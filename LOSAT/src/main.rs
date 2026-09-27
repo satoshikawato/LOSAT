@@ -1,10 +1,33 @@
 #![allow(warnings, clippy::all)]
 
 use anyhow::Result;
-use LOSAT::algorithm::{blastn, blastp, tblastn, tblastx};
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:47-49
+// ```c++
+//     static const string kProgram("blastx");
+//     arg.Reset(new CProgramDescriptionArgs(kProgram,
+//                                   "Translated Query-Protein Subject BLAST"));
+// ```
+use LOSAT::algorithm::{blastn, blastp, blastx, tblastn, tblastx};
 use LOSAT::cli::{Cli, Commands};
 
 fn main() -> Result<()> {
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:3719-3725
+    // ```c++
+    // bool CDir::SetCwd(const string& dir)
+    // {
+    //     if ( NcbiSys_chdir(_T_XCSTRING(dir)) != 0 ) {
+    //         LOG_ERROR_ERRNO(51, "CDir::SetCwd(): Cannot change directory to: " + dir);
+    //         return false;
+    //     }
+    //     return true;
+    // ```
+    // NCBI file readers resolve lexical filenames against the caller's cwd.
+    // WASI starts at /; the existing command host supplies its cwd in PWD.
+    // Set libc's cwd once before argument parsing, without rewriting filenames.
+    #[cfg(target_os = "wasi")]
+    if let Some(cwd) = std::env::var_os("PWD") {
+        std::env::set_current_dir(&cwd)?;
+    }
     let startup_trace = std::env::var("LOSAT_STARTUP_TRACE").ok().as_deref() == Some("1");
     if startup_trace {
         eprintln!("[startup] enter main");
@@ -27,6 +50,42 @@ fn main() -> Result<()> {
     }
 
     match cli.command {
+        // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:277-281
+        // ```c++
+        //                 CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
+        //                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
+        //                 results = lcl_blast.Run();
+        // 	        BLAST_PROF_STOP( APP.LOOP.BLAST );
+        //             }
+        // ```
+        // Native serial search passes actual final results to the BLASTX formatter.
+        Commands::Blastx(args) => {
+            // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:177-180
+            // ```c++
+            //     catch (const CArgException& e) {                                        \
+            //         LOG_POST(Error << "Command line argument error: " << e.GetMsg());   \
+            //         exit_code = BLAST_INPUT_ERROR;                                      \
+            //     }                                                                       \
+            // ```
+            // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:225-227
+            // ```c++
+            //         } else {                                                            \
+            //             LOG_POST(Error << "BLAST engine error: " << e.GetMsg());        \
+            //             exit_code = BLAST_ENGINE_ERROR;                                 \
+            // ```
+            // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:251-255
+            // ```c++
+            //     }                                                                       \
+            //     catch (const std::ios::failure&) {                                      \
+            //         LOG_POST(Error << "BLAST failed to write output");                  \
+            //         exit_code = BLAST_OUTPUT_ERROR;                                     \
+            //     }                                                                       \
+            // ```
+            if let Err(error) = blastx::BlastxArgs::run(args) {
+                blastx::native::exit_on_native_error(&error);
+                return Err(error);
+            }
+        }
         Commands::Blastn(args) => {
             blastn::run(args)?;
         }

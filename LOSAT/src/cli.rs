@@ -4,7 +4,13 @@ use std::ffi::OsString;
 
 use clap::{error::ErrorKind, CommandFactory, Parser, Subcommand};
 
-use crate::algorithm::{blastn, blastp, tblastn, tblastx};
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:47-49
+// ```c++
+//     static const string kProgram("blastx");
+//     arg.Reset(new CProgramDescriptionArgs(kProgram,
+//                                   "Translated Query-Protein Subject BLAST"));
+// ```
+use crate::algorithm::{blastn, blastp, blastx, tblastn, tblastx};
 
 // NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94
 // ```c++
@@ -26,6 +32,14 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:47-49
+    // ```c++
+    //     static const string kProgram("blastx");
+    //     arg.Reset(new CProgramDescriptionArgs(kProgram,
+    //                                   "Translated Query-Protein Subject BLAST"));
+    // ```
+    /// Translated nucleotide query vs protein subject (native serial)
+    Blastx(blastx::BlastxArgs),
     /// Pairwise nucleotide alignment (megablast [default], blastn)
     Blastn(blastn::BlastnArgs),
     /// Pairwise protein alignment (blastp)
@@ -83,6 +97,19 @@ where
             // NCBI c++/src/algo/blast/blastinput/tblastn_args.cpp:64-129:
             // m_Args.push_back(arg) registers shared, formatting, DB, and PSI groups.
             // The named NCBI options below have no Stage B Rust behavior.
+            // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:62-66
+            // ```c++
+            //     m_BlastDbArgs.Reset(new CBlastDatabaseArgs);
+            //     m_BlastDbArgs->SetDatabaseMaskingSupport(true);
+            //     m_BlastDbArgs->SetIPGFilteringSupport(true);
+            //     arg.Reset(m_BlastDbArgs);
+            //     m_Args.push_back(arg);
+            // ```
+            // Product scope explicitly refuses unported NCBI capabilities.
+            if scope.get_name() == "blastx" && is_unported_blastx_arg(name) {
+                return Err(clap::Error::raw(ErrorKind::InvalidValue,
+                    format!("unsupported BLASTX option '-{name}': outside the declared local FASTA scope")));
+            }
             if scope.get_name() == "tblastn" && is_unported_tblastn_arg(name) {
                 return Err(clap::Error::raw(
                     ErrorKind::InvalidValue,
@@ -196,6 +223,58 @@ fn is_unported_tblastn_arg(name: &str) -> bool {
             | "xdrop_gap_final"
             | "parse_deflines"
             | "mt_mode"
+            | "use_sw_tback"
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:62-66
+// ```c++
+//     m_BlastDbArgs.Reset(new CBlastDatabaseArgs);
+//     m_BlastDbArgs->SetDatabaseMaskingSupport(true);
+//     m_BlastDbArgs->SetIPGFilteringSupport(true);
+//     arg.Reset(m_BlastDbArgs);
+//     m_Args.push_back(arg);
+// ```
+// Named capabilities exist in NCBI but are explicitly outside the BLASTX product scope.
+fn is_unported_blastx_arg(name: &str) -> bool {
+    matches!(
+        name,
+        "db" | "query_loc"
+            | "subject_loc"
+            | "show_gis"
+            | "num_descriptions"
+            | "num_alignments"
+            | "line_length"
+            | "html"
+            | "sorthits"
+            | "sorthsps"
+            | "gilist"
+            | "seqidlist"
+            | "negative_gilist"
+            | "negative_seqidlist"
+            | "taxids"
+            | "negative_taxids"
+            | "taxidlist"
+            | "negative_taxidlist"
+            | "no_taxid_expansion"
+            | "entrez_query"
+            | "db_soft_mask"
+            | "db_hard_mask"
+            | "ipglist"
+            | "negative_ipglist"
+            | "qcov_hsp_perc"
+            | "best_hit_overhang"
+            | "best_hit_score_edge"
+            | "dbsize"
+            | "searchsp"
+            | "import_search_strategy"
+            | "export_search_strategy"
+            | "xdrop_ungap"
+            | "xdrop_gap"
+            | "xdrop_gap_final"
+            | "parse_deflines"
+            | "mt_mode"
+            | "remote"
             | "use_sw_tback"
     )
 }

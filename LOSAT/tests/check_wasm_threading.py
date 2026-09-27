@@ -45,6 +45,19 @@ def fixtures(directory):
         (directory / f"{name}.fasta").write_text("".join(
             f">seq{i}" + (f" {edge_title}" if i == 0 else "") + f"\n{value}\n"
             for i, value in enumerate(records[name])))
+    # NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:441-446
+    # ```c++
+    # 	for (index=ABS(frame)-1; index<nt_length-2; index += CODON_LENGTH)
+    # 	{
+    # 		codon[0] = nucl_seq[index];
+    # 		codon[1] = nucl_seq[index+1];
+    # 		codon[2] = nucl_seq[index+2];
+    # 		residue = s_CodonToAA(codon, genetic_code);
+    # ```
+    # Fixed standard-code codons encode the existing protein fixture exactly.
+    codons = dict(zip("ACDEFGHIKLMNPQRSTVWY", ["GCT","TGT","GAT","GAA","TTT","GGT","CAT","ATT","AAA","CTG","ATG","AAT","CCT","CAA","CGT","TCT","ACT","GTT","TGG","TAT"]))
+    records["blastx-query"] = ["".join(codons[x] for x in aa)]
+    (directory / "blastx-query.fasta").write_text(">seq0\n" + records["blastx-query"][0] + "\n")
     return {name: directory / f"{name}.fasta" for name in records}
 
 
@@ -164,6 +177,7 @@ def main():
                 assert "spawn_attempt" not in log and "[losat-thread-pool]" not in log
     format_failures = []
     for program, query, subject, formats, task in [
+        ("blastx", "blastx-query", "aa3", ["0", "6", "7", "6 std qframe sframe btop"], None),
         ("blastp", "aa3", "aa3", ["0", "7", "6 std qlen slen positive ppos btop stitle"], None),
         ("blastp", "aa-query-edge", "aa-subject-edge", ["0", "7", "6 std qlen slen positive ppos btop stitle", "7 qseqid qacc qaccver sseqid sacc saccver qlen slen score nident positive gaps frames qframe sframe qseq sseq btop stitle"], None),
         ("blastn", "nuc3", "nuc3", ["7"], "megablast"),

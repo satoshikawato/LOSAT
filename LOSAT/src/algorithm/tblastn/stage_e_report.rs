@@ -365,6 +365,46 @@ fn write_pairwise(
                     &payload.edit_script,
                     &report_masks,
                 )?;
+                // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2120-2154
+                // ```c++
+                // void CDisplaySeqalign::x_FillIdentityInfo(const string& sequence_standard,
+                //                                           const string& sequence ,
+                //                                           int& match, int& positive,
+                //                                           string& middle_line)
+                // {
+                //     match = 0;
+                //     positive = 0;
+                //     int min_length=min<int>((int)sequence_standard.size(), (int)sequence.size());
+                //     if(m_AlignOption & eShowMiddleLine){
+                //         middle_line = sequence;
+                //     }
+                //     for(int i=0; i<min_length; i++){
+                //         if(sequence_standard[i]==sequence[i]){
+                //             if(m_AlignOption & eShowMiddleLine){
+                //                 if(m_MidLineStyle == eBar ) {
+                //                     middle_line[i] = '|';
+                //                 } else if (m_MidLineStyle == eChar){
+                //                     middle_line[i] = sequence[i];
+                //                 }
+                //             }
+                //             match ++;
+                //         } else {
+                //             if ((m_AlignType&eProt)
+                //                 && m_Matrix[(int)sequence_standard[i]][(int)sequence[i]] > 0){
+                //                 positive ++;
+                //                 if(m_AlignOption & eShowMiddleLine){
+                //                     if (m_MidLineStyle == eChar){
+                //                         middle_line[i] = '+';
+                //                     }
+                //                 }
+                //             } else {
+                //                 if (m_AlignOption & eShowMiddleLine){
+                //                     middle_line[i] = ' ';
+                //                 }
+                //             }
+                // ```
+                let report_positives =
+                    crate::utils::matrix::protein_display_positives(&qseq, &sseq, scoring.matrix);
                 let hit = Hit {
                     identity: if payload.align_length > 0 {
                         100.0 * payload.report_num_ident as f64 / payload.align_length as f64
@@ -392,7 +432,7 @@ fn write_pairwise(
                     sort_subject_end: usize::try_from(hsp.s_end)?,
                     has_sort_offsets: true,
                     gap_info: Some(payload.edit_script.clone()),
-                    num_positives: payload.report_num_positives,
+                    num_positives: report_positives,
                 };
                 hits.push(PairwiseHit {
                     hit,
@@ -400,7 +440,7 @@ fn write_pairwise(
                     subject_seq: Some(sseq),
                     query_frame: None,
                     subject_frame: Some(hsp.frame),
-                    positives: Some(payload.report_num_positives),
+                    positives: Some(report_positives),
                     gaps: Some(payload.gap_letters),
                     subject_length: Some(subject.seq().len()),
                     subject_title: subject.desc().map(str::to_owned),
@@ -519,6 +559,27 @@ fn aligned_sequences(
                         .context("TBLASTN report subject offset overflow")?;
                     // NCBI blast_format.cpp:1541-1557 renders filter locations
                     // as lowercase in the pairwise query sequence.
+                    // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:184-187
+                    // ```c++
+                    // inline unsigned char s_ASCII_MustBeLowerToUpper(unsigned char c)
+                    // {
+                    //     return c + ('A' - 'a');
+                    // }
+                    // ```
+                    // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:945-949
+                    // ```c++
+                    //         case eCharType_MaskedNonGap:
+                    //             CloseGap(pos == 0);
+                    //             m_SeqData[m_CurrentPos] = s_ASCII_MustBeLowerToUpper(c);
+                    //             OpenMask();
+                    //             ++m_CurrentPos;
+                    // ```
+                    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2520-2521
+                    // ```c++
+                    //                     } else if (m_SeqLocChar==eLowerCase){
+                    //                         actualSeq[i-start]=tolower((unsigned char) actualSeq[i-start]);
+                    // ```
+                    let qa = qa.to_ascii_uppercase();
                     let displayed = if report_masks
                         .iter()
                         .any(|&(left, right)| left <= q && q < right)
@@ -552,6 +613,27 @@ fn aligned_sequences(
                     let &qa = query
                         .get(q)
                         .context("TBLASTN report query offset overflow")?;
+                    // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:184-187
+                    // ```c++
+                    // inline unsigned char s_ASCII_MustBeLowerToUpper(unsigned char c)
+                    // {
+                    //     return c + ('A' - 'a');
+                    // }
+                    // ```
+                    // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:945-949
+                    // ```c++
+                    //         case eCharType_MaskedNonGap:
+                    //             CloseGap(pos == 0);
+                    //             m_SeqData[m_CurrentPos] = s_ASCII_MustBeLowerToUpper(c);
+                    //             OpenMask();
+                    //             ++m_CurrentPos;
+                    // ```
+                    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2520-2521
+                    // ```c++
+                    //                     } else if (m_SeqLocChar==eLowerCase){
+                    //                         actualSeq[i-start]=tolower((unsigned char) actualSeq[i-start]);
+                    // ```
+                    let qa = qa.to_ascii_uppercase();
                     let displayed = if report_masks
                         .iter()
                         .any(|&(left, right)| left <= q && q < right)

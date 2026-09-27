@@ -810,36 +810,105 @@ pub(crate) fn build_ncbi_lookup_for_profile(
     matrix: ScoringMatrix,
     word_length: usize,
 ) -> (BlastAaLookupTable, Vec<QueryContext>) {
-    let diag_enabled = diagnostics_enabled();
-    let alphabet_size = LOOKUP_ALPHABET_SIZE; // 28
-    let charsize = ilog2(alphabet_size) + 1; // 5
-    let mask = compute_mask(word_length, charsize);
-    let backbone_size = compute_backbone_size(word_length, alphabet_size, charsize);
-
-    // Compute ideal Karlin parameters (kbp_ideal) - used for check_ideal logic
-    // Reference: NCBI blast_stat.c:2833-2848 Blast_ScoreBlkKbpIdealCalc
     let bounds = if matrix == ScoringMatrix::Blosum62 {
         (-4, 11)
     } else {
         matrix_score_bounds(matrix)
     };
-    let ideal_params = ideal_karlin_params_for_matrix(matrix, bounds);
-
-    // Compute standard amino acid composition (for database/subject)
-    // Reference: NCBI blast_stat.c:2759 Blast_ResFreqStdComp
-    let std_comp = compute_std_aa_composition();
-
-    let mut build_stats = LookupBuildStats::default();
     let prepared = prepare_lookup_query(
         queries,
-        ideal_params,
-        &std_comp,
+        ideal_karlin_params_for_matrix(matrix, bounds),
+        &compute_std_aa_composition(),
         word_length,
         check_ideal,
         matrix,
         bounds,
     );
-    build_stats.skipped_seg_mask = prepared.skipped_seg_mask;
+    build_lookup_from_prepared(prepared, threshold, matrix, word_length)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:446-469
+// ```c++
+//     /* create an empty backbone */
+//
+//     exact_backbone = (Int4 **) calloc(lookup->backbone_size, sizeof(Int4 *));
+//
+//     /* find all the exact matches, grouping together all offsets of identical
+//        query words. The query bias is not used here, since the next stage
+//        will need real offsets into the query sequence */
+//
+//     BlastLookupIndexQueryExactMatches(exact_backbone, lookup->word_length,
+//                                       lookup->charsize, lookup->word_length,
+//                                       query, location);
+//
+//     /* walk though the list of exact matches previously computed. Find
+//        neighboring words for entire lists at a time */
+//
+//     for (i = 0; i < lookup->backbone_size; i++) {
+//         if (exact_backbone[i] != NULL) {
+//             s_AddWordHits(lookup, matrix, query->sequence,
+//                           exact_backbone[i], query_bias, row_max);
+//             sfree(exact_backbone[i]);
+//         }
+//     }
+//
+//     sfree(exact_backbone);
+// ```
+pub(crate) fn build_ncbi_lookup_from_prepared(
+    concat_query: Vec<u8>,
+    lookup_locations: Vec<(i32, i32)>,
+    contexts: Vec<QueryContext>,
+    threshold: i32,
+) -> BlastAaLookupTable {
+    let frame_bases = contexts.iter().map(|c| c.frame_base).collect();
+    let prepared = PreparedLookupQuery {
+        concat_query,
+        lookup_locations,
+        contexts,
+        frame_bases,
+        skipped_seg_mask: 0,
+    };
+    build_lookup_from_prepared(prepared, threshold, ScoringMatrix::Blosum62, 3).0
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:227-245
+// ```c++
+// Int4 BlastAaLookupTableNew(const LookupTableOptions * opt,
+//                            BlastAaLookupTable * *lut)
+// {
+//     Int4 i;
+//     BlastAaLookupTable *lookup = *lut =
+//         (BlastAaLookupTable *) calloc(1, sizeof(BlastAaLookupTable));
+//
+//     ASSERT(lookup != NULL);
+//
+//     lookup->charsize = ilog2(BLASTAA_SIZE) + 1;
+//     lookup->word_length = opt->word_size;
+//
+//     for (i = 0; i < lookup->word_length; i++)
+//         lookup->backbone_size |= (BLASTAA_SIZE - 1) << (i * lookup->charsize);
+//     lookup->backbone_size++;
+//
+//     lookup->mask = (1 << (opt->word_size * lookup->charsize)) - 1;
+//     lookup->alphabet_size = BLASTAA_SIZE;
+//     lookup->threshold = (Int4)opt->threshold;
+// ```
+fn build_lookup_from_prepared(
+    prepared: PreparedLookupQuery,
+    threshold: i32,
+    matrix: ScoringMatrix,
+    word_length: usize,
+) -> (BlastAaLookupTable, Vec<QueryContext>) {
+    let diag_enabled = diagnostics_enabled();
+    let alphabet_size = LOOKUP_ALPHABET_SIZE;
+    let charsize = ilog2(alphabet_size) + 1;
+    let mask = compute_mask(word_length, charsize);
+    let backbone_size = compute_backbone_size(word_length, alphabet_size, charsize);
+    let build_stats_initial = prepared.skipped_seg_mask;
+    let mut build_stats = LookupBuildStats {
+        skipped_seg_mask: build_stats_initial,
+        ..LookupBuildStats::default()
+    };
     let PreparedLookupQuery {
         concat_query,
         lookup_locations,

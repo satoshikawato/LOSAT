@@ -67,16 +67,36 @@ pub(super) fn redo_one_alignment_from_local_starts(
     ) else {
         return Ok(None);
     };
-    let query_start = i32::try_from(aligned.query_start)?
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1760
+    // ```c
+    // queryStart = gap_align->query_start + query_range->begin;
+    // ```
+    let query_start = aligned
+        .query_start
         .checked_add(query_range.begin)
         .context("TBLASTN redo query start overflow")?;
-    let query_end = i32::try_from(aligned.query_stop)?
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1761
+    // ```c
+    // queryEnd = gap_align->query_stop + query_range->begin;
+    // ```
+    let query_end = aligned
+        .query_stop
         .checked_add(query_range.begin)
         .context("TBLASTN redo query end overflow")?;
-    let match_start = i32::try_from(aligned.subject_start)?
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1763
+    // ```c
+    // matchStart = gap_align->subject_start + subject_range->begin;
+    // ```
+    let match_start = aligned
+        .subject_start
         .checked_add(subject_range.begin)
         .context("TBLASTN redo subject start overflow")?;
-    let match_end = i32::try_from(aligned.subject_stop)?
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1764
+    // ```c
+    // matchEnd = gap_align->subject_stop + subject_range->begin;
+    // ```
+    let match_end = aligned
+        .subject_stop
         .checked_add(subject_range.begin)
         .context("TBLASTN redo subject end overflow")?;
     let context = Some(BlastCompoAlignmentContext::EditScript(std::mem::take(
@@ -2573,5 +2593,109 @@ mod tests {
                 .map(|value| value.parse::<i32>().unwrap())
                 .collect::<Vec<_>>()
         );
+    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1760-1772,1934-1946
+    // ```c
+    // status = BLAST_GappedAlignmentWithTraceback(..., &fence_hit);
+    // if (status == 0) return s_NewAlignmentFromGapAlign(...);
+    // queryStart = gap_align->query_start + query_range->begin;
+    // queryEnd = gap_align->query_stop + query_range->begin;
+    // matchStart = gap_align->subject_start + subject_range->begin;
+    // matchEnd = gap_align->subject_stop + subject_range->begin;
+    // obj = BlastCompo_AlignmentNew(gap_align->score, matrix_adjust_rule,
+    //     queryStart, queryEnd, queryIndex, matchStart, matchEnd, frame, *edit_script);
+    // ```
+    // Direct unit boundary only: this synthetic sentinel tests callback state,
+    // separate from natural FASTA runtime reachability. The exact pinned C
+    // s_NewAlignmentFromGapAlign owner provides every expected coordinate,
+    // score and complete script for zero and nonzero range origins.
+    #[test]
+    fn test_tblastn_fence_signed_caller_matches_pinned_ncbi() {
+        let expected = include_str!("../../../tests/unit/blastp_fence_signed_caller_expected.tsv");
+        let mut observed = String::from("qstart\tsstart\tfence_position\tquery_origin\tsubject_origin\tscore\tquery_start\tquery_stop\tsubject_start\tsubject_stop\tedits\n");
+        for line in expected.lines().skip(1) {
+            let f: Vec<&str> = line.split('\t').collect();
+            let qstart: usize = f[0].parse().unwrap();
+            let sstart: usize = f[1].parse().unwrap();
+            let position: i32 = f[2].parse().unwrap();
+            let qb: i32 = f[3].parse().unwrap();
+            let sb: i32 = f[4].parse().unwrap();
+            let query_data = BlastCompoSequenceData::from_ncbistdaa(&[1u8; 6]);
+            let mut sequence = [1u8; 6];
+            if position >= 0 {
+                sequence[usize::try_from(position).unwrap()] = 201;
+            }
+            let subject_data = BlastCompoSequenceData::from_ncbistdaa(&sequence);
+            let qrange = BlastCompoSequenceRange {
+                begin: qb,
+                end: qb + 6,
+                context: 0,
+            };
+            let srange = BlastCompoSequenceRange {
+                begin: sb,
+                end: sb + 6,
+                context: 0,
+            };
+            let mut scratch = GapAlignScratch::new();
+            let result = redo_one_alignment_from_local_starts(
+                qstart,
+                sstart,
+                &query_data,
+                &qrange,
+                &subject_data,
+                &srange,
+                EMatrixAdjustRule::DontAdjustMatrix,
+                None,
+                ScoringMatrix::Blosum62,
+                11,
+                1,
+                18,
+                &mut scratch,
+            )
+            .unwrap()
+            .expect("successful NCBI callback preserves signed payload");
+            let score = result.score;
+            let Some(BlastCompoAlignmentContext::EditScript(script)) = result.context.as_ref()
+            else {
+                panic!("NCBI callback transfers even an empty edit script")
+            };
+            let (qs, qe, ss, se) = (
+                result.query_start,
+                result.query_end,
+                result.match_start,
+                result.match_end,
+            );
+            let edits = if script.is_empty() {
+                "-".to_owned()
+            } else {
+                script
+                    .iter()
+                    .map(|op| {
+                        let kind = match op {
+                            GapEditOp::Sub(_) => 3,
+                            GapEditOp::Del(_) => 0,
+                            GapEditOp::Ins(_) => 6,
+                        };
+                        format!("{kind}:{}", op.num())
+                    })
+                    .collect::<Vec<_>>()
+                    .join(",")
+            };
+            let payload = format!("{score}\t{qs}\t{qe}\t{ss}\t{se}\t{edits}");
+            assert_eq!(
+                payload,
+                f[7..].join("\t"),
+                "direct callback case {}",
+                f[..5].join("/")
+            );
+            observed.push_str(&format!("{}\t{payload}\n", f[..5].join("\t")));
+        }
+        if let Some(root) = std::env::var_os("LOSAT_FENCE_CALLER_DUMP") {
+            std::fs::write(
+                std::path::Path::new(&root).join("tblastn_caller_actual.tsv"),
+                observed,
+            )
+            .unwrap();
+        }
     }
 }

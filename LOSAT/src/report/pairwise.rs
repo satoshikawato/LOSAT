@@ -8,7 +8,29 @@ use super::outfmt6::{format_bitscore_ncbi, format_evalue_ncbi, ReportContext};
 use crate::common::Hit;
 use crate::config::ScoringMatrix;
 use crate::stats::{BlastGumbelBlk, KarlinParams};
-use crate::utils::matrix::{aa_char_to_ncbistdaa, protein_score};
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3563-3581
+// ```c++
+//     retval.Resize(k_NumAsciiChar, k_NumAsciiChar, -1000);
+//
+//     SNCBIFullScoreMatrix mtx;
+//     NCBISM_Unpack(packed_mtx, &mtx);
+//
+//     for(int i = 0; i < ePMatrixSize; ++i){
+//         for(int j = 0; j < ePMatrixSize; ++j){
+//             retval((size_t)k_PSymbol[i], (size_t)k_PSymbol[j]) =
+//                 mtx.s[(size_t)k_PSymbol[i]][(size_t)k_PSymbol[j]];
+//         }
+//     }
+//     for(int i = 0; i < ePMatrixSize; ++i) {
+//         retval((size_t)k_PSymbol[i], '*') = retval('*',(size_t)k_PSymbol[i]) = -4;
+//     }
+//     retval('*', '*') = 1;
+//     // this is to count Selenocysteine to Cysteine matches as positive
+//     retval('U', 'U') = retval('C', 'C');
+//     retval('U', 'C') = retval('C', 'C');
+//     retval('C', 'U') = retval('C', 'C');
+// ```
+use crate::utils::matrix::protein_display_score;
 use std::io::{self, Write};
 use std::sync::Arc;
 
@@ -200,6 +222,27 @@ pub fn write_subject_header<W: Write>(
     Ok(())
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3152-3161
+// ```c++
+// int CAlignFormatUtil::GetPercentMatch(int numerator, int denominator)
+// {
+//      if (numerator == denominator)
+//         return 100;
+//      else {
+//        int retval =(int) (0.5 + 100.0*((double)numerator)/((double)denominator));
+//        retval = min(99, retval);
+//        return retval;
+//      }
+// }
+// ```
+fn ncbi_percent_match(numerator: usize, denominator: usize) -> usize {
+    if numerator == denominator {
+        100
+    } else {
+        ((0.5 + 100.0 * numerator as f64 / denominator as f64) as usize).min(99)
+    }
+}
+
 /// Write HSP score information
 ///
 /// Reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp x_DisplayAlignInfo()
@@ -245,25 +288,52 @@ pub fn write_hsp_info<W: Write>(
     // Identity/Positives/Gaps line
     let align_len = h.length;
     let num_ident = h.num_ident;
-    let ident_pct = if align_len > 0 {
-        (num_ident as f64 / align_len as f64) * 100.0
-    } else {
-        0.0
-    };
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3152-3161
+    // ```c++
+    // int CAlignFormatUtil::GetPercentMatch(int numerator, int denominator)
+    // {
+    //      if (numerator == denominator)
+    //         return 100;
+    //      else {
+    //        int retval =(int) (0.5 + 100.0*((double)numerator)/((double)denominator));
+    //        retval = min(99, retval);
+    //        return retval;
+    //      }
+    // }
+    // ```
+    let ident_pct = ncbi_percent_match(num_ident, align_len);
 
     let positives = hit.positives.unwrap_or(h.num_positives.max(num_ident));
-    let pos_pct = if align_len > 0 {
-        (positives as f64 / align_len as f64) * 100.0
-    } else {
-        0.0
-    };
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3152-3161
+    // ```c++
+    // int CAlignFormatUtil::GetPercentMatch(int numerator, int denominator)
+    // {
+    //      if (numerator == denominator)
+    //         return 100;
+    //      else {
+    //        int retval =(int) (0.5 + 100.0*((double)numerator)/((double)denominator));
+    //        retval = min(99, retval);
+    //        return retval;
+    //      }
+    // }
+    // ```
+    let pos_pct = ncbi_percent_match(positives, align_len);
 
     let gaps = hit.gaps.unwrap_or_else(|| h.gap_letters());
-    let gap_pct = if align_len > 0 {
-        (gaps as f64 / align_len as f64) * 100.0
-    } else {
-        0.0
-    };
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3152-3161
+    // ```c++
+    // int CAlignFormatUtil::GetPercentMatch(int numerator, int denominator)
+    // {
+    //      if (numerator == denominator)
+    //         return 100;
+    //      else {
+    //        int retval =(int) (0.5 + 100.0*((double)numerator)/((double)denominator));
+    //        retval = min(99, retval);
+    //        return retval;
+    //      }
+    // }
+    // ```
+    let gap_pct = ncbi_percent_match(gaps, align_len);
 
     // For protein/translated: show Identities, Positives, Gaps
     // For nucleotide: show Identities, Gaps (no Positives)
@@ -463,9 +533,29 @@ fn is_positive_match(a: char, b: char, matrix: ScoringMatrix) -> bool {
         return true;
     }
 
-    let a_ncbi = aa_char_to_ncbistdaa(a as u8);
-    let b_ncbi = aa_char_to_ncbistdaa(b as u8);
-    protein_score(matrix, a_ncbi, b_ncbi) > 0
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3563-3581
+    // ```c++
+    //     retval.Resize(k_NumAsciiChar, k_NumAsciiChar, -1000);
+    //
+    //     SNCBIFullScoreMatrix mtx;
+    //     NCBISM_Unpack(packed_mtx, &mtx);
+    //
+    //     for(int i = 0; i < ePMatrixSize; ++i){
+    //         for(int j = 0; j < ePMatrixSize; ++j){
+    //             retval((size_t)k_PSymbol[i], (size_t)k_PSymbol[j]) =
+    //                 mtx.s[(size_t)k_PSymbol[i]][(size_t)k_PSymbol[j]];
+    //         }
+    //     }
+    //     for(int i = 0; i < ePMatrixSize; ++i) {
+    //         retval((size_t)k_PSymbol[i], '*') = retval('*',(size_t)k_PSymbol[i]) = -4;
+    //     }
+    //     retval('*', '*') = 1;
+    //     // this is to count Selenocysteine to Cysteine matches as positive
+    //     retval('U', 'U') = retval('C', 'C');
+    //     retval('U', 'C') = retval('C', 'C');
+    //     retval('C', 'U') = retval('C', 'C');
+    // ```
+    protein_display_score(matrix, a as u8, b as u8) > 0
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:790-803
@@ -502,11 +592,42 @@ fn write_database_header<W: Write>(writer: &mut W, context: &ReportContext) -> i
 // static const char*  kBits = "(Bits)";
 // static const char*  kValue = "Value";
 // ```
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:830-837
+// ```c++
+//             if((m_Option & eShowSumN) || (m_Option & eShowPercentIdent)){
+//                 CAlignFormatUtil::AddSpace(out, m_MaxEvalueLen - kValue_size);
+//                 CAlignFormatUtil::AddSpace(out, kTwoSpaceMargin_size);
+//             }
+//             if(m_Option & eShowSumN){
+//                 out << kN;
+//             }
+//             if (m_Option & eShowPercentIdent) {
+// ```
 fn write_subject_summary_table<W: Write>(
     writer: &mut W,
     subject_order: &[u32],
     subject_hits: &std::collections::HashMap<u32, Vec<&PairwiseHit>>,
     subject_ids: &[Arc<str>],
+) -> io::Result<()> {
+    write_subject_summary_table_with_sum_n(writer, subject_order, subject_hits, subject_ids, false)
+}
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:830-837
+// ```c++
+//             if((m_Option & eShowSumN) || (m_Option & eShowPercentIdent)){
+//                 CAlignFormatUtil::AddSpace(out, m_MaxEvalueLen - kValue_size);
+//                 CAlignFormatUtil::AddSpace(out, kTwoSpaceMargin_size);
+//             }
+//             if(m_Option & eShowSumN){
+//                 out << kN;
+//             }
+//             if (m_Option & eShowPercentIdent) {
+// ```
+fn write_subject_summary_table_with_sum_n<W: Write>(
+    writer: &mut W,
+    subject_order: &[u32],
+    subject_hits: &std::collections::HashMap<u32, Vec<&PairwiseHit>>,
+    subject_ids: &[Arc<str>],
+    show_sum_n: bool,
 ) -> io::Result<()> {
     // NCBI reference: c++/src/objtools/align_format/showdefline.cpp:668-709,760-829,929-959
     // m_MaxScoreLen = kBits_size; m_MaxEvalueLen = kValue_size;
@@ -532,7 +653,33 @@ fn write_subject_summary_table<W: Write>(
         "{:<69}",
         "Sequences producing significant alignments:"
     )?;
-    writeln!(writer, "{:<max_score$}  Value", "(Bits)")?;
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:830-840
+    // ```c++
+    //             if((m_Option & eShowSumN) || (m_Option & eShowPercentIdent)){
+    //                 CAlignFormatUtil::AddSpace(out, m_MaxEvalueLen - kValue_size);
+    //                 CAlignFormatUtil::AddSpace(out, kTwoSpaceMargin_size);
+    //             }
+    //             if(m_Option & eShowSumN){
+    //                 out << kN;
+    //             }
+    //             if (m_Option & eShowPercentIdent) {
+    //                 out << kIdentLine2;//"ident"
+    //             }
+    //             out << "\n";
+    // ```
+    write!(writer, "{:<max_score$}  Value", "(Bits)")?;
+    let max_sum_n = subject_order
+        .iter()
+        .filter_map(|i| subject_hits.get(i)?.first())
+        .map(|h| h.sum_n.unwrap_or(1).to_string().len())
+        .max()
+        .unwrap_or(1)
+        .max(1);
+    if show_sum_n {
+        write_spaces(writer, max_evalue - 5 + 2)?;
+        write!(writer, "N")?;
+    }
+    writeln!(writer)?;
     writeln!(writer)?;
     for s_idx in subject_order {
         let Some(shits) = subject_hits.get(s_idx) else {
@@ -560,12 +707,24 @@ fn write_subject_summary_table<W: Write>(
             writer.write_all(label.as_bytes())?;
             write_spaces(writer, 68 - label.len())?;
         }
-        writeln!(
+        write!(
             writer,
             "  {:<max_score$}  {:<max_evalue$}",
             format_bitscore_ncbi(best_hit.hit.bit_score),
             format_evalue_ncbi(best_hit.hit.e_value)
         )?;
+        // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:961-965
+        // ```c++
+        //         if(m_Option & eShowSumN){
+        //             out << kTwoSpaceMargin << (*iter)->sum_n;
+        //             CAlignFormatUtil::AddSpace(out, m_MaxSumNLen -
+        //                      NStr::IntToString((*iter)->sum_n).size());
+        //         }
+        // ```
+        if show_sum_n {
+            write!(writer, "  {:<max_sum_n$}", best_hit.sum_n.unwrap_or(1))?;
+        }
+        writeln!(writer)?;
     }
     writeln!(writer)?;
     Ok(())
@@ -814,22 +973,57 @@ fn write_blastp_database_header<W: Write>(
     database_num_sequences: usize,
     database_total_letters: usize,
 ) -> io::Result<()> {
-    // NCBI reference: c++/src/algo/blast/format/blastfmtutil.cpp:135-137
-    // str << dbString << definition_line << endl; x_WrapOutputLine(str.str(),line_len,out);
-    write_flatfile_wrapped(
+    write_blastp_database_header_spacing(
         writer,
-        &format!("Database: {}", ensure_trailing_period(database_name)),
-        68,
-    )?;
+        database_name,
+        database_num_sequences,
+        database_total_letters,
+        3,
+    )
+}
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:533-538
+// ```c++
+//         CAlignFormatUtil::AddSpace(out, 11);
+//         out << NStr::Int8ToString(tot_num_seqs, NStr::fWithCommas) <<
+//             " sequences; " <<
+//             NStr::Int8ToString(tot_length, NStr::fWithCommas) <<
+//             " total letters\n\n";
+//         return;
+// ```
+fn write_blastp_database_header_spacing<W: Write>(
+    writer: &mut W,
+    database_name: &str,
+    database_num_sequences: usize,
+    database_total_letters: usize,
+    trailing: usize,
+) -> io::Result<()> {
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:513-525
+    // ```c++
+    //         out << "Database: ";
+    //
+    //         string db_titles = dbinfo->definition;
+    //         Int8 tot_num_seqs = static_cast<Int8>(dbinfo->number_seqs);
+    //         Int8 tot_length = dbinfo->total_length;
+    //
+    //         for (size_t i = 1; i < dbinfo_list.size(); i++) {
+    //             db_titles += "; " + dbinfo_list[i].definition;
+    //             tot_num_seqs += static_cast<Int8>(dbinfo_list[i].number_seqs);
+    //             tot_length += dbinfo_list[i].total_length;
+    //         }
+    //
+    //         x_WrapOutputLine(db_titles, line_length, out);
+    // ```
+    write!(writer, "Database: ")?;
+    write_flatfile_wrapped(writer, &ensure_trailing_period(database_name), 68)?;
     writeln!(
         writer,
         "           {} sequences; {} total letters",
         format_count_with_commas(i64::try_from(database_num_sequences).unwrap_or(0)),
         format_count_with_commas(i64::try_from(database_total_letters).unwrap_or(0))
     )?;
-    writeln!(writer)?;
-    writeln!(writer)?;
-    writeln!(writer)?;
+    for _ in 0..trailing {
+        writeln!(writer)?;
+    }
     Ok(())
 }
 
@@ -896,6 +1090,21 @@ fn write_no_hits_found<W: Write>(writer: &mut W) -> io::Result<()> {
 // c++/src/objtools/align_format/align_format_util.cpp:581-613:
 // PrintKAParameters emits both -1 Karlin blocks with no Gumbel columns.
 fn write_tblastn_unsearched_query_footer<W: Write>(writer: &mut W) -> io::Result<()> {
+    write_tblastn_unsearched_query_footer_spacing(writer, true)
+}
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:477-478
+// ```c++
+//     m_Outfile << "Effective search space used: " <<
+//                         summary.GetSearchSpace() << "\n";
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1491-1491
+// ```c++
+//     m_Outfile << "\n\n";
+// ```
+fn write_tblastn_unsearched_query_footer_spacing<W: Write>(
+    writer: &mut W,
+    trailing: bool,
+) -> io::Result<()> {
     writeln!(writer)?;
     writeln!(writer, "Lambda      K        H")?;
     for _ in 0..3 {
@@ -911,8 +1120,10 @@ fn write_tblastn_unsearched_query_footer<W: Write>(writer: &mut W) -> io::Result
     writeln!(writer)?;
     writeln!(writer)?;
     writeln!(writer, "Effective search space used: 0")?;
-    writeln!(writer)?;
-    writeln!(writer)?;
+    if trailing {
+        writeln!(writer)?;
+        writeln!(writer)?;
+    }
     Ok(())
 }
 
@@ -926,6 +1137,32 @@ fn write_blastp_query_footer<W: Write>(
     gapped_karlin: KarlinParams,
     gumbel: BlastGumbelBlk,
     effective_search_space: i64,
+) -> io::Result<()> {
+    write_blastp_query_footer_spacing(
+        writer,
+        ungapped_karlin,
+        gapped_karlin,
+        gumbel,
+        effective_search_space,
+        true,
+    )
+}
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:477-478
+// ```c++
+//     m_Outfile << "Effective search space used: " <<
+//                         summary.GetSearchSpace() << "\n";
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1491-1491
+// ```c++
+//     m_Outfile << "\n\n";
+// ```
+fn write_blastp_query_footer_spacing<W: Write>(
+    writer: &mut W,
+    ungapped_karlin: KarlinParams,
+    gapped_karlin: KarlinParams,
+    gumbel: BlastGumbelBlk,
+    effective_search_space: i64,
+    trailing: bool,
 ) -> io::Result<()> {
     writeln!(writer)?;
     writeln!(writer, "Lambda      K        H        a         alpha")?;
@@ -954,8 +1191,10 @@ fn write_blastp_query_footer<W: Write>(
         "Effective search space used: {}",
         effective_search_space
     )?;
-    writeln!(writer)?;
-    writeln!(writer)?;
+    if trailing {
+        writeln!(writer)?;
+        writeln!(writer)?;
+    }
     Ok(())
 }
 
@@ -1457,28 +1696,7 @@ pub fn write_tblastn_pairwise_report<W: Write>(
     let mut writer = io::BufWriter::new(writer);
     // NCBI c++/src/algo/blast/format/blast_format.cpp:372-424:
     // BlastPrintVersionInfo(m_Program,...); BlastPrintReference(...);
-    writeln!(writer, "TBLASTN {}", report.version)?;
-    writeln!(writer)?;
-    writeln!(writer)?;
-    writeln!(
-        writer,
-        "Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A."
-    )?;
-    writeln!(
-        writer,
-        "Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J."
-    )?;
-    writeln!(
-        writer,
-        "Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of"
-    )?;
-    writeln!(
-        writer,
-        "protein database search programs\", Nucleic Acids Res. 25:3389-3402."
-    )?;
-    writeln!(writer)?;
-    writeln!(writer)?;
-    writeln!(writer)?;
+    write_translated_pairwise_intro(&mut writer, "TBLASTN", &report.version)?;
     write_blastp_database_header(
         &mut writer,
         &report.database_name,
@@ -1600,15 +1818,20 @@ fn write_tblastn_hsp_info<W: Write>(writer: &mut W, hit: &PairwiseHit) -> io::Re
     // if (numerator == denominator) return 100;
     // int retval = (int)(0.5 + 100.0*numerator/denominator);
     // return min(99, retval);
-    let percent = |n: usize| -> usize {
-        if n == length {
-            100
-        } else if length == 0 {
-            0
-        } else {
-            ((0.5 + 100.0 * n as f64 / length as f64) as usize).min(99)
-        }
-    };
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3152-3161
+    // ```c++
+    // int CAlignFormatUtil::GetPercentMatch(int numerator, int denominator)
+    // {
+    //      if (numerator == denominator)
+    //         return 100;
+    //      else {
+    //        int retval =(int) (0.5 + 100.0*((double)numerator)/((double)denominator));
+    //        retval = min(99, retval);
+    //        return retval;
+    //      }
+    // }
+    // ```
+    let percent = |n: usize| ncbi_percent_match(n, length);
     let positives = hit.positives.unwrap_or(h.num_positives);
     let gaps = hit.gaps.unwrap_or_else(|| h.gap_letters());
     writeln!(
@@ -1624,7 +1847,22 @@ fn write_tblastn_hsp_info<W: Write>(writer: &mut W, hit: &PairwiseHit) -> io::Re
         length,
         percent(gaps)
     )?;
-    if let Some(frame) = hit.subject_frame {
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:321-332
+    // ```c++
+    //     if(master_frame != 0 && slave_frame != 0) {
+    //         out <<" Frame = " << ((master_frame > 0) ? "+" : "")
+    //             << master_frame <<"/"<<((slave_frame > 0) ? "+" : "")
+    //             << slave_frame<<"\n";
+    //     } else if (master_frame != 0){
+    //         out <<" Frame = " << ((master_frame > 0) ? "+" : "")
+    //             << master_frame << "\n";
+    //     }  else if (slave_frame != 0){
+    //         out <<" Frame = " << ((slave_frame > 0) ? "+" : "")
+    //             << slave_frame <<"\n";
+    //     }
+    //     out<<"\n";
+    // ```
+    if let Some(frame) = hit.query_frame.or(hit.subject_frame) {
         if frame > 0 {
             writeln!(writer, " Frame = +{frame}")?;
         } else {
@@ -1711,4 +1949,661 @@ fn write_tblastn_alignment<W: Write>(
         s_pos = s_end + direction;
     }
     Ok(())
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:387-407
+// ```c++
+//       CBlastFormatUtil::BlastPrintVersionInfo(m_Program, m_IsHTML,
+//                                               m_Outfile);
+//     }
+//
+//     if (m_IsBl2Seq && !m_IsDbScan) {
+//         return;
+//     }
+//
+//     m_Outfile << NcbiEndl << NcbiEndl;
+//     if (m_Program == "deltablast") {
+//         CBlastFormatUtil::BlastPrintReference(m_IsHTML, kFormatLineLength,
+//                               m_Outfile, CReference::eDeltaBlast);
+//         m_Outfile << "\n";
+//     }
+//
+//     if (m_Megablast)
+//         CBlastFormatUtil::BlastPrintReference(m_IsHTML, kFormatLineLength,
+//                                           m_Outfile, CReference::eMegaBlast);
+//     else
+//         CBlastFormatUtil::BlastPrintReference(m_IsHTML, kFormatLineLength,
+//                                           m_Outfile);
+// ```
+fn write_translated_pairwise_intro(
+    writer: &mut impl Write,
+    program: &str,
+    version: &str,
+) -> io::Result<()> {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:66-73
+    // ```c++
+    // void CBlastFormatUtil::BlastPrintVersionInfo(const string program, bool html,
+    //                                              CNcbiOstream& out)
+    // {
+    //     if (html)
+    //         out << "<b>" << BlastGetVersion(program) << "</b>" << "\n";
+    //     else
+    //         out << BlastGetVersion(program) << "\n";
+    // }
+    // ```
+    writeln!(writer, "{} {}", program, version)?;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:395-395
+    // ```c++
+    //     m_Outfile << NcbiEndl << NcbiEndl;
+    // ```
+    writeln!(writer)?;
+    writer.flush()?;
+    writeln!(writer)?;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:395-395
+    // ```c++
+    //     m_Outfile << NcbiEndl << NcbiEndl;
+    // ```
+    writer.flush()?;
+    writeln!(
+        writer,
+        "Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A."
+    )?;
+    writeln!(
+        writer,
+        "Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J."
+    )?;
+    writeln!(
+        writer,
+        "Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of"
+    )?;
+    writeln!(
+        writer,
+        "protein database search programs\", Nucleic Acids Res. 25:3389-3402."
+    )?;
+    writeln!(writer)?;
+    writeln!(writer)?;
+    writeln!(writer)?;
+    Ok(())
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:275-282
+// ```c++
+//     if ((m_FormatType == CFormattingArgs::eXml2) || (m_FormatType == CFormattingArgs::eJson) ||
+//         (m_FormatType == CFormattingArgs::eXml2_S) || (m_FormatType == CFormattingArgs::eJson_S)) {
+//            m_AccumulatedQueries.Reset(new CBlastQueryVector());
+//     }
+//
+//     if (opts.GetSumStatisticsMode() && m_IsUngappedSearch) {
+//         m_ShowLinkedSetSize = true;
+//     }
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1548-1565
+// ```c++
+//     results.GetMaskedQueryRegions(masklocs);
+//
+//     CSeq_align_set copy_aln_set;
+//     CBlastFormatUtil::PruneSeqalign(*aln_set, copy_aln_set, m_NumAlignments);
+//
+//     int flags = s_SetFlags(m_Program, m_FormatType, m_IsHTML, m_ShowGi,
+//                            (m_IsBl2Seq && !m_IsDbScan), (m_DisableKAStats || kIsGlobal));
+//
+//     CDisplaySeqalign display(copy_aln_set, *m_Scope, &masklocs, NULL, m_MatrixName);
+//     display.SetDbName(m_DbName);
+//     display.SetDbType(!m_DbIsAA);
+//     display.SetLineLen(m_LineLength);
+//     int kAlignToShow=2000000000;  // Nice large number per SB-1817
+//     display.SetNumAlignToShow(kAlignToShow);
+//
+//     // set the alignment flags
+//     display.SetAlignOption(flags);
+//
+// ```
+pub struct BlastxPairwiseOptions {
+    pub word_threshold: f64,
+    pub gapped: bool,
+    pub sum_stats: bool,
+    pub num_descriptions: usize,
+    pub num_alignments: usize,
+}
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1490-1519
+// ```c++
+//
+//     m_Outfile << "\n\n";
+//     CBlastFormatUtil::AcknowledgeBlastQuery(*bioseq, kFormatLineLength,
+//                                             m_Outfile, m_BelieveQuery,
+//                                             m_IsHTML, kIsTabularOutput,
+//                                             results.GetRID());
+//
+//     if (m_IsBl2Seq && !m_IsDbScan) {
+//         m_Outfile << "\n";
+//         // FIXME: this might be configurable in the future
+//         const bool kBelieveSubject = false;
+//         CConstRef<CBioseq> subject_bioseq = x_CreateSubjectBioseq();
+//         CBlastFormatUtil::AcknowledgeBlastSubject(*subject_bioseq,
+//                                                   kFormatLineLength,
+//                                                   m_Outfile, kBelieveSubject,
+//                                                   m_IsHTML, kIsTabularOutput);
+//     }
+//
+//     // quit early if there are no hits
+//     if ( !results.HasAlignments() ) {
+//         m_Outfile << "\n\n"
+//               << "***** " << CBlastFormatUtil::kNoHitsFound << " *****" << "\n"
+//               << "\n\n";
+//         x_PrintOneQueryFooter(*results.GetAncillaryData());
+//         return;
+//     }
+//
+//     CConstRef<CSeq_align_set> aln_set = results.GetSeqAlign();
+//     _ASSERT(results.HasAlignments());
+//     if (m_IsUngappedSearch) {
+// ```
+#[allow(clippy::too_many_arguments)]
+pub fn write_blastx_pairwise_report<W: Write>(
+    hits: &[PairwiseHit],
+    writer: &mut W,
+    stderr: &mut dyn Write,
+    warnings: &[Vec<u8>],
+    config: &PairwiseConfig,
+    queries: &[BlastpPairwiseQuery],
+    query_validity: &[bool],
+    skipped: &[bool],
+    subject_ids: &[Arc<str>],
+    report: &BlastpPairwiseReport,
+    options: &BlastxPairwiseOptions,
+) -> io::Result<()> {
+    let mut writer = io::BufWriter::new(writer);
+    let mut by_query: Vec<Vec<&PairwiseHit>> = vec![Vec::new(); queries.len()];
+    for hit in hits {
+        by_query[hit.hit.q_idx as usize].push(hit);
+    }
+    for (qidx, query) in queries.iter().enumerate() {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1450-1452
+        // ```c++
+        //     if (results.HasWarnings()) {
+        //         ERR_POST(Warning << results.GetWarningStrings());
+        //     }
+        // ```
+        stderr.write_all(&warnings[qidx])?;
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1491-1492
+        // ```c++
+        //     m_Outfile << "\n\n";
+        //     CBlastFormatUtil::AcknowledgeBlastQuery(*bioseq, kFormatLineLength,
+        // ```
+        writeln!(writer)?;
+        writeln!(writer)?;
+        write_blastp_query_header(&mut writer, &query.query_name, query.query_length)?;
+        let query_hits = &by_query[qidx];
+        if query_hits.is_empty() {
+            write_no_hits_found(&mut writer)?;
+        } else {
+            let mut grouped = std::collections::HashMap::new();
+            let mut order = Vec::new();
+            for hit in query_hits {
+                if !grouped.contains_key(&hit.hit.s_idx) {
+                    order.push(hit.hit.s_idx);
+                }
+                grouped
+                    .entry(hit.hit.s_idx)
+                    .or_insert_with(Vec::new)
+                    .push(*hit);
+            }
+            let descriptions = &order[..order.len().min(options.num_descriptions)];
+            write_subject_summary_table_with_sum_n(
+                &mut writer,
+                descriptions,
+                &grouped,
+                subject_ids,
+                !options.gapped && options.sum_stats,
+            )?;
+            writeln!(writer)?;
+            for oid in order.iter().take(options.num_alignments) {
+                let shits = &grouped[oid];
+                let first = shits[0];
+                write_subject_header(
+                    &mut writer,
+                    &subject_ids[*oid as usize],
+                    first.subject_title.as_deref(),
+                    first.subject_length,
+                )?;
+                for hit in shits {
+                    write_tblastn_hsp_info(&mut writer, hit)?;
+                    write_blastx_alignment(&mut writer, hit, config)?;
+                    writeln!(writer)?;
+                }
+            }
+        }
+        write_blastx_query_footer(
+            &mut writer,
+            query,
+            report,
+            query_validity[qidx],
+            skipped[qidx],
+            options.gapped,
+        )?;
+    }
+    writer.flush()
+}
+// NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:254-254
+// ```c++
+//         formatter.PrintProlog();
+// ```
+// NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:297-297
+// ```c++
+//         formatter.PrintEpilog(opt);
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:387-388
+// ```c++
+//       CBlastFormatUtil::BlastPrintVersionInfo(m_Program, m_IsHTML,
+//                                               m_Outfile);
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:406-407
+// ```c++
+//         CBlastFormatUtil::BlastPrintReference(m_IsHTML, kFormatLineLength,
+//                                           m_Outfile);
+// ```
+pub fn write_blastx_prolog(
+    writer: &mut impl Write,
+    report: &BlastpPairwiseReport,
+) -> io::Result<()> {
+    write_translated_pairwise_intro(writer, "BLASTX", &report.version)?;
+    write_blastp_database_header_spacing(
+        writer,
+        &report.database_name,
+        report.database_num_sequences,
+        report.database_total_letters,
+        1,
+    )
+}
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2264-2288
+// ```c++
+//                         options.GetMismatchPenalty() << "\n";
+//     }
+//     else {
+//         m_Outfile << "\n\nMatrix: " << options.GetMatrixName() << "\n";
+//     }
+//
+//     if (options.GetGappedMode() == true) {
+//         double gap_extension = (double) options.GetGapExtensionCost();
+//         if ((m_Program == "megablast" || m_Program == "blastn") && options.GetGapExtensionCost() == 0)
+//         { // Formula from PMID 10890397 applies if both gap values are zero.
+//                gap_extension = -2*options.GetMismatchPenalty() + options.GetMatchReward();
+//                gap_extension /= 2.0;
+//         }
+//         m_Outfile << "Gap Penalties: Existence: "
+//                 << options.GetGapOpeningCost() << ", Extension: "
+//                 << gap_extension << "\n";
+//     }
+//     if (options.GetWordThreshold()) {
+//         m_Outfile << "Neighboring words threshold: " <<
+//                         options.GetWordThreshold() << "\n";
+//     }
+//     if (options.GetWindowSize()) {
+//         m_Outfile << "Window for multiple hits: " <<
+//                         options.GetWindowSize() << "\n";
+//     }
+// ```
+pub fn write_blastx_epilog(
+    writer: &mut impl Write,
+    report: &BlastpPairwiseReport,
+    options: &BlastxPairwiseOptions,
+) -> io::Result<()> {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2264-2288
+    // ```c++
+    //                         options.GetMismatchPenalty() << "\n";
+    //     }
+    //     else {
+    //         m_Outfile << "\n\nMatrix: " << options.GetMatrixName() << "\n";
+    //     }
+    //
+    //     if (options.GetGappedMode() == true) {
+    //         double gap_extension = (double) options.GetGapExtensionCost();
+    //         if ((m_Program == "megablast" || m_Program == "blastn") && options.GetGapExtensionCost() == 0)
+    //         { // Formula from PMID 10890397 applies if both gap values are zero.
+    //                gap_extension = -2*options.GetMismatchPenalty() + options.GetMatchReward();
+    //                gap_extension /= 2.0;
+    //         }
+    //         m_Outfile << "Gap Penalties: Existence: "
+    //                 << options.GetGapOpeningCost() << ", Extension: "
+    //                 << gap_extension << "\n";
+    //     }
+    //     if (options.GetWordThreshold()) {
+    //         m_Outfile << "Neighboring words threshold: " <<
+    //                         options.GetWordThreshold() << "\n";
+    //     }
+    //     if (options.GetWindowSize()) {
+    //         m_Outfile << "Window for multiple hits: " <<
+    //                         options.GetWindowSize() << "\n";
+    //     }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2249-2249
+    // ```c++
+    //     m_Outfile << NcbiEndl << NcbiEndl;
+    // ```
+    writeln!(writer)?;
+    writeln!(writer)?;
+    write!(writer, "  Database: ")?;
+    write_flatfile_wrapped(writer, &ensure_trailing_period(&report.database_name), 68)?;
+    writeln!(writer, "    Posted date:  Unknown")?;
+    writeln!(
+        writer,
+        "  Number of letters in database: {}",
+        format_count_with_commas(report.database_total_letters as i64)
+    )?;
+    writeln!(
+        writer,
+        "  Number of sequences in database:  {}",
+        format_count_with_commas(report.database_num_sequences as i64)
+    )?;
+    writeln!(writer)?;
+    writeln!(writer)?;
+    writeln!(writer)?;
+    writeln!(writer, "Matrix: {}", report.matrix_name)?;
+    if options.gapped {
+        writeln!(
+            writer,
+            "Gap Penalties: Existence: {}, Extension: {}",
+            report.gap_open, report.gap_extend
+        )?;
+    }
+    if options.word_threshold != 0.0 {
+        writeln!(
+            writer,
+            "Neighboring words threshold: {}",
+            options.word_threshold
+        )?;
+    }
+    if report.window_size != 0 {
+        writeln!(writer, "Window for multiple hits: {}", report.window_size)?;
+    }
+    Ok(())
+}
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:445-478
+// ```c++
+// CBlastFormat::x_PrintOneQueryFooter(const blast::CBlastAncillaryData& summary)
+// {
+//     /* Skip printing KA parameters if the program is rmblastn -RMH- */
+//     if ( m_DisableKAStats )
+//       return;
+//
+//     const Blast_KarlinBlk *kbp_ungap =
+//         (m_Program == "psiblast" || m_Program == "deltablast")
+//         ? summary.GetPsiUngappedKarlinBlk()
+//         : summary.GetUngappedKarlinBlk();
+//     const Blast_GumbelBlk *gbp = summary.GetGumbelBlk();
+//     m_Outfile << NcbiEndl;
+//     if (kbp_ungap) {
+//         CBlastFormatUtil::PrintKAParameters(kbp_ungap->Lambda,
+//                                             kbp_ungap->K, kbp_ungap->H,
+//                                             kFormatLineLength, m_Outfile,
+//                                             false, gbp);
+//     }
+//
+//     const Blast_KarlinBlk *kbp_gap =
+//         (m_Program == "psiblast" || m_Program == "deltablast")
+//         ? summary.GetPsiGappedKarlinBlk()
+//         : summary.GetGappedKarlinBlk();
+//     m_Outfile << "\n";
+//     if (kbp_gap) {
+//         CBlastFormatUtil::PrintKAParameters(kbp_gap->Lambda,
+//                                             kbp_gap->K, kbp_gap->H,
+//                                             kFormatLineLength, m_Outfile,
+//                                             true, gbp);
+//     }
+//
+//     m_Outfile << "\n";
+//     m_Outfile << "Effective search space used: " <<
+//                         summary.GetSearchSpace() << "\n";
+// ```
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:583-613
+// ```c++
+//
+//     char buffer[256];
+//     if (gapped) {
+//         out << "Gapped" << "\n";
+//     }
+//     out << "Lambda      K        H";
+//     if (gbp) {
+//         if (gapped) {
+//             out << "        a         alpha    sigma";
+//         } else {
+//             out << "        a         alpha";
+//         }
+//     }
+//     out << "\n";
+//     sprintf(buffer, "%#8.3g ", lambda);
+//     out << buffer;
+//     sprintf(buffer, "%#8.3g ", k);
+//     out << buffer;
+//     sprintf(buffer, "%#8.3g ", h);
+//     out << buffer;
+//     if (gbp) {
+//         if (gapped) {
+//             sprintf(buffer, "%#8.3g ", gbp->a);
+//             out << buffer;
+//             sprintf(buffer, "%#8.3g ", gbp->Alpha);
+//             out << buffer;
+//             sprintf(buffer, "%#8.3g ", gbp->Sigma);
+//             out << buffer;
+//         } else {
+//             sprintf(buffer, "%#8.3g ", gbp->a_un);
+//             out << buffer;
+// ```
+fn write_blastx_query_footer(
+    writer: &mut impl Write,
+    query: &BlastpPairwiseQuery,
+    report: &BlastpPairwiseReport,
+    valid: bool,
+    skipped: bool,
+    gapped: bool,
+) -> io::Result<()> {
+    if skipped {
+        return write_tblastn_unsearched_query_footer_spacing(writer, false);
+    }
+    if valid && gapped {
+        return write_blastp_query_footer_spacing(
+            writer,
+            query.ungapped_karlin,
+            report.gapped_karlin,
+            report.gumbel,
+            query.effective_search_space,
+            false,
+        );
+    }
+    writeln!(writer)?;
+    if valid {
+        writeln!(writer, "Lambda      K        H")?;
+        for v in [
+            query.ungapped_karlin.lambda,
+            query.ungapped_karlin.k,
+            query.ungapped_karlin.h,
+        ] {
+            write_ncbi_ka_field(writer, v)?;
+        }
+        writeln!(writer)?;
+    }
+    writeln!(writer)?;
+    writeln!(writer)?;
+    writeln!(
+        writer,
+        "Effective search space used: {}",
+        if valid {
+            query.effective_search_space
+        } else {
+            0
+        }
+    )?;
+    Ok(())
+}
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1596-1627
+// ```c++
+// {
+//     size_t startLen=0;
+//     int start = alnRoInfo->seqStarts[row].front() + 1;  //+1 for 1 based
+//     int end = alnRoInfo->seqStops[row].front() + 1;
+//     int j = alnRoInfo->currPrintSegment;
+//     int actualLineLen = alnRoInfo->currActualLineLen;
+//     //print out sequence line
+//     //adjust space between id and start
+//     CAlignFormatUtil::AddSpace(out, alnRoInfo->maxIdLen-alnRoInfo->seqidArray[row].size() + k_IdStartMargin);
+//     //not to display start and stop number for empty row
+//     if ((j > 0 && end == prev_stop)
+//         || (j == 0 && start == 1 && end == 1)) {
+//         startLen = 0;
+//     } else {
+//         out << start;
+//         startLen=NStr::IntToString(start).size();
+//     }
+//
+//     CAlignFormatUtil::AddSpace(out, alnRoInfo->maxStartLen-startLen + k_StartSequenceMargin);
+//     x_OutputSeq(alnRoInfo->sequence[row], m_AV->GetSeqId(row), j,
+//                 (int)actualLineLen, alnRoInfo->frame[row], row,
+//                 (row > 0 && alnRoInfo->colorMismatch)?true:false,
+//                 alnRoInfo->masked_regions[row], out);
+//     CAlignFormatUtil::AddSpace(out, k_SeqStopMargin);
+//
+//      //not to display stop number for empty row in the middle
+//     if (!(j > 0 && end == prev_stop)
+//         && !(j == 0 && start == 1 && end == 1)) {
+//         out << end;
+//     }
+//     out<<"\n";
+// }
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:120-134
+// ```c++
+//
+//     if (strand == eNa_strand_minus) {
+//
+//         if (translate)
+//             retval = original_length -
+//                 CODON_LENGTH*(s_GetCurrPos(curr_pos, num) + num)
+//                 + frame + 1;
+//         else
+//             retval = length - s_GetCurrPos(curr_pos, num) - num;
+//
+//     } else {
+//
+//         if (translate)
+//             retval = frame - 1 + CODON_LENGTH*s_GetCurrPos(curr_pos, num);
+//         else
+// ```
+fn write_blastx_alignment(
+    writer: &mut impl Write,
+    hit: &PairwiseHit,
+    config: &PairwiseConfig,
+) -> io::Result<()> {
+    let (Some(qseq), Some(sseq)) = (&hit.query_seq, &hit.subject_seq) else {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "missing BLASTX alignment strings",
+        ));
+    };
+    let q = qseq.as_bytes();
+    let s = sseq.as_bytes();
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1364-1367
+    // ```c++
+    //         x_FillSeqid(seqidArray[row], row);
+    //         maxIdLen=max<size_t>(seqidArray[row].size(), maxIdLen);
+    //         size_t maxCood=max<size_t>(m_AV->GetSeqStart(row), m_AV->GetSeqStop(row));
+    //         maxStartLen = max<size_t>(NStr::SizetToString(maxCood).size(), maxStartLen);
+    // ```
+    let width = digit_count(
+        hit.hit
+            .q_start
+            .max(hit.hit.q_end)
+            .max(hit.hit.s_start)
+            .max(hit.hit.s_end)
+            - 1,
+    );
+    let direction: isize = if hit.query_frame.unwrap_or(1) < 0 {
+        -1
+    } else {
+        1
+    };
+    let mut qp = hit.hit.q_start as isize;
+    let mut sp = hit.hit.s_start;
+    for (qpart, spart) in q
+        .chunks(config.line_length)
+        .zip(s.chunks(config.line_length))
+    {
+        let qn = qpart.iter().filter(|&&c| c != b'-').count();
+        let sn = spart.iter().filter(|&&c| c != b'-').count();
+        let qe = qp + direction * (3 * qn as isize - 1);
+        let se = sp + sn.saturating_sub(1);
+        write!(writer, "Query  ")?;
+        if qn > 0 {
+            write!(writer, "{qp}")?;
+            write_spaces(writer, width + 2 - digit_count(qp.unsigned_abs()))?;
+        } else {
+            write_spaces(writer, width + 2)?;
+        }
+        writer.write_all(qpart)?;
+        write!(writer, "  ")?;
+        if qn > 0 {
+            write!(writer, "{qe}")?;
+        }
+        writeln!(writer)?;
+        write_spaces(writer, 7 + width + 2)?;
+        for (&qc, &sc) in qpart.iter().zip(spart) {
+            let qu = qc.to_ascii_uppercase();
+            let middle = if qu == sc {
+                qu
+            } else if is_positive_match(qu as char, sc as char, config.protein_matrix) {
+                b'+'
+            } else {
+                b' '
+            };
+            writer.write_all(&[middle])?;
+        }
+        writeln!(writer)?;
+        write!(writer, "Sbjct  ")?;
+        if sn > 0 {
+            write!(writer, "{sp}")?;
+            write_spaces(writer, width + 2 - digit_count(sp))?;
+        } else {
+            write_spaces(writer, width + 2)?;
+        }
+        writer.write_all(spart)?;
+        write!(writer, "  ")?;
+        if sn > 0 {
+            write!(writer, "{se}")?;
+        }
+        writeln!(writer)?;
+        writeln!(writer)?;
+        qp += direction * 3 * qn as isize;
+        sp += sn;
+    }
+    Ok(())
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3152-3161
+// ```c++
+// int CAlignFormatUtil::GetPercentMatch(int numerator, int denominator)
+// {
+//      if (numerator == denominator)
+//         return 100;
+//      else {
+//        int retval =(int) (0.5 + 100.0*((double)numerator)/((double)denominator));
+//        retval = min(99, retval);
+//        return retval;
+//      }
+// }
+// ```
+#[cfg(test)]
+#[test]
+fn percent_match_matches_independent_pinned_cpp_edges() {
+    let expected = include_str!("../../tests/unit/blastx_stage_e_percent_expected.tsv");
+    for line in expected.lines() {
+        let fields: Vec<usize> = line
+            .split('\t')
+            .map(|value| value.parse().unwrap())
+            .collect();
+        assert_eq!(fields.len(), 3);
+        assert_eq!(
+            ncbi_percent_match(fields[0], fields[1]),
+            fields[2],
+            "{line}"
+        );
+    }
 }

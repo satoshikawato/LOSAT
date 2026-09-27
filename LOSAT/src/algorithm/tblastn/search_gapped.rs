@@ -853,7 +853,7 @@ fn merge_subject_chunk_hsps(
     }
     let mut incoming: Vec<_> = incoming.into_iter().flatten().collect();
     let retained = old.len().saturating_add(incoming.len()).min(hsp_num_max);
-    // NCBI blast_hits.c:2762-2807, 1330-1382:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2762-2807, 1330-1382:
     // on no cap, append then SortByScore if out of order;
     // on cap, sort both lists and merge score order, preferring old on ties.
     let sorted = |hsps: &mut Vec<(usize, GappedHsp)>| {
@@ -1411,7 +1411,7 @@ pub(super) fn full_translation_traceback_with_matrix_and_events_with_mask_mode_o
     let subject_limit = i32::try_from(subject.len() / 3)? + 1;
     let mut target = TargetTranslation::new(subject, &code);
     for pass in 0..2 {
-        // NCBI blast_traceback.c:294,425-433: initialized from raw subject
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:294,425-433: initialized from raw subject
         // length, then overwritten by each positive translated_length.
         let mut stat_length = i32::try_from(subject.len())?;
         let mut results = Vec::new();
@@ -1448,7 +1448,7 @@ pub(super) fn full_translation_traceback_with_matrix_and_events_with_mask_mode_o
                 if pass == 0 { hit.s_start } else { -1 },
                 hit.s_end,
             )?;
-            // NCBI blast_traceback.c:425-433:
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:425-433:
             // if (subject_length > 0) stat_length = subject_length;
             if translated_length > 0 {
                 stat_length = i32::try_from(translated_length)?;
@@ -1518,6 +1518,18 @@ pub(super) fn full_translation_traceback_with_matrix_and_events_with_mask_mode_o
                 break;
             }
             let alignment = alignment.context("NCBI protein traceback returned no alignment")?;
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:516-520,583-596
+            // ```c
+            // fence_error = (fence_hit && *fence_hit);
+            // if (fence_error) { break; }
+            // Blast_HSPUpdateWithTraceback(gap_align, hsp);
+            // Blast_HSPGetNumIdentitiesAndPositives(query_nomask, adjusted_subject, hsp, ...);
+            // ```
+            // Array/report consumers run only after the caller's fence retry decision.
+            let query_start = usize::try_from(alignment.query_start)?;
+            let query_stop = usize::try_from(alignment.query_stop)?;
+            let subject_start = usize::try_from(alignment.subject_start)?;
+            let subject_stop = usize::try_from(alignment.subject_stop)?;
             // NCBI c++/src/algo/blast/core/blast_traceback.c:585-605:
             // Blast_HSPGetNumIdentitiesAndPositives(..., &align_length, sbp);
             // delete_hsp = Blast_HSPTest(hsp, hit_options, align_length);
@@ -1535,8 +1547,9 @@ pub(super) fn full_translation_traceback_with_matrix_and_events_with_mask_mode_o
             let num_ident = protein_identities_from_edit_ops(
                 query_nomask,
                 subject_sequence,
-                alignment.query_start,
-                alignment.subject_start,
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:583-596: identities use the post-fence valid HSP offsets.
+                query_start,
+                subject_start,
                 &alignment.edit_script,
                 matrix,
             );
@@ -1545,16 +1558,17 @@ pub(super) fn full_translation_traceback_with_matrix_and_events_with_mask_mode_o
             }
             let delete_hsp =
                 blast_hsp_test(num_ident, align_length, percent_identity, min_hit_length);
-            // NCBI blast_traceback.c:585-605 records updated HSP offsets
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:585-605 records updated HSP offsets
             // before Blast_HSPTest and before Blast_HSPAdjustSubjectOffset.
             if let Some(events) = test_events.as_deref_mut() {
                 events.push((
                     delete_hsp,
                     align_length,
-                    alignment.query_start,
-                    alignment.query_stop,
-                    alignment.subject_start + subject_base,
-                    alignment.subject_stop + subject_base,
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:583-596: observer sees the post-fence updated HSP offsets.
+                    query_start,
+                    query_stop,
+                    subject_start + subject_base,
+                    subject_stop + subject_base,
                 ));
             }
             if delete_hsp {
@@ -1567,11 +1581,13 @@ pub(super) fn full_translation_traceback_with_matrix_and_events_with_mask_mode_o
             let saved = GappedHsp {
                 frame: hit.frame,
                 score: alignment.score,
-                q_start: i32::try_from(alignment.query_start)?,
-                q_end: i32::try_from(alignment.query_stop)?,
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:583: Blast_HSPUpdateWithTraceback(gap_align, hsp);
+                q_start: alignment.query_start,
+                q_end: alignment.query_stop,
                 q_gapped_start: i32::try_from(q_start)?,
-                s_start: i32::try_from(alignment.subject_start + subject_base)?,
-                s_end: i32::try_from(alignment.subject_stop + subject_base)?,
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:599: Blast_HSPAdjustSubjectOffset(hsp, start_shift);
+                s_start: alignment.subject_start + i32::try_from(subject_base)?,
+                s_end: alignment.subject_stop + i32::try_from(subject_base)?,
                 s_gapped_start: i32::try_from(s_start + subject_base)?,
             };
             tree.add_hsp(
@@ -2685,9 +2701,9 @@ mod tests {
     // NCBI c++/src/algo/blast/core/blast_traceback.c:436-445:
     // retval = BlastGetOffsetsForGappedAlignment(query, subject, sbp, hsp, ...);
     // if (!retval) { hsp_array[index] = Blast_HSPFree(hsp); continue; }
-    // NCBI blast_gapalign.c:3259-3321: positive 11-residue window scores
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3259-3321: positive 11-residue window scores
     // choose a start; two nonpositive endpoint windows return FALSE.
-    // NCBI blast_traceback.c:446-448: on TRUE, write q_start and s_start
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:446-448: on TRUE, write q_start and s_start
     // into the HSP before alignment; the real-path positive probe tests this.
     fn compare_real_path_start_offset_with_ncbi(positive: bool) {
         let root = concat!(
@@ -3469,10 +3485,11 @@ mod tests {
                 let f: Vec<_> = line.split('\t').collect();
                 expected_removed = Some((
                     f[2].parse::<i32>().unwrap(),
-                    f[4].parse::<usize>().unwrap(),
-                    f[5].parse::<usize>().unwrap(),
-                    f[6].parse::<usize>().unwrap(),
-                    f[7].parse::<usize>().unwrap(),
+                    // NCBI c++/include/algo/blast/core/blast_gapalign.h:85-88: Int4 query_start/query_stop/subject_start/subject_stop.
+                    f[4].parse::<i32>().unwrap(),
+                    f[5].parse::<i32>().unwrap(),
+                    f[6].parse::<i32>().unwrap(),
+                    f[7].parse::<i32>().unwrap(),
                 ));
                 break;
             }
@@ -5190,7 +5207,7 @@ mod tests {
         );
         let query = &read_fasta(&format!("{root}query.faa"))[0].1;
         let subject = &read_fasta(&format!("{root}subjects.fna"))[0].1;
-        // NCBI blast_setup.c:614-638 keeps this query unmasked when
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:614-638 keeps this query unmasked when
         // mask_at_hash is true; all six WordFinder calls see the same bytes.
         let unmasked = encode_protein_query_frame_with_seg(query, None);
         let hex: String = unmasked.aa_seq[1..121]

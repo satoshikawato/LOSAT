@@ -20,6 +20,12 @@ fn canonical_options_for_every_program() {
     for (program, word) in [
         ("blastn", "11"),
         ("blastp", "3"),
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:54-55
+        // ```c++
+        //     static const char kDefaultTask[] = "blastx";
+        //     SetTask(kDefaultTask);
+        // ```
+        ("blastx", "3"),
         ("tblastx", "3"),
         ("tblastn", "3"),
     ] {
@@ -40,6 +46,16 @@ fn canonical_options_for_every_program() {
         )
         .unwrap();
         match cli.command {
+            // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:54-55
+            // ```c++
+            //     static const char kDefaultTask[] = "blastx";
+            //     SetTask(kDefaultTask);
+            // ```
+            Commands::Blastx(a) => {
+                assert_eq!(a.num_threads, 4);
+                assert_eq!(a.evalue, 0.001);
+                assert_eq!(a.max_target_seqs, Some(9));
+            }
             Commands::Blastn(a) => {
                 assert_eq!(a.num_threads, 4);
                 assert_eq!(a.evalue, 0.001);

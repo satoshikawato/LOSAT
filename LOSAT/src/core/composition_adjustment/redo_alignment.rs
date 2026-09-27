@@ -535,6 +535,229 @@ pub struct BlastRedoOneMatchResult {
     pub lambda_ratio: Option<f64>,
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1239-1274
+// ```c++
+//                             in_align, FALSE, subject_is_translated);
+//                     adjust_search_failed =
+//                             Blast_AdjustScores(matrix, query_composition,
+//                                     query.length,
+//                                     &subject_composition,
+//                                     subject.length,
+//                                     scaledMatrixInfo, compo_adjust_mode,
+//                                     RE_pseudocounts, NRrecord,
+//                                     &matrix_adjust_rule,
+//                                     callbacks->calc_lambda,
+//                                     pvalueForThisPair,
+//                                     compositionTestIndex,
+//                                     LambdaRatio);
+//                     if (adjust_search_failed < 0) { /* fatal error */
+//                         status = adjust_search_failed;
+//                         goto window_index_loop_cleanup;
+//                     }
+//                     num_adjustments++;
+//                 }
+//
+//                 if ( !adjust_search_failed ) {
+//                     newAlign = callbacks->redo_one_alignment(
+//                             in_align,
+//                             matrix_adjust_rule,
+//                             &query,
+//                             &window->query_range,
+//                             ccat_query_length,
+//                             &subject,
+//                             &window->subject_range,
+//                             matchingSeq->length,
+//                             gapping_params
+//                     );
+//                     if (newAlign && newAlign->score >= params->cutoff_s) {
+//                         s_WithDistinctEnds(&newAlign, &alignments[query_index],
+//                                 callbacks->free_align_traceback,
+//                                 num_adjustments == 1);
+// ```
+pub enum BlastRedoTraceEvent<'a> {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:966-1000
+    // ```c++
+    // s_IsContained(BlastCompo_Alignment * in_align,
+    //               BlastCompo_Alignment * alignments,
+    //               double lambda)
+    // {
+    //     BlastCompo_Alignment * align;     /* represents the current alignment
+    //                                             in the main loop */
+    //     /* Endpoints of the alignment */
+    //     int query_offset    = in_align->queryStart;
+    //     int query_end       = in_align->queryEnd;
+    //     int subject_offset  = in_align->matchStart;
+    //     int subject_end     = in_align->matchEnd;
+    //     double score        = in_align->score;
+    //     double scoreThresh = score + KAPPA_BIT_TOL * LOCAL_LN2/lambda;
+    //
+    //     for (align = alignments;  align != NULL;  align = align->next ) {
+    //         /* for all elements of alignments */
+    //         if (KAPPA_SIGN(in_align->frame) == KAPPA_SIGN(align->frame)) {
+    //             /* hsp1 and hsp2 are in the same query/subject frame */
+    //             if (KAPPA_CONTAINED_IN_HSP
+    //                 (align->queryStart, align->queryEnd, query_offset,
+    //                  align->matchStart, align->matchEnd, subject_offset) &&
+    //                 KAPPA_CONTAINED_IN_HSP
+    //                 (align->queryStart, align->queryEnd, query_end,
+    //                  align->matchStart, align->matchEnd, subject_end) &&
+    //                 scoreThresh <= align->score) {
+    //                 return 1;
+    //             }
+    //         }
+    //     }
+    //     return 0;
+    // }
+    //
+    //
+    // /* Documented in redo_alignment.h. */
+    // void
+    // ```
+    Contained {
+        incoming: &'a BlastCompoAlignment,
+        result: bool,
+    },
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:224-274
+    // ```c++
+    // s_HitlistReapContained(BlastHSP * hsp_array[], Int4 * hspcnt)
+    // {
+    //     Int4 iread;       /* iteration index used to read the hitlist */
+    //     Int4 iwrite;      /* iteration index used to write to the hitlist */
+    //     Int4 old_hspcnt;  /* number of HSPs in the hitlist on entry */
+    //
+    //     old_hspcnt = *hspcnt;
+    //
+    //     for (iread = 1;  iread < *hspcnt;  iread++) {
+    //         /* for all HSPs in the hitlist */
+    //         Int4      ireadBack;  /* iterator over indices less than iread */
+    //         BlastHSP *hsp1;       /* an HSP that is a candidate for deletion */
+    //
+    //         hsp1 = hsp_array[iread];
+    //         for (ireadBack = 0;  ireadBack < iread && hsp1 != NULL;  ireadBack++) {
+    //             /* for all HSPs before hsp1 in the hitlist and while hsp1
+    //              * has not been deleted */
+    //             BlastHSP *hsp2;    /* an HSP that occurs earlier in hsp_array
+    //                                 * than hsp1 */
+    //             hsp2 = hsp_array[ireadBack];
+    //
+    //             if( hsp2 == NULL ) {  /* hsp2 was deleted in a prior iteration. */
+    //                 continue;
+    //             }
+    //             if (hsp2->query.frame == hsp1->query.frame &&
+    //                 hsp2->subject.frame == hsp1->subject.frame) {
+    //                 /* hsp1 and hsp2 are in the same query/subject frame. */
+    //                 if (CONTAINED_IN_HSP
+    //                     (hsp2->query.offset, hsp2->query.end, hsp1->query.offset,
+    //                      hsp2->subject.offset, hsp2->subject.end,
+    //                      hsp1->subject.offset) &&
+    //                     CONTAINED_IN_HSP
+    //                     (hsp2->query.offset, hsp2->query.end, hsp1->query.end,
+    //                      hsp2->subject.offset, hsp2->subject.end,
+    //                      hsp1->subject.end)    &&
+    //                     hsp1->score <= hsp2->score) {
+    //                     hsp1 = hsp_array[iread] = Blast_HSPFree(hsp_array[iread]);
+    //                 }
+    //             } /* end if hsp1 and hsp2 are in the same query/subject frame */
+    //         } /* end for all HSPs before hsp1 in the hitlist */
+    //     } /* end for all HSPs in the hitlist */
+    //
+    //     /* Condense the hsp_array, removing any NULL items. */
+    //     iwrite = 0;
+    //     for (iread = 0;  iread < *hspcnt;  iread++) {
+    //         if (hsp_array[iread] != NULL) {
+    //             hsp_array[iwrite++] = hsp_array[iread];
+    //         }
+    //     }
+    //     *hspcnt = iwrite;
+    //     /* Fill the remaining memory in hsp_array with NULL pointers. */
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:266-273
+    // ```c
+    //     /* Condense the hsp_array, removing any NULL items. */
+    //     iwrite = 0;
+    //     for (iread = 0;  iread < *hspcnt;  iread++) {
+    //         if (hsp_array[iread] != NULL) {
+    //             hsp_array[iwrite++] = hsp_array[iread];
+    //         }
+    //     }
+    //     *hspcnt = iwrite;
+    // ```
+    ReapList {
+        phase: &'static str,
+        index: usize,
+        context: usize,
+        frame: i8,
+        score: i32,
+        q_start: i32,
+        q_end: i32,
+        s_start: i32,
+        s_end: i32,
+    },
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:238-260
+    // ```c
+    //         for (ireadBack = 0;  ireadBack < iread && hsp1 != NULL;  ireadBack++) {
+    //             /* for all HSPs before hsp1 in the hitlist and while hsp1
+    //              * has not been deleted */
+    //             BlastHSP *hsp2;    /* an HSP that occurs earlier in hsp_array
+    //                                 * than hsp1 */
+    //             hsp2 = hsp_array[ireadBack];
+    //
+    //             if( hsp2 == NULL ) {  /* hsp2 was deleted in a prior iteration. */
+    //                 continue;
+    //             }
+    //             if (hsp2->query.frame == hsp1->query.frame &&
+    //                 hsp2->subject.frame == hsp1->subject.frame) {
+    //                 /* hsp1 and hsp2 are in the same query/subject frame. */
+    //                 if (CONTAINED_IN_HSP
+    //                     (hsp2->query.offset, hsp2->query.end, hsp1->query.offset,
+    //                      hsp2->subject.offset, hsp2->subject.end,
+    //                      hsp1->subject.offset) &&
+    //                     CONTAINED_IN_HSP
+    //                     (hsp2->query.offset, hsp2->query.end, hsp1->query.end,
+    //                      hsp2->subject.offset, hsp2->subject.end,
+    //                      hsp1->subject.end)    &&
+    //                     hsp1->score <= hsp2->score) {
+    //                     hsp1 = hsp_array[iread] = Blast_HSPFree(hsp_array[iread]);
+    // ```
+    ReapCompare {
+        index: usize,
+        previous_index: usize,
+        result: bool,
+    },
+    ReapContained {
+        frame: i8,
+        score: i32,
+        q_start: i32,
+        q_end: i32,
+        s_start: i32,
+        s_end: i32,
+        result: bool,
+    },
+
+    MatchStart {
+        context: usize,
+        count: usize,
+        matrix: Option<&'a AdjustedProteinMatrix>,
+    },
+    MatchEnd {
+        context: usize,
+        matrix: Option<&'a AdjustedProteinMatrix>,
+    },
+    Adjustment {
+        before: bool,
+        status: i32,
+        query_count: i32,
+        subject_count: i32,
+        rule: EMatrixAdjustRule,
+        matrix: Option<&'a AdjustedProteinMatrix>,
+    },
+    Redo {
+        incoming: &'a BlastCompoAlignment,
+        rule: EMatrixAdjustRule,
+        matrix: Option<&'a AdjustedProteinMatrix>,
+    },
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1110-1121
 // ```c
 // static Uint8 s_GetHash(const Uint1* data, int word_size)
@@ -1179,6 +1402,171 @@ fn windows_from_translated_aligns(
     }
     joined.sort_unstable_by(subject_compare_windows);
     Ok(joined)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:681-693
+// ```c++
+//         if (align_copy == NULL)
+//             goto error_return;
+//
+//         if (subject_is_translated) {
+//             begin = MAX(0, align->matchStart - border);
+//             end   = MIN(translated_length, align->matchEnd + border);
+//             windows[k] = s_WindowInfoNew(begin, end, frame, 0,
+//                                 query_length, query_index, align_copy);
+//         } else {
+//             begin = MAX(0, align->queryStart - border);
+//             end   = MIN(query_length, align->queryEnd + border);
+//             /* for blastx, temporarily swap subject and query ranges*/
+//             windows[k] = s_WindowInfoNew(begin, end, query_index, 0,
+// ```
+fn windows_from_translated_query_aligns(
+    alignments: &Option<Box<BlastCompoAlignment>>,
+    query_infos: &[BlastCompoQueryInfo],
+    subject_length: i32,
+    border: i32,
+) -> Result<Vec<WindowInfo>> {
+    let mut windows = Vec::with_capacity(distinct_alignments_length(alignments));
+    let mut current = alignments.as_deref();
+    while let Some(align) = current {
+        let query_length = query_infos
+            .get(usize::try_from(align.query_index)?)
+            .ok_or_else(|| anyhow::anyhow!("BLASTX redo context is missing"))?
+            .seq
+            .length;
+        windows.push(window_info_new(
+            (align.query_start - border).max(0),
+            (align.query_end + border).min(query_length),
+            align.query_index,
+            0,
+            subject_length,
+            0,
+            Some(alignment_copy(align)),
+        ));
+        current = align.next.as_deref();
+    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:700-751
+    // ```c++
+    // 	}
+    //     }
+    //     qsort(windows, hspcnt, sizeof(s_WindowInfo*),
+    //         s_LocationCompareWindows);
+    //
+    //     /* Join windows that overlap or are too close together.  */
+    //     length_joined = 0;
+    //     for (k = 0;  k < hspcnt;  k++) {       /* for all windows in the
+    //                                               original list */
+    //         s_WindowInfo * window;          /* window at this value of k */
+    //         s_WindowInfo * nextWindow;      /* window at the next
+    //                                                value of k, or NULL if
+    //                                                no such window
+    //                                                exists */
+    //         window     = windows[k];
+    //         nextWindow = ( k + 1 < hspcnt ) ? windows[k+1] : NULL;
+    //
+    //         if(nextWindow != NULL &&
+    //            window->subject_range.context ==
+    //            nextWindow->subject_range.context &&
+    //            window->query_range.context == nextWindow->query_range.context &&
+    //            window->subject_range.end >= nextWindow->subject_range.begin) {
+    //             /* Join the current window with the next window.  Do not add the
+    //                current window to the output list. */
+    //             s_WindowInfoJoin(nextWindow, &windows[k]);
+    //         } else {
+    //             /* Don't join the current window with the next window.  Add the
+    //                current window to the output list instead */
+    //             windows[length_joined] = window;
+    //             length_joined++;
+    //         } /* end else don't join the current window with the next window */
+    //     } /* end for all windows in the original list */
+    //     *nWindows = length_joined;
+    //
+    //     for (k = length_joined;  k < hspcnt;  k++) {
+    //         windows[k] = NULL;
+    //     }
+    //
+    //     /* for blastx, swap query and subject range */
+    //     if (!subject_is_translated) {
+    //         for (k=0; k<length_joined; k++) {
+    //             s_WindowSwapRange(windows[k]);
+    //         }
+    //     }
+    //
+    //     for (k = 0;  k < length_joined;  k++) {
+    //         s_DistinctAlignmentsSort(&windows[k]->align, windows[k]->hspcnt);
+    //     }
+    //     qsort(windows, *nWindows, sizeof(s_WindowInfo*),
+    //           s_SubjectCompareWindows);
+    //     return 0; /* normal return */
+    //
+    // ```
+    windows.sort_unstable_by(location_compare_windows);
+    let mut input = windows.into_iter().peekable();
+    let mut joined = Vec::new();
+    while let Some(window) = input.next() {
+        if let Some(next) = input.peek_mut() {
+            if window.subject_range.context == next.subject_range.context
+                && window.query_range.context == next.query_range.context
+                && window.subject_range.end >= next.subject_range.begin
+            {
+                window_info_join(next, window);
+                continue;
+            }
+        }
+        joined.push(window);
+    }
+    for window in &mut joined {
+        window_swap_range(window);
+        distinct_alignments_sort(&mut window.align);
+    }
+    joined.sort_unstable_by(subject_compare_windows);
+    Ok(joined)
+}
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:906-938
+// ```c++
+// s_GetComposition(Blast_AminoAcidComposition * composition,
+//                  int alphsize,
+//                  BlastCompo_SequenceData * seq,
+//                  BlastCompo_SequenceRange * range,
+//                  BlastCompo_Alignment * align,
+//                  Boolean query_is_translated,
+//                  Boolean subject_is_translated)
+// {
+//     Uint1 * data;     /* sequence data for the subject */
+//     int length;       /* length of the subject portion of the alignment */
+//     /* [left, right) is the interval of the subject to use when
+//      * computing composition. The endpoints are offsets into the
+//      * subject_range. */
+//     int left, right;
+//
+//     data = seq->data;
+//     length = range->end - range->begin;
+//     if (query_is_translated || subject_is_translated) {
+//         int start;
+//         int end;
+//         start = ((query_is_translated) ?
+//                  align->queryStart : align->matchStart) - range->begin;
+//         end   = ((query_is_translated) ?
+//                  align->queryEnd   : align->matchEnd  ) - range->begin;
+//         Blast_GetCompositionRange(&left, &right, data, length, start, end);
+//     } else {
+//         /* Use the whole subject to compute the composition */
+//         left = 0;
+//         right = length;
+//     }
+//     Blast_ReadAaComposition(composition, alphsize, &data[left], right-left);
+// }
+//
+// ```
+fn translated_query_composition(
+    query: &BlastCompoSequenceData,
+    range: &BlastCompoSequenceRange,
+    align: &BlastCompoAlignment,
+) -> Result<BlastAminoAcidComposition> {
+    let start = usize::try_from(align.query_start - range.begin)?;
+    let finish = usize::try_from(align.query_end - range.begin)?;
+    let (left, right) = blast_get_composition_range(query.data(), start, finish)?;
+    Ok(read_aa_composition(&query.data()[left..right]))
 }
 
 // NCBI c++/src/algo/blast/core/blast_kappa.c:1504-1525;
@@ -1975,11 +2363,128 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries<'seq>(
     callbacks: &BlastRedoAlignCallbacks,
     composition_workspace: &mut BlastCompositionWorkspace,
 ) -> Result<BlastRedoOneMatchResult> {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3631-3641
+    // ```c++
+    //                                         &matchingSeq,           // thread-local
+    //                                         -1,                     // const
+    //                                         query_info,             // thread-local
+    //                                         numContexts,            // thread-local
+    //                                         matrix,                 // thread-local
+    //                                         BLASTAA_SIZE,           // const
+    //                                         NRrecord,               // thread-local
+    //                                         &pvalueForThisPair,     // local
+    //                                         compositionTestIndex,   // thread-local
+    //                                         &LambdaRatio            // local
+    //                                 );
+    // ```
+    let mut matrix_state = None;
+    blast_redo_one_match_with_workspace_queries_and_matrix(
+        incoming_aligns,
+        params,
+        matching_seq,
+        query_infos,
+        lambda,
+        callbacks,
+        composition_workspace,
+        &mut matrix_state,
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3631-3641
+// ```c++
+//                                         &matchingSeq,           // thread-local
+//                                         -1,                     // const
+//                                         query_info,             // thread-local
+//                                         numContexts,            // thread-local
+//                                         matrix,                 // thread-local
+//                                         BLASTAA_SIZE,           // const
+//                                         NRrecord,               // thread-local
+//                                         &pvalueForThisPair,     // local
+//                                         compositionTestIndex,   // thread-local
+//                                         &LambdaRatio            // local
+//                                 );
+// ```
+pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix<'seq>(
+    incoming_aligns: &Option<Box<BlastCompoAlignment>>,
+    params: &BlastRedoAlignParams,
+    matching_seq: &BlastCompoMatchingSequence<'seq>,
+    query_infos: &[BlastCompoQueryInfo],
+    lambda: f64,
+    callbacks: &BlastRedoAlignCallbacks,
+    composition_workspace: &mut BlastCompositionWorkspace,
+    matrix_state: &mut Option<AdjustedProteinMatrix>,
+) -> Result<BlastRedoOneMatchResult> {
+    blast_redo_one_match_with_workspace_queries_and_matrix_observed(
+        incoming_aligns,
+        params,
+        matching_seq,
+        query_infos,
+        lambda,
+        callbacks,
+        composition_workspace,
+        matrix_state,
+        &mut |_| {},
+    )
+}
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1232-1274
+// ```c++
+//                 if (compo_adjust_mode != eNoCompositionBasedStats &&
+//                         (subject_is_translated || hsp_index == 0
+//                                 || (nearIdenticalStatus != oldNearIdenticalStatus))) {
+//                     Blast_AminoAcidComposition subject_composition;
+//                     s_GetComposition(&subject_composition,
+//                             alphsize, &subject,
+//                             &window->subject_range,
+//                             in_align, FALSE, subject_is_translated);
+//                     adjust_search_failed =
+//                             Blast_AdjustScores(matrix, query_composition,
+//                                     query.length,
+//                                     &subject_composition,
+//                                     subject.length,
+//                                     scaledMatrixInfo, compo_adjust_mode,
+//                                     RE_pseudocounts, NRrecord,
+//                                     &matrix_adjust_rule,
+//                                     callbacks->calc_lambda,
+//                                     pvalueForThisPair,
+//                                     compositionTestIndex,
+//                                     LambdaRatio);
+//                     if (adjust_search_failed < 0) { /* fatal error */
+//                         status = adjust_search_failed;
+//                         goto window_index_loop_cleanup;
+//                     }
+//                     num_adjustments++;
+//                 }
+//
+//                 if ( !adjust_search_failed ) {
+//                     newAlign = callbacks->redo_one_alignment(
+//                             in_align,
+//                             matrix_adjust_rule,
+//                             &query,
+//                             &window->query_range,
+//                             ccat_query_length,
+//                             &subject,
+//                             &window->subject_range,
+//                             matchingSeq->length,
+//                             gapping_params
+//                     );
+//                     if (newAlign && newAlign->score >= params->cutoff_s) {
+//                         s_WithDistinctEnds(&newAlign, &alignments[query_index],
+//                                 callbacks->free_align_traceback,
+//                                 num_adjustments == 1);
+// ```
+pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix_observed<'seq>(
+    incoming_aligns: &Option<Box<BlastCompoAlignment>>,
+    params: &BlastRedoAlignParams,
+    matching_seq: &BlastCompoMatchingSequence<'seq>,
+    query_infos: &[BlastCompoQueryInfo],
+    lambda: f64,
+    callbacks: &BlastRedoAlignCallbacks,
+    composition_workspace: &mut BlastCompositionWorkspace,
+    matrix_state: &mut Option<AdjustedProteinMatrix>,
+    trace: &mut dyn for<'a> FnMut(BlastRedoTraceEvent<'a>),
+) -> Result<BlastRedoOneMatchResult> {
     if params.smith_waterman {
         bail!("blastp redo_alignment Smith-Waterman path is not yet ported");
-    }
-    if params.query_is_translated {
-        bail!("blastx redo_alignment translated-query path is not yet ported");
     }
     if params.position_based {
         bail!("blastp redo_alignment position-based path is not yet ported");
@@ -1999,7 +2504,27 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries<'seq>(
     //         kWindowBorder, sequence_length, ...);
     // else return s_WindowsFromProteinAligns(...);
     // ```
-    let windows = if params.subject_is_translated {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:879-888
+    // ```c++
+    //     if (subject_is_translated || query_is_translated) {
+    //         return s_WindowsFromTranslatedAligns(alignments, query_info,
+    //                                              hspcnt, border,
+    //                                              sequence_length,
+    //                                              pwindows, nWindows,
+    //                                              subject_is_translated, is_pos_based);
+    //     } else {
+    //         return s_WindowsFromProteinAligns(alignments, query_info,
+    //                                           numQueries, sequence_length,
+    //                                           pwindows, nWindows);
+    // ```
+    let windows = if params.query_is_translated {
+        windows_from_translated_query_aligns(
+            incoming_aligns,
+            query_infos,
+            matching_seq.length,
+            WINDOW_BORDER,
+        )?
+    } else if params.subject_is_translated {
         if matching_seq.genetic_code_id.is_none() {
             bail!("TBLASTN redo requires a translated subject genetic code");
         }
@@ -2020,7 +2545,16 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries<'seq>(
     let mut pvalue_for_this_pair = None;
     let mut lambda_ratio = None;
     let mut matrix_adjust_rule = EMatrixAdjustRule::DontAdjustMatrix;
-    let mut adjusted_matrix = None;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1439-1444
+    // ```c++
+    //     if (query_composition->numTrueAminoAcids == 0 ||
+    //         subject_composition->numTrueAminoAcids == 0) {
+    //         /* Either the query or subject contains only ambiguity
+    //            characters, most likely because the entire subject has been
+    //            SEGed.  Compositional adjustment is meaningless. */
+    //         return 1;
+    // ```
+    let mut adjusted_matrix = matrix_state.take();
 
     for window in windows {
         let query_index = usize::try_from(window.query_range.context)?;
@@ -2029,7 +2563,17 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries<'seq>(
         // query_index = window->align->queryIndex;
         // query_composition = &query_info[query_index].composition;
         // ```
-        let query_info = if params.subject_is_translated {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1162-1168
+        // ```c++
+        //         int num_adjustments = 0; /* number of matrix adjustments done in this
+        //                                     window; nearly identical alignments may be
+        //                                     computed with different composition
+        //                                     adjustment than other alignments due to using
+        //                                     full subjects instead of segged ones */
+        //
+        //         window = windows[window_index];
+        // ```
+        let query_info = if params.subject_is_translated || params.query_is_translated {
             query_infos.get(query_index).ok_or_else(|| {
                 anyhow::anyhow!("TBLASTN redo query index {query_index} is missing")
             })?
@@ -2094,7 +2638,37 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries<'seq>(
                 range_result = Some(next_range);
             }
 
-            if !is_contained(current, &alignments_by_query[query_index], lambda) {
+            // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1218-1224
+            // ```c++
+            //             /* do frequency count for partial translated query */
+            //             if (query_is_translated) {
+            //                 s_GetComposition(query_composition,
+            //                         alphsize, &query,
+            //                         &window->query_range,
+            //                         in_align, TRUE, FALSE);
+            //             }
+            // ```
+            let query_composition = if params.query_is_translated {
+                translated_query_composition(
+                    &range_result.as_ref().expect("range initialized").query,
+                    &window.query_range,
+                    current,
+                )?
+            } else {
+                query_info.composition.clone()
+            };
+            // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1225-1227
+            // ```c++
+            //             /* if in_align is not contained in a higher-scoring
+            //              * alignment */
+            //             if ( !s_IsContained(in_align, alignments[query_index], Lambda) ) {
+            // ```
+            let contained = is_contained(current, &alignments_by_query[query_index], lambda);
+            trace(BlastRedoTraceEvent::Contained {
+                incoming: current,
+                result: contained,
+            });
+            if !contained {
                 let mut adjust_search_failed = false;
                 let range = range_result
                     .as_ref()
@@ -2117,11 +2691,6 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries<'seq>(
                         || hsp_index == 0
                         || (near_identical != old_near_identical))
                 {
-                    let query_composition = if params.query_is_translated {
-                        read_aa_composition(range.query.data())
-                    } else {
-                        query_info.composition.clone()
-                    };
                     // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:906-938,1234-1238
                     // ```c
                     // s_GetComposition(&subject_composition, alphsize,
@@ -2137,6 +2706,35 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries<'seq>(
                     } else {
                         read_aa_composition(range.subject.data())
                     };
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1239-1256
+                    // ```c++
+                    //                             in_align, FALSE, subject_is_translated);
+                    //                     adjust_search_failed =
+                    //                             Blast_AdjustScores(matrix, query_composition,
+                    //                                     query.length,
+                    //                                     &subject_composition,
+                    //                                     subject.length,
+                    //                                     scaledMatrixInfo, compo_adjust_mode,
+                    //                                     RE_pseudocounts, NRrecord,
+                    //                                     &matrix_adjust_rule,
+                    //                                     callbacks->calc_lambda,
+                    //                                     pvalueForThisPair,
+                    //                                     compositionTestIndex,
+                    //                                     LambdaRatio);
+                    //                     if (adjust_search_failed < 0) { /* fatal error */
+                    //                         status = adjust_search_failed;
+                    //                         goto window_index_loop_cleanup;
+                    //                     }
+                    //                     num_adjustments++;
+                    // ```
+                    trace(BlastRedoTraceEvent::Adjustment {
+                        before: true,
+                        status: 0,
+                        query_count: query_composition.num_true_amino_acids,
+                        subject_count: subject_composition.num_true_amino_acids,
+                        rule: matrix_adjust_rule,
+                        matrix: adjusted_matrix.as_ref(),
+                    });
                     if query_composition.num_true_amino_acids == 0
                         || subject_composition.num_true_amino_acids == 0
                     {
@@ -2184,10 +2782,51 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries<'seq>(
                             adjust_search_failed = true;
                         }
                     }
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1251-1256
+                    // ```c++
+                    //                                     LambdaRatio);
+                    //                     if (adjust_search_failed < 0) { /* fatal error */
+                    //                         status = adjust_search_failed;
+                    //                         goto window_index_loop_cleanup;
+                    //                     }
+                    //                     num_adjustments++;
+                    // ```
+                    trace(BlastRedoTraceEvent::Adjustment {
+                        before: false,
+                        status: i32::from(adjust_search_failed),
+                        query_count: query_composition.num_true_amino_acids,
+                        subject_count: subject_composition.num_true_amino_acids,
+                        rule: matrix_adjust_rule,
+                        matrix: adjusted_matrix.as_ref(),
+                    });
                     num_adjustments += 1;
                 }
 
                 if !adjust_search_failed {
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1259-1274
+                    // ```c++
+                    //                 if ( !adjust_search_failed ) {
+                    //                     newAlign = callbacks->redo_one_alignment(
+                    //                             in_align,
+                    //                             matrix_adjust_rule,
+                    //                             &query,
+                    //                             &window->query_range,
+                    //                             ccat_query_length,
+                    //                             &subject,
+                    //                             &window->subject_range,
+                    //                             matchingSeq->length,
+                    //                             gapping_params
+                    //                     );
+                    //                     if (newAlign && newAlign->score >= params->cutoff_s) {
+                    //                         s_WithDistinctEnds(&newAlign, &alignments[query_index],
+                    //                                 callbacks->free_align_traceback,
+                    //                                 num_adjustments == 1);
+                    // ```
+                    trace(BlastRedoTraceEvent::Redo {
+                        incoming: current,
+                        rule: matrix_adjust_rule,
+                        matrix: adjusted_matrix.as_ref(),
+                    });
                     let mut new_align = (callbacks.redo_one_alignment)(
                         current,
                         matrix_adjust_rule,
@@ -2236,6 +2875,31 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries<'seq>(
     // ...
     // return status;
     // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1239-1259
+    // ```c++
+    //                             in_align, FALSE, subject_is_translated);
+    //                     adjust_search_failed =
+    //                             Blast_AdjustScores(matrix, query_composition,
+    //                                     query.length,
+    //                                     &subject_composition,
+    //                                     subject.length,
+    //                                     scaledMatrixInfo, compo_adjust_mode,
+    //                                     RE_pseudocounts, NRrecord,
+    //                                     &matrix_adjust_rule,
+    //                                     callbacks->calc_lambda,
+    //                                     pvalueForThisPair,
+    //                                     compositionTestIndex,
+    //                                     LambdaRatio);
+    //                     if (adjust_search_failed < 0) { /* fatal error */
+    //                         status = adjust_search_failed;
+    //                         goto window_index_loop_cleanup;
+    //                     }
+    //                     num_adjustments++;
+    //                 }
+    //
+    //                 if ( !adjust_search_failed ) {
+    // ```
+    *matrix_state = adjusted_matrix;
     Ok(BlastRedoOneMatchResult {
         alignments_by_query,
         pvalue_for_this_pair,

@@ -196,3 +196,16 @@ pub(crate) fn compute_unmasked_intervals(
     }
     result
 }
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:446-453
+// ```c++
+//     /* create an empty backbone */
+//
+//     exact_backbone = (Int4 **) calloc(lookup->backbone_size, sizeof(Int4 *));
+//
+//     /* find all the exact matches, grouping together all offsets of identical
+//        query words. The query bias is not used here, since the next stage
+//        will need real offsets into the query sequence */
+//
+// ```
+pub(crate) use backbone::build_ncbi_lookup_from_prepared;

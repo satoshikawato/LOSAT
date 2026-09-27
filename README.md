@@ -9,6 +9,8 @@
 [![Anaconda-Server Badge](https://anaconda.org/bioconda/losat/badges/latest_release_date.svg)](https://anaconda.org/bioconda/losat)
 [![Anaconda-Server Badge](https://anaconda.org/bioconda/losat/badges/platforms.svg)](https://anaconda.org/bioconda/losat)
 [![Anaconda-Server Badge](https://anaconda.org/bioconda/losat/badges/latest_release_date.svg)](https://anaconda.org/bioconda/losat)
+
+
 **LOSAT** is a lightweight, pure-Rust reimplementation of the NCBI BLAST sequence alignment algorithm designed specifically for pairwise sequence-to-sequence comparisons (`-query` vs `-subject`).
 
 It delivers bit-identical alignment scores, E-values, and coordinates matching NCBI BLAST+ without requiring external C/C++ libraries, BLAST+ installations, or pre-formatted database indices. Built for high portability, LOSAT runs natively on modern operating systems and compiles directly to WebAssembly for client-side, zero-install genomic analyses in web browsers and sandboxed runtimes.

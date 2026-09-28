@@ -18,9 +18,12 @@ test('paste, queue, run, view and export with the fake engine', async ({ page })
   await expect(page.getByTestId('run-1-status')).toHaveText('completed');
   await page.getByTestId('tab-results').click();
   await expect(page.getByTestId('result-command')).toHaveText(
-    'LOSAT tblastx -query query.fa -subject subject.fa',
+    'LOSAT tblastx -query query.fa -subject subject.fa -outfmt 6',
   );
   await page.getByTestId('format-0').click();
+  await expect(page.getByTestId('result-command')).toHaveText(
+    'LOSAT tblastx -query query.fa -subject subject.fa -outfmt 0',
+  );
   await expect(page.getByTestId('result-output')).toContainText('FAKE ENGINE OUTPUT');
 
   const download = page.waitForEvent('download');

@@ -3,7 +3,7 @@ import { computed, ref, watch } from 'vue';
 import type { Coordinator, RunView } from '../application/coordinator';
 import { toShellCommand } from '../domain/argv';
 import { programById } from '../domain/programs';
-import { OUTPUT_FORMATS, type OutputFormat } from '../ports/engine';
+import { OUTPUT_FORMATS, type OutputFormat } from '../domain/output-format';
 
 const props = defineProps<{ coordinator: Coordinator; runs: readonly RunView[] }>();
 const completed = computed(() => props.runs.filter((run) => run.status === 'completed'));
@@ -37,7 +37,7 @@ watch(
       </select>
     </label>
     <p class="command">
-      Command: <code data-testid="result-command">{{ toShellCommand(selected.snapshot.argv) }}</code>
+      Command: <code data-testid="result-command">{{ toShellCommand(selected.snapshot.argv, format) }}</code>
     </p>
     <nav class="tabs" aria-label="Output format">
       <button

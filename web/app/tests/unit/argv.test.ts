@@ -31,9 +31,9 @@ describe('buildArgv', () => {
 });
 
 describe('toShellCommand', () => {
-  it('quotes only the words that need quoting', () => {
-    expect(toShellCommand(['blastn', '-query', 'my query.fa', '-subject', "it's.fa"])).toBe(
-      "LOSAT blastn -query 'my query.fa' -subject 'it'\\''s.fa'",
+  it('quotes only the words that need quoting and always writes -outfmt', () => {
+    expect(toShellCommand(['blastn', '-query', 'my query.fa', '-subject', "it's.fa"], 6)).toBe(
+      "LOSAT blastn -query 'my query.fa' -subject 'it'\\''s.fa' -outfmt 6",
     );
   });
 });

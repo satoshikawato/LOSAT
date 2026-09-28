@@ -1,5 +1,6 @@
 // Search conditions are represented only as a LOSAT CLI argv (plan §5.3). The same argv
 // is validated and run by the engine, shown as the CLI command, and stored in sessions.
+import type { OutputFormat } from './output-format';
 import type { ProgramId } from './programs';
 
 /** Flags that the application manages itself; users cannot set them as parameters. */
@@ -34,9 +35,13 @@ export function buildArgv(input: ArgvInput): readonly string[] {
   return Object.freeze(argv);
 }
 
-/** Renders an argv as a copyable POSIX shell command. */
-export function toShellCommand(argv: readonly string[]): string {
+/**
+ * Renders the CLI command that reproduces one output format of a run, as a copyable
+ * POSIX shell command. `-outfmt` is always written: several programs reject their
+ * CLI default format, so a command without it may not run.
+ */
+export function toShellCommand(argv: readonly string[], outfmt: OutputFormat): string {
   const quote = (word: string) =>
     /^[A-Za-z0-9_@%+=:,./-]+$/.test(word) ? word : `'${word.replaceAll("'", "'\\''")}'`;
-  return ['LOSAT', ...argv].map(quote).join(' ');
+  return ['LOSAT', ...argv, '-outfmt', String(outfmt)].map(quote).join(' ');
 }

@@ -1,6 +1,7 @@
 // FakeEngine: a stand-in for the real engine until the Wasm engine exists (plan §7, W0).
 // Its outputs are not search results and say so on every line. It exists so that the
 // application layer and UI can be built and tested against the EngineGateway contract.
+import { OUTPUT_FORMATS } from '../../domain/output-format';
 import { PROGRAMS, type ProgramId } from '../../domain/programs';
 import {
   RunCancelledError,
@@ -30,7 +31,7 @@ export class FakeEngine implements EngineGateway {
   }
 
   async describe(program: ProgramId): Promise<ProgramDescription> {
-    return { program, parameters: [] };
+    return { program, formats: OUTPUT_FORMATS, parameters: [] };
   }
 
   async validate(argv: readonly string[]): Promise<ValidationResult> {

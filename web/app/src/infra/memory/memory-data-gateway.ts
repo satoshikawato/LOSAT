@@ -1,7 +1,8 @@
 // In-memory DataGateway. It is the Memory implementation of the storage contract
 // (plan §5.6); the OPFS implementation and the Data worker are added in W2.
 import type { DataGateway, ResultSetRef, RunStaging } from '../../ports/data';
-import { OUTPUT_FORMATS, type HspRecord, type OutputFormat } from '../../ports/engine';
+import { OUTPUT_FORMATS, type OutputFormat } from '../../domain/output-format';
+import type { HspRecord } from '../../ports/engine';
 
 interface StoredRun {
   readonly outputs: Record<OutputFormat, Uint8Array[]>;

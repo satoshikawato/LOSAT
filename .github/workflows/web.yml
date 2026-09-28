@@ -4,12 +4,20 @@ on:
   push:
     paths:
       - 'web/**'
-      - 'LOSAT/src/web_api.rs'
+      - 'LOSAT/src/**'
+      - 'LOSAT/build.rs'
+      - 'LOSAT/Cargo.toml'
+      - 'LOSAT/Cargo.lock'
+      - 'LOSAT/.cargo/**'
       - '.github/workflows/web.yml'
   pull_request:
     paths:
       - 'web/**'
-      - 'LOSAT/src/web_api.rs'
+      - 'LOSAT/src/**'
+      - 'LOSAT/build.rs'
+      - 'LOSAT/Cargo.toml'
+      - 'LOSAT/Cargo.lock'
+      - 'LOSAT/.cargo/**'
       - '.github/workflows/web.yml'
 
 jobs:

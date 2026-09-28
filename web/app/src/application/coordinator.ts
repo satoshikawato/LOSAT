@@ -4,6 +4,7 @@
 // Ordering rule for cancel versus commit: a run can be cancelled until it enters
 // `finalizing`; after that, cancel requests are ignored and the run completes.
 import { buildArgv } from '../domain/argv';
+import type { OutputFormat } from '../domain/output-format';
 import type { ProgramId } from '../domain/programs';
 import { isTerminal, type RunRecord, type RunSnapshot, type RunStatus } from '../domain/run';
 import type { DataGateway, ResultSetRef, RunStaging } from '../ports/data';
@@ -12,7 +13,6 @@ import {
   RunCancelledError,
   type EngineGateway,
   type EnginePhase,
-  type OutputFormat,
   type ValidationResult,
 } from '../ports/engine';
 import { Store } from './store';

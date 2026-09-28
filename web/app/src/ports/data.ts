@@ -1,7 +1,8 @@
 // Data port: temporary storage of run outputs (plan §5.6). A run's outputs are staged
 // while it runs and become readable only after `commit`; cancelled or failed runs are
 // discarded.
-import type { HspRecord, OutputFormat, RunSink } from './engine';
+import type { OutputFormat } from '../domain/output-format';
+import type { HspRecord, RunSink } from './engine';
 
 export interface ResultSetRef {
   readonly runId: string;

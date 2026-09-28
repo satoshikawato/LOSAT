@@ -62,7 +62,7 @@ class ManualEngine implements EngineGateway {
   lateFinish?: () => void;
 
   async describe() {
-    return { program: 'blastn' as const, parameters: [] };
+    return { program: 'blastn' as const, formats: [6] as const, parameters: [] };
   }
   async validate(): Promise<ValidationResult> {
     return { ok: true };

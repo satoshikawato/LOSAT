@@ -1,9 +1,7 @@
 // Engine port: the application's only view of the search engine. Implementations live
 // in src/infra; the Wasm implementation follows docs/web/abi_v2.md.
+import type { OutputFormat } from '../domain/output-format';
 import type { ProgramId } from '../domain/programs';
-
-export type OutputFormat = 0 | 6 | 7;
-export const OUTPUT_FORMATS: readonly OutputFormat[] = Object.freeze([0, 6, 7]);
 
 export interface ParameterDescription {
   readonly flag: string;
@@ -15,6 +13,8 @@ export interface ParameterDescription {
 
 export interface ProgramDescription {
   readonly program: ProgramId;
+  /** Output formats the program supports; a run writes exactly these. */
+  readonly formats: readonly OutputFormat[];
   readonly parameters: readonly ParameterDescription[];
 }
 

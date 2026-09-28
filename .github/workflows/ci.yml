@@ -25,6 +25,8 @@ jobs:
       - run: cd LOSAT && cargo fmt --check
       - run: cd LOSAT && cargo clippy --all-targets --all-features -- -D warnings
       - run: cd LOSAT && cargo test --all-features
+        env:
+          LOSAT_BLASTX_WORKER_LOG: ${{ runner.temp }}/blastx-worker.log
       - run: cd LOSAT && cargo build --release
 
   wasm:

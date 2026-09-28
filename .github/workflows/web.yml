@@ -1,0 +1,56 @@
+name: Web
+
+on:
+  push:
+    paths:
+      - 'web/**'
+      - 'LOSAT/src/web_api.rs'
+      - '.github/workflows/web.yml'
+  pull_request:
+    paths:
+      - 'web/**'
+      - 'LOSAT/src/web_api.rs'
+      - '.github/workflows/web.yml'
+
+jobs:
+  app:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: web/app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/app/package-lock.json
+      - run: npm ci
+      - run: npm run check
+      - run: npx playwright install --with-deps chromium
+      - run: npm run e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-results
+          path: web/app/test-results/
+          retention-days: 7
+
+  # The web API tests compile only for wasm32, so the native `cargo test` in ci.yml
+  # never runs them. Run them on wasm32-wasip1 under Node's WASI.
+  engine-web-api:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.92.0
+          targets: wasm32-wasip1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Web API v1 tests on wasm32-wasip1
+        working-directory: LOSAT
+        env:
+          CARGO_TARGET_WASM32_WASIP1_RUNNER: node ${{ github.workspace }}/web/tools/wasi-test-runner.mjs
+        run: cargo test --locked --lib --target wasm32-wasip1 --no-default-features -- web_api::tests

@@ -2464,6 +2464,8 @@ fn write_blastp_tabular_output(
             // NCBI reference: c++/src/objtools/align_format/tabular.cpp:1100-1108
             // ```c
             // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
+            //     if (iter != m_FieldsToShow.begin())
+            //         m_Ostream << m_FieldDelimiter;
             //     x_PrintField(*iter);
             // }
             // m_Ostream << "\n";
@@ -2563,6 +2565,8 @@ fn write_blastp_tabular_hit_lists(
                 // NCBI reference: c++/src/objtools/align_format/tabular.cpp:1100-1108
                 // ```c
                 // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
+                //     if (iter != m_FieldsToShow.begin())
+                //         m_Ostream << m_FieldDelimiter;
                 //     x_PrintField(*iter);
                 // }
                 // m_Ostream << "\n";
@@ -6265,6 +6269,8 @@ fn run_resolved_in_pool(
             // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
             // ```c
             // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
+            //     if (iter != m_FieldsToShow.begin())
+            //         m_Ostream << m_FieldDelimiter;
             //     x_PrintField(*iter);
             // }
             // ```
@@ -6343,8 +6349,11 @@ fn run_resolved_in_pool(
     // ```c
     // CRef<CSearchResultSet> results = m_RmtBlast->GetResultSet();
     // formatter.PrintProlog();
+    // ...
     // ITERATE(CSearchResultSet, result, *results) {
+    //     ...
     //         formatter.PrintOneResultSet(**result, queries);
+    //     ...
     // }
     // ```
     // Each requested format prints the same final result without searching again.

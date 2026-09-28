@@ -59,8 +59,11 @@ fn run(
 // ```c
 // CRef<CSearchResultSet> results = m_RmtBlast->GetResultSet();
 // formatter.PrintProlog();
+// ...
 // ITERATE(CSearchResultSet, result, *results) {
+//     ...
 //         formatter.PrintOneResultSet(**result, queries);
+//     ...
 // }
 // ```
 // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:1443-1451

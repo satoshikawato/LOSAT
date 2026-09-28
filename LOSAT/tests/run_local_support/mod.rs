@@ -3,13 +3,60 @@
 //! every HSP in every format.
 
 use std::io::{self, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use bio::io::fasta;
 use LOSAT::api::local_blast::{FormatObserver, FormatOutput, HspIndex, OutputSink, ReportOutputs};
 use LOSAT::report::PairwiseHit;
+
+/// The sequence of the first record of a FASTA file in `LOSAT/tests/fasta`.
+pub fn fixture_sequence(name: &str) -> Vec<u8> {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fasta")
+        .join(name);
+    read_records(&path)
+        .into_iter()
+        .next()
+        .expect("fixture record")
+        .seq()
+        .to_vec()
+}
+
+/// A temporary FASTA file, removed when dropped.
+pub struct TempFasta(pub PathBuf);
+
+impl TempFasta {
+    /// Writes `records` (id, sequence) with 60 residues per line.
+    pub fn new(name: &str, records: &[(&str, &[u8])]) -> Self {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "losat_run_local_{}_{nanos}_{name}",
+            std::process::id()
+        ));
+        let mut text = Vec::new();
+        for (id, sequence) in records {
+            text.extend_from_slice(format!(">{id}\n").as_bytes());
+            for line in sequence.chunks(60) {
+                text.extend_from_slice(line);
+                text.push(b'\n');
+            }
+        }
+        std::fs::write(&path, text).expect("write temporary FASTA");
+        Self(path)
+    }
+}
+
+impl Drop for TempFasta {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
 
 pub fn read_records(path: &Path) -> Vec<fasta::Record> {
     fasta::Reader::from_file(path)
@@ -136,29 +183,18 @@ pub fn field(row: &[u8], index: usize) -> String {
 // ```c++
 // x_DisplayAlnvecInfo(out, alnvecInfo,showDefLine);
 // ```
-/// Checks the observer ranges of outfmt 0, 6 and 7 (at the given positions of the
-/// request): the outfmt 6 rows are in hit-list order and tile the output; the outfmt 7
-/// rows are its non-comment lines and equal the outfmt 6 rows; each outfmt 0 section is
-/// one score block with the raw score of its HSP; and the same index has the same
-/// coordinates in the hit record and in its outfmt 6 row.
-pub fn assert_observer_ranges(run: &Run, [fmt0, fmt6, fmt7]: [usize; 3], context: &str) {
-    let hits = &run.hits;
-    assert!(!hits.is_empty(), "{context}: the fixture must produce hits");
-
+/// Checks the observer ranges of the tabular formats: the outfmt 6 rows (at position
+/// `fmt6` of the request) are in HSP index order and tile the output, one line each;
+/// with `fmt7`, the outfmt 7 rows are its non-comment lines and equal the outfmt 6 rows.
+/// Returns the number of rows.
+pub fn assert_tabular_ranges(run: &Run, fmt6: usize, fmt7: Option<usize>, context: &str) -> usize {
     let (out6, rows6) = (&run.outputs[fmt6], &run.ranges[fmt6]);
-    assert_eq!(rows6.len(), hits.len(), "{context}: outfmt 6 rows");
     let mut position = 0;
     for (expected_index, &(hsp, start, end)) in rows6.iter().enumerate() {
         assert_eq!(hsp, expected_index, "{context}: outfmt 6 order");
         assert_eq!(start, position, "{context}: outfmt 6 HSP {hsp} start");
         let row = &out6[start..end];
         assert_eq!(row.iter().filter(|&&byte| byte == b'\n').count(), 1);
-        let hit = &hits[hsp].hit;
-        assert_eq!(
-            [6, 7, 8, 9].map(|index| field(row, index)),
-            [hit.q_start, hit.q_end, hit.s_start, hit.s_end].map(|value| value.to_string()),
-            "{context}: outfmt 6 HSP {hsp} coordinates"
-        );
         position = end;
     }
     assert_eq!(
@@ -167,24 +203,57 @@ pub fn assert_observer_ranges(run: &Run, [fmt0, fmt6, fmt7]: [usize; 3], context
         "{context}: outfmt 6 rows tile the output"
     );
 
-    let (out7, rows7) = (&run.outputs[fmt7], &run.ranges[fmt7]);
-    assert_eq!(rows7.len(), hits.len(), "{context}: outfmt 7 rows");
-    for (&(hsp6, s6, e6), &(hsp7, s7, e7)) in rows6.iter().zip(rows7) {
-        assert_eq!(hsp6, hsp7, "{context}: outfmt 7 order");
+    if let Some(fmt7) = fmt7 {
+        let (out7, rows7) = (&run.outputs[fmt7], &run.ranges[fmt7]);
+        assert_eq!(rows7.len(), rows6.len(), "{context}: outfmt 7 rows");
+        for (&(hsp6, s6, e6), &(hsp7, s7, e7)) in rows6.iter().zip(rows7) {
+            assert_eq!(hsp6, hsp7, "{context}: outfmt 7 order");
+            assert_eq!(
+                &out6[s6..e6],
+                &out7[s7..e7],
+                "{context}: outfmt 7 HSP {hsp7}"
+            );
+        }
+        let data_lines = out7
+            .split_inclusive(|&byte| byte == b'\n')
+            .filter(|line| !line.starts_with(b"#"))
+            .count();
+        assert_eq!(data_lines, rows6.len(), "{context}: outfmt 7 data lines");
+    }
+    rows6.len()
+}
+
+/// Checks the observer ranges of outfmt 0, 6 and 7 (at the given positions of the
+/// request) against the hit records: `assert_tabular_ranges`; the same index has the
+/// same coordinates in the hit record and in its outfmt 6 row; and each outfmt 0
+/// section is one score block with the raw score and the query and subject
+/// coordinates of its HSP, inside the report block of its query.
+pub fn assert_observer_ranges(run: &Run, [fmt0, fmt6, fmt7]: [usize; 3], context: &str) {
+    let hits = &run.hits;
+    assert!(!hits.is_empty(), "{context}: the fixture must produce hits");
+    let rows = assert_tabular_ranges(run, fmt6, Some(fmt7), context);
+    assert_eq!(rows, hits.len(), "{context}: outfmt 6 rows");
+    for &(hsp, start, end) in &run.ranges[fmt6] {
+        let hit = &hits[hsp].hit;
+        let row = &run.outputs[fmt6][start..end];
         assert_eq!(
-            &out6[s6..e6],
-            &out7[s7..e7],
-            "{context}: outfmt 7 HSP {hsp7}"
+            [6, 7, 8, 9].map(|index| field(row, index)),
+            [hit.q_start, hit.q_end, hit.s_start, hit.s_end].map(|value| value.to_string()),
+            "{context}: outfmt 6 HSP {hsp} coordinates"
         );
     }
-    let data_lines = out7
-        .split_inclusive(|&byte| byte == b'\n')
-        .filter(|line| !line.starts_with(b"#"))
-        .count();
-    assert_eq!(data_lines, hits.len(), "{context}: outfmt 7 data lines");
 
     let (out0, sections) = (&run.outputs[fmt0], &run.ranges[fmt0]);
     assert_eq!(sections.len(), hits.len(), "{context}: outfmt 0 sections");
+    // Byte offsets of the "Query=" lines that open each query's report block.
+    let query_blocks: Vec<usize> = out0
+        .windows(7)
+        .enumerate()
+        .filter(|&(offset, window)| {
+            window == b"Query= " && (offset == 0 || out0[offset - 1] == b'\n')
+        })
+        .map(|(offset, _)| offset)
+        .collect();
     let mut seen = vec![false; hits.len()];
     for &(hsp, start, end) in sections {
         assert!(
@@ -205,5 +274,52 @@ pub fn assert_observer_ranges(run: &Run, [fmt0, fmt6, fmt7]: [usize; 3], context
             section.contains(&format!("bits ({}),", hits[hsp].hit.raw_score)),
             "{context}: raw score of HSP {hsp}"
         );
+        let hit = &hits[hsp].hit;
+        assert_eq!(
+            alignment_span(section, "Query"),
+            (hit.q_start, hit.q_end),
+            "{context}: query coordinates of HSP {hsp}"
+        );
+        assert_eq!(
+            alignment_span(section, "Sbjct"),
+            (hit.s_start, hit.s_end),
+            "{context}: subject coordinates of HSP {hsp}"
+        );
+        // The section lies in the report block of its own query.
+        let q_idx = hit.q_idx as usize;
+        assert!(
+            query_blocks[q_idx] < start,
+            "{context}: HSP {hsp} before its query block"
+        );
+        if let Some(&next) = query_blocks.get(q_idx + 1) {
+            assert!(end <= next, "{context}: HSP {hsp} after its query block");
+        }
     }
+}
+
+// NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:1970-1973
+// ```c++
+// x_DisplayAlnvecInfo(out, alnvecInfo,showDefLine);
+// ```
+/// The first and last coordinates on the `label` ("Query" or "Sbjct") lines of one
+/// outfmt 0 alignment section.
+fn alignment_span(section: &str, label: &str) -> (usize, usize) {
+    let numbers: Vec<Vec<usize>> = section
+        .lines()
+        .filter(|line| line.starts_with(label))
+        .map(|line| {
+            line.split_whitespace()
+                .filter_map(|word| word.parse().ok())
+                .collect()
+        })
+        .collect();
+    let first = *numbers
+        .first()
+        .and_then(|line| line.first())
+        .expect("first coordinate");
+    let last = *numbers
+        .last()
+        .and_then(|line| line.last())
+        .expect("last coordinate");
+    (first, last)
 }

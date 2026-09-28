@@ -35,7 +35,9 @@ use crate::utils::seg::SegParams;
 // The formatter receives already sorted query hitlists from Stage D.
 // NCBI c++/src/app/blast/blast_formatter.cpp:429-465:
 // ITERATE(CSearchResultSet, result, *results) {
+//     ...
 //         formatter.PrintOneResultSet(**result, queries);
+//     ...
 // }
 // Each requested format prints the same final result without searching again.
 #[allow(clippy::too_many_arguments)]
@@ -220,6 +222,8 @@ fn write_tabular(
                 let evalue = format_evalue_ncbi_tabular(linked.evalue);
                 // NCBI c++/src/objtools/align_format/tabular.cpp:1100-1108:
                 // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
+                //     if (iter != m_FieldsToShow.begin())
+                //         m_Ostream << m_FieldDelimiter;
                 //     x_PrintField(*iter);
                 // }
                 // m_Ostream << "\n";
@@ -275,7 +279,9 @@ mod tests {
     // Compare complete saved formatter bytes after the Stage D local search.
     // NCBI c++/src/app/blast/blast_formatter.cpp:429-465:
     // ITERATE(CSearchResultSet, result, *results) {
+    //     ...
     //         formatter.PrintOneResultSet(**result, queries);
+    //     ...
     // }
     // All three formats are printed from one result.
     #[test]

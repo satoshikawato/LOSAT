@@ -18,6 +18,7 @@ mod run;
 
 // Re-export the main run function
 pub use run::run;
+pub use run::run_local;
 #[cfg(target_arch = "wasm32")]
 pub use run::run_web_pair;
 

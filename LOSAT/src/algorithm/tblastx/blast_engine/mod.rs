@@ -31,6 +31,7 @@ mod run_impl;
 
 // Re-export the main run function
 pub use run_impl::run;
+pub use run_impl::run_local;
 #[cfg(target_arch = "wasm32")]
 pub use run_impl::run_web_pair;
 
@@ -65,10 +66,9 @@ pub(crate) use std::time::{Duration, Instant};
 // // in Seq-aligns.
 // Blast_HSPListSortByEvalue(hsp_list);
 // ```
-pub(crate) use crate::common::{
-    write_output_ncbi_order_evalue_hsp_order, write_output_ncbi_order_evalue_hsp_order_to_writer,
-    Hit,
-};
+pub(crate) use crate::api::local_blast::{FormatProbe, OutputSink, ReportOutputs};
+pub(crate) use crate::blastinput::value_parsers::tblastx_outfmt;
+pub(crate) use crate::common::{write_output_ncbi_order_evalue_hsp_order_to_writer, Hit};
 pub(crate) use crate::config::ScoringMatrix;
 pub(crate) use crate::stats::{lookup_protein_params_ungapped, KarlinParams};
 pub(crate) use crate::utils::genetic_code::GeneticCode;

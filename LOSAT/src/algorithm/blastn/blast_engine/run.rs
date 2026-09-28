@@ -3,6 +3,7 @@
 //! This module contains the main `run()` function that coordinates the BLASTN
 //! search process.
 
+use crate::api::local_blast::{FormatProbe, OutputSink, ReportOutputs};
 use crate::common::GapEditOp;
 use anyhow::{Context, Result};
 use indicatif::{ProgressBar, ProgressStyle};
@@ -75,8 +76,8 @@ use super::super::filtering::{
 };
 use super::super::hsp::{
     get_prelim_hitlist_size, parse_blastn_output_format, sort_hsps_by_score, trim_by_max_hsps,
-    write_output_blastn_hitlists, write_output_blastn_hitlists_to_writer, BlastnHitList, BlastnHsp,
-    BlastnHspList, BlastnOutputFormat,
+    write_output_blastn_hitlists_to_writer, BlastnHitList, BlastnHsp, BlastnHspList,
+    BlastnOutputFormat,
 };
 use super::super::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
 use super::super::lookup::{build_unmasked_ranges, reverse_complement};
@@ -207,40 +208,6 @@ fn calculate_blastn_context_statistics(
 // ```
 const MAX_SUBJECT_OFFSET: i32 = 90000;
 const MAX_TOTAL_GAPS: i32 = 3000;
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:770-782
-// ```c
-// // tabular formatting just prints each alignment in turn
-// if (m_FormatType == CFormattingArgs::eTabular ||
-//     m_FormatType == CFormattingArgs::eTabularWithComments ||
-//     m_FormatType == CFormattingArgs::eCommaSeparatedValues ||
-//     m_FormatType == CFormattingArgs::eCommaSeparatedValuesWithHeader) {
-//   CBlastTabularInfo tabinfo(m_Outfile, m_CustomOutputFormatSpec, kDelim);
-// ```
-enum BlastnOutputTarget<'a> {
-    Path(&'a Option<std::path::PathBuf>),
-    Writer(&'a mut Vec<u8>),
-}
-
-struct BlastnInMemoryRun<'a> {
-    queries: Vec<bio::io::fasta::Record>,
-    subjects: Vec<bio::io::fasta::Record>,
-    output: &'a mut Vec<u8>,
-}
-
-// NCBI reference: c++/src/algo/blast/format/blast_format.cpp:68-96,770-832
-// m_Outfile(ostr)
-// CBlastTabularInfo tabinfo(m_Outfile, m_CustomOutputFormatSpec, kDelim);
-// The caller owns the output stream, independently of the search schedule.
-fn blastn_output_target<'a>(
-    in_memory: &'a mut Option<BlastnInMemoryRun<'_>>,
-    path: &'a Option<std::path::PathBuf>,
-) -> BlastnOutputTarget<'a> {
-    match in_memory {
-        Some(input) => BlastnOutputTarget::Writer(input.output),
-        None => BlastnOutputTarget::Path(path),
-    }
-}
 
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_gapalign.h:54
 // ```c
@@ -4107,11 +4074,11 @@ fn post_process_hits_and_write(
     max_hsps_per_subject: usize,
     subject_besthit: bool,
     query_lengths: &[usize],
-    output_target: BlastnOutputTarget<'_>,
+    outputs: &mut ReportOutputs<'_>,
     verbose: bool,
     query_ids: &[Arc<str>],
     subject_ids: &[Arc<str>],
-    output_format: BlastnOutputFormat,
+    output_formats: &[BlastnOutputFormat],
     query_titles: &[Arc<str>],
     subject_title: &str,
     timing: Option<&BlastnTiming>,
@@ -4243,29 +4210,42 @@ fn post_process_hits_and_write(
     // ```c
     // static int s_EvalueCompareHSPLists(const void* v1, const void* v2) { ... }
     // ```
-    match output_target {
-        BlastnOutputTarget::Path(out_path) => {
-            write_output_blastn_hitlists(
-                &hit_lists,
-                out_path.as_ref(),
-                query_ids,
-                subject_ids,
-                output_format,
-                query_titles,
-                subject_title,
-            )?;
-        }
-        BlastnOutputTarget::Writer(writer) => {
-            write_output_blastn_hitlists_to_writer(
-                &hit_lists,
-                writer,
-                query_ids,
-                subject_ids,
-                output_format,
-                query_titles,
-                subject_title,
-            )?;
-        }
+    // NCBI reference: ncbi-blast/c++/src/app/blast/blast_formatter.cpp:429-465
+    // ```c
+    // CRef<CSearchResultSet> results = m_RmtBlast->GetResultSet();
+    // formatter.PrintProlog();
+    // ...
+    // ITERATE(CSearchResultSet, result, *results) {
+    //     ...
+    //         formatter.PrintOneResultSet(**result, queries);
+    //     ...
+    // }
+    // ```
+    // Each requested format prints the same final result without searching again.
+    let observer = &mut outputs.observer;
+    for (format_index, (format, &output_format)) in
+        outputs.formats.iter_mut().zip(output_formats).enumerate()
+    {
+        let mut probe = observer
+            .as_deref_mut()
+            .map(|observer| FormatProbe::new(observer, format_index));
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:68-93
+        // ```c
+        // CBlastFormat::CBlastFormat(..., CNcbiOstream& outfile, ...)
+        //     : m_FormatType(format_type), ..., m_Outfile(outfile),
+        // ```
+        let mut writer = format.sink.open()?;
+        write_output_blastn_hitlists_to_writer(
+            &hit_lists,
+            &mut writer,
+            query_ids,
+            subject_ids,
+            output_format,
+            query_titles,
+            subject_title,
+            probe.as_mut(),
+        )?;
+        writer.flush()?;
     }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:770-782
@@ -4360,29 +4340,130 @@ pub fn run_web_pair(args: BlastnArgs, query_fasta: &str, subject_fasta: &str) ->
     // ```
     let queries = fasta_records_from_bytes(query_fasta.as_bytes()).context("query FASTA")?;
     let subjects = fasta_records_from_bytes(subject_fasta.as_bytes()).context("subject FASTA")?;
+    // NCBI reference: ncbi-blast/c++/include/algo/blast/api/local_blast.hpp:76-78
+    // ```c
+    // CLocalBlast(CRef<IQueryFactory> query_factory,
+    //             CRef<CBlastOptionsHandle> opts_handle,
+    //             CRef<CLocalDbAdapter> db);
+    // ```
+    // Web ABI v1 runs the same local search as the CLI and keeps the report in memory.
     let mut output = Vec::new();
-    run_internal(
+    let outfmt = args.outfmt.clone();
+    let mut stderr = std::io::stderr();
+    run_local(
         args,
-        Some(BlastnInMemoryRun {
-            queries,
-            subjects,
-            output: &mut output,
-        }),
+        &queries,
+        &subjects,
+        &mut ReportOutputs::single(&outfmt, OutputSink::Writer(&mut output), &mut stderr),
     )?;
     Ok(output)
 }
 
 pub fn run(args: BlastnArgs) -> Result<()> {
-    run_internal(args, None)
+    // NCBI reference: ncbi-blast/c++/src/app/blast/blastn_app.cpp:128-133
+    // ```c
+    // if(RecoverSearchStrategy(args, m_CmdLineArgs)) {
+    // 	m_OptsHndl.Reset(&*m_CmdLineArgs->SetOptionsForSavedStrategy(args));
+    // }
+    // else {
+    // 	m_OptsHndl.Reset(&*m_CmdLineArgs->SetOptions(args));
+    // }
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/app/blast/blastn_app.cpp:199-201
+    // ```c
+    // /*** Get the query sequence(s) ***/
+    // CRef<CQueryOptionsArgs> query_opts =
+    //     m_CmdLineArgs->GetQueryOptionsArgs();
+    // ```
+    // The checks that precede reading the inputs run first, as before; `run_local`
+    // repeats them, which is idempotent.
+    crate::utils::threading::validate_threads(args.num_threads)?;
+    check_blastn_lookup_options(&args, configure_task(&args).effective_word_size)?;
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/blastinput/blast_input_aux.cpp:242-246
+    // ```c
+    // sequences = input->GetAllSeqs(*scope);
+    // ```
+    let (queries, _) = read_queries(&args)?;
+    // An empty query file ends the run before the subject file is read, as before.
+    if queries.is_empty() {
+        return Ok(());
+    }
+    let subjects = read_blastn_fasta_records(&args.subject, "subject")?;
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3478-3480
+    // ```c
+    // else {
+    //     m_OutputStream = &args[kArgOutput].AsOutputFile();
+    // }
+    // ```
+    let outfmt = args.outfmt.clone();
+    let out = args.out.clone();
+    let sink = out.as_deref().map_or(OutputSink::Stdout, OutputSink::File);
+    let mut stderr = std::io::stderr();
+    run_local(
+        args,
+        &queries,
+        &subjects,
+        &mut ReportOutputs::single(&outfmt, sink, &mut stderr),
+    )
 }
 
-// NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
-// TBlastThreads the_threads(GetNumberOfThreads());
-// (*thread)->Run(); (*thread)->Join(&result);
-fn run_internal(args: BlastnArgs, in_memory: Option<BlastnInMemoryRun<'_>>) -> Result<()> {
+// NCBI reference: ncbi-blast/c++/src/app/blast/blast_formatter.cpp:429-465
+// ```c
+// CRef<CSearchResultSet> results = m_RmtBlast->GetResultSet();
+// formatter.PrintProlog();
+// ...
+// ITERATE(CSearchResultSet, result, *results) {
+//     ...
+//         formatter.PrintOneResultSet(**result, queries);
+//     ...
+// }
+// ```
+// NCBI formats one result set without searching again; several requested formats
+// are several CBlastFormat printers over the same result set.
+/// Runs one BLASTN search over already parsed records and writes every requested
+/// output format from the same result (the shared entry of the CLI, web ABI v1 and
+/// v2).
+///
+/// Each requested `-outfmt` is parsed as on the command line, before the search starts.
+/// No BLASTN search option depends on the output formats it supports (6 and 7). The
+/// `-query` and `-subject` values of `args` are used only as display names. The hit
+/// records (`ReportOutputs::hits`) are not produced yet.
+pub fn run_local(
+    args: BlastnArgs,
+    query_records: &[bio::io::fasta::Record],
+    subject_records: &[bio::io::fasta::Record],
+    outputs: &mut ReportOutputs<'_>,
+) -> Result<()> {
+    // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
+    // TBlastThreads the_threads(GetNumberOfThreads());
+    // (*thread)->Run(); (*thread)->Join(&result);
     crate::utils::threading::with_search_pool(args.num_threads, "blastn", |pool| {
-        run_in_pool(args, in_memory, pool)
+        run_in_pool(args, query_records, subject_records, outputs, pool)
     })
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_options.c:1415-1426
+// ```c
+// if (options->db_filter && options->word_size < 16) {
+//    Blast_MessageWrite(blast_msg, eBlastSevError, kBlastMessageNoContext,
+//       "The limit_lookup option can only be used with word size >= 16");
+//    return BLASTERR_OPTION_VALUE_INVALID;
+// }
+// ```
+// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:1495-1501
+// ```c
+// arg_desc.AddDefaultKey(kArgMaxDbWordCount, ...);
+// arg_desc.SetConstraint(kArgMaxDbWordCount,
+//                        new CArgAllowValuesBetween(2, 255, true));
+// ```
+fn check_blastn_lookup_options(args: &BlastnArgs, effective_word_size: usize) -> Result<()> {
+    if args.limit_lookup && effective_word_size < 16 {
+        anyhow::bail!("The limit_lookup option can only be used with word size >= 16");
+    }
+    if args.limit_lookup && args.max_db_word_count < 2 {
+        anyhow::bail!("The max_db_word_count option must be >= 2");
+    }
+    Ok(())
 }
 
 // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
@@ -4390,10 +4471,23 @@ fn run_internal(args: BlastnArgs, in_memory: Option<BlastnInMemoryRun<'_>>) -> R
 // (*thread)->Run(); (*thread)->Join(&result);
 fn run_in_pool(
     args: BlastnArgs,
-    mut in_memory: Option<BlastnInMemoryRun<'_>>,
+    query_records: &[bio::io::fasta::Record],
+    subject_records: &[bio::io::fasta::Record],
+    outputs: &mut ReportOutputs<'_>,
     parallel_pool: &crate::utils::threading::SearchPool<'_>,
 ) -> Result<()> {
-    let output_format = parse_blastn_output_format(&args.outfmt).map_err(anyhow::Error::msg)?;
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2800-2803
+    // ```c
+    // if (args[kArgOutputFormat]) {
+    //     string fmt_choice =
+    //         NStr::TruncateSpaces(args[kArgOutputFormat].AsString());
+    // ```
+    // Each requested output format is parsed exactly as the single CLI `-outfmt` was.
+    let output_formats = outputs
+        .formats
+        .iter()
+        .map(|format| parse_blastn_output_format(format.outfmt).map_err(anyhow::Error::msg))
+        .collect::<Result<Vec<BlastnOutputFormat>>>()?;
 
     // NCBI reference: ncbi-blast/c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
     // ```c
@@ -4489,26 +4583,7 @@ fn run_in_pool(
     // Configure task-specific parameters (initial configuration)
     let mut config = configure_task(&args);
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_options.c:1415-1426
-    // ```c
-    // if (options->db_filter && options->word_size < 16) {
-    //    Blast_MessageWrite(blast_msg, eBlastSevError, kBlastMessageNoContext,
-    //       "The limit_lookup option can only be used with word size >= 16");
-    //    return BLASTERR_OPTION_VALUE_INVALID;
-    // }
-    // ```
-    if args.limit_lookup && config.effective_word_size < 16 {
-        anyhow::bail!("The limit_lookup option can only be used with word size >= 16");
-    }
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:1495-1501
-    // ```c
-    // arg_desc.AddDefaultKey(kArgMaxDbWordCount, ...);
-    // arg_desc.SetConstraint(kArgMaxDbWordCount,
-    //                        new CArgAllowValuesBetween(2, 255, true));
-    // ```
-    if args.limit_lookup && args.max_db_word_count < 2 {
-        anyhow::bail!("The max_db_word_count option must be >= 2");
-    }
+    check_blastn_lookup_options(&args, config.effective_word_size)?;
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:509-513
     // ```c
@@ -4530,23 +4605,19 @@ fn run_in_pool(
     //                  EBlastProgramType prog,
     //                  ...)
     // ```
-    let (queries, query_ids) = if let Some(input) = in_memory.as_mut() {
-        let queries = std::mem::take(&mut input.queries);
-        let query_ids = queries
-            .iter()
-            .map(|record| {
-                record
-                    .id()
-                    .split_whitespace()
-                    .next()
-                    .unwrap_or("unknown")
-                    .to_string()
-            })
-            .collect();
-        (queries, query_ids)
-    } else {
-        read_queries(&args)?
-    };
+    // The search owns its copy of the query records (`prepare_sequence_data`).
+    let queries = query_records.to_vec();
+    let query_ids = queries
+        .iter()
+        .map(|record| {
+            record
+                .id()
+                .split_whitespace()
+                .next()
+                .unwrap_or("unknown")
+                .to_string()
+        })
+        .collect();
     if queries.is_empty() {
         return Ok(());
     }
@@ -4571,7 +4642,6 @@ fn run_in_pool(
     // ```
     // Keep one fetched subject record per oid so metadata, lookup filtering,
     // and search reuse the same subject material instead of reparsing FASTA.
-    let load_subjects = true;
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1401-1427
     // ```c
     // memset((void*) &seq_arg, 0, sizeof(seq_arg));
@@ -4585,14 +4655,7 @@ fn run_in_pool(
     //     }
     // }
     // ```
-    let subject_records: Option<Vec<bio::io::fasta::Record>> =
-        if let Some(input) = in_memory.as_mut() {
-            Some(std::mem::take(&mut input.subjects))
-        } else if load_subjects {
-            Some(read_blastn_fasta_records(&args.subject, "subject")?)
-        } else {
-            None
-        };
+    let subject_records: Option<&[bio::io::fasta::Record]> = Some(subject_records);
     let subject_metadata = if let Some(subjects) = subject_records.as_ref() {
         subject_metadata_from_records(subjects)
     } else {
@@ -10363,11 +10426,11 @@ fn run_in_pool(
                 max_hsps_per_subject,
                 subject_besthit,
                 query_lengths.as_ref(),
-                blastn_output_target(&mut in_memory, &args.out),
+                outputs,
                 verbose,
                 query_ids_arc.as_ref(),
                 subject_ids_arc.as_ref(),
-                output_format,
+                &output_formats,
                 query_titles_arc.as_ref(),
                 subject_title.as_ref(),
                 timing.as_deref(),
@@ -10495,11 +10558,11 @@ fn run_in_pool(
         max_hsps_per_subject,
         subject_besthit,
         query_lengths.as_ref(),
-        blastn_output_target(&mut in_memory, &args.out),
+        outputs,
         args.verbose,
         query_ids_arc.as_ref(),
         subject_ids_arc.as_ref(),
-        output_format,
+        &output_formats,
         query_titles_arc.as_ref(),
         subject_title.as_ref(),
         timing.as_deref(),
@@ -10768,13 +10831,12 @@ mod tests {
                     .unwrap()
             };
             let mut output = Vec::new();
-            run_internal(
+            let mut stderr = std::io::stderr();
+            run_local(
                 options.blastn,
-                Some(BlastnInMemoryRun {
-                    queries: read_records(&query),
-                    subjects: read_records(&subject),
-                    output: &mut output,
-                }),
+                &read_records(&query),
+                &read_records(&subject),
+                &mut ReportOutputs::single("6", OutputSink::Writer(&mut output), &mut stderr),
             )
             .unwrap();
             assert_eq!(output, expected.as_slice(), "n{n}");

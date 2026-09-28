@@ -521,12 +521,6 @@ fn adjust_tblastx_chunk_subject_offsets(hits: &mut [UngappedHit], offset: usize)
     }
 }
 
-struct TblastxInMemoryRun<'a> {
-    queries: Vec<fasta::Record>,
-    subjects: Vec<fasta::Record>,
-    output: &'a mut Vec<u8>,
-}
-
 #[cfg(target_arch = "wasm32")]
 fn fasta_records_from_bytes(bytes: &[u8]) -> Result<Vec<fasta::Record>> {
     // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:486-651
@@ -584,29 +578,145 @@ pub fn run_web_pair(args: TblastxArgs, query_fasta: &str, subject_fasta: &str) -
     // ```
     let queries = fasta_records_from_bytes(query_fasta.as_bytes()).context("query FASTA")?;
     let subjects = fasta_records_from_bytes(subject_fasta.as_bytes()).context("subject FASTA")?;
+    // NCBI reference: ncbi-blast/c++/include/algo/blast/api/local_blast.hpp:76-78
+    // ```c
+    // CLocalBlast(CRef<IQueryFactory> query_factory,
+    //             CRef<CBlastOptionsHandle> opts_handle,
+    //             CRef<CLocalDbAdapter> db);
+    // ```
+    // Web ABI v1 runs the same local search as the CLI and keeps the report in memory.
     let mut output = Vec::new();
-    run_internal(
+    let outfmt = args.outfmt.clone();
+    let mut stderr = std::io::stderr();
+    run_local(
         args,
-        Some(TblastxInMemoryRun {
-            queries,
-            subjects,
-            output: &mut output,
-        }),
+        &queries,
+        &subjects,
+        &mut ReportOutputs::single(&outfmt, OutputSink::Writer(&mut output), &mut stderr),
     )?;
     Ok(output)
 }
 
 pub fn run(args: TblastxArgs) -> Result<()> {
-    run_internal(args, None)
+    // NCBI reference: ncbi-blast/c++/src/app/blast/tblastx_app.cpp:106-111
+    // ```c
+    // if(RecoverSearchStrategy(args, m_CmdLineArgs)) {
+    // 	opts_hndl.Reset(&*m_CmdLineArgs->SetOptionsForSavedStrategy(args));
+    // }
+    // else {
+    // 	opts_hndl.Reset(&*m_CmdLineArgs->SetOptions(args));
+    // }
+    // ```
+    // The thread count is checked before the inputs are read, as before; `run_local`
+    // repeats the check, which is idempotent. Nothing else can fail between reading
+    // the query and reading the subject, so both are read here in the same order.
+    crate::utils::threading::validate_threads(args.num_threads)?;
+    let queries = read_tblastx_fasta_records(&args.query, "query")?;
+    let subjects = read_tblastx_fasta_records(&args.subject, "subject")?;
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3478-3480
+    // ```c
+    // else {
+    //     m_OutputStream = &args[kArgOutput].AsOutputFile();
+    // }
+    // ```
+    let outfmt = args.outfmt.clone();
+    let out = args.out.clone();
+    let sink = out.as_deref().map_or(OutputSink::Stdout, OutputSink::File);
+    let mut stderr = std::io::stderr();
+    run_local(
+        args,
+        &queries,
+        &subjects,
+        &mut ReportOutputs::single(&outfmt, sink, &mut stderr),
+    )
 }
 
-// NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
-// TBlastThreads the_threads(GetNumberOfThreads());
-// (*thread)->Run(); (*thread)->Join(&result);
-fn run_internal(args: TblastxArgs, in_memory: Option<TblastxInMemoryRun<'_>>) -> Result<()> {
+// NCBI reference: ncbi-blast/c++/src/app/blast/blast_formatter.cpp:429-465
+// ```c
+// CRef<CSearchResultSet> results = m_RmtBlast->GetResultSet();
+// formatter.PrintProlog();
+// ...
+// ITERATE(CSearchResultSet, result, *results) {
+//     ...
+//         formatter.PrintOneResultSet(**result, queries);
+//     ...
+// }
+// ```
+// NCBI formats one result set without searching again; several requested formats
+// are several CBlastFormat printers over the same result set.
+/// Runs one TBLASTX search over already parsed records and writes every requested
+/// output format from the same result (the shared entry of the CLI, web ABI v1 and
+/// v2).
+///
+/// Each requested `-outfmt` is validated as on the command line, before the search
+/// starts. The `-query` and `-subject` values of `args` are used only as display names
+/// (TBLASTX's supported format, outfmt 6, shows neither). The hit records
+/// (`ReportOutputs::hits`) are not produced yet.
+pub fn run_local(
+    args: TblastxArgs,
+    query_records: &[fasta::Record],
+    subject_records: &[fasta::Record],
+    outputs: &mut ReportOutputs<'_>,
+) -> Result<()> {
+    // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
+    // TBlastThreads the_threads(GetNumberOfThreads());
+    // (*thread)->Run(); (*thread)->Join(&result);
     crate::utils::threading::with_search_pool(args.num_threads, "tblastx", |pool| {
-        run_in_pool(args, in_memory, pool)
+        run_in_pool(args, query_records, subject_records, outputs, pool)
     })
+}
+
+// NCBI reference: ncbi-blast/c++/src/app/blast/blast_formatter.cpp:429-465
+// ```c
+// ITERATE(CSearchResultSet, result, *results) {
+//     ...
+//         formatter.PrintOneResultSet(**result, queries);
+//     ...
+// }
+// ```
+// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_seqalign.cpp:1574-1577
+// ```c
+// // Sort HSPs with e-values as first priority and scores as
+// // tie-breakers, since that is the order we want to see them in
+// // in Seq-aligns.
+// Blast_HSPListSortByEvalue(hsp_list);
+// ```
+/// Writes the final hits (already filtered by e-value) to every requested format.
+fn write_tblastx_outputs(
+    hits: Vec<Hit>,
+    outputs: &mut ReportOutputs<'_>,
+    query_ids: &[Arc<str>],
+    subject_ids: &[Arc<str>],
+) -> Result<()> {
+    let format_count = outputs.formats.len();
+    let observer = &mut outputs.observer;
+    let mut hits = Some(hits);
+    for (format_index, format) in outputs.formats.iter_mut().enumerate() {
+        let mut probe = observer
+            .as_deref_mut()
+            .map(|observer| FormatProbe::new(observer, format_index));
+        // The writer consumes the hits; every format but the last gets a copy.
+        let format_hits = if format_index + 1 == format_count {
+            hits.take().expect("hits remain for the last format")
+        } else {
+            hits.clone().expect("hits remain for every format")
+        };
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:68-93
+        // ```c
+        // CBlastFormat::CBlastFormat(..., CNcbiOstream& outfile, ...)
+        //     : m_FormatType(format_type), ..., m_Outfile(outfile),
+        // ```
+        let mut writer = format.sink.open()?;
+        write_output_ncbi_order_evalue_hsp_order_to_writer(
+            format_hits,
+            &mut writer,
+            query_ids,
+            subject_ids,
+            probe.as_mut(),
+        )?;
+        writer.flush()?;
+    }
+    Ok(())
 }
 
 // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
@@ -614,9 +724,22 @@ fn run_internal(args: TblastxArgs, in_memory: Option<TblastxInMemoryRun<'_>>) ->
 // (*thread)->Run(); (*thread)->Join(&result);
 fn run_in_pool(
     args: TblastxArgs,
-    mut in_memory: Option<TblastxInMemoryRun<'_>>,
+    query_records: &[fasta::Record],
+    subject_records: &[fasta::Record],
+    outputs: &mut ReportOutputs<'_>,
     parallel_pool: &crate::utils::threading::SearchPool<'_>,
 ) -> Result<()> {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2657-2660
+    // ```c
+    // arg_desc.AddDefaultKey(kArgOutputFormat, "format",
+    //                        kOutputFormatDescription,
+    //                        CArgDescriptions::eString,
+    //                        NStr::IntToString(dft_outfmt));
+    // ```
+    // Each requested output format is validated exactly as the single CLI `-outfmt` was.
+    for format in &outputs.formats {
+        tblastx_outfmt(format.outfmt).map_err(anyhow::Error::msg)?;
+    }
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:575-582
     // ```c
     // score = s_BlastAaExtendTwoHit(matrix, subject, query,
@@ -755,11 +878,7 @@ fn run_in_pool(
     //                  EBlastProgramType prog,
     //                  ...)
     // ```
-    let queries_raw: Vec<fasta::Record> = if let Some(input) = in_memory.as_mut() {
-        std::mem::take(&mut input.queries)
-    } else {
-        read_tblastx_fasta_records(&args.query, "query")?
-    };
+    let queries_raw: &[fasta::Record] = query_records;
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
     // ```c
     // typedef struct BlastHSPList {
@@ -905,11 +1024,7 @@ fn run_in_pool(
     //     }
     // }
     // ```
-    let subjects_raw: Vec<fasta::Record> = if let Some(input) = in_memory.as_mut() {
-        std::mem::take(&mut input.subjects)
-    } else {
-        read_tblastx_fasta_records(&args.subject, "subject")?
-    };
+    let subjects_raw: &[fasta::Record] = subject_records;
     if queries_raw.is_empty() || subjects_raw.is_empty() {
         return Ok(());
     }
@@ -1050,7 +1165,6 @@ fn run_in_pool(
     } else {
         (None, None)
     };
-    let out_path = args.out.clone();
     let evalue_threshold = args.evalue;
 
     // Diagonal array sizing MUST match NCBI's `s_BlastDiagTableNew`:
@@ -1346,30 +1460,16 @@ fn run_in_pool(
         //                       Set to 0 if not applicable */
         // } BlastHSPList;
         // ```
-        let query_ids_out = query_ids.clone();
-        let subject_ids_out = subject_ids.clone();
-        let out_path = out_path.clone();
+        // The collector returns the final hits; they are written after the join, at
+        // the one place that writes every output.
         let rx = rx_opt.take().expect("rx must be available for writer");
-        Some(std::thread::spawn(move || -> Result<()> {
+        Some(std::thread::spawn(move || -> Vec<Hit> {
             let mut all: Vec<Hit> = Vec::new();
             while let Ok(h) = rx.recv() {
                 all.extend(h);
             }
             all.retain(|h| h.e_value <= evalue_threshold);
-            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_seqalign.cpp:1574-1577
-            // ```c
-            // // Sort HSPs with e-values as first priority and scores as
-            // // tie-breakers, since that is the order we want to see them in
-            // // in Seq-aligns.
-            // Blast_HSPListSortByEvalue(hsp_list);
-            // ```
-            write_output_ncbi_order_evalue_hsp_order(
-                all,
-                out_path.as_ref(),
-                &query_ids_out,
-                &subject_ids_out,
-            )?;
-            Ok(())
+            all
         }))
     } else {
         None
@@ -3054,13 +3154,24 @@ fn run_in_pool(
     }
 
     bar.finish();
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_seqalign.cpp:1569-1577
+    // ```c
+    // for (int index = 0; index < hit_list->hsplist_count; index++) {
+    //     BlastHSPList* hsp_list = hit_list->hsplist_array[index];
+    //     if (!hsp_list)
+    //         continue;
+    //     Blast_HSPListSortByEvalue(hsp_list);
+    // }
+    // ```
+    // Each traversal ends with the final hits of the search, filtered by e-value;
+    // they are sorted into NCBI's order and written at one place below.
     #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
-    if let Some(writer) = writer {
-        writer.join().unwrap()?;
-    }
+    let collected_hits: Option<Vec<Hit>> = writer.map(|writer| writer.join().unwrap());
+    #[cfg(not(all(feature = "parallel", not(target_arch = "wasm32"))))]
+    let collected_hits: Option<Vec<Hit>> = None;
     #[cfg(all(feature = "parallel", target_arch = "wasm32", feature = "wasm-threads"))]
-    let wrote_threaded_wasi_direct =
-        if let Some(mut subject_hit_batches) = threaded_wasi_subject_hit_batches {
+    let threaded_wasi_hits: Option<Vec<Hit>> =
+        threaded_wasi_subject_hit_batches.map(|mut subject_hit_batches| {
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1427
             // ```c
             // itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
@@ -3077,76 +3188,20 @@ fn run_in_pool(
                 all.extend(hits);
             }
             all.retain(|h| h.e_value <= evalue_threshold);
-            if let Some(input) = in_memory.as_mut() {
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_seqalign.cpp:1569-1577
-                // ```c
-                // for (int index = 0; index < hit_list->hsplist_count; index++) {
-                //     BlastHSPList* hsp_list = hit_list->hsplist_array[index];
-                //     if (!hsp_list)
-                //         continue;
-                //     Blast_HSPListSortByEvalue(hsp_list);
-                // }
-                // ```
-                write_output_ncbi_order_evalue_hsp_order_to_writer(
-                    all,
-                    input.output,
-                    &query_ids,
-                    &subject_ids,
-                )?;
-            } else {
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3331-3337
-                // ```c
-                // if (hit_list && hit_list->hsplist_count > 1) {
-                //    qsort(hit_list->hsplist_array, hit_list->hsplist_count,
-                //             sizeof(BlastHSPList*), s_EvalueCompareHSPLists);
-                // }
-                // ```
-                write_output_ncbi_order_evalue_hsp_order(
-                    all,
-                    out_path.as_ref(),
-                    &query_ids,
-                    &subject_ids,
-                )?;
-            }
-            true
-        } else {
-            false
-        };
+            all
+        });
     #[cfg(not(all(feature = "parallel", target_arch = "wasm32", feature = "wasm-threads")))]
-    let wrote_threaded_wasi_direct = false;
+    let threaded_wasi_hits: Option<Vec<Hit>> = None;
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_seqalign.cpp:1569-1577
-    // ```c
-    // for (int index = 0; index < hit_list->hsplist_count; index++) {
-    //     BlastHSPList* hsp_list = hit_list->hsplist_array[index];
-    //     if (!hsp_list)
-    //         continue;
-    //     Blast_HSPListSortByEvalue(hsp_list);
-    // }
-    // ```
-    if wrote_threaded_wasi_direct {
-        // Threaded-WASI direct reduction wrote the final NCBI-ordered output above.
+    let final_hits = if let Some(all) = collected_hits.or(threaded_wasi_hits) {
+        Some(all)
     } else if let Some(rx) = rx_opt.take() {
         let mut all: Vec<Hit> = Vec::new();
         for h in rx {
             all.extend(h);
         }
         all.retain(|h| h.e_value <= evalue_threshold);
-        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_seqalign.cpp:1574-1577
-        // ```c
-        // // Sort HSPs with e-values as first priority and scores as
-        // // tie-breakers, since that is the order we want to see them in
-        // // in Seq-aligns.
-        // Blast_HSPListSortByEvalue(hsp_list);
-        // ```
-        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3331-3337
-        // ```c
-        // if (hit_list && hit_list->hsplist_count > 1) {
-        //    qsort(hit_list->hsplist_array, hit_list->hsplist_count,
-        //             sizeof(BlastHSPList*), s_EvalueCompareHSPLists);
-        // }
-        // ```
-        write_output_ncbi_order_evalue_hsp_order(all, out_path.as_ref(), &query_ids, &subject_ids)?;
+        Some(all)
     } else if let Some(state) = single_state {
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1497
         // ```c
@@ -3157,35 +3212,19 @@ fn run_in_pool(
         // ```
         let mut all = state.hits;
         all.retain(|h| h.e_value <= evalue_threshold);
-        if let Some(input) = in_memory.as_mut() {
-            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_seqalign.cpp:1574-1577
-            // ```c
-            // // Sort HSPs with e-values as first priority and scores as
-            // // tie-breakers, since that is the order we want to see them in
-            // // in Seq-aligns.
-            // Blast_HSPListSortByEvalue(hsp_list);
-            // ```
-            write_output_ncbi_order_evalue_hsp_order_to_writer(
-                all,
-                input.output,
-                &query_ids,
-                &subject_ids,
-            )?;
-        } else {
-            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3331-3337
-            // ```c
-            // if (hit_list && hit_list->hsplist_count > 1) {
-            //    qsort(hit_list->hsplist_array, hit_list->hsplist_count,
-            //             sizeof(BlastHSPList*), s_EvalueCompareHSPLists);
-            // }
-            // ```
-            write_output_ncbi_order_evalue_hsp_order(
-                all,
-                out_path.as_ref(),
-                &query_ids,
-                &subject_ids,
-            )?;
-        }
+        Some(all)
+    } else {
+        None
+    };
+    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3331-3337
+    // ```c
+    // if (hit_list && hit_list->hsplist_count > 1) {
+    //    qsort(hit_list->hsplist_array, hit_list->hsplist_count,
+    //             sizeof(BlastHSPList*), s_EvalueCompareHSPLists);
+    // }
+    // ```
+    if let Some(all) = final_hits {
+        write_tblastx_outputs(all, outputs, &query_ids, &subject_ids)?;
     }
     if diag_enabled {
         print_diagnostics_summary(&diagnostics);

@@ -135,8 +135,11 @@ fn cli(inputs: &Inputs, outfmt: &str, extra: &[&str]) -> (Vec<u8>, Vec<u8>) {
 // ```c
 // CRef<CSearchResultSet> results = m_RmtBlast->GetResultSet();
 // formatter.PrintProlog();
+// ...
 // ITERATE(CSearchResultSet, result, *results) {
+//     ...
 //         formatter.PrintOneResultSet(**result, queries);
+//     ...
 // }
 // ```
 #[test]

@@ -15,9 +15,29 @@ use crate::report::PairwiseHit;
 
 // Re-export TBLASTX run function
 pub use crate::algorithm::tblastx::blast_engine::run as run_tblastx;
+// NCBI reference: ncbi-blast/c++/src/app/blast/tblastx_app.cpp:106-111
+// ```c
+// if(RecoverSearchStrategy(args, m_CmdLineArgs)) {
+// 	opts_hndl.Reset(&*m_CmdLineArgs->SetOptionsForSavedStrategy(args));
+// }
+// else {
+// 	opts_hndl.Reset(&*m_CmdLineArgs->SetOptions(args));
+// }
+// ```
+pub use crate::algorithm::tblastx::blast_engine::run_local as run_local_tblastx;
 
 // Re-export BLASTN run function
 pub use crate::algorithm::blastn::blast_engine::run as run_blastn;
+// NCBI reference: ncbi-blast/c++/src/app/blast/blastn_app.cpp:128-133
+// ```c
+// if(RecoverSearchStrategy(args, m_CmdLineArgs)) {
+// 	m_OptsHndl.Reset(&*m_CmdLineArgs->SetOptionsForSavedStrategy(args));
+// }
+// else {
+// 	m_OptsHndl.Reset(&*m_CmdLineArgs->SetOptions(args));
+// }
+// ```
+pub use crate::algorithm::blastn::blast_engine::run_local as run_local_blastn;
 
 // Re-export BLASTP run function
 // NCBI reference: ncbi-blast/c++/src/algo/blast/api/local_blast.cpp:1196-1218
@@ -119,6 +139,8 @@ pub type HspIndex = usize;
 // NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
 // ```c
 // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
+//     if (iter != m_FieldsToShow.begin())
+//         m_Ostream << m_FieldDelimiter;
 //     x_PrintField(*iter);
 // }
 // m_Ostream << "\n";
@@ -211,8 +233,11 @@ impl<'o> FormatProbe<'o> {
 // ```c
 // CRef<CSearchResultSet> results = m_RmtBlast->GetResultSet();
 // formatter.PrintProlog();
+// ...
 // ITERATE(CSearchResultSet, result, *results) {
+//     ...
 //         formatter.PrintOneResultSet(**result, queries);
+//     ...
 // }
 // ```
 // NCBI formats one CSearchResultSet without searching again; several requested formats

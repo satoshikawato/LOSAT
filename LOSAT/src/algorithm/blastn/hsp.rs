@@ -1,9 +1,8 @@
 use std::cmp::Ordering;
-use std::fs::File;
-use std::io::{self, BufWriter, Write};
-use std::path::PathBuf;
+use std::io::{self, Write};
 use std::sync::Arc;
 
+use crate::api::local_blast::{FormatProbe, HspIndex};
 use crate::common::{GapEditOp, Hit};
 use crate::report::{write_hit_fields, OutputConfig};
 
@@ -957,56 +956,6 @@ impl BlastnHitList {
     }
 }
 
-/// Write BLASTN output in NCBI HSP list order without regrouping.
-///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1330-1353
-/// ```c
-/// int ScoreCompareHSPs(const void* h1, const void* h2) {
-///    if (0 == (result = BLAST_CMP(hsp2->score,          hsp1->score)) &&
-///        0 == (result = BLAST_CMP(hsp1->subject.offset, hsp2->subject.offset)) &&
-///        0 == (result = BLAST_CMP(hsp2->subject.end,    hsp1->subject.end)) &&
-///        0 == (result = BLAST_CMP(hsp1->query  .offset, hsp2->query  .offset))) {
-///        result = BLAST_CMP(hsp2->query.end, hsp1->query.end);
-///    }
-/// }
-/// ```
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3077-3106
-/// ```c
-/// static int s_EvalueCompareHSPLists(const void* v1, const void* v2) {
-///    if ((retval = s_EvalueComp(h1->best_evalue, h2->best_evalue)) != 0)
-///       return retval;
-///    if (h1->hsp_array[0]->score > h2->hsp_array[0]->score) return -1;
-///    if (h1->hsp_array[0]->score < h2->hsp_array[0]->score) return 1;
-///    return BLAST_CMP(h2->oid, h1->oid);
-/// }
-/// ```
-pub fn write_output_blastn_hitlists(
-    hit_lists: &[Option<BlastnHitList>],
-    out_path: Option<&PathBuf>,
-    query_ids: &[Arc<str>],
-    subject_ids: &[Arc<str>],
-    output_format: BlastnOutputFormat,
-    query_titles: &[Arc<str>],
-    subject_title: &str,
-) -> io::Result<()> {
-    let stdout = io::stdout();
-    let mut writer: Box<dyn Write> = if let Some(path) = out_path {
-        Box::new(BufWriter::new(File::create(path)?))
-    } else {
-        Box::new(BufWriter::new(stdout.lock()))
-    };
-
-    write_output_blastn_hitlists_to_writer(
-        hit_lists,
-        &mut writer,
-        query_ids,
-        subject_ids,
-        output_format,
-        query_titles,
-        subject_title,
-    )
-}
-
 /// Write BLASTN hit lists to an existing writer.
 ///
 /// NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
@@ -1021,6 +970,7 @@ pub fn write_output_blastn_hitlists(
 ///     m_Ostream << "\n";
 /// }
 /// ```
+#[allow(clippy::too_many_arguments)]
 pub fn write_output_blastn_hitlists_to_writer<W: Write>(
     hit_lists: &[Option<BlastnHitList>],
     writer: &mut W,
@@ -1029,8 +979,16 @@ pub fn write_output_blastn_hitlists_to_writer<W: Write>(
     output_format: BlastnOutputFormat,
     query_titles: &[Arc<str>],
     subject_title: &str,
+    mut probe: Option<&mut FormatProbe<'_>>,
 ) -> io::Result<()> {
     let config = OutputConfig::ncbi_compat();
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:1411
+    // ```c
+    // CBlastFormat::PrintOneResultSet(const blast::CSearchResults& results,
+    // ```
+    // The rows are printed in the order of the final HSP list, so a running count is
+    // each row's HSP index.
+    let mut hsp_index: HspIndex = 0;
 
     for (q_idx, hit_list_opt) in hit_lists.iter().enumerate() {
         if output_format == BlastnOutputFormat::TabularWithComments {
@@ -1112,6 +1070,11 @@ pub fn write_output_blastn_hitlists_to_writer<W: Write>(
                 //     m_Ostream << "\n";
                 // }
                 // ```
+                // One printed row is one HSP; the probe marks it without changing it.
+                if let Some(probe) = probe.as_mut() {
+                    writer.flush()?;
+                    probe.begin(hsp_index);
+                }
                 write_hit_fields(
                     writer,
                     query_id,
@@ -1129,6 +1092,11 @@ pub fn write_output_blastn_hitlists_to_writer<W: Write>(
                     hsp.bit_score,
                     &config,
                 )?;
+                if let Some(probe) = probe.as_mut() {
+                    writer.flush()?;
+                    probe.end(hsp_index);
+                }
+                hsp_index += 1;
             }
         }
     }
@@ -1294,6 +1262,7 @@ mod tests {
             BlastnOutputFormat::TabularWithComments,
             &query_titles,
             "User specified sequence set (Input: subject.fasta)",
+            None,
         )
         .unwrap();
 

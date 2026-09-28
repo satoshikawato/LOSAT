@@ -493,6 +493,17 @@ impl TblastnArgs {
     }
 }
 
+// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:879
+// ```c++
+// opt.SetCompositionBasedStats(compo_mode);
+// ```
+// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:262-263
+// ```c++
+// if (args.Exist(kArgGapOpen) && args[kArgGapOpen]) {
+//     opt.SetGapOpeningCost(args[kArgGapOpen].AsInteger());
+// ```
+// The options handle keeps the composition mode and the scoring choices that the
+// search reads; these are the ones the Stage D port uses.
 /// The search settings that the options select.
 struct SearchSettings {
     composition_mode2: bool,
@@ -505,8 +516,11 @@ struct SearchSettings {
 // NCBI c++/src/app/blast/blast_formatter.cpp:429-465:
 // CRef<CSearchResultSet> results = m_RmtBlast->GetResultSet();
 // formatter.PrintProlog();
+// ...
 // ITERATE(CSearchResultSet, result, *results) {
+//     ...
 //         formatter.PrintOneResultSet(**result, queries);
+//     ...
 // }
 // NCBI formats one result set without searching again; several requested formats
 // are several CBlastFormat printers over the same result set.

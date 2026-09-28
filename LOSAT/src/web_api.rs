@@ -362,10 +362,27 @@ fn parse_tblastx_args(
                 parse_num_threads_arg(next_arg(extra_args, &mut index, flag)?, flag)?;
         } else if let Some(value) = flag.strip_prefix("-num_threads=") {
             args.num_threads = parse_num_threads_arg(value, flag)?;
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2657-2660
+        // ```c
+        // arg_desc.AddDefaultKey(kArgOutputFormat, "format",
+        //                        kOutputFormatDescription,
+        //                        CArgDescriptions::eString,
+        //                        NStr::IntToString(dft_outfmt));
+        // ```
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2800-2803
+        // ```c
+        // if (args[kArgOutputFormat]) {
+        //     string fmt_choice =
+        //         NStr::TruncateSpaces(args[kArgOutputFormat].AsString());
+        // ```
+        // The TBLASTX engine writes only outfmt 6, so the web path applies the same
+        // CLI validator and rejects any other format instead of emitting outfmt 6.
         } else if flag == "-outfmt" {
-            args.outfmt = next_arg(extra_args, &mut index, flag)?.to_string();
+            args.outfmt = crate::blastinput::value_parsers::tblastx_outfmt(next_arg(
+                extra_args, &mut index, flag,
+            )?)?;
         } else if let Some(value) = flag.strip_prefix("-outfmt=") {
-            args.outfmt = value.to_string();
+            args.outfmt = crate::blastinput::value_parsers::tblastx_outfmt(value)?;
         } else if flag == "-evalue" {
             args.evalue = next_arg(extra_args, &mut index, flag)?
                 .parse()
@@ -1031,6 +1048,25 @@ mod tests {
         store.release(first).expect("release existing handle");
         assert!(!store.entries.contains_key(&first));
         assert!(store.release(first).is_err());
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2800-2803
+    // ```c
+    // if (args[kArgOutputFormat]) {
+    //     string fmt_choice =
+    //         NStr::TruncateSpaces(args[kArgOutputFormat].AsString());
+    // ```
+    #[test]
+    fn tblastx_web_args_reject_unimplemented_outfmt() {
+        let parse = |values: &[&str]| {
+            parse_tblastx_args(values, PathBuf::new(), PathBuf::new(), PathBuf::new())
+        };
+
+        assert_eq!(parse(&["-outfmt", "6"]).expect("outfmt 6").outfmt, "6");
+        assert_eq!(parse(&["-outfmt=6"]).expect("outfmt=6").outfmt, "6");
+        assert!(parse(&["-outfmt", "0"]).is_err());
+        assert!(parse(&["-outfmt=7"]).is_err());
+        assert!(parse(&["-outfmt", "6 qseqid sseqid"]).is_err());
     }
 
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1407-1427

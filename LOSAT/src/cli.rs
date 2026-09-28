@@ -38,7 +38,7 @@ pub enum Commands {
     //     arg.Reset(new CProgramDescriptionArgs(kProgram,
     //                                   "Translated Query-Protein Subject BLAST"));
     // ```
-    /// Translated nucleotide query vs protein subject (native serial)
+    /// Translated nucleotide query vs protein subject (local blastx)
     Blastx(blastx::BlastxArgs),
     /// Pairwise nucleotide alignment (megablast [default], blastn)
     Blastn(blastn::BlastnArgs),

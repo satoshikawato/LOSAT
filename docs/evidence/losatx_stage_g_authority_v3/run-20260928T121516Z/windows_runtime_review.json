@@ -1,0 +1,131 @@
+{
+  "approved_m1_registry_sha256": "de0fc2fb0bbc9221d4adf66d5ee5a6ab9a7cab2dd8b3c2d71d93fdcdf78a1466",
+  "declared_paths_not_loaded": {
+    "C:\\Windows\\System32\\bcryptPrimitives.dll": "46c06a0f0323d25a32c2b16da1a4a09e9234d282be7714469b7985bb98031ab6",
+    "C:\\Windows\\System32\\crypt32.dll": "c720af58976a3624dbc5b74ec4e470d8fec8a4645dc06947906c49e929862dc3",
+    "C:\\Windows\\System32\\nsi.dll": "d22f4cc243548dda81e274f95e92433ae8187eddfde39adaaf5996985bb41ef3",
+    "C:\\users\\genom\\github\\losat\\docs\\evidence\\losatx_stage_g_recertification\\run-20260927T152852Z\\official_windows\\package\\ncbi-blast-2.17.0+\\bin\\ncbi-vdb-md.dll": "8aa56408b437224013cad0e48d1f0a5b0bb287bcff32dec0faa295623e31ee5d"
+  },
+  "declared_profile_entries": 23,
+  "extra_path_observation_counts": {
+    "C:\\Windows\\System32\\combase.dll": 691,
+    "C:\\Windows\\System32\\dbgcore.dll": 691,
+    "C:\\Windows\\System32\\dbghelp.dll": 691,
+    "C:\\Windows\\System32\\imm32.dll": 691,
+    "C:\\Windows\\System32\\kernel.appcore.dll": 691,
+    "C:\\Windows\\System32\\oleaut32.dll": 691,
+    "C:\\Windows\\System32\\psapi.dll": 691
+  },
+  "extra_paths": {
+    "C:\\Windows\\System32\\combase.dll": "39a2e2ba1ca6012953c94c10011fff5a18783120a2a34f5b66deb2d374a362c9",
+    "C:\\Windows\\System32\\dbgcore.dll": "af89686bd88030aa0a1d4bdca95e3265b6b8c5bf985f264fd148894844f677e8",
+    "C:\\Windows\\System32\\dbghelp.dll": "cbb0c77b812e09f6ae66f482e8eae94fd2e232bbbc3825d12668f3d2ed97e78e",
+    "C:\\Windows\\System32\\imm32.dll": "7e45f12c1c555e2407c5ca082bd925b34655278fde4dbfac53a0468cc1e77411",
+    "C:\\Windows\\System32\\kernel.appcore.dll": "ed6d62f2555d260547cc94a5cdfe2a6fcb684f18b8e182f78f9e4de224321fc9",
+    "C:\\Windows\\System32\\oleaut32.dll": "e276bb09983606469c50f0f03c9604bbeffd7d669d996526c8c1af89042fbae0",
+    "C:\\Windows\\System32\\psapi.dll": "6c8ebe6621224d11ded0c920873d67b5255fd515e8c4ea803cd587c8232bee5c"
+  },
+  "live_metadata": {
+    "machine": "KAWATO",
+    "observed_utc": "2026-09-28T06:46:38.1857498Z",
+    "os_version": "Microsoft Windows NT 10.0.26200.0",
+    "rows": [
+      {
+        "company": "Microsoft Corporation",
+        "file_version": "10.0.26100.9444 (WinBuild.160101.0800)",
+        "original_filename": "DBGHELP.DLL",
+        "path": "C:\\Windows\\System32\\dbghelp.dll",
+        "product_version": "10.0.26100.9444",
+        "sha256": "cbb0c77b812e09f6ae66f482e8eae94fd2e232bbbc3825d12668f3d2ed97e78e",
+        "signature_status": "Valid",
+        "signer_subject": "CN=Microsoft Windows, O=Microsoft Corporation, L=Redmond, S=Washington, C=US",
+        "signer_thumbprint": "DC91E564D5BC1E3A8E02D6A8508682ABEA8A2443",
+        "size": 2307568
+      },
+      {
+        "company": "Microsoft Corporation",
+        "file_version": "10.0.26100.8875 (WinBuild.160101.0800)",
+        "original_filename": "COMBASE.DLL.MUI",
+        "path": "C:\\Windows\\System32\\combase.dll",
+        "product_version": "10.0.26100.8875",
+        "sha256": "39a2e2ba1ca6012953c94c10011fff5a18783120a2a34f5b66deb2d374a362c9",
+        "signature_status": "Valid",
+        "signer_subject": "CN=Microsoft Windows, O=Microsoft Corporation, L=Redmond, S=Washington, C=US",
+        "signer_thumbprint": "DC91E564D5BC1E3A8E02D6A8508682ABEA8A2443",
+        "size": 3716184
+      },
+      {
+        "company": "Microsoft Corporation",
+        "file_version": "10.0.26100.9278 (WinBuild.160101.0800)",
+        "original_filename": "OLEAUT32.DLL",
+        "path": "C:\\Windows\\System32\\oleaut32.dll",
+        "product_version": "10.0.26100.9278",
+        "sha256": "e276bb09983606469c50f0f03c9604bbeffd7d669d996526c8c1af89042fbae0",
+        "signature_status": "Valid",
+        "signer_subject": "CN=Microsoft Windows, O=Microsoft Corporation, L=Redmond, S=Washington, C=US",
+        "signer_thumbprint": "DC91E564D5BC1E3A8E02D6A8508682ABEA8A2443",
+        "size": 898200
+      },
+      {
+        "company": "Microsoft Corporation",
+        "file_version": "10.0.26100.9444 (WinBuild.160101.0800)",
+        "original_filename": "DBGCORE.DLL",
+        "path": "C:\\Windows\\System32\\dbgcore.dll",
+        "product_version": "10.0.26100.9444",
+        "sha256": "af89686bd88030aa0a1d4bdca95e3265b6b8c5bf985f264fd148894844f677e8",
+        "signature_status": "Valid",
+        "signer_subject": "CN=Microsoft Windows, O=Microsoft Corporation, L=Redmond, S=Washington, C=US",
+        "signer_thumbprint": "BAC13DF18B37E808208A39D3A54CCE975FAC8C1D",
+        "size": 241664
+      },
+      {
+        "company": "Microsoft Corporation",
+        "file_version": "10.0.26100.9278 (WinBuild.160101.0800)",
+        "original_filename": "imm32",
+        "path": "C:\\Windows\\System32\\imm32.dll",
+        "product_version": "10.0.26100.9278",
+        "sha256": "7e45f12c1c555e2407c5ca082bd925b34655278fde4dbfac53a0468cc1e77411",
+        "signature_status": "Valid",
+        "signer_subject": "CN=Microsoft Windows, O=Microsoft Corporation, L=Redmond, S=Washington, C=US",
+        "signer_thumbprint": "DC91E564D5BC1E3A8E02D6A8508682ABEA8A2443",
+        "size": 212288
+      },
+      {
+        "company": "Microsoft Corporation",
+        "file_version": "10.0.26100.8521 (WinBuild.160101.0800)",
+        "original_filename": "PSAPI",
+        "path": "C:\\Windows\\System32\\psapi.dll",
+        "product_version": "10.0.26100.8521",
+        "sha256": "6c8ebe6621224d11ded0c920873d67b5255fd515e8c4ea803cd587c8232bee5c",
+        "signature_status": "Valid",
+        "signer_subject": "CN=Microsoft Windows, O=Microsoft Corporation, L=Redmond, S=Washington, C=US",
+        "signer_thumbprint": "DC91E564D5BC1E3A8E02D6A8508682ABEA8A2443",
+        "size": 42864
+      },
+      {
+        "company": "Microsoft Corporation",
+        "file_version": "10.0.26100.9278 (WinBuild.160101.0800)",
+        "original_filename": "kernel.appcore.dll",
+        "path": "C:\\Windows\\System32\\kernel.appcore.dll",
+        "product_version": "10.0.26100.9278",
+        "sha256": "ed6d62f2555d260547cc94a5cdfe2a6fcb684f18b8e182f78f9e4de224321fc9",
+        "signature_status": "Valid",
+        "signer_subject": "CN=Microsoft Windows, O=Microsoft Corporation, L=Redmond, S=Washington, C=US",
+        "signer_thumbprint": "DC91E564D5BC1E3A8E02D6A8508682ABEA8A2443",
+        "size": 121360
+      }
+    ]
+  },
+  "normalization": "NONE",
+  "observed_distinct_module_paths_including_executable": 27,
+  "observed_profile_rows": 691,
+  "observed_profile_set_count": 1,
+  "package_modules": {
+    "C:\\Users\\genom\\GitHub\\LOSAT\\docs\\evidence\\losatx_stage_g_recertification\\run-20260927T152852Z\\official_windows\\package\\ncbi-blast-2.17.0+\\bin\\nghttp2.dll": "3b4f8fa83d98cbcf7d74c67cddde615950c85dbea0b937ca425b35dd084d596d"
+  },
+  "previous_binding_sha256": "7b5b089bf4d58a9d2522b865d6230435863605f28be029a4006e945fa7ceb6a5",
+  "registration": 0,
+  "review_disposition": "MEASURED_COMPLETE_FOR_THESE_DEBUG_PROCESSES_UNAPPROVED_RUNTIME_PROFILE",
+  "schema": "losatx-windows-debug-runtime-review-v1",
+  "scope": "691 fresh instrumented official Windows BLASTX processes in the frozen provenance run; not retroactive to earlier processes"
+}

@@ -1,0 +1,8 @@
+{
+  "accepted_exact_rows": 853,
+  "legacy_m1_n1_rows_v2_contract": 78,
+  "new_comparison_rows_directly_resolved": 775,
+  "normalization": "NONE",
+  "rejected_changed_or_unknown_contexts": 16,
+  "schema": "losatx-stage-g-authority-v3-lookup-probes-v2"
+}

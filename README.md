@@ -28,7 +28,7 @@ On certified pairwise profiles and fixtures, LOSAT is checked against declared N
 | Program | Supported Tasks | Output Formats (`-outfmt`) | Description |
 |:---|:---|:---|:---|
 | **`blastn`** | `megablast` (default), `blastn` | `6` (tabular), `7` (commented tabular) | Nucleotide vs. nucleotide alignment |
-| **`blastx`** | local `blastx`, native serial | `0` (default), `6`, `7` | Nucleotide query vs. protein subject; [current branch CLI scope](docs/losatx_blastx_native_cli.md) |
+| **`blastx`** | local `blastx`, native and Wasm entry points | `0` (default), `6`, `7` | Nucleotide query vs. protein subject; [CLI scope and release status](docs/losatx_blastx_native_cli.md) |
 | **`blastp`** | `blastp` | `0` (pairwise), `6`, `7` | Protein vs. protein alignment |
 | **`tblastx`** | `tblastx` | `6` | Translated 6-frame nucleotide vs. nucleotide alignment |
 | **`tblastn`** | local `tblastn` | `0`, `6`, `7` | Protein query vs. translated nucleotide subject; [v0.2.0 fixture-scoped contract](docs/release/v0.2.0.md) |
@@ -115,10 +115,11 @@ LOSAT blastx -query transcripts.fna -subject proteins.faa \
   -query_gencode 1 -num_threads 1 -outfmt 6
 ```
 
-The current branch implements native serial BLASTX reporting. See the
-[CLI scope and custom fields](docs/losatx_blastx_native_cli.md). Thread counts
-above one await Session F; BLASTX WASI/Web and performance certification await
-Session G.
+The current branch implements native threaded BLASTX, command-WASI, and the
+Web/reactor entry points. See the [CLI scope and custom fields](docs/losatx_blastx_native_cli.md).
+The v0.2.0 release remains **HOLD**: the required cross-platform, browser,
+negative-case, and authority gates are not fully accepted. Existing finite
+performance measurements do not establish release readiness.
 
 ### 4. Protein vs. Translated Nucleotide (TBLASTN)
 ```bash
@@ -140,7 +141,7 @@ The local TBLASTN path accepts all 27 NCBI `gc.prt` genetic-code IDs, including 
 |:---|:---|:---|:---|
 | `-query <file>` | File path | *(Required)* | Input query sequence file (FASTA) |
 | `-subject <file>` | File path | *(Required)* | Input subject sequence file (FASTA) |
-| `-task <string>` | String | Program default | Task: `megablast` or `blastn` (for `blastn`); `blastp` (for `blastp`); `tblastn` (for `tblastn`) |
+| `-task <string>` | String | Program default | Task: `megablast` or `blastn` (for `blastn`); `blastp` (for `blastp`); `blastx` (for `blastx`); `tblastn` (for `tblastn`) |
 | `-evalue <real>` | Float | `10.0` | Expectation value (E-value) threshold |
 | `-outfmt <int>` | Integer | `6` for tabular examples; `0` for BLASTX/TBLASTN | Output format (`6`=tabular, `7`=commented tabular, `0`=pairwise); availability varies by program |
 | `-num_threads <int>` | Integer | `1` | Number of threads to use |

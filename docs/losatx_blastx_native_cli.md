@@ -1,4 +1,4 @@
-# BLASTX native serial CLI on the current branch
+# BLASTX local CLI on the current branch
 
 ```bash
 LOSAT blastx -query query.fna -subject subject.faa -num_threads 1 -outfmt 0
@@ -38,15 +38,16 @@ a file; `-out -` also uses stdout.
 Each protein subject may contain at most 5,000,000 residues. Longer subjects,
 database searches, stdin FASTA specified with `-query -` or `-subject -`,
 unsupported options/tasks/matrices/gap costs,
-and composition modes 1/3 fail explicitly. Native thread counts above one are
-unimplemented until Session F. BLASTX WASI/Web, parallel execution, pool-specific
-failures, and formal performance measurements remain for F/G. This branch has
-not been published as a BLASTX release. Ordinary native paths such as
+and composition modes 1/3 fail explicitly. Native threads 1/2/4/8 and serial
+and threaded command-WASI and Web/reactor entry points are implemented. Their
+full v0.2.0 acceptance, including browser and pool-failure coverage, remains
+open. Formal performance measurements exist for fixed workloads; they do not
+establish release readiness. The v0.2.0 release remains **HOLD**, and this
+branch has not been published as a BLASTX release. Ordinary native paths such as
 `/dev/stdin` retain the source stream behavior, including pipe EOF, warnings,
 and format-0 header flush before query data.
 
-Session E acceptance requires the public CLI's raw reports, warnings, exits,
-file lifecycle, M1–M7 and applicable native M10 comparisons, current B/C/D and
-shared-program regressions, quality checks, and independent audit. The evidence
-and final acceptance state live in
-`docs/evidence/losatx_stage_e_reporting/run-20260926T143040Z-02aa2d/`.
+Release acceptance requires the public CLI's raw reports, warnings, exits,
+file lifecycle, complete M1–M11 coverage across required targets, current
+shared-program regressions, quality checks, and an independent audit of the
+final binding. The current Session G decision is HARD_FAIL / HOLD.

@@ -1,0 +1,105 @@
+{
+  "files": {
+    "APPROVAL.md": {
+      "sha256": "f2f46b421b04544364e44b9e971caf4ed4456f3a1c757000188ced755263d338",
+      "size": 1416
+    },
+    "AUDIT_REQUEST.md": {
+      "sha256": "9ac28d3d3b3c09cf77e66e452cd0a7de4669f7ab7a0a7f035c3a670d53822f45",
+      "size": 1339
+    },
+    "CARRY_FORWARD.md": {
+      "sha256": "c7c5049c52f92ec5f174cf17c2ed1cc18c5255ca38b0f7831c4b3911cf7203f3",
+      "size": 1777
+    },
+    "GATE_STATUS.md": {
+      "sha256": "93add6a0ecf65f0bfdb5e799018ab5d624e3ac2fac7548d5b42beacae9b167c5",
+      "size": 2867
+    },
+    "REPRODUCE.md": {
+      "sha256": "a1e4ceea1e957206aa1817d57903467791309196f87120282fa7f4c4cc6134af",
+      "size": 3318
+    },
+    "RUNNER_PLAN.md": {
+      "sha256": "f32c3940ffdf1572a5b06a3943d0d9d9d608e4ba876e1a00b06794985aa413dc",
+      "size": 4322
+    },
+    "approved_windows_receipts.tar.gz": {
+      "sha256": "07b925f1fdab2b4e173876eff96e1bb35b32b3ee55844cc37f440cd68e37b506",
+      "size": 8148319
+    },
+    "authority_v3.py": {
+      "sha256": "8ad28fc4122d48f584bfcba921872c338538509738dd23e03b6fea3d8e7fde6d",
+      "size": 9648
+    },
+    "bundle_receipts.py": {
+      "sha256": "9387901e8094967faf998d1d6d61025ad5f70cdcea1b4a1ed7569e1de118a6df",
+      "size": 2842
+    },
+    "comparison.json": {
+      "sha256": "2df55b169330c02b807d483e0bd8d385ae347fb6decc6df6874b470710596eb1",
+      "size": 342785
+    },
+    "coverage_delta.json": {
+      "sha256": "15aa88070159b1c2e0990d20d292a69f1ca7ff49860032890a3aa1bd8c99f156",
+      "size": 443
+    },
+    "final_validator.py": {
+      "sha256": "1a7371d62043918afb8ae2c9f6cb41de36e72c8fdb23a4560e68d7eedb862c06",
+      "size": 6288
+    },
+    "freeze_v3.py": {
+      "sha256": "ec9535463127610a3f89707f606202154c8b3d2cc54dd99bfa5cf50bfe4857b3",
+      "size": 3262
+    },
+    "lookup_probes.json": {
+      "sha256": "802243a06a69c75e0f3bd69023de2aa9e806c6d8cfce6cd30742a209e3d266d1",
+      "size": 253
+    },
+    "lookup_v3.py": {
+      "sha256": "c8445c6135e7fc559eebabfbd099b38ba7c3dace9bbe20814d6b92645561dc12",
+      "size": 5782
+    },
+    "receipt_index.json": {
+      "sha256": "fe898404fa8fa532760602144b70ed088e1220e2a740588ee901f864ece2c092",
+      "size": 796719
+    },
+    "registry.json": {
+      "sha256": "acdb347ff5d896b9647df5dfb62b837488d8020b24ecf5db09cf605c68767533",
+      "size": 5799107
+    },
+    "sakai_authority_continuation.json": {
+      "sha256": "86ff6c32cae1ea355ff3cc2a8e99b283537a5771feaa9794ef287b4d7937c057",
+      "size": 904
+    },
+    "windows_authority_proposal.json": {
+      "sha256": "802965219a96074a34e94968064ae761fd00d5a1c1549ecb5f86010f06fe60dd",
+      "size": 2583069
+    },
+    "windows_authority_replay_addendum.json": {
+      "sha256": "db3f46af526dd0869428d972051e13217a229056006d3666af2aa6840072ed5b",
+      "size": 412290
+    },
+    "windows_m1_n4_authority_proposal.json": {
+      "sha256": "fe706199f0de37e56f52da2ca505433b45663ccabedb8ea90f1efacc1f70683b",
+      "size": 566532
+    },
+    "windows_pr5_oracle_authority_proposal.json": {
+      "sha256": "34b4b8ff348db1c550e3365ad5ea27feb93992b8775a62c1f63568195a33da23",
+      "size": 49077
+    },
+    "windows_pr5_runtime_review.json": {
+      "sha256": "79da9d1105b875d8ccc78640707dda3f1d8ff825d60f8438354f5882c85c2266",
+      "size": 24120
+    },
+    "windows_runtime_review.json": {
+      "sha256": "c353e6cfe6b41c6ac7700548bb221581b8ad682324c5ea7f584fb8f82cf27b21",
+      "size": 7113
+    },
+    "worktrees_prepr.json": {
+      "sha256": "3ee5cf51c9740990144cf236b80afd91b1349533c12dd2a422ed2f8b0b205ae8",
+      "size": 2106
+    }
+  },
+  "schema": "losatx-stage-g-authority-v3-manifest-v1"
+}

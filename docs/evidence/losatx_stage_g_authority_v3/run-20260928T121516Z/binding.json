@@ -1,0 +1,27 @@
+{
+  "approved_sakai_steps_in_new_authority": [
+    11,
+    52,
+    53
+  ],
+  "artifact_integrity": "PENDING_INDEPENDENT_AUDIT",
+  "authority_version": "losatx-stage-g-authority-v3.0.0",
+  "candidate_head_before_pr": "1c131e6027ff7fc0595102f5c0a9fcc5f17b7d56",
+  "candidate_source_closure_sha256": "d5a3dfd3ac00afdf5ac1589f1c4d962ce455370a41d2ba86aeb14a14bd8fc1dd",
+  "comparison_sha256": "2df55b169330c02b807d483e0bd8d385ae347fb6decc6df6874b470710596eb1",
+  "failed_predecessor_binding_sha256": "faa9416b04a8611fdc4ab4fa19699e46787277c00d7ef18986c1c5907cd6a052",
+  "frozen_pr5_gate_a_history": "HARD_FAIL_UNCHANGED",
+  "implementation_acceptance": "HARD_FAIL",
+  "manifest_sha256": "d75de2767f1be8d3619f3d6f9cc8d4494ca26bcf643dce9ba05f50efdb90a623",
+  "new_official_windows_fingerprints_registered": 775,
+  "normalization_used_for_acceptance": false,
+  "portable_receipts_sha256": "07b925f1fdab2b4e173876eff96e1bb35b32b3ee55844cc37f440cd68e37b506",
+  "prior_binding_sha256": "a68d6e657231b20c3251597d9a1238df53df73d9f69c6abd4dcdca5f744f5122",
+  "prior_independent_audit_sha256": "5f912b618e6830f363aa155bce30c4211b27f5231e2468f93686639ccdd5716b",
+  "registry_sha256": "acdb347ff5d896b9647df5dfb62b837488d8020b24ecf5db09cf605c68767533",
+  "release": "HOLD",
+  "schema": "losatx-stage-g-authority-v3-binding-v1",
+  "stale_prose_predecessor_binding_sha256": "38eb06edd0fdbb354b04c610d2f2e735a789c92ef44b60bea2b6986f6a4fabeb",
+  "stale_reproduction_predecessor_binding_sha256": "c92908d0167f2c083771c054fdad707886102c05b467b840f492f0d5f823d49b",
+  "stale_runner_plan_predecessor_binding_sha256": "a9f5f9a0584b8cf6f0d7e8c0134a216962e3e92f5654b4bd8a80e6ae7a4eb6bb"
+}

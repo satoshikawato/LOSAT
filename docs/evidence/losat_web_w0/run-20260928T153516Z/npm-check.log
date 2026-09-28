@@ -1,0 +1,40 @@
+
+> losat-web@0.0.0 check
+> npm run typecheck && npm run lint && npm run test && npm run build
+
+
+> losat-web@0.0.0 typecheck
+> vue-tsc --noEmit
+
+
+> losat-web@0.0.0 lint
+> eslint .
+
+
+> losat-web@0.0.0 test
+> vitest run
+
+
+ RUN  v5.0.2 /mnt/c/Users/genom/GitHub/LOSAT-web-gui/web/app
+
+
+ Test Files  3 passed (3)
+      Tests  19 passed (19)
+   Start at  00:36:04
+   Duration  909ms (transform 65%, import 25%, worker 6%, tests 4%)
+
+
+> losat-web@0.0.0 build
+> vite build
+
+vite v8.3.1 building client environment for production...
+transforming...
+✓ 29 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                  0.39 kB │ gzip:  0.26 kB
+dist/assets/index-CX5DMG9g.css   1.12 kB │ gzip:  0.57 kB
+dist/assets/index-xqVbEKBl.js   77.31 kB │ gzip: 29.87 kB
+
+✓ built in 790ms
+exit=0

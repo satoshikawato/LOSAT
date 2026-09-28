@@ -1,0 +1,48 @@
+{
+  "artifact": "LOSAT.wasm",
+  "rows": [
+    {
+      "outfmt_argument": "6",
+      "extra_args": [],
+      "status": 0,
+      "result_bytes": 1937,
+      "result_sha256": "118fa3a3433f9f5c26a066066c81e0ddd79dc8c584b86605fd6b999ed3346663",
+      "error": ""
+    },
+    {
+      "outfmt_argument": "0",
+      "extra_args": [],
+      "status": -1,
+      "result_bytes": 0,
+      "result_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "error": "unsupported TBLASTX outfmt: only 6 without custom fields is implemented"
+    },
+    {
+      "outfmt_argument": "7",
+      "extra_args": [],
+      "status": -1,
+      "result_bytes": 0,
+      "result_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "error": "unsupported TBLASTX outfmt: only 6 without custom fields is implemented"
+    },
+    {
+      "outfmt_argument": "",
+      "extra_args": [
+        "-outfmt",
+        "0"
+      ],
+      "status": -1,
+      "result_bytes": 0,
+      "result_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "error": "unsupported TBLASTX outfmt: only 6 without custom fields is implemented"
+    },
+    {
+      "outfmt_argument": "6 qseqid",
+      "extra_args": [],
+      "status": -1,
+      "result_bytes": 0,
+      "result_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "error": "unsupported TBLASTX outfmt: only 6 without custom fields is implemented"
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+
+> losat-web@0.0.0 e2e
+> playwright test
+
+
+Running 2 tests using 2 workers
+
+  ✓  1 [chromium] › tests/e2e/smoke.spec.ts:3:1 › the page is cross-origin isolated, so the threaded engine can use shared memory (201ms)
+  ✓  2 [chromium] › tests/e2e/smoke.spec.ts:9:1 › paste, queue, run, view and export with the fake engine (582ms)
+
+  2 passed (7.8s)
+exit=0

@@ -1,0 +1,16 @@
+$ cargo +1.92.0 clippy --all-targets --all-features --locked --target-dir /home/kawato/.cache/losat-web-gui-target/ci-clippy -- -D warnings
+    Checking bio v1.6.0
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 21.30s
+exit 0
+$ cargo +1.92.0 clippy --all-targets --no-default-features --locked --target-dir /home/kawato/.cache/losat-web-gui-target/ci-clippy -- -D warnings
+   Compiling LOSAT v0.2.0 (/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 10.71s
+exit 0
+$ cargo +1.92.0 clippy --all-targets --target wasm32-wasip1 --no-default-features --locked --target-dir /home/kawato/.cache/losat-web-gui-target/ci-clippy -- -D warnings
+    Checking bio v1.6.0
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 21.41s
+exit 0
+$ cargo +1.92.0 clippy --all-targets --target wasm32-wasip1-threads --features wasm-threads --locked --target-dir /home/kawato/.cache/losat-web-gui-target/ci-clippy -- -D warnings
+    Checking bio v1.6.0
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 19.66s
+exit 0

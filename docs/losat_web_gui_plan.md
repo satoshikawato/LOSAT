@@ -1,6 +1,6 @@
 # LOSAT Web GUI 総合実装計画
 
-状態：**S01（W0）、S02（E1a）、S03（E1b）は完了条件を満たした（[W0](evidence/losat_web_w0/README.md)、[E1a](evidence/losat_web_e1a/README.md)、[E1b](evidence/losat_web_e1b/README.md) のゲート記録。E1a と E1b の V-PERF の判断は保守者の確認を求めている）。`PD-LOSAT-WEB-APP-BOUNDARY` は 2026-09-29 に承認された。次は S04。** 作成 2026-09-28、改訂 2026-09-29。
+状態：**S01（W0）から S04（E1c）までは完了条件を満たした（[W0](evidence/losat_web_w0/README.md)、[E1a](evidence/losat_web_e1a/README.md)、[E1b](evidence/losat_web_e1b/README.md)、[E1c](evidence/losat_web_e1c/README.md) のゲート記録。E1a〜E1c の V-PERF の判断と、E1c の CLI の 2 つの振る舞いの差は、保守者の確認を求めている）。`PD-LOSAT-WEB-APP-BOUNDARY` は 2026-09-29 に承認された。次は S05。** 作成 2026-09-28、改訂 2026-09-29。
 
 | 項目 | 内容 |
 |---|---|
@@ -239,14 +239,20 @@ pub struct ReportOutputs<'a> {               // すべて Send（整形はスレ
     pub observer: Option<&'a mut (dyn FormatObserver + Send)>,
 }
 
-// program ごとの入口（S02 で BLASTP、S03 で TBLASTN。S04 以降で他の program に足す）
+// program ごとの入口（S02 で BLASTP、S03 で TBLASTN、S04 で BLASTN と TBLASTX。BLASTX は SX）
 pub fn run_local(args: BlastpArgs, queries: &[fasta::Record], subjects: &[fasta::Record],
                  query_label: &str, subject_label: &str, outputs: &mut ReportOutputs<'_>) -> Result<()>;
 pub fn run_local(args: TblastnArgs, queries: &[fasta::Record], subjects: &[fasta::Record],
                  outputs: &mut ReportOutputs<'_>) -> Result<()>;   // api::local_blast::run_local_tblastn
+pub fn run_local(args: BlastnArgs, queries: &[fasta::Record], subjects: &[fasta::Record],
+                 outputs: &mut ReportOutputs<'_>) -> Result<()>;   // api::local_blast::run_local_blastn
+pub fn run_local(args: TblastxArgs, queries: &[fasta::Record], subjects: &[fasta::Record],
+                 outputs: &mut ReportOutputs<'_>) -> Result<()>;   // api::local_blast::run_local_tblastx
 ```
 
-BLASTP の `query_label` / `subject_label` は v1 のためにある（空なら `-query` / `-subject` の値を使う）。v1 を持たない program の入口は、表示名を `-query` / `-subject` の値からだけ取り、ラベルの引数を持たない。TBLASTN の CLI は、エラーのときに途中までの出力を残さないために、`OutputSink::Writer` でメモリに書き、成功したときだけ stdout / `-out` に書く（以前と同じ）。
+BLASTN と TBLASTX は、S07・S08 で `PairwiseHit` を作るまで `hits` を呼ばない。観測者は outfmt 6/7 の行について知らせる。
+
+BLASTP の `query_label` / `subject_label` は v1 のためにある（空なら `-query` / `-subject` の値を使う）。ほかの program の入口は、表示名を `-query` / `-subject` の値からだけ取り、ラベルの引数を持たない（BLASTN と TBLASTX の v1 はラベルを渡していなかった）。TBLASTN の CLI は、エラーのときに途中までの出力を残さないために、`OutputSink::Writer` でメモリに書き、成功したときだけ stdout / `-out` に書く（以前と同じ）。
 
 program をまたいで振り分ける関数は、それを呼ぶアダプタを作る S05 で足す（使う側の無い振り分けを先に作らない）。
 
@@ -435,7 +441,7 @@ NCBI BLAST+（oracle） ─[既存の認証]─► ネイティブ LOSAT の凍�
 | S01 | **W0** 契約と骨格 | PD、`web/AGENTS.md`、ルートの `AGENTS.md` への範囲の追記、要求トレース表、ABI v2 の下書き、`web/app` の骨格（層、FakeEngine、キューと状態機械、書き出し）、CI `web.yml`、`_headers`。TBLASTX の v1 で outfmt を黙って置き換える不具合の修正 | `npm run check` と `npm run e2e`（FakeEngine の一連の操作、`crossOriginIsolated`）が通る。TBLASTX の修正の単体試験が wasm32-wasip1 で通り、作り直した serial reactor で outfmt 0/7 が拒否される。ゲート記録と `evidence.sha256` がある。**完了（2026-09-29）** |
 | S02 | **E1a** 核の入口：共通部と BLASTP | 最初に全 program の基準を取る。`run_local`、`ReportOutputs`（形式ごとの writer、`diagnostics`、`hits`、observer）、形式ごとのオプション解決と食い違いの検出（TD-4）を作り、BLASTP の CLI・v1 をそこに通す。`docs/web/verification_cells.tsv` を作る | 変更したコードを使う全 program の既存ゲートと Gate A の該当ハッシュが変わらない。v1 の serial / threaded reactor の検査が通る。V-NAT。V-PERF の非退行。独立監査。**完了（2026-09-29）** |
 | S03 | **E1b** 核の入口：TBLASTN | 同じことを TBLASTN に行う | TLOSAN 計画の Stage G のゲートが変わらない。v1 の reactor の検査。V-NAT。V-PERF の非退行。独立監査。**完了（2026-09-29）** |
-| S04 | **E1c** 核の入口：BLASTN と TBLASTX | 同じことを BLASTN と TBLASTX に行う（出力は 6/7 と 6 のまま）。TBLASTX の出力箇所を 1 つにまとめる | 既存のゲートと Gate A のハッシュが変わらない。v1 の reactor の検査。V-NAT。V-PERF の非退行。独立監査 |
+| S04 | **E1c** 核の入口：BLASTN と TBLASTX | 同じことを BLASTN と TBLASTX に行う（出力は 6/7 と 6 のまま）。TBLASTX の出力箇所を 1 つにまとめる | 既存のゲートと Gate A のハッシュが変わらない。v1 の reactor の検査。V-NAT。V-PERF の非退行。独立監査。**完了（2026-09-29）** |
 | S05 | **E1d** アダプタと ABI v2 | `web/adapter` の crate、ABI v2 の確定、2 つの reactor、ビルドの同一性の検査（TD-6）、V-ABI の Node の仕組み、`scan` の性質試験（TD-8） | V-ABI（BLASTP・TBLASTN・BLASTN・TBLASTX の、その時点で対応する全形式 × スレッド 1/2/4）が期待値と一致。同一性の検査が通る |
 | S06 | **E2a-1** BLASTN outfmt 0：権威と fixture | NCBI の呼出し経路（`blast_format.cpp` → `align_format`）の記録。比較する fixture と NCBI の出力の固定 | 経路の対応表、固定した fixture と SHA-256 |
 | S07 | **E2a-2** BLASTN outfmt 0：実装とゲート | 移植、`PairwiseHit` の作成、`run_local` と観測者への接続 | 固定した fixture で NCBI とバイト一致。既存の 6/7 に退行なし。BLASTN の全升目（0/6/7 × スレッド 1/2/4）の V-ABI。独立監査 |

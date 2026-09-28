@@ -1,0 +1,12 @@
+ok blastn native: median 0.084s [0.077, 0.090] -> 0.082s [0.074, 0.159] (x0.983), output same
+ok blastn serial-wasi: median 0.164s [0.152, 0.181] -> 0.164s [0.149, 0.208] (x0.997), output same
+ok blastn threaded-wasi: median 0.465s [0.390, 0.528] -> 0.470s [0.442, 0.521] (x1.012), output same
+ok tblastx native: median 1.001s [0.947, 1.196] -> 0.982s [0.946, 1.057] (x0.982), output same
+ok tblastx serial-wasi: median 1.276s [1.175, 1.457] -> 1.284s [1.191, 1.490] (x1.006), output same
+ok tblastx threaded-wasi: median 1.429s [1.339, 1.483] -> 1.447s [1.343, 1.500] (x1.012), output same
+ok blastn-large native: median 0.791s [0.762, 0.841] -> 0.787s [0.770, 0.802] (x0.994), output same
+ok blastn-large serial-wasi: median 1.058s [1.032, 1.115] -> 1.077s [1.049, 1.117] (x1.018), output same
+ok blastn-large threaded-wasi: median 1.222s [1.180, 1.272] -> 1.228s [1.189, 1.280] (x1.005), output same
+ok blastn-large-fmt7 native: median 0.918s [0.769, 2.305] -> 0.834s [0.786, 2.064] (x0.909), output same
+ok blastn-large-fmt7 serial-wasi: median 1.157s [1.072, 1.276] -> 1.116s [1.078, 1.374] (x0.965), output same
+ok blastn-large-fmt7 threaded-wasi: median 1.229s [1.195, 1.277] -> 1.246s [1.205, 1.331] (x1.013), output same

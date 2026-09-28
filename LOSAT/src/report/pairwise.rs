@@ -5,6 +5,7 @@
 //! Reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp
 
 use super::outfmt6::{format_bitscore_ncbi, format_evalue_ncbi, ReportContext};
+use crate::api::local_blast::{FormatProbe, HspIndex};
 use crate::common::Hit;
 use crate::config::ScoringMatrix;
 use crate::stats::{BlastGumbelBlk, KarlinParams};
@@ -1287,6 +1288,7 @@ pub fn write_blastp_pairwise_report<W: Write>(
     queries: &[BlastpPairwiseQuery],
     subject_ids: &[Arc<str>],
     report: &BlastpPairwiseReport,
+    mut probe: Option<&mut FormatProbe<'_>>,
 ) -> io::Result<()> {
     let mut buffered = io::BufWriter::new(writer);
     let writer = &mut buffered;
@@ -1299,10 +1301,16 @@ pub fn write_blastp_pairwise_report<W: Write>(
         report.database_total_letters,
     )?;
 
-    let mut hits_by_query: Vec<Vec<&PairwiseHit>> = vec![Vec::new(); queries.len()];
-    for hit in hits {
+    // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:1411
+    // ```c++
+    // CBlastFormat::PrintOneResultSet(const blast::CSearchResults& results,
+    // ```
+    // Each hit keeps its index in `hits` (the final result order), which identifies it
+    // to the probe.
+    let mut hits_by_query: Vec<Vec<(HspIndex, &PairwiseHit)>> = vec![Vec::new(); queries.len()];
+    for (hsp_index, hit) in hits.iter().enumerate() {
         if let Some(bucket) = hits_by_query.get_mut(hit.hit.q_idx as usize) {
-            bucket.push(hit);
+            bucket.push((hsp_index, hit));
         }
     }
 
@@ -1323,13 +1331,18 @@ pub fn write_blastp_pairwise_report<W: Write>(
 
         use std::collections::HashMap;
         let mut subject_hits: HashMap<u32, Vec<&PairwiseHit>> = HashMap::new();
+        let mut subject_hit_indices: HashMap<u32, Vec<HspIndex>> = HashMap::new();
         let mut subject_order: Vec<u32> = Vec::new();
-        for hit in query_hits {
+        for &(hsp_index, hit) in query_hits {
             let s_idx = hit.hit.s_idx;
             if !subject_hits.contains_key(&s_idx) {
                 subject_order.push(s_idx);
             }
-            subject_hits.entry(s_idx).or_default().push(*hit);
+            subject_hits.entry(s_idx).or_default().push(hit);
+            subject_hit_indices
+                .entry(s_idx)
+                .or_default()
+                .push(hsp_index);
         }
 
         write_subject_summary_table(writer, &subject_order, &subject_hits, subject_ids)?;
@@ -1354,9 +1367,26 @@ pub fn write_blastp_pairwise_report<W: Write>(
                 first_hit.subject_title.as_deref(),
                 first_hit.subject_length,
             )?;
-            for hit in shits {
+            // NCBI reference: c++/src/objtools/align_format/showalign.cpp:1970-1973
+            // ```c++
+            // subid=&(avRef->GetSeqId(1));
+            // bool showDefLine = previousId.Empty() || !subid->Match(*previousId);
+            // x_DisplayAlnvecInfo(out, alnvecInfo,showDefLine);
+            // ```
+            // The subject defline above is the part of the first x_DisplayAlnvecInfo call
+            // that precedes the HSP; the probe marks the rest of each call (the score
+            // block and the alignment) without changing the written bytes.
+            for (hit, &hsp_index) in shits.iter().zip(&subject_hit_indices[&s_idx]) {
+                if let Some(probe) = probe.as_mut() {
+                    writer.flush()?;
+                    probe.begin(hsp_index);
+                }
                 write_hsp_info(writer, hit, config)?;
                 write_alignment(writer, hit, config)?;
+                if let Some(probe) = probe.as_mut() {
+                    writer.flush()?;
+                    probe.end(hsp_index);
+                }
             }
         }
 

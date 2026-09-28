@@ -33,6 +33,7 @@ use crate::algorithm::tblastx::lookup::prepare_blosum62_lookup_query_for_word_si
 use crate::algorithm::tblastx::lookup::{build_ncbi_lookup, BlastAaLookupTable, QueryContext};
 use crate::algorithm::tblastx::ncbi_cutoffs::{gap_trigger_raw_score, x_drop_raw_score};
 use crate::algorithm::tblastx::translation::QueryFrame;
+use crate::api::local_blast::{FormatProbe, OutputSink, ReportOutputs};
 use crate::common::Hit;
 use crate::config::ScoringMatrix;
 use crate::core::blast_stat::compute_blosum62_ideal_karlin_params;
@@ -2422,26 +2423,6 @@ fn write_blastp_hsp_tabular_field<W: Write>(
     }
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:68-93
-// ```c
-// CBlastFormat::CBlastFormat(..., CNcbiOstream& outfile, ...)
-//     : m_FormatType(format_type), ..., m_Outfile(outfile),
-//       m_NumSummary(num_summary), ...
-// ```
-fn open_output_writer<'a>(
-    out_path: Option<&PathBuf>,
-    in_memory_output: Option<&'a mut Vec<u8>>,
-) -> Result<Box<dyn Write + 'a>> {
-    let stdout = std::io::stdout();
-    Ok(if let Some(output) = in_memory_output {
-        Box::new(BufWriter::new(output))
-    } else if let Some(path) = out_path {
-        Box::new(BufWriter::new(File::create(path)?))
-    } else {
-        Box::new(BufWriter::new(stdout))
-    })
-}
-
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
 // ```c
 // void CBlastTabularInfo::Print()
@@ -2463,6 +2444,7 @@ fn write_blastp_tabular_output(
     query_headers: &[String],
     subject_ids: &[Arc<str>],
     context: &ReportContext,
+    mut probe: Option<&mut FormatProbe<'_>>,
 ) -> Result<()> {
     // NCBI reference: c++/src/objtools/align_format/tabular.cpp:1264-1283,1322-1325
     // PrintHeader(..., const CBioseq& bioseq, ..., const CSeq_align_set* align_set, ...);
@@ -2478,7 +2460,19 @@ fn write_blastp_tabular_output(
             query_context.query_name = Some(query_header.clone());
             write_blastp_outfmt7_header(writer, &query_context, fields, end - start)?;
         }
-        for hit in &hits[start..end] {
+        for (hsp_index, hit) in hits.iter().enumerate().take(end).skip(start) {
+            // NCBI reference: c++/src/objtools/align_format/tabular.cpp:1100-1108
+            // ```c
+            // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
+            //     x_PrintField(*iter);
+            // }
+            // m_Ostream << "\n";
+            // ```
+            // One row per HSP; the probe marks the row without changing its bytes.
+            if let Some(probe) = probe.as_mut() {
+                writer.flush()?;
+                probe.begin(hsp_index);
+            }
             let (query_id, subject_id) = hit.hit.resolve_ids(query_ids, subject_ids);
             for (index, field) in fields.iter().enumerate() {
                 if index > 0 {
@@ -2488,6 +2482,10 @@ fn write_blastp_tabular_output(
                 writer.write_all(value.as_bytes())?;
             }
             writer.write_all(b"\n")?;
+            if let Some(probe) = probe.as_mut() {
+                writer.flush()?;
+                probe.end(hsp_index);
+            }
         }
         start = end;
     }
@@ -2537,9 +2535,12 @@ fn write_blastp_tabular_hit_lists(
     subject_ids: &[Arc<str>],
     subjects: &[EncodedProtein],
     context: &ReportContext,
+    mut probe: Option<&mut FormatProbe<'_>>,
 ) -> Result<()> {
     let config = OutputConfig::ncbi_compat();
     let use_default_fields = fields == default_blastp_tabular_fields();
+    // Index of the next HSP in the final hit list (collect_hits_from_hit_lists order).
+    let mut hsp_index = 0;
     // NCBI reference: c++/src/objtools/align_format/tabular.cpp:1264-1283,1322-1325
     // PrintHeader(..., const CBioseq& bioseq, ..., const CSeq_align_set* align_set, ...);
     // m_Ostream << "# BLAST processed " << num_queries << " queries\n";
@@ -2559,6 +2560,18 @@ fn write_blastp_tabular_hit_lists(
         };
         for hsp_list in hit_list.hsplist_array.iter().take(hit_list.hsplist_count) {
             for hsp in &hsp_list.hsps {
+                // NCBI reference: c++/src/objtools/align_format/tabular.cpp:1100-1108
+                // ```c
+                // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
+                //     x_PrintField(*iter);
+                // }
+                // m_Ostream << "\n";
+                // ```
+                // One row per HSP; the probe marks the row without changing its bytes.
+                if let Some(probe) = probe.as_mut() {
+                    writer.flush()?;
+                    probe.begin(hsp_index);
+                }
                 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
                 // ```c
                 // typedef struct BlastHSPList {
@@ -2592,26 +2605,16 @@ fn write_blastp_tabular_hit_lists(
                         hsp.bit_score,
                         &config,
                     )?;
-                    continue;
-                }
-                let subject_length = subjects
-                    .get(hsp.s_idx as usize)
-                    .map(|subject| subject.aa_len)
-                    .unwrap_or_default();
-                for (index, field) in fields.iter().enumerate() {
-                    if index > 0 {
-                        writer.write_all(b"\t")?;
-                    }
-                    write_blastp_hsp_tabular_field(
-                        writer,
-                        *field,
-                        hsp,
-                        query_id,
-                        subject_id,
-                        subject_length,
+                } else {
+                    write_blastp_hsp_tabular_row(
+                        writer, fields, hsp, query_id, subject_id, subjects,
                     )?;
                 }
-                writer.write_all(b"\n")?;
+                if let Some(probe) = probe.as_mut() {
+                    writer.flush()?;
+                    probe.end(hsp_index);
+                }
+                hsp_index += 1;
             }
         }
     }
@@ -2619,6 +2622,37 @@ fn write_blastp_tabular_hit_lists(
     if outfmt == OutputFormat::TabularWithComments {
         writeln!(writer, "# BLAST processed {} queries", query_headers.len())?;
     }
+    Ok(())
+}
+
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
+// ```c
+// ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
+//     if (iter != m_FieldsToShow.begin())
+//         m_Ostream << m_FieldDelimiter;
+//     x_PrintField(*iter);
+// }
+// m_Ostream << "\n";
+// ```
+fn write_blastp_hsp_tabular_row(
+    writer: &mut impl Write,
+    fields: &[BlastpTabularField],
+    hsp: &BlastpHsp,
+    query_id: &str,
+    subject_id: &str,
+    subjects: &[EncodedProtein],
+) -> Result<()> {
+    let subject_length = subjects
+        .get(hsp.s_idx as usize)
+        .map(|subject| subject.aa_len)
+        .unwrap_or_default();
+    for (index, field) in fields.iter().enumerate() {
+        if index > 0 {
+            writer.write_all(b"\t")?;
+        }
+        write_blastp_hsp_tabular_field(writer, *field, hsp, query_id, subject_id, subject_length)?;
+    }
+    writer.write_all(b"\n")?;
     Ok(())
 }
 
@@ -3955,21 +3989,48 @@ pub fn run_web_pair_records(
     //     }
     // }
     // ```
+    // NCBI reference: ncbi-blast/c++/include/algo/blast/api/local_blast.hpp:76-78
+    // ```c
+    // CLocalBlast(CRef<IQueryFactory> query_factory,
+    //             CRef<CBlastOptionsHandle> opts_handle,
+    //             CRef<CLocalDbAdapter> db);
+    // ```
+    // Web ABI v1 runs the same local search as the CLI and keeps the report in memory.
     let mut output = Vec::new();
-    run_internal_with_records(
+    let outfmt = args.outfmt.clone();
+    let mut stderr = std::io::stderr();
+    let mut outputs = ReportOutputs::single(&outfmt, OutputSink::Writer(&mut output), &mut stderr);
+    run_local(
         args,
         query_records,
         subject_records,
         query_label,
         subject_label,
-        Some(&mut output),
+        &mut outputs,
     )?;
     Ok(output)
 }
 
 pub fn run(args: BlastpArgs) -> Result<()> {
-    let args = args.resolve()?;
-    validate_requested_blastp_support(&args)?;
+    // NCBI reference: ncbi-blast/c++/src/app/blast/blastp_app.cpp:128-133
+    // ```c
+    // if(RecoverSearchStrategy(args, m_CmdLineArgs)) {
+    // 	m_OptsHndl.Reset(&*m_CmdLineArgs->SetOptionsForSavedStrategy(args));
+    // }
+    // else {
+    // 	m_OptsHndl.Reset(&*m_CmdLineArgs->SetOptions(args));
+    // }
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/app/blast/blastp_app.cpp:201-203
+    // ```c
+    // /*** Get the query sequence(s) ***/
+    // CRef<CQueryOptionsArgs> query_opts =
+    //     m_CmdLineArgs->GetQueryOptionsArgs();
+    // ```
+    // The options are resolved and checked before the inputs are read, as before;
+    // `run_local` repeats both steps, which is idempotent.
+    let resolved = args.clone().resolve()?;
+    validate_requested_blastp_support(&resolved)?;
 
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:518-543
     // ```c
@@ -3980,41 +4041,106 @@ pub fn run(args: BlastpArgs) -> Result<()> {
     //     }
     // }
     // ```
-    let query_records: Vec<fasta::Record> = fasta::Reader::from_file(&args.query)
-        .with_context(|| format!("failed to open query FASTA {}", args.query.display()))?
+    let query_records: Vec<fasta::Record> = fasta::Reader::from_file(&resolved.query)
+        .with_context(|| format!("failed to open query FASTA {}", resolved.query.display()))?
         .records()
         .collect::<std::result::Result<Vec<_>, _>>()
-        .with_context(|| format!("failed to read query FASTA {}", args.query.display()))?;
+        .with_context(|| format!("failed to read query FASTA {}", resolved.query.display()))?;
 
-    let subject_records: Vec<fasta::Record> = fasta::Reader::from_file(&args.subject)
-        .with_context(|| format!("failed to open subject FASTA {}", args.subject.display()))?
+    let subject_records: Vec<fasta::Record> = fasta::Reader::from_file(&resolved.subject)
+        .with_context(|| {
+            format!(
+                "failed to open subject FASTA {}",
+                resolved.subject.display()
+            )
+        })?
         .records()
         .collect::<std::result::Result<Vec<_>, _>>()
-        .with_context(|| format!("failed to read subject FASTA {}", args.subject.display()))?;
+        .with_context(|| {
+            format!(
+                "failed to read subject FASTA {}",
+                resolved.subject.display()
+            )
+        })?;
 
-    run_resolved_with_records(args, &query_records, &subject_records, "", "", None)
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3441-3443
+    // ```c
+    // arg_desc.AddDefaultKey(kArgOutput, "output_file",
+    //                "Output file name",
+    //                CArgDescriptions::eOutputFile, "-");
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3478-3480
+    // ```c
+    // else {
+    //     m_OutputStream = &args[kArgOutput].AsOutputFile();
+    // }
+    // ```
+    let outfmt = args.outfmt.clone();
+    let sink = resolved
+        .out
+        .as_deref()
+        .map_or(OutputSink::Stdout, OutputSink::File);
+    let mut stderr = std::io::stderr();
+    let mut outputs = ReportOutputs::single(&outfmt, sink, &mut stderr);
+    run_local(args, &query_records, &subject_records, "", "", &mut outputs)
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1348-1361
+// NCBI reference: ncbi-blast/c++/src/app/blast/blastp_app.cpp:195-295
 // ```c
-// BlastCoreAuxStruct* aux_struct = NULL;
-// BlastHSPList* hsp_list = NULL;
-// BlastSeqSrcGetSeqArg seq_arg;
-// Int2 status = 0;
-// Int8 db_length = 0;
-// ...
-// BlastSeqSrcIterator* itr;
+// InitializeSubject(db_args, m_OptsHndl, m_CmdLineArgs->ExecuteRemotely(),
+//                  db_adapter, scope);
+// CBlastFormat formatter(opt, *db_adapter,
+//                        fmt_args->GetFormattedOutputChoice(), ...);
+// for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
+//         CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
+//         results = lcl_blast.Run();
+//         ITERATE(CSearchResultSet, result, *results) {
+//             formatter.PrintOneResultSet(**result, query_batch);
+//         }
+// }
 // ```
-#[cfg(target_arch = "wasm32")]
-fn run_internal_with_records(
+// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2894-2978
+// ```c
+// int hitlist_size = opt.GetHitlistSize();
+// if(m_OutputFormat <= eFlatQueryAnchoredNoIdentities) {
+//      m_NumDescriptions = m_DfltNumDescriptions;
+//      m_NumAlignments = m_DfltNumAlignments;
+//      ...
+//      if (args.Exist(kArgMaxTargetSequences) && args[kArgMaxTargetSequences]) {
+//         m_NumDescriptions = args[kArgMaxTargetSequences].AsInteger();
+//         m_NumAlignments = args[kArgMaxTargetSequences].AsInteger();
+//         hitlist_size = m_NumAlignments;
+//      }
+//      if ((args.Exist(kArgNumDescriptions) && args[kArgNumDescriptions]) ||
+//          (args.Exist(kArgNumAlignments) && args[kArgNumAlignments])) {
+//         hitlist_size = max(m_NumDescriptions, m_NumAlignments);
+//      }
+// } else {
+//      if (args.Exist(kArgMaxTargetSequences) && args[kArgMaxTargetSequences]) {
+//         hitlist_size = args[kArgMaxTargetSequences].AsInteger();
+//      }
+//      else if (args.Exist(kArgNumAlignments) && args[kArgNumAlignments]) {
+//         hitlist_size = args[kArgNumAlignments].AsInteger();
+//      }
+// }
+// opt.SetHitlistSize(hitlist_size);
+// ```
+/// Runs one BLASTP search over already parsed records and writes every requested output
+/// format from the same result (the shared entry of the CLI, web ABI v1 and v2).
+///
+/// Each requested `-outfmt` is parsed as on the command line, before the search starts.
+/// The search options are resolved once per format and must not differ between formats:
+/// NCBI derives the hitlist size from the output format only through `-num_descriptions`
+/// and `-num_alignments`, which BLASTP does not accept, so a difference is an error here.
+pub fn run_local(
     args: BlastpArgs,
     query_records: &[fasta::Record],
     subject_records: &[fasta::Record],
     query_label: &str,
     subject_label: &str,
-    in_memory_output: Option<&mut Vec<u8>>,
+    outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
-    let args = args.resolve()?;
+    let args = resolve_for_formats(&args, outputs)?;
     validate_requested_blastp_support(&args)?;
     run_resolved_with_records(
         args,
@@ -4022,8 +4148,42 @@ fn run_internal_with_records(
         subject_records,
         query_label,
         subject_label,
-        in_memory_output,
+        outputs,
     )
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2894-2978
+// ```c
+// int hitlist_size = opt.GetHitlistSize();
+// ...
+// opt.SetHitlistSize(hitlist_size);
+// ```
+fn resolve_for_formats(
+    args: &BlastpArgs,
+    outputs: &ReportOutputs<'_>,
+) -> Result<ResolvedBlastpArgs> {
+    // Each format is parsed later, inside the search pool, as web ABI v1 always did; the
+    // CLI has already validated its single `-outfmt` while parsing the command line.
+    let mut resolved_formats = Vec::with_capacity(outputs.formats.len());
+    for format in &outputs.formats {
+        let mut requested = args.clone();
+        requested.outfmt = format.outfmt.to_string();
+        resolved_formats.push(requested.resolve()?);
+    }
+    let search_options = |resolved: &ResolvedBlastpArgs| {
+        let mut options = resolved.clone();
+        options.outfmt.clear();
+        format!("{options:?}")
+    };
+    let mut resolved_formats = resolved_formats.into_iter();
+    let first = resolved_formats
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("no output format was requested"))?;
+    let first_options = search_options(&first);
+    if resolved_formats.any(|resolved| search_options(&resolved) != first_options) {
+        bail!("the requested output formats resolve to different search options");
+    }
+    Ok(first)
 }
 
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:606-617
@@ -4049,7 +4209,7 @@ fn run_resolved_with_records(
     subject_records: &[fasta::Record],
     _query_label: &str,
     subject_label: &str,
-    in_memory_output: Option<&mut Vec<u8>>,
+    outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
     crate::utils::threading::with_search_pool(args.num_threads, "blastp", |pool| {
         run_resolved_in_pool(
@@ -4058,7 +4218,7 @@ fn run_resolved_with_records(
             subject_records,
             _query_label,
             subject_label,
-            in_memory_output,
+            outputs,
             pool,
         )
     })
@@ -4073,7 +4233,7 @@ fn run_resolved_in_pool(
     subject_records: &[fasta::Record],
     _query_label: &str,
     subject_label: &str,
-    mut in_memory_output: Option<&mut Vec<u8>>,
+    outputs: &mut ReportOutputs<'_>,
     blastp_parallel_pool: &crate::utils::threading::SearchPool<'_>,
 ) -> Result<()> {
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1633-1681
@@ -4119,14 +4279,31 @@ fn run_resolved_in_pool(
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
     let blastp_num_threads = blastp_parallel_pool.threads();
-    let (outfmt, custom_fields) = OutputFormat::parse(&args.outfmt).map_err(anyhow::Error::msg)?;
-    if outfmt == OutputFormat::Pairwise && custom_fields.is_some() {
-        bail!("blastp outfmt 0 does not accept custom field lists");
-    }
-    let custom_fields = custom_fields
-        .as_deref()
-        .map(parse_blastp_tabular_fields)
-        .transpose()?;
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2800-2803
+    // ```c
+    // if (args[kArgOutputFormat]) {
+    //     string fmt_choice =
+    //         NStr::TruncateSpaces(args[kArgOutputFormat].AsString());
+    // ```
+    // Each requested output format is parsed exactly as the single CLI `-outfmt` was.
+    let requested_formats = outputs
+        .formats
+        .iter()
+        .map(
+            |format| -> Result<(OutputFormat, Option<Vec<BlastpTabularField>>)> {
+                let (outfmt, custom_fields) =
+                    OutputFormat::parse(format.outfmt).map_err(anyhow::Error::msg)?;
+                if outfmt == OutputFormat::Pairwise && custom_fields.is_some() {
+                    bail!("blastp outfmt 0 does not accept custom field lists");
+                }
+                let custom_fields = custom_fields
+                    .as_deref()
+                    .map(parse_blastp_tabular_fields)
+                    .transpose()?;
+                Ok((outfmt, custom_fields))
+            },
+        )
+        .collect::<Result<Vec<_>>>()?;
 
     let query_ids: Vec<Arc<str>> = query_records.iter().map(fasta_id).collect();
     let query_headers: Vec<String> = query_records.iter().map(fasta_defline).collect();
@@ -6065,58 +6242,74 @@ fn run_resolved_in_pool(
         version: Some(NCBI_BLASTP_VERSION.to_string()),
     };
 
-    let tabular_fields: Option<&[BlastpTabularField]> = if matches!(
-        outfmt,
-        OutputFormat::Tabular | OutputFormat::TabularWithComments
-    ) {
-        Some(if let Some(fields) = custom_fields.as_ref() {
-            fields.as_slice()
-        } else {
-            default_blastp_tabular_fields()
+    // Per requested output format: its tabular field list, and whether its tabular rows
+    // stream directly from the hit lists (they do unless the fields need the rendered
+    // alignment). Only the reporting depends on the format; the search above does not.
+    let format_plans: Vec<(OutputFormat, Option<&[BlastpTabularField]>, bool)> = requested_formats
+        .iter()
+        .map(|(outfmt, custom_fields)| {
+            let tabular_fields: Option<&[BlastpTabularField]> = if matches!(
+                outfmt,
+                OutputFormat::Tabular | OutputFormat::TabularWithComments
+            ) {
+                Some(if let Some(fields) = custom_fields.as_ref() {
+                    fields.as_slice()
+                } else {
+                    default_blastp_tabular_fields()
+                })
+            } else {
+                None
+            };
+            let render_alignment = matches!(outfmt, OutputFormat::Pairwise)
+                || tabular_fields.is_some_and(blastp_tabular_fields_require_rendered_alignment);
+            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
+            // ```c
+            // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
+            //     x_PrintField(*iter);
+            // }
+            // ```
+            let stream_tabular_hit_lists = matches!(
+                outfmt,
+                OutputFormat::Tabular | OutputFormat::TabularWithComments
+            ) && !render_alignment;
+            (*outfmt, tabular_fields, stream_tabular_hit_lists)
         })
-    } else {
-        None
-    };
-    let render_alignment = matches!(outfmt, OutputFormat::Pairwise)
-        || tabular_fields.is_some_and(blastp_tabular_fields_require_rendered_alignment);
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
+        .collect();
+    // NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:973-986
     // ```c
-    // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
-    //     x_PrintField(*iter);
-    // }
+    // if (x_IsFieldRequested(eQuerySeq) ||
+    //     x_IsFieldRequested(eSubjectSeq) ||
+    //     ...
+    //     x_IsFieldRequested(eBTOP) ||
+    //     ...) {
+    //     alnVec->GetWholeAlnSeqString(0, m_QuerySeq);
+    //     alnVec->GetWholeAlnSeqString(1, m_SubjectSeq);
     // ```
-    let stream_tabular_hit_lists = matches!(
-        outfmt,
-        OutputFormat::Tabular | OutputFormat::TabularWithComments
-    ) && !render_alignment;
+    // NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:1970-1973
+    // ```c++
+    // x_DisplayAlnvecInfo(out, alnvecInfo,showDefLine);
+    // ```
+    // Rendered hits are needed by outfmt 0, by tabular fields that need the alignment,
+    // and by the caller's hit records. Every consumer needs the alignment rendered, so
+    // they are built once from the final hit list.
+    let needs_pairwise_hits = outputs.hits.is_some()
+        || format_plans
+            .iter()
+            .any(|(_, _, stream_tabular_hit_lists)| !stream_tabular_hit_lists);
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hspstream.c:271-327
     // ```c
     // *hsp_list_out = hit_list->hsplist_array[last_hsplist_index];
     // (*hsp_list_out)->query_index = index;
     // --hit_list->hsplist_count;
     // ```
-    let final_hits = if matches!(outfmt, OutputFormat::Pairwise)
-        || (matches!(
-            outfmt,
-            OutputFormat::Tabular | OutputFormat::TabularWithComments
-        ) && !stream_tabular_hit_lists)
-    {
-        Some(collect_hits_from_hit_lists(&hit_lists))
-    } else {
-        None
-    };
-    let pairwise_hits = if matches!(
-        outfmt,
-        OutputFormat::Pairwise | OutputFormat::Tabular | OutputFormat::TabularWithComments
-    ) && !stream_tabular_hit_lists
-    {
+    let pairwise_hits = if needs_pairwise_hits {
         Some(build_pairwise_hits(
-            final_hits.expect("final hits collected for rendered blastp output"),
+            collect_hits_from_hit_lists(&hit_lists),
             &contexts,
             &subjects,
             &subject_titles,
             args.scoring.matrix,
-            render_alignment,
+            true,
         )?)
     } else {
         None
@@ -6130,131 +6323,164 @@ fn run_resolved_in_pool(
         );
     }
 
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:1411
+    // ```c
+    // CBlastFormat::PrintOneResultSet(const blast::CSearchResults& results,
+    // ```
+    // The caller receives the same final result that every formatter prints.
+    if let (Some(hits_sink), Some(pairwise_hits)) = (outputs.hits.as_mut(), pairwise_hits.as_ref())
+    {
+        hits_sink(pairwise_hits);
+    }
+
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1553-1554
     // ```c
     // /* Save the results. */
     // status = BlastHSPStreamWrite(hsp_stream, &hsp_list);
     // ```
     let output_format_start = blastp_timing_start(timing_enabled);
-    let output_result: Result<()> = match outfmt {
-        OutputFormat::Pairwise => {
-            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:68-93
-            // ```c
-            // CBlastFormat::CBlastFormat(..., CNcbiOstream& outfile, ...)
-            //     : m_FormatType(format_type), ..., m_Outfile(outfile),
-            //       m_NumSummary(num_summary), ...
-            // ```
-            let mut writer = open_output_writer(
-                args.out.as_ref(),
-                in_memory_output.as_mut().map(|output| &mut **output),
-            )?;
-            let pairwise_config = PairwiseConfig {
-                line_length: 60,
-                show_gi: false,
-                show_frame: false,
-                program: "blastp".to_string(),
-                protein_matrix: args.scoring.matrix,
-            };
-            let pairwise_queries: Vec<BlastpPairwiseQuery> = query_headers
-                .iter()
-                .zip(query_lengths.iter())
-                .enumerate()
-                .map(|(q_idx, (query_name, &query_length))| BlastpPairwiseQuery {
-                    query_name: query_name.clone(),
-                    query_length,
-                    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_results.cpp:84-103
-                    // ```c
-                    // m_SearchSpace = ctx->eff_searchsp;
-                    // ...
-                    // s_InitializeKarlinBlk(sbp->kbp_std[ctx_index],
-                    //                       &m_UngappedKarlinBlk);
-                    // ```
-                    ungapped_karlin: contexts[q_idx].karlin_params,
-                    effective_search_space: search_spaces[q_idx].effective_space.round() as i64,
-                })
-                .collect();
-            let pairwise_report = BlastpPairwiseReport {
-                version: NCBI_BLASTP_VERSION.to_string(),
-                database_name: format!(
-                    "User specified sequence set (Input: {subject_input_label})"
-                ),
-                database_num_sequences: subject_records.len(),
-                database_total_letters: total_db_len,
-                matrix_name: BLASTP_DEFAULT_MATRIX_NAME.to_string(),
-                gap_open: args.scoring.gap_open,
-                gap_extend: args.scoring.gap_extend,
-                word_threshold: args.threshold as i32,
-                window_size: args.window_size as i32,
-                gapped_karlin: gapped_params,
-                gumbel: gapped_gumbel,
-            };
-            write_blastp_pairwise_report(
-                pairwise_hits
-                    .as_ref()
-                    .expect("pairwise hits prepared for blastp outfmt 0"),
-                &mut writer,
-                &pairwise_config,
-                &pairwise_queries,
-                &subject_ids,
-                &pairwise_report,
-            )?;
-            Ok(())
-        }
-        OutputFormat::Tabular | OutputFormat::TabularWithComments => {
-            let fields = tabular_fields.expect("tabular fields prepared for blastp tabular output");
-            let mut writer = open_output_writer(
-                args.out.as_ref(),
-                in_memory_output.as_mut().map(|output| &mut **output),
-            )?;
-            if stream_tabular_hit_lists {
-                // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
+    // NCBI reference: ncbi-blast/c++/src/app/blast/blast_formatter.cpp:429-465
+    // ```c
+    // CRef<CSearchResultSet> results = m_RmtBlast->GetResultSet();
+    // formatter.PrintProlog();
+    // ITERATE(CSearchResultSet, result, *results) {
+    //         formatter.PrintOneResultSet(**result, queries);
+    // }
+    // ```
+    // Each requested format prints the same final result without searching again.
+    let mut output_result: Result<()> = Ok(());
+    let observer = &mut outputs.observer;
+    for (format_index, (format, &(outfmt, tabular_fields, stream_tabular_hit_lists))) in outputs
+        .formats
+        .iter_mut()
+        .zip(format_plans.iter())
+        .enumerate()
+    {
+        let mut probe = observer
+            .as_deref_mut()
+            .map(|observer| FormatProbe::new(observer, format_index));
+        let format_result: Result<()> = match outfmt {
+            OutputFormat::Pairwise => (|| -> Result<()> {
+                // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:68-93
                 // ```c
-                // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
-                //     if (iter != m_FieldsToShow.begin())
-                //         m_Ostream << m_FieldDelimiter;
-                //     x_PrintField(*iter);
-                // }
+                // CBlastFormat::CBlastFormat(..., CNcbiOstream& outfile, ...)
+                //     : m_FormatType(format_type), ..., m_Outfile(outfile),
+                //       m_NumSummary(num_summary), ...
                 // ```
-                write_blastp_tabular_hit_lists(
-                    &hit_lists,
-                    fields,
-                    outfmt,
-                    &mut writer,
-                    // NCBI reference: c++/src/objtools/align_format/tabular.cpp:1295-1309
-                    // AcknowledgeBlastQuery(bioseq, ..., kTabularFormat, rid);
-                    &query_ids,
-                    &query_headers,
-                    &subject_ids,
-                    &subjects,
-                    &context,
-                )?;
-            } else {
-                // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
-                // ```c
-                // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
-                //     if (iter != m_FieldsToShow.begin())
-                //         m_Ostream << m_FieldDelimiter;
-                //     x_PrintField(*iter);
-                // }
-                // ```
-                write_blastp_tabular_output(
+                let mut writer = format.sink.open()?;
+                let pairwise_config = PairwiseConfig {
+                    line_length: 60,
+                    show_gi: false,
+                    show_frame: false,
+                    program: "blastp".to_string(),
+                    protein_matrix: args.scoring.matrix,
+                };
+                let pairwise_queries: Vec<BlastpPairwiseQuery> = query_headers
+                    .iter()
+                    .zip(query_lengths.iter())
+                    .enumerate()
+                    .map(|(q_idx, (query_name, &query_length))| BlastpPairwiseQuery {
+                        query_name: query_name.clone(),
+                        query_length,
+                        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_results.cpp:84-103
+                        // ```c
+                        // m_SearchSpace = ctx->eff_searchsp;
+                        // ...
+                        // s_InitializeKarlinBlk(sbp->kbp_std[ctx_index],
+                        //                       &m_UngappedKarlinBlk);
+                        // ```
+                        ungapped_karlin: contexts[q_idx].karlin_params,
+                        effective_search_space: search_spaces[q_idx].effective_space.round() as i64,
+                    })
+                    .collect();
+                let pairwise_report = BlastpPairwiseReport {
+                    version: NCBI_BLASTP_VERSION.to_string(),
+                    database_name: format!(
+                        "User specified sequence set (Input: {subject_input_label})"
+                    ),
+                    database_num_sequences: subject_records.len(),
+                    database_total_letters: total_db_len,
+                    matrix_name: BLASTP_DEFAULT_MATRIX_NAME.to_string(),
+                    gap_open: args.scoring.gap_open,
+                    gap_extend: args.scoring.gap_extend,
+                    word_threshold: args.threshold as i32,
+                    window_size: args.window_size as i32,
+                    gapped_karlin: gapped_params,
+                    gumbel: gapped_gumbel,
+                };
+                write_blastp_pairwise_report(
                     pairwise_hits
                         .as_ref()
-                        .expect("pairwise hits prepared for blastp tabular outfmt"),
-                    fields,
-                    outfmt,
+                        .expect("pairwise hits prepared for blastp outfmt 0"),
                     &mut writer,
-                    // NCBI reference: c++/src/objtools/align_format/tabular.cpp:1295-1309
-                    // AcknowledgeBlastQuery(bioseq, ..., kTabularFormat, rid);
-                    &query_ids,
-                    &query_headers,
+                    &pairwise_config,
+                    &pairwise_queries,
                     &subject_ids,
-                    &context,
+                    &pairwise_report,
+                    probe.as_mut(),
                 )?;
-            }
-            Ok(())
+                Ok(())
+            })(),
+            OutputFormat::Tabular | OutputFormat::TabularWithComments => (|| -> Result<()> {
+                let fields =
+                    tabular_fields.expect("tabular fields prepared for blastp tabular output");
+                let mut writer = format.sink.open()?;
+                if stream_tabular_hit_lists {
+                    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
+                    // ```c
+                    // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
+                    //     if (iter != m_FieldsToShow.begin())
+                    //         m_Ostream << m_FieldDelimiter;
+                    //     x_PrintField(*iter);
+                    // }
+                    // ```
+                    write_blastp_tabular_hit_lists(
+                        &hit_lists,
+                        fields,
+                        outfmt,
+                        &mut writer,
+                        // NCBI reference: c++/src/objtools/align_format/tabular.cpp:1295-1309
+                        // AcknowledgeBlastQuery(bioseq, ..., kTabularFormat, rid);
+                        &query_ids,
+                        &query_headers,
+                        &subject_ids,
+                        &subjects,
+                        &context,
+                        probe.as_mut(),
+                    )?;
+                } else {
+                    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
+                    // ```c
+                    // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
+                    //     if (iter != m_FieldsToShow.begin())
+                    //         m_Ostream << m_FieldDelimiter;
+                    //     x_PrintField(*iter);
+                    // }
+                    // ```
+                    write_blastp_tabular_output(
+                        pairwise_hits
+                            .as_ref()
+                            .expect("pairwise hits prepared for blastp tabular outfmt"),
+                        fields,
+                        outfmt,
+                        &mut writer,
+                        // NCBI reference: c++/src/objtools/align_format/tabular.cpp:1295-1309
+                        // AcknowledgeBlastQuery(bioseq, ..., kTabularFormat, rid);
+                        &query_ids,
+                        &query_headers,
+                        &subject_ids,
+                        &context,
+                        probe.as_mut(),
+                    )?;
+                }
+                Ok(())
+            })(),
+        };
+        if let Err(error) = format_result {
+            output_result = Err(error);
+            break;
         }
-    };
+    }
     if let Some(timing) = timing.as_ref() {
         BlastpTiming::record_call(
             &timing.output_format_ns,

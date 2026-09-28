@@ -1,0 +1,17 @@
+program	outfmt	profile	runtime_path	expected_source	expected_reference	status	filled_by
+blastp	6	LOSAT/tests/blastp_v010_parity_manifest.tsv (P1, P2)	native CLI	certified frozen bytes	LOSAT/tests/platform_native_v010_canonical.tsv (Gate A, blastp rows)	checked	S02
+blastp	0	LOSAT/tests/blastp_v010_parity_manifest.tsv inputs	native CLI	native-equivalent, not NCBI-certified	docs/evidence/losat_web_e1a/baseline/hashes.tsv (case suffix .fmt0)	checked	S02
+blastp	7	LOSAT/tests/blastp_v010_parity_manifest.tsv inputs	native CLI	native-equivalent, not NCBI-certified	docs/evidence/losat_web_e1a/baseline/hashes.tsv (case suffix .fmt7)	checked	S02
+blastp	6 (custom fields)	first case of LOSAT/tests/blastp_v010_parity_manifest.tsv	native CLI	native-equivalent, not NCBI-certified	docs/evidence/losat_web_e1a/baseline/hashes.tsv (case suffix .fmt6custom)	checked	S02
+blastp	0 / 6 / 7 / custom	8 + 8 record prefixes of the manifest inputs, with and without -max_target_seqs 1	run_local, several formats at once	the native CLI run of each single format	LOSAT/tests/run_local_blastp.rs	checked	S02
+blastp	0 / 6 / 7	same as the native CLI rows	Wasm ABI v2 serial / threaded, threads 1/2/4	the native CLI rows above	web/adapter/tests/ (V-ABI)	pending	S05
+tblastn	0 / 6 / 7	docs/evidence/tlosan_stage_g/matrix_162.jsonl	native CLI	certified frozen bytes	docs/evidence/tlosan_stage_g/matrix_162.jsonl (expected_sha256)	pending	S03
+tblastn	0 / 6 / 7	same	Wasm ABI v2 serial / threaded, threads 1/2/4	the native CLI rows	web/adapter/tests/ (V-ABI)	pending	S05
+blastn	6 / 7	LOSAT/tests/blastn_parity_manifest.tsv	native CLI	certified frozen bytes	LOSAT/tests/platform_native_v010_canonical.tsv (Gate A, blastn rows)	pending	S04
+blastn	0	fixtures fixed in S06	native CLI	certified NCBI bytes from S06	docs/evidence/losat_web_e2a/	pending	S07
+blastn	0 / 6 / 7	same	Wasm ABI v2 serial / threaded, threads 1/2/4	the native CLI rows	web/adapter/tests/ (V-ABI)	pending	S05, S07
+tblastx	6	LOSAT/tests/tblastx_v010_parity_manifest.tsv	native CLI	certified frozen bytes	LOSAT/tests/platform_native_v010_canonical.tsv (Gate A, tblastx rows)	pending	S04
+tblastx	0 / 7	fixtures fixed in S08	native CLI	certified NCBI bytes from S08 (approved genetic-code exception classified)	docs/evidence/losat_web_e2b/	pending	S08
+tblastx	0 / 6 / 7	same	Wasm ABI v2 serial / threaded, threads 1/2/4	the native CLI rows	web/adapter/tests/ (V-ABI)	pending	S05, S08
+blastx	0 / 6 / 7	LOSATX plan comparison fixtures	native CLI	per the LOSATX v0.2.0 certification	docs/losatx_blastx_v0.2.0_plan.md	pending	SX
+blastx	0 / 6 / 7	same	Wasm ABI v2 serial / threaded, threads 1/2/4	the native CLI rows	web/adapter/tests/ (V-ABI)	pending	SX

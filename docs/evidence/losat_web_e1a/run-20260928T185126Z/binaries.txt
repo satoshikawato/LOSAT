@@ -1,0 +1,24 @@
+S02 artifacts (SHA-256). Toolchain: cargo 1.92.0 (344c4567c 2025-10-21); rustc 1.92.0 (ded5c06cf 2025-12-08); node v26.8.2.
+Build commands: see README.md "実行の方法"; natives with cargo build --release --locked (the serial native with --no-default-features),
+WASI with RUSTUP_TOOLCHAIN=1.92.0 python3 LOSAT/tests/build_wasi_artifacts.py --include-serial.
+
+pre-change (built from the bdeaa9bc6 tree, exported with git archive):
+bda9b7dd9410be7b10c1196572099f347237ae36b765a548b95b98f783ee75fe  native LOSAT (rebuilt from the clean tree to the same hash)
+1d4de6cd21f236643912825efc52585e0376eb8a69376cffa229503b3660ae5b  losat-serial-command.wasm (rebuilt from the clean tree to the same hash)
+dbdf05b6d5ca6e77bc3295e6abf0020c81fa108cf318bc2eb1188de5e8df030b  losat-threaded-command.wasm (rebuilt from the clean tree to the same hash)
+fd13693f699f1fc36162b2f413294b604fda8d32344fb2faeba17b9d3b63b110  losat-threaded-reactor.wasm (the independent audit built the same hash)
+10dadb6433f18b3eaf22655bc0770033d244f8fa65d0db2e21a23d3f2d3e6e8f  losat-serial-reactor.wasm
+
+post-change (built from the working tree whose LOSAT/ directory is commit afd57e7cb;
+a native rebuilt from git archive afd57e7cb has the same hash):
+3fef8bd3cee9cde290df622605c2caba46f468a67f042002e743f13a19b039be  native LOSAT
+c9ae0363816603effddd2aa7eb809a8e4b3089e29ba7737da6e3748d48a55820  native LOSAT, --no-default-features (serial)
+6b34f358337b6f95ac751692a980fb115ad045305d43996b14950b5eb353c3d9  losat-serial-command.wasm
+4f6bacbe2f8fa293e08f6a2c8d451ffef01b22948fed9e6c512c7e24da4a36a5  losat-serial-reactor.wasm
+fae798b8f4d33e5608e5014dff55cd84f3ef7161b1090d452f11c9a721902f15  losat-threaded-command.wasm
+78ee7094346e92a642354c9d87683bb5cd323c8262d34a0570060005f45be837  losat-threaded-reactor.wasm
+
+The build directories named in after/binary.json and wasm-threading-metadata.json (native-after/, wasi-after-artifacts/)
+were later reused by the S03 build. Copies of the post-change artifacts above, with the same hashes, are kept in
+/home/kawato/.cache/losat-web-gui-target/s02-final/ (LOSAT, LOSAT-serial, *.wasm); the native rebuilt from
+git archive afd57e7cb is /home/kawato/.cache/losat-web-gui-target/native-provenance-s02/release/LOSAT.

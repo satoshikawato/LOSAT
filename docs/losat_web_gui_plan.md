@@ -1,6 +1,6 @@
 # LOSAT Web GUI 総合実装計画
 
-状態：**W0（S01）は完了条件を満たした（[ゲート記録](evidence/losat_web_w0/README.md)）。`PD-LOSAT-WEB-APP-BOUNDARY` は 2026-09-29 に承認された。次は S02。** 作成 2026-09-28、改訂 2026-09-29。
+状態：**S01（W0）と S02（E1a）は完了条件を満たした（[W0](evidence/losat_web_w0/README.md)、[E1a](evidence/losat_web_e1a/README.md) のゲート記録）。`PD-LOSAT-WEB-APP-BOUNDARY` は 2026-09-29 に承認された。次は S03。** 作成 2026-09-28、改訂 2026-09-29。
 
 | 項目 | 内容 |
 |---|---|
@@ -218,21 +218,33 @@ docs/evidence/losat_web_<stage>/
 
 `LOSAT/src/api/local_blast.rs`（今は再 export だけ）に、NCBI の局所検索（subject 集合を一度用意し、query バッチごとに `CLocalBlast` を実行して整形する、§4.9）に相当する入口を置く。
 
-```rust
-// 形の案。名前と型は S02 で確定する。
-pub fn run_local(
-    args: &ProgramArgs,             // 各 program の Args（CLI の clap、v1 の手書きパーサ、v2 の argv のどれからでも作れる）
-    inputs: &LocalInputs<'_>,       // query と subject の原 FASTA バイト、表示名
-    out: &mut ReportOutputs<'_>,
-) -> Result<RunSummary>;
+S02 で次の形に確定した（`LOSAT/src/api/local_blast.rs`）。
 
-pub struct ReportOutputs<'a> {
-    pub formats: Vec<(OutFmt, &'a mut dyn Write)>,             // 要求された形式（CLI は 1 つ、Web は program が対応するすべて）
-    pub diagnostics: &'a mut dyn Write,                          // CLI の stderr に当たる警告。1 回だけ書く
-    pub hits: Option<&'a mut dyn FnMut(&[PairwiseHit], &HitIds)>,// 構造化レコード（§4.4）
-    pub observer: Option<&'a mut dyn FormatObserver>,            // 行・節の開始と終了（§4.5）
+```rust
+pub enum OutputSink<'a> {
+    Stdout,                                  // CLI（-out なし）。バッファする
+    File(&'a Path),                          // CLI（-out）。整形を始めるときに作る
+    Writer(&'a mut (dyn Write + Send)),      // 呼び出し側の writer。ここではバッファしない
 }
+pub struct FormatOutput<'a> { pub outfmt: &'a str, pub sink: OutputSink<'a> }
+pub type HspIndex = usize;                   // 最終の HSP 一覧の中での番号。全形式で共通の ID
+pub trait FormatObserver {                   // 行・節の開始と終了。書くバイトは変えない
+    fn hsp_begin(&mut self, format: usize, hsp: HspIndex);
+    fn hsp_end(&mut self, format: usize, hsp: HspIndex);
+}
+pub struct ReportOutputs<'a> {               // すべて Send（整形はスレッドプールの中で走る）
+    pub formats: Vec<FormatOutput<'a>>,                                // CLI は 1 つ
+    pub diagnostics: &'a mut (dyn Write + Send),                      // CLI の stderr に当たる警告
+    pub hits: Option<&'a mut (dyn FnMut(&[PairwiseHit]) + Send)>,     // 最終の HSP 一覧
+    pub observer: Option<&'a mut (dyn FormatObserver + Send)>,
+}
+
+// program ごとの入口（S02 では BLASTP。S03 以降で他の program に足す）
+pub fn run_local(args: BlastpArgs, queries: &[fasta::Record], subjects: &[fasta::Record],
+                 query_label: &str, subject_label: &str, outputs: &mut ReportOutputs<'_>) -> Result<()>;
 ```
+
+program をまたいで振り分ける関数は、それを呼ぶアダプタを作る S05 で足す（使う側の無い振り分けを先に作らない）。
 
 - CLI の `run` は「ファイルを読んで `run_local` を呼び、stdout / `-out` に書く」だけになる。v1 の `run_web_pair*` も `run_local` を呼ぶ。こうして program ごとの核の経路を 1 本にする。
 - `run_local` はターゲットに依存しない。そのため `cargo test` で、CLI と同じ経路の出力を fixture で確かめられる。`wasm-threads` のときだけコンパイルされる TBLASTX の出力箇所（G3）は、ネイティブでは通らないので、threaded の V-ABI で確かめる。
@@ -250,13 +262,13 @@ pub struct ReportOutputs<'a> {
 
 ### 4.4 構造化結果：`PairwiseHit`
 
-新しい結果の型は作らない。全 program が、並べ終えた最終の HSP 一覧から `PairwiseHit` を作り（BLASTN と TBLASTX は S07・S08 で作るようにする）、それを構造化結果にする。各 HSP には、その実行の中で一意な ID（`q_idx` と、query の最終一覧の中での番号 `rank`）を付ける。アダプタが直列化する内容は、[`docs/web/abi_v2.md`](web/abi_v2.md) の「HSP record」にある。
+新しい結果の型は作らない。全 program が、並べ終えた最終の HSP 一覧から `PairwiseHit` を作り（BLASTN と TBLASTX は S07・S08 で作るようにする）、それを構造化結果にする。各 HSP の ID は、その実行の最終の HSP 一覧の中での番号（`HspIndex`）で、どの出力形式でも同じ HSP を指す（S02 で確定）。ABI の HSP レコードは、この番号と、そこから求めた `q_idx`・`rank` を持つ。アダプタが直列化する内容は、[`docs/web/abi_v2.md`](web/abi_v2.md) の「HSP record」にある。
 
 **表に出す値は、outfmt 6 の該当行を分割して使う。** NCBI 形式の数値整形を TS で作り直さないためである。並べ替えには原値を使う。
 
 ### 4.5 formatter の観測者（TD-3）
 
-formatter は、HSP の行（outfmt 6/7）や節（outfmt 0）を書き始めるときと書き終えるときに、その HSP の ID を観測者に知らせる。書くバイトは変えない。アダプタは、そのときの書き込み位置から、HSP ごとのバイト範囲を記録する。outfmt 0 に現れない HSP（例：BLASTX の既定で 251 番目以降の subject）は、範囲を持たない。詳細画面には、選んだ HSP の subject 見出しと節を outfmt 0 の原文のまま表示する。midline（`|` や `+`）やマスクの表示規則を TS で作り直すことはしない。
+formatter は、HSP の行（outfmt 6/7）や節（outfmt 0 のスコアの行とアラインメント。subject の見出しは含まない）を書き始めるときと書き終えるときに、その HSP の ID を観測者に知らせる。書くバイトは変えない。アダプタは、そのときの書き込み位置から、HSP ごとのバイト範囲を記録する。outfmt 0 に現れない HSP（例：BLASTX の既定で 251 番目以降の subject）は、範囲を持たない。詳細画面には、選んだ HSP の subject 見出しと節を outfmt 0 の原文のまま表示する（見出しの範囲を得る方法は S05 で決める。S02・S03 の観測者は見出しを節に含めない）。midline（`|` や `+`）やマスクの表示規則を TS で作り直すことはしない。
 
 ### 4.6 Subject の保持
 
@@ -417,7 +429,7 @@ NCBI BLAST+（oracle） ─[既存の認証]─► ネイティブ LOSAT の凍�
 | セッション | 段階 | 内容 | 完了条件（証拠） |
 |---|---|---|---|
 | S01 | **W0** 契約と骨格 | PD、`web/AGENTS.md`、ルートの `AGENTS.md` への範囲の追記、要求トレース表、ABI v2 の下書き、`web/app` の骨格（層、FakeEngine、キューと状態機械、書き出し）、CI `web.yml`、`_headers`。TBLASTX の v1 で outfmt を黙って置き換える不具合の修正 | `npm run check` と `npm run e2e`（FakeEngine の一連の操作、`crossOriginIsolated`）が通る。TBLASTX の修正の単体試験が wasm32-wasip1 で通り、作り直した serial reactor で outfmt 0/7 が拒否される。ゲート記録と `evidence.sha256` がある。**完了（2026-09-29）** |
-| S02 | **E1a** 核の入口：共通部と BLASTP | 最初に全 program の基準を取る。`run_local`、`ReportOutputs`（形式ごとの writer、`diagnostics`、`hits`、observer）、形式ごとのオプション解決と食い違いの検出（TD-4）を作り、BLASTP の CLI・v1 をそこに通す。`docs/web/verification_cells.tsv` を作る | 変更したコードを使う全 program の既存ゲートと Gate A の該当ハッシュが変わらない。v1 の serial / threaded reactor の検査が通る。V-NAT。V-PERF の非退行。独立監査 |
+| S02 | **E1a** 核の入口：共通部と BLASTP | 最初に全 program の基準を取る。`run_local`、`ReportOutputs`（形式ごとの writer、`diagnostics`、`hits`、observer）、形式ごとのオプション解決と食い違いの検出（TD-4）を作り、BLASTP の CLI・v1 をそこに通す。`docs/web/verification_cells.tsv` を作る | 変更したコードを使う全 program の既存ゲートと Gate A の該当ハッシュが変わらない。v1 の serial / threaded reactor の検査が通る。V-NAT。V-PERF の非退行。独立監査。**完了（2026-09-29）** |
 | S03 | **E1b** 核の入口：TBLASTN | 同じことを TBLASTN に行う | TLOSAN 計画の Stage G のゲートが変わらない。v1 の reactor の検査。V-NAT。V-PERF の非退行。独立監査 |
 | S04 | **E1c** 核の入口：BLASTN と TBLASTX | 同じことを BLASTN と TBLASTX に行う（出力は 6/7 と 6 のまま）。TBLASTX の出力箇所を 1 つにまとめる | 既存のゲートと Gate A のハッシュが変わらない。v1 の reactor の検査。V-NAT。V-PERF の非退行。独立監査 |
 | S05 | **E1d** アダプタと ABI v2 | `web/adapter` の crate、ABI v2 の確定、2 つの reactor、ビルドの同一性の検査（TD-6）、V-ABI の Node の仕組み、`scan` の性質試験（TD-8） | V-ABI（BLASTP・TBLASTN・BLASTN・TBLASTX の、その時点で対応する全形式 × スレッド 1/2/4）が期待値と一致。同一性の検査が通る |

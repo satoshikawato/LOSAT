@@ -1,0 +1,6 @@
+ok blastp native: median 0.431s [0.425, 0.438] -> 0.431s [0.424, 0.456] (x1.001), output same
+ok blastp serial-wasi: median 0.615s [0.599, 0.622] -> 0.620s [0.605, 0.643] (x1.008), output same
+ok blastp threaded-wasi: median 0.491s [0.484, 0.528] -> 0.492s [0.487, 0.510] (x1.001), output same
+ok blastp-fmt0 native: median 0.435s [0.427, 0.447] -> 0.431s [0.426, 0.441] (x0.993), output same
+ok blastp-fmt0 serial-wasi: median 0.630s [0.620, 0.642] -> 0.626s [0.610, 0.638] (x0.994), output same
+ok blastp-fmt0 threaded-wasi: median 0.505s [0.496, 0.544] -> 0.499s [0.489, 0.523] (x0.989), output same

@@ -25,9 +25,11 @@ export type ValidationResult = { readonly ok: true } | { readonly ok: false; rea
  * Rust `Hit` / `PairwiseHit` fields so that no mapping layer is needed.
  */
 export interface HspRecord {
+  /** 0-based position in the final hit list of the run; the same HSP in every format. */
+  readonly index: number;
   readonly q_idx: number;
   readonly s_idx: number;
-  /** 0-based position in the final result of its query; with q_idx it identifies the HSP. */
+  /** 0-based position among the HSPs of its query. */
   readonly rank: number;
   readonly raw_score: number;
   readonly bit_score: number;

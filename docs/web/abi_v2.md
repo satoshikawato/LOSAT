@@ -110,18 +110,19 @@ One JSON object per HSP of the final, sorted result. Field names follow the Rust
 
 | Field | Type | Meaning |
 |---|---|---|
+| `index` | integer | 0-based position of the HSP in the final, sorted hit list of the run (`HspIndex` in `LOSAT/src/api/local_blast.rs`); the same HSP has the same index in every output format |
 | `q_idx`, `s_idx` | integer | 0-based record index of the query and the subject in the registered inputs |
-| `rank` | integer | 0-based position of the HSP in the final result of its query; with `q_idx` it identifies the HSP within the run |
+| `rank` | integer | 0-based position of the HSP among the HSPs of its query (derived from `index`) |
 | `raw_score`, `bit_score`, `e_value` | number | engine values, not rounded |
 | `q_start`, `q_end`, `s_start`, `s_end` | integer | 1-based coordinates as printed in outfmt 6 (start > end means minus strand) |
 | `query_frame`, `subject_frame` | integer or null | translation frames where applicable |
 | `subject_length` | integer or null | subject length |
 | `query_aligned`, `subject_aligned` | string or null | aligned sequences with `-` for gaps |
 | `out6` | [integer, integer] or null | byte range [start, end) of this HSP's row in the stream 6 text; null if outfmt 6 does not show it |
-| `out0` | [integer, integer] or null | byte range [start, end) of this HSP's section in the stream 0 text; null if outfmt 0 does not show it (for example BLASTX shows alignments for the first 250 subjects by default) |
+| `out0` | [integer, integer] or null | byte range [start, end) of this HSP's section in the stream 0 text (its score lines and alignment; the subject defline that precedes the first HSP of each subject, written by `x_ShowAlnvecInfo` at `showalign.cpp:3613-3632`, is not part of any section); null if outfmt 0 does not show it (for example BLASTX shows alignments for the first 250 subjects by default) |
 
 The ranges come from formatter observer events: a formatter reports when it starts and
-ends the row or section of an HSP, identified by (`q_idx`, `rank`), and the adapter
+ends the row or section of an HSP, identified by its `index`, and the adapter
 records the byte positions at those moments. The formatter's output bytes do not
 change (plan TD-3, §4.5). Displayed numbers are taken from the outfmt 6 row, not
 formatted from the raw values (plan §4.4).

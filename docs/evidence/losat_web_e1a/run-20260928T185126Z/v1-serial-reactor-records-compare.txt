@@ -1,0 +1,6 @@
+# v1 serial reactor records: LOSAT/tests/check_wasi_api_limits.js <reactor> serial-reactor <fixtures> <records>
+# on the pre-change serial reactor (10dadb64..., built from a clean bdeaa9bc6 tree) and on the post-change one (4f6bacbe...),
+# with the same fixtures (check_wasm_threading.py output, fixtures/).
+$ diff -r serial-records-before serial-records-after
+exit 0
+files compared: 25 (blastn-0-n1.error blastn-0-n1.out blastn-1-n2.error blastn-1-n2.out blastn-2-n4.error blastn-2-n4.out blastn-3-n1.error blastn-3-n1.out blastp-10-n4.error blastp-10-n4.out blastp-11-n1.error blastp-11-n1.out blastp-8-n1.error blastp-8-n1.out blastp-9-n2.error blastp-9-n2.out runs.json tblastx-4-n1.error tblastx-4-n1.out tblastx-5-n2.error tblastx-5-n2.out tblastx-6-n4.error tblastx-6-n4.out tblastx-7-n1.error tblastx-7-n1.out )

@@ -67,6 +67,7 @@ export class FakeEngine implements EngineGateway {
     sink.write(6, encoder.encode(row));
     sink.write(7, encoder.encode(`# ${FAKE_MARKER}\n# 1 hits found\n${row}`));
     const hit: HspRecord = {
+      index: 0,
       q_idx: 0,
       s_idx: 0,
       rank: 0,

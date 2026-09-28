@@ -610,6 +610,8 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     // The thread count is checked before the inputs are read, as before; `run_local`
     // repeats the check, which is idempotent. Nothing else can fail between reading
     // the query and reading the subject, so both are read here in the same order.
+    // LOSAT's own debug and timing output (LOSAT_WASI_THREADS_DEBUG, LOSAT_TIMING,
+    // LOSAT_DEBUG_SCAN_SOFF) now follows the reads and does not count their time.
     crate::utils::threading::validate_threads(args.num_threads)?;
     let queries = read_tblastx_fasta_records(&args.query, "query")?;
     let subjects = read_tblastx_fasta_records(&args.subject, "subject")?;
@@ -631,7 +633,7 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     )
 }
 
-// NCBI reference: ncbi-blast/c++/src/app/blast/blast_formatter.cpp:429-465
+// NCBI reference: ncbi-blast/c++/src/app/blast/blast_formatter.cpp:429-467
 // ```c
 // CRef<CSearchResultSet> results = m_RmtBlast->GetResultSet();
 // formatter.PrintProlog();
@@ -666,7 +668,7 @@ pub fn run_local(
     })
 }
 
-// NCBI reference: ncbi-blast/c++/src/app/blast/blast_formatter.cpp:429-465
+// NCBI reference: ncbi-blast/c++/src/app/blast/blast_formatter.cpp:429-467
 // ```c
 // ITERATE(CSearchResultSet, result, *results) {
 //     ...

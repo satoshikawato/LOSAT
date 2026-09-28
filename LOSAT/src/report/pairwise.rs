@@ -1361,12 +1361,32 @@ pub fn write_blastp_pairwise_report<W: Write>(
             let first_hit = shits
                 .first()
                 .expect("subject group must contain at least one HSP");
+            // NCBI reference: c++/src/objtools/align_format/showalign.cpp:3613-3632
+            // ```c++
+            //     if(show_defline) {
+            // 		...
+            // 				string deflines = x_PrintDefLine(bsp_handle, aln_vec_info);
+            // 				out<< deflines;
+            // 		...
+            // 			out << "\n";
+            // ```
+            // The heading is written before the first HSP of the subject; the probe marks
+            // it with that HSP's index without changing the written bytes.
+            let first_index = subject_hit_indices[&s_idx][0];
+            if let Some(probe) = probe.as_mut() {
+                writer.flush()?;
+                probe.subject_begin(first_index);
+            }
             write_subject_header(
                 writer,
                 subject_id,
                 first_hit.subject_title.as_deref(),
                 first_hit.subject_length,
             )?;
+            if let Some(probe) = probe.as_mut() {
+                writer.flush()?;
+                probe.subject_end(first_index);
+            }
             // NCBI reference: c++/src/objtools/align_format/showalign.cpp:1970-1973
             // ```c++
             // subid=&(avRef->GetSeqId(1));
@@ -1800,12 +1820,32 @@ pub fn write_tblastn_pairwise_report<W: Write>(
         for s_idx in subject_order {
             let shits = &subject_hits[&s_idx];
             let first = shits[0];
+            // NCBI reference: c++/src/objtools/align_format/showalign.cpp:3613-3632
+            // ```c++
+            //     if(show_defline) {
+            // 		...
+            // 				string deflines = x_PrintDefLine(bsp_handle, aln_vec_info);
+            // 				out<< deflines;
+            // 		...
+            // 			out << "\n";
+            // ```
+            // The heading is written before the first HSP of the subject; the probe marks
+            // it with that HSP's index without changing the written bytes.
+            let first_index = subject_hit_indices[&s_idx][0];
+            if let Some(probe) = probe.as_mut() {
+                writer.flush()?;
+                probe.subject_begin(first_index);
+            }
             write_subject_header(
                 &mut writer,
                 &subject_ids[s_idx as usize],
                 first.subject_title.as_deref(),
                 first.subject_length,
             )?;
+            if let Some(probe) = probe.as_mut() {
+                writer.flush()?;
+                probe.subject_end(first_index);
+            }
             // NCBI reference: c++/src/objtools/align_format/showalign.cpp:1970-1973
             // ```c++
             // subid=&(avRef->GetSeqId(1));

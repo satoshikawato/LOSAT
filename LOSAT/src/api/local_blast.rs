@@ -139,6 +139,7 @@ pub type HspIndex = usize;
 // NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
 // ```c
 // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
+//     // Add tab in front of field, except for the first field.
 //     if (iter != m_FieldsToShow.begin())
 //         m_Ostream << m_FieldDelimiter;
 //     x_PrintField(*iter);
@@ -185,6 +186,29 @@ pub trait FormatObserver {
     /// The formatter for `ReportOutputs::formats[format]` finished the row or section of
     /// `hsp`. Every byte of it has reached the sink.
     fn hsp_end(&mut self, format: usize, hsp: HspIndex);
+
+    // NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:3613-3632
+    // ```c++
+    // void CDisplaySeqalign::x_ShowAlnvecInfo(CNcbiOstream& out,
+    //                                            SAlnInfo* aln_vec_info,
+    //                                            bool show_defline)
+    // {
+    // 	bool showSortControls = false;
+    //     if(show_defline) {
+    // 		...
+    // 				string deflines = x_PrintDefLine(bsp_handle, aln_vec_info);
+    // 				out<< deflines;
+    // 		...
+    // 			out << "\n";
+    // ```
+    /// The outfmt 0 formatter for `ReportOutputs::formats[format]` starts the heading of
+    /// a subject (its defline and length line), which precedes the first HSP of that
+    /// subject, `first_hsp`. Every byte written for that format before this call has
+    /// reached its sink. Formatters without subject headings never call it.
+    fn subject_begin(&mut self, _format: usize, _first_hsp: HspIndex) {}
+    /// The formatter finished the heading that `subject_begin` announced. Every byte of
+    /// it has reached the sink.
+    fn subject_end(&mut self, _format: usize, _first_hsp: HspIndex) {}
 }
 
 // NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:1970-1973
@@ -209,6 +233,14 @@ impl<'o> FormatProbe<'o> {
     pub fn end(&mut self, hsp: HspIndex) {
         self.observer.hsp_end(self.format, hsp);
     }
+
+    pub fn subject_begin(&mut self, first_hsp: HspIndex) {
+        self.observer.subject_begin(self.format, first_hsp);
+    }
+
+    pub fn subject_end(&mut self, first_hsp: HspIndex) {
+        self.observer.subject_end(self.format, first_hsp);
+    }
 }
 
 // NCBI reference: ncbi-blast/c++/src/app/blast/blastp_app.cpp:195-295
@@ -229,7 +261,7 @@ impl<'o> FormatProbe<'o> {
 // }
 // formatter.PrintEpilog(opt);
 // ```
-// NCBI reference: ncbi-blast/c++/src/app/blast/blast_formatter.cpp:429-465
+// NCBI reference: ncbi-blast/c++/src/app/blast/blast_formatter.cpp:429-467
 // ```c
 // CRef<CSearchResultSet> results = m_RmtBlast->GetResultSet();
 // formatter.PrintProlog();

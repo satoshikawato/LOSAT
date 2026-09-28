@@ -112,28 +112,47 @@ function createWasi(args) {
   });
 }
 
-function createImports(wasi, memory, spawnThread) {
+// NCBI reference: c++/src/algo/blast/format/blast_format.cpp:68-93
+// CBlastFormat::CBlastFormat(..., CNcbiOstream& outfile, ...) : ..., m_Outfile(outfile),
+// A module may import host functions besides WASI, such as the output stream of the
+// LOSAT Web adapter (docs/web/abi_v2.md). The main instance receives the functions the
+// caller provides; a worker instance imports the same names but never calls them, so
+// each one there traps if it is called.
+function hostImports(module, provided = {}) {
+  const imports = {};
+  for (const { module: name, name: field, kind } of WebAssembly.Module.imports(module)) {
+    if (kind !== "function" || ["env", "wasi", "wasi_snapshot_preview1"].includes(name)) continue;
+    imports[name] = imports[name] || {};
+    imports[name][field] = (provided[name] && provided[name][field]) || (() => {
+      throw new Error(`${name}.${field} is not available on this thread`);
+    });
+  }
+  return imports;
+}
+
+function createImports(wasi, memory, spawnThread, extra) {
   return {
+    ...extra,
     env: { memory },
     wasi: { "thread-spawn": spawnThread },
     wasi_snapshot_preview1: wasi.wasiImport,
   };
 }
 
-async function instantiateWithMemory(module, memory, args, spawnThread) {
+async function instantiateWithMemory(module, memory, args, spawnThread, provided) {
   const wasi = createWasi(args);
   const instance = await WebAssembly.instantiate(
     module,
-    createImports(wasi, memory, spawnThread),
+    createImports(wasi, memory, spawnThread, hostImports(module, provided)),
   );
   return { instance, wasi };
 }
 
-async function instantiateMain(module, args, spawnThread, limits) {
+async function instantiateMain(module, args, spawnThread, limits, provided) {
   const initial = parsePositiveIntEnv("LOSAT_WASM_MEMORY_INITIAL_PAGES", limits.initial);
   const maximum = parsePositiveIntEnv("LOSAT_WASM_MEMORY_MAXIMUM_PAGES", limits.maximum);
   const memory = new WebAssembly.Memory({ initial, maximum, shared: true });
-  return { ...await instantiateWithMemory(module, memory, args, spawnThread), memory };
+  return { ...await instantiateWithMemory(module, memory, args, spawnThread, provided), memory };
 }
 
 async function terminateWorkers(workers) {
@@ -208,7 +227,7 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
     }
     event("ready", { tid }); return tid;
   };
-  const instantiated = await instantiateMain(module, args, spawnThread, identity.memory);
+  const instantiated = await instantiateMain(module, args, spawnThread, identity.memory, options.imports);
   mainMemory = instantiated.memory;
   const { instance, wasi } = instantiated;
   if (kind === "threaded-reactor") wasi.initialize(instance);

@@ -87,6 +87,8 @@ struct RecordingObserver {
     lengths: Vec<Arc<AtomicUsize>>,
     open: Vec<Option<(HspIndex, usize)>>,
     ranges: Vec<Vec<(HspIndex, usize, usize)>>,
+    open_subject: Vec<Option<(HspIndex, usize)>>,
+    subjects: Vec<Vec<(HspIndex, usize, usize)>>,
 }
 
 impl FormatObserver for RecordingObserver {
@@ -100,6 +102,23 @@ impl FormatObserver for RecordingObserver {
         let end = self.lengths[format].load(Ordering::SeqCst);
         self.ranges[format].push((hsp, start, end));
     }
+    fn subject_begin(&mut self, format: usize, first_hsp: HspIndex) {
+        assert!(self.open[format].is_none(), "subject heading inside an HSP");
+        assert!(
+            self.open_subject[format].is_none(),
+            "nested subject heading"
+        );
+        self.open_subject[format] = Some((first_hsp, self.lengths[format].load(Ordering::SeqCst)));
+    }
+    fn subject_end(&mut self, format: usize, first_hsp: HspIndex) {
+        let (begun, start) = self.open_subject[format].take().expect("end without begin");
+        assert_eq!(
+            begun, first_hsp,
+            "end for a different subject in format {format}"
+        );
+        let end = self.lengths[format].load(Ordering::SeqCst);
+        self.subjects[format].push((first_hsp, start, end));
+    }
 }
 
 /// What one `run_local` call wrote.
@@ -110,6 +129,9 @@ pub struct Run {
     pub hits: Vec<PairwiseHit>,
     /// Per format: (HSP index, start, end) of every row or section, in write order.
     pub ranges: Vec<Vec<(HspIndex, usize, usize)>>,
+    /// Per format: (index of the subject's first HSP, start, end) of every subject
+    /// heading, in write order.
+    pub subjects: Vec<Vec<(HspIndex, usize, usize)>>,
 }
 
 /// Calls `search` with one sink per format. With `observe`, it also requests the hit
@@ -130,6 +152,8 @@ pub fn run_formats(
         lengths: sinks.iter().map(|sink| sink.len.clone()).collect(),
         open: vec![None; formats.len()],
         ranges: vec![Vec::new(); formats.len()],
+        open_subject: vec![None; formats.len()],
+        subjects: vec![Vec::new(); formats.len()],
     };
     let collected = Arc::new(Mutex::new(Vec::new()));
     let collected_sink = collected.clone();
@@ -155,12 +179,19 @@ pub fn run_formats(
     for (format, open) in observer.open.iter().enumerate() {
         assert!(open.is_none(), "HSP left open in format {format}");
     }
+    for (format, open) in observer.open_subject.iter().enumerate() {
+        assert!(
+            open.is_none(),
+            "subject heading left open in format {format}"
+        );
+    }
     let hits = collected.lock().unwrap().clone();
     Run {
         outputs: sinks.into_iter().map(|sink| sink.bytes).collect(),
         diagnostics,
         hits,
         ranges: observer.ranges,
+        subjects: observer.subjects,
     }
 }
 
@@ -173,6 +204,7 @@ pub fn field(row: &[u8], index: usize) -> String {
 // NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
 // ```c
 // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
+//     // Add tab in front of field, except for the first field.
 //     if (iter != m_FieldsToShow.begin())
 //         m_Ostream << m_FieldDelimiter;
 //     x_PrintField(*iter);
@@ -294,6 +326,40 @@ pub fn assert_observer_ranges(run: &Run, [fmt0, fmt6, fmt7]: [usize; 3], context
         if let Some(&next) = query_blocks.get(q_idx + 1) {
             assert!(end <= next, "{context}: HSP {hsp} after its query block");
         }
+    }
+
+    // One heading per subject of each query, just before the section of its first HSP.
+    let group_starts: Vec<HspIndex> = (0..hits.len())
+        .filter(|&index| {
+            index == 0
+                || (hits[index].hit.q_idx, hits[index].hit.s_idx)
+                    != (hits[index - 1].hit.q_idx, hits[index - 1].hit.s_idx)
+        })
+        .collect();
+    let headings = &run.subjects[fmt0];
+    assert_eq!(
+        headings
+            .iter()
+            .map(|&(first, _, _)| first)
+            .collect::<Vec<_>>(),
+        group_starts,
+        "{context}: one heading per subject, marked with its first HSP"
+    );
+    for &(first, start, end) in headings {
+        let heading = std::str::from_utf8(&out0[start..end]).expect("utf-8 heading");
+        assert!(
+            heading.starts_with("> "),
+            "{context}: heading of HSP {first}: {heading:.20?}"
+        );
+        let section_start = sections
+            .iter()
+            .find(|&&(hsp, _, _)| hsp == first)
+            .map(|&(_, start, _)| start)
+            .expect("section of the first HSP");
+        assert_eq!(
+            end, section_start,
+            "{context}: heading of HSP {first} ends at its section"
+        );
     }
 }
 

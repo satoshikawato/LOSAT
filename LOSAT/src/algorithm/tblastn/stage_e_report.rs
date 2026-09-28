@@ -33,7 +33,7 @@ use crate::utils::seg::SegParams;
 //     x_PrintTabularReport(results, itr_num); return;
 // }
 // The formatter receives already sorted query hitlists from Stage D.
-// NCBI c++/src/app/blast/blast_formatter.cpp:429-465:
+// NCBI c++/src/app/blast/blast_formatter.cpp:429-467:
 // ITERATE(CSearchResultSet, result, *results) {
 //     ...
 //         formatter.PrintOneResultSet(**result, queries);
@@ -222,6 +222,7 @@ fn write_tabular(
                 let evalue = format_evalue_ncbi_tabular(linked.evalue);
                 // NCBI c++/src/objtools/align_format/tabular.cpp:1100-1108:
                 // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
+                //     // Add tab in front of field, except for the first field.
                 //     if (iter != m_FieldsToShow.begin())
                 //         m_Ostream << m_FieldDelimiter;
                 //     x_PrintField(*iter);
@@ -277,7 +278,7 @@ mod tests {
     // NCBI c++/src/app/blast/tblastn_app.cpp:288-301:
     // results = lcl_blast.Run(); formatter.PrintOneResultSet(**result, query);
     // Compare complete saved formatter bytes after the Stage D local search.
-    // NCBI c++/src/app/blast/blast_formatter.cpp:429-465:
+    // NCBI c++/src/app/blast/blast_formatter.cpp:429-467:
     // ITERATE(CSearchResultSet, result, *results) {
     //     ...
     //         formatter.PrintOneResultSet(**result, queries);

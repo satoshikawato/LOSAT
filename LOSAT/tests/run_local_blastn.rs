@@ -97,7 +97,7 @@ impl Inputs {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/app/blast/blast_formatter.cpp:429-465
+// NCBI reference: ncbi-blast/c++/src/app/blast/blast_formatter.cpp:429-467
 // ```c
 // CRef<CSearchResultSet> results = m_RmtBlast->GetResultSet();
 // formatter.PrintProlog();
@@ -157,6 +157,7 @@ fn every_format_of_one_search_matches_the_cli_run_of_that_format() {
 // NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
 // ```c
 // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
+//     // Add tab in front of field, except for the first field.
 //     if (iter != m_FieldsToShow.begin())
 //         m_Ostream << m_FieldDelimiter;
 //     x_PrintField(*iter);

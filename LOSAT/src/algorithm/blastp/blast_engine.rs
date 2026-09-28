@@ -2464,6 +2464,7 @@ fn write_blastp_tabular_output(
             // NCBI reference: c++/src/objtools/align_format/tabular.cpp:1100-1108
             // ```c
             // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
+            //     // Add tab in front of field, except for the first field.
             //     if (iter != m_FieldsToShow.begin())
             //         m_Ostream << m_FieldDelimiter;
             //     x_PrintField(*iter);
@@ -2521,6 +2522,7 @@ fn blastp_hit_list_hsp_count(hit_lists: &[Option<BlastpHitList>]) -> usize {
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
 // ```c
 // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
+//     // Add tab in front of field, except for the first field.
 //     if (iter != m_FieldsToShow.begin())
 //         m_Ostream << m_FieldDelimiter;
 //     x_PrintField(*iter);
@@ -2565,6 +2567,7 @@ fn write_blastp_tabular_hit_lists(
                 // NCBI reference: c++/src/objtools/align_format/tabular.cpp:1100-1108
                 // ```c
                 // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
+                //     // Add tab in front of field, except for the first field.
                 //     if (iter != m_FieldsToShow.begin())
                 //         m_Ostream << m_FieldDelimiter;
                 //     x_PrintField(*iter);
@@ -2632,6 +2635,7 @@ fn write_blastp_tabular_hit_lists(
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
 // ```c
 // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
+//     // Add tab in front of field, except for the first field.
 //     if (iter != m_FieldsToShow.begin())
 //         m_Ostream << m_FieldDelimiter;
 //     x_PrintField(*iter);
@@ -6269,6 +6273,7 @@ fn run_resolved_in_pool(
             // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
             // ```c
             // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
+            //     // Add tab in front of field, except for the first field.
             //     if (iter != m_FieldsToShow.begin())
             //         m_Ostream << m_FieldDelimiter;
             //     x_PrintField(*iter);
@@ -6345,7 +6350,7 @@ fn run_resolved_in_pool(
     // status = BlastHSPStreamWrite(hsp_stream, &hsp_list);
     // ```
     let output_format_start = blastp_timing_start(timing_enabled);
-    // NCBI reference: ncbi-blast/c++/src/app/blast/blast_formatter.cpp:429-465
+    // NCBI reference: ncbi-blast/c++/src/app/blast/blast_formatter.cpp:429-467
     // ```c
     // CRef<CSearchResultSet> results = m_RmtBlast->GetResultSet();
     // formatter.PrintProlog();
@@ -6438,6 +6443,7 @@ fn run_resolved_in_pool(
                     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
                     // ```c
                     // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
+                    //     // Add tab in front of field, except for the first field.
                     //     if (iter != m_FieldsToShow.begin())
                     //         m_Ostream << m_FieldDelimiter;
                     //     x_PrintField(*iter);
@@ -6461,6 +6467,7 @@ fn run_resolved_in_pool(
                     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
                     // ```c
                     // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
+                    //     // Add tab in front of field, except for the first field.
                     //     if (iter != m_FieldsToShow.begin())
                     //         m_Ostream << m_FieldDelimiter;
                     //     x_PrintField(*iter);
@@ -7488,6 +7495,7 @@ mod tests {
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
     // ```c
     // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
+    //     // Add tab in front of field, except for the first field.
     //     if (iter != m_FieldsToShow.begin())
     //         m_Ostream << m_FieldDelimiter;
     //     x_PrintField(*iter);
@@ -7528,6 +7536,7 @@ mod tests {
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
     // ```c
     // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
+    //     // Add tab in front of field, except for the first field.
     //     if (iter != m_FieldsToShow.begin())
     //         m_Ostream << m_FieldDelimiter;
     //     x_PrintField(*iter);

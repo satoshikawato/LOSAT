@@ -1020,6 +1020,7 @@ pub fn write_output_blastn_hitlists_to_writer<W: Write>(
                 // NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
                 // ```c
                 // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
+                //     // Add tab in front of field, except for the first field.
                 //     if (iter != m_FieldsToShow.begin())
                 //         m_Ostream << m_FieldDelimiter;
                 //     x_PrintField(*iter);

@@ -55,7 +55,7 @@ fn run(
     })
 }
 
-// NCBI reference: ncbi-blast/c++/src/app/blast/blast_formatter.cpp:429-465
+// NCBI reference: ncbi-blast/c++/src/app/blast/blast_formatter.cpp:429-467
 // ```c
 // CRef<CSearchResultSet> results = m_RmtBlast->GetResultSet();
 // formatter.PrintProlog();

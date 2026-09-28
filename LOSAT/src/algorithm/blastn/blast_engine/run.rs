@@ -4210,7 +4210,7 @@ fn post_process_hits_and_write(
     // ```c
     // static int s_EvalueCompareHSPLists(const void* v1, const void* v2) { ... }
     // ```
-    // NCBI reference: ncbi-blast/c++/src/app/blast/blast_formatter.cpp:429-465
+    // NCBI reference: ncbi-blast/c++/src/app/blast/blast_formatter.cpp:429-467
     // ```c
     // CRef<CSearchResultSet> results = m_RmtBlast->GetResultSet();
     // formatter.PrintProlog();
@@ -4407,7 +4407,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     )
 }
 
-// NCBI reference: ncbi-blast/c++/src/app/blast/blast_formatter.cpp:429-465
+// NCBI reference: ncbi-blast/c++/src/app/blast/blast_formatter.cpp:429-467
 // ```c
 // CRef<CSearchResultSet> results = m_RmtBlast->GetResultSet();
 // formatter.PrintProlog();

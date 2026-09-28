@@ -513,7 +513,7 @@ struct SearchSettings {
 // NCBI c++/src/app/blast/tblastn_app.cpp:288-301:
 // results = lcl_blast.Run();
 // formatter.PrintOneResultSet(**result, query);
-// NCBI c++/src/app/blast/blast_formatter.cpp:429-465:
+// NCBI c++/src/app/blast/blast_formatter.cpp:429-467:
 // CRef<CSearchResultSet> results = m_RmtBlast->GetResultSet();
 // formatter.PrintProlog();
 // ...

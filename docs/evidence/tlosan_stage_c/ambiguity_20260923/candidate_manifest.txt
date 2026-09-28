@@ -1,0 +1,7 @@
+NCBI source commit: 598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4
+NCBI binary SHA256: e3956f1e107a30439d56c8f72fae4267a7d62ebcc16e4f99d4baf2bdf00402e0
+Probe source SHA256: ce763167e30c1630bac05f15c5a86209d40c90c125ba4238447770a95d6634e3
+Comparison-only LD_PRELOAD; LOSAT runtime and build do not call NCBI.
+Final NCBI output bytes equal the unprobed raw_isolation_fields.out.
+WordFinder calls: 6; candidate pairs: 181
+Command: ['/home/kawato/micromamba/bin/tblastn', '-task', 'tblastn', '-query', '/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/tlosan_stage_c/ambiguity_20260923/query.faa', '-subject', '/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/tlosan_stage_c/ambiguity_20260923/subjects.fna', '-db_gencode', '1', '-matrix', 'BLOSUM62', '-word_size', '3', '-threshold', '13', '-window_size', '40', '-gapopen', '11', '-gapextend', '1', '-evalue', '10000', '-num_threads', '1', '-comp_based_stats', '0', '-seg', 'no', '-sum_stats', 'false', '-outfmt', '6 qseqid sseqid score qstart qend sstart send sframe qseq sseq']

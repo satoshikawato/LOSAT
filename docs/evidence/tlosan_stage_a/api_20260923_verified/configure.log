@@ -1,0 +1,861 @@
+configure: loading site script /tmp/tmp.v49E5a0dWE/source/c++/src/build-system/config.site
+
+configure: creating cache config.cache
+checking TeamCity build number... none
+checking VCS revision... unknown
+checking NCBI stable components' version... unknown
+checking build system type... x86_64-unknown-linux-gnu
+checking host system type... x86_64-unknown-linux-gnu
+checking for a BSD-compatible install... /usr/bin/install -c
+checking for gcc... gcc
+checking whether the C compiler works... yes
+checking for C compiler default output file name... a.out
+checking for suffix of executables... 
+checking whether we are cross compiling... no
+checking for suffix of object files... o
+checking whether we are using the GNU C compiler... yes
+checking whether gcc accepts -g... yes
+checking for gcc option to accept ISO C89... none needed
+checking how to run the C preprocessor... gcc -E
+checking for x86_64-unknown-linux-gnu-gcc... no
+checking for gcc... gcc
+checking whether we are using the GNU C compiler... yes
+checking whether gcc accepts -g... yes
+checking for gcc option to accept ISO C89... none needed
+checking whether the C compiler works... yes
+checking for C compiler default output file name... a.out
+checking for suffix of executables... 
+checking whether we are cross compiling... no
+checking for suffix of object files... o
+checking how to run the C preprocessor... gcc -E
+checking for g++... g++
+checking whether we are using the GNU C++ compiler... yes
+checking whether g++ accepts -g... yes
+adjusted C   compiler: /usr/bin/gcc 
+adjusted C++ compiler: /usr/bin/g++ 
+checking for grep that handles long lines and -e... /usr/bin/grep
+checking for egrep... /usr/bin/grep -E
+checking for ANSI C header files... yes
+checking for sys/types.h... yes
+checking for sys/stat.h... yes
+checking for stdlib.h... yes
+checking for string.h... yes
+checking for memory.h... yes
+checking for strings.h... yes
+checking for inttypes.h... yes
+checking for stdint.h... yes
+checking for unistd.h... yes
+checking minix/config.h usability... no
+checking minix/config.h presence... no
+checking for minix/config.h... no
+checking whether it is safe to define __EXTENSIONS__... yes
+checking whether /usr/bin/gcc  has an option to export all symbols... -Wl,-export-dynamic
+checking whether /usr/bin/gcc  supports -Wl,--{en,dis}able-new-dtags... yes
+checking whether /usr/bin/gcc  has an option to discard unneeded shared libraries... -Wl,--as-needed
+checking whether /usr/bin/gcc  has an option to link in whole static archives... -Wl,--whole-archive
+checking whether _LIBCPP_VERSION is declared... no
+checking how to enable modern C++ features in /usr/bin/g++ ... -std=gnu++20
+checking whether /usr/bin/g++  -std=gnu++20 supports C++20 <format>... yes
+checking how to enable modern C features in /usr/bin/gcc ... -std=gnu18 -fgnu89-inline
+checking whether /usr/bin/gcc  supports -msse4.2... yes
+checking whether /usr/bin/g++  -std=gnu++20 supports -msse4.2... yes
+checking for dpkg-architecture... /usr/bin/dpkg-architecture
+checking for gawk... gawk
+checking for GNU make... make
+checking for gawk... /usr/bin/gawk
+checking for make... /usr/bin/make
+checking whether ln -s works... yes
+checking for ranlib... ranlib
+checking for ar... ar cr
+checking ranlib's effectiveness... neutral
+checking for ccache... no
+checking for tail... /usr/bin/tail
+checking whether /usr/bin/tail accepts modern syntax (-n N)... yes
+checking for basename... /usr/bin/basename
+checking for sed... /usr/bin/sed
+checking for touch... /bin/touch
+checking for egrep... (cached) /usr/bin/grep -E
+checking how to run /usr/bin/grep -E quietly... /usr/bin/grep -E -q
+checking for valgrind... valgrind
+checking for ldd... /bin/ldd
+checking whether /bin/ldd accepts -r... yes
+checking for uuidgen... /usr/bin/uuidgen
+checking for cd_reporter... no
+checking for size_t... yes
+checking size of size_t... 8
+checking for amq... no
+checking whether /usr/bin/gcc  -msse4.2 -std=gnu18 -fgnu89-inline supports -Wl,--no-allow-shlib-undefined... yes
+checking how to run the C preprocessor... gcc -E
+checking whether cross-directory hard links work... yes
+checking how to run the C++ preprocessor... /usr/bin/g++  -std=gnu++20 -msse4.2 -E
+checking iostream usability... yes
+checking iostream presence... yes
+checking for iostream... yes
+checking iostream.h usability... no
+checking iostream.h presence... no
+checking for iostream.h... no
+checking fstream usability... yes
+checking fstream presence... yes
+checking for fstream... yes
+checking fstream.h usability... no
+checking fstream.h presence... no
+checking for fstream.h... no
+checking strstream usability... yes
+checking strstream presence... yes
+checking for strstream... yes
+checking strstream.h usability... no
+checking strstream.h presence... no
+checking for strstream.h... no
+checking strstrea.h usability... no
+checking strstrea.h presence... no
+checking for strstrea.h... no
+checking for inttypes.h... (cached) yes
+checking limits usability... yes
+checking limits presence... yes
+checking for limits... yes
+checking limits.h usability... yes
+checking limits.h presence... yes
+checking for limits.h... yes
+checking for unistd.h... (cached) yes
+checking windows.h usability... no
+checking windows.h presence... no
+checking for windows.h... no
+checking for wstring... yes
+checking for socklen_t... yes
+checking atomic.h usability... no
+checking atomic.h presence... no
+checking for atomic.h... no
+checking cpuid.h usability... yes
+checking cpuid.h presence... yes
+checking for cpuid.h... yes
+checking dlfcn.h usability... yes
+checking dlfcn.h presence... yes
+checking for dlfcn.h... yes
+checking ieeefp.h usability... no
+checking ieeefp.h presence... no
+checking for ieeefp.h... no
+checking poll.h usability... yes
+checking poll.h presence... yes
+checking for poll.h... yes
+checking stdio.h usability... yes
+checking stdio.h presence... yes
+checking for stdio.h... yes
+checking for string.h... (cached) yes
+checking for strings.h... (cached) yes
+checking sys/epoll.h usability... yes
+checking sys/epoll.h presence... yes
+checking for sys/epoll.h... yes
+checking sys/mount.h usability... yes
+checking sys/mount.h presence... yes
+checking for sys/mount.h... yes
+checking sys/sockio.h usability... no
+checking sys/sockio.h presence... no
+checking for sys/sockio.h... no
+checking for sys/stat.h... (cached) yes
+checking sys/statvfs.h usability... yes
+checking sys/statvfs.h presence... yes
+checking for sys/statvfs.h... yes
+checking sys/sysinfo.h usability... yes
+checking sys/sysinfo.h presence... yes
+checking for sys/sysinfo.h... yes
+checking sys/sysmacros.h usability... yes
+checking sys/sysmacros.h presence... yes
+checking for sys/sysmacros.h... yes
+checking for sys/types.h... (cached) yes
+checking sys/vfs.h usability... yes
+checking sys/vfs.h presence... yes
+checking for sys/vfs.h... yes
+checking x86intrin.h usability... yes
+checking x86intrin.h presence... yes
+checking for x86intrin.h... yes
+checking arpa/inet.h usability... yes
+checking arpa/inet.h presence... yes
+checking for arpa/inet.h... yes
+checking dirent.h usability... yes
+checking dirent.h presence... yes
+checking for dirent.h... yes
+checking errno.h usability... yes
+checking errno.h presence... yes
+checking for errno.h... yes
+checking fcntl.h usability... yes
+checking fcntl.h presence... yes
+checking for fcntl.h... yes
+checking getopt.h usability... yes
+checking getopt.h presence... yes
+checking for getopt.h... yes
+checking langinfo.h usability... yes
+checking langinfo.h presence... yes
+checking for langinfo.h... yes
+checking libgen.h usability... yes
+checking libgen.h presence... yes
+checking for libgen.h... yes
+checking locale.h usability... yes
+checking locale.h presence... yes
+checking for locale.h... yes
+checking malloc.h usability... yes
+checking malloc.h presence... yes
+checking for malloc.h... yes
+checking net/inet/in.h usability... no
+checking net/inet/in.h presence... no
+checking for net/inet/in.h... no
+checking netdb.h usability... yes
+checking netdb.h presence... yes
+checking for netdb.h... yes
+checking netinet/in.h usability... yes
+checking netinet/in.h presence... yes
+checking for netinet/in.h... yes
+checking netinet/tcp.h usability... yes
+checking netinet/tcp.h presence... yes
+checking for netinet/tcp.h... yes
+checking paths.h usability... yes
+checking paths.h presence... yes
+checking for paths.h... yes
+checking select.h usability... no
+checking select.h presence... no
+checking for select.h... no
+checking signal.h usability... yes
+checking signal.h presence... yes
+checking for signal.h... yes
+checking stdbool.h usability... yes
+checking stdbool.h presence... yes
+checking for stdbool.h... yes
+checking stddef.h usability... yes
+checking stddef.h presence... yes
+checking for stddef.h... yes
+checking sys/eventfd.h usability... yes
+checking sys/eventfd.h presence... yes
+checking for sys/eventfd.h... yes
+checking sys/file.h usability... yes
+checking sys/file.h presence... yes
+checking for sys/file.h... yes
+checking sys/ioctl.h usability... yes
+checking sys/ioctl.h presence... yes
+checking for sys/ioctl.h... yes
+checking sys/param.h usability... yes
+checking sys/param.h presence... yes
+checking for sys/param.h... yes
+checking sys/resource.h usability... yes
+checking sys/resource.h presence... yes
+checking for sys/resource.h... yes
+checking sys/select.h usability... yes
+checking sys/select.h presence... yes
+checking for sys/select.h... yes
+checking sys/socket.h usability... yes
+checking sys/socket.h presence... yes
+checking for sys/socket.h... yes
+checking sys/time.h usability... yes
+checking sys/time.h presence... yes
+checking for sys/time.h... yes
+checking sys/wait.h usability... yes
+checking sys/wait.h presence... yes
+checking for sys/wait.h... yes
+checking valgrind/memcheck.h usability... yes
+checking valgrind/memcheck.h presence... yes
+checking for valgrind/memcheck.h... yes
+checking wchar.h usability... yes
+checking wchar.h presence... yes
+checking for wchar.h... yes
+checking for working alloca.h... yes
+checking for alloca... yes
+checking whether time.h and sys/time.h may both be included... yes
+checking cxxabi.h usability... yes
+checking cxxabi.h presence... yes
+checking for cxxabi.h... yes
+checking whether abi::__cxa_demangle is declared... yes
+checking omp.h usability... yes
+checking omp.h presence... yes
+checking for omp.h... yes
+checking for gethostbyname_r... 6
+checking for gethostbyaddr_r... 8
+checking for getservbyname_r... 6
+checking for getpwuid_r... 5
+checking for getlogin_r... yes
+checking for localtime_r... yes
+checking for pthread_setconcurrency... yes
+checking for pthread_atfork... yes
+checking return type of localtime_r... struct
+checking whether pthread mutexes are available... yes
+checking for vprintf... yes
+checking for _doprnt... no
+checking for accept4... yes
+checking for alarm... yes
+checking for asprintf... yes
+checking for atoll... yes
+checking for basename... yes
+checking for bcopy... yes
+checking for __builtin_mul_overflow... no
+checking for dbopen... no
+checking for daemon... yes
+checking for euidaccess... yes
+checking for eventfd... yes
+checking for execvpe... yes
+checking for fseeko... yes
+checking for fstat... yes
+checking for getgrouplist... yes
+checking for gethrtime... no
+checking for getopt... yes
+checking for getpagesize... yes
+checking for getpass... yes
+checking for getpassphrase... no
+checking for getpwuid... yes
+checking for getrusage... yes
+checking for gettimeofday... yes
+checking for getuid... yes
+checking for lchown... yes
+checking for lutimes... yes
+checking for mallinfo... yes
+checking for mallinfo2... yes
+checking for malloc_options... no
+checking for memfd_create... yes
+checking for memmove... yes
+checking for memrchr... yes
+checking for mkostemp... yes
+checking for nl_langinfo... yes
+checking for pipe2... yes
+checking for poll... yes
+checking for putenv... yes
+checking for readpassphrase... no
+checking for readv... yes
+checking for realpath... yes
+checking for secure_getenv... yes
+checking for select... yes
+checking for setenv... yes
+checking for setitimer... yes
+checking for setrlimit... yes
+checking for snprintf... yes
+checking for statfs... yes
+checking for statvfs... yes
+checking for strcasecmp... yes
+checking for strdup... yes
+checking for strerror... yes
+checking for strlcat... yes
+checking for strlcpy... yes
+checking for strndup... yes
+checking for strnlen... yes
+checking for strsep... yes
+checking for strtok_r... yes
+checking for sysmp... no
+checking for timegm... yes
+checking for usleep... yes
+checking for utimes... yes
+checking for vasprintf... yes
+checking for vsnprintf... yes
+checking for writev... yes
+checking return type of signal handlers... void
+checking whether select updates the timeout when interrupted... yes
+checking whether strcasecmp treats letters as lowercase... yes
+checking for Linux-like sysinfo with 1 arg... yes
+checking for getloadavg... yes
+checking for readdir_r... 3
+checking whether stdio supports locking... yes
+checking for an ANSI C-conforming const... yes
+checking whether byte ordering is bigendian... no
+checking whether char is unsigned... no
+checking size of char... 1
+checking size of double... 8
+checking size of float... 4
+checking size of int... 4
+checking size of long... 8
+checking size of long double... 16
+checking size of long long... 8
+checking size of short... 2
+checking size of void*... 8
+checking size of wchar_t... 4
+checking size of __int64... 0
+checking for intptr_t... yes
+checking for uintptr_t... yes
+checking for struct sockaddr_in.sin_len... no
+checking for struct tm.tm_zone... yes
+checking for struct tm.__tm_zone... no
+checking whether function prototypes can use throw(...)... yes
+checking for ios(_base)::register_callback... yes
+checking for SysV semaphores... yes
+checking for union semun... no
+checking which way the stack grows... down
+checking whether the preprocessor supports C99-style variadic macros... yes
+checking whether the preprocessor supports GNU-style variadic macros... yes
+checking how to force inlining... inline __attribute__((always_inline))
+checking whether /usr/bin/gcc  -msse4.2 -std=gnu18 -fgnu89-inline supports __attribute__((visibility("default")))... (cached) unnecessary
+checking whether the C compiler supports C99 restrict... __restrict__
+checking whether the C++ compiler supports C99 restrict... __restrict__
+checking syntax for declaring thread-local variables... __thread
+checking whether FIONBIO requires BSD_COMP to be defined... no
+checking whether INADDR_NONE is defined... yes
+checking whether unaligned reads are permissible... yes
+checking whether /usr/bin/gcc  -msse4.2 -std=gnu18 -fgnu89-inline supports SIMD vector arithmetic... yes
+checking whether /usr/bin/gcc  -msse4.2 -std=gnu18 -fgnu89-inline supports -funsafe-math-optimizations... yes
+checking whether /usr/bin/gcc  -msse4.2 -std=gnu18 -fgnu89-inline supports -msse4.1... yes
+checking whether /usr/bin/gcc  -msse4.2 -std=gnu18 -fgnu89-inline supports -maes... yes
+checking whether /usr/bin/gcc  -msse4.2 -std=gnu18 -fgnu89-inline supports -fdiagnostics-color=always... yes
+checking whether /usr/bin/g++  -std=gnu++20 -msse4.2 supports __builtin_bswap32... yes
+checking whether /usr/bin/g++  -std=gnu++20 -msse4.2 supports __builtin_expect... yes
+checking whether in-house NCBI resources are available... no
+checking library needed for 64-bit std::atomic... none required
+checking for library containing gethostbyname... none required
+checking for library containing connect... none required
+checking for res_search in -lresolv... yes
+checking for inet_ntoa_r... no
+checking for getaddrinfo... yes
+checking for getnameinfo... yes
+checking for freehostent... no
+checking for gethostent_r... yes
+checking for getipnodebyaddr... no
+checking for getipnodebyname... no
+checking for inet_ntop... yes
+checking for socketpair... yes
+checking for erf... yes
+checking for library containing kstat_open... no
+checking for library containing rstat... no
+checking for library containing setkey... no
+checking for library containing dlopen... none required
+checking for library containing uuid_generate... no
+checking for library containing fuse_loop... no
+checking for library containing clock_gettime... none required
+checking for library containing cplus_demangle... no
+checking for clock_gettime... yes
+checking for nanosleep... yes
+checking for pthread_cond_timedwait_relative_np... no
+checking for pthread_condattr_setclock... yes
+checking for sched_yield... yes
+checking whether CLOCK_MONOTONIC is declared... yes
+checking whether CLOCK_SGI_CYCLE is declared... no
+checking whether CLOCK_REALTIME is declared... yes
+checking for library containing iconv... none required
+checking for iconv declaration... 
+       extern size_t iconv (iconv_t cd, char * *inbuf, size_t *inbytesleft, char * *outbuf, size_t *outbytesleft);
+checking for libdw... no
+checking backward.hpp usability... no
+checking backward.hpp presence... no
+checking for backward.hpp... no
+checking for libz... yes
+checking for libbz2... yes
+checking for liblzo2... no
+checking for libzstd... yes
+checking for libpcre... no
+checking for libpcre2-8... no
+configure: using local PCRE copy in util/regexp
+configure: using local mbedTLS copy in connect/mbedtls
+checking for libgmp... no
+checking for libgcrypt-config... (cached) no
+checking for libhogweed... no
+checking for libgnutls-config... (cached) no
+checking for libssl... yes
+checking for krb5-config... /home/kawato/micromamba/bin/krb5-config
+checking for libgssapi_krb5 in /home/kawato/micromamba... yes
+checking for error_message... yes
+checking com_err.h usability... yes
+checking com_err.h presence... yes
+checking for com_err.h... yes
+checking roken.h usability... no
+checking roken.h presence... no
+checking for roken.h... no
+checking for curl-config... /home/kawato/micromamba/bin/curl-config
+checking for libcurl in /home/kawato/micromamba... yes
+checking for reentrant Sybase libraries... no
+checking for Sybase... no
+checking for FreeTDS... no
+checking for mysql_config... no
+checking for Berkeley DB libraries... no
+checking for python... /home/kawato/micromamba/bin/python
+checking for usable Python 3.13 libraries... yes
+checking for python2.5... no
+checking for python2.6... no
+checking for python2.7... no
+checking for python3... /home/kawato/micromamba/bin/python3
+checking for usable Python 3.13 libraries... yes
+checking for perl... /bin/perl
+checking for usable Perl libraries... no
+checking Boost version... 
+checking for Boost library name tag... -gcc133-mt-x64- (autodetected)
+checking for Boost.Regex... no
+checking for Boost.Spirit... no
+checking for Boost.System... no
+checking for Boost.Chrono... no
+checking for Boost.Filesystem... no
+checking for Boost.Iostreams... no
+checking for Boost.Program-Options... no
+checking for Boost.Serialization... no
+checking for Boost.Test... no
+checking for Boost.Thread... no
+checking for the NCBI C toolkit... no
+checking for libncbicrypt... no
+checking for X... no
+checking for XextCreateExtension in -lXext... no
+checking for XtMainLoop in -lXt... no
+checking for XmuMakeAtom in -lXmu... no
+checking for OpenGL... no
+checking for wx-config... no
+checking for wxWidgets... no
+checking for FastCGI libraries... no
+checking for FCGX_Accept_r... no
+checking for libfastcgipp... no
+checking for NCBI SSS directories in /sss/BUILD... no
+checking for SP directories... no
+checking for ORBacus... no
+checking for ICU in /home/kawato/micromamba... yes
+checking for libexpat... no
+checking for libsablot... no
+checking for libxml2... yes
+checking for libxslt... no
+checking for xsltproc... /home/kawato/micromamba/bin/xsltproc
+checking for libexslt... no
+checking for Xerces-C++... no
+checking for Xalan-C++... no
+checking for Zorba... no
+checking for libsqlite3... yes
+checking sqlite3async.h usability... no
+checking sqlite3async.h presence... no
+checking for sqlite3async.h... no
+checking for sqlite3_unlock_notify... yes
+checking for liboechem... no
+checking for libdrmaa... no
+checking for libdrmaa2... no
+checking for libmuparser... no
+checking for libhdf5_cpp... no
+checking for libjpeg... no
+checking for libpng... no
+checking for libtiff... no
+checking for libgif... no
+checking for libungif... no
+checking for libXpm... no
+checking for freetype-config... /home/kawato/micromamba/bin/freetype-config
+checking whether FREETYPE_INCLUDE needs doctoring... no
+checking whether FreeType works... yes
+checking for libftgl... no
+checking for libmagic... no
+checking for libmimetic... no
+checking for soapcpp2... no
+checking for wsdl2h... no
+checking for libgsoapssl++... no
+checking for libavrocpp... no
+checking for USC Cereal... no
+checking for libsasl2... no
+checking for libmongoclient... no
+checking for libmongocxx... no
+checking for libleveldb... no
+checking for liburing... no
+checking for librocksdb... no
+checking for libgmock... no
+checking lapacke.h usability... no
+checking lapacke.h presence... no
+checking for lapacke.h... no
+checking lapacke/lapacke.h usability... no
+checking lapacke/lapacke.h presence... no
+checking for lapacke/lapacke.h... no
+checking clapack.h usability... no
+checking clapack.h presence... no
+checking for clapack.h... no
+checking Accelerate/Accelerate.h usability... no
+checking Accelerate/Accelerate.h presence... no
+checking for Accelerate/Accelerate.h... no
+checking for liblapack... no
+checking for liblmdb... no
+configure: using local LMDB copy in util/lmdb
+checking for libuv... yes
+checking for libssh... no
+checking for libssh2... no
+checking for libcassandra... no
+checking for libnghttp2... no
+checking for libh2o... no
+checking for influxdb-cpp... no
+checking for libxlsxwriter... no
+checking for libprotobuf... no
+checking for libcares... no
+checking for libre2... no
+checking gsl/gsl usability... no
+checking gsl/gsl presence... no
+checking for gsl/gsl... no
+checking for libaws-cpp-sdk-s3... no
+checking for libcrc32c... no
+checking for libgoogle_cloud_cpp_storage... no
+checking for libhiredis... no
+checking for libparquet... no
+checking for librdkafka... no
+checking for libcppkafka... no
+checking for libthrift... no
+checking for JSON for Modern C++... no
+checking for libyaml-cpp... no
+checking for libopentracing... no
+checking for libjaegertracing... no
+checking for libopentelemetry_exporter_otlp_grpc... no
+configure: looking for configurables below /tmp/tmp.v49E5a0dWE/source/c++...
+configure: ...done
+configure: updating cache config.cache
+configure: creating /tmp/tmp.v49E5a0dWE/build/status/config.status
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/corelib/Makefile.precompile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/corelib/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/corelib/ncbicfg.c
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/dbapi/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/dbapi/driver/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/dbapi/driver/odbc/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/html/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/misc/jsonwrapp/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/misc/jsonwrapp/test/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/misc/third_party/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/misc/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/misc/third_party_static/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objtools/simple/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objtools/align_format/unit_test/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objtools/align_format/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objtools/edit/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objtools/alnmgr/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objtools/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objtools/eutils/espell/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objtools/eutils/esearch/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objtools/eutils/efetch/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objtools/eutils/egquery/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objtools/eutils/esummary/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objtools/eutils/uilist/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objtools/eutils/epost/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objtools/eutils/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objtools/eutils/elink/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objtools/eutils/api/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objtools/eutils/einfo/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objtools/eutils/ehistory/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objtools/format/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objtools/cleanup/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objtools/pubseq_gateway/client/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objtools/pubseq_gateway/client/test/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objtools/pubseq_gateway/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objtools/seqmasks_io/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objtools/readers/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objtools/blast/services/unit_test/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objtools/blast/services/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objtools/blast/seqdb_reader/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objtools/blast/seqdb_reader/test/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objtools/blast/seqdb_reader/demo/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objtools/blast/seqdb_writer/unit_test/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objtools/blast/seqdb_writer/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objtools/blast/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objtools/blast/blastdb_format/unit_test/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objtools/blast/blastdb_format/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objtools/data_loaders/genbank/id1/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objtools/data_loaders/genbank/id2/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objtools/data_loaders/genbank/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objtools/data_loaders/genbank/gicache/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objtools/data_loaders/genbank/cache/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objtools/data_loaders/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objtools/data_loaders/blastdb/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objtools/logging/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/util/lmdbxx/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/util/creaders/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/util/profile/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/util/xregexp/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/util/lmdb/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/util/tables/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/util/compress/bzip2/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/util/compress/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/util/compress/api/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/util/compress/zlib_cloudflare/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/util/compress/zlib/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/util/regexp/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/util/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/util/sequtil/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/util/bitset/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/app/dustmasker/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/app/segmasker/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/app/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/app/blastvdb/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/app/blast/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/app/blastdb/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/app/winmasker/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/serial/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/serial/datatool/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/serial/grpc_integration/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/cgi/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/sra/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/sra/readers/sra/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/sra/readers/bam/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/sra/readers/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/sra/data_loaders/wgs/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/sra/data_loaders/sra/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/sra/data_loaders/sra/test/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/sra/data_loaders/bam/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/sra/data_loaders/bam/test/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/sra/data_loaders/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/sra/data_loaders/csra/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/sra/data_loaders/csra/test/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/sra/data_loaders/vdbgraph/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/sra/data_loaders/vdbgraph/test/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/sra/data_loaders/snp/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/connect/services/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/connect/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/connect/ext/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/algo/dustmask/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/algo/segmask/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/algo/winmask/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/algo/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/algo/blast/proteinkmer/unit_test/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/algo/blast/proteinkmer/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/algo/blast/unit_tests/seqdb_reader/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/algo/blast/unit_tests/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/algo/blast/unit_tests/api/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/algo/blast/unit_tests/blast_format/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/algo/blast/unit_tests/blastdb/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/algo/blast/dbindex/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/algo/blast/dbindex/makeindex/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/algo/blast/composition_adjustment/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/algo/blast/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/algo/blast/format/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/algo/blast/blastinput/unit_test/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/algo/blast/blastinput/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/algo/blast/api/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/algo/blast/vdb/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/algo/blast/core/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/algo/blast/igblast/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/pcassay/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/variation_libs/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/variation_libs/dbsnp/tooltip_service/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/variation_libs/dbsnp/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/variation_libs/dbsnp/search_by_rsid/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/submit/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/gbproj/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/medlars/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/id1/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/cn3d/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/varrep/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/taxon1/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/medline/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/id2/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/docsum/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/biotree/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/featdef/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/biblio/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/mmdb/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/valerr/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/blastxml/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/variation/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/genomecoll/gc_cli/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/genomecoll/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/pcsubstance/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/general/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/valid/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/cdd/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/tinyseq/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/remap/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/macro/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/coords/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/seqcode/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/pcassay2/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/seqsplit/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/entrez2/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/homologene/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/entrezgene/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/seqtest/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/pub/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/mim/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/ncbimime/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/seq/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/genesbyloc/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/proj/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/seqedit/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/pubmed/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/scoremat/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/blast/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/objprt/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/blastxml2/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/dbsnp/primary_track/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/dbsnp/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/trackmgr/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/taxon3/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/omssa/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/blastdb/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/insdseq/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/gbseq/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/seqset/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objects/access/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/db/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/db/sqlite/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/run_sybase_app.sh
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/build-system/project_tree_builder/msbuild/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/build-system/project_tree_builder/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/new_module.sh
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/Makefile.lib.tmpl
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/Makefile.app
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/Makefile.metal.tmpl
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/install.sh
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/reconfigure.sh
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/Makefile.is_dll_support
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/Makefile.metal
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/build-system/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/Makefile.meta
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/Makefile.app.tmpl
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/cmake/unused/NCBI-ToolkitConfig.cmake
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/cmake/config.cmake.h
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/cmake/ncbiconf_msvc_site.h
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/cmake/toolchains/x86_64-darwin-clang.cmake
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/cmake/toolchains/aarch64-darwin-clang.cmake
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/cmake/toolchains/aarch64-linux-gcc.cmake
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/cmake/toolchains/arm64-darwin-clang.cmake
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/cmake/toolchains/x86_64-linux-icc.cmake
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/cmake/toolchains/x86_64-linux-gcc.cmake
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/cmake/toolchains/x86_64-linux-clang.cmake
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/Makefile.top_builddir
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/Makefile.both
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/config.h
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/Makefile.rules_with_autodep
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/Makefile.null
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/relocate.sh
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/Makefile.lib
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/run_with_cd_reporter.sh
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/build-system/helpers/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/sysdep.sh
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/Makefile.rules
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/run_with_cd_reporter.py
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/check.cfg
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/Makefile.mk
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/Makefile.protobuf
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/Makefile.dll
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objmgr/util/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objmgr/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/build/objmgr/split/Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/source/c++/./Makefile
+config.status: creating /tmp/tmp.v49E5a0dWE/build/inc/common/ncbi_build_ver.h
+config.status: creating /tmp/tmp.v49E5a0dWE/source/c++/include/common/ncbi_revision.h
+config.status: creating /tmp/tmp.v49E5a0dWE/build/inc/ncbiconf_unix.h
+config.status: executing default commands
+/tmp/tmp.v49E5a0dWE/build/build/corelib/ncbicfg.c is updated
+/tmp/tmp.v49E5a0dWE/build/inc/common/ncbi_build_ver.h is updated
+Build session ID: b476856f-ebde-4b6a-98cf-57d6cd8ee115
+/usr/bin/make -f /tmp/tmp.v49E5a0dWE/build/build/Makefile.app.tmpl srcdir=/tmp/tmp.v49E5a0dWE/source/c++/src/build-system/helpers TMPL=run_with_lock -k flag-stamps
+make[1]: Entering directory '/tmp/tmp.v49E5a0dWE/build/build/build-system/helpers'
+make[1]: Leaving directory '/tmp/tmp.v49E5a0dWE/build/build/build-system/helpers'
+/usr/bin/make -f /tmp/tmp.v49E5a0dWE/build/build/Makefile.app.tmpl srcdir=/tmp/tmp.v49E5a0dWE/source/c++/src/build-system/helpers TMPL=run_with_lock -k all
+make[1]: Entering directory '/tmp/tmp.v49E5a0dWE/build/build/build-system/helpers'
+Updating dependency information for /tmp/tmp.v49E5a0dWE/source/c++/src/build-system/helpers/run_with_lock.c.
+gcc -c  -g -O2   -DNCBI_APP_BUILT_AS=run_with_lock -DNCBI_BUILD_SESSION_ID=b476856f-ebde-4b6a-98cf-57d6cd8ee115 /tmp/tmp.v49E5a0dWE/source/c++/src/build-system/helpers/run_with_lock.c -o run_with_lock.o 
+gcc -Wl,-rpath,/tmp/tmp.v49E5a0dWE/build/lib run_with_lock.o -L/tmp/tmp.v49E5a0dWE/build/lib -lm -lpthread -o run_with_lock
+/bin/bash /tmp/tmp.v49E5a0dWE/source/c++/scripts/common/impl/if_diff.sh /bin/ln -f run_with_lock /tmp/tmp.v49E5a0dWE/build/bin
+/bin/ln -f run_with_lock /tmp/tmp.v49E5a0dWE/build/bin/run_with_lock
+make[1]: Leaving directory '/tmp/tmp.v49E5a0dWE/build/build/build-system/helpers'
+Prebuilt project_tree_builder not found
+===============================================================================
+NCBI C++ Toolkit documentation:
+  Online:   https://www.ncbi.nlm.nih.gov/toolkit/doc/book/
+  Local:    ./doc/public/index.html
+For the available configuration flags run:  ./configure --help
+
+CFLAGS   =  -Wall -Wno-format-y2k  -pthread -O2 -fPIC 
+CXXFLAGS =  -Wall -Wno-format-y2k  -pthread -O2 -fPIC 
+CPPFLAGS = -DNDEBUG -D_LARGEFILE_SOURCE -D_FILE_OFFSET_BITS=64 -D_LARGEFILE64_SOURCE   -D_MT -D_REENTRANT -D_THREAD_SAFE
+LDFLAGS  =  -Wl,--enable-new-dtags -Wl,-export-dynamic  -pthread   -O2
+
+LIBRARIES:  build as static by default
+FEATURES:   Int8GI GCC MT Cxx2020_format_api LFS DLL unix WinMain Linux
+PACKAGES:
+  enabled:  Iconv Z BZ2 ZSTD PCRE2 LocalPCRE MBEDTLS OPENSSL KRB5 CURL PYTHON PYTHON3 ICU LIBXML SQLITE3 FreeType LMDB LocalLMDB LIBUV
+  disabled: UUID FUSE LIBUNWIND LIBDW BACKWARD_CPP LocalZ LocalBZ2 LZO PCRE GMP GCRYPT NETTLE GNUTLS Sybase DBLib FreeTDS MySQL BerkeleyDB BerkeleyDB++ ODBC PYTHON25 PYTHON26 PYTHON27 PERL Boost.Chrono Boost.Filesystem Boost.Iostreams Boost.Program-Options Boost.Regex Boost.Serialization Boost.Spirit Boost.System Boost.Test Boost.Test.Included Boost.Thread C-Toolkit NCBICRYPT OpenGL MESA GLUT GLEW wxWidgets wx2.8 Fast-CGI FASTCGIPP LocalSSS LocalMSGMAIL2 SSSUTILS LocalNCBILS NCBILS2 SSSDB SP ORBacus EXPAT SABLOT LIBXSLT LIBEXSLT Xerces Xalan Zorba SQLITE3ASYNC VDB NGS OECHEM SGE DRMAA2 MUPARSER HDF5 JPEG PNG TIFF GIF UNGIF XPM GL2PS FTGL MAGIC MIMETIC GSOAP AVRO Cereal SASL2 MONGODB MONGODB3 LEVELDB LIBURING ROCKSDB GMOCK LAPACK LIBSSH LIBSSH2 CASSANDRA NGHTTP2 H2O INFLUXDB LIBXLSXWRITER PROTOBUF GRPC MSGSL AWS_SDK CRC32C GOOGLE_CLOUD HIREDIS APACHE_ARROW LIBRDKAFKA CPPKAFKA THRIFT NLohmann_JSON YAML_CPP OPENTRACING JAEGER OPENTELEMETRY
+PROJECTS:
+  enabled:  cgi serial objects dbapi app algo 
+  disabled: bdb ctools gui gbench
+
+Tools / flags / paths:  /tmp/tmp.v49E5a0dWE/build/build/Makefile.mk
+Configuration  header:  /tmp/tmp.v49E5a0dWE/build/inc/ncbiconf_unix.h
+
+To build everything:  cd /tmp/tmp.v49E5a0dWE/build/build && /usr/bin/make all_r
+or simply run /usr/bin/make in the current directory
+
+
+******* CONFIGURATION SUCCESSFUL *******

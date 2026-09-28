@@ -6,8 +6,9 @@
 //!   - Blast_KarlinBlkUngappedCalc: compute Lambda, K, H
 //!   - check_ideal logic: use kbp_ideal if computed Lambda >= ideal Lambda
 
+use crate::config::ScoringMatrix;
 use crate::stats::KarlinParams;
-use crate::utils::matrix::{blosum62_score, ncbistdaa, BLASTAA_SIZE};
+use crate::utils::matrix::{ncbistdaa, protein_score, BLASTAA_SIZE};
 
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_stat.h:121-122
 const BLAST_SCORE_MIN: i32 = i16::MIN as i32;
@@ -304,6 +305,26 @@ pub fn compute_score_freq_profile(
     score_min: i32,
     score_max: i32,
 ) -> ScoreFreqProfile {
+    compute_score_freq_profile_for_matrix(
+        comp1,
+        comp2,
+        score_min,
+        score_max,
+        ScoringMatrix::Blosum62,
+    )
+}
+
+// NCBI c++/src/algo/blast/core/blast_stat.c:2167-2180:
+// matrix = sbp->matrix->data;
+// score = matrix[index1][index2];
+// sfp->sprob[score] += rfp1->prob[index1] * rfp2->prob[index2];
+pub fn compute_score_freq_profile_for_matrix(
+    comp1: &[f64; BLASTAA_SIZE],
+    comp2: &[f64; BLASTAA_SIZE],
+    score_min: i32,
+    score_max: i32,
+    matrix: ScoringMatrix,
+) -> ScoreFreqProfile {
     let mut sfp = ScoreFreqProfile::new(score_min, score_max);
 
     // Initialize all probabilities to zero
@@ -315,7 +336,9 @@ pub fn compute_score_freq_profile(
     // Reference: blast_stat.c:2171-2181
     for i in 0..BLASTAA_SIZE {
         for j in 0..BLASTAA_SIZE {
-            let score = blosum62_score(i as u8, j as u8);
+            // NCBI c++/src/algo/blast/core/blast_stat.c:2171-2179:
+            // score = matrix[index1][index2];
+            let score = protein_score(matrix, i as u8, j as u8);
             if score >= score_min {
                 let prob = comp1[i] * comp2[j];
                 let current = sfp.get_prob(score);

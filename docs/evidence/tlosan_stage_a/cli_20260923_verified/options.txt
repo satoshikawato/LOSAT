@@ -1,0 +1,1 @@
+task=tblastn evalue=10 matrix=BLOSUM62 word_size=3 threshold=13 window_size=40 gapopen=11 gapextend=1 comp_based_stats=2 seg="12 2.2 2.5" sum_stats=true max_intron_length=0 num_threads=1; outfmt=0,6,7

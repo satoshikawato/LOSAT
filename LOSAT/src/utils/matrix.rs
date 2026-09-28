@@ -690,6 +690,124 @@ pub fn protein_score(matrix: ScoringMatrix, aa1_ncbi: u8, aa2_ncbi: u8) -> i32 {
     matrix_data.scores[b1 * PROTEIN_MATRIX_SIZE + b2] as i32
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3563-3581
+// ```c++
+//     retval.Resize(k_NumAsciiChar, k_NumAsciiChar, -1000);
+//
+//     SNCBIFullScoreMatrix mtx;
+//     NCBISM_Unpack(packed_mtx, &mtx);
+//
+//     for(int i = 0; i < ePMatrixSize; ++i){
+//         for(int j = 0; j < ePMatrixSize; ++j){
+//             retval((size_t)k_PSymbol[i], (size_t)k_PSymbol[j]) =
+//                 mtx.s[(size_t)k_PSymbol[i]][(size_t)k_PSymbol[j]];
+//         }
+//     }
+//     for(int i = 0; i < ePMatrixSize; ++i) {
+//         retval((size_t)k_PSymbol[i], '*') = retval('*',(size_t)k_PSymbol[i]) = -4;
+//     }
+//     retval('*', '*') = 1;
+//     // this is to count Selenocysteine to Cysteine matches as positive
+//     retval('U', 'U') = retval('C', 'C');
+//     retval('U', 'C') = retval('C', 'C');
+//     retval('C', 'U') = retval('C', 'C');
+// ```
+#[inline]
+pub fn protein_display_score(matrix: ScoringMatrix, query: u8, subject: u8) -> i32 {
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:88-88
+    // ```c++
+    // const char k_PSymbol[ePMatrixSize + 1] = "ARNDCQEGHILKMFPSTWYVBZX";
+    // ```
+    const SYMBOLS: &[u8] = b"ARNDCQEGHILKMFPSTWYVBZX";
+    if (query == b'U' && matches!(subject, b'U' | b'C')) || (query == b'C' && subject == b'U') {
+        return protein_score(
+            matrix,
+            aa_char_to_ncbistdaa(b'C'),
+            aa_char_to_ncbistdaa(b'C'),
+        );
+    }
+    if query == b'*' && subject == b'*' {
+        return 1;
+    }
+    if (query == b'*' && SYMBOLS.contains(&subject))
+        || (subject == b'*' && SYMBOLS.contains(&query))
+    {
+        return -4;
+    }
+    if !SYMBOLS.contains(&query) || !SYMBOLS.contains(&subject) {
+        return -1000;
+    }
+    protein_score(
+        matrix,
+        aa_char_to_ncbistdaa(query),
+        aa_char_to_ncbistdaa(subject),
+    )
+}
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2120-2154
+// ```c++
+// void CDisplaySeqalign::x_FillIdentityInfo(const string& sequence_standard,
+//                                           const string& sequence ,
+//                                           int& match, int& positive,
+//                                           string& middle_line)
+// {
+//     match = 0;
+//     positive = 0;
+//     int min_length=min<int>((int)sequence_standard.size(), (int)sequence.size());
+//     if(m_AlignOption & eShowMiddleLine){
+//         middle_line = sequence;
+//     }
+//     for(int i=0; i<min_length; i++){
+//         if(sequence_standard[i]==sequence[i]){
+//             if(m_AlignOption & eShowMiddleLine){
+//                 if(m_MidLineStyle == eBar ) {
+//                     middle_line[i] = '|';
+//                 } else if (m_MidLineStyle == eChar){
+//                     middle_line[i] = sequence[i];
+//                 }
+//             }
+//             match ++;
+//         } else {
+//             if ((m_AlignType&eProt)
+//                 && m_Matrix[(int)sequence_standard[i]][(int)sequence[i]] > 0){
+//                 positive ++;
+//                 if(m_AlignOption & eShowMiddleLine){
+//                     if (m_MidLineStyle == eChar){
+//                         middle_line[i] = '+';
+//                     }
+//                 }
+//             } else {
+//                 if (m_AlignOption & eShowMiddleLine){
+//                     middle_line[i] = ' ';
+//                 }
+//             }
+// ```
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1794-1798
+// ```c++
+//     x_FillIdentityInfo(aln_vec_info->alnRowInfo->sequence[0],
+//                        aln_vec_info->alnRowInfo->sequence[1],
+//                        aln_vec_info->match,
+//                        aln_vec_info->positive,
+//                        aln_vec_info->alnRowInfo->middleLine);
+// ```
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2520-2521
+// ```c++
+//                     } else if (m_SeqLocChar==eLowerCase){
+//                         actualSeq[i-start]=tolower((unsigned char) actualSeq[i-start]);
+// ```
+pub fn protein_display_positives(query: &str, subject: &str, matrix: ScoringMatrix) -> usize {
+    // NCBI computes identity info before x_OutputSeq applies lowercase masks.
+    // Decoded report strings retain the original residues beneath that casing.
+    query
+        .bytes()
+        .zip(subject.bytes())
+        .filter(|&(q, s)| {
+            let q = q.to_ascii_uppercase();
+            let s = s.to_ascii_uppercase();
+            q == s || protein_display_score(matrix, q, s) > 0
+        })
+        .count()
+}
+
 #[inline(always)]
 pub fn protein_score_direct(matrix: ScoringMatrix, b1: usize, b2: usize) -> i32 {
     standard_protein_matrix(matrix).scores[b1 * PROTEIN_MATRIX_SIZE + b2] as i32
@@ -833,5 +951,57 @@ mod tests {
             protein_score(ScoringMatrix::Blosum62, ncbistdaa::O, ncbistdaa::W),
             protein_score(ScoringMatrix::Blosum62, ncbistdaa::X, ncbistdaa::W)
         );
+    }
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3563-3581
+    // ```c++
+    //     retval.Resize(k_NumAsciiChar, k_NumAsciiChar, -1000);
+    //
+    //     SNCBIFullScoreMatrix mtx;
+    //     NCBISM_Unpack(packed_mtx, &mtx);
+    //
+    //     for(int i = 0; i < ePMatrixSize; ++i){
+    //         for(int j = 0; j < ePMatrixSize; ++j){
+    //             retval((size_t)k_PSymbol[i], (size_t)k_PSymbol[j]) =
+    //                 mtx.s[(size_t)k_PSymbol[i]][(size_t)k_PSymbol[j]];
+    //         }
+    //     }
+    //     for(int i = 0; i < ePMatrixSize; ++i) {
+    //         retval((size_t)k_PSymbol[i], '*') = retval('*',(size_t)k_PSymbol[i]) = -4;
+    //     }
+    //     retval('*', '*') = 1;
+    //     // this is to count Selenocysteine to Cysteine matches as positive
+    //     retval('U', 'U') = retval('C', 'C');
+    //     retval('U', 'C') = retval('C', 'C');
+    //     retval('C', 'U') = retval('C', 'C');
+    // ```
+    #[test]
+    fn display_matrix_matches_pinned_cpp_all_ascii_matrices() {
+        let expected = include_str!("../../tests/unit/blastx_stage_e_ascii_matrix_expected.tsv");
+        let mut rows = 0;
+        for line in expected.lines() {
+            let fields: Vec<_> = line.split('\t').collect();
+            assert_eq!(fields.len(), 4);
+            let matrix = match fields[0] {
+                "BLOSUM45" => ScoringMatrix::Blosum45,
+                "BLOSUM50" => ScoringMatrix::Blosum50,
+                "BLOSUM62" => ScoringMatrix::Blosum62,
+                "BLOSUM80" => ScoringMatrix::Blosum80,
+                "BLOSUM90" => ScoringMatrix::Blosum90,
+                "PAM30" => ScoringMatrix::Pam30,
+                "PAM70" => ScoringMatrix::Pam70,
+                "PAM250" => ScoringMatrix::Pam250,
+                _ => panic!("unregistered independent matrix"),
+            };
+            let query: u8 = fields[1].parse().unwrap();
+            let subject: u8 = fields[2].parse().unwrap();
+            let score: i32 = fields[3].parse().unwrap();
+            assert_eq!(
+                protein_display_score(matrix, query, subject),
+                score,
+                "{line}"
+            );
+            rows += 1;
+        }
+        assert_eq!(rows, 131072);
     }
 }

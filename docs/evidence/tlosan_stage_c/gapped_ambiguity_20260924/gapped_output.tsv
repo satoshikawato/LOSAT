@@ -1,0 +1,2 @@
+call	subject	frame	index	raw_score	context	query_frame	q_start	q_end	q_gapped_start	subject_frame	s_start	s_end	s_gapped_start
+0	spectrum	1	0	625	0	0	0	120	45	1	0	120	45

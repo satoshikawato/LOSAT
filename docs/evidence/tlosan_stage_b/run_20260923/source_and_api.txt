@@ -1,0 +1,5 @@
+gc.prt commit: 598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4
+gc.prt sha256: 2aecbdd09ecc5e0d233c105090a593737298ef93d88f6bc0c1bef26df6051a04
+source entries: 27; source codons: 1728; TSV entries: 27; TSV codons: 1728
+code32 Stage A C++ API format-6: identity 100.000, bits 251, E 3.39e-93
+same subject with code1 C++ API: identity 95.833, bits 231, E 1.75e-85

@@ -1,0 +1,5 @@
+event	frame	hsp_s_start	hsp_s_end	window_start	window_stop	returned_length	partial
+TARGET_TRANSLATION	3	146	266	113	298	298	1
+TARGET_TRANSLATION	3	-1	0	0	787	787	1
+TARGET_TRANSLATION	3	-1	0	0	787	787	1
+TARGET_TRANSLATION	-1	-1	0	0	788	788	1

@@ -1,0 +1,10 @@
+Comparison-only pinned NCBI local -subject TBLASTN chunk fixture.
+NCBI source commit: 598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4
+NCBI binary SHA256: e3956f1e107a30439d56c8f72fae4267a7d62ebcc16e4f99d4baf2bdf00402e0
+Prefix: ATG x 4999950 codons; insert: saved plus1 362 nt; suffix: ATG x 250 codons.
+Lowercase mask: nucleotide [14999700,15000000), translated +1 right edge 4999900.
+Subject length: 15000962 nt; first frame: 5000320 residues.
+Input SHA256: query=2202085b84706261fddd907db426853c8e44b94d8e20631122332d518c9fa961 subject=b9e8aebd01bf2ae68753f387abcc700247d0b61be9c13c92b1f646b93e07bd87
+Probe source SHA256: wordfinder=074b015577b2725031a8707c65b0597499794be60d64bc8e294ad0835fae8de4, gapped=53ec3b8d9901769a1a14fad3404cff391d7c7cd0a29929b14b0455eeb198b8fc, ranges=2fe153e96d909a8fe5d3ed941ff677d1dc57d90e5b9eaffcbacd0a177bc8ab5e
+Unprobed output equals all three probe outputs byte for byte: yes
+Command: ['/home/kawato/micromamba/bin/tblastn', '-task', 'tblastn', '-query', '/tmp/tlosan-masked-final-20260924/query.faa', '-subject', '/tmp/tlosan-masked-final-20260924/subjects.fna', '-db_gencode', '1', '-matrix', 'BLOSUM62', '-word_size', '3', '-threshold', '13', '-window_size', '40', '-gapopen', '11', '-gapextend', '1', '-evalue', '10000', '-num_threads', '1', '-comp_based_stats', '0', '-seg', 'no', '-sum_stats', 'false', '-outfmt', '6 qseqid sseqid score qstart qend sstart send sframe qseq sseq', '-lcase_masking']

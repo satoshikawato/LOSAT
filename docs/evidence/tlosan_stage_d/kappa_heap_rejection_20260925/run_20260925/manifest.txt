@@ -1,0 +1,7 @@
+NCBI source commit: 598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4
+NCBI binary SHA256: e3956f1e107a30439d56c8f72fae4267a7d62ebcc16e4f99d4baf2bdf00402e0
+Probe SHA256: c8d2035bc10fc4e552829f99b8d12b2ff87aa8029525d78bdda12dda78abb441
+Query SHA256: 02ef3bb9a0c7709517a32b1f8d5dc56a8d6779e7fa1232316c5246a32564e1c6
+Subject SHA256: efef209194b7e8625b1485e9a6c48734fa5c3af899c0e5657f57a83d69901bf0
+Command: ['/home/kawato/micromamba/bin/tblastn', '-task', 'tblastn', '-query', '/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/tlosan_stage_d/kappa_heap_rejection_20260925/query.faa', '-subject', '/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/tlosan_stage_d/kappa_heap_rejection_20260925/subjects.fna', '-db_gencode', '1', '-num_threads', '1', '-evalue', '10', '-max_target_seqs', '2', '-outfmt', '6 qseqid sseqid score bitscore evalue qstart qend sstart send sframe length']
+Comparison only; local -subject; code 1; one thread.

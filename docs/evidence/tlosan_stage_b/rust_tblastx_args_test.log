@@ -1,0 +1,16 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.20s
+     Running tests/unit_tests.rs (target/debug/deps/unit_tests-e0e01e6b9b99a4bd)
+
+running 10 tests
+test unit::tblastx::args::test_custom_evalue ... ok
+test unit::tblastx::args::test_custom_max_target_seqs ... ok
+test unit::tblastx::args::test_custom_gencode ... ok
+test unit::tblastx::args::test_seg_options ... ok
+test unit::tblastx::args::test_custom_word_size ... ok
+test unit::tblastx::args::test_default_values ... ok
+test unit::tblastx::args::test_custom_threshold ... ok
+test unit::tblastx::args::test_output_path ... ok
+test unit::tblastx::args::test_query_and_subject_paths ... ok
+test unit::tblastx::args::test_custom_num_threads ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 168 filtered out; finished in 0.07s

@@ -1,0 +1,48 @@
+{
+  "candidate": {
+    "head": "1c131e6027ff7fc0595102f5c0a9fcc5f17b7d56",
+    "path": "/mnt/c/users/genom/github/losatx-blastx-v020-recovery",
+    "status_short": [
+      " M LOSAT/src/cli.rs",
+      " M README.md",
+      " M docs/losatx_blastx_native_cli.md",
+      "?? docs/evidence/losatx_stage_a/inputs/generated/S12_split19409.fna",
+      "?? docs/evidence/losatx_stage_a/inputs/generated/S12_split19410.fna"
+    ]
+  },
+  "candidate_source_closure_sha256": "d5a3dfd3ac00afdf5ac1589f1c4d962ce455370a41d2ba86aeb14a14bd8fc1dd",
+  "gbdraw": {
+    "head": "538e9ec5699cada2f8f276493ef790792c5b8535",
+    "path": "/mnt/c/users/genom/github/gbdraw",
+    "status_short": [
+      " M gbdraw/web/js/workers/losat-threaded-worker.js",
+      "?? docs/internal/issue-597-proposal-20260926/",
+      "?? docs/internal/issue-598-proposal-20260926/",
+      "?? docs/internal/issue-599-proposal-20260926/",
+      "?? docs/internal/issue-600-proposal-20260926/",
+      "?? docs/internal/issue-601-bug15-bug19-proposal-20260926/",
+      "?? docs/internal/issue-601-export-errors-proposal-20260926/",
+      "?? docs/internal/issue-602-linear-layout-live-edit-20260926/",
+      "?? docs/internal/issue-619-proposal-20260927/"
+    ]
+  },
+  "main": {
+    "head": "8c2cf12e5f043949f065359eca033a4cc75b8ded",
+    "path": "/mnt/c/Users/genom/GitHub/LOSAT",
+    "status_short": [
+      "?? docs/evidence/losatx_stage_g_authority_v2/",
+      "?? docs/evidence/losatx_stage_g_authority_v3/",
+      "?? docs/evidence/losatx_stage_g_hold_completion/",
+      "?? docs/evidence/losatx_stage_g_hold_completion_clarified/",
+      "?? docs/evidence/losatx_stage_g_hold_followup/",
+      "?? docs/evidence/losatx_stage_g_hold_progress/",
+      "?? docs/evidence/losatx_stage_g_hold_progress_correction/",
+      "?? docs/evidence/losatx_stage_g_hold_provenance/",
+      "?? docs/evidence/losatx_stage_g_recertification/",
+      "?? docs/evidence/losatx_stage_g_recovery/",
+      "?? docs/evidence/losatx_stage_g_root_cause/",
+      "?? docs/evidence/losatx_stage_g_runtime_scope/",
+      "?? docs/losatx_blastx_v0.2.0_plan.md"
+    ]
+  }
+}

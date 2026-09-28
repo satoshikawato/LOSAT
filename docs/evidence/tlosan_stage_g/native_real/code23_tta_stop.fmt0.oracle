@@ -1,0 +1,64 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+/tmp/tlosan-stageg-final-real-nohit-20260926/code23_tta.fna).
+           1 sequences; 360 total letters
+
+
+
+Query= q1
+
+Length=120
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s_code23_tta                                                          202     9e-74
+
+
+> s_code23_tta
+Length=360
+
+ Score = 202 bits (513),  Expect = 9e-74, Method: Compositional matrix adjust.
+ Identities = 112/119 (94%), Positives = 112/119 (94%), Gaps = 0/119 (0%)
+ Frame = +1
+
+Query  1    MTEYWLvvvgaggvgWSWLTIQLIQNHFVWEYDPTWEDSYRKQWVIDGETCLLDIWDTAG  60
+            MTEYW VVVGAGGVGWSW TIQ IQNHFVWEYDPTWEDSYRKQWVIDGETC  DIWDTAG
+Sbjct  1    MTEYW*VVVGAGGVGWSW*TIQ*IQNHFVWEYDPTWEDSYRKQWVIDGETC**DIWDTAG  180
+
+Query  61   QEEYWAMRDQYMRTGWGFLCVFAINNTKSFEDIHQWREQIKRVKDSDDVPMVLVGNKCD  119
+            QEEYWAMRDQYMRTGWGF CVFAINNTKSFEDIHQWREQIKRVKDSDDVPMV VGNKCD
+Sbjct  181  QEEYWAMRDQYMRTGWGF*CVFAINNTKSFEDIHQWREQIKRVKDSDDVPMV*VGNKCD  357
+
+
+
+Lambda      K        H        a         alpha
+   0.323    0.138    0.502    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 11449
+
+
+  Database: User specified sequence set (Input:
+/tmp/tlosan-stageg-final-real-nohit-20260926/code23_tta.fna).
+    Posted date:  Unknown
+  Number of letters in database: 360
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40

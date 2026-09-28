@@ -1,0 +1,18 @@
+{
+  "family": "codes",
+  "comparisons": 396,
+  "equal": 396,
+  "unique_case_formats": 81,
+  "by_thread": {
+    "1": 81,
+    "2": 105,
+    "4": 105,
+    "8": 105
+  },
+  "parallel_activity_max": {
+    "1": 0,
+    "2": 0,
+    "4": 0,
+    "8": 0
+  }
+}

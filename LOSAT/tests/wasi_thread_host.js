@@ -98,7 +98,16 @@ function createWasi(args) {
     // Handle the command's exit explicitly on every supported Node version.
     returnOnExit: true,
     args,
-    env: process.env,
+    env: { ...process.env, PWD: process.cwd() },
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:727-729
+// ```c++
+//             fstrm->open(AsString().c_str(),IOS_BASE::in | mode);
+//             if ( !fstrm->is_open() ) {
+//                 delete fstrm;
+// ```
+// Preserve lexical filenames at the recorded host cwd.
+// Root preopen permits absolute paths; PWD initializes the guest cwd for
+// relative filenames through std::env::set_current_dir, without rewriting argv.
     preopens: { "/": "/" },
   });
 }

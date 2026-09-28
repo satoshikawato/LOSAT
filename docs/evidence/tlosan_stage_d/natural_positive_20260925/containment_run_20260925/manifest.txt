@@ -1,0 +1,8 @@
+NCBI source commit: 598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4
+NCBI executable SHA256: e3956f1e107a30439d56c8f72fae4267a7d62ebcc16e4f99d4baf2bdf00402e0
+containment_query.faa SHA256: 8901dea99252daa86bf9b2329259007e2e6091663e0f65554ac745544f599c7f
+containment_subject.fna SHA256: 6c84d42a94b8ec279259000b815bc3927a171d7f3e72a3a537afadad362a38bc
+Command: ['/home/kawato/micromamba/bin/tblastn', '-task', 'tblastn', '-query', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/natural_positive_20260925/containment_query.faa', '-subject', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/natural_positive_20260925/containment_subject.fna', '-db_gencode', '1', '-num_threads', '1', '-seg', 'no', '-evalue', '10000', '-max_target_seqs', '1', '-outfmt', '6 qseqid sseqid score bitscore evalue nident positive length mismatch gaps gapopen qstart qend sstart send sframe']
+containment probe SHA256: 1a6a44cf9e11d5624b5ec1eb093d8f8a651b404620a3be9bab18ccef29e78262
+kappa probe SHA256: 14982b72d31f40f067ab1e6f20b83b6ae875950c2b5fe51ecf1128b75dd8c12d
+calls probe SHA256: 982280d0bcfc29c4088e69a3aea3bd768dba4defe7bb319669826c6a25ca938d

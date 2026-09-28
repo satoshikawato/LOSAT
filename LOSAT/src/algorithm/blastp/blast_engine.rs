@@ -2060,6 +2060,30 @@ fn default_blastp_tabular_fields() -> &'static [BlastpTabularField] {
 // case eSubjectSeq:
 // case eBTOP:
 // ```
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:973-993
+// ```c++
+//     if (x_IsFieldRequested(eQuerySeq) ||
+//         x_IsFieldRequested(eSubjectSeq) ||
+//         x_IsFieldRequested(ePositives) ||
+//         x_IsFieldRequested(ePercentPositives) ||
+//         x_IsFieldRequested(eBTOP) ||
+//         (x_IsFieldRequested(eNumIdentical) && !kNoFetchSequence) ||
+//         (x_IsFieldRequested(eMismatches) && !kNoFetchSequence) ||
+//         (x_IsFieldRequested(ePercentIdentical) && !kNoFetchSequence)) {
+//
+//         alnVec->SetGapChar('-');
+//         alnVec->SetGenCode(m_QueryGeneticCode, 0);
+//         alnVec->SetGenCode(m_DbGeneticCode, 1);
+//         alnVec->GetWholeAlnSeqString(0, m_QuerySeq);
+//         alnVec->GetWholeAlnSeqString(1, m_SubjectSeq);
+//
+//         if (x_IsFieldRequested(ePositives) ||
+//             x_IsFieldRequested(ePercentPositives) ||
+//             x_IsFieldRequested(eBTOP) ||
+//             x_IsFieldRequested(eNumIdentical) ||
+//             x_IsFieldRequested(eMismatches) ||
+//             x_IsFieldRequested(ePercentIdentical)) {
+// ```
 #[inline]
 fn blastp_tabular_fields_require_rendered_alignment(fields: &[BlastpTabularField]) -> bool {
     fields.iter().any(|field| {
@@ -2068,6 +2092,8 @@ fn blastp_tabular_fields_require_rendered_alignment(fields: &[BlastpTabularField
             BlastpTabularField::QuerySeq
                 | BlastpTabularField::SubjectSeq
                 | BlastpTabularField::Btop
+                | BlastpTabularField::Positives
+                | BlastpTabularField::PercentPositives
         )
     })
 }
@@ -2678,9 +2704,9 @@ fn build_pairwise_hits(
     subject_titles: &[Option<String>],
     matrix: ScoringMatrix,
     render_alignment: bool,
-) -> Vec<PairwiseHit> {
+) -> Result<Vec<PairwiseHit>> {
     hits.into_iter()
-        .map(|hit| {
+        .map(|mut hit| -> Result<PairwiseHit> {
             let q_idx = hit.q_idx as usize;
             let s_idx = hit.s_idx as usize;
             let query = query_nomask_sequence(&query_contexts[q_idx]);
@@ -2717,10 +2743,54 @@ fn build_pairwise_hits(
             } else {
                 (None, None)
             };
-            let positives = hit.num_positives;
+            // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:996-1028
+            // ```c++
+            //             int num_matches = 0;
+            //             num_ident = 0;
+            //             // The query and subject sequence strings must be the same size in a correct
+            //             // alignment, but if alignment extends beyond the end of sequence because of
+            //             // a bug, one of the sequence strings may be truncated, hence it is
+            //             // necessary to take a minimum here.
+            //             /// @todo FIXME: Should an exception be thrown instead?
+            //             for (unsigned int i = 0;
+            //                  i < min(m_QuerySeq.size(), m_SubjectSeq.size());
+            //                  ++i) {
+            //                 if (m_QuerySeq[i] == m_SubjectSeq[i]) {
+            //                     ++num_ident;
+            //                     ++num_positives;
+            //                     ++num_matches;
+            //                 } else {
+            //                     if(num_matches > 0) {
+            //                         btop_string +=  NStr::Int8ToString(num_matches);
+            //                         num_matches=0;
+            //                     }
+            //                     btop_string += m_QuerySeq[i];
+            //                     btop_string += m_SubjectSeq[i];
+            //                     if (matrix && !matrix->GetData().empty() &&
+            //                            (*matrix)(m_QuerySeq[i], m_SubjectSeq[i]) > 0) {
+            //                         ++num_positives;
+            //                     }
+            //                 }
+            //             }
+            //
+            //             if (num_matches > 0) {
+            //                 btop_string +=  NStr::Int8ToString(num_matches);
+            //             }
+            //             SetBTOP(btop_string);
+            //         }
+            // ```
+            let positives = if render_alignment {
+                let (Some(query), Some(subject)) = (&query_seq, &subject_seq) else {
+                    anyhow::bail!("unimplemented BLASTP report alignment for final HSP");
+                };
+                crate::utils::matrix::protein_display_positives(query, subject, matrix)
+            } else {
+                hit.num_positives
+            };
+            hit.num_positives = positives;
             let gaps = hit.gap_letters();
 
-            PairwiseHit {
+            Ok(PairwiseHit {
                 hit,
                 query_seq,
                 subject_seq,
@@ -2737,7 +2807,12 @@ fn build_pairwise_hits(
                 gaps: Some(gaps),
                 subject_length: Some(subjects[s_idx].aa_len),
                 subject_title: subject_titles[s_idx].clone(),
-            }
+                // NCBI core/blast_kappa.c:331-342: BLASTP method is handled by its writer.
+                comp_adjust_method: None,
+                // NCBI showalign.cpp:3595-3598: this optional Stage E field is
+                // consumed only by the TBLASTN writer; BLASTP keeps its writer.
+                sum_n: None,
+            })
         })
         .collect()
 }
@@ -6042,7 +6117,7 @@ fn run_resolved_in_pool(
             &subject_titles,
             args.scoring.matrix,
             render_alignment,
-        ))
+        )?)
     } else {
         None
     };
@@ -6359,6 +6434,11 @@ mod tests {
             gaps: Some(1),
             subject_length: Some(30),
             subject_title: Some("subject description".to_string()),
+            // NCBI core/blast_kappa.c:331-342: BLASTP method is handled by its writer.
+            comp_adjust_method: None,
+            // NCBI showalign.cpp:3595-3598: this optional Stage E field is
+            // consumed only by the TBLASTN writer; BLASTP keeps its writer.
+            sum_n: None,
         }
     }
 

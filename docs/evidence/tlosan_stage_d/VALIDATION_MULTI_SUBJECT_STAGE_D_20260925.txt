@@ -1,0 +1,25 @@
+TBLASTN Stage D natural multi-subject continuation, 2026-09-25
+Pinned NCBI source: 598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4
+Branch: feature/tlosan-tblastn-v0.2.0
+
+$ cargo test --lib algorithm::tblastn::kappa
+8 passed, 0 failed, 513 filtered out. This includes the 13-subject natural
+Stage C→preliminary link/reap→Kappa redo→postredo link/reap→normalization/
+identity→heap order test, and the hard-SEG natural C→D connection.
+
+$ cargo test --lib algorithm::tblastn::stage_d_linking::tests::preliminary_kappa_stream_comparator_uses_evalue_score_and_oid -- --exact
+1 passed, 0 failed, 520 filtered out. Covers near-zero E-values, score/ordinal
+ties and empty HSP lists from pinned NCBI blast_hits.c.
+
+$ cargo clippy --lib --tests -- -D warnings
+exit 0.
+$ cargo fmt --all -- --check
+exit 0.
+
+NCBI inputs and output traces are the pinned, checksum-verified
+run_20260924/run_20260923_default.trace,
+kappa_mode2_20260924/run_20260923_default.tsv, and
+kappa_traceback_20260924/run_20260923_default.tsv retained at the prior
+Stage D checkpoint. No new NCBI fixture or source revision was introduced.
+
+Stage D partial; Stage E not started; public TBLASTN CLI still unimplemented.

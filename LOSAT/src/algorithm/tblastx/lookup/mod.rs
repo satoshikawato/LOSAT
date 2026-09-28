@@ -17,9 +17,11 @@ mod backbone;
 pub mod compressed;
 
 // Re-export public types and functions
-pub(crate) use backbone::prepare_blosum62_lookup_query_for_word_size;
 pub use backbone::{
     build_direct_lookup, build_ncbi_lookup, BackboneCell, BlastAaLookupTable, AA_HITS_PER_CELL,
+};
+pub(crate) use backbone::{
+    build_ncbi_lookup_for_profile, prepare_blosum62_lookup_query_for_word_size,
 };
 
 use crate::stats::KarlinParams;
@@ -194,3 +196,16 @@ pub(crate) fn compute_unmasked_intervals(
     }
     result
 }
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:446-453
+// ```c++
+//     /* create an empty backbone */
+//
+//     exact_backbone = (Int4 **) calloc(lookup->backbone_size, sizeof(Int4 *));
+//
+//     /* find all the exact matches, grouping together all offsets of identical
+//        query words. The query bias is not used here, since the next stage
+//        will need real offsets into the query sequence */
+//
+// ```
+pub(crate) use backbone::build_ncbi_lookup_from_prepared;

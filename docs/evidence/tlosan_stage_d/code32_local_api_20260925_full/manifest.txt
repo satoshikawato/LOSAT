@@ -1,0 +1,3 @@
+NCBI source commit: 598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4
+API mode: local subject adapter with explicit FindGeneticCode on BlastSeqSrc retrieval
+Code 1 API output and Kappa call trace match local -subject CLI bytes.

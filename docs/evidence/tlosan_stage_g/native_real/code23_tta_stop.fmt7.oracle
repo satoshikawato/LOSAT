@@ -1,0 +1,7 @@
+# TBLASTN 2.17.0+
+# Query: q1
+# Database: User specified sequence set (Input: /tmp/tlosan-stageg-final-real-nohit-20260926/code23_tta.fna)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q1	s_code23_tta	94.118	119	7	0	1	119	1	357	9.00e-74	202
+# BLAST processed 1 queries

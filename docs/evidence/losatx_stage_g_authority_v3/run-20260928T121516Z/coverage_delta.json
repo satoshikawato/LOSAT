@@ -1,0 +1,15 @@
+{
+  "executed_before_and_after": 6527,
+  "implementation_acceptance": "HARD_FAIL",
+  "missing_actual_native_targets": [
+    "linux-aarch64",
+    "macos-arm64",
+    "macos-x86_64"
+  ],
+  "new_unique_executed_rows": 0,
+  "newly_approved_exact_official_windows_fingerprints": 775,
+  "not_executed_before_and_after": 6912,
+  "release": "HOLD",
+  "schema": "losatx-stage-g-v3-authority-coverage-delta-v1",
+  "unique_rows_before_and_after": 13439
+}

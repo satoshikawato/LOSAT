@@ -1,0 +1,143 @@
+NCBI source commit: 598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4
+NCBI CLI SHA256: e3956f1e107a30439d56c8f72fae4267a7d62ebcc16e4f99d4baf2bdf00402e0
+Derived fields oracle source SHA256: a68139bcd0030d9a4f2a9eab0984816eb00349e124df358a6236b86de0dcf682
+NCBI rule probe SHA256: c99e270472f811e58557af7f76897182b10a8a003cf3751fbff66d2ae0a36573
+NCBI D probe SHA256: 982280d0bcfc29c4088e69a3aea3bd768dba4defe7bb319669826c6a25ca938d
+Oracle binary SHA256: c26fe3f146d63c00466f1c03325bf0c5cc6cf91c9a73813813e2bf0ba0460e11
+Custom formatter changes only CBlastFormat custom_output_format; NCBI search state remains the pinned CLI-calibrated API path.
+code1 query SHA256: 8d1d45361aabbcda649ccf73e1ab1e4e48deae8a937cfd61ce9045e0772e696e
+code1 subject SHA256: 1b1ad1533664185a93fead0a5c3af320c386348efa2f2a6b483b4cec06860d6e
+code1.control: command ['$NCBI_FIELDS_ORACLE', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code1.faa', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code1.fna', '1', '6']; rule probe leaves stdout/stderr unchanged
+code1.control: custom report and D trace byte-identical to code-1 local CLI
+code1.selected: command ['$NCBI_FIELDS_ORACLE', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code1.faa', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code1.fna', '1', '6']; rule probe leaves stdout/stderr unchanged
+code1.selected: custom report and D trace byte-identical to code-1 local CLI
+code2 query SHA256: 8d1d45361aabbcda649ccf73e1ab1e4e48deae8a937cfd61ce9045e0772e696e
+code2 subject SHA256: 7577ecc439808ec2fc7a5d6c642315b754c7991a351b9fbe4dd1bec419217081
+code2.control: command ['$NCBI_FIELDS_ORACLE', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code2.faa', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code2.fna', '1', '6']; rule probe leaves stdout/stderr unchanged
+code2.control: custom report and D trace byte-identical to code-1 local CLI
+code2.selected: command ['$NCBI_FIELDS_ORACLE', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code2.faa', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code2.fna', '2', '6']; rule probe leaves stdout/stderr unchanged
+code3 query SHA256: 8d1d45361aabbcda649ccf73e1ab1e4e48deae8a937cfd61ce9045e0772e696e
+code3 subject SHA256: 6200de8bfea2b7620ef5829d73a6227d618321e7fe30b16177c13825763b442e
+code3.control: command ['$NCBI_FIELDS_ORACLE', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code3.faa', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code3.fna', '1', '6']; rule probe leaves stdout/stderr unchanged
+code3.control: custom report and D trace byte-identical to code-1 local CLI
+code3.selected: command ['$NCBI_FIELDS_ORACLE', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code3.faa', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code3.fna', '3', '6']; rule probe leaves stdout/stderr unchanged
+code4 query SHA256: 8d1d45361aabbcda649ccf73e1ab1e4e48deae8a937cfd61ce9045e0772e696e
+code4 subject SHA256: 96ef84bd681cf0e207db134fbe385b3d6c270f250ade99797354bad3dce12b43
+code4.control: command ['$NCBI_FIELDS_ORACLE', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code4.faa', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code4.fna', '1', '6']; rule probe leaves stdout/stderr unchanged
+code4.control: custom report and D trace byte-identical to code-1 local CLI
+code4.selected: command ['$NCBI_FIELDS_ORACLE', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code4.faa', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code4.fna', '4', '6']; rule probe leaves stdout/stderr unchanged
+code5 query SHA256: 8d1d45361aabbcda649ccf73e1ab1e4e48deae8a937cfd61ce9045e0772e696e
+code5 subject SHA256: c67fa0f75db7be79003778e61adecf7469ace90d348f787785f28b51a55887f9
+code5.control: command ['$NCBI_FIELDS_ORACLE', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code5.faa', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code5.fna', '1', '6']; rule probe leaves stdout/stderr unchanged
+code5.control: custom report and D trace byte-identical to code-1 local CLI
+code5.selected: command ['$NCBI_FIELDS_ORACLE', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code5.faa', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code5.fna', '5', '6']; rule probe leaves stdout/stderr unchanged
+code6 query SHA256: 2b20dcd2a8dd2529c232cfe414674e7a4aae6468139a4c41088dfe4d99a31327
+code6 subject SHA256: 44cac00ea86c221fe464b1f3942a92290c692965bfbb1d632b6133ba042b0e67
+code6.control: command ['$NCBI_FIELDS_ORACLE', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code6.faa', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code6.fna', '1', '6']; rule probe leaves stdout/stderr unchanged
+code6.control: custom report and D trace byte-identical to code-1 local CLI
+code6.selected: command ['$NCBI_FIELDS_ORACLE', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code6.faa', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code6.fna', '6', '6']; rule probe leaves stdout/stderr unchanged
+code9 query SHA256: 8d1d45361aabbcda649ccf73e1ab1e4e48deae8a937cfd61ce9045e0772e696e
+code9 subject SHA256: e5f1516e74cfd27ede4f66091a062088700d210b7d99058e13f962670f45e3e1
+code9.control: command ['$NCBI_FIELDS_ORACLE', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code9.faa', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code9.fna', '1', '6']; rule probe leaves stdout/stderr unchanged
+code9.control: custom report and D trace byte-identical to code-1 local CLI
+code9.selected: command ['$NCBI_FIELDS_ORACLE', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code9.faa', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code9.fna', '9', '6']; rule probe leaves stdout/stderr unchanged
+code10 query SHA256: 33784a6394690db55134571a46a210368dcfd09880e0775e2bd2d40bacca4396
+code10 subject SHA256: 0f91f0309c114416205aaef681931504adbfcef9c23dc1f143012e748a476bcc
+code10.control: command ['$NCBI_FIELDS_ORACLE', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code10.faa', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code10.fna', '1', '6']; rule probe leaves stdout/stderr unchanged
+code10.control: custom report and D trace byte-identical to code-1 local CLI
+code10.selected: command ['$NCBI_FIELDS_ORACLE', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code10.faa', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code10.fna', '10', '6']; rule probe leaves stdout/stderr unchanged
+code11 query SHA256: 8d1d45361aabbcda649ccf73e1ab1e4e48deae8a937cfd61ce9045e0772e696e
+code11 subject SHA256: c604694de1d2d9b6f1c739de161b946b9f3c6c6f3300aa13e7944ba9d21cc364
+code11.control: command ['$NCBI_FIELDS_ORACLE', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code11.faa', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code11.fna', '1', '6']; rule probe leaves stdout/stderr unchanged
+code11.control: custom report and D trace byte-identical to code-1 local CLI
+code11.selected: command ['$NCBI_FIELDS_ORACLE', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code11.faa', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code11.fna', '11', '6']; rule probe leaves stdout/stderr unchanged
+code12 query SHA256: cd00361581516959f12753843dbe76ab573a71e35deebcf6192864b792712230
+code12 subject SHA256: c1bd9267d536dc8ff9ae8afd9610aa01ffc0f34fde5bc311fff1db4795d81a71
+code12.control: command ['$NCBI_FIELDS_ORACLE', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code12.faa', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code12.fna', '1', '6']; rule probe leaves stdout/stderr unchanged
+code12.control: custom report and D trace byte-identical to code-1 local CLI
+code12.selected: command ['$NCBI_FIELDS_ORACLE', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code12.faa', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code12.fna', '12', '6']; rule probe leaves stdout/stderr unchanged
+code13 query SHA256: 8d1d45361aabbcda649ccf73e1ab1e4e48deae8a937cfd61ce9045e0772e696e
+code13 subject SHA256: 4c0d96521b8c90772c3fd9fd6ba9508829cec3269984ecc4acfb56a8419dd481
+code13.control: command ['$NCBI_FIELDS_ORACLE', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code13.faa', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code13.fna', '1', '6']; rule probe leaves stdout/stderr unchanged
+code13.control: custom report and D trace byte-identical to code-1 local CLI
+code13.selected: command ['$NCBI_FIELDS_ORACLE', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code13.faa', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code13.fna', '13', '6']; rule probe leaves stdout/stderr unchanged
+code14 query SHA256: ad0e65fbe65d2f5d02cdd61da7eec923e58f9f5abdfa9bf7e08cd8c6ff9100da
+code14 subject SHA256: e391e5605ef9f1647ff5bc9d09a1c664708dd5838605d0b5a0f0896f5f0b8b3b
+code14.control: command ['$NCBI_FIELDS_ORACLE', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code14.faa', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code14.fna', '1', '6']; rule probe leaves stdout/stderr unchanged
+code14.control: custom report and D trace byte-identical to code-1 local CLI
+code14.selected: command ['$NCBI_FIELDS_ORACLE', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code14.faa', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code14.fna', '14', '6']; rule probe leaves stdout/stderr unchanged
+code15 query SHA256: 2b20dcd2a8dd2529c232cfe414674e7a4aae6468139a4c41088dfe4d99a31327
+code15 subject SHA256: 89ff07deeef4771eda67795e3e6226c2d49ce134a99b27c5b32032363d5da32f
+code15.control: command ['$NCBI_FIELDS_ORACLE', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code15.faa', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code15.fna', '1', '6']; rule probe leaves stdout/stderr unchanged
+code15.control: custom report and D trace byte-identical to code-1 local CLI
+code15.selected: command ['$NCBI_FIELDS_ORACLE', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code15.faa', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code15.fna', '15', '6']; rule probe leaves stdout/stderr unchanged
+code16 query SHA256: 497b0b317abee98233e2bff93404829bba508f7defe4432531587763e70a0665
+code16 subject SHA256: 2e12c29bc4de905d511e1d1d2ceb4422655c9a1c3d8fe276e14c9bfb2fff018f
+code16.control: command ['$NCBI_FIELDS_ORACLE', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code16.faa', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code16.fna', '1', '6']; rule probe leaves stdout/stderr unchanged
+code16.control: custom report and D trace byte-identical to code-1 local CLI
+code16.selected: command ['$NCBI_FIELDS_ORACLE', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code16.faa', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code16.fna', '16', '6']; rule probe leaves stdout/stderr unchanged
+code21 query SHA256: 8d1d45361aabbcda649ccf73e1ab1e4e48deae8a937cfd61ce9045e0772e696e
+code21 subject SHA256: ff227b0a8024d98981dfc4927edee1a92dac0c430520a070d4a1a0826b8a4a0f
+code21.control: command ['$NCBI_FIELDS_ORACLE', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code21.faa', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code21.fna', '1', '6']; rule probe leaves stdout/stderr unchanged
+code21.control: custom report and D trace byte-identical to code-1 local CLI
+code21.selected: command ['$NCBI_FIELDS_ORACLE', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code21.faa', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code21.fna', '21', '6']; rule probe leaves stdout/stderr unchanged
+code22 query SHA256: 497b0b317abee98233e2bff93404829bba508f7defe4432531587763e70a0665
+code22 subject SHA256: 9d7638b569d3c270e4eace47b5019d2a74c9994563a01cd82975c18dd9aac79f
+code22.control: command ['$NCBI_FIELDS_ORACLE', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code22.faa', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code22.fna', '1', '6']; rule probe leaves stdout/stderr unchanged
+code22.control: custom report and D trace byte-identical to code-1 local CLI
+code22.selected: command ['$NCBI_FIELDS_ORACLE', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code22.faa', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code22.fna', '22', '6']; rule probe leaves stdout/stderr unchanged
+code23 query SHA256: 8d1d45361aabbcda649ccf73e1ab1e4e48deae8a937cfd61ce9045e0772e696e
+code23 subject SHA256: 3b1309e56c9da06b2e632b46c7d7a774822bcf7b7bcec4b2f2fa2fc40c9f8995
+code23.control: command ['$NCBI_FIELDS_ORACLE', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code23.faa', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code23.fna', '1', '6']; rule probe leaves stdout/stderr unchanged
+code23.control: custom report and D trace byte-identical to code-1 local CLI
+code23.selected: command ['$NCBI_FIELDS_ORACLE', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code23.faa', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code23.fna', '23', '6']; rule probe leaves stdout/stderr unchanged
+code24 query SHA256: 8d1d45361aabbcda649ccf73e1ab1e4e48deae8a937cfd61ce9045e0772e696e
+code24 subject SHA256: 553fe04d6fb781d5ac1e3e9ecf60d9eedf7ee7e818df6b2ede1690ed1d162216
+code24.control: command ['$NCBI_FIELDS_ORACLE', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code24.faa', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code24.fna', '1', '6']; rule probe leaves stdout/stderr unchanged
+code24.control: custom report and D trace byte-identical to code-1 local CLI
+code24.selected: command ['$NCBI_FIELDS_ORACLE', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code24.faa', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code24.fna', '24', '6']; rule probe leaves stdout/stderr unchanged
+code25 query SHA256: 081861522b6dd081cc6a28e9d2b62fbffb98843f650d4671d5778baacd83f27a
+code25 subject SHA256: 8fc1d536e7dbcd7c0e10abaae19de1e33856a1b772b3b888718dfe445c9ff251
+code25.control: command ['$NCBI_FIELDS_ORACLE', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code25.faa', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code25.fna', '1', '6']; rule probe leaves stdout/stderr unchanged
+code25.control: custom report and D trace byte-identical to code-1 local CLI
+code25.selected: command ['$NCBI_FIELDS_ORACLE', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code25.faa', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code25.fna', '25', '6']; rule probe leaves stdout/stderr unchanged
+code26 query SHA256: 0912d51e6b45a8697d31895ac6efe7054b9c7cb0e31652d6a85fe249107f7e5d
+code26 subject SHA256: 4791432ec97546ec45f5fa3642039ec1f62fd2c526a1d2a7a674ccf71423bdc0
+code26.control: command ['$NCBI_FIELDS_ORACLE', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code26.faa', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code26.fna', '1', '6']; rule probe leaves stdout/stderr unchanged
+code26.control: custom report and D trace byte-identical to code-1 local CLI
+code26.selected: command ['$NCBI_FIELDS_ORACLE', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code26.faa', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code26.fna', '26', '6']; rule probe leaves stdout/stderr unchanged
+code27 query SHA256: 2b20dcd2a8dd2529c232cfe414674e7a4aae6468139a4c41088dfe4d99a31327
+code27 subject SHA256: 5f0536fd9cdeb6c980d57acda6b9ac587258987dc3737b10160446ce6ed5d535
+code27.control: command ['$NCBI_FIELDS_ORACLE', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code27.faa', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code27.fna', '1', '6']; rule probe leaves stdout/stderr unchanged
+code27.control: custom report and D trace byte-identical to code-1 local CLI
+code27.selected: command ['$NCBI_FIELDS_ORACLE', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code27.faa', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code27.fna', '27', '6']; rule probe leaves stdout/stderr unchanged
+code28 query SHA256: 2b20dcd2a8dd2529c232cfe414674e7a4aae6468139a4c41088dfe4d99a31327
+code28 subject SHA256: 05f347fbfaf42673f31cbd71ed632068fc8a4ba5232f09c0027d9901ec384e08
+code28.control: command ['$NCBI_FIELDS_ORACLE', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code28.faa', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code28.fna', '1', '6']; rule probe leaves stdout/stderr unchanged
+code28.control: custom report and D trace byte-identical to code-1 local CLI
+code28.selected: command ['$NCBI_FIELDS_ORACLE', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code28.faa', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code28.fna', '28', '6']; rule probe leaves stdout/stderr unchanged
+code29 query SHA256: ad0e65fbe65d2f5d02cdd61da7eec923e58f9f5abdfa9bf7e08cd8c6ff9100da
+code29 subject SHA256: 8af216e39ec83fbc6bc65d9b8f5ab8870bd23328dff1acd2e84937c0827627ce
+code29.control: command ['$NCBI_FIELDS_ORACLE', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code29.faa', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code29.fna', '1', '6']; rule probe leaves stdout/stderr unchanged
+code29.control: custom report and D trace byte-identical to code-1 local CLI
+code29.selected: command ['$NCBI_FIELDS_ORACLE', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code29.faa', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code29.fna', '29', '6']; rule probe leaves stdout/stderr unchanged
+code30 query SHA256: d4ebcc83a0c353f86011cfe30dfe12fda0978fd9677eaea51d2fff35f37f42b9
+code30 subject SHA256: 5a72cba4b164bc9bbfd678dcc58b8b0387011926e69c291590513665aa1fcf02
+code30.control: command ['$NCBI_FIELDS_ORACLE', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code30.faa', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code30.fna', '1', '6']; rule probe leaves stdout/stderr unchanged
+code30.control: custom report and D trace byte-identical to code-1 local CLI
+code30.selected: command ['$NCBI_FIELDS_ORACLE', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code30.faa', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code30.fna', '30', '6']; rule probe leaves stdout/stderr unchanged
+code31 query SHA256: d4ebcc83a0c353f86011cfe30dfe12fda0978fd9677eaea51d2fff35f37f42b9
+code31 subject SHA256: 0ea3224eb8668804dd28b290104f692fa264e398acf31ad49257b7f12be06b71
+code31.control: command ['$NCBI_FIELDS_ORACLE', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code31.faa', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code31.fna', '1', '6']; rule probe leaves stdout/stderr unchanged
+code31.control: custom report and D trace byte-identical to code-1 local CLI
+code31.selected: command ['$NCBI_FIELDS_ORACLE', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code31.faa', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code31.fna', '31', '6']; rule probe leaves stdout/stderr unchanged
+code32 query SHA256: 8d1d45361aabbcda649ccf73e1ab1e4e48deae8a937cfd61ce9045e0772e696e
+code32 subject SHA256: fc8e2d4005af384d56546ea8a76ff3e5e4c233ba0b9f9b0faf9e6232f86a32b3
+code32.control: command ['$NCBI_FIELDS_ORACLE', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code32.faa', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code32.fna', '1', '6']; rule probe leaves stdout/stderr unchanged
+code32.control: custom report and D trace byte-identical to code-1 local CLI
+code32.selected: command ['$NCBI_FIELDS_ORACLE', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code32.faa', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code32.fna', '32', '6']; rule probe leaves stdout/stderr unchanged
+code33 query SHA256: ad0e65fbe65d2f5d02cdd61da7eec923e58f9f5abdfa9bf7e08cd8c6ff9100da
+code33 subject SHA256: b3050bb1b227cdc09337bf6f20914e3652f2b594c022a504658298f462a9d318
+code33.control: command ['$NCBI_FIELDS_ORACLE', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code33.faa', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code33.fna', '1', '6']; rule probe leaves stdout/stderr unchanged
+code33.control: custom report and D trace byte-identical to code-1 local CLI
+code33.selected: command ['$NCBI_FIELDS_ORACLE', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code33.faa', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code33.fna', '33', '6']; rule probe leaves stdout/stderr unchanged

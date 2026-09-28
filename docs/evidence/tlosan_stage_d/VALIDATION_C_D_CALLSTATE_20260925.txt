@@ -1,0 +1,35 @@
+TBLASTN Stage C→D call-state correction, 2026-09-25
+Pinned NCBI source: 598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4
+Branch: feature/tlosan-tblastn-v0.2.0
+
+$ bash docs/evidence/tlosan_stage_d/run_code32_local_api_oracle.sh /tmp/tlosan-code32-final-20260925
+exit 0; source commit/hash and CLI binary hash verified; comparison-only C++ API
+compiled outside LOSAT. Code-1 API versus local -subject CLI: outfmt-6, Kappa,
+Stage-D call and sequence-source traces exactly equal. Probed versus plain
+stdout and ordinary stderr equal for Kappa, D calls and sequence source.
+Code 32: TotLen 360, no OneSubjectUpdateParameters, word/gapped cutoff 9,
+preliminary HSPs 656/+1 then 16/-3. Full two-call traceback and matrix trace
+saved in code32_local_api_20260925_cli_calibrated. Outfmt-6 from code 32 is
+comparison-oracle diagnostic only, not a LOSAT Stage E comparison.
+
+$ cargo test --lib algorithm::tblastn::kappa
+7 passed, 0 failed, 512 filtered out. Includes natural Rust Stage C→D
+multi-query and code-32 input/order comparisons, 23 saved NCBI traceback
+calls, code-32 matrix/edit-script and heap boundaries.
+
+$ cargo test --lib algorithm::tblastn::search_gapped::tests::computed_default_parameters_preserve_ncbi_preliminary_link_input -- --exact
+1 passed, 0 failed.
+
+$ cargo test --lib algorithm::tblastn::search_gapped::tests::code32_api_gapped_scores_offsets_and_order_match_ncbi -- --exact
+1 passed, 0 failed.
+
+$ cargo clippy --lib --tests -- -D warnings
+exit 0.
+$ cargo fmt --all -- --check
+exit 0.
+$ bash -n docs/evidence/tlosan_stage_d/run_code32_local_api_oracle.sh
+exit 0.
+$ sha256sum -c outputs.sha256 [cwd=docs/evidence/tlosan_stage_d/code32_local_api_20260925_cli_calibrated]
+41/41 output and trace files OK.
+
+Stage D partial; Stage E not started; public TBLASTN CLI still unimplemented.

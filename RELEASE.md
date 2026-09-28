@@ -10,6 +10,10 @@ v0.1.0 gate lives in:
 - [BLASTP v0.1.0 certification](docs/release/blastp_v0.1.0_certification.md)
 - [TBLASTX v0.1.0 certification](docs/release/tblastx_v0.1.0_certification.md)
 
+## v0.2.0 TLOSAN preparation
+
+The [v0.2.0 readiness record](docs/release/v0.2.0.md) defines the declared local TBLASTN scope, candidate checks, current distribution blockers, and reproducible commands. The v0.1.0 workflow and exact-SHA contract below are historical and must not be presented as a v0.2.0 artifact handoff.
+
 ## v0.1.0 Release Candidate Gate
 
 Do not create a release candidate while any P0 readiness item is unresolved.

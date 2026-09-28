@@ -39,6 +39,18 @@ authoritative, current guidance for agent behavior in LOSAT.
      differences as LOSAT parity defects. This exception is narrow and does not
      permit any other deviation from NCBI timing, ordering, scoring, filtering,
      statistics, pruning, or output formatting.
+   - Approved TBLASTN-only product decision (`PD-TLOSAN-LOCAL-GENCODE-32`):
+     local `-subject` searches must apply the selected `-db_gencode` to subject
+     translation, candidate search, HSP re-evaluation, scoring, statistics,
+     coordinates, and `outfmt 0/6/7` reporting for all 27 NCBI `gc.prt`
+     genetic-code IDs. The TBLASTN CLI must accept ID 32 even though the pinned
+     NCBI BLAST+ CLI rejects it; verify ID 32 with a comparison-only NCBI C++
+     API oracle using `FindGeneticCode(32)` through search and formatting.
+     Reject invalid IDs explicitly. Differences from NCBI local `-subject`
+     caused solely by honoring a non-default subject code are permitted; no
+     difference in call timing, ordering, candidate rules, linking, filtering,
+     statistical formulas, or formatting is permitted. This does not expand
+     the TBLASTX exception or authorize NCBI as a runtime/build dependency.
 
 4. NCBI code comments are mandatory for modifications.
    - Every code change must include NCBI C/C++ reference comments with file path

@@ -1,0 +1,11 @@
+./code1_fmt0.out: OK
+./code1_fmt6.out: OK
+./code1_fmt7.out: OK
+./code32_fmt0.out: OK
+./code32_fmt6.out: OK
+./code32_fmt7.out: OK
+./code4_fmt0.out: OK
+./code4_fmt6.out: OK
+./code4_fmt7.out: OK
+./subject32_g1_fmt6.out: OK
+./subject32_g4_fmt6.out: OK

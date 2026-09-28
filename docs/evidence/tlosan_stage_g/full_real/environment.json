@@ -1,0 +1,29 @@
+{
+  "losat_sha256": "02d0e8300007ed0b63566c57276f5407fe9e3adb004384dd347d037fbdad4118",
+  "ncbi_sha256": "e3956f1e107a30439d56c8f72fae4267a7d62ebcc16e4f99d4baf2bdf00402e0",
+  "api_sha256": "d8e0f100143031db5121e13907ec34c31a84e258adbf3f92241976916f1536bb",
+  "batch_wrapper_sha256": "e3a7f6551dd27a08f5255d858753f0622db0ad39cee5edd64f1f3ecb7162ee03",
+  "ncbi_source_commit": "598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4",
+  "cases": {
+    "av_self_code1": {
+      "queries": 120,
+      "query_sha256": "080057e81dae256b8a99955549e0f88361d3d9d20424d838fce51d173ad1f375",
+      "subject_sha256": "c3fd0330ac0c7877827b621c0d31e941a0f7d1a2ff11d0c5c8ae7ec453bba96b"
+    },
+    "av_ps_code11": {
+      "queries": 120,
+      "query_sha256": "080057e81dae256b8a99955549e0f88361d3d9d20424d838fce51d173ad1f375",
+      "subject_sha256": "13e45901b7694d4065a917bd57e1702a96c352f618b9bf0634daa0b851fab45c"
+    },
+    "ap_self_code4": {
+      "queries": 595,
+      "query_sha256": "7389181c47021a82770a2dfd5ec4ec78b8682d00867b196298cba4e2f1864084",
+      "subject_sha256": "184a9e3264cf522a1187716754cf9bca6dab8e882d76f9a267862751570bde80"
+    },
+    "ap_cross_code4": {
+      "queries": 595,
+      "query_sha256": "7389181c47021a82770a2dfd5ec4ec78b8682d00867b196298cba4e2f1864084",
+      "subject_sha256": "3942c9759d39d8d209b26b63e822b60c43de4c16d1477158dce8ab07966dd07d"
+    }
+  }
+}

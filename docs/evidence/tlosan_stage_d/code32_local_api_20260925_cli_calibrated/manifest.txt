@@ -1,0 +1,4 @@
+NCBI source commit: 598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4
+API mode: local -subject dbscan_mode=true; explicit FindGeneticCode on BlastSeqSrc retrieval.
+Code 1 API outfmt 6, Kappa, Stage D, and TotLen call traces match the local -subject CLI bytes.
+Code 32 TotLen=360 skips OneSubjectUpdateParameters; initial word/gapped cutoff=9; two Kappa preliminary HSPs score 656 and 16.

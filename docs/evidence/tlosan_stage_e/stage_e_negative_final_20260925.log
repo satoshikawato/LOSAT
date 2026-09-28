@@ -1,0 +1,14 @@
+PASS database_search: exit=2
+PASS fast_task: exit=1
+PASS checkpoint: exit=2
+PASS remote: exit=1
+PASS subject_location: exit=1
+PASS ungapped: exit=1
+PASS threads: exit=1
+PASS matrix: exit=1
+PASS intron: exit=1
+PASS composition: exit=1
+PASS word_size: exit=1
+PASS invalid_code: exit=2
+PASS xml_format: exit=2
+PASS custom_fields: exit=2

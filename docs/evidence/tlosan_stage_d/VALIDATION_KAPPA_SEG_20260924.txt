@@ -1,0 +1,31 @@
+TBLASTN Stage D translated Kappa SEG partial checkpoint validation, 2026-09-24
+Pinned NCBI source: 598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4
+No Stage D/E acceptance asserted.
+
+$ (cd LOSAT && cargo test --lib translated_kappa_seg_bytes_match_ncbi_mask_calls -- --nocapture)
+running 1 test
+test core::composition_adjustment::redo_alignment::tests::translated_kappa_seg_bytes_match_ncbi_mask_calls ... ok
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 509 filtered out
+exit code: 0
+
+$ (cd LOSAT && cargo test --lib core::composition_adjustment::redo_alignment)
+running 16 tests
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 494 filtered out
+exit code: 0
+
+$ (cd LOSAT && cargo fmt --all --check)
+exit code: 0
+
+$ (cd LOSAT && cargo clippy --lib -- -D warnings)
+    Checking LOSAT v0.1.0
+    Finished `dev` profile
+exit code: 0
+
+$ (cd docs/evidence/tlosan_stage_d/kappa_seg_20260924 && sha256sum -c outputs.sha256)
+manifest.txt: OK
+multi_query_20260924_default.tsv: OK
+seg_hard_query_20260924_default.tsv: OK
+exit code: 0
+
+$ git diff --check
+exit code: 0

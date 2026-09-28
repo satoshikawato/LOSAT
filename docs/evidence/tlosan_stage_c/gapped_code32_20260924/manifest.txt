@@ -1,0 +1,9 @@
+Comparison-only pinned NCBI C++ API -db oracle via FindGeneticCode(32).
+This establishes code-32 candidate-to-gapped HSP behavior, not local -subject statistics or headers.
+NCBI C/C++ source commit: 598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4
+NCBI CLI binary SHA256: e3956f1e107a30439d56c8f72fae4267a7d62ebcc16e4f99d4baf2bdf00402e0
+Probe source SHA256: 89ec02e8d4ebbff01d80d66111779b0d5a9544252321b7f848065f6a407f6a41
+API run: /tmp/tlosan-c-code32-gapped-api
+Rerun: gcc -shared -fPIC -std=c11 -O2 -o /tmp/tlosan-gapped-probe.so docs/evidence/tlosan_stage_c/ncbi_gapped_trace.c -ldl
+Rerun: LD_PRELOAD=/tmp/tlosan-gapped-probe.so bash docs/evidence/tlosan_stage_a/run_api_oracle.sh NEW_API_RUN_DIR
+Rerun: python3 docs/evidence/tlosan_stage_c/parse_code32_gapped_trace.py NEW_API_RUN_DIR NEW_OUTPUT_DIR

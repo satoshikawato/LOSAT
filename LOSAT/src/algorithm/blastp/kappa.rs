@@ -413,6 +413,26 @@ struct RedoneBlastpHit {
     subject_end: i32,
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1755-1770
+// ```c
+// int queryStart, queryEnd, queryIndex, matchStart, matchEnd, frame;
+// queryStart = gap_align->query_start + query_range->begin;
+// queryEnd = gap_align->query_stop + query_range->begin;
+// matchStart = gap_align->subject_start + subject_range->begin;
+// matchEnd = gap_align->subject_stop + subject_range->begin;
+// obj = BlastCompo_AlignmentNew(gap_align->score, matrix_adjust_rule,
+//     queryStart, queryEnd, queryIndex, matchStart, matchEnd, frame, *edit_script);
+// ```
+// Kappa consumes raw signed state before any report Hit conversion.
+struct RedoneBlastpTraceback {
+    score: i32,
+    edit_script: Vec<crate::common::GapEditOp>,
+    query_start: i32,
+    query_end: i32,
+    subject_start: i32,
+    subject_end: i32,
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1748-1770
 // ```c
 // s_NewAlignmentFromGapAlign(..., BlastCompo_SequenceRange * query_range,
@@ -444,7 +464,7 @@ fn redo_preliminary_blastp_hit(
     gap_extend: i32,
     x_drop: i32,
     gap_scratch: &mut GapAlignScratch,
-) -> Option<RedoneBlastpHit> {
+) -> Option<RedoneBlastpTraceback> {
     let q_start = preliminary_hsp.gapped_query_start - query_range.begin;
     let s_start = preliminary_hsp.gapped_subject_start - subject_range.begin;
     if q_start < 0 || s_start < 0 {
@@ -468,32 +488,23 @@ fn redo_preliminary_blastp_hit(
         gap_extend,
         x_drop,
         gap_scratch,
+        None,
     )?;
 
-    let alignment_len = aligned
-        .edit_script
-        .iter()
-        .map(|op| op.num() as usize)
-        .sum::<usize>();
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1757-1770
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1760-1764,1943-1946
     // ```c
     // queryStart = gap_align->query_start + query_range->begin;
-    // queryEnd   = gap_align->query_stop + query_range->begin;
+    // queryEnd = gap_align->query_stop + query_range->begin;
     // matchStart = gap_align->subject_start + subject_range->begin;
-    // matchEnd   = gap_align->subject_stop  + subject_range->begin;
-    // obj = BlastCompo_AlignmentNew(..., queryStart, queryEnd, ...,
-    //                               matchStart, matchEnd, ...);
+    // matchEnd = gap_align->subject_stop + subject_range->begin;
+    // if (status == 0) return s_NewAlignmentFromGapAlign(gapAlign, &gapAlign->edit_script,
+    //     query_range, subject_range, matrix_adjust_rule);
     // ```
-    if alignment_len == 0 {
-        return None;
-    }
-
-    let query_origin = usize::try_from(query_range.begin).ok()?;
-    let subject_origin = usize::try_from(subject_range.begin).ok()?;
-    let query_start = query_origin.checked_add(aligned.query_start)?;
-    let query_end = query_origin.checked_add(aligned.query_stop)?;
-    let subject_start = subject_origin.checked_add(aligned.subject_start)?;
-    let subject_end = subject_origin.checked_add(aligned.subject_stop)?;
+    // Neither an empty edit script nor fence=true overrides successful status.
+    let query_start = aligned.query_start + query_range.begin;
+    let query_end = aligned.query_stop + query_range.begin;
+    let subject_start = aligned.subject_start + subject_range.begin;
+    let subject_end = aligned.subject_stop + subject_range.begin;
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1757-1764
     // ```c
@@ -520,43 +531,14 @@ fn redo_preliminary_blastp_hit(
         );
     }
 
-    Some(RedoneBlastpHit {
-        hit: Hit {
-            identity: 0.0,
-            length: 0,
-            mismatch: 0,
-            gapopen: 0,
-            q_start: query_start + 1,
-            q_end: query_end,
-            s_start: subject_start + 1,
-            s_end: subject_end,
-            e_value: 0.0,
-            bit_score: 0.0,
-            num_ident: 0,
-            query_frame: preliminary_hsp.query_frame,
-            query_length: preliminary_hsp.query_length,
-            q_idx: preliminary_hsp.q_idx,
-            s_idx: preliminary_hsp.s_idx,
-            raw_score: aligned.score,
-            // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-143
-            // ```c
-            // typedef struct BlastHSP {
-            //    BlastSeg query;
-            //    BlastSeg subject;
-            // } BlastHSP;
-            // ```
-            sort_query_offset: 0,
-            sort_query_end: 0,
-            sort_subject_offset: 0,
-            sort_subject_end: 0,
-            has_sort_offsets: false,
-            gap_info: Some(aligned.edit_script),
-            num_positives: 0,
-        },
-        query_start: query_start as i32,
-        query_end: query_end as i32,
-        subject_start: subject_start as i32,
-        subject_end: subject_end as i32,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1767-1770: BlastCompo_AlignmentNew(gap_align->score, ... , *edit_script);
+    Some(RedoneBlastpTraceback {
+        score: aligned.score,
+        edit_script: aligned.edit_script,
+        query_start,
+        query_end,
+        subject_start,
+        subject_end,
     })
 }
 
@@ -682,13 +664,13 @@ fn blastp_redo_one_alignment_callback(
     //     *edit_script = NULL;
     // }
     // ```
-    let edit_script_context = redone_hit
-        .hit
-        .gap_info
-        .take()
-        .map(BlastCompoAlignmentContext::EditScript);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1767-1772: obj = BlastCompo_AlignmentNew(..., *edit_script); *edit_script = NULL;
+    let edit_script_context = Some(BlastCompoAlignmentContext::EditScript(std::mem::take(
+        &mut redone_hit.edit_script,
+    )));
     Ok(Some(blast_compo_alignment_new(
-        redone_hit.hit.raw_score,
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1767: obj = BlastCompo_AlignmentNew(gap_align->score, matrix_adjust_rule, ...);
+        redone_hit.score,
         matrix_adjust_rule,
         redone_hit.query_start,
         redone_hit.query_end,
@@ -750,10 +732,34 @@ fn redone_hit_from_alignment(
     align: &BlastCompoAlignment,
     template_hit: &BlastpPreliminaryHsp,
 ) -> Option<RedoneBlastpHit> {
-    let query_start = usize::try_from(align.query_start).ok()?;
-    let query_end = usize::try_from(align.query_end).ok()?;
-    let subject_start = usize::try_from(align.match_start).ok()?;
-    let subject_end = usize::try_from(align.match_end).ok()?;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1598-1606,1620-1643,326-331;
+    // c++/src/algo/blast/core/blast_gapalign.c:4620-4653
+    // ```c
+    // seqData->buffer = calloc((self->length + 2), sizeof(Uint1));
+    // for (idx = 0; idx < seqData->length; idx++) {
+    //     seqData->data[idx] = origData[idx];
+    // }
+    // *seqData->data++ = '\0';
+    // if ((! (fence_hit && *fence_hit)) && (q_start < q_length) && (s_start < s_length)) {
+    //     found_end = TRUE;
+    //     gap_align->query_stop = q_start + private_q_length + 1;
+    //     gap_align->subject_stop = s_start + private_s_length + 1;
+    // }
+    // status = Blast_HSPInit(align->queryStart, align->queryEnd,
+    //     align->matchStart, align->matchEnd, ...);
+    // ```
+    // The actual BLASTP protein-range getter copies NCBISTDAA 0..27,
+    // adds NULLB=0, and SEG writes X=21; it never constructs FENCE_SENTRY=201.
+    // Valid seeded starts therefore reach found_end=TRUE. Report conversion
+    // enforces that domain; it must never silently drop a signed raw payload.
+    let query_start = usize::try_from(align.query_start)
+        .expect("NCBI full-protein Kappa query start must be non-negative");
+    let query_end = usize::try_from(align.query_end)
+        .expect("NCBI full-protein Kappa query end must be non-negative");
+    let subject_start = usize::try_from(align.match_start)
+        .expect("NCBI full-protein Kappa subject start must be non-negative");
+    let subject_end = usize::try_from(align.match_end)
+        .expect("NCBI full-protein Kappa subject end must be non-negative");
     let gap_info = match align.context.as_ref() {
         Some(BlastCompoAlignmentContext::EditScript(edit_script)) => Some(edit_script.clone()),
         None => None,
@@ -872,10 +878,34 @@ fn redone_hit_from_alignment_owned(
     mut align: BlastCompoAlignment,
     template_hit: &BlastpPreliminaryHsp,
 ) -> Option<RedoneBlastpHit> {
-    let query_start = usize::try_from(align.query_start).ok()?;
-    let query_end = usize::try_from(align.query_end).ok()?;
-    let subject_start = usize::try_from(align.match_start).ok()?;
-    let subject_end = usize::try_from(align.match_end).ok()?;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1598-1606,1620-1643,326-331;
+    // c++/src/algo/blast/core/blast_gapalign.c:4620-4653
+    // ```c
+    // seqData->buffer = calloc((self->length + 2), sizeof(Uint1));
+    // for (idx = 0; idx < seqData->length; idx++) {
+    //     seqData->data[idx] = origData[idx];
+    // }
+    // *seqData->data++ = '\0';
+    // if ((! (fence_hit && *fence_hit)) && (q_start < q_length) && (s_start < s_length)) {
+    //     found_end = TRUE;
+    //     gap_align->query_stop = q_start + private_q_length + 1;
+    //     gap_align->subject_stop = s_start + private_s_length + 1;
+    // }
+    // status = Blast_HSPInit(align->queryStart, align->queryEnd,
+    //     align->matchStart, align->matchEnd, ...);
+    // ```
+    // The actual BLASTP protein-range getter copies NCBISTDAA 0..27,
+    // adds NULLB=0, and SEG writes X=21; it never constructs FENCE_SENTRY=201.
+    // Valid seeded starts therefore reach found_end=TRUE. Report conversion
+    // enforces that domain; it must never silently drop a signed raw payload.
+    let query_start = usize::try_from(align.query_start)
+        .expect("NCBI full-protein Kappa query start must be non-negative");
+    let query_end = usize::try_from(align.query_end)
+        .expect("NCBI full-protein Kappa query end must be non-negative");
+    let subject_start = usize::try_from(align.match_start)
+        .expect("NCBI full-protein Kappa subject start must be non-negative");
+    let subject_end = usize::try_from(align.match_end)
+        .expect("NCBI full-protein Kappa subject end must be non-negative");
     let gap_info = match align.context.take() {
         Some(BlastCompoAlignmentContext::EditScript(edit_script)) => Some(edit_script),
         None => None,
@@ -2314,8 +2344,9 @@ mod tests {
 
         assert_eq!(redone.query_start, 4);
         assert_eq!(redone.subject_start, 3);
-        assert_eq!(redone.hit.q_start, 5);
-        assert_eq!(redone.hit.s_start, 4);
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1760-1764: callback state retains zero-based signed offsets.
+        assert_eq!(redone.query_start + 1, 5);
+        assert_eq!(redone.subject_start + 1, 4);
     }
 
     #[test]
@@ -2724,5 +2755,118 @@ mod tests {
         reap_contained_hits(&mut hsp_list);
 
         assert_eq!(hsp_list.hsps.len(), 2);
+    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1760-1772,1934-1946
+    // ```c
+    // status = BLAST_GappedAlignmentWithTraceback(..., &fence_hit);
+    // if (status == 0) return s_NewAlignmentFromGapAlign(...);
+    // queryStart = gap_align->query_start + query_range->begin;
+    // queryEnd = gap_align->query_stop + query_range->begin;
+    // matchStart = gap_align->subject_start + subject_range->begin;
+    // matchEnd = gap_align->subject_stop + subject_range->begin;
+    // obj = BlastCompo_AlignmentNew(gap_align->score, matrix_adjust_rule,
+    //     queryStart, queryEnd, queryIndex, matchStart, matchEnd, frame, *edit_script);
+    // ```
+    // Direct unit boundary only: this synthetic sentinel tests callback state,
+    // separate from natural FASTA runtime reachability. The exact pinned C
+    // s_NewAlignmentFromGapAlign owner provides every expected coordinate,
+    // score and complete script for zero and nonzero range origins.
+    #[test]
+    fn test_blastp_fence_signed_caller_matches_pinned_ncbi() {
+        let expected = include_str!("../../../tests/unit/blastp_fence_signed_caller_expected.tsv");
+        let mut observed = String::from("qstart\tsstart\tfence_position\tquery_origin\tsubject_origin\tscore\tquery_start\tquery_stop\tsubject_start\tsubject_stop\tedits\n");
+        for line in expected.lines().skip(1) {
+            let f: Vec<&str> = line.split('\t').collect();
+            let qstart: usize = f[0].parse().unwrap();
+            let sstart: usize = f[1].parse().unwrap();
+            let position: i32 = f[2].parse().unwrap();
+            let qb: i32 = f[3].parse().unwrap();
+            let sb: i32 = f[4].parse().unwrap();
+            let query_data = BlastCompoSequenceData::from_ncbistdaa(&[1u8; 6]);
+            let mut sequence = [1u8; 6];
+            if position >= 0 {
+                sequence[usize::try_from(position).unwrap()] = 201;
+            }
+            let subject_data = BlastCompoSequenceData::from_ncbistdaa(&sequence);
+            let qrange = BlastCompoSequenceRange {
+                begin: qb,
+                end: qb + 6,
+                context: 0,
+            };
+            let srange = BlastCompoSequenceRange {
+                begin: sb,
+                end: sb + 6,
+                context: 0,
+            };
+            let mut scratch = GapAlignScratch::new();
+            let input = BlastpPreliminaryHsp {
+                query_start: qb,
+                query_end: qb + 6,
+                subject_start: sb,
+                subject_end: sb + 6,
+                gapped_query_start: qb + qstart as i32,
+                gapped_subject_start: sb + sstart as i32,
+                raw_score: 0,
+                query_context: 0,
+                query_frame: 0,
+                subject_frame: 0,
+                query_length: 6,
+                q_idx: 0,
+                s_idx: 0,
+            };
+            let result = redo_preliminary_blastp_hit(
+                &input,
+                &query_data,
+                &qrange,
+                &subject_data,
+                &srange,
+                ScoringMatrix::Blosum62,
+                None,
+                11,
+                1,
+                18,
+                &mut scratch,
+            )
+            .expect("successful NCBI callback preserves signed payload");
+            let score = result.score;
+            let script = &result.edit_script;
+            let (qs, qe, ss, se) = (
+                result.query_start,
+                result.query_end,
+                result.subject_start,
+                result.subject_end,
+            );
+            let edits = if script.is_empty() {
+                "-".to_owned()
+            } else {
+                script
+                    .iter()
+                    .map(|op| {
+                        let kind = match op {
+                            GapEditOp::Sub(_) => 3,
+                            GapEditOp::Del(_) => 0,
+                            GapEditOp::Ins(_) => 6,
+                        };
+                        format!("{kind}:{}", op.num())
+                    })
+                    .collect::<Vec<_>>()
+                    .join(",")
+            };
+            let payload = format!("{score}\t{qs}\t{qe}\t{ss}\t{se}\t{edits}");
+            assert_eq!(
+                payload,
+                f[7..].join("\t"),
+                "direct callback case {}",
+                f[..5].join("/")
+            );
+            observed.push_str(&format!("{}\t{payload}\n", f[..5].join("\t")));
+        }
+        if let Some(root) = std::env::var_os("LOSAT_FENCE_CALLER_DUMP") {
+            std::fs::write(
+                std::path::Path::new(&root).join("blastp_caller_actual.tsv"),
+                observed,
+            )
+            .unwrap();
+        }
     }
 }

@@ -1,0 +1,10 @@
+   Compiling LOSAT v0.1.0 (/mnt/c/Users/genom/GitHub/LOSAT/LOSAT)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 20.09s
+     Running unittests src/lib.rs (target/debug/deps/LOSAT-58175ff142d19059)
+
+running 3 tests
+test algorithm::tblastn::args::tests::invalid_codes_are_explicit_errors ... ok
+test algorithm::tblastn::args::tests::unsupported_paths_and_ncbi_exclusions_are_rejected ... ok
+test algorithm::tblastn::args::tests::ordinary_defaults_and_code32_are_accepted ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 434 filtered out; finished in 0.15s

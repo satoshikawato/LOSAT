@@ -1,0 +1,12 @@
+call	subject	frame	index	q_seed	s_seed	q_start	s_start	length	raw_score
+0	plus1	1	0	3	3	0	0	120	656
+1	plus2	2	0	3	3	0	0	120	656
+2	plus3	3	0	3	3	0	0	120	656
+3	minus1	-1	0	3	3	0	0	120	656
+4	minus2	-2	0	3	3	0	0	120	656
+5	minus3	-3	0	3	3	0	0	120	656
+6	partial_codon	1	0	3	3	0	0	120	656
+7	ambiguous	1	0	3	3	0	0	120	656
+8	internal_stop	1	0	3	3	0	0	120	647
+9	tie_a	1	0	3	3	0	0	120	656
+10	tie_b	1	0	3	3	0	0	120	656

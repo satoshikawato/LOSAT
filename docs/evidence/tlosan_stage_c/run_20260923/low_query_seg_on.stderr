@@ -1,0 +1,1 @@
+Warning: [tblastn] Query_1 q_low: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options 

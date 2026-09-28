@@ -1,0 +1,9 @@
+# TBLASTN 2.17.0+
+# Query: q1
+# Database: User specified sequence set (Input: docs/evidence/tlosan_stage_c/multi_hsp_20260924/subjects.fna)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+q1	two_copies	100.000	120	0	0	1	120	441	800	1.08e-92	257
+q1	two_copies	100.000	120	0	0	1	120	1503	1862	1.08e-92	257
+q1	two_copies	42.857	7	4	0	13	19	2085	2065	3.1	14.6
+# BLAST processed 1 queries

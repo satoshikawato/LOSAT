@@ -1,0 +1,44 @@
+TBLASTN Stage D focused natural 112-subject Kappa continuation
+Date: 2026-09-25
+LOSAT starting commit: 2419e2db489d6e9c33afd7a370276f17b13744c7
+Pinned NCBI source: 598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4
+NCBI binary SHA256: e3956f1e107a30439d56c8f72fae4267a7d62ebcc16e4f99d4baf2bdf00402e0
+
+$ git status --short --branch
+## feature/tlosan-tblastn-v0.2.0...origin/feature/tlosan-tblastn-v0.2.0
+$ git ls-remote --heads origin feature/tlosan-tblastn-v0.2.0
+2419e2db489d6e9c33afd7a370276f17b13744c7 refs/heads/feature/tlosan-tblastn-v0.2.0
+
+$ python3 docs/evidence/tlosan_stage_d/kappa_heap_rejection_20260925/run_ncbi_natural_c_d_trace.py /tmp/tlosan-natural-cd-20260925-codex-2419-1
+exit 0.
+$ diff -rq docs/evidence/tlosan_stage_d/kappa_heap_rejection_20260925/natural_c_d_early_20260925 /tmp/tlosan-natural-cd-20260925-codex-2419-1
+exit 0, no differences.
+$ python3 docs/evidence/tlosan_stage_d/kappa_heap_rejection_20260925/run_ncbi_natural_mode2_trace.py /tmp/tlosan-natural-mode2-20260925-codex-2419-1
+exit 0.
+$ diff -rq docs/evidence/tlosan_stage_d/kappa_heap_rejection_20260925/natural_mode2_20260925 /tmp/tlosan-natural-mode2-20260925-codex-2419-1
+exit 0, no differences.
+$ python3 docs/evidence/tlosan_stage_d/kappa_heap_rejection_20260925/run_ncbi_heap_rejection_trace.py /tmp/tlosan-heap-result-20260925-codex-2419-1
+exit 0.
+$ diff -rq docs/evidence/tlosan_stage_d/kappa_heap_rejection_20260925/result_order_20260925 /tmp/tlosan-heap-result-20260925-codex-2419-1
+exit 0, no differences.
+
+$ cargo test --manifest-path LOSAT/Cargo.toml --lib algorithm::tblastn::stage_d_linking::tests::natural_heap_replacement_fixture_matches_ncbi_preliminary_stream -- --exact
+1 passed, 0 failed. Rust natural Stage C preliminary HSPs traverse Kappa redo,
+postredo link/reap, normalized raw/bit/E-value/identity, heap and retained
+hitlist score/E-value/coordinate/frame/multiplicity fields. Edit scripts,
+gapped starts, bit score and identity are not retained in the hitlist type.
+$ cargo clippy --manifest-path LOSAT/Cargo.toml --lib --tests -- -D warnings
+exit 0.
+$ cargo fmt --manifest-path LOSAT/Cargo.toml --all -- --check
+exit 0.
+
+No general local runtime Stage D path or Stage E byte comparison is claimed.
+The public TBLASTN CLI remains unimplemented.
+
+Independent read-only ncbi_parity_auditor:
+No concrete numeric mismatch in the compared 112-subject fields. The auditor
+confirmed normalize/identity before HeapWouldInsert matches pinned
+blast_kappa.c:3687-3713. It identified the oracle-fed Kappa parameters and
+missing report-ready hitlist metadata/edit scripts as open scope. A direct
+redone alignment query_index assertion was added to close its wording finding.
+No Stage D or E acceptance claim was made.

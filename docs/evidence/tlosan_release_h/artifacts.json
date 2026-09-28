@@ -1,0 +1,67 @@
+{
+  "artifacts": {
+    "crate": {
+      "bytes": 2813168,
+      "path": "/tmp/tlosan-v020-cargo-package-target-d/package/LOSAT-0.2.0.crate",
+      "sha256": "50009387f331797ad380c1d54df0b10ded3d9c93b7055b083010406c2e6cddb8"
+    },
+    "native": {
+      "bytes": 3481432,
+      "path": "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/target/release/LOSAT",
+      "sha256": "6c50c85d4f14379e3d71952c7cc7c9c3f95976e4bc09921ab7cc421390500b40"
+    },
+    "serial_wasi": {
+      "bytes": 2572141,
+      "path": "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/target/serial-command/wasm32-wasip1/release/LOSAT.wasm",
+      "sha256": "912ea816dd5383b423011b02cacc32ade1d3c61cd02a391a4944f82b4b84eee5"
+    },
+    "threaded_wasi": {
+      "bytes": 2863184,
+      "path": "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/target/threaded-command/wasm32-wasip1-threads/release/LOSAT.wasm",
+      "sha256": "1b84612adc4e5aacadbf62dfd75ec6b10cf84cc652c19aacf535aa57739641b6"
+    }
+  },
+  "candidate_commit": "005e3d4b6cba6b5808334088fe9595c89efe01f8",
+  "cargo": "cargo 1.92.0 (344c4567c 2025-10-21)",
+  "clean_install": {
+    "command": [
+      "cargo",
+      "install",
+      "--path",
+      "/tmp/tlosan-session-h-clean-install-d/LOSAT-0.2.0",
+      "--root",
+      "/tmp/tlosan-session-h-clean-install-d/root",
+      "--target-dir",
+      "/tmp/tlosan-session-h-clean-install-d/target",
+      "--offline",
+      "--locked"
+    ],
+    "expected_sha256": "48483fc59eb06f6bd87e733c22896763e32a2a80027a0e5e5cdf0119deb30f52",
+    "smoke_stdout_sha256": "48483fc59eb06f6bd87e733c22896763e32a2a80027a0e5e5cdf0119deb30f52",
+    "version": "losat 0.2.0"
+  },
+  "node": "v26.8.2",
+  "package_inspection": {
+    "absolute_local_path_occurrences": 387,
+    "absolute_local_path_source_members": 34,
+    "absolute_local_paths_are_source_comments": true,
+    "credential_marker_members": 0,
+    "embedded_vcs_commit": "005e3d4b6cba6b5808334088fe9595c89efe01f8",
+    "file_count": 178,
+    "license_included": true,
+    "test_or_scientific_fixture_members": 0
+  },
+  "package_version": "0.2.0",
+  "quality_gates": {
+    "cargo_build_release_locked": "PASS",
+    "cargo_clippy_all_targets_all_features_D_warnings": "PASS",
+    "cargo_fmt_check": "PASS",
+    "cargo_package_list_locked": "PASS",
+    "cargo_package_locked_offline": "PASS",
+    "cargo_publish_dry_run_locked": "PASS (upload aborted by dry run)",
+    "cargo_test_all_features_locked": "PASS on final 005e3d4b candidate",
+    "cargo_test_cli_v2_and_smoke": "PASS 13/13"
+  },
+  "rustc": "rustc 1.92.0 (ded5c06cf 2025-12-08)",
+  "stage_g_certification_commit": "3ee18789f22df6548f98edaf8017c9b5ba2696ec"
+}

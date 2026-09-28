@@ -1,0 +1,26 @@
+   Compiling LOSAT v0.2.0 (/mnt/c/Users/genom/GitHub/LOSAT/LOSAT)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 34.61s
+     Running tests/cli_smoke.rs (LOSAT/target/debug/deps/cli_smoke-0d155044816430d8)
+
+running 5 tests
+test unsupported_blastp_option_fails_before_file_io ... ok
+test missing_input_file_reports_explicit_query_error ... ok
+test malformed_fasta_reports_parse_error ... ok
+test cli_help_and_version_are_available_without_inputs ... ok
+test normal_tblastx_run_keeps_stderr_clean_without_debug_env ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.20s
+
+     Running tests/cli_v2.rs (LOSAT/target/debug/deps/cli_v2-4f54578cf0c25689)
+
+running 8 tests
+test flags_and_value_tokens_are_not_reinterpreted ... ok
+test canonical_options_for_every_program ... ok
+test filtering_has_exactly_one_shared_value_grammar ... ok
+test defaults_and_task_overrides_remain_distinct ... ok
+test legacy_and_unsupported_syntax_is_unknown ... ok
+test composition_tokens_round_trip_and_reject_suffix_garbage ... ok
+test output_capabilities_fail_explicitly_and_help_is_canonical ... ok
+test numeric_values_are_validated_before_io ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s

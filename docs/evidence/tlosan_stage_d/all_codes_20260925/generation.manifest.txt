@@ -1,0 +1,5 @@
+NCBI gc.prt source: 598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4
+NCBI gc.prt SHA256: 2aecbdd09ecc5e0d233c105090a593737298ef93d88f6bc0c1bef26df6051a04
+Source query SHA256: 02ef3bb9a0c7709517a32b1f8d5dc56a8d6779e7fa1232316c5246a32564e1c6
+Source subject SHA256: 0d44fdc2ae1994196df339d50704bf6f44a658965a0eb6cee8a638a89ed90d49
+Code 11 and 23 have unchanged ncbieaa translation; TGG checks their identical translated path.

@@ -1,0 +1,70 @@
+case	exit_code	observed_diagnostic
+db_gencode=1	1	Error: TBLASTN local search is unimplemented (Stages C-E)
+db_gencode=2	1	Error: TBLASTN local search is unimplemented (Stages C-E)
+db_gencode=3	1	Error: TBLASTN local search is unimplemented (Stages C-E)
+db_gencode=4	1	Error: TBLASTN local search is unimplemented (Stages C-E)
+db_gencode=5	1	Error: TBLASTN local search is unimplemented (Stages C-E)
+db_gencode=6	1	Error: TBLASTN local search is unimplemented (Stages C-E)
+db_gencode=9	1	Error: TBLASTN local search is unimplemented (Stages C-E)
+db_gencode=10	1	Error: TBLASTN local search is unimplemented (Stages C-E)
+db_gencode=11	1	Error: TBLASTN local search is unimplemented (Stages C-E)
+db_gencode=12	1	Error: TBLASTN local search is unimplemented (Stages C-E)
+db_gencode=13	1	Error: TBLASTN local search is unimplemented (Stages C-E)
+db_gencode=14	1	Error: TBLASTN local search is unimplemented (Stages C-E)
+db_gencode=15	1	Error: TBLASTN local search is unimplemented (Stages C-E)
+db_gencode=16	1	Error: TBLASTN local search is unimplemented (Stages C-E)
+db_gencode=21	1	Error: TBLASTN local search is unimplemented (Stages C-E)
+db_gencode=22	1	Error: TBLASTN local search is unimplemented (Stages C-E)
+db_gencode=23	1	Error: TBLASTN local search is unimplemented (Stages C-E)
+db_gencode=24	1	Error: TBLASTN local search is unimplemented (Stages C-E)
+db_gencode=25	1	Error: TBLASTN local search is unimplemented (Stages C-E)
+db_gencode=26	1	Error: TBLASTN local search is unimplemented (Stages C-E)
+db_gencode=27	1	Error: TBLASTN local search is unimplemented (Stages C-E)
+db_gencode=28	1	Error: TBLASTN local search is unimplemented (Stages C-E)
+db_gencode=29	1	Error: TBLASTN local search is unimplemented (Stages C-E)
+db_gencode=30	1	Error: TBLASTN local search is unimplemented (Stages C-E)
+db_gencode=31	1	Error: TBLASTN local search is unimplemented (Stages C-E)
+db_gencode=32	1	Error: TBLASTN local search is unimplemented (Stages C-E)
+db_gencode=33	1	Error: TBLASTN local search is unimplemented (Stages C-E)
+invalid_gencode=0	2	error: invalid value '0' for '-db_gencode <DB_GENCODE>': unsupported genetic code 0
+invalid_gencode=7	2	error: invalid value '7' for '-db_gencode <DB_GENCODE>': unsupported genetic code 7
+invalid_gencode=8	2	error: invalid value '8' for '-db_gencode <DB_GENCODE>': unsupported genetic code 8
+invalid_gencode=17	2	error: invalid value '17' for '-db_gencode <DB_GENCODE>': unsupported genetic code 17
+invalid_gencode=20	2	error: invalid value '20' for '-db_gencode <DB_GENCODE>': unsupported genetic code 20
+invalid_gencode=34	2	error: invalid value '34' for '-db_gencode <DB_GENCODE>': unsupported genetic code 34
+invalid_gencode=255	2	error: invalid value '255' for '-db_gencode <DB_GENCODE>': unsupported genetic code 255
+invalid_gencode=256	2	error: invalid value '256' for '-db_gencode <DB_GENCODE>': invalid genetic code ID
+invalid_gencode=-1	2	error: invalid value '-1' for '-db_gencode <DB_GENCODE>': invalid genetic code ID
+invalid_gencode=abc	2	error: invalid value 'abc' for '-db_gencode <DB_GENCODE>': invalid genetic code ID
+default	1	Error: TBLASTN local search is unimplemented (Stages C-E)
+outfmt=6	1	Error: TBLASTN local search is unimplemented (Stages C-E)
+outfmt=7	1	Error: TBLASTN local search is unimplemented (Stages C-E)
+explicit_bool_values	1	Error: TBLASTN local search is unimplemented (Stages C-E)
+tblastn-fast	1	Error: unsupported TBLASTN task: tblastn-fast
+db_search	2	error: the argument '-subject <PATH>' cannot be used with '-db <DB>'
+psi_checkpoint	2	error: the argument '-query <PATH>' cannot be used with '-in_pssm <PATH>'
+remote	1	Error: unsupported TBLASTN remote search
+ungapped_composition	1	Error: Composition-adjusted searched are not supported with an ungapped search, please add -comp_based_stats F or do a gapped search
+ungapped_comp_off	1	Error: TBLASTN local search is unimplemented (Stages C-E)
+compo_suffix	1	Error: TBLASTN local search is unimplemented (Stages C-E)
+compo_unknown_ncbi	1	Error: TBLASTN local search is unimplemented (Stages C-E)
+word_size=7	1	Error: TBLASTN local search is unimplemented (Stages C-E)
+word_size=8	2	error: invalid value '8' for '-word_size <WORD_SIZE>': Word-size must be less than 8 for a tblastn, blastp or blastx search
+threshold=0	2	error: invalid value '0' for '-threshold <THRESHOLD>': Non-zero threshold required
+evalue=0	2	error: invalid value '0' for '-evalue <EVALUE>': expect value or cutoff score must be greater than zero
+matrix=PAM30	1	Error: TBLASTN local search is unimplemented (Stages C-E)
+matrix=IDENTITY	1	Error: TBLASTN local search is unimplemented (Stages C-E)
+matrix=BAD	1	Error: BAD is not a supported matrix
+gap=1/1	1	Error: Gap existence and extension values of 1 and 1 not supported for BLOSUM62
+matrix=PAM30_gap=9/1	1	Error: TBLASTN local search is unimplemented (Stages C-E)
+matrix=IDENTITY_word=6	1	Error: Word size larger than 5 is not supported for the identity scoring matrix
+outfmt=5	2	error: invalid value '5' for '-outfmt <OUTFMT>': unsupported TBLASTN outfmt: Stage E will implement 0, 6 and 7 output
+unported_max_hsps	2	error: unsupported TBLASTN option '-max_hsps': Rust behavior is unimplemented
+subject_loc	1	Error: unsupported TBLASTN -subject_loc until local range handling is implemented
+subject_loc_remote	2	error: the argument '-subject_loc <SUBJECT_LOC>' cannot be used with '-remote'
+remote_num_threads	2	error: the argument '-remote' cannot be used with '-num_threads <NUM_THREADS>'
+remote_in_pssm	2	error: the argument '-in_pssm <PATH>' cannot be used with '-remote'
+db_subject_loc	2	error: the argument '-db <DB>' cannot be used with '-subject_loc <SUBJECT_LOC>'
+db_only	1	Error: unsupported TBLASTN database search
+psi_only	1	Error: unsupported PSI-TBLASTN checkpoint search
+tblastx_db_gencode=32_rejected	2	error: invalid value '32' for '-db_gencode <DB_GENCODE>': unsupported genetic code

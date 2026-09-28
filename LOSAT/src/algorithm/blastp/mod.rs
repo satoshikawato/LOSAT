@@ -6,9 +6,19 @@
 mod alignment;
 pub mod args;
 pub mod blast_engine;
-mod encoding;
-mod extension;
-mod gapalign;
+// NCBI c++/src/algo/blast/core/blast_setup.c:382-385:
+// if (Blast_QueryIsProtein(program_number)) BLAST_ScoreSetAmbigRes(sbp, 'X');
+// BLASTP and TBLASTN both encode an untranslated protein query in NCBISTDAA.
+pub(crate) mod encoding;
+// NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:217-228
+// status = s_BlastAaWordFinder_TwoHit(subject, query, ..., matrix, ...);
+// The same protein two-hit extension primitive is used by BLASTP and TBLASTN.
+pub(crate) mod extension;
+// NCBI c++/src/algo/blast/core/blast_gapalign.c:3936-3953:
+// max_offset = BlastGetStartForGappedAlignment(...);
+// status = s_BlastProtGappedAlignment(...);
+// BLASTP and TBLASTN use the same protein gapped-score path.
+pub(crate) mod gapalign;
 mod hsp;
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:102-3691
 // ```c

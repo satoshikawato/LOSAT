@@ -1,4 +1,4 @@
-//! Port of the non-Smith-Waterman protein-only control flow from
+//! Port of the non-Smith-Waterman protein and translated-subject control flow from
 //! `composition_adjustment/redo_alignment.{h,c}` used by `blastp` postprocess.
 //!
 //! Reference: ncbi-blast/c++/include/algo/blast/composition_adjustment/redo_alignment.h
@@ -12,15 +12,30 @@ use std::ptr::NonNull;
 
 use crate::common::GapEditOp;
 use crate::core::blast_stat::composition::compute_lambda_from_score_probs;
-use crate::utils::matrix::BLASTAA_SIZE;
+use crate::utils::genetic_code::GeneticCode;
+use crate::utils::matrix::{aa_char_to_ncbistdaa, BLASTAA_SIZE};
+use crate::utils::seg::{SegMasker, SegParams};
 
 use super::adjust_scores::{
-    blast_adjust_scores, read_aa_composition, AdjustedProteinMatrix, BlastAminoAcidComposition,
-    BlastCompositionWorkspace, BlastMatrixInfo,
+    blast_adjust_scores, blast_get_composition_range, read_aa_composition, AdjustedProteinMatrix,
+    BlastAminoAcidComposition, BlastCompositionWorkspace, BlastMatrixInfo,
 };
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:551-570
+// ```c
+// static double s_CalcLambda(double probs[], int min_score,
+//                            int max_score, double lambda0) {
+//     ...
+//     return Blast_KarlinLambdaNR(&freq, lambda0);
+// }
+// ```
 #[inline]
-fn redo_calc_lambda(probs: &[f64], min_score: i32, max_score: i32, lambda0: f64) -> Result<f64> {
+pub(crate) fn redo_calc_lambda(
+    probs: &[f64],
+    min_score: i32,
+    max_score: i32,
+    lambda0: f64,
+) -> Result<f64> {
     compute_lambda_from_score_probs(probs, min_score, max_score, lambda0)
         .map_err(|err| anyhow::anyhow!(err))
 }
@@ -318,6 +333,12 @@ pub struct BlastCompoMatchingSequence<'a> {
     pub length: i32,
     pub index: i32,
     pub data: &'a [u8],
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1494-1497,1522-1525
+    // ```c
+    // local_data->seq_arg.seq->gen_code_string;
+    // Blast_GetPartialTranslation(..., local_data->seq_arg.seq->gen_code_string, ...);
+    // ```
+    pub genetic_code_id: Option<u8>,
 }
 
 impl<'a> BlastCompoMatchingSequence<'a> {
@@ -331,7 +352,24 @@ impl<'a> BlastCompoMatchingSequence<'a> {
             length: data.len() as i32,
             index,
             data,
+            genetic_code_id: None,
         }
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1494-1497,1522-1525
+    // ```c
+    // na_sequence = local_data->seq_arg.seq->sequence_start;
+    // Blast_GetPartialTranslation(...,
+    //     local_data->seq_arg.seq->gen_code_string, ...);
+    // ```
+    pub fn new_translated(index: i32, data: &'a [u8], genetic_code_id: u8) -> Result<Self> {
+        GeneticCode::try_from_id(genetic_code_id).map_err(anyhow::Error::msg)?;
+        Ok(Self {
+            length: i32::try_from(data.len())?,
+            index,
+            data,
+            genetic_code_id: Some(genetic_code_id),
+        })
     }
 }
 
@@ -495,6 +533,229 @@ pub struct BlastRedoOneMatchResult {
     pub alignments_by_query: Vec<Option<Box<BlastCompoAlignment>>>,
     pub pvalue_for_this_pair: Option<f64>,
     pub lambda_ratio: Option<f64>,
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1239-1274
+// ```c++
+//                             in_align, FALSE, subject_is_translated);
+//                     adjust_search_failed =
+//                             Blast_AdjustScores(matrix, query_composition,
+//                                     query.length,
+//                                     &subject_composition,
+//                                     subject.length,
+//                                     scaledMatrixInfo, compo_adjust_mode,
+//                                     RE_pseudocounts, NRrecord,
+//                                     &matrix_adjust_rule,
+//                                     callbacks->calc_lambda,
+//                                     pvalueForThisPair,
+//                                     compositionTestIndex,
+//                                     LambdaRatio);
+//                     if (adjust_search_failed < 0) { /* fatal error */
+//                         status = adjust_search_failed;
+//                         goto window_index_loop_cleanup;
+//                     }
+//                     num_adjustments++;
+//                 }
+//
+//                 if ( !adjust_search_failed ) {
+//                     newAlign = callbacks->redo_one_alignment(
+//                             in_align,
+//                             matrix_adjust_rule,
+//                             &query,
+//                             &window->query_range,
+//                             ccat_query_length,
+//                             &subject,
+//                             &window->subject_range,
+//                             matchingSeq->length,
+//                             gapping_params
+//                     );
+//                     if (newAlign && newAlign->score >= params->cutoff_s) {
+//                         s_WithDistinctEnds(&newAlign, &alignments[query_index],
+//                                 callbacks->free_align_traceback,
+//                                 num_adjustments == 1);
+// ```
+pub enum BlastRedoTraceEvent<'a> {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:966-1000
+    // ```c++
+    // s_IsContained(BlastCompo_Alignment * in_align,
+    //               BlastCompo_Alignment * alignments,
+    //               double lambda)
+    // {
+    //     BlastCompo_Alignment * align;     /* represents the current alignment
+    //                                             in the main loop */
+    //     /* Endpoints of the alignment */
+    //     int query_offset    = in_align->queryStart;
+    //     int query_end       = in_align->queryEnd;
+    //     int subject_offset  = in_align->matchStart;
+    //     int subject_end     = in_align->matchEnd;
+    //     double score        = in_align->score;
+    //     double scoreThresh = score + KAPPA_BIT_TOL * LOCAL_LN2/lambda;
+    //
+    //     for (align = alignments;  align != NULL;  align = align->next ) {
+    //         /* for all elements of alignments */
+    //         if (KAPPA_SIGN(in_align->frame) == KAPPA_SIGN(align->frame)) {
+    //             /* hsp1 and hsp2 are in the same query/subject frame */
+    //             if (KAPPA_CONTAINED_IN_HSP
+    //                 (align->queryStart, align->queryEnd, query_offset,
+    //                  align->matchStart, align->matchEnd, subject_offset) &&
+    //                 KAPPA_CONTAINED_IN_HSP
+    //                 (align->queryStart, align->queryEnd, query_end,
+    //                  align->matchStart, align->matchEnd, subject_end) &&
+    //                 scoreThresh <= align->score) {
+    //                 return 1;
+    //             }
+    //         }
+    //     }
+    //     return 0;
+    // }
+    //
+    //
+    // /* Documented in redo_alignment.h. */
+    // void
+    // ```
+    Contained {
+        incoming: &'a BlastCompoAlignment,
+        result: bool,
+    },
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:224-274
+    // ```c++
+    // s_HitlistReapContained(BlastHSP * hsp_array[], Int4 * hspcnt)
+    // {
+    //     Int4 iread;       /* iteration index used to read the hitlist */
+    //     Int4 iwrite;      /* iteration index used to write to the hitlist */
+    //     Int4 old_hspcnt;  /* number of HSPs in the hitlist on entry */
+    //
+    //     old_hspcnt = *hspcnt;
+    //
+    //     for (iread = 1;  iread < *hspcnt;  iread++) {
+    //         /* for all HSPs in the hitlist */
+    //         Int4      ireadBack;  /* iterator over indices less than iread */
+    //         BlastHSP *hsp1;       /* an HSP that is a candidate for deletion */
+    //
+    //         hsp1 = hsp_array[iread];
+    //         for (ireadBack = 0;  ireadBack < iread && hsp1 != NULL;  ireadBack++) {
+    //             /* for all HSPs before hsp1 in the hitlist and while hsp1
+    //              * has not been deleted */
+    //             BlastHSP *hsp2;    /* an HSP that occurs earlier in hsp_array
+    //                                 * than hsp1 */
+    //             hsp2 = hsp_array[ireadBack];
+    //
+    //             if( hsp2 == NULL ) {  /* hsp2 was deleted in a prior iteration. */
+    //                 continue;
+    //             }
+    //             if (hsp2->query.frame == hsp1->query.frame &&
+    //                 hsp2->subject.frame == hsp1->subject.frame) {
+    //                 /* hsp1 and hsp2 are in the same query/subject frame. */
+    //                 if (CONTAINED_IN_HSP
+    //                     (hsp2->query.offset, hsp2->query.end, hsp1->query.offset,
+    //                      hsp2->subject.offset, hsp2->subject.end,
+    //                      hsp1->subject.offset) &&
+    //                     CONTAINED_IN_HSP
+    //                     (hsp2->query.offset, hsp2->query.end, hsp1->query.end,
+    //                      hsp2->subject.offset, hsp2->subject.end,
+    //                      hsp1->subject.end)    &&
+    //                     hsp1->score <= hsp2->score) {
+    //                     hsp1 = hsp_array[iread] = Blast_HSPFree(hsp_array[iread]);
+    //                 }
+    //             } /* end if hsp1 and hsp2 are in the same query/subject frame */
+    //         } /* end for all HSPs before hsp1 in the hitlist */
+    //     } /* end for all HSPs in the hitlist */
+    //
+    //     /* Condense the hsp_array, removing any NULL items. */
+    //     iwrite = 0;
+    //     for (iread = 0;  iread < *hspcnt;  iread++) {
+    //         if (hsp_array[iread] != NULL) {
+    //             hsp_array[iwrite++] = hsp_array[iread];
+    //         }
+    //     }
+    //     *hspcnt = iwrite;
+    //     /* Fill the remaining memory in hsp_array with NULL pointers. */
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:266-273
+    // ```c
+    //     /* Condense the hsp_array, removing any NULL items. */
+    //     iwrite = 0;
+    //     for (iread = 0;  iread < *hspcnt;  iread++) {
+    //         if (hsp_array[iread] != NULL) {
+    //             hsp_array[iwrite++] = hsp_array[iread];
+    //         }
+    //     }
+    //     *hspcnt = iwrite;
+    // ```
+    ReapList {
+        phase: &'static str,
+        index: usize,
+        context: usize,
+        frame: i8,
+        score: i32,
+        q_start: i32,
+        q_end: i32,
+        s_start: i32,
+        s_end: i32,
+    },
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:238-260
+    // ```c
+    //         for (ireadBack = 0;  ireadBack < iread && hsp1 != NULL;  ireadBack++) {
+    //             /* for all HSPs before hsp1 in the hitlist and while hsp1
+    //              * has not been deleted */
+    //             BlastHSP *hsp2;    /* an HSP that occurs earlier in hsp_array
+    //                                 * than hsp1 */
+    //             hsp2 = hsp_array[ireadBack];
+    //
+    //             if( hsp2 == NULL ) {  /* hsp2 was deleted in a prior iteration. */
+    //                 continue;
+    //             }
+    //             if (hsp2->query.frame == hsp1->query.frame &&
+    //                 hsp2->subject.frame == hsp1->subject.frame) {
+    //                 /* hsp1 and hsp2 are in the same query/subject frame. */
+    //                 if (CONTAINED_IN_HSP
+    //                     (hsp2->query.offset, hsp2->query.end, hsp1->query.offset,
+    //                      hsp2->subject.offset, hsp2->subject.end,
+    //                      hsp1->subject.offset) &&
+    //                     CONTAINED_IN_HSP
+    //                     (hsp2->query.offset, hsp2->query.end, hsp1->query.end,
+    //                      hsp2->subject.offset, hsp2->subject.end,
+    //                      hsp1->subject.end)    &&
+    //                     hsp1->score <= hsp2->score) {
+    //                     hsp1 = hsp_array[iread] = Blast_HSPFree(hsp_array[iread]);
+    // ```
+    ReapCompare {
+        index: usize,
+        previous_index: usize,
+        result: bool,
+    },
+    ReapContained {
+        frame: i8,
+        score: i32,
+        q_start: i32,
+        q_end: i32,
+        s_start: i32,
+        s_end: i32,
+        result: bool,
+    },
+
+    MatchStart {
+        context: usize,
+        count: usize,
+        matrix: Option<&'a AdjustedProteinMatrix>,
+    },
+    MatchEnd {
+        context: usize,
+        matrix: Option<&'a AdjustedProteinMatrix>,
+    },
+    Adjustment {
+        before: bool,
+        status: i32,
+        query_count: i32,
+        subject_count: i32,
+        rule: EMatrixAdjustRule,
+        matrix: Option<&'a AdjustedProteinMatrix>,
+    },
+    Redo {
+        incoming: &'a BlastCompoAlignment,
+        rule: EMatrixAdjustRule,
+        matrix: Option<&'a AdjustedProteinMatrix>,
+    },
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1110-1121
@@ -1080,6 +1341,383 @@ fn subject_compare_windows(w1: &WindowInfo, w2: &WindowInfo) -> Ordering {
         ord => return ord,
     }
     w1.query_range.context.cmp(&w2.query_range.context)
+}
+
+// NCBI c++/src/algo/blast/composition_adjustment/redo_alignment.c:80,626-751:
+// static const int kWindowBorder = 200;
+// translated_length = (sequence_length - ABS(frame) + 1)/3;
+// begin = MAX(0, align->matchStart - border);
+// end = MIN(translated_length, align->matchEnd + border);
+// windows[k] = s_WindowInfoNew(begin, end, frame, 0,
+//                              query_length, query_index, align_copy);
+// qsort(windows, hspcnt, sizeof(s_WindowInfo*), s_LocationCompareWindows);
+// if (same subject/query context && window->subject_range.end >=
+//     nextWindow->subject_range.begin) s_WindowInfoJoin(nextWindow, &windows[k]);
+// s_DistinctAlignmentsSort(&windows[k]->align, windows[k]->hspcnt);
+// qsort(windows, *nWindows, sizeof(s_WindowInfo*), s_SubjectCompareWindows);
+#[allow(dead_code)] // Entered by TBLASTN Kappa only after translated callbacks are ported.
+fn windows_from_translated_aligns(
+    alignments: &Option<Box<BlastCompoAlignment>>,
+    query_lengths: &[i32],
+    subject_nt_length: i32,
+    border: i32,
+) -> Result<Vec<WindowInfo>> {
+    let mut windows = Vec::with_capacity(distinct_alignments_length(alignments));
+    let mut current = alignments.as_deref();
+    while let Some(align) = current {
+        let query_index = usize::try_from(align.query_index)
+            .map_err(|_| anyhow::anyhow!("NCBI translated window query index is negative"))?;
+        let query_length = *query_lengths
+            .get(query_index)
+            .ok_or_else(|| anyhow::anyhow!("NCBI translated window query index is missing"))?;
+        let translated_length = (subject_nt_length - align.frame.abs() + 1) / 3;
+        windows.push(window_info_new(
+            (align.match_start - border).max(0),
+            (align.match_end + border).min(translated_length),
+            align.frame,
+            0,
+            query_length,
+            align.query_index,
+            Some(alignment_copy(align)),
+        ));
+        current = align.next.as_deref();
+    }
+    windows.sort_unstable_by(location_compare_windows);
+    let mut input = windows.into_iter().peekable();
+    let mut joined = Vec::new();
+    while let Some(window) = input.next() {
+        if let Some(next) = input.peek_mut() {
+            if window.subject_range.context == next.subject_range.context
+                && window.query_range.context == next.query_range.context
+                && window.subject_range.end >= next.subject_range.begin
+            {
+                window_info_join(next, window);
+                continue;
+            }
+        }
+        joined.push(window);
+    }
+    for window in &mut joined {
+        distinct_alignments_sort(&mut window.align);
+    }
+    joined.sort_unstable_by(subject_compare_windows);
+    Ok(joined)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:681-693
+// ```c++
+//         if (align_copy == NULL)
+//             goto error_return;
+//
+//         if (subject_is_translated) {
+//             begin = MAX(0, align->matchStart - border);
+//             end   = MIN(translated_length, align->matchEnd + border);
+//             windows[k] = s_WindowInfoNew(begin, end, frame, 0,
+//                                 query_length, query_index, align_copy);
+//         } else {
+//             begin = MAX(0, align->queryStart - border);
+//             end   = MIN(query_length, align->queryEnd + border);
+//             /* for blastx, temporarily swap subject and query ranges*/
+//             windows[k] = s_WindowInfoNew(begin, end, query_index, 0,
+// ```
+fn windows_from_translated_query_aligns(
+    alignments: &Option<Box<BlastCompoAlignment>>,
+    query_infos: &[BlastCompoQueryInfo],
+    subject_length: i32,
+    border: i32,
+) -> Result<Vec<WindowInfo>> {
+    let mut windows = Vec::with_capacity(distinct_alignments_length(alignments));
+    let mut current = alignments.as_deref();
+    while let Some(align) = current {
+        let query_length = query_infos
+            .get(usize::try_from(align.query_index)?)
+            .ok_or_else(|| anyhow::anyhow!("BLASTX redo context is missing"))?
+            .seq
+            .length;
+        windows.push(window_info_new(
+            (align.query_start - border).max(0),
+            (align.query_end + border).min(query_length),
+            align.query_index,
+            0,
+            subject_length,
+            0,
+            Some(alignment_copy(align)),
+        ));
+        current = align.next.as_deref();
+    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:700-751
+    // ```c++
+    // 	}
+    //     }
+    //     qsort(windows, hspcnt, sizeof(s_WindowInfo*),
+    //         s_LocationCompareWindows);
+    //
+    //     /* Join windows that overlap or are too close together.  */
+    //     length_joined = 0;
+    //     for (k = 0;  k < hspcnt;  k++) {       /* for all windows in the
+    //                                               original list */
+    //         s_WindowInfo * window;          /* window at this value of k */
+    //         s_WindowInfo * nextWindow;      /* window at the next
+    //                                                value of k, or NULL if
+    //                                                no such window
+    //                                                exists */
+    //         window     = windows[k];
+    //         nextWindow = ( k + 1 < hspcnt ) ? windows[k+1] : NULL;
+    //
+    //         if(nextWindow != NULL &&
+    //            window->subject_range.context ==
+    //            nextWindow->subject_range.context &&
+    //            window->query_range.context == nextWindow->query_range.context &&
+    //            window->subject_range.end >= nextWindow->subject_range.begin) {
+    //             /* Join the current window with the next window.  Do not add the
+    //                current window to the output list. */
+    //             s_WindowInfoJoin(nextWindow, &windows[k]);
+    //         } else {
+    //             /* Don't join the current window with the next window.  Add the
+    //                current window to the output list instead */
+    //             windows[length_joined] = window;
+    //             length_joined++;
+    //         } /* end else don't join the current window with the next window */
+    //     } /* end for all windows in the original list */
+    //     *nWindows = length_joined;
+    //
+    //     for (k = length_joined;  k < hspcnt;  k++) {
+    //         windows[k] = NULL;
+    //     }
+    //
+    //     /* for blastx, swap query and subject range */
+    //     if (!subject_is_translated) {
+    //         for (k=0; k<length_joined; k++) {
+    //             s_WindowSwapRange(windows[k]);
+    //         }
+    //     }
+    //
+    //     for (k = 0;  k < length_joined;  k++) {
+    //         s_DistinctAlignmentsSort(&windows[k]->align, windows[k]->hspcnt);
+    //     }
+    //     qsort(windows, *nWindows, sizeof(s_WindowInfo*),
+    //           s_SubjectCompareWindows);
+    //     return 0; /* normal return */
+    //
+    // ```
+    windows.sort_unstable_by(location_compare_windows);
+    let mut input = windows.into_iter().peekable();
+    let mut joined = Vec::new();
+    while let Some(window) = input.next() {
+        if let Some(next) = input.peek_mut() {
+            if window.subject_range.context == next.subject_range.context
+                && window.query_range.context == next.query_range.context
+                && window.subject_range.end >= next.subject_range.begin
+            {
+                window_info_join(next, window);
+                continue;
+            }
+        }
+        joined.push(window);
+    }
+    for window in &mut joined {
+        window_swap_range(window);
+        distinct_alignments_sort(&mut window.align);
+    }
+    joined.sort_unstable_by(subject_compare_windows);
+    Ok(joined)
+}
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:906-938
+// ```c++
+// s_GetComposition(Blast_AminoAcidComposition * composition,
+//                  int alphsize,
+//                  BlastCompo_SequenceData * seq,
+//                  BlastCompo_SequenceRange * range,
+//                  BlastCompo_Alignment * align,
+//                  Boolean query_is_translated,
+//                  Boolean subject_is_translated)
+// {
+//     Uint1 * data;     /* sequence data for the subject */
+//     int length;       /* length of the subject portion of the alignment */
+//     /* [left, right) is the interval of the subject to use when
+//      * computing composition. The endpoints are offsets into the
+//      * subject_range. */
+//     int left, right;
+//
+//     data = seq->data;
+//     length = range->end - range->begin;
+//     if (query_is_translated || subject_is_translated) {
+//         int start;
+//         int end;
+//         start = ((query_is_translated) ?
+//                  align->queryStart : align->matchStart) - range->begin;
+//         end   = ((query_is_translated) ?
+//                  align->queryEnd   : align->matchEnd  ) - range->begin;
+//         Blast_GetCompositionRange(&left, &right, data, length, start, end);
+//     } else {
+//         /* Use the whole subject to compute the composition */
+//         left = 0;
+//         right = length;
+//     }
+//     Blast_ReadAaComposition(composition, alphsize, &data[left], right-left);
+// }
+//
+// ```
+fn translated_query_composition(
+    query: &BlastCompoSequenceData,
+    range: &BlastCompoSequenceRange,
+    align: &BlastCompoAlignment,
+) -> Result<BlastAminoAcidComposition> {
+    let start = usize::try_from(align.query_start - range.begin)?;
+    let finish = usize::try_from(align.query_end - range.begin)?;
+    let (left, right) = blast_get_composition_range(query.data(), start, finish)?;
+    Ok(read_aa_composition(&query.data()[left..right]))
+}
+
+// NCBI c++/src/algo/blast/core/blast_kappa.c:1504-1525;
+// c++/src/algo/blast/core/blast_util.c:428-454,1141-1205:
+// translation_start = frame > 0 ? 3 * range->begin
+//     : self->length - 3 * range->end + frame + 1;
+// num_nucleotides = 3 * (range->end - range->begin) + ABS(frame) - 1;
+// Blast_GetPartialTranslation(na_sequence + translation_start,
+//                             num_nucleotides, frame, genetic_code, ...);
+// BLAST_GetTranslation selects the strand and starts at ABS(frame)-1;
+// prot_seq[0] = NULLB; prot_seq[index_prot] = NULLB;
+fn translated_subject_window_sequence(
+    subject_nt: &[u8],
+    range: &BlastCompoSequenceRange,
+    genetic_code: &GeneticCode,
+) -> Result<Vec<u8>> {
+    let frame = range.context;
+    if frame == 0 || frame.abs() > 3 || range.begin < 0 || range.end < range.begin {
+        bail!("invalid NCBI translated subject window");
+    }
+    let full_length = i32::try_from(subject_nt.len())?;
+    let start = if frame > 0 {
+        3 * range.begin
+    } else {
+        full_length - 3 * range.end + frame + 1
+    };
+    let nucleotide_length = 3 * (range.end - range.begin) + frame.abs() - 1;
+    if start < 0 || nucleotide_length < 0 || start + nucleotide_length > full_length {
+        bail!("NCBI translated subject window exceeds nucleotide sequence");
+    }
+    let segment = &subject_nt[start as usize..(start + nucleotide_length) as usize];
+    let strand = if frame > 0 {
+        segment.to_vec()
+    } else {
+        bio::alphabets::dna::revcomp(segment)
+    };
+    let mut translated = Vec::with_capacity((range.end - range.begin) as usize + 2);
+    translated.push(0);
+    for codon in strand[(frame.abs() - 1) as usize..].chunks_exact(3) {
+        translated.push(aa_char_to_ncbistdaa(genetic_code.get(codon)));
+    }
+    translated.push(0);
+    if translated.len() != (range.end - range.begin) as usize + 2 {
+        bail!("NCBI translated subject window length differs");
+    }
+    Ok(translated)
+}
+
+// NCBI c++/src/algo/blast/composition_adjustment/redo_alignment.c:906-938:
+// start = align->matchStart - range->begin;
+// end = align->matchEnd - range->begin;
+// Blast_GetCompositionRange(&left, &right, data, length, start, end);
+// Blast_ReadAaComposition(composition, alphsize, &data[left], right-left);
+#[allow(dead_code)] // TBLASTN enters this after its translated-range callback is connected.
+fn translated_subject_composition(
+    translation: &[u8],
+    range: &BlastCompoSequenceRange,
+    align: &BlastCompoAlignment,
+) -> Result<BlastAminoAcidComposition> {
+    if translation.len() < 2 || translation[0] != 0 || translation[translation.len() - 1] != 0 {
+        bail!("NCBI translated subject data lacks sentinels");
+    }
+    let data = &translation[1..translation.len() - 1];
+    let start = usize::try_from(align.match_start - range.begin)?;
+    let finish = usize::try_from(align.match_end - range.begin)?;
+    let (left, right) = blast_get_composition_range(data, start, finish)?;
+    Ok(read_aa_composition(&data[left..right]))
+}
+
+// NCBI c++/src/algo/blast/core/blast_kappa.c:1417-1455,1530-1548:
+// #define BLASTP_MASK_RESIDUE 21
+// #define BLASTP_MASK_INSTRUCTIONS "S 10 1.8 2.1"
+// BlastSetUp_Filter(eBlastTypeTblastn, seqData->data, seqData->length, ...);
+// Blast_MaskTheResidues(seqData->data, seqData->length,
+//                        FALSE, mask_seqloc, FALSE, 0);
+fn mask_translated_subject_seg(translation: &mut [u8]) -> Result<bool> {
+    if translation.len() < 2 || translation[0] != 0 || translation[translation.len() - 1] != 0 {
+        bail!("NCBI translated subject SEG data lacks sentinels");
+    }
+    let data_len = translation.len() - 1;
+    let data = &mut translation[1..data_len];
+    let masker = SegMasker::with_params(&SegParams::new(10, 1.8, 2.1));
+    let intervals = masker.mask_sequence(data);
+    for interval in &intervals {
+        for residue in &mut data[interval.start..interval.end] {
+            *residue = 21;
+        }
+    }
+    Ok(!intervals.is_empty())
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1475-1552,1677-1704
+// ```c
+// queryData->data[idx] = (origData[idx] != 24) ? origData[idx] : 3;
+// status = Blast_GetPartialTranslation(..., &translation_buffer, ...);
+// if (compo_adjust_mode && (!subject_maybe_biased || *subject_maybe_biased)) {
+//     if (!shouldTestIdentical ||
+//         !s_TestNearIdentical(seqData, range->begin, queryData,
+//                              q_range->begin, query_words, align)) {
+//         status = s_DoSegSequenceData(seqData, eBlastTypeTblastn,
+//                                      subject_maybe_biased);
+//     }
+// }
+// ```
+pub fn translated_subject_get_range<'seq>(
+    matching_seq: &BlastCompoMatchingSequence<'seq>,
+    subject_range: &BlastCompoSequenceRange,
+    orig_query: &BlastCompoSequenceData,
+    query_range: &BlastCompoSequenceRange,
+    query_words: Option<&[u64]>,
+    align: &BlastCompoAlignment,
+    should_test_identical: bool,
+    subject_maybe_biased: bool,
+    params: &BlastRedoAlignParams,
+) -> Result<BlastRedoRangeResult> {
+    if !params.subject_is_translated || params.query_is_translated {
+        bail!("TBLASTN translated range requires protein query and translated subject");
+    }
+    let code_id = matching_seq
+        .genetic_code_id
+        .ok_or_else(|| anyhow::anyhow!("TBLASTN translated range requires subject genetic code"))?;
+    let genetic_code = GeneticCode::try_from_id(code_id).map_err(anyhow::Error::msg)?;
+    let query =
+        BlastCompoSequenceData::copy_query_range_with_selenocysteine_fix(orig_query, query_range);
+    let translated =
+        translated_subject_window_sequence(matching_seq.data, subject_range, &genetic_code)?;
+    let mut subject = BlastCompoSequenceData {
+        length: i32::try_from(translated.len() - 2)?,
+        buffer: translated,
+        data_offset: 1,
+    };
+    let mut maybe_biased = subject_maybe_biased;
+    if params.uses_composition_based_stats()
+        && maybe_biased
+        && (!should_test_identical
+            || !test_near_identical(
+                &subject,
+                subject_range.begin,
+                &query,
+                query_range.begin,
+                query_words,
+                align,
+            ))
+    {
+        maybe_biased = mask_translated_subject_seg(&mut subject.buffer)?;
+    }
+    Ok(BlastRedoRangeResult {
+        query,
+        subject,
+        subject_maybe_biased: maybe_biased,
+    })
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:738-787
@@ -1682,14 +2320,10 @@ pub fn blast_redo_one_match<'seq>(
     )
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:1101-1111
+// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:1101-1111
 // ```c
-// Blast_RedoOneMatch(...,
-//                    int numQueries, int ** matrix, int alphsize,
-//                    Blast_CompositionWorkspace * NRrecord,
-//                    double *pvalueForThisPair,
-//                    int compositionTestIndex,
-//                    double *LambdaRatio)
+// Blast_RedoOneMatch(..., BlastCompo_QueryInfo query_info[],
+//                    int numQueries, ...);
 // ```
 pub(crate) fn blast_redo_one_match_with_workspace<'seq>(
     incoming_aligns: &Option<Box<BlastCompoAlignment>>,
@@ -1700,11 +2334,157 @@ pub(crate) fn blast_redo_one_match_with_workspace<'seq>(
     callbacks: &BlastRedoAlignCallbacks,
     composition_workspace: &mut BlastCompositionWorkspace,
 ) -> Result<BlastRedoOneMatchResult> {
+    blast_redo_one_match_with_workspace_queries(
+        incoming_aligns,
+        params,
+        matching_seq,
+        std::slice::from_ref(query_info),
+        lambda,
+        callbacks,
+        composition_workspace,
+    )
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:1101-1146
+// ```c
+// Blast_RedoOneMatch(..., BlastCompo_QueryInfo query_info[],
+//                    int numQueries, ...);
+// status = s_WindowsFromAligns(incoming_aligns, query_info, hspcnt,
+//     numQueries, kWindowBorder, matchingSeq->length, &windows,
+//     &nWindows, query_is_translated, subject_is_translated,
+//     params->positionBased);
+// ```
+pub(crate) fn blast_redo_one_match_with_workspace_queries<'seq>(
+    incoming_aligns: &Option<Box<BlastCompoAlignment>>,
+    params: &BlastRedoAlignParams,
+    matching_seq: &BlastCompoMatchingSequence<'seq>,
+    query_infos: &[BlastCompoQueryInfo],
+    lambda: f64,
+    callbacks: &BlastRedoAlignCallbacks,
+    composition_workspace: &mut BlastCompositionWorkspace,
+) -> Result<BlastRedoOneMatchResult> {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3631-3641
+    // ```c++
+    //                                         &matchingSeq,           // thread-local
+    //                                         -1,                     // const
+    //                                         query_info,             // thread-local
+    //                                         numContexts,            // thread-local
+    //                                         matrix,                 // thread-local
+    //                                         BLASTAA_SIZE,           // const
+    //                                         NRrecord,               // thread-local
+    //                                         &pvalueForThisPair,     // local
+    //                                         compositionTestIndex,   // thread-local
+    //                                         &LambdaRatio            // local
+    //                                 );
+    // ```
+    let mut matrix_state = None;
+    blast_redo_one_match_with_workspace_queries_and_matrix(
+        incoming_aligns,
+        params,
+        matching_seq,
+        query_infos,
+        lambda,
+        callbacks,
+        composition_workspace,
+        &mut matrix_state,
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3631-3641
+// ```c++
+//                                         &matchingSeq,           // thread-local
+//                                         -1,                     // const
+//                                         query_info,             // thread-local
+//                                         numContexts,            // thread-local
+//                                         matrix,                 // thread-local
+//                                         BLASTAA_SIZE,           // const
+//                                         NRrecord,               // thread-local
+//                                         &pvalueForThisPair,     // local
+//                                         compositionTestIndex,   // thread-local
+//                                         &LambdaRatio            // local
+//                                 );
+// ```
+pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix<'seq>(
+    incoming_aligns: &Option<Box<BlastCompoAlignment>>,
+    params: &BlastRedoAlignParams,
+    matching_seq: &BlastCompoMatchingSequence<'seq>,
+    query_infos: &[BlastCompoQueryInfo],
+    lambda: f64,
+    callbacks: &BlastRedoAlignCallbacks,
+    composition_workspace: &mut BlastCompositionWorkspace,
+    matrix_state: &mut Option<AdjustedProteinMatrix>,
+) -> Result<BlastRedoOneMatchResult> {
+    blast_redo_one_match_with_workspace_queries_and_matrix_observed(
+        incoming_aligns,
+        params,
+        matching_seq,
+        query_infos,
+        lambda,
+        callbacks,
+        composition_workspace,
+        matrix_state,
+        &mut |_| {},
+    )
+}
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1232-1274
+// ```c++
+//                 if (compo_adjust_mode != eNoCompositionBasedStats &&
+//                         (subject_is_translated || hsp_index == 0
+//                                 || (nearIdenticalStatus != oldNearIdenticalStatus))) {
+//                     Blast_AminoAcidComposition subject_composition;
+//                     s_GetComposition(&subject_composition,
+//                             alphsize, &subject,
+//                             &window->subject_range,
+//                             in_align, FALSE, subject_is_translated);
+//                     adjust_search_failed =
+//                             Blast_AdjustScores(matrix, query_composition,
+//                                     query.length,
+//                                     &subject_composition,
+//                                     subject.length,
+//                                     scaledMatrixInfo, compo_adjust_mode,
+//                                     RE_pseudocounts, NRrecord,
+//                                     &matrix_adjust_rule,
+//                                     callbacks->calc_lambda,
+//                                     pvalueForThisPair,
+//                                     compositionTestIndex,
+//                                     LambdaRatio);
+//                     if (adjust_search_failed < 0) { /* fatal error */
+//                         status = adjust_search_failed;
+//                         goto window_index_loop_cleanup;
+//                     }
+//                     num_adjustments++;
+//                 }
+//
+//                 if ( !adjust_search_failed ) {
+//                     newAlign = callbacks->redo_one_alignment(
+//                             in_align,
+//                             matrix_adjust_rule,
+//                             &query,
+//                             &window->query_range,
+//                             ccat_query_length,
+//                             &subject,
+//                             &window->subject_range,
+//                             matchingSeq->length,
+//                             gapping_params
+//                     );
+//                     if (newAlign && newAlign->score >= params->cutoff_s) {
+//                         s_WithDistinctEnds(&newAlign, &alignments[query_index],
+//                                 callbacks->free_align_traceback,
+//                                 num_adjustments == 1);
+// ```
+pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix_observed<'seq>(
+    incoming_aligns: &Option<Box<BlastCompoAlignment>>,
+    params: &BlastRedoAlignParams,
+    matching_seq: &BlastCompoMatchingSequence<'seq>,
+    query_infos: &[BlastCompoQueryInfo],
+    lambda: f64,
+    callbacks: &BlastRedoAlignCallbacks,
+    composition_workspace: &mut BlastCompositionWorkspace,
+    matrix_state: &mut Option<AdjustedProteinMatrix>,
+    trace: &mut dyn for<'a> FnMut(BlastRedoTraceEvent<'a>),
+) -> Result<BlastRedoOneMatchResult> {
     if params.smith_waterman {
         bail!("blastp redo_alignment Smith-Waterman path is not yet ported");
-    }
-    if params.query_is_translated || params.subject_is_translated {
-        bail!("blastp redo_alignment translated paths are not yet ported");
     }
     if params.position_based {
         bail!("blastp redo_alignment position-based path is not yet ported");
@@ -1717,15 +2497,89 @@ pub(crate) fn blast_redo_one_match_with_workspace<'seq>(
         );
     }
 
-    let windows = windows_from_protein_aligns(incoming_aligns, query_info, matching_seq.length)?;
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:865-889
+    // ```c
+    // if (subject_is_translated || query_is_translated)
+    //     return s_WindowsFromTranslatedAligns(..., query_info, numQueries,
+    //         kWindowBorder, sequence_length, ...);
+    // else return s_WindowsFromProteinAligns(...);
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:879-888
+    // ```c++
+    //     if (subject_is_translated || query_is_translated) {
+    //         return s_WindowsFromTranslatedAligns(alignments, query_info,
+    //                                              hspcnt, border,
+    //                                              sequence_length,
+    //                                              pwindows, nWindows,
+    //                                              subject_is_translated, is_pos_based);
+    //     } else {
+    //         return s_WindowsFromProteinAligns(alignments, query_info,
+    //                                           numQueries, sequence_length,
+    //                                           pwindows, nWindows);
+    // ```
+    let windows = if params.query_is_translated {
+        windows_from_translated_query_aligns(
+            incoming_aligns,
+            query_infos,
+            matching_seq.length,
+            WINDOW_BORDER,
+        )?
+    } else if params.subject_is_translated {
+        if matching_seq.genetic_code_id.is_none() {
+            bail!("TBLASTN redo requires a translated subject genetic code");
+        }
+        let query_lengths: Vec<_> = query_infos.iter().map(|info| info.seq.length).collect();
+        windows_from_translated_aligns(
+            incoming_aligns,
+            &query_lengths,
+            matching_seq.length,
+            WINDOW_BORDER,
+        )?
+    } else {
+        let query_info = query_infos
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("BLASTP redo requires query information"))?;
+        windows_from_protein_aligns(incoming_aligns, query_info, matching_seq.length)?
+    };
     let mut alignments_by_query: Vec<Option<Box<BlastCompoAlignment>>> = Vec::new();
     let mut pvalue_for_this_pair = None;
     let mut lambda_ratio = None;
     let mut matrix_adjust_rule = EMatrixAdjustRule::DontAdjustMatrix;
-    let mut adjusted_matrix = None;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1439-1444
+    // ```c++
+    //     if (query_composition->numTrueAminoAcids == 0 ||
+    //         subject_composition->numTrueAminoAcids == 0) {
+    //         /* Either the query or subject contains only ambiguity
+    //            characters, most likely because the entire subject has been
+    //            SEGed.  Compositional adjustment is meaningless. */
+    //         return 1;
+    // ```
+    let mut adjusted_matrix = matrix_state.take();
 
     for window in windows {
-        let query_index = usize::try_from(window.query_range.context).unwrap_or_default();
+        let query_index = usize::try_from(window.query_range.context)?;
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:1162-1188
+        // ```c
+        // query_index = window->align->queryIndex;
+        // query_composition = &query_info[query_index].composition;
+        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1162-1168
+        // ```c++
+        //         int num_adjustments = 0; /* number of matrix adjustments done in this
+        //                                     window; nearly identical alignments may be
+        //                                     computed with different composition
+        //                                     adjustment than other alignments due to using
+        //                                     full subjects instead of segged ones */
+        //
+        //         window = windows[window_index];
+        // ```
+        let query_info = if params.subject_is_translated || params.query_is_translated {
+            query_infos.get(query_index).ok_or_else(|| {
+                anyhow::anyhow!("TBLASTN redo query index {query_index} is missing")
+            })?
+        } else {
+            &query_infos[0]
+        };
         if alignments_by_query.len() <= query_index {
             alignments_by_query.resize_with(query_index + 1, || None);
         }
@@ -1784,7 +2638,37 @@ pub(crate) fn blast_redo_one_match_with_workspace<'seq>(
                 range_result = Some(next_range);
             }
 
-            if !is_contained(current, &alignments_by_query[query_index], lambda) {
+            // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1218-1224
+            // ```c++
+            //             /* do frequency count for partial translated query */
+            //             if (query_is_translated) {
+            //                 s_GetComposition(query_composition,
+            //                         alphsize, &query,
+            //                         &window->query_range,
+            //                         in_align, TRUE, FALSE);
+            //             }
+            // ```
+            let query_composition = if params.query_is_translated {
+                translated_query_composition(
+                    &range_result.as_ref().expect("range initialized").query,
+                    &window.query_range,
+                    current,
+                )?
+            } else {
+                query_info.composition.clone()
+            };
+            // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1225-1227
+            // ```c++
+            //             /* if in_align is not contained in a higher-scoring
+            //              * alignment */
+            //             if ( !s_IsContained(in_align, alignments[query_index], Lambda) ) {
+            // ```
+            let contained = is_contained(current, &alignments_by_query[query_index], lambda);
+            trace(BlastRedoTraceEvent::Contained {
+                incoming: current,
+                result: contained,
+            });
+            if !contained {
                 let mut adjust_search_failed = false;
                 let range = range_result
                     .as_ref()
@@ -1807,12 +2691,50 @@ pub(crate) fn blast_redo_one_match_with_workspace<'seq>(
                         || hsp_index == 0
                         || (near_identical != old_near_identical))
                 {
-                    let query_composition = if params.query_is_translated {
-                        read_aa_composition(range.query.data())
+                    // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:906-938,1234-1238
+                    // ```c
+                    // s_GetComposition(&subject_composition, alphsize,
+                    //     &subject, &window->subject_range, in_align,
+                    //     FALSE, subject_is_translated);
+                    // ```
+                    let subject_composition = if params.subject_is_translated {
+                        translated_subject_composition(
+                            &range.subject.buffer,
+                            &window.subject_range,
+                            current,
+                        )?
                     } else {
-                        query_info.composition.clone()
+                        read_aa_composition(range.subject.data())
                     };
-                    let subject_composition = read_aa_composition(range.subject.data());
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1239-1256
+                    // ```c++
+                    //                             in_align, FALSE, subject_is_translated);
+                    //                     adjust_search_failed =
+                    //                             Blast_AdjustScores(matrix, query_composition,
+                    //                                     query.length,
+                    //                                     &subject_composition,
+                    //                                     subject.length,
+                    //                                     scaledMatrixInfo, compo_adjust_mode,
+                    //                                     RE_pseudocounts, NRrecord,
+                    //                                     &matrix_adjust_rule,
+                    //                                     callbacks->calc_lambda,
+                    //                                     pvalueForThisPair,
+                    //                                     compositionTestIndex,
+                    //                                     LambdaRatio);
+                    //                     if (adjust_search_failed < 0) { /* fatal error */
+                    //                         status = adjust_search_failed;
+                    //                         goto window_index_loop_cleanup;
+                    //                     }
+                    //                     num_adjustments++;
+                    // ```
+                    trace(BlastRedoTraceEvent::Adjustment {
+                        before: true,
+                        status: 0,
+                        query_count: query_composition.num_true_amino_acids,
+                        subject_count: subject_composition.num_true_amino_acids,
+                        rule: matrix_adjust_rule,
+                        matrix: adjusted_matrix.as_ref(),
+                    });
                     if query_composition.num_true_amino_acids == 0
                         || subject_composition.num_true_amino_acids == 0
                     {
@@ -1844,7 +2766,12 @@ pub(crate) fn blast_redo_one_match_with_workspace<'seq>(
                             //         NRrecord, &matrix_adjust_rule,
                             // ```
                             composition_workspace,
-                            redo_calc_lambda,
+                            // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:1239-1248
+                            // ```c
+                            // Blast_AdjustScores(..., callbacks->calc_lambda,
+                            //                    pvalueForThisPair, ...);
+                            // ```
+                            callbacks.calc_lambda.unwrap_or(redo_calc_lambda),
                         )?;
                         if let Some(adjusted) = adjusted {
                             matrix_adjust_rule = adjusted.matrix_adjust_rule;
@@ -1855,10 +2782,51 @@ pub(crate) fn blast_redo_one_match_with_workspace<'seq>(
                             adjust_search_failed = true;
                         }
                     }
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1251-1256
+                    // ```c++
+                    //                                     LambdaRatio);
+                    //                     if (adjust_search_failed < 0) { /* fatal error */
+                    //                         status = adjust_search_failed;
+                    //                         goto window_index_loop_cleanup;
+                    //                     }
+                    //                     num_adjustments++;
+                    // ```
+                    trace(BlastRedoTraceEvent::Adjustment {
+                        before: false,
+                        status: i32::from(adjust_search_failed),
+                        query_count: query_composition.num_true_amino_acids,
+                        subject_count: subject_composition.num_true_amino_acids,
+                        rule: matrix_adjust_rule,
+                        matrix: adjusted_matrix.as_ref(),
+                    });
                     num_adjustments += 1;
                 }
 
                 if !adjust_search_failed {
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1259-1274
+                    // ```c++
+                    //                 if ( !adjust_search_failed ) {
+                    //                     newAlign = callbacks->redo_one_alignment(
+                    //                             in_align,
+                    //                             matrix_adjust_rule,
+                    //                             &query,
+                    //                             &window->query_range,
+                    //                             ccat_query_length,
+                    //                             &subject,
+                    //                             &window->subject_range,
+                    //                             matchingSeq->length,
+                    //                             gapping_params
+                    //                     );
+                    //                     if (newAlign && newAlign->score >= params->cutoff_s) {
+                    //                         s_WithDistinctEnds(&newAlign, &alignments[query_index],
+                    //                                 callbacks->free_align_traceback,
+                    //                                 num_adjustments == 1);
+                    // ```
+                    trace(BlastRedoTraceEvent::Redo {
+                        incoming: current,
+                        rule: matrix_adjust_rule,
+                        matrix: adjusted_matrix.as_ref(),
+                    });
                     let mut new_align = (callbacks.redo_one_alignment)(
                         current,
                         matrix_adjust_rule,
@@ -1907,6 +2875,31 @@ pub(crate) fn blast_redo_one_match_with_workspace<'seq>(
     // ...
     // return status;
     // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1239-1259
+    // ```c++
+    //                             in_align, FALSE, subject_is_translated);
+    //                     adjust_search_failed =
+    //                             Blast_AdjustScores(matrix, query_composition,
+    //                                     query.length,
+    //                                     &subject_composition,
+    //                                     subject.length,
+    //                                     scaledMatrixInfo, compo_adjust_mode,
+    //                                     RE_pseudocounts, NRrecord,
+    //                                     &matrix_adjust_rule,
+    //                                     callbacks->calc_lambda,
+    //                                     pvalueForThisPair,
+    //                                     compositionTestIndex,
+    //                                     LambdaRatio);
+    //                     if (adjust_search_failed < 0) { /* fatal error */
+    //                         status = adjust_search_failed;
+    //                         goto window_index_loop_cleanup;
+    //                     }
+    //                     num_adjustments++;
+    //                 }
+    //
+    //                 if ( !adjust_search_failed ) {
+    // ```
+    *matrix_state = adjusted_matrix;
     Ok(BlastRedoOneMatchResult {
         alignments_by_query,
         pvalue_for_this_pair,
@@ -1918,6 +2911,639 @@ pub(crate) fn blast_redo_one_match_with_workspace<'seq>(
 mod tests {
     use super::BlastCompoAlignmentContext::PreliminaryHspIndex;
     use super::*;
+
+    // NCBI c++/src/algo/blast/composition_adjustment/redo_alignment.c:80,644-751;
+    // c++/src/algo/blast/core/blast_kappa.c:1498-1525:
+    // begin = MAX(0, align->matchStart - border);
+    // end = MIN(translated_length, align->matchEnd + border);
+    // num_nucleotides = 3*(range->end - range->begin) + ABS(frame) - 1;
+    // Compare ordered joined Rust windows to the pinned partial-translation calls.
+    #[test]
+    fn translated_kappa_windows_match_ncbi_partial_translation_ranges() {
+        for (case, query_lengths) in [
+            ("seg_hard_query_20260924_default", vec![160]),
+            ("multi_query_20260924_default", vec![120, 70, 120]),
+        ] {
+            let trace = std::fs::read_to_string(format!(
+                "{}/../docs/evidence/tlosan_stage_d/kappa_mode2_20260924/{case}.tsv",
+                env!("CARGO_MANIFEST_DIR")
+            ))
+            .unwrap();
+            let enter = trace
+                .lines()
+                .find(|line| line.starts_with("K_CALL\t0\tredo_enter\t"))
+                .unwrap();
+            let enter_fields: Vec<_> = enter.split('\t').collect();
+            let subject_nt_length: i32 = enter_fields[7].parse().unwrap();
+            let input_rows: Vec<_> = trace
+                .lines()
+                .filter(|line| line.starts_with("K_ALIGN\t0\tincoming\t"))
+                .collect();
+            assert_eq!(input_rows.len(), enter_fields[3].parse::<usize>().unwrap());
+            let mut input: Option<Box<BlastCompoAlignment>> = None;
+            for row in input_rows.into_iter().rev() {
+                let f: Vec<_> = row.split('\t').collect();
+                assert_eq!(f[6], "-1");
+                input = Some(Box::new(BlastCompoAlignment {
+                    score: f[5].parse().unwrap(),
+                    matrix_adjust_rule: EMatrixAdjustRule::DontAdjustMatrix,
+                    query_index: f[7].parse().unwrap(),
+                    query_start: f[8].parse().unwrap(),
+                    query_end: f[9].parse().unwrap(),
+                    match_start: f[10].parse().unwrap(),
+                    match_end: f[11].parse().unwrap(),
+                    frame: f[12].parse().unwrap(),
+                    context: None,
+                    next: input,
+                }));
+            }
+            let actual =
+                windows_from_translated_aligns(&input, &query_lengths, subject_nt_length, 200)
+                    .unwrap();
+            let mut expected = Vec::new();
+            let mut expected_translation = Vec::new();
+            let mut pending_translation = false;
+            for row in trace.lines() {
+                if row.starts_with("K_CALL\t0\tredo_return\t") {
+                    break;
+                }
+                if row.starts_with("K_TRANSLATED\t") {
+                    if pending_translation {
+                        expected_translation.push(row.split('\t').nth(2).unwrap().to_string());
+                        pending_translation = false;
+                    }
+                    continue;
+                }
+                if !row.contains("\tpartial_translation\t") {
+                    continue;
+                }
+                let f: Vec<_> = row.split('\t').collect();
+                assert_eq!(f[5], "0");
+                let value = (
+                    f[3].parse::<i32>().unwrap(),
+                    f[4].parse::<i32>().unwrap(),
+                    f[6].parse::<i32>().unwrap(),
+                );
+                if expected.last() != Some(&value) {
+                    expected.push(value);
+                    pending_translation = true;
+                }
+            }
+            let observed: Vec<_> = actual
+                .iter()
+                .map(|window| {
+                    let aa_length = window.subject_range.end - window.subject_range.begin;
+                    (
+                        3 * aa_length + window.subject_range.context.abs() - 1,
+                        window.subject_range.context,
+                        aa_length,
+                    )
+                })
+                .collect();
+            assert_eq!(observed, expected, "{case}");
+            assert_eq!(expected_translation.len(), actual.len(), "{case}");
+            let subject_fasta = std::fs::read_to_string(format!(
+                "{}/../docs/evidence/tlosan_stage_c/{}/subjects.fna",
+                env!("CARGO_MANIFEST_DIR"),
+                case.strip_suffix("_default").unwrap()
+            ))
+            .unwrap();
+            let subject_nt: Vec<u8> = subject_fasta
+                .lines()
+                .filter(|line| !line.starts_with('>'))
+                .flat_map(|line| line.bytes())
+                .collect();
+            assert_eq!(subject_nt.len(), subject_nt_length as usize, "{case}");
+            let genetic_code = GeneticCode::from_id(1);
+            for (window, expected_hex) in actual.iter().zip(expected_translation) {
+                let translated = translated_subject_window_sequence(
+                    &subject_nt,
+                    &window.subject_range,
+                    &genetic_code,
+                )
+                .unwrap();
+                let observed_hex = translated[1..translated.len() - 1]
+                    .iter()
+                    .map(|value| format!("{value:02x}"))
+                    .collect::<String>();
+                assert_eq!(
+                    observed_hex, expected_hex,
+                    "{case}: {:?}",
+                    window.subject_range
+                );
+            }
+            // NCBI composition_adjustment/redo_alignment.c:906-938:
+            // Blast_GetCompositionRange(&left, &right, data, length, start, end);
+            // Blast_ReadAaComposition(composition, alphsize, &data[left], right-left);
+            let first_window = &actual[0];
+            let first_align = first_window.align.as_deref().unwrap();
+            let translated = translated_subject_window_sequence(
+                &subject_nt,
+                &first_window.subject_range,
+                &genetic_code,
+            )
+            .unwrap();
+            let observed = translated_subject_composition(
+                &translated,
+                &first_window.subject_range,
+                first_align,
+            )
+            .unwrap();
+            let composition_trace = std::fs::read_to_string(format!(
+                "{}/../docs/evidence/tlosan_stage_d/kappa_composition_matrix_scores_20260924/{case}.tsv",
+                env!("CARGO_MANIFEST_DIR")
+            ))
+            .unwrap();
+            let expected_row = composition_trace
+                .lines()
+                .find(|line| line.starts_with("K_COMP\t0\tsubject\t"))
+                .unwrap();
+            let fields: Vec<_> = expected_row.split('\t').collect();
+            assert_eq!(
+                observed.num_true_amino_acids,
+                fields[3].parse().unwrap(),
+                "{case}"
+            );
+            for (index, (value, bits)) in observed.prob.iter().zip(&fields[4..]).enumerate() {
+                assert_eq!(
+                    value.to_bits(),
+                    u64::from_str_radix(bits, 16).unwrap(),
+                    "{case}: composition index {index}"
+                );
+            }
+        }
+    }
+
+    // NCBI core/blast_kappa.c:1417-1455,1530-1548:
+    // BLASTP_MASK_INSTRUCTIONS "S 10 1.8 2.1";
+    // Blast_MaskTheResidues(seqData->data, seqData->length, FALSE, ...);
+    #[test]
+    fn translated_kappa_seg_bytes_match_ncbi_mask_calls() {
+        let trace = std::fs::read_to_string(format!(
+            "{}/../docs/evidence/tlosan_stage_d/kappa_seg_20260924/multi_query_20260924_default.tsv",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .unwrap();
+        let mut raw = std::collections::HashMap::new();
+        let decode = |hex: &str| -> Vec<u8> {
+            hex.as_bytes()
+                .chunks_exact(2)
+                .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
+                .collect()
+        };
+        for row in trace.lines() {
+            let fields: Vec<_> = row.split('\t').collect();
+            if fields[0] == "K_SEG_RAW" {
+                let residues = decode(fields[5]);
+                assert_eq!(residues.len(), fields[4].parse::<usize>().unwrap());
+                raw.insert(fields[1].parse::<usize>().unwrap(), residues);
+            }
+        }
+        let mut compared = 0;
+        for row in trace.lines() {
+            let fields: Vec<_> = row.split('\t').collect();
+            if fields[0] != "K_SEG_MASKED" {
+                continue;
+            }
+            let event = fields[1].parse::<usize>().unwrap();
+            let mut translated = Vec::with_capacity(raw[&event].len() + 2);
+            translated.push(0);
+            translated.extend_from_slice(&raw[&event]);
+            translated.push(0);
+            assert_eq!(translated.len() - 2, fields[2].parse::<usize>().unwrap());
+            assert!(mask_translated_subject_seg(&mut translated).unwrap());
+            assert_eq!(
+                &translated[1..translated.len() - 1],
+                decode(fields[3]),
+                "SEG event {event}"
+            );
+            compared += 1;
+        }
+        assert_eq!(compared, 7);
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:1172-1208;
+    // core/blast_kappa.c:1488-1552,1684-1704
+    // ```c
+    // if (hsp_index == 0 || subject_maybe_biased)
+    //     nearIdenticalStatus = s_preliminaryTestNearIdentical(...);
+    // if (hsp_index == 0 || (subject_maybe_biased &&
+    //     nearIdenticalStatus != oldNearIdenticalStatus))
+    //     status = callbacks->get_range(..., window->align,
+    //         nearIdenticalStatus, ..., &subject_maybe_biased);
+    // ```
+    #[test]
+    fn translated_get_range_order_and_seg_match_ncbi_saved_calls() {
+        fn decode(hex: &str) -> Vec<u8> {
+            hex.as_bytes()
+                .chunks_exact(2)
+                .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
+                .collect()
+        }
+        for case in ["seg_hard_query_20260924", "multi_query_20260924"] {
+            let root = format!("{}/../docs/evidence", env!("CARGO_MANIFEST_DIR"));
+            let mode_trace = std::fs::read_to_string(format!(
+                "{root}/tlosan_stage_d/kappa_mode2_20260924/{case}_default.tsv"
+            ))
+            .unwrap();
+            let seg_trace = std::fs::read_to_string(format!(
+                "{root}/tlosan_stage_d/kappa_seg_20260924/{case}_default.tsv"
+            ))
+            .unwrap();
+            let query_fasta =
+                std::fs::read_to_string(format!("{root}/tlosan_stage_c/{case}/query.faa")).unwrap();
+            let subject_fasta =
+                std::fs::read_to_string(format!("{root}/tlosan_stage_c/{case}/subjects.fna"))
+                    .unwrap();
+            let mut queries: Vec<Vec<u8>> = Vec::new();
+            for line in query_fasta.lines() {
+                if line.starts_with('>') {
+                    queries.push(Vec::new());
+                } else {
+                    queries
+                        .last_mut()
+                        .unwrap()
+                        .extend(line.bytes().map(aa_char_to_ncbistdaa));
+                }
+            }
+            let query_lengths: Vec<_> = queries.iter().map(|q| q.len() as i32).collect();
+            let subject_nt: Vec<_> = subject_fasta
+                .lines()
+                .filter(|line| !line.starts_with('>'))
+                .flat_map(|line| line.bytes())
+                .collect();
+            let matching_seq =
+                BlastCompoMatchingSequence::new_translated(0, &subject_nt, 1).unwrap();
+            let mut raw_events = Vec::new();
+            let mut masked_events = std::collections::HashMap::new();
+            for line in seg_trace.lines() {
+                let fields: Vec<_> = line.split('\t').collect();
+                match fields[0] {
+                    "K_SEG_RAW" => raw_events.push((
+                        fields[1].parse::<usize>().unwrap(),
+                        fields[2].parse::<i32>().unwrap(),
+                        fields[3].parse::<i32>().unwrap(),
+                        decode(fields[5]),
+                    )),
+                    "K_SEG_MASKED" => {
+                        masked_events
+                            .insert(fields[1].parse::<usize>().unwrap(), decode(fields[3]));
+                    }
+                    _ => {}
+                }
+            }
+            let mut observed_calls = 0;
+            let mut observed_masks = 0;
+            for enter in mode_trace
+                .lines()
+                .filter(|line| line.contains("\tredo_enter\t"))
+            {
+                let fields: Vec<_> = enter.split('\t').collect();
+                let redo_id = fields[1];
+                let lambda = fields[4].parse::<f64>().unwrap();
+                let nt_length = fields[7].parse::<i32>().unwrap();
+                assert_eq!(nt_length, matching_seq.length);
+                let input_rows: Vec<_> = mode_trace
+                    .lines()
+                    .filter(|line| line.starts_with(&format!("K_ALIGN\t{redo_id}\tincoming\t")))
+                    .collect();
+                assert_eq!(input_rows.len(), fields[3].parse::<usize>().unwrap());
+                let mut input: Option<Box<BlastCompoAlignment>> = None;
+                for row in input_rows.into_iter().rev() {
+                    let f: Vec<_> = row.split('\t').collect();
+                    input = Some(Box::new(BlastCompoAlignment {
+                        score: f[5].parse().unwrap(),
+                        matrix_adjust_rule: EMatrixAdjustRule::DontAdjustMatrix,
+                        query_index: f[7].parse().unwrap(),
+                        query_start: f[8].parse().unwrap(),
+                        query_end: f[9].parse().unwrap(),
+                        match_start: f[10].parse().unwrap(),
+                        match_end: f[11].parse().unwrap(),
+                        frame: f[12].parse().unwrap(),
+                        context: None,
+                        next: input,
+                    }));
+                }
+                let windows = windows_from_translated_aligns(
+                    &input,
+                    &query_lengths,
+                    nt_length,
+                    WINDOW_BORDER,
+                )
+                .unwrap();
+                let params = BlastRedoAlignParams {
+                    matrix_info:
+                        crate::core::composition_adjustment::adjust_scores::build_matrix_info(
+                            crate::config::ScoringMatrix::Blosum62,
+                            0.3176,
+                        )
+                        .unwrap(),
+                    gapping_params: BlastCompoGappingParams {
+                        gap_open: 11,
+                        gap_extend: 1,
+                        decline_align: 0,
+                        x_dropoff: 10,
+                        context: Cell::new(None),
+                    },
+                    compo_adjust_mode: BlastCompoAdjustMode::CompositionMatrixAdjust,
+                    alphsize: BLASTAA_SIZE as i32,
+                    composition_test_index: 0,
+                    unified_p: false,
+                    log_k: 0.0,
+                    score_divisor: 32.0,
+                    restricted_alignment: false,
+                    smith_waterman: false,
+                    is_same_adjustment: false,
+                    near_identical_cutoff: 1.74 * LOCAL_LN2 / lambda,
+                    position_based: false,
+                    re_matrix_adjustment_pseudocounts: 20,
+                    ccat_query_length: *query_lengths.iter().max().unwrap(),
+                    query_is_translated: false,
+                    subject_is_translated: true,
+                    cutoff_score: 1,
+                    cutoff_evalue: 10.0,
+                    do_link_hsps: true,
+                };
+                for window in &windows {
+                    let query_index = usize::try_from(window.query_range.context).unwrap();
+                    let query_data = BlastCompoSequenceData::from_ncbistdaa(&queries[query_index]);
+                    let query_info = BlastCompoQueryInfo {
+                        origin: 0,
+                        seq: query_data.clone(),
+                        composition: BlastAminoAcidComposition::empty(),
+                        eff_search_space: 1.0,
+                        words: Some(build_query_word_hashes(query_data.data())),
+                    };
+                    let mut old_near_identical = false;
+                    let mut maybe_biased = true;
+                    let mut hsp_index = 0;
+                    let mut align = window.align.as_deref();
+                    while let Some(current) = align {
+                        let near_identical = if hsp_index == 0 || maybe_biased {
+                            preliminary_test_near_identical(
+                                &query_info,
+                                window,
+                                current,
+                                params.near_identical_cutoff,
+                            )
+                        } else {
+                            old_near_identical
+                        };
+                        if hsp_index == 0 || (maybe_biased && near_identical != old_near_identical)
+                        {
+                            let event = &raw_events[observed_calls];
+                            assert_eq!(event.0, observed_calls, "{case}: event index");
+                            let raw = translated_subject_window_sequence(
+                                &subject_nt,
+                                &window.subject_range,
+                                &GeneticCode::from_id(1),
+                            )
+                            .unwrap();
+                            assert_eq!(
+                                event.1,
+                                3 * (window.subject_range.end - window.subject_range.begin)
+                                    + window.subject_range.context.abs()
+                                    - 1
+                            );
+                            assert_eq!(event.2, window.subject_range.context);
+                            assert_eq!(
+                                &raw[1..raw.len() - 1],
+                                event.3,
+                                "{case}: raw event {}",
+                                event.0
+                            );
+                            let result = translated_subject_get_range(
+                                &matching_seq,
+                                &window.subject_range,
+                                &query_data,
+                                &window.query_range,
+                                query_info.words.as_deref(),
+                                window.align.as_deref().unwrap(),
+                                near_identical,
+                                maybe_biased,
+                                &params,
+                            )
+                            .unwrap();
+                            assert_eq!(
+                                result.query.data(),
+                                query_data.data(),
+                                "{case}: query {query_index}"
+                            );
+                            let expected = masked_events.get(&event.0).unwrap_or(&event.3);
+                            assert_eq!(
+                                result.subject.data(),
+                                expected,
+                                "{case}: subject event {}",
+                                event.0
+                            );
+                            if masked_events.contains_key(&event.0) {
+                                assert!(result.subject_maybe_biased);
+                                observed_masks += 1;
+                            }
+                            maybe_biased = result.subject_maybe_biased;
+                            observed_calls += 1;
+                        }
+                        old_near_identical = near_identical;
+                        hsp_index += 1;
+                        align = current.next.as_deref();
+                    }
+                }
+            }
+            assert_eq!(
+                observed_calls,
+                raw_events.len(),
+                "{case}: get-range call order"
+            );
+            assert_eq!(
+                observed_masks,
+                masked_events.len(),
+                "{case}: SEG call count"
+            );
+        }
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:1101-1146,1172-1269;
+    // core/blast_kappa.c:1475-1552,1896-1957
+    // ```c
+    // status = s_WindowsFromAligns(..., subject_is_translated, ...);
+    // status = callbacks->get_range(..., query_info[query_index].words,
+    //     window->align, nearIdenticalStatus, compo_adjust_mode, FALSE,
+    //     &subject_maybe_biased);
+    // s_GetComposition(&subject_composition, ..., in_align, FALSE,
+    //     subject_is_translated);
+    // newAlign = callbacks->redo_one_alignment(...);
+    // ```
+    #[test]
+    fn translated_redo_core_uses_ncbi_hard_seg_mode2_inputs() {
+        fn trace_alignment(row: &str) -> Box<BlastCompoAlignment> {
+            let f: Vec<_> = row.split('\t').collect();
+            blast_compo_alignment_new(
+                f[5].parse().unwrap(),
+                EMatrixAdjustRule::DontAdjustMatrix,
+                f[8].parse().unwrap(),
+                f[9].parse().unwrap(),
+                f[7].parse().unwrap(),
+                f[10].parse().unwrap(),
+                f[11].parse().unwrap(),
+                f[12].parse().unwrap(),
+                None,
+            )
+        }
+        fn assert_mode2_redo(
+            incoming_align: &BlastCompoAlignment,
+            rule: EMatrixAdjustRule,
+            adjusted: Option<&AdjustedProteinMatrix>,
+            query: &BlastCompoSequenceData,
+            query_range: &BlastCompoSequenceRange,
+            _ccat_query_length: i32,
+            subject: &BlastCompoSequenceData,
+            subject_range: &BlastCompoSequenceRange,
+            _full_subject_length: i32,
+            _params: &BlastRedoAlignParams,
+        ) -> Result<Option<Box<BlastCompoAlignment>>> {
+            assert_eq!(rule, EMatrixAdjustRule::UserSpecifiedRelEntropy);
+            let matrix = adjusted.unwrap();
+            assert_eq!(
+                (
+                    matrix.scores[1][1],
+                    matrix.scores[1][16],
+                    matrix.scores[22][22]
+                ),
+                (149, -28, 202)
+            );
+            assert_eq!(query.length, 160);
+            assert_eq!(
+                query_range,
+                &BlastCompoSequenceRange {
+                    begin: 0,
+                    end: 160,
+                    context: 0
+                }
+            );
+            assert_eq!(&query.data()[..40], &[21u8; 40]);
+            assert_eq!(subject.length, 120);
+            assert_eq!(subject_range.context, 1);
+            assert_eq!(subject.buffer[0], 0);
+            assert_eq!(subject.buffer[subject.buffer.len() - 1], 0);
+            Ok(Some(alignment_copy(incoming_align)))
+        }
+        let root = format!("{}/../docs/evidence", env!("CARGO_MANIFEST_DIR"));
+        let mode_trace = std::fs::read_to_string(format!(
+            "{root}/tlosan_stage_d/kappa_mode2_20260924/seg_hard_query_20260924_default.tsv"
+        ))
+        .unwrap();
+        let incoming = Some(trace_alignment(
+            mode_trace
+                .lines()
+                .find(|line| line.starts_with("K_ALIGN\t0\tincoming\t"))
+                .unwrap(),
+        ));
+        let subject_fasta = std::fs::read_to_string(format!(
+            "{root}/tlosan_stage_c/seg_hard_query_20260924/subjects.fna"
+        ))
+        .unwrap();
+        let subject_nt: Vec<_> = subject_fasta
+            .lines()
+            .filter(|line| !line.starts_with('>'))
+            .flat_map(|line| line.bytes())
+            .collect();
+        let matching_seq = BlastCompoMatchingSequence::new_translated(0, &subject_nt, 1).unwrap();
+        let query_fasta = std::fs::read_to_string(format!(
+            "{root}/tlosan_stage_c/seg_hard_query_20260924/query.faa"
+        ))
+        .unwrap();
+        let mut query: Vec<_> = query_fasta
+            .lines()
+            .filter(|line| !line.starts_with('>'))
+            .flat_map(|line| line.bytes().map(aa_char_to_ncbistdaa))
+            .collect();
+        assert_eq!(query.len(), 160);
+        // NCBI blast_setup.c:614-638 and saved hard-SEG query composition:
+        // hard query filtering replaces the first 40 K residues with X.
+        query[..40].fill(21);
+        let composition = read_aa_composition(&query);
+        let comp_trace = std::fs::read_to_string(format!(
+            "{root}/tlosan_stage_d/kappa_composition_matrix_scores_20260924/seg_hard_query_20260924_default.tsv"
+        )).unwrap();
+        let expected_query = comp_trace
+            .lines()
+            .find(|line| line.starts_with("K_COMP\t0\tquery\t"))
+            .unwrap();
+        let expected: Vec<_> = expected_query.split('\t').collect();
+        assert_eq!(
+            composition.num_true_amino_acids,
+            expected[3].parse().unwrap()
+        );
+        for (value, bits) in composition.prob.iter().zip(&expected[4..]) {
+            assert_eq!(value.to_bits(), u64::from_str_radix(bits, 16).unwrap());
+        }
+        let query_info = BlastCompoQueryInfo {
+            origin: 0,
+            seq: BlastCompoSequenceData::from_ncbistdaa(&query),
+            composition,
+            eff_search_space: 1.0,
+            words: Some(build_query_word_hashes(&query)),
+        };
+        let params = BlastRedoAlignParams {
+            matrix_info: crate::core::composition_adjustment::adjust_scores::build_matrix_info(
+                crate::config::ScoringMatrix::Blosum62,
+                0.0099251861761165822,
+            )
+            .unwrap(),
+            gapping_params: BlastCompoGappingParams {
+                gap_open: 11,
+                gap_extend: 1,
+                decline_align: 0,
+                x_dropoff: 10,
+                context: Cell::new(None),
+            },
+            compo_adjust_mode: BlastCompoAdjustMode::CompositionMatrixAdjust,
+            alphsize: BLASTAA_SIZE as i32,
+            composition_test_index: 0,
+            unified_p: false,
+            log_k: 0.0,
+            score_divisor: 32.0,
+            restricted_alignment: false,
+            smith_waterman: false,
+            is_same_adjustment: false,
+            near_identical_cutoff: 1.74 * LOCAL_LN2 / 0.0083437500000000005,
+            position_based: false,
+            re_matrix_adjustment_pseudocounts: 20,
+            ccat_query_length: 160,
+            query_is_translated: false,
+            subject_is_translated: true,
+            cutoff_score: 320,
+            cutoff_evalue: 10.0,
+            do_link_hsps: true,
+        };
+        let callbacks = BlastRedoAlignCallbacks {
+            calc_lambda: None,
+            get_range: translated_subject_get_range,
+            redo_one_alignment: assert_mode2_redo,
+            new_xdrop_align: None,
+            free_align_traceback: None,
+        };
+        let mut workspace = BlastCompositionWorkspace::new_blosum62();
+        let result = blast_redo_one_match_with_workspace_queries(
+            &incoming,
+            &params,
+            &matching_seq,
+            &[query_info],
+            0.0083437500000000005,
+            &callbacks,
+            &mut workspace,
+        )
+        .unwrap();
+        assert_eq!(result.lambda_ratio.unwrap().to_bits(), 1.0f64.to_bits());
+        assert_eq!(result.alignments_by_query.len(), 1);
+        assert_eq!(
+            result.alignments_by_query[0]
+                .as_ref()
+                .unwrap()
+                .matrix_adjust_rule,
+            EMatrixAdjustRule::DontAdjustMatrix
+        );
+    }
 
     fn make_align(
         score: i32,

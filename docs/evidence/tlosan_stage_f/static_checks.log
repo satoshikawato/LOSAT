@@ -1,0 +1,6 @@
+PYTHON_SYNTAX_OK docs/evidence/tlosan_stage_f/run_stage_f_matrix.py
+PYTHON_SYNTAX_OK docs/evidence/tlosan_stage_f/run_stage_f_negative.py
+PYTHON_SYNTAX_OK docs/evidence/tlosan_stage_f/run_stage_f_output_file.py
+PYTHON_SYNTAX_OK docs/evidence/tlosan_stage_f/run_stage_f_wasm.py
+FMT_AND_DIFF_CHECK_OK
+STAGED_DIFF_CHECK_OK (git diff --cached --check; byte-exact .out fixtures marked binary)

@@ -1,0 +1,12 @@
+rank	query	subject	raw_score	bit_score	evalue
+1	q1	tie_b	656	257	1.66e-94
+2	q1	tie_a	656	257	1.66e-94
+3	q1	partial_codon	656	257	1.66e-94
+4	q1	minus3	656	257	1.66e-94
+5	q1	minus2	656	257	1.66e-94
+6	q1	minus1	656	257	1.66e-94
+7	q1	plus3	656	257	1.66e-94
+8	q1	plus2	656	257	1.66e-94
+9	q1	plus1	656	257	1.66e-94
+10	q1	internal_stop	647	253	3.92e-93
+11	q1	ambiguous	646	253	5.57e-93

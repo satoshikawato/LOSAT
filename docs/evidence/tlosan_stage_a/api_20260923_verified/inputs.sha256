@@ -1,0 +1,9 @@
+e3956f1e107a30439d56c8f72fae4267a7d62ebcc16e4f99d4baf2bdf00402e0  /home/kawato/micromamba/bin/tblastn
+407bf59ec36ee6444104a90f28eab282e374a0dfe4c7ffee89a65d82dc51c4bf  /home/kawato/micromamba/bin/makeblastdb
+dc03d217c8fa6b68034f2cd513b9ae3894e97667c5d8b44332d300c23b153f7a  /home/kawato/micromamba/bin/datatool
+1ea2b02c20dcb6fee121e26c2618e46971ed3b13a2ef1aa3e89bf13ce7b0ed49  /mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/tlosan_stage_a/oracle/tblastn_code32_oracle.cpp
+02ef3bb9a0c7709517a32b1f8d5dc56a8d6779e7fa1232316c5246a32564e1c6  /mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/tlosan_stage_a/fixtures/query.faa
+0d44fdc2ae1994196df339d50704bf6f44a658965a0eb6cee8a638a89ed90d49  /mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/tlosan_stage_a/fixtures/subject_code1.fna
+608a977e1d022621ae2e9a2689d3af7a4e1046a69eed03f0fab31054a6616328  /mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/tlosan_stage_a/fixtures/subject_code32.fna
+86aee0412ede06ab4aa71b52c2223a3f25e6a6ef08b92be05357a0f484a43a9c  /mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/tlosan_stage_a/fixtures/subject_code4.fna
+04755f633ae959b373c98bc427b5be69987683f9e9aca96e25d402dba6a7e4b1  /tmp/tmp.v49E5a0dWE/tblastn_code32_oracle

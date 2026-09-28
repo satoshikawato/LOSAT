@@ -1,0 +1,14 @@
+{
+  "node_version": "v26.8.2",
+  "serial_target": "wasm32-wasip1",
+  "serial_feature": "no-default-features",
+  "threaded_target": "wasm32-wasip1-threads",
+  "threaded_feature": "wasm-threads",
+  "serial_wasm_sha256": "b68278ee51b6d4e5765d357b6ce07e02a2aae3f40a90ffb1aec0c765b19a57d7",
+  "threaded_wasm_sha256": "ec76f820345d6a55310e973d271c985bc621782431aad8e594b02cae24e3fe8f",
+  "serial_runner": "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/run_losat_wasi.js",
+  "threaded_runner": "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/run_losat_wasi_threads.js",
+  "serial_runner_sha256": "4210e97a8b92ffba4c100558cf15ee54e62e1b75586f54a8fadbaced959bb610",
+  "threaded_runner_sha256": "faf39e6c83178530c3b21d49ee0929d67e6b9258061cc50c057876617c759c4b",
+  "native_executable_sha256": "87fc615c1c1e78afc52f081a4744f1b01ceafd76270c9e1b37063f510c237339"
+}

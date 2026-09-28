@@ -927,7 +927,20 @@ fn merge_segs_inclusive(seq_len: usize, segs_inclusive: &mut Vec<(usize, usize)>
     while index + 1 < segs_inclusive.len() {
         let (seg_begin, seg_end) = segs_inclusive[index];
         let (next_begin, next_end) = segs_inclusive[index + 1];
-        if seg_begin <= next_end.saturating_add(1) {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:2130,2141-2145
+        // ```c
+        //    hilenmin = 0;               /* hilenmin - temporary default */
+        // ```
+        // ```c
+        //       if (seg->begin - nextseg->end - 1 < hilenmin) {
+        //          if (seg->end < nextseg->end) seg->end = nextseg->end;
+        //          if (seg->begin > nextseg->begin) seg->begin = nextseg->begin;
+        //          seg->next = nextseg->next;
+        //          sfree(nextseg);
+        // ```
+        // Strict signed comparison merges overlaps; adjacent intervals stay
+        // separate, including their distinct returned DNA-mask endpoints.
+        if seg_begin <= next_end {
             segs_inclusive[index].0 = seg_begin.min(next_begin);
             segs_inclusive[index].1 = seg_end.max(next_end);
             segs_inclusive.remove(index + 1);
@@ -1285,55 +1298,77 @@ mod tests {
         );
     }
 
-    // NCBI reference: /home/kawato/micromamba/bin/segmasker
-    // Command:
-    // `segmasker -in /tmp/bdv02435_query.faa -outfmt interval`
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1140-1157
+    // ```c
+    //        return status;
     //
-    // `segmasker` interval output is `0-based closed`; Rust stores merged
-    // `MaskedInterval` values as `0-based half-open`.
+    // 	if (filter_options->segOptions)
+    // 	{
+    //         SSegOptions* seg_options = filter_options->segOptions;
+    //         SegParameters* sparamsp=NULL;
+    //
+    //         sparamsp = SegParametersNewAa();
+    //         sparamsp->overlaps = TRUE;
+    //         if (seg_options->window > 0)
+    //             sparamsp->window = seg_options->window;
+    //         if (seg_options->locut > 0.0)
+    //             sparamsp->locut = seg_options->locut;
+    //         if (seg_options->hicut > 0.0)
+    //             sparamsp->hicut = seg_options->hicut;
+    //
+    // 		status = SeqBufferSeg(sequence, length, offset, sparamsp,
+    //                               seqloc_retval);
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:2125-2149
+    // ```c
+    // s_MergeSegs(SSequence* seq, SSeg* segs)
+    // {
+    //    SSeg* seg,* nextseg;
+    //    Int4 hilenmin;              /* hilenmin yet unset */
+    //
+    //    hilenmin = 0;               /* hilenmin - temporary default */
+    //
+    //    if (segs==NULL) return;
+    //
+    //    if (seq->length -1 - segs->end < hilenmin)
+    //        segs->end = seq->length -1;
+    //
+    //    seg = segs;
+    //    nextseg = seg->next;
+    //
+    //    while (nextseg!=NULL) {
+    //       if (seg->begin - nextseg->end - 1 < hilenmin) {
+    //          if (seg->end < nextseg->end) seg->end = nextseg->end;
+    //          if (seg->begin > nextseg->begin) seg->begin = nextseg->begin;
+    //          seg->next = nextseg->next;
+    //          sfree(nextseg);
+    //       } else {
+    //          seg = nextseg;
+    //       }
+    //       nextseg = seg->next;
+    // ```
+    // Independent SeqBufferSeg API output with this actual caller's overlaps=TRUE.
+    // The former assertion combined adjacent locations, unlike this core caller.
     #[test]
-    fn test_mask_sequence_matches_ncbi_segmasker_bdv02435_1_query_defaults() {
+    fn test_mask_sequence_matches_ncbi_core_bdv02435_1_query_defaults() {
         let fasta = include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/tests/fasta/AP027131.faa"
         ));
         let seq = fasta_sequence_by_id(fasta, "BDV02435.1");
         let masker = SegMasker::with_params(&SegParams::new(12, 2.2, 2.5));
-
         let mut intervals = masker.mask_sequence(&seq);
         intervals.sort_by_key(|interval| interval.start);
-
-        assert_eq!(
-            intervals,
-            vec![
-                MaskedInterval::new(3, 26),
-                MaskedInterval::new(263, 278),
-                MaskedInterval::new(348, 362),
-                MaskedInterval::new(427, 443),
-                MaskedInterval::new(452, 466),
-                MaskedInterval::new(521, 542),
-                MaskedInterval::new(623, 640),
-                MaskedInterval::new(697, 708),
-                MaskedInterval::new(732, 760),
-                MaskedInterval::new(1021, 1036),
-                MaskedInterval::new(1214, 1227),
-                MaskedInterval::new(1273, 1295),
-                MaskedInterval::new(1418, 1431),
-                MaskedInterval::new(1477, 1499),
-                MaskedInterval::new(2489, 2509),
-                MaskedInterval::new(2593, 2613),
-                MaskedInterval::new(2697, 2717),
-                MaskedInterval::new(3814, 3841),
-                MaskedInterval::new(4087, 4107),
-                MaskedInterval::new(4124, 4139),
-                MaskedInterval::new(4142, 4157),
-                MaskedInterval::new(4204, 4224),
-                MaskedInterval::new(4241, 4256),
-                MaskedInterval::new(4347, 4365),
-                MaskedInterval::new(4516, 4533),
-                MaskedInterval::new(4568, 4578),
-            ]
-        );
+        let expected: Vec<_> =
+            include_str!("../../tests/unit/blastx_stage_e_seg_sequence_expected.tsv")
+                .lines()
+                .map(|line| {
+                    let (begin, end) = line.split_once('\t').unwrap();
+                    MaskedInterval::new(begin.parse().unwrap(), end.parse().unwrap())
+                })
+                .collect();
+        assert_eq!(expected.len(), 27);
+        assert_eq!(intervals, expected);
     }
 
     // NCBI reference: /home/kawato/micromamba/bin/segmasker
@@ -1471,5 +1506,42 @@ mod tests {
         let mut segs = vec![(20, 30), (10, 25), (0, 5)];
         merge_segs_inclusive(64, &mut segs);
         assert_eq!(segs, vec![(10, 30), (0, 5)]);
+    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:2140-2151
+    // ```c
+    //    while (nextseg!=NULL) {
+    //       if (seg->begin - nextseg->end - 1 < hilenmin) {
+    //          if (seg->end < nextseg->end) seg->end = nextseg->end;
+    //          if (seg->begin > nextseg->begin) seg->begin = nextseg->begin;
+    //          seg->next = nextseg->next;
+    //          sfree(nextseg);
+    //       } else {
+    //          seg = nextseg;
+    //       }
+    //       nextseg = seg->next;
+    //    }
+    //
+    // ```
+    // Expected survivors come from the verbatim pinned C function, recorded in
+    // Session E/oracles/seg_overlap; the Rust helper never generates expected data.
+    #[test]
+    fn test_merge_segs_independent_ncbi_boundary_oracle() {
+        let parse = |text: &str| -> Vec<(usize, usize)> {
+            if text == "-" {
+                return Vec::new();
+            }
+            text.split(',')
+                .map(|range| {
+                    let (begin, end) = range.split_once(':').unwrap();
+                    (begin.parse().unwrap(), end.parse().unwrap())
+                })
+                .collect()
+        };
+        for row in include_str!("../../tests/unit/blastx_stage_e_seg_expected.tsv").lines() {
+            let fields: Vec<_> = row.split('\t').collect();
+            let mut intervals = parse(fields[2]);
+            merge_segs_inclusive(fields[1].parse().unwrap(), &mut intervals);
+            assert_eq!(intervals, parse(fields[3]), "{}", fields[0]);
+        }
     }
 }

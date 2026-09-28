@@ -38,6 +38,10 @@ async function checkReactor(artifact, fixtures, output) {
     { id: "blastn-single-dp", program: "blastn", seq: single, args: ["-task", "blastn"] },
     { id: "tblastx", program: "tblastx", seq: nuc, args: [] },
     { id: "blastp", program: "blastp", seq: aa, args: [] },
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:277-281
+    // CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter); results = lcl_blast.Run();
+    // The translated nucleotide query uses a protein subject through the same ABI.
+    { id: "blastx", program: "blastx", seq: fs.readFileSync(path.join(fixtures, "blastx-query.fasta"), "utf8"), subject: aa, args: ["-seg", "no"] },
   ];
   const host = await createThreadHost(artifact, "threaded-reactor");
   const records = [];
@@ -51,7 +55,7 @@ async function checkReactor(artifact, fixtures, output) {
     for (const c of cases) {
       let reference;
       for (const [i, n] of [1, 2, 4, 8, 2, 1, 2, 2].entries()) {
-        const response = runPair(host, c.program, c.seq, c.seq, "6", [...c.args, "-num_threads", String(n)]);
+        const response = runPair(host, c.program, c.seq, c.subject ?? c.seq, "6", [...c.args, "-num_threads", String(n)]);
         const events = await host.waitForWorkers();
         save(`${c.id}-${i}-n${n}`, response, events);
         assert.equal(response.status, 0, response.error);
@@ -64,14 +68,14 @@ async function checkReactor(artifact, fixtures, output) {
       }
       // Failure must clear previous result bytes and retain the engine cause.
       for (const bad of ["0", "invalid", "256"]) {
-        const response = runPair(host, c.program, c.seq, c.seq, "6", [...c.args, "-num_threads", bad]);
+        const response = runPair(host, c.program, c.seq, c.subject ?? c.seq, "6", [...c.args, "-num_threads", bad]);
         const events = await host.waitForWorkers(); save(`${c.id}-reject-${bad}`, response, events);
         assert.equal(response.status, -1); assert.equal(response.result.length, 0);
         assert.ok(response.error.length > 0); assert.equal(events.length, 0);
       }
       for (const failAt of [1, 2]) {
         let attempt = 0; host.setRejectSpawn(() => ++attempt === failAt);
-        const response = runPair(host, c.program, c.seq, c.seq, "6", [...c.args, "-num_threads", "4"]);
+        const response = runPair(host, c.program, c.seq, c.subject ?? c.seq, "6", [...c.args, "-num_threads", "4"]);
         const events = await host.waitForWorkers();
         save(`${c.id}-spawn-fail-${failAt}`, response, events);
         assert.equal(response.status, -1); assert.equal(response.result.length, 0);
@@ -79,17 +83,17 @@ async function checkReactor(artifact, fixtures, output) {
         assert.equal(events.filter(e => e.event === "ready").length, failAt - 1);
         assert.equal(events.filter(e => e.event === "exited").length, failAt - 1);
         host.setRejectSpawn(null);
-        const recovery = runPair(host, c.program, c.seq, c.seq, "6", [...c.args, "-num_threads", "2"]);
+        const recovery = runPair(host, c.program, c.seq, c.subject ?? c.seq, "6", [...c.args, "-num_threads", "2"]);
         const recoveryEvents = await host.waitForWorkers(); save(`${c.id}-recovery-${failAt}`, recovery, recoveryEvents);
         assert.equal(recovery.status, 0, recovery.error); assert.deepEqual(recovery.result, reference);
       }
       // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:770-832
       // CBlastTabularInfo tabinfo(m_Outfile, ...);
       // API labels are a separate existing contract; compare unchanged bytes.
-      for (const format of c.program === "blastp" ? ["0", "7", "6 qseqid sseqid score bitscore qstart qend sstart send"] : c.program === "blastn" ? ["7"] : []) {
+      for (const format of ["blastp", "blastx"].includes(c.program) ? ["0", "7", "6 qseqid sseqid score bitscore qstart qend sstart send"] : c.program === "blastn" ? ["7"] : []) {
         let expected;
         for (const n of [1, 2, 4, 8]) {
-          const response = runPair(host, c.program, c.seq, c.seq, format, [...c.args, "-num_threads", String(n)]);
+          const response = runPair(host, c.program, c.seq, c.subject ?? c.seq, format, [...c.args, "-num_threads", String(n)]);
           const events = await host.waitForWorkers(); save(`${c.id}-format-${format.split(" ")[0]}-n${n}`, response, events);
           assert.equal(response.status, 0, response.error);
           if (!expected) expected = response.result;
@@ -102,9 +106,16 @@ async function checkReactor(artifact, fixtures, output) {
           assert.ok(events.filter(e => e.event === "exited").every(e => e.code === 0));
         }
       }
-      const invalid = runPair(host, c.program, "invalid FASTA", c.seq, "6", [...c.args, "-num_threads", "1"]);
+      const invalid = runPair(host, c.program, c.program === "blastx" ? "@@@@\n" : "invalid FASTA", c.subject ?? c.seq, "6", [...c.args, "-num_threads", "1"]);
       assert.equal(invalid.status, -1); assert.equal(invalid.result.length, 0);
-      assert.match(invalid.error, /FASTA|fasta/);
+      // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1379-1382
+      // ```c++
+      //         if ( ! badIndexes.empty() ) {
+      //             NCBI_THROW2(CBadResiduesException, eBadResidues,
+      //                 "CFastaReader: Invalid " + x_NucOrProt() + "residue(s) in input sequence",
+      //                 CBadResiduesException::SBadResiduePositions( m_BestID, badIndexes, LineNumber() ) );
+      // ```
+      assert.match(invalid.error, /fasta/i);
       save(`${c.id}-invalid-input`, invalid, []);
     }
     // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:177-188

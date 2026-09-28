@@ -1,8 +1,8 @@
 [package]
 name = "LOSAT"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
-description = "Lightweight, pure-Rust sequence alignment tool with bit-perfect NCBI BLAST+ parity for pairwise FASTA comparisons and WebAssembly"
+description = "Pure-Rust local BLAST with NCBI-verified fixtures, genetic-code exceptions, and command-WASI support"
 license = "MIT"
 repository = "https://github.com/satoshikawato/LOSAT"
 readme = "../README.md"
@@ -10,27 +10,8 @@ keywords = ["blast", "bioinformatics", "alignment", "wasm", "genomics"]
 categories = ["science::bioinformatics", "command-line-utilities"]
 exclude = [
     ".tmp/",
+    "tests/",
     "losat_out/",
-    "tests/losat_out/",
-    "tests/blast_out/",
-    "tests/ncbi_out/",
-    "tests/__pycache__/",
-    "tests/blast_db/",
-    "tests/plots/",
-    "tests/fasta/*.gb",
-    "tests/fasta/*.fna",
-    "tests/fasta/*.ndb",
-    "tests/fasta/*.nhd",
-    "tests/fasta/*.nhi",
-    "tests/fasta/*.nhr",
-    "tests/fasta/*.nin",
-    "tests/fasta/*.njs",
-    "tests/fasta/*.nog",
-    "tests/fasta/*.nos",
-    "tests/fasta/*.not",
-    "tests/fasta/*.nsq",
-    "tests/fasta/*.ntf",
-    "tests/fasta/*.nto",
     "LOSAT/",
     "**/*.pyc",
     "**/*.tmp",
@@ -52,6 +33,23 @@ indicatif = "0.17"
 bitvec = "1.0"
 rustc-hash = "1.1"
 
+# NCBI reference (598d8ae6): c++/include/corelib/ncbistre.hpp:437-440
+# ```c++
+# #else
+# /// Portable alias for ifstream.
+# typedef IO_PREFIX::ifstream      CNcbiIfstream;
+# #endif
+# ```
+# NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:235-236
+# ```c++
+#     x_FillBuffer((size_t) m_Sb->in_avail());
+#     return gptr() < egptr() ? CT_TO_INT_TYPE(*gptr()) : CT_EOF;
+# ```
+# Rust filesystem support for the native readable-byte hint; no BLAST behavior,
+# foreign algorithm, NCBI runtime/build dependency or libc-auxv feature.
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "=0.38.44", default-features = false, features = ["std"] }
+
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
 getrandom = { version = "0.2", features = ["js"] }
 
@@ -72,6 +70,17 @@ parallel = ["rayon", "num_cpus"]
 # wasm32-wasip1-threads target and a runtime that implements thread spawning.
 # Explicit wasm32-wasip1 and wasm32-unknown-unknown builds remain serial.
 wasm-threads = ["parallel"]
+# NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1659-1664
+# ```c++
+#     /* Use a local diagnostics structure, because the one passed in an input
+#       argument can be shared between multiple threads, so we don't want to pass
+#       it to the engine and have a lot of mutex contention. */
+#     BlastDiagnostics* local_diagnostics = Blast_DiagnosticsInit();
+#
+#     if ((status =
+# ```
+# Diagnostic-only host clock/worker identity; never read by search or reporting.
+blastx-worker-probe = []
 # Diagnostic-only parity switch. NCBI BLAST has a single scalar C control flow
 # for TBLASTX ungapped extension/reevaluation (aa_ungapped.c:846-921,
 # blast_hits.c:675-733); this feature forces the Wasm build to use the matching

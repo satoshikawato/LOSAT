@@ -1,0 +1,8 @@
+NCBI source commit: 598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4
+NCBI executable SHA256: e3956f1e107a30439d56c8f72fae4267a7d62ebcc16e4f99d4baf2bdf00402e0
+D probe SHA256: 982280d0bcfc29c4088e69a3aea3bd768dba4defe7bb319669826c6a25ca938d
+query SHA256: c5304b0567e07d7b4e3d59a63af6b3509eb1c42c017efa5deefe540c23d75aba
+insert subject source SHA256: a192e6d0d3b82ee89a4bfcbb847a7989494decd2d1245e0b54ee02217aefb05d
+generated subject SHA256: 1a73df75b776ecf57b05280910fc9891e1a527426b0975ea782c267d3e2b97c3
+subject: ATG x 4999950 codons + saved plus1 + ATG x 250 codons
+command: ['/home/kawato/micromamba/bin/tblastn', '-task', 'tblastn', '-query', '/mnt/c/users/genom/github/losat/docs/evidence/tlosan_stage_c/long_multi_query_20260924/query.faa', '-subject', '<generated-subject>', '-db_gencode', '1', '-matrix', 'BLOSUM62', '-word_size', '3', '-threshold', '13', '-window_size', '40', '-gapopen', '11', '-gapextend', '1', '-evalue', '10000', '-num_threads', '1', '-comp_based_stats', '0', '-seg', 'no', '-sum_stats', 'false', '-outfmt', '6 qseqid sseqid score bitscore evalue nident positive length mismatch gaps gapopen qstart qend sstart send sframe']

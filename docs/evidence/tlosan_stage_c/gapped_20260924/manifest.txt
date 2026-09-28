@@ -1,0 +1,10 @@
+Comparison-only LD_PRELOAD NCBI trace; never used by LOSAT runtime/build.
+NCBI source commit: 598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4
+NCBI binary SHA256: e3956f1e107a30439d56c8f72fae4267a7d62ebcc16e4f99d4baf2bdf00402e0
+Probe source SHA256: 89ec02e8d4ebbff01d80d66111779b0d5a9544252321b7f848065f6a407f6a41
+Fixture: /mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/tlosan_stage_c/run_20260923
+Fixture output SHA256: e15a53586a802e8eaddf5c46f2bcf50673dfa1ca76128822f1a4a764208798a7
+GetGappedScore calls: 11; initial HSPs: 11; output HSPs: 11
+Traceback calls: 22; fence retries: 11
+Final NCBI bytes unchanged by probe: yes
+Command: ['/home/kawato/micromamba/bin/tblastn', '-task', 'tblastn', '-query', '/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/tlosan_stage_c/run_20260923/query.faa', '-subject', '/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/tlosan_stage_c/run_20260923/subjects.fna', '-db_gencode', '1', '-matrix', 'BLOSUM62', '-word_size', '3', '-threshold', '13', '-window_size', '40', '-gapopen', '11', '-gapextend', '1', '-evalue', '10000', '-num_threads', '1', '-comp_based_stats', '0', '-seg', 'no', '-sum_stats', 'false', '-outfmt', '6 qseqid sseqid score qstart qend sstart send sframe qseq sseq']

@@ -1,0 +1,11 @@
+{
+  "source": "598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4",
+  "origin": "Fresh official BLASTX with independently compiled pinned C word-finder trace; C regression actual argv and library pins retained in Session F evidence",
+  "expected_files": {
+    "/tmp/losatx-blastx-v020/docs/evidence/losatx_stage_f_parallel_wasi_web/run-20260927T001743Z/regressions/internal_v2/C_e_v10/S06_w3_window0/expected.stage": "76b07bf075863c82a307d478e96758a10bdb414b7b3c6062dbe6b3e72c67811d",
+    "/tmp/losatx-blastx-v020/docs/evidence/losatx_stage_f_parallel_wasi_web/run-20260927T001743Z/regressions/internal_v2/C_e_v10/S06_w3_window1/expected.stage": "78524fa5406c3aa66da8305cdc9bf908e6651710c67a61041ea044c24cccf2ed",
+    "/tmp/losatx-blastx-v020/docs/evidence/losatx_stage_f_parallel_wasi_web/run-20260927T001743Z/regressions/internal_v2/C_e_v10/S06_w3_window39/expected.stage": "382d3236c9fd297397b5fd6f98e8fe690c60c99009f6ae57dd8bb123502bf304",
+    "/tmp/losatx-blastx-v020/docs/evidence/losatx_stage_f_parallel_wasi_web/run-20260927T001743Z/regressions/internal_v2/C_e_v10/S06_w3_window40/expected.stage": "382d3236c9fd297397b5fd6f98e8fe690c60c99009f6ae57dd8bb123502bf304",
+    "/tmp/losatx-blastx-v020/docs/evidence/losatx_stage_f_parallel_wasi_web/run-20260927T001743Z/regressions/internal_v2/C_e_v10/S06_w3_window41/expected.stage": "382d3236c9fd297397b5fd6f98e8fe690c60c99009f6ae57dd8bb123502bf304"
+  }
+}

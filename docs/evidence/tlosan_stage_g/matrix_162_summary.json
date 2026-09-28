@@ -1,0 +1,15 @@
+{
+  "conditions": 162,
+  "equal": 162,
+  "codes": 27,
+  "formats": [
+    0,
+    6,
+    7
+  ],
+  "threads": [
+    1,
+    4
+  ],
+  "native_executable_sha256": "02d0e8300007ed0b63566c57276f5407fe9e3adb004384dd347d037fbdad4118"
+}

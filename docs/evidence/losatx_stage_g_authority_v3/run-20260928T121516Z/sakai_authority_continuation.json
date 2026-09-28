@@ -1,0 +1,18 @@
+{
+  "affected_frozen_gate_a_steps": [
+    11,
+    52,
+    53
+  ],
+  "approval_requested_after_independent_audit": true,
+  "base_proposal_sha256": "62b47d05d2edd0f9404bec6597fe47049e1bb986e188b1748a094adb274631bb",
+  "candidate_head": "1c131e6027ff7fc0595102f5c0a9fcc5f17b7d56",
+  "candidate_raw_sha256": "ac8177764f35b2fb92777f8b1d01ea646cc55ae21b05f1f486ee231348a34a45",
+  "candidate_source_closure_sha256": "d5a3dfd3ac00afdf5ac1589f1c4d962ce455370a41d2ba86aeb14a14bd8fc1dd",
+  "frozen_raw_sha256": "3f27c1f1396b59ecb7e78827b5da390e9c97a276c05cbc7a6c82f56bd0a03262",
+  "historical_frozen_gate_a": "HARD_FAIL_UNCHANGED",
+  "proposed_new_authority": "requires explicit Product/governance approval and fresh platform gates; no registration or changed Rust expected bytes here",
+  "schema": "losatx-sakai-authority-continuation-v1",
+  "status": "PROPOSED_UNAPPROVED",
+  "unknown_fingerprint": "HARD_FAIL"
+}

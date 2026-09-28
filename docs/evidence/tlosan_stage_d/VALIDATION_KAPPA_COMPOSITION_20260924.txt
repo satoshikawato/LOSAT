@@ -1,0 +1,39 @@
+TBLASTN Stage D Kappa composition partial checkpoint validation, 2026-09-24
+Pinned NCBI source: 598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4
+No Stage D/E acceptance asserted.
+
+$ (cd LOSAT && cargo test --lib translated_composition_range_honors_stop_margin_strict_boundaries)
+running 1 test
+test core::composition_adjustment::adjust_scores::tests::translated_composition_range_honors_stop_margin_strict_boundaries ... ok
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 508 filtered out
+exit code: 0
+
+$ (cd LOSAT && cargo test --lib translated_kappa_windows_match_ncbi_partial_translation_ranges)
+running 1 test
+test core::composition_adjustment::redo_alignment::tests::translated_kappa_windows_match_ncbi_partial_translation_ranges ... ok
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 508 filtered out
+exit code: 0
+
+$ (cd LOSAT && cargo test --lib pinned_tblastn_mode2_adjustment_rules_match_ncbi_call_inputs -- --nocapture)
+running 1 test
+test core::composition_adjustment::adjust_scores::tests::pinned_tblastn_mode2_adjustment_rules_match_ncbi_call_inputs ... ok
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 508 filtered out
+exit code: 0
+This test uses the saved query and subject probability bits for 21 NCBI calls, then compares matrix input dimensions, λ, three start-matrix cells, rule, λ-ratio bits, and 784 adjusted score cells per call. The translated-window test independently compares the first subject composition array in each fixture.
+
+$ (cd LOSAT && cargo fmt --all --check)
+exit code: 0
+
+$ (cd LOSAT && cargo clippy --lib -- -D warnings)
+    Checking LOSAT v0.1.0
+    Finished `dev` profile
+exit code: 0
+
+$ (cd docs/evidence/tlosan_stage_d/kappa_composition_matrix_scores_20260924 && sha256sum -c outputs.sha256)
+manifest.txt: OK
+multi_query_20260924_default.tsv: OK
+seg_hard_query_20260924_default.tsv: OK
+exit code: 0
+
+$ git diff --check
+exit code: 0

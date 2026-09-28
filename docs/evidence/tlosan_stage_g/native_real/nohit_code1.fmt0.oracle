@@ -1,0 +1,47 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+/tmp/tlosan-stageg-final-real-nohit-20260926/nohit.fna).
+           1 sequences; 600 total letters
+
+
+
+Query= nohit_query
+
+Length=60
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   -1.00    -1.00    -1.00 
+
+Gapped
+Lambda      K        H
+   -1.00    -1.00    -1.00 
+
+Effective search space used: 0
+
+
+  Database: User specified sequence set (Input:
+/tmp/tlosan-stageg-final-real-nohit-20260926/nohit.fna).
+    Posted date:  Unknown
+  Number of letters in database: 600
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40

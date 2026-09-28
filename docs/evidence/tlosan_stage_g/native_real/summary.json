@@ -1,0 +1,12 @@
+{
+  "comparisons": 72,
+  "equal": 72,
+  "cases": [
+    "av_code1",
+    "ap_code4",
+    "av_code11",
+    "nohit_code1",
+    "valid_nohit_code1",
+    "code23_tta_stop"
+  ]
+}

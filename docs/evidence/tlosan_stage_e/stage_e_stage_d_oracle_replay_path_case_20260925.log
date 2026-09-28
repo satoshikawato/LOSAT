@@ -1,0 +1,8 @@
+Traceback (most recent call last):
+  File "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/tlosan_stage_d/replay_stage_d_new_oracles.py", line 36, in <module>
+    if __name__ == "__main__": main()
+                               ~~~~^^
+  File "/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/tlosan_stage_d/replay_stage_d_new_oracles.py", line 32, in main
+    assert sha(expected / name) == sha(fresh / name), (saved, name)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: ('masking_options_20260925/run_20260925', 'manifest.txt')

@@ -1,0 +1,18 @@
+{
+  "family": "physical",
+  "comparisons": 1794,
+  "equal": 1794,
+  "unique_case_formats": 219,
+  "by_thread": {
+    "1": 219,
+    "2": 525,
+    "4": 525,
+    "8": 525
+  },
+  "parallel_activity_max": {
+    "1": 0,
+    "2": 2,
+    "4": 4,
+    "8": 8
+  }
+}

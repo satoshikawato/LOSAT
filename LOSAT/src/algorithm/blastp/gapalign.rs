@@ -396,10 +396,18 @@ impl GapAlignScratch {
 // ```
 #[derive(Debug, Clone)]
 pub(crate) struct BlastpGapAlignResult {
-    pub query_start: usize,
-    pub query_stop: usize,
-    pub subject_start: usize,
-    pub subject_stop: usize,
+    // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:85-88
+    // ```c
+    // Int4 query_start;
+    // Int4 query_stop;
+    // Int4 subject_start;
+    // Int4 subject_stop;
+    // ```
+    // Raw traceback state includes stop=-1 after a left fence at start0.
+    pub query_start: i32,
+    pub query_stop: i32,
+    pub subject_start: i32,
+    pub subject_stop: i32,
     pub score: i32,
     pub edit_script: Vec<GapEditOp>,
     pub num_ident: usize,
@@ -804,10 +812,17 @@ fn prune_terminal_gap_ops(
     gap_extend: i32,
     score_left: &mut i32,
     score_right: &mut i32,
-    query_start: &mut usize,
-    query_stop: &mut usize,
-    subject_start: &mut usize,
-    subject_stop: &mut usize,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4687-4690,4703-4706
+    // ```c
+    // gap_align->subject_start += esp->num[0];
+    // gap_align->query_start += esp->num[0];
+    // gap_align->subject_stop -= esp->num[i-1];
+    // gap_align->query_stop -= esp->num[i-1];
+    // ```
+    query_start: &mut i32,
+    query_stop: &mut i32,
+    subject_start: &mut i32,
+    subject_stop: &mut i32,
 ) {
     let mut leading_gap_ops = 0usize;
     while leading_gap_ops < edit_script.len() {
@@ -815,11 +830,13 @@ fn prune_terminal_gap_ops(
             GapEditOp::Sub(_) => break,
             GapEditOp::Del(n) => {
                 *score_left += gap_open + gap_extend * n as i32;
-                *subject_start += n as usize;
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4687-4688: gap_align->subject_start += esp->num[0];
+                *subject_start += n as i32;
             }
             GapEditOp::Ins(n) => {
                 *score_left += gap_open + gap_extend * n as i32;
-                *query_start += n as usize;
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4689-4690: gap_align->query_start += esp->num[0];
+                *query_start += n as i32;
             }
         }
         leading_gap_ops += 1;
@@ -833,11 +850,13 @@ fn prune_terminal_gap_ops(
             GapEditOp::Sub(_) => break,
             GapEditOp::Del(n) => {
                 *score_right += gap_open + gap_extend * n as i32;
-                *subject_stop = subject_stop.saturating_sub(n as usize);
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4703-4704: gap_align->subject_stop -= esp->num[i-1];
+                *subject_stop -= n as i32;
             }
             GapEditOp::Ins(n) => {
                 *score_right += gap_open + gap_extend * n as i32;
-                *query_stop = query_stop.saturating_sub(n as usize);
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4705-4706: gap_align->query_stop -= esp->num[i-1];
+                *query_stop -= n as i32;
             }
         }
         edit_script.pop();
@@ -851,7 +870,7 @@ fn prune_terminal_gap_ops(
 // else if (matrix[*q][*s] > 0)
 //    num_pos ++;
 // ```
-fn stats_from_edit_ops_protein(
+pub(crate) fn stats_from_edit_ops_protein(
     q_seq: &[u8],
     s_seq: &[u8],
     q_start: usize,
@@ -874,6 +893,31 @@ fn stats_from_edit_ops_protein(
     } else {
         stats_from_edit_ops_protein_impl::<false>(q_seq, s_seq, q_start, s_start, edit_ops, matrix)
     }
+}
+
+// NCBI c++/src/algo/blast/core/blast_traceback.c:583-596:
+// Blast_HSPGetNumIdentitiesAndPositives(query_nomask,
+//     adjusted_subject, hsp, score_options, &align_length, sbp);
+// NCBI c++/src/algo/blast/core/blast_hits.c:767-811:
+// for each eGapAlignSub letter, if (*q == *s) num_ident++;
+// Reuse the same edit-script walk after SEG-masked traceback.
+pub(crate) fn protein_identities_from_edit_ops(
+    query_nomask: &[u8],
+    subject: &[u8],
+    query_start: usize,
+    subject_start: usize,
+    edit_ops: &[GapEditOp],
+    matrix: ScoringMatrix,
+) -> usize {
+    stats_from_edit_ops_protein(
+        query_nomask,
+        subject,
+        query_start,
+        subject_start,
+        edit_ops,
+        matrix,
+    )
+    .0
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:767-811
@@ -2113,6 +2157,7 @@ pub(crate) fn blast_gapped_alignment_with_traceback(
         gap_extend,
         x_drop,
         &mut scratch,
+        None,
     )
 }
 
@@ -2122,6 +2167,9 @@ pub(crate) fn blast_gapped_alignment_with_traceback(
 // gapAlign->gap_x_dropoff = gapping_params->x_dropoff;
 // status = BLAST_GappedAlignmentWithTraceback(..., gapAlign, ...);
 // ```
+// NCBI c++/src/algo/blast/core/blast_gapalign.c:4549-4554,4620-4643:
+// Int2 BLAST_GappedAlignmentWithTraceback(..., Boolean * fence_hit);
+// if ((! (fence_hit && *fence_hit)) && ...) { /* right extension */ }
 pub(crate) fn blast_gapped_alignment_with_traceback_with_scratch(
     query: &[u8],
     subject: &[u8],
@@ -2133,6 +2181,7 @@ pub(crate) fn blast_gapped_alignment_with_traceback_with_scratch(
     gap_extend: i32,
     x_drop: i32,
     scratch: &mut GapAlignScratch,
+    mut fence_hit_out: Option<&mut bool>,
 ) -> Option<BlastpGapAlignResult> {
     if q_start >= query.len() || s_start >= subject.len() {
         return None;
@@ -2165,8 +2214,17 @@ pub(crate) fn blast_gapped_alignment_with_traceback_with_scratch(
         scratch,
         &mut fence_hit,
     );
-    let mut query_start = q_start + 1 - left_q;
-    let mut subject_start = s_start + 1 - left_s;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4614-4615
+    // ```c
+    // gap_align->query_start = q_start - private_q_length + 1;
+    // gap_align->subject_start = s_start - private_s_length + 1;
+    // ```
+    let raw_q_start = i32::try_from(q_start).expect("NCBI query offset fits Int4");
+    let raw_s_start = i32::try_from(s_start).expect("NCBI subject offset fits Int4");
+    let mut query_start =
+        raw_q_start - i32::try_from(left_q).expect("NCBI query extent fits Int4") + 1;
+    let mut subject_start =
+        raw_s_start - i32::try_from(left_s).expect("NCBI subject extent fits Int4") + 1;
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4629-4642
     // ```c
@@ -2204,15 +2262,25 @@ pub(crate) fn blast_gapped_alignment_with_traceback_with_scratch(
                 &mut fence_hit,
             );
             (
-                q_start + right_q + 1,
-                s_start + right_s + 1,
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4646-4647:
+                // gap_align->query_stop = q_start + private_q_length + 1;
+                // gap_align->subject_stop = s_start + private_s_length + 1;
+                raw_q_start + i32::try_from(right_q).expect("NCBI query extent fits Int4") + 1,
+                raw_s_start + i32::try_from(right_s).expect("NCBI subject extent fits Int4") + 1,
                 score_right,
                 right_edit_ops,
             )
         } else {
             (
-                q_start.saturating_sub(1),
-                s_start.saturating_sub(1),
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4650-4653
+                // ```c
+                // if (found_end == FALSE) {
+                //     gap_align->query_stop = q_start - 1;
+                //     gap_align->subject_stop = s_start - 1;
+                // }
+                // ```
+                raw_q_start - 1,
+                raw_s_start - 1,
                 0,
                 Vec::new(),
             )
@@ -2231,18 +2299,33 @@ pub(crate) fn blast_gapped_alignment_with_traceback_with_scratch(
         &mut subject_stop,
     );
 
-    if edit_script.is_empty() || query_stop <= query_start || subject_stop <= subject_start {
-        return None;
+    // NCBI c++/src/algo/blast/core/blast_gapalign.c:4620-4643:
+    // if ((! (fence_hit && *fence_hit)) && ...) { /* right extension */ }
+    // The caller must see the fence flag before deciding whether to retry.
+    if let Some(out) = fence_hit_out.as_deref_mut() {
+        *out = fence_hit;
     }
-
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4714-4718
+    // ```c++
+    //
+    //     gap_align->score = score_right + score_left;
+    //     return status;
+    // }
+    //
+    // ```
+    // A successful NCBI traceback may have zero score, equal endpoints and
+    // an empty script after a failed composition adjustment. The caller owns
+    // cutoff/reap decisions; preserve that payload here.
     let score = score_left + score_right;
 
     let (num_ident, num_positives, mismatches, gap_opens, gap_letters) =
         stats_from_edit_ops_protein(
             query,
             subject,
-            query_start,
-            subject_start,
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:764-765: q = (Uint1*) &query[q_off]; s = (Uint1*) &subject[s_off];
+            // ALIGN_EX's consumed left extents never exceed start+1; starts remain valid array offsets.
+            usize::try_from(query_start).expect("NCBI traceback query start is non-negative"),
+            usize::try_from(subject_start).expect("NCBI traceback subject start is non-negative"),
             &edit_script,
             matrix,
         );
@@ -2556,10 +2639,12 @@ pub(crate) fn traceback_preliminary_blastp_hsp(
         length: alignment_len,
         mismatch: aligned.mismatches,
         gapopen: aligned.gap_opens,
-        q_start: aligned.query_start + 1,
-        q_end: aligned.query_stop,
-        s_start: aligned.subject_start + 1,
-        s_end: aligned.subject_stop,
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:509-520,583: fence_error is handled before Blast_HSPUpdateWithTraceback.
+        // This full-sequence BLASTP caller has no translation fence and converts only report coordinates.
+        q_start: usize::try_from(aligned.query_start + 1).expect("BLASTP report query start"),
+        q_end: usize::try_from(aligned.query_stop).expect("BLASTP report query end"),
+        s_start: usize::try_from(aligned.subject_start + 1).expect("BLASTP report subject start"),
+        s_end: usize::try_from(aligned.subject_stop).expect("BLASTP report subject end"),
         e_value: evalue_from_raw_score(aligned.score, params, effective_space),
         bit_score: calc_bit_score(aligned.score, params),
         num_ident: aligned.num_ident,
@@ -3148,10 +3233,14 @@ mod tests {
         let mut edit_script = vec![GapEditOp::Ins(2), GapEditOp::Sub(3), GapEditOp::Del(1)];
         let mut score_left = 30;
         let mut score_right = 40;
-        let mut query_start = 10usize;
-        let mut query_stop = 15usize;
-        let mut subject_start = 20usize;
-        let mut subject_stop = 24usize;
+        // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:85-88: Int4 query_start;
+        let mut query_start = 10i32;
+        // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:85-88: Int4 query_stop;
+        let mut query_stop = 15i32;
+        // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:85-88: Int4 subject_start;
+        let mut subject_start = 20i32;
+        // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:85-88: Int4 subject_stop;
+        let mut subject_stop = 24i32;
 
         prune_terminal_gap_ops(
             &mut edit_script,
@@ -3646,8 +3735,9 @@ mod tests {
         let rescored = score_edit_script_local_alignment(
             &query,
             &subject,
-            aligned.query_start,
-            aligned.subject_start,
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:523-550: query/subject pointers walk the valid edit script.
+            usize::try_from(aligned.query_start).unwrap(),
+            usize::try_from(aligned.subject_start).unwrap(),
             &aligned.edit_script,
             BlastpScoreMatrix::Adjusted(&adjusted.adjusted_matrix),
             11 * 32,
@@ -3865,18 +3955,25 @@ mod tests {
         assert!(edit_ops.is_empty());
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4620-4624
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4620-4652,4714-4716
     // ```c
-    // if ((! (fence_hit && *fence_hit)) &&
-    //     (q_start < q_length) &&
-    //     (s_start < s_length)) {
+    // if ((! (fence_hit && *fence_hit)) && ... ) { /* right extension */ }
+    // if (found_end == FALSE) {
+    //     gap_align->query_stop = q_start - 1;
+    //     gap_align->subject_stop = s_start - 1;
+    // }
+    // gap_align->score = score_right + score_left;
+    // return status;
     // ```
+    // Independent pinned C boundary oracle returns status=0, fence=1 and
+    // endpoints 3..1 with no edit script. The caller owns the fence retry.
     #[test]
     fn test_blast_gapped_alignment_with_traceback_skips_right_extension_after_left_fence_hit() {
         let query = [1u8, 1, 1, 1];
         let subject = [1u8, 1, FENCE_SENTRY, 1];
-
-        let result = blast_gapped_alignment_with_traceback(
+        let mut scratch = GapAlignScratch::new();
+        let mut fence_hit = false;
+        let result = blast_gapped_alignment_with_traceback_with_scratch(
             &query,
             &subject,
             2,
@@ -3886,9 +3983,31 @@ mod tests {
             11,
             1,
             18,
-        );
-
-        assert!(result.is_none());
+            &mut scratch,
+            Some(&mut fence_hit),
+        )
+        .expect("NCBI returns successful status even after hitting the fence");
+        let expected = include_str!("../../../tests/unit/blastp_fence_traceback_expected.tsv");
+        let mut lines = expected.lines();
+        let fields: Vec<i32> = lines
+            .next()
+            .unwrap()
+            .split('\t')
+            .map(|f| f.parse().unwrap())
+            .collect();
+        assert_eq!(fields[0], 0); // successful C status maps to Some
+        assert_eq!(i32::from(fence_hit), fields[1]);
+        assert_eq!(result.score, fields[2]);
+        // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:85-88: Int4 query_start;
+        assert_eq!(result.query_start, fields[3]);
+        // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:85-88: Int4 query_stop;
+        assert_eq!(result.query_stop, fields[4]);
+        // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:85-88: Int4 subject_start;
+        assert_eq!(result.subject_start, fields[5]);
+        // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:85-88: Int4 subject_stop;
+        assert_eq!(result.subject_stop, fields[6]);
+        assert_eq!(lines.next(), Some("SCRIPT\t-1"));
+        assert!(result.edit_script.is_empty());
     }
     // NCBI 2.17.0: c++/src/algo/blast/core/blast_gapalign.c:431-432,531-669,689-726
     // ```c
@@ -4019,5 +4138,87 @@ mod tests {
                 assert!(scratch.trace_rows[1].iter().all(|&byte| byte != u8::MAX));
             }
         }
+    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4620-4653,4670-4716
+    // ```c
+    // if ((! (fence_hit && *fence_hit)) && (q_start < q_length) && (s_start < s_length)) {
+    //     found_end = TRUE;
+    //     gap_align->query_stop = q_start + private_q_length + 1;
+    //     gap_align->subject_stop = s_start + private_s_length + 1;
+    // }
+    // if (found_end == FALSE) {
+    //     gap_align->query_stop = q_start - 1;
+    //     gap_align->subject_stop = s_start - 1;
+    // }
+    // gap_align->score = score_right + score_left;
+    // return status;
+    // ```
+    // The independent direct C oracle supplies all expected status, flag,
+    // score, signed endpoints and complete edit operations. Input starts vary
+    // independently, including 0, 1, the prior start2 boundary and the last
+    // residue; the subject fence visits every position in both directions.
+    #[test]
+    fn test_fence_signed_traceback_grid_matches_pinned_ncbi() {
+        let expected =
+            include_str!("../../../tests/unit/blastp_fence_signed_traceback_expected.tsv");
+        let mut actual = String::from(expected.lines().next().unwrap());
+        actual.push('\n');
+        for line in expected.lines().skip(1) {
+            let fields: Vec<&str> = line.split('\t').collect();
+            let qstart: usize = fields[0].parse().unwrap();
+            let sstart: usize = fields[1].parse().unwrap();
+            let position: i32 = fields[2].parse().unwrap();
+            let query = [1u8; 6];
+            let mut subject = [1u8; 6];
+            if position >= 0 {
+                subject[usize::try_from(position).unwrap()] = FENCE_SENTRY;
+            }
+            let mut scratch = GapAlignScratch::new();
+            let mut fence = false;
+            let result = blast_gapped_alignment_with_traceback_with_scratch(
+                &query,
+                &subject,
+                qstart,
+                sstart,
+                ScoringMatrix::Blosum62,
+                None,
+                11,
+                1,
+                18,
+                &mut scratch,
+                Some(&mut fence),
+            )
+            .expect("NCBI status is zero for every valid fence-grid input");
+            let edits = if result.edit_script.is_empty() {
+                "-".to_owned()
+            } else {
+                result
+                    .edit_script
+                    .iter()
+                    .map(|op| {
+                        let kind = match op {
+                            GapEditOp::Sub(_) => 3,
+                            GapEditOp::Del(_) => 0,
+                            GapEditOp::Ins(_) => 6,
+                        };
+                        format!("{kind}:{}", op.num())
+                    })
+                    .collect::<Vec<_>>()
+                    .join(",")
+            };
+            actual.push_str(&format!(
+                "{qstart}\t{sstart}\t{position}\t0\t{}\t{}\t{}\t{}\t{}\t{}\t{edits}\n",
+                i32::from(fence),
+                result.score,
+                result.query_start,
+                result.query_stop,
+                result.subject_start,
+                result.subject_stop
+            ));
+        }
+        if let Some(path) = std::env::var_os("LOSAT_FENCE_BOUNDARY_DUMP") {
+            std::fs::write(path, &actual).unwrap();
+        }
+        assert_eq!(actual, expected);
     }
 }

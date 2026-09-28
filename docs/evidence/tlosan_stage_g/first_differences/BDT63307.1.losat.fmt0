@@ -1,0 +1,99 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/fasta/AvCLPV.fasta).
+           1 sequences; 416,069 total letters
+
+
+
+Query= BDT63307.1 hypothetical protein [Armadillidium vulgare clopovirus]
+
+Length=208
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+LC738883.1 MAG: Armadillidium vulgare clopovirus TUMSAT20210906 D...  429     6e-141
+
+
+> LC738883.1 MAG: Armadillidium vulgare clopovirus TUMSAT20210906 
+DNA, complete genome
+Length=416069
+
+ Score = 429 bits (1102),  Expect = 6e-141, Method: Compositional matrix adjust.
+ Identities = 208/208 (100%), Positives = 208/208 (100%), Gaps = 0/208 (0%)
+ Frame = -3
+
+Query  1       MKKIVFLIFFLIELQSILCIPRIKYENDTDQVCVRSPKKIDYSIPIRYIWRGKFYFSKDA  60
+               MKKIVFLIFFLIELQSILCIPRIKYENDTDQVCVRSPKKIDYSIPIRYIWRGKFYFSKDA
+Sbjct  193065  MKKIVFLIFFLIELQSILCIPRIKYENDTDQVCVRSPKKIDYSIPIRYIWRGKFYFSKDA  192886
+
+Query  61      APECKNTTVTLKMKFIKYRNVDKYDFRRNYHKYKNYKVFNRLTMDDDLWYAIVFNDENQM  120
+               APECKNTTVTLKMKFIKYRNVDKYDFRRNYHKYKNYKVFNRLTMDDDLWYAIVFNDENQM
+Sbjct  192885  APECKNTTVTLKMKFIKYRNVDKYDFRRNYHKYKNYKVFNRLTMDDDLWYAIVFNDENQM  192706
+
+Query  121     DMVYSRDVSKKNLFTITCTYRNDTCPYYKNALYSLTDKRKNITYNGIRIQGKCVMMCIEL  180
+               DMVYSRDVSKKNLFTITCTYRNDTCPYYKNALYSLTDKRKNITYNGIRIQGKCVMMCIEL
+Sbjct  192705  DMVYSRDVSKKNLFTITCTYRNDTCPYYKNALYSLTDKRKNITYNGIRIQGKCVMMCIEL  192526
+
+Query  181     EPDDFLTHHYCFQYSDALSGMKQLLRSF  208
+               EPDDFLTHHYCFQYSDALSGMKQLLRSF
+Sbjct  192525  EPDDFLTHHYCFQYSDALSGMKQLLRSF  192442
+
+
+ Score = 30.4 bits (67),  Expect = 0.010, Method: Compositional matrix adjust.
+ Identities = 39/175 (22%), Positives = 68/175 (39%), Gaps = 26/175 (15%)
+ Frame = -1
+
+Query  31      QVCVRSPKKIDYSIPIRYIWRGKFYFSKDAAPECKNTTVTLKMKFIKYRNVDKYDFRRNY  90
+               +VC+R      Y IP+      K   SK  +  C+N+T+    + +  + ++        
+Sbjct  185735  KVCIRYSSSFIYEIPMYDDSLEKILLSKSLSNNCENSTLKATFELLTRKALN--------  185580
+
+Query  91      HKYKNYKVFNRLTMDD---DLWYAIVFNDENQMDMVYSRDVSKKNLFTITCTYRNDTCP-  146
+                  +NY V N   ++D   D  Y I         + +S    K +  T++     + C  
+Sbjct  185579  ---ENYTVNNIHFIEDEERDTEYVIRL----TTSLDHSLPHPKNSYLTLSI----NICAR  185433
+
+Query  147     -YYKNALYSLTDKRKNI--TYNGIRIQGKCVMMCIELEPDDFLTHHYCFQYSDAL  198
+                Y K    S      NI   ++ ++I G C  +C+EL          CF +S+ L
+Sbjct  185432  DYKKECFISKNPTHYNIEPVFSKLKIYGTCATLCVELPTLKTKNLKNCFLFSENL  185268
+
+
+ Score = 21.9 bits (45),  Expect = 5.1, Method: Compositional matrix adjust.
+ Identities = 8/24 (33%), Positives = 14/24 (58%), Gaps = 0/24 (0%)
+ Frame = -2
+
+Query  156     TDKRKNITYNGIRIQGKCVMMCIE  179
+               T+ +KN    G  + GKC+ +C +
+Sbjct  183382  TNIKKNSNICGFFLNGKCIRLCTD  183311
+
+
+
+Lambda      K        H        a         alpha
+   0.327    0.141    0.443    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 19684466
+
+
+  Database: User specified sequence set (Input:
+/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/tests/fasta/AvCLPV.fasta).
+    Posted date:  Unknown
+  Number of letters in database: 416,069
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40

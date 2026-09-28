@@ -1,0 +1,20 @@
+{
+  "ncbi_source_commit": "598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4",
+  "ncbi_executable": "/home/kawato/micromamba/bin/tblastn",
+  "ncbi_executable_sha256": "e3956f1e107a30439d56c8f72fae4267a7d62ebcc16e4f99d4baf2bdf00402e0",
+  "losat_executable": "/mnt/c/Users/genom/GitHub/LOSAT/LOSAT/target/release/LOSAT",
+  "losat_executable_sha256": "6c50c85d4f14379e3d71952c7cc7c9c3f95976e4bc09921ab7cc421390500b40",
+  "ncbi_api_oracle": "/tmp/tlosan-stageg-api-20260925/tblastn_stage_e_local_oracle",
+  "ncbi_api_oracle_sha256": "d8e0f100143031db5121e13907ec34c31a84e258adbf3f92241976916f1536bb",
+  "threads": [
+    1,
+    2,
+    4,
+    8
+  ],
+  "formats": [
+    0,
+    6,
+    7
+  ]
+}

@@ -1,0 +1,11 @@
+Comparison-only NCBI real traceback deletion fixture; no LOSAT runtime/build dependency.
+NCBI source commit: 598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4
+NCBI binary SHA256: e3956f1e107a30439d56c8f72fae4267a7d62ebcc16e4f99d4baf2bdf00402e0
+Pinned source: blast_traceback.c:585-605; blast_hits.c:993-1001.
+Intervention: set BlastHitSavingOptions.percent_identity to valid 100.0 only while each actual Blast_HSPTest call executes, then restore it.
+Original calls: 31; positive deletions: 17.
+Input SHA256: query=c5304b0567e07d7b4e3d59a63af6b3509eb1c42c017efa5deefe540c23d75aba subject=cb8622ee051aab5bdafbcca2a9d656de1f2cad16dff9bbe15fc1b7118a2ec1b3
+Probe source SHA256: inject=d7d588c6fbd915c7c014a44449d18b9485dc97ab994b295d7368e21b57f1d35e gapped=53ec3b8d9901769a1a14fad3404cff391d7c7cd0a29929b14b0455eeb198b8fc
+Baseline output SHA256: 27f15ece134c1f89135b84b324177b98e8de6c09f7b6eb55d99b701947284cda
+Intervened output SHA256: f1d4d12535321c0d4db9d84597720e04afe9726ca84dc916eb09543d7d4ba9a7
+Command: ['/home/kawato/micromamba/bin/tblastn', '-task', 'tblastn', '-query', '/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/tlosan_stage_c/multi_query_20260924/query.faa', '-subject', '/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/tlosan_stage_c/multi_query_20260924/subjects.fna', '-db_gencode', '1', '-matrix', 'BLOSUM62', '-word_size', '3', '-threshold', '13', '-window_size', '40', '-gapopen', '11', '-gapextend', '1', '-evalue', '10000', '-num_threads', '1', '-comp_based_stats', '0', '-seg', 'no', '-sum_stats', 'false', '-outfmt', '6 qseqid sseqid score qstart qend sstart send sframe qseq sseq']

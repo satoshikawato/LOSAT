@@ -1,0 +1,7 @@
+Comparison-only LD_PRELOAD probe; never used in LOSAT build or runtime.
+NCBI SHA256: e3956f1e107a30439d56c8f72fae4267a7d62ebcc16e4f99d4baf2bdf00402e0
+Probe C SHA256: f52a2504526a7358c0f5250895af9f2b20c9fbb35ba8fb866245c4d3a7ff6d84
+Source commit: 598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4
+NCBI final outfmt 6 bytes with probe equal lowercase_fields.out.
+WordFinder calls: 18; subjects: 3; frames per subject: 6
+Command: ['/home/kawato/micromamba/bin/tblastn', '-task', 'tblastn', '-query', '/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/tlosan_stage_c/lowercase_20260923/query.faa', '-subject', '/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/tlosan_stage_c/lowercase_20260923/subjects.fna', '-db_gencode', '1', '-matrix', 'BLOSUM62', '-word_size', '3', '-threshold', '13', '-window_size', '40', '-gapopen', '11', '-gapextend', '1', '-evalue', '10000', '-num_threads', '1', '-comp_based_stats', '0', '-seg', 'no', '-sum_stats', 'false', '-outfmt', '6 qseqid sseqid score qstart qend sstart send sframe qseq sseq', '-lcase_masking']

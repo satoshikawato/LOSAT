@@ -1,0 +1,7 @@
+# TBLASTN 2.17.0+
+# Query: q1 protein with spaced W codons
+# Database: User specified sequence set (Input: /mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/tlosan_stage_a/fixtures/subject_code1.fna)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q1	s_code1	100.000	120	0	0	1	120	1	360	3.39e-93	251
+# BLAST processed 1 queries

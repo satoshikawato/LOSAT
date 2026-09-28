@@ -6,7 +6,13 @@ use std::sync::{Mutex, OnceLock};
 use bio::io::fasta;
 
 use crate::algorithm::blastp::args::{BlastpCompBasedStats, BlastpCompositionMode, BlastpSegSpec};
-use crate::algorithm::{blastn, blastp, tblastx};
+// NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:277-279
+// ```c++
+//                 CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
+//                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
+//                 results = lcl_blast.Run();
+// ```
+use crate::algorithm::{blastn, blastp, blastx, tblastx};
 
 static LAST_RESULT: OnceLock<Mutex<Vec<u8>>> = OnceLock::new();
 static LAST_ERROR: OnceLock<Mutex<Vec<u8>>> = OnceLock::new();
@@ -42,7 +48,14 @@ fn fasta_store() -> &'static Mutex<FastaStore> {
     FASTA_STORE.get_or_init(|| Mutex::new(FastaStore::default()))
 }
 
+// NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:277-279
+// ```c++
+//                 CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
+//                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
+//                 results = lcl_blast.Run();
+// ```
 struct StoredFasta {
+    bytes: Vec<u8>,
     records: Vec<fasta::Record>,
     label: String,
 }
@@ -54,7 +67,12 @@ struct FastaStore {
 }
 
 impl FastaStore {
-    fn insert(&mut self, records: Vec<fasta::Record>, label: String) -> Result<i32, String> {
+    fn insert(
+        &mut self,
+        records: Vec<fasta::Record>,
+        label: String,
+        bytes: Vec<u8>,
+    ) -> Result<i32, String> {
         if records.is_empty() {
             return Err("FASTA store input did not contain any records".to_string());
         }
@@ -66,7 +84,14 @@ impl FastaStore {
             .next_handle
             .checked_add(1)
             .ok_or_else(|| "FASTA store handle space exhausted".to_string())?;
-        self.entries.insert(handle, StoredFasta { records, label });
+        self.entries.insert(
+            handle,
+            StoredFasta {
+                records,
+                label,
+                bytes,
+            },
+        );
         Ok(handle)
     }
 
@@ -607,6 +632,19 @@ fn run_pair(
     //                  ...)
     // ```
     match program {
+        // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:277-279
+        // ```c++
+        //                 CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
+        //                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
+        //                 results = lcl_blast.Run();
+        // ```
+        "blastx" => blastx::web::run_pair(
+            blastx::web::parse_args(&extra).map_err(engine_error)?,
+            query_fasta.as_bytes(),
+            subject_fasta.as_bytes(),
+            "subject",
+        )
+        .map_err(engine_error),
         "blastp" => {
             // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/blastinput/blastp_args.cpp:71-115
             // ```c
@@ -685,6 +723,32 @@ fn run_pair_handles(
     // }
     // ```
     match program {
+        // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:277-279
+        // ```c++
+        //                 CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
+        //                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
+        //                 results = lcl_blast.Run();
+        // ```
+        "blastx" => {
+            let store = fasta_store()
+                .lock()
+                .map_err(|_| "FASTA store mutex poisoned".to_string())?;
+            let query = store
+                .entries
+                .get(&query_handle)
+                .ok_or_else(|| format!("unknown query FASTA handle: {query_handle}"))?;
+            let subject = store
+                .entries
+                .get(&subject_handle)
+                .ok_or_else(|| format!("unknown subject FASTA handle: {subject_handle}"))?;
+            blastx::web::run_pair(
+                blastx::web::parse_args(&extra).map_err(engine_error)?,
+                &query.bytes,
+                &subject.bytes,
+                &subject.label,
+            )
+            .map_err(engine_error)
+        }
         "blastp" => {
             let store = fasta_store()
                 .lock()
@@ -766,7 +830,7 @@ pub unsafe extern "C" fn losat_web_store_fasta(
     match fasta_store()
         .lock()
         .map_err(|_| "FASTA store mutex poisoned".to_string())
-        .and_then(|mut store| store.insert(records, label))
+        .and_then(|mut store| store.insert(records, label, fasta_bytes.to_vec()))
     {
         Ok(handle) => {
             last_error().lock().expect("error mutex poisoned").clear();
@@ -947,10 +1011,18 @@ mod tests {
         let mut store = FastaStore::default();
 
         let first = store
-            .insert(vec![record("q1")], "query".to_string())
+            .insert(
+                vec![record("q1")],
+                "query".to_string(),
+                b">q1\nACGT\n".to_vec(),
+            )
             .expect("first handle");
         let second = store
-            .insert(vec![record("s1")], "subject".to_string())
+            .insert(
+                vec![record("s1")],
+                "subject".to_string(),
+                b">s1\nACGT\n".to_vec(),
+            )
             .expect("second handle");
 
         assert_eq!(first, 1);
@@ -973,7 +1045,9 @@ mod tests {
     fn fasta_store_rejects_empty_and_unknown_handles() {
         let mut store = FastaStore::default();
 
-        assert!(store.insert(Vec::new(), "empty".to_string()).is_err());
+        assert!(store
+            .insert(Vec::new(), "empty".to_string(), Vec::new())
+            .is_err());
         assert!(store.release(42).is_err());
     }
 
@@ -986,7 +1060,11 @@ mod tests {
     fn fasta_store_clear_removes_entries_and_resets_handles() {
         let mut store = FastaStore::default();
         let handle = store
-            .insert(vec![record("q1")], "query".to_string())
+            .insert(
+                vec![record("q1")],
+                "query".to_string(),
+                b">q1\nACGT\n".to_vec(),
+            )
             .expect("stored handle");
 
         assert_eq!(handle, 1);
@@ -994,7 +1072,11 @@ mod tests {
         assert!(store.entries.is_empty());
 
         let next = store
-            .insert(vec![record("q2")], "query2".to_string())
+            .insert(
+                vec![record("q2")],
+                "query2".to_string(),
+                b">q2\nACGT\n".to_vec(),
+            )
             .expect("stored handle after clear");
         assert_eq!(next, 1);
     }

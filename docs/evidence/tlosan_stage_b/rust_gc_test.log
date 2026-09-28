@@ -1,0 +1,36 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.54s
+     Running unittests src/lib.rs (target/debug/deps/LOSAT-58175ff142d19059)
+
+running 3 tests
+test utils::genetic_code::tests::ambiguous_and_stop_codons_follow_ncbi4na_expansion ... ok
+test utils::genetic_code::tests::invalid_ids_never_resolve_to_standard ... ok
+id=1 codons=64 rust_vs_pinned_ncbi=PASS
+id=2 codons=64 rust_vs_pinned_ncbi=PASS
+id=3 codons=64 rust_vs_pinned_ncbi=PASS
+id=4 codons=64 rust_vs_pinned_ncbi=PASS
+id=5 codons=64 rust_vs_pinned_ncbi=PASS
+id=6 codons=64 rust_vs_pinned_ncbi=PASS
+id=9 codons=64 rust_vs_pinned_ncbi=PASS
+id=10 codons=64 rust_vs_pinned_ncbi=PASS
+id=11 codons=64 rust_vs_pinned_ncbi=PASS
+id=12 codons=64 rust_vs_pinned_ncbi=PASS
+id=13 codons=64 rust_vs_pinned_ncbi=PASS
+id=14 codons=64 rust_vs_pinned_ncbi=PASS
+id=15 codons=64 rust_vs_pinned_ncbi=PASS
+id=16 codons=64 rust_vs_pinned_ncbi=PASS
+id=21 codons=64 rust_vs_pinned_ncbi=PASS
+id=22 codons=64 rust_vs_pinned_ncbi=PASS
+id=23 codons=64 rust_vs_pinned_ncbi=PASS
+id=24 codons=64 rust_vs_pinned_ncbi=PASS
+id=25 codons=64 rust_vs_pinned_ncbi=PASS
+id=26 codons=64 rust_vs_pinned_ncbi=PASS
+id=27 codons=64 rust_vs_pinned_ncbi=PASS
+id=28 codons=64 rust_vs_pinned_ncbi=PASS
+id=29 codons=64 rust_vs_pinned_ncbi=PASS
+id=30 codons=64 rust_vs_pinned_ncbi=PASS
+id=31 codons=64 rust_vs_pinned_ncbi=PASS
+id=32 codons=64 rust_vs_pinned_ncbi=PASS
+id=33 codons=64 rust_vs_pinned_ncbi=PASS
+test utils::genetic_code::tests::pinned_gc_prt_all_27_codes_and_64_codons ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 434 filtered out; finished in 0.08s

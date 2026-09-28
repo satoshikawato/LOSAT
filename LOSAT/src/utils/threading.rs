@@ -136,12 +136,20 @@ where
             let pool = rayon::ThreadPoolBuilder::new()
                 .num_threads(requested)
                 .start_handler(move |index| {
+                    #[cfg(feature = "blastx-worker-probe")]
+                    probe_lifecycle("started", index);
                     if index == 0 {
                         // SAFETY: slot zero is run only by the owning caller.
                         unsafe { callback.call() };
                     }
                 })
+                .exit_handler(|_index| {
+                    #[cfg(feature = "blastx-worker-probe")]
+                    probe_lifecycle("exited", _index);
+                })
                 .spawn_handler(|thread| {
+                    #[cfg(feature = "blastx-worker-probe")]
+                    probe_lifecycle("spawn_attempt", thread.index());
                     if thread.index() == 0 {
                         caller = Some(thread);
                     } else {
@@ -157,6 +165,10 @@ where
             caller.expect("caller owns pool slot zero").run();
             Ok(())
         })?;
+        #[cfg(feature = "blastx-worker-probe")]
+        for index in 0..requested {
+            probe_lifecycle("joined", index);
+        }
         // The caller loop cleared its TLS and scope joined all children before
         // returning or resuming the original user panic.
         return match result_slot.into_inner().expect("caller completed search") {
@@ -286,4 +298,46 @@ mod tests {
         with_search_pool(4, "test", |_| Ok(())).unwrap();
         assert_eq!(rayon::current_thread_index(), None);
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1659-1664
+// ```c++
+//     /* Use a local diagnostics structure, because the one passed in an input
+//       argument can be shared between multiple threads, so we don't want to pass
+//       it to the engine and have a lot of mutex contention. */
+//     BlastDiagnostics* local_diagnostics = Blast_DiagnosticsInit();
+//
+//     if ((status =
+// ```
+// Diagnostic-only host clock/worker identity; never read by search or reporting.
+#[cfg(feature = "blastx-worker-probe")]
+fn probe_lifecycle(event: &str, index: usize) {
+    probe_write(format!(
+        "[blastx-pool-probe] event={event} index={index} thread={:?}\n",
+        std::thread::current().id()
+    ));
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1660-1664
+// ```c++
+//       argument can be shared between multiple threads, so we don't want to pass
+//       it to the engine and have a lot of mutex contention. */
+//     BlastDiagnostics* local_diagnostics = Blast_DiagnosticsInit();
+//
+//     if ((status =
+// ```
+// Diagnostic-only host recording uses a separate append file. Native reporting
+// owns stderr's lock throughout search; workers must never acquire that lock.
+#[cfg(feature = "blastx-worker-probe")]
+pub(crate) fn probe_write(message: String) {
+    use std::io::Write;
+    let path = std::env::var_os("LOSAT_BLASTX_WORKER_LOG")
+        .expect("diagnostic probe requires LOSAT_BLASTX_WORKER_LOG");
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .expect("diagnostic worker log must be writable");
+    file.write_all(message.as_bytes())
+        .expect("diagnostic worker log write");
 }

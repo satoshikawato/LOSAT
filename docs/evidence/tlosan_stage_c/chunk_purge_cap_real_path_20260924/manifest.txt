@@ -1,0 +1,10 @@
+Comparison-only NCBI positive chunk-local endpoint purge and frame append cap fixture.
+NCBI source commit: 598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4
+NCBI binary SHA256: e3956f1e107a30439d56c8f72fae4267a7d62ebcc16e4f99d4baf2bdf00402e0
+Pinned source: blast_engine.c:539-552,840-850; blast_hits.c:2455-2537,2809-2864.
+Artificial intervention: on first 3-HSP purge input, lower-scoring context-0 HSP receives top HSP's query and subject start; first purge removes it. Each actual frame append call receives cap 3 instead of kHspNumMax.
+Input SHA256: query=c5304b0567e07d7b4e3d59a63af6b3509eb1c42c017efa5deefe540c23d75aba subject=cb8622ee051aab5bdafbcca2a9d656de1f2cad16dff9bbe15fc1b7118a2ec1b3
+Probe source SHA256: inject=c5137588fbf24ac074fbff561778d28038e133936e8ff2a81b5c485fd3d7daec gapped=53ec3b8d9901769a1a14fad3404cff391d7c7cd0a29929b14b0455eeb198b8fc
+Baseline output SHA256: 27f15ece134c1f89135b84b324177b98e8de6c09f7b6eb55d99b701947284cda
+Intervened output SHA256: 8cb6d0faa16d14a7b20ec22ce9b493fdb12b9101e36eddb617d960f47c9e9961
+Command: ['/home/kawato/micromamba/bin/tblastn', '-task', 'tblastn', '-query', '/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/tlosan_stage_c/multi_query_20260924/query.faa', '-subject', '/mnt/c/Users/genom/GitHub/LOSAT/docs/evidence/tlosan_stage_c/multi_query_20260924/subjects.fna', '-db_gencode', '1', '-matrix', 'BLOSUM62', '-word_size', '3', '-threshold', '13', '-window_size', '40', '-gapopen', '11', '-gapextend', '1', '-evalue', '10000', '-num_threads', '1', '-comp_based_stats', '0', '-seg', 'no', '-sum_stats', 'false', '-outfmt', '6 qseqid sseqid score qstart qend sstart send sframe qseq sseq']

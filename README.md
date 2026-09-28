@@ -13,16 +13,16 @@
 
 **LOSAT** is a lightweight, pure-Rust reimplementation of the NCBI BLAST sequence alignment algorithm designed specifically for pairwise sequence-to-sequence comparisons (`-query` vs `-subject`).
 
-It delivers bit-identical alignment scores, E-values, and coordinates matching NCBI BLAST+ without requiring external C/C++ libraries, BLAST+ installations, or pre-formatted database indices. Built for high portability, LOSAT runs natively on modern operating systems and compiles directly to WebAssembly for client-side, zero-install genomic analyses in web browsers and sandboxed runtimes.
+On certified pairwise profiles and fixtures, LOSAT is checked against declared NCBI source, executable, or API oracle contracts for scores, E-values, coordinates, and output. Exact-byte parity applies where each contract requires it; documented local subject genetic-code exceptions apply to TBLASTX and TBLASTN. LOSAT runs without external C/C++ libraries, BLAST+ installations, or pre-formatted database indices. Built for high portability, LOSAT runs natively on modern operating systems and compiles directly to WebAssembly for client-side, zero-install genomic analyses in web browsers and sandboxed runtimes.
 
 ---
 
 ## Key Highlights
 
-- **Bit-Perfect NCBI BLAST+ Parity**: Produces identical alignment coordinates, E-values, bit scores, and tabular records matching official NCBI BLAST+ (v2.17.0+) on certified profiles.
+- **NCBI-Verified Certified Fixtures**: Matches the declared NCBI source, CLI, or API oracle contract on certified fixtures, including exact output bytes where required and the documented local subject genetic-code exceptions.
 - **Pure Rust, Zero Dependencies**: Standalone single executable. Does not wrap, link, or shell out to external NCBI binaries or libraries.
 - **Direct Pairwise Alignment**: Compares FASTA files directly via `-query` and `-subject` without running `makeblastdb`.
-- **WebAssembly Ready**: Compiles to WASI and web reactors with multithreading support, powering in-browser bioinformatics visualization tools like [gbdraw](https://github.com/satoshikawato/gbdraw).
+- **WebAssembly Ready**: Compiles to serial and threaded command-WASI. Browser/reactor APIs exist for integrations such as [gbdraw](https://github.com/satoshikawato/gbdraw), but they are outside the TBLASTN v0.2.0 certification.
 - **Corrected TBLASTX Genetic Codes**: Fully respects `--db-gencode` for translated subject sequences in pairwise searches (resolving NCBI BLAST+'s default fallback to standard code).
 - **High Performance**: Multithreaded execution via Rayon natively and shared-memory threading in WebAssembly (`wasm32-wasip1-threads`).
 
@@ -33,8 +33,10 @@ It delivers bit-identical alignment scores, E-values, and coordinates matching N
 | Program | Supported Tasks | Output Formats (`-outfmt`) | Description |
 |:---|:---|:---|:---|
 | **`blastn`** | `megablast` (default), `blastn` | `6` (tabular), `7` (commented tabular) | Nucleotide vs. nucleotide alignment |
+| **`blastx`** | local `blastx`, native and Wasm entry points | `0` (default), `6`, `7` | Nucleotide query vs. protein subject; [CLI scope and release status](docs/losatx_blastx_native_cli.md) |
 | **`blastp`** | `blastp` | `0` (pairwise), `6`, `7` | Protein vs. protein alignment |
 | **`tblastx`** | `tblastx` | `6` | Translated 6-frame nucleotide vs. nucleotide alignment |
+| **`tblastn`** | local `tblastn` | `0`, `6`, `7` | Protein query vs. translated nucleotide subject; [v0.2.0 fixture-scoped contract](docs/release/v0.2.0.md) |
 
 > **Note**: Standard tabular output (`-outfmt 6`) generates the 12 canonical BLAST fields:  
 > `qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore`.
@@ -59,7 +61,7 @@ pixi add losat
 ```
 
 ### Pre-built Binaries
-Download pre-compiled standalone binaries for Linux (x86_64, aarch64), macOS (Apple Silicon & Intel), and Windows from the [Releases](https://github.com/satoshikawato/LOSAT/releases) page.
+Download existing pre-compiled standalone binaries for Linux (x86_64, aarch64), macOS (Apple Silicon & Intel), and Windows from the [Releases](https://github.com/satoshikawato/LOSAT/releases) page. The unpublished TBLASTN v0.2.0 candidate is available only by building this branch; existing Releases and Bioconda packages do not provide that candidate.
 
 ### Build from Source
 Requires the [Rust toolchain](https://rustup.rs/) (edition 2021, Rust 1.92+ recommended):
@@ -111,22 +113,49 @@ LOSAT tblastx \
 
 ---
 
+### Translated Query vs. Protein Subject (BLASTX)
+
+```bash
+LOSAT blastx -query transcripts.fna -subject proteins.faa \
+  -query_gencode 1 -num_threads 1 -outfmt 6
+```
+
+The current branch implements native threaded BLASTX, command-WASI, and the
+Web/reactor entry points. See the [CLI scope and custom fields](docs/losatx_blastx_native_cli.md).
+The v0.2.0 release remains **HOLD**: the required cross-platform, browser,
+negative-case, and authority gates are not fully accepted. Existing finite
+performance measurements do not establish release readiness.
+
+### 4. Protein vs. Translated Nucleotide (TBLASTN)
+```bash
+LOSAT tblastn \
+  -query proteins.faa \
+  -subject genome.fna \
+  -task tblastn \
+  -db_gencode 1 \
+  -outfmt 6
+```
+
+The local TBLASTN path accepts all 27 NCBI `gc.prt` genetic-code IDs, including ID 32 under the documented product decision. Its certified output and target claims apply to the [declared fixtures and options](docs/release/v0.2.0.md). Database searches, `tblastn-fast`, PSI-TBLASTN, and composition modes 1/3 are unsupported.
+
+---
+
 ## Common Command-Line Options
 
 | Flag | Type | Default | Description |
 |:---|:---|:---|:---|
 | `-query <file>` | File path | *(Required)* | Input query sequence file (FASTA) |
 | `-subject <file>` | File path | *(Required)* | Input subject sequence file (FASTA) |
-| `-task <string>` | String | Program default | Task: `megablast` or `blastn` (for `blastn`); `blastp` (for `blastp`) |
+| `-task <string>` | String | Program default | Task: `megablast` or `blastn` (for `blastn`); `blastp` (for `blastp`); `blastx` (for `blastx`); `tblastn` (for `tblastn`) |
 | `-evalue <real>` | Float | `10.0` | Expectation value (E-value) threshold |
-| `-outfmt <int>` | Integer | `6` | Output format (`6`=tabular, `7`=commented tabular, `0`=pairwise) |
+| `-outfmt <int>` | Integer | `6` for tabular examples; `0` for BLASTX/TBLASTN | Output format (`6`=tabular, `7`=commented tabular, `0`=pairwise); availability varies by program |
 | `-num_threads <int>` | Integer | `1` | Number of threads to use |
 | `-max_target_seqs <int>`| Integer | `500` | Maximum number of aligned target sequences to keep |
 | `-max_hsps <int>` | Integer | Unlimited | Maximum number of HSPs per subject sequence |
 | `-dust <args>` | String | `20 64 1` | DUST low-complexity filter for BLASTN (`yes`, `no`, or `"level window linker"`) |
-| `-seg <args>` | String | `no` (blastp)<br>`12 2.2 2.5` (tblastx) | SEG low-complexity filter for BLASTP/TBLASTX (`yes`, `no`, or `"window locut hicut"`) |
-| `-query_gencode <int>` | Integer | `1` | Genetic code for query translation (TBLASTX) |
-| `-db_gencode <int>` | Integer | `1` | Genetic code for subject translation (TBLASTX) |
+| `-seg <args>` | String | `no` (blastp)<br>`12 2.2 2.5` (blastx/tblastx/tblastn) | SEG low-complexity filter for BLASTX/BLASTP/TBLASTX/TBLASTN (`yes`, `no`, or `"window locut hicut"`) |
+| `-query_gencode <int>` | Integer | `1` | Genetic code for query translation (BLASTX/TBLASTX) |
+| `-db_gencode <int>` | Integer | `1` | Genetic code for subject translation (TBLASTX/TBLASTN) |
 
 ---
 
@@ -188,7 +217,8 @@ LOSAT powers the client-side comparative genomic alignment engine in [gbdraw](ht
 
 ## Documentation & Verification
 
-- [Release Readiness & Scope](docs/v0.1.0_scope.md)
+- [TLOSAN v0.2.0 release readiness and scope](docs/release/v0.2.0.md)
+- [v0.1.0 historical release scope](docs/v0.1.0_scope.md)
 - [Verification & Parity Specifications](docs/release/pure_rust_runtime_v0.1.0_certification.md)
 - [CLI Migration Details](docs/cli_v2_migration.md)
 - [Developer & Contributor Guidelines](AGENTS.md)

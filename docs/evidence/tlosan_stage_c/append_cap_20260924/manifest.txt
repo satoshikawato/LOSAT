@@ -1,0 +1,12 @@
+Comparison-only pinned NCBI C API oracle for HSPListAppend cap=3.
+NCBI source commit: 598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4
+NCBI source owner: c++/src/algo/blast/core/blast_hits.c:2762-2864
+NCBI library: /home/kawato/micromamba/lib/ncbi-blast+/libxblast.so
+NCBI library SHA256: 5f95907da402bcbfe0dca1797ea9f7e6f73209c71914b6d04715c11b4a44647a
+Oracle source SHA256: a6a621ea4640deebb78a98c6c8bcdeeac2800d935695abafb9fcba7aeb36b087
+Build: gcc -std=c11 -O2 -Wall -Wextra -o /tmp/tlosan-c-append-cap-oracle docs/evidence/tlosan_stage_c/ncbi_append_cap_oracle.c -ldl
+Run: /tmp/tlosan-c-append-cap-oracle /home/kawato/micromamba/lib/ncbi-blast+/libxblast.so
+Old list: (score,context,frame,subject start) = (100,0,+1,100), (80,0,+1,300), (60,0,+1,500)
+New list: (90,1,+2,200), (80,1,+2,300), (70,1,+2,400)
+Both score-80 HSPs tie on every ScoreCompareHSPs field; the old HSP survives the cap.
+This C API executable is comparison-only and is not linked, built, or called by LOSAT.

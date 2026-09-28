@@ -1,0 +1,12 @@
+call	subject	frame	index	raw_score	context	query_frame	q_start	q_end	q_gapped_start	subject_frame	s_start	s_end	s_gapped_start
+0	plus1	1	0	656	0	0	0	120	29	1	0	120	29
+1	plus2	2	0	656	0	0	0	120	29	2	0	120	29
+2	plus3	3	0	656	0	0	0	120	29	3	0	120	29
+3	minus1	-1	0	656	0	0	0	120	29	-1	0	120	29
+4	minus2	-2	0	656	0	0	0	120	29	-2	0	120	29
+5	minus3	-3	0	656	0	0	0	120	29	-3	0	120	29
+6	partial_codon	1	0	656	0	0	0	120	29	1	0	120	29
+7	ambiguous	1	0	656	0	0	0	120	29	1	0	120	29
+8	internal_stop	1	0	647	0	0	0	120	29	1	0	120	29
+9	tie_a	1	0	656	0	0	0	120	29	1	0	120	29
+10	tie_b	1	0	656	0	0	0	120	29	1	0	120	29

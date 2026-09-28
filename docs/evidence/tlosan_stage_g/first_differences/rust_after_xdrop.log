@@ -1,0 +1,85 @@
+   Compiling LOSAT v0.1.0 (/mnt/c/Users/genom/GitHub/LOSAT/LOSAT)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 04s
+     Running unittests src/lib.rs (LOSAT/target/debug/deps/LOSAT-375c51a56549f105)
+
+running 1 test
+RUST_QUERY_LEN 209 SUBJECT_LEN 138689
+RUST_QUERY_HEX 050d0412040f13031310110e0a0a09041611090e091016091410070a061606110a0401010e05030a0d121213120b0a0c0a06090a16100d13040a16040610100d16080a160a0d160a13060d
+RUST_SUBJ_HEX 0404040d100909040a130309101611111106091605090e0c160404110b050a090b0b110a110b110d0d03050d11120b0a011206050b0b12100a010b0d050d1612130d0d09080609050405051004120516
+BDT_CAND q=53 s=76756 idx=97 prev=489355 flag=false offset=416227
+BDT_CAND q=104 s=76766 idx=138 prev=490658 flag=false offset=416227
+BDT_CAND q=115 s=76766 idx=149 prev=490993 flag=false offset=416227
+BDT_CAND q=104 s=76767 idx=137 prev=491871 flag=false offset=416227
+BDT_CAND q=25 s=76767 idx=58 prev=492541 flag=false offset=416227
+BDT_CAND q=104 s=76768 idx=136 prev=490921 flag=false offset=416227
+BDT_CAND q=114 s=76768 idx=146 prev=492678 flag=false offset=416227
+BDT_CAND q=104 s=76769 idx=135 prev=492929 flag=false offset=416227
+BDT_CAND q=104 s=76770 idx=134 prev=492661 flag=false offset=416227
+BDT_CAND q=104 s=76771 idx=133 prev=491126 flag=false offset=416227
+BDT_CAND q=115 s=76771 idx=144 prev=491611 flag=false offset=416227
+BDT_CAND q=99 s=76773 idx=126 prev=490854 flag=false offset=416227
+BDT_CAND q=80 s=76776 idx=104 prev=492495 flag=false offset=416227
+BDT_CAND q=30 s=76778 idx=52 prev=492045 flag=false offset=416227
+BDT_CAND q=17 s=76779 idx=38 prev=492740 flag=false offset=416227
+BDT_CAND q=175 s=76779 idx=196 prev=490324 flag=false offset=416227
+BDT_CAND q=31 s=76779 idx=52 prev=493005 flag=false offset=416227
+BDT_CAND q=176 s=76780 idx=196 prev=493006 flag=false offset=416227
+BDT_CAND q=32 s=76780 idx=52 prev=493005 flag=false offset=416227
+BDT_CAND q=22 s=76781 idx=41 prev=492738 flag=false offset=416227
+BDT_CAND q=75 s=76781 idx=94 prev=490450 flag=false offset=416227
+BDT_CAND q=45 s=76781 idx=64 prev=489746 flag=false offset=416227
+BDT_CAND q=145 s=76792 idx=153 prev=492922 flag=false offset=416227
+BDT_CAND q=193 s=76794 idx=199 prev=492107 flag=false offset=416227
+BDT_CAND q=63 s=76811 idx=52 prev=493005 flag=false offset=416227
+BDT_EXT_ARGS q=63 s=76811 left=76781 xdrop=15 cutoff=36 wordsize=3
+BDT_CAND q=69 s=76815 idx=54 prev=490719 flag=false offset=416227
+BDT_CAND q=93 s=76830 idx=63 prev=490843 flag=false offset=416227
+BDT_CAND q=87 s=76830 idx=57 prev=491829 flag=false offset=416227
+BDT_CAND q=88 s=76836 idx=52 prev=493038 flag=false offset=416227
+BDT_CAND q=27 s=76846 idx=237 prev=492913 flag=false offset=416227
+BDT_INIT InitHsp { frame: -1, chunk_offset: 0, q_seed: 175, s_seed: 76911, q_start: 163, s_start: 76899, length: 17, score: 45 } chunk=0 contained=false
+BDT_RESULT InitHsp { frame: -1, chunk_offset: 0, q_seed: 175, s_seed: 76911, q_start: 163, s_start: 76899, length: 17, score: 45 } q_gapped=173 s_gapped=76909 score=87 q=3..198 s=76752..76934
+BDT_INIT InitHsp { frame: -1, chunk_offset: 0, q_seed: 88, s_seed: 76836, q_start: 52, s_start: 76800, length: 39, score: 37 } chunk=0 contained=true
+BDT PRE oid=0 context=0 hsp=GappedHsp { frame: -1, score: 87, q_start: 3, q_end: 198, q_gapped_start: 173, s_start: 76752, s_end: 76934, s_gapped_start: 76909 }
+BDT REDO context=0 oid=0 hsp=GappedHsp { frame: -1, score: 87, q_start: 3, q_end: 198, q_gapped_start: 173, s_start: 76752, s_end: 76934, s_gapped_start: 76909 }
+BDT FINAL hsp=LinkedHsp { context: 0, hsp: GappedHsp { frame: -1, score: 67, q_start: 30, q_end: 198, q_gapped_start: 0, s_start: 76778, s_end: 76934, s_gapped_start: 0 }, num: 1, evalue: 0.010100876626244914, source_index: 1 } script=[Sub(53), Ins(11), Sub(12), Del(3), Sub(8), Ins(4), Sub(20), Ins(4), Sub(4), Del(2), Sub(16), Del(2), Sub(36)]
+test algorithm::tblastn::stage_d_pipeline::tests::diagnose_bdt63307_pairwise_script ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 551 filtered out; finished in 1.22s
+
+     Running unittests src/main.rs (LOSAT/target/debug/deps/LOSAT-36cecd75e62236ab)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/cli_smoke.rs (LOSAT/target/debug/deps/cli_smoke-09857a5f3b1702e9)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+     Running tests/cli_v2.rs (LOSAT/target/debug/deps/cli_v2-bffa4a83f9b38177)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.00s
+
+     Running tests/compressed_lookup.rs (LOSAT/target/debug/deps/compressed_lookup-6c6dd413c196046d)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+     Running tests/megablast_xdrop.rs (LOSAT/target/debug/deps/megablast_xdrop-a2ceba7882f59131)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/unit_tests.rs (LOSAT/target/debug/deps/unit_tests-5f5ad48f2a3f2d6a)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 178 filtered out; finished in 0.00s
+

@@ -85,6 +85,7 @@ export class FakeEngine implements EngineGateway {
       subject_aligned: null,
       out6: [0, encoder.encode(row).length],
       out0: [0, encoder.encode(out0).length],
+      out0_subject: null,
     };
     sink.hits([hit]);
   }

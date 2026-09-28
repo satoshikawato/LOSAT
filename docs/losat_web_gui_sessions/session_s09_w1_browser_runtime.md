@@ -6,6 +6,13 @@ LOSAT Web の段階 W1 を実行する。先に [セッション README](README.
 
 目的：FakeEngine を本物の Wasm エンジンに置き換え、ブラウザの中で 4 program（BLASTX は SX の後）を serial / threaded の両方で動かす。
 
+S05 で確定した ABI（`docs/web/abi_v2.md`。version 2）と、それを Node で確かめる方法（V-ABI）の要点：
+
+- 成果物は `web/adapter/tools/build_reactors.py` が作る `losat-web-serial.wasm` と `losat-web-threads.wasm`（どちらも WASI の reactor で、instance 化の後に `_initialize` を 1 回呼ぶ）。ビルドの同一性は `web/adapter/tools/check_build_identity.py` が確かめる。
+- threaded の module は `env.memory`（共有、最大 16384 ページ）と `wasi.thread-spawn` と `losat_host.emit` を import する。スレッド用の worker の instance にも `losat_host.emit` を渡す必要があるが、呼ばれることはない（エンジンは、export を呼んだスレッドで整形する）。呼ばれたら例外にしてよい。Node では `LOSAT/tests/wasi_thread_host.js` の `createThreadHost(path, "threaded-reactor", [], { imports: { losat_host: { emit } } })` がこれを行う。
+- `emit(stream, ptr, len)` のバイトは呼出しの間だけ有効なので写す。stream 0/6/7 は各形式の出力（1 MiB ごと）、1 は HSP レコード（JSON Lines、`out6`・`out0`・`out0_subject` の範囲つき）、2 は `describe`・`register`・`scan_end` の JSON、3 は警告。
+- V-ABI の実行：`node web/adapter/tests/v_abi.js --native <LOSAT> --serial <…> --threads <…> --cases <cases.json>`（case は `web/adapter/tools/v_abi_cases.py --suite quick|full`）。ABI の結合の書き方（引数の確保と解放、エラーの読み方、ハンドルの扱い）は `v_abi.js` の `Reactor` がそのまま参考になる。
+
 1. `web/app/src/infra/engine-worker/` に Engine worker を作る。WASI shim（gbdraw と同じ `@bjorn3/browser_wasi_shim`。版は固定する）、ABI v2 の結合、`losat_host.emit` の受け口を置く。`EngineGateway`（`src/ports/engine.ts`）を実装し、`src/composition.ts` で FakeEngine と入れ替える。FakeEngine は単体試験のために残す。
 2. ThreadHost を作る。`wasi.thread-spawn` を受けて、スレッド用の worker で module を共有メモリ付きで instance 化し、`wasi_thread_start` を呼ぶ。スレッド用の worker は再利用する。参考にする実装は、Node の `LOSAT/tests/wasi_thread_host.js` と、gbdraw の `gbdraw/web/js/workers/` と `gbdraw/web/js/services/losat.js`（<https://github.com/satoshikawato/gbdraw>、commit `538e9ec5`）である。ABI v2 に合わせて書き、コードを写さない。
 3. 機能を実際に確かめて経路を選ぶ（`crossOriginIsolated`、`SharedArrayBuffer`、module が宣言する最大値での共有メモリの確保。最大値は認証済みの threaded ビルドと同じ 1 GiB で、host は大きくしない。計画 TD-7）。threaded にできないときは、argv の `-num_threads` を 1 にして serial のモジュールで実行し、理由を `RuntimeInfo.fallbackReason` に入れる（計画 §4.7）。Auto のスレッド数は、gbdraw の既定値（FASTA が 500,000 文字未満なら serial）から始めて測り直す。

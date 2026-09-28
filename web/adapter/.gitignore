@@ -1,0 +1,2 @@
+# Cargo output when the adapter is built without --target-dir (CI, local tests)
+/target/

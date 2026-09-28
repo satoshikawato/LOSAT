@@ -9,6 +9,7 @@ on:
       - 'LOSAT/Cargo.toml'
       - 'LOSAT/Cargo.lock'
       - 'LOSAT/.cargo/**'
+      - 'LOSAT/tests/wasi_*.js'
       - '.github/workflows/web.yml'
   pull_request:
     paths:
@@ -18,6 +19,7 @@ on:
       - 'LOSAT/Cargo.toml'
       - 'LOSAT/Cargo.lock'
       - 'LOSAT/.cargo/**'
+      - 'LOSAT/tests/wasi_*.js'
       - '.github/workflows/web.yml'
 
 jobs:
@@ -62,3 +64,36 @@ jobs:
         env:
           CARGO_TARGET_WASM32_WASIP1_RUNNER: node ${{ github.workspace }}/web/tools/wasi-test-runner.mjs
         run: cargo test --locked --lib --target wasm32-wasip1 --no-default-features -- web_api::tests
+
+  # The engine adapter (web/adapter): build identity with the certified engine builds
+  # (plan TD-6), the index-scan property tests (TD-8), the two reactors, and V-ABI:
+  # every supported format of every program through ABI v2, compared with the native
+  # CLI of the same commit (plan §6.2).
+  adapter:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.92.0
+          targets: wasm32-wasip1, wasm32-wasip1-threads
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Build identity (plan TD-6)
+        run: python3 web/adapter/tools/check_build_identity.py
+      - name: Adapter tests
+        working-directory: web/adapter
+        run: cargo test --locked
+      - name: Native LOSAT, the V-ABI expectation
+        working-directory: LOSAT
+        run: cargo build --release --locked
+      - name: Reactors
+        run: python3 web/adapter/tools/build_reactors.py --target-dir ${{ runner.temp }}/adapter-target --output-dir ${{ runner.temp }}/reactors
+      - name: V-ABI (quick suite)
+        run: |
+          python3 web/adapter/tools/v_abi_cases.py --suite quick --out ${{ runner.temp }}/v-abi-cases.json
+          node web/adapter/tests/v_abi.js --native LOSAT/target/release/LOSAT \
+            --serial ${{ runner.temp }}/reactors/losat-web-serial.wasm \
+            --threads ${{ runner.temp }}/reactors/losat-web-threads.wasm \
+            --cases ${{ runner.temp }}/v-abi-cases.json

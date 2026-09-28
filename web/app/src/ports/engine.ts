@@ -16,6 +16,10 @@ export interface ProgramDescription {
   /** Output formats the program supports; a run writes exactly these. */
   readonly formats: readonly OutputFormat[];
   readonly parameters: readonly ParameterDescription[];
+  /** Genetic codes the engine accepts for -query_gencode, if the program has it. */
+  readonly queryGencodes?: readonly number[];
+  /** Genetic codes the engine accepts for -db_gencode, if the program has it. */
+  readonly subjectGencodes?: readonly number[];
 }
 
 export type ValidationResult = { readonly ok: true } | { readonly ok: false; readonly message: string };
@@ -47,6 +51,8 @@ export interface HspRecord {
   readonly out6: readonly [number, number] | null;
   /** Byte range [start, end) of this HSP's section in the outfmt 0 text, or null if not shown. */
   readonly out0: readonly [number, number] | null;
+  /** Byte range [start, end) of the heading of this HSP's subject in the outfmt 0 text, or null. */
+  readonly out0_subject: readonly [number, number] | null;
 }
 
 export type EnginePhase = 'preparing' | 'running' | 'finalizing';

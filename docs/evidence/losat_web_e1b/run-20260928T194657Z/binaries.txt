@@ -1,0 +1,21 @@
+S03 artifacts (SHA-256). Toolchain: cargo 1.92.0 (344c4567c 2025-10-21); rustc 1.92.0 (ded5c06cf 2025-12-08); node v26.8.2.
+Build commands: as in ../../losat_web_e1a/README.md "実行の方法".
+
+pre-change = the S02 artifacts (docs/evidence/losat_web_e1a/run-20260928T185126Z/binaries.txt), kept in
+/home/kawato/.cache/losat-web-gui-target/s02-final/:
+3fef8bd3cee9cde290df622605c2caba46f468a67f042002e743f13a19b039be  native LOSAT
+c9ae0363816603effddd2aa7eb809a8e4b3089e29ba7737da6e3748d48a55820  native LOSAT, --no-default-features (serial)
+6b34f358337b6f95ac751692a980fb115ad045305d43996b14950b5eb353c3d9  losat-serial-command.wasm
+4f6bacbe2f8fa293e08f6a2c8d451ffef01b22948fed9e6c512c7e24da4a36a5  losat-serial-reactor.wasm
+fae798b8f4d33e5608e5014dff55cd84f3ef7161b1090d452f11c9a721902f15  losat-threaded-command.wasm
+78ee7094346e92a642354c9d87683bb5cd323c8262d34a0570060005f45be837  losat-threaded-reactor.wasm
+
+post-change (commit 00fdfca14). The gates ran on artifacts built from the working tree before the last edit of
+the commit, a comment-only change in LOSAT/src/api/local_blast.rs. Both natives and all four WASI artifacts rebuilt
+from git archive 00fdfca14 have the same hashes. Copies are kept in /home/kawato/.cache/losat-web-gui-target/s03-final/:
+bf4be7aa9864f3c184007a3d2aff62b5521986a99311e6667646801fed8564dc  native LOSAT (rebuilt from the commit: same hash)
+d7c6fb655a3c2af9dc97bdbc7d07a49f6d914e1d208b5a39663043dae56526d3  native LOSAT, --no-default-features (serial) (rebuilt from the commit: same hash)
+7d8627962cdd402fc5dc373ebcbbe1edf843528cdd065d976b8f86dd1b25f966  losat-serial-command.wasm (rebuilt from the commit: same hash)
+08c7f3a24e9163cf7b66e54b1a3fa2fac223ec9c49c750f58e0e7970c7eccc84  losat-serial-reactor.wasm (rebuilt from the commit: same hash)
+055ac71be4fa63a2eece775be51064de20a6dc43c003bcbda39a9fb607054517  losat-threaded-command.wasm (rebuilt from the commit: same hash)
+0e7410de7bf1e82be7ff637c34d29bf0511d32e22703b7d55d6eb8b501bcb322  losat-threaded-reactor.wasm (rebuilt from the commit: same hash)

@@ -1,0 +1,14 @@
+$ CARGO_TARGET_WASM32_WASIP1_RUNNER="node ../web/tools/wasi-test-runner.mjs" cargo +1.92.0 test --locked --lib --target wasm32-wasip1 --no-default-features --target-dir /home/kawato/.cache/losat-web-gui-target/wasm32-test -- web_api::tests
+   Compiling LOSAT v0.2.0 (/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.45s
+     Running unittests src/lib.rs (/home/kawato/.cache/losat-web-gui-target/wasm32-test/wasm32-wasip1/debug/deps/LOSAT-cc79d84be9646979.wasm)
+
+running 4 tests
+test web_api::tests::fasta_store_allocates_and_releases_handles ... ok
+test web_api::tests::fasta_store_clear_removes_entries_and_resets_handles ... ok
+test web_api::tests::fasta_store_rejects_empty_and_unknown_handles ... ok
+test web_api::tests::tblastx_web_args_reject_unimplemented_outfmt ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 586 filtered out; finished in 0.00s
+
+exit 0

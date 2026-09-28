@@ -5,7 +5,9 @@ blastp	7	LOSAT/tests/blastp_v010_parity_manifest.tsv inputs	native CLI	native-eq
 blastp	6 (custom fields)	first case of LOSAT/tests/blastp_v010_parity_manifest.tsv	native CLI	native-equivalent, not NCBI-certified	docs/evidence/losat_web_e1a/baseline/hashes.tsv (case suffix .fmt6custom)	checked	S02
 blastp	0 / 6 / 7 / custom	8 + 8 record prefixes of the manifest inputs, with and without -max_target_seqs 1	run_local, several formats at once	the native CLI run of each single format	LOSAT/tests/run_local_blastp.rs	checked	S02
 blastp	0 / 6 / 7	same as the native CLI rows	Wasm ABI v2 serial / threaded, threads 1/2/4	the native CLI rows above	web/adapter/tests/ (V-ABI)	pending	S05
-tblastn	0 / 6 / 7	docs/evidence/tlosan_stage_g/matrix_162.jsonl	native CLI	certified frozen bytes	docs/evidence/tlosan_stage_g/matrix_162.jsonl (expected_sha256)	pending	S03
+tblastn	0 / 6 / 7	docs/evidence/tlosan_stage_g/matrix_162.jsonl (27 genetic codes)	native CLI	certified frozen bytes	docs/evidence/tlosan_stage_g/matrix_162.jsonl (expected_sha256); docs/evidence/losat_web_e1b/after/hashes.tsv	checked	S03
+tblastn	0 / 6 / 7	Stage G batch_boundary (valid_then_skipped, skipped_then_valid) and native_real/av_code1	run_local, three formats at once	saved NCBI BLAST+ 2.17.0 stdout and stderr	LOSAT/tests/run_local_tblastn.rs	checked	S03
+tblastn	0 / 6 / 7	Stage C multi_query + multi_hsp queries against four Stage C/D subject files, with and without -max_target_seqs 1	run_local, three formats at once	the native CLI run of each single format (stdout and stderr)	LOSAT/tests/run_local_tblastn.rs	checked	S03
 tblastn	0 / 6 / 7	same	Wasm ABI v2 serial / threaded, threads 1/2/4	the native CLI rows	web/adapter/tests/ (V-ABI)	pending	S05
 blastn	6 / 7	LOSAT/tests/blastn_parity_manifest.tsv	native CLI	certified frozen bytes	LOSAT/tests/platform_native_v010_canonical.tsv (Gate A, blastn rows)	pending	S04
 blastn	0	fixtures fixed in S06	native CLI	certified NCBI bytes from S06	docs/evidence/losat_web_e2a/	pending	S07

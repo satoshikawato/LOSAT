@@ -1,0 +1,6 @@
+ok tblastn-full native: median 2.251s [2.222, 2.272] -> 2.243s [2.214, 2.286] (x0.996), output same
+ok tblastn-full serial-wasi: median 2.706s [2.668, 2.775] -> 2.689s [2.660, 2.706] (x0.994), output same
+ok tblastn-full threaded-wasi: median 3.500s [3.454, 3.563] -> 3.490s [3.478, 3.563] (x0.997), output same
+ok tblastn-full-fmt0 native: median 2.329s [2.261, 2.442] -> 2.316s [2.272, 2.463] (x0.995), output same
+ok tblastn-full-fmt0 serial-wasi: median 2.824s [2.705, 3.038] -> 2.823s [2.765, 3.071] (x1.000), output same
+ok tblastn-full-fmt0 threaded-wasi: median 3.545s [3.448, 3.590] -> 3.557s [3.513, 3.689] (x1.003), output same

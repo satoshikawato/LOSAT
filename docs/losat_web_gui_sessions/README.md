@@ -29,7 +29,7 @@
 |---|---|---|---|---|
 | S01 | [契約と骨格](session_s01_w0_contract_skeleton.md) | W0 | FakeEngine の E2E、`crossOriginIsolated`、TBLASTX v1 の fail-fast | 完了（2026-09-29、[ゲート記録](../evidence/losat_web_w0/README.md)） |
 | S02 | [核の入口：共通部と BLASTP](session_s02_e1a_core_entry_blastp.md) | E1a | 全 program の基準、変更したコードを使う全 program のゲート、v1 の検査、V-PERF | 完了（2026-09-29、[ゲート記録](../evidence/losat_web_e1a/README.md)） |
-| S03 | [核の入口：TBLASTN](session_s03_e1b_core_entry_tblastn.md) | E1b | TLOSAN の Stage G のゲートが変わらない | 未着手 |
+| S03 | [核の入口：TBLASTN](session_s03_e1b_core_entry_tblastn.md) | E1b | TLOSAN の Stage G のゲートが変わらない | 完了（2026-09-29、[ゲート記録](../evidence/losat_web_e1b/README.md)。V-PERF は保守者の確認待ち） |
 | S04 | [核の入口：BLASTN と TBLASTX](session_s04_e1c_core_entry_blastn_tblastx.md) | E1c | 既存ゲートと Gate A が変わらない、v1 の検査 | 未着手 |
 | S05 | [アダプタと ABI v2](session_s05_e1d_adapter_abi_v2.md) | E1d | 4 program の V-ABI、ビルドの同一性の検査 | 未着手 |
 | S06 | [BLASTN outfmt 0：権威と fixture](session_s06_e2a1_blastn_outfmt0_authority.md) | E2a-1 | NCBI の経路の表、固定した fixture | 未着手 |

@@ -1,0 +1,4 @@
+$ cargo +1.92.0 clippy --all-targets --all-features --locked --target-dir /home/kawato/.cache/losat-web-gui-target/ci -- -D warnings
+    Checking LOSAT v0.2.0 (/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 3.49s
+exit 0

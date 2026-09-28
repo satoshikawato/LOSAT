@@ -31,6 +31,19 @@ pub use crate::algorithm::blastn::blast_engine::run as run_blastn;
 pub use crate::algorithm::blastp::blast_engine::run as run_blastp;
 pub use crate::algorithm::blastp::blast_engine::run_local as run_local_blastp;
 
+// Re-export the TBLASTN entry
+// NCBI reference: ncbi-blast/c++/src/app/blast/tblastn_app.cpp:289-301
+// ```c
+// CLocalBlast lcl_blast(query_factory, m_OptsHndl, db_adapter);
+// lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
+// results = lcl_blast.Run();
+// ...
+// ITERATE(CSearchResultSet, result, *results) {
+//     formatter.PrintOneResultSet(**result, query);
+// }
+// ```
+pub use crate::algorithm::tblastn::run_local as run_local_tblastn;
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:68-93
 // ```c
 // CBlastFormat::CBlastFormat(..., CNcbiOstream& outfile, ...)
@@ -110,7 +123,18 @@ pub type HspIndex = usize;
 // }
 // m_Ostream << "\n";
 // ```
-// NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:3613-3630
+// NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:3956-3975
+// ```c++
+// void CDisplaySeqalign::x_DisplayAlnvecInfo(CNcbiOstream& out,
+//                                            SAlnInfo* aln_vec_info,
+//                                            bool show_defline)
+// {
+//     ...
+// 	if(!m_AlignTemplates) {
+// 		x_ShowAlnvecInfo(out,aln_vec_info,show_defline);
+// 	}
+// ```
+// NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:3613-3632
 // ```c++
 // void CDisplaySeqalign::x_ShowAlnvecInfo(CNcbiOstream& out,
 //                                            SAlnInfo* aln_vec_info,

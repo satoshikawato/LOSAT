@@ -1713,6 +1713,7 @@ pub fn write_tblastn_pairwise_report<W: Write>(
     query_batch_skipped: &[bool],
     subject_ids: &[Arc<str>],
     report: &BlastpPairwiseReport,
+    mut probe: Option<&mut FormatProbe<'_>>,
 ) -> io::Result<()> {
     // NCBI c++/src/algo/blast/api/local_blast.cpp:177-224:
     // an all-invalid Run() batch carries -1 Karlin sentinel blocks only for
@@ -1734,10 +1735,16 @@ pub fn write_tblastn_pairwise_report<W: Write>(
         report.database_total_letters,
     )?;
 
-    let mut hits_by_query: Vec<Vec<&PairwiseHit>> = vec![Vec::new(); queries.len()];
-    for hit in hits {
+    // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:1411
+    // ```c++
+    // CBlastFormat::PrintOneResultSet(const blast::CSearchResults& results,
+    // ```
+    // Each hit keeps its index in `hits` (the final result order), which identifies it
+    // to the probe.
+    let mut hits_by_query: Vec<Vec<(HspIndex, &PairwiseHit)>> = vec![Vec::new(); queries.len()];
+    for (hsp_index, hit) in hits.iter().enumerate() {
         if let Some(bucket) = hits_by_query.get_mut(hit.hit.q_idx as usize) {
-            bucket.push(hit);
+            bucket.push((hsp_index, hit));
         }
     }
     for (q_idx, query) in queries.iter().enumerate() {
@@ -1775,12 +1782,18 @@ pub fn write_tblastn_pairwise_report<W: Write>(
         }
         let mut subject_hits: std::collections::HashMap<u32, Vec<&PairwiseHit>> =
             std::collections::HashMap::new();
+        let mut subject_hit_indices: std::collections::HashMap<u32, Vec<HspIndex>> =
+            std::collections::HashMap::new();
         let mut subject_order = Vec::new();
-        for hit in query_hits {
+        for &(hsp_index, hit) in query_hits {
             if !subject_hits.contains_key(&hit.hit.s_idx) {
                 subject_order.push(hit.hit.s_idx);
             }
-            subject_hits.entry(hit.hit.s_idx).or_default().push(*hit);
+            subject_hits.entry(hit.hit.s_idx).or_default().push(hit);
+            subject_hit_indices
+                .entry(hit.hit.s_idx)
+                .or_default()
+                .push(hsp_index);
         }
         write_subject_summary_table(&mut writer, &subject_order, &subject_hits, subject_ids)?;
         writeln!(writer)?;
@@ -1793,12 +1806,36 @@ pub fn write_tblastn_pairwise_report<W: Write>(
                 first.subject_title.as_deref(),
                 first.subject_length,
             )?;
-            for hit in shits {
+            // NCBI reference: c++/src/objtools/align_format/showalign.cpp:1970-1973
+            // ```c++
+            // subid=&(avRef->GetSeqId(1));
+            // bool showDefLine = previousId.Empty() || !subid->Match(*previousId);
+            // x_DisplayAlnvecInfo(out, alnvecInfo,showDefLine);
+            // ```
+            // NCBI reference: c++/src/objtools/align_format/showalign.cpp:3971-3980
+            // ```c++
+            // x_ShowAlnvecInfo(out,aln_vec_info,show_defline);
+            // ...
+            // out<<"\n";
+            // ```
+            // The subject defline above is the part of the first x_DisplayAlnvecInfo call
+            // that precedes the HSP; the probe marks the rest of each call (the score
+            // block, the alignment and the closing blank line) without changing the
+            // written bytes.
+            for (hit, &hsp_index) in shits.iter().zip(&subject_hit_indices[&s_idx]) {
+                if let Some(probe) = probe.as_mut() {
+                    writer.flush()?;
+                    probe.begin(hsp_index);
+                }
                 write_tblastn_hsp_info(&mut writer, hit)?;
                 write_tblastn_alignment(&mut writer, hit, config)?;
                 // NCBI c++/src/objtools/align_format/showalign.cpp:3650-3668:
                 // display leaves an extra blank line after each translated HSP.
                 writeln!(writer)?;
+                if let Some(probe) = probe.as_mut() {
+                    writer.flush()?;
+                    probe.end(hsp_index);
+                }
             }
         }
         write_blastp_query_footer(

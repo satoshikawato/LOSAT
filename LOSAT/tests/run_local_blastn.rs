@@ -173,7 +173,11 @@ fn every_format_of_one_search_matches_the_cli_run_of_that_format() {
 #[test]
 fn observer_ranges_are_exact_rows_and_sections_of_the_same_hsp() {
     let inputs = Inputs::new();
-    for extra in [&[][..], &["-max_target_seqs", "1"][..], &["-task", "blastn"][..]] {
+    for extra in [
+        &[][..],
+        &["-max_target_seqs", "1"][..],
+        &["-task", "blastn"][..],
+    ] {
         let result = inputs.run(&FORMATS, extra, true);
         assert_observer_ranges(&result, [0, 1, 2], &format!("blastn {extra:?}"));
     }

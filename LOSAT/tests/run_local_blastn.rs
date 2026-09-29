@@ -283,6 +283,30 @@ fn an_invalid_query_after_the_first_batch_fails_only_where_its_batch_matters() {
     }
 }
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_seqalign.cpp:672-674
+// ```c
+//     if (hsp->score == 0) {
+//         return CRef<CSeq_align>();
+//     }
+// ```
+// The preliminary search reads the N of the subject as random bases, so seeds of the query
+// land in them; the traceback scores those HSPs 0, and no format or hit record shows them.
+#[test]
+fn hsps_of_score_zero_are_not_reported() {
+    let inputs = Inputs {
+        query: TempFasta::new("blastn_score0_query.fna", &[("q11", b"GTCTGTCACAA")]),
+        subject: TempFasta::new("blastn_score0_subject.fna", &[("sN", &[b'N'; 100])]),
+    };
+    let run = inputs.run(
+        &["6", "7"],
+        &["-task", "blastn", "-word_size", "4", "-evalue", "1e6"],
+        true,
+    );
+    assert!(run.outputs[0].is_empty(), "{:?}", run.outputs[0]);
+    assert!(String::from_utf8_lossy(&run.outputs[1]).contains("# 0 hits found"));
+    assert!(run.hits.is_empty());
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:977,989
 // ```c
 //     sv.SetCoding(CSeq_data::e_Ncbi4na);

@@ -3680,47 +3680,54 @@ fn reverse_mask_intervals(masks: &[MaskedInterval], query_length: usize) -> Vec<
 //     hitsfound = scansub(..., &scan_range[1]);
 // }
 // ```
+// The ranges of a soft-masked subject (bl2seq `-lcase_masking`) come from the inclusive
+// (from, to) pairs of its lowercase masks.
+// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:700-707
+// ```c
+//         ITERATE(CPacked_seqint::Tdata, itr, slp->GetPacked_int().Get()) {
+//     	    CSeqDB::TOffsetPair p;
+//             p.first = ((*itr)->GetFrom() > offset)? (*itr)->GetFrom() - offset : 0;
+//             p.second = MIN((*itr)->GetTo() - offset, length-1);
+//
+//             if ((*itr)->GetTo() >= offset && p.first < length) {
+//                 output.push_back(p);
+//             }
+// ```
+// The pairs are stored from `_data[1]`, but `get_data` returns `_data`, which
+// `SetupSubjects_OMF` passes as `size + 1` ranges.
+// NCBI reference: ncbi-blast/c++/include/objtools/blast/seqdb_reader/seqdb.hpp:280-282
+// ```c
+//         value_type& operator[](size_type i) { return (value_type &)_data[1+ 2*i]; }
+//
+//         value_type * get_data() const { return (value_type *) _data; }
+// ```
+// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:819-826
+// ```c
+//             s_SeqLoc2MaskedSubjRanges(masks, &*range, length,  masked_ranges);
+//             if ( !masked_ranges.empty() ) {
+//                 ...
+//                 BlastSeqBlkSetSeqRanges(subj, (SSeqRange*) masked_ranges.get_data(),
+//                                     static_cast<Uint4>(masked_ranges.size()) + 1, true, eSoftSubjMasking);
+// ```
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_util.c:211-213
+// ```c
+//     // Fill out the boundary of the sequence to compliment the masks
+//     tmp[0].left = 0;
+//     tmp[num_seq_ranges - 1].right = seq_blk->length;
+// ```
+// So range k is {`to` of mask k-1, `from` of mask k}: it starts at the last lowercase
+// letter of the previous mask (a word may start there) and ends before the next mask.
 fn build_subject_seq_ranges_from_masks(
     masks: &[MaskedInterval],
     subject_len: usize,
 ) -> Vec<(i32, i32)> {
-    if subject_len == 0 {
-        return Vec::new();
+    let mut ranges = Vec::with_capacity(masks.len() + 1);
+    let mut left = 0i32;
+    for mask in masks.iter().filter(|mask| mask.start < subject_len) {
+        ranges.push((left, mask.start as i32));
+        left = (mask.end.min(subject_len) - 1) as i32;
     }
-    if masks.is_empty() {
-        return vec![(0, subject_len as i32)];
-    }
-
-    let mut sorted = masks.to_vec();
-    sorted.sort_by_key(|m| m.start);
-
-    let mut merged: Vec<MaskedInterval> = Vec::new();
-    for mask in sorted {
-        let start = mask.start.min(subject_len);
-        let end = mask.end.min(subject_len);
-        if start >= end {
-            continue;
-        }
-        match merged.last_mut() {
-            Some(last) if start <= last.end => {
-                last.end = last.end.max(end);
-            }
-            _ => merged.push(MaskedInterval::new(start, end)),
-        }
-    }
-
-    let mut ranges: Vec<(i32, i32)> = Vec::new();
-    let mut cursor = 0usize;
-    for mask in merged {
-        if mask.start > cursor {
-            ranges.push((cursor as i32, mask.start as i32));
-        }
-        cursor = cursor.max(mask.end);
-    }
-    if cursor < subject_len {
-        ranges.push((cursor as i32, subject_len as i32));
-    }
-
+    ranges.push((left, subject_len as i32));
     ranges
 }
 
@@ -4438,6 +4445,31 @@ fn post_process_hits_and_write(
         for hsp_list in &mut hit_list.hsplist_array {
             sort_hsplist_by_evalue(hsp_list);
         }
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_seqalign.cpp:672-674
+        // ```c
+        //     if (hsp->score == 0) {
+        //         return CRef<CSeq_align>();
+        //     }
+        // ```
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_seqalign.cpp:1485-1490
+        // ```c
+        //             seqalign =
+        //                 s_BlastHSP2SeqAlign(program, hsp, query_id, subject_id,
+        //                                     query_length, subject_length);
+        //         }
+        //
+        //         if (seqalign.Empty()) continue;
+        // ```
+        // An HSP of score 0 (the traceback reads the ambiguity codes that the preliminary
+        // search read as random bases) has no Seq-align, so no format shows it, and a
+        // subject without other HSPs has no alignments.
+        for hsp_list in &mut hit_list.hsplist_array {
+            hsp_list.hsps.retain(|hsp| hsp.raw_score != 0);
+        }
+        hit_list
+            .hsplist_array
+            .retain(|hsp_list| !hsp_list.hsps.is_empty());
+        hit_list.hsplist_count = hit_list.hsplist_array.len();
     }
 
     let total_hits: usize = hit_lists
@@ -5203,7 +5235,8 @@ fn search(
     // (`NStr::HtmlDecode` in `CDeflineGenerator::GenerateDefline`, create_defline.cpp:4066),
     // which LOSAT does not reproduce (`report/defline.rs`).
     // NCBI's x_CleanAndCompress also reads past the end of some titles of punctuation
-    // (NCBI crashes), which LOSAT does not reproduce (`report/defline.rs`).
+    // (NCBI crashes when it writes the title of such a subject with hits), which LOSAT
+    // does not reproduce (`report/defline.rs`); LOSAT rejects the subject before the search.
     if output_formats.contains(&BlastnOutputFormat::Pairwise) {
         for (index, record) in subject_records.iter().enumerate() {
             let defline = match record.desc() {
@@ -5220,7 +5253,7 @@ fn search(
                 crate::report::defline::ncbi_nucleotide_title(&defline, leave_prefix).is_none()
             }) {
                 anyhow::bail!(
-                    "subject record {} has a defline of punctuation that NCBI BLAST+ reads past its end in the outfmt 0 titles (it crashes), which LOSAT does not reproduce",
+                    "subject record {} has a defline of punctuation that NCBI BLAST+ reads past its end when it writes the subject's outfmt 0 title (it crashes if the subject has hits), which LOSAT does not reproduce",
                     index + 1
                 );
             }
@@ -11640,11 +11673,18 @@ mod tests {
     //     output.push_back(p);
     // }
     // ```
+    // Each range starts at the last letter of the previous mask, as NCBI's ranges read
+    // from `TSequenceRanges::get_data` (seqdb.hpp:280-282).
     #[test]
     fn test_build_subject_seq_ranges_from_masks() {
         let masks = vec![MaskedInterval::new(2, 5), MaskedInterval::new(8, 12)];
         let ranges = build_subject_seq_ranges_from_masks(&masks, 10);
-        assert_eq!(ranges, vec![(0, 2), (5, 8)]);
+        assert_eq!(ranges, vec![(0, 2), (4, 8), (9, 10)]);
+        let masks = vec![MaskedInterval::new(0, 5)];
+        assert_eq!(
+            build_subject_seq_ranges_from_masks(&masks, 32),
+            vec![(0, 0), (4, 32)]
+        );
     }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1122-1132

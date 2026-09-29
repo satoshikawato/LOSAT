@@ -48,9 +48,10 @@
 //! capitalized. `NStr::HtmlDecode` changes only character references, which the callers
 //! reject (`has_html_character_reference`, a superset of them). The alignment heading
 //! removes the prefixes; the description table keeps them (`fLeavePrefixSuffix`,
-//! showdefline.cpp:498). For a title of commas, semicolons, tildes and spaces whose last
-//! `", "` or `"; "` is followed only by spaces and those punctuation marks, NCBI's
-//! `x_CleanAndCompress` reads past the end of the string (and crashes); `None`.
+//! showdefline.cpp:498). For some titles of commas, semicolons, tildes and spaces, NCBI's
+//! `x_CleanAndCompress` lets its count of the remaining letters wrap and reads past the
+//! end of the string (and crashes); `clean_and_compress` counts as NCBI does and gives
+//! `None` there.
 
 /// NCBI reference: c++/src/objmgr/util/create_defline.cpp:3431-3446
 /// ```c

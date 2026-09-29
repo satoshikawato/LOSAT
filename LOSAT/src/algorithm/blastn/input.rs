@@ -124,13 +124,14 @@ pub fn check_deflines(bytes: &[u8], role: &str) -> Result<()> {
 ///             warn_strm << "FASTA-Reader: Ignoring invalid " << x_NucOrProt()
 ///                 << "residues at position(s): ";
 /// ```
-/// `role` is `query` or `subject`.
+/// Text before the first defline (a byte order mark, for example) is not a sequence line;
+/// `bio` cannot read it, and the reader names it. `role` is `query` or `subject`.
 pub fn check_sequence_lines(bytes: &[u8], role: &str) -> Result<()> {
     let mut record = 0;
     for line in bytes.split(|&byte| byte == b'\n') {
         if line.starts_with(b">") {
             record += 1;
-        } else if !line.is_ascii() {
+        } else if record > 0 && !line.is_ascii() {
             bail!(
                 "{role} record {record} has a non-ASCII byte in a sequence line; NCBI BLAST+ reads it as an invalid residue, which is not supported by LOSAT's BLASTN (use IUPAC nucleotide letters)"
             );
@@ -412,6 +413,8 @@ mod tests {
     #[test]
     fn non_ascii_bytes_in_sequence_lines_are_rejected() {
         assert!(check_sequence_lines(b">q1 d\nACGT\r\nacgt\n\n>q2\nNN\n", "query").is_ok());
+        // A byte order mark before the first defline is left to the reader's rejection.
+        assert!(check_sequence_lines(b"\xef\xbb\xbf>q1\nACGT\n", "query").is_ok());
         for (bytes, record) in [
             (&b">q1\nACGT\xc2\xa0\n"[..], "query record 1"),
             (b">q1\nACGT\n>q2\nAC\n\xe3\x80\x80\n", "query record 2"),

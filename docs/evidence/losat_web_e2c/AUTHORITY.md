@@ -151,3 +151,13 @@ LOSAT は、1 つの query の表（`use_array_indexing`。query の塊が 8000 
 `slice_sweep.py`（リポジトリのゲノムから固定の seed で切り出した query 2〜20 kb と subject 5〜30 kb の組を、与えたオプションで NCBI と比べる）は、`-task blastn -subject_besthit` の 120 組で変更前に 4 組が違い、変更後は 0 組。既定、`-task blastn`、`-subject_besthit`、`-word_size 8`、`-reward 3 -penalty -4 -gapopen 10 -gapextend 3` でも 0 組。
 
 **S07++ に移したもの（TD-14）：** NCBI は複数の query を batch に分けて検索し、近似の ungapped 伸長は query の塊（batch）の端で止まる（`na_ungapped.c:164,286,317`）。最初の batch は約 5000 残基で、その後の大きさは前の batch の成功した ungapped 伸長の数で決まる（`blastn_app.cpp:261-300`、`blast_app_util.cpp:65-81`、`local_blast.cpp:301-307`）。LOSAT は全 query を 1 つの塊で検索するので、batch の境の query の端の seed で、既定のオプションでも HSP が増えうる（監査の例：5339 bp と 10 bp の 2 つの query、`-task blastn` で NCBI の 62 行に 63 行。NCBI に `BATCH_SIZE=100000000` を与えると LOSAT と同じ）。これは以前からの差で、S07+ の範囲（得点のオプションと入力の読み方）の外のエンジンの構造の変更なので、S07++ で NCBI の batch を移植する（S12 の前）。それまで、最初の batch を超える複数の query の結果は、この点で NCBI と違いうる。
+
+## L. 第 8 回の独立監査で見つかった、以前からの差
+
+| NCBI | 振る舞い | LOSAT |
+|---|---|---|
+| `blast_setup_cxx.cpp:842-847,945-950`、`blast_objmgr_tools.cpp:424-478,515-520`、`random_gen.hpp:224-241` | 予備の段階（lookup の走査、ungapped 伸長、greedy・DP の得点だけの伸長）が読む圧縮した subject（ncbi2na）では、IUPAC の曖昧な文字を、subject の長さを種にした `CRandom` から引いた、両立する塩基にする（`N` と gap は 4 つから、2〜3 塩基の記号はその中から）。traceback は blastna で、曖昧な文字をそのまま使う | 固定の対応（blastna の下位 2 ビット：Y→C、K→T、R→A、N→G…）で詰めていた。そのため、曖昧な文字の近くの seed と予備の得点が NCBI と違い、既定のオプションでも 1 つの query で HSP の有無が違った。TBLASTN が既に移植していた `CRandom`（`NcbiRandom`）を `core/blast_encoding.rs` に移して共有し（`resolve_ncbi4na_to_ncbi2na`、`encode_subject_ncbi2na_packed`）、BLASTN の subject の圧縮に使う。TBLASTN の出力は変わらない |
+| `lookup_util.c:190-203` | lookup table の大きさの見積もり（`EstimateNumTableEntries`）は、区間ごとに `right - left`（`right` は最後の文字を含む） | 区間の長さ（`end - start`、`end` は含まない）を足し、1 つ多かった。境の長さ（例：megablast の 4250 残基の query）で、NCBI と違う幅の表を選んでいた（出力の差は監査の 1380 件で見つかっていない）。`end - start - 1` にした |
+| ABI v1（plan TD-1） | S07+ の前の v1 は、thread の数を最初に確かめ、空の query に空の報告を返した | 空の query でも定義行と LOSAT の上限を調べていた。空の query では、NCBI と同じ誤り（空の subject、オプションの検査）だけを残し、空の報告を返す（`run_web_pair`） |
+
+`slice_sweep.py` に `ambiguity` の pool（EDL933 の曖昧な文字の周りの窓を subject に、その中の曖昧な文字を両立する塩基にした配列を query に）を足した。各 100 組で、変更前は既定で 1 組、`-task blastn` で 4 組、`-task blastn -word_size 7` で 5 組、`-subject_besthit` で 1 組が NCBI と違い、変更後はどれも 0 組。以前の `slice_sweep.py` の 15 のゲノムには曖昧な文字が無く、5 組は同じ配列だった（区別できる 12 にした）。

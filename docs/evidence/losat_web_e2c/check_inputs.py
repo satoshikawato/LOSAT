@@ -119,6 +119,14 @@ def make_inputs(work: Path) -> None:
     genome = lambda name: "".join(line.strip() for line in (ENGINE / "tests/fasta" / f"{name}.fasta").read_text().splitlines()[1:])  # noqa: E731
     (work / "besthit_query.fa").write_text(">bhq\n" + genome("LC738871")[80316:89722] + "\n")
     (work / "besthit_subject.fa").write_text(">bhs\n" + genome("PemoMJNVB")[306307:330257] + "\n")
+    # The eighth audit round: NCBI resolves the ambiguity codes of a subject with CRandom
+    # for the preliminary search (Sakai against EDL933, whose R at subject 1804 and K at
+    # 231204 matter).
+    genome_fna = lambda name: "".join(line.strip() for line in (ENGINE / "tests/fasta" / f"{name}.fna").read_text().splitlines()[1:])  # noqa: E731
+    sakai, edl933 = genome_fna("Sakai"), genome_fna("EDL933")
+    (work / "ambiguity_sakai_query.fa").write_text(">aq\n" + sakai[3349962:3361957] + "\n")
+    (work / "ambiguity_edl933_subject.fa").write_text(">as\n" + edl933[3423311:3428607] + "\n")
+    (work / "ambiguity_besthit_query.fa").write_text(">bq\n" + sakai[230984:231784] + "\n")
 
 
 def cases(work: Path) -> list[tuple[str, list[str], str]]:
@@ -366,6 +374,17 @@ def cases(work: Path) -> list[tuple[str, list[str], str]]:
         ("audit7.bit_score_99.fmt7", [*bits, "-outfmt", "7"], "same"),
         ("audit7.subject_besthit.prelim", [*besthit, "-outfmt", "6"], "same"),
         ("audit7.subject_besthit.prelim.fmt0", besthit, "same"),
+    ]
+    # A 451-bp subject with one Y inside a 50-bp match whose exact runs are shorter than a
+    # word (docs/evidence/losat_web_e2c/inputs/): NCBI's CRandom resolves the Y to T.
+    stored = Path(__file__).resolve().parent / "inputs"
+    amb_s = ["-subject", str(stored / "ambiguity_subject.fa")]
+    rows += [
+        ("audit8.ambiguity.minimal.query_c", ["-query", str(stored / "ambiguity_query_c.fa"), *amb_s, "-outfmt", "6"], "same"),
+        ("audit8.ambiguity.minimal.query_t", ["-query", str(stored / "ambiguity_query_t.fa"), *amb_s, "-outfmt", "6"], "same"),
+        ("audit8.ambiguity.minimal.query_t.fmt0", ["-query", str(stored / "ambiguity_query_t.fa"), *amb_s], "same"),
+        ("audit8.ambiguity.sakai_edl933.blastn", ["-query", f"{w}/ambiguity_sakai_query.fa", "-subject", f"{w}/ambiguity_edl933_subject.fa", "-task", "blastn", "-outfmt", "6"], "same"),
+        ("audit8.ambiguity.besthit_edl933", ["-query", f"{w}/ambiguity_besthit_query.fa", "-subject", "tests/fasta/EDL933.fna", "-subject_besthit", "-outfmt", "6"], "same"),
     ]
     for task in ("megablast", "blastn"):
         for gaps in (["-reward", "1", "-penalty", "-2", "-gapopen", "5", "-gapextend", "2"],

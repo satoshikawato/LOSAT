@@ -8,8 +8,12 @@ to 20 kb and a subject of 5 to 30 kb from two different genomes of `LOSAT/tests/
 runs each pair in NCBI and LOSAT with the given options and -outfmt 6, and prints each
 pair whose stdout, stderr or exit status differs. Exits 1 when any does.
 
-Usage: slice_sweep.py --bin-dir DIR --losat LOSAT --work DIR [--options "..."] [--seed N]
-                      [--cases N] [--jobs N]
+The `ambiguity` pool (the eighth audit round: NCBI resolves a subject's ambiguity codes
+with `CRandom` for the preliminary search) cuts windows of EDL933 around its ambiguity
+codes instead.
+
+Usage: slice_sweep.py --bin-dir DIR --losat LOSAT --work DIR [--pool viral|ambiguity]
+                      [--options "..."] [--seed N] [--cases N] [--jobs N]
 """
 from __future__ import annotations
 
@@ -24,13 +28,41 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "losat_web_e2a"))
 from run_oracle import ENGINE  # noqa: E402
 
+# The distinct genomes (LC738868 = MjeNMV, LC738870 = PemoMJNVA, LC738871 = PemoMJNVB,
+# LC738873 = PeseMJNV and LC738874 = MelaMJNV are the same sequences); none has an
+# ambiguity code, which the `ambiguity` pool covers with EDL933 (6641 codes).
 GENOMES = ["LC738868", "LC738869", "LC738870", "LC738871", "LC738873", "LC738874", "LC738875",
-           "PemoMJNVA", "PemoMJNVB", "MelaMJNV", "MejoMJNV", "PeseMJNV", "TrcuMJNV", "LvMJNV", "MjeNMV"]
+           "MejoMJNV", "TrcuMJNV", "LvMJNV", "MeenMJNV", "MellatMJNV"]
+COMPATIBLE = {"R": "AG", "Y": "CT", "S": "CG", "W": "AT", "K": "GT", "M": "AC", "B": "CGT",
+              "D": "AGT", "H": "ACT", "V": "ACG", "N": "ACGT"}
 
 
 def sequence(name: str) -> str:
-    lines = (ENGINE / "tests/fasta" / f"{name}.fasta").read_text().splitlines()
+    lines = (ENGINE / "tests/fasta" / name).read_text().splitlines()
     return "".join(line.strip() for line in lines[1:])
+
+
+def viral_pair(seqs: dict[str, str], rng: random.Random) -> tuple[str, str]:
+    """A query of 2 to 20 kb and a subject of 5 to 30 kb from two distinct genomes."""
+    query_genome, subject_genome = rng.sample(GENOMES, 2)
+    query_start = rng.randrange(0, len(seqs[query_genome]) - 30000)
+    subject_start = rng.randrange(0, len(seqs[subject_genome]) - 40000)
+    return (seqs[query_genome][query_start:query_start + rng.randrange(2000, 20000)],
+            seqs[subject_genome][subject_start:subject_start + rng.randrange(5000, 30000)])
+
+
+def ambiguity_pair(edl933: str, positions: list[int], rng: random.Random) -> tuple[str, str]:
+    """A subject window of EDL933 around an ambiguity code, and a query from inside it with
+    each ambiguity code replaced by a compatible base: the hits depend on how the
+    preliminary search resolves the subject's codes."""
+    centre = rng.choice(positions)
+    subject_start = max(0, centre - rng.randrange(200, 8000))
+    subject = edl933[subject_start:centre + rng.randrange(200, 8000)]
+    offset = centre - subject_start
+    query_start = max(0, offset - rng.randrange(30, 3000))
+    query = subject[query_start:offset + rng.randrange(30, 3000)]
+    query = "".join(rng.choice(COMPATIBLE[c]) if c in COMPATIBLE else c for c in query)
+    return query, subject
 
 
 def main() -> int:
@@ -42,21 +74,24 @@ def main() -> int:
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--cases", type=int, default=120)
     parser.add_argument("--jobs", type=int, default=4)
+    parser.add_argument("--pool", choices=("viral", "ambiguity"), default="viral")
     args = parser.parse_args()
     args.work.mkdir(parents=True, exist_ok=True)
-    seqs = {name: sequence(name) for name in GENOMES}
     rng = random.Random(args.seed)
+    if args.pool == "viral":
+        seqs = {name: sequence(f"{name}.fasta") for name in GENOMES}
+        pair = lambda: viral_pair(seqs, rng)  # noqa: E731
+    else:
+        edl933 = sequence("EDL933.fna")
+        positions = [index for index, c in enumerate(edl933) if c.upper() not in "ACGT"]
+        pair = lambda: ambiguity_pair(edl933, positions, rng)  # noqa: E731
     cases = []
     for index in range(args.cases):
-        query_genome, subject_genome = rng.sample(GENOMES, 2)
-        query_start = rng.randrange(0, len(seqs[query_genome]) - 30000)
-        query_length = rng.randrange(2000, 20000)
-        subject_start = rng.randrange(0, len(seqs[subject_genome]) - 40000)
-        subject_length = rng.randrange(5000, 30000)
-        query = args.work / f"q{args.seed}_{index}.fa"
-        subject = args.work / f"s{args.seed}_{index}.fa"
-        query.write_text(f">q{index}\n{seqs[query_genome][query_start:query_start + query_length]}\n")
-        subject.write_text(f">s{index}\n{seqs[subject_genome][subject_start:subject_start + subject_length]}\n")
+        query_seq, subject_seq = pair()
+        query = args.work / f"{args.pool}_q{args.seed}_{index}.fa"
+        subject = args.work / f"{args.pool}_s{args.seed}_{index}.fa"
+        query.write_text(f">q{index}\n{query_seq}\n")
+        subject.write_text(f">s{index}\n{subject_seq}\n")
         cases.append(["-query", str(query), "-subject", str(subject), *shlex.split(args.options), "-outfmt", "6"])
 
     def run(argv: list[str]) -> tuple[list[str], bool, int, int]:
@@ -71,7 +106,7 @@ def main() -> int:
             if not same:
                 differing += 1
                 print(f"DIFF\t{argv[1]}\t{argv[3]}\tncbi_lines={ncbi_lines}\tlosat_lines={our_lines}")
-    print(f"# options={args.options!r} seed={args.seed} cases={len(cases)} differing={differing}")
+    print(f"# pool={args.pool} options={args.options!r} seed={args.seed} cases={len(cases)} differing={differing}")
     return 1 if differing else 0
 
 

@@ -56,7 +56,7 @@ pub fn register(program: &str, role: u32, bytes: &[u8]) -> Result<(u32, String),
             .collect::<Result<Vec<_>, _>>()
             .map_err(|error| {
                 let unsupported = if blastn {
-                    format!(" ({})", blastn_input::TEXT_BEFORE_DEFLINE)
+                    format!(" ({})", blastn_input::UNREADABLE_FASTA)
                 } else {
                     String::new()
                 };
@@ -213,10 +213,13 @@ mod tests {
             error.contains("registered for blastp, not blastn"),
             "{error}"
         );
-        // Text before the first defline says that LOSAT does not support it; white space
-        // only is a file without records.
-        let error = register("blastn", ROLE_QUERY, b"\n>q\nACGT\n").unwrap_err();
-        assert!(error.contains("not supported by LOSAT's BLASTN"), "{error}");
+        // FASTA that bio cannot read (text before the first defline, bytes that are not
+        // UTF-8) says that LOSAT does not support it; white space only is a file without
+        // records.
+        for bytes in [&b"\n>q\nACGT\n"[..], b">q\nAC\xffGT\n"] {
+            let error = register("blastn", ROLE_QUERY, bytes).unwrap_err();
+            assert!(error.contains("not supported by LOSAT's BLASTN"), "{error}");
+        }
         let (_, response) = register("blastn", ROLE_QUERY, b" \n\t\n").unwrap();
         assert!(response.ends_with("\"records\":[]}"), "{response}");
     }

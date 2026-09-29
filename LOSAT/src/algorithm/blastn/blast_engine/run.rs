@@ -37,7 +37,7 @@ use std::sync::Arc;
 
 use crate::config::NuclScoringSpec;
 use crate::core::blast_encoding::{
-    encode_iupac_to_blastna, encode_iupac_to_ncbi2na_packed, COMPRESSION_RATIO,
+    encode_iupac_to_blastna, encode_subject_ncbi2na_packed, COMPRESSION_RATIO,
 };
 use crate::stats::length_adjustment::compute_length_adjustment_ncbi;
 
@@ -3605,7 +3605,8 @@ fn compute_lookup_query_stats(
             // num_entries += loc->ssr->right - loc->ssr->left;
             // curr_max = MAX(curr_max, loc->ssr->right);
             // ```
-            approx_entries = approx_entries.saturating_add(end.saturating_sub(start));
+            // NCBI's `right` is inclusive (the last unmasked letter), LOSAT's `end` is not.
+            approx_entries = approx_entries.saturating_add(end - start - 1);
             let abs_right = ctx_offset.saturating_add(end.saturating_sub(1));
             if abs_right > max_q_off {
                 max_q_off = abs_right;
@@ -4814,9 +4815,6 @@ pub fn run_web_pair(args: BlastnArgs, query_fasta: &str, subject_fasta: &str) ->
     // ```
     let queries = fasta_records_from_bytes(query_fasta.as_bytes()).context("query FASTA")?;
     let subjects = fasta_records_from_bytes(subject_fasta.as_bytes()).context("subject FASTA")?;
-    // The deflines that NCBI reads differently are rejected (a fail-fast fix, plan TD-1).
-    check_deflines(subject_fasta.as_bytes(), "subject")?;
-    check_deflines(query_fasta.as_bytes(), "query")?;
     // NCBI reference: ncbi-blast/c++/include/algo/blast/api/local_blast.hpp:76-78
     // ```c
     // CLocalBlast(CRef<IQueryFactory> query_factory,
@@ -4834,20 +4832,25 @@ pub fn run_web_pair(args: BlastnArgs, query_fasta: &str, subject_fasta: &str) ->
         BlastnOutputFormat::Tabular => "6".to_string(),
         BlastnOutputFormat::TabularWithComments => "7".to_string(),
     };
-    // ABI v1 is frozen (plan TD-1) except fail-fast fixes. Its checks keep the order in
-    // which S07+ added them (LOSAT's limits after NCBI's checks, then each record,
-    // residues and then letters). An empty query still gives the empty report of NCBI
-    // and of v1 before S07+, where only letters that NCBI warns about are rejected. (The
-    // later checks of `run_local` repeat these without effect.)
+    // ABI v1 is frozen (plan TD-1) except fail-fast fixes. Before S07+ it checked the
+    // thread count first (in its search pool) and gave the empty report of an empty
+    // query, as NCBI does after reading the subjects and checking the options; S07+ keeps
+    // NCBI's errors there (fail-fast) and adds its checks of the deflines, the records and
+    // LOSAT's limits only for a search.
+    crate::utils::threading::validate_threads(args.num_threads)?;
+    if queries.is_empty() {
+        check_subjects_not_empty(&subjects)?;
+        check_scoring_options(&args)?;
+        return Ok(output);
+    }
+    // The deflines that NCBI reads differently are rejected (a fail-fast fix, plan TD-1).
+    check_deflines(subject_fasta.as_bytes(), "subject")?;
+    check_deflines(query_fasta.as_bytes(), "query")?;
     if !subjects.is_empty() {
         check_scoring_options(&args)?;
         check_losat_limits(&args)?;
-        if queries.is_empty() {
-            check_residues(&subjects, "subject")?;
-        } else {
-            check_records(&subjects, "subject")?;
-            check_records(&queries, "query")?;
-        }
+        check_records(&subjects, "subject")?;
+        check_records(&queries, "query")?;
     }
     let mut stderr = std::io::stderr();
     run_local(
@@ -5467,7 +5470,7 @@ fn run_in_pool(
     let subject_packed_cache: Option<Vec<Vec<u8>>> = subject_records.as_ref().map(|subjects| {
         subjects
             .iter()
-            .map(|record| encode_iupac_to_ncbi2na_packed(record.seq()))
+            .map(|record| encode_subject_ncbi2na_packed(record.seq()))
             .collect()
     });
     let subject_blastna_cache_ref = subject_blastna_cache.as_deref();
@@ -6383,11 +6386,11 @@ fn run_in_pool(
             if let Some(packed) = packed_cache.get(s_idx) {
                 packed.as_slice()
             } else {
-                s_seq_packed_full_vec = Some(encode_iupac_to_ncbi2na_packed(s_seq_full));
+                s_seq_packed_full_vec = Some(encode_subject_ncbi2na_packed(s_seq_full));
                 s_seq_packed_full_vec.as_ref().unwrap().as_slice()
             }
         } else {
-            s_seq_packed_full_vec = Some(encode_iupac_to_ncbi2na_packed(s_seq_full));
+            s_seq_packed_full_vec = Some(encode_subject_ncbi2na_packed(s_seq_full));
             s_seq_packed_full_vec.as_ref().unwrap().as_slice()
         };
 

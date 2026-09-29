@@ -1116,6 +1116,13 @@ mod tests {
         };
         let empty_record = ">s0\n>s1\nACGTACGTACGTACGTACGTACGTACGTACGT\n";
         assert!(blastn::run_web_pair(with(&[]), "", empty_record).is_ok());
+        // An empty query gives the empty report whatever the subject's deflines or LOSAT's
+        // limits (as before S07+ and in NCBI); the serial build still checks threads first.
+        let tab_defline = ">s0\tx\nACGTACGTACGTACGTACGTACGTACGTACGT\n";
+        assert!(blastn::run_web_pair(with(&[]), "", tab_defline).is_ok());
+        assert!(blastn::run_web_pair(with(&["-evalue", "1e400"]), "", fasta).is_ok());
+        #[cfg(not(feature = "parallel"))]
+        assert!(blastn::run_web_pair(with(&["-num_threads", "2"]), "", fasta).is_err());
         let error = blastn::run_web_pair(with(&[]), fasta, empty_record).unwrap_err();
         assert!(engine_error(error).contains("subject record 1 (s0) has no residues"));
         let x_subject = ">s\nACGTXACGTACGTACGTACGTACGTACGTACGT\n";

@@ -1,5 +1,5 @@
 use super::constants::MAX_DIRECT_LOOKUP_WORD_SIZE;
-use crate::core::blast_encoding::{encode_iupac_to_ncbi2na_packed, COMPRESSION_RATIO};
+use crate::core::blast_encoding::{encode_subject_ncbi2na_packed, COMPRESSION_RATIO};
 use crate::utils::dust::MaskedInterval;
 use bio::io::fasta;
 
@@ -338,7 +338,7 @@ pub fn build_db_word_counts(
             }
         }
 
-        let packed = encode_iupac_to_ncbi2na_packed(seq);
+        let packed = encode_subject_ncbi2na_packed(seq);
         scan_subject(seq.len(), &packed);
     }
 

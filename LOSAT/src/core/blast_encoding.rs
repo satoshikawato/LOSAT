@@ -445,7 +445,150 @@ pub fn encode_iupac_to_ncbi2na(seq: &[u8]) -> Vec<u8> {
     out
 }
 
-/// Encode an ASCII sequence to packed ncbi2na (4 bases per byte, remainder count in last byte).
+/// The ncbi4na value of an IUPAC nucleotide letter, either case (bit 0 A, 1 C, 2 G, 3 T;
+/// a gap is 0 and `N` 15), or `None` for another byte.
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_objmgr_tools.cpp:424-425
+/// ```c
+/// static unsigned char ctable[16] = {0xFF, 0x00, 0x01, 0xFF, 0x02, 0xFF, 0xFF, 0xFF,
+/// 		                           0x03, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+/// ```
+pub fn iupacna_to_ncbi4na(letter: u8) -> Option<u8> {
+    Some(match letter.to_ascii_uppercase() {
+        b'A' => 1,
+        b'C' => 2,
+        b'G' => 4,
+        b'T' => 8,
+        b'M' => 3,
+        b'R' => 5,
+        b'S' => 6,
+        b'V' => 7,
+        b'W' => 9,
+        b'Y' => 10,
+        b'H' => 11,
+        b'K' => 12,
+        b'D' => 13,
+        b'B' => 14,
+        b'N' => 15,
+        b'-' => 0,
+        _ => return None,
+    })
+}
+
+// NCBI reference: c++/src/util/random_gen.cpp:98,227-230,287-308 and
+// c++/include/util/random_gen.hpp:224-241
+// ```c
+// static const size_t kStateOffset = 12;
+// m_State[0] = m_Seed = seed;
+// for (int i = 1; i < kStateSize; ++i)
+//     m_State[i] = 1103515245 * m_State[i-1] + 12345;
+// m_RJ = kStateOffset; m_RK = kStateSize - 1;
+// for (int i = 0; i < 10 * kStateSize; ++i) GetRand();
+// r = m_State[m_RK] + m_State[m_RJ--];
+// m_State[m_RK--] = r;
+// return r >> 1;
+// ```
+/// NCBI's `CRandom` (the lagged Fibonacci generator), which resolves the ambiguous
+/// letters of a subject (`resolve_ncbi4na_to_ncbi2na`).
+pub(crate) struct NcbiRandom {
+    state: [u32; 33],
+    j: usize,
+    k: usize,
+}
+
+impl NcbiRandom {
+    pub(crate) fn new(seed: u32) -> Self {
+        let mut state = [0; 33];
+        state[0] = seed;
+        for i in 1..state.len() {
+            state[i] = state[i - 1]
+                .wrapping_mul(1_103_515_245)
+                .wrapping_add(12_345);
+        }
+        let mut random = Self {
+            state,
+            j: 12,
+            k: 32,
+        };
+        for _ in 0..330 {
+            random.get_rand();
+        }
+        random
+    }
+
+    pub(crate) fn get_rand(&mut self) -> u32 {
+        let value = self.state[self.k].wrapping_add(self.state[self.j]);
+        self.state[self.k] = value;
+        self.j = if self.j == 0 { 32 } else { self.j - 1 };
+        self.k = if self.k == 0 { 32 } else { self.k - 1 };
+        value >> 1
+    }
+}
+
+/// The ncbi2na codes (0 A, 1 C, 2 G, 3 T) of an ncbi4na sequence, as NCBI makes the
+/// compressed subject that the preliminary search reads: each ambiguous letter becomes a
+/// compatible base drawn from `CRandom` seeded with the length of the sequence.
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_objmgr_tools.cpp:427-474
+/// ```c
+/// void s_Ncbi4naToNcbi2na(const string & ncbi4na, int base_length,
+///                         unsigned char * ncbi2na)
+/// {
+///     int inp_bytes   = base_length;
+///     CRandom random(base_length);
+///     ...
+///         if (c  != 0xFF) {
+///             // No ambiguities, so we can do this the easy way.
+///         	ncbi2na[i] = c;
+///
+///         } else {
+///             if (b == 0 || b == 0x0F) {
+///             	//gap or N
+///                 ncbi2na[i] = random.GetRand() & 0x3;
+///             }
+///             else {
+///     ...
+///             	int pick = random.GetRand() % bitcount;
+/// ```
+pub fn resolve_ncbi4na_to_ncbi2na(ncbi4na: &[u8]) -> Vec<u8> {
+    let mut random = NcbiRandom::new(ncbi4na.len() as u32);
+    ncbi4na
+        .iter()
+        .map(|&mask| match mask {
+            1 => 0,
+            2 => 1,
+            4 => 2,
+            8 => 3,
+            0 | 15 => (random.get_rand() & 0x3) as u8,
+            _ => {
+                let mut pick = random.get_rand() % mask.count_ones();
+                (0..4u8)
+                    .filter(|bit| mask & (1 << bit) != 0)
+                    .find(|_| {
+                        let found = pick == 0;
+                        pick = pick.wrapping_sub(1);
+                        found
+                    })
+                    .unwrap_or(0)
+            }
+        })
+        .collect()
+}
+
+/// A subject in packed ncbi2na (4 bases per byte, the remainder count in the last byte),
+/// with its ambiguous letters resolved as NCBI resolves them (`resolve_ncbi4na_to_ncbi2na`).
+/// The letters have been checked (IUPAC); another byte is read as `N`.
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_objmgr_tools.cpp:515-520
+/// ```c
+///     virtual SBlastSequence GetCompressedPlusStrand() {
+///         SBlastSequence retval(size());
+///         string ncbi4na = kEmptyStr;
+///         m_SeqVector.GetSeqData(m_SeqVector.begin(), m_SeqVector.end(), ncbi4na);
+///         s_Ncbi4naToNcbi2na(ncbi4na, size(), retval.data.get());
+///         return retval;
+/// ```
+///
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:1154-1187
 /// ```c
 /// for (i=0; i<length; i += 4) {
@@ -455,43 +598,21 @@ pub fn encode_iupac_to_ncbi2na(seq: &[u8]) -> Vec<u8> {
 /// }
 /// packed[j] |= (Uint1)(length % 4);
 /// ```
-pub fn encode_iupac_to_ncbi2na_packed(seq: &[u8]) -> Vec<u8> {
+pub fn encode_subject_ncbi2na_packed(seq: &[u8]) -> Vec<u8> {
     if seq.is_empty() {
         return Vec::new();
     }
-
-    let packed_len = seq.len() / COMPRESSION_RATIO + 1;
-    let mut packed = vec![0u8; packed_len];
-
-    let mut i = 0usize;
-    let mut byte_idx = 0usize;
-
-    while i + COMPRESSION_RATIO <= seq.len() {
-        let a = (IUPACNA_TO_BLASTNA_FULL[seq[i] as usize] & 0x03) << 6;
-        let b = (IUPACNA_TO_BLASTNA_FULL[seq[i + 1] as usize] & 0x03) << 4;
-        let c = (IUPACNA_TO_BLASTNA_FULL[seq[i + 2] as usize] & 0x03) << 2;
-        let d = (IUPACNA_TO_BLASTNA_FULL[seq[i + 3] as usize] & 0x03) << 0;
-        packed[byte_idx] = a | b | c | d;
-        byte_idx += 1;
-        i += COMPRESSION_RATIO;
+    let ncbi4na: Vec<u8> = seq
+        .iter()
+        .map(|&letter| iupacna_to_ncbi4na(letter).unwrap_or(15))
+        .collect();
+    let codes = resolve_ncbi4na_to_ncbi2na(&ncbi4na);
+    let mut packed = vec![0u8; codes.len() / COMPRESSION_RATIO + 1];
+    for (index, &code) in codes.iter().enumerate() {
+        let shift = 6 - 2 * (index % COMPRESSION_RATIO);
+        packed[index / COMPRESSION_RATIO] |= code << shift;
     }
-
-    let mut last_byte = 0u8;
-    while i < seq.len() {
-        let bit_shift = match i % COMPRESSION_RATIO {
-            0 => 6,
-            1 => 4,
-            2 => 2,
-            _ => 0,
-        };
-        let code = IUPACNA_TO_BLASTNA_FULL[seq[i] as usize] & 0x03;
-        last_byte |= code << bit_shift;
-        i += 1;
-    }
-
-    last_byte |= (seq.len() % COMPRESSION_RATIO) as u8;
-    packed[byte_idx] = last_byte;
-
+    *packed.last_mut().expect("at least one byte") |= (codes.len() % COMPRESSION_RATIO) as u8;
     packed
 }
 

@@ -130,13 +130,6 @@ pub fn check_deflines(bytes: &[u8], role: &str) -> Result<()> {
 /// `role` is `query` or `subject`.
 pub fn check_residues(records: &[fasta::Record], role: &str) -> Result<()> {
     for (index, record) in records.iter().enumerate() {
-        if record.seq().is_empty() {
-            bail!(
-                "{role} record {} ({}) has no residues; NCBI BLAST+ reports such a record differently, which is not supported by LOSAT's BLASTN",
-                index + 1,
-                record.id()
-            );
-        }
         if let Some(position) = record
             .seq()
             .iter()
@@ -155,6 +148,24 @@ pub fn check_residues(records: &[fasta::Record], role: &str) -> Result<()> {
                 position + 1
             );
         }
+    }
+    Ok(())
+}
+
+/// Rejects a record without residues: NCBI reads it without a message and reports it when
+/// it sets up the search ("Sequence contains no data"), which LOSAT does not reproduce.
+/// `role` is `query` or `subject`.
+pub fn check_records_have_residues(records: &[fasta::Record], role: &str) -> Result<()> {
+    if let Some((index, record)) = records
+        .iter()
+        .enumerate()
+        .find(|(_, record)| record.seq().is_empty())
+    {
+        bail!(
+            "{role} record {} ({}) has no residues; NCBI BLAST+ reports such a record differently, which is not supported by LOSAT's BLASTN",
+            index + 1,
+            record.id()
+        );
     }
     Ok(())
 }
@@ -244,10 +255,6 @@ mod tests {
             (">q1\nACXGT\n", "'X' at residue 3"),
             (">q1\nAC-GT\n", "'-' at residue 3"),
             (">q1\nAC GT\n", "0x20 at residue 3"),
-            (
-                ">q1 empty\n>q2\nACGT\n",
-                "query record 1 (q1) has no residues",
-            ),
         ] {
             let error = check_residues(&records(text), "query")
                 .unwrap_err()
@@ -255,6 +262,13 @@ mod tests {
             assert!(error.contains(problem), "{text:?}: {error}");
             assert!(error.contains("not supported by LOSAT"), "{error}");
         }
+        let error = check_records_have_residues(&records(">q1 empty\n>q2\nACGT\n"), "query")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("query record 1 (q1) has no residues"),
+            "{error}"
+        );
     }
 
     #[test]

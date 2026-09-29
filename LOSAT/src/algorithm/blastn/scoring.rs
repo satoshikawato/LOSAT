@@ -118,7 +118,8 @@ pub fn check_scoring_options(args: &BlastnArgs) -> anyhow::Result<()> {
 /// (after its `Query is Empty!` success, before its Karlin-Altschul table error, whose
 /// computation the range limit bounds): a reward of 0 or less (NCBI's rmblastn matrix
 /// scoring when the penalty is 0 too, otherwise no valid query), an infinite or NaN
-/// e-value, and scores whose range (reward - penalty) is above `MAX_SCORE_RANGE`, where
+/// e-value, a hit list size whose preliminary size overflows (`get_prelim_hitlist_size`),
+/// and scores whose range (reward - penalty) is above `MAX_SCORE_RANGE`, where
 /// LOSAT's Karlin-Altschul computation has not been compared with NCBI's. The limit on
 /// greedy gap costs follows the table check (`check_greedy_gap_costs`).
 pub fn check_losat_limits(args: &BlastnArgs) -> anyhow::Result<()> {
@@ -131,6 +132,12 @@ pub fn check_losat_limits(args: &BlastnArgs) -> anyhow::Result<()> {
     }
     if !args.evalue.is_finite() {
         anyhow::bail!("an infinite or NaN e-value is not supported by LOSAT's BLASTN");
+    }
+    let hitlist_size = args.max_target_seqs.unwrap_or(args.hitlist_size);
+    if super::hsp::get_prelim_hitlist_size(hitlist_size, false, true) < 1 {
+        anyhow::bail!(
+            "a -max_target_seqs of {hitlist_size}, whose preliminary hit list size overflows NCBI BLAST+'s 32-bit int (NCBI crashes), is not supported by LOSAT's BLASTN"
+        );
     }
     let range = i64::from(spec.reward) - i64::from(spec.penalty);
     if range > MAX_SCORE_RANGE {

@@ -77,7 +77,7 @@ pub fn validate_threads(requested: usize) -> Result<()> {
     #[cfg(feature = "parallel")]
     ensure!(
         requested <= rayon::max_num_threads(),
-        "requested {requested} threads exceeds Rayon maximum {}",
+        "requested {requested} threads exceeds Rayon maximum {}, which is not supported by LOSAT",
         rayon::max_num_threads()
     );
     Ok(())

@@ -258,6 +258,7 @@ fn parse_blastn_args(
         gap_open: None,
         gap_extend: None,
         // NCBI blast_options.c:46-48: kDustLevel=20, kDustWindow=64, kDustLinker=1.
+        dust_filtering: None,
         dust: crate::blastinput::value_parsers::DustSpec::Yes,
         lcase_masking: false,
         subject_besthit: false,

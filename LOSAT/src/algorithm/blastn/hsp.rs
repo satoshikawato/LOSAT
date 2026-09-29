@@ -76,9 +76,45 @@ pub enum BlastnOutputFormat {
 /// formats and specifications that NCBI supports and LOSAT does not are rejected with
 /// LOSAT's message.
 pub fn parse_blastn_output_format(spec: &str) -> anyhow::Result<BlastnOutputFormat> {
-    let choice =
-        spec.trim_matches(|c: char| matches!(c, ' ' | '\t' | '\n' | '\x0b' | '\x0c' | '\r'));
+    let is_space = |c: char| matches!(c, ' ' | '\t' | '\n' | '\x0b' | '\x0c' | '\r');
+    let choice = spec.trim_matches(is_space);
     let (choice, custom) = choice.split_once(' ').unwrap_or((choice, ""));
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2810-2825
+    // ```c
+    //         if(!custom_fmt_spec.empty()) {
+    //             if(NStr::StartsWith(custom_fmt_spec, "delim")) {
+    //                 vector <string> tokens;
+    //                 NStr::Split(custom_fmt_spec," ",tokens);
+    //                 if(tokens.size() > 0) {
+    //                     string tag;
+    //                     bool isValid = NStr::SplitInTwo(tokens[0],"=",tag,custom_delim);
+    //                     if(!isValid) {
+    //                         string msg("Delimiter format is invalid. Valid format is delim=<delimiter value>");
+    //                         NCBI_THROW(CInputException, eInvalidInput, msg);
+    //                     }
+    //                     else {
+    //                         custom_fmt_spec = NStr::Replace(custom_fmt_spec,tokens[0],"");
+    //                         custom_fmt_spec = NStr::TruncateSpaces(custom_fmt_spec);
+    //                     }
+    // ```
+    // The delimiter is checked before the format number; an empty one is the default.
+    let mut custom = custom.to_string();
+    let mut custom_delimiter = false;
+    if custom.starts_with("delim") {
+        let token = custom.split(' ').next().unwrap_or_default().to_string();
+        let Some((_, value)) = token.split_once('=') else {
+            return Err(NativeError {
+                exit: 1,
+                message: "BLAST query/options error: Delimiter format is invalid. Valid format is delim=<delimiter value>\nPlease refer to the BLAST+ user manual.\n".to_string(),
+            }
+            .into());
+        };
+        custom_delimiter = !value.is_empty();
+        custom = custom
+            .replace(&token, "")
+            .trim_matches(is_space)
+            .to_string();
+    }
     let Ok(format) = choice.parse::<i32>() else {
         return Err(NativeError {
             exit: 1,
@@ -101,9 +137,10 @@ pub fn parse_blastn_output_format(spec: &str) -> anyhow::Result<BlastnOutputForm
         7 => BlastnOutputFormat::TabularWithComments,
         _ => anyhow::bail!("output format {format} is not supported by LOSAT's BLASTN"),
     };
-    if format != BlastnOutputFormat::Pairwise && !custom.is_empty() {
+    // The specification and the delimiter count only for the tabular formats.
+    if format != BlastnOutputFormat::Pairwise && (!custom.is_empty() || custom_delimiter) {
         anyhow::bail!(
-            "the custom output format specification {custom:?} (fields or a delimiter) is not supported by LOSAT's BLASTN"
+            "the custom output format specification {spec:?} (fields or a delimiter) is not supported by LOSAT's BLASTN"
         );
     }
     Ok(format)
@@ -420,29 +457,35 @@ impl BlastnHsp {
 //     return prelim_hitlist_size;
 // }
 // ```
+/// NCBI computes the size in `Int4` (blast_hits.c:44-46), whose sums the compiled NCBI
+/// wraps: a hit list size from 2^30 to 2^31 - 51 gives 10 with gapped search, and a larger
+/// one a negative size, with which NCBI crashes (LOSAT rejects it before the search,
+/// `scoring.rs` `check_losat_limits`).
 pub fn get_prelim_hitlist_size(
     hitlist_size: usize,
     composition_based_stats: bool,
     gapped_calculation: bool,
-) -> usize {
+) -> i32 {
+    // The argument is an `int` (`CArg_Integer`); the default is 500.
+    let hitlist_size = i32::try_from(hitlist_size).unwrap_or(i32::MAX);
     let mut prelim_hitlist_size = hitlist_size;
     let adaptive_cbs = std::env::var_os("ADAPTIVE_CBS").is_some();
     if composition_based_stats {
         if adaptive_cbs {
             if hitlist_size < 1000 {
-                prelim_hitlist_size = std::cmp::max(prelim_hitlist_size + 1000, 1500);
+                prelim_hitlist_size = std::cmp::max(prelim_hitlist_size.wrapping_add(1000), 1500);
             } else {
-                prelim_hitlist_size = prelim_hitlist_size.saturating_mul(2).saturating_add(50);
+                prelim_hitlist_size = prelim_hitlist_size.wrapping_mul(2).wrapping_add(50);
             }
         } else if hitlist_size <= 500 {
             prelim_hitlist_size = 1050;
         } else {
-            prelim_hitlist_size = prelim_hitlist_size.saturating_mul(2).saturating_add(50);
+            prelim_hitlist_size = prelim_hitlist_size.wrapping_mul(2).wrapping_add(50);
         }
     } else if gapped_calculation {
         prelim_hitlist_size = std::cmp::min(
-            std::cmp::max(prelim_hitlist_size.saturating_mul(2), 10),
-            prelim_hitlist_size.saturating_add(50),
+            std::cmp::max(prelim_hitlist_size.wrapping_mul(2), 10),
+            prelim_hitlist_size.wrapping_add(50),
         );
     }
     prelim_hitlist_size
@@ -1279,6 +1322,13 @@ mod tests {
         // }
         // ```
         assert_eq!(get_prelim_hitlist_size(1, false, true), 10);
+        // NCBI's Int4 arithmetic wraps (blast_hits.c:68).
+        assert_eq!(get_prelim_hitlist_size(1 << 30, false, true), 10);
+        assert_eq!(
+            get_prelim_hitlist_size((1 << 30) - 1, false, true),
+            (1 << 30) + 49
+        );
+        assert!(get_prelim_hitlist_size(i32::MAX as usize - 49, false, true) < 0);
         assert_eq!(get_prelim_hitlist_size(30, false, true), 60);
         assert_eq!(get_prelim_hitlist_size(1000, false, true), 1050);
     }
@@ -1423,7 +1473,18 @@ mod tests {
                 )
             );
         }
-        for spec in ["5", "21", "6 delim=,", "7  qaccver"] {
+        // NCBI checks a delimiter before the format number (blast_args.cpp:2810-2825).
+        for spec in ["0 delim", "abc delim", "99 delimiter qaccver"] {
+            assert_eq!(native(spec).0, 1, "{spec:?}");
+            assert!(
+                native(spec).1.contains("Delimiter format is invalid"),
+                "{spec:?}"
+            );
+        }
+        for spec in ["0 delim=,", "6 delim=", "7 delim= "] {
+            assert!(parse_blastn_output_format(spec).is_ok(), "{spec:?}");
+        }
+        for spec in ["5", "21", "6 delim=,", "6 delimiter=;", "7  qaccver"] {
             let error = parse_blastn_output_format(spec).unwrap_err().to_string();
             assert!(
                 error.contains("not supported by LOSAT's BLASTN"),

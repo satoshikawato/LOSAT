@@ -80,7 +80,8 @@ use super::super::hsp::{
     BlastnHsp, BlastnHspList, BlastnOutputFormat, NCBI_BLASTN_VERSION,
 };
 use super::super::input::{
-    check_deflines, check_residues, is_blank, with_u_as_t, UNREADABLE_FASTA,
+    check_deflines, check_records_have_residues, check_residues, is_blank, with_u_as_t,
+    UNREADABLE_FASTA,
 };
 use super::super::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
 use super::super::lookup::{build_unmasked_ranges, reverse_complement};
@@ -4755,7 +4756,9 @@ fn parse_blastn_fasta(
     if !is_blank(bytes) {
         check_deflines(bytes, role)?;
     }
-    read_blastn_records(bytes, path, role)
+    let records = read_blastn_records(bytes, path, role)?;
+    check_records_have_residues(&records, role)?;
+    Ok(records)
 }
 
 /// ABI v1's reading of a BLASTN `-outfmt` value, which is frozen (plan TD-1): it keeps the
@@ -4804,8 +4807,15 @@ pub fn run_web_pair(args: BlastnArgs, query_fasta: &str, subject_fasta: &str) ->
     // Plan TD-1: ABI v1 is frozen except for fail-fast fixes, so its BLASTN keeps the
     // formats that it had (6 and 7) and rejects outfmt 0 with the error that it gave
     // before the engine implemented outfmt 0.
-    if v1_output_format(&outfmt)? == BlastnOutputFormat::Pairwise {
-        anyhow::bail!("unsupported BLASTN output format: 0");
+    let outfmt = match v1_output_format(&outfmt)? {
+        BlastnOutputFormat::Pairwise => anyhow::bail!("unsupported BLASTN output format: 0"),
+        BlastnOutputFormat::Tabular => "6".to_string(),
+        BlastnOutputFormat::TabularWithComments => "7".to_string(),
+    };
+    // ABI v1 checked LOSAT's limits with NCBI's checks, before its empty-query warning.
+    if queries.is_empty() && !subjects.is_empty() {
+        check_scoring_options(&args)?;
+        check_losat_limits(&args)?;
     }
     let mut stderr = std::io::stderr();
     run_local(
@@ -4875,9 +4885,10 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     let subject_bytes = read_blastn_fasta_bytes(&mut subject_file, &args.subject, "subject")?;
     drop(subject_file);
     let subjects = read_blastn_records(&subject_bytes, &args.subject, "subject")?;
-    // NCBI reads these deflines without a message; LOSAT rejects them where the search
-    // would start.
-    let subject_deflines = check_deflines(&subject_bytes, "subject");
+    // NCBI reads these deflines and records without a message; LOSAT rejects them where
+    // the search would start.
+    let subject_deflines = check_deflines(&subject_bytes, "subject")
+        .and_then(|()| check_records_have_residues(&subjects, "subject"));
     drop(subject_bytes);
     check_subjects_not_empty(&subjects)?;
     // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3456-3481
@@ -4905,15 +4916,50 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     // The output file is created here, before the options are checked, so a run that
     // stops at a check leaves an empty file; `-` is standard output.
     let mut query_file = open_blastn_input(&args.query, "query")?;
-    let out = args.out.clone().filter(|path| path.as_os_str() != "-");
-    if let Some(path) = out.as_deref() {
-        std::fs::File::create(path).map_err(|_| crate::cli::inaccessible("out", path))?;
-    }
+    // The output file is opened once, as NCBI's stream (a named pipe gives one reader one
+    // end of file).
+    let mut out_file = match args.out.as_deref().filter(|path| path.as_os_str() != "-") {
+        Some(path) => Some(std::io::BufWriter::new(
+            std::fs::File::create(path).map_err(|_| crate::cli::inaccessible("out", path))?,
+        )),
+        None => None,
+    };
     let outfmt = args.outfmt.clone();
-    let sink = out.as_deref().map_or(OutputSink::Stdout, OutputSink::File);
     let mut stderr = std::io::stderr();
-    let mut outputs = ReportOutputs::single(&outfmt, sink, &mut stderr);
-    process_options(&args, &mut outputs)?;
+    let result = {
+        let sink = match out_file.as_mut() {
+            Some(file) => OutputSink::Writer(file),
+            None => OutputSink::Stdout,
+        };
+        let mut outputs = ReportOutputs::single(&outfmt, sink, &mut stderr);
+        search_cli(
+            args,
+            query_file,
+            &subjects,
+            subject_deflines,
+            &mut outputs,
+            output_formats,
+        )
+    };
+    // What was written before an error (such as the outfmt 0 prolog) stays in the file.
+    let flushed = out_file.as_mut().map_or(Ok(()), std::io::Write::flush);
+    result?;
+    flushed.context("failed to write the output")
+}
+
+/// The part of `run` after the output is opened: NCBI's filtering handler (`-dust`), the
+/// processing of the options, `Query is Empty!`, LOSAT's deferred checks of the subjects,
+/// and the search.
+fn search_cli(
+    mut args: BlastnArgs,
+    mut query_file: std::fs::File,
+    subjects: &[bio::io::fasta::Record],
+    subject_deflines: Result<()>,
+    outputs: &mut ReportOutputs<'_>,
+    output_formats: Vec<BlastnOutputFormat>,
+) -> Result<()> {
+    args.resolve_dust()?;
+    process_options(&args, outputs)?;
     // NCBI reference: ncbi-blast/c++/src/app/blast/blastn_app.cpp:209-212
     // ```c
     //         if(IsIStreamEmpty(m_CmdLineArgs->GetInputStream())) {
@@ -4955,7 +5001,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     // sequences = input->GetAllSeqs(*scope);
     // ```
     let queries = parse_blastn_fasta(&query_bytes, &args.query, "query")?;
-    search(args, &queries, &subjects, &mut outputs, output_formats)
+    search(args, &queries, subjects, outputs, output_formats)
 }
 
 /// NCBI's error for a subject file without records, raised when it reads the subjects
@@ -5046,13 +5092,14 @@ fn process_options(args: &BlastnArgs, outputs: &mut ReportOutputs<'_>) -> Result
 /// `-query` and `-subject` values of `args` are used only as display names. The hit
 /// records (`ReportOutputs::hits`) are not produced yet.
 pub fn run_local(
-    args: BlastnArgs,
+    mut args: BlastnArgs,
     query_records: &[bio::io::fasta::Record],
     subject_records: &[bio::io::fasta::Record],
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
     let output_formats = parse_output_formats(outputs.formats.iter().map(|format| format.outfmt))?;
     check_subjects_not_empty(subject_records)?;
+    args.resolve_dust()?;
     process_options(&args, outputs)?;
     search(
         args,
@@ -5081,6 +5128,7 @@ fn search(
             .write_all(b"Warning: [blastn] Query is Empty!\n")?;
         return Ok(());
     }
+    check_records_have_residues(subject_records, "subject")?;
     // LOSAT's limits come where NCBI starts the search, after its checks and its
     // `Query is Empty!` success.
     check_losat_limits(&args)?;
@@ -5096,15 +5144,19 @@ fn search(
     //     if (chunk_sz_str && !NStr::IsBlank(chunk_sz_str)) {
     //         retval = NStr::StringToInt(chunk_sz_str);
     // ```
-    // LOSAT follows NCBI's query batches without these variables.
+    // LOSAT follows NCBI's query batches without these variables (a blank CHUNK_SIZE is
+    // none).
     for variable in ["BATCH_SIZE", "CHUNK_SIZE"] {
-        if std::env::var_os(variable).is_some() {
+        if std::env::var_os(variable)
+            .is_some_and(|value| variable == "BATCH_SIZE" || !is_blank(value.as_encoded_bytes()))
+        {
             anyhow::bail!(
                 "the environment variable {variable}, which changes NCBI BLAST+'s query batches, is not supported by LOSAT's BLASTN"
             );
         }
     }
     check_residues(query_records, "query")?;
+    check_records_have_residues(query_records, "query")?;
     let subjects_read = with_u_as_t(subject_records);
     let queries_read = with_u_as_t(query_records);
     let subject_records = subjects_read.as_deref().unwrap_or(subject_records);
@@ -5928,7 +5980,9 @@ fn run_in_pool(
     //     return prelim_hitlist_size;
     // }
     // ```
-    let prelim_hitlist_size = get_prelim_hitlist_size(hitlist_size, false, true);
+    let prelim_hitlist_size =
+        usize::try_from(get_prelim_hitlist_size(hitlist_size, false, true))
+            .map_err(|_| anyhow::anyhow!("the preliminary hit list size overflows"))?;
 
     // Debug mode: set BLEMIR_DEBUG=1 to enable, BLEMIR_DEBUG_WINDOW="q_start-q_end,s_start-s_end" to focus on a region
     let debug_mode = std::env::var("BLEMIR_DEBUG").is_ok();

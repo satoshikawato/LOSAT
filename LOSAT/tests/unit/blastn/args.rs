@@ -160,7 +160,7 @@ fn given_scores_replace_the_task_defaults_even_when_equal_to_megablast_ones() {
 fn test_dust_options() {
     // Note: -dust is a bool flag, so we can't set it to false directly
     // We'll test the other dust options instead
-    let args = parse_args(&[
+    let mut args = parse_args(&[
         "-query",
         "query.fasta",
         "-subject",
@@ -168,14 +168,15 @@ fn test_dust_options() {
         "-dust",
         "30 32 2",
     ]);
-    // dust defaults to true
+    // NCBI reads -dust in its filtering handler (`resolve_dust`); dust defaults to true.
+    args.resolve_dust().unwrap();
     assert_eq!(args.dust.params(), Some((30, 32, 2)));
 }
 
 #[test]
 fn options_without_an_ncbi_blastn_equivalent_are_rejected() {
-    // AGENTS.md rule 5: NCBI blastn has no -verbose, and -limit_lookup,
-    // -max_db_word_count and -min_hit_length are magicblast's.
+    // AGENTS.md rule 5: NCBI blastn has none of these (-limit_lookup and
+    // -max_db_word_count are magicblast's; NCBI has no -verbose or -min_hit_length).
     for extra in [
         &["-verbose"][..],
         &["-limit_lookup"],

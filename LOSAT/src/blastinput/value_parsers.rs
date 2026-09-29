@@ -42,23 +42,73 @@ impl DustSpec {
     }
 }
 
+/// A `-dust` value as NCBI reads it: `no`, `yes`, or three signed decimal numbers separated
+/// by single spaces. The error is NCBI's message; the masker replaces values out of its
+/// ranges with its defaults (`CSymDustMasker`, `utils/dust.rs`), after NCBI's conversion
+/// to `Uint4` (`as u32`).
+///
+/// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:375-384
+/// ```c
+/// CFilteringArgs::x_TokenizeFilteringArgs(const string& filtering_args,
+///                                         vector<string>& output) const
+/// {
+///     output.clear();
+///     NStr::Split(filtering_args, " ", output);
+///     if (output.size() != 3) {
+///         NCBI_THROW(CInputException, eInvalidInput,
+///                    "Invalid number of arguments to filtering option");
+///     }
+/// }
+/// ```
+/// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:410-426
+/// ```c
+///         if ( !m_QueryIsProtein && args[kArgDustFiltering]) {
+///             const string& dust_opts = args[kArgDustFiltering].AsString();
+///             if (dust_opts == kDfltArgNoFiltering) {
+///                 opt.SetDustFiltering(false);
+///             } else if (dust_opts == kDfltArgApplyFiltering) {
+///                 opt.SetDustFiltering(true);
+///             } else {
+///                 x_TokenizeFilteringArgs(dust_opts, tokens);
+///                 opt.SetDustFilteringLevel(NStr::StringToInt(tokens[0]));
+///                 opt.SetDustFilteringWindow(NStr::StringToInt(tokens[1]));
+///                 opt.SetDustFilteringLinker(NStr::StringToInt(tokens[2]));
+///             }
+///         }
+///     } catch (const CStringException& e) {
+///         if (e.GetErrCode() == CStringException::eConvert) {
+///             NCBI_THROW(CInputException, eInvalidInput,
+///                        "Invalid input for filtering parameters");
+/// ```
+/// NCBI reference: c++/src/algo/blast/api/blast_objmgr_tools.cpp:195-198
+/// ```c
+///                 Blast_FindDustFilterLoc(*m_QueryVector,
+///                     static_cast<Uint4>(m_Options->GetDustFilteringLevel()),
+///                     static_cast<Uint4>(m_Options->GetDustFilteringWindow()),
+///                     static_cast<Uint4>(m_Options->GetDustFilteringLinker()));
+/// ```
+/// `NStr::Split` keeps the empty fields between adjacent spaces, and `NStr::StringToInt`
+/// reads what `i32::from_str` reads.
 pub fn parse_dust_filtering(value: &str) -> Result<DustSpec, String> {
     match value {
         "no" => return Ok(DustSpec::No),
         "yes" => return Ok(DustSpec::Yes),
         _ => {}
     }
-    let tokens: Vec<_> = value.split_whitespace().collect();
+    let tokens: Vec<_> = value.split(' ').collect();
     if tokens.len() != 3 {
-        return Err("DUST requires no, yes, or LEVEL WINDOW LINKER".into());
+        return Err("Invalid number of arguments to filtering option".into());
     }
-    let level = nonnegative_i32(tokens[0])? as u32;
-    let window = positive_usize(tokens[1])?;
-    let linker = nonnegative_i32(tokens[2])? as usize;
+    let number = |token: &str| {
+        token
+            .parse::<i32>()
+            .map_err(|_| "Invalid input for filtering parameters".to_string())
+    };
+    let (level, window, linker) = (number(tokens[0])?, number(tokens[1])?, number(tokens[2])?);
     Ok(DustSpec::Parameters {
-        level,
-        window,
-        linker,
+        level: level as u32,
+        window: window as u32 as usize,
+        linker: linker as u32 as usize,
     })
 }
 
@@ -187,13 +237,42 @@ pub fn ncbi_double(value: &str, program: &str) -> Result<f64, String> {
         return Err("expected a number".into());
     }
     value.parse::<f64>().map_err(|_| {
-        format!("expected a decimal number (other forms that NCBI BLAST+ reads are not supported by LOSAT's {program})")
+        format!("expected a decimal number (other forms, which NCBI BLAST+ may read, are not supported by LOSAT's {program})")
     })
+}
+
+/// An integer argument with a constraint: NCBI's constraint reads the value again with
+/// `NStr::StringToDouble`, which does not read a `0x` prefix without digits (the only form
+/// that `ncbi_integer` reads and `strtod` does not end at), so the value is illegal.
+///
+/// NCBI reference: c++/include/algo/blast/blastinput/blast_input_aux.hpp:110-113
+/// ```c
+///     /// Overloaded method from CArgAllow
+///     virtual bool Verify(const string& value) const {
+///         return NStr::StringToDouble(value) >= m_MinValue;
+///     }
+/// ```
+/// NCBI reference: c++/src/corelib/ncbiargs.cpp:1231-1243
+/// ```c
+///     if ( m_Constraint ) {
+///         bool err = false;
+///         try {
+///             bool check = m_Constraint->Verify(value);
+///     ...
+///         } catch (...) {
+///             err = true;
+///         }
+/// ```
+fn ncbi_constrained_integer(value: &str) -> Result<i32, String> {
+    if value.eq_ignore_ascii_case("0x") {
+        return Err("Illegal value".into());
+    }
+    ncbi_integer(value)
 }
 
 /// A BLASTN integer argument of `CArg_Integer` with NCBI's lower bound (`at_least`).
 fn blastn_integer_at_least(value: &str, at_least: i32) -> Result<i32, String> {
-    let n = ncbi_integer(value)?;
+    let n = ncbi_constrained_integer(value)?;
     if n < at_least {
         return Err(format!("expected an integer >= {at_least}"));
     }
@@ -224,7 +303,7 @@ pub fn blastn_reward(value: &str) -> Result<i32, String> {
 }
 /// A BLASTN penalty: 0 or less, as NCBI's argument (blast_args.cpp:651-652).
 pub fn blastn_penalty(value: &str) -> Result<i32, String> {
-    let n = ncbi_integer(value)?;
+    let n = ncbi_constrained_integer(value)?;
     if n > 0 {
         return Err("expected an integer <= 0".into());
     }
@@ -300,6 +379,34 @@ pub fn genetic_code(value: &str) -> Result<u8, String> {
 // const string kArgQuery("query");
 // const string kArgSubject("subject");
 // ```
+/// A BLASTN output file: a name shorter than 256 bytes, as NCBI's constraint; `-` is
+/// standard output, and a file that cannot be created is reported when it is opened
+/// (`blastn/blast_engine/run.rs`).
+///
+/// NCBI reference: c++/include/algo/blast/blastinput/blast_input_aux.hpp:79-87
+/// ```c
+///     static constexpr Uint4 kDfltMaxLength = 256;
+///
+///     CArgAllowMaximumFileNameLength(Uint4 max = kDfltMaxLength) : m_MaxLength(max) {}
+///
+/// protected:
+///     /// Overloaded method from CArgAllow
+///     virtual bool Verify(const string& value) const {
+///         CFile fname(value);
+///         return fname.GetName().size() < m_MaxLength;
+/// ```
+pub fn blastn_output_path() -> impl clap::builder::TypedValueParser<Value = PathBuf> {
+    use clap::builder::TypedValueParser;
+    clap::builder::OsStringValueParser::new().try_map(|value| {
+        let path = PathBuf::from(value);
+        let name = path.file_name().map_or(0, |name| name.len());
+        if name >= 256 {
+            return Err("Illegal value, expected file name length < 256".to_string());
+        }
+        Ok(path)
+    })
+}
+
 /// A BLASTN input file: any value, as NCBI's `eInputFile` argument; `-` is standard input
 /// and a file that cannot be opened is reported when it is opened (`blastn/blast_engine/run.rs`).
 ///

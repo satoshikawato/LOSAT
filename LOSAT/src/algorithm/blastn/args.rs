@@ -111,7 +111,7 @@ pub struct BlastnArgs {
     // Task resolution owns this internal value; no CLI override.
     #[arg(skip = 0usize)]
     pub min_diag_separation: usize,
-    #[arg(long, value_name = "PATH")]
+    #[arg(long, value_name = "PATH", value_parser = blastn_output_path())]
     pub out: Option<PathBuf>,
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:648-660,674-679
     // ```c
@@ -164,7 +164,15 @@ pub struct BlastnArgs {
     // NCBI blast_args.cpp:410-420: opt.SetDustFiltering(false/true);
     // opt.SetDustFilteringLevel(...); opt.SetDustFilteringWindow(...);
     // opt.SetDustFilteringLinker(...);
-    #[arg(long, default_value = "20 64 1", value_parser = parse_dust_filtering, help = "DUST: no, yes, or LEVEL WINDOW LINKER")]
+    // NCBI reads -dust in its filtering handler, after the output is opened
+    // (`resolve_dust`); an omitted value keeps the default (20 64 1).
+    #[arg(
+        long = "dust",
+        value_name = "DUST",
+        help = "DUST: no, yes, or LEVEL WINDOW LINKER (default: 20 64 1)"
+    )]
+    pub dust_filtering: Option<String>,
+    #[arg(skip = DustSpec::Yes)]
     pub dust: DustSpec,
     // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:1939-1942
     // ```c
@@ -216,4 +224,28 @@ pub struct BlastnArgs {
     // are set (`blastn/hsp.rs` `parse_blastn_output_format`).
     #[arg(long, default_value = "0", value_name = "SPEC")]
     pub outfmt: String,
+}
+
+impl BlastnArgs {
+    /// Reads the `-dust` value (`parse_dust_filtering`) where NCBI's filtering handler reads
+    /// it, with NCBI's error.
+    ///
+    /// NCBI reference: c++/src/app/blast/blast_app_util.hpp:172-175
+    /// ```c
+    ///     catch (const blast::CInputException& e) {                               \
+    ///         LOG_POST(Error << "BLAST query/options error: " << e.GetMsg());     \
+    ///         LOG_POST(Error << "Please refer to the BLAST+ user manual.");       \
+    ///         exit_code = BLAST_INPUT_ERROR;                                      \
+    /// ```
+    pub fn resolve_dust(&mut self) -> anyhow::Result<()> {
+        if let Some(value) = self.dust_filtering.take() {
+            self.dust = parse_dust_filtering(&value).map_err(|message| crate::cli::NativeError {
+                exit: 1,
+                message: format!(
+                    "BLAST query/options error: {message}\nPlease refer to the BLAST+ user manual.\n"
+                ),
+            })?;
+        }
+        Ok(())
+    }
 }

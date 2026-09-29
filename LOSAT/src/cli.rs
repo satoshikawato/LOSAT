@@ -362,11 +362,15 @@ impl std::error::Error for NativeError {}
 //             "File is not accessible",AsString()));
 // ```
 pub fn inaccessible(name: &str, path: &std::path::Path) -> anyhow::Error {
+    let value = if path.as_os_str().is_empty() {
+        String::new()
+    } else {
+        format!(":  `{}'", path.display())
+    };
     NativeError {
         exit: 1,
         message: format!(
-            "Command line argument error: Argument \"{name}\". File is not accessible:  `{path}'\n",
-            path = path.display()
+            "Command line argument error: Argument \"{name}\". File is not accessible{value}\n"
         ),
     }
     .into()

@@ -153,19 +153,32 @@ fn filtering_has_exactly_one_shared_value_grammar() {
     ] {
         assert!(parse_seg_filtering(bad).is_err(), "{bad}");
     }
+    // NCBI blast_args.cpp:375-384,410-426: single spaces separate three signed numbers;
+    // the masker replaces values out of range with its defaults (utils/dust.rs).
     for bad in [
         "",
         "true",
         "false",
+        "Yes",
         "0",
         "20 64",
         "20 64 1 2",
+        "20  64 1",
+        " 20 64 1",
+        "20 64 1 ",
+        "20\u{a0}64 1",
         "x 64 1",
-        "20 0 1",
+        "0x14 64 1",
         "NaN 64 1",
-        "20 64 -1",
     ] {
         assert!(parse_dust_filtering(bad).is_err(), "{bad}");
+    }
+    for (spec, params) in [
+        ("-1 64 1", (u32::MAX, 64, 1)),
+        ("20 0 1", (20, 0, 1)),
+        ("20 64 -1", (20, 64, u32::MAX as usize)),
+    ] {
+        assert_eq!(parse_dust_filtering(spec).unwrap().params(), Some(params));
     }
     for program in ["blastp", "tblastx"] {
         for value in ["no", "yes", "12 2.2 2.5"] {
@@ -347,6 +360,25 @@ fn numeric_values_are_validated_before_io() {
         (Some(2), Some(5), Some(2), Some(11))
     );
     assert_eq!(args.max_target_seqs, Some(16));
+    // A constrained argument is read again with NStr::StringToDouble, which does not read
+    // a bare 0x (blast_input_aux.hpp:110-113); -gapopen has no constraint.
+    for (key, value) in [("-reward", "0x"), ("-penalty", "0X"), ("-word_size", "0x")] {
+        assert!(
+            parse("blastn", &["-outfmt", "6", key, value]).is_err(),
+            "{key} {value}"
+        );
+    }
+    let Commands::Blastn(args) = parse("blastn", &["-outfmt", "6", "-gapopen", "0x"])
+        .unwrap()
+        .command
+    else {
+        unreachable!("blastn")
+    };
+    assert_eq!(args.gap_open, Some(0));
+    // NCBI blast_input_aux.hpp:79-87: an -out file name is shorter than 256 bytes.
+    let long = format!("dir/{}", "o".repeat(256));
+    assert!(parse("blastn", &["-outfmt", "6", "-out", &long]).is_err());
+    parse("blastn", &["-outfmt", "6", "-out", &long[..long.len() - 1]]).unwrap();
     for (key, value) in [
         ("-max_target_seqs", "0x"),
         ("-max_target_seqs", "+0x1"),

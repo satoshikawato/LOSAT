@@ -28,6 +28,9 @@ pub(crate) struct DisplayMasks<'a> {
 
 /// Every HSP of the final hit list, in the order of the tabular formats (queries, then the
 /// subjects and HSPs of each query as ranked), with its displayed rows.
+// Kept out of line: this runs only for outfmt 0 or hit records, and inlining it into the
+// shared post-processing makes every BLASTN run compile it in Wasm hosts.
+#[inline(never)]
 pub(crate) fn pairwise_hits(
     hit_lists: &[Option<BlastnHitList>],
     queries: &[fasta::Record],

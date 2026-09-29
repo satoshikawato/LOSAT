@@ -1953,6 +1953,9 @@ fn write_blastn_final_footer<W: Write>(
 ///     ...
 ///     x_PrintOneQueryFooter(*results.GetAncillaryData());
 /// ```
+// Kept out of line: this runs only for outfmt 0 or hit records, and inlining it into the
+// shared post-processing makes every BLASTN run compile it in Wasm hosts.
+#[inline(never)]
 pub fn write_blastn_pairwise_report<W: Write>(
     hits: &[PairwiseHit],
     writer: &mut W,

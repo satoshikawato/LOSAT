@@ -4097,6 +4097,9 @@ struct BlastnReportInputs<'a> {
 }
 
 /// The per-query and run-level data of the pairwise report.
+// Kept out of line: this runs only for outfmt 0 or hit records, and inlining it into the
+// shared post-processing makes every BLASTN run compile it in Wasm hosts.
+#[inline(never)]
 fn blastn_pairwise_report(
     report: &BlastnReportInputs<'_>,
     query_karlin: &[Option<KarlinParams>],
@@ -4197,6 +4200,9 @@ fn blastn_pairwise_report(
 /// LOSAT does not count. So the batches after the first are known only when their queries
 /// are all invalid (every such batch is then invalid) or all valid; otherwise the report
 /// fails instead of guessing.
+// Kept out of line: this runs only for outfmt 0 or hit records, and inlining it into the
+// shared post-processing makes every BLASTN run compile it in Wasm hosts.
+#[inline(never)]
 fn unsearched_queries(
     report: &BlastnReportInputs<'_>,
     query_karlin: &[Option<KarlinParams>],

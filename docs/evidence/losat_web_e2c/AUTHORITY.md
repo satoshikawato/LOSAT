@@ -161,3 +161,13 @@ LOSAT は、1 つの query の表（`use_array_indexing`。query の塊が 8000 
 | ABI v1（plan TD-1） | S07+ の前の v1 は、thread の数を最初に確かめ、空の query に空の報告を返した | 空の query でも定義行と LOSAT の上限を調べていた。空の query では、NCBI と同じ誤り（空の subject、オプションの検査）だけを残し、空の報告を返す（`run_web_pair`） |
 
 `slice_sweep.py` に `ambiguity` の pool（EDL933 の曖昧な文字の周りの窓を subject に、その中の曖昧な文字を両立する塩基にした配列を query に）を足した。各 100 組で、変更前は既定で 1 組、`-task blastn` で 4 組、`-task blastn -word_size 7` で 5 組、`-subject_besthit` で 1 組が NCBI と違い、変更後はどれも 0 組。以前の `slice_sweep.py` の 15 のゲノムには曖昧な文字が無く、5 組は同じ配列だった（区別できる 12 にした）。
+
+## M. 第 9 回の独立監査で見つかった、以前からの差
+
+| NCBI | 振る舞い | LOSAT |
+|---|---|---|
+| `fasta.cpp:350-362,1094-1140` | `>?` で始まる行は定義行ではなく、配列の gap の行（`>?100` は 100 文字の gap、`>?unk100` は長さの分からない gap、`>?`・`>?abc` は警告して 1 文字）。`>?_` は接頭辞を除いた定義行 | `bio` は `?100` などの名前の新しいレコードにし、HSP の subject と座標が NCBI と違った。`check_deflines` が `?` で始まる定義行を拒否する（TD-12 と同じく、NCBI の読み込み器を移植せずに明示的に拒否する） |
+| `fasta.cpp:670-686,1624-1643`、`blast_fasta_input.cpp:329-330` | `>` の後の文字列が 20 バイトより長く、最後の 20 バイトがすべて A/C/G/T（大文字・小文字）なら、そのレコードを読む時点で `FASTA-Reader: Title ends with at least 20 valid nucleotide characters.  Was the sequence accidentally put in the title line?` を出す（CRLF の CR は除き、行末の空白は残す。2.17.0 で確認） | 出していなかった（stderr だけが違った）。`input.rs` の `write_title_warnings` が、subject を読む時点（CLI の `run`、`run_local` の始め）と query を読む時点（`search` の「Query is Empty!」の後）に出す。`bio` は行末の空白を捨てるので、行末に空白があり、それを除くと警告の条件を満たす定義行は拒否する |
+| `blast_filter.c:1081-1115`、`blast_setup.c:633-653` | 最初の文字から最後の文字まで覆われた context は、lookup の区間 `(end + 1, end)` を持ち、見積もりは 1 つ減り、`end` は `max_off` に入る。区間は ungapped block が context を無効にする前に作るので、無効な context も数える | 覆われた context を数えていなかった。`compute_lookup_query_stats` を NCBI に合わせた（出力の差は監査で見つかっていない） |
+
+ABI v1 は `run_local` で CLI と同じエンジンを使うので、エンジンを NCBI に合わせる修正（例：§L の曖昧な文字）は v1 の検索結果にも及ぶ。計画の TD-1 に、凍結するのは v1 の引数・形式・誤りの扱いであることを書き足した。

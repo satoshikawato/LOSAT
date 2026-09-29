@@ -127,6 +127,19 @@ def make_inputs(work: Path) -> None:
     (work / "ambiguity_sakai_query.fa").write_text(">aq\n" + sakai[3349962:3361957] + "\n")
     (work / "ambiguity_edl933_subject.fa").write_text(">as\n" + edl933[3423311:3428607] + "\n")
     (work / "ambiguity_besthit_query.fa").write_text(">bq\n" + sakai[230984:231784] + "\n")
+    # The ninth audit round: NCBI reads a line that starts with ">?" as a gap in the
+    # sequence (">?_" as a defline without the prefix), and warns about a title that ends
+    # with 20 nucleotide letters.
+    (work / "gap_line_subject.fa").write_text(">s1\n" + edl933[99000:101000] + "\n>?100\n" + edl933[101000:103000] + "\n")
+    (work / "gap_span_query.fa").write_text(">q1\n" + edl933[100500:101500] + "\n")
+    (work / "gap_line_query.fa").write_text(">q1\n" + edl933[100500:101000] + "\n>?100\n" + edl933[101000:101500] + "\n")
+    (work / "underscore_query.fa").write_text(">?_abc\n" + q + "\n")
+    nucleotides = "ACGTACGTACGTACGTACGTA"
+    (work / "title_nucleotides.fa").write_text(f">q1 {nucleotides}\n{q}\n")
+    (work / "title_nucleotides_crlf.fa").write_text(f">q1 {nucleotides}\r\n{q}\r\n")
+    (work / "title_nucleotides_space.fa").write_text(f">q1 {nucleotides} \n{q}\n")
+    (work / "id_nucleotides.fa").write_text(f">{nucleotides}\n{q}\n")
+    (work / "title_nucleotides_subject.fa").write_text(f">msA {nucleotides}\n" + subject.split("\n", 1)[1])
 
 
 def cases(work: Path) -> list[tuple[str, list[str], str]]:
@@ -385,6 +398,18 @@ def cases(work: Path) -> list[tuple[str, list[str], str]]:
         ("audit8.ambiguity.minimal.query_t.fmt0", ["-query", str(stored / "ambiguity_query_t.fa"), *amb_s], "same"),
         ("audit8.ambiguity.sakai_edl933.blastn", ["-query", f"{w}/ambiguity_sakai_query.fa", "-subject", f"{w}/ambiguity_edl933_subject.fa", "-task", "blastn", "-outfmt", "6"], "same"),
         ("audit8.ambiguity.besthit_edl933", ["-query", f"{w}/ambiguity_besthit_query.fa", "-subject", "tests/fasta/EDL933.fna", "-subject_besthit", "-outfmt", "6"], "same"),
+        ("audit9.gap_line.subject", ["-query", f"{w}/gap_span_query.fa", "-subject", f"{w}/gap_line_subject.fa", "-outfmt", "6"], "losat-rejects"),
+        ("audit9.gap_line.query", ["-query", f"{w}/gap_line_query.fa", *multi_s, "-outfmt", "6"], "losat-rejects"),
+        ("audit9.gap_line.underscore", ["-query", f"{w}/underscore_query.fa", *multi_s, "-outfmt", "6"], "losat-rejects"),
+        ("audit9.title_warning.query.fmt0", ["-query", f"{w}/title_nucleotides.fa", *multi_s], "same"),
+        ("audit9.title_warning.query.fmt6", ["-query", f"{w}/title_nucleotides.fa", *multi_s, "-outfmt", "6"], "same"),
+        ("audit9.title_warning.query.fmt7", ["-query", f"{w}/title_nucleotides.fa", *multi_s, "-outfmt", "7"], "same"),
+        ("audit9.title_warning.crlf", ["-query", f"{w}/title_nucleotides_crlf.fa", *multi_s, "-outfmt", "6"], "same"),
+        ("audit9.title_warning.id", ["-query", f"{w}/id_nucleotides.fa", *multi_s, "-outfmt", "6"], "same"),
+        ("audit9.title_warning.trailing_space", ["-query", f"{w}/title_nucleotides_space.fa", *multi_s, "-outfmt", "6"], "losat-rejects"),
+        ("audit9.title_warning.subject", ["-query", f"{F}/multi_query.fasta", "-subject", f"{w}/title_nucleotides_subject.fa", "-outfmt", "6"], "same"),
+        ("audit9.title_warning.subject.penalty_0", ["-query", f"{F}/multi_query.fasta", "-subject", f"{w}/title_nucleotides_subject.fa", "-penalty", "0"], "same-error"),
+        ("audit9.title_warning.query.empty_subject", ["-query", f"{w}/title_nucleotides.fa", "-subject", f"{w}/empty.fa"], "same-error"),
     ]
     for task in ("megablast", "blastn"):
         for gaps in (["-reward", "1", "-penalty", "-2", "-gapopen", "5", "-gapextend", "2"],

@@ -71,6 +71,7 @@ pub fn register(program: &str, role: u32, bytes: &[u8]) -> Result<(u32, String),
     // BLASTN rejects the inputs that NCBI BLAST+ reads differently from bio.
     if blastn {
         blastn_input::check_deflines(bytes, role_name)
+            .and_then(|()| blastn_input::check_sequence_lines(bytes, role_name))
             .and_then(|()| blastn_input::check_residues(&records, role_name))
             .and_then(|()| blastn_input::check_records_have_residues(&records, role_name))
             .map_err(|error| format!("{error:#}"))?;

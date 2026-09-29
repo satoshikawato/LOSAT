@@ -87,8 +87,15 @@ pub fn check_deflines(bytes: &[u8], role: &str) -> Result<()> {
             continue;
         };
         record += 1;
+        // NCBI keeps the white space at the end of a line (it strips the carriage return
+        // of CRLF), which `bio` drops; it matters only to the title warning.
+        let raw = defline.strip_suffix(b"\r").unwrap_or(defline);
         let defline = defline.trim_ascii_end();
-        let problem = if defline.is_empty() {
+        let problem = if defline.first() == Some(&b'?') {
+            "starts with '?' (NCBI BLAST+ reads '>?' as a gap in the sequence, and '>?_' as a defline without the prefix)".to_string()
+        } else if raw.len() != defline.len() && ends_with_nucleotides(defline) {
+            "ends with white space after 20 nucleotide letters (NCBI BLAST+ warns about the letters only without the white space)".to_string()
+        } else if defline.is_empty() {
             "is empty".to_string()
         } else if defline.first().is_some_and(u8::is_ascii_whitespace) {
             "starts with white space".to_string()
@@ -102,6 +109,59 @@ pub fn check_deflines(bytes: &[u8], role: &str) -> Result<()> {
         bail!(
             "{role} record {record} has a defline that {problem}; NCBI BLAST+ reads such a defline differently, which is not supported by LOSAT's BLASTN (use ASCII deflines without control characters)"
         );
+    }
+    Ok(())
+}
+
+/// Whether the text of a defline (after `>`) makes NCBI's reader warn that the title ends
+/// with nucleotides: it is longer than 20 bytes and its last 20 are unambiguous letters.
+///
+/// NCBI reference: c++/src/objtools/readers/fasta.cpp:1624-1643
+/// ```c
+///     const static size_t kWarnNumNucCharsAtEnd = 20;
+///     const static size_t kWarnAminoAcidCharsAtEnd = 50;
+///
+///     const size_t length = sLineText.length();
+///     SIZE_TYPE pos_to_check = length-1;
+///
+///     if((length > kWarnNumNucCharsAtEnd) && !TestFlag(fAssumeProt)) {
+///         // find last non-nuc character, within the last kWarnNumNucCharsAtEnd characters
+///         const SIZE_TYPE last_pos_to_check_for_nuc = (sLineText.length() - kWarnNumNucCharsAtEnd);
+///         for( ; pos_to_check >= last_pos_to_check_for_nuc; --pos_to_check ) {
+///             if( ! s_ASCII_IsUnAmbigNuc(sLineText[pos_to_check]) ) {
+///                 // found a character which is not an unambiguous nucleotide
+///                 break;
+///             }
+///         }
+///         if( pos_to_check < last_pos_to_check_for_nuc ) {
+///             FASTA_WARNING(iLineNum,
+///                 "FASTA-Reader: Title ends with at least " << kWarnNumNucCharsAtEnd
+///                 << " valid nucleotide characters.  Was the sequence "
+///                 << "accidentally put in the title line?",
+/// ```
+fn ends_with_nucleotides(text: &[u8]) -> bool {
+    text.len() > 20
+        && text[text.len() - 20..]
+            .iter()
+            .all(|byte| b"ACGTacgt".contains(byte))
+}
+
+/// NCBI's warning for a record whose defline ends with nucleotides (`ends_with_nucleotides`),
+/// written when NCBI reads the record: the subjects when they are read, the queries after
+/// `Query is Empty!`. The deflines are those of `bio` (the ID, a space and the rest), which
+/// are NCBI's text for the deflines that `check_deflines` accepts.
+pub fn write_title_warnings(
+    records: &[fasta::Record],
+    diagnostics: &mut dyn std::io::Write,
+) -> std::io::Result<()> {
+    for record in records {
+        let text = match record.desc() {
+            Some(desc) => format!("{} {desc}", record.id()),
+            None => record.id().to_string(),
+        };
+        if ends_with_nucleotides(text.as_bytes()) {
+            diagnostics.write_all(b"FASTA-Reader: Title ends with at least 20 valid nucleotide characters.  Was the sequence accidentally put in the title line?\n")?;
+        }
     }
     Ok(())
 }
@@ -262,6 +322,15 @@ mod tests {
             (">q1 \u{e9}\nACGT\n", "non-ASCII"),
             (">\nACGT\n", "record 1 has a defline that is empty"),
             (
+                ">q0\nA\n>?100\nACGT\n",
+                "record 2 has a defline that starts with '?'",
+            ),
+            (">?_q1\nACGT\n", "starts with '?'"),
+            (
+                ">q1 ACGTACGTACGTACGTACGTA \nACGT\n",
+                "ends with white space after 20",
+            ),
+            (
                 ">q0\nA\n>   \nACGT\n",
                 "record 2 has a defline that is empty",
             ),
@@ -300,6 +369,18 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("query record 2 (q2) has no residues"));
+    }
+
+    #[test]
+    fn titles_that_end_with_nucleotides_get_ncbi_warning() {
+        // NCBI 2.17.0: the text after `>` longer than 20 bytes, its last 20 ACGT.
+        let text = ">q1 ACGTACGTACGTACGTACGTA\nACGT\n>ACGTACGTACGTACGTACGT\nACGT\n>ACGTACGTACGTACGTACGTA\nACGT\n>q2 ACGTNACGTACGTACGTACGTA\nACGT\n";
+        assert!(check_deflines(text.as_bytes(), "query").is_ok());
+        assert!(check_deflines(b">q1 ACGTACGTACGTACGTACGTA\r\nACGT\r\n", "query").is_ok());
+        let mut out = Vec::new();
+        write_title_warnings(&records(text), &mut out).unwrap();
+        let warning = "FASTA-Reader: Title ends with at least 20 valid nucleotide characters.  Was the sequence accidentally put in the title line?\n";
+        assert_eq!(String::from_utf8(out).unwrap(), warning.repeat(2));
     }
 
     #[test]

@@ -81,7 +81,7 @@ use super::super::hsp::{
 };
 use super::super::input::{
     check_deflines, check_records, check_records_have_residues, check_residues, is_blank,
-    with_u_as_t, UNREADABLE_FASTA,
+    with_u_as_t, write_title_warnings, UNREADABLE_FASTA,
 };
 use super::super::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
 use super::super::lookup::{build_unmasked_ranges, reverse_complement};
@@ -3590,31 +3590,59 @@ fn compute_lookup_query_stats(
     context_masks: &[Vec<MaskedInterval>],
 ) -> (usize, usize) {
     debug_assert_eq!(contexts.len(), context_masks.len());
-    let mut approx_entries = 0usize;
+    let mut approx_entries = 0i64;
     let mut max_q_off = 0usize;
 
+    // NCBI computes the lookup segments (BLAST_ComplementMaskLocations, which skips the
+    // contexts marked invalid) before its ungapped blocks mark contexts invalid
+    // (blast_setup.c:633-653), so every context of a query with letters counts.
     for (ctx, masks) in contexts.iter().zip(context_masks.iter()) {
-        let ranges = build_unmasked_ranges(ctx.seq.len(), masks);
+        if ctx.seq.is_empty() {
+            continue;
+        }
         let ctx_offset = ctx.query_offset.max(0) as usize;
+        let ranges = build_unmasked_ranges(ctx.seq.len(), masks);
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_filter.c:1081-1115
+        // ```c
+        //          if (first) {
+        //             last_interval_open = TRUE;
+        //             first = FALSE;
+        //
+        //             if (filter_start > start_offset) {
+        //                /* beginning of sequence not filtered */
+        //                left = start_offset;
+        //             } else {
+        //                /* beginning of sequence filtered */
+        //                left = filter_end + 1;
+        //                continue;
+        //             }
+        //          }
+        // ...
+        //       if (last_interval_open) {
+        //          /* Need to finish SSeqRange* for last interval. */
+        //          right = end_offset;
+        // ```
+        // A context masked from its first letter to its last gets the range
+        // (end_offset + 1, end_offset): one entry less, and its end in `max_off`.
+        if ranges.is_empty() {
+            approx_entries -= 1;
+            max_q_off = max_q_off.max(ctx_offset + ctx.seq.len() - 1);
+            continue;
+        }
         for (start, end) in ranges {
-            if end <= start {
-                continue;
-            }
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/lookup_util.c:190-203
             // ```c
             // num_entries += loc->ssr->right - loc->ssr->left;
             // curr_max = MAX(curr_max, loc->ssr->right);
             // ```
             // NCBI's `right` is inclusive (the last unmasked letter), LOSAT's `end` is not.
-            approx_entries = approx_entries.saturating_add(end - start - 1);
-            let abs_right = ctx_offset.saturating_add(end.saturating_sub(1));
-            if abs_right > max_q_off {
-                max_q_off = abs_right;
-            }
+            approx_entries += (end - start) as i64 - 1;
+            max_q_off = max_q_off.max(ctx_offset + end - 1);
         }
     }
 
-    (approx_entries, max_q_off)
+    // A negative estimate (every context masked) selects the smallest table, as 0 does.
+    (approx_entries.max(0) as usize, max_q_off)
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_filter.c:1173-1178
@@ -4920,6 +4948,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     let subject_bytes = read_blastn_fasta_bytes(&mut subject_file, &args.subject, "subject")?;
     drop(subject_file);
     let subjects = read_blastn_records(&subject_bytes, &args.subject, "subject")?;
+    write_title_warnings(&subjects, &mut std::io::stderr())?;
     // NCBI reads these deflines and records without a message; LOSAT rejects them where
     // the search would start.
     let subject_deflines = check_deflines(&subject_bytes, "subject")
@@ -5133,6 +5162,7 @@ pub fn run_local(
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
     let output_formats = parse_output_formats(outputs.formats.iter().map(|format| format.outfmt))?;
+    write_title_warnings(subject_records, outputs.diagnostics)?;
     check_subjects_not_empty(subject_records)?;
     args.resolve_dust()?;
     process_options(&args, outputs)?;
@@ -5164,6 +5194,8 @@ fn search(
         return Ok(());
     }
     check_records_have_residues(subject_records, "subject")?;
+    // NCBI reads the queries after `Query is Empty!`, with its reader's warnings.
+    write_title_warnings(query_records, outputs.diagnostics)?;
     // LOSAT's limits come where NCBI starts the search, after its checks and its
     // `Query is Empty!` success.
     check_losat_limits(&args)?;
@@ -5675,6 +5707,16 @@ fn run_in_pool(
     //                          Int4 *lut_width)
     // ```
     let discontig_template = args.task == "dc-megablast";
+    let scoring_spec = NuclScoringSpec {
+        reward: config.reward,
+        penalty: config.penalty,
+        gap_open: config.gap_open,
+        gap_extend: config.gap_extend,
+    };
+    let context_ungapped = context_ungapped_blocks(
+        query_contexts.iter().map(|context| context.seq.as_slice()),
+        &scoring_spec,
+    );
     let (approx_table_entries, max_q_off) =
         compute_lookup_query_stats(&query_contexts, &query_context_masks);
     let max_query_length = max_q_off.saturating_add(1).max(1);
@@ -5741,12 +5783,6 @@ fn run_in_pool(
     // bit scores, cutoffs and the length adjustment); `scoring.rs` has the NCBI
     // references. NCBI raises an unsupported scoring system when it sets up the first
     // batch with a valid query, after the outfmt 0 prolog.
-    let scoring_spec = NuclScoringSpec {
-        reward: config.reward,
-        penalty: config.penalty,
-        gap_open: config.gap_open,
-        gap_extend: config.gap_extend,
-    };
     let megablast = args.task == "megablast";
     let query_lengths_for_batches: Vec<usize> = seq_data
         .queries
@@ -5755,10 +5791,6 @@ fn run_in_pool(
         .collect();
     let first_batch =
         first_query_batch(&query_lengths_for_batches, seq_data.db_len_total, megablast);
-    let context_ungapped = context_ungapped_blocks(
-        query_contexts.iter().map(|context| context.seq.as_slice()),
-        &scoring_spec,
-    );
     let (context_karlin, round_down_evalue_score) = match context_blocks(
         &context_ungapped,
         &scoring_spec,

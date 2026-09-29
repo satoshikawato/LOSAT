@@ -589,14 +589,16 @@ pub fn resolve_ncbi4na_to_ncbi2na(ncbi4na: &[u8]) -> Vec<u8> {
 ///         return retval;
 /// ```
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:1154-1187
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:1167-1194
 /// ```c
-/// for (i=0; i<length; i += 4) {
-///     Uint1 encoded = (Uint1)(seq[i] & 3) << 6;
+///     // Populate the compressed sequence up to the last byte
+///     for (ci = 0, i = 0; ci < retval.length-1; ci++, i+= COMPRESSION_RATIO) {
+///         Uint1 a, b, c, d;
+///         a = ((*source_ptr & NCBI2NA_MASK)<<6); ++source_ptr;
 ///     ...
-///     packed[j++] = encoded;
-/// }
-/// packed[j] |= (Uint1)(length % 4);
+///     // Set the number of bases in the last 2 bits of the last byte in the
+///     // compressed sequence
+///     retval.data.get()[ci] |= source.length%COMPRESSION_RATIO;
 /// ```
 pub fn encode_subject_ncbi2na_packed(seq: &[u8]) -> Vec<u8> {
     if seq.is_empty() {

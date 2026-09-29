@@ -270,12 +270,24 @@ fn numeric_values_are_validated_before_io() {
     for value in ["2", "4"] {
         assert!(parse("tblastx", &["-outfmt", "6", "-word_size", value]).is_err());
     }
-    // NCBI core/blast_options.c:1322-1334: word_size is bounded by 4 and 100.
-    for value in ["3", "101"] {
-        assert!(parse("blastn", &["-outfmt", "6", "-word_size", value]).is_err());
-    }
-    for value in ["4", "100"] {
-        parse("blastn", &["-outfmt", "6", "-word_size", value]).unwrap();
+    // NCBI blast_args.cpp:168-170: the argument is 4 or more; blast_options.c:1326-1333:
+    // an option check rejects more than 100, with NCBI's message.
+    assert!(parse("blastn", &["-outfmt", "6", "-word_size", "3"]).is_err());
+    for (value, accepted) in [("4", true), ("100", true), ("101", false)] {
+        let Commands::Blastn(args) = parse("blastn", &["-outfmt", "6", "-word_size", value])
+            .unwrap()
+            .command
+        else {
+            unreachable!("blastn")
+        };
+        let checked = LOSAT::algorithm::blastn::scoring::check_scoring_options(&args);
+        assert_eq!(checked.is_ok(), accepted, "-word_size {value}");
+        if !accepted {
+            assert!(checked
+                .unwrap_err()
+                .to_string()
+                .contains("Word-size must be less than or equal to 100"));
+        }
     }
     for program in ["blastp", "tblastx"] {
         assert!(parse(program, &["-outfmt", "6", "-threshold", "0"]).is_err());

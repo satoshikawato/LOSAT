@@ -307,6 +307,14 @@ fn parse_blastn_args(
         }
         index += 1;
     }
+    // Plan TD-1 (a fail-fast fix): the engine implements the tasks of the CLI only; v1
+    // ran other names with LOSAT's own scoring, which NCBI does not use.
+    if !matches!(args.task.as_str(), "megablast" | "blastn") {
+        return Err(format!(
+            "unsupported blastn task for web API: {}",
+            args.task
+        ));
+    }
 
     Ok(args)
 }

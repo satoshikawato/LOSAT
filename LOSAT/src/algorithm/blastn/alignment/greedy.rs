@@ -100,7 +100,7 @@ thread_local! {
     static GREEDY_MEM: RefCell<GreedyAlignMem> = RefCell::new(GreedyAlignMem::new());
 }
 
-/// Scratch memory for affine greedy alignment (preallocated arrays).
+/// Scratch memory for affine greedy alignment.
 /// NCBI reference: ncbi-blast/c++/include/algo/blast/core/greedy_align.h:88-99
 /// ```c
 /// typedef struct SGreedyAlignMem {
@@ -109,8 +109,23 @@ thread_local! {
 ///    Int4* max_score;
 /// } SGreedyAlignMem;
 /// ```
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:240-251
+/// ```c
+///       gamp->diag_bounds = (Int4*) calloc(2*(max_d+1+max_cost), sizeof(Int4));
+///       gamp->last_seq2_off_affine = (SGreedyOffset**)
+/// 	 malloc((MAX(max_d, max_cost) + 2) * sizeof(SGreedyOffset*));
+///     ...
+///       gamp->last_seq2_off_affine[0] = (SGreedyOffset*)
+/// 	 calloc((2*max_d_1 + 6) , sizeof(SGreedyOffset) * (max_cost+1));
+///       for (i = 1; i <= max_cost; i++)
+/// 	 gamp->last_seq2_off_affine[i] =
+/// 	    gamp->last_seq2_off_affine[i-1] + 2*max_d_1 + 6;
+/// ```
+/// NCBI allocates these arrays once with `calloc`, so only the parts that an extension
+/// reaches take memory, and it initializes only the entries that it reads before writing
+/// (`blast_affine_greedy_align`). The rows of `last_seq2_off` are `AffineRows`.
 struct GreedyAffineMem {
-    last_seq2_off: Vec<Vec<GreedyOffset>>,
+    rows: Vec<AffineRow>,
     diag_lower: Vec<i32>,
     diag_upper: Vec<i32>,
     max_score: Vec<i32>,
@@ -119,60 +134,108 @@ struct GreedyAffineMem {
 impl GreedyAffineMem {
     fn new() -> Self {
         Self {
-            last_seq2_off: Vec::new(),
+            rows: Vec::new(),
             diag_lower: Vec::new(),
             diag_upper: Vec::new(),
             max_score: Vec::new(),
         }
     }
 
-    fn ensure_capacity(
-        &mut self,
-        num_rows: usize,
-        array_size: usize,
-        diag_len: usize,
-        max_score_len: usize,
-    ) {
-        if self.last_seq2_off.len() < num_rows {
-            self.last_seq2_off.resize_with(num_rows, Vec::new);
-        }
-        for row in self.last_seq2_off.iter_mut().take(num_rows) {
-            if row.len() < array_size {
-                row.resize(
-                    array_size,
-                    GreedyOffset {
-                        insert_off: INVALID_OFFSET,
-                        match_off: INVALID_OFFSET,
-                        delete_off: INVALID_OFFSET,
-                    },
-                );
-            }
-        }
+    /// Makes the bound and score arrays at least as long as given. They are zeroed, so
+    /// their untouched parts take no memory, as with NCBI's `calloc`.
+    fn ensure_capacity(&mut self, diag_len: usize, max_score_len: usize) {
         if self.diag_lower.len() < diag_len {
-            self.diag_lower.resize(diag_len, INVALID_DIAG);
-        }
-        if self.diag_upper.len() < diag_len {
-            self.diag_upper.resize(diag_len, -INVALID_DIAG);
+            self.diag_lower = vec![0; diag_len];
+            self.diag_upper = vec![0; diag_len];
         }
         if self.max_score.len() < max_score_len {
-            self.max_score.resize(max_score_len, 0);
+            self.max_score = vec![0; max_score_len];
         }
-    }
-
-    fn reset(&mut self, num_rows: usize, array_size: usize, diag_len: usize, max_score_len: usize) {
-        let invalid = GreedyOffset {
-            insert_off: INVALID_OFFSET,
-            match_off: INVALID_OFFSET,
-            delete_off: INVALID_OFFSET,
-        };
-        for row in self.last_seq2_off.iter_mut().take(num_rows) {
-            row[..array_size].fill(invalid);
-        }
-        self.diag_lower[..diag_len].fill(INVALID_DIAG);
-        self.diag_upper[..diag_len].fill(-INVALID_DIAG);
-        self.max_score[..max_score_len].fill(0);
     }
 }
+
+const INVALID_GREEDY_OFFSET: GreedyOffset = GreedyOffset {
+    insert_off: INVALID_OFFSET,
+    match_off: INVALID_OFFSET,
+    delete_off: INVALID_OFFSET,
+};
+
+/// The offsets of one distance for the diagonals `lower..lower + offsets.len()`.
+#[derive(Default)]
+struct AffineRow {
+    lower: i32,
+    offsets: Vec<GreedyOffset>,
+}
+
+/// The rows of `last_seq2_off` of one affine greedy extension.
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:1181-1197
+/// ```c
+///         if (d > max_penalty) {
+///             if (edit_block == NULL) {
+///
+///                 /* if no traceback is required, the next row of
+///                    last_seq2_off can reuse previously allocated memory */
+///
+///                 last_seq2_off[d] = last_seq2_off[d - max_penalty - 1];
+///             }
+///             else {
+///
+///                 /* traceback requires all rows of last_seq2_off to be saved,
+///                    so a new row must be allocated */
+///
+///                 last_seq2_off[d] = s_GetMBSpace(mem_pool,
+///                                    curr_diag_upper - curr_diag_lower + 1) -
+///                                    curr_diag_lower;
+///             }
+///         }
+/// ```
+/// NCBI's rows for the distances up to `max_penalty` span every diagonal, and a later
+/// row reuses the row of `d - max_penalty - 1` or spans the diagonals that distance `d`
+/// tests. Every row is read only inside the diagonal bounds of its distance, which lie
+/// in the diagonals that the distance tests, so here every row holds only those
+/// diagonals: a ring of `max_penalty + 1` rows without traceback (`ring`), one row per
+/// distance with traceback.
+struct AffineRows<'m> {
+    rows: &'m mut Vec<AffineRow>,
+    ring: Option<usize>,
+}
+
+impl AffineRows<'_> {
+    fn slot(&self, d: i32) -> usize {
+        let d = d as usize;
+        self.ring.map_or(d, |period| d % period)
+    }
+
+    /// Starts the row of distance `d` for the diagonals `lower..=upper`.
+    fn start(&mut self, d: i32, lower: i32, upper: i32) {
+        let slot = self.slot(d);
+        if self.rows.len() <= slot {
+            self.rows.resize_with(slot + 1, AffineRow::default);
+        }
+        let row = &mut self.rows[slot];
+        row.lower = lower;
+        row.offsets.clear();
+        row.offsets
+            .resize((upper - lower + 1).max(0) as usize, INVALID_GREEDY_OFFSET);
+    }
+
+    fn get(&self, d: i32, k: i32) -> GreedyOffset {
+        let row = &self.rows[self.slot(d)];
+        usize::try_from(k - row.lower)
+            .ok()
+            .and_then(|index| row.offsets.get(index))
+            .copied()
+            .unwrap_or(INVALID_GREEDY_OFFSET)
+    }
+
+    fn get_mut(&mut self, d: i32, k: i32) -> &mut GreedyOffset {
+        let slot = self.slot(d);
+        let row = &mut self.rows[slot];
+        &mut row.offsets[(k - row.lower) as usize]
+    }
+}
+
 /// Bookkeeping structure for affine greedy alignment (NCBI BLAST's SGreedyOffset).
 /// When aligning two sequences, stores the largest offset into the second sequence
 /// that leads to a high-scoring alignment for a given start point, tracking
@@ -2255,7 +2318,7 @@ fn find_first_mismatch_greedy(
 /// Affine traceback helper from match state.
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:148-178
 fn get_next_affine_tback_from_match(
-    last_seq2_off: &[Vec<GreedyOffset>],
+    last_seq2_off: &AffineRows<'_>,
     diag_lower: &[i32],
     diag_upper: &[i32],
     diag_offset: i32,
@@ -2270,11 +2333,12 @@ fn get_next_affine_tback_from_match(
     let dl_idx = idx + diag_offset;
     if idx >= 0 && dl_idx >= 0 && (dl_idx as usize) < diag_lower.len() {
         if diag >= diag_lower[dl_idx as usize] && diag <= diag_upper[dl_idx as usize] {
-            new_seq2_index = last_seq2_off[idx as usize][diag as usize].match_off;
+            new_seq2_index = last_seq2_off.get(idx, diag).match_off;
             if new_seq2_index
-                >= last_seq2_off[*d as usize][diag as usize]
+                >= last_seq2_off
+                    .get(*d, diag)
                     .insert_off
-                    .max(last_seq2_off[*d as usize][diag as usize].delete_off)
+                    .max(last_seq2_off.get(*d, diag).delete_off)
             {
                 *d -= op_cost;
                 *seq2_index = new_seq2_index;
@@ -2283,13 +2347,11 @@ fn get_next_affine_tback_from_match(
         }
     }
 
-    if last_seq2_off[*d as usize][diag as usize].insert_off
-        > last_seq2_off[*d as usize][diag as usize].delete_off
-    {
-        *seq2_index = last_seq2_off[*d as usize][diag as usize].insert_off;
+    if last_seq2_off.get(*d, diag).insert_off > last_seq2_off.get(*d, diag).delete_off {
+        *seq2_index = last_seq2_off.get(*d, diag).insert_off;
         GapAlignOpType::Ins
     } else {
-        *seq2_index = last_seq2_off[*d as usize][diag as usize].delete_off;
+        *seq2_index = last_seq2_off.get(*d, diag).delete_off;
         GapAlignOpType::Del
     }
 }
@@ -2297,7 +2359,7 @@ fn get_next_affine_tback_from_match(
 /// Affine traceback helper from insertion/deletion state.
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:199-258
 fn get_next_affine_tback_from_indel(
-    last_seq2_off: &[Vec<GreedyOffset>],
+    last_seq2_off: &AffineRows<'_>,
     diag_lower: &[i32],
     diag_upper: &[i32],
     diag_offset: i32,
@@ -2320,9 +2382,9 @@ fn get_next_affine_tback_from_indel(
     if last_d >= 0 && dl_idx >= 0 && (dl_idx as usize) < diag_lower.len() {
         if new_diag >= diag_lower[dl_idx as usize] && new_diag <= diag_upper[dl_idx as usize] {
             new_seq2_index = if state == GapAlignOpType::Ins {
-                last_seq2_off[last_d as usize][new_diag as usize].insert_off
+                last_seq2_off.get(last_d, new_diag).insert_off
             } else {
-                last_seq2_off[last_d as usize][new_diag as usize].delete_off
+                last_seq2_off.get(last_d, new_diag).delete_off
             };
         }
     }
@@ -2332,7 +2394,7 @@ fn get_next_affine_tback_from_indel(
     if last_d >= 0 && dl_idx >= 0 && (dl_idx as usize) < diag_lower.len() {
         if new_diag >= diag_lower[dl_idx as usize]
             && new_diag <= diag_upper[dl_idx as usize]
-            && new_seq2_index < last_seq2_off[last_d as usize][new_diag as usize].match_off
+            && new_seq2_index < last_seq2_off.get(last_d, new_diag).match_off
         {
             *d -= gap_open_extend;
             return GapAlignOpType::Sub;
@@ -2831,7 +2893,6 @@ fn blast_affine_greedy_align(
 
     let scaled_max_dist = max_dist * gap_extend;
     let diag_origin = max_dist + 2;
-    let array_size = (2 * diag_origin + 4) as usize;
 
     let xdrop_offset = (xdrop_threshold + match_score_half) / score_common_factor + 1;
     let max_score_len = (scaled_max_dist as usize) + (xdrop_offset as usize) + 2;
@@ -2839,7 +2900,6 @@ fn blast_affine_greedy_align(
 
     let diag_len = (scaled_max_dist + max_penalty + 2) as usize;
     let diag_offset = max_penalty;
-    let num_rows = (scaled_max_dist + max_penalty + 2) as usize;
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:848-856
     // ```c
@@ -2853,11 +2913,35 @@ fn blast_affine_greedy_align(
     // diag_lower = aux_data->diag_bounds;
     // diag_upper = aux_data->diag_bounds + scaled_max_dist + 1 + max_penalty;
     // ```
-    affine_mem.ensure_capacity(num_rows, array_size, diag_len, max_score_len);
-    affine_mem.reset(num_rows, array_size, diag_len, max_score_len);
-    let max_score_base = &mut affine_mem.max_score[..max_score_len];
-    let diag_lower = &mut affine_mem.diag_lower[..diag_len];
-    let diag_upper = &mut affine_mem.diag_upper[..diag_len];
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:920-942
+    // ```c
+    //     max_score = aux_data->max_score + xdrop_offset;
+    //     for (index = 0; index < xdrop_offset; index++)
+    //         aux_data->max_score[index] = 0;
+    //     ...
+    //     for (index = 0; index < max_penalty; index++) {
+    //         diag_lower[index] = kInvalidDiag;
+    //         diag_upper[index] = -kInvalidDiag;
+    //     }
+    // ```
+    // The other entries are written for a distance before they are read.
+    affine_mem.ensure_capacity(diag_len, max_score_len);
+    let GreedyAffineMem {
+        rows,
+        diag_lower,
+        diag_upper,
+        max_score,
+    } = affine_mem;
+    let max_score_base = &mut max_score[..max_score_len];
+    max_score_base[..max_score_offset].fill(0);
+    let diag_lower = &mut diag_lower[..diag_len];
+    let diag_upper = &mut diag_upper[..diag_len];
+    diag_lower[..diag_offset as usize].fill(INVALID_DIAG);
+    diag_upper[..diag_offset as usize].fill(-INVALID_DIAG);
+    let mut last_seq2_off = AffineRows {
+        rows,
+        ring: edit_block.is_none().then_some((max_penalty + 1) as usize),
+    };
 
     index = find_first_mismatch_greedy(seq1, seq2, len1, len2, 0, 0, reverse, rem, fence_hit);
     if *fence_hit {
@@ -2880,15 +2964,16 @@ fn blast_affine_greedy_align(
         return index * match_score;
     }
 
-    let last_seq2_off = &mut affine_mem.last_seq2_off;
-
     let diag0_idx = (0 + diag_offset) as usize;
     diag_lower[diag0_idx] = diag_origin;
     diag_upper[diag0_idx] = diag_origin;
 
-    last_seq2_off[0][diag_origin as usize].match_off = seq1_index;
-    last_seq2_off[0][diag_origin as usize].insert_off = INVALID_OFFSET;
-    last_seq2_off[0][diag_origin as usize].delete_off = INVALID_OFFSET;
+    last_seq2_off.start(0, diag_origin, diag_origin);
+    *last_seq2_off.get_mut(0, diag_origin) = GreedyOffset {
+        insert_off: INVALID_OFFSET,
+        match_off: seq1_index,
+        delete_off: INVALID_OFFSET,
+    };
     max_score_base[max_score_offset] = seq1_index * match_score;
 
     let mut best_dist: i32 = 0;
@@ -2913,6 +2998,7 @@ fn blast_affine_greedy_align(
         let mut curr_diag: i32 = 0;
         let tmp_diag_lower = curr_diag_lower;
         let tmp_diag_upper = curr_diag_upper;
+        last_seq2_off.start(d, tmp_diag_lower, tmp_diag_upper);
 
         for k_val in tmp_diag_lower..=tmp_diag_upper {
             k = k_val;
@@ -2923,7 +3009,7 @@ fn blast_affine_greedy_align(
             if d_open >= 0 && idx_open >= 0 && (idx_open as usize) < diag_lower.len() {
                 if k + 1 >= diag_lower[idx_open as usize] && k + 1 <= diag_upper[idx_open as usize]
                 {
-                    seq2_index_del = last_seq2_off[d_open as usize][(k + 1) as usize].match_off;
+                    seq2_index_del = last_seq2_off.get(d_open, k + 1).match_off;
                 }
             }
 
@@ -2931,7 +3017,7 @@ fn blast_affine_greedy_align(
             let idx_ext = d_ext + diag_offset;
             if d_ext >= 0 && idx_ext >= 0 && (idx_ext as usize) < diag_lower.len() {
                 if k + 1 >= diag_lower[idx_ext as usize] && k + 1 <= diag_upper[idx_ext as usize] {
-                    let ext_off = last_seq2_off[d_ext as usize][(k + 1) as usize].delete_off;
+                    let ext_off = last_seq2_off.get(d_ext, k + 1).delete_off;
                     if ext_off > seq2_index_del {
                         seq2_index_del = ext_off;
                     }
@@ -2939,42 +3025,42 @@ fn blast_affine_greedy_align(
             }
 
             if seq2_index_del == INVALID_OFFSET {
-                last_seq2_off[d as usize][k as usize].delete_off = INVALID_OFFSET;
+                last_seq2_off.get_mut(d, k).delete_off = INVALID_OFFSET;
             } else {
-                last_seq2_off[d as usize][k as usize].delete_off = seq2_index_del + 1;
+                last_seq2_off.get_mut(d, k).delete_off = seq2_index_del + 1;
             }
 
             let mut seq2_index_ins = INVALID_OFFSET;
             if d_open >= 0 && idx_open >= 0 && (idx_open as usize) < diag_lower.len() {
                 if k - 1 >= diag_lower[idx_open as usize] && k - 1 <= diag_upper[idx_open as usize]
                 {
-                    seq2_index_ins = last_seq2_off[d_open as usize][(k - 1) as usize].match_off;
+                    seq2_index_ins = last_seq2_off.get(d_open, k - 1).match_off;
                 }
             }
             if d_ext >= 0 && idx_ext >= 0 && (idx_ext as usize) < diag_lower.len() {
                 if k - 1 >= diag_lower[idx_ext as usize] && k - 1 <= diag_upper[idx_ext as usize] {
-                    let ext_off = last_seq2_off[d_ext as usize][(k - 1) as usize].insert_off;
+                    let ext_off = last_seq2_off.get(d_ext, k - 1).insert_off;
                     if ext_off > seq2_index_ins {
                         seq2_index_ins = ext_off;
                     }
                 }
             }
             if seq2_index_ins == INVALID_OFFSET {
-                last_seq2_off[d as usize][k as usize].insert_off = INVALID_OFFSET;
+                last_seq2_off.get_mut(d, k).insert_off = INVALID_OFFSET;
             } else {
-                last_seq2_off[d as usize][k as usize].insert_off = seq2_index_ins;
+                last_seq2_off.get_mut(d, k).insert_off = seq2_index_ins;
             }
 
-            seq2_index = last_seq2_off[d as usize][k as usize]
+            seq2_index = last_seq2_off
+                .get(d, k)
                 .insert_off
-                .max(last_seq2_off[d as usize][k as usize].delete_off);
+                .max(last_seq2_off.get(d, k).delete_off);
 
             let d_match = d - op_cost;
             let idx_match = d_match + diag_offset;
             if d_match >= 0 && idx_match >= 0 && (idx_match as usize) < diag_lower.len() {
                 if k >= diag_lower[idx_match as usize] && k <= diag_upper[idx_match as usize] {
-                    seq2_index =
-                        seq2_index.max(last_seq2_off[d_match as usize][k as usize].match_off + 1);
+                    seq2_index = seq2_index.max(last_seq2_off.get(d_match, k).match_off + 1);
                 }
             }
 
@@ -2984,7 +3070,7 @@ fn blast_affine_greedy_align(
                 if k == curr_diag_lower {
                     curr_diag_lower += 1;
                 } else {
-                    last_seq2_off[d as usize][k as usize].match_off = INVALID_OFFSET;
+                    last_seq2_off.get_mut(d, k).match_off = INVALID_OFFSET;
                 }
                 continue;
             }
@@ -3006,7 +3092,7 @@ fn blast_affine_greedy_align(
             seq1_index += index;
             seq2_index += index;
 
-            last_seq2_off[d as usize][k as usize].match_off = seq2_index;
+            last_seq2_off.get_mut(d, k).match_off = seq2_index;
 
             if seq1_index + seq2_index > curr_extent {
                 curr_extent = seq1_index + seq2_index;
@@ -3153,7 +3239,7 @@ fn blast_affine_greedy_align(
 
         block.add(
             GapAlignOpType::Sub,
-            last_seq2_off[0][diag_origin as usize].match_off,
+            last_seq2_off.get(0, diag_origin).match_off,
         );
     }
 

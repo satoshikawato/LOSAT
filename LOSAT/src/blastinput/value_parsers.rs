@@ -116,13 +116,27 @@ pub fn nonpositive_i32(value: &str) -> Result<i32, String> {
 }
 pub fn blastn_word_size(value: &str) -> Result<usize, String> {
     let n = positive_usize(value)?;
-    // NCBI core/blast_options.c:1322-1334; include/algo/blast/core/blast_hits.h:192:
-    // options->word_size < 4 || options->word_size > DBSEQ_CHUNK_OVERLAP
-    // #define DBSEQ_CHUNK_OVERLAP 100
-    if !(4..=100).contains(&n) {
-        return Err("BLASTN word_size must be in 4..=100".into());
+    // NCBI blastinput/blast_args.cpp:168-170:
+    // arg_desc.SetConstraint(kArgWordSize, m_QueryIsProtein
+    //                        ? new CArgAllowValuesGreaterThanOrEqual(2)
+    //                        : new CArgAllowValuesGreaterThanOrEqual(4));
+    // The upper bound (100) is an option check (`blastn/scoring.rs`).
+    if n < 4 {
+        return Err("expected an integer >= 4".into());
     }
     Ok(n)
+}
+/// A BLASTN reward: NCBI accepts 0 or more (blast_args.cpp:658-659); LOSAT does not
+/// implement a reward of 0 (NCBI's rmblastn matrix scoring, or no valid query).
+pub fn blastn_reward(value: &str) -> Result<i32, String> {
+    let n = value
+        .parse::<i32>()
+        .map_err(|_| "expected an integer >= 0")?;
+    match n {
+        n if n < 0 => Err("expected an integer >= 0".into()),
+        0 => Err("a reward of 0 (NCBI BLAST+'s matrix scoring of rmblastn) is not supported by LOSAT's BLASTN".into()),
+        n => Ok(n),
+    }
 }
 pub fn blastp_word_size(value: &str) -> Result<usize, String> {
     let n = positive_usize(value)?;

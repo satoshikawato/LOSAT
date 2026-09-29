@@ -294,9 +294,11 @@ fn lowercase_masked(row: &mut [u8], first: usize, step: isize, masks: &[MaskedIn
 /// ```
 /// The residues are counted in BLASTNA without `N` and the gap, normalized, and paired
 /// with the standard composition (A, C, G, T at 0.25; `Blast_ResFreqStdComp`) through the
-/// BLASTNA matrix (`BlastScoreFreqCalc`, blast_stat.c:2151-2205). Both strands of a query
-/// give the same block, so the plus strand is used. A query of `N` only has no counted
-/// residue, so every score probability is 0 and the calculation fails.
+/// BLASTNA matrix (`BlastScoreFreqCalc`, blast_stat.c:2151-2205). The minus strand of a
+/// query (its reverse complement) has the same residues in another order, so its block
+/// can differ in the last bits; the search computes one per strand (`scoring.rs`). A
+/// query of `N` only has no counted residue, so every score probability is 0 and the
+/// calculation fails.
 pub(crate) fn query_ungapped_karlin(
     query: &[u8],
     reward: i32,

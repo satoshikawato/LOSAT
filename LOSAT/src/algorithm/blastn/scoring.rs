@@ -19,7 +19,7 @@ fn scoring_spec(args: &BlastnArgs) -> NuclScoringSpec {
     }
 }
 
-/// NCBI's check of the scoring options, before the queries are read.
+/// NCBI's checks of the options, before the queries are read, then the limits of LOSAT.
 ///
 /// NCBI reference: c++/src/algo/blast/core/blast_options.c:881-906
 /// ```c
@@ -39,6 +39,23 @@ fn scoring_spec(args: &BlastnArgs) -> NuclScoringSpec {
 ///                      return BLASTERR_OPTION_VALUE_INVALID;
 ///              }
 /// ```
+/// NCBI reference: c++/src/algo/blast/core/blast_options.c:1326-1333
+/// ```c
+///     } else if (program_number == eBlastTypeBlastn &&
+///                options->word_size > DBSEQ_CHUNK_OVERLAP) {
+///         char buffer[256];
+///         int bytes_written = snprintf(buffer, DIM(buffer),
+///                   "Word-size must be less than or equal to %d", DBSEQ_CHUNK_OVERLAP);
+/// ```
+/// NCBI reference: c++/src/algo/blast/core/blast_options.c:1518-1523
+/// ```c
+/// 	if (options->expect_value <= 0.0 && options->cutoff_score <= 0)
+/// 	{
+/// 		Blast_MessageWrite(blast_msg, eBlastSevError, kBlastMessageNoContext,
+///          "expect value or cutoff score must be greater than zero");
+/// 		return BLASTERR_OPTION_VALUE_INVALID;
+/// 	}
+/// ```
 /// NCBI reference: c++/src/algo/blast/core/blast_options.c:1699-1711
 /// ```c
 ///     if (program_number == eBlastTypeBlastn)
@@ -53,7 +70,7 @@ fn scoring_spec(args: &BlastnArgs) -> NuclScoringSpec {
 ///                                        "Greedy extension must be used if gap existence and extension options are zero");
 /// ```
 /// NCBI reference: c++/src/algo/blast/core/blast_options.c:1759-1776 (BLAST_ValidateOptions
-/// runs BlastScoringOptionsValidate before s_BlastExtensionScoringOptionsValidate)
+/// runs the scoring, lookup table, hit saving and extension-scoring checks in this order)
 /// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3609-3612
 /// ```c
 ///         try { m_OptsHandle->Validate(); }
@@ -69,16 +86,41 @@ fn scoring_spec(args: &BlastnArgs) -> NuclScoringSpec {
 ///         exit_code = BLAST_INPUT_ERROR;                                      \
 /// ```
 /// The CLI accepts no reward of 0, so NCBI's exemption of 0/0 (rmblastn) does not
-/// arise. Only megablast extends greedily.
+/// arise. Only megablast extends greedily. `-evalue` is not negative (its parser).
+///
+/// LOSAT's limits, for options that NCBI runs: scores whose range (reward - penalty) is
+/// above `MAX_SCORE_RANGE`, where LOSAT's Karlin-Altschul computation has not been
+/// compared with NCBI's (NCBI keeps the scores in 16 bits, `blast_options.h:465-466`),
+/// and greedy gap costs above `MAX_GREEDY_GAP_COST`, beyond which NCBI's 32-bit greedy
+/// distances (`blast_gapalign.c:233-236`) can overflow.
 pub fn check_scoring_options(args: &BlastnArgs) -> anyhow::Result<()> {
     let spec = scoring_spec(args);
+    let word_size = super::coordination::determine_effective_word_size(args);
+    let greedy = args.task == "megablast";
     let message = if spec.penalty >= 0 {
-        "BLASTN penalty must be negative"
+        "BLASTN penalty must be negative".to_string()
     } else if spec.gap_open > 0 && spec.gap_extend == 0 {
-        "BLASTN gap extension penalty cannot be 0"
-    } else if spec.gap_open == 0 && spec.gap_extend == 0 && args.task != "megablast" {
-        "Greedy extension must be used if gap existence and extension options are zero"
+        "BLASTN gap extension penalty cannot be 0".to_string()
+    } else if word_size > DBSEQ_CHUNK_OVERLAP {
+        format!("Word-size must be less than or equal to {DBSEQ_CHUNK_OVERLAP}")
+    } else if args.evalue <= 0.0 {
+        "expect value or cutoff score must be greater than zero".to_string()
+    } else if spec.gap_open == 0 && spec.gap_extend == 0 && !greedy {
+        "Greedy extension must be used if gap existence and extension options are zero".to_string()
     } else {
+        let range = i64::from(spec.reward) - i64::from(spec.penalty);
+        if range > MAX_SCORE_RANGE {
+            anyhow::bail!(
+                "reward {} and penalty {} span more than {MAX_SCORE_RANGE} score units, which is not supported by LOSAT's BLASTN",
+                spec.reward,
+                spec.penalty
+            );
+        }
+        if greedy && spec.gap_open.max(spec.gap_extend) > MAX_GREEDY_GAP_COST {
+            anyhow::bail!(
+                "gap costs above {MAX_GREEDY_GAP_COST} with greedy extension (-task megablast) are not supported by LOSAT's BLASTN"
+            );
+        }
         return Ok(());
     };
     Err(NativeError {
@@ -89,6 +131,19 @@ pub fn check_scoring_options(args: &BlastnArgs) -> anyhow::Result<()> {
     }
     .into())
 }
+
+/// NCBI reference: c++/include/algo/blast/core/blast_hits.h:192
+/// ```c
+/// #define DBSEQ_CHUNK_OVERLAP 100
+/// ```
+const DBSEQ_CHUNK_OVERLAP: usize = 100;
+
+/// The largest score range (reward - penalty) that LOSAT's BLASTN accepts; pairs up to
+/// 1000/-2000 were compared with NCBI (S07+ independent audit).
+const MAX_SCORE_RANGE: i64 = 3000;
+
+/// The largest gap cost that LOSAT's BLASTN accepts with greedy extension.
+const MAX_GREEDY_GAP_COST: i32 = 32767;
 
 /// NCBI's error for scores or gap costs without Karlin-Altschul values, raised when the
 /// first batch with a valid query is set up: every query of that batch gets the message.

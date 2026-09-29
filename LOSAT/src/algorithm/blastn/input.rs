@@ -5,14 +5,15 @@
 //! except that `U` is read as `T`, which `with_u_as_t` applies. The others are rejected,
 //! because the reader of NCBI would change them:
 //!
-//! - a defline that starts with white space, or has a control character or a non-ASCII
-//!   byte (NCBI skips the white space, ends the title at the control character, and
+//! - an empty defline, or one that starts with white space or has a control character or
+//!   a non-ASCII byte (NCBI names an empty one `Query_1`, skips the white space, ends the
+//!   title at the control character, and
 //!   splits the ID and wraps the title by bytes, where `bio` splits by Unicode white space
 //!   and the report wraps by characters): `check_deflines`, on the bytes of the file,
 //!   because `bio` drops the character that ends the ID;
-//! - a residue that is not an IUPAC nucleotide letter (NCBI ignores white space and
-//!   hyphens, ends the line at `;`, and removes other characters with a warning):
-//!   `check_residues`.
+//! - a record without residues, or a residue that is not an IUPAC nucleotide letter (NCBI
+//!   warns that the sequence contains no data, ignores white space and hyphens, ends the
+//!   line at `;`, and removes other characters with a warning): `check_residues`.
 
 use anyhow::{bail, Result};
 use bio::io::fasta;
@@ -63,7 +64,9 @@ pub fn check_deflines(bytes: &[u8], role: &str) -> Result<()> {
         };
         record += 1;
         let defline = defline.trim_ascii_end();
-        let problem = if defline.first().is_some_and(u8::is_ascii_whitespace) {
+        let problem = if defline.is_empty() {
+            "is empty".to_string()
+        } else if defline.first().is_some_and(u8::is_ascii_whitespace) {
             "starts with white space".to_string()
         } else if let Some(&byte) = defline.iter().find(|&&byte| byte < b' ') {
             format!("has the control character 0x{byte:02x}")
@@ -103,6 +106,13 @@ pub fn check_deflines(bytes: &[u8], role: &str) -> Result<()> {
 /// `role` is `query` or `subject`.
 pub fn check_residues(records: &[fasta::Record], role: &str) -> Result<()> {
     for (index, record) in records.iter().enumerate() {
+        if record.seq().is_empty() {
+            bail!(
+                "{role} record {} ({}) has no residues; NCBI BLAST+ reports such a record differently, which is not supported by LOSAT's BLASTN",
+                index + 1,
+                record.id()
+            );
+        }
         if let Some(position) = record
             .seq()
             .iter()
@@ -194,6 +204,11 @@ mod tests {
                 "record 2 has a defline that starts with white space",
             ),
             (">q1 \u{e9}\nACGT\n", "non-ASCII"),
+            (">\nACGT\n", "record 1 has a defline that is empty"),
+            (
+                ">q0\nA\n>   \nACGT\n",
+                "record 2 has a defline that is empty",
+            ),
         ] {
             let error = check_deflines(text.as_bytes(), "query")
                 .unwrap_err()
@@ -205,6 +220,10 @@ mod tests {
             (">q1\nACXGT\n", "'X' at residue 3"),
             (">q1\nAC-GT\n", "'-' at residue 3"),
             (">q1\nAC GT\n", "0x20 at residue 3"),
+            (
+                ">q1 empty\n>q2\nACGT\n",
+                "query record 1 (q1) has no residues",
+            ),
         ] {
             let error = check_residues(&records(text), "query")
                 .unwrap_err()

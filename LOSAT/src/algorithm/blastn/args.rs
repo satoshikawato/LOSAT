@@ -138,8 +138,8 @@ pub struct BlastnArgs {
     // ```
     // An omitted option keeps the default of the task (`coordination.rs`); a given one is
     // checked as NCBI checks it (`scoring.rs`). A reward of 0 (NCBI's rmblastn matrix
-    // scoring, or no valid query) is not implemented and is rejected here.
-    #[arg(long, value_parser = positive_i32, help = "Reward for a nucleotide match (default: 1 for megablast, 2 for blastn; 0 is not supported)")]
+    // scoring, or no valid query) is not implemented and is rejected (`blastn_reward`).
+    #[arg(long, value_parser = blastn_reward, help = "Reward for a nucleotide match (default: 1 for megablast, 2 for blastn; 0 is not supported)")]
     pub reward: Option<i32>,
     #[arg(long, value_parser = nonpositive_i32, help = "Penalty for a nucleotide mismatch (default: -2 for megablast, -3 for blastn)")]
     pub penalty: Option<i32>,

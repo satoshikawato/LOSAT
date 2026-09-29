@@ -80,8 +80,8 @@ use super::super::hsp::{
     BlastnHsp, BlastnHspList, BlastnOutputFormat, NCBI_BLASTN_VERSION,
 };
 use super::super::input::{
-    check_deflines, check_records, check_records_have_residues, check_residues, is_blank,
-    with_u_as_t, write_title_warnings, UNREADABLE_FASTA,
+    check_deflines, check_records, check_records_have_residues, check_residues,
+    check_sequence_lines, is_blank, with_u_as_t, write_title_warnings, UNREADABLE_FASTA,
 };
 use super::super::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
 use super::super::lookup::{build_unmasked_ranges, reverse_complement};
@@ -4784,6 +4784,7 @@ fn read_blastn_records(
     if is_blank(bytes) {
         return Ok(Vec::new());
     }
+    check_sequence_lines(bytes, role)?;
     let records = bio::io::fasta::Reader::new(bytes)
         .records()
         .collect::<std::result::Result<Vec<_>, _>>()
@@ -4874,6 +4875,8 @@ pub fn run_web_pair(args: BlastnArgs, query_fasta: &str, subject_fasta: &str) ->
     // The deflines that NCBI reads differently are rejected (a fail-fast fix, plan TD-1).
     check_deflines(subject_fasta.as_bytes(), "subject")?;
     check_deflines(query_fasta.as_bytes(), "query")?;
+    check_sequence_lines(subject_fasta.as_bytes(), "subject")?;
+    check_sequence_lines(query_fasta.as_bytes(), "query")?;
     if !subjects.is_empty() {
         check_scoring_options(&args)?;
         check_losat_limits(&args)?;
@@ -5196,6 +5199,23 @@ fn search(
     check_records_have_residues(subject_records, "subject")?;
     // NCBI reads the queries after `Query is Empty!`, with its reader's warnings.
     write_title_warnings(query_records, outputs.diagnostics)?;
+    // NCBI decodes HTML character references in the outfmt 0 titles of the subjects
+    // (`NStr::HtmlDecode` in `CDeflineGenerator::GenerateDefline`, create_defline.cpp:4066),
+    // which LOSAT does not reproduce (`report/defline.rs`).
+    if output_formats.contains(&BlastnOutputFormat::Pairwise) {
+        if let Some(index) = subject_records.iter().position(|record| {
+            crate::report::defline::has_html_character_reference(&format!(
+                "{} {}",
+                record.id(),
+                record.desc().unwrap_or_default()
+            ))
+        }) {
+            anyhow::bail!(
+                "subject record {} has an HTML character reference (such as &amp;) in its defline, which NCBI BLAST+ decodes in the outfmt 0 titles; this is not supported by LOSAT's BLASTN",
+                index + 1
+            );
+        }
+    }
     // LOSAT's limits come where NCBI starts the search, after its checks and its
     // `Query is Empty!` success.
     check_losat_limits(&args)?;

@@ -94,7 +94,7 @@ pub fn check_deflines(bytes: &[u8], role: &str) -> Result<()> {
         let problem = if defline.first() == Some(&b'?') {
             "starts with '?' (NCBI BLAST+ reads '>?' as a gap in the sequence, and '>?_' as a defline without the prefix)".to_string()
         } else if raw.len() != defline.len() && ends_with_nucleotides(defline) {
-            "ends with white space after 20 nucleotide letters (NCBI BLAST+ warns about the letters only without the white space)".to_string()
+            "ends with white space after 20 nucleotide letters (NCBI BLAST+'s warning about the letters depends on that white space, which LOSAT's reader drops)".to_string()
         } else if defline.is_empty() {
             "is empty".to_string()
         } else if defline.first().is_some_and(u8::is_ascii_whitespace) {
@@ -109,6 +109,32 @@ pub fn check_deflines(bytes: &[u8], role: &str) -> Result<()> {
         bail!(
             "{role} record {record} has a defline that {problem}; NCBI BLAST+ reads such a defline differently, which is not supported by LOSAT's BLASTN (use ASCII deflines without control characters)"
         );
+    }
+    Ok(())
+}
+
+/// Rejects a sequence line with a non-ASCII byte. `bio` drops Unicode white space at the
+/// end of a line (U+00A0 and others) and keeps other bytes; NCBI trims only ASCII white
+/// space, so it reads such bytes as invalid residues (a warning, or an error on the first
+/// data line of a record).
+///
+/// NCBI reference: c++/src/objtools/readers/fasta.cpp:1004-1006
+/// ```c
+///             stringstream warn_strm;
+///             warn_strm << "FASTA-Reader: Ignoring invalid " << x_NucOrProt()
+///                 << "residues at position(s): ";
+/// ```
+/// `role` is `query` or `subject`.
+pub fn check_sequence_lines(bytes: &[u8], role: &str) -> Result<()> {
+    let mut record = 0;
+    for line in bytes.split(|&byte| byte == b'\n') {
+        if line.starts_with(b">") {
+            record += 1;
+        } else if !line.is_ascii() {
+            bail!(
+                "{role} record {record} has a non-ASCII byte in a sequence line; NCBI BLAST+ reads it as an invalid residue, which is not supported by LOSAT's BLASTN (use IUPAC nucleotide letters)"
+            );
+        }
     }
     Ok(())
 }

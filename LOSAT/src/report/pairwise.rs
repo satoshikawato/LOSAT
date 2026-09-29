@@ -180,6 +180,14 @@ pub struct BlastpPairwiseReport {
 // Pairwise Output Writers
 // =============================================================================
 
+/// The defline of a subject as `bio` reads it: the ID, a space and the rest.
+fn subject_defline(subject_id: &str, subject_title: Option<&str>) -> String {
+    match subject_title.filter(|title| !title.is_empty()) {
+        Some(title) => format!("{subject_id} {title}"),
+        None => subject_id.to_string(),
+    }
+}
+
 /// Write database/subject information header
 ///
 /// Reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp
@@ -1747,11 +1755,12 @@ fn write_blastn_description_table<W: Write>(
             .get(*s_idx as usize)
             .map(|id| id.as_ref())
             .unwrap_or("unknown");
-        let mut label = subject_id.to_string();
-        if let Some(title) = best.subject_title.as_deref() {
-            label.push(' ');
-            label.push_str(title);
-        }
+        // NCBI reference: c++/src/objtools/align_format/showdefline.cpp:498
+        // The description keeps the prefixes (`fLeavePrefixSuffix`, `defline.rs`).
+        let label = super::defline::ncbi_nucleotide_title(
+            &subject_defline(subject_id, best.subject_title.as_deref()),
+            true,
+        );
         // NCBI reference: c++/src/objtools/align_format/showdefline.cpp:915-918,930
         // ```c++
         //         if(line_component.size()+line_length > m_LineLen){
@@ -2097,12 +2106,16 @@ pub fn write_blastn_pairwise_report<W: Write>(
                 writer.flush()?;
                 probe.subject_begin(first_index);
             }
-            write_subject_header(
-                writer,
-                subject_id,
-                first_hit.subject_title.as_deref(),
-                first_hit.subject_length,
-            )?;
+            // NCBI reference: c++/src/objtools/align_format/showalign.cpp:2273
+            // ```c++
+            //             alnDispParams->title = CDeflineGenerator().GenerateDefline(bsp_handle);
+            // ```
+            // The subject's defline is its title (`defline.rs`).
+            let heading = super::defline::ncbi_nucleotide_title(
+                &subject_defline(subject_id, first_hit.subject_title.as_deref()),
+                false,
+            );
+            write_subject_header(writer, &heading, None, first_hit.subject_length)?;
             if let Some(probe) = probe.as_mut() {
                 writer.flush()?;
                 probe.subject_end(first_index);

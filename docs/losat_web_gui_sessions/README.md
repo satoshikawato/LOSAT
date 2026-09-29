@@ -36,6 +36,7 @@
 | S07 | [BLASTN outfmt 0：実装とゲート](session_s07_e2a2_blastn_outfmt0_port.md) | E2a-2 | NCBI とバイト一致、6/7 に退行なし | 完了（2026-09-29、[ゲート記録](../evidence/losat_web_e2a/README.md)） |
 | S07+ | [BLASTN の得点のオプションと入力の読み方](session_s07p_e2c_blastn_scoring_options.md) | E2c | 既定以外の得点と入力の読み方が NCBI と同じか、明示的に拒否される（S06・S07 で追加。S12 の前に終える） | 未着手 |
 | S08 | [TBLASTX outfmt 0/7](session_s08_e2b_tblastx_outfmt0_7.md) | E2b | NCBI とバイト一致（承認済みの例外を除く） | 未着手 |
+| S08+ | [BLASTP・TBLASTN・TBLASTX の既定以外のオプション](session_s08p_e2e_protein_options.md) | E2e | 既定以外のオプションが NCBI と同じか、明示的に拒否される（S07+ で追加、TD-13。S12 の前に終える） | 未着手 |
 | S09 | [ブラウザでの実行基盤](session_s09_w1_browser_runtime.md) | W1 | V-BR、前処理の割合の実測 | 未着手 |
 | S09+ | 前処理キャッシュ（条件付き） | R2 | DW-8 の条件を満たした program だけ。S09 の結果で行を足す | 未定 |
 | S10 | [データ層](session_s10_w2_data_layer.md) | W2 | BlockStore の契約試験、回収・保護・容量不足 | 未着手 |

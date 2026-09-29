@@ -2,7 +2,8 @@
 """Compare BLASTN input handling and query batches with NCBI (Session S07+; comparison only).
 
 Writes derived inputs into WORK (from the repository's inputs and fixed seeds), runs each
-case in NCBI and LOSAT (standard input empty; `-out` files compared with stdout), and
+case in NCBI and LOSAT (standard input empty unless the case gives a file; `-out` files
+compared with stdout), and
 prints one line per case: `same`, `same-error`,
 `losat-rejects` (NCBI succeeds; LOSAT fails with a message that names what it does not
 support, whether NCBI succeeds or fails otherwise), `both-fail` (both fail, each with its
@@ -166,6 +167,28 @@ def cases(work: Path) -> list[tuple[str, list[str], str]]:
         ("audit2.batch_size_env", ["-query", f"{F}/multi_query.fasta", *multi_s, "-outfmt", "6"], "losat-rejects", {"BATCH_SIZE": "1000"}),
         ("audit2.greedy_gap_table_error", ["-query", f"{F}/multi_query.fasta", *multi_s, "-gapopen", "32768", "-gapextend", "1", "-outfmt", "6"], "same-error"),
         ("audit2.greedy_gap_limit", ["-query", f"{F}/multi_query.fasta", *multi_s, "-gapopen", "32768", "-gapextend", "32768", "-outfmt", "6"], "losat-rejects"),
+        # The third audit round: NCBI reads the subjects before it opens -out and checks the
+        # options; standard input as a query or a subject; a directory; e-value forms.
+        ("audit3.empty_subject.penalty_0", ["-query", f"{F}/multi_query.fasta", "-subject", f"{w}/empty.fa", "-penalty", "0", "-outfmt", "6"], "same-error"),
+        ("audit3.empty_subject.evalue_0", ["-query", f"{F}/multi_query.fasta", "-subject", f"{w}/empty.fa", "-evalue", "0"], "same-error"),
+        ("audit3.empty_subject.word_size_101", ["-query", f"{F}/multi_query.fasta", "-subject", f"{w}/empty.fa", "-word_size", "101", "-outfmt", "7"], "same-error"),
+        ("audit3.empty_subject.max_target_seqs_1", ["-query", f"{F}/multi_query.fasta", "-subject", f"{w}/empty.fa", "-max_target_seqs", "1"], "same-error"),
+        ("audit3.empty_subject.out", ["-query", f"{F}/multi_query.fasta", "-subject", f"{w}/empty.fa", "-out", "{OUT}"], "same-error"),
+        ("audit3.empty_subject.missing_query", ["-query", f"{w}/missing.fa", "-subject", f"{w}/empty.fa"], "both-fail"),
+        ("audit3.piped_query", ["-query", "/dev/stdin", *multi_s, "-outfmt", "6"], "same", {}, f"{F}/multi_query.fasta"),
+        ("audit3.piped_query.fmt0", ["-query", "/dev/stdin", *multi_s], "same", {}, f"{F}/multi_query.fasta"),
+        ("audit3.piped_subject", ["-query", f"{F}/multi_query.fasta", "-subject", "/dev/stdin", "-outfmt", "7"], "same", {}, f"{F}/multi_subject.fasta"),
+        ("audit3.piped_empty_subject", ["-query", f"{F}/multi_query.fasta", "-subject", "/dev/stdin", "-outfmt", "6"], "same-error"),
+        ("audit3.piped_white_space_query", ["-query", "/dev/stdin", *multi_s, "-outfmt", "6"], "losat-rejects", {}, f"{w}/white_space.fa"),
+        ("audit3.directory_query", ["-query", w, *multi_s, "-outfmt", "6"], "same"),
+        ("audit3.directory_subject", ["-query", f"{F}/multi_query.fasta", "-subject", w, "-outfmt", "6"], "same-error"),
+        ("audit3.evalue_inf", ["-query", f"{F}/multi_query.fasta", *multi_s, "-evalue", "inf", "-outfmt", "6"], "both-fail"),
+        ("audit3.evalue_nan", ["-query", f"{F}/multi_query.fasta", *multi_s, "-evalue", "nan", "-outfmt", "6"], "both-fail"),
+        ("audit3.evalue_space", ["-query", f"{F}/multi_query.fasta", *multi_s, "-evalue", " 1", "-outfmt", "6"], "both-fail"),
+        ("audit3.evalue_plus_inf", ["-query", f"{F}/multi_query.fasta", *multi_s, "-evalue", "+inf", "-outfmt", "6"], "losat-rejects"),
+        ("audit3.evalue_plus_nan", ["-query", f"{F}/multi_query.fasta", *multi_s, "-evalue", "+nan", "-outfmt", "6"], "losat-rejects"),
+        ("audit3.evalue_hex", ["-query", f"{F}/multi_query.fasta", *multi_s, "-evalue", "0x10", "-outfmt", "6"], "losat-rejects"),
+        ("audit3.evalue_exponent", ["-query", f"{F}/multi_query.fasta", *multi_s, "-evalue", "+1E-5", "-outfmt", "6"], "same"),
     ]
     for task in ("megablast", "blastn"):
         for gaps in (["-reward", "1", "-penalty", "-2", "-gapopen", "5", "-gapextend", "2"],
@@ -204,14 +227,17 @@ def main() -> int:
     unexpected = []
     print("case\texpect\tresult\tlosat_stderr")
     for name, argv, expect, *extra in cases(args.work.resolve()):
+        # Optional: environment variables, and a file (relative to the engine) given as
+        # standard input.
         env = {**os.environ, **(extra[0] if extra else {})}
+        stdin = (ENGINE / extra[1]).read_bytes() if len(extra) > 1 else b""
         runs = []
         for label, command in (("ncbi", [str(args.bin_dir / "blastn")]), ("losat", [str(args.losat.resolve()), "blastn"])):
             # `{OUT}`: the -out file, whose existence and bytes join the stdout.
             out = args.work.resolve() / f"out.{label}"
             out.unlink(missing_ok=True)
             run = subprocess.run([*command, *(str(out) if word == "{OUT}" else word for word in argv)], cwd=ENGINE,
-                                 capture_output=True, input=b"", env=env)
+                                 capture_output=True, input=stdin, env=env)
             if "{OUT}" in argv:
                 run.stdout += b"<out>" + (out.read_bytes() if out.exists() else b"<missing>")
             runs.append(run)

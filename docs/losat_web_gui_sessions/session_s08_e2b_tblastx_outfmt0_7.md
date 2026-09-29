@@ -20,4 +20,4 @@ S07+ で分かった、TBLASTX にも当てはまる NCBI の振る舞い（`doc
 
 ## 終了・引き継ぎ
 
-README の規則 8 に従う。次は [S09 — ブラウザでの実行基盤](session_s09_w1_browser_runtime.md)。
+README の規則 8 に従う。次は [S08+ — BLASTP・TBLASTN・TBLASTX の既定以外のオプション](session_s08p_e2e_protein_options.md)。

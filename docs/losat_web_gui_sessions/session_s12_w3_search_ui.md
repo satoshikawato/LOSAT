@@ -16,11 +16,12 @@ LOSAT Web の段階 W3 を実行する。先に [セッション README](README.
 8. BLASTN の得点と入力（S07+、`docs/evidence/losat_web_e2c/AUTHORITY.md`）。フォームは次を守る：
    - `-reward`・`-penalty`・`-gapopen`・`-gapextend`・`-word_size` は省略できるオプションで、省いたときは task の既定値（blastn：11、2、−3、5/2。megablast：28、1、−2、0/0）になる。task を切り替えたときに、既定値を argv に書き込まない（既定値と同じ値を明示しても NCBI と同じ結果になるが、argv は短く保つ）。
    - reward は 1 以上（0 は LOSAT が拒否する）、penalty は 0 以下、gap は任意の整数。NCBI が拒否する組合せ（penalty 0、gap extend 0 の gap open、blastn の task の gap 0/0、NCBI の Karlin の表に無い組）は、`validate` が NCBI の文言（`BLAST query/options error: …` または `BLAST engine error: Error: …`）で返すので、その文言をそのまま見せる。表の組と、表を超える gap（ungapped の block を写す）は、NCBI とバイト一致で実行される（`scoring_sweep.py` の 880 の組合せ）。
-   - word size は 4 以上（100 を超えると `validate` が NCBI の文言で拒否する）、e-value は 0 より大きい。LOSAT は、reward − penalty が 3000 を超える得点と、megablast の 32767 を超える gap を、LOSAT の文言で拒否する（`AUTHORITY.md` §G）。
+   - word size は 4 以上（100 を超えると `validate` が NCBI の文言で拒否する）、e-value は 0 より大きい有限の 10 進数（NCBI が受け付ける `+inf`・`+nan`・`0x10` は LOSAT が拒否する。`inf`・`nan` は NCBI も引数の誤りにする）。LOSAT は、reward − penalty が 3000 を超える得点と、megablast の 32767 を超える gap を、LOSAT の文言で拒否する（`AUTHORITY.md` §G）。
    - `register` のハンドルは、登録した program の `run` でだけ使える（BLASTN の入力の検査を他の program の登録で避けられないように）。program を切り替えたら登録し直す。
-   - `register` は、NCBI が違う読み方をする BLASTN の入力（空の定義行・先頭の空白・tab などの制御文字・非 ASCII、残基の無いレコード、IUPAC の文字以外の残基。`U` は `T` として受け付ける）を 「not supported by LOSAT's BLASTN」を含む文言で拒否する（TD-12）。レコード一覧の警告として、その文言を見せる。
+   - `register` は、NCBI が違う読み方をする BLASTN の入力（空の定義行・先頭の空白・tab などの制御文字・非 ASCII、残基の無いレコード、IUPAC の文字以外の残基、最初の定義行の前の文字や UTF-8 でないバイト。`U` は `T` として受け付ける）を 「not supported by LOSAT's BLASTN」を含む文言で拒否する（TD-12）。レコード一覧の警告として、その文言を見せる。
    - query の batch に依存する場合（表を超える gap で組成の違う query が最初の batch に収まらない、など）は、`run` が LOSAT の文言で失敗する。失敗として見せ、結果を部分的に出さない。
-9. E2E：代表的な研究作業（Subject を保持したまま Query を変えて繰り返す、キューに複数積む、実行中に次のジョブを編集する）と、境界条件（空の入力、不正なレコード、除外の後の再実行、取消）を Playwright で試す。
+9. BLASTP・TBLASTN・TBLASTX（S08+、TD-13）と BLASTX（SX）の既定以外のオプション：それぞれのセッションが書き足す、直した値と拒否する値に従う。
+10. E2E：代表的な研究作業（Subject を保持したまま Query を変えて繰り返す、キューに複数積む、実行中に次のジョブを編集する）と、境界条件（空の入力、不正なレコード、除外の後の再実行、取消）を Playwright で試す。
 
 完了条件は計画 §7 の S12 の行による。画面の記録を画面レビューに見せ、指摘と対応を `docs/evidence/losat_web_w3/README.md` に記録する。
 

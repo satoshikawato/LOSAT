@@ -125,9 +125,9 @@ keeps.
   validates the argv that it will run, with its `-num_threads`, so a `-num_threads` in
   the user's words is reported by `validate` (the parser rejects the repeated option).
 - Every other word is parsed by the engine's CLI parser, so options and errors behave
-  exactly as on the command line. LOSAT's own progress output (`-verbose`) and its
-  debug output (environment variables such as `LOSAT_TIMING`) go to the module's WASI
-  standard error, not to stream 3; stream 3 carries the warnings that the CLI writes.
+  exactly as on the command line. LOSAT's own debug output (environment variables such
+  as `LOSAT_TIMING`) goes to the module's WASI standard error, not to stream 3; stream 3
+  carries the warnings that the CLI writes.
 - Options are resolved separately for each output format. If the resolved *search*
   options differ between formats (for example the hitlist size), `run` fails with an
   explicit error instead of searching more than once (plan TD-4). No current program

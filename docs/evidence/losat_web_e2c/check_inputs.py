@@ -11,7 +11,8 @@ argument parser rejects, exit 1, and LOSAT's clap parser rejects, exit 2), `both
 (both fail with the same exit status, each with its own message, and write the same
 output), `timeout` or `DIFF`, with the `expect` column of the case. Exits 1 when a result
 is not the expected one. A case may give environment variables, a file for standard
-input, and named pipes with the files that a writer puts into them in order.
+input, named pipes with the files that a writer puts into them in order, and a named pipe
+for -out that a reader empties.
 
 Usage: check_inputs.py --bin-dir DIR --losat LOSAT --work DIR
 """
@@ -88,6 +89,14 @@ def make_inputs(work: Path) -> None:
     subject_tab = subject.replace(">msA close homolog", ">msA\tclose homolog", 1)
     (work / "tab_subject.fa").write_text(subject_tab)
     (work / "leading_blank_subject.fa").write_text("\n" + subject)
+    # One query and 15 subjects that it hits (more than NCBI's wrapped preliminary hit list
+    # of 10), from fixed seeds.
+    rng15 = random.Random(15)
+    (work / "one_query.fa").write_text(f">q1\n{q}\n")
+    (work / "fifteen_subjects.fa").write_text("".join(
+        f">s{index}\n" + "".join(rng15.choice("ACGT") if rng15.random() < 0.01 * (index + 1) else c for c in q) + "\n"
+        for index in range(15)))
+    (work / "empty_record_subject.fa").write_text(">s0 empty\n" + subject)
 
 
 def cases(work: Path) -> list[tuple[str, list[str], str]]:
@@ -257,6 +266,54 @@ def cases(work: Path) -> list[tuple[str, list[str], str]]:
         ("audit4.fifo.query", ["-query", f"{w}/fifo_q", *multi_s], "same", {}, None, [(f"{w}/fifo_q", f"{F}/multi_query.fasta")]),
         ("audit4.fifo.empty_query", ["-query", f"{w}/fifo_q", *multi_s, "-outfmt", "6"], "losat-rejects", {}, None, [(f"{w}/fifo_q", "/dev/null")]),
     ]
+    # The fifth audit round: -outfmt delimiters; a constrained integer argument of a bare
+    # 0x; NCBI's 32-bit preliminary hit list size; -dust as NCBI reads it; -out opened
+    # once; empty and long file names; LOSAT's thread limit; the subject records.
+    one = ["-query", f"{w}/one_query.fa", "-subject", f"{w}/fifteen_subjects.fa"]
+    rows += [
+        ("audit5.outfmt.delim_without_value", [*mq, *multi_s, "-outfmt", "0 delim"], "same-error"),
+        ("audit5.outfmt.word_delim", [*mq, *multi_s, "-outfmt", "abc delim"], "same-error"),
+        ("audit5.outfmt.out_of_range_delim", [*mq, *multi_s, "-outfmt", "99 delim qaccver"], "same-error"),
+        ("audit5.outfmt.pairwise_delim", [*mq, *multi_s, "-outfmt", "0 delim=,"], "same"),
+        ("audit5.outfmt.empty_delim", [*mq, *multi_s, "-outfmt", "6 delim="], "same"),
+        ("audit5.outfmt.tabular_delim", [*mq, *multi_s, "-outfmt", "6 delim=;"], "losat-rejects"),
+        ("audit5.bare_0x.reward", [*empty_q, *multi_s, "-reward", "0x"], "arg-error"),
+        ("audit5.bare_0x.penalty", [*mq, *multi_s, "-penalty", "0X"], "arg-error"),
+        ("audit5.bare_0x.word_size", [*mq, *multi_s, "-word_size", "0x"], "arg-error"),
+        ("audit5.bare_0x.gaps", [*mq, *multi_s, "-gapopen", "0x", "-gapextend", "0X", "-outfmt", "6"], "same"),
+        ("audit5.hitlist.below_wrap", [*one, "-max_target_seqs", "1073741823", "-outfmt", "6"], "same"),
+        ("audit5.hitlist.wrap", [*one, "-max_target_seqs", "1073741824", "-outfmt", "6"], "same"),
+        ("audit5.hitlist.wrap.hex.fmt0", [*one, "-max_target_seqs", "0x40000000"], "same"),
+        ("audit5.hitlist.wrap.fmt7", [*one, "-max_target_seqs", "2147483597", "-outfmt", "7"], "same"),
+        ("audit5.hitlist.negative", [*one, "-max_target_seqs", "2147483598", "-outfmt", "6"], "losat-rejects"),
+        ("audit5.hitlist.negative.empty_query", [*empty_q, *multi_s, "-max_target_seqs", "2147483647"], "same"),
+        ("audit5.dust.double_space", [*mq, *multi_s, "-dust", "20  64 1", "-outfmt", "6"], "same-error"),
+        ("audit5.dust.leading_space", [*mq, *multi_s, "-dust", " 20 64 1"], "same-error"),
+        ("audit5.dust.no_break_space", [*mq, *multi_s, "-dust", "20\u00a064 1"], "same-error"),
+        ("audit5.dust.capital_yes", [*mq, *multi_s, "-dust", "Yes"], "same-error"),
+        ("audit5.dust.empty", [*mq, *multi_s, "-dust", ""], "same-error"),
+        ("audit5.dust.hex", [*mq, *multi_s, "-dust", "0x14 64 1"], "same-error"),
+        ("audit5.dust.negative_level", [*mq, *multi_s, "-dust", "-1 64 1", "-outfmt", "6"], "same"),
+        ("audit5.dust.zero_window", [*mq, *multi_s, "-dust", "1 0 1", "-outfmt", "6"], "same"),
+        ("audit5.dust.negative_linker", [*mq, *multi_s, "-dust", "20 64 -1", "-outfmt", "6"], "same"),
+        ("audit5.dust.negative_window", [*mq, *multi_s, "-dust", "20 -64 1"], "same"),
+        ("audit5.dust.error.penalty_0.out", [*mq, *multi_s, "-dust", "20 64", "-penalty", "0", "-out", "{OUT}"], "same-error"),
+        ("audit5.dust.error.empty_subject", [*mq, "-subject", f"{w}/empty.fa", "-dust", "20 64"], "same-error"),
+        ("audit5.dust.error.empty_query", [*empty_q, *multi_s, "-dust", "20 64"], "same-error"),
+        ("audit5.out_fifo", [*mq, *multi_s, "-outfmt", "6", "-out", f"{w}/fifo_out"], "same", {}, None, [], f"{w}/fifo_out"),
+        ("audit5.out_fifo.fmt0", [*mq, *multi_s, "-out", f"{w}/fifo_out"], "same", {}, None, [], f"{w}/fifo_out"),
+        ("audit5.empty_name.query", ["-query", "", *multi_s], "same-error"),
+        ("audit5.empty_name.subject", [*mq, "-subject", ""], "same-error"),
+        ("audit5.empty_name.out", [*mq, *multi_s, "-out", ""], "same-error"),
+        ("audit5.long_name.out", [*mq, "-subject", f"{w}/empty.fa", "-out", f"{w}/" + "o" * 256], "arg-error"),
+        ("audit5.long_name.out.255", [*mq, *multi_s, "-outfmt", "6", "-out", f"{w}/" + "o" * 255], "same"),
+        ("audit5.threads.above_rayon", [*mq, *multi_s, "-num_threads", "70000", "-outfmt", "6"], "losat-rejects"),
+        ("audit5.empty_record_subject.penalty_0", [*mq, "-subject", f"{w}/empty_record_subject.fa", "-penalty", "0"], "same-error"),
+        ("audit5.empty_record_subject.empty_query", [*empty_q, "-subject", f"{w}/empty_record_subject.fa"], "same"),
+        ("audit5.empty_record_subject", [*mq, "-subject", f"{w}/empty_record_subject.fa", "-outfmt", "6"], "losat-rejects"),
+        ("audit5.chunk_size.blank", [*mq, *multi_s, "-outfmt", "6"], "same", {"CHUNK_SIZE": "  "}),
+        ("audit5.chunk_size.empty", [*mq, *multi_s, "-outfmt", "6"], "same", {"CHUNK_SIZE": ""}),
+    ]
     for task in ("megablast", "blastn"):
         for gaps in (["-reward", "1", "-penalty", "-2", "-gapopen", "5", "-gapextend", "2"],
                      ["-reward", "1", "-penalty", "-3", "-gapopen", "3", "-gapextend", "2"],
@@ -307,6 +364,8 @@ def main() -> int:
         stdin_file = source[1] if isinstance(source, tuple) else None
         stdin = (ENGINE / source).read_bytes() if isinstance(source, str) else b""
         fifos = extra[2] if len(extra) > 2 else []
+        # A named pipe given as -out, read by a reader into a file that joins the stdout.
+        out_fifo = extra[3] if len(extra) > 3 else None
         runs = []
         for label, command in (("ncbi", [str(args.bin_dir / "blastn")]), ("losat", [str(args.losat.resolve()), "blastn"])):
             # `{OUT}`: the -out file, whose existence and bytes join the stdout.
@@ -319,6 +378,12 @@ def main() -> int:
                     os.mkfifo(fifo)
                 script = " && ".join(f"cat '{ENGINE / source}' > '{fifo}'" for fifo, source in fifos)
                 writer = subprocess.Popen(["sh", "-c", script])
+            reader = None
+            if out_fifo:
+                Path(out_fifo).unlink(missing_ok=True)
+                Path(f"{out_fifo}.read").unlink(missing_ok=True)
+                os.mkfifo(out_fifo)
+                reader = subprocess.Popen(["sh", "-c", f"cat '{out_fifo}' > '{out_fifo}.read'"])
             words = [*command, *(str(out) if word == "{OUT}" else word for word in argv)]
             try:
                 if stdin_file:
@@ -331,6 +396,13 @@ def main() -> int:
             if writer:
                 writer.kill()
                 writer.wait()
+            if reader:
+                try:
+                    reader.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    reader.kill()
+                    reader.wait()
+                run.stdout += b"<fifo>" + Path(f"{out_fifo}.read").read_bytes()
             if "{OUT}" in argv:
                 run.stdout += b"<out>" + (out.read_bytes() if out.exists() else b"<missing>")
             runs.append(run)

@@ -17,6 +17,8 @@ S07+ で BLASTN に見つかった種類の差が、これらにもあるかは�
 - 順序：`-outfmt` の解析、subject のファイル（レコードが無ければ engine error）、query のファイル、`-out`、警告、検査、「Query is Empty!」、LOSAT の上限の順（BLASTN の `run`）。開けないファイルは NCBI の文言（`cli.rs` の `inaccessible`）。`-` は標準入力・標準出力、`-query` の既定値は `-`。
 - `-outfmt` の NCBI の文言と終了コード（`blastn/hsp.rs` の `parse_blastn_output_format`）。
 - NCBI の program に無いオプションは削る（`AGENTS.md` の規則 5。BLASTN では `-verbose` など 4 つ）。
+- 制約のある整数の引数は、制約が `NStr::StringToDouble` で読み直すので `0x` だけを拒否する（`ncbi_constrained_integer`）。`-dust`・`-seg` などの文字列の引数は、NCBI の区切り方と誤り（`parse_dust_filtering`）。`-out` は 1 度だけ開き、名前は 256 バイト未満。予備の hit list の大きさなどの `Int4` の計算は NCBI と同じく折り返す（`get_prelim_hitlist_size`）。
+- 全 program に共通の CLI の誤りの経路：出力の書き込みの失敗（NCBI は「BLAST failed to write output」と終了コード 6、表形式は abort。BLASTX は既にそうしている）と、UTF-8 でないファイル名の表示（`cli.rs` の `inaccessible`）を、BLASTN を含めて NCBI と同じにする（S07+ の第 5 回の監査、`docs/evidence/losat_web_e2c/AUTHORITY.md` の末尾）。
 
 これらのオプションは、アプリの検索画面（S12）に出る。
 

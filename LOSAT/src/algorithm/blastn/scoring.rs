@@ -85,19 +85,23 @@ fn scoring_spec(args: &BlastnArgs) -> NuclScoringSpec {
 ///         LOG_POST(Error << "Please refer to the BLAST+ user manual.");       \
 ///         exit_code = BLAST_INPUT_ERROR;                                      \
 /// ```
-/// The CLI accepts no reward of 0, so NCBI's exemption of 0/0 (rmblastn) does not
-/// arise. Only megablast extends greedily. `-evalue` is not negative (its parser).
+/// Only megablast extends greedily. The reward and the penalty are NCBI's 16-bit values
+/// (`determine_scoring_params`).
 ///
-/// LOSAT's limits, for options that NCBI runs: scores whose range (reward - penalty) is
-/// above `MAX_SCORE_RANGE`, where LOSAT's Karlin-Altschul computation has not been
-/// compared with NCBI's (NCBI keeps the scores in 16 bits, `blast_options.h:465-466`),
-/// and greedy gap costs above `MAX_GREEDY_GAP_COST`, beyond which NCBI's 32-bit greedy
-/// distances (`blast_gapalign.c:233-236`) can overflow.
+/// LOSAT's limits come after NCBI's checks, for options that NCBI runs: a reward of 0 or
+/// less (NCBI's rmblastn matrix scoring when the penalty is 0 too, otherwise no valid
+/// query),
+/// an infinite e-value, and scores whose range (reward - penalty) is above
+/// `MAX_SCORE_RANGE`, where LOSAT's Karlin-Altschul computation has not been compared with
+/// NCBI's; that range limit comes before NCBI's Karlin-Altschul table error, which needs
+/// that computation. The limit on greedy gap costs follows the table check
+/// (`check_greedy_gap_costs`).
 pub fn check_scoring_options(args: &BlastnArgs) -> anyhow::Result<()> {
     let spec = scoring_spec(args);
     let word_size = super::coordination::determine_effective_word_size(args);
     let greedy = args.task == "megablast";
-    let message = if spec.penalty >= 0 {
+    let matrix_only = spec.reward == 0 && spec.penalty == 0;
+    let message = if !matrix_only && spec.penalty >= 0 {
         "BLASTN penalty must be negative".to_string()
     } else if spec.gap_open > 0 && spec.gap_extend == 0 {
         "BLASTN gap extension penalty cannot be 0".to_string()
@@ -108,17 +112,21 @@ pub fn check_scoring_options(args: &BlastnArgs) -> anyhow::Result<()> {
     } else if spec.gap_open == 0 && spec.gap_extend == 0 && !greedy {
         "Greedy extension must be used if gap existence and extension options are zero".to_string()
     } else {
+        if spec.reward <= 0 {
+            anyhow::bail!(
+                "a reward of {} (NCBI BLAST+'s 16-bit value; 0 is NCBI's matrix scoring of rmblastn, otherwise no query is valid) is not supported by LOSAT's BLASTN",
+                spec.reward
+            );
+        }
+        if args.evalue.is_infinite() {
+            anyhow::bail!("an infinite e-value is not supported by LOSAT's BLASTN");
+        }
         let range = i64::from(spec.reward) - i64::from(spec.penalty);
         if range > MAX_SCORE_RANGE {
             anyhow::bail!(
                 "reward {} and penalty {} span more than {MAX_SCORE_RANGE} score units, which is not supported by LOSAT's BLASTN",
                 spec.reward,
                 spec.penalty
-            );
-        }
-        if greedy && spec.gap_open.max(spec.gap_extend) > MAX_GREEDY_GAP_COST {
-            anyhow::bail!(
-                "gap costs above {MAX_GREEDY_GAP_COST} with greedy extension (-task megablast) are not supported by LOSAT's BLASTN"
             );
         }
         return Ok(());
@@ -130,6 +138,19 @@ pub fn check_scoring_options(args: &BlastnArgs) -> anyhow::Result<()> {
         ),
     }
     .into())
+}
+
+/// LOSAT's limit on gap costs with greedy extension (`-task megablast`), for scoring that
+/// NCBI's Karlin-Altschul tables accept: NCBI sizes the greedy distances in 32-bit
+/// integers (`blast_gapalign.c:233-236`), which larger costs can overflow.
+pub fn check_greedy_gap_costs(args: &BlastnArgs) -> anyhow::Result<()> {
+    let spec = scoring_spec(args);
+    if args.task == "megablast" && spec.gap_open.max(spec.gap_extend) > MAX_GREEDY_GAP_COST {
+        anyhow::bail!(
+            "gap costs above {MAX_GREEDY_GAP_COST} with greedy extension (-task megablast) are not supported by LOSAT's BLASTN"
+        );
+    }
+    Ok(())
 }
 
 /// NCBI reference: c++/include/algo/blast/core/blast_hits.h:192
@@ -211,7 +232,8 @@ pub fn check_scoring(args: &BlastnArgs) -> anyhow::Result<()> {
     let spec = scoring_spec(args);
     NuclValues::new(spec.reward, spec.penalty)
         .and_then(|values| values.check_gaps(&spec))
-        .map_err(|message| karlin_error(&message, 1))
+        .map_err(|message| karlin_error(&message, 1))?;
+    check_greedy_gap_costs(args)
 }
 
 /// The Karlin-Altschul blocks of one query context (a strand of a query).

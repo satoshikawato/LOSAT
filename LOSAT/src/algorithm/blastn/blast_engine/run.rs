@@ -79,13 +79,15 @@ use super::super::hsp::{
     sort_hsps_by_score, trim_by_max_hsps, write_output_blastn_hitlists_to_writer, BlastnHitList,
     BlastnHsp, BlastnHspList, BlastnOutputFormat, NCBI_BLASTN_VERSION,
 };
-use super::super::input::{check_deflines, check_residues, with_u_as_t};
+use super::super::input::{
+    check_deflines, check_residues, is_blank, with_u_as_t, TEXT_BEFORE_DEFLINE,
+};
 use super::super::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
 use super::super::lookup::{build_unmasked_ranges, reverse_complement};
 use super::super::pairwise::{pairwise_hits, DisplayMasks};
 use super::super::scoring::{
-    check_scoring_options, context_blocks, context_ungapped_blocks, gap_x_dropoffs, karlin_error,
-    ContextKarlin,
+    check_greedy_gap_costs, check_scoring_options, context_blocks, context_ungapped_blocks,
+    gap_x_dropoffs, karlin_error, ContextKarlin,
 };
 use crate::blastinput::query_batch::query_batches;
 use crate::report::pairwise::{
@@ -4644,20 +4646,22 @@ fn read_blastn_fasta_bytes(path: &std::path::Path, role: &str) -> Result<Vec<u8>
 }
 
 /// The records of a FASTA file, after rejecting the deflines and residues that NCBI reads
-/// differently (`input.rs`). `bio` fails on text before the first defline (blank lines,
-/// `;` comments, a byte order mark), which NCBI reads.
+/// differently (`input.rs`); a file of white space only has no record, as in NCBI.
 fn parse_blastn_fasta(
     bytes: &[u8],
     path: &std::path::Path,
     role: &str,
 ) -> Result<Vec<bio::io::fasta::Record>> {
+    if is_blank(bytes) {
+        return Ok(Vec::new());
+    }
     check_deflines(bytes, role)?;
     let records = bio::io::fasta::Reader::new(bytes)
         .records()
         .collect::<std::result::Result<Vec<_>, _>>()
         .with_context(|| {
             format!(
-                "failed to read {role} FASTA {} (text before the first defline, which NCBI BLAST+ may read, is not supported by LOSAT's BLASTN)",
+                "failed to read {role} FASTA {} ({TEXT_BEFORE_DEFLINE})",
                 path.display()
             )
         })?;
@@ -4728,6 +4732,24 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     // The checks that precede reading the inputs run first, as before.
     crate::utils::threading::validate_threads(args.num_threads)?;
     check_blastn_lookup_options(&args, configure_task(&args).effective_word_size)?;
+    // NCBI checks that the input files can be opened when it parses the arguments, before
+    // it opens the output or checks the options.
+    for (path, role) in [(&args.query, "query"), (&args.subject, "subject")] {
+        std::fs::File::open(path)
+            .with_context(|| format!("failed to open {role} FASTA {}", path.display()))?;
+    }
+    let outfmt = args.outfmt.clone();
+    let out = args.out.clone();
+    // NCBI opens the output file here, before the options are checked, so a run that
+    // stops at a check leaves an empty file.
+    if let Some(path) = out.as_deref() {
+        std::fs::File::create(path)
+            .with_context(|| format!("failed to create output {}", path.display()))?;
+    }
+    let sink = out.as_deref().map_or(OutputSink::Stdout, OutputSink::File);
+    let mut stderr = std::io::stderr();
+    let mut outputs = ReportOutputs::single(&outfmt, sink, &mut stderr);
+    let output_formats = process_options(&args, &mut outputs)?;
     // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_input_aux.cpp:86-91
     // ```c
     //     char* batch_sz_str = getenv("BATCH_SIZE");
@@ -4748,18 +4770,6 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             );
         }
     }
-    let outfmt = args.outfmt.clone();
-    let out = args.out.clone();
-    // NCBI opens the output file here, before the options are checked, so a run that
-    // stops at a check leaves an empty file.
-    if let Some(path) = out.as_deref() {
-        std::fs::File::create(path)
-            .with_context(|| format!("failed to create output {}", path.display()))?;
-    }
-    let sink = out.as_deref().map_or(OutputSink::Stdout, OutputSink::File);
-    let mut stderr = std::io::stderr();
-    let mut outputs = ReportOutputs::single(&outfmt, sink, &mut stderr);
-    let output_formats = process_options(&args, &mut outputs)?;
     // NCBI reference: ncbi-blast/c++/src/app/blast/blastn_app.cpp:192-212
     // ```c
     //         InitializeSubject(db_args, m_OptsHndl, m_CmdLineArgs->ExecuteRemotely(),
@@ -4773,15 +4783,26 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     if args.verbose {
         eprintln!("Reading query & subject...");
     }
-    // The query file is opened first, so that a missing query is reported before a
-    // missing subject, as before.
     let query_bytes = read_blastn_fasta_bytes(&args.query, "query")?;
     let subjects = read_blastn_fasta_records(&args.subject, "subject")?;
-    if query_is_empty(&query_bytes) {
-        // NCBI reads a pipe as not empty (below), and then prints the report of no query.
-        if !std::fs::metadata(&args.query).is_ok_and(|metadata| metadata.is_file()) {
+    check_subjects_not_empty(&subjects)?;
+    // NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.cpp:856-860
+    // ```c
+    // 	char c;
+    // 	CNcbiStreampos orig_p = in.tellg();
+    // 	// Piped input
+    // 	if(orig_p < 0)
+    // 		return false;
+    // ```
+    if is_blank(&query_bytes) {
+        // NCBI reads a stream without a position (a pipe) as not empty, and then prints the
+        // report of no query.
+        let seekable = std::fs::File::open(&args.query)
+            .and_then(|mut file| std::io::Seek::stream_position(&mut file))
+            .is_ok();
+        if !seekable {
             anyhow::bail!(
-                "an empty query that is not a regular file (such as a pipe) is not supported by LOSAT's BLASTN"
+                "an empty query from a stream without a position (such as a pipe) is not supported by LOSAT's BLASTN"
             );
         }
         outputs
@@ -4797,28 +4818,32 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     search(args, &queries, &subjects, &mut outputs, output_formats)
 }
 
-/// Whether the query file has no character but white space.
+/// NCBI's error for a subject file without records, raised when it sets up the subjects
+/// (before the query is read).
 ///
-/// NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.cpp:856-873
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
 /// ```c
-/// 	char c;
-/// 	CNcbiStreampos orig_p = in.tellg();
-/// 	// Piped input
-/// 	if(orig_p < 0)
-/// 		return false;
-///
-/// 	IOS_BASE::iostate orig_state = in.rdstate();
-/// 	IOS_BASE::fmtflags orig_flags = in.setf(ios::skipws);
-///
-/// 	if(! (in >> c))
-/// 		return true;
+/// CObjMgr_QueryFactory::CObjMgr_QueryFactory(CBlastQueryVector & queries)
+///     : m_QueryVector(& queries)
+/// {
+///     if (queries.Empty()) {
+///         NCBI_THROW(CBlastException, eInvalidArgument, "Empty CBlastQueryVector");
+///     }
 /// ```
-/// `in >> c` skips the characters of C's `isspace`. A stream without a position (a pipe)
-/// is not empty (`orig_p < 0`); the caller handles that case.
-fn query_is_empty(bytes: &[u8]) -> bool {
-    bytes
-        .iter()
-        .all(|byte| matches!(byte, b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r'))
+/// NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.hpp:225-227
+/// ```c
+///             LOG_POST(Error << "BLAST engine error: " << e.GetMsg());        \
+///             exit_code = BLAST_ENGINE_ERROR;                                 \
+/// ```
+fn check_subjects_not_empty(subjects: &[bio::io::fasta::Record]) -> Result<()> {
+    if subjects.is_empty() {
+        return Err(crate::cli::NativeError {
+            exit: 3,
+            message: "BLAST engine error: Empty CBlastQueryVector\n".to_string(),
+        }
+        .into());
+    }
+    Ok(())
 }
 
 /// NCBI's processing of the options before any input is read (`SetOptions`): the output
@@ -4909,8 +4934,16 @@ fn search(
 ) -> Result<()> {
     // NCBI reads the subjects before the queries (blastn_app.cpp:192-212). Residues that
     // NCBI reads differently are rejected, and `U` is read as `T` (`input.rs`); the
-    // callers check the deflines, in the bytes of the files.
+    // callers check the deflines, in the bytes of the files. The CLI has already reported
+    // an empty query file; records of the other callers get NCBI's warning.
+    check_subjects_not_empty(subject_records)?;
     check_residues(subject_records, "subject")?;
+    if query_records.is_empty() {
+        outputs
+            .diagnostics
+            .write_all(b"Warning: [blastn] Query is Empty!\n")?;
+        return Ok(());
+    }
     check_residues(query_records, "query")?;
     let subjects_read = with_u_as_t(subject_records);
     let queries_read = with_u_as_t(query_records);
@@ -5529,7 +5562,7 @@ fn run_in_pool(
                 .any(Option::is_none)
             {
                 anyhow::bail!(
-                    "these scoring options have no Karlin-Altschul values, and the first query batch ({} residues) has an invalid query; NCBI BLAST+ does not report the error then, which is not supported by LOSAT's BLASTN",
+                    "these scoring options have no Karlin-Altschul values, and the first query batch (up to {} residues) has an invalid query; NCBI BLAST+ does not report the error then, which is not supported by LOSAT's BLASTN",
                     first_batch.size
                 );
             }
@@ -5567,6 +5600,11 @@ fn run_in_pool(
     // hit reads.
     let context_valid: Vec<bool> = context_karlin.iter().map(Option::is_some).collect();
     let any_valid_context = context_valid.iter().any(|&valid| valid);
+    // Gap costs that the tables accept but LOSAT's greedy extension does not (`scoring.rs`);
+    // with no valid context, NCBI extends nothing.
+    if any_valid_context {
+        check_greedy_gap_costs(&args)?;
+    }
     let search_karlin: Vec<ContextKarlin> = {
         let fallback = context_karlin
             .iter()

@@ -193,12 +193,31 @@ pub fn determine_effective_word_size(args: &BlastnArgs) -> usize {
         .unwrap_or_else(|| task_defaults(&args.task).word_size)
 }
 
-/// The reward, penalty and gap costs: each given one, or the task's.
+/// The reward, penalty and gap costs: each given one, or the task's. NCBI keeps the reward
+/// and the penalty in 16 bits, so a given value outside that range wraps before any check
+/// or use.
+///
+/// NCBI reference: c++/src/algo/blast/api/blast_options_local_priv.hpp:1628-1643
+/// ```c
+/// CBlastOptionsLocal::SetMatchReward(int r)
+/// {
+///     m_ScoringOpts->reward = r;
+/// ...
+/// CBlastOptionsLocal::SetMismatchPenalty(int p)
+/// {
+///     m_ScoringOpts->penalty = p;
+/// }
+/// ```
+/// NCBI reference: c++/include/algo/blast/core/blast_options.h:465-466
+/// ```c
+///    Int2 reward;      /**< Reward for a match */
+///    Int2 penalty;     /**< Penalty for a mismatch */
+/// ```
 pub fn determine_scoring_params(args: &BlastnArgs) -> (i32, i32, i32, i32) {
     let defaults = task_defaults(&args.task);
     (
-        args.reward.unwrap_or(defaults.reward),
-        args.penalty.unwrap_or(defaults.penalty),
+        i32::from(args.reward.unwrap_or(defaults.reward) as i16),
+        i32::from(args.penalty.unwrap_or(defaults.penalty) as i16),
         args.gap_open.unwrap_or(defaults.gap_open),
         args.gap_extend.unwrap_or(defaults.gap_extend),
     )

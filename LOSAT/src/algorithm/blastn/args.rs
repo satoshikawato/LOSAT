@@ -31,7 +31,7 @@ pub struct BlastnArgs {
     pub word_size: Option<usize>,
     #[arg(long, default_value_t = 1, value_parser = positive_usize)]
     pub num_threads: usize,
-    #[arg(long, default_value_t = 10.0, value_parser = nonnegative_f64)]
+    #[arg(long, default_value_t = 10.0, value_parser = blastn_evalue)]
     pub evalue: f64,
     /// Percent identity threshold for filtering HSPs (Blast_HSPTest).
     ///

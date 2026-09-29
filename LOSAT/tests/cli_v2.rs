@@ -249,11 +249,18 @@ fn defaults_and_task_overrides_remain_distinct() {
 #[test]
 fn numeric_values_are_validated_before_io() {
     for program in ["blastn", "blastp", "tblastx"] {
+        // BLASTN reads -inf, negative and infinite e-values as NCBI does; its option check
+        // rejects them (below).
+        let evalues = if program == "blastn" {
+            vec!["NaN", "0x10"]
+        } else {
+            vec!["NaN", "inf", "-inf", "-1"]
+        };
         for (key, values) in [
             ("-num_threads", vec!["0", "-1"]),
             ("-word_size", vec!["0", "-1"]),
             ("-max_target_seqs", vec!["0", "-1"]),
-            ("-evalue", vec!["NaN", "inf", "-inf", "-1"]),
+            ("-evalue", evalues),
         ] {
             for value in values {
                 assert!(
@@ -273,6 +280,23 @@ fn numeric_values_are_validated_before_io() {
     // NCBI blast_args.cpp:168-170: the argument is 4 or more; blast_options.c:1326-1333:
     // an option check rejects more than 100, with NCBI's message.
     assert!(parse("blastn", &["-outfmt", "6", "-word_size", "3"]).is_err());
+    for evalue in ["-1", "-inf", "0", "inf"] {
+        let Commands::Blastn(args) = parse("blastn", &["-outfmt", "6", "-evalue", evalue])
+            .unwrap()
+            .command
+        else {
+            unreachable!("blastn")
+        };
+        let error = LOSAT::algorithm::blastn::scoring::check_scoring_options(&args)
+            .unwrap_err()
+            .to_string();
+        let expected = if evalue == "inf" {
+            "not supported by LOSAT's BLASTN"
+        } else {
+            "expect value or cutoff score must be greater than zero"
+        };
+        assert!(error.contains(expected), "-evalue {evalue}: {error}");
+    }
     for (value, accepted) in [("4", true), ("100", true), ("101", false)] {
         let Commands::Blastn(args) = parse("blastn", &["-outfmt", "6", "-word_size", value])
             .unwrap()

@@ -18,6 +18,29 @@
 use anyhow::{bail, Result};
 use bio::io::fasta;
 
+/// Why a FASTA file that `bio` cannot parse is not read: `bio` fails on text before the
+/// first defline (blank lines, `;` comments, a byte order mark), which NCBI reads.
+pub const TEXT_BEFORE_DEFLINE: &str =
+    "text before the first defline, which NCBI BLAST+ may read, is not supported by LOSAT's BLASTN";
+
+/// Whether a FASTA file has no character but white space: NCBI reads it as a file without
+/// records (an empty query, or no subject).
+///
+/// NCBI reference: c++/src/app/blast/blast_app_util.cpp:862-866
+/// ```c
+/// 	IOS_BASE::iostate orig_state = in.rdstate();
+/// 	IOS_BASE::fmtflags orig_flags = in.setf(ios::skipws);
+///
+/// 	if(! (in >> c))
+/// 		return true;
+/// ```
+/// `in >> c` skips the characters of C's `isspace`.
+pub fn is_blank(bytes: &[u8]) -> bool {
+    bytes
+        .iter()
+        .all(|byte| matches!(byte, b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r'))
+}
+
 /// The IUPAC nucleotide letters, both cases.
 const IUPAC_NUCLEOTIDE: [bool; 256] = {
     let letters = b"ACGTUMRWSYKVHDBNacgtumrwsykvhdbn";

@@ -126,17 +126,28 @@ pub fn blastn_word_size(value: &str) -> Result<usize, String> {
     }
     Ok(n)
 }
-/// A BLASTN reward: NCBI accepts 0 or more (blast_args.cpp:658-659); LOSAT does not
-/// implement a reward of 0 (NCBI's rmblastn matrix scoring, or no valid query).
+/// A BLASTN reward: 0 or more, as NCBI's argument (blast_args.cpp:658-659). A reward of 0
+/// is an option that LOSAT rejects after NCBI's checks (`blastn/scoring.rs`).
 pub fn blastn_reward(value: &str) -> Result<i32, String> {
     let n = value
         .parse::<i32>()
         .map_err(|_| "expected an integer >= 0")?;
-    match n {
-        n if n < 0 => Err("expected an integer >= 0".into()),
-        0 => Err("a reward of 0 (NCBI BLAST+'s matrix scoring of rmblastn) is not supported by LOSAT's BLASTN".into()),
-        n => Ok(n),
+    if n < 0 {
+        return Err("expected an integer >= 0".into());
     }
+    Ok(n)
+}
+/// A BLASTN e-value. NCBI's argument takes any value that `NStr::StringToDouble` reads, and
+/// its option check (`blastn/scoring.rs`) rejects 0 or less; LOSAT reads decimal numbers
+/// (with `-inf`), rejects NaN here and +infinity after NCBI's checks.
+pub fn blastn_evalue(value: &str) -> Result<f64, String> {
+    let n = value.parse::<f64>().map_err(|_| {
+        "expected a decimal number (other forms that NCBI BLAST+ reads are not supported by LOSAT's BLASTN)"
+    })?;
+    if n.is_nan() {
+        return Err("a NaN e-value is not supported by LOSAT's BLASTN".into());
+    }
+    Ok(n)
 }
 pub fn blastp_word_size(value: &str) -> Result<usize, String> {
     let n = positive_usize(value)?;

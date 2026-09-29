@@ -1,0 +1,108 @@
+BLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/strand_subject.fasta).
+           1 sequences; 1,200 total letters
+
+
+
+Query= q_strand synthetic query with plus and minus strand segments
+
+Length=694
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+subj_strand synthetic subject for plus/minus strand, gaps and mul...  503     4e-146
+
+
+> subj_strand synthetic subject for plus/minus strand, gaps and 
+multiple HSPs
+Length=1200
+
+ Score = 503 bits (557),  Expect = 4e-146
+ Identities = 292/301 (97%), Gaps = 0/301 (0%)
+ Strand=Plus/Minus
+
+Query  370  GACGGCCACTCAGGCCTTACCACGTTTGAACAAGACCTCTCTGTGGCCAAACAGTACACT  429
+            |||||||||||||||||||||||||||||||||||||||||||||||||||||||| |||
+Sbjct  900  GACGGCCACTCAGGCCTTACCACGTTTGAACAAGACCTCTCTGTGGCCAAACAGTAAACT  841
+
+Query  430  TGGAAAACTGGTTTAAGGTTTATCTCATGGGCGTGGTGTCCCCTTATAATGCGGGAGCCA  489
+            |||||||||||||||||||||||||||||||||||||||||||||| |||||||||||||
+Sbjct  840  TGGAAAACTGGTTTAAGGTTTATCTCATGGGCGTGGTGTCCCCTTAAAATGCGGGAGCCA  781
+
+Query  490  GGTGGTTACGTTATAGGTTCATCTACGGCAATAGAGAAACAAGTTCAGATACGGGGCCTA  549
+            ||||||||||||| ||||||||||||||| ||||||||||||||||||||||||||||||
+Sbjct  780  GGTGGTTACGTTAGAGGTTCATCTACGGCGATAGAGAAACAAGTTCAGATACGGGGCCTA  721
+
+Query  550  TTTACGCCTGGATACATACAGATCTTTCGAAACGAGATGCGATCTCCACCGGGGTAACCA  609
+            ||||| ||||||||||||||||||||||||||||||||||||||||||| | ||||||||
+Sbjct  720  TTTACACCTGGATACATACAGATCTTTCGAAACGAGATGCGATCTCCACAGAGGTAACCA  661
+
+Query  610  GCCAGAGCCCATGTAGTGCGGGTGCTCTAGTCTAGCTCGTGGGAATACGCACGCGGACAT  669
+            |||||||||||||||| ||||||||||||||||||||||||||||| |||||||||||||
+Sbjct  660  GCCAGAGCCCATGTAGGGCGGGTGCTCTAGTCTAGCTCGTGGGAATTCGCACGCGGACAT  601
+
+Query  670  G  670
+            |
+Sbjct  600  G  600
+
+
+ Score = 489 bits (542),  Expect = 3e-142
+ Identities = 293/306 (96%), Gaps = 5/306 (2%)
+ Strand=Plus/Plus
+
+Query  41   AGGTCTGTCCGCGCAATGCCCGCCGGCACCGCAACATACTCAATCCATGCGGGTAAATAA  100
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  101  AGGTCTGTCCGCGCAATGCCCGCCGGCACCGCAACATACTCAATCCATGCGGGTAAATAA  160
+
+Query  101  GCAATACACCTTTTCCTGGTCCGCAAGCGTGGTACTATATGGTCTGAGCATGGATATCGG  160
+            |||||||||||||||||| ||||||||||||||||||||||| |||||||||||||||||
+Sbjct  161  GCAATACACCTTTTCCTGCTCCGCAAGCGTGGTACTATATGGGCTGAGCATGGATATCGG  220
+
+Query  161  ---GTCGCTTGTATTCAGTCAGTGGAAAATCGCGACACGGACCCCAACCTTTAGCTCTGA  217
+               |||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  221  TAAGTCGCTTGTATTCAGTCAGTGGAAAATCGCGACACGGACCCCAACCTTTAGCTCTGA  280
+
+Query  218  CACGTATATTTTCTAGAAACGTAAGCGTACGCGCCCTCAGGATATTTGATGAGATTTTTC  277
+            ||||||||||||||| ||||  |||||||||||||| ||||||||| |||||||||||||
+Sbjct  281  CACGTATATTTTCTATAAAC--AAGCGTACGCGCCCCCAGGATATTCGATGAGATTTTTC  338
+
+Query  278  ACCCATTGGTGCTTCGTCCGGGGCAGGGGCACATGTCCATCCGCTCCTGAAATTCTCACA  337
+            ||||||||||| |||||||||||||||||| |||||||||||||||||||||||||||||
+Sbjct  339  ACCCATTGGTGGTTCGTCCGGGGCAGGGGCTCATGTCCATCCGCTCCTGAAATTCTCACA  398
+
+Query  338  GGAGTA  343
+            ||| ||
+Sbjct  399  GGATTA  404
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 806480
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/strand_subject.fasta).
+    Posted date:  Unknown
+  Number of letters in database: 1,200
+  Number of sequences in database:  1
+
+
+
+Matrix: blastn matrix 2 -3
+Gap Penalties: Existence: 5, Extension: 2

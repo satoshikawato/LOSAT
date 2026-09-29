@@ -43,19 +43,35 @@ pub fn register(program: &str, role: u32, bytes: &[u8]) -> Result<(u32, String),
         ROLE_SUBJECT => "subject",
         other => return Err(format!("unknown input role {other}")),
     };
-    // BLASTP, TBLASTN, BLASTN and TBLASTX read their inputs with bio::io::fasta.
-    let records = fasta::Reader::new(bytes)
-        .records()
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| format!("failed to read {role_name} FASTA: {error}"))?;
-    let scanned = scan::scan(bytes).map_err(|error| {
-        format!("the index scan of the {role_name} FASTA disagrees with the parser: {error}")
-    })?;
-    check_scan(role_name, &scanned, &records)?;
+    use LOSAT::algorithm::blastn::input as blastn_input;
+    let blastn = program == Program::Blastn;
+    // BLASTN, as the CLI: a file of white space only has no record (NCBI's empty query, or
+    // its error for no subject at run time).
+    let records = if blastn && blastn_input::is_blank(bytes) {
+        Vec::new()
+    } else {
+        // BLASTP, TBLASTN, BLASTN and TBLASTX read their inputs with bio::io::fasta.
+        let records = fasta::Reader::new(bytes)
+            .records()
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| {
+                let unsupported = if blastn {
+                    format!(" ({})", blastn_input::TEXT_BEFORE_DEFLINE)
+                } else {
+                    String::new()
+                };
+                format!("failed to read {role_name} FASTA: {error}{unsupported}")
+            })?;
+        let scanned = scan::scan(bytes).map_err(|error| {
+            format!("the index scan of the {role_name} FASTA disagrees with the parser: {error}")
+        })?;
+        check_scan(role_name, &scanned, &records)?;
+        records
+    };
     // BLASTN rejects the inputs that NCBI BLAST+ reads differently from bio.
-    if program == Program::Blastn {
-        LOSAT::algorithm::blastn::input::check_deflines(bytes, role_name)
-            .and_then(|()| LOSAT::algorithm::blastn::input::check_residues(&records, role_name))
+    if blastn {
+        blastn_input::check_deflines(bytes, role_name)
+            .and_then(|()| blastn_input::check_residues(&records, role_name))
             .map_err(|error| format!("{error:#}"))?;
     }
     let mut response = String::from("{\"handle\":");
@@ -197,5 +213,11 @@ mod tests {
             error.contains("registered for blastp, not blastn"),
             "{error}"
         );
+        // Text before the first defline says that LOSAT does not support it; white space
+        // only is a file without records.
+        let error = register("blastn", ROLE_QUERY, b"\n>q\nACGT\n").unwrap_err();
+        assert!(error.contains("not supported by LOSAT's BLASTN"), "{error}");
+        let (_, response) = register("blastn", ROLE_QUERY, b" \n\t\n").unwrap();
+        assert!(response.ends_with("\"records\":[]}"), "{response}");
     }
 }

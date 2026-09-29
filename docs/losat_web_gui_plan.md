@@ -1,6 +1,6 @@
 # LOSAT Web GUI 総合実装計画
 
-状態：**S01（W0）から S06（E2a-1）までは完了条件を満たした（[W0](evidence/losat_web_w0/README.md)、[E1a](evidence/losat_web_e1a/README.md)、[E1b](evidence/losat_web_e1b/README.md)、[E1c](evidence/losat_web_e1c/README.md)、[E1d](evidence/losat_web_e1d/README.md)、[E2a-1](evidence/losat_web_e2a/README.md) のゲート記録。E1a〜E1c の V-PERF の判断と、E1c の CLI の 2 つの振る舞いの差は、保守者の確認を求めている）。`PD-LOSAT-WEB-APP-BOUNDARY` は 2026-09-29 に承認された。S06 で見つかった BLASTN の得点のオプションの問題のために S07+ を足した（TD-10）。次は S07。** 作成 2026-09-28、改訂 2026-09-29。
+状態：**S01（W0）から S07（E2a-2）までは完了条件を満たした（[W0](evidence/losat_web_w0/README.md)、[E1a](evidence/losat_web_e1a/README.md)、[E1b](evidence/losat_web_e1b/README.md)、[E1c](evidence/losat_web_e1c/README.md)、[E1d](evidence/losat_web_e1d/README.md)、[E2a-1・E2a-2](evidence/losat_web_e2a/README.md) のゲート記録。E1a〜E1c の V-PERF の判断と、E1c の CLI の 2 つの振る舞いの差は、保守者の確認を求めている）。`PD-LOSAT-WEB-APP-BOUNDARY` は 2026-09-29 に承認された。S06 で見つかった BLASTN の得点のオプションの問題のために S07+ を足した（TD-10）。次は S07+。** 作成 2026-09-28、改訂 2026-09-29。
 
 | 項目 | 内容 |
 |---|---|
@@ -81,7 +81,7 @@ LOSAT は、NCBI BLAST+ を純 Rust で再実装したものである。宣言�
 | TD-8 | 索引用の FASTA の走査（`scan`）は、アプリの抽出のためだけの例外として置く。検索に渡す入力は、各 program の解析器が読む。`scan` は解析器の種類（`bio::io::fasta` 型か、BLASTX の NCBI 型か）を受け取り、その解析器とだけ性質試験で照合する。食い違いの最終的な判定は、`register` の時点のエンジンの解析結果との照合で行う | BLASTX の解析器は NCBI の CFastaReader に従い、`;` などで始まる行を読み飛ばす（`LOSAT/src/algorithm/blastx/input.rs`）。`bio` はそうしない。1 つの走査で両方と一致させることはできない |
 | TD-9 | 既存の不具合のうち、BLASTP と TBLASTN の outfmt 0 の座標の桁数（NCBI は 0 始まりの最大値、LOSAT は 1 始まりの最大値から求める）は、S07 で NCBI の規則の 1 つの関数にまとめて直す。BLASTX の関数は変えない（DW-10） | BLASTN の outfmt 0 も同じ規則を使うので、共有の部品として直すのが最も小さい。境界（最大の座標が 10 の累乗）でだけ出力が変わり、変わる凍結出力は NCBI と一致することを示せる（S06 の `docs/evidence/losat_web_e2a/AUTHORITY.md` §D.1） |
 | TD-10 | BLASTN の得点のオプション（既定以外の reward / penalty / gap）は、S07+ で NCBI と同じにするか、明示的に拒否する。アプリが認証されていない BLASTN の得点を出さないよう、S12 の前に終える | S06 で、NCBI が拒否する 34 の組合せを LOSAT が実行し、NCBI が受け付ける 17 の組合せで結果が違うことが分かった（`AUTHORITY.md` §D.5）。outfmt 0 の移植（S07）とは原因が別なので、段階を分ける |
-| TD-11 | reactor は、ビルドした checkout のパスと `CARGO_HOME` を `--remap-path-prefix` で固定の名前に置き換えてビルドする。TD-6 の rustflags の比較は、この置き換えだけを差として認める。S07 で入れ（reactor を作り直し、full の V-ABI を再実行するため）、S16 の V-PRIV で公開物にローカルのパスが無いことを確かめる | アダプタは LOSAT を path 依存として使うので、エンジンのコードの panic の位置に checkout の絶対パスが入り、登録簿の crate の位置には `CARGO_HOME` が入る（S05 の独立監査、`docs/web/abi_v2.md` §2）。公開物にビルドした機械のパスを残さない。置き換えはコードの働きを変えない。ビルドした場所によらず同じバイトになることを S07 で確かめる |
+| TD-11 | reactor は、ビルドした checkout のパスと `CARGO_HOME` を `--remap-path-prefix` で固定の名前に置き換えてビルドする。TD-6 の rustflags の比較は、この置き換えだけを差として認める。S07 で入れ（reactor を作り直し、full の V-ABI を再実行するため）、S16 の V-PRIV で公開物にローカルのパスが無いことを確かめる | アダプタは LOSAT を path 依存として使うので、エンジンのコードの panic の位置に checkout の絶対パスが入り、登録簿の crate の位置には `CARGO_HOME` が入る（S05 の独立監査、`docs/web/abi_v2.md` §2）。公開物にビルドした機械のパスを残さない。置き換えはコードの働きを変えない。S07 で、置き換えの後の reactor にローカルのパスが無いことを確かめた。バイトは checkout のパスにはなお依存する（path 依存の crate の Cargo の metadata hash が記号の名前に入る）ので、同一性の記録に checkout のパスを残し、再現は同じパスで行う |
 
 ---
 
@@ -447,8 +447,8 @@ NCBI BLAST+（oracle） ─[既存の認証]─► ネイティブ LOSAT の凍�
 | S04 | **E1c** 核の入口：BLASTN と TBLASTX | 同じことを BLASTN と TBLASTX に行う（出力は 6/7 と 6 のまま）。TBLASTX の出力箇所を 1 つにまとめる | 既存のゲートと Gate A のハッシュが変わらない。v1 の reactor の検査。V-NAT。V-PERF の非退行。独立監査。**完了（2026-09-29）** |
 | S05 | **E1d** アダプタと ABI v2 | `web/adapter` の crate、ABI v2 の確定、2 つの reactor、ビルドの同一性の検査（TD-6）、V-ABI の Node の仕組み、`scan` の性質試験（TD-8） | V-ABI（BLASTP・TBLASTN・BLASTN・TBLASTX の、その時点で対応する全形式 × スレッド 1/2/4）が期待値と一致。同一性の検査が通る。**完了（2026-09-29）** |
 | S06 | **E2a-1** BLASTN outfmt 0：権威と fixture | NCBI の呼出し経路（`blast_format.cpp` → `align_format`）の記録。比較する fixture と NCBI の出力の固定 | 経路の対応表、固定した fixture と SHA-256。**完了（2026-09-29）** |
-| S07 | **E2a-2** BLASTN outfmt 0：実装とゲート | S06 で見つかった BLASTN の panic の修正、座標の桁数の共有の関数（TD-9）、移植、`PairwiseHit` の作成、`run_local` と観測者への接続 | 固定した fixture（S06 の manifest の BLASTN・BLASTP・TBLASTN の 34 件、stderr を記録したものは stderr も）で NCBI とバイト一致。既存の 6/7 に退行なし。TD-9 で変わる BLASTP・TBLASTN の凍結出力は、すべて NCBI の出力と一致する。BLASTN の全升目（0/6/7 × スレッド 1/2/4）の V-ABI。独立監査 |
-| S07+ | **E2c** BLASTN の得点のオプション | NCBI のオプションの検査（同じ拒否と文言）の移植。既定以外の得点で NCBI と違う原因の調査と修正。直せない組合せの明示的な拒否（TD-10） | S06 の `scoring_sweep.py` の全組合せが、NCBI と同じ拒否、outfmt 6 のバイト一致、明示的な拒否のどれかになる。直した組合せの fixture で NCBI とバイト一致。既存の BLASTN のゲートと S07 の fixture に退行なし。V-PERF の非退行。独立監査 |
+| S07 | **E2a-2** BLASTN outfmt 0：実装とゲート | S06 で見つかった BLASTN の panic の修正、座標の桁数の共有の関数（TD-9）、移植、`PairwiseHit` の作成、`run_local` と観測者への接続 | 固定した fixture（S06 の manifest の BLASTN・BLASTP・TBLASTN の 34 件、stderr を記録したものは stderr も）で NCBI とバイト一致。既存の 6/7 に退行なし。TD-9 で変わる BLASTP・TBLASTN の凍結出力は、すべて NCBI の出力と一致する。BLASTN の全升目（0/6/7 × スレッド 1/2/4）の V-ABI。独立監査。**完了（2026-09-29）** |
+| S07+ | **E2c** BLASTN の得点のオプションと入力の読み方 | NCBI のオプションの検査（同じ拒否と文言）の移植。既定以外の得点で NCBI と違う原因の調査と修正。直せない組合せの明示的な拒否（TD-10）。S07 で見つかった、query の組成に依存する ungapped Karlin block と、FASTA の読み方・警告の時点の差 | S06 の `scoring_sweep.py` の全組合せが、NCBI と同じ拒否、outfmt 6 のバイト一致、明示的な拒否のどれかになる。直した組合せの fixture で NCBI とバイト一致。既存の BLASTN のゲートと S07 の fixture に退行なし。V-PERF の非退行。独立監査 |
 | S08 | **E2b** TBLASTX outfmt 0/7 | 権威の記録、fixture の固定、移植、`PairwiseHit` の作成 | 固定した fixture で NCBI とバイト一致（承認済みの遺伝暗号の例外を除く）。既存の 6 に退行なし。TBLASTX の全升目の V-ABI。独立監査 |
 | S09 | **W1** ブラウザでの実行基盤 | Engine worker、WASI shim、ThreadHost、機能の確認、serial への切り替え、取消、instance の作り直し、R1。DW-8 のための前処理の割合の実測 | V-BR（BLASTX を除く 4 program、3 ブラウザ、n=1/2/4）。取消の後の実行が成功する。メモリの推移と前処理の割合を記録する |
 | S09+ | **R2**（条件付き） | DW-8 の条件を満たした program ごとに、前処理キャッシュを移植する | 連続実行の出力が CLI と一致。独立監査。README の表に行を足して実施する |

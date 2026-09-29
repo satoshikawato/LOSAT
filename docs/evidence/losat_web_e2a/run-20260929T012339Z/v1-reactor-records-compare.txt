@@ -1,0 +1,7 @@
+# v1 reactor records (check_wasi_reactor.js, run by check_wasm_threading.py) of the S05 and S07 reactors.
+$ diff -r -x runs.json s05/reactor-records s07/reactor-records
+exit 0
+records compared: 172
+$ diff -r -x runs.json s05/serial-reactor-records s07/serial-reactor-records
+exit 0
+records compared: 12

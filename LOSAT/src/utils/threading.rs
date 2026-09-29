@@ -159,7 +159,7 @@ where
                 })
                 .build()
                 .with_context(|| {
-                    format!("failed to build {program} pool with {requested} threads")
+                    format!("failed to build {program} pool with {requested} threads; a thread count that the system cannot start is not supported by LOSAT")
                 })?;
             *pool_slot.borrow_mut() = Some(pool);
             caller.expect("caller owns pool slot zero").run();

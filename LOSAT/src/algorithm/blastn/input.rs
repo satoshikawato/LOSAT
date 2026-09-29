@@ -129,45 +129,66 @@ pub fn check_deflines(bytes: &[u8], role: &str) -> Result<()> {
 /// ```
 /// `role` is `query` or `subject`.
 pub fn check_residues(records: &[fasta::Record], role: &str) -> Result<()> {
-    for (index, record) in records.iter().enumerate() {
-        if let Some(position) = record
-            .seq()
-            .iter()
-            .position(|&byte| !IUPAC_NUCLEOTIDE[byte as usize])
-        {
-            let byte = record.seq()[position];
-            let shown = if byte.is_ascii_graphic() {
-                format!("'{}'", byte as char)
-            } else {
-                format!("0x{byte:02x}")
-            };
-            bail!(
-                "{role} record {} ({}) has {shown} at residue {}, which is not an IUPAC nucleotide letter; NCBI BLAST+ reads such a record differently, which is not supported by LOSAT's BLASTN (use IUPAC nucleotide letters)",
-                index + 1,
-                record.id(),
-                position + 1
-            );
-        }
-    }
-    Ok(())
+    first_problem(records, |index, record| {
+        invalid_residue(index, record, role)
+    })
 }
 
 /// Rejects a record without residues: NCBI reads it without a message and reports it when
 /// it sets up the search ("Sequence contains no data"), which LOSAT does not reproduce.
 /// `role` is `query` or `subject`.
 pub fn check_records_have_residues(records: &[fasta::Record], role: &str) -> Result<()> {
-    if let Some((index, record)) = records
+    first_problem(records, |index, record| no_residues(index, record, role))
+}
+
+/// Both checks, record by record (the order of ABI v1, which plan TD-1 freezes).
+pub fn check_records(records: &[fasta::Record], role: &str) -> Result<()> {
+    first_problem(records, |index, record| {
+        no_residues(index, record, role).or_else(|| invalid_residue(index, record, role))
+    })
+}
+
+fn first_problem(
+    records: &[fasta::Record],
+    problem: impl Fn(usize, &fasta::Record) -> Option<String>,
+) -> Result<()> {
+    match records
         .iter()
         .enumerate()
-        .find(|(_, record)| record.seq().is_empty())
+        .find_map(|(index, record)| problem(index, record))
     {
-        bail!(
+        Some(message) => bail!("{message}"),
+        None => Ok(()),
+    }
+}
+
+fn no_residues(index: usize, record: &fasta::Record, role: &str) -> Option<String> {
+    record.seq().is_empty().then(|| {
+        format!(
             "{role} record {} ({}) has no residues; NCBI BLAST+ reports such a record differently, which is not supported by LOSAT's BLASTN",
             index + 1,
             record.id()
-        );
-    }
-    Ok(())
+        )
+    })
+}
+
+fn invalid_residue(index: usize, record: &fasta::Record, role: &str) -> Option<String> {
+    let position = record
+        .seq()
+        .iter()
+        .position(|&byte| !IUPAC_NUCLEOTIDE[byte as usize])?;
+    let byte = record.seq()[position];
+    let shown = if byte.is_ascii_graphic() {
+        format!("'{}'", byte as char)
+    } else {
+        format!("0x{byte:02x}")
+    };
+    Some(format!(
+        "{role} record {} ({}) has {shown} at residue {}, which is not an IUPAC nucleotide letter; NCBI BLAST+ reads such a record differently, which is not supported by LOSAT's BLASTN (use IUPAC nucleotide letters)",
+        index + 1,
+        record.id(),
+        position + 1
+    ))
 }
 
 /// The records with `U` read as `T` (and `u` as `t`), or `None` when none has a `U`.
@@ -269,6 +290,16 @@ mod tests {
             error.contains("query record 1 (q1) has no residues"),
             "{error}"
         );
+        // Record by record, as ABI v1: record 1's letter before record 2's emptiness.
+        let both = records(">q1\nAXG\n>q2 empty\n");
+        assert!(check_records(&both, "query")
+            .unwrap_err()
+            .to_string()
+            .contains("query record 1 (q1) has 'X' at residue 2"));
+        assert!(check_records_have_residues(&both, "query")
+            .unwrap_err()
+            .to_string()
+            .contains("query record 2 (q2) has no residues"));
     }
 
     #[test]

@@ -110,6 +110,12 @@ where
                 return Err(clap::Error::raw(ErrorKind::InvalidValue,
                     format!("unsupported BLASTX option '-{name}': outside the declared local FASTA scope")));
             }
+            if scope.get_name() == "blastn" && is_unported_blastn_arg(name) {
+                return Err(clap::Error::raw(
+                    ErrorKind::InvalidValue,
+                    format!("the NCBI BLAST+ option -{name} is not supported by LOSAT's BLASTN"),
+                ));
+            }
             if scope.get_name() == "tblastn" && is_unported_tblastn_arg(name) {
                 return Err(clap::Error::raw(
                     ErrorKind::InvalidValue,
@@ -183,6 +189,77 @@ pub fn render_message(error: &clap::Error) -> String {
 // m_FormattingArgs.Reset(new CFormattingArgs);
 // m_PsiBlastArgs.Reset(new CPsiBlastArgs(CPsiBlastArgs::eNucleotideDb));
 // ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastn_args.cpp:63-70
+// ```c++
+//     m_BlastDbArgs.Reset(new CBlastDatabaseArgs);
+//     m_BlastDbArgs->SetDatabaseMaskingSupport(true);
+//     arg.Reset(m_BlastDbArgs);
+//     m_Args.push_back(arg);
+//
+//     m_StdCmdLineArgs.Reset(new CStdCmdLineArgs);
+//     arg.Reset(m_StdCmdLineArgs);
+//     m_Args.push_back(arg);
+// ```
+// The options of NCBI blastn 2.17.0+ (-help) that LOSAT's BLASTN does not implement
+// (AGENTS.md rule 2: explicit unsupported errors).
+fn is_unported_blastn_arg(name: &str) -> bool {
+    matches!(
+        name,
+        "best_hit_overhang"
+            | "best_hit_score_edge"
+            | "culling_limit"
+            | "db"
+            | "db_hard_mask"
+            | "db_soft_mask"
+            | "dbsize"
+            | "entrez_query"
+            | "export_search_strategy"
+            | "filtering_db"
+            | "gilist"
+            | "h"
+            | "html"
+            | "import_search_strategy"
+            | "index_name"
+            | "line_length"
+            | "min_raw_gapped_score"
+            | "mt_mode"
+            | "negative_gilist"
+            | "negative_seqidlist"
+            | "negative_taxidlist"
+            | "negative_taxids"
+            | "no_greedy"
+            | "no_taxid_expansion"
+            | "num_alignments"
+            | "num_descriptions"
+            | "off_diagonal_range"
+            | "parse_deflines"
+            | "qcov_hsp_perc"
+            | "query_loc"
+            | "remote"
+            | "searchsp"
+            | "seqidlist"
+            | "show_gis"
+            | "soft_masking"
+            | "sorthits"
+            | "sorthsps"
+            | "strand"
+            | "subject_loc"
+            | "taxidlist"
+            | "taxids"
+            | "template_length"
+            | "template_type"
+            | "ungapped"
+            | "use_index"
+            | "version"
+            | "window_masker_db"
+            | "window_masker_taxid"
+            | "window_size"
+            | "xdrop_gap"
+            | "xdrop_gap_final"
+            | "xdrop_ungap"
+    )
+}
+
 // Names are from the pinned 2.17.0+ -help and have no implemented Rust path yet.
 fn is_unported_tblastn_arg(name: &str) -> bool {
     matches!(

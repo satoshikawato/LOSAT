@@ -1106,6 +1106,20 @@ mod tests {
         let error = blastn::run_web_pair(args("0"), fasta, fasta).unwrap_err();
         assert_eq!(engine_error(error), "unsupported BLASTN output format: 0");
         assert!(blastn::run_web_pair(args("6"), fasta, fasta).is_ok());
+        // Plan TD-1: the order of v1's checks is that of 17a449201 (LOSAT's limits after
+        // NCBI's checks, then each record, before the empty-query warning).
+        let with = |extra: &[&str]| {
+            let mut words = vec!["-outfmt", "6"];
+            words.extend_from_slice(extra);
+            parse_blastn_args(&words, PathBuf::new(), PathBuf::new(), PathBuf::new())
+                .expect("blastn web args")
+        };
+        let empty_record = ">s0\n>s1\nACGTACGTACGTACGTACGTACGTACGTACGT\n";
+        let error = blastn::run_web_pair(with(&[]), "", empty_record).unwrap_err();
+        assert!(engine_error(error).contains("subject record 1 (s0) has no residues"));
+        let x_subject = ">s\nACGTXACGTACGTACGTACGTACGTACGTACGT\n";
+        let error = blastn::run_web_pair(with(&["-evalue", "inf"]), fasta, x_subject).unwrap_err();
+        assert!(engine_error(error).contains("an infinite or NaN e-value"));
     }
 
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1407-1427

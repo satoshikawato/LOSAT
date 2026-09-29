@@ -279,6 +279,38 @@ fn blastn_integer_at_least(value: &str, at_least: i32) -> Result<i32, String> {
     Ok(n)
 }
 
+/// A BLASTN task: NCBI's blastn tasks (case-sensitive), of which LOSAT implements
+/// megablast and blastn and rejects the others explicitly.
+///
+/// NCBI reference: c++/src/algo/blast/api/blast_options_handle.cpp:211-222
+/// ```c
+/// CBlastOptionsFactory::GetTasks(ETaskSets choice /* = eAll */)
+/// {
+///     set<string> retval;
+///     if (choice == eNuclNucl || choice == eAll) {
+///         retval.insert("blastn");
+///         retval.insert("blastn-short");
+///         retval.insert("megablast");
+///         retval.insert("dc-megablast");
+///         retval.insert("vecscreen");
+///         // -RMH-
+///         retval.insert("rmblastn");
+/// ```
+/// NCBI reference: c++/src/algo/blast/blastinput/blastn_args.cpp:57-59
+/// ```c
+///     set<string> tasks
+///         (CBlastOptionsFactory::GetTasks(CBlastOptionsFactory::eNuclNucl));
+///     tasks.erase("vecscreen"); // vecscreen has its own program
+/// ```
+pub fn blastn_task(value: &str) -> Result<String, String> {
+    match value {
+        "megablast" | "blastn" => Ok(value.to_string()),
+        "blastn-short" | "dc-megablast" | "rmblastn" => Err(format!(
+            "the task {value} is not supported by LOSAT's BLASTN (use megablast or blastn)"
+        )),
+        _ => Err("expected one of blastn, blastn-short, dc-megablast, megablast, rmblastn".into()),
+    }
+}
 /// A BLASTN word size: 4 or more (the upper bound, 100, is an option check,
 /// `blastn/scoring.rs`).
 ///
@@ -301,7 +333,8 @@ pub fn blastn_count(value: &str) -> Result<usize, String> {
 pub fn blastn_reward(value: &str) -> Result<i32, String> {
     blastn_integer_at_least(value, 0)
 }
-/// A BLASTN penalty: 0 or less, as NCBI's argument (blast_args.cpp:651-652).
+/// A BLASTN penalty: 0 or less, as NCBI's argument (blast_args.cpp:651-652), whose
+/// constraint reads the value as the `>=` constraint does (blast_input_aux.hpp:135-138).
 pub fn blastn_penalty(value: &str) -> Result<i32, String> {
     let n = ncbi_constrained_integer(value)?;
     if n > 0 {
@@ -398,13 +431,76 @@ pub fn genetic_code(value: &str) -> Result<u8, String> {
 pub fn blastn_output_path() -> impl clap::builder::TypedValueParser<Value = PathBuf> {
     use clap::builder::TypedValueParser;
     clap::builder::OsStringValueParser::new().try_map(|value| {
-        let path = PathBuf::from(value);
-        let name = path.file_name().map_or(0, |name| name.len());
-        if name >= 256 {
+        if ncbi_file_name_length(value.as_encoded_bytes()) >= 256 {
             return Err("Illegal value, expected file name length < 256".to_string());
         }
-        Ok(path)
+        Ok(PathBuf::from(value))
     })
+}
+
+/// The length of NCBI's `CDirEntry::GetName` of a path: the text after the last separator
+/// once the trailing directory separators are removed (a path of one separator has none).
+///
+/// NCBI reference: c++/src/corelib/ncbifile.cpp:298-312
+/// ```c
+/// void CDirEntry::Reset(const string& path)
+/// {
+///     m_Path = path;
+///     size_t len = path.length();
+///     // Root dir
+///     if ((len == 1)  &&  IsPathSeparator(path[0])) {
+///         return;
+///     }
+///     // Disk name
+/// #  if defined(DISK_SEPARATOR)
+///     if ( (len == 2 || len == 3) && (path[1] == DISK_SEPARATOR) ) {
+///         return;
+///     }
+/// #  endif
+///     m_Path = DeleteTrailingPathSeparator(path);
+/// ```
+/// NCBI reference: c++/src/corelib/ncbifile.cpp:465-472
+/// ```c
+/// string CDirEntry::DeleteTrailingPathSeparator(const string& path)
+/// {
+///     size_t pos = path.find_last_not_of(DIR_SEPARATORS);
+///     if (pos + 1 < path.length()) {
+///         return path.substr(0, pos + 1);
+///     }
+///     return path;
+/// }
+/// ```
+/// NCBI reference: c++/src/corelib/ncbifile.cpp:358-363
+/// ```c
+/// void CDirEntry::SplitPath(const string& path, string* dir,
+///                           string* base, string* ext)
+/// {
+///     // Get file name
+///     size_t pos = path.find_last_of(ALL_SEPARATORS);
+///     string filename = (pos == NPOS) ? path : path.substr(pos+1);
+/// ```
+/// On Unix, `DIR_SEPARATORS` and `ALL_SEPARATORS` are `/` (ncbifile.cpp:110-115); on
+/// Windows they are `/\` and `:/\`, with the disk name `C:`.
+fn ncbi_file_name_length(path: &[u8]) -> usize {
+    let (dir_separators, all_separators): (&[u8], &[u8]) = if cfg!(windows) {
+        (b"/\\", b":/\\")
+    } else {
+        (b"/", b"/")
+    };
+    let root = path.len() == 1 && dir_separators.contains(&path[0]);
+    let disk = cfg!(windows) && matches!(path.len(), 2 | 3) && path[1] == b':';
+    let path = if root || disk {
+        path
+    } else {
+        let end = path
+            .iter()
+            .rposition(|byte| !dir_separators.contains(byte))
+            .map_or(0, |pos| pos + 1);
+        &path[..end]
+    };
+    path.iter()
+        .rposition(|byte| all_separators.contains(byte))
+        .map_or(path.len(), |pos| path.len() - pos - 1)
 }
 
 /// A BLASTN input file: any value, as NCBI's `eInputFile` argument; `-` is standard input

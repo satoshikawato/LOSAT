@@ -105,6 +105,14 @@ fn legacy_and_unsupported_syntax_is_unknown() {
             "--dust-window",
         ] {
             let err = parse(program, &["-outfmt", "6", old]).unwrap_err();
+            // BLASTN names the NCBI options that it does not implement (AGENTS.md rule 2).
+            if program == "blastn" && matches!(old, "-db" | "-remote") {
+                assert!(
+                    err.to_string().contains("not supported by LOSAT's BLASTN"),
+                    "{err}"
+                );
+                continue;
+            }
             assert_eq!(
                 err.kind(),
                 clap::error::ErrorKind::UnknownArgument,
@@ -375,6 +383,34 @@ fn numeric_values_are_validated_before_io() {
         unreachable!("blastn")
     };
     assert_eq!(args.gap_open, Some(0));
+    // NCBI's other blastn tasks and options are rejected explicitly (AGENTS.md rule 2).
+    for extra in [
+        &["-task", "dc-megablast"][..],
+        &["-task", "blastn-short"],
+        &["-task", "rmblastn"],
+        &["-strand", "plus"],
+        &["-ungapped"],
+        &["-h"],
+        &["-version"],
+    ] {
+        let mut words = vec!["-outfmt", "6"];
+        words.extend_from_slice(extra);
+        let error = LOSAT::cli::render_message(&parse("blastn", &words).unwrap_err());
+        assert!(
+            error.contains("not supported by LOSAT's BLASTN"),
+            "{extra:?}: {error}"
+        );
+    }
+    assert!(parse("blastn", &["-outfmt", "6", "-task", "BLASTN"]).is_err());
+    // NCBI blast_input_aux.hpp:79-87 (CDirEntry::GetName, ncbifile.cpp:298-312,358-363,
+    // 465-472): the name after the trailing separators are removed.
+    let dotted = format!("{}/.", "o".repeat(256));
+    parse("blastn", &["-outfmt", "6", "-out", &dotted]).unwrap();
+    assert!(parse(
+        "blastn",
+        &["-outfmt", "6", "-out", &format!("{}/", "o".repeat(256))]
+    )
+    .is_err());
     // NCBI blast_input_aux.hpp:79-87: an -out file name is shorter than 256 bytes.
     let long = format!("dir/{}", "o".repeat(256));
     assert!(parse("blastn", &["-outfmt", "6", "-out", &long]).is_err());

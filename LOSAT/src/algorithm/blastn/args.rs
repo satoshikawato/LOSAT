@@ -20,7 +20,7 @@ pub struct BlastnArgs {
     pub query: PathBuf,
     #[arg(long, value_parser = blastn_input_path(), value_name = "PATH")]
     pub subject: PathBuf,
-    #[arg(long, default_value = "megablast", long_help = "Implemented tasks: megablast and blastn. Task defaults: megablast uses word size 28, reward 1, penalty -2, gaps 0/0; blastn uses word size 11, reward 2, penalty -3, gaps 5/2. An omitted option takes the default of the task.", value_parser = ["megablast", "blastn"])]
+    #[arg(long, default_value = "megablast", long_help = "Implemented tasks: megablast and blastn. Task defaults: megablast uses word size 28, reward 1, penalty -2, gaps 0/0; blastn uses word size 11, reward 2, penalty -3, gaps 5/2. An omitted option takes the default of the task.", value_parser = blastn_task)]
     pub task: String,
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:166-170,288-300
     // ```c

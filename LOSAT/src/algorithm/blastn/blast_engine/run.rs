@@ -80,8 +80,8 @@ use super::super::hsp::{
     BlastnHsp, BlastnHspList, BlastnOutputFormat, NCBI_BLASTN_VERSION,
 };
 use super::super::input::{
-    check_deflines, check_records_have_residues, check_residues, is_blank, with_u_as_t,
-    UNREADABLE_FASTA,
+    check_deflines, check_records, check_records_have_residues, check_residues, is_blank,
+    with_u_as_t, UNREADABLE_FASTA,
 };
 use super::super::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
 use super::super::lookup::{build_unmasked_ranges, reverse_complement};
@@ -4812,10 +4812,15 @@ pub fn run_web_pair(args: BlastnArgs, query_fasta: &str, subject_fasta: &str) ->
         BlastnOutputFormat::Tabular => "6".to_string(),
         BlastnOutputFormat::TabularWithComments => "7".to_string(),
     };
-    // ABI v1 checked LOSAT's limits with NCBI's checks, before its empty-query warning.
-    if queries.is_empty() && !subjects.is_empty() {
+    // ABI v1 is frozen (plan TD-1): its checks keep their order of 17a449201, where
+    // LOSAT's limits followed NCBI's checks and each record was checked, residues and then
+    // letters, before the empty-query warning. (The later checks of `run_local` repeat
+    // them without effect.)
+    if !subjects.is_empty() {
         check_scoring_options(&args)?;
         check_losat_limits(&args)?;
+        check_records(&subjects, "subject")?;
+        check_records(&queries, "query")?;
     }
     let mut stderr = std::io::stderr();
     run_local(
@@ -5661,30 +5666,35 @@ fn run_in_pool(
         );
     }
 
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1002-1003
+    // ```c
+    //     if ((status = BlastExtendWordNew(query->length, word_params,
+    //                                     &aux_struct->ewp)) != 0)
+    // ```
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:52-61
     // ```c
-    // diag_array_length = 1;
-    // while (diag_array_length < (qlen+window_size))
-    //     diag_array_length = diag_array_length << 1;
-    // diag_table->diag_array_length = diag_array_length;
-    // diag_table->diag_mask = diag_array_length-1;
+    //                 diag_array_length = 1;
+    //                 /* What power of 2 is just longer than the query? */
+    //                 while (diag_array_length < (qlen+window_size))
+    //                 {
+    //                         diag_array_length = diag_array_length << 1;
+    //                 }
+    //                 /* These are used in the word finders to shift and mask
+    //                 rather than dividing and taking the remainder. */
+    //                 diag_table->diag_array_length = diag_array_length;
+    //                 diag_table->diag_mask = diag_array_length-1;
     // ```
-    let diag_array_lengths: Vec<usize> = seq_data
-        .queries
-        .iter()
-        .map(|q| {
-            let qlen = q.seq().len();
-            let mut diag_array_length = 1usize;
-            while diag_array_length < qlen + TWO_HIT_WINDOW {
-                diag_array_length <<= 1;
-            }
-            diag_array_length
-        })
-        .collect();
-    let diag_masks: Vec<usize> = diag_array_lengths
-        .iter()
-        .map(|len| len.saturating_sub(1))
-        .collect();
+    // `query->length` is the whole query block (both strands and the sentinel, the
+    // offsets of the word finder), not one strand: a table sized from one strand made the
+    // diagonals of the two strands share entries and lost HSPs (S07+ independent audit).
+    let diag_array_length = {
+        let mut diag_array_length = 1usize;
+        while diag_array_length < query_concat_length + TWO_HIT_WINDOW {
+            diag_array_length <<= 1;
+        }
+        diag_array_length
+    };
+    let diag_mask = diag_array_length - 1;
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2758-2792
     // ```c
@@ -6054,8 +6064,7 @@ fn run_in_pool(
     let query_contexts_ref = &query_contexts;
     let query_base_offsets_ref = &query_base_offsets;
     let query_eff_searchsp_ref = &query_eff_searchsp;
-    let diag_array_lengths_ref = &diag_array_lengths;
-    let diag_masks_ref = &diag_masks;
+
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
     // ```c
     // typedef struct BlastHSPList {
@@ -6215,8 +6224,7 @@ fn run_in_pool(
         let query_contexts = query_contexts_ref;
         let query_base_offsets = query_base_offsets_ref;
         let query_eff_searchsp = query_eff_searchsp_ref;
-        let diag_array_lengths = diag_array_lengths_ref;
-        let diag_masks = diag_masks_ref;
+
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:493-526
         // ```c
         // if (aux_struct->WordFinder) {
@@ -6589,7 +6597,7 @@ fn run_in_pool(
             // ```
             const MAX_ARRAY_DIAG_SIZE: usize = 12_000_000;
             let (diag_array_length_single, diag_mask_single) = if queries.len() == 1 {
-                (diag_array_lengths[0], diag_masks[0] as isize)
+                (diag_array_length, diag_mask as isize)
             } else {
                 (0usize, 0isize)
             };

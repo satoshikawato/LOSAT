@@ -2064,7 +2064,17 @@ fn reduce_gaps(
                 if esp.num[i] >= 12 {
                     let mut nm1: i32 = 1;
                     if i > 0 {
+                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2679-2681
+                        // ```c
+                        //                if (i > 0) {
+                        //                    while (q1-nm1>=q && (*(q1-nm1) == *(s1-nm1))) ++nm1;
+                        //                }
+                        // ```
+                        // NCBI bounds only the query; the subject is read before the
+                        // alignment start, down to its leading sentinel, which matches no
+                        // query letter, so the scan stops at the subject's first letter.
                         while (q_idx - nm1 as isize) >= 0
+                            && (s_start + s_idx - nm1 as isize) >= 0
                             && q[(q_start + q_idx - nm1 as isize) as usize]
                                 == s[(s_start + s_idx - nm1 as isize) as usize]
                         {

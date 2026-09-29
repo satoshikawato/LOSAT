@@ -72,7 +72,7 @@ use super::super::extension::{
 use super::super::filtering::{
     blast_hsp_test_identity_and_length, hsp_test, purge_hsps_with_common_endpoints,
     purge_hsps_with_common_endpoints_ex, reevaluate_hsp_with_ambiguities_gapped_ex,
-    subject_best_hit, ReevalParams,
+    subject_best_hit, subject_best_hit_by, BestHitKey, ReevalParams,
 };
 use super::super::hsp::{
     get_prelim_hitlist_size, parse_blastn_output_format, sort_hsplist_by_evalue,
@@ -3099,6 +3099,28 @@ fn merge_two_prelim_hits(hsp1: &mut PrelimHit, hsp2: &PrelimHit, allow_gap: bool
     false
 }
 
+/// NCBI's preliminary subject-best-hit filter (`-subject_besthit`) over the combined HSP
+/// list of a subject, applied after each chunk is merged, before traceback.
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:586-591
+/// ```c
+///         if((hit_params->options->hsp_filt_opt != NULL) &&
+///            (hit_params->options->hsp_filt_opt->subject_besthit_opts != NULL)) {
+///            	Blast_HSPListSubjectBestHit(program_number,
+///            								hit_params->options->hsp_filt_opt->subject_besthit_opts,
+///            								query_info, combined_hsp_list);
+///         }
+/// ```
+fn prelim_subject_best_hit(combined: &mut Vec<PrelimHit>, query_lengths: &[usize]) {
+    subject_best_hit_by(combined, |hit| BestHitKey {
+        context: hit.context_idx,
+        query_frame: hit.query_frame,
+        query_offset: hit.prelim_qs,
+        query_end: hit.prelim_qe,
+        query_length: query_lengths[hit.query_idx as usize],
+    });
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2860-3055
 // ```c
 // Int2 Blast_HSPListsMerge(..., Int4 contexts_per_query, Int4 *split_offsets,
@@ -4812,15 +4834,20 @@ pub fn run_web_pair(args: BlastnArgs, query_fasta: &str, subject_fasta: &str) ->
         BlastnOutputFormat::Tabular => "6".to_string(),
         BlastnOutputFormat::TabularWithComments => "7".to_string(),
     };
-    // ABI v1 is frozen (plan TD-1): its checks keep their order of 17a449201, where
-    // LOSAT's limits followed NCBI's checks and each record was checked, residues and then
-    // letters, before the empty-query warning. (The later checks of `run_local` repeat
-    // them without effect.)
+    // ABI v1 is frozen (plan TD-1) except fail-fast fixes. Its checks keep the order in
+    // which S07+ added them (LOSAT's limits after NCBI's checks, then each record,
+    // residues and then letters). An empty query still gives the empty report of NCBI
+    // and of v1 before S07+, where only letters that NCBI warns about are rejected. (The
+    // later checks of `run_local` repeat these without effect.)
     if !subjects.is_empty() {
         check_scoring_options(&args)?;
         check_losat_limits(&args)?;
-        check_records(&subjects, "subject")?;
-        check_records(&queries, "query")?;
+        if queries.is_empty() {
+            check_residues(&subjects, "subject")?;
+        } else {
+            check_records(&subjects, "subject")?;
+            check_records(&queries, "query")?;
+        }
     }
     let mut stderr = std::io::stderr();
     run_local(
@@ -9596,6 +9623,9 @@ fn run_in_pool(
                             chunk.overlap,
                             true,
                         );
+                        if subject_besthit {
+                            prelim_subject_best_hit(&mut combined_prelim_hits, &query_lengths);
+                        }
                         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:488-491
                         // ```c
                         // /* Delete if not done in last loop iteration to prevent memory leak. */
@@ -9644,6 +9674,9 @@ fn run_in_pool(
                                 overlap,
                                 true,
                             );
+                            if subject_besthit {
+                                prelim_subject_best_hit(&mut combined_prelim_hits, &query_lengths);
+                            }
                         }
                     }
 
@@ -9699,6 +9732,9 @@ fn run_in_pool(
                             chunk.overlap,
                             true,
                         );
+                        if subject_besthit {
+                            prelim_subject_best_hit(&mut combined_prelim_hits, &query_lengths);
+                        }
                         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:488-491
                         // ```c
                         // /* Delete if not done in last loop iteration to prevent memory leak. */

@@ -1106,8 +1106,8 @@ mod tests {
         let error = blastn::run_web_pair(args("0"), fasta, fasta).unwrap_err();
         assert_eq!(engine_error(error), "unsupported BLASTN output format: 0");
         assert!(blastn::run_web_pair(args("6"), fasta, fasta).is_ok());
-        // Plan TD-1: the order of v1's checks is that of 17a449201 (LOSAT's limits after
-        // NCBI's checks, then each record, before the empty-query warning).
+        // Plan TD-1: LOSAT's limits come after NCBI's checks and before the records; an
+        // empty query gives the empty report of NCBI and of v1 before S07+.
         let with = |extra: &[&str]| {
             let mut words = vec!["-outfmt", "6"];
             words.extend_from_slice(extra);
@@ -1115,7 +1115,8 @@ mod tests {
                 .expect("blastn web args")
         };
         let empty_record = ">s0\n>s1\nACGTACGTACGTACGTACGTACGTACGTACGT\n";
-        let error = blastn::run_web_pair(with(&[]), "", empty_record).unwrap_err();
+        assert!(blastn::run_web_pair(with(&[]), "", empty_record).is_ok());
+        let error = blastn::run_web_pair(with(&[]), fasta, empty_record).unwrap_err();
         assert!(engine_error(error).contains("subject record 1 (s0) has no residues"));
         let x_subject = ">s\nACGTXACGTACGTACGTACGTACGTACGTACGT\n";
         let error = blastn::run_web_pair(with(&["-evalue", "inf"]), fasta, x_subject).unwrap_err();

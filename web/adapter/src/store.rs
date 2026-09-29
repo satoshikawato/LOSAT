@@ -215,6 +215,13 @@ mod tests {
             error.contains("registered for blastp, not blastn"),
             "{error}"
         );
+        // NCBI reads a non-ASCII byte in a sequence line (here U+00A0 at its end, which
+        // bio drops) as an invalid residue.
+        let error = register("blastn", ROLE_QUERY, b">q\nACGT\xc2\xa0\n").unwrap_err();
+        assert!(
+            error.contains("non-ASCII byte in a sequence line"),
+            "{error}"
+        );
         // FASTA that bio cannot read (text before the first defline, bytes that are not
         // UTF-8) says that LOSAT does not support it; white space only is a file without
         // records.

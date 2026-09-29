@@ -35,6 +35,7 @@
 | S06 | [BLASTN outfmt 0：権威と fixture](session_s06_e2a1_blastn_outfmt0_authority.md) | E2a-1 | NCBI の経路の表、固定した fixture | 完了（2026-09-29、[ゲート記録](../evidence/losat_web_e2a/README.md)） |
 | S07 | [BLASTN outfmt 0：実装とゲート](session_s07_e2a2_blastn_outfmt0_port.md) | E2a-2 | NCBI とバイト一致、6/7 に退行なし | 完了（2026-09-29、[ゲート記録](../evidence/losat_web_e2a/README.md)） |
 | S07+ | [BLASTN の得点のオプションと入力の読み方](session_s07p_e2c_blastn_scoring_options.md) | E2c | 既定以外の得点と入力の読み方が NCBI と同じか、明示的に拒否される（S06・S07 で追加。S12 の前に終える） | 未着手 |
+| S07++ | [BLASTN の query の batch](session_s07pp_e2f_blastn_query_batches.md) | E2f | 複数の query が NCBI と同じ batch で検索される（S07+ で追加、TD-14。S12 の前に終える） | 未着手 |
 | S08 | [TBLASTX outfmt 0/7](session_s08_e2b_tblastx_outfmt0_7.md) | E2b | NCBI とバイト一致（承認済みの例外を除く） | 未着手 |
 | S08+ | [BLASTP・TBLASTN・TBLASTX の既定以外のオプション](session_s08p_e2e_protein_options.md) | E2e | 既定以外のオプションが NCBI と同じか、明示的に拒否される（S07+ で追加、TD-13。S12 の前に終える） | 未着手 |
 | S09 | [ブラウザでの実行基盤](session_s09_w1_browser_runtime.md) | W1 | V-BR、前処理の割合の実測 | 未着手 |

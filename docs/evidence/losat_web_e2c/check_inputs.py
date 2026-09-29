@@ -107,6 +107,18 @@ def make_inputs(work: Path) -> None:
     (work / "inverted_repeat_query.fa").write_text(">ir\n" + "".join(ir_query) + "\n")
     flank = lambda: "".join(rng_ir.choice("ACGT") for _ in range(300))  # noqa: E731
     (work / "inverted_repeat_subject.fa").write_text(">irs\n" + flank() + repeat + flank() + "\n")
+    # The seventh audit round: a subject that starts inside a tandem repeat of which the
+    # query has more copies (the gap reduction read before the subject); a bit score in
+    # (99.9, 100); slices where the preliminary -subject_besthit filter matters.
+    tail = "CTCACAAATGTCCATGCTCACAAATGTCCATCATAGGCTAGTATCTATTAGGCTTTGAATTCCGCCTTGAGGGATCACAGGGAACCC"
+    (work / "repeat_query.fa").write_text(">rq\nCTCTGCGCTACAAGCTCACAAATGTCCATG" + tail + "\n")
+    (work / "repeat_subject.fa").write_text(">rs\n" + tail + "\n")
+    bits_q = "GATCCTTAGGCTACGTTAGCCATGAGCTAACGTTGCAGCTATCGATGCCTA"
+    (work / "bits_query.fa").write_text(">bq\n" + bits_q + "\n")
+    (work / "bits_subject.fa").write_text(">bs\n" + "T" * 10 + bits_q + "A" * 10 + "\n")
+    genome = lambda name: "".join(line.strip() for line in (ENGINE / "tests/fasta" / f"{name}.fasta").read_text().splitlines()[1:])  # noqa: E731
+    (work / "besthit_query.fa").write_text(">bhq\n" + genome("LC738871")[80316:89722] + "\n")
+    (work / "besthit_subject.fa").write_text(">bhs\n" + genome("PemoMJNVB")[306307:330257] + "\n")
 
 
 def cases(work: Path) -> list[tuple[str, list[str], str]]:
@@ -342,6 +354,18 @@ def cases(work: Path) -> list[tuple[str, list[str], str]]:
         ("audit6.option.xdrop_gap", [*mq, *multi_s, "-xdrop_gap", "30"], "losat-rejects"),
         ("audit6.option.num_alignments", [*mq, *multi_s, "-num_alignments", "5"], "losat-rejects"),
         ("audit6.out_name.trailing_dot", [*mq, *multi_s, "-out", f"{w}/missing_dir/" + "o" * 256 + "/."], "same-error"),
+    ]
+    repeat = ["-query", f"{w}/repeat_query.fa", "-subject", f"{w}/repeat_subject.fa"]
+    bits = ["-query", f"{w}/bits_query.fa", "-subject", f"{w}/bits_subject.fa", "-reward", "2", "-penalty", "-5", "-dust", "no"]
+    besthit = ["-query", f"{w}/besthit_query.fa", "-subject", f"{w}/besthit_subject.fa", "-task", "blastn", "-subject_besthit"]
+    rows += [
+        ("audit7.gap_reduction.subject_start", repeat, "same"),
+        ("audit7.gap_reduction.subject_start.fmt6", [*repeat, "-outfmt", "6"], "same"),
+        ("audit7.bit_score_99.fmt0", bits, "same"),
+        ("audit7.bit_score_99.fmt6", [*bits, "-outfmt", "6"], "same"),
+        ("audit7.bit_score_99.fmt7", [*bits, "-outfmt", "7"], "same"),
+        ("audit7.subject_besthit.prelim", [*besthit, "-outfmt", "6"], "same"),
+        ("audit7.subject_besthit.prelim.fmt0", besthit, "same"),
     ]
     for task in ("megablast", "blastn"):
         for gaps in (["-reward", "1", "-penalty", "-2", "-gapopen", "5", "-gapextend", "2"],

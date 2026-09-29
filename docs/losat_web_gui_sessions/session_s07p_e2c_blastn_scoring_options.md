@@ -33,4 +33,4 @@ LOSAT の段階 E2c を実行する。BLASTN（LOSATN）の得点のオプショ
 
 ## 終了・引き継ぎ
 
-README の規則 8 に従う。次は [S08 — TBLASTX outfmt 0/7](session_s08_e2b_tblastx_outfmt0_7.md)。対応する得点の組合せ（直したものと拒否するもの）を [S12 の指示書](session_s12_w3_search_ui.md) に書き足す。
+README の規則 8 に従う。次は [S07++ — BLASTN の query の batch](session_s07pp_e2f_blastn_query_batches.md)。対応する得点の組合せ（直したものと拒否するもの）を [S12 の指示書](session_s12_w3_search_ui.md) に書き足す。

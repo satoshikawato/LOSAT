@@ -84,6 +84,7 @@ LOSAT は、NCBI BLAST+ を純 Rust で再実装したものである。宣言�
 | TD-11 | reactor は、ビルドした checkout のパスと `CARGO_HOME` を `--remap-path-prefix` で固定の名前に置き換えてビルドする。TD-6 の rustflags の比較は、この置き換えだけを差として認める。S07 で入れ（reactor を作り直し、full の V-ABI を再実行するため）、S16 の V-PRIV で公開物にローカルのパスが無いことを確かめる | アダプタは LOSAT を path 依存として使うので、エンジンのコードの panic の位置に checkout の絶対パスが入り、登録簿の crate の位置には `CARGO_HOME` が入る（S05 の独立監査、`docs/web/abi_v2.md` §2）。公開物にビルドした機械のパスを残さない。置き換えはコードの働きを変えない。S07 で、置き換えの後の reactor にローカルのパスが無いことを確かめた。バイトは checkout のパスにはなお依存する（path 依存の crate の Cargo の metadata hash が記号の名前に入る）ので、同一性の記録に checkout のパスを残し、再現は同じパスで行う |
 | TD-12 | BLASTN の入力は、LOSAT の `bio` の読み方と NCBI の `CFastaReader` の読み方が同じものだけを受け付ける。違いは `U`（NCBI は `T` として読む）だけを移植し、ほかの違い（定義行の先頭の空白・制御文字・非 ASCII、IUPAC の文字以外の残基）は明示的に拒否する。v2 のアダプタは `register` で同じ検査をする。NCBI の読み込み器の移植は未決事項にした（§10） | NCBI の読み込み器の移植には、アダプタの索引の走査（TD-8）に新しい解析器の種類が要り、S07+ の範囲を超える。拒否する入力は研究で使う FASTA では稀で、黙って違う結果を出すより安全である（S07+、`docs/evidence/losat_web_e2c/AUTHORITY.md` §E） |
 | TD-13 | BLASTP・TBLASTN・TBLASTX の既定以外のオプション（行列、gap、threshold、word size、window、`-comp_based_stats`、`-seg`、遺伝暗号、e-value の書き方など）は、S08+ で NCBI と同じにするか、明示的に拒否する。BLASTX は SX で同じことを行う。S12 の前に終える | 認証済みの fixture は既定の値だけを使う（`LOSAT/tests/blastp_parity_options.sh` など。例外は承認済みの遺伝暗号だけ）。S07+ で BLASTN の既定以外の値に多くの差が見つかった（`docs/evidence/losat_web_e2c/AUTHORITY.md`）が、ほかの program は比べていない。これらのオプションはアプリの検索画面に出るので、S07+ と同じ扱いにする（2026-09-29、推奨案で進める保守者の指示による）|
+| TD-14 | BLASTN は、複数の query を NCBI と同じ query の batch（`CBatchSizeMixer`、`good_init_extends` による後の batch の大きさ）に分けて検索する。S07++ で移植し、S07+ の batch に依存する明示的な拒否をなくす。S12 の前に終える | S07+ の第 7 回の独立監査で、NCBI の近似の ungapped 伸長が query の塊（batch）の端で止まるため、batch の境の query の端で、既定のオプションでも LOSAT の HSP が増えることが分かった（`docs/evidence/losat_web_e2c/AUTHORITY.md` §K）。以前からの差で、S07+ の範囲（得点のオプションと入力の読み方）の外の、エンジンの構造の変更なので、段階を分ける（2026-09-30、推奨案で進める保守者の指示による）|
 
 ---
 
@@ -451,6 +452,7 @@ NCBI BLAST+（oracle） ─[既存の認証]─► ネイティブ LOSAT の凍�
 | S06 | **E2a-1** BLASTN outfmt 0：権威と fixture | NCBI の呼出し経路（`blast_format.cpp` → `align_format`）の記録。比較する fixture と NCBI の出力の固定 | 経路の対応表、固定した fixture と SHA-256。**完了（2026-09-29）** |
 | S07 | **E2a-2** BLASTN outfmt 0：実装とゲート | S06 で見つかった BLASTN の panic の修正、座標の桁数の共有の関数（TD-9）、移植、`PairwiseHit` の作成、`run_local` と観測者への接続 | 固定した fixture（S06 の manifest の BLASTN・BLASTP・TBLASTN の 34 件、stderr を記録したものは stderr も）で NCBI とバイト一致。既存の 6/7 に退行なし。TD-9 で変わる BLASTP・TBLASTN の凍結出力は、すべて NCBI の出力と一致する。BLASTN の全升目（0/6/7 × スレッド 1/2/4）の V-ABI。独立監査。**完了（2026-09-29）** |
 | S07+ | **E2c** BLASTN の得点のオプションと入力の読み方 | NCBI のオプションの検査（同じ拒否と文言）の移植。既定以外の得点で NCBI と違う原因の調査と修正。直せない組合せの明示的な拒否（TD-10）。S07 で見つかった、query の組成に依存する ungapped Karlin block と、FASTA の読み方・警告の時点の差 | S06 の `scoring_sweep.py` の全組合せが、NCBI と同じ拒否、outfmt 6 のバイト一致、明示的な拒否のどれかになる。直した組合せの fixture で NCBI とバイト一致。既存の BLASTN のゲートと S07 の fixture に退行なし。V-PERF の非退行。独立監査 |
+| S07++ | **E2f** BLASTN の query の batch | NCBI の query の batch（`CBatchSizeMixer`、batch ごとの query の塊・lookup table・対角線の表）の移植と、batch に依存する S07+ の拒否の置き換え（TD-14） | 複数の query の sweep が NCBI とバイト一致。S07+ の検査、既存の BLASTN のゲート、S07 の fixture に退行なし。V-PERF の記録。BLASTN の V-ABI。独立監査 |
 | S08 | **E2b** TBLASTX outfmt 0/7 | 権威の記録、fixture の固定、移植、`PairwiseHit` の作成 | 固定した fixture で NCBI とバイト一致（承認済みの遺伝暗号の例外を除く）。既存の 6 に退行なし。TBLASTX の全升目の V-ABI。独立監査 |
 | S08+ | **E2e** BLASTP・TBLASTN・TBLASTX の既定以外のオプション | NCBI のオプションの検査（同じ拒否と文言）の移植。既定以外の値で NCBI と違う原因の調査と修正。直せない値の明示的な拒否（TD-13） | 各 program の sweep の全組合せが、NCBI と同じ拒否、outfmt 0/6/7 のバイト一致、明示的な拒否のどれかになる。直した組合せの fixture で NCBI とバイト一致。各 program の既存のゲートと S07・S08 の fixture に退行なし。V-PERF の非退行。変えた program の V-ABI。独立監査 |
 | S09 | **W1** ブラウザでの実行基盤 | Engine worker、WASI shim、ThreadHost、機能の確認、serial への切り替え、取消、instance の作り直し、R1。DW-8 のための前処理の割合の実測 | V-BR（BLASTX を除く 4 program、3 ブラウザ、n=1/2/4）。取消の後の実行が成功する。メモリの推移と前処理の割合を記録する |
@@ -523,6 +525,6 @@ NCBI BLAST+（oracle） ─[既存の認証]─► ネイティブ LOSAT の凍�
 | Cloudflare に残す旧版の数、ドメイン名 | S16 の前 |
 | BLASTX の範囲の拡大（DW-11）を LOSATX 計画の範囲の記録に書くこと | SX の前（保守者） |
 | v1 ABI の廃止 | gbdraw が v2 へ移る時点（TD-1） |
-| BLASTN の FASTA の読み方を NCBI の `CFastaReader` に合わせる（TD-12 の拒否をなくす。アダプタの索引の走査の解析器の種類を足す）と、NCBI の後の query batch の大きさ（`CBatchSizeMixer` と拡張の数）の再現（S07+ の batch に依存する拒否をなくす） | S17 の前（保守者と相談） |
+| BLASTN の FASTA の読み方を NCBI の `CFastaReader` に合わせる（TD-12 の拒否をなくす。アダプタの索引の走査の解析器の種類を足す）。NCBI の後の query batch の大きさの再現は S07++（TD-14）に移した | S17 の前（保守者と相談） |
 | `-num_threads` の NCBI の警告（CPU の数を超えると「Number of threads was reduced to N …」、`-subject` があると「'num_threads' is currently ignored when 'subject' is specified.」、`blast_args.cpp:3203-3236`）。LOSAT はどの program も `-subject` でスレッドを使い、警告を出さない（出力は同じ、stderr だけが違う。以前から。S07+ の第 4 回の監査、`docs/evidence/losat_web_e2c/AUTHORITY.md` §I）。承認済みの例外にするか、警告を出すか | S17 の前（保守者と相談） |
 | 公開する版の名前 | S17 |

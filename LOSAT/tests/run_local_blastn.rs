@@ -3,7 +3,8 @@
 //! The shared BLASTN entry `run_local` writes several output formats from one search.
 //! Every format must be byte-identical to the CLI run that requests only that format,
 //! the warnings must equal that run's standard error, and the observer must report the
-//! exact row of every HSP. (Identity with the previous release over the regression
+//! exact row and pairwise section of every HSP. (Identity of outfmt 0 with NCBI is
+//! checked by docs/evidence/losat_web_e2a/check_losat.py over the frozen fixtures.) (Identity with the previous release over the regression
 //! manifests is checked by docs/evidence/losat_web_e1a/capture_outputs.py.)
 
 mod run_local_support;
@@ -11,13 +12,13 @@ mod run_local_support;
 use std::process::Command;
 
 use run_local_support::{
-    assert_tabular_ranges, fixture_sequence, read_records, run_formats, Run, TempFasta,
+    assert_observer_ranges, fixture_sequence, read_records, run_formats, Run, TempFasta,
 };
 use LOSAT::algorithm::blastn::BlastnArgs;
 use LOSAT::api::local_blast::{run_local_blastn, FormatOutput, OutputSink, ReportOutputs};
 use LOSAT::cli::{try_parse_from, Cli, Commands};
 
-const FORMATS: [&str; 2] = ["6", "7"];
+const FORMATS: [&str; 3] = ["0", "6", "7"];
 
 /// Three queries against four subjects cut from two genomes. The first query overlaps
 /// two subjects, so `-max_target_seqs 1` removes a subject from its hit list.
@@ -125,11 +126,12 @@ fn every_format_of_one_search_matches_the_cli_run_of_that_format() {
         &["-num_threads", "2"][..],
     ] {
         let together = inputs.run(&FORMATS, extra, true);
-        assert!(
-            together.hits.is_empty(),
-            "BLASTN produces no hit records yet"
+        assert_eq!(
+            together.hits.len(),
+            together.ranges[1].len(),
+            "one hit record per outfmt 6 row {extra:?}"
         );
-        row_counts.push(together.ranges[0].len());
+        row_counts.push(together.ranges[1].len());
         for (index, outfmt) in FORMATS.iter().enumerate() {
             let alone = inputs.run(&[outfmt], extra, false);
             assert!(
@@ -164,13 +166,16 @@ fn every_format_of_one_search_matches_the_cli_run_of_that_format() {
 // }
 // m_Ostream << "\n";
 // ```
+// NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:1970-1973
+// ```c++
+// x_DisplayAlnvecInfo(out, alnvecInfo,showDefLine);
+// ```
 #[test]
-fn observer_ranges_are_exact_rows_of_the_same_hsp() {
+fn observer_ranges_are_exact_rows_and_sections_of_the_same_hsp() {
     let inputs = Inputs::new();
-    for extra in [&[][..], &["-max_target_seqs", "1"][..]] {
+    for extra in [&[][..], &["-max_target_seqs", "1"][..], &["-task", "blastn"][..]] {
         let result = inputs.run(&FORMATS, extra, true);
-        let rows = assert_tabular_ranges(&result, 0, Some(1), &format!("blastn {extra:?}"));
-        assert!(rows > 0, "the fixture must produce hits {extra:?}");
+        assert_observer_ranges(&result, [0, 1, 2], &format!("blastn {extra:?}"));
     }
 }
 
@@ -185,7 +190,7 @@ fn unsupported_formats_fail_before_searching() {
     let inputs = Inputs::new();
     let queries = read_records(&inputs.query.0);
     let subjects = read_records(&inputs.subject.0);
-    for outfmt in ["0", "5", "6 qseqid"] {
+    for outfmt in ["0 qseqid", "5", "6 qseqid"] {
         let (mut valid, mut invalid, mut diagnostics) = (Vec::new(), Vec::new(), Vec::new());
         let mut outputs = ReportOutputs {
             formats: vec![

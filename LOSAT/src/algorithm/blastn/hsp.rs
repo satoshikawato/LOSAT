@@ -15,8 +15,17 @@ use super::tracing as blastn_trace;
 //     CBlastTabularInfo tabinfo(m_Outfile, m_CustomOutputFormatSpec, kDelim);
 // }
 // ```
+// NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:1410-1414
+// ```c
+// void
+// CBlastFormat::PrintOneResultSet(const blast::CSearchResults& results,
+//                         CConstRef<blast::CBlastQueryVector> queries,
+//                         unsigned int itr_num
+// ```
+// The pairwise report (outfmt 0) is the non-tabular branch of the same formatter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BlastnOutputFormat {
+    Pairwise,
     Tabular,
     TabularWithComments,
 }
@@ -35,13 +44,14 @@ pub fn parse_blastn_output_format(spec: &str) -> Result<BlastnOutputFormat, Stri
         ));
     }
     match format {
+        "0" => Ok(BlastnOutputFormat::Pairwise),
         "6" => Ok(BlastnOutputFormat::Tabular),
         "7" => Ok(BlastnOutputFormat::TabularWithComments),
         _ => Err(format!("unsupported BLASTN output format: {format}")),
     }
 }
 
-const NCBI_BLASTN_VERSION: &str = "2.17.0+";
+pub(crate) const NCBI_BLASTN_VERSION: &str = "2.17.0+";
 
 // NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1264-1284
 // ```c

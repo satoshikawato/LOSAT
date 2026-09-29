@@ -144,3 +144,16 @@ prot = "".join(rng.choice("ACDEFGHIKLMNPQRSTVWY") for _ in range(33))
 nt = "A" + "".join(rng.choice(codons[amino]) for amino in prot)
 (out / "twidth_s.fna").write_text(">tw_s 100 bp subject, frame +2 ends at 100\n" + nt + "\n")
 (out / "twidth_q.faa").write_text(">tw_q\n" + prot + "\n")
+
+# edge_mixed_allN / edge_ambig (added in S07): an all-N query between two valid ones, and
+# a query with N runs and other IUPAC codes (the ungapped Karlin block depends on the
+# query composition).
+records = [chunk.split("\n", 1) for chunk in COMPACT.read_text().split(">")[1:]]
+alpha_def, alpha_seq = records[0][0], records[0][1].replace("\n", "")
+beta_def, beta_seq = records[1][0], records[1][1].replace("\n", "")
+(out / "edge_mixed_allN.fasta").write_text(
+    ">" + alpha_def + "\n" + alpha_seq + "\n>allN query of only N\n" + "N" * 40 + "\n>" + beta_def + "\n" + beta_seq + "\n")
+ambig = list(alpha_seq)
+ambig[10:15] = "NNNNN"
+ambig[30], ambig[50], ambig[60] = "R", "Y", "K"
+(out / "edge_ambig.fasta").write_text(">ambig alpha with N and IUPAC codes\n" + "".join(ambig) + "\n")

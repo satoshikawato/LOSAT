@@ -77,10 +77,17 @@ use super::super::filtering::{
 use super::super::hsp::{
     get_prelim_hitlist_size, parse_blastn_output_format, sort_hsps_by_score, trim_by_max_hsps,
     write_output_blastn_hitlists_to_writer, BlastnHitList, BlastnHsp, BlastnHspList,
-    BlastnOutputFormat,
+    BlastnOutputFormat, NCBI_BLASTN_VERSION,
 };
 use super::super::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
 use super::super::lookup::{build_unmasked_ranges, reverse_complement};
+use super::super::pairwise::{pairwise_hits, query_ungapped_karlin, DisplayMasks};
+use crate::blastinput::query_batch::query_batches;
+use crate::report::pairwise::{
+    write_blastn_pairwise_report, BlastnPairwiseQuery, BlastnPairwiseReport, PairwiseConfig,
+};
+use crate::report::query_warnings::{few_matches_warning, invalid_query_warning};
+use crate::stats::KarlinParams;
 // NCBI reference: c++/src/algo/blast/core/blast_parameters.c:342-344,370-374
 // gap_trigger = (Int4)((kOptions->gap_trigger * NCBIMATH_LN2 + kbp->logK) / kbp->Lambda);
 // new_cutoff = MIN(new_cutoff, hit_params->cutoffs[context].cutoff_score_max);
@@ -4068,6 +4075,121 @@ fn update_hitlists_with_subject_hits(
     }
 }
 
+/// What the pairwise report, the hit records and the query warnings need besides the
+/// final hit list.
+struct BlastnReportInputs<'a> {
+    queries: &'a [bio::io::fasta::Record],
+    subjects: &'a [bio::io::fasta::Record],
+    /// Per query, plus strand: DUST and, with `-lcase_masking`, the input lowercase.
+    query_masks: &'a [Vec<MaskedInterval>],
+    lcase_masking: bool,
+    /// Per query context (the plus strand of query `q` is context `2 * q`).
+    query_eff_searchsp: &'a [i64],
+    megablast: bool,
+    reward: i32,
+    penalty: i32,
+    gap_open: i32,
+    gap_extend: i32,
+    gapped_karlin: KarlinParams,
+    max_target_seqs: Option<usize>,
+    db_num_seqs: usize,
+    db_len_total: usize,
+}
+
+/// The per-query and run-level data of the pairwise report.
+fn blastn_pairwise_report(
+    report: &BlastnReportInputs<'_>,
+    query_karlin: &[Option<KarlinParams>],
+    query_titles: &[Arc<str>],
+    subject_title: &str,
+) -> (Vec<BlastnPairwiseQuery>, BlastnPairwiseReport) {
+    let queries = report
+        .queries
+        .iter()
+        .enumerate()
+        .map(|(q_idx, query)| BlastnPairwiseQuery {
+            query_name: query_titles[q_idx].to_string(),
+            query_length: query.seq().len(),
+            ungapped_karlin: query_karlin[q_idx],
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_results.cpp:82-104
+            // ```c
+            //     // find the first valid context corresponding to this query
+            //     ...
+            //     m_SearchSpace = ctx->eff_searchsp;
+            // ```
+            // An invalid query has no valid context, and its search space stays 0.
+            effective_search_space: if query_karlin[q_idx].is_some() {
+                report.query_eff_searchsp[2 * q_idx]
+            } else {
+                0
+            },
+        })
+        .collect();
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_input_aux.cpp:105-113
+    // ```c
+    //     case eBlastn:
+    //         retval = 100000;
+    //         break;
+    //     ...
+    //     case eMegablast:
+    //         retval = 5000000;
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/local_blast.cpp:177-207
+    // ```c
+    //     int status = m_PrelimSearch->CheckInternalData();
+    //     if (status != 0)
+    //     {
+    //          // Search was not run, but we send back an empty CSearchResultSet.
+    //     ...
+    //               pair<double, double> tmp_pair(-1.0, -1.0);
+    //               CRef<CBlastAncillaryData>  tmp_ancillary_data(new CBlastAncillaryData(tmp_pair, tmp_pair, tmp_pair, 0));
+    // ```
+    // A batch whose queries are all invalid is not searched; its queries get the `-1`
+    // Karlin blocks.
+    let lengths: Vec<usize> = report
+        .queries
+        .iter()
+        .map(|query| query.seq().len())
+        .collect();
+    let batch_size = if report.megablast { 5_000_000 } else { 100_000 };
+    let mut unsearched = vec![false; lengths.len()];
+    for batch in query_batches(&lengths, batch_size) {
+        if query_karlin[batch.clone()].iter().all(Option::is_none) {
+            unsearched[batch].fill(true);
+        }
+    }
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2910-2928
+    // ```c
+    //     m_NumDescriptions = m_DfltNumDescriptions;
+    //     m_NumAlignments = m_DfltNumAlignments;
+    //     ...
+    //     if (args.Exist(kArgMaxTargetSequences) && args[kArgMaxTargetSequences]) {
+    //         m_NumDescriptions = args[kArgMaxTargetSequences].AsInteger();
+    //         m_NumAlignments = args[kArgMaxTargetSequences].AsInteger();
+    // ```
+    // The defaults are 500 descriptions and 250 alignments (format_flags.cpp:219,221).
+    let (num_descriptions, num_alignments) = match report.max_target_seqs {
+        Some(max_target_seqs) => (max_target_seqs, max_target_seqs),
+        None => (500, 250),
+    };
+    let pairwise_report = BlastnPairwiseReport {
+        version: NCBI_BLASTN_VERSION.to_string(),
+        megablast: report.megablast,
+        database_name: subject_title.to_string(),
+        database_num_sequences: report.db_num_seqs,
+        database_total_letters: report.db_len_total,
+        reward: report.reward,
+        penalty: report.penalty,
+        gap_open: report.gap_open,
+        gap_extend: report.gap_extend,
+        gapped_karlin: report.gapped_karlin,
+        num_descriptions,
+        num_alignments,
+        unsearched,
+    };
+    (queries, pairwise_report)
+}
+
 fn post_process_hits_and_write(
     mut hit_lists: Vec<Option<BlastnHitList>>,
     hitlist_size: usize,
@@ -4082,6 +4204,7 @@ fn post_process_hits_and_write(
     query_titles: &[Arc<str>],
     subject_title: &str,
     timing: Option<&BlastnTiming>,
+    report: &BlastnReportInputs<'_>,
 ) -> Result<()> {
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:183-187
     // ```c
@@ -4222,6 +4345,52 @@ fn post_process_hits_and_write(
     // }
     // ```
     // Each requested format prints the same final result without searching again.
+    //
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2778-2792
+    // ```c
+    //       loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
+    //       if (loop_status) {
+    //           contexts[context].is_valid = FALSE;
+    // ```
+    // A query whose ungapped block cannot be computed is invalid: NCBI does not search it
+    // (it has no hits here either), the pairwise report prints no Karlin blocks for it,
+    // and every format gets its warning.
+    let query_karlin: Vec<Option<KarlinParams>> = report
+        .queries
+        .iter()
+        .map(|query| query_ungapped_karlin(query.seq(), report.reward, report.penalty))
+        .collect();
+    // Rendered hits are needed by outfmt 0 and by the caller's hit records; both get the
+    // same final hit list, built once.
+    let pairwise_hits =
+        if outputs.hits.is_some() || output_formats.contains(&BlastnOutputFormat::Pairwise) {
+            let subject_masks = report.lcase_masking.then(|| {
+                report
+                    .subjects
+                    .iter()
+                    .map(|subject| collect_lowercase_masks(subject.seq()))
+                    .collect::<Vec<_>>()
+            });
+            Some(pairwise_hits(
+                &hit_lists,
+                report.queries,
+                report.subjects,
+                &DisplayMasks {
+                    query: report.query_masks,
+                    subject: subject_masks.as_deref(),
+                },
+            )?)
+        } else {
+            None
+        };
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:1411
+    // ```c
+    // CBlastFormat::PrintOneResultSet(const blast::CSearchResults& results,
+    // ```
+    // The caller receives the same final result that every formatter prints.
+    if let (Some(hits_sink), Some(hits)) = (outputs.hits.as_mut(), pairwise_hits.as_ref()) {
+        hits_sink(hits);
+    }
     let observer = &mut outputs.observer;
     for (format_index, (format, &output_format)) in
         outputs.formats.iter_mut().zip(output_formats).enumerate()
@@ -4235,17 +4404,52 @@ fn post_process_hits_and_write(
         //     : m_FormatType(format_type), ..., m_Outfile(outfile),
         // ```
         let mut writer = format.sink.open()?;
-        write_output_blastn_hitlists_to_writer(
-            &hit_lists,
-            &mut writer,
-            query_ids,
-            subject_ids,
-            output_format,
-            query_titles,
-            subject_title,
-            probe.as_mut(),
-        )?;
+        if output_format == BlastnOutputFormat::Pairwise {
+            let hits = pairwise_hits
+                .as_deref()
+                .expect("pairwise hits are built for outfmt 0");
+            let (queries, pairwise_report) =
+                blastn_pairwise_report(report, &query_karlin, query_titles, subject_title);
+            write_blastn_pairwise_report(
+                hits,
+                &mut writer,
+                &PairwiseConfig {
+                    program: "blastn".to_string(),
+                    show_frame: false,
+                    ..PairwiseConfig::default()
+                },
+                &queries,
+                subject_ids,
+                &pairwise_report,
+                probe.as_mut(),
+            )?;
+        } else {
+            write_output_blastn_hitlists_to_writer(
+                &hit_lists,
+                &mut writer,
+                query_ids,
+                subject_ids,
+                output_format,
+                query_titles,
+                subject_title,
+                probe.as_mut(),
+            )?;
+        }
         writer.flush()?;
+    }
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:1450-1452
+    // ```c
+    //     if (results.HasWarnings()) {
+    //         ERR_POST(Warning << results.GetWarningStrings());
+    //     }
+    // ```
+    // The warnings belong to the result, so they are written once, in query order.
+    for (index, (query, karlin)) in report.queries.iter().zip(&query_karlin).enumerate() {
+        if karlin.is_none() {
+            outputs
+                .diagnostics
+                .write_all(&invalid_query_warning("blastn", index, query))?;
+        }
     }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:770-782
@@ -4488,6 +4692,21 @@ fn run_in_pool(
         .iter()
         .map(|format| parse_blastn_output_format(format.outfmt).map_err(anyhow::Error::msg))
         .collect::<Result<Vec<BlastnOutputFormat>>>()?;
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2975-2977
+    // ```c
+    //     if(hitlist_size < 5){
+    //    		ERR_POST(Warning << "Examining 5 or more matches is recommended");
+    //     }
+    // ```
+    // The hit list size is the -max_target_seqs value, or 500 when it is omitted.
+    if args
+        .max_target_seqs
+        .is_some_and(|max_target_seqs| max_target_seqs < 5)
+    {
+        outputs
+            .diagnostics
+            .write_all(&few_matches_warning("blastn"))?;
+    }
 
     // NCBI reference: ncbi-blast/c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
     // ```c
@@ -5298,6 +5517,22 @@ fn run_in_pool(
     let min_diag_separation = config.min_diag_separation; // For MB_HSP_CLOSE containment check
     let db_len_total = seq_data.db_len_total;
     let db_num_seqs = seq_data.db_num_seqs;
+    let report_inputs = BlastnReportInputs {
+        queries: &seq_data.queries,
+        subjects: subject_records.expect("subject records are loaded before the search"),
+        query_masks: &seq_data.query_masks,
+        lcase_masking: args.lcase_masking,
+        query_eff_searchsp: &query_eff_searchsp,
+        megablast: args.task == "megablast",
+        reward: config.reward,
+        penalty: config.penalty,
+        gap_open: config.gap_open,
+        gap_extend: config.gap_extend,
+        gapped_karlin: params_gapped.clone(),
+        max_target_seqs: args.max_target_seqs,
+        db_num_seqs,
+        db_len_total,
+    };
     let evalue_threshold = args.evalue;
     let subject_besthit = args.subject_besthit;
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:993-1001 (s_HSPTest)
@@ -10434,6 +10669,7 @@ fn run_in_pool(
                 query_titles_arc.as_ref(),
                 subject_title.as_ref(),
                 timing.as_deref(),
+                &report_inputs,
             )?;
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1674-1783
             // ```c
@@ -10566,6 +10802,7 @@ fn run_in_pool(
         query_titles_arc.as_ref(),
         subject_title.as_ref(),
         timing.as_deref(),
+        &report_inputs,
     )?;
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1674-1783
     // ```c

@@ -5,7 +5,9 @@ use clap::Args;
 use std::io::Write;
 use std::path::PathBuf;
 
+use crate::blastinput::query_batch::query_batches;
 use crate::blastinput::value_parsers::*;
+use crate::report::query_warnings::invalid_query_warning;
 use crate::utils::genetic_code::GeneticCode;
 
 use super::scoring::{matrix_params, suggested_threshold, suggested_window_size};
@@ -581,7 +583,8 @@ pub fn run_local(
     let mut ungapped_karlin = Vec::with_capacity(queries.len());
     let mut query_validity = Vec::with_capacity(queries.len());
     let mut query_batch_skipped = Vec::with_capacity(queries.len());
-    for range in tblastn_query_batches(&query_seqs) {
+    let query_lengths: Vec<usize> = query_seqs.iter().map(Vec::len).collect();
+    for range in query_batches(&query_lengths, 20_000) {
         let (mut batch_results, batch_lengths, batch_karlin, batch_validity) =
             run_local_for_report_threads(
                 &query_seqs[range],
@@ -640,91 +643,17 @@ pub fn run_local(
         if !valid {
             outputs
                 .diagnostics
-                .write_all(&ncbi_invalid_query_warning(index, query))?;
+                .write_all(&invalid_query_warning("tblastn", index, query))?;
         }
     }
     Ok(())
-}
-
-// NCBI c++/src/algo/blast/blastinput/blast_input_aux.cpp:105-127:
-// case eTblastn: retval = 20000;
-// NCBI c++/src/algo/blast/blastinput/blast_input.cpp:135-166:
-// while (size_read < GetBatchSize()) { size_read += sequence::GetLength(...);
-//                                 retval->AddQuery(q); }
-// The query that reaches the threshold remains in the current batch.
-fn tblastn_query_batches(queries: &[Vec<u8>]) -> Vec<std::ops::Range<usize>> {
-    let mut batches = Vec::new();
-    let mut start = 0;
-    while start < queries.len() {
-        let mut end = start;
-        let mut residues = 0usize;
-        while end < queries.len() && residues < 20_000 {
-            residues += queries[end].len();
-            end += 1;
-        }
-        batches.push(start..end);
-        start = end;
-    }
-    batches
-}
-
-// NCBI c++/src/algo/blast/core/blast_stat.c:2780-2792:
-// if (loop_status && !Blast_QueryIsTranslated(program))
-//     Blast_MessageWrite(..., eBlastSevWarning, context,
-//                        kBlastErrMsg_CantCalculateUngappedKAParams);
-// NCBI c++/src/algo/blast/core/blast_message.c:37-40:
-// kBlastErrMsg_CantCalculateUngappedKAParams = "Could not calculate ...".
-// NCBI c++/src/algo/blast/api/blast_setup_cxx.cpp:535-543:
-// query_id = id->GetSeqIdString() + " " + kTitle;
-// if (query_id.size() > 35) query_id = query_id.substr(0, 25) + ".. ";
-// NCBI c++/src/algo/blast/api/blast_results.cpp:277-293:
-// retval = m_Errors.GetQueryId() + ": " + warning + " ";
-fn ncbi_invalid_query_warning(index: usize, query: &fasta::Record) -> Vec<u8> {
-    let mut query_id = format!("Query_{} {}", index + 1, query.id()).into_bytes();
-    if let Some(desc) = query.desc() {
-        query_id.extend_from_slice(b" ");
-        query_id.extend_from_slice(desc.as_bytes());
-    }
-    if query_id.len() > 35 {
-        query_id.truncate(25);
-        query_id.extend_from_slice(b".. ");
-    }
-    let mut warning = b"Warning: [tblastn] ".to_vec();
-    warning.extend_from_slice(&query_id);
-    warning.extend_from_slice(b": Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options \n");
-    warning
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    // NCBI c++/src/algo/blast/blastinput/blast_input.cpp:137-165:
-    // while (size_read < GetBatchSize()) { ... size_read += length;
-    //                                  retval->AddQuery(q); }
-    #[test]
-    fn tblastn_batch_keeps_threshold_crossing_query() {
-        let queries = vec![vec![b'A'; 19_999], vec![b'A'; 2], vec![b'A'; 1]];
-        assert_eq!(tblastn_query_batches(&queries), vec![0..2, 2..3]);
-    }
     use crate::cli::{try_parse_from, Cli, Commands};
-
-    // NCBI c++/src/algo/blast/api/blast_setup_cxx.cpp:535-543;
-    // c++/src/algo/blast/api/blast_results.cpp:277-293:
-    // Query_1 + FASTA title is shortened after 35 bytes, then the
-    // invalid-Karlin warning retains NCBI's trailing space and newline.
-    #[test]
-    fn invalid_query_warning_matches_ncbi_bytes() {
-        let short = fasta::Record::with_attrs("nohit_query", None, b"W");
-        assert_eq!(
-            ncbi_invalid_query_warning(0, &short),
-            b"Warning: [tblastn] Query_1 nohit_query: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options \n"
-        );
-        let long =
-            fasta::Record::with_attrs("long_header", Some("abcdefghijklmnopqrstuvwxyz"), b"W");
-        assert!(ncbi_invalid_query_warning(1, &long)
-            .starts_with(b"Warning: [tblastn] Query_2 long_header abcde.. : "));
-    }
 
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:1938-1942
     // arg_desc.AddFlag(kArgUseLCaseMasking,

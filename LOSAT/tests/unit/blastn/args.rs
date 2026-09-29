@@ -25,7 +25,9 @@ fn test_default_values() {
     assert_eq!(args.word_size, 28);
     assert_eq!(args.num_threads, 1);
     assert_eq!(args.evalue, 10.0);
-    assert_eq!(args.max_target_seqs, Some(500));
+    // NCBI blast_args.cpp:2913-2927: an omitted -max_target_seqs keeps the defaults of
+    // the hit list (500) and of the pairwise alignments (250), so it stays unset here.
+    assert_eq!(args.max_target_seqs, None);
     assert_eq!(args.reward, 1);
     assert_eq!(args.penalty, -2);
     assert_eq!(args.gap_open, 0);

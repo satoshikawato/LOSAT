@@ -55,7 +55,14 @@ pub struct BlastnArgs {
     //    hitlist_size = m_NumAlignments;
     // }
     // ```
-    #[arg(long, default_value = "500", value_parser = positive_usize)]
+    // NCBI reference: ncbi-blast/c++/src/objtools/align_format/format_flags.cpp:219,221
+    // ```c
+    // const size_t kDfltArgNumDescriptions = 500;
+    // const size_t kDfltArgNumAlignments = 250;
+    // ```
+    // An omitted value keeps the default hit list size (500, `hitlist_size`) but the
+    // pairwise report then shows 250 alignments, so the option has no clap default.
+    #[arg(long, value_parser = positive_usize, help = "Maximum number of aligned sequences to keep (default: 500)")]
     pub max_target_seqs: Option<usize>,
     /// Maximum number of hits to save (NCBI BLAST hitlist_size)
     /// Reference: ncbi-blast/c++/src/algo/blast/api/blast_nucl_options.cpp:231-270

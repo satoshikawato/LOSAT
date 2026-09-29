@@ -236,8 +236,11 @@ fn defaults_and_task_overrides_remain_distinct() {
         assert_eq!(error.kind(), clap::error::ErrorKind::InvalidValue);
         assert!(error.to_string().contains(task));
     }
+    // NCBI blast_args.cpp:2800-2803: the default -outfmt is 0. BLASTN implements it;
+    // TBLASTX still rejects it.
+    parse("blastn", &[]).unwrap();
+    assert!(parse("tblastx", &[]).unwrap_err().to_string().contains("0"));
     for program in ["blastn", "tblastx"] {
-        assert!(parse(program, &[]).unwrap_err().to_string().contains("0"));
         parse(program, &["-outfmt", "6"]).unwrap();
     }
     assert!(parse("blastn", &["-outfmt", "6", "-task", "dc-megablast"]).is_err());
@@ -322,7 +325,7 @@ fn output_capabilities_fail_explicitly_and_help_is_canonical() {
     parse("blastp", &["-outfmt", "6 qseqid sseqid pident length"]).unwrap();
     for (program, specs) in [
         ("blastp", vec!["5", "0 qseqid", "6 unknown"]),
-        ("blastn", vec!["0", "6 qseqid"]),
+        ("blastn", vec!["0 qseqid", "5", "6 qseqid"]),
         ("tblastx", vec!["0", "7", "6 qseqid"]),
     ] {
         for spec in specs {

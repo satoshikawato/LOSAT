@@ -171,3 +171,14 @@ LOSAT は、1 つの query の表（`use_array_indexing`。query の塊が 8000 
 | `blast_filter.c:1081-1115`、`blast_setup.c:633-653` | 最初の文字から最後の文字まで覆われた context は、lookup の区間 `(end + 1, end)` を持ち、見積もりは 1 つ減り、`end` は `max_off` に入る。区間は ungapped block が context を無効にする前に作るので、無効な context も数える | 覆われた context を数えていなかった。`compute_lookup_query_stats` を NCBI に合わせた（出力の差は監査で見つかっていない） |
 
 ABI v1 は `run_local` で CLI と同じエンジンを使うので、エンジンを NCBI に合わせる修正（例：§L の曖昧な文字）は v1 の検索結果にも及ぶ。計画の TD-1 に、凍結するのは v1 の引数・形式・誤りの扱いであることを書き足した。
+
+## N. 第 10 回の独立監査で見つかった、以前からの差
+
+| NCBI | 振る舞い | LOSAT |
+|---|---|---|
+| `fasta.cpp:376,710-758,1003-1012` | 配列の行の端で除くのは ASCII の空白だけで、残る UTF-8 のバイト（U+00A0 など）は不正な残基（警告して除く。レコードの最初の配列の行で文字が少なければ誤り） | `bio` は行末の Unicode の空白（U+0085、U+00A0、U+2000〜200A、U+3000 など）も除き、黙って受け付けていた。`input.rs` の `check_sequence_lines` が、配列の行の非 ASCII のバイトを、読む時点で拒否する（CLI、`register`、ABI v1 の fail-fast） |
+| `showalign.cpp:2273`、`showdefline.cpp:264,498`、`create_defline.cpp:219-312,3431-3446,3952-3960,4050-4095` | outfmt 0 の subject の見出しと説明の一覧の文字列は、`-parse_deflines` の無い subject では定義行全体（ID を含む）を title とした `CDeflineGenerator::GenerateDefline`：末尾の `.,;~ ` を除き、見出しでは `TPA:`・`MAG ` などの接頭辞を除き（説明は `fLeavePrefixSuffix` で残す）、HTML の文字参照を戻し、末尾の `,;~ ` を除き、`x_CleanAndCompress`（空白の連なり、` ,`、`,,`、`( `、` )` などの整理）。`sseqid`（outfmt 6/7）と query の title は定義行のまま | 定義行をそのまま出していた。`report/defline.rs` の `ncbi_nucleotide_title` を、BLASTN の見出し（`write_blastn_pairwise_report`）と説明の一覧（`write_blastn_description_table`）に使う。HTML の文字参照（`NStr::HtmlDecode` が変える `&名前;`・`&#数;`・`&#x16進;`）を含む subject の定義行は、outfmt 0 を求めたとき明示的に拒否する。BLASTP・TBLASTN・BLASTX の outfmt 0 は変えていない（S08+。蛋白の subject は `x_AdjustProteinTitleSuffix` などの規則も持つ） |
+
+第 9 回の `check_deflines` の、行末の空白の拒否の文言を直した（行末が制御文字でも NCBI は警告するので、「空白が無いときだけ警告する」は誤りだった）。
+
+引数の誤り（NCBI は USAGE と誤りを出して終了コード 1、LOSAT は clap の誤りで終了コード 2。例：`-word_size 3`、`-evalue abc`、未知のオプション）は、どちらも引数の誤りで、`check_inputs.py` の `arg-error` の区分にしている。全 program の CLI に共通なので、S08+ で扱いを決める（承認済みの例外にするか、NCBI の文言と終了コードにするか）。

@@ -140,6 +140,15 @@ def make_inputs(work: Path) -> None:
     (work / "title_nucleotides_space.fa").write_text(f">q1 {nucleotides} \n{q}\n")
     (work / "id_nucleotides.fa").write_text(f">{nucleotides}\n{q}\n")
     (work / "title_nucleotides_subject.fa").write_text(f">msA {nucleotides}\n" + subject.split("\n", 1)[1])
+    # The tenth audit round: Unicode white space that bio drops at the end of a sequence
+    # line; NCBI's outfmt 0 titles of the subjects (CDeflineGenerator).
+    (work / "nbsp_query.fa").write_text(">q1\n" + q[:300] + "\u00a0\n" + q[300:] + "\n")
+    (work / "ideographic_space_subject.fa").write_text(subject.rstrip("\n") + "\n\u3000\n")
+    first_subject = subject.split(">")[1]
+    subject_seq = "".join(first_subject.split("\n")[1:])
+    for index, defline in enumerate([">s1 abc.", ">s1 abc ,def", ">s1 a  b", ">s1 (a )", ">s1,,x", ">TPA: s1 x",
+                                     ">s1 x ; y", ">s1 E. coli sp.", ">s1 a ( b", ">s1 a&amp;b"]):
+        (work / f"title_{index}.fa").write_text(f"{defline}\n{subject_seq}\n")
 
 
 def cases(work: Path) -> list[tuple[str, list[str], str]]:
@@ -410,7 +419,12 @@ def cases(work: Path) -> list[tuple[str, list[str], str]]:
         ("audit9.title_warning.subject", ["-query", f"{F}/multi_query.fasta", "-subject", f"{w}/title_nucleotides_subject.fa", "-outfmt", "6"], "same"),
         ("audit9.title_warning.subject.penalty_0", ["-query", f"{F}/multi_query.fasta", "-subject", f"{w}/title_nucleotides_subject.fa", "-penalty", "0"], "same-error"),
         ("audit9.title_warning.query.empty_subject", ["-query", f"{w}/title_nucleotides.fa", "-subject", f"{w}/empty.fa"], "same-error"),
+        ("audit10.nbsp.query", ["-query", f"{w}/nbsp_query.fa", *multi_s, "-outfmt", "6"], "losat-rejects"),
+        ("audit10.ideographic_space.subject", ["-query", f"{F}/multi_query.fasta", "-subject", f"{w}/ideographic_space_subject.fa", "-outfmt", "6"], "losat-rejects"),
     ]
+    rows += [(f"audit10.title_{index}.fmt0", ["-query", f"{F}/multi_query.fasta", "-subject", f"{w}/title_{index}.fa"],
+              "losat-rejects" if index == 9 else "same") for index in range(10)]
+    rows += [("audit10.title_html.fmt6", ["-query", f"{F}/multi_query.fasta", "-subject", f"{w}/title_9.fa", "-outfmt", "6"], "same")]
     for task in ("megablast", "blastn"):
         for gaps in (["-reward", "1", "-penalty", "-2", "-gapopen", "5", "-gapextend", "2"],
                      ["-reward", "1", "-penalty", "-3", "-gapopen", "3", "-gapextend", "2"],

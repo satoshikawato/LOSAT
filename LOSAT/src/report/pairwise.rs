@@ -411,7 +411,15 @@ pub fn write_hsp_info<W: Write>(
             columns,
             ncbi_percent_match(gaps, columns)
         )?;
-        let subject_strand = if h.s_start > h.s_end { "Minus" } else { "Plus" };
+        // NCBI reference: c++/src/objtools/align_format/showalign.cpp:247-248
+        // ```c++
+        //     int master_strand  = m_AV->StrandSign(0);
+        //     int slave_strand = m_AV->StrandSign(1);
+        // ```
+        // The strand is the HSP's (its query frame; the shown query is on its plus
+        // strand), not the order of the coordinates, which is the same for an HSP of one
+        // letter.
+        let subject_strand = if h.query_frame < 0 { "Minus" } else { "Plus" };
         writeln!(writer, " Strand=Plus/{subject_strand}")?;
     } else {
         writeln!(
@@ -2396,6 +2404,36 @@ mod tests {
         assert!(output_str.contains("Score ="));
         assert!(output_str.contains("Expect ="));
         assert!(output_str.contains("Identities ="));
+    }
+
+    // NCBI reference: c++/src/objtools/align_format/showalign.cpp:247-248
+    // ```c++
+    //     int master_strand  = m_AV->StrandSign(0);
+    //     int slave_strand = m_AV->StrandSign(1);
+    // ```
+    // A BLASTN HSP of one letter has the same start and end; its strand is its frame's.
+    #[test]
+    fn blastn_strand_comes_from_the_hsp_frame() {
+        let config = PairwiseConfig {
+            program: "blastn".to_string(),
+            show_frame: false,
+            ..PairwiseConfig::default()
+        };
+        for (query_frame, strand) in [(1, " Strand=Plus/Plus\n"), (-1, " Strand=Plus/Minus\n")] {
+            let mut hit = PairwiseHit::from(Hit {
+                length: 1,
+                s_start: 10,
+                s_end: 10,
+                query_frame,
+                ..make_hit()
+            });
+            hit.query_seq = Some("G".to_string());
+            hit.subject_seq = Some("G".to_string());
+            let mut output = Vec::new();
+            write_hsp_info(&mut output, &hit, &config).unwrap();
+            let output = String::from_utf8(output).unwrap();
+            assert!(output.contains(strand), "{output}");
+        }
     }
 
     #[test]

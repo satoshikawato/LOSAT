@@ -193,3 +193,11 @@ ABI v1 は `run_local` で CLI と同じエンジンを使うので、エンジ�
 `slice_sweep.py` に `lcase` の pool（ゲノムの窓の subject に 3〜30 の小文字の島を書き、`-lcase_masking` を与える）を足した。各 120 組で、第 11 回の LOSAT は既定で 0 組、`-task blastn` で 3 組、`-task blastn -word_size 7` で 20 組が NCBI と違い、変更後はどれも 0 組。`ambiguity` の pool の `-task blastn -word_size 4 -evalue 1e6` の 40 組は、第 11 回で 1 組、変更後は 0 組。
 
 ほかに：第 11 回の拒否の文言を、NCBI が落ちるのは subject にヒットがあるとき（その title を書くとき）と直した（LOSAT は検索の前に拒否する）。§N の、落ちる定義行の言葉での説明は広すぎた（`~ , ,` などは NCBI が落ちない。コードは NCBI の数え方をそのまま使うので正しい）ので直した。第 10 回の `check_sequence_lines` は、最初の定義行の前の文字（BOM など）を配列の行として扱い「record 0」の文言で拒否していたので、それを `bio` が読めない FASTA の拒否（§G）に任せるようにした。
+
+## P. 第 13 回の独立監査で見つかった、以前からの差
+
+| NCBI | 振る舞い | LOSAT |
+|---|---|---|
+| `showalign.cpp:247-248,317-319` | outfmt 0 の ` Strand=` は、整列の各行の鎖（`StrandSign`）から決める | subject の座標の大小（`s_start > s_end`）から決めていたので、1 文字の HSP（始まりと終わりが同じ）は minus 鎖でも `Plus/Plus` になった（S07 の移植から。第 8 回の修正の後、予備の段階が曖昧な文字を乱数の塩基として読んだ seed を traceback が 1 文字に縮めるときに出る。例：query `TAGGACGG`、subject `YCAYAANTNCRGYACT`、`-task blastn -word_size 4`。outfmt 6/7 は同じ）。`report/pairwise.rs` の BLASTN の行は HSP の query の frame から鎖を決める |
+
+第 12 回の二つの修正は、監査の 700 の区間の組合せ（位置 0 と末尾の小文字、1 文字ずつの区間、5000000 の subject の chunk の境の近く）と、得点 0 の HSP の 450 の組合せ（`-max_target_seqs`・`-max_hsps`・`-subject_besthit`・`-perc_identity`、複数の query と subject、outfmt 0/6/7）で NCBI とバイト一致した。

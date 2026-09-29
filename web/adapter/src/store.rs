@@ -217,6 +217,11 @@ mod tests {
         // FASTA that bio cannot read (text before the first defline, bytes that are not
         // UTF-8) says that LOSAT does not support it; white space only is a file without
         // records.
+        let error = register("blastn", ROLE_SUBJECT, b">s0\n>s1\nACGT\n").unwrap_err();
+        assert!(
+            error.contains("subject record 1 (s0) has no residues"),
+            "{error}"
+        );
         for bytes in [&b"\n>q\nACGT\n"[..], b">q\nAC\xffGT\n"] {
             let error = register("blastn", ROLE_QUERY, bytes).unwrap_err();
             assert!(error.contains("not supported by LOSAT's BLASTN"), "{error}");

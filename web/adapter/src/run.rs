@@ -79,12 +79,14 @@ pub fn parse(words: &[&str]) -> Result<(Program, Commands), String> {
     Ok((program, cli.command))
 }
 
-/// `validate`: `parse`, then the BLASTN scoring options that NCBI rejects or that its
-/// Karlin-Altschul tables do not support, with NCBI's message (for a batch of one query).
+/// `validate`: `parse`, then BLASTN's `-dust` value and the scoring options that NCBI
+/// rejects or that its Karlin-Altschul tables do not support, with NCBI's message (for a
+/// batch of one query).
 /// `run` leaves them to the engine, which reports them as the CLI does.
 pub fn validate(words: &[&str]) -> Result<(), String> {
-    if let (_, Commands::Blastn(args)) = parse(words)? {
-        LOSAT::algorithm::blastn::scoring::check_scoring(&args)
+    if let (_, Commands::Blastn(mut args)) = parse(words)? {
+        args.resolve_dust()
+            .and_then(|()| LOSAT::algorithm::blastn::scoring::check_scoring(&args))
             .map_err(|error| format!("{error:#}"))?;
     }
     Ok(())
@@ -307,6 +309,13 @@ mod tests {
         }
         assert!(parse(&["blastx", "-query", "q", "-subject", "s"]).is_err());
         // validate rejects BLASTN scoring that NCBI rejects, with NCBI's message.
+        // validate reads BLASTN's -dust as the run does.
+        let error =
+            validate(&["blastn", "-query", "q", "-subject", "s", "-dust", "20 64"]).unwrap_err();
+        assert!(
+            error.starts_with("BLAST query/options error: Invalid number of arguments"),
+            "{error}"
+        );
         let blastn = ["blastn", "-query", "q", "-subject", "s", "-task", "blastn"];
         assert!(validate(&blastn).is_ok());
         let unsupported = [&blastn[..], &["-reward", "1", "-penalty", "-6"]].concat();

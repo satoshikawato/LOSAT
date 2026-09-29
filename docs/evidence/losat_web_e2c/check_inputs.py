@@ -97,6 +97,16 @@ def make_inputs(work: Path) -> None:
         f">s{index}\n" + "".join(rng15.choice("ACGT") if rng15.random() < 0.01 * (index + 1) else c for c in q) + "\n"
         for index in range(15)))
     (work / "empty_record_subject.fa").write_text(">s0 empty\n" + subject)
+    # A query with an inverted repeat whose two strands met in one entry of LOSAT's
+    # one-strand diagonal table (the sixth audit round): offsets 100 and 217 of 700.
+    rng_ir = random.Random(3)
+    ir_query = [rng_ir.choice("ACGT") for _ in range(700)]
+    repeat = "".join(rng_ir.choice("ACGT") for _ in range(60))
+    ir_query[100:160] = repeat
+    ir_query[217:277] = repeat[::-1].translate(str.maketrans("ACGT", "TGCA"))
+    (work / "inverted_repeat_query.fa").write_text(">ir\n" + "".join(ir_query) + "\n")
+    flank = lambda: "".join(rng_ir.choice("ACGT") for _ in range(300))  # noqa: E731
+    (work / "inverted_repeat_subject.fa").write_text(">irs\n" + flank() + repeat + flank() + "\n")
 
 
 def cases(work: Path) -> list[tuple[str, list[str], str]]:
@@ -313,6 +323,25 @@ def cases(work: Path) -> list[tuple[str, list[str], str]]:
         ("audit5.empty_record_subject", [*mq, "-subject", f"{w}/empty_record_subject.fa", "-outfmt", "6"], "losat-rejects"),
         ("audit5.chunk_size.blank", [*mq, *multi_s, "-outfmt", "6"], "same", {"CHUNK_SIZE": "  "}),
         ("audit5.chunk_size.empty", [*mq, *multi_s, "-outfmt", "6"], "same", {"CHUNK_SIZE": ""}),
+    ]
+    # The sixth audit round: the diagonal table of a single query covers both strands;
+    # NCBI's other tasks and options; an -out name measured as NCBI's CDirEntry does.
+    ir = ["-query", f"{w}/inverted_repeat_query.fa", "-subject", f"{w}/inverted_repeat_subject.fa"]
+    strand = ["-query", f"{F}/strand_query.fasta", "-subject", f"{F}/strand_subject.fasta"]
+    rows += [
+        ("audit6.diagonals.inverted_repeat", [*ir, "-outfmt", "6"], "same"),
+        ("audit6.diagonals.inverted_repeat.blastn", [*ir, "-task", "blastn", "-outfmt", "6"], "same"),
+        ("audit6.diagonals.inverted_repeat.fmt0", ir, "same"),
+        ("audit6.diagonals.strand", [*strand, "-task", "blastn", "-word_size", "5", "-evalue", "100", "-outfmt", "6"], "same"),
+        ("audit6.task.dc_megablast", [*mq, *multi_s, "-task", "dc-megablast"], "losat-rejects"),
+        ("audit6.task.blastn_short", [*mq, *multi_s, "-task", "blastn-short"], "losat-rejects"),
+        ("audit6.task.rmblastn", [*mq, *multi_s, "-task", "rmblastn"], "losat-rejects"),
+        ("audit6.task.capitals", [*mq, *multi_s, "-task", "BLASTN"], "arg-error"),
+        ("audit6.option.strand", [*mq, *multi_s, "-strand", "plus"], "losat-rejects"),
+        ("audit6.option.ungapped", [*mq, *multi_s, "-ungapped"], "losat-rejects"),
+        ("audit6.option.xdrop_gap", [*mq, *multi_s, "-xdrop_gap", "30"], "losat-rejects"),
+        ("audit6.option.num_alignments", [*mq, *multi_s, "-num_alignments", "5"], "losat-rejects"),
+        ("audit6.out_name.trailing_dot", [*mq, *multi_s, "-out", f"{w}/missing_dir/" + "o" * 256 + "/."], "same-error"),
     ]
     for task in ("megablast", "blastn"):
         for gaps in (["-reward", "1", "-penalty", "-2", "-gapopen", "5", "-gapextend", "2"],

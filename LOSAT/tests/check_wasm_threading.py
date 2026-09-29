@@ -164,7 +164,7 @@ def main():
     # NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2657-2660
     # AddDefaultKey(kArgOutputFormat, ..., eString, ...);
     # Unported format routes must reject explicitly before starting any worker.
-    for program, formats in [("blastn", ["0", "6 qseqid sseqid"]),
+    for program, formats in [("blastn", ["6 qseqid sseqid"]),
                              ("tblastx", ["0", "7", "6 qseqid sseqid"])]:
         for index, fmt in enumerate(formats):
             for kind, prefix in prefixes.items():
@@ -180,8 +180,8 @@ def main():
         ("blastx", "blastx-query", "aa3", ["0", "6", "7", "6 std qframe sframe btop"], None),
         ("blastp", "aa3", "aa3", ["0", "7", "6 std qlen slen positive ppos btop stitle"], None),
         ("blastp", "aa-query-edge", "aa-subject-edge", ["0", "7", "6 std qlen slen positive ppos btop stitle", "7 qseqid qacc qaccver sseqid sacc saccver qlen slen score nident positive gaps frames qframe sframe qseq sseq btop stitle"], None),
-        ("blastn", "nuc3", "nuc3", ["7"], "megablast"),
-        ("blastn", "nuc3", "nuc3", ["7"], "blastn"),
+        ("blastn", "nuc3", "nuc3", ["0", "7"], "megablast"),
+        ("blastn", "nuc3", "nuc3", ["0", "7"], "blastn"),
     ]:
         for index, fmt in enumerate(formats):
             common = ["-query", inputs[query], "-subject", inputs[subject], "-outfmt", fmt, "-out", "{out}"]

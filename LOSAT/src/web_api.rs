@@ -1069,6 +1069,26 @@ mod tests {
         assert!(parse(&["-outfmt", "6 qseqid sseqid"]).is_err());
     }
 
+    // Plan TD-1: ABI v1 is frozen, so its BLASTN keeps outfmt 6 and 7 and rejects
+    // outfmt 0, which the engine implements since LOSAT Web session S07, with the error
+    // that it gave before.
+    #[test]
+    fn blastn_web_pair_keeps_rejecting_outfmt_0() {
+        let args = |outfmt: &str| {
+            parse_blastn_args(
+                &["-outfmt", outfmt],
+                PathBuf::new(),
+                PathBuf::new(),
+                PathBuf::new(),
+            )
+            .expect("blastn web args")
+        };
+        let fasta = ">q\nACGTACGTACGTACGTACGTACGTACGTACGT\n";
+        let error = blastn::run_web_pair(args("0"), fasta, fasta).unwrap_err();
+        assert_eq!(engine_error(error), "unsupported BLASTN output format: 0");
+        assert!(blastn::run_web_pair(args("6"), fasta, fasta).is_ok());
+    }
+
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1407-1427
     // ```c
     // while ((seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr)) != BLAST_SEQSRC_EOF) {

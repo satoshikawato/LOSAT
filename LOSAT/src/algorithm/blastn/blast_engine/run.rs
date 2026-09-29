@@ -4553,6 +4553,14 @@ pub fn run_web_pair(args: BlastnArgs, query_fasta: &str, subject_fasta: &str) ->
     // Web ABI v1 runs the same local search as the CLI and keeps the report in memory.
     let mut output = Vec::new();
     let outfmt = args.outfmt.clone();
+    // Plan TD-1: ABI v1 is frozen except for fail-fast fixes, so its BLASTN keeps the
+    // formats that it had (6 and 7) and rejects outfmt 0 with the error that it gave
+    // before the engine implemented outfmt 0.
+    if parse_blastn_output_format(&outfmt).map_err(anyhow::Error::msg)?
+        == BlastnOutputFormat::Pairwise
+    {
+        anyhow::bail!("unsupported BLASTN output format: 0");
+    }
     let mut stderr = std::io::stderr();
     run_local(
         args,

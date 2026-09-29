@@ -34,33 +34,8 @@ use std::{
 };
 
 // The NCBI-style exit error is shared with the other programs' command lines.
+use crate::cli::inaccessible;
 pub use crate::cli::{exit_on_native_error, NativeError};
-// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:95-99
-// ```c++
-// string s_ArgExptMsg(const string& name, const string& what, const string& attr)
-// {
-//     return string("Argument \"") + (name.empty() ? s_ExtraName : name) +
-//         "\". " + what + (attr.empty() ? attr : ":  `" + attr + "'");
-// }
-// ```
-// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:615-619
-// ```c++
-// void CArg_Ios::x_Open(CArgValue::TFileFlags /*flags*/) const
-// {
-//     if ( !m_Ios ) {
-//         NCBI_THROW(CArgException,eNoFile, s_ArgExptMsg(GetName(),
-//             "File is not accessible",AsString()));
-// ```
-fn inaccessible(name: &str, path: &Path) -> anyhow::Error {
-    NativeError {
-        exit: 1,
-        message: format!(
-            "Command line argument error: Argument \"{name}\". File is not accessible:  `{path}'\n",
-            path = path.display()
-        ),
-    }
-    .into()
-}
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:225-227
 // ```c++
 //         } else {                                                            \

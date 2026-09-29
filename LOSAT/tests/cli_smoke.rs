@@ -143,7 +143,7 @@ fn unsupported_blastp_option_fails_before_file_io() {
 // sequences = input->GetAllSeqs(*scope);
 // ```
 #[test]
-fn missing_input_file_reports_explicit_query_error() {
+fn missing_input_file_reports_ncbi_error() {
     let missing_query = temp_path("missing_query", "fa");
     let missing_subject = temp_path("missing_subject", "fa");
     let output = clean_losat_command()
@@ -156,13 +156,16 @@ fn missing_input_file_reports_explicit_query_error() {
 
     assert!(!output.status.success(), "missing input should fail");
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("failed to open query FASTA"),
-        "missing input error should name query FASTA: {stderr}"
-    );
-    assert!(
-        stderr.contains(&missing_query.display().to_string()),
-        "missing input error should include path: {stderr}"
+    // NCBI opens the subject first (blastn_args.cpp:63-70), with NCBI's message
+    // (ncbiargs.cpp:615-619).
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(
+        stderr,
+        format!(
+            "Command line argument error: Argument \"subject\". File is not accessible:  `{}'\n",
+            missing_subject.display()
+        ),
+        "missing input error should be NCBI's: {stderr}"
     );
 }
 

@@ -86,8 +86,8 @@ use super::super::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
 use super::super::lookup::{build_unmasked_ranges, reverse_complement};
 use super::super::pairwise::{pairwise_hits, DisplayMasks};
 use super::super::scoring::{
-    check_greedy_gap_costs, check_scoring_options, context_blocks, context_ungapped_blocks,
-    gap_x_dropoffs, karlin_error, ContextKarlin,
+    check_greedy_gap_costs, check_losat_limits, check_scoring_options, context_blocks,
+    context_ungapped_blocks, gap_x_dropoffs, karlin_error, ContextKarlin,
 };
 use crate::blastinput::query_batch::query_batches;
 use crate::report::pairwise::{
@@ -4638,13 +4638,70 @@ fn read_blastn_fasta_records(
     path: &std::path::Path,
     role: &str,
 ) -> Result<Vec<bio::io::fasta::Record>> {
-    let mut file = open_blastn_fasta(path, role)?;
+    let mut file = open_blastn_input(path, role)?;
     parse_blastn_fasta(&read_blastn_fasta_bytes(&mut file, path, role)?, path, role)
 }
 
-fn open_blastn_fasta(path: &std::path::Path, role: &str) -> Result<std::fs::File> {
-    std::fs::File::open(path)
-        .with_context(|| format!("failed to open {role} FASTA {}", path.display()))
+/// Opens a BLASTN input as NCBI's argument does when a handler asks for its stream: `-` is
+/// standard input, and a file that does not open gets NCBI's error
+/// (`crate::cli::inaccessible`).
+///
+/// NCBI reference: ncbi-blast/c++/src/corelib/ncbiargs.cpp:717-735
+/// ```c
+///     if (AsString() == "-") {
+/// #if defined(NCBI_OS_MSWIN)
+///         NcbiSys_setmode(NcbiSys_fileno(stdin), (mode & IOS_BASE::binary) ? O_BINARY : O_TEXT);
+/// #endif
+///         m_Ios  = &cin;
+///     } else if ( !AsString().empty() ) {
+///         if (!fstrm) {
+///             fstrm = new CNcbiIfstream;
+///         }
+///         if (fstrm) {
+///             fstrm->open(AsString().c_str(),IOS_BASE::in | mode);
+///             if ( !fstrm->is_open() ) {
+///                 delete fstrm;
+///                 fstrm = NULL;
+///             } else {
+///                 m_DeleteFlag = true;
+///             }
+///         }
+///         m_Ios = fstrm;
+///     }
+/// ```
+fn open_blastn_input(path: &std::path::Path, role: &str) -> Result<std::fs::File> {
+    if path.as_os_str() == "-" {
+        return standard_input().map_err(|_| {
+            anyhow::anyhow!(
+                "reading the {role} from standard input ('-') on this platform is not supported by LOSAT's BLASTN"
+            )
+        });
+    }
+    std::fs::File::open(path).map_err(|_| crate::cli::inaccessible(role, path))
+}
+
+/// Standard input as a file that shares its position, as `cin` does.
+fn standard_input() -> std::io::Result<std::fs::File> {
+    #[cfg(any(unix, target_os = "wasi"))]
+    {
+        use std::os::fd::AsFd;
+        std::io::stdin()
+            .as_fd()
+            .try_clone_to_owned()
+            .map(std::fs::File::from)
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::AsHandle;
+        std::io::stdin()
+            .as_handle()
+            .try_clone_to_owned()
+            .map(std::fs::File::from)
+    }
+    #[cfg(not(any(unix, windows, target_os = "wasi")))]
+    {
+        Err(std::io::ErrorKind::Unsupported.into())
+    }
 }
 
 /// The bytes of an opened FASTA file; a directory reads as no bytes, as NCBI's stream does.
@@ -4663,9 +4720,11 @@ fn read_blastn_fasta_bytes(
     }
 }
 
-/// The records of a FASTA file, after rejecting the deflines and residues that NCBI reads
-/// differently (`input.rs`); a file of white space only has no record, as in NCBI.
-fn parse_blastn_fasta(
+/// The records of a FASTA file, after rejecting the residues that NCBI reads differently
+/// (`input.rs`); a file of white space only has no record, as in NCBI. NCBI reads the
+/// deflines that LOSAT rejects (`check_deflines`) without a message, so the callers check
+/// them where the difference would change a result.
+fn read_blastn_records(
     bytes: &[u8],
     path: &std::path::Path,
     role: &str,
@@ -4673,7 +4732,6 @@ fn parse_blastn_fasta(
     if is_blank(bytes) {
         return Ok(Vec::new());
     }
-    check_deflines(bytes, role)?;
     let records = bio::io::fasta::Reader::new(bytes)
         .records()
         .collect::<std::result::Result<Vec<_>, _>>()
@@ -4685,6 +4743,36 @@ fn parse_blastn_fasta(
         })?;
     check_residues(&records, role)?;
     Ok(records)
+}
+
+/// The records of a FASTA file read where its deflines matter (the query), with the
+/// deflines checked first, so that a defline that bio cannot read is named.
+fn parse_blastn_fasta(
+    bytes: &[u8],
+    path: &std::path::Path,
+    role: &str,
+) -> Result<Vec<bio::io::fasta::Record>> {
+    if !is_blank(bytes) {
+        check_deflines(bytes, role)?;
+    }
+    read_blastn_records(bytes, path, role)
+}
+
+/// ABI v1's reading of a BLASTN `-outfmt` value, which is frozen (plan TD-1): it keeps the
+/// values that it accepted before `parse_blastn_output_format` followed NCBI.
+#[cfg(target_arch = "wasm32")]
+fn v1_output_format(spec: &str) -> Result<BlastnOutputFormat> {
+    let mut parts = spec.split_whitespace();
+    let format = parts.next().unwrap_or("6");
+    if parts.next().is_some() {
+        anyhow::bail!("unsupported BLASTN custom outfmt specification: {spec:?}");
+    }
+    match format {
+        "0" => Ok(BlastnOutputFormat::Pairwise),
+        "6" => Ok(BlastnOutputFormat::Tabular),
+        "7" => Ok(BlastnOutputFormat::TabularWithComments),
+        _ => anyhow::bail!("unsupported BLASTN output format: {format}"),
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -4716,9 +4804,7 @@ pub fn run_web_pair(args: BlastnArgs, query_fasta: &str, subject_fasta: &str) ->
     // Plan TD-1: ABI v1 is frozen except for fail-fast fixes, so its BLASTN keeps the
     // formats that it had (6 and 7) and rejects outfmt 0 with the error that it gave
     // before the engine implemented outfmt 0.
-    if parse_blastn_output_format(&outfmt).map_err(anyhow::Error::msg)?
-        == BlastnOutputFormat::Pairwise
-    {
+    if v1_output_format(&outfmt)? == BlastnOutputFormat::Pairwise {
         anyhow::bail!("unsupported BLASTN output format: 0");
     }
     let mut stderr = std::io::stderr();
@@ -4741,19 +4827,18 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     // 	m_OptsHndl.Reset(&*m_CmdLineArgs->SetOptions(args));
     // }
     // ```
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3478-3480
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3624-3627
     // ```c
-    // else {
-    //     m_OutputStream = &args[kArgOutput].AsOutputFile();
-    // }
+    //     if (GetExportSearchStrategyStream(args) ||
+    //            m_FormattingArgs->ArchiveFormatRequested(args)) {
+    //         locality = CBlastOptions::eBoth;
+    //     }
     // ```
-    // The checks that precede reading the inputs run first, as before.
+    // `ArchiveFormatRequested` parses `-outfmt` (blast_args.cpp:2745-2748) before the
+    // option handlers run.
+    let output_formats = parse_output_formats([args.outfmt.as_str()])?;
+    // LOSAT's thread capability is checked before any input or output, as before.
     crate::utils::threading::validate_threads(args.num_threads)?;
-    check_blastn_lookup_options(&args, configure_task(&args).effective_word_size)?;
-    // NCBI opens the input files when it parses the arguments. Each file is opened once:
-    // a named pipe gives its bytes to one reader only.
-    let mut query_file = open_blastn_fasta(&args.query, "query")?;
-    let mut subject_file = open_blastn_fasta(&args.subject, "subject")?;
     // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3631-3636
     // ```c
     //     NON_CONST_ITERATE(TBlastCmdLineArgs, arg, m_Args) {
@@ -4782,47 +4867,53 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     //                                        use_lcase_masks, subjects, m_IsMapper);
     //         m_Subjects.Reset(new blast::CObjMgr_QueryFactory(*subjects));
     // ```
-    // The subjects are read (and an empty subject set fails) by the first handler, before
-    // the output file is opened, the formats are parsed and the options are checked.
-    if args.verbose {
-        eprintln!("Reading query & subject...");
-    }
+    // The first handler opens and reads the subjects (an empty subject set fails there),
+    // before the query and the output are opened and the options are checked. Files are
+    // opened when a handler asks for them, and each once: a named pipe gives its bytes to
+    // one reader only.
+    let mut subject_file = open_blastn_input(&args.subject, "subject")?;
     let subject_bytes = read_blastn_fasta_bytes(&mut subject_file, &args.subject, "subject")?;
-    let subjects = parse_blastn_fasta(&subject_bytes, &args.subject, "subject")?;
+    drop(subject_file);
+    let subjects = read_blastn_records(&subject_bytes, &args.subject, "subject")?;
+    // NCBI reads these deflines without a message; LOSAT rejects them where the search
+    // would start.
+    let subject_deflines = check_deflines(&subject_bytes, "subject");
     drop(subject_bytes);
     check_subjects_not_empty(&subjects)?;
-    let outfmt = args.outfmt.clone();
-    let out = args.out.clone();
-    // NCBI opens the output file here, before the options are checked, so a run that
-    // stops at a check leaves an empty file.
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3456-3481
+    // ```c
+    //     if (args.Exist(kArgQuery) && args[kArgQuery].HasValue() &&
+    //         m_InputStream == NULL) {
+    // ...
+    //         else {
+    //             m_InputStream = &args[kArgQuery].AsInputFile();
+    //         }
+    //     }
+    // ...
+    //     else {
+    //         m_OutputStream = &args[kArgOutput].AsOutputFile();
+    //     }
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/corelib/ncbiargs.cpp:777-781
+    // ```c
+    //     if (AsString() == "-") {
+    // #if defined(NCBI_OS_MSWIN)
+    //         NcbiSys_setmode(NcbiSys_fileno(stdout), (mode & IOS_BASE::binary) ? O_BINARY : O_TEXT);
+    // #endif
+    //         m_Ios = &cout;
+    // ```
+    // The output file is created here, before the options are checked, so a run that
+    // stops at a check leaves an empty file; `-` is standard output.
+    let mut query_file = open_blastn_input(&args.query, "query")?;
+    let out = args.out.clone().filter(|path| path.as_os_str() != "-");
     if let Some(path) = out.as_deref() {
-        std::fs::File::create(path)
-            .with_context(|| format!("failed to create output {}", path.display()))?;
+        std::fs::File::create(path).map_err(|_| crate::cli::inaccessible("out", path))?;
     }
+    let outfmt = args.outfmt.clone();
     let sink = out.as_deref().map_or(OutputSink::Stdout, OutputSink::File);
     let mut stderr = std::io::stderr();
     let mut outputs = ReportOutputs::single(&outfmt, sink, &mut stderr);
-    let output_formats = process_options(&args, &mut outputs)?;
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_input_aux.cpp:86-91
-    // ```c
-    //     char* batch_sz_str = getenv("BATCH_SIZE");
-    //     if (batch_sz_str) {
-    //         retval = NStr::StringToInt(batch_sz_str);
-    // ```
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/local_blast.cpp:59-62
-    // ```c
-    //     char* chunk_sz_str = getenv("CHUNK_SIZE");
-    //     if (chunk_sz_str && !NStr::IsBlank(chunk_sz_str)) {
-    //         retval = NStr::StringToInt(chunk_sz_str);
-    // ```
-    // LOSAT follows NCBI's query batches without these variables.
-    for variable in ["BATCH_SIZE", "CHUNK_SIZE"] {
-        if std::env::var_os(variable).is_some() {
-            anyhow::bail!(
-                "the environment variable {variable}, which changes NCBI BLAST+'s query batches, is not supported by LOSAT's BLASTN"
-            );
-        }
-    }
+    process_options(&args, &mut outputs)?;
     // NCBI reference: ncbi-blast/c++/src/app/blast/blastn_app.cpp:209-212
     // ```c
     //         if(IsIStreamEmpty(m_CmdLineArgs->GetInputStream())) {
@@ -4838,9 +4929,13 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     // 	if(orig_p < 0)
     // 		return false;
     // ```
-    // The position is taken on the opened file, before it is read.
-    let seekable = std::io::Seek::stream_position(&mut query_file).is_ok();
+    // The position is taken on the opened file, before it is read. When the subjects were
+    // read from standard input too, `cin` has reached its end (a failed stream), so NCBI
+    // gets no position for the query either.
+    let seekable = !(args.query.as_os_str() == "-" && args.subject.as_os_str() == "-")
+        && std::io::Seek::stream_position(&mut query_file).is_ok();
     let query_bytes = read_blastn_fasta_bytes(&mut query_file, &args.query, "query")?;
+    drop(query_file);
     if is_blank(&query_bytes) {
         // NCBI reads a stream without a position (a pipe) as not empty, and then prints
         // the report of no query.
@@ -4854,6 +4949,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             .write_all(b"Warning: [blastn] Query is Empty!\n")?;
         return Ok(());
     }
+    subject_deflines?;
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/blastinput/blast_input_aux.cpp:242-246
     // ```c
     // sequences = input->GetAllSeqs(*scope);
@@ -4890,36 +4986,33 @@ fn check_subjects_not_empty(subjects: &[bio::io::fasta::Record]) -> Result<()> {
     Ok(())
 }
 
-/// NCBI's processing of the options before any input is read (`SetOptions`): the output
-/// formats, the few-matches warning, and the check of the options.
+/// The requested output formats, each parsed exactly as the single CLI `-outfmt` is,
+/// before NCBI's option handlers run (`run`).
+fn parse_output_formats<'a>(
+    formats: impl IntoIterator<Item = &'a str>,
+) -> Result<Vec<BlastnOutputFormat>> {
+    formats
+        .into_iter()
+        .map(parse_blastn_output_format)
+        .collect()
+}
+
+/// NCBI's processing of the options after the query and the output are opened
+/// (`SetOptions`): the few-matches warning of the formatting handler, and the check of the
+/// options.
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2800-2803
-/// ```c
-/// if (args[kArgOutputFormat]) {
-///     string fmt_choice =
-///         NStr::TruncateSpaces(args[kArgOutputFormat].AsString());
-/// ```
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2975-2977
 /// ```c
 ///     if(hitlist_size < 5){
 ///    		ERR_POST(Warning << "Examining 5 or more matches is recommended");
 ///     }
 /// ```
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3609-3612
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3636
 /// ```c
-///         try { m_OptsHandle->Validate(); }
+///     try { retval->Validate(); }
 /// ```
-/// Each requested output format is parsed exactly as the single CLI `-outfmt` was. The
-/// hit list size is the -max_target_seqs value, or 500 when it is omitted.
-fn process_options(
-    args: &BlastnArgs,
-    outputs: &mut ReportOutputs<'_>,
-) -> Result<Vec<BlastnOutputFormat>> {
-    let output_formats = outputs
-        .formats
-        .iter()
-        .map(|format| parse_blastn_output_format(format.outfmt).map_err(anyhow::Error::msg))
-        .collect::<Result<Vec<BlastnOutputFormat>>>()?;
+/// The hit list size is the -max_target_seqs value, or 500 when it is omitted.
+fn process_options(args: &BlastnArgs, outputs: &mut ReportOutputs<'_>) -> Result<()> {
     if args
         .max_target_seqs
         .is_some_and(|max_target_seqs| max_target_seqs < 5)
@@ -4928,8 +5021,7 @@ fn process_options(
             .diagnostics
             .write_all(&few_matches_warning("blastn"))?;
     }
-    check_scoring_options(args)?;
-    Ok(output_formats)
+    check_scoring_options(args)
 }
 
 // NCBI reference: ncbi-blast/c++/src/app/blast/blast_formatter.cpp:429-467
@@ -4959,8 +5051,9 @@ pub fn run_local(
     subject_records: &[bio::io::fasta::Record],
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
+    let output_formats = parse_output_formats(outputs.formats.iter().map(|format| format.outfmt))?;
     check_subjects_not_empty(subject_records)?;
-    let output_formats = process_options(&args, outputs)?;
+    process_options(&args, outputs)?;
     search(
         args,
         query_records,
@@ -4977,17 +5070,39 @@ fn search(
     outputs: &mut ReportOutputs<'_>,
     output_formats: Vec<BlastnOutputFormat>,
 ) -> Result<()> {
-    // NCBI reads the subjects before the queries (blastn_app.cpp:192-212). Residues that
-    // NCBI reads differently are rejected, and `U` is read as `T` (`input.rs`); the
-    // callers check the deflines, in the bytes of the files, and an empty subject set. The
-    // CLI has already reported an empty query file; records of the other callers get
-    // NCBI's warning.
+    // NCBI reads the subjects before the queries (`run`). Residues that NCBI reads
+    // differently are rejected, and `U` is read as `T` (`input.rs`); the callers check the
+    // deflines, in the bytes of the files, and an empty subject set. The CLI has already
+    // reported an empty query file; records of the other callers get NCBI's warning.
     check_residues(subject_records, "subject")?;
     if query_records.is_empty() {
         outputs
             .diagnostics
             .write_all(b"Warning: [blastn] Query is Empty!\n")?;
         return Ok(());
+    }
+    // LOSAT's limits come where NCBI starts the search, after its checks and its
+    // `Query is Empty!` success.
+    check_losat_limits(&args)?;
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_input_aux.cpp:86-91
+    // ```c
+    //     char* batch_sz_str = getenv("BATCH_SIZE");
+    //     if (batch_sz_str) {
+    //         retval = NStr::StringToInt(batch_sz_str);
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/local_blast.cpp:59-62
+    // ```c
+    //     char* chunk_sz_str = getenv("CHUNK_SIZE");
+    //     if (chunk_sz_str && !NStr::IsBlank(chunk_sz_str)) {
+    //         retval = NStr::StringToInt(chunk_sz_str);
+    // ```
+    // LOSAT follows NCBI's query batches without these variables.
+    for variable in ["BATCH_SIZE", "CHUNK_SIZE"] {
+        if std::env::var_os(variable).is_some() {
+            anyhow::bail!(
+                "the environment variable {variable}, which changes NCBI BLAST+'s query batches, is not supported by LOSAT's BLASTN"
+            );
+        }
     }
     check_residues(query_records, "query")?;
     let subjects_read = with_u_as_t(subject_records);
@@ -5029,30 +5144,6 @@ fn search(
             pool,
         )
     })
-}
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_options.c:1415-1426
-// ```c
-// if (options->db_filter && options->word_size < 16) {
-//    Blast_MessageWrite(blast_msg, eBlastSevError, kBlastMessageNoContext,
-//       "The limit_lookup option can only be used with word size >= 16");
-//    return BLASTERR_OPTION_VALUE_INVALID;
-// }
-// ```
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:1495-1501
-// ```c
-// arg_desc.AddDefaultKey(kArgMaxDbWordCount, ...);
-// arg_desc.SetConstraint(kArgMaxDbWordCount,
-//                        new CArgAllowValuesBetween(2, 255, true));
-// ```
-fn check_blastn_lookup_options(args: &BlastnArgs, effective_word_size: usize) -> Result<()> {
-    if args.limit_lookup && effective_word_size < 16 {
-        anyhow::bail!("The limit_lookup option can only be used with word size >= 16");
-    }
-    if args.limit_lookup && args.max_db_word_count < 2 {
-        anyhow::bail!("The max_db_word_count option must be >= 2");
-    }
-    Ok(())
 }
 
 // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
@@ -5159,8 +5250,6 @@ fn run_in_pool(
 
     // Configure task-specific parameters (initial configuration)
     let mut config = configure_task(&args);
-
-    check_blastn_lookup_options(&args, config.effective_word_size)?;
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:509-513
     // ```c

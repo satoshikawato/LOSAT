@@ -194,7 +194,8 @@ fn unsupported_formats_fail_before_searching() {
     let inputs = Inputs::new();
     let queries = read_records(&inputs.query.0);
     let subjects = read_records(&inputs.subject.0);
-    for outfmt in ["0 qseqid", "5", "6 qseqid"] {
+    // NCBI ignores a custom specification with outfmt 0 (blast_args.cpp:2845-2851).
+    for outfmt in ["5", "6 qseqid", "abc"] {
         let (mut valid, mut invalid, mut diagnostics) = (Vec::new(), Vec::new(), Vec::new());
         let mut outputs = ReportOutputs {
             formats: vec![

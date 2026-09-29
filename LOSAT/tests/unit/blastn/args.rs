@@ -173,15 +173,29 @@ fn test_dust_options() {
 }
 
 #[test]
-fn test_verbose_flag() {
-    let args = parse_args(&[
-        "-query",
-        "query.fasta",
-        "-subject",
-        "subject.fasta",
-        "-verbose",
-    ]);
-    assert_eq!(args.verbose, true);
+fn options_without_an_ncbi_blastn_equivalent_are_rejected() {
+    // AGENTS.md rule 5: NCBI blastn has no -verbose, and -limit_lookup,
+    // -max_db_word_count and -min_hit_length are magicblast's.
+    for extra in [
+        &["-verbose"][..],
+        &["-limit_lookup"],
+        &["-max_db_word_count", "30"],
+        &["-min_hit_length", "10"],
+    ] {
+        let mut argv = vec!["losat", "blastn", "-query", "q", "-subject", "s"];
+        argv.extend(extra);
+        assert!(
+            LOSAT::cli::try_parse_from::<LOSAT::cli::Cli, _, _>(argv).is_err(),
+            "{extra:?}"
+        );
+    }
+}
+
+#[test]
+fn query_defaults_to_standard_input() {
+    // NCBI cmdline_flags.cpp:47: const string kDfltArgQuery("-");
+    let args = parse_args(&["-subject", "subject.fasta"]);
+    assert_eq!(args.query, PathBuf::from("-"));
 }
 
 #[test]

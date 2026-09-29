@@ -249,11 +249,10 @@ fn defaults_and_task_overrides_remain_distinct() {
 #[test]
 fn numeric_values_are_validated_before_io() {
     for program in ["blastn", "blastp", "tblastx"] {
-        // BLASTN reads -inf, +inf and negative e-values as NCBI does; its option check
-        // rejects them (below). NCBI rejects a value that does not start with a digit, a
-        // point or a sign (`inf`, `nan`, ` 1`).
+        // NCBI rejects an e-value that does not start with a digit, a point or a sign
+        // (`inf`, `nan`, ` 1`) and one with trailing text; BLASTN's other forms are below.
         let evalues = if program == "blastn" {
-            vec!["NaN", "0x10", "inf", "nan", " 1", "+nan", "-nan", "1 "]
+            vec!["NaN", "inf", "nan", " 1", "1 ", "1,5", ""]
         } else {
             vec!["NaN", "inf", "-inf", "-1"]
         };
@@ -281,23 +280,98 @@ fn numeric_values_are_validated_before_io() {
     // NCBI blast_args.cpp:168-170: the argument is 4 or more; blast_options.c:1326-1333:
     // an option check rejects more than 100, with NCBI's message.
     assert!(parse("blastn", &["-outfmt", "6", "-word_size", "3"]).is_err());
-    for evalue in ["-1", "-inf", "0", "+inf", ".5e-400"] {
+    // Forms that NCBI reads (strtod) and LOSAT does not: rejected explicitly.
+    for evalue in ["0x10", "0x1p-3", "1e"] {
+        let error = parse("blastn", &["-outfmt", "6", "-evalue", evalue])
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("not supported by LOSAT's BLASTN"),
+            "-evalue {evalue}: {error}"
+        );
+    }
+    // NCBI's option check rejects 0 or less; LOSAT's limits reject infinity and NaN, which
+    // NCBI's check accepts.
+    for evalue in [
+        "-1", "-inf", "0", "+inf", "+nan", "-nan", ".5e-400", "1e400",
+    ] {
         let Commands::Blastn(args) = parse("blastn", &["-outfmt", "6", "-evalue", evalue])
             .unwrap()
             .command
         else {
             unreachable!("blastn")
         };
-        let error = LOSAT::algorithm::blastn::scoring::check_scoring_options(&args)
-            .unwrap_err()
-            .to_string();
-        let expected = if evalue == "+inf" {
-            "not supported by LOSAT's BLASTN"
+        let checked = LOSAT::algorithm::blastn::scoring::check_scoring_options(&args);
+        let limited = LOSAT::algorithm::blastn::scoring::check_losat_limits(&args);
+        if matches!(evalue, "+inf" | "+nan" | "-nan" | "1e400") {
+            assert!(checked.is_ok(), "-evalue {evalue}");
+            let error = limited.unwrap_err().to_string();
+            assert!(error.contains("not supported by LOSAT's BLASTN"), "{error}");
         } else {
-            "expect value or cutoff score must be greater than zero"
-        };
-        assert!(error.contains(expected), "-evalue {evalue}: {error}");
+            let error = checked.unwrap_err().to_string();
+            assert!(
+                error.contains("expect value or cutoff score must be greater than zero"),
+                "-evalue {evalue}: {error}"
+            );
+        }
     }
+    // NCBI's integer arguments (ncbiargs.cpp:118-129) read hexadecimal after `0x`.
+    let Commands::Blastn(args) = parse(
+        "blastn",
+        &[
+            "-outfmt",
+            "6",
+            "-task",
+            "blastn",
+            "-reward",
+            "0x2",
+            "-penalty",
+            "-3",
+            "-gapopen",
+            "0X5",
+            "-gapextend",
+            "0x2",
+            "-word_size",
+            "0xB",
+            "-max_target_seqs",
+            "0x10",
+        ],
+    )
+    .unwrap()
+    .command
+    else {
+        unreachable!("blastn")
+    };
+    assert_eq!(
+        (args.reward, args.gap_open, args.gap_extend, args.word_size),
+        (Some(2), Some(5), Some(2), Some(11))
+    );
+    assert_eq!(args.max_target_seqs, Some(16));
+    for (key, value) in [
+        ("-max_target_seqs", "0x"),
+        ("-max_target_seqs", "+0x1"),
+        ("-penalty", "-0x3"),
+        ("-word_size", "0x3"),
+        ("-reward", "0x80000000"),
+        ("-gapopen", "0x5g"),
+    ] {
+        assert!(
+            parse("blastn", &["-outfmt", "6", key, value]).is_err(),
+            "{key} {value}"
+        );
+    }
+    let Commands::Blastn(args) = parse("blastn", &["-outfmt", "6", "-penalty", "0x0"])
+        .unwrap()
+        .command
+    else {
+        unreachable!("blastn")
+    };
+    assert!(
+        LOSAT::algorithm::blastn::scoring::check_scoring_options(&args)
+            .unwrap_err()
+            .to_string()
+            .contains("BLASTN penalty must be negative")
+    );
     for (value, accepted) in [("4", true), ("100", true), ("101", false)] {
         let Commands::Blastn(args) = parse("blastn", &["-outfmt", "6", "-word_size", value])
             .unwrap()
@@ -362,13 +436,20 @@ fn output_capabilities_fail_explicitly_and_help_is_canonical() {
     parse("blastp", &["-outfmt", "6 qseqid sseqid pident length"]).unwrap();
     for (program, specs) in [
         ("blastp", vec!["5", "0 qseqid", "6 unknown"]),
-        ("blastn", vec!["0 qseqid", "5", "6 qseqid"]),
         ("tblastx", vec!["0", "7", "6 qseqid"]),
     ] {
         for spec in specs {
             assert!(parse(program, &["-outfmt", spec]).is_err());
         }
     }
+    // BLASTN parses -outfmt when it sets the options, as NCBI (blast_args.cpp:2801-2851).
+    for spec in ["5", "6 qseqid", "0x6"] {
+        parse("blastn", &["-outfmt", spec]).unwrap();
+        assert!(LOSAT::algorithm::blastn::hsp::parse_blastn_output_format(spec).is_err());
+    }
+    // NCBI blast_args.cpp:2845-2851: a custom specification counts only for the tabular
+    // formats, so BLASTN's outfmt 0 ignores it.
+    parse("blastn", &["-outfmt", "0 qseqid"]).unwrap();
     for program in ["blastn", "blastp", "tblastx"] {
         for help in ["-help", "--help"] {
             let err = try_parse_from::<Cli, _, _>(["losat", program, help]).unwrap_err();

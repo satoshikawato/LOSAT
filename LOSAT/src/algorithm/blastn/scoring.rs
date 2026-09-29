@@ -19,7 +19,7 @@ fn scoring_spec(args: &BlastnArgs) -> NuclScoringSpec {
     }
 }
 
-/// NCBI's checks of the options, before the queries are read, then the limits of LOSAT.
+/// NCBI's checks of the options (`Validate`), before the query is read.
 ///
 /// NCBI reference: c++/src/algo/blast/core/blast_options.c:881-906
 /// ```c
@@ -71,12 +71,12 @@ fn scoring_spec(args: &BlastnArgs) -> NuclScoringSpec {
 /// ```
 /// NCBI reference: c++/src/algo/blast/core/blast_options.c:1759-1776 (BLAST_ValidateOptions
 /// runs the scoring, lookup table, hit saving and extension-scoring checks in this order)
-/// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3609-3612
+/// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3636-3639
 /// ```c
-///         try { m_OptsHandle->Validate(); }
-///         catch (const CBlastException& e) {
-///             NCBI_THROW(CInputException, eInvalidInput, e.GetMsg());
-///         }
+///     try { retval->Validate(); }
+///     catch (const CBlastException& e) {
+///         NCBI_THROW(CInputException, eInvalidInput, e.GetMsg());
+///     }
 /// ```
 /// NCBI reference: c++/src/app/blast/blast_app_util.hpp:172-175
 /// ```c
@@ -86,16 +86,7 @@ fn scoring_spec(args: &BlastnArgs) -> NuclScoringSpec {
 ///         exit_code = BLAST_INPUT_ERROR;                                      \
 /// ```
 /// Only megablast extends greedily. The reward and the penalty are NCBI's 16-bit values
-/// (`determine_scoring_params`).
-///
-/// LOSAT's limits come after NCBI's checks, for options that NCBI runs: a reward of 0 or
-/// less (NCBI's rmblastn matrix scoring when the penalty is 0 too, otherwise no valid
-/// query),
-/// an infinite or NaN e-value, and scores whose range (reward - penalty) is above
-/// `MAX_SCORE_RANGE`, where LOSAT's Karlin-Altschul computation has not been compared with
-/// NCBI's; that range limit comes before NCBI's Karlin-Altschul table error, which needs
-/// that computation. The limit on greedy gap costs follows the table check
-/// (`check_greedy_gap_costs`).
+/// (`determine_scoring_params`). LOSAT's own limits are `check_losat_limits`.
 pub fn check_scoring_options(args: &BlastnArgs) -> anyhow::Result<()> {
     let spec = scoring_spec(args);
     let word_size = super::coordination::determine_effective_word_size(args);
@@ -112,23 +103,6 @@ pub fn check_scoring_options(args: &BlastnArgs) -> anyhow::Result<()> {
     } else if spec.gap_open == 0 && spec.gap_extend == 0 && !greedy {
         "Greedy extension must be used if gap existence and extension options are zero".to_string()
     } else {
-        if spec.reward <= 0 {
-            anyhow::bail!(
-                "a reward of {} (NCBI BLAST+'s 16-bit value; 0 is NCBI's matrix scoring of rmblastn, otherwise no query is valid) is not supported by LOSAT's BLASTN",
-                spec.reward
-            );
-        }
-        if !args.evalue.is_finite() {
-            anyhow::bail!("an infinite or NaN e-value is not supported by LOSAT's BLASTN");
-        }
-        let range = i64::from(spec.reward) - i64::from(spec.penalty);
-        if range > MAX_SCORE_RANGE {
-            anyhow::bail!(
-                "reward {} and penalty {} span more than {MAX_SCORE_RANGE} score units, which is not supported by LOSAT's BLASTN",
-                spec.reward,
-                spec.penalty
-            );
-        }
         return Ok(());
     };
     Err(NativeError {
@@ -138,6 +112,35 @@ pub fn check_scoring_options(args: &BlastnArgs) -> anyhow::Result<()> {
         ),
     }
     .into())
+}
+
+/// LOSAT's limits on the options that NCBI accepts, checked where NCBI starts the search
+/// (after its `Query is Empty!` success, before its Karlin-Altschul table error, whose
+/// computation the range limit bounds): a reward of 0 or less (NCBI's rmblastn matrix
+/// scoring when the penalty is 0 too, otherwise no valid query), an infinite or NaN
+/// e-value, and scores whose range (reward - penalty) is above `MAX_SCORE_RANGE`, where
+/// LOSAT's Karlin-Altschul computation has not been compared with NCBI's. The limit on
+/// greedy gap costs follows the table check (`check_greedy_gap_costs`).
+pub fn check_losat_limits(args: &BlastnArgs) -> anyhow::Result<()> {
+    let spec = scoring_spec(args);
+    if spec.reward <= 0 {
+        anyhow::bail!(
+            "a reward of {} (NCBI BLAST+'s 16-bit value; 0 is NCBI's matrix scoring of rmblastn, otherwise no query is valid) is not supported by LOSAT's BLASTN",
+            spec.reward
+        );
+    }
+    if !args.evalue.is_finite() {
+        anyhow::bail!("an infinite or NaN e-value is not supported by LOSAT's BLASTN");
+    }
+    let range = i64::from(spec.reward) - i64::from(spec.penalty);
+    if range > MAX_SCORE_RANGE {
+        anyhow::bail!(
+            "reward {} and penalty {} span more than {MAX_SCORE_RANGE} score units, which is not supported by LOSAT's BLASTN",
+            spec.reward,
+            spec.penalty
+        );
+    }
+    Ok(())
 }
 
 /// LOSAT's limit on gap costs with greedy extension (`-task megablast`), for scoring that
@@ -224,11 +227,12 @@ pub(crate) fn karlin_error(message: &str, batch_queries: usize) -> anyhow::Error
     .into()
 }
 
-/// The check of `check_scoring_options` and of the Karlin-Altschul tables, without the
-/// queries: the checks that a host can run before a search. A table error is reported
-/// as for a batch of one query.
+/// The checks of `check_scoring_options`, `check_losat_limits` and the Karlin-Altschul
+/// tables, without the queries: the checks that a host can run before a search. A table
+/// error is reported as for a batch of one query.
 pub fn check_scoring(args: &BlastnArgs) -> anyhow::Result<()> {
     check_scoring_options(args)?;
+    check_losat_limits(args)?;
     let spec = scoring_spec(args);
     NuclValues::new(spec.reward, spec.penalty)
         .and_then(|values| values.check_gaps(&spec))
@@ -429,6 +433,18 @@ mod tests {
             "0"
         ])))
         .contains("Greedy extension must be used"));
+        // LOSAT's limits are separate: NCBI's checks accept these options.
+        for words in [
+            &["-reward", "0"][..],
+            &["-evalue", "+inf"],
+            &["-evalue", "+nan"],
+            &["-reward", "5000", "-penalty", "-1"],
+        ] {
+            let parsed = args(words);
+            assert!(check_scoring_options(&parsed).is_ok(), "{words:?}");
+            let error = check_losat_limits(&parsed).unwrap_err().to_string();
+            assert!(error.contains("not supported by LOSAT's BLASTN"), "{error}");
+        }
     }
 
     #[test]

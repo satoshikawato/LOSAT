@@ -3,6 +3,7 @@ use std::io::{self, Write};
 use std::sync::Arc;
 
 use crate::api::local_blast::{FormatProbe, HspIndex};
+use crate::cli::NativeError;
 use crate::common::{GapEditOp, Hit};
 use crate::report::{write_hit_fields, OutputConfig};
 
@@ -30,26 +31,95 @@ pub enum BlastnOutputFormat {
     TabularWithComments,
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2120-2145
-// ```c
-// const string& format = args[kArgOutfmt].AsString();
-// m_FormatType = CFormattingArgs::GetFormatType(format);
-// ```
-pub fn parse_blastn_output_format(spec: &str) -> Result<BlastnOutputFormat, String> {
-    let mut parts = spec.split_whitespace();
-    let format = parts.next().unwrap_or("6");
-    if parts.next().is_some() {
-        return Err(format!(
-            "unsupported BLASTN custom outfmt specification: {spec:?}"
-        ));
+/// The output format of a `-outfmt` value, as NCBI parses it: white space around the
+/// value is removed, the format number ends at the first space, and the rest (a custom
+/// specification) counts only for the tabular formats, where LOSAT does not support it.
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2801-2809
+/// ```c
+///     if (args[kArgOutputFormat]) {
+///         string fmt_choice =
+///             NStr::TruncateSpaces(args[kArgOutputFormat].AsString());
+///         string::size_type pos;
+///         if ( (pos = fmt_choice.find_first_of(' ')) != string::npos) {
+///             custom_fmt_spec.assign(fmt_choice, pos+1,
+///                                    fmt_choice.size()-(pos+1));
+///             fmt_choice.erase(pos);
+///         }
+/// ```
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2828-2851
+/// ```c
+///         int val = 0;
+///         try { val = NStr::StringToInt(fmt_choice); }
+///         catch (const CStringException&) {   // probably a conversion error
+///             CNcbiOstrstream os;
+///             os << "'" << fmt_choice << "' is not a valid output format";
+/// ...
+///         fmt_type = static_cast<EOutputFormat>(val);
+///         if ( !(fmt_type == eTabular ||
+///                fmt_type == eTabularWithComments ||
+///                fmt_type == eCommaSeparatedValues ||
+///                fmt_type == eCommaSeparatedValuesWithHeader ||
+///                fmt_type == eSAM) ) {
+///                custom_fmt_spec.clear();
+///         }
+/// ```
+/// NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.hpp:260-263
+/// ```c
+///     catch (const std::exception& e) {                                       \
+///         LOG_POST(Error << "Error: " << e.what());                           \
+///         exit_code = BLAST_UNKNOWN_ERROR;                                    \
+///     }                                                                       \
+/// ```
+/// `NStr::TruncateSpaces` removes the characters of C's `isspace`, and `NStr::StringToInt`
+/// reads what `i32::from_str` reads. NCBI's errors are its messages and exit statuses; the
+/// formats and specifications that NCBI supports and LOSAT does not are rejected with
+/// LOSAT's message.
+pub fn parse_blastn_output_format(spec: &str) -> anyhow::Result<BlastnOutputFormat> {
+    let choice =
+        spec.trim_matches(|c: char| matches!(c, ' ' | '\t' | '\n' | '\x0b' | '\x0c' | '\r'));
+    let (choice, custom) = choice.split_once(' ').unwrap_or((choice, ""));
+    let Ok(format) = choice.parse::<i32>() else {
+        return Err(NativeError {
+            exit: 1,
+            message: format!(
+                "BLAST query/options error: '{choice}' is not a valid output format\nPlease refer to the BLAST+ user manual.\n"
+            ),
+        }
+        .into());
+    };
+    if !(0..NCBI_OUTPUT_FORMAT_END).contains(&format) {
+        return Err(NativeError {
+            exit: 255,
+            message: "Error: Formatting choice is out of range\n".to_string(),
+        }
+        .into());
     }
-    match format {
-        "0" => Ok(BlastnOutputFormat::Pairwise),
-        "6" => Ok(BlastnOutputFormat::Tabular),
-        "7" => Ok(BlastnOutputFormat::TabularWithComments),
-        _ => Err(format!("unsupported BLASTN output format: {format}")),
+    let format = match format {
+        0 => BlastnOutputFormat::Pairwise,
+        6 => BlastnOutputFormat::Tabular,
+        7 => BlastnOutputFormat::TabularWithComments,
+        _ => anyhow::bail!("output format {format} is not supported by LOSAT's BLASTN"),
+    };
+    if format != BlastnOutputFormat::Pairwise && !custom.is_empty() {
+        anyhow::bail!(
+            "the custom output format specification {custom:?} (fields or a delimiter) is not supported by LOSAT's BLASTN"
+        );
     }
+    Ok(format)
 }
+
+/// NCBI reference: ncbi-blast/c++/include/algo/blast/blastinput/blast_args.hpp:1067-1072
+/// ```c
+///         eCommaSeparatedValuesWithHeader,
+///
+///         /// unaligned reads in magicblast
+///         eFasta,
+///         /// Sentinel value for error checking
+///         eEndValue
+/// ```
+/// `eEndValue` is 22 (`ePairwise` is 0, `eFasta` 21).
+const NCBI_OUTPUT_FORMAT_END: i32 = 22;
 
 pub(crate) const NCBI_BLASTN_VERSION: &str = "2.17.0+";
 
@@ -1315,5 +1385,50 @@ mod tests {
         assert!(parse_blastn_output_format("6").is_ok());
         assert!(parse_blastn_output_format("7").is_ok());
         assert!(parse_blastn_output_format("6 qaccver saccver").is_err());
+        // NCBI's parse (blast_args.cpp:2801-2851): white space is trimmed, the number is a
+        // signed decimal, and a custom specification counts only for the tabular formats.
+        for (spec, format) in [
+            (" 6\t", BlastnOutputFormat::Tabular),
+            ("+6", BlastnOutputFormat::Tabular),
+            ("07", BlastnOutputFormat::TabularWithComments),
+            ("0 qaccver", BlastnOutputFormat::Pairwise),
+        ] {
+            assert_eq!(
+                parse_blastn_output_format(spec).unwrap(),
+                format,
+                "{spec:?}"
+            );
+        }
+        let native = |spec: &str| {
+            let error = parse_blastn_output_format(spec)
+                .unwrap_err()
+                .downcast::<NativeError>()
+                .unwrap();
+            (error.exit, error.message)
+        };
+        assert_eq!(
+            native("6\u{a0}"),
+            (1, "BLAST query/options error: '6\u{a0}' is not a valid output format\nPlease refer to the BLAST+ user manual.\n".to_string())
+        );
+        assert_eq!(
+            native(" ").1.lines().next(),
+            Some("BLAST query/options error: '' is not a valid output format")
+        );
+        for spec in ["22", "-1", "99"] {
+            assert_eq!(
+                native(spec),
+                (
+                    255,
+                    "Error: Formatting choice is out of range\n".to_string()
+                )
+            );
+        }
+        for spec in ["5", "21", "6 delim=,", "7  qaccver"] {
+            let error = parse_blastn_output_format(spec).unwrap_err().to_string();
+            assert!(
+                error.contains("not supported by LOSAT's BLASTN"),
+                "{spec:?}: {error}"
+            );
+        }
     }
 }

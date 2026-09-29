@@ -241,7 +241,7 @@ fn parse_blastn_args(
         query,
         subject,
         task: "megablast".to_string(),
-        word_size: 28,
+        word_size: None,
         num_threads: 1,
         evalue: 10.0,
         percent_identity: 0.0,
@@ -253,10 +253,10 @@ fn parse_blastn_args(
         max_hsps_per_subject: None,
         min_diag_separation: 0,
         out: Some(out),
-        reward: 1,
-        penalty: -2,
-        gap_open: 0,
-        gap_extend: 0,
+        reward: None,
+        penalty: None,
+        gap_open: None,
+        gap_extend: None,
         // NCBI blast_options.c:46-48: kDustLevel=20, kDustWindow=64, kDustLinker=1.
         dust: crate::blastinput::value_parsers::DustSpec::Yes,
         lcase_masking: false,
@@ -278,13 +278,17 @@ fn parse_blastn_args(
         } else if let Some(value) = flag.strip_prefix("-outfmt=") {
             args.outfmt = value.to_string();
         } else if flag == "-word_size" {
-            args.word_size = next_arg(extra_args, &mut index, flag)?
-                .parse()
-                .map_err(|err| format!("{flag} parse error: {err}"))?;
+            args.word_size = v1_blastn_word_size(
+                next_arg(extra_args, &mut index, flag)?
+                    .parse()
+                    .map_err(|err| format!("{flag} parse error: {err}"))?,
+            );
         } else if let Some(value) = flag.strip_prefix("-word_size=") {
-            args.word_size = value
-                .parse()
-                .map_err(|err| format!("{flag} parse error: {err}"))?;
+            args.word_size = v1_blastn_word_size(
+                value
+                    .parse()
+                    .map_err(|err| format!("{flag} parse error: {err}"))?,
+            );
         } else if flag == "-num_threads" {
             args.num_threads =
                 parse_num_threads_arg(next_arg(extra_args, &mut index, flag)?, flag)?;
@@ -305,6 +309,12 @@ fn parse_blastn_args(
     }
 
     Ok(args)
+}
+
+/// The v1 word size: plan TD-1 freezes v1, whose engine took a word size of 28 for the
+/// megablast default and so gave `-task blastn -word_size 28` the blastn default (11).
+fn v1_blastn_word_size(word_size: usize) -> Option<usize> {
+    (word_size != 28).then_some(word_size)
 }
 
 fn parse_tblastx_args(

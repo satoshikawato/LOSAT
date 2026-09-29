@@ -15,10 +15,20 @@ pub struct BlastnArgs {
     pub query: PathBuf,
     #[arg(long, value_parser = file_path(), value_name = "PATH")]
     pub subject: PathBuf,
-    #[arg(long, default_value = "megablast", long_help = "Implemented tasks: megablast and blastn. Task-dependent engine defaults: megablast uses word size 28, reward 1, penalty -2, gaps 0/0; blastn uses word size 11, reward 2, penalty -3, gaps 5/2. The existing engine resolves sentinel/default-valued scoring fields by task.", value_parser = ["megablast", "blastn"])]
+    #[arg(long, default_value = "megablast", long_help = "Implemented tasks: megablast and blastn. Task defaults: megablast uses word size 28, reward 1, penalty -2, gaps 0/0; blastn uses word size 11, reward 2, penalty -3, gaps 5/2. An omitted option takes the default of the task.", value_parser = ["megablast", "blastn"])]
     pub task: String,
-    #[arg(long, default_value_t = 28, value_parser = blastn_word_size)]
-    pub word_size: usize,
+    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:166-170,288-300
+    // ```c
+    //         arg_desc.AddOptionalKey(kArgWordSize, "int_value", description,
+    //                                 CArgDescriptions::eInteger);
+    // ...
+    //     if ( args.Exist(kArgWordSize) && args[kArgWordSize]) {
+    // ...
+    //         opt.SetWordSize(args[kArgWordSize].AsInteger());
+    // ```
+    // An omitted value keeps the default of the task (`coordination.rs`).
+    #[arg(long, value_parser = blastn_word_size, help = "Word size for wordfinder algorithm (default: 28 for megablast, 11 for blastn)")]
+    pub word_size: Option<usize>,
     #[arg(long, default_value_t = 1, value_parser = positive_usize)]
     pub num_threads: usize,
     #[arg(long, default_value_t = 10.0, value_parser = nonnegative_f64)]
@@ -98,16 +108,51 @@ pub struct BlastnArgs {
     pub min_diag_separation: usize,
     #[arg(long, value_name = "PATH")]
     pub out: Option<PathBuf>,
-    // Scoring parameters - defaults are for megablast task
-    // For blastn task, these are overridden in run() based on --task
-    #[arg(long, default_value_t = 1, value_parser = positive_i32)]
-    pub reward: i32,
-    #[arg(long, default_value_t = -2, value_parser = negative_i32)]
-    pub penalty: i32,
-    #[arg(long = "gapopen", default_value_t = 0, value_parser = nonnegative_i32)]
-    pub gap_open: i32,
-    #[arg(long = "gapextend", default_value_t = 0, value_parser = nonnegative_i32)]
-    pub gap_extend: i32,
+    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:648-660,674-679
+    // ```c
+    //     arg_desc.AddOptionalKey(kArgMismatch, "penalty",
+    //                            "Penalty for a nucleotide mismatch",
+    //                            CArgDescriptions::eInteger);
+    //     arg_desc.SetConstraint(kArgMismatch,
+    //                            new CArgAllowValuesLessThanOrEqual(0));
+    // ...
+    //     arg_desc.SetConstraint(kArgMatch,
+    //                            new CArgAllowValuesGreaterThanOrEqual(0));
+    // ...
+    //     if (cmd_line_args.Exist(kArgMismatch) && cmd_line_args[kArgMismatch]) {
+    //         options.SetMismatchPenalty(cmd_line_args[kArgMismatch].AsInteger());
+    //     }
+    //     if (cmd_line_args.Exist(kArgMatch) && cmd_line_args[kArgMatch]) {
+    //         options.SetMatchReward(cmd_line_args[kArgMatch].AsInteger());
+    //     }
+    // ```
+    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:175-182,262-271
+    // ```c
+    //         arg_desc.AddOptionalKey(kArgGapOpen, "open_penalty",
+    //                                 "Cost to open a gap",
+    //                                 CArgDescriptions::eInteger);
+    // ...
+    //     if (args.Exist(kArgGapOpen) && args[kArgGapOpen]) {
+    //         opt.SetGapOpeningCost(args[kArgGapOpen].AsInteger());
+    //     }
+    // ```
+    // An omitted option keeps the default of the task (`coordination.rs`); a given one is
+    // checked as NCBI checks it (`scoring.rs`). A reward of 0 (NCBI's rmblastn matrix
+    // scoring, or no valid query) is not implemented and is rejected here.
+    #[arg(long, value_parser = positive_i32, help = "Reward for a nucleotide match (default: 1 for megablast, 2 for blastn; 0 is not supported)")]
+    pub reward: Option<i32>,
+    #[arg(long, value_parser = nonpositive_i32, help = "Penalty for a nucleotide mismatch (default: -2 for megablast, -3 for blastn)")]
+    pub penalty: Option<i32>,
+    #[arg(
+        long = "gapopen",
+        help = "Cost to open a gap (default: 0 for megablast, 5 for blastn)"
+    )]
+    pub gap_open: Option<i32>,
+    #[arg(
+        long = "gapextend",
+        help = "Cost to extend a gap (default: 0 for megablast, 2 for blastn)"
+    )]
+    pub gap_extend: Option<i32>,
     // NCBI blast_args.cpp:410-420: opt.SetDustFiltering(false/true);
     // opt.SetDustFilteringLevel(...); opt.SetDustFilteringWindow(...);
     // opt.SetDustFilteringLinker(...);

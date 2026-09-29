@@ -229,43 +229,55 @@ fn unsupported_formats_fail_before_searching() {
 //                     input.SetBatchSize(mixer.GetBatchSize(lcl_blast.GetNumExtensions()));
 // ```
 // The report of an invalid query depends on its query batch. The batches after the first
-// depend on NCBI's extension counts, so outfmt 0 fails when an invalid query follows the
-// first batch among valid queries; the tabular formats, which have no footer, do not.
+// depend on NCBI's extension counts, but they have at least 100 residues
+// (blast_app_util.hpp:69-76, k_MinBatchSize), so invalid queries of fewer than 100
+// residues that a valid query follows are searched with it. Otherwise outfmt 0 and 7,
+// which print a section per query, fail; outfmt 6, which has none, does not.
 #[test]
-fn an_invalid_query_after_the_first_batch_fails_only_outfmt_0() {
+fn an_invalid_query_after_the_first_batch_fails_only_where_its_batch_matters() {
     let genome = fixture_sequence("LC738884.fasta");
-    let all_n = vec![b'N'; 40];
-    let query = TempFasta::new(
-        "blastn_batches.fna",
-        &[
-            ("first_batch", &genome[0..6_000]),
-            ("all_n", &all_n),
-            ("valid", &genome[10_000..12_000]),
-        ],
-    );
-    let subject = TempFasta::new("blastn_batches_subject.fna", &[("s", &genome[0..20_000])]);
-    let inputs = Inputs { query, subject };
-    let queries = read_records(&inputs.query.0);
-    let subjects = read_records(&inputs.subject.0);
-    for (outfmt, succeeds) in [("0", false), ("6", true), ("7", true)] {
-        let (mut output, mut diagnostics) = (Vec::new(), Vec::new());
-        let mut outputs = ReportOutputs {
-            formats: vec![FormatOutput {
-                outfmt,
-                sink: OutputSink::Writer(&mut output),
-            }],
-            diagnostics: &mut diagnostics,
-            hits: None,
-            observer: None,
-        };
-        let result = run_local_blastn(inputs.args(&[]), &queries, &subjects, &mut outputs);
-        drop(outputs);
-        assert_eq!(result.is_ok(), succeeds, "outfmt {outfmt}: {result:?}");
-        if !succeeds {
-            assert!(
-                output.is_empty(),
-                "outfmt {outfmt} writes nothing when it fails"
+    for (n_residues, sections_succeed) in [(40, true), (150, false)] {
+        let all_n = vec![b'N'; n_residues];
+        let query = TempFasta::new(
+            "blastn_batches.fna",
+            &[
+                ("first_batch", &genome[0..6_000]),
+                ("all_n", &all_n),
+                ("valid", &genome[10_000..12_000]),
+            ],
+        );
+        let subject = TempFasta::new("blastn_batches_subject.fna", &[("s", &genome[0..20_000])]);
+        let inputs = Inputs { query, subject };
+        let queries = read_records(&inputs.query.0);
+        let subjects = read_records(&inputs.subject.0);
+        for (outfmt, succeeds) in [
+            ("0", sections_succeed),
+            ("6", true),
+            ("7", sections_succeed),
+        ] {
+            let (mut output, mut diagnostics) = (Vec::new(), Vec::new());
+            let mut outputs = ReportOutputs {
+                formats: vec![FormatOutput {
+                    outfmt,
+                    sink: OutputSink::Writer(&mut output),
+                }],
+                diagnostics: &mut diagnostics,
+                hits: None,
+                observer: None,
+            };
+            let result = run_local_blastn(inputs.args(&[]), &queries, &subjects, &mut outputs);
+            drop(outputs);
+            assert_eq!(
+                result.is_ok(),
+                succeeds,
+                "{n_residues} N, outfmt {outfmt}: {result:?}"
             );
+            if !succeeds {
+                assert!(
+                    output.is_empty(),
+                    "outfmt {outfmt} writes nothing when it fails"
+                );
+            }
         }
     }
 }

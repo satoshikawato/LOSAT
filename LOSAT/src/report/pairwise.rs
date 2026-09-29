@@ -1613,8 +1613,9 @@ pub struct BlastnPairwiseQuery {
     /// The FASTA defline without `>`.
     pub query_name: String,
     pub query_length: usize,
-    /// The ungapped block of the query's first valid context; `None` for an invalid query.
-    pub ungapped_karlin: Option<KarlinParams>,
+    /// The ungapped and the gapped block of the query's first valid context; `None` for
+    /// an invalid query.
+    pub karlin: Option<(KarlinParams, KarlinParams)>,
     pub effective_search_space: i64,
 }
 
@@ -1631,7 +1632,6 @@ pub struct BlastnPairwiseReport {
     pub penalty: i32,
     pub gap_open: i32,
     pub gap_extend: i32,
-    pub gapped_karlin: KarlinParams,
     /// Subjects in the description table and with alignments, per query.
     pub num_descriptions: usize,
     pub num_alignments: usize,
@@ -1928,6 +1928,38 @@ fn write_blastn_final_footer<W: Write>(
     )
 }
 
+/// The start of the BLASTN report, which NCBI writes before it searches: the program
+/// and its reference, then the subjects.
+///
+/// NCBI reference: c++/src/app/blast/blastn_app.cpp:258-261
+/// ```c
+///         formatter.PrintProlog();
+///
+///         /*** Process the input ***/
+///         CBatchSizeMixer mixer(SplitQuery_GetChunkSize(opt.GetProgram())-1000);
+/// ```
+pub fn write_blastn_pairwise_prolog<W: Write>(
+    writer: &mut W,
+    version: &str,
+    megablast: bool,
+    database_name: &str,
+    database_num_sequences: usize,
+    database_total_letters: usize,
+) -> io::Result<()> {
+    if megablast {
+        write_megablast_pairwise_intro(writer, version)?;
+    } else {
+        write_translated_pairwise_intro(writer, "BLASTN", version)?;
+    }
+    write_blastp_database_header_spacing(
+        writer,
+        database_name,
+        database_num_sequences,
+        database_total_letters,
+        1,
+    )
+}
+
 /// Writes the BLASTN pairwise report (outfmt 0).
 ///
 /// `hits` is the final hit list of the run in its order (queries in input order, then
@@ -1968,17 +2000,22 @@ pub fn write_blastn_pairwise_report<W: Write>(
     let mut buffered = io::BufWriter::new(writer);
     let writer = &mut buffered;
 
-    if report.megablast {
-        write_megablast_pairwise_intro(writer, &report.version)?;
-    } else {
-        write_translated_pairwise_intro(writer, "BLASTN", &report.version)?;
-    }
-    write_blastp_database_header(
+    write_blastn_pairwise_prolog(
         writer,
+        &report.version,
+        report.megablast,
         &report.database_name,
         report.database_num_sequences,
         report.database_total_letters,
     )?;
+    // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:1489-1491
+    // ```c++
+    //     // print the preamble for this query
+    //
+    //     m_Outfile << "\n\n";
+    // ```
+    // The preamble of the first query; each later one ends the footer before it.
+    writer.write_all(b"\n\n")?;
 
     let mut hits_by_query: Vec<Vec<(HspIndex, &PairwiseHit)>> = vec![Vec::new(); queries.len()];
     for (hsp_index, hit) in hits.iter().enumerate() {
@@ -1995,13 +2032,7 @@ pub fn write_blastn_pairwise_report<W: Write>(
             if report.unsearched.get(q_idx).copied().unwrap_or(false) {
                 write_tblastn_unsearched_query_footer(writer)?;
             } else {
-                write_nucleotide_query_footer(
-                    writer,
-                    query
-                        .ungapped_karlin
-                        .map(|ungapped| (ungapped, report.gapped_karlin)),
-                    query.effective_search_space,
-                )?;
+                write_nucleotide_query_footer(writer, query.karlin, query.effective_search_space)?;
             }
             continue;
         }
@@ -2096,13 +2127,7 @@ pub fn write_blastn_pairwise_report<W: Write>(
             }
         }
 
-        write_nucleotide_query_footer(
-            writer,
-            query
-                .ungapped_karlin
-                .map(|ungapped| (ungapped, report.gapped_karlin)),
-            query.effective_search_space,
-        )?;
+        write_nucleotide_query_footer(writer, query.karlin, query.effective_search_space)?;
     }
 
     write_blastn_final_footer(writer, report)?;

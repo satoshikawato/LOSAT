@@ -63,15 +63,24 @@ pub(crate) const NCBI_BLASTN_VERSION: &str = "2.17.0+";
 //     m_Ostream << "# " << num_hits << " hits found" << "\n";
 // }
 // ```
+// NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:762
+// ```c
+//     CConstRef<CSeq_align_set> aln_set = results.GetSeqAlign();
+// ```
+// A query of a batch that NCBI did not search has no alignment set (`num_hits` is
+// `None`), so its header has no count (local_blast.cpp:177-207).
 fn write_blastn_outfmt7_header<W: Write>(
     writer: &mut W,
     query_title: &str,
     subject_title: &str,
-    num_hits: usize,
+    num_hits: Option<usize>,
 ) -> io::Result<()> {
     writeln!(writer, "# BLASTN {NCBI_BLASTN_VERSION}")?;
     writeln!(writer, "# Query: {query_title}")?;
     writeln!(writer, "# Database: {subject_title}")?;
+    let Some(num_hits) = num_hits else {
+        return Ok(());
+    };
     if num_hits > 0 {
         writeln!(
             writer,
@@ -989,6 +998,7 @@ pub fn write_output_blastn_hitlists_to_writer<W: Write>(
     output_format: BlastnOutputFormat,
     query_titles: &[Arc<str>],
     subject_title: &str,
+    unsearched: &[bool],
     mut probe: Option<&mut FormatProbe<'_>>,
 ) -> io::Result<()> {
     let config = OutputConfig::ncbi_compat();
@@ -1010,7 +1020,8 @@ pub fn write_output_blastn_hitlists_to_writer<W: Write>(
                 writer,
                 query_title,
                 subject_title,
-                blastn_hsp_count(hit_list_opt.as_ref()),
+                (!unsearched.get(q_idx).copied().unwrap_or(false))
+                    .then(|| blastn_hsp_count(hit_list_opt.as_ref())),
             )?;
         }
         let hit_list = match hit_list_opt {
@@ -1273,6 +1284,7 @@ mod tests {
             BlastnOutputFormat::TabularWithComments,
             &query_titles,
             "User specified sequence set (Input: subject.fasta)",
+            &[],
             None,
         )
         .unwrap();
@@ -1281,6 +1293,21 @@ mod tests {
             String::from_utf8(output).unwrap(),
             "# BLASTN 2.17.0+\n# Query: query full description\n# Database: User specified sequence set (Input: subject.fasta)\n# 0 hits found\n# BLAST processed 1 queries\n"
         );
+        // A query of a batch that NCBI did not search has no count.
+        let mut output = Vec::new();
+        write_output_blastn_hitlists_to_writer(
+            &hit_lists,
+            &mut output,
+            &query_ids,
+            &subject_ids,
+            BlastnOutputFormat::TabularWithComments,
+            &query_titles,
+            "User specified sequence set (Input: subject.fasta)",
+            &[true],
+            None,
+        )
+        .unwrap();
+        assert!(!String::from_utf8(output).unwrap().contains("hits found"));
     }
 
     #[test]

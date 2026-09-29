@@ -105,12 +105,12 @@ pub fn nonnegative_i32(value: &str) -> Result<i32, String> {
 pub fn positive_i32(value: &str) -> Result<i32, String> {
     positive_usize(value).map(|n| n as i32)
 }
-pub fn negative_i32(value: &str) -> Result<i32, String> {
+pub fn nonpositive_i32(value: &str) -> Result<i32, String> {
     let n = value
         .parse::<i32>()
-        .map_err(|_| "expected a negative integer")?;
-    if n >= 0 {
-        return Err("expected a negative integer".into());
+        .map_err(|_| "expected an integer <= 0")?;
+    if n > 0 {
+        return Err("expected an integer <= 0".into());
     }
     Ok(n)
 }

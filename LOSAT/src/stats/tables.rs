@@ -332,64 +332,287 @@ const PAM250: &[ParamEntry] = &[
     ParamEntry::new(17, 1, 0.171, 0.014, 0.052, 3.3, -86.0),
 ];
 
-/// Look up Karlin-Altschul parameters for nucleotide scoring scheme
+/// NCBI reference: c++/src/algo/blast/core/ncbi_math.c:405-419
+/// ```c
+/// Int4 BLAST_Gcd(Int4 a, Int4 b)
+/// {
+///    Int4   c;
 ///
-/// NCBI reference: blast_stat.c:3250-3350 (BLAST_GetNuclValuesArray)
-/// This function matches the reward/penalty combination and gap penalties to select
-/// the appropriate statistical parameters from precomputed tables.
+///    b = ABS(b);
+///    if (b > a)
+///       c=a, a=b, b=c;
 ///
-/// Selection logic:
-/// 1. Match reward/penalty combination to select table
-/// 2. Find exact match for gap_open/gap_extend
-/// 3. If no match, use ungapped parameters (first entry with gap_open=0, gap_extend=0)
-/// 4. If table not found, default to reward=1, penalty=-2 ungapped parameters
-pub fn lookup_nucl_params(spec: &NuclScoringSpec) -> KarlinParams {
-    let reward = spec.reward;
-    let penalty = spec.penalty.abs();
-    let gap_open = spec.gap_open.abs();
-    let gap_extend = spec.gap_extend.abs();
+///    while (b != 0) {
+///       c = a%b;
+///       a = b;
+///       b = c;
+///    }
+///    return a;
+/// }
+/// ```
+fn blast_gcd(a: i32, b: i32) -> i32 {
+    let (mut a, mut b) = (a, b.abs());
+    if b > a {
+        std::mem::swap(&mut a, &mut b);
+    }
+    while b != 0 {
+        let c = a % b;
+        a = b;
+        b = c;
+    }
+    a
+}
 
-    let table: &[ParamEntry] = match (reward, penalty) {
-        (1, 5) => BLASTN_1_5,
-        (1, 4) => BLASTN_1_4,
-        (2, 7) => BLASTN_2_7,
-        (1, 3) => BLASTN_1_3,
-        (2, 5) => BLASTN_2_5,
-        (1, 2) => BLASTN_1_2,
-        (2, 3) => BLASTN_2_3,
-        (3, 4) => BLASTN_3_4,
-        (4, 5) => BLASTN_4_5,
-        (1, 1) => BLASTN_1_1,
-        (3, 2) => BLASTN_3_2,
-        (5, 4) => BLASTN_5_4,
-        _ => {
-            // Default to reward=1, penalty=-2 ungapped parameters (megablast default)
-            // NCBI reference: blast_stat.c:3298-3304 (blastn_values_1_2, first entry)
-            return KarlinParams {
-                lambda: 1.28,
-                k: 0.46,
-                h: 0.85,
-                alpha: 1.5,
-                beta: -2.0,
-            };
-        }
-    };
+/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:3955-3963
+/// ```c
+/// static double s_GetUngappedBeta(Int4 reward, Int4 penalty)
+/// {
+///     double beta = 0;
+///     if ((reward == 1 && penalty == -1) ||
+///         (reward == 2 && penalty == -3))
+///         beta = -2;
+///
+///     return beta;
+/// }
+/// ```
+fn ungapped_beta(reward: i32, penalty: i32) -> f64 {
+    if (reward, penalty) == (1, -1) || (reward, penalty) == (2, -3) {
+        -2.0
+    } else {
+        0.0
+    }
+}
 
-    // Find matching gap penalties or use ungapped (first entry)
-    // NCBI reference: blast_stat.c:3305-3312 (gap_open_max, gap_extend_max logic)
-    for entry in table {
-        if entry.gap_open == gap_open && entry.gap_extend == gap_extend {
-            return entry.to_karlin_params();
-        }
+/// The Karlin-Altschul values of a BLASTN reward/penalty pair (NCBI
+/// `s_GetNuclValuesArray`): the table of the pair divided by its greatest common divisor,
+/// with the gap costs multiplied and Lambda and alpha divided by the divisor.
+///
+/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:3237-3372
+/// ```c
+///     int divisor = BLAST_Gcd(reward, penalty);
+///
+///     *round_down = FALSE;
+///     ...
+///     if (divisor != 1)
+///     {
+///        reward /= divisor;
+///        penalty /= divisor;
+///     }
+///
+///     if (reward == 1 && penalty == -5) {
+///         if ((status=s_SplitArrayOf8(blastn_values_1_5, &kValues, &kValues_non_affine, &split)))
+///            return status;
+///
+///         *array_size = sizeof(blastn_values_1_5)/sizeof(array_of_8);
+///         *gap_open_max = 3;
+///         *gap_extend_max = 3;
+///     ...
+///     } else if (reward == 2 && penalty == -3) {
+///         ...
+///         *round_down = TRUE;
+///         *array_size = sizeof(blastn_values_2_3)/sizeof(array_of_8);
+///         *gap_open_max = 6;
+///         *gap_extend_max = 4;
+///     ...
+///     } else  { /* Unsupported reward-penalty */
+///         status = -1;
+///         if (error_return) {
+///             char buffer[256];
+///             snprintf(buffer, sizeof(buffer), "Substitution scores %d and %d are not supported",
+///                 reward, penalty);
+///             Blast_MessageWrite(error_return, eBlastSevError, kBlastMessageNoContext, buffer);
+///         }
+///     }
+///     if (split)
+///         (*array_size)--;
+///     ...
+///         status = s_AdjustGapParametersByGcd(*normal, *non_affine, *array_size, gap_open_max, gap_extend_max, divisor);
+/// ```
+/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:3159-3170 (s_SplitArrayOf8)
+/// ```c
+///     if (input[0][0] == 0 && input[0][1] == 0)
+///     {
+///             *normal = input+1;
+///             *non_affine = input;
+///             *split = TRUE;
+///     }
+/// ```
+/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:3192-3215 (s_AdjustGapParametersByGcd)
+/// ```c
+///     (*gap_existence_max) *= divisor;
+///     (*gap_extend_max) *= divisor;
+///     ...
+///                 normal[i][0] *= divisor;
+///                 normal[i][1] *= divisor;
+///                 normal[i][2] /= divisor;
+///                 normal[i][5] /= divisor;
+///     ...
+///        linear[0][0] *= divisor;
+///        linear[0][1] *= divisor;
+///        linear[0][2] /= divisor;
+///        linear[0][5] /= divisor;
+/// ```
+/// The command line accepts no reward of 0, so the divisor is at least 1.
+pub struct NuclValues {
+    /// The affine gap costs of the table, with their values.
+    normal: Vec<ParamEntry>,
+    /// The values of gap costs 0 and 0 (megablast's linear gaps), when the table has them.
+    linear: Option<ParamEntry>,
+    gap_open_max: i32,
+    gap_extend_max: i32,
+    /// Scores are rounded down to even numbers for e-values and bit scores.
+    pub round_down: bool,
+}
+
+impl NuclValues {
+    pub fn new(reward: i32, penalty: i32) -> Result<Self, String> {
+        let divisor = blast_gcd(reward, penalty).max(1);
+        let (reward, penalty) = (reward / divisor, penalty / divisor);
+        let (table, gap_open_max, gap_extend_max, round_down) = match (reward, penalty) {
+            (1, -5) => (BLASTN_1_5, 3, 3, false),
+            (1, -4) => (BLASTN_1_4, 2, 2, false),
+            (2, -7) => (BLASTN_2_7, 4, 4, true),
+            (1, -3) => (BLASTN_1_3, 2, 2, false),
+            (2, -5) => (BLASTN_2_5, 4, 4, true),
+            (1, -2) => (BLASTN_1_2, 2, 2, false),
+            (2, -3) => (BLASTN_2_3, 6, 4, true),
+            (3, -4) => (BLASTN_3_4, 6, 3, true),
+            (1, -1) => (BLASTN_1_1, 4, 2, false),
+            (3, -2) => (BLASTN_3_2, 5, 5, false),
+            (4, -5) => (BLASTN_4_5, 12, 8, false),
+            (5, -4) => (BLASTN_5_4, 25, 10, false),
+            _ => {
+                return Err(format!(
+                    "Substitution scores {reward} and {penalty} are not supported"
+                ))
+            }
+        };
+        let adjust = |entry: &ParamEntry| ParamEntry {
+            gap_open: entry.gap_open * divisor,
+            gap_extend: entry.gap_extend * divisor,
+            lambda: entry.lambda / divisor as f64,
+            alpha: entry.alpha / divisor as f64,
+            ..*entry
+        };
+        let split = table[0].gap_open == 0 && table[0].gap_extend == 0;
+        Ok(Self {
+            normal: table[usize::from(split)..].iter().map(adjust).collect(),
+            linear: split.then(|| adjust(&table[0])),
+            gap_open_max: gap_open_max * divisor,
+            gap_extend_max: gap_extend_max * divisor,
+            round_down,
+        })
     }
 
-    // If no exact match, use ungapped parameters (first entry)
-    // NCBI BLAST uses the first entry (gap_open=0, gap_extend=0) as fallback
-    if !table.is_empty() {
-        return table[0].to_karlin_params();
+    /// The table row of the gap costs: `Some` row, `None` for gap costs beyond the table
+    /// (which use the ungapped block), or NCBI's message for unsupported gap costs
+    /// (`Blast_KarlinBlkNuclGappedCalc`). The message names the given (not the divided)
+    /// scores.
+    ///
+    /// NCBI reference: c++/src/algo/blast/core/blast_stat.c:3875-3935
+    /// ```c
+    ///     if (gap_open == 0 && gap_extend == 0 && linear)
+    ///     {
+    ///         kbp->Lambda = linear[0][kLambdaIndex];
+    ///     ...
+    ///         for (index = 0; index < num_combinations; ++index) {
+    ///             if (normal[index][kGapOpenIndex] == gap_open &&
+    ///                 normal[index][kGapExtIndex] == gap_extend) {
+    ///     ...
+    ///         if (index == num_combinations) {
+    ///         /* If gap costs are larger than maximal provided in tables, copy
+    ///            the values from the ungapped Karlin block. */
+    ///             if (gap_open >= gap_open_max && gap_extend >= gap_extend_max) {
+    ///                 Blast_KarlinBlkCopy(kbp, kbp_ungap);
+    ///             } else if (error_return) {
+    ///     ...
+    ///                 out_sz = snprintf(buffer, (size_t)buffer_sz,"Gap existence and extension values %ld and %ld "
+    ///                         "are not supported for substitution scores %ld and %ld\n",
+    ///                         (long) gap_open, (long) gap_extend, (long) reward, (long) penalty);
+    ///     ...
+    ///                      out_sz = snprintf(buffer+len, (size_t)buffer_sz, "%ld and %ld are supported existence and extension values\n",
+    ///                         (long) normal[i][kGapOpenIndex],  (long) normal[i][kGapExtIndex]);
+    ///     ...
+    ///                 out_sz = snprintf(buffer+len, (size_t)buffer_sz, "%ld and %ld are supported existence and extension values\n",
+    ///                      (long) gap_open_max, (long) gap_extend_max);
+    ///     ...
+    ///                 out_sz = snprintf(buffer+len, (size_t)buffer_sz, "Any values more stringent than %ld and %ld are supported\n",
+    ///                      (long) gap_open_max, (long) gap_extend_max);
+    /// ```
+    fn row(&self, spec: &NuclScoringSpec) -> Result<Option<ParamEntry>, String> {
+        let row = if spec.gap_open == 0 && spec.gap_extend == 0 && self.linear.is_some() {
+            self.linear
+        } else {
+            self.normal
+                .iter()
+                .find(|entry| {
+                    entry.gap_open == spec.gap_open && entry.gap_extend == spec.gap_extend
+                })
+                .copied()
+        };
+        if row.is_some()
+            || (spec.gap_open >= self.gap_open_max && spec.gap_extend >= self.gap_extend_max)
+        {
+            return Ok(row);
+        }
+        let mut message = format!(
+            "Gap existence and extension values {} and {} are not supported for substitution scores {} and {}\n",
+            spec.gap_open, spec.gap_extend, spec.reward, spec.penalty
+        );
+        let supported = self
+            .normal
+            .iter()
+            .map(|entry| (entry.gap_open, entry.gap_extend))
+            .chain([(self.gap_open_max, self.gap_extend_max)]);
+        for (gap_open, gap_extend) in supported {
+            message += &format!(
+                "{gap_open} and {gap_extend} are supported existence and extension values\n"
+            );
+        }
+        message += &format!(
+            "Any values more stringent than {} and {} are supported\n",
+            self.gap_open_max, self.gap_extend_max
+        );
+        Err(message)
     }
 
-    KarlinParams::default()
+    /// NCBI's message when the gap costs are not supported for these scores.
+    pub fn check_gaps(&self, spec: &NuclScoringSpec) -> Result<(), String> {
+        self.row(spec).map(|_| ())
+    }
+
+    /// The gapped Karlin block of a query context, with the alpha and beta of its length
+    /// adjustment (NCBI `Blast_KarlinBlkNuclGappedCalc` and `Blast_GetNuclAlphaBeta`).
+    /// `ungapped` is the context's ungapped block, which gap costs beyond the table use.
+    ///
+    /// NCBI reference: c++/src/algo/blast/core/blast_stat.c:3995-4026
+    /// ```c
+    ///     if (gapped_calculation && normal) {
+    ///         if (gap_open == 0 && gap_extend == 0 && linear)
+    ///         {
+    ///             *alpha = linear[0][kAlphaIndex];
+    ///             *beta = linear[0][kBetaIndex];
+    ///     ...
+    ///     if (!found)
+    ///     {
+    ///         *alpha = kbp->Lambda/kbp->H;
+    ///         *beta = s_GetUngappedBeta(reward, penalty);
+    ///     }
+    /// ```
+    pub fn gapped(
+        &self,
+        spec: &NuclScoringSpec,
+        ungapped: &KarlinParams,
+    ) -> Result<KarlinParams, String> {
+        Ok(match self.row(spec)? {
+            Some(row) => row.to_karlin_params(),
+            None => KarlinParams {
+                alpha: ungapped.lambda / ungapped.h,
+                beta: ungapped_beta(spec.reward, spec.penalty),
+                ..*ungapped
+            },
+        })
+    }
 }
 
 /// Look up Karlin-Altschul parameters for protein scoring scheme
@@ -461,17 +684,6 @@ pub fn protein_scoring_supported(spec: &ProteinScoringSpec) -> bool {
     table
         .iter()
         .any(|entry| entry.gap_open == spec.gap_open && entry.gap_extend == spec.gap_extend)
-}
-
-/// Check if scores need to be rounded down for even-score-only matrices.
-///
-/// For certain reward/penalty combinations, NCBI BLAST requires that odd scores
-/// be rounded down to the nearest even number before calculating E-values.
-/// This matches the behavior in NCBI BLAST's `s_GetNuclValuesArray` function.
-pub fn requires_even_scores(reward: i32, penalty: i32) -> bool {
-    let penalty = penalty.abs();
-    // NCBI BLAST sets round_down=TRUE for these combinations
-    matches!((reward, penalty), (2, 7) | (2, 5) | (2, 3) | (3, 4))
 }
 
 /// Look up UNGAPPED Karlin-Altschul parameters for protein scoring scheme.
@@ -574,164 +786,101 @@ pub fn lookup_protein_params_gapped(matrix: ScoringMatrix) -> KarlinParams {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_lookup_nucl_params_megablast() {
-        // megablast task default: reward=1, penalty=-2, gap_open=0, gap_extend=0
-        // NCBI reference: blast_stat.c:660-668 (blastn_values_1_2, first entry)
-        let spec = NuclScoringSpec {
-            reward: 1,
-            penalty: -2,
-            gap_open: 0,
-            gap_extend: 0,
-        };
-        let params = lookup_nucl_params(&spec);
-        assert!(
-            (params.lambda - 1.28).abs() < 0.0001,
-            "lambda mismatch: expected 1.28, got {}",
-            params.lambda
-        );
-        assert!(
-            (params.k - 0.46).abs() < 0.0001,
-            "k mismatch: expected 0.46, got {}",
-            params.k
-        );
-        assert!(
-            (params.h - 0.85).abs() < 0.0001,
-            "h mismatch: expected 0.85, got {}",
-            params.h
-        );
-        assert!(
-            (params.alpha - 1.5).abs() < 0.0001,
-            "alpha mismatch: expected 1.5, got {}",
-            params.alpha
-        );
-        assert!(
-            (params.beta - (-2.0)).abs() < 0.0001,
-            "beta mismatch: expected -2.0, got {}",
-            params.beta
-        );
+    fn spec(reward: i32, penalty: i32, gap_open: i32, gap_extend: i32) -> NuclScoringSpec {
+        NuclScoringSpec {
+            reward,
+            penalty,
+            gap_open,
+            gap_extend,
+        }
+    }
+
+    const UNGAPPED: KarlinParams = KarlinParams {
+        lambda: 1.1,
+        k: 0.3,
+        h: 0.5,
+        alpha: 0.0,
+        beta: 0.0,
+    };
+
+    fn values(spec: &NuclScoringSpec) -> Result<(KarlinParams, bool), String> {
+        let values = NuclValues::new(spec.reward, spec.penalty)?;
+        Ok((values.gapped(spec, &UNGAPPED)?, values.round_down))
     }
 
     #[test]
-    fn test_lookup_nucl_params_blastn() {
-        // blastn task default: reward=2, penalty=-3, gap_open=5, gap_extend=2
-        // NCBI reference: blast_stat.c:674-684 (blastn_values_2_3, entry with gap_open=5, gap_extend=2)
-        let spec = NuclScoringSpec {
-            reward: 2,
-            penalty: -3,
-            gap_open: 5,
-            gap_extend: 2,
-        };
-        let params = lookup_nucl_params(&spec);
-        assert!(
-            (params.lambda - 0.625).abs() < 0.0001,
-            "lambda mismatch: expected 0.625, got {}",
-            params.lambda
+    fn task_defaults_use_the_table_rows() {
+        // blastn_values_1_2[0] (linear) and blastn_values_2_3 row { 5, 2, ... }.
+        let (megablast, round_down) = values(&spec(1, -2, 0, 0)).unwrap();
+        assert_eq!(
+            (
+                megablast.lambda,
+                megablast.k,
+                megablast.h,
+                megablast.alpha,
+                megablast.beta
+            ),
+            (1.28, 0.46, 0.85, 1.5, -2.0)
         );
-        assert!(
-            (params.k - 0.41).abs() < 0.0001,
-            "k mismatch: expected 0.41, got {}",
-            params.k
+        assert!(!round_down);
+        let (blastn, round_down) = values(&spec(2, -3, 5, 2)).unwrap();
+        assert_eq!(
+            (blastn.lambda, blastn.k, blastn.h, blastn.alpha, blastn.beta),
+            (0.625, 0.41, 0.78, 0.8, -2.0)
         );
-        assert!(
-            (params.h - 0.78).abs() < 0.0001,
-            "h mismatch: expected 0.78, got {}",
-            params.h
-        );
-        assert!(
-            (params.alpha - 0.8).abs() < 0.0001,
-            "alpha mismatch: expected 0.8, got {}",
-            params.alpha
-        );
-        assert!(
-            (params.beta - (-2.0)).abs() < 0.0001,
-            "beta mismatch: expected -2.0, got {}",
-            params.beta
-        );
+        assert!(round_down);
     }
 
     #[test]
-    fn test_lookup_nucl_params_blastn_ungapped() {
-        // blastn task ungapped: reward=2, penalty=-3, gap_open=0, gap_extend=0
-        // NCBI reference: blast_stat.c:674-684 (blastn_values_2_3, first entry)
-        let spec = NuclScoringSpec {
-            reward: 2,
-            penalty: -3,
-            gap_open: 0,
-            gap_extend: 0,
-        };
-        let params = lookup_nucl_params(&spec);
-        assert!(
-            (params.lambda - 0.55).abs() < 0.0001,
-            "lambda mismatch: expected 0.55, got {}",
-            params.lambda
+    fn scores_with_a_common_divisor_use_the_divided_table() {
+        // 2/-4 is 1/-2: the gap costs double, Lambda and alpha halve.
+        let (params, round_down) = values(&spec(2, -4, 4, 4)).unwrap();
+        assert_eq!(
+            (params.lambda, params.k, params.h, params.alpha, params.beta),
+            (1.33 / 2.0, 0.62, 1.1, 1.2 / 2.0, 0.0)
         );
-        assert!(
-            (params.k - 0.21).abs() < 0.0001,
-            "k mismatch: expected 0.21, got {}",
-            params.k
-        );
-        assert!(
-            (params.h - 0.46).abs() < 0.0001,
-            "h mismatch: expected 0.46, got {}",
-            params.h
-        );
-        assert!(
-            (params.alpha - 1.2).abs() < 0.0001,
-            "alpha mismatch: expected 1.2, got {}",
-            params.alpha
-        );
-        assert!(
-            (params.beta - (-5.0)).abs() < 0.0001,
-            "beta mismatch: expected -5.0, got {}",
-            params.beta
-        );
+        assert!(!round_down);
+        // 4/-6 is 2/-3, whose scores are rounded down.
+        assert!(values(&spec(4, -6, 10, 4)).unwrap().1);
+        assert!(values(&spec(2, -4, 3, 3))
+            .unwrap_err()
+            .contains("\n4 and 4 are supported"));
     }
 
     #[test]
-    fn test_lookup_nucl_params_unsupported_fallback() {
-        // Unsupported reward/penalty combination should fallback to reward=1, penalty=-2
-        let spec = NuclScoringSpec {
-            reward: 99,
-            penalty: -99,
-            gap_open: 0,
-            gap_extend: 0,
-        };
-        let params = lookup_nucl_params(&spec);
-        // Should return default (reward=1, penalty=-2 ungapped)
-        assert!(
-            (params.lambda - 1.28).abs() < 0.0001,
-            "lambda mismatch: expected 1.28, got {}",
-            params.lambda
+    fn gap_costs_beyond_the_table_use_the_ungapped_block() {
+        let (params, _) = values(&spec(1, -2, 5, 2)).unwrap();
+        assert_eq!(
+            (params.lambda, params.k, params.h, params.alpha, params.beta),
+            (1.1, 0.3, 0.5, 1.1 / 0.5, 0.0)
         );
-        assert!(
-            (params.k - 0.46).abs() < 0.0001,
-            "k mismatch: expected 0.46, got {}",
-            params.k
-        );
+        assert_eq!(values(&spec(2, -3, 7, 4)).unwrap().0.beta, -2.0);
     }
 
     #[test]
-    fn test_lookup_nucl_params_gap_fallback() {
-        // If gap_open/gap_extend don't match, should use ungapped (first entry)
-        let spec = NuclScoringSpec {
-            reward: 2,
-            penalty: -3,
-            gap_open: 99,   // Not in table
-            gap_extend: 99, // Not in table
-        };
-        let params = lookup_nucl_params(&spec);
-        // Should return first entry (ungapped: gap_open=0, gap_extend=0)
-        assert!(
-            (params.lambda - 0.55).abs() < 0.0001,
-            "lambda mismatch: expected 0.55, got {}",
-            params.lambda
+    fn unsupported_scores_have_ncbi_messages() {
+        assert_eq!(
+            values(&spec(2, -5, 5, 2)).unwrap_err(),
+            "Gap existence and extension values 5 and 2 are not supported for substitution scores 2 and -5\n\
+             2 and 4 are supported existence and extension values\n\
+             0 and 4 are supported existence and extension values\n\
+             4 and 2 are supported existence and extension values\n\
+             2 and 2 are supported existence and extension values\n\
+             4 and 4 are supported existence and extension values\n\
+             Any values more stringent than 4 and 4 are supported\n"
         );
-        assert!(
-            (params.k - 0.21).abs() < 0.0001,
-            "k mismatch: expected 0.21, got {}",
-            params.k
+        assert_eq!(
+            values(&spec(1, -6, 0, 0)).unwrap_err(),
+            "Substitution scores 1 and -6 are not supported"
         );
+        // The message names the divided scores; 5/-4 has no linear row.
+        assert_eq!(
+            values(&spec(2, -12, 0, 0)).unwrap_err(),
+            "Substitution scores 1 and -6 are not supported"
+        );
+        assert!(values(&spec(5, -4, 0, 0))
+            .unwrap_err()
+            .starts_with("Gap existence and extension values 0 and 0 are not supported"));
     }
 
     #[test]

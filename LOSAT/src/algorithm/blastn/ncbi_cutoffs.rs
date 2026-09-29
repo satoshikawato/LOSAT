@@ -14,7 +14,7 @@ use crate::stats::{compute_karlin_params_ungapped, score_freq_profile_from_proba
 /// ln(2) constant used in NCBI BLAST
 /// Reference: ncbi-blast/c++/include/algo/blast/core/ncbi_math.h
 /// #define NCBIMATH_LN2 0.69314718055994530941723212145818
-const NCBIMATH_LN2: f64 = 0.69314718055994530941723212145818;
+pub(crate) const NCBIMATH_LN2: f64 = 0.69314718055994530941723212145818;
 
 /// Default gap trigger bit score for nucleotide searches
 /// Reference: ncbi-blast/c++/include/algo/blast/core/blast_options.h:140

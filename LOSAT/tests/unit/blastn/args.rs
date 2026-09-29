@@ -22,16 +22,18 @@ fn test_default_values() {
     let args = parse_args(&["-query", "query.fasta", "-subject", "subject.fasta"]);
 
     assert_eq!(args.task, "megablast");
-    assert_eq!(args.word_size, 28);
+    // NCBI blast_args.cpp:166-170,648-660: the word size and scores are optional keys;
+    // an omitted one keeps the task's default (coordination.rs).
+    assert_eq!(args.word_size, None);
     assert_eq!(args.num_threads, 1);
     assert_eq!(args.evalue, 10.0);
     // NCBI blast_args.cpp:2913-2927: an omitted -max_target_seqs keeps the defaults of
     // the hit list (500) and of the pairwise alignments (250), so it stays unset here.
     assert_eq!(args.max_target_seqs, None);
-    assert_eq!(args.reward, 1);
-    assert_eq!(args.penalty, -2);
-    assert_eq!(args.gap_open, 0);
-    assert_eq!(args.gap_extend, 0);
+    assert_eq!(args.reward, None);
+    assert_eq!(args.penalty, None);
+    assert_eq!(args.gap_open, None);
+    assert_eq!(args.gap_extend, None);
     assert_eq!(args.dust.params(), Some((20, 64, 1)));
     assert_eq!(args.verbose, false);
     assert_eq!(args.scan_step, 0);
@@ -60,7 +62,7 @@ fn test_custom_word_size() {
         "-word_size",
         "11",
     ]);
-    assert_eq!(args.word_size, 11);
+    assert_eq!(args.word_size, Some(11));
 }
 
 #[test]
@@ -117,10 +119,41 @@ fn test_custom_scoring_parameters() {
         "-gapextend",
         "2",
     ]);
-    assert_eq!(args.reward, 2);
-    assert_eq!(args.penalty, -3);
-    assert_eq!(args.gap_open, 5);
-    assert_eq!(args.gap_extend, 2);
+    assert_eq!(args.reward, Some(2));
+    assert_eq!(args.penalty, Some(-3));
+    assert_eq!(args.gap_open, Some(5));
+    assert_eq!(args.gap_extend, Some(2));
+}
+
+#[test]
+fn given_scores_replace_the_task_defaults_even_when_equal_to_megablast_ones() {
+    use LOSAT::algorithm::blastn::coordination::{
+        determine_effective_word_size, determine_scoring_params,
+    };
+    let base = [
+        "-query", "q.fasta", "-subject", "s.fasta", "-task", "blastn",
+    ];
+    let args = parse_args(&base);
+    assert_eq!(determine_scoring_params(&args), (2, -3, 5, 2));
+    assert_eq!(determine_effective_word_size(&args), 11);
+    let mut given = base.to_vec();
+    given.extend([
+        "-reward",
+        "1",
+        "-penalty",
+        "-2",
+        "-gapopen",
+        "0",
+        "-gapextend",
+        "0",
+        "-word_size",
+        "28",
+    ]);
+    let args = parse_args(&given);
+    assert_eq!(determine_scoring_params(&args), (1, -2, 0, 0));
+    assert_eq!(determine_effective_word_size(&args), 28);
+    let args = parse_args(&["-query", "q.fasta", "-subject", "s.fasta", "-gapopen=-1"]);
+    assert_eq!(determine_scoring_params(&args), (1, -2, -1, 0));
 }
 
 #[test]

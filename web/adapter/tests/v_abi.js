@@ -138,7 +138,8 @@ function nativeOutputs(native, search, scratch) {
 
 function checkHits(streams, program, label) {
   const records = (streams.get(1) || Buffer.alloc(0)).toString().split("\n").filter(Boolean).map((line) => JSON.parse(line));
-  const out6 = streams.get(6), out0 = streams.get(0);
+  // A stream without bytes (a search without hits) is never emitted.
+  const out6 = streams.get(6) || Buffer.alloc(0), out0 = streams.get(0) || Buffer.alloc(0);
   const rows = out6.toString().split("\n").filter(Boolean);
   assert.equal(records.length, rows.length, `${label}: one record per outfmt 6 row`);
   const ranks = new Map();

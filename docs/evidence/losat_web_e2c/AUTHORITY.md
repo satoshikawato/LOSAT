@@ -7,7 +7,7 @@ NCBI のソースは固定 commit `598d8ae6`（`/mnt/c/Users/genom/GitHub/ncbi-b
 | NCBI | 振る舞い | LOSAT |
 |---|---|---|
 | `blast_nucl_options.cpp:137-150,198-221`（`SetLookupTableDefaults`・`SetMBLookupTableDefaults`・`SetScoringOptionsDefaults`・`SetMBScoringOptionsDefaults`）、`blast_options.h:67-68,86-95` | task の既定値：blastn は word size 11、reward 2、penalty −3、gap 5/2。megablast は 28、1、−2、0/0 | `coordination.rs` の `task_defaults` |
-| `blast_args.cpp:166-170,175-182,262-271,288-300,648-660,674-679` | `-word_size`・`-gapopen`・`-gapextend`・`-reward`・`-penalty` は省略できるキーで、与えたときだけ task の既定値を置き換える。reward は 0 以上、penalty は 0 以下、gap は制約なし | `args.rs` のこれらを `Option` にした。reward 0 は LOSAT が拒否する（`positive_i32`。NCBI の rmblastn の 0/0 と、すべての query が無効になる場合を実装しない） |
+| `blast_args.cpp:166-170,175-182,262-271,288-300,648-660,674-679` | `-word_size`・`-gapopen`・`-gapextend`・`-reward`・`-penalty` は省略できるキーで、与えたときだけ task の既定値を置き換える。reward は 0 以上、penalty は 0 以下、gap は制約なし | `args.rs` のこれらを `Option` にした。reward 0 は LOSAT が拒否する（`blastn_reward`。NCBI の rmblastn の 0/0 と、すべての query が無効になる場合を実装しない）。word size は 4 以上（NCBI の引数の制約）で、100 以下は §B の検査 |
 
 **S07+ の前の差（根本原因 1）：** LOSAT は clap の既定値を megablast の値にし、task が blastn のときに「既定値と同じ値」を blastn の既定値に置き換えていた。そのため、`-task blastn -reward 1` のように megablast の既定値と同じ値を明示すると、その値が無視された（S06 の sweep の reward 1 の 16 件の DIFF の原因）。
 
@@ -16,12 +16,15 @@ NCBI のソースは固定 commit `598d8ae6`（`/mnt/c/Users/genom/GitHub/ncbi-b
 | NCBI | 振る舞い |
 |---|---|
 | `blast_options.c:881-906`（`BlastScoringOptionsValidate`） | penalty が 0 以上なら「BLASTN penalty must be negative」、gap open が正で gap extend が 0 なら「BLASTN gap extension penalty cannot be 0」 |
+| `blast_options.c:1326-1333`（`LookupTableOptionsValidate`） | word size が 100 を超えると「Word-size must be less than or equal to 100」 |
+| `blast_options.c:1518-1523`（`BlastHitSavingOptionsValidate`） | e-value が 0 以下なら「expect value or cutoff score must be greater than zero」 |
 | `blast_options.c:1699-1711`（`s_BlastExtensionScoringOptionsValidate`） | gap が 0/0 で貪欲な伸長でない（blastn の task）なら「Greedy extension must be used if gap existence and extension options are zero」 |
-| `blast_options.c:1759-1776`（`BLAST_ValidateOptions`） | 上の 2 つはこの順に調べる |
+| `blast_options.c:1759-1776`（`BLAST_ValidateOptions`） | 上の検査を、得点、lookup table、hit saving、伸長と得点の順に調べる |
+| `blast_args.cpp:3474-3480` | `-out` のファイルは検査より前に開く（検査で止まっても空のファイルが残る） |
 | `blast_args.cpp:3609-3612`、`blast_app_util.hpp:172-175` | 検査の失敗は `CInputException` になり、`BLAST query/options error: <msg>` と `Please refer to the BLAST+ user manual.` を出して終了コード 1 |
 | `blast_args.cpp:2800-2803,2975-2977` | 出力形式の解析と「Examining 5 or more matches is recommended」の警告は、検査より前（引数の処理の時点） |
 
-LOSAT：`scoring.rs` の `check_scoring_options`。`run.rs` の `process_options` が、形式の解析、警告、検査をこの順に、入力を読む前に行う。CLI の終了コードは、BLASTX と共有する `cli.rs` の `NativeError`（S07+ で `blastx/native.rs` から移した）で NCBI と同じにした。
+LOSAT：`scoring.rs` の `check_scoring_options`。`run.rs` の `process_options` が、形式の解析、警告、検査をこの順に、入力を読む前に行う。CLI の `run` は、その前に `-out` のファイルを作る。CLI の終了コードは、BLASTX と共有する `cli.rs` の `NativeError`（S07+ で `blastx/native.rs` から移した）で NCBI と同じにした。NCBI の検査の後に、LOSAT の上限を調べる（§G）。
 
 ## C. Karlin-Altschul の表
 
@@ -34,9 +37,10 @@ LOSAT：`scoring.rs` の `check_scoring_options`。`run.rs` の `process_options
 | `blast_stat.c:3965-4031`（`Blast_GetNuclAlphaBeta`）、`blast_stat.c:3955-3963` | 長さの補正の alpha と beta：表の行の値。写した場合は alpha = Lambda/H（ungapped）、beta は与えた値が 1/−1 か 2/−3 なら −2、それ以外は 0 |
 | `blast_setup.c:74-107`（`Blast_ScoreBlkKbpGappedCalc`） | 有効な context ごとに計算し、最初の失敗で止まる。有効な context が無ければ計算も失敗もしない |
 | `blast_aux_priv.cpp:94-102`、`blast_aux.cpp:1013-1024`、`blast_types.hpp:180-183`、`setup_factory.cpp:170-184`、`blast_app_util.hpp:225-227` | context を持たないメッセージは、その batch の全 query に付く。例外の文言は query ごとに `Error: <msg> ` をつないだもので、`BLAST engine error: ` を付けて終了コード 3 |
+| `setup_factory.cpp:170-172`、`blast_stat.c:2784-2791` | 例外は、最初のメッセージが error のときだけ投げる。無効な context があると、その warning が先に来るので、NCBI は gapped block の無いまま続ける（S07+ の独立監査で、NCBI が segfault することを確かめた） |
 | `blastn_app.cpp:258-261` | outfmt 0 の prolog（program、参照文献、Database の行）は検索の前に出るので、この失敗でも stdout に残る |
 
-LOSAT：`tables.rs` の `NuclValues`（`new`・`check_gaps`・`gapped`）が 3 つの関数の移植、`scoring.rs` の `context_blocks` と `karlin_error`。失敗は、最初の batch に有効な query があれば NCBI と同じ文言（繰り返しの回数は最初の batch の query の数）と prolog で終わる。最初の batch がすべて無効で後に有効な query がある場合は、2 番目の batch の大きさが NCBI の batch の計算（§F）に依存するので、LOSAT の文言で明示的に失敗する。
+LOSAT：`tables.rs` の `NuclValues`（`new`・`check_gaps`・`gapped`）が 3 つの関数の移植、`scoring.rs` の `context_blocks` と `karlin_error`。失敗は、最初の batch の query がすべて有効なら NCBI と同じ文言（繰り返しの回数は最初の batch の query の数）と prolog で終わる。最初の batch に無効な query があれば、NCBI は失敗を報告しない（上の行）ので、LOSAT の文言で明示的に失敗する。
 
 **S07+ の前の差（根本原因 2）：** LOSAT は最大公約数で割らず、表に無い組は 1/−2 の値を、表に無い gap は表の最初の行を黙って使い、拒否もしなかった。
 
@@ -52,7 +56,7 @@ LOSAT：`tables.rs` の `NuclValues`（`new`・`check_gaps`・`gapped`）が 3 �
 
 2 つの鎖の組成は同じ残基の並べ替えなので、block は最後の桁で違いうる。表の gap では gapped block が表の値で全 context 同じなので差は出ないが、表を超える gap（ungapped block を写す）では、同じ得点の HSP の e-value が鎖で違い、HSP の順序が変わる（NCBI では minus の鎖の HSP が先に来る例を確かめた）。
 
-LOSAT：S07+ の前は、エンジンは ACGT だけを仮定した 1 つの ungapped block と 1 つの gapped block をすべての query に使い、報告だけが query の組成の block を使っていた（S07 の §G.2）。S07+ で、context ごとの ungapped と gapped の block（`ContextKarlin`）を、cutoff、X-drop、gap trigger、探索空間、e-value、bit score に使うようにした。invalid な query は NCBI が検索しないので、その結果は報告の前に捨てる。gapped の X-drop は、全 context で同じ値になるとき、または最初の batch が全 query を含むときに NCBI と同じ。そうでない場合（表を超える gap で、組成の違う query が最初の batch に収まらない）は明示的に失敗する（`scoring.rs` の `gap_x_dropoffs`）。HSP の e-value の並べ直しは `post_process_hits_and_write` に足した。表の gap では並びは変わらない。
+LOSAT：S07+ の前は、エンジンは ACGT だけを仮定した 1 つの ungapped block と 1 つの gapped block をすべての query に使い、報告だけが query の組成の block を使っていた（S07 の §G.2）。S07+ で、context ごとの ungapped と gapped の block（`ContextKarlin`）を、cutoff、X-drop、gap trigger、探索空間、e-value、bit score に使うようにした。無効な context は、NCBI と同じく無限の cutoff（`blast_parameters.c:324-332`）、0 の X-drop と探索空間（`blast_setup.c:778-786`）を持ち、ヒットを持たない。有効な context が無ければ、NCBI と同じく検索しない（`local_blast.cpp:177-180`。以前は、例えば `-reward 4 -penalty -1` の 100 kb の query で 300 秒以上かかった）。gapped の X-drop は、全 context で同じ値になるとき、または最初の batch が全 query を含むときに NCBI と同じ。そうでない場合（表を超える gap で、組成の違う query が最初の batch に収まらない）は明示的に失敗する（`scoring.rs` の `gap_x_dropoffs`）。HSP の e-value の並べ直しは `post_process_hits_and_write` に足した。表の gap では並びは変わらない。
 
 ## E. 入力の読み方
 
@@ -79,10 +83,26 @@ LOSAT：最初の batch の後の、100 残基未満の無効な query の連な
 
 | 入力 | 文言の要点 |
 |---|---|
-| `-reward 0` | clap の値の検査（1 以上） |
-| 定義行の先頭の空白、制御文字、非 ASCII | `has a defline that …; … not supported by LOSAT's BLASTN` |
+| `-reward 0` | `a reward of 0 (NCBI BLAST+'s matrix scoring of rmblastn) is not supported by LOSAT's BLASTN` |
+| 空の定義行、先頭の空白、制御文字、非 ASCII | `has a defline that …; … not supported by LOSAT's BLASTN` |
+| 残基の無いレコード（NCBI は「Sequence contains no data」） | `has no residues; … not supported by LOSAT's BLASTN` |
+| 最初の定義行の前の文字（空行、`;` の注釈、BOM。NCBI は読む） | `failed to read … FASTA … (text before the first defline, which NCBI BLAST+ may read, is not supported by LOSAT's BLASTN)` |
+| 空の query が通常のファイルでない場合（パイプ。NCBI は空と見なさない） | `an empty query that is not a regular file … is not supported by LOSAT's BLASTN` |
+| 環境変数 `BATCH_SIZE`・`CHUNK_SIZE`（NCBI の query の batch を変える） | `the environment variable … is not supported by LOSAT's BLASTN` |
+| reward − penalty が 3000 を超える得点（NCBI は 16 ビットで持つ。LOSAT の Karlin-Altschul の計算は 1000/−2000 まで NCBI と比べた） | `… span more than 3000 score units, which is not supported by LOSAT's BLASTN` |
+| greedy な伸長（`-task megablast`）の 32767 を超える gap（NCBI の 32 ビットの距離が溢れうる） | `gap costs above 32767 with greedy extension … are not supported by LOSAT's BLASTN` |
 | IUPAC の文字以外の残基（`X`、`-`、数字、空白など） | `has 'X' at residue N, which is not an IUPAC nucleotide letter; … not supported by LOSAT's BLASTN` |
-| 最初の batch がすべて無効で、後の batch の得点の表の失敗 | `the error of these scoring options depends on NCBI BLAST+'s adaptive query batches, which LOSAT does not reproduce` |
+| 得点の表の失敗で、最初の batch に無効な query がある（NCBI は報告せず、続けて落ちる） | `… the first query batch … has an invalid query; NCBI BLAST+ does not report the error then, which is not supported by LOSAT's BLASTN` |
 | 表を超える gap で、context の gapped X-drop が違い、query が最初の batch に収まらない | `the gapped X-drop of these gap costs depends on … which LOSAT does not reproduce` |
 | 最初の batch の後の無効な query で、その batch が決まらないもの（outfmt 0 と 7） | `the outfmt 0 and 7 reports of the invalid query N depend on NCBI BLAST+'s adaptive query batches, which LOSAT does not reproduce` |
 | subject の総文字数が 2^31 以上 | `… 32-bit int, which is not supported by LOSAT's BLASTN` |
+
+## H. greedy な伸長のメモリ（S07+ の独立監査）
+
+| NCBI | 振る舞い |
+|---|---|
+| `blast_gapalign.c:240-251` | affine の greedy な伸長の配列は検索ごとに 1 度 `calloc` で取る。`last_seq2_off` の行は距離 `max_cost` までは全対角線の幅 |
+| `greedy_align.c:920-942` | 毎回初期化するのは、先に読まれる最初の `xdrop_offset` の最大得点と `max_penalty` の対角線の範囲だけ |
+| `greedy_align.c:1181-1197` | それより先の距離の行は、traceback が無ければ `d - max_penalty - 1` の行を使い回し、あれば memory pool から、その距離で調べる対角線の範囲だけを取る |
+
+LOSAT は、すべての距離に全幅の行（`scaled_max_dist + max_penalty + 2` 行）を取り、呼出しごとに全部を初期化していた。そのため、gap のコストに比例して時間とメモリがかかった（multi の入力で 1000/500 に 4 秒、4000/2000 に 17 秒、10^6 でメモリ不足。NCBI は 0.02 秒）。また、1 億要素を超えると黙って収束しなかったことにしていた。S07+ で、行を「その距離で調べる対角線の範囲」だけにし（traceback が無ければ `max_penalty + 1` 行の輪、あれば距離ごと）、NCBI が初期化する要素だけを初期化するようにした（`greedy.rs` の `AffineRows`）。行は、その距離の対角線の範囲の中でだけ読まれるので、結果は変わらない。32767/32767 で 0.04 秒、10^6 で 0.7 秒（213 MB）になり、出力は NCBI と同じ。

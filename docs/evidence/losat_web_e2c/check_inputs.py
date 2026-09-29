@@ -2,7 +2,8 @@
 """Compare BLASTN input handling and query batches with NCBI (Session S07+; comparison only).
 
 Writes derived inputs into WORK (from the repository's inputs and fixed seeds), runs each
-case in NCBI and LOSAT, and prints one line per case: `same`, `same-error`,
+case in NCBI and LOSAT (standard input empty; `-out` files compared with stdout), and
+prints one line per case: `same`, `same-error`,
 `losat-rejects` (NCBI succeeds; LOSAT fails with a message that names what it does not
 support, whether NCBI succeeds or fails otherwise) or `DIFF`, with the `expect` column of
 the case. Exits 1 when a result is not the expected one.
@@ -63,6 +64,20 @@ def make_inputs(work: Path) -> None:
         iupac.append(f">i{index}\n{mixed}\n")
     (work / "many_acgt.fa").write_text("".join(acgt))
     (work / "many_iupac.fa").write_text("".join(iupac))
+    # Cases of the S07+ independent audit.
+    subject_lines = subject.split("\n")
+    subject_lines[1] = subject_lines[1][:10] + "XX" + subject_lines[1][10:]
+    (work / "subject_x.fa").write_text("\n".join(subject_lines))
+    (work / "empty_defline.fa").write_text(f">\n{q}\n")
+    (work / "blank_defline.fa").write_text(f">   \n{q}\n")
+    (work / "empty_record.fa").write_text(f">e1 empty\n>mq1 real\n{q}\n")
+    (work / "empty_records_only.fa").write_text(">e1 empty\n>e2 empty\n")
+    (work / "empty_subject_record.fa").write_text(">s0 empty\n" + subject)
+    (work / "leading_blank_line.fa").write_text(f"\n>q1\n{q}\n")
+    (work / "byte_order_mark.fa").write_text(f"\ufeff>q1\n{q}\n")
+    (work / "first_multi_query.fa").write_text(f">{multi[0][0]}\n{q}\n")
+    edl933 = "".join(line for line in (ENGINE / "tests/fasta/EDL933.fna").read_text().splitlines()[1:])
+    (work / "edl933_100k.fa").write_text(">edl933_100k first 100 kb of EDL933\n" + edl933[:100000] + "\n")
 
 
 def cases(work: Path) -> list[tuple[str, list[str], str]]:
@@ -95,6 +110,39 @@ def cases(work: Path) -> list[tuple[str, list[str], str]]:
         ("scoring_error.all_invalid", ["-query", f"{F}/edge_allN.fasta", "-subject", COMPACT, "-reward", "1", "-penalty", "-6"], "same"),
         ("scoring_error.outfmt0_prolog", [*multi, "-reward", "3", "-penalty", "-5"], "same-error"),
         ("scoring_error.megablast_prolog", [*multi, "-task", "blastn", "-reward", "2", "-penalty", "-5", "-max_target_seqs", "3"], "same-error"),
+    ]
+    multi_s = ["-subject", f"{F}/multi_subject.fasta"]
+    rows += [
+        # An invalid query in the first batch of an unsupported scoring: NCBI crashes.
+        ("audit.invalid_first_batch.table_error", ["-query", f"{F}/edge_mixed_allN.fasta", "-subject", COMPACT, "-reward", "1", "-penalty", "-6", "-outfmt", "6"], "losat-rejects"),
+        ("audit.invalid_first_batch.gap_error", ["-query", f"{F}/edge_mixed_allN.fasta", "-subject", COMPACT, "-task", "blastn", "-reward", "1", "-penalty", "-2", "-gapopen", "1", "-gapextend", "3", "-outfmt", "7"], "losat-rejects"),
+        ("audit.invalid_strand.3_-1", ["-query", f"{w}/first_multi_query.fa", *multi_s, "-task", "blastn", "-reward", "3", "-penalty", "-1", "-outfmt", "6"], "losat-rejects"),
+        ("audit.empty_query.subject_x", ["-query", f"{w}/empty.fa", "-subject", f"{w}/subject_x.fa", "-outfmt", "6"], "losat-rejects"),
+        ("audit.empty_defline", ["-query", f"{w}/empty_defline.fa", *multi_s, "-outfmt", "6"], "losat-rejects"),
+        ("audit.blank_defline", ["-query", f"{w}/blank_defline.fa", *multi_s, "-outfmt", "7"], "losat-rejects"),
+        ("audit.empty_record", ["-query", f"{w}/empty_record.fa", *multi_s, "-outfmt", "6"], "losat-rejects"),
+        ("audit.empty_records_only", ["-query", f"{w}/empty_records_only.fa", *multi_s, "-outfmt", "6"], "losat-rejects"),
+        ("audit.empty_subject_record", ["-query", f"{F}/multi_query.fasta", "-subject", f"{w}/empty_subject_record.fa", "-outfmt", "6"], "losat-rejects"),
+        ("audit.penalty_-40000", ["-query", f"{F}/multi_query.fasta", *multi_s, "-penalty", "-40000", "-outfmt", "6"], "losat-rejects"),
+        ("audit.reward_65538", ["-query", f"{F}/multi_query.fasta", *multi_s, "-reward", "65538", "-penalty", "-65540", "-outfmt", "6"], "losat-rejects"),
+        ("audit.reward_2147483647", ["-query", f"{F}/multi_query.fasta", *multi_s, "-reward", "2147483647", "-penalty", "-1", "-outfmt", "6"], "losat-rejects"),
+        ("audit.reward_32767", ["-query", f"{F}/multi_query.fasta", *multi_s, "-reward", "32767", "-penalty", "-32768", "-outfmt", "6"], "losat-rejects"),
+        ("audit.megablast_gap_max", ["-query", f"{F}/multi_query.fasta", *multi_s, "-gapopen", "2147483647", "-gapextend", "2147483647", "-outfmt", "6"], "losat-rejects"),
+        ("audit.megablast_gap_32767", ["-query", f"{F}/multi_query.fasta", *multi_s, "-gapopen", "32767", "-gapextend", "32767", "-outfmt", "6"], "same"),
+        ("audit.megablast_gap_4000", ["-query", f"{F}/multi_query.fasta", *multi_s, "-gapopen", "4000", "-gapextend", "2000", "-outfmt", "0"], "same"),
+        ("audit.large_divisible", ["-query", f"{F}/multi_query.fasta", *multi_s, "-reward", "1000", "-penalty", "-2000", "-outfmt", "6"], "same"),
+        ("audit.evalue_0", ["-query", f"{F}/multi_query.fasta", *multi_s, "-evalue", "0", "-outfmt", "6"], "same-error"),
+        ("audit.evalue_0.greedy_order", ["-query", f"{F}/multi_query.fasta", *multi_s, "-evalue", "0", "-task", "blastn", "-gapopen", "0", "-gapextend", "0", "-outfmt", "6"], "same-error"),
+        ("audit.word_size_101", ["-query", f"{F}/multi_query.fasta", *multi_s, "-word_size", "101", "-outfmt", "6"], "same-error"),
+        ("audit.word_size_101.penalty_order", ["-query", f"{F}/multi_query.fasta", *multi_s, "-word_size", "101", "-penalty", "0", "-outfmt", "6"], "same-error"),
+        ("audit.all_invalid_positive_score", ["-query", f"{w}/edl933_100k.fa", "-subject", "tests/fasta/EDL933.fna", "-task", "blastn", "-reward", "4", "-penalty", "-1", "-outfmt", "6"], "same"),
+        ("audit.reward_0", ["-query", f"{F}/multi_query.fasta", *multi_s, "-reward", "0", "-outfmt", "6"], "losat-rejects"),
+        ("audit.piped_empty_query", ["-query", "/dev/stdin", *multi_s, "-outfmt", "6"], "losat-rejects"),
+        ("audit.out_file.options_error", ["-query", f"{F}/multi_query.fasta", *multi_s, "-penalty", "0", "-out", "{OUT}"], "same-error"),
+        ("audit.out_file.empty_query", ["-query", f"{w}/empty.fa", *multi_s, "-out", "{OUT}"], "same"),
+        ("audit.out_file.table_error.fmt7", ["-query", f"{F}/multi_query.fasta", *multi_s, "-reward", "1", "-penalty", "-6", "-outfmt", "7", "-out", "{OUT}"], "same-error"),
+        ("audit.leading_blank_line", ["-query", f"{w}/leading_blank_line.fa", *multi_s, "-outfmt", "6"], "losat-rejects"),
+        ("audit.byte_order_mark", ["-query", f"{w}/byte_order_mark.fa", *multi_s, "-outfmt", "6"], "losat-rejects"),
     ]
     for task in ("megablast", "blastn"):
         for gaps in (["-reward", "1", "-penalty", "-2", "-gapopen", "5", "-gapextend", "2"],
@@ -130,8 +178,17 @@ def main() -> int:
     unexpected = []
     print("case\texpect\tresult\tlosat_stderr")
     for name, argv, expect in cases(args.work.resolve()):
-        ncbi = subprocess.run([str(args.bin_dir / "blastn"), *argv], cwd=ENGINE, capture_output=True)
-        ours = subprocess.run([str(args.losat.resolve()), "blastn", *argv], cwd=ENGINE, capture_output=True)
+        runs = []
+        for label, command in (("ncbi", [str(args.bin_dir / "blastn")]), ("losat", [str(args.losat.resolve()), "blastn"])):
+            # `{OUT}`: the -out file, whose existence and bytes join the stdout.
+            out = args.work.resolve() / f"out.{label}"
+            out.unlink(missing_ok=True)
+            run = subprocess.run([*command, *(str(out) if word == "{OUT}" else word for word in argv)], cwd=ENGINE,
+                                 capture_output=True, input=b"")
+            if "{OUT}" in argv:
+                run.stdout += b"<out>" + (out.read_bytes() if out.exists() else b"<missing>")
+            runs.append(run)
+        ncbi, ours = runs
         result = classify(ncbi, ours)
         if result != expect:
             unexpected.append(name)

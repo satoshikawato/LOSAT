@@ -13,7 +13,12 @@ LOSAT Web の段階 W3 を実行する。先に [セッション README](README.
 5. Combined / Separate の切り替え（計画 §5.2）。Separate は、ファイルごとの RunSnapshot を同じグループ ID で積み、「グループを取消」を用意する。
 6. スレッドの Auto / 手動、実行中の段階と経過時間、診断情報（RunRecord の経路・スレッド数・切り替えの理由）。query ごとの途中経過は出さない（DW-5）。
 7. モバイルでの縦の配置。Wake Lock の選択、実行中にタブを閉じる前の注意、スリープやバックグラウンドからの復帰時の状態の確認（設計書 §9.4、`REQ-22`）。
-8. E2E：代表的な研究作業（Subject を保持したまま Query を変えて繰り返す、キューに複数積む、実行中に次のジョブを編集する）と、境界条件（空の入力、不正なレコード、除外の後の再実行、取消）を Playwright で試す。
+8. BLASTN の得点と入力（S07+、`docs/evidence/losat_web_e2c/AUTHORITY.md`）。フォームは次を守る：
+   - `-reward`・`-penalty`・`-gapopen`・`-gapextend`・`-word_size` は省略できるオプションで、省いたときは task の既定値（blastn：11、2、−3、5/2。megablast：28、1、−2、0/0）になる。task を切り替えたときに、既定値を argv に書き込まない（既定値と同じ値を明示しても NCBI と同じ結果になるが、argv は短く保つ）。
+   - reward は 1 以上（0 は LOSAT が拒否する）、penalty は 0 以下、gap は任意の整数。NCBI が拒否する組合せ（penalty 0、gap extend 0 の gap open、blastn の task の gap 0/0、NCBI の Karlin の表に無い組）は、`validate` が NCBI の文言（`BLAST query/options error: …` または `BLAST engine error: Error: …`）で返すので、その文言をそのまま見せる。表の組と、表を超える gap（ungapped の block を写す）は、NCBI とバイト一致で実行される（`scoring_sweep.py` の 880 の組合せ）。
+   - `register` は、NCBI が違う読み方をする BLASTN の入力（定義行の先頭の空白・tab などの制御文字・非 ASCII、IUPAC の文字以外の残基。`U` は `T` として受け付ける）を 「not supported by LOSAT's BLASTN」を含む文言で拒否する（TD-12）。レコード一覧の警告として、その文言を見せる。
+   - query の batch に依存する場合（表を超える gap で組成の違う query が最初の batch に収まらない、など）は、`run` が LOSAT の文言で失敗する。失敗として見せ、結果を部分的に出さない。
+9. E2E：代表的な研究作業（Subject を保持したまま Query を変えて繰り返す、キューに複数積む、実行中に次のジョブを編集する）と、境界条件（空の入力、不正なレコード、除外の後の再実行、取消）を Playwright で試す。
 
 完了条件は計画 §7 の S12 の行による。画面の記録を画面レビューに見せ、指摘と対応を `docs/evidence/losat_web_w3/README.md` に記録する。
 

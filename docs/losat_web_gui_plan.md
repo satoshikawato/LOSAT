@@ -82,6 +82,7 @@ LOSAT は、NCBI BLAST+ を純 Rust で再実装したものである。宣言�
 | TD-9 | 既存の不具合のうち、BLASTP と TBLASTN の outfmt 0 の座標の桁数（NCBI は 0 始まりの最大値、LOSAT は 1 始まりの最大値から求める）は、S07 で NCBI の規則の 1 つの関数にまとめて直す。BLASTX の関数は変えない（DW-10） | BLASTN の outfmt 0 も同じ規則を使うので、共有の部品として直すのが最も小さい。境界（最大の座標が 10 の累乗）でだけ出力が変わり、変わる凍結出力は NCBI と一致することを示せる（S06 の `docs/evidence/losat_web_e2a/AUTHORITY.md` §D.1） |
 | TD-10 | BLASTN の得点のオプション（既定以外の reward / penalty / gap）は、S07+ で NCBI と同じにするか、明示的に拒否する。アプリが認証されていない BLASTN の得点を出さないよう、S12 の前に終える | S06 で、NCBI が拒否する 34 の組合せを LOSAT が実行し、NCBI が受け付ける 17 の組合せで結果が違うことが分かった（`AUTHORITY.md` §D.5）。outfmt 0 の移植（S07）とは原因が別なので、段階を分ける |
 | TD-11 | reactor は、ビルドした checkout のパスと `CARGO_HOME` を `--remap-path-prefix` で固定の名前に置き換えてビルドする。TD-6 の rustflags の比較は、この置き換えだけを差として認める。S07 で入れ（reactor を作り直し、full の V-ABI を再実行するため）、S16 の V-PRIV で公開物にローカルのパスが無いことを確かめる | アダプタは LOSAT を path 依存として使うので、エンジンのコードの panic の位置に checkout の絶対パスが入り、登録簿の crate の位置には `CARGO_HOME` が入る（S05 の独立監査、`docs/web/abi_v2.md` §2）。公開物にビルドした機械のパスを残さない。置き換えはコードの働きを変えない。S07 で、置き換えの後の reactor にローカルのパスが無いことを確かめた。バイトは checkout のパスにはなお依存する（path 依存の crate の Cargo の metadata hash が記号の名前に入る）ので、同一性の記録に checkout のパスを残し、再現は同じパスで行う |
+| TD-12 | BLASTN の入力は、LOSAT の `bio` の読み方と NCBI の `CFastaReader` の読み方が同じものだけを受け付ける。違いは `U`（NCBI は `T` として読む）だけを移植し、ほかの違い（定義行の先頭の空白・制御文字・非 ASCII、IUPAC の文字以外の残基）は明示的に拒否する。v2 のアダプタは `register` で同じ検査をする。NCBI の読み込み器の移植は未決事項にした（§10） | NCBI の読み込み器の移植には、アダプタの索引の走査（TD-8）に新しい解析器の種類が要り、S07+ の範囲を超える。拒否する入力は研究で使う FASTA では稀で、黙って違う結果を出すより安全である（S07+、`docs/evidence/losat_web_e2c/AUTHORITY.md` §E） |
 
 ---
 
@@ -520,4 +521,5 @@ NCBI BLAST+（oracle） ─[既存の認証]─► ネイティブ LOSAT の凍�
 | Cloudflare に残す旧版の数、ドメイン名 | S16 の前 |
 | BLASTX の範囲の拡大（DW-11）を LOSATX 計画の範囲の記録に書くこと | SX の前（保守者） |
 | v1 ABI の廃止 | gbdraw が v2 へ移る時点（TD-1） |
+| BLASTN の FASTA の読み方を NCBI の `CFastaReader` に合わせる（TD-12 の拒否をなくす。アダプタの索引の走査の解析器の種類を足す）と、NCBI の後の query batch の大きさ（`CBatchSizeMixer` と拡張の数）の再現（S07+ の batch に依存する拒否をなくす） | S17 の前（保守者と相談） |
 | 公開する版の名前 | S17 |

@@ -410,6 +410,22 @@ mod tests {
     }
 
     #[test]
+    fn non_ascii_bytes_in_sequence_lines_are_rejected() {
+        assert!(check_sequence_lines(b">q1 d\nACGT\r\nacgt\n\n>q2\nNN\n", "query").is_ok());
+        for (bytes, record) in [
+            (&b">q1\nACGT\xc2\xa0\n"[..], "query record 1"),
+            (b">q1\nACGT\n>q2\nAC\n\xe3\x80\x80\n", "query record 2"),
+            (b">q1\n\xef\xbb\xbfACGT\n", "query record 1"),
+        ] {
+            let error = check_sequence_lines(bytes, "query")
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains(record), "{error}");
+            assert!(error.contains("not supported by LOSAT"), "{error}");
+        }
+    }
+
+    #[test]
     fn u_is_read_as_t() {
         assert!(with_u_as_t(&records(">q\nACGT\n")).is_none());
         let read = with_u_as_t(&records(">q d\nACGUu\n")).unwrap();

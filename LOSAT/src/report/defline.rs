@@ -46,8 +46,11 @@
 //! A local FASTA subject has no MolInfo, source or metagenome data, so `mag`, `prefix` and
 //! `suffix` are empty; its title is not empty (LOSAT rejects empty deflines), so it is not
 //! capitalized. `NStr::HtmlDecode` changes only character references, which the callers
-//! reject (`has_html_character_reference`). The alignment heading removes the prefixes;
-//! the description table keeps them (`fLeavePrefixSuffix`, showdefline.cpp:264,498).
+//! reject (`has_html_character_reference`, a superset of them). The alignment heading
+//! removes the prefixes; the description table keeps them (`fLeavePrefixSuffix`,
+//! showdefline.cpp:498). For a title of commas, semicolons, tildes and spaces whose last
+//! `", "` or `"; "` is followed only by spaces and those punctuation marks, NCBI's
+//! `x_CleanAndCompress` reads past the end of the string (and crashes); `None`.
 
 /// NCBI reference: c++/src/objmgr/util/create_defline.cpp:3431-3446
 /// ```c
@@ -86,8 +89,9 @@ const TPA_PREFIXES: [&str; 14] = [
 ];
 
 /// The title of a nucleotide subject with the defline `defline` (the text after `>`),
-/// for the alignment heading (`leave_prefix` false) or the description table (true).
-pub fn ncbi_nucleotide_title(defline: &str, leave_prefix: bool) -> String {
+/// for the alignment heading (`leave_prefix` false) or the description table (true), or
+/// `None` where NCBI reads past the end of the title (see the module).
+pub fn ncbi_nucleotide_title(defline: &str, leave_prefix: bool) -> Option<String> {
     let mut title = defline.as_bytes().to_vec();
     trim_end_of(&mut title, b".,;~ ");
     if !leave_prefix {
@@ -102,13 +106,15 @@ pub fn ncbi_nucleotide_title(defline: &str, leave_prefix: bool) -> String {
     }
     trim_leading_spaces(&mut title);
     trim_end_of(&mut title, b",;~ ");
-    let cleaned = clean_and_compress(&title, false);
-    String::from_utf8(cleaned).expect("ASCII deflines")
+    let cleaned = clean_and_compress(&title, false)?;
+    Some(String::from_utf8(cleaned).expect("ASCII deflines"))
 }
 
-/// Whether `NStr::HtmlDecode` would change the text: an `&` followed by a letter, `#` and a
-/// digit, or `#x` and a hexadecimal digit, with a `;` within the next 16 characters before
-/// another `&` or `#` (ncbistr.cpp:4545-4570).
+/// Whether the text may hold a character reference that `NStr::HtmlDecode` decodes: an `&`
+/// followed by a letter, `#` and a digit, or `#x` and a hexadecimal digit, with a `;`
+/// within the next 16 characters before another `&` or `#` (ncbistr.cpp:4545-4570). This
+/// is a superset: it does not look the names up in NCBI's table (`&foo;` stays) and does
+/// not follow NCBI's trims (a final `;` is trimmed before the decoding).
 pub fn has_html_character_reference(text: &str) -> bool {
     let bytes = text.as_bytes();
     bytes.iter().enumerate().any(|(index, &byte)| {
@@ -206,7 +212,7 @@ fn trim_leading_spaces(text: &mut Vec<u8>) {
 ///         *out++ = curr;
 ///     }
 /// ```
-fn clean_and_compress(input: &[u8], is_protein: bool) -> Vec<u8> {
+fn clean_and_compress(input: &[u8], is_protein: bool) -> Option<Vec<u8>> {
     let mut start = 0;
     let mut end = input.len();
     while start < end && input[start] == b' ' {
@@ -218,7 +224,7 @@ fn clean_and_compress(input: &[u8], is_protein: bool) -> Vec<u8> {
     let text = &input[start..end];
     let mut out = Vec::with_capacity(text.len());
     if text.is_empty() {
-        return out;
+        return Some(out);
     }
     // Past the end reads the terminating NUL of the C++ string.
     let at = |index: usize| text.get(index).copied().unwrap_or(0);
@@ -253,14 +259,16 @@ fn clean_and_compress(input: &[u8], is_protein: bool) -> Vec<u8> {
                 while next == b' ' || next == separator {
                     next = at(index);
                     index += 1;
-                    left = left.saturating_sub(1);
+                    // Where NCBI's `left` (a size_t) would wrap, its loop runs past the
+                    // string (it reads the terminating NUL and on).
+                    left = left.checked_sub(1)?;
                 }
                 two_chars = u16::from(next);
             }
             _ => out.push(curr),
         }
         curr = next;
-        left = left.saturating_sub(1);
+        left = left.checked_sub(1)?;
     }
     if curr > 0 && curr != b' ' {
         out.push(curr);
@@ -269,9 +277,9 @@ fn clean_and_compress(input: &[u8], is_protein: bool) -> Vec<u8> {
         let replaced = String::from_utf8_lossy(&out)
             .replace(". [", " [")
             .replace(", [", " [");
-        return replaced.into_bytes();
+        return Some(replaced.into_bytes());
     }
-    out
+    Some(out)
 }
 
 #[cfg(test)]
@@ -302,13 +310,26 @@ mod tests {
             ("s1.x.", "s1.x", "s1.x"),
         ] {
             assert_eq!(
-                ncbi_nucleotide_title(defline, false),
+                ncbi_nucleotide_title(defline, false).unwrap(),
                 heading,
                 "{defline:?}"
             );
             assert_eq!(
-                ncbi_nucleotide_title(defline, true),
+                ncbi_nucleotide_title(defline, true).unwrap(),
                 description,
+                "{defline:?}"
+            );
+        }
+        // NCBI BLAST+ 2.17.0 crashes on these outfmt 0 titles (x_CleanAndCompress reads
+        // past the string); `, ;` and `,,` do not.
+        for defline in [
+            ", ,", "; ;", "~, ,", ",, ,", ", ,,", ";  ;", ", , ,", ",~, ,",
+        ] {
+            assert_eq!(ncbi_nucleotide_title(defline, false), None, "{defline:?}");
+        }
+        for defline in [", ;", ",,", "a, ,b", ", ,a"] {
+            assert!(
+                ncbi_nucleotide_title(defline, false).is_some(),
                 "{defline:?}"
             );
         }

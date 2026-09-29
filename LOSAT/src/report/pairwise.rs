@@ -1757,10 +1757,8 @@ fn write_blastn_description_table<W: Write>(
             .unwrap_or("unknown");
         // NCBI reference: c++/src/objtools/align_format/showdefline.cpp:498
         // The description keeps the prefixes (`fLeavePrefixSuffix`, `defline.rs`).
-        let label = super::defline::ncbi_nucleotide_title(
-            &subject_defline(subject_id, best.subject_title.as_deref()),
-            true,
-        );
+        let defline = subject_defline(subject_id, best.subject_title.as_deref());
+        let label = super::defline::ncbi_nucleotide_title(&defline, true).unwrap_or(defline);
         // NCBI reference: c++/src/objtools/align_format/showdefline.cpp:915-918,930
         // ```c++
         //         if(line_component.size()+line_length > m_LineLen){
@@ -2111,10 +2109,9 @@ pub fn write_blastn_pairwise_report<W: Write>(
             //             alnDispParams->title = CDeflineGenerator().GenerateDefline(bsp_handle);
             // ```
             // The subject's defline is its title (`defline.rs`).
-            let heading = super::defline::ncbi_nucleotide_title(
-                &subject_defline(subject_id, first_hit.subject_title.as_deref()),
-                false,
-            );
+            let defline = subject_defline(subject_id, first_hit.subject_title.as_deref());
+            // The search rejects the titles that have none (`blastn` `search`).
+            let heading = super::defline::ncbi_nucleotide_title(&defline, false).unwrap_or(defline);
             write_subject_header(writer, &heading, None, first_hit.subject_length)?;
             if let Some(probe) = probe.as_mut() {
                 writer.flush()?;

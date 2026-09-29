@@ -5202,18 +5202,28 @@ fn search(
     // NCBI decodes HTML character references in the outfmt 0 titles of the subjects
     // (`NStr::HtmlDecode` in `CDeflineGenerator::GenerateDefline`, create_defline.cpp:4066),
     // which LOSAT does not reproduce (`report/defline.rs`).
+    // NCBI's x_CleanAndCompress also reads past the end of some titles of punctuation
+    // (NCBI crashes), which LOSAT does not reproduce (`report/defline.rs`).
     if output_formats.contains(&BlastnOutputFormat::Pairwise) {
-        if let Some(index) = subject_records.iter().position(|record| {
-            crate::report::defline::has_html_character_reference(&format!(
-                "{} {}",
-                record.id(),
-                record.desc().unwrap_or_default()
-            ))
-        }) {
-            anyhow::bail!(
-                "subject record {} has an HTML character reference (such as &amp;) in its defline, which NCBI BLAST+ decodes in the outfmt 0 titles; this is not supported by LOSAT's BLASTN",
-                index + 1
-            );
+        for (index, record) in subject_records.iter().enumerate() {
+            let defline = match record.desc() {
+                Some(desc) => format!("{} {desc}", record.id()),
+                None => record.id().to_string(),
+            };
+            if crate::report::defline::has_html_character_reference(&defline) {
+                anyhow::bail!(
+                    "subject record {} has an HTML character reference (such as &amp;) in its defline, which NCBI BLAST+ decodes in the outfmt 0 titles; this is not supported by LOSAT's BLASTN",
+                    index + 1
+                );
+            }
+            if [false, true].into_iter().any(|leave_prefix| {
+                crate::report::defline::ncbi_nucleotide_title(&defline, leave_prefix).is_none()
+            }) {
+                anyhow::bail!(
+                    "subject record {} has a defline of punctuation that NCBI BLAST+ reads past its end in the outfmt 0 titles (it crashes), which LOSAT does not reproduce",
+                    index + 1
+                );
+            }
         }
     }
     // LOSAT's limits come where NCBI starts the search, after its checks and its

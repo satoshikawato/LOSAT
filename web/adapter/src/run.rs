@@ -76,6 +76,12 @@ pub fn parse(words: &[&str]) -> Result<(Program, Commands), String> {
         .chain(words[1..].iter().copied());
     let cli: Cli =
         LOSAT::cli::try_parse_from(argv).map_err(|error| LOSAT::cli::render_message(&error))?;
+    // The scoring options that NCBI rejects, or that its Karlin-Altschul tables do not
+    // support, are rejected here with NCBI's message, before any input is read.
+    if let Commands::Blastn(args) = &cli.command {
+        LOSAT::algorithm::blastn::scoring::check_scoring(args)
+            .map_err(|error| format!("{error:#}"))?;
+    }
     Ok((program, cli.command))
 }
 
@@ -295,6 +301,21 @@ mod tests {
             assert!(error.contains("is not accepted"), "{owned}: {error}");
         }
         assert!(parse(&["blastx", "-query", "q", "-subject", "s"]).is_err());
+        // BLASTN scoring that NCBI rejects is rejected with NCBI's message.
+        let blastn = ["blastn", "-query", "q", "-subject", "s", "-task", "blastn"];
+        assert!(parse(&blastn).is_ok());
+        let error =
+            parse(&[&blastn[..], &["-gapopen", "0", "-gapextend", "0"]].concat()).unwrap_err();
+        assert!(
+            error.starts_with("BLAST query/options error: Greedy extension"),
+            "{error}"
+        );
+        let error =
+            parse(&[&blastn[..], &["-reward", "1", "-penalty", "-6"]].concat()).unwrap_err();
+        assert!(
+            error.starts_with("BLAST engine error: Error: Substitution scores 1 and -6"),
+            "{error}"
+        );
         // An error of the CLI parser keeps the CLI's message.
         for words in [
             &["blastp", "-query", "q", "-subject", "s", "-evalue"][..],

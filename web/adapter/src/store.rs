@@ -50,6 +50,12 @@ pub fn register(program: &str, role: u32, bytes: &[u8]) -> Result<(u32, String),
         format!("the index scan of the {role_name} FASTA disagrees with the parser: {error}")
     })?;
     check_scan(role_name, &scanned, &records)?;
+    // BLASTN rejects the inputs that NCBI BLAST+ reads differently from bio.
+    if program == "blastn" {
+        LOSAT::algorithm::blastn::input::check_deflines(bytes, role_name)
+            .and_then(|()| LOSAT::algorithm::blastn::input::check_residues(&records, role_name))
+            .map_err(|error| format!("{error:#}"))?;
+    }
     let mut response = String::from("{\"handle\":");
     let mut store = store().lock().expect("input store");
     store.next = store
@@ -155,5 +161,16 @@ mod tests {
         let mut recounted = scanned.clone();
         recounted[0].residue_counts[b'A' as usize] += 1;
         assert!(check_scan("query", &recounted, &records).is_err());
+    }
+
+    // BLASTN refuses a record that NCBI BLAST+ reads differently; the other programs
+    // keep their readers.
+    #[test]
+    fn blastn_register_rejects_records_that_ncbi_reads_differently() {
+        let bytes = b">q\tt\nACXGT\n";
+        let error = register("blastn", ROLE_QUERY, bytes).unwrap_err();
+        assert!(error.contains("not supported by LOSAT's BLASTN"), "{error}");
+        assert!(register("blastn", ROLE_QUERY, b">q t\nACGUT\n").is_ok());
+        assert!(register("blastp", ROLE_QUERY, bytes).is_ok());
     }
 }

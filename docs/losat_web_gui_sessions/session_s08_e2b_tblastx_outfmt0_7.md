@@ -11,7 +11,8 @@ LOSAT の段階 E2b を実行する。TBLASTX（TLOSATX）に outfmt 0 と 7 を
 3. 最終の HSP 一覧から `PairwiseHit` を作るのに必要な情報（subject frame、翻訳した配列の区間）を、NCBI と同じ時点で保持する。計算の順序は変えない。`PairwiseHit` を `hits` と outfmt 0 の formatter の両方に渡し、観測者を outfmt 0 と 7 につなぐ。
 4. outfmt 0 と 7 を移植し、`tblastx_outfmt` が受け付けるようにする。Rust の移植箇所の直上に NCBI の参照を書く。S07 の部品を使う。
 5. 試験：fixture すべてで NCBI とバイト一致（例外の分類を除く）。既存の outfmt 6 の回帰ゲート（`LOSAT/tests/audit_tblastx_v010.py` と Gate A のハッシュ）が変わらない。`docs/web/verification_cells.tsv` の TBLASTX の outfmt 0/7 の升目を埋め、TBLASTX の全升目（0/6/7 × スレッド 1/2/4）の V-ABI が通ること。`cargo fmt --check`・`clippy`・`cargo test --all-features`。
-6. 独立監査を受ける。
+6. アダプタ：TBLASTX の形式に 0 と 7 を足す（`web/adapter/src/run.rs` の `Program::formats`、`tests/v_abi.js` と `tools/v_abi_cases.py` の `FORMATS`）。これで全 program が既定の `-outfmt 0` を受け付けるので、`run.rs` の `parse` が挿入している `-outfmt 6` をやめ、`validate` の文言を CLI と同じにする（S05 の独立監査の指摘。`docs/web/abi_v2.md` §4 を直す）。
+7. 独立監査を受ける。
 
 完了条件は計画 §7 の S08 の行による。記録は `docs/evidence/losat_web_e2b/README.md`。
 

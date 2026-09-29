@@ -19,6 +19,7 @@ changes follow the root [`AGENTS.md`](../../AGENTS.md).
 | `tools/check_build_identity.py` | build identity with the certified engine builds (plan TD-6) |
 | `tools/build_reactors.py` | builds both reactors and records their identity |
 | `tools/v_abi_cases.py` | the V-ABI searches (quick for CI, full for gate records) |
+| `tools/run_v_abi_parallel.py` | runs `tests/v_abi.js` over a case list in parallel parts and merges the results |
 
 The release profile and the Wasm rustflags are copies of LOSAT's; the identity check
 compares them, and every dependency version shared by the two `Cargo.lock` files. Build
@@ -38,3 +39,5 @@ node web/adapter/tests/v_abi.js --native LOSAT/target/release/LOSAT \
 The full V-ABI suite (`--suite full`) uses the recorded input spellings of the
 regression cases and needs the Gate A lexical root described in
 [`docs/evidence/losat_web_e1a/README.md`](../../docs/evidence/losat_web_e1a/README.md).
+Its genome-scale TBLASTX searches take a long time in one serial reactor, so gate records
+run it with `tools/run_v_abi_parallel.py` (same options as `v_abi.js`, plus `--jobs`).

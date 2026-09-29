@@ -1,0 +1,16 @@
+blastn raw parity + thread contract PASS
+megablast raw parity + thread contract PASS
+blastp raw parity + thread contract PASS
+tblastx-nuc1-nuc1-e10 raw parity + thread contract PASS
+tblastx-nuc1-nuc3-e10 raw parity + thread contract PASS
+tblastx-nuc3-nuc1-e10 raw parity + thread contract PASS
+tblastx-nuc3-nuc3-e10 raw parity + thread contract PASS
+tblastx-nuc1-unequal-e0.1 raw parity + thread contract PASS
+tblastx-nuc1-unequal-e10 raw parity + thread contract PASS
+tblastx-nuc1-unequal-e10000 raw parity + thread contract PASS
+tblastx-nuc1-remainder-e0.1 raw parity + thread contract PASS
+tblastx-nuc1-remainder-e10 raw parity + thread contract PASS
+tblastx-nuc1-remainder-e10000 raw parity + thread contract PASS
+tblastx-short-context-short-subject-e10 raw parity + thread contract PASS
+409 command/oracle records; reactor lifecycle gates PASS; format failures=0
+EXIT 0

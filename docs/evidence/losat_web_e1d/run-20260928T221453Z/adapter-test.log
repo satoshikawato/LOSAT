@@ -1,0 +1,29 @@
+$ (web/adapter) cargo +1.92.0 test --locked --offline --target-dir /home/kawato/.cache/losat-web-gui-target/adapter-dev -- --nocapture
+   Compiling LOSAT v0.2.0 (/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT)
+   Compiling losat-web-adapter v0.1.0 (/mnt/c/Users/genom/GitHub/LOSAT-web-gui/web/adapter)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 10.02s
+     Running unittests src/lib.rs (/home/kawato/.cache/losat-web-gui-target/adapter-dev/debug/deps/losat_web_adapter-5b6062ad978c9738)
+
+running 2 tests
+test json::tests::strings_and_numbers_are_valid_json ... ok
+test run::tests::argv_is_parsed_as_on_the_command_line ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/scan_properties.rs (/home/kawato/.cache/losat-web-gui-target/adapter-dev/debug/deps/scan_properties-6e702b8631c63f9a)
+
+running 2 tests
+test scan_agrees_with_the_parser_on_edge_cases ... ok
+test scan_agrees_with_the_parser_on_generated_inputs has been running for over 60 seconds
+Coverage { errors: 134, uniform: 2068, checkpoints: 2143, large: 479, crlf: 1090, non_ascii: 1495 }
+test scan_agrees_with_the_parser_on_generated_inputs ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 61.29s
+
+   Doc-tests losat_web_adapter
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+exit 0

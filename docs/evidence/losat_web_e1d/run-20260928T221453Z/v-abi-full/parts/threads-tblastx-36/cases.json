@@ -1,0 +1,19 @@
+[
+  {
+    "program": "tblastx",
+    "argv": [
+      "tblastx",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/LC738874.fasta",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/LC738875.fasta"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT-web-gui",
+    "cases": [
+      "p12_lc738874_lc738875_default"
+    ],
+    "frozen": {
+      "6": "86c05a04efb50e4026720e2d44fe2db2e6446f9594e174f3fde56931d09d5b49"
+    }
+  }
+]

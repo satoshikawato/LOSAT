@@ -1,0 +1,16 @@
+{
+  "runs": 272,
+  "searches": 68,
+  "by_engine_and_threads": {
+    "serial n1": 68,
+    "threads n1": 68,
+    "threads n2": 68,
+    "threads n4": 68
+  },
+  "frozen_equal": 484,
+  "frozen_compared": 488,
+  "frozen_differing": [
+    "Sakai.MG1655.megablast outfmt 7"
+  ],
+  "failed_parts": []
+}

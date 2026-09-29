@@ -74,6 +74,7 @@ class ManualEngine implements EngineGateway {
       this.pending.set(req.runId, {
         resolve: () => {
           sink.write(6, new TextEncoder().encode(`${req.runId}\n`));
+          sink.diagnostics(new TextEncoder().encode(`Warning: ${req.runId}\n`));
           resolve({ path: 'fake', threads: 1, engineBuild: 'manual' });
         },
         reject,
@@ -92,7 +93,7 @@ class ManualEngine implements EngineGateway {
 }
 
 describe('Coordinator', () => {
-  it('runs one job at a time in FIFO order and stores all three outputs', async () => {
+  it('runs one job at a time in FIFO order and stores the outputs and diagnostics', async () => {
     const engine = new ManualEngine();
     const { coordinator, data } = setup(engine);
     const first = (await coordinator.enqueue(request)).runId!;
@@ -106,6 +107,7 @@ describe('Coordinator', () => {
     await waitFor(coordinator, second, 'running');
     expect(engine.started).toEqual([first, second]);
     expect(new TextDecoder().decode(await data.readOutput(first, 6))).toBe(`${first}\n`);
+    expect(await data.readDiagnostics(first)).toBe(`Warning: ${first}\n`);
   });
 
   it('freezes the snapshot so later edits cannot change a queued job', async () => {

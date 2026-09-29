@@ -1,0 +1,11 @@
+$ (web/adapter) cargo +1.92.0 fmt --check
+exit 0
+$ (web/adapter) cargo +1.92.0 clippy --all-targets  --locked --offline --target-dir /home/kawato/.cache/losat-web-gui-target/adapter-clippy -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.68s
+exit 0
+$ (web/adapter) cargo +1.92.0 clippy --all-targets --target wasm32-wasip1 --locked --offline --target-dir /home/kawato/.cache/losat-web-gui-target/adapter-clippy -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.00s
+exit 0
+$ (web/adapter) cargo +1.92.0 clippy --all-targets --target wasm32-wasip1-threads --features threads --locked --offline --target-dir /home/kawato/.cache/losat-web-gui-target/adapter-clippy -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.99s
+exit 0

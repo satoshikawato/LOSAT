@@ -1,0 +1,23 @@
+[
+  {
+    "program": "tblastx",
+    "argv": [
+      "tblastx",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/AP027132.fasta",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/NZ_CP006932.fasta",
+      "-query_gencode",
+      "4",
+      "-db_gencode",
+      "4"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT-web-gui",
+    "cases": [
+      "d02_ap027132_nz_code4"
+    ],
+    "frozen": {
+      "6": "6382e6bcd563d18441f557cabadeb0edcee688d513d09d6cd7759526c717124c"
+    }
+  }
+]

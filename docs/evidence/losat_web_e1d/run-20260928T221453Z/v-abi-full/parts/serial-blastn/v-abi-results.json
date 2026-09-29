@@ -1,0 +1,537 @@
+[
+  {
+    "engine": "serial",
+    "threads": 1,
+    "program": "blastn",
+    "cases": [
+      "PesePMNV.MjPMNV.task_blastn"
+    ],
+    "argv": [
+      "blastn",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/AP027152.fasta",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/AP027202.fasta",
+      "-task",
+      "blastn",
+      "-reward",
+      "2",
+      "-penalty=-3",
+      "-gapopen",
+      "5",
+      "-gapextend",
+      "2",
+      "-word_size",
+      "11",
+      "-evalue",
+      "10",
+      "-max_target_seqs",
+      "500",
+      "-dust",
+      "yes"
+    ],
+    "formats": {
+      "6": "833dc5ac297a0a9dd42c2de7faf00dd6e0387a95cc468f240520ac184758e903",
+      "7": "fcd9236c7b02488d868feaf35166a472c73e9f9e6cc45fc6d7449a9edc7d4120"
+    },
+    "frozen": {
+      "7": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": null
+  },
+  {
+    "engine": "serial",
+    "threads": 1,
+    "program": "blastn",
+    "cases": [
+      "PmeNMV.MjPMNV.task_blastn"
+    ],
+    "argv": [
+      "blastn",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/LC738869.fasta",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/AP027202.fasta",
+      "-task",
+      "blastn",
+      "-reward",
+      "2",
+      "-penalty=-3",
+      "-gapopen",
+      "5",
+      "-gapextend",
+      "2",
+      "-word_size",
+      "11",
+      "-evalue",
+      "10",
+      "-max_target_seqs",
+      "500",
+      "-dust",
+      "yes"
+    ],
+    "formats": {
+      "6": "42e62340421bf92b5044104baeee77545a507d4f2510b1e73b278e177b504d86",
+      "7": "ef6a0a0e86db2a125161d7dde38e00ae168c063533abdb7f094b433ead1d4f6c"
+    },
+    "frozen": {
+      "7": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": null
+  },
+  {
+    "engine": "serial",
+    "threads": 1,
+    "program": "blastn",
+    "cases": [
+      "PmeNMV.PesePMNV.task_blastn"
+    ],
+    "argv": [
+      "blastn",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/LC738869.fasta",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/AP027152.fasta",
+      "-task",
+      "blastn",
+      "-reward",
+      "2",
+      "-penalty=-3",
+      "-gapopen",
+      "5",
+      "-gapextend",
+      "2",
+      "-word_size",
+      "11",
+      "-evalue",
+      "10",
+      "-max_target_seqs",
+      "500",
+      "-dust",
+      "yes"
+    ],
+    "formats": {
+      "6": "d66e76e245007480fc319e1224e2f8256bd24a6ed52736d6647eaca7b5ce58e1",
+      "7": "228c992d1872254ca395361913b410ea247d61ab9bece993708b716d5a388d1d"
+    },
+    "frozen": {
+      "7": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": null
+  },
+  {
+    "engine": "serial",
+    "threads": 1,
+    "program": "blastn",
+    "cases": [
+      "PeseMJNV.PemoMJNVB.task_blastn"
+    ],
+    "argv": [
+      "blastn",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/LC738873.fasta",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/LC738871.fasta",
+      "-task",
+      "blastn",
+      "-reward",
+      "2",
+      "-penalty=-3",
+      "-gapopen",
+      "5",
+      "-gapextend",
+      "2",
+      "-word_size",
+      "11",
+      "-evalue",
+      "10",
+      "-max_target_seqs",
+      "500",
+      "-dust",
+      "yes"
+    ],
+    "formats": {
+      "6": "02798c6a20d0eba852ebe00431d8d0e39eda37478974d73d055014678a77dbde",
+      "7": "23b71f4868c442c8e026de8437906037d7d3daaf9a2ba7967570999d5b937adb"
+    },
+    "frozen": {
+      "7": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": null
+  },
+  {
+    "engine": "serial",
+    "threads": 1,
+    "program": "blastn",
+    "cases": [
+      "MelaMJNV.PemoMJNVA.task_blastn"
+    ],
+    "argv": [
+      "blastn",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/LC738874.fasta",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/LC738870.fasta",
+      "-task",
+      "blastn",
+      "-reward",
+      "2",
+      "-penalty=-3",
+      "-gapopen",
+      "5",
+      "-gapextend",
+      "2",
+      "-word_size",
+      "11",
+      "-evalue",
+      "10",
+      "-max_target_seqs",
+      "500",
+      "-dust",
+      "yes"
+    ],
+    "formats": {
+      "6": "f7264639f1f1aa9b25e43e7da0cef44a40951de43b9ab9bc60cec3f565966b99",
+      "7": "640cf71da6db41c035da8b18fae44672f928abe49600120f4ca0eb04c99879f7"
+    },
+    "frozen": {
+      "7": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": null
+  },
+  {
+    "engine": "serial",
+    "threads": 1,
+    "program": "blastn",
+    "cases": [
+      "PemoMJNVA.PeseMJNV.task_blastn"
+    ],
+    "argv": [
+      "blastn",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/LC738870.fasta",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/LC738873.fasta",
+      "-task",
+      "blastn",
+      "-reward",
+      "2",
+      "-penalty=-3",
+      "-gapopen",
+      "5",
+      "-gapextend",
+      "2",
+      "-word_size",
+      "11",
+      "-evalue",
+      "10",
+      "-max_target_seqs",
+      "500",
+      "-dust",
+      "yes"
+    ],
+    "formats": {
+      "6": "aaf759b9da514ed76b6e48d01cc2244fc15eeddd758fd0e465ed4fa921a9e0f8",
+      "7": "f4ffd5d0451fa94376313c9b44d0ef237ef2aa2cb348a700d0280c9db84a59e5"
+    },
+    "frozen": {
+      "7": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": null
+  },
+  {
+    "engine": "serial",
+    "threads": 1,
+    "program": "blastn",
+    "cases": [
+      "MjeNMV.MelaMJNV.task_blastn"
+    ],
+    "argv": [
+      "blastn",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/LC738868.fasta",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/LC738874.fasta",
+      "-task",
+      "blastn",
+      "-reward",
+      "2",
+      "-penalty=-3",
+      "-gapopen",
+      "5",
+      "-gapextend",
+      "2",
+      "-word_size",
+      "11",
+      "-evalue",
+      "10",
+      "-max_target_seqs",
+      "500",
+      "-dust",
+      "yes"
+    ],
+    "formats": {
+      "6": "a09d9ef416a6ee6c20d134ea495043b8f02a407e5539e648f1d04f1966886959",
+      "7": "f83cb49246648cc641cbe638735d79eaecb24de0064699d54b52d69d74619058"
+    },
+    "frozen": {
+      "7": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": null
+  },
+  {
+    "engine": "serial",
+    "threads": 1,
+    "program": "blastn",
+    "cases": [
+      "MjPMNV.MlPMNV.task_blastn"
+    ],
+    "argv": [
+      "blastn",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/AP027202.fasta",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/LC738875.fasta",
+      "-task",
+      "blastn",
+      "-reward",
+      "2",
+      "-penalty=-3",
+      "-gapopen",
+      "5",
+      "-gapextend",
+      "2",
+      "-word_size",
+      "11",
+      "-evalue",
+      "10",
+      "-max_target_seqs",
+      "500",
+      "-dust",
+      "yes"
+    ],
+    "formats": {
+      "6": "9a30fc9c61c4eb33d79c638ce62a330884d1330f56e4ba4f49d54b6547228603",
+      "7": "6664b0f838fdaafa1d2d93a373375bc68acd759d73d4a8db5ea05b481d3c520e"
+    },
+    "frozen": {
+      "7": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": null
+  },
+  {
+    "engine": "serial",
+    "threads": 1,
+    "program": "blastn",
+    "cases": [
+      "NZ_CP006932.NZ_CP006932.task_blastn"
+    ],
+    "argv": [
+      "blastn",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/NZ_CP006932.fasta",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/NZ_CP006932.fasta",
+      "-task",
+      "blastn",
+      "-reward",
+      "2",
+      "-penalty=-3",
+      "-gapopen",
+      "5",
+      "-gapextend",
+      "2",
+      "-word_size",
+      "11",
+      "-evalue",
+      "10",
+      "-max_target_seqs",
+      "500",
+      "-dust",
+      "yes"
+    ],
+    "formats": {
+      "6": "806751f2ac851244fcf72eac9a242a9e6997071e8a4812bf3ce903d802cf4ea4",
+      "7": "723d7a8f515cb6d853758d4ccc7054c7cebd3b84ef5932f816d7b9bed0bab8c3"
+    },
+    "frozen": {
+      "7": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": null
+  },
+  {
+    "engine": "serial",
+    "threads": 1,
+    "program": "blastn",
+    "cases": [
+      "EDL933.Sakai.megablast"
+    ],
+    "argv": [
+      "blastn",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/EDL933.fna",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/Sakai.fna",
+      "-task",
+      "megablast",
+      "-reward",
+      "1",
+      "-penalty=-2",
+      "-gapopen",
+      "0",
+      "-gapextend",
+      "0",
+      "-word_size",
+      "28",
+      "-evalue",
+      "10",
+      "-max_target_seqs",
+      "500",
+      "-dust",
+      "yes"
+    ],
+    "formats": {
+      "6": "300a925ef86f20af9c0eff53f1c73638bdf80d47f5153352086a3e7bfd416c0c",
+      "7": "3a000ebc6294d85b000112cee74f8de78fd9e932532e8c07a17d84f6f1379b16"
+    },
+    "frozen": {
+      "7": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": null
+  },
+  {
+    "engine": "serial",
+    "threads": 1,
+    "program": "blastn",
+    "cases": [
+      "Sakai.MG1655.megablast"
+    ],
+    "argv": [
+      "blastn",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/Sakai.fna",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/MG1655.fna",
+      "-task",
+      "megablast",
+      "-reward",
+      "1",
+      "-penalty=-2",
+      "-gapopen",
+      "0",
+      "-gapextend",
+      "0",
+      "-word_size",
+      "28",
+      "-evalue",
+      "10",
+      "-max_target_seqs",
+      "500",
+      "-dust",
+      "yes"
+    ],
+    "formats": {
+      "6": "89bc2da34d37c904066116493a666adde359ac4d6a2943d764fe333602117ae7",
+      "7": "ac8177764f35b2fb92777f8b1d01ea646cc55ae21b05f1f486ee231348a34a45"
+    },
+    "frozen": {
+      "7": false
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": null
+  },
+  {
+    "engine": "serial",
+    "threads": 1,
+    "program": "blastn",
+    "cases": [
+      "compact.multi_query.outfmt6",
+      "compact.multi_query.outfmt7"
+    ],
+    "argv": [
+      "blastn",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/blastn_parity_compact.fasta",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/blastn_parity_compact.fasta",
+      "-task",
+      "blastn",
+      "-reward",
+      "2",
+      "-penalty=-3",
+      "-gapopen",
+      "5",
+      "-gapextend",
+      "2",
+      "-word_size",
+      "11",
+      "-evalue",
+      "10",
+      "-max_target_seqs",
+      "500",
+      "-dust",
+      "yes"
+    ],
+    "formats": {
+      "6": "ac4a20b64c8da3eaea725ed09dc89880294f58e971b7207c943489faacdbe03e",
+      "7": "261381e12bd500fe23c2caf7e7146acb310e7733d5246497b08c4c5ab058a70a"
+    },
+    "frozen": {
+      "6": true,
+      "7": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": null
+  },
+  {
+    "engine": "serial",
+    "threads": 1,
+    "program": "blastn",
+    "cases": [
+      "compact.multi_query.no_hit.outfmt7"
+    ],
+    "argv": [
+      "blastn",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/blastn_parity_compact.fasta",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/blastn_parity_compact.fasta",
+      "-task",
+      "blastn",
+      "-reward",
+      "2",
+      "-penalty=-3",
+      "-gapopen",
+      "5",
+      "-gapextend",
+      "2",
+      "-word_size",
+      "11",
+      "-evalue",
+      "1e-100",
+      "-max_target_seqs",
+      "500",
+      "-dust",
+      "yes"
+    ],
+    "formats": {
+      "6": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "7": "b5813f5d8b0ce88287d41333ae5540c3dfd2846069ddb2e4955d64e39dc45d3a"
+    },
+    "frozen": {
+      "7": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": null
+  }
+]

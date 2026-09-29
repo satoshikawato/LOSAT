@@ -76,6 +76,8 @@ export interface EngineRunRequest {
 export interface RunSink {
   write(format: OutputFormat, chunk: Uint8Array): void;
   hits(records: readonly HspRecord[]): void;
+  /** ABI stream 3: the warnings that the CLI writes to stderr, as UTF-8 bytes. */
+  diagnostics(chunk: Uint8Array): void;
 }
 
 /** Thrown (as a rejection) by `run` after `cancel` was called for that run. */

@@ -1,0 +1,11 @@
+# v1 threaded reactor records (check_wasi_reactor.js, run by check_wasm_threading.py) of the S04 reactor (482751ab...)
+# and of the S05 reactor (f6815554...). runs.json holds timings, thread ids and memory sizes.
+$ diff -r -x runs.json s04/reactor-records s05/reactor-records
+exit 0
+records compared: 344
+fixtures: $ diff -r s04/fixtures s05/fixtures -> exit 0
+
+# v1 serial reactor records (check_wasi_api_limits.js ... serial-reactor) of the S04 reactor (08172614...) and the S05 reactor (6440c035...)
+$ diff -r s04/serial-records s05/serial-records
+exit 0
+files compared: 25

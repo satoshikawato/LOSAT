@@ -13,7 +13,10 @@
 // exists (Gate A, the Stage G matrix) the match is recorded as well.
 //
 // Usage: node v_abi.js --native LOSAT --serial losat-web-serial.wasm
-//          --threads losat-web-threads.wasm --cases CASES.json [--out DIR]
+//          --threads losat-web-threads.wasm --cases CASES.json [--engines serial,threads]
+//          [--out DIR]
+// Several processes may run parts of the case list (for example one engine or one
+// program each); each writes its own results.
 const assert = require("node:assert/strict");
 const { execFileSync } = require("node:child_process");
 const crypto = require("node:crypto");
@@ -206,10 +209,11 @@ async function main() {
   const options = parseArgs(process.argv.slice(2));
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "losat-v-abi-"));
   const results = [];
+  const selected = (options.engines || "serial,threads").split(",");
   const engines = [
     { name: "serial", open: () => openSerial(options.serial), threads: [1] },
     { name: "threads", open: () => openThreads(options.threads), threads: [1, 2, 4] },
-  ];
+  ].filter((engine) => selected.includes(engine.name));
   const all = JSON.parse(fs.readFileSync(options.cases, "utf8"));
   for (const engine of engines) {
     const { reactor, close, waitForWorkers } = await engine.open();

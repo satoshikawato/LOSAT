@@ -1,6 +1,6 @@
 # LOSAT Web GUI 総合実装計画
 
-状態：**S01（W0）から S04（E1c）までは完了条件を満たした（[W0](evidence/losat_web_w0/README.md)、[E1a](evidence/losat_web_e1a/README.md)、[E1b](evidence/losat_web_e1b/README.md)、[E1c](evidence/losat_web_e1c/README.md) のゲート記録。E1a〜E1c の V-PERF の判断と、E1c の CLI の 2 つの振る舞いの差は、保守者の確認を求めている）。`PD-LOSAT-WEB-APP-BOUNDARY` は 2026-09-29 に承認された。次は S05。** 作成 2026-09-28、改訂 2026-09-29。
+状態：**S01（W0）から S05（E1d）までは完了条件を満たした（[W0](evidence/losat_web_w0/README.md)、[E1a](evidence/losat_web_e1a/README.md)、[E1b](evidence/losat_web_e1b/README.md)、[E1c](evidence/losat_web_e1c/README.md)、[E1d](evidence/losat_web_e1d/README.md) のゲート記録。E1a〜E1c の V-PERF の判断と、E1c の CLI の 2 つの振る舞いの差は、保守者の確認を求めている）。`PD-LOSAT-WEB-APP-BOUNDARY` は 2026-09-29 に承認された。次は S06。** 作成 2026-09-28、改訂 2026-09-29。
 
 | 項目 | 内容 |
 |---|---|
@@ -79,6 +79,7 @@ LOSAT は、NCBI BLAST+ を純 Rust で再実装したものである。宣言�
 | TD-6 | アダプタは別の crate（`web/adapter/`）にし、reactor の起動は `LOSAT/build.rs` のものを使う（S05 で確かめた方法：その build script の `rustc-cdylib-link-arg` は依存先の cdylib にも渡るので、アダプタは build script を持たない。パスで共有すると `_initialize` が二重に定義される）。`[profile.release]` と Wasm の rustflags は写しを持ち、ビルドの同一性の検査（`web/adapter/tools/check_build_identity.py`：依存の版、profile、rustflags、アダプタに build script が無いこと）で、ずれを機械的に検出する | 規約の範囲を分けたまま（DW-1）、認証済みの command-WASI と同じ条件でビルドする。別の Cargo root は、LOSAT の profile、`LOSAT/.cargo/config.toml` の `+simd128`、`Cargo.lock` を引き継がない |
 | TD-7 | スレッド版の共有メモリの最大値は、認証済みの threaded ビルドと同じ（16384 ページ、1 GiB）にする。host が 2 GiB や 4 GiB を試すことはしない | 取り込むメモリの最大値は、モジュールが宣言した最大値を超えられない。最大値を上げるには link の引数を変える必要があり、TD-6 の同一性とぶつかる。上げる条件は §2.3 に置いた |
 | TD-8 | 索引用の FASTA の走査（`scan`）は、アプリの抽出のためだけの例外として置く。検索に渡す入力は、各 program の解析器が読む。`scan` は解析器の種類（`bio::io::fasta` 型か、BLASTX の NCBI 型か）を受け取り、その解析器とだけ性質試験で照合する。食い違いの最終的な判定は、`register` の時点のエンジンの解析結果との照合で行う | BLASTX の解析器は NCBI の CFastaReader に従い、`;` などで始まる行を読み飛ばす（`LOSAT/src/algorithm/blastx/input.rs`）。`bio` はそうしない。1 つの走査で両方と一致させることはできない |
+| TD-11 | reactor は、ビルドした checkout のパスと `CARGO_HOME` を `--remap-path-prefix` で固定の名前に置き換えてビルドする。TD-6 の rustflags の比較は、この置き換えだけを差として認める。S07 で入れ（reactor を作り直し、full の V-ABI を再実行するため）、S16 の V-PRIV で公開物にローカルのパスが無いことを確かめる | アダプタは LOSAT を path 依存として使うので、エンジンのコードの panic の位置に checkout の絶対パスが入り、登録簿の crate の位置には `CARGO_HOME` が入る（S05 の独立監査、`docs/web/abi_v2.md` §2）。公開物にビルドした機械のパスを残さない。置き換えはコードの働きを変えない。ビルドした場所によらず同じバイトになることを S07 で確かめる |
 
 ---
 
@@ -442,7 +443,7 @@ NCBI BLAST+（oracle） ─[既存の認証]─► ネイティブ LOSAT の凍�
 | S02 | **E1a** 核の入口：共通部と BLASTP | 最初に全 program の基準を取る。`run_local`、`ReportOutputs`（形式ごとの writer、`diagnostics`、`hits`、observer）、形式ごとのオプション解決と食い違いの検出（TD-4）を作り、BLASTP の CLI・v1 をそこに通す。`docs/web/verification_cells.tsv` を作る | 変更したコードを使う全 program の既存ゲートと Gate A の該当ハッシュが変わらない。v1 の serial / threaded reactor の検査が通る。V-NAT。V-PERF の非退行。独立監査。**完了（2026-09-29）** |
 | S03 | **E1b** 核の入口：TBLASTN | 同じことを TBLASTN に行う | TLOSAN 計画の Stage G のゲートが変わらない。v1 の reactor の検査。V-NAT。V-PERF の非退行。独立監査。**完了（2026-09-29）** |
 | S04 | **E1c** 核の入口：BLASTN と TBLASTX | 同じことを BLASTN と TBLASTX に行う（出力は 6/7 と 6 のまま）。TBLASTX の出力箇所を 1 つにまとめる | 既存のゲートと Gate A のハッシュが変わらない。v1 の reactor の検査。V-NAT。V-PERF の非退行。独立監査。**完了（2026-09-29）** |
-| S05 | **E1d** アダプタと ABI v2 | `web/adapter` の crate、ABI v2 の確定、2 つの reactor、ビルドの同一性の検査（TD-6）、V-ABI の Node の仕組み、`scan` の性質試験（TD-8） | V-ABI（BLASTP・TBLASTN・BLASTN・TBLASTX の、その時点で対応する全形式 × スレッド 1/2/4）が期待値と一致。同一性の検査が通る |
+| S05 | **E1d** アダプタと ABI v2 | `web/adapter` の crate、ABI v2 の確定、2 つの reactor、ビルドの同一性の検査（TD-6）、V-ABI の Node の仕組み、`scan` の性質試験（TD-8） | V-ABI（BLASTP・TBLASTN・BLASTN・TBLASTX の、その時点で対応する全形式 × スレッド 1/2/4）が期待値と一致。同一性の検査が通る。**完了（2026-09-29）** |
 | S06 | **E2a-1** BLASTN outfmt 0：権威と fixture | NCBI の呼出し経路（`blast_format.cpp` → `align_format`）の記録。比較する fixture と NCBI の出力の固定 | 経路の対応表、固定した fixture と SHA-256 |
 | S07 | **E2a-2** BLASTN outfmt 0：実装とゲート | 移植、`PairwiseHit` の作成、`run_local` と観測者への接続 | 固定した fixture で NCBI とバイト一致。既存の 6/7 に退行なし。BLASTN の全升目（0/6/7 × スレッド 1/2/4）の V-ABI。独立監査 |
 | S08 | **E2b** TBLASTX outfmt 0/7 | 権威の記録、fixture の固定、移植、`PairwiseHit` の作成 | 固定した fixture で NCBI とバイト一致（承認済みの遺伝暗号の例外を除く）。既存の 6 に退行なし。TBLASTX の全升目の V-ABI。独立監査 |

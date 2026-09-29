@@ -1,0 +1,12 @@
+$ (LOSAT) cargo +1.92.0 clippy --all-targets --all-features --locked --target-dir /home/kawato/.cache/losat-web-gui-target/ci-clippy -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 7.22s
+exit 0
+$ (LOSAT) cargo +1.92.0 clippy --all-targets --no-default-features --locked --target-dir /home/kawato/.cache/losat-web-gui-target/ci-clippy -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 7.27s
+exit 0
+$ (LOSAT) cargo +1.92.0 clippy --all-targets --target wasm32-wasip1 --no-default-features --locked --target-dir /home/kawato/.cache/losat-web-gui-target/ci-clippy -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 6.95s
+exit 0
+$ (LOSAT) cargo +1.92.0 clippy --all-targets --target wasm32-wasip1-threads --features wasm-threads --locked --target-dir /home/kawato/.cache/losat-web-gui-target/ci-clippy -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 7.05s
+exit 0

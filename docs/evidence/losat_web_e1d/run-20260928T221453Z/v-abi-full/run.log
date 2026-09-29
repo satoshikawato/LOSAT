@@ -1,0 +1,65 @@
+ok serial-tblastx-38
+ok serial-blastn
+ok threads-tblastx-38
+ok threads-blastn
+ok serial-tblastx-39
+ok threads-blastp
+ok threads-tblastx-39
+ok serial-blastp
+ok serial-tblastx-34
+ok threads-tblastx-34
+ok threads-tblastx-29
+ok serial-tblastx-29
+ok threads-tblastx-24
+ok threads-tblastx-36
+ok serial-tblastx-24
+ok serial-tblastx-36
+ok serial-tblastx-33
+ok threads-tblastx-20
+ok serial-tblastx-25
+ok threads-tblastx-21
+ok serial-tblastx-20
+ok serial-tblastx-21
+ok threads-tblastx-37
+ok serial-tblastx-37
+ok threads-tblastx-25
+ok threads-tblastx-22
+ok serial-tblastx-23
+ok serial-tblastx-22
+ok threads-tblastx-23
+ok serial-tblastx-26
+ok threads-tblastx-26
+ok threads-tblastx-27
+ok serial-tblastx-27
+ok threads-tblastx-67
+ok serial-tblastx-67
+ok threads-tblastn
+ok serial-tblastn
+ok serial-tblastx-28
+ok threads-tblastx-28
+ok threads-tblastx-33
+ok serial-tblastx-30
+ok serial-tblastx-35
+ok serial-tblastx-31
+ok threads-tblastx-30
+ok serial-tblastx-32
+ok threads-tblastx-35
+ok threads-tblastx-31
+ok threads-tblastx-32
+{
+  "runs": 272,
+  "searches": 68,
+  "by_engine_and_threads": {
+    "serial n1": 68,
+    "threads n1": 68,
+    "threads n2": 68,
+    "threads n4": 68
+  },
+  "frozen_equal": 484,
+  "frozen_compared": 488,
+  "frozen_differing": [
+    "Sakai.MG1655.megablast outfmt 7"
+  ],
+  "failed_parts": []
+}
+exit 0

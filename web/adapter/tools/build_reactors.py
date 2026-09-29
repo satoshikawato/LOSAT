@@ -78,6 +78,9 @@ def main() -> int:
             cargo_lock_sha256=digest(ADAPTER / "Cargo.lock"),
             engine_cargo_lock_sha256=digest(ENGINE / "Cargo.lock"),
             build_rs_sha256=digest(ENGINE / "build.rs"),
+            # Both paths are embedded in the module (docs/web/abi_v2.md §2).
+            checkout=str(ROOT),
+            cargo_home=os.environ.get("CARGO_HOME", str(Path.home() / ".cargo")),
         )
         (out / f"losat-web-{name}.json").write_text(json.dumps(artifact, indent=2) + "\n")
         records[name] = artifact

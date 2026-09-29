@@ -41,11 +41,22 @@ identity. The reactor start-up (`crt1-reactor.o`, `--entry=_initialize`) comes f
 `rustc-cdylib-link-arg` to the adapter's cdylib as well, so the adapter has no build
 script of its own (a second copy would define `_initialize` twice).
 
+The reactors' bytes depend on where they are built. `LOSAT` is a path dependency
+outside the adapter's workspace, so rustc gets its sources by absolute path: the panic
+locations of the engine code (data section) contain the checkout path, which changes the
+code and data sections as well as the symbol hashes of the name section. Every crate
+from the registry is compiled from `CARGO_HOME` (`<CARGO_HOME>/registry/src/...` in its
+panic locations), as in the engine's own Wasm builds. Two builds of the same commit with
+the same checkout path and `CARGO_HOME` are identical; the identity record
+(`losat-web-*.json`) records both. These paths are local file names of the machine that
+built the module; they are removed from published modules before the first publication
+(plan TD-11).
+
 ## 3. Imports
 
 | Module | Name | Used by | Purpose |
 |---|---|---|---|
-| `wasi_snapshot_preview1` | standard functions | both | stderr, clocks, random, environment. No filesystem access is needed |
+| `wasi_snapshot_preview1` | `fd_write`, `fd_close`, `fd_fdstat_get`, `clock_time_get`, `random_get`, `sched_yield`, `environ_get`, `environ_sizes_get`, `proc_exit`, and the filesystem functions `path_open`, `path_create_directory`, `path_filestat_get`, `fd_prestat_get`, `fd_prestat_dir_name` | both | stderr, clocks, random, environment. The filesystem functions are linked by engine code that the exports do not use (for example the CLI's `-out` file, which `validate` rejects); the host gives no preopened directory, so such a call fails instead of touching files |
 | `wasi` | `thread-spawn` | threads | starts a rayon worker thread |
 | `env` | `memory` | threads | shared linear memory, created by the host with the maximum the module declares (16384 pages, 1 GiB, the same as the certified threaded builds; plan TD-7) |
 | `losat_host` | `emit(stream: u32, ptr: u32, len: u32)` | both | receives output bytes (§5). Worker instances of the threaded module import it too, but never call it |
@@ -54,9 +65,12 @@ script of its own (a second copy would define `_initialize` twice).
 
 All functions return `i32`: `0` (or a non-negative handle) on success, `-1` on failure.
 On failure, `losat_web2_last_error_ptr/len` hold a UTF-8 message. Engine errors use the
-same wording as the CLI: argv errors are the CLI's parser message
+CLI's wording: argv errors are the message of the engine's parser
 (`LOSAT::cli::render_message`), search errors are the error and its causes joined by
-`: ` (as ABI v1 reports them).
+`: ` (as ABI v1 reports them). Two details of argv errors differ from the command line:
+the adapter parses the argv with `losat` as the binary name and `-outfmt 6` inserted
+after the program name (§7), so a usage line in a message names `losat` and can list
+`-outfmt`; and an unknown program gives `unknown program '<name>'`.
 
 | Export | Arguments | Result |
 |---|---|---|
@@ -67,7 +81,7 @@ same wording as the CLI: argv errors are the CLI's parser message
 | `losat_web2_register(program_ptr, program_len, role, bytes_ptr, bytes_len)` | role `0` query, `1` subject; original FASTA bytes | handle ≥ 1; emits a *register* JSON on stream 2 |
 | `losat_web2_release(handle)` | handle | `0` |
 | `losat_web2_scan_begin(parser)` / `losat_web2_scan_chunk(scanner, ptr, len)` / `losat_web2_scan_end(scanner)` | parser kind (`0` the `bio::io::fasta` reader of BLASTP, TBLASTN, BLASTN and TBLASTX; `1`, the NCBI-style reader of BLASTX, joins in SX); FASTA bytes in chunks of any size | `scan_begin` returns a scanner handle; `scan_end` emits a *scan* JSON on stream 2 (§9), or fails with the parser's error |
-| `losat_web2_run(argv_ptr, argv_len, query_handle, subject_handle)` | argv, handles | emits the program's supported format streams (0, 6, 7), and streams 1 and 3; returns after the run ends |
+| `losat_web2_run(argv_ptr, argv_len, query_handle, subject_handle)` | argv, handles | emits the program's supported format streams (0, 6, 7), stream 1 (BLASTP and TBLASTN; §8) and stream 3; returns after the run ends |
 | `losat_web2_last_error_ptr()` / `losat_web2_last_error_len()` | — | last error message |
 
 ## 5. Output streams
@@ -82,7 +96,7 @@ which runs slot zero of the search's thread pool (`LOSAT/src/utils/threading.rs`
 | `0` | outfmt 0 text (only for programs that support outfmt 0) |
 | `6` | outfmt 6 text |
 | `7` | outfmt 7 text (only for programs that support outfmt 7) |
-| `1` | HSP records as JSON Lines, one object per HSP (§8) |
+| `1` | HSP records as JSON Lines, one object per HSP (§8); BLASTP and TBLASTN only |
 | `2` | JSON response of `describe`, `register` or `scan_end` |
 | `3` | diagnostics that the CLI writes to stderr (warnings), UTF-8, each written once |
 
@@ -121,7 +135,9 @@ keeps.
 ## 8. HSP record
 
 One JSON object per HSP of the final, sorted result. Field names follow the Rust
-`common::Hit` and `report::PairwiseHit` fields.
+`common::Hit` and `report::PairwiseHit` fields. BLASTP and TBLASTN emit them. BLASTN and
+TBLASTX emit none until their final HSP lists become `PairwiseHit` lists (plan S07 and
+S08); their `run` writes the format streams and stream 3 only.
 
 | Field | Type | Meaning |
 |---|---|---|
@@ -150,7 +166,7 @@ formatted from the raw values (plan §4.4).
 - *register*: `{ "handle", "records": [{ "index", "id", "length" }] }`, produced by the same FASTA parser that the program uses in a search. `register` also scans the same bytes (parser kind of the program) and fails if the record IDs or lengths differ.
 - *scan*: `{ "records": [{ "index", "id", "header_offset", "sequence_offset", "end_offset", "length", "line_layout", "residue_counts" }] }`. Offsets are byte offsets in the scanned input and may exceed 2³²; they are encoded as JSON numbers and stay below 2⁵³. `header_offset` is the `>` of the header line, `sequence_offset` the first byte after it, `end_offset` the next header line or the end of the input; `length` is the sequence length in bytes as the parser reports it.
   - `line_layout` is `{ "kind": "uniform", "width", "eol" }` when residue `i` is at `sequence_offset + floor(i / width) * (width + eol) + i mod width`, or `{ "kind": "checkpoints", "every": 65536, "offsets": [...] }`, where `offsets[k]` is the byte offset of residue `k * 65536`; from there the residues are read forward under the parser's rules (for kind 0: every byte of a line except its trailing whitespace, lines starting with `>` end the record).
-  - `residue_counts` maps each byte value of the sequence to its count: printable ASCII as the character itself, other bytes as `"0xNN"`.
+  - `residue_counts` maps each byte value of the sequence to its count: the bytes 0x21-0x7E as the character itself, every other byte (including the space) as `"0xNN"`.
   - The scan exists only to index original records for extraction; the search always parses the input with the program's own reader (plan TD-8). Kind 0 reproduces `bio::io::fasta` 1.6.0; `web/adapter/tests/scan_properties.rs` checks it against the parser.
 
 ## 10. Versioning

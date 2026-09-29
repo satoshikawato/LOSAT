@@ -19,5 +19,6 @@ export interface DataGateway {
   openRun(runId: string): Promise<RunStaging>;
   readOutput(runId: string, format: OutputFormat): Promise<Uint8Array>;
   readHits(runId: string): Promise<readonly HspRecord[]>;
+  readDiagnostics(runId: string): Promise<string>;
   deleteRun(runId: string): Promise<void>;
 }

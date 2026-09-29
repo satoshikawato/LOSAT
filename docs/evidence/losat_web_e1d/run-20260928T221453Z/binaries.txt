@@ -1,0 +1,30 @@
+S05 artifacts (SHA-256). Toolchain: cargo 1.92.0 (344c4567c 2025-10-21); rustc 1.92.0 (ded5c06cf 2025-12-08); node v26.8.2.
+Build commands: the engine as in ../../losat_web_e1a/README.md "実行の方法"; the adapter reactors with
+web/adapter/tools/build_reactors.py (identity records in reactors/).
+
+pre-change = the S04 artifacts (docs/evidence/losat_web_e1c/run-20260928T203929Z/binaries.txt), kept in
+/home/kawato/.cache/losat-web-gui-target/s04-final/.
+
+post-change, engine (commit edf825d36). Both natives and all four WASI artifacts rebuilt from git archive edf825d36
+have the same hashes:
+56d513d27a5618d8310af4783bc540159e8477430ccd8a945b9bb247417080dd  native LOSAT (rebuilt from the commit: same hash)
+77ed93123e18e7c0109a934f6db0db507a370ebaf2ad038d85c9c17d9d9df521  native LOSAT, --no-default-features (serial) (rebuilt from the commit: same hash)
+8cfb5a36126381f6d52bd7fe507bceb0d02aad66061f763cfd9d37d0a2909922  losat-serial-command.wasm (rebuilt from the commit: same hash)
+6440c035df4d5b21d911ecb915b7bf2d3b5244ac2212d4f520e7b4ca0789aff8  losat-serial-reactor.wasm (rebuilt from the commit: same hash)
+61f94c56e40c16b23e7b51f6a9f0e840c220fdebc96838e8d77ee5b981e3aa6e  losat-threaded-command.wasm (rebuilt from the commit: same hash)
+f68155545d8ac9917d9bb38bb2c64d7dabd65a664fa299c0dabbcd34245495e7  losat-threaded-reactor.wasm (rebuilt from the commit: same hash)
+
+post-change, adapter reactors (commit 20d26bdc3). Rebuilt with a new target directory
+(prov-s05-adapter-canonical/) in the worktree, whose build inputs (LOSAT/src, Cargo.toml, Cargo.lock, build.rs,
+.cargo/ and the same files of web/adapter/) are those of the commit: same hashes.
+bbb58d7857f3c7ca8dc6924535fa8b28414af3b6b15b8d770ee2dd638024b6b6  losat-web-serial.wasm
+9a93c94ed7a3aa082fee78119b1f1eaeecdd0db4caab482a4ff00b2e5f8fefe8  losat-web-threads.wasm
+
+The adapter reactors depend on the directory they are built in. LOSAT is its own workspace root, so its
+artifacts are the same from any directory. The adapter uses LOSAT as a path dependency, and Cargo's
+metadata hash of a path dependency, which appears in mangled symbol names, includes that path. A build
+of git archive 20d26bdc3 extracted in /home/kawato/.cache/losat-web-gui-target/src-s05/ gives different
+reactor bytes (serial 15eece003b52...); the build in the worktree path of the session rules
+(/mnt/c/Users/genom/GitHub/LOSAT-web-gui) gives the hashes above.
+
+All eight are kept in /home/kawato/.cache/losat-web-gui-target/s05-final/ (natives as LOSAT and LOSAT-serial).

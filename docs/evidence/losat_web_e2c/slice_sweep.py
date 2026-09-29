@@ -10,9 +10,11 @@ pair whose stdout, stderr or exit status differs. Exits 1 when any does.
 
 The `ambiguity` pool (the eighth audit round: NCBI resolves a subject's ambiguity codes
 with `CRandom` for the preliminary search) cuts windows of EDL933 around its ambiguity
-codes instead.
+codes instead. The `lcase` pool (the twelfth audit round: the scan ranges of a subject
+with lowercase masks start at the last letter of each mask) writes lowercase islands into
+the subject; give it `-lcase_masking`.
 
-Usage: slice_sweep.py --bin-dir DIR --losat LOSAT --work DIR [--pool viral|ambiguity]
+Usage: slice_sweep.py --bin-dir DIR --losat LOSAT --work DIR [--pool viral|ambiguity|lcase]
                       [--options "..."] [--seed N] [--cases N] [--jobs N]
 """
 from __future__ import annotations
@@ -65,6 +67,22 @@ def ambiguity_pair(edl933: str, positions: list[int], rng: random.Random) -> tup
     return query, subject
 
 
+def lcase_pair(seqs: dict[str, str], rng: random.Random) -> tuple[str, str]:
+    """A query of 200 to 1000 residues from a genome with 0 to 15% of its letters redrawn,
+    and a subject window around it with 3 to 30 lowercase islands of 1 to 40 letters."""
+    genome = seqs[rng.choice(GENOMES)]
+    start = rng.randrange(1000, len(genome) - 20000)
+    rate = rng.choice([0.0, 0.05, 0.15])
+    query = "".join(rng.choice("ACGT") if rng.random() < rate else c
+                    for c in genome[start:start + rng.choice([200, 500, 1000])])
+    subject = list(genome[start - 500:start + 2000])
+    for _ in range(rng.randint(3, 30)):
+        island = rng.randrange(len(subject))
+        for index in range(island, min(len(subject), island + rng.choice([1, 1, 2, 3, 5, 10, 40]))):
+            subject[index] = subject[index].lower()
+    return query, "".join(subject)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--bin-dir", type=Path, required=True)
@@ -74,13 +92,14 @@ def main() -> int:
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--cases", type=int, default=120)
     parser.add_argument("--jobs", type=int, default=4)
-    parser.add_argument("--pool", choices=("viral", "ambiguity"), default="viral")
+    parser.add_argument("--pool", choices=("viral", "ambiguity", "lcase"), default="viral")
     args = parser.parse_args()
     args.work.mkdir(parents=True, exist_ok=True)
     rng = random.Random(args.seed)
-    if args.pool == "viral":
+    if args.pool in ("viral", "lcase"):
         seqs = {name: sequence(f"{name}.fasta") for name in GENOMES}
-        pair = lambda: viral_pair(seqs, rng)  # noqa: E731
+        make = viral_pair if args.pool == "viral" else lcase_pair
+        pair = lambda: make(seqs, rng)  # noqa: E731
     else:
         edl933 = sequence("EDL933.fna")
         positions = [index for index, c in enumerate(edl933) if c.upper() not in "ACGT"]

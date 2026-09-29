@@ -20,6 +20,7 @@ S07+ で BLASTN に見つかった種類の差が、これらにもあるかは�
 - 制約のある整数の引数は、制約が `NStr::StringToDouble` で読み直すので `0x` だけを拒否する（`ncbi_constrained_integer`）。`-dust`・`-seg` などの文字列の引数は、NCBI の区切り方と誤り（`parse_dust_filtering`）。`-out` は 1 度だけ開き、名前は 256 バイト未満。予備の hit list の大きさなどの `Int4` の計算は NCBI と同じく折り返す（`get_prelim_hitlist_size`）。
 - outfmt 0 の subject の title：NCBI は `CDeflineGenerator::GenerateDefline` で作る（BLASTN は `report/defline.rs` の `ncbi_nucleotide_title` で移植済み。S07+ の第 10 回の監査）。TBLASTN（核酸の subject）はこれを使い、BLASTP・BLASTX（蛋白の subject）は `x_CleanAndCompress` の蛋白の規則と `x_AdjustProteinTitleSuffix` を移植するか、明示的に拒否する。
 - 引数の誤り（NCBI は USAGE と終了コード 1、LOSAT は clap の終了コード 2）の扱いを決める。
+- S07+ の第 12 回の監査（`AUTHORITY.md` §O）：NCBI は得点 0 の HSP を Seq-align にしない（`blast_seqalign.cpp:672-674`、全 program）。subject の小文字の区間（`SetupSubjects_OMF`、全 program）は、前の区間の最後の文字から走査の区間を始める。どちらも、ほかの program に当てはまる場合（例えば TBLASTN の subject の曖昧な文字と得点 0、`-lcase_masking` の subject）を確かめ、NCBI と同じにするか、明示的に拒否する。
 - 全 program に共通の CLI の誤りの経路：出力の書き込みの失敗（NCBI は「BLAST failed to write output」と終了コード 6、表形式は abort。BLASTX は既にそうしている）と、UTF-8 でないファイル名の表示（`cli.rs` の `inaccessible`）と引数の値（`-dust`・`-outfmt` など）を、BLASTN を含めて NCBI と同じにする（S07+ の第 5・6 回の監査、`docs/evidence/losat_web_e2c/AUTHORITY.md` §I の末尾）。
 
 これらのオプションは、アプリの検索画面（S12）に出る。

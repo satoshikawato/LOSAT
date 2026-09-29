@@ -10,7 +10,13 @@ LOSAT の段階 E2f を実行する。BLASTN（LOSATN）が複数の query を�
 - lookup table の種類（`BlastChooseNaLookupTable` の query の長さ）、対角線の表か hash か（8000 残基）、表の大きさは、batch の query の塊から決まる。
 - S07+ で batch に依存するために明示的に拒否しているもの（`scoring.rs` の `gap_x_dropoffs` の最初の batch を超える場合、`run.rs` の `unsearched_queries` が決まらない場合）。
 
-1. NCBI の batch の経路をソースで追い、`docs/evidence/losat_web_e2f/AUTHORITY.md` に記録する：`CBlastInput::GetNextSeqBatch` の詰め方、`CBatchSizeMixer::GetBatchSize` の式、`good_init_extends` を数える箇所（`na_ungapped.c`）、`SplitQuery_GetChunkSize` の上限、環境変数 `BATCH_SIZE`。
+S07+ の終わりに読んだ NCBI の経路（下の 1 で確かめ、記録する）：
+
+- `CBatchSizeMixer`（`blast_app_util.hpp:57-95`、`blast_app_util.cpp:65-81`）：目標の hit 数は `max(1000000, subject の総文字数 / 3000)`、最初の batch は目標の 1/200（普通は 5000）。次の batch は `ratio = (hits + 1) / 前の batch の大きさ`（前の `ratio` があれば 0.3 と 0.7 で混ぜる）、`(Int4)(目標 / ratio)` を [100, chunk − 1000] に丸め、丸めたときは `ratio` を −1 に戻す。chunk は blastn 1000000、megablast 5000000（`local_blast.cpp:54-73`）。hits が 0 か 1 のとき `(Int4)` の変換は `int` を超える（x86 では `INT_MIN` になり、次の batch は 100 になるはず）。oracle の出力で確かめる。
+- `good_init_extends`：`BlastNaWordFinder` の最後の `Blast_UngappedStatsUpdate(…, init_hitlist->total)`（`na_ungapped.c:1688`、`blast_diagnostics.c:102-115`。lookup の hit が 0 の subject の chunk は数えない）を、subject の chunk ごと・スレッドごとに足す（`blast_diagnostics.c:118-135`）。索引の megablast の経路（`na_ungapped.c:2144-2149`）は LOSAT に無い。
+- query の分割（`CQuerySplitter`、`split_query_cxx.cpp:50-62`、`split_query_aux_priv.cpp:51-145`、`prelim_stage.cpp:230-260`）：batch の query の総文字数が 2 × (chunk − 100) 以上なら、NCBI は batch を重なり 100 の塊に分けて予備の段階を行い、HSP を合わせる。LOSAT に分割は無い。S07+ の終わりの確認（EDL933 の 2.1 Mb を query に、分割の境をまたぐ subject、`-task blastn`・megablast）では outfmt 6 が NCBI とバイト一致した。分割の境の近くの HSP で差が出るかを sweep で調べ、差があれば移植するか明示的に拒否する。
+
+1. NCBI の batch の経路をソースで追い、`docs/evidence/losat_web_e2f/AUTHORITY.md` に記録する：`CBlastInput::GetNextSeqBatch` の詰め方、`CBatchSizeMixer::GetBatchSize` の式（`Int4` の変換を含む）、`good_init_extends` を数える箇所（`na_ungapped.c`）、`SplitQuery_GetChunkSize` の上限と query の分割、環境変数 `BATCH_SIZE`。
 2. **batch ごとの検索を移植する。** `search` が NCBI と同じ batch に query を分け、batch ごとに query の塊・lookup table・対角線の表を作り、同じ subject を検索する。各 batch の `good_init_extends` を NCBI と同じ箇所で数え、次の batch の大きさを NCBI の式で求める。直す箇所の直上に NCBI のファイル・行と断片を書く。
 3. S07+ の batch に依存する明示的な拒否を、移植した batch で置き換える（`gap_x_dropoffs`、`unsearched_queries`、outfmt 7 の件数、Karlin-Altschul の表の失敗の繰り返しの回数）。
 4. 数の一致を確かめる。NCBI の batch の境は出力に直接は出ないので、境で結果が変わる入力（上の例と、境の前後に query の端がある入力の sweep）を作り、`BATCH_SIZE` を与えた NCBI（境を固定できる）と比べる。

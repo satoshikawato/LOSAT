@@ -149,6 +149,21 @@ def make_inputs(work: Path) -> None:
     for index, defline in enumerate([">s1 abc.", ">s1 abc ,def", ">s1 a  b", ">s1 (a )", ">s1,,x", ">TPA: s1 x",
                                      ">s1 x ; y", ">s1 E. coli sp.", ">s1 a ( b", ">s1 a&amp;b", ">, ,", ">; ;", ">, ;"]):
         (work / f"title_{index}.fa").write_text(f"{defline}\n{subject_seq}\n")
+    # The twelfth audit round: a subject with lowercase masks (NCBI's ranges start at the
+    # last letter of each mask); HSPs of score 0 in runs of N, which NCBI does not show; a
+    # byte order mark; a crash title of a subject without hits.
+    (work / "lcase_q.fa").write_text(">q\nACGTTGCAAGTCCATGGATCCTTAGGCA\n")
+    (work / "lcase_s.fa").write_text(">s\nttttaCGTTGCAAGTCCATGGATCCTTAGGCA\n")
+    (work / "lcase_minus_q.fa").write_text(">q\nTTTTTG\n")
+    (work / "lcase_minus_s.fa").write_text(">s\ncAAAAA\n")
+    (work / "score0_q.fa").write_text(">q11\nGTCTGTCACAA\n")
+    (work / "score0_s.fa").write_text(">sN\n" + "N" * 100 + "\n")
+    lc738871 = genome("LC738871")
+    (work / "n_run_q.fa").write_text(">q\n" + lc738871[10000:10300] + "\n")
+    (work / "n_run_s.fa").write_text(">s\n" + lc738871[9000:11000] + "N" * 1000 + lc738871[15000:18000] + "\n")
+    (work / "bom_query.fa").write_bytes(b"\xef\xbb\xbf>q1\n" + q.encode() + b"\n")
+    no_hit = "".join(random.Random(12).choices("ACGT", k=500))
+    (work / "crash_title_no_hit.fa").write_text(f">, ,\n{no_hit}\n")
 
 
 def cases(work: Path) -> list[tuple[str, list[str], str]]:
@@ -427,6 +442,19 @@ def cases(work: Path) -> list[tuple[str, list[str], str]]:
               "losat-rejects" if index in (9, 10, 11) else "same") for index in range(13)]
     rows += [("audit11.title_overrun.fmt6", ["-query", f"{F}/multi_query.fasta", "-subject", f"{w}/title_10.fa", "-outfmt", "6"], "same")]
     rows += [("audit10.title_html.fmt6", ["-query", f"{F}/multi_query.fasta", "-subject", f"{w}/title_9.fa", "-outfmt", "6"], "same")]
+    island = lambda task, role: str(stored / f"lcase_island_{task}_{role}.fa")  # noqa: E731
+    rows += [(f"audit12.lcase_subject.fmt{outfmt}", ["-query", f"{w}/lcase_q.fa", "-subject", f"{w}/lcase_s.fa", "-lcase_masking", "-outfmt", outfmt], "same")
+             for outfmt in ("0", "6", "7")]
+    rows += [
+        ("audit12.lcase_subject.minus", ["-query", f"{w}/lcase_minus_q.fa", "-subject", f"{w}/lcase_minus_s.fa", "-lcase_masking", "-task", "blastn", "-word_size", "6", "-evalue", "100", "-outfmt", "6"], "same"),
+        ("audit12.lcase_island.megablast", ["-query", island("megablast", "query"), "-subject", island("megablast", "subject"), "-lcase_masking", "-outfmt", "6"], "same"),
+        ("audit12.lcase_island.blastn", ["-query", island("blastn", "query"), "-subject", island("blastn", "subject"), "-task", "blastn", "-lcase_masking", "-outfmt", "6"], "same"),
+        ("audit12.n_run.fmt6", ["-query", f"{w}/n_run_q.fa", "-subject", f"{w}/n_run_s.fa", "-task", "blastn", "-word_size", "4", "-evalue", "1e6", "-outfmt", "6"], "same"),
+        ("audit12.bom_query", ["-query", f"{w}/bom_query.fa", *multi_s, "-outfmt", "6"], "losat-rejects"),
+        ("audit12.crash_title_no_hit.fmt0", ["-query", f"{F}/multi_query.fasta", "-subject", f"{w}/crash_title_no_hit.fa"], "losat-rejects"),
+    ]
+    rows += [(f"audit12.score0.fmt{outfmt}", ["-query", f"{w}/score0_q.fa", "-subject", f"{w}/score0_s.fa", "-task", "blastn", "-word_size", "4", "-evalue", "1e6", "-outfmt", outfmt], "same")
+             for outfmt in ("0", "6", "7")]
     for task in ("megablast", "blastn"):
         for gaps in (["-reward", "1", "-penalty", "-2", "-gapopen", "5", "-gapextend", "2"],
                      ["-reward", "1", "-penalty", "-3", "-gapopen", "3", "-gapextend", "2"],

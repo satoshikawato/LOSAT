@@ -118,7 +118,11 @@ fn store(
 
 impl FormatObserver for RangeRecorder {
     fn hsp_begin(&mut self, format: usize, hsp: HspIndex) {
-        self.open[format] = Some((hsp, self.position(format)));
+        let start = self.position(format);
+        if let Some((open, _)) = self.open[format].replace((hsp, start)) {
+            self.fault
+                .get_or_insert(format!("HSP {hsp} started before HSP {open} ended"));
+        }
     }
 
     fn hsp_end(&mut self, format: usize, hsp: HspIndex) {
@@ -208,6 +212,11 @@ pub fn run(
             Commands::Blastx(_) => unreachable!("rejected by Program::parse"),
         };
         result.map_err(|error| format!("{error:#}"))?;
+    }
+    if let Some((hsp, _)) = recorder.open.iter().flatten().next() {
+        recorder
+            .fault
+            .get_or_insert(format!("HSP {hsp} started but did not end"));
     }
     if let Some(fault) = recorder.fault.take() {
         return Err(format!("internal error in the output ranges: {fault}"));
@@ -353,6 +362,11 @@ mod tests {
             repeated.hsp_end(1, 3);
         }
         assert!(repeated.fault.is_some());
+
+        let mut doubled = recorder();
+        doubled.hsp_begin(1, 0);
+        doubled.hsp_begin(1, 1);
+        assert!(doubled.fault.is_some());
 
         let mut valid = recorder();
         valid.hsp_begin(1, 0);

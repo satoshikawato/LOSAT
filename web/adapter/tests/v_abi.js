@@ -29,7 +29,7 @@ const ROOT = path.resolve(__dirname, "../../..");
 const { createThreadHost } = require(path.join(ROOT, "LOSAT/tests/wasi_thread_host"));
 
 const FORMATS = { blastp: [0, 6, 7], tblastn: [0, 6, 7], blastn: [0, 6, 7], tblastx: [6] };
-const WITH_HITS = new Set(["blastp", "tblastn"]);
+const WITH_HITS = new Set(["blastp", "tblastn", "blastn"]);
 
 function sha256(bytes) {
   return crypto.createHash("sha256").update(bytes).digest("hex");
@@ -151,6 +151,12 @@ function checkHits(streams, program, label) {
     assert.equal(row.trimEnd(), rows[index], `${label}: out6 of HSP ${index}`);
     const fields = row.trimEnd().split("\t");
     assert.deepEqual(fields.slice(6, 10).map(Number), [record.q_start, record.q_end, record.s_start, record.s_end], `${label}: coordinates of HSP ${index}`);
+    // A subject beyond the alignments that outfmt 0 shows (for example BLASTN's 250) has
+    // no section and no heading.
+    if (record.out0 === null) {
+      assert.equal(record.out0_subject, null, `${label}: out0_subject of HSP ${index} without a section`);
+      return;
+    }
     const section = out0.subarray(record.out0[0], record.out0[1]).toString();
     assert.ok(section.startsWith(" Score ="), `${label}: out0 of HSP ${index}`);
     assert.ok(section.includes(`bits (${record.raw_score}),`), `${label}: raw score in out0 of HSP ${index}`);
@@ -182,6 +188,16 @@ function checkSurface(reactor, native) {
     assert.equal(validated.status, -1, argv.join(" "));
     const cli = require("node:child_process").spawnSync(native, argv);
     assert.equal(validated.error, cli.stderr.toString(), `${argv.join(" ")}: the CLI's message`);
+  }
+  // The host validates the argv that it runs, with its -num_threads, so a -num_threads in
+  // the user's words is a repeated option (abi_v2.md §7). The usage line of the message
+  // lists the -outfmt that the adapter inserts, so only the first line is the CLI's.
+  {
+    const argv = ["blastn", "-query", "q", "-subject", "s", "-num_threads", "2", "-num_threads", "1"];
+    const validated = reactor.call("losat_web2_validate", argv.join("\0"));
+    assert.equal(validated.status, -1, argv.join(" "));
+    const cli = require("node:child_process").spawnSync(native, argv);
+    assert.equal(validated.error.split("\n")[0], cli.stderr.toString().split("\n")[0], `${argv.join(" ")}: the CLI's error`);
   }
   assert.match(reactor.call("losat_web2_validate", ["blastp", "-query", "q", "-subject", "s", "-outfmt", "6"].join("\0")).error, /not accepted/);
   // register and scan agree on a multi-record input, in chunks of any size.

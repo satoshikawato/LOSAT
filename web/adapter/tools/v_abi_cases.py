@@ -8,7 +8,8 @@ and for each supported output format the frozen SHA-256 where one exists.
 - full: the regression cases of docs/evidence/losat_web_e1a/capture_outputs.py (Gate A,
   the Stage G matrix, the BLASTP manifest in outfmt 0/6/7), grouped into searches.
   Their inputs use the recorded path spellings, so this needs the Gate A lexical root
-  that capture_outputs.py documents.
+  that capture_outputs.py documents. It adds the outfmt 0 fixtures of
+  LOSAT/tests/outfmt0_manifest.tsv, whose frozen outfmt 0 hash is NCBI's.
 - quick: a few searches per program with repository paths, compared with the native
   CLI only (for CI).
 
@@ -28,7 +29,7 @@ REPO = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO / "docs/evidence/losat_web_e1a"))
 import capture_outputs as capture  # noqa: E402  (the verified case builders)
 
-FORMATS = {"blastp": ["0", "6", "7"], "tblastn": ["0", "6", "7"], "blastn": ["6", "7"], "tblastx": ["6"]}
+FORMATS = {"blastp": ["0", "6", "7"], "tblastn": ["0", "6", "7"], "blastn": ["0", "6", "7"], "tblastx": ["6"]}
 ADAPTER_OWNED = {"-outfmt", "-out", "-num_threads"}
 
 
@@ -64,6 +65,20 @@ def group(cases: list[capture.Case], frozen: bool) -> list[dict]:
             if previous != case.expected_sha256:
                 raise SystemExit(f"{case.case_id}: two frozen hashes for outfmt {outfmt}")
     return list(searches.values())
+
+
+def outfmt0_fixtures() -> list[dict]:
+    """The NCBI-frozen outfmt 0 fixtures (docs/evidence/losat_web_e2a/), run from LOSAT/."""
+    sys.path.insert(0, str(REPO / "docs/evidence/losat_web_e2a"))
+    import run_oracle  # noqa: E402  (the manifest reader and the oracle's arguments)
+    searches = []
+    for row in run_oracle.read_manifest()[2]:
+        argv = run_oracle.search_argv(row)
+        assert argv[-2:] == ["-outfmt", "0"], row["fixture_id"]
+        searches.append({"program": row["program"], "argv": [row["program"], *argv[:-2]],
+                         "cwd": str(run_oracle.ENGINE), "cases": [row["fixture_id"]],
+                         "frozen": {"0": row["stdout_sha256"]}})
+    return searches
 
 
 def direct_tblastx() -> dict:
@@ -108,7 +123,7 @@ def main() -> int:
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
     if args.suite == "full":
-        searches = group(capture.all_cases(set(FORMATS)), frozen=True)
+        searches = group(capture.all_cases(set(FORMATS)), frozen=True) + outfmt0_fixtures()
     else:
         searches = quick()
     searches.append(direct_tblastx())

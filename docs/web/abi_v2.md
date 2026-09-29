@@ -42,15 +42,14 @@ identity. The reactor start-up (`crt1-reactor.o`, `--entry=_initialize`) comes f
 script of its own (a second copy would define `_initialize` twice).
 
 The reactors' bytes depend on where they are built. `LOSAT` is a path dependency
-outside the adapter's workspace, so rustc gets its sources by absolute path: the panic
-locations of the engine code (data section) contain the checkout path, which changes the
-code and data sections as well as the symbol hashes of the name section. Every crate
-from the registry is compiled from `CARGO_HOME` (`<CARGO_HOME>/registry/src/...` in its
-panic locations), as in the engine's own Wasm builds. Two builds of the same commit with
-the same checkout path and `CARGO_HOME` are identical; the identity record
-(`losat-web-*.json`) records both. These paths are local file names of the machine that
-built the module; they are removed from published modules before the first publication
-(plan TD-11).
+outside the adapter's workspace, so rustc gets its sources by absolute path, and every
+crate from the registry is compiled from `CARGO_HOME`. `build_reactors.py` replaces both
+prefixes in the source paths that the modules embed (panic locations) with `/losat` and
+`/cargo` (`--remap-path-prefix`, plan TD-11), so a module carries no path of the build
+machine. The checkout path still changes the bytes: Cargo's metadata hash of the path
+dependency, which appears in the symbol names of the name section, includes it. Two
+builds of the same commit from the same checkout path are identical; the identity record
+(`losat-web-*.json`) records the checkout path, `CARGO_HOME` and the remapping.
 
 ## 3. Imports
 
@@ -68,9 +67,9 @@ On failure, `losat_web2_last_error_ptr/len` hold a UTF-8 message. Engine errors 
 CLI's wording: argv errors are the message of the engine's parser
 (`LOSAT::cli::render_message`), search errors are the error and its causes joined by
 `: ` (as ABI v1 reports them). Two details of argv errors differ from the command line:
-the adapter parses the argv with `losat` as the binary name and `-outfmt 6` inserted
-after the program name (§7), so a usage line in a message names `losat` and can list
-`-outfmt`; and an unknown program gives `unknown program '<name>'`.
+the adapter parses the argv with `-outfmt 6` inserted after the program name (§7), so a
+usage line in a message can list `-outfmt`; and an unknown program gives
+`unknown program '<name>'`.
 
 | Export | Arguments | Result |
 |---|---|---|
@@ -81,7 +80,7 @@ after the program name (§7), so a usage line in a message names `losat` and can
 | `losat_web2_register(program_ptr, program_len, role, bytes_ptr, bytes_len)` | role `0` query, `1` subject; original FASTA bytes | handle ≥ 1; emits a *register* JSON on stream 2 |
 | `losat_web2_release(handle)` | handle | `0` |
 | `losat_web2_scan_begin(parser)` / `losat_web2_scan_chunk(scanner, ptr, len)` / `losat_web2_scan_end(scanner)` | parser kind (`0` the `bio::io::fasta` reader of BLASTP, TBLASTN, BLASTN and TBLASTX; `1`, the NCBI-style reader of BLASTX, joins in SX); FASTA bytes in chunks of any size | `scan_begin` returns a scanner handle; `scan_end` emits a *scan* JSON on stream 2 (§9), or fails with the parser's error |
-| `losat_web2_run(argv_ptr, argv_len, query_handle, subject_handle)` | argv, handles | emits the program's supported format streams (0, 6, 7), stream 1 (BLASTP and TBLASTN; §8) and stream 3; returns after the run ends |
+| `losat_web2_run(argv_ptr, argv_len, query_handle, subject_handle)` | argv, handles | emits the program's supported format streams (0, 6, 7), stream 1 (BLASTP, TBLASTN and BLASTN; §8) and stream 3; returns after the run ends |
 | `losat_web2_last_error_ptr()` / `losat_web2_last_error_len()` | — | last error message |
 
 ## 5. Output streams
@@ -96,7 +95,7 @@ which runs slot zero of the search's thread pool (`LOSAT/src/utils/threading.rs`
 | `0` | outfmt 0 text (only for programs that support outfmt 0) |
 | `6` | outfmt 6 text |
 | `7` | outfmt 7 text (only for programs that support outfmt 7) |
-| `1` | HSP records as JSON Lines, one object per HSP (§8); BLASTP and TBLASTN only |
+| `1` | HSP records as JSON Lines, one object per HSP (§8); BLASTP, TBLASTN and BLASTN |
 | `2` | JSON response of `describe`, `register` or `scan_end` |
 | `3` | diagnostics that the CLI writes to stderr (warnings), UTF-8, each written once |
 
@@ -122,7 +121,9 @@ keeps.
 - `-out` and `-outfmt` are rejected: the adapter writes every format the program supports
   (`describe` lists them).
 - `-num_threads` is appended by the host. When the host falls back to the serial
-  module, it passes `-num_threads 1` and records the reason (plan §4.7).
+  module, it passes `-num_threads 1` and records the reason (plan §4.7). The host
+  validates the argv that it will run, with its `-num_threads`, so a `-num_threads` in
+  the user's words is reported by `validate` (the parser rejects the repeated option).
 - Every other word is parsed by the engine's CLI parser, so options and errors behave
   exactly as on the command line. LOSAT's own progress output (`-verbose`) and its
   debug output (environment variables such as `LOSAT_TIMING`) go to the module's WASI
@@ -135,9 +136,10 @@ keeps.
 ## 8. HSP record
 
 One JSON object per HSP of the final, sorted result. Field names follow the Rust
-`common::Hit` and `report::PairwiseHit` fields. BLASTP and TBLASTN emit them. BLASTN and
-TBLASTX emit none until their final HSP lists become `PairwiseHit` lists (plan S07 and
-S08); their `run` writes the format streams and stream 3 only.
+`common::Hit` and `report::PairwiseHit` fields. BLASTP, TBLASTN and BLASTN emit them.
+TBLASTX emits none until its final HSP list becomes a `PairwiseHit` list (plan S08); its
+`run` writes the format streams and stream 3 only. BLASTN rows are nucleotide rows: the
+query on its plus strand, residues of masked regions in lowercase, no frames.
 
 | Field | Type | Meaning |
 |---|---|---|

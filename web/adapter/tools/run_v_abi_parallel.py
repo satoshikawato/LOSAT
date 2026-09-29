@@ -13,6 +13,7 @@ Usage: run_v_abi_parallel.py --native LOSAT --serial SERIAL.wasm --threads THREA
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import subprocess
 import sys
@@ -53,6 +54,8 @@ def main() -> int:
         engine, key, chunk = item
         directory = out / "parts" / f"{engine}-{key}"
         directory.mkdir(parents=True, exist_ok=True)
+        # A result left by an earlier run must not be merged into this one.
+        (directory / "v-abi-results.json").unlink(missing_ok=True)
         (directory / "cases.json").write_text(json.dumps(chunk, indent=2) + "\n")
         with (directory / "v-abi.log").open("w") as log:
             status = subprocess.run(
@@ -75,6 +78,8 @@ def main() -> int:
     frozen = [(row, fmt, same) for row in results for fmt, same in row["frozen"].items()]
     differing = sorted({f"{','.join(row['cases'])} outfmt {fmt}" for row, fmt, same in frozen if not same})
     summary = {
+        "artifacts": {name: hashlib.sha256(Path(getattr(args, name)).read_bytes()).hexdigest()
+                      for name in ("native", "serial", "threads")},
         "runs": len(results),
         "searches": len({json.dumps(row["argv"]) for row in results}),
         "by_engine_and_threads": {f"{e} n{t}": sum(1 for row in results if row["engine"] == e and row["threads"] == t)

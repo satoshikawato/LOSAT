@@ -4,7 +4,9 @@
 The adapter reactors must be built under the same conditions as the certified LOSAT
 command-WASI builds. This check compares, and prints as JSON:
 - `[profile.release]` of web/adapter/Cargo.toml and LOSAT/Cargo.toml;
-- the target rustflags of web/adapter/.cargo/config.toml and LOSAT/.cargo/config.toml;
+- the target rustflags of web/adapter/.cargo/config.toml and LOSAT/.cargo/config.toml
+  (build_reactors.py adds only the `--remap-path-prefix` flags of plan TD-11, which
+  change embedded source paths and no code generation);
 - the version of every dependency that both Cargo.lock files contain;
 - the link arguments: the adapter has no build script of its own (no `build` key and no
   web/adapter/build.rs, which Cargo would find by itself), so its cdylib gets the

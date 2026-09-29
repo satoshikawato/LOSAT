@@ -9,6 +9,11 @@ records for the engine's own reactors, and artifacts.json adds the build identit
 (tools/check_build_identity.py, plan TD-6). Scripts that call cargo need
 RUSTUP_TOOLCHAIN=1.92.0 in environments whose default toolchain differs.
 
+The builds replace the checkout path and CARGO_HOME in the modules' source paths with
+fixed names (`--remap-path-prefix`, plan TD-11), so that a published module carries no
+path of the build machine. The flags are passed with `cargo --config`, which Cargo appends
+to the rustflags of .cargo/config.toml; the identity check compares that file.
+
 Usage: build_reactors.py --target-dir DIR --output-dir DIR [--node node]
 """
 from __future__ import annotations
@@ -57,9 +62,12 @@ def main() -> int:
     sysroot = Path(subprocess.check_output(["rustc", "--print", "sysroot"], text=True).strip())
     node = json.loads(subprocess.check_output([args.node, "-p", "JSON.stringify(process.versions)"], text=True))
     records = {}
+    cargo_home = Path(os.environ.get("CARGO_HOME", Path.home() / ".cargo"))
+    remap = [f"--remap-path-prefix={ROOT}=/losat", f"--remap-path-prefix={cargo_home}=/cargo"]
     for name, (triple, options, features, kind) in SPECS.items():
         argv = ["cargo", "build", "--release", "--locked", "--target", triple, *options,
-                "--target-dir", str(target / name)]
+                "--target-dir", str(target / name),
+                "--config", f"target.{triple}.rustflags={json.dumps(remap)}"]
         with (out / f"{name}.build.log").open("w") as log:
             subprocess.run(argv, cwd=ADAPTER, stdout=log, stderr=subprocess.STDOUT, check=True)
         built = target / name / triple / "release/losat_web_adapter.wasm"
@@ -78,9 +86,11 @@ def main() -> int:
             cargo_lock_sha256=digest(ADAPTER / "Cargo.lock"),
             engine_cargo_lock_sha256=digest(ENGINE / "Cargo.lock"),
             build_rs_sha256=digest(ENGINE / "build.rs"),
-            # Both paths are embedded in the module (docs/web/abi_v2.md §2).
+            # The checkout path changes the module bytes through Cargo's metadata hash of
+            # the path dependency, although no path is embedded (docs/web/abi_v2.md §2).
             checkout=str(ROOT),
-            cargo_home=os.environ.get("CARGO_HOME", str(Path.home() / ".cargo")),
+            cargo_home=str(cargo_home),
+            remap_path_prefix=remap,
         )
         (out / f"losat-web-{name}.json").write_text(json.dumps(artifact, indent=2) + "\n")
         records[name] = artifact

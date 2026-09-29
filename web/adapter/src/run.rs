@@ -49,8 +49,7 @@ impl Program {
     /// exactly these, each on the stream of the same number.
     pub fn formats(self) -> &'static [u32] {
         match self {
-            Self::Blastp | Self::Tblastn => &[0, 6, 7],
-            Self::Blastn => &[6, 7],
+            Self::Blastp | Self::Tblastn | Self::Blastn => &[0, 6, 7],
             Self::Tblastx => &[6],
         }
     }
@@ -70,8 +69,9 @@ pub fn parse(words: &[&str]) -> Result<(Program, Commands), String> {
     // The formats come from `Program::formats`; `-outfmt 6` only keeps the parser from
     // rejecting a default format that the program does not implement. It follows the
     // program name, so that the host's words are parsed exactly as on the command line
-    // (a trailing option without its value is still reported as such).
-    let argv = ["losat", words[0], "-outfmt", "6"]
+    // (a trailing option without its value is still reported as such). The binary name
+    // is the CLI's, so that a usage line in an error names it the same way.
+    let argv = ["LOSAT", words[0], "-outfmt", "6"]
         .into_iter()
         .chain(words[1..].iter().copied());
     let cli: Cli =
@@ -91,6 +91,8 @@ struct RangeRecorder {
     /// The start of the heading being written, and the last complete heading.
     subject_start: Option<u64>,
     subject: Option<(u64, u64)>,
+    /// The first observer event that does not fit the formatter contract; the run fails.
+    fault: Option<String>,
 }
 
 impl RangeRecorder {
@@ -99,11 +101,19 @@ impl RangeRecorder {
     }
 }
 
-fn store(ranges: &mut Vec<Option<(u64, u64)>>, hsp: HspIndex, range: (u64, u64)) {
+/// Stores the range of `hsp`; a second range for the same HSP is a fault.
+fn store(
+    ranges: &mut Vec<Option<(u64, u64)>>,
+    hsp: HspIndex,
+    range: (u64, u64),
+) -> Result<(), String> {
     if ranges.len() <= hsp {
         ranges.resize(hsp + 1, None);
     }
-    ranges[hsp] = Some(range);
+    match ranges[hsp].replace(range) {
+        None => Ok(()),
+        Some(_) => Err(format!("HSP {hsp} was reported twice in one format")),
+    }
 }
 
 impl FormatObserver for RangeRecorder {
@@ -113,19 +123,26 @@ impl FormatObserver for RangeRecorder {
 
     fn hsp_end(&mut self, format: usize, hsp: HspIndex) {
         let Some((begun, start)) = self.open[format].take() else {
+            self.fault
+                .get_or_insert(format!("HSP {hsp} ended without a start"));
             return;
         };
-        debug_assert_eq!(begun, hsp);
+        if begun != hsp {
+            self.fault
+                .get_or_insert(format!("HSP {begun} started but HSP {hsp} ended"));
+            return;
+        }
         let range = (start, self.position(format));
-        match self.streams[format] {
+        let stored = match self.streams[format] {
             6 => store(&mut self.out6, hsp, range),
-            0 => {
-                store(&mut self.out0, hsp, range);
-                if let Some(subject) = self.subject {
-                    store(&mut self.out0_subject, hsp, subject);
-                }
-            }
-            _ => {}
+            0 => store(&mut self.out0, hsp, range).and_then(|()| match self.subject {
+                Some(subject) => store(&mut self.out0_subject, hsp, subject),
+                None => Ok(()),
+            }),
+            _ => Ok(()),
+        };
+        if let Err(fault) = stored {
+            self.fault.get_or_insert(fault);
         }
     }
 
@@ -164,6 +181,7 @@ pub fn run(
         out0_subject: Vec::new(),
         subject_start: None,
         subject: None,
+        fault: None,
     };
     let outfmts: Vec<String> = formats.iter().map(u32::to_string).collect();
     let mut collected: Option<Vec<PairwiseHit>> = None;
@@ -190,6 +208,9 @@ pub fn run(
             Commands::Blastx(_) => unreachable!("rejected by Program::parse"),
         };
         result.map_err(|error| format!("{error:#}"))?;
+    }
+    if let Some(fault) = recorder.fault.take() {
+        return Err(format!("internal error in the output ranges: {fault}"));
     }
     for writer in &mut writers {
         writer.finish();
@@ -288,7 +309,7 @@ mod tests {
             ][..],
         ] {
             let cli = LOSAT::cli::try_parse_from::<Cli, _, _>(
-                ["losat"].into_iter().chain(words.iter().copied()),
+                ["LOSAT"].into_iter().chain(words.iter().copied()),
             )
             .unwrap_err();
             assert_eq!(
@@ -297,5 +318,53 @@ mod tests {
                 "{words:?}"
             );
         }
+    }
+
+    fn recorder() -> RangeRecorder {
+        RangeRecorder {
+            streams: vec![0, 6],
+            positions: vec![Arc::new(AtomicU64::new(0)), Arc::new(AtomicU64::new(0))],
+            open: vec![None, None],
+            out6: Vec::new(),
+            out0: Vec::new(),
+            out0_subject: Vec::new(),
+            subject_start: None,
+            subject: None,
+            fault: None,
+        }
+    }
+
+    // Observer events that break the formatter contract fail the run instead of
+    // producing wrong ranges.
+    #[test]
+    fn unmatched_or_repeated_hsp_events_are_faults() {
+        let mut unmatched = recorder();
+        unmatched.hsp_end(1, 0);
+        assert!(unmatched.fault.is_some());
+
+        let mut crossed = recorder();
+        crossed.hsp_begin(1, 0);
+        crossed.hsp_end(1, 1);
+        assert!(crossed.fault.is_some());
+
+        let mut repeated = recorder();
+        for _ in 0..2 {
+            repeated.hsp_begin(1, 3);
+            repeated.hsp_end(1, 3);
+        }
+        assert!(repeated.fault.is_some());
+
+        let mut valid = recorder();
+        valid.hsp_begin(1, 0);
+        valid.hsp_end(1, 0);
+        valid.subject_begin(0, 0);
+        valid.subject_end(0, 0);
+        valid.hsp_begin(0, 0);
+        valid.hsp_end(0, 0);
+        assert!(valid.fault.is_none());
+        assert_eq!(
+            (valid.out6.len(), valid.out0.len(), valid.out0_subject.len()),
+            (1, 1, 1)
+        );
     }
 }

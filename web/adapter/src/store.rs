@@ -49,15 +49,7 @@ pub fn register(program: &str, role: u32, bytes: &[u8]) -> Result<(u32, String),
     let scanned = scan::scan(bytes).map_err(|error| {
         format!("the index scan of the {role_name} FASTA disagrees with the parser: {error}")
     })?;
-    if scanned.len() != records.len()
-        || scanned.iter().zip(&records).any(|(scan, record)| {
-            scan.id != record.id() || scan.length != record.seq().len() as u64
-        })
-    {
-        return Err(format!(
-            "the index scan of the {role_name} FASTA disagrees with the parser"
-        ));
-    }
+    check_scan(role_name, &scanned, &records)?;
     let mut response = String::from("{\"handle\":");
     let mut store = store().lock().expect("input store");
     store.next = store
@@ -77,6 +69,35 @@ pub fn register(program: &str, role: u32, bytes: &[u8]) -> Result<(u32, String),
     response.push_str("]}");
     store.entries.insert(handle, Registered { role, records });
     Ok((handle, response))
+}
+
+/// Fails unless the index scan found the parser's records: the same number, and for
+/// each record the same ID, length and residue counts (plan TD-8).
+fn check_scan(
+    role: &str,
+    scanned: &[scan::ScanRecord],
+    records: &[fasta::Record],
+) -> Result<(), String> {
+    let agrees = |scan: &scan::ScanRecord, record: &fasta::Record| {
+        let mut counts = [0u64; 256];
+        for &byte in record.seq() {
+            counts[byte as usize] += 1;
+        }
+        scan.id == record.id()
+            && scan.length == record.seq().len() as u64
+            && *scan.residue_counts == counts
+    };
+    if scanned.len() != records.len()
+        || scanned
+            .iter()
+            .zip(records)
+            .any(|(scan, record)| !agrees(scan, record))
+    {
+        return Err(format!(
+            "the index scan of the {role} FASTA disagrees with the parser"
+        ));
+    }
+    Ok(())
 }
 
 pub fn release(handle: u32) -> Result<(), String> {
@@ -107,4 +128,32 @@ pub fn with_inputs<R>(
     let queries = get(query, ROLE_QUERY, "query")?;
     let subjects = get(subject, ROLE_SUBJECT, "subject")?;
     Ok(work(queries, subjects))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // `register` stops when the scan and the parser disagree on the records.
+    #[test]
+    fn a_scan_that_disagrees_with_the_parser_fails_register() {
+        let bytes = b">a one\nACGT\n>b\nGG\n";
+        let records: Vec<fasta::Record> = fasta::Reader::new(&bytes[..])
+            .records()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        let scanned = scan::scan(bytes).unwrap();
+        assert!(check_scan("query", &scanned, &records).is_ok());
+
+        assert!(check_scan("query", &scanned[..1], &records).is_err());
+        let mut renamed = scanned.clone();
+        renamed[1].id = "c".to_string();
+        assert!(check_scan("query", &renamed, &records).is_err());
+        let mut longer = scanned.clone();
+        longer[0].length += 1;
+        assert!(check_scan("query", &longer, &records).is_err());
+        let mut recounted = scanned.clone();
+        recounted[0].residue_counts[b'A' as usize] += 1;
+        assert!(check_scan("query", &recounted, &records).is_err());
+    }
 }

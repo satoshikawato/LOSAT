@@ -28,7 +28,7 @@ const { WASI } = require("node:wasi");
 const ROOT = path.resolve(__dirname, "../../..");
 const { createThreadHost } = require(path.join(ROOT, "LOSAT/tests/wasi_thread_host"));
 
-const FORMATS = { blastp: [0, 6, 7], tblastn: [0, 6, 7], blastn: [6, 7], tblastx: [6] };
+const FORMATS = { blastp: [0, 6, 7], tblastn: [0, 6, 7], blastn: [0, 6, 7], tblastx: [6] };
 const WITH_HITS = new Set(["blastp", "tblastn"]);
 
 function sha256(bytes) {

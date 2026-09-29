@@ -6,8 +6,12 @@ case in NCBI and LOSAT (standard input empty unless the case gives a file; `-out
 compared with stdout), and
 prints one line per case: `same`, `same-error`,
 `losat-rejects` (NCBI succeeds; LOSAT fails with a message that names what it does not
-support, whether NCBI succeeds or fails otherwise), `both-fail` (both fail, each with its
-own message, and write the same output) or `DIFF`, with the `expect` column of the case. Exits 1 when a result is not the expected one.
+support, whether NCBI succeeds or fails otherwise), `arg-error` (an argument that NCBI's
+argument parser rejects, exit 1, and LOSAT's clap parser rejects, exit 2), `both-fail`
+(both fail with the same exit status, each with its own message, and write the same
+output), `timeout` or `DIFF`, with the `expect` column of the case. Exits 1 when a result
+is not the expected one. A case may give environment variables, a file for standard
+input, and named pipes with the files that a writer puts into them in order.
 
 Usage: check_inputs.py --bin-dir DIR --losat LOSAT --work DIR
 """
@@ -81,6 +85,9 @@ def make_inputs(work: Path) -> None:
     edl933 = "".join(line for line in (ENGINE / "tests/fasta/EDL933.fna").read_text().splitlines()[1:])
     (work / "edl933_100k.fa").write_text(">edl933_100k first 100 kb of EDL933\n" + edl933[:100000] + "\n")
     (work / "white_space_subject.fa").write_text(" \n\t\n")
+    subject_tab = subject.replace(">msA close homolog", ">msA\tclose homolog", 1)
+    (work / "tab_subject.fa").write_text(subject_tab)
+    (work / "leading_blank_subject.fa").write_text("\n" + subject)
 
 
 def cases(work: Path) -> list[tuple[str, list[str], str]]:
@@ -161,7 +168,7 @@ def cases(work: Path) -> list[tuple[str, list[str], str]]:
         ("audit2.evalue_negative.word_size", ["-query", f"{F}/multi_query.fasta", *multi_s, "-evalue", "-1", "-word_size", "101"], "same-error"),
         ("audit2.evalue_minus_inf", ["-query", f"{F}/multi_query.fasta", *multi_s, "-evalue", "-inf", "-outfmt", "6"], "same-error"),
         ("audit2.evalue_overflow", ["-query", f"{F}/multi_query.fasta", *multi_s, "-evalue", "1e400", "-outfmt", "6"], "losat-rejects"),
-        ("audit2.missing_query.out", ["-query", f"{w}/missing.fa", *multi_s, "-out", "{OUT}"], "both-fail"),
+        ("audit2.missing_query.out", ["-query", f"{w}/missing.fa", *multi_s, "-out", "{OUT}"], "same-error"),
         ("audit2.dev_null_query", ["-query", "/dev/null", *multi_s, "-outfmt", "6"], "same"),
         ("audit2.batch_size_env.penalty_0.out", ["-query", f"{F}/multi_query.fasta", *multi_s, "-penalty", "0", "-out", "{OUT}"], "same-error", {"BATCH_SIZE": "1000"}),
         ("audit2.batch_size_env", ["-query", f"{F}/multi_query.fasta", *multi_s, "-outfmt", "6"], "losat-rejects", {"BATCH_SIZE": "1000"}),
@@ -174,7 +181,7 @@ def cases(work: Path) -> list[tuple[str, list[str], str]]:
         ("audit3.empty_subject.word_size_101", ["-query", f"{F}/multi_query.fasta", "-subject", f"{w}/empty.fa", "-word_size", "101", "-outfmt", "7"], "same-error"),
         ("audit3.empty_subject.max_target_seqs_1", ["-query", f"{F}/multi_query.fasta", "-subject", f"{w}/empty.fa", "-max_target_seqs", "1"], "same-error"),
         ("audit3.empty_subject.out", ["-query", f"{F}/multi_query.fasta", "-subject", f"{w}/empty.fa", "-out", "{OUT}"], "same-error"),
-        ("audit3.empty_subject.missing_query", ["-query", f"{w}/missing.fa", "-subject", f"{w}/empty.fa"], "both-fail"),
+        ("audit3.empty_subject.missing_query", ["-query", f"{w}/missing.fa", "-subject", f"{w}/empty.fa"], "same-error"),
         ("audit3.piped_query", ["-query", "/dev/stdin", *multi_s, "-outfmt", "6"], "same", {}, f"{F}/multi_query.fasta"),
         ("audit3.piped_query.fmt0", ["-query", "/dev/stdin", *multi_s], "same", {}, f"{F}/multi_query.fasta"),
         ("audit3.piped_subject", ["-query", f"{F}/multi_query.fasta", "-subject", "/dev/stdin", "-outfmt", "7"], "same", {}, f"{F}/multi_subject.fasta"),
@@ -182,13 +189,73 @@ def cases(work: Path) -> list[tuple[str, list[str], str]]:
         ("audit3.piped_white_space_query", ["-query", "/dev/stdin", *multi_s, "-outfmt", "6"], "losat-rejects", {}, f"{w}/white_space.fa"),
         ("audit3.directory_query", ["-query", w, *multi_s, "-outfmt", "6"], "same"),
         ("audit3.directory_subject", ["-query", f"{F}/multi_query.fasta", "-subject", w, "-outfmt", "6"], "same-error"),
-        ("audit3.evalue_inf", ["-query", f"{F}/multi_query.fasta", *multi_s, "-evalue", "inf", "-outfmt", "6"], "both-fail"),
-        ("audit3.evalue_nan", ["-query", f"{F}/multi_query.fasta", *multi_s, "-evalue", "nan", "-outfmt", "6"], "both-fail"),
-        ("audit3.evalue_space", ["-query", f"{F}/multi_query.fasta", *multi_s, "-evalue", " 1", "-outfmt", "6"], "both-fail"),
+        ("audit3.evalue_inf", ["-query", f"{F}/multi_query.fasta", *multi_s, "-evalue", "inf", "-outfmt", "6"], "arg-error"),
+        ("audit3.evalue_nan", ["-query", f"{F}/multi_query.fasta", *multi_s, "-evalue", "nan", "-outfmt", "6"], "arg-error"),
+        ("audit3.evalue_space", ["-query", f"{F}/multi_query.fasta", *multi_s, "-evalue", " 1", "-outfmt", "6"], "arg-error"),
         ("audit3.evalue_plus_inf", ["-query", f"{F}/multi_query.fasta", *multi_s, "-evalue", "+inf", "-outfmt", "6"], "losat-rejects"),
         ("audit3.evalue_plus_nan", ["-query", f"{F}/multi_query.fasta", *multi_s, "-evalue", "+nan", "-outfmt", "6"], "losat-rejects"),
         ("audit3.evalue_hex", ["-query", f"{F}/multi_query.fasta", *multi_s, "-evalue", "0x10", "-outfmt", "6"], "losat-rejects"),
         ("audit3.evalue_exponent", ["-query", f"{F}/multi_query.fasta", *multi_s, "-evalue", "+1E-5", "-outfmt", "6"], "same"),
+    ]
+    # The fourth audit round: NCBI's integer arguments read hexadecimal; the order of the
+    # subject, the query, -out and the checks; LOSAT's limits after "Query is Empty!";
+    # standard input as "-"; -out -; options that NCBI blastn does not have; -outfmt.
+    mq = ["-query", f"{F}/multi_query.fasta"]
+    empty_q = ["-query", f"{w}/empty.fa"]
+    tab_s = ["-subject", f"{w}/tab_subject.fa"]
+    rows += [
+        ("audit4.hex.reward", [*mq, *multi_s, "-task", "blastn", "-reward", "0x2", "-penalty", "-3", "-outfmt", "6"], "same"),
+        ("audit4.hex.gaps", [*mq, *multi_s, "-task", "blastn", "-gapopen", "0x5", "-gapextend", "0X2", "-outfmt", "6"], "same"),
+        ("audit4.hex.word_size", [*mq, *multi_s, "-task", "blastn", "-word_size", "0xB", "-outfmt", "7"], "same"),
+        ("audit4.hex.word_size_16", [*mq, *multi_s, "-word_size", "0x10", "-outfmt", "6"], "same"),
+        ("audit4.hex.max_target_seqs", [*mq, *multi_s, "-max_target_seqs", "0x3", "-outfmt", "6"], "same"),
+        ("audit4.hex.penalty_0", [*mq, *multi_s, "-penalty", "0x0", "-outfmt", "6"], "same-error"),
+        ("audit4.hex.no_digits", [*mq, *multi_s, "-max_target_seqs", "0x", "-outfmt", "6"], "arg-error"),
+        ("audit4.tab_subject.penalty_0.out", [*mq, *tab_s, "-penalty", "0", "-out", "{OUT}"], "same-error"),
+        ("audit4.tab_subject.evalue_0", [*mq, *tab_s, "-evalue", "0", "-outfmt", "6"], "same-error"),
+        ("audit4.tab_subject.empty_query", [*empty_q, *tab_s, "-outfmt", "6"], "same"),
+        ("audit4.tab_subject", [*mq, *tab_s, "-outfmt", "6"], "losat-rejects"),
+        ("audit4.leading_blank_subject.penalty_0", [*mq, "-subject", f"{w}/leading_blank_subject.fa", "-penalty", "0"], "losat-rejects"),
+        ("audit4.missing_subject", [*mq, "-subject", f"{w}/missing.fa", "-outfmt", "6"], "same-error"),
+        ("audit4.missing_query_and_subject", ["-query", f"{w}/missing.fa", "-subject", f"{w}/missing.fa"], "same-error"),
+        ("audit4.missing_query.bad_out", ["-query", f"{w}/missing.fa", *multi_s, "-out", f"{w}/missing_dir/out.txt"], "same-error"),
+        ("audit4.bad_out", [*mq, *multi_s, "-out", f"{w}/missing_dir/out.txt"], "same-error"),
+        ("audit4.directory_out", [*mq, *multi_s, "-out", w], "same-error"),
+        ("audit4.empty_query.reward_0", [*empty_q, *multi_s, "-reward", "0"], "same"),
+        ("audit4.empty_query.score_range", [*empty_q, *multi_s, "-reward", "5000", "-penalty", "-1"], "same"),
+        ("audit4.empty_query.evalue_plus_inf", [*empty_q, *multi_s, "-evalue", "+inf"], "same"),
+        ("audit4.empty_query.batch_size", [*empty_q, *multi_s, "-outfmt", "6"], "same", {"BATCH_SIZE": "1000"}),
+        ("audit4.evalue_plus_nan.empty_subject", [*mq, "-subject", f"{w}/empty.fa", "-evalue", "+nan"], "same-error"),
+        ("audit4.evalue_plus_nan.penalty_0", [*mq, *multi_s, "-evalue", "+nan", "-penalty", "0"], "same-error"),
+        ("audit4.stdin_query.pipe", ["-query", "-", *multi_s, "-outfmt", "6"], "same", {}, f"{F}/multi_query.fasta"),
+        ("audit4.stdin_query.file", ["-query", "-", *multi_s, "-outfmt", "6"], "same", {}, ("file", f"{F}/multi_query.fasta")),
+        ("audit4.stdin_query.default", [*multi_s, "-outfmt", "7"], "same", {}, ("file", f"{F}/multi_query.fasta")),
+        ("audit4.stdin_subject.file", [*mq, "-subject", "-", "-outfmt", "6"], "same", {}, ("file", f"{F}/multi_subject.fasta")),
+        ("audit4.stdin_subject.pipe", [*mq, "-subject", "-", "-outfmt", "6"], "same", {}, f"{F}/multi_subject.fasta"),
+        ("audit4.stdin_both.file", ["-query", "-", "-subject", "-", "-outfmt", "6"], "losat-rejects", {}, ("file", f"{F}/multi_subject.fasta")),
+        ("audit4.dev_stdin_both.file", ["-query", "/dev/stdin", "-subject", "/dev/stdin", "-outfmt", "6"], "same", {}, ("file", f"{F}/multi_subject.fasta")),
+        ("audit4.stdin_both.pipe", ["-query", "-", "-subject", "-", "-outfmt", "6"], "losat-rejects", {}, f"{F}/multi_subject.fasta"),
+        ("audit4.stdin_empty_query.file", ["-query", "-", *multi_s], "same", {}, ("file", f"{w}/empty.fa")),
+        ("audit4.out_stdout", [*mq, *multi_s, "-outfmt", "6", "-out", "-"], "same"),
+        ("audit4.option.verbose", [*mq, *multi_s, "-verbose"], "arg-error"),
+        ("audit4.option.limit_lookup", [*mq, *multi_s, "-limit_lookup"], "arg-error"),
+        ("audit4.option.max_db_word_count", [*mq, *multi_s, "-max_db_word_count", "30"], "arg-error"),
+        ("audit4.option.min_hit_length", [*mq, *multi_s, "-min_hit_length", "10"], "arg-error"),
+        ("audit4.outfmt.custom_0", [*mq, *multi_s, "-outfmt", "0 qaccver"], "same"),
+        ("audit4.outfmt.plus_6", [*mq, *multi_s, "-outfmt", "+6"], "same"),
+        ("audit4.outfmt.leading_zero", [*mq, *multi_s, "-outfmt", "07"], "same"),
+        ("audit4.outfmt.word", [*mq, *multi_s, "-outfmt", "abc"], "same-error"),
+        ("audit4.outfmt.out_of_range", [*mq, *multi_s, "-outfmt", "99"], "same-error"),
+        ("audit4.outfmt.no_break_space", [*mq, *multi_s, "-outfmt", "6\u00a0"], "same-error"),
+        ("audit4.outfmt.empty", [*mq, *multi_s, "-outfmt", ""], "same-error"),
+        ("audit4.outfmt.word.missing_subject", [*mq, "-subject", f"{w}/missing.fa", "-outfmt", "abc"], "same-error"),
+        ("audit4.outfmt.delimiter", [*mq, *multi_s, "-outfmt", "6 delim=,"], "losat-rejects"),
+        # Named pipes: the writer fills the subject and then the query, the order in which
+        # NCBI opens them.
+        ("audit4.fifo.subject_then_query", ["-query", f"{w}/fifo_q", "-subject", f"{w}/fifo_s", "-outfmt", "6"], "same", {}, None,
+         [(f"{w}/fifo_s", f"{F}/multi_subject.fasta"), (f"{w}/fifo_q", f"{F}/multi_query.fasta")]),
+        ("audit4.fifo.query", ["-query", f"{w}/fifo_q", *multi_s], "same", {}, None, [(f"{w}/fifo_q", f"{F}/multi_query.fasta")]),
+        ("audit4.fifo.empty_query", ["-query", f"{w}/fifo_q", *multi_s, "-outfmt", "6"], "losat-rejects", {}, None, [(f"{w}/fifo_q", "/dev/null")]),
     ]
     for task in ("megablast", "blastn"):
         for gaps in (["-reward", "1", "-penalty", "-2", "-gapopen", "5", "-gapextend", "2"],
@@ -211,8 +278,12 @@ def classify(ncbi: subprocess.CompletedProcess, ours: subprocess.CompletedProces
         return "same-error"
     if ours.returncode and any(marker in ours.stderr for marker in REJECTION_MARKERS):
         return "losat-rejects"
-    # Both fail with their own messages (a missing input file) and write the same output.
-    if ncbi.returncode and ours.returncode and ncbi.stdout == ours.stdout:
+    # An argument that both argument parsers reject, each with its own message.
+    if (ncbi.returncode == 1 and b"CArgException" in ncbi.stderr and ours.returncode == 2
+            and ours.stderr.startswith(b"error: ") and ncbi.stdout == ours.stdout):
+        return "arg-error"
+    # Both fail with the same status, each with its own message, and write the same output.
+    if ncbi.returncode and ncbi.returncode == ours.returncode and ncbi.stdout == ours.stdout:
         return "both-fail"
     return f"DIFF exit {ncbi.returncode}/{ours.returncode}"
 
@@ -230,19 +301,41 @@ def main() -> int:
         # Optional: environment variables, and a file (relative to the engine) given as
         # standard input.
         env = {**os.environ, **(extra[0] if extra else {})}
-        stdin = (ENGINE / extra[1]).read_bytes() if len(extra) > 1 else b""
+        # A path is written to standard input through a pipe; ("file", path) redirects
+        # standard input from the file.
+        source = extra[1] if len(extra) > 1 else None
+        stdin_file = source[1] if isinstance(source, tuple) else None
+        stdin = (ENGINE / source).read_bytes() if isinstance(source, str) else b""
+        fifos = extra[2] if len(extra) > 2 else []
         runs = []
         for label, command in (("ncbi", [str(args.bin_dir / "blastn")]), ("losat", [str(args.losat.resolve()), "blastn"])):
             # `{OUT}`: the -out file, whose existence and bytes join the stdout.
             out = args.work.resolve() / f"out.{label}"
             out.unlink(missing_ok=True)
-            run = subprocess.run([*command, *(str(out) if word == "{OUT}" else word for word in argv)], cwd=ENGINE,
-                                 capture_output=True, input=stdin, env=env)
+            writer = None
+            if fifos:
+                for fifo, _ in fifos:
+                    Path(fifo).unlink(missing_ok=True)
+                    os.mkfifo(fifo)
+                script = " && ".join(f"cat '{ENGINE / source}' > '{fifo}'" for fifo, source in fifos)
+                writer = subprocess.Popen(["sh", "-c", script])
+            words = [*command, *(str(out) if word == "{OUT}" else word for word in argv)]
+            try:
+                if stdin_file:
+                    with open(ENGINE / stdin_file, "rb") as handle:
+                        run = subprocess.run(words, cwd=ENGINE, capture_output=True, stdin=handle, env=env, timeout=60)
+                else:
+                    run = subprocess.run(words, cwd=ENGINE, capture_output=True, input=stdin, env=env, timeout=60)
+            except subprocess.TimeoutExpired as expired:
+                run = subprocess.CompletedProcess(expired.cmd, -9, b"", b"<timeout>")
+            if writer:
+                writer.kill()
+                writer.wait()
             if "{OUT}" in argv:
                 run.stdout += b"<out>" + (out.read_bytes() if out.exists() else b"<missing>")
             runs.append(run)
         ncbi, ours = runs
-        result = classify(ncbi, ours)
+        result = "timeout" if -9 in (ncbi.returncode, ours.returncode) else classify(ncbi, ours)
         if result != expect:
             unexpected.append(name)
         first = ours.stderr.decode(errors="replace").strip().splitlines()

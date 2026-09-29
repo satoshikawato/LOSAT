@@ -10,7 +10,15 @@ LOSAT の段階 E2e を実行する。BLASTP・TBLASTN・TBLASTX の検索のオ
 - TBLASTN：上の得点のオプションに加えて `-db_gencode`、`-max_intron_length`、`-xdrop_gap`、`-xdrop_gap_final`、`-sum_stats`、`-lcase_masking`、`-soft_masking`
 - TBLASTX：`-threshold`、`-word_size`、`-window_size`、`-seg`、`-query_gencode`、`-db_gencode`、`-culling_limit`、`-evalue`、`-max_target_seqs`
 
-S07+ で BLASTN に見つかった種類の差（NCBI が拒否する値を実行する、task の既定値の上書きの誤り、表に無い組の黙った代用、NCBI の検査の順序、16 ビットなどの値の型、e-value の書き方）が、これらにもあるかは確かめていない。これらのオプションは、アプリの検索画面（S12）に出る。
+S07+ で BLASTN に見つかった種類の差が、これらにもあるかは確かめていない（BLASTP は、BLOSUM62 と gap 11/1 以外の行列と gap、`-comp_based_stats 2` 以外を、既に明示的に拒否する。`LOSAT/src/algorithm/blastp/blast_engine.rs`）。S07+ の差は次のとおり（`docs/evidence/losat_web_e2c/AUTHORITY.md`）：
+
+- NCBI が拒否する値を実行する、task の既定値の上書きの誤り、表に無い組の黙った代用、16 ビットなどの値の型。
+- 引数の読み方：NCBI の整数の引数は `0x` の 16 進数も読み（`value_parsers.rs` の `ncbi_integer`）、実数の引数は最初の文字の規則と `strtod` で読む（`ncbi_double`）。BLASTN だけがこれらを使う。ほかの program の引数（`positive_usize` などの共有の parser）も同じにする。
+- 順序：`-outfmt` の解析、subject のファイル（レコードが無ければ engine error）、query のファイル、`-out`、警告、検査、「Query is Empty!」、LOSAT の上限の順（BLASTN の `run`）。開けないファイルは NCBI の文言（`cli.rs` の `inaccessible`）。`-` は標準入力・標準出力、`-query` の既定値は `-`。
+- `-outfmt` の NCBI の文言と終了コード（`blastn/hsp.rs` の `parse_blastn_output_format`）。
+- NCBI の program に無いオプションは削る（`AGENTS.md` の規則 5。BLASTN では `-verbose` など 4 つ）。
+
+これらのオプションは、アプリの検索画面（S12）に出る。
 
 1. **範囲を決める。** program ごとに、受け付けるオプションと、NCBI の引数の制約（`c++/src/algo/blast/blastinput/blast_args.cpp` など）、検査（`c++/src/algo/blast/core/blast_options.c` の `BLAST_ValidateOptions`）、task の既定値（`c++/src/algo/blast/api/blast_prot_options.cpp`、`blast_advprot_options.cpp` など）、表（`c++/src/algo/blast/core/blast_stat.c` の行列ごとの gap の表、`Blast_KarlinBlkGappedLoadFromTables`）の対応を記録する（`docs/evidence/losat_web_e2e/AUTHORITY.md`）。
 2. **sweep を作る。** `docs/evidence/losat_web_e2c/scoring_sweep.py` の形で、program ごとに、行列 × gap の組（NCBI の表にあるもの、無いもの、境界）、threshold と word size、`-comp_based_stats` の値、`-seg` の値、遺伝暗号（承認済みの例外の扱いは `AGENTS.md`）、e-value の書き方を、outfmt 0/6/7 で NCBI と比べる。比べる前に、今の commit の結果を記録する。

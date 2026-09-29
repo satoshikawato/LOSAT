@@ -219,6 +219,7 @@ mod tests {
         for bytes in [&b"\n>q\nACGT\n"[..], b">q\nAC\xffGT\n"] {
             let error = register("blastn", ROLE_QUERY, bytes).unwrap_err();
             assert!(error.contains("not supported by LOSAT's BLASTN"), "{error}");
+            assert!(error.contains("bytes that are not UTF-8"), "{error}");
         }
         let (_, response) = register("blastn", ROLE_QUERY, b" \n\t\n").unwrap();
         assert!(response.ends_with("\"records\":[]}"), "{response}");

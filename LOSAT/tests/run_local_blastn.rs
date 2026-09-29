@@ -220,3 +220,110 @@ fn unsupported_formats_fail_before_searching() {
         );
     }
 }
+
+// NCBI reference: ncbi-blast/c++/src/app/blast/blastn_app.cpp:261-274,299-300
+// ```c
+//         CBatchSizeMixer mixer(SplitQuery_GetChunkSize(opt.GetProgram())-1000);
+//     ...
+//                 if (!batch_size)
+//                     input.SetBatchSize(mixer.GetBatchSize(lcl_blast.GetNumExtensions()));
+// ```
+// The report of an invalid query depends on its query batch. The batches after the first
+// depend on NCBI's extension counts, so outfmt 0 fails when an invalid query follows the
+// first batch among valid queries; the tabular formats, which have no footer, do not.
+#[test]
+fn an_invalid_query_after_the_first_batch_fails_only_outfmt_0() {
+    let genome = fixture_sequence("LC738884.fasta");
+    let all_n = vec![b'N'; 40];
+    let query = TempFasta::new(
+        "blastn_batches.fna",
+        &[
+            ("first_batch", &genome[0..6_000]),
+            ("all_n", &all_n),
+            ("valid", &genome[10_000..12_000]),
+        ],
+    );
+    let subject = TempFasta::new("blastn_batches_subject.fna", &[("s", &genome[0..20_000])]);
+    let inputs = Inputs { query, subject };
+    let queries = read_records(&inputs.query.0);
+    let subjects = read_records(&inputs.subject.0);
+    for (outfmt, succeeds) in [("0", false), ("6", true), ("7", true)] {
+        let (mut output, mut diagnostics) = (Vec::new(), Vec::new());
+        let mut outputs = ReportOutputs {
+            formats: vec![FormatOutput {
+                outfmt,
+                sink: OutputSink::Writer(&mut output),
+            }],
+            diagnostics: &mut diagnostics,
+            hits: None,
+            observer: None,
+        };
+        let result = run_local_blastn(inputs.args(&[]), &queries, &subjects, &mut outputs);
+        drop(outputs);
+        assert_eq!(result.is_ok(), succeeds, "outfmt {outfmt}: {result:?}");
+        if !succeeds {
+            assert!(
+                output.is_empty(),
+                "outfmt {outfmt} writes nothing when it fails"
+            );
+        }
+    }
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:977,989
+// ```c
+//     sv.SetCoding(CSeq_data::e_Ncbi4na);
+//     ...
+//     sv.GetStrandData(strand, buffer);
+// ```
+// Without -lcase_masking, the letter case of the query changes nothing: both strands come
+// from the same case-free sequence data.
+#[test]
+fn a_lowercase_query_finds_the_same_hits_on_both_strands() {
+    let genome = fixture_sequence("LC738884.fasta");
+    let segment = &genome[20_000..22_000];
+    let reverse: Vec<u8> = segment
+        .iter()
+        .rev()
+        .map(|base| match base.to_ascii_uppercase() {
+            b'A' => b'T',
+            b'C' => b'G',
+            b'G' => b'C',
+            b'T' => b'A',
+            other => other,
+        })
+        .collect();
+    let subject = TempFasta::new(
+        "blastn_case_subject.fna",
+        &[("plus", segment), ("minus", &reverse)],
+    );
+    let lower: Vec<u8> = segment.to_ascii_lowercase();
+    let mut outputs = Vec::new();
+    for (name, sequence) in [("upper", segment), ("lower", &lower[..])] {
+        let query = TempFasta::new(&format!("blastn_case_{name}.fna"), &[("q", sequence)]);
+        // The subject file belongs to `subject`; the copy of its path in `inputs` is
+        // forgotten below so that it does not delete the file.
+        let inputs = Inputs {
+            query,
+            subject: TempFasta(subject.0.clone()),
+        };
+        for task in ["megablast", "blastn"] {
+            let run = inputs.run(&["6"], &["-task", task], false);
+            outputs.push((name, task, run.outputs[0].clone()));
+        }
+        std::mem::forget(inputs.subject);
+    }
+    for task in ["megablast", "blastn"] {
+        let rows: Vec<&Vec<u8>> = outputs
+            .iter()
+            .filter(|(_, t, _)| *t == task)
+            .map(|(_, _, rows)| rows)
+            .collect();
+        assert_eq!(rows[0], rows[1], "{task}: lowercase and uppercase queries");
+        let text = String::from_utf8_lossy(rows[0]);
+        assert!(
+            text.lines().any(|row| row.contains("\tminus\t")),
+            "{task}: the fixture has a minus-strand hit"
+        );
+    }
+}

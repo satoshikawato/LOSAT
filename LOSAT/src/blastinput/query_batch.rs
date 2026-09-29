@@ -4,12 +4,15 @@ use std::ops::Range;
 
 /// Splits queries of the given lengths into NCBI's query batches.
 ///
-/// NCBI reference: c++/src/algo/blast/blastinput/blast_input.cpp:137-165
+/// NCBI reference: c++/src/algo/blast/blastinput/blast_input.cpp:138-170
 /// ```c++
+///     TSeqPos size_read = 0;
+///     ...
 ///     while (size_read < GetBatchSize()) {
 ///         ...
-///             size_read += sequence::GetLength(*q->GetQuerySeqLoc(), q->GetScope());
-///             retval->AddQuery(q);
+///             size_read += sequence::GetLength(loc->GetWhole(), q->GetScope());
+///         ...
+///         retval->AddQuery(q);
 /// ```
 /// The query that reaches the batch size stays in the current batch. The batch size
 /// depends on the program (`blast_input_aux.cpp:104-119`).

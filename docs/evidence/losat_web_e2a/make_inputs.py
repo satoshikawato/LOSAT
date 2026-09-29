@@ -157,3 +157,16 @@ ambig = list(alpha_seq)
 ambig[10:15] = "NNNNN"
 ambig[30], ambig[50], ambig[60] = "R", "Y", "K"
 (out / "edge_ambig.fasta").write_text(">ambig alpha with N and IUPAC codes\n" + "".join(ambig) + "\n")
+
+# edge_batch_allN (added in S07, after the independent audit): an all-N query that fills
+# NCBI's first query batch (5000 residues for these subjects) on its own, then a valid query.
+(out / "edge_batch_allN.fasta").write_text(
+    ">batchN 5000 N filling the first query batch\n" + "N" * 5000 + "\n>" + alpha_def + "\n" + alpha_seq + "\n")
+
+# lcase_minus (added in S07, after the independent audit): a query with a lowercase run and
+# no -lcase_masking, whose only hit is on the minus strand of the subject.
+rng = random.Random(4096)
+plain = rnd(200)
+(out / "lcase_minus_query.fasta").write_text(
+    ">lcase_minus query with lowercase 91-110\n" + plain[:90] + plain[90:110].lower() + plain[110:] + "\n")
+(out / "lcase_minus_subject.fasta").write_text(">lcase_minus_s reverse complement of the query\n" + rc(plain) + "\n")

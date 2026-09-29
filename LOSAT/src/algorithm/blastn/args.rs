@@ -143,7 +143,7 @@ pub struct BlastnArgs {
     /// Output format (NCBI BLAST compatible).
     ///
     /// Supported formats:
-    ///   0 = Pairwise (not yet implemented; fails explicitly)
+    ///   0 = Pairwise (the NCBI report; the default)
     ///   6 = Tabular (tab-separated values)
     ///   7 = Tabular with comment lines (headers)
     ///

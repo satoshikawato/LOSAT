@@ -30,7 +30,9 @@ REPO = Path(__file__).resolve().parents[3]
 ENGINE = REPO / "LOSAT"
 MANIFEST = ENGINE / "tests/outfmt0_manifest.tsv"
 HASHES = ("stdout_sha256", "stdout_bytes", "stderr_sha256")
-REPORT_ENV = ("BL2SEQ_LEGACY", "CTOOLKIT_COMPATIBLE", "OLD_FSC")
+# BATCH_SIZE and CHUNK_SIZE change the query batches (blast_input_aux.cpp:86-90,
+# local_blast.cpp:59-62), and with them the report of an invalid query.
+REPORT_ENV = ("BL2SEQ_LEGACY", "CTOOLKIT_COMPATIBLE", "OLD_FSC", "BATCH_SIZE", "CHUNK_SIZE")
 
 
 def read_manifest() -> tuple[list[str], list[str], list[dict[str, str]]]:

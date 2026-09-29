@@ -4102,7 +4102,7 @@ fn blastn_pairwise_report(
     query_karlin: &[Option<KarlinParams>],
     query_titles: &[Arc<str>],
     subject_title: &str,
-) -> (Vec<BlastnPairwiseQuery>, BlastnPairwiseReport) {
+) -> Result<(Vec<BlastnPairwiseQuery>, BlastnPairwiseReport)> {
     let queries = report
         .queries
         .iter()
@@ -4125,39 +4125,7 @@ fn blastn_pairwise_report(
             },
         })
         .collect();
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_input_aux.cpp:105-113
-    // ```c
-    //     case eBlastn:
-    //         retval = 100000;
-    //         break;
-    //     ...
-    //     case eMegablast:
-    //         retval = 5000000;
-    // ```
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/local_blast.cpp:177-207
-    // ```c
-    //     int status = m_PrelimSearch->CheckInternalData();
-    //     if (status != 0)
-    //     {
-    //          // Search was not run, but we send back an empty CSearchResultSet.
-    //     ...
-    //               pair<double, double> tmp_pair(-1.0, -1.0);
-    //               CRef<CBlastAncillaryData>  tmp_ancillary_data(new CBlastAncillaryData(tmp_pair, tmp_pair, tmp_pair, 0));
-    // ```
-    // A batch whose queries are all invalid is not searched; its queries get the `-1`
-    // Karlin blocks.
-    let lengths: Vec<usize> = report
-        .queries
-        .iter()
-        .map(|query| query.seq().len())
-        .collect();
-    let batch_size = if report.megablast { 5_000_000 } else { 100_000 };
-    let mut unsearched = vec![false; lengths.len()];
-    for batch in query_batches(&lengths, batch_size) {
-        if query_karlin[batch.clone()].iter().all(Option::is_none) {
-            unsearched[batch].fill(true);
-        }
-    }
+    let unsearched = unsearched_queries(report, query_karlin)?;
     // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2910-2928
     // ```c
     //     m_NumDescriptions = m_DfltNumDescriptions;
@@ -4187,7 +4155,89 @@ fn blastn_pairwise_report(
         num_alignments,
         unsearched,
     };
-    (queries, pairwise_report)
+    Ok((queries, pairwise_report))
+}
+
+/// The queries that NCBI does not search because every query of their batch is invalid;
+/// the pairwise report gives them the `-1` Karlin blocks.
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/local_blast.cpp:177-207
+/// ```c
+///     int status = m_PrelimSearch->CheckInternalData();
+///     if (status != 0)
+///     {
+///          // Search was not run, but we send back an empty CSearchResultSet.
+///     ...
+///               pair<double, double> tmp_pair(-1.0, -1.0);
+///               CRef<CBlastAncillaryData>  tmp_ancillary_data(new CBlastAncillaryData(tmp_pair, tmp_pair, tmp_pair, 0));
+/// ```
+/// NCBI reference: ncbi-blast/c++/src/app/blast/blastn_app.cpp:261-274,299-300
+/// ```c
+///         CBatchSizeMixer mixer(SplitQuery_GetChunkSize(opt.GetProgram())-1000);
+///         int batch_size = m_CmdLineArgs->GetQueryBatchSize();
+///         if (batch_size) {
+///             input.SetBatchSize(batch_size);
+///         } else {
+///             Int8 total_len = formatter.GetDbTotalLength();
+///             if (total_len > 0) {
+///                 /* the optimal hits per batch scales with total db size */
+///                 mixer.SetTargetHits(total_len / 3000);
+///             }
+///             input.SetBatchSize(mixer.GetBatchSize());
+///         }
+///     ...
+///                 if (!batch_size)
+///                     input.SetBatchSize(mixer.GetBatchSize(lcl_blast.GetNumExtensions()));
+/// ```
+/// `GetQueryBatchSize` is 0 for blastn (blastn_args.cpp:131-135, blast_input_aux.cpp:99).
+/// The first batch therefore has `max(1000000, total / 3000) / 200` residues, within
+/// [100, chunk size - 1000] (blast_app_util.hpp:69-81, blast_app_util.cpp:65-81; chunk
+/// sizes 1000000 for blastn and 5000000 for megablast, local_blast.cpp:65-73). Each later
+/// batch size depends on the number of ungapped extensions of the previous batch, which
+/// LOSAT does not count. So the batches after the first are known only when their queries
+/// are all invalid (every such batch is then invalid) or all valid; otherwise the report
+/// fails instead of guessing.
+fn unsearched_queries(
+    report: &BlastnReportInputs<'_>,
+    query_karlin: &[Option<KarlinParams>],
+) -> Result<Vec<bool>> {
+    let lengths: Vec<usize> = report
+        .queries
+        .iter()
+        .map(|query| query.seq().len())
+        .collect();
+    let chunk_size: i64 = if report.megablast {
+        5_000_000
+    } else {
+        1_000_000
+    };
+    let total = report.db_len_total as i64;
+    let target = if total > 0 {
+        (total / 3000).max(1_000_000)
+    } else {
+        1_000_000
+    };
+    let first_size = (target / 200).clamp(100, chunk_size - 1000) as usize;
+    let first_end = query_batches(&lengths, first_size)
+        .first()
+        .map_or(0, |batch| batch.end);
+    let mut unsearched = vec![false; lengths.len()];
+    if query_karlin[..first_end].iter().all(Option::is_none) {
+        unsearched[..first_end].fill(true);
+    }
+    let later = &query_karlin[first_end..];
+    let later_invalid = later.iter().filter(|karlin| karlin.is_none()).count();
+    if later_invalid == later.len() {
+        unsearched[first_end..].fill(true);
+    } else if later_invalid > 0 {
+        let index = first_end + later.iter().position(Option::is_none).unwrap_or(0);
+        anyhow::bail!(
+            "outfmt 0 of the invalid query {} depends on NCBI BLAST+'s adaptive query batches, which LOSAT does not reproduce (it follows the first batch of {} residues and other queries are valid)",
+            index + 1,
+            first_size
+        );
+    }
+    Ok(unsearched)
 }
 
 fn post_process_hits_and_write(
@@ -4391,6 +4441,18 @@ fn post_process_hits_and_write(
     if let (Some(hits_sink), Some(hits)) = (outputs.hits.as_mut(), pairwise_hits.as_ref()) {
         hits_sink(hits);
     }
+    // Built before any format is written, so that a report that cannot be made fails the
+    // run without output.
+    let pairwise_data = if output_formats.contains(&BlastnOutputFormat::Pairwise) {
+        Some(blastn_pairwise_report(
+            report,
+            &query_karlin,
+            query_titles,
+            subject_title,
+        )?)
+    } else {
+        None
+    };
     let observer = &mut outputs.observer;
     for (format_index, (format, &output_format)) in
         outputs.formats.iter_mut().zip(output_formats).enumerate()
@@ -4408,8 +4470,9 @@ fn post_process_hits_and_write(
             let hits = pairwise_hits
                 .as_deref()
                 .expect("pairwise hits are built for outfmt 0");
-            let (queries, pairwise_report) =
-                blastn_pairwise_report(report, &query_karlin, query_titles, subject_title);
+            let (queries, pairwise_report) = pairwise_data
+                .as_ref()
+                .expect("the pairwise report data is built for outfmt 0");
             write_blastn_pairwise_report(
                 hits,
                 &mut writer,
@@ -4418,9 +4481,9 @@ fn post_process_hits_and_write(
                     show_frame: false,
                     ..PairwiseConfig::default()
                 },
-                &queries,
+                queries,
                 subject_ids,
-                &pairwise_report,
+                pairwise_report,
                 probe.as_mut(),
             )?;
         } else {

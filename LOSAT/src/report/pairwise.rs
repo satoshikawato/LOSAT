@@ -1404,26 +1404,9 @@ fn write_blastp_final_footer<W: Write>(
     Ok(())
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:372-424
-// ```c
-// CBlastFormatUtil::BlastPrintVersionInfo(m_Program, m_IsHTML, m_Outfile);
-// ...
-// CBlastFormatUtil::BlastPrintReference(...);
-// ...
-// CBlastFormatUtil::BlastPrintReference(..., CReference::eCompBasedStats, ...);
-// ```
-//
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:1520-1589
-// ```c
-// if ( (!m_IsBl2Seq || m_IsDbScan) && !(m_DisableKAStats || kIsGlobal) ) {
-//     x_DisplayDeflines(aln_set, itr_num, prev_seqids);
-// }
-// ...
-// display.DisplaySeqalign(m_Outfile);
-// x_PrintOneQueryFooter(*results.GetAncillaryData());
-// ```
 /// The database block of the epilog and the blank lines before the matrix line
-/// (align_format_util.cpp:503-579 and blast_format.cpp:2258-2262, quoted above).
+/// (align_format_util.cpp:503-579 and blast_format.cpp:2258-2262, quoted at
+/// `write_blastp_final_footer`).
 fn write_final_database_report<W: Write>(
     writer: &mut W,
     database_name: &str,
@@ -1450,6 +1433,24 @@ fn write_final_database_report<W: Write>(
     writeln!(writer)
 }
 
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:372-424
+// ```c
+// CBlastFormatUtil::BlastPrintVersionInfo(m_Program, m_IsHTML, m_Outfile);
+// ...
+// CBlastFormatUtil::BlastPrintReference(...);
+// ...
+// CBlastFormatUtil::BlastPrintReference(..., CReference::eCompBasedStats, ...);
+// ```
+//
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:1520-1589
+// ```c
+// if ( (!m_IsBl2Seq || m_IsDbScan) && !(m_DisableKAStats || kIsGlobal) ) {
+//     x_DisplayDeflines(aln_set, itr_num, prev_seqids);
+// }
+// ...
+// display.DisplaySeqalign(m_Outfile);
+// x_PrintOneQueryFooter(*results.GetAncillaryData());
+// ```
 pub fn write_blastp_pairwise_report<W: Write>(
     hits: &[PairwiseHit],
     writer: &mut W,
@@ -1751,8 +1752,15 @@ fn write_blastn_description_table<W: Write>(
             label.push(' ');
             label.push_str(title);
         }
-        // NCBI reference: c++/src/objtools/align_format/showdefline.cpp:914-931
-        // actual_line_component = line_component.substr(0,m_LineLen-line_length-3); actual_line_component += kEllipsis;
+        // NCBI reference: c++/src/objtools/align_format/showdefline.cpp:915-918,930
+        // ```c++
+        //         if(line_component.size()+line_length > m_LineLen){
+        //             actual_line_component = line_component.substr(0, m_LineLen -
+        //                                                           line_length - 3);
+        //             actual_line_component += kEllipsis;
+        //     ...
+        //         CAlignFormatUtil::AddSpace(out, m_LineLen - line_length);
+        // ```
         // String widths are byte counts, including non-ASCII FASTA titles.
         if label.len() > 68 {
             writer.write_all(&label.as_bytes()[..65])?;

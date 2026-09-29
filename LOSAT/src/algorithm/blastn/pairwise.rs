@@ -35,6 +35,15 @@ pub(crate) fn pairwise_hits(
     masks: &DisplayMasks<'_>,
 ) -> Result<Vec<PairwiseHit>> {
     let mut hits = Vec::new();
+    let query_masks: Vec<Vec<MaskedInterval>> = masks
+        .query
+        .iter()
+        .zip(queries)
+        .map(|(masks, query)| shown_query_masks(masks, query.seq().len()))
+        .collect();
+    let subject_masks: Option<Vec<Vec<MaskedInterval>>> = masks
+        .subject
+        .map(|masks| masks.iter().map(|masks| merged(masks)).collect());
     for hit_list in hit_lists.iter().flatten() {
         for hsp_list in &hit_list.hsplist_array {
             for hsp in &hsp_list.hsps {
@@ -46,10 +55,13 @@ pub(crate) fn pairwise_hits(
                     .context("BLASTN HSP of an unknown subject")?;
                 let (mut query_row, mut subject_row) =
                     displayed_rows(hsp, query.seq(), subject.seq())?;
-                let query_masks =
-                    shown_query_masks(&masks.query[hsp.q_idx as usize], query.seq().len());
-                lowercase_masked(&mut query_row, hsp.q_start, 1, &query_masks);
-                if let Some(subject_masks) = masks.subject {
+                lowercase_masked(
+                    &mut query_row,
+                    hsp.q_start,
+                    1,
+                    &query_masks[hsp.q_idx as usize],
+                );
+                if let Some(subject_masks) = &subject_masks {
                     let step = if hsp.s_start > hsp.s_end { -1 } else { 1 };
                     lowercase_masked(
                         &mut subject_row,
@@ -107,20 +119,25 @@ pub(crate) fn pairwise_hits(
 // complement of the query for a minus-strand HSP) against the plus-strand subject.
 // Reversing the alignment of a minus-strand HSP reverse-complements both rows. The
 // residues are the input letters in uppercase (NCBI's IUPAC sequence data); masking is
-// applied afterwards.
+// applied afterwards. Only the aligned segments are read: the segment of the minus-strand
+// context `[qs, qe)` is the reverse complement of query `[len - qe, len - qs)`.
 fn displayed_rows(hsp: &BlastnHsp, query: &[u8], subject: &[u8]) -> Result<(Vec<u8>, Vec<u8>)> {
-    let query = query.to_ascii_uppercase();
+    let (qs, qe) = (hsp.internal_q_offset_0, hsp.internal_q_end_0);
+    let (ss, se) = (hsp.internal_s_offset_0, hsp.internal_s_end_0);
+    ensure!(
+        qs <= qe && qe <= query.len() && ss <= se && se <= subject.len(),
+        "BLASTN HSP outside its sequences"
+    );
     let context = if hsp.query_frame < 0 {
-        reverse_complement(&query)
+        reverse_complement(&query[query.len() - qe..query.len() - qs])
     } else {
-        query
+        query[qs..qe].to_ascii_uppercase()
     };
-    let subject = subject.to_ascii_uppercase();
-    let ungapped = [GapEditOp::Sub(
-        (hsp.internal_q_end_0 - hsp.internal_q_offset_0) as u32,
-    )];
+    let subject = subject[ss..se].to_ascii_uppercase();
+    let ungapped = [GapEditOp::Sub((qe - qs) as u32)];
     let ops = hsp.gap_info.as_deref().unwrap_or(&ungapped);
-    let (mut q, mut s) = (hsp.internal_q_offset_0, hsp.internal_s_offset_0);
+    // Offsets into the two segments.
+    let (mut q, mut s) = (0, 0);
     let (mut query_row, mut subject_row) = (Vec::new(), Vec::new());
     for op in ops {
         let n = op.num() as usize;
@@ -151,7 +168,7 @@ fn displayed_rows(hsp: &BlastnHsp, query: &[u8], subject: &[u8]) -> Result<(Vec<
         }
     }
     ensure!(
-        q == hsp.internal_q_end_0 && s == hsp.internal_s_end_0,
+        q == context.len() && s == subject.len(),
         "BLASTN edit script does not span its HSP"
     );
     if hsp.query_frame < 0 {
@@ -161,21 +178,40 @@ fn displayed_rows(hsp: &BlastnHsp, query: &[u8], subject: &[u8]) -> Result<(Vec<
     Ok((query_row, subject_row))
 }
 
-// NCBI reference: c++/src/algo/blast/api/blast_aux.cpp:885-892
+// NCBI reference: c++/src/algo/blast/api/blast_aux.cpp:878-892
 // ```c++
-//             const TSeqRange kTarget(s_GetQueryRange...
-//             ...
+//         const TSeqRange kTarget((*query_interval)->GetFrom(),
+//                                 (*query_interval)->GetTo());
+//         ...
+//             TSeqRange range(Map(kTarget, masked_range));
 //             if (range.NotEmpty() && range != kTarget) {
 //                 ...
+//                 CRef<CSeqLocInfo> seqlocinfo
 //                     (new CSeqLocInfo(seqint, CSeqLocInfo::eFrameNotSet));
 // ```
 // A mask that covers the whole query is not reported, so it is not shown.
 fn shown_query_masks(masks: &[MaskedInterval], query_length: usize) -> Vec<MaskedInterval> {
-    masks
-        .iter()
-        .filter(|mask| !(mask.start == 0 && mask.end >= query_length))
-        .cloned()
-        .collect()
+    merged(
+        &masks
+            .iter()
+            .filter(|mask| !(mask.start == 0 && mask.end >= query_length))
+            .cloned()
+            .collect::<Vec<_>>(),
+    )
+}
+
+/// The masked positions as disjoint intervals in order, for `lowercase_masked`.
+fn merged(masks: &[MaskedInterval]) -> Vec<MaskedInterval> {
+    let mut sorted = masks.to_vec();
+    sorted.sort_by_key(|mask| mask.start);
+    let mut merged: Vec<MaskedInterval> = Vec::with_capacity(sorted.len());
+    for mask in sorted {
+        match merged.last_mut() {
+            Some(last) if mask.start <= last.end => last.end = last.end.max(mask.end),
+            _ => merged.push(mask),
+        }
+    }
+    merged
 }
 
 // NCBI reference: c++/src/objtools/align_format/showalign.cpp:2495-2521
@@ -188,15 +224,28 @@ fn shown_query_masks(masks: &[MaskedInterval], query_length: usize) -> Vec<Maske
 //                     actualSeq[i-start]=tolower((unsigned char) actualSeq[i-start]);
 // ```
 // The row's residue positions start at `first` (1-based) and move by `step`; a residue
-// whose position lies in a mask is shown in lowercase.
+// whose position lies in a mask is shown in lowercase. `masks` are disjoint and in order
+// (`merged`), so the masks that overlap the row's span are found by binary search.
 fn lowercase_masked(row: &mut [u8], first: usize, step: isize, masks: &[MaskedInterval]) {
-    if masks.is_empty() {
+    let residues = row.iter().filter(|&&residue| residue != b'-').count();
+    if masks.is_empty() || residues == 0 {
+        return;
+    }
+    let last = first as isize + step * (residues as isize - 1);
+    let (low, high) = (
+        (first as isize).min(last) - 1,
+        (first as isize).max(last) - 1,
+    );
+    let (low, high) = (low as usize, high as usize);
+    let candidates = &masks[masks.partition_point(|mask| mask.end <= low)
+        ..masks.partition_point(|mask| mask.start <= high)];
+    if candidates.is_empty() {
         return;
     }
     let mut position = first as isize;
     for residue in row.iter_mut().filter(|residue| **residue != b'-') {
         let zero_based = (position - 1) as usize;
-        if masks
+        if candidates
             .iter()
             .any(|mask| mask.start <= zero_based && zero_based < mask.end)
         {

@@ -1,0 +1,70 @@
+BLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/lcase_minus_subject.fasta).
+           1 sequences; 200 total letters
+
+
+
+Query= lcase_minus query with lowercase 91-110
+
+Length=200
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+lcase_minus_s reverse complement of the query                         361     4e-105
+
+
+> lcase_minus_s reverse complement of the query
+Length=200
+
+ Score = 361 bits (400),  Expect = 4e-105
+ Identities = 200/200 (100%), Gaps = 0/200 (0%)
+ Strand=Plus/Minus
+
+Query  1    AGTCCAGCGAGGGTAATTTAGTAATCTAGATTTGTAGTACCTGTGCTTAGGACGGGGAAT  60
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  200  AGTCCAGCGAGGGTAATTTAGTAATCTAGATTTGTAGTACCTGTGCTTAGGACGGGGAAT  141
+
+Query  61   TCCGATCATGCATATCCGCGAACCACTCTAGACCCTGCATACTTGCGGTAGGTTGCATCG  120
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  140  TCCGATCATGCATATCCGCGAACCACTCTAGACCCTGCATACTTGCGGTAGGTTGCATCG  81
+
+Query  121  TCTTTATCCCGGGCATCAGGAATATTTTTCATCTACGTGACATACAGACCCCACGGACAT  180
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  80   TCTTTATCCCGGGCATCAGGAATATTTTTCATCTACGTGACATACAGACCCCACGGACAT  21
+
+Query  181  ATGTAAGTCATGTTATTTGA  200
+            ||||||||||||||||||||
+Sbjct  20   ATGTAAGTCATGTTATTTGA  1
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 36100
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/lcase_minus_subject.fasta).
+    Posted date:  Unknown
+  Number of letters in database: 200
+  Number of sequences in database:  1
+
+
+
+Matrix: blastn matrix 2 -3
+Gap Penalties: Existence: 5, Extension: 2

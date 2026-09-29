@@ -4,17 +4,49 @@ use bio::io::fasta;
 
 /// The warning for a query whose ungapped Karlin-Altschul parameters cannot be computed.
 ///
-/// NCBI c++/src/algo/blast/core/blast_stat.c:2780-2792:
-/// if (loop_status && !Blast_QueryIsTranslated(program))
-///     Blast_MessageWrite(..., eBlastSevWarning, context,
-///                        kBlastErrMsg_CantCalculateUngappedKAParams);
-/// NCBI c++/src/algo/blast/core/blast_message.c:37-40:
-/// kBlastErrMsg_CantCalculateUngappedKAParams = "Could not calculate ...".
-/// NCBI c++/src/algo/blast/api/blast_setup_cxx.cpp:535-543:
-/// query_id = id->GetSeqIdString() + " " + kTitle;
-/// if (query_id.size() > 35) query_id = query_id.substr(0, 25) + ".. ";
-/// NCBI c++/src/algo/blast/api/blast_results.cpp:277-293:
-/// retval = m_Errors.GetQueryId() + ": " + warning + " ";
+/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:2783-2790
+/// ```c
+///       if (loop_status) {
+///           contexts[context].is_valid = FALSE;
+///           ...
+///           if (!Blast_QueryIsTranslated(program) ) {
+///              Blast_MessageWrite(blast_message, eBlastSevWarning, context,
+///              kBlastErrMsg_CantCalculateUngappedKAParams);
+///           }
+/// ```
+/// NCBI reference: c++/src/algo/blast/core/blast_message.c:37-40
+/// ```c
+/// const char* kBlastErrMsg_CantCalculateUngappedKAParams
+///     = "Could not calculate ungapped Karlin-Altschul parameters due "
+///       "to an invalid query sequence or its translation. Please verify the "
+///       "query sequence(s) and/or filtering options";
+/// ```
+/// NCBI reference: c++/src/algo/blast/api/blast_setup_cxx.cpp:534-543
+/// ```c++
+///                 const string kTitle = queries.GetTitle(index);
+///                 string query_id = id->GetSeqIdString();
+///                 if (kTitle != kEmptyStr) {
+///                     query_id += " " + kTitle;
+///                 }
+///                  if(query_id.size() > 35) {
+///                 	 query_id = query_id.substr(0, 25) + ".. ";
+///                  }
+///
+///                 messages[index].SetQueryId(query_id);
+/// ```
+/// NCBI reference: c++/src/algo/blast/api/blast_results.cpp:283-291
+/// ```c++
+///     string retval(m_Errors.GetQueryId());
+///     if ( !retval.empty() ) {    // in case the query id is not known
+///         retval += ": ";
+///     }
+///     ITERATE(TQueryMessages, iter, m_Errors) {
+///         if ((**iter).GetSeverity() == eBlastSevWarning) {
+///             retval += (*iter)->GetMessage(false) + " ";
+///         }
+///     }
+/// ```
+/// The local ID of an input query is `Query_<n>` and its title is the FASTA defline.
 ///
 /// `index` is the 0-based position of the query in the input; `program` is the lower-case
 /// program name that NCBI's diagnostics print (`[tblastn]`, `[blastn]`).

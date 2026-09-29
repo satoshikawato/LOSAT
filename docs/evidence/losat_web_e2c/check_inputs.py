@@ -147,7 +147,7 @@ def make_inputs(work: Path) -> None:
     first_subject = subject.split(">")[1]
     subject_seq = "".join(first_subject.split("\n")[1:])
     for index, defline in enumerate([">s1 abc.", ">s1 abc ,def", ">s1 a  b", ">s1 (a )", ">s1,,x", ">TPA: s1 x",
-                                     ">s1 x ; y", ">s1 E. coli sp.", ">s1 a ( b", ">s1 a&amp;b"]):
+                                     ">s1 x ; y", ">s1 E. coli sp.", ">s1 a ( b", ">s1 a&amp;b", ">, ,", ">; ;", ">, ;"]):
         (work / f"title_{index}.fa").write_text(f"{defline}\n{subject_seq}\n")
 
 
@@ -422,8 +422,10 @@ def cases(work: Path) -> list[tuple[str, list[str], str]]:
         ("audit10.nbsp.query", ["-query", f"{w}/nbsp_query.fa", *multi_s, "-outfmt", "6"], "losat-rejects"),
         ("audit10.ideographic_space.subject", ["-query", f"{F}/multi_query.fasta", "-subject", f"{w}/ideographic_space_subject.fa", "-outfmt", "6"], "losat-rejects"),
     ]
+    # 10 and 11 (the eleventh round): NCBI reads past the end of these titles and crashes.
     rows += [(f"audit10.title_{index}.fmt0", ["-query", f"{F}/multi_query.fasta", "-subject", f"{w}/title_{index}.fa"],
-              "losat-rejects" if index == 9 else "same") for index in range(10)]
+              "losat-rejects" if index in (9, 10, 11) else "same") for index in range(13)]
+    rows += [("audit11.title_overrun.fmt6", ["-query", f"{F}/multi_query.fasta", "-subject", f"{w}/title_10.fa", "-outfmt", "6"], "same")]
     rows += [("audit10.title_html.fmt6", ["-query", f"{F}/multi_query.fasta", "-subject", f"{w}/title_9.fa", "-outfmt", "6"], "same")]
     for task in ("megablast", "blastn"):
         for gaps in (["-reward", "1", "-penalty", "-2", "-gapopen", "5", "-gapextend", "2"],

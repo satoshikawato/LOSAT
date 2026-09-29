@@ -76,11 +76,11 @@ usage line in a message can list `-outfmt`; and an unknown program gives
 | `losat_web2_abi_version()` | — | `2` |
 | `losat_web2_alloc(len)` / `losat_web2_dealloc(ptr, len)` | — | memory for inputs (§6) |
 | `losat_web2_describe(program_ptr, program_len)` | program name | emits a *describe* JSON on stream 2 |
-| `losat_web2_validate(argv_ptr, argv_len)` | argv (§7) | `0` if the argv is valid, else `-1` with the CLI error |
-| `losat_web2_register(program_ptr, program_len, role, bytes_ptr, bytes_len)` | role `0` query, `1` subject; original FASTA bytes | handle ≥ 1; emits a *register* JSON on stream 2 |
+| `losat_web2_validate(argv_ptr, argv_len)` | argv (§7) | `0` if the argv is valid, else `-1` with the CLI error. For BLASTN it also checks the scoring options as NCBI does before a search and against NCBI's Karlin-Altschul tables, and returns NCBI's message (`BLAST query/options error: …`, or `BLAST engine error: Error: …` as for one query) |
+| `losat_web2_register(program_ptr, program_len, role, bytes_ptr, bytes_len)` | role `0` query, `1` subject; original FASTA bytes | handle ≥ 1; emits a *register* JSON on stream 2. A handle belongs to the program that registered it. For BLASTN, `-1` with a message containing `not supported by LOSAT's BLASTN` when a record is read differently by NCBI BLAST+ (a defline that is empty, starts with white space or has a control character or a non-ASCII byte; a record without residues; a residue other than an IUPAC letter; `U` is read as `T`) |
 | `losat_web2_release(handle)` | handle | `0` |
 | `losat_web2_scan_begin(parser)` / `losat_web2_scan_chunk(scanner, ptr, len)` / `losat_web2_scan_end(scanner)` | parser kind (`0` the `bio::io::fasta` reader of BLASTP, TBLASTN, BLASTN and TBLASTX; `1`, the NCBI-style reader of BLASTX, joins in SX); FASTA bytes in chunks of any size | `scan_begin` returns a scanner handle; `scan_end` emits a *scan* JSON on stream 2 (§9), or fails with the parser's error |
-| `losat_web2_run(argv_ptr, argv_len, query_handle, subject_handle)` | argv, handles | emits the program's supported format streams (0, 6, 7), stream 1 (BLASTP, TBLASTN and BLASTN; §8) and stream 3; returns after the run ends |
+| `losat_web2_run(argv_ptr, argv_len, query_handle, subject_handle)` | argv, handles registered for the argv's program | emits the program's supported format streams (0, 6, 7), stream 1 (BLASTP, TBLASTN and BLASTN; §8) and stream 3; returns after the run ends |
 | `losat_web2_last_error_ptr()` / `losat_web2_last_error_len()` | — | last error message |
 
 ## 5. Output streams

@@ -76,13 +76,18 @@ pub fn parse(words: &[&str]) -> Result<(Program, Commands), String> {
         .chain(words[1..].iter().copied());
     let cli: Cli =
         LOSAT::cli::try_parse_from(argv).map_err(|error| LOSAT::cli::render_message(&error))?;
-    // The scoring options that NCBI rejects, or that its Karlin-Altschul tables do not
-    // support, are rejected here with NCBI's message, before any input is read.
-    if let Commands::Blastn(args) = &cli.command {
-        LOSAT::algorithm::blastn::scoring::check_scoring(args)
+    Ok((program, cli.command))
+}
+
+/// `validate`: `parse`, then the BLASTN scoring options that NCBI rejects or that its
+/// Karlin-Altschul tables do not support, with NCBI's message (for a batch of one query).
+/// `run` leaves them to the engine, which reports them as the CLI does.
+pub fn validate(words: &[&str]) -> Result<(), String> {
+    if let (_, Commands::Blastn(args)) = parse(words)? {
+        LOSAT::algorithm::blastn::scoring::check_scoring(&args)
             .map_err(|error| format!("{error:#}"))?;
     }
-    Ok((program, cli.command))
+    Ok(())
 }
 
 /// Records the byte range of every HSP row (stream 6) and section (stream 0), and of
@@ -301,17 +306,21 @@ mod tests {
             assert!(error.contains("is not accepted"), "{owned}: {error}");
         }
         assert!(parse(&["blastx", "-query", "q", "-subject", "s"]).is_err());
-        // BLASTN scoring that NCBI rejects is rejected with NCBI's message.
+        // validate rejects BLASTN scoring that NCBI rejects, with NCBI's message.
         let blastn = ["blastn", "-query", "q", "-subject", "s", "-task", "blastn"];
-        assert!(parse(&blastn).is_ok());
+        assert!(validate(&blastn).is_ok());
+        let unsupported = [&blastn[..], &["-reward", "1", "-penalty", "-6"]].concat();
+        assert!(
+            parse(&unsupported).is_ok(),
+            "run leaves the check to the engine"
+        );
         let error =
-            parse(&[&blastn[..], &["-gapopen", "0", "-gapextend", "0"]].concat()).unwrap_err();
+            validate(&[&blastn[..], &["-gapopen", "0", "-gapextend", "0"]].concat()).unwrap_err();
         assert!(
             error.starts_with("BLAST query/options error: Greedy extension"),
             "{error}"
         );
-        let error =
-            parse(&[&blastn[..], &["-reward", "1", "-penalty", "-6"]].concat()).unwrap_err();
+        let error = validate(&unsupported).unwrap_err();
         assert!(
             error.starts_with("BLAST engine error: Error: Substitution scores 1 and -6"),
             "{error}"

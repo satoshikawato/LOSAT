@@ -120,7 +120,7 @@ pub unsafe extern "C" fn losat_web2_describe(program_ptr: *const u8, program_len
 #[no_mangle]
 pub unsafe extern "C" fn losat_web2_validate(argv_ptr: *const u8, argv_len: usize) -> i32 {
     guarded(|| {
-        run::parse(&words(text(argv_ptr, argv_len, "argv")?))?;
+        run::validate(&words(text(argv_ptr, argv_len, "argv")?))?;
         Ok(0)
     })
 }
@@ -213,9 +213,13 @@ pub unsafe extern "C" fn losat_web2_run(
 ) -> i32 {
     guarded(|| {
         let argv = words(text(argv_ptr, argv_len, "argv")?);
-        store::with_inputs(query_handle, subject_handle, |queries, subjects| {
-            run::run(&argv, queries, subjects)
-        })??;
+        let program = run::Program::parse(argv.first().copied().unwrap_or(""))?;
+        store::with_inputs(
+            program,
+            query_handle,
+            subject_handle,
+            |queries, subjects| run::run(&argv, queries, subjects),
+        )??;
         Ok(0)
     })
 }

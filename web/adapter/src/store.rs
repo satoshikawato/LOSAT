@@ -17,6 +17,8 @@ pub const ROLE_SUBJECT: u32 = 1;
 
 pub struct Registered {
     pub role: u32,
+    /// The program whose parser and input checks read the records; only its runs use them.
+    pub program: Program,
     pub records: Vec<fasta::Record>,
 }
 
@@ -35,7 +37,7 @@ fn store() -> &'static Mutex<Store> {
 /// scan of the same bytes (plan TD-8), keeps them, and returns the handle and the
 /// *register* JSON.
 pub fn register(program: &str, role: u32, bytes: &[u8]) -> Result<(u32, String), String> {
-    Program::parse(program)?;
+    let program = Program::parse(program)?;
     let role_name = match role {
         ROLE_QUERY => "query",
         ROLE_SUBJECT => "subject",
@@ -51,7 +53,7 @@ pub fn register(program: &str, role: u32, bytes: &[u8]) -> Result<(u32, String),
     })?;
     check_scan(role_name, &scanned, &records)?;
     // BLASTN rejects the inputs that NCBI BLAST+ reads differently from bio.
-    if program == "blastn" {
+    if program == Program::Blastn {
         LOSAT::algorithm::blastn::input::check_deflines(bytes, role_name)
             .and_then(|()| LOSAT::algorithm::blastn::input::check_residues(&records, role_name))
             .map_err(|error| format!("{error:#}"))?;
@@ -73,7 +75,14 @@ pub fn register(program: &str, role: u32, bytes: &[u8]) -> Result<(u32, String),
         let _ = write!(response, ",\"length\":{}}}", record.seq().len());
     }
     response.push_str("]}");
-    store.entries.insert(handle, Registered { role, records });
+    store.entries.insert(
+        handle,
+        Registered {
+            role,
+            program,
+            records,
+        },
+    );
     Ok((handle, response))
 }
 
@@ -116,20 +125,29 @@ pub fn release(handle: u32) -> Result<(), String> {
         .ok_or_else(|| format!("unknown input handle {handle}"))
 }
 
-/// Calls `work` with the records of a query handle and a subject handle.
+/// Calls `work` with the records of a query handle and a subject handle registered for
+/// `program`.
 pub fn with_inputs<R>(
+    program: Program,
     query: u32,
     subject: u32,
     work: impl FnOnce(&[fasta::Record], &[fasta::Record]) -> R,
 ) -> Result<R, String> {
     let store = store().lock().expect("input store");
     let get = |handle: u32, role: u32, name: &str| {
-        store
+        let entry = store
             .entries
             .get(&handle)
             .filter(|entry| entry.role == role)
-            .map(|entry| entry.records.as_slice())
-            .ok_or_else(|| format!("{handle} is not a registered {name} handle"))
+            .ok_or_else(|| format!("{handle} is not a registered {name} handle"))?;
+        if entry.program != program {
+            return Err(format!(
+                "{name} handle {handle} was registered for {}, not {}",
+                entry.program.name(),
+                program.name()
+            ));
+        }
+        Ok(entry.records.as_slice())
     };
     let queries = get(query, ROLE_QUERY, "query")?;
     let subjects = get(subject, ROLE_SUBJECT, "subject")?;
@@ -171,6 +189,13 @@ mod tests {
         let error = register("blastn", ROLE_QUERY, bytes).unwrap_err();
         assert!(error.contains("not supported by LOSAT's BLASTN"), "{error}");
         assert!(register("blastn", ROLE_QUERY, b">q t\nACGUT\n").is_ok());
-        assert!(register("blastp", ROLE_QUERY, bytes).is_ok());
+        // Another program's handle cannot bring the record to a BLASTN run.
+        let (query, _) = register("blastp", ROLE_QUERY, bytes).unwrap();
+        let (subject, _) = register("blastn", ROLE_SUBJECT, b">s\nACGT\n").unwrap();
+        let error = with_inputs(Program::Blastn, query, subject, |_, _| ()).unwrap_err();
+        assert!(
+            error.contains("registered for blastp, not blastn"),
+            "{error}"
+        );
     }
 }

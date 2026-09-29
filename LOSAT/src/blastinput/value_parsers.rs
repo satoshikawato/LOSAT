@@ -137,10 +137,32 @@ pub fn blastn_reward(value: &str) -> Result<i32, String> {
     }
     Ok(n)
 }
-/// A BLASTN e-value. NCBI's argument takes any value that `NStr::StringToDouble` reads, and
-/// its option check (`blastn/scoring.rs`) rejects 0 or less; LOSAT reads decimal numbers
-/// (with `-inf`), rejects NaN here and +infinity after NCBI's checks.
+/// A BLASTN e-value. NCBI's argument takes any value that `NStr::StringToDouble` reads
+/// (its first character is a digit, a point or a sign), and its option check
+/// (`blastn/scoring.rs`) rejects 0 or less; LOSAT reads decimal numbers (and `+inf`,
+/// `-inf`), and rejects NaN here and infinity after NCBI's checks.
+///
+/// NCBI reference: c++/src/corelib/ncbiargs.cpp:464
+/// ```c
+///         m_Double = NStr::StringToDouble(value, NStr::fDecimalPosixOrLocal);
+/// ```
+/// NCBI reference: c++/src/corelib/ncbistr.cpp:1312-1318
+/// ```c
+///     // Because strtod() may just skip such symbols.
+///     if (!(flags & NStr::fAllowLeadingSymbols)) {
+///         char c = str[pos];
+///         if ( !isdigit((unsigned char)c)  &&  !s_IsDecimalPoint(c,flags)  &&  c != '-'  &&  c != '+') {
+///             S2N_CONVERT_ERROR_INVAL(double);
+///         }
+/// ```
 pub fn blastn_evalue(value: &str) -> Result<f64, String> {
+    if !value
+        .chars()
+        .next()
+        .is_some_and(|first| first.is_ascii_digit() || matches!(first, '.' | '-' | '+'))
+    {
+        return Err("expected a number".into());
+    }
     let n = value.parse::<f64>().map_err(|_| {
         "expected a decimal number (other forms that NCBI BLAST+ reads are not supported by LOSAT's BLASTN)"
     })?;

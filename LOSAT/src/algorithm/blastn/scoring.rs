@@ -91,7 +91,7 @@ fn scoring_spec(args: &BlastnArgs) -> NuclScoringSpec {
 /// LOSAT's limits come after NCBI's checks, for options that NCBI runs: a reward of 0 or
 /// less (NCBI's rmblastn matrix scoring when the penalty is 0 too, otherwise no valid
 /// query),
-/// an infinite e-value, and scores whose range (reward - penalty) is above
+/// an infinite or NaN e-value, and scores whose range (reward - penalty) is above
 /// `MAX_SCORE_RANGE`, where LOSAT's Karlin-Altschul computation has not been compared with
 /// NCBI's; that range limit comes before NCBI's Karlin-Altschul table error, which needs
 /// that computation. The limit on greedy gap costs follows the table check
@@ -118,8 +118,8 @@ pub fn check_scoring_options(args: &BlastnArgs) -> anyhow::Result<()> {
                 spec.reward
             );
         }
-        if args.evalue.is_infinite() {
-            anyhow::bail!("an infinite e-value is not supported by LOSAT's BLASTN");
+        if !args.evalue.is_finite() {
+            anyhow::bail!("an infinite or NaN e-value is not supported by LOSAT's BLASTN");
         }
         let range = i64::from(spec.reward) - i64::from(spec.penalty);
         if range > MAX_SCORE_RANGE {

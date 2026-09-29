@@ -19,9 +19,10 @@ use anyhow::{bail, Result};
 use bio::io::fasta;
 
 /// Why a FASTA file that `bio` cannot parse is not read: `bio` fails on text before the
-/// first defline (blank lines, `;` comments, a byte order mark), which NCBI reads.
-pub const TEXT_BEFORE_DEFLINE: &str =
-    "text before the first defline, which NCBI BLAST+ may read, is not supported by LOSAT's BLASTN";
+/// first defline (blank lines, `;` comments, a byte order mark) and on bytes that are not
+/// UTF-8, which NCBI reads.
+pub const UNREADABLE_FASTA: &str =
+    "FASTA that bio cannot read (such as text before the first defline or bytes that are not UTF-8), which NCBI BLAST+ may read, is not supported by LOSAT's BLASTN";
 
 /// Whether a FASTA file has no character but white space: NCBI reads it as a file without
 /// records (an empty query, or no subject).

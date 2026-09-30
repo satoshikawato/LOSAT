@@ -466,6 +466,10 @@ def cases(work: Path) -> list[tuple[str, list[str], str]]:
     rows += [(f"audit14.iupac_seed.{name}", ["-query", f"{w}/iupac_seed_q.fa", "-subject", f"{w}/iupac_seed_s.fa", *options], "same")
              for name, options in (("fmt0", []), ("fmt6", ["-outfmt", "6"]), ("fmt7", ["-outfmt", "7"]),
                                    ("word_size_24", ["-word_size", "24", "-outfmt", "6"]))]
+    # The fifteenth audit round: e-values at NCBI's smallest float (1e-297) on two genomes,
+    # where NCBI's (Int4) of an infinite score is INT_MIN and its cutoff stays 1.
+    rows += [(f"audit15.small_evalue.{evalue}", ["-query", "tests/fasta/AP027131.fasta", "-subject", "tests/fasta/AP027132.fasta", "-evalue", evalue, "-outfmt", "6"], "same")
+             for evalue in ("1e-300", "1e-297", "1e-295")]
     rows += [("audit13.one_letter_minus.fmt0", ["-query", f"{w}/one_letter_q.fa", "-subject", f"{w}/one_letter_s.fa", "-task", "blastn", "-word_size", "4"], "same")]
     rows += [(f"audit12.score0.fmt{outfmt}", ["-query", f"{w}/score0_q.fa", "-subject", f"{w}/score0_s.fa", "-task", "blastn", "-word_size", "4", "-evalue", "1e6", "-outfmt", outfmt], "same")
              for outfmt in ("0", "6", "7")]

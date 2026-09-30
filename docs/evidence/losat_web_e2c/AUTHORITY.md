@@ -212,3 +212,11 @@ ABI v1 は `run_local` で CLI と同じエンジンを使うので、エンジ�
 LOSAT：`extension.rs` の `build_compressed_query`（`BlastCompressBlastnaSequence`）と `SmallNaWord`（2 つの延長）を移植し、`run.rs` が NCBI と同じ条件で延長を選び、小さい表では `type_of_word` の確かめを常に行う。`type_of_word` は、NCBI の `Int4 ext_max` が負になる（word が context や scan の範囲を越える）場合も NCBI と同じく扱う。`slice_sweep.py` に `iupac` の pool（1〜3 の IUPAC の文字を持つ 30〜100 文字の query と、その 2〜4 の写しを持つ subject）を足した。各 300 組で、第 13 回の LOSAT は既定で 3 組、`-word_size 24` で 4 組、`-task blastn` で 0 組が NCBI と違い、変更後はどれも 0 組。
 
 第 13 回の ` Strand=` の引用を、outfmt 0 の経路（`s_DisplayIdentityInfo`、`showalign.cpp:4011-4021`）に直した。ABI v2 の HSP レコードは、1 文字の HSP の鎖を座標で表せない（`start` = `end`）ことを `docs/web/abi_v2.md` §8 に書き、鎖の欄を足すかを S13 の指示書に書いた。
+
+## R. 第 15 回の独立監査で見つかった、以前からの差
+
+| NCBI | 振る舞い | LOSAT |
+|---|---|---|
+| `blast_stat.c:4047-4049,4059-4061`（`BlastKarlinEtoS_simple`）、`blast_stat.c:4108-4129`（`BLAST_Cutoffs`） | e-value を 1e-297（`kSmallFloat`）以上にしてから `S = (Int4) (ceil( log((double)(K * searchsp / E)) / Lambda ))`。`K * searchsp` が約 1.8e11 を超えると `K * searchsp / E` が無限大になり、無限大の `Int4` への変換は C では未定義で、2.17.0 の x86-64 の実行ファイル（`cvttsd2si`）では `INT_MIN`。`BLAST_Cutoffs` は初めの 1 より大きいときだけ置き換えるので、cutoff は 1 のまま | Rust の `as` は無限大を `i32::MAX` にするので、cutoff に届かず、ヒットが無かった（例：AP027131 × AP027132、`-evalue 1e-300` で NCBI の 4 行に 0 行。MG1655 × EDL933、`-evalue 1e-296` で 465 行に 0 行）。`ncbi_cutoffs.rs` の `ncbi_int4_from_double` が、x86-64 の NCBI と同じく、NaN と `Int4` の外の値を `INT_MIN` にする |
+
+オラクルの実行ファイルが x86-64 なので、その変換に合わせた（ほかの CPU の NCBI BLAST+ では違いうる）。S07++ で移植する `CBatchSizeMixer` の `(Int4)` の変換も同じ関数を使う（指示書）。第 15 回の監査は、2 つの task の two-hit の経路（`check_double`）は BLASTN では使われない（`BLAST_WINDOW_SIZE_NUCL`・`BLAST_WINDOW_SIZE_MEGABLAST` が 0、`blast_options.h:58-59`）ことも確かめた。

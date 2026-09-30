@@ -99,3 +99,13 @@ pre.output {
 .error {
   color: #a00;
 }
+
+.storage {
+  margin-top: 24px;
+  color: var(--muted);
+  font-size: 0.9em;
+}
+
+.storage h2 {
+  font-size: 1em;
+}

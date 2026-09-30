@@ -1,0 +1,140 @@
+
+Running 30 tests using 2 workers
+
+pass [opfs] write and seal: a block reads back exactly the bytes appended to it
+pass [opfs] read: any range of a sealed block, and nothing beyond its end
+pass [opfs] write: the store keeps a copy, so the caller may reuse its buffer
+pass [opfs] staging: a block cannot be read before it is sealed
+pass [opfs] seal: a sealed block takes no more bytes and cannot be sealed again
+pass [run output] every stream arrives in order and the run commits
+pass [opfs] discard: a staged or sealed block disappears and its bytes are freed
+pass [opfs] create: a path that exists cannot be created again
+pass [opfs] removeAll: removes one directory, sealed or not, and leaves the rest
+pass [opfs] paths: empty and relative names are rejected
+pass [opfs] an empty block can be sealed and read
+pass [run output] many small chunks and one large chunk arrive unchanged
+pass [run output] a run without output commits with empty outputs
+pass [run output] staging: a run cannot be read before it is committed, and the commit waits for end
+pass [run output] an end whose totals disagree fails the commit and discards the run
+pass [opfs] a large block: 48 MiB in 1 MiB appends reads back unchanged
+pass [opfs] storage full: an append fails with StorageFullError, the block can only be discarded, and sealed blocks stay readable
+pass [run output] a message outside the protocol fails the commit
+  ✓   1 [chromium] › tests/e2e/contracts.spec.ts:32:3 › BlockStore contract: opfs store in a dedicated worker (2.9s)
+pass [memory] write and seal: a block reads back exactly the bytes appended to it
+pass [memory] read: any range of a sealed block, and nothing beyond its end
+pass [memory] write: the store keeps a copy, so the caller may reuse its buffer
+pass [memory] staging: a block cannot be read before it is sealed
+pass [memory] seal: a sealed block takes no more bytes and cannot be sealed again
+pass [memory] discard: a staged or sealed block disappears and its bytes are freed
+pass [memory] create: a path that exists cannot be created again
+pass [memory] removeAll: removes one directory, sealed or not, and leaves the rest
+pass [memory] paths: empty and relative names are rejected
+pass [memory] an empty block can be sealed and read
+pass [run output] discard drops a staged run and ignores its late chunks
+pass [memory] a large block: 48 MiB in 1 MiB appends reads back unchanged
+pass [memory] storage full: an append fails with StorageFullError, the block can only be discarded, and sealed blocks stay readable
+  ✓   3 [chromium] › tests/e2e/contracts.spec.ts:32:3 › BlockStore contract: memory store in a dedicated worker (568ms)
+pass [run output] a committed run is kept by discard and removed by delete
+pass [run output] two staged runs keep their outputs apart
+pass [run output] the writer refuses to write after end
+pass [run output] storage full: the run fails with the reason, and committed runs stay readable
+  ✓   2 [chromium] › tests/e2e/contracts.spec.ts:40:1 › run output contract: a writer in its own worker and the real Data worker (OPFS) (4.5s)
+  ✓   4 [chromium] › tests/e2e/storage.spec.ts:23:1 › a tab keeps its outputs in OPFS under tmp/<session>/runs/<run>/, named by tokens only (1.6s)
+  ✓   5 [chromium] › tests/e2e/storage.spec.ts:46:3 › the next tab removes the data of a tab that is killed, and keeps its own (4.0s)
+  ✓   6 [chromium] › tests/e2e/storage.spec.ts:46:3 › the next tab removes the data of a tab that is closed, and keeps its own (3.5s)
+  ✓   8 [chromium] › tests/e2e/storage.spec.ts:106:1 › two tabs that start at the same time remove an abandoned session once and keep each other (3.2s)
+  ✓   7 [chromium] › tests/e2e/storage.spec.ts:79:1 › two open tabs, started one after the other, never remove each other's data (5.4s)
+  ✓   9 [chromium] › tests/e2e/storage.spec.ts:127:1 › a stopped (frozen) tab keeps its data while another tab starts (2.5s)
+  ✓  10 [chromium] › tests/e2e/storage.spec.ts:146:1 › a run that runs out of storage fails with the reason; earlier results stay and later runs work (4.0s)
+pass [opfs] write and seal: a block reads back exactly the bytes appended to it
+pass [opfs] read: any range of a sealed block, and nothing beyond its end
+pass [opfs] write: the store keeps a copy, so the caller may reuse its buffer
+pass [opfs] staging: a block cannot be read before it is sealed
+pass [opfs] seal: a sealed block takes no more bytes and cannot be sealed again
+pass [opfs] discard: a staged or sealed block disappears and its bytes are freed
+pass [opfs] create: a path that exists cannot be created again
+pass [opfs] removeAll: removes one directory, sealed or not, and leaves the rest
+pass [opfs] paths: empty and relative names are rejected
+pass [opfs] an empty block can be sealed and read
+pass [opfs] a large block: 48 MiB in 1 MiB appends reads back unchanged
+pass [opfs] storage full: an append fails with StorageFullError, the block can only be discarded, and sealed blocks stay readable
+  ✓  11 [chromium] › tests/e2e/contracts.spec.ts:32:3 › BlockStore contract: opfs store in a dedicated worker (2.9s)
+pass [memory] write and seal: a block reads back exactly the bytes appended to it
+pass [memory] read: any range of a sealed block, and nothing beyond its end
+pass [memory] write: the store keeps a copy, so the caller may reuse its buffer
+pass [memory] staging: a block cannot be read before it is sealed
+pass [memory] seal: a sealed block takes no more bytes and cannot be sealed again
+pass [memory] discard: a staged or sealed block disappears and its bytes are freed
+pass [memory] create: a path that exists cannot be created again
+pass [memory] removeAll: removes one directory, sealed or not, and leaves the rest
+pass [memory] paths: empty and relative names are rejected
+pass [memory] an empty block can be sealed and read
+pass [memory] a large block: 48 MiB in 1 MiB appends reads back unchanged
+pass [memory] storage full: an append fails with StorageFullError, the block can only be discarded, and sealed blocks stay readable
+  ✓  13 [chromium] › tests/e2e/contracts.spec.ts:32:3 › BlockStore contract: memory store in a dedicated worker (552ms)
+pass [run output] every stream arrives in order and the run commits
+pass [run output] many small chunks and one large chunk arrive unchanged
+pass [run output] a run without output commits with empty outputs
+  ✓  14 [chromium] › tests/e2e/storage.spec.ts:23:1 › a tab keeps its outputs in OPFS under tmp/<session>/runs/<run>/, named by tokens only (2.1s)
+pass [run output] staging: a run cannot be read before it is committed, and the commit waits for end
+pass [run output] an end whose totals disagree fails the commit and discards the run
+pass [run output] a message outside the protocol fails the commit
+pass [run output] discard drops a staged run and ignores its late chunks
+pass [run output] a committed run is kept by discard and removed by delete
+pass [run output] two staged runs keep their outputs apart
+pass [run output] the writer refuses to write after end
+pass [run output] storage full: the run fails with the reason, and committed runs stay readable
+  ✓  12 [chromium] › tests/e2e/contracts.spec.ts:40:1 › run output contract: a writer in its own worker and the real Data worker (OPFS) (3.6s)
+  ✓  15 [chromium] › tests/e2e/storage.spec.ts:46:3 › the next tab removes the data of a tab that is killed, and keeps its own (4.1s)
+  ✓  16 [chromium] › tests/e2e/storage.spec.ts:46:3 › the next tab removes the data of a tab that is closed, and keeps its own (4.0s)
+  ✓  18 [chromium] › tests/e2e/storage.spec.ts:106:1 › two tabs that start at the same time remove an abandoned session once and keep each other (2.5s)
+  ✓  17 [chromium] › tests/e2e/storage.spec.ts:79:1 › two open tabs, started one after the other, never remove each other's data (4.7s)
+  ✓  19 [chromium] › tests/e2e/storage.spec.ts:127:1 › a stopped (frozen) tab keeps its data while another tab starts (2.8s)
+  ✓  20 [chromium] › tests/e2e/storage.spec.ts:146:1 › a run that runs out of storage fails with the reason; earlier results stay and later runs work (4.7s)
+pass [opfs] write and seal: a block reads back exactly the bytes appended to it
+pass [opfs] read: any range of a sealed block, and nothing beyond its end
+pass [opfs] write: the store keeps a copy, so the caller may reuse its buffer
+pass [opfs] staging: a block cannot be read before it is sealed
+pass [opfs] seal: a sealed block takes no more bytes and cannot be sealed again
+pass [opfs] discard: a staged or sealed block disappears and its bytes are freed
+pass [opfs] create: a path that exists cannot be created again
+pass [opfs] removeAll: removes one directory, sealed or not, and leaves the rest
+pass [opfs] paths: empty and relative names are rejected
+pass [opfs] an empty block can be sealed and read
+pass [opfs] a large block: 48 MiB in 1 MiB appends reads back unchanged
+pass [opfs] storage full: an append fails with StorageFullError, the block can only be discarded, and sealed blocks stay readable
+  ✓  21 [chromium] › tests/e2e/contracts.spec.ts:32:3 › BlockStore contract: opfs store in a dedicated worker (3.6s)
+pass [run output] every stream arrives in order and the run commits
+pass [memory] write and seal: a block reads back exactly the bytes appended to it
+pass [memory] read: any range of a sealed block, and nothing beyond its end
+pass [memory] write: the store keeps a copy, so the caller may reuse its buffer
+pass [memory] staging: a block cannot be read before it is sealed
+pass [memory] seal: a sealed block takes no more bytes and cannot be sealed again
+pass [memory] discard: a staged or sealed block disappears and its bytes are freed
+pass [memory] create: a path that exists cannot be created again
+pass [memory] removeAll: removes one directory, sealed or not, and leaves the rest
+pass [memory] paths: empty and relative names are rejected
+pass [memory] an empty block can be sealed and read
+pass [memory] a large block: 48 MiB in 1 MiB appends reads back unchanged
+pass [memory] storage full: an append fails with StorageFullError, the block can only be discarded, and sealed blocks stay readable
+  ✓  23 [chromium] › tests/e2e/contracts.spec.ts:32:3 › BlockStore contract: memory store in a dedicated worker (727ms)
+pass [run output] many small chunks and one large chunk arrive unchanged
+pass [run output] a run without output commits with empty outputs
+pass [run output] staging: a run cannot be read before it is committed, and the commit waits for end
+pass [run output] an end whose totals disagree fails the commit and discards the run
+pass [run output] a message outside the protocol fails the commit
+  ✓  24 [chromium] › tests/e2e/storage.spec.ts:23:1 › a tab keeps its outputs in OPFS under tmp/<session>/runs/<run>/, named by tokens only (2.3s)
+pass [run output] discard drops a staged run and ignores its late chunks
+pass [run output] a committed run is kept by discard and removed by delete
+pass [run output] two staged runs keep their outputs apart
+pass [run output] the writer refuses to write after end
+pass [run output] storage full: the run fails with the reason, and committed runs stay readable
+  ✓  22 [chromium] › tests/e2e/contracts.spec.ts:40:1 › run output contract: a writer in its own worker and the real Data worker (OPFS) (5.4s)
+  ✓  25 [chromium] › tests/e2e/storage.spec.ts:46:3 › the next tab removes the data of a tab that is killed, and keeps its own (3.7s)
+  ✓  26 [chromium] › tests/e2e/storage.spec.ts:46:3 › the next tab removes the data of a tab that is closed, and keeps its own (3.7s)
+  ✓  28 [chromium] › tests/e2e/storage.spec.ts:106:1 › two tabs that start at the same time remove an abandoned session once and keep each other (3.1s)
+  ✓  27 [chromium] › tests/e2e/storage.spec.ts:79:1 › two open tabs, started one after the other, never remove each other's data (6.6s)
+  ✓  29 [chromium] › tests/e2e/storage.spec.ts:127:1 › a stopped (frozen) tab keeps its data while another tab starts (3.2s)
+  ✓  30 [chromium] › tests/e2e/storage.spec.ts:146:1 › a run that runs out of storage fails with the reason; earlier results stay and later runs work (4.2s)
+
+  30 passed (1.2m)

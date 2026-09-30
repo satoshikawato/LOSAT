@@ -1,8 +1,8 @@
 // Composition root: the only module that chooses implementations for the ports.
 import { Coordinator } from './application/coordinator';
-import { sha256Hex, browserDownloader } from './infra/browser/platform';
+import { browserDownloader } from './infra/browser/platform';
+import { startDataWorker } from './infra/data-worker/gateway';
 import { FakeEngine } from './infra/fake/fake-engine';
-import { MemoryDataGateway } from './infra/memory/memory-data-gateway';
 
 export interface App {
   readonly coordinator: Coordinator;
@@ -14,9 +14,8 @@ export function createApp(): App {
   // The Wasm engine replaces FakeEngine in W1 (docs/losat_web_gui_plan.md §7).
   const coordinator = new Coordinator({
     engine: new FakeEngine({ phaseDelayMs: 50 }),
-    data: new MemoryDataGateway(),
+    data: startDataWorker(),
     downloader: browserDownloader,
-    digest: sha256Hex,
     now: () => Date.now(),
     newRunId: () => crypto.randomUUID(),
   });

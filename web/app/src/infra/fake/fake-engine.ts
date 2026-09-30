@@ -1,19 +1,23 @@
 // FakeEngine: a stand-in for the real engine until the Wasm engine exists (plan §7, W0).
 // Its outputs are not search results and say so on every line. It exists so that the
 // application layer and UI can be built and tested against the EngineGateway contract.
+import { recordMismatch } from '../../domain/dataset';
 import { OUTPUT_FORMATS } from '../../domain/output-format';
 import { PROGRAMS, type ProgramId } from '../../domain/programs';
 import {
+  InputMismatchError,
   RunCancelledError,
   type EngineGateway,
   type EnginePhase,
   type EngineRunRequest,
   type HspRecord,
   type ProgramDescription,
-  type RunSink,
   type RuntimeInfo,
   type ValidationResult,
 } from '../../ports/engine';
+import { DIAGNOSTICS_STREAM, HITS_STREAM } from '../../ports/run-output';
+import { RunOutputWriter } from '../run-output/writer';
+import { fakeRecordKeys } from './fake-fasta';
 
 export const FAKE_MARKER = 'FAKE ENGINE OUTPUT - not a LOSAT search result';
 
@@ -40,17 +44,20 @@ export class FakeEngine implements EngineGateway {
     return { ok: true };
   }
 
-  async run(request: EngineRunRequest, sink: RunSink, onPhase: (phase: EnginePhase) => void): Promise<RuntimeInfo> {
+  async run(request: EngineRunRequest, output: MessagePort, onPhase: (phase: EnginePhase) => void): Promise<RuntimeInfo> {
     const { runId } = request;
     for (const phase of ['preparing', 'running', 'finalizing'] as const) {
       await this.pause();
       if (this.cancelled.delete(runId)) throw new RunCancelledError(runId);
       onPhase(phase);
+      if (phase === 'preparing') this.register(request);
     }
-    if (request.query.length === 0 || request.subject.length === 0) {
+    if (request.query.bytes.length === 0 || request.subject.bytes.length === 0) {
       throw new Error('No sequence input was provided');
     }
-    this.writeOutputs(request, sink);
+    const writer = new RunOutputWriter(output);
+    this.writeOutputs(request, writer);
+    writer.end();
     return { path: 'fake', threads: 1, engineBuild: 'fake-engine' };
   }
 
@@ -58,14 +65,23 @@ export class FakeEngine implements EngineGateway {
     this.cancelled.add(runId);
   }
 
-  private writeOutputs(request: EngineRunRequest, sink: RunSink): void {
+  /** Reads the inputs as the Engine worker's `register` does and checks the record tables. */
+  private register(request: EngineRunRequest): void {
+    for (const role of ['query', 'subject'] as const) {
+      const input = request[role];
+      const mismatch = recordMismatch(input.records, fakeRecordKeys(input.bytes));
+      if (mismatch !== undefined) throw new InputMismatchError(role, mismatch);
+    }
+  }
+
+  private writeOutputs(request: EngineRunRequest, writer: RunOutputWriter): void {
     const encoder = new TextEncoder();
     const program = request.argv[0] ?? '';
     const row = `${FAKE_MARKER}\tquery\tsubject\n`;
     const out0 = `${FAKE_MARKER}\nProgram: ${program}\n`;
-    sink.write(0, encoder.encode(out0));
-    sink.write(6, encoder.encode(row));
-    sink.write(7, encoder.encode(`# ${FAKE_MARKER}\n# 1 hits found\n${row}`));
+    writer.write(0, encoder.encode(out0));
+    writer.write(6, encoder.encode(row));
+    writer.write(7, encoder.encode(`# ${FAKE_MARKER}\n# 1 hits found\n${row}`));
     const hit: HspRecord = {
       index: 0,
       q_idx: 0,
@@ -87,7 +103,8 @@ export class FakeEngine implements EngineGateway {
       out0: [0, encoder.encode(out0).length],
       out0_subject: null,
     };
-    sink.hits([hit]);
+    writer.write(HITS_STREAM, encoder.encode(`${JSON.stringify(hit)}\n`));
+    writer.write(DIAGNOSTICS_STREAM, encoder.encode(`Warning: ${FAKE_MARKER}\n`));
   }
 
   private pause(): Promise<void> {

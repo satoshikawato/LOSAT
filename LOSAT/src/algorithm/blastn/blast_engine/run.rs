@@ -66,8 +66,8 @@ use super::super::coordination::{
     prepare_sequence_data, scan_subjects_metadata, subject_metadata_from_records,
 };
 use super::super::extension::{
-    build_nucl_score_table, build_query_four_base_bytes, extend_hit_ungapped_approx_ncbi,
-    extend_hit_ungapped_exact_ncbi, type_of_word,
+    build_compressed_query, build_nucl_score_table, build_query_four_base_bytes,
+    extend_hit_ungapped_approx_ncbi, extend_hit_ungapped_exact_ncbi, type_of_word, SmallNaWord,
 };
 use super::super::filtering::{
     blast_hsp_test_identity_and_length, hsp_test, purge_hsps_with_common_endpoints,
@@ -5800,6 +5800,39 @@ fn run_in_pool(
             config.scan_step
         );
     }
+    // The word extension of NCBI's small-query lookup table reads a compressed query in
+    // which ambiguity codes are bases (`build_compressed_query`); the other tables compare
+    // the query letters themselves.
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:237-240
+    // ```c
+    //     /* compute a compressed representation of the query, used
+    //        for computing ungapped extensions */
+    //
+    //     BlastCompressBlastnaSequence(query);
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1806-1819
+    // ```c
+    //     else if (lookup_wrap->lut_type == eSmallNaLookupTable) {
+    //         ...
+    //         if (lut->lut_word_length == lut->word_length)
+    //             lut->extend_callback = (void *)s_BlastNaExtendDirect;
+    //         else if (lut->lut_word_length % COMPRESSION_RATIO == 0 &&
+    //                  lut->scan_step % COMPRESSION_RATIO == 0 &&
+    //                  lut->word_length - lut->lut_word_length <= 4)
+    //             lut->extend_callback = (void *)s_BlastSmallNaExtendAlignedOneByte;
+    //         else
+    //             lut->extend_callback = (void *)s_BlastSmallNaExtend;
+    //     }
+    // ```
+    let small_na_compressed_query =
+        if config.small_na_lookup && config.effective_word_size > config.lut_word_length {
+            build_compressed_query(&encoded_query_concat_blastna)
+        } else {
+            Vec::new()
+        };
+    let small_na_aligned_one_byte = config.lut_word_length % COMPRESSION_RATIO == 0
+        && config.scan_step % COMPRESSION_RATIO == 0
+        && config.effective_word_size - config.lut_word_length <= 4;
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1002-1003
     // ```c
@@ -6878,6 +6911,26 @@ fn run_in_pool(
                     // For two-stage lookup, use lut_word_length (8) for scanning
                     let lut_word_length = two_stage.lut_word_length();
                     let word_length = two_stage.word_length();
+                    // NCBI's small-query table always keeps `masked_locations`, so
+                    // `s_TypeOfWord` checks the lookup words of every word hit (the
+                    // compressed query reads ambiguity codes as bases, and the lookup
+                    // table has no words with ambiguity codes).
+                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:407-411
+                    // ```c
+                    //     if (locations &&
+                    //         lookup->word_length > lookup->lut_word_length ) {
+                    //         /* because we use compressed query, we must always check masked location*/
+                    //         lookup->masked_locations = s_SeqLocListInvert(locations, query->length);
+                    //     }
+                    // ```
+                    let small_na_word =
+                        (!small_na_compressed_query.is_empty()).then(|| SmallNaWord {
+                            compressed_query: &small_na_compressed_query,
+                            subject_packed: search_seq_packed,
+                            query_length: encoded_query_concat_blastna.len(),
+                            word_length,
+                            lut_word_length,
+                        });
 
                     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:663-664
                     // ```c
@@ -7094,7 +7147,40 @@ fn run_in_pool(
                                 // For two-stage lookup, verify word_length match BEFORE ungapped extension
                                 // This is done by left+right extension from the lut_word_length match position
                                 let (q_ext_start, s_ext_start, word_ext_left, word_ext_right) =
-                                    if word_length > lut_word_length {
+                                    if let Some(small_na_word) = &small_na_word {
+                                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1651-1663
+                                        // ```c
+                                        //     /* if sequence is masked, fall back to generic scanner and extender */
+                                        //     if (subject->mask_type != eNoSubjMasking) {
+                                        //         ...
+                                        //             if (extend != (TNaExtendFunction)s_BlastNaExtendDirect) {
+                                        //                  extend = (lookup_wrap->lut_type == eSmallNaLookupTable)
+                                        //                     ? (TNaExtendFunction)s_BlastSmallNaExtend
+                                        //                     : (TNaExtendFunction)s_BlastNaExtend;
+                                        //             }
+                                        // ```
+                                        let word = if small_na_aligned_one_byte && !subject_masked {
+                                            small_na_word.extend_aligned_one_byte(
+                                                q_off0,
+                                                kmer_start,
+                                                q_context_start,
+                                                q_context_end,
+                                                s_range,
+                                            )
+                                        } else {
+                                            small_na_word.extend(
+                                                q_off0,
+                                                kmer_start,
+                                                q_context_start,
+                                                q_context_end,
+                                                s_range,
+                                            )
+                                        };
+                                        let Some((q_word, s_word)) = word else {
+                                            continue;
+                                        };
+                                        (q_word, s_word, q_off0.saturating_sub(q_word), 0)
+                                    } else if word_length > lut_word_length {
                                         // NCBI BLAST: s_BlastNaExtend left/right extension uses packed subject
                                         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1093-1144
                                         // ```c
@@ -7476,7 +7562,7 @@ fn run_in_pool(
                                     let (wt, ext, q_off_adj, s_off_adj) = type_of_word(
                                         q_off,
                                         s_off,
-                                        query_mask,
+                                        small_na_word.is_some() || !query_mask.is_empty(),
                                         q_context_end,
                                         s_range,
                                         word_length,
@@ -7699,7 +7785,7 @@ fn run_in_pool(
                                     let (wt, ext, q_off_adj, s_off_adj) = type_of_word(
                                         q_off,
                                         s_off,
-                                        query_mask,
+                                        small_na_word.is_some() || !query_mask.is_empty(),
                                         q_context_end,
                                         s_range,
                                         word_length,
@@ -8606,7 +8692,7 @@ fn run_in_pool(
                                     let (wt, ext, q_off_adj, s_off_adj) = type_of_word(
                                         q_off,
                                         s_off,
-                                        query_mask,
+                                        !query_mask.is_empty(),
                                         q_seq.len(),
                                         s_range,
                                         safe_k, // word_length
@@ -8805,7 +8891,7 @@ fn run_in_pool(
                                     let (wt, ext, q_off_adj, s_off_adj) = type_of_word(
                                         q_off,
                                         s_off,
-                                        query_mask,
+                                        !query_mask.is_empty(),
                                         q_seq.len(),
                                         s_range,
                                         safe_k, // word_length

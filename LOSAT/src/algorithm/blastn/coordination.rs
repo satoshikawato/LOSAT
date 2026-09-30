@@ -65,6 +65,9 @@ pub struct TaskConfig {
     pub use_direct_lookup: bool,
     pub use_two_stage: bool,
     pub lut_word_length: usize,
+    /// Whether NCBI chose its small-query lookup table (`eSmallNaLookupTable`), whose
+    /// word extension reads the compressed query.
+    pub small_na_lookup: bool,
     pub x_drop_gapped: i32, // Task-specific gapped X-dropoff (blastn: 30, megablast: 25)
     pub x_drop_final: i32,  // Final traceback X-dropoff (100 for all nucleotide tasks)
     pub scan_range: usize,  // Scan range for off-diagonal hit detection (blastn: 4, megablast: 0)
@@ -315,6 +318,7 @@ pub fn configure_task(args: &BlastnArgs) -> TaskConfig {
         use_direct_lookup,
         use_two_stage,
         lut_word_length,
+        small_na_lookup: false,
         x_drop_gapped,
         x_drop_final,
         scan_range,
@@ -496,6 +500,7 @@ pub fn finalize_task_config(
     );
 
     config.lut_word_length = lut_width;
+    config.small_na_lookup = lut_kind == LookupTableKind::Small;
     config.use_two_stage =
         lut_kind == LookupTableKind::Mb || config.lut_word_length < config.effective_word_size;
     config.use_direct_lookup =

@@ -411,10 +411,12 @@ pub fn write_hsp_info<W: Write>(
             columns,
             ncbi_percent_match(gaps, columns)
         )?;
-        // NCBI reference: c++/src/objtools/align_format/showalign.cpp:247-248
+        // NCBI reference: c++/src/objtools/align_format/showalign.cpp:4011-4018
         // ```c++
-        //     int master_strand  = m_AV->StrandSign(0);
-        //     int slave_strand = m_AV->StrandSign(1);
+        //         s_DisplayIdentityInfo(out,
+        //                               ...
+        //                               m_AV->StrandSign(0),
+        //                               m_AV->StrandSign(1),
         // ```
         // The strand is the HSP's (its query frame; the shown query is on its plus
         // strand), not the order of the coordinates, which is the same for an HSP of one
@@ -2406,10 +2408,10 @@ mod tests {
         assert!(output_str.contains("Identities ="));
     }
 
-    // NCBI reference: c++/src/objtools/align_format/showalign.cpp:247-248
+    // NCBI reference: c++/src/objtools/align_format/showalign.cpp:4017-4018
     // ```c++
-    //     int master_strand  = m_AV->StrandSign(0);
-    //     int slave_strand = m_AV->StrandSign(1);
+    //                               m_AV->StrandSign(0),
+    //                               m_AV->StrandSign(1),
     // ```
     // A BLASTN HSP of one letter has the same start and end; its strand is its frame's.
     #[test]

@@ -11,6 +11,7 @@ LOSAT Web の段階 W7 を実行する。先に [セッション README](README.
 5. V-PRIV（計画 §5.10）と V-OFF（計画 §6.2）を Playwright で作り、CI に入れる。V-PRIV には、配信する Wasm と JavaScript にビルドした機械のパス（checkout のパス、`CARGO_HOME`、ユーザー名）が含まれないことの検査を含める（計画 TD-11）。
 6. 導入支援：「例を試す」、5 program の小さな例題、最短のチュートリアル、任意のブラウザ自己試験（期待値の SHA-256 と比べる、V-BR の小さな版）。
 7. Cloudflare のプレビューの設定（`web/app/public/_headers` をそのまま使う）を用意し、保守者がデプロイした後に、プレビューで `crossOriginIsolated === true` と CSP を確かめる。
+   旧版のタブのデータを新しい版が消さないこと（`tmp/` と Web Lock の名前 `losat-web:tmp:` を変えないこと。設計書 §7.2、S10 の判断 8）を E2E で確かめる。
 
 完了条件は計画 §7 の S16 の行による。画面の記録を画面レビューに見せ、`docs/evidence/losat_web_w7/README.md` に記録する。
 

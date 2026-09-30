@@ -1,6 +1,6 @@
 # LOSAT Web GUI 総合実装計画
 
-状態：**S01（W0）から S07+（E2c）までは完了条件を満たした（[W0](evidence/losat_web_w0/README.md)、[E1a](evidence/losat_web_e1a/README.md)、[E1b](evidence/losat_web_e1b/README.md)、[E1c](evidence/losat_web_e1c/README.md)、[E1d](evidence/losat_web_e1d/README.md)、[E2a-1・E2a-2](evidence/losat_web_e2a/README.md)、[E2c](evidence/losat_web_e2c/README.md) のゲート記録。E1a〜E1c の V-PERF の判断と、E1c の CLI の 2 つの振る舞いの差は、保守者の確認を求めている）。`PD-LOSAT-WEB-APP-BOUNDARY` は 2026-09-29 に承認された。エンジン側の次は S07++、アプリ側は S10 を進めている（DW-7）。** 作成 2026-09-28、改訂 2026-09-30。
+状態：**S01（W0）から S07+（E2c）までは完了条件を満たした（[W0](evidence/losat_web_w0/README.md)、[E1a](evidence/losat_web_e1a/README.md)、[E1b](evidence/losat_web_e1b/README.md)、[E1c](evidence/losat_web_e1c/README.md)、[E1d](evidence/losat_web_e1d/README.md)、[E2a-1・E2a-2](evidence/losat_web_e2a/README.md)、[E2c](evidence/losat_web_e2c/README.md) のゲート記録。アプリ側の S10（W2）も完了した（[W2](evidence/losat_web_w2/README.md)）。E1a〜E1c の V-PERF の判断と、E1c の CLI の 2 つの振る舞いの差は、保守者の確認を求めている）。`PD-LOSAT-WEB-APP-BOUNDARY` は 2026-09-29 に承認された。エンジン側は S07++ を進めている。アプリ側の次は S09（入口の条件は S08 の完了）（DW-7）。** 作成 2026-09-28、改訂 2026-09-30。
 
 | 項目 | 内容 |
 |---|---|
@@ -152,6 +152,8 @@ LOSAT は、NCBI BLAST+ を純 Rust で再実装したものである。宣言�
 | 構造化バッチ、結果アーカイブからの再整形（設計書 §10.1） | 実行の完了時に、その program が対応する形式と構造化レコードを同時に作り、保存する | 生成していない形式（例：別のカスタム列）を後から出す要求が確定したとき |
 | 一時領域の staging から committed への移動（設計書 §7.1） | 移動しない。Data worker の登録簿で「確定」かどうかを区別する | 無し |
 | 残存領域の回収（設計書 §7.2） | Web Locks の保持状態だけで判断する。時刻では判断しない。Web Locks が使えない環境では回収しない | 無し |
+| レコード表の保存（設計書 §7.1 の `datasets/<revision>/index.blocks`） | Data worker のメモリに置く（S10） | S12 の実測で、レコード表がメモリの負担になったとき |
+| Memory の BlockStore の上限 | 既定は無制限（S10） | S09 のメモリの実測で決める |
 | 進捗率と残り時間（設計書 §3.1） | 出さない。段階と経過時間だけを出す | エンジンが測定できる進捗を持ったとき |
 | 図と一覧の集約表示（設計書 §11.1） | 仮想化した一覧と Canvas での描画だけ | 描画件数の実測値が、保守者の決める閾値を超えたとき |
 | 複数の計算プール、独立した直列 Wasm の並列実行（設計書 §9.1） | 作らない | 作らない（単一 query の高速化には効かないため） |
@@ -195,11 +197,12 @@ web/
       domain/                # program、argv、出力形式、run の型（Vue 非依存、何にも依存しない）
       application/           # coordinator（キュー、状態機械）、Store（Vue 非依存）
       ports/                 # EngineGateway / DataGateway / Downloader の interface
-      infra/                 # fake/（FakeEngine）、memory/（Memory 実装）、browser/（ダウンロード、SHA-256）
-                             # 後で engine-worker/、data-worker/、sw/ を足す
+      infra/                 # fake/（FakeEngine、FakeScanner）、data/（BlockStore の OPFS / Memory、DataService、セッション）、
+                             # data-worker/、run-output/（Engine worker から Data worker への出力の経路）、browser/（ダウンロード、SHA-256）
+                             # 後で engine-worker/、sw/ を足す
       ui/                    # Vue コンポーネント
       composition.ts         # 実装を選んで組み立てる唯一の場所
-    tests/  unit/ e2e/
+    tests/  unit/ contract/ e2e/（harness/、support/）
   tools/                     # Node で wasm32-wasip1 の試験を動かす runner など
 docs/web/                    # 設計書、要求トレース表、ABI v2 の契約
 docs/product_decisions/PD-LOSAT-WEB-APP-BOUNDARY.md
@@ -375,6 +378,7 @@ Combined は、複数ファイルのレコードをつないだ 1 回の実行�
 - 作業ごとに `navigator.locks` のロックを持ち続ける。起動時には、ロックを誰も持っていない `tmp/*` だけを消す。停止中や旧版のタブもロックを持ち続けるので、誤って消されない。
 - 容量不足（`QuotaExceededError`）が起きたら、その実行を理由付きで失敗にし、過去の結果は残す。使用量は、操作を妨げない表示で示す。
 - 次回の起動時に自動で復元することはしない（設計書 T01、`REQ-20`）。
+- S10 の判断（`docs/evidence/losat_web_w2/README.md`）：確定はファイルを動かさず、Data worker の登録簿が持つ。所有の印は作業ごとの Web Lock だけで、ロックを持てないタブは OPFS を使わず Memory にする（他のタブがそのデータを放置と見なさないため）。OPFS が開けないとき（放置されたデータでクォータが一杯のときなど）は、先に回収してからもう一度開く。
 
 ### 5.7 結果画面・抽出・候補
 
@@ -455,9 +459,9 @@ NCBI BLAST+（oracle） ─[既存の認証]─► ネイティブ LOSAT の凍�
 | S07++ | **E2f** BLASTN の query の batch | NCBI の query の batch（`CBatchSizeMixer`、batch ごとの query の塊・lookup table・対角線の表）の移植と、batch に依存する S07+ の拒否の置き換え（TD-14） | 複数の query の sweep が NCBI とバイト一致。S07+ の検査、既存の BLASTN のゲート、S07 の fixture に退行なし。V-PERF の記録。BLASTN の V-ABI。独立監査 |
 | S08 | **E2b** TBLASTX outfmt 0/7 | 権威の記録、fixture の固定、移植、`PairwiseHit` の作成 | 固定した fixture で NCBI とバイト一致（承認済みの遺伝暗号の例外を除く）。既存の 6 に退行なし。TBLASTX の全升目の V-ABI。独立監査 |
 | S08+ | **E2e** BLASTP・TBLASTN・TBLASTX の既定以外のオプション | NCBI のオプションの検査（同じ拒否と文言）の移植。既定以外の値で NCBI と違う原因の調査と修正。直せない値の明示的な拒否（TD-13） | 各 program の sweep の全組合せが、NCBI と同じ拒否、outfmt 0/6/7 のバイト一致、明示的な拒否のどれかになる。直した組合せの fixture で NCBI とバイト一致。各 program の既存のゲートと S07・S08 の fixture に退行なし。V-PERF の非退行。変えた program の V-ABI。独立監査 |
-| S09 | **W1** ブラウザでの実行基盤 | Engine worker、WASI shim、ThreadHost、機能の確認、serial への切り替え、取消、instance の作り直し、R1。DW-8 のための前処理の割合の実測 | V-BR（BLASTX を除く 4 program、3 ブラウザ、n=1/2/4）。取消の後の実行が成功する。メモリの推移と前処理の割合を記録する |
+| S09 | **W1** ブラウザでの実行基盤 | Engine worker、WASI shim、ThreadHost、機能の確認、serial への切り替え、取消、instance の作り直し、R1。DW-8 のための前処理の割合の実測。S10 の port（`RecordScanner`、`EngineInput`、run の出力の経路）を本物の reactor と Engine worker につなぐ | V-BR（BLASTX を除く 4 program、3 ブラウザ、n=1/2/4）。取消の後の実行が成功する。メモリの推移と前処理の割合を記録する。S10 の契約試験（`record-scanner`・`engine-input`・`run-output`）が本物の reactor と Engine worker で通る |
 | S09+ | **R2**（条件付き） | DW-8 の条件を満たした program ごとに、前処理キャッシュを移植する | 連続実行の出力が CLI と一致。独立監査。README の表に行を足して実施する |
-| S10 | **W2** データ層 | Data worker、SourceStore、索引、DatasetRevision、BlockStore（OPFS / Memory）、登録簿、Web Locks、回収、容量不足 | 両方の実装が契約試験を通る。強制終了の後の回収、2 つのタブの保護、容量不足の試験が通る |
+| S10 | **W2** データ層 | Data worker、SourceStore、索引、DatasetRevision、BlockStore（OPFS / Memory）、登録簿、Web Locks、回収、容量不足 | 両方の実装が契約試験を通る。強制終了の後の回収、2 つのタブの保護、容量不足の試験が通る。**完了（2026-09-30、[ゲート記録](evidence/losat_web_w2/README.md)）** |
 | S11 | **E2d** `-query_loc` / `-subject_loc` | BLASTN・BLASTP・TBLASTN・TBLASTX への移植（BLASTX は SX） | 固定した fixture で NCBI とバイト一致。独立監査 |
 | S12 | **W3** 検索画面 | program のタブ、入力、レコード一覧と除外、領域の指定（DW-9）、`describe` から作るフォーム、キュー、スレッド、段階と経過時間、診断、モバイル、Wake Lock など | 研究作業と境界条件の E2E |
 | S13 | **W4** 結果画面 | Subject 一覧、HSP、詳細、ドットプロット、Run の詳細、検証バッジ、フィルター、列定義表 | 対応済みの全 program の E2E。HSP と行・節との対応の試験 |

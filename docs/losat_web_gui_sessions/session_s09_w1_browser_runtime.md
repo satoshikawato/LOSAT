@@ -50,6 +50,7 @@ S09 の作業：
 6. **Subject の保持（R1）**：S10 の `RunSnapshot` は、役割ごとに入力のバイト、SHA-256、`revisionIds`、`records` を持つ。登録済みのハンドルを再利用するときは、`revisionIds` と SHA-256 を鍵にする。
 7. **ブラウザ**：Firefox と WebKit を Playwright の project に足す。`tests/e2e/storage.spec.ts` と `tests/e2e/contracts.spec.ts` は、Chromium の CDP（クォータ、凍結）、ディスク上の Chromium のプロファイル（`tests/e2e/support/profile.ts`）と `/proc`（renderer の強制終了）を使うので Chromium だけで動く。Firefox と WebKit では、BlockStore と run output の契約のうち容量不足以外の case と、通常の E2E を通す（その env を harness に足す）。OPFS が使えないブラウザでは Memory に切り替わり、`Temporary storage` の欄に理由が出ることを確かめる。
 8. **Memory の上限**：`MemoryBlockStore` は既定で上限が無い（`setCapacity` は試験で使う）。S09 のメモリの実測から、OPFS が使えないときの上限を決めるか、無制限のままにするかを決めて記録する。
+9. **空白だけの BLASTN の入力**：adapter の `register` は BLASTN の空白だけの入力を「レコードが無い」として受け付け、CLI は NCBI の警告（query）か誤り（subject）を出す（`docs/web/abi_v2.md` §4）が、`scan` は `Expected > at record start.` で失敗するので、S10 のアプリはキューに入れる前に拒否する。推奨案：adapter の `scan` の扱いに合わせて決め、アプリで BLASTN の規則を作り直さない（エンジン側の変更が要るなら、エンジン側のセッションに頼む）。
 
 S10 で分かった注意：
 

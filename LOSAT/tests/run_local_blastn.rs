@@ -229,15 +229,13 @@ fn unsupported_formats_fail_before_searching() {
 //                 if (!batch_size)
 //                     input.SetBatchSize(mixer.GetBatchSize(lcl_blast.GetNumExtensions()));
 // ```
-// The report of an invalid query depends on its query batch. The batches after the first
-// depend on NCBI's extension counts, but they have at least 100 residues
-// (blast_app_util.hpp:69-76, k_MinBatchSize), so invalid queries of fewer than 100
-// residues that a valid query follows are searched with it. Otherwise outfmt 0 and 7,
-// which print a section per query, fail; outfmt 6, which has none, does not.
+// LOSAT searches NCBI's query batches, so an invalid query after the first batch is
+// reported with the batch that holds it: every format succeeds, as the CLI run does (the
+// bytes against NCBI are checked by docs/evidence/losat_web_e2f/check_inputs.py).
 #[test]
-fn an_invalid_query_after_the_first_batch_fails_only_where_its_batch_matters() {
+fn an_invalid_query_after_the_first_batch_is_reported_with_its_batch() {
     let genome = fixture_sequence("LC738884.fasta");
-    for (n_residues, sections_succeed) in [(40, true), (150, false)] {
+    for n_residues in [40, 150] {
         let all_n = vec![b'N'; n_residues];
         let query = TempFasta::new(
             "blastn_batches.fna",
@@ -251,11 +249,7 @@ fn an_invalid_query_after_the_first_batch_fails_only_where_its_batch_matters() {
         let inputs = Inputs { query, subject };
         let queries = read_records(&inputs.query.0);
         let subjects = read_records(&inputs.subject.0);
-        for (outfmt, succeeds) in [
-            ("0", sections_succeed),
-            ("6", true),
-            ("7", sections_succeed),
-        ] {
+        for outfmt in FORMATS {
             let (mut output, mut diagnostics) = (Vec::new(), Vec::new());
             let mut outputs = ReportOutputs {
                 formats: vec![FormatOutput {
@@ -268,17 +262,13 @@ fn an_invalid_query_after_the_first_batch_fails_only_where_its_batch_matters() {
             };
             let result = run_local_blastn(inputs.args(&[]), &queries, &subjects, &mut outputs);
             drop(outputs);
-            assert_eq!(
+            assert!(
                 result.is_ok(),
-                succeeds,
                 "{n_residues} N, outfmt {outfmt}: {result:?}"
             );
-            if !succeeds {
-                assert!(
-                    output.is_empty(),
-                    "outfmt {outfmt} writes nothing when it fails"
-                );
-            }
+            let (cli_output, cli_stderr) = inputs.cli(outfmt, &[]);
+            assert_eq!(output, cli_output, "{n_residues} N, outfmt {outfmt}");
+            assert_eq!(diagnostics, cli_stderr, "{n_residues} N, outfmt {outfmt}");
         }
     }
 }

@@ -358,41 +358,22 @@ pub(crate) fn context_blocks(
 ///           MAX(options->gap_x_dropoff_final*NCBIMATH_LN2 / min_lambda, params->gap_x_dropoff);
 /// ```
 /// Gapped blocks from the tables are the same for every context; blocks copied from the
-/// ungapped ones differ with the composition. LOSAT knows only the first batch
-/// (`first_query_batch`), so contexts whose blocks give different X-drops are exact only
-/// when the first batch holds every query (`one_batch`); otherwise this is the reason
-/// for failing.
+/// ungapped ones differ with the composition, so the X-drops depend on the contexts of the
+/// batch. Without a valid context the batch is not searched.
 pub(crate) fn gap_x_dropoffs(
     context_karlin: &[Option<ContextKarlin>],
     x_drop_gapped_bits: i32,
     x_drop_final_bits: i32,
-    one_batch: bool,
-) -> Result<(i32, i32), String> {
-    let x_drops = |lambda: f64| {
-        let gapped = (x_drop_gapped_bits as f64 * NCBIMATH_LN2 / lambda) as i32;
-        let finale = (x_drop_final_bits as f64 * NCBIMATH_LN2 / lambda).max(gapped as f64) as i32;
-        (gapped, finale)
-    };
-    let lambdas: Vec<f64> = context_karlin
+) -> (i32, i32) {
+    let min_lambda = context_karlin
         .iter()
         .flatten()
         .map(|blocks| blocks.gapped.lambda)
-        .collect();
-    let Some(&first) = lambdas.first() else {
-        return Ok(x_drops(KarlinParams::default().lambda));
-    };
-    if lambdas
-        .iter()
-        .all(|&lambda| x_drops(lambda) == x_drops(first))
-    {
-        return Ok(x_drops(first));
-    }
-    if !one_batch {
-        return Err("the gapped X-drop of these gap costs depends on the queries of each of NCBI BLAST+'s adaptive query batches, which LOSAT does not reproduce (the queries do not fit in the first batch)".to_string());
-    }
-    Ok(x_drops(
-        lambdas.into_iter().fold(f64::from(i32::MAX), f64::min),
-    ))
+        .reduce(f64::min)
+        .unwrap_or(KarlinParams::default().lambda);
+    let gapped = (x_drop_gapped_bits as f64 * NCBIMATH_LN2 / min_lambda) as i32;
+    let finale = (x_drop_final_bits as f64 * NCBIMATH_LN2 / min_lambda).max(gapped as f64) as i32;
+    (gapped, finale)
 }
 
 #[cfg(test)]

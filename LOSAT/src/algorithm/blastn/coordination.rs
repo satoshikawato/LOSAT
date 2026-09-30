@@ -88,6 +88,7 @@ pub struct LookupTables {
 }
 
 /// Subject metadata needed for search setup.
+#[derive(Clone)]
 pub struct SubjectMetadata {
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1407-1409
     // ```c

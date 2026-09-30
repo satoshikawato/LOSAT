@@ -1,0 +1,8 @@
+commit: d28d65ac70df7e54fcb4513c03377183d6b2db2c
+branch: feature/losat-web-gui-app
+uncommitted files under web/app: 0
+node: v26.8.2
+npm: 11.19.1
+playwright: Version 1.61.1
+playwright browsers: chromium-1228 chromium_headless_shell-1228 ffmpeg-1011 
+os: Linux 5.15.167.4-microsoft-standard-WSL2 x86_64

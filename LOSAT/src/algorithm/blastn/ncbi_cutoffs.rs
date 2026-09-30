@@ -54,6 +54,32 @@ pub fn gap_trigger_raw_score(gap_trigger_bits: f64, ungapped_params: &KarlinPara
     gap_trigger
 }
 
+/// NCBI's `(Int4)` conversion of a double, as the x86-64 build of NCBI BLAST+ 2.17.0 (the
+/// oracle) performs it with `cvttsd2si`: truncation toward zero, and `INT_MIN` for NaN and
+/// for values outside `Int4` (undefined in C). Rust's `as` saturates instead.
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:4047-4049,4059-4061
+/// ```c
+/// /* Smallest float that might not cause a floating point exception in
+///    S = (Int4) (ceil( log((double)(K * searchsp / E)) / Lambda )); below.  */
+///    const double kSmallFloat = 1.0e-297;
+///    ...
+///    E = MAX(E, kSmallFloat);
+///
+///    S = (Int4) (ceil( log((double)(K * searchsp / E)) / Lambda ));
+/// ```
+/// With `E` at `kSmallFloat`, `K * searchsp / E` overflows to infinity once `K * searchsp`
+/// exceeds about 1.8e11; `S` is then `INT_MIN`, and `BLAST_Cutoffs` keeps its initial
+/// cutoff of 1 (the S07+ fifteenth audit round).
+fn ncbi_int4_from_double(value: f64) -> i32 {
+    let truncated = value.trunc();
+    if truncated.is_nan() || truncated < f64::from(i32::MIN) || truncated > f64::from(i32::MAX) {
+        i32::MIN
+    } else {
+        truncated as i32
+    }
+}
+
 /// Calculate cutoff_score_max from E-value using GAPPED Karlin params.
 ///
 /// NCBI reference (verbatim from blast_parameters.c:943):
@@ -98,7 +124,7 @@ pub fn cutoff_score_max_from_evalue(
         let k_times_searchsp_over_e = k_times_searchsp / e;
         let log_value = k_times_searchsp_over_e.ln();
         let score_before_ceil = log_value / gapped_params.lambda;
-        let es = score_before_ceil.ceil() as i32;
+        let es = ncbi_int4_from_double(score_before_ceil.ceil());
 
         // NCBI: if (es > s) *S = es; (pick larger)
         if es > s {
@@ -275,7 +301,7 @@ pub fn compute_blastn_cutoff_score_ungapped(
         let k_times_searchsp_over_e = k_times_searchsp / e_adjusted;
         let log_value = k_times_searchsp_over_e.ln();
         let score_before_ceil = log_value / ungapped_params.lambda;
-        let es = score_before_ceil.ceil() as i32;
+        let es = ncbi_int4_from_double(score_before_ceil.ceil());
 
         // NCBI: if (es > s) *S = es; (pick larger)
         if es > new_cutoff {
@@ -430,6 +456,29 @@ mod tests {
         let cutoff_score_max = cutoff_score_max_from_evalue(evalue, eff_searchsp, &gapped_params);
         // Should be a positive value
         assert!(cutoff_score_max > 0);
+
+        // With E at kSmallFloat, K * searchsp / E overflows for a search space of 1e12:
+        // NCBI's (Int4) of infinity is INT_MIN on x86-64, and the cutoff stays 1.
+        assert_eq!(
+            cutoff_score_max_from_evalue(1e-300, 1_000_000_000_000, &gapped_params),
+            1
+        );
+    }
+
+    #[test]
+    fn int4_conversion_is_the_x86_64_one() {
+        assert_eq!(ncbi_int4_from_double(41.9), 41);
+        assert_eq!(ncbi_int4_from_double(-41.9), -41);
+        assert_eq!(ncbi_int4_from_double(f64::from(i32::MAX)), i32::MAX);
+        for value in [
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::NAN,
+            2_147_483_648.0,
+            -2_147_483_649.0,
+        ] {
+            assert_eq!(ncbi_int4_from_double(value), i32::MIN, "{value}");
+        }
     }
 
     #[test]

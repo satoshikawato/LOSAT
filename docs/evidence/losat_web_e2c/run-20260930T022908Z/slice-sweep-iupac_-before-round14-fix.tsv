@@ -1,0 +1,4 @@
+DIFF	/home/kawato/.cache/losat-web-gui-target/s07p-slices/iupac_q7_108.fa	/home/kawato/.cache/losat-web-gui-target/s07p-slices/iupac_s7_108.fa	ncbi_lines=0	losat_lines=1
+DIFF	/home/kawato/.cache/losat-web-gui-target/s07p-slices/iupac_q7_134.fa	/home/kawato/.cache/losat-web-gui-target/s07p-slices/iupac_s7_134.fa	ncbi_lines=0	losat_lines=1
+DIFF	/home/kawato/.cache/losat-web-gui-target/s07p-slices/iupac_q7_184.fa	/home/kawato/.cache/losat-web-gui-target/s07p-slices/iupac_s7_184.fa	ncbi_lines=2	losat_lines=3
+# pool=iupac options='' seed=7 cases=300 differing=3

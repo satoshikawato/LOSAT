@@ -1,0 +1,3 @@
+DIFF	/home/kawato/.cache/losat-web-gui-target/s07p-slices/viral_q7_46.fa	/home/kawato/.cache/losat-web-gui-target/s07p-slices/viral_s7_46.fa	ncbi_lines=13	losat_lines=14
+DIFF	/home/kawato/.cache/losat-web-gui-target/s07p-slices/viral_q7_52.fa	/home/kawato/.cache/losat-web-gui-target/s07p-slices/viral_s7_52.fa	ncbi_lines=58	losat_lines=58
+# pool=viral options='-task blastn -subject_besthit' seed=7 cases=120 differing=2

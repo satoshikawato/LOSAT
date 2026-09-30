@@ -1,0 +1,2 @@
+DIFF	/home/kawato/.cache/losat-web-gui-target/s07p-slices/ambiguity_q7_19.fa	/home/kawato/.cache/losat-web-gui-target/s07p-slices/ambiguity_s7_19.fa	ncbi_lines=15320	losat_lines=15322
+# pool=ambiguity options='-task blastn -word_size 4 -evalue 1e6' seed=7 cases=40 differing=1

@@ -1,0 +1,70 @@
+ok serial-blastn
+ok threads-blastn
+ok serial-tblastx-34
+ok threads-tblastx-34
+ok threads-tblastx-38
+ok serial-tblastx-38
+ok serial-tblastx-39
+ok threads-tblastx-39
+ok serial-tblastx-33
+ok threads-blastp
+ok serial-blastp
+ok threads-tblastx-33
+ok serial-tblastx-31
+ok threads-tblastx-29
+ok serial-tblastx-35
+ok serial-tblastx-29
+ok threads-tblastx-24
+ok threads-tblastx-36
+ok serial-tblastx-36
+ok serial-tblastx-24
+ok serial-tblastx-32
+ok threads-tblastx-20
+ok serial-tblastx-20
+ok serial-tblastx-30
+ok threads-tblastx-21
+ok serial-tblastx-21
+ok serial-tblastx-37
+ok threads-tblastx-37
+ok serial-tblastx-23
+ok threads-tblastx-23
+ok threads-tblastx-22
+ok serial-tblastx-22
+ok threads-tblastx-26
+ok serial-tblastx-26
+ok serial-tblastx-25
+ok threads-tblastx-31
+ok serial-tblastx-27
+ok threads-tblastx-114
+ok serial-tblastx-114
+ok threads-tblastx-30
+ok serial-tblastn
+ok threads-tblastn
+ok threads-tblastx-27
+ok serial-tblastx-28
+ok threads-tblastx-25
+ok threads-tblastx-28
+ok threads-tblastx-35
+ok threads-tblastx-32
+{
+  "artifacts": {
+    "native": "7e5cf78a0db539438b4990a3e266c1d88a1f17b6d6d374841eba4479eb1837c6",
+    "serial": "1301b4f3979b14fcc5a7c6187c3091e26f7896e48e984250c1190a9a62fc177a",
+    "threads": "ea0622c2cfec7a563c52b96e2b583a701b6b4c3a29e3179b6670a94af89fb084"
+  },
+  "runs": 460,
+  "searches": 115,
+  "by_engine_and_threads": {
+    "serial n1": 115,
+    "threads n1": 115,
+    "threads n2": 115,
+    "threads n4": 115
+  },
+  "frozen_equal": 672,
+  "frozen_compared": 676,
+  "frozen_differing": [
+    "Sakai.MG1655.megablast outfmt 7"
+  ],
+  "failed_parts": []
+}
+exit 0

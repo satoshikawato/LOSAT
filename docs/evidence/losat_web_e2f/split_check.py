@@ -90,7 +90,11 @@ def make_cases(work: Path, seed: int) -> list[tuple[str, str, str, list[str]]]:
     rng = random.Random(seed)
     cases = []
     write(work / "edl933.fa", [("EDL933", edl)])
+    # Two queries are two batches (the first batch is about 5000 residues, blast_input.cpp);
+    # one record of both genomes is one batch, which megablast splits in two.
     write(work / "two.fa", [("EDL933", edl), ("Sakai", sak)])
+    both = edl + sak
+    write(work / "cat.fa", [("EDL933_Sakai", both)])
 
     # EDL933 with -task blastn (five chunks): windows around the starts of chunks 1 to 4.
     for k, (start, _) in enumerate(chunks([len(edl)], 1_000_000)[1:], 1):
@@ -100,18 +104,18 @@ def make_cases(work: Path, seed: int) -> list[tuple[str, str, str, list[str]]]:
             name = f"edl{k}_{width}_{shift}"
             cases.append((name, "edl933.fa", write(work / f"{name}.fa", [(name, edl[a:a + width])]), ["-task", "blastn"]))
 
-    # Two genomes as two queries: megablast splits them in two, blastn in eleven.
-    both = edl + sak
-    for task, size in (("megablast", 5_000_000), ("blastn", 1_000_000)):
-        bounds = chunks([len(edl), len(sak)], size)
-        points = sorted({end for _, end in bounds[:-1]} | {start for start, _ in bounds[1:]} | {len(edl)})
-        if task == "blastn":
-            points = points[:4] + [len(edl)]
+    # Megablast on one record of both genomes (two chunks), around the chunk boundary and the
+    # junction of the genomes; -task blastn on the two genomes as two queries, around the
+    # chunk boundaries of the second batch (Sakai, five chunks).
+    plans = [("cat_megablast", "cat.fa", both, chunks([len(both)], 5_000_000), [len(edl)], "megablast"),
+             ("two_blastn", "two.fa", sak, chunks([len(sak)], 1_000_000), [], "blastn")]
+    for tag, query, seq, bounds, extra_points, task in plans:
+        points = sorted({end for _, end in bounds[:-1]} | {start for start, _ in bounds[1:]} | set(extra_points))
         for p in points:
             for width, shift in ((3000, -1500), (20000, -10000), (300, -50)):
                 a = max(0, p + shift)
-                name = f"two_{task}_{p}_{width}"
-                cases.append((name, "two.fa", write(work / f"{name}.fa", [(name, both[a:a + width])]), ["-task", task]))
+                name = f"{tag}_{p}_{width}"
+                cases.append((name, query, write(work / f"{name}.fa", [(name, seq[a:a + width])]), ["-task", task]))
 
     # An invalid query before and after a split query.
     q = edl[:2_000_000]
@@ -166,8 +170,8 @@ def make_cases(work: Path, seed: int) -> list[tuple[str, str, str, list[str]]]:
 
     # Random subjects around the chunk boundaries: diverged copies with indels, either strand.
     plans = [("edl_blastn", "edl933.fa", edl, [len(edl)], 1_000_000, "blastn", 40),
-             ("two_megablast", "two.fa", both, [len(edl), len(sak)], 5_000_000, "megablast", 40),
-             ("two_blastn", "two.fa", both, [len(edl), len(sak)], 1_000_000, "blastn", 20)]
+             ("cat_megablast", "cat.fa", both, [len(both)], 5_000_000, "megablast", 40),
+             ("two_blastn", "two.fa", sak, [len(sak)], 1_000_000, "blastn", 20)]
     for tag, query, seq, lengths, size, task, count in plans:
         bounds = chunks(lengths, size)
         points = [end for _, end in bounds[:-1]] + [start for start, _ in bounds[1:]]

@@ -6,11 +6,11 @@
 
 各指示書は、この節を前提にしている。
 
-1. **ブランチと作業場所**：ブランチは `feature/losat-web-gui`（上流は `origin/feature/losat-web-gui`）、作業ディレクトリは git worktree `/mnt/c/Users/genom/GitHub/LOSAT-web-gui` だけを使う。新しい clone や worktree（一時的なものを含む）は作らない。この worktree が無い環境に限り、既存の LOSAT のクローンで一度だけ `git fetch origin && git worktree add /mnt/c/Users/genom/GitHub/LOSAT-web-gui feature/losat-web-gui` を実行し（クローンも無ければ、一度だけ `git clone https://github.com/satoshikawato/LOSAT.git` を実行し）、以後それを使い続ける。
+1. **ブランチと作業場所**：エンジン側（`LOSAT/`・`web/adapter/` を変えるセッション）のブランチは `feature/losat-web-gui`（上流は `origin/feature/losat-web-gui`）、作業ディレクトリは git worktree `/mnt/c/Users/genom/GitHub/LOSAT-web-gui`。アプリ側（`web/app/` だけを変えるセッション）のブランチは `feature/losat-web-gui-app`（上流は `origin/feature/losat-web-gui-app`）、作業ディレクトリは git worktree `/mnt/c/Users/genom/GitHub/LOSAT-web-gui-app`。2 本までを並行し（計画 DW-7）、アプリ側はセッションの終わりに `feature/losat-web-gui` へ merge する。アプリ側は `LOSAT/`・`web/adapter/`・計画・この README の表を変えず、変えるべきことはゲート記録に書く（エンジン側が merge のときに反映する）。これ以外の新しい clone や worktree（一時的なものを含む）は作らない。この worktree が無い環境に限り、既存の LOSAT のクローンで一度だけ `git fetch origin && git worktree add /mnt/c/Users/genom/GitHub/LOSAT-web-gui feature/losat-web-gui` を実行し（クローンも無ければ、一度だけ `git clone https://github.com/satoshikawato/LOSAT.git` を実行し）、以後それを使い続ける。
 2. **開始時の確認**：worktree で `git branch --show-current` が `feature/losat-web-gui` であり、`git status` に未コミットの変更が無いことを確かめ、`git pull --ff-only` を行う（取り込むのは `origin/feature/losat-web-gui` だけ）。`main` の変更が必要なときだけ `git merge origin/main` を行い、衝突の解消を独立したコミットにする。
 3. **最初に読むもの**：ルートの `AGENTS.md`、`web/AGENTS.md`、総合計画書、`docs/product_decisions/PD-LOSAT-WEB-APP-BOUNDARY.md`、前のセッションのゲート記録（`docs/evidence/losat_web_<stage>/README.md`）。要求の詳細は `docs/web/losat_web_design_v0.1.md`（設計書）と `docs/web/requirements_trace.tsv` にある。
 4. **エンジン（`LOSAT/`）を変更するセッション**：ルートの `AGENTS.md` の必須規則と `.agents/skills/verify-ncbi-parity-and-speed/SKILL.md` に従う。NCBI のソースは `/mnt/c/Users/genom/GitHub/ncbi-blast/`（固定 commit `598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4`）で読み、NCBI の実行ファイルは比較のためだけに使う。Rust は `cargo +1.92.0` を使い、ビルドの出力先は worktree の外（`--target-dir /home/kawato/.cache/losat-web-gui-target/<用途>`）にする。`rustc` や `cargo` を直接呼ぶ既存のスクリプト（例：`LOSAT/tests/build_wasi_artifacts.py`）は、環境変数 `RUSTUP_TOOLCHAIN=1.92.0` を付けて実行する。出力を変えない変更の前後の比較には `docs/evidence/losat_web_e1a/capture_outputs.py`（全 program の出力の SHA-256）と `docs/evidence/losat_web_e1a/measure_perf.py`（性能の非退行。変更前と変更後を 1 回ずつ交互に測る）を使う。`cargo test --all-features` は診断用の feature を含むので、CI と同じく環境変数 `LOSAT_BLASTX_WORKER_LOG` に書き込めるファイルのパスを設定する。回帰の基準には、凍結バイト（例：`LOSAT/tests/platform_native_v010_canonical.tsv`）か、変更の前にこの worktree で取った出力を使う。
-5. **アプリ（`web/`）を変更するセッション**：`web/AGENTS.md` に従う。コミットの前に `cd web/app && npm ci && npm run check && npm run e2e` を通す。
+5. **アプリ（`web/`）を変更するセッション**：`web/AGENTS.md` に従う。コミットの前に `cd web/app && npm ci && npm run check && npm run e2e` を通す。エンジン側が V-PERF を測る間（ファイル `/home/kawato/.cache/losat-web-gui-target/vperf.lock` がある間）は、アプリ側の試験やビルドを始めず、実行中のものは終わるのを待つ（計画 DW-7）。
 6. **証拠**：`docs/evidence/losat_web_<stage>/` に、ゲート記録の `README.md`、`evidence.sha256`、再現スクリプトを置く。実行の記録は `run-<UTC 時刻>/` に置き、作った後は書き換えない。
 7. **保守者の判断**：PD の承認、公開、Cloudflare へのデプロイ、GA4 の設定、外部サービスへの送信は、セッションの中で行わない。必要になったら、ゲート記録に「保守者の判断待ち」として書き、最終回答でも示す。
 8. **終了と引き継ぎ**：エンジンの変更とアプリの変更は別のコミットにする。コミットして `git push` を行い、ゲート記録に結果・コミット SHA・残件を書く。次のセッションの指示書を、実測や結果に合わせて更新し、この README の表の状態を直して、同じブランチにコミットしてプッシュする。最終回答には、コミット SHA、プッシュの結果、検証の結果、残件、次のセッションの指示書のパスと全文を示す。完了条件が残っているときは完了と書かず、その解消を次の指示書の最初の作業にする。
@@ -38,9 +38,9 @@
 | S07++ | [BLASTN の query の batch](session_s07pp_e2f_blastn_query_batches.md) | E2f | 複数の query が NCBI と同じ batch で検索される（S07+ で追加、TD-14。S12 の前に終える） | 未着手 |
 | S08 | [TBLASTX outfmt 0/7](session_s08_e2b_tblastx_outfmt0_7.md) | E2b | NCBI とバイト一致（承認済みの例外を除く） | 未着手 |
 | S08+ | [BLASTP・TBLASTN・TBLASTX の既定以外のオプション](session_s08p_e2e_protein_options.md) | E2e | 既定以外のオプションが NCBI と同じか、明示的に拒否される（S07+ で追加、TD-13。S12 の前に終える） | 未着手 |
-| S09 | [ブラウザでの実行基盤](session_s09_w1_browser_runtime.md) | W1 | V-BR、前処理の割合の実測 | 未着手 |
+| S09 | [ブラウザでの実行基盤](session_s09_w1_browser_runtime.md) | W1 | V-BR、前処理の割合の実測（アプリ側。S10 の後、入口の条件は S08） | 未着手 |
 | S09+ | 前処理キャッシュ（条件付き） | R2 | DW-8 の条件を満たした program だけ。S09 の結果で行を足す | 未定 |
-| S10 | [データ層](session_s10_w2_data_layer.md) | W2 | BlockStore の契約試験、回収・保護・容量不足 | 未着手 |
+| S10 | [データ層](session_s10_w2_data_layer.md) | W2 | BlockStore の契約試験、回収・保護・容量不足（アプリ側。S09 より先に行う） | 進行中（アプリ側、2026-09-30） |
 | S11 | [領域の指定](session_s11_e2d_query_subject_loc.md) | E2d | `-query_loc` / `-subject_loc` が NCBI とバイト一致 | 未着手 |
 | S12 | [検索画面](session_s12_w3_search_ui.md) | W3 | 研究作業と境界条件の E2E | 未着手 |
 | S13 | [結果画面](session_s13_w4_results_ui.md) | W4 | 5 program の E2E、HSP と行・節の対応 | 未着手 |

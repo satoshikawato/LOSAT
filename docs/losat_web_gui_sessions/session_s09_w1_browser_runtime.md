@@ -6,6 +6,8 @@ LOSAT Web の段階 W1 を実行する。先に [セッション README](README.
 
 目的：FakeEngine を本物の Wasm エンジンに置き換え、ブラウザの中で 4 program（BLASTX は SX の後）を serial / threaded の両方で動かす。
 
+このセッションはアプリ側（README の規則 1）で、S10（データ層）の後に行う（計画 DW-7）。S10 が port と試験用の実装で作った部分（Data worker の `scan_*` によるレコード表と `register` の照合、Engine worker から Data worker への結果のチャンクの MessagePort）を本物の reactor と Engine worker につなぎ、S10 の契約試験を本物の実装で再実行する。
+
 S05 で確定した ABI（`docs/web/abi_v2.md`。version 2）と、それを Node で確かめる方法（V-ABI）の要点：
 
 - 成果物は `web/adapter/tools/build_reactors.py` が作る `losat-web-serial.wasm` と `losat-web-threads.wasm`（どちらも WASI の reactor で、instance 化の後に `_initialize` を 1 回呼ぶ）。ビルドの同一性は `web/adapter/tools/check_build_identity.py` が確かめる。

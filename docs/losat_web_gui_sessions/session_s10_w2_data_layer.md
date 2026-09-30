@@ -6,6 +6,8 @@ LOSAT Web の段階 W2 を実行する。先に [セッション README](README.
 
 目的：入力ファイルと実行結果を、Engine worker から独立して安全に保持する（設計書 §4、§6、§7）。
 
+このセッションはアプリ側（ブランチ `feature/losat-web-gui-app`、worktree `/mnt/c/Users/genom/GitHub/LOSAT-web-gui-app`。README の規則 1）で、エンジン側の S07+〜S08 と並行し、S09 より先に行う（計画 DW-7）。本物の Wasm の実行基盤（WASI shim、Engine worker、reactor の読み込み）は S09 で作るので、それに依存する部分（3 の `scan_*` によるレコード表の作成と `register` の照合、4 の Engine worker からの結果のチャンク）は、port（interface）と、その契約を満たす試験用の実装で作り、契約試験を書く。本物の reactor への接続と、同じ契約試験の再実行は S09 で行う。
+
 1. Data worker を作り、`DataGateway`（`src/ports/data.ts`）をその中で実装する。S01 の `MemoryDataGateway` は、同じ契約の Memory 実装として Data worker の中へ移す。
 2. OPFS の実装を作る。同期アクセスハンドルは Data worker の中だけで使う。配置は `tmp/<session-token>/runs/<run-token>/…` とし、ファイル名に入力名を入れない。Memory と OPFS の両方に、同じ契約試験（書き込み、確定、破棄、読み出し、大きなブロック）をかける。OPFS が使えないときは Memory にする。経路はブラウザ名ではなく、機能を試して選ぶ。
 3. 入力：File は参照だけを持ち、`File.slice` で読む。ABI v2 の `scan_*` でレコード表を作り、レコードごとの SHA-256 と DatasetRevision を作る。`register` の時点で、エンジンが解析した ID・長さとレコード表を照合し、食い違えば止める。
@@ -18,4 +20,4 @@ LOSAT Web の段階 W2 を実行する。先に [セッション README](README.
 
 ## 終了・引き継ぎ
 
-README の規則 8 に従う。次は [S11 — 領域の指定](session_s11_e2d_query_subject_loc.md)。
+README の規則 8 に従う（アプリ側：`feature/losat-web-gui` への merge と、計画・README の表の更新は、エンジン側が行う）。アプリ側の次は [S09 — ブラウザでの実行基盤](session_s09_w1_browser_runtime.md)（入口の条件は S08 の完了）。S09 の指示書に、S10 で作った port と契約試験、本物の reactor につなぐ部分を書き足す。

@@ -1,0 +1,101 @@
+:root {
+  --bg: #ffffff;
+  --fg: #1d2330;
+  --muted: #5b6475;
+  --border: #d5dae3;
+  --accent: #1f5fbf;
+  --warn-bg: #fff4d6;
+  --warn-fg: #6b4a00;
+  font-family: system-ui, sans-serif;
+  color: var(--fg);
+  background: var(--bg);
+}
+
+body {
+  margin: 0;
+  padding: 0 16px 32px;
+  background: var(--bg);
+}
+
+.app-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.local-note,
+.command {
+  color: var(--muted);
+}
+
+.banner {
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+  padding: 8px 12px;
+  border-radius: 4px;
+}
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  margin: 8px 0;
+}
+
+.tabs button[aria-pressed='true'] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 1fr);
+  gap: 24px;
+}
+
+@media (max-width: 800px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.inputs {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+  margin: 12px 0;
+}
+
+.inputs label {
+  display: grid;
+  gap: 4px;
+}
+
+textarea,
+pre.output {
+  font-family: ui-monospace, monospace;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+pre.output {
+  border: 1px solid var(--border);
+  padding: 8px;
+  overflow: auto;
+  max-height: 60vh;
+}
+
+.queue li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.status {
+  color: var(--muted);
+}
+
+.error {
+  color: #a00;
+}

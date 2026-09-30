@@ -1,0 +1,822 @@
+BLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/multi_subject.fasta).
+           6 sequences; 3,360 total letters
+
+
+
+Query= mq1_2 query matching several subjects with IUPAC codes
+
+Length=600
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+msA close homolog of base (1% divergence)                             1091    0.0   
+msB medium homolog of base (6% divergence), reverse complemented      865     0.0   
+msC distant homolog of base (12% divergence)                          398     2e-114
+msD two copies of a base fragment, one on each strand                 358     2e-102
+
+
+> msA close homolog of base (1% divergence)
+Length=700
+
+ Score = 1091 bits (542),  Expect = 0.0
+ Identities = 582/600 (97%), Gaps = 0/600 (0%)
+ Strand=Plus/Plus
+
+Query  1    TTCCCCCAGTATCTCGTCCTCGAATGTAGATCGATCTAGCCCTCCAAACTTATACGATGC  60
+            |||||||||||||||||||||||||| |||||||||||||||||||||||||||||||||
+Sbjct  51   TTCCCCCAGTATCTCGTCCTCGAATGAAGATCGATCTAGCCCTCCAAACTTATACGATGC  110
+
+Query  61   TCACTGTCGTACCTAAACGCCTCCGTCGAGCAGAAGCTTGTTTGACBGTTCGCGAGCCTG  120
+            |||||||||||||||||||||||||||||||||||||||||||||| |||||||||||||
+Sbjct  111  TCACTGTCGTACCTAAACGCCTCCGTCGAGCAGAAGCTTGTTTGACAGTTCGCGAGCCTG  170
+
+Query  121  TATTGAGGTCGTGTCGTTCTGCGAGGCCGTCTGTAACAGCTCGTTGCAAGAAATGGGCAT  180
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  171  TATTGAGGTCGTGTCGTTCTGCGAGGCCGTCTGTAACAGCTCGTTGCAAGAAATGGGCAT  230
+
+Query  181  TCGTGCCTTTCGGCGTWCTTCACTAAGTAGAGAGTGCCATAAGCGYTATCCATCGGGACC  240
+            ||| |||||||||||| |||||||||||||||||||||||||||| ||||||||||||||
+Sbjct  231  TCGGGCCTTTCGGCGTTCTTCACTAAGTAGAGAGTGCCATAAGCGCTATCCATCGGGACC  290
+
+Query  241  GAACCCAATDGCCGAGTCGCACTACTACTACCTGGGATAGCCAGGGATTAAGCGGGATGC  300
+            ||||||||| | ||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  291  GAACCCAATCGTCGAGTCGCACTACTACTACCTGGGATAGCCAGGGATTAAGCGGGATGC  350
+
+Query  301  CAGTTCCTACCGCATAACCCGAGCTCAATTACCGTCTAGCCTCATYCCTCCGCACCCTTA  360
+            ||||||||||||||||||||||||||||||||||||||||||||| ||||||||||||||
+Sbjct  351  CAGTTCCTACCGCATAACCCGAGCTCAATTACCGTCTAGCCTCATCCCTCCGCACCCTTA  410
+
+Query  361  CGGGTCAAATSGHAGCGGAGCGACGTCGGCTAAGCCATAGGTCCAAACCCGGAATABAGT  420
+            |||||||||| | ||||| ||||||||||||||||||||||||||||||||||||| |||
+Sbjct  411  CGGGTCAAATAGCAGCGGTGCGACGTCGGCTAAGCCATAGGTCCAAACCCGGAATATAGT  470
+
+Query  421  TTGGGAGCAACGGAGGCCTTAGATAAGTTTGCVGTCAGTTGAAAHCTYTAAAGCCAATGC  480
+            |||||||||||||||||||| ||||||||||| ||||||||||| || ||||||||||||
+Sbjct  471  TTGGGAGCAACGGAGGCCTTGGATAAGTTTGCAGTCAGTTGAAAACTCTAAAGCCAATGC  530
+
+Query  481  CGCTAGCTTAAGGGRGAAAGTTCGTCGTGGCTGCCGCCGACTCAGTAATATTAAACACGC  540
+            |||||||||||||| |||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  531  CGCTAGCTTAAGGGCGAAAGTTCGTCGTGGCTGCCGCCGACTCAGTAATATTAAACACGC  590
+
+Query  541  ACGGSCAAGACGTGATGTGCGCAGCCTTCGCGAAGCCTAAGGGCGAGAGTCCACATTTTG  600
+            |||| |||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  591  ACGGCCAAGACGTGATGTGCGCAGCCTTCGCGAAGCCTAAGGGCGAGAGTCCACATTTTG  650
+
+
+ Score = 22.6 bits (11),  Expect = 0.30
+ Identities = 11/11 (100%), Gaps = 0/11 (0%)
+ Strand=Plus/Minus
+
+Query  27  TAGATCGATCT  37
+           |||||||||||
+Sbjct  88  TAGATCGATCT  78
+
+
+> msB medium homolog of base (6% divergence), reverse complemented
+Length=660
+
+ Score = 865 bits (430),  Expect = 0.0
+ Identities = 551/596 (92%), Gaps = 0/596 (0%)
+ Strand=Plus/Minus
+
+Query  1    TTCCCCCAGTATCTCGTCCTCGAATGTAGATCGATCTAGCCCTCCAAACTTATACGATGC  60
+            ||||||||||||| ||| | ||||||||||||| |||||||| ||||||||| |||||||
+Sbjct  630  TTCCCCCAGTATCGCGTACACGAATGTAGATCGTTCTAGCCCGCCAAACTTACACGATGC  571
+
+Query  61   TCACTGTCGTACCTAAACGCCTCCGTCGAGCAGAAGCTTGTTTGACBGTTCGCGAGCCTG  120
+            ||  ||||||||||||||||||||||||| |||||||||||||||| |||||||||||||
+Sbjct  570  TCCATGTCGTACCTAAACGCCTCCGTCGAACAGAAGCTTGTTTGACAGTTCGCGAGCCTG  511
+
+Query  121  TATTGAGGTCGTGTCGTTCTGCGAGGCCGTCTGTAACAGCTCGTTGCAAGAAATGGGCAT  180
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  510  TATTGAGGTCGTGTCGTTCTGCGAGGCCGTCTGTAACAGCTCGTTGCAAGAAATGGGCAT  451
+
+Query  181  TCGTGCCTTTCGGCGTWCTTCACTAAGTAGAGAGTGCCATAAGCGYTATCCATCGGGACC  240
+            |||||||||||||||  |||||||||||| ||||||||||||||| ||||||||||||||
+Sbjct  450  TCGTGCCTTTCGGCGCTCTTCACTAAGTAAAGAGTGCCATAAGCGCTATCCATCGGGACC  391
+
+Query  241  GAACCCAATDGCCGAGTCGCACTACTACTACCTGGGATAGCCAGGGATTAAGCGGGATGC  300
+            |||||| || ||||||||||||||||||||||||||||||||||||||||| ||||||||
+Sbjct  390  GAACCCCATCGCCGAGTCGCACTACTACTACCTGGGATAGCCAGGGATTAAACGGGATGC  331
+
+Query  301  CAGTTCCTACCGCATAACCCGAGCTCAATTACCGTCTAGCCTCATYCCTCCGCACCCTTA  360
+            |||| |||||| ||||||||||||||||||||||||||||||||| | ||||||||||| 
+Sbjct  330  CAGTCCCTACCACATAACCCGAGCTCAATTACCGTCTAGCCTCATCCGTCCGCACCCTTC  271
+
+Query  361  CGGGTCAAATSGHAGCGGAGCGACGTCGGCTAAGCCATAGGTCCAAACCCGGAATABAGT  420
+            |||||||||  | |||||||||||||||||||||||||||| ||||||||||||||  ||
+Sbjct  270  CGGGTCAAAAAGCAGCGGAGCGACGTCGGCTAAGCCATAGGCCCAAACCCGGAATATTGT  211
+
+Query  421  TTGGGAGCAACGGAGGCCTTAGATAAGTTTGCVGTCAGTTGAAAHCTYTAAAGCCAATGC  480
+            ||||| || |||||||||||||||||||||||  |||||||||  || ||||||||||||
+Sbjct  210  TTGGGGGCGACGGAGGCCTTAGATAAGTTTGCAATCAGTTGAATACTCTAAAGCCAATGC  151
+
+Query  481  CGCTAGCTTAAGGGRGAAAGTTCGTCGTGGCTGCCGCCGACTCAGTAATATTAAACACGC  540
+            |||||||||||||| | ||| |||||| |||||||||||||||||||||||||||| |||
+Sbjct  150  CGCTAGCTTAAGGGTGCAAGCTCGTCGCGGCTGCCGCCGACTCAGTAATATTAAACGCGC  91
+
+Query  541  ACGGSCAAGACGTGATGTGCGCAGCCTTCGCGAAGCCTAAGGGCGAGAGTCCACAT  596
+            || | ||||||||||||||||||| |||||||||||||||||| | ||||||||||
+Sbjct  90   ACCGCCAAGACGTGATGTGCGCAGGCTTCGCGAAGCCTAAGGGAGGGAGTCCACAT  35
+
+
+ Score = 26.6 bits (13),  Expect = 0.019
+ Identities = 13/13 (100%), Gaps = 0/13 (0%)
+ Strand=Plus/Plus
+
+Query  566  CTTCGCGAAGCCT  578
+            |||||||||||||
+Sbjct  56   CTTCGCGAAGCCT  68
+
+
+> msC distant homolog of base (12% divergence)
+Length=400
+
+ Score = 398 bits (198),  Expect = 2e-114
+ Identities = 342/394 (87%), Gaps = 0/394 (0%)
+ Strand=Plus/Plus
+
+Query  101  TTTGACBGTTCGCGAGCCTGTATTGAGGTCGTGTCGTTCTGCGAGGCCGTCTGTAACAGC  160
+            |||||| || |||||| | ||||||||||||| |||||||||||||| | ||||||||||
+Sbjct  1    TTTGACAGTGCGCGAGGCAGTATTGAGGTCGTATCGTTCTGCGAGGCTGGCTGTAACAGC  60
+
+Query  161  TCGTTGCAAGAAATGGGCATTCGTGCCTTTCGGCGTWCTTCACTAAGTAGAGAGTGCCAT  220
+            |||| ||||||||| ||||||||||| ||||||||| ||||| |||| |||| |||||||
+Sbjct  61   TCGTAGCAAGAAATCGGCATTCGTGCTTTTCGGCGTTCTTCAATAAGAAGAGTGTGCCAT  120
+
+Query  221  AAGCGYTATCCATCGGGACCGAACCCAATDGCCGAGTCGCACTACTACTACCTGGGATAG  280
+            |||||  |||| ||||||||||||||||| ||||| ||||||| |||||||||||| |||
+Sbjct  121  AAGCGTCATCCCTCGGGACCGAACCCAATCGCCGAATCGCACTCCTACTACCTGGGTTAG  180
+
+Query  281  CCAGGGATTAAGCGGGATGCCAGTTCCTACCGCATAACCCGAGCTCAATTACCGTCTAGC  340
+            || ||||||||||| |||| || | ||||||| |||||||| |||||||||||||| |||
+Sbjct  181  CCGGGGATTAAGCGCGATGTCAATGCCTACCGAATAACCCGGGCTCAATTACCGTCGAGC  240
+
+Query  341  CTCATYCCTCCGCACCCTTACGGGTCAAATSGHAGCGGAGCGACGTCGGCTAAGCCATAG  400
+            ||||| ||||||||||||||||| |||||  | ||||||||||||||||||||||| | |
+Sbjct  241  CTCATCCCTCCGCACCCTTACGGTTCAAACAGCAGCGGAGCGACGTCGGCTAAGCCCTTG  300
+
+Query  401  GTCCAAACCCGGAATABAGTTTGGGAGCAACGGAGGCCTTAGATAAGTTTGCVGTCAGTT  460
+            |||| ||||||||||| ||||||| | |||| ||||| || |||| || ||| |||||| 
+Sbjct  301  GTCCCAACCCGGAATATAGTTTGGCACCAACAGAGGCGTTGGATACGTCTGCAGTCAGTG  360
+
+Query  461  GAAAHCTYTAAAGCCAATGCCGCTAGCTTAAGGG  494
+             ||| || | |||||||| |||||||||||||||
+Sbjct  361  AAAAACTCTCAAGCCAATCCCGCTAGCTTAAGGG  394
+
+
+> msD two copies of a base fragment, one on each strand
+Length=540
+
+ Score = 358 bits (178),  Expect = 2e-102
+ Identities = 194/200 (97%), Gaps = 0/200 (0%)
+ Strand=Plus/Plus
+
+Query  1    TTCCCCCAGTATCTCGTCCTCGAATGTAGATCGATCTAGCCCTCCAAACTTATACGATGC  60
+            |||||||||||||||||||||||||||||||||||||||| |||||||||||||||||||
+Sbjct  41   TTCCCCCAGTATCTCGTCCTCGAATGTAGATCGATCTAGCACTCCAAACTTATACGATGC  100
+
+Query  61   TCACTGTCGTACCTAAACGCCTCCGTCGAGCAGAAGCTTGTTTGACBGTTCGCGAGCCTG  120
+            |||||||||||||| ||||||||||||||||||||||||||||||| |||||||||||||
+Sbjct  101  TCACTGTCGTACCTTAACGCCTCCGTCGAGCAGAAGCTTGTTTGACAGTTCGCGAGCCTG  160
+
+Query  121  TATTGAGGTCGTGTCGTTCTGCGAGGCCGTCTGTAACAGCTCGTTGCAAGAAATGGGCAT  180
+            ||||||||||| ||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  161  TATTGAGGTCGAGTCGTTCTGCGAGGCCGTCTGTAACAGCTCGTTGCAAGAAATGGGCAT  220
+
+Query  181  TCGTGCCTTTCGGCGTWCTT  200
+            || ||||||||||||| |||
+Sbjct  221  TCATGCCTTTCGGCGTTCTT  240
+
+
+ Score = 322 bits (160),  Expect = 2e-91
+ Identities = 182/192 (95%), Gaps = 0/192 (0%)
+ Strand=Plus/Minus
+
+Query  301  CAGTTCCTACCGCATAACCCGAGCTCAATTACCGTCTAGCCTCATYCCTCCGCACCCTTA  360
+            |||||||||| |||||||||||||||||||||||||||||||||| ||||||||||||||
+Sbjct  500  CAGTTCCTACTGCATAACCCGAGCTCAATTACCGTCTAGCCTCATCCCTCCGCACCCTTA  441
+
+Query  361  CGGGTCAAATSGHAGCGGAGCGACGTCGGCTAAGCCATAGGTCCAAACCCGGAATABAGT  420
+            |||||||||| | |||||||||||||||||||||||||||||||||||||||| || |||
+Sbjct  440  CGGGTCAAATAGAAGCGGAGCGACGTCGGCTAAGCCATAGGTCCAAACCCGGAGTATAGT  381
+
+Query  421  TTGGGAGCAACGGAGGCCTTAGATAAGTTTGCVGTCAGTTGAAAHCTYTAAAGCCAATGC  480
+            |||||||||||||||||||||||||||||||| ||||||||||| || ||||||||||||
+Sbjct  380  TTGGGAGCAACGGAGGCCTTAGATAAGTTTGCAGTCAGTTGAAAACTCTAAAGCCAATGC  321
+
+Query  481  CGCTAGCTTAAG  492
+             |||||||||||
+Sbjct  320  AGCTAGCTTAAG  309
+
+
+ Score = 24.6 bits (12),  Expect = 0.075
+ Identities = 12/12 (100%), Gaps = 0/12 (0%)
+ Strand=Plus/Minus
+
+Query  27  TAGATCGATCTA  38
+           ||||||||||||
+Sbjct  78  TAGATCGATCTA  67
+
+
+
+Lambda      K        H
+    1.39    0.715     1.33 
+
+Gapped
+Lambda      K        H
+    1.39    0.715     1.33 
+
+Effective search space used: 1947000
+
+
+Query= mq2_2 query with no significant hit with IUPAC codes
+
+Length=300
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+    1.40    0.714     1.32 
+
+Gapped
+Lambda      K        H
+    1.40    0.714     1.32 
+
+Effective search space used: 957000
+
+
+Query= mq3_2 query matching msF on the minus strand with IUPAC codes
+
+Length=300
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+msF contains the second query region                                  449     4e-130
+
+
+> msF contains the second query region
+Length=560
+
+ Score = 449 bits (224),  Expect = 4e-130
+ Identities = 279/298 (94%), Gaps = 0/298 (0%)
+ Strand=Plus/Minus
+
+Query  3    TTGTGTTTACGTGTTGACGTCGAGACAAGGGCAACGTGTTACGTGCGCCCGTGACCTGDT  62
+            ||||||||||||||||||||||||||||||||| |||||||||||||||||||||||| |
+Sbjct  428  TTGTGTTTACGTGTTGACGTCGAGACAAGGGCAGCGTGTTACGTGCGCCCGTGACCTGTT  369
+
+Query  63   GGACAGCCTGACGTGGCACTGTTATTCGGAcccccccGTCATTCTCTATAACCAGCCCAG  122
+            ||||||| ||||||||||||||| ||||||| ||||||||||| ||||||||||||||||
+Sbjct  368  GGACAGCTTGACGTGGCACTGTTTTTCGGACGCCCCCGTCATTATCTATAACCAGCCCAG  309
+
+Query  123  TGTATCGCCCCACAGTGGGGTGTTCTCGGGGTTATGGTCAATACTGAMATAACAAGAAAG  182
+            | |||||||||||||||||||| |||||||||||||||||||||||| |||||||||| |
+Sbjct  308  TCTATCGCCCCACAGTGGGGTGCTCTCGGGGTTATGGTCAATACTGATATAACAAGAACG  249
+
+Query  183  CAGGCRAAGTCHCGAATTTGTCGAGGAGGTTGCCACATGAGATGCGCACAAGTGCCGACA  242
+            ||||| ||||  |||||||||| ||||||||||||  ||||||||| |||||||||||||
+Sbjct  248  CAGGCCAAGTACCGAATTTGTCCAGGAGGTTGCCAAGTGAGATGCGTACAAGTGCCGACA  189
+
+Query  243  CCCGGTGGCRGTACCAATACGCAGCCTGCCGACAGTTCTTCAGGAGGTGTAAGATGTT  300
+            ||||||||| ||||||||| ||||||||||||||||||||||||||||||||||||||
+Sbjct  188  CCCGGTGGCTGTACCAATAGGCAGCCTGCCGACAGTTCTTCAGGAGGTGTAAGATGTT  131
+
+
+
+Lambda      K        H
+    1.39    0.714     1.32 
+
+Gapped
+Lambda      K        H
+    1.39    0.714     1.32 
+
+Effective search space used: 957000
+
+
+Query= mq1_10 query matching several subjects with IUPAC codes
+
+Length=600
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+msA close homolog of base (1% divergence)                             855     0.0  
+msB medium homolog of base (6% divergence), reverse complemented      661     0.0  
+msC distant homolog of base (12% divergence)                          303     1e-85
+msD two copies of a base fragment, one on each strand                 296     8e-84
+
+
+> msA close homolog of base (1% divergence)
+Length=700
+
+ Score = 855 bits (404),  Expect = 0.0
+ Identities = 537/600 (90%), Gaps = 0/600 (0%)
+ Strand=Plus/Plus
+
+Query  1    TTCCCCCAMSATCTCGKCYTCKAATGTAGATCGATCTWGCCMTCCAAACTTATACGATSC  60
+            ||||||||  |||||| | || |||| |||||||||| ||| |||||||||||||||| |
+Sbjct  51   TTCCCCCAGTATCTCGTCCTCGAATGAAGATCGATCTAGCCCTCCAAACTTATACGATGC  110
+
+Query  61   TCACTGTCGTACCTAAACGCCTCCGTCGAGCAGAAGCTTMTTTGAKAGTTCGCGAGCCTG  120
+            ||||||||||||||||||||||||||||||||||||||| ||||| ||||||||||||||
+Sbjct  111  TCACTGTCGTACCTAAACGCCTCCGTCGAGCAGAAGCTTGTTTGACAGTTCGCGAGCCTG  170
+
+Query  121  TATTGMGGTCGTMTCGTTMTGCGAGGCCGTCKGTAACAGCTCKTRGCAAGAAATGGGCAT  180
+            ||||| |||||| ||||| |||||||||||| |||||||||| | |||||||||||||||
+Sbjct  171  TATTGAGGTCGTGTCGTTCTGCGAGGCCGTCTGTAACAGCTCGTTGCAAGAAATGGGCAT  230
+
+Query  181  TCGTGCCTTTCGGCGTTCTTCAWTAAGTAKAGASTGCCARAKGCGCTATCCATCGGGACC  240
+            ||| |||||||||||||||||| |||||| ||| ||||| | ||||||||||||||||||
+Sbjct  231  TCGGGCCTTTCGGCGTTCTTCACTAAGTAGAGAGTGCCATAAGCGCTATCCATCGGGACC  290
+
+Query  241  GAACCCAATCMCCGAGTCGCACTACTACTRCCTGGGAWAGWCAGGGATTAAGCGGGATGC  300
+            ||||||||||  ||||||||||||||||| ||||||| || |||||||||||||||||||
+Sbjct  291  GAACCCAATCGTCGAGTCGCACTACTACTACCTGGGATAGCCAGGGATTAAGCGGGATGC  350
+
+Query  301  CAGTTWCTACCMCATAACCCGAGCTCAARTACCGTCTAGCCTSATCCCTWCGCACCCTTA  360
+            ||||| ||||| |||||||||||||||| ||||||||||||| |||||| ||||||||||
+Sbjct  351  CAGTTCCTACCGCATAACCCGAGCTCAATTACCGTCTAGCCTCATCCCTCCGCACCCTTA  410
+
+Query  361  RWGGRCWAATAGCAGCGGAGCGRRGTCGGCTAAGCCATAGGTCCAAACCCGGAATAYAGT  420
+              || | ||||||||||| |||  |||||||||||||||||||||||||||||||| |||
+Sbjct  411  CGGGTCAAATAGCAGCGGTGCGACGTCGGCTAAGCCATAGGTCCAAACCCGGAATATAGT  470
+
+Query  421  TTGGGAGKAACGGAGGCCTTAGATAAGTTTGMAGTCAGKTGAAAACTCTAAAGCCAMTGC  480
+            ||||||| |||||||||||| |||||||||| |||||| ||||||||||||||||| |||
+Sbjct  471  TTGGGAGCAACGGAGGCCTTGGATAAGTTTGCAGTCAGTTGAAAACTCTAAAGCCAATGC  530
+
+Query  481  CGCTARCTTAAGGMCGAAYGTRCGTCGSGGCKGCCGCCGACTKASTASTATYAYACACGC  540
+            ||||| ||||||| |||| || ||||| ||| |||||||||| | || ||| | ||||||
+Sbjct  531  CGCTAGCTTAAGGGCGAAAGTTCGTCGTGGCTGCCGCCGACTCAGTAATATTAAACACGC  590
+
+Query  541  ACGGCCAWGACGSGATGMGCGCAGCCTWCGCGAASCCTAAGGGWGAGAGTCCACATTTTG  600
+            ||||||| |||| |||| ||||||||| |||||| |||||||| ||||||||||||||||
+Sbjct  591  ACGGCCAAGACGTGATGTGCGCAGCCTTCGCGAAGCCTAAGGGCGAGAGTCCACATTTTG  650
+
+
+ Score = 23.8 bits (11),  Expect = 0.14
+ Identities = 11/11 (100%), Gaps = 0/11 (0%)
+ Strand=Plus/Minus
+
+Query  27  TAGATCGATCT  37
+           |||||||||||
+Sbjct  88  TAGATCGATCT  78
+
+
+> msB medium homolog of base (6% divergence), reverse complemented
+Length=660
+
+ Score = 661 bits (312),  Expect = 0.0
+ Identities = 495/574 (86%), Gaps = 0/574 (0%)
+ Strand=Plus/Minus
+
+Query  23   AATGTAGATCGATCTWGCCMTCCAAACTTATACGATSCTCACTGTCGTACCTAAACGCCT  82
+            ||||||||||| ||| |||  ||||||||| ||||| |||  ||||||||||||||||||
+Sbjct  608  AATGTAGATCGTTCTAGCCCGCCAAACTTACACGATGCTCCATGTCGTACCTAAACGCCT  549
+
+Query  83   CCGTCGAGCAGAAGCTTMTTTGAKAGTTCGCGAGCCTGTATTGMGGTCGTMTCGTTMTGC  142
+            ||||||| ||||||||| ||||| ||||||||||||||||||| |||||| ||||| |||
+Sbjct  548  CCGTCGAACAGAAGCTTGTTTGACAGTTCGCGAGCCTGTATTGAGGTCGTGTCGTTCTGC  489
+
+Query  143  GAGGCCGTCKGTAACAGCTCKTRGCAAGAAATGGGCATTCGTGCCTTTCGGCGTTCTTCA  202
+            ||||||||| |||||||||| | |||||||||||||||||||||||||||||| ||||||
+Sbjct  488  GAGGCCGTCTGTAACAGCTCGTTGCAAGAAATGGGCATTCGTGCCTTTCGGCGCTCTTCA  429
+
+Query  203  WTAAGTAKAGASTGCCARAKGCGCTATCCATCGGGACCGAACCCAATCMCCGAGTCGCAC  262
+             |||||| ||| ||||| | |||||||||||||||||||||||| ||| |||||||||||
+Sbjct  428  CTAAGTAAAGAGTGCCATAAGCGCTATCCATCGGGACCGAACCCCATCGCCGAGTCGCAC  369
+
+Query  263  TACTACTRCCTGGGAWAGWCAGGGATTAAGCGGGATGCCAGTTWCTACCMCATAACCCGA  322
+            ||||||| ||||||| || |||||||||| ||||||||||||  ||||| ||||||||||
+Sbjct  368  TACTACTACCTGGGATAGCCAGGGATTAAACGGGATGCCAGTCCCTACCACATAACCCGA  309
+
+Query  323  GCTCAARTACCGTCTAGCCTSATCCCTWCGCACCCTTARWGGRCWAATAGCAGCGGAGCG  382
+            |||||| ||||||||||||| |||| | |||||||||   || | || ||||||||||||
+Sbjct  308  GCTCAATTACCGTCTAGCCTCATCCGTCCGCACCCTTCCGGGTCAAAAAGCAGCGGAGCG  249
+
+Query  383  RRGTCGGCTAAGCCATAGGTCCAAACCCGGAATAYAGTTTGGGAGKAACGGAGGCCTTAG  442
+              ||||||||||||||||| ||||||||||||||  ||||||| |  |||||||||||||
+Sbjct  248  ACGTCGGCTAAGCCATAGGCCCAAACCCGGAATATTGTTTGGGGGCGACGGAGGCCTTAG  189
+
+Query  443  ATAAGTTTGMAGTCAGKTGAAAACTCTAAAGCCAMTGCCGCTARCTTAAGGMCGAAYGTR  502
+            ||||||||| | |||| |||| |||||||||||| |||||||| |||||||  | | |  
+Sbjct  188  ATAAGTTTGCAATCAGTTGAATACTCTAAAGCCAATGCCGCTAGCTTAAGGGTGCAAGCT  129
+
+Query  503  CGTCGSGGCKGCCGCCGACTKASTASTATYAYACACGCACGGCCAWGACGSGATGMGCGC  562
+            ||||| ||| |||||||||| | || ||| | || ||||| |||| |||| |||| ||||
+Sbjct  128  CGTCGCGGCTGCCGCCGACTCAGTAATATTAAACGCGCACCGCCAAGACGTGATGTGCGC  69
+
+Query  563  AGCCTWCGCGAASCCTAAGGGWGAGAGTCCACAT  596
+            || || |||||| |||||||| | ||||||||||
+Sbjct  68   AGGCTTCGCGAAGCCTAAGGGAGGGAGTCCACAT  35
+
+
+> msC distant homolog of base (12% divergence)
+Length=400
+
+ Score = 303 bits (143),  Expect = 1e-85
+ Identities = 321/393 (82%), Gaps = 0/393 (0%)
+ Strand=Plus/Plus
+
+Query  101  TTTGAKAGTTCGCGAGCCTGTATTGMGGTCGTMTCGTTMTGCGAGGCCGTCKGTAACAGC  160
+            ||||| ||| |||||| | |||||| |||||| ||||| |||||||| | | ||||||||
+Sbjct  1    TTTGACAGTGCGCGAGGCAGTATTGAGGTCGTATCGTTCTGCGAGGCTGGCTGTAACAGC  60
+
+Query  161  TCKTRGCAAGAAATGGGCATTCGTGCCTTTCGGCGTTCTTCAWTAAGTAKAGASTGCCAR  220
+            || | ||||||||| ||||||||||| ||||||||||||||| |||| | ||  ||||| 
+Sbjct  61   TCGTAGCAAGAAATCGGCATTCGTGCTTTTCGGCGTTCTTCAATAAGAAGAGTGTGCCAT  120
+
+Query  221  AKGCGCTATCCATCGGGACCGAACCCAATCMCCGAGTCGCACTACTACTRCCTGGGAWAG  280
+            | |||  |||| |||||||||||||||||| |||| ||||||| ||||| ||||||  ||
+Sbjct  121  AAGCGTCATCCCTCGGGACCGAACCCAATCGCCGAATCGCACTCCTACTACCTGGGTTAG  180
+
+Query  281  WCAGGGATTAAGCGGGATGCCAGTTWCTACCMCATAACCCGAGCTCAARTACCGTCTAGC  340
+             | ||||||||||| |||| || |  |||||  |||||||| |||||| ||||||| |||
+Sbjct  181  CCGGGGATTAAGCGCGATGTCAATGCCTACCGAATAACCCGGGCTCAATTACCGTCGAGC  240
+
+Query  341  CTSATCCCTWCGCACCCTTARWGGRCWAATAGCAGCGGAGCGRRGTCGGCTAAGCCATAG  400
+            || |||||| ||||||||||  |  | || ||||||||||||  |||||||||||| | |
+Sbjct  241  CTCATCCCTCCGCACCCTTACGGTTCAAACAGCAGCGGAGCGACGTCGGCTAAGCCCTTG  300
+
+Query  401  GTCCAAACCCGGAATAYAGTTTGGGAGKAACGGAGGCCTTAGATAAGTTTGMAGTCAGKT  460
+            |||| ||||||||||| ||||||| |  ||| ||||| || |||| || || ||||||  
+Sbjct  301  GTCCCAACCCGGAATATAGTTTGGCACCAACAGAGGCGTTGGATACGTCTGCAGTCAGTG  360
+
+Query  461  GAAAACTCTAAAGCCAMTGCCGCTARCTTAAGG  493
+             |||||||| |||||| | |||||| |||||||
+Sbjct  361  AAAAACTCTCAAGCCAATCCCGCTAGCTTAAGG  393
+
+
+> msD two copies of a base fragment, one on each strand
+Length=540
+
+ Score = 296 bits (140),  Expect = 8e-84
+ Identities = 180/200 (90%), Gaps = 0/200 (0%)
+ Strand=Plus/Plus
+
+Query  1    TTCCCCCAMSATCTCGKCYTCKAATGTAGATCGATCTWGCCMTCCAAACTTATACGATSC  60
+            ||||||||  |||||| | || ||||||||||||||| ||  |||||||||||||||| |
+Sbjct  41   TTCCCCCAGTATCTCGTCCTCGAATGTAGATCGATCTAGCACTCCAAACTTATACGATGC  100
+
+Query  61   TCACTGTCGTACCTAAACGCCTCCGTCGAGCAGAAGCTTMTTTGAKAGTTCGCGAGCCTG  120
+            |||||||||||||| |||||||||||||||||||||||| ||||| ||||||||||||||
+Sbjct  101  TCACTGTCGTACCTTAACGCCTCCGTCGAGCAGAAGCTTGTTTGACAGTTCGCGAGCCTG  160
+
+Query  121  TATTGMGGTCGTMTCGTTMTGCGAGGCCGTCKGTAACAGCTCKTRGCAAGAAATGGGCAT  180
+            ||||| |||||  ||||| |||||||||||| |||||||||| | |||||||||||||||
+Sbjct  161  TATTGAGGTCGAGTCGTTCTGCGAGGCCGTCTGTAACAGCTCGTTGCAAGAAATGGGCAT  220
+
+Query  181  TCGTGCCTTTCGGCGTTCTT  200
+            || |||||||||||||||||
+Sbjct  221  TCATGCCTTTCGGCGTTCTT  240
+
+
+ Score = 263 bits (124),  Expect = 1e-73
+ Identities = 162/180 (90%), Gaps = 0/180 (0%)
+ Strand=Plus/Minus
+
+Query  313  CATAACCCGAGCTCAARTACCGTCTAGCCTSATCCCTWCGCACCCTTARWGGRCWAATAG  372
+            |||||||||||||||| ||||||||||||| |||||| ||||||||||  || | |||||
+Sbjct  488  CATAACCCGAGCTCAATTACCGTCTAGCCTCATCCCTCCGCACCCTTACGGGTCAAATAG  429
+
+Query  373  CAGCGGAGCGRRGTCGGCTAAGCCATAGGTCCAAACCCGGAATAYAGTTTGGGAGKAACG  432
+             |||||||||  ||||||||||||||||||||||||||||| || |||||||||| ||||
+Sbjct  428  AAGCGGAGCGACGTCGGCTAAGCCATAGGTCCAAACCCGGAGTATAGTTTGGGAGCAACG  369
+
+Query  433  GAGGCCTTAGATAAGTTTGMAGTCAGKTGAAAACTCTAAAGCCAMTGCCGCTARCTTAAG  492
+            ||||||||||||||||||| |||||| ||||||||||||||||| ||| |||| ||||||
+Sbjct  368  GAGGCCTTAGATAAGTTTGCAGTCAGTTGAAAACTCTAAAGCCAATGCAGCTAGCTTAAG  309
+
+
+ Score = 23.8 bits (11),  Expect = 0.14
+ Identities = 11/11 (100%), Gaps = 0/11 (0%)
+ Strand=Plus/Minus
+
+Query  27  TAGATCGATCT  37
+           |||||||||||
+Sbjct  78  TAGATCGATCT  68
+
+
+
+Lambda      K        H
+    1.47    0.725     1.38 
+
+Gapped
+Lambda      K        H
+    1.47    0.725     1.38 
+
+Effective search space used: 1947000
+
+
+Query= mq2_10 query with no significant hit with IUPAC codes
+
+Length=300
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+    1.49    0.728     1.40 
+
+Gapped
+Lambda      K        H
+    1.49    0.728     1.40 
+
+Effective search space used: 962046
+
+
+Query= mq3_10 query matching msF on the minus strand with IUPAC codes
+
+Length=300
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+msF contains the second query region                                  355     1e-101
+
+
+> msF contains the second query region
+Length=560
+
+ Score = 355 bits (168),  Expect = 1e-101
+ Identities = 257/296 (87%), Gaps = 0/296 (0%)
+ Strand=Plus/Minus
+
+Query  4    TGTGTTTACGTGTTGACGTCRAGACAWSYGCMACGTGSTACGTGCGCCCGTGACCTGTTG  63
+            |||||||||||||||||||| |||||   ||  |||| ||||||||||||||||||||||
+Sbjct  427  TGTGTTTACGTGTTGACGTCGAGACAAGGGCAGCGTGTTACGTGCGCCCGTGACCTGTTG  368
+
+Query  64   GACAGCRTGACGTGGYACTGTTATTCGGAcccccccGTCATTCTCTKTAWCCAYCCCAKT  123
+            |||||| |||||||| |||||| ||||||| ||||||||||| ||| || ||| |||| |
+Sbjct  367  GACAGCTTGACGTGGCACTGTTTTTCGGACGCCCCCGTCATTATCTATAACCAGCCCAGT  308
+
+Query  124  GTAKCGCCCCACAGWGGGWTGTTCTCGGGRTTATGGTCAATACTGATATAACAAGKAAGW  183
+             || |||||||||| ||| || ||||||| ||||||||||||||||||||||||| | | 
+Sbjct  307  CTATCGCCCCACAGTGGGGTGCTCTCGGGGTTATGGTCAATACTGATATAACAAGAACGC  248
+
+Query  184  AGGCCAAGTCACGAATTTGTCGAGGAGGTTGCWACATGAGATGCGCACAAGTGCCGACAC  243
+            |||||||||  |||||||||| |||||||||| |  ||||||||| ||||||||||||||
+Sbjct  247  AGGCCAAGTACCGAATTTGTCCAGGAGGTTGCCAAGTGAGATGCGTACAAGTGCCGACAC  188
+
+Query  244  CKGGTGGCTGTMCCWATACGCAGCKTGCCGAMAGTTCTTCAGGAGGTGTAASATGT  299
+            | ||||||||| || ||| ||||| |||||| ||||||||||||||||||| ||||
+Sbjct  187  CCGGTGGCTGTACCAATAGGCAGCCTGCCGACAGTTCTTCAGGAGGTGTAAGATGT  132
+
+
+
+Lambda      K        H
+    1.46    0.725     1.38 
+
+Gapped
+Lambda      K        H
+    1.46    0.725     1.38 
+
+Effective search space used: 962046
+
+
+Query= mq1_30 query matching several subjects with IUPAC codes
+
+Length=600
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+msA close homolog of base (1% divergence)                             153     2e-40
+msD two copies of a base fragment, one on each strand                 135     3e-35
+msB medium homolog of base (6% divergence), reverse complemented      95.5    4e-23
+msC distant homolog of base (12% divergence)                          73.0    2e-16
+
+
+> msA close homolog of base (1% divergence)
+Length=700
+
+ Score = 153 bits (61),  Expect = 2e-40
+ Identities = 140/193 (73%), Gaps = 0/193 (0%)
+ Strand=Plus/Plus
+
+Query  358  TTACGGGTCAAATARYAGCGGRGYGACGTCGGCTAAGCCYTAGGTYYAAACCYGGARYRT  417
+            ||||||||||||||  ||||| | ||||||||||||||| |||||  ||||| |||   |
+Sbjct  408  TTACGGGTCAAATAGCAGCGGTGCGACGTCGGCTAAGCCATAGGTCCAAACCCGGAATAT  467
+
+Query  418  AGTTTGGGAGCYACGGAGRCCYTaryraagytygyaytcayttgraaayrcyaaagcyaa  477
+            ||||||||||| |||||| || |    ||| | | | ||| ||| |||  | ||||| ||
+Sbjct  468  AGTTTGGGAGCAACGGAGGCCTTGGATAAGTTTGCAGTCAGTTGAAAACTCTAAAGCCAA  527
+
+Query  478  tgrcgctagcytaarggyraragYTYGTYRYGYYTGCYYCCRRCTCAGTARTRTTAYRCA  537
+            || ||||||| ||| ||  | || | ||   |  |||  ||  ||||||| | |||  ||
+Sbjct  528  TGCCGCTAGCTTAAGGGCGAAAGTTCGTCGTGGCTGCCGCCGACTCAGTAATATTAAACA  587
+
+Query  538  CGCAYGRCYRAGA  550
+            |||| | |  |||
+Sbjct  588  CGCACGGCCAAGA  600
+
+
+ Score = 100 bits (40),  Expect = 1e-24
+ Identities = 189/268 (71%), Gaps = 0/268 (0%)
+ Strand=Plus/Plus
+
+Query  16   GTCCTCGAYYGTAGATCYATCYAYCCCYCCAYAYTTAYARGRYGYTYRCTGTCGRACCTA  75
+            ||||||||  | ||||| ||| | ||| ||| | ||| | |  | |  |||||| |||||
+Sbjct  66   GTCCTCGAATGAAGATCGATCTAGCCCTCCAAACTTATACGATGCTCACTGTCGTACCTA  125
+
+Query  76   AAYGRCRRCRTCGAGCAYAAYYTTGTTTGACRRTYRGYYAGCCYGYATTRYGGTCRTGTR  135
+            || | |  | ||||||| ||  |||||||||  |  |  |||| | |||  |||| ||| 
+Sbjct  126  AACGCCTCCGTCGAGCAGAAGCTTGTTTGACAGTTCGCGAGCCTGTATTGAGGTCGTGTC  185
+
+Query  136  YTTCTGCGRGGRCYYCTGRAARAGCTRGTTGCAAGAAAYGGGCATTRYTGCCTYYRGRCG  195
+             ||||||| || |  ||| || |||| ||||||||||| |||||||   ||||   | ||
+Sbjct  186  GTTCTGCGAGGCCGTCTGTAACAGCTCGTTGCAAGAAATGGGCATTCGGGCCTTTCGGCG  245
+
+Query  196  TTCTTCAYTAARYAGRRAGYGYCATAYGYGCTYTYCATCGYGayrraacccaayygcyga  255
+            ||||||| |||  ||  || | |||| | ||| | ||||| ||   |||||||  |  ||
+Sbjct  246  TTCTTCACTAAGTAGAGAGTGCCATAAGCGCTATCCATCGGGACCGAACCCAATCGTCGA  305
+
+Query  256  gtcgyyyractartycctgggatagyca  283
+            ||||    |||| | |||||||||| ||
+Sbjct  306  GTCGCACTACTACTACCTGGGATAGCCA  333
+
+
+> msD two copies of a base fragment, one on each strand
+Length=540
+
+ Score = 135 bits (54),  Expect = 3e-35
+ Identities = 104/134 (78%), Gaps = 0/134 (0%)
+ Strand=Plus/Minus
+
+Query  358  TTACGGGTCAAATARYAGCGGRGYGACGTCGGCTAAGCCYTAGGTYYAAACCYGGARYRT  417
+            ||||||||||||||  ||||| | ||||||||||||||| |||||  ||||| |||   |
+Sbjct  443  TTACGGGTCAAATAGAAGCGGAGCGACGTCGGCTAAGCCATAGGTCCAAACCCGGAGTAT  384
+
+Query  418  AGTTTGGGAGCYACGGAGRCCYTaryraagytygyaytcayttgraaayrcyaaagcyaa  477
+            ||||||||||| |||||| || ||   ||| | | | ||| ||| |||  | ||||| ||
+Sbjct  383  AGTTTGGGAGCAACGGAGGCCTTAGATAAGTTTGCAGTCAGTTGAAAACTCTAAAGCCAA  324
+
+Query  478  tgrcgctagcytaa  491
+            ||  |||||| |||
+Sbjct  323  TGCAGCTAGCTTAA  310
+
+
+ Score = 58.0 bits (23),  Expect = 7e-12
+ Identities = 131/185 (71%), Gaps = 0/185 (0%)
+ Strand=Plus/Plus
+
+Query  16   GTCCTCGAYYGTAGATCYATCYAYCCCYCCAYAYTTAYARGRYGYTYRCTGTCGRACCTA  75
+            ||||||||  ||||||| ||| | | | ||| | ||| | |  | |  |||||| |||| 
+Sbjct  56   GTCCTCGAATGTAGATCGATCTAGCACTCCAAACTTATACGATGCTCACTGTCGTACCTT  115
+
+Query  76   AAYGRCRRCRTCGAGCAYAAYYTTGTTTGACRRTYRGYYAGCCYGYATTRYGGTCRTGTR  135
+            || | |  | ||||||| ||  |||||||||  |  |  |||| | |||  ||||  || 
+Sbjct  116  AACGCCTCCGTCGAGCAGAAGCTTGTTTGACAGTTCGCGAGCCTGTATTGAGGTCGAGTC  175
+
+Query  136  YTTCTGCGRGGRCYYCTGRAARAGCTRGTTGCAAGAAAYGGGCATTRYTGCCTYYRGRCG  195
+             ||||||| || |  ||| || |||| ||||||||||| |||||||  |||||   | ||
+Sbjct  176  GTTCTGCGAGGCCGTCTGTAACAGCTCGTTGCAAGAAATGGGCATTCATGCCTTTCGGCG  235
+
+Query  196  TTCTT  200
+            |||||
+Sbjct  236  TTCTT  240
+
+
+> msB medium homolog of base (6% divergence), reverse complemented
+Length=660
+
+ Score = 95.5 bits (38),  Expect = 4e-23
+ Identities = 99/134 (74%), Gaps = 0/134 (0%)
+ Strand=Plus/Minus
+
+Query  361  CGGGTCAAATARYAGCGGRGYGACGTCGGCTAAGCCYTAGGTYYAAACCYGGARYRTAGT  420
+            ||||||||| |  ||||| | ||||||||||||||| ||||   ||||| |||   | ||
+Sbjct  270  CGGGTCAAAAAGCAGCGGAGCGACGTCGGCTAAGCCATAGGCCCAAACCCGGAATATTGT  211
+
+Query  421  TTGGGAGCYACGGAGRCCYTaryraagytygyaytcayttgraaayrcyaaagcyaatgr  480
+            ||||| || |||||| || ||   ||| | | | ||| ||| | |  | ||||| |||| 
+Sbjct  210  TTGGGGGCGACGGAGGCCTTAGATAAGTTTGCAATCAGTTGAATACTCTAAAGCCAATGC  151
+
+Query  481  cgctagcytaargg  494
+            ||||||| ||| ||
+Sbjct  150  CGCTAGCTTAAGGG  137
+
+
+ Score = 70.5 bits (28),  Expect = 1e-15
+ Identities = 131/186 (70%), Gaps = 0/186 (0%)
+ Strand=Plus/Minus
+
+Query  98   TTGTTTGACRRTYRGYYAGCCYGYATTRYGGTCRTGTRYTTCTGCGRGGRCYYCTGRAAR  157
+            |||||||||  |  |  |||| | |||  |||| |||  ||||||| || |  ||| || 
+Sbjct  533  TTGTTTGACAGTTCGCGAGCCTGTATTGAGGTCGTGTCGTTCTGCGAGGCCGTCTGTAAC  474
+
+Query  158  AGCTRGTTGCAAGAAAYGGGCATTRYTGCCTYYRGRCGTTCTTCAYTAARYAGRRAGYGY  217
+            |||| ||||||||||| |||||||  |||||   | || |||||| |||  |   || | 
+Sbjct  473  AGCTCGTTGCAAGAAATGGGCATTCGTGCCTTTCGGCGCTCTTCACTAAGTAAAGAGTGC  414
+
+Query  218  CATAYGYGCTYTYCATCGYGayrraacccaayygcygagtcgyyyractartycctggga  277
+            |||| | ||| | ||||| ||   ||||| |  || ||||||    |||| | |||||||
+Sbjct  413  CATAAGCGCTATCCATCGGGACCGAACCCCATCGCCGAGTCGCACTACTACTACCTGGGA  354
+
+Query  278  tagyca  283
+            ||| ||
+Sbjct  353  TAGCCA  348
+
+
+> msC distant homolog of base (12% divergence)
+Length=400
+
+ Score = 73.0 bits (29),  Expect = 2e-16
+ Identities = 52/67 (78%), Gaps = 0/67 (0%)
+ Strand=Plus/Plus
+
+Query  358  TTACGGGTCAAATARYAGCGGRGYGACGTCGGCTAAGCCYTAGGTYYAAACCYGGARYRT  417
+            |||||| ||||| |  ||||| | ||||||||||||||| | |||   |||| |||   |
+Sbjct  258  TTACGGTTCAAACAGCAGCGGAGCGACGTCGGCTAAGCCCTTGGTCCCAACCCGGAATAT  317
+
+Query  418  AGTTTGG  424
+            |||||||
+Sbjct  318  AGTTTGG  324
+
+
+
+Lambda      K        H
+    1.73    0.765     1.61 
+
+Gapped
+Lambda      K        H
+    1.73    0.765     1.61 
+
+Effective search space used: 1960704
+
+
+Query= mq2_30 query with no significant hit with IUPAC codes
+
+Length=300
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+    1.66    0.754     1.54 
+
+Gapped
+Lambda      K        H
+    1.66    0.754     1.54 
+
+Effective search space used: 967104
+
+
+Query= mq3_30 query matching msF on the minus strand with IUPAC codes
+
+Length=300
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+msF contains the second query region                                  32.9    1e-04
+
+
+> msF contains the second query region
+Length=560
+
+ Score = 32.9 bits (13),  Expect = 1e-04
+ Identities = 33/43 (77%), Gaps = 0/43 (0%)
+ Strand=Plus/Minus
+
+Query  150  GGGGTTRTGGTCRATARTGayaraayyayarrGCAGGCCAAGT  192
+            |||||| ||||| ||| ||| | ||  | |  |||||||||||
+Sbjct  281  GGGGTTATGGTCAATACTGATATAACAAGAACGCAGGCCAAGT  239
+
+
+
+Lambda      K        H
+    1.73    0.765     1.61 
+
+Gapped
+Lambda      K        H
+    1.73    0.765     1.61 
+
+Effective search space used: 967104
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/multi_subject.fasta).
+    Posted date:  Unknown
+  Number of letters in database: 3,360
+  Number of sequences in database:  6
+
+
+
+Matrix: blastn matrix 1 -3
+Gap Penalties: Existence: 3, Extension: 2

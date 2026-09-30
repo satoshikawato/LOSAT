@@ -13,6 +13,17 @@ use super::super::hsp::BlastnHsp;
 /// #define BLAST_SUBJECT_BESTHIT_DEFAULT_RANGE_DIFF 3
 const MAX_RANGE_DIFF: usize = 3;
 
+/// The fields of an HSP that `Blast_HSPListSubjectBestHit` reads: its context, the frame of
+/// the query, the query offsets within the context, and the length of the context.
+#[derive(Debug, Clone, Copy)]
+pub struct BestHitKey {
+    pub context: u32,
+    pub query_frame: i32,
+    pub query_offset: usize,
+    pub query_end: usize,
+    pub query_length: usize,
+}
+
 /// Apply Subject Best Hit filtering to remove HSPs with overlapping query ranges.
 ///
 /// NCBI reference: blast_hits.c:2537-2606 Blast_HSPListSubjectBestHit
@@ -30,10 +41,6 @@ const MAX_RANGE_DIFF: usize = 3;
 /// - `hits`: Vector of HSPs, already sorted by score descending
 /// - `query_len`: Length of the query sequence (for cross-strand coordinate flipping)
 pub fn subject_best_hit(hits: &mut Vec<BlastnHsp>, query_len: usize) {
-    if hits.len() <= 1 {
-        return;
-    }
-
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2563-2566
     // ```c
     // o = hsp_array[i]->query.offset - range_diff;
@@ -41,9 +48,23 @@ pub fn subject_best_hit(hits: &mut Vec<BlastnHsp>, query_len: usize) {
     // ```
     // Subject-best-hit filtering uses internal query.offset/query.end, not
     // output coordinates.
-    let q_offsets = |h: &BlastnHsp| (h.internal_q_offset_0, h.internal_q_end_0);
-    let context = |h: &BlastnHsp| -> u32 { h.q_idx * 2 + if h.query_frame < 0 { 1 } else { 0 } };
+    subject_best_hit_by(hits, |h| BestHitKey {
+        context: h.q_idx * 2 + if h.query_frame < 0 { 1 } else { 0 },
+        query_frame: h.query_frame,
+        query_offset: h.internal_q_offset_0,
+        query_end: h.internal_q_end_0,
+        query_length: query_len,
+    });
+}
 
+/// `Blast_HSPListSubjectBestHit` over an HSP list in its order, with the fields of each HSP
+/// given by `key`: the preliminary list of a subject holds the HSPs of every query, each
+/// with the length of its own context (`query_info->contexts[curr_context].query_length`).
+pub fn subject_best_hit_by<T>(hits: &mut Vec<T>, key: impl Fn(&T) -> BestHitKey) {
+    if hits.len() <= 1 {
+        return;
+    }
+    let keys: Vec<BestHitKey> = hits.iter().map(&key).collect();
     // Mark HSPs for removal
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2560-2566
     // ```c
@@ -74,8 +95,8 @@ pub fn subject_best_hit(hits: &mut Vec<BlastnHsp>, query_len: usize) {
             continue;
         }
 
-        let hit_i_context = context(&hits[i]);
-        let (i_q_offset, i_q_end) = q_offsets(&hits[i]);
+        let hit_i_context = keys[i].context;
+        let (i_q_offset, i_q_end) = (keys[i].query_offset, keys[i].query_end);
         let o = i_q_offset.saturating_sub(MAX_RANGE_DIFF);
         let e = i_q_end.saturating_add(MAX_RANGE_DIFF);
 
@@ -84,8 +105,8 @@ pub fn subject_best_hit(hits: &mut Vec<BlastnHsp>, query_len: usize) {
                 continue;
             }
 
-            let hit_j_context = context(&hits[j]);
-            let (j_q_offset, j_q_end) = q_offsets(&hits[j]);
+            let hit_j_context = keys[j].context;
+            let (j_q_offset, j_q_end) = (keys[j].query_offset, keys[j].query_end);
 
             // Same context (strand) check
             if hit_i_context == hit_j_context {
@@ -122,8 +143,9 @@ pub fn subject_best_hit(hits: &mut Vec<BlastnHsp>, query_len: usize) {
             continue;
         }
 
-        let hit_i_context = context(&hits[i]);
-        let target_context = if hits[i].query_frame > 0 {
+        let hit_i_context = keys[i].context;
+        let query_len = keys[i].query_length;
+        let target_context = if keys[i].query_frame > 0 {
             hit_i_context + 1
         } else {
             hit_i_context.saturating_sub(1)
@@ -132,7 +154,7 @@ pub fn subject_best_hit(hits: &mut Vec<BlastnHsp>, query_len: usize) {
         // Flip coordinates for cross-strand comparison
         // NCBI: e = qlen - (query.offset - range_diff)
         // NCBI: o = qlen - (query.end + range_diff)
-        let (i_q_offset, i_q_end) = q_offsets(&hits[i]);
+        let (i_q_offset, i_q_end) = (keys[i].query_offset, keys[i].query_end);
         let flipped_o = query_len.saturating_sub(i_q_end.saturating_add(MAX_RANGE_DIFF));
         let flipped_e = query_len.saturating_sub(i_q_offset.saturating_sub(MAX_RANGE_DIFF));
 
@@ -141,8 +163,8 @@ pub fn subject_best_hit(hits: &mut Vec<BlastnHsp>, query_len: usize) {
                 continue;
             }
 
-            let hit_j_context = context(&hits[j]);
-            let (j_q_offset, j_q_end) = q_offsets(&hits[j]);
+            let hit_j_context = keys[j].context;
+            let (j_q_offset, j_q_end) = (keys[j].query_offset, keys[j].query_end);
 
             // Target context (opposite strand) check
             if hit_j_context == target_context {

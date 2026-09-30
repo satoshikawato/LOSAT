@@ -1,0 +1,13 @@
+[losat-wasi-event] {"event":"spawned","at_ms":120.148954,"tid":1}
+[losat-wasi-event] {"event":"spawned","at_ms":162.181764,"tid":2}
+[losat-wasi-event] {"event":"spawned","at_ms":207.932344,"tid":3}
+[losat-thread-pool] program=tblastx requested_threads=4 pool_threads=4 caller_participates=true measured_activity=null
+[losat-thread-stage] program=tblastx stage=subjects work_items=4 parallel_selected=true measured_activity=null
+[losat-thread-stage] program=tblastx stage=linking work_items=7 parallel_selected=true measured_activity=null
+[losat-thread-stage] program=tblastx stage=linking work_items=8 parallel_selected=true measured_activity=null
+[losat-thread-stage] program=tblastx stage=linking work_items=8 parallel_selected=true measured_activity=null
+[losat-thread-stage] program=tblastx stage=linking work_items=8 parallel_selected=true measured_activity=null
+[losat-thread-stage] program=tblastx stage=linking work_items=6 parallel_selected=true measured_activity=null
+[losat-thread-stage] program=tblastx stage=linking work_items=6 parallel_selected=true measured_activity=null
+[losat-thread-stage] program=tblastx stage=linking work_items=6 parallel_selected=true measured_activity=null
+[losat-thread-stage] program=tblastx stage=linking work_items=7 parallel_selected=true measured_activity=null

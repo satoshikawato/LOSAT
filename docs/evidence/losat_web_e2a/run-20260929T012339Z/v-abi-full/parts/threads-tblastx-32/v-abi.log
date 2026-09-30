@@ -1,0 +1,15 @@
+(node:1498828) ExperimentalWarning: WASI is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ok threads describe, validate, register, scan
+ok threads n1 d02_ap027132_nz_code4
+(node:1498828) ExperimentalWarning: WASI is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ok threads n2 d02_ap027132_nz_code4
+(node:1498828) ExperimentalWarning: WASI is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:1498828) ExperimentalWarning: WASI is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:1498828) ExperimentalWarning: WASI is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ok threads n4 d02_ap027132_nz_code4
+3 runs matched the native CLI; frozen hashes: 3/3 equal

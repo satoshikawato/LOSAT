@@ -279,6 +279,429 @@ mod four_base_tests {
     }
 }
 
+/// NCBI's compressed query of the small-query lookup table: byte `j` holds the query
+/// letters `j` to `j + 3` as two-bit bases (`blastna & 3`, so an ambiguity code or a
+/// sentinel reads as a base), with 0 before the first and after the last letter. The
+/// returned vector holds NCBI's `new_seq[j]` at `j + 3` (`j` from -3).
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_util.c:473-499
+/// ```c
+///     new_seq[-1] = new_seq[-2] = new_seq[-3] = 0;
+///     new_seq[len-3] = new_seq[len-2] = new_seq[len-1] = 0;
+///
+///     /* the first 3 bytes behind new_seq contain right-justified
+///        versions of the first 3 (or less) bases */
+///     max_start = MIN(3, len);
+///     curr_letter = 0;
+///     for (i = 0; i < max_start; i++) {
+///         curr_letter = curr_letter << 2 | (old_seq[i] & 3);
+///         new_seq[i - max_start] = curr_letter;
+///     }
+///
+///     /* offset i into new_seq points to bases i to i+3
+///        packed together into one byte */
+///
+///     for (; i < len; i++) {
+///         curr_letter = curr_letter << 2 | (old_seq[i] & 3);
+///         new_seq[i - max_start] = curr_letter;
+///     }
+///
+///     /* the last 3 bytes contain left-justified versions of
+///        the last 3 (or less) bases */
+///     max_start = MIN(3, len);
+///     for (i = 0; i < max_start; i++) {
+///         curr_letter = curr_letter << 2;
+///         new_seq[len - (max_start - i)] = curr_letter;
+///     }
+/// ```
+/// (`new_seq[i - max_start]` is `Uint1`; with `max_start` = 3 each byte is the last
+/// four letters read, and the prologue writes -3..-1 for queries of three or more letters.)
+pub fn build_compressed_query(query: &[u8]) -> Vec<u8> {
+    let base = |index: isize| -> u8 {
+        if index >= 0 && (index as usize) < query.len() {
+            query[index as usize] & 3
+        } else {
+            0
+        }
+    };
+    (-3..query.len() as isize)
+        .map(|j| base(j) << 6 | base(j + 1) << 4 | base(j + 2) << 2 | base(j + 3))
+        .collect()
+}
+
+/// The number of matching two-bit bases at the right end (`left`) or the left end
+/// (`right`) of the XOR of a query byte and a subject byte, at most 4.
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1326-1330
+/// ```c
+/// /** Entry i of this list gives the number of pairs of
+///  * bits that are zero in the bit pattern of i, looking
+///  * from right to left
+///  */
+/// static const Uint1 s_ExactMatchExtendLeft[256] = {
+/// ```
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1349-1354
+/// ```c
+/// /** Entry i of this list gives the number of pairs of
+///  * bits that are zero in the bit pattern of i, looking
+///  * from left to right
+///  */
+/// static const Uint1 s_ExactMatchExtendRight[256] = {
+/// 4, 3, 3, 3, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
+/// ```
+fn exact_match_extend_left(xor: u8) -> i64 {
+    i64::from(xor.trailing_zeros().min(8) / 2)
+}
+
+fn exact_match_extend_right(xor: u8) -> i64 {
+    i64::from(xor.leading_zeros().min(8) / 2)
+}
+
+/// The start of a word hit of a small-query lookup table, from the start of its lookup
+/// word: NCBI's exact-match extension over the compressed query (`build_compressed_query`)
+/// and the packed subject. `None` where NCBI drops the hit.
+pub struct SmallNaWord<'a> {
+    pub compressed_query: &'a [u8],
+    pub subject_packed: &'a [u8],
+    /// NCBI's `query->length` (the concatenated query).
+    pub query_length: usize,
+    pub word_length: usize,
+    pub lut_word_length: usize,
+}
+
+impl SmallNaWord<'_> {
+    /// `q[offset]` of NCBI's compressed query (offset from -3).
+    fn query_byte(&self, offset: i64) -> u8 {
+        self.compressed_query[(offset + 3) as usize]
+    }
+
+    /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1514-1566
+    /// ```c
+    ///         Int4 ext_max = MIN(MIN(word_length - lut_word_length, s_offset), q_offset - q_start);
+    ///
+    ///         /* Start the extension at the first multiple of 4 bases in
+    ///            the subject sequence to the right of the seed.
+    ///            Collect exact matches in groups of four, until a
+    ///            mismatch is encountered or the expected number of
+    ///            matches is found. The index into q[] below can
+    ///            technically be negative, but the compressed version
+    ///            of the query has extra pad bytes before q[0] */
+    ///
+    ///         Int4 rsdl = COMPRESSION_RATIO - (s_offset % COMPRESSION_RATIO);
+    ///         s_offset += rsdl;
+    ///         q_offset += rsdl;
+    ///         ext_max  += rsdl;
+    ///
+    ///         s_off = s_offset;
+    ///         q_off = q_offset;
+    ///
+    ///         while (ext_left < ext_max) {
+    ///             Uint1 q_byte = q[q_off - 4];
+    ///             Uint1 s_byte = s[s_off / COMPRESSION_RATIO - 1];
+    ///             Uint1 bases = s_ExactMatchExtendLeft[q_byte ^ s_byte];
+    ///             ext_left += bases;
+    ///             if (bases < 4)
+    ///                 break;
+    ///             q_off -= 4;
+    ///             s_off -= 4;
+    ///         }
+    ///         ext_left = MIN(ext_left, ext_max);
+    ///
+    ///         /* extend to the right. The extension begins at the first
+    ///            base not examined by the left extension */
+    ///
+    ///         s_off = s_offset;
+    ///         q_off = q_offset;
+    ///         ext_max = MIN(MIN(word_length - ext_left, s_range - s_off), q_range - q_off);
+    ///         while (ext_right < ext_max) {
+    ///             Uint1 q_byte = q[q_off];
+    ///             Uint1 s_byte = s[s_off / COMPRESSION_RATIO];
+    ///             Uint1 bases = s_ExactMatchExtendRight[q_byte ^ s_byte];
+    ///             ext_right += bases;
+    ///             if (bases < 4)
+    ///                 break;
+    ///             q_off += 4;
+    ///             s_off += 4;
+    ///         }
+    ///         ext_right = MIN(ext_right, ext_max);
+    ///
+    ///         if (ext_left + ext_right < word_length)
+    ///             continue;
+    ///
+    ///         q_offset -= ext_left;
+    ///         s_offset -= ext_left;
+    /// ```
+    /// Returns the query and subject offsets of the word.
+    pub fn extend(
+        &self,
+        q_offset: usize,
+        s_offset: usize,
+        q_start: usize,
+        q_range: usize,
+        s_range: usize,
+    ) -> Option<(usize, usize)> {
+        let ratio = COMPRESSION_RATIO as i64;
+        let (q_offset, s_offset) = (q_offset as i64, s_offset as i64);
+        let (q_start, q_range, s_range) = (q_start as i64, q_range as i64, s_range as i64);
+        let word_length = self.word_length as i64;
+        let mut ext_max = (word_length - self.lut_word_length as i64)
+            .min(s_offset)
+            .min(q_offset - q_start);
+        let rsdl = ratio - s_offset % ratio;
+        let (s_offset, q_offset) = (s_offset + rsdl, q_offset + rsdl);
+        ext_max += rsdl;
+
+        let (mut s_off, mut q_off) = (s_offset, q_offset);
+        let mut ext_left = 0;
+        while ext_left < ext_max {
+            let q_byte = self.query_byte(q_off - 4);
+            let s_byte = self.subject_packed[(s_off / ratio - 1) as usize];
+            let bases = exact_match_extend_left(q_byte ^ s_byte);
+            ext_left += bases;
+            if bases < 4 {
+                break;
+            }
+            q_off -= 4;
+            s_off -= 4;
+        }
+        ext_left = ext_left.min(ext_max);
+
+        let (mut s_off, mut q_off) = (s_offset, q_offset);
+        let ext_max = (word_length - ext_left)
+            .min(s_range - s_off)
+            .min(q_range - q_off);
+        let mut ext_right = 0;
+        while ext_right < ext_max {
+            let q_byte = self.query_byte(q_off);
+            let s_byte = self.subject_packed[(s_off / ratio) as usize];
+            let bases = exact_match_extend_right(q_byte ^ s_byte);
+            ext_right += bases;
+            if bases < 4 {
+                break;
+            }
+            q_off += 4;
+            s_off += 4;
+        }
+        ext_right = ext_right.min(ext_max);
+
+        if ext_left + ext_right < word_length {
+            return None;
+        }
+        Some((
+            (q_offset - ext_left) as usize,
+            (s_offset - ext_left) as usize,
+        ))
+    }
+
+    /// The extension for a lookup width that is a multiple of 4, a scan step that is a
+    /// multiple of 4 and a word at most 4 letters longer than the lookup word.
+    ///
+    /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1415-1435
+    /// ```c
+    ///         if ( (s_offset > 0) && (q_offset > 0) ) {
+    ///             Uint1 q_byte = q[q_offset - 4];
+    ///             Uint1 s_byte = s[s_offset / COMPRESSION_RATIO - 1];
+    ///             ext_left = s_ExactMatchExtendLeft[q_byte ^ s_byte];
+    ///             ext_left = MIN(MIN(ext_left, ext_to), q_offset - q_start);
+    ///         }
+    ///
+    ///         /* look for up to 4 exact matches to the right of the seed */
+    ///
+    ///         if ((ext_left < ext_to) && ((q_offset + lut_word_length) < query->length)) {
+    ///             Uint1 q_byte = q[q_offset + lut_word_length];
+    ///             Uint1 s_byte = s[(s_offset + lut_word_length) / COMPRESSION_RATIO];
+    ///             Int4 ext_right = s_ExactMatchExtendRight[q_byte ^ s_byte];
+    ///             ext_right = MIN(MIN(ext_right, s_range - (s_offset + lut_word_length)),
+    ///                                            q_range - (q_offset + lut_word_length));
+    ///             if (ext_left + ext_right < ext_to)
+    ///                 continue;
+    ///         }
+    ///
+    ///         q_offset -= ext_left;
+    ///         s_offset -= ext_left;
+    /// ```
+    pub fn extend_aligned_one_byte(
+        &self,
+        q_offset: usize,
+        s_offset: usize,
+        q_start: usize,
+        q_range: usize,
+        s_range: usize,
+    ) -> Option<(usize, usize)> {
+        let ratio = COMPRESSION_RATIO as i64;
+        let (q_offset, s_offset) = (q_offset as i64, s_offset as i64);
+        let (q_start, q_range, s_range) = (q_start as i64, q_range as i64, s_range as i64);
+        let lut_word_length = self.lut_word_length as i64;
+        let ext_to = self.word_length as i64 - lut_word_length;
+        let mut ext_left = 0;
+        if s_offset > 0 && q_offset > 0 {
+            let q_byte = self.query_byte(q_offset - 4);
+            let s_byte = self.subject_packed[(s_offset / ratio - 1) as usize];
+            ext_left = exact_match_extend_left(q_byte ^ s_byte)
+                .min(ext_to)
+                .min(q_offset - q_start);
+        }
+        if ext_left < ext_to && q_offset + lut_word_length < self.query_length as i64 {
+            let q_byte = self.query_byte(q_offset + lut_word_length);
+            let s_byte = self.subject_packed[((s_offset + lut_word_length) / ratio) as usize];
+            let ext_right = exact_match_extend_right(q_byte ^ s_byte)
+                .min(s_range - (s_offset + lut_word_length))
+                .min(q_range - (q_offset + lut_word_length));
+            if ext_left + ext_right < ext_to {
+                return None;
+            }
+        }
+        Some((
+            (q_offset - ext_left) as usize,
+            (s_offset - ext_left) as usize,
+        ))
+    }
+}
+
+#[cfg(test)]
+mod small_na_tests {
+    use super::{
+        build_compressed_query, exact_match_extend_left, exact_match_extend_right, SmallNaWord,
+    };
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1330-1347
+    // ```c
+    // static const Uint1 s_ExactMatchExtendLeft[256] = {
+    // ```
+    const NCBI_LEFT: [i64; 256] = [
+        4, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0,
+        0, 0, 2, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0,
+        1, 0, 0, 0, 3, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0, 1, 0,
+        0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0,
+        1, 0, 0, 0, 1, 0, 0, 0, 3, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 1, 0,
+        0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0,
+        1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 3, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 2, 0,
+        0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0,
+        2, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0,
+    ];
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1353-1358
+    // ```c
+    // static const Uint1 s_ExactMatchExtendRight[256] = {
+    // ```
+    // (64 initializers; C sets the other entries to 0.)
+    const NCBI_RIGHT_INITIALIZED: [i64; 64] = [
+        4, 3, 3, 3, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+        1, 1, 1, 1,
+    ];
+
+    #[test]
+    fn exact_match_counts_are_ncbi_tables() {
+        for xor in 0..=255u8 {
+            assert_eq!(
+                exact_match_extend_left(xor),
+                NCBI_LEFT[xor as usize],
+                "{xor}"
+            );
+            let right = NCBI_RIGHT_INITIALIZED
+                .get(xor as usize)
+                .copied()
+                .unwrap_or(0);
+            assert_eq!(exact_match_extend_right(xor), right, "{xor}");
+        }
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_util.c:473-499 (the loops,
+    // with `Int4 curr_letter` stored into `Uint1` bytes).
+    fn ncbi_compress(old: &[u8]) -> Vec<u8> {
+        let len = old.len() as isize;
+        let at = |index: isize| (index + 3) as usize;
+        let mut new_seq = vec![0u8; old.len() + 3];
+        let max_start = len.min(3);
+        let mut curr_letter = 0u32;
+        let mut i = 0;
+        while i < len {
+            curr_letter = curr_letter << 2 | u32::from(old[i as usize] & 3);
+            new_seq[at(i - max_start)] = curr_letter as u8;
+            i += 1;
+        }
+        for i in 0..max_start {
+            curr_letter <<= 2;
+            new_seq[at(len - (max_start - i))] = curr_letter as u8;
+        }
+        new_seq
+    }
+
+    #[test]
+    fn the_compressed_query_is_ncbis() {
+        let mut state = 7u32;
+        for len in 3..64 {
+            let query: Vec<u8> = (0..len)
+                .map(|_| {
+                    state = state.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+                    ((state >> 16) % 16) as u8
+                })
+                .collect();
+            assert_eq!(
+                build_compressed_query(&query),
+                ncbi_compress(&query),
+                "{query:?}"
+            );
+        }
+    }
+
+    fn packed(bases: &[u8]) -> Vec<u8> {
+        bases
+            .chunks(4)
+            .map(|chunk| {
+                (0..4).fold(0u8, |byte, index| {
+                    byte << 2 | chunk.get(index).copied().unwrap_or(0)
+                })
+            })
+            .collect()
+    }
+
+    // The fourteenth S07+ audit round: the query `K` (blastna 7) reads as `T` in the
+    // compressed query, so the exact-match extension of a lookup hit runs through it and the
+    // word starts before it; the per-base extension of the other tables stops at it.
+    #[test]
+    fn the_small_table_extension_reads_ambiguity_codes_as_bases() {
+        let code = |text: &str| -> Vec<u8> {
+            text.bytes()
+                .map(|letter| match letter {
+                    b'A' => 0,
+                    b'C' => 1,
+                    b'G' => 2,
+                    b'T' => 3,
+                    b'K' => 7,
+                    b'D' => 11,
+                    _ => unreachable!(),
+                })
+                .collect()
+        };
+        let query = code("TTTCGTTGACCTAAAAAGTTCKGTTGGTATGAGAGAAGAATTTTTGGTTGDCAGAAAAAC");
+        let subject =
+            code("AAAGCGGCATTTCGTTGACCTAAAAAGTTCTGTTGGTATGAGAGAAGAATTTTTGGTTGACAGAAAAACGGCATTACGA");
+        let compressed = build_compressed_query(&query);
+        let subject_packed = packed(&subject);
+        let word = SmallNaWord {
+            compressed_query: &compressed,
+            subject_packed: &subject_packed,
+            query_length: query.len(),
+            word_length: 28,
+            lut_word_length: 8,
+        };
+        // The lookup hit of query 12 at subject 21 (scan step 21) starts its word at the
+        // query start.
+        assert_eq!(
+            word.extend(12, 21, 0, query.len(), subject.len()),
+            Some((0, 9))
+        );
+        // Query 33 at subject 42 runs back through the K to query 13.
+        assert_eq!(
+            word.extend(33, 42, 0, query.len(), subject.len()),
+            Some((13, 22))
+        );
+        // A word that would end past the query context (here at 40) is dropped.
+        assert_eq!(word.extend(33, 42, 0, 40, subject.len()), None);
+    }
+}
+
 /// Approximate ungapped extension (4-base blocks) with optional exact recomputation.
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:261-349
 /// ```c
@@ -530,7 +953,8 @@ pub fn extend_hit_ungapped(
 /// # Arguments
 /// * `q_off` - Query offset (position of lut_word_length match start) - WILL BE MODIFIED if masked regions found
 /// * `s_off` - Subject offset (position of lut_word_length match start) - WILL BE MODIFIED if masked regions found
-/// * `query_mask` - Masked intervals for query sequence (locations)
+/// * `has_locations` - Whether NCBI's `locations` (the lookup table's `masked_locations`)
+///   is set: the checks of the lookup words run only then
 /// * `q_range` - Exclusive end offset of the current query context
 /// * `s_range` - Exclusive end offset of the current subject scan range
 /// * `word_length` - Full word length (e.g., 28 for megablast)
@@ -548,7 +972,7 @@ pub fn extend_hit_ungapped(
 pub fn type_of_word<F>(
     q_off: usize,
     s_off: usize,
-    query_mask: &[MaskedInterval],
+    has_locations: bool,
     q_range: usize,
     s_range: usize,
     word_length: usize,
@@ -582,9 +1006,7 @@ where
     // Check masked regions and adjust q_off/s_off if needed
     let mut q_off_adjusted = q_off;
     let mut s_off_adjusted = s_off;
-    let has_query_masks = !query_mask.is_empty();
-
-    if has_query_masks {
+    if has_locations {
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:452-490
         // ```c
         // static NCBI_INLINE Boolean s_IsSeedMasked(...)
@@ -641,10 +1063,21 @@ where
     // ext_max = MIN(q_range - q_end, s_range - s_end);
     // ```
     let ext_to = word_length - (q_end - q_off_adjusted);
-    let ext_max = (q_range - q_end).min(s_range - s_end);
+    // NCBI's `Int4 ext_max` is negative for a word that runs past the context or the scan
+    // range (the aligned small-table extension does not check the right end at the end of
+    // the query); then `ext_to > ext_max`, and no extension or double word is possible.
+    let ext_max = (q_range as i64 - q_end as i64).min(s_range as i64 - s_end as i64);
+    if ext_max < 0 {
+        return if ext_to > 0 || has_locations {
+            (0, 0, q_off_adjusted, s_off_adjusted)
+        } else {
+            (1, 0, q_off_adjusted, s_off_adjusted)
+        };
+    }
+    let ext_max = ext_max as usize;
 
     // NCBI: if (ext_to || locations) {
-    if ext_to > 0 || has_query_masks {
+    if ext_to > 0 || has_locations {
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:559
         // ```c
         // if (ext_to > ext_max) return 0;

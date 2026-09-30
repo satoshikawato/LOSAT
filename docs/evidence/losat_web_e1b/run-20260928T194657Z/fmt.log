@@ -1,0 +1,2 @@
+$ cargo +1.92.0 fmt --check
+exit 0

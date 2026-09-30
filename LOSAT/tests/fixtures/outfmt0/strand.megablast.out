@@ -1,0 +1,107 @@
+BLASTN 2.17.0+
+
+
+Reference: Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb
+Miller (2000), "A greedy algorithm for aligning DNA sequences", J
+Comput Biol 2000; 7(1-2):203-14.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/strand_subject.fasta).
+           1 sequences; 1,200 total letters
+
+
+
+Query= q_strand synthetic query with plus and minus strand segments
+
+Length=694
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+subj_strand synthetic subject for plus/minus strand, gaps and mul...  507     2e-147
+
+
+> subj_strand synthetic subject for plus/minus strand, gaps and 
+multiple HSPs
+Length=1200
+
+ Score = 507 bits (274),  Expect = 2e-147
+ Identities = 292/301 (97%), Gaps = 0/301 (0%)
+ Strand=Plus/Minus
+
+Query  370  GACGGCCACTCAGGCCTTACCACGTTTGAACAAGACCTCTCTGTGGCCAAACAGTACACT  429
+            |||||||||||||||||||||||||||||||||||||||||||||||||||||||| |||
+Sbjct  900  GACGGCCACTCAGGCCTTACCACGTTTGAACAAGACCTCTCTGTGGCCAAACAGTAAACT  841
+
+Query  430  TGGAAAACTGGTTTAAGGTTTATCTCATGGGCGTGGTGTCCCCTTATAATGCGGGAGCCA  489
+            |||||||||||||||||||||||||||||||||||||||||||||| |||||||||||||
+Sbjct  840  TGGAAAACTGGTTTAAGGTTTATCTCATGGGCGTGGTGTCCCCTTAAAATGCGGGAGCCA  781
+
+Query  490  GGTGGTTACGTTATAGGTTCATCTACGGCAATAGAGAAACAAGTTCAGATACGGGGCCTA  549
+            ||||||||||||| ||||||||||||||| ||||||||||||||||||||||||||||||
+Sbjct  780  GGTGGTTACGTTAGAGGTTCATCTACGGCGATAGAGAAACAAGTTCAGATACGGGGCCTA  721
+
+Query  550  TTTACGCCTGGATACATACAGATCTTTCGAAACGAGATGCGATCTCCACCGGGGTAACCA  609
+            ||||| ||||||||||||||||||||||||||||||||||||||||||| | ||||||||
+Sbjct  720  TTTACACCTGGATACATACAGATCTTTCGAAACGAGATGCGATCTCCACAGAGGTAACCA  661
+
+Query  610  GCCAGAGCCCATGTAGTGCGGGTGCTCTAGTCTAGCTCGTGGGAATACGCACGCGGACAT  669
+            |||||||||||||||| ||||||||||||||||||||||||||||| |||||||||||||
+Sbjct  660  GCCAGAGCCCATGTAGGGCGGGTGCTCTAGTCTAGCTCGTGGGAATTCGCACGCGGACAT  601
+
+Query  670  G  670
+            |
+Sbjct  600  G  600
+
+
+ Score = 488 bits (264),  Expect = 7e-142
+ Identities = 291/303 (96%), Gaps = 5/303 (2%)
+ Strand=Plus/Plus
+
+Query  41   AGGTCTGTCCGCGCAATGCCCGCCGGCACCGCAACATACTCAATCCATGCGGGTAAATAA  100
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  101  AGGTCTGTCCGCGCAATGCCCGCCGGCACCGCAACATACTCAATCCATGCGGGTAAATAA  160
+
+Query  101  GCAATACACCTTTTCCTGGTCCGCAAGCGTGGTACTATATGGTCTGAGCATGGATATCGG  160
+            |||||||||||||||||| ||||||||||||||||||||||| |||||||||||||||||
+Sbjct  161  GCAATACACCTTTTCCTGCTCCGCAAGCGTGGTACTATATGGGCTGAGCATGGATATCGG  220
+
+Query  161  ---GTCGCTTGTATTCAGTCAGTGGAAAATCGCGACACGGACCCCAACCTTTAGCTCTGA  217
+               |||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  221  TAAGTCGCTTGTATTCAGTCAGTGGAAAATCGCGACACGGACCCCAACCTTTAGCTCTGA  280
+
+Query  218  CACGTATATTTTCTAGAAACGTAAGCGTACGCGCCCTCAGGATATTTGATGAGATTTTTC  277
+            ||||||||||||||| ||||  |||||||||||||| ||||||||| |||||||||||||
+Sbjct  281  CACGTATATTTTCTATAAAC--AAGCGTACGCGCCCCCAGGATATTCGATGAGATTTTTC  338
+
+Query  278  ACCCATTGGTGCTTCGTCCGGGGCAGGGGCACATGTCCATCCGCTCCTGAAATTCTCACA  337
+            ||||||||||| |||||||||||||||||| |||||||||||||||||||||||||||||
+Sbjct  339  ACCCATTGGTGGTTCGTCCGGGGCAGGGGCTCATGTCCATCCGCTCCTGAAATTCTCACA  398
+
+Query  338  GGA  340
+            |||
+Sbjct  399  GGA  401
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 808347
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/strand_subject.fasta).
+    Posted date:  Unknown
+  Number of letters in database: 1,200
+  Number of sequences in database:  1
+
+
+
+Matrix: blastn matrix 1 -2
+Gap Penalties: Existence: 0, Extension: 2.5

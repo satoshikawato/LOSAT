@@ -544,7 +544,40 @@ pub fn blast_get_start_for_gapped_alignment_nucl(
     let mut score: i32 = -1;
     let q_len = q_end;
 
-    while q_start < q_len && q_seq[q_start] == s_seq[s_start] {
+    // NCBI walks both identity runs on the query bound only: the subject buffer
+    // of the traceback has a sentinel byte at each end, which differs from every
+    // base, so a run also stops at either end of the subject. `s_seq` has no
+    // sentinels here, so the subject ends are explicit bounds.
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:342,457
+    // ```c
+    // subject = subject_blk->sequence;
+    // ...
+    //    BlastGetStartForGappedAlignmentNucl(query, subject, hsp);
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/seqsrc_multiseq.cpp:353-358
+    // ```c
+    // /* If this is a nucleotide sequence, and it is the traceback stage,
+    //    we need the uncompressed buffer, stored in the 'sequence_start'
+    //    pointer. That buffer has an extra sentinel byte for blastn, but
+    //    no sentinel byte for translated programs. */
+    // if (args->encoding == eBlastEncodingNucleotide) {
+    //     args->seq->sequence = args->seq->sequence_start + 1;
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:1219-1225
+    // ```c
+    // case eBlastEncodingNucleotide: // Used for nucleotide blastn queries
+    //     if (sentinel == eSentinels) {
+    //         if (strand == eNa_strand_both) {
+    //             retval = sequence_length * 2;
+    //             retval += 3;
+    //         } else {
+    //             retval = sequence_length + 2;
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:121
+    // ```c
+    // const Uint1 kNuclSentinel = 0xF;
+    // ```
+    while q_start < q_len && s_start < s_seq.len() && q_seq[q_start] == s_seq[s_start] {
         score += 1;
         if score > hsp_max_ident_run {
             return (q_gapped_start, s_gapped_start);
@@ -563,7 +596,7 @@ pub fn blast_get_start_for_gapped_alignment_nucl(
         if score > hsp_max_ident_run {
             return (q_gapped_start, s_gapped_start);
         }
-        if q_start == 0 {
+        if q_start == 0 || s_start == 0 {
             break;
         }
         q_start -= 1;
@@ -3379,4 +3412,41 @@ pub fn extend_gapped_heuristic_with_traceback_with_scratch(
         total_gap_letters,
         combined_edit_ops,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::blast_get_start_for_gapped_alignment_nucl;
+
+    fn blastna(bases: &str) -> Vec<u8> {
+        bases
+            .bytes()
+            .map(|base| match base {
+                b'A' => 0,
+                b'C' => 1,
+                b'G' => 2,
+                _ => 3,
+            })
+            .collect()
+    }
+
+    // The backward identity run reaches the first subject base before the first
+    // query base: NCBI stops on the subject's leading sentinel.
+    #[test]
+    fn gapped_start_stops_at_the_subject_start() {
+        let query = blastna("GGGGGACGT");
+        let subject = blastna("ACGTCCCC");
+        let start = blast_get_start_for_gapped_alignment_nucl(&query, &subject, 5, 9, 0, 4, 5, 0);
+        assert_eq!(start, (7, 2));
+    }
+
+    // The forward identity run reaches the subject end before the query end:
+    // NCBI stops on the subject's trailing sentinel.
+    #[test]
+    fn gapped_start_stops_at_the_subject_end() {
+        let query = blastna("ACGTACGTAA");
+        let subject = blastna("ACGTACGT");
+        let start = blast_get_start_for_gapped_alignment_nucl(&query, &subject, 0, 10, 0, 8, 0, 0);
+        assert_eq!(start, (4, 4));
+    }
 }

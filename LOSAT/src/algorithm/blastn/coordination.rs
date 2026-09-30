@@ -65,6 +65,9 @@ pub struct TaskConfig {
     pub use_direct_lookup: bool,
     pub use_two_stage: bool,
     pub lut_word_length: usize,
+    /// Whether NCBI chose its small-query lookup table (`eSmallNaLookupTable`), whose
+    /// word extension reads the compressed query.
+    pub small_na_lookup: bool,
     pub x_drop_gapped: i32, // Task-specific gapped X-dropoff (blastn: 30, megablast: 25)
     pub x_drop_final: i32,  // Final traceback X-dropoff (100 for all nucleotide tasks)
     pub scan_range: usize,  // Scan range for off-diagonal hit detection (blastn: 4, megablast: 0)
@@ -119,63 +122,108 @@ pub struct SequenceData {
     pub subject_ids: Vec<String>,
 }
 
-/// Determine effective word size based on task
-pub fn determine_effective_word_size(args: &BlastnArgs) -> usize {
-    match args.task.as_str() {
-        "megablast" => args.word_size,
-        "blastn" | "dc-megablast" => {
-            if args.word_size == 28 {
-                11
-            } else {
-                args.word_size
-            }
+/// The option values of a task, which the command line options replace (NCBI
+/// `CBlastNucleotideOptionsHandle`). The CLI accepts the tasks megablast and blastn.
+///
+/// NCBI reference: c++/src/algo/blast/api/blast_nucl_options.cpp:137-150,198-221
+/// ```c
+/// CBlastNucleotideOptionsHandle::SetLookupTableDefaults()
+/// {
+///     SetLookupTableType(eNaLookupTable);
+///     SetWordSize(BLAST_WORDSIZE_NUCL);
+/// ...
+/// CBlastNucleotideOptionsHandle::SetMBLookupTableDefaults()
+/// {
+///     SetLookupTableType(eMBLookupTable);
+///     SetWordSize(BLAST_WORDSIZE_MEGABLAST);
+/// ...
+/// CBlastNucleotideOptionsHandle::SetScoringOptionsDefaults()
+/// {
+///     SetMatrixName(NULL);
+///     SetGapOpeningCost(BLAST_GAP_OPEN_NUCL);
+///     SetGapExtensionCost(BLAST_GAP_EXTN_NUCL);
+///     SetMatchReward(2);
+///     SetMismatchPenalty(-3);
+/// ...
+/// CBlastNucleotideOptionsHandle::SetMBScoringOptionsDefaults()
+/// {
+///     SetMatrixName(NULL);
+///     SetGapOpeningCost(BLAST_GAP_OPEN_MEGABLAST);
+///     SetGapExtensionCost(BLAST_GAP_EXTN_MEGABLAST);
+///     SetMatchReward(1);
+///     SetMismatchPenalty(-2);
+/// ```
+/// NCBI reference: c++/include/algo/blast/core/blast_options.h:67-68,86-95
+/// ```c
+/// #define BLAST_WORDSIZE_NUCL 11   /**< default word size (blastn) */
+/// #define BLAST_WORDSIZE_MEGABLAST 28   /**< default word size (contiguous
+/// #define BLAST_GAP_OPEN_NUCL 5 /**< default gap open penalty (blastn) */
+/// #define BLAST_GAP_OPEN_MEGABLAST 0 /**< default gap open penalty (megablast
+/// #define BLAST_GAP_EXTN_NUCL 2 /**< default gap open penalty (blastn) */
+/// #define BLAST_GAP_EXTN_MEGABLAST 0 /**< default gap open penalty (megablast)
+/// ```
+struct TaskDefaults {
+    word_size: usize,
+    reward: i32,
+    penalty: i32,
+    gap_open: i32,
+    gap_extend: i32,
+}
+
+fn task_defaults(task: &str) -> TaskDefaults {
+    if task == "megablast" {
+        TaskDefaults {
+            word_size: 28,
+            reward: 1,
+            penalty: -2,
+            gap_open: 0,
+            gap_extend: 0,
         }
-        _ => args.word_size,
+    } else {
+        TaskDefaults {
+            word_size: 11,
+            reward: 2,
+            penalty: -3,
+            gap_open: 5,
+            gap_extend: 2,
+        }
     }
 }
 
-/// Determine effective scoring parameters based on task
+/// The word size: the given one, or the task's.
+pub fn determine_effective_word_size(args: &BlastnArgs) -> usize {
+    args.word_size
+        .unwrap_or_else(|| task_defaults(&args.task).word_size)
+}
+
+/// The reward, penalty and gap costs: each given one, or the task's. NCBI keeps the reward
+/// and the penalty in 16 bits, so a given value outside that range wraps before any check
+/// or use.
+///
+/// NCBI reference: c++/src/algo/blast/api/blast_options_local_priv.hpp:1628-1643
+/// ```c
+/// CBlastOptionsLocal::SetMatchReward(int r)
+/// {
+///     m_ScoringOpts->reward = r;
+/// ...
+/// CBlastOptionsLocal::SetMismatchPenalty(int p)
+/// {
+///     m_ScoringOpts->penalty = p;
+/// }
+/// ```
+/// NCBI reference: c++/include/algo/blast/core/blast_options.h:465-466
+/// ```c
+///    Int2 reward;      /**< Reward for a match */
+///    Int2 penalty;     /**< Penalty for a mismatch */
+/// ```
 pub fn determine_scoring_params(args: &BlastnArgs) -> (i32, i32, i32, i32) {
-    match args.task.as_str() {
-        "megablast" => {
-            let r = if args.reward == 1 { 1 } else { args.reward };
-            let p = if args.penalty == -2 { -2 } else { args.penalty };
-            let go = if args.gap_open == 0 { 0 } else { args.gap_open };
-            let ge = if args.gap_extend == 0 {
-                0
-            } else {
-                args.gap_extend
-            };
-            (r, p, go, ge)
-        }
-        "blastn" | "dc-megablast" => {
-            let r = if args.reward == 1 { 2 } else { args.reward };
-            let p = if args.penalty == -2 { -3 } else { args.penalty };
-            // NCBI BLAST: gap penalties are specified as positive values (cost)
-            // Reference: ncbi-blast/c++/include/algo/blast/core/blast_options.h:84-96
-            let go = if args.gap_open == 0 { 5 } else { args.gap_open };
-            let ge = if args.gap_extend == 0 {
-                2
-            } else {
-                args.gap_extend
-            };
-            (r, p, go, ge)
-        }
-        "blastn-short" => {
-            let r = if args.reward == 1 { 1 } else { args.reward };
-            let p = if args.penalty == -2 { -3 } else { args.penalty };
-            // NCBI BLAST: gap penalties are specified as positive values (cost)
-            // Reference: ncbi-blast/c++/include/algo/blast/core/blast_options.h:84-96
-            let go = if args.gap_open == 0 { 5 } else { args.gap_open };
-            let ge = if args.gap_extend == 0 {
-                2
-            } else {
-                args.gap_extend
-            };
-            (r, p, go, ge)
-        }
-        _ => (args.reward, args.penalty, args.gap_open, args.gap_extend),
-    }
+    let defaults = task_defaults(&args.task);
+    (
+        i32::from(args.reward.unwrap_or(defaults.reward) as i16),
+        i32::from(args.penalty.unwrap_or(defaults.penalty) as i16),
+        args.gap_open.unwrap_or(defaults.gap_open),
+        args.gap_extend.unwrap_or(defaults.gap_extend),
+    )
 }
 
 /// Calculate initial scan step based on word size
@@ -270,6 +318,7 @@ pub fn configure_task(args: &BlastnArgs) -> TaskConfig {
         use_direct_lookup,
         use_two_stage,
         lut_word_length,
+        small_na_lookup: false,
         x_drop_gapped,
         x_drop_final,
         scan_range,
@@ -451,6 +500,7 @@ pub fn finalize_task_config(
     );
 
     config.lut_word_length = lut_width;
+    config.small_na_lookup = lut_kind == LookupTableKind::Small;
     config.use_two_stage =
         lut_kind == LookupTableKind::Mb || config.lut_word_length < config.effective_word_size;
     config.use_direct_lookup =
@@ -462,50 +512,6 @@ pub fn finalize_task_config(
     // mb_lt->scan_step = mb_lt->word_length - mb_lt->lut_word_length + 1;
     // ```
     config.scan_step = (config.effective_word_size - config.lut_word_length + 1).max(1);
-}
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_input_aux.cpp:221-246
-// ```c
-// ReadSequencesToBlast(CNcbiIstream& in,
-//                      bool read_proteins,
-//                      const TSeqRange& range,
-//                      bool parse_deflines,
-//                      bool use_lcase_masking,
-//                      CRef<CBlastQueryVector>& sequences,
-//                      bool gaps_to_Ns)
-// {
-//     ...
-//     sequences = input->GetAllSeqs(*scope);
-//     return scope;
-// }
-// ```
-/// Read query sequences
-pub fn read_queries(args: &BlastnArgs) -> Result<(Vec<fasta::Record>, Vec<String>)> {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:486-651
-    // ```c
-    // void
-    // SetupQueries_OMF(IBlastQuerySource& queries,
-    //                  BlastQueryInfo* qinfo,
-    //                  BLAST_SequenceBlk** seqblk,
-    //                  EBlastProgramType prog,
-    //                  ...)
-    // ```
-    if args.verbose {
-        eprintln!("Reading query & subject...");
-    }
-    let queries = read_fasta_records(&args.query, "query")?;
-    let query_ids: Vec<String> = queries
-        .iter()
-        .map(|r| {
-            r.id()
-                .split_whitespace()
-                .next()
-                .unwrap_or("unknown")
-                .to_string()
-        })
-        .collect();
-
-    Ok((queries, query_ids))
 }
 
 /// Read query and subject sequences

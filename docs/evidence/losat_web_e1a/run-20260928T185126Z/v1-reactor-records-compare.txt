@@ -1,0 +1,8 @@
+# v1 reactor records: LOSAT/tests/check_wasi_reactor.js on the pre-change threaded reactor
+# (fd13693f..., built from a clean bdeaa9bc6 tree) and on the post-change one (78ee7094...),
+# with the same fixtures (check_wasm_threading.py output, fixtures/). runs.json holds timings,
+# thread ids and memory sizes, so only the .out/.error records are compared.
+$ diff -r -x runs.json reactor-records-before reactor-records-after
+exit 0
+records compared: 344
+linear memory (runs.json memory_bytes, 172 readings): max before 11862016, max after 11993088; after - before per reading: min -262144 (-4 pages), max 196608 (3 pages); higher in 169, lower in 2

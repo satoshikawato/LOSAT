@@ -1,0 +1,4 @@
+DIFF	/home/kawato/.cache/losat-web-gui-target/s07p-slices/lcase_q7_45.fa	/home/kawato/.cache/losat-web-gui-target/s07p-slices/lcase_s7_45.fa	ncbi_lines=5	losat_lines=5
+DIFF	/home/kawato/.cache/losat-web-gui-target/s07p-slices/lcase_q7_61.fa	/home/kawato/.cache/losat-web-gui-target/s07p-slices/lcase_s7_61.fa	ncbi_lines=6	losat_lines=5
+DIFF	/home/kawato/.cache/losat-web-gui-target/s07p-slices/lcase_q7_91.fa	/home/kawato/.cache/losat-web-gui-target/s07p-slices/lcase_s7_91.fa	ncbi_lines=31	losat_lines=30
+# pool=lcase options='-task blastn -lcase_masking' seed=7 cases=120 differing=3

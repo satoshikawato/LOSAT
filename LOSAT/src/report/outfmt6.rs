@@ -315,8 +315,9 @@ pub fn format_bitscore_ncbi(bit_score: f64) -> String {
         // NCBI: "%5.3le" -> scientific notation
         format_scientific_ncbi(bit_score, 3)
     } else if bit_score > 99.9 {
-        // NCBI: "%3.0ld" with `(long)bit_score` truncates toward zero before formatting.
-        (bit_score as i64).to_string()
+        // NCBI: "%3.0ld" with `(long)bit_score` truncates toward zero before formatting,
+        // in a field of 3 (a score in (99.9, 100) is " 99").
+        format!("{:3}", bit_score as i64)
     } else {
         // NCBI: "%4.1lf" -> one decimal place
         format!("{:4.1}", bit_score)
@@ -431,7 +432,7 @@ fn write_bitscore_ncbi<W: Write>(writer: &mut W, bit_score: f64) -> io::Result<(
     if bit_score > 99999.0 {
         write_scientific_ncbi(writer, bit_score, 3)
     } else if bit_score > 99.9 {
-        write!(writer, "{}", bit_score as i64)
+        write!(writer, "{:3}", bit_score as i64)
     } else {
         write!(writer, "{:4.1}", bit_score)
     }
@@ -1188,6 +1189,11 @@ mod tests {
     fn test_format_bitscore_ncbi_medium() {
         // > 99.9 and <= 99999: "%3.0ld" - integer (no decimal)
         assert_eq!(format_bitscore_ncbi(100.0), "100");
+        // "%3.0ld" pads (long)99.95 = 99 to three characters.
+        assert_eq!(format_bitscore_ncbi(99.95), " 99");
+        let mut buffer = Vec::new();
+        write_bitscore_ncbi(&mut buffer, 99.95).unwrap();
+        assert_eq!(buffer, b" 99");
         assert_eq!(format_bitscore_ncbi(185.5), "185");
         assert_eq!(format_bitscore_ncbi(598.9), "598");
         assert_eq!(format_bitscore_ncbi(692.0), "692");

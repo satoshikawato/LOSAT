@@ -1,0 +1,16 @@
+# TBLASTX outfmt 6: 2 queries x 4 subjects (windows of LOSAT/tests/fasta/LC738884.fasta and LC741431.fasta, q.fna and s.fna here).
+# With more than one subject and -num_threads > 1, the threaded command-WASI search reduces per-subject batches
+# in the wasm-threads-only path (run_impl.rs, threaded_wasi_subject_hit_batches). LOSAT_WASI_THREADS_DEBUG=1 shows the worker spawns.
+# Commands: <LOSAT> tblastx -query q.fna -subject s.fna -outfmt 6 -num_threads N -out <file>;
+#           node LOSAT/tests/run_losat_wasi{,_threads}.js <wasm> tblastx ... (same arguments)
+# before = S03 artifacts (s03-final), after = S04 artifacts
+f74526fe21df3ab46e8d659cba67ab8fc4a91f43c7394f5f4fe632723207217c  native-1.out
+f74526fe21df3ab46e8d659cba67ab8fc4a91f43c7394f5f4fe632723207217c  native-4.out
+f74526fe21df3ab46e8d659cba67ab8fc4a91f43c7394f5f4fe632723207217c  serial-1.out
+f74526fe21df3ab46e8d659cba67ab8fc4a91f43c7394f5f4fe632723207217c  threaded-1.out
+f74526fe21df3ab46e8d659cba67ab8fc4a91f43c7394f5f4fe632723207217c  threaded-4.out
+f74526fe21df3ab46e8d659cba67ab8fc4a91f43c7394f5f4fe632723207217c  s03native-1.out
+f74526fe21df3ab46e8d659cba67ab8fc4a91f43c7394f5f4fe632723207217c  s03native-4.out
+f74526fe21df3ab46e8d659cba67ab8fc4a91f43c7394f5f4fe632723207217c  s03threaded-1.out
+f74526fe21df3ab46e8d659cba67ab8fc4a91f43c7394f5f4fe632723207217c  s03threaded-4.out
+rows: 164

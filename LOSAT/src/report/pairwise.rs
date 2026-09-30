@@ -5,6 +5,7 @@
 //! Reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp
 
 use super::outfmt6::{format_bitscore_ncbi, format_evalue_ncbi, ReportContext};
+use crate::api::local_blast::{FormatProbe, HspIndex};
 use crate::common::Hit;
 use crate::config::ScoringMatrix;
 use crate::stats::{BlastGumbelBlk, KarlinParams};
@@ -179,6 +180,14 @@ pub struct BlastpPairwiseReport {
 // Pairwise Output Writers
 // =============================================================================
 
+/// The defline of a subject as `bio` reads it: the ID, a space and the rest.
+fn subject_defline(subject_id: &str, subject_title: Option<&str>) -> String {
+    match subject_title.filter(|title| !title.is_empty()) {
+        Some(title) => format!("{subject_id} {title}"),
+        None => subject_id.to_string(),
+    }
+}
+
 /// Write database/subject information header
 ///
 /// Reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp
@@ -351,6 +360,69 @@ pub fn write_hsp_info<W: Write>(
             align_len,
             gap_pct
         )?;
+    } else if config.program == "blastn" {
+        // NCBI reference: c++/src/objtools/align_format/showalign.cpp:1794-1805,2131-2141
+        // ```c++
+        //     x_FillIdentityInfo(aln_vec_info->alnRowInfo->sequence[0],
+        //                        aln_vec_info->alnRowInfo->sequence[1],
+        //                        aln_vec_info->match,
+        //     ...
+        //         aln_vec_info->gap = x_GetNumGaps();
+        // ...
+        //         if(sequence_standard[i]==sequence[i]){
+        //             ...
+        //             match ++;
+        // ```
+        // The displayed counts come from the two rows (before the lowercase masking of
+        // the display), and the gaps are the gap columns of both rows.
+        let (query_row, subject_row) = (
+            hit.query_seq.as_deref().unwrap_or_default().as_bytes(),
+            hit.subject_seq.as_deref().unwrap_or_default().as_bytes(),
+        );
+        let columns = query_row.len();
+        let matches = query_row
+            .iter()
+            .zip(subject_row)
+            .filter(|(q, s)| q.eq_ignore_ascii_case(s))
+            .count();
+        let gaps = query_row
+            .iter()
+            .chain(subject_row)
+            .filter(|&&residue| residue == b'-')
+            .count();
+        // NCBI reference: c++/src/objtools/align_format/showalign.cpp:310-320
+        // ```c++
+        //     out<<" Identities = "<<match<<"/"<<(aln_stop+1)<<" ("<<identity<<"%"<<")";
+        //     ...
+        //     out<<", Gaps = "<<gap<<"/"<<(aln_stop+1)
+        //        <<" ("<<CAlignFormatUtil::GetPercentMatch(gap, aln_stop+1)<<"%"<<")"<<"\n";
+        //     if (!aln_is_prot){
+        //         out<<" Strand="<<(master_strand==1 ? "Plus" : "Minus")
+        //            <<"/"<<(slave_strand==1? "Plus" : "Minus")<<"\n";
+        // ```
+        // The query is always shown on its plus strand (showalign.cpp:1852-1858).
+        writeln!(
+            writer,
+            " Identities = {}/{} ({}%), Gaps = {}/{} ({}%)",
+            matches,
+            columns,
+            ncbi_percent_match(matches, columns),
+            gaps,
+            columns,
+            ncbi_percent_match(gaps, columns)
+        )?;
+        // NCBI reference: c++/src/objtools/align_format/showalign.cpp:4011-4018
+        // ```c++
+        //         s_DisplayIdentityInfo(out,
+        //                               ...
+        //                               m_AV->StrandSign(0),
+        //                               m_AV->StrandSign(1),
+        // ```
+        // The strand is the HSP's (its query frame; the shown query is on its plus
+        // strand), not the order of the coordinates, which is the same for an HSP of one
+        // letter.
+        let subject_strand = if h.query_frame < 0 { "Minus" } else { "Plus" };
+        writeln!(writer, " Strand=Plus/{subject_strand}")?;
     } else {
         writeln!(
             writer,
@@ -448,25 +520,52 @@ fn write_alignment_with_sequences<W: Write>(
     // CAlignFormatUtil::AddSpace(out, k_SeqStopMargin);
     // out << end;
     // ```
-    let max_pos = hit.q_start.max(hit.q_end).max(hit.s_start).max(hit.s_end);
-    let max_start_len = format!("{max_pos}").len();
+    let max_start_len = coordinate_width(hit);
     let max_id_len = "Query".len().max("Sbjct".len());
+    // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:1570-1573
+    // ```c++
+    //     if (m_Program == "blastn" || m_Program == "megablast") {
+    //         display.SetMiddleLineStyle(CDisplaySeqalign::eBar);
+    //         display.SetAlignType(CDisplaySeqalign::eNuc);
+    // ```
+    let nucleotide = config.program == "blastn";
+    // A minus-strand subject is shown with decreasing coordinates (the query is always
+    // on its plus strand, showalign.cpp:1852-1858).
+    let subject_step: isize = if hit.s_start > hit.s_end { -1 } else { 1 };
 
-    let mut q_pos = hit.q_start;
-    let mut s_pos = hit.s_start;
+    let mut q_next = hit.q_start as isize;
+    let mut s_next = hit.s_start as isize;
     let mut offset = 0;
 
     while offset < q_chars.len() {
         let end = (offset + line_len).min(q_chars.len());
-        let chunk_q: String = q_chars[offset..end].iter().collect();
-        let chunk_s: String = s_chars[offset..end].iter().collect();
+        let first_chunk = offset == 0;
 
-        // Build middle line (identity markers)
+        // NCBI reference: c++/src/objtools/align_format/showalign.cpp:2131-2155
+        // ```c++
+        //         if(sequence_standard[i]==sequence[i]){
+        //             if(m_AlignOption & eShowMiddleLine){
+        //                 if(m_MidLineStyle == eBar ) {
+        //                     middle_line[i] = '|';
+        //                 } else if (m_MidLineStyle == eChar){
+        //                     middle_line[i] = sequence[i];
+        //         ...
+        //                 if (m_AlignOption & eShowMiddleLine){
+        //                     middle_line[i] = ' ';
+        // ```
+        // The nucleotide rows may carry lowercase masking, which NCBI applies only when it
+        // prints a row (showalign.cpp:2495-2521), so they are compared without case.
         let middle: String = q_chars[offset..end]
             .iter()
             .zip(s_chars[offset..end].iter())
             .map(|(q, s)| {
-                if q == s {
+                if nucleotide {
+                    if q.eq_ignore_ascii_case(s) {
+                        '|'
+                    } else {
+                        ' '
+                    }
+                } else if q == s {
                     *q // Identity: show the character
                 } else if is_positive_match(*q, *s, config.protein_matrix) {
                     '+' // Positive: show +
@@ -476,39 +575,96 @@ fn write_alignment_with_sequences<W: Write>(
             })
             .collect();
 
-        // Count non-gap characters in this chunk
-        let q_non_gap = chunk_q.chars().filter(|&c| c != '-').count();
-        let s_non_gap = chunk_s.chars().filter(|&c| c != '-').count();
-
-        let q_end_pos = q_pos + q_non_gap.saturating_sub(1);
-        let s_end_pos = s_pos + s_non_gap.saturating_sub(1);
-
-        write!(writer, "Query")?;
-        write_spaces(writer, max_id_len - "Query".len() + 2)?;
-        write!(writer, "{}", q_pos)?;
-        write_spaces(writer, max_start_len - digit_count(q_pos) + 2)?;
-        write!(writer, "{}", chunk_q)?;
-        write_spaces(writer, 2)?;
-        writeln!(writer, "{}", q_end_pos)?;
-
+        write_sequence_row(
+            writer,
+            "Query",
+            &q_chars[offset..end],
+            &mut q_next,
+            1,
+            max_start_len,
+            first_chunk,
+        )?;
         write_spaces(writer, max_id_len + 2 + max_start_len + 2)?;
         writeln!(writer, "{}", middle)?;
-
-        write!(writer, "Sbjct")?;
-        write_spaces(writer, max_id_len - "Sbjct".len() + 2)?;
-        write!(writer, "{}", s_pos)?;
-        write_spaces(writer, max_start_len - digit_count(s_pos) + 2)?;
-        write!(writer, "{}", chunk_s)?;
-        write_spaces(writer, 2)?;
-        writeln!(writer, "{}", s_end_pos)?;
-
+        write_sequence_row(
+            writer,
+            "Sbjct",
+            &s_chars[offset..end],
+            &mut s_next,
+            subject_step,
+            max_start_len,
+            first_chunk,
+        )?;
         writeln!(writer)?;
 
-        q_pos = q_end_pos + 1;
-        s_pos = s_end_pos + 1;
         offset = end;
     }
 
+    Ok(())
+}
+
+/// Writes one row of one alignment chunk and advances `next`, the position of the row's
+/// next residue, by `step` per residue.
+///
+/// NCBI reference: c++/src/objtools/align_format/showalign.cpp:1598-1626
+/// ```c++
+///     int start = alnRoInfo->seqStarts[row].front() + 1;  //+1 for 1 based
+///     int end = alnRoInfo->seqStops[row].front() + 1;
+///     ...
+///     //not to display start and stop number for empty row
+///     if ((j > 0 && end == prev_stop)
+///         || (j == 0 && start == 1 && end == 1)) {
+///         startLen = 0;
+///     } else {
+///         out << start;
+///         startLen=NStr::IntToString(start).size();
+///     }
+///
+///     CAlignFormatUtil::AddSpace(out, alnRoInfo->maxStartLen-startLen + k_StartSequenceMargin);
+///     x_OutputSeq(alnRoInfo->sequence[row], m_AV->GetSeqId(row), j,
+///     ...
+///     CAlignFormatUtil::AddSpace(out, k_SeqStopMargin);
+///
+///      //not to display stop number for empty row in the middle
+///     if (!(j > 0 && end == prev_stop)
+///         && !(j == 0 && start == 1 && end == 1)) {
+///         out << end;
+///     }
+///     out<<"\n";
+/// ```
+/// A later chunk without residues ends where the previous chunk ended
+/// (`end == prev_stop`). `AddSpace` takes a `size_t`, so an omitted start gives
+/// `maxStartLen + 2` spaces.
+fn write_sequence_row<W: Write>(
+    writer: &mut W,
+    label: &str,
+    residues: &[char],
+    next: &mut isize,
+    step: isize,
+    width: usize,
+    first_chunk: bool,
+) -> io::Result<()> {
+    let count = residues.iter().filter(|&&c| c != '-').count() as isize;
+    let start = *next;
+    let end = start + step * (count - 1);
+    let shown = !(!first_chunk && count == 0 || first_chunk && start == 1 && end == 1);
+    write!(writer, "{label}")?;
+    write_spaces(writer, 2)?;
+    if shown {
+        write!(writer, "{start}")?;
+        write_spaces(writer, width + 2 - digit_count(start.unsigned_abs()))?;
+    } else {
+        write_spaces(writer, width + 2)?;
+    }
+    for &residue in residues {
+        write!(writer, "{residue}")?;
+    }
+    write_spaces(writer, 2)?;
+    if shown {
+        write!(writer, "{end}")?;
+    }
+    writeln!(writer)?;
+    *next += step * count;
     Ok(())
 }
 
@@ -733,6 +889,22 @@ fn write_subject_summary_table_with_sum_n<W: Write>(
 #[inline]
 fn digit_count(value: usize) -> usize {
     value.to_string().len()
+}
+
+/// Width of the start-coordinate column of an alignment block.
+///
+/// NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:1366-1367
+/// ```c++
+///         size_t maxCood=max<size_t>(m_AV->GetSeqStart(row), m_AV->GetSeqStop(row));
+///         maxStartLen = max<size_t>(NStr::SizetToString(maxCood).size(), maxStartLen);
+/// ```
+/// `GetSeqStart` and `GetSeqStop` are 0-based, so the width is that of the largest
+/// 1-based coordinate minus one, and a printed 1-based start can have one digit
+/// more. NCBI then pads with the `size_t` value `maxStartLen - startLen +
+/// k_StartSequenceMargin`, which is one space in that case; callers write
+/// `width + 2 - digits` (showalign.cpp:1614; align_format_util.cpp:932-936).
+fn coordinate_width(hit: &Hit) -> usize {
+    digit_count(hit.q_start.max(hit.q_end).max(hit.s_start).max(hit.s_end) - 1)
 }
 
 #[inline]
@@ -1225,24 +1397,12 @@ fn write_blastp_final_footer<W: Write>(
     writer: &mut W,
     report: &BlastpPairwiseReport,
 ) -> io::Result<()> {
-    // NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:543-544
-    // out << "  Database: "; x_WrapOutputLine(dbinfo->definition, line_length, out);
-    write!(writer, "  Database: ")?;
-    write_flatfile_wrapped(writer, &ensure_trailing_period(&report.database_name), 68)?;
-    writeln!(writer, "    Posted date:  Unknown")?;
-    writeln!(
+    write_final_database_report(
         writer,
-        "  Number of letters in database: {}",
-        format_count_with_commas(i64::try_from(report.database_total_letters).unwrap_or(0))
+        &report.database_name,
+        report.database_num_sequences,
+        report.database_total_letters,
     )?;
-    writeln!(
-        writer,
-        "  Number of sequences in database:  {}",
-        format_count_with_commas(i64::try_from(report.database_num_sequences).unwrap_or(0))
-    )?;
-    writeln!(writer)?;
-    writeln!(writer)?;
-    writeln!(writer)?;
     writeln!(writer, "Matrix: {}", report.matrix_name)?;
     writeln!(
         writer,
@@ -1260,6 +1420,35 @@ fn write_blastp_final_footer<W: Write>(
         writeln!(writer, "Window for multiple hits: {}", report.window_size)?;
     }
     Ok(())
+}
+
+/// The database block of the epilog and the blank lines before the matrix line
+/// (align_format_util.cpp:503-579 and blast_format.cpp:2258-2262, quoted at
+/// `write_blastp_final_footer`).
+fn write_final_database_report<W: Write>(
+    writer: &mut W,
+    database_name: &str,
+    database_num_sequences: usize,
+    database_total_letters: usize,
+) -> io::Result<()> {
+    // NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:543-544
+    // out << "  Database: "; x_WrapOutputLine(dbinfo->definition, line_length, out);
+    write!(writer, "  Database: ")?;
+    write_flatfile_wrapped(writer, &ensure_trailing_period(database_name), 68)?;
+    writeln!(writer, "    Posted date:  Unknown")?;
+    writeln!(
+        writer,
+        "  Number of letters in database: {}",
+        format_count_with_commas(i64::try_from(database_total_letters).unwrap_or(0))
+    )?;
+    writeln!(
+        writer,
+        "  Number of sequences in database:  {}",
+        format_count_with_commas(i64::try_from(database_num_sequences).unwrap_or(0))
+    )?;
+    writeln!(writer)?;
+    writeln!(writer)?;
+    writeln!(writer)
 }
 
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:372-424
@@ -1287,6 +1476,7 @@ pub fn write_blastp_pairwise_report<W: Write>(
     queries: &[BlastpPairwiseQuery],
     subject_ids: &[Arc<str>],
     report: &BlastpPairwiseReport,
+    mut probe: Option<&mut FormatProbe<'_>>,
 ) -> io::Result<()> {
     let mut buffered = io::BufWriter::new(writer);
     let writer = &mut buffered;
@@ -1299,10 +1489,16 @@ pub fn write_blastp_pairwise_report<W: Write>(
         report.database_total_letters,
     )?;
 
-    let mut hits_by_query: Vec<Vec<&PairwiseHit>> = vec![Vec::new(); queries.len()];
-    for hit in hits {
+    // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:1411
+    // ```c++
+    // CBlastFormat::PrintOneResultSet(const blast::CSearchResults& results,
+    // ```
+    // Each hit keeps its index in `hits` (the final result order), which identifies it
+    // to the probe.
+    let mut hits_by_query: Vec<Vec<(HspIndex, &PairwiseHit)>> = vec![Vec::new(); queries.len()];
+    for (hsp_index, hit) in hits.iter().enumerate() {
         if let Some(bucket) = hits_by_query.get_mut(hit.hit.q_idx as usize) {
-            bucket.push(hit);
+            bucket.push((hsp_index, hit));
         }
     }
 
@@ -1323,13 +1519,18 @@ pub fn write_blastp_pairwise_report<W: Write>(
 
         use std::collections::HashMap;
         let mut subject_hits: HashMap<u32, Vec<&PairwiseHit>> = HashMap::new();
+        let mut subject_hit_indices: HashMap<u32, Vec<HspIndex>> = HashMap::new();
         let mut subject_order: Vec<u32> = Vec::new();
-        for hit in query_hits {
+        for &(hsp_index, hit) in query_hits {
             let s_idx = hit.hit.s_idx;
             if !subject_hits.contains_key(&s_idx) {
                 subject_order.push(s_idx);
             }
-            subject_hits.entry(s_idx).or_default().push(*hit);
+            subject_hits.entry(s_idx).or_default().push(hit);
+            subject_hit_indices
+                .entry(s_idx)
+                .or_default()
+                .push(hsp_index);
         }
 
         write_subject_summary_table(writer, &subject_order, &subject_hits, subject_ids)?;
@@ -1348,15 +1549,52 @@ pub fn write_blastp_pairwise_report<W: Write>(
             let first_hit = shits
                 .first()
                 .expect("subject group must contain at least one HSP");
+            // NCBI reference: c++/src/objtools/align_format/showalign.cpp:3613-3632
+            // ```c++
+            //     if(show_defline) {
+            // 		...
+            // 				string deflines = x_PrintDefLine(bsp_handle, aln_vec_info);
+            // 				out<< deflines;
+            // 		...
+            // 			out << "\n";
+            // ```
+            // The heading is written before the first HSP of the subject; the probe marks
+            // it with that HSP's index without changing the written bytes.
+            let first_index = subject_hit_indices[&s_idx][0];
+            if let Some(probe) = probe.as_mut() {
+                writer.flush()?;
+                probe.subject_begin(first_index);
+            }
             write_subject_header(
                 writer,
                 subject_id,
                 first_hit.subject_title.as_deref(),
                 first_hit.subject_length,
             )?;
-            for hit in shits {
+            if let Some(probe) = probe.as_mut() {
+                writer.flush()?;
+                probe.subject_end(first_index);
+            }
+            // NCBI reference: c++/src/objtools/align_format/showalign.cpp:1970-1973
+            // ```c++
+            // subid=&(avRef->GetSeqId(1));
+            // bool showDefLine = previousId.Empty() || !subid->Match(*previousId);
+            // x_DisplayAlnvecInfo(out, alnvecInfo,showDefLine);
+            // ```
+            // The subject defline above is the part of the first x_DisplayAlnvecInfo call
+            // that precedes the HSP; the probe marks the rest of each call (the score
+            // block and the alignment) without changing the written bytes.
+            for (hit, &hsp_index) in shits.iter().zip(&subject_hit_indices[&s_idx]) {
+                if let Some(probe) = probe.as_mut() {
+                    writer.flush()?;
+                    probe.begin(hsp_index);
+                }
                 write_hsp_info(writer, hit, config)?;
                 write_alignment(writer, hit, config)?;
+                if let Some(probe) = probe.as_mut() {
+                    writer.flush()?;
+                    probe.end(hsp_index);
+                }
             }
         }
 
@@ -1370,6 +1608,549 @@ pub fn write_blastp_pairwise_report<W: Write>(
     }
 
     write_blastp_final_footer(writer, report)?;
+    writer.flush()
+}
+
+// =============================================================================
+// BLASTN pairwise report
+// =============================================================================
+
+/// One BLASTN query of the pairwise report (NCBI `CBlastAncillaryData` and the query's
+/// validity).
+///
+/// NCBI reference: c++/src/algo/blast/api/blast_results.cpp:82-104
+/// ```c++
+///     // find the first valid context corresponding to this query
+///     ...
+///     m_SearchSpace = ctx->eff_searchsp;
+///     ...
+///     s_InitializeKarlinBlk(sbp->kbp_std[ctx_index], &m_UngappedKarlinBlk);
+/// ```
+#[derive(Debug, Clone)]
+pub struct BlastnPairwiseQuery {
+    /// The FASTA defline without `>`.
+    pub query_name: String,
+    pub query_length: usize,
+    /// The ungapped and the gapped block of the query's first valid context; `None` for
+    /// an invalid query.
+    pub karlin: Option<(KarlinParams, KarlinParams)>,
+    pub effective_search_space: i64,
+}
+
+/// Run-level data of the BLASTN pairwise report.
+#[derive(Debug, Clone)]
+pub struct BlastnPairwiseReport {
+    pub version: String,
+    /// `-task megablast` (NCBI's `m_Megablast`; the program name stays `blastn`).
+    pub megablast: bool,
+    pub database_name: String,
+    pub database_num_sequences: usize,
+    pub database_total_letters: usize,
+    pub reward: i32,
+    pub penalty: i32,
+    pub gap_open: i32,
+    pub gap_extend: i32,
+    /// Subjects in the description table and with alignments, per query.
+    pub num_descriptions: usize,
+    pub num_alignments: usize,
+    /// Every query of the batch is invalid, so NCBI did not search it (all queries of such
+    /// a batch get the `-1` footer, local_blast.cpp:177-207). Indexed like the queries.
+    pub unsearched: Vec<bool>,
+}
+
+// The description table of the BLASTN report.
+//
+// NCBI reference: c++/src/objtools/align_format/showdefline.cpp:1004-1011
+// ```c++
+// void CShowBlastDefline::DisplayBlastDefline(CNcbiOstream & out)
+// {
+//     x_InitDeflineTable();
+//     ...
+//     x_DisplayDefline(out);
+// ```
+// NCBI reference: c++/src/objtools/align_format/showdefline.cpp:1100-1142
+// ```c++
+//         if(!is_first_aln && !(subid->Match(*previous_id))) {
+//             SScoreInfo* sci = x_GetScoreInfoForTable(hit, num_align);
+//             if(sci){
+//                 m_ScoreList.push_back(sci);
+//                 if(m_MaxScoreLen < sci->bit_string.size()){
+//                     m_MaxScoreLen = sci->bit_string.size();
+//                 }
+//                 if(m_MaxTotalScoreLen < sci->total_bit_string.size()){
+//                     m_MaxTotalScoreLen = sci->total_bit_string.size();
+//                 }
+//     ...
+//         if (num_align < m_NumToShow) { //no adding if number to show already reached
+//             hit.Set().push_back(*iter);
+//         }
+//     ...
+//     //the last hit
+//     SScoreInfo* sci = x_GetScoreInfoForTable(hit, num_align);
+//     if(sci){
+//          m_ScoreList.push_back(sci);
+//         if(m_MaxScoreLen < sci->bit_string.size()){
+//             m_MaxScoreLen = sci->bit_string.size();
+//         }
+//         if(m_MaxTotalScoreLen < sci->total_bit_string.size()){
+//             m_MaxScoreLen = sci->total_bit_string.size();
+//         }
+// ```
+// NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:4285-4310
+// ```c++
+//         total_bits += bits;
+//     ...
+//         if (bits > highest_bits) {
+//             highest_bits = bits;
+//             lowest_evalue = evalue;
+//         }
+//     ...
+//     seqSetInfo->total_bit_score = total_bits;
+//     seqSetInfo->bit_score = highest_bits;
+//     seqSetInfo->evalue = lowest_evalue;
+// ```
+// A row shows the highest bit score of the subject's HSPs and that HSP's E-value. The
+// widths start from "(Bits)" and "Value" (showdefline.cpp:1059-1062). The last row's
+// total score sets the score width when it is wider than every earlier total (the
+// width that NCBI assigns there is the score width). The last row exists only when the
+// subjects fit in the table: otherwise the loop stops with an empty last group. A total
+// is wider than "Total" only above 99999 bits (`%5.3le`), which `format_bitscore_ncbi`
+// formats alike. The header and the rows are those of `write_subject_summary_table`.
+fn write_blastn_description_table<W: Write>(
+    writer: &mut W,
+    described: &[u32],
+    last_row_counted: bool,
+    subject_hits: &std::collections::HashMap<u32, Vec<&PairwiseHit>>,
+    subject_ids: &[Arc<str>],
+) -> io::Result<()> {
+    let rows: Vec<(u32, &PairwiseHit, f64)> = described
+        .iter()
+        .filter_map(|s_idx| {
+            let hits = subject_hits.get(s_idx)?;
+            let mut best = *hits.first()?;
+            for hit in hits {
+                if hit.hit.bit_score > best.hit.bit_score {
+                    best = hit;
+                }
+            }
+            Some((*s_idx, best, hits.iter().map(|hit| hit.hit.bit_score).sum()))
+        })
+        .collect();
+    let mut max_score = "(Bits)".len();
+    let mut max_evalue = "Value".len();
+    let mut max_total = "Total".len();
+    for (index, (_, best, total)) in rows.iter().enumerate() {
+        max_score = max_score.max(format_bitscore_ncbi(best.hit.bit_score).len());
+        max_evalue = max_evalue.max(format_evalue_ncbi(best.hit.e_value).len());
+        let total_len = format_bitscore_ncbi(*total).len();
+        if index + 1 == rows.len() && last_row_counted {
+            if max_total < total_len {
+                max_score = total_len;
+            }
+        } else {
+            max_total = max_total.max(total_len);
+        }
+    }
+    write_spaces(writer, 70)?;
+    writeln!(writer, "{:<max_score$}    E", "Score")?;
+    write!(
+        writer,
+        "{:<69}",
+        "Sequences producing significant alignments:"
+    )?;
+    writeln!(writer, "{:<max_score$}  Value", "(Bits)")?;
+    writeln!(writer)?;
+    for (s_idx, best, _) in &rows {
+        let subject_id = subject_ids
+            .get(*s_idx as usize)
+            .map(|id| id.as_ref())
+            .unwrap_or("unknown");
+        // NCBI reference: c++/src/objtools/align_format/showdefline.cpp:498
+        // The description keeps the prefixes (`fLeavePrefixSuffix`, `defline.rs`).
+        let defline = subject_defline(subject_id, best.subject_title.as_deref());
+        let label = super::defline::ncbi_nucleotide_title(&defline, true).unwrap_or(defline);
+        // NCBI reference: c++/src/objtools/align_format/showdefline.cpp:915-918,930
+        // ```c++
+        //         if(line_component.size()+line_length > m_LineLen){
+        //             actual_line_component = line_component.substr(0, m_LineLen -
+        //                                                           line_length - 3);
+        //             actual_line_component += kEllipsis;
+        //     ...
+        //         CAlignFormatUtil::AddSpace(out, m_LineLen - line_length);
+        // ```
+        // String widths are byte counts, including non-ASCII FASTA titles.
+        if label.len() > 68 {
+            writer.write_all(&label.as_bytes()[..65])?;
+            writer.write_all(b"...")?;
+        } else {
+            writer.write_all(label.as_bytes())?;
+            write_spaces(writer, 68 - label.len())?;
+        }
+        writeln!(
+            writer,
+            "  {:<max_score$}  {:<max_evalue$}",
+            format_bitscore_ncbi(best.hit.bit_score),
+            format_evalue_ncbi(best.hit.e_value)
+        )?;
+    }
+    writeln!(writer)
+}
+
+// NCBI reference: c++/src/algo/blast/format/blast_format.cpp:387-407
+// ```c++
+//       CBlastFormatUtil::BlastPrintVersionInfo(m_Program, m_IsHTML,
+//                                               m_Outfile);
+//     ...
+//     m_Outfile << NcbiEndl << NcbiEndl;
+//     ...
+//     if (m_Megablast)
+//         CBlastFormatUtil::BlastPrintReference(m_IsHTML, kFormatLineLength,
+//                                           m_Outfile, CReference::eMegaBlast);
+// ```
+// NCBI reference: c++/src/algo/blast/api/version.cpp:58-61
+// ```c++
+//     // eMegaBlast
+//     "Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb Miller (2000), \
+// \"A greedy algorithm for aligning DNA sequences\", \
+// J Comput Biol 2000; 7(1-2):203-14.",
+// ```
+// The reference is printed after "Reference: " and wrapped at 68 columns
+// (blastfmtutil.cpp:116-121); the layout is that of `write_translated_pairwise_intro`.
+fn write_megablast_pairwise_intro(writer: &mut impl Write, version: &str) -> io::Result<()> {
+    writeln!(writer, "BLASTN {version}")?;
+    writeln!(writer)?;
+    writeln!(writer)?;
+    writeln!(
+        writer,
+        "Reference: Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb"
+    )?;
+    writeln!(
+        writer,
+        "Miller (2000), \"A greedy algorithm for aligning DNA sequences\", J"
+    )?;
+    writeln!(writer, "Comput Biol 2000; 7(1-2):203-14.")?;
+    writeln!(writer)?;
+    writeln!(writer)?;
+    writeln!(writer)
+}
+
+// NCBI reference: c++/src/algo/blast/format/blast_format.cpp:451-478
+// ```c++
+//     m_Outfile << NcbiEndl;
+//     if (kbp_ungap) {
+//         CBlastFormatUtil::PrintKAParameters(kbp_ungap->Lambda, kbp_ungap->K,
+//                                             kbp_ungap->H, kFormatLineLength,
+//                                             m_Outfile, false, gbp);
+//     }
+//
+//     m_Outfile << "\n";
+//     if (kbp_gap) {
+//         ...
+//     }
+//
+//     m_Outfile << "Effective search space used: " <<
+//         summary.GetSearchSpace() << "\n";
+// ```
+// NCBI reference: c++/src/algo/blast/core/blast_setup.c:472-480
+// ```c
+//     if (program_number == eBlastTypeBlastn ||
+//     ...
+//         /* disable new FSC rules for nucleotide case for now */
+//         if (sbp && sbp->gbp) {
+//             sfree(sbp->gbp);
+// ```
+// Without a Gumbel block, PrintKAParameters (align_format_util.cpp:585-619) prints only
+// the Lambda, K and H columns. An invalid query has neither Karlin block (`karlin` is
+// `None`) and a search space of 0.
+fn write_nucleotide_query_footer<W: Write>(
+    writer: &mut W,
+    karlin: Option<(KarlinParams, KarlinParams)>,
+    effective_search_space: i64,
+) -> io::Result<()> {
+    writeln!(writer)?;
+    if let Some((ungapped, _)) = karlin {
+        writeln!(writer, "Lambda      K        H")?;
+        write_ncbi_ka_field(writer, ungapped.lambda)?;
+        write_ncbi_ka_field(writer, ungapped.k)?;
+        write_ncbi_ka_field(writer, ungapped.h)?;
+        writeln!(writer)?;
+    }
+    writeln!(writer)?;
+    if let Some((_, gapped)) = karlin {
+        writeln!(writer, "Gapped")?;
+        writeln!(writer, "Lambda      K        H")?;
+        write_ncbi_ka_field(writer, gapped.lambda)?;
+        write_ncbi_ka_field(writer, gapped.k)?;
+        write_ncbi_ka_field(writer, gapped.h)?;
+        writeln!(writer)?;
+    }
+    writeln!(writer)?;
+    writeln!(
+        writer,
+        "Effective search space used: {}",
+        effective_search_space
+    )?;
+    // The two blank lines of the next query's preamble or of the epilog
+    // (blast_format.cpp:1491, 2249).
+    writeln!(writer)?;
+    writeln!(writer)
+}
+
+// NCBI reference: c++/src/algo/blast/format/blast_format.cpp:2261-2279
+// ```c++
+//     if (m_Program == "blastn" || m_Program == "megablast") {
+//         m_Outfile << "\n\nMatrix: " << "blastn matrix " <<
+//                         options.GetMatchReward() << " " <<
+//                         options.GetMismatchPenalty() << "\n";
+//     }
+//     ...
+//     double gap_extension = (double) options.GetGapExtensionCost();
+//     if ((m_Program == "megablast" || m_Program == "blastn") && options.GetGapExtensionCost() == 0)
+//     {
+//         // Formula from PMID 10890397 applies if both gap values are zero.
+//         gap_extension = -2*options.GetMismatchPenalty() + options.GetMatchReward();
+//         gap_extension /= 2.0;
+//     }
+//     m_Outfile << "Gap Penalties: Existence: "
+//             << options.GetGapOpeningCost() << ", Extension: "
+//             << gap_extension << "\n";
+// ```
+// The word threshold and the window size are 0 for blastn (blast_format.cpp:2281-2288),
+// so those lines are not printed. The extension is a whole or half number, which the
+// C++ stream and Rust print alike (`2`, `2.5`).
+fn write_blastn_final_footer<W: Write>(
+    writer: &mut W,
+    report: &BlastnPairwiseReport,
+) -> io::Result<()> {
+    write_final_database_report(
+        writer,
+        &report.database_name,
+        report.database_num_sequences,
+        report.database_total_letters,
+    )?;
+    writeln!(
+        writer,
+        "Matrix: blastn matrix {} {}",
+        report.reward, report.penalty
+    )?;
+    let gap_extension = if report.gap_extend == 0 {
+        f64::from(-2 * report.penalty + report.reward) / 2.0
+    } else {
+        f64::from(report.gap_extend)
+    };
+    writeln!(
+        writer,
+        "Gap Penalties: Existence: {}, Extension: {}",
+        report.gap_open, gap_extension
+    )
+}
+
+/// The start of the BLASTN report, which NCBI writes before it searches: the program
+/// and its reference, then the subjects.
+///
+/// NCBI reference: c++/src/app/blast/blastn_app.cpp:258-261
+/// ```c
+///         formatter.PrintProlog();
+///
+///         /*** Process the input ***/
+///         CBatchSizeMixer mixer(SplitQuery_GetChunkSize(opt.GetProgram())-1000);
+/// ```
+pub fn write_blastn_pairwise_prolog<W: Write>(
+    writer: &mut W,
+    version: &str,
+    megablast: bool,
+    database_name: &str,
+    database_num_sequences: usize,
+    database_total_letters: usize,
+) -> io::Result<()> {
+    if megablast {
+        write_megablast_pairwise_intro(writer, version)?;
+    } else {
+        write_translated_pairwise_intro(writer, "BLASTN", version)?;
+    }
+    write_blastp_database_header_spacing(
+        writer,
+        database_name,
+        database_num_sequences,
+        database_total_letters,
+        1,
+    )
+}
+
+/// Writes the BLASTN pairwise report (outfmt 0).
+///
+/// `hits` is the final hit list of the run in its order (queries in input order, then
+/// subjects and HSPs in result order); each hit's index in it identifies it to the probe.
+///
+/// NCBI reference: c++/src/algo/blast/format/blast_format.cpp:1491-1589
+/// ```c++
+///     m_Outfile << "\n\n";
+///     CBlastFormatUtil::AcknowledgeBlastQuery(*bioseq, kFormatLineLength,
+///     ...
+///         m_Outfile << "\n\n"
+///                   << "***** " << CBlastFormatUtil::kNoHitsFound << " *****" << "\n"
+///                   << "\n\n";
+///         x_PrintOneQueryFooter(*results.GetAncillaryData());
+///     ...
+///         x_DisplayDeflines(aln_set, itr_num, prev_seqids);
+///     ...
+///     m_Outfile << "\n";
+///     ...
+///     CBlastFormatUtil::PruneSeqalign(*aln_set, copy_aln_set, m_NumAlignments);
+///     ...
+///     display.DisplaySeqalign(m_Outfile);
+///     ...
+///     x_PrintOneQueryFooter(*results.GetAncillaryData());
+/// ```
+// Kept out of line: this runs only for outfmt 0 or hit records, and inlining it into the
+// shared post-processing makes every BLASTN run compile it in Wasm hosts.
+#[inline(never)]
+pub fn write_blastn_pairwise_report<W: Write>(
+    hits: &[PairwiseHit],
+    writer: &mut W,
+    config: &PairwiseConfig,
+    queries: &[BlastnPairwiseQuery],
+    subject_ids: &[Arc<str>],
+    report: &BlastnPairwiseReport,
+    mut probe: Option<&mut FormatProbe<'_>>,
+) -> io::Result<()> {
+    let mut buffered = io::BufWriter::new(writer);
+    let writer = &mut buffered;
+
+    write_blastn_pairwise_prolog(
+        writer,
+        &report.version,
+        report.megablast,
+        &report.database_name,
+        report.database_num_sequences,
+        report.database_total_letters,
+    )?;
+    // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:1489-1491
+    // ```c++
+    //     // print the preamble for this query
+    //
+    //     m_Outfile << "\n\n";
+    // ```
+    // The preamble of the first query; each later one ends the footer before it.
+    writer.write_all(b"\n\n")?;
+
+    let mut hits_by_query: Vec<Vec<(HspIndex, &PairwiseHit)>> = vec![Vec::new(); queries.len()];
+    for (hsp_index, hit) in hits.iter().enumerate() {
+        if let Some(bucket) = hits_by_query.get_mut(hit.hit.q_idx as usize) {
+            bucket.push((hsp_index, hit));
+        }
+    }
+
+    for (q_idx, query) in queries.iter().enumerate() {
+        write_blastp_query_header(writer, &query.query_name, query.query_length)?;
+        let query_hits = &hits_by_query[q_idx];
+        if query_hits.is_empty() {
+            write_no_hits_found(writer)?;
+            if report.unsearched.get(q_idx).copied().unwrap_or(false) {
+                write_tblastn_unsearched_query_footer(writer)?;
+            } else {
+                write_nucleotide_query_footer(writer, query.karlin, query.effective_search_space)?;
+            }
+            continue;
+        }
+
+        use std::collections::HashMap;
+        let mut subject_hits: HashMap<u32, Vec<&PairwiseHit>> = HashMap::new();
+        let mut subject_hit_indices: HashMap<u32, Vec<HspIndex>> = HashMap::new();
+        let mut subject_order: Vec<u32> = Vec::new();
+        for &(hsp_index, hit) in query_hits {
+            let s_idx = hit.hit.s_idx;
+            if !subject_hits.contains_key(&s_idx) {
+                subject_order.push(s_idx);
+            }
+            subject_hits.entry(s_idx).or_default().push(hit);
+            subject_hit_indices
+                .entry(s_idx)
+                .or_default()
+                .push(hsp_index);
+        }
+
+        // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:606-611
+        // ```c++
+        //     CShowBlastDefline showdef(*aln_set, *m_Scope,
+        //                               defline_length == -1 ? kFormatLineLength:defline_length,
+        //                               m_NumSummary + additional);
+        // ```
+        let described = &subject_order[..subject_order.len().min(report.num_descriptions)];
+        write_blastn_description_table(
+            writer,
+            described,
+            subject_order.len() <= report.num_descriptions,
+            &subject_hits,
+            subject_ids,
+        )?;
+        writeln!(writer)?;
+
+        // NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:1014-1040
+        // (PruneSeqalign keeps the alignments of the first `m_NumAlignments` subjects).
+        let aligned = &subject_order[..subject_order.len().min(report.num_alignments)];
+        for &s_idx in aligned {
+            let subject_id = subject_ids
+                .get(s_idx as usize)
+                .map(|id| id.as_ref())
+                .unwrap_or("unknown");
+            let shits = &subject_hits[&s_idx];
+            let first_hit = shits
+                .first()
+                .expect("subject group must contain at least one HSP");
+            // NCBI reference: c++/src/objtools/align_format/showalign.cpp:3613-3632
+            // ```c++
+            //     if(show_defline) {
+            // 		...
+            // 				string deflines = x_PrintDefLine(bsp_handle, aln_vec_info);
+            // 				out<< deflines;
+            // 		...
+            // 			out << "\n";
+            // ```
+            // The heading is written before the first HSP of the subject; the probe marks
+            // it with that HSP's index without changing the written bytes.
+            let first_index = subject_hit_indices[&s_idx][0];
+            if let Some(probe) = probe.as_mut() {
+                writer.flush()?;
+                probe.subject_begin(first_index);
+            }
+            // NCBI reference: c++/src/objtools/align_format/showalign.cpp:2273
+            // ```c++
+            //             alnDispParams->title = CDeflineGenerator().GenerateDefline(bsp_handle);
+            // ```
+            // The subject's defline is its title (`defline.rs`).
+            let defline = subject_defline(subject_id, first_hit.subject_title.as_deref());
+            // The search rejects the titles that have none (`blastn` `search`).
+            let heading = super::defline::ncbi_nucleotide_title(&defline, false).unwrap_or(defline);
+            write_subject_header(writer, &heading, None, first_hit.subject_length)?;
+            if let Some(probe) = probe.as_mut() {
+                writer.flush()?;
+                probe.subject_end(first_index);
+            }
+            // NCBI reference: c++/src/objtools/align_format/showalign.cpp:1970-1973
+            // ```c++
+            // subid=&(avRef->GetSeqId(1));
+            // bool showDefLine = previousId.Empty() || !subid->Match(*previousId);
+            // x_DisplayAlnvecInfo(out, alnvecInfo,showDefLine);
+            // ```
+            for (hit, &hsp_index) in shits.iter().zip(&subject_hit_indices[&s_idx]) {
+                if let Some(probe) = probe.as_mut() {
+                    writer.flush()?;
+                    probe.begin(hsp_index);
+                }
+                write_hsp_info(writer, hit, config)?;
+                write_alignment(writer, hit, config)?;
+                if let Some(probe) = probe.as_mut() {
+                    writer.flush()?;
+                    probe.end(hsp_index);
+                }
+            }
+        }
+
+        write_nucleotide_query_footer(writer, query.karlin, query.effective_search_space)?;
+    }
+
+    write_blastn_final_footer(writer, report)?;
     writer.flush()
 }
 
@@ -1627,6 +2408,36 @@ mod tests {
         assert!(output_str.contains("Identities ="));
     }
 
+    // NCBI reference: c++/src/objtools/align_format/showalign.cpp:4017-4018
+    // ```c++
+    //                               m_AV->StrandSign(0),
+    //                               m_AV->StrandSign(1),
+    // ```
+    // A BLASTN HSP of one letter has the same start and end; its strand is its frame's.
+    #[test]
+    fn blastn_strand_comes_from_the_hsp_frame() {
+        let config = PairwiseConfig {
+            program: "blastn".to_string(),
+            show_frame: false,
+            ..PairwiseConfig::default()
+        };
+        for (query_frame, strand) in [(1, " Strand=Plus/Plus\n"), (-1, " Strand=Plus/Minus\n")] {
+            let mut hit = PairwiseHit::from(Hit {
+                length: 1,
+                s_start: 10,
+                s_end: 10,
+                query_frame,
+                ..make_hit()
+            });
+            hit.query_seq = Some("G".to_string());
+            hit.subject_seq = Some("G".to_string());
+            let mut output = Vec::new();
+            write_hsp_info(&mut output, &hit, &config).unwrap();
+            let output = String::from_utf8(output).unwrap();
+            assert!(output.contains(strand), "{output}");
+        }
+    }
+
     #[test]
     fn test_write_pairwise_simple() {
         let hits = vec![make_hit()];
@@ -1683,6 +2494,7 @@ pub fn write_tblastn_pairwise_report<W: Write>(
     query_batch_skipped: &[bool],
     subject_ids: &[Arc<str>],
     report: &BlastpPairwiseReport,
+    mut probe: Option<&mut FormatProbe<'_>>,
 ) -> io::Result<()> {
     // NCBI c++/src/algo/blast/api/local_blast.cpp:177-224:
     // an all-invalid Run() batch carries -1 Karlin sentinel blocks only for
@@ -1704,10 +2516,16 @@ pub fn write_tblastn_pairwise_report<W: Write>(
         report.database_total_letters,
     )?;
 
-    let mut hits_by_query: Vec<Vec<&PairwiseHit>> = vec![Vec::new(); queries.len()];
-    for hit in hits {
+    // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:1411
+    // ```c++
+    // CBlastFormat::PrintOneResultSet(const blast::CSearchResults& results,
+    // ```
+    // Each hit keeps its index in `hits` (the final result order), which identifies it
+    // to the probe.
+    let mut hits_by_query: Vec<Vec<(HspIndex, &PairwiseHit)>> = vec![Vec::new(); queries.len()];
+    for (hsp_index, hit) in hits.iter().enumerate() {
         if let Some(bucket) = hits_by_query.get_mut(hit.hit.q_idx as usize) {
-            bucket.push(hit);
+            bucket.push((hsp_index, hit));
         }
     }
     for (q_idx, query) in queries.iter().enumerate() {
@@ -1745,30 +2563,80 @@ pub fn write_tblastn_pairwise_report<W: Write>(
         }
         let mut subject_hits: std::collections::HashMap<u32, Vec<&PairwiseHit>> =
             std::collections::HashMap::new();
+        let mut subject_hit_indices: std::collections::HashMap<u32, Vec<HspIndex>> =
+            std::collections::HashMap::new();
         let mut subject_order = Vec::new();
-        for hit in query_hits {
+        for &(hsp_index, hit) in query_hits {
             if !subject_hits.contains_key(&hit.hit.s_idx) {
                 subject_order.push(hit.hit.s_idx);
             }
-            subject_hits.entry(hit.hit.s_idx).or_default().push(*hit);
+            subject_hits.entry(hit.hit.s_idx).or_default().push(hit);
+            subject_hit_indices
+                .entry(hit.hit.s_idx)
+                .or_default()
+                .push(hsp_index);
         }
         write_subject_summary_table(&mut writer, &subject_order, &subject_hits, subject_ids)?;
         writeln!(writer)?;
         for s_idx in subject_order {
             let shits = &subject_hits[&s_idx];
             let first = shits[0];
+            // NCBI reference: c++/src/objtools/align_format/showalign.cpp:3613-3632
+            // ```c++
+            //     if(show_defline) {
+            // 		...
+            // 				string deflines = x_PrintDefLine(bsp_handle, aln_vec_info);
+            // 				out<< deflines;
+            // 		...
+            // 			out << "\n";
+            // ```
+            // The heading is written before the first HSP of the subject; the probe marks
+            // it with that HSP's index without changing the written bytes.
+            let first_index = subject_hit_indices[&s_idx][0];
+            if let Some(probe) = probe.as_mut() {
+                writer.flush()?;
+                probe.subject_begin(first_index);
+            }
             write_subject_header(
                 &mut writer,
                 &subject_ids[s_idx as usize],
                 first.subject_title.as_deref(),
                 first.subject_length,
             )?;
-            for hit in shits {
+            if let Some(probe) = probe.as_mut() {
+                writer.flush()?;
+                probe.subject_end(first_index);
+            }
+            // NCBI reference: c++/src/objtools/align_format/showalign.cpp:1970-1973
+            // ```c++
+            // subid=&(avRef->GetSeqId(1));
+            // bool showDefLine = previousId.Empty() || !subid->Match(*previousId);
+            // x_DisplayAlnvecInfo(out, alnvecInfo,showDefLine);
+            // ```
+            // NCBI reference: c++/src/objtools/align_format/showalign.cpp:3971-3980
+            // ```c++
+            // x_ShowAlnvecInfo(out,aln_vec_info,show_defline);
+            // ...
+            // out<<"\n";
+            // ```
+            // The subject defline above is the part of the first x_DisplayAlnvecInfo call
+            // that precedes the HSP; the probe marks the rest of each call (the score
+            // block, the alignment and the closing blank line) without changing the
+            // written bytes.
+            for (hit, &hsp_index) in shits.iter().zip(&subject_hit_indices[&s_idx]) {
+                if let Some(probe) = probe.as_mut() {
+                    writer.flush()?;
+                    probe.begin(hsp_index);
+                }
                 write_tblastn_hsp_info(&mut writer, hit)?;
                 write_tblastn_alignment(&mut writer, hit, config)?;
                 // NCBI c++/src/objtools/align_format/showalign.cpp:3650-3668:
                 // display leaves an extra blank line after each translated HSP.
                 writeln!(writer)?;
+                if let Some(probe) = probe.as_mut() {
+                    writer.flush()?;
+                    probe.end(hsp_index);
+                }
             }
         }
         write_blastp_query_footer(
@@ -1898,13 +2766,7 @@ fn write_tblastn_alignment<W: Write>(
             "TBLASTN alignment string lengths differ",
         ));
     }
-    let max_pos = hit
-        .hit
-        .q_start
-        .max(hit.hit.q_end)
-        .max(hit.hit.s_start)
-        .max(hit.hit.s_end);
-    let width = digit_count(max_pos);
+    let width = coordinate_width(&hit.hit);
     let direction: isize = if hit.subject_frame.unwrap_or(1) < 0 {
         -1
     } else {
@@ -1921,7 +2783,7 @@ fn write_tblastn_alignment<W: Write>(
         let q_end = q_pos + q_count.saturating_sub(1);
         let s_end = s_pos + direction * (3 * s_count as isize - 1);
         write!(writer, "Query  {}", q_pos)?;
-        write_spaces(writer, width - digit_count(q_pos) + 2)?;
+        write_spaces(writer, width + 2 - digit_count(q_pos))?;
         writer.write_all(qpart)?;
         write!(writer, "  {}\n", q_end)?;
         write_spaces(writer, 7 + width + 2)?;
@@ -1941,7 +2803,7 @@ fn write_tblastn_alignment<W: Write>(
         }
         writeln!(writer)?;
         write!(writer, "Sbjct  {}", s_pos)?;
-        write_spaces(writer, width - digit_count(s_pos.unsigned_abs()) + 2)?;
+        write_spaces(writer, width + 2 - digit_count(s_pos.unsigned_abs()))?;
         writer.write_all(spart)?;
         write!(writer, "  {}\n", s_end)?;
         writeln!(writer)?;

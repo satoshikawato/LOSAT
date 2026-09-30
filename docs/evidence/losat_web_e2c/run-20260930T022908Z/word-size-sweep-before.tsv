@@ -1,0 +1,23 @@
+DIFF	-query tests/fasta/outfmt0/strand_query.fasta -subject tests/fasta/outfmt0/strand_subject.fasta -task blastn -word_size 4 -evalue 1e5 -outfmt 6	ncbi_lines=4501	losat_lines=4442
+DIFF	-query tests/fasta/outfmt0/strand_query.fasta -subject tests/fasta/outfmt0/strand_subject.fasta -task blastn -word_size 5 -evalue 1e5 -outfmt 6	ncbi_lines=1159	losat_lines=1155
+DIFF	-query tests/fasta/outfmt0/strand_query.fasta -subject tests/fasta/outfmt0/strand_subject.fasta -task megablast -word_size 4 -evalue 1e5 -outfmt 6	ncbi_lines=4532	losat_lines=4476
+DIFF	-query tests/fasta/outfmt0/strand_query.fasta -subject tests/fasta/outfmt0/strand_subject.fasta -task megablast -word_size 5 -evalue 1e5 -outfmt 6	ncbi_lines=1171	losat_lines=1167
+DIFF	-query tests/fasta/outfmt0/mask_query.fasta -subject tests/fasta/outfmt0/mask_subject.fasta -task blastn -word_size 4 -evalue 1e5 -outfmt 6	ncbi_lines=767	losat_lines=763
+DIFF	-query tests/fasta/outfmt0/mask_query.fasta -subject tests/fasta/outfmt0/mask_subject.fasta -task megablast -word_size 4 -evalue 1e5 -outfmt 6	ncbi_lines=817	losat_lines=813
+DIFF	-query tests/fasta/outfmt0/longdef_query.fasta -subject tests/fasta/outfmt0/longdef_subject.fasta -task blastn -word_size 4 -evalue 1e5 -outfmt 6	ncbi_lines=1562	losat_lines=1551
+DIFF	-query tests/fasta/outfmt0/longdef_query.fasta -subject tests/fasta/outfmt0/longdef_subject.fasta -task blastn -word_size 5 -evalue 1e5 -outfmt 6	ncbi_lines=405	losat_lines=403
+DIFF	-query tests/fasta/outfmt0/longdef_query.fasta -subject tests/fasta/outfmt0/longdef_subject.fasta -task megablast -word_size 4 -evalue 1e5 -outfmt 6	ncbi_lines=1584	losat_lines=1576
+DIFF	-query tests/fasta/outfmt0/longdef_query.fasta -subject tests/fasta/outfmt0/longdef_subject.fasta -task megablast -word_size 5 -evalue 1e5 -outfmt 6	ncbi_lines=413	losat_lines=412
+DIFF	-query tests/fasta/outfmt0/many_query.fasta -subject tests/fasta/outfmt0/many_subject.fasta -task blastn -word_size 4 -evalue 1e5 -outfmt 6	ncbi_lines=56619	losat_lines=56466
+DIFF	-query tests/fasta/outfmt0/many_query.fasta -subject tests/fasta/outfmt0/many_subject.fasta -task blastn -word_size 5 -evalue 1e5 -outfmt 6	ncbi_lines=14370	losat_lines=14357
+DIFF	-query tests/fasta/outfmt0/many_query.fasta -subject tests/fasta/outfmt0/many_subject.fasta -task blastn -word_size 6 -evalue 1e5 -outfmt 6	ncbi_lines=3977	losat_lines=3975
+DIFF	-query tests/fasta/outfmt0/many_query.fasta -subject tests/fasta/outfmt0/many_subject.fasta -task blastn -word_size 28 -evalue 10 -outfmt 6	ncbi_lines=241	losat_lines=262
+DIFF	-query tests/fasta/outfmt0/many_query.fasta -subject tests/fasta/outfmt0/many_subject.fasta -task blastn -word_size 28 -evalue 1e5 -outfmt 6	ncbi_lines=241	losat_lines=262
+DIFF	-query tests/fasta/outfmt0/many_query.fasta -subject tests/fasta/outfmt0/many_subject.fasta -task megablast -word_size 4 -evalue 1e5 -outfmt 6	ncbi_lines=63240	losat_lines=63084
+DIFF	-query tests/fasta/outfmt0/many_query.fasta -subject tests/fasta/outfmt0/many_subject.fasta -task megablast -word_size 5 -evalue 1e5 -outfmt 6	ncbi_lines=15831	losat_lines=15818
+DIFF	-query tests/fasta/outfmt0/many_query.fasta -subject tests/fasta/outfmt0/many_subject.fasta -task megablast -word_size 6 -evalue 1e5 -outfmt 6	ncbi_lines=4530	losat_lines=4528
+DIFF	-query tests/fasta/outfmt0/multi_query.fasta -subject tests/fasta/outfmt0/multi_subject.fasta -task blastn -word_size 28 -evalue 10 -outfmt 6	ncbi_lines=5	losat_lines=9
+DIFF	-query tests/fasta/outfmt0/multi_query.fasta -subject tests/fasta/outfmt0/multi_subject.fasta -task blastn -word_size 28 -evalue 1e5 -outfmt 6	ncbi_lines=5	losat_lines=9
+DIFF	-query tests/fasta/outfmt0/iupac_query.fasta -subject tests/fasta/outfmt0/multi_subject.fasta -task blastn -word_size 28 -evalue 10 -outfmt 6	ncbi_lines=9	losat_lines=23
+DIFF	-query tests/fasta/outfmt0/iupac_query.fasta -subject tests/fasta/outfmt0/multi_subject.fasta -task blastn -word_size 28 -evalue 1e5 -outfmt 6	ncbi_lines=9	losat_lines=23
+# cases=256 differing=22

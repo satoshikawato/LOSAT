@@ -1,5 +1,5 @@
 use super::constants::MAX_DIRECT_LOOKUP_WORD_SIZE;
-use crate::core::blast_encoding::{encode_iupac_to_ncbi2na_packed, COMPRESSION_RATIO};
+use crate::core::blast_encoding::{encode_subject_ncbi2na_packed, COMPRESSION_RATIO};
 use crate::utils::dust::MaskedInterval;
 use bio::io::fasta;
 
@@ -70,10 +70,22 @@ const NCBI4NA_REV_COMP: [u8; 16] = [0, 8, 4, 12, 2, 10, 6, 14, 1, 9, 5, 13, 3, 1
 
 /// Generate the reverse complement of a DNA sequence in IUPACNA.
 /// Uses NCBI4NA bitmask mapping to preserve ambiguous base complements.
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:977,989
+/// ```c
+///     sv.SetCoding(CSeq_data::e_Ncbi4na);
+///     ...
+///     sv.GetStrandData(strand, buffer);
+/// ```
+/// NCBI takes both strands, in NCBI4NA, from sequence data that has no letter case
+/// (the reader records lowercase as masks), so a lowercase input letter is the same
+/// base as its uppercase form. `IUPACNA_TO_NCBI4NA` maps only uppercase letters, so
+/// the letter is uppercased first; the result is uppercase.
 pub fn reverse_complement(seq: &[u8]) -> Vec<u8> {
     seq.iter()
         .rev()
         .map(|&b| {
+            let b = b.to_ascii_uppercase();
             let idx = if b < 128 {
                 IUPACNA_TO_NCBI4NA[b as usize]
             } else {
@@ -326,7 +338,7 @@ pub fn build_db_word_counts(
             }
         }
 
-        let packed = encode_iupac_to_ncbi2na_packed(seq);
+        let packed = encode_subject_ncbi2na_packed(seq);
         scan_subject(seq.len(), &packed);
     }
 
@@ -1854,4 +1866,15 @@ pub fn build_direct_lookup(
     // REMOVED: Over-represented k-mer filtering (MAX_HITS_PER_KMER) - does not exist in NCBI BLAST
 
     DirectKmerLookup { offsets, hits }
+}
+
+#[cfg(test)]
+mod reverse_complement_tests {
+    use super::reverse_complement;
+
+    // A lowercase (soft-masked) letter is the same base on the minus strand.
+    #[test]
+    fn lowercase_letters_are_complemented_like_uppercase() {
+        assert_eq!(reverse_complement(b"ACgtRn-"), b"-NYACGT");
+    }
 }

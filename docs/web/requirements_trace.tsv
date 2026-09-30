@@ -1,0 +1,27 @@
+id	design_ref	requirement	status	stages	verification
+REQ-01	§2.1 検索	BLASTN・BLASTP・BLASTX・TBLASTN・TBLASTX の5program。すべてにoutfmt 0相当の詳細アラインメント表示	initial	E1a E1b E1c E1d E2a-1 E2a-2 E2b SX W4	V-NAT V-ABI V-BR
+REQ-02	§2.1 入口	検索タブと結果タブ。NCBI Web BLASTに馴染みのある操作。UI・ヘルプ・エラーは英語	initial	W0 W3 W4	V-APP
+REQ-03	§2.1 入力	生配列／FASTAの貼り付け、非圧縮のFASTA・multi-FASTA、複数ファイル、ドラッグ＆ドロップ	initial	W2 W3	V-APP
+REQ-04	§2.1 選択	配列種別とprogramは手動で選ぶ。BLASTNのtask選択。query側／subject側の遺伝暗号表	initial	W3	V-APP V-ABI
+REQ-05	§2.1 入力検証	元ヘッダーと大文字小文字を保持。重複IDは内部IDで区別。不正レコードは明示的に除外	initial	W2 W3	V-APP
+REQ-06	§2.1 入力検証	領域は座標入力とプレビュー選択で指定する。その役割のレコードが1つのときだけ指定でき、-query_loc / -subject_loc になる（計画 DW-9）。BLASTXはSXで対象にする（計画 DW-11）	initial	E2d SX W3	V-NAT V-APP
+REQ-07	§2.1 反復検索	Subjectを標準で保持し、入力参照・パース・初期化済みエンジンを再利用する。エンコード・翻訳などの前処理の再利用は、前処理がwarm実行時間の20%以上を占めるprogramだけ（計画 DW-8）	initial	E1d W1 R2	V-ABI V-BR V-PERF
+REQ-08	§2.1 実行	1つの実行中の検索とキュー。次のジョブは編集中でもよい。Auto／手動のスレッド指定、進捗（段階と経過時間）、取消、診断	initial	W0 W1 W3	V-APP V-BR
+REQ-09	§2.1 途中結果	完了したqueryの結果の仮表示、完了query数の表示	withdrawn (DW-5)	-	-
+REQ-10	§2.1 途中結果	抽出・候補登録・出力は、その実行が正常に完了した後だけ。取消した実行の結果は破棄する	initial	W0 W5 W6	V-APP
+REQ-11	§2.1 基本結果画面	query切替 → Subject一覧 → HSP・詳細。表・図・詳細・抽出の対象が連動する	initial	W4	V-APP
+REQ-12	§2.1 図	二配列のドットプロット。ズーム・パン・逆向きの識別・HSPの選択	initial	W4	V-APP
+REQ-13	§2.1 配列回収	周辺配列付き、ヒット区間、Subject全長、選択した候補のmulti-FASTA、ギャップ付きアラインメント	initial	W5	V-APP
+REQ-14	§2.1 候補	複数の実行から候補を集め、元の結果へ戻れる。メモ、並べ替え、削除、由来の一覧	initial	W5	V-APP
+REQ-15	§2.1 出力	outfmt 0・6・7、CSV、構造化JSON、結果レポート、設定ファイル（検索条件だけ）、設定＋結果のセッションファイル	initial	W0 W6	V-APP V-BR
+REQ-16	§2.1 環境	Windows・macOS・Linux、Chromium系・Firefox・Safari/WebKit、モバイル。組合せと規模は検証表で具体化する	initial	W1 G	V-BR V-MOB V-PERF
+REQ-17	§2.1 オフライン	必要な資産の取得後、オフラインで5programの検索・詳細・抽出・出力まで完結する。更新の適用は利用者の明示操作	initial	W7	V-OFF
+REQ-18	§2.1 検証	programと出力形式ごとのバイト一致を基本とし、根拠のある例外を列挙する。検証バッジと試験記録への導線。期待値の出どころは docs/web/verification_cells.tsv（E1a で作成）	initial	E1a W4 G	V-ABI V-BR
+REQ-19	§2.1 導入支援	例を試す、5つの小さな例題、最短のチュートリアル、任意のブラウザ自己試験	initial	W7	V-APP
+REQ-20	§0 T01, §7	計算用の一時ファイルは確認なしで自動作成してよい。次回起動時の自動保存・自動復元はしない	initial	W2	V-APP
+REQ-21	§13	研究データをネットワークへ送らない。GA4は研究データを扱う文書から隔離する	initial	W7	V-PRIV
+REQ-22	§9.4	Wake Lockの選択、終了前の注意、スリープ／バックグラウンドの注意、復帰時の状態確認	initial	W3	V-APP
+REQ-23	§12.2	セッションの読み込みで検索を自動開始しない。元FASTAは明示的に選び直し、照合してからつなぎ直す	initial	W6	V-APP
+REQ-24	§2.2 後続	PWA、複数レコードのドットプロット、次のqueryにする操作、逆相補化・表示方向の変更、環状境界をまたぐ抽出、短いquery向けの特別対応、高度なpause/resume、初回・更新時の自動試験	deferred	-	-
+REQ-25	§2.2 対象外	巨大公開DB、全ゲノム自動注釈、多重アラインメント、系統解析、クラウド同期、高度な図編集、GenBank/GFF3入力、圧縮FASTAの直接入力、Query/Subject入替、gbdraw専用連携、自己ホスト用パッケージ、ネイティブ版	out-of-scope	-	-
+REQ-26	§2.2, §18	SVG/PNG、トラック、all-vs-all、外部API/SDK、実行差分比較、表示調整、元の核酸文字列の併記の時期、列とフィルターの完全な定義表	undecided	計画 §10	-

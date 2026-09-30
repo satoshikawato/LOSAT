@@ -1,0 +1,6 @@
+DIFF	/home/kawato/.cache/losat-web-gui-target/s07p-slices/ambiguity_q7_26.fa	/home/kawato/.cache/losat-web-gui-target/s07p-slices/ambiguity_s7_26.fa	ncbi_lines=28	losat_lines=27
+DIFF	/home/kawato/.cache/losat-web-gui-target/s07p-slices/ambiguity_q7_31.fa	/home/kawato/.cache/losat-web-gui-target/s07p-slices/ambiguity_s7_31.fa	ncbi_lines=42	losat_lines=42
+DIFF	/home/kawato/.cache/losat-web-gui-target/s07p-slices/ambiguity_q7_56.fa	/home/kawato/.cache/losat-web-gui-target/s07p-slices/ambiguity_s7_56.fa	ncbi_lines=23	losat_lines=22
+DIFF	/home/kawato/.cache/losat-web-gui-target/s07p-slices/ambiguity_q7_67.fa	/home/kawato/.cache/losat-web-gui-target/s07p-slices/ambiguity_s7_67.fa	ncbi_lines=33	losat_lines=32
+DIFF	/home/kawato/.cache/losat-web-gui-target/s07p-slices/ambiguity_q7_86.fa	/home/kawato/.cache/losat-web-gui-target/s07p-slices/ambiguity_s7_86.fa	ncbi_lines=30	losat_lines=29
+# pool=ambiguity options='-task blastn -word_size 7' seed=7 cases=100 differing=5

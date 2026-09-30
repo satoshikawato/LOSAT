@@ -241,7 +241,7 @@ fn parse_blastn_args(
         query,
         subject,
         task: "megablast".to_string(),
-        word_size: 28,
+        word_size: None,
         num_threads: 1,
         evalue: 10.0,
         percent_identity: 0.0,
@@ -253,11 +253,12 @@ fn parse_blastn_args(
         max_hsps_per_subject: None,
         min_diag_separation: 0,
         out: Some(out),
-        reward: 1,
-        penalty: -2,
-        gap_open: 0,
-        gap_extend: 0,
+        reward: None,
+        penalty: None,
+        gap_open: None,
+        gap_extend: None,
         // NCBI blast_options.c:46-48: kDustLevel=20, kDustWindow=64, kDustLinker=1.
+        dust_filtering: None,
         dust: crate::blastinput::value_parsers::DustSpec::Yes,
         lcase_masking: false,
         subject_besthit: false,
@@ -278,13 +279,17 @@ fn parse_blastn_args(
         } else if let Some(value) = flag.strip_prefix("-outfmt=") {
             args.outfmt = value.to_string();
         } else if flag == "-word_size" {
-            args.word_size = next_arg(extra_args, &mut index, flag)?
-                .parse()
-                .map_err(|err| format!("{flag} parse error: {err}"))?;
+            args.word_size = v1_blastn_word_size(
+                next_arg(extra_args, &mut index, flag)?
+                    .parse()
+                    .map_err(|err| format!("{flag} parse error: {err}"))?,
+            );
         } else if let Some(value) = flag.strip_prefix("-word_size=") {
-            args.word_size = value
-                .parse()
-                .map_err(|err| format!("{flag} parse error: {err}"))?;
+            args.word_size = v1_blastn_word_size(
+                value
+                    .parse()
+                    .map_err(|err| format!("{flag} parse error: {err}"))?,
+            );
         } else if flag == "-num_threads" {
             args.num_threads =
                 parse_num_threads_arg(next_arg(extra_args, &mut index, flag)?, flag)?;
@@ -303,8 +308,22 @@ fn parse_blastn_args(
         }
         index += 1;
     }
+    // Plan TD-1 (a fail-fast fix): the engine implements the tasks of the CLI only; v1
+    // ran other names with LOSAT's own scoring, which NCBI does not use.
+    if !matches!(args.task.as_str(), "megablast" | "blastn") {
+        return Err(format!(
+            "unsupported blastn task for web API: {}",
+            args.task
+        ));
+    }
 
     Ok(args)
+}
+
+/// The v1 word size: plan TD-1 freezes v1, whose engine took a word size of 28 for the
+/// megablast default and so gave `-task blastn -word_size 28` the blastn default (11).
+fn v1_blastn_word_size(word_size: usize) -> Option<usize> {
+    (word_size != 28).then_some(word_size)
 }
 
 fn parse_tblastx_args(
@@ -362,10 +381,27 @@ fn parse_tblastx_args(
                 parse_num_threads_arg(next_arg(extra_args, &mut index, flag)?, flag)?;
         } else if let Some(value) = flag.strip_prefix("-num_threads=") {
             args.num_threads = parse_num_threads_arg(value, flag)?;
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2657-2660
+        // ```c
+        // arg_desc.AddDefaultKey(kArgOutputFormat, "format",
+        //                        kOutputFormatDescription,
+        //                        CArgDescriptions::eString,
+        //                        NStr::IntToString(dft_outfmt));
+        // ```
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2800-2803
+        // ```c
+        // if (args[kArgOutputFormat]) {
+        //     string fmt_choice =
+        //         NStr::TruncateSpaces(args[kArgOutputFormat].AsString());
+        // ```
+        // The TBLASTX engine writes only outfmt 6, so the web path applies the same
+        // CLI validator and rejects any other format instead of emitting outfmt 6.
         } else if flag == "-outfmt" {
-            args.outfmt = next_arg(extra_args, &mut index, flag)?.to_string();
+            args.outfmt = crate::blastinput::value_parsers::tblastx_outfmt(next_arg(
+                extra_args, &mut index, flag,
+            )?)?;
         } else if let Some(value) = flag.strip_prefix("-outfmt=") {
-            args.outfmt = value.to_string();
+            args.outfmt = crate::blastinput::value_parsers::tblastx_outfmt(value)?;
         } else if flag == "-evalue" {
             args.evalue = next_arg(extra_args, &mut index, flag)?
                 .parse()
@@ -1031,6 +1067,67 @@ mod tests {
         store.release(first).expect("release existing handle");
         assert!(!store.entries.contains_key(&first));
         assert!(store.release(first).is_err());
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2800-2803
+    // ```c
+    // if (args[kArgOutputFormat]) {
+    //     string fmt_choice =
+    //         NStr::TruncateSpaces(args[kArgOutputFormat].AsString());
+    // ```
+    #[test]
+    fn tblastx_web_args_reject_unimplemented_outfmt() {
+        let parse = |values: &[&str]| {
+            parse_tblastx_args(values, PathBuf::new(), PathBuf::new(), PathBuf::new())
+        };
+
+        assert_eq!(parse(&["-outfmt", "6"]).expect("outfmt 6").outfmt, "6");
+        assert_eq!(parse(&["-outfmt=6"]).expect("outfmt=6").outfmt, "6");
+        assert!(parse(&["-outfmt", "0"]).is_err());
+        assert!(parse(&["-outfmt=7"]).is_err());
+        assert!(parse(&["-outfmt", "6 qseqid sseqid"]).is_err());
+    }
+
+    // Plan TD-1: ABI v1 is frozen, so its BLASTN keeps outfmt 6 and 7 and rejects
+    // outfmt 0, which the engine implements since LOSAT Web session S07, with the error
+    // that it gave before.
+    #[test]
+    fn blastn_web_pair_keeps_rejecting_outfmt_0() {
+        let args = |outfmt: &str| {
+            parse_blastn_args(
+                &["-outfmt", outfmt],
+                PathBuf::new(),
+                PathBuf::new(),
+                PathBuf::new(),
+            )
+            .expect("blastn web args")
+        };
+        let fasta = ">q\nACGTACGTACGTACGTACGTACGTACGTACGT\n";
+        let error = blastn::run_web_pair(args("0"), fasta, fasta).unwrap_err();
+        assert_eq!(engine_error(error), "unsupported BLASTN output format: 0");
+        assert!(blastn::run_web_pair(args("6"), fasta, fasta).is_ok());
+        // Plan TD-1: LOSAT's limits come after NCBI's checks and before the records; an
+        // empty query gives the empty report of NCBI and of v1 before S07+.
+        let with = |extra: &[&str]| {
+            let mut words = vec!["-outfmt", "6"];
+            words.extend_from_slice(extra);
+            parse_blastn_args(&words, PathBuf::new(), PathBuf::new(), PathBuf::new())
+                .expect("blastn web args")
+        };
+        let empty_record = ">s0\n>s1\nACGTACGTACGTACGTACGTACGTACGTACGT\n";
+        assert!(blastn::run_web_pair(with(&[]), "", empty_record).is_ok());
+        // An empty query gives the empty report whatever the subject's deflines or LOSAT's
+        // limits (as before S07+ and in NCBI); the serial build still checks threads first.
+        let tab_defline = ">s0\tx\nACGTACGTACGTACGTACGTACGTACGTACGT\n";
+        assert!(blastn::run_web_pair(with(&[]), "", tab_defline).is_ok());
+        assert!(blastn::run_web_pair(with(&["-evalue", "1e400"]), "", fasta).is_ok());
+        #[cfg(not(feature = "parallel"))]
+        assert!(blastn::run_web_pair(with(&["-num_threads", "2"]), "", fasta).is_err());
+        let error = blastn::run_web_pair(with(&[]), fasta, empty_record).unwrap_err();
+        assert!(engine_error(error).contains("subject record 1 (s0) has no residues"));
+        let x_subject = ">s\nACGTXACGTACGTACGTACGTACGTACGTACGT\n";
+        let error = blastn::run_web_pair(with(&["-evalue", "inf"]), fasta, x_subject).unwrap_err();
+        assert!(engine_error(error).contains("an infinite or NaN e-value"));
     }
 
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1407-1427

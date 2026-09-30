@@ -1,0 +1,271 @@
+{
+  "binaries": {
+    "before": [
+      "3fef8bd3cee9cde290df622605c2caba46f468a67f042002e743f13a19b039be",
+      "6b34f358337b6f95ac751692a980fb115ad045305d43996b14950b5eb353c3d9",
+      "fae798b8f4d33e5608e5014dff55cd84f3ef7161b1090d452f11c9a721902f15"
+    ],
+    "after": [
+      "bf4be7aa9864f3c184007a3d2aff62b5521986a99311e6667646801fed8564dc",
+      "7d8627962cdd402fc5dc373ebcbbe1edf843528cdd065d976b8f86dd1b25f966",
+      "055ac71be4fa63a2eece775be51064de20a6dc43c003bcbda39a9fb607054517"
+    ]
+  },
+  "repeat": 3,
+  "started_at": "2026-09-28T19:56:19+00:00",
+  "cases": [
+    {
+      "case": "tblastn-full",
+      "mode": "native",
+      "threads": 1,
+      "argv": [
+        "tblastn",
+        "-task",
+        "tblastn",
+        "-query",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/AvCLPV.faa",
+        "-subject",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/PsCLPV.fasta",
+        "-outfmt",
+        "6",
+        "-num_threads",
+        "1",
+        "-out",
+        "/tmp/tmpukkdc582/tblastn-full.native.after.out"
+      ],
+      "before": {
+        "samples_s": [
+          2.2461113410008693,
+          2.432890705000318,
+          2.3182184870001947
+        ],
+        "median_s": 2.3182184870001947,
+        "min_s": 2.2461113410008693,
+        "max_s": 2.432890705000318,
+        "output_sha256": "fc62309a3574406873a1b9e89e3f68646575795bfd9deb7de9a61f20cb83a279"
+      },
+      "after": {
+        "samples_s": [
+          2.2385761910009023,
+          2.3055871750002552,
+          2.255659757000103
+        ],
+        "median_s": 2.255659757000103,
+        "min_s": 2.2385761910009023,
+        "max_s": 2.3055871750002552,
+        "output_sha256": "fc62309a3574406873a1b9e89e3f68646575795bfd9deb7de9a61f20cb83a279"
+      }
+    },
+    {
+      "case": "tblastn-full",
+      "mode": "serial-wasi",
+      "threads": 1,
+      "argv": [
+        "tblastn",
+        "-task",
+        "tblastn",
+        "-query",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/AvCLPV.faa",
+        "-subject",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/PsCLPV.fasta",
+        "-outfmt",
+        "6",
+        "-num_threads",
+        "1",
+        "-out",
+        "/tmp/tmpukkdc582/tblastn-full.serial-wasi.after.out"
+      ],
+      "before": {
+        "samples_s": [
+          2.754720285000076,
+          2.774658443999215,
+          3.0710644709997723
+        ],
+        "median_s": 2.774658443999215,
+        "min_s": 2.754720285000076,
+        "max_s": 3.0710644709997723,
+        "output_sha256": "fc62309a3574406873a1b9e89e3f68646575795bfd9deb7de9a61f20cb83a279"
+      },
+      "after": {
+        "samples_s": [
+          2.720295111001178,
+          2.69936563400006,
+          2.751667964999797
+        ],
+        "median_s": 2.720295111001178,
+        "min_s": 2.69936563400006,
+        "max_s": 2.751667964999797,
+        "output_sha256": "fc62309a3574406873a1b9e89e3f68646575795bfd9deb7de9a61f20cb83a279"
+      }
+    },
+    {
+      "case": "tblastn-full",
+      "mode": "threaded-wasi",
+      "threads": 4,
+      "argv": [
+        "tblastn",
+        "-task",
+        "tblastn",
+        "-query",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/AvCLPV.faa",
+        "-subject",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/PsCLPV.fasta",
+        "-outfmt",
+        "6",
+        "-num_threads",
+        "4",
+        "-out",
+        "/tmp/tmpukkdc582/tblastn-full.threaded-wasi.after.out"
+      ],
+      "before": {
+        "samples_s": [
+          3.6558239160003723,
+          3.486591471000793,
+          3.523694693001744
+        ],
+        "median_s": 3.523694693001744,
+        "min_s": 3.486591471000793,
+        "max_s": 3.6558239160003723,
+        "output_sha256": "fc62309a3574406873a1b9e89e3f68646575795bfd9deb7de9a61f20cb83a279"
+      },
+      "after": {
+        "samples_s": [
+          3.556807975000993,
+          3.463642851998884,
+          3.4433245719992556
+        ],
+        "median_s": 3.463642851998884,
+        "min_s": 3.4433245719992556,
+        "max_s": 3.556807975000993,
+        "output_sha256": "fc62309a3574406873a1b9e89e3f68646575795bfd9deb7de9a61f20cb83a279"
+      }
+    },
+    {
+      "case": "tblastn-full-fmt0",
+      "mode": "native",
+      "threads": 1,
+      "argv": [
+        "tblastn",
+        "-task",
+        "tblastn",
+        "-query",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/AvCLPV.faa",
+        "-subject",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/PsCLPV.fasta",
+        "-outfmt",
+        "0",
+        "-num_threads",
+        "1",
+        "-out",
+        "/tmp/tmpukkdc582/tblastn-full-fmt0.native.after.out"
+      ],
+      "before": {
+        "samples_s": [
+          2.2949181470012263,
+          2.415431466000882,
+          2.5665389340010734
+        ],
+        "median_s": 2.415431466000882,
+        "min_s": 2.2949181470012263,
+        "max_s": 2.5665389340010734,
+        "output_sha256": "e2de8d5c15a478be777b5208cfd1e9698982721dc079a826b83aef19f4b4994c"
+      },
+      "after": {
+        "samples_s": [
+          2.353955718001089,
+          2.301592512998468,
+          2.289547439000671
+        ],
+        "median_s": 2.301592512998468,
+        "min_s": 2.289547439000671,
+        "max_s": 2.353955718001089,
+        "output_sha256": "e2de8d5c15a478be777b5208cfd1e9698982721dc079a826b83aef19f4b4994c"
+      }
+    },
+    {
+      "case": "tblastn-full-fmt0",
+      "mode": "serial-wasi",
+      "threads": 1,
+      "argv": [
+        "tblastn",
+        "-task",
+        "tblastn",
+        "-query",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/AvCLPV.faa",
+        "-subject",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/PsCLPV.fasta",
+        "-outfmt",
+        "0",
+        "-num_threads",
+        "1",
+        "-out",
+        "/tmp/tmpukkdc582/tblastn-full-fmt0.serial-wasi.after.out"
+      ],
+      "before": {
+        "samples_s": [
+          2.8134608199998183,
+          2.7747827089988277,
+          2.8548408999995445
+        ],
+        "median_s": 2.8134608199998183,
+        "min_s": 2.7747827089988277,
+        "max_s": 2.8548408999995445,
+        "output_sha256": "e2de8d5c15a478be777b5208cfd1e9698982721dc079a826b83aef19f4b4994c"
+      },
+      "after": {
+        "samples_s": [
+          2.8446319430004223,
+          2.8135317970009055,
+          2.801273774999572
+        ],
+        "median_s": 2.8135317970009055,
+        "min_s": 2.801273774999572,
+        "max_s": 2.8446319430004223,
+        "output_sha256": "e2de8d5c15a478be777b5208cfd1e9698982721dc079a826b83aef19f4b4994c"
+      }
+    },
+    {
+      "case": "tblastn-full-fmt0",
+      "mode": "threaded-wasi",
+      "threads": 4,
+      "argv": [
+        "tblastn",
+        "-task",
+        "tblastn",
+        "-query",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/AvCLPV.faa",
+        "-subject",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/PsCLPV.fasta",
+        "-outfmt",
+        "0",
+        "-num_threads",
+        "4",
+        "-out",
+        "/tmp/tmpukkdc582/tblastn-full-fmt0.threaded-wasi.after.out"
+      ],
+      "before": {
+        "samples_s": [
+          4.7271405440005765,
+          3.58152646400049,
+          3.53190675299993
+        ],
+        "median_s": 3.58152646400049,
+        "min_s": 3.53190675299993,
+        "max_s": 4.7271405440005765,
+        "output_sha256": "e2de8d5c15a478be777b5208cfd1e9698982721dc079a826b83aef19f4b4994c"
+      },
+      "after": {
+        "samples_s": [
+          3.613010454999312,
+          3.5535707239996555,
+          3.8025895279988617
+        ],
+        "median_s": 3.613010454999312,
+        "min_s": 3.5535707239996555,
+        "max_s": 3.8025895279988617,
+        "output_sha256": "e2de8d5c15a478be777b5208cfd1e9698982721dc079a826b83aef19f4b4994c"
+      }
+    }
+  ],
+  "finished_at": "2026-09-28T19:58:43+00:00"
+}

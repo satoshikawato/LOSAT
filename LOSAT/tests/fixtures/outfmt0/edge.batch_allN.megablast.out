@@ -1,0 +1,80 @@
+BLASTN 2.17.0+
+
+
+Reference: Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb
+Miller (2000), "A greedy algorithm for aligning DNA sequences", J
+Comput Biol 2000; 7(1-2):203-14.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/blastn_parity_compact.fasta).
+           2 sequences; 152 total letters
+
+
+
+Query= batchN 5000 N filling the first query batch
+
+Length=5000
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   -1.00    -1.00    -1.00 
+
+Gapped
+Lambda      K        H
+   -1.00    -1.00    -1.00 
+
+Effective search space used: 0
+
+
+Query= blastn_parity_alpha compact multi-query parity fixture alpha
+
+Length=76
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+blastn_parity_alpha compact multi-query parity fixture alpha          141     2e-39
+
+
+> blastn_parity_alpha compact multi-query parity fixture alpha
+Length=76
+
+ Score = 141 bits (76),  Expect = 2e-39
+ Identities = 76/76 (100%), Gaps = 0/76 (0%)
+ Strand=Plus/Plus
+
+Query  1   ACGTTGCATGTCAGTACCGATGCTAGTCGATCGTACGATGGCATTCGAGTCCGATACGTA  60
+           ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  1   ACGTTGCATGTCAGTACCGATGCTAGTCGATCGTACGATGGCATTCGAGTCCGATACGTA  60
+
+Query  61  GCTTGCAGATCGTACG  76
+           ||||||||||||||||
+Sbjct  61  GCTTGCAGATCGTACG  76
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 9522
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/blastn_parity_compact.fasta).
+    Posted date:  Unknown
+  Number of letters in database: 152
+  Number of sequences in database:  2
+
+
+
+Matrix: blastn matrix 1 -2
+Gap Penalties: Existence: 0, Extension: 2.5

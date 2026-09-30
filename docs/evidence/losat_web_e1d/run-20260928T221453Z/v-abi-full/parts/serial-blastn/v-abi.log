@@ -1,0 +1,17 @@
+(node:969016) ExperimentalWarning: WASI is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ok serial describe, validate, register, scan
+ok serial n1 PesePMNV.MjPMNV.task_blastn
+ok serial n1 PmeNMV.MjPMNV.task_blastn
+ok serial n1 PmeNMV.PesePMNV.task_blastn
+ok serial n1 PeseMJNV.PemoMJNVB.task_blastn
+ok serial n1 MelaMJNV.PemoMJNVA.task_blastn
+ok serial n1 PemoMJNVA.PeseMJNV.task_blastn
+ok serial n1 MjeNMV.MelaMJNV.task_blastn
+ok serial n1 MjPMNV.MlPMNV.task_blastn
+ok serial n1 NZ_CP006932.NZ_CP006932.task_blastn
+ok serial n1 EDL933.Sakai.megablast
+ok serial n1 Sakai.MG1655.megablast
+ok serial n1 compact.multi_query.outfmt6,compact.multi_query.outfmt7
+ok serial n1 compact.multi_query.no_hit.outfmt7
+13 runs matched the native CLI; frozen hashes: 13/14 equal, differing: Sakai.MG1655.megablast outfmt 7

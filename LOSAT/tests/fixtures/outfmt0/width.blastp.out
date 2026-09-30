@@ -1,0 +1,71 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/pwidth_s.faa).
+           1 sequences; 100 total letters
+
+
+
+Query= pw_q
+
+Length=61
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+pw_s                                                                  132     8e-48
+
+
+> pw_s
+Length=100
+
+ Score = 132 bits (333),  Expect = 8e-48, Method: Compositional matrix adjust.
+ Identities = 61/61 (100%), Positives = 61/61 (100%), Gaps = 0/61 (0%)
+
+Query  1   MHVHGHPLANQGFKDMLYWAYMDLNLSMGSSGCKANPAVQNPWARCGYHEIRNTNTKREW  60
+           MHVHGHPLANQGFKDMLYWAYMDLNLSMGSSGCKANPAVQNPWARCGYHEIRNTNTKREW
+Sbjct  40  MHVHGHPLANQGFKDMLYWAYMDLNLSMGSSGCKANPAVQNPWARCGYHEIRNTNTKREW  99
+
+Query  61  N  61
+           N
+Sbjct  100 N  100
+
+
+
+Lambda      K        H        a         alpha
+   0.320    0.132    0.467    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 5022
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/pwidth_s.faa).
+    Posted date:  Unknown
+  Number of letters in database: 100
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

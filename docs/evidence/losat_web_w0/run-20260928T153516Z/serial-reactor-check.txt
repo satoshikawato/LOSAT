@@ -1,0 +1,5 @@
+build: (cd LOSAT && cargo +1.92.0 build --release --locked --lib --target wasm32-wasip1 --no-default-features --target-dir <outside-worktree>/serial-reactor)
+source commit: 35e34eee07fbf21c6fd4610a2afd309a8a2099a9
+artifact sha256: 10dadb6433f18b3eaf22655bc0770033d244f8fa65d0db2e21a23d3f2d3e6e8f  LOSAT.wasm (serial v1 reactor)
+check: node docs/evidence/losat_web_w0/check_tblastx_outfmt_reactor.js <repo> <LOSAT.wasm>
+exit=0

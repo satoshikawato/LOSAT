@@ -1,0 +1,91 @@
+{
+  "checks": {
+    "link_arguments": {
+      "adapter_build_rs_exists": false,
+      "adapter_build_script": null,
+      "engine_build_rs_sha256": "7d70a92bfe68a76662ed485e0d98ea82e4294a84c959714fb62ad331ef808830"
+    },
+    "other_configuration": {
+      "cargo_config_files": [],
+      "environment": []
+    },
+    "profile_release": {
+      "adapter": {
+        "codegen-units": 1,
+        "lto": true,
+        "opt-level": 3,
+        "panic": "abort"
+      },
+      "engine": {
+        "codegen-units": 1,
+        "lto": true,
+        "opt-level": 3,
+        "panic": "abort"
+      }
+    },
+    "shared_dependencies": {
+      "count": 144,
+      "differing": {}
+    },
+    "target_rustflags": {
+      "adapter": {
+        "cfg(target_arch = \"x86_64\")": {
+          "rustflags": [
+            "-C",
+            "llvm-args=-align-loops=64",
+            "-C",
+            "llvm-args=-max-bytes-for-alignment=63"
+          ]
+        },
+        "wasm32-unknown-unknown": {
+          "rustflags": [
+            "-C",
+            "target-feature=+simd128"
+          ]
+        },
+        "wasm32-wasip1": {
+          "rustflags": [
+            "-C",
+            "target-feature=+simd128"
+          ]
+        },
+        "wasm32-wasip1-threads": {
+          "rustflags": [
+            "-C",
+            "target-feature=+simd128"
+          ]
+        }
+      },
+      "engine": {
+        "cfg(target_arch = \"x86_64\")": {
+          "rustflags": [
+            "-C",
+            "llvm-args=-align-loops=64",
+            "-C",
+            "llvm-args=-max-bytes-for-alignment=63"
+          ]
+        },
+        "wasm32-unknown-unknown": {
+          "rustflags": [
+            "-C",
+            "target-feature=+simd128"
+          ]
+        },
+        "wasm32-wasip1": {
+          "rustflags": [
+            "-C",
+            "target-feature=+simd128"
+          ]
+        },
+        "wasm32-wasip1-threads": {
+          "rustflags": [
+            "-C",
+            "target-feature=+simd128"
+          ]
+        }
+      }
+    }
+  },
+  "failures": [],
+  "identical": true
+}

@@ -5,7 +5,9 @@ use clap::Args;
 use std::io::Write;
 use std::path::PathBuf;
 
+use crate::blastinput::query_batch::query_batches;
 use crate::blastinput::value_parsers::*;
+use crate::report::query_warnings::invalid_query_warning;
 use crate::utils::genetic_code::GeneticCode;
 
 use super::scoring::{matrix_params, suggested_threshold, suggested_window_size};
@@ -14,6 +16,7 @@ use super::stage_d_pipeline::{
 };
 use super::stage_d_stats::LocalSubjectParameters;
 use super::stage_e_report::render;
+use crate::api::local_blast::{OutputSink, ReportOutputs};
 use crate::config::ScoringMatrix;
 
 // NCBI reference: c++/src/algo/blast/blastinput/tblastn_args.cpp:45-125
@@ -374,17 +377,14 @@ impl TblastnArgs {
         Ok(())
     }
 
-    // NCBI c++/src/app/blast/tblastn_app.cpp:288-301:
-    // results = lcl_blast.Run();
-    // formatter.PrintOneResultSet(**result, query);
-    // NCBI c++/src/algo/blast/format/blast_format.cpp:1411-1458:
-    // PrintOneResultSet dispatches the complete result to outfmt 0/6/7.
-    pub fn run(self) -> Result<()> {
+    // NCBI c++/src/algo/blast/blastinput/blast_args.cpp:838-866;
+    // core/blast_traceback.c:1481-1501:
+    // compo_mode selects ordinary traceback or composition redo.
+    // The Stage D port covers only these two choices.
+    /// Checks every option that does not need the inputs, and returns the search
+    /// settings they select.
+    fn search_settings(&self) -> Result<SearchSettings> {
         self.validate()?;
-        // NCBI c++/src/algo/blast/blastinput/blast_args.cpp:838-866;
-        // core/blast_traceback.c:1481-1501:
-        // compo_mode selects ordinary traceback or composition redo.
-        // The Stage D port covers only these two choices.
         let composition_mode2 = match self.comp_based_stats.chars().next() {
             Some('0' | 'F' | 'f') => false,
             Some('2') => true,
@@ -432,6 +432,30 @@ impl TblastnArgs {
         if !profile_supported {
             bail!("unsupported TBLASTN scoring and lookup option combination");
         }
+        Ok(SearchSettings {
+            composition_mode2,
+            scoring: LocalStageDScoring {
+                matrix,
+                gap_open,
+                gap_extend,
+                word_size: self.word_size,
+                threshold: threshold as i32,
+                window: i32::try_from(window)?,
+                gap_xdrop_bits: self.xdrop_gap.unwrap_or(15.0),
+                final_xdrop_bits: self.xdrop_gap_final.unwrap_or(25.0),
+            },
+        })
+    }
+
+    // NCBI c++/src/app/blast/tblastn_app.cpp:288-301:
+    // results = lcl_blast.Run();
+    // formatter.PrintOneResultSet(**result, query);
+    // NCBI c++/src/algo/blast/format/blast_format.cpp:1411-1458:
+    // PrintOneResultSet dispatches the complete result to outfmt 0/6/7.
+    pub fn run(self) -> Result<()> {
+        // The options are checked before the inputs are read, as before; `run_local`
+        // repeats the check, which is idempotent.
+        self.search_settings()?;
         let query_path = self.query.as_ref().context("TBLASTN query file missing")?;
         let subject_path = self
             .subject
@@ -448,116 +472,20 @@ impl TblastnArgs {
         };
         let queries = read(query_path)?;
         let subjects = read(subject_path)?;
-        let query_seqs: Vec<_> = queries.iter().map(|record| record.seq().to_vec()).collect();
-        let subject_seqs: Vec<_> = subjects
-            .iter()
-            .map(|record| record.seq().to_vec())
-            .collect();
-        let seg = self.seg.params();
-        // NCBI c++/src/algo/blast/api/prelim_stage.cpp:172-188:
-        // (*thread)->Run(); (*thread)->Join(&result);
-        // NCBI c++/src/algo/blast/format/blast_format.cpp:1411-1417:
-        // CBlastFormat::PrintOneResultSet(const blast::CSearchResults& results,
-        //                         CConstRef<blast::CBlastQueryVector> queries,
-        // NCBI c++/src/app/blast/tblastn_app.cpp:251-252,275-301:
-        // input.Reset(new CBlastInput(&*fasta, GetQueryBatchSize()));
-        // for (; !input->End(); ...) {
-        //     query = input->GetNextSeqBatch(*scope);
-        //     CLocalBlast lcl_blast(query_factory, ..., db_adapter);
-        //     results = lcl_blast.Run();
-        // }
-        // NCBI c++/src/algo/blast/blastinput/blast_input_aux.cpp:70-127:
-        // case eTblastn: retval = 20000;
-        // Search each accumulated batch independently; preliminary linking
-        // and sum-statistics depend on its concatenated query contexts.
-        let mut results = Vec::with_capacity(queries.len());
-        let mut lengths: Option<LocalSubjectParameters> = None;
-        let mut ungapped_karlin = Vec::with_capacity(queries.len());
-        let mut query_validity = Vec::with_capacity(queries.len());
-        let mut query_batch_skipped = Vec::with_capacity(queries.len());
-        for range in tblastn_query_batches(&query_seqs) {
-            let (mut batch_results, batch_lengths, batch_karlin, batch_validity) =
-                run_local_for_report_threads(
-                    &query_seqs[range],
-                    &subject_seqs,
-                    LocalStageDProfile {
-                        seg: seg.as_ref(),
-                        soft_masking: self.soft_masking,
-                        mask_lowercase: self.lcase_masking,
-                        genetic_code: self.db_gencode,
-                        expect_value: self.evalue,
-                        max_target_seqs: self.max_target_seqs,
-                    },
-                    composition_mode2,
-                    self.sum_stats,
-                    LocalStageDScoring {
-                        matrix,
-                        gap_open,
-                        gap_extend,
-                        word_size: self.word_size,
-                        threshold: threshold as i32,
-                        window: i32::try_from(window)?,
-                        gap_xdrop_bits: self.xdrop_gap.unwrap_or(15.0),
-                        final_xdrop_bits: self.xdrop_gap_final.unwrap_or(25.0),
-                    },
-                    self.num_threads,
-                )?;
-            results.append(&mut batch_results);
-            if let Some(all_lengths) = &mut lengths {
-                // NCBI tblastn_app.cpp:288-301 formats each batch's own
-                // query-context lengths; retain those values in input order.
-                all_lengths.lengths.extend(batch_lengths.lengths);
-                all_lengths.cutoffs.extend(batch_lengths.cutoffs);
-            } else {
-                lengths = Some(batch_lengths);
-            }
-            ungapped_karlin.extend(batch_karlin);
-            // NCBI c++/src/algo/blast/api/local_blast.cpp:177-224:
-            // if (CheckInternalData() != 0) each result in this Run() batch
-            // receives an unsearched ancillary state and null align set.
-            let skipped = batch_validity.iter().all(|&valid| !valid);
-            query_batch_skipped.extend(std::iter::repeat(skipped).take(batch_validity.len()));
-            query_validity.extend(batch_validity);
-        }
-        let lengths = lengths.context("TBLASTN query file is empty")?;
         // NCBI c++/src/algo/blast/format/blast_format.cpp:1411-1458:
         // formatter.PrintOneResultSet(...) writes only after a valid result.
         // Buffer the complete report so an error cannot leave partial success output.
         let mut bytes = Vec::new();
-        render(
-            &mut bytes,
-            &self.outfmt,
+        let outfmt = self.outfmt.clone();
+        let out = self.out.clone();
+        let mut stderr = std::io::stderr();
+        run_local(
+            self,
             &queries,
             &subjects,
-            subject_path,
-            &mut results,
-            &lengths,
-            &ungapped_karlin,
-            &query_validity,
-            &query_batch_skipped,
-            LocalStageDScoring {
-                matrix,
-                gap_open,
-                gap_extend,
-                word_size: self.word_size,
-                threshold: threshold as i32,
-                window: i32::try_from(window)?,
-                gap_xdrop_bits: self.xdrop_gap.unwrap_or(15.0),
-                final_xdrop_bits: self.xdrop_gap_final.unwrap_or(25.0),
-            },
-            self.db_gencode,
-            seg.as_ref(),
-            self.lcase_masking,
+            &mut ReportOutputs::single(&outfmt, OutputSink::Writer(&mut bytes), &mut stderr),
         )?;
-        // NCBI c++/src/algo/blast/format/blast_format.cpp:1443-1451:
-        // if (results.HasWarnings()) ERR_POST(Warning << results.GetWarningStrings());
-        // Print one setup warning per invalid query in formatter query order.
-        for (index, (query, valid)) in queries.iter().zip(&query_validity).enumerate() {
-            if !valid {
-                std::io::stderr().write_all(&ncbi_invalid_query_warning(index, query))?;
-            }
-        }
-        if let Some(path) = &self.out {
+        if let Some(path) = &out {
             std::fs::write(path, bytes)
                 .with_context(|| format!("failed to write {}", path.display()))?;
         } else {
@@ -567,85 +495,165 @@ impl TblastnArgs {
     }
 }
 
-// NCBI c++/src/algo/blast/blastinput/blast_input_aux.cpp:105-127:
-// case eTblastn: retval = 20000;
-// NCBI c++/src/algo/blast/blastinput/blast_input.cpp:135-166:
-// while (size_read < GetBatchSize()) { size_read += sequence::GetLength(...);
-//                                 retval->AddQuery(q); }
-// The query that reaches the threshold remains in the current batch.
-fn tblastn_query_batches(queries: &[Vec<u8>]) -> Vec<std::ops::Range<usize>> {
-    let mut batches = Vec::new();
-    let mut start = 0;
-    while start < queries.len() {
-        let mut end = start;
-        let mut residues = 0usize;
-        while end < queries.len() && residues < 20_000 {
-            residues += queries[end].len();
-            end += 1;
-        }
-        batches.push(start..end);
-        start = end;
-    }
-    batches
+// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:879
+// ```c++
+// opt.SetCompositionBasedStats(compo_mode);
+// ```
+// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:262-263
+// ```c++
+// if (args.Exist(kArgGapOpen) && args[kArgGapOpen]) {
+//     opt.SetGapOpeningCost(args[kArgGapOpen].AsInteger());
+// ```
+// The options handle keeps the composition mode and the scoring choices that the
+// search reads; these are the ones the Stage D port uses.
+/// The search settings that the options select.
+struct SearchSettings {
+    composition_mode2: bool,
+    scoring: LocalStageDScoring,
 }
 
-// NCBI c++/src/algo/blast/core/blast_stat.c:2780-2792:
-// if (loop_status && !Blast_QueryIsTranslated(program))
-//     Blast_MessageWrite(..., eBlastSevWarning, context,
-//                        kBlastErrMsg_CantCalculateUngappedKAParams);
-// NCBI c++/src/algo/blast/core/blast_message.c:37-40:
-// kBlastErrMsg_CantCalculateUngappedKAParams = "Could not calculate ...".
-// NCBI c++/src/algo/blast/api/blast_setup_cxx.cpp:535-543:
-// query_id = id->GetSeqIdString() + " " + kTitle;
-// if (query_id.size() > 35) query_id = query_id.substr(0, 25) + ".. ";
-// NCBI c++/src/algo/blast/api/blast_results.cpp:277-293:
-// retval = m_Errors.GetQueryId() + ": " + warning + " ";
-fn ncbi_invalid_query_warning(index: usize, query: &fasta::Record) -> Vec<u8> {
-    let mut query_id = format!("Query_{} {}", index + 1, query.id()).into_bytes();
-    if let Some(desc) = query.desc() {
-        query_id.extend_from_slice(b" ");
-        query_id.extend_from_slice(desc.as_bytes());
+// NCBI c++/src/app/blast/tblastn_app.cpp:288-301:
+// results = lcl_blast.Run();
+// formatter.PrintOneResultSet(**result, query);
+// NCBI c++/src/app/blast/blast_formatter.cpp:429-467:
+// CRef<CSearchResultSet> results = m_RmtBlast->GetResultSet();
+// formatter.PrintProlog();
+// ...
+// ITERATE(CSearchResultSet, result, *results) {
+//     ...
+//         formatter.PrintOneResultSet(**result, queries);
+//     ...
+// }
+// NCBI formats one result set without searching again; several requested formats
+// are several CBlastFormat printers over the same result set.
+/// Runs one TBLASTN search over already parsed records and writes every requested
+/// output format from the same result (the shared entry of the CLI and web ABI v2).
+///
+/// Each requested `-outfmt` is validated as on the command line. No TBLASTN search
+/// option depends on the output format. The `-query` and `-subject` values of `args`
+/// are used only as display names.
+pub fn run_local(
+    args: TblastnArgs,
+    query_records: &[fasta::Record],
+    subject_records: &[fasta::Record],
+    outputs: &mut ReportOutputs<'_>,
+) -> Result<()> {
+    // NCBI c++/src/algo/blast/blastinput/blast_args.cpp:2657-2660:
+    // arg_desc.AddDefaultKey(kArgOutputFormat, "format",
+    //                        kOutputFormatDescription,
+    //                        CArgDescriptions::eString,
+    //                        NStr::IntToString(dft_outfmt));
+    for format in &outputs.formats {
+        tblastn_outfmt(format.outfmt).map_err(anyhow::Error::msg)?;
     }
-    if query_id.len() > 35 {
-        query_id.truncate(25);
-        query_id.extend_from_slice(b".. ");
+    let SearchSettings {
+        composition_mode2,
+        scoring,
+    } = args.search_settings()?;
+    let subject_path = args
+        .subject
+        .as_ref()
+        .context("TBLASTN subject file missing")?;
+    let queries = query_records;
+    let subjects = subject_records;
+    let query_seqs: Vec<_> = queries.iter().map(|record| record.seq().to_vec()).collect();
+    let subject_seqs: Vec<_> = subjects
+        .iter()
+        .map(|record| record.seq().to_vec())
+        .collect();
+    let seg = args.seg.params();
+    // NCBI c++/src/algo/blast/api/prelim_stage.cpp:172-188:
+    // (*thread)->Run(); (*thread)->Join(&result);
+    // NCBI c++/src/algo/blast/format/blast_format.cpp:1411-1417:
+    // CBlastFormat::PrintOneResultSet(const blast::CSearchResults& results,
+    //                         CConstRef<blast::CBlastQueryVector> queries,
+    // NCBI c++/src/app/blast/tblastn_app.cpp:251-252,275-301:
+    // input.Reset(new CBlastInput(&*fasta, GetQueryBatchSize()));
+    // for (; !input->End(); ...) {
+    //     query = input->GetNextSeqBatch(*scope);
+    //     CLocalBlast lcl_blast(query_factory, ..., db_adapter);
+    //     results = lcl_blast.Run();
+    // }
+    // NCBI c++/src/algo/blast/blastinput/blast_input_aux.cpp:70-127:
+    // case eTblastn: retval = 20000;
+    // Search each accumulated batch independently; preliminary linking
+    // and sum-statistics depend on its concatenated query contexts.
+    let mut results = Vec::with_capacity(queries.len());
+    let mut lengths: Option<LocalSubjectParameters> = None;
+    let mut ungapped_karlin = Vec::with_capacity(queries.len());
+    let mut query_validity = Vec::with_capacity(queries.len());
+    let mut query_batch_skipped = Vec::with_capacity(queries.len());
+    let query_lengths: Vec<usize> = query_seqs.iter().map(Vec::len).collect();
+    for range in query_batches(&query_lengths, 20_000) {
+        let (mut batch_results, batch_lengths, batch_karlin, batch_validity) =
+            run_local_for_report_threads(
+                &query_seqs[range],
+                &subject_seqs,
+                LocalStageDProfile {
+                    seg: seg.as_ref(),
+                    soft_masking: args.soft_masking,
+                    mask_lowercase: args.lcase_masking,
+                    genetic_code: args.db_gencode,
+                    expect_value: args.evalue,
+                    max_target_seqs: args.max_target_seqs,
+                },
+                composition_mode2,
+                args.sum_stats,
+                scoring,
+                args.num_threads,
+            )?;
+        results.append(&mut batch_results);
+        if let Some(all_lengths) = &mut lengths {
+            // NCBI tblastn_app.cpp:288-301 formats each batch's own
+            // query-context lengths; retain those values in input order.
+            all_lengths.lengths.extend(batch_lengths.lengths);
+            all_lengths.cutoffs.extend(batch_lengths.cutoffs);
+        } else {
+            lengths = Some(batch_lengths);
+        }
+        ungapped_karlin.extend(batch_karlin);
+        // NCBI c++/src/algo/blast/api/local_blast.cpp:177-224:
+        // if (CheckInternalData() != 0) each result in this Run() batch
+        // receives an unsearched ancillary state and null align set.
+        let skipped = batch_validity.iter().all(|&valid| !valid);
+        query_batch_skipped.extend(std::iter::repeat(skipped).take(batch_validity.len()));
+        query_validity.extend(batch_validity);
     }
-    let mut warning = b"Warning: [tblastn] ".to_vec();
-    warning.extend_from_slice(&query_id);
-    warning.extend_from_slice(b": Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options \n");
-    warning
+    let lengths = lengths.context("TBLASTN query file is empty")?;
+    render(
+        outputs,
+        queries,
+        subjects,
+        subject_path,
+        &mut results,
+        &lengths,
+        &ungapped_karlin,
+        &query_validity,
+        &query_batch_skipped,
+        scoring,
+        args.db_gencode,
+        seg.as_ref(),
+        args.lcase_masking,
+    )?;
+    // NCBI c++/src/algo/blast/format/blast_format.cpp:1443-1451:
+    // if (results.HasWarnings()) ERR_POST(Warning << results.GetWarningStrings());
+    // Print one setup warning per invalid query in formatter query order.
+    // The warnings belong to the result, so they are written once for every format.
+    for (index, (query, valid)) in queries.iter().zip(&query_validity).enumerate() {
+        if !valid {
+            outputs
+                .diagnostics
+                .write_all(&invalid_query_warning("tblastn", index, query))?;
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    // NCBI c++/src/algo/blast/blastinput/blast_input.cpp:137-165:
-    // while (size_read < GetBatchSize()) { ... size_read += length;
-    //                                  retval->AddQuery(q); }
-    #[test]
-    fn tblastn_batch_keeps_threshold_crossing_query() {
-        let queries = vec![vec![b'A'; 19_999], vec![b'A'; 2], vec![b'A'; 1]];
-        assert_eq!(tblastn_query_batches(&queries), vec![0..2, 2..3]);
-    }
     use crate::cli::{try_parse_from, Cli, Commands};
-
-    // NCBI c++/src/algo/blast/api/blast_setup_cxx.cpp:535-543;
-    // c++/src/algo/blast/api/blast_results.cpp:277-293:
-    // Query_1 + FASTA title is shortened after 35 bytes, then the
-    // invalid-Karlin warning retains NCBI's trailing space and newline.
-    #[test]
-    fn invalid_query_warning_matches_ncbi_bytes() {
-        let short = fasta::Record::with_attrs("nohit_query", None, b"W");
-        assert_eq!(
-            ncbi_invalid_query_warning(0, &short),
-            b"Warning: [tblastn] Query_1 nohit_query: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options \n"
-        );
-        let long =
-            fasta::Record::with_attrs("long_header", Some("abcdefghijklmnopqrstuvwxyz"), b"W");
-        assert!(ncbi_invalid_query_warning(1, &long)
-            .starts_with(b"Warning: [tblastn] Query_2 long_header abcde.. : "));
-    }
 
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:1938-1942
     // arg_desc.AddFlag(kArgUseLCaseMasking,

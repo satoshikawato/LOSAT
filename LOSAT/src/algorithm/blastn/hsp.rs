@@ -1,9 +1,9 @@
 use std::cmp::Ordering;
-use std::fs::File;
-use std::io::{self, BufWriter, Write};
-use std::path::PathBuf;
+use std::io::{self, Write};
 use std::sync::Arc;
 
+use crate::api::local_blast::{FormatProbe, HspIndex};
+use crate::cli::NativeError;
 use crate::common::{GapEditOp, Hit};
 use crate::report::{write_hit_fields, OutputConfig};
 
@@ -16,33 +16,149 @@ use super::tracing as blastn_trace;
 //     CBlastTabularInfo tabinfo(m_Outfile, m_CustomOutputFormatSpec, kDelim);
 // }
 // ```
+// NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:1410-1414
+// ```c
+// void
+// CBlastFormat::PrintOneResultSet(const blast::CSearchResults& results,
+//                         CConstRef<blast::CBlastQueryVector> queries,
+//                         unsigned int itr_num
+// ```
+// The pairwise report (outfmt 0) is the non-tabular branch of the same formatter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BlastnOutputFormat {
+    Pairwise,
     Tabular,
     TabularWithComments,
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2120-2145
-// ```c
-// const string& format = args[kArgOutfmt].AsString();
-// m_FormatType = CFormattingArgs::GetFormatType(format);
-// ```
-pub fn parse_blastn_output_format(spec: &str) -> Result<BlastnOutputFormat, String> {
-    let mut parts = spec.split_whitespace();
-    let format = parts.next().unwrap_or("6");
-    if parts.next().is_some() {
-        return Err(format!(
-            "unsupported BLASTN custom outfmt specification: {spec:?}"
-        ));
+/// The output format of a `-outfmt` value, as NCBI parses it: white space around the
+/// value is removed, the format number ends at the first space, and the rest (a custom
+/// specification) counts only for the tabular formats, where LOSAT does not support it.
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2801-2809
+/// ```c
+///     if (args[kArgOutputFormat]) {
+///         string fmt_choice =
+///             NStr::TruncateSpaces(args[kArgOutputFormat].AsString());
+///         string::size_type pos;
+///         if ( (pos = fmt_choice.find_first_of(' ')) != string::npos) {
+///             custom_fmt_spec.assign(fmt_choice, pos+1,
+///                                    fmt_choice.size()-(pos+1));
+///             fmt_choice.erase(pos);
+///         }
+/// ```
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2828-2851
+/// ```c
+///         int val = 0;
+///         try { val = NStr::StringToInt(fmt_choice); }
+///         catch (const CStringException&) {   // probably a conversion error
+///             CNcbiOstrstream os;
+///             os << "'" << fmt_choice << "' is not a valid output format";
+/// ...
+///         fmt_type = static_cast<EOutputFormat>(val);
+///         if ( !(fmt_type == eTabular ||
+///                fmt_type == eTabularWithComments ||
+///                fmt_type == eCommaSeparatedValues ||
+///                fmt_type == eCommaSeparatedValuesWithHeader ||
+///                fmt_type == eSAM) ) {
+///                custom_fmt_spec.clear();
+///         }
+/// ```
+/// NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.hpp:260-263
+/// ```c
+///     catch (const std::exception& e) {                                       \
+///         LOG_POST(Error << "Error: " << e.what());                           \
+///         exit_code = BLAST_UNKNOWN_ERROR;                                    \
+///     }                                                                       \
+/// ```
+/// `NStr::TruncateSpaces` removes the characters of C's `isspace`, and `NStr::StringToInt`
+/// reads what `i32::from_str` reads. NCBI's errors are its messages and exit statuses; the
+/// formats and specifications that NCBI supports and LOSAT does not are rejected with
+/// LOSAT's message.
+pub fn parse_blastn_output_format(spec: &str) -> anyhow::Result<BlastnOutputFormat> {
+    let is_space = |c: char| matches!(c, ' ' | '\t' | '\n' | '\x0b' | '\x0c' | '\r');
+    let choice = spec.trim_matches(is_space);
+    let (choice, custom) = choice.split_once(' ').unwrap_or((choice, ""));
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2810-2825
+    // ```c
+    //         if(!custom_fmt_spec.empty()) {
+    //             if(NStr::StartsWith(custom_fmt_spec, "delim")) {
+    //                 vector <string> tokens;
+    //                 NStr::Split(custom_fmt_spec," ",tokens);
+    //                 if(tokens.size() > 0) {
+    //                     string tag;
+    //                     bool isValid = NStr::SplitInTwo(tokens[0],"=",tag,custom_delim);
+    //                     if(!isValid) {
+    //                         string msg("Delimiter format is invalid. Valid format is delim=<delimiter value>");
+    //                         NCBI_THROW(CInputException, eInvalidInput, msg);
+    //                     }
+    //                     else {
+    //                         custom_fmt_spec = NStr::Replace(custom_fmt_spec,tokens[0],"");
+    //                         custom_fmt_spec = NStr::TruncateSpaces(custom_fmt_spec);
+    //                     }
+    // ```
+    // The delimiter is checked before the format number; an empty one is the default.
+    let mut custom = custom.to_string();
+    let mut custom_delimiter = false;
+    if custom.starts_with("delim") {
+        let token = custom.split(' ').next().unwrap_or_default().to_string();
+        let Some((_, value)) = token.split_once('=') else {
+            return Err(NativeError {
+                exit: 1,
+                message: "BLAST query/options error: Delimiter format is invalid. Valid format is delim=<delimiter value>\nPlease refer to the BLAST+ user manual.\n".to_string(),
+            }
+            .into());
+        };
+        custom_delimiter = !value.is_empty();
+        custom = custom
+            .replace(&token, "")
+            .trim_matches(is_space)
+            .to_string();
     }
-    match format {
-        "6" => Ok(BlastnOutputFormat::Tabular),
-        "7" => Ok(BlastnOutputFormat::TabularWithComments),
-        _ => Err(format!("unsupported BLASTN output format: {format}")),
+    let Ok(format) = choice.parse::<i32>() else {
+        return Err(NativeError {
+            exit: 1,
+            message: format!(
+                "BLAST query/options error: '{choice}' is not a valid output format\nPlease refer to the BLAST+ user manual.\n"
+            ),
+        }
+        .into());
+    };
+    if !(0..NCBI_OUTPUT_FORMAT_END).contains(&format) {
+        return Err(NativeError {
+            exit: 255,
+            message: "Error: Formatting choice is out of range\n".to_string(),
+        }
+        .into());
     }
+    let format = match format {
+        0 => BlastnOutputFormat::Pairwise,
+        6 => BlastnOutputFormat::Tabular,
+        7 => BlastnOutputFormat::TabularWithComments,
+        _ => anyhow::bail!("output format {format} is not supported by LOSAT's BLASTN"),
+    };
+    // The specification and the delimiter count only for the tabular formats.
+    if format != BlastnOutputFormat::Pairwise && (!custom.is_empty() || custom_delimiter) {
+        anyhow::bail!(
+            "the custom output format specification {spec:?} (fields or a delimiter) is not supported by LOSAT's BLASTN"
+        );
+    }
+    Ok(format)
 }
 
-const NCBI_BLASTN_VERSION: &str = "2.17.0+";
+/// NCBI reference: ncbi-blast/c++/include/algo/blast/blastinput/blast_args.hpp:1067-1072
+/// ```c
+///         eCommaSeparatedValuesWithHeader,
+///
+///         /// unaligned reads in magicblast
+///         eFasta,
+///         /// Sentinel value for error checking
+///         eEndValue
+/// ```
+/// `eEndValue` is 22 (`ePairwise` is 0, `eFasta` 21).
+const NCBI_OUTPUT_FORMAT_END: i32 = 22;
+
+pub(crate) const NCBI_BLASTN_VERSION: &str = "2.17.0+";
 
 // NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1264-1284
 // ```c
@@ -54,15 +170,24 @@ const NCBI_BLASTN_VERSION: &str = "2.17.0+";
 //     m_Ostream << "# " << num_hits << " hits found" << "\n";
 // }
 // ```
+// NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:762
+// ```c
+//     CConstRef<CSeq_align_set> aln_set = results.GetSeqAlign();
+// ```
+// A query of a batch that NCBI did not search has no alignment set (`num_hits` is
+// `None`), so its header has no count (local_blast.cpp:177-207).
 fn write_blastn_outfmt7_header<W: Write>(
     writer: &mut W,
     query_title: &str,
     subject_title: &str,
-    num_hits: usize,
+    num_hits: Option<usize>,
 ) -> io::Result<()> {
     writeln!(writer, "# BLASTN {NCBI_BLASTN_VERSION}")?;
     writeln!(writer, "# Query: {query_title}")?;
     writeln!(writer, "# Database: {subject_title}")?;
+    let Some(num_hits) = num_hits else {
+        return Ok(());
+    };
     if num_hits > 0 {
         writeln!(
             writer,
@@ -332,29 +457,35 @@ impl BlastnHsp {
 //     return prelim_hitlist_size;
 // }
 // ```
+/// NCBI computes the size in `Int4` (blast_hits.c:44-46), whose sums the compiled NCBI
+/// wraps: a hit list size from 2^30 to 2^31 - 51 gives 10 with gapped search, and a larger
+/// one a negative size, with which NCBI crashes (LOSAT rejects it before the search,
+/// `scoring.rs` `check_losat_limits`).
 pub fn get_prelim_hitlist_size(
     hitlist_size: usize,
     composition_based_stats: bool,
     gapped_calculation: bool,
-) -> usize {
+) -> i32 {
+    // The argument is an `int` (`CArg_Integer`); the default is 500.
+    let hitlist_size = i32::try_from(hitlist_size).unwrap_or(i32::MAX);
     let mut prelim_hitlist_size = hitlist_size;
     let adaptive_cbs = std::env::var_os("ADAPTIVE_CBS").is_some();
     if composition_based_stats {
         if adaptive_cbs {
             if hitlist_size < 1000 {
-                prelim_hitlist_size = std::cmp::max(prelim_hitlist_size + 1000, 1500);
+                prelim_hitlist_size = std::cmp::max(prelim_hitlist_size.wrapping_add(1000), 1500);
             } else {
-                prelim_hitlist_size = prelim_hitlist_size.saturating_mul(2).saturating_add(50);
+                prelim_hitlist_size = prelim_hitlist_size.wrapping_mul(2).wrapping_add(50);
             }
         } else if hitlist_size <= 500 {
             prelim_hitlist_size = 1050;
         } else {
-            prelim_hitlist_size = prelim_hitlist_size.saturating_mul(2).saturating_add(50);
+            prelim_hitlist_size = prelim_hitlist_size.wrapping_mul(2).wrapping_add(50);
         }
     } else if gapped_calculation {
         prelim_hitlist_size = std::cmp::min(
-            std::cmp::max(prelim_hitlist_size.saturating_mul(2), 10),
-            prelim_hitlist_size.saturating_add(50),
+            std::cmp::max(prelim_hitlist_size.wrapping_mul(2), 10),
+            prelim_hitlist_size.wrapping_add(50),
         );
     }
     prelim_hitlist_size
@@ -957,56 +1088,6 @@ impl BlastnHitList {
     }
 }
 
-/// Write BLASTN output in NCBI HSP list order without regrouping.
-///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1330-1353
-/// ```c
-/// int ScoreCompareHSPs(const void* h1, const void* h2) {
-///    if (0 == (result = BLAST_CMP(hsp2->score,          hsp1->score)) &&
-///        0 == (result = BLAST_CMP(hsp1->subject.offset, hsp2->subject.offset)) &&
-///        0 == (result = BLAST_CMP(hsp2->subject.end,    hsp1->subject.end)) &&
-///        0 == (result = BLAST_CMP(hsp1->query  .offset, hsp2->query  .offset))) {
-///        result = BLAST_CMP(hsp2->query.end, hsp1->query.end);
-///    }
-/// }
-/// ```
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3077-3106
-/// ```c
-/// static int s_EvalueCompareHSPLists(const void* v1, const void* v2) {
-///    if ((retval = s_EvalueComp(h1->best_evalue, h2->best_evalue)) != 0)
-///       return retval;
-///    if (h1->hsp_array[0]->score > h2->hsp_array[0]->score) return -1;
-///    if (h1->hsp_array[0]->score < h2->hsp_array[0]->score) return 1;
-///    return BLAST_CMP(h2->oid, h1->oid);
-/// }
-/// ```
-pub fn write_output_blastn_hitlists(
-    hit_lists: &[Option<BlastnHitList>],
-    out_path: Option<&PathBuf>,
-    query_ids: &[Arc<str>],
-    subject_ids: &[Arc<str>],
-    output_format: BlastnOutputFormat,
-    query_titles: &[Arc<str>],
-    subject_title: &str,
-) -> io::Result<()> {
-    let stdout = io::stdout();
-    let mut writer: Box<dyn Write> = if let Some(path) = out_path {
-        Box::new(BufWriter::new(File::create(path)?))
-    } else {
-        Box::new(BufWriter::new(stdout.lock()))
-    };
-
-    write_output_blastn_hitlists_to_writer(
-        hit_lists,
-        &mut writer,
-        query_ids,
-        subject_ids,
-        output_format,
-        query_titles,
-        subject_title,
-    )
-}
-
 /// Write BLASTN hit lists to an existing writer.
 ///
 /// NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
@@ -1021,6 +1102,7 @@ pub fn write_output_blastn_hitlists(
 ///     m_Ostream << "\n";
 /// }
 /// ```
+#[allow(clippy::too_many_arguments)]
 pub fn write_output_blastn_hitlists_to_writer<W: Write>(
     hit_lists: &[Option<BlastnHitList>],
     writer: &mut W,
@@ -1029,8 +1111,17 @@ pub fn write_output_blastn_hitlists_to_writer<W: Write>(
     output_format: BlastnOutputFormat,
     query_titles: &[Arc<str>],
     subject_title: &str,
+    unsearched: &[bool],
+    mut probe: Option<&mut FormatProbe<'_>>,
 ) -> io::Result<()> {
     let config = OutputConfig::ncbi_compat();
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:1411
+    // ```c
+    // CBlastFormat::PrintOneResultSet(const blast::CSearchResults& results,
+    // ```
+    // The rows are printed in the order of the final HSP list, so a running count is
+    // each row's HSP index.
+    let mut hsp_index: HspIndex = 0;
 
     for (q_idx, hit_list_opt) in hit_lists.iter().enumerate() {
         if output_format == BlastnOutputFormat::TabularWithComments {
@@ -1042,7 +1133,8 @@ pub fn write_output_blastn_hitlists_to_writer<W: Write>(
                 writer,
                 query_title,
                 subject_title,
-                blastn_hsp_count(hit_list_opt.as_ref()),
+                (!unsearched.get(q_idx).copied().unwrap_or(false))
+                    .then(|| blastn_hsp_count(hit_list_opt.as_ref())),
             )?;
         }
         let hit_list = match hit_list_opt {
@@ -1062,6 +1154,7 @@ pub fn write_output_blastn_hitlists_to_writer<W: Write>(
                 // NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
                 // ```c
                 // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
+                //     // Add tab in front of field, except for the first field.
                 //     if (iter != m_FieldsToShow.begin())
                 //         m_Ostream << m_FieldDelimiter;
                 //     x_PrintField(*iter);
@@ -1112,6 +1205,11 @@ pub fn write_output_blastn_hitlists_to_writer<W: Write>(
                 //     m_Ostream << "\n";
                 // }
                 // ```
+                // One printed row is one HSP; the probe marks it without changing it.
+                if let Some(probe) = probe.as_mut() {
+                    writer.flush()?;
+                    probe.begin(hsp_index);
+                }
                 write_hit_fields(
                     writer,
                     query_id,
@@ -1129,6 +1227,11 @@ pub fn write_output_blastn_hitlists_to_writer<W: Write>(
                     hsp.bit_score,
                     &config,
                 )?;
+                if let Some(probe) = probe.as_mut() {
+                    writer.flush()?;
+                    probe.end(hsp_index);
+                }
+                hsp_index += 1;
             }
         }
     }
@@ -1219,6 +1322,13 @@ mod tests {
         // }
         // ```
         assert_eq!(get_prelim_hitlist_size(1, false, true), 10);
+        // NCBI's Int4 arithmetic wraps (blast_hits.c:68).
+        assert_eq!(get_prelim_hitlist_size(1 << 30, false, true), 10);
+        assert_eq!(
+            get_prelim_hitlist_size((1 << 30) - 1, false, true),
+            (1 << 30) + 49
+        );
+        assert!(get_prelim_hitlist_size(i32::MAX as usize - 49, false, true) < 0);
         assert_eq!(get_prelim_hitlist_size(30, false, true), 60);
         assert_eq!(get_prelim_hitlist_size(1000, false, true), 1050);
     }
@@ -1294,6 +1404,8 @@ mod tests {
             BlastnOutputFormat::TabularWithComments,
             &query_titles,
             "User specified sequence set (Input: subject.fasta)",
+            &[],
+            None,
         )
         .unwrap();
 
@@ -1301,6 +1413,21 @@ mod tests {
             String::from_utf8(output).unwrap(),
             "# BLASTN 2.17.0+\n# Query: query full description\n# Database: User specified sequence set (Input: subject.fasta)\n# 0 hits found\n# BLAST processed 1 queries\n"
         );
+        // A query of a batch that NCBI did not search has no count.
+        let mut output = Vec::new();
+        write_output_blastn_hitlists_to_writer(
+            &hit_lists,
+            &mut output,
+            &query_ids,
+            &subject_ids,
+            BlastnOutputFormat::TabularWithComments,
+            &query_titles,
+            "User specified sequence set (Input: subject.fasta)",
+            &[true],
+            None,
+        )
+        .unwrap();
+        assert!(!String::from_utf8(output).unwrap().contains("hits found"));
     }
 
     #[test]
@@ -1308,5 +1435,61 @@ mod tests {
         assert!(parse_blastn_output_format("6").is_ok());
         assert!(parse_blastn_output_format("7").is_ok());
         assert!(parse_blastn_output_format("6 qaccver saccver").is_err());
+        // NCBI's parse (blast_args.cpp:2801-2851): white space is trimmed, the number is a
+        // signed decimal, and a custom specification counts only for the tabular formats.
+        for (spec, format) in [
+            (" 6\t", BlastnOutputFormat::Tabular),
+            ("+6", BlastnOutputFormat::Tabular),
+            ("07", BlastnOutputFormat::TabularWithComments),
+            ("0 qaccver", BlastnOutputFormat::Pairwise),
+        ] {
+            assert_eq!(
+                parse_blastn_output_format(spec).unwrap(),
+                format,
+                "{spec:?}"
+            );
+        }
+        let native = |spec: &str| {
+            let error = parse_blastn_output_format(spec)
+                .unwrap_err()
+                .downcast::<NativeError>()
+                .unwrap();
+            (error.exit, error.message)
+        };
+        assert_eq!(
+            native("6\u{a0}"),
+            (1, "BLAST query/options error: '6\u{a0}' is not a valid output format\nPlease refer to the BLAST+ user manual.\n".to_string())
+        );
+        assert_eq!(
+            native(" ").1.lines().next(),
+            Some("BLAST query/options error: '' is not a valid output format")
+        );
+        for spec in ["22", "-1", "99"] {
+            assert_eq!(
+                native(spec),
+                (
+                    255,
+                    "Error: Formatting choice is out of range\n".to_string()
+                )
+            );
+        }
+        // NCBI checks a delimiter before the format number (blast_args.cpp:2810-2825).
+        for spec in ["0 delim", "abc delim", "99 delimiter qaccver"] {
+            assert_eq!(native(spec).0, 1, "{spec:?}");
+            assert!(
+                native(spec).1.contains("Delimiter format is invalid"),
+                "{spec:?}"
+            );
+        }
+        for spec in ["0 delim=,", "6 delim=", "7 delim= "] {
+            assert!(parse_blastn_output_format(spec).is_ok(), "{spec:?}");
+        }
+        for spec in ["5", "21", "6 delim=,", "6 delimiter=;", "7  qaccver"] {
+            let error = parse_blastn_output_format(spec).unwrap_err().to_string();
+            assert!(
+                error.contains("not supported by LOSAT's BLASTN"),
+                "{spec:?}: {error}"
+            );
+        }
     }
 }

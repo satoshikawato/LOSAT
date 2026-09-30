@@ -314,6 +314,23 @@ LOSAT/                     # Rust crate root
 Additional scripts and datasets live at repo root: `tests/`, `losat_out/`, and
 `compare_tblastx_results.sh`.
 
+```
+web/                       # LOSAT Web (browser application)
+├── AGENTS.md              # Rules for code under web/
+├── adapter/               # Rust crate: Wasm ABI v2 over the LOSAT library (added in session S05)
+└── app/                   # Vite + Vue 3 + TypeScript application
+```
+
+### Scope of these rules for `web/`
+
+Code under `web/` follows [`web/AGENTS.md`](web/AGENTS.md) under
+[`PD-LOSAT-WEB-APP-BOUNDARY`](docs/product_decisions/PD-LOSAT-WEB-APP-BOUNDARY.md).
+Application code there must not compute or change BLAST behavior or compatibility
+outputs; it therefore does not carry NCBI reference comments, and application features
+permitted by that decision are not "unauthorized features" under requirement 5. Every
+change under `LOSAT/`, including one made for LOSAT Web, remains subject to all the
+requirements above.
+
 ---
 
 ## Entry Points

@@ -1,0 +1,84 @@
+BLASTN 2.17.0+
+
+
+Reference: Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb
+Miller (2000), "A greedy algorithm for aligning DNA sequences", J
+Comput Biol 2000; 7(1-2):203-14.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/longdef_subject.fasta).
+           2 sequences; 800 total letters
+
+
+
+Query= longdef_q1 Synthetic query, with commas, hyphen-separated-words and
+a very-long-token
+AAAAAAAAAABBBBBBBBBBCCCCCCCCCCDDDDDDDDDDEEEEEEEEEEFFFFFFFFFFGGGGGGGG
+GG end of the description line that keeps going beyond two wrapped
+lines of sixty-eight columns
+
+Length=360
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+longdef_s1 Synthetic subject title whose words keep going past si...  665     0.0  
+
+
+> longdef_s1 Synthetic subject title whose words keep going past 
+sixty characters and then contains an unbreakable token XXXXXXXXXXYYYYYYYYYYZZZZZZZZZZXXXXXXXXXXYYYYYYYYYYZZZZZZZZZZ 
+followed 
+by more words to wrap again at the next whitespace
+Length=400
+
+ Score = 665 bits (360),  Expect = 0.0
+ Identities = 360/360 (100%), Gaps = 0/360 (0%)
+ Strand=Plus/Plus
+
+Query  1    TCGGCGCCGGATCTGTAATTCTACCAAAGCCACGGCTAGAAAGGCTAGTATGACTGGGAC  60
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  21   TCGGCGCCGGATCTGTAATTCTACCAAAGCCACGGCTAGAAAGGCTAGTATGACTGGGAC  80
+
+Query  61   AGTATCCGTGCGAACTCCAGCATGGATATTTAAAGACTAATTGATCGGGATTGGCTCATA  120
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  81   AGTATCCGTGCGAACTCCAGCATGGATATTTAAAGACTAATTGATCGGGATTGGCTCATA  140
+
+Query  121  GTCACATTGGCAACTCTATGTTCTCGGCGGACTAACTAACCTGACTTATCTTAGAAGCCT  180
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  141  GTCACATTGGCAACTCTATGTTCTCGGCGGACTAACTAACCTGACTTATCTTAGAAGCCT  200
+
+Query  181  CGTGACGGAGTGCATCTCTAGCTAATTTCCTCGACAGGCTACCAGTGTATGTGGTCGTCC  240
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  201  CGTGACGGAGTGCATCTCTAGCTAATTTCCTCGACAGGCTACCAGTGTATGTGGTCGTCC  260
+
+Query  241  CGAAACCCCAGGTATTAGCGTAGTTTTCTAAGTAATCTTGCGCTGAGTACTTACCGCTGA  300
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  261  CGAAACCCCAGGTATTAGCGTAGTTTTCTAAGTAATCTTGCGCTGAGTACTTACCGCTGA  320
+
+Query  301  TCGTCGGATTTCACGTCTATAGAGAACCGAGGCAAGCGGATGTGTCTTATCGCGTGATTC  360
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  321  TCGTCGGATTTCACGTCTATAGAGAACCGAGGCAAGCGGATGTGTCTTATCGCGTGATTC  380
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 271522
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/longdef_subject.fasta).
+    Posted date:  Unknown
+  Number of letters in database: 800
+  Number of sequences in database:  2
+
+
+
+Matrix: blastn matrix 1 -2
+Gap Penalties: Existence: 0, Extension: 2.5

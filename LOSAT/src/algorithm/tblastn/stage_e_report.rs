@@ -12,6 +12,7 @@ use super::search_seed::encode_tblastn_lookup_query;
 use super::stage_d_pipeline::LocalStageDScoring;
 use super::stage_d_results::KappaResultHitList;
 use super::stage_d_stats::LocalSubjectParameters;
+use crate::api::local_blast::{FormatProbe, HspIndex, ReportOutputs};
 use crate::common::{GapEditOp, Hit};
 use crate::config::ProteinScoringSpec;
 use crate::core::composition_adjustment::redo_alignment::EMatrixAdjustRule;
@@ -32,9 +33,16 @@ use crate::utils::seg::SegParams;
 //     x_PrintTabularReport(results, itr_num); return;
 // }
 // The formatter receives already sorted query hitlists from Stage D.
+// NCBI c++/src/app/blast/blast_formatter.cpp:429-467:
+// ITERATE(CSearchResultSet, result, *results) {
+//     ...
+//         formatter.PrintOneResultSet(**result, queries);
+//     ...
+// }
+// Each requested format prints the same final result without searching again.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn render(
-    writer: &mut impl Write,
-    outfmt: &str,
+    outputs: &mut ReportOutputs<'_>,
     query_records: &[fasta::Record],
     subject_records: &[fasta::Record],
     subject_path: &Path,
@@ -57,33 +65,66 @@ pub(super) fn render(
     for hitlist in hitlists.iter_mut() {
         hitlist.sort_hsps_for_report();
     }
-    match outfmt {
-        "6" | "7" => write_tabular(
-            writer,
-            outfmt == "7",
-            query_records,
-            subject_records,
-            subject_path,
-            hitlists,
-            query_batch_skipped,
-        ),
-        "0" => write_pairwise(
-            writer,
-            query_records,
-            subject_records,
-            subject_path,
-            hitlists,
-            parameters,
-            ungapped_karlin,
-            query_validity,
-            query_batch_skipped,
-            scoring,
-            genetic_code,
-            seg,
-            mask_lowercase,
-        ),
-        _ => bail!("unsupported TBLASTN outfmt {outfmt}"),
+    let hitlists: &[KappaResultHitList] = hitlists;
+    // NCBI c++/src/algo/blast/format/blast_format.cpp:1411:
+    // CBlastFormat::PrintOneResultSet(const blast::CSearchResults& results,
+    // The alignments are rendered once from the final result, for outfmt 0 and for
+    // the caller's hit records, in the order of the tabular rows.
+    let pairwise_hits =
+        if outputs.hits.is_some() || outputs.formats.iter().any(|format| format.outfmt == "0") {
+            Some(pairwise_hits(
+                query_records,
+                subject_records,
+                hitlists,
+                scoring,
+                genetic_code,
+                seg,
+                mask_lowercase,
+            )?)
+        } else {
+            None
+        };
+    if let (Some(hits_sink), Some(pairwise_hits)) = (outputs.hits.as_mut(), pairwise_hits.as_ref())
+    {
+        hits_sink(pairwise_hits);
     }
+    let observer = &mut outputs.observer;
+    for (format_index, format) in outputs.formats.iter_mut().enumerate() {
+        let mut probe = observer
+            .as_deref_mut()
+            .map(|observer| FormatProbe::new(observer, format_index));
+        let mut writer = format.sink.open()?;
+        match format.outfmt {
+            "6" | "7" => write_tabular(
+                &mut writer,
+                format.outfmt == "7",
+                query_records,
+                subject_records,
+                subject_path,
+                hitlists,
+                query_batch_skipped,
+                probe.as_mut(),
+            )?,
+            "0" => write_pairwise(
+                &mut writer,
+                pairwise_hits
+                    .as_deref()
+                    .expect("pairwise hits prepared for TBLASTN outfmt 0"),
+                query_records,
+                subject_records,
+                subject_path,
+                parameters,
+                ungapped_karlin,
+                query_validity,
+                query_batch_skipped,
+                scoring,
+                probe.as_mut(),
+            )?,
+            outfmt => bail!("unsupported TBLASTN outfmt {outfmt}"),
+        }
+        writer.flush()?;
+    }
+    Ok(())
 }
 
 // NCBI c++/src/objtools/align_format/tabular.cpp:1266-1338:
@@ -91,6 +132,7 @@ pub(super) fn render(
 // if (align_set) { if (num_hits != 0) PrintFieldNames(...);
 //                 m_Ostream << "# " << num_hits << " hits found\n"; }
 // CBlastTabularInfo::PrintNumProcessed appends the final query count.
+#[allow(clippy::too_many_arguments)]
 fn write_tabular(
     writer: &mut impl Write,
     comments: bool,
@@ -99,6 +141,7 @@ fn write_tabular(
     subject_path: &Path,
     hitlists: &[KappaResultHitList],
     query_batch_skipped: &[bool],
+    mut probe: Option<&mut FormatProbe<'_>>,
 ) -> Result<()> {
     // NCBI c++/src/algo/blast/api/local_blast.cpp:177-224:
     // a skipped batch has a null align set for each query it contains.
@@ -106,6 +149,9 @@ fn write_tabular(
         query_batch_skipped.len() == query_records.len(),
         "TBLASTN batch validity count mismatch"
     );
+    // The rows are printed in the order of the final HSP list, so a running count is
+    // each row's HSP index.
+    let mut hsp_index: HspIndex = 0;
     for ((query, hitlist), &search_skipped) in
         query_records.iter().zip(hitlists).zip(query_batch_skipped)
     {
@@ -174,6 +220,19 @@ fn write_tabular(
                     format_percent_identity_ncbi(payload.report_num_ident, payload.align_length, 3);
                 let bits = format_bitscore_ncbi(payload.bit_score);
                 let evalue = format_evalue_ncbi_tabular(linked.evalue);
+                // NCBI c++/src/objtools/align_format/tabular.cpp:1100-1108:
+                // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
+                //     // Add tab in front of field, except for the first field.
+                //     if (iter != m_FieldsToShow.begin())
+                //         m_Ostream << m_FieldDelimiter;
+                //     x_PrintField(*iter);
+                // }
+                // m_Ostream << "\n";
+                // One printed row is one HSP; the probe marks it without changing it.
+                if let Some(probe) = probe.as_mut() {
+                    writer.flush()?;
+                    probe.begin(hsp_index);
+                }
                 writeln!(
                     writer,
                     "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
@@ -193,6 +252,11 @@ fn write_tabular(
                     // kBitScoreFormat is "%4.1lf", retaining width for scores below ten.
                     bits,
                 )?;
+                if let Some(probe) = probe.as_mut() {
+                    writer.flush()?;
+                    probe.end(hsp_index);
+                }
+                hsp_index += 1;
             }
         }
     }
@@ -208,11 +272,19 @@ mod tests {
     use crate::algorithm::tblastn::stage_d_pipeline::{
         run_local_for_report, LocalStageDProfile, LocalStageDScoring,
     };
+    use crate::api::local_blast::{FormatOutput, OutputSink};
     use crate::utils::seg::SegParams;
 
     // NCBI c++/src/app/blast/tblastn_app.cpp:288-301:
     // results = lcl_blast.Run(); formatter.PrintOneResultSet(**result, query);
     // Compare complete saved formatter bytes after the Stage D local search.
+    // NCBI c++/src/app/blast/blast_formatter.cpp:429-467:
+    // ITERATE(CSearchResultSet, result, *results) {
+    //     ...
+    //         formatter.PrintOneResultSet(**result, queries);
+    //     ...
+    // }
+    // All three formats are printed from one result.
     #[test]
     fn initial_tabular_oracle_bytes() {
         let query_path = Path::new(concat!(
@@ -257,33 +329,48 @@ mod tests {
                 LocalStageDScoring::default(),
             )
             .unwrap();
-            for fmt in ["0", "6", "7"] {
-                let mut actual = Vec::new();
-                render(
-                    &mut actual,
-                    fmt,
-                    &queries,
-                    &subjects,
-                    subject_path,
-                    &mut results,
-                    &parameters,
-                    &ungapped_karlin,
-                    &query_validity,
-                    &vec![false; queries.len()],
-                    LocalStageDScoring::default(),
-                    1,
-                    Some(&seg),
-                    false,
-                )
-                .unwrap();
+            const FORMATS: [&str; 3] = ["0", "6", "7"];
+            let mut outputs_bytes = vec![Vec::new(); FORMATS.len()];
+            let mut diagnostics = Vec::new();
+            let mut outputs = ReportOutputs {
+                formats: FORMATS
+                    .iter()
+                    .zip(outputs_bytes.iter_mut())
+                    .map(|(outfmt, bytes)| FormatOutput {
+                        outfmt,
+                        sink: OutputSink::Writer(bytes),
+                    })
+                    .collect(),
+                diagnostics: &mut diagnostics,
+                hits: None,
+                observer: None,
+            };
+            render(
+                &mut outputs,
+                &queries,
+                &subjects,
+                subject_path,
+                &mut results,
+                &parameters,
+                &ungapped_karlin,
+                &query_validity,
+                &vec![false; queries.len()],
+                LocalStageDScoring::default(),
+                1,
+                Some(&seg),
+                false,
+            )
+            .unwrap();
+            drop(outputs);
+            for (fmt, actual) in FORMATS.iter().zip(&outputs_bytes) {
                 let expected = std::fs::read(format!(
                     "{}/../docs/evidence/tlosan_stage_e/initial_20260925/multi_hsp.mode{mode}.outfmt{fmt}",
                     env!("CARGO_MANIFEST_DIR"),
                 ))
                 .unwrap();
-                if actual != expected {
+                if *actual != expected {
                     let path = format!("/tmp/tblastn_stagee_mode{mode}_fmt{fmt}.actual");
-                    std::fs::write(&path, &actual).unwrap();
+                    std::fs::write(&path, actual).unwrap();
                     let offset = actual
                         .iter()
                         .zip(&expected)
@@ -301,26 +388,16 @@ mod tests {
 // AcknowledgeBlastQuery; x_DisplayDeflines; DisplaySeqalign;
 // the formatted result contains full aligned protein strings and the
 // translated subject nucleotide endpoints.
-#[allow(clippy::too_many_arguments)]
-fn write_pairwise(
-    writer: &mut impl Write,
+/// The final HSP list with rendered alignments, in the order of the tabular rows.
+fn pairwise_hits(
     query_records: &[fasta::Record],
     subject_records: &[fasta::Record],
-    subject_path: &Path,
     hitlists: &[KappaResultHitList],
-    parameters: &LocalSubjectParameters,
-    ungapped_karlin: &[crate::stats::tables::KarlinParams],
-    query_validity: &[bool],
-    query_batch_skipped: &[bool],
     scoring: LocalStageDScoring,
     genetic_code: u8,
     seg: Option<&SegParams>,
     mask_lowercase: bool,
-) -> Result<()> {
-    ensure!(
-        ungapped_karlin.len() == query_records.len() && query_validity.len() == query_records.len(),
-        "TBLASTN query statistics count mismatch"
-    );
+) -> Result<Vec<PairwiseHit>> {
     let code = GeneticCode::try_from_id(genetic_code).map_err(anyhow::Error::msg)?;
     let mut hits = Vec::new();
     for (q_idx, hitlist) in hitlists.iter().enumerate() {
@@ -459,7 +536,30 @@ fn write_pairwise(
             }
         }
     }
+    Ok(hits)
+}
 
+// NCBI c++/src/algo/blast/format/blast_format.cpp:1490-1589;
+// c++/src/objtools/align_format/showalign.cpp:1600-1625:
+// AcknowledgeBlastQuery; x_DisplayDeflines; DisplaySeqalign;
+#[allow(clippy::too_many_arguments)]
+fn write_pairwise(
+    writer: &mut impl Write,
+    hits: &[PairwiseHit],
+    query_records: &[fasta::Record],
+    subject_records: &[fasta::Record],
+    subject_path: &Path,
+    parameters: &LocalSubjectParameters,
+    ungapped_karlin: &[crate::stats::tables::KarlinParams],
+    query_validity: &[bool],
+    query_batch_skipped: &[bool],
+    scoring: LocalStageDScoring,
+    probe: Option<&mut FormatProbe<'_>>,
+) -> Result<()> {
+    ensure!(
+        ungapped_karlin.len() == query_records.len() && query_validity.len() == query_records.len(),
+        "TBLASTN query statistics count mismatch"
+    );
     let spec = ProteinScoringSpec {
         matrix: scoring.matrix,
         gap_open: scoring.gap_open,
@@ -511,14 +611,15 @@ fn write_pairwise(
         ..PairwiseConfig::default()
     };
     write_tblastn_pairwise_report(
-        &hits,
+        hits,
         writer,
         &config,
         &queries,
-        &query_validity,
+        query_validity,
         query_batch_skipped,
         &subject_ids,
         &report,
+        probe,
     )?;
     Ok(())
 }

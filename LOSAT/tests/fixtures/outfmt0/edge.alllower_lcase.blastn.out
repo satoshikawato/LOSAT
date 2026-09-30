@@ -1,0 +1,81 @@
+BLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/blastn_parity_compact.fasta).
+           2 sequences; 152 total letters
+
+
+
+Query= alllower fully lowercase copy of alpha
+
+Length=76
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 9248
+
+
+Query= ok_alpha uppercase alpha
+
+Length=76
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+blastn_parity_alpha compact multi-query parity fixture alpha          138     2e-38
+
+
+> blastn_parity_alpha compact multi-query parity fixture alpha
+Length=76
+
+ Score = 138 bits (152),  Expect = 2e-38
+ Identities = 76/76 (100%), Gaps = 0/76 (0%)
+ Strand=Plus/Plus
+
+Query  1   ACGTTGCATGTCAGTACCGATGCTAGTCGATCGTACGATGGCATTCGAGTCCGATACGTA  60
+           ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  1   ACGTTGCATGTCAGTACCGATGCTAGTCGATCGTACGATGGCATTCGAGTCCGATACGTA  60
+
+Query  61  GCTTGCAGATCGTACG  76
+           ||||||||||||||||
+Sbjct  61  GCTTGCAGATCGTACG  76
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 9248
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/blastn_parity_compact.fasta).
+    Posted date:  Unknown
+  Number of letters in database: 152
+  Number of sequences in database:  2
+
+
+
+Matrix: blastn matrix 2 -3
+Gap Penalties: Existence: 5, Extension: 2

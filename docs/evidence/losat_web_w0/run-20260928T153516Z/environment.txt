@@ -1,0 +1,7 @@
+commit: 35e34eee07fbf21c6fd4610a2afd309a8a2099a9
+node: v26.8.2
+npm: 11.19.1
+cargo: cargo 1.92.0 (344c4567c 2025-10-21)
+rustc: rustc 1.92.0 (ded5c06cf 2025-12-08)
+playwright chromium: chromium-1228
+Linux 5.15.167.4-microsoft-standard-WSL2 x86_64

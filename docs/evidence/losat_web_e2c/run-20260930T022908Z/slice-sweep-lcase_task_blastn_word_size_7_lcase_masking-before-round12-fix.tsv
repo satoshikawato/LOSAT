@@ -1,0 +1,21 @@
+DIFF	/home/kawato/.cache/losat-web-gui-target/s07p-slices/lcase_q7_2.fa	/home/kawato/.cache/losat-web-gui-target/s07p-slices/lcase_s7_2.fa	ncbi_lines=41	losat_lines=40
+DIFF	/home/kawato/.cache/losat-web-gui-target/s07p-slices/lcase_q7_7.fa	/home/kawato/.cache/losat-web-gui-target/s07p-slices/lcase_s7_7.fa	ncbi_lines=32	losat_lines=31
+DIFF	/home/kawato/.cache/losat-web-gui-target/s07p-slices/lcase_q7_17.fa	/home/kawato/.cache/losat-web-gui-target/s07p-slices/lcase_s7_17.fa	ncbi_lines=23	losat_lines=24
+DIFF	/home/kawato/.cache/losat-web-gui-target/s07p-slices/lcase_q7_19.fa	/home/kawato/.cache/losat-web-gui-target/s07p-slices/lcase_s7_19.fa	ncbi_lines=14	losat_lines=13
+DIFF	/home/kawato/.cache/losat-web-gui-target/s07p-slices/lcase_q7_25.fa	/home/kawato/.cache/losat-web-gui-target/s07p-slices/lcase_s7_25.fa	ncbi_lines=19	losat_lines=18
+DIFF	/home/kawato/.cache/losat-web-gui-target/s07p-slices/lcase_q7_26.fa	/home/kawato/.cache/losat-web-gui-target/s07p-slices/lcase_s7_26.fa	ncbi_lines=28	losat_lines=26
+DIFF	/home/kawato/.cache/losat-web-gui-target/s07p-slices/lcase_q7_33.fa	/home/kawato/.cache/losat-web-gui-target/s07p-slices/lcase_s7_33.fa	ncbi_lines=64	losat_lines=63
+DIFF	/home/kawato/.cache/losat-web-gui-target/s07p-slices/lcase_q7_42.fa	/home/kawato/.cache/losat-web-gui-target/s07p-slices/lcase_s7_42.fa	ncbi_lines=43	losat_lines=42
+DIFF	/home/kawato/.cache/losat-web-gui-target/s07p-slices/lcase_q7_47.fa	/home/kawato/.cache/losat-web-gui-target/s07p-slices/lcase_s7_47.fa	ncbi_lines=26	losat_lines=25
+DIFF	/home/kawato/.cache/losat-web-gui-target/s07p-slices/lcase_q7_50.fa	/home/kawato/.cache/losat-web-gui-target/s07p-slices/lcase_s7_50.fa	ncbi_lines=77	losat_lines=76
+DIFF	/home/kawato/.cache/losat-web-gui-target/s07p-slices/lcase_q7_51.fa	/home/kawato/.cache/losat-web-gui-target/s07p-slices/lcase_s7_51.fa	ncbi_lines=41	losat_lines=40
+DIFF	/home/kawato/.cache/losat-web-gui-target/s07p-slices/lcase_q7_56.fa	/home/kawato/.cache/losat-web-gui-target/s07p-slices/lcase_s7_56.fa	ncbi_lines=13	losat_lines=12
+DIFF	/home/kawato/.cache/losat-web-gui-target/s07p-slices/lcase_q7_62.fa	/home/kawato/.cache/losat-web-gui-target/s07p-slices/lcase_s7_62.fa	ncbi_lines=40	losat_lines=39
+DIFF	/home/kawato/.cache/losat-web-gui-target/s07p-slices/lcase_q7_71.fa	/home/kawato/.cache/losat-web-gui-target/s07p-slices/lcase_s7_71.fa	ncbi_lines=133	losat_lines=130
+DIFF	/home/kawato/.cache/losat-web-gui-target/s07p-slices/lcase_q7_73.fa	/home/kawato/.cache/losat-web-gui-target/s07p-slices/lcase_s7_73.fa	ncbi_lines=300	losat_lines=298
+DIFF	/home/kawato/.cache/losat-web-gui-target/s07p-slices/lcase_q7_76.fa	/home/kawato/.cache/losat-web-gui-target/s07p-slices/lcase_s7_76.fa	ncbi_lines=38	losat_lines=37
+DIFF	/home/kawato/.cache/losat-web-gui-target/s07p-slices/lcase_q7_84.fa	/home/kawato/.cache/losat-web-gui-target/s07p-slices/lcase_s7_84.fa	ncbi_lines=22	losat_lines=21
+DIFF	/home/kawato/.cache/losat-web-gui-target/s07p-slices/lcase_q7_91.fa	/home/kawato/.cache/losat-web-gui-target/s07p-slices/lcase_s7_91.fa	ncbi_lines=89	losat_lines=88
+DIFF	/home/kawato/.cache/losat-web-gui-target/s07p-slices/lcase_q7_93.fa	/home/kawato/.cache/losat-web-gui-target/s07p-slices/lcase_s7_93.fa	ncbi_lines=65	losat_lines=64
+DIFF	/home/kawato/.cache/losat-web-gui-target/s07p-slices/lcase_q7_113.fa	/home/kawato/.cache/losat-web-gui-target/s07p-slices/lcase_s7_113.fa	ncbi_lines=78	losat_lines=77
+# pool=lcase options='-task blastn -word_size 7 -lcase_masking' seed=7 cases=120 differing=20

@@ -1,0 +1,23 @@
+# A copy of the rustflags of LOSAT/.cargo/config.toml (checked by
+# tools/check_build_identity.py). Build outputs go outside the worktree (--target-dir).
+
+# The Rust code only enters its wasm SIMD routines behind
+# `cfg(all(target_arch = "wasm32", target_feature = "simd128"))`; this enables
+# those existing parity-preserving integer paths for browser/WASI builds.
+[target.wasm32-wasip1]
+rustflags = ["-C", "target-feature=+simd128"]
+
+[target.wasm32-wasip1-threads]
+rustflags = ["-C", "target-feature=+simd128"]
+
+[target.wasm32-unknown-unknown]
+rustflags = ["-C", "target-feature=+simd128"]
+
+# NCBI reference: c++/src/algo/blast/core/link_hsps.c:827-861
+# for (H2_index=H_index-1; H2_index>1;) { ... }
+# Align native x86_64 loop heads so unrelated function-size changes do not
+# displace the repeated helper scan from its measured fast alignment. This
+# changes instruction padding, preserving the same search operations/order.
+# Explicit target scope keeps command/reactor Wasm code generation unchanged.
+[target.'cfg(target_arch = "x86_64")']
+rustflags = ["-C", "llvm-args=-align-loops=64", "-C", "llvm-args=-max-bytes-for-alignment=63"]

@@ -6,6 +6,7 @@ use std::io::{self, BufWriter, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::api::local_blast::{FormatProbe, HspIndex};
 use crate::report::{
     write_hit_fields, write_outfmt7, write_pairwise_simple, OutputConfig, OutputFormat,
     PairwiseConfig, ReportContext,
@@ -690,40 +691,6 @@ pub fn write_output_ncbi_order_to_writer<W: Write>(
     )
 }
 
-/// Write default tabular output with NCBI subject ordering and formatter HSP
-/// ordering by e-value.
-///
-/// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_seqalign.cpp:1569-1577
-/// ```c
-/// for (int index = 0; index < hit_list->hsplist_count; index++) {
-///     BlastHSPList* hsp_list = hit_list->hsplist_array[index];
-///     Blast_HSPListSortByEvalue(hsp_list);
-/// }
-/// ```
-pub fn write_output_ncbi_order_evalue_hsp_order(
-    hits: Vec<Hit>,
-    out_path: Option<&PathBuf>,
-    query_ids: &[Arc<str>],
-    subject_ids: &[Arc<str>],
-) -> Result<()> {
-    let stdout = io::stdout();
-    let mut writer: Box<dyn Write> = if let Some(path) = out_path {
-        Box::new(BufWriter::new(File::create(path)?))
-    } else {
-        Box::new(BufWriter::new(stdout.lock()))
-    };
-
-    write_output_ncbi_order_with_format_to_writer_impl(
-        hits,
-        &mut writer,
-        OutputFormat::Tabular,
-        query_ids,
-        subject_ids,
-        &ReportContext::default(),
-        HspOutputOrder::EvalueCompare,
-    )
-}
-
 /// Write default tabular output with NCBI subject ordering to an existing writer,
 /// using formatter HSP ordering by e-value.
 ///
@@ -740,6 +707,7 @@ pub fn write_output_ncbi_order_evalue_hsp_order_to_writer<W: Write>(
     writer: &mut W,
     query_ids: &[Arc<str>],
     subject_ids: &[Arc<str>],
+    probe: Option<&mut FormatProbe<'_>>,
 ) -> Result<()> {
     write_output_ncbi_order_with_format_to_writer_impl(
         hits,
@@ -749,6 +717,7 @@ pub fn write_output_ncbi_order_evalue_hsp_order_to_writer<W: Write>(
         subject_ids,
         &ReportContext::default(),
         HspOutputOrder::EvalueCompare,
+        probe,
     )
 }
 
@@ -815,9 +784,11 @@ pub fn write_output_ncbi_order_with_format_to_writer<W: Write>(
         subject_ids,
         context,
         HspOutputOrder::ScoreCompare,
+        None,
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn write_output_ncbi_order_with_format_to_writer_impl<W: Write>(
     mut hits: Vec<Hit>,
     writer: &mut W,
@@ -826,6 +797,7 @@ fn write_output_ncbi_order_with_format_to_writer_impl<W: Write>(
     subject_ids: &[Arc<str>],
     context: &ReportContext,
     hsp_order: HspOutputOrder,
+    mut probe: Option<&mut FormatProbe<'_>>,
 ) -> Result<()> {
     if hits.is_empty() {
         // For outfmt 7, still write header even with no hits
@@ -866,6 +838,13 @@ fn write_output_ncbi_order_with_format_to_writer_impl<W: Write>(
 
     // For outfmt 0 (pairwise), we need to collect all sorted hits first
     let mut all_sorted_hits: Vec<Hit> = Vec::new();
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:1411
+    // ```c
+    // CBlastFormat::PrintOneResultSet(const blast::CSearchResults& results,
+    // ```
+    // The tabular rows are printed in the order of the final HSP list, so a running
+    // count is each row's HSP index.
+    let mut hsp_index: HspIndex = 0;
 
     // Step 2: For each query, build subject groups and sort
     for &q_idx in &query_order {
@@ -985,6 +964,11 @@ fn write_output_ncbi_order_with_format_to_writer_impl<W: Write>(
                         // } BlastHSPList;
                         // ```
                         let (query_id, subject_id) = hit.resolve_ids(query_ids, subject_ids);
+                        // One printed row is one HSP; the probe marks it without changing it.
+                        if let Some(probe) = probe.as_mut() {
+                            writer.flush()?;
+                            probe.begin(hsp_index);
+                        }
                         write_hit_fields(
                             writer,
                             query_id,
@@ -1002,6 +986,11 @@ fn write_output_ncbi_order_with_format_to_writer_impl<W: Write>(
                             hit.bit_score,
                             &config,
                         )?;
+                        if let Some(probe) = probe.as_mut() {
+                            writer.flush()?;
+                            probe.end(hsp_index);
+                        }
+                        hsp_index += 1;
                     }
                 }
             }
@@ -1193,6 +1182,7 @@ mod shared_output_sort_tests {
             &mut evalue_output,
             &query_ids,
             &subject_ids,
+            None,
         )
         .expect("evalue-order shared output");
 

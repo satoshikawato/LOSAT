@@ -1,0 +1,21 @@
+S04 artifacts (SHA-256). Toolchain: cargo 1.92.0 (344c4567c 2025-10-21); rustc 1.92.0 (ded5c06cf 2025-12-08); node v26.8.2.
+Build commands: as in ../../losat_web_e1a/README.md "実行の方法".
+
+pre-change = the S03 artifacts (docs/evidence/losat_web_e1b/run-20260928T194657Z/binaries.txt), kept in
+/home/kawato/.cache/losat-web-gui-target/s03-final/:
+bf4be7aa9864f3c184007a3d2aff62b5521986a99311e6667646801fed8564dc  native LOSAT
+d7c6fb655a3c2af9dc97bdbc7d07a49f6d914e1d208b5a39663043dae56526d3  native LOSAT, --no-default-features (serial)
+7d8627962cdd402fc5dc373ebcbbe1edf843528cdd065d976b8f86dd1b25f966  losat-serial-command.wasm
+08c7f3a24e9163cf7b66e54b1a3fa2fac223ec9c49c750f58e0e7970c7eccc84  losat-serial-reactor.wasm
+055ac71be4fa63a2eece775be51064de20a6dc43c003bcbda39a9fb607054517  losat-threaded-command.wasm
+0e7410de7bf1e82be7ff637c34d29bf0511d32e22703b7d55d6eb8b501bcb322  losat-threaded-reactor.wasm
+
+post-change (commit 458cbe110). Built from the working tree whose LOSAT/ directory is the commit; both natives and
+all four WASI artifacts rebuilt from git archive 458cbe110 have the same hashes. Copies are kept in
+/home/kawato/.cache/losat-web-gui-target/s04-final/:
+a5700d66ddb697aca80d97f2ba610e100746d9ceb9cc00bff87d3789ad83253e  native LOSAT (rebuilt from the commit: same hash)
+c73c1372a6a1da38207708ed4011d39bd187097e801c646fbc4f58933dc1f624  native LOSAT, --no-default-features (serial) (rebuilt from the commit: same hash)
+830c5a6f114aed1bc269431f7d4b6fcbe5ff4a3216e71d52596f6d876c05a8a0  losat-serial-command.wasm (rebuilt from the commit: same hash)
+0817261477847f8eae4e83e66261f5c09bd346052fb1bdf1add774017d7aaa65  losat-serial-reactor.wasm (rebuilt from the commit: same hash)
+0a14aaabe3359272d3cead3b42afe48b2e5615d1e7cabf50d6d0016bb8a68787  losat-threaded-command.wasm (rebuilt from the commit: same hash)
+482751aba6a0f4668ee5066b899a48fff83176631b4e7714dbd389991f5760bc  losat-threaded-reactor.wasm (rebuilt from the commit: same hash)

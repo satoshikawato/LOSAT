@@ -1,0 +1,62 @@
+BLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/width_subject.fasta).
+           1 sequences; 100 total letters
+
+
+
+Query= width_q subject positions 40-100
+
+Length=61
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+width_s 100 bp subject                                                111     2e-30
+
+
+> width_s 100 bp subject
+Length=100
+
+ Score = 111 bits (122),  Expect = 2e-30
+ Identities = 61/61 (100%), Gaps = 0/61 (0%)
+ Strand=Plus/Plus
+
+Query  1   CTTCACGGGGTTAAGTGCTTGCAGCAGAACGCGGTAATCACATATCTATCATACCCAACC  60
+           ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  40  CTTCACGGGGTTAAGTGCTTGCAGCAGAACGCGGTAATCACATATCTATCATACCCAACC  99
+
+Query  61  A  61
+           |
+Sbjct  100 A  100
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 5022
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/width_subject.fasta).
+    Posted date:  Unknown
+  Number of letters in database: 100
+  Number of sequences in database:  1
+
+
+
+Matrix: blastn matrix 2 -3
+Gap Penalties: Existence: 5, Extension: 2

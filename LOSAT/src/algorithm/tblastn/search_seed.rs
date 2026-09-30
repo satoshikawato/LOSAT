@@ -126,52 +126,6 @@ pub(super) fn unmasked_translated_chunks(frame_length: usize) -> Vec<TranslatedC
     chunks
 }
 
-// NCBI reference: c++/src/util/random_gen.cpp:98,227-230,287-308 and
-// c++/include/util/random_gen.hpp:224-241
-// static const size_t kStateOffset = 12;
-// m_State[0] = m_Seed = seed;
-// for (int i = 1; i < kStateSize; ++i)
-//     m_State[i] = 1103515245 * m_State[i-1] + 12345;
-// m_RJ = kStateOffset; m_RK = kStateSize - 1;
-// for (int i = 0; i < 10 * kStateSize; ++i) GetRand();
-// r = m_State[m_RK] + m_State[m_RJ--];
-// m_State[m_RK--] = r;
-// return r >> 1;
-struct NcbiRandom {
-    state: [u32; 33],
-    j: usize,
-    k: usize,
-}
-
-impl NcbiRandom {
-    fn new(seed: u32) -> Self {
-        let mut state = [0; 33];
-        state[0] = seed;
-        for i in 1..state.len() {
-            state[i] = state[i - 1]
-                .wrapping_mul(1_103_515_245)
-                .wrapping_add(12_345);
-        }
-        let mut random = Self {
-            state,
-            j: 12,
-            k: 32,
-        };
-        for _ in 0..330 {
-            random.get_rand();
-        }
-        random
-    }
-
-    fn get_rand(&mut self) -> u32 {
-        let value = self.state[self.k].wrapping_add(self.state[self.j]);
-        self.state[self.k] = value;
-        self.j = if self.j == 0 { 32 } else { self.j - 1 };
-        self.k = if self.k == 0 { 32 } else { self.k - 1 };
-        value >> 1
-    }
-}
-
 // NCBI reference: c++/src/algo/blast/core/blast_encoding.c:95-103 and
 // c++/src/algo/blast/api/blast_objmgr_tools.cpp:427-474,515-520
 // static unsigned char ctable[16] = {0xFF,0,1,0xFF,2,0xFF,0xFF,0xFF,
@@ -182,53 +136,24 @@ impl NcbiRandom {
 // The uncompressed ncbi4na sequence is retained by SetupSubjects_OMF for
 // traceback reevaluation; these resolved bases are preliminary-search input.
 pub(super) fn resolve_local_subject_ncbi2na(subject: &[u8]) -> Result<Vec<u8>> {
-    let seed = u32::try_from(subject.len())?;
-    let mut random = NcbiRandom::new(seed);
-    let mut resolved = Vec::with_capacity(subject.len());
-    for &base in subject {
-        let mask: u8 = match base.to_ascii_uppercase() {
-            b'A' => 1,
-            b'C' => 2,
-            b'G' => 4,
-            b'T' => 8,
-            b'M' => 3,
-            b'R' => 5,
-            b'S' => 6,
-            b'V' => 7,
-            b'W' => 9,
-            b'Y' => 10,
-            b'H' => 11,
-            b'K' => 12,
-            b'D' => 13,
-            b'B' => 14,
-            b'N' => 15,
-            b'-' => 0,
-            _ => bail!("TBLASTN subject base '{}' is not implemented", base as char),
-        };
-        let code = match mask {
-            1 => 0,
-            2 => 1,
-            4 => 2,
-            8 => 3,
-            0 | 15 => random.get_rand() % 4,
-            _ => {
-                let mut pick = random.get_rand() % mask.count_ones();
-                let mut code = 0;
-                for i in 0..4 {
-                    if mask & (1 << i) != 0 {
-                        if pick == 0 {
-                            code = i;
-                            break;
-                        }
-                        pick -= 1;
-                    }
-                }
-                code
-            }
-        };
-        resolved.push(b"ACGT"[code as usize]);
-    }
-    Ok(resolved)
+    u32::try_from(subject.len())?;
+    let ncbi4na = subject
+        .iter()
+        .map(|&base| {
+            // TBLASTN reads the IUPAC letters without `U`.
+            crate::core::blast_encoding::iupacna_to_ncbi4na(base)
+                .filter(|_| !base.eq_ignore_ascii_case(&b'U'))
+                .ok_or_else(|| {
+                    anyhow::anyhow!("TBLASTN subject base '{}' is not implemented", base as char)
+                })
+        })
+        .collect::<Result<Vec<u8>>>()?;
+    Ok(
+        crate::core::blast_encoding::resolve_ncbi4na_to_ncbi2na(&ncbi4na)
+            .into_iter()
+            .map(|code| b"ACGT"[code as usize])
+            .collect(),
+    )
 }
 
 // NCBI reference: c++/src/algo/blast/api/blast_setup_cxx.cpp:813-826

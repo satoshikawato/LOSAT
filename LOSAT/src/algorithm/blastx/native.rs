@@ -33,97 +33,9 @@ use std::{
     path::Path,
 };
 
-// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:177-184
-// ```c++
-//     catch (const CArgException& e) {                                        \
-//         LOG_POST(Error << "Command line argument error: " << e.GetMsg());   \
-//         exit_code = BLAST_INPUT_ERROR;                                      \
-//     }                                                                       \
-//     catch (const CObjReaderParseException& e) {                             \
-//         LOG_POST(Error << "BLAST query error: " << e.GetMsg());             \
-//         exit_code = BLAST_INPUT_ERROR;                                      \
-//     }                                                                       \
-// ```
-// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:216-230
-// ```c++
-//     catch (const blast::CBlastException& e) {                               \
-//         const string& msg = e.GetMsg();                                     \
-//         if (e.GetErrCode() == CBlastException::eInvalidOptions) {           \
-//             LOG_POST(Error << "BLAST options error: " << e.GetMsg());       \
-//             exit_code = BLAST_INPUT_ERROR;                                  \
-//         } else if ((NStr::Find(msg, "Out of memory") != NPOS) ||            \
-//             (NStr::Find(msg, "Failed to allocate") != NPOS)) {              \
-//             LOG_POST(Error << "BLAST ran out of memory: " << e.GetMsg());   \
-//             exit_code = BLAST_OUT_OF_MEMORY;                                \
-//         } else {                                                            \
-//             LOG_POST(Error << "BLAST engine error: " << e.GetMsg());        \
-//             exit_code = BLAST_ENGINE_ERROR;                                 \
-//         }                                                                   \
-//     }                                                                       \
-//     catch (const blast::CBlastSystemException& e) {                         \
-// ```
-// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:251-255
-// ```c++
-//     }                                                                       \
-//     catch (const std::ios::failure&) {                                      \
-//         LOG_POST(Error << "BLAST failed to write output");                  \
-//         exit_code = BLAST_OUTPUT_ERROR;                                     \
-//     }                                                                       \
-// ```
-#[derive(Debug)]
-pub struct NativeError {
-    pub exit: i32,
-    pub message: String,
-}
-// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:178-180
-// ```c++
-//         LOG_POST(Error << "Command line argument error: " << e.GetMsg());   \
-//         exit_code = BLAST_INPUT_ERROR;                                      \
-//     }                                                                       \
-// ```
-impl fmt::Display for NativeError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.message)
-    }
-}
-// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:177-184
-// ```c++
-//     catch (const CArgException& e) {                                        \
-//         LOG_POST(Error << "Command line argument error: " << e.GetMsg());   \
-//         exit_code = BLAST_INPUT_ERROR;                                      \
-//     }                                                                       \
-//     catch (const CObjReaderParseException& e) {                             \
-//         LOG_POST(Error << "BLAST query error: " << e.GetMsg());             \
-//         exit_code = BLAST_INPUT_ERROR;                                      \
-//     }                                                                       \
-// ```
-impl std::error::Error for NativeError {}
-// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:95-99
-// ```c++
-// string s_ArgExptMsg(const string& name, const string& what, const string& attr)
-// {
-//     return string("Argument \"") + (name.empty() ? s_ExtraName : name) +
-//         "\". " + what + (attr.empty() ? attr : ":  `" + attr + "'");
-// }
-// ```
-// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:615-619
-// ```c++
-// void CArg_Ios::x_Open(CArgValue::TFileFlags /*flags*/) const
-// {
-//     if ( !m_Ios ) {
-//         NCBI_THROW(CArgException,eNoFile, s_ArgExptMsg(GetName(),
-//             "File is not accessible",AsString()));
-// ```
-fn inaccessible(name: &str, path: &Path) -> anyhow::Error {
-    NativeError {
-        exit: 1,
-        message: format!(
-            "Command line argument error: Argument \"{name}\". File is not accessible:  `{path}'\n",
-            path = path.display()
-        ),
-    }
-    .into()
-}
+// The NCBI-style exit error is shared with the other programs' command lines.
+use crate::cli::inaccessible;
+pub use crate::cli::{exit_on_native_error, NativeError};
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:225-227
 // ```c++
 //         } else {                                                            \
@@ -664,42 +576,4 @@ pub(crate) fn reader_warning(warning: &InputWarning, stderr: &mut dyn Write) -> 
         };
     writeln!(stderr, "{message}")?;
     Ok(())
-}
-
-// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:177-180
-// ```c++
-//     catch (const CArgException& e) {                                        \
-//         LOG_POST(Error << "Command line argument error: " << e.GetMsg());   \
-//         exit_code = BLAST_INPUT_ERROR;                                      \
-//     }                                                                       \
-// ```
-// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:225-227
-// ```c++
-//         } else {                                                            \
-//             LOG_POST(Error << "BLAST engine error: " << e.GetMsg());        \
-//             exit_code = BLAST_ENGINE_ERROR;                                 \
-// ```
-// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:251-255
-// ```c++
-//     }                                                                       \
-//     catch (const std::ios::failure&) {                                      \
-//         LOG_POST(Error << "BLAST failed to write output");                  \
-//         exit_code = BLAST_OUTPUT_ERROR;                                     \
-//     }                                                                       \
-// ```
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:160-163
-// ```c++
-// CBlastTabularInfo::~CBlastTabularInfo()
-// {
-//     m_Ostream.flush();
-// }
-// ```
-pub fn exit_on_native_error(error: &anyhow::Error) {
-    if let Some(e) = error.downcast_ref::<NativeError>() {
-        eprint!("{}", e.message);
-        if e.exit < 0 {
-            std::process::abort();
-        }
-        std::process::exit(e.exit);
-    }
 }

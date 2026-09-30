@@ -86,8 +86,21 @@ fn main() -> Result<()> {
                 return Err(error);
             }
         }
+        // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:172-175,225-227
+        // ```c++
+        //     catch (const blast::CInputException& e) {                               \
+        //         LOG_POST(Error << "BLAST query/options error: " << e.GetMsg());     \
+        //         LOG_POST(Error << "Please refer to the BLAST+ user manual.");       \
+        //         exit_code = BLAST_INPUT_ERROR;                                      \
+        // ...
+        //             LOG_POST(Error << "BLAST engine error: " << e.GetMsg());        \
+        //             exit_code = BLAST_ENGINE_ERROR;                                 \
+        // ```
         Commands::Blastn(args) => {
-            blastn::run(args)?;
+            if let Err(error) = blastn::run(args) {
+                LOSAT::cli::exit_on_native_error(&error);
+                return Err(error);
+            }
         }
         Commands::Blastp(args) => {
             blastp::run(args)?;

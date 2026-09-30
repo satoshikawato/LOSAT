@@ -77,7 +77,7 @@ pub fn validate_threads(requested: usize) -> Result<()> {
     #[cfg(feature = "parallel")]
     ensure!(
         requested <= rayon::max_num_threads(),
-        "requested {requested} threads exceeds Rayon maximum {}",
+        "requested {requested} threads exceeds Rayon maximum {}, which is not supported by LOSAT",
         rayon::max_num_threads()
     );
     Ok(())
@@ -159,7 +159,7 @@ where
                 })
                 .build()
                 .with_context(|| {
-                    format!("failed to build {program} pool with {requested} threads")
+                    format!("failed to build {program} pool with {requested} threads; a thread count that the system cannot start is not supported by LOSAT")
                 })?;
             *pool_slot.borrow_mut() = Some(pool);
             caller.expect("caller owns pool slot zero").run();

@@ -11,6 +11,7 @@ pub mod interval_tree;
 pub mod lookup;
 pub mod ncbi_cutoffs;
 pub(crate) mod pairwise;
+pub mod query_split;
 pub mod scoring;
 pub mod sequence_compare;
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:633-692

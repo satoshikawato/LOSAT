@@ -917,14 +917,10 @@ pub fn build_lookup_tables(
     )
 }
 
-/// Prepare all sequence data and configuration
-pub fn prepare_sequence_data(
-    args: &BlastnArgs,
-    queries: Vec<fasta::Record>,
-    query_ids: Vec<String>,
-    subject_metadata: SubjectMetadata,
-) -> SequenceData {
-    let mut query_masks = apply_dust_masking(args, &queries);
+/// The masks of the queries: their DUST masks and, with `-lcase_masking`, their lower-case
+/// letters.
+pub fn query_masks(args: &BlastnArgs, queries: &[fasta::Record]) -> Vec<Vec<MaskedInterval>> {
+    let mut query_masks = apply_dust_masking(args, queries);
     // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2547-2556
     // ```c
     // const bool use_lcase_masks = args.Exist(kArgUseLCaseMasking) ? ... : kDfltArgUseLCaseMasking;
@@ -936,7 +932,7 @@ pub fn prepare_sequence_data(
     // query_masks->Merge(kTopFlags, 0);
     // ```
     if args.lcase_masking {
-        let lcase_masks = collect_lowercase_masks_for_records(&queries);
+        let lcase_masks = collect_lowercase_masks_for_records(queries);
         for (dust_masks, lcase) in query_masks.iter_mut().zip(lcase_masks) {
             if !lcase.is_empty() {
                 dust_masks.extend(lcase);
@@ -945,6 +941,59 @@ pub fn prepare_sequence_data(
             }
         }
     }
+    query_masks
+}
+
+/// The masks of the query parts of a query chunk: the DUST masks of each part added to the
+/// masks that NCBI keeps from its query (`query_split::restrict_masks`), which already have
+/// the lower-case letters.
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/dust_filter.cpp:171-180
+/// ```c
+///         CSeqVector data(*queries.GetQuerySeqLoc(i), *queries.GetScope(i),
+///                         CBioseq_Handle::eCoding_Iupac);
+///         ...
+///         CRef<CSeq_loc> masks = queries.GetMasks(i);
+///         s_CombineDustMasksWithUserProvidedMasks(data,
+///                                                 queries.GetQuerySeqLoc(i),
+///                                                 queries.GetScope(i), query_id,
+///                                                 masks, level, window, linker);
+/// ```
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/dust_filter.cpp:121-128
+/// ```c
+///     const int kTopFlags = CSeq_loc::fStrand_Ignore|CSeq_loc::fMerge_All|CSeq_loc::fSort;
+///     if (orig_query_mask.NotEmpty() && !orig_query_mask->IsNull()) {
+///         CRef<CSeq_loc> tmp = orig_query_mask->Add(*query_masks,  kTopFlags, 0);
+///         orig_query_mask.Reset(tmp);
+///     } else {
+///         query_masks->Merge(kTopFlags, 0);
+///         orig_query_mask.Reset(query_masks);
+///     }
+/// ```
+/// The part's own masks are only merged when DUST finds a region; the lookup table and the
+/// search use the masked residues, which merging does not change.
+pub fn chunk_query_masks(
+    args: &BlastnArgs,
+    parts: &[fasta::Record],
+    restricted: Vec<Vec<MaskedInterval>>,
+) -> Vec<Vec<MaskedInterval>> {
+    apply_dust_masking(args, parts)
+        .into_iter()
+        .zip(restricted)
+        .map(|(mut masks, restricted)| {
+            masks.extend(restricted);
+            merge_mask_intervals(masks)
+        })
+        .collect()
+}
+
+/// Prepare all sequence data and configuration
+pub fn prepare_sequence_data(
+    queries: Vec<fasta::Record>,
+    query_ids: Vec<String>,
+    query_masks: Vec<Vec<MaskedInterval>>,
+    subject_metadata: SubjectMetadata,
+) -> SequenceData {
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1407-1409
     // ```c
     // db_length = BlastSeqSrcGetTotLen(seq_src);

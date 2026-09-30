@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { StorageFullError } from '../../src/infra/data/block-store';
 import { MemoryBlockStore } from '../../src/infra/data/memory-block-store';
 import {
   holdSessionLock,
@@ -80,9 +81,12 @@ describe('working session ownership', () => {
     const session = await startDataSession({
       token: 'own',
       locks,
-      openOpfs: async (token) => {
-        expect(locks.held.has(SESSION_LOCK_PREFIX + token)).toBe(true);
-        return { store, space };
+      opfs: {
+        space: async () => space,
+        open: async (token) => {
+          expect(locks.held.has(SESSION_LOCK_PREFIX + token)).toBe(true);
+          return store;
+        },
       },
     });
     expect(session.store).toBe(store);
@@ -90,27 +94,96 @@ describe('working session ownership', () => {
     expect(await session.cleanup).toEqual({ state: 'done', removedSessions: 1 });
   });
 
-  it('removes nothing without Web Locks', async () => {
+  it('reclaims abandoned sessions first when OPFS is too full to open, then opens it', async () => {
+    const space = new FakeSpace(['dead']);
+    const store = new MemoryBlockStore();
+    const session = await startDataSession({
+      token: 'own',
+      locks: new FakeLocks(),
+      opfs: {
+        space: async () => space,
+        open: async () => {
+          if (space.tokens.length > 0) throw new StorageFullError();
+          return store;
+        },
+      },
+    });
+    expect(session.store).toBe(store);
+    expect(await session.cleanup).toEqual({ state: 'done', removedSessions: 1 });
+  });
+
+  it('keeps its data in memory when OPFS stays full after the reclaim', async () => {
+    const session = await startDataSession({
+      token: 'own',
+      locks: new FakeLocks(),
+      opfs: {
+        space: async () => new FakeSpace([]),
+        open: async () => {
+          throw new StorageFullError();
+        },
+      },
+    });
+    expect(session.store.backend).toBe('memory');
+    expect(session.fallbackReason).toBe('the browser storage of this site is full');
+  });
+
+  it('keeps its data in memory and removes nothing without Web Locks', async () => {
     const space = new FakeSpace(['other']);
+    let opened = false;
     const session = await startDataSession({
       token: 'own',
       locks: undefined,
-      openOpfs: async () => ({ store: new MemoryBlockStore(), space }),
+      opfs: {
+        space: async () => space,
+        open: async () => {
+          opened = true;
+          return new MemoryBlockStore();
+        },
+      },
     });
+    expect(opened).toBe(false);
+    expect(session.store.backend).toBe('memory');
+    expect(session.fallbackReason).toMatch(/^this browser has no Web Locks API/);
     expect(await session.cleanup).toEqual({ state: 'unavailable', reason: 'this browser has no Web Locks API' });
     expect(space.tokens).toEqual(['other']);
+  });
+
+  it('keeps its data in memory when its lock cannot be taken, so no other tab can remove it', async () => {
+    let opened = false;
+    const session = await startDataSession({
+      token: 'own',
+      locks: {
+        request: async () => {
+          throw new Error('SecurityError');
+        },
+      },
+      opfs: {
+        space: async () => new FakeSpace([]),
+        open: async () => {
+          opened = true;
+          return new MemoryBlockStore();
+        },
+      },
+    });
+    expect(opened).toBe(false);
+    expect(session.store.backend).toBe('memory');
+    expect(session.fallbackReason).toBe('the Web Lock of this tab could not be taken (SecurityError)');
+    expect(await session.cleanup).toEqual({ state: 'unavailable', reason: 'this tab holds no Web Lock' });
   });
 
   it('falls back to memory with the reason when OPFS cannot be used', async () => {
     const session = await startDataSession({
       token: 'own',
       locks: new FakeLocks(),
-      openOpfs: async () => {
-        throw new Error('this browser cannot write OPFS files from a worker (no createSyncAccessHandle)');
+      opfs: {
+        space: async () => {
+          throw new Error('this browser has no Origin Private File System');
+        },
+        open: async () => new MemoryBlockStore(),
       },
     });
     expect(session.store.backend).toBe('memory');
-    expect(session.fallbackReason).toBe('this browser cannot write OPFS files from a worker (no createSyncAccessHandle)');
+    expect(session.fallbackReason).toBe('this browser has no Origin Private File System');
     expect(await session.cleanup).toEqual({ state: 'done', removedSessions: 0 });
   });
 });

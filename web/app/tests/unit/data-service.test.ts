@@ -47,6 +47,22 @@ describe('DataService sources and record tables', () => {
     }
   });
 
+  it('keeps records with the same ID apart and keeps the original headers and case (REQ-05)', async () => {
+    const { data } = service();
+    const text = '>dup First Header\nacgtACGT\n>dup second\nGGCC\n';
+    const source = await data.addSource(new File([text], 'dup.fa'));
+    const revision = await data.indexSource(source.sourceId, 0);
+    expect(revision.records.map((r) => [r.index, r.id, r.length])).toEqual([
+      [0, 'dup', 8],
+      [1, 'dup', 4],
+    ]);
+    expect(revision.records[0]!.sha256).not.toBe(revision.records[1]!.sha256);
+    expect(revision.records[0]!.residue_counts).toEqual({ a: 1, c: 1, g: 1, t: 1, A: 1, C: 1, G: 1, T: 1 });
+    const second = await data.reviseDataset(revision.revisionId, [0]);
+    const input = await data.buildRunInput([second.revisionId]);
+    expect(decoder.decode(input.bytes)).toBe('>dup second\nGGCC\n');
+  });
+
   it('rejects a source that the parser cannot read', async () => {
     const { data } = service();
     const source = await data.addSource(new File(['ACGT\n'], 'plain.txt'));
@@ -119,6 +135,9 @@ describe('DataService sources and record tables', () => {
     const input = await data.buildRunInput([first.revisionId, second.revisionId, first.revisionId]);
     expect(decoder.decode(input.bytes)).toBe('>x\nAC\n>y\nGG\n>x\nAC');
     expect(input.records.map((r) => r.id)).toEqual(['x', 'y', 'x']);
+    // A source whose records are all left out adds nothing, not even the newline.
+    const none = await data.reviseDataset(second.revisionId, [0]);
+    expect(decoder.decode((await data.buildRunInput([first.revisionId, none.revisionId])).bytes)).toBe('>x\nAC');
   });
 });
 
@@ -174,6 +193,27 @@ describe('DataService runs and storage status', () => {
     writer.end();
     await expect(data.commitRun('run-1')).rejects.toThrow('Not enough temporary storage');
     expect(removals).toBeGreaterThan(0);
+  });
+
+  it('counts the HSP records as readHits reads them: blank lines and empty chunks are not records', async () => {
+    const { data } = service();
+    const port = await data.openRun('run-1');
+    // Raw messages, as an engine that does not filter empty chunks would send them.
+    const chunks = [new Uint8Array(0), encoder.encode('{"index":0}\n\n{"inde'), encoder.encode('x":1}\n  \n{"index":2}')];
+    for (const bytes of chunks) port.postMessage({ type: 'chunk', stream: 1, bytes });
+    port.postMessage({ type: 'end', chunks: chunks.length, bytes: chunks.reduce((sum, c) => sum + c.length, 0) });
+    expect((await data.commitRun('run-1')).hitCount).toBe(3);
+    expect((await data.readHits('run-1')).map((hit) => hit.index)).toEqual([0, 1, 2]);
+  });
+
+  it('commits a run once when the commit is asked for twice', async () => {
+    const { data } = service();
+    const writer = new RunOutputWriter(await data.openRun('run-1'));
+    writer.write(6, encoder.encode('row\n'));
+    const [first, second] = [data.commitRun('run-1'), data.commitRun('run-1')];
+    writer.end();
+    expect(await first).toEqual(await second);
+    expect(decoder.decode(await data.readOutput('run-1', 6))).toBe('row\n');
   });
 
   it('frees the bytes of a run that runs out of storage at once', async () => {

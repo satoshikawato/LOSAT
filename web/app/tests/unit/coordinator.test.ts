@@ -257,6 +257,14 @@ describe('Coordinator', () => {
     expect(storage.cleanup).toEqual({ state: 'done', removedSessions: 0 });
   });
 
+  it('refuses BLASTX as ABI v2 does until session SX', async () => {
+    const { coordinator } = setup();
+    expect(await coordinator.enqueue({ ...request, program: 'blastx' })).toEqual({
+      ok: false,
+      message: 'blastx is not available in LOSAT Web ABI v2 yet',
+    });
+  });
+
   it('does not queue a request that the engine rejects', async () => {
     const engine = new ManualEngine();
     engine.validate = async () => ({ ok: false, message: 'bad option' });

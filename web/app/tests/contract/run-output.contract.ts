@@ -30,6 +30,8 @@ export interface RunOutputEnv {
   readonly data: RunStore;
   /** An engine-side writer on `port`; the environment may transfer the port to a worker. */
   writer(port: MessagePort): Promise<RemoteWriter>;
+  /** Bytes that the data layer holds in temporary storage. */
+  usage(): Promise<number>;
   /** Makes the storage refuse more data; `restore` undoes it. */
   exhaust(): Promise<void>;
   restore(): Promise<void>;
@@ -116,7 +118,7 @@ export const RUN_OUTPUT_CASES: readonly ContractCase<RunOutputEnv>[] = [
       await writer.write(6, bytes('row\n'));
       await rejects(env.data.readOutput('run-d', 6), /no committed result/, 'read before commit');
       const commit = env.data.commitRun('run-d');
-      check(!(await settlesWithin(commit, 100)), 'the commit must wait for end');
+      check(!(await settlesWithin(commit, 300)), 'the commit must wait for end');
       await writer.end();
       same((await commit).byteLengths[6], 4, 'length after end');
     },
@@ -143,11 +145,14 @@ export const RUN_OUTPUT_CASES: readonly ContractCase<RunOutputEnv>[] = [
   {
     name: 'discard drops a staged run and ignores its late chunks',
     async run(env) {
+      const baseline = await env.usage();
       const writer = await openWriter(env, 'run-g');
       await writer.write(6, bytes('first\n'));
       await env.data.discardRun('run-g');
       await writer.write(6, bytes('late\n'));
       await writer.end();
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      same(await env.usage(), baseline, 'bytes held after the discard and the late chunks');
       await rejects(env.data.readOutput('run-g', 6), /no committed result/, 'read after discard');
       await rejects(env.data.commitRun('run-g'), /not staged/, 'commit after discard');
       const again = await openWriter(env, 'run-g');

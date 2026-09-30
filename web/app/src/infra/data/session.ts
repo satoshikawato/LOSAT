@@ -6,7 +6,7 @@
 // older-release tabs keep their locks, so their data stays. Time stamps are never used,
 // and without Web Locks nothing is removed.
 import type { CleanupState } from '../../ports/data';
-import type { BlockStore } from './block-store';
+import { isStorageFull, type BlockStore } from './block-store';
 import { MemoryBlockStore } from './memory-block-store';
 
 /** The OPFS directory of the working sessions. Shared by every release. */
@@ -67,12 +67,19 @@ export async function reclaimAbandonedSessions(
   return removed;
 }
 
+/** OPFS as a session uses it; implemented by opfs-block-store.ts. */
+export interface OpfsAccess {
+  /** The session directories under tmp/. Rejects when this browser has no usable OPFS. */
+  space(): Promise<SessionSpace>;
+  /** Opens tmp/<token>/ as a block store after checking it; rejects when it cannot be used. */
+  open(token: string): Promise<BlockStore>;
+}
+
 export interface DataSessionEnv {
   readonly token: string;
   /** `navigator.locks`, or undefined where the browser has no Web Locks. */
   readonly locks: SessionLocks | undefined;
-  /** Opens OPFS for this session; rejects when OPFS cannot be used here. */
-  readonly openOpfs: (token: string) => Promise<{ readonly store: BlockStore; readonly space: SessionSpace }>;
+  readonly opfs: OpfsAccess;
 }
 
 export interface DataSession {
@@ -84,37 +91,60 @@ export interface DataSession {
 }
 
 /**
- * Starts a working session: holds its lock, then chooses the storage by trying OPFS
- * (never by browser name) and falls back to memory, then removes abandoned sessions in
- * the background.
+ * Starts a working session. It holds its lock, then chooses the storage by trying OPFS
+ * (never by browser name), and removes abandoned sessions in the background. A tab keeps
+ * its data in OPFS only while it holds its lock; without one (no Web Locks API, or a
+ * request that failed) other tabs could not tell that the data is in use, so the tab
+ * keeps it in memory. If OPFS cannot be opened, for example because abandoned sessions
+ * fill the quota, the session removes them first and tries once more.
  */
 export async function startDataSession(env: DataSessionEnv): Promise<DataSession> {
-  if (env.locks !== undefined) await holdSessionLock(env.locks, env.token);
-  let opfs: { readonly store: BlockStore; readonly space: SessionSpace } | undefined;
-  let fallbackReason: string | undefined;
-  try {
-    opfs = await env.openOpfs(env.token);
-  } catch (error) {
-    fallbackReason = error instanceof Error ? error.message : String(error);
-  }
-  const locks = env.locks;
-  let cleanup: Promise<CleanupState>;
+  const { locks, token } = env;
   if (locks === undefined) {
-    cleanup = Promise.resolve({ state: 'unavailable', reason: 'this browser has no Web Locks API' });
-  } else if (opfs === undefined) {
-    cleanup = Promise.resolve({ state: 'done', removedSessions: 0 });
-  } else {
-    cleanup = reclaimAbandonedSessions(opfs.space, locks, env.token).then(
-      (removedSessions): CleanupState => ({ state: 'done', removedSessions }),
-      (error: unknown): CleanupState => ({
-        state: 'unavailable',
-        reason: error instanceof Error ? error.message : String(error),
-      }),
+    return memorySession(
+      'this browser has no Web Locks API, which keeps the temporary files of a tab safe from other tabs',
+      { state: 'unavailable', reason: 'this browser has no Web Locks API' },
     );
   }
-  return {
-    store: opfs?.store ?? new MemoryBlockStore(),
-    ...(fallbackReason === undefined ? {} : { fallbackReason }),
-    cleanup,
-  };
+  try {
+    await holdSessionLock(locks, token);
+  } catch (error) {
+    return memorySession(`the Web Lock of this tab could not be taken (${messageOf(error)})`, {
+      state: 'unavailable',
+      reason: 'this tab holds no Web Lock',
+    });
+  }
+  let space: SessionSpace;
+  try {
+    space = await env.opfs.space();
+  } catch (error) {
+    return memorySession(messageOf(error), { state: 'done', removedSessions: 0 });
+  }
+  const reclaim = () =>
+    reclaimAbandonedSessions(space, locks, token).then(
+      (removedSessions): CleanupState => ({ state: 'done', removedSessions }),
+      (error: unknown): CleanupState => ({ state: 'unavailable', reason: messageOf(error) }),
+    );
+  try {
+    return { store: await env.opfs.open(token), cleanup: reclaim() };
+  } catch {
+    const cleanup = await reclaim();
+    try {
+      return { store: await env.opfs.open(token), cleanup: Promise.resolve(cleanup) };
+    } catch (error) {
+      return memorySession(openFailure(error), cleanup);
+    }
+  }
+}
+
+function memorySession(fallbackReason: string, cleanup: CleanupState): DataSession {
+  return { store: new MemoryBlockStore(), fallbackReason, cleanup: Promise.resolve(cleanup) };
+}
+
+function openFailure(error: unknown): string {
+  return isStorageFull(error) ? 'the browser storage of this site is full' : messageOf(error);
+}
+
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

@@ -120,7 +120,17 @@ const CORPUS: readonly Corpus[] = [
     expected: records({ id: 'a', header_offset: 0, sequence_offset: 2, end_offset: 2, residues: '' }),
   },
   { name: 'an empty input has no records', input: text(''), expected: records() },
-  { name: 'a long record (3 checkpoints) with lines of 60 and 61 residues', ...longRecord(3 * 65_536 + 100, [60, 61]) },
+  {
+    name: 'a U+FEFF at the start of a header is part of the ID',
+    input: text(`>${String.fromCharCode(0xfeff)}a\nAC\n`),
+    expected: records({ id: `${String.fromCharCode(0xfeff)}a`, header_offset: 0, sequence_offset: 6, end_offset: 9, residues: 'AC' }),
+  },
+  {
+    name: 'bytes after the empty record that ends the input are not read',
+    input: () => new Uint8Array([...encoder.encode('>a\nAC\n>\n>b\nGG\n'), 0xff]),
+    expected: records({ id: 'a', header_offset: 0, sequence_offset: 3, end_offset: 6, residues: 'AC' }),
+  },
+  { name: 'a long record (4 checkpoints) with lines of 60 and 61 residues', ...longRecord(3 * 65_536 + 100, [60, 61]) },
   { name: 'a long record with regular 80-residue lines', ...longRecord(200_000, [80]) },
 ];
 
@@ -128,6 +138,11 @@ const ERRORS: ReadonlyArray<{ readonly name: string; readonly input: Uint8Array;
   { name: 'text before the first header', input: encoder.encode('x\n>a\nAC\n'), error: /Expected > at record start\./ },
   { name: 'a blank line before the first header', input: encoder.encode('\n>a\nAC\n'), error: /Expected > at record start\./ },
   { name: 'white space only', input: encoder.encode(' \n'), error: /Expected > at record start\./ },
+  {
+    name: 'a first line that is not a header, before bytes that are not UTF-8',
+    input: new Uint8Array([0x78, 0x0a, 0xff]),
+    error: /Expected > at record start\./,
+  },
   {
     name: 'bytes that are not UTF-8',
     input: new Uint8Array([...encoder.encode('>a\nAC'), 0xff, ...encoder.encode('GT\n')]),

@@ -64,9 +64,13 @@ interface StagedRun {
   readonly writers: ReadonlyMap<OutputStream, BlockWriter>;
   readonly receiver: RunOutputReceiver;
   readonly lengths: Lengths;
+  /** HSP records so far: the lines of stream 1 that are not blank, as `readHits` reads them. */
   hitLines: number;
-  lastHitByte: number | undefined;
+  /** The current line of stream 1 has a character other than white space. */
+  hitLineOpen: boolean;
   failure: Error | undefined;
+  /** The commit in progress; a second commitRun waits for the same one. */
+  commit: Promise<ResultSetRef> | undefined;
 }
 
 interface CommittedRun {
@@ -137,10 +141,10 @@ export class DataService implements DataGateway {
               included.map((record) => [record.header_offset, record.end_offset] as const),
             );
       const previous = parts[parts.length - 1];
-      if (previous !== undefined && previous.length > 0 && previous[previous.length - 1] !== LF) {
+      if (bytes.length > 0 && previous !== undefined && previous[previous.length - 1] !== LF) {
         parts.push(NEWLINE);
       }
-      parts.push(bytes);
+      if (bytes.length > 0) parts.push(bytes);
       records.push(...included.map(recordKey));
     }
     const bytes = concatBytes(parts);
@@ -168,16 +172,22 @@ export class DataService implements DataGateway {
       receiver: new RunOutputReceiver(channel.port2, (stream, bytes) => this.append(run, stream, bytes)),
       lengths,
       hitLines: 0,
-      lastHitByte: undefined,
+      hitLineOpen: false,
       failure: undefined,
+      commit: undefined,
     };
     this.runs.set(runId, run);
     return channel.port1;
   }
 
-  async commitRun(runId: string): Promise<ResultSetRef> {
+  commitRun(runId: string): Promise<ResultSetRef> {
     const run = this.runs.get(runId);
-    if (run?.state !== 'staged') throw new Error(`run ${runId} is not staged`);
+    if (run?.state !== 'staged') return Promise.reject(new Error(`run ${runId} is not staged`));
+    run.commit ??= this.commit(runId, run);
+    return run.commit;
+  }
+
+  private async commit(runId: string, run: StagedRun): Promise<ResultSetRef> {
     const result = await run.receiver.finished;
     if (this.runs.get(runId) !== run) throw new Error(`run ${runId} was discarded`);
     const failure =
@@ -195,7 +205,7 @@ export class DataService implements DataGateway {
       throw isStorageFull(error) ? new StorageFullError() : error;
     }
     this.runs.set(runId, { state: 'committed', token: run.token, lengths: Object.freeze({ ...run.lengths }) });
-    const hitCount = run.hitLines + (run.lengths[HITS_STREAM] > 0 && run.lastHitByte !== LF ? 1 : 0);
+    const hitCount = run.hitLines + (run.hitLineOpen ? 1 : 0);
     return { runId, byteLengths: { 0: run.lengths[0], 6: run.lengths[6], 7: run.lengths[7] }, hitCount };
   }
 
@@ -237,7 +247,7 @@ export class DataService implements DataGateway {
 
   /** Stores one chunk of a staged run. After a failure, the run keeps nothing. */
   private append(run: StagedRun, stream: OutputStream, bytes: Uint8Array): void {
-    if (run.failure !== undefined) return;
+    if (run.failure !== undefined || bytes.length === 0) return;
     try {
       run.writers.get(stream)!.append(bytes);
     } catch (error) {
@@ -248,8 +258,14 @@ export class DataService implements DataGateway {
     }
     run.lengths[stream] += bytes.length;
     if (stream === HITS_STREAM) {
-      for (const byte of bytes) if (byte === LF) run.hitLines++;
-      run.lastHitByte = bytes[bytes.length - 1];
+      for (const byte of bytes) {
+        if (byte === LF) {
+          if (run.hitLineOpen) run.hitLines++;
+          run.hitLineOpen = false;
+        } else if (byte !== 0x20 && byte !== 0x09 && byte !== 0x0d) {
+          run.hitLineOpen = true;
+        }
+      }
     }
   }
 

@@ -76,7 +76,7 @@ for (const ending of ['is killed', 'is closed'] as const) {
   });
 }
 
-test("two open tabs never remove each other's data", async ({ profile }) => {
+test("two open tabs, started one after the other, never remove each other's data", async ({ profile }) => {
   const a = await openApp(profile.context);
   await runSearch(a, 1);
   const probe = await openProbe(profile.context);
@@ -101,6 +101,27 @@ test("two open tabs never remove each other's data", async ({ profile }) => {
   expect(after).toHaveLength(2);
   await expectResult(a, 1);
   await runSearch(a, 2);
+});
+
+test('two tabs that start at the same time remove an abandoned session once and keep each other', async ({
+  profile,
+}) => {
+  const abandonedTab = await openApp(profile.context);
+  await runSearch(abandonedTab, 1);
+  const probe = await openProbe(profile.context);
+  const [abandoned] = await sessionDirectories(probe);
+  await abandonedTab.close();
+  await expect.poll(() => heldSessionLocks(probe)).toEqual([]);
+
+  const tabs = await Promise.all([openApp(profile.context), openApp(profile.context)]);
+  const removed = await Promise.all(
+    tabs.map((tab) => tab.getByTestId('storage-status').getAttribute('data-removed-sessions')),
+  );
+  expect(removed.map(Number).sort()).toEqual([0, 1]);
+  const sessions = await sessionDirectories(probe);
+  expect(sessions).toHaveLength(2);
+  expect(sessions).not.toContain(abandoned);
+  expect(await heldSessionLocks(probe)).toEqual(sessions);
 });
 
 test('a stopped (frozen) tab keeps its data while another tab starts', async ({ profile }) => {

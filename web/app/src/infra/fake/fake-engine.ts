@@ -41,6 +41,8 @@ export class FakeEngine implements EngineGateway {
   async validate(argv: readonly string[]): Promise<ValidationResult> {
     const program = argv[0];
     if (!PROGRAMS.some((p) => p.id === program)) return { ok: false, message: `unknown program: ${program}` };
+    // As ABI v2 does until session SX (web/adapter/src/run.rs `Program::parse`).
+    if (program === 'blastx') return { ok: false, message: 'blastx is not available in LOSAT Web ABI v2 yet' };
     return { ok: true };
   }
 

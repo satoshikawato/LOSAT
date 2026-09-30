@@ -4,7 +4,7 @@
 // composition root.
 import { sha256Hex } from '../browser/platform';
 import { DataService } from '../data/data-service';
-import { openOpfsSession } from '../data/opfs-block-store';
+import { opfsAccess } from '../data/opfs-block-store';
 import { startDataSession, type SessionLocks } from '../data/session';
 import { FakeScanner } from '../fake/fake-fasta';
 import { DATA_GATEWAY_METHODS } from './methods';
@@ -13,7 +13,7 @@ import { serveRpc, type RpcEndpoint } from './rpc';
 const token = crypto.randomUUID();
 const locks = 'locks' in navigator ? (navigator.locks as unknown as SessionLocks) : undefined;
 
-const service = startDataSession({ token, locks, openOpfs: openOpfsSession }).then(
+const service = startDataSession({ token, locks, opfs: opfsAccess }).then(
   (session) =>
     new DataService({
       store: session.store,

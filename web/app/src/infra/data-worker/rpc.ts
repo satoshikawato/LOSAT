@@ -63,14 +63,16 @@ export function serveRpc<T extends object>(
 
 /**
  * Returns an object whose `methods` call the served object behind `endpoint`. If the
- * endpoint reports an error (a worker that failed to start or crashed), every pending and
- * later call rejects with it.
+ * endpoint reports an error before its first answer (a worker that failed to start),
+ * every pending and later call rejects with it.
  */
 export function rpcClient<T extends object>(endpoint: RpcEndpoint, methods: readonly Methods<T>[]): T {
   let nextId = 0;
   let broken: Error | undefined;
   const pending = new Map<number, { resolve(value: unknown): void; reject(error: Error): void }>();
+  let answered = false;
   endpoint.addEventListener('message', (event) => {
+    answered = true;
     const response = (event as MessageEvent<RpcResponse>).data;
     const call = pending.get(response.id);
     if (call === undefined) return;
@@ -84,6 +86,9 @@ export function rpcClient<T extends object>(endpoint: RpcEndpoint, methods: read
     }
   });
   endpoint.addEventListener('error', (event) => {
+    // An error before the first answer means the worker failed to start. Later errors are
+    // uncaught exceptions of a running worker; the served calls report their own errors.
+    if (answered) return;
     const detail = (event as ErrorEvent).message;
     broken = new Error(`the worker stopped${detail ? `: ${detail}` : ''}`);
     for (const call of pending.values()) call.reject(broken);

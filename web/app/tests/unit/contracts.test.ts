@@ -57,6 +57,7 @@ describe('Run output contract: DataService with the memory store, in one thread'
       await contractCase.run({
         data,
         writer: async (port) => localWriter(port),
+        usage: async () => store.usage(),
         exhaust: async () => store.setCapacity(store.usage()),
         restore: async () => store.setCapacity(Number.POSITIVE_INFINITY),
       });

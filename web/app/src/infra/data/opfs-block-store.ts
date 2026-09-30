@@ -10,7 +10,7 @@ import {
   type BlockStore,
   type BlockWriter,
 } from './block-store';
-import { TMP_DIRECTORY, type SessionSpace } from './session';
+import { TMP_DIRECTORY, type OpfsAccess, type SessionSpace } from './session';
 
 /** The part of FileSystemSyncAccessHandle that the store uses (worker-only API). */
 interface SyncAccessHandle {
@@ -42,11 +42,12 @@ export class OpfsBlockStore implements BlockStore {
     const names = pathNames(path);
     const name = names[names.length - 1]!;
     if (this.blocks.has(path)) throw new Error(`block ${path} already exists`);
-    const directory = await this.directory(names.slice(0, -1), true);
-    if (await hasEntry(directory, name)) throw new Error(`block ${path} already exists`);
+    let directory: FileSystemDirectoryHandle;
     let file: FileSystemFileHandle;
     let handle: SyncAccessHandle;
     try {
+      directory = await this.directory(names.slice(0, -1), true);
+      if (await hasEntry(directory, name)) throw new Error(`block ${path} already exists`);
       file = await directory.getFileHandle(name, { create: true });
       handle = await openSyncAccessHandle(file);
     } catch (error) {
@@ -167,30 +168,39 @@ export class OpfsBlockStore implements BlockStore {
   }
 }
 
-/**
- * Opens OPFS for one working session: tmp/<token>/, checked by writing, sealing, reading
- * and removing a small block. Call it only while the session's lock is held (session.ts).
- * Rejects, after removing what it created, when this browser cannot use OPFS here.
- */
-export async function openOpfsSession(token: string): Promise<{ store: OpfsBlockStore; space: SessionSpace }> {
+/** OPFS for the working sessions (session.ts): tmp/ and the directory of each session. */
+export const opfsAccess: OpfsAccess = {
+  async space() {
+    return opfsSessionSpace(await tmpDirectory());
+  },
+  /**
+   * Opens tmp/<token>/, checked by writing, sealing, reading and removing a small block.
+   * Call it only while the session's lock is held. Rejects, after removing what it
+   * created, when this browser cannot use OPFS here.
+   */
+  async open(token) {
+    const tmp = await tmpDirectory();
+    const store = new OpfsBlockStore(await tmp.getDirectoryHandle(token, { create: true }));
+    try {
+      await probe(store);
+    } catch (error) {
+      await tmp.removeEntry(token, { recursive: true }).catch(() => undefined);
+      throw error;
+    }
+    return store;
+  },
+};
+
+async function tmpDirectory(): Promise<FileSystemDirectoryHandle> {
   const storage = (globalThis.navigator as Navigator | undefined)?.storage;
   if (typeof storage?.getDirectory !== 'function') {
     throw new Error('this browser has no Origin Private File System');
   }
-  const root = await storage.getDirectory();
-  const tmp = await root.getDirectoryHandle(TMP_DIRECTORY, { create: true });
-  const store = new OpfsBlockStore(await tmp.getDirectoryHandle(token, { create: true }));
-  try {
-    await probe(store);
-  } catch (error) {
-    await tmp.removeEntry(token, { recursive: true }).catch(() => undefined);
-    throw error;
-  }
-  return { store, space: opfsSessionSpace(tmp) };
+  return (await storage.getDirectory()).getDirectoryHandle(TMP_DIRECTORY, { create: true });
 }
 
 /** The session directories under tmp/ (session.ts). */
-export function opfsSessionSpace(tmp: FileSystemDirectoryHandle): SessionSpace {
+function opfsSessionSpace(tmp: FileSystemDirectoryHandle): SessionSpace {
   return {
     async list() {
       const names: string[] = [];

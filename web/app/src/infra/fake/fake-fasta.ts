@@ -3,8 +3,8 @@
 // reader and must not be used for anything else. It follows the parser kind 0 rules of
 // the ABI document (the `bio::io::fasta` reader) closely enough to pass
 // tests/contract/record-scanner.contract.ts, with these simplifications: it validates
-// UTF-8 over the whole input first, it trims only ASCII white space at the end of
-// sequence lines that are pure ASCII, and it always reports the checkpoints layout.
+// UTF-8 line by line (only the lines that bio reads), and it always reports the
+// checkpoints layout.
 import { recordKey, type IndexedRecord, type RecordKey } from '../../domain/dataset';
 import type { RecordScanner, ScanResponse } from '../../ports/scan';
 import { concatBytes } from '../bytes';
@@ -41,21 +41,25 @@ interface Builder {
   readonly checkpoints: number[];
 }
 
-export function fakeScan(bytes: Uint8Array): IndexedRecord[] {
+/** Decodes one line as bio reads it: UTF-8, a leading U+FEFF kept. */
+function decodeLine(line: Uint8Array): string {
   try {
-    new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(line);
   } catch {
     throw new Error('stream did not contain valid UTF-8');
   }
+}
+
+export function fakeScan(bytes: Uint8Array): IndexedRecord[] {
   const records: IndexedRecord[] = [];
-  if (bytes.length === 0) return records;
-  if (bytes[0] !== GT) throw new Error('Expected > at record start.');
   let current: Builder | undefined;
   let offset = 0;
   while (offset < bytes.length) {
     const newline = bytes.indexOf(LF, offset);
     const lineEnd = newline < 0 ? bytes.length : newline;
     const next = newline < 0 ? bytes.length : newline + 1;
+    decodeLine(bytes.subarray(offset, lineEnd));
+    if (offset === 0 && bytes[0] !== GT) throw new Error('Expected > at record start.');
     if (bytes[offset] === GT) {
       if (current !== undefined) {
         const record = finish(current, offset);
@@ -75,7 +79,7 @@ export function fakeScan(bytes: Uint8Array): IndexedRecord[] {
 }
 
 function startRecord(bytes: Uint8Array, start: number, lineEnd: number, next: number, index: number): Builder {
-  const header = new TextDecoder().decode(bytes.subarray(start + 1, lineEnd)).replace(TRAILING_WHITESPACE, '');
+  const header = decodeLine(bytes.subarray(start + 1, lineEnd)).replace(TRAILING_WHITESPACE, '');
   const split = header.search(WHITESPACE);
   return {
     index,
@@ -95,7 +99,7 @@ function addLine(builder: Builder, line: Uint8Array, lineOffset: number): void {
   if (line.every((byte) => byte < 0x80)) {
     while (keep > 0 && isAsciiWhitespace(line[keep - 1]!)) keep--;
   } else {
-    keep = new TextEncoder().encode(new TextDecoder().decode(line).replace(TRAILING_WHITESPACE, '')).length;
+    keep = new TextEncoder().encode(decodeLine(line).replace(TRAILING_WHITESPACE, '')).length;
   }
   for (let i = 0; i < keep; i++) {
     if ((builder.length + i) % CHECKPOINT_EVERY === 0) builder.checkpoints.push(lineOffset + i);

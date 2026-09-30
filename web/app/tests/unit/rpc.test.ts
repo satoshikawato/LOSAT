@@ -77,7 +77,22 @@ describe('rpc', () => {
     await expect(client.add(1, 1)).rejects.toThrow('no storage');
   });
 
-  it('rejects pending and later calls when the worker stops', async () => {
+  it('keeps working after an error event of a worker that has answered', async () => {
+    const target = new EventTarget();
+    const endpoint: RpcEndpoint = {
+      postMessage: (message) => {
+        const { id } = message as { id: number };
+        queueMicrotask(() => target.dispatchEvent(new MessageEvent('message', { data: { id, ok: true, value: 3 } })));
+      },
+      addEventListener: (type, listener) => target.addEventListener(type, listener),
+    };
+    const client = rpcClient<Service>(endpoint, ['add']);
+    expect(await client.add(1, 2)).toBe(3);
+    target.dispatchEvent(new Event('error'));
+    expect(await client.add(1, 2)).toBe(3);
+  });
+
+  it('rejects pending and later calls when the worker fails to start', async () => {
     const target = new EventTarget();
     const endpoint: RpcEndpoint = {
       postMessage: () => undefined,

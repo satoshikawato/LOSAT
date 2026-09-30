@@ -67,7 +67,7 @@ async function expectMismatch(
       'run',
     );
     check(error.message.includes('record table'), 'the message names the record table');
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await new Promise((resolve) => setTimeout(resolve, 300));
     same(observed.messages.length, 0, 'messages sent by a run stopped at register');
   } finally {
     observed.close();

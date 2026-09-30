@@ -122,7 +122,13 @@ async function runOutput(): Promise<{ backend: StorageBackend; results: CaseResu
     const backend = (await data.storageInfo()).backend;
     const results = await runCases(
       RUN_OUTPUT_CASES,
-      () => ({ data, writer: (port: MessagePort) => engine.writer(port), exhaust, restore }),
+      () => ({
+        data,
+        writer: (port: MessagePort) => engine.writer(port),
+        usage: async () => (await data.storageInfo()).sessionBytes,
+        exhaust,
+        restore,
+      }),
       { onResult: (result) => logResult('run output', result) },
     );
     return { backend, results };

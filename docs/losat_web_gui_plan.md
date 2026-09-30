@@ -531,7 +531,6 @@ NCBI BLAST+（oracle） ─[既存の認証]─► ネイティブ LOSAT の凍�
 | Cloudflare に残す旧版の数、ドメイン名 | S16 の前 |
 | BLASTX の範囲の拡大（DW-11）を LOSATX 計画の範囲の記録に書くこと | SX の前（保守者） |
 | v1 ABI の廃止 | gbdraw が v2 へ移る時点（TD-1） |
-| BLASTN の query の分割（`CQuerySplitter`。NCBI は、query の batch の片方の鎖の合計が 2 ×（chunk − 100）以上、`-task blastn` で 1,999,800、megablast で 9,999,800 文字以上のとき、塊に分けて予備の段階を行い HSP を合わせる）を移植し、S07++ の明示的な拒否をなくす（`docs/evidence/losat_web_e2f/AUTHORITY.md` §D） | S17 の前（保守者と相談） |
 | BLASTN の FASTA の読み方を NCBI の `CFastaReader` に合わせる（TD-12 の拒否をなくす。アダプタの索引の走査の解析器の種類を足す）。NCBI の後の query batch の大きさの再現は S07++（TD-14）に移した | S17 の前（保守者と相談） |
 | `-num_threads` の NCBI の警告（CPU の数を超えると「Number of threads was reduced to N …」、`-subject` があると「'num_threads' is currently ignored when 'subject' is specified.」、`blast_args.cpp:3203-3236`）。LOSAT はどの program も `-subject` でスレッドを使い、警告を出さない（出力は同じ、stderr だけが違う。以前から。S07+ の第 4 回の監査、`docs/evidence/losat_web_e2c/AUTHORITY.md` §I）。承認済みの例外にするか、警告を出すか | S17 の前（保守者と相談） |
 | 公開する版の名前 | S17 |

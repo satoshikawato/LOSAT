@@ -7,7 +7,7 @@ depended on the batches after the first are compared byte for byte ("same"). The
 reports of invalid queries after the first batch, and the gapped X-drop of gap costs beyond
 the tables with queries of different compositions. A Karlin-Altschul table error after a
 first batch of invalid queries stays an explicit rejection. Two cases more check the batch
-size from which NCBI splits a batch into query chunks, which LOSAT rejects explicitly.
+size from which NCBI splits a batch into query chunks, which LOSAT does as NCBI.
 
 Usage: check_inputs.py --bin-dir DIR --losat LOSAT --work DIR
 """
@@ -24,7 +24,7 @@ BATCHED = {"invalid_at_end.fmt7", "long_invalid_run.fmt0"}
 e2c_cases = e2c.cases
 e2c_make_inputs = e2c.make_inputs
 # NCBI splits a query batch of at least 2 x (1000000 - 100) residues with -task blastn into
-# query chunks (CQuerySplitter), which LOSAT rejects; one residue less is not split.
+# query chunks (CQuerySplitter); one residue less is not split.
 SPLIT = 2 * (1_000_000 - 100)
 
 
@@ -43,7 +43,7 @@ def cases(work: Path) -> list[tuple]:
             expect = "same"
         rows.append((name, argv, expect, *extra))
     split = ["-subject", f"{work}/split_subject.fa", "-task", "blastn", "-outfmt", "6"]
-    rows += [("s07pp.query_split", ["-query", f"{work}/split_query.fa", *split], "losat-rejects"),
+    rows += [("s07pp.query_split", ["-query", f"{work}/split_query.fa", *split], "same"),
              ("s07pp.query_unsplit", ["-query", f"{work}/unsplit_query.fa", *split], "same")]
     return rows
 

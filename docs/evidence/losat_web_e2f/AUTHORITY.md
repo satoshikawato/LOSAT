@@ -35,6 +35,8 @@ query ごとの値（ungapped と gapped の block、長さの補正、探索空
 | `blastinput/query_batch.rs` の `BatchSizeMixer`、`next_query_batch_end` | `CBatchSizeMixer` と `GetNextSeqBatch` の移植。`(Int4)` は `core/blast_util.rs` の `ncbi_int4_from_double` |
 | `run.rs` の `run_in_pool` | subject を 1 度だけ読み符号化し（`PreparedSubjects`）、batch を NCBI と同じく決めて `search_query_batch` を呼ぶ。batch の HSP の query の番号を全体の番号に直し、全 query の結果を 1 度に書く |
 | `run.rs` の `search_query_batch` | batch の query の塊、lookup table、対角線の表、X-drop、`-subject_besthit` で検索する（S07+ までの全 query の検索と同じ処理を batch に対して行う）。subject の chunk ごとの初期の hit の数を足す |
+| `blastn/query_split.rs` | `CQuerySplitter` の塊の数・範囲・部分・context・補正と、mask の制限（§D） |
+| `run.rs` の `search_query_chunks`・`merge_query_chunk`・`merge_prelim_hit_lists` | 分割する batch の塊ごとの予備の段階（`search_query_batch` の `BatchStage::ChunkPrelim`）と、`BlastHSPStreamMerge`・`Blast_HitListMerge`・`Blast_HSPListsMerge` の移植（§D） |
 
 S07+ で batch に依存するために置いた次のものを、本物の batch で置き換えた。
 
@@ -46,4 +48,23 @@ S07+ で batch に依存するために置いた次のものを、本物の batc
 
 ## D. query の分割
 
-NCBI は、batch の query の総文字数が 2 ×（chunk − 100）以上のとき、batch を重なり 100 の塊に分けて予備の段階を行い、HSP を合わせる（`split_query_cxx.cpp:50-62`、`split_query_aux_priv.cpp:51-145`、`prelim_stage.cpp:230-260`）。LOSAT は分割しない。EDL933（5,528,445 文字）を query にした `-task blastn`（NCBI は 5 つの塊に分ける。塊の大きさ 1,105,770、重なり 100）で、塊の境の前後に置いた 63 の subject の窓（EDL933 と Sakai、300〜20000 文字）を比べると、62 は NCBI とバイト一致し、1 つ（境でちょうど終わる 3000 文字の窓）で LOSAT に 17 文字の HSP が 1 本多かった。NCBI に `CHUNK_SIZE=10000000` を与えて分割させないと、LOSAT と同じになる。分割の移植（塊ごとの query の塊と lookup table、塊ごとの予備の段階、`BlastHSPStreamMerge` での重なりの HSP の合わせ方）は大きいので、NCBI が分割する batch（query の片方の鎖の合計が 2 ×（chunk − 100）以上、`-task blastn` で 1,999,800、megablast で 9,999,800 文字以上）は明示的に拒否する（`run.rs` の `run_in_pool`）。1,999,799 文字の query は NCBI とバイト一致し、1,999,800 文字は拒否する（`check_inputs.py` の `s07pp.query_unsplit`・`s07pp.query_split`）。Gate A の EDL933 × Sakai の megablast（5.5 Mb）は分割の対象ではない。分割の移植は計画の未決事項にした。
+NCBI は、batch の query の総文字数を「chunk の大きさ − 重なり 100」で割った商が 2 以上のとき（`-task blastn` で 1,999,800、megablast で 9,999,800 文字以上）、batch を query の塊に分けて予備の段階を塊ごとに行い、HSP を batch の context に移して合わせ、traceback は batch 全体で行う。LOSAT はこれを移植した（`query_split.rs`、`run.rs` の `search_query_chunks`・`merge_query_chunk`・`merge_prelim_hit_lists`）。
+
+| NCBI | 振る舞い |
+|---|---|
+| `split_query_aux_priv.cpp:105-145`（`SplitQuery_CalculateNumChunks`） | 塊の数は総文字数 /（chunk − 100）。2 以上なら、塊の大きさを（総文字数 +（塊の数 − 1）× 100）/ 塊の数とし、塊の数 < 大きさ − 100 なら 1 を足す |
+| `split_query_cxx.cpp:135-180` | 塊の範囲：始まりを「大きさ − 100」ずつ進め、最後の塊は総文字数まで |
+| `split_query_cxx.cpp:214-293`、`196-210` | query の範囲は前の query の終わりから続く（`COpenRange`）。塊と交わる query ごとに、塊の中の部分を作る |
+| `split_query_cxx.cpp:392-410` | 塊の context は、部分ごとに batch の 2 本の鎖の context |
+| `split_query_cxx.cpp:580-665`、`split_query_aux_priv.cpp:251-284` | 塊の context の補正：部分が batch の context で始まる位置（minus 鎖は query の終わりから）。式は `size_t` で、部分の長さと重なりの小さい方を引く。部分が続く限り正しい位置になる（`query_split.rs` の試験） |
+| `split_query_cxx.cpp:278-281`、`seqlocinfo.cpp:98-124`、`blast_setup.c:1030-1062` | 塊の mask：batch の設定のときに query の vector に書かれた mask（DUST と小文字）を部分に制限する。`RestrictToSeqInt` は部分の最後の文字を範囲から外し、交わりの終わりを 1 文字伸ばす。そのため部分の最後の文字から始まる mask は落ち、ほかの mask は 1 文字長くなる（部分の終わりまで） |
+| `dust_filter.cpp:166-186`、`blast_objmgr_tools.cpp:176-228` | 塊の部分にも DUST を行い、制限した mask と合わせる |
+| `split_query_aux_priv.cpp:150-182`、`blast_setup.c:670-697,774-850`、`query_data.cpp:52-58` | 塊の探索空間：options に batch の context の探索空間を入れ、塊の context は、batch の context でなく塊の中の番号の値を使う。値が 0 なら塊の長さから計算する。batch の query data は cache されるので、計算は batch の設定の無効な context を見て 0 にする |
+| `prelim_stage.cpp:225-300`、`split_query_aux_priv.cpp:185-210` | 塊ごとに query の塊・lookup table・Karlin-Altschul の block（塊の組成）・X-drop・対角線の表・診断を作って予備の段階を行う（`-subject_besthit` と予備の e-value の刈り込みは塊の値で行う）。塊の警告は出さず、有効な context の無い塊の誤りは無視する |
+| `blast_hspstream.c:399-536`、`hspfilter_collector.c:97-160` | 塊の HSP を query ごとの一覧に分け、context と補正で batch に移し、補正を分割点にして `Blast_HitListMerge` で合わせ、最後に得点で並べる |
+| `blast_hits.c:2119-2219`、`2757-2804`、`2809-3034` | 分割点のどれかが正なら `Blast_HSPListsMerge`（query の分割の枝。重なりの帯の判定は鎖で向きが変わり、帯の HSP を前に入れ替えてから、対角線の差が 10 未満のものを `s_BlastMergeTwoHSPs` で合わせる）、そうでなければ `Blast_HSPListAppend` |
+| `local_blast.cpp:301-310` | 分割した batch の `GetNumExtensions` は batch の診断で 0（塊の診断は別）。次の batch の大きさは初期の hit を 0 として決まる |
+
+LOSAT の違い（出力は同じ）：分割した batch の lookup table を作らない（NCBI は作るが走査しない）。予備の hit list の大きさは、分割しない batch と同じく traceback の後に適用する。`Blast_HSPListsMerge` の帯の HSP の入れ替えは、subject の分割の枝にも入れた（S07+ までは入れ替えず、得点が同じ HSP の順が違いえた）。
+
+確かめたこと（NCBI BLAST+ 2.17.0 とのバイト比較。`split_check/`）：EDL933（5,528,445 文字）を query にした `-task blastn`（5 つの塊）の、塊の境の前後の 63 の窓（S07++ の最初の比較で 1 つが違った窓を含む）。EDL933 と Sakai の 2 つの query の megablast（2 つの塊）と `-task blastn`（11 の塊）の、塊の境と query の境の窓。無効な query を分割する batch の前と後に置いた outfmt 0・6・7。短い query の後の長い query（2 つ目の塊の context が短い query の探索空間を使う）。小文字の mask の 1 文字の伸びと、塊の最後の文字から始まる mask の脱落（`-word_size 8`）。複数の subject と `-max_target_seqs`・`-subject_besthit`・`-num_threads 4`。分割した batch の後の batch。塊の境の周りの乱数の窓（分岐、挿入と欠失、逆向き）。NCBI に `CHUNK_SIZE=20000000` を与えて分割させない出力とも比べ、分割で NCBI の出力が変わる case（探索空間、mask の 2 つの細部、境の HSP）を LOSAT が再現することを確かめた。

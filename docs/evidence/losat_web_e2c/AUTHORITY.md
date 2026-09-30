@@ -198,6 +198,17 @@ ABI v1 は `run_local` で CLI と同じエンジンを使うので、エンジ�
 
 | NCBI | 振る舞い | LOSAT |
 |---|---|---|
-| `showalign.cpp:247-248,317-319` | outfmt 0 の ` Strand=` は、整列の各行の鎖（`StrandSign`）から決める | subject の座標の大小（`s_start > s_end`）から決めていたので、1 文字の HSP（始まりと終わりが同じ）は minus 鎖でも `Plus/Plus` になった（S07 の移植から。第 8 回の修正の後、予備の段階が曖昧な文字を乱数の塩基として読んだ seed を traceback が 1 文字に縮めるときに出る。例：query `TAGGACGG`、subject `YCAYAANTNCRGYACT`、`-task blastn -word_size 4`。outfmt 6/7 は同じ）。`report/pairwise.rs` の BLASTN の行は HSP の query の frame から鎖を決める |
+| `showalign.cpp:4011-4021,317-319` | outfmt 0 の ` Strand=` は、整列の各行の鎖（`StrandSign`）から決める | subject の座標の大小（`s_start > s_end`）から決めていたので、1 文字の HSP（始まりと終わりが同じ）は minus 鎖でも `Plus/Plus` になった（S07 の移植から。第 8 回の修正の後、予備の段階が曖昧な文字を乱数の塩基として読んだ seed を traceback が 1 文字に縮めるときに出る。例：query `TAGGACGG`、subject `YCAYAANTNCRGYACT`、`-task blastn -word_size 4`。outfmt 6/7 は同じ）。`report/pairwise.rs` の BLASTN の行は HSP の query の frame から鎖を決める |
 
 第 12 回の二つの修正は、監査の 700 の区間の組合せ（位置 0 と末尾の小文字、1 文字ずつの区間、5000000 の subject の chunk の境の近く）と、得点 0 の HSP の 450 の組合せ（`-max_target_seqs`・`-max_hsps`・`-subject_besthit`・`-perc_identity`、複数の query と subject、outfmt 0/6/7）で NCBI とバイト一致した。
+
+## Q. 第 14 回の独立監査で見つかった、以前からの差
+
+| NCBI | 振る舞い | LOSAT |
+|---|---|---|
+| `na_ungapped.c:1791-1819`（`BlastChooseNaExtend`）、`na_ungapped.c:1415-1435,1514-1566`、`blast_util.c:473-499` | query の短い（`eSmallNaLookupTable` の）lookup table で、word が lookup の語より長ければ、lookup の語の完全一致の延長は圧縮した query（各文字の `blastna & 3`。曖昧な文字も塩基として読む）と subject を 4 文字ずつ比べる（lookup の語の長さと scan step が 4 の倍数で、word が lookup の語より 4 文字以内だけ長ければ 1 byte だけを見る `s_BlastSmallNaExtendAlignedOneByte`、そうでなければ `s_BlastSmallNaExtend`。subject に小文字の区間があれば、scan の開始が揃わないので後者、`na_ungapped.c:1651-1663`） | 表の種類によらず、query の文字をそのまま比べる `s_BlastNaExtend` の延長を使っていた（曖昧な文字は一致しない）。ACGT だけの query では結果は同じ |
+| `blast_nalookup.c:407-411`、`na_ungapped.c:458-606`（`s_IsSeedMasked`・`s_TypeOfWord`） | その表では `masked_locations` を常に作る（「because we use compressed query, we must always check masked location」）。そのため `s_TypeOfWord` は word の中の lookup の語がすべて lookup table にあるかを確かめ、曖昧な文字を含む語（lookup table に無い）があれば word を捨てるか左端を移す | `type_of_word` は query に DUST や小文字の区間があるときだけ確かめていた。そのため、曖昧な文字で区切られた完全一致の区間に 28 文字の seed が 1 つしかない query で、NCBI が捨てる HSP を出していた（既定の megablast。例：query `TTTCGTTGACCTAAAAAGTTCKGTTGGTATGAGAGAAGAATTTTTGGTTGDCAGAAAAAC`、subject `AAAGCGGCA` の後に同じ配列（K→T、D→A）、NCBI は 0 行・LOSAT は 1 行。subject の位置で 21 のうち 9 だけ NCBI が見つける） |
+
+LOSAT：`extension.rs` の `build_compressed_query`（`BlastCompressBlastnaSequence`）と `SmallNaWord`（2 つの延長）を移植し、`run.rs` が NCBI と同じ条件で延長を選び、小さい表では `type_of_word` の確かめを常に行う。`type_of_word` は、NCBI の `Int4 ext_max` が負になる（word が context や scan の範囲を越える）場合も NCBI と同じく扱う。`slice_sweep.py` に `iupac` の pool（1〜3 の IUPAC の文字を持つ 30〜100 文字の query と、その 2〜4 の写しを持つ subject）を足した。各 300 組で、第 13 回の LOSAT は既定で 3 組、`-word_size 24` で 4 組、`-task blastn` で 0 組が NCBI と違い、変更後はどれも 0 組。
+
+第 13 回の ` Strand=` の引用を、outfmt 0 の経路（`s_DisplayIdentityInfo`、`showalign.cpp:4011-4021`）に直した。ABI v2 の HSP レコードは、1 文字の HSP の鎖を座標で表せない（`start` = `end`）ことを `docs/web/abi_v2.md` §8 に書き、鎖の欄を足すかを S13 の指示書に書いた。

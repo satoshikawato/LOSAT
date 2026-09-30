@@ -147,7 +147,7 @@ query on its plus strand, residues of masked regions in lowercase, no frames.
 | `q_idx`, `s_idx` | integer | 0-based record index of the query and the subject in the registered inputs |
 | `rank` | integer | 0-based position of the HSP among the HSPs of its query (derived from `index`) |
 | `raw_score`, `bit_score`, `e_value` | number | engine values, not rounded |
-| `q_start`, `q_end`, `s_start`, `s_end` | integer | 1-based coordinates as printed in outfmt 6 (start > end means minus strand) |
+| `q_start`, `q_end`, `s_start`, `s_end` | integer | 1-based coordinates as printed in outfmt 6 (start > end means minus strand; a BLASTN HSP of one letter has start = end on either strand, and only its `Strand=` line in the stream 0 section shows the strand, S07+ AUTHORITY §P) |
 | `query_frame`, `subject_frame` | integer or null | translation frames where applicable |
 | `subject_length` | integer or null | subject length |
 | `query_aligned`, `subject_aligned` | string or null | aligned sequences with `-` for gaps |

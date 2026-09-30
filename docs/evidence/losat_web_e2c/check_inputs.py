@@ -168,6 +168,12 @@ def make_inputs(work: Path) -> None:
     # random bases of an ambiguity code, trimmed by the traceback) is labelled Plus/Minus.
     (work / "one_letter_q.fa").write_text(">q\nTAGGACGG\n")
     (work / "one_letter_s.fa").write_text(">s\nYCAYAANTNCRGYACT\n")
+    # The fourteenth audit round: IUPAC codes of a query around the only 28-letter seed; the
+    # word extension of NCBI's small-query lookup table reads them as bases, and its word
+    # check drops the words that contain them.
+    (work / "iupac_seed_q.fa").write_text(">q\nTTTCGTTGACCTAAAAAGTTCKGTTGGTATGAGAGAAGAATTTTTGGTTGDCAGAAAAAC\n")
+    (work / "iupac_seed_s.fa").write_text(
+        ">s\nAAAGCGGCATTTCGTTGACCTAAAAAGTTCTGTTGGTATGAGAGAAGAATTTTTGGTTGACAGAAAAACGGCATTACGA\n")
 
 
 def cases(work: Path) -> list[tuple[str, list[str], str]]:
@@ -457,6 +463,9 @@ def cases(work: Path) -> list[tuple[str, list[str], str]]:
         ("audit12.bom_query", ["-query", f"{w}/bom_query.fa", *multi_s, "-outfmt", "6"], "losat-rejects"),
         ("audit12.crash_title_no_hit.fmt0", ["-query", f"{F}/multi_query.fasta", "-subject", f"{w}/crash_title_no_hit.fa"], "losat-rejects"),
     ]
+    rows += [(f"audit14.iupac_seed.{name}", ["-query", f"{w}/iupac_seed_q.fa", "-subject", f"{w}/iupac_seed_s.fa", *options], "same")
+             for name, options in (("fmt0", []), ("fmt6", ["-outfmt", "6"]), ("fmt7", ["-outfmt", "7"]),
+                                   ("word_size_24", ["-word_size", "24", "-outfmt", "6"]))]
     rows += [("audit13.one_letter_minus.fmt0", ["-query", f"{w}/one_letter_q.fa", "-subject", f"{w}/one_letter_s.fa", "-task", "blastn", "-word_size", "4"], "same")]
     rows += [(f"audit12.score0.fmt{outfmt}", ["-query", f"{w}/score0_q.fa", "-subject", f"{w}/score0_s.fa", "-task", "blastn", "-word_size", "4", "-evalue", "1e6", "-outfmt", outfmt], "same")
              for outfmt in ("0", "6", "7")]

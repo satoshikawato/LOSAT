@@ -12,9 +12,12 @@ The `ambiguity` pool (the eighth audit round: NCBI resolves a subject's ambiguit
 with `CRandom` for the preliminary search) cuts windows of EDL933 around its ambiguity
 codes instead. The `lcase` pool (the twelfth audit round: the scan ranges of a subject
 with lowercase masks start at the last letter of each mask) writes lowercase islands into
-the subject; give it `-lcase_masking`.
+the subject; give it `-lcase_masking`. The `iupac` pool (the fourteenth audit round: the
+word extension of NCBI's small-query lookup table reads ambiguity codes of the query as
+bases, and its word check drops the words that contain them) writes IUPAC codes into a
+short query that the subject holds several copies of.
 
-Usage: slice_sweep.py --bin-dir DIR --losat LOSAT --work DIR [--pool viral|ambiguity|lcase]
+Usage: slice_sweep.py --bin-dir DIR --losat LOSAT --work DIR [--pool viral|ambiguity|lcase|iupac]
                       [--options "..."] [--seed N] [--cases N] [--jobs N]
 """
 from __future__ import annotations
@@ -83,6 +86,29 @@ def lcase_pair(seqs: dict[str, str], rng: random.Random) -> tuple[str, str]:
     return query, "".join(subject)
 
 
+def iupac_pair(seqs: dict[str, str], rng: random.Random) -> tuple[str, str]:
+    """A query of 30 to 100 residues from a genome with 1 to 3 IUPAC codes (reverse
+    complemented for 30% of the pairs), and a subject of 2 to 4 copies of it with 0 to 6%
+    of their letters redrawn, between pieces of the genome."""
+    genome = seqs[rng.choice(GENOMES)]
+    start = rng.randrange(1000, len(genome) - 5000)
+    region = genome[start:start + rng.choice([30, 37, 45, 60, 100])]
+    rate = lambda: rng.choice([0.0, 0.03, 0.06])  # noqa: E731
+    copies = [
+        "".join(rng.choice("ACGT") if rng.random() < copy_rate else c for c in region)
+        + genome[start + 1000 + index * 50:start + 1000 + index * 50 + rng.randint(0, 40)]
+        for index, copy_rate in enumerate(rate() for _ in range(rng.randint(2, 4)))
+    ]
+    subject = genome[start - rng.randint(0, 40):start] + "".join(copies)
+    query = list(region)
+    for _ in range(rng.randint(1, 3)):
+        query[rng.randrange(len(query))] = rng.choice("NRYSWKMBDHV")
+    query = "".join(query)
+    if rng.random() < 0.3:
+        query = query[::-1].translate(str.maketrans("ACGTNRYSWKMBDHV", "TGCANYRSWMKVHDB"))
+    return query, subject
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--bin-dir", type=Path, required=True)
@@ -92,13 +118,13 @@ def main() -> int:
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--cases", type=int, default=120)
     parser.add_argument("--jobs", type=int, default=4)
-    parser.add_argument("--pool", choices=("viral", "ambiguity", "lcase"), default="viral")
+    parser.add_argument("--pool", choices=("viral", "ambiguity", "lcase", "iupac"), default="viral")
     args = parser.parse_args()
     args.work.mkdir(parents=True, exist_ok=True)
     rng = random.Random(args.seed)
-    if args.pool in ("viral", "lcase"):
+    if args.pool in ("viral", "lcase", "iupac"):
         seqs = {name: sequence(f"{name}.fasta") for name in GENOMES}
-        make = viral_pair if args.pool == "viral" else lcase_pair
+        make = {"viral": viral_pair, "lcase": lcase_pair, "iupac": iupac_pair}[args.pool]
         pair = lambda: make(seqs, rng)  # noqa: E731
     else:
         edl933 = sequence("EDL933.fna")

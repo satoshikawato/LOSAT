@@ -5473,6 +5473,7 @@ fn search(
     // LOSAT's limits come where NCBI starts the search, after its checks and its
     // `Query is Empty!` success.
     check_losat_limits(&args)?;
+    check_unsupported_environment()?;
     let batching = query_batching_from_environment(args.task == "megablast")?;
     check_residues(query_records, "query")?;
     check_records_have_residues(query_records, "query")?;
@@ -5516,6 +5517,31 @@ fn search(
             batching,
         )
     })
+}
+
+/// Rejects the environment variables that put NCBI BLAST+ into a search mode or report that
+/// LOSAT does not reproduce.
+///
+/// NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.cpp:204-210
+/// ```c
+///     if ( (subjects = db_args->GetSubjects(scope)) ) {
+///         _ASSERT(search_db.Empty());
+/// 	char* bl2seq_legacy = getenv("BL2SEQ_LEGACY");
+/// 	if (bl2seq_legacy)
+///         	db_adapter.Reset(new CLocalDbAdapter(subjects, opts_hndl, false));
+/// 	else
+///         	db_adapter.Reset(new CLocalDbAdapter(subjects, opts_hndl, true));
+/// ```
+/// `BL2SEQ_LEGACY` (any value, also an empty one) turns off the scan of the subjects as a
+/// database: `CLocalBlast` then searches each subject on its own (local_blast.cpp:189,289)
+/// and `CBlastFormat` writes the legacy bl2seq report (`m_IsBl2Seq && !m_IsDbScan`).
+fn check_unsupported_environment() -> Result<()> {
+    if std::env::var_os("BL2SEQ_LEGACY").is_some() {
+        anyhow::bail!(
+            "the environment variable BL2SEQ_LEGACY, which makes NCBI BLAST+ search each subject on its own and write its legacy bl2seq report, is not supported by LOSAT's BLASTN"
+        );
+    }
+    Ok(())
 }
 
 /// NCBI's query batch size (`GetQueryBatchSize`, 0 for the adaptive `CBatchSizeMixer`) and

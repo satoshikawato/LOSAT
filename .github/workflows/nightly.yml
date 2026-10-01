@@ -1,0 +1,54 @@
+name: Nightly
+
+# Heavy checks kept off pull requests: every capture case (including the long
+# TBLASTX manifest cases) against the S02 baseline and the frozen hashes, and the
+# WASI command/reactor matrix with the NCBI comparison oracle.
+on:
+  schedule:
+    - cron: '17 18 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  full-regressions:
+    name: full output regressions
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.92.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: LOSAT -> target
+      - name: Build release binary
+        run: cd LOSAT && cargo build --release --locked --bin LOSAT
+      - name: Link the frozen input paths
+        run: |
+          sudo mkdir -p /mnt/c/Users/genom/GitHub
+          sudo ln -sfn "$GITHUB_WORKSPACE" /mnt/c/Users/genom/GitHub/LOSAT
+      - name: All output hashes, frozen hashes and outfmt 0 fixtures
+        run: |
+          python3 LOSAT/tests/ci_fast_regressions.py --losat LOSAT/target/release/LOSAT \
+            --out .tmp/full-regressions --programs all --all-cases
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: full-regressions
+          path: |
+            .tmp/full-regressions/summary.json
+            .tmp/full-regressions/hashes.tsv
+            .tmp/full-regressions/timing.tsv
+            .tmp/full-regressions/outfmt0-fixtures-*.tsv
+          if-no-files-found: warn
+          retention-days: 30
+
+  wasm:
+    uses: ./.github/workflows/wasm-threading.yml

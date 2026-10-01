@@ -37,6 +37,9 @@ jobs:
         with:
           toolchain: 1.92.0
           targets: wasm32-wasip1-threads
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: LOSAT -> target
       # NCBI reference: c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
       # m_NumThreads = CThreadable::kMinNumThreads; m_MTMode = eNotSupported;
       - name: Install optional serial compatibility target
@@ -114,6 +117,14 @@ jobs:
             --threaded .tmp/threading/artifacts/losat-threaded-command.wasm \
             --oracle-dir .tmp/threading/oracle/ncbi-blast-2.17.0+/bin \
             --jobs 3 --output-dir .tmp/threading/frozen-regressions "${compat_args[@]}"
+      # Runs after a failed frozen step too, so one run reports both.
+      - name: TBLASTX thread-threshold regressions
+        if: ${{ success() || failure() }}
+        run: |
+          compat_args=()
+          if [[ "$INCLUDE_SERIAL_COMPATIBILITY" == true ]]; then
+            compat_args=(--serial .tmp/threading/artifacts/losat-serial-command.wasm)
+          fi
           python3 LOSAT/tests/check_tblastx_thread_thresholds.py \
             --native LOSAT/target/release/LOSAT \
             --threaded .tmp/threading/artifacts/losat-threaded-command.wasm \

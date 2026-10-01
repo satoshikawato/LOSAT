@@ -1,8 +1,16 @@
 name: CI
 
+# Pull requests run the fast checks (no NCBI executable); pushes run them on main
+# only. The two-hour WASI matrix and the full TBLASTX output set run in
+# nightly.yml (schedule, workflow_dispatch) and in release-readiness.yml.
 on:
   push:
+    branches: [main]
   pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   rust:
@@ -13,6 +21,9 @@ jobs:
         with:
           toolchain: 1.92.0
           components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: LOSAT -> target
       # NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1379-1381
       # calls qsort for HSP ordering. This fail-fast ratchet prevents LOSAT from
       # adding another project-owned native implementation boundary.
@@ -22,12 +33,66 @@ jobs:
         run: python3 -m unittest discover -s LOSAT/tests -p 'test_check_pure_rust_runtime_boundary.py'
       - name: Release-candidate tooling tests
         run: python3 -m unittest LOSAT/tests/test_prepare_release_candidate_v010.py
+      - name: Regression tooling tests
+        run: python3 -m unittest discover -s LOSAT/tests -p 'test_ci_fast_regressions.py'
       - run: cd LOSAT && cargo fmt --check
       - run: cd LOSAT && cargo clippy --all-targets --all-features -- -D warnings
       - run: cd LOSAT && cargo test --all-features
         env:
           LOSAT_BLASTX_WORKER_LOG: ${{ runner.temp }}/blastx-worker.log
-      - run: cd LOSAT && cargo build --release
+          # Optimized test code; the test profile keeps the dev profile's debug
+          # assertions and overflow checks.
+          CARGO_PROFILE_TEST_OPT_LEVEL: '1'
 
-  wasm:
-    uses: ./.github/workflows/wasm-threading.yml
+  regressions:
+    name: fast output regressions
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Select programs from the changed paths
+        id: select
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [[ -n "$BASE_SHA" ]]; then
+            python3 LOSAT/tests/ci_fast_regressions.py --select-only --changed-from "$BASE_SHA" | tee select.txt
+          else
+            python3 LOSAT/tests/ci_fast_regressions.py --select-only --programs all | tee select.txt
+          fi
+          echo "programs=$(sed -n 's/^selected programs: \([^ ]*\).*/\1/p' select.txt)" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.select.outputs.programs != 'none'
+        with:
+          toolchain: 1.92.0
+      - uses: Swatinem/rust-cache@v2
+        if: steps.select.outputs.programs != 'none'
+        with:
+          workspaces: LOSAT -> target
+      - name: Build release binary
+        if: steps.select.outputs.programs != 'none'
+        run: cd LOSAT && cargo build --release --locked --bin LOSAT
+      # Frozen outfmt 0/7 bytes print the input paths of the runs that froze them
+      # (TLOSAN Stage G); capture_outputs.py checks the bytes behind each path.
+      - name: Link the frozen input paths
+        if: steps.select.outputs.programs != 'none'
+        run: |
+          sudo mkdir -p /mnt/c/Users/genom/GitHub
+          sudo ln -sfn "$GITHUB_WORKSPACE" /mnt/c/Users/genom/GitHub/LOSAT
+      - name: Output hashes, frozen hashes and outfmt 0 fixtures
+        if: steps.select.outputs.programs != 'none'
+        run: |
+          python3 LOSAT/tests/ci_fast_regressions.py --losat LOSAT/target/release/LOSAT \
+            --out .tmp/fast-regressions --programs "${{ steps.select.outputs.programs }}"
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.select.outputs.programs != 'none'
+        with:
+          name: fast-regressions
+          path: |
+            .tmp/fast-regressions/summary.json
+            .tmp/fast-regressions/hashes.tsv
+            .tmp/fast-regressions/timing.tsv
+            .tmp/fast-regressions/outfmt0-fixtures-*.tsv
+          if-no-files-found: warn
+          retention-days: 14

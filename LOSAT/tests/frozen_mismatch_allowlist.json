@@ -1,0 +1,21 @@
+{
+  "schema": "losat-frozen-mismatch-allowlist-v1",
+  "scope": "Frozen raw-output expectations (PR5 Gate A and the expectations that reuse them) that LOSAT is known not to match. A listed case passes only when its output equals allowed_actual_sha256; any other output fails. A listed case that matches its frozen hash again, or that a full run does not execute, fails so that the entry is removed. The frozen hashes themselves are never rewritten.",
+  "entries": [
+    {
+      "program": "blastn",
+      "case_id": "Sakai.MG1655.megablast",
+      "frozen_sha256": "3f27c1f1396b59ecb7e78827b5da390e9c97a276c05cbc7a6c82f56bd0a03262",
+      "allowed_actual_sha256": "ac8177764f35b2fb92777f8b1d01ea646cc55ae21b05f1f486ee231348a34a45",
+      "frozen_gate_a_steps": [11, 52, 53],
+      "reason": "Known since S02 (E1a): LOSAT produced ac8177764f... before and after every LOSAT Web change; PR5 Gate A steps 11/52/53 remain a historical HARD_FAIL and the new Sakai expectation is a separately approved authority version.",
+      "evidence": [
+        "docs/evidence/losat_web_e1a/README.md",
+        "docs/evidence/losat_web_e1a/baseline/hashes.tsv",
+        "docs/evidence/losatx_stage_g_authority_v3/run-20260928T121516Z/GATE_STATUS.md",
+        "docs/evidence/losatx_stage_g_authority_v3/run-20260928T121516Z/registry.json",
+        "docs/evidence/losat_web_e2g/README.md"
+      ]
+    }
+  ]
+}

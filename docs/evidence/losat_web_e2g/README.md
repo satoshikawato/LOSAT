@@ -2,7 +2,7 @@
 
 - 段階：E2g BLASTN の経路の棚卸しと一括の移植（[総合計画書](../../losat_web_gui_plan.md) §7 の S07+++、指示書 [S07+++](../../losat_web_gui_sessions/session_s07ppp_e2g_blastn_inventory.md)、計画 DW-12）
 - ブランチ：`feature/losat-web-gui`。変更前は S07++ の記録（エンジンは `7693a9c73`、実行ファイルは `~/.cache/losat-web-gui-target/s07pg-native/release/LOSAT`、SHA-256 `a4ff5abb3a61…80f5`、ハッシュの一覧は `../losat_web_e2f/run-20260930T163727Z/artifacts.sha256`）
-- 状態：**進行中**。CI の整備（指示書の 0.）は済んだ。棚卸しの第 1 段は済み、第 2 段の分類を実行している
+- 状態：**完了条件は未達（S07+++b に続く）**。S07+++ で済んだもの：CI の整備（指示書の 0.。毎晩の WASI の 1 件の TIMEOUT が残る）、棚卸しの第 1 段と第 2 段（`INVENTORY.tsv` 1006 行）、予備の hit list の単体試験（`2fabad16c`）。残るもの：一括の transpile（13 項目）、新しい明示的な拒否 2 つ、拒否の見直し 1 つ、試験・ゲート・V-PERF、独立監査（下の「残件と引き継ぎ」）
 
 ## CI の整備（指示書の 0.）
 
@@ -51,7 +51,7 @@ CI の設定とその検査の道具だけを変えた。エンジン（`LOSAT/s
 ### 毎晩の検査の確認
 
 - 全 case（236）：手元で S07++ の実行ファイルの全 case を S02 の基準と比べ、差 0（`capture_outputs.py compare`）。`nightly.yml` は `main` に入るまで `workflow_dispatch` できない。
-- WASI の行列：`wasm-threading.yml` を `feature/losat-web-gui` で `workflow_dispatch` した（run [`36882087513`](https://github.com/satoshikawato/LOSAT/actions/runs/36882087513)）。結果は下の「残件」に書く。手元では、Sakai の 2 case に絞った実行で、許可リストの 4 つの label（native、threaded、repeatability の 2 つ）が「ALLOWED」、ほかが PASS、終了コード 0 だった。
+- WASI の行列：`wasm-threading.yml` を `feature/losat-web-gui` で `workflow_dispatch` した（run [`36882087513`](https://github.com/satoshikawato/LOSAT/actions/runs/36882087513)、`c6c3386cf`、2 時間）。凍結の 104 件のうち、Sakai の 4 つの label（native、threaded、repeatability の 2 つ）が許可リストどおり「allowed known mismatch」、TBLASTX の閾値の検査 9 件が PASS（凍結の段階の失敗の後も、別の段階として実行された）。**1 件が失敗した：`threaded/tblastx/p11_avclpv_psclpv` が TIMEOUT**（1 検索の期限 3600 秒。native は PASS）。前回の赤い run `36745543144` でもこの label は PASS を出していない（最初の不一致の例外に隠れていた）。最後に `wasm / integration` が緑だった run [`35201795582`](https://github.com/satoshikawato/LOSAT/actions/runs/35201795582)（2026-09-17、`implement-v010-distribution`）では、この label は 1 時間以内に PASS し、104 件すべてが通っていた。threaded Wasm の TBLASTX の速度の退行か、runner の差かは未確認（BLASTN の範囲の外。S07+++b の最初の作業）。手元では、Sakai の 2 case に絞った実行で、許可リストの 4 つの label が「ALLOWED」、ほかが PASS、終了コード 0 だった。
 
 ## 棚卸しの第 1 段
 
@@ -64,11 +64,41 @@ CI の設定とその検査の道具だけを変えた。エンジン（`LOSAT/s
 
 ## 棚卸しの第 2 段
 
-指示書の 7 つの範囲（A：app と引数、B：API、C：統計と DUST、D：lookup・scan・ungapped、E1：gapped、E2：traceback と hit の保存、F：整形）ごとに、読み取り専用の agent（sonnet）が `stage2/<範囲>.tsv` に行を追記しながら分類する。共通の指示は `stage2/PROMPT_COMMON.md`。
+指示書の 7 つの範囲（A：app と引数、B：API、C：統計と DUST、D：lookup・scan・ungapped、E1：gapped、E2：traceback と hit の保存、F：整形）ごとに、読み取り専用の agent（sonnet）が `stage2/<範囲>.tsv` に行を追記しながら分類した（共通の指示は `stage2/PROMPT_COMMON.md`。並行は 4 つまで、2 回に分けた）。agent は NCBI のソースと LOSAT を読み、A・C・F の agent は小さな入力で NCBI BLAST+ 2.17.0 も実行して文言・終了コードを確かめた。オーケストレータ（Opus）が、divergent・unported・rejected の行をすべて NCBI のソースと LOSAT で確かめ、判断を `stage2/REVIEW.md` に書いた。
 
-（実行中）
+| 範囲 | 行 | faithful | n/a | rejected | divergent | unported |
+|---|---|---|---|---|---|---|
+| A | 236 | 118 | 62 | 42 | 6 | 8 |
+| B | 175 | 127 | 41 | 5 | 1 | 1 |
+| C | 174 | 130 | 36 | 8 | 0 | 0 |
+| D | 88 | 64 | 17 | 0 | 7 | 0 |
+| E1 | 68 | 52 | 11 | 1 | 3 | 1 |
+| E2 | 119 | 85 | 33 | 0 | 1 | 0 |
+| F | 146 | 98 | 29 | 10 | 1 | 8 |
+| 計 | 1006 | 674 | 229 | 66 | 19 | 18 |
 
-## 残件
+`INVENTORY.tsv`（`build_inventory.py` が 7 つの表と判断の規則から作る）は、行ごとに id、NCBI のファイル・行・関数・分岐、LOSAT の位置、状態、影響、`e2g_action`（faithful と n/a 以外の行の扱い）、`e2g_result`（移植の結果。S07+++b で埋める）を持つ。影響が high の差は無かった。
 
-- WASI の行列の `workflow_dispatch`（run `36882087513`）の結果。
-- 緑の PR の実行時間（cache あり）は、この記録の後の `main` への PR で測る。
+| 扱い | 行 | 内容（`build_inventory.py` の `ACTIONS`） |
+|---|---|---|
+| T1〜T13（transpile） | 25 | T1 初期の hit の並べ替え（連結した query の位置、安定な並べ替え）、T2 `BlastGetStartForGappedAlignmentNucl` の `Int4`、T3 予備の e-value の刈り込みの比較、T4 traceback の順（heap の e-value の順を保つ）、T5 小さい・標準の lookup table の cell の query の位置の昇順、T6 query の塊が 8000 以下なら対角線の配列、T7 `BATCH_SIZE`・`CHUNK_SIZE`・`OVERLAP_CHUNK_SIZE`、T8 最初の batch が無効な query だけのときの得点の表の失敗、T9 batch ごとの警告、T10 `-subject` が無いときの誤り、T11 `CTOOLKIT_COMPATIBLE`、T12 `PRE_FETCH_SEQS_LIMIT` の誤り、T13 Lambda・K・H の `%#8.3g` |
+| R1、R2（新しい明示的な拒否） | 11 | `BL2SEQ_LEGACY`（別の検索の mode と報告）、NCBI の診断と registry の環境変数（`DIAG_POST_LEVEL` など） |
+| V1（見直し） | 1 | reward − penalty が 3000 を超える得点の拒否（NCBI と比べて一致すれば外す） |
+| K-*（拒否のまま） | 60 | FASTA の読み方（計画 §10、TD-12）21、NCBI の C++ の層か範囲外の機能 20、別の mode 15、NCBI が落ちる 2、NCBI の 32 ビットの溢れ 2 |
+| S08（保守者の判断待ち） | 6 | 全 program に共通の CLI：引数の誤りの文言と終了コード、`-help`、書き込みの失敗の終了コード、UTF-8 でないパス、`-num_threads` の 2 つの警告（計画で S08+ に移してある） |
+| OPEN（保守者の判断待ち） | 1 | メモリ不足（NCBI は「BLAST ran out of memory」で終了コード 4。Rust は abort） |
+
+確かめたことの要点（詳細は `stage2/REVIEW.md`）：NCBI の traceback は `_DEBUG` のときだけ得点で並べ直す（オラクルは release）。NCBI は subject の chunk ごとに得点で並べる（blast_engine.c:555）ので、LOSAT の並べ直しが効くのは heap にした（550 を超える subject の）list だけ。小さい lookup table の cell は NCBI では query の位置の昇順、megablast の table は新しい順で、LOSAT は小さい table を megablast の鎖で持つ。NCBI は query の塊が 8000 以下なら query の数によらず対角線の配列を使う（blast_parameters.c:225-231）。`BL2SEQ_LEGACY` は `CLocalBlast` の dbscan mode を切る（local_blast.cpp:189,289）。`.ncbirc` の `[BLAST] LONG_SEQID` も出力を変えるが、LOSAT は `.ncbirc` を読まない（記録だけ）。
+
+## 予備の hit list の単体試験
+
+S07++ の独立監査の第 2 回の指摘（重大度 低）を `2fabad16c` で入れた（試験だけ。検索のコードは変えていない）：subject の番号による同点（等しい list は番号の大きい方が残り、先に来る）、1e-180 の規則、最初の HSP の得点、多くの list からの heap の選択、heap にするときの list の e-value の並べ替え、空の list の除去と最後の大きさの上限、collector（query ごとの `prelim_hitlist_size`）、`merge_prelim_hit_list`（`Blast_HitListMerge`）。`cargo fmt --check`、`clippy --all-targets --all-features -D warnings`、`cargo test --all-features`（lib 626 件、ほか全件）、`verify_refs.py` が通過。
+
+## 残件と引き継ぎ（S07+++b へ）
+
+- **毎晩の WASI の TIMEOUT：** `threaded/tblastx/p11_avclpv_psclpv`（上の「毎晩の検査の確認」）。S07+++b の最初に、速度の退行か runner の差かを確かめ、毎晩の検査を緑にする。
+- **一括の transpile：** T1〜T13、R1、R2、V1（上の表と `stage2/REVIEW.md`）。エンジンは変えていない（`2fabad16c` は試験だけ）。
+- **試験・ゲート・V-PERF・独立監査：** 指示書の 4.。移植した分岐ごとの NCBI との比較と、BLASTN の fixture（`blastn_regression_fixtures.py`）への case の追加。
+- **CI の残り：** 緑の PR の実行時間（cache あり）を測る。`main` への PR（この記録の後）。
+- **保守者の判断待ち：** S08 の 6 行と OPEN の 1 行（上の表）。FASTA の読み方の移植（計画 §10）。
+- 次の指示書：[`session_s07pppb_e2g_transpile.md`](../../losat_web_gui_sessions/session_s07pppb_e2g_transpile.md)。

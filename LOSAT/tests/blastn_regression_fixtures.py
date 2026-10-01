@@ -13,6 +13,9 @@ batch, IUPAC ambiguity, lowercase masking and non-default scores.
 - check --losat LOSAT: runs `LOSAT blastn <argv> <losat_extra>` from LOSAT/ and
   compares stdout, stderr and the exit status with the frozen files.
 
+A case may set environment variables (`env`, space-separated KEY=VALUE) for both
+programs; every other variable that changes NCBI's batches or report is unset.
+
 The split case slices LOSAT/tests/fasta/EDL933.fna at run time into
 LOSAT/target/blastn_regression/ (outfmt 6 prints no file names).
 
@@ -41,7 +44,7 @@ MANIFEST = FIXTURES / "manifest.tsv"
 RUNTIME = ENGINE / "target/blastn_regression"
 FASTA = ENGINE / "tests/fasta"
 E2C_INPUTS = ENGINE.parent / "docs/evidence/losat_web_e2c/inputs"
-FIELDS = ["case_id", "argv", "losat_extra", "exit", "stdout_sha256", "stdout_bytes", "stderr_sha256"]
+FIELDS = ["case_id", "argv", "losat_extra", "exit", "stdout_sha256", "stdout_bytes", "stderr_sha256", "env"]
 # NCBI reads these and each one changes the batches or the report.
 REPORT_ENV = ("BL2SEQ_LEGACY", "CTOOLKIT_COMPATIBLE", "OLD_FSC", "BATCH_SIZE", "CHUNK_SIZE", "ADAPTIVE_CBS")
 
@@ -52,8 +55,8 @@ T = f"-query {I}/q3k.fa -subject {I}/s600ties.fa"
 B = f"-query {I}/mq.fa -subject {I}/s60k.fa"
 S = f"-query {R}/edl933_2m.fa -subject {I}/sakai_60k.fa"
 A = f"-query {I}/ambiguity_query_c.fa -subject {I}/ambiguity_subject.fa"
-# (case_id, NCBI argv after `blastn`, extra LOSAT-only arguments)
-CASES = [
+# (case_id, NCBI argv after `blastn`, extra LOSAT-only arguments[, environment])
+_CASES = [
     ("prelim.default", f"{P} -outfmt 6", ""),
     ("prelim.task_blastn", f"{P} -task blastn -outfmt 6", ""),
     ("prelim.max1", f"{P} -max_target_seqs 1 -outfmt 6", ""),
@@ -85,7 +88,11 @@ CASES = [
                      " -task blastn -lcase_masking -outfmt 6", ""),
     ("lcase.megablast", f"-query {I}/lcase_island_megablast_query.fa -subject {I}/lcase_island_megablast_subject.fa"
                         " -lcase_masking -outfmt 6", ""),
+    # E2g T11: showdefline.cpp kBits is "(bits)" when CTOOLKIT_COMPATIBLE is set (also empty).
+    ("ctoolkit.fmt0", f"{P} -max_target_seqs 3 -outfmt 0", "", "CTOOLKIT_COMPATIBLE=1"),
+    ("ctoolkit.empty_fmt0", f"{T} -task blastn -max_target_seqs 5 -outfmt 0", "", "CTOOLKIT_COMPATIBLE="),
 ]
+CASES = [case if len(case) == 4 else (*case, "") for case in _CASES]
 
 
 def genome(name: str) -> str:
@@ -168,9 +175,13 @@ def sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def clean_env() -> dict[str, str]:
-    return {key: value for key, value in os.environ.items()
-            if key not in REPORT_ENV and not key.startswith(("LOSAT_", "RAYON_"))}
+def clean_env(case_env: str = "") -> dict[str, str]:
+    env = {key: value for key, value in os.environ.items()
+           if key not in REPORT_ENV and not key.startswith(("LOSAT_", "RAYON_"))}
+    for item in shlex.split(case_env):
+        key, _, value = item.partition("=")
+        env[key] = value
+    return env
 
 
 def read_manifest() -> list[dict[str, str]]:
@@ -185,8 +196,8 @@ def command_freeze(args) -> int:
     oracle = str(Path(args.oracle).resolve())
     version = subprocess.run([oracle, "-version"], capture_output=True, text=True).stdout.strip().replace("\n", "; ")
     rows = []
-    for case_id, argv, extra in CASES:
-        result = subprocess.run([oracle, *shlex.split(argv)], cwd=ENGINE, capture_output=True, env=clean_env())
+    for case_id, argv, extra, case_env in CASES:
+        result = subprocess.run([oracle, *shlex.split(argv)], cwd=ENGINE, capture_output=True, env=clean_env(case_env))
         (FIXTURES / f"{case_id}.out").write_bytes(result.stdout)
         err = FIXTURES / f"{case_id}.err"
         if result.stderr:
@@ -195,11 +206,11 @@ def command_freeze(args) -> int:
             err.unlink()
         rows.append({"case_id": case_id, "argv": argv, "losat_extra": extra, "exit": str(result.returncode),
                      "stdout_sha256": sha256(result.stdout), "stdout_bytes": str(len(result.stdout)),
-                     "stderr_sha256": sha256(result.stderr) if result.stderr else ""})
+                     "stderr_sha256": sha256(result.stderr) if result.stderr else "", "env": case_env})
         print(f"{case_id}\texit {result.returncode}\t{result.stdout.count(b'\n')} lines\t{len(result.stderr)} stderr bytes", flush=True)
     with open(MANIFEST, "w", newline="") as handle:
         handle.write(f"# Frozen BLASTN outputs of {version} (comparison oracle only; see blastn_regression_fixtures.py).\n")
-        handle.write("# Run from LOSAT/: blastn <argv> (LOSAT: LOSAT blastn <argv> <losat_extra>). Written by `freeze`; do not edit.\n")
+        handle.write("# Run from LOSAT/: env <env> blastn <argv> (LOSAT: LOSAT blastn <argv> <losat_extra>). Written by `freeze`; do not edit.\n")
         writer = csv.DictWriter(handle, fieldnames=FIELDS, delimiter="\t", lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
@@ -208,7 +219,7 @@ def command_freeze(args) -> int:
 
 def check_one(losat: str, row: dict[str, str]) -> tuple[str, str]:
     argv = [losat, "blastn", *shlex.split(row["argv"]), *shlex.split(row["losat_extra"])]
-    result = subprocess.run(argv, cwd=ENGINE, capture_output=True, env=clean_env())
+    result = subprocess.run(argv, cwd=ENGINE, capture_output=True, env=clean_env(row.get("env") or ""))
     expected_out = (FIXTURES / f"{row['case_id']}.out").read_bytes()
     err_path = FIXTURES / f"{row['case_id']}.err"
     expected_err = err_path.read_bytes() if err_path.exists() else b""

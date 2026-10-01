@@ -742,12 +742,30 @@ fn write_database_header<W: Write>(writer: &mut W, context: &ReportContext) -> i
     Ok(())
 }
 
-// NCBI reference: ncbi-blast/c++/src/objtools/align_format/showdefline.cpp:69-79
+// NCBI reference: ncbi-blast/c++/src/objtools/align_format/showdefline.cpp:75-83
 // ```c
 // static const char*  kHeader = "Sequences producing significant alignments:";
-// static const char*  kBits = "(Bits)";
+// ...
+// static const char*  kBits = (getenv("CTOOLKIT_COMPATIBLE") ? "(bits)" : "(Bits)");
+// static const size_t kBits_size = strlen(kBits);
+// ...
 // static const char*  kValue = "Value";
 // ```
+// `kBits` is a static initialized when the program starts, from whether the
+// environment has CTOOLKIT_COMPATIBLE (any value, also an empty one).
+fn ncbi_k_bits() -> &'static str {
+    static K_BITS: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
+    K_BITS.get_or_init(|| ncbi_k_bits_for(std::env::var_os("CTOOLKIT_COMPATIBLE").is_some()))
+}
+
+fn ncbi_k_bits_for(ctoolkit_compatible: bool) -> &'static str {
+    if ctoolkit_compatible {
+        "(bits)"
+    } else {
+        "(Bits)"
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:830-837
 // ```c++
 //             if((m_Option & eShowSumN) || (m_Option & eShowPercentIdent)){
@@ -823,7 +841,13 @@ fn write_subject_summary_table_with_sum_n<W: Write>(
     //             }
     //             out << "\n";
     // ```
-    write!(writer, "{:<max_score$}  Value", "(Bits)")?;
+    // NCBI reference: ncbi-blast/c++/src/objtools/align_format/showdefline.cpp:811-813
+    // ```c
+    // out << kBits;
+    // //in case m_MaxScoreLen > kBits.size()
+    // CAlignFormatUtil::AddSpace(out, m_MaxScoreLen - kBits_size);
+    // ```
+    write!(writer, "{:<max_score$}  Value", ncbi_k_bits())?;
     let max_sum_n = subject_order
         .iter()
         .filter_map(|i| subject_hits.get(i)?.first())
@@ -1752,7 +1776,11 @@ fn write_blastn_description_table<W: Write>(
             Some((*s_idx, best, hits.iter().map(|hit| hit.hit.bit_score).sum()))
         })
         .collect();
-    let mut max_score = "(Bits)".len();
+    // NCBI reference: ncbi-blast/c++/src/objtools/align_format/showdefline.cpp:1059
+    // ```c
+    // m_MaxScoreLen = kBits_size;
+    // ```
+    let mut max_score = ncbi_k_bits().len();
     let mut max_evalue = "Value".len();
     let mut max_total = "Total".len();
     for (index, (_, best, total)) in rows.iter().enumerate() {
@@ -1774,7 +1802,7 @@ fn write_blastn_description_table<W: Write>(
         "{:<69}",
         "Sequences producing significant alignments:"
     )?;
-    writeln!(writer, "{:<max_score$}  Value", "(Bits)")?;
+    writeln!(writer, "{:<max_score$}  Value", ncbi_k_bits())?;
     writeln!(writer)?;
     for (s_idx, best, _) in &rows {
         let subject_id = subject_ids
@@ -2262,10 +2290,12 @@ pub fn write_pairwise<W: Write>(
         subject_hits.entry(s_idx).or_default().push(hit);
     }
 
-    // NCBI reference: ncbi-blast/c++/src/objtools/align_format/showdefline.cpp:69-79
+    // NCBI reference: ncbi-blast/c++/src/objtools/align_format/showdefline.cpp:75-83
     // ```c
     // static const char*  kHeader = "Sequences producing significant alignments:";
-    // static const char*  kBits = "(Bits)";
+    // ...
+    // static const char*  kBits = (getenv("CTOOLKIT_COMPATIBLE") ? "(bits)" : "(Bits)");
+    // ...
     // static const char*  kValue = "Value";
     // ```
     write_subject_summary_table(writer, &subject_order, &subject_hits, subject_ids)?;
@@ -2331,6 +2361,13 @@ pub fn write_pairwise_simple<W: Write>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn k_bits_follows_ctoolkit_compatible() {
+        assert_eq!(ncbi_k_bits_for(true), "(bits)");
+        assert_eq!(ncbi_k_bits_for(false), "(Bits)");
+        assert_eq!(ncbi_k_bits_for(true).len(), ncbi_k_bits_for(false).len());
+    }
 
     #[test]
     fn ka_value_matches_c_percent_hash_8_3g() {

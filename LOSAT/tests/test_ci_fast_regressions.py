@@ -66,7 +66,7 @@ class CheckRowsTests(unittest.TestCase):
 class BlastnFixtureTests(unittest.TestCase):
     def test_manifest_matches_cases_and_files(self):
         rows = fixtures.read_manifest()
-        self.assertEqual([(r["case_id"], r["argv"], r["losat_extra"]) for r in rows], fixtures.CASES)
+        self.assertEqual([(r["case_id"], r["argv"], r["losat_extra"], r.get("env") or "") for r in rows], fixtures.CASES)
         for r in rows:
             data = (fixtures.FIXTURES / f"{r['case_id']}.out").read_bytes()
             self.assertEqual(fixtures.sha256(data), r["stdout_sha256"], r["case_id"])

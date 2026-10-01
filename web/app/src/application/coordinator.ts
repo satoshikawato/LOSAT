@@ -3,25 +3,28 @@
 //
 // Ordering rule for cancel versus commit: a run can be cancelled until it enters
 // `finalizing`; after that, cancel requests are ignored and the run completes.
+//
+// Inputs go through the data layer (plan §5.4): each input becomes a source, the source
+// gets a record table (a dataset revision), and the run snapshot holds the bytes of the
+// included records with their IDs and lengths, which the engine checks at `register`.
 import { buildArgv } from '../domain/argv';
+import type { FastaParserKind } from '../domain/dataset';
 import type { OutputFormat } from '../domain/output-format';
-import type { ProgramId } from '../domain/programs';
-import { isTerminal, type RunRecord, type RunSnapshot, type RunStatus } from '../domain/run';
-import type { DataGateway, ResultSetRef, RunStaging } from '../ports/data';
+import { programById, type ProgramId } from '../domain/programs';
+import { isTerminal, type InputSnapshot, type RunRecord, type RunSnapshot, type RunStatus } from '../domain/run';
+import type { DataGateway, ResultSetRef, StorageInfo } from '../ports/data';
 import type { Downloader } from '../ports/download';
 import {
   RunCancelledError,
   type EngineGateway,
+  type EngineInput,
   type EnginePhase,
   type ValidationResult,
 } from '../ports/engine';
 import { Store } from './store';
 
-export interface SequenceInput {
-  /** File name, or undefined for pasted text. */
-  readonly fileName?: string;
-  readonly text: string;
-}
+/** Pasted text, or a file chosen by the user (read by reference, never copied). */
+export type SequenceInput = { readonly text: string } | { readonly file: File };
 
 export interface SearchRequest {
   readonly program: ProgramId;
@@ -40,13 +43,14 @@ export interface RunView {
 
 export interface AppState {
   readonly runs: readonly RunView[];
+  /** Temporary storage in use, shown without blocking any action (plan §5.6). */
+  readonly storage?: StorageInfo;
 }
 
 export interface CoordinatorDeps {
   readonly engine: EngineGateway;
   readonly data: DataGateway;
   readonly downloader: Downloader;
-  readonly digest: (bytes: Uint8Array) => Promise<string>;
   readonly now: () => number;
   readonly newRunId: () => string;
 }
@@ -59,6 +63,8 @@ const PHASE_STATUS: Readonly<Record<EnginePhase, RunStatus>> = {
   running: 'running',
   finalizing: 'finalizing',
 };
+/** How often the storage status is read again while the start-up cleanup runs. */
+const CLEANUP_POLL_MS = 250;
 
 export class Coordinator {
   readonly state = new Store<AppState>({ runs: [] });
@@ -67,12 +73,15 @@ export class Coordinator {
   private active: string | undefined;
   private nextNumber = 1;
 
-  constructor(private readonly deps: CoordinatorDeps) {}
+  constructor(private readonly deps: CoordinatorDeps) {
+    void this.refreshStorage();
+  }
 
   /** Validates the request with the engine and, if valid, freezes it as a queued run. */
   async enqueue(request: SearchRequest): Promise<EnqueueResult> {
-    const queryName = request.query.fileName ?? PASTED_NAMES.query;
-    const subjectName = request.subject.fileName ?? PASTED_NAMES.subject;
+    const program = programById(request.program);
+    const queryName = inputName(request.query, PASTED_NAMES.query);
+    const subjectName = inputName(request.subject, PASTED_NAMES.subject);
     let argv: readonly string[];
     try {
       argv = buildArgv({ program: request.program, queryName, subjectName, parameters: request.parameters });
@@ -82,21 +91,22 @@ export class Coordinator {
     const validation = await this.deps.engine.validate(argv);
     if (!validation.ok) return validation;
 
-    const encoder = new TextEncoder();
-    const queryBytes = encoder.encode(request.query.text);
-    const subjectBytes = encoder.encode(request.subject.text);
+    let query: InputSnapshot;
+    let subject: InputSnapshot;
+    try {
+      query = await this.snapshotInput('Query', request.query, queryName, program.fastaParser);
+      subject = await this.snapshotInput('Subject', request.subject, subjectName, program.fastaParser);
+    } catch (error) {
+      return { ok: false, message: errorMessage(error) };
+    }
     const runId = this.deps.newRunId();
     const snapshot: RunSnapshot = Object.freeze({
       runId,
       number: this.nextNumber++,
       program: request.program,
       argv,
-      query: Object.freeze({ name: queryName, bytes: queryBytes, sha256: await this.deps.digest(queryBytes) }),
-      subject: Object.freeze({
-        name: subjectName,
-        bytes: subjectBytes,
-        sha256: await this.deps.digest(subjectBytes),
-      }),
+      query,
+      subject,
       requestedThreads: request.requestedThreads,
       queuedAt: this.deps.now(),
     });
@@ -134,6 +144,42 @@ export class Coordinator {
     return new TextDecoder().decode(await this.deps.data.readOutput(runId, format));
   }
 
+  /** Reads the storage status again; it keeps polling while the start-up cleanup runs. */
+  async refreshStorage(): Promise<void> {
+    let storage: StorageInfo;
+    try {
+      storage = await this.deps.data.storageInfo();
+    } catch {
+      return; // The status is informative; a failure to read it must not affect runs.
+    }
+    this.state.set({ ...this.state.get(), storage });
+    if (storage.cleanup.state === 'pending') setTimeout(() => void this.refreshStorage(), CLEANUP_POLL_MS);
+  }
+
+  /** Makes the input a source with a record table, and freezes its run input. */
+  private async snapshotInput(
+    role: string,
+    input: SequenceInput,
+    name: string,
+    parser: FastaParserKind,
+  ): Promise<InputSnapshot> {
+    const file = 'file' in input ? input.file : new File([input.text], name, { type: 'text/plain' });
+    try {
+      const source = await this.deps.data.addSource(file);
+      const revision = await this.deps.data.indexSource(source.sourceId, parser);
+      const runInput = await this.deps.data.buildRunInput([revision.revisionId]);
+      return Object.freeze({
+        name,
+        bytes: runInput.bytes,
+        sha256: runInput.sha256,
+        revisionIds: Object.freeze([revision.revisionId]),
+        records: runInput.records,
+      });
+    } catch (error) {
+      throw new Error(`${role} FASTA: ${errorMessage(error)}`, { cause: error });
+    }
+  }
+
   private pump(): void {
     if (this.active !== undefined) return;
     const next = this.queue.shift();
@@ -146,25 +192,26 @@ export class Coordinator {
     const view = this.find(runId);
     if (view === undefined) throw new Error(`missing run ${runId}`);
     const { snapshot } = view;
-    let staging: RunStaging | undefined;
+    let staged = false;
     const startedAt = this.deps.now();
     try {
       this.update(runId, { status: 'preparing', record: { startedAt } });
-      staging = await this.deps.data.openRun(runId);
+      const output = await this.deps.data.openRun(runId);
+      staged = true;
       const runtime = await this.deps.engine.run(
         {
           runId,
           argv: snapshot.argv,
-          query: snapshot.query.bytes,
-          subject: snapshot.subject.bytes,
+          query: engineInput(snapshot.query),
+          subject: engineInput(snapshot.subject),
           requestedThreads: snapshot.requestedThreads,
         },
-        staging,
+        output,
         (phase) => this.onPhase(runId, phase),
       );
       if (this.cancelRequested.has(runId)) throw new RunCancelledError(runId);
       this.update(runId, { status: 'finalizing' });
-      const result = await staging.commit();
+      const result = await this.deps.data.commitRun(runId);
       this.update(runId, {
         status: 'completed',
         result,
@@ -178,7 +225,7 @@ export class Coordinator {
         },
       });
     } catch (error) {
-      await staging?.discard();
+      if (staged) await this.deps.data.discardRun(runId).catch(() => undefined);
       const cancelled = error instanceof RunCancelledError || this.cancelRequested.has(runId);
       this.update(runId, {
         status: cancelled ? 'cancelled' : 'failed',
@@ -191,6 +238,7 @@ export class Coordinator {
     } finally {
       this.cancelRequested.delete(runId);
       this.active = undefined;
+      void this.refreshStorage();
       this.pump();
     }
   }
@@ -216,8 +264,16 @@ export class Coordinator {
   }
 
   private setRuns(runs: readonly RunView[]): void {
-    this.state.set({ runs: Object.freeze([...runs]) });
+    this.state.set({ ...this.state.get(), runs: Object.freeze([...runs]) });
   }
+}
+
+function inputName(input: SequenceInput, pastedName: string): string {
+  return 'file' in input ? input.file.name : pastedName;
+}
+
+function engineInput(input: InputSnapshot): EngineInput {
+  return { bytes: input.bytes, records: input.records };
 }
 
 function errorMessage(error: unknown): string {

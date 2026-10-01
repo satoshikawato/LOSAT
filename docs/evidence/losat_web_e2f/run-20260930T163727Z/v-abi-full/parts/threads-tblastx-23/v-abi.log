@@ -1,0 +1,15 @@
+(node:300879) ExperimentalWarning: WASI is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ok threads describe, validate, register, scan
+ok threads n1 p04_pemojnva_pesemjnv
+(node:300879) ExperimentalWarning: WASI is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ok threads n2 p04_pemojnva_pesemjnv
+(node:300879) ExperimentalWarning: WASI is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:300879) ExperimentalWarning: WASI is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:300879) ExperimentalWarning: WASI is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ok threads n4 p04_pemojnva_pesemjnv
+3 runs matched the native CLI; frozen hashes: 3/3 equal

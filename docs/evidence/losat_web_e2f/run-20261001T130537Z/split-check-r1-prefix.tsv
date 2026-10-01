@@ -1,0 +1,10 @@
+# case	result	split_changes_ncbi	argv
+r1_a_default	DIFFERENT	yes	-query r1_q2m.fa -subject r1_a.fa -task blastn -outfmt 6
+r1_b_mts1	DIFFERENT	yes	-query r1_q2m.fa -subject r1_b.fa -task blastn -max_target_seqs 1 -outfmt 6
+r1_b_mts3	DIFFERENT	yes	-query r1_q2m.fa -subject r1_b.fa -task blastn -max_target_seqs 3 -outfmt 6
+r1_b_mts10	same	no	-query r1_q2m.fa -subject r1_b.fa -task blastn -max_target_seqs 10 -outfmt 6
+r1_b_mts11	same	no	-query r1_q2m.fa -subject r1_b.fa -task blastn -max_target_seqs 11 -outfmt 6
+r1_c_megablast_mts1	DIFFERENT	yes	-query r1_cat.fa -subject r1_c.fa -task megablast -max_target_seqs 1 -outfmt 6
+r1_d_mts1	DIFFERENT	no	-query r1_q300k.fa -subject r1_d.fa -task blastn -max_target_seqs 1 -outfmt 6
+# cases=7 differing=5 split_changes_ncbi=4
+exit 1

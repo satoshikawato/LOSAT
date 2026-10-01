@@ -5,6 +5,7 @@ import { useStore } from './useStore';
 import SearchPanel from './SearchPanel.vue';
 import QueuePanel from './QueuePanel.vue';
 import ResultsPanel from './ResultsPanel.vue';
+import StorageStatus from './StorageStatus.vue';
 
 const props = defineProps<{ coordinator: Coordinator; usesFakeEngine: boolean }>();
 const state = useStore(props.coordinator.state);
@@ -30,6 +31,7 @@ const tab = ref<'search' | 'results'>('search');
     </section>
     <aside class="secondary">
       <QueuePanel :coordinator="coordinator" :runs="state.runs" />
+      <StorageStatus :storage="state.storage" />
     </aside>
   </main>
 </template>

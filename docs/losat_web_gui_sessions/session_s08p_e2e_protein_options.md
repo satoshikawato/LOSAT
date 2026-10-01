@@ -25,6 +25,7 @@ S07+ で BLASTN に見つかった種類の差が、これらにもあるかは�
 
 これらのオプションは、アプリの検索画面（S12）に出る。
 
+0. **棚卸しの方式（計画 DW-12）。** 監査の指摘を 1 つずつ直すのでなく、S07+++ と同じく、program ごとに NCBI の実行経路に現れる関数を棚卸しし（`docs/evidence/losat_web_e2e/INVENTORY.tsv`）、未移植と差のある移植を先に一括で transpile してから、sweep と監査で確かめる。LOSAT が速度のために NCBI と違う実装にしている箇所は、出力が同じなら新しく移植する部分にも使ってよい。
 1. **範囲を決める。** program ごとに、受け付けるオプションと、NCBI の引数の制約（`c++/src/algo/blast/blastinput/blast_args.cpp` など）、検査（`c++/src/algo/blast/core/blast_options.c` の `BLAST_ValidateOptions`）、task の既定値（`c++/src/algo/blast/api/blast_prot_options.cpp`、`blast_advprot_options.cpp` など）、表（`c++/src/algo/blast/core/blast_stat.c` の行列ごとの gap の表、`Blast_KarlinBlkGappedLoadFromTables`）の対応を記録する（`docs/evidence/losat_web_e2e/AUTHORITY.md`）。
 2. **sweep を作る。** `docs/evidence/losat_web_e2c/scoring_sweep.py` の形で、program ごとに、行列 × gap の組（NCBI の表にあるもの、無いもの、境界）、threshold と word size、`-comp_based_stats` の値、`-seg` の値、遺伝暗号（承認済みの例外の扱いは `AGENTS.md`）、e-value の書き方を、outfmt 0/6/7 で NCBI と比べる。比べる前に、今の commit の結果を記録する。
 3. **NCBI の検査を移植する。** NCBI が拒否する値を、NCBI と同じ順序、文言、終了コードで拒否する（S07+ の `LOSAT/src/algorithm/blastn/scoring.rs` と `LOSAT/src/cli.rs` の `NativeError` を参考にし、共有できる部品は共有する）。

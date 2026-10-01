@@ -1,17 +1,23 @@
+import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { Coordinator, type SearchRequest } from '../../src/application/coordinator';
 import type { RunStatus } from '../../src/domain/run';
+import { sha256Hex } from '../../src/infra/browser/platform';
+import { DataService } from '../../src/infra/data/data-service';
+import { MemoryBlockStore } from '../../src/infra/data/memory-block-store';
 import { FakeEngine, FAKE_MARKER } from '../../src/infra/fake/fake-engine';
-import { MemoryDataGateway } from '../../src/infra/memory/memory-data-gateway';
+import { FakeScanner } from '../../src/infra/fake/fake-fasta';
+import { RunOutputWriter } from '../../src/infra/run-output/writer';
+import type { DataGateway } from '../../src/ports/data';
 import type { Downloader } from '../../src/ports/download';
 import type {
   EngineGateway,
   EnginePhase,
   EngineRunRequest,
-  RunSink,
   RuntimeInfo,
   ValidationResult,
 } from '../../src/ports/engine';
+import { DIAGNOSTICS_STREAM } from '../../src/ports/run-output';
 
 const request: SearchRequest = {
   program: 'blastn',
@@ -21,8 +27,16 @@ const request: SearchRequest = {
   requestedThreads: 'auto',
 };
 
-function setup(engine: EngineGateway = new FakeEngine()) {
-  const data = new MemoryDataGateway();
+function setup(engine: EngineGateway = new FakeEngine(), wrap: (data: DataService) => DataGateway = (d) => d) {
+  const store = new MemoryBlockStore();
+  let token = 0;
+  const data = new DataService({
+    store,
+    scanner: new FakeScanner(),
+    digest: sha256Hex,
+    newToken: () => `token-${++token}`,
+    cleanup: Promise.resolve({ state: 'done', removedSessions: 0 }),
+  });
   const saved: Array<{ fileName: string; text: string }> = [];
   const downloader: Downloader = {
     save: (fileName, bytes) => saved.push({ fileName, text: new TextDecoder().decode(bytes) }),
@@ -30,17 +44,17 @@ function setup(engine: EngineGateway = new FakeEngine()) {
   let id = 0;
   const coordinator = new Coordinator({
     engine,
-    data,
+    data: wrap(data),
     downloader,
-    digest: async (bytes) => `sha-${bytes.length}`,
     now: () => 1000,
     newRunId: () => `run-${++id}`,
   });
-  return { coordinator, data, saved };
+  return { coordinator, data, store, saved };
 }
 
-const statusOf = (coordinator: Coordinator, runId: string): RunStatus | undefined =>
-  coordinator.state.get().runs.find((run) => run.snapshot.runId === runId)?.status;
+const viewOf = (coordinator: Coordinator, runId: string) =>
+  coordinator.state.get().runs.find((run) => run.snapshot.runId === runId);
+const statusOf = (coordinator: Coordinator, runId: string): RunStatus | undefined => viewOf(coordinator, runId)?.status;
 
 function waitFor(coordinator: Coordinator, runId: string, status: RunStatus): Promise<void> {
   return new Promise((resolve) => {
@@ -67,14 +81,16 @@ class ManualEngine implements EngineGateway {
   async validate(): Promise<ValidationResult> {
     return { ok: true };
   }
-  run(req: EngineRunRequest, sink: RunSink, onPhase: (phase: EnginePhase) => void): Promise<RuntimeInfo> {
+  run(req: EngineRunRequest, output: MessagePort, onPhase: (phase: EnginePhase) => void): Promise<RuntimeInfo> {
     this.started.push(req.runId);
     onPhase('running');
     return new Promise((resolve, reject) => {
       this.pending.set(req.runId, {
         resolve: () => {
-          sink.write(6, new TextEncoder().encode(`${req.runId}\n`));
-          sink.diagnostics(new TextEncoder().encode(`Warning: ${req.runId}\n`));
+          const writer = new RunOutputWriter(output);
+          writer.write(6, new TextEncoder().encode(`${req.runId}\n`));
+          writer.write(DIAGNOSTICS_STREAM, new TextEncoder().encode(`Warning: ${req.runId}\n`));
+          writer.end();
           resolve({ path: 'fake', threads: 1, engineBuild: 'manual' });
         },
         reject,
@@ -116,12 +132,36 @@ describe('Coordinator', () => {
     const params: Array<[string, string]> = [['-evalue', '10']];
     const runId = (await coordinator.enqueue({ ...request, parameters: params })).runId!;
     params[0]![1] = '1e-50';
-    const snapshot = coordinator.state.get().runs.find((r) => r.snapshot.runId === runId)!.snapshot;
+    const snapshot = viewOf(coordinator, runId)!.snapshot;
     expect(Object.isFrozen(snapshot)).toBe(true);
     expect(snapshot.argv).toContain('10');
     expect(snapshot.argv).not.toContain('1e-50');
     expect(snapshot.query.name).toBe('query.fa');
-    expect(snapshot.subject.sha256).toBe('sha-8');
+    expect(snapshot.subject.sha256).toBe(createHash('sha256').update('>s\nACGT\n').digest('hex'));
+    expect(snapshot.subject.records).toEqual([{ id: 's', length: 4 }]);
+    expect(snapshot.subject.revisionIds).toHaveLength(1);
+  });
+
+  it('reads a chosen file by reference and names the input after it', async () => {
+    const { coordinator } = setup(new ManualEngine());
+    const file = new File(['>chr1 genome\nACGTACGT\n>chr2\nGG\n'], 'genome.fa');
+    const runId = (await coordinator.enqueue({ ...request, subject: { file } })).runId!;
+    const snapshot = viewOf(coordinator, runId)!.snapshot;
+    expect(snapshot.argv).toEqual(['blastn', '-query', 'query.fa', '-subject', 'genome.fa']);
+    expect(snapshot.subject.name).toBe('genome.fa');
+    expect(snapshot.subject.records).toEqual([
+      { id: 'chr1', length: 8 },
+      { id: 'chr2', length: 2 },
+    ]);
+  });
+
+  it('does not queue an input that the index scan cannot read', async () => {
+    const { coordinator } = setup(new ManualEngine());
+    expect(await coordinator.enqueue({ ...request, query: { text: 'ACGT\n' } })).toEqual({
+      ok: false,
+      message: 'Query FASTA: Expected > at record start.',
+    });
+    expect(coordinator.state.get().runs).toHaveLength(0);
   });
 
   it('cancels a queued job without starting it', async () => {
@@ -139,7 +179,7 @@ describe('Coordinator', () => {
 
   it('discards a cancelled run and ignores its late events', async () => {
     const engine = new ManualEngine();
-    const { coordinator, data } = setup(engine);
+    const { coordinator, data, store } = setup(engine);
     const runId = (await coordinator.enqueue(request)).runId!;
     await waitFor(coordinator, runId, 'running');
     coordinator.cancel(runId);
@@ -148,6 +188,7 @@ describe('Coordinator', () => {
     engine.finish(runId);
     await waitFor(coordinator, runId, 'cancelled');
     await expect(data.readOutput(runId, 6)).rejects.toThrow();
+    expect(store.usage()).toBe(0);
   });
 
   it('cancels a FakeEngine run between phases', async () => {
@@ -169,9 +210,59 @@ describe('Coordinator', () => {
     await waitFor(coordinator, second, 'running');
     engine.fail(second, 'engine error');
     await waitFor(coordinator, second, 'failed');
-    const failed = coordinator.state.get().runs.find((r) => r.snapshot.runId === second)!;
-    expect(failed.record.error).toBe('engine error');
+    expect(viewOf(coordinator, second)!.record.error).toBe('engine error');
     expect(new TextDecoder().decode(await data.readOutput(first, 6))).toBe(`${first}\n`);
+  });
+
+  it('fails a run whose records the engine reads differently from the record table', async () => {
+    const { coordinator } = setup(new FakeEngine(), (data) => {
+      const gateway = Object.create(data) as DataGateway;
+      gateway.buildRunInput = async (ids) => {
+        const input = await data.buildRunInput(ids);
+        return { ...input, records: input.records.map((r) => ({ ...r, id: `${r.id}-stale` })) };
+      };
+      return gateway;
+    });
+    const runId = (await coordinator.enqueue(request)).runId!;
+    await waitFor(coordinator, runId, 'failed');
+    expect(viewOf(coordinator, runId)!.record.error).toBe(
+      'The query records that the engine read differ from the record table: ' +
+        'record 1 is "q-stale" (length 4) in the record table, but the engine read "q" (length 4)',
+    );
+  });
+
+  it('fails a run with the reason when storage runs out, keeps earlier results and recovers', async () => {
+    const { coordinator, store, saved } = setup();
+    const first = (await coordinator.enqueue(request)).runId!;
+    await waitFor(coordinator, first, 'completed');
+    store.setCapacity(store.usage());
+    const second = (await coordinator.enqueue(request)).runId!;
+    await waitFor(coordinator, second, 'failed');
+    expect(viewOf(coordinator, second)!.record.error).toMatch(/^Not enough temporary storage/);
+    await coordinator.exportOutput(first, 6);
+    expect(saved[0]!.text).toContain(FAKE_MARKER);
+    store.setCapacity(Number.POSITIVE_INFINITY);
+    const third = (await coordinator.enqueue(request)).runId!;
+    await waitFor(coordinator, third, 'completed');
+  });
+
+  it('publishes the temporary storage in use', async () => {
+    const { coordinator } = setup();
+    const runId = (await coordinator.enqueue(request)).runId!;
+    await waitFor(coordinator, runId, 'completed');
+    await coordinator.refreshStorage();
+    const storage = coordinator.state.get().storage!;
+    expect(storage.backend).toBe('memory');
+    expect(storage.sessionBytes).toBeGreaterThan(0);
+    expect(storage.cleanup).toEqual({ state: 'done', removedSessions: 0 });
+  });
+
+  it('refuses BLASTX as ABI v2 does until session SX', async () => {
+    const { coordinator } = setup();
+    expect(await coordinator.enqueue({ ...request, program: 'blastx' })).toEqual({
+      ok: false,
+      message: 'blastx is not available in LOSAT Web ABI v2 yet',
+    });
   });
 
   it('does not queue a request that the engine rejects', async () => {

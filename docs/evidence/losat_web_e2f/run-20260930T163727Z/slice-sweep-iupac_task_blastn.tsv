@@ -1,0 +1,2 @@
+# pool=iupac options='-task blastn' seed=7 cases=300 differing=0
+exit 0

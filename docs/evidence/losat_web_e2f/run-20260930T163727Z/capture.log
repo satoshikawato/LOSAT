@@ -1,0 +1,2 @@
+expected-hash mismatch: blastn Sakai.MG1655.megablast
+236 cases, 1 frozen-hash mismatches -> /home/kawato/.cache/losat-web-gui-target/capture-s07pg/hashes.tsv

@@ -1,5 +1,6 @@
 // Engine port: the application's only view of the search engine. Implementations live
 // in src/infra; the Wasm implementation follows docs/web/abi_v2.md.
+import type { RecordKey } from '../domain/dataset';
 import type { OutputFormat } from '../domain/output-format';
 import type { ProgramId } from '../domain/programs';
 
@@ -64,20 +65,34 @@ export interface RuntimeInfo {
   readonly fallbackReason?: string;
 }
 
+/** One input of a run: the exact FASTA bytes of the run snapshot and their record table. */
+export interface EngineInput {
+  readonly bytes: Uint8Array;
+  /**
+   * ID and length of each record in `bytes`, from the data layer's index scan. After
+   * `register`, the engine compares the records its own parser read with these and fails
+   * the run with InputMismatchError, before searching, if they differ (plan §5.4).
+   */
+  readonly records: readonly RecordKey[];
+}
+
 export interface EngineRunRequest {
   readonly runId: string;
   readonly argv: readonly string[];
-  readonly query: Uint8Array;
-  readonly subject: Uint8Array;
+  readonly query: EngineInput;
+  readonly subject: EngineInput;
   readonly requestedThreads: number | 'auto';
 }
 
-/** Receives the outputs of one run. Supplied by the data layer. */
-export interface RunSink {
-  write(format: OutputFormat, chunk: Uint8Array): void;
-  hits(records: readonly HspRecord[]): void;
-  /** ABI stream 3: the warnings that the CLI writes to stderr, as UTF-8 bytes. */
-  diagnostics(chunk: Uint8Array): void;
+/** Thrown (as a rejection) by `run` when `register` read other records than the record table. */
+export class InputMismatchError extends Error {
+  constructor(
+    readonly role: 'query' | 'subject',
+    detail: string,
+  ) {
+    super(`The ${role} records that the engine read differ from the record table: ${detail}`);
+    this.name = 'InputMismatchError';
+  }
 }
 
 /** Thrown (as a rejection) by `run` after `cancel` was called for that run. */
@@ -91,8 +106,13 @@ export class RunCancelledError extends Error {
 export interface EngineGateway {
   describe(program: ProgramId): Promise<ProgramDescription>;
   validate(argv: readonly string[]): Promise<ValidationResult>;
-  /** Resolves after every output was written to `sink`; rejects on failure or cancel. */
-  run(request: EngineRunRequest, sink: RunSink, onPhase: (phase: EnginePhase) => void): Promise<RuntimeInfo>;
+  /**
+   * Runs one search and sends its outputs to `output` (ports/run-output.ts): the chunks of
+   * every stream, then `end`, all posted before the promise resolves. `output` comes from
+   * `DataGateway.openRun` and may be transferred to a worker. Rejects on failure or cancel
+   * without sending `end`; the data layer then discards what arrived.
+   */
+  run(request: EngineRunRequest, output: MessagePort, onPhase: (phase: EnginePhase) => void): Promise<RuntimeInfo>;
   /** Stops the run as soon as possible. Unknown or finished runs are ignored. */
   cancel(runId: string): void;
 }

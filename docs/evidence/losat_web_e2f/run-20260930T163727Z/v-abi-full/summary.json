@@ -1,0 +1,21 @@
+{
+  "artifacts": {
+    "native": "a4ff5abb3a619f3f73b9cd9f342ae0e05d7089bef9391b4c77d8c1e8750080f5",
+    "serial": "e5902cd943414ea1ac51561df81a95b6914e6bfd84c7500346adf9eeb011fe09",
+    "threads": "5f2eef383f1630adea615de2a9c089334085400f04940baec0d3183a3f4a558b"
+  },
+  "runs": 460,
+  "searches": 115,
+  "by_engine_and_threads": {
+    "serial n1": 115,
+    "threads n1": 115,
+    "threads n2": 115,
+    "threads n4": 115
+  },
+  "frozen_equal": 672,
+  "frozen_compared": 676,
+  "frozen_differing": [
+    "Sakai.MG1655.megablast outfmt 7"
+  ],
+  "failed_parts": []
+}

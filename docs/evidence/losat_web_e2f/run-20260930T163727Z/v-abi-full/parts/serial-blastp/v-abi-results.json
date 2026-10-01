@@ -1,0 +1,236 @@
+[
+  {
+    "engine": "serial",
+    "threads": 1,
+    "program": "blastp",
+    "cases": [
+      "pairwise_default_serial",
+      "pairwise_default_serial.fmt0",
+      "pairwise_default_serial.fmt7",
+      "pairwise_default_thread4",
+      "pairwise_default_thread4.fmt0",
+      "pairwise_default_thread4.fmt7"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/SicyWSV.faa",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/PajaWSV.faa",
+      "-max_hsps",
+      "1"
+    ],
+    "formats": {
+      "0": "0a3d25996928d5302b23ac812fd72220cd5e7a1a04f59745b4fec7b190f0eee9",
+      "6": "fd4b010800e32ce6c823cb38b42a10b7845f3342edae892acccc8f554f9edf34",
+      "7": "6ba45dd4d62e92b527ecb265eeeb629ef7c01ba09097aa1f50e49ce3f5026405"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 475
+  },
+  {
+    "engine": "serial",
+    "threads": 1,
+    "program": "blastp",
+    "cases": [
+      "pairwise_limit1_serial",
+      "pairwise_limit1_serial.fmt0",
+      "pairwise_limit1_serial.fmt7"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/SicyWSV.faa",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/PajaWSV.faa",
+      "-max_hsps",
+      "1",
+      "-max_target_seqs",
+      "1"
+    ],
+    "formats": {
+      "0": "1c80ed52662e28383c3570b0617ca05ac375b607330a98c10796d00f4b2674fd",
+      "6": "2825ce099d7858d7d23a811bff98f4c42fee96c9519003ee936f25855648d3af",
+      "7": "b4bb8b0373e7cc38860854e54cf1a3773aca309fb93537ad0642348ec6e6661a"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 89
+  },
+  {
+    "engine": "serial",
+    "threads": 1,
+    "program": "blastp",
+    "cases": [
+      "pairwise_limit5_serial",
+      "pairwise_limit5_serial.fmt0",
+      "pairwise_limit5_serial.fmt7"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/SicyWSV.faa",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/PajaWSV.faa",
+      "-max_hsps",
+      "1",
+      "-max_target_seqs",
+      "5"
+    ],
+    "formats": {
+      "0": "6130d57826a01a6daca61ffe199fef70fd100d52e30c7afead2aea35fb815a7a",
+      "6": "cd02727a3d7bd2548e1db2759a96b6be72ab0709e7bb0e2179312c01d42419c7",
+      "7": "b68c17d470b2d3db945b73b90fb0e858a149b78b8152b8476a0d79d5dd9747df"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 373
+  },
+  {
+    "engine": "serial",
+    "threads": 1,
+    "program": "blastp",
+    "cases": [
+      "pairwise_nohit_serial",
+      "pairwise_nohit_serial.fmt0",
+      "pairwise_nohit_serial.fmt7"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/SicyWSV.faa",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/AP027078.faa",
+      "-max_hsps",
+      "1"
+    ],
+    "formats": {
+      "0": "9377e98f7118408c06725b60746896d8e0d2e34a5868b6d73ca3ea21137988cf",
+      "6": "8c39d7c6c27963e78c01fac416bd86542b64501301919bd74df280e31aa6f4b8",
+      "7": "5f8967fd07f087e9bb1fa23aed206953d5a3c83912cd9bd876770cdc2c6f7663"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 334
+  },
+  {
+    "engine": "serial",
+    "threads": 1,
+    "program": "blastp",
+    "cases": [
+      "all_hsp_forward_serial",
+      "all_hsp_forward_serial.fmt0",
+      "all_hsp_forward_serial.fmt7",
+      "all_hsp_forward_thread4",
+      "all_hsp_forward_thread4.fmt0",
+      "all_hsp_forward_thread4.fmt7"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/SicyWSV.faa",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/PajaWSV.faa"
+    ],
+    "formats": {
+      "0": "76a624440cccfb26cfa39a699146c2e840d4e1f3409b26cbb89b71a57d776732",
+      "6": "a6d38a3200c9570726550a12858101d1eaa414dca236f925da5651e95d819b5d",
+      "7": "206bc59f52df0b6b39491c02f781097d3828de9e5250019b386d51d0803e9363"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 530
+  },
+  {
+    "engine": "serial",
+    "threads": 1,
+    "program": "blastp",
+    "cases": [
+      "all_hsp_reverse_limit5_serial",
+      "all_hsp_reverse_limit5_serial.fmt0",
+      "all_hsp_reverse_limit5_serial.fmt7"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/PajaWSV.faa",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/SicyWSV.faa",
+      "-max_target_seqs",
+      "5"
+    ],
+    "formats": {
+      "0": "548d2b82fbd091bf7a633d5e53cc338698277d92b811236aa47f57f512781f34",
+      "6": "2db7a6604c7d44731e69f75546340b127037e63fe56ad9370e7d64849ad7162d",
+      "7": "2fd0fa943af500aa953ae13c20be38140ac80312cde2c8291ed2e86fa1b49c97"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 445
+  },
+  {
+    "engine": "serial",
+    "threads": 1,
+    "program": "blastp",
+    "cases": [
+      "all_hsp_self_serial",
+      "all_hsp_self_serial.fmt0",
+      "all_hsp_self_serial.fmt7"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/SicyWSV.faa",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/SicyWSV.faa"
+    ],
+    "formats": {
+      "0": "4fb2821c0f61f8af6281b015cfe8c7ac02c01368956274c743bc95341b57ccf0",
+      "6": "67911f4a93327e9622afe10d15a66d9e52ae8e1c3d905db9ca5fb018d6612e46",
+      "7": "4db4b2ac42acf6f785ef97f3cc004f8a59efc31f4063c9ecd69f3ebb7c5d806c"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 568
+  },
+  {
+    "engine": "serial",
+    "threads": 1,
+    "program": "blastp",
+    "cases": [
+      "width.blastp"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/pwidth_q.faa",
+      "-subject",
+      "tests/fasta/outfmt0/pwidth_s.faa"
+    ],
+    "formats": {
+      "0": "2f540da2e4394efa8938825e18298dad06358eccba2367a3fec3bdffc92b2f52",
+      "6": "06ae846ee38604ef7214f4a5f9806256c30e6a1cfad5125bccc668a95c2256ad",
+      "7": "dac2c39bdc7ddefe36088a649a29cd77fdb542b3955f74696f7d6350dd2ab0bb"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 1
+  }
+]

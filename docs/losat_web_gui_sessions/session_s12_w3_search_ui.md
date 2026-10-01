@@ -21,6 +21,7 @@ LOSAT Web の段階 W3 を実行する。先に [セッション README](README.
    - `register` は、NCBI が違う読み方をする BLASTN の入力（空の定義行・先頭の空白・tab などの制御文字・非 ASCII、残基の無いレコード、IUPAC の文字以外の残基、最初の定義行の前の文字や UTF-8 でないバイト。`U` は `T` として受け付ける）を 「not supported by LOSAT's BLASTN」を含む文言で拒否する（TD-12）。レコード一覧の警告として、その文言を見せる。
    - query の batch に依存する場合（表を超える gap で組成の違う query が最初の batch に収まらない、など）は、`run` が LOSAT の文言で失敗する。失敗として見せ、結果を部分的に出さない。
 9. BLASTP・TBLASTN・TBLASTX（S08+、TD-13）と BLASTX（SX）の既定以外のオプション：それぞれのセッションが書き足す、直した値と拒否する値に従う。
+   入力は S10 の `DatasetStore`（`addSource`・`indexSource`・`reviseDataset`・`buildRunInput`）を使い、ファイルを選んだ時点で索引を作る（S10 では `enqueue` が作り、貼り付けは Data worker の File と snapshot のバイトの 2 つの写しになる）。レコード一覧は `DatasetRevision.records`、除外は `reviseDataset`、Combined は `buildRunInput([...])`。BLASTX を SX までどう表示するか決める。多数のレコードの索引とハッシュの時間を測る（`docs/evidence/losat_web_w2/README.md`）。
 10. E2E：代表的な研究作業（Subject を保持したまま Query を変えて繰り返す、キューに複数積む、実行中に次のジョブを編集する）と、境界条件（空の入力、不正なレコード、除外の後の再実行、取消）を Playwright で試す。
 
 完了条件は計画 §7 の S12 の行による。画面の記録を画面レビューに見せ、指摘と対応を `docs/evidence/losat_web_w3/README.md` に記録する。

@@ -62,8 +62,9 @@ use super::super::args::BlastnArgs;
 use super::super::blast_extend::DiagStruct;
 use super::super::constants::TWO_HIT_WINDOW;
 use super::super::coordination::{
-    build_lookup_tables, collect_lowercase_masks, configure_task, finalize_task_config,
-    prepare_sequence_data, scan_subjects_metadata, subject_metadata_from_records,
+    build_lookup_tables, chunk_query_masks, collect_lowercase_masks, configure_task,
+    finalize_task_config, prepare_sequence_data, query_masks, scan_subjects_metadata,
+    subject_metadata_from_records, LookupTables, SubjectMetadata,
 };
 use super::super::extension::{
     build_compressed_query, build_nucl_score_table, build_query_four_base_bytes,
@@ -75,9 +76,9 @@ use super::super::filtering::{
     subject_best_hit, subject_best_hit_by, BestHitKey, ReevalParams,
 };
 use super::super::hsp::{
-    get_prelim_hitlist_size, parse_blastn_output_format, sort_hsplist_by_evalue,
+    evalue_comp, get_prelim_hitlist_size, parse_blastn_output_format, sort_hsplist_by_evalue,
     sort_hsps_by_score, trim_by_max_hsps, write_output_blastn_hitlists_to_writer, BlastnHitList,
-    BlastnHsp, BlastnHspList, BlastnOutputFormat, NCBI_BLASTN_VERSION,
+    BlastnHsp, BlastnHspList, BlastnOutputFormat, HitList, HitListEntry, NCBI_BLASTN_VERSION,
 };
 use super::super::input::{
     check_deflines, check_records, check_records_have_residues, check_residues,
@@ -86,11 +87,14 @@ use super::super::input::{
 use super::super::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
 use super::super::lookup::{build_unmasked_ranges, reverse_complement};
 use super::super::pairwise::{pairwise_hits, DisplayMasks};
+use super::super::query_split::{
+    query_chunk_size, restrict_masks, split_query_batch, QueryChunk, QUERY_CHUNK_OVERLAP,
+};
 use super::super::scoring::{
     check_greedy_gap_costs, check_losat_limits, check_scoring_options, context_blocks,
     context_ungapped_blocks, gap_x_dropoffs, karlin_error, ContextKarlin,
 };
-use crate::blastinput::query_batch::query_batches;
+use crate::blastinput::query_batch::{next_query_batch_end, BatchSizeMixer};
 use crate::report::pairwise::{
     write_blastn_pairwise_prolog, write_blastn_pairwise_report, BlastnPairwiseQuery,
     BlastnPairwiseReport, PairwiseConfig,
@@ -2856,6 +2860,9 @@ struct PrelimHit {
     prelim_score: i32,
     seed_qs: usize,
     seed_ss: usize,
+    /// The e-value of the preliminary stage (set before its reap); a merge of two HSPs keeps
+    /// the first one's (`s_BlastMergeTwoHSPs` does not change `evalue`).
+    prelim_evalue: f64,
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1330-1353
@@ -3121,15 +3128,28 @@ fn prelim_subject_best_hit(combined: &mut Vec<PrelimHit>, query_lengths: &[usize
     });
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2860-3055
+/// Where the second of two preliminary HSP lists continues the first: the start of a subject
+/// chunk, or the offsets of a query chunk's contexts (plus and minus strand; `Blast_HSPListsMerge`
+/// takes `contexts_per_query < 0` for the subject).
+#[derive(Clone, Copy)]
+enum HspListSplit {
+    Subject { offset: usize },
+    Query { offsets: [i32; 2] },
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2857-2862
 // ```c
-// Int2 Blast_HSPListsMerge(..., Int4 contexts_per_query, Int4 *split_offsets,
-//                          Int4 chunk_overlap_size, Boolean allow_gap, Boolean short_reads)
+// Int2 Blast_HSPListsMerge(BlastHSPList** hsp_list_ptr,
+//                    BlastHSPList** combined_hsp_list_ptr,
+//                    Int4 hsp_num_max, Int4 *split_offsets,
+//                    Int4 contexts_per_query, Int4 chunk_overlap_size,
+//                    Boolean allow_gap, Boolean short_reads)
 // ```
-fn merge_prelim_hits_subject_split(
+// `hsp_num_max` is `INT4_MAX` for BLASTN (`BlastHspNumMax`), so every HSP is kept.
+fn merge_prelim_hit_lists(
     combined: &mut Vec<PrelimHit>,
     mut incoming: Vec<PrelimHit>,
-    split_offset: usize,
+    split: HspListSplit,
     chunk_overlap_size: usize,
     allow_gap: bool,
 ) -> Vec<PrelimHit> {
@@ -3141,78 +3161,357 @@ fn merge_prelim_hits_subject_split(
         return incoming;
     }
 
-    let mut combined_overlap = Vec::new();
-    for (idx, hsp) in combined.iter().enumerate() {
-        if hsp.prelim_se > split_offset {
-            combined_overlap.push(idx);
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2890-2945
+    // ```c
+    //    if (contexts_per_query < 0) {      /* subject seq is split */
+    //       for (index1 = 0; index1 < combined_hsp_list->hspcnt; index1++) {
+    //          hsp1 = combined_hsp_list->hsp_array[index1];
+    //          if (hsp1->subject.end > split_offsets[0]) {
+    //             /* At least part of this HSP lies in the overlap strip. */
+    //             hsp_var = combined_hsp_list->hsp_array[hspcnt1];
+    //             combined_hsp_list->hsp_array[hspcnt1] = hsp1;
+    //             combined_hsp_list->hsp_array[index1] = hsp_var;
+    //             ++hspcnt1;
+    //          }
+    //       }
+    //       ...
+    //          if (hsp2->subject.offset < split_offsets[0] + chunk_overlap_size) {
+    //       ...
+    //    else {            /* query seq is split */
+    //       ...
+    //          offset_idx = hsp1->context % contexts_per_query;
+    //          if (split_offsets[offset_idx] < 0) continue;
+    //          if ((hsp1->query.frame >= 0 && hsp1->query.end >
+    //                          split_offsets[offset_idx]) ||
+    //              (hsp1->query.frame < 0 && hsp1->query.offset <
+    //                          split_offsets[offset_idx] + chunk_overlap_size)) {
+    //       ...
+    //          if ((hsp2->query.frame < 0 && hsp2->query.end >
+    //                          split_offsets[offset_idx]) ||
+    //              (hsp2->query.frame >= 0 && hsp2->query.offset <
+    //                          split_offsets[offset_idx] + chunk_overlap_size)) {
+    // ```
+    // The swaps put the HSPs of the overlap strip first, in order, and reorder the others;
+    // the stable sort by score below keeps that order for equal HSPs.
+    let overlap = chunk_overlap_size as i64;
+    let in_strip = |hsp: &PrelimHit, combined_side: bool| match split {
+        HspListSplit::Subject { offset } => {
+            if combined_side {
+                hsp.prelim_se > offset
+            } else {
+                hsp.prelim_ss < offset.saturating_add(chunk_overlap_size)
+            }
+        }
+        HspListSplit::Query { offsets } => {
+            let split_offset = offsets[(hsp.context_idx % 2) as usize] as i64;
+            if split_offset < 0 {
+                return false;
+            }
+            let ends_after = hsp.prelim_qe as i64 > split_offset;
+            let starts_before = (hsp.prelim_qs as i64) < split_offset + overlap;
+            if (hsp.query_frame >= 0) == combined_side {
+                ends_after
+            } else {
+                starts_before
+            }
+        }
+    };
+    let mut hspcnt1 = 0usize;
+    for index1 in 0..combined.len() {
+        if in_strip(&combined[index1], true) {
+            combined.swap(hspcnt1, index1);
+            hspcnt1 += 1;
+        }
+    }
+    let mut hspcnt2 = 0usize;
+    for index2 in 0..incoming.len() {
+        if in_strip(&incoming[index2], false) {
+            incoming.swap(hspcnt2, index2);
+            hspcnt2 += 1;
         }
     }
 
-    let mut incoming_overlap = Vec::new();
-    for (idx, hsp) in incoming.iter().enumerate() {
-        if hsp.prelim_ss < split_offset.saturating_add(chunk_overlap_size) {
-            incoming_overlap.push(idx);
-        }
-    }
-
-    let mut deleted = vec![false; incoming.len()];
-
-    for &i in combined_overlap.iter() {
-        let hsp1_context = combined[i].context_idx;
-        for &j in incoming_overlap.iter() {
-            if deleted[j] {
-                continue;
-            }
-            if incoming[j].context_idx != hsp1_context {
-                continue;
-            }
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2982-2990
-            // ```c
-            // if (contexts_per_query < 0 || hsp1->query.frame >= 0) {
-            //    end_diag = s_HSPEndDiag(hsp1);
-            //    start_diag = s_HSPStartDiag(hsp2);
-            // }
-            // ...
-            // if (ABS(end_diag - start_diag) < OVERLAP_DIAG_CLOSE) {
-            //    if (s_BlastMergeTwoHSPs(hsp1, hsp2, allow_gap)) {
-            // ```
-            // `hsp1` may already have been expanded by an earlier merge in this
-            // inner loop, so recompute its end diagonal every iteration.
-            let end_diag = combined[i].prelim_qe as i32 - combined[i].prelim_se as i32;
-            let start_diag = incoming[j].prelim_qs as i32 - incoming[j].prelim_ss as i32;
-            if (end_diag - start_diag).abs() < OVERLAP_DIAG_CLOSE {
-                if merge_two_prelim_hits(&mut combined[i], &incoming[j], allow_gap) {
-                    deleted[j] = true;
+    if hspcnt1 > 0 && hspcnt2 > 0 {
+        let mut deleted = vec![false; incoming.len()];
+        for index1 in 0..hspcnt1 {
+            let hsp1_context = combined[index1].context_idx;
+            for index2 in 0..hspcnt2 {
+                if deleted[index2] || incoming[index2].context_idx != hsp1_context {
+                    continue;
+                }
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2982-2990
+                // ```c
+                // if (contexts_per_query < 0 || hsp1->query.frame >= 0) {
+                //    end_diag = s_HSPEndDiag(hsp1);
+                //    start_diag = s_HSPStartDiag(hsp2);
+                // }
+                // else {
+                //    end_diag = s_HSPEndDiag(hsp2);
+                //    start_diag = s_HSPStartDiag(hsp1);
+                // }
+                // ```
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1465-1477
+                // ```c
+                //     return hsp->query.offset - hsp->subject.offset;
+                //     return hsp->query.end - hsp->subject.end;
+                // ```
+                // `hsp1` may already have been expanded by an earlier merge in this
+                // inner loop, so recompute its diagonals every iteration.
+                let end_diag = |hsp: &PrelimHit| hsp.prelim_qe as i64 - hsp.prelim_se as i64;
+                let start_diag = |hsp: &PrelimHit| hsp.prelim_qs as i64 - hsp.prelim_ss as i64;
+                let hsp1_first = matches!(split, HspListSplit::Subject { .. })
+                    || combined[index1].query_frame >= 0;
+                let (end, start) = if hsp1_first {
+                    (end_diag(&combined[index1]), start_diag(&incoming[index2]))
+                } else {
+                    (end_diag(&incoming[index2]), start_diag(&combined[index1]))
+                };
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2991-2995
+                // ```c
+                //             if (ABS(end_diag - start_diag) < OVERLAP_DIAG_CLOSE) {
+                //                if (s_BlastMergeTwoHSPs(hsp1, hsp2, allow_gap)) {
+                //                   /* Free the second HSP. */
+                //                   hspp2[index2] = Blast_HSPFree(hsp2);
+                //                }
+                // ```
+                if (end - start).abs() < OVERLAP_DIAG_CLOSE as i64
+                    && merge_two_prelim_hits(&mut combined[index1], &incoming[index2], allow_gap)
+                {
+                    deleted[index2] = true;
                 }
             }
         }
+
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3000-3001
+        // ```c
+        // /* Purge the nulled out HSPs from the new HSP list */
+        // Blast_HSPListPurgeNullHSPs(hsp_list);
+        // ```
+        let mut delete_idx = 0usize;
+        incoming.retain(|_| {
+            let keep = !deleted[delete_idx];
+            delete_idx += 1;
+            keep
+        });
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3000-3001
-    // ```c
-    // /* Purge the nulled out HSPs from the new HSP list */
-    // Blast_HSPListPurgeNullHSPs(hsp_list);
-    // ```
-    let mut delete_idx = 0usize;
-    incoming.retain(|_| {
-        let keep = !deleted[delete_idx];
-        delete_idx += 1;
-        keep
-    });
+    append_prelim_hit_list(combined, incoming)
+}
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3029
-    // ```c
-    // s_BlastHSPListsCombineByScore(hsp_list, combined_hsp_list, new_hspcnt);
-    // ```
+/// NCBI's `s_BlastHSPListsCombineByScore` when every HSP is kept (`hsp_num_max` is
+/// `INT4_MAX`): the HSPs of the second list follow those of the first, then the list is sorted
+/// by score. `Blast_HSPListAppend` is this alone.
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2757-2766
+/// ```c
+///    if (new_hspcnt >= hsp_list->hspcnt + combined_hsp_list->hspcnt) {
+///       /* All HSPs from both arrays are saved */
+///       for (index=combined_hsp_list->hspcnt, index1=0;
+///            index1<hsp_list->hspcnt; index1++) {
+///          if (hsp_list->hsp_array[index1] != NULL)
+///             combined_hsp_list->hsp_array[index++] = hsp_list->hsp_array[index1];
+///       }
+///       combined_hsp_list->hspcnt = new_hspcnt;
+///       Blast_HSPListSortByScore(combined_hsp_list);
+/// ```
+fn append_prelim_hit_list(
+    combined: &mut Vec<PrelimHit>,
+    mut incoming: Vec<PrelimHit>,
+) -> Vec<PrelimHit> {
+    if incoming.is_empty() {
+        return incoming;
+    }
+    if combined.is_empty() {
+        combined.extend(incoming.drain(..));
+        return incoming;
+    }
     combined.extend(incoming.drain(..));
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3029
-    // ```c
-    // s_BlastHSPListsCombineByScore(hsp_list, combined_hsp_list, new_hspcnt);
-    // ```
-    // `s_BlastHSPListsCombineByScore` relies on `qsort`-ordered score lists;
-    // keep the merged preliminary list on the same ordering path.
     sort_prelim_hits_by_score(combined);
     incoming
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1414-1435
+// ```c
+// s_EvalueCompareHSPs(const void* v1, const void* v2)
+// {
+//    ...
+//    if ((retval = s_EvalueComp(h1->evalue, h2->evalue)) != 0)
+//       return retval;
+//
+//    return ScoreCompareHSPs(v1, v2);
+// }
+// ```
+fn evalue_compare_prelim_hits(a: &PrelimHit, b: &PrelimHit) -> std::cmp::Ordering {
+    evalue_comp(a.prelim_evalue, b.prelim_evalue).then_with(|| score_compare_prelim_hits(a, b))
+}
+
+/// A subject's preliminary HSPs of one query: NCBI's `BlastHSPList` in the HSP stream of the
+/// preliminary stage, kept in the query's hit list of `prelim_hitlist_size` subjects.
+struct PrelimHspList {
+    oid: u32,
+    hsps: Vec<PrelimHit>,
+    best_evalue: f64,
+}
+
+impl HitListEntry for PrelimHspList {
+    fn oid(&self) -> u32 {
+        self.oid
+    }
+
+    fn hsp_count(&self) -> usize {
+        self.hsps.len()
+    }
+
+    fn best_evalue(&self) -> f64 {
+        self.best_evalue
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1740-1748
+    // ```c
+    // s_BlastGetBestEvalue(const BlastHSPList* hsp_list)
+    // {
+    //     int index = 0;
+    //     double best_evalue = (double) INT4_MAX;
+    //
+    //     for (index=0; index<hsp_list->hspcnt; index++)
+    //        best_evalue = MIN(hsp_list->hsp_array[index]->evalue, best_evalue);
+    //
+    //     return best_evalue;
+    // ```
+    fn update_best_evalue(&mut self) {
+        let mut best = i32::MAX as f64;
+        for hsp in &self.hsps {
+            if hsp.prelim_evalue < best {
+                best = hsp.prelim_evalue;
+            }
+        }
+        self.best_evalue = best;
+    }
+
+    fn first_score(&self) -> Option<i32> {
+        self.hsps.first().map(|hsp| hsp.prelim_score)
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1442-1455
+    // ```c
+    //     if (hsp_list->hspcnt > 1) {
+    //         Int4 index;
+    //         BlastHSP** hsp_array = hsp_list->hsp_array;
+    //         /* First check if HSP array is already sorted. */
+    //         for (index = 0; index < hsp_list->hspcnt - 1; ++index) {
+    //             if (s_EvalueCompareHSPs(&hsp_array[index], &hsp_array[index+1]) > 0) {
+    //                 break;
+    //             }
+    //         }
+    //         /* Sort the HSP array if it is not sorted yet. */
+    //         if (index < hsp_list->hspcnt - 1) {
+    //             qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
+    //                   s_EvalueCompareHSPs);
+    //         }
+    // ```
+    fn sort_by_evalue(&mut self) {
+        let sorted = self.hsps.windows(2).all(|pair| {
+            evalue_compare_prelim_hits(&pair[0], &pair[1]) != std::cmp::Ordering::Greater
+        });
+        if !sorted {
+            qsort_prelim_hits_by(&mut self.hsps, evalue_compare_prelim_hits);
+        }
+    }
+}
+
+/// The hit lists of the preliminary stage, one per query.
+type PrelimHitLists = Vec<Option<HitList<PrelimHspList>>>;
+
+/// NCBI's HSP collector of the preliminary stage: each subject's HSPs (in subject order) are
+/// split into one list per query, in their order, and saved in the query's hit list, which
+/// holds at most `prelim_hitlist_size` subjects (`Blast_HitListUpdate` drops the list with
+/// the worst preliminary e-value).
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/hspfilter_collector.c:116-161
+/// ```c
+///       for (index = 0; index < hsp_list->hspcnt; index++) {
+///          Int4 query_index;
+///          hsp = hsp_list->hsp_array[index];
+///          query_index = Blast_GetQueryIndexFromContext(hsp->context, program);
+///          ...
+///          Blast_HSPListSaveHSP(tmp_hsp_list, hsp);
+///       ...
+///       for (index = 0; index < results->num_queries; index++) {
+///          if (hsp_list_array[index]) {
+///             if (!results->hitlist_array[index]) {
+///                results->hitlist_array[index] =
+///                   Blast_HitListNew(params->prelim_hitlist_size);
+///             }
+///             Blast_HitListUpdate(results->hitlist_array[index],
+///                                 hsp_list_array[index]);
+///          }
+///       }
+///       ...
+///    } else if (hsp_list->hspcnt > 0) {
+///       /* Single query; save the HSP list directly into the results
+///          structure */
+///       if (!results->hitlist_array[0]) {
+///          results->hitlist_array[0] =
+///             Blast_HitListNew(params->prelim_hitlist_size);
+///       }
+///       Blast_HitListUpdate(results->hitlist_array[0], hsp_list);
+/// ```
+fn collect_prelim_hit_lists(
+    subject_hits: Vec<Vec<PrelimHit>>,
+    num_queries: usize,
+    prelim_hitlist_size: usize,
+) -> PrelimHitLists {
+    let mut hit_lists: PrelimHitLists = Vec::with_capacity(num_queries);
+    hit_lists.resize_with(num_queries, || None);
+    for (oid, hits) in subject_hits.into_iter().enumerate() {
+        if hits.is_empty() {
+            continue;
+        }
+        let mut per_query: Vec<Vec<PrelimHit>> = vec![Vec::new(); num_queries];
+        for hit in hits {
+            per_query[hit.query_idx as usize].push(hit);
+        }
+        for (query, hsps) in per_query.into_iter().enumerate() {
+            if hsps.is_empty() {
+                continue;
+            }
+            hit_lists[query]
+                .get_or_insert_with(|| HitList::new(prelim_hitlist_size))
+                .update(PrelimHspList {
+                    oid: oid as u32,
+                    hsps,
+                    best_evalue: 0.0,
+                });
+        }
+    }
+    hit_lists
+}
+
+/// The preliminary HSPs that the traceback reads, for each subject: the kept lists of the
+/// queries, a query after another. NCBI's `BlastHSPStreamClose` sorts the kept lists by
+/// subject, and the traceback reads each subject's lists (`BlastHSPStreamBatchRead`); the
+/// traceback of one query's list does not depend on the lists of the other queries.
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hspstream.c:196-203
+/// ```c
+///    /* sort in order of decreasing subject OID. HSPLists will be
+///       read out from the end of hsplist_array later */
+///
+///    hsp_stream->num_hsplists = num_hsplists;
+///    if (num_hsplists > 1) {
+///       qsort(hsp_stream->sorted_hsplists, num_hsplists,
+///                     sizeof(BlastHSPList *), s_SortHSPListByOid);
+///    }
+/// ```
+fn prelim_hits_by_subject(hit_lists: PrelimHitLists, num_subjects: usize) -> Vec<Vec<PrelimHit>> {
+    let mut by_subject: Vec<Vec<PrelimHit>> = Vec::with_capacity(num_subjects);
+    by_subject.resize_with(num_subjects, Vec::new);
+    for hit_list in hit_lists.into_iter().flatten() {
+        for list in hit_list.hsplist_array {
+            by_subject[list.oid as usize].extend(list.hsps);
+        }
+    }
+    by_subject
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:488-491
@@ -4229,112 +4528,6 @@ fn blastn_pairwise_report(
     Ok((queries, pairwise_report))
 }
 
-/// The first query batch of a search: its end (a query index) and its size in residues.
-///
-/// NCBI reference: ncbi-blast/c++/src/app/blast/blastn_app.cpp:261-274,299-300
-/// ```c
-///         CBatchSizeMixer mixer(SplitQuery_GetChunkSize(opt.GetProgram())-1000);
-///         int batch_size = m_CmdLineArgs->GetQueryBatchSize();
-///         if (batch_size) {
-///             input.SetBatchSize(batch_size);
-///         } else {
-///             Int8 total_len = formatter.GetDbTotalLength();
-///             if (total_len > 0) {
-///                 /* the optimal hits per batch scales with total db size */
-///                 mixer.SetTargetHits(total_len / 3000);
-///             }
-///             input.SetBatchSize(mixer.GetBatchSize());
-///         }
-///     ...
-///                 if (!batch_size)
-///                     input.SetBatchSize(mixer.GetBatchSize(lcl_blast.GetNumExtensions()));
-/// ```
-/// `GetQueryBatchSize` is 0 for blastn (blastn_args.cpp:131-135, blast_input_aux.cpp:99).
-/// The first batch therefore has `max(1000000, total / 3000) / 200` residues, within
-/// [100, chunk size - 1000] (blast_app_util.hpp:69-81, blast_app_util.cpp:65-81; chunk
-/// sizes 1000000 for blastn and 5000000 for megablast, local_blast.cpp:65-73). Each later
-/// batch size depends on the number of ungapped extensions of the previous batch, which
-/// LOSAT does not count; it is at least 100 residues (`k_MinBatchSize`).
-struct FirstBatch {
-    end: usize,
-    size: usize,
-}
-
-fn first_query_batch(lengths: &[usize], db_len_total: usize, megablast: bool) -> FirstBatch {
-    let chunk_size: i64 = if megablast { 5_000_000 } else { 1_000_000 };
-    let total = db_len_total as i64;
-    let target = if total > 0 {
-        (total / 3000).max(1_000_000)
-    } else {
-        1_000_000
-    };
-    let size = (target / 200).clamp(100, chunk_size - 1000) as usize;
-    let end = query_batches(lengths, size)
-        .first()
-        .map_or(0, |batch| batch.end);
-    FirstBatch { end, size }
-}
-
-/// The queries that NCBI does not search because every query of their batch is invalid;
-/// the pairwise report gives them the `-1` Karlin blocks.
-///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/local_blast.cpp:177-207
-/// ```c
-///     int status = m_PrelimSearch->CheckInternalData();
-///     if (status != 0)
-///     {
-///          // Search was not run, but we send back an empty CSearchResultSet.
-///     ...
-///               pair<double, double> tmp_pair(-1.0, -1.0);
-///               CRef<CBlastAncillaryData>  tmp_ancillary_data(new CBlastAncillaryData(tmp_pair, tmp_pair, tmp_pair, 0));
-/// ```
-/// The batches after the first (`first_query_batch`) are known only where it does not
-/// matter: a run of invalid queries of fewer than 100 residues that a valid query
-/// follows is always in a batch with a valid query, and when every query after the first
-/// batch is invalid, every such batch is invalid. Otherwise the report fails instead of
-/// guessing.
-// Kept out of line: this runs only for outfmt 0 or hit records, and inlining it into the
-// shared post-processing makes every BLASTN run compile it in Wasm hosts.
-#[inline(never)]
-fn unsearched_queries(report: &BlastnReportInputs<'_>) -> Result<Vec<bool>> {
-    let query_karlin: Vec<Option<ContextKarlin>> =
-        report.context_karlin.iter().step_by(2).copied().collect();
-    let lengths: Vec<usize> = report
-        .queries
-        .iter()
-        .map(|query| query.seq().len())
-        .collect();
-    let first = first_query_batch(&lengths, report.db_len_total, report.megablast);
-    let mut unsearched = vec![false; lengths.len()];
-    if query_karlin[..first.end].iter().all(Option::is_none) {
-        unsearched[..first.end].fill(true);
-    }
-    if query_karlin[first.end..].iter().all(Option::is_none) {
-        unsearched[first.end..].fill(true);
-        return Ok(unsearched);
-    }
-    let mut start = first.end;
-    while start < lengths.len() {
-        if query_karlin[start].is_some() {
-            start += 1;
-            continue;
-        }
-        let end = (start..lengths.len())
-            .find(|&index| query_karlin[index].is_some())
-            .unwrap_or(lengths.len());
-        let residues: usize = lengths[start..end].iter().sum();
-        if end == lengths.len() || residues >= 100 {
-            anyhow::bail!(
-                "the outfmt 0 and 7 reports of the invalid query {} depend on NCBI BLAST+'s adaptive query batches, which LOSAT does not reproduce (it follows the first batch of {} residues and other queries are valid)",
-                start + 1,
-                first.size
-            );
-        }
-        start = end;
-    }
-    Ok(unsearched)
-}
-
 fn post_process_hits_and_write(
     mut hit_lists: Vec<Option<BlastnHitList>>,
     hitlist_size: usize,
@@ -4350,6 +4543,7 @@ fn post_process_hits_and_write(
     subject_title: &str,
     timing: Option<&BlastnTiming>,
     report: &BlastnReportInputs<'_>,
+    unsearched: Vec<bool>,
 ) -> Result<()> {
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:183-187
     // ```c
@@ -4527,19 +4721,8 @@ fn post_process_hits_and_write(
     // }
     // ```
     // Each requested format prints the same final result without searching again.
-    // The queries of batches that NCBI did not search, for the formats with a section per
-    // query (outfmt 0 and 7). Found before any format is written, so that a run whose
-    // batches LOSAT cannot tell fails without output.
-    let unsearched = if output_formats.iter().any(|format| {
-        matches!(
-            format,
-            BlastnOutputFormat::Pairwise | BlastnOutputFormat::TabularWithComments
-        )
-    }) {
-        unsearched_queries(report)?
-    } else {
-        Vec::new()
-    };
+    // `unsearched` marks the queries of the batches without a valid context, which NCBI
+    // does not search (outfmt 0 and 7 show them without results).
     // Rendered hits are needed by outfmt 0 and by the caller's hit records; both get the
     // same final hit list, built once.
     let pairwise_hits =
@@ -5331,6 +5514,87 @@ fn search(
 // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
 // TBlastThreads the_threads(GetNumberOfThreads());
 // (*thread)->Run(); (*thread)->Join(&result);
+/// The subjects of a search, read and encoded once for all query batches, as NCBI's
+/// `CLocalDbAdapter` of the subject set serves every batch.
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:836-847
+/// ```c
+/// if (subj_is_na) {
+///     BlastSeqBlkSetSequence(subj, sequence.data.release(),
+///        ((sentinels == eSentinels) ? sequence.length - 2 :
+///         sequence.length));
+///     ...
+///     SBlastSequence compressed_seq =
+///         subjects.GetBlastSequence(i, eBlastEncodingNcbi2na,
+///                                   eNa_strand_plus, eNoSentinels);
+///     BlastSeqBlkSetCompressedSequence(subj,
+///                               compressed_seq.data.release());
+/// ```
+struct PreparedSubjects<'a> {
+    records: &'a [bio::io::fasta::Record],
+    metadata: SubjectMetadata,
+    blastna: Vec<Vec<u8>>,
+    packed: Vec<Vec<u8>>,
+}
+
+/// The results of one query batch, with the values of its query contexts that the reports
+/// use.
+struct QueryBatch {
+    hit_lists: Vec<Option<BlastnHitList>>,
+    good_init_extends: u64,
+    searched: bool,
+    query_masks: Vec<Vec<MaskedInterval>>,
+    context_karlin: Vec<Option<ContextKarlin>>,
+    query_eff_searchsp: Vec<i64>,
+    /// The preliminary hit lists of a query chunk, one per query part
+    /// (`BatchStage::ChunkPrelim`).
+    chunk_prelim_lists: PrelimHitLists,
+}
+
+/// Which of NCBI's stages `search_query_batch` runs for its queries.
+#[derive(Clone, Copy)]
+enum BatchStage<'a> {
+    /// The preliminary search and the traceback of a query batch (`CLocalBlast::Run`). A
+    /// batch that NCBI splits has its preliminary search run in query chunks
+    /// (`search_query_chunks`).
+    Search,
+    /// The preliminary search of one query chunk of a split batch
+    /// (`SplitQuery_CreateChunkData`), with the masks of its query parts and the search
+    /// spaces of the batch's contexts.
+    ChunkPrelim {
+        query_masks: &'a [Vec<MaskedInterval>],
+        batch_eff_searchsp: &'a [i64],
+    },
+}
+
+/// Searches the queries in NCBI's query batches and writes the results of all of them.
+///
+/// NCBI reference: ncbi-blast/c++/src/app/blast/blastn_app.cpp:261-300
+/// ```c++
+///         CBatchSizeMixer mixer(SplitQuery_GetChunkSize(opt.GetProgram())-1000);
+///         int batch_size = m_CmdLineArgs->GetQueryBatchSize();
+///         if (batch_size) {
+///             input.SetBatchSize(batch_size);
+///         } else {
+///             Int8 total_len = formatter.GetDbTotalLength();
+///             if (total_len > 0) {
+///                 /* the optimal hits per batch scales with total db size */
+///                 mixer.SetTargetHits(total_len / 3000);
+///             }
+///             input.SetBatchSize(mixer.GetBatchSize());
+///         }
+///         ...
+///         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup() ) {
+///             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
+///             ...
+///                 CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
+///                 ...
+///                 results = lcl_blast.Run();
+///                 if (!batch_size)
+///                     input.SetBatchSize(mixer.GetBatchSize(lcl_blast.GetNumExtensions()));
+/// ```
+/// `GetQueryBatchSize` is 0 for blastn (the environment variable `BATCH_SIZE` is rejected);
+/// the chunk size is `query_chunk_size`.
 fn run_in_pool(
     args: BlastnArgs,
     query_records: &[bio::io::fasta::Record],
@@ -5339,6 +5603,148 @@ fn run_in_pool(
     output_formats: Vec<BlastnOutputFormat>,
     parallel_pool: &crate::utils::threading::SearchPool<'_>,
 ) -> Result<()> {
+    if query_records.is_empty() {
+        return Ok(());
+    }
+    let metadata = subject_metadata_from_records(subject_records);
+    if metadata.db_num_seqs == 0 {
+        return Ok(());
+    }
+    let subjects = PreparedSubjects {
+        records: subject_records,
+        blastna: subject_records
+            .iter()
+            .map(|record| encode_iupac_to_blastna(record.seq()))
+            .collect(),
+        packed: subject_records
+            .iter()
+            .map(|record| encode_subject_ncbi2na_packed(record.seq()))
+            .collect(),
+        metadata,
+    };
+    let megablast = args.task == "megablast";
+    let chunk_size = query_chunk_size(megablast) as i32;
+    let mut mixer = BatchSizeMixer::new(chunk_size - 1000);
+    let total_length = subjects.metadata.db_len_total as i64;
+    if total_length > 0 {
+        mixer.set_target_hits((total_length / 3000) as i32);
+    }
+    let mut batch_size = mixer.batch_size(None);
+
+    let lengths: Vec<usize> = query_records
+        .iter()
+        .map(|record| record.seq().len())
+        .collect();
+    let mut hit_lists: Vec<Option<BlastnHitList>> = Vec::with_capacity(lengths.len());
+    let mut unsearched = Vec::with_capacity(lengths.len());
+    let mut query_masks = Vec::with_capacity(lengths.len());
+    let mut context_karlin = Vec::with_capacity(2 * lengths.len());
+    let mut query_eff_searchsp = Vec::with_capacity(2 * lengths.len());
+    let mut start = 0;
+    while start < lengths.len() {
+        let end = next_query_batch_end(&lengths, start, batch_size);
+        let batch = search_query_batch(
+            &args,
+            &query_records[start..end],
+            &subjects,
+            outputs,
+            &output_formats,
+            parallel_pool,
+            batch_size,
+            start == 0,
+            BatchStage::Search,
+        )?;
+        // The batch numbers its queries from 0.
+        let first = start as u32;
+        hit_lists.extend(batch.hit_lists.into_iter().map(|list| {
+            list.map(|mut list| {
+                for hsp_list in &mut list.hsplist_array {
+                    hsp_list.query_index += first;
+                    for hsp in &mut hsp_list.hsps {
+                        hsp.q_idx += first;
+                    }
+                }
+                list
+            })
+        }));
+        unsearched.extend(std::iter::repeat_n(!batch.searched, end - start));
+        query_masks.extend(batch.query_masks);
+        context_karlin.extend(batch.context_karlin);
+        query_eff_searchsp.extend(batch.query_eff_searchsp);
+        // NCBI's `Int4` count of the batch's successful initial extensions.
+        batch_size = mixer.batch_size(Some(batch.good_init_extends as u32 as i32));
+        start = end;
+    }
+
+    let config = configure_task(&args);
+    let report_inputs = BlastnReportInputs {
+        queries: query_records,
+        subjects: subject_records,
+        query_masks: &query_masks,
+        lcase_masking: args.lcase_masking,
+        query_eff_searchsp: &query_eff_searchsp,
+        megablast,
+        reward: config.reward,
+        penalty: config.penalty,
+        gap_open: config.gap_open,
+        gap_extend: config.gap_extend,
+        context_karlin: &context_karlin,
+        max_target_seqs: args.max_target_seqs,
+        db_num_seqs: subjects.metadata.db_num_seqs,
+        db_len_total: subjects.metadata.db_len_total,
+    };
+    let query_ids: Vec<Arc<str>> = query_records
+        .iter()
+        .map(|record| Arc::from(record.id().split_whitespace().next().unwrap_or("unknown")))
+        .collect();
+    let subject_ids: Vec<Arc<str>> = subjects
+        .metadata
+        .subject_ids
+        .iter()
+        .map(|id: &String| Arc::<str>::from(id.as_str()))
+        .collect();
+    let query_titles: Vec<Arc<str>> = query_records.iter().map(fasta_defline).collect();
+    let subject_title = format!(
+        "User specified sequence set (Input: {})",
+        args.subject.display()
+    );
+    let hitlist_size = match args.max_target_seqs {
+        Some(max_target_seqs) if max_target_seqs > 0 => max_target_seqs,
+        _ => args.hitlist_size,
+    };
+    post_process_hits_and_write(
+        hit_lists,
+        hitlist_size,
+        args.max_hsps_per_subject.unwrap_or(0),
+        args.subject_besthit,
+        &lengths,
+        outputs,
+        args.verbose,
+        &query_ids,
+        &subject_ids,
+        &output_formats,
+        &query_titles,
+        &subject_title,
+        None,
+        &report_inputs,
+        unsearched,
+    )
+}
+
+/// Searches one query batch against the subjects, with the query block, lookup table and
+/// diagonal table of the batch, as NCBI's `CLocalBlast` does for each batch that
+/// `run_in_pool` reads.
+fn search_query_batch(
+    args: &BlastnArgs,
+    query_records: &[bio::io::fasta::Record],
+    subjects: &PreparedSubjects<'_>,
+    outputs: &mut ReportOutputs<'_>,
+    output_formats: &[BlastnOutputFormat],
+    parallel_pool: &crate::utils::threading::SearchPool<'_>,
+    batch_size: i32,
+    first_batch: bool,
+    stage: BatchStage<'_>,
+) -> Result<QueryBatch> {
     // NCBI reference: ncbi-blast/c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
     // ```c
     // CMTArgs(...)
@@ -5466,9 +5872,6 @@ fn run_in_pool(
                 .to_string()
         })
         .collect();
-    if queries.is_empty() {
-        return Ok(());
-    }
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1312-1325
     // ```c
     // if (lookup_options->db_filter) {
@@ -5503,15 +5906,8 @@ fn run_in_pool(
     //     }
     // }
     // ```
-    let subject_records: Option<&[bio::io::fasta::Record]> = Some(subject_records);
-    let subject_metadata = if let Some(subjects) = subject_records.as_ref() {
-        subject_metadata_from_records(subjects)
-    } else {
-        scan_subjects_metadata(&args)?
-    };
-    if subject_metadata.db_num_seqs == 0 {
-        return Ok(());
-    }
+    let subject_records: Option<&[bio::io::fasta::Record]> = Some(subjects.records);
+    let subject_metadata = subjects.metadata.clone();
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1475
     // ```c
@@ -5556,20 +5952,8 @@ fn run_in_pool(
     //                               compressed_seq.data.release());
     // }
     // ```
-    let subject_blastna_cache: Option<Vec<Vec<u8>>> = subject_records.as_ref().map(|subjects| {
-        subjects
-            .iter()
-            .map(|record| encode_iupac_to_blastna(record.seq()))
-            .collect()
-    });
-    let subject_packed_cache: Option<Vec<Vec<u8>>> = subject_records.as_ref().map(|subjects| {
-        subjects
-            .iter()
-            .map(|record| encode_subject_ncbi2na_packed(record.seq()))
-            .collect()
-    });
-    let subject_blastna_cache_ref = subject_blastna_cache.as_deref();
-    let subject_packed_cache_ref = subject_packed_cache.as_deref();
+    let subject_blastna_cache_ref = Some(subjects.blastna.as_slice());
+    let subject_packed_cache_ref = Some(subjects.packed.as_slice());
 
     // Prepare sequence data (including DUST masking)
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1401-1405
@@ -5578,7 +5962,11 @@ fn run_in_pool(
     //   sequences are retieved in ncbistdaa/ncbi2na encodings respectively. */
     // seq_arg.encoding = eBlastEncodingProtein;
     // ```
-    let seq_data = prepare_sequence_data(&args, queries, query_ids, subject_metadata);
+    let masks = match stage {
+        BatchStage::Search => query_masks(args, &queries),
+        BatchStage::ChunkPrelim { query_masks, .. } => query_masks.to_vec(),
+    };
+    let seq_data = prepare_sequence_data(queries, query_ids, masks, subject_metadata);
 
     // NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1264-1284
     // ```c
@@ -5880,13 +6268,6 @@ fn run_in_pool(
     // references. NCBI raises an unsupported scoring system when it sets up the first
     // batch with a valid query, after the outfmt 0 prolog.
     let megablast = args.task == "megablast";
-    let query_lengths_for_batches: Vec<usize> = seq_data
-        .queries
-        .iter()
-        .map(|query| query.seq().len())
-        .collect();
-    let first_batch =
-        first_query_batch(&query_lengths_for_batches, seq_data.db_len_total, megablast);
     let (context_karlin, round_down_evalue_score) = match context_blocks(
         &context_ungapped,
         &scoring_spec,
@@ -5910,17 +6291,20 @@ fn run_in_pool(
             // invalid context puts its warning first, and NCBI then goes on without the
             // gapped blocks (it crashes; with a first batch of invalid queries only, a later
             // batch raises it). LOSAT reproduces the error only for a first batch of valid
-            // queries.
-            if context_ungapped[..2 * first_batch.end]
-                .iter()
-                .any(Option::is_none)
-            {
+            // queries (the error does not depend on the queries, so the first batch with a valid
+            // query meets it; NCBI writes the results and warnings of the batches before it).
+            if !first_batch {
                 anyhow::bail!(
-                    "these scoring options have no Karlin-Altschul values, and the first query batch (up to {} residues) has an invalid query; NCBI BLAST+ does not report the error then, which is not supported by LOSAT's BLASTN",
-                    first_batch.size
+                    "these scoring options have no Karlin-Altschul values, and the first query batch has only invalid queries; NCBI BLAST+ reports the error after the results of that batch, which LOSAT does not reproduce"
                 );
             }
-            for (format, &output_format) in outputs.formats.iter_mut().zip(&output_formats) {
+            if context_ungapped.iter().any(Option::is_none) {
+                anyhow::bail!(
+                    "these scoring options have no Karlin-Altschul values, and the first query batch (up to {} residues) has an invalid query; NCBI BLAST+ does not report the error then, which is not supported by LOSAT's BLASTN",
+                    batch_size
+                );
+            }
+            for (format, &output_format) in outputs.formats.iter_mut().zip(output_formats) {
                 if output_format == BlastnOutputFormat::Pairwise {
                     let mut writer = format.sink.open()?;
                     write_blastn_pairwise_prolog(
@@ -5934,7 +6318,7 @@ fn run_in_pool(
                     writer.flush()?;
                 }
             }
-            return Err(karlin_error(&message, first_batch.end));
+            return Err(karlin_error(&message, seq_data.queries.len()));
         }
     };
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:324-332
@@ -5994,14 +6378,51 @@ fn run_in_pool(
     //       if (query_info->contexts[index].is_valid &&
     //           ((query_length = query_info->contexts[index].query_length) > 0) ) {
     // ```
-    // An invalid context keeps the search space of the options, which is 0.
+    // An invalid context keeps the search space of the options, which is 0, except in a query
+    // chunk: NCBI sets the options to the search spaces of the batch's contexts
+    // (`SplitQuery_SetEffectiveSearchSpace`), and a chunk's context takes the one at its own
+    // index in the chunk, not its context in the batch (0, for an invalid context of the
+    // batch, has the chunk compute its own).
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_aux_priv.cpp:177-182
+    // ```c
+    //     vector<Int8> eff_searchsp;
+    //     for (size_t index = 0; index <= (size_t)qinfo->last_context; index++) {
+    //         eff_searchsp.push_back(calc.GetEffSearchSpaceForContext(index));
+    //     }
+    //     options->SetEffectiveSearchSpace(eff_searchsp);
+    // }
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:690-693
+    // ```c
+    //     } else if (eff_len_options->num_searchspaces > 1) {
+    //         ASSERT(context_index < eff_len_options->num_searchspaces);
+    //         retval = eff_len_options->searchsp_eff[context_index];
+    //     } else {
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:826-846
+    // ```c
+    //          if (effective_search_space == 0) {
+    //          ...
+    //              effective_search_space = effective_db_length *
+    //                              (query_length - length_adjustment);
+    //          }
+    //       }
+    //       query_info->contexts[index].eff_searchsp = effective_search_space;
+    // ```
     let query_eff_searchsp: Vec<i64> = query_contexts
         .iter()
         .zip(&search_karlin)
         .zip(&context_valid)
-        .map(|((ctx, blocks), &valid)| {
-            if !valid {
-                return 0;
+        .enumerate()
+        .map(|(index, ((ctx, blocks), &valid))| {
+            let options_searchsp = match stage {
+                BatchStage::Search => 0,
+                BatchStage::ChunkPrelim {
+                    batch_eff_searchsp, ..
+                } => batch_eff_searchsp[index],
+            };
+            if !valid || options_searchsp != 0 {
+                return options_searchsp;
             }
             let query_len = ctx.seq.len() as i64;
             let result = compute_length_adjustment_ncbi(
@@ -6018,6 +6439,34 @@ fn run_in_pool(
         })
         .collect();
 
+    // NCBI searches a batch of at least two query chunks chunk by chunk in its preliminary
+    // stage, after it has set up the whole batch (the errors and warnings above are the
+    // batch's), and runs the traceback on the batch. A batch without a valid context is not
+    // searched.
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:232-236
+    // ```c
+    //     CRef<CQuerySplitter> query_splitter = setup_data->m_QuerySplitter;
+    //     if (query_splitter->IsQuerySplit()) {
+    //
+    //         CRef<CSplitQueryBlk> split_query_blk = query_splitter->Split();
+    // ```
+    let split_prelim_lists = match stage {
+        BatchStage::Search if any_valid_context => search_query_chunks(
+            args,
+            &seq_data.queries,
+            &seq_data.query_masks,
+            &query_eff_searchsp,
+            &query_context_offsets,
+            subjects,
+            outputs,
+            output_formats,
+            parallel_pool,
+            batch_size,
+            first_batch,
+        )?,
+        _ => None,
+    };
+
     // Build lookup tables
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1270-1306
     // ```c
@@ -6033,16 +6482,33 @@ fn run_in_pool(
     // }
     // ```
     let subjects_for_lookup: &[bio::io::fasta::Record] = subject_records.as_deref().unwrap_or(&[]);
-    let (lookup_tables, scan_step) = build_lookup_tables(
-        &config,
-        &args,
-        &encoded_queries_blastna,
-        &query_context_masks,
-        &query_context_offsets,
-        subjects_for_lookup,
-        subject_packed_cache_ref,
-        approx_table_entries,
-    );
+    // A split batch has no lookup table of its own; its chunks have theirs.
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_aux_priv.cpp:206-207
+    // ```c
+    //     // 5. Create the lookup table
+    //     if ( !retval->m_QuerySplitter->IsQuerySplit() ) {
+    // ```
+    let (lookup_tables, scan_step) = if split_prelim_lists.is_some() {
+        (
+            LookupTables {
+                two_stage_lookup: None,
+                pv_direct_lookup: None,
+                na_lookup: None,
+            },
+            config.scan_step,
+        )
+    } else {
+        build_lookup_tables(
+            &config,
+            &args,
+            &encoded_queries_blastna,
+            &query_context_masks,
+            &query_context_offsets,
+            subjects_for_lookup,
+            subject_packed_cache_ref,
+            approx_table_entries,
+        )
+    };
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:991-1041
     // ```c
@@ -6264,33 +6730,12 @@ fn run_in_pool(
     //       params->gap_x_dropoff_final = (Int4)
     //           MAX(options->gap_x_dropoff_final*NCBIMATH_LN2 / min_lambda, params->gap_x_dropoff);
     // ```
-    let (x_drop_gapped, x_drop_final) = gap_x_dropoffs(
-        &context_karlin,
-        config.x_drop_gapped,
-        config.x_drop_final,
-        first_batch.end == seq_data.queries.len(),
-    )
-    .map_err(anyhow::Error::msg)?;
+    let (x_drop_gapped, x_drop_final) =
+        gap_x_dropoffs(&context_karlin, config.x_drop_gapped, config.x_drop_final);
     let scan_range = config.scan_range; // For off-diagonal hit detection
     let min_diag_separation = config.min_diag_separation; // For MB_HSP_CLOSE containment check
     let db_len_total = seq_data.db_len_total;
     let db_num_seqs = seq_data.db_num_seqs;
-    let report_inputs = BlastnReportInputs {
-        queries: &seq_data.queries,
-        subjects: subject_records.expect("subject records are loaded before the search"),
-        query_masks: &seq_data.query_masks,
-        lcase_masking: args.lcase_masking,
-        query_eff_searchsp: &query_eff_searchsp,
-        megablast: args.task == "megablast",
-        reward: config.reward,
-        penalty: config.penalty,
-        gap_open: config.gap_open,
-        gap_extend: config.gap_extend,
-        context_karlin: &context_karlin,
-        max_target_seqs: args.max_target_seqs,
-        db_num_seqs,
-        db_len_total,
-    };
     let evalue_threshold = args.evalue;
     let subject_besthit = args.subject_besthit;
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:993-1001 (s_HSPTest)
@@ -6362,11 +6807,30 @@ fn run_in_pool(
     //     ...
     // }
     // ```
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/local_blast.cpp:301-310
+    // ```c
+    // Int4 CLocalBlast::GetNumExtensions()
+    // {
+    //     Int4 retv = 0;
+    //     if (m_InternalData) {
+    //         BlastDiagnostics * diag = m_InternalData->m_Diagnostics->GetPointer();
+    //         if (diag && diag->ungapped_stat) {
+    //              retv = diag->ungapped_stat->good_init_extends;
+    //         }
+    //     }
+    //     return retv;
+    // }
+    // ```
+    // The initial hits that the word finder saved in every subject chunk of the batch; they
+    // size the next batch.
+    let good_init_extends = std::sync::atomic::AtomicU64::new(0);
     let process_subject = |s_idx: usize,
                            s_record: &bio::io::fasta::Record,
                            gap_scratch: &mut GapAlignScratch,
                            subject_scratch: &mut SubjectScratch,
-                           subject_hits: &mut Option<Vec<BlastnHsp>>| {
+                           prelim_source: Option<&Vec<PrelimHit>>,
+                           subject_hits: &mut Option<Vec<BlastnHsp>>,
+                           prelim_out: &mut Vec<PrelimHit>| {
         // NCBI reference: ncbi-blast/c++/src/algo/blast/api/local_blast.cpp:177-180
         // ```c
         //     int status = m_PrelimSearch->CheckInternalData();
@@ -9257,6 +9721,20 @@ fn run_in_pool(
             // Debug counters for containment analysis
             let mut dbg_containment_skipped = 0usize;
             let total_ungapped = ungapped_hits.len();
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1688-1689
+            // ```c
+            //     Blast_UngappedStatsUpdate(ungapped_stats, total_hits, hits_extended,
+            //                               init_hitlist->total);
+            // ```
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_diagnostics.c:106-112
+            // ```c
+            //    if (!ungapped_stats || total_hits == 0)
+            //       return;
+            //    ...
+            //    ungapped_stats->good_init_extends += saved_hits;
+            // ```
+            good_init_extends
+                .fetch_add(total_ungapped as u64, std::sync::atomic::Ordering::Relaxed);
             let gapped_start_time = std::time::Instant::now();
             let mut dbg_gapped_calls = 0usize;
 
@@ -9627,6 +10105,7 @@ fn run_in_pool(
                     prelim_score,
                     seed_qs,
                     seed_ss,
+                    prelim_evalue: 0.0,
                 });
                 continue;
             }
@@ -9734,22 +10213,161 @@ fn run_in_pool(
         };
 
         let mut combined_prelim_hits: Vec<PrelimHit> = Vec::new();
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
-        // ```c
-        // if (num_threads > 1) {
-        //     SetNumberOfThreads(num_threads);
-        // }
-        // ```
-        // NCBI reference: c++/src/algo/blast/core/blast_engine.c:478-536
-        // status = s_GetNextSubjectChunk(subject, &backup, kNucleotide, ...);
-        // A single subject can contain independent chunks. Pool availability
-        // is separate from the outer subject traversal's number of jobs.
-        if requested_parallel {
-            #[cfg(all(
-                feature = "parallel",
-                any(not(target_arch = "wasm32"), feature = "wasm-threads")
-            ))]
-            {
+        if let Some(kept) = prelim_source {
+            // The traceback of the HSPs that the preliminary stage kept (`search_subjects`).
+            combined_prelim_hits.clone_from(kept);
+        } else {
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
+            // ```c
+            // if (num_threads > 1) {
+            //     SetNumberOfThreads(num_threads);
+            // }
+            // ```
+            // NCBI reference: c++/src/algo/blast/core/blast_engine.c:478-536
+            // status = s_GetNextSubjectChunk(subject, &backup, kNucleotide, ...);
+            // A single subject can contain independent chunks. Pool availability
+            // is separate from the outer subject traversal's number of jobs.
+            if requested_parallel {
+                #[cfg(all(
+                    feature = "parallel",
+                    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+                ))]
+                {
+                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:478-536
+                    // ```c
+                    // while (TRUE) {
+                    //     status = s_GetNextSubjectChunk(subject, &backup, kNucleotide,
+                    //                                    dbseq_chunk_overlap);
+                    //     if (status == SUBJECT_SPLIT_DONE) break;
+                    //     if (status == SUBJECT_SPLIT_NO_RANGE) continue;
+                    //     ...
+                    // }
+                    // ```
+                    let max_in_flight = num_threads.max(1) * 2;
+                    let mut chunk_batch: Vec<SubjectChunk> = Vec::with_capacity(max_in_flight);
+                    let mut done = false;
+                    loop {
+                        chunk_batch.clear();
+                        while chunk_batch.len() < max_in_flight && !done {
+                            match split_state.next_chunk(subject_masked, dbseq_chunk_overlap) {
+                                SubjectChunkStatus::Done => done = true,
+                                SubjectChunkStatus::NoRange => continue,
+                                SubjectChunkStatus::Ok(chunk) => chunk_batch.push(chunk),
+                            }
+                        }
+                        if chunk_batch.is_empty() {
+                            break;
+                        }
+
+                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:264-268
+                        // ```c
+                        // subject->seq_ranges = backup->soft_ranges;
+                        // subject->num_seq_ranges = backup->num_soft_ranges;
+                        // return SUBJECT_SPLIT_OK;
+                        // ```
+                        // NCBI reference: c++/src/algo/blast/core/blast_engine.c:478-500
+                        // status = s_GetNextSubjectChunk(subject, &backup, ...);
+                        crate::utils::threading::report_stage(
+                            "blastn",
+                            "subject_chunks",
+                            chunk_batch.len(),
+                            chunk_batch.len() > 1,
+                        );
+                        let soft_ranges = split_state.soft_ranges.as_slice();
+                        if chunk_batch.len() == 1 {
+                            let chunk = &chunk_batch[0];
+                            let hits = collect_prelim_hits_for_chunk(
+                                chunk,
+                                soft_ranges,
+                                gap_scratch,
+                                subject_scratch,
+                                true,
+                            );
+                            let hits = merge_prelim_hit_lists(
+                                &mut combined_prelim_hits,
+                                hits,
+                                HspListSplit::Subject {
+                                    offset: chunk.offset,
+                                },
+                                chunk.overlap,
+                                true,
+                            );
+                            if subject_besthit {
+                                prelim_subject_best_hit(&mut combined_prelim_hits, &query_lengths);
+                            }
+                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:488-491
+                            // ```c
+                            // /* Delete if not done in last loop iteration to prevent memory leak. */
+                            // hsp_list = Blast_HSPListFree(hsp_list);
+                            //
+                            // BlastInitHitListReset(init_hitlist);
+                            // ```
+                            subject_scratch.prelim_hits = hits;
+                        } else {
+                            let mut chunk_results: Vec<(usize, usize, Vec<PrelimHit>)> =
+                                Vec::with_capacity(chunk_batch.len());
+                            chunk_batch
+                                .par_iter()
+                                .map_init(
+                                    || {
+                                        (
+                                            GapAlignScratch::new(),
+                                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:991-1041
+                                            // ```c
+                                            // Int4 offset_array_size = GetOffsetArraySize(lookup_wrap);
+                                            // ...
+                                            // aux_struct->offset_pairs =
+                                            //   (BlastOffsetPair*) malloc(offset_array_size * sizeof(BlastOffsetPair));
+                                            // ```
+                                            SubjectScratch::new(
+                                                queries_ref.len(),
+                                                offset_array_size,
+                                            ),
+                                        )
+                                    },
+                                    |state, chunk| {
+                                        let (gap_scratch, subject_scratch) = state;
+                                        let hits = collect_prelim_hits_for_chunk(
+                                            chunk,
+                                            soft_ranges,
+                                            gap_scratch,
+                                            subject_scratch,
+                                            false,
+                                        );
+                                        (chunk.offset, chunk.overlap, hits)
+                                    },
+                                )
+                                .collect_into_vec(&mut chunk_results);
+                            for (offset, overlap, hits) in chunk_results {
+                                let _ = merge_prelim_hit_lists(
+                                    &mut combined_prelim_hits,
+                                    hits,
+                                    HspListSplit::Subject { offset },
+                                    overlap,
+                                    true,
+                                );
+                                if subject_besthit {
+                                    prelim_subject_best_hit(
+                                        &mut combined_prelim_hits,
+                                        &query_lengths,
+                                    );
+                                }
+                            }
+                        }
+
+                        if done {
+                            break;
+                        }
+                    }
+                }
+                #[cfg(any(
+                    not(feature = "parallel"),
+                    all(target_arch = "wasm32", not(feature = "wasm-threads"))
+                ))]
+                {
+                    unreachable!("use_parallel is false when parallel threads are disabled");
+                }
+            } else {
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:478-536
                 // ```c
                 // while (TRUE) {
@@ -9760,217 +10378,105 @@ fn run_in_pool(
                 //     ...
                 // }
                 // ```
-                let max_in_flight = num_threads.max(1) * 2;
-                let mut chunk_batch: Vec<SubjectChunk> = Vec::with_capacity(max_in_flight);
-                let mut done = false;
                 loop {
-                    chunk_batch.clear();
-                    while chunk_batch.len() < max_in_flight && !done {
-                        match split_state.next_chunk(subject_masked, dbseq_chunk_overlap) {
-                            SubjectChunkStatus::Done => done = true,
-                            SubjectChunkStatus::NoRange => continue,
-                            SubjectChunkStatus::Ok(chunk) => chunk_batch.push(chunk),
-                        }
-                    }
-                    if chunk_batch.is_empty() {
-                        break;
-                    }
-
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:264-268
-                    // ```c
-                    // subject->seq_ranges = backup->soft_ranges;
-                    // subject->num_seq_ranges = backup->num_soft_ranges;
-                    // return SUBJECT_SPLIT_OK;
-                    // ```
-                    // NCBI reference: c++/src/algo/blast/core/blast_engine.c:478-500
-                    // status = s_GetNextSubjectChunk(subject, &backup, ...);
-                    crate::utils::threading::report_stage(
-                        "blastn",
-                        "subject_chunks",
-                        chunk_batch.len(),
-                        chunk_batch.len() > 1,
-                    );
-                    let soft_ranges = split_state.soft_ranges.as_slice();
-                    if chunk_batch.len() == 1 {
-                        let chunk = &chunk_batch[0];
-                        let hits = collect_prelim_hits_for_chunk(
-                            chunk,
-                            soft_ranges,
-                            gap_scratch,
-                            subject_scratch,
-                            true,
-                        );
-                        let hits = merge_prelim_hits_subject_split(
-                            &mut combined_prelim_hits,
-                            hits,
-                            chunk.offset,
-                            chunk.overlap,
-                            true,
-                        );
-                        if subject_besthit {
-                            prelim_subject_best_hit(&mut combined_prelim_hits, &query_lengths);
-                        }
-                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:488-491
-                        // ```c
-                        // /* Delete if not done in last loop iteration to prevent memory leak. */
-                        // hsp_list = Blast_HSPListFree(hsp_list);
-                        //
-                        // BlastInitHitListReset(init_hitlist);
-                        // ```
-                        subject_scratch.prelim_hits = hits;
-                    } else {
-                        let mut chunk_results: Vec<(usize, usize, Vec<PrelimHit>)> =
-                            Vec::with_capacity(chunk_batch.len());
-                        chunk_batch
-                            .par_iter()
-                            .map_init(
-                                || {
-                                    (
-                                        GapAlignScratch::new(),
-                                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:991-1041
-                                        // ```c
-                                        // Int4 offset_array_size = GetOffsetArraySize(lookup_wrap);
-                                        // ...
-                                        // aux_struct->offset_pairs =
-                                        //   (BlastOffsetPair*) malloc(offset_array_size * sizeof(BlastOffsetPair));
-                                        // ```
-                                        SubjectScratch::new(queries_ref.len(), offset_array_size),
-                                    )
-                                },
-                                |state, chunk| {
-                                    let (gap_scratch, subject_scratch) = state;
-                                    let hits = collect_prelim_hits_for_chunk(
-                                        chunk,
-                                        soft_ranges,
-                                        gap_scratch,
-                                        subject_scratch,
-                                        false,
-                                    );
-                                    (chunk.offset, chunk.overlap, hits)
-                                },
-                            )
-                            .collect_into_vec(&mut chunk_results);
-                        for (offset, overlap, hits) in chunk_results {
-                            let _ = merge_prelim_hits_subject_split(
+                    match split_state.next_chunk(subject_masked, dbseq_chunk_overlap) {
+                        SubjectChunkStatus::Done => break,
+                        SubjectChunkStatus::NoRange => continue,
+                        SubjectChunkStatus::Ok(chunk) => {
+                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:264-268
+                            // ```c
+                            // subject->seq_ranges = backup->soft_ranges;
+                            // subject->num_seq_ranges = backup->num_soft_ranges;
+                            // return SUBJECT_SPLIT_OK;
+                            // ```
+                            // NCBI reference: c++/src/algo/blast/core/blast_engine.c:478-500
+                            // status = s_GetNextSubjectChunk(subject, &backup, ...);
+                            crate::utils::threading::report_stage(
+                                "blastn",
+                                "subject_chunks",
+                                1,
+                                false,
+                            );
+                            let soft_ranges = split_state.soft_ranges.as_slice();
+                            let hits = collect_prelim_hits_for_chunk(
+                                &chunk,
+                                soft_ranges,
+                                gap_scratch,
+                                subject_scratch,
+                                true,
+                            );
+                            let hits = merge_prelim_hit_lists(
                                 &mut combined_prelim_hits,
                                 hits,
-                                offset,
-                                overlap,
+                                HspListSplit::Subject {
+                                    offset: chunk.offset,
+                                },
+                                chunk.overlap,
                                 true,
                             );
                             if subject_besthit {
                                 prelim_subject_best_hit(&mut combined_prelim_hits, &query_lengths);
                             }
+                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:488-491
+                            // ```c
+                            // /* Delete if not done in last loop iteration to prevent memory leak. */
+                            // hsp_list = Blast_HSPListFree(hsp_list);
+                            //
+                            // BlastInitHitListReset(init_hitlist);
+                            // ```
+                            subject_scratch.prelim_hits = hits;
                         }
-                    }
-
-                    if done {
-                        break;
                     }
                 }
             }
-            #[cfg(any(
-                not(feature = "parallel"),
-                all(target_arch = "wasm32", not(feature = "wasm-threads"))
-            ))]
-            {
-                unreachable!("use_parallel is false when parallel threads are disabled");
-            }
-        } else {
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:478-536
-            // ```c
-            // while (TRUE) {
-            //     status = s_GetNextSubjectChunk(subject, &backup, kNucleotide,
-            //                                    dbseq_chunk_overlap);
-            //     if (status == SUBJECT_SPLIT_DONE) break;
-            //     if (status == SUBJECT_SPLIT_NO_RANGE) continue;
-            //     ...
-            // }
-            // ```
-            loop {
-                match split_state.next_chunk(subject_masked, dbseq_chunk_overlap) {
-                    SubjectChunkStatus::Done => break,
-                    SubjectChunkStatus::NoRange => continue,
-                    SubjectChunkStatus::Ok(chunk) => {
-                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:264-268
-                        // ```c
-                        // subject->seq_ranges = backup->soft_ranges;
-                        // subject->num_seq_ranges = backup->num_soft_ranges;
-                        // return SUBJECT_SPLIT_OK;
-                        // ```
-                        // NCBI reference: c++/src/algo/blast/core/blast_engine.c:478-500
-                        // status = s_GetNextSubjectChunk(subject, &backup, ...);
-                        crate::utils::threading::report_stage("blastn", "subject_chunks", 1, false);
-                        let soft_ranges = split_state.soft_ranges.as_slice();
-                        let hits = collect_prelim_hits_for_chunk(
-                            &chunk,
-                            soft_ranges,
-                            gap_scratch,
-                            subject_scratch,
-                            true,
-                        );
-                        let hits = merge_prelim_hits_subject_split(
-                            &mut combined_prelim_hits,
-                            hits,
-                            chunk.offset,
-                            chunk.overlap,
-                            true,
-                        );
-                        if subject_besthit {
-                            prelim_subject_best_hit(&mut combined_prelim_hits, &query_lengths);
-                        }
-                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:488-491
-                        // ```c
-                        // /* Delete if not done in last loop iteration to prevent memory leak. */
-                        // hsp_list = Blast_HSPListFree(hsp_list);
-                        //
-                        // BlastInitHitListReset(init_hitlist);
-                        // ```
-                        subject_scratch.prelim_hits = hits;
-                    }
-                }
+
+            if !combined_prelim_hits.is_empty() {
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:885-899
+                // ```c
+                // Blast_HSPListGetEvalues(program_number, query_info,
+                //                                  stat_length, hsp_list_out,
+                //                                  score_options->gapped_calculation,
+                //                                  isRPS, gap_align->sbp, 0, scale_factor);
+                // ...
+                // status = s_Blast_HSPListReapByPrelimEvalue(hsp_list_out, hit_params);
+                // ```
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:642-671
+                // ```c
+                // cutoff = hit_params->prelim_evalue;
+                // ...
+                // if (hsp->evalue > cutoff) {
+                //     hsp_array[index] = Blast_HSPFree(hsp_array[index]);
+                // }
+                // ```
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:868,933
+                // ```c
+                // params->prelim_evalue = options->expect_value;
+                // ```
+                // This reap happens after preliminary gapped scoring and before the
+                // traceback stream is consumed, so low preliminary scores cannot survive
+                // solely because traceback later finds a high-scoring alignment.
+                combined_prelim_hits.retain_mut(|prelim| {
+                    let eff_searchsp = query_eff_searchsp
+                        .get(prelim.context_idx as usize)
+                        .copied()
+                        .unwrap_or(0);
+                    let (_, prelim_evalue) = calculate_blastn_context_statistics(
+                        prelim.prelim_score,
+                        &search_karlin_ref[prelim.context_idx as usize].gapped,
+                        eff_searchsp,
+                        round_down_evalue_score,
+                    );
+                    prelim.prelim_evalue = prelim_evalue;
+                    prelim_evalue <= evalue_threshold
+                });
             }
         }
 
-        if !combined_prelim_hits.is_empty() {
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:885-899
-            // ```c
-            // Blast_HSPListGetEvalues(program_number, query_info,
-            //          stat_length, hsp_list_out, score_options->gapped_calculation,
-            //          isRPS, gap_align->sbp, 0, scale_factor);
-            // ...
-            // status = s_Blast_HSPListReapByPrelimEvalue(hsp_list_out, hit_params);
-            // ```
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:642-671
-            // ```c
-            // cutoff = hit_params->prelim_evalue;
-            // ...
-            // if (hsp->evalue > cutoff) {
-            //     hsp_array[index] = Blast_HSPFree(hsp_array[index]);
-            // }
-            // ```
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:868,933
-            // ```c
-            // params->prelim_evalue = options->expect_value;
-            // ```
-            // This reap happens after preliminary gapped scoring and before the
-            // traceback stream is consumed, so low preliminary scores cannot survive
-            // solely because traceback later finds a high-scoring alignment.
-            combined_prelim_hits.retain(|prelim| {
-                let eff_searchsp = query_eff_searchsp
-                    .get(prelim.context_idx as usize)
-                    .copied()
-                    .unwrap_or(0);
-                let (_, prelim_evalue) = calculate_blastn_context_statistics(
-                    prelim.prelim_score,
-                    &search_karlin_ref[prelim.context_idx as usize].gapped,
-                    eff_searchsp,
-                    round_down_evalue_score,
-                );
-                prelim_evalue <= evalue_threshold
-            });
+        // The preliminary stage gives the subject's HSPs to the collector (`search_subjects`).
+        if prelim_source.is_none() {
+            *prelim_out = combined_prelim_hits;
+            return;
         }
-
         if combined_prelim_hits.is_empty() {
             return;
         }
@@ -11422,37 +11928,50 @@ fn run_in_pool(
         }
     };
 
-    if use_parallel {
-        #[cfg(all(
-            feature = "parallel",
-            any(not(target_arch = "wasm32"), feature = "wasm-threads")
-        ))]
-        {
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1427
-            // ```c
-            // itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
-            // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-            //        != BLAST_SEQSRC_EOF) {
-            //    if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0) {
-            //        continue;
-            //    }
-            // }
-            // ```
-            //
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/hspfilter_collector.c:155-161
-            // ```c
-            // if (!results->hitlist_array[index]) {
-            //    results->hitlist_array[index] =
-            //       Blast_HitListNew(params->prelim_hitlist_size);
-            // }
-            // Blast_HitListUpdate(results->hitlist_array[index],
-            //                     hsp_list_array[index]);
-            // ```
-            let subject_records_ref = subject_records
-                .as_ref()
-                .expect("subject records must be loaded for parallel search");
-            let parallel_pool = parallel_pool;
-            let mut subject_hit_batches: Vec<(usize, Vec<BlastnHsp>)> =
+    // The batch's results, read after its subjects are searched.
+    let batch_result = |hit_lists: Vec<Option<BlastnHitList>>,
+                        chunk_prelim_lists: PrelimHitLists| QueryBatch {
+        hit_lists,
+        chunk_prelim_lists,
+        good_init_extends: good_init_extends.load(std::sync::atomic::Ordering::Relaxed),
+        searched: any_valid_context,
+        query_masks: seq_data.query_masks.clone(),
+        context_karlin: context_karlin.clone(),
+        query_eff_searchsp: query_eff_searchsp.clone(),
+    };
+    let subject_records_ref = subjects.records;
+    // One pass over the subjects in subject order: the preliminary stage gives each subject's
+    // preliminary HSPs (`kept` is `None`), the traceback saves the final HSPs of the kept
+    // preliminary HSPs in the final hit lists of `hitlist_size` subjects
+    // (`Blast_HSPResultsInsertHSPList`).
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1427
+    // ```c
+    // itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
+    // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+    //        != BLAST_SEQSRC_EOF) {
+    //    if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0) {
+    //        continue;
+    //    }
+    // }
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:1700-1707
+    // ```c
+    //                 batch->hsplist_array[hsplist_itr] = NULL;
+    //                 if (hsp_list->hspcnt == 0) {
+    //                     hsp_list = Blast_HSPListFree(hsp_list);
+    //                 }
+    //                 else {
+    //                     Blast_HSPResultsInsertHSPList(thread_data->tld[tid]->results, hsp_list,
+    //                                   hit_params->options->hitlist_size);
+    //                 }
+    // ```
+    let search_subjects = |kept: Option<&[Vec<PrelimHit>]>| {
+        let results: Vec<(Option<Vec<BlastnHsp>>, Vec<PrelimHit>)> = if use_parallel {
+            #[cfg(all(
+                feature = "parallel",
+                any(not(target_arch = "wasm32"), feature = "wasm-threads")
+            ))]
+            {
                 parallel_pool.install(|| {
                     subject_records_ref
                         .par_iter()
@@ -11474,188 +11993,73 @@ fn run_in_pool(
                             |state, (s_idx, s_record)| {
                                 let (gap_scratch, subject_scratch) = state;
                                 let mut subject_hits: Option<Vec<BlastnHsp>> = None;
+                                let mut prelim_hits: Vec<PrelimHit> = Vec::new();
                                 process_subject(
                                     s_idx,
                                     s_record,
                                     gap_scratch,
                                     subject_scratch,
+                                    kept.map(|kept| &kept[s_idx]),
                                     &mut subject_hits,
+                                    &mut prelim_hits,
                                 );
-                                subject_hits.map(|hits| (s_idx, hits))
+                                (subject_hits, prelim_hits)
                             },
                         )
-                        .filter_map(|hits| hits)
                         .collect()
-                });
-
-            if let Some(bar) = progress_bar.as_ref() {
-                bar.finish();
+                })
             }
-
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1427
-            // ```c
-            // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-            //        != BLAST_SEQSRC_EOF) {
-            //    ...
-            //    status = s_BlastSearchEngineCore(..., &hsp_list, ...);
-            // }
-            // ```
-            subject_hit_batches.sort_by_key(|(s_idx, _)| *s_idx);
-            let mut hit_lists: Vec<Option<BlastnHitList>> = Vec::with_capacity(query_ids_arc.len());
-            hit_lists.resize_with(query_ids_arc.len(), || None);
-            for (_, hits) in subject_hit_batches {
-                update_hitlists_with_subject_hits(&mut hit_lists, hits, prelim_hitlist_size);
+            #[cfg(any(
+                not(feature = "parallel"),
+                all(target_arch = "wasm32", not(feature = "wasm-threads"))
+            ))]
+            {
+                unreachable!("use_parallel is false when parallel threads are disabled");
             }
-
-            post_process_hits_and_write(
-                hit_lists,
-                hitlist_size,
-                max_hsps_per_subject,
-                subject_besthit,
-                query_lengths.as_ref(),
-                outputs,
-                verbose,
-                query_ids_arc.as_ref(),
-                subject_ids_arc.as_ref(),
-                &output_formats,
-                query_titles_arc.as_ref(),
-                subject_title.as_ref(),
-                timing.as_deref(),
-                &report_inputs,
-            )?;
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1674-1783
+        } else {
+            let mut gap_scratch = GapAlignScratch::new();
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:991-1041
             // ```c
-            // BLAST_PreliminarySearchEngine(program_number, query, query_info,
-            //    seq_src, gap_align, score_params, lookup_wrap, word_options,
-            //    ext_params, hit_params, eff_len_params, psi_options,
-            //    db_options, hsp_stream, diagnostics, interrupt_search,
-            //    progress_info);
+            // Int4 offset_array_size = GetOffsetArraySize(lookup_wrap);
             // ...
-            // BLAST_ComputeTraceback(program_number, hsp_stream, query, query_info,
-            //    seq_src, gap_align, score_params, ext_params, hit_params,
-            //    eff_len_params, db_options, psi_options, rps_info, pattern_blk,
-            //    results, interrupt_search, progress_info);
+            // aux_struct->offset_pairs =
+            //   (BlastOffsetPair*) malloc(offset_array_size * sizeof(BlastOffsetPair));
             // ```
-            if let Some(timing) = timing.as_ref() {
-                print_blastn_timing(timing.as_ref(), t_search_start, t_total);
+            let mut subject_scratch = SubjectScratch::new(queries_ref.len(), offset_array_size);
+            subject_records_ref
+                .iter()
+                .enumerate()
+                .map(|(s_idx, s_record)| {
+                    let mut subject_hits: Option<Vec<BlastnHsp>> = None;
+                    let mut prelim_hits: Vec<PrelimHit> = Vec::new();
+                    process_subject(
+                        s_idx,
+                        s_record,
+                        &mut gap_scratch,
+                        &mut subject_scratch,
+                        kept.map(|kept| &kept[s_idx]),
+                        &mut subject_hits,
+                        &mut prelim_hits,
+                    );
+                    (subject_hits, prelim_hits)
+                })
+                .collect()
+        };
+        let mut hit_lists: Vec<Option<BlastnHitList>> = Vec::with_capacity(queries_ref.len());
+        hit_lists.resize_with(queries_ref.len(), || None);
+        let mut prelim_hits = Vec::with_capacity(results.len());
+        for (hits, prelim) in results {
+            if let Some(hits) = hits {
+                update_hitlists_with_subject_hits(&mut hit_lists, hits, hitlist_size);
             }
-            return Ok(());
+            prelim_hits.push(prelim);
         }
-        #[cfg(any(
-            not(feature = "parallel"),
-            all(target_arch = "wasm32", not(feature = "wasm-threads"))
-        ))]
-        {
-            unreachable!("use_parallel is false when parallel threads are disabled");
-        }
-    }
+        (hit_lists, prelim_hits)
+    };
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:478-536
-    // ```c
-    // while (TRUE) {
-    //     status = s_GetNextSubjectChunk(subject, &backup, kNucleotide,
-    //                                    dbseq_chunk_overlap);
-    //     if (status == SUBJECT_SPLIT_DONE) break;
-    //     if (status == SUBJECT_SPLIT_NO_RANGE) continue;
-    //     ...
-    //     if (aux_struct->WordFinder) {
-    //         aux_struct->WordFinder(...);
-    //         if (init_hitlist->total == 0) continue;
-    //     }
-    //     ...
-    // }
-    // ```
-    let mut hit_lists: Vec<Option<BlastnHitList>> = Vec::with_capacity(queries_ref.len());
-    hit_lists.resize_with(queries_ref.len(), || None);
-    let mut gap_scratch = GapAlignScratch::new();
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:488-491
-    // ```c
-    // hsp_list = Blast_HSPListFree(hsp_list);
-    // BlastInitHitListReset(init_hitlist);
-    // ```
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:84-105
-    // ```c
-    // n = diag->diag_array_length;
-    // diag->offset = diag->window;
-    // diag_struct_array = diag->hit_level_array;
-    // for (i = 0; i < n; i++) {
-    //     diag_struct_array[i].flag = 0;
-    //     diag_struct_array[i].last_hit = -diag->window;
-    //     if (diag->hit_len_array) diag->hit_len_array[i] = 0;
-    // }
-    // ```
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:991-1041
-    // ```c
-    // Int4 offset_array_size = GetOffsetArraySize(lookup_wrap);
-    // ...
-    // aux_struct->offset_pairs =
-    //   (BlastOffsetPair*) malloc(offset_array_size * sizeof(BlastOffsetPair));
-    // ```
-    let mut subject_scratch = SubjectScratch::new(queries_ref.len(), offset_array_size);
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1427
-    // ```c
-    // itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
-    // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-    //        != BLAST_SEQSRC_EOF) {
-    //     if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0) {
-    //         continue;
-    //     }
-    // }
-    // ```
-    if let Some(subjects) = subject_records.as_ref() {
-        for (s_idx, s_record) in subjects.iter().enumerate() {
-            let mut subject_hits: Option<Vec<BlastnHsp>> = None;
-            process_subject(
-                s_idx,
-                s_record,
-                &mut gap_scratch,
-                &mut subject_scratch,
-                &mut subject_hits,
-            );
-            if let Some(hits) = subject_hits {
-                update_hitlists_with_subject_hits(&mut hit_lists, hits, prelim_hitlist_size);
-            }
-        }
-    } else {
-        let subject_reader = bio::io::fasta::Reader::from_file(&args.subject)
-            .with_context(|| format!("failed to open subject FASTA {}", args.subject.display()))?;
-        for (s_idx, record_result) in subject_reader.records().enumerate() {
-            let s_record = record_result.with_context(|| {
-                format!("failed to read subject FASTA {}", args.subject.display())
-            })?;
-            let mut subject_hits: Option<Vec<BlastnHsp>> = None;
-            process_subject(
-                s_idx,
-                &s_record,
-                &mut gap_scratch,
-                &mut subject_scratch,
-                &mut subject_hits,
-            );
-            if let Some(hits) = subject_hits {
-                update_hitlists_with_subject_hits(&mut hit_lists, hits, prelim_hitlist_size);
-            }
-        }
-    }
-
-    if let Some(bar) = progress_bar.as_ref() {
-        bar.finish();
-    }
-    post_process_hits_and_write(
-        hit_lists,
-        hitlist_size,
-        max_hsps_per_subject,
-        subject_besthit,
-        query_lengths.as_ref(),
-        outputs,
-        args.verbose,
-        query_ids_arc.as_ref(),
-        subject_ids_arc.as_ref(),
-        &output_formats,
-        query_titles_arc.as_ref(),
-        subject_title.as_ref(),
-        timing.as_deref(),
-        &report_inputs,
-    )?;
+    // NCBI's preliminary stage keeps, for each query, the preliminary HSPs of at most
+    // `prelim_hitlist_size` subjects (a split batch merges those of its query chunks), and
+    // its traceback reads only those.
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1674-1783
     // ```c
     // BLAST_PreliminarySearchEngine(program_number, query, query_info,
@@ -11669,10 +12073,339 @@ fn run_in_pool(
     //    eff_len_params, db_options, psi_options, rps_info, pattern_blk,
     //    results, interrupt_search, progress_info);
     // ```
+    let prelim_lists = match split_prelim_lists {
+        Some(lists) => lists,
+        None => {
+            let (_, prelim_hits) = search_subjects(None);
+            collect_prelim_hit_lists(prelim_hits, queries_ref.len(), prelim_hitlist_size)
+        }
+    };
+    if let BatchStage::ChunkPrelim { .. } = stage {
+        return Ok(batch_result(Vec::new(), prelim_lists));
+    }
+    let kept = prelim_hits_by_subject(prelim_lists, subject_records_ref.len());
+    let (hit_lists, _) = search_subjects(Some(&kept));
+
+    if let Some(bar) = progress_bar.as_ref() {
+        bar.finish();
+    }
     if let Some(timing) = timing.as_ref() {
         print_blastn_timing(timing.as_ref(), t_search_start, t_total);
     }
+    Ok(batch_result(hit_lists, Vec::new()))
+}
+
+/// NCBI's preliminary search of a split query batch: each query chunk is searched as a batch
+/// of its query parts (`BatchStage::ChunkPrelim`), and its preliminary hit lists are mapped
+/// onto the batch's contexts and merged with those of the chunks before it
+/// (`merge_query_chunk`). The merged hit lists of the batch's queries; `None` when NCBI does
+/// not split the batch.
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:237-289
+/// ```c
+///         for (Uint4 i = 0; i < query_splitter->GetNumberOfChunks(); i++) {
+///             try {
+///                 CRef<IQueryFactory> chunk_qf =
+///                     query_splitter->GetQueryFactoryForChunk(i);
+///                 ...
+///                 CRef<SInternalData> chunk_data =
+///                     SplitQuery_CreateChunkData(chunk_qf, m_Options,
+///                                                m_InternalData,
+///                                                GetNumberOfThreads());
+///                 ...
+///                     retval =
+///                         CPrelimSearchRunner(*chunk_data, opts_memento.get())();
+///                 ...
+///                 BlastHSPStreamMerge(split_query_blk->GetCStruct(), i,
+///                                 chunk_data->m_HspStream->GetPointer(),
+///                                 m_InternalData->m_HspStream->GetPointer());
+///                 ...
+///             } catch (const CBlastException& e) {
+///                 // This error message is safe to ignore for a given chunk,
+///                 // because the chunks might end up producing a region of
+///                 // the query for which ungapped Karlin-Altschul blocks
+///                 // cannot be calculated
+///                 ...
+///                 if (e.GetMsg().find(err_msg1) == NPOS && e.GetMsg().find(err_msg2) == NPOS) {
+///                     throw;
+///                 }
+/// ```
+/// A chunk has its own query block, masks, Karlin-Altschul blocks, lookup table and
+/// diagnostics (a split batch gives the next batch size 0 initial hits), and NCBI drops its
+/// warnings. A chunk without a valid context finds nothing, as NCBI ignores its error.
+#[allow(clippy::too_many_arguments)]
+fn search_query_chunks(
+    args: &BlastnArgs,
+    queries: &[bio::io::fasta::Record],
+    query_masks: &[Vec<MaskedInterval>],
+    batch_eff_searchsp: &[i64],
+    context_offsets: &[i32],
+    subjects: &PreparedSubjects<'_>,
+    outputs: &mut ReportOutputs<'_>,
+    output_formats: &[BlastnOutputFormat],
+    parallel_pool: &crate::utils::threading::SearchPool<'_>,
+    batch_size: i32,
+    first_batch: bool,
+) -> Result<Option<PrelimHitLists>> {
+    let lengths: Vec<usize> = queries.iter().map(|record| record.seq().len()).collect();
+    let Some(chunks) = split_query_batch(&lengths, args.task == "megablast") else {
+        return Ok(None);
+    };
+    let mut merged: PrelimHitLists = Vec::with_capacity(queries.len());
+    merged.resize_with(queries.len(), || None);
+    for chunk in &chunks {
+        // NCBI fails to make the query factory of a chunk without a query ("Empty
+        // CBlastQueryVector"); `split_query_batch` makes none.
+        anyhow::ensure!(
+            !chunk.queries.is_empty(),
+            "a query chunk without a query is not supported by LOSAT's BLASTN"
+        );
+        let parts: Vec<bio::io::fasta::Record> = chunk
+            .queries
+            .iter()
+            .map(|part| {
+                let record = &queries[part.query];
+                bio::io::fasta::Record::with_attrs(
+                    record.id(),
+                    record.desc(),
+                    &record.seq()[part.from..part.to],
+                )
+            })
+            .collect();
+        let restricted = chunk
+            .queries
+            .iter()
+            .map(|part| restrict_masks(&query_masks[part.query], part))
+            .collect();
+        let part_masks = chunk_query_masks(args, &parts, restricted);
+        let batch = search_query_batch(
+            args,
+            &parts,
+            subjects,
+            outputs,
+            output_formats,
+            parallel_pool,
+            batch_size,
+            first_batch,
+            BatchStage::ChunkPrelim {
+                query_masks: &part_masks,
+                batch_eff_searchsp,
+            },
+        )?;
+        merge_query_chunk(
+            &mut merged,
+            batch.chunk_prelim_lists,
+            chunk,
+            &lengths,
+            context_offsets,
+        )?;
+    }
+    Ok(Some(merged))
+}
+
+/// NCBI's `BlastHSPStreamMerge` of a query chunk: the HSPs of each query part's hit list
+/// move to the part's contexts in the batch, and the list merges with the query's hit list of
+/// the chunks before (`merge_prelim_hit_list`).
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hspstream.c:476-522
+/// ```c
+///        for (j = 0; j < contexts_per_query; j++) {
+///            split_points[j] = -1;
+///        }
+///
+///        for (j = 0; j < contexts_per_query; j++) {
+///            Int4 local_context = i * contexts_per_query + j;
+///            if (context_list[local_context] >= 0) {
+///                split_points[context_list[local_context] % contexts_per_query] =
+///                                 offset_list[local_context];
+///            }
+///        }
+///        ...
+///                hsp->context = context_list[local_context];
+///                hsp->query.offset += offset_list[local_context];
+///                hsp->query.end += offset_list[local_context];
+///                hsp->query.gapped_start += offset_list[local_context];
+///                hsp->query.frame = BLAST_ContextToFrame(stream2->program,
+///                                                        hsp->context);
+///            }
+///
+///            hsplist->query_index = global_query;
+///        }
+///
+///        Blast_HitListMerge(results1->hitlist_array + i,
+///                           results2->hitlist_array + global_query,
+///                           contexts_per_query, split_points,
+///                           (Int4)SplitQueryBlk_GetChunkOverlapSize(squery_blk),
+/// ```
+/// The overlap is 100 and gaps are allowed (`CSplitQueryBlk` of a gapped search).
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hspstream.c:527-534
+/// ```c
+///    for (i = 0; i < results2->num_queries; i++) {
+///        BlastHitList *hitlist = results2->hitlist_array[i];
+///        if (hitlist == NULL)
+///            continue;
+///
+///        for (j = 0; j < hitlist->hsplist_count; j++)
+///            Blast_HSPListSortByScore(hitlist->hsplist_array[j]);
+///    }
+/// ```
+fn merge_query_chunk(
+    merged: &mut PrelimHitLists,
+    chunk_lists: PrelimHitLists,
+    chunk: &QueryChunk,
+    query_lengths: &[usize],
+    context_offsets: &[i32],
+) -> Result<()> {
+    for (local_query, hit_list) in chunk_lists.into_iter().enumerate() {
+        let Some(mut hit_list) = hit_list else {
+            continue;
+        };
+        let part = &chunk.queries[local_query];
+        let query_length = query_lengths[part.query] as i64;
+        for list in &mut hit_list.hsplist_array {
+            for hsp in &mut list.hsps {
+                let local_context = hsp.context_idx as usize;
+                let context = chunk.contexts[local_context];
+                let offset = chunk.context_offsets[local_context] as i64;
+                let query_offset = hsp.prelim_qs as i64 + offset;
+                let query_end = hsp.prelim_qe as i64 + offset;
+                let gapped_start = hsp.seed_qs as i64 + offset;
+                // The offsets are the starts of the parts (`query_split::context_offsets`).
+                anyhow::ensure!(
+                    query_offset >= 0 && query_end <= query_length && gapped_start < query_length,
+                    "internal error: an HSP of a query chunk maps outside its query"
+                );
+                hsp.context_idx = context as u32;
+                hsp.query_idx = part.query as u32;
+                hsp.query_frame = if context % 2 == 0 { 1 } else { -1 };
+                hsp.query_context_offset = context_offsets[context];
+                hsp.prelim_qs = query_offset as usize;
+                hsp.prelim_qe = query_end as usize;
+                hsp.seed_qs = gapped_start as usize;
+            }
+        }
+        let split_points = [
+            chunk.context_offsets[2 * local_query],
+            chunk.context_offsets[2 * local_query + 1],
+        ];
+        merge_prelim_hit_list(hit_list, &mut merged[part.query], split_points);
+    }
+    for hit_list in merged.iter_mut().flatten() {
+        for list in &mut hit_list.hsplist_array {
+            sort_prelim_hits_by_score(&mut list.hsps);
+        }
+    }
     Ok(())
+}
+
+/// NCBI's `Blast_HitListMerge`: a query chunk's hit list of a query merges with the query's
+/// hit list of the chunks before into a new hit list of the same size, subject by subject in
+/// subject order (`Blast_HitListUpdate` keeps the best `prelim_hitlist_size` subjects by
+/// their preliminary e-values). The HSP lists of a subject in both merge with
+/// `Blast_HSPListsMerge` when a split point is positive, else `Blast_HSPListAppend`.
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2132-2217
+/// ```c
+///     if (hitlist1 == NULL)
+///         return 0;
+///     if (hitlist2 == NULL) {
+///         *combined_hit_list_ptr = hitlist1;
+///         *old_hit_list_ptr = NULL;
+///         return 0;
+///     }
+///     num_hsplists1 = hitlist1->hsplist_count;
+///     num_hsplists2 = hitlist2->hsplist_count;
+///     new_hitlist = Blast_HitListNew(hitlist1->hsplist_max);
+///
+///     /* sort the lists of HSPs by oid */
+///
+///     if (num_hsplists1 > 1) {
+///         qsort(hitlist1->hsplist_array, num_hsplists1,
+///               sizeof(BlastHSPList*), s_SortHSPListByOid);
+///     }
+///     ...
+///     query_is_split = FALSE;
+///     for (i = 0; i < contexts_per_query; i++) {
+///         if (split_offsets[i] > 0) {
+///             query_is_split = TRUE;
+///     ...
+///         if (hsplist1->oid < hsplist2->oid) {
+///             Blast_HitListUpdate(new_hitlist, hsplist1);
+///             i++;
+///         }
+///         else if (hsplist1->oid > hsplist2->oid) {
+///             Blast_HitListUpdate(new_hitlist, hsplist2);
+///             j++;
+///         }
+///         else {
+///             ...
+///             if (query_is_split) {
+///                 Blast_HSPListsMerge(hitlist1->hsplist_array + i,
+///                                     hitlist2->hsplist_array + j,
+///                                     hsplist2->hsp_max, split_offsets,
+///                                     contexts_per_query,
+///                                     chunk_overlap_size,
+///                                     allow_gap, FALSE);
+///             }
+///             else {
+///                 Blast_HSPListAppend(hitlist1->hsplist_array + i,
+///                                     hitlist2->hsplist_array + j,
+///                                     hsplist2->hsp_max);
+///             }
+///             Blast_HitListUpdate(new_hitlist, hitlist2->hsplist_array[j]);
+///     ...
+///     *old_hit_list_ptr = NULL;
+///     *combined_hit_list_ptr = new_hitlist;
+/// ```
+fn merge_prelim_hit_list(
+    mut hitlist1: HitList<PrelimHspList>,
+    combined: &mut Option<HitList<PrelimHspList>>,
+    split_offsets: [i32; 2],
+) {
+    let Some(mut hitlist2) = combined.take() else {
+        *combined = Some(hitlist1);
+        return;
+    };
+    let mut new_hitlist = HitList::new(hitlist1.hsplist_max);
+    // The subjects of a hit list are distinct, so the sort order is total.
+    hitlist1.hsplist_array.sort_by_key(|list| list.oid);
+    hitlist2.hsplist_array.sort_by_key(|list| list.oid);
+    let query_is_split = split_offsets.iter().any(|&offset| offset > 0);
+    let mut lists1 = std::mem::take(&mut hitlist1.hsplist_array)
+        .into_iter()
+        .peekable();
+    let mut lists2 = std::mem::take(&mut hitlist2.hsplist_array)
+        .into_iter()
+        .peekable();
+    while let (Some(list1), Some(list2)) = (lists1.peek(), lists2.peek()) {
+        if list1.oid < list2.oid {
+            new_hitlist.update(lists1.next().unwrap());
+        } else if list1.oid > list2.oid {
+            new_hitlist.update(lists2.next().unwrap());
+        } else {
+            let list1 = lists1.next().unwrap();
+            let mut list2 = lists2.next().unwrap();
+            if query_is_split {
+                merge_prelim_hit_lists(
+                    &mut list2.hsps,
+                    list1.hsps,
+                    HspListSplit::Query {
+                        offsets: split_offsets,
+                    },
+                    QUERY_CHUNK_OVERLAP,
+                    true,
+                );
+            } else {
+                append_prelim_hit_list(&mut list2.hsps, list1.hsps);
+            }
+            new_hitlist.update(list2);
+        }
+    }
+    for list in lists1.chain(lists2) {
+        new_hitlist.update(list);
+    }
+    *combined = Some(new_hitlist);
 }
 
 #[cfg(test)]
@@ -11701,7 +12434,74 @@ mod tests {
             prelim_score: 50,
             seed_qs,
             seed_ss,
+            prelim_evalue: 0.0,
         }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn prelim_hit(
+        context_idx: u32,
+        query_frame: i32,
+        prelim_qs: usize,
+        prelim_qe: usize,
+        prelim_ss: usize,
+        prelim_se: usize,
+        prelim_score: i32,
+    ) -> PrelimHit {
+        PrelimHit {
+            context_idx,
+            query_idx: 0,
+            query_frame,
+            query_context_offset: 0,
+            prelim_qs,
+            prelim_qe,
+            prelim_ss,
+            prelim_se,
+            prelim_score,
+            seed_qs: prelim_qs,
+            seed_ss: prelim_ss,
+            prelim_evalue: 0.0,
+        }
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2912-2945
+    // ```c
+    //    else {            /* query seq is split */
+    //          if ((hsp1->query.frame >= 0 && hsp1->query.end >
+    //                          split_offsets[offset_idx]) ||
+    //              (hsp1->query.frame < 0 && hsp1->query.offset <
+    //                          split_offsets[offset_idx] + chunk_overlap_size)) {
+    //          if ((hsp2->query.frame < 0 && hsp2->query.end >
+    //                          split_offsets[offset_idx]) ||
+    //              (hsp2->query.frame >= 0 && hsp2->query.offset <
+    //                          split_offsets[offset_idx] + chunk_overlap_size)) {
+    // ```
+    #[test]
+    fn a_query_split_merges_hsps_across_the_split_on_either_strand() {
+        let split = HspListSplit::Query {
+            offsets: [1000, 5000],
+        };
+        // Plus strand: the earlier chunk's HSP ends after the split point, the later
+        // chunk's starts before its overlap ends.
+        let mut combined = vec![prelim_hit(0, 1, 900, 1050, 100, 250, 150)];
+        let incoming = vec![prelim_hit(0, 1, 1000, 1200, 200, 400, 200)];
+        merge_prelim_hit_lists(&mut combined, incoming, split, 100, true);
+        assert_eq!(combined.len(), 1);
+        assert_eq!((combined[0].prelim_qs, combined[0].prelim_qe), (900, 1200));
+        // The score density of the two (350 / 350) over the merged 300 residues.
+        assert_eq!(combined[0].prelim_score, 300);
+        // Minus strand: the later chunk comes first on the strand, so the tests swap.
+        let mut combined = vec![prelim_hit(1, -1, 4950, 5200, 1000, 1250, 150)];
+        let incoming = vec![prelim_hit(1, -1, 4800, 5050, 850, 1100, 150)];
+        merge_prelim_hit_lists(&mut combined, incoming, split, 100, true);
+        assert_eq!(combined.len(), 1);
+        assert_eq!((combined[0].prelim_qs, combined[0].prelim_qe), (4800, 5200));
+        // The same pair on the plus strand is not in the strips (the earlier HSP does not
+        // end after the split point): both stay.
+        let mut combined = vec![prelim_hit(0, 1, 800, 950, 1000, 1150, 150)];
+        let incoming = vec![prelim_hit(0, 1, 700, 850, 900, 1050, 150)];
+        merge_prelim_hit_lists(&mut combined, incoming, split, 100, true);
+        assert_eq!(combined.len(), 2);
     }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1330-1353

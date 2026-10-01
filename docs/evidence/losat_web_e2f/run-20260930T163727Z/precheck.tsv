@@ -1,0 +1,49 @@
+fixture_id	ncbi_exit	ncbi_lines	losat_exit	losat_lines	result	losat_stderr
+compact.blastn	0	2	0	2	same	
+compact.megablast	0	2	0	2	same	
+compact.nohit.blastn	0	0	0	0	same	
+compact.nohit.megablast	0	0	0	0	same	
+LC738874_LC738870.megablast	0	20	0	20	same	
+AP027152_AP027202.blastn	0	241	0	241	same	
+strand.blastn	0	2	0	2	same	
+strand.megablast	0	2	0	2	same	
+mask.dust.blastn	0	1	0	1	same	
+mask.nodust.blastn	0	1	0	1	same	
+mask.lcase.blastn	0	1	0	1	same	
+mask.lcase_nodust.blastn	0	1	0	1	same	
+mask.lcase.megablast	0	1	0	1	same	
+mask.subjlc_lcase.blastn	0	1	0	1	same	
+mask.subjlc.blastn	0	1	0	1	same	
+mask.lcase_minus.blastn	0	1	0	1	same	
+mask.lcase_minus.megablast	0	1	0	1	same	
+multi.blastn	0	9	0	9	same	
+multi.megablast	0	5	0	5	same	
+multi.mts3.blastn	0	6	0	6	same	Warning: [blastn] Examining 5 or more matches is recommended
+multi.mts1.blastn	0	3	0	3	same	Warning: [blastn] Examining 5 or more matches is recommended
+multi.ws7_e1000.blastn	0	315	0	315	same	
+multi.maxhsps1.blastn	0	5	0	5	same	
+multi.perc97.blastn	0	5	0	5	same	
+multi.besthit.blastn	0	6	0	6	same	
+multi.r2p3g00.megablast	0	5	0	5	same	
+many.blastn	0	262	0	262	same	
+many.mts255.blastn	0	257	0	257	same	
+many.mts500.blastn	0	262	0	262	same	
+width.blastn	0	1	0	1	same	
+width.megablast	0	1	0	1	same	
+edge.allN.blastn	0	0	0	0	same	Warning: [blastn] Query_1 allN query of only N: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options
+edge.alllower_lcase.blastn	0	1	0	1	same	
+edge.mixed_allN.blastn	0	2	0	2	same	Warning: [blastn] Query_2 allN query of only N: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options
+edge.ambig.blastn	0	1	0	1	same	
+edge.ambig.megablast	0	0	0	0	same	
+edge.batch_allN.blastn	0	1	0	1	same	Warning: [blastn] Query_1 batchN 5000 N fil.. : Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options
+edge.batch_allN.megablast	0	1	0	1	same	Warning: [blastn] Query_1 batchN 5000 N fil.. : Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options
+longdef.megablast	0	1	0	1	same	
+width.blastp	0	1	0	1	same	
+width.tblastn	0	1	0	1	same	
+scoring.reward1.blastn	0	9	0	9	same	
+scoring.beyond_table.megablast	0	5	0	5	same	
+scoring.divisor.blastn	0	9	0	9	same	
+scoring.beyond_table_iupac.blastn	0	25	0	25	same	
+input.rna.megablast	0	5	0	5	same	
+edge.short_invalid.blastn	0	67	0	67	same	Warning: [blastn] Query_2 shortN1 40 N: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options 
+# fixtures=47 differing=[]

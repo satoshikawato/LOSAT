@@ -536,8 +536,20 @@ pub fn blast_get_start_for_gapped_alignment_nucl(
         return (q_gapped_start, s_gapped_start);
     }
 
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3327-3332
+    // ```c
+    // int hspMaxIdentRun = 10;
+    // const Uint1 *q, *s;
+    // Int4 index, max_offset, score, max_score, q_start, s_start, q_len;
+    // Boolean match, prev_match;
+    // Int4 offset = MIN(hsp->subject.gapped_start - hsp->subject.offset,
+    //                   hsp->query.gapped_start - hsp->query.offset);
+    // ```
+    // `offset` is an Int4 and is negative when a gapped start lies left of the
+    // HSP start; the arithmetic below is Int4 as in C.
     let mut hsp_max_ident_run: i32 = 10;
-    let offset = (s_gapped_start - s_offset).min(q_gapped_start - q_offset);
+    let offset: i32 =
+        (s_gapped_start as i32 - s_offset as i32).min(q_gapped_start as i32 - q_offset as i32);
 
     let mut q_start = q_gapped_start;
     let mut s_start = s_gapped_start;
@@ -603,27 +615,79 @@ pub fn blast_get_start_for_gapped_alignment_nucl(
         s_start -= 1;
     }
 
-    hsp_max_ident_run = (hsp_max_ident_run * 3) / 2;
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3350-3361
+    // ```c
+    // hspMaxIdentRun *= 1.5;  /* Demand larger value if we move */
+    // /* if the old value is not ok, try to find a better point */
+    // q_start = hsp->query.gapped_start - offset;
+    // s_start = hsp->subject.gapped_start - offset;
+    // q_len = MIN(hsp->subject.end - s_start, hsp->query.end - q_start);
+    // q = query + q_start;
+    // s = subject + s_start;
+    // max_score = 0;
+    // max_offset = q_start;
+    // score = 0;
+    // match = FALSE;
+    // prev_match = FALSE;
+    // ```
+    hsp_max_ident_run = (f64::from(hsp_max_ident_run) * 1.5) as i32;
+    let q_start: i32 = q_gapped_start as i32 - offset;
+    let s_start: i32 = s_gapped_start as i32 - offset;
+    let q_len: i32 = (s_end as i32 - s_start).min(q_end as i32 - q_start);
 
-    q_start = q_gapped_start - offset;
-    s_start = s_gapped_start - offset;
-    let q_len = (s_end - s_start).min(q_end - q_start);
-
-    if q_start + q_len > q_seq.len() || s_start + q_len > s_seq.len() {
+    // The loop reads query[q_start .. q_start + q_len) and the same number of
+    // subject bases from s_start; HSP coordinates keep them inside the
+    // sequences, as in NCBI. Guard the reads only to satisfy Rust bounds.
+    if q_len > 0
+        && (q_start < 0
+            || s_start < 0
+            || (q_start + q_len) as usize > q_seq.len()
+            || (s_start + q_len) as usize > s_seq.len())
+    {
         return (q_gapped_start, s_gapped_start);
     }
 
     let mut max_score: i32 = 0;
-    let mut max_offset = q_start;
+    let mut max_offset: i32 = q_start;
     score = 0;
     let mut match_run = false;
     let mut prev_match = false;
-    let mut q_idx = q_start;
-    let mut s_idx = s_start;
-    let mut index = q_start;
-    let end = q_start + q_len;
 
-    while index < end {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3362-3389
+    // ```c
+    // for (index = q_start; index < q_start + q_len; index++) {
+    //     match = (*q++ == *s++);
+    //     if (match != prev_match) {
+    //         prev_match = match;
+    //         if (match) {
+    //             score = 1;
+    //         } else if (score > max_score) {
+    //             max_score = score;
+    //             max_offset = index - score/2;
+    //         }
+    //     } else if (match) {
+    //         ++score;
+    //         if (score > hspMaxIdentRun) {
+    //             max_offset = index - hspMaxIdentRun/2;
+    //             hsp->query.gapped_start = max_offset;
+    //             hsp->subject.gapped_start = max_offset + s_start - q_start;
+    //             return;
+    //         }
+    //     }
+    // }
+    // if (match && score > max_score) {
+    //     max_score = score;
+    //     max_offset = index - score/2;
+    // }
+    // if (max_score > 0) {
+    //     hsp->query.gapped_start = max_offset;
+    //     hsp->subject.gapped_start = max_offset + s_start - q_start;
+    // }
+    // ```
+    let mut index: i32 = q_start;
+    while index < q_start + q_len {
+        let q_idx = index as usize;
+        let s_idx = (s_start + (index - q_start)) as usize;
         match_run = q_seq[q_idx] == s_seq[s_idx];
         if match_run != prev_match {
             prev_match = match_run;
@@ -631,27 +695,31 @@ pub fn blast_get_start_for_gapped_alignment_nucl(
                 score = 1;
             } else if score > max_score {
                 max_score = score;
-                max_offset = index - (score as usize / 2);
+                max_offset = index - score / 2;
             }
         } else if match_run {
             score += 1;
             if score > hsp_max_ident_run {
-                max_offset = index - (hsp_max_ident_run as usize / 2);
-                return (max_offset, max_offset + s_start - q_start);
+                max_offset = index - hsp_max_ident_run / 2;
+                return (
+                    max_offset as usize,
+                    (max_offset + s_start - q_start) as usize,
+                );
             }
         }
-        q_idx += 1;
-        s_idx += 1;
         index += 1;
     }
 
     if match_run && score > max_score {
         max_score = score;
-        max_offset = index - (score as usize / 2);
+        max_offset = index - score / 2;
     }
 
     if max_score > 0 {
-        return (max_offset, max_offset + s_start - q_start);
+        return (
+            max_offset as usize,
+            (max_offset + s_start - q_start) as usize,
+        );
     }
 
     (q_gapped_start, s_gapped_start)

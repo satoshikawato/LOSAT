@@ -1,0 +1,271 @@
+{
+  "kind": "serial-reactor",
+  "sha256": "e5902cd943414ea1ac51561df81a95b6914e6bfd84c7500346adf9eeb011fe09",
+  "imports": [
+    {
+      "module": "losat_host",
+      "name": "emit",
+      "kind": "function"
+    },
+    {
+      "module": "wasi_snapshot_preview1",
+      "name": "random_get",
+      "kind": "function"
+    },
+    {
+      "module": "wasi_snapshot_preview1",
+      "name": "sched_yield",
+      "kind": "function"
+    },
+    {
+      "module": "wasi_snapshot_preview1",
+      "name": "clock_time_get",
+      "kind": "function"
+    },
+    {
+      "module": "wasi_snapshot_preview1",
+      "name": "path_filestat_get",
+      "kind": "function"
+    },
+    {
+      "module": "wasi_snapshot_preview1",
+      "name": "path_create_directory",
+      "kind": "function"
+    },
+    {
+      "module": "wasi_snapshot_preview1",
+      "name": "fd_write",
+      "kind": "function"
+    },
+    {
+      "module": "wasi_snapshot_preview1",
+      "name": "path_open",
+      "kind": "function"
+    },
+    {
+      "module": "wasi_snapshot_preview1",
+      "name": "environ_get",
+      "kind": "function"
+    },
+    {
+      "module": "wasi_snapshot_preview1",
+      "name": "environ_sizes_get",
+      "kind": "function"
+    },
+    {
+      "module": "wasi_snapshot_preview1",
+      "name": "fd_close",
+      "kind": "function"
+    },
+    {
+      "module": "wasi_snapshot_preview1",
+      "name": "fd_fdstat_get",
+      "kind": "function"
+    },
+    {
+      "module": "wasi_snapshot_preview1",
+      "name": "fd_prestat_get",
+      "kind": "function"
+    },
+    {
+      "module": "wasi_snapshot_preview1",
+      "name": "fd_prestat_dir_name",
+      "kind": "function"
+    },
+    {
+      "module": "wasi_snapshot_preview1",
+      "name": "proc_exit",
+      "kind": "function"
+    }
+  ],
+  "exports": [
+    {
+      "name": "memory",
+      "kind": "memory"
+    },
+    {
+      "name": "losat_web2_abi_version",
+      "kind": "function"
+    },
+    {
+      "name": "losat_web2_alloc",
+      "kind": "function"
+    },
+    {
+      "name": "losat_web2_dealloc",
+      "kind": "function"
+    },
+    {
+      "name": "losat_web2_describe",
+      "kind": "function"
+    },
+    {
+      "name": "losat_web2_last_error_len",
+      "kind": "function"
+    },
+    {
+      "name": "losat_web2_last_error_ptr",
+      "kind": "function"
+    },
+    {
+      "name": "losat_web2_register",
+      "kind": "function"
+    },
+    {
+      "name": "losat_web2_release",
+      "kind": "function"
+    },
+    {
+      "name": "losat_web2_run",
+      "kind": "function"
+    },
+    {
+      "name": "losat_web2_scan_begin",
+      "kind": "function"
+    },
+    {
+      "name": "losat_web2_scan_chunk",
+      "kind": "function"
+    },
+    {
+      "name": "losat_web2_scan_end",
+      "kind": "function"
+    },
+    {
+      "name": "losat_web2_validate",
+      "kind": "function"
+    },
+    {
+      "name": "losat_web_alloc",
+      "kind": "function"
+    },
+    {
+      "name": "losat_web_clear",
+      "kind": "function"
+    },
+    {
+      "name": "losat_web_clear_fasta_store",
+      "kind": "function"
+    },
+    {
+      "name": "losat_web_dealloc",
+      "kind": "function"
+    },
+    {
+      "name": "losat_web_error_len",
+      "kind": "function"
+    },
+    {
+      "name": "losat_web_error_ptr",
+      "kind": "function"
+    },
+    {
+      "name": "losat_web_has_direct_api",
+      "kind": "function"
+    },
+    {
+      "name": "losat_web_release_fasta",
+      "kind": "function"
+    },
+    {
+      "name": "losat_web_result_len",
+      "kind": "function"
+    },
+    {
+      "name": "losat_web_result_ptr",
+      "kind": "function"
+    },
+    {
+      "name": "losat_web_run_pair",
+      "kind": "function"
+    },
+    {
+      "name": "losat_web_run_pair_handles",
+      "kind": "function"
+    },
+    {
+      "name": "losat_web_store_fasta",
+      "kind": "function"
+    },
+    {
+      "name": "_initialize",
+      "kind": "function"
+    }
+  ],
+  "memory": {
+    "imported": false,
+    "initial": 22,
+    "maximum": null,
+    "shared": false
+  },
+  "artifact": "losat-web-serial.wasm",
+  "target": "wasm32-wasip1",
+  "engine_features": [],
+  "rust": "rustc 1.92.0 (ded5c06cf 2025-12-08)\nbinary: rustc\ncommit-hash: ded5c06cf21d2b93bffd5d884aa6e96934ee4234\ncommit-date: 2025-12-08\nhost: x86_64-unknown-linux-gnu\nrelease: 1.92.0\nLLVM version: 21.1.3\n",
+  "node": {
+    "node": "26.8.2",
+    "acorn": "8.18.0",
+    "ada": "4.0.0",
+    "amaro": "1.1.11",
+    "ares": "1.34.8",
+    "brotli": "1.2.0",
+    "cldr": "48.0",
+    "icu": "78.3",
+    "libffi": "3.8.0",
+    "lief": "0.17.0",
+    "llhttp": "9.4.3",
+    "merve": "1.2.2",
+    "modules": "147",
+    "napi": "10",
+    "nbytes": "0.1.4",
+    "ncrypto": "0.0.1",
+    "nghttp2": "1.70.0",
+    "nghttp3": "",
+    "ngtcp2": "",
+    "openssl": "3.5.8",
+    "simdjson": "4.6.9",
+    "simdutf": "7.7.0",
+    "sqlite": "3.53.4",
+    "tz": "2026c",
+    "undici": "8.10.2",
+    "unicode": "17.0",
+    "uv": "1.52.1",
+    "uvwasi": "0.0.23",
+    "v8": "14.6.202.34-node.28",
+    "zlib": "1.3.2.1-motley-5eb4d7e",
+    "zstd": "1.5.7"
+  },
+  "argv": [
+    "cargo",
+    "build",
+    "--release",
+    "--locked",
+    "--target",
+    "wasm32-wasip1",
+    "--lib",
+    "--target-dir",
+    "/home/kawato/.cache/losat-web-gui-target/s07pg-adapter/serial",
+    "--config",
+    "target.wasm32-wasip1.rustflags=[\"--remap-path-prefix=/mnt/c/Users/genom/GitHub/LOSAT-web-gui=/losat\", \"--remap-path-prefix=/home/kawato/.cargo=/cargo\"]"
+  ],
+  "cwd": "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/web/adapter",
+  "target_rustflags": [
+    "-C",
+    "target-feature=+simd128"
+  ],
+  "reactor_link_args": [
+    "<rust-sysroot>/lib/rustlib/<target>/lib/self-contained/crt1-reactor.o",
+    "--entry=_initialize"
+  ],
+  "environment": {},
+  "reactor_crt_sha256": "f6e18fb8e18fd2e5f795434971da18e87a1adc2e981a055c9cfc8836f88f5862",
+  "cargo_lock_sha256": "62b7696c63dfc6963e287fe772e9eb33e3d39fe99022d71e7dceac72bfd0ae94",
+  "engine_cargo_lock_sha256": "92a8ff6e1d33a74d41bfadb6aa93db46efe927cdd5025567dac3aa5d8974f531",
+  "build_rs_sha256": "7d70a92bfe68a76662ed485e0d98ea82e4294a84c959714fb62ad331ef808830",
+  "checkout": "/mnt/c/Users/genom/GitHub/LOSAT-web-gui",
+  "cargo_home": "/home/kawato/.cargo",
+  "remap_path_prefix": [
+    "--remap-path-prefix=/mnt/c/Users/genom/GitHub/LOSAT-web-gui=/losat",
+    "--remap-path-prefix=/home/kawato/.cargo=/cargo"
+  ]
+}

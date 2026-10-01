@@ -1,0 +1,1526 @@
+[
+  {
+    "engine": "serial",
+    "threads": 1,
+    "program": "blastp",
+    "cases": [
+      "pairwise_default_serial"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/SicyWSV.faa",
+      "-subject",
+      "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/PajaWSV.faa",
+      "-max_hsps",
+      "1"
+    ],
+    "formats": {
+      "0": "6ae2ee96ae7cb70bc8bc1e572f262f10e0e2621d0451f64926aeb5540780bd50",
+      "6": "fd4b010800e32ce6c823cb38b42a10b7845f3342edae892acccc8f554f9edf34",
+      "7": "1d34fb432780918b5ce870bf328e41e39a7dc91ee64c0cdb499e857a4a00ac04"
+    },
+    "frozen": {},
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 475
+  },
+  {
+    "engine": "serial",
+    "threads": 1,
+    "program": "blastp",
+    "cases": [
+      "pairwise_limit1_serial"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/SicyWSV.faa",
+      "-subject",
+      "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/PajaWSV.faa",
+      "-max_hsps",
+      "1",
+      "-max_target_seqs",
+      "1"
+    ],
+    "formats": {
+      "0": "c8bc75445ab393510e3e698b673b51c1cf9bbe833102ea3fc4e93aef8fac0e45",
+      "6": "2825ce099d7858d7d23a811bff98f4c42fee96c9519003ee936f25855648d3af",
+      "7": "3ed278d1c6fcec4a0fc15a4489b34ac0a65718471353d6e36c27cc5cd7677813"
+    },
+    "frozen": {},
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 89
+  },
+  {
+    "engine": "serial",
+    "threads": 1,
+    "program": "blastn",
+    "cases": [
+      "MjPMNV.MlPMNV.task_blastn"
+    ],
+    "argv": [
+      "blastn",
+      "-query",
+      "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/AP027202.fasta",
+      "-subject",
+      "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/LC738875.fasta",
+      "-task",
+      "blastn",
+      "-reward",
+      "2",
+      "-penalty=-3",
+      "-gapopen",
+      "5",
+      "-gapextend",
+      "2",
+      "-word_size",
+      "11",
+      "-evalue",
+      "10",
+      "-max_target_seqs",
+      "500",
+      "-dust",
+      "yes"
+    ],
+    "formats": {
+      "0": "e1612e9c1930d83463e8c12b8c7caaf8704405c57baba1f5a2e59c66bbc98d61",
+      "6": "9a30fc9c61c4eb33d79c638ce62a330884d1330f56e4ba4f49d54b6547228603",
+      "7": "499fef0d04287bf42f29c8299a3cf45b69491442b284df5c736b7ad517d7324d"
+    },
+    "frozen": {},
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 54402
+  },
+  {
+    "engine": "serial",
+    "threads": 1,
+    "program": "blastn",
+    "cases": [
+      "compact.multi_query.outfmt6",
+      "compact.multi_query.outfmt7"
+    ],
+    "argv": [
+      "blastn",
+      "-query",
+      "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/blastn_parity_compact.fasta",
+      "-subject",
+      "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/blastn_parity_compact.fasta",
+      "-task",
+      "blastn",
+      "-reward",
+      "2",
+      "-penalty=-3",
+      "-gapopen",
+      "5",
+      "-gapextend",
+      "2",
+      "-word_size",
+      "11",
+      "-evalue",
+      "10",
+      "-max_target_seqs",
+      "500",
+      "-dust",
+      "yes"
+    ],
+    "formats": {
+      "0": "e2ccc311174462b31876945569e7144116923127fbe2c74047f7142afd8e0fdc",
+      "6": "ac4a20b64c8da3eaea725ed09dc89880294f58e971b7207c943489faacdbe03e",
+      "7": "054c105f1ac10d41e3812324c6465a8275d1bf029f9104ce238da8b13cbae799"
+    },
+    "frozen": {},
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 2
+  },
+  {
+    "engine": "serial",
+    "threads": 1,
+    "program": "blastn",
+    "cases": [
+      "compact.multi_query.no_hit.outfmt7"
+    ],
+    "argv": [
+      "blastn",
+      "-query",
+      "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/blastn_parity_compact.fasta",
+      "-subject",
+      "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/blastn_parity_compact.fasta",
+      "-task",
+      "blastn",
+      "-reward",
+      "2",
+      "-penalty=-3",
+      "-gapopen",
+      "5",
+      "-gapextend",
+      "2",
+      "-word_size",
+      "11",
+      "-evalue",
+      "1e-100",
+      "-max_target_seqs",
+      "500",
+      "-dust",
+      "yes"
+    ],
+    "formats": {
+      "0": "dbc12a3a29a42161c70da091cbb0a63870e07d48ebccf7a7e4b3fe9488703eb6",
+      "6": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "7": "0661134a118de20b96c4e7901e377d84b871fd2316af8936f412cc23d85b35fb"
+    },
+    "frozen": {},
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 0
+  },
+  {
+    "engine": "serial",
+    "threads": 1,
+    "program": "tblastx",
+    "cases": [
+      "p02_mje_mela"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/MjeNMV.fasta",
+      "-subject",
+      "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/MelaMJNV.fasta",
+      "-query_gencode",
+      "1",
+      "-db_gencode",
+      "1"
+    ],
+    "formats": {
+      "6": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7"
+    },
+    "frozen": {},
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": null
+  },
+  {
+    "engine": "serial",
+    "threads": 1,
+    "program": "tblastn",
+    "cases": [
+      "code1",
+      "code1",
+      "code1"
+    ],
+    "argv": [
+      "tblastn",
+      "-task",
+      "tblastn",
+      "-query",
+      "docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code1.faa",
+      "-subject",
+      "docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code1.fna",
+      "-db_gencode",
+      "1"
+    ],
+    "formats": {
+      "0": "ed71ac24665162f4a54911284a2984261884bcff8938735372c962e09e3f4456",
+      "6": "9f755c8e22a2a3a872d66f2c5ce6f7724c2dc3a907b46545e3adf3b210ff4dad",
+      "7": "765977716b05efabd8106eb374f2018913b644230af012087ed39df8d45760a8"
+    },
+    "frozen": {},
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 1
+  },
+  {
+    "engine": "serial",
+    "threads": 1,
+    "program": "tblastn",
+    "cases": [
+      "code4",
+      "code4",
+      "code4"
+    ],
+    "argv": [
+      "tblastn",
+      "-task",
+      "tblastn",
+      "-query",
+      "docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code4.faa",
+      "-subject",
+      "docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code4.fna",
+      "-db_gencode",
+      "4"
+    ],
+    "formats": {
+      "0": "e185141ce97c76c4bee301886921f1290ae7d92acd616304d605c87da3297b13",
+      "6": "aed3c56a2b77c1f7f705d9f892f0b9e83d63c0979d427a1c9f33b9522c239437",
+      "7": "4071f57a874959fae24cfead2ccf3a34152e3f14076b9f5048ef0e57ad697f82"
+    },
+    "frozen": {},
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 1
+  },
+  {
+    "engine": "serial",
+    "threads": 1,
+    "program": "tblastn",
+    "cases": [
+      "code11",
+      "code11",
+      "code11"
+    ],
+    "argv": [
+      "tblastn",
+      "-task",
+      "tblastn",
+      "-query",
+      "docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code11.faa",
+      "-subject",
+      "docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code11.fna",
+      "-db_gencode",
+      "11"
+    ],
+    "formats": {
+      "0": "c02d75f4ff8a530e836dc9109d7bed1cb29b64fe6abddd482a423a6e13413b08",
+      "6": "32ffc5574db470e8b8f9484acaef2394de584707a6174a68c64905ffac0364e9",
+      "7": "b2c2d288f7fce2a0e24b62ee418bea7b8137bdfc443a12c5330b750b674f674e"
+    },
+    "frozen": {},
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 1
+  },
+  {
+    "engine": "serial",
+    "threads": 1,
+    "program": "tblastn",
+    "cases": [
+      "code32",
+      "code32",
+      "code32"
+    ],
+    "argv": [
+      "tblastn",
+      "-task",
+      "tblastn",
+      "-query",
+      "docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code32.faa",
+      "-subject",
+      "docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code32.fna",
+      "-db_gencode",
+      "32"
+    ],
+    "formats": {
+      "0": "8b15880915565fbcdf6bd1a70eeee71dcd9be86bd0b85044677cd1d340494350",
+      "6": "0835fffadec3753e875f250c31ca075083f67a9ad91373d71bd5c197913010cf",
+      "7": "7ea3ed9d6fdcfef9711518a447764aafb73ffe5737139a385c5a7aa05a8462d5"
+    },
+    "frozen": {},
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 1
+  },
+  {
+    "engine": "serial",
+    "threads": 1,
+    "program": "tblastn",
+    "cases": [
+      "valid_then_skipped"
+    ],
+    "argv": [
+      "tblastn",
+      "-query",
+      "docs/evidence/tlosan_stage_g/batch_boundary/valid_then_skipped.faa",
+      "-subject",
+      "docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code1.fna"
+    ],
+    "formats": {
+      "0": "ad828141a7b32604f49ee61673c12415d0634a8dc1e1dd6111b5eb6c13dcb0e2",
+      "6": "e9ec99487195877d4accc1191259f0a6999221b9a37107f4a2f9425e3d28c369",
+      "7": "172004d288fd77ed1b67656ea69375cce8a24d1cd90d61034e2cf9e5ceb0f1f6"
+    },
+    "frozen": {},
+    "diagnostics": "286e53e0045ab86920588c7c0116c7cb971c4f4e7f17852cd339851cbb108631",
+    "hits": 1
+  },
+  {
+    "engine": "serial",
+    "threads": 1,
+    "program": "tblastn",
+    "cases": [
+      "skipped_then_valid"
+    ],
+    "argv": [
+      "tblastn",
+      "-query",
+      "docs/evidence/tlosan_stage_g/batch_boundary/skipped_then_valid.faa",
+      "-subject",
+      "docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code1.fna"
+    ],
+    "formats": {
+      "0": "8fda0f00f534e4e97f9ebced6935a14fbad97b4c51227c55a9e9a7ac3a9d25ef",
+      "6": "e9ec99487195877d4accc1191259f0a6999221b9a37107f4a2f9425e3d28c369",
+      "7": "709b40116173dbc6c6ebb9f17ba7792f7d58f2850893998e325d533859410ec2"
+    },
+    "frozen": {},
+    "diagnostics": "3cad2839433b5f884c0683e72d26bf8835f182232eb19b2ebed8c3cf9438e219",
+    "hits": 1
+  },
+  {
+    "engine": "serial",
+    "threads": 1,
+    "program": "tblastx",
+    "cases": [
+      "tblastx-threaded-direct"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "docs/evidence/losat_web_e1c/run-20260928T203929Z/tblastx-threaded-direct/q.fna",
+      "-subject",
+      "docs/evidence/losat_web_e1c/run-20260928T203929Z/tblastx-threaded-direct/s.fna"
+    ],
+    "formats": {
+      "6": "f74526fe21df3ab46e8d659cba67ab8fc4a91f43c7394f5f4fe632723207217c"
+    },
+    "frozen": {},
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": null
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "blastp",
+    "cases": [
+      "pairwise_default_serial"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/SicyWSV.faa",
+      "-subject",
+      "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/PajaWSV.faa",
+      "-max_hsps",
+      "1"
+    ],
+    "formats": {
+      "0": "6ae2ee96ae7cb70bc8bc1e572f262f10e0e2621d0451f64926aeb5540780bd50",
+      "6": "fd4b010800e32ce6c823cb38b42a10b7845f3342edae892acccc8f554f9edf34",
+      "7": "1d34fb432780918b5ce870bf328e41e39a7dc91ee64c0cdb499e857a4a00ac04"
+    },
+    "frozen": {},
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 475
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "blastp",
+    "cases": [
+      "pairwise_default_serial"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/SicyWSV.faa",
+      "-subject",
+      "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/PajaWSV.faa",
+      "-max_hsps",
+      "1"
+    ],
+    "formats": {
+      "0": "6ae2ee96ae7cb70bc8bc1e572f262f10e0e2621d0451f64926aeb5540780bd50",
+      "6": "fd4b010800e32ce6c823cb38b42a10b7845f3342edae892acccc8f554f9edf34",
+      "7": "1d34fb432780918b5ce870bf328e41e39a7dc91ee64c0cdb499e857a4a00ac04"
+    },
+    "frozen": {},
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 475
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "blastp",
+    "cases": [
+      "pairwise_default_serial"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/SicyWSV.faa",
+      "-subject",
+      "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/PajaWSV.faa",
+      "-max_hsps",
+      "1"
+    ],
+    "formats": {
+      "0": "6ae2ee96ae7cb70bc8bc1e572f262f10e0e2621d0451f64926aeb5540780bd50",
+      "6": "fd4b010800e32ce6c823cb38b42a10b7845f3342edae892acccc8f554f9edf34",
+      "7": "1d34fb432780918b5ce870bf328e41e39a7dc91ee64c0cdb499e857a4a00ac04"
+    },
+    "frozen": {},
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 475
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "blastp",
+    "cases": [
+      "pairwise_limit1_serial"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/SicyWSV.faa",
+      "-subject",
+      "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/PajaWSV.faa",
+      "-max_hsps",
+      "1",
+      "-max_target_seqs",
+      "1"
+    ],
+    "formats": {
+      "0": "c8bc75445ab393510e3e698b673b51c1cf9bbe833102ea3fc4e93aef8fac0e45",
+      "6": "2825ce099d7858d7d23a811bff98f4c42fee96c9519003ee936f25855648d3af",
+      "7": "3ed278d1c6fcec4a0fc15a4489b34ac0a65718471353d6e36c27cc5cd7677813"
+    },
+    "frozen": {},
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 89
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "blastp",
+    "cases": [
+      "pairwise_limit1_serial"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/SicyWSV.faa",
+      "-subject",
+      "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/PajaWSV.faa",
+      "-max_hsps",
+      "1",
+      "-max_target_seqs",
+      "1"
+    ],
+    "formats": {
+      "0": "c8bc75445ab393510e3e698b673b51c1cf9bbe833102ea3fc4e93aef8fac0e45",
+      "6": "2825ce099d7858d7d23a811bff98f4c42fee96c9519003ee936f25855648d3af",
+      "7": "3ed278d1c6fcec4a0fc15a4489b34ac0a65718471353d6e36c27cc5cd7677813"
+    },
+    "frozen": {},
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 89
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "blastp",
+    "cases": [
+      "pairwise_limit1_serial"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/SicyWSV.faa",
+      "-subject",
+      "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/PajaWSV.faa",
+      "-max_hsps",
+      "1",
+      "-max_target_seqs",
+      "1"
+    ],
+    "formats": {
+      "0": "c8bc75445ab393510e3e698b673b51c1cf9bbe833102ea3fc4e93aef8fac0e45",
+      "6": "2825ce099d7858d7d23a811bff98f4c42fee96c9519003ee936f25855648d3af",
+      "7": "3ed278d1c6fcec4a0fc15a4489b34ac0a65718471353d6e36c27cc5cd7677813"
+    },
+    "frozen": {},
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 89
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "blastn",
+    "cases": [
+      "MjPMNV.MlPMNV.task_blastn"
+    ],
+    "argv": [
+      "blastn",
+      "-query",
+      "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/AP027202.fasta",
+      "-subject",
+      "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/LC738875.fasta",
+      "-task",
+      "blastn",
+      "-reward",
+      "2",
+      "-penalty=-3",
+      "-gapopen",
+      "5",
+      "-gapextend",
+      "2",
+      "-word_size",
+      "11",
+      "-evalue",
+      "10",
+      "-max_target_seqs",
+      "500",
+      "-dust",
+      "yes"
+    ],
+    "formats": {
+      "0": "e1612e9c1930d83463e8c12b8c7caaf8704405c57baba1f5a2e59c66bbc98d61",
+      "6": "9a30fc9c61c4eb33d79c638ce62a330884d1330f56e4ba4f49d54b6547228603",
+      "7": "499fef0d04287bf42f29c8299a3cf45b69491442b284df5c736b7ad517d7324d"
+    },
+    "frozen": {},
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 54402
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "blastn",
+    "cases": [
+      "MjPMNV.MlPMNV.task_blastn"
+    ],
+    "argv": [
+      "blastn",
+      "-query",
+      "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/AP027202.fasta",
+      "-subject",
+      "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/LC738875.fasta",
+      "-task",
+      "blastn",
+      "-reward",
+      "2",
+      "-penalty=-3",
+      "-gapopen",
+      "5",
+      "-gapextend",
+      "2",
+      "-word_size",
+      "11",
+      "-evalue",
+      "10",
+      "-max_target_seqs",
+      "500",
+      "-dust",
+      "yes"
+    ],
+    "formats": {
+      "0": "e1612e9c1930d83463e8c12b8c7caaf8704405c57baba1f5a2e59c66bbc98d61",
+      "6": "9a30fc9c61c4eb33d79c638ce62a330884d1330f56e4ba4f49d54b6547228603",
+      "7": "499fef0d04287bf42f29c8299a3cf45b69491442b284df5c736b7ad517d7324d"
+    },
+    "frozen": {},
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 54402
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "blastn",
+    "cases": [
+      "MjPMNV.MlPMNV.task_blastn"
+    ],
+    "argv": [
+      "blastn",
+      "-query",
+      "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/AP027202.fasta",
+      "-subject",
+      "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/LC738875.fasta",
+      "-task",
+      "blastn",
+      "-reward",
+      "2",
+      "-penalty=-3",
+      "-gapopen",
+      "5",
+      "-gapextend",
+      "2",
+      "-word_size",
+      "11",
+      "-evalue",
+      "10",
+      "-max_target_seqs",
+      "500",
+      "-dust",
+      "yes"
+    ],
+    "formats": {
+      "0": "e1612e9c1930d83463e8c12b8c7caaf8704405c57baba1f5a2e59c66bbc98d61",
+      "6": "9a30fc9c61c4eb33d79c638ce62a330884d1330f56e4ba4f49d54b6547228603",
+      "7": "499fef0d04287bf42f29c8299a3cf45b69491442b284df5c736b7ad517d7324d"
+    },
+    "frozen": {},
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 54402
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "blastn",
+    "cases": [
+      "compact.multi_query.outfmt6",
+      "compact.multi_query.outfmt7"
+    ],
+    "argv": [
+      "blastn",
+      "-query",
+      "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/blastn_parity_compact.fasta",
+      "-subject",
+      "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/blastn_parity_compact.fasta",
+      "-task",
+      "blastn",
+      "-reward",
+      "2",
+      "-penalty=-3",
+      "-gapopen",
+      "5",
+      "-gapextend",
+      "2",
+      "-word_size",
+      "11",
+      "-evalue",
+      "10",
+      "-max_target_seqs",
+      "500",
+      "-dust",
+      "yes"
+    ],
+    "formats": {
+      "0": "e2ccc311174462b31876945569e7144116923127fbe2c74047f7142afd8e0fdc",
+      "6": "ac4a20b64c8da3eaea725ed09dc89880294f58e971b7207c943489faacdbe03e",
+      "7": "054c105f1ac10d41e3812324c6465a8275d1bf029f9104ce238da8b13cbae799"
+    },
+    "frozen": {},
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 2
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "blastn",
+    "cases": [
+      "compact.multi_query.outfmt6",
+      "compact.multi_query.outfmt7"
+    ],
+    "argv": [
+      "blastn",
+      "-query",
+      "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/blastn_parity_compact.fasta",
+      "-subject",
+      "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/blastn_parity_compact.fasta",
+      "-task",
+      "blastn",
+      "-reward",
+      "2",
+      "-penalty=-3",
+      "-gapopen",
+      "5",
+      "-gapextend",
+      "2",
+      "-word_size",
+      "11",
+      "-evalue",
+      "10",
+      "-max_target_seqs",
+      "500",
+      "-dust",
+      "yes"
+    ],
+    "formats": {
+      "0": "e2ccc311174462b31876945569e7144116923127fbe2c74047f7142afd8e0fdc",
+      "6": "ac4a20b64c8da3eaea725ed09dc89880294f58e971b7207c943489faacdbe03e",
+      "7": "054c105f1ac10d41e3812324c6465a8275d1bf029f9104ce238da8b13cbae799"
+    },
+    "frozen": {},
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 2
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "blastn",
+    "cases": [
+      "compact.multi_query.outfmt6",
+      "compact.multi_query.outfmt7"
+    ],
+    "argv": [
+      "blastn",
+      "-query",
+      "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/blastn_parity_compact.fasta",
+      "-subject",
+      "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/blastn_parity_compact.fasta",
+      "-task",
+      "blastn",
+      "-reward",
+      "2",
+      "-penalty=-3",
+      "-gapopen",
+      "5",
+      "-gapextend",
+      "2",
+      "-word_size",
+      "11",
+      "-evalue",
+      "10",
+      "-max_target_seqs",
+      "500",
+      "-dust",
+      "yes"
+    ],
+    "formats": {
+      "0": "e2ccc311174462b31876945569e7144116923127fbe2c74047f7142afd8e0fdc",
+      "6": "ac4a20b64c8da3eaea725ed09dc89880294f58e971b7207c943489faacdbe03e",
+      "7": "054c105f1ac10d41e3812324c6465a8275d1bf029f9104ce238da8b13cbae799"
+    },
+    "frozen": {},
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 2
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "blastn",
+    "cases": [
+      "compact.multi_query.no_hit.outfmt7"
+    ],
+    "argv": [
+      "blastn",
+      "-query",
+      "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/blastn_parity_compact.fasta",
+      "-subject",
+      "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/blastn_parity_compact.fasta",
+      "-task",
+      "blastn",
+      "-reward",
+      "2",
+      "-penalty=-3",
+      "-gapopen",
+      "5",
+      "-gapextend",
+      "2",
+      "-word_size",
+      "11",
+      "-evalue",
+      "1e-100",
+      "-max_target_seqs",
+      "500",
+      "-dust",
+      "yes"
+    ],
+    "formats": {
+      "0": "dbc12a3a29a42161c70da091cbb0a63870e07d48ebccf7a7e4b3fe9488703eb6",
+      "6": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "7": "0661134a118de20b96c4e7901e377d84b871fd2316af8936f412cc23d85b35fb"
+    },
+    "frozen": {},
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 0
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "blastn",
+    "cases": [
+      "compact.multi_query.no_hit.outfmt7"
+    ],
+    "argv": [
+      "blastn",
+      "-query",
+      "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/blastn_parity_compact.fasta",
+      "-subject",
+      "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/blastn_parity_compact.fasta",
+      "-task",
+      "blastn",
+      "-reward",
+      "2",
+      "-penalty=-3",
+      "-gapopen",
+      "5",
+      "-gapextend",
+      "2",
+      "-word_size",
+      "11",
+      "-evalue",
+      "1e-100",
+      "-max_target_seqs",
+      "500",
+      "-dust",
+      "yes"
+    ],
+    "formats": {
+      "0": "dbc12a3a29a42161c70da091cbb0a63870e07d48ebccf7a7e4b3fe9488703eb6",
+      "6": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "7": "0661134a118de20b96c4e7901e377d84b871fd2316af8936f412cc23d85b35fb"
+    },
+    "frozen": {},
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 0
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "blastn",
+    "cases": [
+      "compact.multi_query.no_hit.outfmt7"
+    ],
+    "argv": [
+      "blastn",
+      "-query",
+      "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/blastn_parity_compact.fasta",
+      "-subject",
+      "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/blastn_parity_compact.fasta",
+      "-task",
+      "blastn",
+      "-reward",
+      "2",
+      "-penalty=-3",
+      "-gapopen",
+      "5",
+      "-gapextend",
+      "2",
+      "-word_size",
+      "11",
+      "-evalue",
+      "1e-100",
+      "-max_target_seqs",
+      "500",
+      "-dust",
+      "yes"
+    ],
+    "formats": {
+      "0": "dbc12a3a29a42161c70da091cbb0a63870e07d48ebccf7a7e4b3fe9488703eb6",
+      "6": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "7": "0661134a118de20b96c4e7901e377d84b871fd2316af8936f412cc23d85b35fb"
+    },
+    "frozen": {},
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 0
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "tblastx",
+    "cases": [
+      "p02_mje_mela"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/MjeNMV.fasta",
+      "-subject",
+      "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/MelaMJNV.fasta",
+      "-query_gencode",
+      "1",
+      "-db_gencode",
+      "1"
+    ],
+    "formats": {
+      "6": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7"
+    },
+    "frozen": {},
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": null
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "tblastx",
+    "cases": [
+      "p02_mje_mela"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/MjeNMV.fasta",
+      "-subject",
+      "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/MelaMJNV.fasta",
+      "-query_gencode",
+      "1",
+      "-db_gencode",
+      "1"
+    ],
+    "formats": {
+      "6": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7"
+    },
+    "frozen": {},
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": null
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "tblastx",
+    "cases": [
+      "p02_mje_mela"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/MjeNMV.fasta",
+      "-subject",
+      "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/MelaMJNV.fasta",
+      "-query_gencode",
+      "1",
+      "-db_gencode",
+      "1"
+    ],
+    "formats": {
+      "6": "b309f77fee038f0559d870737ebeba732c11eba4f7e495f045acbfb831817fd7"
+    },
+    "frozen": {},
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": null
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "tblastn",
+    "cases": [
+      "code1",
+      "code1",
+      "code1"
+    ],
+    "argv": [
+      "tblastn",
+      "-task",
+      "tblastn",
+      "-query",
+      "docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code1.faa",
+      "-subject",
+      "docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code1.fna",
+      "-db_gencode",
+      "1"
+    ],
+    "formats": {
+      "0": "ed71ac24665162f4a54911284a2984261884bcff8938735372c962e09e3f4456",
+      "6": "9f755c8e22a2a3a872d66f2c5ce6f7724c2dc3a907b46545e3adf3b210ff4dad",
+      "7": "765977716b05efabd8106eb374f2018913b644230af012087ed39df8d45760a8"
+    },
+    "frozen": {},
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 1
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "tblastn",
+    "cases": [
+      "code1",
+      "code1",
+      "code1"
+    ],
+    "argv": [
+      "tblastn",
+      "-task",
+      "tblastn",
+      "-query",
+      "docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code1.faa",
+      "-subject",
+      "docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code1.fna",
+      "-db_gencode",
+      "1"
+    ],
+    "formats": {
+      "0": "ed71ac24665162f4a54911284a2984261884bcff8938735372c962e09e3f4456",
+      "6": "9f755c8e22a2a3a872d66f2c5ce6f7724c2dc3a907b46545e3adf3b210ff4dad",
+      "7": "765977716b05efabd8106eb374f2018913b644230af012087ed39df8d45760a8"
+    },
+    "frozen": {},
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 1
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "tblastn",
+    "cases": [
+      "code1",
+      "code1",
+      "code1"
+    ],
+    "argv": [
+      "tblastn",
+      "-task",
+      "tblastn",
+      "-query",
+      "docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code1.faa",
+      "-subject",
+      "docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code1.fna",
+      "-db_gencode",
+      "1"
+    ],
+    "formats": {
+      "0": "ed71ac24665162f4a54911284a2984261884bcff8938735372c962e09e3f4456",
+      "6": "9f755c8e22a2a3a872d66f2c5ce6f7724c2dc3a907b46545e3adf3b210ff4dad",
+      "7": "765977716b05efabd8106eb374f2018913b644230af012087ed39df8d45760a8"
+    },
+    "frozen": {},
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 1
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "tblastn",
+    "cases": [
+      "code4",
+      "code4",
+      "code4"
+    ],
+    "argv": [
+      "tblastn",
+      "-task",
+      "tblastn",
+      "-query",
+      "docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code4.faa",
+      "-subject",
+      "docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code4.fna",
+      "-db_gencode",
+      "4"
+    ],
+    "formats": {
+      "0": "e185141ce97c76c4bee301886921f1290ae7d92acd616304d605c87da3297b13",
+      "6": "aed3c56a2b77c1f7f705d9f892f0b9e83d63c0979d427a1c9f33b9522c239437",
+      "7": "4071f57a874959fae24cfead2ccf3a34152e3f14076b9f5048ef0e57ad697f82"
+    },
+    "frozen": {},
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 1
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "tblastn",
+    "cases": [
+      "code4",
+      "code4",
+      "code4"
+    ],
+    "argv": [
+      "tblastn",
+      "-task",
+      "tblastn",
+      "-query",
+      "docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code4.faa",
+      "-subject",
+      "docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code4.fna",
+      "-db_gencode",
+      "4"
+    ],
+    "formats": {
+      "0": "e185141ce97c76c4bee301886921f1290ae7d92acd616304d605c87da3297b13",
+      "6": "aed3c56a2b77c1f7f705d9f892f0b9e83d63c0979d427a1c9f33b9522c239437",
+      "7": "4071f57a874959fae24cfead2ccf3a34152e3f14076b9f5048ef0e57ad697f82"
+    },
+    "frozen": {},
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 1
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "tblastn",
+    "cases": [
+      "code4",
+      "code4",
+      "code4"
+    ],
+    "argv": [
+      "tblastn",
+      "-task",
+      "tblastn",
+      "-query",
+      "docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code4.faa",
+      "-subject",
+      "docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code4.fna",
+      "-db_gencode",
+      "4"
+    ],
+    "formats": {
+      "0": "e185141ce97c76c4bee301886921f1290ae7d92acd616304d605c87da3297b13",
+      "6": "aed3c56a2b77c1f7f705d9f892f0b9e83d63c0979d427a1c9f33b9522c239437",
+      "7": "4071f57a874959fae24cfead2ccf3a34152e3f14076b9f5048ef0e57ad697f82"
+    },
+    "frozen": {},
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 1
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "tblastn",
+    "cases": [
+      "code11",
+      "code11",
+      "code11"
+    ],
+    "argv": [
+      "tblastn",
+      "-task",
+      "tblastn",
+      "-query",
+      "docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code11.faa",
+      "-subject",
+      "docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code11.fna",
+      "-db_gencode",
+      "11"
+    ],
+    "formats": {
+      "0": "c02d75f4ff8a530e836dc9109d7bed1cb29b64fe6abddd482a423a6e13413b08",
+      "6": "32ffc5574db470e8b8f9484acaef2394de584707a6174a68c64905ffac0364e9",
+      "7": "b2c2d288f7fce2a0e24b62ee418bea7b8137bdfc443a12c5330b750b674f674e"
+    },
+    "frozen": {},
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 1
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "tblastn",
+    "cases": [
+      "code11",
+      "code11",
+      "code11"
+    ],
+    "argv": [
+      "tblastn",
+      "-task",
+      "tblastn",
+      "-query",
+      "docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code11.faa",
+      "-subject",
+      "docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code11.fna",
+      "-db_gencode",
+      "11"
+    ],
+    "formats": {
+      "0": "c02d75f4ff8a530e836dc9109d7bed1cb29b64fe6abddd482a423a6e13413b08",
+      "6": "32ffc5574db470e8b8f9484acaef2394de584707a6174a68c64905ffac0364e9",
+      "7": "b2c2d288f7fce2a0e24b62ee418bea7b8137bdfc443a12c5330b750b674f674e"
+    },
+    "frozen": {},
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 1
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "tblastn",
+    "cases": [
+      "code11",
+      "code11",
+      "code11"
+    ],
+    "argv": [
+      "tblastn",
+      "-task",
+      "tblastn",
+      "-query",
+      "docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code11.faa",
+      "-subject",
+      "docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code11.fna",
+      "-db_gencode",
+      "11"
+    ],
+    "formats": {
+      "0": "c02d75f4ff8a530e836dc9109d7bed1cb29b64fe6abddd482a423a6e13413b08",
+      "6": "32ffc5574db470e8b8f9484acaef2394de584707a6174a68c64905ffac0364e9",
+      "7": "b2c2d288f7fce2a0e24b62ee418bea7b8137bdfc443a12c5330b750b674f674e"
+    },
+    "frozen": {},
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 1
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "tblastn",
+    "cases": [
+      "code32",
+      "code32",
+      "code32"
+    ],
+    "argv": [
+      "tblastn",
+      "-task",
+      "tblastn",
+      "-query",
+      "docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code32.faa",
+      "-subject",
+      "docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code32.fna",
+      "-db_gencode",
+      "32"
+    ],
+    "formats": {
+      "0": "8b15880915565fbcdf6bd1a70eeee71dcd9be86bd0b85044677cd1d340494350",
+      "6": "0835fffadec3753e875f250c31ca075083f67a9ad91373d71bd5c197913010cf",
+      "7": "7ea3ed9d6fdcfef9711518a447764aafb73ffe5737139a385c5a7aa05a8462d5"
+    },
+    "frozen": {},
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 1
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "tblastn",
+    "cases": [
+      "code32",
+      "code32",
+      "code32"
+    ],
+    "argv": [
+      "tblastn",
+      "-task",
+      "tblastn",
+      "-query",
+      "docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code32.faa",
+      "-subject",
+      "docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code32.fna",
+      "-db_gencode",
+      "32"
+    ],
+    "formats": {
+      "0": "8b15880915565fbcdf6bd1a70eeee71dcd9be86bd0b85044677cd1d340494350",
+      "6": "0835fffadec3753e875f250c31ca075083f67a9ad91373d71bd5c197913010cf",
+      "7": "7ea3ed9d6fdcfef9711518a447764aafb73ffe5737139a385c5a7aa05a8462d5"
+    },
+    "frozen": {},
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 1
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "tblastn",
+    "cases": [
+      "code32",
+      "code32",
+      "code32"
+    ],
+    "argv": [
+      "tblastn",
+      "-task",
+      "tblastn",
+      "-query",
+      "docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code32.faa",
+      "-subject",
+      "docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code32.fna",
+      "-db_gencode",
+      "32"
+    ],
+    "formats": {
+      "0": "8b15880915565fbcdf6bd1a70eeee71dcd9be86bd0b85044677cd1d340494350",
+      "6": "0835fffadec3753e875f250c31ca075083f67a9ad91373d71bd5c197913010cf",
+      "7": "7ea3ed9d6fdcfef9711518a447764aafb73ffe5737139a385c5a7aa05a8462d5"
+    },
+    "frozen": {},
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 1
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "tblastn",
+    "cases": [
+      "valid_then_skipped"
+    ],
+    "argv": [
+      "tblastn",
+      "-query",
+      "docs/evidence/tlosan_stage_g/batch_boundary/valid_then_skipped.faa",
+      "-subject",
+      "docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code1.fna"
+    ],
+    "formats": {
+      "0": "ad828141a7b32604f49ee61673c12415d0634a8dc1e1dd6111b5eb6c13dcb0e2",
+      "6": "e9ec99487195877d4accc1191259f0a6999221b9a37107f4a2f9425e3d28c369",
+      "7": "172004d288fd77ed1b67656ea69375cce8a24d1cd90d61034e2cf9e5ceb0f1f6"
+    },
+    "frozen": {},
+    "diagnostics": "286e53e0045ab86920588c7c0116c7cb971c4f4e7f17852cd339851cbb108631",
+    "hits": 1
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "tblastn",
+    "cases": [
+      "valid_then_skipped"
+    ],
+    "argv": [
+      "tblastn",
+      "-query",
+      "docs/evidence/tlosan_stage_g/batch_boundary/valid_then_skipped.faa",
+      "-subject",
+      "docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code1.fna"
+    ],
+    "formats": {
+      "0": "ad828141a7b32604f49ee61673c12415d0634a8dc1e1dd6111b5eb6c13dcb0e2",
+      "6": "e9ec99487195877d4accc1191259f0a6999221b9a37107f4a2f9425e3d28c369",
+      "7": "172004d288fd77ed1b67656ea69375cce8a24d1cd90d61034e2cf9e5ceb0f1f6"
+    },
+    "frozen": {},
+    "diagnostics": "286e53e0045ab86920588c7c0116c7cb971c4f4e7f17852cd339851cbb108631",
+    "hits": 1
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "tblastn",
+    "cases": [
+      "valid_then_skipped"
+    ],
+    "argv": [
+      "tblastn",
+      "-query",
+      "docs/evidence/tlosan_stage_g/batch_boundary/valid_then_skipped.faa",
+      "-subject",
+      "docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code1.fna"
+    ],
+    "formats": {
+      "0": "ad828141a7b32604f49ee61673c12415d0634a8dc1e1dd6111b5eb6c13dcb0e2",
+      "6": "e9ec99487195877d4accc1191259f0a6999221b9a37107f4a2f9425e3d28c369",
+      "7": "172004d288fd77ed1b67656ea69375cce8a24d1cd90d61034e2cf9e5ceb0f1f6"
+    },
+    "frozen": {},
+    "diagnostics": "286e53e0045ab86920588c7c0116c7cb971c4f4e7f17852cd339851cbb108631",
+    "hits": 1
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "tblastn",
+    "cases": [
+      "skipped_then_valid"
+    ],
+    "argv": [
+      "tblastn",
+      "-query",
+      "docs/evidence/tlosan_stage_g/batch_boundary/skipped_then_valid.faa",
+      "-subject",
+      "docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code1.fna"
+    ],
+    "formats": {
+      "0": "8fda0f00f534e4e97f9ebced6935a14fbad97b4c51227c55a9e9a7ac3a9d25ef",
+      "6": "e9ec99487195877d4accc1191259f0a6999221b9a37107f4a2f9425e3d28c369",
+      "7": "709b40116173dbc6c6ebb9f17ba7792f7d58f2850893998e325d533859410ec2"
+    },
+    "frozen": {},
+    "diagnostics": "3cad2839433b5f884c0683e72d26bf8835f182232eb19b2ebed8c3cf9438e219",
+    "hits": 1
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "tblastn",
+    "cases": [
+      "skipped_then_valid"
+    ],
+    "argv": [
+      "tblastn",
+      "-query",
+      "docs/evidence/tlosan_stage_g/batch_boundary/skipped_then_valid.faa",
+      "-subject",
+      "docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code1.fna"
+    ],
+    "formats": {
+      "0": "8fda0f00f534e4e97f9ebced6935a14fbad97b4c51227c55a9e9a7ac3a9d25ef",
+      "6": "e9ec99487195877d4accc1191259f0a6999221b9a37107f4a2f9425e3d28c369",
+      "7": "709b40116173dbc6c6ebb9f17ba7792f7d58f2850893998e325d533859410ec2"
+    },
+    "frozen": {},
+    "diagnostics": "3cad2839433b5f884c0683e72d26bf8835f182232eb19b2ebed8c3cf9438e219",
+    "hits": 1
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "tblastn",
+    "cases": [
+      "skipped_then_valid"
+    ],
+    "argv": [
+      "tblastn",
+      "-query",
+      "docs/evidence/tlosan_stage_g/batch_boundary/skipped_then_valid.faa",
+      "-subject",
+      "docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code1.fna"
+    ],
+    "formats": {
+      "0": "8fda0f00f534e4e97f9ebced6935a14fbad97b4c51227c55a9e9a7ac3a9d25ef",
+      "6": "e9ec99487195877d4accc1191259f0a6999221b9a37107f4a2f9425e3d28c369",
+      "7": "709b40116173dbc6c6ebb9f17ba7792f7d58f2850893998e325d533859410ec2"
+    },
+    "frozen": {},
+    "diagnostics": "3cad2839433b5f884c0683e72d26bf8835f182232eb19b2ebed8c3cf9438e219",
+    "hits": 1
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "tblastx",
+    "cases": [
+      "tblastx-threaded-direct"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "docs/evidence/losat_web_e1c/run-20260928T203929Z/tblastx-threaded-direct/q.fna",
+      "-subject",
+      "docs/evidence/losat_web_e1c/run-20260928T203929Z/tblastx-threaded-direct/s.fna"
+    ],
+    "formats": {
+      "6": "f74526fe21df3ab46e8d659cba67ab8fc4a91f43c7394f5f4fe632723207217c"
+    },
+    "frozen": {},
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": null
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "tblastx",
+    "cases": [
+      "tblastx-threaded-direct"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "docs/evidence/losat_web_e1c/run-20260928T203929Z/tblastx-threaded-direct/q.fna",
+      "-subject",
+      "docs/evidence/losat_web_e1c/run-20260928T203929Z/tblastx-threaded-direct/s.fna"
+    ],
+    "formats": {
+      "6": "f74526fe21df3ab46e8d659cba67ab8fc4a91f43c7394f5f4fe632723207217c"
+    },
+    "frozen": {},
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": null
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "tblastx",
+    "cases": [
+      "tblastx-threaded-direct"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "docs/evidence/losat_web_e1c/run-20260928T203929Z/tblastx-threaded-direct/q.fna",
+      "-subject",
+      "docs/evidence/losat_web_e1c/run-20260928T203929Z/tblastx-threaded-direct/s.fna"
+    ],
+    "formats": {
+      "6": "f74526fe21df3ab46e8d659cba67ab8fc4a91f43c7394f5f4fe632723207217c"
+    },
+    "frozen": {},
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": null
+  }
+]

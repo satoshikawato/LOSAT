@@ -1,0 +1,2 @@
+DIFF	/home/kawato/.cache/losat-web-gui-target/s07pp-bt/batches_q7_75.fa	/home/kawato/.cache/losat-web-gui-target/s07pp-bt/batches_s7_75.fa	ncbi_lines=123	losat_lines=124
+# options='-task blastn' seed=7 cases=150 differing=1

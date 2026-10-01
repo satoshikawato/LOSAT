@@ -92,6 +92,11 @@ _CASES = [
     ("pal.default", f"-query {I}/pal_query.fa -subject {I}/pal_subject.fa -outfmt 6", ""),
     ("pal.task_blastn", f"-query {I}/pal_query.fa -subject {I}/pal_subject.fa -task blastn -outfmt 6", ""),
     ("pal.word7_fmt0", f"-query {I}/pal_query.fa -subject {I}/pal_subject.fa -task blastn -word_size 7 -outfmt 0", ""),
+    # E2g T6: diagonal array for a block of several queries of at most 8000.
+    ("sq.default", f"-query {I}/sq_query.fa -subject {I}/sq_subject.fa -outfmt 6", ""),
+    ("sq.task_blastn", f"-query {I}/sq_query.fa -subject {I}/sq_subject.fa -task blastn -outfmt 6", ""),
+    ("sq.word7", f"-query {I}/sq_query.fa -subject {I}/sq_subject.fa -task blastn -word_size 7 -evalue 100 -outfmt 6", ""),
+    ("sq.word16_fmt7", f"-query {I}/sq_query.fa -subject {I}/sq_subject.fa -word_size 16 -outfmt 7", ""),
     # E2g T11: showdefline.cpp kBits is "(bits)" when CTOOLKIT_COMPATIBLE is set (also empty).
     ("ctoolkit.fmt0", f"{P} -max_target_seqs 3 -outfmt 0", "", "CTOOLKIT_COMPATIBLE=1"),
     ("ctoolkit.empty_fmt0", f"{T} -task blastn -max_target_seqs 5 -outfmt 0", "", "CTOOLKIT_COMPATIBLE="),
@@ -182,6 +187,21 @@ def generate_e2g_inputs(edl: str, sakai: str) -> None:
         subject.append(mutate(rng, x, rng.choice((0.0, 0.02))))
     write_fasta(INPUTS / "pal_query.fa", records)
     write_fasta(INPUTS / "pal_subject.fa", [("pals EDL933 windows", "".join(subject))])
+    # T6: several short queries whose block (both strands) is at most 8000, so NCBI
+    # uses the diagonal array (blast_parameters.c:225-231); the subject repeats them.
+    region = sakai[3_000_000:3_040_000]
+    records, subject = [], []
+    for index in range(12):
+        length = rng.randint(100, 300)
+        start = rng.randrange(0, len(region) - length)
+        window = region[start:start + length]
+        records.append((f"sq{index:02d} Sakai {3_000_001 + start} len{length}", mutate(rng, window, 0.02)))
+        for _ in range(rng.randint(1, 3)):
+            subject.append("".join(rng.choice("ACGT") for _ in range(rng.randint(30, 400))))
+            copy = mutate(rng, window, rng.choice((0.0, 0.03, 0.08)), 0.01)
+            subject.append(revcomp(copy) if rng.random() < 0.4 else copy)
+    write_fasta(INPUTS / "sq_query.fa", records)
+    write_fasta(INPUTS / "sq_subject.fa", [("sqs Sakai windows repeated", "".join(subject))])
 
 
 def prepare_runtime_inputs() -> None:

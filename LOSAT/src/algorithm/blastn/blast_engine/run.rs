@@ -7247,12 +7247,16 @@ fn search_query_batch(
             // diag_table->diag_mask = diag_array_length-1;
             // diag_table->offset = window_size;
             // ```
-            const MAX_ARRAY_DIAG_SIZE: usize = 12_000_000;
-            let (diag_array_length_single, diag_mask_single) = if queries.len() == 1 {
-                (diag_array_length, diag_mask as isize)
-            } else {
-                (0usize, 0isize)
-            };
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1002-1003
+            // ```c
+            // if ((status = BlastExtendWordNew(query->length, word_params,
+            //                                 &aux_struct->ewp)) != 0)
+            // ```
+            // One diagonal table for the whole query block (every query and both
+            // strands): `query->length` is the last context's offset plus its
+            // length, `query_concat_length` here, and the diagonals use offsets in
+            // the concatenated query.
+            let (diag_table_length, diag_table_mask) = (diag_array_length, diag_mask as isize);
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:166-233
             // ```c
             // const int kQueryLenForHashTable = 8000; /* For blastn, use hash table rather
@@ -7267,9 +7271,7 @@ fn search_query_batch(
             //     p->container_type = eDiagArray;
             // ```
             let use_diag_hash = query_concat_length > 8000;
-            let use_array_indexing = !use_diag_hash
-                && queries.len() == 1
-                && diag_array_length_single <= MAX_ARRAY_DIAG_SIZE;
+            let use_array_indexing = !use_diag_hash;
             let diag_window = TWO_HIT_WINDOW as i32;
 
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:786-833
@@ -7303,7 +7305,7 @@ fn search_query_batch(
                     subject_scratch.diag_hash.offset as isize
                 };
                 let diag_array_size = if use_array_indexing {
-                    diag_array_length_single
+                    diag_table_length
                 } else {
                     0
                 };
@@ -7432,7 +7434,7 @@ fn search_query_batch(
                     // real_diag = diag & diag_table->diag_mask;
                     // ```
                     let (diag_array_length, diag_mask) = if use_array_indexing {
-                        (diag_array_length_single as isize, diag_mask_single)
+                        (diag_table_length as isize, diag_table_mask)
                     } else {
                         (0isize, 0isize)
                     };
@@ -8945,7 +8947,7 @@ fn search_query_batch(
                                 // real_diag = diag & diag_table->diag_mask;
                                 // ```
                                 let (diag_array_length, diag_mask) = if use_array_indexing {
-                                    (diag_array_length_single as isize, diag_mask_single)
+                                    (diag_table_length as isize, diag_table_mask)
                                 } else {
                                     (0isize, 0isize)
                                 };

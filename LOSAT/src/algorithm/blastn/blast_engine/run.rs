@@ -10551,20 +10551,23 @@ fn search_query_batch(
         if !prelim_hits.is_empty() {
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:358-365
             // ```c
-            // /* Make sure the HSPs in the HSP list are sorted by score, as they should be. */
+            // /* Make sure the HSPs in the HSP list are sorted by score, as they
+            //    should be. */
+            // #ifdef _DEBUG
+            // {
+            //     Blast_HSPListSortByScore(hsp_list);
+            // }
+            // #endif
             // ASSERT(Blast_HSPListIsSortedByScore(hsp_list));
             // ```
+            // The oracle is a release build: the HSPs are traced in the order of the
+            // stored list (`kept`, each query's list for this subject in turn). That
+            // is score order for a list kept as it came (sorted per subject chunk,
+            // blast_engine.c:555, and merged by score), and e-value order for a list
+            // that `Blast_HitListUpdate` sorted when the hit list became a heap
+            // (blast_hits.c:3272-3284).
             if let Some(timing) = timing_ref {
                 BlastnTiming::record_count(&timing.traceback_prelim_hsps, prelim_hits.len() as u64);
-            }
-            let sort_prelim_start = if timing_enabled {
-                Some(std::time::Instant::now())
-            } else {
-                None
-            };
-            sort_prelim_hits_by_score(prelim_hits);
-            if let (Some(timing), Some(sort_prelim_start)) = (timing_ref, sort_prelim_start) {
-                BlastnTiming::record_duration(&timing.traceback_sort_prelim_ns, sort_prelim_start);
             }
 
             interval_tree.reset();

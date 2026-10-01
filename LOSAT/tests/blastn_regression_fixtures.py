@@ -104,6 +104,12 @@ _CASES = [
     ("rep.word16", f"-query {I}/rep_query.fa -subject {I}/rep_subject.fa -word_size 16 -outfmt 6", ""),
     ("rep2.task_blastn", f"-query {I}/rep2_query.fa -subject {I}/rep_subject.fa -task blastn -outfmt 6", ""),
     ("rep2.fmt0", f"-query {I}/rep2_query.fa -subject {I}/rep_subject.fa -task blastn -word_size 10 -outfmt 0", ""),
+    # E2g T4: heapified preliminary hit lists (600 subjects) traced in their stored order,
+    # with gap costs beyond the tables (gapped Karlin block copied from the ungapped one).
+    ("prelim.gaps10_1_2", f"{P} -task blastn -reward 1 -penalty -2 -gapopen 10 -gapextend 10 -outfmt 6", ""),
+    ("prelim.gaps10_2_3_max3", f"{P} -task blastn -reward 2 -penalty -3 -gapopen 10 -gapextend 10"
+                               " -max_target_seqs 3 -outfmt 6", ""),
+    ("ties.gaps10_1_1", f"{T} -task blastn -reward 1 -penalty -1 -gapopen 10 -gapextend 10 -outfmt 6", ""),
     # E2g T11: showdefline.cpp kBits is "(bits)" when CTOOLKIT_COMPATIBLE is set (also empty).
     ("ctoolkit.fmt0", f"{P} -max_target_seqs 3 -outfmt 0", "", "CTOOLKIT_COMPATIBLE=1"),
     ("ctoolkit.empty_fmt0", f"{T} -task blastn -max_target_seqs 5 -outfmt 0", "", "CTOOLKIT_COMPATIBLE="),

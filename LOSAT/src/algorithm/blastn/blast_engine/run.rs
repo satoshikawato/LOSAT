@@ -5215,6 +5215,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
         }
         .into());
     };
+    check_utf8_file_name(subject_path, "subject")?;
     let mut subject_file = open_blastn_input(subject_path, "subject")?;
     let subject_bytes = read_blastn_fasta_bytes(&mut subject_file, subject_path, "subject")?;
     drop(subject_file);
@@ -5250,9 +5251,13 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     // ```
     // The output file is created here, before the options are checked, so a run that
     // stops at a check leaves an empty file; `-` is standard output.
+    check_utf8_file_name(&args.query, "query")?;
     let mut query_file = open_blastn_input(&args.query, "query")?;
     // The output file is opened once, as NCBI's stream (a named pipe gives one reader one
     // end of file).
+    if let Some(path) = args.out.as_deref() {
+        check_utf8_file_name(path, "out")?;
+    }
     let mut out_file = match args.out.as_deref().filter(|path| path.as_os_str() != "-") {
         Some(path) => Some(std::io::BufWriter::new(
             std::fs::File::create(path).map_err(|_| crate::cli::inaccessible("out", path))?,
@@ -5542,6 +5547,34 @@ fn search(
             batching,
         )
     })
+}
+
+/// Rejects a file name that is not UTF-8, where NCBI opens the file (the subjects, then the
+/// queries, then the output: `CBlastDatabaseArgs` comes before `CStdCmdLineArgs`).
+///
+/// NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.cpp:903-911
+/// ```c
+/// GetSubjectFile(const CArgs& args)
+/// {
+/// 	string filename="";
+///
+/// 	if (args.Exist(kArgSubject) && args[kArgSubject].HasValue())
+/// 		filename = args[kArgSubject].AsString();
+///
+/// 	return filename;
+/// }
+/// ```
+/// NCBI takes a file name as bytes: it writes the `-subject` name into the outfmt 0 and 7
+/// reports (`Database: User specified sequence set (Input: ...)`) and every name into its
+/// error messages as they are, which LOSAT's UTF-8 strings do not reproduce (plan DW-13).
+fn check_utf8_file_name(path: &std::path::Path, role: &str) -> Result<()> {
+    if path.to_str().is_none() {
+        anyhow::bail!(
+            "the -{role} file name {:?} is not UTF-8; NCBI BLAST+ writes the bytes of file names as they are, which is not supported by LOSAT's BLASTN",
+            path.to_string_lossy()
+        );
+    }
+    Ok(())
 }
 
 /// Rejects the environment variables that put NCBI BLAST+ into a search mode or report that

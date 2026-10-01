@@ -88,6 +88,10 @@ _CASES = [
                      " -task blastn -lcase_masking -outfmt 6", ""),
     ("lcase.megablast", f"-query {I}/lcase_island_megablast_query.fa -subject {I}/lcase_island_megablast_subject.fa"
                         " -lcase_masking -outfmt 6", ""),
+    # E2g T2: a gapped start left of the HSP start (negative Int4 offset in
+    # BlastGetStartForGappedAlignmentNucl). t2_query.fa/t2_subject.fa are case plain208 of
+    # the E2g overflow hunt (docs/evidence/losat_web_e2g/overflow_hunt/), not made by `generate`.
+    ("t2.word4", f"-query {I}/t2_query.fa -subject {I}/t2_subject.fa -task blastn -word_size 4 -evalue 1e5 -outfmt 6", ""),
     # E2g T1: init hits of the two strands tied on score, subject start and length.
     ("pal.default", f"-query {I}/pal_query.fa -subject {I}/pal_subject.fa -outfmt 6", ""),
     ("pal.task_blastn", f"-query {I}/pal_query.fa -subject {I}/pal_subject.fa -task blastn -outfmt 6", ""),

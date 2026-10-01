@@ -1,0 +1,311 @@
+name	cat	result	ncbi_rc	losat_rc	ncbi_bytes	uncapped_hit_subjects	output_subjects	prefix_binary_matches_ncbi	argv
+A_classes_560_blastn	A_big_default	same	0	0	29878	560	500	yes	-query w/q_e1.fa -subject w/A_classes_560.fa -task blastn -outfmt 6
+A_classes_1200_megablast	A_big_default	same	0	0	31118	1198	500	yes	-query w/q_e2.fa -subject w/A_classes_1200.fa -task megablast -outfmt 6
+A_classes_2000_blastn	A_big_default	same	0	0	33302	1999	500	yes	-query w/q_s1.fa -subject w/A_classes_2000.fa -task blastn -outfmt 6
+A_ties_exact_560_blastn	A_big_default	same	0	0	30733	560	500	yes	-query w/q_e1.fa -subject w/A_ties_exact_560.fa -task blastn -outfmt 6
+A_ties_exact_1200_megablast	A_big_default	same	0	0	29196	1184	500	NO	-query w/q_e2.fa -subject w/A_ties_exact_1200.fa -task megablast -outfmt 6
+A_ties_exact_2000_blastn	A_big_default	same	0	0	29931	1998	500	yes	-query w/q_s1.fa -subject w/A_ties_exact_2000.fa -task blastn -outfmt 6
+A_ties_fixedlen_560_blastn	A_big_default	same	0	0	30081	560	500	yes	-query w/q_e1.fa -subject w/A_ties_fixedlen_560.fa -task blastn -outfmt 6
+A_ties_fixedlen_1200_megablast	A_big_default	same	0	0	28554	1181	500	yes	-query w/q_e2.fa -subject w/A_ties_fixedlen_1200.fa -task megablast -outfmt 6
+A_ties_fixedlen_2000_blastn	A_big_default	same	0	0	29017	1998	500	yes	-query w/q_s1.fa -subject w/A_ties_fixedlen_2000.fa -task blastn -outfmt 6
+A_dups_560_blastn	A_big_default	same	0	0	34363	560	500	yes	-query w/q_e1.fa -subject w/A_dups_560.fa -task blastn -outfmt 6
+A_dups_1200_megablast	A_big_default	same	0	0	30947	1200	500	yes	-query w/q_e2.fa -subject w/A_dups_1200.fa -task megablast -outfmt 6
+A_dups_2000_blastn	A_big_default	same	0	0	42381	2000	500	yes	-query w/q_s1.fa -subject w/A_dups_2000.fa -task blastn -outfmt 6
+A_mixed_560_blastn	A_big_default	same	0	0	31565	559	500	yes	-query w/q_e1.fa -subject w/A_mixed_560.fa -task blastn -outfmt 6
+A_mixed_1200_megablast	A_big_default	same	0	0	30529	998	500	yes	-query w/q_e2.fa -subject w/A_mixed_1200.fa -task megablast -outfmt 6
+A_mixed_2000_blastn	A_big_default	same	0	0	31232	1999	500	yes	-query w/q_s1.fa -subject w/A_mixed_2000.fa -task blastn -outfmt 6
+A_rc_mix_560_blastn	A_big_default	same	0	0	30849	560	500	yes	-query w/q_e1.fa -subject w/A_rc_mix_560.fa -task blastn -outfmt 6
+A_rc_mix_1200_megablast	A_big_default	same	0	0	30602	1150	500	yes	-query w/q_e2.fa -subject w/A_rc_mix_1200.fa -task megablast -outfmt 6
+A_rc_mix_2000_blastn	A_big_default	same	0	0	33326	1997	500	yes	-query w/q_s1.fa -subject w/A_rc_mix_2000.fa -task blastn -outfmt 6
+A_both_strands_560_blastn	A_big_default	same	0	0	63121	560	500	yes	-query w/q_e1.fa -subject w/A_both_strands_560.fa -task blastn -outfmt 6
+A_both_strands_1200_megablast	A_big_default	same	0	0	60551	1200	500	yes	-query w/q_e2.fa -subject w/A_both_strands_1200.fa -task megablast -outfmt 6
+A_both_strands_2000_blastn	A_big_default	same	0	0	61622	2000	500	yes	-query w/q_s1.fa -subject w/A_both_strands_2000.fa -task blastn -outfmt 6
+A_multi_hsp_560_blastn	A_big_default	same	0	0	100485	560	500	yes	-query w/q_e1.fa -subject w/A_multi_hsp_560.fa -task blastn -outfmt 6
+A_multi_hsp_1200_megablast	A_big_default	same	0	0	95223	1200	500	yes	-query w/q_e2.fa -subject w/A_multi_hsp_1200.fa -task megablast -outfmt 6
+A_multi_hsp_2000_blastn	A_big_default	same	0	0	103309	2000	500	yes	-query w/q_s1.fa -subject w/A_multi_hsp_2000.fa -task blastn -outfmt 6
+A_indel_560_blastn	A_big_default	same	0	0	31696	560	500	yes	-query w/q_e1.fa -subject w/A_indel_560.fa -task blastn -outfmt 6
+A_indel_1200_megablast	A_big_default	same	0	0	29768	952	500	yes	-query w/q_e2.fa -subject w/A_indel_1200.fa -task megablast -outfmt 6
+A_indel_2000_blastn	A_big_default	same	0	0	32989	1999	500	yes	-query w/q_s1.fa -subject w/A_indel_2000.fa -task blastn -outfmt 6
+A_same_window_560_blastn	A_big_default	same	0	0	27460	560	500	yes	-query w/q_e1.fa -subject w/A_same_window_560.fa -task blastn -outfmt 6
+A_same_window_1200_megablast	A_big_default	same	0	0	28200	1200	500	yes	-query w/q_e2.fa -subject w/A_same_window_1200.fa -task megablast -outfmt 6
+A_same_window_2000_blastn	A_big_default	same	0	0	28000	2000	500	yes	-query w/q_s1.fa -subject w/A_same_window_2000.fa -task blastn -outfmt 6
+A2_classes_700_blastn_o7	A_big_default	same	0	0	32661	700	500	yes	-query w/q_e1.fa -subject w/A2_classes_700_7.fa -task blastn -outfmt 7
+A2_dups_900_blastn_o0	A_big_default	same	0	0	339675	900	-1	yes	-query w/q_e1.fa -subject w/A2_dups_900_0.fa -task blastn -outfmt 0
+A2_mixed_650_megablast_o0	A_big_default	same	0	0	290296	547	-1	yes	-query w/q_e1.fa -subject w/A2_mixed_650_0.fa -task megablast -outfmt 0
+A2_ties_exact_600_megablast_o7	A_big_default	same	0	0	29003	595	500	yes	-query w/q_e1.fa -subject w/A2_ties_exact_600_7.fa -task megablast -outfmt 7
+A2_multi_hsp_800_blastn_o7	A_big_default	same	0	0	94405	800	500	yes	-query w/q_e1.fa -subject w/A2_multi_hsp_800_7.fa -task blastn -outfmt 7
+A2_rc_mix_560_blastn_o0	A_big_default	same	0	0	284369	560	-1	yes	-query w/q_e1.fa -subject w/A2_rc_mix_560_0.fa -task blastn -outfmt 0
+A3_edge549	A_big_default	same	0	0	30279	549	500	yes	-query w/q_e1.fa -subject w/A3_549.fa -task blastn -outfmt 6
+A3_edge550	A_big_default	same	0	0	30305	550	500	yes	-query w/q_e1.fa -subject w/A3_550.fa -task blastn -outfmt 6
+A3_edge551	A_big_default	same	0	0	30755	551	500	yes	-query w/q_e1.fa -subject w/A3_551.fa -task blastn -outfmt 6
+A3_edge552	A_big_default	same	0	0	32156	552	500	yes	-query w/q_e1.fa -subject w/A3_552.fa -task blastn -outfmt 6
+B_mts1_classes_40	B_max_target_seqs	same	0	0	161	40	1	yes	-query w/q_e1.fa -subject w/B_classes_40_1.fa -task blastn -outfmt 6 -max_target_seqs 1
+B_mts1_ties_exact_300	B_max_target_seqs	same	0	0	112	299	1	yes	-query w/q_e1.fa -subject w/B_ties_exact_300_1.fa -task blastn -outfmt 6 -max_target_seqs 1
+B_mts1_dups_60	B_max_target_seqs	same	0	0	57	60	1	yes	-query w/q_e1.fa -subject w/B_dups_60_1.fa -task blastn -outfmt 6 -max_target_seqs 1
+B_mts2_classes_40	B_max_target_seqs	same	0	0	113	40	2	yes	-query w/q_e1.fa -subject w/B_classes_40_2.fa -task blastn -outfmt 6 -max_target_seqs 2
+B_mts2_ties_exact_300	B_max_target_seqs	same	0	0	114	300	2	yes	-query w/q_e1.fa -subject w/B_ties_exact_300_2.fa -task blastn -outfmt 6 -max_target_seqs 2
+B_mts2_dups_60	B_max_target_seqs	same	0	0	210	60	2	yes	-query w/q_e1.fa -subject w/B_dups_60_2.fa -task blastn -outfmt 6 -max_target_seqs 2
+B_mts3_classes_40	B_max_target_seqs	same	0	0	225	40	3	yes	-query w/q_e1.fa -subject w/B_classes_40_3.fa -task blastn -outfmt 6 -max_target_seqs 3
+B_mts3_ties_exact_300	B_max_target_seqs	same	0	0	166	300	3	yes	-query w/q_e1.fa -subject w/B_ties_exact_300_3.fa -task blastn -outfmt 6 -max_target_seqs 3
+B_mts3_dups_60	B_max_target_seqs	same	0	0	336	60	3	yes	-query w/q_e1.fa -subject w/B_dups_60_3.fa -task blastn -outfmt 6 -max_target_seqs 3
+B_mts4_classes_40	B_max_target_seqs	same	0	0	291	40	4	yes	-query w/q_e1.fa -subject w/B_classes_40_4.fa -task blastn -outfmt 6 -max_target_seqs 4
+B_mts4_ties_exact_300	B_max_target_seqs	same	0	0	218	300	4	yes	-query w/q_e1.fa -subject w/B_ties_exact_300_4.fa -task blastn -outfmt 6 -max_target_seqs 4
+B_mts4_dups_60	B_max_target_seqs	same	0	0	228	60	4	yes	-query w/q_e1.fa -subject w/B_dups_60_4.fa -task blastn -outfmt 6 -max_target_seqs 4
+B_mts5_classes_40	B_max_target_seqs	same	0	0	652	40	5	yes	-query w/q_e1.fa -subject w/B_classes_40_5.fa -task blastn -outfmt 6 -max_target_seqs 5
+B_mts5_ties_exact_300	B_max_target_seqs	same	0	0	275	299	5	yes	-query w/q_e1.fa -subject w/B_ties_exact_300_5.fa -task blastn -outfmt 6 -max_target_seqs 5
+B_mts5_dups_60	B_max_target_seqs	same	0	0	830	60	5	yes	-query w/q_e1.fa -subject w/B_dups_60_5.fa -task blastn -outfmt 6 -max_target_seqs 5
+B_mts6_classes_40	B_max_target_seqs	same	0	0	391	40	6	yes	-query w/q_e1.fa -subject w/B_classes_40_6.fa -task blastn -outfmt 6 -max_target_seqs 6
+B_mts6_ties_exact_300	B_max_target_seqs	same	0	0	331	300	6	yes	-query w/q_e1.fa -subject w/B_ties_exact_300_6.fa -task blastn -outfmt 6 -max_target_seqs 6
+B_mts6_dups_60	B_max_target_seqs	same	0	0	336	60	6	yes	-query w/q_e1.fa -subject w/B_dups_60_6.fa -task blastn -outfmt 6 -max_target_seqs 6
+B_mts10_classes_40	B_max_target_seqs	same	0	0	896	40	10	yes	-query w/q_e1.fa -subject w/B_classes_40_10.fa -task blastn -outfmt 6 -max_target_seqs 10
+B_mts10_ties_exact_300	B_max_target_seqs	same	0	0	659	300	10	yes	-query w/q_e1.fa -subject w/B_ties_exact_300_10.fa -task blastn -outfmt 6 -max_target_seqs 10
+B_mts10_dups_60	B_max_target_seqs	same	0	0	570	60	10	yes	-query w/q_e1.fa -subject w/B_dups_60_10.fa -task blastn -outfmt 6 -max_target_seqs 10
+B_mts11_classes_40	B_max_target_seqs	same	0	0	726	40	11	yes	-query w/q_e1.fa -subject w/B_classes_40_11.fa -task blastn -outfmt 6 -max_target_seqs 11
+B_mts11_ties_exact_300	B_max_target_seqs	same	0	0	671	300	11	yes	-query w/q_e1.fa -subject w/B_ties_exact_300_11.fa -task blastn -outfmt 6 -max_target_seqs 11
+B_mts11_dups_60	B_max_target_seqs	same	0	0	1210	60	11	yes	-query w/q_e1.fa -subject w/B_dups_60_11.fa -task blastn -outfmt 6 -max_target_seqs 11
+B2_mts100_classes_700	B_max_target_seqs	same	0	0	6462	699	100	yes	-query w/q_e2.fa -subject w/B2_classes_700_100.fa -task blastn -outfmt 6 -max_target_seqs 100
+B2_mts100_mixed_1500	B_max_target_seqs	same	0	0	6850	1499	100	yes	-query w/q_e2.fa -subject w/B2_mixed_1500_100.fa -task blastn -outfmt 6 -max_target_seqs 100
+B2_mts550_classes_700	B_max_target_seqs	same	0	0	34890	700	550	yes	-query w/q_e2.fa -subject w/B2_classes_700_550.fa -task blastn -outfmt 6 -max_target_seqs 550
+B2_mts550_mixed_1500	B_max_target_seqs	same	0	0	36639	1499	550	yes	-query w/q_e2.fa -subject w/B2_mixed_1500_550.fa -task blastn -outfmt 6 -max_target_seqs 550
+B2_mts600_classes_700	B_max_target_seqs	same	0	0	38531	700	600	yes	-query w/q_e2.fa -subject w/B2_classes_700_600.fa -task blastn -outfmt 6 -max_target_seqs 600
+B2_mts600_mixed_1500	B_max_target_seqs	same	0	0	39968	1499	600	yes	-query w/q_e2.fa -subject w/B2_mixed_1500_600.fa -task blastn -outfmt 6 -max_target_seqs 600
+B3_mts3_o0_blastn	B_max_target_seqs	same	0	0	6388	120	-1	yes	-query w/q_s1.fa -subject w/B3_3_0_blastn.fa -task blastn -outfmt 0 -max_target_seqs 3
+B3_mts5_o7_megablast	B_max_target_seqs	same	0	0	1266	120	5	yes	-query w/q_s1.fa -subject w/B3_5_7_megablast.fa -task megablast -outfmt 7 -max_target_seqs 5
+B3_mts1_o0_megablast	B_max_target_seqs	same	0	0	2699	120	-1	yes	-query w/q_s1.fa -subject w/B3_1_0_megablast.fa -task megablast -outfmt 0 -max_target_seqs 1
+B3_mts2_o7_blastn	B_max_target_seqs	same	0	0	625	120	2	yes	-query w/q_s1.fa -subject w/B3_2_7_blastn.fa -task blastn -outfmt 7 -max_target_seqs 2
+B3_mts11_o0_blastn	B_max_target_seqs	same	0	0	27108	120	-1	yes	-query w/q_s1.fa -subject w/B3_11_0_blastn.fa -task blastn -outfmt 0 -max_target_seqs 11
+B3_mts10_o7_blastn	B_max_target_seqs	same	0	0	1988	120	10	yes	-query w/q_s1.fa -subject w/B3_10_7_blastn.fa -task blastn -outfmt 7 -max_target_seqs 10
+C_besthit_0_classes_600_None	C_subject_besthit	same	0	0	31529	599	500	yes	-query w/q_e1.fa -subject w/C_0.fa -task blastn -outfmt 6 -subject_besthit
+C_besthit_1_multi_hsp_600_None	C_subject_besthit	same	0	0	97241	600	500	yes	-query w/q_e1.fa -subject w/C_1.fa -task blastn -outfmt 6 -subject_besthit
+C_besthit_2_both_strands_700_None	C_subject_besthit	same	0	0	65223	700	500	yes	-query w/q_e1.fa -subject w/C_2.fa -task blastn -outfmt 6 -subject_besthit
+C_besthit_3_rc_mix_560_None	C_subject_besthit	same	0	0	31741	560	500	yes	-query w/q_e1.fa -subject w/C_3.fa -task blastn -outfmt 6 -subject_besthit
+C_besthit_4_multi_hsp_80_3	C_subject_besthit	same	0	0	572	80	3	yes	-query w/q_e1.fa -subject w/C_4.fa -task blastn -outfmt 6 -subject_besthit -max_target_seqs 3
+C_besthit_5_both_strands_50_1	C_subject_besthit	same	0	0	112	50	1	yes	-query w/q_e1.fa -subject w/C_5.fa -task blastn -outfmt 6 -subject_besthit -max_target_seqs 1
+C_besthit_6_classes_40_5	C_subject_besthit	same	0	0	489	40	5	yes	-query w/q_e1.fa -subject w/C_6.fa -task blastn -outfmt 6 -subject_besthit -max_target_seqs 5
+C_besthit_7_indel_600_None	C_subject_besthit	same	0	0	30347	600	500	yes	-query w/q_e1.fa -subject w/C_7.fa -task blastn -outfmt 6 -subject_besthit
+C_besthit_8_dups_700_None	C_subject_besthit	same	0	0	33412	700	500	yes	-query w/q_e1.fa -subject w/C_8.fa -task blastn -outfmt 6 -subject_besthit
+C_besthit_9_multi_hsp_1000_100	C_subject_besthit	same	0	0	19935	1000	100	yes	-query w/q_e1.fa -subject w/C_9.fa -task blastn -outfmt 6 -subject_besthit -max_target_seqs 100
+C_besthit_10_mixed_650_None	C_subject_besthit	same	0	0	31371	650	500	yes	-query w/q_e1.fa -subject w/C_10.fa -task blastn -outfmt 6 -subject_besthit
+C_besthit_11_same_window_600_None	C_subject_besthit	same	0	0	26500	600	500	yes	-query w/q_e1.fa -subject w/C_11.fa -task blastn -outfmt 6 -subject_besthit
+D_maxhsps1_0_multi_hsp_600_None	D_max_hsps	same	0	0	27884	600	500	yes	-query w/q_e2.fa -subject w/D_0.fa -task blastn -outfmt 6 -max_hsps 1
+D_maxhsps2_1_multi_hsp_600_None	D_max_hsps	same	0	0	56477	600	500	yes	-query w/q_e2.fa -subject w/D_1.fa -task blastn -outfmt 6 -max_hsps 2
+D_maxhsps3_2_multi_hsp_600_None	D_max_hsps	same	0	0	78754	600	500	yes	-query w/q_e2.fa -subject w/D_2.fa -task blastn -outfmt 6 -max_hsps 3
+D_maxhsps1_3_both_strands_700_None	D_max_hsps	same	0	0	27959	700	500	yes	-query w/q_e2.fa -subject w/D_3.fa -task blastn -outfmt 6 -max_hsps 1
+D_maxhsps2_4_multi_hsp_60_3	D_max_hsps	same	0	0	325	60	3	yes	-query w/q_e2.fa -subject w/D_4.fa -task blastn -outfmt 6 -max_hsps 2 -max_target_seqs 3
+D_maxhsps1_5_multi_hsp_60_1	D_max_hsps	same	0	0	50	60	1	yes	-query w/q_e2.fa -subject w/D_5.fa -task blastn -outfmt 6 -max_hsps 1 -max_target_seqs 1
+D_maxhsps2_6_indel_600_None	D_max_hsps	same	0	0	31528	597	500	yes	-query w/q_e2.fa -subject w/D_6.fa -task blastn -outfmt 7 -max_hsps 2
+D_maxhsps3_7_multi_hsp_700_5	D_max_hsps	same	0	0	782	700	5	NO	-query w/q_e2.fa -subject w/D_7.fa -task blastn -outfmt 6 -max_hsps 3 -max_target_seqs 5
+D_maxhsps1_8_both_strands_80_2	D_max_hsps	same	0	0	4662	80	-1	yes	-query w/q_e2.fa -subject w/D_8.fa -task blastn -outfmt 0 -max_hsps 1 -max_target_seqs 2
+D_maxhsps2_9_multi_hsp_560_None	D_max_hsps	same	0	0	699029	560	-1	yes	-query w/q_e2.fa -subject w/D_9.fa -task blastn -outfmt 0 -max_hsps 2
+D_maxhsps1_10_classes_600_None	D_max_hsps	same	0	0	28183	600	500	yes	-query w/q_e2.fa -subject w/D_10.fa -task blastn -outfmt 6 -max_hsps 1
+D_maxhsps3_11_multi_hsp_1000_100	D_max_hsps	same	0	0	15899	1000	100	NO	-query w/q_e2.fa -subject w/D_11.fa -task blastn -outfmt 6 -max_hsps 3 -max_target_seqs 100
+E_threads_0_classes_600_None_blastn	E_num_threads	same	0	0	29708	600	500	yes	-query w/q_s1.fa -subject w/E_0.fa -task blastn -outfmt 6 -num_threads 4
+E_threads_1_ties_exact_800_None_blastn	E_num_threads	same	0	0	30508	800	500	yes	-query w/q_s1.fa -subject w/E_1.fa -task blastn -outfmt 6 -num_threads 4
+E_threads_2_multi_hsp_60_3_blastn	E_num_threads	same	0	0	616	60	3	yes	-query w/q_s1.fa -subject w/E_2.fa -task blastn -outfmt 6 -num_threads 4 -max_target_seqs 3
+E_threads_3_dups_700_None_megablast	E_num_threads	same	0	0	28413	700	500	yes	-query w/q_s1.fa -subject w/E_3.fa -task megablast -outfmt 6 -num_threads 4
+E_threads_4_mixed_900_5_blastn	E_num_threads	same	0	0	409	898	5	yes	-query w/q_s1.fa -subject w/E_4.fa -task blastn -outfmt 6 -num_threads 4 -max_target_seqs 5
+E_threads_5_rc_mix_40_1_megablast	E_num_threads	same	0	0	57	39	1	yes	-query w/q_s1.fa -subject w/E_5.fa -task megablast -outfmt 6 -num_threads 4 -max_target_seqs 1
+E_threads_6_both_strands_1000_None_blastn	E_num_threads	same	0	0	60704	1000	500	yes	-query w/q_s1.fa -subject w/E_6.fa -task blastn -outfmt 6 -num_threads 4
+E_threads_7_classes_30_2_blastn	E_num_threads	same	0	0	158	30	2	yes	-query w/q_s1.fa -subject w/E_7.fa -task blastn -outfmt 6 -num_threads 4 -max_target_seqs 2
+E_threads_8_same_window_700_None_blastn	E_num_threads	same	0	0	53000	700	500	yes	-query w/q_s1.fa -subject w/E_8.fa -task blastn -outfmt 6 -num_threads 4
+E_threads_9_indel_560_10_blastn	E_num_threads	same	0	0	562	559	10	yes	-query w/q_s1.fa -subject w/E_9.fa -task blastn -outfmt 6 -num_threads 4 -max_target_seqs 10
+F_evalue1e-30_0_mixed_700_None	F_evalue	same	0	0	19788	349	349	yes	-query w/q_e3.fa -subject w/F_0.fa -task blastn -outfmt 6 -evalue 1e-30
+F_evalue1e-25_1_classes_700_None	F_evalue	same	0	0	20509	357	357	yes	-query w/q_e3.fa -subject w/F_1.fa -task blastn -outfmt 6 -evalue 1e-25
+F_evalue1e-60_2_mixed_700_None	F_evalue	same	0	0	13357	233	233	yes	-query w/q_e3.fa -subject w/F_2.fa -task blastn -outfmt 6 -evalue 1e-60
+F_evalue1000_3_classes_800_None	F_evalue	same	0	0	58005	800	500	yes	-query w/q_e3.fa -subject w/F_3.fa -task blastn -outfmt 6 -evalue 1000
+F_evalue100000_4_classes_800_None	F_evalue	same	0	0	748031	800	500	yes	-query w/q_e3.fa -subject w/F_4.fa -task blastn -outfmt 6 -evalue 100000
+F_evalue10000_5_ties_exact_700_None	F_evalue	same	0	0	234427	700	500	yes	-query w/q_e3.fa -subject w/F_5.fa -task blastn -outfmt 6 -evalue 10000
+F_evalue1e-20_6_classes_60_3	F_evalue	same	0	0	221	37	3	yes	-query w/q_e3.fa -subject w/F_6.fa -task blastn -outfmt 6 -evalue 1e-20 -max_target_seqs 3
+F_evalue1000_7_mixed_60_4	F_evalue	same	0	0	6597	60	4	yes	-query w/q_e3.fa -subject w/F_7.fa -task blastn -outfmt 6 -evalue 1000 -max_target_seqs 4
+F_evalue1e-10_8_dups_700_None	F_evalue	same	0	0	25297	453	453	yes	-query w/q_e3.fa -subject w/F_8.fa -task blastn -outfmt 6 -evalue 1e-10
+F_evalue50_9_indel_900_5	F_evalue	same	0	0	868	882	5	yes	-query w/q_e3.fa -subject w/F_9.fa -task blastn -outfmt 6 -evalue 50 -max_target_seqs 5
+G_split_0_in560_span3_mtsNone	G_split	same	0	0	58507	562	500	yes	-query w/q2m.fa -subject w/G_0.fa -task blastn -outfmt 6
+G_split_1_in560_span1_mts1	G_split	same	0	0	59	560	1	yes	-query w/q2m.fa -subject w/G_1.fa -task blastn -outfmt 6 -max_target_seqs 1
+G_split_2_in560_span20_mts3	G_split	same	0	0	189	579	3	yes	-query w/q2m.fa -subject w/G_2.fa -task blastn -outfmt 6 -max_target_seqs 3
+G_split_3_in100_span15_mts5	G_split	same	0	0	311	115	5	yes	-query w/q2m.fa -subject w/G_3.fa -task blastn -outfmt 6 -max_target_seqs 5
+G_split_4_in30_span3_mts10	G_split	same	0	0	1917	33	10	NO	-query w/q2m.fa -subject w/G_4.fa -task blastn -outfmt 6 -max_target_seqs 10
+G_split_5_in30_span3_mts11	G_split	same	0	0	1315	33	11	yes	-query w/q2m.fa -subject w/G_5.fa -task blastn -outfmt 6 -max_target_seqs 11
+G_split_6_in600_span5_mtsNone	G_split	same	0	0	77967	605	500	yes	-query w/q2m.fa -subject w/G_6.fa -task blastn -outfmt 6
+G_split_7_in700_span40_mtsNone	G_split	same	0	0	64507	737	500	yes	-query w/q2m.fa -subject w/G_7.fa -task blastn -outfmt 7
+G_split_8_in80_span12_mts4	G_split	same	0	0	248	92	4	yes	-query w/q2m.fa -subject w/G_8.fa -task blastn -outfmt 6 -max_target_seqs 4
+G_split_9_in560_span3_mtsNone	G_split	same	0	0	66308	562	500	yes	-query w/q2m.fa -subject w/G_9.fa -task blastn -outfmt 6 -subject_besthit
+G_split_10_in560_span8_mts2	G_split	same	0	0	126	568	2	yes	-query w/q2m.fa -subject w/G_10.fa -task blastn -outfmt 6 -subject_besthit -max_target_seqs 2
+G_split_11_in560_span10_mtsNone	G_split	same	0	0	32031	569	500	yes	-query w/q2m.fa -subject w/G_11.fa -task blastn -outfmt 6 -max_hsps 1
+G_split_12_in120_span20_mts3	G_split	same	0	0	187	140	3	yes	-query w/q2m.fa -subject w/G_12.fa -task blastn -outfmt 6 -max_hsps 2 -max_target_seqs 3
+G_split_13_in560_span3_mtsNone	G_split	same	0	0	65025	561	500	yes	-query w/q2m.fa -subject w/G_13.fa -task blastn -outfmt 6 -num_threads 4
+G_split_14_in60_span5_mts2	G_split	same	0	0	246	65	2	NO	-query w/q2m.fa -subject w/G_14.fa -task blastn -outfmt 6 -num_threads 4 -max_target_seqs 2
+G_split_15_in900_span10_mtsNone	G_split	same	0	0	704294	910	-1	yes	-query w/q2m.fa -subject w/G_15.fa -task blastn -outfmt 0
+G_split_16_in50_span4_mts1	G_split	same	0	0	7332	53	-1	yes	-query w/q2m.fa -subject w/G_16.fa -task blastn -outfmt 0 -max_target_seqs 1
+G_split_17_in560_span30_mts6	G_split	same	0	0	378	590	6	yes	-query w/q2m.fa -subject w/G_17.fa -task blastn -outfmt 6 -max_target_seqs 6
+G2_splitbnd_0_n600_mtsNone	G_split	same	0	0	30000	600	500	yes	-query w/q2m.fa -subject w/G2_0.fa -task blastn -outfmt 6
+G2_splitbnd_1_n600_mts1	G_split	same	0	0	60	600	1	yes	-query w/q2m.fa -subject w/G2_1.fa -task blastn -outfmt 6 -max_target_seqs 1
+G2_splitbnd_2_n60_mts3	G_split	same	0	0	177	60	3	yes	-query w/q2m.fa -subject w/G2_2.fa -task blastn -outfmt 6 -max_target_seqs 3
+G2_splitbnd_3_n560_mts5	G_split	same	0	0	587	560	5	yes	-query w/q2m.fa -subject w/G2_3.fa -task blastn -outfmt 7 -max_target_seqs 5
+G2_splitbnd_4_n700_mtsNone	G_split	same	0	0	30000	700	500	yes	-query w/q2m.fa -subject w/G2_4.fa -outfmt 6 -task megablast
+G3_splitmega_0_in560_span3_mtsNone	G_split	same	0	0	96979	563	500	yes	-query w/qcat.fa -subject w/G3_0.fa -task megablast -outfmt 6
+G3_splitmega_1_in40_span6_mts1	G_split	same	0	0	133	45	1	yes	-query w/qcat.fa -subject w/G3_1.fa -task megablast -outfmt 6 -max_target_seqs 1
+G3_splitmega_2_in60_span6_mts3	G_split	same	0	0	688	66	3	yes	-query w/qcat.fa -subject w/G3_2.fa -task megablast -outfmt 6 -max_target_seqs 3
+G3_splitmega_3_in580_span12_mts5	G_split	same	0	0	817	592	5	NO	-query w/qcat.fa -subject w/G3_3.fa -task megablast -outfmt 6 -max_target_seqs 5
+G4_wholeEDL_0_in600_span8_mtsNone	G_split	same	0	0	96289	608	500	yes	-query w/qedl.fa -subject w/G4_0.fa -task blastn -outfmt 6
+G4_wholeEDL_1_in60_span8_mts2	G_split	same	0	0	3055	68	2	NO	-query w/qedl.fa -subject w/G4_1.fa -task blastn -outfmt 6 -max_target_seqs 2
+H_multiq_0_nq4_mtsNone_blastn	H_multi_query	same	0	0	58419	1335	1044	yes	-query w/H_0_q.fa -subject w/H_0.fa -task blastn -outfmt 6
+H_multiq_1_nq4_mts1_blastn	H_multi_query	same	0	0	213	1335	4	yes	-query w/H_1_q.fa -subject w/H_1.fa -task blastn -outfmt 6 -max_target_seqs 1
+H_multiq_2_nq3_mts3_blastn	H_multi_query	same	0	0	478	695	9	yes	-query w/H_2_q.fa -subject w/H_2.fa -task blastn -outfmt 6 -max_target_seqs 3
+H_multiq_3_nq6_mtsNone_blastn	H_multi_query	same	0	0	83663	1820	1535	yes	-query w/H_3_q.fa -subject w/H_3.fa -task blastn -outfmt 6
+H_multiq_4_nq6_mts5_blastn	H_multi_query	same	0	0	3145	1820	30	yes	-query w/H_4_q.fa -subject w/H_4.fa -task blastn -outfmt 7 -max_target_seqs 5
+H_multiq_5_nq5_mts2_megablast	H_multi_query	same	0	0	524	1142	10	yes	-query w/H_5_q.fa -subject w/H_5.fa -task megablast -outfmt 6 -max_target_seqs 2
+H_multiq_6_nq3_mtsNone_blastn	H_multi_query	same	0	0	599322	1625	-1	yes	-query w/H_6_q.fa -subject w/H_6.fa -task blastn -outfmt 0
+H_multiq_7_nq4_mtsNone_blastn	H_multi_query	same	0	0	61304	1340	1039	yes	-query w/H_7_q.fa -subject w/H_7.fa -task blastn -outfmt 6 -subject_besthit
+H_multiq_8_nq4_mts4_blastn	H_multi_query	same	0	0	839	1340	16	yes	-query w/H_8_q.fa -subject w/H_8.fa -task blastn -outfmt 6 -max_hsps 1 -max_target_seqs 4
+H_multiq_9_nq3_mtsNone_blastn	H_multi_query	same	0	0	55323	1295	1037	yes	-query w/H_9_q.fa -subject w/H_9.fa -task blastn -outfmt 6 -num_threads 4
+H_multiq_10_nq8_mts10_blastn	H_multi_query	same	0	0	3590	1795	63	yes	-query w/H_10_q.fa -subject w/H_10.fa -task blastn -outfmt 6 -max_target_seqs 10
+H_multiq_11_nq2_mts3_blastn	H_multi_query	same	0	0	331	1305	6	yes	-query w/H_11_q.fa -subject w/H_11.fa -task blastn -outfmt 6 -max_target_seqs 3
+H_multiq_12_nq3_mtsNone_megablast	H_multi_query	same	0	0	54878	1178	1018	yes	-query w/H_12_q.fa -subject w/H_12.fa -task megablast -outfmt 6
+I_scoring_0	I_scoring	same	0	0	102477	600	500	yes	-query w/q_e1.fa -subject w/I_0.fa -task blastn -outfmt 6 -reward 1 -penalty -3
+I2_scoring_0_mts2	I_scoring	same	0	0	321	40	2	yes	-query w/q_e1.fa -subject w/I2_0.fa -task blastn -outfmt 6 -max_target_seqs 2 -reward 1 -penalty -3
+I_scoring_1	I_scoring	same	0	0	104419	600	500	yes	-query w/q_e1.fa -subject w/I_1.fa -task blastn -outfmt 6 -reward 1 -penalty -1 -gapopen 5 -gapextend 2
+I2_scoring_1_mts2	I_scoring	same	0	0	216	40	2	yes	-query w/q_e1.fa -subject w/I2_1.fa -task blastn -outfmt 6 -max_target_seqs 2 -reward 1 -penalty -1 -gapopen 5 -gapextend 2
+I_scoring_2	I_scoring	same	3	3	0	-1	0	yes	-query w/q_e1.fa -subject w/I_2.fa -task blastn -outfmt 6 -reward 4 -penalty -5
+I2_scoring_2_mts2	I_scoring	same	3	3	0	-1	0	yes	-query w/q_e1.fa -subject w/I2_2.fa -task blastn -outfmt 6 -max_target_seqs 2 -reward 4 -penalty -5
+I_scoring_3	I_scoring	same	0	0	98116	600	500	yes	-query w/q_e1.fa -subject w/I_3.fa -task blastn -outfmt 6 -reward 2 -penalty -3 -gapopen 5 -gapextend 2
+I2_scoring_3_mts2	I_scoring	same	0	0	269	40	2	yes	-query w/q_e1.fa -subject w/I2_3.fa -task blastn -outfmt 6 -max_target_seqs 2 -reward 2 -penalty -3 -gapopen 5 -gapextend 2
+I_scoring_4	I_scoring	same	0	0	101267	600	500	yes	-query w/q_e1.fa -subject w/I_4.fa -task blastn -outfmt 6 -word_size 7
+I2_scoring_4_mts2	I_scoring	same	0	0	319	40	2	yes	-query w/q_e1.fa -subject w/I2_4.fa -task blastn -outfmt 6 -max_target_seqs 2 -word_size 7
+I_scoring_5	I_scoring	same	0	0	101528	600	500	yes	-query w/q_e1.fa -subject w/I_5.fa -task blastn -outfmt 6 -dust no
+I2_scoring_5_mts2	I_scoring	same	0	0	268	40	2	yes	-query w/q_e1.fa -subject w/I2_5.fa -task blastn -outfmt 6 -max_target_seqs 2 -dust no
+I_scoring_6	I_scoring	rejected	0	2	95885	600	500	NO	-query w/q_e1.fa -subject w/I_6.fa -task blastn -outfmt 6 -xdrop_gap 10
+I2_scoring_6_mts2	I_scoring	rejected	0	2	221	40	2	NO	-query w/q_e1.fa -subject w/I2_6.fa -task blastn -outfmt 6 -max_target_seqs 2 -xdrop_gap 10
+I_scoring_7	I_scoring	rejected	0	2	103174	600	500	NO	-query w/q_e1.fa -subject w/I_7.fa -task blastn -outfmt 6 -ungapped
+I2_scoring_7_mts2	I_scoring	rejected	0	2	221	40	2	NO	-query w/q_e1.fa -subject w/I2_7.fa -task blastn -outfmt 6 -max_target_seqs 2 -ungapped
+K_eps_0_560_mtsNone_blastn	K_epsilon	same	0	0	38868	560	500	yes	-query w/q_e1.fa -subject w/K_0.fa -task blastn -outfmt 6
+K_eps_1_700_mtsNone_blastn	K_epsilon	same	0	0	38235	700	500	yes	-query w/q_e1.fa -subject w/K_1.fa -task blastn -outfmt 6
+K_eps_2_600_mtsNone_megablast	K_epsilon	same	0	0	30406	600	500	yes	-query w/q_e1.fa -subject w/K_2.fa -task megablast -outfmt 6
+K_eps_3_40_mts1_blastn	K_epsilon	same	0	0	782	40	1	yes	-query w/q_e1.fa -subject w/K_3.fa -task blastn -outfmt 6 -max_target_seqs 1
+K_eps_4_40_mts3_blastn	K_epsilon	same	0	0	318	40	3	yes	-query w/q_e1.fa -subject w/K_4.fa -task blastn -outfmt 6 -max_target_seqs 3
+K_eps_5_60_mts5_megablast	K_epsilon	same	0	0	275	60	5	yes	-query w/q_e1.fa -subject w/K_5.fa -task megablast -outfmt 6 -max_target_seqs 5
+K_eps_6_800_mts100_blastn	K_epsilon	same	0	0	12084	800	100	yes	-query w/q_e1.fa -subject w/K_6.fa -task blastn -outfmt 6 -max_target_seqs 100
+K_eps_7_580_mtsNone_blastn	K_epsilon	same	0	0	40657	580	500	yes	-query w/q_e1.fa -subject w/K_7.fa -task blastn -outfmt 7
+K_eps_8_30_mts2_blastn	K_epsilon	same	0	0	269	30	2	yes	-query w/q_e1.fa -subject w/K_8.fa -task blastn -outfmt 6 -subject_besthit -max_target_seqs 2
+K_eps_9_620_mtsNone_blastn	K_epsilon	same	0	0	27277	620	500	yes	-query w/q_e1.fa -subject w/K_9.fa -task blastn -outfmt 6 -max_hsps 1
+J_cutoff_0_700_ws7_evNone_mtsNone	J_near_cutoff	same	0	0	28486	554	500	yes	-query w/q_e3.fa -subject w/J_0.fa -task blastn -outfmt 6 -word_size 7
+J_cutoff_1_700_ws7_evNone_mtsNone	J_near_cutoff	same	0	0	27433	501	500	yes	-query w/q_e3.fa -subject w/J_1.fa -task blastn -outfmt 6 -word_size 7
+J_cutoff_2_900_ws8_evNone_mtsNone	J_near_cutoff	same	0	0	28782	708	500	yes	-query w/q_e3.fa -subject w/J_2.fa -task blastn -outfmt 6 -word_size 8
+J_cutoff_3_600_ws7_ev1_mtsNone	J_near_cutoff	same	0	0	23080	418	418	yes	-query w/q_e3.fa -subject w/J_3.fa -task blastn -outfmt 6 -word_size 7 -evalue 1
+J_cutoff_4_700_ws7_evNone_mts3	J_near_cutoff	same	0	0	173	523	3	yes	-query w/q_e3.fa -subject w/J_4.fa -task blastn -outfmt 6 -word_size 7 -max_target_seqs 3
+J_cutoff_5_50_ws7_evNone_mts2	J_near_cutoff	same	0	0	110	50	2	yes	-query w/q_e3.fa -subject w/J_5.fa -task blastn -outfmt 6 -word_size 7 -max_target_seqs 2
+J_cutoff_6_800_ws7_ev100_mtsNone	J_near_cutoff	same	0	0	31410	617	500	yes	-query w/q_e3.fa -subject w/J_6.fa -task blastn -outfmt 6 -word_size 7 -evalue 100
+J_cutoff_7_700_ws7_ev0.1_mts1	J_near_cutoff	same	0	0	56	321	1	yes	-query w/q_e3.fa -subject w/J_7.fa -task blastn -outfmt 6 -word_size 7 -evalue 0.1 -max_target_seqs 1
+J_cutoff_8_1000_ws11_ev10_mtsNone	J_near_cutoff	same	0	0	28702	797	500	yes	-query w/q_e3.fa -subject w/J_8.fa -task blastn -outfmt 6 -word_size 11 -evalue 10
+J_cutoff_9_600_ws7_evNone_mts5	J_near_cutoff	same	0	0	280	458	5	yes	-query w/q_e3.fa -subject w/J_9.fa -task blastn -outfmt 6 -word_size 7 -max_target_seqs 5
+G5_genome_0_600_mtsNone_blastn	G_split	same	0	0	2113813	597	500	NO	-query w/qedl.fa -subject w/G5_0.fa -task blastn -outfmt 6
+G5_genome_1_600_mts3_blastn	G_split	same	0	0	18601	598	3	NO	-query w/qedl.fa -subject w/G5_1.fa -task blastn -outfmt 6 -max_target_seqs 3
+G5_genome_2_700_mtsNone_megablast	G_split	same	0	0	367696	699	500	yes	-query w/qedl.fa -subject w/G5_2.fa -task megablast -outfmt 6
+G5_genome_3_600_mts1_megablast	G_split	same	0	0	62	596	1	yes	-query w/qedl.fa -subject w/G5_3.fa -task megablast -outfmt 6 -max_target_seqs 1
+G5_genome_4_560_mtsNone_megablast	G_split	same	0	0	305122	558	500	yes	-query w/qedl.fa -subject w/G5_4.fa -task megablast -outfmt 6 -subject_besthit
+G5_genome_5_580_mts5_blastn	G_split	same	0	0	638	579	5	NO	-query w/qedl.fa -subject w/G5_5.fa -task blastn -outfmt 6 -max_hsps 2 -max_target_seqs 5
+P_gap_0_12_mts1_blastn	P_prelim_vs_final	same	0	0	206	12	1	yes	-query w/q_e2.fa -subject w/P_0.fa -task blastn -outfmt 6 -max_target_seqs 1
+P_gap_1_12_mts1_blastn	P_prelim_vs_final	same	0	0	265	12	1	yes	-query w/q_e2.fa -subject w/P_1.fa -task blastn -outfmt 6 -max_target_seqs 1
+P_gap_2_14_mts2_blastn	P_prelim_vs_final	same	0	0	745	14	2	yes	-query w/q_e2.fa -subject w/P_2.fa -task blastn -outfmt 6 -max_target_seqs 2
+P_gap_3_20_mts3_blastn	P_prelim_vs_final	same	0	0	1725	20	3	yes	-query w/q_e2.fa -subject w/P_3.fa -task blastn -outfmt 6 -max_target_seqs 3
+P_gap_4_30_mts5_blastn	P_prelim_vs_final	same	0	0	685	30	5	NO	-query w/q_e2.fa -subject w/P_4.fa -task blastn -outfmt 6 -max_target_seqs 5
+P_gap_5_15_mts1_megablast	P_prelim_vs_final	same	0	0	107	15	1	yes	-query w/q_e2.fa -subject w/P_5.fa -task megablast -outfmt 6 -max_target_seqs 1
+P_gap_6_25_mts4_megablast	P_prelim_vs_final	same	0	0	214	25	4	yes	-query w/q_e2.fa -subject w/P_6.fa -task megablast -outfmt 6 -max_target_seqs 4
+P_gap_7_600_mtsNone_blastn	P_prelim_vs_final	same	0	0	57208	600	500	NO	-query w/q_e2.fa -subject w/P_7.fa -task blastn -outfmt 6
+P_gap_8_700_mts100_blastn	P_prelim_vs_final	same	0	0	12610	700	100	NO	-query w/q_e2.fa -subject w/P_8.fa -task blastn -outfmt 6 -max_target_seqs 100
+P_gap_9_570_mtsNone_megablast	P_prelim_vs_final	same	0	0	44499	570	500	NO	-query w/q_e2.fa -subject w/P_9.fa -task megablast -outfmt 6
+P_gap_10_16_mts1_blastn	P_prelim_vs_final	same	0	0	54	16	1	yes	-query w/q_e2.fa -subject w/P_10.fa -task blastn -outfmt 6 -subject_besthit -max_target_seqs 1
+P_gap_11_20_mts3_blastn	P_prelim_vs_final	same	0	0	158	20	3	yes	-query w/q_e2.fa -subject w/P_11.fa -task blastn -outfmt 6 -max_hsps 1 -max_target_seqs 3
+P_gap_12_20_mts2_blastn	P_prelim_vs_final	same	0	0	437	20	2	NO	-query w/q_e2.fa -subject w/P_12.fa -task blastn -outfmt 6 -num_threads 4 -max_target_seqs 2
+P_gap_13_14_mts1_blastn	P_prelim_vs_final	same	0	0	17223	14	-1	yes	-query w/q_e2.fa -subject w/P_13.fa -task blastn -outfmt 0 -max_target_seqs 1
+P_gap_14_18_mts3_blastn	P_prelim_vs_final	same	0	0	704	18	3	yes	-query w/q_e2.fa -subject w/P_14.fa -task blastn -outfmt 7 -max_target_seqs 3
+P_gap_15_13_mts1_blastn	P_prelim_vs_final	same	0	0	51	13	1	yes	-query w/q_e2.fa -subject w/P_15.fa -task blastn -outfmt 6 -evalue 1e-100 -max_target_seqs 1
+P_gap_16_20_mts10_blastn	P_prelim_vs_final	same	0	0	1376	20	10	yes	-query w/q_e2.fa -subject w/P_16.fa -task blastn -outfmt 6 -max_target_seqs 10
+P_gap_17_30_mts11_blastn	P_prelim_vs_final	same	0	0	3152	30	11	yes	-query w/q_e2.fa -subject w/P_17.fa -task blastn -outfmt 6 -max_target_seqs 11
+P2_gapmultiq_0_nq3_mts1	P_prelim_vs_final	same	0	0	578	28	2	yes	-query w/P2_0_q.fa -subject w/P2_0.fa -task blastn -outfmt 6 -max_target_seqs 1
+P2_gapmultiq_1_nq4_mtsNone	P_prelim_vs_final	same	0	0	51979	655	555	NO	-query w/P2_1_q.fa -subject w/P2_1.fa -task blastn -outfmt 6
+P2_gapmultiq_2_nq4_mts3	P_prelim_vs_final	same	0	0	1232	655	12	NO	-query w/P2_2_q.fa -subject w/P2_2.fa -task blastn -outfmt 6 -max_target_seqs 3
+P2_gapmultiq_3_nq2_mts2	P_prelim_vs_final	same	0	0	273	582	4	NO	-query w/P2_3_q.fa -subject w/P2_3.fa -task blastn -outfmt 6 -max_target_seqs 2
+P3_gap_0_40_mts1_blastn	P_prelim_vs_final	same	0	0	379	40	1	NO	-query w/q_e2.fa -subject w/P3_0.fa -task blastn -outfmt 6 -max_target_seqs 1
+P3_gap_1_60_mts1_blastn	P_prelim_vs_final	same	0	0	287	60	1	NO	-query w/q_e2.fa -subject w/P3_1.fa -task blastn -outfmt 6 -max_target_seqs 1
+P3_gap_2_60_mts2_blastn	P_prelim_vs_final	same	0	0	159	60	2	NO	-query w/q_e2.fa -subject w/P3_2.fa -task blastn -outfmt 6 -max_target_seqs 2
+P3_gap_3_100_mts3_blastn	P_prelim_vs_final	same	0	0	443	100	3	NO	-query w/q_e2.fa -subject w/P3_3.fa -task blastn -outfmt 6 -max_target_seqs 3
+P3_gap_4_100_mts5_blastn	P_prelim_vs_final	same	0	0	591	100	5	NO	-query w/q_e2.fa -subject w/P3_4.fa -task blastn -outfmt 6 -max_target_seqs 5
+P3_gap_5_40_mts1_megablast	P_prelim_vs_final	same	0	0	52	40	1	NO	-query w/q_e2.fa -subject w/P3_5.fa -task megablast -outfmt 6 -max_target_seqs 1
+P3_gap_6_80_mts2_megablast	P_prelim_vs_final	same	0	0	108	80	2	NO	-query w/q_e2.fa -subject w/P3_6.fa -task megablast -outfmt 6 -max_target_seqs 2
+P3_gap_7_100_mts4_blastn	P_prelim_vs_final	same	0	0	667	100	4	NO	-query w/q_e2.fa -subject w/P3_7.fa -task blastn -outfmt 6 -max_target_seqs 4
+P3_gap_8_50_mts1_blastn	P_prelim_vs_final	same	0	0	225	50	1	NO	-query w/q_e2.fa -subject w/P3_8.fa -task blastn -outfmt 6 -max_target_seqs 1
+P3_gap_9_70_mts3_megablast	P_prelim_vs_final	same	0	0	158	70	3	NO	-query w/q_e2.fa -subject w/P3_9.fa -task megablast -outfmt 6 -max_target_seqs 3
+Q_dupgap_0_6x10_mts1_blastn	Q_dup_gap	same	0	0	104	60	1	NO	-query w/q_e2.fa -subject w/Q_0.fa -task blastn -outfmt 6 -max_target_seqs 1
+Q_dupgap_1_6x20_mts3_blastn	Q_dup_gap	same	0	0	1317	120	3	yes	-query w/q_e2.fa -subject w/Q_1.fa -task blastn -outfmt 6 -max_target_seqs 3
+Q_dupgap_2_8x10_mts5_blastn	Q_dup_gap	same	0	0	547	80	5	NO	-query w/q_e2.fa -subject w/Q_2.fa -task blastn -outfmt 6 -max_target_seqs 5
+Q_dupgap_3_5x120_mtsNone_blastn	Q_dup_gap	same	0	0	70010	600	500	NO	-query w/q_e2.fa -subject w/Q_3.fa -task blastn -outfmt 6
+Q_dupgap_4_4x160_mts100_blastn	Q_dup_gap	same	0	0	35598	640	100	NO	-query w/q_e2.fa -subject w/Q_4.fa -task blastn -outfmt 6 -max_target_seqs 100
+Q_dupgap_5_6x12_mts2_megablast	Q_dup_gap	same	0	0	106	72	2	yes	-query w/q_e2.fa -subject w/Q_5.fa -task megablast -outfmt 6 -max_target_seqs 2
+Q_dupgap_6_7x90_mtsNone_megablast	Q_dup_gap	same	0	0	46682	630	500	yes	-query w/q_e2.fa -subject w/Q_6.fa -task megablast -outfmt 7
+Q_dupgap_7_6x15_mts4_blastn	Q_dup_gap	same	0	0	58636	90	-1	yes	-query w/q_e2.fa -subject w/Q_7.fa -task blastn -outfmt 0 -max_target_seqs 4
+Q_dupgap_8_6x100_mtsNone_blastn	Q_dup_gap	same	0	0	27098	600	500	NO	-query w/q_e2.fa -subject w/Q_8.fa -task blastn -outfmt 6 -max_hsps 1
+Q_dupgap_9_5x130_mts6_blastn	Q_dup_gap	same	0	0	999	650	6	yes	-query w/q_e2.fa -subject w/Q_9.fa -task blastn -outfmt 6 -subject_besthit -max_target_seqs 6
+R_gap_0_60_mts1_blastn	R_gap_options	same	0	0	102	60	1	NO	-query w/q_e1.fa -subject w/R_0.fa -task blastn -outfmt 6 -subject_besthit -max_target_seqs 1
+R_gap_1_80_mts3_blastn	R_gap_options	same	0	0	213	80	3	NO	-query w/q_e1.fa -subject w/R_1.fa -task blastn -outfmt 6 -subject_besthit -max_target_seqs 3
+R_gap_2_600_mtsNone_blastn	R_gap_options	same	0	0	58334	600	500	NO	-query w/q_e1.fa -subject w/R_2.fa -task blastn -outfmt 6 -subject_besthit
+R_gap_3_60_mts2_megablast	R_gap_options	same	0	0	108	60	2	NO	-query w/q_e1.fa -subject w/R_3.fa -task megablast -outfmt 6 -subject_besthit -max_target_seqs 2
+R_gap_4_60_mts1_blastn	R_gap_options	same	0	0	264	60	1	NO	-query w/q_e1.fa -subject w/R_4.fa -task blastn -outfmt 6 -num_threads 4 -max_target_seqs 1
+R_gap_5_80_mts5_blastn	R_gap_options	same	0	0	1505	80	5	NO	-query w/q_e1.fa -subject w/R_5.fa -task blastn -outfmt 6 -num_threads 4 -max_target_seqs 5
+R_gap_6_600_mtsNone_blastn	R_gap_options	same	0	0	86286	600	500	NO	-query w/q_e1.fa -subject w/R_6.fa -task blastn -outfmt 6 -num_threads 4
+R_gap_7_60_mts3_megablast	R_gap_options	same	0	0	162	60	3	yes	-query w/q_e1.fa -subject w/R_7.fa -task megablast -outfmt 6 -num_threads 4 -max_target_seqs 3
+R_gap_8_60_mts6_blastn	R_gap_options	same	0	0	1616	60	6	NO	-query w/q_e1.fa -subject w/R_8.fa -task blastn -outfmt 6 -max_target_seqs 6
+R_gap_9_60_mts10_blastn	R_gap_options	same	0	0	1964	60	10	NO	-query w/q_e1.fa -subject w/R_9.fa -task blastn -outfmt 6 -max_target_seqs 10
+R_gap_10_60_mts11_blastn	R_gap_options	same	0	0	1186	60	11	NO	-query w/q_e1.fa -subject w/R_10.fa -task blastn -outfmt 6 -max_target_seqs 11
+R_gap_11_60_mts1_blastn	R_gap_options	same	0	0	54	60	1	NO	-query w/q_e1.fa -subject w/R_11.fa -task blastn -outfmt 6 -max_hsps 1 -max_target_seqs 1
+R_gap_12_60_mts2_blastn	R_gap_options	same	0	0	213	60	2	NO	-query w/q_e1.fa -subject w/R_12.fa -task blastn -outfmt 6 -max_hsps 2 -max_target_seqs 2
+R_gap_13_80_mts3_blastn	R_gap_options	same	0	0	383	80	3	NO	-query w/q_e1.fa -subject w/R_13.fa -task blastn -outfmt 6 -max_hsps 3 -max_target_seqs 3
+R_gap_14_60_mts3_blastn	R_gap_options	same	0	0	162	60	3	NO	-query w/q_e1.fa -subject w/R_14.fa -task blastn -outfmt 6 -evalue 1e-300 -max_target_seqs 3
+R_gap_15_70_mts2_blastn	R_gap_options	same	0	0	72405	70	2	NO	-query w/q_e1.fa -subject w/R_15.fa -task blastn -outfmt 6 -evalue 1e5 -max_target_seqs 2
+R2_gapmultiq_0_nq3_mts1_blastn	R_gap_options	same	0	0	211	85	3	NO	-query w/R2_0_q.fa -subject w/R2_0.fa -task blastn -outfmt 6 -subject_besthit -max_target_seqs 1
+R2_gapmultiq_1_nq4_mts3_blastn	R_gap_options	same	0	0	2127	728	12	NO	-query w/R2_1_q.fa -subject w/R2_1.fa -task blastn -outfmt 6 -num_threads 4 -max_target_seqs 3
+R2_gapmultiq_2_nq3_mts2_blastn	R_gap_options	same	0	0	317	130	5	NO	-query w/R2_2_q.fa -subject w/R2_2.fa -task blastn -outfmt 6 -max_hsps 1 -max_target_seqs 2
+R2_gapmultiq_3_nq2_mts5_megablast	R_gap_options	same	0	0	665	630	10	NO	-query w/R2_3_q.fa -subject w/R2_3.fa -task megablast -outfmt 6 -max_target_seqs 5
+R2_gapmultiq_4_nq6_mts1_blastn	R_gap_options	same	0	0	714	300	6	NO	-query w/R2_4_q.fa -subject w/R2_4.fa -task blastn -outfmt 6 -max_target_seqs 1
+R2_gapmultiq_5_nq3_mts4_blastn	R_gap_options	same	0	0	1921	240	12	NO	-query w/R2_5_q.fa -subject w/R2_5.fa -task blastn -outfmt 7 -max_target_seqs 4
+S_splitgap_0_40_mts1_blastn	S_split_gap	same	0	0	61	40	1	yes	-query w/q2m.fa -subject w/S_0.fa -task blastn -outfmt 6 -max_target_seqs 1
+S_splitgap_1_60_mts2_blastn	S_split_gap	same	0	0	616	60	2	NO	-query w/q2m.fa -subject w/S_1.fa -task blastn -outfmt 6 -max_target_seqs 2
+S_splitgap_2_80_mts3_blastn	S_split_gap	same	0	0	373	80	3	NO	-query w/q2m.fa -subject w/S_2.fa -task blastn -outfmt 6 -max_target_seqs 3
+S_splitgap_3_100_mts5_blastn	S_split_gap	same	0	0	1345	99	5	NO	-query w/q2m.fa -subject w/S_3.fa -task blastn -outfmt 6 -max_target_seqs 5
+S_splitgap_4_600_mtsNone_blastn	S_split_gap	same	0	0	199137	600	500	NO	-query w/q2m.fa -subject w/S_4.fa -task blastn -outfmt 6
+S_splitgap_5_60_mts1_blastn	S_split_gap	same	0	0	121	60	1	NO	-query w/q2m.fa -subject w/S_5.fa -task blastn -outfmt 6 -subject_besthit -max_target_seqs 1
+S_splitgap_6_60_mts3_blastn	S_split_gap	same	0	0	2564	60	3	NO	-query w/q2m.fa -subject w/S_6.fa -task blastn -outfmt 6 -num_threads 4 -max_target_seqs 3
+S_splitgap_7_60_mts2_blastn	S_split_gap	same	0	0	599	60	2	NO	-query w/q2m.fa -subject w/S_7.fa -task blastn -outfmt 7 -max_target_seqs 2
+S_splitgap_8_60_mts1_blastn	S_split_gap	same	0	0	61	60	1	NO	-query w/q2m.fa -subject w/S_8.fa -task blastn -outfmt 6 -max_hsps 1 -max_target_seqs 1
+S_splitgap_9_60_mts4_blastn	S_split_gap	same	0	0	63411	60	-1	NO	-query w/q2m.fa -subject w/S_9.fa -task blastn -outfmt 0 -max_target_seqs 4
+S2_splitgapmega_0_60_mts1	S_split_gap	same	0	0	131	60	1	NO	-query w/qcat.fa -subject w/S2_0.fa -task megablast -outfmt 6 -max_target_seqs 1
+S2_splitgapmega_1_60_mts3	S_split_gap	same	0	0	398	60	3	yes	-query w/qcat.fa -subject w/S2_1.fa -task megablast -outfmt 6 -max_target_seqs 3
+S2_splitgapmega_2_80_mts5	S_split_gap	same	0	0	803	80	5	NO	-query w/qcat.fa -subject w/S2_2.fa -task megablast -outfmt 6 -max_target_seqs 5
+S2_splitgapmega_3_600_mtsNone	S_split_gap	same	0	0	226297	600	500	NO	-query w/qcat.fa -subject w/S2_3.fa -task megablast -outfmt 6
+S3_splitmultiq_0_big_first_mts2	S_split_gap	same	0	0	1596	730	8	NO	-query w/S3_0_q.fa -subject w/S3_0.fa -task blastn -outfmt 6 -max_target_seqs 2
+S3_splitmultiq_1_big_last_mts3	S_split_gap	same	0	0	12421	730	12	NO	-query w/S3_1_q.fa -subject w/S3_1.fa -task blastn -outfmt 6 -max_target_seqs 3
+S3_splitmultiq_2_big_mid_mtsNone	S_split_gap	same	0	0	168891	730	671	NO	-query w/S3_2_q.fa -subject w/S3_2.fa -task blastn -outfmt 6
+S3_splitmultiq_3_big_first_mts1	S_split_gap	same	0	0	507	730	4	NO	-query w/S3_3_q.fa -subject w/S3_3.fa -task blastn -outfmt 6 -max_target_seqs 1
+T_chunkover_0_620_mixed_mtsNone	T_chunk_overflow	same	0	0	63930	1240	500	NO	-query w/q2m.fa -subject w/T_0.fa -task blastn -outfmt 6
+T_chunkover_1_700_dups_mtsNone	T_chunk_overflow	same	0	0	34043	1406	500	NO	-query w/q2m.fa -subject w/T_1.fa -task blastn -outfmt 6
+T_chunkover_2_650_exact_fix_mtsNone	T_chunk_overflow	same	0	0	42547	1302	500	NO	-query w/q2m.fa -subject w/T_2.fa -task blastn -outfmt 6
+T_chunkover_3_600_mixed_mts3	T_chunk_overflow	same	0	0	184	1205	3	yes	-query w/q2m.fa -subject w/T_3.fa -task blastn -outfmt 6 -max_target_seqs 3
+T_chunkover_4_600_exact_fix_mts1	T_chunk_overflow	same	0	0	63	1204	1	yes	-query w/q2m.fa -subject w/T_4.fa -task blastn -outfmt 6 -max_target_seqs 1
+T_chunkover_5_600_dups_mts5	T_chunk_overflow	same	0	0	320	1206	5	yes	-query w/q2m.fa -subject w/T_5.fa -task blastn -outfmt 6 -max_target_seqs 5
+T_chunkover_6_620_mixed_mtsNone	T_chunk_overflow	same	0	0	49935	1244	500	NO	-query w/q2m.fa -subject w/T_6.fa -task blastn -outfmt 7
+T_chunkover_7_600_mixed_mts2	T_chunk_overflow	same	0	0	126	1205	2	yes	-query w/q2m.fa -subject w/T_7.fa -task blastn -outfmt 6 -subject_besthit -max_target_seqs 2
+T_chunkover_8_580_mixed_mtsNone	T_chunk_overflow	same	0	0	32668	1165	500	yes	-query w/q2m.fa -subject w/T_8.fa -task blastn -outfmt 6 -max_hsps 1
+T2_chunkovermega_0_620_mixed_mtsNone	T_chunk_overflow	same	0	0	110443	1238	500	NO	-query w/qcat.fa -subject w/T2_0.fa -task megablast -outfmt 6
+T2_chunkovermega_1_600_dups_mts3	T_chunk_overflow	same	0	0	404	1206	3	yes	-query w/qcat.fa -subject w/T2_1.fa -task megablast -outfmt 6 -max_target_seqs 3
+T2_chunkovermega_2_600_exact_fix_mts1	T_chunk_overflow	same	0	0	132	1200	1	yes	-query w/qcat.fa -subject w/T2_2.fa -task megablast -outfmt 6 -max_target_seqs 1
+T3_chunkover5_mixed_mtsNone	T_chunk_overflow	same	0	0	71871	3009	500	NO	-query w/qedl.fa -subject w/T3_0.fa -task blastn -outfmt 6
+T3_chunkover5_exact_fix_mts2	T_chunk_overflow	same	0	0	243	3007	2	NO	-query w/qedl.fa -subject w/T3_1.fa -task blastn -outfmt 6 -max_target_seqs 2
+U_bigsubject_0_600_mtsNone_blastn	U_big_subject	same	0	0	266320	601	500	NO	-query w/q_e1.fa -subject w/U_0.fa -task blastn -outfmt 6
+U_bigsubject_1_60_mts3_blastn	U_big_subject	same	0	0	186451	61	3	NO	-query w/q_e1.fa -subject w/U_1.fa -task blastn -outfmt 6 -max_target_seqs 3
+U_bigsubject_2_40_mts1_megablast	U_big_subject	same	0	0	34092	41	1	yes	-query w/q_e1.fa -subject w/U_2.fa -task megablast -outfmt 6 -max_target_seqs 1
+U_bigsubject_3_600_mts100_megablast	U_big_subject	same	0	0	44628	601	100	NO	-query w/q_e1.fa -subject w/U_3.fa -task megablast -outfmt 6 -max_target_seqs 100
+V_linear_0_600_mtsNone	V_linear_gap	same	0	0	37396	600	500	NO	-query w/q_e1.fa -subject w/V_0.fa -task megablast -outfmt 6 -gapopen 0 -gapextend 0 -reward 2 -penalty -3
+V_linear_1_600_mtsNone	V_linear_gap	same	0	0	46879	600	500	NO	-query w/q_e1.fa -subject w/V_1.fa -task megablast -outfmt 6 -gapopen 0 -gapextend 0 -reward 1 -penalty -2
+V_linear_2_600_mtsNone	V_linear_gap	same	0	0	56178	600	500	yes	-query w/q_e1.fa -subject w/V_2.fa -task megablast -outfmt 6 -gapopen 0 -gapextend 0 -reward 2 -penalty -7
+V_linear_3_60_mts2	V_linear_gap	same	0	0	108	60	2	NO	-query w/q_e1.fa -subject w/V_3.fa -task megablast -outfmt 6 -gapopen 0 -gapextend 0 -reward 2 -penalty -3 -max_target_seqs 2
+V_linear_4_60_mts1	V_linear_gap	same	0	0	51	60	1	NO	-query w/q_e1.fa -subject w/V_4.fa -task megablast -outfmt 6 -gapopen 0 -gapextend 0 -reward 1 -penalty -2 -max_target_seqs 1
+V_linear_5_60_mts3	V_linear_gap	same	0	0	279	60	3	yes	-query w/q_e1.fa -subject w/V_5.fa -task megablast -outfmt 6 -gapopen 0 -gapextend 0 -reward 2 -penalty -7 -max_target_seqs 3

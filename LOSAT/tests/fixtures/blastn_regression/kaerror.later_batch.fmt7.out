@@ -1,0 +1,3 @@
+# BLASTN 2.17.0+
+# Query: batchN 5000 N filling the first query batch
+# Database: User specified sequence set (Input: tests/fasta/blastn_parity_compact.fasta)

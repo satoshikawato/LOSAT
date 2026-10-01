@@ -147,6 +147,19 @@ _CASES = [
      "HOME=tests/fixtures/blastn_regression/ncbirc_home BLAST_USAGE_REPORT=0 NCBI_CONFIG__BLAST__BLASTDB=/x"),
     # E2g T14: a failed outfmt 0 write ("BLAST failed to write output", exit 6; Linux /dev/full).
     ("write.devfull_fmt0", f"{T} -max_target_seqs 5 -outfmt 0 -out /dev/full", ""),
+    # E2g T8: the Karlin-Altschul table error of a later batch, after the reports of a first
+    # batch of invalid queries (no epilog).
+    ("kaerror.later_batch.fmt6", "-query tests/fasta/outfmt0/edge_batch_allN.fasta -subject"
+                                 " tests/fasta/blastn_parity_compact.fasta -reward 1 -penalty -6 -outfmt 6", ""),
+    ("kaerror.later_batch.fmt0", "-query tests/fasta/outfmt0/edge_batch_allN.fasta -subject"
+                                 " tests/fasta/blastn_parity_compact.fasta -reward 1 -penalty -6 -outfmt 0", ""),
+    ("kaerror.later_batch.fmt7", "-query tests/fasta/outfmt0/edge_batch_allN.fasta -subject"
+                                 " tests/fasta/blastn_parity_compact.fasta -reward 1 -penalty -6 -outfmt 7", ""),
+    # E2g T9: title and invalid-query warnings per query batch.
+    ("warnings.batches.fmt6", f"-query {I}/warn_query.fa -subject {I}/warn_subject.fa -outfmt 6", ""),
+    ("warnings.batches.fmt0", f"-query {I}/warn_query.fa -subject {I}/warn_subject.fa -outfmt 0", ""),
+    ("warnings.batch1000.fmt7", f"-query {I}/warn_query.fa -subject {I}/warn_subject.fa -task blastn -outfmt 7", "",
+     "BATCH_SIZE=1000"),
     # E2g T11: showdefline.cpp kBits is "(bits)" when CTOOLKIT_COMPATIBLE is set (also empty).
     ("ctoolkit.fmt0", f"{P} -max_target_seqs 3 -outfmt 0", "", "CTOOLKIT_COMPATIBLE=1"),
     ("ctoolkit.empty_fmt0", f"{T} -task blastn -max_target_seqs 5 -outfmt 0", "", "CTOOLKIT_COMPATIBLE="),
@@ -274,6 +287,14 @@ def generate_e2g_inputs(edl: str, sakai: str) -> None:
         copy = mutate(rng, unit if index % 2 == 0 else rep[index * 300:index * 300 + 600], 0.02, 0.005)
         subject.append(revcomp(copy) if index % 3 == 0 else copy)
     write_fasta(INPUTS / "rep_subject.fa", [("reps Sakai unit copies", "".join(subject))])
+    # T9: two query batches (the first ends at 5000 residues), each with a title that ends
+    # in nucleotides (CFastaReader's warning) and an invalid query (all N).
+    window = sakai[3_100_000:3_120_000]
+    write_fasta(INPUTS / "warn_query.fa", [
+        ("q1 first ACGTACGTACGTACGTACGTACGTAC", window[1000:4000]), ("q2 all N one", "N" * 2500),
+        ("q3 third GGGGCCCCAAAATTTTGGGGCCCCAA", window[8000:8300]), ("q4 all N two", "N" * 100),
+        ("q5 plain", window[12000:12500])])
+    write_fasta(INPUTS / "warn_subject.fa", [("s Sakai window", window)])
 
 
 def prepare_runtime_inputs() -> None:

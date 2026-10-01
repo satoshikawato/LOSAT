@@ -1149,6 +1149,7 @@ pub fn write_output_blastn_hitlists_to_writer<W: Write>(
     query_titles: &[Arc<str>],
     subject_title: &str,
     unsearched: &[bool],
+    epilog: bool,
     mut probe: Option<&mut FormatProbe<'_>>,
 ) -> io::Result<()> {
     let config = OutputConfig::ncbi_compat();
@@ -1273,7 +1274,8 @@ pub fn write_output_blastn_hitlists_to_writer<W: Write>(
         }
     }
 
-    if output_format == BlastnOutputFormat::TabularWithComments {
+    // `PrintEpilog` writes the last line; an error in a later query batch skips it.
+    if output_format == BlastnOutputFormat::TabularWithComments && epilog {
         // NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1324
         // ```c
         // m_Ostream << "# BLAST processed " << num_queries << " queries\n";
@@ -1605,6 +1607,7 @@ mod tests {
             &query_titles,
             "User specified sequence set (Input: subject.fasta)",
             &[],
+            true,
             None,
         )
         .unwrap();
@@ -1624,10 +1627,14 @@ mod tests {
             &query_titles,
             "User specified sequence set (Input: subject.fasta)",
             &[true],
+            false,
             None,
         )
         .unwrap();
-        assert!(!String::from_utf8(output).unwrap().contains("hits found"));
+        let text = String::from_utf8(output).unwrap();
+        assert!(!text.contains("hits found"));
+        // Without NCBI's epilog (an error in a later query batch), no last line.
+        assert!(!text.contains("BLAST processed"));
     }
 
     #[test]

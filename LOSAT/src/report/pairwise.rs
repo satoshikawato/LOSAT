@@ -1696,6 +1696,9 @@ pub struct BlastnPairwiseReport {
     /// Every query of the batch is invalid, so NCBI did not search it (all queries of such
     /// a batch get the `-1` footer, local_blast.cpp:177-207). Indexed like the queries.
     pub unsearched: Vec<bool>,
+    /// Whether NCBI's epilog (the database and statistics footer, `PrintEpilog`) ends the
+    /// report.
+    pub epilog: bool,
 }
 
 // The description table of the BLASTN report.
@@ -1911,6 +1914,17 @@ fn write_nucleotide_query_footer<W: Write>(
     karlin: Option<(KarlinParams, KarlinParams)>,
     effective_search_space: i64,
 ) -> io::Result<()> {
+    write_nucleotide_query_footer_spacing(writer, karlin, effective_search_space, true)
+}
+
+/// `write_nucleotide_query_footer`, with the two blank lines that follow it (the next
+/// query's preamble or the epilog) when `trailing`.
+fn write_nucleotide_query_footer_spacing<W: Write>(
+    writer: &mut W,
+    karlin: Option<(KarlinParams, KarlinParams)>,
+    effective_search_space: i64,
+    trailing: bool,
+) -> io::Result<()> {
     writeln!(writer)?;
     if let Some((ungapped, _)) = karlin {
         writeln!(writer, "Lambda      K        H")?;
@@ -1936,8 +1950,11 @@ fn write_nucleotide_query_footer<W: Write>(
     )?;
     // The two blank lines of the next query's preamble or of the epilog
     // (blast_format.cpp:1491, 2249).
-    writeln!(writer)?;
-    writeln!(writer)
+    if trailing {
+        writeln!(writer)?;
+        writeln!(writer)?;
+    }
+    Ok(())
 }
 
 // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:2261-2279
@@ -2086,14 +2103,22 @@ pub fn write_blastn_pairwise_report<W: Write>(
     }
 
     for (q_idx, query) in queries.iter().enumerate() {
+        // Without the epilog (an error in a later query batch), nothing follows the last
+        // query's footer.
+        let trailing = report.epilog || q_idx + 1 < queries.len();
         write_blastp_query_header(writer, &query.query_name, query.query_length)?;
         let query_hits = &hits_by_query[q_idx];
         if query_hits.is_empty() {
             write_no_hits_found(writer)?;
             if report.unsearched.get(q_idx).copied().unwrap_or(false) {
-                write_tblastn_unsearched_query_footer(writer)?;
+                write_tblastn_unsearched_query_footer_spacing(writer, trailing)?;
             } else {
-                write_nucleotide_query_footer(writer, query.karlin, query.effective_search_space)?;
+                write_nucleotide_query_footer_spacing(
+                    writer,
+                    query.karlin,
+                    query.effective_search_space,
+                    trailing,
+                )?;
             }
             continue;
         }
@@ -2191,10 +2216,23 @@ pub fn write_blastn_pairwise_report<W: Write>(
             }
         }
 
-        write_nucleotide_query_footer(writer, query.karlin, query.effective_search_space)?;
+        write_nucleotide_query_footer_spacing(
+            writer,
+            query.karlin,
+            query.effective_search_space,
+            trailing,
+        )?;
     }
 
-    write_blastn_final_footer(writer, report)?;
+    // NCBI reference: ncbi-blast/c++/src/app/blast/blastn_app.cpp:317-318
+    // ```c
+    //         BLAST_PROF_START( APP.POST );
+    //         formatter.PrintEpilog(opt);
+    // ```
+    // An error in a later query batch skips the epilog.
+    if report.epilog {
+        write_blastn_final_footer(writer, report)?;
+    }
     writer.flush()
 }
 

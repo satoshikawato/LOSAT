@@ -1,0 +1,2 @@
+Warning: [blastn] Query_1 batchN 5000 N fil.. : Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options 
+BLAST engine error: Error: Substitution scores 1 and -6 are not supported 

@@ -4490,6 +4490,9 @@ struct BlastnReportInputs<'a> {
     max_target_seqs: Option<usize>,
     db_num_seqs: usize,
     db_len_total: usize,
+    /// Whether NCBI's epilog (`PrintEpilog`: the outfmt 0 footer, outfmt 7's last line)
+    /// follows the reports; an error in a later batch skips it.
+    epilog: bool,
 }
 
 /// The per-query and run-level data of the pairwise report.
@@ -4552,6 +4555,7 @@ fn blastn_pairwise_report(
         num_descriptions,
         num_alignments,
         unsearched,
+        epilog: report.epilog,
     };
     Ok((queries, pairwise_report))
 }
@@ -4837,30 +4841,13 @@ fn post_process_hits_and_write(
                 query_titles,
                 subject_title,
                 &unsearched,
+                report.epilog,
                 probe.as_mut(),
             )?;
         }
         writer.flush()?;
     }
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:1450-1452
-    // ```c
-    //     if (results.HasWarnings()) {
-    //         ERR_POST(Warning << results.GetWarningStrings());
-    //     }
-    // ```
-    // The warnings belong to the result, so they are written once, in query order.
-    for (index, (query, karlin)) in report
-        .queries
-        .iter()
-        .zip(report.context_karlin.iter().step_by(2))
-        .enumerate()
-    {
-        if karlin.is_none() {
-            outputs
-                .diagnostics
-                .write_all(&invalid_query_warning("blastn", index, query))?;
-        }
-    }
+    // The warnings of invalid queries are written per batch (`run_in_pool`).
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:770-782
     // ```c
@@ -5518,8 +5505,8 @@ fn search(
         return Ok(());
     }
     check_records_have_residues(subject_records, "subject")?;
-    // NCBI reads the queries after `Query is Empty!`, with its reader's warnings.
-    write_title_warnings(query_records, outputs.diagnostics)?;
+    // NCBI reads the queries after `Query is Empty!`, one batch at a time, with its
+    // reader's warnings (`run_in_pool`).
     // NCBI decodes HTML character references in the outfmt 0 titles of the subjects
     // (`NStr::HtmlDecode` in `CDeflineGenerator::GenerateDefline`, create_defline.cpp:4066),
     // which LOSAT does not reproduce (`report/defline.rs`).
@@ -5679,6 +5666,19 @@ fn check_unsupported_environment() -> Result<()> {
     }
     Ok(())
 }
+
+/// The Karlin-Altschul error of a query batch after the first (`search_query_batch`), which
+/// NCBI raises after the reports of the batches before.
+#[derive(Debug)]
+struct KarlinErrorAfterInvalidBatches(anyhow::Error);
+
+impl std::fmt::Display for KarlinErrorAfterInvalidBatches {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::error::Error for KarlinErrorAfterInvalidBatches {}
 
 /// NCBI's query batch size (`GetQueryBatchSize`, 0 for the adaptive `CBatchSizeMixer`) and
 /// query chunk sizes, as a query batch of the search uses them.
@@ -5856,6 +5856,7 @@ fn run_in_pool(
     }
     let metadata = subject_metadata_from_records(subject_records);
     if metadata.db_num_seqs == 0 {
+        write_title_warnings(query_records, outputs.diagnostics)?;
         return Ok(());
     }
     let subjects = PreparedSubjects {
@@ -5893,7 +5894,16 @@ fn run_in_pool(
     let mut start = 0;
     while start < lengths.len() {
         let end = next_query_batch_end(&lengths, start, batching.batch_size);
-        let batch = search_query_batch(
+        // NCBI reference: ncbi-blast/c++/src/app/blast/blastn_app.cpp:277-279
+        // ```c
+        //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup() ) {
+        // 	    BLAST_PROF_START( APP.LOOP.PRE );
+        //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
+        // ```
+        // `CFastaReader` warns about the titles of a batch's queries when it reads them,
+        // after the report of the batch before.
+        write_title_warnings(&query_records[start..end], outputs.diagnostics)?;
+        let batch = match search_query_batch(
             &args,
             &query_records[start..end],
             &subjects,
@@ -5903,7 +5913,48 @@ fn run_in_pool(
             batching,
             start == 0,
             BatchStage::Search,
-        )?;
+        ) {
+            Ok(batch) => batch,
+            Err(error) => match error.downcast::<KarlinErrorAfterInvalidBatches>() {
+                // NCBI reference: ncbi-blast/c++/src/app/blast/blastn_app.cpp:295-318
+                // ```c
+                //                 CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
+                //                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
+                // 		        lcl_blast.SetBatchNumber( batch_num );
+                //                 results = lcl_blast.Run();
+                //     ...
+                //                 ITERATE(CSearchResultSet, result, *results) {
+                //                     formatter.PrintOneResultSet(**result, query_batch);
+                //                 }
+                //     ...
+                //         }
+                //         BLAST_PROF_START( APP.POST );
+                //         formatter.PrintEpilog(opt);
+                // ```
+                // The reports of the batches before are written, then the error, which
+                // skips `PrintEpilog` (the outfmt 0 footer and outfmt 7's last line).
+                Ok(KarlinErrorAfterInvalidBatches(error)) => {
+                    write_batch_reports(
+                        &args,
+                        &query_records[..start],
+                        &subjects,
+                        outputs,
+                        &output_formats,
+                        BatchResults {
+                            hit_lists,
+                            lengths: &lengths[..start],
+                            unsearched,
+                            query_masks: &query_masks,
+                            context_karlin: &context_karlin,
+                            query_eff_searchsp: &query_eff_searchsp,
+                        },
+                        false,
+                    )?;
+                    return Err(error);
+                }
+                Err(error) => return Err(error),
+            },
+        };
         // The batch numbers its queries from 0.
         let first = start as u32;
         hit_lists.extend(batch.hit_lists.into_iter().map(|list| {
@@ -5919,6 +5970,23 @@ fn run_in_pool(
         }));
         unsearched.extend(std::iter::repeat_n(!batch.searched, end - start));
         query_masks.extend(batch.query_masks);
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:1450-1452
+        // ```c
+        //     if (results.HasWarnings()) {
+        //         ERR_POST(Warning << results.GetWarningStrings());
+        //     }
+        // ```
+        // The warnings of a batch's invalid queries come with its report
+        // (`PrintOneResultSet`), before the next batch is read.
+        for (index, karlin) in batch.context_karlin.iter().step_by(2).enumerate() {
+            if karlin.is_none() {
+                outputs.diagnostics.write_all(&invalid_query_warning(
+                    "blastn",
+                    start + index,
+                    &query_records[start + index],
+                ))?;
+            }
+        }
         context_karlin.extend(batch.context_karlin);
         query_eff_searchsp.extend(batch.query_eff_searchsp);
         // NCBI's `Int4` count of the batch's successful initial extensions.
@@ -5929,22 +5997,64 @@ fn run_in_pool(
         start = end;
     }
 
-    let config = configure_task(&args);
+    write_batch_reports(
+        &args,
+        query_records,
+        &subjects,
+        outputs,
+        &output_formats,
+        BatchResults {
+            hit_lists,
+            lengths: &lengths,
+            unsearched,
+            query_masks: &query_masks,
+            context_karlin: &context_karlin,
+            query_eff_searchsp: &query_eff_searchsp,
+        },
+        true,
+    )
+}
+
+/// The results of the query batches searched so far, indexed by query (two contexts per
+/// query).
+struct BatchResults<'a> {
+    hit_lists: Vec<Option<BlastnHitList>>,
+    lengths: &'a [usize],
+    unsearched: Vec<bool>,
+    query_masks: &'a [Vec<MaskedInterval>],
+    context_karlin: &'a [Option<ContextKarlin>],
+    query_eff_searchsp: &'a [i64],
+}
+
+/// Writes the reports of `query_records` (the queries of the batches searched), with
+/// NCBI's epilog (`PrintEpilog`) when `epilog`.
+fn write_batch_reports(
+    args: &BlastnArgs,
+    query_records: &[bio::io::fasta::Record],
+    subjects: &PreparedSubjects<'_>,
+    outputs: &mut ReportOutputs<'_>,
+    output_formats: &[BlastnOutputFormat],
+    results: BatchResults<'_>,
+    epilog: bool,
+) -> Result<()> {
+    let megablast = args.task == "megablast";
+    let config = configure_task(args);
     let report_inputs = BlastnReportInputs {
         queries: query_records,
-        subjects: subject_records,
-        query_masks: &query_masks,
+        subjects: subjects.records,
+        query_masks: results.query_masks,
         lcase_masking: args.lcase_masking,
-        query_eff_searchsp: &query_eff_searchsp,
+        query_eff_searchsp: results.query_eff_searchsp,
         megablast,
         reward: config.reward,
         penalty: config.penalty,
         gap_open: config.gap_open,
         gap_extend: config.gap_extend,
-        context_karlin: &context_karlin,
+        context_karlin: results.context_karlin,
         max_target_seqs: args.max_target_seqs,
         db_num_seqs: subjects.metadata.db_num_seqs,
         db_len_total: subjects.metadata.db_len_total,
+        epilog,
     };
     let query_ids: Vec<Arc<str>> = query_records
         .iter()
@@ -5966,21 +6076,21 @@ fn run_in_pool(
         _ => args.hitlist_size,
     };
     post_process_hits_and_write(
-        hit_lists,
+        results.hit_lists,
         hitlist_size,
         args.max_hsps_per_subject.unwrap_or(0),
         args.subject_besthit,
-        &lengths,
+        results.lengths,
         outputs,
         args.verbose,
         &query_ids,
         &subject_ids,
-        &output_formats,
+        output_formats,
         &query_titles,
         &subject_title,
         None,
         &report_inputs,
-        unsearched,
+        results.unsearched,
     )
 }
 
@@ -6546,16 +6656,21 @@ fn search_query_batch(
             // batch raises it). LOSAT reproduces the error only for a first batch of valid
             // queries (the error does not depend on the queries, so the first batch with a valid
             // query meets it; NCBI writes the results and warnings of the batches before it).
-            if !first_batch {
-                anyhow::bail!(
-                    "these scoring options have no Karlin-Altschul values, and the first query batch has only invalid queries; NCBI BLAST+ reports the error after the results of that batch, which LOSAT does not reproduce"
-                );
-            }
             if context_ungapped.iter().any(Option::is_none) {
                 anyhow::bail!(
-                    "these scoring options have no Karlin-Altschul values, and the first query batch (up to {} residues) has an invalid query; NCBI BLAST+ does not report the error then, which is not supported by LOSAT's BLASTN",
+                    "these scoring options have no Karlin-Altschul values, and the query batch (up to {} residues) has an invalid query; NCBI BLAST+ goes on without the gapped values and crashes, which is not supported by LOSAT's BLASTN",
                     batching.batch_size
                 );
+            }
+            // A batch after the first: every batch before it had only invalid queries (one
+            // with a valid query would have raised the error), and NCBI has written their
+            // reports (`run_in_pool`).
+            if !first_batch {
+                return Err(KarlinErrorAfterInvalidBatches(karlin_error(
+                    &message,
+                    seq_data.queries.len(),
+                ))
+                .into());
             }
             for (format, &output_format) in outputs.formats.iter_mut().zip(output_formats) {
                 if output_format == BlastnOutputFormat::Pairwise {

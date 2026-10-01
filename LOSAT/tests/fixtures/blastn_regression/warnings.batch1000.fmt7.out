@@ -1,0 +1,56 @@
+# BLASTN 2.17.0+
+# Query: q1 first ACGTACGTACGTACGTACGTACGTAC
+# Database: User specified sequence set (Input: tests/fixtures/blastn_regression/inputs/warn_subject.fa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 19 hits found
+q1	s	100.000	3000	0	0	1	3000	1001	4000	0.0	5411
+q1	s	94.444	18	1	0	830	847	17418	17401	0.18	29.2
+q1	s	100.000	14	0	0	972	985	8004	7991	0.61	26.5
+q1	s	100.000	14	0	0	1796	1809	9723	9710	0.61	26.5
+q1	s	89.474	19	2	0	1576	1594	12565	12583	0.61	26.5
+q1	s	89.474	19	2	0	995	1013	17908	17926	0.61	26.5
+q1	s	100.000	13	0	0	1611	1623	5630	5618	2.1	24.7
+q1	s	100.000	13	0	0	997	1009	8006	7994	2.1	24.7
+q1	s	100.000	13	0	0	138	150	16136	16124	2.1	24.7
+q1	s	93.333	15	1	0	962	976	1590	1604	7.5	23.8
+q1	s	93.333	15	1	0	590	604	1962	1976	7.5	23.8
+q1	s	93.333	15	1	0	2070	2084	14452	14466	7.5	23.8
+q1	s	100.000	12	0	0	2540	2551	5175	5186	7.5	22.9
+q1	s	100.000	12	0	0	547	558	8772	8783	7.5	22.9
+q1	s	100.000	12	0	0	1008	1019	8843	8832	7.5	22.9
+q1	s	100.000	12	0	0	1704	1715	11052	11063	7.5	22.9
+q1	s	100.000	12	0	0	2466	2477	12896	12885	7.5	22.9
+q1	s	100.000	12	0	0	1502	1513	17243	17232	7.5	22.9
+q1	s	100.000	12	0	0	2622	2633	19414	19425	7.5	22.9
+# BLASTN 2.17.0+
+# Query: q2 all N one
+# Database: User specified sequence set (Input: tests/fixtures/blastn_regression/inputs/warn_subject.fa)
+# BLASTN 2.17.0+
+# Query: q3 third GGGGCCCCAAAATTTTGGGGCCCCAA
+# Database: User specified sequence set (Input: tests/fixtures/blastn_regression/inputs/warn_subject.fa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 6 hits found
+q3	s	100.000	300	0	0	1	300	8001	8300	3.21e-157	542
+q3	s	90.000	20	2	0	254	273	8273	8254	0.017	28.3
+q3	s	85.000	20	3	0	232	251	17873	17892	0.71	23.8
+q3	s	92.857	14	1	0	45	58	2962	2975	2.5	22.0
+q3	s	100.000	11	0	0	28	38	11700	11690	2.5	21.1
+q3	s	100.000	11	0	0	255	265	12760	12750	2.5	21.1
+# BLASTN 2.17.0+
+# Query: q4 all N two
+# Database: User specified sequence set (Input: tests/fixtures/blastn_regression/inputs/warn_subject.fa)
+# 0 hits found
+# BLASTN 2.17.0+
+# Query: q5 plain
+# Database: User specified sequence set (Input: tests/fixtures/blastn_regression/inputs/warn_subject.fa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 8 hits found
+q5	s	100.000	500	0	0	1	500	12001	12500	0.0	902
+q5	s	72.093	43	12	0	43	85	16926	16884	0.35	24.7
+q5	s	92.857	14	1	0	229	242	14424	14411	4.2	22.0
+q5	s	100.000	11	0	0	170	180	7500	7490	4.2	21.1
+q5	s	100.000	11	0	0	314	324	8914	8924	4.2	21.1
+q5	s	100.000	11	0	0	100	110	10042	10032	4.2	21.1
+q5	s	100.000	11	0	0	39	49	14490	14500	4.2	21.1
+q5	s	100.000	11	0	0	145	155	18315	18325	4.2	21.1
+# BLAST processed 5 queries

@@ -87,8 +87,26 @@ RULES = [
     (r".*", r".*", r"", r"rejected", "K-layer"),
 ]
 
-# Filled as the transpile items are finished: action -> result text.
-RESULTS: dict[str, str] = {}
+# Filled as the transpile items are finished: action -> result text (S07+++b, 2026-10-02).
+RESULTS: dict[str, str] = {
+    "T1": "faithful after 019ba8ea4; concatenated q_start, stable sort; fixtures pal.* (40 X+revcomp(X) queries) match NCBI before and after",
+    "T2": "faithful after b5940fba9 (+ fixture de42604ff); Int4 offset; overflow hunt (2762 commands, overflow-checked build): the only overflow site, 188 commands, all equal NCBI before and after; 926 sweep combinations equal",
+    "T3": "faithful after 35e3e6d7f; !(evalue > cutoff) in both reaps; unit test (NaN only, -evalue NaN rejected)",
+    "T4": "faithful after 7eb018f70; traced in the stored order (heap lists in e-value order); for BLASTN equal to score order; one interval tree equivalent to per-query trees; fixtures prelim.gaps10_*, ties.gaps10_1_1",
+    "T5": "faithful after 435f97afd; ascending cells for the small and standard tables (TaskConfig::mb_lookup); unit test; fixtures rep.*, rep2.*",
+    "T6": "faithful after 0b3b851c7; diagonal array whenever the block is at most 8000; fixtures sq.* (12 queries, block 5155)",
+    "T7": "faithful after 8ccf079ba; NCBI's StringToInt and size_t/TSeqPos arithmetic; explicit rejection: non-integers (CStringException text names the build's files, exit 255), CHUNK_SIZE=1000 without BATCH_SIZE (empty batch, exit 3), both negative; 20 fixtures env.*; 22 batch_sweep runs x 60 cases and 4 split_check runs with the variables: 0 differ",
+    "T8": "faithful after baf180fbb; reports of the batches before, no epilog, then BLAST engine error (exit 3); a failing batch with an invalid query (NCBI crashes) stays rejected; fixtures kaerror.later_batch.fmt{0,6,7}",
+    "T9": "faithful after baf180fbb; title warnings when a batch is read, invalid-query warnings with its report; fixtures warnings.batches.fmt{0,6}, warnings.batch1000.fmt7",
+    "T10": "faithful after 1a0fd98c1; -subject optional for the parser, NCBI's error (exit 1) before -query and -out are opened; fixtures nosubject.*",
+    "T11": "faithful after e4b5c4a63; kBits from CTOOLKIT_COMPATIBLE (any value); fixtures ctoolkit.*; 55 outfmt 0 cases of every program x 3 environments: 51 same, 4 TBLASTX (outfmt 0 not implemented, S08)",
+    "T12": "faithful after 650b02771; integers accepted (no output change), non-integers rejected explicitly (CStringException text names the build's files, exit 255); fixtures env.prefetch*",
+    "T13": "faithful after a99527f20; exact %#8.3g; unit test with C's strings",
+    "T14": "faithful after 5cd9cc3cf; outfmt 0 write failure: BLAST failed to write output, exit 6 (oracle -out /dev/full); SIGPIPE default (closed pipe ends every format by the signal, as NCBI); fixture write.devfull_fmt0",
+    "R1": "explicit rejection after 7b63980b2 (any value; an empty query still ends with Query is Empty!)",
+    "R2": "explicit rejection after 219c2c49e: DIAG_*, NCBI_CONFIG_* (except entries that change no output), ABORT_ON_THROW, stack-trace and LOG_* parameters, non-Boolean BLAST_USAGE_REPORT; blastn.ini and .ncbirc on NCBI's search path accepted only with entries that change no output (fixture ncbirc.harmless_fmt0); oracle research e2g-r2r3",
+    "R3": "explicit rejection after 6182cef73 (-subject, -query, -out not UTF-8, in NCBI's open order)",
+}
 
 
 def main() -> int:

@@ -545,7 +545,7 @@ pub fn read_sequences(
         })
         .collect();
 
-    let subjects = read_fasta_records(&args.subject, "subject")?;
+    let subjects = read_fasta_records(args.subject_path(), "subject")?;
 
     Ok((queries, query_ids, subjects))
 }
@@ -590,15 +590,23 @@ pub fn subject_metadata_from_records(records: &[fasta::Record]) -> SubjectMetada
 // }
 // ```
 pub fn scan_subjects_metadata(args: &BlastnArgs) -> Result<SubjectMetadata> {
-    let subject_reader = fasta::Reader::from_file(&args.subject)
-        .with_context(|| format!("failed to open subject FASTA {}", args.subject.display()))?;
+    let subject_reader = fasta::Reader::from_file(args.subject_path()).with_context(|| {
+        format!(
+            "failed to open subject FASTA {}",
+            args.subject_path().display()
+        )
+    })?;
     let mut subject_ids: Vec<String> = Vec::new();
     let mut db_len_total: usize = 0;
     let mut db_num_seqs: usize = 0;
 
     for record_result in subject_reader.records() {
-        let record = record_result
-            .with_context(|| format!("failed to read subject FASTA {}", args.subject.display()))?;
+        let record = record_result.with_context(|| {
+            format!(
+                "failed to read subject FASTA {}",
+                args.subject_path().display()
+            )
+        })?;
         subject_ids.push(
             record
                 .id()

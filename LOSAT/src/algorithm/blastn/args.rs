@@ -18,8 +18,18 @@ pub struct BlastnArgs {
     // `-` is standard input (`blastn/blast_engine/run.rs`).
     #[arg(long, default_value = "-", value_parser = blastn_input_path(), value_name = "PATH")]
     pub query: PathBuf,
+    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2558-2562
+    // ```c
+    //     } else if (!m_IsIgBlast){
+    //         // IgBlast permits use of germline database
+    //         NCBI_THROW(CInputException, eInvalidInput,
+    //            "Either a BLAST database or subject sequence(s) must be specified");
+    //     }
+    // ```
+    // Optional for the parser: a missing `-subject` is NCBI's error after the parsing
+    // (`blastn/blast_engine/run.rs`).
     #[arg(long, value_parser = blastn_input_path(), value_name = "PATH")]
-    pub subject: PathBuf,
+    pub subject: Option<PathBuf>,
     #[arg(long, default_value = "megablast", long_help = "Implemented tasks: megablast and blastn. Task defaults: megablast uses word size 28, reward 1, penalty -2, gaps 0/0; blastn uses word size 11, reward 2, penalty -3, gaps 5/2. An omitted option takes the default of the task.", value_parser = blastn_task)]
     pub task: String,
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:166-170,288-300
@@ -227,6 +237,11 @@ pub struct BlastnArgs {
 }
 
 impl BlastnArgs {
+    /// The `-subject` path (empty before NCBI's check that it is given).
+    pub fn subject_path(&self) -> &std::path::Path {
+        self.subject.as_deref().unwrap_or(std::path::Path::new(""))
+    }
+
     /// Reads the `-dust` value (`parse_dust_filtering`) where NCBI's filtering handler reads
     /// it, with NCBI's error.
     ///

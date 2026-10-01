@@ -239,7 +239,7 @@ fn parse_blastn_args(
     // ```
     let mut args = blastn::BlastnArgs {
         query,
-        subject,
+        subject: Some(subject),
         task: "megablast".to_string(),
         word_size: None,
         num_threads: 1,

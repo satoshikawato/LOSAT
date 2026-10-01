@@ -5190,10 +5190,35 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     // before the query and the output are opened and the options are checked. Files are
     // opened when a handler asks for them, and each once: a named pipe gives its bytes to
     // one reader only.
-    let mut subject_file = open_blastn_input(&args.subject, "subject")?;
-    let subject_bytes = read_blastn_fasta_bytes(&mut subject_file, &args.subject, "subject")?;
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2558-2562
+    // ```c
+    //     } else if (!m_IsIgBlast){
+    //         // IgBlast permits use of germline database
+    //         NCBI_THROW(CInputException, eInvalidInput,
+    //            "Either a BLAST database or subject sequence(s) must be specified");
+    //     }
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.hpp:172-176
+    // ```c
+    //     catch (const blast::CInputException& e) {                               \
+    //         LOG_POST(Error << "BLAST query/options error: " << e.GetMsg());     \
+    //         LOG_POST(Error << "Please refer to the BLAST+ user manual.");       \
+    //         exit_code = BLAST_INPUT_ERROR;                                      \
+    //     }                                                                       \
+    // ```
+    // The handler of the database arguments raises it, before the query and the output
+    // are opened (`CStdCmdLineArgs` comes after it).
+    let Some(subject_path) = args.subject.as_deref() else {
+        return Err(crate::cli::NativeError {
+            exit: 1,
+            message: "BLAST query/options error: Either a BLAST database or subject sequence(s) must be specified\nPlease refer to the BLAST+ user manual.\n".to_string(),
+        }
+        .into());
+    };
+    let mut subject_file = open_blastn_input(subject_path, "subject")?;
+    let subject_bytes = read_blastn_fasta_bytes(&mut subject_file, subject_path, "subject")?;
     drop(subject_file);
-    let subjects = read_blastn_records(&subject_bytes, &args.subject, "subject")?;
+    let subjects = read_blastn_records(&subject_bytes, subject_path, "subject")?;
     write_title_warnings(&subjects, &mut std::io::stderr())?;
     // NCBI reads these deflines and records without a message; LOSAT rejects them where
     // the search would start.
@@ -5288,7 +5313,7 @@ fn search_cli(
     // The position is taken on the opened file, before it is read. When the subjects were
     // read from standard input too, `cin` has reached its end (a failed stream), so NCBI
     // gets no position for the query either.
-    let seekable = !(args.query.as_os_str() == "-" && args.subject.as_os_str() == "-")
+    let seekable = !(args.query.as_os_str() == "-" && args.subject_path().as_os_str() == "-")
         && std::io::Seek::stream_position(&mut query_file).is_ok();
     let query_bytes = read_blastn_fasta_bytes(&mut query_file, &args.query, "query")?;
     drop(query_file);
@@ -5853,7 +5878,7 @@ fn run_in_pool(
     let query_titles: Vec<Arc<str>> = query_records.iter().map(fasta_defline).collect();
     let subject_title = format!(
         "User specified sequence set (Input: {})",
-        args.subject.display()
+        args.subject_path().display()
     );
     let hitlist_size = match args.max_target_seqs {
         Some(max_target_seqs) if max_target_seqs > 0 => max_target_seqs,
@@ -6129,7 +6154,7 @@ fn search_query_batch(
     );
     let subject_title = Arc::<str>::from(format!(
         "User specified sequence set (Input: {})",
-        args.subject.display()
+        args.subject_path().display()
     ));
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2589-2593

@@ -938,7 +938,7 @@ fn ensure_trailing_period(text: &str) -> String {
     }
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/align_format_util.cpp:581-613
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/align_format_util.cpp:584-603
 // ```c
 // if (gapped) {
 //     out << "Gapped" << "\n";
@@ -951,26 +951,42 @@ fn ensure_trailing_period(text: &str) -> String {
 //         out << "        a         alpha";
 //     }
 // }
-// ...
+// out << "\n";
 // sprintf(buffer, "%#8.3g ", lambda);
 // ```
+// C's `%#.3g` (C99 7.21.6.1): with precision P = 3 and X the exponent of the
+// `%e` conversion (after rounding to P digits), `%f` with precision P - 1 - X
+// when P > X >= -4, otherwise `%e` with precision P - 1 and an exponent of a
+// sign and at least two digits; `#` keeps the decimal point and the trailing
+// zeros. Rust's precision formatting rounds the exact binary value half to
+// even, as glibc does.
 fn format_ncbi_ka_value(value: f64) -> String {
-    if value == 0.0 {
-        return "0.00".to_string();
+    const PRECISION: i32 = 3;
+    if !value.is_finite() {
+        let text = if value.is_nan() { "nan" } else { "inf" };
+        return if value.is_sign_negative() {
+            format!("-{text}")
+        } else {
+            text.to_string()
+        };
     }
-
-    let abs = value.abs();
-    let exponent = abs.log10().floor() as i32;
-    if exponent <= -5 || exponent >= 3 {
-        return format!("{value:.2e}");
+    let e_style = format!("{:.*e}", (PRECISION - 1) as usize, value);
+    let (mantissa, exponent) = e_style
+        .split_once('e')
+        .expect("Rust exponent formatting has an 'e'");
+    let exponent: i32 = exponent
+        .parse()
+        .expect("Rust exponent formatting has an integer exponent");
+    if PRECISION > exponent && exponent >= -4 {
+        let mut formatted = format!("{:.*}", (PRECISION - 1 - exponent) as usize, value);
+        if !formatted.contains('.') {
+            formatted.push('.');
+        }
+        formatted
+    } else {
+        let sign = if exponent < 0 { '-' } else { '+' };
+        format!("{mantissa}e{sign}{:02}", exponent.unsigned_abs())
     }
-
-    let decimals = usize::try_from((2 - exponent).max(0)).unwrap_or(0);
-    let mut formatted = format!("{value:.prec$}", prec = decimals);
-    if !formatted.contains('.') {
-        formatted.push('.');
-    }
-    formatted
 }
 
 #[inline]
@@ -2315,6 +2331,55 @@ pub fn write_pairwise_simple<W: Write>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ka_value_matches_c_percent_hash_8_3g() {
+        // Expected strings from C's sprintf(buffer, "%#8.3g ", value) semantics
+        // (Python's '%#.3g' % value gives the same strings).
+        let cases: [(f64, &str); 32] = [
+            (0.0, "0.00"),
+            (-1.0, "-1.00"),
+            (0.625, "0.625"),
+            (0.41, "0.410"),
+            (0.78, "0.780"),
+            (1.37, "1.37"),
+            (1.28, "1.28"),
+            (0.46, "0.460"),
+            (0.85, "0.850"),
+            (0.99996, "1.00"),
+            (9.9996, "10.0"),
+            (999.5, "1.00e+03"),
+            (1.23e-05, "1.23e-05"),
+            (0.0001, "0.000100"),
+            (9.999e-05, "0.000100"),
+            (9.9994e-05, "0.000100"),
+            (1000.0, "1.00e+03"),
+            (99.95, "100."),
+            (99.94, "99.9"),
+            (0.125, "0.125"),
+            (0.375, "0.375"),
+            (12.5, "12.5"),
+            (125.0, "125."),
+            (1.5, "1.50"),
+            (2.25e-07, "2.25e-07"),
+            (123456.0, "1.23e+05"),
+            (-0.00042, "-0.000420"),
+            (5e-324, "4.94e-324"),
+            (f64::MAX, "1.80e+308"),
+            (0.0009995, "0.000999"),
+            (0.00099949, "0.000999"),
+            (-999.49, "-999."),
+        ];
+        for (value, expected) in cases {
+            assert_eq!(format_ncbi_ka_value(value), expected, "value {value:e}");
+            let mut field = Vec::new();
+            write_ncbi_ka_field(&mut field, value).unwrap();
+            assert_eq!(String::from_utf8(field).unwrap(), format!("{expected:>8} "));
+        }
+        assert_eq!(format_ncbi_ka_value(f64::NAN), "nan");
+        assert_eq!(format_ncbi_ka_value(f64::INFINITY), "inf");
+        assert_eq!(format_ncbi_ka_value(f64::NEG_INFINITY), "-inf");
+    }
 
     fn make_hit() -> Hit {
         // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166

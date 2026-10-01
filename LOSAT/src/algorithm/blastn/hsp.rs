@@ -809,7 +809,7 @@ pub fn compare_hsp_lists<L: HitListEntry>(a: &L, b: &L) -> Ordering {
         Ordering::Equal => {}
         ord => return ord,
     }
-    b.oid().cmp(&a.oid())
+    a.oid().cmp(&b.oid())
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1627-1650

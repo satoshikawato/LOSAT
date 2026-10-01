@@ -12889,4 +12889,106 @@ mod tests {
         assert!(ordered.iter().all(|hsp| hsp.7 > 0 && !hsp.9.is_empty()));
         std::fs::remove_dir_all(directory).unwrap();
     }
+
+    fn query_prelim_hit(query_idx: u32, prelim_score: i32) -> PrelimHit {
+        PrelimHit {
+            query_idx,
+            ..prelim_hit(query_idx * 2, 1, 10, 30, 20, 40, prelim_score)
+        }
+    }
+
+    fn prelim_scores(hit_list: &HitList<PrelimHspList>) -> Vec<(u32, Vec<i32>)> {
+        hit_list
+            .hsplist_array
+            .iter()
+            .map(|list| {
+                (
+                    list.oid,
+                    list.hsps.iter().map(|hsp| hsp.prelim_score).collect(),
+                )
+            })
+            .collect()
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/hspfilter_collector.c:116-161
+    // ```c
+    //       for (index = 0; index < hsp_list->hspcnt; index++) {
+    //          query_index = Blast_GetQueryIndexFromContext(hsp->context, program);
+    //          Blast_HSPListSaveHSP(tmp_hsp_list, hsp);
+    //       ...
+    //             if (!results->hitlist_array[index]) {
+    //                results->hitlist_array[index] =
+    //                   Blast_HitListNew(params->prelim_hitlist_size);
+    //             }
+    //             Blast_HitListUpdate(results->hitlist_array[index],
+    //                                 hsp_list_array[index]);
+    // ```
+    #[test]
+    fn the_collector_keeps_prelim_hitlist_size_subjects_per_query() {
+        let subject_hits = vec![
+            vec![query_prelim_hit(0, 30), query_prelim_hit(1, 90)],
+            vec![query_prelim_hit(0, 50)],
+            vec![query_prelim_hit(0, 40), query_prelim_hit(0, 45)],
+            Vec::new(),
+        ];
+        let mut hit_lists = collect_prelim_hit_lists(subject_hits, 3, 2);
+        assert!(hit_lists[2].is_none());
+        let mut query0 = hit_lists[0].take().unwrap();
+        // Subject 2 replaces subject 0 (the worst first score); a list that enters the
+        // heap is sorted by e-value, then score (`Blast_HSPListSortByEvalue`).
+        query0.sort_by_evalue();
+        assert_eq!(
+            prelim_scores(&query0),
+            vec![(1, vec![50]), (2, vec![45, 40])]
+        );
+        let mut query1 = hit_lists[1].take().unwrap();
+        query1.sort_by_evalue();
+        assert_eq!(prelim_scores(&query1), vec![(0, vec![90])]);
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2163-2210
+    // ```c
+    //     while (i < num_hsplists1 && j < num_hsplists2) {
+    //         if (hsplist1->oid < hsplist2->oid) {
+    //             Blast_HitListUpdate(new_hitlist, hsplist1);
+    //         ...
+    //             else {
+    //                 Blast_HSPListAppend(hitlist1->hsplist_array + i,
+    //                                     hitlist2->hsplist_array + j,
+    //                                     hsplist2->hsp_max);
+    //             }
+    //             Blast_HitListUpdate(new_hitlist, hitlist2->hsplist_array[j]);
+    // ```
+    #[test]
+    fn merging_prelim_hit_lists_appends_shared_subjects_and_keeps_the_size() {
+        let list = |oid: u32, scores: &[i32]| PrelimHspList {
+            oid,
+            hsps: scores
+                .iter()
+                .map(|&score| query_prelim_hit(0, score))
+                .collect(),
+            best_evalue: 0.0,
+        };
+        let mut hitlist1 = HitList::new(3);
+        hitlist1.update(list(4, &[50]));
+        hitlist1.update(list(2, &[70]));
+        let mut combined = HitList::new(3);
+        combined.update(list(9, &[80]));
+        combined.update(list(2, &[60]));
+        combined.update(list(7, &[40]));
+        let mut combined = Some(combined);
+        merge_prelim_hit_list(hitlist1, &mut combined, [0, 0]);
+        let mut merged = combined.unwrap();
+        assert_eq!(merged.hsplist_max, 3);
+        merged.sort_by_evalue();
+        assert_eq!(
+            prelim_scores(&merged),
+            vec![(9, vec![80]), (2, vec![70, 60]), (4, vec![50])]
+        );
+        let mut empty = None;
+        let mut single = HitList::new(3);
+        single.update(list(5, &[10]));
+        merge_prelim_hit_list(single, &mut empty, [0, 0]);
+        assert_eq!(prelim_scores(empty.as_ref().unwrap()), vec![(5, vec![10])]);
+    }
 }

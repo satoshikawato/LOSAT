@@ -59,3 +59,12 @@ Each agent's divergent / unported / rejected / UNSURE rows, checked against the 
 | F-2 | `BL2SEQ_LEGACY` (7 rows: the legacy bl2seq conversion and report) | = E1-4 | keep-rejected (new explicit rejection) |
 | F-3 | `CTOOLKIT_COMPATIBLE` `kBits` (showdefline.cpp:80) | = A-5 | transpile |
 | F-4 | `.ncbirc` `[BLAST] LONG_SEQID` | Out of scope (the inventory assumes no .ncbirc). LOSAT does not read .ncbirc. | record (no change; LOSAT never reads .ncbirc, as for the other .ncbirc keys) |
+
+## C (setup, parameters, statistics, DUST): 174 rows; faithful 130, n/a 36, rejected 8
+
+| # | Row | Check | Decision |
+|---|---|---|---|
+| C-1 | reward − penalty above 3000 (`Blast_KarlinBlkUngappedCalc`; NCBI accepts the 16-bit range) | Existing E2c §G rejection, set where S07+ had compared LOSAT's Karlin-Altschul code (up to 1000/−2000). The code is a port of NCBI's; the limit is about verification, not a known difference. | re-examine: compare with the oracle above 3000 and remove the rejection if LOSAT matches |
+| C-2 | reward ≤ 0, K-A failure with invalid queries, empty subject | Existing rejections (K-A: see B-rej). | keep-rejected (K-A first-batch branch: transpile, see B-rej) |
+| C-note | `BSearchContextInfo` called with `q_end` at sentinel offsets (na_ungapped.c:534) | Flagged by the agent for range D; D classified `s_TypeOfWord` faithful. | check during the D transpile |
+| C-doc | E2c AUTHORITY §D still describes the `gap_x_dropoffs` rejection | E2f §C records that S07++ replaced it with real batches. | no change (E2f §C supersedes) |

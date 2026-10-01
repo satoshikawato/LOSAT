@@ -11,7 +11,48 @@ LOSAT の段階 E2g を実行する。BLASTN（LOSATN）の NCBI との一致を
 3. **明示的な拒否の見直し。** S07+ と S07++ の明示的な拒否（`AUTHORITY.md` §G など）のうち、transpile で NCBI と同じにできるものは拒否をなくす。残すものは表に理由を書く（NCBI が落ちる、NCBI の C++ の層の丸ごとの移植が要る、など）。
 4. **試験。** S07+ と S07++ のすべての検査（`check_inputs.py`、`scoring_sweep.py`、`word_size_sweep.py`、`slice_sweep.py`、`title_sweep.py`、`batch_sweep.py`）、既存の BLASTN のゲート（Gate A）、outfmt 0 の fixture に退行なし。移植した関数ごとに、その分岐に入る入力を NCBI と比べる。V-PERF の非退行。独立監査は、棚卸しの表を基準に、経路の網羅と移植の忠実さを確かめる。
 
-記録は `docs/evidence/losat_web_e2g/`（`README.md`、`INVENTORY.tsv`、`evidence.sha256`）。変更前の成果物は S07++ の成果物である。
+記録は `docs/evidence/losat_web_e2g/`（`README.md`、`INVENTORY.tsv`、`evidence.sha256`）。変更前の成果物は S07++ の成果物である（ゲートの実行ファイルのハッシュは `docs/evidence/losat_web_e2f/run-20260930T163727Z/artifacts.sha256`、native は `~/.cache/losat-web-gui-target/s07pg-native/release/LOSAT`、SHA-256 `a4ff5abb…80f5`）。
+
+## S07++ からの引き継ぎ（S07++b、2026-10-01 の実測）
+
+S07++（E2f）は完了した（[ゲート記録](../evidence/losat_web_e2f/README.md)、`AUTHORITY.md` §A〜§E）。独立監査は第 1 回が unsupported（予備の hit list の大きさ `prelim_hitlist_size` を traceback の後に適用していた）、第 2 回が supported（325 件の比較で差 0、`docs/evidence/losat_web_e2f/audit_round2/`）。これを前提に、次の点を守る。
+
+### 進め方（保守者の指示、S07++b から引き継ぐ）
+
+- **使用量を抑える。** 機械的な作業（ゲートや sweep の実行と集計、NCBI との比較の実行、記録・`evidence.sha256`・`verification_cells.tsv` の行の下書き、決まった観点でのファイルの走査と分類）は Agent ツールに `model: "sonnet"` で回す。メイン（Opus）は、NCBI の移植の設計、監査の指摘の判断、修正の設計と実装、agent の成果の確認だけを行う。
+- **一度に 1 つ、serial に。** agent は前景（`run_in_background: false`）で 1 つずつ、自己完結した指示で実行し、書いたものはメインが読んで確かめてからコミットする。エンジン側とアプリ側を並行させない（アプリ側の S09 は `/mnt/c/Users/genom/GitHub/LOSAT-web-gui-app` に中断した作業が未コミットで残っている。このセッションでは触らない）。
+- V-PERF で閾値を超えた case の切り分けの再計測は `perf_cases.py run … --repeat 5`。V-PERF の段階はアプリ側の lock（`~/.cache/losat-web-gui-target/s07p-resume/vperf_lock.sh`）を取る。ゲートの script の雛形は `~/.cache/losat-web-gui-target/s07p-resume/s07pp_gates2.sh`（実行の前に `date -u +%Y%m%dT%H%M%SZ > …/s07p-resume/ts2.txt` で run の名前を決める。無ければ `run-20260930T163727Z/` の記録から作り直す）。NCBI の参照の注釈の検査は `…/s07p-resume/verify_refs.py <変えた .rs>`。
+- 最初に独立監査の第 2 回の script（`docs/evidence/losat_web_e2f/audit_round2/{gen,cases,driver}.py`）を読み、棚卸しの後の監査でそのまま再利用できる。
+
+### 棚卸しの第 1 段（やり直し）
+
+NCBI の参照の注釈（`NCBI reference: …` と直後の断片）を機械的に突き合わせる script を `docs/evidence/losat_web_e2g/` に置く（前回の一時的な結果は失われた）。前回は、BLASTN から届く 54 の Rust ファイルで 2180 の注釈を数え、669 の NCBI 関数に対応した。この数を再現できることを、script の最初の検査にする。
+
+### 分類（第 2 段）
+
+7 つの範囲ごとに 1 つずつ、sonnet の agent に serial に回す。
+
+| 範囲 | NCBI のファイル |
+|---|---|
+| A：app と引数 | `blastn_app.cpp`、`blast_args.cpp`、`CFastaReader` |
+| B：API | `CLocalBlast`、`prelim_stage`、`setup_factory`、`blast_setup_cxx`、`seqsrc_multiseq`、`traceback_stage`、分割 |
+| C：統計と DUST | `blast_setup.c`、`blast_parameters.c`、`blast_stat.c`、`blast_filter.c`、`dust_filter.cpp`、`symdust.cpp` |
+| D：lookup・scan・ungapped | `blast_nalookup.c`、`blast_nascan.c`、`na_ungapped.c`、`blast_extend.c` |
+| E1：gapped | `blast_engine.c`、`blast_gapalign.c`、`greedy_align.c` |
+| E2：traceback と hit の保存 | `blast_traceback.c`、`blast_hits.c`、`hspfilter_collector.c`、`blast_hspstream.c`、`blast_itree.c` |
+| F：整形 | `blast_seqalign.cpp`、`blast_format.cpp`、`showalign.cpp`、`tabular.cpp`、`create_defline.cpp` |
+
+表の列と状態は上の 1.（`INVENTORY.tsv`）のとおり。これに加えて、行ごとに**影響の大きさ**（high / medium / low / none）を付けさせる（出力が変わりうる入力の広さ。例：既定のオプションで出る差は high）。
+
+### 一括の transpile の確かめる候補
+
+設計と実装はメイン（Opus）が行う。前回の調べで、次が確かめる候補になっている。
+
+- ほかの `qsort` を Rust の安定な並べ替えにした箇所。オラクルの glibc は 2.39 で、`qsort` は安定な merge sort。
+- `run.rs` の初期の hit の並べ替え。`sort_unstable_by` を使っている。
+- 予備の hit list（`74223fee3`）の単体試験の不足。S07++ の独立監査の第 2 回の指摘（重大度 低）：`hsp.rs` の `test_hitlist_update_keeps_best` は大きさ 1・異なる e-value の場合だけで、subject の番号による同点の順、e-value・得点が等しい場合、1e-180 の規則、2 つ以上の list の heap、collector、`merge_prelim_hit_list`、最後の hit list の大きさの上限を固定していない。試験だけの変更でもソースの行が動いて実行ファイルが変わるので、このセッションの最初のエンジンの変更と同時に足す。
+- 残る明示的な拒否（S07++ の `AUTHORITY.md` §C）：得点の表が無い得点で、最初の batch が無効な query だけのとき。NCBI は、その batch の結果と警告を書いた後に、次の batch で誤りを出す。棚卸しの表で、拒否のままにするか移植するかを決める。
+- 証拠の範囲：S07++ の比較は EDL933 と Sakai だけで、`BATCH_SIZE` を与えた NCBI との比較は行っていない（LOSAT は `BATCH_SIZE` を拒否する）。棚卸しの後の独立監査では、別の生物の配列（ウイルス、IUPAC の多い配列）も入力に含める。
 
 ## 終了・引き継ぎ
 

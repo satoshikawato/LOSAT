@@ -1,6 +1,6 @@
 # LOSAT Web GUI 総合実装計画
 
-状態：**S01（W0）から S07+（E2c）までは完了条件を満たした（[W0](evidence/losat_web_w0/README.md)、[E1a](evidence/losat_web_e1a/README.md)、[E1b](evidence/losat_web_e1b/README.md)、[E1c](evidence/losat_web_e1c/README.md)、[E1d](evidence/losat_web_e1d/README.md)、[E2a-1・E2a-2](evidence/losat_web_e2a/README.md)、[E2c](evidence/losat_web_e2c/README.md) のゲート記録。アプリ側の S10（W2）も完了した（[W2](evidence/losat_web_w2/README.md)）。E1a〜E1c の V-PERF の判断と、E1c の CLI の 2 つの振る舞いの差は、保守者の確認を求めている）。`PD-LOSAT-WEB-APP-BOUNDARY` は 2026-09-29 に承認された。エンジン側は S07++ を進めている。アプリ側の次は S09（入口の条件は S08 の完了）（DW-7）。** 作成 2026-09-28、改訂 2026-09-30。
+状態：**S01（W0）から S07++（E2f）までは完了条件を満たした（[W0](evidence/losat_web_w0/README.md)、[E1a](evidence/losat_web_e1a/README.md)、[E1b](evidence/losat_web_e1b/README.md)、[E1c](evidence/losat_web_e1c/README.md)、[E1d](evidence/losat_web_e1d/README.md)、[E2a-1・E2a-2](evidence/losat_web_e2a/README.md)、[E2c](evidence/losat_web_e2c/README.md)、[E2f](evidence/losat_web_e2f/README.md) のゲート記録。アプリ側の S10（W2）も完了した（[W2](evidence/losat_web_w2/README.md)）。E1a〜E1c の V-PERF の判断と、E1c の CLI の 2 つの振る舞いの差は、保守者の確認を求めている）。`PD-LOSAT-WEB-APP-BOUNDARY` は 2026-09-29 に承認された。エンジン側の次は S07+++（E2g、BLASTN の経路の棚卸しと一括の移植）。アプリ側の次は S09（入口の条件は S08 の完了）（DW-7）。** 作成 2026-09-28、改訂 2026-10-01。
 
 | 項目 | 内容 |
 |---|---|

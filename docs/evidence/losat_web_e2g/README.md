@@ -15,7 +15,9 @@ CI の設定とその検査の道具だけを変えた。エンジン（`LOSAT/s
 - S02 の基準（`../losat_web_e1a/baseline/hashes.tsv` の 12 行目）の LOSAT の出力が `ac8177764f35…`、Gate A の期待値が `3f27c1f1396b…`、`matches_expected` が false（`../losat_web_e1a/README.md` の「既存の差」）。
 - LOSATX の Stage G の権威 v3（`../losatx_stage_g_authority_v3/run-20260928T121516Z/registry.json` の `sakai_new_gate_a` の 11・52・53、`approval` は `USER_APPROVED_EXACT_FOUR_PROPOSALS_2026-09-28`）が、新しい Sakai の期待値を `ac8177764f35…` として承認し、PR5 の Gate A の 11・52・53 を historical HARD_FAIL のまま残している（`GATE_STATUS.md`）。
 
-よって回帰ではなく、承認済みの差として許可リストに載せた（凍結ハッシュは書き換えていない）。
+差の中身（2026-10-02 に確かめた）：凍結した `3f27c1f1…` は v0.1.0 の LOSAT の出力で（`LOSAT-v0.1.0-candidate-20260829T051719Z` の実行ファイル、`ca61245` で再現）、NCBI と違っていた。今の LOSAT の `ac8177764f…` は、同じコマンドの NCBI BLAST+ 2.17.0 の出力とバイト一致し（`retained-linux-oracle` の実行）、登録済みの Linux の NCBI の指紋（`LOSAT/tests/ncbi_platform_variance_v010.json` の `retained_linux_raw_sha256`）とも同じである。v0.1.0 の出力との差は outfmt 7 の 6482 行のうち 5 行で、座標・e-value・bit score は同じで、gap の開始の数・長さ・mismatch・一致率だけが違う（megablast の greedy な traceback が、得点の等しい別の経路を選んでいた）。5 つの HSP は query の 48 kb・495 kb・4.66 Mb（2 つ）・4.94 Mb にあり、query の分割とは関係しない（Sakai は 5,498,578 文字で、megablast の分割の閾値 9,999,800 より短い）。v0.1.0 の後、S02 の前に `main` で直った。
+
+よって回帰でもパリティの例外でもなく、古い凍結の期待値（NCBI と違っていた v0.1.0 の出力）との不一致で、新しい期待値が承認済みの別の版である。許可リストに載せた（凍結ハッシュは書き換えていない）。
 
 ### 変えたもの
 

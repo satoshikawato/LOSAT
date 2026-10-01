@@ -97,6 +97,13 @@ _CASES = [
     ("sq.task_blastn", f"-query {I}/sq_query.fa -subject {I}/sq_subject.fa -task blastn -outfmt 6", ""),
     ("sq.word7", f"-query {I}/sq_query.fa -subject {I}/sq_subject.fa -task blastn -word_size 7 -evalue 100 -outfmt 6", ""),
     ("sq.word16_fmt7", f"-query {I}/sq_query.fa -subject {I}/sq_subject.fa -word_size 16 -outfmt 7", ""),
+    # E2g T5: small lookup table cells in ascending query offsets, diagonal hash.
+    ("rep.megablast", f"-query {I}/rep_query.fa -subject {I}/rep_subject.fa -outfmt 6", ""),
+    ("rep.task_blastn", f"-query {I}/rep_query.fa -subject {I}/rep_subject.fa -task blastn -outfmt 6", ""),
+    ("rep.word9", f"-query {I}/rep_query.fa -subject {I}/rep_subject.fa -task blastn -word_size 9 -outfmt 6", ""),
+    ("rep.word16", f"-query {I}/rep_query.fa -subject {I}/rep_subject.fa -word_size 16 -outfmt 6", ""),
+    ("rep2.task_blastn", f"-query {I}/rep2_query.fa -subject {I}/rep_subject.fa -task blastn -outfmt 6", ""),
+    ("rep2.fmt0", f"-query {I}/rep2_query.fa -subject {I}/rep_subject.fa -task blastn -word_size 10 -outfmt 0", ""),
     # E2g T11: showdefline.cpp kBits is "(bits)" when CTOOLKIT_COMPATIBLE is set (also empty).
     ("ctoolkit.fmt0", f"{P} -max_target_seqs 3 -outfmt 0", "", "CTOOLKIT_COMPATIBLE=1"),
     ("ctoolkit.empty_fmt0", f"{T} -task blastn -max_target_seqs 5 -outfmt 0", "", "CTOOLKIT_COMPATIBLE="),
@@ -202,6 +209,28 @@ def generate_e2g_inputs(edl: str, sakai: str) -> None:
             subject.append(revcomp(copy) if rng.random() < 0.4 else copy)
     write_fasta(INPUTS / "sq_query.fa", records)
     write_fasta(INPUTS / "sq_subject.fa", [("sqs Sakai windows repeated", "".join(subject))])
+    # T5: queries just above the 8000 block limit (diagonal hash) that still get the
+    # small lookup table (blast_nalookup.c:45-185), with a repeated unit so one
+    # subject offset gives seeds at several query offsets.
+    region = sakai[4_000_000:4_100_000]
+    unit = region[50_000:50_250]
+    parts, used = [], 0
+    while used < 4100 - 250:
+        piece = region[used:used + rng.randint(300, 700)]
+        parts.append(piece)
+        parts.append(mutate(rng, unit, rng.choice((0.0, 0.01, 0.03))))
+        used += len(piece) + 250
+    rep = "".join(parts)[:4100]
+    second = mutate(rng, region[60_000:60_700], 0.02) + unit
+    write_fasta(INPUTS / "rep_query.fa", [("rep Sakai 4000001 with a repeated unit", rep)])
+    write_fasta(INPUTS / "rep2_query.fa", [("rep Sakai 4000001 with a repeated unit", rep),
+                                           ("rep2 Sakai 4060001 and the unit", second)])
+    subject = []
+    for index in range(10):
+        subject.append("".join(rng.choice("ACGT") for _ in range(rng.randint(50, 400))))
+        copy = mutate(rng, unit if index % 2 == 0 else rep[index * 300:index * 300 + 600], 0.02, 0.005)
+        subject.append(revcomp(copy) if index % 3 == 0 else copy)
+    write_fasta(INPUTS / "rep_subject.fa", [("reps Sakai unit copies", "".join(subject))])
 
 
 def prepare_runtime_inputs() -> None:

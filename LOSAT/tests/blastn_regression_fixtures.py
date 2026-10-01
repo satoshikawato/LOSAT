@@ -136,6 +136,9 @@ _CASES = [
     ("env.split_overlap0", f"{S} -task blastn -outfmt 6", "", "CHUNK_SIZE=300000 OVERLAP_CHUNK_SIZE=0"),
     ("env.split_overlap_negative", f"{S} -task blastn -outfmt 6", "", "OVERLAP_CHUNK_SIZE=-1"),
     ("env.split_besthit_batch", f"{S} -task blastn -subject_besthit -outfmt 6", "", "BATCH_SIZE=1000 CHUNK_SIZE=300000"),
+    # E2g T12: an integer PRE_FETCH_SEQS_LIMIT only decides whether sequences are fetched ahead.
+    ("env.prefetch0_fmt0", f"{T} -max_target_seqs 5 -outfmt 0", "", "PRE_FETCH_SEQS_LIMIT=0"),
+    ("env.prefetch5", f"{B} -outfmt 6", "", "PRE_FETCH_SEQS_LIMIT=5"),
     # E2g T11: showdefline.cpp kBits is "(bits)" when CTOOLKIT_COMPATIBLE is set (also empty).
     ("ctoolkit.fmt0", f"{P} -max_target_seqs 3 -outfmt 0", "", "CTOOLKIT_COMPATIBLE=1"),
     ("ctoolkit.empty_fmt0", f"{T} -task blastn -max_target_seqs 5 -outfmt 0", "", "CTOOLKIT_COMPATIBLE="),

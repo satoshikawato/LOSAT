@@ -5541,6 +5541,36 @@ fn check_unsupported_environment() -> Result<()> {
             "the environment variable BL2SEQ_LEGACY, which makes NCBI BLAST+ search each subject on its own and write its legacy bl2seq report, is not supported by LOSAT's BLASTN"
         );
     }
+    // NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.cpp:732-737
+    // ```c
+    // 		char * pre_fetch_limit_str = getenv("PRE_FETCH_SEQS_LIMIT");
+    // 		if (pre_fetch_limit_str) {
+    // 			int pre_fetch_limit = NStr::StringToInt(pre_fetch_limit_str);
+    // 			if(pre_fetch_limit == 0) {
+    // 				return false;
+    // 			}
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.cpp:761-766
+    // ```c
+    //     if (results.size() == 0) {
+    //         return;
+    //     }
+    //     if(!s_PreFetchSeqs(results, format_type)){
+    //     	return;
+    //     }
+    // ```
+    // An integer only decides whether the report's sequences are fetched ahead, which
+    // changes no output. Before the report of each query batch NCBI converts the value, and
+    // one that `NStr::StringToInt` cannot convert (an empty one too) stops it with a
+    // `CStringException` whose text names its build's source files (exit 255).
+    if let Some(value) = std::env::var_os("PRE_FETCH_SEQS_LIMIT") {
+        if crate::blastinput::query_batch::ncbi_string_to_int(&value).is_none() {
+            anyhow::bail!(
+                "the environment variable PRE_FETCH_SEQS_LIMIT has the value {:?}, which NCBI BLAST+ cannot convert to an int (it stops with a CStringException that names its build's source files); this is not supported by LOSAT's BLASTN",
+                value.to_string_lossy()
+            );
+        }
+    }
     Ok(())
 }
 

@@ -50,3 +50,12 @@ Each agent's divergent / unported / rejected / UNSURE rows, checked against the 
 | A-8 | `OVERLAP_CHUNK_SIZE` (a non-integer exits 255 even without a split) | = B-1 | transpile with B-1 (also the error of a non-integer value) |
 | A-9 | out of memory ("BLAST ran out of memory", exit 4) | A Rust allocation failure aborts; reproducing it would need fallible allocation everywhere. | deferred (maintainer decision: accepted limitation) |
 | A-10 | NCBI toolkit diagnostics variables (`DIAG_POST_LEVEL` hides the `Warning: [blastn]` lines; `Trace` adds Info lines) | The CNcbiDiag layer. | keep-rejected: new explicit rejection of the diagnostics variables that change blastn's stderr (list them from ncbidiag.cpp) |
+
+## F (results conversion and formatting): 146 rows; faithful 98, n/a 29, rejected 10, unported 8, divergent 1
+
+| # | Row | Check | Decision |
+|---|---|---|---|
+| F-1 | `CAlignFormatUtil::PrintKAParameters` `%#8.3g` (align_format_util.cpp:578-620) | Confirmed: `report/pairwise.rs` `format_ncbi_ka_value` picks the style from the unrounded exponent (C: the exponent after rounding to three digits) and formats the exponent with Rust `{:.2e}` (C: sign and at least two digits). Same output for ordinary Lambda/K/H; differs within ~0.05% below a power of ten, below 1e-4 or above 999. Shared by every program's outfmt 0. | transpile: exact `%#.3g` |
+| F-2 | `BL2SEQ_LEGACY` (7 rows: the legacy bl2seq conversion and report) | = E1-4 | keep-rejected (new explicit rejection) |
+| F-3 | `CTOOLKIT_COMPATIBLE` `kBits` (showdefline.cpp:80) | = A-5 | transpile |
+| F-4 | `.ncbirc` `[BLAST] LONG_SEQID` | Out of scope (the inventory assumes no .ncbirc). LOSAT does not read .ncbirc. | record (no change; LOSAT never reads .ncbirc, as for the other .ncbirc keys) |

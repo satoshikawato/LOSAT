@@ -1,6 +1,6 @@
 # LOSAT Web GUI 総合実装計画
 
-状態：**S01（W0）から S07++（E2f）までは完了条件を満たした（[W0](evidence/losat_web_w0/README.md)、[E1a](evidence/losat_web_e1a/README.md)、[E1b](evidence/losat_web_e1b/README.md)、[E1c](evidence/losat_web_e1c/README.md)、[E1d](evidence/losat_web_e1d/README.md)、[E2a-1・E2a-2](evidence/losat_web_e2a/README.md)、[E2c](evidence/losat_web_e2c/README.md)、[E2f](evidence/losat_web_e2f/README.md) のゲート記録。アプリ側の S10（W2）も完了した（[W2](evidence/losat_web_w2/README.md)）。E1a〜E1c の V-PERF の判断と、E1c の CLI の 2 つの振る舞いの差は、保守者の確認を求めている）。`PD-LOSAT-WEB-APP-BOUNDARY` は 2026-09-29 に承認された。S07+++（E2g）は CI の整備と棚卸し（`INVENTORY.tsv`）を終え、エンジン側の次は S07+++b（E2g の続き：一括の transpile、試験、独立監査）。アプリ側の次は S09（入口の条件は S08 の完了）（DW-7）。** 作成 2026-09-28、改訂 2026-10-02。
+状態：**S01（W0）から S07++（E2f）までは完了条件を満たした（[W0](evidence/losat_web_w0/README.md)、[E1a](evidence/losat_web_e1a/README.md)、[E1b](evidence/losat_web_e1b/README.md)、[E1c](evidence/losat_web_e1c/README.md)、[E1d](evidence/losat_web_e1d/README.md)、[E2a-1・E2a-2](evidence/losat_web_e2a/README.md)、[E2c](evidence/losat_web_e2c/README.md)、[E2f](evidence/losat_web_e2f/README.md) のゲート記録。アプリ側の S10（W2）も完了した（[W2](evidence/losat_web_w2/README.md)）。E1a〜E1c の V-PERF の判断と、E1c の CLI の 2 つの振る舞いの差は、2026-10-02 に保守者が記録どおり承認した（DW-13））。`PD-LOSAT-WEB-APP-BOUNDARY` は 2026-09-29 に承認された。S07+++（E2g）は CI の整備と棚卸し（`INVENTORY.tsv`）を終え、エンジン側の次は S07+++b（E2g の続き：一括の transpile、試験、独立監査）。アプリ側の次は S09（入口の条件は S08 の完了）（DW-7）。** 作成 2026-09-28、改訂 2026-10-02。
 
 | 項目 | 内容 |
 |---|---|
@@ -63,6 +63,7 @@ LOSAT は、NCBI BLAST+ を純 Rust で再実装したものである。宣言�
 | DW-9 | 2026-09-29 | 領域の指定は、その役割のレコードが 1 つのときだけ | NCBI の `-query_loc` / `-subject_loc` は読み込むすべてのレコードに同じ範囲を適用する（§4.9）。レコードごとに別の範囲を指定するには検索を分ける必要があり、統計が変わるので行わない（`REQ-06`） |
 | DW-10 | 2026-09-29 | TBLASTN は今、BLASTX は認証の後 | 核の入口へのまとめ直し（§4.2）は、BLASTP・TBLASTN・BLASTN・TBLASTX を先に行う。TBLASTN は TLOSAN 計画の認証のゲートをこのブランチで再実行する。BLASTX は、LOSATX 計画の v0.2.0 の認証が `main` に入った後に、`main` を取り込んでから扱う（§7 の SX）。進行中の LOSATX の作業とぶつからないようにするためである |
 | DW-11 | 2026-09-29 | BLASTX も領域の指定の対象にする | LOSATX 計画は v0.2.0 の範囲外として `-query_loc` / `-subject_loc` を拒否している（`LOSAT/src/cli.rs:238-246`）。v0.2.0 の認証の後に、このブランチで BLASTX に移植する（SX）。v0.2.0 の後の範囲の拡大として扱う |
+| DW-13 | 2026-10-02 | CLI の検索以外の差の扱いと FASTA の読み方の移植の時期 | S07+++ の棚卸しが保守者の判断に残した項目を決めた（`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`、版 1.0、AGENTS.md）。承認済みの例外：引数の構文の誤りと `-help`（LOSAT の文言と終了コード 2）、`-subject` での `-num_threads`（LOSAT は並列のまま、NCBI の 2 つのスレッドの警告を出さない）、outfmt 6/7 の書き込みの失敗（NCBI は abort、LOSAT は誤りを報告）、メモリ不足（LOSAT は abort）。移植：outfmt 0 の書き込みの失敗（`BLAST failed to write output`、終了コード 6）。明示的な拒否：UTF-8 でないファイル名、出力を変える `.ncbirc` の設定。FASTA の読み方（TD-12）は S17 の前の専用のセッション（SF）で移植する。E1a〜E1c の V-PERF と E1c の CLI の 2 つの差は記録どおり承認 |
 | DW-12 | 2026-09-30 | NCBI の経路の棚卸しと一括の transpile | エンジンの NCBI との一致は、独立監査の指摘を 1 つずつ直すのでなく、アプリが出すオプションの範囲で NCBI の実行経路に現れる関数を program ごとに棚卸しし（忠実な移植・差のある移植・未移植・明示的な拒否）、未移植と差のある移植を NCBI の関数ごとに簡略化せずに transpile してから、棚卸しの表を基準に監査する。NCBI の C++ の層（object manager、ASN.1、`CFastaReader` など）は経路にある関数だけを移植する。LOSAT が速度のために NCBI と違う実装にしている箇所（詰めた配列の走査、並列化など）は、出力が同じなら、新しく移植する部分にも同じ方式を使ってよい（S07+ の 16 回の監査の後の、保守者の指示） |
 | DW-12 | 2026-09-29 | `PD-LOSAT-WEB-APP-BOUNDARY` を承認する | 状態を Accepted（版 1.0）にした。S02 の入口の条件を満たす |
 
@@ -531,6 +532,6 @@ NCBI BLAST+（oracle） ─[既存の認証]─► ネイティブ LOSAT の凍�
 | Cloudflare に残す旧版の数、ドメイン名 | S16 の前 |
 | BLASTX の範囲の拡大（DW-11）を LOSATX 計画の範囲の記録に書くこと | SX の前（保守者） |
 | v1 ABI の廃止 | gbdraw が v2 へ移る時点（TD-1） |
-| BLASTN の FASTA の読み方を NCBI の `CFastaReader` に合わせる（TD-12 の拒否をなくす。アダプタの索引の走査の解析器の種類を足す）。NCBI の後の query batch の大きさの再現は S07++（TD-14）に移した | S17 の前（保守者と相談） |
+| BLASTN の FASTA の読み方を NCBI の `CFastaReader` に合わせる（TD-12 の拒否をなくす。アダプタの索引の走査の解析器の種類を足す）。NCBI の後の query batch の大きさの再現は S07++（TD-14）に移した | S17 の前の専用のセッション SF（2026-10-02 に保守者が決定、DW-13） |
 | `-num_threads` の NCBI の警告（CPU の数を超えると「Number of threads was reduced to N …」、`-subject` があると「'num_threads' is currently ignored when 'subject' is specified.」、`blast_args.cpp:3203-3236`）。LOSAT はどの program も `-subject` でスレッドを使い、警告を出さない（出力は同じ、stderr だけが違う。以前から。S07+ の第 4 回の監査、`docs/evidence/losat_web_e2c/AUTHORITY.md` §I）。承認済みの例外にするか、警告を出すか | S17 の前（保守者と相談） |
 | 公開する版の名前 | S17 |

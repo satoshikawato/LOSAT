@@ -82,11 +82,11 @@ CI の設定とその検査の道具だけを変えた。エンジン（`LOSAT/s
 | 扱い | 行 | 内容（`build_inventory.py` の `ACTIONS`） |
 |---|---|---|
 | T1〜T13（transpile） | 25 | T1 初期の hit の並べ替え（連結した query の位置、安定な並べ替え）、T2 `BlastGetStartForGappedAlignmentNucl` の `Int4`、T3 予備の e-value の刈り込みの比較、T4 traceback の順（heap の e-value の順を保つ）、T5 小さい・標準の lookup table の cell の query の位置の昇順、T6 query の塊が 8000 以下なら対角線の配列、T7 `BATCH_SIZE`・`CHUNK_SIZE`・`OVERLAP_CHUNK_SIZE`、T8 最初の batch が無効な query だけのときの得点の表の失敗、T9 batch ごとの警告、T10 `-subject` が無いときの誤り、T11 `CTOOLKIT_COMPATIBLE`、T12 `PRE_FETCH_SEQS_LIMIT` の誤り、T13 Lambda・K・H の `%#8.3g` |
-| R1、R2（新しい明示的な拒否） | 11 | `BL2SEQ_LEGACY`（別の検索の mode と報告）、NCBI の診断と registry の環境変数（`DIAG_POST_LEVEL` など） |
+| R1、R2（新しい明示的な拒否） | 11 | `BL2SEQ_LEGACY`（別の検索の mode と報告）、NCBI の診断と registry の環境変数（`DIAG_POST_LEVEL` など）と、出力を変える `.ncbirc` の設定（2026-10-02 の決定） |
 | V1（見直し） | 1 | reward − penalty が 3000 を超える得点の拒否（NCBI と比べて一致すれば外す） |
-| K-*（拒否のまま） | 60 | FASTA の読み方（計画 §10、TD-12）21、NCBI の C++ の層か範囲外の機能 20、別の mode 15、NCBI が落ちる 2、NCBI の 32 ビットの溢れ 2 |
-| S08（保守者の判断待ち） | 6 | 全 program に共通の CLI：引数の誤りの文言と終了コード、`-help`、書き込みの失敗の終了コード、UTF-8 でないパス、`-num_threads` の 2 つの警告（計画で S08+ に移してある） |
-| OPEN（保守者の判断待ち） | 1 | メモリ不足（NCBI は「BLAST ran out of memory」で終了コード 4。Rust は abort） |
+| K-*（拒否のまま） | 60 | FASTA の読み方（S17 の前のセッション SF で移植、DW-13）21、NCBI の C++ の層か範囲外の機能 20、別の mode 15、NCBI が落ちる 2、NCBI の 32 ビットの溢れ 2 |
+| X-*（承認済みの例外、2026-10-02） | 5 | `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`：引数の構文の誤りと `-help`（X-cli 2）、`-subject` での `-num_threads` の 2 つの警告（X-threads 2）、メモリ不足（X-oom 1） |
+| T14、R3（2026-10-02 の決定で足した） | 2 | T14 outfmt 0 の書き込みの失敗（`BLAST failed to write output`、終了コード 6。outfmt 6/7 は例外）、R3 UTF-8 でないファイル名の明示的な拒否 |
 
 確かめたことの要点（詳細は `stage2/REVIEW.md`）：NCBI の traceback は `_DEBUG` のときだけ得点で並べ直す（オラクルは release）。NCBI は subject の chunk ごとに得点で並べる（blast_engine.c:555）ので、LOSAT の並べ直しが効くのは heap にした（550 を超える subject の）list だけ。小さい lookup table の cell は NCBI では query の位置の昇順、megablast の table は新しい順で、LOSAT は小さい table を megablast の鎖で持つ。NCBI は query の塊が 8000 以下なら query の数によらず対角線の配列を使う（blast_parameters.c:225-231）。`BL2SEQ_LEGACY` は `CLocalBlast` の dbscan mode を切る（local_blast.cpp:189,289）。`.ncbirc` の `[BLAST] LONG_SEQID` も出力を変えるが、LOSAT は `.ncbirc` を読まない（記録だけ）。
 
@@ -100,5 +100,9 @@ S07++ の独立監査の第 2 回の指摘（重大度 低）を `2fabad16c` で
 - **一括の transpile：** T1〜T13、R1、R2、V1（上の表と `stage2/REVIEW.md`）。エンジンは変えていない（`2fabad16c` は試験だけ）。
 - **試験・ゲート・V-PERF・独立監査：** 指示書の 4.。移植した分岐ごとの NCBI との比較と、BLASTN の fixture（`blastn_regression_fixtures.py`）への case の追加。
 - **CI の残り：** 緑の PR の実行時間（cache あり）を測る。`main` への PR（この記録の後）。
-- **保守者の判断待ち：** S08 の 6 行と OPEN の 1 行（上の表）。FASTA の読み方の移植（計画 §10）。
+- **保守者の決定（2026-10-02、DW-13、`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`、AGENTS.md）：** 判断待ちだった 8 件を、保守者が推奨の案で決めた。
+  - 承認済みの例外：引数の構文の誤りと `-help`、`-subject` での `-num_threads`（並列のまま、2 つの警告を出さない）、outfmt 6/7 の書き込みの失敗、メモリ不足。
+  - S07+++b で移植：outfmt 0 の書き込みの失敗（T14）。S07+++b で明示的に拒否：UTF-8 でないファイル名（R3）、出力を変える `.ncbirc` の設定（R2 に含める）。
+  - FASTA の読み方：S17 の前の専用のセッション SF で移植（それまで拒否のまま）。
+  - E1a〜E1c の V-PERF と E1c の CLI の 2 つの差：記録どおり承認。
 - 次の指示書：[`session_s07pppb_e2g_transpile.md`](../../losat_web_gui_sessions/session_s07pppb_e2g_transpile.md)。

@@ -29,8 +29,8 @@
 |---|---|---|---|---|
 | S01 | [契約と骨格](session_s01_w0_contract_skeleton.md) | W0 | FakeEngine の E2E、`crossOriginIsolated`、TBLASTX v1 の fail-fast | 完了（2026-09-29、[ゲート記録](../evidence/losat_web_w0/README.md)） |
 | S02 | [核の入口：共通部と BLASTP](session_s02_e1a_core_entry_blastp.md) | E1a | 全 program の基準、変更したコードを使う全 program のゲート、v1 の検査、V-PERF | 完了（2026-09-29、[ゲート記録](../evidence/losat_web_e1a/README.md)） |
-| S03 | [核の入口：TBLASTN](session_s03_e1b_core_entry_tblastn.md) | E1b | TLOSAN の Stage G のゲートが変わらない | 完了（2026-09-29、[ゲート記録](../evidence/losat_web_e1b/README.md)。V-PERF は保守者の確認待ち） |
-| S04 | [核の入口：BLASTN と TBLASTX](session_s04_e1c_core_entry_blastn_tblastx.md) | E1c | 既存ゲートと Gate A が変わらない、v1 の検査 | 完了（2026-09-29、[ゲート記録](../evidence/losat_web_e1c/README.md)。V-PERF と CLI の 2 つの差は保守者の確認待ち） |
+| S03 | [核の入口：TBLASTN](session_s03_e1b_core_entry_tblastn.md) | E1b | TLOSAN の Stage G のゲートが変わらない | 完了（2026-09-29、[ゲート記録](../evidence/losat_web_e1b/README.md)。V-PERF は 2026-10-02 に保守者が承認、DW-13） |
+| S04 | [核の入口：BLASTN と TBLASTX](session_s04_e1c_core_entry_blastn_tblastx.md) | E1c | 既存ゲートと Gate A が変わらない、v1 の検査 | 完了（2026-09-29、[ゲート記録](../evidence/losat_web_e1c/README.md)。V-PERF と CLI の 2 つの差は 2026-10-02 に保守者が承認、DW-13） |
 | S05 | [アダプタと ABI v2](session_s05_e1d_adapter_abi_v2.md) | E1d | 4 program の V-ABI、ビルドの同一性の検査 | 完了（2026-09-29、[ゲート記録](../evidence/losat_web_e1d/README.md)） |
 | S06 | [BLASTN outfmt 0：権威と fixture](session_s06_e2a1_blastn_outfmt0_authority.md) | E2a-1 | NCBI の経路の表、固定した fixture | 完了（2026-09-29、[ゲート記録](../evidence/losat_web_e2a/README.md)） |
 | S07 | [BLASTN outfmt 0：実装とゲート](session_s07_e2a2_blastn_outfmt0_port.md) | E2a-2 | NCBI とバイト一致、6/7 に退行なし | 完了（2026-09-29、[ゲート記録](../evidence/losat_web_e2a/README.md)） |
@@ -50,6 +50,7 @@
 | S14 | [抽出と候補](session_s14_w5_extraction_candidates.md) | W5 | 原配列との一致 | 未着手 |
 | S15 | [出力と再現性](session_s15_w6_export_session.md) | W6 | 再計算しない再読込、明示的なつなぎ直し | 未着手 |
 | S16 | [配信の仕上げ](session_s16_w7_delivery.md) | W7 | V-OFF・V-PRIV、プレビューでの隔離 | 未着手 |
+| SF | BLASTN の FASTA の読み方（`CFastaReader` の移植） | E2h | NCBI の `CFastaReader` の経路の関数の移植とアダプタの索引の走査で、TD-12 の拒否をなくす（DW-13） | 未着手（S17 の前。指示書は S07+++b の後に作る） |
 | SX | [BLASTX の統合](session_sx_blastx_integration.md)（条件付き） | SX | LOSATX の v0.2.0 の認証が `main` に入った後の最初の区切りで実施。S17 の前に必ず終える | 条件待ち |
 | S17 | [公開判定](session_s17_g_release_decision.md) | G | 初期の要求に未達が無い | 未着手 |
 

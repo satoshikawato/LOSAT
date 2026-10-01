@@ -2,7 +2,7 @@
 
 ## INSTRUCTION PROMPT
 
-LOSAT の段階 E2g の続きを実行する。S07+++ は、CI の整備と、NCBI の BLASTN の経路の棚卸し（`docs/evidence/losat_web_e2g/INVENTORY.tsv`、1006 行）までを終えた。このセッションでは、棚卸しで決めた一括の transpile を行い、試験・ゲート・V-PERF・独立監査を通して、E2g の完了条件を満たす。完了条件の正本は総合計画書 §7 の S07+++ の行で、[S07+++ の指示書](session_s07ppp_e2g_blastn_inventory.md)がその細部である（条件を緩めない）。
+LOSAT の段階 E2g の続きを実行する。S07+++ は、CI の整備と、NCBI の BLASTN の経路の棚卸し（`docs/evidence/losat_web_e2g/INVENTORY.tsv`、1006 行）までを終えた。このセッションでは、棚卸しで決めた一括の transpile（と 2026-10-02 の保守者の決定で足した項目）を行い、試験・ゲート・V-PERF・独立監査を通して、E2g の完了条件を満たす。完了条件の正本は総合計画書 §7 の S07+++ の行で、[S07+++ の指示書](session_s07ppp_e2g_blastn_inventory.md)がその細部である（条件を緩めない）。
 
 先に次を読む：
 - [セッション README](README.md) の共通規則（特に規則 4）
@@ -43,13 +43,15 @@ LOSAT の段階 E2g の続きを実行する。S07+++ は、CI の整備と、NC
 | T11 `CTOOLKIT_COMPATIBLE` | `showdefline.cpp:80`（`kBits` の静的な初期化で `getenv`） | `report/pairwise.rs:748,826` | 変数があれば「(bits)」。全 program の outfmt 0 の説明の一覧が共有する書き手で直す | 変数を与えた outfmt 0（BLASTN と、共有するほかの program） |
 | T12 `PRE_FETCH_SEQS_LIMIT` | `blast_app_util.cpp:731-751`（`s_PreFetchSeqs`） | 無し | 整数でない値は、NCBI と同じ時点で NCBI の誤り（終了コード 255）を出す。整数は prefetch を切り替えるだけで、出力は変わらない | 変数を与えたコマンド |
 | T13 `%#8.3g` | `align_format_util.cpp:578-620`（`PrintKAParameters`） | `report/pairwise.rs:957` `format_ncbi_ka_value` | C の `%#.3g` と同じにする：3 桁に丸めた後の指数で書き方を選び、指数の書き方は符号つき 2 桁以上、`#` で小数点と末尾の 0 を残す。全 program の outfmt 0 が共有する | 単体試験（Python の `'%#.3g' % x` は C と同じ）。0.99996・9.9996・999.5・1.23e-5 など |
+| T14 outfmt 0 の書き込みの失敗 | `blast_app_util.hpp:242-254`（`CIOException::eFlush` は「BLAST failed to write output: <msg>」、`std::ios::failure` は「BLAST failed to write output」、どちらも終了コード 6 `BLAST_OUTPUT_ERROR`） | BLASTN の報告の書き出し（`run.rs` の `writer.flush()?` と `cli.rs` の `NativeError`） | outfmt 0 の書き込みの失敗で、NCBI の文言と終了コード 6 を出す（NCBI がどちらの例外になるかを oracle の `-out /dev/full` で確かめる）。outfmt 6/7 は承認済みの例外（`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` 3）で、今の誤りの報告のまま | `-out /dev/full` と、読み手が閉じたパイプへの stdout（outfmt 0） |
 | R1 `BL2SEQ_LEGACY` | `blast_app_util.cpp:206-211`、`local_blast.cpp:189,289`、`blast_format.cpp`（`m_IsBl2Seq && !m_IsDbScan`） | 無し | 明示的に拒否する（別の検索の mode と報告。値が空でも `getenv` は真）。今の環境変数の検査（`run.rs` ~5462）と同じ所で | 変数を与えたコマンド |
-| R2 NCBI の診断と registry の変数 | `ncbiapp.cpp:1050-1135`、`ncbidiag.cpp` | 無し | blastn の stdout・stderr を変える変数（`DIAG_POST_LEVEL`、`DIAG_POST_PREFIX`、`NCBI_CONFIG__*` など）を NCBI のソースから挙げ、oracle で確かめ、明示的に拒否する | 変数ごとの oracle の実行 |
+| R2 NCBI の診断と registry の変数、`.ncbirc` | `ncbiapp.cpp:1050-1135`、`ncbidiag.cpp`、registry の読み込み（`.ncbirc` を探す場所と順序） | 無し | blastn の stdout・stderr を変える環境変数（`DIAG_POST_LEVEL`、`DIAG_POST_PREFIX`、`NCBI_CONFIG__*` など）と、NCBI が読む `.ncbirc` の出力を変えるキー（`[BLAST] LONG_SEQID` など）を NCBI のソースから挙げ、oracle で確かめ、明示的に拒否する。出力に効かないキーだけの `.ncbirc`（`BLASTDB` など）は受け付ける（DW-13） | 変数ごと、キーごとの oracle の実行 |
+| R3 UTF-8 でないファイル名 | `GetSubjectFile`（`-subject` の文字列をそのまま出す）、NCBI はファイル名を生のバイトで扱う | `report` の `Database:` の行、`cli.rs` の `inaccessible`（U+FFFD にする） | `-query`・`-subject`・`-out` のパスが UTF-8 でなければ、「not supported by LOSAT」で明示的に拒否する（DW-13）。拒否の時点は NCBI がそのファイルを扱う時点に合わせる | UTF-8 でないパスの入力 |
 | V1 得点の幅 3000 | `blast_stat.c:2698-2734` | `scoring.rs:174`（`MAX_SCORE_RANGE`）、`scoring.rs:125`（`check_losat_limits`） | 制限を外した LOSAT を NCBI と比べる（reward は 32767 まで、penalty は −32768 まで、表の最大公約数の形を含む。出力と時間・メモリ）。一致すれば拒否を外し、しなければ見た理由を書いて残す | 得点の sweep の大きい値 |
 
 **順序**
 1. 小さい項目を 1 つずつ、それぞれ別のコミットで：T3、T13、T11、T2、T1、T6、T5、T4。
-2. 次に T7、R1、R2、T12、T10。
+2. 次に T7、R1、R2、R3、T12、T10、T14。
 3. 次に T8 と T9（batch ごとの書き出し）。
 4. 最後に V1。
 
@@ -142,12 +144,20 @@ README の規則 8 に従う。
 - **使用量の上限：** agent には結果を途中でファイルに書かせる。上限に達したら並行数を 2 に減らす。
 - **アプリ側：** S09（`LOSAT-web-gui-app` の未コミットの作業）には触らない。
 
-### 保守者の判断待ち（このセッションでは決めない。記録に残す）
+### 保守者の決定（2026-10-02、計画 DW-13、`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`、AGENTS.md）
 
-- **全 program に共通の CLI（`INVENTORY.tsv` の S08 の 6 行）：** 引数の誤りの文言と終了コード、`-help`、書き込みの失敗の終了コード、UTF-8 でないパス、`-num_threads` の 2 つの警告。
-- **メモリ不足の扱い（OPEN の 1 行）：** NCBI は「BLAST ran out of memory」で終了コード 4、Rust は abort。
-- **FASTA の読み方の移植：** 計画 §10、TD-12。
-- **`.ncbirc`：** LOSAT は読まない。`[BLAST] LONG_SEQID` などは出力を変える。
+S07+++ の終わりに、判断待ちだった 8 件を保守者が決めた（どれも推奨の案）。
+
+- **承認済みの例外（全 program）：**
+  - 引数の構文の誤りと `-help`：LOSAT の文言と終了コード 2。引数の解析の後の誤りは NCBI と同じにする。
+  - `-subject` での `-num_threads`：LOSAT は並列のまま、NCBI の 2 つのスレッドの警告を出さない。
+  - outfmt 6/7 の書き込みの失敗：NCBI は abort、LOSAT は誤りを報告して 0 でない終了コード。
+  - メモリ不足：LOSAT は abort。
+  - `INVENTORY.tsv` の X-cli・X-threads・X-oom。
+- **このセッションで移植：** outfmt 0 の書き込みの失敗（T14）。
+- **このセッションで明示的に拒否：** UTF-8 でないファイル名（R3）、出力を変える `.ncbirc` のキー（R2）。
+- **FASTA の読み方（TD-12）：** S17 の前の専用のセッション SF で移植する。このセッションでは拒否のまま。
+- **E1a〜E1c の V-PERF と E1c の CLI の 2 つの差：** 記録どおり承認した（閉じた）。
 
 ## 終了・引き継ぎ
 

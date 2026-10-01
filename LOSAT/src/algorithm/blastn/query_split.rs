@@ -5,8 +5,8 @@
 
 use crate::utils::dust::MaskedInterval;
 
-/// The query chunk size of the task (`SplitQuery_GetChunkSize`; LOSAT does not read the
-/// environment variable `CHUNK_SIZE`, `run.rs`).
+/// The query chunk size of the task when the environment variable `CHUNK_SIZE` is not set
+/// or blank (`SplitQuery_GetChunkSize`).
 ///
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/api/local_blast.cpp:65-73
 /// ```c
@@ -28,7 +28,8 @@ pub fn query_chunk_size(megablast: bool) -> usize {
     }
 }
 
-/// The overlap of two query chunks for a nucleotide query.
+/// The overlap of two query chunks for a nucleotide query when the environment variable
+/// `OVERLAP_CHUNK_SIZE` is not set or blank.
 ///
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_aux_priv.cpp:51-53
 /// ```c
@@ -37,6 +38,69 @@ pub fn query_chunk_size(megablast: bool) -> usize {
 ///     size_t retval = 100;
 /// ```
 pub const QUERY_CHUNK_OVERLAP: usize = 100;
+
+/// NCBI's query chunk size and chunk overlap (`size_t` values), from the environment
+/// variables `CHUNK_SIZE` and `OVERLAP_CHUNK_SIZE` when they are set and not blank.
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/local_blast.cpp:54-62
+/// ```c
+/// size_t
+/// SplitQuery_GetChunkSize(EProgram program)
+/// {
+///     size_t retval = 0;
+///
+///     // used for experimentation purposes
+///     char* chunk_sz_str = getenv("CHUNK_SIZE");
+///     if (chunk_sz_str && !NStr::IsBlank(chunk_sz_str)) {
+///         retval = NStr::StringToInt(chunk_sz_str);
+/// ```
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_aux_priv.cpp:53-60
+/// ```c
+///     size_t retval = 100;
+///     // used for experimentation purposes
+///     char* overlap_sz_str = getenv("OVERLAP_CHUNK_SIZE");
+///     if (overlap_sz_str && !NStr::IsBlank(overlap_sz_str)) {
+///         retval = NStr::StringToInt(overlap_sz_str);
+///         _TRACE("Using overlap chunk size from environment " << retval);
+///         return retval;
+///     }
+/// ```
+/// The `int` converts to the 64-bit `size_t` of the oracle: a negative value becomes
+/// 2^64 plus the value. `u64` keeps that arithmetic on every target.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SplitSizes {
+    pub chunk_size: u64,
+    pub overlap: u64,
+}
+
+impl SplitSizes {
+    /// The sizes of a task, with the values of the environment variables (already read
+    /// with `NStr::StringToInt`; `None` when unset or blank).
+    pub fn new(megablast: bool, chunk_size: Option<i32>, overlap: Option<i32>) -> Self {
+        Self {
+            chunk_size: chunk_size.map_or(query_chunk_size(megablast) as u64, |value| {
+                i64::from(value) as u64
+            }),
+            overlap: overlap.map_or(QUERY_CHUNK_OVERLAP as u64, |value| i64::from(value) as u64),
+        }
+    }
+
+    /// The default sizes of a task (neither variable set).
+    pub fn default_for(megablast: bool) -> Self {
+        Self::new(megablast, None, None)
+    }
+
+    /// NCBI's `CBatchSizeMixer` maximum: the chunk size less 1000 (`size_t`), converted to
+    /// its `Int4` parameter.
+    ///
+    /// NCBI reference: ncbi-blast/c++/src/app/blast/blastn_app.cpp:261
+    /// ```c
+    ///         CBatchSizeMixer mixer(SplitQuery_GetChunkSize(opt.GetProgram())-1000);
+    /// ```
+    pub fn mixer_max_batch_size(&self) -> i32 {
+        self.chunk_size.wrapping_sub(1000) as u32 as i32
+    }
+}
 
 /// One query's part in a query chunk: the query of the batch and its residues `from..to`.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -84,20 +148,23 @@ pub struct QueryChunk {
 ///        // Round up only if this will not decrease the number of chunks
 ///        if (num_chunks < (*chunk_size) - overlap_size ) (*chunk_size)++;
 /// ```
-pub fn calculate_num_chunks(chunk_size: usize, concatenated_query_length: usize) -> (usize, usize) {
-    let overlap_size = QUERY_CHUNK_OVERLAP;
-    let mut num_chunks = 0;
-    if chunk_size > overlap_size {
-        num_chunks = concatenated_query_length / (chunk_size - overlap_size);
+pub fn calculate_num_chunks(sizes: SplitSizes, concatenated_query_length: usize) -> (usize, usize) {
+    let overlap_size = sizes.overlap;
+    let length = concatenated_query_length as u64;
+    // `Uint4 num_chunks` (split_query_aux_priv.cpp:112).
+    let mut num_chunks: u32 = 0;
+    if sizes.chunk_size > overlap_size {
+        num_chunks = (length / (sizes.chunk_size - overlap_size)) as u32;
     }
     if num_chunks <= 1 {
         return (1, concatenated_query_length);
     }
-    let mut chunk_size = (concatenated_query_length + (num_chunks - 1) * overlap_size) / num_chunks;
-    if num_chunks < chunk_size - overlap_size {
+    let chunks = u64::from(num_chunks);
+    let mut chunk_size = length.wrapping_add((chunks - 1).wrapping_mul(overlap_size)) / chunks;
+    if chunks < chunk_size.wrapping_sub(overlap_size) {
         chunk_size += 1;
     }
-    (num_chunks, chunk_size)
+    (num_chunks as usize, chunk_size as usize)
 }
 
 /// The query chunks of a batch with queries of `lengths` residues, or `None` when NCBI
@@ -201,12 +268,14 @@ pub fn calculate_num_chunks(chunk_size: usize, concatenated_query_length: usize)
 ///                                               static_cast<Int4>(kNumContexts*queries[i]+ctx));
 /// ```
 /// The offsets are `context_offsets`.
-pub fn split_query_batch(lengths: &[usize], megablast: bool) -> Option<Vec<QueryChunk>> {
+pub fn split_query_batch(lengths: &[usize], sizes: SplitSizes) -> Option<Vec<QueryChunk>> {
     let total_length: usize = lengths.iter().sum();
-    let (num_chunks, chunk_size) = calculate_num_chunks(query_chunk_size(megablast), total_length);
+    let (num_chunks, chunk_size) = calculate_num_chunks(sizes, total_length);
     if num_chunks <= 1 {
         return None;
     }
+    // A split needs `chunk_size > overlap`, so the overlap is an ordinary `int` value here.
+    let overlap_size = sizes.overlap as usize;
 
     let mut chunk_ranges = vec![(0usize, 0usize); num_chunks];
     let mut chunk_start = 0usize;
@@ -216,7 +285,7 @@ pub fn split_query_batch(lengths: &[usize], megablast: bool) -> Option<Vec<Query
             chunk_end = total_length;
         }
         *range = (chunk_start, chunk_end);
-        chunk_start += chunk_size - QUERY_CHUNK_OVERLAP;
+        chunk_start += chunk_size - overlap_size;
         if chunk_start > total_length || chunk_end == total_length {
             break;
         }
@@ -259,7 +328,7 @@ pub fn split_query_batch(lengths: &[usize], megablast: bool) -> Option<Vec<Query
         .collect();
 
     let offsets: Vec<Vec<i32>> = (0..chunks.len())
-        .map(|chunk_num| context_offsets(&chunks, chunk_num, lengths))
+        .map(|chunk_num| context_offsets(&chunks, chunk_num, lengths, overlap_size))
         .collect();
     for (chunk, offsets) in chunks.iter_mut().zip(offsets) {
         chunk.context_offsets = offsets;
@@ -412,8 +481,12 @@ fn starting_chunk(chunks: &[QueryChunk], curr_chunk: usize, absolute_context: us
 ///                     global_qinfo->contexts[absolute_context].query_length -
 ///                     subtrahend;
 /// ```
-fn context_offsets(chunks: &[QueryChunk], chunk_num: usize, lengths: &[usize]) -> Vec<i32> {
-    let overlap_size = QUERY_CHUNK_OVERLAP;
+fn context_offsets(
+    chunks: &[QueryChunk],
+    chunk_num: usize,
+    lengths: &[usize],
+    overlap_size: usize,
+) -> Vec<i32> {
     chunks[chunk_num]
         .contexts
         .iter()
@@ -519,11 +592,23 @@ mod tests {
     // ```
     #[test]
     fn the_chunk_count_and_size_are_ncbis() {
-        assert_eq!(calculate_num_chunks(1_000_000, 1_999_799), (1, 1_999_799));
-        assert_eq!(calculate_num_chunks(1_000_000, 1_999_800), (2, 999_951));
+        assert_eq!(
+            calculate_num_chunks(SplitSizes::default_for(false), 1_999_799),
+            (1, 1_999_799)
+        );
+        assert_eq!(
+            calculate_num_chunks(SplitSizes::default_for(false), 1_999_800),
+            (2, 999_951)
+        );
         // EDL933 with -task blastn: five chunks of 1,105,770 (E2f §D).
-        assert_eq!(calculate_num_chunks(1_000_000, 5_528_445), (5, 1_105_770));
-        assert_eq!(calculate_num_chunks(5_000_000, 5_528_445), (1, 5_528_445));
+        assert_eq!(
+            calculate_num_chunks(SplitSizes::default_for(false), 5_528_445),
+            (5, 1_105_770)
+        );
+        assert_eq!(
+            calculate_num_chunks(SplitSizes::default_for(true), 5_528_445),
+            (1, 5_528_445)
+        );
     }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_cxx.cpp:612-662
@@ -536,7 +621,8 @@ mod tests {
     // ```
     #[test]
     fn a_query_over_two_chunks_is_mapped_onto_its_contexts() {
-        let chunks = split_query_batch(&[1_999_800], false).expect("split");
+        let chunks =
+            split_query_batch(&[1_999_800], SplitSizes::default_for(false)).expect("split");
         assert_eq!(chunks.len(), 2);
         assert_eq!(
             chunks[0].queries,
@@ -563,7 +649,8 @@ mod tests {
     fn parts_that_end_or_start_in_an_overlap_keep_their_starts() {
         // Chunks of 1,000,059 overlapping by 100: the first query ends 58 residues into the
         // overlap of the second and third chunks, and the second query starts there.
-        let chunks = split_query_batch(&[1_999_976, 1_000_000], false).expect("split");
+        let chunks = split_query_batch(&[1_999_976, 1_000_000], SplitSizes::default_for(false))
+            .expect("split");
         assert_eq!(chunks.len(), 3);
         assert_eq!(
             chunks[1].queries,
@@ -632,5 +719,63 @@ mod tests {
                 MaskedInterval::new(90, 100),
             ]
         );
+    }
+
+    // CHUNK_SIZE and OVERLAP_CHUNK_SIZE as NCBI reads them (split_query_aux_priv.cpp:100-138).
+    #[test]
+    fn environment_sizes_follow_ncbis_size_t_arithmetic() {
+        let sizes = SplitSizes::new(false, Some(500), None);
+        assert_eq!(calculate_num_chunks(sizes, 100_000), (250, 500));
+        let sizes = SplitSizes::new(false, Some(40_000), Some(0));
+        assert_eq!(calculate_num_chunks(sizes, 100_000), (2, 50_001));
+        // An overlap at least the chunk size, a negative overlap (2^64 - 1) and a negative
+        // chunk size (2^64 - 5) never split.
+        assert_eq!(
+            calculate_num_chunks(SplitSizes::new(false, Some(150), Some(150)), 100_000),
+            (1, 100_000)
+        );
+        assert_eq!(
+            calculate_num_chunks(SplitSizes::new(false, Some(40_000), Some(-1)), 100_000),
+            (1, 100_000)
+        );
+        assert_eq!(
+            calculate_num_chunks(SplitSizes::new(false, Some(-5), None), 100_000),
+            (1, 100_000)
+        );
+        // The CBatchSizeMixer maximum: size_t chunk size - 1000 as Int4.
+        assert_eq!(
+            SplitSizes::default_for(false).mixer_max_batch_size(),
+            999_000
+        );
+        assert_eq!(
+            SplitSizes::default_for(true).mixer_max_batch_size(),
+            4_999_000
+        );
+        assert_eq!(
+            SplitSizes::new(false, Some(1001), None).mixer_max_batch_size(),
+            1
+        );
+        assert_eq!(
+            SplitSizes::new(false, Some(500), None).mixer_max_batch_size(),
+            -500
+        );
+        assert_eq!(
+            SplitSizes::new(false, Some(-5), None).mixer_max_batch_size(),
+            -1005
+        );
+        assert_eq!(
+            SplitSizes::new(false, Some(i32::MIN), None).mixer_max_batch_size(),
+            i32::MAX - 999
+        );
+    }
+
+    #[test]
+    fn small_chunks_cover_the_queries_with_the_overlap() {
+        let sizes = SplitSizes::new(false, Some(1200), Some(50));
+        let chunks = split_query_batch(&[1000, 1500, 700], sizes).expect("split");
+        assert!(chunks.len() > 1);
+        for chunk in &chunks {
+            assert!(!chunk.queries.is_empty());
+        }
     }
 }

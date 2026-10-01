@@ -46,7 +46,8 @@ FASTA = ENGINE / "tests/fasta"
 E2C_INPUTS = ENGINE.parent / "docs/evidence/losat_web_e2c/inputs"
 FIELDS = ["case_id", "argv", "losat_extra", "exit", "stdout_sha256", "stdout_bytes", "stderr_sha256", "env"]
 # NCBI reads these and each one changes the batches or the report.
-REPORT_ENV = ("BL2SEQ_LEGACY", "CTOOLKIT_COMPATIBLE", "OLD_FSC", "BATCH_SIZE", "CHUNK_SIZE", "ADAPTIVE_CBS")
+REPORT_ENV = ("BL2SEQ_LEGACY", "CTOOLKIT_COMPATIBLE", "OLD_FSC", "BATCH_SIZE", "CHUNK_SIZE", "ADAPTIVE_CBS",
+              "OVERLAP_CHUNK_SIZE", "PRE_FETCH_SEQS_LIMIT")
 
 I = "tests/fixtures/blastn_regression/inputs"
 R = "target/blastn_regression"
@@ -114,6 +115,27 @@ _CASES = [
     ("prelim.gaps10_2_3_max3", f"{P} -task blastn -reward 2 -penalty -3 -gapopen 10 -gapextend 10"
                                " -max_target_seqs 3 -outfmt 6", ""),
     ("ties.gaps10_1_1", f"{T} -task blastn -reward 1 -penalty -1 -gapopen 10 -gapextend 10 -outfmt 6", ""),
+    # E2g T7: BATCH_SIZE, CHUNK_SIZE and OVERLAP_CHUNK_SIZE as NCBI reads them.
+    ("env.batch100", f"{B} -task blastn -outfmt 6", "", "BATCH_SIZE=100"),
+    ("env.batch1000", f"{B} -outfmt 6", "", "BATCH_SIZE=1000"),
+    ("env.batch5000_fmt7", f"{B} -task blastn -outfmt 7", "", "BATCH_SIZE=5000"),
+    ("env.batch100000", f"{B} -outfmt 6", "", "BATCH_SIZE=100000"),
+    ("env.batch_negative", f"{B} -task blastn -outfmt 6", "", "BATCH_SIZE=-1"),
+    ("env.batch0", f"{B} -outfmt 6", "", "BATCH_SIZE=0"),
+    ("env.chunk40000", f"{B} -task blastn -outfmt 6", "", "CHUNK_SIZE=40000"),
+    ("env.chunk40000_overlap6", f"{B} -task blastn -outfmt 6", "", "CHUNK_SIZE=40000 OVERLAP_CHUNK_SIZE=6"),
+    ("env.chunk2000", f"{B} -task blastn -outfmt 6", "", "CHUNK_SIZE=2000"),
+    ("env.chunk1500_overlap50_fmt0", f"{B} -outfmt 0", "", "CHUNK_SIZE=1500 OVERLAP_CHUNK_SIZE=50"),
+    ("env.chunk500", f"{B} -task blastn -outfmt 6", "", "CHUNK_SIZE=500"),
+    ("env.chunk_negative", f"{B} -outfmt 6", "", "CHUNK_SIZE=-5"),
+    ("env.chunk_blank", f"{B} -outfmt 6", "", "CHUNK_SIZE=' '"),
+    ("env.chunk1000_batch5000", f"{B} -outfmt 6", "", "CHUNK_SIZE=1000 BATCH_SIZE=5000"),
+    ("env.split_chunk300000", f"{S} -task blastn -outfmt 6", "", "CHUNK_SIZE=300000"),
+    ("env.split_overlap50", f"{S} -task blastn -outfmt 6", "", "CHUNK_SIZE=300000 OVERLAP_CHUNK_SIZE=50"),
+    ("env.split_overlap500", f"{S} -task blastn -outfmt 6", "", "CHUNK_SIZE=300000 OVERLAP_CHUNK_SIZE=500"),
+    ("env.split_overlap0", f"{S} -task blastn -outfmt 6", "", "CHUNK_SIZE=300000 OVERLAP_CHUNK_SIZE=0"),
+    ("env.split_overlap_negative", f"{S} -task blastn -outfmt 6", "", "OVERLAP_CHUNK_SIZE=-1"),
+    ("env.split_besthit_batch", f"{S} -task blastn -subject_besthit -outfmt 6", "", "BATCH_SIZE=1000 CHUNK_SIZE=300000"),
     # E2g T11: showdefline.cpp kBits is "(bits)" when CTOOLKIT_COMPATIBLE is set (also empty).
     ("ctoolkit.fmt0", f"{P} -max_target_seqs 3 -outfmt 0", "", "CTOOLKIT_COMPATIBLE=1"),
     ("ctoolkit.empty_fmt0", f"{T} -task blastn -max_target_seqs 5 -outfmt 0", "", "CTOOLKIT_COMPATIBLE="),

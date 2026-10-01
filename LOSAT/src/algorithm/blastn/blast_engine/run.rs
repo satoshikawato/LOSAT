@@ -87,9 +87,7 @@ use super::super::input::{
 use super::super::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
 use super::super::lookup::{build_unmasked_ranges, reverse_complement};
 use super::super::pairwise::{pairwise_hits, DisplayMasks};
-use super::super::query_split::{
-    query_chunk_size, restrict_masks, split_query_batch, QueryChunk, QUERY_CHUNK_OVERLAP,
-};
+use super::super::query_split::{restrict_masks, split_query_batch, QueryChunk, SplitSizes};
 use super::super::scoring::{
     check_greedy_gap_costs, check_losat_limits, check_scoring_options, context_blocks,
     context_ungapped_blocks, gap_x_dropoffs, karlin_error, ContextKarlin,
@@ -5475,29 +5473,7 @@ fn search(
     // LOSAT's limits come where NCBI starts the search, after its checks and its
     // `Query is Empty!` success.
     check_losat_limits(&args)?;
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_input_aux.cpp:86-91
-    // ```c
-    //     char* batch_sz_str = getenv("BATCH_SIZE");
-    //     if (batch_sz_str) {
-    //         retval = NStr::StringToInt(batch_sz_str);
-    // ```
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/local_blast.cpp:59-62
-    // ```c
-    //     char* chunk_sz_str = getenv("CHUNK_SIZE");
-    //     if (chunk_sz_str && !NStr::IsBlank(chunk_sz_str)) {
-    //         retval = NStr::StringToInt(chunk_sz_str);
-    // ```
-    // LOSAT follows NCBI's query batches without these variables (a blank CHUNK_SIZE is
-    // none).
-    for variable in ["BATCH_SIZE", "CHUNK_SIZE"] {
-        if std::env::var_os(variable)
-            .is_some_and(|value| variable == "BATCH_SIZE" || !is_blank(value.as_encoded_bytes()))
-        {
-            anyhow::bail!(
-                "the environment variable {variable}, which changes NCBI BLAST+'s query batches, is not supported by LOSAT's BLASTN"
-            );
-        }
-    }
+    let batching = query_batching_from_environment(args.task == "megablast")?;
     check_residues(query_records, "query")?;
     check_records_have_residues(query_records, "query")?;
     let subjects_read = with_u_as_t(subject_records);
@@ -5537,7 +5513,85 @@ fn search(
             outputs,
             output_formats,
             pool,
+            batching,
         )
+    })
+}
+
+/// NCBI's query batch size (`GetQueryBatchSize`, 0 for the adaptive `CBatchSizeMixer`) and
+/// query chunk sizes, as a query batch of the search uses them.
+#[derive(Clone, Copy, Debug)]
+struct QueryBatching {
+    /// The `BATCH_SIZE` value; 0 when it is not set.
+    fixed_batch_size: i32,
+    /// The size of the current batch (`TSeqPos`).
+    batch_size: u32,
+    split: SplitSizes,
+}
+
+/// Reads the environment variables that set NCBI's query batches and chunks, in NCBI's
+/// order: `CHUNK_SIZE` (the `CBatchSizeMixer` maximum), `BATCH_SIZE`, then
+/// `OVERLAP_CHUNK_SIZE` (the query splitter of the first batch).
+///
+/// NCBI reference: ncbi-blast/c++/src/app/blast/blastn_app.cpp:261-262
+/// ```c
+///         CBatchSizeMixer mixer(SplitQuery_GetChunkSize(opt.GetProgram())-1000);
+///         int batch_size = m_CmdLineArgs->GetQueryBatchSize();
+/// ```
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_cxx.cpp:55-59
+/// ```c
+///     m_ChunkSize = SplitQuery_GetChunkSize(m_Options->GetProgram());
+///     m_LocalQueryData = m_QueryFactory->MakeLocalQueryData(m_Options);
+///     m_TotalQueryLength = m_LocalQueryData->GetSumOfSequenceLengths();
+///     m_NumChunks = SplitQuery_CalculateNumChunks(m_Options->GetProgramType(),
+///         &m_ChunkSize, m_TotalQueryLength, m_LocalQueryData->GetNumQueries());
+/// ```
+/// A value that `NStr::StringToInt` cannot convert makes NCBI stop with its
+/// `CStringException`, whose text names the source path of the oracle's build (exit 255);
+/// LOSAT rejects it. So it does a `CHUNK_SIZE` of 1000 without `BATCH_SIZE` (the mixer's
+/// maximum is 0, so NCBI's first query batch is empty: "BLAST engine error: Empty
+/// CBlastQueryVector", exit 3) and negative `CHUNK_SIZE` and `OVERLAP_CHUNK_SIZE` together
+/// (the chunk computation then wraps around `size_t`).
+fn query_batching_from_environment(megablast: bool) -> Result<QueryBatching> {
+    let read = |variable: &str| -> Result<Option<i32>> {
+        match std::env::var_os(variable) {
+            Some(value) if !is_blank(value.as_encoded_bytes()) => {
+                match crate::blastinput::query_batch::ncbi_string_to_int(&value) {
+                    Some(number) => Ok(Some(number)),
+                    None => anyhow::bail!(
+                        "the environment variable {variable} has the value {:?}, which NCBI BLAST+ cannot convert to an int (it stops with a CStringException that names its build's source files); this is not supported by LOSAT's BLASTN",
+                        value.to_string_lossy()
+                    ),
+                }
+            }
+            _ => Ok(None),
+        }
+    };
+    let chunk_size = read("CHUNK_SIZE")?;
+    let fixed_batch_size = crate::blastinput::query_batch::get_query_batch_size(
+        std::env::var_os("BATCH_SIZE").as_deref(),
+    )
+    .map_err(|value| {
+        anyhow::anyhow!(
+            "the environment variable BATCH_SIZE has the value {value:?}, which NCBI BLAST+ cannot convert to an int (it stops with a CStringException that names its build's source files); this is not supported by LOSAT's BLASTN"
+        )
+    })?;
+    let overlap = read("OVERLAP_CHUNK_SIZE")?;
+    let split = SplitSizes::new(megablast, chunk_size, overlap);
+    if fixed_batch_size == 0 && split.mixer_max_batch_size() == 0 {
+        anyhow::bail!(
+            "the environment variable CHUNK_SIZE=1000 makes NCBI BLAST+'s query batches empty (\"BLAST engine error: Empty CBlastQueryVector\"), which is not supported by LOSAT's BLASTN"
+        );
+    }
+    if chunk_size.is_some_and(|value| value < 0) && overlap.is_some_and(|value| value < 0) {
+        anyhow::bail!(
+            "negative CHUNK_SIZE and OVERLAP_CHUNK_SIZE make NCBI BLAST+'s query chunks wrap around its size_t arithmetic, which is not supported by LOSAT's BLASTN"
+        );
+    }
+    Ok(QueryBatching {
+        fixed_batch_size,
+        batch_size: fixed_batch_size as u32,
+        split,
     })
 }
 
@@ -5623,8 +5677,9 @@ enum BatchStage<'a> {
 ///                 if (!batch_size)
 ///                     input.SetBatchSize(mixer.GetBatchSize(lcl_blast.GetNumExtensions()));
 /// ```
-/// `GetQueryBatchSize` is 0 for blastn (the environment variable `BATCH_SIZE` is rejected);
-/// the chunk size is `query_chunk_size`.
+/// `GetQueryBatchSize` is the `BATCH_SIZE` value (0 when it is not set) and the chunk size
+/// that of `CHUNK_SIZE` or the task (`query_batching_from_environment`).
+#[allow(clippy::too_many_arguments)]
 fn run_in_pool(
     args: BlastnArgs,
     query_records: &[bio::io::fasta::Record],
@@ -5632,6 +5687,7 @@ fn run_in_pool(
     outputs: &mut ReportOutputs<'_>,
     output_formats: Vec<BlastnOutputFormat>,
     parallel_pool: &crate::utils::threading::SearchPool<'_>,
+    mut batching: QueryBatching,
 ) -> Result<()> {
     if query_records.is_empty() {
         return Ok(());
@@ -5653,13 +5709,15 @@ fn run_in_pool(
         metadata,
     };
     let megablast = args.task == "megablast";
-    let chunk_size = query_chunk_size(megablast) as i32;
-    let mut mixer = BatchSizeMixer::new(chunk_size - 1000);
-    let total_length = subjects.metadata.db_len_total as i64;
-    if total_length > 0 {
-        mixer.set_target_hits((total_length / 3000) as i32);
+    let mut mixer = BatchSizeMixer::new(batching.split.mixer_max_batch_size());
+    if batching.fixed_batch_size == 0 {
+        let total_length = subjects.metadata.db_len_total as i64;
+        if total_length > 0 {
+            mixer.set_target_hits((total_length / 3000) as i32);
+        }
+        // `input.SetBatchSize(mixer.GetBatchSize())` converts the `Int4` to `TSeqPos`.
+        batching.batch_size = mixer.batch_size(None) as u32;
     }
-    let mut batch_size = mixer.batch_size(None);
 
     let lengths: Vec<usize> = query_records
         .iter()
@@ -5672,7 +5730,7 @@ fn run_in_pool(
     let mut query_eff_searchsp = Vec::with_capacity(2 * lengths.len());
     let mut start = 0;
     while start < lengths.len() {
-        let end = next_query_batch_end(&lengths, start, batch_size);
+        let end = next_query_batch_end(&lengths, start, batching.batch_size);
         let batch = search_query_batch(
             &args,
             &query_records[start..end],
@@ -5680,7 +5738,7 @@ fn run_in_pool(
             outputs,
             &output_formats,
             parallel_pool,
-            batch_size,
+            batching,
             start == 0,
             BatchStage::Search,
         )?;
@@ -5702,7 +5760,10 @@ fn run_in_pool(
         context_karlin.extend(batch.context_karlin);
         query_eff_searchsp.extend(batch.query_eff_searchsp);
         // NCBI's `Int4` count of the batch's successful initial extensions.
-        batch_size = mixer.batch_size(Some(batch.good_init_extends as u32 as i32));
+        if batching.fixed_batch_size == 0 {
+            batching.batch_size =
+                mixer.batch_size(Some(batch.good_init_extends as u32 as i32)) as u32;
+        }
         start = end;
     }
 
@@ -5771,7 +5832,7 @@ fn search_query_batch(
     outputs: &mut ReportOutputs<'_>,
     output_formats: &[BlastnOutputFormat],
     parallel_pool: &crate::utils::threading::SearchPool<'_>,
-    batch_size: i32,
+    batching: QueryBatching,
     first_batch: bool,
     stage: BatchStage<'_>,
 ) -> Result<QueryBatch> {
@@ -6331,7 +6392,7 @@ fn search_query_batch(
             if context_ungapped.iter().any(Option::is_none) {
                 anyhow::bail!(
                     "these scoring options have no Karlin-Altschul values, and the first query batch (up to {} residues) has an invalid query; NCBI BLAST+ does not report the error then, which is not supported by LOSAT's BLASTN",
-                    batch_size
+                    batching.batch_size
                 );
             }
             for (format, &output_format) in outputs.formats.iter_mut().zip(output_formats) {
@@ -6491,7 +6552,7 @@ fn search_query_batch(
             outputs,
             output_formats,
             parallel_pool,
-            batch_size,
+            batching,
             first_batch,
         )?,
         _ => None,
@@ -12182,11 +12243,11 @@ fn search_query_chunks(
     outputs: &mut ReportOutputs<'_>,
     output_formats: &[BlastnOutputFormat],
     parallel_pool: &crate::utils::threading::SearchPool<'_>,
-    batch_size: i32,
+    batching: QueryBatching,
     first_batch: bool,
 ) -> Result<Option<PrelimHitLists>> {
     let lengths: Vec<usize> = queries.iter().map(|record| record.seq().len()).collect();
-    let Some(chunks) = split_query_batch(&lengths, args.task == "megablast") else {
+    let Some(chunks) = split_query_batch(&lengths, batching.split) else {
         return Ok(None);
     };
     let mut merged: PrelimHitLists = Vec::with_capacity(queries.len());
@@ -12223,19 +12284,34 @@ fn search_query_chunks(
             outputs,
             output_formats,
             parallel_pool,
-            batch_size,
+            batching,
             first_batch,
             BatchStage::ChunkPrelim {
                 query_masks: &part_masks,
                 batch_eff_searchsp,
             },
         )?;
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_cxx.cpp:174-178
+        // ```c
+        //     const size_t kOverlap =
+        //         Blast_QueryIsTranslated(m_Options->GetProgramType())
+        //         ? kOverlapSize / CODON_LENGTH : kOverlapSize;
+        //     m_SplitBlk->SetChunkOverlapSize(kOverlap);
+        // ```
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hspstream.c:519-522
+        // ```c
+        //        Blast_HitListMerge(results1->hitlist_array + i,
+        //                           results2->hitlist_array + global_query,
+        //                           contexts_per_query, split_points,
+        //                           (Int4)SplitQueryBlk_GetChunkOverlapSize(squery_blk),
+        // ```
         merge_query_chunk(
             &mut merged,
             batch.chunk_prelim_lists,
             chunk,
             &lengths,
             context_offsets,
+            batching.split.overlap as u32 as i32,
         )?;
     }
     Ok(Some(merged))
@@ -12294,6 +12370,7 @@ fn merge_query_chunk(
     chunk: &QueryChunk,
     query_lengths: &[usize],
     context_offsets: &[i32],
+    chunk_overlap_size: i32,
 ) -> Result<()> {
     for (local_query, hit_list) in chunk_lists.into_iter().enumerate() {
         let Some(mut hit_list) = hit_list else {
@@ -12327,7 +12404,12 @@ fn merge_query_chunk(
             chunk.context_offsets[2 * local_query],
             chunk.context_offsets[2 * local_query + 1],
         ];
-        merge_prelim_hit_list(hit_list, &mut merged[part.query], split_points);
+        merge_prelim_hit_list(
+            hit_list,
+            &mut merged[part.query],
+            split_points,
+            chunk_overlap_size,
+        );
     }
     for hit_list in merged.iter_mut().flatten() {
         for list in &mut hit_list.hsplist_array {
@@ -12400,6 +12482,7 @@ fn merge_prelim_hit_list(
     mut hitlist1: HitList<PrelimHspList>,
     combined: &mut Option<HitList<PrelimHspList>>,
     split_offsets: [i32; 2],
+    chunk_overlap_size: i32,
 ) {
     let Some(mut hitlist2) = combined.take() else {
         *combined = Some(hitlist1);
@@ -12431,7 +12514,7 @@ fn merge_prelim_hit_list(
                     HspListSplit::Query {
                         offsets: split_offsets,
                     },
-                    QUERY_CHUNK_OVERLAP,
+                    chunk_overlap_size as usize,
                     true,
                 );
             } else {
@@ -13027,7 +13110,7 @@ mod tests {
         combined.update(list(2, &[60]));
         combined.update(list(7, &[40]));
         let mut combined = Some(combined);
-        merge_prelim_hit_list(hitlist1, &mut combined, [0, 0]);
+        merge_prelim_hit_list(hitlist1, &mut combined, [0, 0], 100);
         let mut merged = combined.unwrap();
         assert_eq!(merged.hsplist_max, 3);
         merged.sort_by_evalue();
@@ -13038,7 +13121,7 @@ mod tests {
         let mut empty = None;
         let mut single = HitList::new(3);
         single.update(list(5, &[10]));
-        merge_prelim_hit_list(single, &mut empty, [0, 0]);
+        merge_prelim_hit_list(single, &mut empty, [0, 0], 100);
         assert_eq!(prelim_scores(empty.as_ref().unwrap()), vec![(5, vec![10])]);
     }
 }

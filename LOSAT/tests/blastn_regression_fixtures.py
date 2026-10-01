@@ -142,6 +142,9 @@ _CASES = [
     # E2g T10: no -subject (CBlastDatabaseArgs raises NCBI's error before -query and -out are opened).
     ("nosubject.fmt6", f"-query {I}/q3k.fa -outfmt 6", ""),
     ("nosubject.missing_query_out", "-query nonexistent_query.fa -out nonexistent_dir/out.txt", ""),
+    # E2g R2: a .ncbirc (found through $HOME) with entries that change no output.
+    ("ncbirc.harmless_fmt0", f"{T} -max_target_seqs 5 -outfmt 0", "",
+     "HOME=tests/fixtures/blastn_regression/ncbirc_home BLAST_USAGE_REPORT=0 NCBI_CONFIG__BLAST__BLASTDB=/x"),
     # E2g T11: showdefline.cpp kBits is "(bits)" when CTOOLKIT_COMPATIBLE is set (also empty).
     ("ctoolkit.fmt0", f"{P} -max_target_seqs 3 -outfmt 0", "", "CTOOLKIT_COMPATIBLE=1"),
     ("ctoolkit.empty_fmt0", f"{T} -task blastn -max_target_seqs 5 -outfmt 0", "", "CTOOLKIT_COMPATIBLE="),

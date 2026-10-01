@@ -15,6 +15,8 @@
 pub mod blast_args;
 pub mod blastn_args;
 pub mod blastp_args;
+// NCBI corelib/ncbiapp.cpp, metareg.cpp: the application layer's environment and registry.
+pub mod ncbi_environment;
 pub mod query_batch;
 pub mod tblastx_args;
 

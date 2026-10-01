@@ -1,0 +1,7 @@
+; E2g R2: entries that change no output of blastn -subject (accepted by LOSAT)
+[BLAST]
+BLASTDB=/nonexistent/blastdb
+DATA_LOADERS=blastdb
+BLAST_USAGE_REPORT=false
+[NCBI]
+Data=/nonexistent/data

@@ -2827,15 +2827,26 @@ struct UngappedHit {
 //     }
 // }
 // ```
+// NCBI's `ungapped_data->q_start` is an offset in the concatenated query (the
+// scan and the ungapped extension run on the whole query block), so hits of
+// different contexts never tie on it; `qs` here is context-local, and the
+// context offset is added back for the comparison.
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:206-207
+// ```c
+// ungapped_data->q_start = (Int4)(q_beg - query->sequence);
+// ungapped_data->s_start = s_off - (q_off - ungapped_data->q_start);
+// ```
 fn score_compare_ungapped_hits(a: &UngappedHit, b: &UngappedHit) -> std::cmp::Ordering {
     let a_len = a.qe.saturating_sub(a.qs);
     let b_len = b.qe.saturating_sub(b.qs);
+    let a_q_start = i64::from(a.query_context_offset) + a.qs as i64;
+    let b_q_start = i64::from(b.query_context_offset) + b.qs as i64;
 
     b.score
         .cmp(&a.score)
         .then_with(|| a.ss.cmp(&b.ss))
         .then_with(|| b_len.cmp(&a_len))
-        .then_with(|| a.qs.cmp(&b.qs))
+        .then_with(|| a_q_start.cmp(&b_q_start))
         .then_with(|| b_len.cmp(&a_len))
 }
 
@@ -9735,7 +9746,10 @@ fn search_query_batch(
             // qsort(init_hsp_array, init_hitlist->total,
             //       sizeof(BlastInitHSP), score_compare_match);
             // ```
-            ungapped_hits.sort_unstable_by(score_compare_ungapped_hits);
+            // The oracle's qsort (glibc 2.39) is a stable merge sort: hits that
+            // compare equal keep the order in which they were saved. `sort_by`
+            // is stable too.
+            ungapped_hits.sort_by(score_compare_ungapped_hits);
 
             // Debug counters for containment analysis
             let mut dbg_containment_skipped = 0usize;

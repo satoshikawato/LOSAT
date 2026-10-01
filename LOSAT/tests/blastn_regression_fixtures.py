@@ -88,6 +88,10 @@ _CASES = [
                      " -task blastn -lcase_masking -outfmt 6", ""),
     ("lcase.megablast", f"-query {I}/lcase_island_megablast_query.fa -subject {I}/lcase_island_megablast_subject.fa"
                         " -lcase_masking -outfmt 6", ""),
+    # E2g T1: init hits of the two strands tied on score, subject start and length.
+    ("pal.default", f"-query {I}/pal_query.fa -subject {I}/pal_subject.fa -outfmt 6", ""),
+    ("pal.task_blastn", f"-query {I}/pal_query.fa -subject {I}/pal_subject.fa -task blastn -outfmt 6", ""),
+    ("pal.word7_fmt0", f"-query {I}/pal_query.fa -subject {I}/pal_subject.fa -task blastn -word_size 7 -outfmt 0", ""),
     # E2g T11: showdefline.cpp kBits is "(bits)" when CTOOLKIT_COMPATIBLE is set (also empty).
     ("ctoolkit.fmt0", f"{P} -max_target_seqs 3 -outfmt 0", "", "CTOOLKIT_COMPATIBLE=1"),
     ("ctoolkit.empty_fmt0", f"{T} -task blastn -max_target_seqs 5 -outfmt 0", "", "CTOOLKIT_COMPATIBLE="),
@@ -160,7 +164,24 @@ def command_generate(_args) -> int:
                  "lcase_island_blastn_subject.fa", "lcase_island_megablast_query.fa",
                  "lcase_island_megablast_subject.fa"):
         (INPUTS / name).write_bytes((E2C_INPUTS / name).read_bytes())
+    generate_e2g_inputs(edl, sakai)
     return 0
+
+
+def generate_e2g_inputs(edl: str, sakai: str) -> None:
+    """Inputs added in E2g; a separate generator keeps the earlier inputs unchanged."""
+    rng = random.Random(20261003)
+    # T1: query X + revcomp(X); its minus-strand context is the same sequence, so both
+    # strands give hits with equal score, subject start and length (context-local q_start).
+    records, subject = [], []
+    for index in range(40):
+        start = rng.randrange(0, len(edl) - 400)
+        x = edl[start:start + rng.choice((60, 90, 120, 150))]
+        records.append((f"pal{index:02d} EDL933 {start + 1} X+revcomp(X)", x + revcomp(x)))
+        subject.append("".join(rng.choice("ACGT") for _ in range(rng.randint(20, 120))))
+        subject.append(mutate(rng, x, rng.choice((0.0, 0.02))))
+    write_fasta(INPUTS / "pal_query.fa", records)
+    write_fasta(INPUTS / "pal_subject.fa", [("pals EDL933 windows", "".join(subject))])
 
 
 def prepare_runtime_inputs() -> None:

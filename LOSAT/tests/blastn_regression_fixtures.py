@@ -145,6 +145,8 @@ _CASES = [
     # E2g R2: a .ncbirc (found through $HOME) with entries that change no output.
     ("ncbirc.harmless_fmt0", f"{T} -max_target_seqs 5 -outfmt 0", "",
      "HOME=tests/fixtures/blastn_regression/ncbirc_home BLAST_USAGE_REPORT=0 NCBI_CONFIG__BLAST__BLASTDB=/x"),
+    # E2g T14: a failed outfmt 0 write ("BLAST failed to write output", exit 6; Linux /dev/full).
+    ("write.devfull_fmt0", f"{T} -max_target_seqs 5 -outfmt 0 -out /dev/full", ""),
     # E2g T11: showdefline.cpp kBits is "(bits)" when CTOOLKIT_COMPATIBLE is set (also empty).
     ("ctoolkit.fmt0", f"{P} -max_target_seqs 3 -outfmt 0", "", "CTOOLKIT_COMPATIBLE=1"),
     ("ctoolkit.empty_fmt0", f"{T} -task blastn -max_target_seqs 5 -outfmt 0", "", "CTOOLKIT_COMPATIBLE="),

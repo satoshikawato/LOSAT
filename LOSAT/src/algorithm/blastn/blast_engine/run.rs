@@ -5258,20 +5258,25 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     if let Some(path) = args.out.as_deref() {
         check_utf8_file_name(path, "out")?;
     }
-    let mut out_file = match args.out.as_deref().filter(|path| path.as_os_str() != "-") {
+    let out_file = match args.out.as_deref().filter(|path| path.as_os_str() != "-") {
         Some(path) => Some(std::io::BufWriter::new(
             std::fs::File::create(path).map_err(|_| crate::cli::inaccessible("out", path))?,
         )),
         None => None,
     };
     let outfmt = args.outfmt.clone();
+    let pairwise = output_formats.contains(&BlastnOutputFormat::Pairwise);
     let mut stderr = std::io::stderr();
+    let mut report = ReportStream {
+        inner: match out_file {
+            Some(file) => Box::new(file) as Box<dyn std::io::Write + Send>,
+            None => Box::new(std::io::BufWriter::new(std::io::stdout())),
+        },
+        failed: false,
+    };
     let result = {
-        let sink = match out_file.as_mut() {
-            Some(file) => OutputSink::Writer(file),
-            None => OutputSink::Stdout,
-        };
-        let mut outputs = ReportOutputs::single(&outfmt, sink, &mut stderr);
+        let mut outputs =
+            ReportOutputs::single(&outfmt, OutputSink::Writer(&mut report), &mut stderr);
         search_cli(
             args,
             query_file,
@@ -5282,9 +5287,52 @@ pub fn run(args: BlastnArgs) -> Result<()> {
         )
     };
     // What was written before an error (such as the outfmt 0 prolog) stays in the file.
-    let flushed = out_file.as_mut().map_or(Ok(()), std::io::Write::flush);
+    let flushed = std::io::Write::flush(&mut report);
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:118-119
+    // ```c
+    // {
+    //     m_Outfile.exceptions(NcbiBadbit);
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.hpp:252-255
+    // ```c
+    //     catch (const std::ios::failure&) {                                      \
+    //         LOG_POST(Error << "BLAST failed to write output");                  \
+    //         exit_code = BLAST_OUTPUT_ERROR;                                     \
+    //     }                                                                       \
+    // ```
+    // The outfmt 0 formatter's stream throws when a write fails (oracle: `-out /dev/full`,
+    // exit 6). For outfmt 6/7 NCBI aborts instead, and LOSAT reports the error
+    // (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES).
+    if report.failed && pairwise {
+        return Err(crate::cli::NativeError {
+            exit: 6,
+            message: "BLAST failed to write output\n".to_string(),
+        }
+        .into());
+    }
     result?;
     flushed.context("failed to write the output")
+}
+
+/// The report's output stream (the `-out` file or standard output), which records whether
+/// a write to it failed.
+struct ReportStream {
+    inner: Box<dyn std::io::Write + Send>,
+    failed: bool,
+}
+
+impl std::io::Write for ReportStream {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let written = self.inner.write(buf);
+        self.failed |= written.is_err();
+        written
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        let flushed = self.inner.flush();
+        self.failed |= flushed.is_err();
+        flushed
+    }
 }
 
 /// The part of `run` after the output is opened: NCBI's filtering handler (`-dust`), the

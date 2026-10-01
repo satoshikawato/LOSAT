@@ -28,6 +28,10 @@ S05 で確定した ABI（`docs/web/abi_v2.md`。version 2）と、それを Nod
 
 完了条件は計画 §7 の S09 の行による。記録は `docs/evidence/losat_web_w1/README.md`。S10 の契約試験（`record-scanner`・`engine-input`・`run-output`）が本物の reactor と Engine worker で通ることも、このセッションで確かめる（S10 のゲート記録で、計画 §7 の S09 の行に足すよう依頼した）。
 
+## 前回の中断（2026-10-01）
+
+最初の S09 の作業は使用量の上限で止まった。`/mnt/c/Users/genom/GitHub/LOSAT-web-gui-app` の作業ツリーに、未コミットで試験していない変更が残っている（`web/app/` の 25 ファイル：Engine worker・reactor の結合・harness など。ブランチは `origin/feature/losat-web-gui` を取り込み済みで、push していない）。最初の作業として、この変更を読み、使うか捨てるかを決める（`git stash` で退避してもよい）。入口の条件の判断（S08 の TBLASTX の outfmt 0/7 の升目を除いて、V-ABI を通る升目で始める）は前回と同じ推奨案とする。使用量を抑えるため、機械的な作業は Agent の `model: "sonnet"` に回す（[S07++b](session_s07ppb_e2f_close.md) の「進め方」）。
+
 ## S10 で作った port と、S09 が本物につなぐもの
 
 S10（W2、[ゲート記録](../evidence/losat_web_w2/README.md)）は、本物の reactor に依存する部分を port と試験用の実装で作り、契約試験を書いた。どれも `web/app/` の中にある。

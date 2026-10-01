@@ -221,6 +221,25 @@ fn calculate_blastn_context_statistics(
     (bit_score, e_value)
 }
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:662-664
+// ```c
+// if (hsp->evalue > cutoff) {
+//    hsp_array[index] = Blast_HSPFree(hsp_array[index]);
+// } else {
+// ```
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1996-1998
+// ```c
+// if (hsp->evalue > cutoff) {
+//    hsp_array[index] = Blast_HSPFree(hsp_array[index]);
+// } else {
+// ```
+// The HSP survives unless `evalue > cutoff`, the same comparison as C (a NaN
+// e-value survives; LOSAT rejects a NaN `-evalue` before the search).
+#[allow(clippy::neg_cmp_op_on_partial_ord)]
+fn hsp_survives_evalue_reap(evalue: f64, cutoff: f64) -> bool {
+    !(evalue > cutoff)
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4155-4160
 // ```c
 // #define MAX_SUBJECT_OFFSET 90000
@@ -10467,7 +10486,7 @@ fn search_query_batch(
                         round_down_evalue_score,
                     );
                     prelim.prelim_evalue = prelim_evalue;
-                    prelim_evalue <= evalue_threshold
+                    hsp_survives_evalue_reap(prelim_evalue, evalue_threshold)
                 });
             }
         }
@@ -11866,7 +11885,7 @@ fn search_query_batch(
             hit.bit_score = bit_score;
             hit.e_value = eval;
         }
-        final_hits.retain(|hit| hit.e_value <= evalue_threshold);
+        final_hits.retain(|hit| hsp_survives_evalue_reap(hit.e_value, evalue_threshold));
         if let Some(timing) = timing_ref {
             BlastnTiming::record_count(
                 &timing.traceback_deleted_evalue_cutoff_hsps,
@@ -12411,6 +12430,18 @@ fn merge_prelim_hit_list(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn evalue_reap_keeps_unless_greater_than_cutoff() {
+        assert!(hsp_survives_evalue_reap(10.0, 10.0));
+        assert!(!hsp_survives_evalue_reap(1e-180, 0.0));
+        assert!(hsp_survives_evalue_reap(0.0, 0.0));
+        assert!(!hsp_survives_evalue_reap(10.000001, 10.0));
+        assert!(hsp_survives_evalue_reap(f64::NAN, 10.0));
+        assert!(hsp_survives_evalue_reap(10.0, f64::NAN));
+        assert!(hsp_survives_evalue_reap(f64::INFINITY, f64::INFINITY));
+        assert!(!hsp_survives_evalue_reap(f64::INFINITY, f64::MAX));
+    }
 
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-148
     // ```c

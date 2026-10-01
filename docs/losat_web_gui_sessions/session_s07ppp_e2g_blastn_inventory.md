@@ -17,12 +17,13 @@ LOSAT の段階 E2g を実行する。BLASTN（LOSATN）の NCBI との一致を
 
 S07++（E2f）は完了した（[ゲート記録](../evidence/losat_web_e2f/README.md)、`AUTHORITY.md` §A〜§E）。独立監査は第 1 回が unsupported（予備の hit list の大きさ `prelim_hitlist_size` を traceback の後に適用していた）、第 2 回が supported（325 件の比較で差 0、`docs/evidence/losat_web_e2f/audit_round2/`）。これを前提に、次の点を守る。
 
-### 進め方（保守者の指示、S07++b から引き継ぐ）
+### 進め方（保守者の指示、2026-10-01）
 
-- **使用量を抑える。** 機械的な作業（ゲートや sweep の実行と集計、NCBI との比較の実行、記録・`evidence.sha256`・`verification_cells.tsv` の行の下書き、決まった観点でのファイルの走査と分類）は Agent ツールに `model: "sonnet"` で回す。メイン（Opus）は、NCBI の移植の設計、監査の指摘の判断、修正の設計と実装、agent の成果の確認だけを行う。
-- **一度に 1 つ、serial に。** agent は前景（`run_in_background: false`）で 1 つずつ、自己完結した指示で実行し、書いたものはメインが読んで確かめてからコミットする。エンジン側とアプリ側を並行させない（アプリ側の S09 は `/mnt/c/Users/genom/GitHub/LOSAT-web-gui-app` に中断した作業が未コミットで残っている。このセッションでは触らない）。
+- **オーケストレータは Opus（メインのセッション）。** 設計を伴う作業だけを行う：NCBI の移植の設計と実装、監査の指摘の判断、分類の結果の確認と統合、agent の成果の確認。機械的な作業は Agent ツールに `model: "sonnet"` で回す：ゲートや sweep の実行と集計、NCBI との比較の実行、記録・`evidence.sha256`・`verification_cells.tsv` の行の下書き、決まった観点でのファイルの走査と分類。
+- **並行は同時に 4 つまで。** 互いに独立な読み取り専用の作業（第 2 段の分類の 7 範囲、独立監査の観点ごとの確認、NCBI との比較の実行）だけを並行させる。**エンジンのソース（特に `run.rs`）を変える作業は serial に 1 つずつ行う**（同じファイルを触る・ビルドの出力先が競合する）。ビルドの出力先は agent ごとに別の `--target-dir` にする。ゲートの実行は 1 つだけ（V-PERF は lock を取る）。アプリ側の S09（`/mnt/c/Users/genom/GitHub/LOSAT-web-gui-app` に中断した作業が未コミットで残っている）はこのセッションでは触らない。
+- **使用量の上限で作業が失われないようにする。** 2026-09-30 に並行した agent が同時に上限に達して成果を失った。agent には、結果を**途中で、ファイルに書きながら**進めさせる（分類は範囲ごとの TSV を `docs/evidence/losat_web_e2g/` か scratch に行ごとに追記する。比較の実行は case ごとの結果を TSV に書く）。agent の指示は自己完結にして、成果の保存先を指定する。agent が終わるたびにメインが読んで確かめ、コミットする。上限に達したら、並行数を 2 に減らして続ける。
 - V-PERF で閾値を超えた case の切り分けの再計測は `perf_cases.py run … --repeat 5`。V-PERF の段階はアプリ側の lock（`~/.cache/losat-web-gui-target/s07p-resume/vperf_lock.sh`）を取る。ゲートの script の雛形は `~/.cache/losat-web-gui-target/s07p-resume/s07pp_gates2.sh`（実行の前に `date -u +%Y%m%dT%H%M%SZ > …/s07p-resume/ts2.txt` で run の名前を決める。無ければ `run-20260930T163727Z/` の記録から作り直す）。NCBI の参照の注釈の検査は `…/s07p-resume/verify_refs.py <変えた .rs>`。
-- 最初に独立監査の第 2 回の script（`docs/evidence/losat_web_e2f/audit_round2/{gen,cases,driver}.py`）を読み、棚卸しの後の監査でそのまま再利用できる。
+- 独立監査の第 2 回の script（`docs/evidence/losat_web_e2f/audit_round2/{gen,cases,driver}.py`）は、棚卸しの後の監査でそのまま再利用できる。
 
 ### 棚卸しの第 1 段（やり直し）
 
@@ -30,7 +31,7 @@ NCBI の参照の注釈（`NCBI reference: …` と直後の断片）を機械�
 
 ### 分類（第 2 段）
 
-7 つの範囲ごとに 1 つずつ、sonnet の agent に serial に回す。
+7 つの範囲ごとに 1 つずつ、sonnet の agent に回す（独立な読み取り専用の作業なので、4 つまで並行してよい）。各 agent は行を範囲ごとの TSV に追記しながら進め、メインが読んで統合する。
 
 | 範囲 | NCBI のファイル |
 |---|---|

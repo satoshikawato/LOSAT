@@ -109,11 +109,6 @@ fn main() -> Result<()> {
             // blastn's own code runs; LOSAT rejects the settings that change the output.
             LOSAT::blastinput::ncbi_environment::check_ncbi_application_settings("blastn")
                 .map_err(anyhow::Error::msg)?;
-            // NCBI's blastn keeps the C runtime's default action for SIGPIPE: a write to a
-            // closed pipe ends it by the signal (oracle: exit 128 + 13 from the shell, no
-            // message). The Rust runtime ignores SIGPIPE at startup; blastn restores it.
-            #[cfg(unix)]
-            restore_default_sigpipe();
             if let Err(error) = blastn::run(args) {
                 LOSAT::cli::exit_on_native_error(&error);
                 return Err(error);
@@ -133,21 +128,4 @@ fn main() -> Result<()> {
         }
     }
     Ok(())
-}
-
-/// Restores the default action of SIGPIPE (the process ends when it writes to a closed
-/// pipe), which the Rust runtime sets to "ignore" before `main`.
-#[cfg(unix)]
-fn restore_default_sigpipe() {
-    extern "C" {
-        fn signal(signum: i32, handler: usize) -> usize;
-    }
-    const SIGPIPE: i32 = 13;
-    const SIG_DFL: usize = 0;
-    // SAFETY: `signal` is the C library's function, which the Rust standard library
-    // links on Unix; SIGPIPE is 13 and SIG_DFL is 0 on Linux and macOS. It changes only
-    // the disposition of SIGPIPE, before any thread of the search starts.
-    unsafe {
-        signal(SIGPIPE, SIG_DFL);
-    }
 }

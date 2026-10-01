@@ -47,6 +47,7 @@ jobs:
             .tmp/full-regressions/hashes.tsv
             .tmp/full-regressions/timing.tsv
             .tmp/full-regressions/outfmt0-fixtures-*.tsv
+            .tmp/full-regressions/blastn-regression-fixtures.tsv
           if-no-files-found: warn
           retention-days: 30
 

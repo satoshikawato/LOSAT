@@ -7,8 +7,10 @@ docs/evidence/losat_web_e1a/capture_outputs.py and checks, per case:
   (docs/evidence/losat_web_e1a/baseline/hashes.tsv);
 - the frozen expected hash (Gate A, TLOSAN Stage G), with the known mismatches of
   frozen_mismatch_allowlist.json (a stale entry fails);
-and the outfmt 0 fixtures (docs/evidence/losat_web_e2a/check_losat.py) of the
-selected programs at 1 and 4 threads.
+the outfmt 0 fixtures (docs/evidence/losat_web_e2a/check_losat.py) of the
+selected programs at 1 and 4 threads, and for BLASTN the frozen NCBI outputs of
+blastn_regression_fixtures.py (preliminary hit lists, batches, split, ambiguity,
+lowercase masking).
 
 Programs are selected from the changed paths (--changed-from): a program's own
 directory selects it and every program that imports it; any other engine or
@@ -179,6 +181,14 @@ def run_fixtures(losat: Path, programs: set[str], out: Path) -> list[str]:
         log.write_text(result.stdout + result.stderr)
         if result.returncode != 0:
             failures.append(f"outfmt 0 fixtures differ at {threads} thread(s): see {log.name}")
+    if "blastn" in programs:
+        log = out / "blastn-regression-fixtures.tsv"
+        result = subprocess.run([sys.executable, str(TESTS / "blastn_regression_fixtures.py"), "check",
+                                 "--losat", str(losat), "--out", str(log)], capture_output=True, text=True)
+        if result.returncode != 0:
+            failures += [f"BLASTN regression fixture {line}" for line in result.stdout.splitlines()
+                         if "\t" in line and not line.endswith("\tsame")]
+            failures.append(f"BLASTN regression fixtures differ: see {log.name}")
     return failures
 
 

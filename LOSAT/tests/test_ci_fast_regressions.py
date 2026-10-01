@@ -10,6 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import blastn_regression_fixtures as fixtures  # noqa: E402
 import ci_fast_regressions as fast  # noqa: E402
 from frozen_allowlist import Allowlist  # noqa: E402
 
@@ -60,6 +61,17 @@ class CheckRowsTests(unittest.TestCase):
         self.assertTrue(any("not executed" in line for line in failures))
         failures, _ = fast.check_rows([row("same", FROZEN)], baseline, allowlist(), {"blastn"}, False)
         self.assertEqual(failures, [])
+
+
+class BlastnFixtureTests(unittest.TestCase):
+    def test_manifest_matches_cases_and_files(self):
+        rows = fixtures.read_manifest()
+        self.assertEqual([(r["case_id"], r["argv"], r["losat_extra"]) for r in rows], fixtures.CASES)
+        for r in rows:
+            data = (fixtures.FIXTURES / f"{r['case_id']}.out").read_bytes()
+            self.assertEqual(fixtures.sha256(data), r["stdout_sha256"], r["case_id"])
+            err = fixtures.FIXTURES / f"{r['case_id']}.err"
+            self.assertEqual(fixtures.sha256(err.read_bytes()) if err.exists() else "", r["stderr_sha256"], r["case_id"])
 
 
 class SelectionTests(unittest.TestCase):

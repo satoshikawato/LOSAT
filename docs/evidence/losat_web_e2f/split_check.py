@@ -10,7 +10,16 @@ with NCBI byte for byte (stdout, stderr and exit status). NCBI's stderr warning
 comparison (LOSAT does not write it; docs/evidence/losat_web_e2c/AUTHORITY.md section I).
 The last column says whether splitting changes NCBI's output. Exits 1 when a case differs.
 
-Usage: split_check.py --bin-dir DIR --losat LOSAT --work DIR [--seed N] [--jobs N]
+The cases named r1_* are the round-1 audit reproductions (`make_regression_cases`): NCBI keeps
+only `prelim_hitlist_size` subjects' HSP lists (550 by default, 10 for -max_target_seqs 1..5)
+after the preliminary stage and before the traceback, so output differs from a build that
+applies that limit after the traceback when more subjects than the limit have hits. (a) 560
+subjects plus one that spans the chunk boundary of a split query; (b) -max_target_seqs 1, 3
+and the controls 10, 11; (c) the same on a split megablast query; (d) an unsplit batch.
+They use their own random stream, so the other cases do not change. Run them alone with
+`--only r1_`.
+
+Usage: split_check.py --bin-dir DIR --losat LOSAT --work DIR [--seed N] [--jobs N] [--only PREFIX]
 """
 from __future__ import annotations
 
@@ -181,6 +190,47 @@ def make_cases(work: Path, seed: int) -> list[tuple[str, str, str, list[str]]]:
             a = max(0, p - rng.randint(0, width))
             name = f"sweep_{tag}_{k}"
             cases.append((name, query, write(work / f"{name}.fa", [(name, mutate(rng, seq[a:a + width]))]), ["-task", task]))
+    cases += make_regression_cases(work, seed)
+    return cases
+
+
+def make_regression_cases(work: Path, seed: int) -> list[tuple[str, str, str, list[str]]]:
+    """Round-1 audit reproductions of the prelim_hitlist_size limit (see the module docstring).
+    Own random stream: adding or changing these cases does not change `make_cases`."""
+    edl, sak = genome("EDL933.fna"), genome("Sakai.fna")
+    rng = random.Random(f"{seed}-regression")
+    cases = []
+    q = edl[:2_000_000]
+    write(work / "r1_q2m.fa", [("EDL933_2M", q)])
+
+    # (a) 560 subjects with hits in the first chunk plus B, which spans the chunk boundary
+    # (NCBI prints 500 subjects and not B).
+    subjects = [("B", q[999_200:1_000_800])]
+    for i in range(560):
+        a = rng.randrange(0, 990_000 - 1500 + 1)
+        seq = list(q[a:a + 1500])
+        for j in range(len(seq)):
+            if rng.random() < 0.03:
+                seq[j] = rng.choice([c for c in "ACGT" if c != seq[j]])
+        subjects.append((f"S{i}", "".join(seq)))
+    cases.append(("r1_a_default", "r1_q2m.fa", write(work / "r1_a.fa", subjects), ["-task", "blastn", "-outfmt", "6"]))
+
+    # (b) X spans the chunk boundary, Y0..Y9 are far from it.
+    subject = write(work / "r1_b.fa", [("X", edl[997_000:1_003_000])] + [(f"Y{i}", edl[50_000 + 80_000 * i:50_000 + 80_000 * i + 4500]) for i in range(10)])
+    for n in (1, 3, 10, 11):
+        cases.append((f"r1_b_mts{n}", "r1_q2m.fa", subject, ["-task", "blastn", "-max_target_seqs", str(n)]))
+
+    # (c) One record of both genomes (megablast splits it in two); X spans the chunk boundary.
+    both = edl + sak
+    write(work / "r1_cat.fa", [("EDL933_Sakai", both)])
+    subject = write(work / "r1_c.fa", [("X", both[5_510_500:5_516_500])] + [(f"Y{i}", both[200_000 + 900_000 * i:200_000 + 900_000 * i + 4500]) for i in range(10)])
+    cases.append(("r1_c_megablast_mts1", "r1_cat.fa", subject, ["-task", "megablast", "-max_target_seqs", "1"]))
+
+    # (d) Unsplit batch; X is interrupted by 25 random letters.
+    write(work / "r1_q300k.fa", [("EDL933_300k", edl[:300_000])])
+    insert = "".join(rng.choice("ACGT") for _ in range(25))
+    subject = write(work / "r1_d.fa", [("X", edl[100_000:102_000] + insert + edl[102_000:104_000])] + [(f"Y{i}", edl[150_000 + 12_000 * i:150_000 + 12_000 * i + 3000]) for i in range(10)])
+    cases.append(("r1_d_mts1", "r1_q300k.fa", subject, ["-task", "blastn", "-max_target_seqs", "1", "-outfmt", "6"]))
     return cases
 
 
@@ -196,9 +246,10 @@ def main() -> int:
     parser.add_argument("--work", required=True, type=Path)
     parser.add_argument("--seed", type=int, default=20260930)
     parser.add_argument("--jobs", type=int, default=6)
+    parser.add_argument("--only", default="", metavar="PREFIX", help="run only the cases whose name starts with PREFIX")
     args = parser.parse_args()
     args.work.mkdir(parents=True, exist_ok=True)
-    cases = make_cases(args.work, args.seed)
+    cases = [case for case in make_cases(args.work, args.seed) if case[0].startswith(args.only)]
     ncbi = str(args.bin_dir / "blastn")
     unsplit = dict(os.environ, CHUNK_SIZE="20000000")
 

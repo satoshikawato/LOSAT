@@ -1,8 +1,9 @@
 # Product Decision: CLI behaviour outside the search results
 
 - Decision ID: `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`
-- Version: 1.1
-- Date: 2026-10-02 (1.0); 1.1 the same day (exception 5, Session S07+++b)
+- Version: 1.2
+- Date: 2026-10-02 (1.0); 1.1 the same day (exception 5, Session S07+++b); 1.2 the same day
+  (the timing of a closed pipe, exceptions 3 and 5, Session S07+++b)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++ (E2g), on the items
   that the BLASTN inventory (`docs/evidence/losat_web_e2g/INVENTORY.tsv`, actions `S08` and
   `OPEN`) left for a maintainer decision. Plan decision DW-13 in
@@ -49,6 +50,11 @@ BLAST+.
    native `signal` call that the project's pure-Rust runtime boundary check rejects. LOSAT
    reports the failed outfmt 0 write as NCBI reports other outfmt 0 write failures:
    `BLAST failed to write output`, exit code 6 (outfmt 6/7: exception 3).
+   Version 1.2: whether a write to a pipe fails depends on when the reader closes it. When
+   LOSAT's writes have completed before the reader closes (for example a short outfmt 6 or
+   7 report read by `head -c 100`), LOSAT exits with code 0, where NCBI, which writes later
+   (at its flushes), is ended by SIGPIPE (141). This timing is part of exceptions 3 and 5
+   (round-3 audit of Session S07+++b).
 
 ## Decided handling that is not an exception
 

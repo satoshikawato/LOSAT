@@ -59,7 +59,8 @@ authoritative, current guidance for agent behavior in LOSAT.
      is reported with a non-zero exit; an allocation failure aborts (NCBI:
      "BLAST ran out of memory", exit 4); an outfmt 0 write to a closed pipe,
      where NCBI is ended by SIGPIPE, is reported as "BLAST failed to write
-     output", exit 6. Errors raised after argument parsing, the outfmt 0 write
+     output", exit 6, and a closed pipe that LOSAT's completed writes do not
+     reach ends LOSAT with exit 0 (timing; NCBI's later flush gets SIGPIPE). Errors raised after argument parsing, the outfmt 0 write
      failure ("BLAST failed to write output", exit 6), all other warnings, and
      every search result must still match NCBI. Non-UTF-8
      file names and `.ncbirc` keys that change output are explicit

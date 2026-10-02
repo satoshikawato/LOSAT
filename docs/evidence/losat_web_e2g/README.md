@@ -293,10 +293,10 @@ supported。CLI 3958 件と web の経路 966 件（`run_local_blastn` を adapt
 
 ## 残件と引き継ぎ（S08 へ）
 
-- **保守者の確認を待つもの（2026-10-02 の判断の後に分かった細部。今は下の扱い）：**
-  1. 負の `CHUNK_SIZE` が負の `OVERLAP_CHUNK_SIZE` より大きく、batch を分けるがもう一度は分けない場合：NCBI は隙間のある塊で検索して hit を落とす（決まった結果）。判断 #7 のとおり明示的な拒否にした（「決まった結果は再現」の原則なら再現になる）。
-  2. reward 32768 以上（16 bit で 0 以下に回る）：NCBI は全 query を無効にして hit 無しで終わる。判断 #4 と同じく明示的な拒否のまま。
-  3. outfmt 6/7 で閉じたパイプ：LOSAT の書き込みが読み手が閉じる前に済むと LOSAT は終了コード 0、NCBI は後の flush で SIGPIPE（141）。承認済みの例外 3・5 と同じ原因（時間に依る）として扱った。
+- **保守者の確認（2026-10-02、DW-16、推奨の案）：** DW-15 の後に分かった 3 つの細部。
+  1. 負の `CHUNK_SIZE` が負の `OVERLAP_CHUNK_SIZE` より大きく、batch を分けるがもう一度は分けない場合（NCBI は隙間のある塊で検索して hit を落とす、決まった結果）：明示的な拒否のまま（`PD-LOSAT-NCBI-DEFECTS` 版 1.1）。
+  2. reward 32768 以上（16 bit で 0 以下に回り、NCBI は全 query を無効にして hit 無し）：明示的な拒否のまま（同 版 1.1）。
+  3. outfmt 6/7 の閉じたパイプで、LOSAT の書き込みが読み手が閉じる前に済むと LOSAT は終了コード 0、NCBI は後の flush で SIGPIPE（141）：承認済みの例外 3・5 の時間に依る部分（`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` 版 1.2、AGENTS.md）。
 - **`-evalue` の 16 進と `1e`：** NCBI は `0x1p3`・`+0x10`・`1e` を読む（`strtod`／`StringToDoublePosix`）。LOSAT は明示的に拒否のまま（棚卸し A-207、K-layer。アプリの出す書き方ではない）。BLASTP などの e-value の書き方は TD-13（S08+）。
 - **整数でない環境変数の値：** NCBI の `CStringException` の文言はオラクルの build のソースのパスを含むので再現せず、明示的に拒否する（計画 TD-15、`check_inputs.py` の `e2g.t7.batch_size_text`）。
 - **R2 の族ごとの拒否：** `DIAG_*` などは値によって NCBI の出力が変わらない場合も拒否する（監査 (b)：472 件中 125 の場面、第 2 回 74 件）。文言は族の理由を言う。誤った出力の経路は無い。

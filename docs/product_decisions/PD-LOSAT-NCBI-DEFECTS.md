@@ -1,8 +1,8 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.0
-- Date: 2026-10-02
+- Version: 1.1
+- Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`) and the independent audits found to be
@@ -22,7 +22,9 @@ other programs add theirs in their sessions under the same rule.
    is valid when it equals NCBI's output for a nearby input or configuration that does
    not reach the defect (evidence under `docs/evidence/`).
 2. **NCBI gives a deterministic result, even one that looks wrong:** LOSAT reproduces it
-   byte for byte. This is not an exception.
+   byte for byte. This is not an exception. The maintainer may keep an explicit rejection
+   instead for a setting without a practical use whose reproduction is costly (version
+   1.1: the two items so marked below).
 3. **NCBI fails, and no valid result can be defined or checked:** an explicit rejection
    ("... is not supported by LOSAT's BLASTN"). This is not an exception.
 4. **NCBI accepts an input deterministically that LOSAT rejected:** LOSAT ports it.
@@ -81,14 +83,19 @@ other programs add theirs in their sessions under the same rule.
 - A reward of 32767 or a penalty of -32768 (after NCBI's 16-bit conversion):
   `BLAST_SCORE_MAX`/`BLAST_SCORE_MIN` fall outside NCBI's score range; a reward of 32767
   is counted past the end of the frequency array (invalid queries or a crash), a penalty
-  of -32768 makes every query invalid.
+  of -32768 makes every query invalid. Version 1.1 (maintainer, 2026-10-02): a reward of
+  32768 or more, which NCBI's 16-bit field wraps to 0 or below (NCBI: every query invalid,
+  no hits, a deterministic result), stays an explicit rejection too.
 - Subjects of 2^31 letters or more in total: NCBI's 32-bit total wraps.
 - megablast gap costs above 32767: NCBI's 32-bit greedy distance arithmetic can wrap.
 - A negative `CHUNK_SIZE` above a negative `OVERLAP_CHUNK_SIZE` that splits a query batch
   (`SplitQuery_CalculateNumChunks` gives more than one chunk): NCBI's `size_t` chunk ranges
   wrap; NCBI stops as in exception 1 where a chunk would be split again, and otherwise
-  searches chunk ranges with gaps between them (hits are lost). Where such a pair does not
-  split the batch (for example `-1` above `-2147483648`), NCBI searches as without the
+  searches chunk ranges with gaps between them (hits are lost). Version 1.1 (maintainer,
+  2026-10-02): the second case, although NCBI's result is deterministic, stays an explicit
+  rejection (a setting without a practical use; reproducing it would need NCBI's wrapped
+  `size_t` arithmetic through the chunk ranges, masks and merge). Where such a pair does
+  not split the batch (for example `-1` above `-2147483648`), NCBI searches as without the
   variables and so does LOSAT (fixtures `env.negative_pair_*`).
 
 - A `CHUNK_SIZE`/`OVERLAP_CHUNK_SIZE` pair whose chunk ranges leave a chunk without a

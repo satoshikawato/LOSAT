@@ -88,7 +88,7 @@ use super::super::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
 use super::super::lookup::{build_unmasked_ranges, reverse_complement};
 use super::super::pairwise::{pairwise_hits, DisplayMasks};
 use super::super::query_split::{
-    query_chunk_size, restrict_masks, split_query_batch, QueryChunk, QUERY_CHUNK_OVERLAP,
+    calculate_num_chunks, restrict_masks, split_query_batch, QueryChunk, SplitSizes,
 };
 use super::super::scoring::{
     check_greedy_gap_costs, check_losat_limits, check_scoring_options, context_blocks,
@@ -219,6 +219,25 @@ fn calculate_blastn_context_statistics(
         (eff_searchsp as f64) * (-(params.lambda) * (evalue_score as f64) + log_k).exp()
     };
     (bit_score, e_value)
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:662-664
+// ```c
+// if (hsp->evalue > cutoff) {
+//    hsp_array[index] = Blast_HSPFree(hsp_array[index]);
+// } else {
+// ```
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1996-1998
+// ```c
+// if (hsp->evalue > cutoff) {
+//    hsp_array[index] = Blast_HSPFree(hsp_array[index]);
+// } else {
+// ```
+// The HSP survives unless `evalue > cutoff`, the same comparison as C (a NaN
+// e-value survives; LOSAT rejects a NaN `-evalue` before the search).
+#[allow(clippy::neg_cmp_op_on_partial_ord)]
+fn hsp_survives_evalue_reap(evalue: f64, cutoff: f64) -> bool {
+    !(evalue > cutoff)
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4155-4160
@@ -2808,15 +2827,26 @@ struct UngappedHit {
 //     }
 // }
 // ```
+// NCBI's `ungapped_data->q_start` is an offset in the concatenated query (the
+// scan and the ungapped extension run on the whole query block), so hits of
+// different contexts never tie on it; `qs` here is context-local, and the
+// context offset is added back for the comparison.
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:206-207
+// ```c
+// ungapped_data->q_start = (Int4)(q_beg - query->sequence);
+// ungapped_data->s_start = s_off - (q_off - ungapped_data->q_start);
+// ```
 fn score_compare_ungapped_hits(a: &UngappedHit, b: &UngappedHit) -> std::cmp::Ordering {
     let a_len = a.qe.saturating_sub(a.qs);
     let b_len = b.qe.saturating_sub(b.qs);
+    let a_q_start = i64::from(a.query_context_offset) + a.qs as i64;
+    let b_q_start = i64::from(b.query_context_offset) + b.qs as i64;
 
     b.score
         .cmp(&a.score)
         .then_with(|| a.ss.cmp(&b.ss))
         .then_with(|| b_len.cmp(&a_len))
-        .then_with(|| a.qs.cmp(&b.qs))
+        .then_with(|| a_q_start.cmp(&b_q_start))
         .then_with(|| b_len.cmp(&a_len))
 }
 
@@ -4462,6 +4492,12 @@ struct BlastnReportInputs<'a> {
     max_target_seqs: Option<usize>,
     db_num_seqs: usize,
     db_len_total: usize,
+    /// Whether NCBI's epilog (`PrintEpilog`: the outfmt 0 footer, outfmt 7's last line)
+    /// follows the reports; an error in a later batch skips it.
+    epilog: bool,
+    /// Whether the outfmt 0 report starts with the prolog, which is otherwise written
+    /// before the search (`write_pairwise_prologs`).
+    prolog: bool,
 }
 
 /// The per-query and run-level data of the pairwise report.
@@ -4524,6 +4560,8 @@ fn blastn_pairwise_report(
         num_descriptions,
         num_alignments,
         unsearched,
+        epilog: report.epilog,
+        prolog: report.prolog,
     };
     Ok((queries, pairwise_report))
 }
@@ -4544,6 +4582,7 @@ fn post_process_hits_and_write(
     timing: Option<&BlastnTiming>,
     report: &BlastnReportInputs<'_>,
     unsearched: Vec<bool>,
+    query_warnings: &[Vec<u8>],
 ) -> Result<()> {
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:183-187
     // ```c
@@ -4767,12 +4806,18 @@ fn post_process_hits_and_write(
         None
     };
     let observer = &mut outputs.observer;
+    // The warnings are written once, with the first format (`QueryWarnings`).
+    let mut warnings = Some(crate::report::query_warnings::QueryWarnings {
+        before: query_warnings,
+        sink: &mut *outputs.diagnostics,
+    });
     for (format_index, (format, &output_format)) in
         outputs.formats.iter_mut().zip(output_formats).enumerate()
     {
         let mut probe = observer
             .as_deref_mut()
             .map(|observer| FormatProbe::new(observer, format_index));
+        let mut format_warnings = warnings.take();
         // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:68-93
         // ```c
         // CBlastFormat::CBlastFormat(..., CNcbiOstream& outfile, ...)
@@ -4798,6 +4843,7 @@ fn post_process_hits_and_write(
                 subject_ids,
                 pairwise_report,
                 probe.as_mut(),
+                format_warnings.as_mut(),
             )?;
         } else {
             write_output_blastn_hitlists_to_writer(
@@ -4809,28 +4855,17 @@ fn post_process_hits_and_write(
                 query_titles,
                 subject_title,
                 &unsearched,
+                report.epilog,
                 probe.as_mut(),
+                format_warnings.as_mut(),
             )?;
         }
         writer.flush()?;
     }
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:1450-1452
-    // ```c
-    //     if (results.HasWarnings()) {
-    //         ERR_POST(Warning << results.GetWarningStrings());
-    //     }
-    // ```
-    // The warnings belong to the result, so they are written once, in query order.
-    for (index, (query, karlin)) in report
-        .queries
-        .iter()
-        .zip(report.context_karlin.iter().step_by(2))
-        .enumerate()
-    {
-        if karlin.is_none() {
-            outputs
-                .diagnostics
-                .write_all(&invalid_query_warning("blastn", index, query))?;
+    // Without an output format the warnings are written all at once.
+    if let Some(warnings) = warnings {
+        for query_warnings in warnings.before {
+            warnings.sink.write_all(query_warnings)?;
         }
     }
 
@@ -5162,10 +5197,36 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     // before the query and the output are opened and the options are checked. Files are
     // opened when a handler asks for them, and each once: a named pipe gives its bytes to
     // one reader only.
-    let mut subject_file = open_blastn_input(&args.subject, "subject")?;
-    let subject_bytes = read_blastn_fasta_bytes(&mut subject_file, &args.subject, "subject")?;
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2558-2562
+    // ```c
+    //     } else if (!m_IsIgBlast){
+    //         // IgBlast permits use of germline database
+    //         NCBI_THROW(CInputException, eInvalidInput,
+    //            "Either a BLAST database or subject sequence(s) must be specified");
+    //     }
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.hpp:172-176
+    // ```c
+    //     catch (const blast::CInputException& e) {                               \
+    //         LOG_POST(Error << "BLAST query/options error: " << e.GetMsg());     \
+    //         LOG_POST(Error << "Please refer to the BLAST+ user manual.");       \
+    //         exit_code = BLAST_INPUT_ERROR;                                      \
+    //     }                                                                       \
+    // ```
+    // The handler of the database arguments raises it, before the query and the output
+    // are opened (`CStdCmdLineArgs` comes after it).
+    let Some(subject_path) = args.subject.as_deref() else {
+        return Err(crate::cli::NativeError {
+            exit: 1,
+            message: "BLAST query/options error: Either a BLAST database or subject sequence(s) must be specified\nPlease refer to the BLAST+ user manual.\n".to_string(),
+        }
+        .into());
+    };
+    check_utf8_file_name(subject_path, "subject")?;
+    let mut subject_file = open_blastn_input(subject_path, "subject")?;
+    let subject_bytes = read_blastn_fasta_bytes(&mut subject_file, subject_path, "subject")?;
     drop(subject_file);
-    let subjects = read_blastn_records(&subject_bytes, &args.subject, "subject")?;
+    let subjects = read_blastn_records(&subject_bytes, subject_path, "subject")?;
     write_title_warnings(&subjects, &mut std::io::stderr())?;
     // NCBI reads these deflines and records without a message; LOSAT rejects them where
     // the search would start.
@@ -5197,23 +5258,32 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     // ```
     // The output file is created here, before the options are checked, so a run that
     // stops at a check leaves an empty file; `-` is standard output.
+    check_utf8_file_name(&args.query, "query")?;
     let mut query_file = open_blastn_input(&args.query, "query")?;
     // The output file is opened once, as NCBI's stream (a named pipe gives one reader one
     // end of file).
-    let mut out_file = match args.out.as_deref().filter(|path| path.as_os_str() != "-") {
+    if let Some(path) = args.out.as_deref() {
+        check_utf8_file_name(path, "out")?;
+    }
+    let out_file = match args.out.as_deref().filter(|path| path.as_os_str() != "-") {
         Some(path) => Some(std::io::BufWriter::new(
             std::fs::File::create(path).map_err(|_| crate::cli::inaccessible("out", path))?,
         )),
         None => None,
     };
     let outfmt = args.outfmt.clone();
+    let pairwise = output_formats.contains(&BlastnOutputFormat::Pairwise);
     let mut stderr = std::io::stderr();
+    let mut report = ReportStream {
+        inner: match out_file {
+            Some(file) => Box::new(file) as Box<dyn std::io::Write + Send>,
+            None => Box::new(std::io::BufWriter::new(std::io::stdout())),
+        },
+        failed: false,
+    };
     let result = {
-        let sink = match out_file.as_mut() {
-            Some(file) => OutputSink::Writer(file),
-            None => OutputSink::Stdout,
-        };
-        let mut outputs = ReportOutputs::single(&outfmt, sink, &mut stderr);
+        let mut outputs =
+            ReportOutputs::single(&outfmt, OutputSink::Writer(&mut report), &mut stderr);
         search_cli(
             args,
             query_file,
@@ -5224,9 +5294,52 @@ pub fn run(args: BlastnArgs) -> Result<()> {
         )
     };
     // What was written before an error (such as the outfmt 0 prolog) stays in the file.
-    let flushed = out_file.as_mut().map_or(Ok(()), std::io::Write::flush);
+    let flushed = std::io::Write::flush(&mut report);
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:118-119
+    // ```c
+    // {
+    //     m_Outfile.exceptions(NcbiBadbit);
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.hpp:252-255
+    // ```c
+    //     catch (const std::ios::failure&) {                                      \
+    //         LOG_POST(Error << "BLAST failed to write output");                  \
+    //         exit_code = BLAST_OUTPUT_ERROR;                                     \
+    //     }                                                                       \
+    // ```
+    // The outfmt 0 formatter's stream throws when a write fails (oracle: `-out /dev/full`,
+    // exit 6). For outfmt 6/7 NCBI aborts instead, and LOSAT reports the error
+    // (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES).
+    if report.failed && pairwise {
+        return Err(crate::cli::NativeError {
+            exit: 6,
+            message: "BLAST failed to write output\n".to_string(),
+        }
+        .into());
+    }
     result?;
     flushed.context("failed to write the output")
+}
+
+/// The report's output stream (the `-out` file or standard output), which records whether
+/// a write to it failed.
+struct ReportStream {
+    inner: Box<dyn std::io::Write + Send>,
+    failed: bool,
+}
+
+impl std::io::Write for ReportStream {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let written = self.inner.write(buf);
+        self.failed |= written.is_err();
+        written
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        let flushed = self.inner.flush();
+        self.failed |= flushed.is_err();
+        flushed
+    }
 }
 
 /// The part of `run` after the output is opened: NCBI's filtering handler (`-dust`), the
@@ -5260,7 +5373,7 @@ fn search_cli(
     // The position is taken on the opened file, before it is read. When the subjects were
     // read from standard input too, `cin` has reached its end (a failed stream), so NCBI
     // gets no position for the query either.
-    let seekable = !(args.query.as_os_str() == "-" && args.subject.as_os_str() == "-")
+    let seekable = !(args.query.as_os_str() == "-" && args.subject_path().as_os_str() == "-")
         && std::io::Seek::stream_position(&mut query_file).is_ok();
     let query_bytes = read_blastn_fasta_bytes(&mut query_file, &args.query, "query")?;
     drop(query_file);
@@ -5412,14 +5525,15 @@ fn search(
         return Ok(());
     }
     check_records_have_residues(subject_records, "subject")?;
-    // NCBI reads the queries after `Query is Empty!`, with its reader's warnings.
-    write_title_warnings(query_records, outputs.diagnostics)?;
+    // NCBI reads the queries after `Query is Empty!`, one batch at a time, with its
+    // reader's warnings (`run_in_pool`).
     // NCBI decodes HTML character references in the outfmt 0 titles of the subjects
     // (`NStr::HtmlDecode` in `CDeflineGenerator::GenerateDefline`, create_defline.cpp:4066),
     // which LOSAT does not reproduce (`report/defline.rs`).
     // NCBI's x_CleanAndCompress also reads past the end of some titles of punctuation
-    // (NCBI crashes when it writes the title of such a subject with hits), which LOSAT
-    // does not reproduce (`report/defline.rs`); LOSAT rejects the subject before the search.
+    // (NCBI crashes when it writes the title of such a subject with hits); LOSAT stops at
+    // the end of the title (`report/defline.rs`, approved exception 2 of
+    // PD-LOSAT-NCBI-DEFECTS).
     if output_formats.contains(&BlastnOutputFormat::Pairwise) {
         for (index, record) in subject_records.iter().enumerate() {
             let defline = match record.desc() {
@@ -5432,42 +5546,13 @@ fn search(
                     index + 1
                 );
             }
-            if [false, true].into_iter().any(|leave_prefix| {
-                crate::report::defline::ncbi_nucleotide_title(&defline, leave_prefix).is_none()
-            }) {
-                anyhow::bail!(
-                    "subject record {} has a defline of punctuation that NCBI BLAST+ reads past its end when it writes the subject's outfmt 0 title (it crashes if the subject has hits), which LOSAT does not reproduce",
-                    index + 1
-                );
-            }
         }
     }
     // LOSAT's limits come where NCBI starts the search, after its checks and its
     // `Query is Empty!` success.
     check_losat_limits(&args)?;
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_input_aux.cpp:86-91
-    // ```c
-    //     char* batch_sz_str = getenv("BATCH_SIZE");
-    //     if (batch_sz_str) {
-    //         retval = NStr::StringToInt(batch_sz_str);
-    // ```
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/local_blast.cpp:59-62
-    // ```c
-    //     char* chunk_sz_str = getenv("CHUNK_SIZE");
-    //     if (chunk_sz_str && !NStr::IsBlank(chunk_sz_str)) {
-    //         retval = NStr::StringToInt(chunk_sz_str);
-    // ```
-    // LOSAT follows NCBI's query batches without these variables (a blank CHUNK_SIZE is
-    // none).
-    for variable in ["BATCH_SIZE", "CHUNK_SIZE"] {
-        if std::env::var_os(variable)
-            .is_some_and(|value| variable == "BATCH_SIZE" || !is_blank(value.as_encoded_bytes()))
-        {
-            anyhow::bail!(
-                "the environment variable {variable}, which changes NCBI BLAST+'s query batches, is not supported by LOSAT's BLASTN"
-            );
-        }
-    }
+    check_unsupported_environment()?;
+    let batching = query_batching_from_environment(args.task == "megablast")?;
     check_residues(query_records, "query")?;
     check_records_have_residues(query_records, "query")?;
     let subjects_read = with_u_as_t(subject_records);
@@ -5507,7 +5592,169 @@ fn search(
             outputs,
             output_formats,
             pool,
+            batching,
         )
+    })
+}
+
+/// Rejects a file name that is not UTF-8, where NCBI opens the file (the subjects, then the
+/// queries, then the output: `CBlastDatabaseArgs` comes before `CStdCmdLineArgs`).
+///
+/// NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.cpp:903-911
+/// ```c
+/// GetSubjectFile(const CArgs& args)
+/// {
+/// 	string filename="";
+///
+/// 	if (args.Exist(kArgSubject) && args[kArgSubject].HasValue())
+/// 		filename = args[kArgSubject].AsString();
+///
+/// 	return filename;
+/// }
+/// ```
+/// NCBI takes a file name as bytes: it writes the `-subject` name into the outfmt 0 and 7
+/// reports (`Database: User specified sequence set (Input: ...)`) and every name into its
+/// error messages as they are, which LOSAT's UTF-8 strings do not reproduce (plan DW-13).
+fn check_utf8_file_name(path: &std::path::Path, role: &str) -> Result<()> {
+    if path.to_str().is_none() {
+        anyhow::bail!(
+            "the -{role} file name {:?} is not UTF-8; NCBI BLAST+ writes the bytes of file names as they are, which is not supported by LOSAT's BLASTN",
+            path.to_string_lossy()
+        );
+    }
+    Ok(())
+}
+
+/// Rejects the environment variables that put NCBI BLAST+ into a search mode or report that
+/// LOSAT does not reproduce.
+///
+/// NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.cpp:204-210
+/// ```c
+///     if ( (subjects = db_args->GetSubjects(scope)) ) {
+///         _ASSERT(search_db.Empty());
+/// 	char* bl2seq_legacy = getenv("BL2SEQ_LEGACY");
+/// 	if (bl2seq_legacy)
+///         	db_adapter.Reset(new CLocalDbAdapter(subjects, opts_hndl, false));
+/// 	else
+///         	db_adapter.Reset(new CLocalDbAdapter(subjects, opts_hndl, true));
+/// ```
+/// `BL2SEQ_LEGACY` (any value, also an empty one) turns off the scan of the subjects as a
+/// database: `CLocalBlast` then searches each subject on its own (local_blast.cpp:189,289)
+/// and `CBlastFormat` writes the legacy bl2seq report (`m_IsBl2Seq && !m_IsDbScan`).
+fn check_unsupported_environment() -> Result<()> {
+    if std::env::var_os("BL2SEQ_LEGACY").is_some() {
+        anyhow::bail!(
+            "the environment variable BL2SEQ_LEGACY, which makes NCBI BLAST+ search each subject on its own and write its legacy bl2seq report, is not supported by LOSAT's BLASTN"
+        );
+    }
+    // NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.cpp:732-737
+    // ```c
+    // 		char * pre_fetch_limit_str = getenv("PRE_FETCH_SEQS_LIMIT");
+    // 		if (pre_fetch_limit_str) {
+    // 			int pre_fetch_limit = NStr::StringToInt(pre_fetch_limit_str);
+    // 			if(pre_fetch_limit == 0) {
+    // 				return false;
+    // 			}
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.cpp:761-766
+    // ```c
+    //     if (results.size() == 0) {
+    //         return;
+    //     }
+    //     if(!s_PreFetchSeqs(results, format_type)){
+    //     	return;
+    //     }
+    // ```
+    // An integer only decides whether the report's sequences are fetched ahead, which
+    // changes no output. Before the report of each query batch NCBI converts the value, and
+    // one that `NStr::StringToInt` cannot convert (an empty one too) stops it with a
+    // `CStringException` whose text names its build's source files (exit 255).
+    if let Some(value) = std::env::var_os("PRE_FETCH_SEQS_LIMIT") {
+        if crate::blastinput::query_batch::ncbi_string_to_int(&value).is_none() {
+            anyhow::bail!(
+                "the environment variable PRE_FETCH_SEQS_LIMIT has the value {:?}, which NCBI BLAST+ cannot convert to an int (it stops with a CStringException that names its build's source files); this is not supported by LOSAT's BLASTN",
+                value.to_string_lossy()
+            );
+        }
+    }
+    Ok(())
+}
+
+/// The Karlin-Altschul error of a query batch after the first (`search_query_batch`), which
+/// NCBI raises after the reports of the batches before.
+#[derive(Debug)]
+struct KarlinErrorAfterInvalidBatches(anyhow::Error);
+
+impl std::fmt::Display for KarlinErrorAfterInvalidBatches {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::error::Error for KarlinErrorAfterInvalidBatches {}
+
+/// NCBI's query batch size (`GetQueryBatchSize`, 0 for the adaptive `CBatchSizeMixer`) and
+/// query chunk sizes, as a query batch of the search uses them.
+#[derive(Clone, Copy, Debug)]
+struct QueryBatching {
+    /// The `BATCH_SIZE` value; 0 when it is not set.
+    fixed_batch_size: i32,
+    /// The size of the current batch (`TSeqPos`).
+    batch_size: u32,
+    split: SplitSizes,
+}
+
+/// Reads the environment variables that set NCBI's query batches and chunks, in NCBI's
+/// order: `CHUNK_SIZE` (the `CBatchSizeMixer` maximum), `BATCH_SIZE`, then
+/// `OVERLAP_CHUNK_SIZE` (the query splitter of the first batch).
+///
+/// NCBI reference: ncbi-blast/c++/src/app/blast/blastn_app.cpp:261-262
+/// ```c
+///         CBatchSizeMixer mixer(SplitQuery_GetChunkSize(opt.GetProgram())-1000);
+///         int batch_size = m_CmdLineArgs->GetQueryBatchSize();
+/// ```
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_cxx.cpp:55-59
+/// ```c
+///     m_ChunkSize = SplitQuery_GetChunkSize(m_Options->GetProgram());
+///     m_LocalQueryData = m_QueryFactory->MakeLocalQueryData(m_Options);
+///     m_TotalQueryLength = m_LocalQueryData->GetSumOfSequenceLengths();
+///     m_NumChunks = SplitQuery_CalculateNumChunks(m_Options->GetProgramType(),
+///         &m_ChunkSize, m_TotalQueryLength, m_LocalQueryData->GetNumQueries());
+/// ```
+/// A value that `NStr::StringToInt` cannot convert makes NCBI stop with its
+/// `CStringException`, whose text names the source path of the oracle's build (exit 255);
+/// LOSAT rejects it. A negative `CHUNK_SIZE` is a `size_t` near 2^64; LOSAT rejects it where
+/// it splits a query batch (`search_query_chunks`), and otherwise searches as NCBI.
+fn query_batching_from_environment(megablast: bool) -> Result<QueryBatching> {
+    let read = |variable: &str| -> Result<Option<i32>> {
+        match std::env::var_os(variable) {
+            Some(value) if !is_blank(value.as_encoded_bytes()) => {
+                match crate::blastinput::query_batch::ncbi_string_to_int(&value) {
+                    Some(number) => Ok(Some(number)),
+                    None => anyhow::bail!(
+                        "the environment variable {variable} has the value {:?}, which NCBI BLAST+ cannot convert to an int (it stops with a CStringException that names its build's source files); this is not supported by LOSAT's BLASTN",
+                        value.to_string_lossy()
+                    ),
+                }
+            }
+            _ => Ok(None),
+        }
+    };
+    let chunk_size = read("CHUNK_SIZE")?;
+    let fixed_batch_size = crate::blastinput::query_batch::get_query_batch_size(
+        std::env::var_os("BATCH_SIZE").as_deref(),
+    )
+    .map_err(|value| {
+        anyhow::anyhow!(
+            "the environment variable BATCH_SIZE has the value {value:?}, which NCBI BLAST+ cannot convert to an int (it stops with a CStringException that names its build's source files); this is not supported by LOSAT's BLASTN"
+        )
+    })?;
+    let overlap = read("OVERLAP_CHUNK_SIZE")?;
+    let split = SplitSizes::new(megablast, chunk_size, overlap);
+    Ok(QueryBatching {
+        fixed_batch_size,
+        batch_size: fixed_batch_size as u32,
+        split,
     })
 }
 
@@ -5593,8 +5840,9 @@ enum BatchStage<'a> {
 ///                 if (!batch_size)
 ///                     input.SetBatchSize(mixer.GetBatchSize(lcl_blast.GetNumExtensions()));
 /// ```
-/// `GetQueryBatchSize` is 0 for blastn (the environment variable `BATCH_SIZE` is rejected);
-/// the chunk size is `query_chunk_size`.
+/// `GetQueryBatchSize` is the `BATCH_SIZE` value (0 when it is not set) and the chunk size
+/// that of `CHUNK_SIZE` or the task (`query_batching_from_environment`).
+#[allow(clippy::too_many_arguments)]
 fn run_in_pool(
     args: BlastnArgs,
     query_records: &[bio::io::fasta::Record],
@@ -5602,12 +5850,14 @@ fn run_in_pool(
     outputs: &mut ReportOutputs<'_>,
     output_formats: Vec<BlastnOutputFormat>,
     parallel_pool: &crate::utils::threading::SearchPool<'_>,
+    mut batching: QueryBatching,
 ) -> Result<()> {
     if query_records.is_empty() {
         return Ok(());
     }
     let metadata = subject_metadata_from_records(subject_records);
     if metadata.db_num_seqs == 0 {
+        write_title_warnings(query_records, outputs.diagnostics)?;
         return Ok(());
     }
     let subjects = PreparedSubjects {
@@ -5623,13 +5873,70 @@ fn run_in_pool(
         metadata,
     };
     let megablast = args.task == "megablast";
-    let chunk_size = query_chunk_size(megablast) as i32;
-    let mut mixer = BatchSizeMixer::new(chunk_size - 1000);
-    let total_length = subjects.metadata.db_len_total as i64;
-    if total_length > 0 {
-        mixer.set_target_hits((total_length / 3000) as i32);
+    // NCBI reference: ncbi-blast/c++/src/app/blast/blastn_app.cpp:258-261
+    // ```c
+    //         formatter.PrintProlog();
+    //
+    //         /*** Process the input ***/
+    //         CBatchSizeMixer mixer(SplitQuery_GetChunkSize(opt.GetProgram())-1000);
+    // ```
+    // NCBI writes the outfmt 0 prolog before it reads the first query batch, and its stream
+    // throws at the prolog's first flush when the write fails (blast_format.cpp:118-119),
+    // before any query is read or searched.
+    let subject_title = format!(
+        "User specified sequence set (Input: {})",
+        args.subject_path().display()
+    );
+    write_pairwise_prologs(
+        outputs,
+        &output_formats,
+        megablast,
+        &subject_title,
+        &subjects.metadata,
+        true,
+    )?;
+    let mut mixer = BatchSizeMixer::new(batching.split.mixer_max_batch_size());
+    if batching.fixed_batch_size == 0 {
+        let total_length = subjects.metadata.db_len_total as i64;
+        if total_length > 0 {
+            mixer.set_target_hits((total_length / 3000) as i32);
+        }
+        // `input.SetBatchSize(mixer.GetBatchSize())` converts the `Int4` to `TSeqPos`.
+        batching.batch_size = mixer.batch_size(None) as u32;
     }
-    let mut batch_size = mixer.batch_size(None);
+    // NCBI reference: ncbi-blast/c++/src/app/blast/blastn_app.cpp:277-280
+    // ```c
+    //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup() ) {
+    // 	    BLAST_PROF_START( APP.LOOP.PRE );
+    //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
+    //             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
+    // ```c
+    // CObjMgr_QueryFactory::CObjMgr_QueryFactory(CBlastQueryVector & queries)
+    //     : m_QueryVector(& queries)
+    // {
+    //     if (queries.Empty()) {
+    //         NCBI_THROW(CBlastException, eInvalidArgument, "Empty CBlastQueryVector");
+    //     }
+    // ```
+    // A batch size of 0 (`CHUNK_SIZE` 1000 without `BATCH_SIZE`: the mixer's maximum is
+    // 0) reads no query, so the first batch fails after the prolog (outfmt 0).
+    if batching.batch_size == 0 {
+        write_pairwise_prologs(
+            outputs,
+            &output_formats,
+            megablast,
+            &subject_title,
+            &subjects.metadata,
+            false,
+        )?;
+        return Err(crate::cli::NativeError {
+            exit: 3,
+            message: "BLAST engine error: Empty CBlastQueryVector\n".to_string(),
+        }
+        .into());
+    }
 
     let lengths: Vec<usize> = query_records
         .iter()
@@ -5639,21 +5946,84 @@ fn run_in_pool(
     let mut unsearched = Vec::with_capacity(lengths.len());
     let mut query_masks = Vec::with_capacity(lengths.len());
     let mut context_karlin = Vec::with_capacity(2 * lengths.len());
+    // The warnings written before each query's report (`QueryWarnings`).
+    let mut warnings: Vec<Vec<u8>> = vec![Vec::new(); lengths.len()];
     let mut query_eff_searchsp = Vec::with_capacity(2 * lengths.len());
     let mut start = 0;
     while start < lengths.len() {
-        let end = next_query_batch_end(&lengths, start, batch_size);
-        let batch = search_query_batch(
+        let end = next_query_batch_end(&lengths, start, batching.batch_size);
+        // NCBI reference: ncbi-blast/c++/src/app/blast/blastn_app.cpp:277-279
+        // ```c
+        //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup() ) {
+        // 	    BLAST_PROF_START( APP.LOOP.PRE );
+        //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
+        // ```
+        // `CFastaReader` warns about the titles of a batch's queries when it reads them,
+        // after the report of the batch before: before the report of the batch's first
+        // query (`QueryWarnings`).
+        write_title_warnings(&query_records[start..end], &mut warnings[start])?;
+        let batch = match search_query_batch(
             &args,
             &query_records[start..end],
             &subjects,
             outputs,
             &output_formats,
             parallel_pool,
-            batch_size,
+            batching,
             start == 0,
             BatchStage::Search,
-        )?;
+        ) {
+            Ok(batch) => batch,
+            Err(error) => match error.downcast::<KarlinErrorAfterInvalidBatches>() {
+                // NCBI reference: ncbi-blast/c++/src/app/blast/blastn_app.cpp:295-318
+                // ```c
+                //                 CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
+                //                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
+                // 		        lcl_blast.SetBatchNumber( batch_num );
+                //                 results = lcl_blast.Run();
+                //     ...
+                //                 ITERATE(CSearchResultSet, result, *results) {
+                //                     formatter.PrintOneResultSet(**result, query_batch);
+                //                 }
+                //     ...
+                //         }
+                //         BLAST_PROF_START( APP.POST );
+                //         formatter.PrintEpilog(opt);
+                // ```
+                // The reports of the batches before are written, then the error, which
+                // skips `PrintEpilog` (the outfmt 0 footer and outfmt 7's last line).
+                Ok(KarlinErrorAfterInvalidBatches(error)) => {
+                    write_batch_reports(
+                        &args,
+                        &query_records[..start],
+                        &subjects,
+                        outputs,
+                        &output_formats,
+                        BatchResults {
+                            hit_lists,
+                            warnings: &warnings[..start],
+                            lengths: &lengths[..start],
+                            unsearched,
+                            query_masks: &query_masks,
+                            context_karlin: &context_karlin,
+                            query_eff_searchsp: &query_eff_searchsp,
+                        },
+                        false,
+                    )?;
+                    // The failing batch was read (its title warnings) before its search.
+                    outputs.diagnostics.write_all(&warnings[start])?;
+                    return Err(error);
+                }
+                // The warnings of the batches read so far, in NCBI's order (the outfmt 0
+                // prolog of a Karlin-Altschul error of the first batch is written).
+                Err(error) => {
+                    for query_warnings in &warnings[..=start] {
+                        outputs.diagnostics.write_all(query_warnings)?;
+                    }
+                    return Err(error);
+                }
+            },
+        };
         // The batch numbers its queries from 0.
         let first = start as u32;
         hit_lists.extend(batch.hit_lists.into_iter().map(|list| {
@@ -5669,29 +6039,137 @@ fn run_in_pool(
         }));
         unsearched.extend(std::iter::repeat_n(!batch.searched, end - start));
         query_masks.extend(batch.query_masks);
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:1450-1452
+        // ```c
+        //     if (results.HasWarnings()) {
+        //         ERR_POST(Warning << results.GetWarningStrings());
+        //     }
+        // ```
+        // The warning of an invalid query comes with its report (`PrintOneResultSet`),
+        // before its preamble (`QueryWarnings`).
+        for (index, karlin) in batch.context_karlin.iter().step_by(2).enumerate() {
+            if karlin.is_none() {
+                warnings[start + index].extend(invalid_query_warning(
+                    "blastn",
+                    start + index,
+                    &query_records[start + index],
+                ));
+            }
+        }
         context_karlin.extend(batch.context_karlin);
         query_eff_searchsp.extend(batch.query_eff_searchsp);
         // NCBI's `Int4` count of the batch's successful initial extensions.
-        batch_size = mixer.batch_size(Some(batch.good_init_extends as u32 as i32));
+        if batching.fixed_batch_size == 0 {
+            batching.batch_size =
+                mixer.batch_size(Some(batch.good_init_extends as u32 as i32)) as u32;
+        }
         start = end;
     }
 
-    let config = configure_task(&args);
+    write_batch_reports(
+        &args,
+        query_records,
+        &subjects,
+        outputs,
+        &output_formats,
+        BatchResults {
+            hit_lists,
+            warnings: &warnings,
+            lengths: &lengths,
+            unsearched,
+            query_masks: &query_masks,
+            context_karlin: &context_karlin,
+            query_eff_searchsp: &query_eff_searchsp,
+        },
+        true,
+    )
+}
+
+/// Whether the outfmt 0 prolog of `sink` is written before the search, as NCBI writes it
+/// (`write_pairwise_prologs`). A file sink is created when its report is written
+/// (`OutputSink::open`), so its prolog stays at the start of the report.
+fn prolog_before_search(sink: &OutputSink<'_>) -> bool {
+    !matches!(sink, OutputSink::File(_))
+}
+
+/// Writes and flushes the outfmt 0 prolog of every outfmt 0 sink whose prolog comes before
+/// the search (`before_search`) or, for a run that stops before any report, of the others.
+fn write_pairwise_prologs(
+    outputs: &mut ReportOutputs<'_>,
+    output_formats: &[BlastnOutputFormat],
+    megablast: bool,
+    subject_title: &str,
+    metadata: &SubjectMetadata,
+    before_search: bool,
+) -> Result<()> {
+    for (format, &output_format) in outputs.formats.iter_mut().zip(output_formats) {
+        if output_format == BlastnOutputFormat::Pairwise
+            && prolog_before_search(&format.sink) == before_search
+        {
+            let mut writer = format.sink.open()?;
+            write_blastn_pairwise_prolog(
+                &mut writer,
+                NCBI_BLASTN_VERSION,
+                megablast,
+                subject_title,
+                metadata.db_num_seqs,
+                metadata.db_len_total,
+            )?;
+            writer.flush()?;
+        }
+    }
+    Ok(())
+}
+
+/// The results of the query batches searched so far, indexed by query (two contexts per
+/// query).
+struct BatchResults<'a> {
+    hit_lists: Vec<Option<BlastnHitList>>,
+    /// The warnings written before each query's report (`QueryWarnings`).
+    warnings: &'a [Vec<u8>],
+    lengths: &'a [usize],
+    unsearched: Vec<bool>,
+    query_masks: &'a [Vec<MaskedInterval>],
+    context_karlin: &'a [Option<ContextKarlin>],
+    query_eff_searchsp: &'a [i64],
+}
+
+/// Writes the reports of `query_records` (the queries of the batches searched), with
+/// NCBI's epilog (`PrintEpilog`) when `epilog`.
+fn write_batch_reports(
+    args: &BlastnArgs,
+    query_records: &[bio::io::fasta::Record],
+    subjects: &PreparedSubjects<'_>,
+    outputs: &mut ReportOutputs<'_>,
+    output_formats: &[BlastnOutputFormat],
+    results: BatchResults<'_>,
+    epilog: bool,
+) -> Result<()> {
+    let megablast = args.task == "megablast";
+    let config = configure_task(args);
     let report_inputs = BlastnReportInputs {
         queries: query_records,
-        subjects: subject_records,
-        query_masks: &query_masks,
+        subjects: subjects.records,
+        query_masks: results.query_masks,
         lcase_masking: args.lcase_masking,
-        query_eff_searchsp: &query_eff_searchsp,
+        query_eff_searchsp: results.query_eff_searchsp,
         megablast,
         reward: config.reward,
         penalty: config.penalty,
         gap_open: config.gap_open,
         gap_extend: config.gap_extend,
-        context_karlin: &context_karlin,
+        context_karlin: results.context_karlin,
         max_target_seqs: args.max_target_seqs,
         db_num_seqs: subjects.metadata.db_num_seqs,
         db_len_total: subjects.metadata.db_len_total,
+        epilog,
+        prolog: outputs
+            .formats
+            .iter()
+            .zip(output_formats)
+            .any(|(format, &output_format)| {
+                output_format == BlastnOutputFormat::Pairwise && !prolog_before_search(&format.sink)
+            }),
     };
     let query_ids: Vec<Arc<str>> = query_records
         .iter()
@@ -5706,28 +6184,29 @@ fn run_in_pool(
     let query_titles: Vec<Arc<str>> = query_records.iter().map(fasta_defline).collect();
     let subject_title = format!(
         "User specified sequence set (Input: {})",
-        args.subject.display()
+        args.subject_path().display()
     );
     let hitlist_size = match args.max_target_seqs {
         Some(max_target_seqs) if max_target_seqs > 0 => max_target_seqs,
         _ => args.hitlist_size,
     };
     post_process_hits_and_write(
-        hit_lists,
+        results.hit_lists,
         hitlist_size,
         args.max_hsps_per_subject.unwrap_or(0),
         args.subject_besthit,
-        &lengths,
+        results.lengths,
         outputs,
         args.verbose,
         &query_ids,
         &subject_ids,
-        &output_formats,
+        output_formats,
         &query_titles,
         &subject_title,
         None,
         &report_inputs,
-        unsearched,
+        results.unsearched,
+        results.warnings,
     )
 }
 
@@ -5741,7 +6220,7 @@ fn search_query_batch(
     outputs: &mut ReportOutputs<'_>,
     output_formats: &[BlastnOutputFormat],
     parallel_pool: &crate::utils::threading::SearchPool<'_>,
-    batch_size: i32,
+    batching: QueryBatching,
     first_batch: bool,
     stage: BatchStage<'_>,
 ) -> Result<QueryBatch> {
@@ -5982,7 +6461,7 @@ fn search_query_batch(
     );
     let subject_title = Arc::<str>::from(format!(
         "User specified sequence set (Input: {})",
-        args.subject.display()
+        args.subject_path().display()
     ));
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2589-2593
@@ -6293,19 +6772,27 @@ fn search_query_batch(
             // batch raises it). LOSAT reproduces the error only for a first batch of valid
             // queries (the error does not depend on the queries, so the first batch with a valid
             // query meets it; NCBI writes the results and warnings of the batches before it).
-            if !first_batch {
-                anyhow::bail!(
-                    "these scoring options have no Karlin-Altschul values, and the first query batch has only invalid queries; NCBI BLAST+ reports the error after the results of that batch, which LOSAT does not reproduce"
-                );
-            }
             if context_ungapped.iter().any(Option::is_none) {
                 anyhow::bail!(
-                    "these scoring options have no Karlin-Altschul values, and the first query batch (up to {} residues) has an invalid query; NCBI BLAST+ does not report the error then, which is not supported by LOSAT's BLASTN",
-                    batch_size
+                    "these scoring options have no Karlin-Altschul values, and the query batch (up to {} residues) has an invalid query; NCBI BLAST+ goes on without the gapped values and crashes, which is not supported by LOSAT's BLASTN",
+                    batching.batch_size
                 );
             }
+            // A batch after the first: every batch before it had only invalid queries (one
+            // with a valid query would have raised the error), and NCBI has written their
+            // reports (`run_in_pool`).
+            if !first_batch {
+                return Err(KarlinErrorAfterInvalidBatches(karlin_error(
+                    &message,
+                    seq_data.queries.len(),
+                ))
+                .into());
+            }
+            // The prolog of a file sink (the others were written before the search).
             for (format, &output_format) in outputs.formats.iter_mut().zip(output_formats) {
-                if output_format == BlastnOutputFormat::Pairwise {
+                if output_format == BlastnOutputFormat::Pairwise
+                    && !prolog_before_search(&format.sink)
+                {
                     let mut writer = format.sink.open()?;
                     write_blastn_pairwise_prolog(
                         &mut writer,
@@ -6461,7 +6948,7 @@ fn search_query_batch(
             outputs,
             output_formats,
             parallel_pool,
-            batch_size,
+            batching,
             first_batch,
         )?,
         _ => None,
@@ -7217,12 +7704,16 @@ fn search_query_batch(
             // diag_table->diag_mask = diag_array_length-1;
             // diag_table->offset = window_size;
             // ```
-            const MAX_ARRAY_DIAG_SIZE: usize = 12_000_000;
-            let (diag_array_length_single, diag_mask_single) = if queries.len() == 1 {
-                (diag_array_length, diag_mask as isize)
-            } else {
-                (0usize, 0isize)
-            };
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1002-1003
+            // ```c
+            // if ((status = BlastExtendWordNew(query->length, word_params,
+            //                                 &aux_struct->ewp)) != 0)
+            // ```
+            // One diagonal table for the whole query block (every query and both
+            // strands): `query->length` is the last context's offset plus its
+            // length, `query_concat_length` here, and the diagonals use offsets in
+            // the concatenated query.
+            let (diag_table_length, diag_table_mask) = (diag_array_length, diag_mask as isize);
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:166-233
             // ```c
             // const int kQueryLenForHashTable = 8000; /* For blastn, use hash table rather
@@ -7237,9 +7728,7 @@ fn search_query_batch(
             //     p->container_type = eDiagArray;
             // ```
             let use_diag_hash = query_concat_length > 8000;
-            let use_array_indexing = !use_diag_hash
-                && queries.len() == 1
-                && diag_array_length_single <= MAX_ARRAY_DIAG_SIZE;
+            let use_array_indexing = !use_diag_hash;
             let diag_window = TWO_HIT_WINDOW as i32;
 
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:786-833
@@ -7273,7 +7762,7 @@ fn search_query_batch(
                     subject_scratch.diag_hash.offset as isize
                 };
                 let diag_array_size = if use_array_indexing {
-                    diag_array_length_single
+                    diag_table_length
                 } else {
                     0
                 };
@@ -7402,7 +7891,7 @@ fn search_query_batch(
                     // real_diag = diag & diag_table->diag_mask;
                     // ```
                     let (diag_array_length, diag_mask) = if use_array_indexing {
-                        (diag_array_length_single as isize, diag_mask_single)
+                        (diag_table_length as isize, diag_table_mask)
                     } else {
                         (0isize, 0isize)
                     };
@@ -8915,7 +9404,7 @@ fn search_query_batch(
                                 // real_diag = diag & diag_table->diag_mask;
                                 // ```
                                 let (diag_array_length, diag_mask) = if use_array_indexing {
-                                    (diag_array_length_single as isize, diag_mask_single)
+                                    (diag_table_length as isize, diag_table_mask)
                                 } else {
                                     (0isize, 0isize)
                                 };
@@ -9716,7 +10205,10 @@ fn search_query_batch(
             // qsort(init_hsp_array, init_hitlist->total,
             //       sizeof(BlastInitHSP), score_compare_match);
             // ```
-            ungapped_hits.sort_unstable_by(score_compare_ungapped_hits);
+            // The oracle's qsort (glibc 2.39) is a stable merge sort: hits that
+            // compare equal keep the order in which they were saved. `sort_by`
+            // is stable too.
+            ungapped_hits.sort_by(score_compare_ungapped_hits);
 
             // Debug counters for containment analysis
             let mut dbg_containment_skipped = 0usize;
@@ -10467,7 +10959,7 @@ fn search_query_batch(
                         round_down_evalue_score,
                     );
                     prelim.prelim_evalue = prelim_evalue;
-                    prelim_evalue <= evalue_threshold
+                    hsp_survives_evalue_reap(prelim_evalue, evalue_threshold)
                 });
             }
         }
@@ -10516,20 +11008,23 @@ fn search_query_batch(
         if !prelim_hits.is_empty() {
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:358-365
             // ```c
-            // /* Make sure the HSPs in the HSP list are sorted by score, as they should be. */
+            // /* Make sure the HSPs in the HSP list are sorted by score, as they
+            //    should be. */
+            // #ifdef _DEBUG
+            // {
+            //     Blast_HSPListSortByScore(hsp_list);
+            // }
+            // #endif
             // ASSERT(Blast_HSPListIsSortedByScore(hsp_list));
             // ```
+            // The oracle is a release build: the HSPs are traced in the order of the
+            // stored list (`kept`, each query's list for this subject in turn). That
+            // is score order for a list kept as it came (sorted per subject chunk,
+            // blast_engine.c:555, and merged by score), and e-value order for a list
+            // that `Blast_HitListUpdate` sorted when the hit list became a heap
+            // (blast_hits.c:3272-3284).
             if let Some(timing) = timing_ref {
                 BlastnTiming::record_count(&timing.traceback_prelim_hsps, prelim_hits.len() as u64);
-            }
-            let sort_prelim_start = if timing_enabled {
-                Some(std::time::Instant::now())
-            } else {
-                None
-            };
-            sort_prelim_hits_by_score(prelim_hits);
-            if let (Some(timing), Some(sort_prelim_start)) = (timing_ref, sort_prelim_start) {
-                BlastnTiming::record_duration(&timing.traceback_sort_prelim_ns, sort_prelim_start);
             }
 
             interval_tree.reset();
@@ -11866,7 +12361,7 @@ fn search_query_batch(
             hit.bit_score = bit_score;
             hit.e_value = eval;
         }
-        final_hits.retain(|hit| hit.e_value <= evalue_threshold);
+        final_hits.retain(|hit| hsp_survives_evalue_reap(hit.e_value, evalue_threshold));
         if let Some(timing) = timing_ref {
             BlastnTiming::record_count(
                 &timing.traceback_deleted_evalue_cutoff_hsps,
@@ -12144,13 +12639,29 @@ fn search_query_chunks(
     outputs: &mut ReportOutputs<'_>,
     output_formats: &[BlastnOutputFormat],
     parallel_pool: &crate::utils::threading::SearchPool<'_>,
-    batch_size: i32,
+    batching: QueryBatching,
     first_batch: bool,
 ) -> Result<Option<PrelimHitLists>> {
     let lengths: Vec<usize> = queries.iter().map(|record| record.seq().len()).collect();
-    let Some(chunks) = split_query_batch(&lengths, args.task == "megablast") else {
+    // A negative CHUNK_SIZE splits a batch only with a negative OVERLAP_CHUNK_SIZE below it
+    // (`calculate_num_chunks`); NCBI's `size_t` chunk ranges then wrap (split_query_cxx.cpp:
+    // 145-171): NCBI stops with a CCoreException that names its build's files where a chunk
+    // would be split again, and otherwise searches chunk ranges with gaps between them.
+    if batching.split.negative_chunk_size()
+        && calculate_num_chunks(batching.split, lengths.iter().sum()).0 > 1
+    {
+        anyhow::bail!(
+            "a negative CHUNK_SIZE above a negative OVERLAP_CHUNK_SIZE splits this query batch with NCBI BLAST+'s size_t chunk ranges wrapped (NCBI stops with a CCoreException that names its build's source files, or searches chunks with gaps between them), which is not supported by LOSAT's BLASTN"
+        );
+    }
+    let Some(chunks) = split_query_batch(&lengths, batching.split) else {
         return Ok(None);
     };
+    // With an overlap close to the chunk size NCBI's setup of a chunk would split it again
+    // and stop with a CCoreException that names its build's files
+    // (`query_split::chunk_would_be_split`). LOSAT searches each chunk once, as NCBI does
+    // for every overlap that does not split a chunk again (approved exception 1 of
+    // PD-LOSAT-NCBI-DEFECTS).
     let mut merged: PrelimHitLists = Vec::with_capacity(queries.len());
     merged.resize_with(queries.len(), || None);
     for chunk in &chunks {
@@ -12185,19 +12696,34 @@ fn search_query_chunks(
             outputs,
             output_formats,
             parallel_pool,
-            batch_size,
+            batching,
             first_batch,
             BatchStage::ChunkPrelim {
                 query_masks: &part_masks,
                 batch_eff_searchsp,
             },
         )?;
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_cxx.cpp:174-178
+        // ```c
+        //     const size_t kOverlap =
+        //         Blast_QueryIsTranslated(m_Options->GetProgramType())
+        //         ? kOverlapSize / CODON_LENGTH : kOverlapSize;
+        //     m_SplitBlk->SetChunkOverlapSize(kOverlap);
+        // ```
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hspstream.c:519-522
+        // ```c
+        //        Blast_HitListMerge(results1->hitlist_array + i,
+        //                           results2->hitlist_array + global_query,
+        //                           contexts_per_query, split_points,
+        //                           (Int4)SplitQueryBlk_GetChunkOverlapSize(squery_blk),
+        // ```
         merge_query_chunk(
             &mut merged,
             batch.chunk_prelim_lists,
             chunk,
             &lengths,
             context_offsets,
+            batching.split.overlap as u32 as i32,
         )?;
     }
     Ok(Some(merged))
@@ -12256,6 +12782,7 @@ fn merge_query_chunk(
     chunk: &QueryChunk,
     query_lengths: &[usize],
     context_offsets: &[i32],
+    chunk_overlap_size: i32,
 ) -> Result<()> {
     for (local_query, hit_list) in chunk_lists.into_iter().enumerate() {
         let Some(mut hit_list) = hit_list else {
@@ -12289,7 +12816,12 @@ fn merge_query_chunk(
             chunk.context_offsets[2 * local_query],
             chunk.context_offsets[2 * local_query + 1],
         ];
-        merge_prelim_hit_list(hit_list, &mut merged[part.query], split_points);
+        merge_prelim_hit_list(
+            hit_list,
+            &mut merged[part.query],
+            split_points,
+            chunk_overlap_size,
+        );
     }
     for hit_list in merged.iter_mut().flatten() {
         for list in &mut hit_list.hsplist_array {
@@ -12362,6 +12894,7 @@ fn merge_prelim_hit_list(
     mut hitlist1: HitList<PrelimHspList>,
     combined: &mut Option<HitList<PrelimHspList>>,
     split_offsets: [i32; 2],
+    chunk_overlap_size: i32,
 ) {
     let Some(mut hitlist2) = combined.take() else {
         *combined = Some(hitlist1);
@@ -12393,7 +12926,7 @@ fn merge_prelim_hit_list(
                     HspListSplit::Query {
                         offsets: split_offsets,
                     },
-                    QUERY_CHUNK_OVERLAP,
+                    chunk_overlap_size as usize,
                     true,
                 );
             } else {
@@ -12411,6 +12944,18 @@ fn merge_prelim_hit_list(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn evalue_reap_keeps_unless_greater_than_cutoff() {
+        assert!(hsp_survives_evalue_reap(10.0, 10.0));
+        assert!(!hsp_survives_evalue_reap(1e-180, 0.0));
+        assert!(hsp_survives_evalue_reap(0.0, 0.0));
+        assert!(!hsp_survives_evalue_reap(10.000001, 10.0));
+        assert!(hsp_survives_evalue_reap(f64::NAN, 10.0));
+        assert!(hsp_survives_evalue_reap(10.0, f64::NAN));
+        assert!(hsp_survives_evalue_reap(f64::INFINITY, f64::INFINITY));
+        assert!(!hsp_survives_evalue_reap(f64::INFINITY, f64::MAX));
+    }
 
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-148
     // ```c
@@ -12888,5 +13433,107 @@ mod tests {
         assert_eq!(ordered, reversed.into_iter().rev().collect::<Vec<_>>());
         assert!(ordered.iter().all(|hsp| hsp.7 > 0 && !hsp.9.is_empty()));
         std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    fn query_prelim_hit(query_idx: u32, prelim_score: i32) -> PrelimHit {
+        PrelimHit {
+            query_idx,
+            ..prelim_hit(query_idx * 2, 1, 10, 30, 20, 40, prelim_score)
+        }
+    }
+
+    fn prelim_scores(hit_list: &HitList<PrelimHspList>) -> Vec<(u32, Vec<i32>)> {
+        hit_list
+            .hsplist_array
+            .iter()
+            .map(|list| {
+                (
+                    list.oid,
+                    list.hsps.iter().map(|hsp| hsp.prelim_score).collect(),
+                )
+            })
+            .collect()
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/hspfilter_collector.c:116-161
+    // ```c
+    //       for (index = 0; index < hsp_list->hspcnt; index++) {
+    //          query_index = Blast_GetQueryIndexFromContext(hsp->context, program);
+    //          Blast_HSPListSaveHSP(tmp_hsp_list, hsp);
+    //       ...
+    //             if (!results->hitlist_array[index]) {
+    //                results->hitlist_array[index] =
+    //                   Blast_HitListNew(params->prelim_hitlist_size);
+    //             }
+    //             Blast_HitListUpdate(results->hitlist_array[index],
+    //                                 hsp_list_array[index]);
+    // ```
+    #[test]
+    fn the_collector_keeps_prelim_hitlist_size_subjects_per_query() {
+        let subject_hits = vec![
+            vec![query_prelim_hit(0, 30), query_prelim_hit(1, 90)],
+            vec![query_prelim_hit(0, 50)],
+            vec![query_prelim_hit(0, 40), query_prelim_hit(0, 45)],
+            Vec::new(),
+        ];
+        let mut hit_lists = collect_prelim_hit_lists(subject_hits, 3, 2);
+        assert!(hit_lists[2].is_none());
+        let mut query0 = hit_lists[0].take().unwrap();
+        // Subject 2 replaces subject 0 (the worst first score); a list that enters the
+        // heap is sorted by e-value, then score (`Blast_HSPListSortByEvalue`).
+        query0.sort_by_evalue();
+        assert_eq!(
+            prelim_scores(&query0),
+            vec![(1, vec![50]), (2, vec![45, 40])]
+        );
+        let mut query1 = hit_lists[1].take().unwrap();
+        query1.sort_by_evalue();
+        assert_eq!(prelim_scores(&query1), vec![(0, vec![90])]);
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2163-2210
+    // ```c
+    //     while (i < num_hsplists1 && j < num_hsplists2) {
+    //         if (hsplist1->oid < hsplist2->oid) {
+    //             Blast_HitListUpdate(new_hitlist, hsplist1);
+    //         ...
+    //             else {
+    //                 Blast_HSPListAppend(hitlist1->hsplist_array + i,
+    //                                     hitlist2->hsplist_array + j,
+    //                                     hsplist2->hsp_max);
+    //             }
+    //             Blast_HitListUpdate(new_hitlist, hitlist2->hsplist_array[j]);
+    // ```
+    #[test]
+    fn merging_prelim_hit_lists_appends_shared_subjects_and_keeps_the_size() {
+        let list = |oid: u32, scores: &[i32]| PrelimHspList {
+            oid,
+            hsps: scores
+                .iter()
+                .map(|&score| query_prelim_hit(0, score))
+                .collect(),
+            best_evalue: 0.0,
+        };
+        let mut hitlist1 = HitList::new(3);
+        hitlist1.update(list(4, &[50]));
+        hitlist1.update(list(2, &[70]));
+        let mut combined = HitList::new(3);
+        combined.update(list(9, &[80]));
+        combined.update(list(2, &[60]));
+        combined.update(list(7, &[40]));
+        let mut combined = Some(combined);
+        merge_prelim_hit_list(hitlist1, &mut combined, [0, 0], 100);
+        let mut merged = combined.unwrap();
+        assert_eq!(merged.hsplist_max, 3);
+        merged.sort_by_evalue();
+        assert_eq!(
+            prelim_scores(&merged),
+            vec![(9, vec![80]), (2, vec![70, 60]), (4, vec![50])]
+        );
+        let mut empty = None;
+        let mut single = HitList::new(3);
+        single.update(list(5, &[10]));
+        merge_prelim_hit_list(single, &mut empty, [0, 0], 100);
+        assert_eq!(prelim_scores(empty.as_ref().unwrap()), vec![(5, vec![10])]);
     }
 }

@@ -51,6 +51,29 @@ authoritative, current guidance for agent behavior in LOSAT.
      difference in call timing, ordering, candidate rules, linking, filtering,
      statistical formulas, or formatting is permitted. This does not expand
      the TBLASTX exception or authorize NCBI as a runtime/build dependency.
+   - Approved CLI exceptions outside the search results, for every program
+     (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`): argument-parser syntax errors and
+     `-help`/`-h` use LOSAT's parser text and exit code 2 (NCBI: USAGE, exit
+     1); with `-subject`, LOSAT honors `-num_threads` and does not print NCBI's
+     two thread warnings; a write failure in outfmt 6/7, where NCBI aborts,
+     is reported with a non-zero exit; an allocation failure aborts (NCBI:
+     "BLAST ran out of memory", exit 4); an outfmt 0 write to a closed pipe,
+     where NCBI is ended by SIGPIPE, is reported as "BLAST failed to write
+     output", exit 6. Errors raised after argument parsing, the outfmt 0 write
+     failure ("BLAST failed to write output", exit 6), all other warnings, and
+     every search result must still match NCBI. Non-UTF-8
+     file names and `.ncbirc` keys that change output are explicit
+     rejections, not exceptions.
+   - Approved exceptions for NCBI defects (`PD-LOSAT-NCBI-DEFECTS`): where
+     NCBI BLAST+ fails (a crash, a debug-only assumption, a read past a buffer)
+     and LOSAT's result was shown to equal NCBI's output for a nearby input
+     that does not reach the defect. BLASTN: a query chunk that NCBI would
+     split again (CHUNK_SIZE/OVERLAP_CHUNK_SIZE; NCBI stops with a
+     CCoreException) is searched once; outfmt 0 titles made only of
+     punctuation stop at the end of the string (NCBI reads past it and
+     crashes). Deterministic NCBI results, even wrong-looking ones, are
+     reproduced, not excepted; NCBI failures without a checkable valid result
+     are explicit rejections.
 
 4. NCBI code comments are mandatory for modifications.
    - Every code change must include NCBI C/C++ reference comments with file path

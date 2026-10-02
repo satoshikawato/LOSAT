@@ -440,6 +440,27 @@ mod tests {
         );
     }
 
+    // BLAST_Cutoffs (blast_stat.c:4090-4129) with NCBI's infinite and NaN e-values: an
+    // infinite E gives log(0) / Lambda, which (Int4) makes INT_MIN, and a NaN fails `e > 0`;
+    // both keep the initial cutoff 1, as the largest finite e-value does (E2g).
+    #[test]
+    fn infinite_and_nan_evalues_keep_the_initial_cutoff() {
+        let gapped_params = KarlinParams {
+            lambda: 0.625,
+            k: 0.41,
+            h: 0.78,
+            alpha: 0.8,
+            beta: -2.0,
+        };
+        for evalue in [f64::INFINITY, f64::NAN, -f64::NAN, f64::MAX] {
+            assert_eq!(
+                cutoff_score_max_from_evalue(evalue, 10_000_000, &gapped_params),
+                1,
+                "{evalue}"
+            );
+        }
+    }
+
     #[test]
     fn test_compute_blastn_cutoff_score_ungapped() {
         // Test with blastn ungapped params (reward=2, penalty=-3)

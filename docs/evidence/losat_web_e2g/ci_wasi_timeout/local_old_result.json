@@ -1,0 +1,31 @@
+{
+  "boottime_seconds": 2808.5922264719993,
+  "cpu_system_seconds": 2.13,
+  "cpu_user_seconds": 8000.27,
+  "elapsed_clock": "CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics",
+  "ended_utc": "2026-10-02T00:35:19Z",
+  "exit_status": 0,
+  "gnu_elapsed_seconds": 2977.57,
+  "monotonic_clock_agreement": true,
+  "monotonic_end": 46291.567706428,
+  "monotonic_start": 43482.975497283,
+  "output": "/home/kawato/.cache/losat-web-gui-target/e2g-wasi-timeout/localrun/old/threaded/tblastx/p11_avclpv_psclpv/output.txt",
+  "peak_rss_bytes": 362266624,
+  "process_ended_utc": "2026-10-02T00:35:19Z",
+  "raw_output_bytes": 697676,
+  "raw_output_sha256": "1eb11f5caa4d1030a016e67bafc90acaecb0a1fe76f9b11256fe1343f0571fe4",
+  "realtime_clock_agreement": false,
+  "realtime_seconds": 2977.579619884491,
+  "reason": null,
+  "started_utc": "2026-10-01T23:45:42Z",
+  "status": "PASS",
+  "timeout_seconds": 7200,
+  "unavailable_metrics": {},
+  "wall_seconds": 2808.5922091450047,
+  "watchdog_clocks": {
+    "started": {
+      "monotonic": 43482.975782242,
+      "realtime": 1790898342.1780295
+    }
+  }
+}

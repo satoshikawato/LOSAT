@@ -266,9 +266,17 @@ The detailed performance parser rejects absent or inconsistent evidence.
 `LOSAT_TBLASTX_SERIAL_SCAN_CHUNKS=1` describes sequential diagnostic chunking;
 the old `LOSAT_TBLASTX_PARALLEL_SCAN_CHUNKS` name has been removed.
 
-The CI workflow also runs `check_wasm_threading_regressions.py --jobs 3` against
-all frozen manifest rows and `check_tblastx_thread_thresholds.py` for the
-LC738874/LC738875 E-value 10/100/10000 sweep. `--jobs` overlaps independent
+The nightly workflow (`nightly.yml`, also `workflow_dispatch` and release
+readiness) runs `check_wasm_threading_regressions.py --jobs 3` against all frozen
+manifest rows and `check_tblastx_thread_thresholds.py` for the LC738874/LC738875
+E-value 10/100/10000 sweep. The frozen runner executes every row and fails on
+any mismatch except the known ones in `frozen_mismatch_allowlist.json` (which
+pass only with their listed output); an entry that matches again, or is not
+executed, fails so the list is cleaned. Pull requests run
+`ci_fast_regressions.py` instead: the `capture_outputs.py` cases of the programs
+selected from the changed paths against the S02 baseline and the frozen hashes,
+and the outfmt 0 fixtures, without NCBI executables (TBLASTX runs only its short
+cases; `--all-cases` runs all of them nightly). `--jobs` overlaps independent
 comparison processes; it does not change a search's requested thread count.
 The frozen runner uses a 3600-second per-search deadline, configurable with a
 positive `--timeout-seconds`; long genome cases can exceed a 900-second limit.

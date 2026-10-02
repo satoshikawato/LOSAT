@@ -1,0 +1,381 @@
+=== 35201795582
+2026-09-17T08:53:54.5263448Z ncbi-blast-2.17.0+/bin/tblastx: OK
+2026-09-17T08:53:55.8632316Z blastn raw parity + thread contract PASS
+2026-09-17T08:53:57.0387097Z megablast raw parity + thread contract PASS
+2026-09-17T08:53:58.3148331Z blastp raw parity + thread contract PASS
+2026-09-17T08:53:59.4439195Z tblastx-nuc1-nuc1-e10 raw parity + thread contract PASS
+2026-09-17T08:54:00.6221821Z tblastx-nuc1-nuc3-e10 raw parity + thread contract PASS
+2026-09-17T08:54:01.8103423Z tblastx-nuc3-nuc1-e10 raw parity + thread contract PASS
+2026-09-17T08:54:03.0542519Z tblastx-nuc3-nuc3-e10 raw parity + thread contract PASS
+2026-09-17T08:54:04.1962973Z tblastx-nuc1-unequal-e0.1 raw parity + thread contract PASS
+2026-09-17T08:54:05.4108270Z tblastx-nuc1-unequal-e10 raw parity + thread contract PASS
+2026-09-17T08:54:06.6101094Z tblastx-nuc1-unequal-e10000 raw parity + thread contract PASS
+2026-09-17T08:54:07.7570058Z tblastx-nuc1-remainder-e0.1 raw parity + thread contract PASS
+2026-09-17T08:54:08.9081903Z tblastx-nuc1-remainder-e10 raw parity + thread contract PASS
+2026-09-17T08:54:10.0590705Z tblastx-nuc1-remainder-e10000 raw parity + thread contract PASS
+2026-09-17T08:54:11.2236883Z tblastx-short-context-short-subject-e10 raw parity + thread contract PASS
+2026-09-17T08:54:36.5742911Z 256 command/oracle records; reactor lifecycle gates PASS; format failures=0
+2026-09-17T08:54:37.3629475Z native/blastn/PmeNMV.MjPMNV.task_blastn PASS
+2026-09-17T08:54:37.4036612Z native/blastn/PesePMNV.MjPMNV.task_blastn PASS
+2026-09-17T08:54:37.9953278Z threaded/blastn/PesePMNV.MjPMNV.task_blastn PASS
+2026-09-17T08:54:38.1509694Z native/blastn/PmeNMV.PesePMNV.task_blastn PASS
+2026-09-17T08:54:38.2558146Z threaded/blastn/PmeNMV.MjPMNV.task_blastn PASS
+2026-09-17T08:54:39.3675007Z threaded/blastn/PmeNMV.PesePMNV.task_blastn PASS
+2026-09-17T08:54:40.4497408Z native/blastn/MelaMJNV.PemoMJNVA.task_blastn PASS
+2026-09-17T08:54:42.1218045Z threaded/blastn/MelaMJNV.PemoMJNVA.task_blastn PASS
+2026-09-17T08:54:42.8418366Z native/blastn/PeseMJNV.PemoMJNVB.task_blastn PASS
+2026-09-17T08:54:43.2029732Z threaded/blastn/PeseMJNV.PemoMJNVB.task_blastn PASS
+2026-09-17T08:54:45.0689146Z native/blastn/PemoMJNVA.PeseMJNV.task_blastn PASS
+2026-09-17T08:54:45.1554656Z native/blastn/MjeNMV.MelaMJNV.task_blastn PASS
+2026-09-17T08:54:46.7747635Z threaded/blastn/PemoMJNVA.PeseMJNV.task_blastn PASS
+2026-09-17T08:54:47.8678189Z threaded/blastn/MjeNMV.MelaMJNV.task_blastn PASS
+2026-09-17T08:55:00.7962394Z native/blastn/NZ_CP006932.NZ_CP006932.task_blastn PASS
+2026-09-17T08:55:07.6805110Z native/blastn/MjPMNV.MlPMNV.task_blastn PASS
+2026-09-17T08:55:07.9356685Z threaded/blastn/MjPMNV.MlPMNV.task_blastn PASS
+2026-09-17T08:55:09.2278139Z native/blastn/EDL933.Sakai.megablast PASS
+2026-09-17T08:55:10.5949534Z native/blastn/Sakai.MG1655.megablast PASS
+2026-09-17T08:55:10.5973539Z threaded/blastn/EDL933.Sakai.megablast PASS
+2026-09-17T08:55:10.6020002Z native/blastn/compact.multi_query.outfmt6 PASS
+2026-09-17T08:55:10.9667733Z threaded/blastn/compact.multi_query.outfmt6 PASS
+2026-09-17T08:55:10.9725709Z native/blastn/compact.multi_query.outfmt7 PASS
+2026-09-17T08:55:11.4194615Z threaded/blastn/compact.multi_query.outfmt7 PASS
+2026-09-17T08:55:11.4292644Z native/blastn/compact.multi_query.no_hit.outfmt7 PASS
+2026-09-17T08:55:11.8203711Z threaded/blastn/compact.multi_query.no_hit.outfmt7 PASS
+2026-09-17T08:55:12.8675836Z native/blastp/pairwise_default_serial PASS
+2026-09-17T08:55:13.3008869Z threaded/blastn/Sakai.MG1655.megablast PASS
+2026-09-17T08:55:14.2127378Z threaded/blastp/pairwise_default_serial PASS
+2026-09-17T08:55:14.5697288Z native/blastp/pairwise_limit1_serial PASS
+2026-09-17T08:55:14.6141981Z threaded/blastn/NZ_CP006932.NZ_CP006932.task_blastn PASS
+2026-09-17T08:55:15.2302318Z threaded/blastp/pairwise_limit1_serial PASS
+2026-09-17T08:55:15.9041111Z native/blastp/pairwise_limit5_serial PASS
+2026-09-17T08:55:16.0395600Z threaded/blastp/pairwise_limit5_serial PASS
+2026-09-17T08:55:16.6070600Z native/blastp/pairwise_nohit_serial PASS
+2026-09-17T08:55:16.6177152Z native/blastp/pairwise_default_thread4 PASS
+2026-09-17T08:55:17.3467402Z threaded/blastp/pairwise_nohit_serial PASS
+2026-09-17T08:55:18.0776956Z threaded/blastp/pairwise_default_thread4 PASS
+2026-09-17T08:55:18.2577337Z native/blastp/all_hsp_forward_serial PASS
+2026-09-17T08:55:18.9447821Z threaded/blastp/all_hsp_forward_serial PASS
+2026-09-17T08:55:19.4721942Z native/blastp/all_hsp_reverse_limit5_serial PASS
+2026-09-17T08:55:19.6605502Z threaded/blastp/all_hsp_reverse_limit5_serial PASS
+2026-09-17T08:55:20.2357367Z native/blastp/all_hsp_forward_thread4 PASS
+2026-09-17T08:55:21.0872083Z native/blastp/all_hsp_self_serial PASS
+2026-09-17T08:55:21.2047714Z threaded/blastp/all_hsp_self_serial PASS
+2026-09-17T08:55:21.9505492Z threaded/blastp/all_hsp_forward_thread4 PASS
+2026-09-17T08:55:43.2062978Z native/tblastx/p02_mje_mela PASS
+2026-09-17T08:56:00.3767399Z threaded/tblastx/p01_ap027280_self PASS
+2026-09-17T08:56:03.6557202Z native/tblastx/p03_mela_pemojnva PASS
+2026-09-17T08:56:05.2495105Z threaded/tblastx/p02_mje_mela PASS
+2026-09-17T08:56:09.1268211Z native/tblastx/p01_ap027280_self PASS
+2026-09-17T08:56:09.6168123Z threaded/tblastx/p03_mela_pemojnva PASS
+2026-09-17T08:56:28.0966917Z native/tblastx/p04_pemojnva_pesemjnv PASS
+2026-09-17T08:56:40.2749899Z threaded/tblastx/p04_pemojnva_pesemjnv PASS
+2026-09-17T08:57:10.6987397Z native/tblastx/p05_pesemjnv_pemojnva PASS
+2026-09-17T08:57:36.2187162Z threaded/tblastx/p05_pesemjnv_pemojnva PASS
+2026-09-17T08:57:41.7487283Z native/tblastx/p07_lvmjnv_trcumjnv PASS
+2026-09-17T08:57:48.9957190Z threaded/tblastx/p07_lvmjnv_trcumjnv PASS
+2026-09-17T08:58:11.3315985Z native/tblastx/p08_trcumjnv_mellatmjnv PASS
+2026-09-17T08:58:35.5362315Z threaded/tblastx/p08_trcumjnv_mellatmjnv PASS
+2026-09-17T09:00:11.3286985Z native/tblastx/p09_mellatmjnv_meenmjnv PASS
+2026-09-17T09:01:35.4227413Z threaded/tblastx/p09_mellatmjnv_meenmjnv PASS
+2026-09-17T09:04:12.1607308Z native/tblastx/p10_meenmjnv_mejomjnv PASS
+2026-09-17T09:04:12.6124197Z native/tblastx/p06_pemojnva_lvmjnv PASS
+2026-09-17T09:05:45.5877517Z threaded/tblastx/p06_pemojnva_lvmjnv PASS
+2026-09-17T09:06:26.0317330Z threaded/tblastx/p10_meenmjnv_mejomjnv PASS
+2026-09-17T09:31:22.7647489Z native/tblastx/d01_nz_self_code4 PASS
+2026-09-17T09:36:01.7286467Z native/tblastx/p11_avclpv_psclpv PASS
+2026-09-17T09:45:32.6447234Z threaded/tblastx/d01_nz_self_code4 PASS
+2026-09-17T10:00:16.7080174Z threaded/tblastx/d02_ap027132_nz_code4 PASS
+2026-09-17T10:01:43.8809938Z threaded/tblastx/p11_avclpv_psclpv PASS
+2026-09-17T10:04:58.3437316Z native/tblastx/d02_ap027132_nz_code4 PASS
+2026-09-17T10:07:05.2042281Z threaded/tblastx/d03_ap027078_ap027131_code4 PASS
+2026-09-17T10:07:52.4717417Z native/tblastx/d04_ap027131_ap027133_code4 PASS
+2026-09-17T10:08:49.1204964Z threaded/tblastx/d04_ap027131_ap027133_code4 PASS
+2026-09-17T10:12:32.7890629Z native/tblastx/d03_ap027078_ap027131_code4 PASS
+2026-09-17T10:12:38.9149670Z native/tblastx/p12_lc738874_lc738875_default PASS
+2026-09-17T10:12:49.4497329Z threaded/tblastx/p12_lc738874_lc738875_default PASS
+2026-09-17T10:13:07.1077391Z native/tblastx/p13_mela_mje_reverse PASS
+2026-09-17T10:13:25.3267310Z threaded/tblastx/p13_mela_mje_reverse PASS
+2026-09-17T10:14:02.9457268Z native/tblastx/p14_ap027131_ap027133_query4 PASS
+2026-09-17T10:14:40.2857450Z threaded/tblastx/p14_ap027131_ap027133_query4 PASS
+2026-09-17T10:15:16.2392923Z native/tblastx/d06_ap027131_ap027133_db4 PASS
+2026-09-17T10:15:52.9977281Z threaded/tblastx/d06_ap027131_ap027133_db4 PASS
+2026-09-17T10:15:53.4366500Z retained-linux-oracle/blastn/PesePMNV.MjPMNV.task_blastn PASS
+2026-09-17T10:15:55.0330487Z retained-linux-oracle/blastn/Sakai.MG1655.megablast PASS
+2026-09-17T10:15:56.2901133Z retained-linux-oracle/blastp/pairwise_default_serial PASS
+2026-09-17T10:16:02.0467640Z retained-linux-oracle/tblastx/p03_mela_pemojnva PASS
+2026-09-17T10:17:43.0785284Z threaded/tblastx/d05_ap027133_ap027132_code4 PASS
+2026-09-17T10:17:59.4815096Z retained-linux-oracle/tblastx/p14_ap027131_ap027133_query4 PASS
+2026-09-17T10:17:59.8208374Z repeatability/blastn/PesePMNV.MjPMNV.task_blastn/2 PASS
+2026-09-17T10:18:00.1562773Z repeatability/blastn/PesePMNV.MjPMNV.task_blastn/3 PASS
+2026-09-17T10:18:01.4628338Z repeatability/blastn/Sakai.MG1655.megablast/2 PASS
+2026-09-17T10:18:02.9157405Z repeatability/blastn/Sakai.MG1655.megablast/3 PASS
+2026-09-17T10:18:03.7985100Z repeatability/blastp/pairwise_default_serial/2 PASS
+2026-09-17T10:18:04.7870961Z repeatability/blastp/pairwise_default_serial/3 PASS
+2026-09-17T10:18:09.2833416Z repeatability/tblastx/p03_mela_pemojnva/2 PASS
+2026-09-17T10:18:14.1022364Z repeatability/tblastx/p03_mela_pemojnva/3 PASS
+2026-09-17T10:18:41.9852940Z retained-linux-oracle/tblastx/d06_ap027131_ap027133_db4 PASS
+2026-09-17T10:18:50.6204387Z repeatability/tblastx/p14_ap027131_ap027133_query4/2 PASS
+2026-09-17T10:19:22.1609433Z repeatability/tblastx/p14_ap027131_ap027133_query4/3 PASS
+2026-09-17T10:19:28.4648308Z repeatability/tblastx/d06_ap027131_ap027133_db4/2 PASS
+2026-09-17T10:19:51.0954627Z repeatability/tblastx/d06_ap027131_ap027133_db4/3 PASS
+2026-09-17T10:22:21.6756936Z native/tblastx/d05_ap027133_ap027132_code4 PASS
+2026-09-17T10:22:21.6760691Z 104 frozen regression records PASS
+2026-09-17T10:22:31.1444156Z 10 native raw parity PASS
+2026-09-17T10:22:40.4501235Z 10 threaded raw parity PASS
+2026-09-17T10:22:50.0840433Z 100 native raw parity PASS
+2026-09-17T10:22:59.2794906Z 100 threaded raw parity PASS
+2026-09-17T10:23:30.7557419Z 10000 native raw parity PASS
+2026-09-17T10:23:52.7497268Z 10000 threaded raw parity PASS
+2026-09-17T10:23:52.7497672Z 9 threshold records PASS
+=== 36745543144
+2026-09-30T16:43:13.8237896Z ncbi-blast-2.17.0+/bin/tblastx: OK
+2026-09-30T16:43:15.6952070Z blastn raw parity + thread contract PASS
+2026-09-30T16:43:17.3048006Z megablast raw parity + thread contract PASS
+2026-09-30T16:43:20.3080515Z blastp raw parity + thread contract PASS
+2026-09-30T16:43:21.9277061Z tblastx-nuc1-nuc1-e10 raw parity + thread contract PASS
+2026-09-30T16:43:23.6948001Z tblastx-nuc1-nuc3-e10 raw parity + thread contract PASS
+2026-09-30T16:43:25.3851289Z tblastx-nuc3-nuc1-e10 raw parity + thread contract PASS
+2026-09-30T16:43:27.1887574Z tblastx-nuc3-nuc3-e10 raw parity + thread contract PASS
+2026-09-30T16:43:28.7909378Z tblastx-nuc1-unequal-e0.1 raw parity + thread contract PASS
+2026-09-30T16:43:30.5279919Z tblastx-nuc1-unequal-e10 raw parity + thread contract PASS
+2026-09-30T16:43:32.2843807Z tblastx-nuc1-unequal-e10000 raw parity + thread contract PASS
+2026-09-30T16:43:34.0179009Z tblastx-nuc1-remainder-e0.1 raw parity + thread contract PASS
+2026-09-30T16:43:35.7551149Z tblastx-nuc1-remainder-e10 raw parity + thread contract PASS
+2026-09-30T16:43:38.0319559Z tblastx-nuc1-remainder-e10000 raw parity + thread contract PASS
+2026-09-30T16:43:39.7478853Z tblastx-short-context-short-subject-e10 raw parity + thread contract PASS
+2026-09-30T16:44:16.8956565Z 296 command/oracle records; reactor lifecycle gates PASS; format failures=0
+2026-09-30T16:44:17.7715743Z native/blastn/PmeNMV.MjPMNV.task_blastn PASS
+2026-09-30T16:44:17.7982368Z native/blastn/PesePMNV.MjPMNV.task_blastn PASS
+2026-09-30T16:44:18.4079258Z threaded/blastn/PesePMNV.MjPMNV.task_blastn PASS
+2026-09-30T16:44:18.5312602Z native/blastn/PmeNMV.PesePMNV.task_blastn PASS
+2026-09-30T16:44:18.8726670Z threaded/blastn/PmeNMV.MjPMNV.task_blastn PASS
+2026-09-30T16:44:19.9116296Z threaded/blastn/PmeNMV.PesePMNV.task_blastn PASS
+2026-09-30T16:44:20.9715520Z native/blastn/MelaMJNV.PemoMJNVA.task_blastn PASS
+2026-09-30T16:44:22.6463442Z threaded/blastn/MelaMJNV.PemoMJNVA.task_blastn PASS
+2026-09-30T16:44:23.2885501Z native/blastn/PeseMJNV.PemoMJNVB.task_blastn PASS
+2026-09-30T16:44:24.4455270Z threaded/blastn/PeseMJNV.PemoMJNVB.task_blastn PASS
+2026-09-30T16:44:25.8041972Z native/blastn/PemoMJNVA.PeseMJNV.task_blastn PASS
+2026-09-30T16:44:26.4006968Z native/blastn/MjeNMV.MelaMJNV.task_blastn PASS
+2026-09-30T16:44:27.4277003Z threaded/blastn/PemoMJNVA.PeseMJNV.task_blastn PASS
+2026-09-30T16:44:28.6225467Z threaded/blastn/MjeNMV.MelaMJNV.task_blastn PASS
+2026-09-30T16:44:41.9061397Z native/blastn/NZ_CP006932.NZ_CP006932.task_blastn PASS
+2026-09-30T16:44:47.8726893Z threaded/blastn/MjPMNV.MlPMNV.task_blastn PASS
+2026-09-30T16:44:48.6947965Z native/blastn/MjPMNV.MlPMNV.task_blastn PASS
+2026-09-30T16:44:49.5975411Z native/blastn/EDL933.Sakai.megablast PASS
+2026-09-30T16:44:51.9545524Z threaded/blastn/EDL933.Sakai.megablast PASS
+2026-09-30T16:44:51.9632264Z native/blastn/compact.multi_query.outfmt6 PASS
+2026-09-30T16:44:52.4097535Z threaded/blastn/compact.multi_query.outfmt6 PASS
+2026-09-30T16:44:52.4141498Z native/blastn/compact.multi_query.outfmt7 PASS
+2026-09-30T16:44:52.8847805Z threaded/blastn/compact.multi_query.outfmt7 PASS
+2026-09-30T16:44:52.8901503Z native/blastn/compact.multi_query.no_hit.outfmt7 PASS
+2026-09-30T16:44:53.3880756Z threaded/blastn/compact.multi_query.no_hit.outfmt7 PASS
+2026-09-30T16:44:54.5535644Z native/blastp/pairwise_default_serial PASS
+2026-09-30T16:44:55.9718628Z threaded/blastp/pairwise_default_serial PASS
+2026-09-30T16:44:56.0785277Z native/blastp/pairwise_limit1_serial PASS
+2026-09-30T16:44:56.8240344Z threaded/blastn/NZ_CP006932.NZ_CP006932.task_blastn PASS
+2026-09-30T16:44:57.1285526Z threaded/blastp/pairwise_limit1_serial PASS
+2026-09-30T16:44:57.3855493Z native/blastp/pairwise_limit5_serial PASS
+2026-09-30T16:44:58.4759337Z native/blastp/pairwise_nohit_serial PASS
+2026-09-30T16:44:58.5715354Z threaded/blastp/pairwise_limit5_serial PASS
+2026-09-30T16:44:59.3075902Z threaded/blastp/pairwise_nohit_serial PASS
+2026-09-30T16:44:59.4101886Z native/blastp/pairwise_default_thread4 PASS
+2026-09-30T16:45:00.5633934Z threaded/blastp/pairwise_default_thread4 PASS
+2026-09-30T16:45:00.7757771Z native/blastp/all_hsp_forward_serial PASS
+2026-09-30T16:45:01.2815300Z threaded/blastp/all_hsp_forward_serial PASS
+2026-09-30T16:45:01.8505380Z native/blastp/all_hsp_reverse_limit5_serial PASS
+2026-09-30T16:45:02.4312059Z threaded/blastp/all_hsp_reverse_limit5_serial PASS
+2026-09-30T16:45:03.3375057Z native/blastp/all_hsp_forward_thread4 PASS
+2026-09-30T16:45:03.4835662Z native/blastp/all_hsp_self_serial PASS
+2026-09-30T16:45:03.8778577Z threaded/blastp/all_hsp_self_serial PASS
+2026-09-30T16:45:05.0835148Z threaded/blastp/all_hsp_forward_thread4 PASS
+2026-09-30T16:45:36.0823115Z native/tblastx/p02_mje_mela PASS
+2026-09-30T16:45:50.6095324Z threaded/tblastx/p01_ap027280_self PASS
+2026-09-30T16:45:56.7110626Z native/tblastx/p03_mela_pemojnva PASS
+2026-09-30T16:46:04.0249097Z threaded/tblastx/p02_mje_mela PASS
+2026-09-30T16:46:04.1245049Z threaded/tblastx/p03_mela_pemojnva PASS
+2026-09-30T16:46:06.2541496Z native/tblastx/p01_ap027280_self PASS
+2026-09-30T16:46:31.0417897Z native/tblastx/p04_pemojnva_pesemjnv PASS
+2026-09-30T16:46:40.9865270Z threaded/tblastx/p04_pemojnva_pesemjnv PASS
+2026-09-30T16:47:14.8144584Z native/tblastx/p05_pesemjnv_pemojnva PASS
+2026-09-30T16:48:10.2957727Z threaded/tblastx/p05_pesemjnv_pemojnva PASS
+2026-09-30T16:48:15.5485209Z native/tblastx/p07_lvmjnv_trcumjnv PASS
+2026-09-30T16:48:23.2869667Z threaded/tblastx/p07_lvmjnv_trcumjnv PASS
+2026-09-30T16:48:50.5508970Z native/tblastx/p08_trcumjnv_mellatmjnv PASS
+2026-09-30T16:49:17.0165291Z threaded/tblastx/p08_trcumjnv_mellatmjnv PASS
+2026-09-30T16:51:17.6355214Z native/tblastx/p09_mellatmjnv_meenmjnv PASS
+2026-09-30T16:53:05.5155436Z threaded/tblastx/p09_mellatmjnv_meenmjnv PASS
+2026-09-30T16:53:59.0365348Z native/tblastx/p06_pemojnva_lvmjnv PASS
+2026-09-30T16:56:34.5901597Z threaded/tblastx/p10_meenmjnv_mejomjnv PASS
+2026-09-30T16:57:03.8346617Z native/tblastx/p10_meenmjnv_mejomjnv PASS
+2026-09-30T16:57:10.8797122Z threaded/tblastx/p06_pemojnva_lvmjnv PASS
+2026-09-30T17:20:07.3645345Z native/tblastx/p11_avclpv_psclpv PASS
+2026-09-30T17:35:57.7515490Z native/tblastx/d01_nz_self_code4 PASS
+2026-09-30T17:42:00.4676918Z threaded/tblastx/d01_nz_self_code4 PASS
+2026-09-30T18:03:02.6330188Z threaded/tblastx/d02_ap027132_nz_code4 PASS
+2026-09-30T18:11:35.9320050Z threaded/tblastx/d03_ap027078_ap027131_code4 PASS
+2026-09-30T18:13:56.3879827Z native/tblastx/d03_ap027078_ap027131_code4 PASS
+2026-09-30T18:15:28.0002867Z native/tblastx/d04_ap027131_ap027133_code4 PASS
+2026-09-30T18:15:47.0605337Z native/tblastx/d02_ap027132_nz_code4 PASS
+2026-09-30T18:16:04.2190335Z threaded/tblastx/d04_ap027131_ap027133_code4 PASS
+2026-09-30T18:16:11.6373112Z native/tblastx/p12_lc738874_lc738875_default PASS
+2026-09-30T18:16:25.9315331Z threaded/tblastx/p12_lc738874_lc738875_default PASS
+2026-09-30T18:17:00.8825662Z native/tblastx/p13_mela_mje_reverse PASS
+2026-09-30T18:17:32.2165471Z threaded/tblastx/p13_mela_mje_reverse PASS
+2026-09-30T18:18:44.7820656Z native/tblastx/p14_ap027131_ap027133_query4 PASS
+2026-09-30T18:19:52.9543104Z threaded/tblastx/p14_ap027131_ap027133_query4 PASS
+2026-09-30T18:20:44.3432767Z native/tblastx/d06_ap027131_ap027133_db4 PASS
+2026-09-30T18:21:28.9442370Z threaded/tblastx/d06_ap027131_ap027133_db4 PASS
+2026-09-30T18:21:29.6776677Z retained-linux-oracle/blastn/PesePMNV.MjPMNV.task_blastn PASS
+2026-09-30T18:21:31.4503126Z retained-linux-oracle/blastn/Sakai.MG1655.megablast PASS
+2026-09-30T18:21:33.1510506Z retained-linux-oracle/blastp/pairwise_default_serial PASS
+2026-09-30T18:21:40.8998039Z retained-linux-oracle/tblastx/p03_mela_pemojnva PASS
+2026-09-30T18:24:27.1614439Z retained-linux-oracle/tblastx/p14_ap027131_ap027133_query4 PASS
+2026-09-30T18:26:01.0993694Z retained-linux-oracle/tblastx/d06_ap027131_ap027133_db4 PASS
+2026-09-30T18:26:01.5595489Z repeatability/blastn/PesePMNV.MjPMNV.task_blastn/2 PASS
+2026-09-30T18:26:02.0115357Z repeatability/blastn/PesePMNV.MjPMNV.task_blastn/3 PASS
+2026-09-30T18:26:06.6004912Z repeatability/blastp/pairwise_default_serial/2 PASS
+2026-09-30T18:26:07.9037194Z repeatability/blastp/pairwise_default_serial/3 PASS
+2026-09-30T18:26:14.3374802Z repeatability/tblastx/p03_mela_pemojnva/2 PASS
+2026-09-30T18:26:20.8275444Z repeatability/tblastx/p03_mela_pemojnva/3 PASS
+2026-09-30T18:27:11.6005466Z repeatability/tblastx/p14_ap027131_ap027133_query4/2 PASS
+2026-09-30T18:28:02.4418603Z repeatability/tblastx/p14_ap027131_ap027133_query4/3 PASS
+2026-09-30T18:28:55.0843720Z repeatability/tblastx/d06_ap027131_ap027133_db4/2 PASS
+2026-09-30T18:28:58.5809265Z threaded/tblastx/d05_ap027133_ap027132_code4 PASS
+2026-09-30T18:29:30.9918852Z repeatability/tblastx/d06_ap027131_ap027133_db4/3 PASS
+2026-09-30T18:37:17.0202275Z native/tblastx/d05_ap027133_ap027132_code4 PASS
+2026-09-30T18:37:17.0219526Z RuntimeError: native/blastn/Sakai.MG1655.megablast: frozen raw output mismatch or execution failure: {'status': 'PASS', 'reason': None, 'exit_status': 0, 'wall_seconds': 1.5506067479999501, 'monotonic_start': 589.410191906, 'monotonic_end': 590.960798654, 'realtime_seconds': 1.5506107807159424, 'boottime_seconds': 1.5506104459999506, 'gnu_elapsed_seconds': 1.54, 'process_ended_utc': '2026-09-30T16:44:51Z', 'watchdog_clocks': {'started': {'monotonic': 589.413125664, 'realtime': 1790786689.5985298}}, 'realtime_clock_agreement': True, 'monotonic_clock_agreement': True, 'elapsed_clock': 'CLOCK_MONOTONIC; realtime and GNU elapsed are adjustable-clock diagnostics', 'cpu_user_seconds': 1.43, 'cpu_system_seconds': 0.05, 'peak_rss_bytes': 251514880, 'output': '/home/runner/work/LOSAT/LOSAT/.tmp/threading/frozen-regressions/native/blastn/Sakai.MG1655.megablast/output.txt', 'raw_output_sha256': 'ac8177764f35b2fb92777f8b1d01ea646cc55ae21b05f1f486ee231348a34a45', 'raw_output_bytes': 536922, 'started_utc': '2026-09-30T16:44:49Z', 'ended_utc': '2026-09-30T16:44:51Z', 'timeout_seconds': 3600, 'unavailable_metrics': {}, 'label': 'native/blastn/Sakai.MG1655.megablast', 'expected_sha256': '3f27c1f1396b59ecb7e78827b5da390e9c97a276c05cbc7a6c82f56bd0a03262', 'raw_equal': False}
+=== 36882087513
+2026-10-01T15:10:22.8209303Z   CACHE_ON_FAILURE: false
+2026-10-01T15:10:23.3851347Z   CACHE_ON_FAILURE: false
+2026-10-01T15:10:23.5551080Z   CACHE_ON_FAILURE: false
+2026-10-01T15:10:37.6173959Z   CACHE_ON_FAILURE: false
+2026-10-01T15:11:08.9460512Z   CACHE_ON_FAILURE: false
+2026-10-01T15:16:10.4923870Z   CACHE_ON_FAILURE: false
+2026-10-01T15:16:18.9230735Z ncbi-blast-2.17.0+/bin/tblastx: OK
+2026-10-01T15:16:18.9348918Z   CACHE_ON_FAILURE: false
+2026-10-01T15:16:21.0801415Z blastn raw parity + thread contract PASS
+2026-10-01T15:16:23.0279208Z megablast raw parity + thread contract PASS
+2026-10-01T15:16:25.0772368Z blastp raw parity + thread contract PASS
+2026-10-01T15:16:27.0136034Z tblastx-nuc1-nuc1-e10 raw parity + thread contract PASS
+2026-10-01T15:16:28.8425070Z tblastx-nuc1-nuc3-e10 raw parity + thread contract PASS
+2026-10-01T15:16:30.8205225Z tblastx-nuc3-nuc1-e10 raw parity + thread contract PASS
+2026-10-01T15:16:32.8048271Z tblastx-nuc3-nuc3-e10 raw parity + thread contract PASS
+2026-10-01T15:16:34.7270082Z tblastx-nuc1-unequal-e0.1 raw parity + thread contract PASS
+2026-10-01T15:16:36.8196622Z tblastx-nuc1-unequal-e10 raw parity + thread contract PASS
+2026-10-01T15:16:38.9056129Z tblastx-nuc1-unequal-e10000 raw parity + thread contract PASS
+2026-10-01T15:16:40.9799520Z tblastx-nuc1-remainder-e0.1 raw parity + thread contract PASS
+2026-10-01T15:16:43.0508681Z tblastx-nuc1-remainder-e10 raw parity + thread contract PASS
+2026-10-01T15:16:45.1552108Z tblastx-nuc1-remainder-e10000 raw parity + thread contract PASS
+2026-10-01T15:16:47.2254401Z tblastx-short-context-short-subject-e10 raw parity + thread contract PASS
+2026-10-01T15:17:30.2174735Z 296 command/oracle records; reactor lifecycle gates PASS; format failures=0
+2026-10-01T15:17:30.2401114Z   CACHE_ON_FAILURE: false
+2026-10-01T15:17:31.2266462Z native/blastn/PesePMNV.MjPMNV.task_blastn PASS
+2026-10-01T15:17:31.3084276Z native/blastn/PmeNMV.MjPMNV.task_blastn PASS
+2026-10-01T15:17:32.2324062Z threaded/blastn/PesePMNV.MjPMNV.task_blastn PASS
+2026-10-01T15:17:32.2768919Z native/blastn/PmeNMV.PesePMNV.task_blastn PASS
+2026-10-01T15:17:32.4747663Z threaded/blastn/PmeNMV.MjPMNV.task_blastn PASS
+2026-10-01T15:17:34.0994356Z threaded/blastn/PmeNMV.PesePMNV.task_blastn PASS
+2026-10-01T15:17:35.2087677Z native/blastn/MelaMJNV.PemoMJNVA.task_blastn PASS
+2026-10-01T15:17:37.4991074Z threaded/blastn/MelaMJNV.PemoMJNVA.task_blastn PASS
+2026-10-01T15:17:38.0734020Z native/blastn/PeseMJNV.PemoMJNVB.task_blastn PASS
+2026-10-01T15:17:39.2572904Z threaded/blastn/PeseMJNV.PemoMJNVB.task_blastn PASS
+2026-10-01T15:17:41.2304940Z native/blastn/PemoMJNVA.PeseMJNV.task_blastn PASS
+2026-10-01T15:17:41.5224126Z native/blastn/MjeNMV.MelaMJNV.task_blastn PASS
+2026-10-01T15:17:43.4075820Z threaded/blastn/PemoMJNVA.PeseMJNV.task_blastn PASS
+2026-10-01T15:17:44.6950579Z threaded/blastn/MjeNMV.MelaMJNV.task_blastn PASS
+2026-10-01T15:18:00.4324603Z native/blastn/NZ_CP006932.NZ_CP006932.task_blastn PASS
+2026-10-01T15:18:08.6188800Z threaded/blastn/MjPMNV.MlPMNV.task_blastn PASS
+2026-10-01T15:18:08.6477170Z native/blastn/MjPMNV.MlPMNV.task_blastn PASS
+2026-10-01T15:18:10.7293873Z native/blastn/EDL933.Sakai.megablast PASS
+2026-10-01T15:18:12.2024121Z threaded/blastn/EDL933.Sakai.megablast PASS
+2026-10-01T15:18:12.7321341Z native/blastn/compact.multi_query.outfmt6 PASS
+2026-10-01T15:18:13.2640764Z threaded/blastn/compact.multi_query.outfmt6 PASS
+2026-10-01T15:18:13.2703877Z native/blastn/compact.multi_query.outfmt7 PASS
+2026-10-01T15:18:13.8844364Z threaded/blastn/compact.multi_query.outfmt7 PASS
+2026-10-01T15:18:13.8973184Z native/blastn/compact.multi_query.no_hit.outfmt7 PASS
+2026-10-01T15:18:14.5161520Z threaded/blastn/compact.multi_query.no_hit.outfmt7 PASS
+2026-10-01T15:18:15.9406180Z native/blastp/pairwise_default_serial PASS
+2026-10-01T15:18:17.6070665Z native/blastp/pairwise_limit1_serial PASS
+2026-10-01T15:18:17.6397364Z threaded/blastp/pairwise_default_serial PASS
+2026-10-01T15:18:18.2963084Z threaded/blastn/NZ_CP006932.NZ_CP006932.task_blastn PASS
+2026-10-01T15:18:19.1058175Z threaded/blastp/pairwise_limit1_serial PASS
+2026-10-01T15:18:19.3633815Z native/blastp/pairwise_limit5_serial PASS
+2026-10-01T15:18:20.2371174Z threaded/blastp/pairwise_limit5_serial PASS
+2026-10-01T15:18:20.9844193Z native/blastp/pairwise_nohit_serial PASS
+2026-10-01T15:18:21.3794007Z native/blastp/pairwise_default_thread4 PASS
+2026-10-01T15:18:21.6234586Z threaded/blastp/pairwise_nohit_serial PASS
+2026-10-01T15:18:23.1407389Z native/blastp/all_hsp_forward_serial PASS
+2026-10-01T15:18:23.3713763Z threaded/blastp/pairwise_default_thread4 PASS
+2026-10-01T15:18:23.6836875Z threaded/blastp/all_hsp_forward_serial PASS
+2026-10-01T15:18:24.8755657Z native/blastp/all_hsp_reverse_limit5_serial PASS
+2026-10-01T15:18:25.0968487Z threaded/blastp/all_hsp_reverse_limit5_serial PASS
+2026-10-01T15:18:26.0133737Z native/blastp/all_hsp_forward_thread4 PASS
+2026-10-01T15:18:26.0286639Z native/blastp/all_hsp_self_serial PASS
+2026-10-01T15:18:27.0854233Z threaded/blastp/all_hsp_self_serial PASS
+2026-10-01T15:18:28.0965014Z threaded/blastp/all_hsp_forward_thread4 PASS
+2026-10-01T15:18:56.9451559Z native/tblastx/p02_mje_mela PASS
+2026-10-01T15:19:21.3081992Z threaded/tblastx/p01_ap027280_self PASS
+2026-10-01T15:19:24.8855601Z native/tblastx/p01_ap027280_self PASS
+2026-10-01T15:19:27.2567718Z native/tblastx/p03_mela_pemojnva PASS
+2026-10-01T15:19:27.6378158Z threaded/tblastx/p02_mje_mela PASS
+2026-10-01T15:19:32.8961496Z threaded/tblastx/p03_mela_pemojnva PASS
+2026-10-01T15:20:00.0145017Z native/tblastx/p04_pemojnva_pesemjnv PASS
+2026-10-01T15:20:08.6973739Z threaded/tblastx/p04_pemojnva_pesemjnv PASS
+2026-10-01T15:20:50.7580879Z native/tblastx/p05_pesemjnv_pemojnva PASS
+2026-10-01T15:21:49.9393903Z threaded/tblastx/p05_pesemjnv_pemojnva PASS
+2026-10-01T15:21:56.1604263Z native/tblastx/p07_lvmjnv_trcumjnv PASS
+2026-10-01T15:22:06.2923869Z threaded/tblastx/p07_lvmjnv_trcumjnv PASS
+2026-10-01T15:22:34.6017382Z native/tblastx/p08_trcumjnv_mellatmjnv PASS
+2026-10-01T15:23:05.3693881Z threaded/tblastx/p08_trcumjnv_mellatmjnv PASS
+2026-10-01T15:25:10.8893826Z native/tblastx/p09_mellatmjnv_meenmjnv PASS
+2026-10-01T15:27:06.8056705Z threaded/tblastx/p09_mellatmjnv_meenmjnv PASS
+2026-10-01T15:29:35.7804044Z native/tblastx/p06_pemojnva_lvmjnv PASS
+2026-10-01T15:30:55.3453688Z native/tblastx/p10_meenmjnv_mejomjnv PASS
+2026-10-01T15:32:20.8506722Z threaded/tblastx/p06_pemojnva_lvmjnv PASS
+2026-10-01T15:32:32.4505661Z threaded/tblastx/p10_meenmjnv_mejomjnv PASS
+2026-10-01T16:04:10.4673842Z native/tblastx/d01_nz_self_code4 PASS
+2026-10-01T16:05:15.7373598Z native/tblastx/p11_avclpv_psclpv PASS
+2026-10-01T16:22:55.7410566Z threaded/tblastx/d01_nz_self_code4 PASS
+2026-10-01T16:32:20.8583988Z threaded/tblastx/p11_avclpv_psclpv FAIL (mismatch, thread evidence None, status TIMEOUT)
+2026-10-01T16:42:04.8811568Z threaded/tblastx/d02_ap027132_nz_code4 PASS
+2026-10-01T16:44:31.4120686Z native/tblastx/d02_ap027132_nz_code4 PASS
+2026-10-01T16:46:16.2443824Z native/tblastx/d03_ap027078_ap027131_code4 PASS
+2026-10-01T16:48:43.9483378Z threaded/tblastx/d04_ap027131_ap027133_code4 PASS
+2026-10-01T16:49:10.2283893Z native/tblastx/d04_ap027131_ap027133_code4 PASS
+2026-10-01T16:50:30.7133808Z threaded/tblastx/d03_ap027078_ap027131_code4 PASS
+2026-10-01T16:50:42.4823859Z native/tblastx/p12_lc738874_lc738875_default PASS
+2026-10-01T16:50:59.6443702Z threaded/tblastx/p12_lc738874_lc738875_default PASS
+2026-10-01T16:51:31.2708248Z native/tblastx/p13_mela_mje_reverse PASS
+2026-10-01T16:52:05.1633625Z threaded/tblastx/p13_mela_mje_reverse PASS
+2026-10-01T16:53:19.0973652Z native/tblastx/p14_ap027131_ap027133_query4 PASS
+2026-10-01T16:54:11.4345617Z threaded/tblastx/p14_ap027131_ap027133_query4 PASS
+2026-10-01T16:54:59.7333760Z native/tblastx/d06_ap027131_ap027133_db4 PASS
+2026-10-01T16:55:44.8333773Z threaded/tblastx/d06_ap027131_ap027133_db4 PASS
+2026-10-01T16:55:45.5663570Z retained-linux-oracle/blastn/PesePMNV.MjPMNV.task_blastn PASS
+2026-10-01T16:55:47.5273993Z retained-linux-oracle/blastn/Sakai.MG1655.megablast PASS
+2026-10-01T16:55:49.3187673Z retained-linux-oracle/blastp/pairwise_default_serial PASS
+2026-10-01T16:55:56.6182098Z retained-linux-oracle/tblastx/p03_mela_pemojnva PASS
+2026-10-01T16:57:57.0216361Z retained-linux-oracle/tblastx/p14_ap027131_ap027133_query4 PASS
+2026-10-01T16:59:02.2716167Z retained-linux-oracle/tblastx/d06_ap027131_ap027133_db4 PASS
+2026-10-01T16:59:02.7713868Z repeatability/blastn/PesePMNV.MjPMNV.task_blastn/2 PASS
+2026-10-01T16:59:03.2703710Z repeatability/blastn/PesePMNV.MjPMNV.task_blastn/3 PASS
+2026-10-01T16:59:08.0002148Z repeatability/blastp/pairwise_default_serial/2 PASS
+2026-10-01T16:59:09.3478245Z repeatability/blastp/pairwise_default_serial/3 PASS
+2026-10-01T16:59:15.3314685Z repeatability/tblastx/p03_mela_pemojnva/2 PASS
+2026-10-01T16:59:21.2353771Z repeatability/tblastx/p03_mela_pemojnva/3 PASS
+2026-10-01T17:00:13.4776554Z repeatability/tblastx/p14_ap027131_ap027133_query4/2 PASS
+2026-10-01T17:00:41.9440304Z threaded/tblastx/d05_ap027133_ap027132_code4 PASS
+2026-10-01T17:01:05.1353577Z repeatability/tblastx/p14_ap027131_ap027133_query4/3 PASS
+2026-10-01T17:01:17.7125534Z repeatability/tblastx/d06_ap027131_ap027133_db4/2 PASS
+2026-10-01T17:01:42.2293825Z repeatability/tblastx/d06_ap027131_ap027133_db4/3 PASS
+2026-10-01T17:07:43.6233738Z native/tblastx/d05_ap027133_ap027132_code4 PASS
+2026-10-01T17:07:43.6240915Z FAILED: threaded/tblastx/p11_avclpv_psclpv
+2026-10-01T17:07:43.6496301Z   CACHE_ON_FAILURE: false
+2026-10-01T17:07:55.9715155Z 10 native raw parity PASS
+2026-10-01T17:08:09.0441740Z 10 threaded raw parity PASS
+2026-10-01T17:08:21.4154893Z 100 native raw parity PASS
+2026-10-01T17:08:35.8010842Z 100 threaded raw parity PASS
+2026-10-01T17:09:15.5372439Z 10000 native raw parity PASS
+2026-10-01T17:09:47.3731379Z 10000 threaded raw parity PASS
+2026-10-01T17:09:47.3731780Z 9 threshold records PASS
+2026-10-01T17:09:47.3895337Z   CACHE_ON_FAILURE: false

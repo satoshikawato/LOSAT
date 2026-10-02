@@ -216,5 +216,19 @@ fn test_output_path() {
 fn test_query_and_subject_paths() {
     let args = parse_args(&["-query", "query.fasta", "-subject", "subject.fasta"]);
     assert_eq!(args.query, PathBuf::from("query.fasta"));
-    assert_eq!(args.subject, PathBuf::from("subject.fasta"));
+    assert_eq!(args.subject, Some(PathBuf::from("subject.fasta")));
+}
+
+// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2558-2562
+// ```c
+//     } else if (!m_IsIgBlast){
+//         // IgBlast permits use of germline database
+//         NCBI_THROW(CInputException, eInvalidInput,
+//            "Either a BLAST database or subject sequence(s) must be specified");
+// ```
+// A missing -subject is NCBI's error after the parsing, not a parser error.
+#[test]
+fn test_subject_is_optional_for_the_parser() {
+    let args = parse_args(&["-query", "query.fasta"]);
+    assert_eq!(args.subject, None);
 }

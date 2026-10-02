@@ -211,9 +211,10 @@ pub fn ncbi_integer(value: &str) -> Result<i32, String> {
 }
 
 /// A real argument as NCBI reads it (`CArg_Double`): the first character is a digit, a
-/// point or a sign, and the rest is what `strtod` reads. LOSAT reads the decimal forms
-/// and the signed infinities and NaN (`f64::from_str`), and rejects NCBI's other forms
-/// (hexadecimal, an exponent mark without digits) with a message that names the program.
+/// point or a sign, and the rest is what `strtod` reads. LOSAT reads the decimal forms,
+/// the signed infinities and NaN (`f64::from_str`) and glibc's `nan(n-char-sequence)`
+/// (letters, digits and `_`), and rejects NCBI's other forms (hexadecimal, an exponent
+/// mark without digits) with a message that names the program.
 ///
 /// NCBI reference: c++/src/corelib/ncbiargs.cpp:464
 /// ```c
@@ -235,6 +236,19 @@ pub fn ncbi_double(value: &str, program: &str) -> Result<f64, String> {
         .is_some_and(|first| first.is_ascii_digit() || matches!(first, '.' | '-' | '+'))
     {
         return Err("expected a number".into());
+    }
+    // glibc's strtod reads `nan(...)` as NaN; NCBI then checks that it ended at the end of
+    // the string (ncbistr.cpp:1332-1376).
+    let unsigned = value.trim_start_matches(['+', '-']);
+    if unsigned.len() + 1 == value.len()
+        && unsigned.len() >= 5
+        && unsigned[..4].eq_ignore_ascii_case("nan(")
+        && unsigned.ends_with(')')
+        && unsigned[4..unsigned.len() - 1]
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+    {
+        return Ok(f64::NAN);
     }
     value.parse::<f64>().map_err(|_| {
         format!("expected a decimal number (other forms, which NCBI BLAST+ may read, are not supported by LOSAT's {program})")
@@ -710,6 +724,16 @@ mod tests {
         }
         assert!(ncbi_double("+inf", "BLASTN").unwrap().is_infinite());
         assert!(ncbi_double("-nan", "BLASTN").unwrap().is_nan());
+        // NCBI 2.17.0 searches with each of these (-evalue, E2g).
+        for value in ["+nan(1)", "-NaN()", "+nan(x_9)", "+Infinity", "1e999"] {
+            let read = ncbi_double(value, "BLASTN").unwrap();
+            assert!(read.is_nan() || read.is_infinite(), "{value}");
+        }
+        for value in [
+            "+nan(", "+nan(1", "+nan(-)", "+nan(1)x", "+-nan(1)", "nan(1)",
+        ] {
+            assert!(ncbi_double(value, "BLASTN").is_err(), "{value}");
+        }
         for value in ["inf", "nan", " 1", "", "e5"] {
             assert_eq!(
                 ncbi_double(value, "BLASTN"),

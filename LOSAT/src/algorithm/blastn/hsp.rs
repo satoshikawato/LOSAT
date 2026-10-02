@@ -1149,7 +1149,9 @@ pub fn write_output_blastn_hitlists_to_writer<W: Write>(
     query_titles: &[Arc<str>],
     subject_title: &str,
     unsearched: &[bool],
+    epilog: bool,
     mut probe: Option<&mut FormatProbe<'_>>,
+    mut warnings: Option<&mut crate::report::query_warnings::QueryWarnings<'_>>,
 ) -> io::Result<()> {
     let config = OutputConfig::ncbi_compat();
     // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:1411
@@ -1161,6 +1163,10 @@ pub fn write_output_blastn_hitlists_to_writer<W: Write>(
     let mut hsp_index: HspIndex = 0;
 
     for (q_idx, hit_list_opt) in hit_lists.iter().enumerate() {
+        // The query's warnings come before its lines (`QueryWarnings`).
+        if let Some(warnings) = warnings.as_deref_mut() {
+            warnings.before_query(q_idx, &mut *writer)?;
+        }
         if output_format == BlastnOutputFormat::TabularWithComments {
             let query_title = query_titles
                 .get(q_idx)
@@ -1273,7 +1279,8 @@ pub fn write_output_blastn_hitlists_to_writer<W: Write>(
         }
     }
 
-    if output_format == BlastnOutputFormat::TabularWithComments {
+    // `PrintEpilog` writes the last line; an error in a later query batch skips it.
+    if output_format == BlastnOutputFormat::TabularWithComments && epilog {
         // NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1324
         // ```c
         // m_Ostream << "# BLAST processed " << num_queries << " queries\n";
@@ -1415,6 +1422,169 @@ mod tests {
         assert_eq!(hit_list.hsplist_array[0].oid, 20);
     }
 
+    fn make_list(oid: u32, hsps: &[(f64, i32)]) -> BlastnHspList {
+        BlastnHspList {
+            oid,
+            query_index: 0,
+            hsps: hsps
+                .iter()
+                .map(|&(e_value, score)| make_hsp(e_value, score, oid))
+                .collect(),
+            best_evalue: i32::MAX as f64,
+        }
+    }
+
+    fn list_oids(hit_list: &BlastnHitList) -> Vec<u32> {
+        hit_list.hsplist_array.iter().map(|list| list.oid).collect()
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3095-3106
+    // ```c
+    //    if ((retval = s_EvalueComp(h1->best_evalue,
+    //                                    h2->best_evalue)) != 0)
+    //       return retval;
+    //
+    //    if (h1->hsp_array[0]->score > h2->hsp_array[0]->score)
+    //       return -1;
+    //    if (h1->hsp_array[0]->score < h2->hsp_array[0]->score)
+    //       return 1;
+    //
+    //    /* In case of equal best E-values and scores, order will be determined
+    //       by ordinal ids of the subject sequences */
+    //    return BLAST_CMP(h2->oid, h1->oid);
+    // ```
+    // An equal list replaces the heap root (`evalue_order < 0` frees only a worse one,
+    // blast_hits.c:3285-3291), so equal lists keep the higher ordinal ids, first.
+    #[test]
+    fn hit_list_equal_evalue_and_score_keeps_higher_oids() {
+        let mut hit_list = BlastnHitList::new(3);
+        for oid in 0..10 {
+            hit_list.update(make_list(oid, &[(1e-10, 100)]));
+        }
+        assert!(hit_list.heapified);
+        hit_list.sort_by_evalue();
+        assert_eq!(list_oids(&hit_list), vec![9, 8, 7]);
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1392-1395
+    // ```c
+    //     const double epsilon = 1.0e-180;
+    //     if (evalue1 < epsilon && evalue2 < epsilon) {
+    //         return 0;
+    //     }
+    // ```
+    #[test]
+    fn hit_list_evalues_below_1e180_compare_equal() {
+        let mut hit_list = BlastnHitList::new(1);
+        hit_list.update(make_list(1, &[(1e-200, 50)]));
+        hit_list.update(make_list(2, &[(1e-190, 60)]));
+        assert_eq!(list_oids(&hit_list), vec![2]);
+        let mut hit_list = BlastnHitList::new(1);
+        hit_list.update(make_list(1, &[(1e-100, 50)]));
+        hit_list.update(make_list(2, &[(1e-90, 60)]));
+        assert_eq!(list_oids(&hit_list), vec![1]);
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3099-3102
+    // ```c
+    //    if (h1->hsp_array[0]->score > h2->hsp_array[0]->score)
+    //       return -1;
+    //    if (h1->hsp_array[0]->score < h2->hsp_array[0]->score)
+    //       return 1;
+    // ```
+    #[test]
+    fn hit_list_equal_evalue_higher_first_score_wins() {
+        let mut hit_list = BlastnHitList::new(1);
+        hit_list.update(make_list(5, &[(1e-5, 40)]));
+        hit_list.update(make_list(1, &[(1e-5, 41)]));
+        assert_eq!(list_oids(&hit_list), vec![1]);
+        hit_list.update(make_list(9, &[(1e-5, 40)]));
+        assert_eq!(list_oids(&hit_list), vec![1]);
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3276-3287
+    // ```c
+    //           s_CreateHeap(hit_list->hsplist_array, hit_list->hsplist_count,
+    //                        sizeof(BlastHSPList*), s_EvalueCompareHSPLists);
+    //           hit_list->heapified = TRUE;
+    //       }
+    //       ...
+    //       evalue_order = s_EvalueCompareHSPLists(&(hit_list->hsplist_array[0]), &hsp_list);
+    //       if (evalue_order < 0) {
+    // ```
+    #[test]
+    fn hit_list_heap_keeps_the_best_lists_in_comparator_order() {
+        let keys: Vec<(u32, f64, i32)> = (0..40u32)
+            .map(|oid| {
+                let e_value = [1e-30, 1e-10, 1e-3, 0.5, 2.0][(oid * 7 % 5) as usize];
+                (oid, e_value, 30 + (oid * 13 % 11) as i32)
+            })
+            .collect();
+        let mut hit_list = BlastnHitList::new(7);
+        for &(oid, e_value, score) in &keys {
+            hit_list.update(make_list(oid, &[(e_value, score)]));
+        }
+        hit_list.sort_by_evalue();
+        let mut all: Vec<BlastnHspList> = keys
+            .iter()
+            .map(|&(oid, e_value, score)| {
+                let mut list = make_list(oid, &[(e_value, score)]);
+                list.update_best_evalue();
+                list
+            })
+            .collect();
+        all.sort_by(compare_hsp_lists);
+        let best: Vec<u32> = all.iter().take(7).map(|list| list.oid).collect();
+        assert_eq!(list_oids(&hit_list), best);
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3267-3283
+    // ```c
+    // if (!hit_list->heapified) {
+    //     for (index =0; index < hit_list->hsplist_count; index++) {
+    //         Blast_HSPListSortByEvalue(hit_list->hsplist_array[index]);
+    //         hit_list->hsplist_array[index]->best_evalue =
+    //             s_BlastGetBestEvalue(hit_list->hsplist_array[index]);
+    //     }
+    // ```
+    #[test]
+    fn hit_list_heapify_sorts_each_list_by_evalue() {
+        let mut hit_list = BlastnHitList::new(1);
+        hit_list.update(make_list(3, &[(1e-3, 10), (1e-20, 50)]));
+        assert_eq!(hit_list.hsplist_array[0].hsps[0].raw_score, 10);
+        hit_list.update(make_list(4, &[(1e-2, 70)]));
+        assert!(hit_list.heapified);
+        assert_eq!(list_oids(&hit_list), vec![3]);
+        assert_eq!(hit_list.hsplist_array[0].hsps[0].raw_score, 50);
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3172-3187
+    // ```c
+    // for (index = 0; index < hsplist_count &&
+    //         hit_list->hsplist_array[index]->hspcnt > 0; ++index);
+    // hit_list->hsplist_count = index;
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:877-892
+    // ```c
+    // hit_list->hsplist_count = MIN(hit_list->hsplist_count, hitlist_size);
+    // ```
+    #[test]
+    fn hit_list_sort_purges_empty_lists_and_prune_caps_the_size() {
+        let mut hit_list = BlastnHitList::new(10);
+        hit_list.update(make_list(1, &[]));
+        hit_list.update(make_list(2, &[(1e-5, 50)]));
+        hit_list.update(make_list(3, &[]));
+        hit_list.update(make_list(4, &[(1e-6, 60)]));
+        for oid in 5..9 {
+            hit_list.update(make_list(oid, &[(1e-4 * f64::from(oid), 40)]));
+        }
+        hit_list.sort_by_evalue();
+        assert_eq!(list_oids(&hit_list), vec![4, 2, 5, 6, 7, 8]);
+        hit_list.prune_by_size(4);
+        assert_eq!(list_oids(&hit_list), vec![4, 2, 5, 6]);
+        assert_eq!(hit_list.hsplist_count, 4);
+    }
+
     // NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1264-1284
     // ```c
     // x_PrintQueryAndDbNames(program_version, bioseq, dbname, rid, iteration,
@@ -1442,6 +1612,8 @@ mod tests {
             &query_titles,
             "User specified sequence set (Input: subject.fasta)",
             &[],
+            true,
+            None,
             None,
         )
         .unwrap();
@@ -1461,10 +1633,15 @@ mod tests {
             &query_titles,
             "User specified sequence set (Input: subject.fasta)",
             &[true],
+            false,
+            None,
             None,
         )
         .unwrap();
-        assert!(!String::from_utf8(output).unwrap().contains("hits found"));
+        let text = String::from_utf8(output).unwrap();
+        assert!(!text.contains("hits found"));
+        // Without NCBI's epilog (an error in a later query batch), no last line.
+        assert!(!text.contains("BLAST processed"));
     }
 
     #[test]

@@ -1,0 +1,4106 @@
+[
+ {
+  "input": "T89p0",
+  "fmt": "0",
+  "mode": "merged",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p0",
+  "fmt": "0",
+  "mode": "merged",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p0",
+  "fmt": "0",
+  "mode": "merged",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p0",
+  "fmt": "0",
+  "mode": "separate",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p0",
+  "fmt": "0",
+  "mode": "separate",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p0",
+  "fmt": "0",
+  "mode": "separate",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p0",
+  "fmt": "0",
+  "mode": "devfull",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p0",
+  "fmt": "0",
+  "mode": "devfull",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p0",
+  "fmt": "0",
+  "mode": "devfull",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p0",
+  "fmt": "0",
+  "mode": "out_devfull",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p0",
+  "fmt": "0",
+  "mode": "out_devfull",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p0",
+  "fmt": "0",
+  "mode": "out_devfull",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p0",
+  "fmt": "6",
+  "mode": "merged",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p0",
+  "fmt": "6",
+  "mode": "merged",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p0",
+  "fmt": "6",
+  "mode": "merged",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p0",
+  "fmt": "6",
+  "mode": "separate",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p0",
+  "fmt": "6",
+  "mode": "separate",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p0",
+  "fmt": "6",
+  "mode": "separate",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p0",
+  "fmt": "7",
+  "mode": "merged",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p0",
+  "fmt": "7",
+  "mode": "merged",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p0",
+  "fmt": "7",
+  "mode": "merged",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p0",
+  "fmt": "7",
+  "mode": "separate",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p0",
+  "fmt": "7",
+  "mode": "separate",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p0",
+  "fmt": "7",
+  "mode": "separate",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p1",
+  "fmt": "0",
+  "mode": "merged",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p1",
+  "fmt": "0",
+  "mode": "merged",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p1",
+  "fmt": "0",
+  "mode": "merged",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p1",
+  "fmt": "0",
+  "mode": "separate",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p1",
+  "fmt": "0",
+  "mode": "separate",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p1",
+  "fmt": "0",
+  "mode": "separate",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p1",
+  "fmt": "0",
+  "mode": "devfull",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p1",
+  "fmt": "0",
+  "mode": "devfull",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p1",
+  "fmt": "0",
+  "mode": "devfull",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p1",
+  "fmt": "0",
+  "mode": "out_devfull",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p1",
+  "fmt": "0",
+  "mode": "out_devfull",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p1",
+  "fmt": "0",
+  "mode": "out_devfull",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p1",
+  "fmt": "6",
+  "mode": "merged",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p1",
+  "fmt": "6",
+  "mode": "merged",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p1",
+  "fmt": "6",
+  "mode": "merged",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p1",
+  "fmt": "6",
+  "mode": "separate",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p1",
+  "fmt": "6",
+  "mode": "separate",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p1",
+  "fmt": "6",
+  "mode": "separate",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p1",
+  "fmt": "7",
+  "mode": "merged",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p1",
+  "fmt": "7",
+  "mode": "merged",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p1",
+  "fmt": "7",
+  "mode": "merged",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p1",
+  "fmt": "7",
+  "mode": "separate",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p1",
+  "fmt": "7",
+  "mode": "separate",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p1",
+  "fmt": "7",
+  "mode": "separate",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p10",
+  "fmt": "0",
+  "mode": "merged",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p10",
+  "fmt": "0",
+  "mode": "merged",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p10",
+  "fmt": "0",
+  "mode": "merged",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p10",
+  "fmt": "0",
+  "mode": "separate",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p10",
+  "fmt": "0",
+  "mode": "separate",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p10",
+  "fmt": "0",
+  "mode": "separate",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p10",
+  "fmt": "0",
+  "mode": "devfull",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p10",
+  "fmt": "0",
+  "mode": "devfull",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p10",
+  "fmt": "0",
+  "mode": "devfull",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p10",
+  "fmt": "0",
+  "mode": "out_devfull",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p10",
+  "fmt": "0",
+  "mode": "out_devfull",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p10",
+  "fmt": "0",
+  "mode": "out_devfull",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p10",
+  "fmt": "6",
+  "mode": "merged",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p10",
+  "fmt": "6",
+  "mode": "merged",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p10",
+  "fmt": "6",
+  "mode": "merged",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p10",
+  "fmt": "6",
+  "mode": "separate",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p10",
+  "fmt": "6",
+  "mode": "separate",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p10",
+  "fmt": "6",
+  "mode": "separate",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p10",
+  "fmt": "7",
+  "mode": "merged",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p10",
+  "fmt": "7",
+  "mode": "merged",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p10",
+  "fmt": "7",
+  "mode": "merged",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p10",
+  "fmt": "7",
+  "mode": "separate",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p10",
+  "fmt": "7",
+  "mode": "separate",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p10",
+  "fmt": "7",
+  "mode": "separate",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p11",
+  "fmt": "0",
+  "mode": "merged",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p11",
+  "fmt": "0",
+  "mode": "merged",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p11",
+  "fmt": "0",
+  "mode": "merged",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p11",
+  "fmt": "0",
+  "mode": "separate",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p11",
+  "fmt": "0",
+  "mode": "separate",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p11",
+  "fmt": "0",
+  "mode": "separate",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p11",
+  "fmt": "0",
+  "mode": "devfull",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p11",
+  "fmt": "0",
+  "mode": "devfull",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p11",
+  "fmt": "0",
+  "mode": "devfull",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p11",
+  "fmt": "0",
+  "mode": "out_devfull",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p11",
+  "fmt": "0",
+  "mode": "out_devfull",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p11",
+  "fmt": "0",
+  "mode": "out_devfull",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p11",
+  "fmt": "6",
+  "mode": "merged",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p11",
+  "fmt": "6",
+  "mode": "merged",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p11",
+  "fmt": "6",
+  "mode": "merged",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p11",
+  "fmt": "6",
+  "mode": "separate",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p11",
+  "fmt": "6",
+  "mode": "separate",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p11",
+  "fmt": "6",
+  "mode": "separate",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p11",
+  "fmt": "7",
+  "mode": "merged",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p11",
+  "fmt": "7",
+  "mode": "merged",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p11",
+  "fmt": "7",
+  "mode": "merged",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p11",
+  "fmt": "7",
+  "mode": "separate",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p11",
+  "fmt": "7",
+  "mode": "separate",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p11",
+  "fmt": "7",
+  "mode": "separate",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p12",
+  "fmt": "0",
+  "mode": "merged",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p12",
+  "fmt": "0",
+  "mode": "merged",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p12",
+  "fmt": "0",
+  "mode": "merged",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p12",
+  "fmt": "0",
+  "mode": "separate",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p12",
+  "fmt": "0",
+  "mode": "separate",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p12",
+  "fmt": "0",
+  "mode": "separate",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p12",
+  "fmt": "0",
+  "mode": "devfull",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p12",
+  "fmt": "0",
+  "mode": "devfull",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p12",
+  "fmt": "0",
+  "mode": "devfull",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p12",
+  "fmt": "0",
+  "mode": "out_devfull",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p12",
+  "fmt": "0",
+  "mode": "out_devfull",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p12",
+  "fmt": "0",
+  "mode": "out_devfull",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p12",
+  "fmt": "6",
+  "mode": "merged",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p12",
+  "fmt": "6",
+  "mode": "merged",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p12",
+  "fmt": "6",
+  "mode": "merged",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p12",
+  "fmt": "6",
+  "mode": "separate",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p12",
+  "fmt": "6",
+  "mode": "separate",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p12",
+  "fmt": "6",
+  "mode": "separate",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p12",
+  "fmt": "7",
+  "mode": "merged",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p12",
+  "fmt": "7",
+  "mode": "merged",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p12",
+  "fmt": "7",
+  "mode": "merged",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p12",
+  "fmt": "7",
+  "mode": "separate",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p12",
+  "fmt": "7",
+  "mode": "separate",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p12",
+  "fmt": "7",
+  "mode": "separate",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p13",
+  "fmt": "0",
+  "mode": "merged",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p13",
+  "fmt": "0",
+  "mode": "merged",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p13",
+  "fmt": "0",
+  "mode": "merged",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p13",
+  "fmt": "0",
+  "mode": "separate",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p13",
+  "fmt": "0",
+  "mode": "separate",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p13",
+  "fmt": "0",
+  "mode": "separate",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p13",
+  "fmt": "0",
+  "mode": "devfull",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p13",
+  "fmt": "0",
+  "mode": "devfull",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p13",
+  "fmt": "0",
+  "mode": "devfull",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p13",
+  "fmt": "0",
+  "mode": "out_devfull",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p13",
+  "fmt": "0",
+  "mode": "out_devfull",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p13",
+  "fmt": "0",
+  "mode": "out_devfull",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p13",
+  "fmt": "6",
+  "mode": "merged",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p13",
+  "fmt": "6",
+  "mode": "merged",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p13",
+  "fmt": "6",
+  "mode": "merged",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p13",
+  "fmt": "6",
+  "mode": "separate",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p13",
+  "fmt": "6",
+  "mode": "separate",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p13",
+  "fmt": "6",
+  "mode": "separate",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p13",
+  "fmt": "7",
+  "mode": "merged",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p13",
+  "fmt": "7",
+  "mode": "merged",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p13",
+  "fmt": "7",
+  "mode": "merged",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p13",
+  "fmt": "7",
+  "mode": "separate",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p13",
+  "fmt": "7",
+  "mode": "separate",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p13",
+  "fmt": "7",
+  "mode": "separate",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p14",
+  "fmt": "0",
+  "mode": "merged",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p14",
+  "fmt": "0",
+  "mode": "merged",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p14",
+  "fmt": "0",
+  "mode": "merged",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p14",
+  "fmt": "0",
+  "mode": "separate",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p14",
+  "fmt": "0",
+  "mode": "separate",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p14",
+  "fmt": "0",
+  "mode": "separate",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p14",
+  "fmt": "0",
+  "mode": "devfull",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p14",
+  "fmt": "0",
+  "mode": "devfull",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p14",
+  "fmt": "0",
+  "mode": "devfull",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p14",
+  "fmt": "0",
+  "mode": "out_devfull",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p14",
+  "fmt": "0",
+  "mode": "out_devfull",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p14",
+  "fmt": "0",
+  "mode": "out_devfull",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p14",
+  "fmt": "6",
+  "mode": "merged",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p14",
+  "fmt": "6",
+  "mode": "merged",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p14",
+  "fmt": "6",
+  "mode": "merged",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p14",
+  "fmt": "6",
+  "mode": "separate",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p14",
+  "fmt": "6",
+  "mode": "separate",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p14",
+  "fmt": "6",
+  "mode": "separate",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p14",
+  "fmt": "7",
+  "mode": "merged",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p14",
+  "fmt": "7",
+  "mode": "merged",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p14",
+  "fmt": "7",
+  "mode": "merged",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p14",
+  "fmt": "7",
+  "mode": "separate",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p14",
+  "fmt": "7",
+  "mode": "separate",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p14",
+  "fmt": "7",
+  "mode": "separate",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p15",
+  "fmt": "0",
+  "mode": "merged",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p15",
+  "fmt": "0",
+  "mode": "merged",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p15",
+  "fmt": "0",
+  "mode": "merged",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p15",
+  "fmt": "0",
+  "mode": "separate",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p15",
+  "fmt": "0",
+  "mode": "separate",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p15",
+  "fmt": "0",
+  "mode": "separate",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p15",
+  "fmt": "0",
+  "mode": "devfull",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p15",
+  "fmt": "0",
+  "mode": "devfull",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p15",
+  "fmt": "0",
+  "mode": "devfull",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p15",
+  "fmt": "0",
+  "mode": "out_devfull",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p15",
+  "fmt": "0",
+  "mode": "out_devfull",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p15",
+  "fmt": "0",
+  "mode": "out_devfull",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p15",
+  "fmt": "6",
+  "mode": "merged",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p15",
+  "fmt": "6",
+  "mode": "merged",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p15",
+  "fmt": "6",
+  "mode": "merged",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p15",
+  "fmt": "6",
+  "mode": "separate",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p15",
+  "fmt": "6",
+  "mode": "separate",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p15",
+  "fmt": "6",
+  "mode": "separate",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p15",
+  "fmt": "7",
+  "mode": "merged",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p15",
+  "fmt": "7",
+  "mode": "merged",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p15",
+  "fmt": "7",
+  "mode": "merged",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p15",
+  "fmt": "7",
+  "mode": "separate",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p15",
+  "fmt": "7",
+  "mode": "separate",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p15",
+  "fmt": "7",
+  "mode": "separate",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p16",
+  "fmt": "0",
+  "mode": "merged",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p16",
+  "fmt": "0",
+  "mode": "merged",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p16",
+  "fmt": "0",
+  "mode": "merged",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p16",
+  "fmt": "0",
+  "mode": "separate",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p16",
+  "fmt": "0",
+  "mode": "separate",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p16",
+  "fmt": "0",
+  "mode": "separate",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p16",
+  "fmt": "0",
+  "mode": "devfull",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p16",
+  "fmt": "0",
+  "mode": "devfull",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p16",
+  "fmt": "0",
+  "mode": "devfull",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p16",
+  "fmt": "0",
+  "mode": "out_devfull",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p16",
+  "fmt": "0",
+  "mode": "out_devfull",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p16",
+  "fmt": "0",
+  "mode": "out_devfull",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p16",
+  "fmt": "6",
+  "mode": "merged",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p16",
+  "fmt": "6",
+  "mode": "merged",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p16",
+  "fmt": "6",
+  "mode": "merged",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p16",
+  "fmt": "6",
+  "mode": "separate",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p16",
+  "fmt": "6",
+  "mode": "separate",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p16",
+  "fmt": "6",
+  "mode": "separate",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p16",
+  "fmt": "7",
+  "mode": "merged",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p16",
+  "fmt": "7",
+  "mode": "merged",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p16",
+  "fmt": "7",
+  "mode": "merged",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p16",
+  "fmt": "7",
+  "mode": "separate",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p16",
+  "fmt": "7",
+  "mode": "separate",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p16",
+  "fmt": "7",
+  "mode": "separate",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p17",
+  "fmt": "0",
+  "mode": "merged",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p17",
+  "fmt": "0",
+  "mode": "merged",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p17",
+  "fmt": "0",
+  "mode": "merged",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p17",
+  "fmt": "0",
+  "mode": "separate",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p17",
+  "fmt": "0",
+  "mode": "separate",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p17",
+  "fmt": "0",
+  "mode": "separate",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p17",
+  "fmt": "0",
+  "mode": "devfull",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p17",
+  "fmt": "0",
+  "mode": "devfull",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p17",
+  "fmt": "0",
+  "mode": "devfull",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p17",
+  "fmt": "0",
+  "mode": "out_devfull",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p17",
+  "fmt": "0",
+  "mode": "out_devfull",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p17",
+  "fmt": "0",
+  "mode": "out_devfull",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p17",
+  "fmt": "6",
+  "mode": "merged",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p17",
+  "fmt": "6",
+  "mode": "merged",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p17",
+  "fmt": "6",
+  "mode": "merged",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p17",
+  "fmt": "6",
+  "mode": "separate",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p17",
+  "fmt": "6",
+  "mode": "separate",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p17",
+  "fmt": "6",
+  "mode": "separate",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p17",
+  "fmt": "7",
+  "mode": "merged",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p17",
+  "fmt": "7",
+  "mode": "merged",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p17",
+  "fmt": "7",
+  "mode": "merged",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p17",
+  "fmt": "7",
+  "mode": "separate",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p17",
+  "fmt": "7",
+  "mode": "separate",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p17",
+  "fmt": "7",
+  "mode": "separate",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p18",
+  "fmt": "0",
+  "mode": "merged",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p18",
+  "fmt": "0",
+  "mode": "merged",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p18",
+  "fmt": "0",
+  "mode": "merged",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p18",
+  "fmt": "0",
+  "mode": "separate",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p18",
+  "fmt": "0",
+  "mode": "separate",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p18",
+  "fmt": "0",
+  "mode": "separate",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p18",
+  "fmt": "0",
+  "mode": "devfull",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p18",
+  "fmt": "0",
+  "mode": "devfull",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p18",
+  "fmt": "0",
+  "mode": "devfull",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p18",
+  "fmt": "0",
+  "mode": "out_devfull",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p18",
+  "fmt": "0",
+  "mode": "out_devfull",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p18",
+  "fmt": "0",
+  "mode": "out_devfull",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p18",
+  "fmt": "6",
+  "mode": "merged",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p18",
+  "fmt": "6",
+  "mode": "merged",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p18",
+  "fmt": "6",
+  "mode": "merged",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p18",
+  "fmt": "6",
+  "mode": "separate",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p18",
+  "fmt": "6",
+  "mode": "separate",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p18",
+  "fmt": "6",
+  "mode": "separate",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p18",
+  "fmt": "7",
+  "mode": "merged",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p18",
+  "fmt": "7",
+  "mode": "merged",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p18",
+  "fmt": "7",
+  "mode": "merged",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p18",
+  "fmt": "7",
+  "mode": "separate",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p18",
+  "fmt": "7",
+  "mode": "separate",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p18",
+  "fmt": "7",
+  "mode": "separate",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p2",
+  "fmt": "0",
+  "mode": "merged",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p2",
+  "fmt": "0",
+  "mode": "merged",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p2",
+  "fmt": "0",
+  "mode": "merged",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p2",
+  "fmt": "0",
+  "mode": "separate",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p2",
+  "fmt": "0",
+  "mode": "separate",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p2",
+  "fmt": "0",
+  "mode": "separate",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p2",
+  "fmt": "0",
+  "mode": "devfull",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p2",
+  "fmt": "0",
+  "mode": "devfull",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p2",
+  "fmt": "0",
+  "mode": "devfull",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p2",
+  "fmt": "0",
+  "mode": "out_devfull",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p2",
+  "fmt": "0",
+  "mode": "out_devfull",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p2",
+  "fmt": "0",
+  "mode": "out_devfull",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p2",
+  "fmt": "6",
+  "mode": "merged",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p2",
+  "fmt": "6",
+  "mode": "merged",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p2",
+  "fmt": "6",
+  "mode": "merged",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p2",
+  "fmt": "6",
+  "mode": "separate",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p2",
+  "fmt": "6",
+  "mode": "separate",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p2",
+  "fmt": "6",
+  "mode": "separate",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p2",
+  "fmt": "7",
+  "mode": "merged",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p2",
+  "fmt": "7",
+  "mode": "merged",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p2",
+  "fmt": "7",
+  "mode": "merged",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p2",
+  "fmt": "7",
+  "mode": "separate",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p2",
+  "fmt": "7",
+  "mode": "separate",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p2",
+  "fmt": "7",
+  "mode": "separate",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p3",
+  "fmt": "0",
+  "mode": "merged",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p3",
+  "fmt": "0",
+  "mode": "merged",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p3",
+  "fmt": "0",
+  "mode": "merged",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p3",
+  "fmt": "0",
+  "mode": "separate",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p3",
+  "fmt": "0",
+  "mode": "separate",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p3",
+  "fmt": "0",
+  "mode": "separate",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p3",
+  "fmt": "0",
+  "mode": "devfull",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p3",
+  "fmt": "0",
+  "mode": "devfull",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p3",
+  "fmt": "0",
+  "mode": "devfull",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p3",
+  "fmt": "0",
+  "mode": "out_devfull",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p3",
+  "fmt": "0",
+  "mode": "out_devfull",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p3",
+  "fmt": "0",
+  "mode": "out_devfull",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p3",
+  "fmt": "6",
+  "mode": "merged",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p3",
+  "fmt": "6",
+  "mode": "merged",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p3",
+  "fmt": "6",
+  "mode": "merged",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p3",
+  "fmt": "6",
+  "mode": "separate",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p3",
+  "fmt": "6",
+  "mode": "separate",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p3",
+  "fmt": "6",
+  "mode": "separate",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p3",
+  "fmt": "7",
+  "mode": "merged",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p3",
+  "fmt": "7",
+  "mode": "merged",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p3",
+  "fmt": "7",
+  "mode": "merged",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p3",
+  "fmt": "7",
+  "mode": "separate",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p3",
+  "fmt": "7",
+  "mode": "separate",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p3",
+  "fmt": "7",
+  "mode": "separate",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p4",
+  "fmt": "0",
+  "mode": "merged",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p4",
+  "fmt": "0",
+  "mode": "merged",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p4",
+  "fmt": "0",
+  "mode": "merged",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p4",
+  "fmt": "0",
+  "mode": "separate",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p4",
+  "fmt": "0",
+  "mode": "separate",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p4",
+  "fmt": "0",
+  "mode": "separate",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p4",
+  "fmt": "0",
+  "mode": "devfull",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p4",
+  "fmt": "0",
+  "mode": "devfull",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p4",
+  "fmt": "0",
+  "mode": "devfull",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p4",
+  "fmt": "0",
+  "mode": "out_devfull",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p4",
+  "fmt": "0",
+  "mode": "out_devfull",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p4",
+  "fmt": "0",
+  "mode": "out_devfull",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p4",
+  "fmt": "6",
+  "mode": "merged",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p4",
+  "fmt": "6",
+  "mode": "merged",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p4",
+  "fmt": "6",
+  "mode": "merged",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p4",
+  "fmt": "6",
+  "mode": "separate",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p4",
+  "fmt": "6",
+  "mode": "separate",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p4",
+  "fmt": "6",
+  "mode": "separate",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p4",
+  "fmt": "7",
+  "mode": "merged",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p4",
+  "fmt": "7",
+  "mode": "merged",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p4",
+  "fmt": "7",
+  "mode": "merged",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p4",
+  "fmt": "7",
+  "mode": "separate",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p4",
+  "fmt": "7",
+  "mode": "separate",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p4",
+  "fmt": "7",
+  "mode": "separate",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p5",
+  "fmt": "0",
+  "mode": "merged",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p5",
+  "fmt": "0",
+  "mode": "merged",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p5",
+  "fmt": "0",
+  "mode": "merged",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p5",
+  "fmt": "0",
+  "mode": "separate",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p5",
+  "fmt": "0",
+  "mode": "separate",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p5",
+  "fmt": "0",
+  "mode": "separate",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p5",
+  "fmt": "0",
+  "mode": "devfull",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p5",
+  "fmt": "0",
+  "mode": "devfull",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p5",
+  "fmt": "0",
+  "mode": "devfull",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p5",
+  "fmt": "0",
+  "mode": "out_devfull",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p5",
+  "fmt": "0",
+  "mode": "out_devfull",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p5",
+  "fmt": "0",
+  "mode": "out_devfull",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p5",
+  "fmt": "6",
+  "mode": "merged",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p5",
+  "fmt": "6",
+  "mode": "merged",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p5",
+  "fmt": "6",
+  "mode": "merged",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p5",
+  "fmt": "6",
+  "mode": "separate",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p5",
+  "fmt": "6",
+  "mode": "separate",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p5",
+  "fmt": "6",
+  "mode": "separate",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p5",
+  "fmt": "7",
+  "mode": "merged",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p5",
+  "fmt": "7",
+  "mode": "merged",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p5",
+  "fmt": "7",
+  "mode": "merged",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p5",
+  "fmt": "7",
+  "mode": "separate",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p5",
+  "fmt": "7",
+  "mode": "separate",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p5",
+  "fmt": "7",
+  "mode": "separate",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p6",
+  "fmt": "0",
+  "mode": "merged",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p6",
+  "fmt": "0",
+  "mode": "merged",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p6",
+  "fmt": "0",
+  "mode": "merged",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p6",
+  "fmt": "0",
+  "mode": "separate",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p6",
+  "fmt": "0",
+  "mode": "separate",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p6",
+  "fmt": "0",
+  "mode": "separate",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p6",
+  "fmt": "0",
+  "mode": "devfull",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p6",
+  "fmt": "0",
+  "mode": "devfull",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p6",
+  "fmt": "0",
+  "mode": "devfull",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p6",
+  "fmt": "0",
+  "mode": "out_devfull",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p6",
+  "fmt": "0",
+  "mode": "out_devfull",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p6",
+  "fmt": "0",
+  "mode": "out_devfull",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p6",
+  "fmt": "6",
+  "mode": "merged",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p6",
+  "fmt": "6",
+  "mode": "merged",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p6",
+  "fmt": "6",
+  "mode": "merged",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p6",
+  "fmt": "6",
+  "mode": "separate",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p6",
+  "fmt": "6",
+  "mode": "separate",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p6",
+  "fmt": "6",
+  "mode": "separate",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p6",
+  "fmt": "7",
+  "mode": "merged",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p6",
+  "fmt": "7",
+  "mode": "merged",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p6",
+  "fmt": "7",
+  "mode": "merged",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p6",
+  "fmt": "7",
+  "mode": "separate",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p6",
+  "fmt": "7",
+  "mode": "separate",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p6",
+  "fmt": "7",
+  "mode": "separate",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p7",
+  "fmt": "0",
+  "mode": "merged",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p7",
+  "fmt": "0",
+  "mode": "merged",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p7",
+  "fmt": "0",
+  "mode": "merged",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p7",
+  "fmt": "0",
+  "mode": "separate",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p7",
+  "fmt": "0",
+  "mode": "separate",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p7",
+  "fmt": "0",
+  "mode": "separate",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p7",
+  "fmt": "0",
+  "mode": "devfull",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p7",
+  "fmt": "0",
+  "mode": "devfull",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p7",
+  "fmt": "0",
+  "mode": "devfull",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p7",
+  "fmt": "0",
+  "mode": "out_devfull",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p7",
+  "fmt": "0",
+  "mode": "out_devfull",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p7",
+  "fmt": "0",
+  "mode": "out_devfull",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p7",
+  "fmt": "6",
+  "mode": "merged",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p7",
+  "fmt": "6",
+  "mode": "merged",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p7",
+  "fmt": "6",
+  "mode": "merged",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p7",
+  "fmt": "6",
+  "mode": "separate",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p7",
+  "fmt": "6",
+  "mode": "separate",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p7",
+  "fmt": "6",
+  "mode": "separate",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p7",
+  "fmt": "7",
+  "mode": "merged",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p7",
+  "fmt": "7",
+  "mode": "merged",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p7",
+  "fmt": "7",
+  "mode": "merged",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p7",
+  "fmt": "7",
+  "mode": "separate",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p7",
+  "fmt": "7",
+  "mode": "separate",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p7",
+  "fmt": "7",
+  "mode": "separate",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p8",
+  "fmt": "0",
+  "mode": "merged",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p8",
+  "fmt": "0",
+  "mode": "merged",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p8",
+  "fmt": "0",
+  "mode": "merged",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p8",
+  "fmt": "0",
+  "mode": "separate",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p8",
+  "fmt": "0",
+  "mode": "separate",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p8",
+  "fmt": "0",
+  "mode": "separate",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p8",
+  "fmt": "0",
+  "mode": "devfull",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p8",
+  "fmt": "0",
+  "mode": "devfull",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p8",
+  "fmt": "0",
+  "mode": "devfull",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p8",
+  "fmt": "0",
+  "mode": "out_devfull",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p8",
+  "fmt": "0",
+  "mode": "out_devfull",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p8",
+  "fmt": "0",
+  "mode": "out_devfull",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p8",
+  "fmt": "6",
+  "mode": "merged",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p8",
+  "fmt": "6",
+  "mode": "merged",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p8",
+  "fmt": "6",
+  "mode": "merged",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p8",
+  "fmt": "6",
+  "mode": "separate",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p8",
+  "fmt": "6",
+  "mode": "separate",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p8",
+  "fmt": "6",
+  "mode": "separate",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p8",
+  "fmt": "7",
+  "mode": "merged",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p8",
+  "fmt": "7",
+  "mode": "merged",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p8",
+  "fmt": "7",
+  "mode": "merged",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p8",
+  "fmt": "7",
+  "mode": "separate",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p8",
+  "fmt": "7",
+  "mode": "separate",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p8",
+  "fmt": "7",
+  "mode": "separate",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p9",
+  "fmt": "0",
+  "mode": "merged",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p9",
+  "fmt": "0",
+  "mode": "merged",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p9",
+  "fmt": "0",
+  "mode": "merged",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p9",
+  "fmt": "0",
+  "mode": "separate",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p9",
+  "fmt": "0",
+  "mode": "separate",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p9",
+  "fmt": "0",
+  "mode": "separate",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p9",
+  "fmt": "0",
+  "mode": "devfull",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p9",
+  "fmt": "0",
+  "mode": "devfull",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p9",
+  "fmt": "0",
+  "mode": "devfull",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p9",
+  "fmt": "0",
+  "mode": "out_devfull",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p9",
+  "fmt": "0",
+  "mode": "out_devfull",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p9",
+  "fmt": "0",
+  "mode": "out_devfull",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 6,
+  "losat_exit": 6
+ },
+ {
+  "input": "T89p9",
+  "fmt": "6",
+  "mode": "merged",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p9",
+  "fmt": "6",
+  "mode": "merged",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p9",
+  "fmt": "6",
+  "mode": "merged",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p9",
+  "fmt": "6",
+  "mode": "separate",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p9",
+  "fmt": "6",
+  "mode": "separate",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p9",
+  "fmt": "6",
+  "mode": "separate",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p9",
+  "fmt": "7",
+  "mode": "merged",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p9",
+  "fmt": "7",
+  "mode": "merged",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p9",
+  "fmt": "7",
+  "mode": "merged",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p9",
+  "fmt": "7",
+  "mode": "separate",
+  "batch": "",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p9",
+  "fmt": "7",
+  "mode": "separate",
+  "batch": "1",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ },
+ {
+  "input": "T89p9",
+  "fmt": "7",
+  "mode": "separate",
+  "batch": "200",
+  "same": true,
+  "ncbi_exit": 0,
+  "losat_exit": 0
+ }
+]

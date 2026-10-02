@@ -1,0 +1,8 @@
+# EDL933 (5,528,445, five query chunks) x Sakai[1000000:1500000], -task blastn -outfmt 6, one thread
+ncbi	rep0	1.76s
+losat	rep0	1.36s
+ncbi	rep1	1.35s
+losat	rep1	1.46s
+ncbi	rep2	1.94s
+losat	rep2	1.45s
+same output: True lines: 1919

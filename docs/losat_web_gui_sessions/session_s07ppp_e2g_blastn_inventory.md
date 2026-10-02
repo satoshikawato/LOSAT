@@ -6,12 +6,13 @@ LOSAT の段階 E2g を実行する。BLASTN（LOSATN）の NCBI との一致を
 
 背景：S07+ では 16 回の独立監査のたびに、NCBI の経路の未移植（小さい lookup table の word の延長、subject の曖昧な文字の `CRandom`、query の batch と分割など）と、C の細部（`Int4` の変換、`size_t` の折り返し、`get_data` の位置のずれ、得点 0 の HSP の除去）が 1 つずつ見つかった（`docs/evidence/losat_web_e2c/AUTHORITY.md` §H〜§R）。
 
+0. **CI の整備（最初に行う。下の「CI の整備」）。** 回帰を CI で素早く見つけられるようにする。棚卸しと transpile の前に済ませ、以後の変更を CI で守る。
 1. **棚卸し。** アプリが出す BLASTN のオプション（`describe` と S12 の指示書の範囲）で、NCBI の `blastn`（`-subject` の bl2seq）の実行経路に現れる関数を洗い出す：`blastn_app.cpp` の引数の処理と batch、`CLocalBlast`、`CBlastPrelimSearch`（query の分割を含む）、`algo/blast/core` の setup・lookup・scan・ungapped・gapped・traceback・hit の保存・統計、`blast_seqalign.cpp`、`blast_format.cpp` と `align_format` の outfmt 0/6/7。関数ごとに、NCBI のファイル・行、LOSAT の対応箇所、状態（忠実な移植、差のある移植、未移植、明示的な拒否、承認済みの例外）を表にする（`docs/evidence/losat_web_e2g/INVENTORY.tsv`）。LOSAT のコードの `NCBI reference` の注釈を機械的に突き合わせて、分類を始める（その script も証拠に置く）。option の値ごとに分岐が変わる関数（例：`BlastChooseNaExtend`、`s_SmallNaChooseScanSubject`）は、分岐ごとに行を分ける。
 2. **一括の transpile。** 「未移植」と「差のある移植」を、NCBI の関数ごとに、簡略化せずに移植する（直上に NCBI のファイル・行と断片）。LOSAT が速度のために NCBI と違う実装にしている箇所は、出力が同じなら新しく移植する部分にも同じ方式を使ってよい（DW-12）。そのときは表に書く。C の細部（整数の型の幅と折り返し、浮動小数点から整数への変換、ポインタの位置）も NCBI と同じにする。
 3. **明示的な拒否の見直し。** S07+ と S07++ の明示的な拒否（`AUTHORITY.md` §G など）のうち、transpile で NCBI と同じにできるものは拒否をなくす。残すものは表に理由を書く（NCBI が落ちる、NCBI の C++ の層の丸ごとの移植が要る、など）。
 4. **試験。** S07+ と S07++ のすべての検査（`check_inputs.py`、`scoring_sweep.py`、`word_size_sweep.py`、`slice_sweep.py`、`title_sweep.py`、`batch_sweep.py`）、既存の BLASTN のゲート（Gate A）、outfmt 0 の fixture に退行なし。移植した関数ごとに、その分岐に入る入力を NCBI と比べる。V-PERF の非退行。独立監査は、棚卸しの表を基準に、経路の網羅と移植の忠実さを確かめる。
 
-記録は `docs/evidence/losat_web_e2g/`（`README.md`、`INVENTORY.tsv`、`evidence.sha256`）。変更前の成果物は S07++ の成果物である（ゲートの実行ファイルのハッシュは `docs/evidence/losat_web_e2f/run-20260930T163727Z/artifacts.sha256`、native は `~/.cache/losat-web-gui-target/s07pg-native/release/LOSAT`、SHA-256 `a4ff5abb…80f5`）。
+完了条件に加えて、CI の整備（0.）が済み、PR の CI が 20 分以内で回帰を検出できること。記録は `docs/evidence/losat_web_e2g/`（`README.md`、`INVENTORY.tsv`、`evidence.sha256`）。変更前の成果物は S07++ の成果物である（ゲートの実行ファイルのハッシュは `docs/evidence/losat_web_e2f/run-20260930T163727Z/artifacts.sha256`、native は `~/.cache/losat-web-gui-target/s07pg-native/release/LOSAT`、SHA-256 `a4ff5abb…80f5`）。
 
 ## S07++ からの引き継ぎ（S07++b、2026-10-01 の実測）
 
@@ -24,6 +25,25 @@ S07++（E2f）は完了した（[ゲート記録](../evidence/losat_web_e2f/READ
 - **使用量の上限で作業が失われないようにする。** 2026-09-30 に並行した agent が同時に上限に達して成果を失った。agent には、結果を**途中で、ファイルに書きながら**進めさせる（分類は範囲ごとの TSV を `docs/evidence/losat_web_e2g/` か scratch に行ごとに追記する。比較の実行は case ごとの結果を TSV に書く）。agent の指示は自己完結にして、成果の保存先を指定する。agent が終わるたびにメインが読んで確かめ、コミットする。上限に達したら、並行数を 2 に減らして続ける。
 - V-PERF で閾値を超えた case の切り分けの再計測は `perf_cases.py run … --repeat 5`。V-PERF の段階はアプリ側の lock（`~/.cache/losat-web-gui-target/s07p-resume/vperf_lock.sh`）を取る。ゲートの script の雛形は `~/.cache/losat-web-gui-target/s07p-resume/s07pp_gates2.sh`（実行の前に `date -u +%Y%m%dT%H%M%SZ > …/s07p-resume/ts2.txt` で run の名前を決める。無ければ `run-20260930T163727Z/` の記録から作り直す）。NCBI の参照の注釈の検査は `…/s07p-resume/verify_refs.py <変えた .rs>`。
 - 独立監査の第 2 回の script（`docs/evidence/losat_web_e2f/audit_round2/{gen,cases,driver}.py`）は、棚卸しの後の監査でそのまま再利用できる。
+
+### CI の整備
+
+背景（2026-10-01 の実測）：CI（`.github/workflows/ci.yml` と、そこから呼ぶ `wasm-threading.yml`）は、回帰の検出に使えていない。
+
+- `wasm / integration` の「Frozen default and approved genetic-code regressions」が、`native/blastn/Sakai.MG1655.megablast` の凍結ハッシュの不一致で落ちる（`LOSAT/tests/check_wasm_threading_regressions.py` の `record()` が、不一致で `RuntimeError`）。V-ABI の既知の 4 件（凍結ハッシュ 672/676、`Sakai.MG1655.megablast` の outfmt 7、S02 から）と同じ組合せと思われるが、ログ全文では未確認（run `36745543144` のログ、約 2 時間で失敗。ほかの case が終わるまで止まらない）。`feature/losat-web-gui` の push、PR #107、`main` の merge（`3f68f6430`）、PR #108 のどれも、このジョブが赤か赤になる見込みである。
+- `ci.yml` は `push` と `pull_request` の両方で動き、同じ変更で 2 回走る（`rust` と `wasm / integration` が 2 つずつ）。
+- 実行時間：`rust` が約 14 分、`wasm / integration` が約 2 時間（Rust のビルドは毎回 5 分）。
+
+作業（CI の設定はエンジンの出力を変えない。変更は別のコミットにし、ゲートのやり直しは要らない）：
+
+1. **赤の原因を確かめる。** 上の不一致が、S02 から既知の `Sakai.MG1655.megablast` の outfmt 7 か、ログ全文（`gh run view <id> --log`）で確かめる。既知なら、承認済みの例外として許可リストに載せる（凍結ハッシュを書き換えるのでなく、例外の記録 `docs/evidence/` と対応させる）。既知でなければ、回帰として直す（この場合は S07+++ の最初の作業にする）。
+2. **許可リスト方式にする。** `check_wasm_threading_regressions.py` は、最初の不一致で止めず、全件の結果を集め、許可リストにある不一致以外があれば失敗にする。許可リストの項目が一致するようになったときも失敗にして、リストの掃除を促す。
+3. **走る回数を減らす。** `ci.yml` の `push` は `main` だけにし、PR は `pull_request` で走らせる。`concurrency`（`group: ${{ github.workflow }}-${{ github.ref }}`、`cancel-in-progress: true`）を付ける。
+4. **PR で速い検査、重い検査は別の契機。** PR で走らせるのは、NCBI を使わない検査：`docs/evidence/losat_web_e1a/capture_outputs.py compare`（全 program 236 件の出力のハッシュを S02 の基準と比べる）、fixture（outfmt 0 の 47 件）、凍結ハッシュ（NCBI の実行ファイルは要らない）、`cargo test`。変更したパスで選ぶ（例：BLASTN のソースを変えたときに BLASTN の凍結ハッシュ、TBLASTN の変更で TBLASTN の Stage G）。2 時間の wasm の行列は `schedule`（毎晩）、`workflow_dispatch`、release-readiness で走らせる。PR の目標は 20 分以内。
+5. **ビルドを cache する。** `Swatinem/rust-cache` を `rust` と `wasm` のジョブに入れる。
+6. **検出できることを確かめる。** 整備したあと、わざと出力を変える変更（例：`prelim_hitlist_size` を 1 つずらす）を別のブランチで push して、PR の速い検査が失敗することを確かめ、その run の URL を記録に残す。変更は捨てる。
+
+記録は `docs/evidence/losat_web_e2g/README.md` の節にする（変えたワークフロー、前後の実行時間、検出の確認の run）。`main` への反映は、この記録の commit の後の PR で行う。
 
 ### 棚卸しの第 1 段（やり直し）
 

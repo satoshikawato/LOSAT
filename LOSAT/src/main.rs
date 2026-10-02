@@ -97,6 +97,18 @@ fn main() -> Result<()> {
         //             exit_code = BLAST_ENGINE_ERROR;                                 \
         // ```
         Commands::Blastn(args) => {
+            // NCBI reference: ncbi-blast/c++/src/corelib/ncbiapp.cpp:1031-1044
+            // ```c
+            //     // Setup some debugging features from environment variables.
+            //     if ( !m_Environ->Get(DIAG_TRACE).empty() ) {
+            //         SetDiagTrace(eDT_Enable, eDT_Enable);
+            //     }
+            //     string post_level = m_Environ->Get(DIAG_POST_LEVEL);
+            // ```
+            // NCBI's application layer reads its environment and registry files before
+            // blastn's own code runs; LOSAT rejects the settings that change the output.
+            LOSAT::blastinput::ncbi_environment::check_ncbi_application_settings("blastn")
+                .map_err(anyhow::Error::msg)?;
             if let Err(error) = blastn::run(args) {
                 LOSAT::cli::exit_on_native_error(&error);
                 return Err(error);

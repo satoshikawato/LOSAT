@@ -1,0 +1,12 @@
+(node:3070536) ExperimentalWarning: WASI is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ok serial describe, validate, register, scan
+ok serial n1 pairwise_default_serial,pairwise_default_serial.fmt0,pairwise_default_serial.fmt7,pairwise_default_thread4,pairwise_default_thread4.fmt0,pairwise_default_thread4.fmt7
+ok serial n1 pairwise_limit1_serial,pairwise_limit1_serial.fmt0,pairwise_limit1_serial.fmt7
+ok serial n1 pairwise_limit5_serial,pairwise_limit5_serial.fmt0,pairwise_limit5_serial.fmt7
+ok serial n1 pairwise_nohit_serial,pairwise_nohit_serial.fmt0,pairwise_nohit_serial.fmt7
+ok serial n1 all_hsp_forward_serial,all_hsp_forward_serial.fmt0,all_hsp_forward_serial.fmt7,all_hsp_forward_thread4,all_hsp_forward_thread4.fmt0,all_hsp_forward_thread4.fmt7
+ok serial n1 all_hsp_reverse_limit5_serial,all_hsp_reverse_limit5_serial.fmt0,all_hsp_reverse_limit5_serial.fmt7
+ok serial n1 all_hsp_self_serial,all_hsp_self_serial.fmt0,all_hsp_self_serial.fmt7
+ok serial n1 width.blastp
+8 runs matched the native CLI; frozen hashes: 8/8 equal

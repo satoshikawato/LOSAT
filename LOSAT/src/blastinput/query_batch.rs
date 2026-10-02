@@ -49,14 +49,81 @@ pub fn query_batches(lengths: &[usize], batch_size: usize) -> Vec<Range<usize>> 
 ///         retval->AddQuery(q);
 ///     }
 /// ```
-pub fn next_query_batch_end(lengths: &[usize], start: usize, batch_size: i32) -> usize {
+/// The batch size and `size_read` are `TSeqPos` (32-bit unsigned): an `Int4` batch size
+/// converts to it (a negative one becomes 2^32 plus the value).
+pub fn next_query_batch_end(lengths: &[usize], start: usize, batch_size: u32) -> usize {
     let mut end = start;
-    let mut residues = 0usize;
-    while end < lengths.len() && (residues as i64) < i64::from(batch_size) {
-        residues += lengths[end];
+    let mut size_read: u32 = 0;
+    while end < lengths.len() && size_read < batch_size {
+        size_read = size_read.wrapping_add(lengths[end] as u32);
         end += 1;
     }
     end
+}
+
+/// `NStr::StringToInt` with the default flags: an optional sign and decimal digits, within
+/// the range of an `int`, and nothing else (no spaces); `None` where NCBI throws its
+/// `CStringException`.
+///
+/// NCBI reference: ncbi-blast/c++/src/corelib/ncbistr.cpp:635-643
+/// ```c
+/// int NStr::StringToInt(const CTempString str, TStringToNumFlags flags, int base)
+/// {
+///     S2N_CONVERT_GUARD_EX(flags);
+///     Int8 value = StringToInt8(str, flags, base);
+///     if ( value < kMin_Int  ||  value > kMax_Int ) {
+///         S2N_CONVERT_ERROR(int, "overflow", ERANGE, 0);
+///     }
+///     return (int) value;
+/// }
+/// ```
+/// NCBI reference: ncbi-blast/c++/src/corelib/ncbistr.cpp:810-862
+/// ```c
+///     // Determine sign
+///     bool sign = false;
+///     switch (str[pos]) {
+///     case '-':
+///         sign = true;
+///         /*FALLTHRU*/
+///     case '+':
+///         pos++;
+///         break;
+///     ...
+///     // Last checks
+///     if ( pos == pos0  || ((comma >= 0)  &&  (comma != 3)) ) {
+///         S2N_CONVERT_ERROR_INVAL(Int8);
+///     }
+/// ```
+/// `i32::from_str` reads the same strings.
+pub fn ncbi_string_to_int(value: &std::ffi::OsStr) -> Option<i32> {
+    value.to_str()?.parse::<i32>().ok()
+}
+
+/// The query batch size of blastn from the environment variable `BATCH_SIZE` (0 when it
+/// is not set: NCBI then uses `CBatchSizeMixer`). `Err` holds the value that NCBI cannot
+/// convert (an empty value too).
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_input_aux.cpp:85-91
+/// ```c
+///     // used for experimentation purposes
+///     char* batch_sz_str = getenv("BATCH_SIZE");
+///     if (batch_sz_str) {
+///         retval = NStr::StringToInt(batch_sz_str);
+///         _TRACE("DEBUG: Using query batch size " << retval);
+///         return retval;
+///     }
+/// ```
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_input_aux.cpp:99
+/// ```c
+///     if (! use_default) return 0;
+/// ```
+pub fn get_query_batch_size(value: Option<&std::ffi::OsStr>) -> Result<i32, String> {
+    match value {
+        None => Ok(0),
+        Some(value) => {
+            ncbi_string_to_int(value).ok_or_else(|| value.to_string_lossy().into_owned())
+        }
+    }
 }
 
 /// NCBI's adaptive query batch size of blastn: the first batch aims at 1/200 of the target
@@ -168,7 +235,10 @@ impl BatchSizeMixer {
 
 #[cfg(test)]
 mod tests {
-    use super::{next_query_batch_end, query_batches, BatchSizeMixer};
+    use super::{
+        get_query_batch_size, ncbi_string_to_int, next_query_batch_end, query_batches,
+        BatchSizeMixer,
+    };
 
     #[test]
     fn the_query_that_reaches_the_batch_size_stays_in_the_batch() {
@@ -177,6 +247,45 @@ mod tests {
             query_batches(&[], 20_000),
             Vec::<std::ops::Range<usize>>::new()
         );
+    }
+
+    #[test]
+    fn batch_size_strings_are_read_as_ncbis_string_to_int() {
+        use std::ffi::OsStr;
+        for (text, value) in [
+            ("100", Some(100)),
+            ("+100", Some(100)),
+            ("-1", Some(-1)),
+            ("007", Some(7)),
+            ("2147483647", Some(i32::MAX)),
+            ("-2147483648", Some(i32::MIN)),
+            ("2147483648", None),
+            ("", None),
+            (" 100", None),
+            ("100 ", None),
+            ("1e5", None),
+            ("abc", None),
+            ("+", None),
+            ("1,000", None),
+            ("0x10", None),
+        ] {
+            assert_eq!(ncbi_string_to_int(OsStr::new(text)), value, "{text:?}");
+        }
+        assert_eq!(get_query_batch_size(None), Ok(0));
+        assert_eq!(get_query_batch_size(Some(OsStr::new("5000"))), Ok(5000));
+        assert_eq!(
+            get_query_batch_size(Some(OsStr::new(""))),
+            Err(String::new())
+        );
+    }
+
+    #[test]
+    fn a_negative_batch_size_is_a_huge_tseqpos() {
+        assert_eq!(
+            next_query_batch_end(&[3000, 1999, 2, 7], 0, -1i32 as u32),
+            4
+        );
+        assert_eq!(next_query_batch_end(&[3000, 1999, 2, 7], 0, 1), 1);
     }
 
     #[test]

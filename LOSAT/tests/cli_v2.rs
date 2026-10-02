@@ -311,8 +311,8 @@ fn numeric_values_are_validated_before_io() {
             "-evalue {evalue}: {error}"
         );
     }
-    // NCBI's option check rejects 0 or less; LOSAT's limits reject infinity and NaN, which
-    // NCBI's check accepts.
+    // NCBI's option check rejects 0 or less and accepts infinity and NaN (E2g: NCBI
+    // searches with them, as LOSAT does).
     for evalue in [
         "-1", "-inf", "0", "+inf", "+nan", "-nan", ".5e-400", "1e400",
     ] {
@@ -326,8 +326,7 @@ fn numeric_values_are_validated_before_io() {
         let limited = LOSAT::algorithm::blastn::scoring::check_losat_limits(&args);
         if matches!(evalue, "+inf" | "+nan" | "-nan" | "1e400") {
             assert!(checked.is_ok(), "-evalue {evalue}");
-            let error = limited.unwrap_err().to_string();
-            assert!(error.contains("not supported by LOSAT's BLASTN"), "{error}");
+            assert!(limited.is_ok(), "-evalue {evalue}");
         } else {
             let error = checked.unwrap_err().to_string();
             assert!(

@@ -1,0 +1,34 @@
+BLASTN 2.17.0+
+
+
+Reference: Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb
+Miller (2000), "A greedy algorithm for aligning DNA sequences", J
+Comput Biol 2000; 7(1-2):203-14.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/blastn_parity_compact.fasta).
+           2 sequences; 152 total letters
+
+Warning: [blastn] Query_1 batchN 5000 N fil.. : Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options 
+
+
+Query= batchN 5000 N filling the first query batch
+
+Length=5000
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   -1.00    -1.00    -1.00 
+
+Gapped
+Lambda      K        H
+   -1.00    -1.00    -1.00 
+
+Effective search space used: 0
+BLAST engine error: Error: Substitution scores 1 and -6 are not supported 

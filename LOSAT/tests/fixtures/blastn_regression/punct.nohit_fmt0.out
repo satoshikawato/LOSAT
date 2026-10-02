@@ -1,0 +1,97 @@
+BLASTN 2.17.0+
+
+
+Reference: Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb
+Miller (2000), "A greedy algorithm for aligning DNA sequences", J
+Comput Biol 2000; 7(1-2):203-14.
+
+
+
+Database: User specified sequence set (Input:
+tests/fixtures/blastn_regression/inputs/punct_nohit_subject.fa).
+           3 sequences; 1,195 total letters
+
+
+
+Query= q20k query
+
+Length=20000
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+norm1 normal                                                          1059    0.0  
+
+
+> norm1 normal
+Length=645
+
+ Score = 1059 bits (573),  Expect = 0.0
+ Identities = 621/645 (96%), Gaps = 0/645 (0%)
+ Strand=Plus/Plus
+
+Query  5735  atgattgtcatcatcattattattattattattattattgttattgttttttacactctg  5794
+             ||||||||||||||||||||||||||||||||||||| ||||||||||||||||||||||
+Sbjct  1     ATGATTGTCATCATCATTATTATTATTATTATTATTACTGTTATTGTTTTTTACACTCTG  60
+
+Query  5795  agtttcatggtttttaattttatttgttttttcataattattatttttactaatatcact  5854
+             ||||||||||||||||||||||||||||||||||||||||||||||| ||||||||||||
+Sbjct  61    AGTTTCATGGTTTTTAATTTTATTTGTTTTTTCATAATTATTATTTTGACTAATATCACT  120
+
+Query  5855  aatattattattgttgttgttgttgtcgttgttATTatcatcataatcagtatctccctc  5914
+             |||||| |||||||||||||||||||||||||||||||||||||||||||||||||||| 
+Sbjct  121   AATATTTTTATTGTTGTTGTTGTTGTCGTTGTTATTATCATCATAATCAGTATCTCCCTG  180
+
+Query  5915  atacccatcatcatcatcattattatattgatattgatctcctcctctactaaattgatc  5974
+             | ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  181   AAACCCATCATCATCATCATTATTATATTGATATTGATCTCCTCCTCTACTAAATTGATC  240
+
+Query  5975  tttattattattattattattattatttaattccatatcatttaattccattcttttgtt  6034
+             |||||||||||||||||||||||||||||| ||||||||||| ||||||||||||| |||
+Sbjct  241   TTTATTATTATTATTATTATTATTATTTAAATCCATATCATTAAATTCCATTCTTTGGTT  300
+
+Query  6035  tattaataaattatttgtattgttattttttgattccattttttttttttaatattcacc  6094
+              |||||||||||||||||||||||||||||||||| | ||||||||||||||||||||||
+Sbjct  301   CATTAATAAATTATTTGTATTGTTATTTTTTGATTGCGTTTTTTTTTTTTAATATTCACC  360
+
+Query  6095  aattttttttttATTCATATGTTTCTTATGTAGATTTTCGGAATTCATTTATTATATTGT  6154
+             ||| |||||||||| ||||| |||| |||||||||  |||||||||||||||||||||||
+Sbjct  361   AATCTTTTTTTTATACATATATTTCGTATGTAGATCCTCGGAATTCATTTATTATATTGT  420
+
+Query  6155  CTAAAATTTCAATATTAGATTTCTGAGATCTTTGATTTCGATCCTGATTCATAATACTGT  6214
+             |||||||| ||||||||||||||||||| |||||||||||||||||||||||||||||||
+Sbjct  421   CTAAAATTGCAATATTAGATTTCTGAGACCTTTGATTTCGATCCTGATTCATAATACTGT  480
+
+Query  6215  GATTTTGATATCtatttttataatcagtattaaaccttgtattaattaatgtattatttt  6274
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||| ||
+Sbjct  481   GATTTTGATATCTATTTTTATAATCAGTATTAAACCTTGTATTAATTAATGTATTATGTT  540
+
+Query  6275  tagttgatttatttttattcttattattattattatcaatacctggttttatattaaatc  6334
+             ||||||||||||||||||| | || ||||||||||||||||||||||||| |||||||||
+Sbjct  541   TAGTTGATTTATTTTTATTGTAATCATTATTATTATCAATACCTGGTTTTCTATTAAATC  600
+
+Query  6335  tttgtaatatatatttaAAATGTGAATTAGATAACCGTGCAATAG  6379
+             |||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  601   TTTGTAATATATATTTAAAATGTGAATTAGATAACCGTGCAATAG  645
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 22921648
+
+
+  Database: User specified sequence set (Input:
+tests/fixtures/blastn_regression/inputs/punct_nohit_subject.fa).
+    Posted date:  Unknown
+  Number of letters in database: 1,195
+  Number of sequences in database:  3
+
+
+
+Matrix: blastn matrix 1 -2
+Gap Penalties: Existence: 0, Extension: 2.5

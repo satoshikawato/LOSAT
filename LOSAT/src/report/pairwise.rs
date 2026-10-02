@@ -742,12 +742,30 @@ fn write_database_header<W: Write>(writer: &mut W, context: &ReportContext) -> i
     Ok(())
 }
 
-// NCBI reference: ncbi-blast/c++/src/objtools/align_format/showdefline.cpp:69-79
+// NCBI reference: ncbi-blast/c++/src/objtools/align_format/showdefline.cpp:75-83
 // ```c
 // static const char*  kHeader = "Sequences producing significant alignments:";
-// static const char*  kBits = "(Bits)";
+// ...
+// static const char*  kBits = (getenv("CTOOLKIT_COMPATIBLE") ? "(bits)" : "(Bits)");
+// static const size_t kBits_size = strlen(kBits);
+// ...
 // static const char*  kValue = "Value";
 // ```
+// `kBits` is a static initialized when the program starts, from whether the
+// environment has CTOOLKIT_COMPATIBLE (any value, also an empty one).
+fn ncbi_k_bits() -> &'static str {
+    static K_BITS: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
+    K_BITS.get_or_init(|| ncbi_k_bits_for(std::env::var_os("CTOOLKIT_COMPATIBLE").is_some()))
+}
+
+fn ncbi_k_bits_for(ctoolkit_compatible: bool) -> &'static str {
+    if ctoolkit_compatible {
+        "(bits)"
+    } else {
+        "(Bits)"
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:830-837
 // ```c++
 //             if((m_Option & eShowSumN) || (m_Option & eShowPercentIdent)){
@@ -823,7 +841,13 @@ fn write_subject_summary_table_with_sum_n<W: Write>(
     //             }
     //             out << "\n";
     // ```
-    write!(writer, "{:<max_score$}  Value", "(Bits)")?;
+    // NCBI reference: ncbi-blast/c++/src/objtools/align_format/showdefline.cpp:811-813
+    // ```c
+    // out << kBits;
+    // //in case m_MaxScoreLen > kBits.size()
+    // CAlignFormatUtil::AddSpace(out, m_MaxScoreLen - kBits_size);
+    // ```
+    write!(writer, "{:<max_score$}  Value", ncbi_k_bits())?;
     let max_sum_n = subject_order
         .iter()
         .filter_map(|i| subject_hits.get(i)?.first())
@@ -938,7 +962,7 @@ fn ensure_trailing_period(text: &str) -> String {
     }
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/align_format_util.cpp:581-613
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/align_format_util.cpp:584-603
 // ```c
 // if (gapped) {
 //     out << "Gapped" << "\n";
@@ -951,26 +975,42 @@ fn ensure_trailing_period(text: &str) -> String {
 //         out << "        a         alpha";
 //     }
 // }
-// ...
+// out << "\n";
 // sprintf(buffer, "%#8.3g ", lambda);
 // ```
+// C's `%#.3g` (C99 7.21.6.1): with precision P = 3 and X the exponent of the
+// `%e` conversion (after rounding to P digits), `%f` with precision P - 1 - X
+// when P > X >= -4, otherwise `%e` with precision P - 1 and an exponent of a
+// sign and at least two digits; `#` keeps the decimal point and the trailing
+// zeros. Rust's precision formatting rounds the exact binary value half to
+// even, as glibc does.
 fn format_ncbi_ka_value(value: f64) -> String {
-    if value == 0.0 {
-        return "0.00".to_string();
+    const PRECISION: i32 = 3;
+    if !value.is_finite() {
+        let text = if value.is_nan() { "nan" } else { "inf" };
+        return if value.is_sign_negative() {
+            format!("-{text}")
+        } else {
+            text.to_string()
+        };
     }
-
-    let abs = value.abs();
-    let exponent = abs.log10().floor() as i32;
-    if exponent <= -5 || exponent >= 3 {
-        return format!("{value:.2e}");
+    let e_style = format!("{:.*e}", (PRECISION - 1) as usize, value);
+    let (mantissa, exponent) = e_style
+        .split_once('e')
+        .expect("Rust exponent formatting has an 'e'");
+    let exponent: i32 = exponent
+        .parse()
+        .expect("Rust exponent formatting has an integer exponent");
+    if PRECISION > exponent && exponent >= -4 {
+        let mut formatted = format!("{:.*}", (PRECISION - 1 - exponent) as usize, value);
+        if !formatted.contains('.') {
+            formatted.push('.');
+        }
+        formatted
+    } else {
+        let sign = if exponent < 0 { '-' } else { '+' };
+        format!("{mantissa}e{sign}{:02}", exponent.unsigned_abs())
     }
-
-    let decimals = usize::try_from((2 - exponent).max(0)).unwrap_or(0);
-    let mut formatted = format!("{value:.prec$}", prec = decimals);
-    if !formatted.contains('.') {
-        formatted.push('.');
-    }
-    formatted
 }
 
 #[inline]
@@ -1656,6 +1696,12 @@ pub struct BlastnPairwiseReport {
     /// Every query of the batch is invalid, so NCBI did not search it (all queries of such
     /// a batch get the `-1` footer, local_blast.cpp:177-207). Indexed like the queries.
     pub unsearched: Vec<bool>,
+    /// Whether NCBI's epilog (the database and statistics footer, `PrintEpilog`) ends the
+    /// report.
+    pub epilog: bool,
+    /// Whether the report starts with NCBI's prolog (`PrintProlog`); false when the caller
+    /// wrote it before the search, as NCBI does.
+    pub prolog: bool,
 }
 
 // The description table of the BLASTN report.
@@ -1736,7 +1782,11 @@ fn write_blastn_description_table<W: Write>(
             Some((*s_idx, best, hits.iter().map(|hit| hit.hit.bit_score).sum()))
         })
         .collect();
-    let mut max_score = "(Bits)".len();
+    // NCBI reference: ncbi-blast/c++/src/objtools/align_format/showdefline.cpp:1059
+    // ```c
+    // m_MaxScoreLen = kBits_size;
+    // ```
+    let mut max_score = ncbi_k_bits().len();
     let mut max_evalue = "Value".len();
     let mut max_total = "Total".len();
     for (index, (_, best, total)) in rows.iter().enumerate() {
@@ -1758,7 +1808,7 @@ fn write_blastn_description_table<W: Write>(
         "{:<69}",
         "Sequences producing significant alignments:"
     )?;
-    writeln!(writer, "{:<max_score$}  Value", "(Bits)")?;
+    writeln!(writer, "{:<max_score$}  Value", ncbi_k_bits())?;
     writeln!(writer)?;
     for (s_idx, best, _) in &rows {
         let subject_id = subject_ids
@@ -1768,7 +1818,7 @@ fn write_blastn_description_table<W: Write>(
         // NCBI reference: c++/src/objtools/align_format/showdefline.cpp:498
         // The description keeps the prefixes (`fLeavePrefixSuffix`, `defline.rs`).
         let defline = subject_defline(subject_id, best.subject_title.as_deref());
-        let label = super::defline::ncbi_nucleotide_title(&defline, true).unwrap_or(defline);
+        let label = super::defline::ncbi_nucleotide_title(&defline, true);
         // NCBI reference: c++/src/objtools/align_format/showdefline.cpp:915-918,930
         // ```c++
         //         if(line_component.size()+line_length > m_LineLen){
@@ -1867,6 +1917,17 @@ fn write_nucleotide_query_footer<W: Write>(
     karlin: Option<(KarlinParams, KarlinParams)>,
     effective_search_space: i64,
 ) -> io::Result<()> {
+    write_nucleotide_query_footer_spacing(writer, karlin, effective_search_space, true)
+}
+
+/// `write_nucleotide_query_footer`, with the two blank lines that follow it (the next
+/// query's preamble or the epilog) when `trailing`.
+fn write_nucleotide_query_footer_spacing<W: Write>(
+    writer: &mut W,
+    karlin: Option<(KarlinParams, KarlinParams)>,
+    effective_search_space: i64,
+    trailing: bool,
+) -> io::Result<()> {
     writeln!(writer)?;
     if let Some((ungapped, _)) = karlin {
         writeln!(writer, "Lambda      K        H")?;
@@ -1892,8 +1953,11 @@ fn write_nucleotide_query_footer<W: Write>(
     )?;
     // The two blank lines of the next query's preamble or of the epilog
     // (blast_format.cpp:1491, 2249).
-    writeln!(writer)?;
-    writeln!(writer)
+    if trailing {
+        writeln!(writer)?;
+        writeln!(writer)?;
+    }
+    Ok(())
 }
 
 // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:2261-2279
@@ -2013,27 +2077,21 @@ pub fn write_blastn_pairwise_report<W: Write>(
     subject_ids: &[Arc<str>],
     report: &BlastnPairwiseReport,
     mut probe: Option<&mut FormatProbe<'_>>,
+    mut warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
 ) -> io::Result<()> {
     let mut buffered = io::BufWriter::new(writer);
     let writer = &mut buffered;
 
-    write_blastn_pairwise_prolog(
-        writer,
-        &report.version,
-        report.megablast,
-        &report.database_name,
-        report.database_num_sequences,
-        report.database_total_letters,
-    )?;
-    // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:1489-1491
-    // ```c++
-    //     // print the preamble for this query
-    //
-    //     m_Outfile << "\n\n";
-    // ```
-    // The preamble of the first query; each later one ends the footer before it.
-    writer.write_all(b"\n\n")?;
-
+    if report.prolog {
+        write_blastn_pairwise_prolog(
+            writer,
+            &report.version,
+            report.megablast,
+            &report.database_name,
+            report.database_num_sequences,
+            report.database_total_letters,
+        )?;
+    }
     let mut hits_by_query: Vec<Vec<(HspIndex, &PairwiseHit)>> = vec![Vec::new(); queries.len()];
     for (hsp_index, hit) in hits.iter().enumerate() {
         if let Some(bucket) = hits_by_query.get_mut(hit.hit.q_idx as usize) {
@@ -2042,14 +2100,31 @@ pub fn write_blastn_pairwise_report<W: Write>(
     }
 
     for (q_idx, query) in queries.iter().enumerate() {
+        // The query's warnings (and those of its batch's reading) come before its preamble
+        // (`QueryWarnings`).
+        if let Some(warnings) = warnings.as_deref_mut() {
+            warnings.before_query(q_idx, writer)?;
+        }
+        // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:1489-1491
+        // ```c++
+        //     // print the preamble for this query
+        //
+        //     m_Outfile << "\n\n";
+        // ```
+        writer.write_all(b"\n\n")?;
         write_blastp_query_header(writer, &query.query_name, query.query_length)?;
         let query_hits = &hits_by_query[q_idx];
         if query_hits.is_empty() {
             write_no_hits_found(writer)?;
             if report.unsearched.get(q_idx).copied().unwrap_or(false) {
-                write_tblastn_unsearched_query_footer(writer)?;
+                write_tblastn_unsearched_query_footer_spacing(writer, false)?;
             } else {
-                write_nucleotide_query_footer(writer, query.karlin, query.effective_search_space)?;
+                write_nucleotide_query_footer_spacing(
+                    writer,
+                    query.karlin,
+                    query.effective_search_space,
+                    false,
+                )?;
             }
             continue;
         }
@@ -2121,7 +2196,7 @@ pub fn write_blastn_pairwise_report<W: Write>(
             // The subject's defline is its title (`defline.rs`).
             let defline = subject_defline(subject_id, first_hit.subject_title.as_deref());
             // The search rejects the titles that have none (`blastn` `search`).
-            let heading = super::defline::ncbi_nucleotide_title(&defline, false).unwrap_or(defline);
+            let heading = super::defline::ncbi_nucleotide_title(&defline, false);
             write_subject_header(writer, &heading, None, first_hit.subject_length)?;
             if let Some(probe) = probe.as_mut() {
                 writer.flush()?;
@@ -2147,10 +2222,25 @@ pub fn write_blastn_pairwise_report<W: Write>(
             }
         }
 
-        write_nucleotide_query_footer(writer, query.karlin, query.effective_search_space)?;
+        write_nucleotide_query_footer_spacing(
+            writer,
+            query.karlin,
+            query.effective_search_space,
+            false,
+        )?;
     }
 
-    write_blastn_final_footer(writer, report)?;
+    // NCBI reference: ncbi-blast/c++/src/app/blast/blastn_app.cpp:317-318
+    // ```c
+    //         BLAST_PROF_START( APP.POST );
+    //         formatter.PrintEpilog(opt);
+    // ```
+    // An error in a later query batch skips the epilog, and nothing follows the last
+    // query's footer. The epilog starts with two blank lines (blast_format.cpp:2249).
+    if report.epilog {
+        writer.write_all(b"\n\n")?;
+        write_blastn_final_footer(writer, report)?;
+    }
     writer.flush()
 }
 
@@ -2246,10 +2336,12 @@ pub fn write_pairwise<W: Write>(
         subject_hits.entry(s_idx).or_default().push(hit);
     }
 
-    // NCBI reference: ncbi-blast/c++/src/objtools/align_format/showdefline.cpp:69-79
+    // NCBI reference: ncbi-blast/c++/src/objtools/align_format/showdefline.cpp:75-83
     // ```c
     // static const char*  kHeader = "Sequences producing significant alignments:";
-    // static const char*  kBits = "(Bits)";
+    // ...
+    // static const char*  kBits = (getenv("CTOOLKIT_COMPATIBLE") ? "(bits)" : "(Bits)");
+    // ...
     // static const char*  kValue = "Value";
     // ```
     write_subject_summary_table(writer, &subject_order, &subject_hits, subject_ids)?;
@@ -2315,6 +2407,62 @@ pub fn write_pairwise_simple<W: Write>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn k_bits_follows_ctoolkit_compatible() {
+        assert_eq!(ncbi_k_bits_for(true), "(bits)");
+        assert_eq!(ncbi_k_bits_for(false), "(Bits)");
+        assert_eq!(ncbi_k_bits_for(true).len(), ncbi_k_bits_for(false).len());
+    }
+
+    #[test]
+    fn ka_value_matches_c_percent_hash_8_3g() {
+        // Expected strings from C's sprintf(buffer, "%#8.3g ", value) semantics
+        // (Python's '%#.3g' % value gives the same strings).
+        let cases: [(f64, &str); 32] = [
+            (0.0, "0.00"),
+            (-1.0, "-1.00"),
+            (0.625, "0.625"),
+            (0.41, "0.410"),
+            (0.78, "0.780"),
+            (1.37, "1.37"),
+            (1.28, "1.28"),
+            (0.46, "0.460"),
+            (0.85, "0.850"),
+            (0.99996, "1.00"),
+            (9.9996, "10.0"),
+            (999.5, "1.00e+03"),
+            (1.23e-05, "1.23e-05"),
+            (0.0001, "0.000100"),
+            (9.999e-05, "0.000100"),
+            (9.9994e-05, "0.000100"),
+            (1000.0, "1.00e+03"),
+            (99.95, "100."),
+            (99.94, "99.9"),
+            (0.125, "0.125"),
+            (0.375, "0.375"),
+            (12.5, "12.5"),
+            (125.0, "125."),
+            (1.5, "1.50"),
+            (2.25e-07, "2.25e-07"),
+            (123456.0, "1.23e+05"),
+            (-0.00042, "-0.000420"),
+            (5e-324, "4.94e-324"),
+            (f64::MAX, "1.80e+308"),
+            (0.0009995, "0.000999"),
+            (0.00099949, "0.000999"),
+            (-999.49, "-999."),
+        ];
+        for (value, expected) in cases {
+            assert_eq!(format_ncbi_ka_value(value), expected, "value {value:e}");
+            let mut field = Vec::new();
+            write_ncbi_ka_field(&mut field, value).unwrap();
+            assert_eq!(String::from_utf8(field).unwrap(), format!("{expected:>8} "));
+        }
+        assert_eq!(format_ncbi_ka_value(f64::NAN), "nan");
+        assert_eq!(format_ncbi_ka_value(f64::INFINITY), "inf");
+        assert_eq!(format_ncbi_ka_value(f64::NEG_INFINITY), "-inf");
+    }
 
     fn make_hit() -> Hit {
         // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166

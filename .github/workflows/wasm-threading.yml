@@ -104,6 +104,10 @@ jobs:
             --reactor .tmp/threading/artifacts/losat-threaded-reactor.wasm \
             --oracle-dir .tmp/threading/oracle/ncbi-blast-2.17.0+/bin \
             --output-dir .tmp/threading/gates "${compat_args[@]}"
+      # threaded/tblastx/p11 took 3358 s of the 3600 s per-search limit in the last green
+      # run (35201795582); hosted runners were 1.1-1.9x slower on the same binaries in
+      # 36745543144 and 36882087513, where it timed out. A local A/B on the same cores
+      # showed no slowdown of the threaded Wasm (E2g gate record), so the limit is doubled.
       - name: Frozen default and approved genetic-code regressions
         run: |
           # NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:173-180
@@ -116,7 +120,8 @@ jobs:
             --native LOSAT/target/release/LOSAT \
             --threaded .tmp/threading/artifacts/losat-threaded-command.wasm \
             --oracle-dir .tmp/threading/oracle/ncbi-blast-2.17.0+/bin \
-            --jobs 3 --output-dir .tmp/threading/frozen-regressions "${compat_args[@]}"
+            --jobs 3 --timeout-seconds 7200 \
+            --output-dir .tmp/threading/frozen-regressions "${compat_args[@]}"
       # Runs after a failed frozen step too, so one run reports both.
       - name: TBLASTX thread-threshold regressions
         if: ${{ success() || failure() }}

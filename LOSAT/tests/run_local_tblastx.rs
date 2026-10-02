@@ -284,6 +284,58 @@ fn a_batch_size_that_is_not_an_integer_is_rejected() {
     }
 }
 
+// NCBI reference: c++/src/algo/blast/api/local_blast.cpp:54-62,
+// c++/src/algo/blast/api/split_query_aux_priv.cpp:53-60 and
+// c++/src/app/blast/blast_app_util.cpp:206-210,732-737: NCBI converts CHUNK_SIZE,
+// OVERLAP_CHUNK_SIZE and PRE_FETCH_SEQS_LIMIT with NStr::StringToInt (its CStringException
+// names its build's source files) and searches each subject on its own with BL2SEQ_LEGACY.
+#[test]
+fn environment_that_ncbi_cannot_convert_or_reports_otherwise_is_rejected() {
+    let inputs = Inputs::new();
+    for (variable, value, text) in [
+        (
+            "CHUNK_SIZE",
+            "abc",
+            "the environment variable CHUNK_SIZE has the value \"abc\"",
+        ),
+        (
+            "OVERLAP_CHUNK_SIZE",
+            "1e3",
+            "the environment variable OVERLAP_CHUNK_SIZE has the value \"1e3\"",
+        ),
+        (
+            "PRE_FETCH_SEQS_LIMIT",
+            "",
+            "the environment variable PRE_FETCH_SEQS_LIMIT has the value \"\"",
+        ),
+        (
+            "BL2SEQ_LEGACY",
+            "0",
+            "the environment variable BL2SEQ_LEGACY",
+        ),
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_LOSAT"))
+            .arg("tblastx")
+            .arg("-query")
+            .arg(&inputs.query.0)
+            .arg("-subject")
+            .arg(&inputs.subject.0)
+            .args(["-outfmt", "6"])
+            .env(variable, value)
+            .env_remove("LOSAT_TIMING")
+            .output()
+            .expect("run LOSAT CLI");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(1), "{variable}: {output:?}");
+        assert!(
+            output.stdout.is_empty()
+                && stderr.contains(text)
+                && stderr.contains("not supported by LOSAT's TBLASTX"),
+            "{variable}: {stderr}"
+        );
+    }
+}
+
 // NCBI reference: c++/src/app/blast/blast_app_util.hpp:252-255 (an outfmt 0 write that
 // fails: "BLAST failed to write output", exit 6). A standard output closed at the start
 // (`>&-`) fails NCBI's first write; Rust's runtime opens /dev/null there, which LOSAT

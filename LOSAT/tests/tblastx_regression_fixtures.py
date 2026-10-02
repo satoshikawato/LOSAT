@@ -185,6 +185,11 @@ _CASES = [
                                      " -outfmt 6", ""),
     ("options.seg_window_negative_fmt7", f"-query {I}/seg_query.fa -subject {I}/seg_subject.fa"
                                          " -seg '-5 2.2 2.5' -outfmt 7", ""),
+    # BLAST_Cutoffs returns at least the caller's 1 (blast_stat.c:4097, 4126-4129): a large
+    # -evalue against the small search space of a 150-nt query (a copy of LC738875 at
+    # 76964; audit (b) F-1) gives a cutoff of 1, not a negative one, to the linking.
+    ("cutoff.floor_evalue_1e10", f"-query {I}/cutoff_q150.fa -subject tests/fasta/LC738875.fasta"
+                                 " -evalue 1e10 -outfmt 6", ""),
 ]
 CASES = [(*case, *[""] * (5 - len(case))) for case in _CASES]
 

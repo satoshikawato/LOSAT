@@ -125,6 +125,20 @@ _CASES = [
     ("batch.short3_first", f"-query {I}/short3_query.fa {SUBJECTS} -outfmt 6", ""),
     ("batch.short3_first_fmt0", f"-query {I}/short3_query.fa {SUBJECTS} -max_target_seqs 1 -outfmt 0", ""),
     ("batch.short4_between_fmt7", f"-query {I}/short4_query.fa {SUBJECTS} -outfmt 7", ""),
+    # Ties of HSPs with equal scores in different query frames, found in S08 (the inputs
+    # come from the inventory's and the investigations' runs, not from `generate`): the
+    # init hit list sorted by score_compare_match per subject chunk (aa_ungapped.c:234-235;
+    # tie_frames: a cut of LC738874 20001-100000 against itself, tie_init), the HSP list
+    # sorted by score after the first BLAST_LinkHsps (link_hsps.c:1802-1803; tie_nisland:
+    # an N island in the subject, tie_trim: a two-hit tail trimmed by the re-evaluation),
+    # and BLAST_LargeGapSumE in NCBI's order of evaluation (blast_stat.c:4560-4561, sume).
+    ("tie.frames", f"-query {I}/tie_frames_query.fa -subject {I}/tie_frames_subject.fa -outfmt 6", ""),
+    ("tie.init_seg_no", f"-query {I}/tie_init_query.fa -subject {I}/tie_init_subject.fa -seg no -outfmt 6", ""),
+    ("tie.nisland_seg_no", f"-query {I}/tie_nisland_query.fa -subject {I}/tie_nisland_subject.fa -seg no"
+                           " -outfmt 6", ""),
+    ("tie.trim_seg_no_fmt0", f"-query {I}/tie_trim_query.fa -subject {I}/tie_trim_subject.fa -seg no -outfmt 0",
+     ""),
+    ("sume.large_gap_seg_no", f"-query {I}/sume_query.fa -subject {I}/sume_subject.fa -seg no -outfmt 6", ""),
     # A failed outfmt 0 write ("BLAST failed to write output", exit 6; Linux /dev/full),
     # also with the warnings of an unsearched batch (the stream fails before the query is read).
     ("write.devfull_fmt0", f"{C} -outfmt 0 -out /dev/full", ""),

@@ -449,7 +449,23 @@ pub fn read_records(
         return Ok(Vec::new());
     }
     check_sequence_lines_of(bytes, role, program)?;
-    let records = bio::io::fasta::Reader::new(bytes)
+    let records = bio_records_of(bytes, path, role, program)?;
+    check_residues_of(&records, role, program)?;
+    Ok(records)
+}
+
+/// The records that `bio` reads from a FASTA file (none from white space only), or the
+/// error that names what `bio` cannot read, without the checks of `read_records`.
+pub fn bio_records_of(
+    bytes: &[u8],
+    path: &std::path::Path,
+    role: &str,
+    program: &str,
+) -> Result<Vec<bio::io::fasta::Record>> {
+    if is_blank(bytes) {
+        return Ok(Vec::new());
+    }
+    bio::io::fasta::Reader::new(bytes)
         .records()
         .collect::<std::result::Result<Vec<_>, _>>()
         .with_context(|| {
@@ -458,9 +474,7 @@ pub fn read_records(
                 path.display(),
                 unreadable_fasta(program)
             )
-        })?;
-    check_residues_of(&records, role, program)?;
-    Ok(records)
+        })
 }
 
 /// The records of a FASTA file read where its deflines matter (the query), with the

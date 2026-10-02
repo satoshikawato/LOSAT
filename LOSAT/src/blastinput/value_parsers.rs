@@ -562,11 +562,7 @@ pub fn file_path() -> impl clap::builder::TypedValueParser<Value = PathBuf> {
 pub enum SegSpec {
     No,
     Yes,
-    WindowLocutHicut {
-        window: usize,
-        locut: f64,
-        hicut: f64,
-    },
+    WindowLocutHicut { window: i32, locut: f64, hicut: f64 },
 }
 
 impl SegSpec {
@@ -575,16 +571,41 @@ impl SegSpec {
         !matches!(self, Self::No)
     }
 
+    /// The SEG parameters of the query filter: a window, locut or hicut that is not above
+    /// 0 keeps NCBI's default (`SegParametersNewAa`), then SEG checks the parameters
+    /// (`SegParams::new`, blast_seg.c:2247-2258).
+    ///
+    /// NCBI reference: c++/src/algo/blast/core/blast_filter.c:1147-1154
+    /// ```c
+    ///         sparamsp = SegParametersNewAa();
+    ///         sparamsp->overlaps = TRUE;
+    ///         if (seg_options->window > 0)
+    ///             sparamsp->window = seg_options->window;
+    ///         if (seg_options->locut > 0.0)
+    ///             sparamsp->locut = seg_options->locut;
+    ///         if (seg_options->hicut > 0.0)
+    ///             sparamsp->hicut = seg_options->hicut;
+    /// ```
     #[inline]
     pub fn params(&self) -> Option<SegParams> {
-        match self {
+        match *self {
             Self::No => None,
             Self::Yes => Some(SegParams::default()),
             Self::WindowLocutHicut {
                 window,
                 locut,
                 hicut,
-            } => Some(SegParams::new(*window, *locut, *hicut)),
+            } => {
+                let defaults = SegParams::default();
+                Some(SegParams::new(
+                    usize::try_from(window)
+                        .ok()
+                        .filter(|&window| window > 0)
+                        .unwrap_or(defaults.window),
+                    if locut > 0.0 { locut } else { defaults.locut },
+                    if hicut > 0.0 { hicut } else { defaults.hicut },
+                ))
+            }
         }
     }
 
@@ -611,53 +632,43 @@ impl SegSpec {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:367-381,396-407
-// ```c
-// NStr::Split(filtering_args, " ", output);
-// if (output.size() != 3) {
-//     NCBI_THROW(CInputException, eInvalidInput,
-//                "Invalid number of arguments to filtering option");
-// }
-// ...
-// if (seg_opts == kDfltArgNoFiltering) {
-//     opt.SetSegFiltering(false);
-// } else if (seg_opts == kDfltArgApplyFiltering) {
-//     opt.SetSegFiltering(true);
-// } else {
-//     x_TokenizeFilteringArgs(seg_opts, tokens);
-//     opt.SetSegFilteringWindow(...);
-//     opt.SetSegFilteringLocut(...);
-//     opt.SetSegFilteringHicut(...);
-// }
-// ```
+/// A `-seg` value as NCBI reads it: `no`, `yes`, or a window (an `int`), a locut and a
+/// hicut separated by single spaces (`x_TokenizeFilteringArgs`, see `parse_dust_filtering`).
+/// The errors are NCBI's messages; LOSAT also rejects a locut or hicut that is not finite.
+/// The values are used as NCBI's query filter uses them (`SegSpec::params`).
+///
+/// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:396-406
+/// ```c
+///         if (m_QueryIsProtein && args[kArgSegFiltering]) {
+///             const string& seg_opts = args[kArgSegFiltering].AsString();
+///             if (seg_opts == kDfltArgNoFiltering) {
+///                 opt.SetSegFiltering(false);
+///             } else if (seg_opts == kDfltArgApplyFiltering) {
+///                 opt.SetSegFiltering(true);
+///             } else {
+///                 x_TokenizeFilteringArgs(seg_opts, tokens);
+///                 opt.SetSegFilteringWindow(NStr::StringToInt(tokens[0]));
+///                 opt.SetSegFilteringLocut(NStr::StringToDouble(tokens[1]));
+///                 opt.SetSegFilteringHicut(NStr::StringToDouble(tokens[2]));
+///             }
+/// ```
 pub fn parse_seg_filtering(value: &str) -> Result<SegSpec, String> {
-    if value == "no" {
-        return Ok(SegSpec::No);
+    match value {
+        "no" => return Ok(SegSpec::No),
+        "yes" => return Ok(SegSpec::Yes),
+        _ => {}
     }
-    if value == "yes" {
-        return Ok(SegSpec::Yes);
-    }
-
-    let tokens: Vec<&str> = value.split_whitespace().collect();
+    let tokens: Vec<&str> = value.split(' ').collect();
     if tokens.len() != 3 {
-        return Err("invalid number of arguments to filtering option".to_string());
+        return Err("Invalid number of arguments to filtering option".into());
     }
-
-    let window = tokens[0]
-        .parse::<usize>()
-        .map_err(|_| "invalid input for filtering parameters".to_string())?;
-    let locut = tokens[1]
-        .parse::<f64>()
-        .map_err(|_| "invalid input for filtering parameters".to_string())?;
-    let hicut = tokens[2]
-        .parse::<f64>()
-        .map_err(|_| "invalid input for filtering parameters".to_string())?;
-
-    if window == 0 || window > i32::MAX as usize || !locut.is_finite() || !hicut.is_finite() {
-        return Err("SEG requires window > 0 and finite locut/hicut".into());
+    let invalid = || "Invalid input for filtering parameters".to_string();
+    let window = tokens[0].parse::<i32>().map_err(|_| invalid())?;
+    let locut = tokens[1].parse::<f64>().map_err(|_| invalid())?;
+    let hicut = tokens[2].parse::<f64>().map_err(|_| invalid())?;
+    if !locut.is_finite() || !hicut.is_finite() {
+        return Err("a SEG locut or hicut that is not finite is not supported by LOSAT".into());
     }
-    // NCBI blast_seg.c:2247-2258 normalizes finite negative/inverted cutoffs.
-    // Keep that behavior in SegParams::new at the typed configuration boundary.
     Ok(SegSpec::WindowLocutHicut {
         window,
         locut,

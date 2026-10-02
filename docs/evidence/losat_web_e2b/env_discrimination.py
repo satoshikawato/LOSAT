@@ -26,6 +26,11 @@ NO_EFFECT = {
     # showdefline.cpp kBits: only the outfmt 0 description table reads it.
     "ctoolkit.fmt7": "CTOOLKIT_COMPATIBLE changes only outfmt 0",
     "ncbirc.harmless_fmt0": "the .ncbirc entries change no output",
+    # split_query_cxx.cpp:55-61: the splitter reads the sizes but an ungapped search is
+    # never split; 9 and 2^64 - 1 (-1) are divisible by 3, and the overlap is any int.
+    "env.chunk9_fmt7": "a chunk size divisible by 3 changes nothing in an ungapped search",
+    "env.chunk_minus1_fmt6": "a chunk size divisible by 3 changes nothing in an ungapped search",
+    "env.overlap_negative_fmt6": "the overlap changes nothing in an ungapped search",
 }
 
 

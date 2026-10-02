@@ -76,13 +76,20 @@ pub fn parse(words: &[&str]) -> Result<(Program, Commands), String> {
 
 /// `validate`: `parse`, then BLASTN's `-dust` value and the scoring options that NCBI
 /// rejects or that its Karlin-Altschul tables do not support, with NCBI's message (for a
-/// batch of one query).
+/// batch of one query), and TBLASTX's checks of its options alone (NCBI's `-evalue`
+/// check, the options that LOSAT's TBLASTX rejects).
 /// `run` leaves them to the engine, which reports them as the CLI does.
 pub fn validate(words: &[&str]) -> Result<(), String> {
-    if let (_, Commands::Blastn(mut args)) = parse(words)? {
-        args.resolve_dust()
+    match parse(words)? {
+        (_, Commands::Blastn(mut args)) => args
+            .resolve_dust()
             .and_then(|()| LOSAT::algorithm::blastn::scoring::check_scoring(&args))
-            .map_err(|error| format!("{error:#}"))?;
+            .map_err(|error| format!("{error:#}"))?,
+        (_, Commands::Tblastx(args)) => {
+            LOSAT::algorithm::tblastx::blast_engine::check_options(&args)
+                .map_err(|error| format!("{error:#}"))?
+        }
+        _ => {}
     }
     Ok(())
 }
@@ -339,6 +346,20 @@ mod tests {
             error.starts_with("BLAST engine error: Error: Substitution scores 1 and -6"),
             "{error}"
         );
+        // validate reports TBLASTX's checks of its options alone, as the run does.
+        let tblastx = ["tblastx", "-query", "q", "-subject", "s"];
+        assert!(validate(&tblastx).is_ok());
+        for (extra, start) in [
+            (["-evalue", "0"], "BLAST query/options error: expect value"),
+            (
+                ["-window_size", "0"],
+                "-window_size 0 (the one-hit word finder)",
+            ),
+            (["-culling_limit", "2"], "-culling_limit 2 is not supported"),
+        ] {
+            let error = validate(&[&tblastx[..], &extra[..]].concat()).unwrap_err();
+            assert!(error.starts_with(start), "{error}");
+        }
         // An error of the CLI parser keeps the CLI's message.
         for words in [
             &["blastp", "-query", "q", "-subject", "s", "-evalue"][..],

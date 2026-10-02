@@ -5164,7 +5164,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     let mut report = crate::cli::ReportStream {
         inner: match out_file {
             Some(file) => Box::new(file) as Box<dyn std::io::Write + Send>,
-            None => Box::new(std::io::BufWriter::new(std::io::stdout())),
+            None => crate::cli::report_standard_output(),
         },
         failed: false,
     };
@@ -5406,7 +5406,7 @@ fn search(
                 Some(desc) => format!("{} {desc}", record.id()),
                 None => record.id().to_string(),
             };
-            if crate::report::defline::has_html_character_reference(&defline) {
+            if crate::report::defline::ncbi_nucleotide_title_is_decoded(&defline) {
                 anyhow::bail!(
                     "subject record {} has an HTML character reference (such as &amp;) in its defline, which NCBI BLAST+ decodes in the outfmt 0 titles; this is not supported by LOSAT's BLASTN",
                     index + 1

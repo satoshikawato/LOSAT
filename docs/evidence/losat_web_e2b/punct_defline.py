@@ -6,7 +6,10 @@ covers BLASTN. For TBLASTX and TBLASTN, LOSAT rejects such subjects in outfmt 0 
 maintainer decides. The inputs: three subjects of the TBLASTX `many` fixture with the
 deflines `, ,`, `x1 ok` and `;~ ;` (the first and last reach the defect), the `many`
 query for TBLASTX and its frame +1 peptide for TBLASTN. Expected: NCBI dies of a signal in
-outfmt 0; LOSAT exits 1 with the rejection; outfmt 6 and 7 are the same as NCBI's.
+outfmt 0; LOSAT exits 1 with the rejection, which comes after the search (NCBI makes the
+titles of the subjects with hits only): TBLASTX's stdout holds its outfmt 0 prolog, which
+starts with what NCBI flushed before it crashed (the first lines), TBLASTN's nothing;
+outfmt 6 and 7 are the same as NCBI's.
 
 Usage: punct_defline.py --bin-dir DIR --losat LOSAT --work DIR
 """
@@ -47,7 +50,8 @@ def main() -> int:
             ncbi = subprocess.run([str(args.bin_dir / program), *argv], capture_output=True)
             losat = subprocess.run([str(args.losat.resolve()), program, *argv], capture_output=True)
             if outfmt == "0":
-                rejected = losat.returncode == 1 and b"reads past its end" in losat.stderr and not losat.stdout
+                prolog = not losat.stdout or (losat.stdout.startswith(ncbi.stdout) and b"Query=" not in losat.stdout)
+                rejected = losat.returncode == 1 and b"reads past its end" in losat.stderr and prolog
                 ok = ncbi.returncode < 0 or ncbi.returncode >= 128
                 result = "ncbi-crash, losat-rejects" if ok and rejected else "UNEXPECTED"
             else:

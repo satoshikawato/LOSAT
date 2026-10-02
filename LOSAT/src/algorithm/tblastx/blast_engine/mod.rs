@@ -30,6 +30,7 @@
 mod run_impl;
 
 // Re-export the main run function
+pub use run_impl::check_options;
 pub use run_impl::run;
 pub use run_impl::run_local;
 #[cfg(target_arch = "wasm32")]

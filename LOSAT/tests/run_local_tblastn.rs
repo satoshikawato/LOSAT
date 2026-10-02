@@ -394,6 +394,25 @@ fn outfmt0_rejects_subject_titles_that_ncbi_reads_past_or_decodes() {
                 result.unwrap_or_else(|error| panic!("outfmt {outfmt} {defline:?}: {error}"));
             }
         }
+        // NCBI makes the titles of the subjects that the report shows only: a subject
+        // without hits keeps its title out of the report.
+        let unknown = "N".repeat(900);
+        std::fs::write(
+            &subject,
+            format!(">hit\n{sequence}\n>{defline}\n{unknown}\n"),
+        )
+        .expect("subject");
+        let subjects = read_records(&subject);
+        let (mut report, mut diagnostics) = (Vec::new(), Vec::new());
+        let mut outputs =
+            ReportOutputs::single("0", OutputSink::Writer(&mut report), &mut diagnostics);
+        run_local_tblastn(
+            tblastn_args("q", "s", &[]),
+            &queries,
+            &subjects,
+            &mut outputs,
+        )
+        .unwrap_or_else(|error| panic!("{defline:?} without hits: {error}"));
     }
     let _ = std::fs::remove_dir_all(&dir);
 }

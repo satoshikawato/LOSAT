@@ -147,6 +147,44 @@ _CASES = [
     # also with the warnings of an unsearched batch (the stream fails before the query is read).
     ("write.devfull_fmt0", f"{C} -outfmt 0 -out /dev/full", ""),
     ("write.devfull_unsearched_fmt0", f"{U} -outfmt 0 -out /dev/full", ""),
+    # NCBI's check of the hit saving options (blast_options.c:1518-1523): an -evalue of 0 (or
+    # one that reads as 0) fails after the formatting warning and before `Query is Empty!`.
+    ("options.evalue0_fmt0", f"{C} -evalue 0 -outfmt 0", ""),
+    ("options.evalue0_mts1_fmt6.merged", f"{C} -evalue 1e-400 -max_target_seqs 1 -outfmt 6", ""),
+    ("options.evalue0_empty_query_fmt7", f"-query {I}/empty.fa {SUBJECTS} -evalue 0 -outfmt 7", ""),
+    # NCBI reads a blank line before the first defline of the subjects without a message,
+    # so an empty query still gives `Query is Empty!`.
+    ("input.subject_blank_first_empty_query", f"-query {I}/empty.fa -subject {I}/blank_first_subject.fa"
+                                              " -outfmt 0", ""),
+    # Subject titles that NCBI's HtmlDecode leaves as they are (not a name of its table, a
+    # final `;` trimmed before the decoding, `&xi;` read from the `i`), and titles that NCBI
+    # decodes or reads past on subjects without hits (NCBI makes only the shown titles).
+    ("title.kept_fmt0", f"-query {O}/tblastx_many_query.fasta -subject {I}/titles_kept_subject.fa"
+                        " -outfmt 0", ""),
+    ("title.hitless_fmt0", f"-query {O}/tblastx_many_query.fasta -subject {I}/titles_hitless_subject.fa"
+                           " -outfmt 0", ""),
+    # A DEL (0x7f) in the deflines: NCBI's title ends at the first byte below a space only
+    # (fasta_reader_utils.cpp:215-225).
+    ("input.del_deflines_fmt0", f"-query {I}/del_query.fa -subject {I}/del_subject.fa -query_gencode 4"
+                                " -outfmt 0", ""),
+    ("input.del_deflines_fmt7", f"-query {I}/del_query.fa -subject {I}/del_subject.fa -query_gencode 4"
+                                " -outfmt 7", ""),
+    # The query splitter of every batch reads CHUNK_SIZE (a size_t that must be divisible by
+    # 3 for a translated query; -1 is 2^64 - 1) and OVERLAP_CHUNK_SIZE, but does not split
+    # an ungapped search (split_query_cxx.cpp:55-61, local_blast.cpp:98-103).
+    ("env.chunk10_fmt0", f"{C} -outfmt 0", "", "CHUNK_SIZE=10"),
+    ("env.chunk_minus2_fmt6", f"{C} -outfmt 6", "", "CHUNK_SIZE=-2"),
+    ("env.chunk9_fmt7", f"{C} -outfmt 7", "", "CHUNK_SIZE=9"),
+    ("env.chunk_minus1_fmt6", f"{C} -outfmt 6", "", "CHUNK_SIZE=-1"),
+    ("env.overlap_negative_fmt6", f"{C} -outfmt 6", "", "OVERLAP_CHUNK_SIZE=-5"),
+    # A SEG window, locut or hicut that is not above 0 keeps NCBI's default (blast_filter.c
+    # 1147-1154), before SEG's own check of the parameters.
+    ("options.seg_locut0_fmt0", f"-query {I}/seg_query.fa -subject {I}/seg_subject.fa -seg '12 0 2.5'"
+                                " -outfmt 0", ""),
+    ("options.seg_nonpositive_fmt6", f"-query {I}/seg_query.fa -subject {I}/seg_subject.fa -seg '0 -1 0'"
+                                     " -outfmt 6", ""),
+    ("options.seg_window_negative_fmt7", f"-query {I}/seg_query.fa -subject {I}/seg_subject.fa"
+                                         " -seg '-5 2.2 2.5' -outfmt 7", ""),
 ]
 CASES = [(*case, *[""] * (5 - len(case))) for case in _CASES]
 
@@ -171,6 +209,19 @@ def command_generate(_args) -> int:
     (INPUTS / "short3_query.fa").write_text(">s3 three\nACG\n" + ">" + ">".join(records))
     (INPUTS / "short4_query.fa").write_text(">" + records[1] + ">s4 four\nACGT\n>" + records[2]
                                             + ">sN3 three N\nNNN\n>" + records[3])
+    code4_query = (ENGINE / O / "tblastx_code4_query.fasta").read_text()
+    code4_subject = (ENGINE / O / "tblastx_code4_subject.fasta").read_text()
+    (INPUTS / "blank_first_subject.fa").write_text("\n" + code4_subject)
+    # The first records of the `many` subjects (each with hits of the `many` query) with
+    # new titles, and subjects of N only (no hits).
+    many = [chunk.split("\n", 1)[1] for chunk in (ENGINE / O / "tblastx_many_subject.fasta").read_text().split(">")[1:6]]
+    kept = ("R&D; x", "a&foo;b c", "a&amp;", "s &xi;t", "q &X41; r")
+    (INPUTS / "titles_kept_subject.fa").write_text("".join(f">{title}\n{seq}" for title, seq in zip(kept, many)))
+    unknown = "N" * 60 + "\n"
+    (INPUTS / "titles_hitless_subject.fa").write_text(
+        f">hit one\n{many[0]}>, ,\n{unknown * 15}>s &amp; t\n{unknown * 15}>x &#38; y\n{unknown * 15}")
+    (INPUTS / "del_query.fa").write_text(code4_query.replace(">", ">q\x7fid del\x7f ", 1))
+    (INPUTS / "del_subject.fa").write_text(code4_subject.replace(">", ">s\x7fid del\x7f ", 1))
     return 0
 
 

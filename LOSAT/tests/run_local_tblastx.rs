@@ -257,6 +257,82 @@ fn a_batch_size_that_is_not_an_integer_is_rejected() {
             )
         );
     }
+    // NCBI reads the batch size before the queries (tblastx_app.cpp:136-137) and reads
+    // the deflines that LOSAT rejects without a message: the batch size fails first.
+    let sequence = fixture_sequence("LC738884.fasta");
+    let empty_defline = TempFasta::new("tblastx_empty_defline.fna", &[("", &sequence[0..900])]);
+    for (query, subject) in [
+        (&empty_defline.0, &inputs.subject.0),
+        (&inputs.query.0, &empty_defline.0),
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_LOSAT"))
+            .arg("tblastx")
+            .arg("-query")
+            .arg(query)
+            .arg("-subject")
+            .arg(subject)
+            .args(["-outfmt", "6"])
+            .env("BATCH_SIZE", "abc")
+            .env_remove("LOSAT_TIMING")
+            .output()
+            .expect("run LOSAT CLI");
+        assert_eq!(output.status.code(), Some(1), "{output:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).starts_with("Error: the BATCH_SIZE value"),
+            "{output:?}"
+        );
+    }
+}
+
+// NCBI reference: c++/src/app/blast/blast_app_util.hpp:252-255 (an outfmt 0 write that
+// fails: "BLAST failed to write output", exit 6). A standard output closed at the start
+// (`>&-`) fails NCBI's first write; Rust's runtime opens /dev/null there, which LOSAT
+// recognises on Linux (`cli::report_standard_output`). outfmt 6 and 7 exit non-zero
+// (NCBI aborts; PD-LOSAT-CLI-NONSEARCH-DIFFERENCES).
+#[cfg(target_os = "linux")]
+#[test]
+fn a_closed_standard_output_fails_the_report() {
+    let inputs = Inputs::new();
+    for (outfmt, exit) in [("0", 6), ("6", 1), ("7", 1)] {
+        let output = Command::new("sh")
+            .arg("-c")
+            .arg("exec \"$@\" >&-")
+            .arg("sh")
+            .arg(env!("CARGO_BIN_EXE_LOSAT"))
+            .arg("tblastx")
+            .arg("-query")
+            .arg(&inputs.query.0)
+            .arg("-subject")
+            .arg(&inputs.subject.0)
+            .args(["-outfmt", outfmt])
+            .env_remove("LOSAT_TIMING")
+            .output()
+            .expect("run LOSAT CLI");
+        assert_eq!(
+            output.status.code(),
+            Some(exit),
+            "outfmt {outfmt}: {output:?}"
+        );
+        if outfmt == "0" {
+            assert_eq!(
+                String::from_utf8_lossy(&output.stderr),
+                "BLAST failed to write output\n"
+            );
+        }
+    }
+    // A standard output redirected to /dev/null is written as any file.
+    let output = Command::new(env!("CARGO_BIN_EXE_LOSAT"))
+        .arg("tblastx")
+        .arg("-query")
+        .arg(&inputs.query.0)
+        .arg("-subject")
+        .arg(&inputs.subject.0)
+        .args(["-outfmt", "0"])
+        .stdout(std::process::Stdio::null())
+        .env_remove("LOSAT_TIMING")
+        .output()
+        .expect("run LOSAT CLI");
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
 }
 
 // NCBI reference: c++/src/objmgr/util/create_defline.cpp:219-312 (x_CleanAndCompress) and
@@ -268,6 +344,7 @@ fn outfmt0_rejects_subject_titles_that_ncbi_reads_past_or_decodes() {
     let inputs = Inputs::new();
     let queries = read_records(&inputs.query.0);
     let sequence = fixture_sequence("LC738884.fasta");
+    let unknown = vec![b'N'; 900];
     for (defline, reason) in [
         (", ,", "reads past its end"),
         ("s &amp; t", "HTML character reference"),
@@ -291,11 +368,40 @@ fn outfmt0_rejects_subject_titles_that_ncbi_reads_past_or_decodes() {
                     error.contains(reason) && error.contains("not supported by LOSAT's TBLASTX"),
                     "{error}"
                 );
-                assert!(report.is_empty() && diagnostics.is_empty());
+                // The rejection comes after the prolog, before the first query's report.
+                let report = String::from_utf8(report).expect("UTF-8 report");
+                assert!(report.starts_with("TBLASTX 2.17.0+"), "{report}");
+                assert!(!report.contains("Query=") && diagnostics.is_empty());
             } else {
                 result.unwrap_or_else(|error| panic!("outfmt {outfmt} {defline:?}: {error}"));
             }
         }
+        // NCBI makes the titles of the subjects that the report shows only: a subject
+        // without hits keeps its title out of the report.
+        let subject = TempFasta::new(
+            "tblastx_title_hitless.fna",
+            &[("hit", &sequence[1_000..6_000]), (defline, &unknown)],
+        );
+        let subjects = read_records(&subject.0);
+        let (mut report, mut diagnostics) = (Vec::new(), Vec::new());
+        let mut outputs =
+            ReportOutputs::single("0", OutputSink::Writer(&mut report), &mut diagnostics);
+        run_local_tblastx(inputs.args(&[]), &queries, &subjects, &mut outputs)
+            .unwrap_or_else(|error| panic!("{defline:?} without hits: {error}"));
+    }
+    // Titles that NCBI's HtmlDecode leaves as they are (not a name of its table, a final
+    // `;` trimmed before the decoding) are written.
+    for defline in ["R&D; x", "a&foo;b", "a&amp;"] {
+        let subject = TempFasta::new(
+            "tblastx_title_kept.fna",
+            &[(defline, &sequence[1_000..6_000])],
+        );
+        let subjects = read_records(&subject.0);
+        let (mut report, mut diagnostics) = (Vec::new(), Vec::new());
+        let mut outputs =
+            ReportOutputs::single("0", OutputSink::Writer(&mut report), &mut diagnostics);
+        run_local_tblastx(inputs.args(&[]), &queries, &subjects, &mut outputs)
+            .unwrap_or_else(|error| panic!("{defline:?}: {error}"));
     }
 }
 
@@ -342,4 +448,14 @@ fn inputs_ncbi_reads_differently_and_culling_are_rejected() {
         error.contains("-culling_limit 2 is not supported by LOSAT's TBLASTX"),
         "{error}"
     );
+    // NCBI's check of the hit saving options (blast_options.c:1518-1523), before
+    // `Query is Empty!`.
+    for evalue in ["0", "1e-400"] {
+        for queries in [&queries[..], &[]] {
+            assert_eq!(
+                run(&["-evalue", evalue], queries, &subjects),
+                "BLAST query/options error: expect value or cutoff score must be greater than zero\nPlease refer to the BLAST+ user manual.\n"
+            );
+        }
+    }
 }

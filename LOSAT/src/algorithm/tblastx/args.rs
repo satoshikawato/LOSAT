@@ -97,9 +97,9 @@ pub struct TblastxArgs {
     #[arg(long, default_value = "12 2.2 2.5", value_parser = parse_seg_filtering, help = "SEG: no, yes, or WINDOW LOCUT HICUT")]
     pub seg: SegSpec,
 
-    /// Two-hit window size for triggering ungapped extension (default: 40)
-    /// Smaller values are more strict, larger values are more sensitive
-    /// Use 0 to enable one-hit mode (like NCBI BLAST's -window_size 0)
+    /// Two-hit window size for triggering ungapped extension (default: 40).
+    /// Smaller values are more strict, larger values are more sensitive.
+    /// 0 (NCBI's one-hit word finder) is not supported by LOSAT's TBLASTX.
     #[arg(long, default_value_t = 40, value_parser = nonnegative_usize)]
     pub window_size: usize,
 
@@ -107,12 +107,10 @@ pub struct TblastxArgs {
     #[arg(long, default_value = "0", value_name = "SPEC", value_parser = tblastx_outfmt)]
     pub outfmt: String,
 
-    /// HSP culling limit (number of HSPs allowed per query region).
+    /// HSP culling limit (default: 0, no culling). A limit above 0 is not supported by
+    /// LOSAT's TBLASTX (its HSP culling differs from NCBI's hspfilter_culling.c).
     ///
-    /// When > 0, applies NCBI's interval tree-based HSP culling algorithm to remove
-    /// dominated HSPs based on score/length tradeoff. Default: 0 (disabled, matches NCBI tblastx default).
-    ///
-    /// NCBI reference: hspfilter_culling.c, cmdline_flags.cpp:127-128 (kDfltArgCullingLimit = 0)
+    /// NCBI reference: cmdline_flags.cpp:127-128 (kDfltArgCullingLimit = 0)
     #[arg(long, default_value_t = 0)]
     pub culling_limit: u32,
 }

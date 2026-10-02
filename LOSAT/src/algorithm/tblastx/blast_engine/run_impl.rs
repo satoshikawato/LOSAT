@@ -650,16 +650,30 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     let mut subject_file = fasta_input::open_input(&args.subject, "subject", "TBLASTX")?;
     let subject_bytes = fasta_input::read_fasta_bytes(&mut subject_file, &args.subject, "subject")?;
     drop(subject_file);
-    let subjects = fasta_input::read_records(&subject_bytes, &args.subject, "subject", "TBLASTX")?;
+    // NCBI warns about the residues that LOSAT rejects when it reads them, so they are
+    // rejected here. NCBI reads the FASTA that `bio` cannot read (blank lines or `;`
+    // comments before the first defline), these deflines and records without residues
+    // without a message, so LOSAT rejects them where the search would start.
+    let blank = fasta_input::is_blank(&subject_bytes);
+    if !blank {
+        fasta_input::check_sequence_lines_of(&subject_bytes, "subject", "TBLASTX")?;
+    }
+    let (subjects, subject_reading) =
+        match fasta_input::bio_records_of(&subject_bytes, &args.subject, "subject", "TBLASTX") {
+            Ok(records) => (records, Ok(())),
+            Err(error) => (Vec::new(), Err(error)),
+        };
+    fasta_input::check_residues_of(&subjects, "subject", "TBLASTX")?;
     fasta_input::write_title_warnings(&subjects, &mut std::io::stderr())?;
-    // NCBI reads these deflines and records without a message; LOSAT rejects them where
-    // the search would start.
-    let subject_deflines = fasta_input::check_deflines_of(&subject_bytes, "subject", "TBLASTX")
+    if subject_reading.is_ok() {
+        check_subjects_not_empty(&subjects)?;
+    }
+    let subject_checks = subject_reading
+        .and_then(|()| fasta_input::check_deflines_of(&subject_bytes, "subject", "TBLASTX"))
         .and_then(|()| {
             fasta_input::check_records_have_residues_of(&subjects, "subject", "TBLASTX")
         });
     drop(subject_bytes);
-    check_subjects_not_empty(&subjects)?;
     // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3456-3481
     // ```c
     //     if (args.Exist(kArgQuery) && args[kArgQuery].HasValue() &&
@@ -693,14 +707,14 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     let mut stream = crate::cli::ReportStream {
         inner: match out_file {
             Some(file) => Box::new(file) as Box<dyn std::io::Write + Send>,
-            None => Box::new(std::io::BufWriter::new(std::io::stdout())),
+            None => crate::cli::report_standard_output(),
         },
         failed: false,
     };
     let result = {
         let mut outputs =
             ReportOutputs::single(&outfmt, OutputSink::Writer(&mut stream), &mut stderr);
-        search_cli(args, query_file, &subjects, subject_deflines, &mut outputs)
+        search_cli(args, query_file, &subjects, subject_checks, &mut outputs)
     };
     // What was written before an error (such as the outfmt 0 prolog) stays in the file.
     let flushed = std::io::Write::flush(&mut stream);
@@ -774,17 +788,84 @@ fn process_options(args: &TblastxArgs, outputs: &mut ReportOutputs<'_>) -> Resul
     Ok(())
 }
 
-/// The part of `run` after the output is opened: the options, `Query is Empty!`, and the
-/// search.
+/// NCBI's check of the hit saving options, which `SetOptions` validates before the query
+/// is read (tblastx_app.cpp:110).
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_options.c:1518-1523
+/// ```c
+///     if (options->expect_value <= 0.0 && options->cutoff_score <= 0)
+///     {
+///         Blast_MessageWrite(blast_msg, eBlastSevError, kBlastMessageNoContext,
+///          "expect value or cutoff score must be greater than zero");
+///         return BLASTERR_OPTION_VALUE_INVALID;
+///     }
+/// ```
+/// NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.hpp:173-175
+/// ```c
+///         LOG_POST(Error << "BLAST query/options error: " << e.GetMsg());     \
+///         LOG_POST(Error << "Please refer to the BLAST+ user manual.");       \
+///         exit_code = BLAST_INPUT_ERROR;                                      \
+/// ```
+/// TBLASTX has no cutoff score option, so an `-evalue` of 0 (or one that reads as 0) fails.
+fn check_hit_saving_options(args: &TblastxArgs) -> Result<()> {
+    if args.evalue <= 0.0 {
+        return Err(crate::cli::NativeError {
+            exit: 1,
+            message: "BLAST query/options error: expect value or cutoff score must be greater than zero\nPlease refer to the BLAST+ user manual.\n".to_string(),
+        }
+        .into());
+    }
+    Ok(())
+}
+
+/// The options that LOSAT's TBLASTX rejects, where NCBI would start the search.
+fn check_losat_limits(args: &TblastxArgs) -> Result<()> {
+    // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:214-224
+    // ```c
+    //     if (ewp->diag_table->multiple_hits) {
+    //         status = s_BlastAaWordFinder_TwoHit(subject, query,
+    //     ...
+    //     } else {
+    //         status = s_BlastAaWordFinder_OneHit(subject, query,
+    // ```
+    // LOSAT's TBLASTX scans with the two-hit word finder only; the one-hit word finder of
+    // a window of 0 is not ported.
+    if args.window_size == 0 {
+        anyhow::bail!(
+            "-window_size 0 (the one-hit word finder) is not supported by LOSAT's TBLASTX"
+        );
+    }
+    // NCBI culls with the HSP writer of hspfilter_culling.c, which also moves the hit list
+    // cut to the traceback stage; LOSAT's culling (`hsp_culling.rs`) keeps other HSPs than
+    // NCBI's, so a culling limit is rejected until it is ported.
+    if args.culling_limit > 0 {
+        anyhow::bail!(
+            "-culling_limit {} is not supported by LOSAT's TBLASTX (its HSP culling differs from NCBI's)",
+            args.culling_limit
+        );
+    }
+    Ok(())
+}
+
+/// The checks of the options alone, without the inputs (the `validate` of web ABI v2):
+/// NCBI's check of the hit saving options and LOSAT's limits.
+pub fn check_options(args: &TblastxArgs) -> Result<()> {
+    check_hit_saving_options(args)?;
+    check_losat_limits(args)
+}
+
+/// The part of `run` after the output is opened: the options, `Query is Empty!`, the
+/// query batch size, the reading of the queries and the search.
 fn search_cli(
     args: TblastxArgs,
     mut query_file: std::fs::File,
     subjects: &[fasta::Record],
-    subject_deflines: Result<()>,
+    subject_checks: Result<()>,
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
     use crate::algorithm::blastn::input as fasta_input;
     process_options(&args, outputs)?;
+    check_hit_saving_options(&args)?;
     // NCBI reference: ncbi-blast/c++/src/app/blast/tblastx_app.cpp:132-135
     // ```c
     //         if(IsIStreamEmpty(m_CmdLineArgs->GetInputStream())){
@@ -817,9 +898,17 @@ fn search_cli(
             .write_all(b"Warning: [tblastx] Query is Empty!\n")?;
         return Ok(());
     }
-    subject_deflines?;
+    // NCBI reference: ncbi-blast/c++/src/app/blast/tblastx_app.cpp:136-137
+    // ```c
+    //         CBlastFastaInputSource fasta(m_CmdLineArgs->GetInputStream(), iconfig);
+    //         CBlastInput input(&fasta, m_CmdLineArgs->GetQueryBatchSize());
+    // ```
+    // The batch size is read before the queries, which NCBI reads one batch at a time after
+    // the outfmt 0 prolog; LOSAT's rejections of the inputs come after it.
+    let batch_size = tblastx_query_batch_size()?;
+    subject_checks?;
     let queries = fasta_input::parse_fasta(&query_bytes, &args.query, "query", "TBLASTX")?;
-    search(args, &queries, subjects, outputs)
+    search(args, &queries, subjects, outputs, batch_size)
 }
 
 // NCBI reference: ncbi-blast/c++/src/app/blast/blast_formatter.cpp:429-467
@@ -855,13 +944,15 @@ pub fn run_local(
     crate::algorithm::blastn::input::write_title_warnings(subject_records, outputs.diagnostics)?;
     check_subjects_not_empty(subject_records)?;
     process_options(&args, outputs)?;
+    check_hit_saving_options(&args)?;
     if query_records.is_empty() {
         outputs
             .diagnostics
             .write_all(b"Warning: [tblastx] Query is Empty!\n")?;
         return Ok(());
     }
-    search(args, query_records, subject_records, outputs)
+    let batch_size = tblastx_query_batch_size()?;
+    search(args, query_records, subject_records, outputs, batch_size)
 }
 
 /// The search of `run_local` and of the CLI, after NCBI's checks of the options and the
@@ -871,6 +962,7 @@ fn search(
     query_records: &[fasta::Record],
     subject_records: &[fasta::Record],
     outputs: &mut ReportOutputs<'_>,
+    batch_size: u32,
 ) -> Result<()> {
     // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2657-2660
     // ```c
@@ -884,30 +976,8 @@ fn search(
         tblastx_outfmt(format.outfmt).map_err(anyhow::Error::msg)?;
     }
     check_report_titles(query_records, subject_records, outputs)?;
-    // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:214-224
-    // ```c
-    //     if (ewp->diag_table->multiple_hits) {
-    //         status = s_BlastAaWordFinder_TwoHit(subject, query,
-    //     ...
-    //     } else {
-    //         status = s_BlastAaWordFinder_OneHit(subject, query,
-    // ```
-    // LOSAT's TBLASTX scans with the two-hit word finder only; the one-hit word finder of
-    // a window of 0 is not ported.
-    if args.window_size == 0 {
-        anyhow::bail!(
-            "-window_size 0 (the one-hit word finder) is not supported by LOSAT's TBLASTX"
-        );
-    }
-    // NCBI culls with the HSP writer of hspfilter_culling.c, which also moves the hit list
-    // cut to the traceback stage; LOSAT's culling (`hsp_culling.rs`) keeps other HSPs than
-    // NCBI's, so a culling limit is rejected until it is ported.
-    if args.culling_limit > 0 {
-        anyhow::bail!(
-            "-culling_limit {} is not supported by LOSAT's TBLASTX (its HSP culling differs from NCBI's)",
-            args.culling_limit
-        );
-    }
+    check_losat_limits(&args)?;
+    check_unsupported_environment()?;
     // NCBI reads the records with `CFastaReader`, which removes residues that are not IUPAC
     // nucleotide letters with a warning and reports a record without residues when it sets
     // up the search; LOSAT rejects both, as BLASTN does (`blastn/input.rs`), and reads `U`
@@ -924,31 +994,34 @@ fn search(
     // TBlastThreads the_threads(GetNumberOfThreads());
     // (*thread)->Run(); (*thread)->Join(&result);
     crate::utils::threading::with_search_pool(args.num_threads, "tblastx", |pool| {
-        run_in_pool(args, query_records, subject_records, outputs, pool)
+        run_in_pool(
+            args,
+            query_records,
+            subject_records,
+            outputs,
+            pool,
+            batch_size,
+        )
     })
 }
 
 /// LOSAT's limits on the titles that outfmt 0 and 7 print.
 ///
 /// NCBI reads the deflines with `CFastaReader`, which LOSAT's `bio` reader does not
-/// reproduce for every defline, and makes the outfmt 0 subject titles with
-/// `CDeflineGenerator` (`report/defline.rs`), which decodes HTML character references
-/// (`NStr::HtmlDecode`, create_defline.cpp:4066). Those reports therefore reject a
-/// defline that is empty, starts with white space, or has a control character or a
-/// non-ASCII byte, and outfmt 0 rejects a subject defline with a character reference.
+/// reproduce for every defline (the title ends at the first byte below a space,
+/// fasta_reader_utils.cpp:215-225). Those reports therefore reject a defline that is
+/// empty, starts with white space, or has a control character or a non-ASCII byte. The
+/// outfmt 0 titles of the subjects are checked where the report shows them
+/// (`check_shown_subject_titles`).
 fn check_report_titles(
     queries: &[fasta::Record],
     subjects: &[fasta::Record],
     outputs: &ReportOutputs<'_>,
 ) -> Result<()> {
-    let formats: Vec<report::TblastxOutputFormat> = outputs
+    if outputs
         .formats
         .iter()
-        .map(|format| report::output_format(format.outfmt))
-        .collect();
-    if formats
-        .iter()
-        .all(|&format| format == report::TblastxOutputFormat::Tabular)
+        .all(|format| report::output_format(format.outfmt) == report::TblastxOutputFormat::Tabular)
     {
         return Ok(());
     }
@@ -957,7 +1030,7 @@ fn check_report_titles(
             let defline = report::fasta_defline(record);
             if defline.is_empty()
                 || !defline.is_ascii()
-                || defline.bytes().any(|byte| byte.is_ascii_control())
+                || defline.bytes().any(|byte| byte < b' ')
                 || record.id().is_empty()
             {
                 anyhow::bail!(
@@ -965,28 +1038,24 @@ fn check_report_titles(
                     index + 1
                 );
             }
-            if role == "subject"
-                && formats.contains(&report::TblastxOutputFormat::Pairwise)
-                && crate::report::defline::has_html_character_reference(&defline)
-            {
-                anyhow::bail!(
-                    "subject record {} has an HTML character reference (such as &amp;) in its defline, which NCBI BLAST+ decodes in the outfmt 0 titles; this is not supported by LOSAT's TBLASTX",
-                    index + 1
-                );
-            }
-            // NCBI's x_CleanAndCompress reads past the end of some titles of punctuation and
-            // crashes when it writes the title of such a subject with hits (approved
-            // exception 2 of PD-LOSAT-NCBI-DEFECTS covers BLASTN only).
-            if role == "subject"
-                && formats.contains(&report::TblastxOutputFormat::Pairwise)
-                && crate::report::defline::ncbi_nucleotide_title_reads_past_end(&defline)
-            {
-                anyhow::bail!(
-                    "subject record {} has a defline of punctuation that NCBI BLAST+ reads past its end when it writes the subject's outfmt 0 title (it crashes if the subject has hits); this is not supported by LOSAT's TBLASTX",
-                    index + 1
-                );
-            }
         }
+    }
+    Ok(())
+}
+
+/// Rejects the outfmt 0 titles that LOSAT does not write as NCBI of the subjects that the
+/// reports show: those with hits in the final hit lists, which NCBI's description tables
+/// list (blast_format.cpp:1540, `report/defline.rs`). The check comes after the outfmt 0
+/// prolog, where NCBI writes the titles of the first query's report.
+fn check_shown_subject_titles(hits: &[TblastxHsp], subjects: &[fasta::Record]) -> Result<()> {
+    let shown: std::collections::BTreeSet<usize> =
+        hits.iter().map(|hsp| hsp.hit.s_idx as usize).collect();
+    for index in shown {
+        crate::report::defline::check_shown_subject_title(
+            &report::fasta_defline(&subjects[index]),
+            index + 1,
+            "TBLASTX",
+        )?;
     }
     Ok(())
 }
@@ -1108,6 +1177,9 @@ fn write_tblastx_outputs(
     // ```
     // The hit list size is the -max_target_seqs value, or 500 when it is omitted.
     let mut hits = report::final_hit_order(hits, args.max_target_seqs.unwrap_or(500));
+    if output_formats.contains(&report::TblastxOutputFormat::Pairwise) {
+        check_shown_subject_titles(&hits, run.subjects)?;
+    }
     report::set_displayed_identities(&mut hits, run.queries, run.subjects, &query_code, &db_code);
     // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:1411
     // ```c
@@ -1295,6 +1367,84 @@ fn write_tblastx_outputs(
 //         retval = 10002;
 //         break;
 // ```
+/// The query splitter that NCBI sets up for every query batch (`CBlastPrelimSearch`, in
+/// `BlastSetupPreliminarySearchEx`), which reads `CHUNK_SIZE` and then `OVERLAP_CHUNK_SIZE`
+/// but does not split an ungapped search. The outer `Err` is LOSAT's rejection of a value
+/// that NCBI cannot convert (its `CStringException` names its build's source files, exit
+/// 255); the inner one is NCBI's error for a chunk size that is not divisible by 3.
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_cxx.cpp:55-61
+/// ```c
+///     m_ChunkSize = SplitQuery_GetChunkSize(m_Options->GetProgram());
+///     m_LocalQueryData = m_QueryFactory->MakeLocalQueryData(m_Options);
+///     m_TotalQueryLength = m_LocalQueryData->GetSumOfSequenceLengths();
+///     m_NumChunks = SplitQuery_CalculateNumChunks(m_Options->GetProgramType(),
+///         &m_ChunkSize, m_TotalQueryLength, m_LocalQueryData->GetNumQueries());
+///     /* No split for ungapped mode JIRA SB-1082 */
+///     if (!options->GetGappedMode()) m_NumChunks = 1;
+/// ```
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/local_blast.cpp:98-103
+/// ```c
+///     const EBlastProgramType prog_type(EProgramToEBlastProgramType(program));
+///     if (Blast_QueryIsTranslated(prog_type) && !Blast_SubjectIsPssm(prog_type) &&
+///         (retval % CODON_LENGTH) != 0) {
+///         NCBI_THROW(CBlastException, eInvalidArgument,
+///                    "Split query chunk size must be divisible by 3");
+///     }
+/// ```
+/// `SplitQuery_ShouldSplit` is true for tblastx (split_query_aux_priv.cpp:73-97), so
+/// `SplitQuery_CalculateNumChunks` always reads the overlap (`blastn/query_split.rs`
+/// `SplitSizes`; the `int` becomes a 64-bit `size_t`).
+fn check_query_split_environment() -> Result<Result<()>> {
+    let read = |variable: &str| -> Result<Option<i32>> {
+        match std::env::var_os(variable) {
+            Some(value)
+                if !crate::algorithm::blastn::input::is_blank(value.as_encoded_bytes()) =>
+            {
+                match crate::blastinput::query_batch::ncbi_string_to_int(&value) {
+                    Some(number) => Ok(Some(number)),
+                    None => anyhow::bail!(
+                        "the environment variable {variable} has the value {:?}, which NCBI BLAST+ cannot convert to an int (it stops with a CStringException that names its build's source files); this is not supported by LOSAT's TBLASTX",
+                        value.to_string_lossy()
+                    ),
+                }
+            }
+            _ => Ok(None),
+        }
+    };
+    if let Some(chunk_size) = read("CHUNK_SIZE")? {
+        if (i64::from(chunk_size) as u64) % 3 != 0 {
+            return Ok(Err(crate::cli::NativeError {
+                exit: 3,
+                message: "BLAST engine error: Split query chunk size must be divisible by 3\n"
+                    .to_string(),
+            }
+            .into()));
+        }
+    }
+    read("OVERLAP_CHUNK_SIZE")?;
+    Ok(Ok(()))
+}
+
+/// The environment that changes NCBI's tblastx in a way that LOSAT does not reproduce.
+///
+/// NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.cpp:206-210
+/// ```c
+/// 	char* bl2seq_legacy = getenv("BL2SEQ_LEGACY");
+/// 	if (bl2seq_legacy)
+///         	db_adapter.Reset(new CLocalDbAdapter(subjects, opts_hndl, false));
+/// 	else
+///         	db_adapter.Reset(new CLocalDbAdapter(subjects, opts_hndl, true));
+/// ```
+fn check_unsupported_environment() -> Result<()> {
+    if std::env::var_os("BL2SEQ_LEGACY").is_some() {
+        anyhow::bail!(
+            "the environment variable BL2SEQ_LEGACY, which makes NCBI BLAST+ search each subject on its own and write its legacy bl2seq report, is not supported by LOSAT's TBLASTX"
+        );
+    }
+    Ok(())
+}
+
 /// The query batch size of tblastx in nucleotides (`CTblastxAppArgs::GetQueryBatchSize`,
 /// tblastx_args.cpp:129-133), as the `TSeqPos` that `CBlastInput` compares with.
 fn tblastx_query_batch_size() -> Result<u32> {
@@ -1341,6 +1491,7 @@ fn run_in_pool(
     subject_records: &[fasta::Record],
     outputs: &mut ReportOutputs<'_>,
     parallel_pool: &crate::utils::threading::SearchPool<'_>,
+    batch_size: u32,
 ) -> Result<()> {
     // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2657-2660
     // ```c
@@ -1353,7 +1504,6 @@ fn run_in_pool(
     for format in &outputs.formats {
         tblastx_outfmt(format.outfmt).map_err(anyhow::Error::msg)?;
     }
-    let batch_size = tblastx_query_batch_size()?;
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
     // ```c
     // typedef struct BlastHSPList {
@@ -1390,6 +1540,16 @@ fn run_in_pool(
         .into());
     }
     let lengths: Vec<usize> = query_records.iter().map(|r| r.seq().len()).collect();
+    // The query splitter of the first batch fails after `CFastaReader` read the batch and
+    // wrote its title warnings (`write_tblastx_outputs` writes them for the reports).
+    if let Err(error) = check_query_split_environment()? {
+        let end = crate::blastinput::query_batch::next_query_batch_end(&lengths, 0, batch_size);
+        crate::algorithm::blastn::input::write_title_warnings(
+            &query_records[..end],
+            outputs.diagnostics,
+        )?;
+        return Err(error);
+    }
     let mut hits: Vec<TblastxHsp> = Vec::new();
     let mut queries: Vec<TblastxQueryStats> = Vec::with_capacity(lengths.len());
     let mut searched: Vec<bool> = Vec::with_capacity(lengths.len());

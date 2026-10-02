@@ -132,10 +132,22 @@ fn filtering_has_exactly_one_shared_value_grammar() {
             .to_ncbi_cli_string(),
         "12 2.2 2.5"
     );
-    // NCBI blast_seg.c:2253-2258: clamp negative cutoffs and raise hicut to locut.
-    for (spec, expected) in [("12 -1 -2", (0.0, 0.0)), ("12 3 2", (3.0, 3.0))] {
+    // NCBI blast_filter.c:1147-1154: a value that is not above 0 keeps the default
+    // (12, 2.2, 2.5); then blast_seg.c:2253-2258 raises hicut to locut.
+    for (spec, expected) in [
+        ("12 -1 -2", (12, 2.2, 2.5)),
+        ("12 0 2.5", (12, 2.2, 2.5)),
+        ("0 2.2 2.5", (12, 2.2, 2.5)),
+        ("-5 2.2 0", (12, 2.2, 2.5)),
+        ("12 3 2", (12, 3.0, 3.0)),
+        ("15 2.5 3.0", (15, 2.5, 3.0)),
+    ] {
         let params = parse_seg_filtering(spec).unwrap().params().unwrap();
-        assert_eq!((params.locut, params.hicut), expected);
+        assert_eq!(
+            (params.window, params.locut, params.hicut),
+            expected,
+            "{spec}"
+        );
     }
     assert_eq!(parse_dust_filtering("no").unwrap(), DustSpec::No);
     assert_eq!(
@@ -155,7 +167,11 @@ fn filtering_has_exactly_one_shared_value_grammar() {
         "12 2.2",
         "12 2.2 2.5 4",
         "x 2.2 2.5",
-        "0 2.2 2.5",
+        "12  2.2 2.5",
+        " 12 2.2 2.5",
+        "12 2.2 2.5 ",
+        "12\t2.2 2.5",
+        "2147483648 2.2 2.5",
         "12 NaN 2.5",
         "12 2.2 inf",
     ] {

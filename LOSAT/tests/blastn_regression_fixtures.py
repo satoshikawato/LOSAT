@@ -155,6 +155,10 @@ _CASES = [
      "", "CHUNK_SIZE=3000 OVERLAP_CHUNK_SIZE=2900", "CHUNK_SIZE=3000 OVERLAP_CHUNK_SIZE=1512"),
     # A negative chunk size at most a negative overlap splits nothing.
     ("env.negative_pair_le", f"{B} -outfmt 6", "", "CHUNK_SIZE=-10 OVERLAP_CHUNK_SIZE=-5"),
+    # Above it, a split needs the wrapped difference twice in the batch (E2g audits b and
+    # round 2): these do not split, and NCBI searches as without the variables.
+    ("env.negative_pair_wide", f"{S} -task blastn -outfmt 6", "", "CHUNK_SIZE=-1 OVERLAP_CHUNK_SIZE=-2147483648"),
+    ("env.negative_pair_wide_fmt0", f"{B} -outfmt 0", "", "CHUNK_SIZE=-5 OVERLAP_CHUNK_SIZE=-2147483648"),
     ("env.split_chunk300000", f"{S} -task blastn -outfmt 6", "", "CHUNK_SIZE=300000"),
     ("env.split_overlap50", f"{S} -task blastn -outfmt 6", "", "CHUNK_SIZE=300000 OVERLAP_CHUNK_SIZE=50"),
     ("env.split_overlap500", f"{S} -task blastn -outfmt 6", "", "CHUNK_SIZE=300000 OVERLAP_CHUNK_SIZE=500"),

@@ -87,7 +87,9 @@ use super::super::input::{
 use super::super::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
 use super::super::lookup::{build_unmasked_ranges, reverse_complement};
 use super::super::pairwise::{pairwise_hits, DisplayMasks};
-use super::super::query_split::{restrict_masks, split_query_batch, QueryChunk, SplitSizes};
+use super::super::query_split::{
+    calculate_num_chunks, restrict_masks, split_query_batch, QueryChunk, SplitSizes,
+};
 use super::super::scoring::{
     check_greedy_gap_costs, check_losat_limits, check_scoring_options, context_blocks,
     context_ungapped_blocks, gap_x_dropoffs, karlin_error, ContextKarlin,
@@ -5717,10 +5719,8 @@ struct QueryBatching {
 /// ```
 /// A value that `NStr::StringToInt` cannot convert makes NCBI stop with its
 /// `CStringException`, whose text names the source path of the oracle's build (exit 255);
-/// LOSAT rejects it. So it does a negative `CHUNK_SIZE` above a negative
-/// `OVERLAP_CHUNK_SIZE`: the chunk computation wraps around `size_t` and NCBI stops with a
-/// `CCoreException` whose text names its build's files (oracle, exit 3). A negative chunk
-/// size at most the negative overlap splits nothing, as NCBI.
+/// LOSAT rejects it. A negative `CHUNK_SIZE` is a `size_t` near 2^64; LOSAT rejects it where
+/// it splits a query batch (`search_query_chunks`), and otherwise searches as NCBI.
 fn query_batching_from_environment(megablast: bool) -> Result<QueryBatching> {
     let read = |variable: &str| -> Result<Option<i32>> {
         match std::env::var_os(variable) {
@@ -5747,13 +5747,6 @@ fn query_batching_from_environment(megablast: bool) -> Result<QueryBatching> {
     })?;
     let overlap = read("OVERLAP_CHUNK_SIZE")?;
     let split = SplitSizes::new(megablast, chunk_size, overlap);
-    if let (Some(chunk), Some(overlap)) = (chunk_size, overlap) {
-        if chunk < 0 && overlap < 0 && chunk > overlap {
-            anyhow::bail!(
-                "a negative CHUNK_SIZE above a negative OVERLAP_CHUNK_SIZE makes NCBI BLAST+'s query chunks wrap around its size_t arithmetic (it stops with a CCoreException that names its build's source files), which is not supported by LOSAT's BLASTN"
-            );
-        }
-    }
     Ok(QueryBatching {
         fixed_batch_size,
         batch_size: fixed_batch_size as u32,
@@ -12588,6 +12581,17 @@ fn search_query_chunks(
     first_batch: bool,
 ) -> Result<Option<PrelimHitLists>> {
     let lengths: Vec<usize> = queries.iter().map(|record| record.seq().len()).collect();
+    // A negative CHUNK_SIZE splits a batch only with a negative OVERLAP_CHUNK_SIZE below it
+    // (`calculate_num_chunks`); NCBI's `size_t` chunk ranges then wrap (split_query_cxx.cpp:
+    // 145-171): NCBI stops with a CCoreException that names its build's files where a chunk
+    // would be split again, and otherwise searches chunk ranges with gaps between them.
+    if batching.split.negative_chunk_size()
+        && calculate_num_chunks(batching.split, lengths.iter().sum()).0 > 1
+    {
+        anyhow::bail!(
+            "a negative CHUNK_SIZE above a negative OVERLAP_CHUNK_SIZE splits this query batch with NCBI BLAST+'s size_t chunk ranges wrapped (NCBI stops with a CCoreException that names its build's source files, or searches chunks with gaps between them), which is not supported by LOSAT's BLASTN"
+        );
+    }
     let Some(chunks) = split_query_batch(&lengths, batching.split) else {
         return Ok(None);
     };

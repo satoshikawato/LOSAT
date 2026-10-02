@@ -90,6 +90,12 @@ impl SplitSizes {
         Self::new(megablast, None, None)
     }
 
+    /// Whether `CHUNK_SIZE` was negative (`SplitQuery_GetChunkSize` returns it as a
+    /// `size_t`, near 2^64).
+    pub fn negative_chunk_size(self) -> bool {
+        (self.chunk_size as i64) < 0
+    }
+
     /// NCBI's `CBatchSizeMixer` maximum: the chunk size less 1000 (`size_t`), converted to
     /// its `Int4` parameter.
     ///
@@ -812,6 +818,20 @@ mod tests {
         for chunk in &chunks {
             assert!(!chunk.queries.is_empty());
         }
+    }
+
+    // Oracle (E2g audits b and round 2): a negative chunk size above a negative overlap
+    // splits a batch only when the wrapped difference fits in it at least twice; -1 over
+    // INT_MIN does not split 12000 residues (NCBI searches as without the variables), -5
+    // over -10 does.
+    #[test]
+    fn a_negative_chunk_size_splits_only_a_long_enough_batch() {
+        let wide = SplitSizes::new(false, Some(-1), Some(i32::MIN));
+        assert!(wide.negative_chunk_size());
+        assert_eq!(calculate_num_chunks(wide, 12_000).0, 1);
+        let narrow = SplitSizes::new(false, Some(-5), Some(-10));
+        assert!(calculate_num_chunks(narrow, 12_000).0 > 1);
+        assert!(!SplitSizes::new(false, Some(3000), Some(-10)).negative_chunk_size());
     }
 
     // Oracle (E2g audit a): a 30000-residue query with CHUNK_SIZE 3000 fails from

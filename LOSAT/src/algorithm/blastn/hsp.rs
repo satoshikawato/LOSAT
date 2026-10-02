@@ -1151,6 +1151,7 @@ pub fn write_output_blastn_hitlists_to_writer<W: Write>(
     unsearched: &[bool],
     epilog: bool,
     mut probe: Option<&mut FormatProbe<'_>>,
+    mut warnings: Option<&mut crate::report::query_warnings::QueryWarnings<'_>>,
 ) -> io::Result<()> {
     let config = OutputConfig::ncbi_compat();
     // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:1411
@@ -1162,6 +1163,10 @@ pub fn write_output_blastn_hitlists_to_writer<W: Write>(
     let mut hsp_index: HspIndex = 0;
 
     for (q_idx, hit_list_opt) in hit_lists.iter().enumerate() {
+        // The query's warnings come before its lines (`QueryWarnings`).
+        if let Some(warnings) = warnings.as_deref_mut() {
+            warnings.before_query(q_idx, &mut *writer)?;
+        }
         if output_format == BlastnOutputFormat::TabularWithComments {
             let query_title = query_titles
                 .get(q_idx)
@@ -1609,6 +1614,7 @@ mod tests {
             &[],
             true,
             None,
+            None,
         )
         .unwrap();
 
@@ -1628,6 +1634,7 @@ mod tests {
             "User specified sequence set (Input: subject.fasta)",
             &[true],
             false,
+            None,
             None,
         )
         .unwrap();

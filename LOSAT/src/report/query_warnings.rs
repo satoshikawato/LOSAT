@@ -1,6 +1,51 @@
 //! Warnings that NCBI writes to standard error for a search, whatever the output format.
 
 use bio::io::fasta;
+use std::io::{self, Write};
+
+/// The warnings that NCBI posts between the reports of a search: the title warnings of a
+/// query batch when it is read (before the report of its first query) and the warning of
+/// an invalid query when its report starts (`PrintOneResultSet`, before the query's
+/// preamble). NCBI posts them on `cerr`, which the C++ library ties to `cout`, so the
+/// report written so far reaches standard output before each of them; a failed write of
+/// the report stops NCBI there (its stream throws, `blast_format.cpp:118-119`).
+///
+/// NCBI reference: ncbi-blast/c++/src/corelib/ncbidiag.cpp:4086
+/// ```c
+///         CDiagHandler* handler = new CStreamDiagHandler(&NcbiCerr, true, kLogName_Stderr);
+/// ```
+/// NCBI reference: ncbi-blast/c++/include/corelib/ncbistre.hpp:543-544
+/// ```c
+/// #define NcbiCout                 IO_PREFIX::cout
+/// #define NcbiCerr                 IO_PREFIX::cerr
+/// ```
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:1450-1452
+/// ```c
+///     if (results.HasWarnings()) {
+///         ERR_POST(Warning << results.GetWarningStrings());
+///     }
+/// ```
+pub struct QueryWarnings<'a> {
+    /// The warnings to write before the report of each query, by query index.
+    pub before: &'a [Vec<u8>],
+    /// Standard error (the CLI) or the caller's diagnostics.
+    pub sink: &'a mut (dyn Write + Send),
+}
+
+impl QueryWarnings<'_> {
+    /// Writes the warnings of query `index`, after the report written so far (`report`)
+    /// is flushed; a failed flush returns before them.
+    pub fn before_query(&mut self, index: usize, report: &mut dyn Write) -> io::Result<()> {
+        match self.before.get(index) {
+            Some(warnings) if !warnings.is_empty() => {
+                report.flush()?;
+                self.sink.write_all(warnings)?;
+                self.sink.flush()
+            }
+            _ => Ok(()),
+        }
+    }
+}
 
 /// The warning for a query whose ungapped Karlin-Altschul parameters cannot be computed.
 ///

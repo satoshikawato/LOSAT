@@ -17,7 +17,9 @@ A case may set environment variables (`env`, space-separated KEY=VALUE) for both
 programs; every other variable that changes NCBI's batches or report is unset. A case of
 an approved exception (docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md), where NCBI fails
 with `env`, also sets `oracle_env`: `freeze` runs NCBI with it instead, a configuration
-whose output LOSAT's result with `env` was shown to equal.
+whose output LOSAT's result with `env` was shown to equal. A case whose id ends in
+`.merged` runs with standard error merged into standard output (`2>&1`), which records
+the order of the warnings and the report.
 
 The split case slices LOSAT/tests/fasta/EDL933.fna at run time into
 LOSAT/target/blastn_regression/ (outfmt 6 prints no file names).
@@ -183,6 +185,20 @@ _CASES = [
     ("warnings.batches.fmt0", f"-query {I}/warn_query.fa -subject {I}/warn_subject.fa -outfmt 0", ""),
     ("warnings.batch1000.fmt7", f"-query {I}/warn_query.fa -subject {I}/warn_subject.fa -task blastn -outfmt 7", "",
      "BATCH_SIZE=1000"),
+    # NCBI posts the warnings on cerr, tied to cout: a batch's title warnings come before the
+    # report of its first query, an invalid query's warning before its preamble.
+    ("warnings.batches.fmt0.merged", f"-query {I}/warn_query.fa -subject {I}/warn_subject.fa -outfmt 0", ""),
+    ("warnings.batches.fmt6.merged", f"-query {I}/warn_query.fa -subject {I}/warn_subject.fa -outfmt 6", ""),
+    ("warnings.batch1000.fmt7.merged", f"-query {I}/warn_query.fa -subject {I}/warn_subject.fa -task blastn -outfmt 7",
+     "", "BATCH_SIZE=1000"),
+    ("warnings.batch1000.fmt0.merged", f"-query {I}/warn_query.fa -subject {I}/warn_subject.fa -outfmt 0", "",
+     "BATCH_SIZE=1000"),
+    ("kaerror.later_batch.fmt0.merged", "-query tests/fasta/outfmt0/edge_batch_allN.fasta -subject"
+                                        " tests/fasta/blastn_parity_compact.fasta -reward 1 -penalty -6 -outfmt 0", ""),
+    # The outfmt 0 stream fails at its first flush, after the version line, before any
+    # query is read: no warning is written.
+    ("write.devfull_warnings_fmt0", f"-query {I}/warn_query.fa -subject {I}/warn_subject.fa -outfmt 0 -out /dev/full",
+     ""),
     # E2g V1: scores beyond the former 3000-unit limit (gcd-scaled table pairs).
     ("scores.10000_20000", f"{T} -max_target_seqs 20 -reward 10000 -penalty -20000 -outfmt 6", ""),
     ("scores.16383_32766_gaps", f"{T} -max_target_seqs 20 -reward 16383 -penalty -32766 -gapopen 16383"
@@ -376,8 +392,7 @@ def command_freeze(args) -> int:
     version = subprocess.run([oracle, "-version"], capture_output=True, text=True).stdout.strip().replace("\n", "; ")
     rows = []
     for case_id, argv, extra, case_env, oracle_env in CASES:
-        result = subprocess.run([oracle, *shlex.split(argv)], cwd=ENGINE, capture_output=True,
-                                env=clean_env(oracle_env or case_env))
+        result = run_case(oracle, [], case_id, argv, oracle_env or case_env)
         (FIXTURES / f"{case_id}.out").write_bytes(result.stdout)
         err = FIXTURES / f"{case_id}.err"
         if result.stderr:
@@ -398,9 +413,18 @@ def command_freeze(args) -> int:
     return 0
 
 
+def run_case(program: str, prefix: list[str], case_id: str, argv: str, case_env: str, extra: str = ""):
+    command = [program, *prefix, *shlex.split(argv), *shlex.split(extra)]
+    if case_id.endswith(".merged"):
+        result = subprocess.run(command, cwd=ENGINE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                env=clean_env(case_env))
+        result.stderr = b""
+        return result
+    return subprocess.run(command, cwd=ENGINE, capture_output=True, env=clean_env(case_env))
+
+
 def check_one(losat: str, row: dict[str, str]) -> tuple[str, str]:
-    argv = [losat, "blastn", *shlex.split(row["argv"]), *shlex.split(row["losat_extra"])]
-    result = subprocess.run(argv, cwd=ENGINE, capture_output=True, env=clean_env(row.get("env") or ""))
+    result = run_case(losat, ["blastn"], row["case_id"], row["argv"], row.get("env") or "", row["losat_extra"])
     expected_out = (FIXTURES / f"{row['case_id']}.out").read_bytes()
     err_path = FIXTURES / f"{row['case_id']}.err"
     expected_err = err_path.read_bytes() if err_path.exists() else b""

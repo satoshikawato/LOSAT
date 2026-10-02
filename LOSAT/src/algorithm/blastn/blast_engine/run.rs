@@ -4576,6 +4576,7 @@ fn post_process_hits_and_write(
     timing: Option<&BlastnTiming>,
     report: &BlastnReportInputs<'_>,
     unsearched: Vec<bool>,
+    query_warnings: &[Vec<u8>],
 ) -> Result<()> {
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:183-187
     // ```c
@@ -4799,12 +4800,18 @@ fn post_process_hits_and_write(
         None
     };
     let observer = &mut outputs.observer;
+    // The warnings are written once, with the first format (`QueryWarnings`).
+    let mut warnings = Some(crate::report::query_warnings::QueryWarnings {
+        before: query_warnings,
+        sink: &mut *outputs.diagnostics,
+    });
     for (format_index, (format, &output_format)) in
         outputs.formats.iter_mut().zip(output_formats).enumerate()
     {
         let mut probe = observer
             .as_deref_mut()
             .map(|observer| FormatProbe::new(observer, format_index));
+        let mut format_warnings = warnings.take();
         // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:68-93
         // ```c
         // CBlastFormat::CBlastFormat(..., CNcbiOstream& outfile, ...)
@@ -4830,6 +4837,7 @@ fn post_process_hits_and_write(
                 subject_ids,
                 pairwise_report,
                 probe.as_mut(),
+                format_warnings.as_mut(),
             )?;
         } else {
             write_output_blastn_hitlists_to_writer(
@@ -4843,11 +4851,17 @@ fn post_process_hits_and_write(
                 &unsearched,
                 report.epilog,
                 probe.as_mut(),
+                format_warnings.as_mut(),
             )?;
         }
         writer.flush()?;
     }
-    // The warnings of invalid queries are written per batch (`run_in_pool`).
+    // Without an output format the warnings are written all at once.
+    if let Some(warnings) = warnings {
+        for query_warnings in warnings.before {
+            warnings.sink.write_all(query_warnings)?;
+        }
+    }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:770-782
     // ```c
@@ -5923,6 +5937,8 @@ fn run_in_pool(
     let mut unsearched = Vec::with_capacity(lengths.len());
     let mut query_masks = Vec::with_capacity(lengths.len());
     let mut context_karlin = Vec::with_capacity(2 * lengths.len());
+    // The warnings written before each query's report (`QueryWarnings`).
+    let mut warnings: Vec<Vec<u8>> = vec![Vec::new(); lengths.len()];
     let mut query_eff_searchsp = Vec::with_capacity(2 * lengths.len());
     let mut start = 0;
     while start < lengths.len() {
@@ -5934,8 +5950,9 @@ fn run_in_pool(
         //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
         // ```
         // `CFastaReader` warns about the titles of a batch's queries when it reads them,
-        // after the report of the batch before.
-        write_title_warnings(&query_records[start..end], outputs.diagnostics)?;
+        // after the report of the batch before: before the report of the batch's first
+        // query (`QueryWarnings`).
+        write_title_warnings(&query_records[start..end], &mut warnings[start])?;
         let batch = match search_query_batch(
             &args,
             &query_records[start..end],
@@ -5975,6 +5992,7 @@ fn run_in_pool(
                         &output_formats,
                         BatchResults {
                             hit_lists,
+                            warnings: &warnings[..start],
                             lengths: &lengths[..start],
                             unsearched,
                             query_masks: &query_masks,
@@ -5983,9 +6001,18 @@ fn run_in_pool(
                         },
                         false,
                     )?;
+                    // The failing batch was read (its title warnings) before its search.
+                    outputs.diagnostics.write_all(&warnings[start])?;
                     return Err(error);
                 }
-                Err(error) => return Err(error),
+                // The warnings of the batches read so far, in NCBI's order (the outfmt 0
+                // prolog of a Karlin-Altschul error of the first batch is written).
+                Err(error) => {
+                    for query_warnings in &warnings[..=start] {
+                        outputs.diagnostics.write_all(query_warnings)?;
+                    }
+                    return Err(error);
+                }
             },
         };
         // The batch numbers its queries from 0.
@@ -6009,15 +6036,15 @@ fn run_in_pool(
         //         ERR_POST(Warning << results.GetWarningStrings());
         //     }
         // ```
-        // The warnings of a batch's invalid queries come with its report
-        // (`PrintOneResultSet`), before the next batch is read.
+        // The warning of an invalid query comes with its report (`PrintOneResultSet`),
+        // before its preamble (`QueryWarnings`).
         for (index, karlin) in batch.context_karlin.iter().step_by(2).enumerate() {
             if karlin.is_none() {
-                outputs.diagnostics.write_all(&invalid_query_warning(
+                warnings[start + index].extend(invalid_query_warning(
                     "blastn",
                     start + index,
                     &query_records[start + index],
-                ))?;
+                ));
             }
         }
         context_karlin.extend(batch.context_karlin);
@@ -6038,6 +6065,7 @@ fn run_in_pool(
         &output_formats,
         BatchResults {
             hit_lists,
+            warnings: &warnings,
             lengths: &lengths,
             unsearched,
             query_masks: &query_masks,
@@ -6052,6 +6080,8 @@ fn run_in_pool(
 /// query).
 struct BatchResults<'a> {
     hit_lists: Vec<Option<BlastnHitList>>,
+    /// The warnings written before each query's report (`QueryWarnings`).
+    warnings: &'a [Vec<u8>],
     lengths: &'a [usize],
     unsearched: Vec<bool>,
     query_masks: &'a [Vec<MaskedInterval>],
@@ -6124,6 +6154,7 @@ fn write_batch_reports(
         None,
         &report_inputs,
         results.unsearched,
+        results.warnings,
     )
 }
 

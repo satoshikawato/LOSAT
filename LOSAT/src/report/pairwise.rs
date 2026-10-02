@@ -2074,6 +2074,7 @@ pub fn write_blastn_pairwise_report<W: Write>(
     subject_ids: &[Arc<str>],
     report: &BlastnPairwiseReport,
     mut probe: Option<&mut FormatProbe<'_>>,
+    mut warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
 ) -> io::Result<()> {
     let mut buffered = io::BufWriter::new(writer);
     let writer = &mut buffered;
@@ -2086,15 +2087,6 @@ pub fn write_blastn_pairwise_report<W: Write>(
         report.database_num_sequences,
         report.database_total_letters,
     )?;
-    // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:1489-1491
-    // ```c++
-    //     // print the preamble for this query
-    //
-    //     m_Outfile << "\n\n";
-    // ```
-    // The preamble of the first query; each later one ends the footer before it.
-    writer.write_all(b"\n\n")?;
-
     let mut hits_by_query: Vec<Vec<(HspIndex, &PairwiseHit)>> = vec![Vec::new(); queries.len()];
     for (hsp_index, hit) in hits.iter().enumerate() {
         if let Some(bucket) = hits_by_query.get_mut(hit.hit.q_idx as usize) {
@@ -2103,21 +2095,30 @@ pub fn write_blastn_pairwise_report<W: Write>(
     }
 
     for (q_idx, query) in queries.iter().enumerate() {
-        // Without the epilog (an error in a later query batch), nothing follows the last
-        // query's footer.
-        let trailing = report.epilog || q_idx + 1 < queries.len();
+        // The query's warnings (and those of its batch's reading) come before its preamble
+        // (`QueryWarnings`).
+        if let Some(warnings) = warnings.as_deref_mut() {
+            warnings.before_query(q_idx, writer)?;
+        }
+        // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:1489-1491
+        // ```c++
+        //     // print the preamble for this query
+        //
+        //     m_Outfile << "\n\n";
+        // ```
+        writer.write_all(b"\n\n")?;
         write_blastp_query_header(writer, &query.query_name, query.query_length)?;
         let query_hits = &hits_by_query[q_idx];
         if query_hits.is_empty() {
             write_no_hits_found(writer)?;
             if report.unsearched.get(q_idx).copied().unwrap_or(false) {
-                write_tblastn_unsearched_query_footer_spacing(writer, trailing)?;
+                write_tblastn_unsearched_query_footer_spacing(writer, false)?;
             } else {
                 write_nucleotide_query_footer_spacing(
                     writer,
                     query.karlin,
                     query.effective_search_space,
-                    trailing,
+                    false,
                 )?;
             }
             continue;
@@ -2220,7 +2221,7 @@ pub fn write_blastn_pairwise_report<W: Write>(
             writer,
             query.karlin,
             query.effective_search_space,
-            trailing,
+            false,
         )?;
     }
 
@@ -2229,8 +2230,10 @@ pub fn write_blastn_pairwise_report<W: Write>(
     //         BLAST_PROF_START( APP.POST );
     //         formatter.PrintEpilog(opt);
     // ```
-    // An error in a later query batch skips the epilog.
+    // An error in a later query batch skips the epilog, and nothing follows the last
+    // query's footer. The epilog starts with two blank lines (blast_format.cpp:2249).
     if report.epilog {
+        writer.write_all(b"\n\n")?;
         write_blastn_final_footer(writer, report)?;
     }
     writer.flush()

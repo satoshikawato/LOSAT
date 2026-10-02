@@ -1,0 +1,7 @@
+FASTA-Reader: Title ends with at least 20 valid nucleotide characters.  Was the sequence accidentally put in the title line?
+q1	s	100.000	3000	0	0	1	3000	1001	4000	0.0	5541
+Warning: [blastn] Query_2 q2 all N one: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options 
+FASTA-Reader: Title ends with at least 20 valid nucleotide characters.  Was the sequence accidentally put in the title line?
+q3	s	100.000	300	0	0	1	300	8001	8300	4.46e-161	555
+Warning: [blastn] Query_4 q4 all N two: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options 
+q5	s	100.000	500	0	0	1	500	12001	12500	0.0	924

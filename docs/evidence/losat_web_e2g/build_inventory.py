@@ -105,7 +105,7 @@ RESULTS: dict[str, str] = {
     "T11": "faithful after e4b5c4a63; kBits from CTOOLKIT_COMPATIBLE (any value); fixtures ctoolkit.*; 55 outfmt 0 cases of every program x 3 environments: 51 same, 4 TBLASTX (outfmt 0 not implemented, S08)",
     "T12": "faithful after 650b02771; integers accepted (no output change), non-integers rejected explicitly (CStringException text names the build's files, exit 255); fixtures env.prefetch*",
     "T13": "faithful after a99527f20; exact %#8.3g; unit test with C's strings",
-    "T14": "faithful after 5cd9cc3cf; outfmt 0 write failure: BLAST failed to write output, exit 6 (oracle -out /dev/full); SIGPIPE default (closed pipe ends every format by the signal, as NCBI); fixture write.devfull_fmt0",
+    "T14": "faithful after 5cd9cc3cf and 48a9ee0c2; outfmt 0 write failure: BLAST failed to write output, exit 6 (oracle -out /dev/full); a closed pipe in outfmt 0 (NCBI: ended by SIGPIPE) gives the same message and exit 6, approved exception 5 of PD-LOSAT-CLI-NONSEARCH-DIFFERENCES 1.1 (DW-14); fixture write.devfull_fmt0",
     "R1": "explicit rejection after 7b63980b2 (any value; an empty query still ends with Query is Empty!)",
     "R2": "explicit rejection after 219c2c49e: DIAG_*, NCBI_CONFIG_* (except entries that change no output), ABORT_ON_THROW, stack-trace and LOG_* parameters, non-Boolean BLAST_USAGE_REPORT; blastn.ini and .ncbirc on NCBI's search path accepted only with entries that change no output (fixture ncbirc.harmless_fmt0); oracle research e2g-r2r3",
     "R3": "explicit rejection after 6182cef73 (-subject, -query, -out not UTF-8, in NCBI's open order)",

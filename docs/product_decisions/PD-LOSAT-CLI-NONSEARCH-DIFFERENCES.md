@@ -1,8 +1,8 @@
 # Product Decision: CLI behaviour outside the search results
 
 - Decision ID: `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`
-- Version: 1.0
-- Date: 2026-10-02
+- Version: 1.1
+- Date: 2026-10-02 (1.0); 1.1 the same day (exception 5, Session S07+++b)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++ (E2g), on the items
   that the BLASTN inventory (`docs/evidence/losat_web_e2g/INVENTORY.tsv`, actions `S08` and
   `OPEN`) left for a maintainer decision. Plan decision DW-13 in
@@ -42,6 +42,13 @@ BLAST+.
 4. **Memory exhaustion.** LOSAT aborts when an allocation fails. NCBI catches the
    allocation failure and prints `BLAST ran out of memory`, exit code 4
    (`BLAST_OUT_OF_MEMORY`, `blast_app_util.hpp:216-235,255-258`).
+5. **Closed pipe in outfmt 0** (version 1.1, accepted by the maintainer on 2026-10-02 in
+   Session S07+++b). NCBI keeps the C runtime's default action for SIGPIPE, so a write to
+   a pipe whose reader has closed ends it by the signal (exit status 141 from the shell,
+   no message), in every format. The Rust runtime ignores SIGPIPE; restoring it needs a
+   native `signal` call that the project's pure-Rust runtime boundary check rejects. LOSAT
+   reports the failed outfmt 0 write as NCBI reports other outfmt 0 write failures:
+   `BLAST failed to write output`, exit code 6 (outfmt 6/7: exception 3).
 
 ## Decided handling that is not an exception
 

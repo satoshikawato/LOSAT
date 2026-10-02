@@ -47,7 +47,7 @@ ACTIONS = {
     "K-layer": "keep-rejected: needs an NCBI C++ layer or feature outside the app's option scope",
     "K-crash": "keep-rejected: NCBI crashes or misbehaves",
     "K-mode": "keep-rejected: another program mode (rmblastn scoring, other tasks, -ungapped)",
-    "K-limit": "keep-rejected: LOSAT limit where NCBI's 32-bit arithmetic overflows",
+    "K-limit": "keep-rejected: LOSAT limit where NCBI's 32-bit arithmetic overflows (the greedy gap-cost limit 32767 is conservative: NCBI fails from about 600000, audit c)",
     "X-cli": "approved exception: argument syntax errors and -help (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES 1)",
     "X-threads": "approved exception: -num_threads with -subject, no NCBI thread warnings (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES 2)",
     "X-oom": "approved exception: allocation failure aborts (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES 4)",
@@ -78,6 +78,9 @@ RULES = [
     (r"A", r"CATCH_ALL", r"Out of memory", r"unported", "X-oom"),
     (r"A", r"CFasta|FastaDefline|IsIStreamEmpty|x_FastaToSeqLoc|ReadOneSeq|GetNextSeqBatch|CATCH_ALL", r"", r"rejected", "K-fasta"),
     (r"A", r"CArg_Double", r"", r"rejected", "K-layer"),
+    # Audit (c), 2026-10-02: NCBI decodes HTML character references (NStr::HtmlDecode) in the
+    # titles, it does not crash; only the titles of punctuation crash it (x_CleanAndCompress).
+    (r"F", r"GenerateDefline", r"HTML|Html|html|&", r"rejected", "K-layer"),
     (r"F", r"GenerateDefline|x_CleanAndCompress", r"", r"rejected", "K-crash"),
     (r".*", r"s_MultiSeqGetTotLen|s_BlastGreedyAlignMemAlloc", r"", r"rejected", "K-limit"),
     (r".*", r".*", r"rmblastn|reward == 0|reward <= 0|matrix_only|m_DisableKAStats|-ungapped|is_gapped false|"
@@ -95,7 +98,7 @@ RESULTS: dict[str, str] = {
     "T4": "faithful after 7eb018f70; traced in the stored order (heap lists in e-value order); for BLASTN equal to score order; one interval tree equivalent to per-query trees; fixtures prelim.gaps10_*, ties.gaps10_1_1",
     "T5": "faithful after 435f97afd; ascending cells for the small and standard tables (TaskConfig::mb_lookup); unit test; fixtures rep.*, rep2.*",
     "T6": "faithful after 0b3b851c7; diagonal array whenever the block is at most 8000; fixtures sq.* (12 queries, block 5155)",
-    "T7": "faithful after 8ccf079ba; NCBI's StringToInt and size_t/TSeqPos arithmetic; explicit rejection: non-integers (CStringException text names the build's files, exit 255), CHUNK_SIZE=1000 without BATCH_SIZE (empty batch, exit 3), both negative; 20 fixtures env.*; 22 batch_sweep runs x 60 cases and 4 split_check runs with the variables: 0 differ",
+    "T7": "faithful after 8ccf079ba and 5dac71f72; NCBI's StringToInt and size_t/TSeqPos arithmetic; CHUNK_SIZE=1000 without BATCH_SIZE gives NCBI's empty-batch error after the outfmt 0 prolog (exit 3); explicit rejection: non-integers (CStringException text names the build's files, exit 255) and a negative CHUNK_SIZE above a negative OVERLAP_CHUNK_SIZE (CCoreException naming the build's files); 23 fixtures env.*; 22 batch_sweep runs x 60 cases and 4 split_check runs with the variables: 0 differ",
     "T8": "faithful after baf180fbb; reports of the batches before, no epilog, then BLAST engine error (exit 3); a failing batch with an invalid query (NCBI crashes) stays rejected; fixtures kaerror.later_batch.fmt{0,6,7}",
     "T9": "faithful after baf180fbb; title warnings when a batch is read, invalid-query warnings with its report; fixtures warnings.batches.fmt{0,6}, warnings.batch1000.fmt7",
     "T10": "faithful after 1a0fd98c1; -subject optional for the parser, NCBI's error (exit 1) before -query and -out are opened; fixtures nosubject.*",
@@ -106,7 +109,7 @@ RESULTS: dict[str, str] = {
     "R1": "explicit rejection after 7b63980b2 (any value; an empty query still ends with Query is Empty!)",
     "R2": "explicit rejection after 219c2c49e: DIAG_*, NCBI_CONFIG_* (except entries that change no output), ABORT_ON_THROW, stack-trace and LOG_* parameters, non-Boolean BLAST_USAGE_REPORT; blastn.ini and .ncbirc on NCBI's search path accepted only with entries that change no output (fixture ncbirc.harmless_fmt0); oracle research e2g-r2r3",
     "R3": "explicit rejection after 6182cef73 (-subject, -query, -out not UTF-8, in NCBI's open order)",
-    "V1": "rejection removed after 82e8c7593 except reward 32767 / penalty -32768 (BlastScoreBlkMaxScoreSet leaves BLAST_SCORE_MAX/MIN out of the range; BlastScoreFreqCalc then counts outside the array); sweep e2g-v1-sweep: every case NCBI runs is identical (gcd-scaled pairs up to 24000/-30000); fixtures scores.*",
+    "V1": "rejection removed after 82e8c7593 except reward 32767 / penalty -32768 (BlastScoreBlkMaxScoreSet leaves BLAST_SCORE_MAX/MIN out of the range: a reward of 32767 is counted outside the frequency array and can crash NCBI, a penalty of -32768 makes every query invalid); sweep e2g-v1-sweep: 512 compared, 448 identical, the 64 others reward 32767 or megablast gap costs above 32767 (K-limit); fixtures scores.*",
 }
 
 

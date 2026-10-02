@@ -161,10 +161,11 @@ pub fn check_losat_limits(args: &BlastnArgs) -> anyhow::Result<()> {
     //          }
     // ```
     // NCBI leaves a reward of BLAST_SCORE_MAX (32767) or a penalty of BLAST_SCORE_MIN
-    // (-32768) out of the score range of the ungapped Karlin-Altschul computation, and then
-    // counts a reward of 32767 beyond the end of the frequency array (oracle: queries made
-    // invalid). LOSAT's scores below these values were compared with NCBI's up to
-    // 24000/-30000 (E2g V1); these two values are rejected.
+    // (-32768) out of the score range of the ungapped Karlin-Altschul computation. It then
+    // counts a reward of 32767 beyond the end of the frequency array (oracle: invalid
+    // queries, or a crash), and without a penalty of -32768 every query is invalid (oracle:
+    // the warnings and no hits), which LOSAT's computation does not reproduce. LOSAT's
+    // scores below these values were compared with NCBI's up to 24000/-30000 (E2g V1).
     if spec.reward >= i32::from(i16::MAX) || spec.penalty <= i32::from(i16::MIN) {
         anyhow::bail!(
             "a reward of 32767 or a penalty of -32768 (NCBI BLAST+'s BLAST_SCORE_MAX and BLAST_SCORE_MIN, which it leaves out of the score range of its Karlin-Altschul computation) is not supported by LOSAT's BLASTN; reward {} and penalty {} were given",

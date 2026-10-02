@@ -165,7 +165,7 @@ fn rejected_variable(name: &OsStr, value: &OsStr) -> Option<String> {
             }
         }
         return Some(format!(
-            "the environment variable {name}, which sets an entry of NCBI BLAST+'s registry, is not supported by LOSAT"
+            "the environment variable {name}, which sets an entry of NCBI BLAST+'s registry that LOSAT does not know to change no output (it accepts only the entries listed for registry files), is not supported by LOSAT"
         ));
     }
     if name.starts_with("NCBI_CONFIG_") {
@@ -175,7 +175,7 @@ fn rejected_variable(name: &OsStr, value: &OsStr) -> Option<String> {
     }
     if name.starts_with("DIAG_") || REJECTED_VARIABLES.contains(&name) {
         return Some(format!(
-            "the environment variable {name}, which changes the diagnostics or the error handling of NCBI BLAST+, is not supported by LOSAT"
+            "the environment variable {name}, a parameter of NCBI BLAST+'s diagnostics or error handling (LOSAT rejects the whole family: some members change NCBI's messages or exit status, some only on errors), is not supported by LOSAT"
         ));
     }
     // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_usage_report.cpp:197-199
@@ -416,7 +416,7 @@ fn check_registry_file(path: &Path) -> Result<Vec<(String, String, String)>, Str
     for (section, name, value) in &entries {
         if !is_harmless_entry(section, name, value) {
             return Err(format!(
-                "the registry file {} sets [{section}] {name}, which NCBI BLAST+ reads and LOSAT does not reproduce (LOSAT accepts only [BLAST] BLASTDB, BLASTMAT, DATA_LOADERS, BLASTDB_NUCL_DATA_LOADER, BLASTDB_PROT_DATA_LOADER, IGDATA, MAX_SEQID_LENGTH, BLAST_USAGE_REPORT with a Boolean, [NCBI] DATA and DONT_USE_NCBIRC); this is not supported by LOSAT",
+                "the registry file {} sets [{section}] {name}, which LOSAT does not know to change no output of NCBI BLAST+ (LOSAT accepts only [BLAST] BLASTDB, BLASTMAT, DATA_LOADERS, BLASTDB_NUCL_DATA_LOADER, BLASTDB_PROT_DATA_LOADER, IGDATA, MAX_SEQID_LENGTH, BLAST_USAGE_REPORT with a Boolean, [NCBI] DATA and DONT_USE_NCBIRC); this is not supported by LOSAT",
                 path.display()
             ));
         }

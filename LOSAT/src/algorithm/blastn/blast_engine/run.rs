@@ -5710,10 +5710,10 @@ struct QueryBatching {
 /// ```
 /// A value that `NStr::StringToInt` cannot convert makes NCBI stop with its
 /// `CStringException`, whose text names the source path of the oracle's build (exit 255);
-/// LOSAT rejects it. So it does a `CHUNK_SIZE` of 1000 without `BATCH_SIZE` (the mixer's
-/// maximum is 0, so NCBI's first query batch is empty: "BLAST engine error: Empty
-/// CBlastQueryVector", exit 3) and negative `CHUNK_SIZE` and `OVERLAP_CHUNK_SIZE` together
-/// (the chunk computation then wraps around `size_t`).
+/// LOSAT rejects it. So it does a negative `CHUNK_SIZE` above a negative
+/// `OVERLAP_CHUNK_SIZE`: the chunk computation wraps around `size_t` and NCBI stops with a
+/// `CCoreException` whose text names its build's files (oracle, exit 3). A negative chunk
+/// size at most the negative overlap splits nothing, as NCBI.
 fn query_batching_from_environment(megablast: bool) -> Result<QueryBatching> {
     let read = |variable: &str| -> Result<Option<i32>> {
         match std::env::var_os(variable) {
@@ -5740,15 +5740,12 @@ fn query_batching_from_environment(megablast: bool) -> Result<QueryBatching> {
     })?;
     let overlap = read("OVERLAP_CHUNK_SIZE")?;
     let split = SplitSizes::new(megablast, chunk_size, overlap);
-    if fixed_batch_size == 0 && split.mixer_max_batch_size() == 0 {
-        anyhow::bail!(
-            "the environment variable CHUNK_SIZE=1000 makes NCBI BLAST+'s query batches empty (\"BLAST engine error: Empty CBlastQueryVector\"), which is not supported by LOSAT's BLASTN"
-        );
-    }
-    if chunk_size.is_some_and(|value| value < 0) && overlap.is_some_and(|value| value < 0) {
-        anyhow::bail!(
-            "negative CHUNK_SIZE and OVERLAP_CHUNK_SIZE make NCBI BLAST+'s query chunks wrap around its size_t arithmetic, which is not supported by LOSAT's BLASTN"
-        );
+    if let (Some(chunk), Some(overlap)) = (chunk_size, overlap) {
+        if chunk < 0 && overlap < 0 && chunk > overlap {
+            anyhow::bail!(
+                "a negative CHUNK_SIZE above a negative OVERLAP_CHUNK_SIZE makes NCBI BLAST+'s query chunks wrap around its size_t arithmetic (it stops with a CCoreException that names its build's source files), which is not supported by LOSAT's BLASTN"
+            );
+        }
     }
     Ok(QueryBatching {
         fixed_batch_size,
@@ -5880,6 +5877,49 @@ fn run_in_pool(
         }
         // `input.SetBatchSize(mixer.GetBatchSize())` converts the `Int4` to `TSeqPos`.
         batching.batch_size = mixer.batch_size(None) as u32;
+    }
+    // NCBI reference: ncbi-blast/c++/src/app/blast/blastn_app.cpp:277-280
+    // ```c
+    //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup() ) {
+    // 	    BLAST_PROF_START( APP.LOOP.PRE );
+    //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
+    //             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
+    // ```c
+    // CObjMgr_QueryFactory::CObjMgr_QueryFactory(CBlastQueryVector & queries)
+    //     : m_QueryVector(& queries)
+    // {
+    //     if (queries.Empty()) {
+    //         NCBI_THROW(CBlastException, eInvalidArgument, "Empty CBlastQueryVector");
+    //     }
+    // ```
+    // A batch size of 0 (`CHUNK_SIZE` 1000 without `BATCH_SIZE`: the mixer's maximum is
+    // 0) reads no query, so the first batch fails after the prolog (outfmt 0).
+    if batching.batch_size == 0 {
+        let subject_title = format!(
+            "User specified sequence set (Input: {})",
+            args.subject_path().display()
+        );
+        for (format, &output_format) in outputs.formats.iter_mut().zip(&output_formats) {
+            if output_format == BlastnOutputFormat::Pairwise {
+                let mut writer = format.sink.open()?;
+                write_blastn_pairwise_prolog(
+                    &mut writer,
+                    NCBI_BLASTN_VERSION,
+                    megablast,
+                    &subject_title,
+                    subjects.metadata.db_num_seqs,
+                    subjects.metadata.db_len_total,
+                )?;
+                writer.flush()?;
+            }
+        }
+        return Err(crate::cli::NativeError {
+            exit: 3,
+            message: "BLAST engine error: Empty CBlastQueryVector\n".to_string(),
+        }
+        .into());
     }
 
     let lengths: Vec<usize> = query_records

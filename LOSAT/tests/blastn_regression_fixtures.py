@@ -130,6 +130,11 @@ _CASES = [
     ("env.chunk_negative", f"{B} -outfmt 6", "", "CHUNK_SIZE=-5"),
     ("env.chunk_blank", f"{B} -outfmt 6", "", "CHUNK_SIZE=' '"),
     ("env.chunk1000_batch5000", f"{B} -outfmt 6", "", "CHUNK_SIZE=1000 BATCH_SIZE=5000"),
+    # A batch size of 0: the empty first batch fails after the outfmt 0 prolog (exit 3).
+    ("env.chunk1000_fmt0", f"{B} -outfmt 0", "", "CHUNK_SIZE=1000"),
+    ("env.chunk1000_fmt7", f"{B} -outfmt 7", "", "CHUNK_SIZE=1000"),
+    # A negative chunk size at most a negative overlap splits nothing.
+    ("env.negative_pair_le", f"{B} -outfmt 6", "", "CHUNK_SIZE=-10 OVERLAP_CHUNK_SIZE=-5"),
     ("env.split_chunk300000", f"{S} -task blastn -outfmt 6", "", "CHUNK_SIZE=300000"),
     ("env.split_overlap50", f"{S} -task blastn -outfmt 6", "", "CHUNK_SIZE=300000 OVERLAP_CHUNK_SIZE=50"),
     ("env.split_overlap500", f"{S} -task blastn -outfmt 6", "", "CHUNK_SIZE=300000 OVERLAP_CHUNK_SIZE=500"),

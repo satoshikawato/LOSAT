@@ -50,9 +50,22 @@ pub fn register(program: &str, role: u32, bytes: &[u8]) -> Result<(u32, String),
         Program::Tblastx => Some("TBLASTX"),
         _ => None,
     };
+    // BLASTN and TBLASTX reject the inputs that NCBI BLAST+ reads differently from bio, in
+    // the CLI's order: a query's deflines first (`parse_fasta`); a subject's deflines after
+    // its residues, which NCBI warns about when it reads the subjects (TBLASTX's `run`).
+    let check = |checked: Result<(), _>| checked.map_err(|error| format!("{error:#}"));
+    let blank = blastn_input::is_blank(bytes);
+    if let (Some(name), false) = (nucleotide, blank) {
+        if role == ROLE_QUERY {
+            check(blastn_input::check_deflines_of(bytes, role_name, name))?;
+        }
+        check(blastn_input::check_sequence_lines_of(
+            bytes, role_name, name,
+        ))?;
+    }
     // BLASTN and TBLASTX, as the CLI: a file of white space only has no record (NCBI's
     // empty query, or its error for no subject at run time).
-    let records = if nucleotide.is_some() && blastn_input::is_blank(bytes) {
+    let records = if nucleotide.is_some() && blank {
         Vec::new()
     } else {
         // BLASTP, TBLASTN, BLASTN and TBLASTX read their inputs with bio::io::fasta.
@@ -72,13 +85,14 @@ pub fn register(program: &str, role: u32, bytes: &[u8]) -> Result<(u32, String),
         check_scan(role_name, &scanned, &records)?;
         records
     };
-    // BLASTN and TBLASTX reject the inputs that NCBI BLAST+ reads differently from bio.
     if let Some(name) = nucleotide {
-        blastn_input::check_deflines_of(bytes, role_name, name)
-            .and_then(|()| blastn_input::check_sequence_lines_of(bytes, role_name, name))
-            .and_then(|()| blastn_input::check_residues_of(&records, role_name, name))
-            .and_then(|()| blastn_input::check_records_have_residues_of(&records, role_name, name))
-            .map_err(|error| format!("{error:#}"))?;
+        check(blastn_input::check_residues_of(&records, role_name, name))?;
+        if role == ROLE_SUBJECT {
+            check(blastn_input::check_deflines_of(bytes, role_name, name))?;
+        }
+        check(blastn_input::check_records_have_residues_of(
+            &records, role_name, name,
+        ))?;
     }
     let mut response = String::from("{\"handle\":");
     let mut store = store().lock().expect("input store");
@@ -226,19 +240,22 @@ mod tests {
             error.contains("non-ASCII byte in a sequence line"),
             "{error}"
         );
-        // FASTA that bio cannot read (text before the first defline, bytes that are not
-        // UTF-8) says that LOSAT does not support it; white space only is a file without
-        // records.
+        // FASTA that bio cannot read (text before the first defline) says that LOSAT does
+        // not support it; a byte that is not UTF-8 in a sequence line is a non-ASCII byte
+        // there, as the CLI reports it; white space only is a file without records.
         let error = register("blastn", ROLE_SUBJECT, b">s0\n>s1\nACGT\n").unwrap_err();
         assert!(
             error.contains("subject record 1 (s0) has no residues"),
             "{error}"
         );
-        for bytes in [&b"\n>q\nACGT\n"[..], b">q\nAC\xffGT\n"] {
-            let error = register("blastn", ROLE_QUERY, bytes).unwrap_err();
-            assert!(error.contains("not supported by LOSAT's BLASTN"), "{error}");
-            assert!(error.contains("bytes that are not UTF-8"), "{error}");
-        }
+        let error = register("blastn", ROLE_QUERY, b"\n>q\nACGT\n").unwrap_err();
+        assert!(error.contains("not supported by LOSAT's BLASTN"), "{error}");
+        assert!(error.contains("bytes that are not UTF-8"), "{error}");
+        let error = register("blastn", ROLE_QUERY, b">q\nAC\xffGT\n").unwrap_err();
+        assert!(
+            error.contains("non-ASCII byte in a sequence line"),
+            "{error}"
+        );
         let (_, response) = register("blastn", ROLE_QUERY, b" \n\t\n").unwrap();
         assert!(response.ends_with("\"records\":[]}"), "{response}");
     }

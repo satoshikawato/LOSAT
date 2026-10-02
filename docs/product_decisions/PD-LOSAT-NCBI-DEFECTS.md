@@ -39,8 +39,13 @@ other programs add theirs in their sessions under the same rule.
    blastn and megablast, 7 chunk and overlap pairs); NCBI exit 3 in all; LOSAT's output
    equals NCBI's unsplit output in 35, and NCBI's output at the largest overlap that does
    not split a chunk again in 74 of 84 runs (outfmt 6 and 0). The 10 others differ only
-   by the HSPs at chunk boundaries that NCBI's own splits also lose. Fixtures
-   `env.resplit_*` (expected output from NCBI at that largest overlap, `oracle_env`).
+   by the HSPs at chunk boundaries that NCBI's own splits also lose. The round-3 audit
+   (`~/.cache/losat-web-gui-target/e2g-audit/r3b/`): 61 of 65 sampled rows equal NCBI at
+   that largest overlap byte for byte; in batches of several queries with weak HSPs
+   (E-values near 1 to 10) LOSAT's output differs from NCBI's at the non-re-splitting
+   overlaps by about as many weak HSPs as NCBI's outputs at two such overlaps differ from
+   each other. Fixtures `env.resplit_*` (expected output from NCBI at that largest overlap,
+   `oracle_env`).
    With a negative `CHUNK_SIZE` above a negative `OVERLAP_CHUNK_SIZE` the same failure is
    an explicit rejection (below).
 2. **outfmt 0 titles made only of punctuation.** For a subject defline of commas,
@@ -85,6 +90,12 @@ other programs add theirs in their sessions under the same rule.
   searches chunk ranges with gaps between them (hits are lost). Where such a pair does not
   split the batch (for example `-1` above `-2147483648`), NCBI searches as without the
   variables and so does LOSAT (fixtures `env.negative_pair_*`).
+
+- A `CHUNK_SIZE`/`OVERLAP_CHUNK_SIZE` pair whose chunk ranges leave a chunk without a
+  query (an overlap close to or above the chunk size): NCBI's `CQuerySplitter::Split`
+  (`split_query_cxx.cpp:872-880`) or the chunk's search stops with a null-pointer
+  `CCoreException`; LOSAT rejects "a query chunk without a query" (round-3 audit: 27
+  oracle cases, the reason holds in all).
 
 ## Ported (rule 4)
 

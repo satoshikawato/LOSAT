@@ -13,8 +13,9 @@ NCBI's batches or report is unset, `oracle_env` is NCBI's configuration for an a
 exception, and a case id ending in `.merged` runs with standard error merged into
 standard output (`2>&1`).
 
-- generate: writes the inputs to LOSAT/tests/fixtures/tblastx_regression/inputs/ (the
-  files are committed); the other inputs are those of the outfmt 0/7 fixtures.
+- generate: writes the inputs to LOSAT/tests/fixtures/tblastx_regression/inputs/ (empty
+  files and the code4 windows as RNA; the files are committed); the other inputs are those
+  of the outfmt 0/7 fixtures.
 - freeze --oracle TBLASTX: runs NCBI BLAST+ (comparison oracle only) from LOSAT/ and
   writes <case>.out, <case>.err and the hash columns of manifest.tsv.
 - check --losat LOSAT: runs `LOSAT tblastx <argv> <losat_extra>` from LOSAT/ and compares
@@ -112,6 +113,18 @@ _CASES = [
     # A .ncbirc (found through $HOME) with entries that change no output.
     ("ncbirc.harmless_fmt0", f"{C} -outfmt 0", "",
      "HOME=tests/fixtures/blastn_regression/ncbirc_home BLAST_USAGE_REPORT=0"),
+    # U is read as T (CFastaReader keeps U; the search and the display translate it as T,
+    # on both strands): the windows of the code4 fixtures with every T as U.
+    ("input.rna_query", f"-query {I}/rna_query.fa -subject {O}/tblastx_code4_subject.fasta -query_gencode 4"
+                        " -outfmt 6", ""),
+    ("input.rna_subject_fmt0", f"-query {O}/tblastx_code4_query.fasta -subject {I}/rna_subject.fa"
+                               " -query_gencode 4 -outfmt 0", ""),
+    ("input.rna_both_fmt7", f"-query {I}/rna_query.fa -subject {I}/rna_subject.fa -query_gencode 4 -outfmt 7", ""),
+    # Sum statistics link the HSPs per query and strand (link_hsps.c context/3): a 3- or
+    # 4-nt query before another query in the batch.
+    ("batch.short3_first", f"-query {I}/short3_query.fa {SUBJECTS} -outfmt 6", ""),
+    ("batch.short3_first_fmt0", f"-query {I}/short3_query.fa {SUBJECTS} -max_target_seqs 1 -outfmt 0", ""),
+    ("batch.short4_between_fmt7", f"-query {I}/short4_query.fa {SUBJECTS} -outfmt 7", ""),
     # A failed outfmt 0 write ("BLAST failed to write output", exit 6; Linux /dev/full),
     # also with the warnings of an unsearched batch (the stream fails before the query is read).
     ("write.devfull_fmt0", f"{C} -outfmt 0 -out /dev/full", ""),
@@ -120,10 +133,26 @@ _CASES = [
 CASES = [(*case, *[""] * (5 - len(case))) for case in _CASES]
 
 
+def rna(source: Path, target: Path) -> None:
+    """The records of `source` with every T read as U (u for t), deflines unchanged."""
+    lines = source.read_text().splitlines()
+    target.write_text("".join((line if line.startswith(">") else line.replace("T", "U").replace("t", "u")) + "\n"
+                              for line in lines))
+
+
 def command_generate(_args) -> int:
     INPUTS.mkdir(parents=True, exist_ok=True)
     (INPUTS / "empty.fa").write_bytes(b"")
     (INPUTS / "blank.fa").write_bytes(b"\n  \n\t\n")
+    rna(ENGINE / O / "tblastx_code4_query.fasta", INPUTS / "rna_query.fa")
+    rna(ENGINE / O / "tblastx_code4_subject.fasta", INPUTS / "rna_subject.fa")
+    # Queries of 3 and 4 nt (2 and 4 frames with a residue; NCBI still has 6 contexts per
+    # query) before and between the multi queries, in the same batch.
+    multi = (ENGINE / O / "tblastx_multi_query.fasta").read_text()
+    records = multi.split(">")[1:]
+    (INPUTS / "short3_query.fa").write_text(">s3 three\nACG\n" + ">" + ">".join(records))
+    (INPUTS / "short4_query.fa").write_text(">" + records[1] + ">s4 four\nACGT\n>" + records[2]
+                                            + ">sN3 three N\nNNN\n>" + records[3])
     return 0
 
 

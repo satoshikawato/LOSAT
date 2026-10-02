@@ -11,8 +11,9 @@ A row whose `contract` is `approved_db_gencode_deviation` (a TBLASTX search with
 non-default `-db_gencode`, AGENTS.md's approved exception) also runs NCBI with the subject
 as a BLAST database (`makeblastdb -dbtype nucl` without `-parse_seqids`, then `-db`
 instead of `-subject`), whose search applies `-db_gencode` to the subject as LOSAT's local
-search does; it writes DIR/<fixture_id>.db.out and checks `db_stdout_sha256`
-(check_losat.py compares LOSAT with that output outside the database lines).
+search does; it writes DIR/<fixture_id>.db.out and checks `db_stdout_sha256`, the hash
+of that output with its `Posted date:` line (the time makeblastdb ran) replaced by a
+fixed text (check_losat.py compares LOSAT with that output outside the database lines).
 
 - default: compare the outputs with the manifest's hash columns; exit 1 on a difference.
 - --freeze: write the hash and size columns of the manifest instead (run with
@@ -30,6 +31,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -72,6 +74,11 @@ def db_argv(row: dict[str, str], db: str) -> list[str]:
     argv = search_argv(row)
     index = argv.index("-subject")
     return [*argv[:index], "-db", db, *argv[index + 2:]]
+
+
+def without_posted_date(report: bytes) -> bytes:
+    """The report with the time of the database (outfmt 0 `Posted date:`) as a fixed text."""
+    return re.sub(rb"(?m)^(    Posted date:  ).*$", rb"\1(the time makeblastdb ran)", report)
 
 
 def digest(data: bytes) -> str:
@@ -132,7 +139,7 @@ def main() -> int:
                                     capture_output=True, check=True)
             shutil.rmtree(db_dir)
             (args.out / f"{row['fixture_id']}.db.out").write_bytes(db_run.stdout)
-            observed["db_stdout_sha256"] = digest(db_run.stdout)
+            observed["db_stdout_sha256"] = digest(without_posted_date(db_run.stdout))
             hashes.append("db_stdout_sha256")
         if args.freeze:
             row.update(observed)

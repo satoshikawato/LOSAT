@@ -233,7 +233,7 @@ const NCBI_HTML_ENTITY_NAMES: [&str; 280] = [
 /// Whether `NStr::HtmlDecode` decodes a character reference of the ASCII text `text` (its
 /// result then differs from `text`), scanning as NCBI scans.
 ///
-/// NCBI reference: c++/src/corelib/ncbistr.cpp:4543-4581
+/// NCBI reference: c++/src/corelib/ncbistr.cpp:4543-4585
 /// ```c
 ///         if (i != e && ch == '&') {
 ///             CTempString::const_iterator start_of_entity, end_of_entity, itmp;

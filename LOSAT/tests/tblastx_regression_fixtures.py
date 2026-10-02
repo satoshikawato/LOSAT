@@ -139,6 +139,10 @@ _CASES = [
     ("tie.trim_seg_no_fmt0", f"-query {I}/tie_trim_query.fa -subject {I}/tie_trim_subject.fa -seg no -outfmt 0",
      ""),
     ("sume.large_gap_seg_no", f"-query {I}/sume_query.fa -subject {I}/sume_subject.fa -seg no -outfmt 6", ""),
+    # SEG keeps only the head of the segments of a left recursion (blast_seg.c:2086-2101):
+    # a low-complexity run in frame +1 (the inputs come from the S08 investigation).
+    ("seg.left_recursion", f"-query {I}/seg_query.fa -subject {I}/seg_subject.fa -outfmt 6", ""),
+    ("seg.left_recursion_fmt0", f"-query {I}/seg_query.fa -subject {I}/seg_subject.fa -outfmt 0", ""),
     # A failed outfmt 0 write ("BLAST failed to write output", exit 6; Linux /dev/full),
     # also with the warnings of an unsearched batch (the stream fails before the query is read).
     ("write.devfull_fmt0", f"{C} -outfmt 0 -out /dev/full", ""),

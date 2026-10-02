@@ -1,11 +1,11 @@
 {
   "files": 54,
-  "annotations": 1829,
-  "reference_tokens": 1820,
+  "annotations": 1873,
+  "reference_tokens": 1864,
   "annotations_without_file_line": 10,
   "ncbi_files": 111,
-  "ncbi_functions": 390,
-  "ncbi_non_function_targets": 74,
+  "ncbi_functions": 396,
+  "ncbi_non_function_targets": 75,
   "unresolved_tokens": {},
   "rust_files": [
     "LOSAT/src/algorithm/blastn/alignment/gapped.rs",

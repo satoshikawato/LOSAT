@@ -32,8 +32,9 @@ REPO = Path(__file__).resolve().parents[3]
 SRC = REPO / "LOSAT/src"
 OTHER_PROGRAMS = tuple(f"algorithm/{p}/" for p in ("blastp", "blastx", "tblastn", "tblastx"))
 DEFAULT_NCBI = Path("/mnt/c/Users/genom/GitHub/ncbi-blast")
-# Pinned on 2026-10-02 at the S07++ engine (LOSAT/ unchanged since 7693a9c73).
-EXPECTED = {"files": 54, "annotations": 1829, "ncbi_functions": 390}
+# Pinned on 2026-10-02 at the end of the E2g transpile (82e8c7593); the S07++ engine
+# (7693a9c73) had 54 files, 1829 annotations and 390 functions.
+EXPECTED = {"files": 54, "annotations": 1873, "ncbi_functions": 396}
 REF = re.compile(r"((?:[A-Za-z0-9_.+\-]+/)*[A-Za-z0-9_+\-]+\.(?:cpp|hpp|inl|prt|c|h))(?![A-Za-z0-9_])"
                  r"(?::(\d+)(?:\s*[-–]\s*(\d+))?)?")
 

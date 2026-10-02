@@ -106,6 +106,7 @@ RESULTS: dict[str, str] = {
     "R1": "explicit rejection after 7b63980b2 (any value; an empty query still ends with Query is Empty!)",
     "R2": "explicit rejection after 219c2c49e: DIAG_*, NCBI_CONFIG_* (except entries that change no output), ABORT_ON_THROW, stack-trace and LOG_* parameters, non-Boolean BLAST_USAGE_REPORT; blastn.ini and .ncbirc on NCBI's search path accepted only with entries that change no output (fixture ncbirc.harmless_fmt0); oracle research e2g-r2r3",
     "R3": "explicit rejection after 6182cef73 (-subject, -query, -out not UTF-8, in NCBI's open order)",
+    "V1": "rejection removed after 82e8c7593 except reward 32767 / penalty -32768 (BlastScoreBlkMaxScoreSet leaves BLAST_SCORE_MAX/MIN out of the range; BlastScoreFreqCalc then counts outside the array); sweep e2g-v1-sweep: every case NCBI runs is identical (gcd-scaled pairs up to 24000/-30000); fixtures scores.*",
 }
 
 

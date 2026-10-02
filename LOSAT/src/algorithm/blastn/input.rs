@@ -454,6 +454,34 @@ pub fn read_records(
     Ok(records)
 }
 
+/// Whether every line before the first defline is one that NCBI's `CFastaReader` skips
+/// without a message: white space only, or a comment starting with `!`, `#` or `;` after
+/// the white space. Other text there is a record without a defline, or a line that NCBI
+/// stops at ("doesn't look like plausible data", `CheckDataLine`, fasta.cpp:710-760).
+///
+/// NCBI reference: c++/src/objtools/readers/fasta.cpp:375-384
+/// ```c
+///         CTempString line = NStr::TruncateSpaces_Unsafe(*++GetLineReader());
+///
+///         if (line.empty()) {
+///             continue; // ignore lines containing only whitespace
+///         }
+///         c = line[0];
+///
+///         if (c == '!'  ||  c == '#' || c == ';') {
+///             // no content, just a comment or blank line
+///             continue;
+/// ```
+pub fn only_skipped_lines_before_first_defline(bytes: &[u8]) -> bool {
+    bytes
+        .split(|&byte| byte == b'\n')
+        .take_while(|line| line.first() != Some(&b'>'))
+        .all(|line| {
+            let line = line.trim_ascii();
+            line.is_empty() || matches!(line[0], b'!' | b'#' | b';')
+        })
+}
+
 /// The records that `bio` reads from a FASTA file (none from white space only), or the
 /// error that names what `bio` cannot read, without the checks of `read_records`.
 pub fn bio_records_of(
@@ -631,5 +659,28 @@ mod tests {
         let read = with_u_as_t(&records(">q d\nACGUu\n")).unwrap();
         assert_eq!(read[0].seq(), b"ACGTt");
         assert_eq!(read[0].desc(), Some("d"));
+    }
+
+    // NCBI reference: c++/src/objtools/readers/fasta.cpp:375-384 (CFastaReader skips lines of
+    // white space and comments starting with `!`, `#` or `;` before reading a defline).
+    #[test]
+    fn lines_that_ncbi_skips_before_the_first_defline() {
+        for text in [
+            &b">s\nACGT\n"[..],
+            b"\n>s\nACGT\n",
+            b"  \n\t\r\n>s\nACGT\n",
+            b";c\n !x\n#y\n>s\nACGT\n",
+            b">s\xe9\nACGT\n",
+        ] {
+            assert!(only_skipped_lines_before_first_defline(text), "{text:?}");
+        }
+        for text in [
+            &b"ACGT\n>s\nACGT\n"[..],
+            b"\xef\xbb\xbf>s\nACGT\n",
+            b" >s\nACGT\n",
+            b"\n\nab%%%\n>s\nACGT\n",
+        ] {
+            assert!(!only_skipped_lines_before_first_defline(text), "{text:?}");
+        }
     }
 }

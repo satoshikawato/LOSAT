@@ -651,9 +651,11 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     let subject_bytes = fasta_input::read_fasta_bytes(&mut subject_file, &args.subject, "subject")?;
     drop(subject_file);
     // NCBI warns about the residues that LOSAT rejects when it reads them, so they are
-    // rejected here. NCBI reads the FASTA that `bio` cannot read (blank lines or `;`
-    // comments before the first defline), these deflines and records without residues
-    // without a message, so LOSAT rejects them where the search would start.
+    // rejected here. NCBI reads the FASTA that `bio` cannot read because of blank or
+    // comment lines before the first defline (or a defline that is not UTF-8), these
+    // deflines and records without residues without a message, so LOSAT rejects them
+    // where the search would start. Other text before the first defline is rejected here:
+    // NCBI reads it as a record without a defline or stops at it.
     let blank = fasta_input::is_blank(&subject_bytes);
     if !blank {
         fasta_input::check_sequence_lines_of(&subject_bytes, "subject", "TBLASTX")?;
@@ -661,7 +663,10 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     let (subjects, subject_reading) =
         match fasta_input::bio_records_of(&subject_bytes, &args.subject, "subject", "TBLASTX") {
             Ok(records) => (records, Ok(())),
-            Err(error) => (Vec::new(), Err(error)),
+            Err(error) if fasta_input::only_skipped_lines_before_first_defline(&subject_bytes) => {
+                (Vec::new(), Err(error))
+            }
+            Err(error) => return Err(error),
         };
     fasta_input::check_residues_of(&subjects, "subject", "TBLASTX")?;
     fasta_input::write_title_warnings(&subjects, &mut std::io::stderr())?;

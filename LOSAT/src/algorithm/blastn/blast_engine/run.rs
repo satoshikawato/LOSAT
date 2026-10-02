@@ -4495,6 +4495,9 @@ struct BlastnReportInputs<'a> {
     /// Whether NCBI's epilog (`PrintEpilog`: the outfmt 0 footer, outfmt 7's last line)
     /// follows the reports; an error in a later batch skips it.
     epilog: bool,
+    /// Whether the outfmt 0 report starts with the prolog, which is otherwise written
+    /// before the search (`write_pairwise_prologs`).
+    prolog: bool,
 }
 
 /// The per-query and run-level data of the pairwise report.
@@ -4558,6 +4561,7 @@ fn blastn_pairwise_report(
         num_alignments,
         unsearched,
         epilog: report.epilog,
+        prolog: report.prolog,
     };
     Ok((queries, pairwise_report))
 }
@@ -5869,6 +5873,28 @@ fn run_in_pool(
         metadata,
     };
     let megablast = args.task == "megablast";
+    // NCBI reference: ncbi-blast/c++/src/app/blast/blastn_app.cpp:258-261
+    // ```c
+    //         formatter.PrintProlog();
+    //
+    //         /*** Process the input ***/
+    //         CBatchSizeMixer mixer(SplitQuery_GetChunkSize(opt.GetProgram())-1000);
+    // ```
+    // NCBI writes the outfmt 0 prolog before it reads the first query batch, and its stream
+    // throws at the prolog's first flush when the write fails (blast_format.cpp:118-119),
+    // before any query is read or searched.
+    let subject_title = format!(
+        "User specified sequence set (Input: {})",
+        args.subject_path().display()
+    );
+    write_pairwise_prologs(
+        outputs,
+        &output_formats,
+        megablast,
+        &subject_title,
+        &subjects.metadata,
+        true,
+    )?;
     let mut mixer = BatchSizeMixer::new(batching.split.mixer_max_batch_size());
     if batching.fixed_batch_size == 0 {
         let total_length = subjects.metadata.db_len_total as i64;
@@ -5897,24 +5923,14 @@ fn run_in_pool(
     // A batch size of 0 (`CHUNK_SIZE` 1000 without `BATCH_SIZE`: the mixer's maximum is
     // 0) reads no query, so the first batch fails after the prolog (outfmt 0).
     if batching.batch_size == 0 {
-        let subject_title = format!(
-            "User specified sequence set (Input: {})",
-            args.subject_path().display()
-        );
-        for (format, &output_format) in outputs.formats.iter_mut().zip(&output_formats) {
-            if output_format == BlastnOutputFormat::Pairwise {
-                let mut writer = format.sink.open()?;
-                write_blastn_pairwise_prolog(
-                    &mut writer,
-                    NCBI_BLASTN_VERSION,
-                    megablast,
-                    &subject_title,
-                    subjects.metadata.db_num_seqs,
-                    subjects.metadata.db_len_total,
-                )?;
-                writer.flush()?;
-            }
-        }
+        write_pairwise_prologs(
+            outputs,
+            &output_formats,
+            megablast,
+            &subject_title,
+            &subjects.metadata,
+            false,
+        )?;
         return Err(crate::cli::NativeError {
             exit: 3,
             message: "BLAST engine error: Empty CBlastQueryVector\n".to_string(),
@@ -6069,6 +6085,42 @@ fn run_in_pool(
     )
 }
 
+/// Whether the outfmt 0 prolog of `sink` is written before the search, as NCBI writes it
+/// (`write_pairwise_prologs`). A file sink is created when its report is written
+/// (`OutputSink::open`), so its prolog stays at the start of the report.
+fn prolog_before_search(sink: &OutputSink<'_>) -> bool {
+    !matches!(sink, OutputSink::File(_))
+}
+
+/// Writes and flushes the outfmt 0 prolog of every outfmt 0 sink whose prolog comes before
+/// the search (`before_search`) or, for a run that stops before any report, of the others.
+fn write_pairwise_prologs(
+    outputs: &mut ReportOutputs<'_>,
+    output_formats: &[BlastnOutputFormat],
+    megablast: bool,
+    subject_title: &str,
+    metadata: &SubjectMetadata,
+    before_search: bool,
+) -> Result<()> {
+    for (format, &output_format) in outputs.formats.iter_mut().zip(output_formats) {
+        if output_format == BlastnOutputFormat::Pairwise
+            && prolog_before_search(&format.sink) == before_search
+        {
+            let mut writer = format.sink.open()?;
+            write_blastn_pairwise_prolog(
+                &mut writer,
+                NCBI_BLASTN_VERSION,
+                megablast,
+                subject_title,
+                metadata.db_num_seqs,
+                metadata.db_len_total,
+            )?;
+            writer.flush()?;
+        }
+    }
+    Ok(())
+}
+
 /// The results of the query batches searched so far, indexed by query (two contexts per
 /// query).
 struct BatchResults<'a> {
@@ -6111,6 +6163,13 @@ fn write_batch_reports(
         db_num_seqs: subjects.metadata.db_num_seqs,
         db_len_total: subjects.metadata.db_len_total,
         epilog,
+        prolog: outputs
+            .formats
+            .iter()
+            .zip(output_formats)
+            .any(|(format, &output_format)| {
+                output_format == BlastnOutputFormat::Pairwise && !prolog_before_search(&format.sink)
+            }),
     };
     let query_ids: Vec<Arc<str>> = query_records
         .iter()
@@ -6729,8 +6788,11 @@ fn search_query_batch(
                 ))
                 .into());
             }
+            // The prolog of a file sink (the others were written before the search).
             for (format, &output_format) in outputs.formats.iter_mut().zip(output_formats) {
-                if output_format == BlastnOutputFormat::Pairwise {
+                if output_format == BlastnOutputFormat::Pairwise
+                    && !prolog_before_search(&format.sink)
+                {
                     let mut writer = format.sink.open()?;
                     write_blastn_pairwise_prolog(
                         &mut writer,

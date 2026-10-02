@@ -1699,6 +1699,9 @@ pub struct BlastnPairwiseReport {
     /// Whether NCBI's epilog (the database and statistics footer, `PrintEpilog`) ends the
     /// report.
     pub epilog: bool,
+    /// Whether the report starts with NCBI's prolog (`PrintProlog`); false when the caller
+    /// wrote it before the search, as NCBI does.
+    pub prolog: bool,
 }
 
 // The description table of the BLASTN report.
@@ -2079,14 +2082,16 @@ pub fn write_blastn_pairwise_report<W: Write>(
     let mut buffered = io::BufWriter::new(writer);
     let writer = &mut buffered;
 
-    write_blastn_pairwise_prolog(
-        writer,
-        &report.version,
-        report.megablast,
-        &report.database_name,
-        report.database_num_sequences,
-        report.database_total_letters,
-    )?;
+    if report.prolog {
+        write_blastn_pairwise_prolog(
+            writer,
+            &report.version,
+            report.megablast,
+            &report.database_name,
+            report.database_num_sequences,
+            report.database_total_letters,
+        )?;
+    }
     let mut hits_by_query: Vec<Vec<(HspIndex, &PairwiseHit)>> = vec![Vec::new(); queries.len()];
     for (hsp_index, hit) in hits.iter().enumerate() {
         if let Some(bucket) = hits_by_query.get_mut(hit.hit.q_idx as usize) {

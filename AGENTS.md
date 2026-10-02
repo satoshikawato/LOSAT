@@ -64,6 +64,16 @@ authoritative, current guidance for agent behavior in LOSAT.
      every search result must still match NCBI. Non-UTF-8
      file names and `.ncbirc` keys that change output are explicit
      rejections, not exceptions.
+   - Approved exceptions for NCBI defects (`PD-LOSAT-NCBI-DEFECTS`): where
+     NCBI BLAST+ fails (a crash, a debug-only assumption, a read past a buffer)
+     and LOSAT's result was shown to equal NCBI's output for a nearby input
+     that does not reach the defect. BLASTN: a query chunk that NCBI would
+     split again (CHUNK_SIZE/OVERLAP_CHUNK_SIZE; NCBI stops with a
+     CCoreException) is searched once; outfmt 0 titles made only of
+     punctuation stop at the end of the string (NCBI reads past it and
+     crashes). Deterministic NCBI results, even wrong-looking ones, are
+     reproduced, not excepted; NCBI failures without a checkable valid result
+     are explicit rejections.
 
 4. NCBI code comments are mandatory for modifications.
    - Every code change must include NCBI C/C++ reference comments with file path

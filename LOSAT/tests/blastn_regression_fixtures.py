@@ -14,7 +14,10 @@ batch, IUPAC ambiguity, lowercase masking and non-default scores.
   compares stdout, stderr and the exit status with the frozen files.
 
 A case may set environment variables (`env`, space-separated KEY=VALUE) for both
-programs; every other variable that changes NCBI's batches or report is unset.
+programs; every other variable that changes NCBI's batches or report is unset. A case of
+an approved exception (docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md), where NCBI fails
+with `env`, also sets `oracle_env`: `freeze` runs NCBI with it instead, a configuration
+whose output LOSAT's result with `env` was shown to equal.
 
 The split case slices LOSAT/tests/fasta/EDL933.fna at run time into
 LOSAT/target/blastn_regression/ (outfmt 6 prints no file names).
@@ -44,7 +47,8 @@ MANIFEST = FIXTURES / "manifest.tsv"
 RUNTIME = ENGINE / "target/blastn_regression"
 FASTA = ENGINE / "tests/fasta"
 E2C_INPUTS = ENGINE.parent / "docs/evidence/losat_web_e2c/inputs"
-FIELDS = ["case_id", "argv", "losat_extra", "exit", "stdout_sha256", "stdout_bytes", "stderr_sha256", "env"]
+FIELDS = ["case_id", "argv", "losat_extra", "exit", "stdout_sha256", "stdout_bytes", "stderr_sha256", "env",
+          "oracle_env"]
 # NCBI reads these and each one changes the batches or the report.
 REPORT_ENV = ("BL2SEQ_LEGACY", "CTOOLKIT_COMPATIBLE", "OLD_FSC", "BATCH_SIZE", "CHUNK_SIZE", "ADAPTIVE_CBS",
               "OVERLAP_CHUNK_SIZE", "PRE_FETCH_SEQS_LIMIT")
@@ -56,7 +60,7 @@ T = f"-query {I}/q3k.fa -subject {I}/s600ties.fa"
 B = f"-query {I}/mq.fa -subject {I}/s60k.fa"
 S = f"-query {R}/edl933_2m.fa -subject {I}/sakai_60k.fa"
 A = f"-query {I}/ambiguity_query_c.fa -subject {I}/ambiguity_subject.fa"
-# (case_id, NCBI argv after `blastn`, extra LOSAT-only arguments[, environment])
+# (case_id, NCBI argv after `blastn`, extra LOSAT-only arguments[, environment[, NCBI environment]])
 _CASES = [
     ("prelim.default", f"{P} -outfmt 6", ""),
     ("prelim.task_blastn", f"{P} -task blastn -outfmt 6", ""),
@@ -134,8 +138,19 @@ _CASES = [
     ("env.chunk1000_fmt0", f"{B} -outfmt 0", "", "CHUNK_SIZE=1000"),
     ("env.chunk1000_fmt7", f"{B} -outfmt 7", "", "CHUNK_SIZE=1000"),
     # An overlap above about half the chunk size, just below the size where NCBI would split a
-    # chunk again (that one is rejected: NCBI stops with a CCoreException).
+    # chunk again.
     ("env.split_overlap_near_resplit", f"{S} -task blastn -outfmt 6", "", "CHUNK_SIZE=300000 OVERLAP_CHUNK_SIZE=149000"),
+    # Approved exception 1 of PD-LOSAT-NCBI-DEFECTS: with these overlaps NCBI would split a
+    # query chunk again and stops with a CCoreException; LOSAT searches each chunk once, which
+    # equals NCBI's output with the largest overlap that does not split a chunk again
+    # (docs/evidence/losat_web_e2g/resplit/; resplit_query.fa and resplit_subject.fa come from
+    # its validate.py, not from `generate`).
+    ("env.resplit_overlap155000", f"{S} -task blastn -outfmt 6", "", "CHUNK_SIZE=300000 OVERLAP_CHUNK_SIZE=155000",
+     "CHUNK_SIZE=300000 OVERLAP_CHUNK_SIZE=149000"),
+    ("env.resplit_8000_4100_fmt0", f"-query {I}/resplit_query.fa -subject {I}/resplit_subject.fa -task blastn -outfmt 0",
+     "", "CHUNK_SIZE=8000 OVERLAP_CHUNK_SIZE=4100", "CHUNK_SIZE=8000 OVERLAP_CHUNK_SIZE=4090"),
+    ("env.resplit_3000_2900_megablast", f"-query {I}/resplit_query.fa -subject {I}/resplit_subject.fa -outfmt 6",
+     "", "CHUNK_SIZE=3000 OVERLAP_CHUNK_SIZE=2900", "CHUNK_SIZE=3000 OVERLAP_CHUNK_SIZE=1512"),
     # A negative chunk size at most a negative overlap splits nothing.
     ("env.negative_pair_le", f"{B} -outfmt 6", "", "CHUNK_SIZE=-10 OVERLAP_CHUNK_SIZE=-5"),
     ("env.split_chunk300000", f"{S} -task blastn -outfmt 6", "", "CHUNK_SIZE=300000"),
@@ -180,7 +195,7 @@ _CASES = [
     ("ctoolkit.fmt0", f"{P} -max_target_seqs 3 -outfmt 0", "", "CTOOLKIT_COMPATIBLE=1"),
     ("ctoolkit.empty_fmt0", f"{T} -task blastn -max_target_seqs 5 -outfmt 0", "", "CTOOLKIT_COMPATIBLE="),
 ]
-CASES = [case if len(case) == 4 else (*case, "") for case in _CASES]
+CASES = [(*case, *[""] * (5 - len(case))) for case in _CASES]
 
 
 def genome(name: str) -> str:
@@ -346,8 +361,9 @@ def command_freeze(args) -> int:
     oracle = str(Path(args.oracle).resolve())
     version = subprocess.run([oracle, "-version"], capture_output=True, text=True).stdout.strip().replace("\n", "; ")
     rows = []
-    for case_id, argv, extra, case_env in CASES:
-        result = subprocess.run([oracle, *shlex.split(argv)], cwd=ENGINE, capture_output=True, env=clean_env(case_env))
+    for case_id, argv, extra, case_env, oracle_env in CASES:
+        result = subprocess.run([oracle, *shlex.split(argv)], cwd=ENGINE, capture_output=True,
+                                env=clean_env(oracle_env or case_env))
         (FIXTURES / f"{case_id}.out").write_bytes(result.stdout)
         err = FIXTURES / f"{case_id}.err"
         if result.stderr:
@@ -356,7 +372,8 @@ def command_freeze(args) -> int:
             err.unlink()
         rows.append({"case_id": case_id, "argv": argv, "losat_extra": extra, "exit": str(result.returncode),
                      "stdout_sha256": sha256(result.stdout), "stdout_bytes": str(len(result.stdout)),
-                     "stderr_sha256": sha256(result.stderr) if result.stderr else "", "env": case_env})
+                     "stderr_sha256": sha256(result.stderr) if result.stderr else "", "env": case_env,
+                     "oracle_env": oracle_env})
         print(f"{case_id}\texit {result.returncode}\t{result.stdout.count(b'\n')} lines\t{len(result.stderr)} stderr bytes", flush=True)
     with open(MANIFEST, "w", newline="") as handle:
         handle.write(f"# Frozen BLASTN outputs of {version} (comparison oracle only; see blastn_regression_fixtures.py).\n")

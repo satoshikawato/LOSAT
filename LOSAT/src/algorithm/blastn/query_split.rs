@@ -171,6 +171,8 @@ pub fn calculate_num_chunks(sizes: SplitSizes, concatenated_query_length: usize)
 /// search builds its own query splitter with the same chunk size and overlap, and only a
 /// debug build asserts that it does not split. When it does (an overlap close to the chunk
 /// size), the release build skips the chunk's lookup table and stops with a null reference.
+/// LOSAT searches such a chunk once (approved exception 1 of PD-LOSAT-NCBI-DEFECTS), so
+/// this only tells where the exception applies.
 ///
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_aux_priv.cpp:190-201
 /// ```c

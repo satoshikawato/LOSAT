@@ -87,9 +87,7 @@ use super::super::input::{
 use super::super::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
 use super::super::lookup::{build_unmasked_ranges, reverse_complement};
 use super::super::pairwise::{pairwise_hits, DisplayMasks};
-use super::super::query_split::{
-    chunk_would_be_split, restrict_masks, split_query_batch, QueryChunk, SplitSizes,
-};
+use super::super::query_split::{restrict_masks, split_query_batch, QueryChunk, SplitSizes};
 use super::super::scoring::{
     check_greedy_gap_costs, check_losat_limits, check_scoring_options, context_blocks,
     context_ungapped_blocks, gap_x_dropoffs, karlin_error, ContextKarlin,
@@ -12569,13 +12567,11 @@ fn search_query_chunks(
     let Some(chunks) = split_query_batch(&lengths, batching.split) else {
         return Ok(None);
     };
-    // NCBI's setup of a chunk would split it again and stop with a CCoreException that
-    // names its build's files (`chunk_would_be_split`).
-    if chunk_would_be_split(&chunks, batching.split) {
-        anyhow::bail!(
-            "with these CHUNK_SIZE and OVERLAP_CHUNK_SIZE values NCBI BLAST+ would split a query chunk again and stops with a CCoreException that names its build's source files, which is not supported by LOSAT's BLASTN"
-        );
-    }
+    // With an overlap close to the chunk size NCBI's setup of a chunk would split it again
+    // and stop with a CCoreException that names its build's files
+    // (`query_split::chunk_would_be_split`). LOSAT searches each chunk once, as NCBI does
+    // for every overlap that does not split a chunk again (approved exception 1 of
+    // PD-LOSAT-NCBI-DEFECTS).
     let mut merged: PrelimHitLists = Vec::with_capacity(queries.len());
     merged.resize_with(queries.len(), || None);
     for chunk in &chunks {

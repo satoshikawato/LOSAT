@@ -107,10 +107,9 @@ pub struct TblastxArgs {
     #[arg(long, default_value = "0", value_name = "SPEC", value_parser = tblastx_outfmt)]
     pub outfmt: String,
 
+    // NCBI reference: cmdline_flags.cpp:127-128 (kDfltArgCullingLimit = 0)
     /// HSP culling limit (default: 0, no culling). A limit above 0 is not supported by
     /// LOSAT's TBLASTX (its HSP culling differs from NCBI's hspfilter_culling.c).
-    ///
-    /// NCBI reference: cmdline_flags.cpp:127-128 (kDfltArgCullingLimit = 0)
     #[arg(long, default_value_t = 0)]
     pub culling_limit: u32,
 }

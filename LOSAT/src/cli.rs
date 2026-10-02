@@ -452,53 +452,14 @@ impl std::io::Write for ReportStream {
 /// Standard output as the report's stream (`ReportStream::inner`).
 ///
 /// NCBI writes the report to `cout`; when the process starts with its standard output
-/// closed (`>&-`), the first write fails (outfmt 0: "BLAST failed to write output", exit
+/// closed (`>&-`), its first write fails (outfmt 0: "BLAST failed to write output", exit
 /// 6; outfmt 6 and 7 abort). Rust's runtime opens `/dev/null` on a closed standard
-/// descriptor before `main`, read and write, so the writes would succeed: on Linux, that
-/// descriptor is recognised (`/proc/self/fdinfo/1`; a shell's `> /dev/null` opens it write
-/// only) and every write fails, as the approved CLI differences expect
-/// (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES).
+/// descriptor before `main`, which LOSAT cannot tell from a `/dev/null` that the caller
+/// opened (read and write, as Python's `subprocess.DEVNULL`), so the report is written
+/// there and the run succeeds (a difference put to the maintainer in session S08,
+/// `docs/evidence/losat_web_e2b/README.md`).
 pub fn report_standard_output() -> Box<dyn std::io::Write + Send> {
-    if standard_output_was_closed() {
-        Box::new(ClosedStandardOutput)
-    } else {
-        Box::new(std::io::BufWriter::new(std::io::stdout()))
-    }
-}
-
-/// Whether standard output is the `/dev/null` that the runtime opened read and write in
-/// place of a closed descriptor (O_ACCMODE is 3 and O_RDWR is 2 on Linux).
-#[cfg(target_os = "linux")]
-fn standard_output_was_closed() -> bool {
-    let is_dev_null = std::fs::read_link("/proc/self/fd/1")
-        .is_ok_and(|target| target == std::path::Path::new("/dev/null"));
-    is_dev_null
-        && std::fs::read_to_string("/proc/self/fdinfo/1")
-            .ok()
-            .and_then(|info| {
-                info.lines()
-                    .find_map(|line| line.strip_prefix("flags:"))
-                    .and_then(|flags| u32::from_str_radix(flags.trim(), 8).ok())
-            })
-            .is_some_and(|flags| flags & 3 == 2)
-}
-
-#[cfg(not(target_os = "linux"))]
-fn standard_output_was_closed() -> bool {
-    false
-}
-
-/// A standard output that was closed when the process started: every write fails.
-struct ClosedStandardOutput;
-
-impl std::io::Write for ClosedStandardOutput {
-    fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
-        Err(std::io::Error::other("standard output is closed"))
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
+    Box::new(std::io::BufWriter::new(std::io::stdout()))
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:95-99

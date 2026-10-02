@@ -336,55 +336,34 @@ fn environment_that_ncbi_cannot_convert_or_reports_otherwise_is_rejected() {
     }
 }
 
-// NCBI reference: c++/src/app/blast/blast_app_util.hpp:252-255 (an outfmt 0 write that
-// fails: "BLAST failed to write output", exit 6). A standard output closed at the start
-// (`>&-`) fails NCBI's first write; Rust's runtime opens /dev/null there, which LOSAT
-// recognises on Linux (`cli::report_standard_output`). outfmt 6 and 7 exit non-zero
-// (NCBI aborts; PD-LOSAT-CLI-NONSEARCH-DIFFERENCES).
-#[cfg(target_os = "linux")]
+// A standard output that the caller opened on /dev/null, read and write (as Python's
+// subprocess.DEVNULL and Node's `stdio: 'ignore'`), is written as any file (S08 audit (c),
+// round 2, N2). A standard output closed at the start becomes the same /dev/null in Rust's
+// runtime (`cli::report_standard_output`).
+#[cfg(unix)]
 #[test]
-fn a_closed_standard_output_fails_the_report() {
+fn a_standard_output_on_dev_null_is_written() {
     let inputs = Inputs::new();
-    for (outfmt, exit) in [("0", 6), ("6", 1), ("7", 1)] {
-        let output = Command::new("sh")
-            .arg("-c")
-            .arg("exec \"$@\" >&-")
-            .arg("sh")
-            .arg(env!("CARGO_BIN_EXE_LOSAT"))
+    for outfmt in ["0", "6", "7"] {
+        let null = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open("/dev/null")
+            .expect("open /dev/null");
+        let output = Command::new(env!("CARGO_BIN_EXE_LOSAT"))
             .arg("tblastx")
             .arg("-query")
             .arg(&inputs.query.0)
             .arg("-subject")
             .arg(&inputs.subject.0)
             .args(["-outfmt", outfmt])
+            .stdout(std::process::Stdio::from(null))
             .env_remove("LOSAT_TIMING")
             .output()
             .expect("run LOSAT CLI");
-        assert_eq!(
-            output.status.code(),
-            Some(exit),
-            "outfmt {outfmt}: {output:?}"
-        );
-        if outfmt == "0" {
-            assert_eq!(
-                String::from_utf8_lossy(&output.stderr),
-                "BLAST failed to write output\n"
-            );
-        }
+        assert_eq!(output.status.code(), Some(0), "outfmt {outfmt}: {output:?}");
+        assert!(output.stderr.is_empty(), "outfmt {outfmt}: {output:?}");
     }
-    // A standard output redirected to /dev/null is written as any file.
-    let output = Command::new(env!("CARGO_BIN_EXE_LOSAT"))
-        .arg("tblastx")
-        .arg("-query")
-        .arg(&inputs.query.0)
-        .arg("-subject")
-        .arg(&inputs.subject.0)
-        .args(["-outfmt", "0"])
-        .stdout(std::process::Stdio::null())
-        .env_remove("LOSAT_TIMING")
-        .output()
-        .expect("run LOSAT CLI");
-    assert_eq!(output.status.code(), Some(0), "{output:?}");
 }
 
 // NCBI reference: c++/src/objmgr/util/create_defline.cpp:219-312 (x_CleanAndCompress) and

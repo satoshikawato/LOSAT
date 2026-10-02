@@ -119,9 +119,9 @@ pub fn check_scoring_options(args: &BlastnArgs) -> anyhow::Result<()> {
 /// computation the range limit bounds): a reward of 0 or less (NCBI's rmblastn matrix
 /// scoring when the penalty is 0 too, otherwise no valid query), an infinite or NaN
 /// e-value, a hit list size whose preliminary size overflows (`get_prelim_hitlist_size`),
-/// and scores whose range (reward - penalty) is above `MAX_SCORE_RANGE`, where
-/// LOSAT's Karlin-Altschul computation has not been compared with NCBI's. The limit on
-/// greedy gap costs follows the table check (`check_greedy_gap_costs`).
+/// and a reward of `BLAST_SCORE_MAX` or a penalty of `BLAST_SCORE_MIN` (the 16-bit values
+/// after NCBI's conversion). The limit on greedy gap costs follows the table check
+/// (`check_greedy_gap_costs`).
 pub fn check_losat_limits(args: &BlastnArgs) -> anyhow::Result<()> {
     let spec = scoring_spec(args);
     if spec.reward <= 0 {
@@ -139,10 +139,35 @@ pub fn check_losat_limits(args: &BlastnArgs) -> anyhow::Result<()> {
             "a -max_target_seqs of {hitlist_size}, whose preliminary hit list size overflows NCBI BLAST+'s 32-bit int (NCBI crashes), is not supported by LOSAT's BLASTN"
         );
     }
-    let range = i64::from(spec.reward) - i64::from(spec.penalty);
-    if range > MAX_SCORE_RANGE {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1506-1520
+    // ```c
+    //     sbp->loscore = BLAST_SCORE_MAX;
+    //     sbp->hiscore = BLAST_SCORE_MIN;
+    //     matrix = sbp->matrix->data;
+    //     for (index1=0; index1<sbp->alphabet_size; index1++)
+    //     {
+    //       for (index2=0; index2<sbp->alphabet_size; index2++)
+    //       {
+    //          score = matrix[index1][index2];
+    //          if (score <= BLAST_SCORE_MIN || score >= BLAST_SCORE_MAX)
+    //             continue;
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2175-2179
+    // ```c
+    //          score = matrix[index1][index2];
+    //          if (score >= sbp->loscore)
+    //          {
+    //             sfp->sprob[score] += rfp1->prob[index1] * rfp2->prob[index2];
+    //          }
+    // ```
+    // NCBI leaves a reward of BLAST_SCORE_MAX (32767) or a penalty of BLAST_SCORE_MIN
+    // (-32768) out of the score range of the ungapped Karlin-Altschul computation, and then
+    // counts a reward of 32767 beyond the end of the frequency array (oracle: queries made
+    // invalid). LOSAT's scores below these values were compared with NCBI's up to
+    // 24000/-30000 (E2g V1); these two values are rejected.
+    if spec.reward >= i32::from(i16::MAX) || spec.penalty <= i32::from(i16::MIN) {
         anyhow::bail!(
-            "reward {} and penalty {} span more than {MAX_SCORE_RANGE} score units, which is not supported by LOSAT's BLASTN",
+            "a reward of 32767 or a penalty of -32768 (NCBI BLAST+'s BLAST_SCORE_MAX and BLAST_SCORE_MIN, which it leaves out of the score range of its Karlin-Altschul computation) is not supported by LOSAT's BLASTN; reward {} and penalty {} were given",
             spec.reward,
             spec.penalty
         );
@@ -168,10 +193,6 @@ pub fn check_greedy_gap_costs(args: &BlastnArgs) -> anyhow::Result<()> {
 /// #define DBSEQ_CHUNK_OVERLAP 100
 /// ```
 const DBSEQ_CHUNK_OVERLAP: usize = 100;
-
-/// The largest score range (reward - penalty) that LOSAT's BLASTN accepts; pairs up to
-/// 1000/-2000 were compared with NCBI (S07+ independent audit).
-const MAX_SCORE_RANGE: i64 = 3000;
 
 /// The largest gap cost that LOSAT's BLASTN accepts with greedy extension.
 const MAX_GREEDY_GAP_COST: i32 = 32767;
@@ -426,12 +447,22 @@ mod tests {
             &["-reward", "0"][..],
             &["-evalue", "+inf"],
             &["-evalue", "+nan"],
-            &["-reward", "5000", "-penalty", "-1"],
+            &["-reward", "32767", "-penalty", "-1"],
+            &["-reward", "16384", "-penalty", "-32768"],
+            // 98303 is 32767 as NCBI's 16-bit reward.
+            &["-reward", "98303", "-penalty", "-2"],
         ] {
             let parsed = args(words);
             assert!(check_scoring_options(&parsed).is_ok(), "{words:?}");
             let error = check_losat_limits(&parsed).unwrap_err().to_string();
             assert!(error.contains("not supported by LOSAT's BLASTN"), "{error}");
+        }
+        // Scores below the 16-bit limits are accepted (E2g V1).
+        for words in [
+            &["-reward", "5000", "-penalty", "-1"][..],
+            &["-reward", "32766", "-penalty", "-32767"],
+        ] {
+            assert!(check_losat_limits(&args(words)).is_ok(), "{words:?}");
         }
     }
 

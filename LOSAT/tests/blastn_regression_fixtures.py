@@ -160,6 +160,14 @@ _CASES = [
     ("warnings.batches.fmt0", f"-query {I}/warn_query.fa -subject {I}/warn_subject.fa -outfmt 0", ""),
     ("warnings.batch1000.fmt7", f"-query {I}/warn_query.fa -subject {I}/warn_subject.fa -task blastn -outfmt 7", "",
      "BATCH_SIZE=1000"),
+    # E2g V1: scores beyond the former 3000-unit limit (gcd-scaled table pairs).
+    ("scores.10000_20000", f"{T} -max_target_seqs 20 -reward 10000 -penalty -20000 -outfmt 6", ""),
+    ("scores.16383_32766_gaps", f"{T} -max_target_seqs 20 -reward 16383 -penalty -32766 -gapopen 16383"
+                                " -gapextend 32766 -outfmt 6", ""),
+    ("scores.24000_30000_task_blastn", f"{T} -task blastn -max_target_seqs 20 -reward 24000 -penalty -30000"
+                                       " -gapopen 30000 -gapextend 30000 -outfmt 6", ""),
+    ("scores.6000_21000_fmt0", f"{P} -max_target_seqs 3 -reward 6000 -penalty -21000 -gapopen 30000"
+                               " -gapextend 30000 -outfmt 0", ""),
     # E2g T11: showdefline.cpp kBits is "(bits)" when CTOOLKIT_COMPATIBLE is set (also empty).
     ("ctoolkit.fmt0", f"{P} -max_target_seqs 3 -outfmt 0", "", "CTOOLKIT_COMPATIBLE=1"),
     ("ctoolkit.empty_fmt0", f"{T} -task blastn -max_target_seqs 5 -outfmt 0", "", "CTOOLKIT_COMPATIBLE="),

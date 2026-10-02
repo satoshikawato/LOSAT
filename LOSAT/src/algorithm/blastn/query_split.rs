@@ -167,6 +167,39 @@ pub fn calculate_num_chunks(sizes: SplitSizes, concatenated_query_length: usize)
     (num_chunks as usize, chunk_size as usize)
 }
 
+/// Whether NCBI's setup of some query chunk would split that chunk again: each chunk's
+/// search builds its own query splitter with the same chunk size and overlap, and only a
+/// debug build asserts that it does not split. When it does (an overlap close to the chunk
+/// size), the release build skips the chunk's lookup table and stops with a null reference.
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_aux_priv.cpp:190-201
+/// ```c
+///     BlastSeqSrc* seqsrc =
+///         BlastSeqSrcCopy(full_data->m_SeqSrc->GetPointer());
+///     CRef<SBlastSetupData> setup_data =
+///         BlastSetupPreliminarySearchEx(
+///                 qf, options,
+///                 CRef<objects::CPssmWithParameters>(),
+///                 seqsrc, num_threads);
+///     BlastSeqSrcResetChunkIterator(seqsrc);
+///     setup_data->m_InternalData->m_SeqSrc.Reset(new TBlastSeqSrc(seqsrc,
+///                                                BlastSeqSrcFree));
+///
+///     _ASSERT(setup_data->m_QuerySplitter->IsQuerySplit() == false);
+/// ```
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_aux_priv.cpp:206-208
+/// ```c
+///     // 5. Create the lookup table
+///     if ( !retval->m_QuerySplitter->IsQuerySplit() ) {
+///         LookupTableWrap* lut =
+/// ```
+pub fn chunk_would_be_split(chunks: &[QueryChunk], sizes: SplitSizes) -> bool {
+    chunks.iter().any(|chunk| {
+        let length = chunk.queries.iter().map(ChunkQuery::len).sum();
+        calculate_num_chunks(sizes, length).0 > 1
+    })
+}
+
 /// The query chunks of a batch with queries of `lengths` residues, or `None` when NCBI
 /// does not split it.
 ///
@@ -777,5 +810,20 @@ mod tests {
         for chunk in &chunks {
             assert!(!chunk.queries.is_empty());
         }
+    }
+
+    // Oracle (E2g audit a): a 30000-residue query with CHUNK_SIZE 3000 fails from
+    // OVERLAP_CHUNK_SIZE 1526 (chunks of 2950 over 1474) and runs at 1525.
+    #[test]
+    fn a_chunk_that_ncbi_would_split_again() {
+        let fails = SplitSizes::new(false, Some(3000), Some(1526));
+        let chunks = split_query_batch(&[30_000], fails).expect("split");
+        assert!(chunk_would_be_split(&chunks, fails));
+        let runs = SplitSizes::new(false, Some(3000), Some(1525));
+        let chunks = split_query_batch(&[30_000], runs).expect("split");
+        assert!(!chunk_would_be_split(&chunks, runs));
+        let default = SplitSizes::default_for(false);
+        let chunks = split_query_batch(&[1_999_800], default).expect("split");
+        assert!(!chunk_would_be_split(&chunks, default));
     }
 }

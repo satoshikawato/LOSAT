@@ -191,6 +191,14 @@ _CASES = [
                                        " -gapopen 30000 -gapextend 30000 -outfmt 6", ""),
     ("scores.6000_21000_fmt0", f"{P} -max_target_seqs 3 -reward 6000 -penalty -21000 -gapopen 30000"
                                " -gapextend 30000 -outfmt 0", ""),
+    # Approved exception 2 of PD-LOSAT-NCBI-DEFECTS: subjects whose deflines are only
+    # punctuation (NCBI reads past the end of their outfmt 0 titles and crashes when such a
+    # subject has hits; docs/evidence/losat_web_e2g/punct_defline/). Without hits on them NCBI
+    # runs and LOSAT must equal it. punct_query.fa and punct_nohit_subject.fa come from that
+    # validation, not from `generate`.
+    ("punct.nohit_fmt0", f"-query {I}/punct_query.fa -subject {I}/punct_nohit_subject.fa -outfmt 0", ""),
+    ("punct.nohit_task_blastn_fmt0", f"-query {I}/punct_query.fa -subject {I}/punct_nohit_subject.fa"
+                                     " -task blastn -outfmt 0", ""),
     # E2g T11: showdefline.cpp kBits is "(bits)" when CTOOLKIT_COMPATIBLE is set (also empty).
     ("ctoolkit.fmt0", f"{P} -max_target_seqs 3 -outfmt 0", "", "CTOOLKIT_COMPATIBLE=1"),
     ("ctoolkit.empty_fmt0", f"{T} -task blastn -max_target_seqs 5 -outfmt 0", "", "CTOOLKIT_COMPATIBLE="),

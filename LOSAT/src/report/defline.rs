@@ -50,8 +50,8 @@
 //! removes the prefixes; the description table keeps them (`fLeavePrefixSuffix`,
 //! showdefline.cpp:498). For some titles of commas, semicolons, tildes and spaces, NCBI's
 //! `x_CleanAndCompress` lets its count of the remaining letters wrap and reads past the
-//! end of the string (and crashes); `clean_and_compress` counts as NCBI does and gives
-//! `None` there.
+//! end of the string (and crashes); `clean_and_compress` stops at the end of the string
+//! there (approved exception 2 of PD-LOSAT-NCBI-DEFECTS).
 
 /// NCBI reference: c++/src/objmgr/util/create_defline.cpp:3431-3446
 /// ```c
@@ -90,9 +90,8 @@ const TPA_PREFIXES: [&str; 14] = [
 ];
 
 /// The title of a nucleotide subject with the defline `defline` (the text after `>`),
-/// for the alignment heading (`leave_prefix` false) or the description table (true), or
-/// `None` where NCBI reads past the end of the title (see the module).
-pub fn ncbi_nucleotide_title(defline: &str, leave_prefix: bool) -> Option<String> {
+/// for the alignment heading (`leave_prefix` false) or the description table (true).
+pub fn ncbi_nucleotide_title(defline: &str, leave_prefix: bool) -> String {
     let mut title = defline.as_bytes().to_vec();
     trim_end_of(&mut title, b".,;~ ");
     if !leave_prefix {
@@ -107,8 +106,8 @@ pub fn ncbi_nucleotide_title(defline: &str, leave_prefix: bool) -> Option<String
     }
     trim_leading_spaces(&mut title);
     trim_end_of(&mut title, b",;~ ");
-    let cleaned = clean_and_compress(&title, false)?;
-    Some(String::from_utf8(cleaned).expect("ASCII deflines"))
+    let cleaned = clean_and_compress(&title, false);
+    String::from_utf8(cleaned).expect("ASCII deflines")
 }
 
 /// Whether the text may hold a character reference that `NStr::HtmlDecode` decodes: an `&`
@@ -153,7 +152,8 @@ fn trim_leading_spaces(text: &mut Vec<u8>) {
     text.drain(..first);
 }
 
-/// NCBI's `x_CleanAndCompress`, byte for byte (the titles are ASCII).
+/// NCBI's `x_CleanAndCompress`, byte for byte (the titles are ASCII), except that it stops
+/// at the end of the string where NCBI's count of the remaining letters wraps (see below).
 ///
 /// NCBI reference: c++/src/objmgr/util/create_defline.cpp:219-312
 /// ```c
@@ -213,7 +213,7 @@ fn trim_leading_spaces(text: &mut Vec<u8>) {
 ///         *out++ = curr;
 ///     }
 /// ```
-fn clean_and_compress(input: &[u8], is_protein: bool) -> Option<Vec<u8>> {
+fn clean_and_compress(input: &[u8], is_protein: bool) -> Vec<u8> {
     let mut start = 0;
     let mut end = input.len();
     while start < end && input[start] == b' ' {
@@ -225,7 +225,7 @@ fn clean_and_compress(input: &[u8], is_protein: bool) -> Option<Vec<u8>> {
     let text = &input[start..end];
     let mut out = Vec::with_capacity(text.len());
     if text.is_empty() {
-        return Some(out);
+        return out;
     }
     // Past the end reads the terminating NUL of the C++ string.
     let at = |index: usize| text.get(index).copied().unwrap_or(0);
@@ -260,16 +260,19 @@ fn clean_and_compress(input: &[u8], is_protein: bool) -> Option<Vec<u8>> {
                 while next == b' ' || next == separator {
                     next = at(index);
                     index += 1;
-                    // Where NCBI's `left` (a size_t) would wrap, its loop runs past the
-                    // string (it reads the terminating NUL and on).
-                    left = left.checked_sub(1)?;
+                    // Where NCBI's `left` (a size_t) wraps, for a run of spaces and
+                    // separators that reaches the end of the string, its loop runs past the
+                    // string (it reads the terminating NUL and on, and crashes). LOSAT stops
+                    // at the end of the string (approved exception 2 of
+                    // PD-LOSAT-NCBI-DEFECTS): `next` is the NUL and nothing more is written.
+                    left = left.saturating_sub(1);
                 }
                 two_chars = u16::from(next);
             }
             _ => out.push(curr),
         }
         curr = next;
-        left = left.checked_sub(1)?;
+        left = left.saturating_sub(1);
     }
     if curr > 0 && curr != b' ' {
         out.push(curr);
@@ -278,9 +281,9 @@ fn clean_and_compress(input: &[u8], is_protein: bool) -> Option<Vec<u8>> {
         let replaced = String::from_utf8_lossy(&out)
             .replace(". [", " [")
             .replace(", [", " [");
-        return Some(replaced.into_bytes());
+        return replaced.into_bytes();
     }
-    Some(out)
+    out
 }
 
 #[cfg(test)]
@@ -311,28 +314,34 @@ mod tests {
             ("s1.x.", "s1.x", "s1.x"),
         ] {
             assert_eq!(
-                ncbi_nucleotide_title(defline, false).unwrap(),
+                ncbi_nucleotide_title(defline, false),
                 heading,
                 "{defline:?}"
             );
             assert_eq!(
-                ncbi_nucleotide_title(defline, true).unwrap(),
+                ncbi_nucleotide_title(defline, true),
                 description,
                 "{defline:?}"
             );
         }
-        // NCBI BLAST+ 2.17.0 crashes on these outfmt 0 titles (x_CleanAndCompress reads
-        // past the string); `, ;` and `,,` do not.
-        for defline in [
-            ", ,", "; ;", "~, ,", ",, ,", ", ,,", ";  ;", ", , ,", ",~, ,",
+        // NCBI BLAST+ 2.17.0 crashes on the outfmt 0 titles of the first group
+        // (x_CleanAndCompress reads past the string); LOSAT stops at the end of the string
+        // (approved exception 2 of PD-LOSAT-NCBI-DEFECTS). The second group is NCBI's.
+        for (defline, title) in [
+            (", ,", ", "),
+            ("; ;", "; "),
+            ("~, ,", "~, "),
+            (",, ,", ",  "),
+            (", ,,", ", "),
+            (";  ;", "; "),
+            (", , ,", ", "),
+            (",~, ,", ",~, "),
+            (", ;", ", ;"),
+            (",,", ","),
+            ("a, ,b", "a, b"),
+            (", ,a", ", a"),
         ] {
-            assert_eq!(ncbi_nucleotide_title(defline, false), None, "{defline:?}");
-        }
-        for defline in [", ;", ",,", "a, ,b", ", ,a"] {
-            assert!(
-                ncbi_nucleotide_title(defline, false).is_some(),
-                "{defline:?}"
-            );
+            assert_eq!(ncbi_nucleotide_title(defline, false), title, "{defline:?}");
         }
     }
 

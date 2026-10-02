@@ -1,0 +1,42 @@
+[
+ {
+  "task": "megablast",
+  "extra": "",
+  "losat_exit": 0,
+  "ncbi_punct_exit": -11,
+  "ncbi_place_exit": 0,
+  "same_after_substitution": true,
+  "losat_stderr": "",
+  "ncbi_punct_stderr": ""
+ },
+ {
+  "task": "megablast",
+  "extra": "-max_target_seqs 3",
+  "losat_exit": 0,
+  "ncbi_punct_exit": -11,
+  "ncbi_place_exit": 0,
+  "same_after_substitution": true,
+  "losat_stderr": "Warning: [blastn] Examining 5 or more matches is recommended\n",
+  "ncbi_punct_stderr": "Warning: [blastn] Examining 5 or more matches is recommended\n"
+ },
+ {
+  "task": "blastn",
+  "extra": "",
+  "losat_exit": 0,
+  "ncbi_punct_exit": -11,
+  "ncbi_place_exit": 0,
+  "same_after_substitution": true,
+  "losat_stderr": "",
+  "ncbi_punct_stderr": ""
+ },
+ {
+  "task": "blastn",
+  "extra": "-max_target_seqs 3",
+  "losat_exit": 0,
+  "ncbi_punct_exit": -11,
+  "ncbi_place_exit": 0,
+  "same_after_substitution": true,
+  "losat_stderr": "Warning: [blastn] Examining 5 or more matches is recommended\n",
+  "ncbi_punct_stderr": "Warning: [blastn] Examining 5 or more matches is recommended\n"
+ }
+]

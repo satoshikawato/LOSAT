@@ -1,0 +1,11 @@
+# E2g independent audit, round 4 (the fix of the round-3 D4 residual)
+
+Follow COMMON.md (read-only). FINAL_BINARY: /home/kawato/.cache/losat-web-gui-target/e2g-bins/AC8/LOSAT (engine f4057718a). Work dir: /home/kawato/.cache/losat-web-gui-target/e2g-audit/r4/. Use at most 6 concurrent processes (the gates run at the same time). Read ROUND3.md for the decisions and approved exceptions; they still hold.
+
+f4057718a writes the outfmt 0 prolog (and flushes it) before the first query batch is read and searched, as NCBI's PrintProlog (blastn_app.cpp:258) before CBatchSizeMixer and the batch loop; the report writer then skips it (BlastnPairwiseReport.prolog; a File sink keeps the old order). Read the diff (`git show f4057718a`).
+
+Tasks:
+1. Re-run the round-3 part A case files r3a/CASES_X.tsv and r3a/CASES_MINI.tsv (driver r3a/lib.py with LIB_LOSAT set to FINAL_BINARY; copy what you need into r4/) and report every difference with its class.
+2. Look for regressions of the move: outfmt 0 (and 0 together with 6/7 where the web API allows several formats: LOSAT/src/web_api.rs, web/adapter) in merged (2>&1) and separate streams for: an empty query file and a query file of only blank lines (Query is Empty!), -max_target_seqs 1..4 (its warning first), CHUNK_SIZE=1000 without BATCH_SIZE (prolog then Empty CBlastQueryVector, exit 3), the Karlin-Altschul error of the first batch (-reward 1 -penalty -6 with valid queries) and after a first batch of invalid queries (tests/fasta/outfmt0/edge_batch_allN.fasta), title warnings in the first and later batches (BATCH_SIZE 1, 200), a missing -subject, -subject of an empty file, LOSAT's explicit rejections that come after Query is Empty! (for example -reward 0, -evalue nan(...) forms that are rejected, HTML character references in subject deflines with outfmt 0) — for these, report what LOSAT prints on stdout before its rejection compared with NCBI. Also stdout and -out to /dev/full for each. At least 300 compared runs.
+3. Run `cargo test --locked --all-features --target-dir /home/kawato/.cache/losat-web-gui-target/e2g-r4-test` in LOSAT/ only if needed to understand a failure (CARGO_PROFILE_TEST_OPT_LEVEL=1, RUSTUP_TOOLCHAIN=1.92.0).
+4. Verdict: supported / unsupported / inconclusive, with every difference classified. Give the findings in your final message.

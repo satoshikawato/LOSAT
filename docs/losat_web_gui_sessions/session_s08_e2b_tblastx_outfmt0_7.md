@@ -18,6 +18,23 @@ S07+ で分かった、TBLASTX にも当てはまる NCBI の振る舞い（`doc
 
 完了条件は計画 §7 の S08 の行による。記録は `docs/evidence/losat_web_e2b/README.md`。
 
+## S07+++b からの引き継ぎ（2026-10-02 の実測）
+
+S07+++b（E2g）は BLASTN の棚卸し（`docs/evidence/losat_web_e2g/INVENTORY.tsv`、1015 行）の一括の transpile を終え、独立監査は第 4 回で supported になった（[ゲート記録](../evidence/losat_web_e2g/README.md)）。毎晩の WASI の TIMEOUT（`threaded/tblastx/p11_avclpv_psclpv`）は runner の差で、TBLASTX の速度の退行ではない（手元の 4 コアで HEAD 相当 2164 秒、緑の run の成果物 2809 秒）。期限を 7200 秒にした（`beea0bddf`）ので、S08 の最初の作業にはしない。S08 で使えること、守ること：
+
+- **進め方：** オーケストレータは Opus（設計を伴う作業：移植の設計と実装、監査の指摘の判断、agent の成果の確認）。機械的な作業（NCBI との比較の実行、sweep、ゲート、記録の下書き、決まった観点の走査）は Agent ツールに `model: "sonnet"` で回す。sonnet の agent は互いに独立なら 4 つを超えて並行してよい。エンジンのソースの変更、ゲート、V-PERF は 1 つずつ。agent には結果を途中でファイルに書かせ、作業ディレクトリと `--target-dir` を分ける。
+- **棚卸しの方式（DW-12）：** S08 以降も、NCBI の経路の関数を棚卸しして（`docs/evidence/losat_web_e2g/` の `inventory_refs.py`・`build_inventory.py`・`stage2/` の方式）、未移植と差のある移植を一括で移す。
+- **NCBI の不具合の扱い（DW-15、`docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md`）：** NCBI が落ちる・debug でだけ防ぐ前提が崩れる・buffer の外を読む入力は、近い入力の NCBI の出力と一致を示せる妥当な結果を LOSAT が出せるなら承認済みの例外（保守者に諮る）。NCBI が決まった結果を出すものは、見かけが誤りでも再現する。妥当な結果を確かめられない失敗は明示的な拒否。NCBI が受け付ける入力は移植する。そのような挙動が見つかったら、まとめて保守者の判断を仰ぐ（保守者の指示）。TBLASTX の outfmt 0 の題も BLASTN と同じ `ncbi_nucleotide_title` で、句読点だけの題は文字列の終わりで止める（例外 2）。
+- **項目ごとの検査：** `~/.cache/losat-web-gui-target/s07p-resume/e2g_item_check.sh <項目> <変えた .rs>` が、pure-Rust の境界の検査（CI の `rust` のジョブと同じ `LOSAT/tests/check_pure_rust_runtime_boundary.py`）、`verify_refs.py`、fmt、clippy、`cargo test --all-features`（`opt-level=1`）、release のビルド、`ci_fast_regressions.py` をまとめて行う。`extern "C"` の import はこの検査が拒否する。
+- **NCBI の凍結 fixture：** `LOSAT/tests/blastn_regression_fixtures.py` は case ごとの環境変数（列 `env`）、NCBI だけの環境（列 `oracle_env`：NCBI が失敗する承認済みの例外の期待値を、近い設定の NCBI の出力で凍結する）、stderr を stdout に合わせた case（case の名前の末尾 `.merged`）を持てる。TBLASTX でも同じ方式の fixture を作り、変更前の実行ファイルでも `check` して、case がその分岐を区別することを記録する。
+- **警告と報告の順（BLASTN、`e37099f44`・`f4057718a`）：** NCBI は警告を cerr に出し、cerr は cout に tie されているので、警告の前に書いた分の stdout が出る（`2>&1` で観測できる）。outfmt 0 の prolog は最初の query の batch を読む前に書いて flush し、書き込みの失敗はそこで止まる。LOSAT は `report/query_warnings.rs` の `QueryWarnings`（各 query の報告の前で、報告を flush してから警告を書く）と、`run.rs` の `write_pairwise_prologs` で同じにした。TBLASTX の outfmt 0/7 を作るときも、stdout と stderr を 1 つにした NCBI との比較を入れる。NCBI の flush の位置は gdb で write の system call を数えると分かる（`docs/evidence/losat_web_e2g/order/flushmap.py`）。
+- **outfmt 0 の書き込みの失敗：** 「BLAST failed to write output」、終了コード 6（`/dev/full`）。閉じたパイプは承認済みの例外 5（LOSAT は同じ文言と終了コード 6、NCBI は SIGPIPE）。TBLASTX の outfmt 0 も同じ扱いにする。
+- **`CTOOLKIT_COMPATIBLE`：** 共有の outfmt 0 の説明の一覧の見出しは「(bits)」になる（`report/pairwise.rs`）。TBLASTX の outfmt 0 を作ったら、変数を与えた NCBI との比較に TBLASTX を足す（S07+++b では TBLASTX に outfmt 0 が無く、比べられなかった 4 件）。
+- **`%#8.3g`：** Lambda・K・H の書き方は C と同じになった（全 program 共有）。
+- **NCBI の application の層：** `LOSAT/src/blastinput/ncbi_environment.rs` の `check_ncbi_application_settings(program)` が、`DIAG_*`・`NCBI_CONFIG_*` などと、出力を変える `<program>.ini`・`.ncbirc` を拒否する。今は blastn だけが呼ぶ（`main.rs`）。S08+ でほかの program の入口にも足す。
+- **整数でない環境変数の値：** 明示的に拒否する（計画 TD-15）。
+- **保守者の確認を待つ細部（BLASTN、ゲート記録の「残件」）：** 負の `CHUNK_SIZE` の組で batch を分けるがもう一度は分けない場合（拒否のまま）、reward 32768 以上（拒否のまま）、outfmt 6/7 の閉じたパイプの時間に依る終了コード 0。
+
 ## 終了・引き継ぎ
 
 README の規則 8 に従う。次は [S08+ — BLASTP・TBLASTN・TBLASTX の既定以外のオプション](session_s08p_e2e_protein_options.md)。

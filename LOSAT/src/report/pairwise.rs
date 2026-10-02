@@ -2674,16 +2674,41 @@ fn write_tblastx_epilog<W: Write>(
     )?;
     writeln!(writer, "Matrix: BLOSUM62")?;
     if report.word_threshold != 0 {
+        // `GetWordThreshold()` is a double, written with the stream's default format.
         writeln!(
             writer,
             "Neighboring words threshold: {}",
-            report.word_threshold
+            cpp_default_double(f64::from(report.word_threshold))
         )?;
     }
     if report.window_size != 0 {
         writeln!(writer, "Window for multiple hits: {}", report.window_size)?;
     }
     Ok(())
+}
+
+/// A `double` written to a C++ stream with the default flags: `%g` with precision 6
+/// (`1e+06` for 1000000, `1.23457e+06` for 1234567).
+fn cpp_default_double(value: f64) -> String {
+    fn trim(text: &str) -> &str {
+        if text.contains('.') {
+            text.trim_end_matches('0').trim_end_matches('.')
+        } else {
+            text
+        }
+    }
+    if value == 0.0 {
+        return "0".to_string();
+    }
+    let scientific = format!("{value:.5e}");
+    let (mantissa, exponent) = scientific.split_once('e').expect("exponent");
+    let exponent: i32 = exponent.parse().expect("exponent digits");
+    if !(-4..6).contains(&exponent) {
+        let sign = if exponent < 0 { '-' } else { '+' };
+        format!("{}e{sign}{:02}", trim(mantissa), exponent.abs())
+    } else {
+        trim(&format!("{value:.*}", (5 - exponent) as usize)).to_string()
+    }
 }
 
 /// Writes the TBLASTX pairwise report (outfmt 0).
@@ -4282,6 +4307,22 @@ fn percent_match_matches_independent_pinned_cpp_edges() {
 #[cfg(test)]
 mod tblastx_tests {
     use super::*;
+
+    #[test]
+    fn thresholds_are_written_as_a_cpp_stream_writes_a_double() {
+        for (value, text) in [
+            (11.0, "11"),
+            (999999.0, "999999"),
+            (1000000.0, "1e+06"),
+            (1234567.0, "1.23457e+06"),
+            (2147483647.0, "2.14748e+09"),
+            (12.5, "12.5"),
+            (0.0001, "0.0001"),
+            (0.00001, "1e-05"),
+        ] {
+            assert_eq!(cpp_default_double(value), text, "{value}");
+        }
+    }
 
     fn tblastx_hit(sum_n: i32) -> PairwiseHit {
         let query: String = "ACDEFGHIKL".repeat(6) + "M";

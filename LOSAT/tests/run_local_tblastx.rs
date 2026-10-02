@@ -298,3 +298,48 @@ fn outfmt0_rejects_subject_titles_that_ncbi_reads_past_or_decodes() {
         }
     }
 }
+
+// NCBI reference: c++/src/objtools/readers/fasta.cpp:919-935 (CFastaReader: a residue that is
+// not an IUPAC nucleotide letter is removed with a warning) and the "Sequence contains no
+// data" warning of a record without residues; LOSAT rejects both, as BLASTN does. NCBI culls
+// with hspfilter_culling.c, which LOSAT's culling does not reproduce.
+#[test]
+fn inputs_ncbi_reads_differently_and_culling_are_rejected() {
+    let inputs = Inputs::new();
+    let queries = read_records(&inputs.query.0);
+    let subjects = read_records(&inputs.subject.0);
+    let sequence = fixture_sequence("LC738884.fasta");
+    let mut with_digit = sequence[1_000..3_000].to_vec();
+    with_digit[700] = b'7';
+    let digit = TempFasta::new("tblastx_digit.fna", &[("digit", &with_digit)]);
+    let empty = TempFasta::new(
+        "tblastx_empty_record.fna",
+        &[("empty", &[][..]), ("full", &sequence[0..900])],
+    );
+    let run = |extra: &[&str], queries: &[_], subjects: &[_]| {
+        let (mut report, mut diagnostics) = (Vec::new(), Vec::new());
+        let mut outputs =
+            ReportOutputs::single("6", OutputSink::Writer(&mut report), &mut diagnostics);
+        let result = run_local_tblastx(inputs.args(extra), queries, subjects, &mut outputs);
+        drop(outputs);
+        assert!(report.is_empty() && diagnostics.is_empty());
+        result.expect_err("rejected").to_string()
+    };
+    let error = run(&[], &read_records(&digit.0), &subjects);
+    assert!(
+        error.contains("query record 1 (digit) has '7' at residue 701")
+            && error.contains("LOSAT's TBLASTX"),
+        "{error}"
+    );
+    let error = run(&[], &queries, &read_records(&empty.0));
+    assert!(
+        error.contains("subject record 1 (empty) has no residues")
+            && error.contains("LOSAT's TBLASTX"),
+        "{error}"
+    );
+    let error = run(&["-culling_limit", "2"], &queries, &subjects);
+    assert!(
+        error.contains("-culling_limit 2 is not supported by LOSAT's TBLASTX"),
+        "{error}"
+    );
+}

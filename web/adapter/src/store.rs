@@ -44,10 +44,15 @@ pub fn register(program: &str, role: u32, bytes: &[u8]) -> Result<(u32, String),
         other => return Err(format!("unknown input role {other}")),
     };
     use LOSAT::algorithm::blastn::input as blastn_input;
-    let blastn = program == Program::Blastn;
-    // BLASTN, as the CLI: a file of white space only has no record (NCBI's empty query, or
-    // its error for no subject at run time).
-    let records = if blastn && blastn_input::is_blank(bytes) {
+    // The nucleotide programs whose CLI reads its FASTA inputs as BLASTN's does.
+    let nucleotide = match program {
+        Program::Blastn => Some("BLASTN"),
+        Program::Tblastx => Some("TBLASTX"),
+        _ => None,
+    };
+    // BLASTN and TBLASTX, as the CLI: a file of white space only has no record (NCBI's
+    // empty query, or its error for no subject at run time).
+    let records = if nucleotide.is_some() && blastn_input::is_blank(bytes) {
         Vec::new()
     } else {
         // BLASTP, TBLASTN, BLASTN and TBLASTX read their inputs with bio::io::fasta.
@@ -55,10 +60,9 @@ pub fn register(program: &str, role: u32, bytes: &[u8]) -> Result<(u32, String),
             .records()
             .collect::<Result<Vec<_>, _>>()
             .map_err(|error| {
-                let unsupported = if blastn {
-                    format!(" ({})", blastn_input::UNREADABLE_FASTA)
-                } else {
-                    String::new()
+                let unsupported = match nucleotide {
+                    Some(name) => format!(" ({})", blastn_input::unreadable_fasta(name)),
+                    None => String::new(),
                 };
                 format!("failed to read {role_name} FASTA: {error}{unsupported}")
             })?;
@@ -68,12 +72,12 @@ pub fn register(program: &str, role: u32, bytes: &[u8]) -> Result<(u32, String),
         check_scan(role_name, &scanned, &records)?;
         records
     };
-    // BLASTN rejects the inputs that NCBI BLAST+ reads differently from bio.
-    if blastn {
-        blastn_input::check_deflines(bytes, role_name)
-            .and_then(|()| blastn_input::check_sequence_lines(bytes, role_name))
-            .and_then(|()| blastn_input::check_residues(&records, role_name))
-            .and_then(|()| blastn_input::check_records_have_residues(&records, role_name))
+    // BLASTN and TBLASTX reject the inputs that NCBI BLAST+ reads differently from bio.
+    if let Some(name) = nucleotide {
+        blastn_input::check_deflines_of(bytes, role_name, name)
+            .and_then(|()| blastn_input::check_sequence_lines_of(bytes, role_name, name))
+            .and_then(|()| blastn_input::check_residues_of(&records, role_name, name))
+            .and_then(|()| blastn_input::check_records_have_residues_of(&records, role_name, name))
             .map_err(|error| format!("{error:#}"))?;
     }
     let mut response = String::from("{\"handle\":");

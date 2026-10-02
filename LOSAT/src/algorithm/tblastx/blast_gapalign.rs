@@ -104,6 +104,58 @@ pub fn trace_init_hsp_if_match(stage: &str, init: &InitHSP, contexts: &[QueryCon
     }
 }
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:274-304
+// ```c
+// static int score_compare_match(const void *v1, const void *v2)
+// {
+//     ...
+//     if (0 == (result = BLAST_CMP(h2->ungapped_data->score,
+//                                  h1->ungapped_data->score)) &&
+//         0 == (result = BLAST_CMP(h1->ungapped_data->s_start,
+//                                  h2->ungapped_data->s_start)) &&
+//         0 == (result = BLAST_CMP(h2->ungapped_data->length,
+//                                  h1->ungapped_data->length)) &&
+//         0 == (result = BLAST_CMP(h1->ungapped_data->q_start,
+//                                  h2->ungapped_data->q_start))) {
+//         result = BLAST_CMP(h2->ungapped_data->length,
+//                            h1->ungapped_data->length);
+//     }
+//     return result;
+// }
+// ```
+// `q_start` is still the absolute offset in the concatenated query buffer here
+// (s_AdjustInitialHSPOffsets runs later, in BLAST_GetUngappedHSPList), so this
+// comparator orders HSPs that have identical context-relative coordinates in
+// different query frames by context. ScoreCompareHSPs (blast_hits.c:1330-1353)
+// cannot: it only sees context-relative offsets and ties.
+fn score_compare_init_hsps_ncbi(a: &InitHSP, b: &InitHSP) -> Ordering {
+    b.score
+        .cmp(&a.score)
+        .then_with(|| a.s_start.cmp(&b.s_start))
+        .then_with(|| (b.s_end - b.s_start).cmp(&(a.s_end - a.s_start)))
+        .then_with(|| a.q_start_absolute.cmp(&b.q_start_absolute))
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:306-310
+// ```c
+// void Blast_InitHitListSortByScore(BlastInitHitList * init_hitlist)
+// {
+//     qsort(init_hitlist->init_hsp_array, init_hitlist->total,
+//           sizeof(BlastInitHSP), score_compare_match);
+// }
+// ```
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:234-235
+// ```c
+// Blast_InitHitListSortByScore(init_hitlist);
+// return status;
+// ```
+// (end of BlastAaWordFinder, the tblastx word finder, once per subject chunk.)
+// glibc's qsort is a stable merge sort and `slice::sort_by` is stable, so
+// comparator-equal records keep their scan order in both.
+pub(crate) fn sort_init_hsps_by_score_ncbi(init_hsps: &mut [InitHSP]) {
+    init_hsps.sort_by(score_compare_init_hsps_ncbi);
+}
+
 /// NCBI s_AdjustInitialHSPOffsets equivalent
 ///
 /// Reference: blast_gapalign.c:2384-2392
@@ -505,6 +557,24 @@ mod tests {
             hsp_link_num: 0,
             num: 0,
         }
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:274-310
+    // score_compare_match breaks score/s_start/length ties on the ABSOLUTE
+    // q_start, so equal context-relative HSPs of different query frames leave
+    // the word finder in context order whatever their scan order was.
+    #[test]
+    fn test_sort_init_hsps_orders_equal_relative_hits_by_absolute_query_start() {
+        let mut ctx2_first = make_init_hsp(20 + 7, 20 + 17, 519, 529, 42);
+        ctx2_first.ctx_idx = 2;
+        let mut ctx0_second = make_init_hsp(7, 17, 519, 529, 42);
+        ctx0_second.ctx_idx = 0;
+        let mut hsps = vec![ctx2_first, ctx0_second];
+        sort_init_hsps_by_score_ncbi(&mut hsps);
+        assert_eq!(
+            hsps.iter().map(|h| h.ctx_idx).collect::<Vec<_>>(),
+            vec![0, 2]
+        );
     }
 
     #[test]

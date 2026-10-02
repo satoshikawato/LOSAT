@@ -4,7 +4,7 @@
 
 use crate::stats::sum_statistics::{
     defaults::{GAP_SIZE, OVERLAP_SIZE},
-    gap_decay_divisor, large_gap_sum_e, normalize_score, small_gap_sum_e,
+    gap_decay_divisor, ncbi_large_gap_sum_e, normalize_score, small_gap_sum_e,
 };
 use crate::stats::KarlinParams;
 use std::cell::RefCell;
@@ -176,9 +176,25 @@ fn blast_nint(x: f64) -> i32 {
 // else if (context1 > context2)
 //    return 1;
 // ```
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_query_info.c:76-77
+// ```c
+//     retval->first_context = 0;
+//     retval->last_context = retval->num_queries * kNumContexts - 1;
+// ```
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_util.c:1373-1376
+// ```c
+// BLAST_GetNumberOfContexts(EBlastProgramType p)
+// {
+//     if (Blast_QueryIsTranslated(p)) {
+//         return NUM_FRAMES;
+// ```
+// Every query has six contexts in NCBI, also a frame without a residue, so
+// `context/(NUM_FRAMES/2)` is `2 * query + (frame < 0)`. LOSAT's `ctx_idx` counts only the
+// frames that have a residue (none for 1-2 nt, two for 3 nt, four for 4 nt), so it would
+// shift the groups of the queries after such a query in the batch.
 #[inline]
 fn translated_context_group(hit: &UngappedHit) -> usize {
-    hit.ctx_idx / 3
+    hit.q_idx as usize * 2 + usize::from(hit.q_frame < 0)
 }
 
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:331-375
@@ -2000,7 +2016,7 @@ fn link_hsp_group_ncbi(
                 let num = pool_hsp_links[bi].num[1] as usize;
                 let xsum = pool_hsp_links[bi].xsum[1];
                 let divisor = gap_decay_divisor(gap_decay_rate, num);
-                prob[1] = large_gap_sum_e(
+                prob[1] = ncbi_large_gap_sum_e(
                     num as i16,
                     xsum,
                     eff_query_len as i32,
@@ -2030,7 +2046,7 @@ fn link_hsp_group_ncbi(
                 let num = pool_hsp_links[bi].num[1] as usize;
                 let xsum = pool_hsp_links[bi].xsum[1];
                 let divisor = gap_decay_divisor(gap_decay_rate, num);
-                prob[1] = large_gap_sum_e(
+                prob[1] = ncbi_large_gap_sum_e(
                     num as i16,
                     xsum,
                     eff_query_len as i32,
@@ -2805,6 +2821,25 @@ mod tests {
             chain_next_link_id: None,
             hsp_link_num: 0,
             num: 0,
+        }
+    }
+
+    #[test]
+    fn context_groups_are_query_and_strand_whatever_the_frames_before() {
+        // A 3-nt query has only frames +1 and -1 in LOSAT (`ctx_idx` 0 and 1); the next
+        // query's frames are `ctx_idx` 2..7. NCBI's groups (`context / 3`, six contexts per
+        // query) are 2 * query + strand.
+        let frames = [1i8, 2, 3, -1, -2, -3];
+        for (offset, &frame) in frames.iter().enumerate() {
+            let mut hit = mock_hit(0, 10, 0, 10, 1);
+            hit.q_idx = 1;
+            hit.q_frame = frame;
+            hit.ctx_idx = 2 + offset;
+            assert_eq!(
+                translated_context_group(&hit),
+                if frame > 0 { 2 } else { 3 },
+                "{frame}"
+            );
         }
     }
 

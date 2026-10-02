@@ -118,8 +118,8 @@ pub(crate) use super::blast_extend::DiagStruct;
 
 // Import InitHSP and related functions from blast_gapalign module (NCBI blast_gapalign.c equivalent)
 pub(crate) use super::blast_gapalign::{
-    get_ungapped_hsp_list, sort_ungapped_hits_by_score_ncbi, trace_init_hsp_if_match,
-    ungapped_hits_is_sorted_by_score_ncbi, InitHSP,
+    get_ungapped_hsp_list, sort_init_hsps_by_score_ncbi, sort_ungapped_hits_by_score_ncbi,
+    trace_init_hsp_if_match, ungapped_hits_is_sorted_by_score_ncbi, InitHSP,
 };
 
 // Import subject scanning functions from blast_aascan module (NCBI blast_aascan.c equivalent)

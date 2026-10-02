@@ -240,7 +240,7 @@ fn has_seqalign(hsp: &Hsp, gapped: bool) -> bool {
 //                     m_AminoAcid [st] = aa;
 //                 }
 // ```
-fn display_codon(masks: [u8; 3], code: &crate::utils::genetic_code::GeneticCode) -> u8 {
+pub(crate) fn display_codon(masks: [u8; 3], code: &crate::utils::genetic_code::GeneticCode) -> u8 {
     let expansions = [(1, 2), (2, 1), (4, 3), (8, 0)];
     let mut aa = 0;
     for (x, i) in expansions {

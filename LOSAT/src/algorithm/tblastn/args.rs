@@ -550,6 +550,32 @@ pub fn run_local(
         composition_mode2,
         scoring,
     } = args.search_settings()?;
+    // NCBI decodes HTML character references in the outfmt 0 titles of the subjects
+    // (`NStr::HtmlDecode` in `CDeflineGenerator::GenerateDefline`, create_defline.cpp:4066),
+    // which LOSAT does not reproduce (`report/defline.rs`). NCBI's x_CleanAndCompress also
+    // reads past the end of some titles of punctuation and crashes when it writes the title
+    // of such a subject with hits (approved exception 2 of PD-LOSAT-NCBI-DEFECTS covers
+    // BLASTN only).
+    if outputs.formats.iter().any(|format| format.outfmt == "0") {
+        for (index, record) in subject_records.iter().enumerate() {
+            let defline = match record.desc() {
+                Some(desc) => format!("{} {desc}", record.id()),
+                None => record.id().to_string(),
+            };
+            if crate::report::defline::has_html_character_reference(&defline) {
+                anyhow::bail!(
+                    "subject record {} has an HTML character reference (such as &amp;) in its defline, which NCBI BLAST+ decodes in the outfmt 0 titles; this is not supported by LOSAT's TBLASTN",
+                    index + 1
+                );
+            }
+            if crate::report::defline::ncbi_nucleotide_title_reads_past_end(&defline) {
+                anyhow::bail!(
+                    "subject record {} has a defline of punctuation that NCBI BLAST+ reads past its end when it writes the subject's outfmt 0 title (it crashes if the subject has hits); this is not supported by LOSAT's TBLASTN",
+                    index + 1
+                );
+            }
+        }
+    }
     let subject_path = args
         .subject
         .as_ref()

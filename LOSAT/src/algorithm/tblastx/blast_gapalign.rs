@@ -294,6 +294,18 @@ pub fn get_ungapped_hsp_list(
             // ```
             link_id: 0,
             chain_next_link_id: None,
+            hsp_link_num: 0,
+            // NCBI reference: c++/src/algo/blast/core/blast_hits.c:141-145,162
+            // ```c
+            // BlastHSP* Blast_HSPNew(void)
+            // {
+            //      BlastHSP* new_hsp = (BlastHSP*) calloc(1, sizeof(BlastHSP));
+            //      return new_hsp;
+            // }
+            // ...
+            //    new_hsp = Blast_HSPNew();
+            // ```
+            num: 0,
         };
         trace_ungapped_hit_if_match("after_get_ungapped_hsp_list", &uh);
         ungapped_hits.push(uh);
@@ -490,6 +502,8 @@ mod tests {
             start_of_chain: false,
             link_id: 0,
             chain_next_link_id: None,
+            hsp_link_num: 0,
+            num: 0,
         }
     }
 

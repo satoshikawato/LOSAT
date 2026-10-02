@@ -5274,7 +5274,7 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     let outfmt = args.outfmt.clone();
     let pairwise = output_formats.contains(&BlastnOutputFormat::Pairwise);
     let mut stderr = std::io::stderr();
-    let mut report = ReportStream {
+    let mut report = crate::cli::ReportStream {
         inner: match out_file {
             Some(file) => Box::new(file) as Box<dyn std::io::Write + Send>,
             None => Box::new(std::io::BufWriter::new(std::io::stdout())),
@@ -5319,27 +5319,6 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     }
     result?;
     flushed.context("failed to write the output")
-}
-
-/// The report's output stream (the `-out` file or standard output), which records whether
-/// a write to it failed.
-struct ReportStream {
-    inner: Box<dyn std::io::Write + Send>,
-    failed: bool,
-}
-
-impl std::io::Write for ReportStream {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        let written = self.inner.write(buf);
-        self.failed |= written.is_err();
-        written
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        let flushed = self.inner.flush();
-        self.failed |= flushed.is_err();
-        flushed
-    }
 }
 
 /// The part of `run` after the output is opened: NCBI's filtering handler (`-dust`), the

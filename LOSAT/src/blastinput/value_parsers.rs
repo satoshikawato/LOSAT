@@ -667,7 +667,27 @@ pub fn parse_seg_filtering(value: &str) -> Result<SegSpec, String> {
 
 // NCBI blast_args.cpp:2657-2660: AddDefaultKey(kArgOutputFormat, ..., eString, ...).
 // CLI v2 exposes only the formatter capabilities actually implemented by LOSAT.
+// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2800-2803
+// ```c
+//     if (args[kArgOutputFormat]) {
+//         string fmt_choice =
+//             NStr::TruncateSpaces(args[kArgOutputFormat].AsString());
+// ```
+/// A TBLASTX `-outfmt` value: the pairwise report (0) or the tabular formats (6, 7),
+/// without a custom field list. The other formats are not implemented and fail.
 pub fn tblastx_outfmt(value: &str) -> Result<String, String> {
+    if !matches!(value.trim(), "0" | "6" | "7") {
+        return Err(
+            "unsupported TBLASTX outfmt: only 0, 6 and 7 without custom fields are implemented"
+                .into(),
+        );
+    }
+    Ok(value.into())
+}
+
+/// The TBLASTX `-outfmt` value of web ABI v1, which is frozen (plan TD-1): it keeps the
+/// only format that it accepted before TBLASTX outfmt 0 and 7 were ported (session S08).
+pub fn tblastx_v1_outfmt(value: &str) -> Result<String, String> {
     if value.trim() != "6" {
         return Err(
             "unsupported TBLASTX outfmt: only 6 without custom fields is implemented".into(),

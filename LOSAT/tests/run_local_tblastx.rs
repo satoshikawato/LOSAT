@@ -1,11 +1,13 @@
 #![allow(warnings, clippy::all)]
 
-//! The shared TBLASTX entry `run_local` writes every requested output from one search.
-//! TBLASTX implements outfmt 6 only, so two outfmt 6 outputs are requested; each must
-//! be byte-identical to the CLI run, the warnings must equal that run's standard error,
-//! and the observer must report the exact row of every HSP. With `-num_threads 2` the
-//! native search reduces its results in a collector thread; the result must not change.
-//! (Identity with the previous release over the regression manifests is checked by
+//! The shared TBLASTX entry `run_local` writes several output formats from one search.
+//! Every format must be byte-identical to the CLI run that requests only that format, the
+//! warnings must equal that run's standard error, the hit records must be the final HSP
+//! list, and the observer must report the exact row and pairwise section of every HSP.
+//! With `-num_threads 2` the native search reduces its results in a collector thread; the
+//! result must not change. (Identity of outfmt 0 and 7 with NCBI is checked by
+//! docs/evidence/losat_web_e2a/check_losat.py over the frozen fixtures; identity with the
+//! previous release over the regression manifests by
 //! docs/evidence/losat_web_e1a/capture_outputs.py.)
 
 mod run_local_support;
@@ -13,13 +15,13 @@ mod run_local_support;
 use std::process::Command;
 
 use run_local_support::{
-    assert_tabular_ranges, fixture_sequence, read_records, run_formats, Run, TempFasta,
+    assert_observer_ranges, fixture_sequence, read_records, run_formats, Run, TempFasta,
 };
 use LOSAT::algorithm::tblastx::TblastxArgs;
 use LOSAT::api::local_blast::{run_local_tblastx, FormatOutput, OutputSink, ReportOutputs};
 use LOSAT::cli::{try_parse_from, Cli, Commands};
 
-const FORMATS: [&str; 2] = ["6", "6"];
+const FORMATS: [&str; 3] = ["0", "6", "7"];
 
 /// Two queries against three subjects cut from two genomes; the first query overlaps
 /// two subjects.
@@ -71,9 +73,9 @@ impl Inputs {
         })
     }
 
-    /// The CLI output file and standard error of one run.
-    fn cli(&self, extra: &[&str]) -> (Vec<u8>, Vec<u8>) {
-        let out = self.query.0.with_extension("cli.out");
+    /// The CLI output file and standard error of one single-format run.
+    fn cli(&self, outfmt: &str, extra: &[&str]) -> (Vec<u8>, Vec<u8>) {
+        let out = self.query.0.with_extension(format!("cli{outfmt}.out"));
         let output = Command::new(env!("CARGO_BIN_EXE_LOSAT"))
             .arg("tblastx")
             .arg("-query")
@@ -82,7 +84,7 @@ impl Inputs {
             .arg(&self.subject.0)
             .args(extra)
             .arg("-outfmt")
-            .arg("6")
+            .arg(outfmt)
             .arg("-out")
             .arg(&out)
             .env_remove("LOSAT_TIMING")
@@ -110,41 +112,50 @@ impl Inputs {
 // TBlastThreads the_threads(GetNumberOfThreads());
 // (*thread)->Run(); (*thread)->Join(&result);
 #[test]
-fn every_output_of_one_search_matches_the_cli_run() {
+fn every_format_of_one_search_matches_the_cli_run_of_that_format() {
     let inputs = Inputs::new();
     let serial = inputs.run(&FORMATS, &[], true);
-    assert!(
-        serial.hits.is_empty(),
-        "TBLASTX produces no hit records yet"
-    );
-    assert!(
-        !serial.ranges[0].is_empty(),
-        "the fixture must produce hits"
-    );
+    let mut row_counts = Vec::new();
     for extra in [
         &[][..],
         &["-num_threads", "2"][..],
         &["-max_target_seqs", "1"][..],
     ] {
         let together = inputs.run(&FORMATS, extra, true);
-        let (cli_output, cli_stderr) = inputs.cli(extra);
+        assert_eq!(
+            together.hits.len(),
+            together.ranges[1].len(),
+            "one hit record per outfmt 6 row {extra:?}"
+        );
+        row_counts.push(together.ranges[1].len());
         for (index, outfmt) in FORMATS.iter().enumerate() {
+            let alone = inputs.run(&[outfmt], extra, false);
+            assert!(
+                together.outputs[index] == alone.outputs[0],
+                "run_local outfmt {outfmt} {extra:?}"
+            );
+            let (cli_output, cli_stderr) = inputs.cli(outfmt, extra);
             assert!(
                 together.outputs[index] == cli_output,
-                "CLI outfmt {outfmt} (output {index}) {extra:?}"
+                "CLI outfmt {outfmt} {extra:?}"
+            );
+            assert_eq!(
+                together.diagnostics, cli_stderr,
+                "warnings of three formats equal those of the single-format CLI run {extra:?}"
             );
         }
-        assert_eq!(
-            together.diagnostics, cli_stderr,
-            "warnings of two outputs equal those of the CLI run {extra:?}"
-        );
         if extra.first() == Some(&"-num_threads") {
             assert!(
-                together.outputs[0] == serial.outputs[0],
+                together.outputs == serial.outputs,
                 "the collector thread must not change the result"
             );
         }
     }
+    assert!(row_counts[0] > 0, "the fixture must produce hits");
+    assert!(
+        row_counts[2] < row_counts[0],
+        "-max_target_seqs 1 must drop a subject of this fixture: {row_counts:?}"
+    );
 }
 
 // NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
@@ -157,19 +168,20 @@ fn every_output_of_one_search_matches_the_cli_run() {
 // }
 // m_Ostream << "\n";
 // ```
+// NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:1970-1973
+// ```c++
+// x_DisplayAlnvecInfo(out, alnvecInfo,showDefLine);
+// ```
 #[test]
-fn observer_ranges_are_exact_rows_of_the_same_hsp() {
+fn observer_ranges_are_exact_rows_and_sections_of_the_same_hsp() {
     let inputs = Inputs::new();
-    for extra in [&[][..], &["-num_threads", "2"][..]] {
+    for extra in [
+        &[][..],
+        &["-num_threads", "2"][..],
+        &["-max_target_seqs", "1"][..],
+    ] {
         let result = inputs.run(&FORMATS, extra, true);
-        let context = format!("tblastx {extra:?}");
-        let rows = assert_tabular_ranges(&result, 0, None, &context);
-        assert!(rows > 0, "the fixture must produce hits {extra:?}");
-        assert_tabular_ranges(&result, 1, None, &context);
-        assert_eq!(
-            result.ranges[0], result.ranges[1],
-            "{context}: both outputs"
-        );
+        assert_observer_ranges(&result, [0, 1, 2], &format!("tblastx {extra:?}"));
     }
 }
 
@@ -185,7 +197,7 @@ fn unsupported_formats_fail_before_searching() {
     let inputs = Inputs::new();
     let queries = read_records(&inputs.query.0);
     let subjects = read_records(&inputs.subject.0);
-    for outfmt in ["0", "7", "6 qseqid"] {
+    for outfmt in ["5", "6 qseqid", "abc"] {
         let (mut valid, mut invalid, mut diagnostics) = (Vec::new(), Vec::new(), Vec::new());
         let mut outputs = ReportOutputs {
             formats: vec![
@@ -209,5 +221,80 @@ fn unsupported_formats_fail_before_searching() {
             valid.is_empty() && invalid.is_empty() && diagnostics.is_empty(),
             "nothing is written when a requested format is invalid"
         );
+    }
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_input_aux.cpp:86-88
+// ```c
+//     char* batch_sz_str = getenv("BATCH_SIZE");
+//     if (batch_sz_str) {
+//         retval = NStr::StringToInt(batch_sz_str);
+// ```
+// NCBI stops with a CStringException (exit 255, with the path of its build in the message);
+// LOSAT rejects the value, before the prolog as NCBI.
+#[test]
+fn a_batch_size_that_is_not_an_integer_is_rejected() {
+    let inputs = Inputs::new();
+    for value in ["abc", " ", "12x"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_LOSAT"))
+            .arg("tblastx")
+            .arg("-query")
+            .arg(&inputs.query.0)
+            .arg("-subject")
+            .arg(&inputs.subject.0)
+            .args(["-outfmt", "0"])
+            .env("BATCH_SIZE", value)
+            .env_remove("LOSAT_TIMING")
+            .output()
+            .expect("run LOSAT CLI");
+        assert_eq!(output.status.code(), Some(1), "{output:?}");
+        assert!(output.stdout.is_empty(), "no prolog: {output:?}");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stderr),
+            format!(
+                "Error: the BATCH_SIZE value '{value}' is not an integer; NCBI stops with a \
+                 CStringException for it, which is not supported by LOSAT's TBLASTX\n"
+            )
+        );
+    }
+}
+
+// NCBI reference: c++/src/objmgr/util/create_defline.cpp:219-312 (x_CleanAndCompress) and
+// 4066 (`NStr::HtmlDecode`): NCBI reads past the end of the title `, ,` (and crashes when
+// such a subject has hits) and decodes `&amp;` in outfmt 0; the tabular formats print
+// only the ids.
+#[test]
+fn outfmt0_rejects_subject_titles_that_ncbi_reads_past_or_decodes() {
+    let inputs = Inputs::new();
+    let queries = read_records(&inputs.query.0);
+    let sequence = fixture_sequence("LC738884.fasta");
+    for (defline, reason) in [
+        (", ,", "reads past its end"),
+        ("s &amp; t", "HTML character reference"),
+    ] {
+        let subject = TempFasta::new(
+            "tblastx_title_subject.fna",
+            &[(defline, &sequence[1_000..6_000])],
+        );
+        let subjects = read_records(&subject.0);
+        for outfmt in FORMATS {
+            let (mut report, mut diagnostics) = (Vec::new(), Vec::new());
+            let mut outputs =
+                ReportOutputs::single(outfmt, OutputSink::Writer(&mut report), &mut diagnostics);
+            let result = run_local_tblastx(inputs.args(&[]), &queries, &subjects, &mut outputs);
+            drop(outputs);
+            if outfmt == "0" {
+                let error = result
+                    .expect_err("outfmt 0 must reject the title")
+                    .to_string();
+                assert!(
+                    error.contains(reason) && error.contains("not supported by LOSAT's TBLASTX"),
+                    "{error}"
+                );
+                assert!(report.is_empty() && diagnostics.is_empty());
+            } else {
+                result.unwrap_or_else(|error| panic!("outfmt {outfmt} {defline:?}: {error}"));
+            }
+        }
     }
 }

@@ -18,6 +18,7 @@ pub mod hsp_culling;
 pub mod lookup;
 pub mod ncbi_cutoffs;
 pub mod reevaluate;
+pub(crate) mod report;
 mod scan;
 pub mod stage_dump;
 pub mod sum_stats_linking;

@@ -49,16 +49,14 @@ impl Program {
     /// exactly these, each on the stream of the same number.
     pub fn formats(self) -> &'static [u32] {
         match self {
-            Self::Blastp | Self::Tblastn | Self::Blastn => &[0, 6, 7],
-            Self::Tblastx => &[6],
+            Self::Blastp | Self::Tblastn | Self::Blastn | Self::Tblastx => &[0, 6, 7],
         }
     }
 }
 
 /// Parses an argv (program name first) with the engine's CLI parser.
 pub fn parse(words: &[&str]) -> Result<(Program, Commands), String> {
-    let program = Program::parse(words.first().copied().unwrap_or(""))?;
-    for word in &words[1..] {
+    for word in words.iter().skip(1) {
         let key = word.split('=').next().unwrap_or("");
         if matches!(key, "-out" | "--out" | "-outfmt" | "--outfmt") {
             return Err(format!(
@@ -66,16 +64,13 @@ pub fn parse(words: &[&str]) -> Result<(Program, Commands), String> {
             ));
         }
     }
-    // The formats come from `Program::formats`; `-outfmt 6` only keeps the parser from
-    // rejecting a default format that the program does not implement. It follows the
-    // program name, so that the host's words are parsed exactly as on the command line
-    // (a trailing option without its value is still reported as such). The binary name
-    // is the CLI's, so that a usage line in an error names it the same way.
-    let argv = ["LOSAT", words[0], "-outfmt", "6"]
-        .into_iter()
-        .chain(words[1..].iter().copied());
+    // The formats come from `Program::formats`, and every program accepts the CLI's
+    // default `-outfmt 0`, so the host's words are parsed exactly as on the command line,
+    // with the CLI's binary name: an error (an unknown program too) is the CLI's message.
+    let argv = std::iter::once("LOSAT").chain(words.iter().copied());
     let cli: Cli =
         LOSAT::cli::try_parse_from(argv).map_err(|error| LOSAT::cli::render_message(&error))?;
+    let program = Program::parse(words.first().copied().unwrap_or(""))?;
     Ok((program, cli.command))
 }
 
@@ -308,6 +303,16 @@ mod tests {
             assert!(error.contains("is not accepted"), "{owned}: {error}");
         }
         assert!(parse(&["blastx", "-query", "q", "-subject", "s"]).is_err());
+        // An unknown program and a parser error are the CLI's messages.
+        for words in [&["nosuch"][..], &["tblastx", "-query", "q"][..]] {
+            let cli = LOSAT::cli::try_parse_from::<Cli, _, _>(
+                std::iter::once("LOSAT").chain(words.iter().copied()),
+            )
+            .map(|_| ())
+            .map_err(|error| LOSAT::cli::render_message(&error));
+            assert_eq!(parse(words).map(|_| ()), cli, "{words:?}");
+        }
+        assert_eq!(Program::Tblastx.formats(), &[0, 6, 7]);
         // validate rejects BLASTN scoring that NCBI rejects, with NCBI's message.
         // validate reads BLASTN's -dust as the run does.
         let error =

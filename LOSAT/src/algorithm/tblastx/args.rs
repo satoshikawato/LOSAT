@@ -53,8 +53,26 @@ pub struct TblastxArgs {
     pub query_gencode: u8,
     #[arg(long, default_value_t = 1, value_parser = genetic_code)]
     pub db_gencode: u8,
-    #[arg(long, default_value_t = 500, value_parser = positive_usize)]
-    pub max_target_seqs: usize,
+    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2910-2927
+    // ```c
+    //     m_NumDescriptions = m_DfltNumDescriptions;
+    //     m_NumAlignments = m_DfltNumAlignments;
+    //     ...
+    //     if (args.Exist(kArgMaxTargetSequences) && args[kArgMaxTargetSequences]) {
+    //         m_NumDescriptions = args[kArgMaxTargetSequences].AsInteger();
+    //         m_NumAlignments = args[kArgMaxTargetSequences].AsInteger();
+    //         hitlist_size = m_NumAlignments;
+    //     }
+    // ```
+    // NCBI reference: c++/src/objtools/align_format/format_flags.cpp:219,221
+    // ```c
+    // const size_t kDfltArgNumDescriptions = 500;
+    // const size_t kDfltArgNumAlignments = 250;
+    // ```
+    // An omitted value keeps the default hit list size (500) but the pairwise report then
+    // shows 250 alignments, so the option has no clap default.
+    #[arg(long, value_parser = positive_usize, help = "Maximum number of aligned sequences to keep (default: 500)")]
+    pub max_target_seqs: Option<usize>,
     // NCBI low-complexity filtering selection:
     // - dust is used only for blastn (and mapping)
     // - otherwise seg is used
@@ -85,8 +103,7 @@ pub struct TblastxArgs {
     #[arg(long, default_value_t = 40, value_parser = nonnegative_usize)]
     pub window_size: usize,
 
-    /// Output format. Only 6 without custom fields is currently implemented.
-    /// The NCBI default 0 fails explicitly until pairwise output is ported.
+    /// Output format: 0 (pairwise), 6 or 7 (tabular), without custom fields.
     #[arg(long, default_value = "0", value_name = "SPEC", value_parser = tblastx_outfmt)]
     pub outfmt: String,
 

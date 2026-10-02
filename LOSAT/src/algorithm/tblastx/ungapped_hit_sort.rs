@@ -78,6 +78,8 @@ mod tests {
             start_of_chain: !marker.is_multiple_of(2),
             link_id: marker + 140,
             chain_next_link_id: Some(marker + 150),
+            hsp_link_num: 0,
+            num: 0,
         }
     }
 

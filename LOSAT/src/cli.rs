@@ -422,6 +422,33 @@ impl fmt::Display for NativeError {
 // ```
 impl std::error::Error for NativeError {}
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:118-119
+// ```c
+// {
+//     m_Outfile.exceptions(NcbiBadbit);
+// ```
+/// The report's output stream (the `-out` file or standard output), which records whether
+/// a write to it failed: NCBI's outfmt 0 stream throws there, which the application
+/// reports as "BLAST failed to write output" (blast_app_util.hpp:252-255).
+pub struct ReportStream {
+    pub inner: Box<dyn std::io::Write + Send>,
+    pub failed: bool,
+}
+
+impl std::io::Write for ReportStream {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let written = self.inner.write(buf);
+        self.failed |= written.is_err();
+        written
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        let flushed = self.inner.flush();
+        self.failed |= flushed.is_err();
+        flushed
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:95-99
 // ```c++
 // string s_ArgExptMsg(const string& name, const string& what, const string& attr)

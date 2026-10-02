@@ -221,6 +221,8 @@ mod tests {
             // ```
             link_id: 0,
             chain_next_link_id: None,
+            hsp_link_num: 0,
+            num: 0,
         }
     }
 
@@ -351,6 +353,8 @@ mod tests {
             // ```
             link_id: 0,
             chain_next_link_id: None,
+            hsp_link_num: 0,
+            num: 0,
         };
         let hit2 = UngappedHit {
             q_idx: 0,
@@ -387,6 +391,8 @@ mod tests {
             // ```
             link_id: 0,
             chain_next_link_id: None,
+            hsp_link_num: 0,
+            num: 0,
         };
 
         let mut subject0_hits = vec![hit1.clone()];

@@ -69,7 +69,7 @@ fn canonical_options_for_every_program() {
             Commands::Tblastx(a) => {
                 assert_eq!(a.num_threads, 4);
                 assert_eq!(a.evalue, 0.001);
-                assert_eq!(a.max_target_seqs, 9);
+                assert_eq!(a.max_target_seqs, Some(9));
             }
             // NCBI tblastn_args.cpp:55-62: SetTask(kDefaultTask);
             // blast_args.cpp:2726-2731: AddOptionalKey(kArgMaxTargetSequences, ...);
@@ -257,10 +257,10 @@ fn defaults_and_task_overrides_remain_distinct() {
         assert_eq!(error.kind(), clap::error::ErrorKind::InvalidValue);
         assert!(error.to_string().contains(task));
     }
-    // NCBI blast_args.cpp:2800-2803: the default -outfmt is 0. BLASTN implements it;
-    // TBLASTX still rejects it.
+    // NCBI blast_args.cpp:2800-2803: the default -outfmt is 0, which BLASTN and TBLASTX
+    // implement.
     parse("blastn", &[]).unwrap();
-    assert!(parse("tblastx", &[]).unwrap_err().to_string().contains("0"));
+    parse("tblastx", &[]).unwrap();
     for program in ["blastn", "tblastx"] {
         parse(program, &["-outfmt", "6"]).unwrap();
     }
@@ -503,11 +503,15 @@ fn output_capabilities_fail_explicitly_and_help_is_canonical() {
     parse("blastp", &["-outfmt", "6 qseqid sseqid pident length"]).unwrap();
     for (program, specs) in [
         ("blastp", vec!["5", "0 qseqid", "6 unknown"]),
-        ("tblastx", vec!["0", "7", "6 qseqid"]),
+        ("tblastx", vec!["5", "6 qseqid", "7 std"]),
     ] {
         for spec in specs {
             assert!(parse(program, &["-outfmt", spec]).is_err());
         }
+    }
+    // TBLASTX implements the pairwise report and both tabular formats (session S08).
+    for spec in ["0", "6", "7"] {
+        parse("tblastx", &["-outfmt", spec]).unwrap();
     }
     // BLASTN parses -outfmt when it sets the options, as NCBI (blast_args.cpp:2801-2851).
     for spec in ["5", "6 qseqid", "0x6"] {

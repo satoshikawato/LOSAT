@@ -53,7 +53,7 @@ fn db_gencode_controls_local_subject_search_translation() {
         out: Some(out.clone()),
         query_gencode: 4,
         db_gencode: 4,
-        max_target_seqs: 500,
+        max_target_seqs: None,
         seg: LOSAT::blastinput::value_parsers::SegSpec::No,
         window_size: 40,
         outfmt: "6".to_string(),

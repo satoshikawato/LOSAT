@@ -92,6 +92,30 @@ const TPA_PREFIXES: [&str; 14] = [
 /// The title of a nucleotide subject with the defline `defline` (the text after `>`),
 /// for the alignment heading (`leave_prefix` false) or the description table (true).
 pub fn ncbi_nucleotide_title(defline: &str, leave_prefix: bool) -> String {
+    let (cleaned, _) = clean_and_compress(
+        &nucleotide_title_before_cleanup(defline, leave_prefix),
+        false,
+    );
+    String::from_utf8(cleaned).expect("ASCII deflines")
+}
+
+/// Whether NCBI's `x_CleanAndCompress` reads past the end of the outfmt 0 title of a
+/// nucleotide subject with the defline `defline`, in the alignment heading or in the
+/// description table (NCBI crashes when it writes the title of such a subject with hits).
+/// Approved exception 2 of PD-LOSAT-NCBI-DEFECTS covers BLASTN only; the other programs
+/// reject such subjects.
+pub fn ncbi_nucleotide_title_reads_past_end(defline: &str) -> bool {
+    [false, true].into_iter().any(|leave_prefix| {
+        clean_and_compress(
+            &nucleotide_title_before_cleanup(defline, leave_prefix),
+            false,
+        )
+        .1
+    })
+}
+
+/// The title of `ncbi_nucleotide_title` before `x_CleanAndCompress`.
+fn nucleotide_title_before_cleanup(defline: &str, leave_prefix: bool) -> Vec<u8> {
     let mut title = defline.as_bytes().to_vec();
     trim_end_of(&mut title, b".,;~ ");
     if !leave_prefix {
@@ -106,8 +130,7 @@ pub fn ncbi_nucleotide_title(defline: &str, leave_prefix: bool) -> String {
     }
     trim_leading_spaces(&mut title);
     trim_end_of(&mut title, b",;~ ");
-    let cleaned = clean_and_compress(&title, false);
-    String::from_utf8(cleaned).expect("ASCII deflines")
+    title
 }
 
 /// Whether the text may hold a character reference that `NStr::HtmlDecode` decodes: an `&`
@@ -153,7 +176,8 @@ fn trim_leading_spaces(text: &mut Vec<u8>) {
 }
 
 /// NCBI's `x_CleanAndCompress`, byte for byte (the titles are ASCII), except that it stops
-/// at the end of the string where NCBI's count of the remaining letters wraps (see below).
+/// at the end of the string where NCBI's count of the remaining letters wraps (see below);
+/// the flag is whether it wrapped.
 ///
 /// NCBI reference: c++/src/objmgr/util/create_defline.cpp:219-312
 /// ```c
@@ -213,7 +237,7 @@ fn trim_leading_spaces(text: &mut Vec<u8>) {
 ///         *out++ = curr;
 ///     }
 /// ```
-fn clean_and_compress(input: &[u8], is_protein: bool) -> Vec<u8> {
+fn clean_and_compress(input: &[u8], is_protein: bool) -> (Vec<u8>, bool) {
     let mut start = 0;
     let mut end = input.len();
     while start < end && input[start] == b' ' {
@@ -225,12 +249,13 @@ fn clean_and_compress(input: &[u8], is_protein: bool) -> Vec<u8> {
     let text = &input[start..end];
     let mut out = Vec::with_capacity(text.len());
     if text.is_empty() {
-        return out;
+        return (out, false);
     }
     // Past the end reads the terminating NUL of the C++ string.
     let at = |index: usize| text.get(index).copied().unwrap_or(0);
     let mut index = 0;
     let mut left = text.len();
+    let mut wrapped = false;
     let mut curr = at(index);
     index += 1;
     left -= 1;
@@ -265,6 +290,7 @@ fn clean_and_compress(input: &[u8], is_protein: bool) -> Vec<u8> {
                     // string (it reads the terminating NUL and on, and crashes). LOSAT stops
                     // at the end of the string (approved exception 2 of
                     // PD-LOSAT-NCBI-DEFECTS): `next` is the NUL and nothing more is written.
+                    wrapped |= left == 0;
                     left = left.saturating_sub(1);
                 }
                 two_chars = u16::from(next);
@@ -272,6 +298,7 @@ fn clean_and_compress(input: &[u8], is_protein: bool) -> Vec<u8> {
             _ => out.push(curr),
         }
         curr = next;
+        wrapped |= left == 0;
         left = left.saturating_sub(1);
     }
     if curr > 0 && curr != b' ' {
@@ -281,9 +308,9 @@ fn clean_and_compress(input: &[u8], is_protein: bool) -> Vec<u8> {
         let replaced = String::from_utf8_lossy(&out)
             .replace(". [", " [")
             .replace(", [", " [");
-        return replaced.into_bytes();
+        return (replaced.into_bytes(), wrapped);
     }
-    out
+    (out, wrapped)
 }
 
 #[cfg(test)]
@@ -342,6 +369,17 @@ mod tests {
             (", ,a", ", a"),
         ] {
             assert_eq!(ncbi_nucleotide_title(defline, false), title, "{defline:?}");
+        }
+        for defline in [
+            ", ,", "; ;", "~, ,", ",, ,", ", ,,", ";  ;", ", , ,", ",~, ,",
+        ] {
+            assert!(ncbi_nucleotide_title_reads_past_end(defline), "{defline:?}");
+        }
+        for defline in [", ;", ",,", "a, ,b", ", ,a", "id, ,", "MAG: , ,x"] {
+            assert!(
+                !ncbi_nucleotide_title_reads_past_end(defline),
+                "{defline:?}"
+            );
         }
     }
 

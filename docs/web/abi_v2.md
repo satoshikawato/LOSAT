@@ -66,10 +66,11 @@ All functions return `i32`: `0` (or a non-negative handle) on success, `-1` on f
 On failure, `losat_web2_last_error_ptr/len` hold a UTF-8 message. Engine errors use the
 CLI's wording: argv errors are the message of the engine's parser
 (`LOSAT::cli::render_message`), search errors are the error and its causes joined by
-`: ` (as ABI v1 reports them). Two details of argv errors differ from the command line:
-the adapter parses the argv with `-outfmt 6` inserted after the program name (§7), so a
-usage line in a message can list `-outfmt`; and an unknown program gives
-`unknown program '<name>'`.
+`: ` (as ABI v1 reports them). The adapter parses the argv exactly as the command line
+(every program accepts the CLI's default `-outfmt 0`), so an argv error, an unknown
+program's included, is the CLI's message (session S08). Only the adapter's own rules give
+other messages: `-out` and `-outfmt` are not accepted (§7), and `blastx` is not available
+until SX.
 
 | Export | Arguments | Result |
 |---|---|---|
@@ -80,7 +81,7 @@ usage line in a message can list `-outfmt`; and an unknown program gives
 | `losat_web2_register(program_ptr, program_len, role, bytes_ptr, bytes_len)` | role `0` query, `1` subject; original FASTA bytes | handle ≥ 1; emits a *register* JSON on stream 2. A handle belongs to the program that registered it. For BLASTN, `-1` with a message containing `not supported by LOSAT's BLASTN` when a record is read differently by NCBI BLAST+ (a defline that is empty, starts with white space or has a control character or a non-ASCII byte; a record without residues; a residue other than an IUPAC letter; FASTA that `bio` cannot read, such as text before the first defline or bytes that are not UTF-8); `U` is read as `T`. A BLASTN file of white space only has no record: a run then gives NCBI's `Query is Empty!` warning (query) or its `Empty CBlastQueryVector` error (subject) |
 | `losat_web2_release(handle)` | handle | `0` |
 | `losat_web2_scan_begin(parser)` / `losat_web2_scan_chunk(scanner, ptr, len)` / `losat_web2_scan_end(scanner)` | parser kind (`0` the `bio::io::fasta` reader of BLASTP, TBLASTN, BLASTN and TBLASTX; `1`, the NCBI-style reader of BLASTX, joins in SX); FASTA bytes in chunks of any size | `scan_begin` returns a scanner handle; `scan_end` emits a *scan* JSON on stream 2 (§9), or fails with the parser's error |
-| `losat_web2_run(argv_ptr, argv_len, query_handle, subject_handle)` | argv, handles registered for the argv's program | emits the program's supported format streams (0, 6, 7), stream 1 (BLASTP, TBLASTN and BLASTN; §8) and stream 3; returns after the run ends |
+| `losat_web2_run(argv_ptr, argv_len, query_handle, subject_handle)` | argv, handles registered for the argv's program | emits the program's supported format streams (0, 6, 7), stream 1 (§8) and stream 3; returns after the run ends |
 | `losat_web2_last_error_ptr()` / `losat_web2_last_error_len()` | — | last error message |
 
 ## 5. Output streams
@@ -95,7 +96,7 @@ which runs slot zero of the search's thread pool (`LOSAT/src/utils/threading.rs`
 | `0` | outfmt 0 text (only for programs that support outfmt 0) |
 | `6` | outfmt 6 text |
 | `7` | outfmt 7 text (only for programs that support outfmt 7) |
-| `1` | HSP records as JSON Lines, one object per HSP (§8); BLASTP, TBLASTN and BLASTN |
+| `1` | HSP records as JSON Lines, one object per HSP (§8); BLASTP, TBLASTN, BLASTN and TBLASTX |
 | `2` | JSON response of `describe`, `register` or `scan_end` |
 | `3` | diagnostics that the CLI writes to stderr (warnings), UTF-8, each written once |
 
@@ -136,10 +137,12 @@ keeps.
 ## 8. HSP record
 
 One JSON object per HSP of the final, sorted result. Field names follow the Rust
-`common::Hit` and `report::PairwiseHit` fields. BLASTP, TBLASTN and BLASTN emit them.
-TBLASTX emits none until its final HSP list becomes a `PairwiseHit` list (plan S08); its
-`run` writes the format streams and stream 3 only. BLASTN rows are nucleotide rows: the
-query on its plus strand, residues of masked regions in lowercase, no frames.
+`common::Hit` and `report::PairwiseHit` fields. BLASTP, TBLASTN, BLASTN and TBLASTX
+emit them (TBLASTX since session S08). BLASTN rows are nucleotide rows: the query on its
+plus strand, residues of masked regions in lowercase, no frames. TBLASTX rows are the
+translated rows of outfmt 0 (both sequences translated again from the nucleotides with
+`-query_gencode` and `-db_gencode`, SEG-masked query residues in lowercase), with both
+frames.
 
 | Field | Type | Meaning |
 |---|---|---|

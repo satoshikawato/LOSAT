@@ -1,0 +1,1984 @@
+TBLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/tblastx_multi_subject.fasta).
+           4 sequences; 40,000 total letters
+
+
+
+Query= LC738874_100001_101500 window 100001-101500 of LC738874.1 MAG:
+Melicertus latisulcatus majanivirus Okinawa2016 DNA, complete genome
+
+Length=1500
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+LC738875_270001_280000 window 270001-280000 of LC738875.1 MAG: Me...  25.8    0.21   1
+LC738875_300001_310000 window 300001-310000 of LC738875.1 MAG: Me...  21.2    5.0    1
+
+
+> LC738875_270001_280000 window 270001-280000 of LC738875.1 MAG: 
+Melicertus latisulcatus pemonivirus Okinawa2016 DNA, complete 
+genome
+Length=10000
+
+ Score = 25.8 bits (50),  Expect = 0.21
+ Identities = 11/31 (35%), Positives = 17/31 (55%), Gaps = 0/31 (0%)
+ Frame = -1/-3
+
+Query  792  IILYLFC*LELYNHLLLFSFFSALVH*YCIY  700
+            I LY FC*  ++ +L+    +  +  * CIY
+Sbjct  905  IFLYFFC*WSIHYNLMTDMHYLTIFL*RCIY  813
+
+
+> LC738875_300001_310000 window 300001-310000 of LC738875.1 MAG: 
+Melicertus latisulcatus pemonivirus Okinawa2016 DNA, complete 
+genome
+Length=10000
+
+ Score = 21.2 bits (40),  Expect = 5.0
+ Identities = 10/24 (42%), Positives = 13/24 (54%), Gaps = 0/24 (0%)
+ Frame = +2/+3
+
+Query  566   IQKLFEKTSFFQKAICT*RCLRGR  637
+             + ++ EKTS   K   T  C RGR
+Sbjct  9399  VLRI*EKTSLVFKRCSTLYCQRGR  9470
+
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 6210110
+
+
+Query= LC738874_120001_140000 window 120001-140000 of LC738874.1 MAG:
+Melicertus latisulcatus majanivirus Okinawa2016 DNA, complete genome
+
+Length=20000
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value   N
+
+LC738875_300001_310000 window 300001-310000 of LC738875.1 MAG: Me...  123     1e-126  9
+LC738875_130001_140000 window 130001-140000 of LC738875.1 MAG: Me...  171     2e-68   4
+LC738875_270001_280000 window 270001-280000 of LC738875.1 MAG: Me...  29.0    0.32    1
+LC738875_120001_130000 window 120001-130000 of LC738875.1 MAG: Me...  25.8    3.0     1
+
+
+> LC738875_300001_310000 window 300001-310000 of LC738875.1 MAG: 
+Melicertus latisulcatus pemonivirus Okinawa2016 DNA, complete 
+genome
+Length=10000
+
+ Score = 123 bits (263),  Expect(9) = 1e-126
+ Identities = 50/116 (43%), Positives = 71/116 (61%), Gaps = 0/116 (0%)
+ Frame = +3/+3
+
+Query  7437  LSQRKSLAELHCKKNIKTKTHLGRVTATSWVVCALKKISNGDPDIFLKLLEDVGVYHLSH  7616
+             L+ RK LA +H   N++T+THLGRVTATSW V A++ +S+GD  +F +L  DV  YHL+H
+Sbjct  5568  LTDRKGLAAIHATTNVRTRTHLGRVTATSWAVDAIRTVSSGDSALFTRLAVDVDTYHLAH  5747
+
+Query  7617  MNPANTYVYFSDNCLSNEDQMGLKGYIDRMKNTDGQLVLHESAKKELTRGTFHSTN  7784
+              N AN + Y+S NC SN+ + GL GYI R      +  +       L+R    +T+
+Sbjct  5748  TNSANFFPYYSSNCNSNDSENGLWGYIRRTSEKTAKAEIERGRFANLSRAGVANTD  5915
+
+
+ Score = 116 bits (249),  Expect(9) = 1e-126
+ Identities = 40/82 (49%), Positives = 62/82 (76%), Gaps = 0/82 (0%)
+ Frame = +3/+3
+
+Query  5787  LISVHTDVLSDTSTEIYRQKFRRYCIFSFCIYLLNAPLHAQYLSPLPYNYFNFYSYLFAH  5966
+             L S     +++++  +YR+KFRRYC+F F +YLLN  LH ++ SPLP+N+FN +SYL+ H
+Sbjct  3945  LASTRECAITESTLTVYRRKFRRYCLFCFSLYLLNRGLHPEHTSPLPFNFFNAFSYLYCH  4124
+
+Query  5967  GPELKTTSFLNTMCFLNNNIFK  6032
+             G ++ ++S+LNT+CFL N IF+
+Sbjct  4125  GIDMHSSSYLNTLCFLQNRIFR  4190
+
+
+ Score = 80.8 bits (170),  Expect(9) = 1e-126
+ Identities = 32/54 (59%), Positives = 42/54 (78%), Gaps = 0/54 (0%)
+ Frame = +3/+3
+
+Query  6057  SVQRLIDLDYAFLKGGKSITHSFGSPSKTSIHTRTLVSFMMYSEYMMRVFQQLL  6218
+             S +RL+DLDYAFLKGGK+    FGSP+KTS+HTRT+VSF+ Y+E ++     LL
+Sbjct  4221  SFKRLVDLDYAFLKGGKAPLREFGSPAKTSVHTRTVVSFLAYAEMVLGALCHLL  4382
+
+
+ Score = 72.1 bits (151),  Expect(9) = 1e-126
+ Identities = 29/50 (58%), Positives = 34/50 (68%), Gaps = 0/50 (0%)
+ Frame = +3/+3
+
+Query  7275  SGLCRQLIRIDLVNFGIWGDVKIDLKLDRRNNILHKNNVLLPKERDKIKY  7424
+             S LCR L+  DL NFGIWGDVK D +LD   N +HKN V LP E D+ K+
+Sbjct  5403  STLCRHLLLSDLANFGIWGDVKCDQRLDCTTNRMHKNGVRLPSESDRKKF  5552
+
+
+ Score = 67.0 bits (140),  Expect(9) = 1e-126
+ Identities = 23/67 (34%), Positives = 44/67 (66%), Gaps = 0/67 (0%)
+ Frame = +3/+3
+
+Query  4848  KSQSITGNIIHNVAKKQELDTIIQSIDLNKRCAIIFDEKECKTFIEKNKKVILCTAYNMF  5027
+             +  +  GN ++ VAK+   D  I+++D+  +C I+++E EC+ F+E N++VIL  A + F
+Sbjct  2982  RPDATVGNHVYAVAKRDAADAAIRALDIKGKCRIVYNEDECRAFVEANRQVILREAVHTF  3161
+
+Query  5028  KKNITTK  5048
+              + ++TK
+Sbjct  3162  NRRLSTK  3182
+
+
+ Score = 63.8 bits (133),  Expect(9) = 1e-126
+ Identities = 33/57 (58%), Positives = 44/57 (77%), Gaps = 0/57 (0%)
+ Frame = +3/+3
+
+Query  6261  IEIKTKQNLSRLCEGVLfiffsfvffHRISAIRQLTNWSALRLILGQPHLHDSKSKA  6431
+             IE + K  + RLC+G++F+FF+FVFFHR   +++LT  SALRL LGQPH H SK+KA
+Sbjct  4401  IERRCKATIERLCDGIIFVFFTFVFFHRFGGVKRLTLRSALRLTLGQPHFHTSKAKA  4571
+
+
+ Score = 57.9 bits (120),  Expect(9) = 1e-126
+ Identities = 20/36 (56%), Positives = 30/36 (83%), Gaps = 0/36 (0%)
+ Frame = +3/+3
+
+Query  6510  KSTHSNGLFFSHAHILGLPYGIQSRLGVPLEKINPI  6617
+             +ST   G+  SH H+LGLPYGIQ+RLGVP+++++P+
+Sbjct  4677  ESTSLKGMSVSHPHLLGLPYGIQARLGVPVDRLHPL  4784
+
+
+ Score = 53.8 bits (111),  Expect(9) = 1e-126
+ Identities = 21/41 (51%), Positives = 29/41 (71%), Gaps = 0/41 (0%)
+ Frame = +3/+3
+
+Query  5358  LPPEKRQRLDLTTAKNSIVFSQLRRMDHTKPLYRKNKTFWQ  5480
+             LPPE+R+ LDLT ++ S +F+ LRR D +KP+     TFWQ
+Sbjct  3504  LPPEERRDLDLTRSEGSHIFTSLRRHDSSKPVLYAGGTFWQ  3626
+
+
+ Score = 28.1 bits (55),  Expect(9) = 1e-126
+ Identities = 10/25 (40%), Positives = 19/25 (76%), Gaps = 0/25 (0%)
+ Frame = +3/+3
+
+Query  7032  QYKLLKDTLDYFTASPLKDVFILSS  7106
+             ++ + +D ++Y+ ASP++ VFIL S
+Sbjct  5193  EFAIGRDLIEYWQASPMRLVFILVS  5267
+
+
+ Score = 58.8 bits (122),  Expect(8) = 6e-34
+ Identities = 34/73 (47%), Positives = 40/73 (55%), Gaps = 0/73 (0%)
+ Frame = -2/-1
+
+Query  7696  IYPFRPIWSSLERQLSLKYTYVLAGFI*ER**TPTSSNNFKKMSGSPFDIFLRAQTTQEV  7517
+             +YP  P   SL  QL L Y   LA  +  R**  TS+ +    + SP D  L A T  EV
+Sbjct  5827  MYPHSPFSLSLLLQLEL*YGKKLAELVCAR**VSTSTASRVNRALSPEDTVLIASTAHEV  5648
+
+Query  7516  AVTRPRWVLVLMF  7478
+             AVTRP+WV VL F
+Sbjct  5647  AVTRPKWVRVLTF  5609
+
+
+ Score = 43.7 bits (89),  Expect(8) = 6e-34
+ Identities = 15/43 (35%), Positives = 25/43 (58%), Gaps = 0/43 (0%)
+ Frame = -1/-3
+
+Query  2891  HPFIFLPTATDFWSFCKNGQPIYDIKNIIVNARPSSFPPVCGG  2763
+             +P I LP A + W FCK  +P  D++ +++N+   S P +  G
+Sbjct  1064  NPLIILPCAANLWDFCKTERPPSDVRFLLLNSEAPSDPRLTSG  936
+
+
+ Score = 43.2 bits (88),  Expect(8) = 6e-34
+ Identities = 29/65 (45%), Positives = 36/65 (55%), Gaps = 0/65 (0%)
+ Frame = -2/-1
+
+Query  6031  LKILLLRKHIVFKKLVVLSSGP*ANK*E*KLK*L*GNGDRY*A*RGALSKYIQKENIQ*R  5852
+             L I   +KH VF+ L    S P   + E  LK L G+GD    *R  LS+Y +K+N Q*R
+Sbjct  4189  LNIRFCKKHSVFR*LDECMSIPWQYRYEKALKKLKGSGDVCSG*RPRLSRYKEKQNKQ*R  4010
+
+Query  5851  LNFCR  5837
+              NF R
+Sbjct  4009  RNFRR  3995
+
+
+ Score = 40.0 bits (81),  Expect(8) = 6e-34
+ Identities = 21/39 (54%), Positives = 25/39 (64%), Gaps = 0/39 (0%)
+ Frame = -2/-1
+
+Query  7420  FILSRSLGNNTLFLCKMLFRLSSLRSILTSPHIPKLTKS  7304
+             F+ S S G+ T FLC  L   SSL S LTSP +PKL +S
+Sbjct  5548  FLRSLSDGSLTPFLCMRLVVQSSL*SHLTSPQMPKLARS  5432
+
+
+ Score = 36.8 bits (74),  Expect(8) = 6e-34
+ Identities = 13/24 (54%), Positives = 16/24 (67%), Gaps = 0/24 (0%)
+ Frame = -1/-3
+
+Query  3170  ICSDYFLKLLFEFLLSPHIHSTWR  3099
+             I +DY LK   E +LSPHIH  W+
+Sbjct  1301  ITADYLLKSTIELILSPHIHWEWK  1230
+
+
+ Score = 35.4 bits (71),  Expect(8) = 6e-34
+ Identities = 18/33 (55%), Positives = 20/33 (61%), Gaps = 0/33 (0%)
+ Frame = -2/-1
+
+Query  6172  NDTRVRV*ILVLEGDPKLCVILLPPLRKA*SKS  6074
+             NDT V V  LV  GDP      LPP +KA*S+S
+Sbjct  4336  NDTTVLVCTLVFAGDPNSRSGALPPFKKA*SRS  4238
+
+
+ Score = 32.2 bits (64),  Expect(8) = 6e-34
+ Identities = 19/46 (41%), Positives = 23/46 (50%), Gaps = 0/46 (0%)
+ Frame = -2/-1
+
+Query  6652  LVEdddnddDSSIGLIFSRGTPNLD*IP*GRPRI*A*EKNSPFEWV  6515
+             +VE       ++ G   S GTP   *IP*GRPR    E + PF  V
+Sbjct  4819  IVEATPALPFATSGCSRSTGTPRRA*IP*GRPRRCGWETDMPFREV  4682
+
+
+ Score = 29.5 bits (58),  Expect(8) = 6e-34
+ Identities = 9/13 (69%), Positives = 11/13 (85%), Gaps = 0/13 (0%)
+ Frame = -2/-1
+
+Query  6412  WRCG*PRINRRAD  6374
+             W+CG*PR+ R AD
+Sbjct  4552  WKCG*PRVRRSAD  4514
+
+
+ Score = 26.3 bits (51),  Expect = 2.2
+ Identities = 11/18 (61%), Positives = 12/18 (67%), Gaps = 0/18 (0%)
+ Frame = +3/-2
+
+Query  13860  TGYDRERTDVSLLVCCCN  13913
+              T YDR RT VSL  C C+
+Sbjct  5550   TFYDRFRTVVSLHFCACD  5497
+
+
+ Score = 26.3 bits (51),  Expect = 2.2
+ Identities = 10/17 (59%), Positives = 14/17 (82%), Gaps = 0/17 (0%)
+ Frame = -2/+2
+
+Query  7354  SLRSILTSPHIPKLTKS  7304
+             S++SIL +P  P+LTKS
+Sbjct  8057  SIQSILLAPRSPRLTKS  8107
+
+
+ Score = 25.4 bits (49),  Expect = 4.1
+ Identities = 9/17 (53%), Positives = 12/17 (71%), Gaps = 0/17 (0%)
+ Frame = +3/+2
+
+Query  9126  RILSKKQDSLYTCARLI  9176
+             RIL +  DSLYTC  ++
+Sbjct  836   RILLRNYDSLYTCRSVV  886
+
+
+ Score = 24.9 bits (48),  Expect = 5.6
+ Identities = 10/19 (53%), Positives = 13/19 (68%), Gaps = 0/19 (0%)
+ Frame = +3/-1
+
+Query  7413  KIKYTHAILSQRKSLAELH  7469
+             K+K T  I SQR+S+  LH
+Sbjct  4468  KVKNTKIIPSQRRSMVALH  4412
+
+
+ Score = 24.9 bits (48),  Expect = 5.6
+ Identities = 8/19 (42%), Positives = 13/19 (68%), Gaps = 0/19 (0%)
+ Frame = +3/-1
+
+Query  11655  YNHHHHHPYPMGTIAVSVS  11711
+              ++HHHHH     T+A+ +S
+Sbjct  1753   HHHHHHH*IE*ETMAMPIS  1697
+
+
+ Score = 24.4 bits (47),  Expect = 7.7
+ Identities = 11/33 (33%), Positives = 18/33 (55%), Gaps = 0/33 (0%)
+ Frame = -2/-2
+
+Query  7030  SRSDNEGGFVCILLYFIFILFVSTRERLVQGLH  6932
+             S+ + +GGF C +L     +FV  R  +V  +H
+Sbjct  9732  SKLEGDGGFACEVLATSTPIFVIGRSTVVFTVH  9634
+
+
+ Score = 24.4 bits (47),  Expect = 7.7
+ Identities = 6/11 (55%), Positives = 9/11 (82%), Gaps = 0/11 (0%)
+ Frame = +2/+2
+
+Query  383   PIRYHQRHCII  415
+             P+RY  RHC++
+Sbjct  1691  PLRYRHRHCLL  1723
+
+
+ Score = 24.4 bits (47),  Expect = 7.7
+ Identities = 14/45 (31%), Positives = 20/45 (44%), Gaps = 0/45 (0%)
+ Frame = -2/+2
+
+Query  1270  KRRDNSLYRKQDNLSQYYEHQRFDNKDQYVHSKKPKSYQMRHHHP  1136
+             +RR  SL   +   S + E     N+D +  S +P S    H HP
+Sbjct  2807  RRRGQSLVNCRGQHSTWSEPHCCWNQDAFRGSSQPPSALRIHGHP  2941
+
+
+> LC738875_130001_140000 window 130001-140000 of LC738875.1 MAG: 
+Melicertus latisulcatus pemonivirus Okinawa2016 DNA, complete 
+genome
+Length=10000
+
+ Score = 171 bits (368),  Expect(4) = 2e-68
+ Identities = 71/129 (55%), Positives = 90/129 (70%), Gaps = 0/129 (0%)
+ Frame = +1/+3
+
+Query  9148  IAYTHVPDSFPGLFFKVLVPIRHLKKGETIGGYYTQAAKEREAGNGDAVKKYFRGKTVLI  9327
+             IA+ + P++FPG+FFKV VP   L+KGETIG YYT+AA  RE  +   V   FR KTVL+
+Sbjct  4989  IAFNYNPETFPGMFFKVRVPSLPLEKGETIGEYYTRAALSREEKDRRNVSSLFRFKTVLV  5168
+
+Query  9328  FQVGKCTILGACGGDDIHVIFKMLFGFFWYFIDKSVHLTDDEFENGKCTYHLPPLSWYLM  9507
+             F+VGKCT+LG CGGDD+ VI K+LFGFF+YF+D  + L+  E       Y +PPL WYL 
+Sbjct  5169  FKVGKCTVLGECGGDDMSVISKLLFGFFFYFMDHHIKLSVSEAMRMIDKYGIPPLEWYLF  5348
+
+Query  9508  TDFFLRTVP  9534
+             +DFF  T P
+Sbjct  5349  SDFFFYTHP  5375
+
+
+ Score = 64.8 bits (135),  Expect(4) = 2e-68
+ Identities = 26/53 (49%), Positives = 40/53 (75%), Gaps = 0/53 (0%)
+ Frame = +1/+3
+
+Query  8932  SILIFSMGSVIIVGLRKLGLTPLSVLQAVSAIADTQEHPITIANVEIVNVVST  9090
+             SIL+F+ G++I+VGL+   LT L V++++S+I DT E+P+ +  V IVN VST
+Sbjct  4770  SILVFASGALIVVGLQDSSLTRLCVIKSISSIVDTLEYPVRVKRVTIVNTVST  4928
+
+
+ Score = 37.7 bits (76),  Expect(4) = 2e-68
+ Identities = 15/36 (42%), Positives = 26/36 (72%), Gaps = 0/36 (0%)
+ Frame = +1/+3
+
+Query  8815  TSKNKKMHLIDKTIMVKSLNETSQKQFTALRLREEF  8922
+             +S N    ++D+++++ +  ETSQKQFTAL+ R+ F
+Sbjct  4659  SSANPINVMLDRSLVMLTERETSQKQFTALKCRDSF  4766
+
+
+ Score = 35.9 bits (72),  Expect(4) = 2e-68
+ Identities = 12/24 (50%), Positives = 17/24 (71%), Gaps = 0/24 (0%)
+ Frame = +1/+3
+
+Query  8731  IAHNCYTRDNLCIGITLDFGKNHQ  8802
+             ++H+  + DN C+ I LDFGKN Q
+Sbjct  4557  VSHSVCSTDNNCVSIVLDFGKNKQ  4628
+
+
+ Score = 54.7 bits (113),  Expect(5) = 1e-24
+ Identities = 23/38 (61%), Positives = 27/38 (71%), Gaps = 0/38 (0%)
+ Frame = -1/-1
+
+Query  9425  SIKYQKNPKSILKMT*MSSPPHAPRMVHLPT*NINTVL  9312
+             S+K +K PK   +MT MSSPPH+PR VH PT N  TVL
+Sbjct  5266  SMK*KKKPKRSFEMTDMSSPPHSPRTVHFPTLNTRTVL  5153
+
+
+ Score = 39.6 bits (80),  Expect(5) = 1e-24
+ Identities = 18/29 (62%), Positives = 20/29 (69%), Gaps = 0/29 (0%)
+ Frame = -1/-1
+
+Query  9251  V*YPPIVSPFFK*RMGTSTLKKRPGNESG  9165
+             V*Y P+VSPF +   GT TLK  PGN SG
+Sbjct  5092  V*YSPMVSPFSRGSDGTRTLKNIPGNVSG  5006
+
+
+ Score = 32.2 bits (64),  Expect(5) = 1e-24
+ Identities = 13/18 (72%), Positives = 13/18 (72%), Gaps = 0/18 (0%)
+ Frame = -1/-1
+
+Query  8921  NSSRKRRAVNCFCDVSFS  8868
+             N SR   AVNCFCDVS S
+Sbjct  4765  NESRHLSAVNCFCDVSRS  4712
+
+
+ Score = 27.2 bits (53),  Expect(5) = 1e-24
+ Identities = 12/21 (57%), Positives = 14/21 (67%), Gaps = 0/21 (0%)
+ Frame = -1/-1
+
+Query  9533  GTVLKKKSVIKYHERGGK*YV  9471
+             G V KKKS  +YH RGG  Y+
+Sbjct  5374  GWV*KKKSENRYHSRGGIPYL  5312
+
+
+ Score = 23.5 bits (45),  Expect(5) = 1e-24
+ Identities = 11/32 (34%), Positives = 18/32 (56%), Gaps = 0/32 (0%)
+ Frame = -3/-3
+
+Query  9114  KVEFKKIKSRDDIDNLYIGYGDGMFLSICNSR  9019
+             +++ K I+ R  IDN +  +  G+F  I N R
+Sbjct  4952  EIKGKPIERRHGIDNRHPFHAHGIFERINNGR  4857
+
+
+ Score = 47.8 bits (98),  Expect = 7e-07
+ Identities = 27/85 (32%), Positives = 44/85 (52%), Gaps = 0/85 (0%)
+ Frame = +3/+2
+
+Query  9168  RLIPWPLF*SAGTHSSFEKRRDDRRILYAGSQGKRSRKWGRGEKVF*G*NRVNISGGQVY  9347
+             R +PW +F*   T +S  K  D RR+L++     R  +  + +     *+R  I GG++Y
+Sbjct  5009  RDVPWNVF*GPSTVASSGKG*DHRRVLHSSGTEPRRER*TKRQLFIPF*DRSRI*GGKMY  5188
+
+Query  9348  HSRRMWRRRHSCHF*NALWILLVLY  9422
+               R +W R H  HF  +L +  +L+
+Sbjct  5189  GPR*VWWR*HVGHFEASLRLFFLLH  5263
+
+
+ Score = 40.0 bits (81),  Expect = 2e-04
+ Identities = 15/40 (38%), Positives = 27/40 (68%), Gaps = 0/40 (0%)
+ Frame = -3/-3
+
+Query  9435  NGFIDKVPEESKEHFKNDMNVVSATCAENGTLAHLKY*HG  9316
+             N  I +V ++++E  +ND +V++ T  E+ T +HLKY +G
+Sbjct  5276  NVMIHEVKKKAEEKLRNDRHVIATTLTEDRTFSHLKYENG  5157
+
+
+ Score = 26.7 bits (52),  Expect = 1.6
+ Identities = 8/26 (31%), Positives = 17/26 (65%), Gaps = 0/26 (0%)
+ Frame = -2/-3
+
+Query  1159  YQMRHHHPYYNNNRMRQQHHPSQSYQ  1082
+             +Q +H+H + ++++ +QQH   Q  Q
+Sbjct  3059  HQNQHNHHHNHHHQQQQQHQQDQELQ  2982
+
+
+ Score = 25.8 bits (50),  Expect = 3.0
+ Identities = 8/25 (32%), Positives = 11/25 (44%), Gaps = 0/25 (0%)
+ Frame = +3/+2
+
+Query  7881  INCNIEGNDRMLNSTETLWRWPYTP  7955
+             +  N+E N R    T   W+W   P
+Sbjct  2504  VGANVEENSRRGRKTSLCWKWHCRP  2578
+
+
+ Score = 24.9 bits (48),  Expect = 5.6
+ Identities = 9/30 (30%), Positives = 15/30 (50%), Gaps = 0/30 (0%)
+ Frame = +1/+3
+
+Query  16264  PSPRHT*TVKHAQSFRLVYPRQWKRQRHET  16353
+              P PR+T   K  +  R   P QW   ++++
+Sbjct  5643   PRPRYTTDTKGVKKIRYYLPPQWGSSQNKS  5732
+
+
+> LC738875_270001_280000 window 270001-280000 of LC738875.1 MAG: 
+Melicertus latisulcatus pemonivirus Okinawa2016 DNA, complete 
+genome
+Length=10000
+
+ Score = 29.0 bits (57),  Expect = 0.32
+ Identities = 10/26 (38%), Positives = 15/26 (58%), Gaps = 0/26 (0%)
+ Frame = -1/+2
+
+Query  12047  YKYVCTCVYINIYLSYKPTNIRYQHL  11970
+              Y Y+   +YI I + Y  T + YQH+
+Sbjct  3203   YIYIYIYIYIYIIVKYSSTRLYYQHV  3280
+
+
+ Score = 26.3 bits (51),  Expect = 2.2
+ Identities = 8/18 (44%), Positives = 15/18 (83%), Gaps = 0/18 (0%)
+ Frame = -3/+3
+
+Query  14514  YLFVYVY*FILEVMIVLV  14461
+              Y+++Y+Y +IL + IVL+
+Sbjct  3207   YIYIYIYIYILSLNIVLL  3260
+
+
+ Score = 26.3 bits (51),  Expect = 2.2
+ Identities = 7/17 (41%), Positives = 11/17 (65%), Gaps = 0/17 (0%)
+ Frame = +1/-1
+
+Query  589   YLLHYYHQPVFVYHYYH  639
+             Y  +YYH   + Y+YY+
+Sbjct  2590  YYYYYYHYYYYYYYYYY  2540
+
+
+ Score = 24.9 bits (48),  Expect = 5.6
+ Identities = 7/19 (37%), Positives = 12/19 (63%), Gaps = 0/19 (0%)
+ Frame = +1/-1
+
+Query  598   HYYHQPVFVYHYYHLF*IY  654
+             HYY+   + Y+YY+ +  Y
+Sbjct  2596  HYYYYYYYHYYYYYYYYYY  2540
+
+
+ Score = 24.9 bits (48),  Expect = 5.6
+ Identities = 9/14 (64%), Positives = 12/14 (86%), Gaps = 0/14 (0%)
+ Frame = +2/-2
+
+Query  4154  P*VYNLLPVSPLYH  4195
+             P*VY +L V+PL+H
+Sbjct  2385  P*VYIILSVAPLFH  2344
+
+
+ Score = 24.4 bits (47),  Expect = 7.7
+ Identities = 6/15 (40%), Positives = 11/15 (73%), Gaps = 0/15 (0%)
+ Frame = +1/+1
+
+Query  595   LHYYHQPVFVYHYYH  639
+             +HYY+   + Y+YY+
+Sbjct  2458  VHYYYYYYYYYYYYY  2502
+
+
+ Score = 24.4 bits (47),  Expect = 7.7
+ Identities = 11/21 (52%), Positives = 13/21 (62%), Gaps = 0/21 (0%)
+ Frame = +2/+3
+
+Query  16901  FIAIRLCQYDGTVLTSFLMSS  16963
+              +I  RL  Y GTV  +FLM S
+Sbjct  4446   YITDRLTPYKGTVRKTFLMFS  4508
+
+
+ Score = 24.4 bits (47),  Expect = 7.7
+ Identities = 8/15 (53%), Positives = 11/15 (73%), Gaps = 0/15 (0%)
+ Frame = -2/-3
+
+Query  916   DQKCFSCSLKNDVNR  872
+             D KCF C+LK ++ R
+Sbjct  4847  DVKCFDCNLKINMTR  4803
+
+
+> LC738875_120001_130000 window 120001-130000 of LC738875.1 MAG: 
+Melicertus latisulcatus pemonivirus Okinawa2016 DNA, complete 
+genome
+Length=10000
+
+ Score = 25.8 bits (50),  Expect = 3.0
+ Identities = 9/18 (50%), Positives = 13/18 (72%), Gaps = 0/18 (0%)
+ Frame = -1/+2
+
+Query  4922  TLNNRIEFLFFSHIMYYI  4869
+             TL+N +  LFF H +Y+I
+Sbjct  8999  TLSNTLYTLFFLHFIYFI  9052
+
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 87403365
+
+
+Query= LC738874_30001_30800 window 30001-30800 of LC738874.1 MAG:
+Melicertus latisulcatus majanivirus Okinawa2016 DNA, complete genome
+
+Length=800
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+LC738875_270001_280000 window 270001-280000 of LC738875.1 MAG: Me...  66.1    9e-28  4
+LC738875_300001_310000 window 300001-310000 of LC738875.1 MAG: Me...  28.1    0.022  1
+LC738875_130001_140000 window 130001-140000 of LC738875.1 MAG: Me...  21.2    2.5    1
+LC738875_120001_130000 window 120001-130000 of LC738875.1 MAG: Me...  19.9    6.6    1
+
+
+> LC738875_270001_280000 window 270001-280000 of LC738875.1 MAG: 
+Melicertus latisulcatus pemonivirus Okinawa2016 DNA, complete 
+genome
+Length=10000
+
+ Score = 66.1 bits (138),  Expect(4) = 9e-28
+ Identities = 22/53 (42%), Positives = 40/53 (75%), Gaps = 0/53 (0%)
+ Frame = -1/-3
+
+Query  590   EFLMDLDIVKCVVSMGYPISIAKVSLVMHVEEKGWPFLRIDEYIDDMNKLLKK  432
+             + + + DIVK V+ +GYP+SIA+ +L  H++  GWP+L ID YI+D+ +++++
+Sbjct  3917  DMMTESDIVKDVIEIGYPMSIARATLRNHIQITGWPYLNIDLYIEDIERMIRE  3759
+
+
+ Score = 64.8 bits (135),  Expect(4) = 9e-28
+ Identities = 19/31 (61%), Positives = 26/31 (84%), Gaps = 0/31 (0%)
+ Frame = -1/-3
+
+Query  788   NWEKEDIPWNMHAKWHPNCTYVLLKKGADFI  696
+             NWEK+DIPWN HAKW+P C +V+++KG  F+
+Sbjct  4100  NWEKDDIPWNEHAKWYPECNFVIIEKGKIFV  4008
+
+
+ Score = 26.3 bits (51),  Expect(4) = 9e-28
+ Identities = 9/20 (45%), Positives = 12/20 (60%), Gaps = 0/20 (0%)
+ Frame = -1/-3
+
+Query  134   VLCEACALVSKDCPKCKKWI  75
+             V C +CA+V   CP C+  I
+Sbjct  3422  VACASCAVVLTACPVCRSSI  3363
+
+
+ Score = 24.9 bits (48),  Expect(4) = 9e-28
+ Identities = 10/27 (37%), Positives = 12/27 (44%), Gaps = 0/27 (0%)
+ Frame = -1/-3
+
+Query  188   CKKCMITDALVAVFPCRHVLCEACALV  108
+             CK CM     V   PC H++  A   V
+Sbjct  3479  CKVCMDNKVDVVFIPCTHMVACASCAV  3399
+
+
+ Score = 44.1 bits (90),  Expect(2) = 9e-13
+ Identities = 24/44 (55%), Positives = 26/44 (59%), Gaps = 0/44 (0%)
+ Frame = +1/+1
+
+Query  451   ISSIYSSILKNGQPFSSTCITRETLAILMG*PILTTHLTISKSI  582
+             ISSIY S+ K GQP       R  LAI MG PI  T LTIS S+
+Sbjct  3778  ISSIYRSMFKYGQPVI*MWFLRVALAIDMGYPISITSLTISDSV  3909
+
+
+ Score = 36.8 bits (74),  Expect(2) = 9e-13
+ Identities = 16/31 (52%), Positives = 19/31 (61%), Gaps = 0/31 (0%)
+ Frame = +1/+1
+
+Query  700   KSAPFFRRT*VQFGCHFACIFQGISSFSQLK  792
+             K  PF   T +  G H AC F G+SSFSQL+
+Sbjct  4012  KILPFSIMTKLHSGYHLACSFHGMSSFSQLR  4104
+
+
+ Score = 42.3 bits (86),  Expect(2) = 4e-09
+ Identities = 19/44 (43%), Positives = 26/44 (59%), Gaps = 0/44 (0%)
+ Frame = -3/-2
+
+Query  582   DGFGYC*MCSKYGLSHKYC*SFSRNAC*RERLAIFKN**IY**Y  451
+             DG GYC  C++  +SH YC  +S+      RLAI K+  +Y* Y
+Sbjct  3909  DGIGYCQRCNRDWVSHVYCQGYSQKPHSNYRLAILKHRSVY*RY  3778
+
+
+ Score = 26.3 bits (51),  Expect(2) = 4e-09
+ Identities = 12/28 (43%), Positives = 18/28 (64%), Gaps = 0/28 (0%)
+ Frame = -2/-1
+
+Query  787   IGRKKIYLGICTQNGIQIAPMSF*RKVQ  704
+             IG++  Y G+   +GIQ   +S *RKV+
+Sbjct  4099  IGKRTTYHGMNMLSGIQNVTLSL*RKVK  4016
+
+
+ Score = 31.3 bits (62),  Expect(2) = 5e-07
+ Identities = 12/31 (39%), Positives = 18/31 (58%), Gaps = 0/31 (0%)
+ Frame = +3/+3
+
+Query  483   WPTFLFNMHYERNFSNTYGITHTYYTFNNIQ  575
+             WP    N+  E +  N +GI + YY F+NI+
+Sbjct  3810  WPAGNLNVVSESSPGNRHGIPNLYYIFDNIR  3902
+
+
+ Score = 29.9 bits (59),  Expect(2) = 5e-07
+ Identities = 12/31 (39%), Positives = 16/31 (52%), Gaps = 0/31 (0%)
+ Frame = +3/+3
+
+Query  696   NKVCTFL*KDIGAIWMPFCVHIPRYIFFLPI  788
+             N+  TFL  D    W+P  + IP Y+   PI
+Sbjct  4008  NENFTFLYNDKVTFWIPLSMFIPWYVVLFPI  4100
+
+
+ Score = 30.4 bits (60),  Expect = 0.004
+ Identities = 11/16 (69%), Positives = 12/16 (75%), Gaps = 0/16 (0%)
+ Frame = +2/+2
+
+Query  536   WDNPYLLHI*QYPNPS  583
+             WD   LLH+*QYP PS
+Sbjct  3863  WDTQSLLHL*QYPIPS  3910
+
+
+ Score = 24.0 bits (46),  Expect = 0.38
+ Identities = 8/18 (44%), Positives = 12/18 (67%), Gaps = 0/18 (0%)
+ Frame = -1/+1
+
+Query  566   VKCVVSMGYPISIAKVSL  513
+             V   + MGYPISI  +++
+Sbjct  3844  VALAIDMGYPISITSLTI  3897
+
+
+ Score = 20.3 bits (38),  Expect(2) = 0.49
+ Identities = 10/24 (42%), Positives = 13/24 (54%), Gaps = 0/24 (0%)
+ Frame = +3/+3
+
+Query  147   KYCYKCVRDHAFFTFWM*NINITF  218
+             +Y  +CV    FF+  M N N TF
+Sbjct  3954  RYSGRCVVVWCFFSPNMVNENFTF  4025
+
+
+ Score = 18.9 bits (35),  Expect(2) = 0.49
+ Identities = 5/14 (36%), Positives = 10/14 (71%), Gaps = 0/14 (0%)
+ Frame = +2/+3
+
+Query  77    SIFYILDSLSRREH  118
+             +++YI D++  R H
+Sbjct  3873  NLYYIFDNIRFRHH  3914
+
+
+ Score = 21.2 bits (40),  Expect = 2.5
+ Identities = 7/24 (29%), Positives = 16/24 (67%), Gaps = 0/24 (0%)
+ Frame = -1/+1
+
+Query  521   VSLVMHVEEKGWPFLRIDEYIDDM  450
+             + ++ HV+E    F+ + EY+D++
+Sbjct  6529  IDVLEHVDEFVDQFIDLLEYVDEL  6600
+
+
+ Score = 20.3 bits (38),  Expect = 4.8
+ Identities = 5/9 (56%), Positives = 8/9 (89%), Gaps = 0/9 (0%)
+ Frame = -1/+3
+
+Query  386   INETGCAYI  360
+             +N+TGC Y+
+Sbjct  1044  LNQTGCMYL  1070
+
+
+ Score = 20.3 bits (38),  Expect = 4.8
+ Identities = 9/21 (43%), Positives = 12/21 (57%), Gaps = 0/21 (0%)
+ Frame = -2/+1
+
+Query  706   QTLFIEIIKKRMKRIVKNYII  644
+             +TLFI     R   IVKN ++
+Sbjct  8974  RTLFICTYSARYVNIVKNKVV  9036
+
+
+ Score = 19.4 bits (36),  Expect = 9.1
+ Identities = 10/18 (56%), Positives = 10/18 (56%), Gaps = 0/18 (0%)
+ Frame = +1/-3
+
+Query  454   SSIYSSILKNGQPFSSTC  507
+             SS YSS   N    SSTC
+Sbjct  6596  SSTYSSKSMN*STNSSTC  6543
+
+
+> LC738875_300001_310000 window 300001-310000 of LC738875.1 MAG: 
+Melicertus latisulcatus pemonivirus Okinawa2016 DNA, complete 
+genome
+Length=10000
+
+ Score = 28.1 bits (55),  Expect = 0.022
+ Identities = 10/21 (48%), Positives = 16/21 (76%), Gaps = 0/21 (0%)
+ Frame = -3/+1
+
+Query  780   ERRYTLEYARKMASKLHLCPS  718
+             +R+ T+ YAR ++S +HL PS
+Sbjct  7876  DRKKTIRYARVISSVVHLVPS  7938
+
+
+ Score = 24.4 bits (47),  Expect = 0.28
+ Identities = 10/21 (48%), Positives = 12/21 (57%), Gaps = 0/21 (0%)
+ Frame = +2/-3
+
+Query  719   EGHRCNLDAILRAYSKVYLLS  781
+             EG RC  D + RAY  V+  S
+Sbjct  7937  EGTRCTTDEMTRAYLIVFFRS  7875
+
+
+ Score = 21.2 bits (40),  Expect = 2.5
+ Identities = 8/12 (67%), Positives = 9/12 (75%), Gaps = 0/12 (0%)
+ Frame = -2/+2
+
+Query  142   VGMCFVKLVLSS  107
+             VGMC  +LVL S
+Sbjct  1895  VGMCHARLVLRS  1930
+
+
+ Score = 20.8 bits (39),  Expect = 3.5
+ Identities = 10/26 (38%), Positives = 14/26 (54%), Gaps = 0/26 (0%)
+ Frame = -1/-2
+
+Query  566   VKCVVSMGYPISIAKVSLVMHVEEKG  489
+             V CVVS+  P++     L +HV   G
+Sbjct  7506  VYCVVSVVSPVNGGLDELHLHVTVSG  7429
+
+
+ Score = 19.9 bits (37),  Expect = 6.6
+ Identities = 6/12 (50%), Positives = 8/12 (67%), Gaps = 0/12 (0%)
+ Frame = -2/+1
+
+Query  61   HLTICESCVFNS  26
+            H++IC  C F S
+Sbjct  868  HMSICRRCSFLS  903
+
+
+ Score = 19.9 bits (37),  Expect = 6.6
+ Identities = 5/7 (71%), Positives = 6/7 (86%), Gaps = 0/7 (0%)
+ Frame = -1/+2
+
+Query  770   IPWNMHA  750
+             +PWN HA
+Sbjct  4118  LPWNRHA  4138
+
+
+ Score = 19.4 bits (36),  Expect = 9.1
+ Identities = 6/19 (32%), Positives = 12/19 (63%), Gaps = 0/19 (0%)
+ Frame = +1/-2
+
+Query  190   FGCEILILLSMVFVSDKAS  246
+             F CE+L   + +FV  +++
+Sbjct  9708  FACEVLATSTPIFVIGRST  9652
+
+
+ Score = 19.4 bits (36),  Expect = 9.1
+ Identities = 8/20 (40%), Positives = 11/20 (55%), Gaps = 0/20 (0%)
+ Frame = -1/-2
+
+Query  521   VSLVMHVEEKGWPFLRIDEY  462
+             + +V  V E GW  + ID Y
+Sbjct  7878  IFIVSPVGECGWQNVFIDRY  7819
+
+
+ Score = 19.4 bits (36),  Expect = 9.1
+ Identities = 10/34 (29%), Positives = 17/34 (50%), Gaps = 0/34 (0%)
+ Frame = +2/+3
+
+Query  428   DSFSTIYSYHQYIHQFLKMANLSLQHALREKL*Q  529
+             D    ++    + H+F  +  L+L+ ALR  L Q
+Sbjct  4440  DGIIFVFFTFVFFHRFGGVKRLTLRSALRLTLGQ  4541
+
+
+> LC738875_130001_140000 window 130001-140000 of LC738875.1 MAG: 
+Melicertus latisulcatus pemonivirus Okinawa2016 DNA, complete 
+genome
+Length=10000
+
+ Score = 21.2 bits (40),  Expect = 2.5
+ Identities = 9/22 (41%), Positives = 13/22 (59%), Gaps = 0/22 (0%)
+ Frame = +2/+3
+
+Query  632   FPARYDIIFHYSFHTFLDYFYK  697
+             F  R+ I F+Y+  TF   F+K
+Sbjct  4971  FFVRHCIAFNYNPETFPGMFFK  5036
+
+
+ Score = 19.4 bits (36),  Expect = 9.1
+ Identities = 8/39 (21%), Positives = 19/39 (49%), Gaps = 0/39 (0%)
+ Frame = -1/+1
+
+Query  671  EKNSEKLYHTWQGINSNVSHMSTLILTEFLMDLDIVKCV  555
+            E+N  ++  TW  + S+   ++T  L   +  ++   C+
+Sbjct  493  ERNFRRVLKTWLPLISDEYDVATKTLEILIERMEFNGCI  609
+
+
+ Score = 19.4 bits (36),  Expect = 9.1
+ Identities = 7/21 (33%), Positives = 12/21 (57%), Gaps = 0/21 (0%)
+ Frame = +3/+3
+
+Query  501  NMHYERNFSNTYGITHTYYTF  563
+            N+H +  +S +Y  T   +TF
+Sbjct  741  NIHQQYGYSTSYH*TLRVHTF  803
+
+
+ Score = 19.4 bits (36),  Expect = 9.1
+ Identities = 5/11 (45%), Positives = 7/11 (64%), Gaps = 0/11 (0%)
+ Frame = -1/-3
+
+Query  764   WNMHAKWHPNC  732
+             WN    +HP+C
+Sbjct  5327  WNSILIYHPHC  5295
+
+
+> LC738875_120001_130000 window 120001-130000 of LC738875.1 MAG: 
+Melicertus latisulcatus pemonivirus Okinawa2016 DNA, complete 
+genome
+Length=10000
+
+ Score = 19.9 bits (37),  Expect = 6.6
+ Identities = 10/38 (26%), Positives = 16/38 (42%), Gaps = 0/38 (0%)
+ Frame = +3/+3
+
+Query  528   NTYGITHTYYTFNNIQIHQEFS*N*CTHMTHIRIYSLP  641
+             +TY +TH         +H +F  +   H+     YS P
+Sbjct  3381  DTYAMTHQQNCNCPFTLHHDFRPSLDEHLVPSFAYSRP  3494
+
+
+ Score = 19.9 bits (37),  Expect = 6.6
+ Identities = 6/14 (43%), Positives = 11/14 (79%), Gaps = 0/14 (0%)
+ Frame = -2/+3
+
+Query  289   VPVKN*KTLKIQHL  248
+             + VKN*  +++QH+
+Sbjct  9108  IKVKN*YNMRVQHV  9149
+
+
+ Score = 19.9 bits (37),  Expect = 6.6
+ Identities = 8/13 (62%), Positives = 9/13 (69%), Gaps = 0/13 (0%)
+ Frame = -2/+1
+
+Query  778   KKIYLGICTQNGI  740
+             K IYL I T NG+
+Sbjct  9385  K*IYLSIITPNGL  9423
+
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 3132429
+
+
+Query= LC738874_180001_186000 window 180001-186000 of LC738874.1 MAG:
+Melicertus latisulcatus majanivirus Okinawa2016 DNA, complete genome
+
+Length=6000
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+LC738875_270001_280000 window 270001-280000 of LC738875.1 MAG: Me...  28.6    0.13   1
+LC738875_130001_140000 window 130001-140000 of LC738875.1 MAG: Me...  24.0    3.1    1
+LC738875_300001_310000 window 300001-310000 of LC738875.1 MAG: Me...  23.1    5.9    1
+LC738875_120001_130000 window 120001-130000 of LC738875.1 MAG: Me...  23.1    5.9    1
+
+
+> LC738875_270001_280000 window 270001-280000 of LC738875.1 MAG: 
+Melicertus latisulcatus pemonivirus Okinawa2016 DNA, complete 
+genome
+Length=10000
+
+ Score = 28.6 bits (56),  Expect = 0.13
+ Identities = 15/41 (37%), Positives = 21/41 (51%), Gaps = 0/41 (0%)
+ Frame = +1/+3
+
+Query  1297  YFLFLIPIYIYTCVYIHNYH*IVLKFF*LDIINLYFFSSFL  1419
+             Y    I IYIY  +YI+ Y  I +    L+I+ L F  + L
+Sbjct  3159  YIYIYIYIYIYIYIYIYIYIYIYIYILSLNIVLLGFIINML  3281
+
+
+ Score = 27.6 bits (54),  Expect = 0.25
+ Identities = 11/26 (42%), Positives = 16/26 (62%), Gaps = 0/26 (0%)
+ Frame = +1/+2
+
+Query  1297  YFLFLIPIYIYTCVYIHNYH*IVLKF  1374
+             Y    I IYIY  +YI+ Y  I++K+
+Sbjct  3173  YIYIYIYIYIYIYIYIYIYIYIIVKY  3250
+
+
+ Score = 25.8 bits (50),  Expect(3) = 0.62
+ Identities = 11/16 (69%), Positives = 11/16 (69%), Gaps = 0/16 (0%)
+ Frame = -3/+2
+
+Query  3943  KCITLGCVYIYIYIYI  3896
+             K I L   YIYIYIYI
+Sbjct  3131  KVIPLKLQYIYIYIYI  3178
+
+
+ Score = 24.9 bits (48),  Expect(3) = 0.62
+ Identities = 9/13 (69%), Positives = 11/13 (85%), Gaps = 0/13 (0%)
+ Frame = -3/+3
+
+Query  1348  YEYIHMYIYILEL  1310
+             Y YI++YIYIL L
+Sbjct  3207  YIYIYIYIYILSL  3245
+
+
+ Score = 23.1 bits (44),  Expect(3) = 0.62
+ Identities = 8/17 (47%), Positives = 11/17 (65%), Gaps = 0/17 (0%)
+ Frame = -2/+2
+
+Query  287   DLSGHPNSQTDKTPSLY  237
+             D+  H N QTDK+  +Y
+Sbjct  9203  DVVQHANEQTDKSCDMY  9253
+
+
+ Score = 25.8 bits (50),  Expect = 0.88
+ Identities = 9/14 (64%), Positives = 12/14 (86%), Gaps = 0/14 (0%)
+ Frame = -3/-2
+
+Query  3937  ITLGCVYIYIYIYI  3896
+             +T+  +YIYIYIYI
+Sbjct  3246  LTIIYIYIYIYIYI  3205
+
+
+ Score = 25.4 bits (49),  Expect = 1.2
+ Identities = 9/21 (43%), Positives = 14/21 (67%), Gaps = 0/21 (0%)
+ Frame = +1/-2
+
+Query  1291  ISYFLFLIPIYIYTCVYIHNY  1353
+             +  +L +I IYIY  +YI+ Y
+Sbjct  3258  VELYLTIIYIYIYIYIYIYIY  3196
+
+
+ Score = 25.4 bits (49),  Expect = 1.2
+ Identities = 7/19 (37%), Positives = 13/19 (68%), Gaps = 0/19 (0%)
+ Frame = +2/+1
+
+Query  890   CTHSIYWNNVKKNSISYIH  946
+             CT+S  + N+ KN + ++H
+Sbjct  8989  CTYSARYVNIVKNKVVFVH  9045
+
+
+ Score = 24.9 bits (48),  Expect = 1.7
+ Identities = 9/14 (64%), Positives = 11/14 (79%), Gaps = 0/14 (0%)
+ Frame = -3/+2
+
+Query  3937  ITLGCVYIYIYIYI  3896
+             + L  +YIYIYIYI
+Sbjct  3143  LKLQYIYIYIYIYI  3184
+
+
+ Score = 24.9 bits (48),  Expect = 1.7
+ Identities = 9/12 (75%), Positives = 10/12 (83%), Gaps = 0/12 (0%)
+ Frame = -3/-2
+
+Query  3931  LGCVYIYIYIYI  3896
+             L  +YIYIYIYI
+Sbjct  3246  LTIIYIYIYIYI  3211
+
+
+ Score = 24.9 bits (48),  Expect = 1.7
+ Identities = 7/10 (70%), Positives = 9/10 (90%), Gaps = 0/10 (0%)
+ Frame = +1/+2
+
+Query  2557  HHHIYSYLVF  2586
+             HH +YSYL+F
+Sbjct  248   HHMVYSYLIF  277
+
+
+ Score = 24.9 bits (48),  Expect = 1.7
+ Identities = 13/40 (33%), Positives = 20/40 (50%), Gaps = 0/40 (0%)
+ Frame = +1/-2
+
+Query  1303  LFLIPIYIYTCVYIHNYH*IVLKFF*LDIINLYFFSSFLY  1422
+             +  I IYIY  +YI+ Y  I +  +     NL   + +LY
+Sbjct  3240  IIYIYIYIYIYIYIYIYIYIYIYIYIYIYCNLRGMTFYLY  3121
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 8/9 (89%), Positives = 9/9 (100%), Gaps = 0/9 (0%)
+ Frame = -3/+1
+
+Query  3922  VYIYIYIYI  3896
+             +YIYIYIYI
+Sbjct  3154  IYIYIYIYI  3180
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 8/9 (89%), Positives = 9/9 (100%), Gaps = 0/9 (0%)
+ Frame = -3/+3
+
+Query  3922  VYIYIYIYI  3896
+             +YIYIYIYI
+Sbjct  3156  IYIYIYIYI  3182
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 8/9 (89%), Positives = 9/9 (100%), Gaps = 0/9 (0%)
+ Frame = -3/+1
+
+Query  3922  VYIYIYIYI  3896
+             +YIYIYIYI
+Sbjct  3160  IYIYIYIYI  3186
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 8/9 (89%), Positives = 9/9 (100%), Gaps = 0/9 (0%)
+ Frame = -3/+3
+
+Query  3922  VYIYIYIYI  3896
+             +YIYIYIYI
+Sbjct  3162  IYIYIYIYI  3188
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 8/9 (89%), Positives = 9/9 (100%), Gaps = 0/9 (0%)
+ Frame = -3/+2
+
+Query  3922  VYIYIYIYI  3896
+             +YIYIYIYI
+Sbjct  3164  IYIYIYIYI  3190
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 8/9 (89%), Positives = 9/9 (100%), Gaps = 0/9 (0%)
+ Frame = -3/+1
+
+Query  3922  VYIYIYIYI  3896
+             +YIYIYIYI
+Sbjct  3166  IYIYIYIYI  3192
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 8/9 (89%), Positives = 9/9 (100%), Gaps = 0/9 (0%)
+ Frame = -3/+3
+
+Query  3922  VYIYIYIYI  3896
+             +YIYIYIYI
+Sbjct  3168  IYIYIYIYI  3194
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 8/9 (89%), Positives = 9/9 (100%), Gaps = 0/9 (0%)
+ Frame = -3/+2
+
+Query  3922  VYIYIYIYI  3896
+             +YIYIYIYI
+Sbjct  3170  IYIYIYIYI  3196
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 8/9 (89%), Positives = 9/9 (100%), Gaps = 0/9 (0%)
+ Frame = -3/+1
+
+Query  3922  VYIYIYIYI  3896
+             +YIYIYIYI
+Sbjct  3172  IYIYIYIYI  3198
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 8/9 (89%), Positives = 9/9 (100%), Gaps = 0/9 (0%)
+ Frame = -3/+3
+
+Query  3922  VYIYIYIYI  3896
+             +YIYIYIYI
+Sbjct  3174  IYIYIYIYI  3200
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 8/9 (89%), Positives = 9/9 (100%), Gaps = 0/9 (0%)
+ Frame = -3/+2
+
+Query  3922  VYIYIYIYI  3896
+             +YIYIYIYI
+Sbjct  3176  IYIYIYIYI  3202
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 8/9 (89%), Positives = 9/9 (100%), Gaps = 0/9 (0%)
+ Frame = -3/+1
+
+Query  3922  VYIYIYIYI  3896
+             +YIYIYIYI
+Sbjct  3178  IYIYIYIYI  3204
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 8/9 (89%), Positives = 9/9 (100%), Gaps = 0/9 (0%)
+ Frame = -3/+3
+
+Query  3922  VYIYIYIYI  3896
+             +YIYIYIYI
+Sbjct  3180  IYIYIYIYI  3206
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 8/9 (89%), Positives = 9/9 (100%), Gaps = 0/9 (0%)
+ Frame = -3/+2
+
+Query  3922  VYIYIYIYI  3896
+             +YIYIYIYI
+Sbjct  3182  IYIYIYIYI  3208
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 8/9 (89%), Positives = 9/9 (100%), Gaps = 0/9 (0%)
+ Frame = -3/+1
+
+Query  3922  VYIYIYIYI  3896
+             +YIYIYIYI
+Sbjct  3184  IYIYIYIYI  3210
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 8/9 (89%), Positives = 9/9 (100%), Gaps = 0/9 (0%)
+ Frame = -3/+3
+
+Query  3922  VYIYIYIYI  3896
+             +YIYIYIYI
+Sbjct  3186  IYIYIYIYI  3212
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 8/9 (89%), Positives = 9/9 (100%), Gaps = 0/9 (0%)
+ Frame = -3/+2
+
+Query  3922  VYIYIYIYI  3896
+             +YIYIYIYI
+Sbjct  3188  IYIYIYIYI  3214
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 8/9 (89%), Positives = 9/9 (100%), Gaps = 0/9 (0%)
+ Frame = -3/+1
+
+Query  3922  VYIYIYIYI  3896
+             +YIYIYIYI
+Sbjct  3190  IYIYIYIYI  3216
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 8/9 (89%), Positives = 9/9 (100%), Gaps = 0/9 (0%)
+ Frame = -3/+3
+
+Query  3922  VYIYIYIYI  3896
+             +YIYIYIYI
+Sbjct  3192  IYIYIYIYI  3218
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 8/9 (89%), Positives = 9/9 (100%), Gaps = 0/9 (0%)
+ Frame = -3/+2
+
+Query  3922  VYIYIYIYI  3896
+             +YIYIYIYI
+Sbjct  3194  IYIYIYIYI  3220
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 8/9 (89%), Positives = 9/9 (100%), Gaps = 0/9 (0%)
+ Frame = -3/+1
+
+Query  3922  VYIYIYIYI  3896
+             +YIYIYIYI
+Sbjct  3196  IYIYIYIYI  3222
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 8/9 (89%), Positives = 9/9 (100%), Gaps = 0/9 (0%)
+ Frame = -3/+3
+
+Query  3922  VYIYIYIYI  3896
+             +YIYIYIYI
+Sbjct  3198  IYIYIYIYI  3224
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 8/9 (89%), Positives = 9/9 (100%), Gaps = 0/9 (0%)
+ Frame = -3/+2
+
+Query  3922  VYIYIYIYI  3896
+             +YIYIYIYI
+Sbjct  3200  IYIYIYIYI  3226
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 8/9 (89%), Positives = 9/9 (100%), Gaps = 0/9 (0%)
+ Frame = -3/+1
+
+Query  3922  VYIYIYIYI  3896
+             +YIYIYIYI
+Sbjct  3202  IYIYIYIYI  3228
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 8/9 (89%), Positives = 9/9 (100%), Gaps = 0/9 (0%)
+ Frame = -3/+3
+
+Query  3922  VYIYIYIYI  3896
+             +YIYIYIYI
+Sbjct  3204  IYIYIYIYI  3230
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 8/9 (89%), Positives = 9/9 (100%), Gaps = 0/9 (0%)
+ Frame = -3/+2
+
+Query  3922  VYIYIYIYI  3896
+             +YIYIYIYI
+Sbjct  3206  IYIYIYIYI  3232
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 8/9 (89%), Positives = 9/9 (100%), Gaps = 0/9 (0%)
+ Frame = -3/+1
+
+Query  3922  VYIYIYIYI  3896
+             +YIYIYIYI
+Sbjct  3208  IYIYIYIYI  3234
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 8/9 (89%), Positives = 9/9 (100%), Gaps = 0/9 (0%)
+ Frame = -3/+3
+
+Query  3922  VYIYIYIYI  3896
+             +YIYIYIYI
+Sbjct  3210  IYIYIYIYI  3236
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 8/9 (89%), Positives = 9/9 (100%), Gaps = 0/9 (0%)
+ Frame = -3/+2
+
+Query  3922  VYIYIYIYI  3896
+             +YIYIYIYI
+Sbjct  3212  IYIYIYIYI  3238
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 10/18 (56%), Positives = 12/18 (67%), Gaps = 0/18 (0%)
+ Frame = -1/-1
+
+Query  1371  F*DNLMIIMNIYTCIYIY  1318
+             F DN+ I + IY  IYIY
+Sbjct  3247  FNDNIYIYIYIYIYIYIY  3194
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 8/9 (89%), Positives = 9/9 (100%), Gaps = 0/9 (0%)
+ Frame = -3/-1
+
+Query  3922  VYIYIYIYI  3896
+             +YIYIYIYI
+Sbjct  3235  IYIYIYIYI  3209
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 8/9 (89%), Positives = 9/9 (100%), Gaps = 0/9 (0%)
+ Frame = -3/-3
+
+Query  3922  VYIYIYIYI  3896
+             +YIYIYIYI
+Sbjct  3233  IYIYIYIYI  3207
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 8/9 (89%), Positives = 9/9 (100%), Gaps = 0/9 (0%)
+ Frame = -3/-1
+
+Query  3922  VYIYIYIYI  3896
+             +YIYIYIYI
+Sbjct  3229  IYIYIYIYI  3203
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 8/9 (89%), Positives = 9/9 (100%), Gaps = 0/9 (0%)
+ Frame = -3/-3
+
+Query  3922  VYIYIYIYI  3896
+             +YIYIYIYI
+Sbjct  3227  IYIYIYIYI  3201
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 8/9 (89%), Positives = 9/9 (100%), Gaps = 0/9 (0%)
+ Frame = -3/-2
+
+Query  3922  VYIYIYIYI  3896
+             +YIYIYIYI
+Sbjct  3225  IYIYIYIYI  3199
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 8/9 (89%), Positives = 9/9 (100%), Gaps = 0/9 (0%)
+ Frame = -3/-1
+
+Query  3922  VYIYIYIYI  3896
+             +YIYIYIYI
+Sbjct  3223  IYIYIYIYI  3197
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 8/9 (89%), Positives = 9/9 (100%), Gaps = 0/9 (0%)
+ Frame = -3/-3
+
+Query  3922  VYIYIYIYI  3896
+             +YIYIYIYI
+Sbjct  3221  IYIYIYIYI  3195
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 8/9 (89%), Positives = 9/9 (100%), Gaps = 0/9 (0%)
+ Frame = -3/-2
+
+Query  3922  VYIYIYIYI  3896
+             +YIYIYIYI
+Sbjct  3219  IYIYIYIYI  3193
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 8/9 (89%), Positives = 9/9 (100%), Gaps = 0/9 (0%)
+ Frame = -3/-1
+
+Query  3922  VYIYIYIYI  3896
+             +YIYIYIYI
+Sbjct  3217  IYIYIYIYI  3191
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 8/9 (89%), Positives = 9/9 (100%), Gaps = 0/9 (0%)
+ Frame = -3/-3
+
+Query  3922  VYIYIYIYI  3896
+             +YIYIYIYI
+Sbjct  3215  IYIYIYIYI  3189
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 8/9 (89%), Positives = 9/9 (100%), Gaps = 0/9 (0%)
+ Frame = -3/-2
+
+Query  3922  VYIYIYIYI  3896
+             +YIYIYIYI
+Sbjct  3213  IYIYIYIYI  3187
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 8/9 (89%), Positives = 9/9 (100%), Gaps = 0/9 (0%)
+ Frame = -3/-1
+
+Query  3922  VYIYIYIYI  3896
+             +YIYIYIYI
+Sbjct  3211  IYIYIYIYI  3185
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 8/9 (89%), Positives = 9/9 (100%), Gaps = 0/9 (0%)
+ Frame = -3/-3
+
+Query  3922  VYIYIYIYI  3896
+             +YIYIYIYI
+Sbjct  3209  IYIYIYIYI  3183
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 8/9 (89%), Positives = 9/9 (100%), Gaps = 0/9 (0%)
+ Frame = -3/-2
+
+Query  3922  VYIYIYIYI  3896
+             +YIYIYIYI
+Sbjct  3207  IYIYIYIYI  3181
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 8/9 (89%), Positives = 9/9 (100%), Gaps = 0/9 (0%)
+ Frame = -3/-1
+
+Query  3922  VYIYIYIYI  3896
+             +YIYIYIYI
+Sbjct  3205  IYIYIYIYI  3179
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 8/9 (89%), Positives = 9/9 (100%), Gaps = 0/9 (0%)
+ Frame = -3/-3
+
+Query  3922  VYIYIYIYI  3896
+             +YIYIYIYI
+Sbjct  3203  IYIYIYIYI  3177
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 8/9 (89%), Positives = 9/9 (100%), Gaps = 0/9 (0%)
+ Frame = -3/-2
+
+Query  3922  VYIYIYIYI  3896
+             +YIYIYIYI
+Sbjct  3201  IYIYIYIYI  3175
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 8/9 (89%), Positives = 9/9 (100%), Gaps = 0/9 (0%)
+ Frame = -3/-1
+
+Query  3922  VYIYIYIYI  3896
+             +YIYIYIYI
+Sbjct  3199  IYIYIYIYI  3173
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 8/9 (89%), Positives = 9/9 (100%), Gaps = 0/9 (0%)
+ Frame = -3/-3
+
+Query  3922  VYIYIYIYI  3896
+             +YIYIYIYI
+Sbjct  3197  IYIYIYIYI  3171
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 8/9 (89%), Positives = 9/9 (100%), Gaps = 0/9 (0%)
+ Frame = -3/-2
+
+Query  3922  VYIYIYIYI  3896
+             +YIYIYIYI
+Sbjct  3195  IYIYIYIYI  3169
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 8/9 (89%), Positives = 9/9 (100%), Gaps = 0/9 (0%)
+ Frame = -3/-1
+
+Query  3922  VYIYIYIYI  3896
+             +YIYIYIYI
+Sbjct  3193  IYIYIYIYI  3167
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 8/9 (89%), Positives = 9/9 (100%), Gaps = 0/9 (0%)
+ Frame = -3/-3
+
+Query  3922  VYIYIYIYI  3896
+             +YIYIYIYI
+Sbjct  3191  IYIYIYIYI  3165
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 8/9 (89%), Positives = 9/9 (100%), Gaps = 0/9 (0%)
+ Frame = -3/-2
+
+Query  3922  VYIYIYIYI  3896
+             +YIYIYIYI
+Sbjct  3189  IYIYIYIYI  3163
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 8/9 (89%), Positives = 9/9 (100%), Gaps = 0/9 (0%)
+ Frame = -3/-1
+
+Query  3922  VYIYIYIYI  3896
+             +YIYIYIYI
+Sbjct  3187  IYIYIYIYI  3161
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 8/9 (89%), Positives = 9/9 (100%), Gaps = 0/9 (0%)
+ Frame = -3/-3
+
+Query  3922  VYIYIYIYI  3896
+             +YIYIYIYI
+Sbjct  3185  IYIYIYIYI  3159
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 8/9 (89%), Positives = 9/9 (100%), Gaps = 0/9 (0%)
+ Frame = -3/-2
+
+Query  3922  VYIYIYIYI  3896
+             +YIYIYIYI
+Sbjct  3183  IYIYIYIYI  3157
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 8/9 (89%), Positives = 9/9 (100%), Gaps = 0/9 (0%)
+ Frame = -3/-1
+
+Query  3922  VYIYIYIYI  3896
+             +YIYIYIYI
+Sbjct  3181  IYIYIYIYI  3155
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 8/9 (89%), Positives = 9/9 (100%), Gaps = 0/9 (0%)
+ Frame = -3/-3
+
+Query  3922  VYIYIYIYI  3896
+             +YIYIYIYI
+Sbjct  3179  IYIYIYIYI  3153
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 9/21 (43%), Positives = 12/21 (57%), Gaps = 0/21 (0%)
+ Frame = +1/+2
+
+Query  1291  ISYFLFLIPIYIYTCVYIHNY  1353
+             + Y    I IYIY  +YI+ Y
+Sbjct  3149  LQYIYIYIYIYIYIYIYIYIY  3211
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 9/20 (45%), Positives = 12/20 (60%), Gaps = 0/20 (0%)
+ Frame = +1/+1
+
+Query  1297  YFLFLIPIYIYTCVYIHNYH  1356
+             Y    I IYIY  +YI+ Y+
+Sbjct  3181  YIYIYIYIYIYIYIYIYIYY  3240
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 12/33 (36%), Positives = 18/33 (55%), Gaps = 0/33 (0%)
+ Frame = +1/-2
+
+Query  1303  LFLIPIYIYTCVYIHNYH*IVLKFF*LDIINLY  1401
+             L+L  IYIY  +YI+ Y  I +  +    I +Y
+Sbjct  3252  LYLTIIYIYIYIYIYIYIYIYIYIYIYIYIYIY  3154
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 10/21 (48%), Positives = 12/21 (57%), Gaps = 0/21 (0%)
+ Frame = +1/-2
+
+Query  1291  ISYFLFLIPIYIYTCVYIHNY  1353
+             I Y    I IYIY  +YI+ Y
+Sbjct  3240  IIYIYIYIYIYIYIYIYIYIY  3178
+
+
+ Score = 24.4 bits (47),  Expect = 2.3
+ Identities = 13/45 (29%), Positives = 23/45 (51%), Gaps = 0/45 (0%)
+ Frame = +3/-2
+
+Query  1266  LYI*LMTCNILFSFLNSNIYIYMCIYS*LSLNCLKIFLVGYYQLV  1400
+             +YI +     ++ ++   IYIY+ IY   +L  +  +L  Y  LV
+Sbjct  3237  IYIYIYIYIYIYIYIYIYIYIYIYIYIYCNLRGMTFYLYTYV*LV  3103
+
+
+ Score = 24.0 bits (46),  Expect = 3.1
+ Identities = 9/14 (64%), Positives = 12/14 (86%), Gaps = 0/14 (0%)
+ Frame = -3/-1
+
+Query  1348  YEYIHMYIYILELR  1307
+             Y YI++YIYIL L+
+Sbjct  3184  YIYIYIYIYIL*LK  3143
+
+
+ Score = 24.0 bits (46),  Expect = 3.1
+ Identities = 16/47 (34%), Positives = 24/47 (51%), Gaps = 0/47 (0%)
+ Frame = +1/+2
+
+Query  1282  *RAISYFLFLIPIYIYTCVYIHNYH*IVLKFF*LDIINLYFFSSFLY  1422
+             *+ I   L  I IYIY  +YI+ Y  I +  +    I + + S+ LY
+Sbjct  3128  *KVIPLKLQYIYIYIYIYIYIYIYIYIYIYIYIYIYIIVKYSSTRLY  3268
+
+
+ Score = 24.0 bits (46),  Expect = 3.1
+ Identities = 12/29 (41%), Positives = 15/29 (52%), Gaps = 0/29 (0%)
+ Frame = +1/-1
+
+Query  1297  YFLFLIPIYIYTCVYIHNYH*IVLKFF*L  1383
+             Y    I IYIY  +YI+ Y  I +   *L
+Sbjct  3232  YIYIYIYIYIYIYIYIYIYIYIYIYIL*L  3146
+
+
+ Score = 24.0 bits (46),  Expect = 3.1
+ Identities = 11/23 (48%), Positives = 13/23 (57%), Gaps = 0/23 (0%)
+ Frame = +1/-3
+
+Query  1297  YFLFLIPIYIYTCVYIHNYH*IV  1365
+             Y    I IYIY  +YI+ Y  IV
+Sbjct  3218  YIYIYIYIYIYIYIYIYIYIYIV  3150
+
+
+ Score = 23.5 bits (45),  Expect = 4.3
+ Identities = 10/31 (32%), Positives = 17/31 (55%), Gaps = 0/31 (0%)
+ Frame = +1/+1
+
+Query  1312  IPIYIYTCVYIHNYH*IVLKFF*LDIINLYF  1404
+             + IYIY  +YI+ Y  I +  +    I +Y+
+Sbjct  3148  VTIYIYIYIYIYIYIYIYIYIYIYIYIYIYY  3240
+
+
+ Score = 23.5 bits (45),  Expect = 4.3
+ Identities = 9/19 (47%), Positives = 11/19 (58%), Gaps = 0/19 (0%)
+ Frame = +1/+1
+
+Query  1297  YFLFLIPIYIYTCVYIHNY  1353
+             Y    I IYIY  +YI+ Y
+Sbjct  3157  YIYIYIYIYIYIYIYIYIY  3213
+
+
+ Score = 23.5 bits (45),  Expect = 4.3
+ Identities = 9/19 (47%), Positives = 11/19 (58%), Gaps = 0/19 (0%)
+ Frame = +1/+2
+
+Query  1297  YFLFLIPIYIYTCVYIHNY  1353
+             Y    I IYIY  +YI+ Y
+Sbjct  3161  YIYIYIYIYIYIYIYIYIY  3217
+
+
+ Score = 23.5 bits (45),  Expect = 4.3
+ Identities = 9/19 (47%), Positives = 11/19 (58%), Gaps = 0/19 (0%)
+ Frame = +1/+1
+
+Query  1297  YFLFLIPIYIYTCVYIHNY  1353
+             Y    I IYIY  +YI+ Y
+Sbjct  3163  YIYIYIYIYIYIYIYIYIY  3219
+
+
+ Score = 23.5 bits (45),  Expect = 4.3
+ Identities = 9/19 (47%), Positives = 11/19 (58%), Gaps = 0/19 (0%)
+ Frame = +1/+3
+
+Query  1297  YFLFLIPIYIYTCVYIHNY  1353
+             Y    I IYIY  +YI+ Y
+Sbjct  3165  YIYIYIYIYIYIYIYIYIY  3221
+
+
+ Score = 23.5 bits (45),  Expect = 4.3
+ Identities = 9/19 (47%), Positives = 11/19 (58%), Gaps = 0/19 (0%)
+ Frame = +1/+2
+
+Query  1297  YFLFLIPIYIYTCVYIHNY  1353
+             Y    I IYIY  +YI+ Y
+Sbjct  3167  YIYIYIYIYIYIYIYIYIY  3223
+
+
+ Score = 23.5 bits (45),  Expect = 4.3
+ Identities = 9/19 (47%), Positives = 11/19 (58%), Gaps = 0/19 (0%)
+ Frame = +1/+1
+
+Query  1297  YFLFLIPIYIYTCVYIHNY  1353
+             Y    I IYIY  +YI+ Y
+Sbjct  3169  YIYIYIYIYIYIYIYIYIY  3225
+
+
+ Score = 23.5 bits (45),  Expect = 4.3
+ Identities = 9/19 (47%), Positives = 11/19 (58%), Gaps = 0/19 (0%)
+ Frame = +1/+3
+
+Query  1297  YFLFLIPIYIYTCVYIHNY  1353
+             Y    I IYIY  +YI+ Y
+Sbjct  3171  YIYIYIYIYIYIYIYIYIY  3227
+
+
+ Score = 23.5 bits (45),  Expect = 4.3
+ Identities = 9/19 (47%), Positives = 11/19 (58%), Gaps = 0/19 (0%)
+ Frame = +1/+1
+
+Query  1297  YFLFLIPIYIYTCVYIHNY  1353
+             Y    I IYIY  +YI+ Y
+Sbjct  3175  YIYIYIYIYIYIYIYIYIY  3231
+
+
+ Score = 23.5 bits (45),  Expect = 4.3
+ Identities = 9/19 (47%), Positives = 11/19 (58%), Gaps = 0/19 (0%)
+ Frame = +1/+3
+
+Query  1297  YFLFLIPIYIYTCVYIHNY  1353
+             Y    I IYIY  +YI+ Y
+Sbjct  3177  YIYIYIYIYIYIYIYIYIY  3233
+
+
+ Score = 23.5 bits (45),  Expect = 4.3
+ Identities = 9/19 (47%), Positives = 11/19 (58%), Gaps = 0/19 (0%)
+ Frame = +1/+2
+
+Query  1297  YFLFLIPIYIYTCVYIHNY  1353
+             Y    I IYIY  +YI+ Y
+Sbjct  3179  YIYIYIYIYIYIYIYIYIY  3235
+
+
+ Score = 23.5 bits (45),  Expect = 4.3
+ Identities = 10/26 (38%), Positives = 15/26 (58%), Gaps = 0/26 (0%)
+ Frame = +1/+3
+
+Query  1297  YFLFLIPIYIYTCVYIHNYH*IVLKF  1374
+             Y    I IYIY  +YI + + ++L F
+Sbjct  3189  YIYIYIYIYIYIYIYILSLNIVLLGF  3266
+
+
+ Score = 23.5 bits (45),  Expect = 4.3
+ Identities = 9/19 (47%), Positives = 11/19 (58%), Gaps = 0/19 (0%)
+ Frame = +1/-3
+
+Query  1297  YFLFLIPIYIYTCVYIHNY  1353
+             Y    I IYIY  +YI+ Y
+Sbjct  3236  YIYIYIYIYIYIYIYIYIY  3180
+
+
+ Score = 23.5 bits (45),  Expect = 4.3
+ Identities = 9/19 (47%), Positives = 11/19 (58%), Gaps = 0/19 (0%)
+ Frame = +1/-3
+
+Query  1297  YFLFLIPIYIYTCVYIHNY  1353
+             Y    I IYIY  +YI+ Y
+Sbjct  3230  YIYIYIYIYIYIYIYIYIY  3174
+
+
+ Score = 23.5 bits (45),  Expect = 4.3
+ Identities = 9/19 (47%), Positives = 11/19 (58%), Gaps = 0/19 (0%)
+ Frame = +1/-2
+
+Query  1297  YFLFLIPIYIYTCVYIHNY  1353
+             Y    I IYIY  +YI+ Y
+Sbjct  3228  YIYIYIYIYIYIYIYIYIY  3172
+
+
+ Score = 23.5 bits (45),  Expect = 4.3
+ Identities = 9/19 (47%), Positives = 11/19 (58%), Gaps = 0/19 (0%)
+ Frame = +1/-1
+
+Query  1297  YFLFLIPIYIYTCVYIHNY  1353
+             Y    I IYIY  +YI+ Y
+Sbjct  3226  YIYIYIYIYIYIYIYIYIY  3170
+
+
+ Score = 23.5 bits (45),  Expect = 4.3
+ Identities = 9/19 (47%), Positives = 11/19 (58%), Gaps = 0/19 (0%)
+ Frame = +1/-3
+
+Query  1297  YFLFLIPIYIYTCVYIHNY  1353
+             Y    I IYIY  +YI+ Y
+Sbjct  3224  YIYIYIYIYIYIYIYIYIY  3168
+
+
+ Score = 23.5 bits (45),  Expect = 4.3
+ Identities = 9/19 (47%), Positives = 11/19 (58%), Gaps = 0/19 (0%)
+ Frame = +1/-2
+
+Query  1297  YFLFLIPIYIYTCVYIHNY  1353
+             Y    I IYIY  +YI+ Y
+Sbjct  3222  YIYIYIYIYIYIYIYIYIY  3166
+
+
+ Score = 23.5 bits (45),  Expect = 4.3
+ Identities = 9/19 (47%), Positives = 11/19 (58%), Gaps = 0/19 (0%)
+ Frame = +1/-1
+
+Query  1297  YFLFLIPIYIYTCVYIHNY  1353
+             Y    I IYIY  +YI+ Y
+Sbjct  3220  YIYIYIYIYIYIYIYIYIY  3164
+
+
+ Score = 23.5 bits (45),  Expect = 4.3
+ Identities = 9/19 (47%), Positives = 11/19 (58%), Gaps = 0/19 (0%)
+ Frame = +1/-2
+
+Query  1297  YFLFLIPIYIYTCVYIHNY  1353
+             Y    I IYIY  +YI+ Y
+Sbjct  3216  YIYIYIYIYIYIYIYIYIY  3160
+
+
+ Score = 23.5 bits (45),  Expect = 4.3
+ Identities = 9/19 (47%), Positives = 11/19 (58%), Gaps = 0/19 (0%)
+ Frame = +1/-1
+
+Query  1297  YFLFLIPIYIYTCVYIHNY  1353
+             Y    I IYIY  +YI+ Y
+Sbjct  3214  YIYIYIYIYIYIYIYIYIY  3158
+
+
+ Score = 23.5 bits (45),  Expect = 4.3
+ Identities = 9/19 (47%), Positives = 11/19 (58%), Gaps = 0/19 (0%)
+ Frame = +1/-3
+
+Query  1297  YFLFLIPIYIYTCVYIHNY  1353
+             Y    I IYIY  +YI+ Y
+Sbjct  3212  YIYIYIYIYIYIYIYIYIY  3156
+
+
+ Score = 23.5 bits (45),  Expect = 4.3
+ Identities = 9/19 (47%), Positives = 11/19 (58%), Gaps = 0/19 (0%)
+ Frame = +1/-2
+
+Query  1297  YFLFLIPIYIYTCVYIHNY  1353
+             Y    I IYIY  +YI+ Y
+Sbjct  3210  YIYIYIYIYIYIYIYIYIY  3154
+
+
+ Score = 23.1 bits (44),  Expect = 5.9
+ Identities = 10/22 (45%), Positives = 13/22 (59%), Gaps = 0/22 (0%)
+ Frame = -3/-1
+
+Query  1384  PTRKILRQFNDNYEYIHMYIYI  1319
+             P+R I       Y YI++YIYI
+Sbjct  3262  PSRTIFNDNIYIYIYIYIYIYI  3197
+
+
+ Score = 23.1 bits (44),  Expect = 5.9
+ Identities = 8/8 (100%), Positives = 8/8 (100%), Gaps = 0/8 (0%)
+ Frame = -3/-3
+
+Query  3919  YIYIYIYI  3896
+             YIYIYIYI
+Sbjct  3236  YIYIYIYI  3213
+
+
+ Score = 23.1 bits (44),  Expect = 5.9
+ Identities = 11/25 (44%), Positives = 16/25 (64%), Gaps = 0/25 (0%)
+ Frame = +1/+1
+
+Query  3439  SSILYYDEI*YSSGVALFLFFFSPN  3513
+             SSI++ + I*Y    A+ L+ FS N
+Sbjct  4975  SSIVFLNNI*YDYLQAMNLYLFSVN  5049
+
+
+ Score = 22.6 bits (43),  Expect = 8.1
+ Identities = 7/8 (88%), Positives = 8/8 (100%), Gaps = 0/8 (0%)
+ Frame = -3/+1
+
+Query  3922  VYIYIYIY  3899
+             +YIYIYIY
+Sbjct  3214  IYIYIYIY  3237
+
+
+ Score = 22.6 bits (43),  Expect = 8.1
+ Identities = 7/8 (88%), Positives = 8/8 (100%), Gaps = 0/8 (0%)
+ Frame = -3/-2
+
+Query  3922  VYIYIYIY  3899
+             +YIYIYIY
+Sbjct  3177  IYIYIYIY  3154
+
+
+> LC738875_130001_140000 window 130001-140000 of LC738875.1 MAG: 
+Melicertus latisulcatus pemonivirus Okinawa2016 DNA, complete 
+genome
+Length=10000
+
+ Score = 24.0 bits (46),  Expect = 3.1
+ Identities = 11/30 (37%), Positives = 17/30 (57%), Gaps = 0/30 (0%)
+ Frame = +2/-1
+
+Query  1538  RHLSDSNISGTNEEHGRLLVTRFSIGIFFI  1627
+             RH+S + ++ T+ +HG  L    S  IF I
+Sbjct  7222  RHVSSATVAWTHLQHGLFLPGSVSNVIFSI  7133
+
+
+ Score = 23.1 bits (44),  Expect = 5.9
+ Identities = 11/24 (46%), Positives = 16/24 (67%), Gaps = 0/24 (0%)
+ Frame = +2/-1
+
+Query  1208  SIGIHPVSESF*DLNLSLLVIYLI  1279
+             SIG++P S     L LSLL+ +L+
+Sbjct  5785  SIGLNP*STGELTLTLSLLLFWLL  5714
+
+
+ Score = 22.6 bits (43),  Expect = 8.1
+ Identities = 7/12 (58%), Positives = 9/12 (75%), Gaps = 0/12 (0%)
+ Frame = +1/+1
+
+Query  5812  CKGMFCKYVRAS  5847
+             C G+ CK+VR S
+Sbjct  8044  CPGVHCKHVRVS  8079
+
+
+> LC738875_300001_310000 window 300001-310000 of LC738875.1 MAG: 
+Melicertus latisulcatus pemonivirus Okinawa2016 DNA, complete 
+genome
+Length=10000
+
+ Score = 23.1 bits (44),  Expect = 5.9
+ Identities = 12/50 (24%), Positives = 22/50 (44%), Gaps = 0/50 (0%)
+ Frame = +3/+2
+
+Query  1197  IDFKVSGFILFPSLSRILT*AFWLYI*LMTCNILFSFLNSNIYIYMCIYS  1346
+             + + +   +L P   R+       ++ L     LF +L   ++IY  IYS
+Sbjct  8048  LSYSIQSILLAPRSPRLTKSPSSSFVRLTVNRYLFVYLFVFLHIYRLIYS  8197
+
+
+ Score = 23.1 bits (44),  Expect = 5.9
+ Identities = 6/10 (60%), Positives = 9/10 (90%), Gaps = 0/10 (0%)
+ Frame = -3/+3
+
+Query  3925  CVYIYIYIYI  3896
+             C++IY+Y YI
+Sbjct  8148  CLFIYLYFYI  8177
+
+
+> LC738875_120001_130000 window 120001-130000 of LC738875.1 MAG: 
+Melicertus latisulcatus pemonivirus Okinawa2016 DNA, complete 
+genome
+Length=10000
+
+ Score = 23.1 bits (44),  Expect = 5.9
+ Identities = 7/13 (54%), Positives = 9/13 (69%), Gaps = 0/13 (0%)
+ Frame = +2/-1
+
+Query  2048  WATSDYLMNDFPR  2086
+             W+ S+YL  D PR
+Sbjct  7141  WSVSEYLFIDLPR  7103
+
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 25945302
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/tblastx_multi_subject.fasta).
+    Posted date:  Unknown
+  Number of letters in database: 40,000
+  Number of sequences in database:  4
+
+
+
+Matrix: BLOSUM62
+Neighboring words threshold: 13
+Window for multiple hits: 40

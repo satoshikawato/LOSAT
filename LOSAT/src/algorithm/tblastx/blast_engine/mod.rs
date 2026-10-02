@@ -90,6 +90,7 @@ pub(crate) use super::ncbi_cutoffs::{
 pub(crate) use super::reevaluate::{
     get_num_identities_and_positives_ungapped, hsp_test, reevaluate_ungapped_hit_ncbi_translated,
 };
+pub(crate) use super::report;
 pub(crate) use super::stage_dump;
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/link_hsps.c:553-558
 // ```c
@@ -128,6 +129,82 @@ pub(crate) use super::blast_aascan::s_blast_aa_scan_subject;
 // Shared structures
 // ---------------------------------------------------------------------------
 
+// NCBI reference: c++/include/algo/blast/core/blast_hits.h:126-148
+// ```c
+// typedef struct BlastHSP {
+//    Int4 score;           /**< This HSP's raw score */
+//    Int4 num_ident;       /**< Number of identical base pairs in this HSP */
+//    double bit_score;     /**< Bit score, calculated from score */
+//    double evalue;        /**< This HSP's e-value */
+//    BlastSeg query;       /**< Query sequence info. */
+//    BlastSeg subject;     /**< Subject sequence info. */
+//    Int4     context;     /**< Context number of query */
+//    GapEditScript* gap_info;/**< ALL gapped alignment is here */
+//    Int4 num;             /**< How many HSP's are linked together for sum
+// ```
+// NCBI reference: c++/include/algo/blast/core/blast_hits.h:96-99
+// ```c
+// typedef struct BlastSeg {
+//    Int2 frame;  /**< Translation frame */
+//    Int4 offset; /**< Start of hsp */
+//    Int4 end;    /**< End of hsp */
+// ```
+/// One HSP of the final TBLASTX result: the tabular record, and the parts of NCBI's
+/// `BlastHSP` that the pairwise report adds (the Seq-align of `blast_seqalign.cpp`).
+#[derive(Debug, Clone)]
+pub(crate) struct TblastxHsp {
+    pub hit: Hit,
+    /// `BlastHSP::subject.frame`.
+    pub subject_frame: i8,
+    /// `BlastHSP::num` (the Seq-align score "sum_n" when it is above 1).
+    pub num: i32,
+}
+
+// NCBI reference: c++/src/algo/blast/api/blast_results.cpp:72-100
+// ```c++
+// CBlastAncillaryData::CBlastAncillaryData(EBlastProgramType program_type,
+//                     int query_number,
+//                     const BlastScoreBlk *sbp,
+//                     const BlastQueryInfo *query_info)
+// ...
+//         if (ctx->is_valid) {
+//             m_SearchSpace = ctx->eff_searchsp;
+//     ...
+//         s_InitializeKarlinBlk(sbp->kbp_std[ctx_index], &m_UngappedKarlinBlk);
+// ```
+/// What the reports show of one query apart from its HSPs.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct TblastxQueryStats {
+    /// The Karlin block of the query's first valid context; `None` when no context of
+    /// the query is valid.
+    pub karlin: Option<KarlinParams>,
+    /// That context's effective search space (0 without a valid context).
+    pub eff_searchsp: i64,
+    /// The SEG intervals (residues of the frame, end exclusive) of each translated frame.
+    pub seg_masks: Vec<(i8, Vec<(usize, usize)>)>,
+}
+
+// NCBI reference: ncbi-blast/c++/src/app/blast/tblastx_app.cpp:176-195
+// ```c
+//         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
+//
+//             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
+//     ...
+//                 CLocalBlast lcl_blast(queries, opts_hndl, db_adapter);
+//                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
+//                 results = lcl_blast.Run();
+// ```
+/// The result of one query batch. The query indices of `hits` and `queries` are the
+/// queries' positions in the batch.
+#[derive(Debug, Default)]
+pub(crate) struct TblastxBatch {
+    pub hits: Vec<TblastxHsp>,
+    /// False when the batch has no valid context, so NCBI did not search it
+    /// (`CheckInternalData`, local_blast.cpp:177-208).
+    pub searched: bool,
+    pub queries: Vec<TblastxQueryStats>,
+}
+
 pub(crate) struct WorkerState {
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1475
     // ```c
@@ -137,8 +214,8 @@ pub(crate) struct WorkerState {
     //    status = s_BlastSearchEngineCore(..., &hsp_list, ...);
     // }
     // ```
-    pub tx: Option<std::sync::mpsc::Sender<Vec<Hit>>>,
-    pub hits: Vec<Hit>,
+    pub tx: Option<std::sync::mpsc::Sender<Vec<TblastxHsp>>>,
+    pub hits: Vec<TblastxHsp>,
     pub offset_pairs: Vec<OffsetPair>,
     pub diag_array: Vec<DiagStruct>,
     pub diag_offset: i32,

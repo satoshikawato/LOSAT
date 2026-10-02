@@ -1,0 +1,32 @@
+--- /mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/src/utils/seg.rs	2026-09-28 23:42:23.515604400 +0900
++++ src/utils/seg.rs	2026-10-02 21:26:41.251447182 +0900
+@@ -840,7 +840,28 @@
+                         if lend < leftend {
+                             let rend = leftend - 1;
+                             if rend < seq.len() && lend <= rend {
+-                                seg_seq(masker, &seq[lend..=rend], offset + lend, segs);
++                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_seg.c:2086-2101
++                                // ```c
++                                // SSeg *leftsegs = (SSeg*) NULL;
++                                // status = s_SegSeq(leftseq, sparamsp, &leftsegs, offset+lend);
++                                // ...
++                                // /* prepend here, order will be restored in s_SegToSeqLoc */
++                                // if (leftsegs!=NULL)
++                                // {
++                                //    leftsegs->next = *segs;
++                                //    *segs = leftsegs;
++                                // }
++                                // ```
++                                // `leftsegs->next = *segs` overwrites the link of the head of
++                                // the recursive result, so when the recursion found more than
++                                // one segment only its head (the most recently found one)
++                                // survives; the remaining segments are dropped (leaked in C).
++                                // This is deterministic NCBI behavior and is reproduced.
++                                let mut left_segs: Vec<(usize, usize)> = Vec::new();
++                                seg_seq(masker, &seq[lend..=rend], offset + lend, &mut left_segs);
++                                if let Some(&head) = left_segs.first() {
++                                    segs.insert(0, head);
++                                }
+                             }
+                         }
+                     }

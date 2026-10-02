@@ -37,4 +37,4 @@ S07+++b（E2g）は BLASTN の棚卸し（`docs/evidence/losat_web_e2g/INVENTORY
 
 ## 終了・引き継ぎ
 
-README の規則 8 に従う。次は [S08+ — BLASTP・TBLASTN・TBLASTX の既定以外のオプション](session_s08p_e2e_protein_options.md)。
+README の規則 8 に従う。S08 は 2026-10-03 に区切り、仕上げは [S08b](session_s08b_e2b_final_gates.md)。その次は [S08+ — BLASTP・TBLASTN・TBLASTX の既定以外のオプション](session_s08p_e2e_protein_options.md)。

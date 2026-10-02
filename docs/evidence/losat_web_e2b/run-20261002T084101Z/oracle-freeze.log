@@ -1,0 +1,69 @@
+# /home/kawato/micromamba/bin/blastn sha256=0b88d4a00cb7fa579c203653151175b24c83d27fe240d420abe7b5261a3083d1 blastn: 2.17.0+ /  Package: blast 2.17.0, build Aug 11 2025 09:46:06
+# /home/kawato/micromamba/bin/blastp sha256=fdcbaa25cfdee5359231ae178713d2c28272e694614b847c5b2b7407c3d8a08b blastp: 2.17.0+ /  Package: blast 2.17.0, build Aug 11 2025 09:46:06
+# /home/kawato/micromamba/bin/tblastn sha256=e3956f1e107a30439d56c8f72fae4267a7d62ebcc16e4f99d4baf2bdf00402e0 tblastn: 2.17.0+ /  Package: blast 2.17.0, build Aug 11 2025 09:46:06
+# /home/kawato/micromamba/bin/tblastx sha256=9b6121d254d2c634114ac91c0bf4faa252b93532b1142cfb3ade2336fb830873 tblastx: 2.17.0+ /  Package: blast 2.17.0, build Aug 11 2025 09:46:06
+# /home/kawato/micromamba/bin/makeblastdb sha256=407bf59ec36ee6444104a90f28eab282e374a0dfe4c7ffee89a65d82dc51c4bf makeblastdb: 2.17.0+ /  Package: blast 2.17.0, build Aug 11 2025 09:46:06
+fixture_id	wall_s	stdout_sha256	stdout_bytes	stderr_sha256	command
+tblastx.lc.0	7.28	fac4c8b96864d7efca8deb7d4216f9e1df366567ef8215a2e0d01fc525b5715c	1290091		tblastx -query tests/fasta/LC738874.fasta -subject tests/fasta/LC738875.fasta -outfmt 0
+tblastx.lc.7	4.61	a770dbb2bb9717881fbc1a865718ffd16c721b675af6a15d68d6a21709132852	321972		tblastx -query tests/fasta/LC738874.fasta -subject tests/fasta/LC738875.fasta -outfmt 7
+tblastx.multi.0	0.12	38d69c9a5b70d456ade106e1b1cac61257f52d144a8cb4f3ea329ea42c8e8f6e	58799		tblastx -query tests/fasta/outfmt0/tblastx_multi_query.fasta -subject tests/fasta/outfmt0/tblastx_multi_subject.fasta -outfmt 0
+tblastx.multi.7	0.11	1ea1b68aff0d64821ccfb183c9411249be4d4bfbf7c257fe28d11fd96c880c94	17179		tblastx -query tests/fasta/outfmt0/tblastx_multi_query.fasta -subject tests/fasta/outfmt0/tblastx_multi_subject.fasta -outfmt 7
+tblastx.batch.0	0.11	c117ab1246890a40d58f82fdb5e716dbbab6a5a863a93f3915028df1527098be	54533		tblastx -query tests/fasta/outfmt0/tblastx_batch_query.fasta -subject tests/fasta/outfmt0/tblastx_multi_subject.fasta -outfmt 0
+tblastx.batch.7	0.10	f4e67cd5eec6d0fd92eade1940c65c9e82bb59a5299106cb0fb49391f9a58a2d	19338		tblastx -query tests/fasta/outfmt0/tblastx_batch_query.fasta -subject tests/fasta/outfmt0/tblastx_multi_subject.fasta -outfmt 7
+tblastx.invalid.0	0.07	93c1014a4119e53aa2945f30ae78435ba626197e4694183e6278ce9829c31ee7	11512		tblastx -query tests/fasta/outfmt0/tblastx_invalid_query.fasta -subject tests/fasta/outfmt0/tblastx_multi_subject.fasta -outfmt 0
+tblastx.invalid.7	0.07	811864e641a634fd10a1c00834a6a52734865667ec335f89d3321bc0823ffb7e	4196		tblastx -query tests/fasta/outfmt0/tblastx_invalid_query.fasta -subject tests/fasta/outfmt0/tblastx_multi_subject.fasta -outfmt 7
+tblastx.unsearched.0	0.08	e7f389a429b106aebb71e5ab6cc5a27285243e8f35fc13cabd0d3c32471324a0	14330	5eaf2dcbe84eaa9ceed9bfd5e8a7cb576d04bbee2db329b923fed0cc2dab33b7	tblastx -query tests/fasta/outfmt0/tblastx_unsearched_query.fasta -subject tests/fasta/outfmt0/tblastx_multi_subject.fasta -outfmt 0
+tblastx.unsearched.7	0.07	58ce4b2b600ca595c261630f8cc73b7e786a1df858bb2654dd8d911b91c15e55	5134	5eaf2dcbe84eaa9ceed9bfd5e8a7cb576d04bbee2db329b923fed0cc2dab33b7	tblastx -query tests/fasta/outfmt0/tblastx_unsearched_query.fasta -subject tests/fasta/outfmt0/tblastx_multi_subject.fasta -outfmt 7
+tblastx.nohit.0	0.10	0cd9660d90221e8444f1b2d2949b6e4e7ee70a3e71f82faba81516593a12bed6	9797		tblastx -query tests/fasta/outfmt0/tblastx_multi_query.fasta -subject tests/fasta/outfmt0/tblastx_multi_subject.fasta -evalue 1e-100 -outfmt 0
+tblastx.nohit.7	0.10	490f34d604743a21e00e7f4c040483ce612feaa0f8ecbb904d3d2ff903da55ee	3025		tblastx -query tests/fasta/outfmt0/tblastx_multi_query.fasta -subject tests/fasta/outfmt0/tblastx_multi_subject.fasta -evalue 1e-100 -outfmt 7
+tblastx.mts1.0	0.10	eb5b017400c361006a3916c7b4f44d58a5ce8ea8aed7fa55447c773747cdc383	42679	f9d83f3bfd617fac48221b7c7ff9ab74cc1c5185cabb1321e2b1f090e87cbafb	tblastx -query tests/fasta/outfmt0/tblastx_multi_query.fasta -subject tests/fasta/outfmt0/tblastx_multi_subject.fasta -max_target_seqs 1 -outfmt 0
+tblastx.mts1.7	0.10	b7d06d5b90bc408889a78496022f3b4639e7d31329762e2ae9161502889470cb	12424	f9d83f3bfd617fac48221b7c7ff9ab74cc1c5185cabb1321e2b1f090e87cbafb	tblastx -query tests/fasta/outfmt0/tblastx_multi_query.fasta -subject tests/fasta/outfmt0/tblastx_multi_subject.fasta -max_target_seqs 1 -outfmt 7
+tblastx.mts3.0	0.10	9dc73360187fe543af966020c7b99275a2529a8cb51be175c88dc58af0336c6b	55302	f9d83f3bfd617fac48221b7c7ff9ab74cc1c5185cabb1321e2b1f090e87cbafb	tblastx -query tests/fasta/outfmt0/tblastx_multi_query.fasta -subject tests/fasta/outfmt0/tblastx_multi_subject.fasta -max_target_seqs 3 -outfmt 0
+tblastx.segno.0	0.26	e70496294ac45cb9b7bbd63b8b5ec0db6a7e7cc029c1a7eab1c705ed1f289e7b	1592976		tblastx -query tests/fasta/outfmt0/tblastx_multi_query.fasta -subject tests/fasta/outfmt0/tblastx_multi_subject.fasta -seg no -outfmt 0
+tblastx.thrwin.0	0.15	e002b02d42e49cbbbbfab3dd3931594140f61a20806426f3ca6e1a95f5c7a280	73767		tblastx -query tests/fasta/outfmt0/tblastx_multi_query.fasta -subject tests/fasta/outfmt0/tblastx_multi_subject.fasta -threshold 11 -window_size 25 -outfmt 0
+tblastx.ambig.0	0.07	ac0778575207be591ce0deeeae64d36aed2594c5970f903358af1dade3958253	65541		tblastx -query tests/fasta/outfmt0/tblastx_ambig_query.fasta -subject tests/fasta/outfmt0/tblastx_ambig_subject.fasta -outfmt 0
+tblastx.ambig.7	0.07	a4b1f962cdd72d1c43867497113c4f5e344325c2c2defc334ac9b03189cba6b8	18051		tblastx -query tests/fasta/outfmt0/tblastx_ambig_query.fasta -subject tests/fasta/outfmt0/tblastx_ambig_subject.fasta -outfmt 7
+tblastx.code4q.0	0.08	4f835801ee9ce1540cf42662f5597553a4a048cd66daaf8d835e862e5eac78f4	13035		tblastx -query tests/fasta/outfmt0/tblastx_code4_query.fasta -subject tests/fasta/outfmt0/tblastx_code4_subject.fasta -query_gencode 4 -outfmt 0
+tblastx.code4q.7	0.08	ddb2a41db2b55eddb5e609930b6b71613c3ffe29c8505f4ccc4843417e321303	4588		tblastx -query tests/fasta/outfmt0/tblastx_code4_query.fasta -subject tests/fasta/outfmt0/tblastx_code4_subject.fasta -query_gencode 4 -outfmt 7
+tblastx.code4.0	0.08	ca2ecccf6c17f7173a16dd5647d48c9b91fa879417cde29a931aa97c5ad6891f	13035		tblastx -query tests/fasta/outfmt0/tblastx_code4_query.fasta -subject tests/fasta/outfmt0/tblastx_code4_subject.fasta -query_gencode 4 -db_gencode 4 -outfmt 0
+tblastx.code4.7	0.08	18d0b975951d316acabc4738403720636a064d1d71490b24bdce81a7b7b11cd6	4588		tblastx -query tests/fasta/outfmt0/tblastx_code4_query.fasta -subject tests/fasta/outfmt0/tblastx_code4_subject.fasta -query_gencode 4 -db_gencode 4 -outfmt 7
+tblastx.many.0	0.10	364222301fec36fd9f8400763adfc2bdbe1db4a372b4a6086e042276c00e3727	386114		tblastx -query tests/fasta/outfmt0/tblastx_many_query.fasta -subject tests/fasta/outfmt0/tblastx_many_subject.fasta -outfmt 0
+tblastx.many.7	0.09	e4cc76907e9bd4c3adc7183bbfa87a16e51e0229cef4a82ae73b6062e5a68684	72688		tblastx -query tests/fasta/outfmt0/tblastx_many_query.fasta -subject tests/fasta/outfmt0/tblastx_many_subject.fasta -outfmt 7
+tblastx.many_mts255.0	0.10	a46b1b9fee5f739e5216c7241e81417ff7d4086f5cf31930794ba5c27dc62ac8	390670		tblastx -query tests/fasta/outfmt0/tblastx_many_query.fasta -subject tests/fasta/outfmt0/tblastx_many_subject.fasta -max_target_seqs 255 -outfmt 0
+# fixtures=26 differing=[]
+# /home/kawato/micromamba/bin/blastn sha256=0b88d4a00cb7fa579c203653151175b24c83d27fe240d420abe7b5261a3083d1 blastn: 2.17.0+ /  Package: blast 2.17.0, build Aug 11 2025 09:46:06
+# /home/kawato/micromamba/bin/blastp sha256=fdcbaa25cfdee5359231ae178713d2c28272e694614b847c5b2b7407c3d8a08b blastp: 2.17.0+ /  Package: blast 2.17.0, build Aug 11 2025 09:46:06
+# /home/kawato/micromamba/bin/tblastn sha256=e3956f1e107a30439d56c8f72fae4267a7d62ebcc16e4f99d4baf2bdf00402e0 tblastn: 2.17.0+ /  Package: blast 2.17.0, build Aug 11 2025 09:46:06
+# /home/kawato/micromamba/bin/tblastx sha256=9b6121d254d2c634114ac91c0bf4faa252b93532b1142cfb3ade2336fb830873 tblastx: 2.17.0+ /  Package: blast 2.17.0, build Aug 11 2025 09:46:06
+# /home/kawato/micromamba/bin/makeblastdb sha256=407bf59ec36ee6444104a90f28eab282e374a0dfe4c7ffee89a65d82dc51c4bf makeblastdb: 2.17.0+ /  Package: blast 2.17.0, build Aug 11 2025 09:46:06
+fixture_id	wall_s	stdout_sha256	stdout_bytes	stderr_sha256	command
+tblastx.segno.0	0.10	8b6365a345cab3c476b7f627bc95afc35b89f755025cb6db980ba29353884d01	71058		tblastx -query tests/fasta/outfmt0/tblastx_code4_query.fasta -subject tests/fasta/outfmt0/tblastx_code4_subject.fasta -query_gencode 4 -seg no -outfmt 0
+# fixtures=1 differing=[]
+# /home/kawato/micromamba/bin/blastn sha256=0b88d4a00cb7fa579c203653151175b24c83d27fe240d420abe7b5261a3083d1 blastn: 2.17.0+ /  Package: blast 2.17.0, build Aug 11 2025 09:46:06
+# /home/kawato/micromamba/bin/blastp sha256=fdcbaa25cfdee5359231ae178713d2c28272e694614b847c5b2b7407c3d8a08b blastp: 2.17.0+ /  Package: blast 2.17.0, build Aug 11 2025 09:46:06
+# /home/kawato/micromamba/bin/tblastn sha256=e3956f1e107a30439d56c8f72fae4267a7d62ebcc16e4f99d4baf2bdf00402e0 tblastn: 2.17.0+ /  Package: blast 2.17.0, build Aug 11 2025 09:46:06
+# /home/kawato/micromamba/bin/tblastx sha256=9b6121d254d2c634114ac91c0bf4faa252b93532b1142cfb3ade2336fb830873 tblastx: 2.17.0+ /  Package: blast 2.17.0, build Aug 11 2025 09:46:06
+# /home/kawato/micromamba/bin/makeblastdb sha256=407bf59ec36ee6444104a90f28eab282e374a0dfe4c7ffee89a65d82dc51c4bf makeblastdb: 2.17.0+ /  Package: blast 2.17.0, build Aug 11 2025 09:46:06
+fixture_id	wall_s	stdout_sha256	stdout_bytes	stderr_sha256	command
+tblastx.code4.0	0.12	ca2ecccf6c17f7173a16dd5647d48c9b91fa879417cde29a931aa97c5ad6891f	13035		tblastx -query tests/fasta/outfmt0/tblastx_code4_query.fasta -subject tests/fasta/outfmt0/tblastx_code4_subject.fasta -query_gencode 4 -db_gencode 4 -outfmt 0
+tblastx.code4.7	0.12	18d0b975951d316acabc4738403720636a064d1d71490b24bdce81a7b7b11cd6	4588		tblastx -query tests/fasta/outfmt0/tblastx_code4_query.fasta -subject tests/fasta/outfmt0/tblastx_code4_subject.fasta -query_gencode 4 -db_gencode 4 -outfmt 7
+# fixtures=2 differing=[]
+# /home/kawato/micromamba/bin/blastn sha256=0b88d4a00cb7fa579c203653151175b24c83d27fe240d420abe7b5261a3083d1 blastn: 2.17.0+ /  Package: blast 2.17.0, build Aug 11 2025 09:46:06
+# /home/kawato/micromamba/bin/blastp sha256=fdcbaa25cfdee5359231ae178713d2c28272e694614b847c5b2b7407c3d8a08b blastp: 2.17.0+ /  Package: blast 2.17.0, build Aug 11 2025 09:46:06
+# /home/kawato/micromamba/bin/tblastn sha256=e3956f1e107a30439d56c8f72fae4267a7d62ebcc16e4f99d4baf2bdf00402e0 tblastn: 2.17.0+ /  Package: blast 2.17.0, build Aug 11 2025 09:46:06
+# /home/kawato/micromamba/bin/tblastx sha256=9b6121d254d2c634114ac91c0bf4faa252b93532b1142cfb3ade2336fb830873 tblastx: 2.17.0+ /  Package: blast 2.17.0, build Aug 11 2025 09:46:06
+# /home/kawato/micromamba/bin/makeblastdb sha256=407bf59ec36ee6444104a90f28eab282e374a0dfe4c7ffee89a65d82dc51c4bf makeblastdb: 2.17.0+ /  Package: blast 2.17.0, build Aug 11 2025 09:46:06
+fixture_id	wall_s	stdout_sha256	stdout_bytes	stderr_sha256	command
+tblastx.code4q.0	0.13	4f835801ee9ce1540cf42662f5597553a4a048cd66daaf8d835e862e5eac78f4	13035		tblastx -query tests/fasta/outfmt0/tblastx_code4_query.fasta -subject tests/fasta/outfmt0/tblastx_code4_subject.fasta -query_gencode 4 -outfmt 0
+tblastx.code4q.7	0.12	ddb2a41db2b55eddb5e609930b6b71613c3ffe29c8505f4ccc4843417e321303	4588		tblastx -query tests/fasta/outfmt0/tblastx_code4_query.fasta -subject tests/fasta/outfmt0/tblastx_code4_subject.fasta -query_gencode 4 -outfmt 7
+tblastx.code4.0	0.14	ca2ecccf6c17f7173a16dd5647d48c9b91fa879417cde29a931aa97c5ad6891f	13035		tblastx -query tests/fasta/outfmt0/tblastx_code4_query.fasta -subject tests/fasta/outfmt0/tblastx_code4_subject.fasta -query_gencode 4 -db_gencode 4 -outfmt 0
+tblastx.code4.7	0.13	18d0b975951d316acabc4738403720636a064d1d71490b24bdce81a7b7b11cd6	4588		tblastx -query tests/fasta/outfmt0/tblastx_code4_query.fasta -subject tests/fasta/outfmt0/tblastx_code4_subject.fasta -query_gencode 4 -db_gencode 4 -outfmt 7
+# fixtures=4 differing=[]
+# /home/kawato/micromamba/bin/blastn sha256=0b88d4a00cb7fa579c203653151175b24c83d27fe240d420abe7b5261a3083d1 blastn: 2.17.0+ /  Package: blast 2.17.0, build Aug 11 2025 09:46:06
+# /home/kawato/micromamba/bin/blastp sha256=fdcbaa25cfdee5359231ae178713d2c28272e694614b847c5b2b7407c3d8a08b blastp: 2.17.0+ /  Package: blast 2.17.0, build Aug 11 2025 09:46:06
+# /home/kawato/micromamba/bin/tblastn sha256=e3956f1e107a30439d56c8f72fae4267a7d62ebcc16e4f99d4baf2bdf00402e0 tblastn: 2.17.0+ /  Package: blast 2.17.0, build Aug 11 2025 09:46:06
+# /home/kawato/micromamba/bin/tblastx sha256=9b6121d254d2c634114ac91c0bf4faa252b93532b1142cfb3ade2336fb830873 tblastx: 2.17.0+ /  Package: blast 2.17.0, build Aug 11 2025 09:46:06
+# /home/kawato/micromamba/bin/makeblastdb sha256=407bf59ec36ee6444104a90f28eab282e374a0dfe4c7ffee89a65d82dc51c4bf makeblastdb: 2.17.0+ /  Package: blast 2.17.0, build Aug 11 2025 09:46:06
+fixture_id	wall_s	stdout_sha256	stdout_bytes	stderr_sha256	command
+seg.blastp.6	0.08	61c0c1f8ee7ed77bc2f8997415a839280f7a14f3786045f9b3eb99a1aa9db6c5	49		blastp -query tests/fasta/outfmt0/blastp_seg_query.faa -subject tests/fasta/outfmt0/blastp_seg_subject.faa -seg yes -outfmt 6
+# fixtures=1 differing=[]

@@ -39,7 +39,8 @@
 | S07++b | [E2f の仕上げ](session_s07ppb_e2f_close.md) | E2f | 独立監査の第 2 回で supported、ゲート記録、`main` への merge | 完了（2026-10-01、[ゲート記録](../evidence/losat_web_e2f/README.md)） |
 | S07+++ | [BLASTN の経路の棚卸しと一括の移植](session_s07ppp_e2g_blastn_inventory.md) | E2g | NCBI の BLASTN の経路の関数を棚卸しし、未移植と差のある移植を一括で transpile する（DW-12。S12 の前に終える） | 完了（2026-10-02、[ゲート記録](../evidence/losat_web_e2g/README.md)。CI の整備、棚卸し `INVENTORY.tsv`、予備の hit list の単体試験。transpile と完了条件は S07+++b） |
 | S07+++b | [E2g の続き：一括の transpile、試験、独立監査](session_s07pppb_e2g_transpile.md) | E2g | T1〜T13・R1・R2・V1 の移植、S07+ と S07++ の全検査・Gate A・fixture に退行なし、V-PERF、棚卸しの表を基準にした独立監査、毎晩の WASI の TIMEOUT の解消 | 完了（2026-10-02、[ゲート記録](../evidence/losat_web_e2g/README.md)。T1〜T14・R1〜R3・V1 の移植、NCBI の不具合の扱いの保守者の判断（DW-15、`PD-LOSAT-NCBI-DEFECTS`）、独立監査は第 4 回で supported） |
-| S08 | [TBLASTX outfmt 0/7](session_s08_e2b_tblastx_outfmt0_7.md) | E2b | NCBI とバイト一致（承認済みの例外を除く） | 未着手 |
+| S08 | [TBLASTX outfmt 0/7](session_s08_e2b_tblastx_outfmt0_7.md) | E2b | NCBI とバイト一致（承認済みの例外を除く） | 一部完了（2026-10-03、[ゲート記録](../evidence/losat_web_e2b/README.md)。移植、fixture、棚卸し、独立監査の第 1・2 回と指摘への対応。最後のゲートと完了条件は S08b） |
+| S08b | [E2b の仕上げ](session_s08b_e2b_final_gates.md) | E2b | 最後のコミットの全ゲート、独立監査の第 3 回、Gate A、V-PERF、TBLASTX の全升目の V-ABI、`main` への PR | 未着手 |
 | S08+ | [BLASTP・TBLASTN・TBLASTX の既定以外のオプション](session_s08p_e2e_protein_options.md) | E2e | 既定以外のオプションが NCBI と同じか、明示的に拒否される（S07+ で追加、TD-13。S12 の前に終える） | 未着手 |
 | S09 | [ブラウザでの実行基盤](session_s09_w1_browser_runtime.md) | W1 | V-BR、前処理の割合の実測（アプリ側。S10 の後、入口の条件は S08） | 未着手 |
 | S09+ | 前処理キャッシュ（条件付き） | R2 | DW-8 の条件を満たした program だけ。S09 の結果で行を足す | 未定 |

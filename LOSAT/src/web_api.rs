@@ -296,12 +296,13 @@ fn parse_blastn_args(
         } else if let Some(value) = flag.strip_prefix("-num_threads=") {
             args.num_threads = parse_num_threads_arg(value, flag)?;
         } else if flag == "-evalue" {
-            args.evalue = next_arg(extra_args, &mut index, flag)?
-                .parse()
-                .map_err(|err| format!("{flag} parse error: {err}"))?;
+            // The forms that NCBI's CArg_Double reads, as the CLI (`blastn_evalue`).
+            args.evalue = crate::blastinput::value_parsers::blastn_evalue(next_arg(
+                extra_args, &mut index, flag,
+            )?)
+            .map_err(|err| format!("{flag} parse error: {err}"))?;
         } else if let Some(value) = flag.strip_prefix("-evalue=") {
-            args.evalue = value
-                .parse()
+            args.evalue = crate::blastinput::value_parsers::blastn_evalue(value)
                 .map_err(|err| format!("{flag} parse error: {err}"))?;
         } else {
             return Err(format!("unsupported blastn argument for web API: {flag}"));
@@ -1125,9 +1126,18 @@ mod tests {
         assert!(blastn::run_web_pair(with(&["-num_threads", "2"]), "", fasta).is_err());
         let error = blastn::run_web_pair(with(&[]), fasta, empty_record).unwrap_err();
         assert!(engine_error(error).contains("subject record 1 (s0) has no residues"));
-        let x_subject = ">s\nACGTXACGTACGTACGTACGTACGTACGTACGT\n";
-        let error = blastn::run_web_pair(with(&["-evalue", "inf"]), fasta, x_subject).unwrap_err();
-        assert!(engine_error(error).contains("an infinite or NaN e-value"));
+        // NCBI's CArg_Double reads a signed infinity and NaN, not a bare `inf`, and NCBI
+        // searches with them (E2g).
+        let error = parse_blastn_args(
+            &["-outfmt", "6", "-evalue", "inf"],
+            PathBuf::new(),
+            PathBuf::new(),
+            PathBuf::new(),
+        )
+        .unwrap_err();
+        assert!(error.contains("expected a number"), "{error}");
+        assert!(blastn::run_web_pair(with(&["-evalue", "+inf"]), fasta, fasta).is_ok());
+        assert!(blastn::run_web_pair(with(&["-evalue=+nan"]), fasta, fasta).is_ok());
     }
 
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1407-1427

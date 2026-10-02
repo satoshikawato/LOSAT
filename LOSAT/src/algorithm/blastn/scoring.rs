@@ -117,8 +117,8 @@ pub fn check_scoring_options(args: &BlastnArgs) -> anyhow::Result<()> {
 /// LOSAT's limits on the options that NCBI accepts, checked where NCBI starts the search
 /// (after its `Query is Empty!` success, before its Karlin-Altschul table error, whose
 /// computation the range limit bounds): a reward of 0 or less (NCBI's rmblastn matrix
-/// scoring when the penalty is 0 too, otherwise no valid query), an infinite or NaN
-/// e-value, a hit list size whose preliminary size overflows (`get_prelim_hitlist_size`),
+/// scoring when the penalty is 0 too, otherwise no valid query), a hit list size whose
+/// preliminary size overflows (`get_prelim_hitlist_size`),
 /// and a reward of `BLAST_SCORE_MAX` or a penalty of `BLAST_SCORE_MIN` (the 16-bit values
 /// after NCBI's conversion). The limit on greedy gap costs follows the table check
 /// (`check_greedy_gap_costs`).
@@ -129,9 +129,6 @@ pub fn check_losat_limits(args: &BlastnArgs) -> anyhow::Result<()> {
             "a reward of {} (NCBI BLAST+'s 16-bit value; 0 is NCBI's matrix scoring of rmblastn, otherwise no query is valid) is not supported by LOSAT's BLASTN",
             spec.reward
         );
-    }
-    if !args.evalue.is_finite() {
-        anyhow::bail!("an infinite or NaN e-value is not supported by LOSAT's BLASTN");
     }
     let hitlist_size = args.max_target_seqs.unwrap_or(args.hitlist_size);
     if super::hsp::get_prelim_hitlist_size(hitlist_size, false, true) < 1 {
@@ -446,8 +443,6 @@ mod tests {
         // LOSAT's limits are separate: NCBI's checks accept these options.
         for words in [
             &["-reward", "0"][..],
-            &["-evalue", "+inf"],
-            &["-evalue", "+nan"],
             &["-reward", "32767", "-penalty", "-1"],
             &["-reward", "16384", "-penalty", "-32768"],
             // 98303 is 32767 as NCBI's 16-bit reward.
@@ -458,10 +453,14 @@ mod tests {
             let error = check_losat_limits(&parsed).unwrap_err().to_string();
             assert!(error.contains("not supported by LOSAT's BLASTN"), "{error}");
         }
-        // Scores below the 16-bit limits are accepted (E2g V1).
+        // Scores below the 16-bit limits are accepted (E2g V1), and so are the infinite
+        // and NaN e-values that NCBI searches with (E2g).
         for words in [
             &["-reward", "5000", "-penalty", "-1"][..],
             &["-reward", "32766", "-penalty", "-32767"],
+            &["-evalue", "+inf"],
+            &["-evalue", "+nan"],
+            &["-evalue", "-nan(7)"],
         ] {
             assert!(check_losat_limits(&args(words)).is_ok(), "{words:?}");
         }

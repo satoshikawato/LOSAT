@@ -199,6 +199,12 @@ _CASES = [
     ("punct.nohit_fmt0", f"-query {I}/punct_query.fa -subject {I}/punct_nohit_subject.fa -outfmt 0", ""),
     ("punct.nohit_task_blastn_fmt0", f"-query {I}/punct_query.fa -subject {I}/punct_nohit_subject.fa"
                                      " -task blastn -outfmt 0", ""),
+    # E2g: NCBI's CArg_Double reads signed infinities and NaN (strtod, also nan(...)) and
+    # NCBI searches with them as with the largest e-value.
+    ("evalue.plus_inf", f"{P} -evalue +inf -outfmt 6", ""),
+    ("evalue.minus_nan_task_blastn_fmt7", f"{B} -task blastn -evalue -nan -outfmt 7", ""),
+    ("evalue.nan_paren_fmt0", f"{T} -max_target_seqs 5 -evalue +nan(1) -outfmt 0", ""),
+    ("evalue.1e999_word7", f"{A} -task blastn -word_size 7 -evalue 1e999 -outfmt 6", ""),
     # E2g T11: showdefline.cpp kBits is "(bits)" when CTOOLKIT_COMPATIBLE is set (also empty).
     ("ctoolkit.fmt0", f"{P} -max_target_seqs 3 -outfmt 0", "", "CTOOLKIT_COMPATIBLE=1"),
     ("ctoolkit.empty_fmt0", f"{T} -task blastn -max_target_seqs 5 -outfmt 0", "", "CTOOLKIT_COMPATIBLE="),

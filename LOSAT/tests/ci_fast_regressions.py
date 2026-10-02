@@ -8,9 +8,10 @@ docs/evidence/losat_web_e1a/capture_outputs.py and checks, per case:
 - the frozen expected hash (Gate A, TLOSAN Stage G), with the known mismatches of
   frozen_mismatch_allowlist.json (a stale entry fails);
 the outfmt 0 fixtures (docs/evidence/losat_web_e2a/check_losat.py) of the
-selected programs at 1 and 4 threads, and for BLASTN the frozen NCBI outputs of
+selected programs at 1 and 4 threads, for BLASTN the frozen NCBI outputs of
 blastn_regression_fixtures.py (preliminary hit lists, batches, split, ambiguity,
-lowercase masking).
+lowercase masking) and for TBLASTX those of tblastx_regression_fixtures.py (query
+batches, warnings, hit lists, ambiguity, empty inputs, failed writes).
 
 Programs are selected from the changed paths (--changed-from): a program's own
 directory selects it and every program that imports it; any other engine or
@@ -49,7 +50,8 @@ import certify_platform_native_v010 as certify  # noqa: E402
 from frozen_allowlist import Allowlist  # noqa: E402
 
 PROGRAMS = capture_outputs.PROGRAMS
-FIXTURE_PROGRAMS = ("blastn", "blastp", "tblastn")
+FIXTURE_PROGRAMS = ("blastn", "blastp", "tblastn", "tblastx")
+REGRESSION_FIXTURES = {"blastn": "BLASTN", "tblastx": "TBLASTX"}
 # TBLASTX manifest cases that finish in under 30 s (2026-10-01, native release binary);
 # the other 13 (46 s to over 10 min) run in the nightly workflow.
 FAST_TBLASTX = frozenset({
@@ -181,14 +183,16 @@ def run_fixtures(losat: Path, programs: set[str], out: Path) -> list[str]:
         log.write_text(result.stdout + result.stderr)
         if result.returncode != 0:
             failures.append(f"outfmt 0 fixtures differ at {threads} thread(s): see {log.name}")
-    if "blastn" in programs:
-        log = out / "blastn-regression-fixtures.tsv"
-        result = subprocess.run([sys.executable, str(TESTS / "blastn_regression_fixtures.py"), "check",
+    for program, name in REGRESSION_FIXTURES.items():
+        if program not in programs:
+            continue
+        log = out / f"{program}-regression-fixtures.tsv"
+        result = subprocess.run([sys.executable, str(TESTS / f"{program}_regression_fixtures.py"), "check",
                                  "--losat", str(losat), "--out", str(log)], capture_output=True, text=True)
         if result.returncode != 0:
-            failures += [f"BLASTN regression fixture {line}" for line in result.stdout.splitlines()
+            failures += [f"{name} regression fixture {line}" for line in result.stdout.splitlines()
                          if "\t" in line and not line.endswith("\tsame")]
-            failures.append(f"BLASTN regression fixtures differ: see {log.name}")
+            failures.append(f"{name} regression fixtures differ: see {log.name}")
     return failures
 
 

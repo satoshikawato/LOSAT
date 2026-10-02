@@ -1,0 +1,549 @@
+TBLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/tblastx_multi_subject.fasta).
+           4 sequences; 40,000 total letters
+
+
+
+Query= LC738874_230001_240003 window 230001-240003 of LC738874.1 MAG:
+Melicertus latisulcatus majanivirus Okinawa2016 DNA, complete genome
+
+Length=10003
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+LC738875_270001_280000 window 270001-280000 of LC738875.1 MAG: Me...  46.4    5e-09  2
+LC738875_130001_140000 window 130001-140000 of LC738875.1 MAG: Me...  24.0    5.3    1
+LC738875_120001_130000 window 120001-130000 of LC738875.1 MAG: Me...  24.0    5.3    1
+LC738875_300001_310000 window 300001-310000 of LC738875.1 MAG: Me...  23.5    7.2    1
+
+
+> LC738875_270001_280000 window 270001-280000 of LC738875.1 MAG: 
+Melicertus latisulcatus pemonivirus Okinawa2016 DNA, complete 
+genome
+Length=10000
+
+ Score = 46.4 bits (95),  Expect(2) = 5e-09
+ Identities = 20/36 (56%), Positives = 25/36 (69%), Gaps = 0/36 (0%)
+ Frame = -2/+1
+
+Query  1713  TKRN*RVHIMIQGFGFRLFFFVKWSQVVAGIPPINH  1606
+             TKRN RV++M +GF FR F  + WS VVA I P +H
+Sbjct  1420  TKRNGRVNLMGRGFCFRCFSSMTWSHVVADIAPSDH  1527
+
+
+ Score = 25.4 bits (49),  Expect(2) = 5e-09
+ Identities = 11/17 (65%), Positives = 12/17 (71%), Gaps = 0/17 (0%)
+ Frame = -1/+1
+
+Query  1531  QGLFAKATLYALEWGRT  1481
+             QGL A ATL+A  W RT
+Sbjct  1579  QGL*ANATLHAGSWRRT  1629
+
+
+ Score = 40.9 bits (83),  Expect(3) = 2e-08
+ Identities = 16/25 (64%), Positives = 19/25 (76%), Gaps = 0/25 (0%)
+ Frame = +2/-3
+
+Query  3965  AILLCYEKGLSYYGDCSHNYCNYRN  4039
+             +ILLCYEKG+S  G CSHN+ N  N
+Sbjct  164   SILLCYEKGMSDDGYCSHNHGNMLN  90
+
+
+ Score = 22.6 bits (43),  Expect(3) = 2e-08
+ Identities = 7/8 (88%), Positives = 8/8 (100%), Gaps = 0/8 (0%)
+ Frame = +3/-2
+
+Query  3912  PNDGRHDV  3935
+             P+DGRHDV
+Sbjct  195   PDDGRHDV  172
+
+
+ Score = 22.6 bits (43),  Expect(3) = 2e-08
+ Identities = 7/11 (64%), Positives = 9/11 (82%), Gaps = 0/11 (0%)
+ Frame = +1/-3
+
+Query  3937  LTFGDFLSLCY  3969
+             +TFGD + LCY
+Sbjct  179   MTFGDSILLCY  147
+
+
+ Score = 34.5 bits (69),  Expect = 0.004
+ Identities = 12/22 (55%), Positives = 17/22 (77%), Gaps = 0/22 (0%)
+ Frame = -3/+2
+
+Query  4028  YSNYDCSRHNNSILFHSTTK*H  3963
+             + +YDCS H++S LFHS  K*+
+Sbjct  101   FRDYDCSSHHHSFLFHSIIK*N  166
+
+
+ Score = 31.8 bits (63),  Expect = 0.024
+ Identities = 9/12 (75%), Positives = 10/12 (83%), Gaps = 0/12 (0%)
+ Frame = -1/-1
+
+Query  4720  CMCLCVYMCICV  4685
+             CMC CVY C+CV
+Sbjct  9727  CMCGCVYACVCV  9692
+
+
+ Score = 31.8 bits (63),  Expect = 0.024
+ Identities = 9/12 (75%), Positives = 10/12 (83%), Gaps = 0/12 (0%)
+ Frame = -1/-3
+
+Query  4720  CMCLCVYMCICV  4685
+             CMC CVY C+CV
+Sbjct  8180  CMCGCVYACVCV  8145
+
+
+ Score = 31.8 bits (63),  Expect = 0.024
+ Identities = 9/12 (75%), Positives = 10/12 (83%), Gaps = 0/12 (0%)
+ Frame = -1/-1
+
+Query  4720  CMCLCVYMCICV  4685
+             CMC CVY C+CV
+Sbjct  6850  CMCGCVYACVCV  6815
+
+
+ Score = 31.3 bits (62),  Expect = 0.033
+ Identities = 9/12 (75%), Positives = 10/12 (83%), Gaps = 0/12 (0%)
+ Frame = -1/-3
+
+Query  4720  CMCLCVYMCICV  4685
+             CMC CVY C+CV
+Sbjct  8699  CMCGCVYECVCV  8664
+
+
+ Score = 27.6 bits (54),  Expect = 0.42
+ Identities = 7/14 (50%), Positives = 12/14 (86%), Gaps = 0/14 (0%)
+ Frame = -1/-1
+
+Query  4726  SVCMCLCVYMCICV  4685
+             ++C+ +CVY C+CV
+Sbjct  7708  TMCL*VCVYACVCV  7667
+
+
+ Score = 26.7 bits (52),  Expect(2) = 0.54
+ Identities = 15/19 (79%), Positives = 15/19 (79%), Gaps = 0/19 (0%)
+ Frame = -2/+1
+
+Query  4023  *L*LQSP**LNPFS*HNKI  3967
+             *L*LQ P  L PFS*HNKI
+Sbjct  106   *L*LQ*PSSLIPFS*HNKI  162
+
+
+ Score = 26.3 bits (51),  Expect(2) = 0.54
+ Identities = 13/28 (46%), Positives = 14/28 (50%), Gaps = 0/28 (0%)
+ Frame = -3/+1
+
+Query  3716  WSQVVAGIAPFIHLTWVFFCCEIVSSYS  3633
+             WS VVA IAP  H     F   + S YS
+Sbjct  1489  WSHVVADIAPSDHPAITGFLGSVGSHYS  1572
+
+
+ Score = 25.4 bits (49),  Expect = 2.0
+ Identities = 8/14 (57%), Positives = 11/14 (79%), Gaps = 0/14 (0%)
+ Frame = -1/-3
+
+Query  4726  SVCMCLCVYMCICV  4685
+             S  MCL V++C+CV
+Sbjct  9743  SQTMCLYVWVCVCV  9702
+
+
+ Score = 25.4 bits (49),  Expect = 2.0
+ Identities = 8/14 (57%), Positives = 11/14 (79%), Gaps = 0/14 (0%)
+ Frame = -1/-2
+
+Query  4726  SVCMCLCVYMCICV  4685
+             S  MCL V++C+CV
+Sbjct  8196  SQTMCLYVWVCVCV  8155
+
+
+ Score = 25.4 bits (49),  Expect = 2.0
+ Identities = 8/14 (57%), Positives = 11/14 (79%), Gaps = 0/14 (0%)
+ Frame = -1/-3
+
+Query  4726  SVCMCLCVYMCICV  4685
+             S  MCL V++C+CV
+Sbjct  6866  SQTMCLYVWVCVCV  6825
+
+
+ Score = 25.4 bits (49),  Expect = 2.0
+ Identities = 9/13 (69%), Positives = 11/13 (85%), Gaps = 0/13 (0%)
+ Frame = +1/-3
+
+Query  3679  WIKGAIPATT*DH  3717
+             W +GA+ ATT*DH
+Sbjct  1526  WSEGAMSATT*DH  1488
+
+
+ Score = 24.9 bits (48),  Expect = 2.8
+ Identities = 9/22 (41%), Positives = 14/22 (64%), Gaps = 0/22 (0%)
+ Frame = -1/+1
+
+Query  6490  NVSLTNDNNDNETSTLNTNNVH  6425
+             N +  N+NN+N  +  N NNV+
+Sbjct  2536  NDNSNNNNNNNNDNNNNNNNVN  2601
+
+
+ Score = 24.4 bits (47),  Expect = 3.8
+ Identities = 9/18 (50%), Positives = 12/18 (67%), Gaps = 0/18 (0%)
+ Frame = -1/+1
+
+Query  3598  FSAAKWSQVVAGVPLSNH  3545
+             FS+  WS VVA +  S+H
+Sbjct  1474  FSSMTWSHVVADIAPSDH  1527
+
+
+ Score = 24.4 bits (47),  Expect = 3.8
+ Identities = 10/26 (38%), Positives = 14/26 (54%), Gaps = 0/26 (0%)
+ Frame = +1/-1
+
+Query  6418  FCHEHY*YLKYLFHCHYYHSLMIHSI  6495
+             + + HY Y  Y ++ HY  S  I SI
+Sbjct  2584  YYYYHYYYYYYYYYYHYVISSNISSI  2507
+
+
+ Score = 24.4 bits (47),  Expect = 3.8
+ Identities = 16/40 (40%), Positives = 21/40 (53%), Gaps = 0/40 (0%)
+ Frame = +2/-3
+
+Query  1607  WLIGGIPATT*DHFTKKnnlnpnp*iiiCTR*FLLVTGAH  1726
+             W  G + ATT*DH  ++ +    P  I  TR F LV  A+
+Sbjct  1526  WSEGAMSATT*DHVMEEKHRKQKPRPIRFTRPFRLVKIAY  1407
+
+
+ Score = 24.0 bits (46),  Expect = 5.3
+ Identities = 8/15 (53%), Positives = 11/15 (73%), Gaps = 0/15 (0%)
+ Frame = -1/+3
+
+Query  1921  RINVHTGTLHISRLQ  1877
+             RI  HTGTL +S ++
+Sbjct  5973  RIQTHTGTLSVSSIE  6017
+
+
+ Score = 24.0 bits (46),  Expect = 5.3
+ Identities = 10/22 (45%), Positives = 11/22 (50%), Gaps = 0/22 (0%)
+ Frame = +3/-3
+
+Query  3531  PLSLQWLESGTPATT*DHFAAE  3596
+             P+   W E    ATT*DH   E
+Sbjct  1541  PVIAGWSEGAMSATT*DHVMEE  1476
+
+
+ Score = 23.5 bits (45),  Expect = 7.2
+ Identities = 7/20 (35%), Positives = 12/20 (60%), Gaps = 0/20 (0%)
+ Frame = +1/+1
+
+Query  6415  VFCHEHY*YLKYLFHCHYYH  6474
+             +F   HY Y  Y ++ +YY+
+Sbjct  2446  IFPFVHYYYYYYYYYYYYYY  2505
+
+
+ Score = 23.5 bits (45),  Expect = 7.2
+ Identities = 7/24 (29%), Positives = 14/24 (58%), Gaps = 0/24 (0%)
+ Frame = +3/+2
+
+Query  2709  FIPFPYLFMSHINCIIDKVSNIVH  2780
+             F  +P  F++HI+   D  + ++H
+Sbjct  5084  FYTYPRRFLNHISSFSDCSAKVIH  5155
+
+
+ Score = 23.5 bits (45),  Expect = 7.2
+ Identities = 8/18 (44%), Positives = 9/18 (50%), Gaps = 0/18 (0%)
+ Frame = +3/-3
+
+Query  4203  ANMGAFHCGTHSHKHRFH  4256
+             A  G F+CG   H   FH
+Sbjct  4172  AEAGFFYCGLSDHVRCFH  4119
+
+
+ Score = 23.5 bits (45),  Expect = 7.2
+ Identities = 8/16 (50%), Positives = 10/16 (63%), Gaps = 0/16 (0%)
+ Frame = -1/+3
+
+Query  4744  DAHVCVSVCMCLCVYM  4697
+             D  + + VCMCL  YM
+Sbjct  7971  DRKILLYVCMCLARYM  8018
+
+
+ Score = 23.5 bits (45),  Expect = 7.2
+ Identities = 9/17 (53%), Positives = 10/17 (59%), Gaps = 0/17 (0%)
+ Frame = +2/-3
+
+Query  1550  WLESGIPATT*DHFTAE  1600
+             W E  + ATT*DH   E
+Sbjct  1526  WSEGAMSATT*DHVMEE  1476
+
+
+ Score = 23.1 bits (44),  Expect = 9.9
+ Identities = 6/10 (60%), Positives = 8/10 (80%), Gaps = 0/10 (0%)
+ Frame = +3/+1
+
+Query  9504  CFNNFTWRHV  9533
+             CF++ TW HV
+Sbjct  1471  CFSSMTWSHV  1500
+
+
+ Score = 23.1 bits (44),  Expect = 9.9
+ Identities = 8/18 (44%), Positives = 12/18 (67%), Gaps = 0/18 (0%)
+ Frame = -1/+2
+
+Query  2146  SGRDPRYLIIIIYSLAVD  2093
+             SGR P +  +I++  AVD
+Sbjct  1190  SGRGPGFFNLIVFGTAVD  1243
+
+
+ Score = 23.1 bits (44),  Expect = 9.9
+ Identities = 6/10 (60%), Positives = 8/10 (80%), Gaps = 0/10 (0%)
+ Frame = -1/-1
+
+Query  4735  VCVSVCMCLC  4706
+             VCV  C+C+C
+Sbjct  7693  VCVYACVCVC  7664
+
+
+ Score = 23.1 bits (44),  Expect = 9.9
+ Identities = 10/27 (37%), Positives = 15/27 (56%), Gaps = 0/27 (0%)
+ Frame = -1/+1
+
+Query  6475  NDNNDNETSTLNTNNVHDKTLLKDYSL  6395
+             N NN+N  +  N NN ++   +  YSL
+Sbjct  2542  NSNNNNNNNNDNNNNNNNVNRM**YSL  2622
+
+
+ Score = 23.1 bits (44),  Expect = 9.9
+ Identities = 10/31 (32%), Positives = 16/31 (52%), Gaps = 0/31 (0%)
+ Frame = -1/-3
+
+Query  4735  VCVSVCMCLCVYMCICVMGSLFLFLTHCRRG  4643
+             +C+ V +C+CV + +  M    L     RRG
+Sbjct  6857  MCLYVWVCVCVRVRVRAMSMTLLRRKILRRG  6765
+
+
+ Score = 23.1 bits (44),  Expect = 9.9
+ Identities = 10/33 (30%), Positives = 15/33 (45%), Gaps = 0/33 (0%)
+ Frame = +3/-3
+
+Query  4824  HVLSCIKDAS*LPSLQNSLARAHSARFFSFSLC  4922
+             H   C+K    LP   +    AH+    +FS+C
+Sbjct  6737  HCTGCVKADDWLPDSGHLTVEAHAYISQAFSVC  6639
+
+
+ Score = 23.1 bits (44),  Expect = 9.9
+ Identities = 8/14 (57%), Positives = 10/14 (71%), Gaps = 0/14 (0%)
+ Frame = -1/+3
+
+Query  1921  RINVHTGTLHISRL  1880
+             RI  HTGTL +S +
+Sbjct  5547  RIQTHTGTLSVSSI  5588
+
+
+> LC738875_130001_140000 window 130001-140000 of LC738875.1 MAG: 
+Melicertus latisulcatus pemonivirus Okinawa2016 DNA, complete 
+genome
+Length=10000
+
+ Score = 24.0 bits (46),  Expect = 5.3
+ Identities = 14/46 (30%), Positives = 19/46 (41%), Gaps = 0/46 (0%)
+ Frame = +1/+2
+
+Query  1540  ITTMAGKWDTRYNLRPLYSRSKVVNRWNTRYNLRPFHKKEQPKPKP  1677
+             +T   GK DT+Y+    YSR          Y   P   +E+  P P
+Sbjct  2720  VT*HLGKRDTKYSGYRFYSREASTCFSRAHY*WPPLGHQERRHPPP  2857
+
+
+ Score = 24.0 bits (46),  Expect = 5.3
+ Identities = 8/18 (44%), Positives = 13/18 (72%), Gaps = 0/18 (0%)
+ Frame = +1/-2
+
+Query  5980  GVYYHTHVSISLLTNDVI  6033
+             GV +HT++S SLL   ++
+Sbjct  5331  GVEFHTYLSSSLLRKQIV  5278
+
+
+ Score = 23.5 bits (45),  Expect = 7.2
+ Identities = 10/29 (34%), Positives = 14/29 (48%), Gaps = 0/29 (0%)
+ Frame = +1/+1
+
+Query  3367  GRFHFCNWSISPLQGESGSNAAYLTGDWR  3453
+             G F+FC   +S L    G  A ++   WR
+Sbjct  1969  GHFNFCKEFLSRLYQFGGIVAIFIQQRWR  2055
+
+
+ Score = 23.5 bits (45),  Expect = 7.2
+ Identities = 8/28 (29%), Positives = 14/28 (50%), Gaps = 0/28 (0%)
+ Frame = -2/-3
+
+Query  3762  YMIPDYQNLKKINKEMVSSCRGNSTFYP  3679
+             Y + DY  L+ + +   S C G ++  P
+Sbjct  2543  YALADYSPLRSLQRISASQCCGPTSLKP  2460
+
+
+ Score = 23.1 bits (44),  Expect = 9.9
+ Identities = 8/14 (57%), Positives = 10/14 (71%), Gaps = 0/14 (0%)
+ Frame = +2/+2
+
+Query  3221  NSRSVKKISLCQEW  3262
+             NSR  +K SLC +W
+Sbjct  2525  NSRRGRKTSLCWKW  2566
+
+
+ Score = 23.1 bits (44),  Expect = 9.9
+ Identities = 9/25 (36%), Positives = 16/25 (64%), Gaps = 0/25 (0%)
+ Frame = +3/-3
+
+Query  4938  KKGNISSFTICSLILKNVYERWSVF  5012
+             ++  +SSF +CSL L  V  R +++
+Sbjct  2240  RRVRLSSFRLCSLALHRVTLRLTLY  2166
+
+
+> LC738875_120001_130000 window 120001-130000 of LC738875.1 MAG: 
+Melicertus latisulcatus pemonivirus Okinawa2016 DNA, complete 
+genome
+Length=10000
+
+ Score = 24.0 bits (46),  Expect = 5.3
+ Identities = 10/33 (30%), Positives = 17/33 (52%), Gaps = 0/33 (0%)
+ Frame = -2/+3
+
+Query  4395  LSVIEVLLFYRRTKINFIFSYFCAVTNEYATYN  4297
+             LSVI  +L++  T     F + C++ + Y   N
+Sbjct  9000  LSVILYILYFSYTLYTLFFLHACSIYHIYMCIN  9098
+
+
+ Score = 23.1 bits (44),  Expect = 9.9
+ Identities = 5/8 (63%), Positives = 8/8 (100%), Gaps = 0/8 (0%)
+ Frame = +2/-3
+
+Query  5798  QRKCWCNF  5821
+             +R+CWC+F
+Sbjct  7544  RRRCWCSF  7521
+
+
+ Score = 23.1 bits (44),  Expect = 9.9
+ Identities = 8/23 (35%), Positives = 15/23 (65%), Gaps = 0/23 (0%)
+ Frame = +2/+3
+
+Query  4958  FYDMFPNIEKCVRAMVRIPGSGK  5026
+             F +MF N+E+  + +  + GSG+
+Sbjct  2571  FNNMFGNLEEASKRLTVLVGSGR  2639
+
+
+> LC738875_300001_310000 window 300001-310000 of LC738875.1 MAG: 
+Melicertus latisulcatus pemonivirus Okinawa2016 DNA, complete 
+genome
+Length=10000
+
+ Score = 23.5 bits (45),  Expect = 7.2
+ Identities = 11/38 (29%), Positives = 19/38 (50%), Gaps = 0/38 (0%)
+ Frame = +3/+2
+
+Query  5769  IGAGVVDRDYRGNVGVILFNHAKTDYKVEKGDRIAQLI  5882
+             +G GV     R  VG+   + ++ + K    DR+A +I
+Sbjct  8384  LGGGVSASQIRSAVGISSTSPSECETKPPVADRVADVI  8497
+
+
+ Score = 23.1 bits (44),  Expect = 9.9
+ Identities = 7/13 (54%), Positives = 10/13 (77%), Gaps = 0/13 (0%)
+ Frame = +1/+2
+
+Query  2848  SIHTQCRKCAPLS  2886
+             S++T CR+C  LS
+Sbjct  5699  SVYTTCRRCGHLS  5737
+
+
+ Score = 23.1 bits (44),  Expect = 9.9
+ Identities = 11/37 (30%), Positives = 17/37 (46%), Gaps = 0/37 (0%)
+ Frame = -2/+3
+
+Query  3108  SLTVILSSTRAVFMFCFLCVLLSLDIYMYHMTSFTSN  2998
+             +LTV     R   +FCF   LL+  ++  H +    N
+Sbjct  3981  TLTVYRRKFRRYCLFCFSLYLLNRGLHPEHTSPLPFN  4091
+
+
+ Score = 23.1 bits (44),  Expect = 9.9
+ Identities = 9/17 (53%), Positives = 11/17 (65%), Gaps = 0/17 (0%)
+ Frame = -1/-2
+
+Query  3220  DSVSKLSPGESLGINSL  3170
+             +S S+L PG  LGI  L
+Sbjct  3372  ESASRLGPGVGLGIRRL  3322
+
+
+ Score = 23.1 bits (44),  Expect = 9.9
+ Identities = 9/16 (56%), Positives = 11/16 (69%), Gaps = 0/16 (0%)
+ Frame = -2/+3
+
+Query  5394  DVGPTVVPRTIFAGKQ  5347
+             D GPT VPR   +G+Q
+Sbjct  8595  DPGPTTVPRP*RSGRQ  8642
+
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 43523707
+Warning: [tblastx] Query_2 allN 300 N: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options 
+
+
+Query= allN 300 N
+
+Length=300
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   -1.00    -1.00    -1.00 
+
+Gapped
+Lambda      K        H
+   -1.00    -1.00    -1.00 
+
+Effective search space used: 0
+Warning: [tblastx] Query_3 short2 two bases: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options 
+
+
+Query= short2 two bases
+
+Length=2
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   -1.00    -1.00    -1.00 
+
+Gapped
+Lambda      K        H
+   -1.00    -1.00    -1.00 
+
+Effective search space used: 0
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/tblastx_multi_subject.fasta).
+    Posted date:  Unknown
+  Number of letters in database: 40,000
+  Number of sequences in database:  4
+
+
+
+Matrix: BLOSUM62
+Neighboring words threshold: 13
+Window for multiple hits: 40

@@ -70,4 +70,4 @@ LOSAT の段階 E2b（TBLASTX の outfmt 0 と 7）の仕上げを行う。S08 �
 
 ## 終了・引き継ぎ
 
-README の規則 8 に従う。次は [S08+ — BLASTP・TBLASTN・TBLASTX の既定以外のオプション](session_s08p_e2e_protein_options.md)。
+README の規則 8 に従う。次は [SD — BLASTN の dc-megablast と blastn-short](session_sd_e2i_blastn_dc_megablast.md)（保守者の依頼、DW-18）、その次が [S08+ — BLASTP・TBLASTN・TBLASTX の既定以外のオプション](session_s08p_e2e_protein_options.md)。

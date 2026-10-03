@@ -8,6 +8,7 @@ import {
   heldSessionLocks,
   openApp,
   openProbe,
+  OUTFMT7_MARK,
   queueSearch,
   runSearch,
   sessionDirectories,
@@ -160,7 +161,7 @@ test('a run that runs out of storage fails with the reason; earlier results stay
     const download = page.waitForEvent('download');
     await page.getByTestId('export-output').click();
     const saved = await readFile((await (await download).path())!, 'utf8');
-    expect(saved).toContain('FAKE ENGINE OUTPUT');
+    expect(saved).toContain(OUTFMT7_MARK);
   } finally {
     await setQuota(page, null);
   }

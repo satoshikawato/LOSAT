@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import type { IndexedRecord } from '../../src/domain/dataset';
 import { sha256Hex } from '../../src/infra/browser/platform';
+import { MEMORY_FULL_MESSAGE } from '../../src/infra/data/block-store';
 import { DataService, type DataServiceDeps } from '../../src/infra/data/data-service';
 import { MemoryBlockStore } from '../../src/infra/data/memory-block-store';
 import { FakeScanner } from '../../src/infra/fake/fake-fasta';
@@ -226,5 +227,15 @@ describe('DataService runs and storage status', () => {
     writer.end();
     await expect(data.commitRun('run-1')).rejects.toThrow('Not enough temporary storage');
     expect(store.usage()).toBe(0);
+  });
+
+  it('reports the memory budget of results kept in memory with its own message', async () => {
+    const store = new MemoryBlockStore({ capacityBytes: 8, fullMessage: MEMORY_FULL_MESSAGE });
+    const { data } = service({ store });
+    const port = await data.openRun('run-1');
+    const writer = new RunOutputWriter(port);
+    writer.write(0, encoder.encode('123456789'));
+    writer.end();
+    await expect(data.commitRun('run-1')).rejects.toMatchObject({ name: 'StorageFullError', message: MEMORY_FULL_MESSAGE });
   });
 });

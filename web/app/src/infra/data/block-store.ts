@@ -41,6 +41,23 @@ export class StorageFullError extends Error {
   }
 }
 
+/**
+ * Results kept in memory (no OPFS) may take at most this many bytes in a tab (S09). Memory
+ * is then the only copy of the results, so running out of it would end the tab and lose
+ * every result; the budget makes it the same recoverable failure as a full OPFS instead.
+ * The engine's own memory comes on top (up to 1 GiB for the threaded module, plan TD-7).
+ */
+export const MEMORY_RESULTS_CAPACITY_BYTES = 512 * 1024 * 1024;
+
+export const MEMORY_FULL_MESSAGE =
+  'Not enough temporary storage for the results of this run: this browser keeps results in memory, ' +
+  'at most 512 MB in a tab. Earlier results are kept.';
+
+/** The StorageFullError of a storage-full error, keeping its message (memory or browser storage). */
+export function asStorageFull(error: unknown): StorageFullError {
+  return error instanceof StorageFullError ? error : new StorageFullError();
+}
+
 /** True for StorageFullError and for the browser's QuotaExceededError. */
 export function isStorageFull(error: unknown): boolean {
   return (

@@ -10,6 +10,7 @@ on:
       - 'LOSAT/Cargo.lock'
       - 'LOSAT/.cargo/**'
       - 'LOSAT/tests/wasi_*.js'
+      - 'LOSAT/tests/outfmt0_manifest.tsv'
       - '.github/workflows/web.yml'
   pull_request:
     paths:
@@ -20,6 +21,7 @@ on:
       - 'LOSAT/Cargo.lock'
       - 'LOSAT/.cargo/**'
       - 'LOSAT/tests/wasi_*.js'
+      - 'LOSAT/tests/outfmt0_manifest.tsv'
       - '.github/workflows/web.yml'
 
 jobs:
@@ -37,7 +39,7 @@ jobs:
           cache-dependency-path: web/app/package-lock.json
       - run: npm ci
       - run: npm run check
-      - run: npx playwright install --with-deps chromium
+      - run: npx playwright install --with-deps chromium firefox webkit
       - run: npm run e2e
       - uses: actions/upload-artifact@v4
         if: failure()
@@ -97,3 +99,63 @@ jobs:
             --serial ${{ runner.temp }}/reactors/losat-web-serial.wasm \
             --threads ${{ runner.temp }}/reactors/losat-web-threads.wasm \
             --cases ${{ runner.temp }}/v-abi-cases.json
+      - name: Keep the reactors for the browser job
+        uses: actions/upload-artifact@v4
+        with:
+          name: reactors
+          path: |
+            ${{ runner.temp }}/reactors/artifacts.json
+            ${{ runner.temp }}/reactors/losat-web-serial.wasm
+            ${{ runner.temp }}/reactors/losat-web-threads.wasm
+          retention-days: 3
+      - name: Keep the native CLI for the browser job
+        uses: actions/upload-artifact@v4
+        with:
+          name: native
+          path: LOSAT/target/release/LOSAT
+          retention-days: 3
+
+  # V-BR (plan §6.2): the application's EngineGateway and Engine worker with the reactors
+  # of the adapter job, in Chromium, Firefox and WebKit, compared with the native CLI of the
+  # same commit and NCBI's frozen bytes (tests/e2e/engine.spec.ts); the other E2E tests on
+  # the application built with the engine; and the reactor tests in Node (the RecordScanner
+  # contract on the serial reactor, responses of more than 1 MiB).
+  browser-engine:
+    needs: adapter
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: web/app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/app/package-lock.json
+      - uses: actions/download-artifact@v4
+        with:
+          name: reactors
+          path: ${{ runner.temp }}/reactors
+      - uses: actions/download-artifact@v4
+        with:
+          name: native
+          path: ${{ runner.temp }}/native
+      - run: chmod +x ${{ runner.temp }}/native/LOSAT
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium firefox webkit
+      - name: RecordScanner contract on the serial reactor (Node)
+        env:
+          LOSAT_WEB_REACTORS: ${{ runner.temp }}/reactors
+        run: npx vitest run tests/unit/engine-runtime.test.ts
+      - name: V-BR and every E2E test with the engine in the build
+        env:
+          LOSAT_WEB_REACTORS: ${{ runner.temp }}/reactors
+          LOSAT_WEB_NATIVE: ${{ runner.temp }}/native/LOSAT
+        run: npm run e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-engine-results
+          path: web/app/test-results/
+          retention-days: 7

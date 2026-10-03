@@ -44,7 +44,19 @@ export interface RunRecord {
   readonly threads?: number;
   readonly fallbackReason?: string;
   readonly engineBuild?: string;
+  /** The engine runtime (Engine worker) that ran the search; it changes after a cancel. */
+  readonly runtimeGeneration?: number;
+  /** Linear memory of the engine instance around the search (plan §5.5). */
+  readonly memory?: {
+    readonly linearBytesBefore: number;
+    readonly linearBytesAfter: number;
+    readonly instanceRuns: number;
+  };
+  /** The engine searched the subject that it held from an earlier search (R1). */
+  readonly subjectRetained?: boolean;
   readonly startedAt?: number;
+  /** When each engine phase started. */
+  readonly phaseTimes?: { readonly preparing?: number; readonly running?: number; readonly finalizing?: number };
   readonly endedAt?: number;
   readonly error?: string;
 }

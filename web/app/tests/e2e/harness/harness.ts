@@ -1,10 +1,13 @@
-// Contract harness page for tests/e2e/contracts.spec.ts. Playwright builds it in memory and
-// serves it under /__harness/; it is never part of the application build. It runs the
-// contract suites in real browser workers:
+// Contract harness page for the E2E tests. Playwright builds it in memory and serves it
+// under /__harness/; it is never part of the application build. It runs the contract
+// suites in real browser workers:
 // - the BlockStore contract against OPFS and memory in a dedicated worker;
 // - the run output contract with the writer in a separate worker (the Engine worker's
-//   place) and the real Data worker of the application as the receiver.
+//   place) and the real Data worker of the application as the receiver;
+// and, with the engine (engine.ts, S09), searches through the application, the contract
+// suites against the real reactor and Engine worker, and the runtime checks.
 import { startDataWorker } from '../../../src/infra/data-worker/gateway';
+import * as engine from './engine';
 import type { StorageBackend } from '../../../src/ports/data';
 import type { OutputStream } from '../../../src/ports/run-output';
 import { runCases, type CaseResult } from '../../contract/contract';
@@ -14,6 +17,7 @@ import type { BlockStorePageMessage, BlockStoreWorkerMessage, EngineDoubleComman
 export interface Harness {
   blockStore(backend: 'opfs' | 'memory'): Promise<CaseResult[]>;
   runOutput(): Promise<{ readonly backend: StorageBackend; readonly results: CaseResult[] }>;
+  readonly engine: typeof engine;
 }
 
 declare global {
@@ -137,4 +141,4 @@ async function runOutput(): Promise<{ backend: StorageBackend; results: CaseResu
   }
 }
 
-window.losatHarness = { blockStore, runOutput };
+window.losatHarness = { blockStore, runOutput, engine };

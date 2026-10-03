@@ -19,6 +19,7 @@ import {
   type EngineGateway,
   type EngineInput,
   type EnginePhase,
+  type HspRecord,
   type ValidationResult,
 } from '../ports/engine';
 import { Store } from './store';
@@ -144,6 +145,18 @@ export class Coordinator {
     return new TextDecoder().decode(await this.deps.data.readOutput(runId, format));
   }
 
+  /** The HSP records of a completed run (docs/web/abi_v2.md §8). */
+  async readHits(runId: string): Promise<readonly HspRecord[]> {
+    if (this.find(runId)?.status !== 'completed') throw new Error('run is not completed');
+    return this.deps.data.readHits(runId);
+  }
+
+  /** The warnings of a completed run, as the CLI writes them to standard error. */
+  async readDiagnostics(runId: string): Promise<string> {
+    if (this.find(runId)?.status !== 'completed') throw new Error('run is not completed');
+    return this.deps.data.readDiagnostics(runId);
+  }
+
   /** Reads the storage status again; it keeps polling while the start-up cleanup runs. */
   async refreshStorage(): Promise<void> {
     let storage: StorageInfo;
@@ -216,12 +229,14 @@ export class Coordinator {
         status: 'completed',
         result,
         record: {
-          startedAt,
           endedAt: this.deps.now(),
           runtimePath: runtime.path,
           threads: runtime.threads,
           engineBuild: runtime.engineBuild,
           ...(runtime.fallbackReason === undefined ? {} : { fallbackReason: runtime.fallbackReason }),
+          ...(runtime.runtimeGeneration === undefined ? {} : { runtimeGeneration: runtime.runtimeGeneration }),
+          ...(runtime.memory === undefined ? {} : { memory: runtime.memory }),
+          ...(runtime.subjectRetained === undefined ? {} : { subjectRetained: runtime.subjectRetained }),
         },
       });
     } catch (error) {
@@ -230,7 +245,6 @@ export class Coordinator {
       this.update(runId, {
         status: cancelled ? 'cancelled' : 'failed',
         record: {
-          startedAt,
           endedAt: this.deps.now(),
           ...(cancelled ? {} : { error: errorMessage(error) }),
         },
@@ -248,7 +262,8 @@ export class Coordinator {
     if (this.active !== runId || this.cancelRequested.has(runId)) return;
     const view = this.find(runId);
     if (view === undefined || isTerminal(view.status) || view.status === 'finalizing') return;
-    this.update(runId, { status: PHASE_STATUS[phase] });
+    const phaseTimes = { ...view.record.phaseTimes, [phase]: this.deps.now() };
+    this.update(runId, { status: PHASE_STATUS[phase], record: { phaseTimes } });
   }
 
   private find(runId: string): RunView | undefined {
@@ -273,7 +288,7 @@ function inputName(input: SequenceInput, pastedName: string): string {
 }
 
 function engineInput(input: InputSnapshot): EngineInput {
-  return { bytes: input.bytes, records: input.records };
+  return { bytes: input.bytes, sha256: input.sha256, revisionIds: input.revisionIds, records: input.records };
 }
 
 function errorMessage(error: unknown): string {

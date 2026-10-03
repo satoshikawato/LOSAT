@@ -1,6 +1,6 @@
 // Memory implementation of the BlockStore contract, used when OPFS is not available
 // (plan §5.6). It replaces the S01 MemoryDataGateway.
-import { checkRange, pathNames, StorageFullError, type BlockStore, type BlockWriter } from './block-store';
+import { checkRange, pathNames, STORAGE_FULL_MESSAGE, StorageFullError, type BlockStore, type BlockWriter } from './block-store';
 
 interface MemoryBlock {
   readonly chunks: Uint8Array[];
@@ -9,8 +9,10 @@ interface MemoryBlock {
 }
 
 export interface MemoryBlockStoreOptions {
-  /** Memory budget in bytes; unlimited by default (S09 measures the memory limits). */
+  /** Memory budget in bytes; unlimited by default (the application sets MEMORY_RESULTS_CAPACITY_BYTES). */
   readonly capacityBytes?: number;
+  /** The message of the StorageFullError beyond the budget. */
+  readonly fullMessage?: string;
 }
 
 export class MemoryBlockStore implements BlockStore {
@@ -18,9 +20,16 @@ export class MemoryBlockStore implements BlockStore {
   private readonly blocks = new Map<string, MemoryBlock>();
   private used = 0;
   private capacity: number;
+  private readonly fullMessage: string;
 
   constructor(options: MemoryBlockStoreOptions = {}) {
     this.capacity = options.capacityBytes ?? Number.POSITIVE_INFINITY;
+    this.fullMessage = options.fullMessage ?? STORAGE_FULL_MESSAGE;
+  }
+
+  /** The memory budget in bytes. */
+  capacityBytes(): number {
+    return this.capacity;
   }
 
   /** Changes the memory budget; appends beyond it fail with StorageFullError. */
@@ -39,14 +48,14 @@ export class MemoryBlockStore implements BlockStore {
         if (!live() || block.state !== 'open') throw new Error(`block ${path} is not open`);
         if (this.used + bytes.length > this.capacity) {
           block.state = 'full';
-          throw new StorageFullError();
+          throw new StorageFullError(this.fullMessage);
         }
         block.chunks.push(bytes.slice());
         block.length += bytes.length;
         this.used += bytes.length;
       },
       seal: async () => {
-        if (live() && block.state === 'full') throw new StorageFullError();
+        if (live() && block.state === 'full') throw new StorageFullError(this.fullMessage);
         if (!live() || block.state !== 'open') throw new Error(`block ${path} is not open`);
         block.state = 'sealed';
         return block.length;

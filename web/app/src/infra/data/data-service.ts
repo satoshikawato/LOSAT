@@ -28,7 +28,7 @@ import { DIAGNOSTICS_STREAM, HITS_STREAM, OUTPUT_STREAMS, type OutputStream } fr
 import type { RecordScanner } from '../../ports/scan';
 import { RunOutputReceiver } from '../run-output/receiver';
 import { concatBytes } from '../bytes';
-import { isStorageFull, StorageFullError, type BlockStore, type BlockWriter } from './block-store';
+import { asStorageFull, isStorageFull, type BlockStore, type BlockWriter } from './block-store';
 
 export interface DataServiceDeps {
   readonly store: BlockStore;
@@ -161,7 +161,7 @@ export class DataService implements DataGateway {
       for (const stream of OUTPUT_STREAMS) writers.set(stream, await this.deps.store.create(blockPath(token, stream)));
     } catch (error) {
       await this.deps.store.removeAll(runPrefix(token)).catch(() => undefined);
-      throw isStorageFull(error) ? new StorageFullError() : error;
+      throw isStorageFull(error) ? asStorageFull(error) : error;
     }
     const channel = new MessageChannel();
     const lengths: Lengths = { 0: 0, 6: 0, 7: 0, [HITS_STREAM]: 0, [DIAGNOSTICS_STREAM]: 0 };
@@ -202,7 +202,7 @@ export class DataService implements DataGateway {
       for (const writer of run.writers.values()) await writer.seal();
     } catch (error) {
       await this.discardRun(runId).catch(() => undefined);
-      throw isStorageFull(error) ? new StorageFullError() : error;
+      throw isStorageFull(error) ? asStorageFull(error) : error;
     }
     this.runs.set(runId, { state: 'committed', token: run.token, lengths: Object.freeze({ ...run.lengths }) });
     const hitCount = run.hitLines + (run.hitLineOpen ? 1 : 0);
@@ -251,7 +251,7 @@ export class DataService implements DataGateway {
     try {
       run.writers.get(stream)!.append(bytes);
     } catch (error) {
-      run.failure = isStorageFull(error) ? new StorageFullError() : toError(error);
+      run.failure = isStorageFull(error) ? asStorageFull(error) : toError(error);
       // Give the space back at once; the commit reports the failure.
       void this.deps.store.removeAll(runPrefix(run.token)).catch(() => undefined);
       return;

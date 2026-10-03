@@ -18,6 +18,8 @@ export interface EngineInputEnv {
   /** What the engine's own parser reads from `query` and `subject`. */
   readonly queryRecords: readonly RecordKey[];
   readonly subjectRecords: readonly RecordKey[];
+  /** Threads of the runs; 1 by default. */
+  readonly threads?: number;
 }
 
 interface Observed {
@@ -43,13 +45,27 @@ async function waitFor(condition: () => boolean, ms: number): Promise<boolean> {
   return true;
 }
 
-function request(env: EngineInputEnv, runId: string, change: Partial<Record<'query' | 'subject', readonly RecordKey[]>>): EngineRunRequest {
+async function sha256(bytes: Uint8Array): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', bytes as BufferSource);
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+async function request(
+  env: EngineInputEnv,
+  runId: string,
+  change: Partial<Record<'query' | 'subject', readonly RecordKey[]>>,
+): Promise<EngineRunRequest> {
   return {
     runId,
     argv: env.argv,
-    query: { bytes: env.query, records: change.query ?? env.queryRecords },
-    subject: { bytes: env.subject, records: change.subject ?? env.subjectRecords },
-    requestedThreads: 1,
+    query: { bytes: env.query, sha256: await sha256(env.query), revisionIds: ['query'], records: change.query ?? env.queryRecords },
+    subject: {
+      bytes: env.subject,
+      sha256: await sha256(env.subject),
+      revisionIds: ['subject'],
+      records: change.subject ?? env.subjectRecords,
+    },
+    requestedThreads: env.threads ?? 1,
   };
 }
 
@@ -62,7 +78,7 @@ async function expectMismatch(
   const observed = observedPort();
   try {
     const error = await rejects(
-      env.engine.run(request(env, runId, change), observed.port, () => undefined),
+      env.engine.run(await request(env, runId, change), observed.port, () => undefined),
       new RegExp(`^InputMismatchError: The ${role} records`),
       'run',
     );
@@ -80,7 +96,7 @@ export const ENGINE_INPUT_CASES: readonly ContractCase<EngineInputEnv>[] = [
     async run(env) {
       const observed = observedPort();
       try {
-        await env.engine.run(request(env, 'input-ok', {}), observed.port, () => undefined);
+        await env.engine.run(await request(env, 'input-ok', {}), observed.port, () => undefined);
         check(await waitFor(() => observed.messages.some((m) => m.type === 'end'), 2000), 'the output ends');
       } finally {
         observed.close();

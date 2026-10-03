@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { StorageFullError } from '../../src/infra/data/block-store';
+import { MEMORY_RESULTS_CAPACITY_BYTES, StorageFullError } from '../../src/infra/data/block-store';
 import { MemoryBlockStore } from '../../src/infra/data/memory-block-store';
 import {
   holdSessionLock,
@@ -125,6 +125,8 @@ describe('working session ownership', () => {
     });
     expect(session.store.backend).toBe('memory');
     expect(session.fallbackReason).toBe('the browser storage of this site is full');
+    // Results kept in memory have a budget (S09).
+    expect((session.store as MemoryBlockStore).capacityBytes()).toBe(MEMORY_RESULTS_CAPACITY_BYTES);
   });
 
   it('keeps its data in memory and removes nothing without Web Locks', async () => {

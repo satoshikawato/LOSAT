@@ -58,16 +58,37 @@ export interface HspRecord {
 
 export type EnginePhase = 'preparing' | 'running' | 'finalizing';
 
+/** Linear memory of the engine instance around one search (plan §5.5, G12). */
+export interface EngineMemory {
+  readonly linearBytesBefore: number;
+  readonly linearBytesAfter: number;
+  /** Searches the instance has run, including this one. */
+  readonly instanceRuns: number;
+}
+
 export interface RuntimeInfo {
   readonly path: 'threaded' | 'serial' | 'fake';
   readonly threads: number;
   readonly engineBuild: string;
+  /** Why the search ran on the serial module although more threads were requested. */
   readonly fallbackReason?: string;
+  /**
+   * The runtime (Engine worker) that ran the search. It changes when the runtime is ended
+   * (cancel) or renewed; messages of an older runtime are dropped.
+   */
+  readonly runtimeGeneration?: number;
+  readonly memory?: EngineMemory;
+  /** The engine searched the subject that it held from an earlier search (plan §4.6 R1). */
+  readonly subjectRetained?: boolean;
 }
 
 /** One input of a run: the exact FASTA bytes of the run snapshot and their record table. */
 export interface EngineInput {
   readonly bytes: Uint8Array;
+  /** Lower-case hex SHA-256 of `bytes`. With `revisionIds`, it identifies a retained subject. */
+  readonly sha256: string;
+  /** The dataset revisions whose records make up `bytes` (RunSnapshot). */
+  readonly revisionIds: readonly string[];
   /**
    * ID and length of each record in `bytes`, from the data layer's index scan. After
    * `register`, the engine compares the records its own parser read with these and fails

@@ -44,6 +44,7 @@
 | `c0849e604` | 監査 (a)：棚卸しに 4 行と C-15 の証拠 |
 | `f26a7d017` | template の区別の fixture `dc.div_*` 22 件と入力（下の「fixture」） |
 | `4d3c9cc26` | 壊した実行ファイルの確かめ（`mutants/`）、E2c の `check_inputs.py` の期待値、`sd_postgate.sh` |
+| `fd1ddd13c` | PR の CI（adapter の job）で見つかった試験の道具の誤り：V-ABI quick に足した `dc.default`・`short.default` は `LOSAT/` から走るので、CI の相対の `--native LOSAT/target/release/LOSAT` がそこから見えず、起動に失敗した。`v_abi.js` が `--native` を起動の時の directory で絶対のパスにする（相対のパスで quick 60 の実行、凍結ハッシュ 16/16）。ゲートは絶対のパスを渡していたので結果は変わらない |
 
 ## fixture（指示書の 3.）
 
@@ -169,7 +170,7 @@ megablast と blastn は非退行（閾値以内）。dc-megablast と blastn-sh
 
 ## 残件と引き継ぎ
 
-- **`main` への PR**：[#112](https://github.com/satoshikawato/LOSAT/pull/112)（SD のコミット `90c5f0181`〜）。merge は保守者。CI の結果はこの記録の次のコミットで書く。
+- **`main` への PR**：[#112](https://github.com/satoshikawato/LOSAT/pull/112)（SD のコミット `90c5f0181`〜）。最初の CI は adapter の job の V-ABI quick で失敗し（上の `fd1ddd13c`）、直した後の `fd1ddd13c` で CI（`rust`、fast output regressions、adapter、app、engine-web-api）はすべて緑。merge は保守者。
 - **S08+**（[指示書](../../losat_web_gui_sessions/session_s08p_e2e_protein_options.md)の「SD からの引き継ぎ」、次のエンジン側のセッション）：SD の監査が記録した BLASTN の明示的な拒否と SD の前からの差。中心は、task が内部で決める option（`-window_size`・`-off_diagonal_range`・`-xdrop_*`・`-no_greedy`。監査 (c) の F1、中程度）で、SD の後は値が `TaskConfig` にあるので、移す範囲と順を書いた。ほかに NCBI が無視する option、`-reward 0`、誤りの順、hit list のあふれの拒否、文言、ABI v2 の `validate` の細部。S08 の引き継ぎ（BLASTN の HTML の題の検査をヒットのある subject に狭める、`-num_threads` 65535 以上）も残る。
 - **S12**（[指示書](../../losat_web_gui_sessions/session_s12_w3_search_ui.md)の 8.）：両 task の既定値と template の option の規則を書き足した。
 - **保守者の確認**：無し。V-PERF は閾値以内で、SD は保守者の判断の要る NCBI の不具合に当たらなかった。S08b の V-PERF の `tblastx-multi`（NCBI の batch の費用）は今も保守者の確認待ち（E2b のゲート記録）。

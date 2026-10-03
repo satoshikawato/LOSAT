@@ -1,0 +1,601 @@
+BLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/short_subject.fasta).
+           3 sequences; 8,660 total letters
+
+
+
+Query= p1 shs1 1001-1025
+
+Length=25
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+shs1 LC738875 1-4000                                                  50.1    1e-10
+
+
+> shs1 LC738875 1-4000
+Length=4000
+
+ Score = 50.1 bits (25),  Expect = 1e-10
+ Identities = 25/25 (100%), Gaps = 0/25 (0%)
+ Strand=Plus/Plus
+
+Query  1     TATGGGCTTGAACATTGTTAAGTAC  25
+             |||||||||||||||||||||||||
+Sbjct  1001  TATGGGCTTGAACATTGTTAAGTAC  1025
+
+
+
+Lambda      K        H
+    1.37    0.711     1.31 
+
+Gapped
+Lambda      K        H
+    1.37    0.711     1.31 
+
+Effective search space used: 146812
+
+
+Query= p2 shs1 2030-2001 reverse complement
+
+Length=30
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+shs1 LC738875 1-4000                                                  60.0    2e-13
+
+
+> shs1 LC738875 1-4000
+Length=4000
+
+ Score = 60.0 bits (30),  Expect = 2e-13
+ Identities = 30/30 (100%), Gaps = 0/30 (0%)
+ Strand=Plus/Minus
+
+Query  1     TAACAATAACCATTATGAAATAATATTAAT  30
+             ||||||||||||||||||||||||||||||
+Sbjct  2030  TAACAATAACCATTATGAAATAATATTAAT  2001
+
+
+ Score = 22.3 bits (11),  Expect = 0.035
+ Identities = 11/11 (100%), Gaps = 0/11 (0%)
+ Strand=Plus/Minus
+
+Query  20    ATAATATTAAT  30
+             |||||||||||
+Sbjct  1523  ATAATATTAAT  1513
+
+
+
+Lambda      K        H
+    1.37    0.711     1.31 
+
+Gapped
+Lambda      K        H
+    1.37    0.711     1.31 
+
+Effective search space used: 181293
+
+
+Query= p3 shs1 3001-3028 with two mismatches
+
+Length=28
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+shs1 LC738875 1-4000                                                  22.3    0.033
+
+
+> shs1 LC738875 1-4000
+Length=4000
+
+ Score = 22.3 bits (11),  Expect = 0.033
+ Identities = 11/11 (100%), Gaps = 0/11 (0%)
+ Strand=Plus/Plus
+
+Query  4     TAACGGATATC  14
+             |||||||||||
+Sbjct  2427  TAACGGATATC  2437
+
+
+ Score = 22.3 bits (11),  Expect = 0.033
+ Identities = 11/11 (100%), Gaps = 0/11 (0%)
+ Strand=Plus/Plus
+
+Query  4     TAACGGATATC  14
+             |||||||||||
+Sbjct  3584  TAACGGATATC  3594
+
+
+
+Lambda      K        H
+    1.37    0.711     1.31 
+
+Gapped
+Lambda      K        H
+    1.37    0.711     1.31 
+
+Effective search space used: 172720
+
+
+Query= p4 shs1 1501-1522 with N and R
+
+Length=22
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+    1.42    0.718     1.34 
+
+Gapped
+Lambda      K        H
+    1.42    0.718     1.34 
+
+Effective search space used: 120904
+
+
+Query= p5 shs2 2001-2035 with a lowercase run
+
+Length=35
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+shs2 LC738874 1-4000                                                  69.9    2e-16
+shs1 LC738875 1-4000                                                  22.3    0.044
+
+
+> shs2 LC738874 1-4000
+Length=4000
+
+ Score = 69.9 bits (35),  Expect = 2e-16
+ Identities = 35/35 (100%), Gaps = 0/35 (0%)
+ Strand=Plus/Plus
+
+Query  1     GGCTTTTTATACCATTTTATCTATTTATGAATTGT  35
+             |||||||||||||||||||||||||||||||||||
+Sbjct  2001  GGCTTTTTATACCATTTTATCTATTTATGAATTGT  2035
+
+
+> shs1 LC738875 1-4000
+Length=4000
+
+ Score = 22.3 bits (11),  Expect = 0.044
+ Identities = 11/11 (100%), Gaps = 0/11 (0%)
+ Strand=Plus/Plus
+
+Query  5   TTTTATACCAT  15
+           |||||||||||
+Sbjct  21  TTTTATACCAT  31
+
+
+ Score = 22.3 bits (11),  Expect = 0.044
+ Identities = 11/11 (100%), Gaps = 0/11 (0%)
+ Strand=Plus/Minus
+
+Query  4     TTTTTATACCA  14
+             |||||||||||
+Sbjct  3749  TTTTTATACCA  3739
+
+
+
+Lambda      K        H
+    1.37    0.711     1.31 
+
+Gapped
+Lambda      K        H
+    1.37    0.711     1.31 
+
+Effective search space used: 224458
+
+
+Query= p6 random 20
+
+Length=20
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+    1.37    0.711     1.31 
+
+Gapped
+Lambda      K        H
+    1.37    0.711     1.31 
+
+Effective search space used: 103632
+
+
+Query= p7 shs2 3045-3001 reverse complement
+
+Length=45
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+shs2 LC738874 1-4000                                                  89.7    3e-22
+
+
+> shs2 LC738874 1-4000
+Length=4000
+
+ Score = 89.7 bits (45),  Expect = 3e-22
+ Identities = 45/45 (100%), Gaps = 0/45 (0%)
+ Strand=Plus/Minus
+
+Query  1     TTTTCTTTTGTTGTTGTTTTTGATGAACCATTTGAAGAAATCATA  45
+             |||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  3045  TTTTCTTTTGTTGTTGTTTTTGATGAACCATTTGAAGAAATCATA  3001
+
+
+
+Lambda      K        H
+    1.37    0.711     1.31 
+
+Gapped
+Lambda      K        H
+    1.37    0.711     1.31 
+
+Effective search space used: 310788
+
+
+Query= p8 shs3 291-338 across the CA repeat
+
+Length=48
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+shs3 LC738875 5001-5300, (CA)30, LC738875 5301-5600                   95.6    5e-24
+shs1 LC738875 1-4000                                                  81.8    8e-20
+shs2 LC738874 1-4000                                                  38.2    1e-06
+
+
+> shs3 LC738875 5001-5300, (CA)30, LC738875 5301-5600
+Length=660
+
+ Score = 95.6 bits (48),  Expect = 5e-24
+ Identities = 48/48 (100%), Gaps = 0/48 (0%)
+ Strand=Plus/Plus
+
+Query  1    ATCGGGAACGCACACACACACACACACACACACACACACACACACACA  48
+            ||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  291  ATCGGGAACGCACACACACACACACACACACACACACACACACACACA  338
+
+
+ Score = 75.8 bits (38),  Expect = 5e-18
+ Identities = 38/38 (100%), Gaps = 0/38 (0%)
+ Strand=Plus/Plus
+
+Query  11   CACACACACACACACACACACACACACACACACACACA  48
+            ||||||||||||||||||||||||||||||||||||||
+Sbjct  305  CACACACACACACACACACACACACACACACACACACA  342
+
+
+ Score = 75.8 bits (38),  Expect = 5e-18
+ Identities = 38/38 (100%), Gaps = 0/38 (0%)
+ Strand=Plus/Plus
+
+Query  11   CACACACACACACACACACACACACACACACACACACA  48
+            ||||||||||||||||||||||||||||||||||||||
+Sbjct  307  CACACACACACACACACACACACACACACACACACACA  344
+
+
+ Score = 75.8 bits (38),  Expect = 5e-18
+ Identities = 38/38 (100%), Gaps = 0/38 (0%)
+ Strand=Plus/Plus
+
+Query  11   CACACACACACACACACACACACACACACACACACACA  48
+            ||||||||||||||||||||||||||||||||||||||
+Sbjct  309  CACACACACACACACACACACACACACACACACACACA  346
+
+
+ Score = 75.8 bits (38),  Expect = 5e-18
+ Identities = 38/38 (100%), Gaps = 0/38 (0%)
+ Strand=Plus/Plus
+
+Query  11   CACACACACACACACACACACACACACACACACACACA  48
+            ||||||||||||||||||||||||||||||||||||||
+Sbjct  311  CACACACACACACACACACACACACACACACACACACA  348
+
+
+ Score = 75.8 bits (38),  Expect = 5e-18
+ Identities = 38/38 (100%), Gaps = 0/38 (0%)
+ Strand=Plus/Plus
+
+Query  11   CACACACACACACACACACACACACACACACACACACA  48
+            ||||||||||||||||||||||||||||||||||||||
+Sbjct  313  CACACACACACACACACACACACACACACACACACACA  350
+
+
+ Score = 75.8 bits (38),  Expect = 5e-18
+ Identities = 38/38 (100%), Gaps = 0/38 (0%)
+ Strand=Plus/Plus
+
+Query  11   CACACACACACACACACACACACACACACACACACACA  48
+            ||||||||||||||||||||||||||||||||||||||
+Sbjct  315  CACACACACACACACACACACACACACACACACACACA  352
+
+
+ Score = 75.8 bits (38),  Expect = 5e-18
+ Identities = 38/38 (100%), Gaps = 0/38 (0%)
+ Strand=Plus/Plus
+
+Query  11   CACACACACACACACACACACACACACACACACACACA  48
+            ||||||||||||||||||||||||||||||||||||||
+Sbjct  317  CACACACACACACACACACACACACACACACACACACA  354
+
+
+ Score = 75.8 bits (38),  Expect = 5e-18
+ Identities = 38/38 (100%), Gaps = 0/38 (0%)
+ Strand=Plus/Plus
+
+Query  11   CACACACACACACACACACACACACACACACACACACA  48
+            ||||||||||||||||||||||||||||||||||||||
+Sbjct  319  CACACACACACACACACACACACACACACACACACACA  356
+
+
+ Score = 75.8 bits (38),  Expect = 5e-18
+ Identities = 38/38 (100%), Gaps = 0/38 (0%)
+ Strand=Plus/Plus
+
+Query  11   CACACACACACACACACACACACACACACACACACACA  48
+            ||||||||||||||||||||||||||||||||||||||
+Sbjct  321  CACACACACACACACACACACACACACACACACACACA  358
+
+
+ Score = 75.8 bits (38),  Expect = 5e-18
+ Identities = 38/38 (100%), Gaps = 0/38 (0%)
+ Strand=Plus/Plus
+
+Query  11   CACACACACACACACACACACACACACACACACACACA  48
+            ||||||||||||||||||||||||||||||||||||||
+Sbjct  323  CACACACACACACACACACACACACACACACACACACA  360
+
+
+> shs1 LC738875 1-4000
+Length=4000
+
+ Score = 81.8 bits (41),  Expect = 8e-20
+ Identities = 41/41 (100%), Gaps = 0/41 (0%)
+ Strand=Plus/Plus
+
+Query  8    ACGCACACACACACACACACACACACACACACACACACACA  48
+            |||||||||||||||||||||||||||||||||||||||||
+Sbjct  481  ACGCACACACACACACACACACACACACACACACACACACA  521
+
+
+ Score = 75.8 bits (38),  Expect = 5e-18
+ Identities = 38/38 (100%), Gaps = 0/38 (0%)
+ Strand=Plus/Plus
+
+Query  11   CACACACACACACACACACACACACACACACACACACA  48
+            ||||||||||||||||||||||||||||||||||||||
+Sbjct  486  CACACACACACACACACACACACACACACACACACACA  523
+
+
+ Score = 75.8 bits (38),  Expect = 5e-18
+ Identities = 38/38 (100%), Gaps = 0/38 (0%)
+ Strand=Plus/Plus
+
+Query  11   CACACACACACACACACACACACACACACACACACACA  48
+            ||||||||||||||||||||||||||||||||||||||
+Sbjct  488  CACACACACACACACACACACACACACACACACACACA  525
+
+
+ Score = 75.8 bits (38),  Expect = 5e-18
+ Identities = 38/38 (100%), Gaps = 0/38 (0%)
+ Strand=Plus/Plus
+
+Query  11   CACACACACACACACACACACACACACACACACACACA  48
+            ||||||||||||||||||||||||||||||||||||||
+Sbjct  490  CACACACACACACACACACACACACACACACACACACA  527
+
+
+ Score = 75.8 bits (38),  Expect = 5e-18
+ Identities = 38/38 (100%), Gaps = 0/38 (0%)
+ Strand=Plus/Plus
+
+Query  11   CACACACACACACACACACACACACACACACACACACA  48
+            ||||||||||||||||||||||||||||||||||||||
+Sbjct  492  CACACACACACACACACACACACACACACACACACACA  529
+
+
+ Score = 75.8 bits (38),  Expect = 5e-18
+ Identities = 38/38 (100%), Gaps = 0/38 (0%)
+ Strand=Plus/Plus
+
+Query  11   CACACACACACACACACACACACACACACACACACACA  48
+            ||||||||||||||||||||||||||||||||||||||
+Sbjct  494  CACACACACACACACACACACACACACACACACACACA  531
+
+
+ Score = 75.8 bits (38),  Expect = 5e-18
+ Identities = 38/38 (100%), Gaps = 0/38 (0%)
+ Strand=Plus/Plus
+
+Query  11   CACACACACACACACACACACACACACACACACACACA  48
+            ||||||||||||||||||||||||||||||||||||||
+Sbjct  496  CACACACACACACACACACACACACACACACACACACA  533
+
+
+ Score = 75.8 bits (38),  Expect = 5e-18
+ Identities = 38/38 (100%), Gaps = 0/38 (0%)
+ Strand=Plus/Plus
+
+Query  11   CACACACACACACACACACACACACACACACACACACA  48
+            ||||||||||||||||||||||||||||||||||||||
+Sbjct  498  CACACACACACACACACACACACACACACACACACACA  535
+
+
+ Score = 75.8 bits (38),  Expect = 5e-18
+ Identities = 38/38 (100%), Gaps = 0/38 (0%)
+ Strand=Plus/Plus
+
+Query  11   CACACACACACACACACACACACACACACACACACACA  48
+            ||||||||||||||||||||||||||||||||||||||
+Sbjct  500  CACACACACACACACACACACACACACACACACACACA  537
+
+
+ Score = 75.8 bits (38),  Expect = 5e-18
+ Identities = 38/38 (100%), Gaps = 0/38 (0%)
+ Strand=Plus/Plus
+
+Query  11   CACACACACACACACACACACACACACACACACACACA  48
+            ||||||||||||||||||||||||||||||||||||||
+Sbjct  502  CACACACACACACACACACACACACACACACACACACA  539
+
+
+ Score = 67.9 bits (34),  Expect = 1e-15
+ Identities = 37/38 (97%), Gaps = 0/38 (0%)
+ Strand=Plus/Plus
+
+Query  11   CACACACACACACACACACACACACACACACACACACA  48
+            ||||||||| ||||||||||||||||||||||||||||
+Sbjct  474  CACACACACGCACACACACACACACACACACACACACA  511
+
+
+ Score = 67.9 bits (34),  Expect = 1e-15
+ Identities = 37/38 (97%), Gaps = 0/38 (0%)
+ Strand=Plus/Plus
+
+Query  11   CACACACACACACACACACACACACACACACACACACA  48
+            ||||||| ||||||||||||||||||||||||||||||
+Sbjct  476  CACACACGCACACACACACACACACACACACACACACA  513
+
+
+ Score = 67.9 bits (34),  Expect = 1e-15
+ Identities = 37/38 (97%), Gaps = 0/38 (0%)
+ Strand=Plus/Plus
+
+Query  11   CACACACACACACACACACACACACACACACACACACA  48
+            ||||| ||||||||||||||||||||||||||||||||
+Sbjct  478  CACACGCACACACACACACACACACACACACACACACA  515
+
+
+ Score = 65.9 bits (33),  Expect = 5e-15
+ Identities = 36/37 (97%), Gaps = 0/37 (0%)
+ Strand=Plus/Plus
+
+Query  12   ACACACACACACACACACACACACACACACACACACA  48
+            |||||||||| ||||||||||||||||||||||||||
+Sbjct  473  ACACACACACGCACACACACACACACACACACACACA  509
+
+
+ Score = 22.3 bits (11),  Expect = 0.065
+ Identities = 11/11 (100%), Gaps = 0/11 (0%)
+ Strand=Plus/Minus
+
+Query  10    GCACACACACA  20
+             |||||||||||
+Sbjct  1848  GCACACACACA  1838
+
+
+> shs2 LC738874 1-4000
+Length=4000
+
+ Score = 38.2 bits (19),  Expect = 1e-06
+ Identities = 25/27 (93%), Gaps = 0/27 (0%)
+ Strand=Plus/Plus
+
+Query  12    ACACACACACACACACACACACACACA  38
+             |||||||||||||||||| | ||||||
+Sbjct  1725  ACACACACACACACACACGCGCACACA  1751
+
+
+ Score = 38.2 bits (19),  Expect = 1e-06
+ Identities = 25/27 (93%), Gaps = 0/27 (0%)
+ Strand=Plus/Plus
+
+Query  14    ACACACACACACACACACACACACACA  40
+             |||||||||||||||||| | ||||||
+Sbjct  1725  ACACACACACACACACACGCGCACACA  1751
+
+
+ Score = 38.2 bits (19),  Expect = 1e-06
+ Identities = 25/27 (93%), Gaps = 0/27 (0%)
+ Strand=Plus/Plus
+
+Query  16    ACACACACACACACACACACACACACA  42
+             |||||||||||||||||| | ||||||
+Sbjct  1725  ACACACACACACACACACGCGCACACA  1751
+
+
+ Score = 38.2 bits (19),  Expect = 1e-06
+ Identities = 25/27 (93%), Gaps = 0/27 (0%)
+ Strand=Plus/Plus
+
+Query  18    ACACACACACACACACACACACACACA  44
+             |||||||||||||||||| | ||||||
+Sbjct  1725  ACACACACACACACACACGCGCACACA  1751
+
+
+ Score = 38.2 bits (19),  Expect = 1e-06
+ Identities = 25/27 (93%), Gaps = 0/27 (0%)
+ Strand=Plus/Plus
+
+Query  20    ACACACACACACACACACACACACACA  46
+             |||||||||||||||||| | ||||||
+Sbjct  1725  ACACACACACACACACACGCGCACACA  1751
+
+
+ Score = 38.2 bits (19),  Expect = 1e-06
+ Identities = 25/27 (93%), Gaps = 0/27 (0%)
+ Strand=Plus/Plus
+
+Query  22    ACACACACACACACACACACACACACA  48
+             |||||||||||||||||| | ||||||
+Sbjct  1725  ACACACACACACACACACGCGCACACA  1751
+
+
+ Score = 36.2 bits (18),  Expect = 4e-06
+ Identities = 24/26 (92%), Gaps = 0/26 (0%)
+ Strand=Plus/Plus
+
+Query  11    CACACACACACACACACACACACACA  36
+             ||||||||||||||||| | ||||||
+Sbjct  1726  CACACACACACACACACGCGCACACA  1751
+
+
+ Score = 28.2 bits (14),  Expect = 0.001
+ Identities = 17/18 (94%), Gaps = 0/18 (0%)
+ Strand=Plus/Plus
+
+Query  8     ACGCACACACACACACAC  25
+             ||||||||||| ||||||
+Sbjct  1845  ACGCACACACATACACAC  1862
+
+
+
+Lambda      K        H
+    1.37    0.711     1.31 
+
+Gapped
+Lambda      K        H
+    1.37    0.711     1.31 
+
+Effective search space used: 336687
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/short_subject.fasta).
+    Posted date:  Unknown
+  Number of letters in database: 8,660
+  Number of sequences in database:  3
+
+
+
+Matrix: blastn matrix 1 -3
+Gap Penalties: Existence: 5, Extension: 2

@@ -12,9 +12,10 @@ by default, and prints one line per combination:
 
 The pairs cover NCBI's 12 tables, pairs with a common divisor, pairs without a table and
 a penalty of 0; the gap costs cover table rows, costs beyond the tables, 0/0 and invalid
-values. Exits 1 when any line is DIFF.
+values. Exits 1 when any line is DIFF. --tasks takes a comma-separated list of BLASTN
+tasks to sweep (default blastn,megablast).
 
-Usage: scoring_sweep.py --bin-dir DIR --losat LOSAT [--outfmt 0|6|7] [--jobs N]
+Usage: scoring_sweep.py --bin-dir DIR --losat LOSAT [--outfmt 0|6|7] [--jobs N] [--tasks A,B]
 """
 from __future__ import annotations
 
@@ -82,8 +83,9 @@ def main() -> int:
     parser.add_argument("--losat", type=Path, required=True)
     parser.add_argument("--outfmt", default="6")
     parser.add_argument("--jobs", type=int, default=8)
+    parser.add_argument("--tasks", default="blastn,megablast")
     args = parser.parse_args()
-    cases = [(input_name, task, reward, penalty, gaps) for input_name in INPUTS for task in ("blastn", "megablast")
+    cases = [(input_name, task, reward, penalty, gaps) for input_name in INPUTS for task in args.tasks.split(",")
              for reward, penalty in SCORES for gaps in GAPS]
     with ThreadPoolExecutor(args.jobs) as pool:
         lines = list(pool.map(lambda case: compare(args.bin_dir, args.losat, args.outfmt, case), cases))

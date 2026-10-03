@@ -5,14 +5,15 @@
 // and recovery; renewal of the runtime; and the serial fallback. Every project (Chromium,
 // Firefox, WebKit) runs them, on a harness server (support/harness-server.ts). The
 // storage-full cases need the Chrome DevTools Protocol and run in contracts.spec.ts.
-import { writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import type { OutputFormat } from '../../src/domain/output-format';
 import type { RetentionResult, SearchCase, SearchResult } from './harness/engine';
 import { buildHarness, type HarnessFiles } from './support/browser';
 import { ENGINE, NO_ENGINE_REASON } from './support/engine';
-import { openHarness, startHarnessServer, type HarnessServer } from './support/harness-server';
+import { openHarness, REPOSITORY, startHarnessServer, type HarnessServer } from './support/harness-server';
 import { manifestCase, NATIVE, nativeExpectation, NO_NATIVE_REASON, searchOf, vbrCases, type VbrCase } from './support/native';
 
 test.skip(ENGINE === undefined, NO_ENGINE_REASON);
@@ -26,9 +27,34 @@ let harness: HarnessFiles;
 let isolated: HarnessServer;
 let notIsolated: HarnessServer;
 
+/**
+ * A TBLASTN search of several query batches (62,500 residues of NZ_CP006932's proteins
+ * against 437,500 nt of its genome), as files in a directory of their own: the query is
+ * searched in batches of 20,000 residues, each with its own thread pool.
+ */
+const BATCHES_DIR = mkdtempSync(join(tmpdir(), 'losat-web-batches-'));
+function writeBatchInputs(): Map<string, Uint8Array> {
+  const read = (path: string) => readFileSync(join(REPOSITORY, path), 'utf8');
+  let query = '';
+  let residues = 0;
+  for (const record of read('LOSAT/tests/fasta/NZ_CP006932.faa').split(/^>/m).slice(1)) {
+    if (residues >= 62_500) break;
+    query += `>${record}`;
+    residues += record.split('\n').slice(1).join('').replace(/\s/g, '').length;
+  }
+  const [header, ...lines] = read('LOSAT/tests/fasta/NZ_CP006932.fasta').split('\n');
+  const subject = `${header}\n${lines.join('').slice(0, 437_500).replace(/(.{70})/g, '$1\n')}\n`;
+  const files = new Map([
+    ['batches_query.faa', new TextEncoder().encode(query)],
+    ['batches_subject.fasta', new TextEncoder().encode(subject)],
+  ]);
+  for (const [name, bytes] of files) writeFileSync(join(BATCHES_DIR, name), bytes);
+  return files;
+}
+
 test.beforeAll(async () => {
   harness = await buildHarness();
-  isolated = await startHarnessServer(harness);
+  isolated = await startHarnessServer(harness, { extra: writeBatchInputs() });
   notIsolated = await startHarnessServer(harness, { isolated: false });
 });
 
@@ -182,6 +208,31 @@ test('R1: searches of one subject with other queries and options reuse it and gi
     });
   }
   record('r1', browserName, rows);
+});
+
+test('a search that builds one thread pool after another runs threaded from a new runtime', async ({ context }) => {
+  // The first threaded search of a runtime: each query batch starts its pool while the
+  // threads of the previous pool are still returning (the ThreadHost's spare thread workers).
+  const page = await openHarness(context, isolated);
+  const batches: VbrCase = {
+    id: 'tblastn.query_batches',
+    program: 'tblastn',
+    options: [],
+    cwd: BATCHES_DIR,
+    query: 'batches_query.faa',
+    subject: 'batches_subject.fasta',
+    frozen: {},
+  };
+  const file = (name: string) => ({ url: `/__extra/${name}`, name });
+  for (const threads of [2, 4]) {
+    const search: SearchCase = { ...searchOf(batches, threads), query: file(batches.query), subject: file(batches.subject) };
+    // A new application (a session with its own options), so that this is the first search of its runtime.
+    const [result] = await page.evaluate((s) => window.losatHarness!.engine.searches([s], { renewal: {} }), search);
+    expect(result!.status, result!.record.error).toBe('completed');
+    expect(result!.record.runtimePath).toBe('threaded');
+    expect(result!.record.threads).toBe(threads);
+    if (NATIVE !== undefined) expectOutputs(batches, result!);
+  }
 });
 
 test('a cancelled search ends its runtime; the next search runs in a new one with the expected bytes', async ({ context, browserName }) => {

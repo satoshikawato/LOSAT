@@ -5,7 +5,15 @@
 // loop. Each thread therefore runs in a thread worker that was prepared beforehand: it has
 // instantiated the module on the shared memory and waits for a start message. A thread
 // worker is reused: when its thread ends, it instantiates the module again and becomes
-// ready for the next search. The Node host of the same ABI is LOSAT/tests/wasi_thread_host.js.
+// ready for the next thread. The Node host of the same ABI (LOSAT/tests/wasi_thread_host.js)
+// starts a new Node worker for each thread instead, which Node can do while the spawning
+// thread waits; a browser cannot be relied on to start a worker then.
+//
+// A search can build one thread pool after another (TBLASTN builds one for each batch of
+// queries). The threads of a pool return only after the spawns of the next pool have
+// returned: the engine's thread library holds a lock across `thread-spawn` that an ending
+// thread needs (S09). So a search of N threads has two sets of N-1 thread workers: the next
+// pool starts in the set that the previous pool did not use.
 import {
   SLOT_FAILED,
   SLOT_PREPARING,
@@ -52,14 +60,18 @@ export class ThreadHost {
 
   constructor(private readonly options: ThreadHostOptions) {}
 
-  /** Creates thread workers up to `count` and waits until `count` of them are ready. */
+  /**
+   * Makes two sets of `count` thread workers (the threads of a search of `count` + 1
+   * threads, and a spare set for its next pool) and waits until all of them are ready.
+   */
   async prepare(count: number): Promise<void> {
-    while (this.slots.length < count) this.slots.push(this.createSlot());
+    const total = 2 * count;
+    while (this.slots.length < total) this.slots.push(this.createSlot());
     const deadline = performance.now() + (this.options.readyTimeoutMs ?? DEFAULT_TIMEOUT_MS);
     for (;;) {
       const failed = this.slots.find((slot) => Atomics.load(slot.state, 0) === SLOT_FAILED);
       if (failed !== undefined) throw new ThreadHostError(failed.error ?? 'a thread worker stopped');
-      if (this.slots.filter((slot) => Atomics.load(slot.state, 0) === SLOT_READY).length >= count) return;
+      if (this.slots.filter((slot) => Atomics.load(slot.state, 0) === SLOT_READY).length >= total) return;
       if (performance.now() > deadline) throw new ThreadHostError('the thread workers did not become ready in time');
       await new Promise((resolve) => setTimeout(resolve, 2));
     }
@@ -102,9 +114,9 @@ export class ThreadHost {
   }
 
   /**
-   * Takes a ready slot, waiting for one that is running or being prepared. A search can
-   * start a new thread pool while the threads of its previous pool are still ending (TBLASTN
-   * builds one pool for each batch of queries); their thread workers then prepare again.
+   * Takes a ready slot, waiting for one that is being prepared again (its thread has
+   * returned). A slot whose thread is still running is not waited for: it may be a thread of
+   * the previous pool, which cannot return while this spawn waits.
    */
   private claim(): Slot | undefined {
     const deadline = performance.now() + (this.options.readyTimeoutMs ?? DEFAULT_TIMEOUT_MS);
@@ -112,12 +124,9 @@ export class ThreadHost {
       for (const slot of this.slots) {
         if (Atomics.compareExchange(slot.state, 0, SLOT_READY, SLOT_RUNNING) === SLOT_READY) return slot;
       }
-      const busy = this.slots.find((slot) => {
-        const state = Atomics.load(slot.state, 0);
-        return state === SLOT_PREPARING || state === SLOT_RUNNING;
-      });
-      if (busy === undefined || performance.now() > deadline) return undefined;
-      Atomics.wait(busy.state, 0, Atomics.load(busy.state, 0), 50);
+      const preparing = this.slots.find((slot) => Atomics.load(slot.state, 0) === SLOT_PREPARING);
+      if (preparing === undefined || performance.now() > deadline) return undefined;
+      Atomics.wait(preparing.state, 0, SLOT_PREPARING, 50);
     }
   }
 

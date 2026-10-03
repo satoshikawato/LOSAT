@@ -7,8 +7,9 @@ import { build } from 'vite';
 import { siteHeaders } from '../../../build/headers';
 import { findReactors, losatEngine } from '../../../build/reactors';
 import { SESSION_LOCK_PREFIX, TMP_DIRECTORY } from '../../../src/infra/data/session';
+import { E2E_ORIGIN } from './origin';
 
-export const ORIGIN = 'http://localhost:4173';
+export const ORIGIN = E2E_ORIGIN;
 
 /** Whether the application build has the engine (LOSAT_WEB_REACTORS), or uses the FakeEngine. */
 const REACTORS = findReactors();

@@ -5,6 +5,7 @@ import { Worker as NodeWorker } from 'node:worker_threads';
 import { describe, expect, it } from 'vitest';
 import {
   SLOT_FAILED,
+  SLOT_PREPARING,
   SLOT_READY,
   START_ABANDONED,
   START_PENDING,
@@ -71,33 +72,51 @@ function host(behaviour: Behaviour) {
 }
 
 describe('ThreadHost', () => {
-  it('prepares thread workers and starts threads in them with increasing thread IDs', async () => {
+  it('prepares two sets of thread workers and starts threads in them with increasing thread IDs', async () => {
     const { threads, workers } = host('ready-and-start');
     await threads.prepare(2);
-    expect(workers).toHaveLength(2);
+    expect(workers).toHaveLength(4);
     expect(threads.spawn(1000)).toBe(1);
     expect(threads.spawn(2000)).toBe(2);
-    expect(workers.flatMap((worker) => worker.starts)).toEqual([1, 2]);
-    // Both are busy, and their threads do not end within the ready timeout: a third spawn fails.
-    expect(threads.spawn(3000)).toBe(-1);
     threads.terminate();
     expect(workers.every((worker) => worker.terminated)).toBe(true);
   });
 
-  it('waits for a thread worker whose thread is still ending (a new pool of the same search)', async () => {
+  it('starts the next pool of a search in the spare set while the threads of the previous pool still run', async () => {
     const { threads, workers } = host('ready-and-start');
     await threads.prepare(1);
     expect(threads.spawn(1000)).toBe(1);
-    // The thread ends 30 ms later and its worker becomes ready again, while spawn waits.
-    const ending = new NodeWorker(
+    // The thread of the first pool has not returned (its slot is running): the next pool's
+    // spawn takes the spare thread worker at once instead of waiting for it.
+    const started = performance.now();
+    expect(threads.spawn(2000)).toBe(2);
+    expect(performance.now() - started).toBeLessThan(50);
+    expect(workers.map((worker) => worker.starts)).toEqual([[1], [2]]);
+    // With every thread worker running, a spawn fails at once: the threads it would wait
+    // for may need this spawn to return before they can.
+    const failing = performance.now();
+    expect(threads.spawn(3000)).toBe(-1);
+    expect(performance.now() - failing).toBeLessThan(50);
+    threads.terminate();
+  });
+
+  it('waits for a thread worker that is being prepared again after its thread returned', async () => {
+    const { threads, workers } = host('ready-and-start');
+    await threads.prepare(1);
+    expect(threads.spawn(1000)).toBe(1);
+    expect(threads.spawn(2000)).toBe(2);
+    // The first thread returned; its worker becomes ready 30 ms later, while spawn waits.
+    const state = workers[0]!.state!;
+    Atomics.store(state, 0, SLOT_PREPARING);
+    const ready = new NodeWorker(
       `const { workerData } = require('node:worker_threads');
        const state = new Int32Array(workerData);
        setTimeout(() => { Atomics.store(state, 0, ${SLOT_READY}); Atomics.notify(state, 0); }, 30);`,
-      { eval: true, workerData: workers[0]!.state!.buffer },
+      { eval: true, workerData: state.buffer },
     );
-    expect(threads.spawn(2000)).toBe(2);
-    expect(workers).toHaveLength(1);
-    await ending.terminate();
+    expect(threads.spawn(3000)).toBe(3);
+    expect(workers[0]!.starts).toEqual([1, 3]);
+    await ready.terminate();
     threads.terminate();
   });
 

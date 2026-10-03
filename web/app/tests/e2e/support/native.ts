@@ -5,7 +5,7 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import type { OutputFormat } from '../../../src/domain/output-format';
 import type { SearchCase } from '../harness/engine';
 import { REPOSITORY } from './harness-server';
@@ -28,7 +28,7 @@ function sha256(bytes: Uint8Array | string): string {
 
 const cache = new Map<string, NativeExpectation>();
 
-/** Runs the native CLI for every format with `argv` (program first) from `cwd` (repository-relative). */
+/** Runs the native CLI for every format with `argv` (program first) from `cwd` (relative to the repository, or absolute). */
 export function nativeExpectation(argv: readonly string[], cwd: string): NativeExpectation {
   const key = JSON.stringify([argv, cwd]);
   const cached = cache.get(key);
@@ -38,7 +38,7 @@ export function nativeExpectation(argv: readonly string[], cwd: string): NativeE
   let stderr: string | undefined;
   for (const format of FORMATS) {
     const args = [...argv, '-outfmt', String(format), '-num_threads', '1'];
-    const result = spawnSync(NATIVE, args, { cwd: join(REPOSITORY, cwd), maxBuffer: 1 << 30 });
+    const result = spawnSync(NATIVE, args, { cwd: resolve(REPOSITORY, cwd), maxBuffer: 1 << 30 });
     if (result.status !== 0) throw new Error(`native ${args.join(' ')} failed (${result.status}): ${result.stderr}`);
     formats[format] = sha256(result.stdout);
     const warnings = sha256(result.stderr);
@@ -55,7 +55,7 @@ export interface VbrCase {
   readonly id: string;
   readonly program: SearchCase['program'];
   readonly options: readonly string[];
-  /** Repository-relative directory that the argv's file names are relative to. */
+  /** The directory that the argv's file names are relative to: repository-relative, or absolute. */
   readonly cwd: string;
   readonly query: string;
   readonly subject: string;

@@ -870,15 +870,6 @@ fn check_losat_limits(args: &TblastxArgs) -> Result<()> {
             "-window_size 0 (the one-hit word finder) is not supported by LOSAT's TBLASTX"
         );
     }
-    // NCBI culls with the HSP writer of hspfilter_culling.c, which also moves the hit list
-    // cut to the traceback stage; LOSAT's culling (`hsp_culling.rs`) keeps other HSPs than
-    // NCBI's, so a culling limit is rejected until it is ported.
-    if args.culling_limit > 0 {
-        anyhow::bail!(
-            "-culling_limit {} is not supported by LOSAT's TBLASTX (its HSP culling differs from NCBI's)",
-            args.culling_limit
-        );
-    }
     Ok(())
 }
 
@@ -1211,7 +1202,23 @@ fn write_tblastx_outputs(
     //     opt.SetHitlistSize(hitlist_size);
     // ```
     // The hit list size is the -max_target_seqs value, or 500 when it is omitted.
-    let mut hits = report::final_hit_order(hits, args.max_target_seqs.unwrap_or(500));
+    // NCBI reference: c++/src/algo/blast/api/blast_options_local_priv.hpp:1320-1324
+    // ```c
+    // CBlastOptionsLocal::SetCullingLimit(int s)
+    // {
+    //     if (s <= 0) {
+    //         return;
+    //     }
+    // ```
+    // A culling limit above 0 installs NCBI's culling writer and pipe
+    // (`report::culled_hit_order`).
+    let hitlist_size = args.max_target_seqs.unwrap_or(500);
+    let mut hits = if args.culling_limit > 0 {
+        let query_lengths: Vec<usize> = run.queries.iter().map(|query| query.seq().len()).collect();
+        report::culled_hit_order(hits, hitlist_size, args.culling_limit, &query_lengths)
+    } else {
+        report::final_hit_order(hits, hitlist_size)
+    };
     if output_formats.contains(&report::TblastxOutputFormat::Pairwise) {
         check_shown_subject_titles(&hits, run.subjects)?;
     }
@@ -3626,22 +3633,8 @@ fn search_query_batch(
                     .fetch_add(linked.len(), AtomicOrdering::Relaxed);
             }
 
-            // NCBI HSP culling (conditional on culling_limit > 0)
-            // Reference: hspfilter_culling.c - applied after linking, before output
-            // Default for tblastx: culling_limit = 0 (disabled)
-            let linked_before_cull = linked.len();
-            let linked = if args.culling_limit > 0 {
-                hsp_culling::apply_culling(linked, contexts_ref, args.culling_limit)
-            } else {
-                // Default: no culling (matches NCBI tblastx default)
-                linked
-            };
-            if diag_enabled && args.culling_limit > 0 {
-                diagnostics.base.hsps_culled_dominated.fetch_add(
-                    linked_before_cull.saturating_sub(linked.len()),
-                    AtomicOrdering::Relaxed,
-                );
-            }
+            // NCBI's culling (`-culling_limit`) runs on the final HSPs of all subjects, after
+            // the e-value reap (`report::culled_hit_order`).
 
             let total_linked = linked.len();
             let mut stats_single_hsps = 0usize;

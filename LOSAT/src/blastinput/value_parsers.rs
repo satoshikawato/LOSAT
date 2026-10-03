@@ -284,13 +284,31 @@ fn ncbi_constrained_integer(value: &str) -> Result<i32, String> {
     ncbi_integer(value)
 }
 
-/// A BLASTN integer argument of `CArg_Integer` with NCBI's lower bound (`at_least`).
-fn blastn_integer_at_least(value: &str, at_least: i32) -> Result<i32, String> {
+/// An integer argument of `CArg_Integer` with NCBI's lower bound (`at_least`,
+/// `CArgAllowValuesGreaterThanOrEqual`).
+pub fn ncbi_integer_at_least(value: &str, at_least: i32) -> Result<i32, String> {
     let n = ncbi_constrained_integer(value)?;
     if n < at_least {
         return Err(format!("expected an integer >= {at_least}"));
     }
     Ok(n)
+}
+
+/// A non-negative integer argument (`CArg_Integer` with `CArgAllowValuesGreaterThanOrEqual(0)`),
+/// such as `-culling_limit`.
+///
+/// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3296-3302
+/// ```c
+///     arg_desc.AddOptionalKey(kArgCullingLimit, "int_value",
+///                      "If the query range of a hit is enveloped by that of at "
+///                      "least this many higher-scoring hits, delete the hit",
+///                      CArgDescriptions::eInteger);
+///     arg_desc.SetConstraint(kArgCullingLimit,
+///     // best hit algorithm arguments
+///                new CArgAllowValuesGreaterThanOrEqual(kDfltArgCullingLimit));
+/// ```
+pub fn nonnegative_ncbi_integer(value: &str) -> Result<i32, String> {
+    ncbi_integer_at_least(value, 0)
 }
 
 /// A BLASTN task: NCBI's blastn tasks (case-sensitive), of which LOSAT implements
@@ -415,17 +433,17 @@ pub fn blastn_template_length(value: &str) -> Result<u8, String> {
 ///                                : new CArgAllowValuesGreaterThanOrEqual(4));
 /// ```
 pub fn blastn_word_size(value: &str) -> Result<usize, String> {
-    blastn_integer_at_least(value, 4).map(|n| n as usize)
+    ncbi_integer_at_least(value, 4).map(|n| n as usize)
 }
 /// A BLASTN count of 1 or more (`-num_threads`, `-max_target_seqs`, `-max_hsps`), as
 /// NCBI's arguments (blast_args.cpp:203-207,2731-2732,3162-3163).
 pub fn blastn_count(value: &str) -> Result<usize, String> {
-    blastn_integer_at_least(value, 1).map(|n| n as usize)
+    ncbi_integer_at_least(value, 1).map(|n| n as usize)
 }
 /// A BLASTN reward: 0 or more, as NCBI's argument (blast_args.cpp:658-659). A reward of 0
 /// is an option that LOSAT rejects before the search (`blastn/scoring.rs`).
 pub fn blastn_reward(value: &str) -> Result<i32, String> {
-    blastn_integer_at_least(value, 0)
+    ncbi_integer_at_least(value, 0)
 }
 /// A BLASTN penalty: 0 or less, as NCBI's argument (blast_args.cpp:651-652), whose
 /// constraint reads the value as the `>=` constraint does (blast_input_aux.hpp:135-138).

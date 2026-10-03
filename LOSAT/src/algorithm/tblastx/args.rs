@@ -107,9 +107,17 @@ pub struct TblastxArgs {
     #[arg(long, default_value = "0", value_name = "SPEC", value_parser = tblastx_outfmt)]
     pub outfmt: String,
 
-    // NCBI reference: cmdline_flags.cpp:127-128 (kDfltArgCullingLimit = 0)
-    /// HSP culling limit (default: 0, no culling). A limit above 0 is not supported by
-    /// LOSAT's TBLASTX (its HSP culling differs from NCBI's hspfilter_culling.c).
-    #[arg(long, default_value_t = 0)]
-    pub culling_limit: u32,
+    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3335-3340
+    // ```c
+    // CHspFilteringArgs::ExtractAlgorithmOptions(const CArgs& args,
+    //                                            CBlastOptions& opts)
+    // {
+    //     if (args[kArgCullingLimit]) {
+    //         opts.SetCullingLimit(args[kArgCullingLimit].AsInteger());
+    //     }
+    // ```
+    /// If the query range of a hit is enveloped by that of at least this many
+    /// higher-scoring hits, delete the hit (default: 0, no culling).
+    #[arg(long, default_value_t = 0, value_parser = nonnegative_ncbi_integer)]
+    pub culling_limit: i32,
 }

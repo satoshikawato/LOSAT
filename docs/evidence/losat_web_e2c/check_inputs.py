@@ -400,8 +400,9 @@ def cases(work: Path) -> list[tuple[str, list[str], str]]:
         ("audit6.diagonals.inverted_repeat.blastn", [*ir, "-task", "blastn", "-outfmt", "6"], "same"),
         ("audit6.diagonals.inverted_repeat.fmt0", ir, "same"),
         ("audit6.diagonals.strand", [*strand, "-task", "blastn", "-word_size", "5", "-evalue", "100", "-outfmt", "6"], "same"),
-        ("audit6.task.dc_megablast", [*mq, *multi_s, "-task", "dc-megablast"], "losat-rejects"),
-        ("audit6.task.blastn_short", [*mq, *multi_s, "-task", "blastn-short"], "losat-rejects"),
+        # Session SD (E2i) ported dc-megablast and blastn-short.
+        ("audit6.task.dc_megablast", [*mq, *multi_s, "-task", "dc-megablast"], "same"),
+        ("audit6.task.blastn_short", [*mq, *multi_s, "-task", "blastn-short"], "same"),
         ("audit6.task.rmblastn", [*mq, *multi_s, "-task", "rmblastn"], "losat-rejects"),
         ("audit6.task.capitals", [*mq, *multi_s, "-task", "BLASTN"], "arg-error"),
         ("audit6.option.strand", [*mq, *multi_s, "-strand", "plus"], "losat-rejects"),

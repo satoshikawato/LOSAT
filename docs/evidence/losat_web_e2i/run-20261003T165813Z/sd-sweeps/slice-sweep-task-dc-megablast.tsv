@@ -1,0 +1,2 @@
+# pool=viral options='-task dc-megablast' seed=7 cases=120 differing=0
+exit 0

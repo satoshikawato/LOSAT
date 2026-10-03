@@ -1,0 +1,7 @@
+17:22:29 scoring sweeps
+17:23:01 word size sweep
+17:23:07 check_inputs
+17:23:58 batch sweeps (3 in parallel, 2 jobs each)
+17:25:21 slice sweeps (3 in parallel, 2 jobs each)
+17:25:36 done
+exit 0

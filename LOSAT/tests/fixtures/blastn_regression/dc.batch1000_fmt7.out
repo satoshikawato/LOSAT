@@ -1,0 +1,229 @@
+# BLASTN 2.17.0+
+# Query: mq00 len1250
+# Database: User specified sequence set (Input: tests/fixtures/blastn_regression/inputs/s60k.fa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+mq00	s60k	96.099	1256	40	9	1	1250	22961	24213	0.0	2012
+# BLASTN 2.17.0+
+# Query: mq01 len159
+# Database: User specified sequence set (Input: tests/fixtures/blastn_regression/inputs/s60k.fa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+mq01	s60k	98.125	160	2	1	1	159	2479	2638	1.30e-75	272
+# BLASTN 2.17.0+
+# Query: mq02 len77
+# Database: User specified sequence set (Input: tests/fixtures/blastn_regression/inputs/s60k.fa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+mq02	s60k	94.805	77	3	1	1	77	11896	11971	7.75e-30	118
+# BLASTN 2.17.0+
+# Query: mq03 len1438
+# Database: User specified sequence set (Input: tests/fixtures/blastn_regression/inputs/s60k.fa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+mq03	s60k	97.155	1441	34	7	1	1438	25067	26503	0.0	2389
+# BLASTN 2.17.0+
+# Query: mq04 len1682
+# Database: User specified sequence set (Input: tests/fixtures/blastn_regression/inputs/s60k.fa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+mq04	s60k	98.754	1685	14	7	1	1682	55576	57256	0.0	2920
+# BLASTN 2.17.0+
+# Query: mq05 len15
+# Database: User specified sequence set (Input: tests/fixtures/blastn_regression/inputs/s60k.fa)
+# 0 hits found
+# BLASTN 2.17.0+
+# Query: mq06 len24
+# Database: User specified sequence set (Input: tests/fixtures/blastn_regression/inputs/s60k.fa)
+# 0 hits found
+# BLASTN 2.17.0+
+# Query: mq07 len19
+# Database: User specified sequence set (Input: tests/fixtures/blastn_regression/inputs/s60k.fa)
+# 0 hits found
+# BLASTN 2.17.0+
+# Query: mq08 len524
+# Database: User specified sequence set (Input: tests/fixtures/blastn_regression/inputs/s60k.fa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+mq08	s60k	95.437	526	19	5	1	524	24034	24556	0.0	823
+# BLASTN 2.17.0+
+# Query: mq09 len2669
+# Database: User specified sequence set (Input: tests/fixtures/blastn_regression/inputs/s60k.fa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+mq09	s60k	97.793	2673	48	11	1	2669	34112	31447	0.0	4516
+# BLASTN 2.17.0+
+# Query: mq10 len444
+# Database: User specified sequence set (Input: tests/fixtures/blastn_regression/inputs/s60k.fa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+mq10	s60k	98.423	444	5	2	1	444	45545	45986	0.0	763
+# BLASTN 2.17.0+
+# Query: mq11 len44
+# Database: User specified sequence set (Input: tests/fixtures/blastn_regression/inputs/s60k.fa)
+# 0 hits found
+# BLASTN 2.17.0+
+# Query: mq12 len501
+# Database: User specified sequence set (Input: tests/fixtures/blastn_regression/inputs/s60k.fa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+mq12	s60k	97.605	501	9	3	1	501	46255	46752	0.0	839
+# BLASTN 2.17.0+
+# Query: mq13 len4528
+# Database: User specified sequence set (Input: tests/fixtures/blastn_regression/inputs/s60k.fa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+mq13	s60k	98.767	4540	36	20	1	4528	3351	7882	0.0	7863
+# BLASTN 2.17.0+
+# Query: mq14 len30
+# Database: User specified sequence set (Input: tests/fixtures/blastn_regression/inputs/s60k.fa)
+# 0 hits found
+# BLASTN 2.17.0+
+# Query: mq15 len501
+# Database: User specified sequence set (Input: tests/fixtures/blastn_regression/inputs/s60k.fa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+mq15	s60k	96.414	502	16	2	1	501	4813	5313	0.0	818
+# BLASTN 2.17.0+
+# Query: mq16 len583
+# Database: User specified sequence set (Input: tests/fixtures/blastn_regression/inputs/s60k.fa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+mq16	s60k	97.089	584	14	3	1	583	40167	40748	0.0	966
+# BLASTN 2.17.0+
+# Query: mq17 len58
+# Database: User specified sequence set (Input: tests/fixtures/blastn_regression/inputs/s60k.fa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+mq17	s60k	100.000	58	0	0	1	58	58381	58438	3.45e-26	105
+# BLASTN 2.17.0+
+# Query: mq18 len1676
+# Database: User specified sequence set (Input: tests/fixtures/blastn_regression/inputs/s60k.fa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+mq18	s60k	95.476	1680	65	11	1	1676	50374	48702	0.0	2648
+# BLASTN 2.17.0+
+# Query: mq19 len12
+# Database: User specified sequence set (Input: tests/fixtures/blastn_regression/inputs/s60k.fa)
+# 0 hits found
+# BLASTN 2.17.0+
+# Query: mq20 len687
+# Database: User specified sequence set (Input: tests/fixtures/blastn_regression/inputs/s60k.fa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+mq20	s60k	97.820	688	13	2	1	687	25682	24996	0.0	1167
+# BLASTN 2.17.0+
+# Query: mq21 len58
+# Database: User specified sequence set (Input: tests/fixtures/blastn_regression/inputs/s60k.fa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+mq21	s60k	98.276	58	1	0	1	58	45175	45118	1.47e-24	101
+# BLASTN 2.17.0+
+# Query: mq22 len2038
+# Database: User specified sequence set (Input: tests/fixtures/blastn_regression/inputs/s60k.fa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+mq22	s60k	98.483	2043	17	14	1	2038	44751	46784	0.0	3495
+# BLASTN 2.17.0+
+# Query: mq23 len72
+# Database: User specified sequence set (Input: tests/fixtures/blastn_regression/inputs/s60k.fa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+mq23	s60k	95.833	72	3	0	1	72	18833	18762	2.48e-29	117
+# BLASTN 2.17.0+
+# Query: mq24 len2649
+# Database: User specified sequence set (Input: tests/fixtures/blastn_regression/inputs/s60k.fa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+mq24	s60k	97.587	2652	50	14	3	2649	50212	52854	0.0	4444
+# BLASTN 2.17.0+
+# Query: mq25 len866
+# Database: User specified sequence set (Input: tests/fixtures/blastn_regression/inputs/s60k.fa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+mq25	s60k	97.929	869	11	7	1	866	17581	18445	0.0	1462
+# BLASTN 2.17.0+
+# Query: mq26 len1858
+# Database: User specified sequence set (Input: tests/fixtures/blastn_regression/inputs/s60k.fa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+mq26	s60k	98.497	1863	17	11	1	1858	49883	51739	0.0	3195
+# BLASTN 2.17.0+
+# Query: mq27 len252
+# Database: User specified sequence set (Input: tests/fixtures/blastn_regression/inputs/s60k.fa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+mq27	s60k	96.825	252	8	0	1	252	22269	22520	6.55e-120	419
+# BLASTN 2.17.0+
+# Query: mq28 len176
+# Database: User specified sequence set (Input: tests/fixtures/blastn_regression/inputs/s60k.fa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+mq28	s60k	97.110	173	5	0	1	173	13597	13769	5.41e-81	290
+# BLASTN 2.17.0+
+# Query: mq29 len261
+# Database: User specified sequence set (Input: tests/fixtures/blastn_regression/inputs/s60k.fa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+mq29	s60k	95.038	262	11	2	1	261	34422	34162	4.29e-116	407
+# BLASTN 2.17.0+
+# Query: mq30 len50
+# Database: User specified sequence set (Input: tests/fixtures/blastn_regression/inputs/s60k.fa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+mq30	s60k	98.000	50	0	1	1	50	43041	42993	3.20e-19	83.3
+# BLASTN 2.17.0+
+# Query: mq31 len45
+# Database: User specified sequence set (Input: tests/fixtures/blastn_regression/inputs/s60k.fa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+mq31	s60k	97.778	45	1	0	1	45	36431	36387	1.17e-17	77.9
+# BLASTN 2.17.0+
+# Query: mq32 len47
+# Database: User specified sequence set (Input: tests/fixtures/blastn_regression/inputs/s60k.fa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+mq32	s60k	93.617	47	3	0	1	47	28902	28948	5.30e-16	72.5
+# BLASTN 2.17.0+
+# Query: mq33 len67
+# Database: User specified sequence set (Input: tests/fixtures/blastn_regression/inputs/s60k.fa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+mq33	s60k	97.015	67	2	0	1	67	55737	55803	2.81e-28	113
+# BLASTN 2.17.0+
+# Query: mq34 len148
+# Database: User specified sequence set (Input: tests/fixtures/blastn_regression/inputs/s60k.fa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+mq34	s60k	97.973	148	3	0	1	148	29016	29163	3.21e-70	254
+# BLASTN 2.17.0+
+# Query: mq35 len5768
+# Database: User specified sequence set (Input: tests/fixtures/blastn_regression/inputs/s60k.fa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+mq35	s60k	98.510	5773	59	27	3	5768	50876	56628	0.0	9927
+# BLASTN 2.17.0+
+# Query: mq36 len939
+# Database: User specified sequence set (Input: tests/fixtures/blastn_regression/inputs/s60k.fa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+mq36	s60k	98.193	941	14	3	1	939	37015	37954	0.0	1610
+# BLASTN 2.17.0+
+# Query: mq37 len1125
+# Database: User specified sequence set (Input: tests/fixtures/blastn_regression/inputs/s60k.fa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+mq37	s60k	98.137	1127	16	5	1	1125	48835	49958	0.0	1920
+# BLASTN 2.17.0+
+# Query: mq38 len950
+# Database: User specified sequence set (Input: tests/fixtures/blastn_regression/inputs/s60k.fa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+mq38	s60k	98.211	950	12	5	1	949	22425	21480	0.0	1619
+# BLASTN 2.17.0+
+# Query: mq39 len785
+# Database: User specified sequence set (Input: tests/fixtures/blastn_regression/inputs/s60k.fa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+mq39	s60k	97.843	788	11	6	1	785	50350	51134	0.0	1324
+# BLAST processed 40 queries

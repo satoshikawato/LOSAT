@@ -1,0 +1,83 @@
+[
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "tblastx",
+    "cases": [
+      "tblastx.unsearched.0",
+      "tblastx.unsearched.7"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "tests/fasta/outfmt0/tblastx_unsearched_query.fasta",
+      "-subject",
+      "tests/fasta/outfmt0/tblastx_multi_subject.fasta"
+    ],
+    "formats": {
+      "0": "e7f389a429b106aebb71e5ab6cc5a27285243e8f35fc13cabd0d3c32471324a0",
+      "6": "f61be0e1ced44ee06db5978c923951d6c3c3b51b9b6de3a9dfb9a73fa2a272d6",
+      "7": "58ce4b2b600ca595c261630f8cc73b7e786a1df858bb2654dd8d911b91c15e55"
+    },
+    "frozen": {
+      "0": true,
+      "7": true
+    },
+    "diagnostics": "5eaf2dcbe84eaa9ceed9bfd5e8a7cb576d04bbee2db329b923fed0cc2dab33b7",
+    "hits": 49
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "tblastx",
+    "cases": [
+      "tblastx.unsearched.0",
+      "tblastx.unsearched.7"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "tests/fasta/outfmt0/tblastx_unsearched_query.fasta",
+      "-subject",
+      "tests/fasta/outfmt0/tblastx_multi_subject.fasta"
+    ],
+    "formats": {
+      "0": "e7f389a429b106aebb71e5ab6cc5a27285243e8f35fc13cabd0d3c32471324a0",
+      "6": "f61be0e1ced44ee06db5978c923951d6c3c3b51b9b6de3a9dfb9a73fa2a272d6",
+      "7": "58ce4b2b600ca595c261630f8cc73b7e786a1df858bb2654dd8d911b91c15e55"
+    },
+    "frozen": {
+      "0": true,
+      "7": true
+    },
+    "diagnostics": "5eaf2dcbe84eaa9ceed9bfd5e8a7cb576d04bbee2db329b923fed0cc2dab33b7",
+    "hits": 49
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "tblastx",
+    "cases": [
+      "tblastx.unsearched.0",
+      "tblastx.unsearched.7"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "tests/fasta/outfmt0/tblastx_unsearched_query.fasta",
+      "-subject",
+      "tests/fasta/outfmt0/tblastx_multi_subject.fasta"
+    ],
+    "formats": {
+      "0": "e7f389a429b106aebb71e5ab6cc5a27285243e8f35fc13cabd0d3c32471324a0",
+      "6": "f61be0e1ced44ee06db5978c923951d6c3c3b51b9b6de3a9dfb9a73fa2a272d6",
+      "7": "58ce4b2b600ca595c261630f8cc73b7e786a1df858bb2654dd8d911b91c15e55"
+    },
+    "frozen": {
+      "0": true,
+      "7": true
+    },
+    "diagnostics": "5eaf2dcbe84eaa9ceed9bfd5e8a7cb576d04bbee2db329b923fed0cc2dab33b7",
+    "hits": 49
+  }
+]

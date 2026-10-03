@@ -1,0 +1,15 @@
+(node:480288) ExperimentalWarning: WASI is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ok threads describe, validate, register, scan
+ok threads n1 tblastx.mts1.0,tblastx.mts1.7
+(node:480288) ExperimentalWarning: WASI is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ok threads n2 tblastx.mts1.0,tblastx.mts1.7
+(node:480288) ExperimentalWarning: WASI is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:480288) ExperimentalWarning: WASI is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:480288) ExperimentalWarning: WASI is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ok threads n4 tblastx.mts1.0,tblastx.mts1.7
+3 runs matched the native CLI; frozen hashes: 6/6 equal

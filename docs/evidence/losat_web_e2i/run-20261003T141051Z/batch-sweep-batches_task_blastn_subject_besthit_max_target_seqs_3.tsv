@@ -1,0 +1,2 @@
+# options='-task blastn -subject_besthit -max_target_seqs 3' seed=7 cases=150 differing=0
+exit 0

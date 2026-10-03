@@ -1,0 +1,31 @@
+[
+  {
+    "engine": "serial",
+    "threads": 1,
+    "program": "tblastx",
+    "cases": [
+      "tblastx.code4q.0",
+      "tblastx.code4q.7"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "tests/fasta/outfmt0/tblastx_code4_query.fasta",
+      "-subject",
+      "tests/fasta/outfmt0/tblastx_code4_subject.fasta",
+      "-query_gencode",
+      "4"
+    ],
+    "formats": {
+      "0": "4f835801ee9ce1540cf42662f5597553a4a048cd66daaf8d835e862e5eac78f4",
+      "6": "3904082939c52108a16d854e9973b22bba26a55fd159107cf3897e7653f6bee7",
+      "7": "ddb2a41db2b55eddb5e609930b6b71613c3ffe29c8505f4ccc4843417e321303"
+    },
+    "frozen": {
+      "0": true,
+      "7": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 46
+  }
+]

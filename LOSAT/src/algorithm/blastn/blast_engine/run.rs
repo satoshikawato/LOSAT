@@ -60,12 +60,12 @@ use super::super::alignment::{
 };
 use super::super::args::BlastnArgs;
 use super::super::blast_extend::DiagStruct;
-use super::super::constants::TWO_HIT_WINDOW;
 use super::super::coordination::{
     build_lookup_tables, chunk_query_masks, collect_lowercase_masks, configure_task,
     finalize_task_config, prepare_sequence_data, query_masks, scan_subjects_metadata,
     subject_metadata_from_records, LookupTables, SubjectMetadata,
 };
+use super::super::disc_lookup::{choose_disc_scan_subject, disc_word_scan_subject};
 use super::super::extension::{
     build_compressed_query, build_nucl_score_table, build_query_four_base_bytes,
     extend_hit_ungapped_approx_ncbi, extend_hit_ungapped_exact_ncbi, type_of_word, SmallNaWord,
@@ -86,7 +86,7 @@ use super::super::input::{
     read_fasta_bytes, read_records, with_u_as_t, write_title_warnings,
 };
 use super::super::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
-use super::super::lookup::{build_unmasked_ranges, reverse_complement};
+use super::super::lookup::{build_unmasked_ranges, reverse_complement, DiscTemplates};
 use super::super::pairwise::{pairwise_hits, DisplayMasks};
 use super::super::query_split::{
     calculate_num_chunks, restrict_masks, split_query_batch, QueryChunk, SplitSizes,
@@ -2777,6 +2777,101 @@ fn scan_subject_kmers_with_ranges<F>(
     }
 }
 
+/// Scans a subject for the discontiguous words of a discontiguous megablast table, with
+/// the template length as both the word length and the lookup word length; calls
+/// `on_word(s_off, s_range, index, index2)` for every word in NCBI's order.
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1624-1634
+/// ```c
+///     else if (lookup_wrap->lut_type == eMBLookupTable) {
+///         BlastMBLookupTable *lookup =
+///                                 (BlastMBLookupTable *) lookup_wrap->lut;
+///         if (lookup->discontiguous) {
+///             word_length = lookup->template_length;
+///             lut_word_length = lookup->template_length;
+///         } else {
+/// ```
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1647-1684
+/// ```c
+///     scan_range[0] = 0;  /* subject seq mask index */
+///     scan_range[1] = 0;	/* start pos of scan */
+///     scan_range[2] = subject->length - lut_word_length; /*end pos (inclusive) of scan*/
+///
+///     /* if sequence is masked, fall back to generic scanner and extender */
+///     if (subject->mask_type != eNoSubjMasking) {
+///         if (lookup_wrap->lut_type == eMBLookupTable &&
+///             ((BlastMBLookupTable *) lookup_wrap->lut)->discontiguous) {
+///             /* discontiguous scan subs assumes any (non-aligned starting offset */
+///         } else {
+///         ...
+///         }
+///         /* generic scanner permits any (non-aligned) starting offset */
+///         scan_range[1] = subject->seq_ranges[0].left + word_length - lut_word_length;
+///         scan_range[2] = subject->seq_ranges[0].right - lut_word_length;
+///     }
+///
+///     ASSERT(scansub);
+///     ASSERT(extend);
+///
+///     while(s_DetermineScanningOffsets(subject, word_length, lut_word_length, scan_range)) {
+///
+///         hitsfound = scansub(lookup_wrap, subject, offset_pairs, max_hits, &scan_range[1]);
+///
+///         if (hitsfound == 0)
+///             continue;
+///
+///         total_hits += hitsfound;
+///         hits_extended += extend(offset_pairs, hitsfound, word_params,
+///                                 lookup_wrap, query, subject, matrix,
+///                                 query_info, ewp, init_hitlist, scan_range[2] + lut_word_length);
+///     }
+/// ```
+fn scan_subject_disc_words_with_ranges<F>(
+    packed: &[u8],
+    subject_len: usize,
+    disc: &DiscTemplates,
+    seq_ranges: &[(i32, i32)],
+    subject_masked: bool,
+    mut on_word: F,
+) where
+    F: FnMut(usize, usize, u64, Option<u64>),
+{
+    if seq_ranges.is_empty() {
+        return;
+    }
+    let template_length = disc.template_length;
+    let mut scan_range = [0i32, 0i32, 0i32];
+    if subject_masked {
+        let (left, right) = seq_ranges[0];
+        scan_range[1] = left;
+        scan_range[2] = right - template_length as i32;
+    } else {
+        scan_range[1] = 0;
+        scan_range[2] = subject_len as i32 - template_length as i32;
+    }
+    let kind = choose_disc_scan_subject(disc.template_type, disc.two_templates);
+    scan_subject_kmers_with_offsets(
+        seq_ranges,
+        template_length,
+        template_length,
+        scan_range,
+        |start, end| {
+            let s_range = end.saturating_add(template_length);
+            disc_word_scan_subject(
+                kind,
+                packed,
+                disc.template_type,
+                disc.second_template_type,
+                template_length as i32,
+                [start as i32, end as i32],
+                &mut |s_off, index, index2| {
+                    on_word(s_off as usize, s_range, index as u64, index2.map(u64::from))
+                },
+            );
+        },
+    );
+}
+
 /// Structure to hold ungapped hit data for batch processing
 /// NCBI reference: blast_gapalign.c - init_hsp_array is sorted by score descending
 /// before gapped extension
@@ -3668,7 +3763,7 @@ struct SubjectScratch {
 // BlastInitHitListReset(init_hitlist);
 // ```
 impl SubjectScratch {
-    fn new(query_count: usize, offset_array_size: usize) -> Self {
+    fn new(query_count: usize, offset_array_size: usize, window_size: usize) -> Self {
         Self {
             hits: Vec::new(),
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4012-4076
@@ -3708,8 +3803,8 @@ impl SubjectScratch {
             seq_ranges_scratch: Vec::new(),
             hit_level_array: Vec::new(),
             hit_len_array: Vec::new(),
-            diag_hash: DiagHashTable::new(TWO_HIT_WINDOW as i32),
-            diag_table_offset: TWO_HIT_WINDOW as i32,
+            diag_hash: DiagHashTable::new(window_size as i32),
+            diag_table_offset: window_size as i32,
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:991-1041
             // ```c
             // Int4 offset_array_size = GetOffsetArraySize(lookup_wrap);
@@ -4487,6 +4582,10 @@ struct BlastnReportInputs<'a> {
     penalty: i32,
     gap_open: i32,
     gap_extend: i32,
+    /// The task is megablast or blastn (`BlastnPairwiseReport::zero_gap_extension_formula`).
+    zero_gap_extension_formula: bool,
+    /// The two-hit window of the task, printed in the epilog when not 0.
+    window_size: usize,
     /// Per query context (the plus strand of query `q` is context `2 * q`); `None` for
     /// the contexts of an invalid query (not searched by NCBI).
     context_karlin: &'a [Option<ContextKarlin>],
@@ -4558,6 +4657,8 @@ fn blastn_pairwise_report(
         penalty: report.penalty,
         gap_open: report.gap_open,
         gap_extend: report.gap_extend,
+        zero_gap_extension_formula: report.zero_gap_extension_formula,
+        window_size: report.window_size,
         num_descriptions,
         num_alignments,
         unsearched,
@@ -5418,7 +5519,9 @@ fn search(
     // `Query is Empty!` success.
     check_losat_limits(&args)?;
     check_unsupported_environment()?;
-    let batching = query_batching_from_environment(args.task == "megablast")?;
+    let batching = query_batching_from_environment(
+        super::super::coordination::task_uses_megablast_chunks(&args.task),
+    )?;
     check_residues(query_records, "query")?;
     check_records_have_residues(query_records, "query")?;
     let subjects_read = with_u_as_t(subject_records);
@@ -5996,6 +6099,12 @@ fn write_batch_reports(
         penalty: config.penalty,
         gap_open: config.gap_open,
         gap_extend: config.gap_extend,
+        // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:2272
+        // ```c
+        //         if ((m_Program == "megablast" || m_Program == "blastn") && options.GetGapExtensionCost() == 0)
+        // ```
+        zero_gap_extension_formula: matches!(args.task.as_str(), "megablast" | "blastn"),
+        window_size: config.window_size,
         context_karlin: results.context_karlin,
         max_target_seqs: args.max_target_seqs,
         db_num_seqs: subjects.metadata.db_num_seqs,
@@ -6474,7 +6583,16 @@ fn search_query_batch(
     //                          Int4 approx_table_entries, Int4 max_q_off,
     //                          Int4 *lut_width)
     // ```
-    let discontig_template = args.task == "dc-megablast";
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:62-67
+    // ```c
+    //    /* Discontiguous megablast must always use a megablast table */
+    //
+    //    if (lookup_options->mb_template_length > 0) {
+    //         *lut_width = lookup_options->word_size;
+    //         return eMBLookupTable;
+    //    }
+    // ```
+    let discontig_template = config.mb_template_length > 0;
     let scoring_spec = NuclScoringSpec {
         reward: config.reward,
         penalty: config.penalty,
@@ -6560,9 +6678,21 @@ fn search_query_batch(
     // `query->length` is the whole query block (both strands and the sentinel, the
     // offsets of the word finder), not one strand: a table sized from one strand made the
     // diagonals of the two strands share entries and lost HSPs (S07+ independent audit).
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:133-142
+    // ```c
+    //         ewp->hash_table->window = word_params->options->window_size;
+    //         ewp->hash_table->offset = word_params->options->window_size;
+    // ...
+    //         Boolean multiple_hits = (word_params->options->window_size > 0);
+    //         ...
+    //             s_BlastDiagTableNew(query_length, multiple_hits,
+    //                               word_params->options->window_size);
+    // ```
+    // The two-hit window of the task (`configure_task`).
+    let window_size = config.window_size;
     let diag_array_length = {
         let mut diag_array_length = 1usize;
-        while diag_array_length < query_concat_length + TWO_HIT_WINDOW {
+        while diag_array_length < query_concat_length + window_size {
             diag_array_length <<= 1;
         }
         diag_array_length
@@ -7061,7 +7191,7 @@ fn search_query_batch(
     let min_diag_separation = config.min_diag_separation; // For MB_HSP_CLOSE containment check
     let db_len_total = seq_data.db_len_total;
     let db_num_seqs = seq_data.db_num_seqs;
-    let evalue_threshold = args.evalue;
+    let evalue_threshold = super::super::coordination::determine_evalue(&args);
     let subject_besthit = args.subject_besthit;
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:993-1001 (s_HSPTest)
     // ```c
@@ -7567,7 +7697,7 @@ fn search_query_batch(
             // ```
             let use_diag_hash = query_concat_length > 8000;
             let use_array_indexing = !use_diag_hash;
-            let diag_window = TWO_HIT_WINDOW as i32;
+            let diag_window = window_size as i32;
 
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:786-833
             // ```c
@@ -7647,7 +7777,7 @@ fn search_query_batch(
                             hit_level_array.fill(diag_default);
                         }
                     }
-                    if TWO_HIT_WINDOW > 0 {
+                    if window_size > 0 {
                         if hit_len_array.len() != diag_array_size {
                             let had_entries = !hit_len_array.is_empty();
                             hit_len_array.resize(diag_array_size, 0);
@@ -7743,12 +7873,12 @@ fn search_query_batch(
                     //                       hit_ready, s_off_pos, window_size + Delta + 1);
                     // ```
                     let diag_hash_window = if !use_array_indexing {
-                        diag_hash_insert_window(TWO_HIT_WINDOW, scan_range, word_length)
+                        diag_hash_insert_window(window_size, scan_range, word_length)
                     } else {
                         0
                     };
 
-                    let two_hits = TWO_HIT_WINDOW > 0;
+                    let two_hits = window_size > 0;
 
                     // DEBUG: Count loop iterations
                     let mut dbg_left_ext_iters = 0usize;
@@ -8341,7 +8471,7 @@ fn search_query_batch(
                                 //     word_type = s_TypeOfWord(...);
                                 // ```
                                 let s_end_pos_i32 = s_end_pos as i32;
-                                let window_end = last_hit + TWO_HIT_WINDOW as i32;
+                                let window_end = last_hit + window_size as i32;
                                 if two_hits && (hit_saved || s_end_pos_i32 > window_end) {
                                     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:674-680
                                     // ```c
@@ -8404,7 +8534,6 @@ fn search_query_batch(
                                         // NCBI reference: na_ungapped.c:658, 692
                                         // Int4 Delta = MIN(word_params->options->scan_range, window_size - word_length);
                                         // if (Delta < 0) Delta = 0;
-                                        let window_size = TWO_HIT_WINDOW;
                                         let delta_calc =
                                             window_size as isize - word_length as isize;
                                         let delta_max = if delta_calc < 0 {
@@ -8938,18 +9067,11 @@ fn search_query_batch(
                             *offset_pairs_len = 0;
                         };
 
-                    let mb_scan_kind =
-                        select_mb_scan_kind(lut_word_length, scan_step, subject_masked);
-                    scan_subject_kmers_with_ranges(
-                        search_seq_packed,
-                        s_len,
-                        word_length,
-                        lut_word_length,
-                        scan_step,
-                        &subject_seq_ranges,
-                        subject_masked,
-                        mb_scan_kind,
-                        |kmer_start, s_range, current_lut_kmer| {
+                    let mut on_word =
+                        |kmer_start: usize,
+                         s_range: usize,
+                         current_lut_kmer: u64,
+                         second_template_index: Option<u64>| {
                             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:193-207
                             // ```c
                             // for (; s <= s_end; s += scan_step) {
@@ -9049,6 +9171,38 @@ fn search_query_batch(
                                     offset_pairs_len += 1;
                                 }
                             });
+                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:1456-1469
+                            // ```c
+                            // /** access the megablast lookup table with two templates */
+                            // #define MB_ACCESS_HITS2()                               \
+                            //    if (total_hits >= max_hits)                          \
+                            //        break;                                           \
+                            //    if (s_BlastMBLookupHasHits(mb_lt, index)) {          \
+                            //        total_hits += s_BlastMBLookupRetrieve(mb_lt,     \
+                            //                   index, offset_pairs + total_hits,     \
+                            //                   scan_range[0]);                               \
+                            //    }                                                    \
+                            //    if (s_BlastMBLookupHasHits(mb_lt, index2)) {         \
+                            //        total_hits += s_BlastMBLookupRetrieve2(mb_lt,    \
+                            //                   index2, offset_pairs + total_hits,    \
+                            //                   scan_range[0]);                               \
+                            //    }
+                            // ```
+                            // The second template's hits of the same subject offset follow
+                            // the first template's (`longest_chain` counts both chains).
+                            if let Some(second_template_index) = second_template_index {
+                                two_stage.for_each_hit2(second_template_index, |q_off_1| {
+                                    if debug_enabled {
+                                        dbg_seeds_found += 1;
+                                    }
+                                    offset_pairs[offset_pairs_len] = OffsetPair {
+                                        q_off: q_off_1 as usize - 1,
+                                        s_off: kmer_start,
+                                        s_range,
+                                    };
+                                    offset_pairs_len += 1;
+                                });
+                            }
 
                             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/lookup_wrap.c:255-288
                             // ```c
@@ -9063,8 +9217,61 @@ fn search_query_batch(
                                     true,
                                 );
                             }
-                        },
-                    );
+                        };
+                    if let Some(disc) = two_stage.disc() {
+                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1647-1684
+                        // ```c
+                        //     scan_range[0] = 0;  /* subject seq mask index */
+                        //     scan_range[1] = 0;	/* start pos of scan */
+                        //     scan_range[2] = subject->length - lut_word_length; /*end pos (inclusive) of scan*/
+                        //
+                        //     /* if sequence is masked, fall back to generic scanner and extender */
+                        //     if (subject->mask_type != eNoSubjMasking) {
+                        //         if (lookup_wrap->lut_type == eMBLookupTable &&
+                        //             ((BlastMBLookupTable *) lookup_wrap->lut)->discontiguous) {
+                        //             /* discontiguous scan subs assumes any (non-aligned starting offset */
+                        //         } else {
+                        //             ...
+                        //         }
+                        //         /* generic scanner permits any (non-aligned) starting offset */
+                        //         scan_range[1] = subject->seq_ranges[0].left + word_length - lut_word_length;
+                        //         scan_range[2] = subject->seq_ranges[0].right - lut_word_length;
+                        //     }
+                        //     ...
+                        //     while(s_DetermineScanningOffsets(subject, word_length, lut_word_length, scan_range)) {
+                        //
+                        //         hitsfound = scansub(lookup_wrap, subject, offset_pairs, max_hits, &scan_range[1]);
+                        //         ...
+                        //         hits_extended += extend(offset_pairs, hitsfound, word_params,
+                        //                                 lookup_wrap, query, subject, matrix,
+                        //                                 query_info, ewp, init_hitlist, scan_range[2] + lut_word_length);
+                        //     }
+                        // ```
+                        scan_subject_disc_words_with_ranges(
+                            search_seq_packed,
+                            s_len,
+                            disc,
+                            &subject_seq_ranges,
+                            subject_masked,
+                            |s_off, s_range, index, index2| on_word(s_off, s_range, index, index2),
+                        );
+                    } else {
+                        let mb_scan_kind =
+                            select_mb_scan_kind(lut_word_length, scan_step, subject_masked);
+                        scan_subject_kmers_with_ranges(
+                            search_seq_packed,
+                            s_len,
+                            word_length,
+                            lut_word_length,
+                            scan_step,
+                            &subject_seq_ranges,
+                            subject_masked,
+                            mb_scan_kind,
+                            |kmer_start, s_range, current_lut_kmer| {
+                                on_word(kmer_start, s_range, current_lut_kmer, None)
+                            },
+                        );
+                    }
 
                     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:193-207
                     // ```c
@@ -9387,7 +9594,7 @@ fn search_query_batch(
                                 //     s_end += extended;
                                 //     s_end_pos += extended;
                                 // }
-                                let two_hits = TWO_HIT_WINDOW > 0;
+                                let two_hits = window_size > 0;
                                 let mut q_off = q_pos_usize;
                                 let mut s_off = kmer_start;
                                 let mut s_end = kmer_start + safe_k;
@@ -9405,7 +9612,7 @@ fn search_query_batch(
                                     //                       (hit_ready) ? 0 : s_end_pos - s_off_pos,
                                     //                       hit_ready, s_off_pos, window_size + Delta + 1);
                                     // ```
-                                    diag_hash_insert_window(TWO_HIT_WINDOW, scan_range, safe_k)
+                                    diag_hash_insert_window(window_size, scan_range, safe_k)
                                 } else {
                                     0
                                 };
@@ -9466,7 +9673,7 @@ fn search_query_batch(
                                 //     word_type = s_TypeOfWord(...);
                                 // ```
                                 let s_end_pos_i32 = s_end_pos as i32;
-                                let window_end = last_hit + TWO_HIT_WINDOW as i32;
+                                let window_end = last_hit + window_size as i32;
                                 if two_hits && (hit_saved || s_end_pos_i32 > window_end) {
                                     // NCBI reference: na_ungapped.c:677-680
                                     // word_type = s_TypeOfWord(query, subject, &q_off, &s_off,
@@ -9518,7 +9725,6 @@ fn search_query_batch(
                                         // NCBI reference: na_ungapped.c:858
                                         // Int4 Delta = MIN(word_params->options->scan_range, window_size - word_length);
                                         // if (Delta < 0) Delta = 0;
-                                        let window_size = TWO_HIT_WINDOW;
                                         let delta_calc = window_size as isize - safe_k as isize;
                                         let delta_max = if delta_calc < 0 {
                                             0
@@ -10652,6 +10858,7 @@ fn search_query_batch(
                                             SubjectScratch::new(
                                                 queries_ref.len(),
                                                 offset_array_size,
+                                                window_size,
                                             ),
                                         )
                                     },
@@ -12320,7 +12527,11 @@ fn search_query_batch(
                                     // aux_struct->offset_pairs =
                                     //   (BlastOffsetPair*) malloc(offset_array_size * sizeof(BlastOffsetPair));
                                     // ```
-                                    SubjectScratch::new(queries_ref.len(), offset_array_size),
+                                    SubjectScratch::new(
+                                        queries_ref.len(),
+                                        offset_array_size,
+                                        window_size,
+                                    ),
                                 )
                             },
                             |state, (s_idx, s_record)| {
@@ -12358,7 +12569,8 @@ fn search_query_batch(
             // aux_struct->offset_pairs =
             //   (BlastOffsetPair*) malloc(offset_array_size * sizeof(BlastOffsetPair));
             // ```
-            let mut subject_scratch = SubjectScratch::new(queries_ref.len(), offset_array_size);
+            let mut subject_scratch =
+                SubjectScratch::new(queries_ref.len(), offset_array_size, window_size);
             subject_records_ref
                 .iter()
                 .enumerate()

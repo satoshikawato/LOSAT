@@ -1,0 +1,5 @@
+ M docs/losat_web_gui_sessions/session_s08p_e2e_protein_options.md
+ M docs/losat_web_gui_sessions/session_s12_w3_search_ui.md
+?? docs/evidence/losat_web_e2i/README.md
+?? docs/evidence/losat_web_e2i/run-20261003T141051Z/
+?? docs/evidence/losat_web_e2i/run-20261003T165813Z/

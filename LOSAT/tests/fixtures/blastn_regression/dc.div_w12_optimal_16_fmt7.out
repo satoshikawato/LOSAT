@@ -1,0 +1,115 @@
+# BLASTN 2.17.0+
+# Query: dvq1 AP027280 10767-11089
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/dc_div_subject.fasta)
+# 0 hits found
+# BLASTN 2.17.0+
+# Query: dvq2 AP027280 13869-14221
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/dc_div_subject.fasta)
+# 0 hits found
+# BLASTN 2.17.0+
+# Query: dvq3 AP027280 16200-16591
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/dc_div_subject.fasta)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+dvq3	dvs32	68.394	193	60	1	101	292	293	101	4.72e-15	70.7
+# BLASTN 2.17.0+
+# Query: dvq4 AP027280 19534-19917
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/dc_div_subject.fasta)
+# 0 hits found
+# BLASTN 2.17.0+
+# Query: dvq5 AP027280 23538-23829
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/dc_div_subject.fasta)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+dvq5	dvs34	81.720	93	15	2	101	192	101	192	1.57e-19	85.1
+# BLASTN 2.17.0+
+# Query: dvq6 AP027280 62157-62536
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/dc_div_subject.fasta)
+# 0 hits found
+# BLASTN 2.17.0+
+# Query: dvq7 AP027280 71673-71983
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/dc_div_subject.fasta)
+# 0 hits found
+# BLASTN 2.17.0+
+# Query: dvq8 AP027280 103602-103940
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/dc_div_subject.fasta)
+# 0 hits found
+# BLASTN 2.17.0+
+# Query: dvq9 AP027280 104288-104588
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/dc_div_subject.fasta)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+dvq9	dvs20	82.178	101	18	0	101	201	201	101	6.05e-25	102
+# BLASTN 2.17.0+
+# Query: dvq10 AP027280 114818-115214
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/dc_div_subject.fasta)
+# 0 hits found
+# BLASTN 2.17.0+
+# Query: dvq11 AP027280 153233-153571
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/dc_div_subject.fasta)
+# 0 hits found
+# BLASTN 2.17.0+
+# Query: dvq12 AP027280 153877-154294
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/dc_div_subject.fasta)
+# 0 hits found
+# BLASTN 2.17.0+
+# Query: dvq13 AP027280 160229-160675
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/dc_div_subject.fasta)
+# 0 hits found
+# BLASTN 2.17.0+
+# Query: dvq14 AP027280 168233-168647
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/dc_div_subject.fasta)
+# 0 hits found
+# BLASTN 2.17.0+
+# Query: dvq15 AP027280 174369-174775
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/dc_div_subject.fasta)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+dvq15	dvs12	69.082	207	64	0	101	307	101	307	6.38e-20	86.0
+# BLASTN 2.17.0+
+# Query: dvq16 AP027280 180144-180409
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/dc_div_subject.fasta)
+# 0 hits found
+# BLASTN 2.17.0+
+# Query: dvq17 AP027280 182743-183143
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/dc_div_subject.fasta)
+# 0 hits found
+# BLASTN 2.17.0+
+# Query: dvq18 AP027280 185203-185536
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/dc_div_subject.fasta)
+# 0 hits found
+# BLASTN 2.17.0+
+# Query: dvq19 AP027280 197254-197589
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/dc_div_subject.fasta)
+# 0 hits found
+# BLASTN 2.17.0+
+# Query: dvq20 AP027280 202624-203053
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/dc_div_subject.fasta)
+# 0 hits found
+# BLASTN 2.17.0+
+# Query: dvq21 AP027280 207108-207441
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/dc_div_subject.fasta)
+# 0 hits found
+# BLASTN 2.17.0+
+# Query: dvq22 AP027280 211645-211948
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/dc_div_subject.fasta)
+# 0 hits found
+# BLASTN 2.17.0+
+# Query: dvq23 AP027280 216972-217518
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/dc_div_subject.fasta)
+# 0 hits found
+# BLASTN 2.17.0+
+# Query: dvq24 AP027280 258466-258877
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/dc_div_subject.fasta)
+# 0 hits found
+# BLASTN 2.17.0+
+# Query: dvq25 AP027280 303180-303585
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/dc_div_subject.fasta)
+# 0 hits found
+# BLASTN 2.17.0+
+# Query: dvq26 AP027280 305336-308684
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/dc_div_subject.fasta)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+dvq26	dvs2	66.230	382	119	5	2582	2958	477	101	1.04e-21	95.1
+# BLAST processed 26 queries

@@ -26,7 +26,13 @@ fn test_default_values() {
     // an omitted one keeps the task's default (coordination.rs).
     assert_eq!(args.word_size, None);
     assert_eq!(args.num_threads, 1);
-    assert_eq!(args.evalue, 10.0);
+    // NCBI blast_args.cpp:142-146: -evalue is an optional key; an omitted one keeps the
+    // task's default (10, or 1000 for blastn-short; coordination.rs determine_evalue).
+    assert_eq!(args.evalue, None);
+    assert_eq!(
+        LOSAT::algorithm::blastn::coordination::determine_evalue(&args),
+        10.0
+    );
     // NCBI blast_args.cpp:2913-2927: an omitted -max_target_seqs keeps the defaults of
     // the hit list (500) and of the pairwise alignments (250), so it stays unset here.
     assert_eq!(args.max_target_seqs, None);
@@ -88,7 +94,7 @@ fn test_custom_evalue() {
         "-evalue",
         "1e-5",
     ]);
-    assert_eq!(args.evalue, 1e-5);
+    assert_eq!(args.evalue, Some(1e-5));
 }
 
 #[test]

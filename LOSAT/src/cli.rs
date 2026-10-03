@@ -246,8 +246,6 @@ fn is_unported_blastn_arg(name: &str) -> bool {
             | "subject_loc"
             | "taxidlist"
             | "taxids"
-            | "template_length"
-            | "template_type"
             | "ungapped"
             | "use_index"
             | "version"

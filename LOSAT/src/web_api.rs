@@ -241,9 +241,11 @@ fn parse_blastn_args(
         query,
         subject: Some(subject),
         task: "megablast".to_string(),
+        template_type: None,
+        template_length: None,
         word_size: None,
         num_threads: 1,
-        evalue: 10.0,
+        evalue: Some(10.0),
         percent_identity: 0.0,
         min_hit_length: 0,
         max_target_seqs: None,
@@ -297,13 +299,17 @@ fn parse_blastn_args(
             args.num_threads = parse_num_threads_arg(value, flag)?;
         } else if flag == "-evalue" {
             // The forms that NCBI's CArg_Double reads, as the CLI (`blastn_evalue`).
-            args.evalue = crate::blastinput::value_parsers::blastn_evalue(next_arg(
-                extra_args, &mut index, flag,
-            )?)
-            .map_err(|err| format!("{flag} parse error: {err}"))?;
+            args.evalue = Some(
+                crate::blastinput::value_parsers::blastn_evalue(next_arg(
+                    extra_args, &mut index, flag,
+                )?)
+                .map_err(|err| format!("{flag} parse error: {err}"))?,
+            );
         } else if let Some(value) = flag.strip_prefix("-evalue=") {
-            args.evalue = crate::blastinput::value_parsers::blastn_evalue(value)
-                .map_err(|err| format!("{flag} parse error: {err}"))?;
+            args.evalue = Some(
+                crate::blastinput::value_parsers::blastn_evalue(value)
+                    .map_err(|err| format!("{flag} parse error: {err}"))?,
+            );
         } else {
             return Err(format!("unsupported blastn argument for web API: {flag}"));
         }

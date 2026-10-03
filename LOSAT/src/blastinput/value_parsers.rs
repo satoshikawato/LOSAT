@@ -294,7 +294,8 @@ fn blastn_integer_at_least(value: &str, at_least: i32) -> Result<i32, String> {
 }
 
 /// A BLASTN task: NCBI's blastn tasks (case-sensitive), of which LOSAT implements
-/// megablast and blastn and rejects the others explicitly.
+/// megablast, blastn, dc-megablast and blastn-short and rejects rmblastn (matrix scoring
+/// and masklevel) explicitly.
 ///
 /// NCBI reference: c++/src/algo/blast/api/blast_options_handle.cpp:211-222
 /// ```c
@@ -318,11 +319,90 @@ fn blastn_integer_at_least(value: &str, at_least: i32) -> Result<i32, String> {
 /// ```
 pub fn blastn_task(value: &str) -> Result<String, String> {
     match value {
-        "megablast" | "blastn" => Ok(value.to_string()),
-        "blastn-short" | "dc-megablast" | "rmblastn" => Err(format!(
-            "the task {value} is not supported by LOSAT's BLASTN (use megablast or blastn)"
+        "megablast" | "blastn" | "dc-megablast" | "blastn-short" => Ok(value.to_string()),
+        "rmblastn" => Err(format!(
+            "the task {value} is not supported by LOSAT's BLASTN (use megablast, blastn, dc-megablast or blastn-short)"
         )),
         _ => Err("expected one of blastn, blastn-short, dc-megablast, megablast, rmblastn".into()),
+    }
+}
+/// A discontiguous megablast template type: `coding`, `optimal` or `coding_and_optimal`.
+///
+/// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:688-693,708-714
+/// ```c
+/// /// Value to specify coding template type
+/// const char* kTemplType_Coding = "coding";
+/// /// Value to specify optimal template type
+/// const char* kTemplType_Optimal = "optimal";
+/// /// Value to specify coding+optimal template type
+/// const char* kTemplType_CodingAndOptimal = "coding_and_optimal";
+/// ...
+///     arg_desc.AddOptionalKey(kArgDMBTemplateType, "type",
+///                  "Discontiguous MegaBLAST template type",
+///                  CArgDescriptions::eString);
+///     arg_desc.SetConstraint(kArgDMBTemplateType, &(*new CArgAllow_Strings,
+///                                                   kTemplType_Coding,
+///                                                   kTemplType_Optimal,
+///                                                   kTemplType_CodingAndOptimal));
+/// ```
+/// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:747-752
+/// ```c
+///         if (type == kTemplType_Coding) {
+///             temp_type = eMBWordCoding;
+///         } else if (type == kTemplType_Optimal) {
+///             temp_type = eMBWordOptimal;
+///         } else if (type == kTemplType_CodingAndOptimal) {
+///             temp_type = eMBWordTwoTemplates;
+/// ```
+pub fn blastn_template_type(
+    value: &str,
+) -> Result<crate::algorithm::blastn::disc_lookup::DiscWordType, String> {
+    use crate::algorithm::blastn::disc_lookup::DiscWordType;
+    match value {
+        "coding" => Ok(DiscWordType::Coding),
+        "optimal" => Ok(DiscWordType::Optimal),
+        "coding_and_optimal" => Ok(DiscWordType::TwoTemplates),
+        _ => Err("expected one of coding, coding_and_optimal, optimal".into()),
+    }
+}
+/// A discontiguous megablast template length: 16, 18 or 21.
+///
+/// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:719-727
+/// ```c
+///     arg_desc.AddOptionalKey(kArgDMBTemplateLength, "int_value",
+///                  "Discontiguous MegaBLAST template length",
+///                  CArgDescriptions::eInteger);
+///     set<int> allowed_values;
+///     allowed_values.insert(16);
+///     allowed_values.insert(18);
+///     allowed_values.insert(21);
+///     arg_desc.SetConstraint(kArgDMBTemplateLength,
+///                            new CArgAllowIntegerSet(allowed_values));
+/// ```
+/// The constraint converts the value again with `NStr::StringToInt` in base 10, so a
+/// hexadecimal value that the integer argument reads fails it.
+///
+/// NCBI reference: c++/include/algo/blast/blastinput/blast_input_aux.hpp:214-222,239
+/// ```c
+///     virtual bool Verify(const string& value) const {                        \
+///         DataType value2check = String2DataTypeFn(value);                    \
+///         ITERATE(set<DataType>, itr, m_AllowedValues) {                      \
+///             if (*itr == value2check) {                                      \
+///                 return true;                                                \
+///             }                                                               \
+///         }                                                                   \
+///         return false;                                                       \
+///     }                                                                       \
+/// ...
+/// DEFINE_CARGALLOW_SET_CLASS(CArgAllowIntegerSet, int, NStr::StringToInt);
+/// ```
+/// `NStr::StringToInt` in base 10 reads what `i32::from_str` reads (an optional sign and
+/// ASCII digits, `ncbi_integer`).
+pub fn blastn_template_length(value: &str) -> Result<u8, String> {
+    ncbi_constrained_integer(value)?;
+    match value.parse::<i32>() {
+        Ok(n @ (16 | 18 | 21)) => Ok(n as u8),
+        _ => Err("expected one of 16, 18, 21".into()),
     }
 }
 /// A BLASTN word size: 4 or more (the upper bound, 100, is an option check,

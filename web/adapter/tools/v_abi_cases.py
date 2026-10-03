@@ -120,7 +120,12 @@ def quick() -> list[dict]:
         cases.append(capture.Case("tblastn", stem, [
             "tblastn", "-query", f"docs/evidence/tlosan_stage_g/batch_boundary/{stem}.faa",
             "-subject", "docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code1.fna"], REPO))
-    return group(cases, frozen=False)
+    searches = group(cases, frozen=False)
+    # BLASTN dc-megablast and blastn-short (Session SD): their default fixtures, with the
+    # NCBI-frozen hashes of outfmt 0 and 7.
+    searches += [search for search in outfmt0_fixtures()
+                 if set(search["cases"]) & {"dc.default", "short.default"}]
+    return searches
 
 
 def main() -> int:

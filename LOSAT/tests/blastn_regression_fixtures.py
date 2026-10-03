@@ -62,6 +62,12 @@ T = f"-query {I}/q3k.fa -subject {I}/s600ties.fa"
 B = f"-query {I}/mq.fa -subject {I}/s60k.fa"
 S = f"-query {R}/edl933_2m.fa -subject {I}/sakai_60k.fa"
 A = f"-query {I}/ambiguity_query_c.fa -subject {I}/ambiguity_subject.fa"
+O = "tests/fasta/outfmt0"
+DCQ = f"-query {O}/dc_query.fasta -subject {O}/dc_subject.fasta"
+DC = f"{DCQ} -task dc-megablast"
+DVQ = f"-query {O}/dc_div_query.fasta -subject {O}/dc_div_subject.fasta"
+DV = f"{DVQ} -task dc-megablast"
+SH = f"-query {O}/short_query.fasta -subject {O}/short_subject.fasta -task blastn-short"
 # (case_id, NCBI argv after `blastn`, extra LOSAT-only arguments[, environment[, NCBI environment]])
 _CASES = [
     ("prelim.default", f"{P} -outfmt 6", ""),
@@ -235,6 +241,109 @@ _CASES = [
     # E2g T11: showdefline.cpp kBits is "(bits)" when CTOOLKIT_COMPATIBLE is set (also empty).
     ("ctoolkit.fmt0", f"{P} -max_target_seqs 3 -outfmt 0", "", "CTOOLKIT_COMPATIBLE=1"),
     ("ctoolkit.empty_fmt0", f"{T} -task blastn -max_target_seqs 5 -outfmt 0", "", "CTOOLKIT_COMPATIBLE="),
+    # Session SD (E2i): dc-megablast and blastn-short. dc_*.fasta and short_*.fasta are made
+    # by docs/evidence/losat_web_e2i/make_inputs.py (LOSAT/tests/fasta/outfmt0/, also the
+    # outfmt 0/7 fixtures dc.* and short.* of outfmt0_manifest.tsv). Every template type,
+    # length and word size of NCBI's s_GetDiscTemplateType (blast_nalookup.c:600-643):
+    ("dc.w11_coding_16", f"{DC} -word_size 11 -template_type coding -template_length 16 -outfmt 6", ""),
+    ("dc.w11_coding_18", f"{DC} -word_size 11 -template_type coding -template_length 18 -outfmt 6", ""),
+    ("dc.w11_coding_21", f"{DC} -word_size 11 -template_type coding -template_length 21 -outfmt 6", ""),
+    ("dc.w11_optimal_16", f"{DC} -word_size 11 -template_type optimal -template_length 16 -outfmt 6", ""),
+    ("dc.w11_optimal_18", f"{DC} -word_size 11 -template_type optimal -template_length 18 -outfmt 6", ""),
+    ("dc.w11_optimal_21", f"{DC} -word_size 11 -template_type optimal -template_length 21 -outfmt 6", ""),
+    ("dc.w11_coding_and_optimal_16", f"{DC} -word_size 11 -template_type coding_and_optimal -template_length 16 -outfmt 6", ""),
+    ("dc.w11_coding_and_optimal_18", f"{DC} -word_size 11 -template_type coding_and_optimal -template_length 18 -outfmt 6", ""),
+    ("dc.w11_coding_and_optimal_21", f"{DC} -word_size 11 -template_type coding_and_optimal -template_length 21 -outfmt 6", ""),
+    ("dc.w12_coding_16", f"{DC} -word_size 12 -template_type coding -template_length 16 -outfmt 6", ""),
+    ("dc.w12_coding_18", f"{DC} -word_size 12 -template_type coding -template_length 18 -outfmt 6", ""),
+    ("dc.w12_coding_21", f"{DC} -word_size 12 -template_type coding -template_length 21 -outfmt 6", ""),
+    ("dc.w12_optimal_16", f"{DC} -word_size 12 -template_type optimal -template_length 16 -outfmt 6", ""),
+    ("dc.w12_optimal_18", f"{DC} -word_size 12 -template_type optimal -template_length 18 -outfmt 6", ""),
+    ("dc.w12_optimal_21", f"{DC} -word_size 12 -template_type optimal -template_length 21 -outfmt 6", ""),
+    ("dc.w12_coding_and_optimal_16", f"{DC} -word_size 12 -template_type coding_and_optimal -template_length 16 -outfmt 6", ""),
+    ("dc.w12_coding_and_optimal_18", f"{DC} -word_size 12 -template_type coding_and_optimal -template_length 18 -outfmt 6", ""),
+    ("dc.w12_coding_and_optimal_21", f"{DC} -word_size 12 -template_type coding_and_optimal -template_length 21 -outfmt 6", ""),
+    ("dc.megablast_w11_coding_18", f"{DCQ} -word_size 11 -template_type coding -template_length 18 -outfmt 6", ""),
+    ("dc.default_threads4", f"{DC} -outfmt 6", "-num_threads 4"),
+    ("dc.two21_threads2_fmt7", f"{DC} -template_type coding_and_optimal -template_length 21 -outfmt 7",
+     "-num_threads 2"),
+    ("dc.small_two16", f"-query {O}/dc_small_query.fasta -subject {O}/dc_subject.fasta -task dc-megablast"
+                       " -template_type coding_and_optimal -template_length 16 -outfmt 6", ""),
+    # Lowercase in the subject with -lcase_masking: the discontiguous scan over the subject's
+    # unmasked ranges (na_ungapped.c:1651-1667), and the control without the option.
+    ("dc.lcase_subject", f"-query {I}/lcase_island_megablast_query.fa -subject {I}/lcase_island_megablast_subject.fa"
+                         " -task dc-megablast -lcase_masking -outfmt 6", ""),
+    ("dc.lcase_subject_control", f"-query {I}/lcase_island_megablast_query.fa"
+                                 f" -subject {I}/lcase_island_megablast_subject.fa -task dc-megablast -outfmt 6", ""),
+    ("dc.prelim", f"{P} -task dc-megablast -outfmt 6", ""),
+    ("dc.prelim_max3_fmt0", f"{P} -task dc-megablast -max_target_seqs 3 -outfmt 0", ""),
+    ("dc.batches", f"{B} -task dc-megablast -outfmt 6", ""),
+    ("dc.batches_besthit", f"{B} -task dc-megablast -subject_besthit -outfmt 6", ""),
+    ("dc.ambiguity", f"{A} -task dc-megablast -outfmt 6", ""),
+    ("dc.rep", f"-query {I}/rep_query.fa -subject {I}/rep_subject.fa -task dc-megablast -outfmt 6", ""),
+    # NCBI's query chunks are 5,000,000 for dc-megablast (local_blast.cpp:64-72): the 2 Mb
+    # query is one chunk, as for megablast; with CHUNK_SIZE it is split.
+    ("dc.split_unsplit", f"{S} -task dc-megablast -outfmt 6", ""),
+    ("dc.split_chunk300000", f"{S} -task dc-megablast -outfmt 6", "", "CHUNK_SIZE=300000"),
+    ("dc.batch1000_fmt7", f"{B} -task dc-megablast -outfmt 7", "", "BATCH_SIZE=1000"),
+    # Option checks (blast_options.c:1247-1261,1399-1413): the word size of a template, the
+    # lookup table of the task.
+    ("dc.word13", f"{DC} -word_size 13 -outfmt 6", ""),
+    ("dc.word13_fmt0", f"{DC} -word_size 13 -outfmt 0", ""),
+    ("dc.blastn_template", f"{DCQ} -task blastn -word_size 11 -template_type coding -template_length 18 -outfmt 6", ""),
+    ("dc.short_template", f"{DCQ} -task blastn-short -template_type optimal -template_length 21 -outfmt 6", ""),
+    ("dc.megablast_template_word28", f"{DCQ} -template_type coding -template_length 18 -outfmt 6", ""),
+    ("dc.zero_gaps", f"{DC} -gapopen 0 -gapextend 0 -outfmt 6", ""),
+    # The divergent pair (dc_div_*.fasta, added after the SD audit): NCBI gives a different
+    # output for each of the 18 combinations (the pair above gives 9), so each scanner of
+    # blast_nascan.c:2202-2626 and the second template are told apart.
+    ("dc.div_w11_coding_16", f"{DV} -word_size 11 -template_type coding -template_length 16 -outfmt 6", ""),
+    ("dc.div_w11_coding_18", f"{DV} -word_size 11 -template_type coding -template_length 18 -outfmt 6", ""),
+    ("dc.div_w11_coding_21", f"{DV} -word_size 11 -template_type coding -template_length 21 -outfmt 6", ""),
+    ("dc.div_w11_optimal_16", f"{DV} -word_size 11 -template_type optimal -template_length 16 -outfmt 6", ""),
+    ("dc.div_w11_optimal_18", f"{DV} -word_size 11 -template_type optimal -template_length 18 -outfmt 6", ""),
+    ("dc.div_w11_optimal_21", f"{DV} -word_size 11 -template_type optimal -template_length 21 -outfmt 6", ""),
+    ("dc.div_w11_coding_and_optimal_16",
+     f"{DV} -word_size 11 -template_type coding_and_optimal -template_length 16 -outfmt 6", ""),
+    ("dc.div_w11_coding_and_optimal_18",
+     f"{DV} -word_size 11 -template_type coding_and_optimal -template_length 18 -outfmt 6", ""),
+    ("dc.div_w11_coding_and_optimal_21",
+     f"{DV} -word_size 11 -template_type coding_and_optimal -template_length 21 -outfmt 6", ""),
+    ("dc.div_w12_coding_16", f"{DV} -word_size 12 -template_type coding -template_length 16 -outfmt 6", ""),
+    ("dc.div_w12_coding_18", f"{DV} -word_size 12 -template_type coding -template_length 18 -outfmt 6", ""),
+    ("dc.div_w12_coding_21", f"{DV} -word_size 12 -template_type coding -template_length 21 -outfmt 6", ""),
+    ("dc.div_w12_optimal_16", f"{DV} -word_size 12 -template_type optimal -template_length 16 -outfmt 6", ""),
+    ("dc.div_w12_optimal_18", f"{DV} -word_size 12 -template_type optimal -template_length 18 -outfmt 6", ""),
+    ("dc.div_w12_optimal_21", f"{DV} -word_size 12 -template_type optimal -template_length 21 -outfmt 6", ""),
+    ("dc.div_w12_coding_and_optimal_16",
+     f"{DV} -word_size 12 -template_type coding_and_optimal -template_length 16 -outfmt 6", ""),
+    ("dc.div_w12_coding_and_optimal_18",
+     f"{DV} -word_size 12 -template_type coding_and_optimal -template_length 18 -outfmt 6", ""),
+    ("dc.div_w12_coding_and_optimal_21",
+     f"{DV} -word_size 12 -template_type coding_and_optimal -template_length 21 -outfmt 6", ""),
+    ("dc.div_megablast_w11_coding_18", f"{DVQ} -word_size 11 -template_type coding -template_length 18 -outfmt 6",
+     ""),
+    ("dc.div_two21_fmt0", f"{DV} -template_type coding_and_optimal -template_length 21 -outfmt 0", ""),
+    ("dc.div_w12_optimal_16_fmt7", f"{DV} -word_size 12 -template_type optimal -template_length 16 -outfmt 7", ""),
+    ("dc.div_two18_threads4", f"{DV} -template_type coding_and_optimal -template_length 18 -outfmt 6",
+     "-num_threads 4"),
+    ("short.default", f"{SH} -outfmt 6", ""),
+    ("short.default_threads4", f"{SH} -outfmt 6", "-num_threads 4"),
+    ("short.word4", f"{SH} -word_size 4 -evalue 10 -outfmt 6", ""),
+    ("short.word16", f"{SH} -word_size 16 -outfmt 6", ""),
+    ("short.reward2_penalty3_gaps", f"{SH} -reward 2 -penalty -3 -gapopen 4 -gapextend 4 -outfmt 6", ""),
+    ("short.evalue1e3_dust", f"{SH} -evalue 1e-3 -dust '15 64 1' -outfmt 6", ""),
+    ("short.dust_no_fmt7", f"{SH} -dust no -outfmt 7", ""),
+    ("short.lcase", f"{SH} -lcase_masking -outfmt 6", ""),
+    ("short.perc_besthit", f"{SH} -perc_identity 90 -subject_besthit -outfmt 6", ""),
+    ("short.batches", f"{B} -task blastn-short -evalue 1e-5 -outfmt 6", ""),
+    ("short.prelim_max3", f"{P} -task blastn-short -evalue 1e-10 -max_target_seqs 3 -outfmt 6", ""),
+    ("short.ambiguity", f"{A} -task blastn-short -outfmt 6", ""),
+    # blastn-short is eBlastn: 1,000,000 query chunks, so the 2 Mb query is split.
+    ("short.split", f"{S} -task blastn-short -evalue 1e-20 -outfmt 6", ""),
+    ("short.nohit_fmt0", f"-query {O}/short_nohit_query.fasta -subject {O}/short_subject.fasta -task blastn-short"
+                         " -evalue 1e-5 -outfmt 0", ""),
+    ("short.evalue0", f"{SH} -evalue 0 -outfmt 6", ""),
 ]
 CASES = [(*case, *[""] * (5 - len(case))) for case in _CASES]
 

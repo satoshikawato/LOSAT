@@ -4,6 +4,7 @@
 - ブランチ：`feature/losat-web-gui-app`（アプリ側。worktree `/mnt/c/Users/genom/GitHub/LOSAT-web-gui-app`）。エンジンは `origin/feature/losat-web-gui` の `dfa65cfd8`（エンジンの最後のコミットは `24fcfe41b`）を早送りで取り込み、ゲートの前に文書だけの 2 コミット（`27cfdefd1` まで）を merge した（`bb6cdaad5`。衝突なし）
 - 実行記録：[`run-20261003T053627Z/`](run-20261003T053627Z/)（commit `3669ad28f` の木。ゲートの記録）と [`run-20261003T043424Z/`](run-20261003T043424Z/)（commit `bb6cdaad5` の木。この実行の計測で TBLASTN のスレッドの不具合を見つけた。下の「計測で見つけて直したもの」）。作成後は書き換えない。ファイルのハッシュは [`evidence.sha256`](evidence.sha256)、再現は [`run_gate.sh`](run_gate.sh)
 - 判定：**完了条件を満たした**。2 回目のゲートの実行（`run_gate.sh`）のすべての段階が通った：V-ABI quick（52 の検索がネイティブの CLI と一致）、`npm run check`、reactor 付きの単体試験（184 件）、FakeEngine と本物のエンジンの両方のビルドでの E2E（3 ブラウザ。26 件と 56 件）、エンジンの E2E の 2 回の繰り返し（60 件）、共有メモリの試験、計測
+- CI（GitHub Actions の Web、[run 37102490081](https://github.com/satoshikawato/LOSAT/actions/runs/37102490081)、commit `161567562`）：4 つの job がすべて成功。`app`（check と、3 ブラウザの FakeEngine の E2E 26 件）、`engine-web-api`、`adapter`（build identity、reactor、V-ABI quick）、新しい `browser-engine`（adapter の job の reactor とネイティブの CLI で、エンジン入りのビルドの E2E 56 件。V-BR を含む）
 - 保守者の判断待ち：2 件（下の「保守者の判断待ち」。TBLASTN の R2 の進め方、協調取消の閾値）
 
 ## コミット

@@ -9,17 +9,10 @@ pub const X_DROP_GAPPED_NUCL: i32 = 30; // BLAST_GAP_X_DROPOFF_NUCL (blastn, non
 pub const X_DROP_GAPPED_GREEDY: i32 = 25; // BLAST_GAP_X_DROPOFF_GREEDY (megablast, greedy)
 pub const X_DROP_GAPPED_FINAL: i32 = 100; // BLAST_GAP_X_DROPOFF_FINAL_NUCL for final traceback (共通)
 
-/// Two-hit window size for nucleotide searches
-/// NCBI BLAST default: BLAST_WINDOW_SIZE_NUCL = 0 (one-hit mode)
-/// Reference: ncbi-blast/c++/include/algo/blast/core/blast_options.h:58
-/// When window_size = 0, all seeds trigger extension (one-hit mode)
-/// When window_size > 0, two-hit requirement is enforced
-/// NCBI reference: na_ungapped.c:656: Boolean two_hits = (window_size > 0);
-pub const TWO_HIT_WINDOW: usize = 0; // NCBI BLAST default (one-hit mode)
-                                     // REMOVED: MAX_HITS_PER_KMER - Over-represented k-mer filtering does not exist in NCBI BLAST
-                                     // NCBI reference: blast_lookup.c:BlastLookupAddWordHit (lines 33-77)
-                                     // NCBI BLAST adds all k-mers to lookup table regardless of frequency
-                                     // Database word count filtering (kDbFilter) exists but filters based on database counts, not query counts
+// REMOVED: MAX_HITS_PER_KMER - Over-represented k-mer filtering does not exist in NCBI BLAST
+// NCBI reference: blast_lookup.c:BlastLookupAddWordHit (lines 33-77)
+// NCBI BLAST adds all k-mers to lookup table regardless of frequency
+// Database word count filtering (kDbFilter) exists but filters based on database counts, not query counts
 
 /// Scan range for off-diagonal hit detection
 /// NCBI reference: na_ungapped.c:658: Int4 Delta = MIN(word_params->options->scan_range, window_size - word_length);

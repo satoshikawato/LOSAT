@@ -75,7 +75,7 @@ pub struct TaskConfig {
     pub mb_lookup: bool,
     pub x_drop_gapped: i32, // Task-specific gapped X-dropoff (blastn: 30, megablast: 25)
     pub x_drop_final: i32,  // Final traceback X-dropoff (100 for all nucleotide tasks)
-    pub scan_range: usize,  // Scan range for off-diagonal hit detection (blastn: 4, megablast: 0)
+    pub scan_range: usize,  // Off-diagonal scan range (BLAST_SCAN_RANGE_NUCL: 0 for every task)
     pub min_diag_separation: i32, // NCBI reference: blast_nucl_options.cpp:239,259 (blastn: 50, megablast: 6)
     /// The two-hit window (`window_size`): 40 for dc-megablast, 0 (one hit) otherwise.
     pub window_size: usize,

@@ -663,8 +663,38 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     let (subjects, subject_reading) =
         match fasta_input::bio_records_of(&subject_bytes, &args.subject, "subject", "TBLASTX") {
             Ok(records) => (records, Ok(())),
+            // NCBI reference: c++/src/objtools/readers/fasta.cpp:375-384
+            // ```c
+            //         if (line.empty()) {
+            //             continue; // ignore lines containing only whitespace
+            //         }
+            //         c = line[0];
+            //
+            //         if (c == '!'  ||  c == '#' || c == ';') {
+            //             // no content, just a comment or blank line
+            //             continue;
+            // ```
+            // NCBI skips these lines and reads the records after them as those of any file:
+            // a file of such lines only has no subject (it fails below as a blank file
+            // does), and the records after them are checked and warned about now, as those
+            // of a file that `bio` reads, so that a query that NCBI finds empty later does
+            // not hide NCBI's failure to read them.
             Err(error) if fasta_input::only_skipped_lines_before_first_defline(&subject_bytes) => {
-                (Vec::new(), Err(error))
+                match fasta_input::from_first_defline(&subject_bytes) {
+                    None => (Vec::new(), Ok(())),
+                    Some(records_text) => {
+                        if let Ok(records) = fasta_input::bio_records_of(
+                            records_text,
+                            &args.subject,
+                            "subject",
+                            "TBLASTX",
+                        ) {
+                            fasta_input::check_residues_of(&records, "subject", "TBLASTX")?;
+                            fasta_input::write_title_warnings(&records, &mut std::io::stderr())?;
+                        }
+                        (Vec::new(), Err(error))
+                    }
+                }
             }
             Err(error) => return Err(error),
         };

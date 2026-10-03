@@ -366,6 +366,56 @@ fn a_standard_output_on_dev_null_is_written() {
     }
 }
 
+// NCBI reference: c++/src/objtools/readers/fasta.cpp:375-384
+// ```c
+//         if (line.empty()) {
+//             continue; // ignore lines containing only whitespace
+//         }
+//         c = line[0];
+//
+//         if (c == '!'  ||  c == '#' || c == ';') {
+//             // no content, just a comment or blank line
+//             continue;
+// ```
+// NCBI reads the subjects before it finds the query empty (tblastx_app.cpp:118-132): after
+// the lines it skips, it reads the records as those of any file (S08 audit round 3, (a)
+// N1-ii and N1-iii, (d) L1). A subject that `bio` cannot read because of such lines has its
+// residues checked when it is read, and a file of such lines only has no subject.
+#[test]
+fn subjects_after_skipped_lines_are_read_before_the_query_is_found_empty() {
+    let empty = TempFasta::new("tblastx_no_query.fna", &[]);
+    let subject = TempFasta::new("tblastx_skipped_lines.fna", &[]);
+    let run = |text: &[u8]| {
+        std::fs::write(&subject.0, text).expect("write subject");
+        Command::new(env!("CARGO_BIN_EXE_LOSAT"))
+            .arg("tblastx")
+            .arg("-query")
+            .arg(&empty.0)
+            .arg("-subject")
+            .arg(&subject.0)
+            .args(["-outfmt", "6"])
+            .env_remove("LOSAT_TIMING")
+            .output()
+            .expect("run LOSAT CLI")
+    };
+    let output = run(b"\n; comment\n>s1\nACGTAC%%%%\n");
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    assert!(output.stdout.is_empty(), "{output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("subject record 1 (s1) has '%' at residue 7")
+            && stderr.contains("LOSAT's TBLASTX"),
+        "{stderr}"
+    );
+    let output = run(b"; only comment\n!x\n");
+    assert_eq!(output.status.code(), Some(3), "{output:?}");
+    assert!(output.stdout.is_empty(), "{output:?}");
+    assert_eq!(
+        String::from_utf8_lossy(&output.stderr),
+        "BLAST engine error: Empty CBlastQueryVector\n"
+    );
+}
+
 // NCBI reference: c++/src/objmgr/util/create_defline.cpp:219-312 (x_CleanAndCompress) and
 // 4066 (`NStr::HtmlDecode`): NCBI reads past the end of the title `, ,` (and crashes when
 // such a subject has hits) and decodes `&amp;` in outfmt 0; the tabular formats print

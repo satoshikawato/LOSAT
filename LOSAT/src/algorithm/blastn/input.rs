@@ -482,6 +482,23 @@ pub fn only_skipped_lines_before_first_defline(bytes: &[u8]) -> bool {
         })
 }
 
+/// The text from the first defline on (the line that starts with `>`), where NCBI starts
+/// to read records after the lines that it skips (`only_skipped_lines_before_first_defline`);
+/// `None` when no line starts with `>`.
+///
+/// NCBI reference: c++/src/objtools/readers/fasta.cpp:375-384 (as above: the lines before
+/// the first defline that `CFastaReader` skips)
+pub fn from_first_defline(bytes: &[u8]) -> Option<&[u8]> {
+    let mut start = 0;
+    for line in bytes.split(|&byte| byte == b'\n') {
+        if line.first() == Some(&b'>') {
+            return Some(&bytes[start..]);
+        }
+        start += line.len() + 1;
+    }
+    None
+}
+
 /// The records that `bio` reads from a FASTA file (none from white space only), or the
 /// error that names what `bio` cannot read, without the checks of `read_records`.
 pub fn bio_records_of(
@@ -682,5 +699,12 @@ mod tests {
         ] {
             assert!(!only_skipped_lines_before_first_defline(text), "{text:?}");
         }
+        assert_eq!(
+            from_first_defline(b"\n;c\n>s\nACGT\n"),
+            Some(&b">s\nACGT\n"[..])
+        );
+        assert_eq!(from_first_defline(b">s\nACGT\n"), Some(&b">s\nACGT\n"[..]));
+        assert_eq!(from_first_defline(b"; only comment\n"), None);
+        assert_eq!(from_first_defline(b"\n !x\n#y"), None);
     }
 }

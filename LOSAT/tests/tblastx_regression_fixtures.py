@@ -156,6 +156,16 @@ _CASES = [
     # so an empty query still gives `Query is Empty!`.
     ("input.subject_blank_first_empty_query", f"-query {I}/empty.fa -subject {I}/blank_first_subject.fa"
                                               " -outfmt 0", ""),
+    # After the lines it skips, NCBI reads the subjects as those of any file, before it finds
+    # the query empty (S08 audit round 3, (a) N1-iii): a file of comments only has no subject
+    # (`Empty CBlastQueryVector`, exit 3), and a title after a comment is warned about.
+    ("input.subject_comment_only_empty_query", f"-query {I}/empty.fa -subject {I}/comment_only_subject.fa"
+                                               " -outfmt 6", ""),
+    ("input.subject_comment_only_fmt0", f"-query {O}/tblastx_code4_query.fasta"
+                                        f" -subject {I}/comment_only_subject.fa -outfmt 0", ""),
+    ("input.subject_comment_first_title_empty_query", f"-query {I}/empty.fa"
+                                                      f" -subject {I}/comment_first_title_subject.fa"
+                                                      " -outfmt 0", ""),
     # Subject titles that NCBI's HtmlDecode leaves as they are (not a name of its table, a
     # final `;` trimmed before the decoding, `&xi;` read from the `i`), and titles that NCBI
     # decodes or reads past on subjects without hits (NCBI makes only the shown titles).
@@ -217,6 +227,10 @@ def command_generate(_args) -> int:
     code4_query = (ENGINE / O / "tblastx_code4_query.fasta").read_text()
     code4_subject = (ENGINE / O / "tblastx_code4_subject.fasta").read_text()
     (INPUTS / "blank_first_subject.fa").write_text("\n" + code4_subject)
+    (INPUTS / "comment_only_subject.fa").write_text("; only comments\n!x\n")
+    first_sequence = code4_subject.split(">")[1].split("\n", 1)[1]
+    (INPUTS / "comment_first_title_subject.fa").write_text(
+        ";c\n>t1 ends in ACGTACGTACGTACGTACGTAC\n" + first_sequence)
     # The first records of the `many` subjects (each with hits of the `many` query) with
     # new titles, and subjects of N only (no hits).
     many = [chunk.split("\n", 1)[1] for chunk in (ENGINE / O / "tblastx_many_subject.fasta").read_text().split(">")[1:6]]

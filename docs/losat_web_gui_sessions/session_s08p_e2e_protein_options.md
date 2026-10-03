@@ -34,7 +34,7 @@ S07+ で BLASTN に見つかった種類の差が、これらにもあるかは�
 6. BLASTX は範囲に入れない（DW-10）。BLASTX の同じ確認は SX で行う（[SX の指示書](session_sx_blastx_integration.md) に書き足す）。
 7. 試験：sweep の全組合せが、NCBI と同じ拒否、outfmt 0/6/7 のバイト一致、明示的な拒否のどれかになる。各 program の既存のゲート（v0.1.0・v0.2.0 の manifest、Gate A、TLOSAN の Stage G）と S07・S08 の fixture が変わらない。エンジンの変更の V-PERF の非退行。変えた program の全升目の V-ABI。`cargo fmt --check`・`clippy`・`cargo test --all-features`。独立監査。
 
-記録は `docs/evidence/losat_web_e2e/`（`README.md`、`evidence.sha256`、変更前と変更後の sweep の結果）。変更前の成果物は S08 の成果物である。
+記録は `docs/evidence/losat_web_e2e/`（`README.md`、`evidence.sha256`、変更前と変更後の sweep の結果）。変更前の成果物は SD の成果物である（下の「SD からの引き継ぎ」の状態。SD は BLASTN だけを変え、BLASTP・TBLASTN・TBLASTX の出力は S08 と同じ）。
 
 ## S08 からの引き継ぎ（2026-10-02・03 の実測）
 
@@ -65,6 +65,21 @@ S08（E2b、[ゲート記録](../evidence/losat_web_e2b/README.md)、[権威の�
 - **BLASTP・TBLASTN の outfmt 0 の S08 で見つかった差**（S08 の SEG の調べ、`docs/evidence/losat_web_e2b/investigations/segmask.md`）：BLASTP の `-seg yes` の outfmt 0 は SEG で mask した query の残基を小文字にしない（NCBI はする。TBLASTN・TBLASTX・BLASTX はする）。BLASTP の outfmt 0 の `Method:` の名前が一部の alignment で違う（NCBI `Composition-based stats`、LOSAT `Compositional matrix adjust`）。TBLASTN の outfmt 0 の Lambda・K・H の行が、乱数の 3000 の入力のうち約 35 で最後の桁が違う。どれも S08 の前からの差。
 - **SEG の左の再帰**：S08 で NCBI と同じにした（`utils/seg.rs`。BLASTP・TBLASTN・TBLASTX が共有）。fixture `seg.blastp.6`（`LOSAT/tests/outfmt0_manifest.tsv`）。BLASTP・TBLASTN の sweep でも確かめる。
 - **outfmt 0 の punctuation だけの subject の title**：上の「最初の作業 1」。
+
+## SD からの引き継ぎ（2026-10-04 の実測）
+
+SD（E2i：BLASTN の `-task dc-megablast` と `-task blastn-short`、[ゲート記録](../evidence/losat_web_e2i/README.md)、[権威の記録](../evidence/losat_web_e2i/AUTHORITY.md)、棚卸し `docs/evidence/losat_web_e2i/INVENTORY.tsv`）が残したもの。どれも SD の前からの BLASTN の明示的な拒否か差で、SD では変えていない。S08+ の範囲（BLASTP・TBLASTN・TBLASTX）の外の BLASTN の項目は、S08+ で共有の部品（`cli.rs`、`value_parsers.rs`、`input.rs`）を直すときに一緒に扱うか、後のセッションの項目として計画に記録する（保守者の判断）。SD の独立監査の作業ディレクトリ（`~/.cache/losat-web-gui-target/sd-audit/{a,b,c,d}/`）に再現がある。
+
+- **状態**：SD は完了した（2026-10-04）。エンジンの最後のコミットは `eeeea4fb2`（native `487ac387…`。ゲートと最後のコミットの確かめは `docs/evidence/losat_web_e2i/run-20261003T141051Z/`・`run-20261003T165813Z/`）。S08+ の変更前の基準はこの成果物（`~/.cache/losat-web-gui-target/sd-final-native/release/LOSAT`、`sd-final-wasi-artifacts`、`sd-final-reactors`。ハッシュは `run-20261003T165813Z/artifacts.sha256`）。`main` への PR は SD が作った（merge は保守者）。S08+ は PR の merge を待たずに同じブランチで始めてよい。
+- **BLASTN の task が内部で決める option**（SD の監査 (c) の F1、中程度）：`-window_size`、`-off_diagonal_range`、`-xdrop_ungap`、`-xdrop_gap`、`-xdrop_gap_final`、`-no_greedy` は E2c から全 task で明示的に拒否している（`cli.rs` の `is_unported_blastn_arg`）。NCBI は 4 つの task で受け付け、出力が変わる（例：dc-megablast の `-window_size 0` と `-xdrop_gap_final 20`、blastn-short の `-window_size 40`。blastn-short の `-off_diagonal_range 5` は NCBI が「off_diagonal_range is only useful in 2-hit algorithm」で終了コード 1）。SD の後は値が `TaskConfig` にある（`window_size`、`x_drop_gapped`・`x_drop_final`、`use_dp`、`scan_range`）。移すなら、引数の解析（`blast_args.cpp:210-232,274-287,473-522,661-687`）、NCBI の検査（`blast_options.c:620-625`）、off-diagonal の loop（`na_ungapped.c:688-713`）、contiguous の word で two-hit を使う分岐（blastn と megablast の窓 > 0、Delta > 0）を移植し、4 つの task の sweep で確かめる。`-no_greedy` は megablast の DP。`-ungapped`・`-min_raw_gapped_score` は費用が高い。
+- **NCBI が無視するか既定と同じ option**（監査 (c) の F2、低）：`-use_index`・`-index_name`・`-mt_mode`（`-subject` では無視、`blast_args.cpp:3225-3240,3378-3390`）、`-soft_masking true`（既定と同じ。`false` は出力が変わるので拒否は正当）、outfmt 6/7 の `-num_descriptions`・`-sorthits`・`-sorthsps`・`-line_length`・`-html`・`-show_gis`・`-parse_deflines`（NCBI は警告して既定の出力）、`-num_alignments`（hit list の別名）。LOSAT は全部を明示的に拒否する。
+- **`-reward 0`（または 65536）と 0 でない penalty**（監査 (c) の F3、低、E2c の拒否）：NCBI は query ごとの警告と終了コード 0、ヒット無し（outfmt 0 は Lambda −1.00、`blast_stat.c:2776-2822`）。LOSAT は全部 N の query で同じ経路を既に再現している。`-reward 0 -penalty 0`（行列の得点）の拒否は正当。
+- **誤りの順**（監査 (c) の F5、低）：LOSAT の上限（`-max_target_seqs 2147483647` の hit list の大きさ、`-reward 0 -penalty 0`）が、NCBI の gap の表の誤り（`Gap existence and extension values … are not supported`、終了コード 3）より先に出る（`run.rs` の検査の順）。どちらも明示的な失敗。
+- **hit list のあふれの拒否**（監査 (c) の F6、低）：`-max_target_seqs 2147483647` をヒットの無い検索でも拒否する（`scoring.rs` の `check_losat_limits`）。NCBI はヒットがあるときだけ落ちる（`blast_hits.c:44-46`）。
+- **文言**（監査 (c) の F7、情報）：`-outfmt 13`・`14`・`19` は NCBI 自身が誤りにする（`blast_args.cpp:2875-2885`）が、LOSAT は「not supported by LOSAT」の文言（`hsp.rs`）。`-h` は LOSAT の文言、`-help` は clap の文言。outfmt 0 の prolog の後のエンジンの拒否（query の batch の Karlin、megablast の greedy の上限）は stdout に 390・293 バイトを残す（NCBI は落ちる前の 17 バイト）。
+- **ABI v2**（監査 (d)、低、SD の前から）：argv の最後の語が空文字列のとき、末尾の NUL の規則で落ちる（`-template_length ""` が最後なら「requires one value」。`abi_v2.md` §7）。LOSAT の拒否の文言に CLI の `Error: ` が付かない（§4 の記述どおり）。`validate` は `-subject`・`-query` の無い argv を受け付ける（`run` は handle から読む）。`describe` は `-task`・`-template_type` の `choices` を持たない（help の文だけ。S12 の指示書に書いた）。
+- **`-num_threads` 65535 以上**と**BLASTN の outfmt 0 の題の HTML の拒否をヒットの無い subject にも行うこと**（監査 (c) の F4・F8）：上の「S08 からの引き継ぎ」の項と同じ。
+- **E2c の `check_inputs.py` の期待値**：`audit6.task.dc_megablast` と `audit6.task.blastn_short` を SD で `same` に直した（E2g の起動でも SD の後は予期しない差にならない）。
 
 ## 終了・引き継ぎ
 

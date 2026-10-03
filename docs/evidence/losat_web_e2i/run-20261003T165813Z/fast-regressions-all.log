@@ -1,0 +1,4 @@
+selected programs: blastn,blastp,tblastx,tblastn,blastx (all programs)
+allowed known mismatch: blastn/Sakai.MG1655.megablast
+236 cases, 0 failures, 1 allowed known mismatches -> /home/kawato/.cache/losat-web-gui-target/sd-final-fast/summary.json
+exit 0

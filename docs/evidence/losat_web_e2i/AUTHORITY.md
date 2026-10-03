@@ -7,7 +7,7 @@ This record fixes what LOSAT's BLASTN reproduces for NCBI's discontiguous megabl
 | NCBI source (sole authority) | `/mnt/c/Users/genom/GitHub/ncbi-blast/`, commit `598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4`. Paths below are relative to `c++/`. Line numbers count lines after removing CR. |
 | NCBI BLAST+ (comparison oracle only) | `blastn` 2.17.0+ (package `blast 2.17.0`, build `Aug 11 2025 09:46:06`) in `/home/kawato/micromamba/bin/`. No `.ncbirc`; `BATCH_SIZE`, `CHUNK_SIZE`, `OVERLAP_CHUNK_SIZE`, `BL2SEQ_LEGACY`, `CTOOLKIT_COMPATIBLE` unset unless a case sets them. |
 | LOSAT | Branch `feature/losat-web-gui`; the port is `90c5f0181`, the fixtures `af03129ee`. LOSAT line numbers below are those of `90c5f0181` (paths relative to `LOSAT/src/`). |
-| Fixtures | `dc.*` and `short.*` rows of [`LOSAT/tests/outfmt0_manifest.tsv`](../../../LOSAT/tests/outfmt0_manifest.tsv) (21, outfmt 0 and 7) and of [`LOSAT/tests/blastn_regression_fixtures.py`](../../../LOSAT/tests/blastn_regression_fixtures.py) (54); inputs made by [`make_inputs.py`](make_inputs.py). |
+| Fixtures | `dc.*` and `short.*` rows of [`LOSAT/tests/outfmt0_manifest.tsv`](../../../LOSAT/tests/outfmt0_manifest.tsv) (21, outfmt 0 and 7) and of [`LOSAT/tests/blastn_regression_fixtures.py`](../../../LOSAT/tests/blastn_regression_fixtures.py) (54, and the 22 `dc.div_*` cases added after the audit on a pair where every template combination gives NCBI a different output: 76); inputs made by [`make_inputs.py`](make_inputs.py). |
 | Inventory | [`INVENTORY.tsv`](INVENTORY.tsv) (built by [`build_inventory.py`](build_inventory.py) from `inventory/`). |
 
 ---

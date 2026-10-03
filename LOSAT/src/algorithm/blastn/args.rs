@@ -30,8 +30,31 @@ pub struct BlastnArgs {
     // (`blastn/blast_engine/run.rs`).
     #[arg(long, value_parser = blastn_input_path(), value_name = "PATH")]
     pub subject: Option<PathBuf>,
-    #[arg(long, default_value = "megablast", long_help = "Implemented tasks: megablast and blastn. Task defaults: megablast uses word size 28, reward 1, penalty -2, gaps 0/0; blastn uses word size 11, reward 2, penalty -3, gaps 5/2. An omitted option takes the default of the task.", value_parser = blastn_task)]
+    #[arg(long, default_value = "megablast", long_help = "Implemented tasks: megablast, blastn, dc-megablast and blastn-short. Task defaults: megablast uses word size 28, reward 1, penalty -2, gaps 0/0; blastn uses word size 11, reward 2, penalty -3, gaps 5/2; dc-megablast uses the 11-of-18 coding template, reward 2, penalty -3, gaps 5/2 and two hits in a window of 40; blastn-short uses word size 7, reward 1, penalty -3, gaps 5/2, e-value 1000 and no DUST. An omitted option takes the default of the task.", value_parser = blastn_task)]
     pub task: String,
+    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:708-730
+    // ```c
+    //     arg_desc.AddOptionalKey(kArgDMBTemplateType, "type",
+    //                  "Discontiguous MegaBLAST template type",
+    //                  CArgDescriptions::eString);
+    //     ...
+    //     arg_desc.SetDependency(kArgDMBTemplateType,
+    //                            CArgDescriptions::eRequires,
+    //                            kArgDMBTemplateLength);
+    //
+    //     arg_desc.AddOptionalKey(kArgDMBTemplateLength, "int_value",
+    //                  "Discontiguous MegaBLAST template length",
+    //                  CArgDescriptions::eInteger);
+    //     ...
+    //     arg_desc.SetDependency(kArgDMBTemplateLength,
+    //                            CArgDescriptions::eRequires,
+    //                            kArgDMBTemplateType);
+    // ```
+    // NCBI applies them to any task (`coordination.rs` `determine_template`).
+    #[arg(long, value_name = "TYPE", value_parser = blastn_template_type, requires = "template_length", help = "Discontiguous MegaBLAST template type: coding, optimal or coding_and_optimal")]
+    pub template_type: Option<crate::algorithm::blastn::disc_lookup::DiscWordType>,
+    #[arg(long, value_name = "INT", value_parser = blastn_template_length, requires = "template_type", help = "Discontiguous MegaBLAST template length: 16, 18 or 21")]
+    pub template_length: Option<u8>,
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:166-170,288-300
     // ```c
     //         arg_desc.AddOptionalKey(kArgWordSize, "int_value", description,
@@ -42,12 +65,21 @@ pub struct BlastnArgs {
     //         opt.SetWordSize(args[kArgWordSize].AsInteger());
     // ```
     // An omitted value keeps the default of the task (`coordination.rs`).
-    #[arg(long, value_parser = blastn_word_size, help = "Word size for wordfinder algorithm (default: 28 for megablast, 11 for blastn)")]
+    #[arg(long, value_parser = blastn_word_size, help = "Word size for wordfinder algorithm (default: 28 for megablast, 11 for blastn and dc-megablast, 7 for blastn-short)")]
     pub word_size: Option<usize>,
     #[arg(long, default_value_t = 1, value_parser = blastn_count)]
     pub num_threads: usize,
-    #[arg(long, default_value_t = 10.0, value_parser = blastn_evalue)]
-    pub evalue: f64,
+    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:142-146
+    // ```c
+    //     	string des = "Expectation value (E) threshold for saving hits. Default = 10";
+    //     	if(m_IsBlastn) {
+    //     		des += " (1000 for blastn-short)";
+    //     	}
+    //         arg_desc.AddOptionalKey(kArgEvalue, "evalue", des, CArgDescriptions::eDouble);
+    // ```
+    // An omitted value keeps the default of the task (`coordination.rs` `determine_evalue`).
+    #[arg(long, value_parser = blastn_evalue, help = "Expectation value (E) threshold for saving hits (default: 10; 1000 for blastn-short)")]
+    pub evalue: Option<f64>,
     /// Percent identity threshold for filtering HSPs (Blast_HSPTest).
     ///
     /// Default: 0.0 (disabled, matches NCBI BLAST default from calloc initialization).
@@ -155,20 +187,20 @@ pub struct BlastnArgs {
     // checked as NCBI checks it (`scoring.rs`). NCBI keeps the reward and the penalty in 16
     // bits; a reward of 0 or less (NCBI's rmblastn matrix scoring, or no valid query) is
     // not implemented and is rejected after NCBI's checks (`scoring.rs`).
-    #[arg(long, value_parser = blastn_reward, help = "Reward for a nucleotide match (default: 1 for megablast, 2 for blastn; LOSAT does not support 0)")]
+    #[arg(long, value_parser = blastn_reward, help = "Reward for a nucleotide match (default: 1 for megablast and blastn-short, 2 for blastn and dc-megablast; LOSAT does not support 0)")]
     pub reward: Option<i32>,
-    #[arg(long, value_parser = blastn_penalty, help = "Penalty for a nucleotide mismatch (default: -2 for megablast, -3 for blastn)")]
+    #[arg(long, value_parser = blastn_penalty, help = "Penalty for a nucleotide mismatch (default: -2 for megablast, -3 for the other tasks)")]
     pub penalty: Option<i32>,
     #[arg(
         long = "gapopen",
         value_parser = blastn_gap_cost,
-        help = "Cost to open a gap (default: 0 for megablast, 5 for blastn)"
+        help = "Cost to open a gap (default: 0 for megablast, 5 for the other tasks)"
     )]
     pub gap_open: Option<i32>,
     #[arg(
         long = "gapextend",
         value_parser = blastn_gap_cost,
-        help = "Cost to extend a gap (default: 0 for megablast, 2 for blastn)"
+        help = "Cost to extend a gap (default: 0 for megablast, 2 for the other tasks)"
     )]
     pub gap_extend: Option<i32>,
     // NCBI blast_args.cpp:410-420: opt.SetDustFiltering(false/true);
@@ -179,7 +211,7 @@ pub struct BlastnArgs {
     #[arg(
         long = "dust",
         value_name = "DUST",
-        help = "DUST: no, yes, or LEVEL WINDOW LINKER (default: 20 64 1)"
+        help = "DUST: no, yes, or LEVEL WINDOW LINKER (default: 20 64 1; no for blastn-short)"
     )]
     pub dust_filtering: Option<String>,
     #[arg(skip = DustSpec::Yes)]
@@ -252,7 +284,27 @@ impl BlastnArgs {
     ///         LOG_POST(Error << "Please refer to the BLAST+ user manual.");       \
     ///         exit_code = BLAST_INPUT_ERROR;                                      \
     /// ```
+    ///
+    /// Without `-dust`, blastn-short does not filter: its task clears the filtering
+    /// options (`coordination.rs` `task_dust_by_default`), and the argument has no default.
+    ///
+    /// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:344-349,410
+    /// ```c
+    ///         arg_desc.AddOptionalKey(kArgDustFiltering, "DUST_options",
+    ///                         "Filter query sequence with DUST "
+    ///                         "(Format: '" + kDfltArgApplyFiltering + "', " +
+    ///                         "'level window linker', or '" + kDfltArgNoFiltering +
+    ///                         "' to disable) Default = '20 64 1' ('" + kDfltArgNoFiltering + "' for blastn-short)",
+    ///                         CArgDescriptions::eString);
+    /// ...
+    ///         if ( !m_QueryIsProtein && args[kArgDustFiltering]) {
+    /// ```
     pub fn resolve_dust(&mut self) -> anyhow::Result<()> {
+        if self.dust_filtering.is_none()
+            && !crate::algorithm::blastn::coordination::task_dust_by_default(&self.task)
+        {
+            self.dust = DustSpec::No;
+        }
         if let Some(value) = self.dust_filtering.take() {
             self.dust = parse_dust_filtering(&value).map_err(|message| crate::cli::NativeError {
                 exit: 1,

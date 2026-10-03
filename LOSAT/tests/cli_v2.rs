@@ -58,7 +58,7 @@ fn canonical_options_for_every_program() {
             }
             Commands::Blastn(a) => {
                 assert_eq!(a.num_threads, 4);
-                assert_eq!(a.evalue, 0.001);
+                assert_eq!(a.evalue, Some(0.001));
                 assert_eq!(a.max_target_seqs, Some(9));
             }
             Commands::Blastp(a) => {
@@ -280,7 +280,33 @@ fn defaults_and_task_overrides_remain_distinct() {
     for program in ["blastn", "tblastx"] {
         parse(program, &["-outfmt", "6"]).unwrap();
     }
-    assert!(parse("blastn", &["-outfmt", "6", "-task", "dc-megablast"]).is_err());
+    // NCBI blast_options_handle.cpp:344-380: dc-megablast and blastn-short are tasks of
+    // blastn (Session SD); rmblastn stays an explicit rejection.
+    parse("blastn", &["-outfmt", "6", "-task", "dc-megablast"]).unwrap();
+    parse("blastn", &["-outfmt", "6", "-task", "blastn-short"]).unwrap();
+    assert!(parse("blastn", &["-outfmt", "6", "-task", "rmblastn"]).is_err());
+    // NCBI blast_args.cpp:708-730: -template_type and -template_length require each other
+    // and take coding/optimal/coding_and_optimal and 16/18/21.
+    parse(
+        "blastn",
+        &[
+            "-task",
+            "dc-megablast",
+            "-template_type",
+            "optimal",
+            "-template_length",
+            "21",
+        ],
+    )
+    .unwrap();
+    for words in [
+        &["-template_type", "coding"][..],
+        &["-template_length", "18"],
+        &["-template_type", "Coding", "-template_length", "18"],
+        &["-template_type", "coding", "-template_length", "17"],
+    ] {
+        assert!(parse("blastn", words).is_err(), "{words:?}");
+    }
 }
 
 #[test]
@@ -400,9 +426,7 @@ fn numeric_values_are_validated_before_io() {
     assert_eq!(args.gap_open, Some(0));
     // NCBI's other blastn tasks and options are rejected explicitly (AGENTS.md rule 2).
     for extra in [
-        &["-task", "dc-megablast"][..],
-        &["-task", "blastn-short"],
-        &["-task", "rmblastn"],
+        &["-task", "rmblastn"][..],
         &["-strand", "plus"],
         &["-ungapped"],
         &["-h"],

@@ -1690,6 +1690,11 @@ pub struct BlastnPairwiseReport {
     pub penalty: i32,
     pub gap_open: i32,
     pub gap_extend: i32,
+    /// The task is megablast or blastn, for which a gap extension cost of 0 is printed as
+    /// the PMID 10890397 value (NCBI compares the task name, `m_Program`).
+    pub zero_gap_extension_formula: bool,
+    /// The two-hit window (`options.GetWindowSize()`): 40 for dc-megablast.
+    pub window_size: usize,
     /// Subjects in the description table and with alignments, per query.
     pub num_descriptions: usize,
     pub num_alignments: usize,
@@ -2053,7 +2058,31 @@ fn write_blastn_final_footer<W: Write>(
         "Matrix: blastn matrix {} {}",
         report.reward, report.penalty
     )?;
-    let gap_extension = if report.gap_extend == 0 {
+    // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:2270-2288
+    // ```c
+    //     if (options.GetGappedMode() == true) {
+    //         double gap_extension = (double) options.GetGapExtensionCost();
+    //         if ((m_Program == "megablast" || m_Program == "blastn") && options.GetGapExtensionCost() == 0)
+    //         { // Formula from PMID 10890397 applies if both gap values are zero.
+    //                gap_extension = -2*options.GetMismatchPenalty() + options.GetMatchReward();
+    //                gap_extension /= 2.0;
+    //         }
+    //         m_Outfile << "Gap Penalties: Existence: "
+    //                 << options.GetGapOpeningCost() << ", Extension: "
+    //                 << gap_extension << "\n";
+    //     }
+    //     if (options.GetWordThreshold()) {
+    //         m_Outfile << "Neighboring words threshold: " <<
+    //                         options.GetWordThreshold() << "\n";
+    //     }
+    //     if (options.GetWindowSize()) {
+    //         m_Outfile << "Window for multiple hits: " <<
+    //                         options.GetWindowSize() << "\n";
+    //     }
+    // ```
+    // BLASTN's word threshold is 0 for every task (BLAST_WORD_THRESHOLD_BLASTN and
+    // BLAST_WORD_THRESHOLD_MEGABLAST, blast_options.h).
+    let gap_extension = if report.zero_gap_extension_formula && report.gap_extend == 0 {
         f64::from(-2 * report.penalty + report.reward) / 2.0
     } else {
         f64::from(report.gap_extend)
@@ -2062,7 +2091,11 @@ fn write_blastn_final_footer<W: Write>(
         writer,
         "Gap Penalties: Existence: {}, Extension: {}",
         report.gap_open, gap_extension
-    )
+    )?;
+    if report.window_size != 0 {
+        writeln!(writer, "Window for multiple hits: {}", report.window_size)?;
+    }
+    Ok(())
 }
 
 /// The start of the BLASTN report, which NCBI writes before it searches: the program

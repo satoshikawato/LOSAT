@@ -4,6 +4,7 @@ pub mod blast_engine;
 pub mod blast_extend;
 pub mod constants;
 pub mod coordination;
+pub mod disc_lookup;
 pub mod extension;
 pub mod filtering;
 pub mod input;

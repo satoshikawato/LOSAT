@@ -32,6 +32,18 @@ S05 で確定した ABI（`docs/web/abi_v2.md`。version 2）と、それを Nod
 
 最初の S09 の作業は使用量の上限で止まった。`/mnt/c/Users/genom/GitHub/LOSAT-web-gui-app` の作業ツリーに、未コミットで試験していない変更が残っている（`web/app/` の 25 ファイル：Engine worker・reactor の結合・harness など。ブランチは `origin/feature/losat-web-gui` を取り込み済みで、push していない）。最初の作業として、この変更を読み、使うか捨てるかを決める（`git stash` で退避してもよい）。入口の条件の判断（S08 の TBLASTX の outfmt 0/7 の升目を除いて、V-ABI を通る升目で始める）は前回と同じ推奨案とする。使用量を抑えるため、機械的な作業は Agent の `model: "sonnet"` に回す（[S07++b](session_s07ppb_e2f_close.md) の「進め方」）。
 
+## S08b と並行して始める（2026-10-03）
+
+保守者の指示で、S09 をエンジン側の S08b（E2b の仕上げ）と並行して始める（計画 DW-7 の 2 本）。
+
+- **エンジンの状態**：S08 の移植は終わり、エンジンの最後のコミットは `24fcfe41b`（`origin/feature/losat-web-gui` に push 済み）。S08b はその全ゲート、Gate A、V-PERF、記録、`main` への PR を進めている。ゲートで直すことが見つかれば、エンジンのコミットが増える。
+- **取り込み**：アプリ側のブランチは `origin/feature/losat-web-gui` より 80 コミットほど遅れている（S07+++・S07+++b・S08・S08b）。前回の中断の変更を決めた後（退避するなら `git stash`）、`git merge origin/feature/losat-web-gui` で取り込み、衝突の解消を独立したコミットにする。S08b がエンジンのコミットや升目の記録を足したら、もう一度取り込む。
+- **S08 がアプリに渡すもの**（[E2b のゲート記録](../evidence/losat_web_e2b/README.md)の「アプリ側（S09）への注意」、`docs/web/abi_v2.md` §4・§5・§8）：TBLASTX は ABI v2 で形式 0・6・7 と stream 1 の HSP の記録（翻訳した行、SEG で mask した query の小文字、両側の frame）を出す。`describe` の TBLASTX の `-max_target_seqs` に `default` が無い（省略すると hit list 500、outfmt 0 は説明 500・整列 250）。`parse` は `-outfmt` を挿入しない（全 program の既定は `-outfmt 0`）。argv の誤りは CLI と同じ文言。TBLASTX の `register` は BLASTN と同じに入力を確かめる（NCBI が違う読み方をする record は `not supported by LOSAT's TBLASTX`、`U` は `T`。各入力を別々に確かめるので、空の query の run より厳しい）。outfmt 0 の題が NCBI の読み過ぎる句読点だけの subject は、TBLASTX・TBLASTN の outfmt 0 で明示的に拒否する（保守者が例外 2 を広げた。実装は S08+）。
+- **入口の条件**：TBLASTX の outfmt 0/7 の升目（`docs/web/verification_cells.tsv` の 26・28 行）は、S08b が `24fcfe41b` の V-ABI full で確かめて `checked` にする。それまでは前回と同じ推奨案（S08 の TBLASTX の outfmt 0/7 の升目を除き、V-ABI を通る升目で始める）。S08b が升目を埋めて push したら、取り込んで V-BR に加える。
+- **V-PERF の lock**：S08b は、ゲートの後（2026-10-03 の UTC 05 時ごろの見込み）に V-PERF を測り、その間 `/home/kawato/.cache/losat-web-gui-target/vperf.lock` を置く。このファイルがある間は、アプリ側の試験やビルド（`npm run check`・`npm run e2e`・Playwright・reactor のビルド）を始めず、実行中のものは終わるのを待つ（README の規則 5）。lock が消えたら再開する。
+- **作業場所**：worktree `/mnt/c/Users/genom/GitHub/LOSAT-web-gui-app`、ブランチ `feature/losat-web-gui-app`。ビルドの出力先は `~/.cache/losat-web-gui-target/app-s09-*`（前回の `app-s09-reactors`・`app-s09-native` などがある）。エンジン側の `s08-*`・`s08-audit/`・`e2g-*` の directory と worktree `/mnt/c/Users/genom/GitHub/LOSAT-web-gui` には触れない。reactor はアプリ側の worktree の `web/adapter/tools/build_reactors.py`（`RUSTUP_TOOLCHAIN=1.92.0`）で自分の出力先に作る。`LOSAT/` と `web/adapter/` は変えない（変えるべきことはゲート記録に書き、エンジン側に頼む）。
+- **進め方**：機械的な作業（試験の実行、比較、記録の下書き）は Agent の `model: "sonnet"` に回し、互いに独立なら 4 つを超えて並行してよい。長い実行は 30 分以内の間隔で見る。保守者に判断を仰ぐことはまとめて諮り、ほかは推奨の案で進めて記録する。Claude Code が再起動すると background のコマンドが止まったように見えることがあるので、長い実行は `setsid nohup … &` で始め、log を見る。
+
 ## S10 で作った port と、S09 が本物につなぐもの
 
 S10（W2、[ゲート記録](../evidence/losat_web_w2/README.md)）は、本物の reactor に依存する部分を port と試験用の実装で作り、契約試験を書いた。どれも `web/app/` の中にある。

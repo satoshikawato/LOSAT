@@ -42,7 +42,7 @@
 | S08 | [TBLASTX outfmt 0/7](session_s08_e2b_tblastx_outfmt0_7.md) | E2b | NCBI とバイト一致（承認済みの例外を除く） | 一部完了（2026-10-03、[ゲート記録](../evidence/losat_web_e2b/README.md)。移植、fixture、棚卸し、独立監査の第 1・2 回と指摘への対応。最後のゲートと完了条件は S08b） |
 | S08b | [E2b の仕上げ](session_s08b_e2b_final_gates.md) | E2b | 最後のコミットの全ゲート、独立監査の第 3 回、Gate A、V-PERF、TBLASTX の全升目の V-ABI、`main` への PR | 未着手 |
 | S08+ | [BLASTP・TBLASTN・TBLASTX の既定以外のオプション](session_s08p_e2e_protein_options.md) | E2e | 既定以外のオプションが NCBI と同じか、明示的に拒否される（S07+ で追加、TD-13。S12 の前に終える） | 未着手 |
-| S09 | [ブラウザでの実行基盤](session_s09_w1_browser_runtime.md) | W1 | V-BR、前処理の割合の実測（アプリ側。S10 の後、入口の条件は S08） | 未着手 |
+| S09 | [ブラウザでの実行基盤](session_s09_w1_browser_runtime.md) | W1 | V-BR、前処理の割合の実測（アプリ側。S10 の後、入口の条件は S08） | 着手（2026-10-03、S08b と並行。保守者の指示） |
 | S09+ | 前処理キャッシュ（条件付き） | R2 | DW-8 の条件を満たした program だけ。S09 の結果で行を足す | 未定 |
 | S10 | [データ層](session_s10_w2_data_layer.md) | W2 | BlockStore の契約試験、回収・保護・容量不足（アプリ側。S09 より先に行う） | 完了（2026-09-30、[ゲート記録](../evidence/losat_web_w2/README.md)） |
 | S11 | [領域の指定](session_s11_e2d_query_subject_loc.md) | E2d | `-query_loc` / `-subject_loc` が NCBI とバイト一致 | 未着手 |

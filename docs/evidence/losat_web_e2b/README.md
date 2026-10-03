@@ -238,7 +238,7 @@ reactor（`d2db178a…`・`8b179d93…`）は `bc521f450` で変わった（TBLA
 
 ## 残件と引き継ぎ
 
-- **`main` への PR**：S08 と S08b のコミット（`4fc67f9ab`・`2bcb86b1f` を含む）。merge は保守者。
+- **`main` への PR**：[#111](https://github.com/satoshikawato/LOSAT/pull/111)（S08 と S08b のコミット、`4fc67f9ab`・`2bcb86b1f` を含む）。CI（`rust`、fast output regressions、adapter、app、engine-web-api）はすべて緑（`82dea272a`）。merge は保守者。
 - **保守者の確認**：V-PERF の `tblastx-multi`（上の「V-PERF」。推奨は NCBI の batch の費用として認め、batch の間で subject の準備を使い回す最適化を後の項目にする）。
 - **SD（次のエンジン側のセッション、[指示書](../../losat_web_gui_sessions/session_sd_e2i_blastn_dc_megablast.md)、DW-18）**：保守者の依頼で、BLASTN の `-task dc-megablast` と `-task blastn-short` を NCBI と同じにする。
 - **S08+**（[指示書](../../losat_web_gui_sessions/session_s08p_e2e_protein_options.md)の「S08 からの引き継ぎ」、SD の後）：最初の作業は、TBLASTX・TBLASTN の句読点だけの題の例外 2 の実装（DW-17）と TBLASTN の subject の定義行（監査 (c) の F14）。ほかに、第 3 回の監査の後回し（中身の無いレコードと `bio` の読み方（(a) N1-iv、(b) N-b2）、最初の定義行の前の NCBI が読む文字列と配列の行の中の空白・`;`（(c) L1・L1b、(b) N-r4-1）、垂直タブ、TBLASTN の `PRE_FETCH_SEQS_LIMIT`（(c) L3））、引数の解析の後の NCBI の検査の文言、TBLASTX の入力の読み方の安く移せる拒否、標準入力とパイプ、`-num_threads` 65535 以上、TBLASTX の `check_ncbi_application_settings`、BLASTN の HTML の題の検査を表示される subject に狭めること、BLASTP の差、TBLASTN の `-max_target_seqs` 5 未満の警告、batch の間の subject の準備の使い回し（V-PERF）。

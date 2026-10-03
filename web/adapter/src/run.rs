@@ -346,6 +346,44 @@ mod tests {
             error.starts_with("BLAST engine error: Error: Substitution scores 1 and -6"),
             "{error}"
         );
+        // dc-megablast and blastn-short (Session SD): the task defaults and NCBI's template
+        // checks, with NCBI's messages (blast_options.c:1247-1261,1399-1413).
+        for task in ["dc-megablast", "blastn-short"] {
+            assert!(validate(&["blastn", "-query", "q", "-subject", "s", "-task", task]).is_ok());
+        }
+        let dc = [
+            "blastn",
+            "-query",
+            "q",
+            "-subject",
+            "s",
+            "-task",
+            "dc-megablast",
+        ];
+        let template = [
+            "-template_type",
+            "coding_and_optimal",
+            "-template_length",
+            "21",
+        ];
+        assert!(validate(&[&dc[..], &template[..], &["-word_size", "12"]].concat()).is_ok());
+        let error = validate(&[&dc[..], &["-word_size", "13"]].concat()).unwrap_err();
+        assert!(
+            error.starts_with(
+                "BLAST query/options error: Invalid discontiguous template parameters: word size must be either 11 or 12"
+            ),
+            "{error}"
+        );
+        let error =
+            validate(&[&blastn[..], &template[..], &["-word_size", "11"]].concat()).unwrap_err();
+        assert!(
+            error.starts_with(
+                "BLAST query/options error: Invalid lookup table type for discontiguous Mega BLAST"
+            ),
+            "{error}"
+        );
+        // The options require each other: a parser error, the CLI's message.
+        assert!(validate(&[&dc[..], &["-template_type", "coding"]].concat()).is_err());
         // validate reports TBLASTX's checks of its options alone, as the run does.
         let tblastx = ["tblastx", "-query", "q", "-subject", "s"];
         assert!(validate(&tblastx).is_ok());

@@ -456,8 +456,8 @@ impl std::io::Write for ReportStream {
 /// 6; outfmt 6 and 7 abort). Rust's runtime opens `/dev/null` on a closed standard
 /// descriptor before `main`, which LOSAT cannot tell from a `/dev/null` that the caller
 /// opened (read and write, as Python's `subprocess.DEVNULL`), so the report is written
-/// there and the run succeeds (a difference put to the maintainer in session S08,
-/// `docs/evidence/losat_web_e2b/README.md`).
+/// there and the run succeeds (approved exception 6 of
+/// `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`, accepted by the maintainer in session S08b).
 pub fn report_standard_output() -> Box<dyn std::io::Write + Send> {
     Box::new(std::io::BufWriter::new(std::io::stdout()))
 }

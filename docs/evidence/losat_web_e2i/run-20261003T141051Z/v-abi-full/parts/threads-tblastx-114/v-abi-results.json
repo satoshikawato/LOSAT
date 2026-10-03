@@ -1,0 +1,83 @@
+[
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "tblastx",
+    "cases": [
+      "tblastx.lc.0",
+      "tblastx.lc.7"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "tests/fasta/LC738874.fasta",
+      "-subject",
+      "tests/fasta/LC738875.fasta"
+    ],
+    "formats": {
+      "0": "fac4c8b96864d7efca8deb7d4216f9e1df366567ef8215a2e0d01fc525b5715c",
+      "6": "86c05a04efb50e4026720e2d44fe2db2e6446f9594e174f3fde56931d09d5b49",
+      "7": "a770dbb2bb9717881fbc1a865718ffd16c721b675af6a15d68d6a21709132852"
+    },
+    "frozen": {
+      "0": true,
+      "7": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 4319
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "tblastx",
+    "cases": [
+      "tblastx.lc.0",
+      "tblastx.lc.7"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "tests/fasta/LC738874.fasta",
+      "-subject",
+      "tests/fasta/LC738875.fasta"
+    ],
+    "formats": {
+      "0": "fac4c8b96864d7efca8deb7d4216f9e1df366567ef8215a2e0d01fc525b5715c",
+      "6": "86c05a04efb50e4026720e2d44fe2db2e6446f9594e174f3fde56931d09d5b49",
+      "7": "a770dbb2bb9717881fbc1a865718ffd16c721b675af6a15d68d6a21709132852"
+    },
+    "frozen": {
+      "0": true,
+      "7": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 4319
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "tblastx",
+    "cases": [
+      "tblastx.lc.0",
+      "tblastx.lc.7"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "tests/fasta/LC738874.fasta",
+      "-subject",
+      "tests/fasta/LC738875.fasta"
+    ],
+    "formats": {
+      "0": "fac4c8b96864d7efca8deb7d4216f9e1df366567ef8215a2e0d01fc525b5715c",
+      "6": "86c05a04efb50e4026720e2d44fe2db2e6446f9594e174f3fde56931d09d5b49",
+      "7": "a770dbb2bb9717881fbc1a865718ffd16c721b675af6a15d68d6a21709132852"
+    },
+    "frozen": {
+      "0": true,
+      "7": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 4319
+  }
+]

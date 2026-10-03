@@ -1,0 +1,97 @@
+fixture_id	ncbi_exit	ncbi_lines	losat_exit	losat_lines	result	losat_stderr
+compact.blastn	0	2	0	2	same	
+compact.megablast	0	2	0	2	same	
+compact.nohit.blastn	0	0	0	0	same	
+compact.nohit.megablast	0	0	0	0	same	
+LC738874_LC738870.megablast	0	20	0	20	same	
+AP027152_AP027202.blastn	0	241	0	241	same	
+strand.blastn	0	2	0	2	same	
+strand.megablast	0	2	0	2	same	
+mask.dust.blastn	0	1	0	1	same	
+mask.nodust.blastn	0	1	0	1	same	
+mask.lcase.blastn	0	1	0	1	same	
+mask.lcase_nodust.blastn	0	1	0	1	same	
+mask.lcase.megablast	0	1	0	1	same	
+mask.subjlc_lcase.blastn	0	1	0	1	same	
+mask.subjlc.blastn	0	1	0	1	same	
+mask.lcase_minus.blastn	0	1	0	1	same	
+mask.lcase_minus.megablast	0	1	0	1	same	
+multi.blastn	0	9	0	9	same	
+multi.megablast	0	5	0	5	same	
+multi.mts3.blastn	0	6	0	6	same	Warning: [blastn] Examining 5 or more matches is recommended
+multi.mts1.blastn	0	3	0	3	same	Warning: [blastn] Examining 5 or more matches is recommended
+multi.ws7_e1000.blastn	0	315	0	315	same	
+multi.maxhsps1.blastn	0	5	0	5	same	
+multi.perc97.blastn	0	5	0	5	same	
+multi.besthit.blastn	0	6	0	6	same	
+multi.r2p3g00.megablast	0	5	0	5	same	
+many.blastn	0	262	0	262	same	
+many.mts255.blastn	0	257	0	257	same	
+many.mts500.blastn	0	262	0	262	same	
+width.blastn	0	1	0	1	same	
+width.megablast	0	1	0	1	same	
+edge.allN.blastn	0	0	0	0	same	Warning: [blastn] Query_1 allN query of only N: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options
+edge.alllower_lcase.blastn	0	1	0	1	same	
+edge.mixed_allN.blastn	0	2	0	2	same	Warning: [blastn] Query_2 allN query of only N: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options
+edge.ambig.blastn	0	1	0	1	same	
+edge.ambig.megablast	0	0	0	0	same	
+edge.batch_allN.blastn	0	1	0	1	same	Warning: [blastn] Query_1 batchN 5000 N fil.. : Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options
+edge.batch_allN.megablast	0	1	0	1	same	Warning: [blastn] Query_1 batchN 5000 N fil.. : Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options
+longdef.megablast	0	1	0	1	same	
+width.blastp	0	1	0	1	same	
+width.tblastn	0	1	0	1	same	
+scoring.reward1.blastn	0	9	0	9	same	
+scoring.beyond_table.megablast	0	5	0	5	same	
+scoring.divisor.blastn	0	9	0	9	same	
+scoring.beyond_table_iupac.blastn	0	25	0	25	same	
+input.rna.megablast	0	5	0	5	same	
+edge.short_invalid.blastn	0	67	0	67	same	Warning: [blastn] Query_2 shortN1 40 N: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options 
+tblastx.lc.0	0	4319	0	4319	same	
+tblastx.lc.7	0	4319	0	4319	same	
+tblastx.multi.0	0	171	0	171	same	
+tblastx.multi.7	0	171	0	171	same	
+tblastx.batch.0	0	197	0	197	same	
+tblastx.batch.7	0	197	0	197	same	
+tblastx.invalid.0	0	34	0	34	same	
+tblastx.invalid.7	0	34	0	34	same	
+tblastx.unsearched.0	0	49	0	49	same	Warning: [tblastx] Query_2 allN 300 N: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options 
+tblastx.unsearched.7	0	49	0	49	same	Warning: [tblastx] Query_2 allN 300 N: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options 
+tblastx.nohit.0	0	17	0	17	same	
+tblastx.nohit.7	0	17	0	17	same	
+tblastx.mts1.0	0	118	0	118	same	Warning: [tblastx] Examining 5 or more matches is recommended
+tblastx.mts1.7	0	118	0	118	same	Warning: [tblastx] Examining 5 or more matches is recommended
+tblastx.mts3.0	0	159	0	159	same	Warning: [tblastx] Examining 5 or more matches is recommended
+tblastx.segno.0	0	265	0	265	same	
+tblastx.thrwin.0	0	228	0	228	same	
+tblastx.ambig.0	0	172	0	172	same	
+tblastx.ambig.7	0	172	0	172	same	
+tblastx.code4q.0	0	46	0	46	same	
+tblastx.code4q.7	0	46	0	46	same	
+tblastx.code4.0	0	46	0	122	DIFF	
+tblastx.code4.7	0	46	0	122	DIFF	
+tblastx.many.0	0	1230	0	1230	same	
+tblastx.many.7	0	1230	0	1230	same	
+tblastx.many_mts255.0	0	1209	0	1209	same	
+seg.blastp.6	0	1	0	1	same	
+dc.default	0	22	0	22	same	
+dc.default.7	0	22	0	22	same	
+dc.small	0	3	0	3	same	
+dc.optimal16	0	21	0	21	same	
+dc.two21	0	22	0	22	same	
+dc.word12_coding18.7	0	20	0	20	same	
+dc.lcase	0	22	0	22	same	
+dc.nodust	0	429	0	429	same	
+dc.scores	0	30	0	30	same	
+dc.max	0	4	0	4	same	Warning: [blastn] Examining 5 or more matches is recommended
+dc.megablast_template	0	55	0	55	same	
+dc.nohit	0	3	0	3	same	
+short.default	0	435	0	435	same	
+short.default.7	0	435	0	435	same	
+short.word11	0	43	0	43	same	
+short.scores	0	426	0	426	same	
+short.evalue10	0	273	0	273	same	
+short.dust	0	321	0	321	same	
+short.lcase	0	390	0	390	same	
+short.max	0	24	0	24	same	Warning: [blastn] Examining 5 or more matches is recommended
+short.nohit	0	0	0	0	same	
+# fixtures=95 differing=['tblastx.code4.0', 'tblastx.code4.7']

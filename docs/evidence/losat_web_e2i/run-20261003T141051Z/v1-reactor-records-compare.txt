@@ -1,0 +1,154 @@
+# v1 reactor records (check_wasi_reactor.js, run by check_wasm_threading.py) of the S05 and SD reactors.
+$ diff -r -x runs.json s05/reactor-records sd/reactor-records
+diff -r -x runs.json /home/kawato/.cache/losat-web-gui-target/wasm-threading-s05/reactor-records/blastn-dp-reject-256.error /home/kawato/.cache/losat-web-gui-target/wasm-threading-sd/reactor-records/blastn-dp-reject-256.error
+1c1
+< requested 256 threads exceeds Rayon maximum 255
+\ No newline at end of file
+---
+> requested 256 threads exceeds Rayon maximum 255, which is not supported by LOSAT
+\ No newline at end of file
+diff -r -x runs.json /home/kawato/.cache/losat-web-gui-target/wasm-threading-s05/reactor-records/blastn-dp-spawn-fail-1.error /home/kawato/.cache/losat-web-gui-target/wasm-threading-sd/reactor-records/blastn-dp-spawn-fail-1.error
+1c1
+< failed to build blastn pool with 4 threads: Resource temporarily unavailable (os error 6): Resource temporarily unavailable (os error 6)
+\ No newline at end of file
+---
+> failed to build blastn pool with 4 threads; a thread count that the system cannot start is not supported by LOSAT: Resource temporarily unavailable (os error 6): Resource temporarily unavailable (os error 6)
+\ No newline at end of file
+diff -r -x runs.json /home/kawato/.cache/losat-web-gui-target/wasm-threading-s05/reactor-records/blastn-dp-spawn-fail-2.error /home/kawato/.cache/losat-web-gui-target/wasm-threading-sd/reactor-records/blastn-dp-spawn-fail-2.error
+1c1
+< failed to build blastn pool with 4 threads: Resource temporarily unavailable (os error 6): Resource temporarily unavailable (os error 6)
+\ No newline at end of file
+---
+> failed to build blastn pool with 4 threads; a thread count that the system cannot start is not supported by LOSAT: Resource temporarily unavailable (os error 6): Resource temporarily unavailable (os error 6)
+\ No newline at end of file
+diff -r -x runs.json /home/kawato/.cache/losat-web-gui-target/wasm-threading-s05/reactor-records/blastn-single-dp-reject-256.error /home/kawato/.cache/losat-web-gui-target/wasm-threading-sd/reactor-records/blastn-single-dp-reject-256.error
+1c1
+< requested 256 threads exceeds Rayon maximum 255
+\ No newline at end of file
+---
+> requested 256 threads exceeds Rayon maximum 255, which is not supported by LOSAT
+\ No newline at end of file
+diff -r -x runs.json /home/kawato/.cache/losat-web-gui-target/wasm-threading-s05/reactor-records/blastn-single-dp-spawn-fail-1.error /home/kawato/.cache/losat-web-gui-target/wasm-threading-sd/reactor-records/blastn-single-dp-spawn-fail-1.error
+1c1
+< failed to build blastn pool with 4 threads: Resource temporarily unavailable (os error 6): Resource temporarily unavailable (os error 6)
+\ No newline at end of file
+---
+> failed to build blastn pool with 4 threads; a thread count that the system cannot start is not supported by LOSAT: Resource temporarily unavailable (os error 6): Resource temporarily unavailable (os error 6)
+\ No newline at end of file
+diff -r -x runs.json /home/kawato/.cache/losat-web-gui-target/wasm-threading-s05/reactor-records/blastn-single-dp-spawn-fail-2.error /home/kawato/.cache/losat-web-gui-target/wasm-threading-sd/reactor-records/blastn-single-dp-spawn-fail-2.error
+1c1
+< failed to build blastn pool with 4 threads: Resource temporarily unavailable (os error 6): Resource temporarily unavailable (os error 6)
+\ No newline at end of file
+---
+> failed to build blastn pool with 4 threads; a thread count that the system cannot start is not supported by LOSAT: Resource temporarily unavailable (os error 6): Resource temporarily unavailable (os error 6)
+\ No newline at end of file
+diff -r -x runs.json /home/kawato/.cache/losat-web-gui-target/wasm-threading-s05/reactor-records/blastp-reject-256.error /home/kawato/.cache/losat-web-gui-target/wasm-threading-sd/reactor-records/blastp-reject-256.error
+1c1
+< requested 256 threads exceeds Rayon maximum 255
+\ No newline at end of file
+---
+> requested 256 threads exceeds Rayon maximum 255, which is not supported by LOSAT
+\ No newline at end of file
+diff -r -x runs.json /home/kawato/.cache/losat-web-gui-target/wasm-threading-s05/reactor-records/blastp-spawn-fail-1.error /home/kawato/.cache/losat-web-gui-target/wasm-threading-sd/reactor-records/blastp-spawn-fail-1.error
+1c1
+< failed to build blastp pool with 4 threads: Resource temporarily unavailable (os error 6): Resource temporarily unavailable (os error 6)
+\ No newline at end of file
+---
+> failed to build blastp pool with 4 threads; a thread count that the system cannot start is not supported by LOSAT: Resource temporarily unavailable (os error 6): Resource temporarily unavailable (os error 6)
+\ No newline at end of file
+diff -r -x runs.json /home/kawato/.cache/losat-web-gui-target/wasm-threading-s05/reactor-records/blastp-spawn-fail-2.error /home/kawato/.cache/losat-web-gui-target/wasm-threading-sd/reactor-records/blastp-spawn-fail-2.error
+1c1
+< failed to build blastp pool with 4 threads: Resource temporarily unavailable (os error 6): Resource temporarily unavailable (os error 6)
+\ No newline at end of file
+---
+> failed to build blastp pool with 4 threads; a thread count that the system cannot start is not supported by LOSAT: Resource temporarily unavailable (os error 6): Resource temporarily unavailable (os error 6)
+\ No newline at end of file
+diff -r -x runs.json /home/kawato/.cache/losat-web-gui-target/wasm-threading-s05/reactor-records/blastx-reject-256.error /home/kawato/.cache/losat-web-gui-target/wasm-threading-sd/reactor-records/blastx-reject-256.error
+1c1
+< requested 256 threads exceeds Rayon maximum 255
+\ No newline at end of file
+---
+> requested 256 threads exceeds Rayon maximum 255, which is not supported by LOSAT
+\ No newline at end of file
+diff -r -x runs.json /home/kawato/.cache/losat-web-gui-target/wasm-threading-s05/reactor-records/blastx-spawn-fail-1.error /home/kawato/.cache/losat-web-gui-target/wasm-threading-sd/reactor-records/blastx-spawn-fail-1.error
+1c1
+< failed to build BLASTX pool with 4 threads: Resource temporarily unavailable (os error 6): Resource temporarily unavailable (os error 6)
+\ No newline at end of file
+---
+> failed to build BLASTX pool with 4 threads; a thread count that the system cannot start is not supported by LOSAT: Resource temporarily unavailable (os error 6): Resource temporarily unavailable (os error 6)
+\ No newline at end of file
+diff -r -x runs.json /home/kawato/.cache/losat-web-gui-target/wasm-threading-s05/reactor-records/blastx-spawn-fail-2.error /home/kawato/.cache/losat-web-gui-target/wasm-threading-sd/reactor-records/blastx-spawn-fail-2.error
+1c1
+< failed to build BLASTX pool with 4 threads: Resource temporarily unavailable (os error 6): Resource temporarily unavailable (os error 6)
+\ No newline at end of file
+---
+> failed to build BLASTX pool with 4 threads; a thread count that the system cannot start is not supported by LOSAT: Resource temporarily unavailable (os error 6): Resource temporarily unavailable (os error 6)
+\ No newline at end of file
+diff -r -x runs.json /home/kawato/.cache/losat-web-gui-target/wasm-threading-s05/reactor-records/megablast-reject-256.error /home/kawato/.cache/losat-web-gui-target/wasm-threading-sd/reactor-records/megablast-reject-256.error
+1c1
+< requested 256 threads exceeds Rayon maximum 255
+\ No newline at end of file
+---
+> requested 256 threads exceeds Rayon maximum 255, which is not supported by LOSAT
+\ No newline at end of file
+diff -r -x runs.json /home/kawato/.cache/losat-web-gui-target/wasm-threading-s05/reactor-records/megablast-spawn-fail-1.error /home/kawato/.cache/losat-web-gui-target/wasm-threading-sd/reactor-records/megablast-spawn-fail-1.error
+1c1
+< failed to build blastn pool with 4 threads: Resource temporarily unavailable (os error 6): Resource temporarily unavailable (os error 6)
+\ No newline at end of file
+---
+> failed to build blastn pool with 4 threads; a thread count that the system cannot start is not supported by LOSAT: Resource temporarily unavailable (os error 6): Resource temporarily unavailable (os error 6)
+\ No newline at end of file
+diff -r -x runs.json /home/kawato/.cache/losat-web-gui-target/wasm-threading-s05/reactor-records/megablast-spawn-fail-2.error /home/kawato/.cache/losat-web-gui-target/wasm-threading-sd/reactor-records/megablast-spawn-fail-2.error
+1c1
+< failed to build blastn pool with 4 threads: Resource temporarily unavailable (os error 6): Resource temporarily unavailable (os error 6)
+\ No newline at end of file
+---
+> failed to build blastn pool with 4 threads; a thread count that the system cannot start is not supported by LOSAT: Resource temporarily unavailable (os error 6): Resource temporarily unavailable (os error 6)
+\ No newline at end of file
+diff -r -x runs.json /home/kawato/.cache/losat-web-gui-target/wasm-threading-s05/reactor-records/tblastx-linking-reject-256.error /home/kawato/.cache/losat-web-gui-target/wasm-threading-sd/reactor-records/tblastx-linking-reject-256.error
+1c1
+< requested 256 threads exceeds Rayon maximum 255
+\ No newline at end of file
+---
+> requested 256 threads exceeds Rayon maximum 255, which is not supported by LOSAT
+\ No newline at end of file
+diff -r -x runs.json /home/kawato/.cache/losat-web-gui-target/wasm-threading-s05/reactor-records/tblastx-linking-spawn-fail-1.error /home/kawato/.cache/losat-web-gui-target/wasm-threading-sd/reactor-records/tblastx-linking-spawn-fail-1.error
+1c1
+< failed to build tblastx pool with 4 threads: Resource temporarily unavailable (os error 6): Resource temporarily unavailable (os error 6)
+\ No newline at end of file
+---
+> failed to build tblastx pool with 4 threads; a thread count that the system cannot start is not supported by LOSAT: Resource temporarily unavailable (os error 6): Resource temporarily unavailable (os error 6)
+\ No newline at end of file
+diff -r -x runs.json /home/kawato/.cache/losat-web-gui-target/wasm-threading-s05/reactor-records/tblastx-linking-spawn-fail-2.error /home/kawato/.cache/losat-web-gui-target/wasm-threading-sd/reactor-records/tblastx-linking-spawn-fail-2.error
+1c1
+< failed to build tblastx pool with 4 threads: Resource temporarily unavailable (os error 6): Resource temporarily unavailable (os error 6)
+\ No newline at end of file
+---
+> failed to build tblastx pool with 4 threads; a thread count that the system cannot start is not supported by LOSAT: Resource temporarily unavailable (os error 6): Resource temporarily unavailable (os error 6)
+\ No newline at end of file
+diff -r -x runs.json /home/kawato/.cache/losat-web-gui-target/wasm-threading-s05/reactor-records/tblastx-reject-256.error /home/kawato/.cache/losat-web-gui-target/wasm-threading-sd/reactor-records/tblastx-reject-256.error
+1c1
+< requested 256 threads exceeds Rayon maximum 255
+\ No newline at end of file
+---
+> requested 256 threads exceeds Rayon maximum 255, which is not supported by LOSAT
+\ No newline at end of file
+diff -r -x runs.json /home/kawato/.cache/losat-web-gui-target/wasm-threading-s05/reactor-records/tblastx-spawn-fail-1.error /home/kawato/.cache/losat-web-gui-target/wasm-threading-sd/reactor-records/tblastx-spawn-fail-1.error
+1c1
+< failed to build tblastx pool with 4 threads: Resource temporarily unavailable (os error 6): Resource temporarily unavailable (os error 6)
+\ No newline at end of file
+---
+> failed to build tblastx pool with 4 threads; a thread count that the system cannot start is not supported by LOSAT: Resource temporarily unavailable (os error 6): Resource temporarily unavailable (os error 6)
+\ No newline at end of file
+diff -r -x runs.json /home/kawato/.cache/losat-web-gui-target/wasm-threading-s05/reactor-records/tblastx-spawn-fail-2.error /home/kawato/.cache/losat-web-gui-target/wasm-threading-sd/reactor-records/tblastx-spawn-fail-2.error
+1c1
+< failed to build tblastx pool with 4 threads: Resource temporarily unavailable (os error 6): Resource temporarily unavailable (os error 6)
+\ No newline at end of file
+---
+> failed to build tblastx pool with 4 threads; a thread count that the system cannot start is not supported by LOSAT: Resource temporarily unavailable (os error 6): Resource temporarily unavailable (os error 6)
+\ No newline at end of file
+exit 1
+records compared: 172
+$ diff -r -x runs.json s05/serial-reactor-records sd/serial-reactor-records
+exit 0
+records compared: 12

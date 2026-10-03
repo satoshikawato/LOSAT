@@ -1,0 +1,5 @@
+(node:480754) ExperimentalWarning: WASI is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ok serial describe, validate, register, scan
+ok serial n1 tblastx.invalid.0,tblastx.invalid.7
+1 runs matched the native CLI; frozen hashes: 2/2 equal

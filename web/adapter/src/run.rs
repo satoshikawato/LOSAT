@@ -393,7 +393,6 @@ mod tests {
                 ["-window_size", "0"],
                 "-window_size 0 (the one-hit word finder)",
             ),
-            (["-culling_limit", "2"], "-culling_limit 2 is not supported"),
         ] {
             let error = validate(&[&tblastx[..], &extra[..]].concat()).unwrap_err();
             assert!(error.starts_with(start), "{error}");

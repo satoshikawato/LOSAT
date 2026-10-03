@@ -1,17 +1,18 @@
-# Session SD — E2i：BLASTN の dc-megablast
+# Session SD — E2i：BLASTN の dc-megablast と blastn-short
 
 ## INSTRUCTION PROMPT
 
-LOSAT の段階 E2i を実行する。BLASTN の `-task dc-megablast`（discontiguous megablast）を NCBI BLAST+ と同じにする。先に [セッション README](README.md) の共通規則を読み、特に規則 4（`AGENTS.md`、`.agents/skills/verify-ncbi-parity-and-speed/SKILL.md`）に従う。完了条件の正本は、総合計画書 §7 の SD の行である（計画 DW-18）。エンジン側のセッションで、S08b の後、S08+ の前に行う。
+LOSAT の段階 E2i を実行する。BLASTN の `-task dc-megablast`（discontiguous megablast）と `-task blastn-short` を NCBI BLAST+ と同じにする。先に [セッション README](README.md) の共通規則を読み、特に規則 4（`AGENTS.md`、`.agents/skills/verify-ncbi-parity-and-speed/SKILL.md`）に従う。完了条件の正本は、総合計画書 §7 の SD の行である（計画 DW-18）。エンジン側のセッションで、S08b の後、S08+ の前に行う。
 
 背景（2026-10-03 の調べ）：
 
 - v0.1.0 の CLI の前（`adbcaf7fb` の前、2026-09-11 まで）の `-task` は任意の文字列を受け付け、`dc-megablast` は blastn の既定値（word size 11、reward 2、penalty −3、gap 5/2）を使い、megablast の lookup を強いるだけだった（`coordination.rs` の `discontig_template`）。discontiguous の template（`-template_type`・`-template_length`）、その lookup と走査は無く、NCBI の dc-megablast とは違う結果だった。
 - v0.1.0 の CLI（`adbcaf7fb`）は `-task` を `megablast` と `blastn` に絞り、S07+（`c33731d08`）は NCBI のほかの task（`blastn-short`・`dc-megablast`・`rmblastn`）を明示的に拒否した（`LOSAT/src/blastinput/value_parsers.rs` の `blastn_task`）。`-template_type`・`-template_length` は LOSAT に無い NCBI の option として拒否している（`LOSAT/src/cli.rs`）。
 - 残っている部品：`LOSAT/src/algorithm/blastn/blast_engine/run.rs` の `discontig_template`、`LOSAT/src/algorithm/blastn/coordination.rs` の lookup の選び方（`mb_template_length > 0` で megablast の lookup を強いる NCBI の分岐、`blast_nalookup.c` の `BlastChooseNaLookupTable` の移植）。どちらも今は届かない。
-- 保守者の依頼（2026-10-03）：dc-megablast をできるようにする。
+- 保守者の依頼（2026-10-03）：dc-megablast をできるようにする。続けて blastn-short も。
+- blastn-short は NCBI では blastn の program に task の既定値を重ねたもの（`c++/src/algo/blast/api/blast_options_handle.cpp:343-360`：`SetMatchReward(1)`、`SetMismatchPenalty(-3)`、`SetEvalueThreshold(1000)`、`SetWordSize(7)`、`ClearFilterOptions()`）。LOSAT の blastn は word size 4〜28 と NCBI の得点の表を既に NCBI と同じにしている（E2c の `word_size_sweep.py`・`scoring_sweep.py`）ので、残りは task の既定値と、NCBI の CLI がそれと `-evalue`・`-dust`・`-lcase_masking` などの指定を組み合わせる順序（`blastn_args.cpp`、`blast_args.cpp` の `ExtractAlgorithmOptions`）。
 
-NCBI の経路（固定 commit 598d8ae6 のソースで確かめ、表にする）：
+NCBI の経路（固定 commit 598d8ae6 のソースで確かめ、表にする。blastn-short は下の「task と既定値」「引数」と、blastn の経路のうち既定値で変わる分岐）：
 
 - task と既定値：`c++/src/algo/blast/api/blast_options_handle.cpp`（`CBlastOptionsFactory::CreateTask` の `dc-megablast`）、`c++/src/algo/blast/api/disc_nucl_options.cpp`（`CDiscNucleotideOptionsHandle`：`SetTemplateType(0)`、`SetTemplateLength(18)`、`SetWordSize(BLAST_WORDSIZE_NUCL)`、`SetWindowSize(BLAST_WINDOW_SIZE_DISC)`（40）、ungapped と gapped の X-drop、gap trigger、`eDynProgScoreOnly` と `eDynProgTbck`、得点は `CBlastNucleotideOptionsHandle::SetScoringOptionsDefaults`）、program `eDiscMegablast`。
 - 引数：`c++/src/algo/blast/blastinput/blast_args.cpp:696-760`（`CDiscontiguousMegablastArgs`：`-template_type` は `coding`・`optimal`・`coding_and_optimal`、`-template_length` は 16・18・21、互いに依存）、`blastn_args.cpp`。
@@ -22,10 +23,10 @@ NCBI の経路（固定 commit 598d8ae6 のソースで確かめ、表にする�
 - 報告：outfmt 0 の prolog と epilog、outfmt 7 の見出しの program と task の表記、`Method:` の有無。
 
 1. **棚卸し（計画 DW-12）**：NCBI の dc-megablast の経路の関数を、E2g の棚卸しと同じ方式（`docs/evidence/losat_web_e2g/` の `inventory_refs.py`・`build_inventory.py`・`stage2/`）で表にする（`docs/evidence/losat_web_e2i/INVENTORY.tsv`）。megablast・blastn と共有で E2g が faithful とした行は、dc-megablast で通る分岐が同じかだけを確かめる。読み取り専用の sonnet の agent に範囲ごとに分けてよい。
-2. **一括の移植**：未移植と差のある移植を、NCBI の関数ごとに簡略化せずに transpile する。Rust の移植箇所の直上に NCBI のファイル・行と断片を書く。速度のための LOSAT の方式（詰めた配列の走査、並列化）は、出力が同じなら使ってよい。`blastn_task` で `dc-megablast` を受け付け、`-template_type`・`-template_length` を NCBI と同じ制約と依存で足す（`cli.rs` の拒否の一覧から外す）。`blastn-short`・`rmblastn` は明示的な拒否のまま。
-3. **fixture**：NCBI BLAST+ 2.17.0 の出力を oracle として固定する（`LOSAT/tests/outfmt0_manifest.tsv` と `LOSAT/tests/blastn_regression_fixtures.py` の方式。outfmt 0/6/7、スレッド 1/2/4）。template の種類（coding・optimal・両方）× 長さ（16・18・21）× word size（11・12）、両方の鎖、複数の query の batch、曖昧な文字、`-lcase_masking`、`-dust`、遠い種どうしの組（`LOSAT/tests/fasta` の genome の窓）、ヒット無し。変更前の実行ファイルでも `check` して、fixture が分岐を区別することを記録する。
-4. **sweep**：E2c の `scoring_sweep.py` と `check_inputs.py`、E2f の batch の sweep を `-task dc-megablast` に広げ、NCBI と同じ拒否、outfmt 0/6/7 のバイト一致、明示的な拒否のどれかになることを確かめる。
-5. **アダプタ**：ABI v2 の `describe` に task と新しい option を出し、`validate` が CLI と同じ文言になることを確かめる（`docs/web/abi_v2.md`）。`docs/web/verification_cells.tsv` に BLASTN の dc-megablast の行（native CLI と Wasm ABI v2 serial / threaded、スレッド 1/2/4）を足して埋める。
+2. **一括の移植**：未移植と差のある移植を、NCBI の関数ごとに簡略化せずに transpile する。Rust の移植箇所の直上に NCBI のファイル・行と断片を書く。速度のための LOSAT の方式（詰めた配列の走査、並列化）は、出力が同じなら使ってよい。`blastn_task` で `dc-megablast` と `blastn-short` を受け付け、`-template_type`・`-template_length` を NCBI と同じ制約と依存で足す（`cli.rs` の拒否の一覧から外す）。`rmblastn`（行列の得点と masklevel）は明示的な拒否のまま。
+3. **fixture**：NCBI BLAST+ 2.17.0 の出力を oracle として固定する（`LOSAT/tests/outfmt0_manifest.tsv` と `LOSAT/tests/blastn_regression_fixtures.py` の方式。outfmt 0/6/7、スレッド 1/2/4）。dc-megablast は template の種類（coding・optimal・両方）× 長さ（16・18・21）× word size（11・12）、blastn-short は 50 塩基より短い query（primer の長さ）と既定値の上書き（`-word_size`・`-reward`・`-penalty`・`-evalue`・`-dust`）、両方の鎖、複数の query の batch、曖昧な文字、`-lcase_masking`、`-dust`、遠い種どうしの組（`LOSAT/tests/fasta` の genome の窓）、ヒット無し。変更前の実行ファイルでも `check` して、fixture が分岐を区別することを記録する。
+4. **sweep**：E2c の `scoring_sweep.py`・`word_size_sweep.py`・`check_inputs.py`、E2f の batch の sweep を `-task dc-megablast` と `-task blastn-short` に広げ、NCBI と同じ拒否、outfmt 0/6/7 のバイト一致、明示的な拒否のどれかになることを確かめる。
+5. **アダプタ**：ABI v2 の `describe` に task と新しい option を出し、`validate` が CLI と同じ文言になることを確かめる（`docs/web/abi_v2.md`）。`docs/web/verification_cells.tsv` に BLASTN の dc-megablast と blastn-short の行（native CLI と Wasm ABI v2 serial / threaded、スレッド 1/2/4）を足して埋める。
 6. **ゲート**：BLASTN の既存のゲート（Gate A、S02 の capture、E2c・E2f・E2g の sweep と fixture、CI の速い検査）に退行なし、v1 の WASI の行列、V-ABI quick と full、`cargo fmt --check`・clippy・`cargo test --all-features`。V-PERF は megablast と blastn の case が非退行であること（dc-megablast は新しい経路なので、NCBI との時間の比を記録する）。
 7. **独立監査**：観点ごとに sonnet の agent（読み取り専用）で、経路の網羅、移植の忠実さ、拒否の理由、ABI を確かめる（S08 の `~/.cache/losat-web-gui-target/s08-audit/` の指示の形）。4 つとも supported になるまで続ける。
 

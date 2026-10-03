@@ -350,7 +350,7 @@ fn parse_tblastx_args(
         out: Some(out),
         query_gencode: 1,
         db_gencode: 1,
-        max_target_seqs: 500,
+        max_target_seqs: None,
         // NCBI blast_options.c:83-85: window=kSegWindow; locut=kSegLocut; hicut=kSegHicut.
         seg: BlastpSegSpec::Yes,
         window_size: 40,
@@ -395,14 +395,15 @@ fn parse_tblastx_args(
         //     string fmt_choice =
         //         NStr::TruncateSpaces(args[kArgOutputFormat].AsString());
         // ```
-        // The TBLASTX engine writes only outfmt 6, so the web path applies the same
-        // CLI validator and rejects any other format instead of emitting outfmt 6.
+        // Plan TD-1 freezes ABI v1, whose TBLASTX wrote only outfmt 6: it keeps rejecting
+        // any other format with the error that it gave before the engine implemented
+        // outfmt 0 and 7 (session S08).
         } else if flag == "-outfmt" {
-            args.outfmt = crate::blastinput::value_parsers::tblastx_outfmt(next_arg(
+            args.outfmt = crate::blastinput::value_parsers::tblastx_v1_outfmt(next_arg(
                 extra_args, &mut index, flag,
             )?)?;
         } else if let Some(value) = flag.strip_prefix("-outfmt=") {
-            args.outfmt = crate::blastinput::value_parsers::tblastx_outfmt(value)?;
+            args.outfmt = crate::blastinput::value_parsers::tblastx_v1_outfmt(value)?;
         } else if flag == "-evalue" {
             args.evalue = next_arg(extra_args, &mut index, flag)?
                 .parse()

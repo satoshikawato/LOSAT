@@ -53,8 +53,26 @@ pub struct TblastxArgs {
     pub query_gencode: u8,
     #[arg(long, default_value_t = 1, value_parser = genetic_code)]
     pub db_gencode: u8,
-    #[arg(long, default_value_t = 500, value_parser = positive_usize)]
-    pub max_target_seqs: usize,
+    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2910-2927
+    // ```c
+    //     m_NumDescriptions = m_DfltNumDescriptions;
+    //     m_NumAlignments = m_DfltNumAlignments;
+    //     ...
+    //     if (args.Exist(kArgMaxTargetSequences) && args[kArgMaxTargetSequences]) {
+    //         m_NumDescriptions = args[kArgMaxTargetSequences].AsInteger();
+    //         m_NumAlignments = args[kArgMaxTargetSequences].AsInteger();
+    //         hitlist_size = m_NumAlignments;
+    //     }
+    // ```
+    // NCBI reference: c++/src/objtools/align_format/format_flags.cpp:219,221
+    // ```c
+    // const size_t kDfltArgNumDescriptions = 500;
+    // const size_t kDfltArgNumAlignments = 250;
+    // ```
+    // An omitted value keeps the default hit list size (500) but the pairwise report then
+    // shows 250 alignments, so the option has no clap default.
+    #[arg(long, value_parser = positive_usize, help = "Maximum number of aligned sequences to keep (default: 500)")]
+    pub max_target_seqs: Option<usize>,
     // NCBI low-complexity filtering selection:
     // - dust is used only for blastn (and mapping)
     // - otherwise seg is used
@@ -79,23 +97,19 @@ pub struct TblastxArgs {
     #[arg(long, default_value = "12 2.2 2.5", value_parser = parse_seg_filtering, help = "SEG: no, yes, or WINDOW LOCUT HICUT")]
     pub seg: SegSpec,
 
-    /// Two-hit window size for triggering ungapped extension (default: 40)
-    /// Smaller values are more strict, larger values are more sensitive
-    /// Use 0 to enable one-hit mode (like NCBI BLAST's -window_size 0)
+    /// Two-hit window size for triggering ungapped extension (default: 40).
+    /// Smaller values are more strict, larger values are more sensitive.
+    /// 0 (NCBI's one-hit word finder) is not supported by LOSAT's TBLASTX.
     #[arg(long, default_value_t = 40, value_parser = nonnegative_usize)]
     pub window_size: usize,
 
-    /// Output format. Only 6 without custom fields is currently implemented.
-    /// The NCBI default 0 fails explicitly until pairwise output is ported.
+    /// Output format: 0 (pairwise), 6 or 7 (tabular), without custom fields.
     #[arg(long, default_value = "0", value_name = "SPEC", value_parser = tblastx_outfmt)]
     pub outfmt: String,
 
-    /// HSP culling limit (number of HSPs allowed per query region).
-    ///
-    /// When > 0, applies NCBI's interval tree-based HSP culling algorithm to remove
-    /// dominated HSPs based on score/length tradeoff. Default: 0 (disabled, matches NCBI tblastx default).
-    ///
-    /// NCBI reference: hspfilter_culling.c, cmdline_flags.cpp:127-128 (kDfltArgCullingLimit = 0)
+    // NCBI reference: cmdline_flags.cpp:127-128 (kDfltArgCullingLimit = 0)
+    /// HSP culling limit (default: 0, no culling). A limit above 0 is not supported by
+    /// LOSAT's TBLASTX (its HSP culling differs from NCBI's hspfilter_culling.c).
     #[arg(long, default_value_t = 0)]
     pub culling_limit: u32,
 }

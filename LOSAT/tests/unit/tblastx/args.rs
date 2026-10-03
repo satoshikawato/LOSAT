@@ -27,7 +27,9 @@ fn test_default_values() {
     assert_eq!(args.num_threads, 1);
     assert_eq!(args.query_gencode, 1);
     assert_eq!(args.db_gencode, 1);
-    assert_eq!(args.max_target_seqs, 500);
+    // An omitted -max_target_seqs keeps NCBI's default hit list size of 500 (and the
+    // pairwise report's 250 alignments).
+    assert_eq!(args.max_target_seqs, None);
     let params = args.seg.params().unwrap();
     assert_eq!((params.window, params.locut, params.hicut), (12, 2.2, 2.5));
 }
@@ -110,7 +112,7 @@ fn test_custom_max_target_seqs() {
         "-max_target_seqs",
         "1000",
     ]);
-    assert_eq!(args.max_target_seqs, 1000);
+    assert_eq!(args.max_target_seqs, Some(1000));
 }
 
 #[test]

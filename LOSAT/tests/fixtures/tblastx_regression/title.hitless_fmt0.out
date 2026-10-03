@@ -1,0 +1,92 @@
+TBLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/fixtures/tblastx_regression/inputs/titles_hitless_subject.fa).
+           4 sequences; 2,880 total letters
+
+
+
+Query= pep40 a 40-residue peptide in frame +1 with random flanks
+
+Length=180
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+hit one                                                               105     2e-27  1
+
+
+> hit one
+Length=180
+
+ Score = 105 bits (223),  Expect = 2e-27
+ Identities = 40/40 (100%), Positives = 40/40 (100%), Gaps = 0/40 (0%)
+ Frame = +1/+1
+
+Query  31   WCDMTMSVIQVGGQFKPRTASAYFPYCISLCGKNQIVEHV  150
+            WCDMTMSVIQVGGQFKPRTASAYFPYCISLCGKNQIVEHV
+Sbjct  31   WCDMTMSVIQVGGQFKPRTASAYFPYCISLCGKNQIVEHV  150
+
+
+ Score = 67.5 bits (141),  Expect = 4e-16
+ Identities = 30/43 (70%), Positives = 35/43 (81%), Gaps = 0/43 (0%)
+ Frame = -2/-2
+
+Query  158  IVSTCSTI*FFPQRLMQYGK*ADAVRGLN*PPTCITLMVISHH  30
+            ++STCSTI*FFP + +Q GK A AVRGLN PPT IT MV+SHH
+Sbjct  158  LISTCSTI*FFPHKEIQ*GKYALAVRGLNWPPTWITDMVMSHH  30
+
+
+ Score = 49.2 bits (101),  Expect = 1e-10
+ Identities = 19/40 (48%), Positives = 27/40 (68%), Gaps = 0/40 (0%)
+ Frame = -1/-1
+
+Query  150  YMLHYLILSAEADAVWEVGGRRTWLELTPDLYNTHGHITP  31
+            ++L+YLIL A+ D + E+   R WL+L  DL   HGH+TP
+Sbjct  150  HVLYYLILPAQGDTIREICTGRPWLKLASDLDY*HGHVTP  31
+
+
+ Score = 33.1 bits (66),  Expect = 8e-06
+ Identities = 17/39 (44%), Positives = 25/39 (64%), Gaps = 0/39 (0%)
+ Frame = +3/+3
+
+Query  30   MV*YDHECYTGRGSVQATYGVRLLPILHQPLRKESNSGA  146
+            +V*+DH    GR  V AT G  + P+L+  +R+ES+S A
+Sbjct  30   VV*HDHVSNPGRRPV*ATDGQCIFPLLYLLVREESDSRA  146
+
+
+ Score = 28.1 bits (55),  Expect = 3e-04
+ Identities = 17/38 (45%), Positives = 20/38 (53%), Gaps = 0/38 (0%)
+ Frame = -3/-3
+
+Query  145  APLFDSFRRG*CSMGSRRTPYVA*TDPRPV*HSWSYHT  32
+            A L DS R    + G+   P VA*T  RP   +WS HT
+Sbjct  145  ALLSDSSRTRRYNKGNMHWPSVA*TGLRPGLLTWSCHT  32
+
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 37296
+
+
+  Database: User specified sequence set (Input:
+tests/fixtures/tblastx_regression/inputs/titles_hitless_subject.fa).
+    Posted date:  Unknown
+  Number of letters in database: 2,880
+  Number of sequences in database:  4
+
+
+
+Matrix: BLOSUM62
+Neighboring words threshold: 13
+Window for multiple hits: 40

@@ -1,0 +1,31 @@
+# LOSAT 55a7e57469be… (1117e8c17), NCBI BLAST+ 2.17.0; run 2026-10-03T00:34:22Z
+blastn	outfmt 0	LOSAT	exit 0	open-stdout bytes 12783	stderr: 
+blastn	outfmt 0	NCBI	exit 6	open-stdout bytes 12783	stderr: BLAST failed to write output|
+blastn	outfmt 6	LOSAT	exit 0	open-stdout bytes 110	stderr: 
+blastn	outfmt 6	NCBI	exit 134	open-stdout bytes 110	stderr: terminate called after throwing an instance of 'std::__ios_failure'|  
+blastn	outfmt 7	LOSAT	exit 0	open-stdout bytes 460	stderr: 
+blastn	outfmt 7	NCBI	exit 134	open-stdout bytes 460	stderr: terminate called after throwing an instance of 'std::__ios_failure'|  
+tblastx	outfmt 0	LOSAT	exit 0	open-stdout bytes 37491	stderr: 
+tblastx	outfmt 0	NCBI	exit 6	open-stdout bytes 37491	stderr: BLAST failed to write output|
+tblastx	outfmt 6	LOSAT	exit 0	open-stdout bytes 4334	stderr: 
+tblastx	outfmt 6	NCBI	exit 134	open-stdout bytes 4334	stderr: terminate called after throwing an instance of 'std::__ios_failure'|  
+tblastx	outfmt 7	LOSAT	exit 0	open-stdout bytes 4686	stderr: 
+tblastx	outfmt 7	NCBI	exit 134	open-stdout bytes 4686	stderr: terminate called after throwing an instance of 'std::__ios_failure'|  
+blastp	outfmt 0	LOSAT	exit 0	open-stdout bytes 12700	stderr: 
+blastp	outfmt 0	NCBI	exit 6	open-stdout bytes 12700	stderr: BLAST failed to write output|
+blastp	outfmt 6	LOSAT	exit 0	open-stdout bytes 371	stderr: 
+blastp	outfmt 6	NCBI	exit 134	open-stdout bytes 371	stderr: terminate called after throwing an instance of 'std::__ios_failure'|  
+blastp	outfmt 7	LOSAT	exit 0	open-stdout bytes 998	stderr: 
+blastp	outfmt 7	NCBI	exit 134	open-stdout bytes 998	stderr: terminate called after throwing an instance of 'std::__ios_failure'|  
+tblastn	outfmt 0	LOSAT	exit 0	open-stdout bytes 4020	stderr: 
+tblastn	outfmt 0	NCBI	exit 6	open-stdout bytes 4020	stderr: BLAST failed to write output|
+tblastn	outfmt 6	LOSAT	exit 0	open-stdout bytes 394	stderr: 
+tblastn	outfmt 6	NCBI	exit 134	open-stdout bytes 394	stderr: terminate called after throwing an instance of 'std::__ios_failure'|  
+tblastn	outfmt 7	LOSAT	exit 0	open-stdout bytes 1023	stderr: 
+tblastn	outfmt 7	NCBI	exit 134	open-stdout bytes 1023	stderr: terminate called after throwing an instance of 'std::__ios_failure'|  
+blastx	outfmt 0	LOSAT	exit 0	open-stdout bytes 2930	stderr: 
+blastx	outfmt 0	NCBI	exit 6	open-stdout bytes 2930	stderr: BLAST failed to write output|
+blastx	outfmt 6	LOSAT	exit 0	open-stdout bytes 259	stderr: 
+blastx	outfmt 6	NCBI	exit 134	open-stdout bytes 259	stderr: terminate called after throwing an instance of 'std::__ios_failure'|  
+blastx	outfmt 7	LOSAT	exit 0	open-stdout bytes 609	stderr: 
+blastx	outfmt 7	NCBI	exit 134	open-stdout bytes 609	stderr: terminate called after throwing an instance of 'std::__ios_failure'|  

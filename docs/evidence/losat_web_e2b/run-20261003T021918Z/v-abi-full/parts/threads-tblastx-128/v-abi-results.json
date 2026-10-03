@@ -1,0 +1,83 @@
+[
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "tblastx",
+    "cases": [
+      "tblastx.many_mts255.0"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "tests/fasta/outfmt0/tblastx_many_query.fasta",
+      "-subject",
+      "tests/fasta/outfmt0/tblastx_many_subject.fasta",
+      "-max_target_seqs",
+      "255"
+    ],
+    "formats": {
+      "0": "a46b1b9fee5f739e5216c7241e81417ff7d4086f5cf31930794ba5c27dc62ac8",
+      "6": "1b56499cb12bf9dcc404fd6292c76aa57dbfc157628241beef3886ec677f1d45",
+      "7": "19dc3452347a75bf3eeb692e0abd18ca4f60f4cca502650368913854377f821a"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 1209
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "tblastx",
+    "cases": [
+      "tblastx.many_mts255.0"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "tests/fasta/outfmt0/tblastx_many_query.fasta",
+      "-subject",
+      "tests/fasta/outfmt0/tblastx_many_subject.fasta",
+      "-max_target_seqs",
+      "255"
+    ],
+    "formats": {
+      "0": "a46b1b9fee5f739e5216c7241e81417ff7d4086f5cf31930794ba5c27dc62ac8",
+      "6": "1b56499cb12bf9dcc404fd6292c76aa57dbfc157628241beef3886ec677f1d45",
+      "7": "19dc3452347a75bf3eeb692e0abd18ca4f60f4cca502650368913854377f821a"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 1209
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "tblastx",
+    "cases": [
+      "tblastx.many_mts255.0"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "tests/fasta/outfmt0/tblastx_many_query.fasta",
+      "-subject",
+      "tests/fasta/outfmt0/tblastx_many_subject.fasta",
+      "-max_target_seqs",
+      "255"
+    ],
+    "formats": {
+      "0": "a46b1b9fee5f739e5216c7241e81417ff7d4086f5cf31930794ba5c27dc62ac8",
+      "6": "1b56499cb12bf9dcc404fd6292c76aa57dbfc157628241beef3886ec677f1d45",
+      "7": "19dc3452347a75bf3eeb692e0abd18ca4f60f4cca502650368913854377f821a"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 1209
+  }
+]

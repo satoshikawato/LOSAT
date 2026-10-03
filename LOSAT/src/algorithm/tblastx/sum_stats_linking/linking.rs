@@ -4,7 +4,7 @@
 
 use crate::stats::sum_statistics::{
     defaults::{GAP_SIZE, OVERLAP_SIZE},
-    gap_decay_divisor, large_gap_sum_e, normalize_score, small_gap_sum_e,
+    gap_decay_divisor, ncbi_large_gap_sum_e, normalize_score, small_gap_sum_e,
 };
 use crate::stats::KarlinParams;
 use std::cell::RefCell;
@@ -176,9 +176,25 @@ fn blast_nint(x: f64) -> i32 {
 // else if (context1 > context2)
 //    return 1;
 // ```
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_query_info.c:76-77
+// ```c
+//     retval->first_context = 0;
+//     retval->last_context = retval->num_queries * kNumContexts - 1;
+// ```
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_util.c:1373-1376
+// ```c
+// BLAST_GetNumberOfContexts(EBlastProgramType p)
+// {
+//     if (Blast_QueryIsTranslated(p)) {
+//         return NUM_FRAMES;
+// ```
+// Every query has six contexts in NCBI, also a frame without a residue, so
+// `context/(NUM_FRAMES/2)` is `2 * query + (frame < 0)`. LOSAT's `ctx_idx` counts only the
+// frames that have a residue (none for 1-2 nt, two for 3 nt, four for 4 nt), so it would
+// shift the groups of the queries after such a query in the batch.
 #[inline]
 fn translated_context_group(hit: &UngappedHit) -> usize {
-    hit.ctx_idx / 3
+    hit.q_idx as usize * 2 + usize::from(hit.q_frame < 0)
 }
 
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:331-375
@@ -544,9 +560,17 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
     //    link_hsp_array[index] = (LinkHSPStruct*) calloc(1, sizeof(LinkHSPStruct));
     //    link_hsp_array[index]->hsp = hsp_array[index];
     // ```
+    // NCBI reference: c++/src/algo/blast/core/link_hsps.c:1773-1776
+    // ```c
+    //     /* Remove any information on number of linked HSPs from previous
+    //        linking. */
+    //     for (index = 0; index < hsp_list->hspcnt; ++index)
+    //         hsp_list->hsp_array[index]->num = 1;
+    // ```
     for (link_id, hit) in hits.iter_mut().enumerate() {
         hit.link_id = link_id;
         hit.chain_next_link_id = None;
+        hit.num = 1;
     }
 
     let diag_enabled = diagnostics_enabled();
@@ -836,7 +860,7 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
 //    if (H != NULL)
 //       link = H->hsp_link.link[ordering_method];
 // ```
-fn replay_ncbi_output_list(sorted_hits: Vec<&mut UngappedHit>) -> Vec<UngappedHit> {
+fn replay_ncbi_output_list(mut sorted_hits: Vec<&mut UngappedHit>) -> Vec<UngappedHit> {
     if sorted_hits.len() <= 1 {
         // NCBI reference: c++/src/algo/blast/core/link_hsps.c:1080-1085
         // hsp_list->hsp_array[index] = H->hsp;
@@ -862,8 +886,28 @@ fn replay_ncbi_output_list(sorted_hits: Vec<&mut UngappedHit>) -> Vec<UngappedHi
 
         let mut current = index;
         let mut hops = 0usize;
+        // NCBI reference: c++/src/algo/blast/core/link_hsps.c:1044-1061
+        // ```c
+        // 			/* The first one has the number of links correct. */
+        // 			num_links = H->hsp_link.num[ordering_method];
+        // 			link = H->hsp_link.link[ordering_method];
+        // 			while (link)
+        // 			{
+        // 				H->hsp->num = num_links;
+        //     ...
+        // 			}
+        // 			/* Set these for last link in chain. */
+        // 			H->hsp->num = num_links;
+        // ```
+        // Every HSP of a chain gets the head's count; an HSP without a link keeps 1.
+        let num_links = sorted_hits[index]
+            .chain_next_link_id
+            .map(|_| i32::from(sorted_hits[index].hsp_link_num));
         loop {
             replayed_indices.push(current);
+            if let Some(num_links) = num_links {
+                sorted_hits[current].num = num_links;
+            }
             let Some(next_id) = sorted_hits[current].chain_next_link_id else {
                 break;
             };
@@ -1972,7 +2016,7 @@ fn link_hsp_group_ncbi(
                 let num = pool_hsp_links[bi].num[1] as usize;
                 let xsum = pool_hsp_links[bi].xsum[1];
                 let divisor = gap_decay_divisor(gap_decay_rate, num);
-                prob[1] = large_gap_sum_e(
+                prob[1] = ncbi_large_gap_sum_e(
                     num as i16,
                     xsum,
                     eff_query_len as i32,
@@ -2002,7 +2046,7 @@ fn link_hsp_group_ncbi(
                 let num = pool_hsp_links[bi].num[1] as usize;
                 let xsum = pool_hsp_links[bi].xsum[1];
                 let divisor = gap_decay_divisor(gap_decay_rate, num);
-                prob[1] = large_gap_sum_e(
+                prob[1] = ncbi_large_gap_sum_e(
                     num as i16,
                     xsum,
                     eff_query_len as i32,
@@ -2083,6 +2127,14 @@ fn link_hsp_group_ncbi(
         // This is set BEFORE the loop that processes chain members
         pool_hsp_links[best_i].start_of_chain = true;
         group_hits[best_i].start_of_chain = true;
+        // NCBI reference: c++/src/algo/blast/core/link_hsps.c:1044-1045
+        // ```c
+        // 			/* The first one has the number of links correct. */
+        // 			num_links = H->hsp_link.num[ordering_method];
+        // ```
+        // The selected HSPs leave the list (link_hsps.c:965-980), so the head's count is
+        // not changed again before the HSPs are hooked up (`replay_ncbi_output_list`).
+        group_hits[best_i].hsp_link_num = pool_hsp_links[best_i].num[ordering];
 
         // Mark chain head and remove chain from consideration (NCBI lines 961-1000)
         // IMPORTANT: Set the chain's E-value to ALL members of the chain,
@@ -2767,6 +2819,27 @@ mod tests {
             // ```
             link_id: 0,
             chain_next_link_id: None,
+            hsp_link_num: 0,
+            num: 0,
+        }
+    }
+
+    #[test]
+    fn context_groups_are_query_and_strand_whatever_the_frames_before() {
+        // A 3-nt query has only frames +1 and -1 in LOSAT (`ctx_idx` 0 and 1); the next
+        // query's frames are `ctx_idx` 2..7. NCBI's groups (`context / 3`, six contexts per
+        // query) are 2 * query + strand.
+        let frames = [1i8, 2, 3, -1, -2, -3];
+        for (offset, &frame) in frames.iter().enumerate() {
+            let mut hit = mock_hit(0, 10, 0, 10, 1);
+            hit.q_idx = 1;
+            hit.q_frame = frame;
+            hit.ctx_idx = 2 + offset;
+            assert_eq!(
+                translated_context_group(&hit),
+                if frame > 0 { 2 } else { 3 },
+                "{frame}"
+            );
         }
     }
 
@@ -2806,6 +2879,43 @@ mod tests {
         let replayed = replay_ncbi_output_list(vec![&mut member, &mut head, &mut single]);
         let replayed_ids: Vec<usize> = replayed.iter().map(|hit| hit.link_id).collect();
         assert_eq!(replayed_ids, vec![1, 0, 2]);
+    }
+
+    #[test]
+    fn replay_gives_every_chain_hsp_the_head_count() {
+        // NCBI reference: c++/src/algo/blast/core/link_hsps.c:1044-1061
+        // ```c
+        // 			/* The first one has the number of links correct. */
+        // 			num_links = H->hsp_link.num[ordering_method];
+        // 			link = H->hsp_link.link[ordering_method];
+        // 			while (link)
+        // 			{
+        // 				H->hsp->num = num_links;
+        //     ...
+        // 			/* Set these for last link in chain. */
+        // 			H->hsp->num = num_links;
+        // ```
+        let mut member = mock_hit(1, 10, 1, 10, 10);
+        member.link_id = 0;
+        member.linked_set = true;
+        member.num = 1;
+        let mut head = mock_hit(20, 30, 20, 30, 20);
+        head.link_id = 1;
+        head.linked_set = true;
+        head.start_of_chain = true;
+        head.chain_next_link_id = Some(member.link_id);
+        head.hsp_link_num = 2;
+        head.num = 1;
+        let mut single = mock_hit(40, 50, 40, 50, 30);
+        single.link_id = 2;
+        single.start_of_chain = true;
+        single.hsp_link_num = 7;
+        single.num = 1;
+
+        let replayed = replay_ncbi_output_list(vec![&mut member, &mut head, &mut single]);
+        let nums: Vec<(usize, i32)> = replayed.iter().map(|hit| (hit.link_id, hit.num)).collect();
+        // The chain (head, member) has 2 HSPs; an HSP without a link keeps 1.
+        assert_eq!(nums, vec![(1, 2), (0, 2), (2, 1)]);
     }
 
     #[test]

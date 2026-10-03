@@ -105,6 +105,31 @@ pub struct UngappedHit {
     // ```
     /// Stable id of the next HSP in the selected chain, if any.
     pub chain_next_link_id: Option<usize>,
+    // NCBI reference: c++/src/algo/blast/core/link_hsps.c:63-66
+    // ```c
+    // typedef struct BlastHSPLink {
+    //    struct LinkHSPStruct* link[eOrderingMethods]; /**< Best
+    //                                                choice of HSP to link with */
+    //    Int2 num[eOrderingMethods]; /**< number of HSP in the ordering. */
+    // ```
+    // NCBI reference: c++/src/algo/blast/core/link_hsps.c:1044-1045
+    // ```c
+    // 			/* The first one has the number of links correct. */
+    // 			num_links = H->hsp_link.num[ordering_method];
+    // ```
+    /// `hsp_link.num[ordering_method]` of a chain head when its chain is selected (the
+    /// number of HSPs in the chain). Read only for chain heads.
+    pub hsp_link_num: i16,
+    // NCBI reference: c++/include/algo/blast/core/blast_hits.h:135-138
+    // ```c
+    //    Int4 num;             /**< How many HSP's are linked together for sum
+    //                               statistics evaluation? If unset (0), this HSP is
+    //                               not part of a linked set, i.e. value 0 is treated
+    //                               the same way as 1. */
+    // ```
+    /// NCBI `BlastHSP::num`. The pairwise report prints it as `Expect(n)` and in the `N`
+    /// column (the Seq-align score "sum_n").
+    pub num: i32,
 }
 
 /// Sequence data for re-alignment during HSP chaining

@@ -1,0 +1,16 @@
+== cargo clippy --locked --all-targets --all-features -- -D warnings
+    Checking LOSAT v0.2.0 (/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 9.66s
+exit 0
+== cargo clippy --locked --all-targets --no-default-features -- -D warnings
+    Checking LOSAT v0.2.0 (/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 9.73s
+exit 0
+== cargo clippy --locked --lib --target wasm32-wasip1 --no-default-features -- -D warnings
+    Checking LOSAT v0.2.0 (/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 10.05s
+exit 0
+== cargo clippy --locked --lib --target wasm32-wasip1-threads --features wasm-threads -- -D warnings
+    Checking LOSAT v0.2.0 (/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 12.21s
+exit 0

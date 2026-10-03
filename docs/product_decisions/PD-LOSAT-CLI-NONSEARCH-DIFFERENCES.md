@@ -1,8 +1,10 @@
 # Product Decision: CLI behaviour outside the search results
 
 - Decision ID: `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`
-- Version: 1.1
-- Date: 2026-10-02 (1.0); 1.1 the same day (exception 5, Session S07+++b)
+- Version: 1.3
+- Date: 2026-10-02 (1.0); 1.1 the same day (exception 5, Session S07+++b); 1.2 the same day
+  (the timing of a closed pipe, exceptions 3 and 5, Session S07+++b); 1.3 2026-10-03
+  (exception 6, a standard output closed at the start, Session S08b)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++ (E2g), on the items
   that the BLASTN inventory (`docs/evidence/losat_web_e2g/INVENTORY.tsv`, actions `S08` and
   `OPEN`) left for a maintainer decision. Plan decision DW-13 in
@@ -49,6 +51,25 @@ BLAST+.
    native `signal` call that the project's pure-Rust runtime boundary check rejects. LOSAT
    reports the failed outfmt 0 write as NCBI reports other outfmt 0 write failures:
    `BLAST failed to write output`, exit code 6 (outfmt 6/7: exception 3).
+   Version 1.2: whether a write to a pipe fails depends on when the reader closes it. When
+   LOSAT's writes have completed before the reader closes (for example a short outfmt 6 or
+   7 report read by `head -c 100`), LOSAT exits with code 0, where NCBI, which writes later
+   (at its flushes), is ended by SIGPIPE (141). This timing is part of exceptions 3 and 5
+   (round-3 audit of Session S07+++b).
+6. **Standard output closed at the start** (version 1.3, accepted by the maintainer on
+   2026-10-03 in Session S08b, plan DW-17). When a program starts with its standard output
+   closed (`>&-`), NCBI's first write to `cout` fails: outfmt 0 reports `BLAST failed to
+   write output`, exit code 6; outfmt 6 and 7 end on an uncaught `std::ios_base::failure`
+   (abort, exit status 134). Before `main`, the Rust runtime opens `/dev/null` on a closed
+   standard descriptor, so LOSAT cannot tell it from a `/dev/null` that the caller opened
+   for reading and writing (Python's `subprocess.DEVNULL`, Node's `stdio: 'ignore'`); a
+   check before `main` needs a native function that the pure-Rust runtime boundary check
+   rejects, and a Linux check of `/proc/self/fdinfo/1` failed such callers (Session S08,
+   audit (c) round 2, N2). LOSAT writes the report to that `/dev/null` and exits as the
+   search ends (0 when it succeeds), in every program and format; the report is discarded
+   either way. Evidence `docs/evidence/losat_web_e2b/closed_stdout/`: BLASTN, TBLASTX,
+   BLASTP, TBLASTN and BLASTX in outfmt 0, 6 and 7 (LOSAT exit 0 without stderr in all
+   15; NCBI exit 6 in the 5 outfmt 0 runs and 134 in the 10 others).
 
 ## Decided handling that is not an exception
 

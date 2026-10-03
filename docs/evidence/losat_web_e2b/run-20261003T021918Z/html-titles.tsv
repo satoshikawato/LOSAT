@@ -1,0 +1,3357 @@
+program	defline	ncbi_exit	losat_exit	result
+tblastx	'id x &Tab; y'	0	1	decoded, losat-rejects
+tblastn	'id x &Tab; y'	0	1	decoded, losat-rejects
+blastn	'id x &Tab; y'	0	1	decoded, losat-rejects
+tblastx	'id x &Tab y'	0	0	same
+tblastn	'id x &Tab y'	0	0	same
+blastn	'id x &Tab y'	0	0	same
+tblastx	'id x &NewLine; y'	0	1	decoded, losat-rejects
+tblastn	'id x &NewLine; y'	0	1	decoded, losat-rejects
+blastn	'id x &NewLine; y'	0	1	decoded, losat-rejects
+tblastx	'id x &NewLine y'	0	0	same
+tblastn	'id x &NewLine y'	0	0	same
+blastn	'id x &NewLine y'	0	0	same
+tblastx	'id x &excl; y'	0	1	decoded, losat-rejects
+tblastn	'id x &excl; y'	0	1	decoded, losat-rejects
+blastn	'id x &excl; y'	0	1	decoded, losat-rejects
+tblastx	'id x &excl y'	0	0	same
+tblastn	'id x &excl y'	0	0	same
+blastn	'id x &excl y'	0	0	same
+tblastx	'id x &quot; y'	0	1	decoded, losat-rejects
+tblastn	'id x &quot; y'	0	1	decoded, losat-rejects
+blastn	'id x &quot; y'	0	1	decoded, losat-rejects
+tblastx	'id x &quot y'	0	0	same
+tblastn	'id x &quot y'	0	0	same
+blastn	'id x &quot y'	0	0	same
+tblastx	'id x &num; y'	0	1	decoded, losat-rejects
+tblastn	'id x &num; y'	0	1	decoded, losat-rejects
+blastn	'id x &num; y'	0	1	decoded, losat-rejects
+tblastx	'id x &num y'	0	0	same
+tblastn	'id x &num y'	0	0	same
+blastn	'id x &num y'	0	0	same
+tblastx	'id x &dollar; y'	0	1	decoded, losat-rejects
+tblastn	'id x &dollar; y'	0	1	decoded, losat-rejects
+blastn	'id x &dollar; y'	0	1	decoded, losat-rejects
+tblastx	'id x &dollar y'	0	0	same
+tblastn	'id x &dollar y'	0	0	same
+blastn	'id x &dollar y'	0	0	same
+tblastx	'id x &percnt; y'	0	1	decoded, losat-rejects
+tblastn	'id x &percnt; y'	0	1	decoded, losat-rejects
+blastn	'id x &percnt; y'	0	1	decoded, losat-rejects
+tblastx	'id x &percnt y'	0	0	same
+tblastn	'id x &percnt y'	0	0	same
+blastn	'id x &percnt y'	0	0	same
+tblastx	'id x &amp; y'	0	1	decoded, losat-rejects
+tblastn	'id x &amp; y'	0	1	decoded, losat-rejects
+blastn	'id x &amp; y'	0	1	decoded, losat-rejects
+tblastx	'id x &amp y'	0	0	same
+tblastn	'id x &amp y'	0	0	same
+blastn	'id x &amp y'	0	0	same
+tblastx	'id x &apos; y'	0	1	decoded, losat-rejects
+tblastn	'id x &apos; y'	0	1	decoded, losat-rejects
+blastn	'id x &apos; y'	0	1	decoded, losat-rejects
+tblastx	'id x &apos y'	0	0	same
+tblastn	'id x &apos y'	0	0	same
+blastn	'id x &apos y'	0	0	same
+tblastx	'id x &lpar; y'	0	1	decoded, losat-rejects
+tblastn	'id x &lpar; y'	0	1	decoded, losat-rejects
+blastn	'id x &lpar; y'	0	1	decoded, losat-rejects
+tblastx	'id x &lpar y'	0	0	same
+tblastn	'id x &lpar y'	0	0	same
+blastn	'id x &lpar y'	0	0	same
+tblastx	'id x &rpar; y'	0	1	decoded, losat-rejects
+tblastn	'id x &rpar; y'	0	1	decoded, losat-rejects
+blastn	'id x &rpar; y'	0	1	decoded, losat-rejects
+tblastx	'id x &rpar y'	0	0	same
+tblastn	'id x &rpar y'	0	0	same
+blastn	'id x &rpar y'	0	0	same
+tblastx	'id x &ast; y'	0	1	decoded, losat-rejects
+tblastn	'id x &ast; y'	0	1	decoded, losat-rejects
+blastn	'id x &ast; y'	0	1	decoded, losat-rejects
+tblastx	'id x &ast y'	0	0	same
+tblastn	'id x &ast y'	0	0	same
+blastn	'id x &ast y'	0	0	same
+tblastx	'id x &plus; y'	0	1	decoded, losat-rejects
+tblastn	'id x &plus; y'	0	1	decoded, losat-rejects
+blastn	'id x &plus; y'	0	1	decoded, losat-rejects
+tblastx	'id x &plus y'	0	0	same
+tblastn	'id x &plus y'	0	0	same
+blastn	'id x &plus y'	0	0	same
+tblastx	'id x &comma; y'	0	1	decoded, losat-rejects
+tblastn	'id x &comma; y'	0	1	decoded, losat-rejects
+blastn	'id x &comma; y'	0	1	decoded, losat-rejects
+tblastx	'id x &comma y'	0	0	same
+tblastn	'id x &comma y'	0	0	same
+blastn	'id x &comma y'	0	0	same
+tblastx	'id x &period; y'	0	1	decoded, losat-rejects
+tblastn	'id x &period; y'	0	1	decoded, losat-rejects
+blastn	'id x &period; y'	0	1	decoded, losat-rejects
+tblastx	'id x &period y'	0	0	same
+tblastn	'id x &period y'	0	0	same
+blastn	'id x &period y'	0	0	same
+tblastx	'id x &sol; y'	0	1	decoded, losat-rejects
+tblastn	'id x &sol; y'	0	1	decoded, losat-rejects
+blastn	'id x &sol; y'	0	1	decoded, losat-rejects
+tblastx	'id x &sol y'	0	0	same
+tblastn	'id x &sol y'	0	0	same
+blastn	'id x &sol y'	0	0	same
+tblastx	'id x &colon; y'	0	1	decoded, losat-rejects
+tblastn	'id x &colon; y'	0	1	decoded, losat-rejects
+blastn	'id x &colon; y'	0	1	decoded, losat-rejects
+tblastx	'id x &colon y'	0	0	same
+tblastn	'id x &colon y'	0	0	same
+blastn	'id x &colon y'	0	0	same
+tblastx	'id x &semi; y'	0	1	decoded, losat-rejects
+tblastn	'id x &semi; y'	0	1	decoded, losat-rejects
+blastn	'id x &semi; y'	0	1	decoded, losat-rejects
+tblastx	'id x &semi y'	0	0	same
+tblastn	'id x &semi y'	0	0	same
+blastn	'id x &semi y'	0	0	same
+tblastx	'id x &lt; y'	0	1	decoded, losat-rejects
+tblastn	'id x &lt; y'	0	1	decoded, losat-rejects
+blastn	'id x &lt; y'	0	1	decoded, losat-rejects
+tblastx	'id x &lt y'	0	0	same
+tblastn	'id x &lt y'	0	0	same
+blastn	'id x &lt y'	0	0	same
+tblastx	'id x &equals; y'	0	1	decoded, losat-rejects
+tblastn	'id x &equals; y'	0	1	decoded, losat-rejects
+blastn	'id x &equals; y'	0	1	decoded, losat-rejects
+tblastx	'id x &equals y'	0	0	same
+tblastn	'id x &equals y'	0	0	same
+blastn	'id x &equals y'	0	0	same
+tblastx	'id x &gt; y'	0	1	decoded, losat-rejects
+tblastn	'id x &gt; y'	0	1	decoded, losat-rejects
+blastn	'id x &gt; y'	0	1	decoded, losat-rejects
+tblastx	'id x &gt y'	0	0	same
+tblastn	'id x &gt y'	0	0	same
+blastn	'id x &gt y'	0	0	same
+tblastx	'id x &quest; y'	0	1	decoded, losat-rejects
+tblastn	'id x &quest; y'	0	1	decoded, losat-rejects
+blastn	'id x &quest; y'	0	1	decoded, losat-rejects
+tblastx	'id x &quest y'	0	0	same
+tblastn	'id x &quest y'	0	0	same
+blastn	'id x &quest y'	0	0	same
+tblastx	'id x &commat; y'	0	1	decoded, losat-rejects
+tblastn	'id x &commat; y'	0	1	decoded, losat-rejects
+blastn	'id x &commat; y'	0	1	decoded, losat-rejects
+tblastx	'id x &commat y'	0	0	same
+tblastn	'id x &commat y'	0	0	same
+blastn	'id x &commat y'	0	0	same
+tblastx	'id x &lsqb; y'	0	1	decoded, losat-rejects
+tblastn	'id x &lsqb; y'	0	1	decoded, losat-rejects
+blastn	'id x &lsqb; y'	0	1	decoded, losat-rejects
+tblastx	'id x &lsqb y'	0	0	same
+tblastn	'id x &lsqb y'	0	0	same
+blastn	'id x &lsqb y'	0	0	same
+tblastx	'id x &bsol; y'	0	1	decoded, losat-rejects
+tblastn	'id x &bsol; y'	0	1	decoded, losat-rejects
+blastn	'id x &bsol; y'	0	1	decoded, losat-rejects
+tblastx	'id x &bsol y'	0	0	same
+tblastn	'id x &bsol y'	0	0	same
+blastn	'id x &bsol y'	0	0	same
+tblastx	'id x &rsqb; y'	0	1	decoded, losat-rejects
+tblastn	'id x &rsqb; y'	0	1	decoded, losat-rejects
+blastn	'id x &rsqb; y'	0	1	decoded, losat-rejects
+tblastx	'id x &rsqb y'	0	0	same
+tblastn	'id x &rsqb y'	0	0	same
+blastn	'id x &rsqb y'	0	0	same
+tblastx	'id x &Hat; y'	0	1	decoded, losat-rejects
+tblastn	'id x &Hat; y'	0	1	decoded, losat-rejects
+blastn	'id x &Hat; y'	0	1	decoded, losat-rejects
+tblastx	'id x &Hat y'	0	0	same
+tblastn	'id x &Hat y'	0	0	same
+blastn	'id x &Hat y'	0	0	same
+tblastx	'id x &lowbar; y'	0	1	decoded, losat-rejects
+tblastn	'id x &lowbar; y'	0	1	decoded, losat-rejects
+blastn	'id x &lowbar; y'	0	1	decoded, losat-rejects
+tblastx	'id x &lowbar y'	0	0	same
+tblastn	'id x &lowbar y'	0	0	same
+blastn	'id x &lowbar y'	0	0	same
+tblastx	'id x &grave; y'	0	1	decoded, losat-rejects
+tblastn	'id x &grave; y'	0	1	decoded, losat-rejects
+blastn	'id x &grave; y'	0	1	decoded, losat-rejects
+tblastx	'id x &grave y'	0	0	same
+tblastn	'id x &grave y'	0	0	same
+blastn	'id x &grave y'	0	0	same
+tblastx	'id x &lcub; y'	0	1	decoded, losat-rejects
+tblastn	'id x &lcub; y'	0	1	decoded, losat-rejects
+blastn	'id x &lcub; y'	0	1	decoded, losat-rejects
+tblastx	'id x &lcub y'	0	0	same
+tblastn	'id x &lcub y'	0	0	same
+blastn	'id x &lcub y'	0	0	same
+tblastx	'id x &verbar; y'	0	1	decoded, losat-rejects
+tblastn	'id x &verbar; y'	0	1	decoded, losat-rejects
+blastn	'id x &verbar; y'	0	1	decoded, losat-rejects
+tblastx	'id x &verbar y'	0	0	same
+tblastn	'id x &verbar y'	0	0	same
+blastn	'id x &verbar y'	0	0	same
+tblastx	'id x &rcub; y'	0	1	decoded, losat-rejects
+tblastn	'id x &rcub; y'	0	1	decoded, losat-rejects
+blastn	'id x &rcub; y'	0	1	decoded, losat-rejects
+tblastx	'id x &rcub y'	0	0	same
+tblastn	'id x &rcub y'	0	0	same
+blastn	'id x &rcub y'	0	0	same
+tblastx	'id x &nbsp; y'	0	1	decoded, losat-rejects
+tblastn	'id x &nbsp; y'	0	1	decoded, losat-rejects
+blastn	'id x &nbsp; y'	0	1	decoded, losat-rejects
+tblastx	'id x &nbsp y'	0	0	same
+tblastn	'id x &nbsp y'	0	0	same
+blastn	'id x &nbsp y'	0	0	same
+tblastx	'id x &iexcl; y'	0	1	decoded, losat-rejects
+tblastn	'id x &iexcl; y'	0	1	decoded, losat-rejects
+blastn	'id x &iexcl; y'	0	1	decoded, losat-rejects
+tblastx	'id x &iexcl y'	0	0	same
+tblastn	'id x &iexcl y'	0	0	same
+blastn	'id x &iexcl y'	0	0	same
+tblastx	'id x &cent; y'	0	1	decoded, losat-rejects
+tblastn	'id x &cent; y'	0	1	decoded, losat-rejects
+blastn	'id x &cent; y'	0	1	decoded, losat-rejects
+tblastx	'id x &cent y'	0	0	same
+tblastn	'id x &cent y'	0	0	same
+blastn	'id x &cent y'	0	0	same
+tblastx	'id x &pound; y'	0	1	decoded, losat-rejects
+tblastn	'id x &pound; y'	0	1	decoded, losat-rejects
+blastn	'id x &pound; y'	0	1	decoded, losat-rejects
+tblastx	'id x &pound y'	0	0	same
+tblastn	'id x &pound y'	0	0	same
+blastn	'id x &pound y'	0	0	same
+tblastx	'id x &curren; y'	0	1	decoded, losat-rejects
+tblastn	'id x &curren; y'	0	1	decoded, losat-rejects
+blastn	'id x &curren; y'	0	1	decoded, losat-rejects
+tblastx	'id x &curren y'	0	0	same
+tblastn	'id x &curren y'	0	0	same
+blastn	'id x &curren y'	0	0	same
+tblastx	'id x &yen; y'	0	1	decoded, losat-rejects
+tblastn	'id x &yen; y'	0	1	decoded, losat-rejects
+blastn	'id x &yen; y'	0	1	decoded, losat-rejects
+tblastx	'id x &yen y'	0	0	same
+tblastn	'id x &yen y'	0	0	same
+blastn	'id x &yen y'	0	0	same
+tblastx	'id x &brvbar; y'	0	1	decoded, losat-rejects
+tblastn	'id x &brvbar; y'	0	1	decoded, losat-rejects
+blastn	'id x &brvbar; y'	0	1	decoded, losat-rejects
+tblastx	'id x &brvbar y'	0	0	same
+tblastn	'id x &brvbar y'	0	0	same
+blastn	'id x &brvbar y'	0	0	same
+tblastx	'id x &sect; y'	0	1	decoded, losat-rejects
+tblastn	'id x &sect; y'	0	1	decoded, losat-rejects
+blastn	'id x &sect; y'	0	1	decoded, losat-rejects
+tblastx	'id x &sect y'	0	0	same
+tblastn	'id x &sect y'	0	0	same
+blastn	'id x &sect y'	0	0	same
+tblastx	'id x &uml; y'	0	1	decoded, losat-rejects
+tblastn	'id x &uml; y'	0	1	decoded, losat-rejects
+blastn	'id x &uml; y'	0	1	decoded, losat-rejects
+tblastx	'id x &uml y'	0	0	same
+tblastn	'id x &uml y'	0	0	same
+blastn	'id x &uml y'	0	0	same
+tblastx	'id x &copy; y'	0	1	decoded, losat-rejects
+tblastn	'id x &copy; y'	0	1	decoded, losat-rejects
+blastn	'id x &copy; y'	0	1	decoded, losat-rejects
+tblastx	'id x &copy y'	0	0	same
+tblastn	'id x &copy y'	0	0	same
+blastn	'id x &copy y'	0	0	same
+tblastx	'id x &ordf; y'	0	1	decoded, losat-rejects
+tblastn	'id x &ordf; y'	0	1	decoded, losat-rejects
+blastn	'id x &ordf; y'	0	1	decoded, losat-rejects
+tblastx	'id x &ordf y'	0	0	same
+tblastn	'id x &ordf y'	0	0	same
+blastn	'id x &ordf y'	0	0	same
+tblastx	'id x &laquo; y'	0	1	decoded, losat-rejects
+tblastn	'id x &laquo; y'	0	1	decoded, losat-rejects
+blastn	'id x &laquo; y'	0	1	decoded, losat-rejects
+tblastx	'id x &laquo y'	0	0	same
+tblastn	'id x &laquo y'	0	0	same
+blastn	'id x &laquo y'	0	0	same
+tblastx	'id x &not; y'	0	1	decoded, losat-rejects
+tblastn	'id x &not; y'	0	1	decoded, losat-rejects
+blastn	'id x &not; y'	0	1	decoded, losat-rejects
+tblastx	'id x &not y'	0	0	same
+tblastn	'id x &not y'	0	0	same
+blastn	'id x &not y'	0	0	same
+tblastx	'id x &shy; y'	0	1	decoded, losat-rejects
+tblastn	'id x &shy; y'	0	1	decoded, losat-rejects
+blastn	'id x &shy; y'	0	1	decoded, losat-rejects
+tblastx	'id x &shy y'	0	0	same
+tblastn	'id x &shy y'	0	0	same
+blastn	'id x &shy y'	0	0	same
+tblastx	'id x &reg; y'	0	1	decoded, losat-rejects
+tblastn	'id x &reg; y'	0	1	decoded, losat-rejects
+blastn	'id x &reg; y'	0	1	decoded, losat-rejects
+tblastx	'id x &reg y'	0	0	same
+tblastn	'id x &reg y'	0	0	same
+blastn	'id x &reg y'	0	0	same
+tblastx	'id x &macr; y'	0	1	decoded, losat-rejects
+tblastn	'id x &macr; y'	0	1	decoded, losat-rejects
+blastn	'id x &macr; y'	0	1	decoded, losat-rejects
+tblastx	'id x &macr y'	0	0	same
+tblastn	'id x &macr y'	0	0	same
+blastn	'id x &macr y'	0	0	same
+tblastx	'id x &deg; y'	0	1	decoded, losat-rejects
+tblastn	'id x &deg; y'	0	1	decoded, losat-rejects
+blastn	'id x &deg; y'	0	1	decoded, losat-rejects
+tblastx	'id x &deg y'	0	0	same
+tblastn	'id x &deg y'	0	0	same
+blastn	'id x &deg y'	0	0	same
+tblastx	'id x &plusmn; y'	0	1	decoded, losat-rejects
+tblastn	'id x &plusmn; y'	0	1	decoded, losat-rejects
+blastn	'id x &plusmn; y'	0	1	decoded, losat-rejects
+tblastx	'id x &plusmn y'	0	0	same
+tblastn	'id x &plusmn y'	0	0	same
+blastn	'id x &plusmn y'	0	0	same
+tblastx	'id x &sup2; y'	0	1	decoded, losat-rejects
+tblastn	'id x &sup2; y'	0	1	decoded, losat-rejects
+blastn	'id x &sup2; y'	0	1	decoded, losat-rejects
+tblastx	'id x &sup2 y'	0	0	same
+tblastn	'id x &sup2 y'	0	0	same
+blastn	'id x &sup2 y'	0	0	same
+tblastx	'id x &sup3; y'	0	1	decoded, losat-rejects
+tblastn	'id x &sup3; y'	0	1	decoded, losat-rejects
+blastn	'id x &sup3; y'	0	1	decoded, losat-rejects
+tblastx	'id x &sup3 y'	0	0	same
+tblastn	'id x &sup3 y'	0	0	same
+blastn	'id x &sup3 y'	0	0	same
+tblastx	'id x &acute; y'	0	1	decoded, losat-rejects
+tblastn	'id x &acute; y'	0	1	decoded, losat-rejects
+blastn	'id x &acute; y'	0	1	decoded, losat-rejects
+tblastx	'id x &acute y'	0	0	same
+tblastn	'id x &acute y'	0	0	same
+blastn	'id x &acute y'	0	0	same
+tblastx	'id x &micro; y'	0	1	decoded, losat-rejects
+tblastn	'id x &micro; y'	0	1	decoded, losat-rejects
+blastn	'id x &micro; y'	0	1	decoded, losat-rejects
+tblastx	'id x &micro y'	0	0	same
+tblastn	'id x &micro y'	0	0	same
+blastn	'id x &micro y'	0	0	same
+tblastx	'id x &para; y'	0	1	decoded, losat-rejects
+tblastn	'id x &para; y'	0	1	decoded, losat-rejects
+blastn	'id x &para; y'	0	1	decoded, losat-rejects
+tblastx	'id x &para y'	0	0	same
+tblastn	'id x &para y'	0	0	same
+blastn	'id x &para y'	0	0	same
+tblastx	'id x &middot; y'	0	1	decoded, losat-rejects
+tblastn	'id x &middot; y'	0	1	decoded, losat-rejects
+blastn	'id x &middot; y'	0	1	decoded, losat-rejects
+tblastx	'id x &middot y'	0	0	same
+tblastn	'id x &middot y'	0	0	same
+blastn	'id x &middot y'	0	0	same
+tblastx	'id x &cedil; y'	0	1	decoded, losat-rejects
+tblastn	'id x &cedil; y'	0	1	decoded, losat-rejects
+blastn	'id x &cedil; y'	0	1	decoded, losat-rejects
+tblastx	'id x &cedil y'	0	0	same
+tblastn	'id x &cedil y'	0	0	same
+blastn	'id x &cedil y'	0	0	same
+tblastx	'id x &sup1; y'	0	1	decoded, losat-rejects
+tblastn	'id x &sup1; y'	0	1	decoded, losat-rejects
+blastn	'id x &sup1; y'	0	1	decoded, losat-rejects
+tblastx	'id x &sup1 y'	0	0	same
+tblastn	'id x &sup1 y'	0	0	same
+blastn	'id x &sup1 y'	0	0	same
+tblastx	'id x &ordm; y'	0	1	decoded, losat-rejects
+tblastn	'id x &ordm; y'	0	1	decoded, losat-rejects
+blastn	'id x &ordm; y'	0	1	decoded, losat-rejects
+tblastx	'id x &ordm y'	0	0	same
+tblastn	'id x &ordm y'	0	0	same
+blastn	'id x &ordm y'	0	0	same
+tblastx	'id x &raquo; y'	0	1	decoded, losat-rejects
+tblastn	'id x &raquo; y'	0	1	decoded, losat-rejects
+blastn	'id x &raquo; y'	0	1	decoded, losat-rejects
+tblastx	'id x &raquo y'	0	0	same
+tblastn	'id x &raquo y'	0	0	same
+blastn	'id x &raquo y'	0	0	same
+tblastx	'id x &frac14; y'	0	1	decoded, losat-rejects
+tblastn	'id x &frac14; y'	0	1	decoded, losat-rejects
+blastn	'id x &frac14; y'	0	1	decoded, losat-rejects
+tblastx	'id x &frac14 y'	0	0	same
+tblastn	'id x &frac14 y'	0	0	same
+blastn	'id x &frac14 y'	0	0	same
+tblastx	'id x &frac12; y'	0	1	decoded, losat-rejects
+tblastn	'id x &frac12; y'	0	1	decoded, losat-rejects
+blastn	'id x &frac12; y'	0	1	decoded, losat-rejects
+tblastx	'id x &frac12 y'	0	0	same
+tblastn	'id x &frac12 y'	0	0	same
+blastn	'id x &frac12 y'	0	0	same
+tblastx	'id x &frac34; y'	0	1	decoded, losat-rejects
+tblastn	'id x &frac34; y'	0	1	decoded, losat-rejects
+blastn	'id x &frac34; y'	0	1	decoded, losat-rejects
+tblastx	'id x &frac34 y'	0	0	same
+tblastn	'id x &frac34 y'	0	0	same
+blastn	'id x &frac34 y'	0	0	same
+tblastx	'id x &iquest; y'	0	1	decoded, losat-rejects
+tblastn	'id x &iquest; y'	0	1	decoded, losat-rejects
+blastn	'id x &iquest; y'	0	1	decoded, losat-rejects
+tblastx	'id x &iquest y'	0	0	same
+tblastn	'id x &iquest y'	0	0	same
+blastn	'id x &iquest y'	0	0	same
+tblastx	'id x &Agrave; y'	0	1	decoded, losat-rejects
+tblastn	'id x &Agrave; y'	0	1	decoded, losat-rejects
+blastn	'id x &Agrave; y'	0	1	decoded, losat-rejects
+tblastx	'id x &Agrave y'	0	0	same
+tblastn	'id x &Agrave y'	0	0	same
+blastn	'id x &Agrave y'	0	0	same
+tblastx	'id x &Aacute; y'	0	1	decoded, losat-rejects
+tblastn	'id x &Aacute; y'	0	1	decoded, losat-rejects
+blastn	'id x &Aacute; y'	0	1	decoded, losat-rejects
+tblastx	'id x &Aacute y'	0	0	same
+tblastn	'id x &Aacute y'	0	0	same
+blastn	'id x &Aacute y'	0	0	same
+tblastx	'id x &Acirc; y'	0	1	decoded, losat-rejects
+tblastn	'id x &Acirc; y'	0	1	decoded, losat-rejects
+blastn	'id x &Acirc; y'	0	1	decoded, losat-rejects
+tblastx	'id x &Acirc y'	0	0	same
+tblastn	'id x &Acirc y'	0	0	same
+blastn	'id x &Acirc y'	0	0	same
+tblastx	'id x &Atilde; y'	0	1	decoded, losat-rejects
+tblastn	'id x &Atilde; y'	0	1	decoded, losat-rejects
+blastn	'id x &Atilde; y'	0	1	decoded, losat-rejects
+tblastx	'id x &Atilde y'	0	0	same
+tblastn	'id x &Atilde y'	0	0	same
+blastn	'id x &Atilde y'	0	0	same
+tblastx	'id x &Auml; y'	0	1	decoded, losat-rejects
+tblastn	'id x &Auml; y'	0	1	decoded, losat-rejects
+blastn	'id x &Auml; y'	0	1	decoded, losat-rejects
+tblastx	'id x &Auml y'	0	0	same
+tblastn	'id x &Auml y'	0	0	same
+blastn	'id x &Auml y'	0	0	same
+tblastx	'id x &Aring; y'	0	1	decoded, losat-rejects
+tblastn	'id x &Aring; y'	0	1	decoded, losat-rejects
+blastn	'id x &Aring; y'	0	1	decoded, losat-rejects
+tblastx	'id x &Aring y'	0	0	same
+tblastn	'id x &Aring y'	0	0	same
+blastn	'id x &Aring y'	0	0	same
+tblastx	'id x &AElig; y'	0	1	decoded, losat-rejects
+tblastn	'id x &AElig; y'	0	1	decoded, losat-rejects
+blastn	'id x &AElig; y'	0	1	decoded, losat-rejects
+tblastx	'id x &AElig y'	0	0	same
+tblastn	'id x &AElig y'	0	0	same
+blastn	'id x &AElig y'	0	0	same
+tblastx	'id x &Ccedil; y'	0	1	decoded, losat-rejects
+tblastn	'id x &Ccedil; y'	0	1	decoded, losat-rejects
+blastn	'id x &Ccedil; y'	0	1	decoded, losat-rejects
+tblastx	'id x &Ccedil y'	0	0	same
+tblastn	'id x &Ccedil y'	0	0	same
+blastn	'id x &Ccedil y'	0	0	same
+tblastx	'id x &Egrave; y'	0	1	decoded, losat-rejects
+tblastn	'id x &Egrave; y'	0	1	decoded, losat-rejects
+blastn	'id x &Egrave; y'	0	1	decoded, losat-rejects
+tblastx	'id x &Egrave y'	0	0	same
+tblastn	'id x &Egrave y'	0	0	same
+blastn	'id x &Egrave y'	0	0	same
+tblastx	'id x &Eacute; y'	0	1	decoded, losat-rejects
+tblastn	'id x &Eacute; y'	0	1	decoded, losat-rejects
+blastn	'id x &Eacute; y'	0	1	decoded, losat-rejects
+tblastx	'id x &Eacute y'	0	0	same
+tblastn	'id x &Eacute y'	0	0	same
+blastn	'id x &Eacute y'	0	0	same
+tblastx	'id x &Ecirc; y'	0	1	decoded, losat-rejects
+tblastn	'id x &Ecirc; y'	0	1	decoded, losat-rejects
+blastn	'id x &Ecirc; y'	0	1	decoded, losat-rejects
+tblastx	'id x &Ecirc y'	0	0	same
+tblastn	'id x &Ecirc y'	0	0	same
+blastn	'id x &Ecirc y'	0	0	same
+tblastx	'id x &Euml; y'	0	1	decoded, losat-rejects
+tblastn	'id x &Euml; y'	0	1	decoded, losat-rejects
+blastn	'id x &Euml; y'	0	1	decoded, losat-rejects
+tblastx	'id x &Euml y'	0	0	same
+tblastn	'id x &Euml y'	0	0	same
+blastn	'id x &Euml y'	0	0	same
+tblastx	'id x &Igrave; y'	0	1	decoded, losat-rejects
+tblastn	'id x &Igrave; y'	0	1	decoded, losat-rejects
+blastn	'id x &Igrave; y'	0	1	decoded, losat-rejects
+tblastx	'id x &Igrave y'	0	0	same
+tblastn	'id x &Igrave y'	0	0	same
+blastn	'id x &Igrave y'	0	0	same
+tblastx	'id x &Iacute; y'	0	1	decoded, losat-rejects
+tblastn	'id x &Iacute; y'	0	1	decoded, losat-rejects
+blastn	'id x &Iacute; y'	0	1	decoded, losat-rejects
+tblastx	'id x &Iacute y'	0	0	same
+tblastn	'id x &Iacute y'	0	0	same
+blastn	'id x &Iacute y'	0	0	same
+tblastx	'id x &Icirc; y'	0	1	decoded, losat-rejects
+tblastn	'id x &Icirc; y'	0	1	decoded, losat-rejects
+blastn	'id x &Icirc; y'	0	1	decoded, losat-rejects
+tblastx	'id x &Icirc y'	0	0	same
+tblastn	'id x &Icirc y'	0	0	same
+blastn	'id x &Icirc y'	0	0	same
+tblastx	'id x &Iuml; y'	0	1	decoded, losat-rejects
+tblastn	'id x &Iuml; y'	0	1	decoded, losat-rejects
+blastn	'id x &Iuml; y'	0	1	decoded, losat-rejects
+tblastx	'id x &Iuml y'	0	0	same
+tblastn	'id x &Iuml y'	0	0	same
+blastn	'id x &Iuml y'	0	0	same
+tblastx	'id x &ETH; y'	0	1	decoded, losat-rejects
+tblastn	'id x &ETH; y'	0	1	decoded, losat-rejects
+blastn	'id x &ETH; y'	0	1	decoded, losat-rejects
+tblastx	'id x &ETH y'	0	0	same
+tblastn	'id x &ETH y'	0	0	same
+blastn	'id x &ETH y'	0	0	same
+tblastx	'id x &Ntilde; y'	0	1	decoded, losat-rejects
+tblastn	'id x &Ntilde; y'	0	1	decoded, losat-rejects
+blastn	'id x &Ntilde; y'	0	1	decoded, losat-rejects
+tblastx	'id x &Ntilde y'	0	0	same
+tblastn	'id x &Ntilde y'	0	0	same
+blastn	'id x &Ntilde y'	0	0	same
+tblastx	'id x &Ograve; y'	0	1	decoded, losat-rejects
+tblastn	'id x &Ograve; y'	0	1	decoded, losat-rejects
+blastn	'id x &Ograve; y'	0	1	decoded, losat-rejects
+tblastx	'id x &Ograve y'	0	0	same
+tblastn	'id x &Ograve y'	0	0	same
+blastn	'id x &Ograve y'	0	0	same
+tblastx	'id x &Oacute; y'	0	1	decoded, losat-rejects
+tblastn	'id x &Oacute; y'	0	1	decoded, losat-rejects
+blastn	'id x &Oacute; y'	0	1	decoded, losat-rejects
+tblastx	'id x &Oacute y'	0	0	same
+tblastn	'id x &Oacute y'	0	0	same
+blastn	'id x &Oacute y'	0	0	same
+tblastx	'id x &Ocirc; y'	0	1	decoded, losat-rejects
+tblastn	'id x &Ocirc; y'	0	1	decoded, losat-rejects
+blastn	'id x &Ocirc; y'	0	1	decoded, losat-rejects
+tblastx	'id x &Ocirc y'	0	0	same
+tblastn	'id x &Ocirc y'	0	0	same
+blastn	'id x &Ocirc y'	0	0	same
+tblastx	'id x &Otilde; y'	0	1	decoded, losat-rejects
+tblastn	'id x &Otilde; y'	0	1	decoded, losat-rejects
+blastn	'id x &Otilde; y'	0	1	decoded, losat-rejects
+tblastx	'id x &Otilde y'	0	0	same
+tblastn	'id x &Otilde y'	0	0	same
+blastn	'id x &Otilde y'	0	0	same
+tblastx	'id x &Ouml; y'	0	1	decoded, losat-rejects
+tblastn	'id x &Ouml; y'	0	1	decoded, losat-rejects
+blastn	'id x &Ouml; y'	0	1	decoded, losat-rejects
+tblastx	'id x &Ouml y'	0	0	same
+tblastn	'id x &Ouml y'	0	0	same
+blastn	'id x &Ouml y'	0	0	same
+tblastx	'id x &times; y'	0	1	decoded, losat-rejects
+tblastn	'id x &times; y'	0	1	decoded, losat-rejects
+blastn	'id x &times; y'	0	1	decoded, losat-rejects
+tblastx	'id x &times y'	0	0	same
+tblastn	'id x &times y'	0	0	same
+blastn	'id x &times y'	0	0	same
+tblastx	'id x &Oslash; y'	0	1	decoded, losat-rejects
+tblastn	'id x &Oslash; y'	0	1	decoded, losat-rejects
+blastn	'id x &Oslash; y'	0	1	decoded, losat-rejects
+tblastx	'id x &Oslash y'	0	0	same
+tblastn	'id x &Oslash y'	0	0	same
+blastn	'id x &Oslash y'	0	0	same
+tblastx	'id x &Ugrave; y'	0	1	decoded, losat-rejects
+tblastn	'id x &Ugrave; y'	0	1	decoded, losat-rejects
+blastn	'id x &Ugrave; y'	0	1	decoded, losat-rejects
+tblastx	'id x &Ugrave y'	0	0	same
+tblastn	'id x &Ugrave y'	0	0	same
+blastn	'id x &Ugrave y'	0	0	same
+tblastx	'id x &Uacute; y'	0	1	decoded, losat-rejects
+tblastn	'id x &Uacute; y'	0	1	decoded, losat-rejects
+blastn	'id x &Uacute; y'	0	1	decoded, losat-rejects
+tblastx	'id x &Uacute y'	0	0	same
+tblastn	'id x &Uacute y'	0	0	same
+blastn	'id x &Uacute y'	0	0	same
+tblastx	'id x &Ucirc; y'	0	1	decoded, losat-rejects
+tblastn	'id x &Ucirc; y'	0	1	decoded, losat-rejects
+blastn	'id x &Ucirc; y'	0	1	decoded, losat-rejects
+tblastx	'id x &Ucirc y'	0	0	same
+tblastn	'id x &Ucirc y'	0	0	same
+blastn	'id x &Ucirc y'	0	0	same
+tblastx	'id x &Uuml; y'	0	1	decoded, losat-rejects
+tblastn	'id x &Uuml; y'	0	1	decoded, losat-rejects
+blastn	'id x &Uuml; y'	0	1	decoded, losat-rejects
+tblastx	'id x &Uuml y'	0	0	same
+tblastn	'id x &Uuml y'	0	0	same
+blastn	'id x &Uuml y'	0	0	same
+tblastx	'id x &Yacute; y'	0	1	decoded, losat-rejects
+tblastn	'id x &Yacute; y'	0	1	decoded, losat-rejects
+blastn	'id x &Yacute; y'	0	1	decoded, losat-rejects
+tblastx	'id x &Yacute y'	0	0	same
+tblastn	'id x &Yacute y'	0	0	same
+blastn	'id x &Yacute y'	0	0	same
+tblastx	'id x &THORN; y'	0	1	decoded, losat-rejects
+tblastn	'id x &THORN; y'	0	1	decoded, losat-rejects
+blastn	'id x &THORN; y'	0	1	decoded, losat-rejects
+tblastx	'id x &THORN y'	0	0	same
+tblastn	'id x &THORN y'	0	0	same
+blastn	'id x &THORN y'	0	0	same
+tblastx	'id x &szlig; y'	0	1	decoded, losat-rejects
+tblastn	'id x &szlig; y'	0	1	decoded, losat-rejects
+blastn	'id x &szlig; y'	0	1	decoded, losat-rejects
+tblastx	'id x &szlig y'	0	0	same
+tblastn	'id x &szlig y'	0	0	same
+blastn	'id x &szlig y'	0	0	same
+tblastx	'id x &agrave; y'	0	1	decoded, losat-rejects
+tblastn	'id x &agrave; y'	0	1	decoded, losat-rejects
+blastn	'id x &agrave; y'	0	1	decoded, losat-rejects
+tblastx	'id x &agrave y'	0	0	same
+tblastn	'id x &agrave y'	0	0	same
+blastn	'id x &agrave y'	0	0	same
+tblastx	'id x &aacute; y'	0	1	decoded, losat-rejects
+tblastn	'id x &aacute; y'	0	1	decoded, losat-rejects
+blastn	'id x &aacute; y'	0	1	decoded, losat-rejects
+tblastx	'id x &aacute y'	0	0	same
+tblastn	'id x &aacute y'	0	0	same
+blastn	'id x &aacute y'	0	0	same
+tblastx	'id x &acirc; y'	0	1	decoded, losat-rejects
+tblastn	'id x &acirc; y'	0	1	decoded, losat-rejects
+blastn	'id x &acirc; y'	0	1	decoded, losat-rejects
+tblastx	'id x &acirc y'	0	0	same
+tblastn	'id x &acirc y'	0	0	same
+blastn	'id x &acirc y'	0	0	same
+tblastx	'id x &atilde; y'	0	1	decoded, losat-rejects
+tblastn	'id x &atilde; y'	0	1	decoded, losat-rejects
+blastn	'id x &atilde; y'	0	1	decoded, losat-rejects
+tblastx	'id x &atilde y'	0	0	same
+tblastn	'id x &atilde y'	0	0	same
+blastn	'id x &atilde y'	0	0	same
+tblastx	'id x &auml; y'	0	1	decoded, losat-rejects
+tblastn	'id x &auml; y'	0	1	decoded, losat-rejects
+blastn	'id x &auml; y'	0	1	decoded, losat-rejects
+tblastx	'id x &auml y'	0	0	same
+tblastn	'id x &auml y'	0	0	same
+blastn	'id x &auml y'	0	0	same
+tblastx	'id x &aring; y'	0	1	decoded, losat-rejects
+tblastn	'id x &aring; y'	0	1	decoded, losat-rejects
+blastn	'id x &aring; y'	0	1	decoded, losat-rejects
+tblastx	'id x &aring y'	0	0	same
+tblastn	'id x &aring y'	0	0	same
+blastn	'id x &aring y'	0	0	same
+tblastx	'id x &aelig; y'	0	1	decoded, losat-rejects
+tblastn	'id x &aelig; y'	0	1	decoded, losat-rejects
+blastn	'id x &aelig; y'	0	1	decoded, losat-rejects
+tblastx	'id x &aelig y'	0	0	same
+tblastn	'id x &aelig y'	0	0	same
+blastn	'id x &aelig y'	0	0	same
+tblastx	'id x &ccedil; y'	0	1	decoded, losat-rejects
+tblastn	'id x &ccedil; y'	0	1	decoded, losat-rejects
+blastn	'id x &ccedil; y'	0	1	decoded, losat-rejects
+tblastx	'id x &ccedil y'	0	0	same
+tblastn	'id x &ccedil y'	0	0	same
+blastn	'id x &ccedil y'	0	0	same
+tblastx	'id x &egrave; y'	0	1	decoded, losat-rejects
+tblastn	'id x &egrave; y'	0	1	decoded, losat-rejects
+blastn	'id x &egrave; y'	0	1	decoded, losat-rejects
+tblastx	'id x &egrave y'	0	0	same
+tblastn	'id x &egrave y'	0	0	same
+blastn	'id x &egrave y'	0	0	same
+tblastx	'id x &eacute; y'	0	1	decoded, losat-rejects
+tblastn	'id x &eacute; y'	0	1	decoded, losat-rejects
+blastn	'id x &eacute; y'	0	1	decoded, losat-rejects
+tblastx	'id x &eacute y'	0	0	same
+tblastn	'id x &eacute y'	0	0	same
+blastn	'id x &eacute y'	0	0	same
+tblastx	'id x &ecirc; y'	0	1	decoded, losat-rejects
+tblastn	'id x &ecirc; y'	0	1	decoded, losat-rejects
+blastn	'id x &ecirc; y'	0	1	decoded, losat-rejects
+tblastx	'id x &ecirc y'	0	0	same
+tblastn	'id x &ecirc y'	0	0	same
+blastn	'id x &ecirc y'	0	0	same
+tblastx	'id x &euml; y'	0	1	decoded, losat-rejects
+tblastn	'id x &euml; y'	0	1	decoded, losat-rejects
+blastn	'id x &euml; y'	0	1	decoded, losat-rejects
+tblastx	'id x &euml y'	0	0	same
+tblastn	'id x &euml y'	0	0	same
+blastn	'id x &euml y'	0	0	same
+tblastx	'id x &igrave; y'	0	1	decoded, losat-rejects
+tblastn	'id x &igrave; y'	0	1	decoded, losat-rejects
+blastn	'id x &igrave; y'	0	1	decoded, losat-rejects
+tblastx	'id x &igrave y'	0	0	same
+tblastn	'id x &igrave y'	0	0	same
+blastn	'id x &igrave y'	0	0	same
+tblastx	'id x &iacute; y'	0	1	decoded, losat-rejects
+tblastn	'id x &iacute; y'	0	1	decoded, losat-rejects
+blastn	'id x &iacute; y'	0	1	decoded, losat-rejects
+tblastx	'id x &iacute y'	0	0	same
+tblastn	'id x &iacute y'	0	0	same
+blastn	'id x &iacute y'	0	0	same
+tblastx	'id x &icirc; y'	0	1	decoded, losat-rejects
+tblastn	'id x &icirc; y'	0	1	decoded, losat-rejects
+blastn	'id x &icirc; y'	0	1	decoded, losat-rejects
+tblastx	'id x &icirc y'	0	0	same
+tblastn	'id x &icirc y'	0	0	same
+blastn	'id x &icirc y'	0	0	same
+tblastx	'id x &iuml; y'	0	1	decoded, losat-rejects
+tblastn	'id x &iuml; y'	0	1	decoded, losat-rejects
+blastn	'id x &iuml; y'	0	1	decoded, losat-rejects
+tblastx	'id x &iuml y'	0	0	same
+tblastn	'id x &iuml y'	0	0	same
+blastn	'id x &iuml y'	0	0	same
+tblastx	'id x &eth; y'	0	1	decoded, losat-rejects
+tblastn	'id x &eth; y'	0	1	decoded, losat-rejects
+blastn	'id x &eth; y'	0	1	decoded, losat-rejects
+tblastx	'id x &eth y'	0	0	same
+tblastn	'id x &eth y'	0	0	same
+blastn	'id x &eth y'	0	0	same
+tblastx	'id x &ntilde; y'	0	1	decoded, losat-rejects
+tblastn	'id x &ntilde; y'	0	1	decoded, losat-rejects
+blastn	'id x &ntilde; y'	0	1	decoded, losat-rejects
+tblastx	'id x &ntilde y'	0	0	same
+tblastn	'id x &ntilde y'	0	0	same
+blastn	'id x &ntilde y'	0	0	same
+tblastx	'id x &ograve; y'	0	1	decoded, losat-rejects
+tblastn	'id x &ograve; y'	0	1	decoded, losat-rejects
+blastn	'id x &ograve; y'	0	1	decoded, losat-rejects
+tblastx	'id x &ograve y'	0	0	same
+tblastn	'id x &ograve y'	0	0	same
+blastn	'id x &ograve y'	0	0	same
+tblastx	'id x &oacute; y'	0	1	decoded, losat-rejects
+tblastn	'id x &oacute; y'	0	1	decoded, losat-rejects
+blastn	'id x &oacute; y'	0	1	decoded, losat-rejects
+tblastx	'id x &oacute y'	0	0	same
+tblastn	'id x &oacute y'	0	0	same
+blastn	'id x &oacute y'	0	0	same
+tblastx	'id x &ocirc; y'	0	1	decoded, losat-rejects
+tblastn	'id x &ocirc; y'	0	1	decoded, losat-rejects
+blastn	'id x &ocirc; y'	0	1	decoded, losat-rejects
+tblastx	'id x &ocirc y'	0	0	same
+tblastn	'id x &ocirc y'	0	0	same
+blastn	'id x &ocirc y'	0	0	same
+tblastx	'id x &otilde; y'	0	1	decoded, losat-rejects
+tblastn	'id x &otilde; y'	0	1	decoded, losat-rejects
+blastn	'id x &otilde; y'	0	1	decoded, losat-rejects
+tblastx	'id x &otilde y'	0	0	same
+tblastn	'id x &otilde y'	0	0	same
+blastn	'id x &otilde y'	0	0	same
+tblastx	'id x &ouml; y'	0	1	decoded, losat-rejects
+tblastn	'id x &ouml; y'	0	1	decoded, losat-rejects
+blastn	'id x &ouml; y'	0	1	decoded, losat-rejects
+tblastx	'id x &ouml y'	0	0	same
+tblastn	'id x &ouml y'	0	0	same
+blastn	'id x &ouml y'	0	0	same
+tblastx	'id x &divide; y'	0	1	decoded, losat-rejects
+tblastn	'id x &divide; y'	0	1	decoded, losat-rejects
+blastn	'id x &divide; y'	0	1	decoded, losat-rejects
+tblastx	'id x &divide y'	0	0	same
+tblastn	'id x &divide y'	0	0	same
+blastn	'id x &divide y'	0	0	same
+tblastx	'id x &oslash; y'	0	1	decoded, losat-rejects
+tblastn	'id x &oslash; y'	0	1	decoded, losat-rejects
+blastn	'id x &oslash; y'	0	1	decoded, losat-rejects
+tblastx	'id x &oslash y'	0	0	same
+tblastn	'id x &oslash y'	0	0	same
+blastn	'id x &oslash y'	0	0	same
+tblastx	'id x &ugrave; y'	0	1	decoded, losat-rejects
+tblastn	'id x &ugrave; y'	0	1	decoded, losat-rejects
+blastn	'id x &ugrave; y'	0	1	decoded, losat-rejects
+tblastx	'id x &ugrave y'	0	0	same
+tblastn	'id x &ugrave y'	0	0	same
+blastn	'id x &ugrave y'	0	0	same
+tblastx	'id x &uacute; y'	0	1	decoded, losat-rejects
+tblastn	'id x &uacute; y'	0	1	decoded, losat-rejects
+blastn	'id x &uacute; y'	0	1	decoded, losat-rejects
+tblastx	'id x &uacute y'	0	0	same
+tblastn	'id x &uacute y'	0	0	same
+blastn	'id x &uacute y'	0	0	same
+tblastx	'id x &ucirc; y'	0	1	decoded, losat-rejects
+tblastn	'id x &ucirc; y'	0	1	decoded, losat-rejects
+blastn	'id x &ucirc; y'	0	1	decoded, losat-rejects
+tblastx	'id x &ucirc y'	0	0	same
+tblastn	'id x &ucirc y'	0	0	same
+blastn	'id x &ucirc y'	0	0	same
+tblastx	'id x &uuml; y'	0	1	decoded, losat-rejects
+tblastn	'id x &uuml; y'	0	1	decoded, losat-rejects
+blastn	'id x &uuml; y'	0	1	decoded, losat-rejects
+tblastx	'id x &uuml y'	0	0	same
+tblastn	'id x &uuml y'	0	0	same
+blastn	'id x &uuml y'	0	0	same
+tblastx	'id x &yacute; y'	0	1	decoded, losat-rejects
+tblastn	'id x &yacute; y'	0	1	decoded, losat-rejects
+blastn	'id x &yacute; y'	0	1	decoded, losat-rejects
+tblastx	'id x &yacute y'	0	0	same
+tblastn	'id x &yacute y'	0	0	same
+blastn	'id x &yacute y'	0	0	same
+tblastx	'id x &thorn; y'	0	1	decoded, losat-rejects
+tblastn	'id x &thorn; y'	0	1	decoded, losat-rejects
+blastn	'id x &thorn; y'	0	1	decoded, losat-rejects
+tblastx	'id x &thorn y'	0	0	same
+tblastn	'id x &thorn y'	0	0	same
+blastn	'id x &thorn y'	0	0	same
+tblastx	'id x &yuml; y'	0	1	decoded, losat-rejects
+tblastn	'id x &yuml; y'	0	1	decoded, losat-rejects
+blastn	'id x &yuml; y'	0	1	decoded, losat-rejects
+tblastx	'id x &yuml y'	0	0	same
+tblastn	'id x &yuml y'	0	0	same
+blastn	'id x &yuml y'	0	0	same
+tblastx	'id x &OElig; y'	0	1	decoded, losat-rejects
+tblastn	'id x &OElig; y'	0	1	decoded, losat-rejects
+blastn	'id x &OElig; y'	0	1	decoded, losat-rejects
+tblastx	'id x &OElig y'	0	0	same
+tblastn	'id x &OElig y'	0	0	same
+blastn	'id x &OElig y'	0	0	same
+tblastx	'id x &oelig; y'	0	1	decoded, losat-rejects
+tblastn	'id x &oelig; y'	0	1	decoded, losat-rejects
+blastn	'id x &oelig; y'	0	1	decoded, losat-rejects
+tblastx	'id x &oelig y'	0	0	same
+tblastn	'id x &oelig y'	0	0	same
+blastn	'id x &oelig y'	0	0	same
+tblastx	'id x &Scaron; y'	0	1	decoded, losat-rejects
+tblastn	'id x &Scaron; y'	0	1	decoded, losat-rejects
+blastn	'id x &Scaron; y'	0	1	decoded, losat-rejects
+tblastx	'id x &Scaron y'	0	0	same
+tblastn	'id x &Scaron y'	0	0	same
+blastn	'id x &Scaron y'	0	0	same
+tblastx	'id x &scaron; y'	0	1	decoded, losat-rejects
+tblastn	'id x &scaron; y'	0	1	decoded, losat-rejects
+blastn	'id x &scaron; y'	0	1	decoded, losat-rejects
+tblastx	'id x &scaron y'	0	0	same
+tblastn	'id x &scaron y'	0	0	same
+blastn	'id x &scaron y'	0	0	same
+tblastx	'id x &Yuml; y'	0	1	decoded, losat-rejects
+tblastn	'id x &Yuml; y'	0	1	decoded, losat-rejects
+blastn	'id x &Yuml; y'	0	1	decoded, losat-rejects
+tblastx	'id x &Yuml y'	0	0	same
+tblastn	'id x &Yuml y'	0	0	same
+blastn	'id x &Yuml y'	0	0	same
+tblastx	'id x &fnof; y'	0	1	decoded, losat-rejects
+tblastn	'id x &fnof; y'	0	1	decoded, losat-rejects
+blastn	'id x &fnof; y'	0	1	decoded, losat-rejects
+tblastx	'id x &fnof y'	0	0	same
+tblastn	'id x &fnof y'	0	0	same
+blastn	'id x &fnof y'	0	0	same
+tblastx	'id x &circ; y'	0	1	decoded, losat-rejects
+tblastn	'id x &circ; y'	0	1	decoded, losat-rejects
+blastn	'id x &circ; y'	0	1	decoded, losat-rejects
+tblastx	'id x &circ y'	0	0	same
+tblastn	'id x &circ y'	0	0	same
+blastn	'id x &circ y'	0	0	same
+tblastx	'id x &tilde; y'	0	1	decoded, losat-rejects
+tblastn	'id x &tilde; y'	0	1	decoded, losat-rejects
+blastn	'id x &tilde; y'	0	1	decoded, losat-rejects
+tblastx	'id x &tilde y'	0	0	same
+tblastn	'id x &tilde y'	0	0	same
+blastn	'id x &tilde y'	0	0	same
+tblastx	'id x &Alpha; y'	0	1	decoded, losat-rejects
+tblastn	'id x &Alpha; y'	0	1	decoded, losat-rejects
+blastn	'id x &Alpha; y'	0	1	decoded, losat-rejects
+tblastx	'id x &Alpha y'	0	0	same
+tblastn	'id x &Alpha y'	0	0	same
+blastn	'id x &Alpha y'	0	0	same
+tblastx	'id x &Beta; y'	0	1	decoded, losat-rejects
+tblastn	'id x &Beta; y'	0	1	decoded, losat-rejects
+blastn	'id x &Beta; y'	0	1	decoded, losat-rejects
+tblastx	'id x &Beta y'	0	0	same
+tblastn	'id x &Beta y'	0	0	same
+blastn	'id x &Beta y'	0	0	same
+tblastx	'id x &Gamma; y'	0	1	decoded, losat-rejects
+tblastn	'id x &Gamma; y'	0	1	decoded, losat-rejects
+blastn	'id x &Gamma; y'	0	1	decoded, losat-rejects
+tblastx	'id x &Gamma y'	0	0	same
+tblastn	'id x &Gamma y'	0	0	same
+blastn	'id x &Gamma y'	0	0	same
+tblastx	'id x &Delta; y'	0	1	decoded, losat-rejects
+tblastn	'id x &Delta; y'	0	1	decoded, losat-rejects
+blastn	'id x &Delta; y'	0	1	decoded, losat-rejects
+tblastx	'id x &Delta y'	0	0	same
+tblastn	'id x &Delta y'	0	0	same
+blastn	'id x &Delta y'	0	0	same
+tblastx	'id x &Epsilon; y'	0	1	decoded, losat-rejects
+tblastn	'id x &Epsilon; y'	0	1	decoded, losat-rejects
+blastn	'id x &Epsilon; y'	0	1	decoded, losat-rejects
+tblastx	'id x &Epsilon y'	0	0	same
+tblastn	'id x &Epsilon y'	0	0	same
+blastn	'id x &Epsilon y'	0	0	same
+tblastx	'id x &Zeta; y'	0	1	decoded, losat-rejects
+tblastn	'id x &Zeta; y'	0	1	decoded, losat-rejects
+blastn	'id x &Zeta; y'	0	1	decoded, losat-rejects
+tblastx	'id x &Zeta y'	0	0	same
+tblastn	'id x &Zeta y'	0	0	same
+blastn	'id x &Zeta y'	0	0	same
+tblastx	'id x &Eta; y'	0	1	decoded, losat-rejects
+tblastn	'id x &Eta; y'	0	1	decoded, losat-rejects
+blastn	'id x &Eta; y'	0	1	decoded, losat-rejects
+tblastx	'id x &Eta y'	0	0	same
+tblastn	'id x &Eta y'	0	0	same
+blastn	'id x &Eta y'	0	0	same
+tblastx	'id x &Theta; y'	0	1	decoded, losat-rejects
+tblastn	'id x &Theta; y'	0	1	decoded, losat-rejects
+blastn	'id x &Theta; y'	0	1	decoded, losat-rejects
+tblastx	'id x &Theta y'	0	0	same
+tblastn	'id x &Theta y'	0	0	same
+blastn	'id x &Theta y'	0	0	same
+tblastx	'id x &Iota; y'	0	1	decoded, losat-rejects
+tblastn	'id x &Iota; y'	0	1	decoded, losat-rejects
+blastn	'id x &Iota; y'	0	1	decoded, losat-rejects
+tblastx	'id x &Iota y'	0	0	same
+tblastn	'id x &Iota y'	0	0	same
+blastn	'id x &Iota y'	0	0	same
+tblastx	'id x &Kappa; y'	0	1	decoded, losat-rejects
+tblastn	'id x &Kappa; y'	0	1	decoded, losat-rejects
+blastn	'id x &Kappa; y'	0	1	decoded, losat-rejects
+tblastx	'id x &Kappa y'	0	0	same
+tblastn	'id x &Kappa y'	0	0	same
+blastn	'id x &Kappa y'	0	0	same
+tblastx	'id x &Lambda; y'	0	1	decoded, losat-rejects
+tblastn	'id x &Lambda; y'	0	1	decoded, losat-rejects
+blastn	'id x &Lambda; y'	0	1	decoded, losat-rejects
+tblastx	'id x &Lambda y'	0	0	same
+tblastn	'id x &Lambda y'	0	0	same
+blastn	'id x &Lambda y'	0	0	same
+tblastx	'id x &Mu; y'	0	1	decoded, losat-rejects
+tblastn	'id x &Mu; y'	0	1	decoded, losat-rejects
+blastn	'id x &Mu; y'	0	1	decoded, losat-rejects
+tblastx	'id x &Mu y'	0	0	same
+tblastn	'id x &Mu y'	0	0	same
+blastn	'id x &Mu y'	0	0	same
+tblastx	'id x &Nu; y'	0	1	decoded, losat-rejects
+tblastn	'id x &Nu; y'	0	1	decoded, losat-rejects
+blastn	'id x &Nu; y'	0	1	decoded, losat-rejects
+tblastx	'id x &Nu y'	0	0	same
+tblastn	'id x &Nu y'	0	0	same
+blastn	'id x &Nu y'	0	0	same
+tblastx	'id x &Xi; y'	0	0	same
+tblastn	'id x &Xi; y'	0	0	same
+blastn	'id x &Xi; y'	0	0	same
+tblastx	'id x &Xi y'	0	0	same
+tblastn	'id x &Xi y'	0	0	same
+blastn	'id x &Xi y'	0	0	same
+tblastx	'id x &Omicron; y'	0	1	decoded, losat-rejects
+tblastn	'id x &Omicron; y'	0	1	decoded, losat-rejects
+blastn	'id x &Omicron; y'	0	1	decoded, losat-rejects
+tblastx	'id x &Omicron y'	0	0	same
+tblastn	'id x &Omicron y'	0	0	same
+blastn	'id x &Omicron y'	0	0	same
+tblastx	'id x &Pi; y'	0	1	decoded, losat-rejects
+tblastn	'id x &Pi; y'	0	1	decoded, losat-rejects
+blastn	'id x &Pi; y'	0	1	decoded, losat-rejects
+tblastx	'id x &Pi y'	0	0	same
+tblastn	'id x &Pi y'	0	0	same
+blastn	'id x &Pi y'	0	0	same
+tblastx	'id x &Rho; y'	0	1	decoded, losat-rejects
+tblastn	'id x &Rho; y'	0	1	decoded, losat-rejects
+blastn	'id x &Rho; y'	0	1	decoded, losat-rejects
+tblastx	'id x &Rho y'	0	0	same
+tblastn	'id x &Rho y'	0	0	same
+blastn	'id x &Rho y'	0	0	same
+tblastx	'id x &Sigma; y'	0	1	decoded, losat-rejects
+tblastn	'id x &Sigma; y'	0	1	decoded, losat-rejects
+blastn	'id x &Sigma; y'	0	1	decoded, losat-rejects
+tblastx	'id x &Sigma y'	0	0	same
+tblastn	'id x &Sigma y'	0	0	same
+blastn	'id x &Sigma y'	0	0	same
+tblastx	'id x &Tau; y'	0	1	decoded, losat-rejects
+tblastn	'id x &Tau; y'	0	1	decoded, losat-rejects
+blastn	'id x &Tau; y'	0	1	decoded, losat-rejects
+tblastx	'id x &Tau y'	0	0	same
+tblastn	'id x &Tau y'	0	0	same
+blastn	'id x &Tau y'	0	0	same
+tblastx	'id x &Upsilon; y'	0	1	decoded, losat-rejects
+tblastn	'id x &Upsilon; y'	0	1	decoded, losat-rejects
+blastn	'id x &Upsilon; y'	0	1	decoded, losat-rejects
+tblastx	'id x &Upsilon y'	0	0	same
+tblastn	'id x &Upsilon y'	0	0	same
+blastn	'id x &Upsilon y'	0	0	same
+tblastx	'id x &Phi; y'	0	1	decoded, losat-rejects
+tblastn	'id x &Phi; y'	0	1	decoded, losat-rejects
+blastn	'id x &Phi; y'	0	1	decoded, losat-rejects
+tblastx	'id x &Phi y'	0	0	same
+tblastn	'id x &Phi y'	0	0	same
+blastn	'id x &Phi y'	0	0	same
+tblastx	'id x &Chi; y'	0	1	decoded, losat-rejects
+tblastn	'id x &Chi; y'	0	1	decoded, losat-rejects
+blastn	'id x &Chi; y'	0	1	decoded, losat-rejects
+tblastx	'id x &Chi y'	0	0	same
+tblastn	'id x &Chi y'	0	0	same
+blastn	'id x &Chi y'	0	0	same
+tblastx	'id x &Psi; y'	0	1	decoded, losat-rejects
+tblastn	'id x &Psi; y'	0	1	decoded, losat-rejects
+blastn	'id x &Psi; y'	0	1	decoded, losat-rejects
+tblastx	'id x &Psi y'	0	0	same
+tblastn	'id x &Psi y'	0	0	same
+blastn	'id x &Psi y'	0	0	same
+tblastx	'id x &Omega; y'	0	1	decoded, losat-rejects
+tblastn	'id x &Omega; y'	0	1	decoded, losat-rejects
+blastn	'id x &Omega; y'	0	1	decoded, losat-rejects
+tblastx	'id x &Omega y'	0	0	same
+tblastn	'id x &Omega y'	0	0	same
+blastn	'id x &Omega y'	0	0	same
+tblastx	'id x &alpha; y'	0	1	decoded, losat-rejects
+tblastn	'id x &alpha; y'	0	1	decoded, losat-rejects
+blastn	'id x &alpha; y'	0	1	decoded, losat-rejects
+tblastx	'id x &alpha y'	0	0	same
+tblastn	'id x &alpha y'	0	0	same
+blastn	'id x &alpha y'	0	0	same
+tblastx	'id x &beta; y'	0	1	decoded, losat-rejects
+tblastn	'id x &beta; y'	0	1	decoded, losat-rejects
+blastn	'id x &beta; y'	0	1	decoded, losat-rejects
+tblastx	'id x &beta y'	0	0	same
+tblastn	'id x &beta y'	0	0	same
+blastn	'id x &beta y'	0	0	same
+tblastx	'id x &gamma; y'	0	1	decoded, losat-rejects
+tblastn	'id x &gamma; y'	0	1	decoded, losat-rejects
+blastn	'id x &gamma; y'	0	1	decoded, losat-rejects
+tblastx	'id x &gamma y'	0	0	same
+tblastn	'id x &gamma y'	0	0	same
+blastn	'id x &gamma y'	0	0	same
+tblastx	'id x &delta; y'	0	1	decoded, losat-rejects
+tblastn	'id x &delta; y'	0	1	decoded, losat-rejects
+blastn	'id x &delta; y'	0	1	decoded, losat-rejects
+tblastx	'id x &delta y'	0	0	same
+tblastn	'id x &delta y'	0	0	same
+blastn	'id x &delta y'	0	0	same
+tblastx	'id x &epsilon; y'	0	1	decoded, losat-rejects
+tblastn	'id x &epsilon; y'	0	1	decoded, losat-rejects
+blastn	'id x &epsilon; y'	0	1	decoded, losat-rejects
+tblastx	'id x &epsilon y'	0	0	same
+tblastn	'id x &epsilon y'	0	0	same
+blastn	'id x &epsilon y'	0	0	same
+tblastx	'id x &zeta; y'	0	1	decoded, losat-rejects
+tblastn	'id x &zeta; y'	0	1	decoded, losat-rejects
+blastn	'id x &zeta; y'	0	1	decoded, losat-rejects
+tblastx	'id x &zeta y'	0	0	same
+tblastn	'id x &zeta y'	0	0	same
+blastn	'id x &zeta y'	0	0	same
+tblastx	'id x &eta; y'	0	1	decoded, losat-rejects
+tblastn	'id x &eta; y'	0	1	decoded, losat-rejects
+blastn	'id x &eta; y'	0	1	decoded, losat-rejects
+tblastx	'id x &eta y'	0	0	same
+tblastn	'id x &eta y'	0	0	same
+blastn	'id x &eta y'	0	0	same
+tblastx	'id x &theta; y'	0	1	decoded, losat-rejects
+tblastn	'id x &theta; y'	0	1	decoded, losat-rejects
+blastn	'id x &theta; y'	0	1	decoded, losat-rejects
+tblastx	'id x &theta y'	0	0	same
+tblastn	'id x &theta y'	0	0	same
+blastn	'id x &theta y'	0	0	same
+tblastx	'id x &iota; y'	0	1	decoded, losat-rejects
+tblastn	'id x &iota; y'	0	1	decoded, losat-rejects
+blastn	'id x &iota; y'	0	1	decoded, losat-rejects
+tblastx	'id x &iota y'	0	0	same
+tblastn	'id x &iota y'	0	0	same
+blastn	'id x &iota y'	0	0	same
+tblastx	'id x &kappa; y'	0	1	decoded, losat-rejects
+tblastn	'id x &kappa; y'	0	1	decoded, losat-rejects
+blastn	'id x &kappa; y'	0	1	decoded, losat-rejects
+tblastx	'id x &kappa y'	0	0	same
+tblastn	'id x &kappa y'	0	0	same
+blastn	'id x &kappa y'	0	0	same
+tblastx	'id x &lambda; y'	0	1	decoded, losat-rejects
+tblastn	'id x &lambda; y'	0	1	decoded, losat-rejects
+blastn	'id x &lambda; y'	0	1	decoded, losat-rejects
+tblastx	'id x &lambda y'	0	0	same
+tblastn	'id x &lambda y'	0	0	same
+blastn	'id x &lambda y'	0	0	same
+tblastx	'id x &mu; y'	0	1	decoded, losat-rejects
+tblastn	'id x &mu; y'	0	1	decoded, losat-rejects
+blastn	'id x &mu; y'	0	1	decoded, losat-rejects
+tblastx	'id x &mu y'	0	0	same
+tblastn	'id x &mu y'	0	0	same
+blastn	'id x &mu y'	0	0	same
+tblastx	'id x &nu; y'	0	1	decoded, losat-rejects
+tblastn	'id x &nu; y'	0	1	decoded, losat-rejects
+blastn	'id x &nu; y'	0	1	decoded, losat-rejects
+tblastx	'id x &nu y'	0	0	same
+tblastn	'id x &nu y'	0	0	same
+blastn	'id x &nu y'	0	0	same
+tblastx	'id x &xi; y'	0	0	same
+tblastn	'id x &xi; y'	0	0	same
+blastn	'id x &xi; y'	0	0	same
+tblastx	'id x &xi y'	0	0	same
+tblastn	'id x &xi y'	0	0	same
+blastn	'id x &xi y'	0	0	same
+tblastx	'id x &omicron; y'	0	1	decoded, losat-rejects
+tblastn	'id x &omicron; y'	0	1	decoded, losat-rejects
+blastn	'id x &omicron; y'	0	1	decoded, losat-rejects
+tblastx	'id x &omicron y'	0	0	same
+tblastn	'id x &omicron y'	0	0	same
+blastn	'id x &omicron y'	0	0	same
+tblastx	'id x &pi; y'	0	1	decoded, losat-rejects
+tblastn	'id x &pi; y'	0	1	decoded, losat-rejects
+blastn	'id x &pi; y'	0	1	decoded, losat-rejects
+tblastx	'id x &pi y'	0	0	same
+tblastn	'id x &pi y'	0	0	same
+blastn	'id x &pi y'	0	0	same
+tblastx	'id x &rho; y'	0	1	decoded, losat-rejects
+tblastn	'id x &rho; y'	0	1	decoded, losat-rejects
+blastn	'id x &rho; y'	0	1	decoded, losat-rejects
+tblastx	'id x &rho y'	0	0	same
+tblastn	'id x &rho y'	0	0	same
+blastn	'id x &rho y'	0	0	same
+tblastx	'id x &sigmaf; y'	0	1	decoded, losat-rejects
+tblastn	'id x &sigmaf; y'	0	1	decoded, losat-rejects
+blastn	'id x &sigmaf; y'	0	1	decoded, losat-rejects
+tblastx	'id x &sigmaf y'	0	0	same
+tblastn	'id x &sigmaf y'	0	0	same
+blastn	'id x &sigmaf y'	0	0	same
+tblastx	'id x &sigma; y'	0	1	decoded, losat-rejects
+tblastn	'id x &sigma; y'	0	1	decoded, losat-rejects
+blastn	'id x &sigma; y'	0	1	decoded, losat-rejects
+tblastx	'id x &sigma y'	0	0	same
+tblastn	'id x &sigma y'	0	0	same
+blastn	'id x &sigma y'	0	0	same
+tblastx	'id x &tau; y'	0	1	decoded, losat-rejects
+tblastn	'id x &tau; y'	0	1	decoded, losat-rejects
+blastn	'id x &tau; y'	0	1	decoded, losat-rejects
+tblastx	'id x &tau y'	0	0	same
+tblastn	'id x &tau y'	0	0	same
+blastn	'id x &tau y'	0	0	same
+tblastx	'id x &upsilon; y'	0	1	decoded, losat-rejects
+tblastn	'id x &upsilon; y'	0	1	decoded, losat-rejects
+blastn	'id x &upsilon; y'	0	1	decoded, losat-rejects
+tblastx	'id x &upsilon y'	0	0	same
+tblastn	'id x &upsilon y'	0	0	same
+blastn	'id x &upsilon y'	0	0	same
+tblastx	'id x &phi; y'	0	1	decoded, losat-rejects
+tblastn	'id x &phi; y'	0	1	decoded, losat-rejects
+blastn	'id x &phi; y'	0	1	decoded, losat-rejects
+tblastx	'id x &phi y'	0	0	same
+tblastn	'id x &phi y'	0	0	same
+blastn	'id x &phi y'	0	0	same
+tblastx	'id x &chi; y'	0	1	decoded, losat-rejects
+tblastn	'id x &chi; y'	0	1	decoded, losat-rejects
+blastn	'id x &chi; y'	0	1	decoded, losat-rejects
+tblastx	'id x &chi y'	0	0	same
+tblastn	'id x &chi y'	0	0	same
+blastn	'id x &chi y'	0	0	same
+tblastx	'id x &psi; y'	0	1	decoded, losat-rejects
+tblastn	'id x &psi; y'	0	1	decoded, losat-rejects
+blastn	'id x &psi; y'	0	1	decoded, losat-rejects
+tblastx	'id x &psi y'	0	0	same
+tblastn	'id x &psi y'	0	0	same
+blastn	'id x &psi y'	0	0	same
+tblastx	'id x &omega; y'	0	1	decoded, losat-rejects
+tblastn	'id x &omega; y'	0	1	decoded, losat-rejects
+blastn	'id x &omega; y'	0	1	decoded, losat-rejects
+tblastx	'id x &omega y'	0	0	same
+tblastn	'id x &omega y'	0	0	same
+blastn	'id x &omega y'	0	0	same
+tblastx	'id x &thetasym; y'	0	1	decoded, losat-rejects
+tblastn	'id x &thetasym; y'	0	1	decoded, losat-rejects
+blastn	'id x &thetasym; y'	0	1	decoded, losat-rejects
+tblastx	'id x &thetasym y'	0	0	same
+tblastn	'id x &thetasym y'	0	0	same
+blastn	'id x &thetasym y'	0	0	same
+tblastx	'id x &upsih; y'	0	1	decoded, losat-rejects
+tblastn	'id x &upsih; y'	0	1	decoded, losat-rejects
+blastn	'id x &upsih; y'	0	1	decoded, losat-rejects
+tblastx	'id x &upsih y'	0	0	same
+tblastn	'id x &upsih y'	0	0	same
+blastn	'id x &upsih y'	0	0	same
+tblastx	'id x &piv; y'	0	1	decoded, losat-rejects
+tblastn	'id x &piv; y'	0	1	decoded, losat-rejects
+blastn	'id x &piv; y'	0	1	decoded, losat-rejects
+tblastx	'id x &piv y'	0	0	same
+tblastn	'id x &piv y'	0	0	same
+blastn	'id x &piv y'	0	0	same
+tblastx	'id x &ensp; y'	0	1	decoded, losat-rejects
+tblastn	'id x &ensp; y'	0	1	decoded, losat-rejects
+blastn	'id x &ensp; y'	0	1	decoded, losat-rejects
+tblastx	'id x &ensp y'	0	0	same
+tblastn	'id x &ensp y'	0	0	same
+blastn	'id x &ensp y'	0	0	same
+tblastx	'id x &emsp; y'	0	1	decoded, losat-rejects
+tblastn	'id x &emsp; y'	0	1	decoded, losat-rejects
+blastn	'id x &emsp; y'	0	1	decoded, losat-rejects
+tblastx	'id x &emsp y'	0	0	same
+tblastn	'id x &emsp y'	0	0	same
+blastn	'id x &emsp y'	0	0	same
+tblastx	'id x &thinsp; y'	0	1	decoded, losat-rejects
+tblastn	'id x &thinsp; y'	0	1	decoded, losat-rejects
+blastn	'id x &thinsp; y'	0	1	decoded, losat-rejects
+tblastx	'id x &thinsp y'	0	0	same
+tblastn	'id x &thinsp y'	0	0	same
+blastn	'id x &thinsp y'	0	0	same
+tblastx	'id x &zwnj; y'	0	1	decoded, losat-rejects
+tblastn	'id x &zwnj; y'	0	1	decoded, losat-rejects
+blastn	'id x &zwnj; y'	0	1	decoded, losat-rejects
+tblastx	'id x &zwnj y'	0	0	same
+tblastn	'id x &zwnj y'	0	0	same
+blastn	'id x &zwnj y'	0	0	same
+tblastx	'id x &zwj; y'	0	1	decoded, losat-rejects
+tblastn	'id x &zwj; y'	0	1	decoded, losat-rejects
+blastn	'id x &zwj; y'	0	1	decoded, losat-rejects
+tblastx	'id x &zwj y'	0	0	same
+tblastn	'id x &zwj y'	0	0	same
+blastn	'id x &zwj y'	0	0	same
+tblastx	'id x &lrm; y'	0	1	decoded, losat-rejects
+tblastn	'id x &lrm; y'	0	1	decoded, losat-rejects
+blastn	'id x &lrm; y'	0	1	decoded, losat-rejects
+tblastx	'id x &lrm y'	0	0	same
+tblastn	'id x &lrm y'	0	0	same
+blastn	'id x &lrm y'	0	0	same
+tblastx	'id x &rlm; y'	0	1	decoded, losat-rejects
+tblastn	'id x &rlm; y'	0	1	decoded, losat-rejects
+blastn	'id x &rlm; y'	0	1	decoded, losat-rejects
+tblastx	'id x &rlm y'	0	0	same
+tblastn	'id x &rlm y'	0	0	same
+blastn	'id x &rlm y'	0	0	same
+tblastx	'id x &ndash; y'	0	1	decoded, losat-rejects
+tblastn	'id x &ndash; y'	0	1	decoded, losat-rejects
+blastn	'id x &ndash; y'	0	1	decoded, losat-rejects
+tblastx	'id x &ndash y'	0	0	same
+tblastn	'id x &ndash y'	0	0	same
+blastn	'id x &ndash y'	0	0	same
+tblastx	'id x &mdash; y'	0	1	decoded, losat-rejects
+tblastn	'id x &mdash; y'	0	1	decoded, losat-rejects
+blastn	'id x &mdash; y'	0	1	decoded, losat-rejects
+tblastx	'id x &mdash y'	0	0	same
+tblastn	'id x &mdash y'	0	0	same
+blastn	'id x &mdash y'	0	0	same
+tblastx	'id x &lsquo; y'	0	1	decoded, losat-rejects
+tblastn	'id x &lsquo; y'	0	1	decoded, losat-rejects
+blastn	'id x &lsquo; y'	0	1	decoded, losat-rejects
+tblastx	'id x &lsquo y'	0	0	same
+tblastn	'id x &lsquo y'	0	0	same
+blastn	'id x &lsquo y'	0	0	same
+tblastx	'id x &rsquo; y'	0	1	decoded, losat-rejects
+tblastn	'id x &rsquo; y'	0	1	decoded, losat-rejects
+blastn	'id x &rsquo; y'	0	1	decoded, losat-rejects
+tblastx	'id x &rsquo y'	0	0	same
+tblastn	'id x &rsquo y'	0	0	same
+blastn	'id x &rsquo y'	0	0	same
+tblastx	'id x &sbquo; y'	0	1	decoded, losat-rejects
+tblastn	'id x &sbquo; y'	0	1	decoded, losat-rejects
+blastn	'id x &sbquo; y'	0	1	decoded, losat-rejects
+tblastx	'id x &sbquo y'	0	0	same
+tblastn	'id x &sbquo y'	0	0	same
+blastn	'id x &sbquo y'	0	0	same
+tblastx	'id x &ldquo; y'	0	1	decoded, losat-rejects
+tblastn	'id x &ldquo; y'	0	1	decoded, losat-rejects
+blastn	'id x &ldquo; y'	0	1	decoded, losat-rejects
+tblastx	'id x &ldquo y'	0	0	same
+tblastn	'id x &ldquo y'	0	0	same
+blastn	'id x &ldquo y'	0	0	same
+tblastx	'id x &rdquo; y'	0	1	decoded, losat-rejects
+tblastn	'id x &rdquo; y'	0	1	decoded, losat-rejects
+blastn	'id x &rdquo; y'	0	1	decoded, losat-rejects
+tblastx	'id x &rdquo y'	0	0	same
+tblastn	'id x &rdquo y'	0	0	same
+blastn	'id x &rdquo y'	0	0	same
+tblastx	'id x &bdquo; y'	0	1	decoded, losat-rejects
+tblastn	'id x &bdquo; y'	0	1	decoded, losat-rejects
+blastn	'id x &bdquo; y'	0	1	decoded, losat-rejects
+tblastx	'id x &bdquo y'	0	0	same
+tblastn	'id x &bdquo y'	0	0	same
+blastn	'id x &bdquo y'	0	0	same
+tblastx	'id x &dagger; y'	0	1	decoded, losat-rejects
+tblastn	'id x &dagger; y'	0	1	decoded, losat-rejects
+blastn	'id x &dagger; y'	0	1	decoded, losat-rejects
+tblastx	'id x &dagger y'	0	0	same
+tblastn	'id x &dagger y'	0	0	same
+blastn	'id x &dagger y'	0	0	same
+tblastx	'id x &Dagger; y'	0	1	decoded, losat-rejects
+tblastn	'id x &Dagger; y'	0	1	decoded, losat-rejects
+blastn	'id x &Dagger; y'	0	1	decoded, losat-rejects
+tblastx	'id x &Dagger y'	0	0	same
+tblastn	'id x &Dagger y'	0	0	same
+blastn	'id x &Dagger y'	0	0	same
+tblastx	'id x &bull; y'	0	1	decoded, losat-rejects
+tblastn	'id x &bull; y'	0	1	decoded, losat-rejects
+blastn	'id x &bull; y'	0	1	decoded, losat-rejects
+tblastx	'id x &bull y'	0	0	same
+tblastn	'id x &bull y'	0	0	same
+blastn	'id x &bull y'	0	0	same
+tblastx	'id x &hellip; y'	0	1	decoded, losat-rejects
+tblastn	'id x &hellip; y'	0	1	decoded, losat-rejects
+blastn	'id x &hellip; y'	0	1	decoded, losat-rejects
+tblastx	'id x &hellip y'	0	0	same
+tblastn	'id x &hellip y'	0	0	same
+blastn	'id x &hellip y'	0	0	same
+tblastx	'id x &permil; y'	0	1	decoded, losat-rejects
+tblastn	'id x &permil; y'	0	1	decoded, losat-rejects
+blastn	'id x &permil; y'	0	1	decoded, losat-rejects
+tblastx	'id x &permil y'	0	0	same
+tblastn	'id x &permil y'	0	0	same
+blastn	'id x &permil y'	0	0	same
+tblastx	'id x &prime; y'	0	1	decoded, losat-rejects
+tblastn	'id x &prime; y'	0	1	decoded, losat-rejects
+blastn	'id x &prime; y'	0	1	decoded, losat-rejects
+tblastx	'id x &prime y'	0	0	same
+tblastn	'id x &prime y'	0	0	same
+blastn	'id x &prime y'	0	0	same
+tblastx	'id x &Prime; y'	0	1	decoded, losat-rejects
+tblastn	'id x &Prime; y'	0	1	decoded, losat-rejects
+blastn	'id x &Prime; y'	0	1	decoded, losat-rejects
+tblastx	'id x &Prime y'	0	0	same
+tblastn	'id x &Prime y'	0	0	same
+blastn	'id x &Prime y'	0	0	same
+tblastx	'id x &lsaquo; y'	0	1	decoded, losat-rejects
+tblastn	'id x &lsaquo; y'	0	1	decoded, losat-rejects
+blastn	'id x &lsaquo; y'	0	1	decoded, losat-rejects
+tblastx	'id x &lsaquo y'	0	0	same
+tblastn	'id x &lsaquo y'	0	0	same
+blastn	'id x &lsaquo y'	0	0	same
+tblastx	'id x &rsaquo; y'	0	1	decoded, losat-rejects
+tblastn	'id x &rsaquo; y'	0	1	decoded, losat-rejects
+blastn	'id x &rsaquo; y'	0	1	decoded, losat-rejects
+tblastx	'id x &rsaquo y'	0	0	same
+tblastn	'id x &rsaquo y'	0	0	same
+blastn	'id x &rsaquo y'	0	0	same
+tblastx	'id x &oline; y'	0	1	decoded, losat-rejects
+tblastn	'id x &oline; y'	0	1	decoded, losat-rejects
+blastn	'id x &oline; y'	0	1	decoded, losat-rejects
+tblastx	'id x &oline y'	0	0	same
+tblastn	'id x &oline y'	0	0	same
+blastn	'id x &oline y'	0	0	same
+tblastx	'id x &frasl; y'	0	1	decoded, losat-rejects
+tblastn	'id x &frasl; y'	0	1	decoded, losat-rejects
+blastn	'id x &frasl; y'	0	1	decoded, losat-rejects
+tblastx	'id x &frasl y'	0	0	same
+tblastn	'id x &frasl y'	0	0	same
+blastn	'id x &frasl y'	0	0	same
+tblastx	'id x &euro; y'	0	1	decoded, losat-rejects
+tblastn	'id x &euro; y'	0	1	decoded, losat-rejects
+blastn	'id x &euro; y'	0	1	decoded, losat-rejects
+tblastx	'id x &euro y'	0	0	same
+tblastn	'id x &euro y'	0	0	same
+blastn	'id x &euro y'	0	0	same
+tblastx	'id x &weierp; y'	0	1	decoded, losat-rejects
+tblastn	'id x &weierp; y'	0	1	decoded, losat-rejects
+blastn	'id x &weierp; y'	0	1	decoded, losat-rejects
+tblastx	'id x &weierp y'	0	0	same
+tblastn	'id x &weierp y'	0	0	same
+blastn	'id x &weierp y'	0	0	same
+tblastx	'id x &image; y'	0	1	decoded, losat-rejects
+tblastn	'id x &image; y'	0	1	decoded, losat-rejects
+blastn	'id x &image; y'	0	1	decoded, losat-rejects
+tblastx	'id x &image y'	0	0	same
+tblastn	'id x &image y'	0	0	same
+blastn	'id x &image y'	0	0	same
+tblastx	'id x &real; y'	0	1	decoded, losat-rejects
+tblastn	'id x &real; y'	0	1	decoded, losat-rejects
+blastn	'id x &real; y'	0	1	decoded, losat-rejects
+tblastx	'id x &real y'	0	0	same
+tblastn	'id x &real y'	0	0	same
+blastn	'id x &real y'	0	0	same
+tblastx	'id x &trade; y'	0	1	decoded, losat-rejects
+tblastn	'id x &trade; y'	0	1	decoded, losat-rejects
+blastn	'id x &trade; y'	0	1	decoded, losat-rejects
+tblastx	'id x &trade y'	0	0	same
+tblastn	'id x &trade y'	0	0	same
+blastn	'id x &trade y'	0	0	same
+tblastx	'id x &alefsym; y'	0	1	decoded, losat-rejects
+tblastn	'id x &alefsym; y'	0	1	decoded, losat-rejects
+blastn	'id x &alefsym; y'	0	1	decoded, losat-rejects
+tblastx	'id x &alefsym y'	0	0	same
+tblastn	'id x &alefsym y'	0	0	same
+blastn	'id x &alefsym y'	0	0	same
+tblastx	'id x &larr; y'	0	1	decoded, losat-rejects
+tblastn	'id x &larr; y'	0	1	decoded, losat-rejects
+blastn	'id x &larr; y'	0	1	decoded, losat-rejects
+tblastx	'id x &larr y'	0	0	same
+tblastn	'id x &larr y'	0	0	same
+blastn	'id x &larr y'	0	0	same
+tblastx	'id x &uarr; y'	0	1	decoded, losat-rejects
+tblastn	'id x &uarr; y'	0	1	decoded, losat-rejects
+blastn	'id x &uarr; y'	0	1	decoded, losat-rejects
+tblastx	'id x &uarr y'	0	0	same
+tblastn	'id x &uarr y'	0	0	same
+blastn	'id x &uarr y'	0	0	same
+tblastx	'id x &rarr; y'	0	1	decoded, losat-rejects
+tblastn	'id x &rarr; y'	0	1	decoded, losat-rejects
+blastn	'id x &rarr; y'	0	1	decoded, losat-rejects
+tblastx	'id x &rarr y'	0	0	same
+tblastn	'id x &rarr y'	0	0	same
+blastn	'id x &rarr y'	0	0	same
+tblastx	'id x &darr; y'	0	1	decoded, losat-rejects
+tblastn	'id x &darr; y'	0	1	decoded, losat-rejects
+blastn	'id x &darr; y'	0	1	decoded, losat-rejects
+tblastx	'id x &darr y'	0	0	same
+tblastn	'id x &darr y'	0	0	same
+blastn	'id x &darr y'	0	0	same
+tblastx	'id x &harr; y'	0	1	decoded, losat-rejects
+tblastn	'id x &harr; y'	0	1	decoded, losat-rejects
+blastn	'id x &harr; y'	0	1	decoded, losat-rejects
+tblastx	'id x &harr y'	0	0	same
+tblastn	'id x &harr y'	0	0	same
+blastn	'id x &harr y'	0	0	same
+tblastx	'id x &crarr; y'	0	1	decoded, losat-rejects
+tblastn	'id x &crarr; y'	0	1	decoded, losat-rejects
+blastn	'id x &crarr; y'	0	1	decoded, losat-rejects
+tblastx	'id x &crarr y'	0	0	same
+tblastn	'id x &crarr y'	0	0	same
+blastn	'id x &crarr y'	0	0	same
+tblastx	'id x &lArr; y'	0	1	decoded, losat-rejects
+tblastn	'id x &lArr; y'	0	1	decoded, losat-rejects
+blastn	'id x &lArr; y'	0	1	decoded, losat-rejects
+tblastx	'id x &lArr y'	0	0	same
+tblastn	'id x &lArr y'	0	0	same
+blastn	'id x &lArr y'	0	0	same
+tblastx	'id x &uArr; y'	0	1	decoded, losat-rejects
+tblastn	'id x &uArr; y'	0	1	decoded, losat-rejects
+blastn	'id x &uArr; y'	0	1	decoded, losat-rejects
+tblastx	'id x &uArr y'	0	0	same
+tblastn	'id x &uArr y'	0	0	same
+blastn	'id x &uArr y'	0	0	same
+tblastx	'id x &rArr; y'	0	1	decoded, losat-rejects
+tblastn	'id x &rArr; y'	0	1	decoded, losat-rejects
+blastn	'id x &rArr; y'	0	1	decoded, losat-rejects
+tblastx	'id x &rArr y'	0	0	same
+tblastn	'id x &rArr y'	0	0	same
+blastn	'id x &rArr y'	0	0	same
+tblastx	'id x &dArr; y'	0	1	decoded, losat-rejects
+tblastn	'id x &dArr; y'	0	1	decoded, losat-rejects
+blastn	'id x &dArr; y'	0	1	decoded, losat-rejects
+tblastx	'id x &dArr y'	0	0	same
+tblastn	'id x &dArr y'	0	0	same
+blastn	'id x &dArr y'	0	0	same
+tblastx	'id x &hArr; y'	0	1	decoded, losat-rejects
+tblastn	'id x &hArr; y'	0	1	decoded, losat-rejects
+blastn	'id x &hArr; y'	0	1	decoded, losat-rejects
+tblastx	'id x &hArr y'	0	0	same
+tblastn	'id x &hArr y'	0	0	same
+blastn	'id x &hArr y'	0	0	same
+tblastx	'id x &forall; y'	0	1	decoded, losat-rejects
+tblastn	'id x &forall; y'	0	1	decoded, losat-rejects
+blastn	'id x &forall; y'	0	1	decoded, losat-rejects
+tblastx	'id x &forall y'	0	0	same
+tblastn	'id x &forall y'	0	0	same
+blastn	'id x &forall y'	0	0	same
+tblastx	'id x &part; y'	0	1	decoded, losat-rejects
+tblastn	'id x &part; y'	0	1	decoded, losat-rejects
+blastn	'id x &part; y'	0	1	decoded, losat-rejects
+tblastx	'id x &part y'	0	0	same
+tblastn	'id x &part y'	0	0	same
+blastn	'id x &part y'	0	0	same
+tblastx	'id x &exist; y'	0	1	decoded, losat-rejects
+tblastn	'id x &exist; y'	0	1	decoded, losat-rejects
+blastn	'id x &exist; y'	0	1	decoded, losat-rejects
+tblastx	'id x &exist y'	0	0	same
+tblastn	'id x &exist y'	0	0	same
+blastn	'id x &exist y'	0	0	same
+tblastx	'id x &empty; y'	0	1	decoded, losat-rejects
+tblastn	'id x &empty; y'	0	1	decoded, losat-rejects
+blastn	'id x &empty; y'	0	1	decoded, losat-rejects
+tblastx	'id x &empty y'	0	0	same
+tblastn	'id x &empty y'	0	0	same
+blastn	'id x &empty y'	0	0	same
+tblastx	'id x &nabla; y'	0	1	decoded, losat-rejects
+tblastn	'id x &nabla; y'	0	1	decoded, losat-rejects
+blastn	'id x &nabla; y'	0	1	decoded, losat-rejects
+tblastx	'id x &nabla y'	0	0	same
+tblastn	'id x &nabla y'	0	0	same
+blastn	'id x &nabla y'	0	0	same
+tblastx	'id x &isin; y'	0	1	decoded, losat-rejects
+tblastn	'id x &isin; y'	0	1	decoded, losat-rejects
+blastn	'id x &isin; y'	0	1	decoded, losat-rejects
+tblastx	'id x &isin y'	0	0	same
+tblastn	'id x &isin y'	0	0	same
+blastn	'id x &isin y'	0	0	same
+tblastx	'id x &notin; y'	0	1	decoded, losat-rejects
+tblastn	'id x &notin; y'	0	1	decoded, losat-rejects
+blastn	'id x &notin; y'	0	1	decoded, losat-rejects
+tblastx	'id x &notin y'	0	0	same
+tblastn	'id x &notin y'	0	0	same
+blastn	'id x &notin y'	0	0	same
+tblastx	'id x &ni; y'	0	1	decoded, losat-rejects
+tblastn	'id x &ni; y'	0	1	decoded, losat-rejects
+blastn	'id x &ni; y'	0	1	decoded, losat-rejects
+tblastx	'id x &ni y'	0	0	same
+tblastn	'id x &ni y'	0	0	same
+blastn	'id x &ni y'	0	0	same
+tblastx	'id x &prod; y'	0	1	decoded, losat-rejects
+tblastn	'id x &prod; y'	0	1	decoded, losat-rejects
+blastn	'id x &prod; y'	0	1	decoded, losat-rejects
+tblastx	'id x &prod y'	0	0	same
+tblastn	'id x &prod y'	0	0	same
+blastn	'id x &prod y'	0	0	same
+tblastx	'id x &sum; y'	0	1	decoded, losat-rejects
+tblastn	'id x &sum; y'	0	1	decoded, losat-rejects
+blastn	'id x &sum; y'	0	1	decoded, losat-rejects
+tblastx	'id x &sum y'	0	0	same
+tblastn	'id x &sum y'	0	0	same
+blastn	'id x &sum y'	0	0	same
+tblastx	'id x &minus; y'	0	1	decoded, losat-rejects
+tblastn	'id x &minus; y'	0	1	decoded, losat-rejects
+blastn	'id x &minus; y'	0	1	decoded, losat-rejects
+tblastx	'id x &minus y'	0	0	same
+tblastn	'id x &minus y'	0	0	same
+blastn	'id x &minus y'	0	0	same
+tblastx	'id x &lowast; y'	0	1	decoded, losat-rejects
+tblastn	'id x &lowast; y'	0	1	decoded, losat-rejects
+blastn	'id x &lowast; y'	0	1	decoded, losat-rejects
+tblastx	'id x &lowast y'	0	0	same
+tblastn	'id x &lowast y'	0	0	same
+blastn	'id x &lowast y'	0	0	same
+tblastx	'id x &radic; y'	0	1	decoded, losat-rejects
+tblastn	'id x &radic; y'	0	1	decoded, losat-rejects
+blastn	'id x &radic; y'	0	1	decoded, losat-rejects
+tblastx	'id x &radic y'	0	0	same
+tblastn	'id x &radic y'	0	0	same
+blastn	'id x &radic y'	0	0	same
+tblastx	'id x &prop; y'	0	1	decoded, losat-rejects
+tblastn	'id x &prop; y'	0	1	decoded, losat-rejects
+blastn	'id x &prop; y'	0	1	decoded, losat-rejects
+tblastx	'id x &prop y'	0	0	same
+tblastn	'id x &prop y'	0	0	same
+blastn	'id x &prop y'	0	0	same
+tblastx	'id x &infin; y'	0	1	decoded, losat-rejects
+tblastn	'id x &infin; y'	0	1	decoded, losat-rejects
+blastn	'id x &infin; y'	0	1	decoded, losat-rejects
+tblastx	'id x &infin y'	0	0	same
+tblastn	'id x &infin y'	0	0	same
+blastn	'id x &infin y'	0	0	same
+tblastx	'id x &ang; y'	0	1	decoded, losat-rejects
+tblastn	'id x &ang; y'	0	1	decoded, losat-rejects
+blastn	'id x &ang; y'	0	1	decoded, losat-rejects
+tblastx	'id x &ang y'	0	0	same
+tblastn	'id x &ang y'	0	0	same
+blastn	'id x &ang y'	0	0	same
+tblastx	'id x &and; y'	0	1	decoded, losat-rejects
+tblastn	'id x &and; y'	0	1	decoded, losat-rejects
+blastn	'id x &and; y'	0	1	decoded, losat-rejects
+tblastx	'id x &and y'	0	0	same
+tblastn	'id x &and y'	0	0	same
+blastn	'id x &and y'	0	0	same
+tblastx	'id x &or; y'	0	1	decoded, losat-rejects
+tblastn	'id x &or; y'	0	1	decoded, losat-rejects
+blastn	'id x &or; y'	0	1	decoded, losat-rejects
+tblastx	'id x &or y'	0	0	same
+tblastn	'id x &or y'	0	0	same
+blastn	'id x &or y'	0	0	same
+tblastx	'id x &cap; y'	0	1	decoded, losat-rejects
+tblastn	'id x &cap; y'	0	1	decoded, losat-rejects
+blastn	'id x &cap; y'	0	1	decoded, losat-rejects
+tblastx	'id x &cap y'	0	0	same
+tblastn	'id x &cap y'	0	0	same
+blastn	'id x &cap y'	0	0	same
+tblastx	'id x &cup; y'	0	1	decoded, losat-rejects
+tblastn	'id x &cup; y'	0	1	decoded, losat-rejects
+blastn	'id x &cup; y'	0	1	decoded, losat-rejects
+tblastx	'id x &cup y'	0	0	same
+tblastn	'id x &cup y'	0	0	same
+blastn	'id x &cup y'	0	0	same
+tblastx	'id x &int; y'	0	1	decoded, losat-rejects
+tblastn	'id x &int; y'	0	1	decoded, losat-rejects
+blastn	'id x &int; y'	0	1	decoded, losat-rejects
+tblastx	'id x &int y'	0	0	same
+tblastn	'id x &int y'	0	0	same
+blastn	'id x &int y'	0	0	same
+tblastx	'id x &there4; y'	0	1	decoded, losat-rejects
+tblastn	'id x &there4; y'	0	1	decoded, losat-rejects
+blastn	'id x &there4; y'	0	1	decoded, losat-rejects
+tblastx	'id x &there4 y'	0	0	same
+tblastn	'id x &there4 y'	0	0	same
+blastn	'id x &there4 y'	0	0	same
+tblastx	'id x &sim; y'	0	1	decoded, losat-rejects
+tblastn	'id x &sim; y'	0	1	decoded, losat-rejects
+blastn	'id x &sim; y'	0	1	decoded, losat-rejects
+tblastx	'id x &sim y'	0	0	same
+tblastn	'id x &sim y'	0	0	same
+blastn	'id x &sim y'	0	0	same
+tblastx	'id x &cong; y'	0	1	decoded, losat-rejects
+tblastn	'id x &cong; y'	0	1	decoded, losat-rejects
+blastn	'id x &cong; y'	0	1	decoded, losat-rejects
+tblastx	'id x &cong y'	0	0	same
+tblastn	'id x &cong y'	0	0	same
+blastn	'id x &cong y'	0	0	same
+tblastx	'id x &asymp; y'	0	1	decoded, losat-rejects
+tblastn	'id x &asymp; y'	0	1	decoded, losat-rejects
+blastn	'id x &asymp; y'	0	1	decoded, losat-rejects
+tblastx	'id x &asymp y'	0	0	same
+tblastn	'id x &asymp y'	0	0	same
+blastn	'id x &asymp y'	0	0	same
+tblastx	'id x &ne; y'	0	1	decoded, losat-rejects
+tblastn	'id x &ne; y'	0	1	decoded, losat-rejects
+blastn	'id x &ne; y'	0	1	decoded, losat-rejects
+tblastx	'id x &ne y'	0	0	same
+tblastn	'id x &ne y'	0	0	same
+blastn	'id x &ne y'	0	0	same
+tblastx	'id x &equiv; y'	0	1	decoded, losat-rejects
+tblastn	'id x &equiv; y'	0	1	decoded, losat-rejects
+blastn	'id x &equiv; y'	0	1	decoded, losat-rejects
+tblastx	'id x &equiv y'	0	0	same
+tblastn	'id x &equiv y'	0	0	same
+blastn	'id x &equiv y'	0	0	same
+tblastx	'id x &le; y'	0	1	decoded, losat-rejects
+tblastn	'id x &le; y'	0	1	decoded, losat-rejects
+blastn	'id x &le; y'	0	1	decoded, losat-rejects
+tblastx	'id x &le y'	0	0	same
+tblastn	'id x &le y'	0	0	same
+blastn	'id x &le y'	0	0	same
+tblastx	'id x &ge; y'	0	1	decoded, losat-rejects
+tblastn	'id x &ge; y'	0	1	decoded, losat-rejects
+blastn	'id x &ge; y'	0	1	decoded, losat-rejects
+tblastx	'id x &ge y'	0	0	same
+tblastn	'id x &ge y'	0	0	same
+blastn	'id x &ge y'	0	0	same
+tblastx	'id x &sub; y'	0	1	decoded, losat-rejects
+tblastn	'id x &sub; y'	0	1	decoded, losat-rejects
+blastn	'id x &sub; y'	0	1	decoded, losat-rejects
+tblastx	'id x &sub y'	0	0	same
+tblastn	'id x &sub y'	0	0	same
+blastn	'id x &sub y'	0	0	same
+tblastx	'id x &sup; y'	0	1	decoded, losat-rejects
+tblastn	'id x &sup; y'	0	1	decoded, losat-rejects
+blastn	'id x &sup; y'	0	1	decoded, losat-rejects
+tblastx	'id x &sup y'	0	0	same
+tblastn	'id x &sup y'	0	0	same
+blastn	'id x &sup y'	0	0	same
+tblastx	'id x &nsub; y'	0	1	decoded, losat-rejects
+tblastn	'id x &nsub; y'	0	1	decoded, losat-rejects
+blastn	'id x &nsub; y'	0	1	decoded, losat-rejects
+tblastx	'id x &nsub y'	0	0	same
+tblastn	'id x &nsub y'	0	0	same
+blastn	'id x &nsub y'	0	0	same
+tblastx	'id x &sube; y'	0	1	decoded, losat-rejects
+tblastn	'id x &sube; y'	0	1	decoded, losat-rejects
+blastn	'id x &sube; y'	0	1	decoded, losat-rejects
+tblastx	'id x &sube y'	0	0	same
+tblastn	'id x &sube y'	0	0	same
+blastn	'id x &sube y'	0	0	same
+tblastx	'id x &supe; y'	0	1	decoded, losat-rejects
+tblastn	'id x &supe; y'	0	1	decoded, losat-rejects
+blastn	'id x &supe; y'	0	1	decoded, losat-rejects
+tblastx	'id x &supe y'	0	0	same
+tblastn	'id x &supe y'	0	0	same
+blastn	'id x &supe y'	0	0	same
+tblastx	'id x &oplus; y'	0	1	decoded, losat-rejects
+tblastn	'id x &oplus; y'	0	1	decoded, losat-rejects
+blastn	'id x &oplus; y'	0	1	decoded, losat-rejects
+tblastx	'id x &oplus y'	0	0	same
+tblastn	'id x &oplus y'	0	0	same
+blastn	'id x &oplus y'	0	0	same
+tblastx	'id x &otimes; y'	0	1	decoded, losat-rejects
+tblastn	'id x &otimes; y'	0	1	decoded, losat-rejects
+blastn	'id x &otimes; y'	0	1	decoded, losat-rejects
+tblastx	'id x &otimes y'	0	0	same
+tblastn	'id x &otimes y'	0	0	same
+blastn	'id x &otimes y'	0	0	same
+tblastx	'id x &perp; y'	0	1	decoded, losat-rejects
+tblastn	'id x &perp; y'	0	1	decoded, losat-rejects
+blastn	'id x &perp; y'	0	1	decoded, losat-rejects
+tblastx	'id x &perp y'	0	0	same
+tblastn	'id x &perp y'	0	0	same
+blastn	'id x &perp y'	0	0	same
+tblastx	'id x &sdot; y'	0	1	decoded, losat-rejects
+tblastn	'id x &sdot; y'	0	1	decoded, losat-rejects
+blastn	'id x &sdot; y'	0	1	decoded, losat-rejects
+tblastx	'id x &sdot y'	0	0	same
+tblastn	'id x &sdot y'	0	0	same
+blastn	'id x &sdot y'	0	0	same
+tblastx	'id x &lceil; y'	0	1	decoded, losat-rejects
+tblastn	'id x &lceil; y'	0	1	decoded, losat-rejects
+blastn	'id x &lceil; y'	0	1	decoded, losat-rejects
+tblastx	'id x &lceil y'	0	0	same
+tblastn	'id x &lceil y'	0	0	same
+blastn	'id x &lceil y'	0	0	same
+tblastx	'id x &rceil; y'	0	1	decoded, losat-rejects
+tblastn	'id x &rceil; y'	0	1	decoded, losat-rejects
+blastn	'id x &rceil; y'	0	1	decoded, losat-rejects
+tblastx	'id x &rceil y'	0	0	same
+tblastn	'id x &rceil y'	0	0	same
+blastn	'id x &rceil y'	0	0	same
+tblastx	'id x &lfloor; y'	0	1	decoded, losat-rejects
+tblastn	'id x &lfloor; y'	0	1	decoded, losat-rejects
+blastn	'id x &lfloor; y'	0	1	decoded, losat-rejects
+tblastx	'id x &lfloor y'	0	0	same
+tblastn	'id x &lfloor y'	0	0	same
+blastn	'id x &lfloor y'	0	0	same
+tblastx	'id x &rfloor; y'	0	1	decoded, losat-rejects
+tblastn	'id x &rfloor; y'	0	1	decoded, losat-rejects
+blastn	'id x &rfloor; y'	0	1	decoded, losat-rejects
+tblastx	'id x &rfloor y'	0	0	same
+tblastn	'id x &rfloor y'	0	0	same
+blastn	'id x &rfloor y'	0	0	same
+tblastx	'id x &lang; y'	0	1	decoded, losat-rejects
+tblastn	'id x &lang; y'	0	1	decoded, losat-rejects
+blastn	'id x &lang; y'	0	1	decoded, losat-rejects
+tblastx	'id x &lang y'	0	0	same
+tblastn	'id x &lang y'	0	0	same
+blastn	'id x &lang y'	0	0	same
+tblastx	'id x &rang; y'	0	1	decoded, losat-rejects
+tblastn	'id x &rang; y'	0	1	decoded, losat-rejects
+blastn	'id x &rang; y'	0	1	decoded, losat-rejects
+tblastx	'id x &rang y'	0	0	same
+tblastn	'id x &rang y'	0	0	same
+blastn	'id x &rang y'	0	0	same
+tblastx	'id x &loz; y'	0	1	decoded, losat-rejects
+tblastn	'id x &loz; y'	0	1	decoded, losat-rejects
+blastn	'id x &loz; y'	0	1	decoded, losat-rejects
+tblastx	'id x &loz y'	0	0	same
+tblastn	'id x &loz y'	0	0	same
+blastn	'id x &loz y'	0	0	same
+tblastx	'id x &spades; y'	0	1	decoded, losat-rejects
+tblastn	'id x &spades; y'	0	1	decoded, losat-rejects
+blastn	'id x &spades; y'	0	1	decoded, losat-rejects
+tblastx	'id x &spades y'	0	0	same
+tblastn	'id x &spades y'	0	0	same
+blastn	'id x &spades y'	0	0	same
+tblastx	'id x &clubs; y'	0	1	decoded, losat-rejects
+tblastn	'id x &clubs; y'	0	1	decoded, losat-rejects
+blastn	'id x &clubs; y'	0	1	decoded, losat-rejects
+tblastx	'id x &clubs y'	0	0	same
+tblastn	'id x &clubs y'	0	0	same
+blastn	'id x &clubs y'	0	0	same
+tblastx	'id x &hearts; y'	0	1	decoded, losat-rejects
+tblastn	'id x &hearts; y'	0	1	decoded, losat-rejects
+blastn	'id x &hearts; y'	0	1	decoded, losat-rejects
+tblastx	'id x &hearts y'	0	0	same
+tblastn	'id x &hearts y'	0	0	same
+blastn	'id x &hearts y'	0	0	same
+tblastx	'id x &diams; y'	0	1	decoded, losat-rejects
+tblastn	'id x &diams; y'	0	1	decoded, losat-rejects
+blastn	'id x &diams; y'	0	1	decoded, losat-rejects
+tblastx	'id x &diams y'	0	0	same
+tblastn	'id x &diams y'	0	0	same
+blastn	'id x &diams y'	0	0	same
+tblastx	'id a&#38;b'	0	1	decoded, losat-rejects
+tblastn	'id a&#38;b'	0	1	decoded, losat-rejects
+blastn	'id a&#38;b'	0	1	decoded, losat-rejects
+tblastx	'id a&#x26;b'	0	1	decoded, losat-rejects
+tblastn	'id a&#x26;b'	0	1	decoded, losat-rejects
+blastn	'id a&#x26;b'	0	1	decoded, losat-rejects
+tblastx	'id a&#X26;b'	0	1	decoded, losat-rejects
+tblastn	'id a&#X26;b'	0	1	decoded, losat-rejects
+blastn	'id a&#X26;b'	0	1	decoded, losat-rejects
+tblastx	'id a&#0;b'	0	1	decoded, losat-rejects
+tblastn	'id a&#0;b'	0	1	decoded, losat-rejects
+blastn	'id a&#0;b'	0	1	decoded, losat-rejects
+tblastx	'id a&#;b'	0	0	same
+tblastn	'id a&#;b'	0	0	same
+blastn	'id a&#;b'	0	0	same
+tblastx	'id a&#x;b'	0	0	same
+tblastn	'id a&#x;b'	0	0	same
+blastn	'id a&#x;b'	0	0	same
+tblastx	'id a&#xg;b'	0	0	same
+tblastn	'id a&#xg;b'	0	0	same
+blastn	'id a&#xg;b'	0	0	same
+tblastx	'id a&#65'	0	0	same
+tblastn	'id a&#65'	0	0	same
+blastn	'id a&#65'	0	0	same
+tblastx	'id a&#65 ;'	0	0	same
+tblastn	'id a&#65 ;'	0	0	same
+blastn	'id a&#65 ;'	0	0	same
+tblastx	'id a&#12345678901234567;b'	0	0	same
+tblastn	'id a&#12345678901234567;b'	0	0	same
+blastn	'id a&#12345678901234567;b'	0	0	same
+tblastx	'id a&#1234567890123456;b'	0	0	same
+tblastn	'id a&#1234567890123456;b'	0	0	same
+blastn	'id a&#1234567890123456;b'	0	0	same
+tblastx	'id s &xi;t'	0	0	same
+tblastn	'id s &xi;t'	0	0	same
+blastn	'id s &xi;t'	0	0	same
+tblastx	'id s &xa;t'	0	0	same
+tblastn	'id s &xa;t'	0	0	same
+blastn	'id s &xa;t'	0	0	same
+tblastx	'id q &X41; r'	0	0	same
+tblastn	'id q &X41; r'	0	0	same
+blastn	'id q &X41; r'	0	0	same
+tblastx	'id a&amp#;b'	0	0	same
+tblastn	'id a&amp#;b'	0	0	same
+blastn	'id a&amp#;b'	0	0	same
+tblastx	'id a&ampxxxxxxxxxxxxxxxx;b'	0	0	same
+tblastn	'id a&ampxxxxxxxxxxxxxxxx;b'	0	0	same
+blastn	'id a&ampxxxxxxxxxxxxxxxx;b'	0	0	same
+tblastx	'id a&ampxxxxxxxxxxxxx;b'	0	0	same
+tblastn	'id a&ampxxxxxxxxxxxxx;b'	0	0	same
+blastn	'id a&ampxxxxxxxxxxxxx;b'	0	0	same
+tblastx	'id a&amp;'	0	0	same
+tblastn	'id a&amp;'	0	0	same
+blastn	'id a&amp;'	0	0	same
+tblastx	'id a&amp;;'	0	0	same
+tblastn	'id a&amp;;'	0	0	same
+blastn	'id a&amp;;'	0	0	same
+tblastx	'id a&amp; .'	0	0	same
+tblastn	'id a&amp; .'	0	0	same
+blastn	'id a&amp; .'	0	0	same
+tblastx	'id a&amp;.b'	0	1	decoded, losat-rejects
+tblastn	'id a&amp;.b'	0	1	decoded, losat-rejects
+blastn	'id a&amp;.b'	0	1	decoded, losat-rejects
+tblastx	'id TPA: &amp;x'	0	1	decoded, losat-rejects
+tblastn	'id TPA: &amp;x'	0	1	decoded, losat-rejects
+blastn	'id TPA: &amp;x'	0	1	decoded, losat-rejects
+tblastx	'id MAG: x&amp;'	0	0	same
+tblastn	'id MAG: x&amp;'	0	0	same
+blastn	'id MAG: x&amp;'	0	0	same
+tblastx	'id TPA:&lt;b'	0	1	decoded, losat-rejects
+tblastn	'id TPA:&lt;b'	0	1	decoded, losat-rejects
+blastn	'id TPA:&lt;b'	0	1	decoded, losat-rejects
+tblastx	'id R&D; x'	0	0	same
+tblastn	'id R&D; x'	0	0	same
+blastn	'id R&D; x'	0	0	same
+tblastx	'id a&foo;b'	0	0	same
+tblastn	'id a&foo;b'	0	0	same
+blastn	'id a&foo;b'	0	0	same
+tblastx	'id a & b'	0	0	same
+tblastn	'id a & b'	0	0	same
+blastn	'id a & b'	0	0	same
+tblastx	'id a&;'	0	0	same
+tblastn	'id a&;'	0	0	same
+blastn	'id a&;'	0	0	same
+tblastx	'id &&amp;'	0	0	same
+tblastn	'id &&amp;'	0	0	same
+blastn	'id &&amp;'	0	0	same
+tblastx	'id a&&#38;'	0	0	same
+tblastn	'id a&&#38;'	0	0	same
+blastn	'id a&&#38;'	0	0	same
+tblastx	'id F;1'	0	0	same
+tblastn	'id F;1'	0	0	same
+blastn	'id F;1'	0	0	same
+tblastx	'id ma#Fpa'	0	0	same
+tblastn	'id ma#Fpa'	0	0	same
+blastn	'id ma#Fpa'	0	0	same
+tblastx	'id p  X&'	0	0	same
+tblastn	'id p  X&'	0	0	same
+blastn	'id p  X&'	0	0	same
+tblastx	'id xXm1#1F#'	0	0	same
+tblastn	'id xXm1#1F#'	0	0	same
+blastn	'id xXm1#1F#'	0	0	same
+tblastx	'id x'	0	0	same
+tblastn	'id x'	0	0	same
+blastn	'id x'	0	0	same
+tblastx	'id ;a'	0	0	same
+tblastn	'id ;a'	0	0	same
+blastn	'id ;a'	0	0	same
+tblastx	'id &;'	0	0	same
+tblastn	'id &;'	0	0	same
+blastn	'id &;'	0	0	same
+tblastx	'id pmXap xpmm'	0	0	same
+tblastn	'id pmXap xpmm'	0	0	same
+blastn	'id pmXap xpmm'	0	0	same
+tblastx	'id mFx'	0	0	same
+tblastn	'id mFx'	0	0	same
+blastn	'id mFx'	0	0	same
+tblastx	'id'	0	0	same
+tblastn	'id'	0	0	same
+blastn	'id'	0	0	same
+tblastx	'id pa&F'	0	0	same
+tblastn	'id pa&F'	0	0	same
+blastn	'id pa&F'	0	0	same
+tblastx	'id ;m&a'	0	0	same
+tblastn	'id ;m&a'	0	0	same
+blastn	'id ;m&a'	0	0	same
+tblastx	'id x&xXa1FXm'	0	0	same
+tblastn	'id x&xXa1FXm'	0	0	same
+blastn	'id x&xXa1FXm'	0	0	same
+tblastx	'id ;Fmp#;F#'	0	0	same
+tblastn	'id ;Fmp#;F#'	0	0	same
+blastn	'id ;Fmp#;F#'	0	0	same
+tblastx	'id ;&'	0	0	same
+tblastn	'id ;&'	0	0	same
+blastn	'id ;&'	0	0	same
+tblastx	'id &;x&1#p;m'	0	0	same
+tblastn	'id &;x&1#p;m'	0	0	same
+blastn	'id &;x&1#p;m'	0	0	same
+tblastx	'id am'	0	0	same
+tblastn	'id am'	0	0	same
+blastn	'id am'	0	0	same
+tblastx	'id X&mp;  1'	0	0	same
+tblastn	'id X&mp;  1'	0	0	same
+blastn	'id X&mp;  1'	0	0	same
+tblastx	'id mmX'	0	0	same
+tblastn	'id mmX'	0	0	same
+blastn	'id mmX'	0	0	same
+tblastx	'id Xmpm1am'	0	0	same
+tblastn	'id Xmpm1am'	0	0	same
+blastn	'id Xmpm1am'	0	0	same
+tblastx	'id 1'	0	0	same
+tblastn	'id 1'	0	0	same
+blastn	'id 1'	0	0	same
+tblastx	'id 1pp'	0	0	same
+tblastn	'id 1pp'	0	0	same
+blastn	'id 1pp'	0	0	same
+tblastx	'id X'	0	0	same
+tblastn	'id X'	0	0	same
+blastn	'id X'	0	0	same
+tblastx	'id m xF'	0	0	same
+tblastn	'id m xF'	0	0	same
+blastn	'id m xF'	0	0	same
+tblastx	'id ;m'	0	0	same
+tblastn	'id ;m'	0	0	same
+blastn	'id ;m'	0	0	same
+tblastx	'id F#m& m;1&p'	0	0	same
+tblastn	'id F#m& m;1&p'	0	0	same
+blastn	'id F#m& m;1&p'	0	0	same
+tblastx	'id #XamXF;m'	0	0	same
+tblastn	'id #XamXF;m'	0	0	same
+blastn	'id #XamXF;m'	0	0	same
+tblastx	'id xXFmF'	0	0	same
+tblastn	'id xXFmF'	0	0	same
+blastn	'id xXFmF'	0	0	same
+tblastx	'id mmpF&#'	0	0	same
+tblastn	'id mmpF&#'	0	0	same
+blastn	'id mmpF&#'	0	0	same
+tblastx	'id aaF'	0	0	same
+tblastn	'id aaF'	0	0	same
+blastn	'id aaF'	0	0	same
+tblastx	'id aa'	0	0	same
+tblastn	'id aa'	0	0	same
+blastn	'id aa'	0	0	same
+tblastx	'id mp ;a'	0	0	same
+tblastn	'id mp ;a'	0	0	same
+blastn	'id mp ;a'	0	0	same
+tblastx	'id Xmm;1'	0	0	same
+tblastn	'id Xmm;1'	0	0	same
+blastn	'id Xmm;1'	0	0	same
+tblastx	'id  #X&&'	0	0	same
+tblastn	'id  #X&&'	0	0	same
+blastn	'id  #X&&'	0	0	same
+tblastx	'id m;'	0	0	same
+tblastn	'id m;'	0	0	same
+blastn	'id m;'	0	0	same
+tblastx	'id apaF'	0	0	same
+tblastn	'id apaF'	0	0	same
+blastn	'id apaF'	0	0	same
+tblastx	'id x11 m aXXp'	0	0	same
+tblastn	'id x11 m aXXp'	0	0	same
+blastn	'id x11 m aXXp'	0	0	same
+tblastx	'id 1&pXp'	0	0	same
+tblastn	'id 1&pXp'	0	0	same
+blastn	'id 1&pXp'	0	0	same
+tblastx	'id 1X& a'	0	0	same
+tblastn	'id 1X& a'	0	0	same
+blastn	'id 1X& a'	0	0	same
+tblastx	'id a'	0	0	same
+tblastn	'id a'	0	0	same
+blastn	'id a'	0	0	same
+tblastx	'id mpmpaa;'	0	0	same
+tblastn	'id mpmpaa;'	0	0	same
+blastn	'id mpmpaa;'	0	0	same
+tblastx	'id # axmF&m'	0	0	same
+tblastn	'id # axmF&m'	0	0	same
+blastn	'id # axmF&m'	0	0	same
+tblastx	'id Faa#& 1#F'	0	0	same
+tblastn	'id Faa#& 1#F'	0	0	same
+blastn	'id Faa#& 1#F'	0	0	same
+tblastx	'id mp&XF  Xp'	0	0	same
+tblastn	'id mp&XF  Xp'	0	0	same
+blastn	'id mp&XF  Xp'	0	0	same
+tblastx	'id #a;ap1'	0	0	same
+tblastn	'id #a;ap1'	0	0	same
+blastn	'id #a;ap1'	0	0	same
+tblastx	'id p;;;p&'	0	0	same
+tblastn	'id p;;;p&'	0	0	same
+blastn	'id p;;;p&'	0	0	same
+tblastx	'id X&x&m#p&m'	0	0	same
+tblastn	'id X&x&m#p&m'	0	0	same
+blastn	'id X&x&m#p&m'	0	0	same
+tblastx	'id   Xpaa'	0	0	same
+tblastn	'id   Xpaa'	0	0	same
+blastn	'id   Xpaa'	0	0	same
+tblastx	'id 1am &Xxp'	0	0	same
+tblastn	'id 1am &Xxp'	0	0	same
+blastn	'id 1am &Xxp'	0	0	same
+tblastx	'id #& 1'	0	0	same
+tblastn	'id #& 1'	0	0	same
+blastn	'id #& 1'	0	0	same
+tblastx	'id p m&map#'	0	0	same
+tblastn	'id p m&map#'	0	0	same
+blastn	'id p m&map#'	0	0	same
+tblastx	'id mX&'	0	0	same
+tblastn	'id mX&'	0	0	same
+blastn	'id mX&'	0	0	same
+tblastx	'id mpaxp pF&'	0	0	same
+tblastn	'id mpaxp pF&'	0	0	same
+blastn	'id mpaxp pF&'	0	0	same
+tblastx	'id F1##X1a &'	0	0	same
+tblastn	'id F1##X1a &'	0	0	same
+blastn	'id F1##X1a &'	0	0	same
+tblastx	'id m&'	0	0	same
+tblastn	'id m&'	0	0	same
+blastn	'id m&'	0	0	same
+tblastx	'id x&px1p&'	0	0	same
+tblastn	'id x&px1p&'	0	0	same
+blastn	'id x&px1p&'	0	0	same
+tblastx	'id Xxm'	0	0	same
+tblastn	'id Xxm'	0	0	same
+blastn	'id Xxm'	0	0	same
+tblastx	'id  1aX#p'	0	0	same
+tblastn	'id  1aX#p'	0	0	same
+blastn	'id  1aX#p'	0	0	same
+tblastx	'id &X #mFXmm'	0	0	same
+tblastn	'id &X #mFXmm'	0	0	same
+blastn	'id &X #mFXmm'	0	0	same
+tblastx	'id ;& #x#p;a'	0	0	same
+tblastn	'id ;& #x#p;a'	0	0	same
+blastn	'id ;& #x#p;a'	0	0	same
+tblastx	'id ;X x#& #F#'	0	0	same
+tblastn	'id ;X x#& #F#'	0	0	same
+blastn	'id ;X x#& #F#'	0	0	same
+tblastx	'id pa &1'	0	0	same
+tblastn	'id pa &1'	0	0	same
+blastn	'id pa &1'	0	0	same
+tblastx	'id 1Xp;FX&F'	0	0	same
+tblastn	'id 1Xp;FX&F'	0	0	same
+blastn	'id 1Xp;FX&F'	0	0	same
+tblastx	'id F;X;ax#a'	0	0	same
+tblastn	'id F;X;ax#a'	0	0	same
+blastn	'id F;X;ax#a'	0	0	same
+tblastx	'id     pF m&m'	0	0	same
+tblastn	'id     pF m&m'	0	0	same
+blastn	'id     pF m&m'	0	0	same
+tblastx	'id a1xx&1; a'	0	0	same
+tblastn	'id a1xx&1; a'	0	0	same
+blastn	'id a1xx&1; a'	0	0	same
+tblastx	'id xaF'	0	0	same
+tblastn	'id xaF'	0	0	same
+blastn	'id xaF'	0	0	same
+tblastx	'id F#p'	0	0	same
+tblastn	'id F#p'	0	0	same
+blastn	'id F#p'	0	0	same
+tblastx	'id xaXmF1FF'	0	0	same
+tblastn	'id xaXmF1FF'	0	0	same
+blastn	'id xaXmF1FF'	0	0	same
+tblastx	'id #; xmFxaa'	0	0	same
+tblastn	'id #; xmFxaa'	0	0	same
+blastn	'id #; xmFxaa'	0	0	same
+tblastx	'id X;mX#p&p'	0	0	same
+tblastn	'id X;mX#p&p'	0	0	same
+blastn	'id X;mX#p&p'	0	0	same
+tblastx	'id  #FmFap1'	0	0	same
+tblastn	'id  #FmFap1'	0	0	same
+blastn	'id  #FmFap1'	0	0	same
+tblastx	'id X X## m ma'	0	0	same
+tblastn	'id X X## m ma'	0	0	same
+blastn	'id X X## m ma'	0	0	same
+tblastx	'id F m1;'	0	0	same
+tblastn	'id F m1;'	0	0	same
+blastn	'id F m1;'	0	0	same
+tblastx	'id 11p#'	0	0	same
+tblastn	'id 11p#'	0	0	same
+blastn	'id 11p#'	0	0	same
+tblastx	'id xXx;#&xaa'	0	0	same
+tblastn	'id xXx;#&xaa'	0	0	same
+blastn	'id xXx;#&xaa'	0	0	same
+tblastx	'id  FX#F'	0	0	same
+tblastn	'id  FX#F'	0	0	same
+blastn	'id  FX#F'	0	0	same
+tblastx	'id a1;Xma x #'	0	0	same
+tblastn	'id a1;Xma x #'	0	0	same
+blastn	'id a1;Xma x #'	0	0	same
+tblastx	'id ;x&xmp1'	0	0	same
+tblastn	'id ;x&xmp1'	0	0	same
+blastn	'id ;x&xmp1'	0	0	same
+tblastx	'id a&;&&Fx'	0	0	same
+tblastn	'id a&;&&Fx'	0	0	same
+blastn	'id a&;&&Fx'	0	0	same
+tblastx	'id ;1&#&&&#'	0	0	same
+tblastn	'id ;1&#&&&#'	0	0	same
+blastn	'id ;1&#&&&#'	0	0	same
+tblastx	'id ap#;F'	0	0	same
+tblastn	'id ap#;F'	0	0	same
+blastn	'id ap#;F'	0	0	same
+tblastx	'id # ;XFm'	0	0	same
+tblastn	'id # ;XFm'	0	0	same
+blastn	'id # ;XFm'	0	0	same
+tblastx	'id amp'	0	0	same
+tblastn	'id amp'	0	0	same
+blastn	'id amp'	0	0	same
+tblastx	'id &Fx;;a;Xm'	0	0	same
+tblastn	'id &Fx;;a;Xm'	0	0	same
+blastn	'id &Fx;;a;Xm'	0	0	same
+tblastx	'id pF&&pF11'	0	0	same
+tblastn	'id pF&&pF11'	0	0	same
+blastn	'id pF&&pF11'	0	0	same
+tblastx	'id FxXXm#1;m'	0	0	same
+tblastn	'id FxXXm#1;m'	0	0	same
+blastn	'id FxXXm#1;m'	0	0	same
+tblastx	'id pX pxam'	0	0	same
+tblastn	'id pX pxam'	0	0	same
+blastn	'id pX pxam'	0	0	same
+tblastx	'id &&1x#&'	0	0	same
+tblastn	'id &&1x#&'	0	0	same
+blastn	'id &&1x#&'	0	0	same
+tblastx	'id X#m&mXa'	0	0	same
+tblastn	'id X#m&mXa'	0	0	same
+blastn	'id X#m&mXa'	0	0	same
+tblastx	'id #'	0	0	same
+tblastn	'id #'	0	0	same
+blastn	'id #'	0	0	same
+tblastx	'id p1F#x#px#'	0	0	same
+tblastn	'id p1F#x#px#'	0	0	same
+blastn	'id p1F#x#px#'	0	0	same
+tblastx	'id a aF1&'	0	0	same
+tblastn	'id a aF1&'	0	0	same
+blastn	'id a aF1&'	0	0	same
+tblastx	'id 1xx1'	0	0	same
+tblastn	'id 1xx1'	0	0	same
+blastn	'id 1xx1'	0	0	same
+tblastx	'id &F'	0	0	same
+tblastn	'id &F'	0	0	same
+blastn	'id &F'	0	0	same
+tblastx	'id FaXxX1X'	0	0	same
+tblastn	'id FaXxX1X'	0	0	same
+blastn	'id FaXxX1X'	0	0	same
+tblastx	'id Xp Xa;aXx&'	0	0	same
+tblastn	'id Xp Xa;aXx&'	0	0	same
+blastn	'id Xp Xa;aXx&'	0	0	same
+tblastx	'id ;'	0	0	same
+tblastn	'id ;'	0	0	same
+blastn	'id ;'	0	0	same
+tblastx	'id a&&x;'	0	0	same
+tblastn	'id a&&x;'	0	0	same
+blastn	'id a&&x;'	0	0	same
+tblastx	'id x;Xx&#XX'	0	0	same
+tblastn	'id x;Xx&#XX'	0	0	same
+blastn	'id x;Xx&#XX'	0	0	same
+tblastx	'id x&pX'	0	0	same
+tblastn	'id x&pX'	0	0	same
+blastn	'id x&pX'	0	0	same
+tblastx	'id F&m'	0	0	same
+tblastn	'id F&m'	0	0	same
+blastn	'id F&m'	0	0	same
+tblastx	'id #;F&a;&'	0	0	same
+tblastn	'id #;F&a;&'	0	0	same
+blastn	'id #;F&a;&'	0	0	same
+tblastx	'id ;F#X#xm#1&'	0	0	same
+tblastn	'id ;F#X#xm#1&'	0	0	same
+blastn	'id ;F#X#xm#1&'	0	0	same
+tblastx	'id XmpF;1a'	0	0	same
+tblastn	'id XmpF;1a'	0	0	same
+blastn	'id XmpF;1a'	0	0	same
+tblastx	'id a& #m'	0	0	same
+tblastn	'id a& #m'	0	0	same
+blastn	'id a& #m'	0	0	same
+tblastx	'id 1  ##p'	0	0	same
+tblastn	'id 1  ##p'	0	0	same
+blastn	'id 1  ##p'	0	0	same
+tblastx	'id ;;axp&X'	0	0	same
+tblastn	'id ;;axp&X'	0	0	same
+blastn	'id ;;axp&X'	0	0	same
+tblastx	'id &1F#X;#x'	0	0	same
+tblastn	'id &1F#X;#x'	0	0	same
+blastn	'id &1F#X;#x'	0	0	same
+tblastx	'id X;1p1pa#pp'	0	0	same
+tblastn	'id X;1p1pa#pp'	0	0	same
+blastn	'id X;1p1pa#pp'	0	0	same
+tblastx	'id ;p 1m1&m1'	0	0	same
+tblastn	'id ;p 1m1&m1'	0	0	same
+blastn	'id ;p 1m1&m1'	0	0	same
+tblastx	'id m& pX;&X#'	0	0	same
+tblastn	'id m& pX;&X#'	0	0	same
+blastn	'id m& pX;&X#'	0	0	same
+tblastx	'id Xpma;#'	0	0	same
+tblastn	'id Xpma;#'	0	0	same
+blastn	'id Xpma;#'	0	0	same
+tblastx	'id x& x'	0	0	same
+tblastn	'id x& x'	0	0	same
+blastn	'id x& x'	0	0	same
+tblastx	'id F11'	0	0	same
+tblastn	'id F11'	0	0	same
+blastn	'id F11'	0	0	same
+tblastx	'id xXm##x1aX;'	0	0	same
+tblastn	'id xXm##x1aX;'	0	0	same
+blastn	'id xXm##x1aX;'	0	0	same
+tblastx	'id pm'	0	0	same
+tblastn	'id pm'	0	0	same
+blastn	'id pm'	0	0	same
+tblastx	'id 1m;xam&px'	0	0	same
+tblastn	'id 1m;xam&px'	0	0	same
+blastn	'id 1m;xam&px'	0	0	same
+tblastx	'id p1;;1&a1#F'	0	0	same
+tblastn	'id p1;;1&a1#F'	0	0	same
+blastn	'id p1;;1&a1#F'	0	0	same
+tblastx	'id Fp'	0	0	same
+tblastn	'id Fp'	0	0	same
+blastn	'id Fp'	0	0	same
+tblastx	'id #F'	0	0	same
+tblastn	'id #F'	0	0	same
+blastn	'id #F'	0	0	same
+tblastx	'id #pF;XF;p'	0	0	same
+tblastn	'id #pF;XF;p'	0	0	same
+blastn	'id #pF;XF;p'	0	0	same
+tblastx	'id ;p'	0	0	same
+tblastn	'id ;p'	0	0	same
+blastn	'id ;p'	0	0	same
+tblastx	'id F1'	0	0	same
+tblastn	'id F1'	0	0	same
+blastn	'id F1'	0	0	same
+tblastx	'id m1x1ma#m'	0	0	same
+tblastn	'id m1x1ma#m'	0	0	same
+blastn	'id m1x1ma#m'	0	0	same
+tblastx	'id mx&X&x'	0	0	same
+tblastn	'id mx&X&x'	0	0	same
+blastn	'id mx&X&x'	0	0	same
+tblastx	'id   a& x&a#'	0	0	same
+tblastn	'id   a& x&a#'	0	0	same
+blastn	'id   a& x&a#'	0	0	same
+tblastx	'id Xap'	0	0	same
+tblastn	'id Xap'	0	0	same
+blastn	'id Xap'	0	0	same
+tblastx	'id 1xxmFm'	0	0	same
+tblastn	'id 1xxmFm'	0	0	same
+blastn	'id 1xxmFm'	0	0	same
+tblastx	'id ;pF X'	0	0	same
+tblastn	'id ;pF X'	0	0	same
+blastn	'id ;pF X'	0	0	same
+tblastx	'id #;&aF'	0	0	same
+tblastn	'id #;&aF'	0	0	same
+blastn	'id #;&aF'	0	0	same
+tblastx	'id x;;mm;X'	0	0	same
+tblastn	'id x;;mm;X'	0	0	same
+blastn	'id x;;mm;X'	0	0	same
+tblastx	'id ;;X'	0	0	same
+tblastn	'id ;;X'	0	0	same
+blastn	'id ;;X'	0	0	same
+tblastx	'id pXxpFX#aXF'	0	0	same
+tblastn	'id pXxpFX#aXF'	0	0	same
+blastn	'id pXxpFX#aXF'	0	0	same
+tblastx	'id xm'	0	0	same
+tblastn	'id xm'	0	0	same
+blastn	'id xm'	0	0	same
+tblastx	'id FXX  &p1'	0	0	same
+tblastn	'id FXX  &p1'	0	0	same
+blastn	'id FXX  &p1'	0	0	same
+tblastx	'id XF'	0	0	same
+tblastn	'id XF'	0	0	same
+blastn	'id XF'	0	0	same
+tblastx	'id aaa'	0	0	same
+tblastn	'id aaa'	0	0	same
+blastn	'id aaa'	0	0	same
+tblastx	'id 11maFX'	0	0	same
+tblastn	'id 11maFX'	0	0	same
+blastn	'id 11maFX'	0	0	same
+tblastx	'id 1a;'	0	0	same
+tblastn	'id 1a;'	0	0	same
+blastn	'id 1a;'	0	0	same
+tblastx	'id ;;am'	0	0	same
+tblastn	'id ;;am'	0	0	same
+blastn	'id ;;am'	0	0	same
+tblastx	'id &p1papX#x'	0	0	same
+tblastn	'id &p1papX#x'	0	0	same
+blastn	'id &p1papX#x'	0	0	same
+tblastx	'id mp;'	0	0	same
+tblastn	'id mp;'	0	0	same
+blastn	'id mp;'	0	0	same
+tblastx	'id #X'	0	0	same
+tblastn	'id #X'	0	0	same
+blastn	'id #X'	0	0	same
+tblastx	'id a&#x &&#'	0	0	same
+tblastn	'id a&#x &&#'	0	0	same
+blastn	'id a&#x &&#'	0	0	same
+tblastx	'id mXpFx;'	0	0	same
+tblastn	'id mXpFx;'	0	0	same
+blastn	'id mXpFx;'	0	0	same
+tblastx	'id  #p1X F'	0	0	same
+tblastn	'id  #p1X F'	0	0	same
+blastn	'id  #p1X F'	0	0	same
+tblastx	'id  ;m'	0	0	same
+tblastn	'id  ;m'	0	0	same
+blastn	'id  ;m'	0	0	same
+tblastx	'id x1X&#'	0	0	same
+tblastn	'id x1X&#'	0	0	same
+blastn	'id x1X&#'	0	0	same
+tblastx	'id max&;'	0	0	same
+tblastn	'id max&;'	0	0	same
+blastn	'id max&;'	0	0	same
+tblastx	'id &  X'	0	0	same
+tblastn	'id &  X'	0	0	same
+blastn	'id &  X'	0	0	same
+tblastx	'id pama'	0	0	same
+tblastn	'id pama'	0	0	same
+blastn	'id pama'	0	0	same
+tblastx	'id map'	0	0	same
+tblastn	'id map'	0	0	same
+blastn	'id map'	0	0	same
+tblastx	'id ;Fm;Fm#pp;'	0	0	same
+tblastn	'id ;Fm;Fm#pp;'	0	0	same
+blastn	'id ;Fm;Fm#pp;'	0	0	same
+tblastx	'id mm;11&X;'	0	0	same
+tblastn	'id mm;11&X;'	0	0	same
+blastn	'id mm;11&X;'	0	0	same
+tblastx	'id XxXF'	0	0	same
+tblastn	'id XxXF'	0	0	same
+blastn	'id XxXF'	0	0	same
+tblastx	'id  m#; xX;'	0	0	same
+tblastn	'id  m#; xX;'	0	0	same
+blastn	'id  m#; xX;'	0	0	same
+tblastx	'id &p#;'	0	0	same
+tblastn	'id &p#;'	0	0	same
+blastn	'id &p#;'	0	0	same
+tblastx	'id &1XF'	0	0	same
+tblastn	'id &1XF'	0	0	same
+blastn	'id &1XF'	0	0	same
+tblastx	'id x;&F'	0	0	same
+tblastn	'id x;&F'	0	0	same
+blastn	'id x;&F'	0	0	same
+tblastx	'id Fp  Xp1 m'	0	0	same
+tblastn	'id Fp  Xp1 m'	0	0	same
+blastn	'id Fp  Xp1 m'	0	0	same
+tblastx	'id #m&'	0	0	same
+tblastn	'id #m&'	0	0	same
+blastn	'id #m&'	0	0	same
+tblastx	'id &a&&X'	0	0	same
+tblastn	'id &a&&X'	0	0	same
+blastn	'id &a&&X'	0	0	same
+tblastx	'id a&1F'	0	0	same
+tblastn	'id a&1F'	0	0	same
+blastn	'id a&1F'	0	0	same
+tblastx	'id &Xmx&1xx'	0	0	same
+tblastn	'id &Xmx&1xx'	0	0	same
+blastn	'id &Xmx&1xx'	0	0	same
+tblastx	'id Fpm;#m1'	0	0	same
+tblastn	'id Fpm;#m1'	0	0	same
+blastn	'id Fpm;#m1'	0	0	same
+tblastx	'id p1apX'	0	0	same
+tblastn	'id p1apX'	0	0	same
+blastn	'id p1apX'	0	0	same
+tblastx	'id m#xa;'	0	0	same
+tblastn	'id m#xa;'	0	0	same
+blastn	'id m#xa;'	0	0	same
+tblastx	'id ;##F'	0	0	same
+tblastn	'id ;##F'	0	0	same
+blastn	'id ;##F'	0	0	same
+tblastx	'id Xap;;'	0	0	same
+tblastn	'id Xap;;'	0	0	same
+blastn	'id Xap;;'	0	0	same
+tblastx	'id ap#m'	0	0	same
+tblastn	'id ap#m'	0	0	same
+blastn	'id ap#m'	0	0	same
+tblastx	'id #pX#a#mp#X'	0	0	same
+tblastn	'id #pX#a#mp#X'	0	0	same
+blastn	'id #pX#a#mp#X'	0	0	same
+tblastx	'id &1FmpF&aX'	0	0	same
+tblastn	'id &1FmpF&aX'	0	0	same
+blastn	'id &1FmpF&aX'	0	0	same
+tblastx	'id  Fm#a'	0	0	same
+tblastn	'id  Fm#a'	0	0	same
+blastn	'id  Fm#a'	0	0	same
+tblastx	'id &amFX1&m'	0	0	same
+tblastn	'id &amFX1&m'	0	0	same
+blastn	'id &amFX1&m'	0	0	same
+tblastx	'id p&aFFp'	0	0	same
+tblastn	'id p&aFFp'	0	0	same
+blastn	'id p&aFFp'	0	0	same
+tblastx	'id 1&F'	0	0	same
+tblastn	'id 1&F'	0	0	same
+blastn	'id 1&F'	0	0	same
+tblastx	'id  p;1mF&pp'	0	0	same
+tblastn	'id  p;1mF&pp'	0	0	same
+blastn	'id  p;1mF&pp'	0	0	same
+tblastx	'id  x&F1'	0	0	same
+tblastn	'id  x&F1'	0	0	same
+blastn	'id  x&F1'	0	0	same
+tblastx	'id app'	0	0	same
+tblastn	'id app'	0	0	same
+blastn	'id app'	0	0	same
+tblastx	'id  p'	0	0	same
+tblastn	'id  p'	0	0	same
+blastn	'id  p'	0	0	same
+tblastx	'id 1xxmFx1'	0	0	same
+tblastn	'id 1xxmFx1'	0	0	same
+blastn	'id 1xxmFx1'	0	0	same
+tblastx	'id  #a'	0	0	same
+tblastn	'id  #a'	0	0	same
+blastn	'id  #a'	0	0	same
+tblastx	'id pF'	0	0	same
+tblastn	'id pF'	0	0	same
+blastn	'id pF'	0	0	same
+tblastx	'id p'	0	0	same
+tblastn	'id p'	0	0	same
+blastn	'id p'	0	0	same
+tblastx	'id ap1#;##1'	0	0	same
+tblastn	'id ap1#;##1'	0	0	same
+blastn	'id ap1#;##1'	0	0	same
+tblastx	'id  mF1p;a#m'	0	0	same
+tblastn	'id  mF1p;a#m'	0	0	same
+blastn	'id  mF1p;a#m'	0	0	same
+tblastx	'id  #&&&xx1X'	0	0	same
+tblastn	'id  #&&&xx1X'	0	0	same
+blastn	'id  #&&&xx1X'	0	0	same
+tblastx	'id pFmFm'	0	0	same
+tblastn	'id pFmFm'	0	0	same
+blastn	'id pFmFm'	0	0	same
+tblastx	'id &aaaXp p;'	0	0	same
+tblastn	'id &aaaXp p;'	0	0	same
+blastn	'id &aaaXp p;'	0	0	same
+tblastx	'id ;pxF x;#xp'	0	0	same
+tblastn	'id ;pxF x;#xp'	0	0	same
+blastn	'id ;pxF x;#xp'	0	0	same
+tblastx	'id a;a'	0	0	same
+tblastn	'id a;a'	0	0	same
+blastn	'id a;a'	0	0	same
+tblastx	'id p#p&#'	0	0	same
+tblastn	'id p#p&#'	0	0	same
+blastn	'id p#p&#'	0	0	same
+tblastx	'id pxp#'	0	0	same
+tblastn	'id pxp#'	0	0	same
+blastn	'id pxp#'	0	0	same
+tblastx	'id ;mXXF'	0	0	same
+tblastn	'id ;mXXF'	0	0	same
+blastn	'id ;mXXF'	0	0	same
+tblastx	'id ap1'	0	0	same
+tblastn	'id ap1'	0	0	same
+blastn	'id ap1'	0	0	same
+tblastx	'id #;ppx'	0	0	same
+tblastn	'id #;ppx'	0	0	same
+blastn	'id #;ppx'	0	0	same
+tblastx	'id F;pp1p&&'	0	0	same
+tblastn	'id F;pp1p&&'	0	0	same
+blastn	'id F;pp1p&&'	0	0	same
+tblastx	'id maF&xXX'	0	0	same
+tblastn	'id maF&xXX'	0	0	same
+blastn	'id maF&xXX'	0	0	same
+tblastx	'id # ;;F&p'	0	0	same
+tblastn	'id # ;;F&p'	0	0	same
+blastn	'id # ;;F&p'	0	0	same
+tblastx	'id &'	0	0	same
+tblastn	'id &'	0	0	same
+blastn	'id &'	0	0	same
+tblastx	'id &xpxmFm'	0	0	same
+tblastn	'id &xpxmFm'	0	0	same
+blastn	'id &xpxmFm'	0	0	same
+tblastx	'id m1Xap;'	0	0	same
+tblastn	'id m1Xap;'	0	0	same
+blastn	'id m1Xap;'	0	0	same
+tblastx	'id aF'	0	0	same
+tblastn	'id aF'	0	0	same
+blastn	'id aF'	0	0	same
+tblastx	'id #XpxX'	0	0	same
+tblastn	'id #XpxX'	0	0	same
+blastn	'id #XpxX'	0	0	same
+tblastx	'id mFX#Fx  ;F'	0	0	same
+tblastn	'id mFX#Fx  ;F'	0	0	same
+blastn	'id mFX#Fx  ;F'	0	0	same
+tblastx	'id  F;;aX1'	0	0	same
+tblastn	'id  F;;aX1'	0	0	same
+blastn	'id  F;;aX1'	0	0	same
+tblastx	'id pX'	0	0	same
+tblastn	'id pX'	0	0	same
+blastn	'id pX'	0	0	same
+tblastx	'id p#xa1X'	0	0	same
+tblastn	'id p#xa1X'	0	0	same
+blastn	'id p#xa1X'	0	0	same
+tblastx	'id p;XmpF#ma'	0	0	same
+tblastn	'id p;XmpF#ma'	0	0	same
+blastn	'id p;XmpF#ma'	0	0	same
+tblastx	'id x;FF;&1'	0	0	same
+tblastn	'id x;FF;&1'	0	0	same
+blastn	'id x;FF;&1'	0	0	same
+tblastx	'id FFFp#'	0	0	same
+tblastn	'id FFFp#'	0	0	same
+blastn	'id FFFp#'	0	0	same
+tblastx	'id ap'	0	0	same
+tblastn	'id ap'	0	0	same
+blastn	'id ap'	0	0	same
+tblastx	'id ;pmx&'	0	0	same
+tblastn	'id ;pmx&'	0	0	same
+blastn	'id ;pmx&'	0	0	same
+tblastx	'id F;;Fa X#F1'	0	0	same
+tblastn	'id F;;Fa X#F1'	0	0	same
+blastn	'id F;;Fa X#F1'	0	0	same
+tblastx	'id 1FX m&F'	0	0	same
+tblastn	'id 1FX m&F'	0	0	same
+blastn	'id 1FX m&F'	0	0	same
+tblastx	'id &;# &#x &'	0	0	same
+tblastn	'id &;# &#x &'	0	0	same
+blastn	'id &;# &#x &'	0	0	same
+tblastx	'id #Fp;aX&#x'	0	0	same
+tblastn	'id #Fp;aX&#x'	0	0	same
+blastn	'id #Fp;aX&#x'	0	0	same
+tblastx	'id xpX&&'	0	0	same
+tblastn	'id xpX&&'	0	0	same
+blastn	'id xpX&&'	0	0	same
+tblastx	'id #x'	0	0	same
+tblastn	'id #x'	0	0	same
+blastn	'id #x'	0	0	same
+tblastx	'id Xampx FFX'	0	0	same
+tblastn	'id Xampx FFX'	0	0	same
+blastn	'id Xampx FFX'	0	0	same
+tblastx	'id ;xx1F1F#Xa'	0	0	same
+tblastn	'id ;xx1F1F#Xa'	0	0	same
+blastn	'id ;xx1F1F#Xa'	0	0	same
+tblastx	'id mpFx'	0	0	same
+tblastn	'id mpFx'	0	0	same
+blastn	'id mpFx'	0	0	same
+tblastx	'id a#x&X  #F'	0	0	same
+tblastn	'id a#x&X  #F'	0	0	same
+blastn	'id a#x&X  #F'	0	0	same
+tblastx	'id #F;xF'	0	0	same
+tblastn	'id #F;xF'	0	0	same
+blastn	'id #F;xF'	0	0	same
+tblastx	'id F;pFx#p&m&'	0	0	same
+tblastn	'id F;pFx#p&m&'	0	0	same
+blastn	'id F;pFx#p&m&'	0	0	same
+tblastx	'id a1p&Fmm&;'	0	0	same
+tblastn	'id a1p&Fmm&;'	0	0	same
+blastn	'id a1p&Fmm&;'	0	0	same
+tblastx	'id XFx1&a#mx'	0	0	same
+tblastn	'id XFx1&a#mx'	0	0	same
+blastn	'id XFx1&a#mx'	0	0	same
+tblastx	'id x#;'	0	0	same
+tblastn	'id x#;'	0	0	same
+blastn	'id x#;'	0	0	same
+tblastx	'id  ;#'	0	0	same
+tblastn	'id  ;#'	0	0	same
+blastn	'id  ;#'	0	0	same
+tblastx	'id #mxF'	0	0	same
+tblastn	'id #mxF'	0	0	same
+blastn	'id #mxF'	0	0	same
+tblastx	'id F#1Xa#Xm;'	0	0	same
+tblastn	'id F#1Xa#Xm;'	0	0	same
+blastn	'id F#1Xa#Xm;'	0	0	same
+tblastx	'id &&F#p'	0	0	same
+tblastn	'id &&F#p'	0	0	same
+blastn	'id &&F#p'	0	0	same
+tblastx	'id FxXX'	0	0	same
+tblastn	'id FxXX'	0	0	same
+blastn	'id FxXX'	0	0	same
+tblastx	'id xam1'	0	0	same
+tblastn	'id xam1'	0	0	same
+blastn	'id xam1'	0	0	same
+tblastx	'id &&pFF#'	0	0	same
+tblastn	'id &&pFF#'	0	0	same
+blastn	'id &&pFF#'	0	0	same
+tblastx	'id ;Fa1xmp#X'	0	0	same
+tblastn	'id ;Fa1xmp#X'	0	0	same
+blastn	'id ;Fa1xmp#X'	0	0	same
+tblastx	'id Xm'	0	0	same
+tblastn	'id Xm'	0	0	same
+blastn	'id Xm'	0	0	same
+tblastx	'id pa;#p&;'	0	0	same
+tblastn	'id pa;#p&;'	0	0	same
+blastn	'id pa;#p&;'	0	0	same
+tblastx	'id 1Fx'	0	0	same
+tblastn	'id 1Fx'	0	0	same
+blastn	'id 1Fx'	0	0	same
+tblastx	'id m#'	0	0	same
+tblastn	'id m#'	0	0	same
+blastn	'id m#'	0	0	same
+tblastx	'id xF;X'	0	0	same
+tblastn	'id xF;X'	0	0	same
+blastn	'id xF;X'	0	0	same
+tblastx	'id #F;'	0	0	same
+tblastn	'id #F;'	0	0	same
+blastn	'id #F;'	0	0	same
+tblastx	'id p;1 Xmmm;'	0	0	same
+tblastn	'id p;1 Xmmm;'	0	0	same
+blastn	'id p;1 Xmmm;'	0	0	same
+tblastx	'id  x1x'	0	0	same
+tblastn	'id  x1x'	0	0	same
+blastn	'id  x1x'	0	0	same
+tblastx	'id #1'	0	0	same
+tblastn	'id #1'	0	0	same
+blastn	'id #1'	0	0	same
+tblastx	'id m11&'	0	0	same
+tblastn	'id m11&'	0	0	same
+blastn	'id m11&'	0	0	same
+tblastx	'id x mmF&'	0	0	same
+tblastn	'id x mmF&'	0	0	same
+blastn	'id x mmF&'	0	0	same
+tblastx	'id 1x;x'	0	0	same
+tblastn	'id 1x;x'	0	0	same
+blastn	'id 1x;x'	0	0	same
+tblastx	'id Fm1 aF'	0	0	same
+tblastn	'id Fm1 aF'	0	0	same
+blastn	'id Fm1 aF'	0	0	same
+tblastx	'id &XF'	0	0	same
+tblastn	'id &XF'	0	0	same
+blastn	'id &XF'	0	0	same
+tblastx	'id maaXF'	0	0	same
+tblastn	'id maaXF'	0	0	same
+blastn	'id maaXF'	0	0	same
+tblastx	'id F;1pX# F;#'	0	0	same
+tblastn	'id F;1pX# F;#'	0	0	same
+blastn	'id F;1pX# F;#'	0	0	same
+tblastx	'id pXmXXp'	0	0	same
+tblastn	'id pXmXXp'	0	0	same
+blastn	'id pXmXXp'	0	0	same
+tblastx	'id p;#&;p'	0	0	same
+tblastn	'id p;#&;p'	0	0	same
+blastn	'id p;#&;p'	0	0	same
+tblastx	'id m'	0	0	same
+tblastn	'id m'	0	0	same
+blastn	'id m'	0	0	same
+tblastx	'id  m a'	0	0	same
+tblastn	'id  m a'	0	0	same
+blastn	'id  m a'	0	0	same
+tblastx	'id  mpmX'	0	0	same
+tblastn	'id  mpmX'	0	0	same
+blastn	'id  mpmX'	0	0	same
+tblastx	'id x#Xx'	0	0	same
+tblastn	'id x#Xx'	0	0	same
+blastn	'id x#Xx'	0	0	same
+tblastx	'id x1#p'	0	0	same
+tblastn	'id x1#p'	0	0	same
+blastn	'id x1#p'	0	0	same
+tblastx	'id xa#;p'	0	0	same
+tblastn	'id xa#;p'	0	0	same
+blastn	'id xa#;p'	0	0	same
+tblastx	'id  p##1a1ma'	0	0	same
+tblastn	'id  p##1a1ma'	0	0	same
+blastn	'id  p##1a1ma'	0	0	same
+tblastx	'id mm;##p'	0	0	same
+tblastn	'id mm;##p'	0	0	same
+blastn	'id mm;##p'	0	0	same
+tblastx	'id apm'	0	0	same
+tblastn	'id apm'	0	0	same
+blastn	'id apm'	0	0	same
+tblastx	'id #XX#a &'	0	0	same
+tblastn	'id #XX#a &'	0	0	same
+blastn	'id #XX#a &'	0	0	same
+tblastx	'id x& aa'	0	0	same
+tblastn	'id x& aa'	0	0	same
+blastn	'id x& aa'	0	0	same
+tblastx	'id ;&xF;'	0	0	same
+tblastn	'id ;&xF;'	0	0	same
+blastn	'id ;&xF;'	0	0	same
+tblastx	'id Xa #p&1Fm&'	0	0	same
+tblastn	'id Xa #p&1Fm&'	0	0	same
+blastn	'id Xa #p&1Fm&'	0	0	same
+tblastx	'id &##FF'	0	0	same
+tblastn	'id &##FF'	0	0	same
+blastn	'id &##FF'	0	0	same
+tblastx	'id ;pXx&&'	0	0	same
+tblastn	'id ;pXx&&'	0	0	same
+blastn	'id ;pXx&&'	0	0	same
+tblastx	'id Xa11#X;#'	0	0	same
+tblastn	'id Xa11#X;#'	0	0	same
+blastn	'id Xa11#X;#'	0	0	same
+tblastx	'id  ;;'	0	0	same
+tblastn	'id  ;;'	0	0	same
+blastn	'id  ;;'	0	0	same
+tblastx	'id &p;#pp;&;'	0	0	same
+tblastn	'id &p;#pp;&;'	0	0	same
+blastn	'id &p;#pp;&;'	0	0	same
+tblastx	'id 1p a&F'	0	0	same
+tblastn	'id 1p a&F'	0	0	same
+blastn	'id 1p a&F'	0	0	same
+tblastx	'id p;;m&xF1F'	0	0	same
+tblastn	'id p;;m&xF1F'	0	0	same
+blastn	'id p;;m&xF1F'	0	0	same
+tblastx	'id F'	0	0	same
+tblastn	'id F'	0	0	same
+blastn	'id F'	0	0	same
+tblastx	'id a;F;'	0	0	same
+tblastn	'id a;F;'	0	0	same
+blastn	'id a;F;'	0	0	same
+tblastx	'id ;paFpm'	0	0	same
+tblastn	'id ;paFpm'	0	0	same
+blastn	'id ;paFpm'	0	0	same
+tblastx	'id ap 1;m1#p#'	0	0	same
+tblastn	'id ap 1;m1#p#'	0	0	same
+blastn	'id ap 1;m1#p#'	0	0	same
+tblastx	'id xXm;&'	0	0	same
+tblastn	'id xXm;&'	0	0	same
+blastn	'id xXm;&'	0	0	same
+tblastx	'id paF#;'	0	0	same
+tblastn	'id paF#;'	0	0	same
+blastn	'id paF#;'	0	0	same
+tblastx	'id x&x'	0	0	same
+tblastn	'id x&x'	0	0	same
+blastn	'id x&x'	0	0	same
+tblastx	'id a xam'	0	0	same
+tblastn	'id a xam'	0	0	same
+blastn	'id a xam'	0	0	same
+tblastx	'id X#&mFaFx'	0	0	same
+tblastn	'id X#&mFaFx'	0	0	same
+blastn	'id X#&mFaFx'	0	0	same
+tblastx	'id   F1a #m'	0	0	same
+tblastn	'id   F1a #m'	0	0	same
+blastn	'id   F1a #m'	0	0	same
+tblastx	'id F#;Fpp'	0	0	same
+tblastn	'id F#;Fpp'	0	0	same
+blastn	'id F#;Fpp'	0	0	same
+tblastx	'id  &X;x&x1p&'	0	0	same
+tblastn	'id  &X;x&x1p&'	0	0	same
+blastn	'id  &X;x&x1p&'	0	0	same
+tblastx	'id FFxXxm'	0	0	same
+tblastn	'id FFxXxm'	0	0	same
+blastn	'id FFxXxm'	0	0	same
+tblastx	'id &x Fax'	0	0	same
+tblastn	'id &x Fax'	0	0	same
+blastn	'id &x Fax'	0	0	same
+tblastx	'id p#;1a#x1pX'	0	0	same
+tblastn	'id p#;1a#x1pX'	0	0	same
+blastn	'id p#;1a#x1pX'	0	0	same
+tblastx	'id x&p&1pX'	0	0	same
+tblastn	'id x&p&1pX'	0	0	same
+blastn	'id x&p&1pX'	0	0	same
+tblastx	'id m#x'	0	0	same
+tblastn	'id m#x'	0	0	same
+blastn	'id m#x'	0	0	same
+tblastx	'id Xxx;m&'	0	0	same
+tblastn	'id Xxx;m&'	0	0	same
+blastn	'id Xxx;m&'	0	0	same
+tblastx	'id #FFFFp1p'	0	0	same
+tblastn	'id #FFFFp1p'	0	0	same
+blastn	'id #FFFFp1p'	0	0	same
+tblastx	'id #p11& 1'	0	0	same
+tblastn	'id #p11& 1'	0	0	same
+blastn	'id #p11& 1'	0	0	same
+tblastx	'id  #'	0	0	same
+tblastn	'id  #'	0	0	same
+blastn	'id  #'	0	0	same
+tblastx	'id 1&a#a&XX'	0	0	same
+tblastn	'id 1&a#a&XX'	0	0	same
+blastn	'id 1&a#a&XX'	0	0	same
+tblastx	'id &Xa;'	0	0	same
+tblastn	'id &Xa;'	0	0	same
+blastn	'id &Xa;'	0	0	same
+tblastx	'id X;'	0	0	same
+tblastn	'id X;'	0	0	same
+blastn	'id X;'	0	0	same
+tblastx	'id p#'	0	0	same
+tblastn	'id p#'	0	0	same
+blastn	'id p#'	0	0	same
+tblastx	'id XpX'	0	0	same
+tblastn	'id XpX'	0	0	same
+blastn	'id XpX'	0	0	same
+tblastx	'id #x;x&&&&aX'	0	0	same
+tblastn	'id #x;x&&&&aX'	0	0	same
+blastn	'id #x;x&&&&aX'	0	0	same
+tblastx	'id X;mppaxXpF'	0	0	same
+tblastn	'id X;mppaxXpF'	0	0	same
+blastn	'id X;mppaxXpF'	0	0	same
+tblastx	'id F##  &p&#X'	0	0	same
+tblastn	'id F##  &p&#X'	0	0	same
+blastn	'id F##  &p&#X'	0	0	same
+tblastx	'id X;FXmx; #'	0	0	same
+tblastn	'id X;FXmx; #'	0	0	same
+blastn	'id X;FXmx; #'	0	0	same
+tblastx	'id 1&p;#&&xx'	0	0	same
+tblastn	'id 1&p;#&&xx'	0	0	same
+blastn	'id 1&p;#&&xx'	0	0	same
+tblastx	'id F F;F'	0	0	same
+tblastn	'id F F;F'	0	0	same
+blastn	'id F F;F'	0	0	same
+tblastx	'id ;FXx'	0	0	same
+tblastn	'id ;FXx'	0	0	same
+blastn	'id ;FXx'	0	0	same
+tblastx	'id Fma&F1x'	0	0	same
+tblastn	'id Fma&F1x'	0	0	same
+blastn	'id Fma&F1x'	0	0	same
+tblastx	'id x1;a'	0	0	same
+tblastn	'id x1;a'	0	0	same
+blastn	'id x1;a'	0	0	same
+tblastx	'id &mp;&F'	0	0	same
+tblastn	'id &mp;&F'	0	0	same
+blastn	'id &mp;&F'	0	0	same
+tblastx	'id F;xaFm'	0	0	same
+tblastn	'id F;xaFm'	0	0	same
+blastn	'id F;xaFm'	0	0	same
+tblastx	'id FX1x#'	0	0	same
+tblastn	'id FX1x#'	0	0	same
+blastn	'id FX1x#'	0	0	same
+tblastx	'id xxappxx'	0	0	same
+tblastn	'id xxappxx'	0	0	same
+blastn	'id xxappxx'	0	0	same
+tblastx	'id Fx#a  ; xa'	0	0	same
+tblastn	'id Fx#a  ; xa'	0	0	same
+blastn	'id Fx#a  ; xa'	0	0	same
+tblastx	'id x#x1'	0	0	same
+tblastn	'id x#x1'	0	0	same
+blastn	'id x#x1'	0	0	same
+tblastx	'id FaFmm#'	0	0	same
+tblastn	'id FaFmm#'	0	0	same
+blastn	'id FaFmm#'	0	0	same
+tblastx	'id FX'	0	0	same
+tblastn	'id FX'	0	0	same
+blastn	'id FX'	0	0	same
+tblastx	'id F;m#m'	0	0	same
+tblastn	'id F;m#m'	0	0	same
+blastn	'id F;m#m'	0	0	same
+tblastx	'id ; X;xm'	0	0	same
+tblastn	'id ; X;xm'	0	0	same
+blastn	'id ; X;xm'	0	0	same
+tblastx	'id  x ;X'	0	0	same
+tblastn	'id  x ;X'	0	0	same
+blastn	'id  x ;X'	0	0	same
+tblastx	'id  pX&aa'	0	0	same
+tblastn	'id  pX&aa'	0	0	same
+blastn	'id  pX&aa'	0	0	same
+tblastx	'id aX #  &'	0	0	same
+tblastn	'id aX #  &'	0	0	same
+blastn	'id aX #  &'	0	0	same
+tblastx	'id x &xa&#1p'	0	0	same
+tblastn	'id x &xa&#1p'	0	0	same
+blastn	'id x &xa&#1p'	0	0	same
+tblastx	'id 1a;#1xX1'	0	0	same
+tblastn	'id 1a;#1xX1'	0	0	same
+blastn	'id 1a;#1xX1'	0	0	same
+tblastx	'id pa1'	0	0	same
+tblastn	'id pa1'	0	0	same
+blastn	'id pa1'	0	0	same
+tblastx	'id &xx'	0	0	same
+tblastn	'id &xx'	0	0	same
+blastn	'id &xx'	0	0	same
+tblastx	'id ;;& ##pX11'	0	0	same
+tblastn	'id ;;& ##pX11'	0	0	same
+blastn	'id ;;& ##pX11'	0	0	same
+tblastx	'id F&#F pm&Xa'	0	0	same
+tblastn	'id F&#F pm&Xa'	0	0	same
+blastn	'id F&#F pm&Xa'	0	0	same
+tblastx	'id 1; #'	0	0	same
+tblastn	'id 1; #'	0	0	same
+blastn	'id 1; #'	0	0	same
+tblastx	'id F #Xaax'	0	0	same
+tblastn	'id F #Xaax'	0	0	same
+blastn	'id F #Xaax'	0	0	same
+tblastx	'id 1x X;FFaa'	0	0	same
+tblastn	'id 1x X;FFaa'	0	0	same
+blastn	'id 1x X;FFaa'	0	0	same
+tblastx	'id x;Xp&1;a&m'	0	0	same
+tblastn	'id x;Xp&1;a&m'	0	0	same
+blastn	'id x;Xp&1;a&m'	0	0	same
+tblastx	'id 1Fmm;'	0	0	same
+tblastn	'id 1Fmm;'	0	0	same
+blastn	'id 1Fmm;'	0	0	same
+tblastx	'id #;'	0	0	same
+tblastn	'id #;'	0	0	same
+blastn	'id #;'	0	0	same
+tblastx	'id XFFx'	0	0	same
+tblastn	'id XFFx'	0	0	same
+blastn	'id XFFx'	0	0	same
+tblastx	'id xX;&&pFpFx'	0	0	same
+tblastn	'id xX;&&pFpFx'	0	0	same
+blastn	'id xX;&&pFpFx'	0	0	same
+tblastx	'id F; ;p#Fm'	0	0	same
+tblastn	'id F; ;p#Fm'	0	0	same
+blastn	'id F; ;p#Fm'	0	0	same
+tblastx	'id Xm;1#mxx'	0	0	same
+tblastn	'id Xm;1#mxx'	0	0	same
+blastn	'id Xm;1#mxx'	0	0	same
+tblastx	'id ;F ; xX'	0	0	same
+tblastn	'id ;F ; xX'	0	0	same
+blastn	'id ;F ; xX'	0	0	same
+tblastx	'id &mxxm;##;'	0	0	same
+tblastn	'id &mxxm;##;'	0	0	same
+blastn	'id &mxxm;##;'	0	0	same
+tblastx	'id Fxma'	0	0	same
+tblastn	'id Fxma'	0	0	same
+blastn	'id Fxma'	0	0	same
+tblastx	'id 1a'	0	0	same
+tblastn	'id 1a'	0	0	same
+blastn	'id 1a'	0	0	same
+tblastx	'id 1m;aX&&##'	0	0	same
+tblastn	'id 1m;aX&&##'	0	0	same
+blastn	'id 1m;aX&&##'	0	0	same
+tblastx	'id axa'	0	0	same
+tblastn	'id axa'	0	0	same
+blastn	'id axa'	0	0	same
+tblastx	'id pFX#a#Fp'	0	0	same
+tblastn	'id pFX#a#Fp'	0	0	same
+blastn	'id pFX#a#Fp'	0	0	same
+tblastx	'id &;p'	0	0	same
+tblastn	'id &;p'	0	0	same
+blastn	'id &;p'	0	0	same
+tblastx	'id Xap  ;X1&'	0	0	same
+tblastn	'id Xap  ;X1&'	0	0	same
+blastn	'id Xap  ;X1&'	0	0	same
+tblastx	'id  xxp1'	0	0	same
+tblastn	'id  xxp1'	0	0	same
+blastn	'id  xxp1'	0	0	same
+tblastx	'id paX1 x;1;m'	0	0	same
+tblastn	'id paX1 x;1;m'	0	0	same
+blastn	'id paX1 x;1;m'	0	0	same
+tblastx	'id x11aa #X'	0	0	same
+tblastn	'id x11aa #X'	0	0	same
+blastn	'id x11aa #X'	0	0	same
+tblastx	'id ;1;F#X'	0	0	same
+tblastn	'id ;1;F#X'	0	0	same
+blastn	'id ;1;F#X'	0	0	same
+tblastx	'id F ma#a&ma'	0	0	same
+tblastn	'id F ma#a&ma'	0	0	same
+blastn	'id F ma#a&ma'	0	0	same
+tblastx	'id Xp'	0	0	same
+tblastn	'id Xp'	0	0	same
+blastn	'id Xp'	0	0	same
+tblastx	'id #a;xFx &'	0	0	same
+tblastn	'id #a;xFx &'	0	0	same
+blastn	'id #a;xFx &'	0	0	same
+tblastx	'id 1&1'	0	0	same
+tblastn	'id 1&1'	0	0	same
+blastn	'id 1&1'	0	0	same
+tblastx	'id pxppm'	0	0	same
+tblastn	'id pxppm'	0	0	same
+blastn	'id pxppm'	0	0	same
+tblastx	'id x# ;'	0	0	same
+tblastn	'id x# ;'	0	0	same
+blastn	'id x# ;'	0	0	same
+tblastx	'id m Xma&X#;'	0	0	same
+tblastn	'id m Xma&X#;'	0	0	same
+blastn	'id m Xma&X#;'	0	0	same
+tblastx	'id aXp#&#xFa'	0	0	same
+tblastn	'id aXp#&#xFa'	0	0	same
+blastn	'id aXp#&#xFa'	0	0	same
+tblastx	'id  a Fp;XX&'	0	0	same
+tblastn	'id  a Fp;XX&'	0	0	same
+blastn	'id  a Fp;XX&'	0	0	same
+tblastx	'id  #F'	0	0	same
+tblastn	'id  #F'	0	0	same
+blastn	'id  #F'	0	0	same
+tblastx	'id #a#'	0	0	same
+tblastn	'id #a#'	0	0	same
+blastn	'id #a#'	0	0	same
+tblastx	'id ;;Xap#xx'	0	0	same
+tblastn	'id ;;Xap#xx'	0	0	same
+blastn	'id ;;Xap#xx'	0	0	same
+tblastx	'id &FF; F'	0	0	same
+tblastn	'id &FF; F'	0	0	same
+blastn	'id &FF; F'	0	0	same
+tblastx	'id x;mX &p #'	0	0	same
+tblastn	'id x;mX &p #'	0	0	same
+blastn	'id x;mX &p #'	0	0	same
+tblastx	'id XX#;'	0	0	same
+tblastn	'id XX#;'	0	0	same
+blastn	'id XX#;'	0	0	same
+tblastx	'id X Xx'	0	0	same
+tblastn	'id X Xx'	0	0	same
+blastn	'id X Xx'	0	0	same
+tblastx	'id xFp;x'	0	0	same
+tblastn	'id xFp;x'	0	0	same
+blastn	'id xFp;x'	0	0	same
+tblastx	'id ##ma#FxX'	0	0	same
+tblastn	'id ##ma#FxX'	0	0	same
+blastn	'id ##ma#FxX'	0	0	same
+tblastx	'id &&; #;'	0	0	same
+tblastn	'id &&; #;'	0	0	same
+blastn	'id &&; #;'	0	0	same
+tblastx	'id ;m 1mm&'	0	0	same
+tblastn	'id ;m 1mm&'	0	0	same
+blastn	'id ;m 1mm&'	0	0	same
+tblastx	'id xF'	0	0	same
+tblastn	'id xF'	0	0	same
+blastn	'id xF'	0	0	same
+tblastx	'id ;X'	0	0	same
+tblastn	'id ;X'	0	0	same
+blastn	'id ;X'	0	0	same
+tblastx	'id &#F'	0	0	same
+tblastn	'id &#F'	0	0	same
+blastn	'id &#F'	0	0	same
+tblastx	'id &FmF1pF'	0	0	same
+tblastn	'id &FmF1pF'	0	0	same
+blastn	'id &FmF1pF'	0	0	same
+tblastx	'id X1p&##;'	0	0	same
+tblastn	'id X1p&##;'	0	0	same
+blastn	'id X1p&##;'	0	0	same
+tblastx	'id 1X'	0	0	same
+tblastn	'id 1X'	0	0	same
+blastn	'id 1X'	0	0	same
+tblastx	'id p&11'	0	0	same
+tblastn	'id p&11'	0	0	same
+blastn	'id p&11'	0	0	same
+tblastx	'id paXFmXxx'	0	0	same
+tblastn	'id paXFmXxx'	0	0	same
+blastn	'id paXFmXxx'	0	0	same
+tblastx	'id X##Fx'	0	0	same
+tblastn	'id X##Fx'	0	0	same
+blastn	'id X##Fx'	0	0	same
+tblastx	'id ;;&'	0	0	same
+tblastn	'id ;;&'	0	0	same
+blastn	'id ;;&'	0	0	same
+tblastx	'id p;'	0	0	same
+tblastn	'id p;'	0	0	same
+blastn	'id p;'	0	0	same
+tblastx	'id ma'	0	0	same
+tblastn	'id ma'	0	0	same
+blastn	'id ma'	0	0	same
+tblastx	'id a1;x'	0	0	same
+tblastn	'id a1;x'	0	0	same
+blastn	'id a1;x'	0	0	same
+tblastx	'id X F&#&x'	0	0	same
+tblastn	'id X F&#&x'	0	0	same
+blastn	'id X F&#&x'	0	0	same
+tblastx	'id a#m#1'	0	0	same
+tblastn	'id a#m#1'	0	0	same
+blastn	'id a#m#1'	0	0	same
+tblastx	'id  xpx'	0	0	same
+tblastn	'id  xpx'	0	0	same
+blastn	'id  xpx'	0	0	same
+tblastx	'id  am'	0	0	same
+tblastn	'id  am'	0	0	same
+blastn	'id  am'	0	0	same
+tblastx	'id 1m1'	0	0	same
+tblastn	'id 1m1'	0	0	same
+blastn	'id 1m1'	0	0	same
+tblastx	'id &#mm#Xa&'	0	0	same
+tblastn	'id &#mm#Xa&'	0	0	same
+blastn	'id &#mm#Xa&'	0	0	same
+tblastx	'id #pm'	0	0	same
+tblastn	'id #pm'	0	0	same
+blastn	'id #pm'	0	0	same
+tblastx	'id xxmFaX&'	0	0	same
+tblastn	'id xxmFaX&'	0	0	same
+blastn	'id xxmFaX&'	0	0	same
+tblastx	'id ;;m&&'	0	0	same
+tblastn	'id ;;m&&'	0	0	same
+blastn	'id ;;m&&'	0	0	same
+tblastx	'id ;&aF1XFam#'	0	0	same
+tblastn	'id ;&aF1XFam#'	0	0	same
+blastn	'id ;&aF1XFam#'	0	0	same
+tblastx	'id m;FmmX#;'	0	0	same
+tblastn	'id m;FmmX#;'	0	0	same
+blastn	'id m;FmmX#;'	0	0	same
+tblastx	'id #1&#1# pX1'	0	0	same
+tblastn	'id #1&#1# pX1'	0	0	same
+blastn	'id #1&#1# pX1'	0	0	same
+tblastx	'id &#Xm'	0	0	same
+tblastn	'id &#Xm'	0	0	same
+blastn	'id &#Xm'	0	0	same
+tblastx	'id a aX'	0	0	same
+tblastn	'id a aX'	0	0	same
+blastn	'id a aX'	0	0	same
+tblastx	'id 1;F1#mp#;x'	0	0	same
+tblastn	'id 1;F1#mp#;x'	0	0	same
+blastn	'id 1;F1#mp#;x'	0	0	same
+tblastx	'id &xXaxaX'	0	0	same
+tblastn	'id &xXaxaX'	0	0	same
+blastn	'id &xXaxaX'	0	0	same
+tblastx	'id 1&Xa1Fp;'	0	0	same
+tblastn	'id 1&Xa1Fp;'	0	0	same
+blastn	'id 1&Xa1Fp;'	0	0	same
+tblastx	'id &#p'	0	0	same
+tblastn	'id &#p'	0	0	same
+blastn	'id &#p'	0	0	same
+tblastx	'id 1;mxmxF;'	0	0	same
+tblastn	'id 1;mxmxF;'	0	0	same
+blastn	'id 1;mxmxF;'	0	0	same
+tblastx	'id x&'	0	0	same
+tblastn	'id x&'	0	0	same
+blastn	'id x&'	0	0	same
+tblastx	'id F& p&&'	0	0	same
+tblastn	'id F& p&&'	0	0	same
+blastn	'id F& p&&'	0	0	same
+tblastx	'id  XFXaa&'	0	0	same
+tblastn	'id  XFXaa&'	0	0	same
+blastn	'id  XFXaa&'	0	0	same
+tblastx	'id amaa'	0	0	same
+tblastn	'id amaa'	0	0	same
+blastn	'id amaa'	0	0	same
+tblastx	'id a;#mx'	0	0	same
+tblastn	'id a;#mx'	0	0	same
+blastn	'id a;#mx'	0	0	same
+tblastx	'id ;xFXFpa X'	0	0	same
+tblastn	'id ;xFXFpa X'	0	0	same
+blastn	'id ;xFXFpa X'	0	0	same
+tblastx	'id ;&maa;; &'	0	0	same
+tblastn	'id ;&maa;; &'	0	0	same
+blastn	'id ;&maa;; &'	0	0	same
+tblastx	'id 1pp;pX'	0	0	same
+tblastn	'id 1pp;pX'	0	0	same
+blastn	'id 1pp;pX'	0	0	same
+tblastx	'id F&1m&X#;;'	0	0	same
+tblastn	'id F&1m&X#;;'	0	0	same
+blastn	'id F&1m&X#;;'	0	0	same
+tblastx	'id xaxxFX;&'	0	0	same
+tblastn	'id xaxxFX;&'	0	0	same
+blastn	'id xaxxFX;&'	0	0	same
+tblastx	'id F;1F# &x'	0	0	same
+tblastn	'id F;1F# &x'	0	0	same
+blastn	'id F;1F# &x'	0	0	same
+tblastx	'id mF1p#FF&m;'	0	0	same
+tblastn	'id mF1p#FF&m;'	0	0	same
+blastn	'id mF1p#FF&m;'	0	0	same
+tblastx	'id axp&a'	0	0	same
+tblastn	'id axp&a'	0	0	same
+blastn	'id axp&a'	0	0	same
+tblastx	'id p&x'	0	0	same
+tblastn	'id p&x'	0	0	same
+blastn	'id p&x'	0	0	same
+tblastx	'id #1 &'	0	0	same
+tblastn	'id #1 &'	0	0	same
+blastn	'id #1 &'	0	0	same
+tblastx	'id m1xa1'	0	0	same
+tblastn	'id m1xa1'	0	0	same
+blastn	'id m1xa1'	0	0	same
+tblastx	'id  a&p'	0	0	same
+tblastn	'id  a&p'	0	0	same
+blastn	'id  a&p'	0	0	same
+tblastx	'id F1XX1#ap1'	0	0	same
+tblastn	'id F1XX1#ap1'	0	0	same
+blastn	'id F1XX1#ap1'	0	0	same
+tblastx	'id mXF1aax x;'	0	0	same
+tblastn	'id mXF1aax x;'	0	0	same
+blastn	'id mXF1aax x;'	0	0	same
+tblastx	'id X1'	0	0	same
+tblastn	'id X1'	0	0	same
+blastn	'id X1'	0	0	same
+tblastx	'id &aXxmx&'	0	0	same
+tblastn	'id &aXxmx&'	0	0	same
+blastn	'id &aXxmx&'	0	0	same
+tblastx	'id X;mp'	0	0	same
+tblastn	'id X;mp'	0	0	same
+blastn	'id X;mp'	0	0	same
+tblastx	'id XX;F1;'	0	0	same
+tblastn	'id XX;F1;'	0	0	same
+blastn	'id XX;F1;'	0	0	same
+tblastx	'id xpF1pp'	0	0	same
+tblastn	'id xpF1pp'	0	0	same
+blastn	'id xpF1pp'	0	0	same
+tblastx	'id 11a'	0	0	same
+tblastn	'id 11a'	0	0	same
+blastn	'id 11a'	0	0	same
+tblastx	'id x#am'	0	0	same
+tblastn	'id x#am'	0	0	same
+blastn	'id x#am'	0	0	same
+tblastx	'id ; &&mXx'	0	0	same
+tblastn	'id ; &&mXx'	0	0	same
+blastn	'id ; &&mXx'	0	0	same
+tblastx	'id F&mp'	0	0	same
+tblastn	'id F&mp'	0	0	same
+blastn	'id F&mp'	0	0	same
+tblastx	'id m;x1F'	0	0	same
+tblastn	'id m;x1F'	0	0	same
+blastn	'id m;x1F'	0	0	same
+tblastx	'id 11mF&'	0	0	same
+tblastn	'id 11mF&'	0	0	same
+blastn	'id 11mF&'	0	0	same
+tblastx	'id pxpx'	0	0	same
+tblastn	'id pxpx'	0	0	same
+blastn	'id pxpx'	0	0	same
+tblastx	'id 1 &m&;'	0	0	same
+tblastn	'id 1 &m&;'	0	0	same
+blastn	'id 1 &m&;'	0	0	same
+tblastx	'id  xm F;'	0	0	same
+tblastn	'id  xm F;'	0	0	same
+blastn	'id  xm F;'	0	0	same
+tblastx	'id &1'	0	0	same
+tblastn	'id &1'	0	0	same
+blastn	'id &1'	0	0	same
+tblastx	'id m;;;1#'	0	0	same
+tblastn	'id m;;;1#'	0	0	same
+blastn	'id m;;;1#'	0	0	same
+tblastx	'id ;axx;Fp;'	0	0	same
+tblastn	'id ;axx;Fp;'	0	0	same
+blastn	'id ;axx;Fp;'	0	0	same
+tblastx	'id p;;x 11'	0	0	same
+tblastn	'id p;;x 11'	0	0	same
+blastn	'id p;;x 11'	0	0	same
+tblastx	'id aFx&;xFFp'	0	0	same
+tblastn	'id aFx&;xFFp'	0	0	same
+blastn	'id aFx&;xFFp'	0	0	same
+tblastx	'id 1apx&'	0	0	same
+tblastn	'id 1apx&'	0	0	same
+blastn	'id 1apx&'	0	0	same
+tblastx	'id a#mm# pa&1'	0	0	same
+tblastn	'id a#mm# pa&1'	0	0	same
+blastn	'id a#mm# pa&1'	0	0	same
+tblastx	'id 1 &F&Xm1#'	0	0	same
+tblastn	'id 1 &F&Xm1#'	0	0	same
+blastn	'id 1 &F&Xm1#'	0	0	same
+tblastx	'id xp'	0	0	same
+tblastn	'id xp'	0	0	same
+blastn	'id xp'	0	0	same
+tblastx	'id &xX xx1p1'	0	0	same
+tblastn	'id &xX xx1p1'	0	0	same
+blastn	'id &xX xx1p1'	0	0	same
+tblastx	'id p&xa &xF'	0	0	same
+tblastn	'id p&xa &xF'	0	0	same
+blastn	'id p&xa &xF'	0	0	same
+tblastx	'id x##'	0	0	same
+tblastn	'id x##'	0	0	same
+blastn	'id x##'	0	0	same
+tblastx	'id pa#; ;'	0	0	same
+tblastn	'id pa#; ;'	0	0	same
+blastn	'id pa#; ;'	0	0	same
+tblastx	'id X#'	0	0	same
+tblastn	'id X#'	0	0	same
+blastn	'id X#'	0	0	same
+tblastx	'id ;pF&'	0	0	same
+tblastn	'id ;pF&'	0	0	same
+blastn	'id ;pF&'	0	0	same
+tblastx	'id ap1&a# x&'	0	0	same
+tblastn	'id ap1&a# x&'	0	0	same
+blastn	'id ap1&a# x&'	0	0	same
+tblastx	'id #&mXF1'	0	0	same
+tblastn	'id #&mXF1'	0	0	same
+blastn	'id #&mXF1'	0	0	same
+tblastx	'id F1p1Fpm##&'	0	0	same
+tblastn	'id F1p1Fpm##&'	0	0	same
+blastn	'id F1p1Fpm##&'	0	0	same
+tblastx	'id mx&X a1'	0	0	same
+tblastn	'id mx&X a1'	0	0	same
+blastn	'id mx&X a1'	0	0	same
+tblastx	'id 1X#'	0	0	same
+tblastn	'id 1X#'	0	0	same
+blastn	'id 1X#'	0	0	same
+tblastx	'id 1F;a'	0	0	same
+tblastn	'id 1F;a'	0	0	same
+blastn	'id 1F;a'	0	0	same
+tblastx	'id a;Xa'	0	0	same
+tblastn	'id a;Xa'	0	0	same
+blastn	'id a;Xa'	0	0	same
+tblastx	'id mpmaxFF #1'	0	0	same
+tblastn	'id mpmaxFF #1'	0	0	same
+blastn	'id mpmaxFF #1'	0	0	same
+tblastx	'id a;#1&1 x'	0	0	same
+tblastn	'id a;#1&1 x'	0	0	same
+blastn	'id a;#1&1 x'	0	0	same
+tblastx	'id ma#1 x#a'	0	0	same
+tblastn	'id ma#1 x#a'	0	0	same
+blastn	'id ma#1 x#a'	0	0	same
+tblastx	'id X&am 1'	0	0	same
+tblastn	'id X&am 1'	0	0	same
+blastn	'id X&am 1'	0	0	same
+tblastx	'id mX;aX;'	0	0	same
+tblastn	'id mX;aX;'	0	0	same
+blastn	'id mX;aX;'	0	0	same
+tblastx	'id xaa&mp a'	0	0	same
+tblastn	'id xaa&mp a'	0	0	same
+blastn	'id xaa&mp a'	0	0	same
+tblastx	'id 1pax'	0	0	same
+tblastn	'id 1pax'	0	0	same
+blastn	'id 1pax'	0	0	same
+tblastx	'id p1Xa mmFxx'	0	0	same
+tblastn	'id p1Xa mmFxx'	0	0	same
+blastn	'id p1Xa mmFxx'	0	0	same
+tblastx	'id aXX'	0	0	same
+tblastn	'id aXX'	0	0	same
+blastn	'id aXX'	0	0	same
+tblastx	'id aX'	0	0	same
+tblastn	'id aX'	0	0	same
+blastn	'id aX'	0	0	same
+tblastx	'id x1xF&pXx'	0	0	same
+tblastn	'id x1xF&pXx'	0	0	same
+blastn	'id x1xF&pXx'	0	0	same
+tblastx	'id 11x'	0	0	same
+tblastn	'id 11x'	0	0	same
+blastn	'id 11x'	0	0	same
+tblastx	'id ;F;'	0	0	same
+tblastn	'id ;F;'	0	0	same
+blastn	'id ;F;'	0	0	same
+tblastx	'id x&;x 1&'	0	0	same
+tblastn	'id x&;x 1&'	0	0	same
+blastn	'id x&;x 1&'	0	0	same
+tblastx	'id & F'	0	0	same
+tblastn	'id & F'	0	0	same
+blastn	'id & F'	0	0	same
+tblastx	'id xFa;'	0	0	same
+tblastn	'id xFa;'	0	0	same
+blastn	'id xFa;'	0	0	same
+tblastx	'id ;p XFX1#a'	0	0	same
+tblastn	'id ;p XFX1#a'	0	0	same
+blastn	'id ;p XFX1#a'	0	0	same
+tblastx	'id 1FpX&&1p'	0	0	same
+tblastn	'id 1FpX&&1p'	0	0	same
+blastn	'id 1FpX&&1p'	0	0	same
+tblastx	'id &  x'	0	0	same
+tblastn	'id &  x'	0	0	same
+blastn	'id &  x'	0	0	same
+tblastx	'id  mpm1&1mp'	0	0	same
+tblastn	'id  mpm1&1mp'	0	0	same
+blastn	'id  mpm1&1mp'	0	0	same
+tblastx	'id  #p&F mx'	0	0	same
+tblastn	'id  #p&F mx'	0	0	same
+blastn	'id  #p&F mx'	0	0	same
+tblastx	'id ppaF'	0	0	same
+tblastn	'id ppaF'	0	0	same
+blastn	'id ppaF'	0	0	same
+tblastx	'id X&pp1;'	0	0	same
+tblastn	'id X&pp1;'	0	0	same
+blastn	'id X&pp1;'	0	0	same
+tblastx	'id & m mXam#'	0	0	same
+tblastn	'id & m mXam#'	0	0	same
+blastn	'id & m mXam#'	0	0	same
+tblastx	'id 1&F&;;#'	0	0	same
+tblastn	'id 1&F&;;#'	0	0	same
+blastn	'id 1&F&;;#'	0	0	same
+tblastx	'id Xa#F'	0	0	same
+tblastn	'id Xa#F'	0	0	same
+blastn	'id Xa#F'	0	0	same
+tblastx	'id FFm m xp1F'	0	0	same
+tblastn	'id FFm m xp1F'	0	0	same
+blastn	'id FFm m xp1F'	0	0	same
+tblastx	'id aFa1XX'	0	0	same
+tblastn	'id aFa1XX'	0	0	same
+blastn	'id aFa1XX'	0	0	same
+tblastx	'id #X1m#'	0	0	same
+tblastn	'id #X1m#'	0	0	same
+blastn	'id #X1m#'	0	0	same
+tblastx	'id a;X;'	0	0	same
+tblastn	'id a;X;'	0	0	same
+blastn	'id a;X;'	0	0	same
+tblastx	'id #m'	0	0	same
+tblastn	'id #m'	0	0	same
+blastn	'id #m'	0	0	same
+tblastx	'id ;xF1'	0	0	same
+tblastn	'id ;xF1'	0	0	same
+blastn	'id ;xF1'	0	0	same
+tblastx	'id p1p&'	0	0	same
+tblastn	'id p1p&'	0	0	same
+blastn	'id p1p&'	0	0	same
+tblastx	'id a F;'	0	0	same
+tblastn	'id a F;'	0	0	same
+blastn	'id a F;'	0	0	same
+tblastx	'id  ;'	0	0	same
+tblastn	'id  ;'	0	0	same
+blastn	'id  ;'	0	0	same
+tblastx	'id aa1m1ppxp'	0	0	same
+tblastn	'id aa1m1ppxp'	0	0	same
+blastn	'id aa1m1ppxp'	0	0	same
+tblastx	'id #m;X'	0	0	same
+tblastn	'id #m;X'	0	0	same
+blastn	'id #m;X'	0	0	same
+tblastx	'id  FF  mm'	0	0	same
+tblastn	'id  FF  mm'	0	0	same
+blastn	'id  FF  mm'	0	0	same
+tblastx	'id ; Fppp&m;F'	0	0	same
+tblastn	'id ; Fppp&m;F'	0	0	same
+blastn	'id ; Fppp&m;F'	0	0	same
+tblastx	'id xaa1#'	0	0	same
+tblastn	'id xaa1#'	0	0	same
+blastn	'id xaa1#'	0	0	same
+tblastx	'id x&1m'	0	0	same
+tblastn	'id x&1m'	0	0	same
+blastn	'id x&1m'	0	0	same
+tblastx	'id 1#X;m'	0	0	same
+tblastn	'id 1#X;m'	0	0	same
+blastn	'id 1#X;m'	0	0	same
+tblastx	'id  mm'	0	0	same
+tblastn	'id  mm'	0	0	same
+blastn	'id  mm'	0	0	same
+tblastx	'id axa F&;x'	0	0	same
+tblastn	'id axa F&;x'	0	0	same
+blastn	'id axa F&;x'	0	0	same
+tblastx	'id a; & &;X'	0	0	same
+tblastn	'id a; & &;X'	0	0	same
+blastn	'id a; & &;X'	0	0	same
+tblastx	'id  a&&mpX'	0	0	same
+tblastn	'id  a&&mpX'	0	0	same
+blastn	'id  a&&mpX'	0	0	same
+tblastx	'id ;#&pX;X&1;'	0	0	same
+tblastn	'id ;#&pX;X&1;'	0	0	same
+blastn	'id ;#&pX;X&1;'	0	0	same
+tblastx	'id & m'	0	0	same
+tblastn	'id & m'	0	0	same
+blastn	'id & m'	0	0	same
+tblastx	'id x#m;Xxp'	0	0	same
+tblastn	'id x#m;Xxp'	0	0	same
+blastn	'id x#m;Xxp'	0	0	same
+tblastx	'id #F&ma #&xa'	0	0	same
+tblastn	'id #F&ma #&xa'	0	0	same
+blastn	'id #F&ma #&xa'	0	0	same
+tblastx	'id aa;&mpa'	0	0	same
+tblastn	'id aa;&mpa'	0	0	same
+blastn	'id aa;&mpa'	0	0	same
+tblastx	'id amxF#'	0	0	same
+tblastn	'id amxF#'	0	0	same
+blastn	'id amxF#'	0	0	same
+tblastx	'id #F;a'	0	0	same
+tblastn	'id #F;a'	0	0	same
+blastn	'id #F;a'	0	0	same
+tblastx	'id F 1&xX 1p'	0	0	same
+tblastn	'id F 1&xX 1p'	0	0	same
+blastn	'id F 1&xX 1p'	0	0	same
+tblastx	'id F#;axax'	0	0	same
+tblastn	'id F#;axax'	0	0	same
+blastn	'id F#;axax'	0	0	same
+tblastx	'id pFxm&&Fap'	0	0	same
+tblastn	'id pFxm&&Fap'	0	0	same
+blastn	'id pFxm&&Fap'	0	0	same
+tblastx	'id 1# ;'	0	0	same
+tblastn	'id 1# ;'	0	0	same
+blastn	'id 1# ;'	0	0	same
+tblastx	'id  pm;ap'	0	0	same
+tblastn	'id  pm;ap'	0	0	same
+blastn	'id  pm;ap'	0	0	same
+tblastx	'id #pX'	0	0	same
+tblastn	'id #pX'	0	0	same
+blastn	'id #pX'	0	0	same
+tblastx	'id F;pX;xFa#;'	0	0	same
+tblastn	'id F;pX;xFa#;'	0	0	same
+blastn	'id F;pX;xFa#;'	0	0	same
+tblastx	'id #x ;m1m&Xp'	0	0	same
+tblastn	'id #x ;m1m&Xp'	0	0	same
+blastn	'id #x ;m1m&Xp'	0	0	same
+tblastx	'id XXX#1;1;mF'	0	0	same
+tblastn	'id XXX#1;1;mF'	0	0	same
+blastn	'id XXX#1;1;mF'	0	0	same
+tblastx	'id & ;xxXF&mm'	0	0	same
+tblastn	'id & ;xxXF&mm'	0	0	same
+blastn	'id & ;xxXF&mm'	0	0	same
+tblastx	'id 1max&'	0	0	same
+tblastn	'id 1max&'	0	0	same
+blastn	'id 1max&'	0	0	same
+tblastx	'id 1;x;;p FXp'	0	0	same
+tblastn	'id 1;x;;p FXp'	0	0	same
+blastn	'id 1;x;;p FXp'	0	0	same
+tblastx	'id 1p1&FX'	0	0	same
+tblastn	'id 1p1&FX'	0	0	same
+blastn	'id 1p1&FX'	0	0	same
+tblastx	'id  &m1x'	0	0	same
+tblastn	'id  &m1x'	0	0	same
+blastn	'id  &m1x'	0	0	same
+tblastx	'id X#p #mx'	0	0	same
+tblastn	'id X#p #mx'	0	0	same
+blastn	'id X#p #mx'	0	0	same
+tblastx	'id 1p#F;'	0	0	same
+tblastn	'id 1p#F;'	0	0	same
+blastn	'id 1p#F;'	0	0	same
+# deflines=1118 runs=3354 decoded, losat-rejects=855 same=2499
+exit 0

@@ -377,7 +377,7 @@ pub fn score_compare_hsps(a: &Hit, b: &Hit) -> Ordering {
 //    return ScoreCompareHSPs(v1, v2);
 // }
 // ```
-fn evalue_compare_hsps(a: &Hit, b: &Hit) -> Ordering {
+pub(crate) fn evalue_compare_hsps(a: &Hit, b: &Hit) -> Ordering {
     match evalue_comp(a.e_value, b.e_value) {
         Ordering::Equal => score_compare_hsps(a, b),
         ord => ord,

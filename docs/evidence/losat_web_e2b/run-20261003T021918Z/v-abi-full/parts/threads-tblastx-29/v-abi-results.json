@@ -1,0 +1,89 @@
+[
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "tblastx",
+    "cases": [
+      "p10_meenmjnv_mejomjnv"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/MeenMJNV.fasta",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/MejoMJNV.fasta",
+      "-query_gencode",
+      "1",
+      "-db_gencode",
+      "1"
+    ],
+    "formats": {
+      "0": "c0c990bcaa84a14286242730a6470f4ef2e2bb1da648c62d0a91b4c981f29850",
+      "6": "9aa19d6e0f49cc27348ef54e4dd567f63d356e3bd5b0e09d621efc4088db7f3e",
+      "7": "3fae2764d9d9ba407b50bf41e925d9f3c2358dd3451921aedfe20a77754b0f19"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 23240
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "tblastx",
+    "cases": [
+      "p10_meenmjnv_mejomjnv"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/MeenMJNV.fasta",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/MejoMJNV.fasta",
+      "-query_gencode",
+      "1",
+      "-db_gencode",
+      "1"
+    ],
+    "formats": {
+      "0": "c0c990bcaa84a14286242730a6470f4ef2e2bb1da648c62d0a91b4c981f29850",
+      "6": "9aa19d6e0f49cc27348ef54e4dd567f63d356e3bd5b0e09d621efc4088db7f3e",
+      "7": "3fae2764d9d9ba407b50bf41e925d9f3c2358dd3451921aedfe20a77754b0f19"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 23240
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "tblastx",
+    "cases": [
+      "p10_meenmjnv_mejomjnv"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/MeenMJNV.fasta",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/MejoMJNV.fasta",
+      "-query_gencode",
+      "1",
+      "-db_gencode",
+      "1"
+    ],
+    "formats": {
+      "0": "c0c990bcaa84a14286242730a6470f4ef2e2bb1da648c62d0a91b4c981f29850",
+      "6": "9aa19d6e0f49cc27348ef54e4dd567f63d356e3bd5b0e09d621efc4088db7f3e",
+      "7": "3fae2764d9d9ba407b50bf41e925d9f3c2358dd3451921aedfe20a77754b0f19"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 23240
+  }
+]

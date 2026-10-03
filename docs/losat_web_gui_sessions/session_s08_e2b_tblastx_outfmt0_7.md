@@ -33,8 +33,8 @@ S07+++b（E2g）は BLASTN の棚卸し（`docs/evidence/losat_web_e2g/INVENTORY
 - **`%#8.3g`：** Lambda・K・H の書き方は C と同じになった（全 program 共有）。
 - **NCBI の application の層：** `LOSAT/src/blastinput/ncbi_environment.rs` の `check_ncbi_application_settings(program)` が、`DIAG_*`・`NCBI_CONFIG_*` などと、出力を変える `<program>.ini`・`.ncbirc` を拒否する。今は blastn だけが呼ぶ（`main.rs`）。S08+ でほかの program の入口にも足す。
 - **整数でない環境変数の値：** 明示的に拒否する（計画 TD-15）。
-- **保守者の確認を待つ細部（BLASTN、ゲート記録の「残件」）：** 負の `CHUNK_SIZE` の組で batch を分けるがもう一度は分けない場合（拒否のまま）、reward 32768 以上（拒否のまま）、outfmt 6/7 の閉じたパイプの時間に依る終了コード 0。
+- **保守者の確認（DW-16）：** 負の `CHUNK_SIZE` の組で batch を分けるがもう一度は分けない場合と reward 32768 以上は、決まった結果でも実用の無い設定なので明示的な拒否のまま（`PD-LOSAT-NCBI-DEFECTS` 版 1.1 の規則 2 の但し書き）。outfmt 6/7 の閉じたパイプの時間に依る終了コード 0 は承認済みの例外 3・5（`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` 版 1.2）。TBLASTX でも同じに扱う。
 
 ## 終了・引き継ぎ
 
-README の規則 8 に従う。次は [S08+ — BLASTP・TBLASTN・TBLASTX の既定以外のオプション](session_s08p_e2e_protein_options.md)。
+README の規則 8 に従う。S08 は 2026-10-03 に区切り、仕上げは [S08b](session_s08b_e2b_final_gates.md)。その次は [S08+ — BLASTP・TBLASTN・TBLASTX の既定以外のオプション](session_s08p_e2e_protein_options.md)。

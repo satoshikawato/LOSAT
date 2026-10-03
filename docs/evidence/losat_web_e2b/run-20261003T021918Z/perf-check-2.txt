@@ -1,0 +1,9 @@
+ok tblastx native: median 0.807s [0.787, 0.817] -> 0.814s [0.794, 0.823] (x1.009), output same
+ok tblastx serial-wasi: median 1.217s [1.174, 1.440] -> 1.231s [1.211, 1.269] (x1.011), output same
+ok tblastx threaded-wasi: median 1.406s [1.371, 1.749] -> 1.447s [1.382, 2.219] (x1.029), output same
+FAIL tblastx-multi native: median 0.100s [0.098, 0.104] -> 0.120s [0.118, 0.120] (x1.204), output same
+FAIL tblastx-multi serial-wasi: median 0.206s [0.200, 0.225] -> 0.228s [0.217, 0.292] (x1.106), output same
+ok tblastx-multi threaded-wasi: median 0.408s [0.374, 1.262] -> 0.393s [0.385, 0.612] (x0.961), output same
+ok blastp-fmt0 native: median 0.506s [0.421, 0.614] -> 0.498s [0.436, 0.513] (x0.985), output same
+ok blastp-fmt0 serial-wasi: median 0.608s [0.601, 0.780] -> 0.612s [0.604, 0.681] (x1.007), output same
+ok blastp-fmt0 threaded-wasi: median 0.692s [0.492, 0.900] -> 0.522s [0.491, 0.759] (x0.755), output same

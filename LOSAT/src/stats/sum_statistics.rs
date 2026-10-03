@@ -811,6 +811,45 @@ pub fn large_gap_sum_e(
     sum_e
 }
 
+/// `large_gap_sum_e` in NCBI's order of evaluation: `xsum -= num*log(...) - lnfact`
+/// subtracts the difference, which rounds differently from subtracting the product and
+/// adding the factorial (the HSP order of TBLASTX depends on the last bit). BLASTX keeps
+/// `large_gap_sum_e` until it is integrated (plan DW-10, SX).
+///
+/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:4560-4561
+/// ```c
+///       xsum -= num*log(lcl_subject_length*lcl_query_length)
+///         - BLAST_LnFactorial((double) num);
+/// ```
+pub fn ncbi_large_gap_sum_e(
+    num_hsps: i16,
+    xsum: f64,
+    query_length: i32,
+    subject_length: i32,
+    searchsp_eff: i64,
+    weight_divisor: f64,
+) -> f64 {
+    let mut sum_e: f64;
+    if num_hsps == 1 {
+        sum_e = (searchsp_eff as f64) * (-xsum).exp();
+    } else {
+        let num = num_hsps as i32;
+        let prod = (subject_length as f64) * (query_length as f64);
+        let adjusted_xsum = xsum - ((num as f64) * prod.ln() - ln_factorial_int(num));
+        let sum_p = blast_sum_p(num, adjusted_xsum);
+        sum_e = p_to_e(sum_p) * ((searchsp_eff as f64) / prod);
+    }
+    if weight_divisor == 0.0 {
+        sum_e = i32::MAX as f64;
+    } else {
+        sum_e /= weight_divisor;
+        if sum_e > (i32::MAX as f64) {
+            sum_e = i32::MAX as f64;
+        }
+    }
+    sum_e
+}
+
 /// Normalize a raw score to nats using Karlin-Altschul parameters.
 ///
 /// Formula: xsum = lambda * score - logK

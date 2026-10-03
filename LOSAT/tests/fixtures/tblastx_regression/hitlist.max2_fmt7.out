@@ -1,0 +1,19 @@
+# TBLASTX 2.17.0+
+# Query: pep40 a 40-residue peptide in frame +1 with random flanks
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/tblastx_many_subject.fasta)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 13 hits found
+pep40	subject259	86.000	50	7	0	31	180	31	180	5.04e-28	110
+pep40	subject259	60.377	53	21	0	179	21	179	21	5.91e-18	76.7
+pep40	subject259	48.780	41	21	0	150	28	150	28	5.05e-08	43.7
+pep40	subject259	42.500	40	23	0	30	149	30	149	8.80e-07	39.6
+pep40	subject259	42.500	40	23	0	32	151	32	151	5.47e-05	33.6
+pep40	subject259	42.500	40	23	0	151	32	151	32	0.001	29.5
+pep40	subject259	30.000	20	14	0	25	84	77	18	9.5	16.2
+pep40	subject049	93.333	45	3	0	25	159	25	159	2.40e-27	107
+pep40	subject049	73.333	45	12	0	158	24	158	24	4.31e-18	77.1
+pep40	subject049	50.000	40	20	0	147	28	147	28	4.31e-10	50.6
+pep40	subject049	52.500	40	19	0	30	149	30	149	5.32e-09	46.9
+pep40	subject049	51.282	39	19	0	148	32	148	32	5.92e-06	36.8
+pep40	subject049	51.282	39	19	0	32	148	32	148	4.91e-04	30.4
+# BLAST processed 1 queries

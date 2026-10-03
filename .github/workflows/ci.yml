@@ -94,6 +94,6 @@ jobs:
             .tmp/fast-regressions/hashes.tsv
             .tmp/fast-regressions/timing.tsv
             .tmp/fast-regressions/outfmt0-fixtures-*.tsv
-            .tmp/fast-regressions/blastn-regression-fixtures.tsv
+            .tmp/fast-regressions/*-regression-fixtures.tsv
           if-no-files-found: warn
           retention-days: 14

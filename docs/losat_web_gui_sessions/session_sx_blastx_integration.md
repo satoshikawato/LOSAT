@@ -17,6 +17,17 @@ LOSAT の BLASTX（LOSATX）を LOSAT Web の構成に組み入れる。先に [
 
 記録は `docs/evidence/losat_web_sx/README.md`。1 セッションで終わらなければ、まとめ直し（SXa）と範囲指定（SXb）に分ける。
 
+## S08 からの引き継ぎ（2026-10-02）
+
+S08（E2b、[ゲート記録](../evidence/losat_web_e2b/README.md)）は、BLASTX と共有のコードで次を見つけ、DW-10 に従って BLASTX の振る舞いを変えずに残した。取り込んだ後に、LOSATX の比較ゲートで確かめて合わせる。
+
+- `BLAST_LargeGapSumE` の計算の順：NCBI は `xsum -= num*log(...) - BLAST_LnFactorial(num)`（`c++/src/algo/blast/core/blast_stat.c:4560-4561`）で、差を引く。`LOSAT/src/stats/sum_statistics.rs` の `large_gap_sum_e`（BLASTX の `algorithm/blastx/even_gap.rs` が使う）は積を引いてから階乗を足すので、最後の桁が違い、HSP の順が変わることがある（TBLASTX では 700 の乱数の入力のうち 4 件）。TBLASTX は S08 で `ncbi_large_gap_sum_e` に移した。
+- 説明の一覧：BLASTX は今も `write_subject_summary_table_with_sum_n`（最初の HSP と素の幅）を使う。NCBI の規則は `x_InitDeflineTable`（E2a §G.3、`write_blastn_description_table`）。
+- `score_compare_match` の同点：TBLASTX は S08 で `Blast_InitHitListSortByScore` を移植した（`algorithm/tblastx/blast_gapalign.rs`）。BLASTX の `algorithm/blastx/seed.rs` にある注釈の写しは確かめていない。
+- 入力の読み方：`algorithm/blastn/input.rs` の部品は program の名前を受け取るようになった（BLASTN・TBLASTX が使う）。
+- SEG：NCBI の `s_SegSeq` は左の部分の再帰で見つけた区間のうち先頭の 1 つだけを残す（`c++/src/algo/blast/core/blast_seg.c:2086-2101` の `leftsegs->next = *segs`）。S08 で `LOSAT/src/utils/seg.rs` を NCBI と同じにし、BLASTX の 2 か所（`algorithm/blastx/query_setup.rs`、`algorithm/blastx/kappa.rs`）だけが `keeping_all_left_segments()` で前の振る舞いを保つ。取り込んだ後にこの 2 つを外し、LOSATX の比較ゲートで確かめる（S08 の調べでは、低複雑度の領域を持つ蛋白の 388 件の組で BLASTX の 344 件が NCBI と違い、直すと 0 件）。
+- `-seg` の値（S08 の独立監査の後、`7fbbfad96`）：BLASTP・TBLASTN・TBLASTX は NCBI と同じに 1 つの空白で分け、0 以下の窓・locut・hicut を NCBI の既定のままにする（`c++/src/algo/blast/core/blast_filter.c:1147-1154`、`blastinput/value_parsers.rs` の `SegSpec::params`）。BLASTX は自分の `seg` の解析器（`algorithm/blastx/args.rs` の `BlastxSeg`）のままなので、取り込むときに同じにする。閉じた標準出力（`cli.rs` の `report_standard_output`）も BLASTX の報告はまだ使っていない。
+
 ## 終了・引き継ぎ
 
 README の規則 8 に従う。SX を終えた後は、中断していた順番のセッションに戻る。

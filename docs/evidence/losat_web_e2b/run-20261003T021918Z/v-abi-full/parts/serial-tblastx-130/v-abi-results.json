@@ -1,0 +1,25 @@
+[
+  {
+    "engine": "serial",
+    "threads": 1,
+    "program": "tblastx",
+    "cases": [
+      "tblastx-threaded-direct"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "docs/evidence/losat_web_e1c/run-20260928T203929Z/tblastx-threaded-direct/q.fna",
+      "-subject",
+      "docs/evidence/losat_web_e1c/run-20260928T203929Z/tblastx-threaded-direct/s.fna"
+    ],
+    "formats": {
+      "0": "289f7821cb656857f1b9f8297247d16553fe7535f9381e3d74e3bbace8832ad1",
+      "6": "f74526fe21df3ab46e8d659cba67ab8fc4a91f43c7394f5f4fe632723207217c",
+      "7": "128712679acb543adeb5c1c0a6d480154f38463a654663e41fada76024847950"
+    },
+    "frozen": {},
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 164
+  }
+]

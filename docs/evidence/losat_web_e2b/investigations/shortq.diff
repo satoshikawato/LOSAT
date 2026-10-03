@@ -1,0 +1,21 @@
+--- a/LOSAT/src/algorithm/tblastx/sum_stats_linking/linking.rs
++++ b/LOSAT/src/algorithm/tblastx/sum_stats_linking/linking.rs
+@@ -176,9 +176,17 @@
+ // else if (context1 > context2)
+ //    return 1;
+ // ```
++//
++// NCBI numbers the contexts of every query 0..5 (`BLAST_GetNumberOfContexts` = NUM_FRAMES,
++// blast_util.c:1373-1376; `BlastQueryInfoNew`, blast_query_info.c:77; `SetupQueryInfo_OMF`
++// creates six contexts per query even when a frame has no residue, blast_setup_cxx.cpp:164,
++// 193-225, 268), so `context/(NUM_FRAMES/2)` is `2 * query_index + (frame < 0)`.  LOSAT's `ctx_idx`
++// indexes only the frames `generate_frames` produced (none for 1-2 nt, two for 3 nt, four
++// for 4 nt), so `ctx_idx / 3` is not that value once such a query precedes another one in
++// the batch.
+ #[inline]
+ fn translated_context_group(hit: &UngappedHit) -> usize {
+-    hit.ctx_idx / 3
++    hit.q_idx as usize * 2 + usize::from(hit.q_frame < 0)
+ }
+ 
+ // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:331-375

@@ -422,6 +422,46 @@ impl fmt::Display for NativeError {
 // ```
 impl std::error::Error for NativeError {}
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:118-119
+// ```c
+// {
+//     m_Outfile.exceptions(NcbiBadbit);
+// ```
+/// The report's output stream (the `-out` file or standard output), which records whether
+/// a write to it failed: NCBI's outfmt 0 stream throws there, which the application
+/// reports as "BLAST failed to write output" (blast_app_util.hpp:252-255).
+pub struct ReportStream {
+    pub inner: Box<dyn std::io::Write + Send>,
+    pub failed: bool,
+}
+
+impl std::io::Write for ReportStream {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let written = self.inner.write(buf);
+        self.failed |= written.is_err();
+        written
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        let flushed = self.inner.flush();
+        self.failed |= flushed.is_err();
+        flushed
+    }
+}
+
+/// Standard output as the report's stream (`ReportStream::inner`).
+///
+/// NCBI writes the report to `cout`; when the process starts with its standard output
+/// closed (`>&-`), its first write fails (outfmt 0: "BLAST failed to write output", exit
+/// 6; outfmt 6 and 7 abort). Rust's runtime opens `/dev/null` on a closed standard
+/// descriptor before `main`, which LOSAT cannot tell from a `/dev/null` that the caller
+/// opened (read and write, as Python's `subprocess.DEVNULL`), so the report is written
+/// there and the run succeeds (approved exception 6 of
+/// `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`, accepted by the maintainer in session S08b).
+pub fn report_standard_output() -> Box<dyn std::io::Write + Send> {
+    Box::new(std::io::BufWriter::new(std::io::stdout()))
+}
+
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:95-99
 // ```c++
 // string s_ArgExptMsg(const string& name, const string& what, const string& attr)

@@ -1,0 +1,27 @@
+--- a/LOSAT/src/algorithm/tblastx/blast_engine/run_impl.rs	2026-10-02 20:15:52.890310313 +0900
++++ b/LOSAT/src/algorithm/tblastx/blast_engine/run_impl.rs	2026-10-02 20:16:07.985218546 +0900
+@@ -3204,6 +3204,24 @@
+                 use_parallel,
+             )
+         };
++        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/link_hsps.c:1802-1803
++        // ```c
++        //     /* Sort the HSP array by score */
++        //     Blast_HSPListSortByScore(hsp_list);
++        // ```
++        // BLAST_LinkHsps ends by sorting the list it linked, here with the scores of the
++        // preliminary (compressed-subject) search. The re-evaluation below may change or
++        // trim those scores (random bases for ambiguous subject letters, two-hit
++        // extension tails), after which Blast_HSPListReevaluateUngapped sorts again
++        // (blast_hits.c:2733-2734): HSPs that tie after re-evaluation keep the order
++        // of this first sort, not the order of the linking chains. That order is the
++        // input order of the second BLAST_LinkHsps (blast_engine.c:1515-1520), whose
++        // `>=` chain choices (link_hsps.c:613-622, 759, 887) give the better chain to
++        // the later of two comparator-equal HSPs of different frames.
++        // (The sort at the end of the second BLAST_LinkHsps is `report::final_hit_order`.)
++        if !ungapped_hits_is_sorted_by_score_ncbi(&prelinked_ungapped_hits) {
++            sort_ungapped_hits_by_score_ncbi(&mut prelinked_ungapped_hits);
++        }
+         if stage_dump::enabled() {
+             stage_dump::dump_ungapped_hits(
+                 "after_prelim_link_hsps_before_reevaluate",

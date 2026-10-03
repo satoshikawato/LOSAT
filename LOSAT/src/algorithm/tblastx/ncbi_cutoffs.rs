@@ -454,12 +454,12 @@ pub fn cutoff_score_for_update_tblastx(
     // NCBI: cutoff_e = s_GetCutoffEvalue(program_number) = CUTOFF_E_TBLASTX = 1e-300
     // NCBI: BLAST_Cutoffs(&new_cutoff, &cutoff_e, kbp, searchsp, TRUE, gap_decay_rate)
     // dodecay=TRUE means we apply gap decay divisor
-    let mut new_cutoff = cutoff_score_from_evalue_with_decay(
+    let mut new_cutoff = blast_cutoffs_from_one(cutoff_score_from_evalue_with_decay(
         CUTOFF_E_TBLASTX,
         searchsp,
         gap_decay_rate,
         ungapped_params,
-    );
+    ));
 
     // NCBI reference: blast_parameters.c:365-373
     // ```c
@@ -536,7 +536,31 @@ pub fn cutoff_score_max_for_tblastx(
 ) -> i32 {
     // NCBI: BLAST_Cutoffs(&new_cutoff, &evalue, kbp, searchsp, FALSE, 0)
     // dodecay=FALSE means no gap decay adjustment
-    cutoff_score_from_evalue(evalue_threshold, eff_searchsp, ungapped_params)
+    blast_cutoffs_from_one(cutoff_score_from_evalue(
+        evalue_threshold,
+        eff_searchsp,
+        ungapped_params,
+    ))
+}
+
+/// The cutoff score that `BLAST_Cutoffs` returns to a caller whose cutoff starts at 1
+/// (`Int4 new_cutoff = 1;`, blast_parameters.c:321 and 916): the larger of 1 and the score
+/// computed from E (`es`), so a large E-value against a small search space gives 1, not
+/// a score below it.
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:4097
+/// ```c
+///    Int4  s = *S, es;
+/// ```
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:4126-4129
+/// ```c
+///    if (es > s) {
+///       s_changed = TRUE;
+///       *S = s = es;
+///    }
+/// ```
+fn blast_cutoffs_from_one(es: i32) -> i32 {
+    es.max(1)
 }
 
 /// Calculate final cutoff_score for word_params (ungapped extension threshold).

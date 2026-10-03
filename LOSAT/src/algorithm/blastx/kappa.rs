@@ -316,7 +316,10 @@ fn get_range<'a>(
             || !test_near_identical(&subject, 0, &query, query_range.begin, words, align))
     {
         let intervals =
-            SegMasker::with_params(&SegParams::new(10, 1.8, 2.1)).mask_sequence(subject.data());
+            // BLASTX keeps LOSAT's former SEG until SX (plan DW-10).
+            SegMasker::with_params(&SegParams::new(10, 1.8, 2.1))
+                .keeping_all_left_segments()
+                .mask_sequence(subject.data());
         biased = !intervals.is_empty();
         for interval in intervals {
             for residue in &mut subject.buffer[1 + interval.start..1 + interval.end] {

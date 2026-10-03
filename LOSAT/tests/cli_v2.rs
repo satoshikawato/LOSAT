@@ -69,7 +69,7 @@ fn canonical_options_for_every_program() {
             Commands::Tblastx(a) => {
                 assert_eq!(a.num_threads, 4);
                 assert_eq!(a.evalue, 0.001);
-                assert_eq!(a.max_target_seqs, 9);
+                assert_eq!(a.max_target_seqs, Some(9));
             }
             // NCBI tblastn_args.cpp:55-62: SetTask(kDefaultTask);
             // blast_args.cpp:2726-2731: AddOptionalKey(kArgMaxTargetSequences, ...);
@@ -132,10 +132,22 @@ fn filtering_has_exactly_one_shared_value_grammar() {
             .to_ncbi_cli_string(),
         "12 2.2 2.5"
     );
-    // NCBI blast_seg.c:2253-2258: clamp negative cutoffs and raise hicut to locut.
-    for (spec, expected) in [("12 -1 -2", (0.0, 0.0)), ("12 3 2", (3.0, 3.0))] {
+    // NCBI blast_filter.c:1147-1154: a value that is not above 0 keeps the default
+    // (12, 2.2, 2.5); then blast_seg.c:2253-2258 raises hicut to locut.
+    for (spec, expected) in [
+        ("12 -1 -2", (12, 2.2, 2.5)),
+        ("12 0 2.5", (12, 2.2, 2.5)),
+        ("0 2.2 2.5", (12, 2.2, 2.5)),
+        ("-5 2.2 0", (12, 2.2, 2.5)),
+        ("12 3 2", (12, 3.0, 3.0)),
+        ("15 2.5 3.0", (15, 2.5, 3.0)),
+    ] {
         let params = parse_seg_filtering(spec).unwrap().params().unwrap();
-        assert_eq!((params.locut, params.hicut), expected);
+        assert_eq!(
+            (params.window, params.locut, params.hicut),
+            expected,
+            "{spec}"
+        );
     }
     assert_eq!(parse_dust_filtering("no").unwrap(), DustSpec::No);
     assert_eq!(
@@ -155,7 +167,11 @@ fn filtering_has_exactly_one_shared_value_grammar() {
         "12 2.2",
         "12 2.2 2.5 4",
         "x 2.2 2.5",
-        "0 2.2 2.5",
+        "12  2.2 2.5",
+        " 12 2.2 2.5",
+        "12 2.2 2.5 ",
+        "12\t2.2 2.5",
+        "2147483648 2.2 2.5",
         "12 NaN 2.5",
         "12 2.2 inf",
     ] {
@@ -257,10 +273,10 @@ fn defaults_and_task_overrides_remain_distinct() {
         assert_eq!(error.kind(), clap::error::ErrorKind::InvalidValue);
         assert!(error.to_string().contains(task));
     }
-    // NCBI blast_args.cpp:2800-2803: the default -outfmt is 0. BLASTN implements it;
-    // TBLASTX still rejects it.
+    // NCBI blast_args.cpp:2800-2803: the default -outfmt is 0, which BLASTN and TBLASTX
+    // implement.
     parse("blastn", &[]).unwrap();
-    assert!(parse("tblastx", &[]).unwrap_err().to_string().contains("0"));
+    parse("tblastx", &[]).unwrap();
     for program in ["blastn", "tblastx"] {
         parse(program, &["-outfmt", "6"]).unwrap();
     }
@@ -503,11 +519,15 @@ fn output_capabilities_fail_explicitly_and_help_is_canonical() {
     parse("blastp", &["-outfmt", "6 qseqid sseqid pident length"]).unwrap();
     for (program, specs) in [
         ("blastp", vec!["5", "0 qseqid", "6 unknown"]),
-        ("tblastx", vec!["0", "7", "6 qseqid"]),
+        ("tblastx", vec!["5", "6 qseqid", "7 std"]),
     ] {
         for spec in specs {
             assert!(parse(program, &["-outfmt", spec]).is_err());
         }
+    }
+    // TBLASTX implements the pairwise report and both tabular formats (session S08).
+    for spec in ["0", "6", "7"] {
+        parse("tblastx", &["-outfmt", spec]).unwrap();
     }
     // BLASTN parses -outfmt when it sets the options, as NCBI (blast_args.cpp:2801-2851).
     for spec in ["5", "6 qseqid", "0x6"] {

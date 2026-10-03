@@ -82,7 +82,8 @@ use super::super::hsp::{
 };
 use super::super::input::{
     check_deflines, check_records, check_records_have_residues, check_residues,
-    check_sequence_lines, is_blank, with_u_as_t, write_title_warnings, UNREADABLE_FASTA,
+    check_sequence_lines, check_utf8_file_name, is_blank, open_input, parse_fasta,
+    read_fasta_bytes, read_records, with_u_as_t, write_title_warnings,
 };
 use super::super::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
 use super::super::lookup::{build_unmasked_ranges, reverse_complement};
@@ -4940,127 +4941,13 @@ fn read_blastn_fasta_records(
     path: &std::path::Path,
     role: &str,
 ) -> Result<Vec<bio::io::fasta::Record>> {
-    let mut file = open_blastn_input(path, role)?;
-    parse_blastn_fasta(&read_blastn_fasta_bytes(&mut file, path, role)?, path, role)
-}
-
-/// Opens a BLASTN input as NCBI's argument does when a handler asks for its stream: `-` is
-/// standard input, and a file that does not open gets NCBI's error
-/// (`crate::cli::inaccessible`).
-///
-/// NCBI reference: ncbi-blast/c++/src/corelib/ncbiargs.cpp:717-735
-/// ```c
-///     if (AsString() == "-") {
-/// #if defined(NCBI_OS_MSWIN)
-///         NcbiSys_setmode(NcbiSys_fileno(stdin), (mode & IOS_BASE::binary) ? O_BINARY : O_TEXT);
-/// #endif
-///         m_Ios  = &cin;
-///     } else if ( !AsString().empty() ) {
-///         if (!fstrm) {
-///             fstrm = new CNcbiIfstream;
-///         }
-///         if (fstrm) {
-///             fstrm->open(AsString().c_str(),IOS_BASE::in | mode);
-///             if ( !fstrm->is_open() ) {
-///                 delete fstrm;
-///                 fstrm = NULL;
-///             } else {
-///                 m_DeleteFlag = true;
-///             }
-///         }
-///         m_Ios = fstrm;
-///     }
-/// ```
-fn open_blastn_input(path: &std::path::Path, role: &str) -> Result<std::fs::File> {
-    if path.as_os_str() == "-" {
-        return standard_input().map_err(|_| {
-            anyhow::anyhow!(
-                "reading the {role} from standard input ('-') on this platform is not supported by LOSAT's BLASTN"
-            )
-        });
-    }
-    std::fs::File::open(path).map_err(|_| crate::cli::inaccessible(role, path))
-}
-
-/// Standard input as a file that shares its position, as `cin` does.
-fn standard_input() -> std::io::Result<std::fs::File> {
-    #[cfg(any(unix, target_os = "wasi"))]
-    {
-        use std::os::fd::AsFd;
-        std::io::stdin()
-            .as_fd()
-            .try_clone_to_owned()
-            .map(std::fs::File::from)
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::io::AsHandle;
-        std::io::stdin()
-            .as_handle()
-            .try_clone_to_owned()
-            .map(std::fs::File::from)
-    }
-    #[cfg(not(any(unix, windows, target_os = "wasi")))]
-    {
-        Err(std::io::ErrorKind::Unsupported.into())
-    }
-}
-
-/// The bytes of an opened FASTA file; a directory reads as no bytes, as NCBI's stream does.
-fn read_blastn_fasta_bytes(
-    file: &mut std::fs::File,
-    path: &std::path::Path,
-    role: &str,
-) -> Result<Vec<u8>> {
-    let mut bytes = Vec::new();
-    match std::io::Read::read_to_end(file, &mut bytes) {
-        Ok(_) => Ok(bytes),
-        Err(error) if error.kind() == std::io::ErrorKind::IsADirectory => Ok(Vec::new()),
-        Err(error) => {
-            Err(error).with_context(|| format!("failed to read {role} FASTA {}", path.display()))
-        }
-    }
-}
-
-/// The records of a FASTA file, after rejecting the residues that NCBI reads differently
-/// (`input.rs`); a file of white space only has no record, as in NCBI. NCBI reads the
-/// deflines that LOSAT rejects (`check_deflines`) without a message, so the callers check
-/// them where the difference would change a result.
-fn read_blastn_records(
-    bytes: &[u8],
-    path: &std::path::Path,
-    role: &str,
-) -> Result<Vec<bio::io::fasta::Record>> {
-    if is_blank(bytes) {
-        return Ok(Vec::new());
-    }
-    check_sequence_lines(bytes, role)?;
-    let records = bio::io::fasta::Reader::new(bytes)
-        .records()
-        .collect::<std::result::Result<Vec<_>, _>>()
-        .with_context(|| {
-            format!(
-                "failed to read {role} FASTA {} ({UNREADABLE_FASTA})",
-                path.display()
-            )
-        })?;
-    check_residues(&records, role)?;
-    Ok(records)
-}
-
-/// The records of a FASTA file read where its deflines matter (the query), with the
-/// deflines checked first, so that a defline that bio cannot read is named.
-fn parse_blastn_fasta(
-    bytes: &[u8],
-    path: &std::path::Path,
-    role: &str,
-) -> Result<Vec<bio::io::fasta::Record>> {
-    if !is_blank(bytes) {
-        check_deflines(bytes, role)?;
-    }
-    let records = read_blastn_records(bytes, path, role)?;
-    check_records_have_residues(&records, role)?;
-    Ok(records)
+    let mut file = open_input(path, role, "BLASTN")?;
+    parse_fasta(
+        &read_fasta_bytes(&mut file, path, role)?,
+        path,
+        role,
+        "BLASTN",
+    )
 }
 
 /// ABI v1's reading of a BLASTN `-outfmt` value, which is frozen (plan TD-1): it keeps the
@@ -5222,11 +5109,11 @@ pub fn run(args: BlastnArgs) -> Result<()> {
         }
         .into());
     };
-    check_utf8_file_name(subject_path, "subject")?;
-    let mut subject_file = open_blastn_input(subject_path, "subject")?;
-    let subject_bytes = read_blastn_fasta_bytes(&mut subject_file, subject_path, "subject")?;
+    check_utf8_file_name(subject_path, "subject", "BLASTN")?;
+    let mut subject_file = open_input(subject_path, "subject", "BLASTN")?;
+    let subject_bytes = read_fasta_bytes(&mut subject_file, subject_path, "subject")?;
     drop(subject_file);
-    let subjects = read_blastn_records(&subject_bytes, subject_path, "subject")?;
+    let subjects = read_records(&subject_bytes, subject_path, "subject", "BLASTN")?;
     write_title_warnings(&subjects, &mut std::io::stderr())?;
     // NCBI reads these deflines and records without a message; LOSAT rejects them where
     // the search would start.
@@ -5258,12 +5145,12 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     // ```
     // The output file is created here, before the options are checked, so a run that
     // stops at a check leaves an empty file; `-` is standard output.
-    check_utf8_file_name(&args.query, "query")?;
-    let mut query_file = open_blastn_input(&args.query, "query")?;
+    check_utf8_file_name(&args.query, "query", "BLASTN")?;
+    let mut query_file = open_input(&args.query, "query", "BLASTN")?;
     // The output file is opened once, as NCBI's stream (a named pipe gives one reader one
     // end of file).
     if let Some(path) = args.out.as_deref() {
-        check_utf8_file_name(path, "out")?;
+        check_utf8_file_name(path, "out", "BLASTN")?;
     }
     let out_file = match args.out.as_deref().filter(|path| path.as_os_str() != "-") {
         Some(path) => Some(std::io::BufWriter::new(
@@ -5274,10 +5161,10 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     let outfmt = args.outfmt.clone();
     let pairwise = output_formats.contains(&BlastnOutputFormat::Pairwise);
     let mut stderr = std::io::stderr();
-    let mut report = ReportStream {
+    let mut report = crate::cli::ReportStream {
         inner: match out_file {
             Some(file) => Box::new(file) as Box<dyn std::io::Write + Send>,
-            None => Box::new(std::io::BufWriter::new(std::io::stdout())),
+            None => crate::cli::report_standard_output(),
         },
         failed: false,
     };
@@ -5321,27 +5208,6 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     flushed.context("failed to write the output")
 }
 
-/// The report's output stream (the `-out` file or standard output), which records whether
-/// a write to it failed.
-struct ReportStream {
-    inner: Box<dyn std::io::Write + Send>,
-    failed: bool,
-}
-
-impl std::io::Write for ReportStream {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        let written = self.inner.write(buf);
-        self.failed |= written.is_err();
-        written
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        let flushed = self.inner.flush();
-        self.failed |= flushed.is_err();
-        flushed
-    }
-}
-
 /// The part of `run` after the output is opened: NCBI's filtering handler (`-dust`), the
 /// processing of the options, `Query is Empty!`, LOSAT's deferred checks of the subjects,
 /// and the search.
@@ -5375,7 +5241,7 @@ fn search_cli(
     // gets no position for the query either.
     let seekable = !(args.query.as_os_str() == "-" && args.subject_path().as_os_str() == "-")
         && std::io::Seek::stream_position(&mut query_file).is_ok();
-    let query_bytes = read_blastn_fasta_bytes(&mut query_file, &args.query, "query")?;
+    let query_bytes = read_fasta_bytes(&mut query_file, &args.query, "query")?;
     drop(query_file);
     if is_blank(&query_bytes) {
         // NCBI reads a stream without a position (a pipe) as not empty, and then prints
@@ -5395,7 +5261,7 @@ fn search_cli(
     // ```c
     // sequences = input->GetAllSeqs(*scope);
     // ```
-    let queries = parse_blastn_fasta(&query_bytes, &args.query, "query")?;
+    let queries = parse_fasta(&query_bytes, &args.query, "query", "BLASTN")?;
     search(args, &queries, subjects, outputs, output_formats)
 }
 
@@ -5540,7 +5406,7 @@ fn search(
                 Some(desc) => format!("{} {desc}", record.id()),
                 None => record.id().to_string(),
             };
-            if crate::report::defline::has_html_character_reference(&defline) {
+            if crate::report::defline::ncbi_nucleotide_title_is_decoded(&defline) {
                 anyhow::bail!(
                     "subject record {} has an HTML character reference (such as &amp;) in its defline, which NCBI BLAST+ decodes in the outfmt 0 titles; this is not supported by LOSAT's BLASTN",
                     index + 1
@@ -5595,34 +5461,6 @@ fn search(
             batching,
         )
     })
-}
-
-/// Rejects a file name that is not UTF-8, where NCBI opens the file (the subjects, then the
-/// queries, then the output: `CBlastDatabaseArgs` comes before `CStdCmdLineArgs`).
-///
-/// NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.cpp:903-911
-/// ```c
-/// GetSubjectFile(const CArgs& args)
-/// {
-/// 	string filename="";
-///
-/// 	if (args.Exist(kArgSubject) && args[kArgSubject].HasValue())
-/// 		filename = args[kArgSubject].AsString();
-///
-/// 	return filename;
-/// }
-/// ```
-/// NCBI takes a file name as bytes: it writes the `-subject` name into the outfmt 0 and 7
-/// reports (`Database: User specified sequence set (Input: ...)`) and every name into its
-/// error messages as they are, which LOSAT's UTF-8 strings do not reproduce (plan DW-13).
-fn check_utf8_file_name(path: &std::path::Path, role: &str) -> Result<()> {
-    if path.to_str().is_none() {
-        anyhow::bail!(
-            "the -{role} file name {:?} is not UTF-8; NCBI BLAST+ writes the bytes of file names as they are, which is not supported by LOSAT's BLASTN",
-            path.to_string_lossy()
-        );
-    }
-    Ok(())
 }
 
 /// Rejects the environment variables that put NCBI BLAST+ into a search mode or report that

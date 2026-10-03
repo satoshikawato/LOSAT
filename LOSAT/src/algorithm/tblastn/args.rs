@@ -620,6 +620,30 @@ pub fn run_local(
         query_validity.extend(batch_validity);
     }
     let lengths = lengths.context("TBLASTN query file is empty")?;
+    // NCBI decodes HTML character references in the outfmt 0 titles of the subjects
+    // (`NStr::HtmlDecode` in `CDeflineGenerator::GenerateDefline`), which LOSAT does not
+    // reproduce, and its x_CleanAndCompress reads past the end of some titles of
+    // punctuation and crashes (approved exception 2 of PD-LOSAT-NCBI-DEFECTS covers BLASTN
+    // only). NCBI makes the titles of the subjects that the reports show, those with hits
+    // in the final hit lists (`report/defline.rs`).
+    if outputs.formats.iter().any(|format| format.outfmt == "0") {
+        let shown: std::collections::BTreeSet<usize> = results
+            .iter()
+            .flat_map(|hitlist| hitlist.lists())
+            .filter(|list| !list.hsps.hsps.is_empty())
+            .map(|list| usize::try_from(list.oid).context("negative TBLASTN subject OID"))
+            .collect::<Result<_>>()?;
+        for index in shown {
+            let record = subjects
+                .get(index)
+                .context("TBLASTN subject OID out of range")?;
+            let defline = match record.desc() {
+                Some(desc) => format!("{} {desc}", record.id()),
+                None => record.id().to_string(),
+            };
+            crate::report::defline::check_shown_subject_title(&defline, index + 1, "TBLASTN")?;
+        }
+    }
     render(
         outputs,
         queries,

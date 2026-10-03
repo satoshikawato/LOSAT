@@ -28,8 +28,8 @@ const { WASI } = require("node:wasi");
 const ROOT = path.resolve(__dirname, "../../..");
 const { createThreadHost } = require(path.join(ROOT, "LOSAT/tests/wasi_thread_host"));
 
-const FORMATS = { blastp: [0, 6, 7], tblastn: [0, 6, 7], blastn: [0, 6, 7], tblastx: [6] };
-const WITH_HITS = new Set(["blastp", "tblastn", "blastn"]);
+const FORMATS = { blastp: [0, 6, 7], tblastn: [0, 6, 7], blastn: [0, 6, 7], tblastx: [0, 6, 7] };
+const WITH_HITS = new Set(["blastp", "tblastn", "blastn", "tblastx"]);
 
 function sha256(bytes) {
   return crypto.createHash("sha256").update(bytes).digest("hex");
@@ -191,14 +191,14 @@ function checkSurface(reactor, native) {
     assert.equal(validated.error, cli.stderr.toString(), `${argv.join(" ")}: the CLI's message`);
   }
   // The host validates the argv that it runs, with its -num_threads, so a -num_threads in
-  // the user's words is a repeated option (abi_v2.md §7). The usage line of the message
-  // lists the -outfmt that the adapter inserts, so only the first line is the CLI's.
-  {
-    const argv = ["blastn", "-query", "q", "-subject", "s", "-num_threads", "2", "-num_threads", "1"];
+  // the user's words is a repeated option (abi_v2.md §7). The adapter parses the argv as the
+  // CLI does, so the whole message (its usage line too) and an unknown program's are the CLI's.
+  for (const argv of [["blastn", "-query", "q", "-subject", "s", "-num_threads", "2", "-num_threads", "1"],
+                      ["nosuch", "-query", "q", "-subject", "s"]]) {
     const validated = reactor.call("losat_web2_validate", argv.join("\0"));
     assert.equal(validated.status, -1, argv.join(" "));
     const cli = require("node:child_process").spawnSync(native, argv);
-    assert.equal(validated.error.split("\n")[0], cli.stderr.toString().split("\n")[0], `${argv.join(" ")}: the CLI's error`);
+    assert.equal(validated.error, cli.stderr.toString(), `${argv.join(" ")}: the CLI's error`);
   }
   assert.match(reactor.call("losat_web2_validate", ["blastp", "-query", "q", "-subject", "s", "-outfmt", "6"].join("\0")).error, /not accepted/);
   // register and scan agree on a multi-record input, in chunks of any size.

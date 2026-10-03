@@ -165,8 +165,9 @@ def main():
     # AddDefaultKey(kArgOutputFormat, ..., eString, ...);
     # Unported format routes must reject explicitly before starting any worker
     # (BLASTN names what it does not support since S07+: "not supported by LOSAT").
+    # TBLASTX writes outfmt 0 and 7 since S08; they are compared with the oracle below.
     for program, formats in [("blastn", ["6 qseqid sseqid"]),
-                             ("tblastx", ["0", "7", "6 qseqid sseqid"])]:
+                             ("tblastx", ["6 qseqid sseqid"])]:
         for index, fmt in enumerate(formats):
             for kind, prefix in prefixes.items():
                 n = 1 if kind in ["serial", "native-serial"] else 8
@@ -184,6 +185,7 @@ def main():
         ("blastp", "aa-query-edge", "aa-subject-edge", ["0", "7", "6 std qlen slen positive ppos btop stitle", "7 qseqid qacc qaccver sseqid sacc saccver qlen slen score nident positive gaps frames qframe sframe qseq sseq btop stitle"], None),
         ("blastn", "nuc3", "nuc3", ["0", "7"], "megablast"),
         ("blastn", "nuc3", "nuc3", ["0", "7"], "blastn"),
+        ("tblastx", "nuc3", "nuc3", ["0", "7"], None),
     ]:
         for index, fmt in enumerate(formats):
             common = ["-query", inputs[query], "-subject", inputs[subject], "-outfmt", fmt, "-out", "{out}"]

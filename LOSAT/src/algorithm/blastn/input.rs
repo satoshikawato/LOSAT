@@ -15,14 +15,15 @@
 //!   warns that the sequence contains no data, ignores white space and hyphens, ends the
 //!   line at `;`, and removes other characters with a warning): `check_residues`.
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use bio::io::fasta;
 
 /// Why a FASTA file that `bio` cannot parse is not read: `bio` fails on text before the
 /// first defline (blank lines, `;` comments, a byte order mark) and on bytes that are not
 /// UTF-8, which NCBI reads.
-pub const UNREADABLE_FASTA: &str =
-    "FASTA that bio cannot read (such as text before the first defline or bytes that are not UTF-8), which NCBI BLAST+ may read, is not supported by LOSAT's BLASTN";
+pub fn unreadable_fasta(program: &str) -> String {
+    format!("FASTA that bio cannot read (such as text before the first defline or bytes that are not UTF-8), which NCBI BLAST+ may read, is not supported by LOSAT's {program}")
+}
 
 /// Whether a FASTA file has no character but white space: NCBI reads it as a file without
 /// records (an empty query, or no subject).
@@ -81,6 +82,11 @@ const IUPAC_NUCLEOTIDE: [bool; 256] = {
 /// ```
 /// `role` is `query` or `subject`.
 pub fn check_deflines(bytes: &[u8], role: &str) -> Result<()> {
+    check_deflines_of(bytes, role, "BLASTN")
+}
+
+/// `check_deflines` for the FASTA input of `program` (as named in the message).
+pub fn check_deflines_of(bytes: &[u8], role: &str, program: &str) -> Result<()> {
     let mut record = 0;
     for line in bytes.split(|&byte| byte == b'\n') {
         let Some(defline) = line.strip_prefix(b">") else {
@@ -107,7 +113,7 @@ pub fn check_deflines(bytes: &[u8], role: &str) -> Result<()> {
             continue;
         };
         bail!(
-            "{role} record {record} has a defline that {problem}; NCBI BLAST+ reads such a defline differently, which is not supported by LOSAT's BLASTN (use ASCII deflines without control characters)"
+            "{role} record {record} has a defline that {problem}; NCBI BLAST+ reads such a defline differently, which is not supported by LOSAT's {program} (use ASCII deflines without control characters)"
         );
     }
     Ok(())
@@ -127,13 +133,18 @@ pub fn check_deflines(bytes: &[u8], role: &str) -> Result<()> {
 /// Text before the first defline (a byte order mark, for example) is not a sequence line;
 /// `bio` cannot read it, and the reader names it. `role` is `query` or `subject`.
 pub fn check_sequence_lines(bytes: &[u8], role: &str) -> Result<()> {
+    check_sequence_lines_of(bytes, role, "BLASTN")
+}
+
+/// `check_sequence_lines` for the FASTA input of `program`.
+pub fn check_sequence_lines_of(bytes: &[u8], role: &str, program: &str) -> Result<()> {
     let mut record = 0;
     for line in bytes.split(|&byte| byte == b'\n') {
         if line.starts_with(b">") {
             record += 1;
         } else if record > 0 && !line.is_ascii() {
             bail!(
-                "{role} record {record} has a non-ASCII byte in a sequence line; NCBI BLAST+ reads it as an invalid residue, which is not supported by LOSAT's BLASTN (use IUPAC nucleotide letters)"
+                "{role} record {record} has a non-ASCII byte in a sequence line; NCBI BLAST+ reads it as an invalid residue, which is not supported by LOSAT's {program} (use IUPAC nucleotide letters)"
             );
         }
     }
@@ -216,8 +227,13 @@ pub fn write_title_warnings(
 /// ```
 /// `role` is `query` or `subject`.
 pub fn check_residues(records: &[fasta::Record], role: &str) -> Result<()> {
+    check_residues_of(records, role, "BLASTN")
+}
+
+/// `check_residues` for the nucleotide records of `program` (as named in the message).
+pub fn check_residues_of(records: &[fasta::Record], role: &str, program: &str) -> Result<()> {
     first_problem(records, |index, record| {
-        invalid_residue(index, record, role)
+        invalid_residue(index, record, role, program)
     })
 }
 
@@ -225,13 +241,25 @@ pub fn check_residues(records: &[fasta::Record], role: &str) -> Result<()> {
 /// it sets up the search ("Sequence contains no data"), which LOSAT does not reproduce.
 /// `role` is `query` or `subject`.
 pub fn check_records_have_residues(records: &[fasta::Record], role: &str) -> Result<()> {
-    first_problem(records, |index, record| no_residues(index, record, role))
+    check_records_have_residues_of(records, role, "BLASTN")
+}
+
+/// `check_records_have_residues` for the nucleotide records of `program`.
+pub fn check_records_have_residues_of(
+    records: &[fasta::Record],
+    role: &str,
+    program: &str,
+) -> Result<()> {
+    first_problem(records, |index, record| {
+        no_residues(index, record, role, program)
+    })
 }
 
 /// Both checks, record by record (the order of ABI v1, which plan TD-1 freezes).
 pub fn check_records(records: &[fasta::Record], role: &str) -> Result<()> {
     first_problem(records, |index, record| {
-        no_residues(index, record, role).or_else(|| invalid_residue(index, record, role))
+        no_residues(index, record, role, "BLASTN")
+            .or_else(|| invalid_residue(index, record, role, "BLASTN"))
     })
 }
 
@@ -249,17 +277,22 @@ fn first_problem(
     }
 }
 
-fn no_residues(index: usize, record: &fasta::Record, role: &str) -> Option<String> {
+fn no_residues(index: usize, record: &fasta::Record, role: &str, program: &str) -> Option<String> {
     record.seq().is_empty().then(|| {
         format!(
-            "{role} record {} ({}) has no residues; NCBI BLAST+ reports such a record differently, which is not supported by LOSAT's BLASTN",
+            "{role} record {} ({}) has no residues; NCBI BLAST+ reports such a record differently, which is not supported by LOSAT's {program}",
             index + 1,
             record.id()
         )
     })
 }
 
-fn invalid_residue(index: usize, record: &fasta::Record, role: &str) -> Option<String> {
+fn invalid_residue(
+    index: usize,
+    record: &fasta::Record,
+    role: &str,
+    program: &str,
+) -> Option<String> {
     let position = record
         .seq()
         .iter()
@@ -271,7 +304,7 @@ fn invalid_residue(index: usize, record: &fasta::Record, role: &str) -> Option<S
         format!("0x{byte:02x}")
     };
     Some(format!(
-        "{role} record {} ({}) has {shown} at residue {}, which is not an IUPAC nucleotide letter; NCBI BLAST+ reads such a record differently, which is not supported by LOSAT's BLASTN (use IUPAC nucleotide letters)",
+        "{role} record {} ({}) has {shown} at residue {}, which is not an IUPAC nucleotide letter; NCBI BLAST+ reads such a record differently, which is not supported by LOSAT's {program} (use IUPAC nucleotide letters)",
         index + 1,
         record.id(),
         position + 1
@@ -322,6 +355,215 @@ pub fn with_u_as_t(records: &[fasta::Record]) -> Option<Vec<fasta::Record>> {
             })
             .collect(),
     )
+}
+
+/// Opens a FASTA input of `program` as NCBI's argument does when a handler asks for its stream: `-` is
+/// standard input, and a file that does not open gets NCBI's error
+/// (`crate::cli::inaccessible`).
+///
+/// NCBI reference: ncbi-blast/c++/src/corelib/ncbiargs.cpp:717-735
+/// ```c
+///     if (AsString() == "-") {
+/// #if defined(NCBI_OS_MSWIN)
+///         NcbiSys_setmode(NcbiSys_fileno(stdin), (mode & IOS_BASE::binary) ? O_BINARY : O_TEXT);
+/// #endif
+///         m_Ios  = &cin;
+///     } else if ( !AsString().empty() ) {
+///         if (!fstrm) {
+///             fstrm = new CNcbiIfstream;
+///         }
+///         if (fstrm) {
+///             fstrm->open(AsString().c_str(),IOS_BASE::in | mode);
+///             if ( !fstrm->is_open() ) {
+///                 delete fstrm;
+///                 fstrm = NULL;
+///             } else {
+///                 m_DeleteFlag = true;
+///             }
+///         }
+///         m_Ios = fstrm;
+///     }
+/// ```
+pub fn open_input(path: &std::path::Path, role: &str, program: &str) -> Result<std::fs::File> {
+    if path.as_os_str() == "-" {
+        return standard_input().map_err(|_| {
+            anyhow::anyhow!(
+                "reading the {role} from standard input ('-') on this platform is not supported by LOSAT's {program}"
+            )
+        });
+    }
+    std::fs::File::open(path).map_err(|_| crate::cli::inaccessible(role, path))
+}
+
+/// Standard input as a file that shares its position, as `cin` does.
+fn standard_input() -> std::io::Result<std::fs::File> {
+    #[cfg(any(unix, target_os = "wasi"))]
+    {
+        use std::os::fd::AsFd;
+        std::io::stdin()
+            .as_fd()
+            .try_clone_to_owned()
+            .map(std::fs::File::from)
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::AsHandle;
+        std::io::stdin()
+            .as_handle()
+            .try_clone_to_owned()
+            .map(std::fs::File::from)
+    }
+    #[cfg(not(any(unix, windows, target_os = "wasi")))]
+    {
+        Err(std::io::ErrorKind::Unsupported.into())
+    }
+}
+
+/// The bytes of an opened FASTA file; a directory reads as no bytes, as NCBI's stream does.
+pub fn read_fasta_bytes(
+    file: &mut std::fs::File,
+    path: &std::path::Path,
+    role: &str,
+) -> Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    match std::io::Read::read_to_end(file, &mut bytes) {
+        Ok(_) => Ok(bytes),
+        Err(error) if error.kind() == std::io::ErrorKind::IsADirectory => Ok(Vec::new()),
+        Err(error) => {
+            Err(error).with_context(|| format!("failed to read {role} FASTA {}", path.display()))
+        }
+    }
+}
+
+/// The records of a FASTA file, after rejecting the residues that NCBI reads differently
+/// (`input.rs`); a file of white space only has no record, as in NCBI. NCBI reads the
+/// deflines that LOSAT rejects (`check_deflines`) without a message, so the callers check
+/// them where the difference would change a result.
+pub fn read_records(
+    bytes: &[u8],
+    path: &std::path::Path,
+    role: &str,
+    program: &str,
+) -> Result<Vec<bio::io::fasta::Record>> {
+    if is_blank(bytes) {
+        return Ok(Vec::new());
+    }
+    check_sequence_lines_of(bytes, role, program)?;
+    let records = bio_records_of(bytes, path, role, program)?;
+    check_residues_of(&records, role, program)?;
+    Ok(records)
+}
+
+/// Whether every line before the first defline is one that NCBI's `CFastaReader` skips
+/// without a message: white space only, or a comment starting with `!`, `#` or `;` after
+/// the white space. Other text there is a record without a defline, or a line that NCBI
+/// stops at ("doesn't look like plausible data", `CheckDataLine`, fasta.cpp:710-760).
+///
+/// NCBI reference: c++/src/objtools/readers/fasta.cpp:375-384
+/// ```c
+///         CTempString line = NStr::TruncateSpaces_Unsafe(*++GetLineReader());
+///
+///         if (line.empty()) {
+///             continue; // ignore lines containing only whitespace
+///         }
+///         c = line[0];
+///
+///         if (c == '!'  ||  c == '#' || c == ';') {
+///             // no content, just a comment or blank line
+///             continue;
+/// ```
+pub fn only_skipped_lines_before_first_defline(bytes: &[u8]) -> bool {
+    bytes
+        .split(|&byte| byte == b'\n')
+        .take_while(|line| line.first() != Some(&b'>'))
+        .all(|line| {
+            let line = line.trim_ascii();
+            line.is_empty() || matches!(line[0], b'!' | b'#' | b';')
+        })
+}
+
+/// The text from the first defline on (the line that starts with `>`), where NCBI starts
+/// to read records after the lines that it skips (`only_skipped_lines_before_first_defline`);
+/// `None` when no line starts with `>`.
+///
+/// NCBI reference: c++/src/objtools/readers/fasta.cpp:375-384 (as above: the lines before
+/// the first defline that `CFastaReader` skips)
+pub fn from_first_defline(bytes: &[u8]) -> Option<&[u8]> {
+    let mut start = 0;
+    for line in bytes.split(|&byte| byte == b'\n') {
+        if line.first() == Some(&b'>') {
+            return Some(&bytes[start..]);
+        }
+        start += line.len() + 1;
+    }
+    None
+}
+
+/// The records that `bio` reads from a FASTA file (none from white space only), or the
+/// error that names what `bio` cannot read, without the checks of `read_records`.
+pub fn bio_records_of(
+    bytes: &[u8],
+    path: &std::path::Path,
+    role: &str,
+    program: &str,
+) -> Result<Vec<bio::io::fasta::Record>> {
+    if is_blank(bytes) {
+        return Ok(Vec::new());
+    }
+    bio::io::fasta::Reader::new(bytes)
+        .records()
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .with_context(|| {
+            format!(
+                "failed to read {role} FASTA {} ({})",
+                path.display(),
+                unreadable_fasta(program)
+            )
+        })
+}
+
+/// The records of a FASTA file read where its deflines matter (the query), with the
+/// deflines checked first, so that a defline that bio cannot read is named.
+pub fn parse_fasta(
+    bytes: &[u8],
+    path: &std::path::Path,
+    role: &str,
+    program: &str,
+) -> Result<Vec<bio::io::fasta::Record>> {
+    if !is_blank(bytes) {
+        check_deflines_of(bytes, role, program)?;
+    }
+    let records = read_records(bytes, path, role, program)?;
+    check_records_have_residues_of(&records, role, program)?;
+    Ok(records)
+}
+
+/// Rejects a file name that is not UTF-8, where NCBI opens the file (the subjects, then the
+/// queries, then the output: `CBlastDatabaseArgs` comes before `CStdCmdLineArgs`).
+///
+/// NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.cpp:903-911
+/// ```c
+/// GetSubjectFile(const CArgs& args)
+/// {
+/// 	string filename="";
+///
+/// 	if (args.Exist(kArgSubject) && args[kArgSubject].HasValue())
+/// 		filename = args[kArgSubject].AsString();
+///
+/// 	return filename;
+/// }
+/// ```
+/// NCBI takes a file name as bytes: it writes the `-subject` name into the outfmt 0 and 7
+/// reports (`Database: User specified sequence set (Input: ...)`) and every name into its
+/// error messages as they are, which LOSAT's UTF-8 strings do not reproduce (plan DW-13).
+pub fn check_utf8_file_name(path: &std::path::Path, role: &str, program: &str) -> Result<()> {
+    if path.to_str().is_none() {
+        anyhow::bail!(
+            "the -{role} file name {:?} is not UTF-8; NCBI BLAST+ writes the bytes of file names as they are, which is not supported by LOSAT's {program}",
+            path.to_string_lossy()
+        );
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -434,5 +676,35 @@ mod tests {
         let read = with_u_as_t(&records(">q d\nACGUu\n")).unwrap();
         assert_eq!(read[0].seq(), b"ACGTt");
         assert_eq!(read[0].desc(), Some("d"));
+    }
+
+    // NCBI reference: c++/src/objtools/readers/fasta.cpp:375-384 (CFastaReader skips lines of
+    // white space and comments starting with `!`, `#` or `;` before reading a defline).
+    #[test]
+    fn lines_that_ncbi_skips_before_the_first_defline() {
+        for text in [
+            &b">s\nACGT\n"[..],
+            b"\n>s\nACGT\n",
+            b"  \n\t\r\n>s\nACGT\n",
+            b";c\n !x\n#y\n>s\nACGT\n",
+            b">s\xe9\nACGT\n",
+        ] {
+            assert!(only_skipped_lines_before_first_defline(text), "{text:?}");
+        }
+        for text in [
+            &b"ACGT\n>s\nACGT\n"[..],
+            b"\xef\xbb\xbf>s\nACGT\n",
+            b" >s\nACGT\n",
+            b"\n\nab%%%\n>s\nACGT\n",
+        ] {
+            assert!(!only_skipped_lines_before_first_defline(text), "{text:?}");
+        }
+        assert_eq!(
+            from_first_defline(b"\n;c\n>s\nACGT\n"),
+            Some(&b">s\nACGT\n"[..])
+        );
+        assert_eq!(from_first_defline(b">s\nACGT\n"), Some(&b">s\nACGT\n"[..]));
+        assert_eq!(from_first_defline(b"; only comment\n"), None);
+        assert_eq!(from_first_defline(b"\n !x\n#y"), None);
     }
 }

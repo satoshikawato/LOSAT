@@ -1,0 +1,324 @@
+TBLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/tblastx_many_subject.fasta).
+           260 sequences; 46,800 total letters
+
+
+
+Query= pep40 a 40-residue peptide in frame +1 with random flanks
+
+Length=180
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+subject259 the peptide with 0 substitutions                           110     5e-28  1
+subject049 the peptide with 0 substitutions                           107     2e-27  1
+subject100 the peptide with 2 substitutions                           107     2e-27  1
+subject098 the peptide with 0 substitutions                           107     3e-27  1
+subject091 the peptide with 0 substitutions                           107     3e-27  1
+
+
+> subject259 the peptide with 0 substitutions
+Length=180
+
+ Score = 110 bits (234),  Expect = 5e-28
+ Identities = 43/50 (86%), Positives = 44/50 (88%), Gaps = 0/50 (0%)
+ Frame = +1/+1
+
+Query  31   WCDMTMSVIQVGGQFKPRTASAYFPYCISLCGKNQIVEHVLTISLGAACL  180
+            WCDMTMSVIQVGGQFKPRTASAYFPYCISLCGKNQIVEHVL     + CL
+Sbjct  31   WCDMTMSVIQVGGQFKPRTASAYFPYCISLCGKNQIVEHVLMPCSSSVCL  180
+
+
+ Score = 76.7 bits (161),  Expect = 6e-18
+ Identities = 32/53 (60%), Positives = 40/53 (75%), Gaps = 0/53 (0%)
+ Frame = -2/-2
+
+Query  179  KHAAPNDIVSTCSTI*FFPQRLMQYGK*ADAVRGLN*PPTCITLMVISHHCKN  21
+            +H      ++TCSTI*FFP R +QYGK*ADAV GLN PPTC+T +VISH  ++
+Sbjct  179  RHTEEEQGINTCSTI*FFPHRDIQYGK*ADAVLGLNWPPTCMTDIVISHQFRS  21
+
+
+ Score = 43.7 bits (89),  Expect = 5e-08
+ Identities = 20/41 (49%), Positives = 22/41 (54%), Gaps = 0/41 (0%)
+ Frame = -1/-1
+
+Query  150  YMLHYLILSAEADAVWEVGGRRTWLELTPDLYNTHGHITPL  28
+            YM HYLI       V EV G     EL  DLY+ H HITP+
+Sbjct  150  YMFHYLIFPT*RYTVREVSGCSPRFELAADLYDGHCHITPI  28
+
+
+ Score = 39.6 bits (80),  Expect = 9e-07
+ Identities = 17/40 (43%), Positives = 27/40 (68%), Gaps = 0/40 (0%)
+ Frame = +3/+3
+
+Query  30   MV*YDHECYTGRGSVQATYGVRLLPILHQPLRKESNSGAC  149
+            +V*YD+  +T R  VQ    +RLLP+L+  + ++S+SG C
+Sbjct  30   LV*YDNVRHTSRRPVQTEDCIRLLPVLYISMWEKSDSGTC  149
+
+
+ Score = 33.6 bits (67),  Expect = 5e-05
+ Identities = 17/40 (43%), Positives = 22/40 (55%), Gaps = 0/40 (0%)
+ Frame = +2/+2
+
+Query  32   GVI*P*VLYRSGVSSSHVRRPPTSHTASASAERIK*WSMY  151
+            GVI*    Y+S  SS+    P TS T      +I+*W+MY
+Sbjct  32   GVI*QCPSYKSAASSNRGLHPLTSRTVYLYVGKIR*WNMY  151
+
+
+ Score = 29.5 bits (58),  Expect = 0.001
+ Identities = 17/40 (43%), Positives = 20/40 (50%), Gaps = 0/40 (0%)
+ Frame = -3/-3
+
+Query  151  VHAPLFDSFRRG*CSMGSRRTPYVA*TDPRPV*HSWSYHT  32
+            +H PL D       S GS+R     *T  R V* + SYHT
+Sbjct  151  IHVPLSDFSHIEIYSTGSKRMQSSV*TGRRLV*RTLSYHT  32
+
+
+ Score = 16.2 bits (29),  Expect = 9.5
+ Identities = 6/20 (30%), Positives = 10/20 (50%), Gaps = 0/20 (0%)
+ Frame = +1/-2
+
+Query  25  LQWCDMTMSVIQVGGQFKPR  84
+           L W    M+ I +  QF+ +
+Sbjct  77  LNWPPTCMTDIVISHQFRSK  18
+
+
+> subject049 the peptide with 0 substitutions
+Length=180
+
+ Score = 107 bits (229),  Expect = 2e-27
+ Identities = 42/45 (93%), Positives = 42/45 (93%), Gaps = 0/45 (0%)
+ Frame = +1/+1
+
+Query  25   LQWCDMTMSVIQVGGQFKPRTASAYFPYCISLCGKNQIVEHVLTI  159
+            L WCDMTMSVIQVGGQFKPRTASAYFPYCISLCGKNQIVEHV  I
+Sbjct  25   LDWCDMTMSVIQVGGQFKPRTASAYFPYCISLCGKNQIVEHVAKI  159
+
+
+ Score = 77.1 bits (162),  Expect = 4e-18
+ Identities = 33/45 (73%), Positives = 38/45 (84%), Gaps = 0/45 (0%)
+ Frame = -2/-2
+
+Query  158  IVSTCSTI*FFPQRLMQYGK*ADAVRGLN*PPTCITLMVISHHCK  24
+            I++TCSTI*F P +L+QYGK*A AV GLN PPTCITL+VISH  K
+Sbjct  158  ILATCSTI*FLPHKLIQYGK*ALAVLGLNCPPTCITLIVISHQSK  24
+
+
+ Score = 50.6 bits (104),  Expect = 4e-10
+ Identities = 20/40 (50%), Positives = 25/40 (63%), Gaps = 0/40 (0%)
+ Frame = -1/-1
+
+Query  147  MLHYLILSAEADAVWEVGGRRTWLELTPDLYNTHGHITPL  28
+            M +YLI +  AD VWEV   R+  EL+  LY TH HI P+
+Sbjct  147  MFYYLIFAT*ADTVWEVSASRSRFELSTHLYYTHRHIAPI  28
+
+
+ Score = 46.9 bits (96),  Expect = 5e-09
+ Identities = 21/40 (53%), Positives = 27/40 (68%), Gaps = 0/40 (0%)
+ Frame = +3/+3
+
+Query  30   MV*YDHECYTGRGSVQATYGVRLLPILHQPLRKESNSGAC  149
+            +V YD EC TG  +VQ   G RLLPIL+Q + ++SNS  C
+Sbjct  30   LVRYDDECNTGGWTVQTENG*RLLPILYQLMWQKSNSRTC  149
+
+
+ Score = 36.8 bits (74),  Expect = 6e-06
+ Identities = 20/39 (51%), Positives = 22/39 (56%), Gaps = 0/39 (0%)
+ Frame = -3/-3
+
+Query  148  HAPLFDSFRRG*CSMGSRRTPYVA*TDPRPV*HSWSYHT  32
+            H  LFD     * SMGS+R P+  *T   PV HS SY T
+Sbjct  148  HVLLFDFCHIS*YSMGSKR*PFSV*TVHPPVLHSSSYRT  32
+
+
+ Score = 30.4 bits (60),  Expect = 5e-04
+ Identities = 20/39 (51%), Positives = 23/39 (59%), Gaps = 0/39 (0%)
+ Frame = +2/+2
+
+Query  32   GVI*P*VLYRSGVSSSHVRRPPTSHTASASAERIK*WSM  148
+            G I* *V YR   SS+  R   TSHT SA   +IK* +M
+Sbjct  32   GAI*R*V*YRWVDSSNRERLALTSHTVSAYVAKIK**NM  148
+
+
+> subject100 the peptide with 2 substitutions
+Length=180
+
+ Score = 107 bits (229),  Expect = 2e-27
+ Identities = 42/49 (86%), Positives = 44/49 (90%), Gaps = 0/49 (0%)
+ Frame = +1/+1
+
+Query  28   QWCDMTMSVIQVGGQFKPRTASAYFPYCISLCGKNQIVEHVLTISLGAA  174
+            +WCDMT+SVIQVGGQFKPRTASAYFPYCISLCGKNQIVEHV    LG A
+Sbjct  28   RWCDMTLSVIQVGGQFKPRTASAYFPYCISLCGKNQIVEHVSCEGLGVA  174
+
+
+ Score = 72.5 bits (152),  Expect = 1e-16
+ Identities = 34/48 (71%), Positives = 35/48 (73%), Gaps = 0/48 (0%)
+ Frame = -2/-2
+
+Query  173  AAPNDIVSTCSTI*FFPQRLMQYGK*ADAVRGLN*PPTCITLMVISHH  30
+            A PN    TCSTI*FFP R MQYGK*A AV GLN PPT IT  V+SHH
+Sbjct  173  ATPNPSQDTCSTI*FFPHREMQYGK*ALAVLGLNCPPT*ITDRVMSHH  30
+
+
+ Score = 51.0 bits (105),  Expect = 3e-10
+ Identities = 22/40 (55%), Positives = 28/40 (70%), Gaps = 0/40 (0%)
+ Frame = +3/+3
+
+Query  30   MV*YDHECYTGRGSVQATYGVRLLPILHQPLRKESNSGAC  149
+            +V +D  CY+GR ++    G RLLPILH P+ KESNS AC
+Sbjct  30   VVRHDSVCYSGRRTI*TENG*RLLPILHFPMWKESNSRAC  149
+
+
+ Score = 49.2 bits (101),  Expect = 1e-09
+ Identities = 21/50 (42%), Positives = 29/50 (58%), Gaps = 0/50 (0%)
+ Frame = -1/-1
+
+Query  159  YSEYMLHYLILSAEADAVWEVGGRRTWLELTPDLYNTHGHITPL*EPVLA  10
+            ++ YML YLILS   +A+WEV   R+  +L+  L N   H+ P   PV A
+Sbjct  159  FARYMLDYLILST*GNAIWEVSASRSRFKLSAYLNNRQSHVAPPVAPVTA  10
+
+
+ Score = 38.6 bits (78),  Expect = 2e-06
+ Identities = 19/40 (48%), Positives = 24/40 (60%), Gaps = 0/40 (0%)
+ Frame = -3/-3
+
+Query  151  VHAPLFDSFRRG*CSMGSRRTPYVA*TDPRPV*HSWSYHT  32
+            +HA LFDSF  G C+MGS+R P+  *    P * + S  T
+Sbjct  151  IHARLFDSFHIGKCNMGSKR*PFSV*IVRLPE*QTESCRT  32
+
+
+ Score = 31.3 bits (62),  Expect = 3e-04
+ Identities = 20/47 (43%), Positives = 25/47 (53%), Gaps = 0/47 (0%)
+ Frame = +2/+2
+
+Query  11   ASTGSYNGVI*P*VLYRSGVSSSHVRRPPTSHTASASAERIK*WSMY  151
+            A TG+  G  *  +L+R   + +  R   TSH A    ERIK* SMY
+Sbjct  11   AVTGATGGAT*LCLLFR*ADNLNRERLALTSHIAFPYVERIK*SSMY  151
+
+
+> subject098 the peptide with 0 substitutions
+Length=180
+
+ Score = 107 bits (228),  Expect = 3e-27
+ Identities = 41/42 (98%), Positives = 42/42 (100%), Gaps = 0/42 (0%)
+ Frame = +1/+1
+
+Query  25   LQWCDMTMSVIQVGGQFKPRTASAYFPYCISLCGKNQIVEHV  150
+            L+WCDMTMSVIQVGGQFKPRTASAYFPYCISLCGKNQIVEHV
+Sbjct  25   LRWCDMTMSVIQVGGQFKPRTASAYFPYCISLCGKNQIVEHV  150
+
+
+ Score = 58.8 bits (122),  Expect = 1e-12
+ Identities = 27/39 (69%), Positives = 30/39 (77%), Gaps = 0/39 (0%)
+ Frame = -2/-2
+
+Query  149  TCSTI*FFPQRLMQYGK*ADAVRGLN*PPTCITLMVISH  33
+            TCSTI F P + MQYGK A AV GLN*PPT IT +V+SH
+Sbjct  149  TCSTIWFLPHKEMQYGKYALAVLGLN*PPTWITDIVMSH  33
+
+
+ Score = 39.1 bits (79),  Expect = 1e-06
+ Identities = 17/40 (43%), Positives = 25/40 (63%), Gaps = 0/40 (0%)
+ Frame = -1/-1
+
+Query  150  YMLHYLILSAEADAVWEVGGRRTWLELTPDLYNTHGHITP  31
+            Y+L+ L+L+ + +AV E+  R   LELT DL   H H+ P
+Sbjct  150  YVLYDLVLTTQGNAVREICARGPRLELTSDLDYRHCHVAP  31
+
+
+ Score = 21.7 bits (41),  Expect = 0.21
+ Identities = 11/28 (39%), Positives = 16/28 (57%), Gaps = 0/28 (0%)
+ Frame = +3/+3
+
+Query  30   MV*YDHECYTGRGSVQATYGVRLLPILH  113
+            +V +D+     R SVQA    R+ P+LH
+Sbjct  30   LVRHDNVGNPSRRSVQA*DRERIFPVLH  113
+
+
+> subject091 the peptide with 0 substitutions
+Length=180
+
+ Score = 107 bits (228),  Expect = 3e-27
+ Identities = 42/44 (95%), Positives = 42/44 (95%), Gaps = 0/44 (0%)
+ Frame = +1/+1
+
+Query  19   GFLQWCDMTMSVIQVGGQFKPRTASAYFPYCISLCGKNQIVEHV  150
+            G L WCDMTMSVIQVGGQFKPRTASAYFPYCISLCGKNQIVEHV
+Sbjct  19   GSLIWCDMTMSVIQVGGQFKPRTASAYFPYCISLCGKNQIVEHV  150
+
+
+ Score = 65.2 bits (136),  Expect = 2e-14
+ Identities = 29/44 (66%), Positives = 34/44 (77%), Gaps = 0/44 (0%)
+ Frame = -2/-2
+
+Query  149  TCSTI*FFPQRLMQYGK*ADAVRGLN*PPTCITLMVISHHCKNP  18
+            TCSTI*F P + +Q GK*A AV GLN*PPTC+T MV+SH  + P
+Sbjct  149  TCSTI*FLPHKDIQ*GK*ALAVLGLN*PPTCMTDMVMSHQIREP  18
+
+
+ Score = 38.6 bits (78),  Expect = 2e-06
+ Identities = 15/39 (38%), Positives = 22/39 (56%), Gaps = 0/39 (0%)
+ Frame = -1/-1
+
+Query  147  MLHYLILSAEADAVWEVGGRRTWLELTPDLYNTHGHITP  31
+            M   LI +A+   + ++  R    ELT DLY+ HGH+ P
+Sbjct  147  MFDNLIFTAQRYTIGKISTRGPGFELTSDLYDRHGHVAP  31
+
+
+ Score = 29.5 bits (58),  Expect = 0.001
+ Identities = 16/47 (34%), Positives = 26/47 (55%), Gaps = 0/47 (0%)
+ Frame = +3/+3
+
+Query  9    ELARVLTMV*YDHECYTGRGSVQATYGVRLLPILHQPLRKESNSGAC  149
+            ++ R+  +V +DH  +TGR SVQ      L  +L+  +R +SN   C
+Sbjct  9    DVVRLPYLVRHDHVGHTGRRSVQTQDRECLFSLLYIFVR*KSNCRTC  149
+
+
+ Score = 26.3 bits (51),  Expect = 0.009
+ Identities = 14/39 (36%), Positives = 20/39 (51%), Gaps = 0/39 (0%)
+ Frame = -3/-3
+
+Query  148  HAPLFDSFRRG*CSMGSRRTPYVA*TDPRPV*HSWSYHT  32
+            H   FD +R    +  ++ +    *TD RPV* +WS  T
+Sbjct  148  HVRQFDFYRTKIYNRENKHSRSWV*TDLRPV*PTWSCRT  32
+
+
+ Score = 17.6 bits (32),  Expect = 3.6
+ Identities = 9/17 (53%), Positives = 11/17 (65%), Gaps = 0/17 (0%)
+ Frame = +2/+2
+
+Query  29  NGVI*P*VLYRSGVSSS  79
+           +G  *P   YRS VSS+
+Sbjct  29  SGAT*PCRSYRSEVSSN  79
+
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 355940
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/tblastx_many_subject.fasta).
+    Posted date:  Unknown
+  Number of letters in database: 46,800
+  Number of sequences in database:  260
+
+
+
+Matrix: BLOSUM62
+Neighboring words threshold: 13
+Window for multiple hits: 40

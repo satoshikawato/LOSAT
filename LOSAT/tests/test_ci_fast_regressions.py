@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import blastn_regression_fixtures as fixtures  # noqa: E402
 import ci_fast_regressions as fast  # noqa: E402
+import tblastx_regression_fixtures as tblastx_fixtures  # noqa: E402
 from frozen_allowlist import Allowlist  # noqa: E402
 
 FROZEN, KNOWN, OTHER = "f" * 64, "a" * 64, "0" * 64
@@ -65,14 +66,15 @@ class CheckRowsTests(unittest.TestCase):
 
 class BlastnFixtureTests(unittest.TestCase):
     def test_manifest_matches_cases_and_files(self):
-        rows = fixtures.read_manifest()
-        self.assertEqual([(r["case_id"], r["argv"], r["losat_extra"], r.get("env") or "", r.get("oracle_env") or "")
-                          for r in rows], fixtures.CASES)
-        for r in rows:
-            data = (fixtures.FIXTURES / f"{r['case_id']}.out").read_bytes()
-            self.assertEqual(fixtures.sha256(data), r["stdout_sha256"], r["case_id"])
-            err = fixtures.FIXTURES / f"{r['case_id']}.err"
-            self.assertEqual(fixtures.sha256(err.read_bytes()) if err.exists() else "", r["stderr_sha256"], r["case_id"])
+        for module in (fixtures, tblastx_fixtures):
+            rows = module.read_manifest()
+            self.assertEqual([(r["case_id"], r["argv"], r["losat_extra"], r.get("env") or "", r.get("oracle_env") or "")
+                              for r in rows], module.CASES, module.__name__)
+            for r in rows:
+                data = (module.FIXTURES / f"{r['case_id']}.out").read_bytes()
+                self.assertEqual(module.sha256(data), r["stdout_sha256"], r["case_id"])
+                err = module.FIXTURES / f"{r['case_id']}.err"
+                self.assertEqual(module.sha256(err.read_bytes()) if err.exists() else "", r["stderr_sha256"], r["case_id"])
 
 
 class SelectionTests(unittest.TestCase):
@@ -85,7 +87,8 @@ class SelectionTests(unittest.TestCase):
         self.assertEqual(fast.select_programs(["LOSAT/src/algorithm/tblastn/args.rs"]), {"tblastn"})
         blastn = fast.select_programs(["LOSAT/src/algorithm/blastn/hsp.rs"])
         self.assertIn("blastn", blastn)
-        self.assertNotIn("tblastx", blastn)
+        # TBLASTX uses BLASTN's hit list (blastn/hsp.rs HitList) and blank-input check.
+        self.assertIn("tblastx", blastn)
         for program in fast.PROGRAMS:
             self.assertIn(program, fast.program_dependents()[program])
 

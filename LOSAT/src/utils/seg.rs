@@ -552,6 +552,9 @@ pub struct SegMasker {
     maxtrim: usize,
     downset: usize,
     upset: usize,
+    /// Whether a recursion on the left part of a trimmed segment keeps only the head of
+    /// its result, as NCBI's `s_SegSeq` does (true, the default; see `mask_sequence`).
+    ncbi_left_segments: bool,
 }
 
 impl SegMasker {
@@ -573,7 +576,16 @@ impl SegMasker {
             maxtrim: params.maxtrim,
             downset,
             upset,
+            ncbi_left_segments: true,
         }
+    }
+
+    /// The masker that keeps every segment of the left recursion (LOSAT's SEG before S08).
+    /// BLASTX keeps it until it is integrated (plan DW-10, SX); every other program uses
+    /// NCBI's behavior.
+    pub fn keeping_all_left_segments(mut self) -> Self {
+        self.ncbi_left_segments = false;
+        self
     }
 
     /// Create a SEG masker with default parameters (window=12, locut=2.2, hicut=2.5)
@@ -595,6 +607,7 @@ impl SegMasker {
             maxtrim: params.maxtrim,
             downset,
             upset,
+            ncbi_left_segments: true,
         }
     }
 
@@ -840,7 +853,37 @@ impl SegMasker {
                         if lend < leftend {
                             let rend = leftend - 1;
                             if rend < seq.len() && lend <= rend {
-                                seg_seq(masker, &seq[lend..=rend], offset + lend, segs);
+                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_seg.c:2086-2101
+                                // ```c
+                                //             SSeg *leftsegs = (SSeg*) NULL;
+                                // ...
+                                //             status = s_SegSeq(leftseq, sparamsp, &leftsegs, offset+lend);
+                                // ...
+                                //             if (leftsegs!=NULL)
+                                //             {
+                                //                leftsegs->next = *segs;
+                                //                *segs = leftsegs;
+                                //             }
+                                // ```
+                                // `leftsegs->next = *segs` overwrites the link of the head of
+                                // the recursion's list, so when the recursion found more than
+                                // one segment only its head (the one found last) is kept; the
+                                // others are dropped (and leaked). This deterministic result
+                                // is reproduced.
+                                if masker.ncbi_left_segments {
+                                    let mut left_segs: Vec<(usize, usize)> = Vec::new();
+                                    seg_seq(
+                                        masker,
+                                        &seq[lend..=rend],
+                                        offset + lend,
+                                        &mut left_segs,
+                                    );
+                                    if let Some(&head) = left_segs.first() {
+                                        segs.insert(0, head);
+                                    }
+                                } else {
+                                    seg_seq(masker, &seq[lend..=rend], offset + lend, segs);
+                                }
                             }
                         }
                     }

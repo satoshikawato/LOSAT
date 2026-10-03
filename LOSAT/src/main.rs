@@ -117,8 +117,20 @@ fn main() -> Result<()> {
         Commands::Blastp(args) => {
             blastp::run(args)?;
         }
+        // NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.hpp:225-227,252-255
+        // ```c
+        //             LOG_POST(Error << "BLAST engine error: " << e.GetMsg());        \
+        //             exit_code = BLAST_ENGINE_ERROR;                                 \
+        //     ...
+        //     catch (const std::ios::failure&) {                                      \
+        //         LOG_POST(Error << "BLAST failed to write output");                  \
+        //         exit_code = BLAST_OUTPUT_ERROR;                                     \
+        // ```
         Commands::Tblastx(args) => {
-            tblastx::run(args)?;
+            if let Err(error) = tblastx::run(args) {
+                LOSAT::cli::exit_on_native_error(&error);
+                return Err(error);
+            }
         }
         // NCBI c++/src/app/blast/tblastn_app.cpp:288-301:
         // results = lcl_blast.Run();

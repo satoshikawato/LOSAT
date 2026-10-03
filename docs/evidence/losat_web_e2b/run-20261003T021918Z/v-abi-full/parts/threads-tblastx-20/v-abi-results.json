@@ -1,0 +1,89 @@
+[
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "tblastx",
+    "cases": [
+      "p01_ap027280_self"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/AP027280.fasta",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/AP027280.fasta",
+      "-query_gencode",
+      "1",
+      "-db_gencode",
+      "1"
+    ],
+    "formats": {
+      "0": "ea0eb6583029fae046a28c6fada666dc1e24574dd645ed7ab663e4f8c21dabbc",
+      "6": "845d15661c2a30fa69e01bcd8140792e55a1fa06bbb52181632680435a08eda8",
+      "7": "db1b19a7c4d78aa39ea814325a2aa8fb0e4605530fb19a70df41bd762160ac1e"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 42733
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "tblastx",
+    "cases": [
+      "p01_ap027280_self"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/AP027280.fasta",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/AP027280.fasta",
+      "-query_gencode",
+      "1",
+      "-db_gencode",
+      "1"
+    ],
+    "formats": {
+      "0": "ea0eb6583029fae046a28c6fada666dc1e24574dd645ed7ab663e4f8c21dabbc",
+      "6": "845d15661c2a30fa69e01bcd8140792e55a1fa06bbb52181632680435a08eda8",
+      "7": "db1b19a7c4d78aa39ea814325a2aa8fb0e4605530fb19a70df41bd762160ac1e"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 42733
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "tblastx",
+    "cases": [
+      "p01_ap027280_self"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/AP027280.fasta",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/AP027280.fasta",
+      "-query_gencode",
+      "1",
+      "-db_gencode",
+      "1"
+    ],
+    "formats": {
+      "0": "ea0eb6583029fae046a28c6fada666dc1e24574dd645ed7ab663e4f8c21dabbc",
+      "6": "845d15661c2a30fa69e01bcd8140792e55a1fa06bbb52181632680435a08eda8",
+      "7": "db1b19a7c4d78aa39ea814325a2aa8fb0e4605530fb19a70df41bd762160ac1e"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 42733
+  }
+]

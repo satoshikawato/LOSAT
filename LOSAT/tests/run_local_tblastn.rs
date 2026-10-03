@@ -335,3 +335,84 @@ fn unsupported_formats_fail_before_searching() {
         );
     }
 }
+
+// NCBI reference: c++/src/objmgr/util/create_defline.cpp:219-312 (x_CleanAndCompress) and
+// 4066 (`NStr::HtmlDecode`): NCBI reads past the end of the title `, ,` (and crashes when
+// such a subject has hits) and decodes `&amp;` in outfmt 0; the tabular formats print
+// only the ids.
+#[test]
+fn outfmt0_rejects_subject_titles_that_ncbi_reads_past_or_decodes() {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock")
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!(
+        "losat_tblastn_titles_{}_{nanos}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let query = dir.join("query.faa");
+    std::fs::write(&query, ">pep\nWCDMTMSVIQVGGQFKPRTASAYFPYCISLCGKNQIVEHV\n").expect("query");
+    let many = std::fs::read_to_string(repository(
+        "LOSAT/tests/fasta/outfmt0/tblastx_many_subject.fasta",
+    ))
+    .expect("subject fixture");
+    let sequence: String = many
+        .lines()
+        .skip(1)
+        .take_while(|line| !line.starts_with('>'))
+        .collect();
+    for (defline, reason) in [
+        (", ,", "reads past its end"),
+        ("s &amp; t", "HTML character reference"),
+    ] {
+        let subject = dir.join("subject.fna");
+        std::fs::write(&subject, format!(">{defline}\n{sequence}\n")).expect("subject");
+        let queries = read_records(&query);
+        let subjects = read_records(&subject);
+        for outfmt in FORMATS {
+            let (mut report, mut diagnostics) = (Vec::new(), Vec::new());
+            let mut outputs =
+                ReportOutputs::single(outfmt, OutputSink::Writer(&mut report), &mut diagnostics);
+            let result = run_local_tblastn(
+                tblastn_args("q", "s", &[]),
+                &queries,
+                &subjects,
+                &mut outputs,
+            );
+            drop(outputs);
+            if outfmt == "0" {
+                let error = result
+                    .expect_err("outfmt 0 must reject the title")
+                    .to_string();
+                assert!(
+                    error.contains(reason) && error.contains("not supported by LOSAT's TBLASTN"),
+                    "{error}"
+                );
+                assert!(report.is_empty() && diagnostics.is_empty());
+            } else {
+                result.unwrap_or_else(|error| panic!("outfmt {outfmt} {defline:?}: {error}"));
+            }
+        }
+        // NCBI makes the titles of the subjects that the report shows only: a subject
+        // without hits keeps its title out of the report.
+        let unknown = "N".repeat(900);
+        std::fs::write(
+            &subject,
+            format!(">hit\n{sequence}\n>{defline}\n{unknown}\n"),
+        )
+        .expect("subject");
+        let subjects = read_records(&subject);
+        let (mut report, mut diagnostics) = (Vec::new(), Vec::new());
+        let mut outputs =
+            ReportOutputs::single("0", OutputSink::Writer(&mut report), &mut diagnostics);
+        run_local_tblastn(
+            tblastn_args("q", "s", &[]),
+            &queries,
+            &subjects,
+            &mut outputs,
+        )
+        .unwrap_or_else(|error| panic!("{defline:?} without hits: {error}"));
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

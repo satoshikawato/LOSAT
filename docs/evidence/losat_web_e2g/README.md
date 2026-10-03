@@ -13,7 +13,7 @@
 | S07+ と S07++ の全検査、既存の BLASTN のゲート、fixture に退行なし | 満たす | 下の「ゲート」（`run-20261002T042123Z`、capture 236 件が S02 の基準と差 0、fixture 107 件、sweep 3710 件ほか） |
 | V-PERF の非退行 | 満たす | 下の「V-PERF」 |
 | 棚卸しの表を基準にした独立監査 | 満たす | 下の「独立監査」（第 1〜3 回の指摘を直し、第 4 回で supported） |
-| 毎晩の WASI の TIMEOUT の解消（S07+++b の 0.） | 満たす（原因と変更）。`main` での dispatch の結果は下 | runner の差。期限を 7200 秒（`beea0bddf`） |
+| 毎晩の WASI の TIMEOUT の解消（S07+++b の 0.） | 満たす | runner の差。期限を 7200 秒（`beea0bddf`）。`main` で dispatch した nightly が緑（run `36975869986`、threaded p11 3272 秒） |
 
 # S07+++（CI の整備と棚卸し）
 
@@ -289,14 +289,16 @@ supported。CLI 3958 件と web の経路 966 件（`run_local_blastn` を adapt
 
 ## `main` への merge と毎晩の検査
 
-この記録の commit の後に PR [#110](https://github.com/satoshikawato/LOSAT/pull/110) を S07++b と同じ流れ（merge commit、保守者は承認済み）で `main` に merge し、`nightly.yml` を `main` で 1 回 `workflow_dispatch` する。結果はこの節に追記する。
+この記録の commit（`834d14da6`。その CI は緑：run `36974853317`、`rust` 3 分 48 秒、fast output regressions 2 分 30 秒）の後に、PR [#110](https://github.com/satoshikawato/LOSAT/pull/110) を S07++b と同じ流れ（merge commit、保守者は承認済み）で `main` に merge した（`639b6b467`）。`nightly.yml` を `main` で 1 回 `workflow_dispatch` した run [`36975869986`](https://github.com/satoshikawato/LOSAT/actions/runs/36975869986)（2026-10-02 06:55〜08:42 UTC）は緑：full output regressions（06:56〜07:38）、wasm / integration（06:56〜08:42）。WASI の frozen regressions は 104 件すべて PASS（成果物 `wasi-threading-evidence` の `frozen-regressions/runs.json`）。`threaded/tblastx/p11_avclpv_psclpv` は 3272 秒（期限 7200 秒。前の期限 3600 秒の内でもある）、`native/tblastx/p11_avclpv_psclpv` は 1158 秒。毎晩の検査は緑に戻った。
+
+この merge の後のコミット `4fc67f9ab`（DW-16 の記録）とこの節の追記は、次の PR（S08）で `main` に入る。
 
 ## 残件と引き継ぎ（S08 へ）
 
-- **保守者の確認を待つもの（2026-10-02 の判断の後に分かった細部。今は下の扱い）：**
-  1. 負の `CHUNK_SIZE` が負の `OVERLAP_CHUNK_SIZE` より大きく、batch を分けるがもう一度は分けない場合：NCBI は隙間のある塊で検索して hit を落とす（決まった結果）。判断 #7 のとおり明示的な拒否にした（「決まった結果は再現」の原則なら再現になる）。
-  2. reward 32768 以上（16 bit で 0 以下に回る）：NCBI は全 query を無効にして hit 無しで終わる。判断 #4 と同じく明示的な拒否のまま。
-  3. outfmt 6/7 で閉じたパイプ：LOSAT の書き込みが読み手が閉じる前に済むと LOSAT は終了コード 0、NCBI は後の flush で SIGPIPE（141）。承認済みの例外 3・5 と同じ原因（時間に依る）として扱った。
+- **保守者の確認（2026-10-02、DW-16、推奨の案）：** DW-15 の後に分かった 3 つの細部。
+  1. 負の `CHUNK_SIZE` が負の `OVERLAP_CHUNK_SIZE` より大きく、batch を分けるがもう一度は分けない場合（NCBI は隙間のある塊で検索して hit を落とす、決まった結果）：明示的な拒否のまま（`PD-LOSAT-NCBI-DEFECTS` 版 1.1）。
+  2. reward 32768 以上（16 bit で 0 以下に回り、NCBI は全 query を無効にして hit 無し）：明示的な拒否のまま（同 版 1.1）。
+  3. outfmt 6/7 の閉じたパイプで、LOSAT の書き込みが読み手が閉じる前に済むと LOSAT は終了コード 0、NCBI は後の flush で SIGPIPE（141）：承認済みの例外 3・5 の時間に依る部分（`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` 版 1.2、AGENTS.md）。
 - **`-evalue` の 16 進と `1e`：** NCBI は `0x1p3`・`+0x10`・`1e` を読む（`strtod`／`StringToDoublePosix`）。LOSAT は明示的に拒否のまま（棚卸し A-207、K-layer。アプリの出す書き方ではない）。BLASTP などの e-value の書き方は TD-13（S08+）。
 - **整数でない環境変数の値：** NCBI の `CStringException` の文言はオラクルの build のソースのパスを含むので再現せず、明示的に拒否する（計画 TD-15、`check_inputs.py` の `e2g.t7.batch_size_text`）。
 - **R2 の族ごとの拒否：** `DIAG_*` などは値によって NCBI の出力が変わらない場合も拒否する（監査 (b)：472 件中 125 の場面、第 2 回 74 件）。文言は族の理由を言う。誤った出力の経路は無い。

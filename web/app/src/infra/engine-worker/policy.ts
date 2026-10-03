@@ -7,11 +7,11 @@
 
 /**
  * Auto runs the serial module when the query and subject FASTA together are smaller than
- * this. gbdraw's default (500,000 characters) was the starting point. In S09, threads
- * shortened the search phase about threefold wherever the work spreads over many records
- * (BLASTP of proteomes, from 20,000 residues on), and changed it by at most about 10%
- * where it does not (one genome against another); below this size every search took less
- * than half a second.
+ * this. gbdraw's default (500,000 characters) was the starting point. In S09, 4 threads
+ * made the search phase about three times shorter wherever the work spreads over many
+ * records (BLASTP of a proteome against itself, from 20,000 residues on), and changed it
+ * little in absolute terms where it does not (one genome against another: at most 69 ms
+ * longer); below this size every search took less than half a second.
  */
 export const AUTO_SERIAL_BELOW_BYTES = 20_000;
 
@@ -41,7 +41,7 @@ export interface RenewalLimits {
 /**
  * In S09 the linear memory reached its level in the first one to three searches and then
  * stayed there, over 20 repeats of each program and 30 searches of every program in turn;
- * the largest search measured (two E. coli genomes) left 248 MiB. So the count of searches
+ * the largest search measured (two E. coli genomes) left about 240 MiB. So the count of searches
  * renews nothing; the high-water mark, half the threaded module's maximum (1 GiB, plan
  * TD-7), gives the memory of an unusually large search back to the browser.
  */

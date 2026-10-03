@@ -28,8 +28,8 @@ SKIP_SHORT = "audit15.small_evalue."
 # - NCBI's errors where the base case searches: the scores of the case have no gap costs 5/2
 #   in NCBI's tables (the DP tasks' defaults), dc-megablast's word sizes other than 11 and 12,
 #   zero gap costs without greedy extension;
-# - LOSAT's limit on greedy gap costs (`-task megablast` only) does not apply, and the tasks
-#   are accepted;
+# - LOSAT's limit on greedy gap costs (`-task megablast` only) does not apply (the cases of
+#   E2c that give the tasks themselves now expect `same` there);
 # - with blastn-short's e-value 1000 the punctuation title has hits, where NCBI crashes
 #   (approved exception 2 of PD-LOSAT-NCBI-DEFECTS).
 E2I_EXPECT = {
@@ -40,8 +40,6 @@ E2I_EXPECT = {
     "audit14.iupac_seed.word_size_24.dc": "same-error",
     **{f"{case}.{suffix}": "same" for case in ("audit.megablast_gap_max", "audit2.greedy_gap_limit")
        for suffix in ("dc", "short")},
-    "audit6.task.dc_megablast": "same",
-    "audit6.task.blastn_short": "same",
     "audit12.crash_title_no_hit.fmt0.short": "exception-2",
 }
 

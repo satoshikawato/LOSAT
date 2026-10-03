@@ -11,8 +11,9 @@ REPEAT=${REPEAT:-3}
 SUFFIX=${SUFFIX:-1}
 step() { echo "$(date -u +%H:%M:%S) $*"; }
 cd $W
-N=$A/sd-gate-native/release/LOSAT
-WA=$A/sd-gate-wasi-artifacts
+# The after artifacts: the gate's, or the post-gate build of the final commit (sd_postgate.sh).
+N=${N_AFTER:-$A/sd-gate-native/release/LOSAT}
+WA=${WA_AFTER:-$A/sd-gate-wasi-artifacts}
 B=$S/bin/native/LOSAT; BW=$S/bin/wasi
 step "perf (V-PERF lock: app track paused)"
 source $A/s07p-resume/vperf_lock.sh

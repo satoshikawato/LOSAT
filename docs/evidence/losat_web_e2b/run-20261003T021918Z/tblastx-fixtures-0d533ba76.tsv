@@ -1,0 +1,74 @@
+case_id	result
+env.batch700	same
+env.batch22000_fmt0	same
+env.batch100000_fmt7	same
+env.batch700_threads4	same
+env.batch_negative	same
+env.batch_text_empty_query	same
+env.batch0_fmt0	same
+env.batch0_fmt7	same
+env.batch0_empty_query_fmt0	same
+env.batch300_invalid_fmt0.merged	same
+env.batch300_invalid_fmt7.merged	same
+env.batch300_invalid_fmt6.merged	same
+warnings.unsearched_fmt0.merged	same
+warnings.unsearched_fmt7.merged	same
+warnings.unsearched_fmt6.merged	same
+warnings.mts2_fmt0.merged	same
+warnings.mts4_fmt7.merged	same
+empty.query_fmt0	same
+empty.query_fmt7	same
+empty.blank_query_fmt6	same
+empty.subject_fmt0	same
+empty.subject_fmt6	same
+hitlist.max1	same
+hitlist.max2_fmt7	same
+hitlist.max5	same
+hitlist.max250	same
+hitlist.default_threads4	same
+hitlist.max5_fmt0_threads2	same
+ambig.fmt6	same
+ambig.fmt6_threads4	same
+ambig.fmt0_threads2	same
+options.thrwin_fmt6	same
+options.thrwin_fmt7	same
+options.segno_fmt7	same
+ctoolkit.fmt0	same
+ctoolkit.empty_fmt0	same
+ctoolkit.fmt7	same
+ncbirc.harmless_fmt0	same
+input.rna_query	stdout differs (expected 46 lines, got 20; first difference at line 4)
+input.rna_subject_fmt0	stdout differs (expected 463 lines, got 265; first difference at line 58)
+input.rna_both_fmt7	stdout differs (expected 52 lines, got 22; first difference at line 5)
+batch.short3_first	stdout differs (expected 171 lines, got 171; first difference at line 8)
+batch.short3_first_fmt0	stdout differs (expected 1327 lines, got 1327; first difference at line 266)
+batch.short4_between_fmt7	stdout differs (expected 164 lines, got 165; first difference at line 13)
+tie.frames	stdout differs (expected 117 lines, got 117; first difference at line 52)
+tie.init_seg_no	stdout differs (expected 202 lines, got 202; first difference at line 89)
+tie.nisland_seg_no	stdout differs (expected 12 lines, got 12; first difference at line 4)
+tie.trim_seg_no_fmt0	stdout differs (expected 4634 lines, got 4634; first difference at line 658)
+sume.large_gap_seg_no	stdout differs (expected 13 lines, got 13; first difference at line 2)
+seg.left_recursion	stdout differs (expected 38 lines, got 38; first difference at line 4)
+seg.left_recursion_fmt0	stdout differs (expected 401 lines, got 401; first difference at line 24)
+write.devfull_fmt0	same
+write.devfull_unsearched_fmt0	same
+options.evalue0_fmt0	exit 0, expected 1; stdout differs (expected 0 lines, got 44; first difference at line 1); stderr differs: b''
+options.evalue0_mts1_fmt6.merged	exit 0, expected 1; stdout differs (expected 3 lines, got 1; first difference at line 2)
+options.evalue0_empty_query_fmt7	exit 0, expected 1; stderr differs: b'Warning: [tblastx] Query is Empty!\n'
+input.subject_blank_first_empty_query	exit 1, expected 0; stderr differs: b'Error: failed to read subject FASTA tests/fixtures/tblastx_regression/inputs/blank_first_subject.fa\n\nCaused by:\n    Expected > at record start.\n'
+input.subject_comment_only_empty_query	exit 1, expected 3; stderr differs: b'Error: failed to read subject FASTA tests/fixtures/tblastx_regression/inputs/comment_only_subject.fa\n\nCaused by:\n    Expected > at record start.\n'
+input.subject_comment_only_fmt0	exit 1, expected 3; stderr differs: b'Error: failed to read subject FASTA tests/fixtures/tblastx_regression/inputs/comment_only_subject.fa\n\nCaused by:\n    Expected > at record start.\n'
+input.subject_comment_first_title_empty_query	exit 1, expected 0; stderr differs: b'Error: failed to read subject FASTA tests/fixtures/tblastx_regression/inputs/comment_first_title_subject.fa\n\nCaused by:\n    Expected > at record start.\n'
+title.kept_fmt0	exit 1, expected 0; stdout differs (expected 270 lines, got 0; first difference at line 1); stderr differs: b"Error: subject record 1 has an HTML character reference (such as &amp;) in its defline, which NCBI BLAST+ decodes in the outfmt 0 titles; this is not supported by LOSAT's TBLASTX\n"
+title.hitless_fmt0	exit 1, expected 0; stdout differs (expected 92 lines, got 0; first difference at line 1); stderr differs: b"Error: subject record 2 has a defline of punctuation that NCBI BLAST+ reads past its end when it writes the subject's outfmt 0 title (it crashes if the subject has hits); this is not supported by LOSA"
+input.del_deflines_fmt0	exit 1, expected 0; stdout differs (expected 464 lines, got 0; first difference at line 1); stderr differs: b'Error: query record 1 has a defline that is empty, starts with white space or has a control character or a non-ASCII byte, which NCBI BLAST+ reads differently in the outfmt 0 and 7 titles; this is not'
+input.del_deflines_fmt7	exit 1, expected 0; stdout differs (expected 52 lines, got 0; first difference at line 1); stderr differs: b'Error: query record 1 has a defline that is empty, starts with white space or has a control character or a non-ASCII byte, which NCBI BLAST+ reads differently in the outfmt 0 and 7 titles; this is not'
+env.chunk10_fmt0	exit 0, expected 3; stdout differs (expected 14 lines, got 463; first difference at line 15); stderr differs: b''
+env.chunk_minus2_fmt6	exit 0, expected 3; stdout differs (expected 0 lines, got 46; first difference at line 1); stderr differs: b''
+env.chunk9_fmt7	same
+env.chunk_minus1_fmt6	same
+env.overlap_negative_fmt6	same
+options.seg_locut0_fmt0	stdout differs (expected 401 lines, got 3712; first difference at line 23)
+options.seg_nonpositive_fmt6	exit 2, expected 0; stdout differs (expected 38 lines, got 0; first difference at line 1); stderr differs: b"error: invalid value '0 -1 0' for '-seg <SEG>': SEG requires window > 0 and finite locut/hicut\n\nFor more information, try '--help'.\n"
+options.seg_window_negative_fmt7	exit 2, expected 0; stdout differs (expected 44 lines, got 0; first difference at line 1); stderr differs: b"error: invalid value '-5 2.2 2.5' for '-seg <SEG>': invalid input for filtering parameters\n\nFor more information, try '--help'.\n"
+cutoff.floor_evalue_1e10	stdout differs (expected 1222 lines, got 1222; first difference at line 30)

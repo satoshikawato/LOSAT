@@ -1,1 +1,0 @@
-This run was interrupted at "build wasi" (2026-10-03 01:32 JST) by an I/O error of the WSL /mnt/c mount (drvfs); the lint and test stage on 1117e8c17 completed (logs here). The full gate is re-run in session S08b.

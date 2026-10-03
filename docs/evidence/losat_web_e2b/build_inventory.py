@@ -12,7 +12,7 @@ rejected; RESOLUTION below records how (`s08_final`). Rows E X1 and X2 were adde
 result agents. The independent audit of 968fa98c8 (README, "独立監査") changed the final
 state of some rows (AUDIT_FINAL) and found NCBI paths without a row, which range H adds
 (AUDIT_ROWS; status before S08 `-`). Its fixes are the commits 7fbbfad96 (round 1),
-aa4b6f8c3, 6017f0ea2 and 5fa53b3f0 (round 2).
+aa4b6f8c3, 6017f0ea2 and 5fa53b3f0 (round 2), and bc521f450 (round 3).
 
 Usage: build_inventory.py  (writes INVENTORY.tsv next to this script and prints the counts)
 """
@@ -99,9 +99,10 @@ AUDIT_ROWS = [
      f"ported: the title ends at the first byte below a space only, {AUDIT}",
      "tblastx/blast_engine/run_impl.rs check_report_titles", "fixtures input.del_deflines_*"),
     ("src/app/blast/blast_app_util.hpp", "252-255", "CATCH_ALL: std::ios::failure", "standard output closed",
-     "deferred: pending the maintainer; Rust's runtime opens /dev/null on a closed standard output before main, "
-     "so LOSAT writes the report there and succeeds (the check of 7fbbfad96 failed callers with a /dev/null "
-     "opened read and write; removed in 1117e8c17)",
+     "exception: approved exception 6 of PD-LOSAT-CLI-NONSEARCH-DIFFERENCES (maintainer, 2026-10-03, DW-17); "
+     "Rust's runtime opens /dev/null on a closed standard output before main, so LOSAT writes the report there "
+     "and succeeds (the check of 7fbbfad96 failed callers with a /dev/null opened read and write; removed in "
+     "1117e8c17)",
      "cli.rs report_standard_output", "tests/run_local_tblastx.rs a_standard_output_on_dev_null_is_written"),
     ("src/app/blast/tblastx_app.cpp", "132-137", "CTblastxApp::Run", "Query is Empty!, then BATCH_SIZE",
      f"ported: BATCH_SIZE before the queries and the deferred subject checks; a subject bio cannot read "
@@ -134,8 +135,11 @@ AUDIT_ROWS = [
      "tests/run_local_tblastx.rs; audit (b) F-4b, (a) round 2 N2"),
     ("src/objtools/readers/fasta.cpp", "375-384", "CFastaReader::ReadOneSeq", "lines before the first defline",
      "ported: a subject bio cannot read is deferred only after lines NCBI skips; other text rejected at "
-     "read, 5fa53b3f0", "blastn/input.rs only_skipped_lines_before_first_defline",
-     "audit (a) round 2 N1"),
+     "read, 5fa53b3f0; the records after those lines are checked and warned about at read, and a file of "
+     "such lines only has no subject (exit 3), bc521f450", "blastn/input.rs "
+     "only_skipped_lines_before_first_defline, from_first_defline; tblastx run_impl.rs run",
+     "audit (a) round 2 N1, round 3 N1-ii and N1-iii, (b) N-b1, (d) L1; fixtures "
+     "input.subject_comment_only_{empty_query,fmt0}, input.subject_comment_first_title_empty_query"),
     ("src/algo/blast/api/seqsrc_multiseq.cpp", "-", "the subject sequence source, SplitQuery_SetEffectiveSearchSpace",
      "-", "faithful: rows E43, E44", "LOSAT/src/algorithm/tblastx", "audit (a): equal footers in every outfmt 0 run"),
 ]

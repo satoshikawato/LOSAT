@@ -11,6 +11,9 @@ export RUSTUP_TOOLCHAIN=1.92.0
 step() { echo "$(date -u +%H:%M:%S) $*"; }
 fail() { echo "$(date -u +%H:%M:%S) FAILED $*"; exit 1; }
 cd $W
+# The Gate A lexical root that frozen hashes name (/tmp is emptied when WSL restarts):
+# staged as the CI fast job stages it (ci_fast_regressions.py stage_lexical_fixtures).
+(cd LOSAT/tests && python3 -c 'import ci_fast_regressions as c; c.stage_lexical_fixtures()') || fail lexical-fixtures
 
 mkdir -p $RUN
 step "lint and tests"

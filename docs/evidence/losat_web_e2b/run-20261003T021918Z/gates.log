@@ -1,0 +1,11 @@
+02:19:18 lint and tests
+02:28:31 build native
+02:30:07 build wasi
+02:32:35 build reactors
+02:33:36 v-abi full (background)
+02:33:38 fixtures
+03:10:53 capture
+03:47:26 v1 wasi matrix
+03:49:21 v-abi quick
+03:57:11 wait for v-abi full
+05:15:55 done (V-PERF separately)

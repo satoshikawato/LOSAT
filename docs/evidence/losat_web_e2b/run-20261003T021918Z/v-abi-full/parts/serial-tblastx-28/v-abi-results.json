@@ -1,0 +1,31 @@
+[
+  {
+    "engine": "serial",
+    "threads": 1,
+    "program": "tblastx",
+    "cases": [
+      "p09_mellatmjnv_meenmjnv"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/MellatMJNV.fasta",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/MeenMJNV.fasta",
+      "-query_gencode",
+      "1",
+      "-db_gencode",
+      "1"
+    ],
+    "formats": {
+      "0": "c9b97531b131c3874eb8a0a345b1f8a326c6eb146c74ae067488dfb4982e032f",
+      "6": "3496edb698855f91b9387f006c9c026d48403865a55ebf827b77de77f7825a1f",
+      "7": "c9b869dbdcda031471e68a80425ae25cdd8c4137eb7f77e9a73987bce042c2fa"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 18560
+  }
+]

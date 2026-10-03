@@ -1,0 +1,8 @@
+2a46c2e421ae6474cf48639d2ebb8e278ba18cc34ad83a3c636067ac33d2bc46  /home/kawato/.cache/losat-web-gui-target/s08-gate-native/release/LOSAT
+42d530d9bb8cee8fc393def5d80559bc3cafc81f6f8b4a7b3b49fc1ae7cbee09  /home/kawato/.cache/losat-web-gui-target/s08-gate-native-serial/release/LOSAT
+533aeddde9ecbc4b4e9e1e0f95e713a371d006399187c539c007a6bef71f117f  /home/kawato/.cache/losat-web-gui-target/s08-gate-wasi-artifacts/losat-serial-command.wasm
+5bc2284ec343a86ec15b9afd14fe9c26c0e7eb3becf78143e87421256a5e5ac7  /home/kawato/.cache/losat-web-gui-target/s08-gate-wasi-artifacts/losat-serial-reactor.wasm
+5309d850c4c3a71920d0a9595b6e0c45eb0b0149ef4a7a7b085f6e413ecd4c31  /home/kawato/.cache/losat-web-gui-target/s08-gate-wasi-artifacts/losat-threaded-command.wasm
+f3669b20ba848d49821b5aca0b89fb88f4c040f83bf6552d512f5c10b5e1f06a  /home/kawato/.cache/losat-web-gui-target/s08-gate-wasi-artifacts/losat-threaded-reactor.wasm
+d2db178a4339bc918755e87757667b553f2246d7b64fa6b8a0668cd291e4c476  /home/kawato/.cache/losat-web-gui-target/s08-gate-reactors/losat-web-serial.wasm
+8b179d93bc9a871b7928bcc61834017c589575514997a211a4c2dd3a38e315ca  /home/kawato/.cache/losat-web-gui-target/s08-gate-reactors/losat-web-threads.wasm

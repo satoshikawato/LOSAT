@@ -1,0 +1,2 @@
+LC738884 x LC741431 outfmt 6: median 0.900s [0.895, 0.9, 0.913]; outfmt 0: median 0.944s [0.906, 0.946, 0.944]; outfmt 7: median 0.913s [0.913, 0.916, 0.861]
+LC738874 x LC738875 outfmt 6: median 2.846s [2.738, 2.894, 2.846]; outfmt 0: median 2.925s [2.926, 2.908, 2.925]; outfmt 7: median 2.938s [2.938, 2.911, 2.998]

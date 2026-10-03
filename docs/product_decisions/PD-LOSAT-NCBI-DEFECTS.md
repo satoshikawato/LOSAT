@@ -79,11 +79,14 @@ Version 1.2, accepted by the maintainer on 2026-10-03 in Session S08b (E2b), pla
    crashes on 272 and 66, exactly those that LOSAT's test of such a title
    (`report/defline.rs` `ncbi_nucleotide_title_reads_past_end`) finds; the other reports are
    byte-identical. The approved result: LOSAT stops the cleanup at the end of the string, as
-   for BLASTN. Until that title is
-   ported to TBLASTX and TBLASTN and checked as BLASTN's was (each report equals NCBI's
-   report for the same subjects with placeholder deflines once each placeholder is replaced
-   by LOSAT's title, `docs/evidence/losat_web_e2g/title_sweep.py`), LOSAT rejects such
-   subjects with hits in outfmt 0 explicitly (Session S08+).
+   for BLASTN. Implemented in Session S08+ (E2e; until then LOSAT rejected such subjects
+   with hits in outfmt 0 explicitly) and checked as BLASTN's was: over all 1023 deflines of
+   one to five of `,;~` and space, each TBLASTX and TBLASTN report equals NCBI's (957) or
+   equals NCBI's report for the same subject with a placeholder defline once the
+   placeholder is replaced by LOSAT's title (66, where NCBI crashes),
+   `docs/evidence/losat_web_e2e/title_sweep.py`; fixtures `punct.tblastx` and
+   `punct.tblastn` of `LOSAT/tests/outfmt0_manifest.tsv` (contract `approved_punct_title`).
+   This records the implementation; the decision of version 1.2 is unchanged.
 
 ## Reproduced as NCBI (rule 2)
 

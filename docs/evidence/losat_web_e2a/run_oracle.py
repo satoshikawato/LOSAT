@@ -15,6 +15,16 @@ search does; it writes DIR/<fixture_id>.db.out and checks `db_stdout_sha256`, th
 of that output with its `Posted date:` line (the time makeblastdb ran) replaced by a
 fixed text (check_losat.py compares LOSAT with that output outside the database lines).
 
+A row whose `contract` is `approved_punct_title:<stand-in subject>` (approved exception 2
+of PD-LOSAT-NCBI-DEFECTS: subject titles made only of punctuation, on which NCBI's outfmt 0
+crashes when the subject has hits) runs NCBI with the stand-in subject instead: the same
+records, with a placeholder defline (a run of one letter) of the length of the title that
+NCBI's `x_CleanAndCompress` gives when it stops at the end of the string, for each defline
+that differs. Its expected output is NCBI's report of the stand-in with each placeholder
+replaced by that title and the stand-in's path by the subject's (the two paths have the
+same length), the check of docs/evidence/losat_web_e2g/title_sweep.py and
+docs/evidence/losat_web_e2e/title_sweep.py.
+
 - default: compare the outputs with the manifest's hash columns; exit 1 on a difference.
 - --freeze: write the hash and size columns of the manifest instead (run with
   --out LOSAT/tests/fixtures/outfmt0 so the fixtures are the frozen bytes).
@@ -45,6 +55,7 @@ ENGINE = REPO / "LOSAT"
 MANIFEST = ENGINE / "tests/outfmt0_manifest.tsv"
 HASHES = ("stdout_sha256", "stdout_bytes", "stderr_sha256")
 DEVIATION = "approved_db_gencode_deviation"
+PUNCT_TITLE = "approved_punct_title:"
 # BATCH_SIZE and CHUNK_SIZE change the query batches (blast_input_aux.cpp:86-90,
 # local_blast.cpp:59-62), and with them the report of an invalid query.
 REPORT_ENV = ("BL2SEQ_LEGACY", "CTOOLKIT_COMPATIBLE", "OLD_FSC", "BATCH_SIZE", "CHUNK_SIZE")
@@ -74,6 +85,38 @@ def db_argv(row: dict[str, str], db: str) -> list[str]:
     argv = search_argv(row)
     index = argv.index("-subject")
     return [*argv[:index], "-db", db, *argv[index + 2:]]
+
+
+def punct_title_run(row: dict[str, str], binary: Path) -> subprocess.CompletedProcess:
+    """NCBI's run of an `approved_punct_title` row: the stand-in subject's report with the
+    placeholders replaced by the titles (see the module)."""
+    sys.path.insert(0, str(REPO / "docs/evidence/losat_web_e2g"))
+    from title_sweep import title  # noqa: E402  (NCBI's title stopped at the end of the string)
+    stand_in = row["contract"].removeprefix(PUNCT_TITLE)
+    if len(stand_in) != len(row["subject"]):
+        raise SystemExit(f"{row['fixture_id']}: the stand-in path must have the subject path's length")
+    deflines = [line[1:] for line in (ENGINE / row["subject"]).read_text().splitlines() if line.startswith(">")]
+    placeholders = [line[1:] for line in (ENGINE / stand_in).read_text().splitlines() if line.startswith(">")]
+    argv = search_argv(row)
+    argv[argv.index("-subject") + 1] = stand_in
+    run = subprocess.run([str(binary), *argv], cwd=ENGINE, capture_output=True)
+    titles = {}
+    for defline, placeholder in zip(deflines, placeholders, strict=True):
+        if defline != placeholder:
+            expected = title(defline)
+            if not expected or placeholder != placeholder[0] * len(expected) or not placeholder.isalpha():
+                raise SystemExit(f"{row['fixture_id']}: placeholder {placeholder!r} for {defline!r}")
+            titles[placeholder.encode()] = expected.encode()
+    # A title starts a line of the description table and follows "> " in an alignment
+    # heading; only there is a placeholder replaced.
+    lines = run.stdout.replace(stand_in.encode(), row["subject"].encode()).split(b"\n")
+    for index, line in enumerate(lines):
+        for placeholder, expected in titles.items():
+            for prefix in (b"", b"> "):
+                rest = line[len(prefix) + len(placeholder):]
+                if line.startswith(prefix + placeholder) and (not rest or rest.startswith(b" ")):
+                    lines[index] = prefix + expected + rest
+    return subprocess.CompletedProcess(run.args, run.returncode, b"\n".join(lines), run.stderr)
 
 
 def without_posted_date(report: bytes) -> bytes:
@@ -114,7 +157,10 @@ def main() -> int:
     for row in selected:
         command = [str(args.bin_dir / row["program"]), *search_argv(row)]
         start = time.monotonic()
-        run = subprocess.run(command, cwd=ENGINE, capture_output=True)
+        if row.get("contract", "").startswith(PUNCT_TITLE):
+            run = punct_title_run(row, args.bin_dir / row["program"])
+        else:
+            run = subprocess.run(command, cwd=ENGINE, capture_output=True)
         wall = time.monotonic() - start
         if run.returncode != 0:
             raise SystemExit(f"{row['fixture_id']}: exit {run.returncode}\n{run.stderr.decode()}")

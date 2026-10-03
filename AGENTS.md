@@ -76,8 +76,7 @@ authoritative, current guidance for agent behavior in LOSAT.
      split again (CHUNK_SIZE/OVERLAP_CHUNK_SIZE; NCBI stops with a
      CCoreException) is searched once. BLASTN, TBLASTX and TBLASTN: outfmt 0
      titles made only of punctuation stop at the end of the string (NCBI
-     reads past it and crashes; TBLASTX and TBLASTN reject such subjects
-     explicitly until this title is ported and checked for them). Deterministic NCBI results, even wrong-looking ones, are
+     reads past it and crashes). Deterministic NCBI results, even wrong-looking ones, are
      reproduced, not excepted; NCBI failures without a checkable valid result
      are explicit rejections.
 

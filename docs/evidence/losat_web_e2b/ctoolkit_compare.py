@@ -3,7 +3,8 @@
 
 Runs every row of LOSAT/tests/outfmt0_manifest.tsv (all programs; the rows of the approved
 db_gencode deviation are left out, as NCBI's local -subject search does not apply their
-subject code) with CTOOLKIT_COMPATIBLE unset, set to 1 and set to the empty string, with
+subject code, and so are the rows of approved punctuation titles, on whose subjects NCBI
+crashes) with CTOOLKIT_COMPATIBLE unset, set to 1 and set to the empty string, with
 NCBI BLAST+ and with LOSAT, and compares stdout, stderr and the exit status. NCBI's
 showdefline.cpp writes "(bits)" in the description table header when the variable is set,
 even to the empty string; every other variable that changes NCBI's report is unset.
@@ -43,7 +44,10 @@ def main() -> int:
     if (Path.home() / ".ncbirc").exists():
         raise SystemExit("remove ~/.ncbirc before comparing")
     rows = run_oracle.read_manifest()[2]
-    compared = [row for row in rows if row.get("contract") != run_oracle.DEVIATION]
+    # NCBI crashes on the subjects of an approved punctuation-title row (its oracle is a
+    # stand-in subject, run_oracle.punct_title_run).
+    compared = [row for row in rows if row.get("contract") != run_oracle.DEVIATION
+                and not row.get("contract", "").startswith(run_oracle.PUNCT_TITLE)]
     runs = [(row, value) for row in compared for value in (None, "1", "")]
 
     def one(run):

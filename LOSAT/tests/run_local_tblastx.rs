@@ -419,17 +419,15 @@ fn subjects_after_skipped_lines_are_read_before_the_query_is_found_empty() {
 // NCBI reference: c++/src/objmgr/util/create_defline.cpp:219-312 (x_CleanAndCompress) and
 // 4066 (`NStr::HtmlDecode`): NCBI reads past the end of the title `, ,` (and crashes when
 // such a subject has hits) and decodes `&amp;` in outfmt 0; the tabular formats print
-// only the ids.
+// only the ids. LOSAT writes the title `, ` stopped at the end of the string (approved
+// exception 2 of PD-LOSAT-NCBI-DEFECTS) and rejects the decoded title.
 #[test]
-fn outfmt0_rejects_subject_titles_that_ncbi_reads_past_or_decodes() {
+fn outfmt0_titles_that_ncbi_reads_past_or_decodes() {
     let inputs = Inputs::new();
     let queries = read_records(&inputs.query.0);
     let sequence = fixture_sequence("LC738884.fasta");
     let unknown = vec![b'N'; 900];
-    for (defline, reason) in [
-        (", ,", "reads past its end"),
-        ("s &amp; t", "HTML character reference"),
-    ] {
+    for (defline, reason) in [(", ,", ""), ("s &amp; t", "HTML character reference")] {
         let subject = TempFasta::new(
             "tblastx_title_subject.fna",
             &[(defline, &sequence[1_000..6_000])],
@@ -441,7 +439,11 @@ fn outfmt0_rejects_subject_titles_that_ncbi_reads_past_or_decodes() {
                 ReportOutputs::single(outfmt, OutputSink::Writer(&mut report), &mut diagnostics);
             let result = run_local_tblastx(inputs.args(&[]), &queries, &subjects, &mut outputs);
             drop(outputs);
-            if outfmt == "0" {
+            if outfmt == "0" && reason.is_empty() {
+                result.unwrap_or_else(|error| panic!("outfmt 0 {defline:?}: {error}"));
+                let report = String::from_utf8(report).expect("UTF-8 report");
+                assert!(report.contains("\n> , \n"), "{report}");
+            } else if outfmt == "0" {
                 let error = result
                     .expect_err("outfmt 0 must reject the title")
                     .to_string();

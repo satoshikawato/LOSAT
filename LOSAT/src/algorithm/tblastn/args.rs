@@ -622,10 +622,10 @@ pub fn run_local(
     let lengths = lengths.context("TBLASTN query file is empty")?;
     // NCBI decodes HTML character references in the outfmt 0 titles of the subjects
     // (`NStr::HtmlDecode` in `CDeflineGenerator::GenerateDefline`), which LOSAT does not
-    // reproduce, and its x_CleanAndCompress reads past the end of some titles of
-    // punctuation and crashes (approved exception 2 of PD-LOSAT-NCBI-DEFECTS covers BLASTN
-    // only). NCBI makes the titles of the subjects that the reports show, those with hits
-    // in the final hit lists (`report/defline.rs`).
+    // reproduce. NCBI makes the titles of the subjects that the reports show, those with
+    // hits in the final hit lists (`report/defline.rs`). Its x_CleanAndCompress reads past
+    // the end of some titles of punctuation and crashes; LOSAT writes the title stopped at
+    // the end of the string (approved exception 2 of PD-LOSAT-NCBI-DEFECTS).
     if outputs.formats.iter().any(|format| format.outfmt == "0") {
         let shown: std::collections::BTreeSet<usize> = results
             .iter()

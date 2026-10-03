@@ -360,7 +360,52 @@ fn run_local_search_with_pool(
     );
     let code = GeneticCode::try_from_id(profile.genetic_code).map_err(anyhow::Error::msg)?;
     let total_nt: usize = subjects.iter().map(Vec::len).sum();
-    let min_subject_length = subjects.iter().map(Vec::len).min().unwrap() / 3;
+    // NCBI reference: c++/src/algo/blast/api/local_db_adapter.cpp:133-135
+    // ```c
+    //             if ( !m_Subjects.empty() ) {
+    //                 //m_SeqSrc = QueryFactoryBlastSeqSrcInit(m_Subjects, program);
+    //                 m_SeqSrc = MultiSeqBlastSeqSrcInit(m_Subjects, program, m_DbScanMode);
+    // ```
+    // NCBI reference: c++/src/algo/blast/api/seqsrc_multiseq.cpp:226-240
+    // ```c
+    // s_MultiSeqGetMinLength(void* multiseq_handle, void*)
+    // {
+    //     Int4 retval = INT4_MAX;
+    //     Uint4 index;
+    //     CRef<CMultiSeqInfo>* seq_info =
+    //         static_cast<CRef<CMultiSeqInfo>*>(multiseq_handle);
+    //
+    //     for (index=0; index<(*seq_info)->GetNumSeqs(); ++index)
+    //         retval = MIN(retval, (*seq_info)->GetSeqBlk(index)->length);
+    //
+    //     if(retval < BLAST_SEQSRC_MINLENGTH)
+    // 	retval = BLAST_SEQSRC_MINLENGTH;
+    //
+    //     return retval;
+    // }
+    // ```
+    // NCBI reference: c++/include/algo/blast/core/blast_seqsrc.h:205
+    // ```c
+    // #define BLAST_SEQSRC_MINLENGTH  10    /**< Default minimal sequence length */
+    // ```
+    // NCBI reference: c++/src/algo/blast/core/blast_setup.c:969-973
+    // ```c
+    //    if (sbp->gbp) {
+    //        min_subject_length = BlastSeqSrcGetMinSeqLen(seq_src);
+    //        if (Blast_SubjectIsTranslated(program_number)) {
+    //            min_subject_length/=3;
+    //        }
+    // ```
+    // The local `-subject` sequences are a multi-sequence source: the shortest record (an
+    // empty one counts as 0, in nucleotides) is raised to 10 before the division.
+    const BLAST_SEQSRC_MINLENGTH: usize = 10;
+    let min_subject_length = subjects
+        .iter()
+        .map(Vec::len)
+        .min()
+        .unwrap_or(i32::MAX as usize)
+        .max(BLAST_SEQSRC_MINLENGTH)
+        / 3;
     let query_lengths: Vec<i32> = queries
         .iter()
         .map(|query| i32::try_from(query.len()))
@@ -1109,6 +1154,24 @@ fn finish_local_mode0_no_sum_stats(
         let input: Vec<_> = preliminary.hsps.iter().map(|linked| linked.hsp).collect();
         // NCBI c++/src/algo/blast/core/blast_traceback.c:503-536:
         // traceback uses the selected scoring matrix and gap costs.
+        // NCBI reference: c++/src/algo/blast/core/blast_parameters.c:455-463
+        // ```c
+        //       double min_lambda = s_BlastFindSmallestLambda(sbp->kbp_gap, query_info, NULL);
+        //       params->gap_x_dropoff = (Int4)
+        //           (options->gap_x_dropoff*NCBIMATH_LN2 / min_lambda);
+        //       /* Note that this conversion from bits to raw score is done prematurely
+        //          when rescaling and composition based statistics is applied, as we
+        //          lose precision. Therefore this is redone in Kappa_RedoAlignmentCore */
+        //       params->gap_x_dropoff_final = (Int4)
+        //           MAX(options->gap_x_dropoff_final*NCBIMATH_LN2 / min_lambda, params->gap_x_dropoff);
+        // ```
+        // The final X-drop is at least the preliminary one (`-xdrop_gap` above
+        // `-xdrop_gap_final`).
+        let final_xdrop = local_extension_final_xdrop(
+            scoring.gap_xdrop_bits,
+            scoring.final_xdrop_bits,
+            gapped_params[context].lambda,
+        )?;
         let (traced, stat_length) =
             full_translation_traceback_with_matrix_and_events_with_mask_mode_owned(
                 &queries[context],
@@ -1118,8 +1181,7 @@ fn finish_local_mode0_no_sum_stats(
                 scoring.matrix,
                 scoring.gap_open,
                 scoring.gap_extend,
-                ((scoring.final_xdrop_bits * std::f64::consts::LN_2)
-                    / gapped_params[context].lambda) as i32,
+                final_xdrop,
                 0.0,
                 0,
                 profile.seg,

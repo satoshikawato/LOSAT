@@ -1267,13 +1267,45 @@ fn blastp_word_cutoff_score_for_context(hit_cutoff_score: i32, ctx: &QueryContex
 // For multi-sequence subject sets NCBI keeps the hit-saving cutoff baseline
 // fixed from setup-time sequence-source statistics; it does not recompute
 // blastp protein cutoffs for each subject unless `db_length == 0`.
+// NCBI reference: c++/src/algo/blast/api/local_db_adapter.cpp:133-135
+// ```c
+//             if ( !m_Subjects.empty() ) {
+//                 //m_SeqSrc = QueryFactoryBlastSeqSrcInit(m_Subjects, program);
+//                 m_SeqSrc = MultiSeqBlastSeqSrcInit(m_Subjects, program, m_DbScanMode);
+// ```
+// NCBI reference: c++/src/algo/blast/api/seqsrc_multiseq.cpp:226-240
+// ```c
+// s_MultiSeqGetMinLength(void* multiseq_handle, void*)
+// {
+//     Int4 retval = INT4_MAX;
+//     Uint4 index;
+//     CRef<CMultiSeqInfo>* seq_info =
+//         static_cast<CRef<CMultiSeqInfo>*>(multiseq_handle);
+//
+//     for (index=0; index<(*seq_info)->GetNumSeqs(); ++index)
+//         retval = MIN(retval, (*seq_info)->GetSeqBlk(index)->length);
+//
+//     if(retval < BLAST_SEQSRC_MINLENGTH)
+// 	retval = BLAST_SEQSRC_MINLENGTH;
+//
+//     return retval;
+// }
+// ```
+// NCBI reference: c++/include/algo/blast/core/blast_seqsrc.h:205
+// ```c
+// #define BLAST_SEQSRC_MINLENGTH  10    /**< Default minimal sequence length */
+// ```
+// The local `-subject` sequences are a multi-sequence source: the shortest record (an
+// empty one counts as 0) is raised to 10.
 #[inline]
 fn blastp_preliminary_cutoff_subject_length(subjects: &[EncodedProtein]) -> i32 {
+    const BLAST_SEQSRC_MINLENGTH: i32 = 10;
     subjects
         .iter()
         .map(|subject| subject.aa_len as i32)
         .min()
-        .unwrap_or(0)
+        .unwrap_or(i32::MAX)
+        .max(BLAST_SEQSRC_MINLENGTH)
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:234-242

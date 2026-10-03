@@ -32,7 +32,6 @@ use crate::utils::matrix::BLASTAA_SIZE;
 // params->gap_x_dropoff_final = (Int4)
 //     MAX(options->gap_x_dropoff_final*NCBIMATH_LN2/min_lambda,
 //         params->gap_x_dropoff);
-#[allow(dead_code)] // Calculated at extension-parameter setup before Kappa.
 pub(super) fn local_extension_final_xdrop(
     prelim_bits: f64,
     final_bits: f64,

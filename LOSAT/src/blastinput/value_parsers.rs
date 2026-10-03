@@ -379,9 +379,29 @@ pub fn blastn_template_type(
 ///     arg_desc.SetConstraint(kArgDMBTemplateLength,
 ///                            new CArgAllowIntegerSet(allowed_values));
 /// ```
+/// The constraint converts the value again with `NStr::StringToInt` in base 10, so a
+/// hexadecimal value that the integer argument reads fails it.
+///
+/// NCBI reference: c++/include/algo/blast/blastinput/blast_input_aux.hpp:214-222,239
+/// ```c
+///     virtual bool Verify(const string& value) const {                        \
+///         DataType value2check = String2DataTypeFn(value);                    \
+///         ITERATE(set<DataType>, itr, m_AllowedValues) {                      \
+///             if (*itr == value2check) {                                      \
+///                 return true;                                                \
+///             }                                                               \
+///         }                                                                   \
+///         return false;                                                       \
+///     }                                                                       \
+/// ...
+/// DEFINE_CARGALLOW_SET_CLASS(CArgAllowIntegerSet, int, NStr::StringToInt);
+/// ```
+/// `NStr::StringToInt` in base 10 reads what `i32::from_str` reads (an optional sign and
+/// ASCII digits, `ncbi_integer`).
 pub fn blastn_template_length(value: &str) -> Result<u8, String> {
-    match ncbi_constrained_integer(value)? {
-        n @ (16 | 18 | 21) => Ok(n as u8),
+    ncbi_constrained_integer(value)?;
+    match value.parse::<i32>() {
+        Ok(n @ (16 | 18 | 21)) => Ok(n as u8),
         _ => Err("expected one of 16, 18, 21".into()),
     }
 }

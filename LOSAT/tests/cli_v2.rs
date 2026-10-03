@@ -304,9 +304,20 @@ fn defaults_and_task_overrides_remain_distinct() {
         &["-template_length", "18"],
         &["-template_type", "Coding", "-template_length", "18"],
         &["-template_type", "coding", "-template_length", "17"],
+        // blast_input_aux.hpp:214-222,239: the set is checked with a base-10 conversion.
+        &["-template_type", "coding", "-template_length", "0x12"],
     ] {
         assert!(parse("blastn", words).is_err(), "{words:?}");
     }
+    for length in ["018", "+18", "000000000000000018"] {
+        parse(
+            "blastn",
+            &["-template_type", "coding", "-template_length", length],
+        )
+        .unwrap();
+    }
+    let words = ["-template_type", "coding", "-template_length", " 18"];
+    assert!(parse("blastn", &words).is_err(), "{words:?}");
 }
 
 #[test]

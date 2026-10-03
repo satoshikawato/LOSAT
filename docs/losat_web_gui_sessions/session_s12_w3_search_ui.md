@@ -26,6 +26,17 @@ LOSAT Web の段階 W3 を実行する。先に [セッション README](README.
 
 完了条件は計画 §7 の S12 の行による。画面の記録を画面レビューに見せ、指摘と対応を `docs/evidence/losat_web_w3/README.md` に記録する。
 
+## S09（W1）から引き継ぐこと
+
+[W1 のゲート記録](../evidence/losat_web_w1/README.md)の「S12 への申し送り」の要点：
+
+- **本物のエンジン**：`LOSAT_WEB_REACTORS`（`web/adapter/tools/build_reactors.py` の出力先）を付けてビルドすると、アプリは Wasm のエンジン（`src/infra/engine-worker/`）を使い、付けないと FakeEngine とその帯を使う（`build/reactors.ts`）。`describe` と `validate` は Data worker の serial の reactor が答える（検索の実行中でも答えられる）。E2E は両方のビルドで通る（`tests/e2e/support/browser.ts` の `BUILD_HAS_ENGINE`）。
+- **R1 の効き方**：登録済みの Subject を再利用する鍵は、program、SHA-256、`revisionIds` である。今の `enqueue` は入力ごとに新しい revision を作るので、再利用は起きない。作業 9 で `DatasetStore` を使い、同じ Subject の revision を続く検索に渡すと再利用される（`RunRecord.subjectRetained` が `true`）。「Subject を保持したまま Query を変えて繰り返す」E2E は、これを確かめる。
+- **スレッド**：Auto の規則は `src/infra/engine-worker/policy.ts`（W1 の実測で決めた値。ゲート記録の「Auto」）。手動の指定はそのまま使い、threaded にできないときは serial と理由（`RunRecord.fallbackReason`）になる。作業 6 の診断情報は `RunRecord` の `runtimePath`・`threads`・`fallbackReason`・`engineBuild`・`runtimeGeneration`・`memory`・`subjectRetained`・`phaseTimes` から出す。
+- **入力の検査**：BLASTN の空白だけの入力は、索引の走査（`scan`）の誤り「Expected > at record start.」でキューに入れる前に拒否する（CLI は query なら警告「Query is Empty!」、subject なら誤り。W1 で決めた。エンジン側が `scan` を変えたら、それに従う）。
+- **S08 の申し送り**（`docs/evidence/losat_web_e2b/README.md` の「アプリ側（S09）への注意」）：`describe` の TBLASTX の `-max_target_seqs` には `default` が無い（省略すると hit list は 500、outfmt 0 は説明 500・整列 250。help に「(default: 500)」）。フォームはこれを未指定として扱い、既定値を argv に書かない。
+- **ブラウザ**：Playwright の project は Chromium・Firefox・WebKit。`storage.spec.ts` と `contracts.spec.ts` は Chromium だけ。Playwright の WebKit には OPFS が無く、結果はメモリに置かれる（上限 512 MB、`MEMORY_RESULTS_CAPACITY_BYTES`）。WebKit のシステムライブラリを入れられない環境では `LOSAT_WEB_WEBKIT_EXECUTABLE` で起動する（ゲート記録）。
+
 ## 終了・引き継ぎ
 
 README の規則 8 に従う。次は [S13 — 結果画面](session_s13_w4_results_ui.md)。

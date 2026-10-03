@@ -1,0 +1,52 @@
+--------------------------------------------------------------------------------
+Profile data file 'cg_qmin_halfsub.out' (creator: callgrind-3.22.0)
+--------------------------------------------------------------------------------
+I1 cache: 
+D1 cache: 
+LL cache: 
+Timerange: Basic block 0 - 30278150
+Trigger: Program termination
+Profiled target:  /home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT tblastn -task tblastn -query /tmp/claude-1000/-mnt-c-Users-genom-GitHub-LOSAT/e09c9cb4-4139-44a0-a544-40af9a99d58f/scratchpad/tblastn-profile/qmin.faa -subject /tmp/claude-1000/-mnt-c-Users-genom-GitHub-LOSAT/e09c9cb4-4139-44a0-a544-40af9a99d58f/scratchpad/tblastn-profile/subject_half.fasta -outfmt 6 -num_threads 1 (PID 1059624, part 1)
+Events recorded:  Ir
+Events shown:     Ir
+Event sort order: Ir
+Thresholds:       99
+Include dirs:     
+User annotated:   
+Auto-annotation:  on
+
+--------------------------------------------------------------------------------
+Ir                   
+--------------------------------------------------------------------------------
+121,090,295 (100.0%)  PROGRAM TOTALS
+
+--------------------------------------------------------------------------------
+Ir                   file:function
+--------------------------------------------------------------------------------
+66,332,525 (54.78%)  ???:LOSAT::utils::genetic_code::GeneticCode::get [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+11,529,220 ( 9.52%)  ???:LOSAT::stats::karlin_calc::compute_karlin_params_ungapped [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+ 9,988,389 ( 8.25%)  ???:LOSAT::algorithm::tblastn::stage_d_pipeline::run_local_search_with_pool::{{closure}} [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+ 8,321,596 ( 6.87%)  ???:LOSAT::algorithm::tblastx::translation::translate_sequence [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+ 7,697,263 ( 6.36%)  ???:<core::iter::adapters::GenericShunt<I,R> as core::iter::traits::iterator::Iterator>::next [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+ 4,649,180 ( 3.84%)  ???:LOSAT::algorithm::tblastx::lookup::backbone::build_lookup_from_prepared [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+ 3,904,521 ( 3.22%)  ???:LOSAT::core::blast_stat::composition::compute_blosum62_ideal_karlin_params [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+ 2,500,512 ( 2.06%)  ???:LOSAT::core::blast_encoding::resolve_ncbi4na_to_ncbi2na [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+ 2,080,570 ( 1.72%)  ???:LOSAT::algorithm::tblastx::translation::generate_frames [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+   732,699 ( 0.61%)  ???:std::io::BufRead::read_line [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+   664,617 ( 0.55%)  ./string/../sysdeps/x86_64/multiarch/memmove-vec-unaligned-erms.S:__memcpy_avx_unaligned_erms [/usr/lib/x86_64-linux-gnu/libc.so.6]
+   307,713 ( 0.25%)  ./string/../sysdeps/x86_64/multiarch/memset-vec-unaligned-erms.S:__memset_avx2_unaligned_erms [/usr/lib/x86_64-linux-gnu/libc.so.6]
+   302,876 ( 0.25%)  ???:core::str::converts::from_utf8 [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+   238,908 ( 0.20%)  ???:LOSAT::utils::seg::SegMasker::mask_sequence::seg_seq [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+   157,312 ( 0.13%)  ???:<T as alloc::vec::spec_from_elem::SpecFromElem>::from_elem [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+   156,544 ( 0.13%)  ???:LOSAT::utils::seg::SegWindow::shift_win1 [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+   147,459 ( 0.12%)  ./malloc/./malloc/malloc.c:_int_malloc [/usr/lib/x86_64-linux-gnu/libc.so.6]
+   128,504 ( 0.11%)  ???:LOSAT::stats::karlin_calc::compute_score_freq_profile_for_matrix [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+    92,225 ( 0.08%)  ???:core::str::<impl str>::trim_end_matches [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+
+--------------------------------------------------------------------------------
+The following files chosen for auto-annotation could not be found:
+--------------------------------------------------------------------------------
+  ./malloc/./malloc/malloc.c
+  ./string/../sysdeps/x86_64/multiarch/memmove-vec-unaligned-erms.S
+  ./string/../sysdeps/x86_64/multiarch/memset-vec-unaligned-erms.S
+

@@ -1,0 +1,122 @@
+[WebServer] [PLUGIN_TIMINGS] JavaScript callbacks ran for 5.6s of this 6.7s build (83%).
+[WebServer] The slowest callbacks, timed inside each callback (the wait before a callback starts is excluded, the time it awaits is included):
+[WebServer]   - plugin vite:css-post renderChunk (41%, 2.8s, 1 call)
+[WebServer] Additional callback time came from the callbacks below and from callbacks under 1s.
+[WebServer] 1 callback is listed without a time. Its calls overlapped, so the time inside one call includes work from other calls. To find its cost, profile the build with `node --cpu-prof`:
+[WebServer]   - plugin vite:worker-import-meta-url transform (2 calls)
+[WebServer] See https://rolldown.rs/reference/InputOptions.checks#bundlertimings for more details.
+[WebServer] 
+
+Running 4 tests using 1 worker
+
+[PLUGIN_TIMINGS] JavaScript callbacks ran for 4.6s of this 5.6s build (83%).
+The slowest callbacks, timed inside each callback (the wait before a callback starts is excluded, the time it awaits is included):
+  - plugin vite:build-html transform (28%, 1.6s, 1 call)
+Additional callback time came from the callbacks below and from callbacks under 1s.
+1 callback is listed without a time. Its calls overlapped, so the time inside one call includes work from other calls. To find its cost, profile the build with `node --cpu-prof`:
+  - plugin vite:worker-import-meta-url transform (4 calls)
+See https://rolldown.rs/reference/InputOptions.checks#bundlertimings for more details.
+
+done blastp SicyWSV/PajaWSV query 0 n=1: prepare 91 ms, run 3829 ms
+done blastp SicyWSV/PajaWSV query 1 n=1: prepare 5 ms, run 3832 ms
+done blastp SicyWSV/PajaWSV query 2 n=1: prepare 5 ms, run 3738 ms
+done blastp SicyWSV/PajaWSV query 3 n=1: prepare 5 ms, run 3697 ms
+done blastp SicyWSV/PajaWSV qmin 0 n=1: prepare 1 ms, run 37 ms
+done blastp SicyWSV/PajaWSV qmin 1 n=1: prepare 1 ms, run 37 ms
+done blastp SicyWSV/PajaWSV qmin 2 n=1: prepare 1 ms, run 37 ms
+done blastp SicyWSV/PajaWSV qmin 3 n=1: prepare 1 ms, run 36 ms
+{"id":"blastp SicyWSV/PajaWSV","threads":1,"runMs":[3832,3738,3697],"qminRunMs":[37,37,36],"medianRunMs":3738,"medianQminRunMs":37,"upperBoundShare":0.0098,"retained":[false,true,true,true,true,true,true,true]}
+done tblastn AvCLPV protein/AvCLPV query 0 n=1: prepare 97 ms, run 233 ms
+done tblastn AvCLPV protein/AvCLPV query 1 n=1: prepare 1 ms, run 222 ms
+done tblastn AvCLPV protein/AvCLPV query 2 n=1: prepare 1 ms, run 216 ms
+done tblastn AvCLPV protein/AvCLPV query 3 n=1: prepare 1 ms, run 216 ms
+done tblastn AvCLPV protein/AvCLPV qmin 0 n=1: prepare 1 ms, run 126 ms
+done tblastn AvCLPV protein/AvCLPV qmin 1 n=1: prepare 1 ms, run 128 ms
+done tblastn AvCLPV protein/AvCLPV qmin 2 n=1: prepare 1 ms, run 127 ms
+done tblastn AvCLPV protein/AvCLPV qmin 3 n=1: prepare 1 ms, run 127 ms
+{"id":"tblastn AvCLPV protein/AvCLPV","threads":1,"runMs":[222,216,216],"qminRunMs":[128,127,127],"medianRunMs":216,"medianQminRunMs":127,"upperBoundShare":0.5878,"retained":[false,true,true,true,true,true,true,true]}
+done blastn megablast AP027152/LC738884 query 0 n=1: prepare 111 ms, run 133 ms
+done blastn megablast AP027152/LC738884 query 1 n=1: prepare 18 ms, run 124 ms
+done blastn megablast AP027152/LC738884 query 2 n=1: prepare 18 ms, run 125 ms
+done blastn megablast AP027152/LC738884 query 3 n=1: prepare 17 ms, run 123 ms
+done blastn megablast AP027152/LC738884 qmin 0 n=1: prepare 1 ms, run 7 ms
+done blastn megablast AP027152/LC738884 qmin 1 n=1: prepare 1 ms, run 7 ms
+done blastn megablast AP027152/LC738884 qmin 2 n=1: prepare 1 ms, run 7 ms
+done blastn megablast AP027152/LC738884 qmin 3 n=1: prepare 1 ms, run 7 ms
+{"id":"blastn megablast AP027152/LC738884","threads":1,"runMs":[124,125,123],"qminRunMs":[7,7,7],"medianRunMs":124,"medianQminRunMs":7,"upperBoundShare":0.0565,"retained":[false,true,true,true,true,true,true,true]}
+done tblastx LC738884/LC741431 query 0 n=1: prepare 103 ms, run 5484 ms
+done tblastx LC738884/LC741431 query 1 n=1: prepare 17 ms, run 5658 ms
+done tblastx LC738884/LC741431 query 2 n=1: prepare 17 ms, run 5595 ms
+done tblastx LC738884/LC741431 query 3 n=1: prepare 16 ms, run 5255 ms
+done tblastx LC738884/LC741431 qmin 0 n=1: prepare 1 ms, run 71 ms
+done tblastx LC738884/LC741431 qmin 1 n=1: prepare 1 ms, run 70 ms
+done tblastx LC738884/LC741431 qmin 2 n=1: prepare 1 ms, run 71 ms
+done tblastx LC738884/LC741431 qmin 3 n=1: prepare 1 ms, run 72 ms
+{"id":"tblastx LC738884/LC741431","threads":1,"runMs":[5658,5595,5255],"qminRunMs":[70,71,72],"medianRunMs":5595,"medianQminRunMs":71,"upperBoundShare":0.0127,"retained":[false,true,true,true,true,true,true,true]}
+done blastp SicyWSV/PajaWSV query 0 n=4: prepare 101 ms, run 1516 ms
+done blastp SicyWSV/PajaWSV query 1 n=4: prepare 5 ms, run 1494 ms
+done blastp SicyWSV/PajaWSV query 2 n=4: prepare 6 ms, run 1580 ms
+done blastp SicyWSV/PajaWSV query 3 n=4: prepare 6 ms, run 1572 ms
+done blastp SicyWSV/PajaWSV qmin 0 n=4: prepare 1 ms, run 17 ms
+done blastp SicyWSV/PajaWSV qmin 1 n=4: prepare 1 ms, run 18 ms
+done blastp SicyWSV/PajaWSV qmin 2 n=4: prepare 1 ms, run 18 ms
+done blastp SicyWSV/PajaWSV qmin 3 n=4: prepare 1 ms, run 17 ms
+{"id":"blastp SicyWSV/PajaWSV","threads":4,"runMs":[1494,1580,1572],"qminRunMs":[18,18,17],"medianRunMs":1572,"medianQminRunMs":18,"upperBoundShare":0.0116,"retained":[false,true,true,true,true,true,true,true]}
+done tblastn AvCLPV protein/AvCLPV query 0 n=4: prepare 109 ms, run 222 ms
+done tblastn AvCLPV protein/AvCLPV query 1 n=4: prepare 1 ms, run 218 ms
+done tblastn AvCLPV protein/AvCLPV query 2 n=4: prepare 1 ms, run 222 ms
+done tblastn AvCLPV protein/AvCLPV query 3 n=4: prepare 1 ms, run 220 ms
+done tblastn AvCLPV protein/AvCLPV qmin 0 n=4: prepare 1 ms, run 128 ms
+done tblastn AvCLPV protein/AvCLPV qmin 1 n=4: prepare 1 ms, run 124 ms
+done tblastn AvCLPV protein/AvCLPV qmin 2 n=4: prepare 1 ms, run 124 ms
+done tblastn AvCLPV protein/AvCLPV qmin 3 n=4: prepare 1 ms, run 122 ms
+{"id":"tblastn AvCLPV protein/AvCLPV","threads":4,"runMs":[218,222,220],"qminRunMs":[124,124,122],"medianRunMs":220,"medianQminRunMs":124,"upperBoundShare":0.5627,"retained":[false,true,true,true,true,true,true,true]}
+done blastn megablast AP027152/LC738884 query 0 n=4: prepare 125 ms, run 145 ms
+done blastn megablast AP027152/LC738884 query 1 n=4: prepare 18 ms, run 137 ms
+done blastn megablast AP027152/LC738884 query 2 n=4: prepare 17 ms, run 137 ms
+done blastn megablast AP027152/LC738884 query 3 n=4: prepare 18 ms, run 134 ms
+done blastn megablast AP027152/LC738884 qmin 0 n=4: prepare 1 ms, run 8 ms
+done blastn megablast AP027152/LC738884 qmin 1 n=4: prepare 1 ms, run 8 ms
+done blastn megablast AP027152/LC738884 qmin 2 n=4: prepare 1 ms, run 8 ms
+done blastn megablast AP027152/LC738884 qmin 3 n=4: prepare 1 ms, run 8 ms
+{"id":"blastn megablast AP027152/LC738884","threads":4,"runMs":[137,137,134],"qminRunMs":[8,8,8],"medianRunMs":137,"medianQminRunMs":8,"upperBoundShare":0.0574,"retained":[false,true,true,true,true,true,true,true]}
+done tblastx LC738884/LC741431 query 0 n=4: prepare 128 ms, run 5126 ms
+done tblastx LC738884/LC741431 query 1 n=4: prepare 17 ms, run 5325 ms
+done tblastx LC738884/LC741431 query 2 n=4: prepare 17 ms, run 5034 ms
+done tblastx LC738884/LC741431 query 3 n=4: prepare 17 ms, run 4782 ms
+done tblastx LC738884/LC741431 qmin 0 n=4: prepare 1 ms, run 69 ms
+done tblastx LC738884/LC741431 qmin 1 n=4: prepare 1 ms, run 72 ms
+done tblastx LC738884/LC741431 qmin 2 n=4: prepare 1 ms, run 68 ms
+done tblastx LC738884/LC741431 qmin 3 n=4: prepare 1 ms, run 68 ms
+{"id":"tblastx LC738884/LC741431","threads":4,"runMs":[5325,5034,4782],"qminRunMs":[72,68,68],"medianRunMs":5034,"medianQminRunMs":68,"upperBoundShare":0.0135,"retained":[false,true,true,true,true,true,true,true]}
+  ✓  1 [firefox] › tests/e2e/measure.spec.ts:207:1 › dw8: the share of a warm search that subject-only preprocessing can take (1.4m)
+  -  2 [firefox] › tests/e2e/measure.spec.ts:238:1 › memory: the linear memory of one instance over repeated searches
+  -  3 [firefox] › tests/e2e/measure.spec.ts:272:1 › auto: the search phase at 1, 2 and 4 threads by input size
+done blastn megablast AP027152/LC738884 first n=1: prepare 101 ms, run 130 ms
+done blastn megablast AP027152/LC738884 warm n=1: prepare 16 ms, run 118 ms
+stopped tblastx LC738884/LC741431 cancelled n=1: prepare 0 ms, run 0 ms
+done blastn megablast AP027152/LC738884 after cancel n=1: prepare 42 ms, run 127 ms
+done blastn megablast AP027152/LC738884 warm again n=1: prepare 19 ms, run 123 ms
+{"next":"blastn megablast AP027152/LC738884","threads":1,"runs":[{"id":"blastn megablast AP027152/LC738884 first","prepareMs":101,"runMs":130,"generation":1,"retained":false},{"id":"blastn megablast AP027152/LC738884 warm","prepareMs":16,"runMs":118,"generation":1,"retained":true},{"id":"tblastx LC738884/LC741431 cancelled","error":"RunCancelledError: run timed-2 was cancelled","prepareMs":null,"runMs":null,"cancelMs":0},{"id":"blastn megablast AP027152/LC738884 after cancel","prepareMs":42,"runMs":127,"generation":2,"retained":false},{"id":"blastn megablast AP027152/LC738884 warm again","prepareMs":19,"runMs":123,"generation":2,"retained":true}]}
+done blastn megablast Sakai/MG1655 first n=1: prepare 635 ms, run 5229 ms
+done blastn megablast Sakai/MG1655 warm n=1: prepare 306 ms, run 5341 ms
+stopped tblastx LC738884/LC741431 cancelled n=1: prepare 0 ms, run 0 ms
+done blastn megablast Sakai/MG1655 after cancel n=1: prepare 576 ms, run 5481 ms
+done blastn megablast Sakai/MG1655 warm again n=1: prepare 304 ms, run 4953 ms
+{"next":"blastn megablast Sakai/MG1655","threads":1,"runs":[{"id":"blastn megablast Sakai/MG1655 first","prepareMs":635,"runMs":5229,"generation":1,"retained":false},{"id":"blastn megablast Sakai/MG1655 warm","prepareMs":306,"runMs":5341,"generation":1,"retained":true},{"id":"tblastx LC738884/LC741431 cancelled","error":"RunCancelledError: run timed-2 was cancelled","prepareMs":null,"runMs":null,"cancelMs":0},{"id":"blastn megablast Sakai/MG1655 after cancel","prepareMs":576,"runMs":5481,"generation":2,"retained":false},{"id":"blastn megablast Sakai/MG1655 warm again","prepareMs":304,"runMs":4953,"generation":2,"retained":true}]}
+done blastn megablast AP027152/LC738884 first n=4: prepare 113 ms, run 133 ms
+done blastn megablast AP027152/LC738884 warm n=4: prepare 17 ms, run 124 ms
+stopped tblastx LC738884/LC741431 cancelled n=4: prepare 0 ms, run 0 ms
+done blastn megablast AP027152/LC738884 after cancel n=4: prepare 58 ms, run 131 ms
+done blastn megablast AP027152/LC738884 warm again n=4: prepare 16 ms, run 155 ms
+{"next":"blastn megablast AP027152/LC738884","threads":4,"runs":[{"id":"blastn megablast AP027152/LC738884 first","prepareMs":113,"runMs":133,"generation":1,"retained":false},{"id":"blastn megablast AP027152/LC738884 warm","prepareMs":17,"runMs":124,"generation":1,"retained":true},{"id":"tblastx LC738884/LC741431 cancelled","error":"RunCancelledError: run timed-2 was cancelled","prepareMs":null,"runMs":null,"cancelMs":0},{"id":"blastn megablast AP027152/LC738884 after cancel","prepareMs":58,"runMs":131,"generation":2,"retained":false},{"id":"blastn megablast AP027152/LC738884 warm again","prepareMs":16,"runMs":155,"generation":2,"retained":true}]}
+done blastn megablast Sakai/MG1655 first n=4: prepare 614 ms, run 5227 ms
+done blastn megablast Sakai/MG1655 warm n=4: prepare 317 ms, run 5232 ms
+stopped tblastx LC738884/LC741431 cancelled n=4: prepare 0 ms, run 0 ms
+done blastn megablast Sakai/MG1655 after cancel n=4: prepare 606 ms, run 5560 ms
+done blastn megablast Sakai/MG1655 warm again n=4: prepare 362 ms, run 5457 ms
+{"next":"blastn megablast Sakai/MG1655","threads":4,"runs":[{"id":"blastn megablast Sakai/MG1655 first","prepareMs":614,"runMs":5227,"generation":1,"retained":false},{"id":"blastn megablast Sakai/MG1655 warm","prepareMs":317,"runMs":5232,"generation":1,"retained":true},{"id":"tblastx LC738884/LC741431 cancelled","error":"RunCancelledError: run timed-2 was cancelled","prepareMs":null,"runMs":null,"cancelMs":0},{"id":"blastn megablast Sakai/MG1655 after cancel","prepareMs":606,"runMs":5560,"generation":2,"retained":false},{"id":"blastn megablast Sakai/MG1655 warm again","prepareMs":362,"runMs":5457,"generation":2,"retained":true}]}
+  ✓  4 [firefox] › tests/e2e/measure.spec.ts:298:1 › cancel: the time to cancel and to prepare the next search in a new runtime (55.4s)
+
+  2 skipped
+  2 passed (3.2m)

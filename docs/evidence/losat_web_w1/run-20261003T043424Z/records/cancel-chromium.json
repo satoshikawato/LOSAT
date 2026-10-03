@@ -1,0 +1,12 @@
+[
+  {
+    "threads": 1,
+    "cancelMs": 5,
+    "nextPrepareMs": 33
+  },
+  {
+    "threads": 4,
+    "cancelMs": 5,
+    "nextPrepareMs": 60
+  }
+]

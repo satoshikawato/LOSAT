@@ -1,0 +1,184 @@
+case_id	result
+prelim.default	same
+prelim.task_blastn	same
+prelim.max1	same
+prelim.max3	same
+prelim.max6	same
+prelim.max3_besthit	same
+prelim.max5_maxhsps1	same
+prelim.max2_evalue	same
+prelim.max3_fmt7	same
+prelim.max3_fmt0	same
+prelim.default_threads4	same
+prelim.scores_3_4	same
+prelim.scores_1_1	same
+ties.default	same
+ties.max3	same
+ties.max1_task_blastn	same
+batches.default	same
+batches.task_blastn	same
+batches.word7	same
+batches.besthit	same
+batches.fmt7	same
+batches.fmt0	same
+batches.threads4	same
+split.task_blastn	same
+split.besthit	same
+ambiguity.default	same
+ambiguity.task_blastn_word7	same
+lcase.blastn	same
+lcase.megablast	same
+t2.word4	same
+pal.default	same
+pal.task_blastn	same
+pal.word7_fmt0	same
+sq.default	same
+sq.task_blastn	same
+sq.word7	same
+sq.word16_fmt7	same
+rep.megablast	same
+rep.task_blastn	same
+rep.word9	same
+rep.word16	same
+rep2.task_blastn	same
+rep2.fmt0	same
+prelim.gaps10_1_2	same
+prelim.gaps10_2_3_max3	same
+ties.gaps10_1_1	same
+env.batch100	same
+env.batch1000	same
+env.batch5000_fmt7	same
+env.batch100000	same
+env.batch_negative	same
+env.batch0	same
+env.chunk40000	same
+env.chunk40000_overlap6	same
+env.chunk2000	same
+env.chunk1500_overlap50_fmt0	same
+env.chunk500	same
+env.chunk_negative	same
+env.chunk_blank	same
+env.chunk1000_batch5000	same
+env.chunk1000_fmt0	same
+env.chunk1000_fmt7	same
+env.split_overlap_near_resplit	same
+env.resplit_overlap155000	same
+env.resplit_8000_4100_fmt0	same
+env.resplit_3000_2900_megablast	same
+env.negative_pair_le	same
+env.negative_pair_wide	same
+env.negative_pair_wide_fmt0	same
+env.split_chunk300000	same
+env.split_overlap50	same
+env.split_overlap500	same
+env.split_overlap0	same
+env.split_overlap_negative	same
+env.split_besthit_batch	same
+env.prefetch0_fmt0	same
+env.prefetch5	same
+nosubject.fmt6	same
+nosubject.missing_query_out	same
+ncbirc.harmless_fmt0	same
+write.devfull_fmt0	same
+kaerror.later_batch.fmt6	same
+kaerror.later_batch.fmt0	same
+kaerror.later_batch.fmt7	same
+warnings.batches.fmt6	same
+warnings.batches.fmt0	same
+warnings.batch1000.fmt7	same
+warnings.batches.fmt0.merged	same
+warnings.batches.fmt6.merged	same
+warnings.batch1000.fmt7.merged	same
+warnings.batch1000.fmt0.merged	same
+kaerror.later_batch.fmt0.merged	same
+write.devfull_warnings_fmt0	same
+write.devfull_warnings_kaerror_fmt0	same
+write.devfull_kaerror_batch_fmt0	same
+scores.10000_20000	same
+scores.16383_32766_gaps	same
+scores.24000_30000_task_blastn	same
+scores.6000_21000_fmt0	same
+punct.nohit_fmt0	same
+punct.nohit_task_blastn_fmt0	same
+evalue.plus_inf	same
+evalue.minus_nan_task_blastn_fmt7	same
+evalue.nan_paren_fmt0	same
+evalue.1e999_word7	same
+ctoolkit.fmt0	same
+ctoolkit.empty_fmt0	same
+dc.w11_coding_16	exit 2, expected 0; stdout differs (expected 22 lines, got 0; first difference at line 1); stderr differs: b"error: the NCBI BLAST+ option -template_type is not supported by LOSAT's BLASTN"
+dc.w11_coding_18	exit 2, expected 0; stdout differs (expected 22 lines, got 0; first difference at line 1); stderr differs: b"error: the NCBI BLAST+ option -template_type is not supported by LOSAT's BLASTN"
+dc.w11_coding_21	exit 2, expected 0; stdout differs (expected 21 lines, got 0; first difference at line 1); stderr differs: b"error: the NCBI BLAST+ option -template_type is not supported by LOSAT's BLASTN"
+dc.w11_optimal_16	exit 2, expected 0; stdout differs (expected 21 lines, got 0; first difference at line 1); stderr differs: b"error: the NCBI BLAST+ option -template_type is not supported by LOSAT's BLASTN"
+dc.w11_optimal_18	exit 2, expected 0; stdout differs (expected 21 lines, got 0; first difference at line 1); stderr differs: b"error: the NCBI BLAST+ option -template_type is not supported by LOSAT's BLASTN"
+dc.w11_optimal_21	exit 2, expected 0; stdout differs (expected 22 lines, got 0; first difference at line 1); stderr differs: b"error: the NCBI BLAST+ option -template_type is not supported by LOSAT's BLASTN"
+dc.w11_coding_and_optimal_16	exit 2, expected 0; stdout differs (expected 22 lines, got 0; first difference at line 1); stderr differs: b"error: the NCBI BLAST+ option -template_type is not supported by LOSAT's BLASTN"
+dc.w11_coding_and_optimal_18	exit 2, expected 0; stdout differs (expected 22 lines, got 0; first difference at line 1); stderr differs: b"error: the NCBI BLAST+ option -template_type is not supported by LOSAT's BLASTN"
+dc.w11_coding_and_optimal_21	exit 2, expected 0; stdout differs (expected 22 lines, got 0; first difference at line 1); stderr differs: b"error: the NCBI BLAST+ option -template_type is not supported by LOSAT's BLASTN"
+dc.w12_coding_16	exit 2, expected 0; stdout differs (expected 18 lines, got 0; first difference at line 1); stderr differs: b"error: the NCBI BLAST+ option -template_type is not supported by LOSAT's BLASTN"
+dc.w12_coding_18	exit 2, expected 0; stdout differs (expected 20 lines, got 0; first difference at line 1); stderr differs: b"error: the NCBI BLAST+ option -template_type is not supported by LOSAT's BLASTN"
+dc.w12_coding_21	exit 2, expected 0; stdout differs (expected 18 lines, got 0; first difference at line 1); stderr differs: b"error: the NCBI BLAST+ option -template_type is not supported by LOSAT's BLASTN"
+dc.w12_optimal_16	exit 2, expected 0; stdout differs (expected 21 lines, got 0; first difference at line 1); stderr differs: b"error: the NCBI BLAST+ option -template_type is not supported by LOSAT's BLASTN"
+dc.w12_optimal_18	exit 2, expected 0; stdout differs (expected 18 lines, got 0; first difference at line 1); stderr differs: b"error: the NCBI BLAST+ option -template_type is not supported by LOSAT's BLASTN"
+dc.w12_optimal_21	exit 2, expected 0; stdout differs (expected 21 lines, got 0; first difference at line 1); stderr differs: b"error: the NCBI BLAST+ option -template_type is not supported by LOSAT's BLASTN"
+dc.w12_coding_and_optimal_16	exit 2, expected 0; stdout differs (expected 21 lines, got 0; first difference at line 1); stderr differs: b"error: the NCBI BLAST+ option -template_type is not supported by LOSAT's BLASTN"
+dc.w12_coding_and_optimal_18	exit 2, expected 0; stdout differs (expected 22 lines, got 0; first difference at line 1); stderr differs: b"error: the NCBI BLAST+ option -template_type is not supported by LOSAT's BLASTN"
+dc.w12_coding_and_optimal_21	exit 2, expected 0; stdout differs (expected 22 lines, got 0; first difference at line 1); stderr differs: b"error: the NCBI BLAST+ option -template_type is not supported by LOSAT's BLASTN"
+dc.megablast_w11_coding_18	exit 2, expected 0; stdout differs (expected 57 lines, got 0; first difference at line 1); stderr differs: b"error: the NCBI BLAST+ option -template_type is not supported by LOSAT's BLASTN"
+dc.default_threads4	exit 2, expected 0; stdout differs (expected 22 lines, got 0; first difference at line 1); stderr differs: b"error: invalid value 'dc-megablast' for '-task <TASK>': the task dc-megablast is not supported by LOSAT's BLASTN (use megablast or blastn)\n\nFor more information, try '--help'.\n"
+dc.two21_threads2_fmt7	exit 2, expected 0; stdout differs (expected 33 lines, got 0; first difference at line 1); stderr differs: b"error: the NCBI BLAST+ option -template_type is not supported by LOSAT's BLASTN"
+dc.small_two16	exit 2, expected 0; stdout differs (expected 3 lines, got 0; first difference at line 1); stderr differs: b"error: the NCBI BLAST+ option -template_type is not supported by LOSAT's BLASTN"
+dc.lcase_subject	exit 2, expected 0; stdout differs (expected 42 lines, got 0; first difference at line 1); stderr differs: b"error: invalid value 'dc-megablast' for '-task <TASK>': the task dc-megablast is not supported by LOSAT's BLASTN (use megablast or blastn)\n\nFor more information, try '--help'.\n"
+dc.lcase_subject_control	exit 2, expected 0; stdout differs (expected 43 lines, got 0; first difference at line 1); stderr differs: b"error: invalid value 'dc-megablast' for '-task <TASK>': the task dc-megablast is not supported by LOSAT's BLASTN (use megablast or blastn)\n\nFor more information, try '--help'.\n"
+dc.prelim	exit 2, expected 0; stdout differs (expected 500 lines, got 0; first difference at line 1); stderr differs: b"error: invalid value 'dc-megablast' for '-task <TASK>': the task dc-megablast is not supported by LOSAT's BLASTN (use megablast or blastn)\n\nFor more information, try '--help'.\n"
+dc.prelim_max3_fmt0	exit 2, expected 0; stdout differs (expected 133 lines, got 0; first difference at line 1); stderr differs: b"error: invalid value 'dc-megablast' for '-task <TASK>': the task dc-megablast is not supported by LOSAT's BLASTN (use megablast or blastn)\n\nFor more information, try '--help'.\n"
+dc.batches	exit 2, expected 0; stdout differs (expected 34 lines, got 0; first difference at line 1); stderr differs: b"error: invalid value 'dc-megablast' for '-task <TASK>': the task dc-megablast is not supported by LOSAT's BLASTN (use megablast or blastn)\n\nFor more information, try '--help'.\n"
+dc.batches_besthit	exit 2, expected 0; stdout differs (expected 34 lines, got 0; first difference at line 1); stderr differs: b"error: invalid value 'dc-megablast' for '-task <TASK>': the task dc-megablast is not supported by LOSAT's BLASTN (use megablast or blastn)\n\nFor more information, try '--help'.\n"
+dc.ambiguity	exit 2, expected 0; stdout differs (expected 1 lines, got 0; first difference at line 1); stderr differs: b"error: invalid value 'dc-megablast' for '-task <TASK>': the task dc-megablast is not supported by LOSAT's BLASTN (use megablast or blastn)\n\nFor more information, try '--help'.\n"
+dc.rep	exit 2, expected 0; stdout differs (expected 46 lines, got 0; first difference at line 1); stderr differs: b"error: invalid value 'dc-megablast' for '-task <TASK>': the task dc-megablast is not supported by LOSAT's BLASTN (use megablast or blastn)\n\nFor more information, try '--help'.\n"
+dc.split_unsplit	exit 2, expected 0; stdout differs (expected 6 lines, got 0; first difference at line 1); stderr differs: b"error: invalid value 'dc-megablast' for '-task <TASK>': the task dc-megablast is not supported by LOSAT's BLASTN (use megablast or blastn)\n\nFor more information, try '--help'.\n"
+dc.split_chunk300000	exit 2, expected 0; stdout differs (expected 6 lines, got 0; first difference at line 1); stderr differs: b"error: invalid value 'dc-megablast' for '-task <TASK>': the task dc-megablast is not supported by LOSAT's BLASTN (use megablast or blastn)\n\nFor more information, try '--help'.\n"
+dc.batch1000_fmt7	exit 2, expected 0; stdout differs (expected 229 lines, got 0; first difference at line 1); stderr differs: b"error: invalid value 'dc-megablast' for '-task <TASK>': the task dc-megablast is not supported by LOSAT's BLASTN (use megablast or blastn)\n\nFor more information, try '--help'.\n"
+dc.word13	exit 2, expected 1; stderr differs: b"error: invalid value 'dc-megablast' for '-task <TASK>': the task dc-megablast is not supported by LOSAT's BLASTN (use megablast or blastn)\n\nFor more information, try '--help'.\n"
+dc.word13_fmt0	exit 2, expected 1; stderr differs: b"error: invalid value 'dc-megablast' for '-task <TASK>': the task dc-megablast is not supported by LOSAT's BLASTN (use megablast or blastn)\n\nFor more information, try '--help'.\n"
+dc.blastn_template	exit 2, expected 1; stderr differs: b"error: the NCBI BLAST+ option -template_type is not supported by LOSAT's BLASTN"
+dc.short_template	exit 2, expected 1; stderr differs: b"error: the NCBI BLAST+ option -template_type is not supported by LOSAT's BLASTN"
+dc.megablast_template_word28	exit 2, expected 1; stderr differs: b"error: the NCBI BLAST+ option -template_type is not supported by LOSAT's BLASTN"
+dc.zero_gaps	exit 2, expected 1; stderr differs: b"error: invalid value 'dc-megablast' for '-task <TASK>': the task dc-megablast is not supported by LOSAT's BLASTN (use megablast or blastn)\n\nFor more information, try '--help'.\n"
+dc.div_w11_coding_16	exit 2, expected 0; stdout differs (expected 22 lines, got 0; first difference at line 1); stderr differs: b"error: the NCBI BLAST+ option -template_type is not supported by LOSAT's BLASTN"
+dc.div_w11_coding_18	exit 2, expected 0; stdout differs (expected 36 lines, got 0; first difference at line 1); stderr differs: b"error: the NCBI BLAST+ option -template_type is not supported by LOSAT's BLASTN"
+dc.div_w11_coding_21	exit 2, expected 0; stdout differs (expected 23 lines, got 0; first difference at line 1); stderr differs: b"error: the NCBI BLAST+ option -template_type is not supported by LOSAT's BLASTN"
+dc.div_w11_optimal_16	exit 2, expected 0; stdout differs (expected 10 lines, got 0; first difference at line 1); stderr differs: b"error: the NCBI BLAST+ option -template_type is not supported by LOSAT's BLASTN"
+dc.div_w11_optimal_18	exit 2, expected 0; stdout differs (expected 14 lines, got 0; first difference at line 1); stderr differs: b"error: the NCBI BLAST+ option -template_type is not supported by LOSAT's BLASTN"
+dc.div_w11_optimal_21	exit 2, expected 0; stdout differs (expected 11 lines, got 0; first difference at line 1); stderr differs: b"error: the NCBI BLAST+ option -template_type is not supported by LOSAT's BLASTN"
+dc.div_w11_coding_and_optimal_16	exit 2, expected 0; stdout differs (expected 29 lines, got 0; first difference at line 1); stderr differs: b"error: the NCBI BLAST+ option -template_type is not supported by LOSAT's BLASTN"
+dc.div_w11_coding_and_optimal_18	exit 2, expected 0; stdout differs (expected 37 lines, got 0; first difference at line 1); stderr differs: b"error: the NCBI BLAST+ option -template_type is not supported by LOSAT's BLASTN"
+dc.div_w11_coding_and_optimal_21	exit 2, expected 0; stdout differs (expected 26 lines, got 0; first difference at line 1); stderr differs: b"error: the NCBI BLAST+ option -template_type is not supported by LOSAT's BLASTN"
+dc.div_w12_coding_16	exit 2, expected 0; stdout differs (expected 16 lines, got 0; first difference at line 1); stderr differs: b"error: the NCBI BLAST+ option -template_type is not supported by LOSAT's BLASTN"
+dc.div_w12_coding_18	exit 2, expected 0; stdout differs (expected 18 lines, got 0; first difference at line 1); stderr differs: b"error: the NCBI BLAST+ option -template_type is not supported by LOSAT's BLASTN"
+dc.div_w12_coding_21	exit 2, expected 0; stdout differs (expected 21 lines, got 0; first difference at line 1); stderr differs: b"error: the NCBI BLAST+ option -template_type is not supported by LOSAT's BLASTN"
+dc.div_w12_optimal_16	exit 2, expected 0; stdout differs (expected 5 lines, got 0; first difference at line 1); stderr differs: b"error: the NCBI BLAST+ option -template_type is not supported by LOSAT's BLASTN"
+dc.div_w12_optimal_18	exit 2, expected 0; stdout differs (expected 10 lines, got 0; first difference at line 1); stderr differs: b"error: the NCBI BLAST+ option -template_type is not supported by LOSAT's BLASTN"
+dc.div_w12_optimal_21	exit 2, expected 0; stdout differs (expected 9 lines, got 0; first difference at line 1); stderr differs: b"error: the NCBI BLAST+ option -template_type is not supported by LOSAT's BLASTN"
+dc.div_w12_coding_and_optimal_16	exit 2, expected 0; stdout differs (expected 18 lines, got 0; first difference at line 1); stderr differs: b"error: the NCBI BLAST+ option -template_type is not supported by LOSAT's BLASTN"
+dc.div_w12_coding_and_optimal_18	exit 2, expected 0; stdout differs (expected 24 lines, got 0; first difference at line 1); stderr differs: b"error: the NCBI BLAST+ option -template_type is not supported by LOSAT's BLASTN"
+dc.div_w12_coding_and_optimal_21	exit 2, expected 0; stdout differs (expected 24 lines, got 0; first difference at line 1); stderr differs: b"error: the NCBI BLAST+ option -template_type is not supported by LOSAT's BLASTN"
+dc.div_megablast_w11_coding_18	exit 2, expected 0; stdout differs (expected 55 lines, got 0; first difference at line 1); stderr differs: b"error: the NCBI BLAST+ option -template_type is not supported by LOSAT's BLASTN"
+dc.div_two21_fmt0	exit 2, expected 0; stdout differs (expected 1079 lines, got 0; first difference at line 1); stderr differs: b"error: the NCBI BLAST+ option -template_type is not supported by LOSAT's BLASTN"
+dc.div_w12_optimal_16_fmt7	exit 2, expected 0; stdout differs (expected 115 lines, got 0; first difference at line 1); stderr differs: b"error: the NCBI BLAST+ option -template_type is not supported by LOSAT's BLASTN"
+dc.div_two18_threads4	exit 2, expected 0; stdout differs (expected 37 lines, got 0; first difference at line 1); stderr differs: b"error: the NCBI BLAST+ option -template_type is not supported by LOSAT's BLASTN"
+short.default	exit 2, expected 0; stdout differs (expected 435 lines, got 0; first difference at line 1); stderr differs: b"error: invalid value 'blastn-short' for '-task <TASK>': the task blastn-short is not supported by LOSAT's BLASTN (use megablast or blastn)\n\nFor more information, try '--help'.\n"
+short.default_threads4	exit 2, expected 0; stdout differs (expected 435 lines, got 0; first difference at line 1); stderr differs: b"error: invalid value 'blastn-short' for '-task <TASK>': the task blastn-short is not supported by LOSAT's BLASTN (use megablast or blastn)\n\nFor more information, try '--help'.\n"
+short.word4	exit 2, expected 0; stdout differs (expected 287 lines, got 0; first difference at line 1); stderr differs: b"error: invalid value 'blastn-short' for '-task <TASK>': the task blastn-short is not supported by LOSAT's BLASTN (use megablast or blastn)\n\nFor more information, try '--help'.\n"
+short.word16	exit 2, expected 0; stdout differs (expected 36 lines, got 0; first difference at line 1); stderr differs: b"error: invalid value 'blastn-short' for '-task <TASK>': the task blastn-short is not supported by LOSAT's BLASTN (use megablast or blastn)\n\nFor more information, try '--help'.\n"
+short.reward2_penalty3_gaps	exit 2, expected 0; stdout differs (expected 432 lines, got 0; first difference at line 1); stderr differs: b"error: invalid value 'blastn-short' for '-task <TASK>': the task blastn-short is not supported by LOSAT's BLASTN (use megablast or blastn)\n\nFor more information, try '--help'.\n"
+short.evalue1e3_dust	exit 2, expected 0; stdout differs (expected 7 lines, got 0; first difference at line 1); stderr differs: b"error: invalid value 'blastn-short' for '-task <TASK>': the task blastn-short is not supported by LOSAT's BLASTN (use megablast or blastn)\n\nFor more information, try '--help'.\n"
+short.dust_no_fmt7	exit 2, expected 0; stdout differs (expected 476 lines, got 0; first difference at line 1); stderr differs: b"error: invalid value 'blastn-short' for '-task <TASK>': the task blastn-short is not supported by LOSAT's BLASTN (use megablast or blastn)\n\nFor more information, try '--help'.\n"
+short.lcase	exit 2, expected 0; stdout differs (expected 390 lines, got 0; first difference at line 1); stderr differs: b"error: invalid value 'blastn-short' for '-task <TASK>': the task blastn-short is not supported by LOSAT's BLASTN (use megablast or blastn)\n\nFor more information, try '--help'.\n"
+short.perc_besthit	exit 2, expected 0; stdout differs (expected 41 lines, got 0; first difference at line 1); stderr differs: b"error: invalid value 'blastn-short' for '-task <TASK>': the task blastn-short is not supported by LOSAT's BLASTN (use megablast or blastn)\n\nFor more information, try '--help'.\n"
+short.batches	exit 2, expected 0; stdout differs (expected 38 lines, got 0; first difference at line 1); stderr differs: b"error: invalid value 'blastn-short' for '-task <TASK>': the task blastn-short is not supported by LOSAT's BLASTN (use megablast or blastn)\n\nFor more information, try '--help'.\n"
+short.prelim_max3	exit 2, expected 0; stdout differs (expected 3 lines, got 0; first difference at line 1); stderr differs: b"error: invalid value 'blastn-short' for '-task <TASK>': the task blastn-short is not supported by LOSAT's BLASTN (use megablast or blastn)\n\nFor more information, try '--help'.\n"
+short.ambiguity	exit 2, expected 0; stdout differs (expected 12 lines, got 0; first difference at line 1); stderr differs: b"error: invalid value 'blastn-short' for '-task <TASK>': the task blastn-short is not supported by LOSAT's BLASTN (use megablast or blastn)\n\nFor more information, try '--help'.\n"
+short.split	exit 2, expected 0; stdout differs (expected 1 lines, got 0; first difference at line 1); stderr differs: b"error: invalid value 'blastn-short' for '-task <TASK>': the task blastn-short is not supported by LOSAT's BLASTN (use megablast or blastn)\n\nFor more information, try '--help'.\n"
+short.nohit_fmt0	exit 2, expected 0; stdout differs (expected 45 lines, got 0; first difference at line 1); stderr differs: b"error: invalid value 'blastn-short' for '-task <TASK>': the task blastn-short is not supported by LOSAT's BLASTN (use megablast or blastn)\n\nFor more information, try '--help'.\n"
+short.evalue0	exit 2, expected 1; stderr differs: b"error: invalid value 'blastn-short' for '-task <TASK>': the task blastn-short is not supported by LOSAT's BLASTN (use megablast or blastn)\n\nFor more information, try '--help'.\n"

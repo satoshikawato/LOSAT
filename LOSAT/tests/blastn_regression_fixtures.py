@@ -65,6 +65,8 @@ A = f"-query {I}/ambiguity_query_c.fa -subject {I}/ambiguity_subject.fa"
 O = "tests/fasta/outfmt0"
 DCQ = f"-query {O}/dc_query.fasta -subject {O}/dc_subject.fasta"
 DC = f"{DCQ} -task dc-megablast"
+DVQ = f"-query {O}/dc_div_query.fasta -subject {O}/dc_div_subject.fasta"
+DV = f"{DVQ} -task dc-megablast"
 SH = f"-query {O}/short_query.fasta -subject {O}/short_subject.fasta -task blastn-short"
 # (case_id, NCBI argv after `blastn`, extra LOSAT-only arguments[, environment[, NCBI environment]])
 _CASES = [
@@ -238,7 +240,8 @@ _CASES = [
     ("evalue.1e999_word7", f"{A} -task blastn -word_size 7 -evalue 1e999 -outfmt 6", ""),
     # E2g T11: showdefline.cpp kBits is "(bits)" when CTOOLKIT_COMPATIBLE is set (also empty).
     ("ctoolkit.fmt0", f"{P} -max_target_seqs 3 -outfmt 0", "", "CTOOLKIT_COMPATIBLE=1"),
-    ("ctoolkit.empty_fmt0", f"{T} -task blastn -max_target_seqs 5 -outfmt 0", "", "CTOOLKIT_COMPATIBLE="),    # Session SD (E2i): dc-megablast and blastn-short. dc_*.fasta and short_*.fasta are made
+    ("ctoolkit.empty_fmt0", f"{T} -task blastn -max_target_seqs 5 -outfmt 0", "", "CTOOLKIT_COMPATIBLE="),
+    # Session SD (E2i): dc-megablast and blastn-short. dc_*.fasta and short_*.fasta are made
     # by docs/evidence/losat_web_e2i/make_inputs.py (LOSAT/tests/fasta/outfmt0/, also the
     # outfmt 0/7 fixtures dc.* and short.* of outfmt0_manifest.tsv). Every template type,
     # length and word size of NCBI's s_GetDiscTemplateType (blast_nalookup.c:600-643):
@@ -291,6 +294,39 @@ _CASES = [
     ("dc.short_template", f"{DCQ} -task blastn-short -template_type optimal -template_length 21 -outfmt 6", ""),
     ("dc.megablast_template_word28", f"{DCQ} -template_type coding -template_length 18 -outfmt 6", ""),
     ("dc.zero_gaps", f"{DC} -gapopen 0 -gapextend 0 -outfmt 6", ""),
+    # The divergent pair (dc_div_*.fasta, added after the SD audit): NCBI gives a different
+    # output for each of the 18 combinations (the pair above gives 9), so each scanner of
+    # blast_nascan.c:2202-2626 and the second template are told apart.
+    ("dc.div_w11_coding_16", f"{DV} -word_size 11 -template_type coding -template_length 16 -outfmt 6", ""),
+    ("dc.div_w11_coding_18", f"{DV} -word_size 11 -template_type coding -template_length 18 -outfmt 6", ""),
+    ("dc.div_w11_coding_21", f"{DV} -word_size 11 -template_type coding -template_length 21 -outfmt 6", ""),
+    ("dc.div_w11_optimal_16", f"{DV} -word_size 11 -template_type optimal -template_length 16 -outfmt 6", ""),
+    ("dc.div_w11_optimal_18", f"{DV} -word_size 11 -template_type optimal -template_length 18 -outfmt 6", ""),
+    ("dc.div_w11_optimal_21", f"{DV} -word_size 11 -template_type optimal -template_length 21 -outfmt 6", ""),
+    ("dc.div_w11_coding_and_optimal_16",
+     f"{DV} -word_size 11 -template_type coding_and_optimal -template_length 16 -outfmt 6", ""),
+    ("dc.div_w11_coding_and_optimal_18",
+     f"{DV} -word_size 11 -template_type coding_and_optimal -template_length 18 -outfmt 6", ""),
+    ("dc.div_w11_coding_and_optimal_21",
+     f"{DV} -word_size 11 -template_type coding_and_optimal -template_length 21 -outfmt 6", ""),
+    ("dc.div_w12_coding_16", f"{DV} -word_size 12 -template_type coding -template_length 16 -outfmt 6", ""),
+    ("dc.div_w12_coding_18", f"{DV} -word_size 12 -template_type coding -template_length 18 -outfmt 6", ""),
+    ("dc.div_w12_coding_21", f"{DV} -word_size 12 -template_type coding -template_length 21 -outfmt 6", ""),
+    ("dc.div_w12_optimal_16", f"{DV} -word_size 12 -template_type optimal -template_length 16 -outfmt 6", ""),
+    ("dc.div_w12_optimal_18", f"{DV} -word_size 12 -template_type optimal -template_length 18 -outfmt 6", ""),
+    ("dc.div_w12_optimal_21", f"{DV} -word_size 12 -template_type optimal -template_length 21 -outfmt 6", ""),
+    ("dc.div_w12_coding_and_optimal_16",
+     f"{DV} -word_size 12 -template_type coding_and_optimal -template_length 16 -outfmt 6", ""),
+    ("dc.div_w12_coding_and_optimal_18",
+     f"{DV} -word_size 12 -template_type coding_and_optimal -template_length 18 -outfmt 6", ""),
+    ("dc.div_w12_coding_and_optimal_21",
+     f"{DV} -word_size 12 -template_type coding_and_optimal -template_length 21 -outfmt 6", ""),
+    ("dc.div_megablast_w11_coding_18", f"{DVQ} -word_size 11 -template_type coding -template_length 18 -outfmt 6",
+     ""),
+    ("dc.div_two21_fmt0", f"{DV} -template_type coding_and_optimal -template_length 21 -outfmt 0", ""),
+    ("dc.div_w12_optimal_16_fmt7", f"{DV} -word_size 12 -template_type optimal -template_length 16 -outfmt 7", ""),
+    ("dc.div_two18_threads4", f"{DV} -template_type coding_and_optimal -template_length 18 -outfmt 6",
+     "-num_threads 4"),
     ("short.default", f"{SH} -outfmt 6", ""),
     ("short.default_threads4", f"{SH} -outfmt 6", "-num_threads 4"),
     ("short.word4", f"{SH} -word_size 4 -evalue 10 -outfmt 6", ""),

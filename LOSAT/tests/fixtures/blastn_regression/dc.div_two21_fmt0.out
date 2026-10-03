@@ -1,0 +1,1079 @@
+BLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/dc_div_subject.fasta).
+           37 sequences; 13,609 total letters
+
+
+
+Query= dvq1 AP027280 10767-11089
+
+Length=323
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+dvs6 LC741431 97422-97744                                             65.3    2e-13
+
+
+> dvs6 LC741431 97422-97744
+Length=323
+
+ Score = 65.3 bits (71),  Expect = 2e-13
+ Identities = 88/123 (72%), Gaps = 0/123 (0%)
+ Strand=Plus/Plus
+
+Query  101  ATGTGGATCTTGGGCAACATTCGACGACCCGCATTCTGTATTGCCTTGGGTGGCAAGCAT  160
+            |||||| || ||||| || || ||||| || ||||||||  | || ||||| || |  ||
+Sbjct  101  ATGTGGCTCATGGGCTACTTTTGACGAACCACATTCTGTTCTTCCATGGGTTGCGAATAT  160
+
+Query  161  GAAAGATTTGCCTAAAGGACAATCCCTCTCCTGCGATAAAGGGATGTCCACTTTAAAGGC  220
+            |||||| ||  |||| ||   |||  |  | || |||||||| ||| || | | | ||||
+Sbjct  161  GAAAGACTTAGCTAAGGGGACATCAGTGACATGTGATAAAGGTATGACCGCCTCAGAGGC  220
+
+Query  221  AGT  223
+             ||
+Sbjct  221  GGT  223
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 3996219
+
+
+Query= dvq2 AP027280 13869-14221
+
+Length=353
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+dvs33 LC738884 167607-167959                                          69.8    4e-15
+
+
+> dvs33 LC738884 167607-167959
+Length=353
+
+ Score = 69.8 bits (76),  Expect = 4e-15
+ Identities = 107/153 (70%), Gaps = 0/153 (0%)
+ Strand=Plus/Minus
+
+Query  101  GTCGTACAGGCAAAATTTGGGTAAACCTTCAAACTCGCCTGTGCAGTTATCAAAGCATAT  160
+            |||||| ||||| ||||| || | | | || || || ||  | || ||||||||||| | 
+Sbjct  253  GTCGTAGAGGCAGAATTTTGGCATATCGTCGAATTCTCCATTACAATTATCAAAGCACAG  194
+
+Query  161  TTGTATCAAAGAACCTTCCGCACCTATTAAATTTCCAACCATAAAAGAGTCTATGTGTTC  220
+            ||| |  |  || || ||||  || || | ||| ||  | |  || || || || || ||
+Sbjct  193  TTGGAGTATGGATCCGTCCGTGCCGATAAGATTGCCGGCAACGAAGGAATCAATATGCTC  134
+
+Query  221  ATTAACAAAAACACTATTTTCTTTAGTGAGTGT  253
+             || || ||  | ||||||||||| ||||||||
+Sbjct  133  TTTTACGAATGCGCTATTTTCTTTGGTGAGTGT  101
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 4386729
+
+
+Query= dvq3 AP027280 16200-16591
+
+Length=392
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+dvs32 LC738884 165308-165700                                          70.7    5e-15
+
+
+> dvs32 LC738884 165308-165700
+Length=393
+
+ Score = 70.7 bits (77),  Expect = 5e-15
+ Identities = 132/193 (68%), Gaps = 1/193 (1%)
+ Strand=Plus/Minus
+
+Query  101  AAAAGAATCCCCAGTTTGCTCTAGTGACATGACCATCTTTTTTGATTCGTTTGTTGTCCT  160
+            ||| || |||||||| || ||||| ||||| |||| |||||| | |||    |   | ||
+Sbjct  293  AAACGAGTCCCCAGTCTGTTCTAGCGACATTACCACCTTTTTGGGTTCCGGGGAAATTCT  234
+
+Query  161  TAAACGCTTCACTGCATCGGTGACAGAAGTTGCCTTGATATTCAATAGTGCACCTTTACA  220
+            ||  || || || || || |  || ||    ||||| |    ||  ||||| | ||| ||
+Sbjct  233  TAGGCGTTTGACAGCCTCTGCCACGGAGTGCGCCTTCACGGACAGGAGTGCGCTTTTGCA  174
+
+Query  221  TGCTGCCACAGAAGTACTTGCTGTATTAATGAAGTATTGTCTCCTCAACTTTTCAAAACA  280
+             || || |||||| |||| || || || ||||| ||||| |  ||||  ||||  || ||
+Sbjct  173  CGCCGCGACAGAAATACTGGCAGTGTTGATGAAATATTGGCGTCTCAGTTTTTTGAACCA  114
+
+Query  281  CT-CGTCGTCAAA  292
+            || || ||| |||
+Sbjct  113  CTCCGCCGTAAAA  101
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 4894392
+
+
+Query= dvq4 AP027280 19534-19917
+
+Length=384
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+dvs4 LC741431 80300-80685                                             97.8    3e-23
+
+
+> dvs4 LC741431 80300-80685
+Length=386
+
+ Score = 97.8 bits (107),  Expect = 3e-23
+ Identities = 136/188 (72%), Gaps = 6/188 (3%)
+ Strand=Plus/Minus
+
+Query  101  AGAATAAA--AGTTCAGATCCGCCGTGAACACTACCCGAAACCATGCGACTATTTCGCAA  158
+            ||||||||  | ||| || || || || ||| | || |||| ||| ||||| || || | 
+Sbjct  286  AGAATAAAGAATTTCTGACCCACCATGTACATTGCCTGAAATCATACGACTGTTACGTAG  227
+
+Query  159  ACATTCTGTGGCCAACATACTATGTTCATAGGGTTTTTGAGGTATGTTTCCGGCCAAAAC  218
+            |||||| |||||||  |   ||||||| |||||||| ||||||| ||  || ||   |||
+Sbjct  226  ACATTCAGTGGCCAGTAGGTTATGTTCGTAGGGTTTCTGAGGTACGTGACCTGCGGTAAC  167
+
+Query  219  ATTAGCTGCTGGCTCAATGTAAAAGGGTGCAGTACAGAATGGCCTAT--GCTGCCCCGAG  276
+             ||||| || || || |  |||||||  || || ||||| || | ||  | ||||  || 
+Sbjct  166  GTTAGCCGCCGGTTCCACATAAAAGGCGGCTGTGCAGAACGGACGATCGGATGCC--GAT  109
+
+Query  277  GAAGGTTT  284
+            ||||||||
+Sbjct  108  GAAGGTTT  101
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 4790256
+
+
+Query= dvq5 AP027280 23538-23829
+
+Length=292
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+dvs34 LC738884 180931-181222                                          85.1    2e-19
+
+
+> dvs34 LC738884 180931-181222
+Length=292
+
+ Score = 85.1 bits (93),  Expect = 2e-19
+ Identities = 76/93 (82%), Gaps = 2/93 (2%)
+ Strand=Plus/Plus
+
+Query  101  AGAGATAATATTGGAGGATTTT-TATTAGCCACAATTCAAAACGATGACCGCCAAGTGAA  159
+            ||||| ||||||| |||| |   |||| |  || || |||||||| ||||| ||| | ||
+Sbjct  101  AGAGAAAATATTGCAGGACTGGCTATT-GAAACGATACAAAACGAGGACCGTCAAATAAA  159
+
+Query  160  TGTGGAGAGCATACAAAAACTTTTGACGGCCAG  192
+            ||| || ||||||||||||||||||||||||||
+Sbjct  160  TGTCGAAAGCATACAAAAACTTTTGACGGCCAG  192
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 3592692
+
+
+Query= dvq6 AP027280 62157-62536
+
+Length=380
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+dvs28 LC738884 98492-98859                                            83.3    7e-19
+dvs27 LC738884 94543-94910                                            83.3    7e-19
+dvs15 LC738884 1797-2164                                              78.8    9e-18
+dvs7 LC741431 101341-101653                                           70.7    5e-15
+
+
+> dvs28 LC738884 98492-98859
+Length=368
+
+ Score = 83.3 bits (91),  Expect = 7e-19
+ Identities = 119/168 (71%), Gaps = 0/168 (0%)
+ Strand=Plus/Minus
+
+Query  101  AATTGGGAACTTGAGATTAGACACTATGTCATCTCTATGGGAGGTGCTGCAGTGACAAAG  160
+            ||||||||| | ||  || | || || || ||  | ||||  ||  | || |||||||| 
+Sbjct  268  AATTGGGAATTCGAAGTTCGCCAATACGTTATTACCATGGCGGGATCGGCGGTGACAAAA  209
+
+Query  161  ATTTCCGATGAAGATTTGGAACAATTCACGCCTGTAAGAGGTGCTGTCTCTGTCACTACA  220
+             |    ||||||||| | |   ||| ||| || || | |||||| || |||||||| |||
+Sbjct  208  GTGAAGGATGAAGATCTAGTTAAATACACACCGGTTAAAGGTGCCGTGTCTGTCACGACA  149
+
+Query  221  GCACCTAATGATAAGCTACCTGTAGGGGCACATCAGACATGGAAGGAT  268
+            || || |||||||| || || || || ||| |||| || ||| | |||
+Sbjct  148  GCCCCAAATGATAAACTTCCCGTGGGCGCATATCAAACTTGGCAAGAT  101
+
+
+> dvs27 LC738884 94543-94910
+Length=368
+
+ Score = 83.3 bits (91),  Expect = 7e-19
+ Identities = 119/168 (71%), Gaps = 0/168 (0%)
+ Strand=Plus/Minus
+
+Query  101  AATTGGGAACTTGAGATTAGACACTATGTCATCTCTATGGGAGGTGCTGCAGTGACAAAG  160
+            ||||||||| | ||  || | || || || ||  | ||||  ||  | || |||||||| 
+Sbjct  268  AATTGGGAATTCGAAGTTCGCCAATACGTTATTACCATGGCGGGATCGGCGGTGACAAAA  209
+
+Query  161  ATTTCCGATGAAGATTTGGAACAATTCACGCCTGTAAGAGGTGCTGTCTCTGTCACTACA  220
+             |    ||||||||| | |   ||| ||| || || | |||||| || |||||||| |||
+Sbjct  208  GTGAAGGATGAAGATCTAGTTAAATACACACCGGTTAAAGGTGCCGTGTCTGTCACGACA  149
+
+Query  221  GCACCTAATGATAAGCTACCTGTAGGGGCACATCAGACATGGAAGGAT  268
+            || || |||||||| || || || || ||| |||| || ||| | |||
+Sbjct  148  GCCCCAAATGATAAACTTCCCGTGGGCGCATATCAAACTTGGCAAGAT  101
+
+
+> dvs15 LC738884 1797-2164
+Length=368
+
+ Score = 78.8 bits (86),  Expect = 9e-18
+ Identities = 118/168 (70%), Gaps = 0/168 (0%)
+ Strand=Plus/Minus
+
+Query  101  AATTGGGAACTTGAGATTAGACACTATGTCATCTCTATGGGAGGTGCTGCAGTGACAAAG  160
+            ||||||||| | ||  || | || || || ||  | ||||  ||  | || |||||||| 
+Sbjct  268  AATTGGGAATTCGAAGTTCGCCAATACGTTATTACCATGGCGGGATCGGCGGTGACAAAA  209
+
+Query  161  ATTTCCGATGAAGATTTGGAACAATTCACGCCTGTAAGAGGTGCTGTCTCTGTCACTACA  220
+             |    ||||| ||| | |   ||| ||| || || | |||||| || |||||||| |||
+Sbjct  208  GTGAAGGATGAGGATCTAGTTAAATACACACCGGTTAAAGGTGCCGTGTCTGTCACGACA  149
+
+Query  221  GCACCTAATGATAAGCTACCTGTAGGGGCACATCAGACATGGAAGGAT  268
+            || || |||||||| || || || || ||| |||| || ||| | |||
+Sbjct  148  GCCCCAAATGATAAACTTCCCGTGGGCGCATATCAAACTTGGCAAGAT  101
+
+
+> dvs7 LC741431 101341-101653
+Length=313
+
+ Score = 70.7 bits (77),  Expect = 5e-15
+ Identities = 84/113 (74%), Gaps = 1/113 (1%)
+ Strand=Plus/Minus
+
+Query  169  TGAAGATTTGGAACAATTCACGCCTGTAAGAGGTGCTGTCTCTGTCACTACAGCACCTAA  228
+            ||| |||||||||||||||||||| || |  || || || ||||  || || ||||||||
+Sbjct  213  TGATGATTTGGAACAATTCACGCCCGTTAAGGGCGCAGTATCTGCAACCACTGCACCTAA  154
+
+Query  229  TGATAAGCTACCTGTAGGGGCACATCAGACATGGAAGGATG-AACAAACACTA  280
+             || || || || |   |||| || |  |||||| | |||| || |||| |||
+Sbjct  153  CGACAAACTCCCAGACCGGGCGCACCTAACATGGGACGATGAAAGAAACGCTA  101
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 4738188
+
+
+Query= dvq7 AP027280 71673-71983
+
+Length=311
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+dvs35 LC738884 217989-218299                                          70.7    4e-15
+
+
+> dvs35 LC738884 217989-218299
+Length=311
+
+ Score = 70.7 bits (77),  Expect = 4e-15
+ Identities = 82/111 (74%), Gaps = 0/111 (0%)
+ Strand=Plus/Plus
+
+Query  101  ACACACGTTTTTATGATGTCCAACCATCAGGTTCCATTTCACCAGCACATCAGAATCGTG  160
+            |||||| |  || |||||  | ||||| |  ||||| ||  |||| ||||||||||||||
+Sbjct  101  ACACACCTGGTTGTGATGAGCCACCATTAAATTCCACTTGGCCAGTACATCAGAATCGTG  160
+
+Query  161  GGAGAAAAGATTCATAGAAAGTGTTTGATTTTCATCGTTGGTGTGTTGCTT  211
+             || || ||||| |  || | | | |||   ||  ||||||||||||||||
+Sbjct  161  CGAAAATAGATTGACGGACACTTTCTGACGATCCACGTTGGTGTGTTGCTT  211
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 3840015
+
+
+Query= dvq8 AP027280 103602-103940
+
+Length=339
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+dvs10 LC741431 199382-199720                                          112     1e-27
+dvs19 LC738884 20773-21098                                            70.7    4e-15
+
+
+> dvs10 LC741431 199382-199720
+Length=339
+
+ Score = 112 bits (123),  Expect = 1e-27
+ Identities = 108/139 (78%), Gaps = 0/139 (0%)
+ Strand=Plus/Minus
+
+Query  101  TAATTTCTTTGCTCGAGGCCACTTGGCTCCGGCTGGAGATTTTTTCCTCGCTTCAGAGAG  160
+            ||||||  | ||  |||| || |||||||| |||| |||||||||||| ||||  || ||
+Sbjct  239  TAATTTTATGGCCAGAGGACATTTGGCTCCCGCTGCAGATTTTTTCCTAGCTTGTGAAAG  180
+
+Query  161  ATGGGCAACTTTTGCTCTAGAGAATGCAGTACCTCAAATACAGAACCATAACAATGGTGA  220
+             |||||||||||  | |||   ||||  |||||||||   |||| |||||||||||||  
+Sbjct  179  GTGGGCAACTTTCTCACTATCTAATGTCGTACCTCAATGGCAGACCCATAACAATGGTCG  120
+
+Query  221  ATGGAAAGATATTGAAAAT  239
+             ||||| | ||||||||||
+Sbjct  119  TTGGAAGGCTATTGAAAAT  101
+
+
+> dvs19 LC738884 20773-21098
+Length=326
+
+ Score = 70.7 bits (77),  Expect = 4e-15
+ Identities = 91/126 (72%), Gaps = 0/126 (0%)
+ Strand=Plus/Minus
+
+Query  111  GCTCGAGGCCACTTGGCTCCGGCTGGAGATTTTTTCCTCGCTTCAGAGAGATGGGCAACT  170
+            ||||| ||||| || || || || | |||||| ||||||||  | || ||||||||||| 
+Sbjct  226  GCTCGGGGCCATTTAGCGCCCGCCGCAGATTTCTTCCTCGCGGCTGAAAGATGGGCAACA  167
+
+Query  171  TTTGCTCTAGAGAATGCAGTACCTCAAATACAGAACCATAACAATGGTGAATGGAAAGAT  230
+            ||  | || || || || || || ||    || | ||| ||||  || || |||||||| 
+Sbjct  166  TTCTCGCTGGAAAACGCGGTGCCACAGTGGCAAAGCCACAACAGCGGCGAGTGGAAAGAC  107
+
+Query  231  ATTGAA  236
+            || |||
+Sbjct  106  ATCGAA  101
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 4204491
+
+
+Query= dvq9 AP027280 104288-104588
+
+Length=301
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+dvs20 LC738884 24067-24367                                            102     6e-25
+dvs11 LC741431 202815-203115                                          84.2    2e-19
+
+
+> dvs20 LC738884 24067-24367
+Length=301
+
+ Score = 102 bits (112),  Expect = 6e-25
+ Identities = 83/101 (82%), Gaps = 0/101 (0%)
+ Strand=Plus/Minus
+
+Query  101  ACAATAACAGAGTTGGGGGAAAAATCAGTCGTGCTACGTCCAGACTGGCCAGTATTTTTA  160
+            ||||| ||||||||||| ||||| || |||||| | | ||| || |||||||| || || 
+Sbjct  201  ACAATGACAGAGTTGGGCGAAAATTCCGTCGTGTTTCTTCCCGATTGGCCAGTGTTCTTG  142
+
+Query  161  CTGCTCCATGGTGTAGGATCATGCTTTCTAGGCTTGTCTGA  201
+            || |||||||||||||| || |  |||||||||||||| ||
+Sbjct  141  CTACTCCATGGTGTAGGGTCGTATTTTCTAGGCTTGTCGGA  101
+
+
+> dvs11 LC741431 202815-203115
+Length=301
+
+ Score = 84.2 bits (92),  Expect = 2e-19
+ Identities = 79/101 (78%), Gaps = 0/101 (0%)
+ Strand=Plus/Minus
+
+Query  101  ACAATAACAGAGTTGGGGGAAAAATCAGTCGTGCTACGTCCAGACTGGCCAGTATTTTTA  160
+            || || | ||||||||| || || || || ||||| || ||||| || |||||||| |||
+Sbjct  201  ACTATGATAGAGTTGGGTGAGAACTCGGTGGTGCTTCGGCCAGATTGTCCAGTATTCTTA  142
+
+Query  161  CTGCTCCATGGTGTAGGATCATGCTTTCTAGGCTTGTCTGA  201
+            || ||||| || ||||| |||   |||||||| ||||| ||
+Sbjct  141  CTACTCCACGGGGTAGGGTCAGATTTTCTAGGTTTGTCCGA  101
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 3709845
+
+
+Query= dvq10 AP027280 114818-115214
+
+Length=397
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+dvs8 LC741431 140198-140594                                           86.0    6e-20
+
+
+> dvs8 LC741431 140198-140594
+Length=397
+
+ Score = 86.0 bits (94),  Expect = 6e-20
+ Identities = 137/197 (70%), Gaps = 0/197 (0%)
+ Strand=Plus/Minus
+
+Query  101  ACTCCCATGTCCACAAGTGCTAAAGGTTGTATAGTTCCATCCCTCTTTGGTGGGAATGGT  160
+            || ||||| ||||| || || || ||||| || || ||||| |||   || ||||| || 
+Sbjct  297  ACACCCATATCCACTAGAGCCAATGGTTGCATGGTGCCATCTCTCAAGGGGGGGAACGGA  238
+
+Query  161  CCTCTATCTGATTGACAAACAAAGGGGAATCTATCCTTCAAATCACCCTCTGAAACAGAA  220
+            | |||||  |||||||| || || |||||  | | ||| |  || || || || ||||  
+Sbjct  237  CATCTATTAGATTGACATACGAATGGGAAATTGTTCTTAAGGTCTCCTTCAGATACAGGT  178
+
+Query  221  ACAGTTTTTTCTCTTGTATAATAATATCTGCTCATTAATCCTTCATATCCAAAATGGTGA  280
+              |  || | |||| | || | ||  ||    ||| |  || |||||||||||||| |||
+Sbjct  177  GTATCTTGTCCTCTGGAATTAAAACCTCGAGACATGAGACCCTCATATCCAAAATGATGA  118
+
+Query  281  TGGTGTGCAAATTTCCT  297
+            || || ||| | |||||
+Sbjct  117  TGATGGGCATACTTCCT  101
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 4959477
+
+
+Query= dvq11 AP027280 153233-153571
+
+Length=339
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+dvs18 LC738884 16223-16561                                            87.8    2e-20
+
+
+> dvs18 LC738884 16223-16561
+Length=339
+
+ Score = 87.8 bits (96),  Expect = 2e-20
+ Identities = 105/141 (74%), Gaps = 4/141 (3%)
+ Strand=Plus/Minus
+
+Query  101  CTTCCTCTCTTTTTCTGGACAACCTTTAATTGCCATGGTGTTATGAGAGGTAAACTCGCC  160
+            ||||||| |  ||| || |  || || | |||||| || ||||| || ||||| ||||||
+Sbjct  239  CTTCCTCGCCGTTTTTGTATCACTTTAAGTTGCCAAGGCGTTATTAGGGGTAAGCTCGCC  180
+
+Query  161  TCATAGAATCCGCAAACTTCCTCTAAAG--GGAACAAGTGTTTCCCCATAGGGGACAATT  218
+            ||  | || || |  |||  || | |||  | ||||| || || |||| ||| |||||||
+Sbjct  179  TCGAATAAGCCACTGACT--CTTTCAAGTTGAAACAAATGCTTTCCCAGAGGCGACAATT  122
+
+Query  219  CAAAAATATAATTCCAACATA  239
+            ||||||  |||||||||||||
+Sbjct  121  CAAAAACGTAATTCCAACATA  101
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 4204491
+
+
+Query= dvq12 AP027280 153877-154294
+
+Length=418
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+dvs17 LC738884 15545-15962                                            78.8    1e-17
+dvs9 LC741431 195304-195616                                           69.8    5e-15
+
+
+> dvs17 LC738884 15545-15962
+Length=418
+
+ Score = 78.8 bits (86),  Expect = 1e-17
+ Identities = 148/218 (68%), Gaps = 0/218 (0%)
+ Strand=Plus/Minus
+
+Query  101  ACATAAGAGTATTAAAACTCTCGACAAATTATACATGGCACCTACTCTTCCTTCCATATT  160
+            ||| || | ||| |||| ||| |||||   |||||  || ||||||||||| || | |  
+Sbjct  318  ACAAAACAATATAAAAAATCTGGACAACAGATACAGTGCTCCTACTCTTCCCTCTAAACC  259
+
+Query  161  ACTGATAGCTCTATACATATTAACCACGTATTGTATAGGTGCTTCTACGTACAAATCTGA  220
+               | | || | |||||| || | |||||| || |  || ||||| ||  |||  || ||
+Sbjct  258  TTCGGTGGCGCGATACATGTTTAGCACGTACTGCACGGGGGCTTCCACAAACAGGTCCGA  199
+
+Query  221  AAATCCACTAGCGGCAGTTCCTTCACTAAAGGCTAGAACTTGTTCCATAGTCTTCTCTTC  280
+             ||||| || ||||| || |||| |||||| | ||| ||   |||   ||| ||     |
+Sbjct  198  GAATCCGCTGGCGGCCGTGCCTTGACTAAAAGATAGCACGCTTTCTGCAGTTTTGGTCCC  139
+
+Query  281  TGAAAACATTTGCTGAATTATTTTAGTGGATAGTTTGT  318
+             | ||||||||   | ||  | || ||||||| |||||
+Sbjct  138  AGCAAACATTTCACGGATAGTATTGGTGGATAATTTGT  101
+
+
+> dvs9 LC741431 195304-195616
+Length=313
+
+ Score = 69.8 bits (76),  Expect = 5e-15
+ Identities = 83/113 (73%), Gaps = 0/113 (0%)
+ Strand=Plus/Minus
+
+Query  131  ATACATGGCACCTACTCTTCCTTCCATATTACTGATAGCTCTATACATATTAACCACGTA  190
+            ||||| |||||||||||  || || |    |   || || | |||||| || |  |||||
+Sbjct  213  ATACAGGGCACCTACTCGACCCTCTAACCCATCTATGGCCCGATACATGTTGAGTACGTA  154
+
+Query  191  TTGTATAGGTGCTTCTACGTACAAATCTGAAAATCCACTAGCGGCAGTTCCTT  243
+             ||||  |||||||| |  |||| ||| ||||| ||||||||||| || ||||
+Sbjct  153  CTGTACCGGTGCTTCAATATACAGATCAGAAAAACCACTAGCGGCGGTACCTT  101
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 5232834
+
+
+Query= dvq13 AP027280 160229-160675
+
+Length=447
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 5610327
+
+
+Query= dvq14 AP027280 168233-168647
+
+Length=415
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+dvs37 LC738884 252639-253053                                          99.6    1e-23
+
+
+> dvs37 LC738884 252639-253053
+Length=415
+
+ Score = 99.6 bits (109),  Expect = 1e-23
+ Identities = 153/216 (71%), Gaps = 2/216 (1%)
+ Strand=Plus/Plus
+
+Query  101  CAAGATAGGAACGCTTTTGATCTACTTAGAAAGTGCTTCCTTTCTGCCTCTCTTCATCAC  160
+            || ||||  || || || ||| | || || ||||| ||||| || |||   || || |||
+Sbjct  101  CAGGATAAAAAAGCGTTCGATTTGCTCAGCAAGTGTTTCCTCTCGGCCGGCCTACACCAC  160
+
+Query  161  ATTTTCTGTCCTGATGTGCTTATGGTGCATAGAGGAGACAGCTTCAATATTAACTTTGCA  220
+            ||||  || || |||||  | ||||| ||||||||| ||| ||| || ||| | ||    
+Sbjct  161  ATTTATTGCCCCGATGTTTTGATGGTTCATAGAGGAAACAACTTTAACATTGATTTAAAG  220
+
+Query  221  AACAACAAACTCGAGTGCTAT-AATGAACGTAACGGAATTGAAGAAGTTACTTCCTCACA  279
+            || ||||| || || || ||| | ||||   |||     ||||||| | ||||| || ||
+Sbjct  221  AATAACAAGCTAGATTG-TATCACTGAAACCAACCAGTCTGAAGAAATCACTTCGTCTCA  279
+
+Query  280  AACGGTCAACGCCAAGGAAGCACTTGAGGATATTAC  315
+            ||| || |||||||| ||||| ||   ||| |||||
+Sbjct  280  AACTGTGAACGCCAAAGAAGCTCTGACGGACATTAC  315
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 5193783
+
+
+Query= dvq15 AP027280 174369-174775
+
+Length=407
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+dvs12 LC741431 219001-219407                                          86.0    6e-20
+
+
+> dvs12 LC741431 219001-219407
+Length=407
+
+ Score = 86.0 bits (94),  Expect = 6e-20
+ Identities = 143/207 (69%), Gaps = 0/207 (0%)
+ Strand=Plus/Plus
+
+Query  101  TAGAGTTTGTTTCCTTATACGGGTGTGAACCAATAGTCGGTAAAACACCAATCCACCGGT  160
+            ||||||||||   ||||     || || | | | | ||||||| | ||||  |  || ||
+Sbjct  101  TAGAGTTTGTACTCTTACGTTCGTATGGAGCCACAATCGGTAAGAAACCAGACACCCAGT  160
+
+Query  161  TACGATGATGGATATCAACAATATATAGAATAGGGCCTTGTCACTAGCCTTGGCAGCATT  220
+            ||| |  |  ||||| |  |||||  |||| | ||| || ||||| |||||||| |||||
+Sbjct  161  TACCAACACAGATATTATAAATATCAAGAACAAGGCTTTATCACTGGCCTTGGCGGCATT  220
+
+Query  221  GTCTCTTTCTGCAGCTGCAGTCAAATCTTTGTAGTCTGGGCCTAATTCGCTCTGTACGTG  280
+            ||||||||| ||||| ||||  |  || ||||||  ||  |||| |||| | |  |  ||
+Sbjct  221  GTCTCTTTCAGCAGCCGCAGCTAGGTCCTTGTAGGATGAACCTAGTTCGTTGTTAAGATG  280
+
+Query  281  GTTCCGTATTCTCTCAGACACGTCCAT  307
+              ||| ||||   ||   |||||||||
+Sbjct  281  AGTCCTTATTTGTTCCCCCACGTCCAT  307
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 5089647
+
+
+Query= dvq16 AP027280 180144-180409
+
+Length=266
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+dvs13 LC741431 223814-224079                                          61.7    2e-12
+
+
+> dvs13 LC741431 223814-224079
+Length=266
+
+ Score = 61.7 bits (67),  Expect = 2e-12
+ Identities = 53/66 (80%), Gaps = 0/66 (0%)
+ Strand=Plus/Plus
+
+Query  101  AGAGGGATGGAAGATCGTCCCACAGCCAACTATAGAACCTCCTTACATTCAGCTACTCAA  160
+            || || ||||| |||||||| || || || |||||||| || |||||  ||| ||| |||
+Sbjct  101  AGGGGTATGGAGGATCGTCCTACCGCTAATTATAGAACATCGTTACACACAGATACCCAA  160
+
+Query  161  AATAAA  166
+            ||||||
+Sbjct  161  AATAAA  166
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 3254250
+
+
+Query= dvq17 AP027280 182743-183143
+
+Length=401
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 5011545
+
+
+Query= dvq18 AP027280 185203-185536
+
+Length=334
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+dvs29 LC738884 117600-117932                                          63.5    6e-13
+
+
+> dvs29 LC738884 117600-117932
+Length=333
+
+ Score = 63.5 bits (69),  Expect = 6e-13
+ Identities = 95/134 (71%), Gaps = 1/134 (1%)
+ Strand=Plus/Minus
+
+Query  101  TATATTTTATGCAGTACACTTCAATGGACAATTTAGCTTTCTTTAAAAGTTTGATCACTA  160
+            ||| ||| || || || ||  | ||   |||||| || || ||||  ||||| || ||  
+Sbjct  233  TATTTTTGATACAATAAACGGCTATATTCAATTTGGCCTTTTTTAGCAGTTTCATAACGG  174
+
+Query  161  CTGCGCTTAGCAAGTGTTTCCTCTTGTCCATGAAATTGACTAGTGTATTTAATGCATTAT  220
+            |||||| || |||||||||||| |||||||   | || ||||    ||| | |  ||| |
+Sbjct  173  CTGCGCATATCAAGTGTTTCCTTTTGTCCAGATATTTTACTATATCATTCATTATATTGT  114
+
+Query  221  CAAAAATAGGGGAT  234
+            |||| | |||||||
+Sbjct  113  CAAACA-AGGGGAT  101
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 4139406
+
+
+Query= dvq19 AP027280 197254-197589
+
+Length=336
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 4165440
+
+
+Query= dvq20 AP027280 202624-203053
+
+Length=430
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+dvs21 LC738884 55937-56366                                            84.2    2e-19
+
+
+> dvs21 LC738884 55937-56366
+Length=430
+
+ Score = 84.2 bits (92),  Expect = 2e-19
+ Identities = 159/233 (68%), Gaps = 6/233 (3%)
+ Strand=Plus/Plus
+
+Query  101  AAGACAAATGTTGTATCACAAGGAAAAACAATAAGTCTTTTAGACATAGCTTCGTCGACA  160
+            ||| |||||   ||||  |||||||||| ||  | |||||| |  | ||||||||| |||
+Sbjct  101  AAGGCAAATTGGGTATTGCAAGGAAAAATAACCATTCTTTTGGCTAAAGCTTCGTCCACA  160
+
+Query  161  AAGAATGAGAAGATGTAACTGTTGGACATCATAATAGGAGACACAGTAATGCTGCTTTTT  220
+            ||||| || || |  ||||| || ||| |||||||||| | ||  | |||||||     |
+Sbjct  161  AAGAAAGAAAAAACATAACTATTTGACGTCATAATAGGTGTCATGGAAATGCTGGACACT  220
+
+Query  221  GCGCCCTGTTGGAAAATGCCTCTAATCATGACGCT---GTTTTGGGGTGAAGTCATATTC  277
+             |    |     ||||||||||| | |    ||||    | || || |   || || |||
+Sbjct  221  ACAGGTTTACAAAAAATGCCTCTCACCGCAGCGCTAGCCTGTTTGGTT---GTGATTTTC  277
+
+Query  278  TTTAATAAACTGGAGGGAAATTGGCCCGGAAGCATATGTTTGGTTATAGAACT  330
+            || || |   ||||   |||||| ||||| |||||||||||||| || | |||
+Sbjct  278  TTCAACATGTTGGAATTAAATTGCCCCGGGAGCATATGTTTGGTAATTGCACT  330
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 5389038
+
+
+Query= dvq21 AP027280 207108-207441
+
+Length=334
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 4139406
+
+
+Query= dvq22 AP027280 211645-211948
+
+Length=304
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+dvs23 LC738884 64157-64460                                            67.1    4e-14
+
+
+> dvs23 LC738884 64157-64460
+Length=304
+
+ Score = 67.1 bits (73),  Expect = 4e-14
+ Identities = 77/104 (74%), Gaps = 0/104 (0%)
+ Strand=Plus/Plus
+
+Query  101  TGATAGTACTCTTCTGGATGAGAAGTGATGTTGTACAGCGCACAAAACCGCTCAGCAAGA  160
+            ||||| || |||||||| |||||   ||| || |||||||||||||||| ||| || | |
+Sbjct  101  TGATAATATTCTTCTGGGTGAGACACGATATTATACAGCGCACAAAACCTCTCCGCCAAA  160
+
+Query  161  GTAACGACTGTCCACGCGAATATGGTGTCGTTCTTGTCAGCACC  204
+             | || |   ||||   ||| |||||||| |  ||||| || ||
+Sbjct  161  ATTACCATCATCCAAAAGAACATGGTGTCCTCTTTGTCCGCCCC  204
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 3748896
+
+
+Query= dvq23 AP027280 216972-217518
+
+Length=547
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+dvs24 LC738884 69086-69635                                            81.5    4e-18
+
+
+> dvs24 LC738884 69086-69635
+Length=550
+
+ Score = 81.5 bits (89),  Expect = 4e-18
+ Identities = 127/179 (71%), Gaps = 6/179 (3%)
+ Strand=Plus/Plus
+
+Query  272  TATATTTGGTTCAACGCAGCGGTTGTTTCCCTTACGGATAGCAACATTAAAATGCCCCTC  331
+            || |||||||||||| | || ||  |||| || || |||| ||||||||| |||    ||
+Sbjct  275  TACATTTGGTTCAACACTGCCGTCATTTCTCTAACCGATACCAACATTAAGATGGTTGTC  334
+
+Query  332  AACACAATGTCC--GAGGGCACT-GGCGATGACATTTATAGGGACTATTTGGCCATCAGA  388
+            ||     || ||  ||||| | | || ||||   ||||||| || || ||| | || |||
+Sbjct  335  AA---TGTGGCCAAGAGGGGATTGGGTGATGCTCTTTATAGTGATTACTTGTCAATTAGA  391
+
+Query  389  GGCATGGTTAATAATTACAACAGTAGTCTCTCCTCTATTTCAGTCAAGGCTATTTCCGA  447
+              | | || || ||||||||||| ||| | | |  | ||||| |||||||  |||||||
+Sbjct  392  TCCCTCGTCAACAATTACAACAGAAGTTTGTGCAATTTTTCAATCAAGGCCGTTTCCGA  450
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 6879400
+
+
+Query= dvq24 AP027280 258466-258877
+
+Length=412
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 5154732
+
+
+Query= dvq25 AP027280 303180-303585
+
+Length=406
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 5076630
+
+
+Query= dvq26 AP027280 305336-308684
+
+Length=3349
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+dvs2 LC741431 51910-52549                                             95.1    1e-21
+
+
+> dvs2 LC741431 51910-52549
+Length=640
+
+ Score = 95.1 bits (104),  Expect = 1e-21
+ Identities = 253/382 (66%), Gaps = 10/382 (3%)
+ Strand=Plus/Minus
+
+Query  2582  GAGGCGGTGACGCAAGCGAATGCAGCTTTCACCCCTTACAAAAAGGGAGCCTTTGTGAAG  2641
+             || || || || |||||  ||||||  || ||  |||||||||||||||| ||||| || 
+Sbjct  477   GATGCTGTAACACAAGCTGATGCAGTATTTACATCTTACAAAAAGGGAGCTTTTGTTAAA  418
+
+Query  2642  AAGGGAATTACACCCACCACCAAACTAAAGGGTCTCCAATCATTGATTGCAAGATTTTTA  2701
+             || || ||  || |  |||| ||| |||| ||| | |||||  |  | || |||    | 
+Sbjct  417   AAAGGTATATCAACAGCCACAAAATTAAAAGGTTTACAATCTCTATTCGCCAGACAGGTT  358
+
+Query  2702  CCAAAAATAGAGGAA--AAGAAAAGCTGTTATTTGGATGTGATGAAGAATCATGTGGAGA  2759
+             ||      ||| |||   |||  ||  | ||| ||   ||  | ||  |||||||  | |
+Sbjct  357   CC-GGGGGAGATGAATCCAGATCAG-AGATATATGACCGTTGTCAATCATCATGTACAAA  300
+
+Query  2760  ATTTTGCATCCCATATAACAAATCCTGCTATGATGATTACTAGTTCCCGAGTCAACAAGT  2819
+             | | ||| || |||| |||| | ||  | |||||||| ||    ||| ||||||| ||||
+Sbjct  299   ACTATGCTTCGCATACAACAGACCCCTCCATGATGATAACATCATCCAGAGTCAATAAGT  240
+
+Query  2820  TTGATACGTCAAAAG---AACAGAGTAGACCTAATCCTCTAGCTCTAGCGATAAATAACC  2876
+             | ||||   || | |     ||||  |||||||||||||||||| | || || || ||||
+Sbjct  239   TAGATA---CAGATGTGTTGCAGACGAGACCTAATCCTCTAGCTGTTGCTATCAACAACC  183
+
+Query  2877  ACCTGAACCCTTCTTCAGAAATTTCATTGGGGCAGAAATTTAAGACGGTGACATCAGTTT  2936
+             | || || ||   |  | |||| |  || ||  | ||||||||||  ||    || || |
+Sbjct  182   AACTTAATCCCAATGGAAAAATATATTTAGGAGATAAATTTAAGAGTGTTGTTTCTGTAT  123
+
+Query  2937  CTTCTTGGAGTCTTTCGGCAGA  2958
+             |  |||||||| | | ||| ||
+Sbjct  122   CGGCTTGGAGTTTGTTGGCGGA  101
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 42976980
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/dc_div_subject.fasta).
+    Posted date:  Unknown
+  Number of letters in database: 13,609
+  Number of sequences in database:  37
+
+
+
+Matrix: blastn matrix 2 -3
+Gap Penalties: Existence: 5, Extension: 2
+Window for multiple hits: 40

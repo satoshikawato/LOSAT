@@ -16,6 +16,9 @@ under LOSAT/tests/fasta/outfmt0/, so later runs never regenerate them.
   complement, mismatches, IUPAC codes, lowercase, a long one, one across the CA repeat)
   and a random one.
 - short_nohit_query.fasta: one random primer.
+- dc_div_query.fasta, dc_div_subject.fasta (added after the SD audit): 26 windows of
+  AP027280 (WSSV) and 37 windows of LC741431 and LC738884 (distant nimaviruses) around
+  weak hits, so that every template combination gives NCBI a different output.
 
 Usage: make_inputs.py  (writes into LOSAT/tests/fasta/outfmt0/)
 """
@@ -28,6 +31,33 @@ REPO = Path(__file__).resolve().parents[3]
 FASTA = REPO / "LOSAT/tests/fasta"
 OUT = FASTA / "outfmt0"
 COMPLEMENT = str.maketrans("ACGTacgtRYKMrykmNn", "TGCAtgcaYRMKyrmkNn")
+# dc_div_query.fasta and dc_div_subject.fasta: (genome, 1-based start, end), plus strand.
+DIV_QUERY_WINDOWS = [
+    ("AP027280", 10767, 11089), ("AP027280", 13869, 14221), ("AP027280", 16200, 16591),
+    ("AP027280", 19534, 19917), ("AP027280", 23538, 23829), ("AP027280", 62157, 62536),
+    ("AP027280", 71673, 71983), ("AP027280", 103602, 103940), ("AP027280", 104288, 104588),
+    ("AP027280", 114818, 115214), ("AP027280", 153233, 153571), ("AP027280", 153877, 154294),
+    ("AP027280", 160229, 160675), ("AP027280", 168233, 168647), ("AP027280", 174369, 174775),
+    ("AP027280", 180144, 180409), ("AP027280", 182743, 183143), ("AP027280", 185203, 185536),
+    ("AP027280", 197254, 197589), ("AP027280", 202624, 203053), ("AP027280", 207108, 207441),
+    ("AP027280", 211645, 211948), ("AP027280", 216972, 217518), ("AP027280", 258466, 258877),
+    ("AP027280", 303180, 303585), ("AP027280", 305336, 308684),
+]
+DIV_SUBJECT_WINDOWS = [
+    ("LC741431", 17938, 18271), ("LC741431", 51910, 52549), ("LC741431", 75951, 76274),
+    ("LC741431", 80300, 80685), ("LC741431", 84743, 85034), ("LC741431", 97422, 97744),
+    ("LC741431", 101341, 101653), ("LC741431", 140198, 140594), ("LC741431", 195304, 195616),
+    ("LC741431", 199382, 199720), ("LC741431", 202815, 203115), ("LC741431", 219001, 219407),
+    ("LC741431", 223814, 224079), ("LC741431", 241365, 241707), ("LC738884", 1797, 2164),
+    ("LC738884", 5674, 6082), ("LC738884", 15545, 15962), ("LC738884", 16223, 16561),
+    ("LC738884", 20773, 21098), ("LC738884", 24067, 24367), ("LC738884", 55937, 56366),
+    ("LC738884", 60055, 60388), ("LC738884", 64157, 64460), ("LC738884", 69086, 69635),
+    ("LC738884", 88096, 88431), ("LC738884", 91350, 91796), ("LC738884", 94543, 94910),
+    ("LC738884", 98492, 98859), ("LC738884", 117600, 117932), ("LC738884", 119572, 119966),
+    ("LC738884", 150592, 151021), ("LC738884", 165308, 165700), ("LC738884", 167607, 167959),
+    ("LC738884", 180931, 181222), ("LC738884", 217989, 218299), ("LC738884", 231072, 231482),
+    ("LC738884", 252639, 253053),
+]
 
 
 def read(name: str) -> str:
@@ -111,6 +141,15 @@ def main() -> None:
         ("p8 shs3 291-338 across the CA repeat", window(s3, 291, 338)),
     ])
     write("short_nohit_query.fasta", [("nohit random 24", "".join(rng.choice("ACGT") for _ in range(24)))])
+
+    # The divergent pair (after the SD audit): windows of WSSV around weak hits (63-75 %
+    # identity) in two distant nimaviruses, on which NCBI gives 18 distinct outputs for the
+    # 18 template combinations (the pair above gives 9).
+    genomes = {name: read(f"{name}.fasta") for name in ("AP027280", "LC741431", "LC738884")}
+    write("dc_div_query.fasta", [(f"dvq{i} {name} {start}-{end}", window(genomes[name], start, end))
+                                 for i, (name, start, end) in enumerate(DIV_QUERY_WINDOWS, 1)])
+    write("dc_div_subject.fasta", [(f"dvs{i} {name} {start}-{end}", window(genomes[name], start, end))
+                                   for i, (name, start, end) in enumerate(DIV_SUBJECT_WINDOWS, 1)])
 
 
 if __name__ == "__main__":

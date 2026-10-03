@@ -69,9 +69,10 @@ use super::gapalign::{
     BlastpGappedAlignmentMode, BlastpPreliminaryHsp, GapAlignScratch,
 };
 use super::hsp::{
-    blast_compo_early_termination, collect_hits_from_hit_lists, fill_results_from_compo_heaps,
-    get_prelim_hitlist_size, reap_hsplist_by_evalue, trim_by_max_hsps, BlastCompoHeap,
-    BlastpHitList, BlastpHsp, BlastpHspList,
+    blast_compo_early_termination, collect_hits_and_methods_from_hit_lists,
+    collect_hits_from_hit_lists, fill_results_from_compo_heaps, get_prelim_hitlist_size,
+    reap_hsplist_by_evalue, trim_by_max_hsps, BlastCompoHeap, BlastpHitList, BlastpHsp,
+    BlastpHspList,
 };
 #[cfg(all(
     feature = "parallel",
@@ -1376,6 +1377,8 @@ fn build_preliminary_hsp_list_for_hitlist(
             raw_score: hit.raw_score,
             gap_info: None,
             num_positives: 0,
+            // Blast_HSPInit callocs the HSP: no composition adjustment yet.
+            comp_adjustment_method: 0,
         })
         .collect();
     let mut hsp_list = BlastpHspList {
@@ -2772,7 +2775,7 @@ fn query_nomask_sequence(ctx: &QueryContext) -> &[u8] {
 // status = BlastHSPStreamWrite(hsp_stream, &hsp_list);
 // ```
 fn build_pairwise_hits(
-    hits: Vec<Hit>,
+    hits: Vec<(Hit, u8)>,
     query_contexts: &[QueryContext],
     subjects: &[EncodedProtein],
     subject_titles: &[Option<String>],
@@ -2780,7 +2783,7 @@ fn build_pairwise_hits(
     render_alignment: bool,
 ) -> Result<Vec<PairwiseHit>> {
     hits.into_iter()
-        .map(|mut hit| -> Result<PairwiseHit> {
+        .map(|(mut hit, comp_adjustment_method)| -> Result<PairwiseHit> {
             let q_idx = hit.q_idx as usize;
             let s_idx = hit.s_idx as usize;
             let query = query_nomask_sequence(&query_contexts[q_idx]);
@@ -2881,8 +2884,8 @@ fn build_pairwise_hits(
                 gaps: Some(gaps),
                 subject_length: Some(subjects[s_idx].aa_len),
                 subject_title: subject_titles[s_idx].clone(),
-                // NCBI core/blast_kappa.c:331-342: BLASTP method is handled by its writer.
-                comp_adjust_method: None,
+                // NCBI core/blast_kappa.c:332-342: the HSP's composition adjustment.
+                comp_adjust_method: Some(comp_adjustment_method),
                 // NCBI showalign.cpp:3595-3598: this optional Stage E field is
                 // consumed only by the TBLASTN writer; BLASTP keeps its writer.
                 sum_n: None,
@@ -6347,7 +6350,7 @@ fn run_resolved_in_pool(
     // ```
     let pairwise_hits = if needs_pairwise_hits {
         Some(build_pairwise_hits(
-            collect_hits_from_hit_lists(&hit_lists),
+            collect_hits_and_methods_from_hit_lists(&hit_lists),
             &contexts,
             &subjects,
             &subject_titles,
@@ -6886,6 +6889,7 @@ mod tests {
             raw_score: preliminary_hsp.raw_score,
             gap_info: None,
             num_positives: 0,
+            comp_adjustment_method: 0,
         }
     }
 

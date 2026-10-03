@@ -43,6 +43,16 @@ pub(crate) struct BlastpHsp {
     pub raw_score: i32,
     pub gap_info: Option<Vec<GapEditOp>>,
     pub num_positives: usize,
+    // NCBI reference: c++/include/algo/blast/core/blast_hits.h:139-141
+    // ```c
+    //    Int2		comp_adjustment_method;  /**< which mode of composition
+    //                                               adjustment was used; relevant
+    //                                               only for blastp and tblastn */
+    // ```
+    /// `BlastHSP::comp_adjustment_method`: 0 (no adjustment), 1 (composition-based
+    /// statistics) or 2 (compositional matrix adjustment), set from the redone
+    /// alignment's matrix adjustment rule (`kappa.rs`).
+    pub comp_adjustment_method: u8,
 }
 
 impl BlastpHsp {
@@ -106,6 +116,7 @@ impl BlastpHsp {
             raw_score,
             gap_info,
             num_positives,
+            comp_adjustment_method: 0,
         }
     }
 
@@ -1782,6 +1793,17 @@ fn purge_hits_for_subject_ex_impl<const TRACK_STATS: bool>(
 // typedef struct BlastHitList { ... } BlastHitList;
 // ```
 pub(crate) fn collect_hits_from_hit_lists(hit_lists: &[Option<BlastpHitList>]) -> Vec<Hit> {
+    collect_hits_and_methods_from_hit_lists(hit_lists)
+        .into_iter()
+        .map(|(hit, _)| hit)
+        .collect()
+}
+
+/// `collect_hits_from_hit_lists` with each HSP's `comp_adjustment_method`, which the
+/// outfmt 0 report prints (showalign.cpp:3600-3603).
+pub(crate) fn collect_hits_and_methods_from_hit_lists(
+    hit_lists: &[Option<BlastpHitList>],
+) -> Vec<(Hit, u8)> {
     let mut hits = Vec::new();
     for hit_list_opt in hit_lists {
         let Some(hit_list) = hit_list_opt else {
@@ -1789,7 +1811,7 @@ pub(crate) fn collect_hits_from_hit_lists(hit_lists: &[Option<BlastpHitList>]) -
         };
         for hsp_list in hit_list.hsplist_array.iter().take(hit_list.hsplist_count) {
             for hsp in &hsp_list.hsps {
-                hits.push(hsp.clone().into_hit());
+                hits.push((hsp.clone().into_hit(), hsp.comp_adjustment_method));
             }
         }
     }

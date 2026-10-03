@@ -12,6 +12,13 @@ Deterministic: the files are cut from committed fixtures, so a rerun writes the 
   stand-in subject of the `approved_punct_title` rows of LOSAT/tests/outfmt0_manifest.tsv
   (docs/evidence/losat_web_e2a/run_oracle.py). Its path has the length of the subject's.
 - punct_hits_query.faa: the frame +1 peptide of the `many` query (the TBLASTN query).
+- e2e_protein_query.faa: seven MeenMJNV proteins with homologs in LvMJNV (identities from
+  about 30 to 60 %, one weak pair) and the first AvCLPV protein (low complexity, for SEG);
+  e2e_protein_subject.faa: the seven LvMJNV homologs and six other LvMJNV proteins (every
+  17th record); the BLASTP inputs of option_sweep.py.
+- e2e_tblastn_subject.fna: five windows of the LvMJNV genome that hold the TBLASTN hits of
+  e2e_protein_query.faa, the second with 300 lowercase bases and the fourth with a run of
+  40 N; the TBLASTN subject of option_sweep.py.
 
 Usage: make_inputs.py
 """
@@ -24,6 +31,40 @@ OUT = REPO / "LOSAT/tests/fasta/outfmt0"
 CODE = "FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG"
 DEFLINES = (", ,", "x1 ok", ";~ ;")
 STAND_INS = ("OO", "x1 ok", "UUU")
+FASTA = REPO / "LOSAT/tests/fasta"
+QUERIES = ("BDT62569.1", "BDT62529.1", "BDT62562.1", "BDT62620.1", "BDT62567.1", "BDT62581.1", "BDT62533.1")
+HOMOLOGS = ("BDT62125.1", "BDT62158.1", "BDT62172.1", "BDT62143.1", "BDT62170.1", "BDT62187.1", "BDT62149.1")
+WINDOWS = ((93000, 98000), (143000, 152000), (160000, 165000), (199000, 206000), (242000, 247000))
+
+
+def protein_records(path: Path) -> dict[str, str]:
+    """The records of a FASTA file by ID, each with its defline and lines as written."""
+    records: dict[str, str] = {}
+    for chunk in path.read_text().split(">")[1:]:
+        records[chunk.split(None, 1)[0]] = ">" + chunk
+    return records
+
+
+def sweep_inputs() -> None:
+    meen = protein_records(FASTA / "MeenMJNV.faa")
+    lv = protein_records(FASTA / "LvMJNV.faa")
+    first_av = next(iter(protein_records(FASTA / "AvCLPV.faa").values()))
+    (OUT / "e2e_protein_query.faa").write_text("".join(meen[key] for key in QUERIES[:6]) + first_av
+                                               + meen[QUERIES[6]])
+    others = [key for key in list(lv)[::17] if key not in HOMOLOGS][:6]
+    (OUT / "e2e_protein_subject.faa").write_text("".join(lv[key] for key in (*HOMOLOGS[:6], *others, HOMOLOGS[6])))
+    genome = "".join(line.strip() for line in (FASTA / "LvMJNV.fasta").read_text().splitlines()
+                     if not line.startswith(">"))
+    out = []
+    for number, (start, end) in enumerate(WINDOWS, 1):
+        seq = genome[start:end]
+        if number == 2:
+            seq = seq[:2500] + seq[2500:2800].lower() + seq[2800:]
+        if number == 4:
+            seq = seq[:3000] + "N" * 40 + seq[3040:]
+        lines = "\n".join(seq[i:i + 70] for i in range(0, len(seq), 70))
+        out.append(f">LvMJNV_{start + 1}_{end} window {number} of LvMJNV\n{lines}\n")
+    (OUT / "e2e_tblastn_subject.fna").write_text("".join(out))
 
 
 def main() -> None:
@@ -35,6 +76,7 @@ def main() -> None:
     peptide = "".join(CODE[index[seq[i]] * 16 + index[seq[i + 1]] * 4 + index[seq[i + 2]]]
                       for i in range(30, len(seq) - 32, 3)).replace("*", "")
     (OUT / "punct_hits_query.faa").write_text(f">pep frame +1 of the many query\n{peptide}\n")
+    sweep_inputs()
 
 
 if __name__ == "__main__":

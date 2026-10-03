@@ -274,17 +274,22 @@ pub fn write_hsp_info<W: Write>(
     let bit_score_str = format_bitscore_ncbi(h.bit_score);
     let evalue_str = format_evalue_ncbi(h.e_value);
     if config.program == "blastp" {
-        // NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:3578-3604
+        // NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:3600-3603
         // ```c
-        // out << " Score = " << bit_score
-        //     << " bits (" << score << "),  Expect = " << evalue;
-        // ...
-        // out << ", Method: Compositional matrix adjust.";
+        //             if (aln_vec_info->comp_adj_method == 1)
+        //             out << ", Method: Composition-based stats.";
+        //             else if (aln_vec_info->comp_adj_method == 2)
+        //             out << ", Method: Compositional matrix adjust.";
         // ```
+        let method = match hit.comp_adjust_method {
+            Some(1) => ", Method: Composition-based stats.",
+            Some(2) => ", Method: Compositional matrix adjust.",
+            _ => "",
+        };
         writeln!(
             writer,
-            " Score = {} bits ({}),  Expect = {}, Method: Compositional matrix adjust.",
-            bit_score_str, h.raw_score, evalue_str
+            " Score = {} bits ({}),  Expect = {}{}",
+            bit_score_str, h.raw_score, evalue_str, method
         )?;
     } else {
         writeln!(

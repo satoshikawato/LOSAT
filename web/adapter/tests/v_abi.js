@@ -41,6 +41,9 @@ function parseArgs(argv) {
   for (const required of ["native", "serial", "threads", "cases"]) {
     if (!options[required]) throw new Error(`--${required} is required`);
   }
+  // Searches run from their own working directory (the repository or LOSAT/), so a relative
+  // CLI path is resolved against the directory v_abi.js was started from.
+  options.native = path.resolve(options.native);
   return options;
 }
 
@@ -127,7 +130,7 @@ function nativeOutputs(native, search, scratch) {
     const out = path.join(scratch, `native.${format}.out`);
     const argv = [...search.argv, "-outfmt", String(format), "-num_threads", "1", "-out", out];
     const result = require("node:child_process").spawnSync(native, argv, { cwd: search.cwd, maxBuffer: 1 << 30 });
-    if (result.status !== 0) throw new Error(`native ${argv.join(" ")} failed: ${result.stderr}`);
+    if (result.status !== 0) throw new Error(`native ${argv.join(" ")} failed: ${result.error ?? result.stderr}`);
     outputs.set(format, fs.readFileSync(out));
     fs.rmSync(out);
     if (stderr === null) stderr = result.stderr;

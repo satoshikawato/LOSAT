@@ -60,7 +60,11 @@ authoritative, current guidance for agent behavior in LOSAT.
      "BLAST ran out of memory", exit 4); an outfmt 0 write to a closed pipe,
      where NCBI is ended by SIGPIPE, is reported as "BLAST failed to write
      output", exit 6, and a closed pipe that LOSAT's completed writes do not
-     reach ends LOSAT with exit 0 (timing; NCBI's later flush gets SIGPIPE). Errors raised after argument parsing, the outfmt 0 write
+     reach ends LOSAT with exit 0 (timing; NCBI's later flush gets SIGPIPE);
+     a standard output closed at the start (`>&-`), where NCBI's first write
+     fails (outfmt 0 exit 6, outfmt 6/7 abort), is the `/dev/null` that the
+     Rust runtime opens before `main`, so LOSAT discards the report and exits
+     as the search ends. Errors raised after argument parsing, the outfmt 0 write
      failure ("BLAST failed to write output", exit 6), all other warnings, and
      every search result must still match NCBI. Non-UTF-8
      file names and `.ncbirc` keys that change output are explicit
@@ -70,9 +74,10 @@ authoritative, current guidance for agent behavior in LOSAT.
      and LOSAT's result was shown to equal NCBI's output for a nearby input
      that does not reach the defect. BLASTN: a query chunk that NCBI would
      split again (CHUNK_SIZE/OVERLAP_CHUNK_SIZE; NCBI stops with a
-     CCoreException) is searched once; outfmt 0 titles made only of
-     punctuation stop at the end of the string (NCBI reads past it and
-     crashes). Deterministic NCBI results, even wrong-looking ones, are
+     CCoreException) is searched once. BLASTN, TBLASTX and TBLASTN: outfmt 0
+     titles made only of punctuation stop at the end of the string (NCBI
+     reads past it and crashes; TBLASTX and TBLASTN reject such subjects
+     explicitly until this title is ported and checked for them). Deterministic NCBI results, even wrong-looking ones, are
      reproduced, not excepted; NCBI failures without a checkable valid result
      are explicit rejections.
 

@@ -1,8 +1,9 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.1
-- Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b)
+- Version: 1.2
+- Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
+  1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`) and the independent audits found to be
@@ -13,8 +14,9 @@
 NCBI BLAST+ 2.17.0 behaviour that is a defect rather than a design: a crash, an
 exception that only a debug-build assertion was meant to prevent, a read past the end of
 a buffer, or an integer that wraps. Everything else stays under the root
-[`AGENTS.md`](../../AGENTS.md) bit-perfect rule. This version lists the BLASTN items; the
-other programs add theirs in their sessions under the same rule.
+[`AGENTS.md`](../../AGENTS.md) bit-perfect rule. Versions 1.0 and 1.1 list the BLASTN
+items; version 1.2 adds TBLASTX and TBLASTN; the other programs add theirs in their
+sessions under the same rule.
 
 ## Rule
 
@@ -61,6 +63,27 @@ other programs add theirs in their sessions under the same rule.
    runs; LOSAT's report equals NCBI's report for the same subjects with placeholder
    deflines once each placeholder is replaced by LOSAT's title. Subjects with such
    deflines and no hits, where NCBI runs, match NCBI (fixtures `punct.nohit_*`).
+
+## Approved exceptions (TBLASTX and TBLASTN)
+
+Version 1.2, accepted by the maintainer on 2026-10-03 in Session S08b (E2b), plan DW-17.
+
+2. **outfmt 0 titles made only of punctuation** (BLASTN exception 2, extended). NCBI
+   tblastx and tblastn build the outfmt 0 title of a nucleotide subject with the same
+   `CDeflineGenerator` and `x_CleanAndCompress` (`create_defline.cpp:219-312`) and crash
+   (SIGSEGV) on the same deflines when such a subject has hits; outfmt 6 and 7 do not build
+   the title, and there NCBI and LOSAT agree. Evidence `docs/evidence/losat_web_e2b/`:
+   `punct_defline.py` (deflines `, ,` and `;~ ;`: NCBI dies of the signal in outfmt 0,
+   outfmt 6 and 7 equal), and the S08 audit (c), rounds 1 and 2: over all 15624 TBLASTX
+   deflines of up to 6 and all 3124 TBLASTN deflines of up to 5 of `,;~ a` and space, NCBI
+   crashes on 272 and 66, exactly those that LOSAT's test of such a title
+   (`report/defline.rs` `ncbi_nucleotide_title_reads_past_end`) finds; the other reports are
+   byte-identical. The approved result: LOSAT stops the cleanup at the end of the string, as
+   for BLASTN. Until that title is
+   ported to TBLASTX and TBLASTN and checked as BLASTN's was (each report equals NCBI's
+   report for the same subjects with placeholder deflines once each placeholder is replaced
+   by LOSAT's title, `docs/evidence/losat_web_e2g/title_sweep.py`), LOSAT rejects such
+   subjects with hits in outfmt 0 explicitly (Session S08+).
 
 ## Reproduced as NCBI (rule 2)
 

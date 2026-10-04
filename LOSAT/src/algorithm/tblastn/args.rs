@@ -494,13 +494,20 @@ fn search_settings(args: &ResolvedTblastnArgs) -> Result<SearchSettings> {
     // NCBI c++/src/algo/blast/api/prelim_stage.cpp:145-147:
     // TBlastThreads the_threads(GetNumberOfThreads());
     crate::utils::threading::validate_threads(args.num_threads)?;
-    // NCBI's tblastn dies of SIGSEGV with an infinite -evalue (+inf, 1e999) when the search
-    // keeps enough HSPs (300 subjects), and runs otherwise; LOSAT cannot tell beforehand, so
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:409,3687
+    // ```c
+    //     *pbestEvalue = DBL_MAX;
+    //                 if (best_evalue <= hitParams->options->expect_value) {
+    // ```
+    // A list whose HSPs all fail keeps the best e-value DBL_MAX, so an -evalue of DBL_MAX
+    // or more (+inf, 1e999, 1.7976931348623157e308) puts an empty list into the hit list,
+    // and NCBI's tblastn dies of SIGSEGV reading its first HSP (blast_hits.c:3266) when
+    // the search keeps enough HSPs, and runs otherwise; LOSAT cannot tell beforehand, so
     // it rejects the value (decision D12 of docs/evidence/losat_web_e2e/AUTHORITY.md). A
-    // finite -evalue such as 1e308 runs.
-    if args.evalue.is_infinite() {
+    // smaller -evalue such as 1e308 runs.
+    if args.evalue >= f64::MAX {
         anyhow::bail!(
-            "an infinite -evalue ({}), with which NCBI BLAST+'s tblastn crashes on some inputs, is not supported by LOSAT's TBLASTN",
+            "an -evalue of DBL_MAX or more ({}), with which NCBI BLAST+'s tblastn crashes on some inputs, is not supported by LOSAT's TBLASTN",
             args.evalue
         );
     }

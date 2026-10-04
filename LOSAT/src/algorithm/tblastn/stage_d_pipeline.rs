@@ -558,7 +558,11 @@ fn run_local_search_with_pool(
         word_size: scoring.word_size,
         gap_open: scoring.gap_open,
         gap_extend: scoring.gap_extend,
-        gap_xdrop: ((scoring.gap_xdrop_bits * std::f64::consts::LN_2) / gapped.lambda) as i32,
+        // NCBI blast_parameters.c:457-458: (Int4)(gap_x_dropoff*NCBIMATH_LN2/min_lambda),
+        // converted as the x86-64 build does (INT_MIN beyond Int4).
+        gap_xdrop: crate::core::blast_util::ncbi_int4_from_double(
+            (scoring.gap_xdrop_bits * std::f64::consts::LN_2) / gapped.lambda,
+        ),
         gapped_cutoff: &hit_cutoff,
         hsp_num_max: i32::MAX as usize,
     };

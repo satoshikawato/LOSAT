@@ -174,6 +174,40 @@ impl KappaResultHitList {
         }
     }
 
+    // NCBI reference: c++/src/algo/blast/api/blast_seqalign.cpp:672-674
+    // ```c++
+    //     if (hsp->score == 0) {
+    //         return CRef<CSeq_align>();
+    //     }
+    // ```
+    // NCBI reference: c++/src/algo/blast/api/blast_seqalign.cpp:1484-1490
+    // ```c++
+    //             seqalign =
+    //                 s_BlastHSP2SeqAlign(program, hsp, query_id, subject_id,
+    //                                     query_length, subject_length);
+    //         }
+    //
+    //         if (seqalign.Empty()) continue;
+    // ```
+    /// Leaves out the HSPs of score 0 (kept by a very large -evalue), which have no
+    /// Seq-align and so are in no report, and the subjects left without an HSP.
+    pub(super) fn drop_zero_score_hsps(&mut self) {
+        for list in &mut self.lists {
+            if list.payloads.is_empty() {
+                list.hsps.hsps.retain(|linked| linked.hsp.score != 0);
+            } else {
+                let (hsps, payloads): (Vec<_>, Vec<_>) = std::mem::take(&mut list.hsps.hsps)
+                    .into_iter()
+                    .zip(std::mem::take(&mut list.payloads))
+                    .filter(|(linked, _)| linked.hsp.score != 0)
+                    .unzip();
+                list.hsps.hsps = hsps;
+                list.payloads = payloads;
+            }
+        }
+        self.lists.retain(|list| !list.hsps.hsps.is_empty());
+    }
+
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.h:169-181:
     // Int4 hsplist_count, hsplist_max;
     // double worst_evalue; Int4 low_score; Boolean heapified;

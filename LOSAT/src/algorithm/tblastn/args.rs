@@ -298,6 +298,21 @@ impl TblastnArgs {
                 }
             }
             word_size = value;
+            // NCBI reference: c++/src/algo/blast/api/blast_options_local_priv.hpp:612-619
+            // ```c
+            // CBlastOptionsLocal::SetWordSize(int ws)
+            // {
+            //     m_LutOpts->word_size = ws;
+            //     if (m_LutOpts->lut_type == eCompressedAaLookupTable && ws <= 4)
+            // 	m_LutOpts->lut_type = eAaLookupTable;
+            //     else if (m_LutOpts->lut_type == eAaLookupTable && ws > 4)
+            // 	m_LutOpts->lut_type = eCompressedAaLookupTable;
+            // }
+            // ```
+            // (tblastn-fast with -word_size 3 or 4 uses the plain lookup table.)
+            if compressed_lookup && value <= 4 {
+                compressed_lookup = false;
+            }
         }
         if let Some(value) = self.sum_stats {
             sum_stats = value;

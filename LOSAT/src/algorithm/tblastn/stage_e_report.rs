@@ -71,6 +71,7 @@ pub(super) fn render(
     // Blast_HSPListSortByEvalue(hsp_list); /* during Seq-align conversion */
     for hitlist in hitlists.iter_mut() {
         hitlist.sort_hsps_for_report();
+        hitlist.drop_zero_score_hsps();
     }
     let hitlists: &[KappaResultHitList] = hitlists;
     // NCBI c++/src/algo/blast/format/blast_format.cpp:1411:

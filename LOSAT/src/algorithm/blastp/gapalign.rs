@@ -1855,7 +1855,7 @@ fn align_ex_protein_impl<const BLOSUM62: bool, const REVERSE: bool>(
         }
 
         let orig_b_index = first_b_index;
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:513-518,666
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:514-519,669
         // ```c
         //         if (gap_extend > 0)
         //             state_struct = s_GapGetState(&gap_align->state_struct,

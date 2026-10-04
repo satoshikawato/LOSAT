@@ -82,7 +82,16 @@ TBLASTN（`tblastn/stage_d_pipeline.rs` の `split_preliminary_hitlists`、`stag
 5. traceback と kappa は今までどおり全体の query と全体の統計で行う（prelim_stage.cpp:286-296）。
 6. NCBI が落ちる組は明示的な拒否：chunk をもう一度分けるほど重なりが大きい組（NCBI は null の参照で止まる）、batch を分ける負の `CHUNK_SIZE` の組（BLASTN の DW-16 と同じ扱い）。
 
-BLASTP は同じ移植を続けて行う（下）。
+BLASTP（`blastp/blast_engine.rs` の `search_split_query_batches`、`blastp/query_split.rs`）：LOSAT の BLASTP は全ての query をまとめて検索する（予備の hit list は他の query に依らないので、分割されない batch は NCBI の batch ごとの検索と同じ）。NCBI が分割する batch（chunk の大きさ 10000、重なり 100、`CHUNK_SIZE`・`OVERLAP_CHUNK_SIZE`）の query は、chunk ごとに部分の配列を query の集合として同じ検索関数で予備の段まで検索し（`run_resolved_in_pool` の `chunk_prelim`、stream を閉じる前の予備の hit list を返す）、TBLASTN と同じ合わせ方（`BlastHSPStreamMerge`・`Blast_HitListMerge`・query 側の `Blast_HSPListsMerge`・`s_BlastMergeTwoHSPs`・得点の順の安定な並べ替え）の結果で予備の hit list を置き換えてから、kappa に進む。BLASTP の予備の段は有効な探索空間を使わない（cutoff と e-value は部分の長さの Spouge の FSC）ので、chunk に与える全体の探索空間は結果を変えない。分割される batch の query は、全体の検索でも一度検索される（結果は捨てる。約 9,800 残基を超える query だけの費用）。
+
+
+### 確かめ（BLASTP）
+
+- `bigq.faa` × `bigs_prot.faa`（`bigs.fna` の frame 1 の翻訳）・`e2e_many_subject.faa`、`two_q.faa` × `e2e_many_subject.faa`、既定・`-evalue 1000`・outfmt 0 の 9 組が全て一致（分割の有無で NCBI が 11 行変わる組を含む）。
+- 入力の再現の agent が見つけた 30000 残基の 1 行の query（`q_bigline.faa` × `s_base.faa`）：一致（拒否の版では拒否していた）。
+- 小さい `CHUNK_SIZE`（1000、500、300/重なり 50、2000/重なり 300、700/重なり 0、1000 と `BATCH_SIZE=1500`）：`e2e_many_query.faa` × `e2e_many_subject.faa`（既定、`-evalue 1000`、`-max_target_seqs 3`、`-task blastp-fast`、outfmt 7、`-num_threads 4`）と `e2e_protein_query.faa` × `e2e_protein_subject.faa`（outfmt 0）の 42 組で標準出力が全て一致（`-num_threads 4` は NCBI のスレッドの警告だけが違う）。
+- fixture：`e2e.blastp.query_split`、`e2e.blastp.query_split_two`（`-evalue 1000`）。変更前の実行ファイルは 2 件とも違う。
+- BLASTP の単体試験 121 件、全 fixture 146 件（1・4 スレッド）。
 
 ### 確かめ（TBLASTN）
 

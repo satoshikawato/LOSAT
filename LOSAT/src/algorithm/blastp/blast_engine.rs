@@ -4883,6 +4883,7 @@ fn run_resolved_with_records(
             subject_label,
             outputs,
             pool,
+            None,
         )
     })
 }
@@ -4905,7 +4906,7 @@ fn run_resolved_with_records(
 /// rejects (`BL2SEQ_LEGACY`, `OLD_FSC`, values that NCBI cannot convert), and a
 /// `BATCH_SIZE` of 0, with which the first query batch is empty and NCBI fails after the
 /// outfmt 0 prolog. Other batch sizes change a blastp report only through the query
-/// split, which is rejected (`check_protein_query_split`).
+/// split (`search_split_query_batches`).
 fn check_blastp_environment(
     args: &ResolvedBlastpArgs,
     query_records: &[fasta::Record],
@@ -4945,24 +4946,148 @@ fn check_blastp_environment(
         }
         .into());
     }
-    // NCBI c++/src/algo/blast/api/prelim_stage.cpp:232-233:
-    // if (query_splitter->IsQuerySplit()) { ... }
-    // A query batch that NCBI splits into query chunks is rejected (RP-4).
-    app::check_protein_query_split(
-        "BLASTP",
-        10000,
-        &query_records
-            .iter()
-            .map(|record| record.seq().len())
-            .collect::<Vec<_>>(),
-        app::query_batch_size("BLASTP", 10000)? as usize,
-    )?;
     Ok(())
 }
 
 // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
 // TBlastThreads the_threads(GetNumberOfThreads());
 // (*thread)->Run(); (*thread)->Join(&result);
+// NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:219-283
+// ```c++
+//     CEffectiveSearchSpacesMemento eff_memento(m_Options);
+//     SplitQuery_SetEffectiveSearchSpace(m_Options, m_QueryFactory,
+//                                        m_InternalData);
+//     ...
+//     if (query_splitter->IsQuerySplit()) {
+//
+//         CRef<CSplitQueryBlk> split_query_blk = query_splitter->Split();
+//
+//         for (Uint4 i = 0; i < query_splitter->GetNumberOfChunks(); i++) {
+//             try {
+//                 CRef<IQueryFactory> chunk_qf =
+//                     query_splitter->GetQueryFactoryForChunk(i);
+//                 ...
+//                 CRef<SInternalData> chunk_data =
+//                     SplitQuery_CreateChunkData(chunk_qf, m_Options,
+//                                                m_InternalData,
+//                                                GetNumberOfThreads());
+//                 ...
+//                 BlastHSPStreamMerge(split_query_blk->GetCStruct(), i,
+//                                 chunk_data->m_HspStream->GetPointer(),
+//                                 m_InternalData->m_HspStream->GetPointer());
+//             ...
+//             } catch (const CBlastException& e) {
+//                 // This error message is safe to ignore for a given chunk,
+//                 // because the chunks might end up producing a region of
+//                 // the query for which ungapped Karlin-Altschul blocks
+//                 // cannot be calculated
+// ```
+// NCBI reference: c++/src/app/blast/blastp_app.cpp:215-219
+// ```c++
+//         CBlastFastaInputSource fasta(m_CmdLineArgs->GetInputStream(), iconfig);
+//         CBlastInput input(&fasta, m_CmdLineArgs->GetQueryBatchSize());
+// ```
+// NCBI searches every query batch on its own (RP-4). A blastp query's preliminary hit list
+// does not depend on the other queries of its batch, so the batches that NCBI does not
+// split are the search of all queries above; the queries of a batch that NCBI splits
+// (`common/protein_query_split.rs`) take the merged hit lists of the batch's query chunks,
+// each searched as a query set of its parts. The preliminary stage uses no effective search
+// space (its cutoffs and E-values use Spouge's FSC with the part's length), so the batch's
+// search spaces that NCBI gives a chunk do not change it. A chunk whose contexts all fail
+// the Karlin-Altschul setup finds nothing, as NCBI ignores its error.
+#[allow(clippy::too_many_arguments)]
+fn search_split_query_batches(
+    args: &ResolvedBlastpArgs,
+    query_records: &[fasta::Record],
+    subject_records: &[fasta::Record],
+    subject_label: &str,
+    outputs: &mut ReportOutputs<'_>,
+    blastp_parallel_pool: &crate::utils::threading::SearchPool<'_>,
+    query_lengths: &[usize],
+    preliminary_hit_lists: &mut [Option<BlastpHitList>],
+) -> Result<()> {
+    use crate::algorithm::common::protein_query_split::{
+        protein_chunk_would_be_split, split_protein_batch,
+    };
+    let sizes = crate::blastinput::app::protein_query_split_sizes("BLASTP", 10000)?;
+    let batch_size = crate::blastinput::app::query_batch_size("BLASTP", 10000)? as usize;
+    for range in crate::blastinput::query_batch::query_batches(query_lengths, batch_size) {
+        let Some(chunks) = split_protein_batch(&query_lengths[range.clone()], sizes) else {
+            continue;
+        };
+        // A negative CHUNK_SIZE splits a batch only with a negative OVERLAP_CHUNK_SIZE below
+        // it; NCBI's `size_t` chunk ranges then wrap (split_query_cxx.cpp:145-171).
+        anyhow::ensure!(
+            !sizes.negative_chunk_size(),
+            "a negative CHUNK_SIZE above a negative OVERLAP_CHUNK_SIZE splits this query batch with NCBI BLAST+'s size_t chunk ranges wrapped, which is not supported by LOSAT's BLASTP"
+        );
+        anyhow::ensure!(
+            !protein_chunk_would_be_split(&chunks, sizes),
+            "an OVERLAP_CHUNK_SIZE so close to CHUNK_SIZE that NCBI BLAST+ would split a query chunk again (it then stops with a null reference) is not supported by LOSAT's BLASTP"
+        );
+        let mut merged: Vec<Option<BlastpHitList>> = (0..range.len()).map(|_| None).collect();
+        for chunk in &chunks {
+            // NCBI fails to make the query factory of a chunk without a query ("Empty
+            // CBlastQueryVector"); `split_protein_batch` makes none.
+            anyhow::ensure!(
+                !chunk.queries.is_empty(),
+                "a query chunk without a query is not supported by LOSAT's BLASTP"
+            );
+            let parts: Vec<fasta::Record> = chunk
+                .queries
+                .iter()
+                .map(|part| {
+                    let record = &query_records[range.start + part.query];
+                    fasta::Record::with_attrs(
+                        record.id(),
+                        record.desc(),
+                        &record.seq()[part.from..part.to],
+                    )
+                })
+                .collect();
+            let mut chunk_lists = Vec::new();
+            run_resolved_in_pool(
+                args.clone(),
+                &parts,
+                subject_records,
+                "",
+                subject_label,
+                outputs,
+                blastp_parallel_pool,
+                Some(&mut chunk_lists),
+            )?;
+            let chunk_parts: Vec<super::query_split::BlastpChunkPart> = chunk
+                .queries
+                .iter()
+                .zip(&chunk.context_offsets)
+                .map(|(part, &offset)| super::query_split::BlastpChunkPart {
+                    batch_query: part.query,
+                    q_idx: (range.start + part.query) as u32,
+                    offset,
+                    query_length: query_lengths[range.start + part.query],
+                })
+                .collect();
+            // NCBI reference: c++/src/algo/blast/api/split_query_cxx.cpp:174-178
+            // ```c++
+            //     const size_t kOverlap =
+            //         Blast_QueryIsTranslated(m_Options->GetProgramType())
+            //         ? kOverlapSize / CODON_LENGTH : kOverlapSize;
+            //     m_SplitBlk->SetChunkOverlapSize(kOverlap);
+            // ```
+            super::query_split::merge_query_chunk(
+                &mut merged,
+                chunk_lists,
+                &chunk_parts,
+                sizes.overlap as u32 as i32,
+            );
+        }
+        for (local, list) in merged.into_iter().enumerate() {
+            preliminary_hit_lists[range.start + local] = list;
+        }
+    }
+    Ok(())
+}
+
 fn run_resolved_in_pool(
     args: ResolvedBlastpArgs,
     query_records: &[fasta::Record],
@@ -4971,6 +5096,7 @@ fn run_resolved_in_pool(
     subject_label: &str,
     outputs: &mut ReportOutputs<'_>,
     blastp_parallel_pool: &crate::utils::threading::SearchPool<'_>,
+    chunk_prelim: Option<&mut Vec<Option<BlastpHitList>>>,
 ) -> Result<()> {
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1633-1681
     // ```c
@@ -6332,6 +6458,30 @@ fn run_resolved_in_pool(
             }
         }
     }
+
+    // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:268-271
+    // ```c++
+    //                 _ASSERT(chunk_data->m_HspStream->GetPointer());
+    //                 BlastHSPStreamMerge(split_query_blk->GetCStruct(), i,
+    //                                 chunk_data->m_HspStream->GetPointer(),
+    //                                 m_InternalData->m_HspStream->GetPointer());
+    // ```
+    // A query chunk's preliminary stage ends here, before its stream is closed: its hit
+    // lists merge into the batch's (`search_split_query_batches`).
+    if let Some(chunk_lists) = chunk_prelim {
+        *chunk_lists = preliminary_hit_lists;
+        return Ok(());
+    }
+    search_split_query_batches(
+        &args,
+        query_records,
+        subject_records,
+        subject_label,
+        outputs,
+        blastp_parallel_pool,
+        &query_lengths,
+        &mut preliminary_hit_lists,
+    )?;
 
     let merge_sort_start = blastp_timing_start(timing_enabled);
     for hit_list_opt in &mut preliminary_hit_lists {

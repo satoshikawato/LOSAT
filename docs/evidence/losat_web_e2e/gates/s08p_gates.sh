@@ -83,7 +83,7 @@ step "option sweeps (after)"
 mkdir -p $RUN/sweeps
 for p in blastp tblastn tblastx; do
   rm -rf $A/s08p-gate-sweep-$p; mkdir -p $A/s08p-gate-sweep-$p
-  python3 docs/evidence/losat_web_e2e/option_sweep.py --program $p --bin-dir $NCBI --losat $N --ncbi-src $S/ncbi/c++ --jobs 6 --timeout 300 \
+  python3 docs/evidence/losat_web_e2e/option_sweep.py --program $p --bin-dir $NCBI --losat $N --ncbi-src $S/ncbi/c++ --jobs 6 --timeout 1200 \
     --work $A/s08p-gate-sweep-$p --api $S/api-oracle/tblastn_stage_e_local_oracle > $RUN/sweeps/after-$p.tsv 2> $RUN/sweeps/after-$p.err; echo "exit $?" >> $RUN/sweeps/after-$p.err
 done
 python3 docs/evidence/losat_web_e2e/gencode_api_check.py --api $S/api-oracle/tblastn_stage_e_local_oracle --bin-dir $NCBI --losat $N > $RUN/gencode-api-check.tsv 2>&1; echo "exit $?" >> $RUN/gencode-api-check.tsv

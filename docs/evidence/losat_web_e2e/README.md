@@ -75,15 +75,17 @@ S08+ の第 1 回の監査で残った 5 件を、S08+ の閉じる作業と並�
 | `141e49567` | R2b-1：`-evalue` が DBL_MAX 以上を拒否（判断 D12 を広げた） |
 | `75cc8e565` | R2D-1：注釈の行 |
 | `7f64c9cba`・`3373ae5fe`・`8c905ccc5` | 記録、最後のゲートの script（[`gates/s08pb_gates.sh`](gates/s08pb_gates.sh)、自分の build の directory、TBLASTX の sweep の並列 3）、監査 (a) の 2 回目の指示 |
+| `3b84ce6c4` | 第 2 回の監査 (a) の 2 回目の R2A2-1：`-task blastp-fast` の chaining は ungapped の整列が 1 つの list にも行う（NCBI が飛ばすのは空の list だけ、blast_gapalign.c:3707-3708、drop の検査 3628-3636）。fixture 2 件 |
+| `9e07a403e`・`875bfe114`・`70a1bb5a3`・`3bc4d3454` | 記録、ゲートの script の build の directory の接頭辞（`GATE`。前のゲートの Gate A が動いている間に次のゲートを組むため） |
 
 ## fixture
 
 | 集まり | 件数 | 内容 |
 |---|---|---|
-| `LOSAT/tests/outfmt0_manifest.tsv` の `e2e.*`・`method.blastp`・`punct.tblastn`・`punct.tblastx` | 54（S08+ 42、S08+a 10、S08+b 2） | NCBI の outfmt 0 か 7 を凍結（`run_oracle.py`、stderr も固定した行がある）。BLASTP：`blastp-fast`、word 5、threshold の実数と `+inf`、`-seg` の小文字と窓、行列の名の大小、`-max_target_seqs` 3・280・回り込み、全て X、O の同一性と警告の順、無効な query、空の subject、300 の subject、蛋白の題、Method の文、query の分割、compressed の短い subject、one-hit の負の長さ。TBLASTN：BLOSUM45、同じ得点の frame、hard mask と少ない `-max_target_seqs`、fence と X-drop、最終と予備の X-drop、IUPAC の subject、真偽値の flag、O の警告、300 の subject、query の分割、窓の右端。TBLASTX：threshold の実数、句読点の題 |
+| `LOSAT/tests/outfmt0_manifest.tsv` の `e2e.*`・`method.blastp`・`punct.tblastn`・`punct.tblastx` | 56（S08+ 42、S08+a 10、S08+b 4） | NCBI の outfmt 0 か 7 を凍結（`run_oracle.py`、stderr も固定した行がある）。BLASTP：`blastp-fast`、word 5、threshold の実数と `+inf`、`-seg` の小文字と窓、行列の名の大小、`-max_target_seqs` 3・280・回り込み、全て X、O の同一性と警告の順、無効な query、空の subject、300 の subject、蛋白の題、Method の文、query の分割、compressed の短い subject、one-hit の負の長さ、blastp-fast の 1 つの ungapped の整列（outfmt 0 と 7）。TBLASTN：BLOSUM45、同じ得点の frame、hard mask と少ない `-max_target_seqs`、fence と X-drop、最終と予備の X-drop、IUPAC の subject、真偽値の flag、O の警告、300 の subject、query の分割、窓の右端。TBLASTX：threshold の実数、句読点の題 |
 | `LOSAT/tests/tblastx_regression_fixtures.py` の `culling.*` | 11 | TBLASTX の `-culling_limit`（§L） |
 
-fixture の数は 149（SD の 95 に 54）。凍結と確かめは各ゲートの `check-losat-n{1,2,4}.tsv`・`oracle-check-gate.log`。
+fixture の数は 151（SD の 95 に 56）。凍結と確かめは各ゲートの `check-losat-n{1,2,4}.tsv`・`oracle-check-gate.log`。
 
 ## sweep
 
@@ -145,7 +147,14 @@ fixture の数は 149（SD の 95 に 54）。凍結と確かめは各ゲート�
 
 ### 第 2 回（S08+b）
 
-（監査の後に書く）
+[`audit/ROUND2.md`](audit/ROUND2.md)。第 1 回の 5 つの報告を (a) BLASTP、(b) TBLASTN、(c) TBLASTX、(d) 報告と入力 の 4 観点にまとめ、sonnet の監査役 4 人が読み取り専用で並行して、第 1 回の全ての再現の命令と harness を繰り返し、S08+・S08+a・S08+b の変更の周り（query の分割、巨大な X-drop、BLOSUM45 の同点、hard mask、窓の右端、toolkit の語、BLASTP の同順位）を新しく調べた（指示は [`audit/round2/brief/`](audit/round2/brief/)、報告は [`audit/round2/`](audit/round2/)）。比べた数は約 12 万。
+
+| 観点 | 結論 | 指摘と対応 |
+|---|---|---|
+| (a) BLASTP | 1 回目 unsupported（`491292327`）→ 2 回目 unsupported（`75cc8e565`）→ **3 回目 supported**（`3b84ce6c4`） | R2A-1 compressed の lookup の短い subject と R2A-2 one-hit の負の長さの abort（`0e59e2f64`、fixture 2 件）、R2A2-1 blastp-fast の 1 つの ungapped の整列の chaining（`3b84ce6c4`、fixture 2 件）。R2A2-2 は NCBI が配列の外を読んで落ちる検索で、LOSAT は NCBI の `valgrind -q` の下の出力と一致（D15、保守者の判断待ち） |
+| (b) TBLASTN | supported（1 回目） | R2b-1 DBL_MAX の `-evalue` で NCBI が落ちる（D12 を広げた、`141e49567`）、R2b-2 小さい `CHUNK_SIZE` の速さ（残件） |
+| (c) TBLASTX | supported（1 回目） | R2c-1 完全な近傍の記憶（残件、出力は同じ）、R2c-2 最後の `--`（`13493774f`）、R2c-3 文言（受け入れ） |
+| (d) 報告と入力 | supported（1 回目） | R2D-1 注釈の行（`75cc8e565`） |
 
 ## 保守者に諮ること
 

@@ -1108,6 +1108,38 @@ mod tests {
         assert!(parse(&["-outfmt", "6 qseqid sseqid"]).is_err());
     }
 
+    // Plan TD-1: ABI v1 is frozen, so its BLASTP checks the options before the output
+    // format and refuses a tabular field that it does not write, as before S08+ (the CLI
+    // and ABI v2 follow NCBI: -outfmt first, an unknown token ignored).
+    #[test]
+    fn blastp_web_pair_keeps_v1_error_order_and_fields() {
+        let args = |outfmt: &str, extra: &[&str]| {
+            let mut words = vec!["-outfmt", outfmt];
+            words.extend_from_slice(extra);
+            parse_blastp_args(&words, PathBuf::new(), PathBuf::new(), PathBuf::new())
+                .expect("blastp web args")
+        };
+        let fasta = ">q\nMKVLAAGIVGLLLAQPAMAAEIPVDPALAV\n";
+        let error = |outfmt: &str, extra: &[&str]| {
+            engine_error(blastp::run_web_pair(args(outfmt, extra), fasta, fasta).unwrap_err())
+        };
+        assert_eq!(
+            error("6 nosuch", &[]),
+            "unsupported blastp tabular field 'nosuch'"
+        );
+        assert_eq!(
+            error("9", &[]),
+            "Unsupported output format: 9. Supported: 0, 6, 7"
+        );
+        assert_eq!(
+            error("9", &["-num_threads", "0"]),
+            "num_threads must be greater than zero"
+        );
+        assert!(!error("9", &["-ungapped"]).contains("output format"));
+        assert!(error("6 nosuch", &["-matrix", "FOO"]).contains("FOO"));
+        assert!(blastp::run_web_pair(args("6 qseqid sseqid std", &[]), fasta, fasta).is_ok());
+    }
+
     // Plan TD-1: ABI v1 is frozen, so its BLASTN keeps outfmt 6 and 7 and rejects
     // outfmt 0, which the engine implements since LOSAT Web session S07, with the error
     // that it gave before.

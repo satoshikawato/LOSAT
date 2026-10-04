@@ -4492,6 +4492,29 @@ pub fn run_web_pair(args: BlastpArgs, query_fasta: &str, subject_fasta: &str) ->
     run_web_pair_records(args, &queries, &subjects, "", "")
 }
 
+/// ABI v1's checks of a BLASTP request, whose arguments, formats and errors are frozen
+/// (plan TD-1): the options are checked before the output format, and a tabular field that
+/// LOSAT's BLASTP does not write is an error, as in v1 before S08+ moved BLASTP to NCBI's
+/// application layer (which reads `-outfmt` first and ignores a token that is not a field).
+#[cfg(target_arch = "wasm32")]
+fn check_web_v1_request(args: &BlastpArgs) -> Result<()> {
+    check_options(args)?;
+    let (format, fields) = OutputFormat::parse(&args.outfmt).map_err(anyhow::Error::msg)?;
+    if let Some(fields) = fields {
+        if format == OutputFormat::Pairwise {
+            bail!("blastp outfmt 0 does not accept custom field lists");
+        }
+        for token in fields.split_whitespace() {
+            if !token.eq_ignore_ascii_case("std")
+                && !matches!(blastp_tabular_field(token), Ok(Some(_)))
+            {
+                bail!("unsupported blastp tabular field '{token}'");
+            }
+        }
+    }
+    Ok(())
+}
+
 #[cfg(target_arch = "wasm32")]
 pub fn run_web_pair_records(
     args: BlastpArgs,
@@ -4525,6 +4548,7 @@ pub fn run_web_pair_records(
     //             CRef<CLocalDbAdapter> db);
     // ```
     // Web ABI v1 runs the same local search as the CLI and keeps the report in memory.
+    check_web_v1_request(&args)?;
     let mut output = Vec::new();
     let outfmt = args.outfmt.clone();
     let mut stderr = std::io::stderr();

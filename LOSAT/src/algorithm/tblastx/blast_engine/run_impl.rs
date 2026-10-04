@@ -643,72 +643,10 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     //         m_Subjects.Reset(new blast::CObjMgr_QueryFactory(*subjects));
     // ```
     // The first handler opens and reads the subjects (an empty subject set fails there),
-    // as BLASTN's `run`; the inputs are read and checked as BLASTN reads them
-    // (`blastn/input.rs`).
+    // as BLASTN's `run` (`blastn/input.rs` `read_nucleotide_subjects`).
     use crate::algorithm::blastn::input as fasta_input;
-    fasta_input::check_utf8_file_name(&args.subject, "subject", "TBLASTX")?;
-    let mut subject_file = fasta_input::open_input(&args.subject, "subject", "TBLASTX")?;
-    let subject_bytes = fasta_input::read_fasta_bytes(&mut subject_file, &args.subject, "subject")?;
-    drop(subject_file);
-    // NCBI warns about the residues that LOSAT rejects when it reads them, so they are
-    // rejected here. NCBI reads the FASTA that `bio` cannot read because of blank or
-    // comment lines before the first defline (or a defline that is not UTF-8), these
-    // deflines and records without residues without a message, so LOSAT rejects them
-    // where the search would start. Other text before the first defline is rejected here:
-    // NCBI reads it as a record without a defline or stops at it.
-    let blank = fasta_input::is_blank(&subject_bytes);
-    if !blank {
-        fasta_input::check_sequence_lines_of(&subject_bytes, "subject", "TBLASTX")?;
-    }
-    let (subjects, subject_reading) =
-        match fasta_input::bio_records_of(&subject_bytes, &args.subject, "subject", "TBLASTX") {
-            Ok(records) => (records, Ok(())),
-            // NCBI reference: c++/src/objtools/readers/fasta.cpp:375-384
-            // ```c
-            //         if (line.empty()) {
-            //             continue; // ignore lines containing only whitespace
-            //         }
-            //         c = line[0];
-            //
-            //         if (c == '!'  ||  c == '#' || c == ';') {
-            //             // no content, just a comment or blank line
-            //             continue;
-            // ```
-            // NCBI skips these lines and reads the records after them as those of any file:
-            // a file of such lines only has no subject (it fails below as a blank file
-            // does), and the records after them are checked and warned about now, as those
-            // of a file that `bio` reads, so that a query that NCBI finds empty later does
-            // not hide NCBI's failure to read them.
-            Err(error) if fasta_input::only_skipped_lines_before_first_defline(&subject_bytes) => {
-                match fasta_input::from_first_defline(&subject_bytes) {
-                    None => (Vec::new(), Ok(())),
-                    Some(records_text) => {
-                        if let Ok(records) = fasta_input::bio_records_of(
-                            records_text,
-                            &args.subject,
-                            "subject",
-                            "TBLASTX",
-                        ) {
-                            fasta_input::check_residues_of(&records, "subject", "TBLASTX")?;
-                            fasta_input::write_title_warnings(&records, &mut std::io::stderr())?;
-                        }
-                        (Vec::new(), Err(error))
-                    }
-                }
-            }
-            Err(error) => return Err(error),
-        };
-    fasta_input::check_residues_of(&subjects, "subject", "TBLASTX")?;
-    fasta_input::write_title_warnings(&subjects, &mut std::io::stderr())?;
-    if subject_reading.is_ok() {
-        check_subjects_not_empty(&subjects)?;
-    }
-    let subject_checks = subject_reading
-        .and_then(|()| fasta_input::check_deflines_of(&subject_bytes, "subject", "TBLASTX"))
-        .and_then(|()| {
-            fasta_input::check_records_have_residues_of(&subjects, "subject", "TBLASTX")
-        });
-    drop(subject_bytes);
+    let (subjects, subject_checks) =
+        fasta_input::read_nucleotide_subjects(&args.subject, "TBLASTX")?;
     // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3456-3481
     // ```c
     //     if (args.Exist(kArgQuery) && args[kArgQuery].HasValue() &&

@@ -75,8 +75,8 @@ fn canonical_options_for_every_program() {
             // blast_args.cpp:2726-2731: AddOptionalKey(kArgMaxTargetSequences, ...);
             Commands::Tblastn(a) => {
                 assert_eq!(a.num_threads, 4);
-                assert_eq!(a.evalue, 0.001);
-                assert_eq!(a.max_target_seqs, 9);
+                assert_eq!(a.evalue, Some(0.001));
+                assert_eq!(a.max_target_seqs, Some(9));
             }
         }
     }

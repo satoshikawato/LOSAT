@@ -717,6 +717,26 @@ pub fn tblastx_threshold(value: &str) -> Result<f64, String> {
     ncbi_threshold(value, "TBLASTX")
 }
 
+/// A Boolean argument (`CArg_Boolean`, read with `NStr::StringToBool`:
+/// `blastinput/ncbi_environment.rs` `ncbi_string_to_bool`).
+///
+/// NCBI reference: c++/src/corelib/ncbiargs.cpp:489-497
+/// ```c
+/// inline CArg_Boolean::CArg_Boolean(const string& name, const string& value)
+///     : CArg_String(name, value)
+/// {
+///     try {
+///         m_Boolean = NStr::StringToBool(value);
+///     } catch (const CException& e) {
+///         NCBI_RETHROW(e,CArgException,eConvert, s_ArgExptMsg(GetName(),
+///             "Argument cannot be converted",value));
+///     }
+/// ```
+pub fn ncbi_boolean(value: &str) -> Result<bool, String> {
+    crate::blastinput::ncbi_environment::ncbi_string_to_bool(value)
+        .ok_or_else(|| format!("Argument cannot be converted: `{value}'"))
+}
+
 /// A protein `-word_size` (`CArgAllowValuesGreaterThanOrEqual(2)` for a protein query).
 ///
 /// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:166-170

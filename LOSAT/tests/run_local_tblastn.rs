@@ -308,7 +308,9 @@ fn unsupported_formats_fail_before_searching() {
     let queries = read_records(&inputs.query);
     let subjects = read_records(&inputs.subject);
     let (query_name, subject_name) = inputs.names();
-    for outfmt in ["5", "6 qseq sseq", "0 qseqid"] {
+    // NCBI blast_args.cpp:2845-2851: a custom specification of outfmt 0 is ignored, so
+    // "0 qseqid" is outfmt 0; LOSAT's TBLASTN writes no custom tabular fields or delimiter.
+    for outfmt in ["5", "6 qseq sseq", "6 delim=,"] {
         let (mut valid, mut invalid, mut diagnostics) = (Vec::new(), Vec::new(), Vec::new());
         let mut outputs = ReportOutputs {
             formats: vec![

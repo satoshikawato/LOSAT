@@ -41,6 +41,12 @@ use crate::utils::seg::SegParams;
 // }
 // Each requested format prints the same final result without searching again.
 #[allow(clippy::too_many_arguments)]
+/// The format number of a checked `-outfmt` value, as NCBI's `ParseFormattingString` reads
+/// it (a custom specification of outfmt 0 is ignored); -1 for a value it does not read.
+pub(super) fn format_number(outfmt: &str) -> i32 {
+    crate::blastinput::app::parse_formatting_string(outfmt).map_or(-1, |choice| choice.number)
+}
+
 pub(super) fn render(
     outputs: &mut ReportOutputs<'_>,
     query_records: &[fasta::Record],
@@ -52,6 +58,7 @@ pub(super) fn render(
     query_validity: &[bool],
     query_batch_skipped: &[bool],
     scoring: LocalStageDScoring,
+    matrix_name: &str,
     genetic_code: u8,
     seg: Option<&SegParams>,
     mask_lowercase: bool,
@@ -70,20 +77,24 @@ pub(super) fn render(
     // CBlastFormat::PrintOneResultSet(const blast::CSearchResults& results,
     // The alignments are rendered once from the final result, for outfmt 0 and for
     // the caller's hit records, in the order of the tabular rows.
-    let pairwise_hits =
-        if outputs.hits.is_some() || outputs.formats.iter().any(|format| format.outfmt == "0") {
-            Some(pairwise_hits(
-                query_records,
-                subject_records,
-                hitlists,
-                scoring,
-                genetic_code,
-                seg,
-                mask_lowercase,
-            )?)
-        } else {
-            None
-        };
+    let pairwise_hits = if outputs.hits.is_some()
+        || outputs
+            .formats
+            .iter()
+            .any(|format| format_number(format.outfmt) == 0)
+    {
+        Some(pairwise_hits(
+            query_records,
+            subject_records,
+            hitlists,
+            scoring,
+            genetic_code,
+            seg,
+            mask_lowercase,
+        )?)
+    } else {
+        None
+    };
     if let (Some(hits_sink), Some(pairwise_hits)) = (outputs.hits.as_mut(), pairwise_hits.as_ref())
     {
         hits_sink(pairwise_hits);
@@ -94,10 +105,10 @@ pub(super) fn render(
             .as_deref_mut()
             .map(|observer| FormatProbe::new(observer, format_index));
         let mut writer = format.sink.open()?;
-        match format.outfmt {
-            "6" | "7" => write_tabular(
+        match format_number(format.outfmt) {
+            6 | 7 => write_tabular(
                 &mut writer,
-                format.outfmt == "7",
+                format_number(format.outfmt) == 7,
                 query_records,
                 subject_records,
                 subject_path,
@@ -105,7 +116,7 @@ pub(super) fn render(
                 query_batch_skipped,
                 probe.as_mut(),
             )?,
-            "0" => write_pairwise(
+            0 => write_pairwise(
                 &mut writer,
                 pairwise_hits
                     .as_deref()
@@ -118,9 +129,10 @@ pub(super) fn render(
                 query_validity,
                 query_batch_skipped,
                 scoring,
+                matrix_name,
                 probe.as_mut(),
             )?,
-            outfmt => bail!("unsupported TBLASTN outfmt {outfmt}"),
+            _ => bail!("unsupported TBLASTN outfmt {}", format.outfmt),
         }
         writer.flush()?;
     }
@@ -356,6 +368,7 @@ mod tests {
                 &query_validity,
                 &vec![false; queries.len()],
                 LocalStageDScoring::default(),
+                "BLOSUM62",
                 1,
                 Some(&seg),
                 false,
@@ -554,6 +567,7 @@ fn write_pairwise(
     query_validity: &[bool],
     query_batch_skipped: &[bool],
     scoring: LocalStageDScoring,
+    matrix_name: &str,
     probe: Option<&mut FormatProbe<'_>>,
 ) -> Result<()> {
     ensure!(
@@ -579,7 +593,8 @@ fn write_pairwise(
         ),
         database_num_sequences: subject_records.len(),
         database_total_letters: total_nt,
-        matrix_name: format!("{:?}", scoring.matrix).to_ascii_uppercase(),
+        // NCBI blast_format.cpp:2266: options.GetMatrixName(), as typed.
+        matrix_name: matrix_name.to_string(),
         gap_open: scoring.gap_open,
         gap_extend: scoring.gap_extend,
         word_threshold: f64::from(scoring.threshold),

@@ -151,7 +151,15 @@ fn main() -> Result<()> {
         // results = lcl_blast.Run();
         // formatter.PrintOneResultSet(**result, query);
         Commands::Tblastn(args) => {
-            tblastn::TblastnArgs::run(args)?;
+            // NCBI's application layer reads its environment and registry files before
+            // tblastn's own code runs (as for BLASTN); LOSAT rejects the settings that change
+            // the output.
+            LOSAT::blastinput::ncbi_environment::check_ncbi_application_settings("tblastn")
+                .map_err(anyhow::Error::msg)?;
+            if let Err(error) = tblastn::TblastnArgs::run(args) {
+                LOSAT::cli::exit_on_native_error(&error);
+                return Err(error);
+            }
         }
     }
     Ok(())

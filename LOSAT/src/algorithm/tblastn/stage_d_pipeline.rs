@@ -578,29 +578,22 @@ fn run_local_search_with_pool(
     // rejects the environment mode until the close operation is ported.
     ensure!(
         !composition_mode2 || std::env::var_os("ADAPTIVE_CBS").is_none(),
-        "TBLASTN ADAPTIVE_CBS preliminary stream close is unimplemented"
+        "the environment variable ADAPTIVE_CBS, which makes NCBI BLAST+ close its preliminary stream of composition-adjusted HSPs early, is not supported by LOSAT's TBLASTN"
     );
     // NCBI c++/src/algo/blast/core/blast_hits.c:43-70:
     // if (compositionBasedStats) ... 1050 or 2*hitlist+50;
     // else if (gapped_calculation)
     //   prelim_hitlist_size = MIN(MAX(2*hitlist_size,10), hitlist_size+50);
-    let prelim_size = if composition_mode2 {
-        if profile.max_target_seqs <= 500 {
-            1050
-        } else {
-            profile
-                .max_target_seqs
-                .checked_mul(2)
-                .and_then(|v| v.checked_add(50))
-                .context("TBLASTN preliminary cap overflow")?
-        }
-    } else {
-        profile
-            .max_target_seqs
-            .saturating_mul(2)
-            .max(10)
-            .min(profile.max_target_seqs.saturating_add(50))
-    };
+    // The size is NCBI's `int` (`blastn/hsp.rs` `get_prelim_hitlist_size`); a size that is
+    // not positive (NCBI crashes) is rejected with the options (`args.rs`).
+    let prelim_size = usize::try_from(crate::algorithm::blastn::hsp::get_prelim_hitlist_size(
+        profile.max_target_seqs,
+        composition_mode2,
+        true,
+    ))
+    .ok()
+    .filter(|&size| size > 0)
+    .context("TBLASTN preliminary hit list size is not positive")?;
     let mut preliminary_hitlists: Vec<Option<KappaResultHitList>> =
         (0..queries.len()).map(|_| None).collect();
     // NCBI c++/src/algo/blast/core/blast_engine.c:1469-1475,872-905:

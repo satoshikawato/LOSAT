@@ -138,7 +138,7 @@ where
             if scope.get_name() == "tblastn" && is_unported_tblastn_arg(name) {
                 return Err(clap::Error::raw(
                     ErrorKind::InvalidValue,
-                    format!("unsupported TBLASTN option '-{name}': Rust behavior is unimplemented"),
+                    format!("the NCBI BLAST+ option -{name} is not supported by LOSAT's TBLASTN"),
                 ));
             }
             return Err(clap::Error::raw(
@@ -366,47 +366,60 @@ fn is_ncbi_toolkit_arg(name: &str) -> bool {
     )
 }
 
-// Names are from the pinned 2.17.0+ -help and have no implemented Rust path yet.
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastn_args.cpp:44-50
+// ```c++
+// CTblastnAppArgs::CTblastnAppArgs()
+// {
+//     CRef<IBlastCmdLineArgs> arg;
+//     static const string kProgram("tblastn");
+//     arg.Reset(new CProgramDescriptionArgs(kProgram,
+//                                   "Protein Query-Translated Subject BLAST"));
+// ```
+// The options of NCBI tblastn 2.17.0+ (-help) that LOSAT's TBLASTN does not implement
+// (AGENTS.md rule 2: explicit unsupported errors).
 fn is_unported_tblastn_arg(name: &str) -> bool {
     matches!(
         name,
-        "query_loc"
-            | "show_gis"
-            | "num_descriptions"
-            | "num_alignments"
-            | "line_length"
-            | "html"
-            | "sorthits"
-            | "sorthsps"
-            | "lcase_masking"
+        "best_hit_overhang"
+            | "best_hit_score_edge"
+            | "culling_limit"
+            | "db"
+            | "db_hard_mask"
+            | "db_soft_mask"
+            | "dbsize"
+            | "entrez_query"
+            | "export_search_strategy"
             | "gilist"
-            | "seqidlist"
+            | "h"
+            | "html"
+            | "import_search_strategy"
+            | "in_pssm"
+            | "line_length"
+            | "max_hsps"
+            | "mt_mode"
             | "negative_gilist"
             | "negative_seqidlist"
-            | "taxids"
-            | "negative_taxids"
-            | "taxidlist"
             | "negative_taxidlist"
+            | "negative_taxids"
             | "no_taxid_expansion"
-            | "entrez_query"
-            | "db_soft_mask"
-            | "db_hard_mask"
-            | "qcov_hsp_perc"
-            | "max_hsps"
-            | "culling_limit"
-            | "best_hit_overhang"
-            | "best_hit_score_edge"
-            | "subject_besthit"
-            | "dbsize"
-            | "searchsp"
-            | "import_search_strategy"
-            | "export_search_strategy"
-            | "xdrop_ungap"
-            | "xdrop_gap"
-            | "xdrop_gap_final"
+            | "num_alignments"
+            | "num_descriptions"
             | "parse_deflines"
-            | "mt_mode"
+            | "qcov_hsp_perc"
+            | "query_loc"
+            | "remote"
+            | "searchsp"
+            | "seqidlist"
+            | "show_gis"
+            | "sorthits"
+            | "sorthsps"
+            | "subject_besthit"
+            | "subject_loc"
+            | "taxidlist"
+            | "taxids"
             | "use_sw_tback"
+            | "version"
+            | "xdrop_ungap"
     )
 }
 

@@ -3371,6 +3371,25 @@ mod tests {
 // PrintProlog(); AcknowledgeBlastQuery(...); x_DisplayDeflines(...);
 // display.DisplaySeqalign(...); x_PrintOneQueryFooter(...);
 // This uses the local-subject database header and TBLASTN translated alignment.
+/// The outfmt 0 prolog of tblastn (the version, the references and the database), which
+/// NCBI writes before it reads the first query batch (as `write_tblastx_pairwise_prolog`).
+pub fn write_tblastn_pairwise_prolog<W: Write>(
+    writer: &mut W,
+    version: &str,
+    database_name: &str,
+    database_num_sequences: usize,
+    database_total_letters: usize,
+) -> io::Result<()> {
+    write_translated_pairwise_intro(writer, "TBLASTN", version)?;
+    write_blastp_database_header_spacing(
+        writer,
+        database_name,
+        database_num_sequences,
+        database_total_letters,
+        1,
+    )
+}
+
 pub fn write_tblastn_pairwise_report<W: Write>(
     hits: &[PairwiseHit],
     writer: &mut W,

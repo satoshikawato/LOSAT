@@ -268,6 +268,15 @@ pub fn check_protein_input_of(
         return Ok(());
     }
     check_deflines_of(bytes, role, program)?;
+    check_protein_residues_of(records, role, program)
+}
+
+/// The residue check of `check_protein_input_of` for records already read.
+pub fn check_protein_residues_of(
+    records: &[fasta::Record],
+    role: &str,
+    program: &str,
+) -> Result<()> {
     first_problem(records, |index, record| {
         let position = record
             .seq()
@@ -615,6 +624,87 @@ pub fn check_utf8_file_name(path: &std::path::Path, role: &str, program: &str) -
         );
     }
     Ok(())
+}
+
+/// The subjects of a translated search (TBLASTN, TBLASTX), read as NCBI's handler of the
+/// database arguments reads them: the file is opened and read, the records that NCBI
+/// warns about or reads differently are rejected (or their title warnings written), and a
+/// file without records fails with NCBI's error. Returns the records and the checks that
+/// LOSAT makes where the search would start (NCBI reads those inputs without a message).
+pub fn read_nucleotide_subjects(
+    path: &std::path::Path,
+    program: &str,
+) -> Result<(Vec<fasta::Record>, Result<()>)> {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2553-2557
+    // ```c
+    //         CRef<blast::CBlastQueryVector> subjects;
+    //         m_Scope = ReadSequencesToBlast(*subj_input_stream, IsProtein(),
+    //                                        subj_range, parse_deflines,
+    //                                        use_lcase_masks, subjects, m_IsMapper);
+    //         m_Subjects.Reset(new blast::CObjMgr_QueryFactory(*subjects));
+    // ```
+    // The first handler opens and reads the subjects (an empty subject set fails there),
+    // as BLASTN's `run`; the inputs are read and checked as BLASTN reads them
+    // (`blastn/input.rs`).
+    check_utf8_file_name(path, "subject", program)?;
+    let mut subject_file = open_input(path, "subject", program)?;
+    let subject_bytes = read_fasta_bytes(&mut subject_file, path, "subject")?;
+    drop(subject_file);
+    // NCBI warns about the residues that LOSAT rejects when it reads them, so they are
+    // rejected here. NCBI reads the FASTA that `bio` cannot read because of blank or
+    // comment lines before the first defline (or a defline that is not UTF-8), these
+    // deflines and records without residues without a message, so LOSAT rejects them
+    // where the search would start. Other text before the first defline is rejected here:
+    // NCBI reads it as a record without a defline or stops at it.
+    let blank = is_blank(&subject_bytes);
+    if !blank {
+        check_sequence_lines_of(&subject_bytes, "subject", program)?;
+    }
+    let (subjects, subject_reading) = match bio_records_of(&subject_bytes, path, "subject", program)
+    {
+        Ok(records) => (records, Ok(())),
+        // NCBI reference: c++/src/objtools/readers/fasta.cpp:375-384
+        // ```c
+        //         if (line.empty()) {
+        //             continue; // ignore lines containing only whitespace
+        //         }
+        //         c = line[0];
+        //
+        //         if (c == '!'  ||  c == '#' || c == ';') {
+        //             // no content, just a comment or blank line
+        //             continue;
+        // ```
+        // NCBI skips these lines and reads the records after them as those of any file:
+        // a file of such lines only has no subject (it fails below as a blank file
+        // does), and the records after them are checked and warned about now, as those
+        // of a file that `bio` reads, so that a query that NCBI finds empty later does
+        // not hide NCBI's failure to read them.
+        Err(error) if only_skipped_lines_before_first_defline(&subject_bytes) => {
+            match from_first_defline(&subject_bytes) {
+                None => (Vec::new(), Ok(())),
+                Some(records_text) => {
+                    if let Ok(records) = bio_records_of(records_text, path, "subject", program) {
+                        check_residues_of(&records, "subject", program)?;
+                        write_title_warnings(&records, &mut std::io::stderr())?;
+                    }
+                    (Vec::new(), Err(error))
+                }
+            }
+        }
+        Err(error) => return Err(error),
+    };
+    check_residues_of(&subjects, "subject", program)?;
+    write_title_warnings(&subjects, &mut std::io::stderr())?;
+    if subject_reading.is_ok() {
+        if subjects.is_empty() {
+            return Err(crate::blastinput::app::empty_subjects_error());
+        }
+    }
+    let subject_checks = subject_reading
+        .and_then(|()| check_deflines_of(&subject_bytes, "subject", program))
+        .and_then(|()| check_records_have_residues_of(&subjects, "subject", program));
+    drop(subject_bytes);
+    Ok((subjects, subject_checks))
 }
 
 #[cfg(test)]

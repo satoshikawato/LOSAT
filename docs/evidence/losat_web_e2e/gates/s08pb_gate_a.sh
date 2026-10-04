@@ -3,13 +3,13 @@
 # into the run directory (docs/evidence/losat_web_e2e/run-*). Made from the S08 Gate A run.
 set -u
 A=/home/kawato/.cache/losat-web-gui-target
-S=$A/s08p
+B=$A/s08pb
 W=/mnt/c/Users/genom/GitHub/LOSAT-web-gui
-RUN=$W/$(cat $S/rundir)
+RUN=$W/$(cat $B/rundir)
 OUT=/tmp/claude-1000/s08pb-tblastx-v010
 step() { echo "$(date -u +%H:%M:%S) $*"; }
 cd $W
-N=$A/s08p-gate-native/release/LOSAT
+N=$A/s08pb-gate-native/release/LOSAT
 step "gate a: tblastx v0.1.0 (outfmt 6)"
 rm -rf $OUT
 python3 LOSAT/tests/audit_tblastx_v010.py --losat-bin $N --output-dir $OUT > $RUN/audit-tblastx-v010.log 2>&1; echo "exit $?" >> $RUN/audit-tblastx-v010.log

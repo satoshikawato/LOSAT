@@ -2308,6 +2308,7 @@ fn write_blastp_outfmt7_header<W: Write>(
     context: &ReportContext,
     fields: &[BlastpTabularField],
     num_hits: usize,
+    batch_skipped: bool,
 ) -> std::io::Result<()> {
     let version_str = context.version.as_deref().unwrap_or("0.1.0");
     writeln!(
@@ -2327,6 +2328,15 @@ fn write_blastp_outfmt7_header<W: Write>(
         .or(context.subject_name.as_ref())
     {
         writeln!(writer, "# Database: {}", db)?;
+    }
+    // NCBI reference: c++/src/objtools/align_format/tabular.cpp:1277-1278
+    // ```c++
+    //     if (align_set) {
+    //        int num_hits = align_set->Get().size();
+    // ```
+    // A query of an unsearched batch has no Seq-align set, so no hit count is written.
+    if batch_skipped {
+        return Ok(());
     }
     if num_hits > 0 {
         let field_list = fields
@@ -2513,14 +2523,20 @@ fn write_blastp_tabular_output(
     query_ids: &[Arc<str>],
     query_headers: &[String],
     subject_ids: &[Arc<str>],
+    query_batch_skipped: &[bool],
     context: &ReportContext,
     mut probe: Option<&mut FormatProbe<'_>>,
+    mut warnings: Option<&mut crate::report::query_warnings::QueryWarnings<'_>>,
 ) -> Result<()> {
     // NCBI reference: c++/src/objtools/align_format/tabular.cpp:1264-1283,1322-1325
     // PrintHeader(..., const CBioseq& bioseq, ..., const CSeq_align_set* align_set, ...);
     // m_Ostream << "# BLAST processed " << num_queries << " queries\n";
     let mut start = 0;
     for (q_idx, query_header) in query_headers.iter().enumerate() {
+        // The query's warnings come before its lines (`QueryWarnings`).
+        if let Some(warnings) = warnings.as_deref_mut() {
+            warnings.before_query(q_idx, &mut *writer)?;
+        }
         let mut end = start;
         while end < hits.len() && hits[end].hit.q_idx as usize == q_idx {
             end += 1;
@@ -2528,7 +2544,13 @@ fn write_blastp_tabular_output(
         if outfmt == OutputFormat::TabularWithComments {
             let mut query_context = context.clone();
             query_context.query_name = Some(query_header.clone());
-            write_blastp_outfmt7_header(writer, &query_context, fields, end - start)?;
+            write_blastp_outfmt7_header(
+                writer,
+                &query_context,
+                fields,
+                end - start,
+                query_batch_skipped[q_idx],
+            )?;
         }
         for (hsp_index, hit) in hits.iter().enumerate().take(end).skip(start) {
             // NCBI reference: c++/src/objtools/align_format/tabular.cpp:1100-1108
@@ -2608,8 +2630,10 @@ fn write_blastp_tabular_hit_lists(
     query_headers: &[String],
     subject_ids: &[Arc<str>],
     subjects: &[EncodedProtein],
+    query_batch_skipped: &[bool],
     context: &ReportContext,
     mut probe: Option<&mut FormatProbe<'_>>,
+    mut warnings: Option<&mut crate::report::query_warnings::QueryWarnings<'_>>,
 ) -> Result<()> {
     let config = OutputConfig::ncbi_compat();
     let use_default_fields = fields == default_blastp_tabular_fields();
@@ -2619,6 +2643,10 @@ fn write_blastp_tabular_hit_lists(
     // PrintHeader(..., const CBioseq& bioseq, ..., const CSeq_align_set* align_set, ...);
     // m_Ostream << "# BLAST processed " << num_queries << " queries\n";
     for (q_idx, hit_list_opt) in hit_lists.iter().enumerate() {
+        // The query's warnings come before its lines (`QueryWarnings`).
+        if let Some(warnings) = warnings.as_deref_mut() {
+            warnings.before_query(q_idx, &mut *writer)?;
+        }
         if outfmt == OutputFormat::TabularWithComments {
             let mut query_context = context.clone();
             query_context.query_name = Some(query_headers[q_idx].clone());
@@ -2627,6 +2655,7 @@ fn write_blastp_tabular_hit_lists(
                 &query_context,
                 fields,
                 blastp_hit_list_hsp_count(std::slice::from_ref(hit_list_opt)),
+                query_batch_skipped[q_idx],
             )?;
         }
         let Some(hit_list) = hit_list_opt else {
@@ -2918,6 +2947,44 @@ fn masked_query_rows(
     )
 }
 
+// NCBI reference: c++/src/objtools/alnmgr/alnvec.cpp:116-121
+// ```c++
+//         CBioseq_Handle h = GetBioseqHandle(row);
+//         CSeqVector vec = h.GetSeqVector
+//             (CBioseq_Handle::eCoding_Iupac,
+//              IsPositiveStrand(row) ?
+//              CBioseq_Handle::eStrand_Plus :
+//              CBioseq_Handle::eStrand_Minus);
+// ```
+/// The displayed row of an alignment from `start` (0-based) of `sequence`: the reports read
+/// the input sequence, so a pyrrolysine (O) that the search read as X is shown as O.
+fn restore_displayed_o(row: Option<String>, sequence: &[u8], start: usize) -> Option<String> {
+    let row = row?;
+    if !sequence
+        .iter()
+        .any(|residue| residue.eq_ignore_ascii_case(&b'O'))
+    {
+        return Some(row);
+    }
+    let mut position = start;
+    Some(
+        row.chars()
+            .map(|column| {
+                if column == '-' {
+                    return column;
+                }
+                let shown = match sequence.get(position) {
+                    Some(residue) if residue.eq_ignore_ascii_case(&b'O') && column == 'X' => 'O',
+                    _ => column,
+                };
+                position += 1;
+                shown
+            })
+            .collect(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
 fn build_pairwise_hits(
     hits: Vec<(Hit, u8)>,
     query_contexts: &[QueryContext],
@@ -2925,6 +2992,8 @@ fn build_pairwise_hits(
     subject_titles: &[Option<String>],
     matrix: ScoringMatrix,
     render_alignment: bool,
+    query_records: &[fasta::Record],
+    subject_records: &[fasta::Record],
 ) -> Result<Vec<PairwiseHit>> {
     hits.into_iter()
         .map(|(mut hit, comp_adjustment_method)| -> Result<PairwiseHit> {
@@ -2964,6 +3033,20 @@ fn build_pairwise_hits(
             } else {
                 (None, None)
             };
+            let query_seq = restore_displayed_o(
+                query_seq,
+                query_records
+                    .get(q_idx)
+                    .map_or(&[][..], |record| record.seq()),
+                hit.q_start.saturating_sub(1),
+            );
+            let subject_seq = restore_displayed_o(
+                subject_seq,
+                subject_records
+                    .get(s_idx)
+                    .map_or(&[][..], |record| record.seq()),
+                hit.s_start.saturating_sub(1),
+            );
             // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:996-1028
             // ```c++
             //             int num_matches = 0;
@@ -4350,6 +4433,7 @@ fn search_cli(
 ) -> Result<()> {
     use crate::algorithm::blastn::input as fasta_input;
     let resolved = args.check_options(outputs.diagnostics)?;
+    fasta_input::write_empty_subject_warnings(subjects, "blastp", outputs.diagnostics)?;
     // NCBI reference: ncbi-blast/c++/src/app/blast/blastp_app.cpp:211-214
     // ```c
     //         if(IsIStreamEmpty(m_CmdLineArgs->GetInputStream())){
@@ -4395,6 +4479,9 @@ fn search_cli(
     let queries = fasta_input::bio_records_of(&query_bytes, &args.query, "query", "BLASTP")?;
     fasta_input::write_protein_title_warnings(&queries, outputs.diagnostics)?;
     fasta_input::check_protein_input_of(&query_bytes, &queries, "query", "BLASTP")?;
+    // NCBI warns about a query without residues ("Sequence contains no data") and fails
+    // when no query has any; LOSAT rejects such a query, as BLASTN does.
+    fasta_input::check_records_have_residues_of(&queries, "query", "BLASTP")?;
     drop(query_bytes);
     validate_requested_blastp_support(&resolved)?;
     run_resolved_with_records(resolved, &queries, subjects, "", "", outputs)
@@ -4462,9 +4549,19 @@ pub fn run_local(
         outputs.diagnostics,
     )?;
     let args = resolve_for_formats(&args, outputs)?;
+    crate::algorithm::blastn::input::write_empty_subject_warnings(
+        subject_records,
+        "blastp",
+        outputs.diagnostics,
+    )?;
     crate::algorithm::blastn::input::write_protein_title_warnings(
         query_records,
         outputs.diagnostics,
+    )?;
+    crate::algorithm::blastn::input::check_records_have_residues_of(
+        query_records,
+        "query",
+        "BLASTP",
     )?;
     validate_requested_blastp_support(&args)?;
     run_resolved_with_records(
@@ -4854,6 +4951,30 @@ fn run_resolved_in_pool(
     };
     let context_lookup_bounds = blastp_context_lookup_bounds(&contexts);
     let concatenated_query = build_blastp_concatenated_query(&contexts);
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/local_blast.cpp:177-180
+    // ```c
+    //     int status = m_PrelimSearch->CheckInternalData();
+    //     if (status != 0)
+    //     {
+    //          // Search was not run, but we send back an empty CSearchResultSet.
+    // ```
+    // A query whose Karlin-Altschul parameters cannot be computed is invalid
+    // (`is_valid`); a query batch (`GetQueryBatchSize`) of invalid queries only is not
+    // searched, and its reports show -1 parameters.
+    let mut query_valid = vec![true; query_records.len()];
+    for context in &contexts {
+        if !context.is_valid {
+            query_valid[context.q_idx as usize] = false;
+        }
+    }
+    let mut query_batch_skipped = vec![false; query_records.len()];
+    let batch_size = crate::blastinput::app::query_batch_size("BLASTP", 10000)? as usize;
+    for range in crate::blastinput::query_batch::query_batches(&query_lengths, batch_size) {
+        let skipped = query_valid[range.clone()].iter().all(|valid| !valid);
+        for flag in &mut query_batch_skipped[range] {
+            *flag = skipped;
+        }
+    }
     if let Some(timing) = timing.as_ref() {
         BlastpTiming::record_duration(&timing.lookup_ns, lookup_start);
     }
@@ -6763,6 +6884,8 @@ fn run_resolved_in_pool(
             &subject_titles,
             args.scoring.matrix,
             true,
+            query_records,
+            subject_records,
         )?)
     } else {
         None
@@ -6803,6 +6926,32 @@ fn run_resolved_in_pool(
     //     ...
     // }
     // ```
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:1450-1452
+    // ```c
+    //     if (results.HasWarnings()) {
+    //         ERR_POST(Warning << results.GetWarningStrings());
+    //     }
+    // ```
+    // The warnings of each query (the O characters read as X, an invalid query) are
+    // written before the query's report, once, with the first format (`QueryWarnings`).
+    let query_warning_lines: Vec<Vec<u8>> = query_records
+        .iter()
+        .enumerate()
+        .map(|(q_idx, record)| {
+            let mut messages = Vec::new();
+            messages.extend(crate::report::query_warnings::replaced_o_message(
+                record.seq(),
+            ));
+            if !query_valid[q_idx] {
+                messages.push(crate::report::query_warnings::INVALID_QUERY_MESSAGE.to_string());
+            }
+            crate::report::query_warnings::query_warning("blastp", q_idx, record, &messages)
+        })
+        .collect();
+    let mut format_warnings = Some(crate::report::query_warnings::QueryWarnings {
+        before: &query_warning_lines,
+        sink: &mut *outputs.diagnostics,
+    });
     // Each requested format prints the same final result without searching again.
     let mut output_result: Result<()> = Ok(());
     let observer = &mut outputs.observer;
@@ -6815,6 +6964,7 @@ fn run_resolved_in_pool(
         let mut probe = observer
             .as_deref_mut()
             .map(|observer| FormatProbe::new(observer, format_index));
+        let mut warnings = format_warnings.take();
         let format_result: Result<()> = match outfmt {
             OutputFormat::Pairwise => (|| -> Result<()> {
                 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:68-93
@@ -6847,6 +6997,8 @@ fn run_resolved_in_pool(
                         // ```
                         ungapped_karlin: contexts[q_idx].karlin_params,
                         effective_search_space: search_spaces[q_idx].effective_space.round() as i64,
+                        valid: query_valid[q_idx],
+                        batch_skipped: query_batch_skipped[q_idx],
                     })
                     .collect();
                 let pairwise_report = BlastpPairwiseReport {
@@ -6900,6 +7052,7 @@ fn run_resolved_in_pool(
                     &subject_ids,
                     &pairwise_report,
                     probe.as_mut(),
+                    warnings.as_mut(),
                 )?;
                 Ok(())
             })(),
@@ -6928,8 +7081,10 @@ fn run_resolved_in_pool(
                         &query_headers,
                         &subject_ids,
                         &subjects,
+                        &query_batch_skipped,
                         &context,
                         probe.as_mut(),
+                        warnings.as_mut(),
                     )?;
                 } else {
                     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
@@ -6953,8 +7108,10 @@ fn run_resolved_in_pool(
                         &query_ids,
                         &query_headers,
                         &subject_ids,
+                        &query_batch_skipped,
                         &context,
                         probe.as_mut(),
+                        warnings.as_mut(),
                     )?;
                 }
                 Ok(())

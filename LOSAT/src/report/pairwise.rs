@@ -143,6 +143,11 @@ pub struct BlastpPairwiseQuery {
     pub query_length: usize,
     pub ungapped_karlin: KarlinParams,
     pub effective_search_space: i64,
+    /// Whether the query's Karlin-Altschul parameters could be computed (`is_valid`).
+    pub valid: bool,
+    /// Whether every query of the query's batch is invalid, so NCBI did not search the
+    /// batch (local_blast.cpp:177-207: -1 parameters and no Seq-align set).
+    pub batch_skipped: bool,
 }
 
 /// NCBI BLASTP pairwise run-level footer/header data.
@@ -1550,16 +1555,20 @@ pub fn write_blastp_pairwise_report<W: Write>(
     subject_ids: &[Arc<str>],
     report: &BlastpPairwiseReport,
     mut probe: Option<&mut FormatProbe<'_>>,
+    mut warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
 ) -> io::Result<()> {
     let mut buffered = io::BufWriter::new(writer);
     let writer = &mut buffered;
 
     write_blastp_pairwise_intro(writer, &report.version)?;
-    write_blastp_database_header(
+    // The prolog ends with one blank line; each query's preamble starts with two
+    // (blast_format.cpp:1491), after the query's warnings.
+    write_blastp_database_header_spacing(
         writer,
         &report.database_name,
         report.database_num_sequences,
         report.database_total_letters,
+        1,
     )?;
 
     // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:1411
@@ -1576,17 +1585,41 @@ pub fn write_blastp_pairwise_report<W: Write>(
     }
 
     for (q_idx, query) in queries.iter().enumerate() {
+        // The query's warnings come before its preamble (`QueryWarnings`).
+        if let Some(warnings) = warnings.as_deref_mut() {
+            warnings.before_query(q_idx, writer)?;
+        }
+        // NCBI blast_format.cpp:1491: m_Outfile << "\n\n";
+        writeln!(writer)?;
+        writeln!(writer)?;
         write_blastp_query_header(writer, &query.query_name, query.query_length)?;
         let query_hits = &hits_by_query[q_idx];
         if query_hits.is_empty() {
             write_no_hits_found(writer)?;
-            write_blastp_query_footer(
-                writer,
-                query.ungapped_karlin,
-                report.gapped_karlin,
-                report.gumbel,
-                query.effective_search_space,
-            )?;
+            // NCBI c++/src/algo/blast/api/local_blast.cpp:177-180,204-208:
+            // if (m_PrelimSearch->CheckInternalData() != 0)
+            //     new CBlastAncillaryData(tmp_pair, tmp_pair, tmp_pair, 0);
+            // The all-invalid batch uses -1 sentinel blocks. An invalid query
+            // within a searched batch has null blocks (blast_results.cpp:82-103),
+            // so only the blank lines and the zero search space are written
+            // (blast_format.cpp:445-477), as TBLASTN does.
+            if query.batch_skipped {
+                write_tblastn_unsearched_query_footer_spacing(writer, false)?;
+            } else if !query.valid {
+                writeln!(writer)?;
+                writeln!(writer)?;
+                writeln!(writer)?;
+                writeln!(writer, "Effective search space used: 0")?;
+            } else {
+                write_blastp_query_footer_spacing(
+                    writer,
+                    query.ungapped_karlin,
+                    report.gapped_karlin,
+                    report.gumbel,
+                    query.effective_search_space,
+                    false,
+                )?;
+            }
             continue;
         }
 
@@ -1695,14 +1728,21 @@ pub fn write_blastp_pairwise_report<W: Write>(
             }
         }
 
-        write_blastp_query_footer(
+        write_blastp_query_footer_spacing(
             writer,
             query.ungapped_karlin,
             report.gapped_karlin,
             report.gumbel,
             query.effective_search_space,
+            false,
         )?;
     }
+
+    // The blank lines before the epilog (blast_format.cpp:2249).
+
+    writeln!(writer)?;
+
+    writeln!(writer)?;
 
     write_blastp_final_footer(writer, report)?;
     writer.flush()
@@ -3435,6 +3475,7 @@ pub fn write_tblastn_pairwise_report<W: Write>(
     subject_ids: &[Arc<str>],
     report: &BlastpPairwiseReport,
     mut probe: Option<&mut FormatProbe<'_>>,
+    mut warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
 ) -> io::Result<()> {
     // NCBI c++/src/algo/blast/api/local_blast.cpp:177-224:
     // an all-invalid Run() batch carries -1 Karlin sentinel blocks only for
@@ -3449,11 +3490,14 @@ pub fn write_tblastn_pairwise_report<W: Write>(
     // NCBI c++/src/algo/blast/format/blast_format.cpp:372-424:
     // BlastPrintVersionInfo(m_Program,...); BlastPrintReference(...);
     write_translated_pairwise_intro(&mut writer, "TBLASTN", &report.version)?;
-    write_blastp_database_header(
+    // The prolog ends with one blank line; each query's preamble starts with two
+    // (blast_format.cpp:1491), after the query's warnings.
+    write_blastp_database_header_spacing(
         &mut writer,
         &report.database_name,
         report.database_num_sequences,
         report.database_total_letters,
+        1,
     )?;
 
     // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:1411
@@ -3469,6 +3513,13 @@ pub fn write_tblastn_pairwise_report<W: Write>(
         }
     }
     for (q_idx, query) in queries.iter().enumerate() {
+        // The query's warnings come before its preamble (`QueryWarnings`).
+        if let Some(warnings) = warnings.as_deref_mut() {
+            warnings.before_query(q_idx, &mut writer)?;
+        }
+        // NCBI blast_format.cpp:1491: m_Outfile << "\n\n";
+        writeln!(&mut writer)?;
+        writeln!(&mut writer)?;
         write_blastp_query_header(&mut writer, &query.query_name, query.query_length)?;
         let query_hits = &hits_by_query[q_idx];
         if query_hits.is_empty() {
@@ -3482,21 +3533,20 @@ pub fn write_tblastn_pairwise_report<W: Write>(
             // The all-invalid batch uses -1 sentinel blocks. An invalid query
             // within a searched batch has null blocks (blast_results.cpp:82-103).
             if query_batch_skipped[q_idx] {
-                write_tblastn_unsearched_query_footer(&mut writer)?;
+                write_tblastn_unsearched_query_footer_spacing(&mut writer, false)?;
             } else if !query_validity[q_idx] {
                 writeln!(writer)?;
                 writeln!(writer)?;
                 writeln!(writer)?;
                 writeln!(writer, "Effective search space used: 0")?;
-                writeln!(writer)?;
-                writeln!(writer)?;
             } else {
-                write_blastp_query_footer(
+                write_blastp_query_footer_spacing(
                     &mut writer,
                     query.ungapped_karlin,
                     report.gapped_karlin,
                     report.gumbel,
                     query.effective_search_space,
+                    false,
                 )?;
             }
             continue;
@@ -3606,14 +3656,18 @@ pub fn write_tblastn_pairwise_report<W: Write>(
                 }
             }
         }
-        write_blastp_query_footer(
+        write_blastp_query_footer_spacing(
             &mut writer,
             query.ungapped_karlin,
             report.gapped_karlin,
             report.gumbel,
             query.effective_search_space,
+            false,
         )?;
     }
+    // The blank lines before the epilog (blast_format.cpp:2249).
+    writeln!(&mut writer)?;
+    writeln!(&mut writer)?;
     write_blastp_final_footer(&mut writer, report)?;
     writer.flush()
 }

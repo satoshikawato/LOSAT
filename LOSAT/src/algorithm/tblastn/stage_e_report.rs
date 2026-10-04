@@ -63,6 +63,7 @@ pub(super) fn render(
     genetic_code: u8,
     seg: Option<&SegParams>,
     mask_lowercase: bool,
+    query_warning_lines: &[Vec<u8>],
 ) -> Result<()> {
     ensure!(
         query_records.len() == hitlists.len(),
@@ -101,11 +102,18 @@ pub(super) fn render(
     {
         hits_sink(pairwise_hits);
     }
+    // The warnings of each query are written before its report, once, with the first
+    // format (`QueryWarnings`).
+    let mut format_warnings = Some(crate::report::query_warnings::QueryWarnings {
+        before: query_warning_lines,
+        sink: &mut *outputs.diagnostics,
+    });
     let observer = &mut outputs.observer;
     for (format_index, format) in outputs.formats.iter_mut().enumerate() {
         let mut probe = observer
             .as_deref_mut()
             .map(|observer| FormatProbe::new(observer, format_index));
+        let mut warnings = format_warnings.take();
         let mut writer = format.sink.open()?;
         match format_number(format.outfmt) {
             6 | 7 => write_tabular(
@@ -117,6 +125,7 @@ pub(super) fn render(
                 hitlists,
                 query_batch_skipped,
                 probe.as_mut(),
+                warnings.as_mut(),
             )?,
             0 => write_pairwise(
                 &mut writer,
@@ -134,6 +143,7 @@ pub(super) fn render(
                 matrix_name,
                 max_target_seqs_given,
                 probe.as_mut(),
+                warnings.as_mut(),
             )?,
             _ => bail!("unsupported TBLASTN outfmt {}", format.outfmt),
         }
@@ -157,6 +167,7 @@ fn write_tabular(
     hitlists: &[KappaResultHitList],
     query_batch_skipped: &[bool],
     mut probe: Option<&mut FormatProbe<'_>>,
+    mut warnings: Option<&mut crate::report::query_warnings::QueryWarnings<'_>>,
 ) -> Result<()> {
     // NCBI c++/src/algo/blast/api/local_blast.cpp:177-224:
     // a skipped batch has a null align set for each query it contains.
@@ -167,9 +178,16 @@ fn write_tabular(
     // The rows are printed in the order of the final HSP list, so a running count is
     // each row's HSP index.
     let mut hsp_index: HspIndex = 0;
-    for ((query, hitlist), &search_skipped) in
-        query_records.iter().zip(hitlists).zip(query_batch_skipped)
+    for (q_idx, ((query, hitlist), &search_skipped)) in query_records
+        .iter()
+        .zip(hitlists)
+        .zip(query_batch_skipped)
+        .enumerate()
     {
+        // The query's warnings come before its lines (`QueryWarnings`).
+        if let Some(warnings) = warnings.as_deref_mut() {
+            warnings.before_query(q_idx, &mut *writer)?;
+        }
         let hit_count: usize = hitlist
             .lists()
             .iter()
@@ -376,6 +394,7 @@ mod tests {
                 1,
                 Some(&seg),
                 false,
+                &[],
             )
             .unwrap();
             drop(outputs);
@@ -576,6 +595,7 @@ fn write_pairwise(
     matrix_name: &str,
     max_target_seqs_given: Option<usize>,
     probe: Option<&mut FormatProbe<'_>>,
+    warnings: Option<&mut crate::report::query_warnings::QueryWarnings<'_>>,
 ) -> Result<()> {
     ensure!(
         ungapped_karlin.len() == query_records.len() && query_validity.len() == query_records.len(),
@@ -626,6 +646,9 @@ fn write_pairwise(
         .zip(ungapped_karlin)
         .zip(&parameters.lengths)
         .map(|((query, &karlin), length)| BlastpPairwiseQuery {
+            // TBLASTN's report reads the validity from its own arrays.
+            valid: true,
+            batch_skipped: false,
             query_name: match query.desc() {
                 Some(desc) => format!("{} {desc}", query.id()),
                 None => query.id().to_string(),
@@ -654,6 +677,7 @@ fn write_pairwise(
         &subject_ids,
         &report,
         probe,
+        warnings,
     )?;
     Ok(())
 }

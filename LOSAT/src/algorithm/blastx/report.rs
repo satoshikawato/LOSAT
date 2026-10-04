@@ -1375,6 +1375,8 @@ fn write_pairwise(
             let first = (qidx * 6..qidx * 6 + 6).find(|&c| batch.parameters[c].valid);
             let stat = first.map(|c| &batch.parameters[c]);
             qinfo.push(BlastpPairwiseQuery {
+                valid: true,
+                batch_skipped: false,
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:630-637
                 // ```c++
                 // CAlignFormatUtil::GetSeqIdString(const list<CRef<CSeq_id> > & ids, bool believe_local_id)

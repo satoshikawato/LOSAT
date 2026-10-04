@@ -96,6 +96,23 @@ impl QueryWarnings<'_> {
 /// `index` is the 0-based position of the query in the input; `program` is the lower-case
 /// program name that NCBI's diagnostics print (`[tblastn]`, `[blastn]`).
 pub fn invalid_query_warning(program: &str, index: usize, query: &fasta::Record) -> Vec<u8> {
+    query_warning(program, index, query, &[INVALID_QUERY_MESSAGE.to_string()])
+}
+
+/// NCBI's `kBlastErrMsg_CantCalculateUngappedKAParams` (see `invalid_query_warning`).
+pub const INVALID_QUERY_MESSAGE: &str = "Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options";
+
+/// The warning line of query `index` with its warning messages, each followed by a space
+/// (`GetWarningStrings`, see `invalid_query_warning`); empty when there is none.
+pub fn query_warning(
+    program: &str,
+    index: usize,
+    query: &fasta::Record,
+    messages: &[String],
+) -> Vec<u8> {
+    if messages.is_empty() {
+        return Vec::new();
+    }
     let mut query_id = format!("Query_{} {}", index + 1, query.id()).into_bytes();
     if let Some(desc) = query.desc() {
         query_id.extend_from_slice(b" ");
@@ -107,8 +124,54 @@ pub fn invalid_query_warning(program: &str, index: usize, query: &fasta::Record)
     }
     let mut warning = format!("Warning: [{program}] ").into_bytes();
     warning.extend_from_slice(&query_id);
-    warning.extend_from_slice(b": Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options \n");
+    warning.extend_from_slice(b": ");
+    for message in messages {
+        warning.extend_from_slice(message.as_bytes());
+        warning.push(b' ');
+    }
+    warning.push(b'\n');
     warning
+}
+
+/// The warning of a protein query with pyrrolysine (O), which NCBI reads as X, or `None`.
+///
+/// NCBI reference: c++/src/algo/blast/api/blast_setup_cxx.cpp:920-932
+/// ```c
+///     if (warnings && replaced_residues.size() > 0) {
+///         *warnings += "One or more O characters replaced by X for ";
+///         *warnings += "alignment score calculations at positions ";
+///         *warnings += NStr::IntToString(replaced_residues[0]);
+///         for (i = 1; i < min(kMaxResiduesToWarnAbout, replaced_residues.size());
+///              i++) {
+///             *warnings += ", " + NStr::IntToString(replaced_residues[i]);
+///         }
+///         if (replaced_residues.size() > kMaxResiduesToWarnAbout) {
+///             *warnings += ",... (only first ";
+///             *warnings += NStr::SizetToString(kMaxResiduesToWarnAbout);
+///             *warnings += " shown)";
+///         }
+///     }
+/// ```
+/// The query's O messages come before its Karlin-Altschul message (blast_setup_cxx.cpp:
+/// 608-621 adds them when the query is read).
+pub fn replaced_o_message(sequence: &[u8]) -> Option<String> {
+    let positions: Vec<usize> = sequence
+        .iter()
+        .enumerate()
+        .filter(|(_, residue)| residue.eq_ignore_ascii_case(&b'O'))
+        .map(|(position, _)| position)
+        .collect();
+    let first = *positions.first()?;
+    let mut message = format!(
+        "One or more O characters replaced by X for alignment score calculations at positions {first}"
+    );
+    for position in positions.iter().take(20).skip(1) {
+        message.push_str(&format!(", {position}"));
+    }
+    if positions.len() > 20 {
+        message.push_str(",... (only first 20 shown)");
+    }
+    Some(message)
 }
 
 /// The warning for a hit list size below 5.

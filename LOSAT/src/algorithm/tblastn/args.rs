@@ -7,7 +7,6 @@ use std::path::PathBuf;
 
 use crate::blastinput::query_batch::query_batches;
 use crate::blastinput::value_parsers::*;
-use crate::report::query_warnings::invalid_query_warning;
 use crate::utils::genetic_code::GeneticCode;
 
 use super::stage_d_pipeline::{
@@ -721,6 +720,9 @@ fn search_cli(
     let queries = fasta_input::bio_records_of(&query_bytes, &args.query, "query", "TBLASTN")?;
     fasta_input::write_protein_title_warnings(&queries, outputs.diagnostics)?;
     fasta_input::check_protein_input_of(&query_bytes, &queries, "query", "TBLASTN")?;
+    // NCBI warns about a query without residues ("Sequence contains no data") and fails
+    // when no query has any; LOSAT rejects such a query, as BLASTN does.
+    fasta_input::check_records_have_residues_of(&queries, "query", "TBLASTN")?;
     drop(query_bytes);
     search(&args, resolved, &queries, subjects, outputs)
 }
@@ -810,6 +812,7 @@ fn search(
     fasta_input::check_residues_of(subject_records, "subject", "TBLASTN")?;
     fasta_input::check_records_have_residues_of(subject_records, "subject", "TBLASTN")?;
     fasta_input::check_protein_residues_of(query_records, "query", "TBLASTN")?;
+    fasta_input::check_records_have_residues_of(query_records, "query", "TBLASTN")?;
     let SearchSettings {
         composition_mode2,
         scoring,
@@ -950,6 +953,26 @@ fn search(
             crate::report::defline::check_shown_subject_title(&defline, index + 1, "TBLASTN")?;
         }
     }
+    // NCBI c++/src/algo/blast/format/blast_format.cpp:1443-1451:
+    // if (results.HasWarnings()) ERR_POST(Warning << results.GetWarningStrings());
+    // The warnings belong to the result: each query's are written before its report, once
+    // (`QueryWarnings`). A query's O characters (read as X, `report/query_warnings.rs`)
+    // come before its Karlin-Altschul message, on the same line.
+    let query_warning_lines: Vec<Vec<u8>> = queries
+        .iter()
+        .zip(&query_validity)
+        .enumerate()
+        .map(|(index, (query, valid))| {
+            let mut messages = Vec::new();
+            messages.extend(crate::report::query_warnings::replaced_o_message(
+                query.seq(),
+            ));
+            if !valid {
+                messages.push(crate::report::query_warnings::INVALID_QUERY_MESSAGE.to_string());
+            }
+            crate::report::query_warnings::query_warning("tblastn", index, query, &messages)
+        })
+        .collect();
     render(
         outputs,
         queries,
@@ -966,18 +989,8 @@ fn search(
         resolved.db_gencode,
         seg.as_ref(),
         resolved.lcase_masking,
+        &query_warning_lines,
     )?;
-    // NCBI c++/src/algo/blast/format/blast_format.cpp:1443-1451:
-    // if (results.HasWarnings()) ERR_POST(Warning << results.GetWarningStrings());
-    // Print one setup warning per invalid query in formatter query order.
-    // The warnings belong to the result, so they are written once for every format.
-    for (index, (query, valid)) in queries.iter().zip(&query_validity).enumerate() {
-        if !valid {
-            outputs
-                .diagnostics
-                .write_all(&invalid_query_warning("tblastn", index, query))?;
-        }
-    }
     Ok(())
 }
 

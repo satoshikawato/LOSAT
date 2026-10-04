@@ -42,11 +42,24 @@ pub fn ncbistdaa_to_ascii(residue: u8) -> char {
 // ... AMINOACID_TO_NCBISTDAA ...
 // const Uint1 kProtSentinel = NULLB;
 // ```
+// NCBI reference: c++/src/algo/blast/api/blast_setup_cxx.cpp:894-899
+// ```c
+//     for (i = 0; i < sv.size(); i++) {
+//         // Change unsupported residues to X
+//         if (sv[i] == AMINOACID_TO_NCBISTDAA[(int)'O']) {
+//             replaced_residues.push_back(i);
+//             *buf_var++ = AMINOACID_TO_NCBISTDAA[(int)'X'];
+// ```
+// The search and its statistics read pyrrolysine (O) as X; the reports show the input.
 pub fn encode_protein_sequence(seq: &[u8]) -> EncodedProtein {
     let mut aa_seq = Vec::with_capacity(seq.len() + 2);
     aa_seq.push(0);
     for &residue in seq {
-        aa_seq.push(aa_char_to_ncbistdaa(residue.to_ascii_uppercase()));
+        let residue = match residue.to_ascii_uppercase() {
+            b'O' => b'X',
+            upper => upper,
+        };
+        aa_seq.push(aa_char_to_ncbistdaa(residue));
     }
     aa_seq.push(0);
     EncodedProtein {

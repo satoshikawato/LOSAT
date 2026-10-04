@@ -239,6 +239,50 @@ pub fn write_protein_title_warnings(
     Ok(())
 }
 
+/// NCBI's warning for a subject without residues, which it skips when it sets up the
+/// subjects (`InitializeSubject`, after the option handlers and before `Query is Empty!`).
+/// The ID of a subject is `Subject_<n>` and its title is the defline.
+///
+/// NCBI reference: c++/src/algo/blast/api/blast_setup_cxx.cpp:773-788
+/// ```c
+///         catch(CBlastException & e ) {
+///         	// Skip bad subject sequence
+///         	if(e.GetErrCode() == CBlastException::eInvalidArgument) {
+///         		seqblk_vec->push_back(subj);
+///         		string warning = kEmptyStr;
+///         		const CSeq_id *  id = subjects.GetSeqId(i);
+///         		string title = subjects.GetTitle(i);
+///         		if(id != NULL) {
+///         			warning = id->GetSeqIdString() + " ";
+///         		}
+///         		warning += subjects.GetTitle(i);
+///         		if(warning != kEmptyStr){
+///         			warning += ": ";
+///         		}
+///         		warning += "Subject sequence contains no data";
+///         		ERR_POST(Warning << warning);
+/// ```
+pub fn write_empty_subject_warnings(
+    records: &[fasta::Record],
+    program: &str,
+    diagnostics: &mut dyn std::io::Write,
+) -> std::io::Result<()> {
+    for (index, record) in records.iter().enumerate() {
+        if record.seq().is_empty() {
+            let title = match record.desc() {
+                Some(desc) => format!("{} {desc}", record.id()),
+                None => record.id().to_string(),
+            };
+            writeln!(
+                diagnostics,
+                "Warning: [{program}] Subject_{} {title}: Subject sequence contains no data",
+                index + 1
+            )?;
+        }
+    }
+    Ok(())
+}
+
 /// Rejects the records with a residue that NCBI reads differently (see the module).
 ///
 /// NCBI reference: c++/src/objtools/readers/fasta.cpp:919-935

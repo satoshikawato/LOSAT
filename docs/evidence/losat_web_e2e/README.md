@@ -10,8 +10,8 @@
 |---|---|---|
 | 各 program の sweep の全組合せが、NCBI と同じ拒否、outfmt 0/6/7 のバイト一致、明示的な拒否のどれか | 満たした（1 件は保守者の判断待ち） | 最後のゲートの sweep：BLASTP 1196・TBLASTN 1427・TBLASTX 641 で DIFF 0・timeout 0（変更前は DIFF 987・1073・194）。TBLASTN の既定以外の `-db_gencode` は承認済みの例外で、C++ API の oracle と一致。2 回の独立監査の約 13 万の比較でも、一致、同じ誤り、承認済みの例外、明示的な拒否だけ。保守者の判断待ちは D11〜D14（明示的な拒否）と D15（NCBI が落ちる検索で LOSAT は NCBI の valgrind の下の出力を出す。推奨は承認済みの例外。断られれば明示的な拒否にする）（下の「保守者に諮ること」） |
 | 直した組合せの fixture で NCBI とバイト一致 | 満たした | outfmt 0/7 の manifest の E2e の 56 行（1・2・4 スレッドで差 0）、TBLASTX の `culling.*` 11 件。変更前の実行ファイルは足した行で違う（S08+ の [`audit/ROUND1.md`](audit/ROUND1.md) の確かめ、S08+a の `s08pa/checks/fixtures-base-e2e.log`、S08+b の `s08pb/r2a2_1/check-losat-old-n1.tsv`） |
-| 各 program の既存のゲートと S07・S08 の fixture に退行なし | 満たした（Gate A は下の「Gate A」） | capture 236 件が S02 の基準と差 0（S08+ が NCBI とバイト一致にした BLASTP の 11 行の hash を更新）、CI の速い検査の全件 236 件で失敗 0（Gate A と TLOSAN Stage G の凍結ハッシュを含む）、TBLASTX 84・BLASTN 183 の回帰 fixture、題の sweep、BLASTN の入力、`CTOOLKIT_COMPATIBLE`、v1 の WASI の行列で形式の失敗 0 |
-| V-PERF の非退行 | （V-PERF の後に書く） | 下の「V-PERF」 |
+| 各 program の既存のゲートと S07・S08 の fixture に退行なし | 満たした | Gate A（TBLASTX v0.1.0 の 20 組：EXACT_TEXT 14、承認済みの `-db_gencode` の HSP_SET_DIFF 6）、capture 236 件が S02 の基準と差 0（S08+ が NCBI とバイト一致にした BLASTP の 11 行の hash を更新）、CI の速い検査の全件 236 件で失敗 0（Gate A と TLOSAN Stage G の凍結ハッシュを含む）、TBLASTX 84・BLASTN 183 の回帰 fixture、題の sweep、BLASTN の入力、`CTOOLKIT_COMPATIBLE`、v1 の WASI の行列で形式の失敗 0 |
+| V-PERF の非退行 | 満たした | 24 組のうち出力が同じ 21 組が閾値以内（`perf-1` で超えた 4 組は `--repeat 5` で ×0.437〜×1.029）。出力が違う `blastp-fmt0` の 3 組は変更後が NCBI とバイト一致（S08+ の outfmt 0 の修正）で、時間の比も ×1.046 以内（下の「V-PERF」） |
 | 変えた program の V-ABI | 満たした | V-ABI full 800 の実行で失敗した部分 0（E2e の fixture の 50 の検索を含む）、凍結ハッシュ 1080/1084（違う 4 件は既知の Sakai）、V-ABI quick 60 の実行と凍結ハッシュ 16/16。`docs/web/verification_cells.tsv` に E2e の 4 行を `checked` で足した |
 | 独立監査 | 満たした | 第 1 回（S08+、5 観点）の指摘を直し、第 2 回（S08+b、4 観点）で 4 観点とも supported（(a) は 3 回目） |
 
@@ -142,11 +142,18 @@ fixture の数は 151（SD の 95 に 56）。凍結と確かめは各ゲート�
 
 ## Gate A
 
-（ゲートの後に書く）
+[`gates/s08pb_gate_a.sh`](gates/s08pb_gate_a.sh)（`GATE=s08pb2-gate`）が最後のゲートの native（`6f070575…`）で `LOSAT/tests/audit_tblastx_v010.py` を実行した（`run-20261004T163746Z/audit-tblastx-v010.log`、`audit-tblastx-v010/`）。TBLASTX v0.1.0 の outfmt 6 の 20 組：EXACT_TEXT 14（全て contract PASS、3 回の実行で REPEATABLE）、HSP_SET_DIFF 6（承認済みの `-db_gencode` の例外の組 `d01`〜`d06`、contract PASS）。S08 からの分類と同じで、TBLASTX の v0.1.0 の parity は変わらない。
 
 ## V-PERF
 
-（ゲートの後に書く）
+[`gates/s08p_perf.sh`](gates/s08p_perf.sh)、V-PERF の lock を取って（アプリ側の S09 は止まる）、Gate A の後の静かな計算機で（load 2 前後）。結果は最後のゲートの run [`run-20261004T163746Z/`](run-20261004T163746Z/)（`perf-1.*`・`perf-2.*`、`perf-check-*.txt`）。変更前は SD の最後の成果物（native `487ac387…`、`sd-final-wasi-artifacts`）、変更後は最後のゲートの成果物（`s08pb2-gate-*`、native `6f070575…`）。case は E2b の [`perf_cases.py`](../losat_web_e2b/perf_cases.py) の `blastp`・`blastp-fmt0`・`tblastn`・`tblastn-fmt0`・`tblastx`・`tblastx-multi`・`tblastx-many`・`blastn-large` × native・serial-WASI・threaded-WASI（4 スレッド）、変更前と変更後を交互に（暖機 1 回）。
+
+| 計測 | 結果 |
+|---|---|
+| `perf-1`（`--repeat 3`、24 組） | 出力は `blastp-fmt0` の 3 組のほか全て同じ。`blastp-fmt0` は S08+ が BLASTP の outfmt 0 を NCBI に合わせた（500 の説明・250 の整列、蛋白の題）ので出力が違い、変更後の出力は NCBI BLAST+ 2.17.0 とバイト一致（stdout・stderr）、変更前は違う（[`s08pb/vperf_blastp_fmt0_vs_ncbi.txt`](s08pb/vperf_blastp_fmt0_vs_ncbi.txt)）。時間の比は ×0.996・×1.010・×1.046 で、比較は参考。出力が同じ 21 組のうち 17 組が閾値（×1.05）以内（×0.930〜×1.043）。超えた 4 組：`tblastn` serial-WASI ×1.153（0.143 → 0.165 秒）、`tblastn-fmt0` native ×1.215（0.053 → 0.065 秒）、`tblastx-many` serial-WASI ×1.092（0.091 → 0.099 秒）・threaded-WASI ×1.089（0.273 → 0.297 秒） |
+| `perf-2`（`tblastn`・`tblastn-fmt0`・`tblastx-many` を `--repeat 5`、9 組） | 9 組とも閾値以内（×0.437〜×1.029）、出力は同じ。`perf-1` の超過は起動の時間が大半の短い case の計測の揺れ（同じ case の変更前の native の中央値が `perf-1` 0.053 秒、`perf-2` 0.238 秒） |
+
+参考（指示書の 5.）：S08+a の native だけの測定（`s08pa/checks/perf-final*.json`、`d96412265` と `68154c73e`）では BLASTP が 2 回とも約 1〜2 % 遅い側に出た（上限の内）。この V-PERF の `blastp` は native ×1.020、serial-WASI ×0.998、threaded-WASI ×0.985。TBLASTN の 300 の subject（`e2e_many_subject.fna`）は LOSAT が約 2〜4 秒、NCBI が 0.2〜0.4 秒で、SD の成果物から同じ（退行ではない。残件）。
 
 ## 独立監査
 
@@ -175,7 +182,7 @@ fixture の数は 151（SD の 95 に 56）。凍結と確かめは各ゲート�
 4. **D14**（S08+a、BP-8 の残り）：option の値の位置の `-version` などの toolkit の語も、option の位置と同じ文言で拒否する（NCBI は version を出して終了 0）。推奨：このまま。
 5. **D15**（第 2 回の監査 R2A2-2）：BLASTP の one-hit と `-threshold` 1〜3 の一部で NCBI は配列の外を読んで SIGSEGV。LOSAT は配列の外を NULLB として読み、NCBI を `valgrind -q` の下で走らせた出力と 23 件ともバイト一致。推奨：承認済みの例外（NCBI の不具合の方針の「確かめられる妥当な結果」）。別案：窓が配列の外を読む検索の明示的な拒否。
 6. **web ABI v1 の BLASTP の誤りの文言**（計画 TD-1）：4 つの要求の誤りの文言がエンジンの今の文言（NCBI の文言か LOSAT の明示的な拒否）に変わった。状態、出力の無さ、検査の順は E1d と同じ。推奨：TD-1 の S07+ のスレッドの上限の文言と同じ扱いで受け入れる。
-7. V-PERF：（V-PERF の後に書く）
+7. V-PERF：上限を超えた case は無い（`perf-1` の 4 組は `--repeat 5` で閾値以内）。
 
 S08b の V-PERF の `tblastx-multi`（E2b のゲート記録）は今も保守者の確認待ち。
 

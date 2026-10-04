@@ -1,0 +1,6 @@
+# V-PERF case blastp-fmt0 (docs/evidence/losat_web_e1a/measure_perf.py): blastp -query LOSAT/tests/fasta/SicyWSV.faa -subject LOSAT/tests/fasta/PajaWSV.faa -max_hsps 1 -outfmt 0 -num_threads 1 -out <file>
+# NCBI BLAST+ 2.17.0 vs the final gate's native (6f070575...) and SD's final native (487ac387..., the V-PERF before)
+7b5e0b32bb72ccdf4cd761e67c5e76725c4a61e184ec4f6c8350e29b08f3dd88  ncbi.out
+7b5e0b32bb72ccdf4cd761e67c5e76725c4a61e184ec4f6c8350e29b08f3dd88  after.out
+6ae2ee96ae7cb70bc8bc1e572f262f10e0e2621d0451f64926aeb5540780bd50  before.out
+# after == NCBI: yes (stderr same); before == NCBI: no (S08+'s outfmt 0 changes for BLASTP: 500 descriptions, 250 alignments, protein titles)

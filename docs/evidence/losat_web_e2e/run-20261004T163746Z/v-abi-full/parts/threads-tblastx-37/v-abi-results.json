@@ -1,0 +1,89 @@
+[
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "tblastx",
+    "cases": [
+      "p13_mela_mje_reverse"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/MelaMJNV.fasta",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/MjeNMV.fasta",
+      "-query_gencode",
+      "1",
+      "-db_gencode",
+      "1"
+    ],
+    "formats": {
+      "0": "39092a5195c039dac13c210929dfd1f5861190c89735372d83a7cd9038450621",
+      "6": "b34593f9506fb9ca9856c8b9e840295ff40e99c75b4ac144d867da8c032e062b",
+      "7": "4fbe342dc18e62bbf24c5c0e06b6c798741effe407e59c94ebd39ba8e5a7aaa5"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 22952
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "tblastx",
+    "cases": [
+      "p13_mela_mje_reverse"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/MelaMJNV.fasta",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/MjeNMV.fasta",
+      "-query_gencode",
+      "1",
+      "-db_gencode",
+      "1"
+    ],
+    "formats": {
+      "0": "39092a5195c039dac13c210929dfd1f5861190c89735372d83a7cd9038450621",
+      "6": "b34593f9506fb9ca9856c8b9e840295ff40e99c75b4ac144d867da8c032e062b",
+      "7": "4fbe342dc18e62bbf24c5c0e06b6c798741effe407e59c94ebd39ba8e5a7aaa5"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 22952
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "tblastx",
+    "cases": [
+      "p13_mela_mje_reverse"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/MelaMJNV.fasta",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/MjeNMV.fasta",
+      "-query_gencode",
+      "1",
+      "-db_gencode",
+      "1"
+    ],
+    "formats": {
+      "0": "39092a5195c039dac13c210929dfd1f5861190c89735372d83a7cd9038450621",
+      "6": "b34593f9506fb9ca9856c8b9e840295ff40e99c75b4ac144d867da8c032e062b",
+      "7": "4fbe342dc18e62bbf24c5c0e06b6c798741effe407e59c94ebd39ba8e5a7aaa5"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 22952
+  }
+]

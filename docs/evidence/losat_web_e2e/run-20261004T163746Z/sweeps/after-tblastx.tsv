@@ -1,0 +1,643 @@
+set	outfmt	options	result	ncbi_message	losat_message
+word	0	-word_size 1	arg-error	Error: Argument "word_size". Illegal value, expected >=2:  `1'	error: invalid value '1' for '-word_size <WORD_SIZE>': expected an integer >= 2
+word	6	-word_size 1	arg-error	Error: Argument "word_size". Illegal value, expected >=2:  `1'	error: invalid value '1' for '-word_size <WORD_SIZE>': expected an integer >= 2
+word	7	-word_size 1	arg-error	Error: Argument "word_size". Illegal value, expected >=2:  `1'	error: invalid value '1' for '-word_size <WORD_SIZE>': expected an integer >= 2
+word	0	-word_size 2	losat-rejects	Error: -word_size 2 is not supported by LOSAT's TBLASTX (it implements word size 3)	Error: -word_size 2 is not supported by LOSAT's TBLASTX (it implements word size 3)
+word	6	-word_size 2	losat-rejects	Error: -word_size 2 is not supported by LOSAT's TBLASTX (it implements word size 3)	Error: -word_size 2 is not supported by LOSAT's TBLASTX (it implements word size 3)
+word	7	-word_size 2	losat-rejects	Error: -word_size 2 is not supported by LOSAT's TBLASTX (it implements word size 3)	Error: -word_size 2 is not supported by LOSAT's TBLASTX (it implements word size 3)
+word	0	-word_size 3	same		
+word	6	-word_size 3	same		
+word	7	-word_size 3	same		
+word	0	-word_size 4	losat-rejects	Error: -word_size 4 is not supported by LOSAT's TBLASTX (it implements word size 3)	Error: -word_size 4 is not supported by LOSAT's TBLASTX (it implements word size 3)
+word	6	-word_size 4	losat-rejects	Error: -word_size 4 is not supported by LOSAT's TBLASTX (it implements word size 3)	Error: -word_size 4 is not supported by LOSAT's TBLASTX (it implements word size 3)
+word	7	-word_size 4	losat-rejects	Error: -word_size 4 is not supported by LOSAT's TBLASTX (it implements word size 3)	Error: -word_size 4 is not supported by LOSAT's TBLASTX (it implements word size 3)
+word	0	-word_size 5	same-error	BLAST query/options error: Word-size must be less than 6 for protein comparison	BLAST query/options error: Word-size must be less than 6 for protein comparison
+word	6	-word_size 5	same-error	BLAST query/options error: Word-size must be less than 6 for protein comparison	BLAST query/options error: Word-size must be less than 6 for protein comparison
+word	7	-word_size 5	same-error	BLAST query/options error: Word-size must be less than 6 for protein comparison	BLAST query/options error: Word-size must be less than 6 for protein comparison
+word	0	-word_size 6	same-error	BLAST query/options error: Word-size must be less than 6 for protein comparison	BLAST query/options error: Word-size must be less than 6 for protein comparison
+word	6	-word_size 6	same-error	BLAST query/options error: Word-size must be less than 6 for protein comparison	BLAST query/options error: Word-size must be less than 6 for protein comparison
+word	7	-word_size 6	same-error	BLAST query/options error: Word-size must be less than 6 for protein comparison	BLAST query/options error: Word-size must be less than 6 for protein comparison
+word	0	-word_size 0x3	same		
+word	6	-word_size 0x3	same		
+word	7	-word_size 0x3	same		
+word	0	-word_size 03	same		
+word	6	-word_size 03	same		
+word	7	-word_size 03	same		
+word	0	-word_size +3	same		
+word	6	-word_size +3	same		
+word	7	-word_size +3	same		
+word	0	-word_size 3.0	arg-error	Error: Cannot convert string '3.0' to Int8 (m_Pos = 1)	error: invalid value '3.0' for '-word_size <WORD_SIZE>': expected an integer
+word	6	-word_size 3.0	arg-error	Error: Cannot convert string '3.0' to Int8 (m_Pos = 1)	error: invalid value '3.0' for '-word_size <WORD_SIZE>': expected an integer
+word	7	-word_size 3.0	arg-error	Error: Cannot convert string '3.0' to Int8 (m_Pos = 1)	error: invalid value '3.0' for '-word_size <WORD_SIZE>': expected an integer
+word	0	-threshold 0	same-error	BLAST query/options error: Non-zero threshold required	BLAST query/options error: Non-zero threshold required
+word	6	-threshold 0	same-error	BLAST query/options error: Non-zero threshold required	BLAST query/options error: Non-zero threshold required
+word	7	-threshold 0	same-error	BLAST query/options error: Non-zero threshold required	BLAST query/options error: Non-zero threshold required
+word	0	-threshold 1	same		
+word	6	-threshold 1	same		
+word	7	-threshold 1	same		
+word	0	-threshold 11	same		
+word	6	-threshold 11	same		
+word	7	-threshold 11	same		
+word	0	-threshold 11.5	same		
+word	6	-threshold 11.5	same		
+word	7	-threshold 11.5	same		
+word	0	-threshold 13	same		
+word	6	-threshold 13	same		
+word	7	-threshold 13	same		
+word	0	-threshold 30	same		
+word	6	-threshold 30	same		
+word	7	-threshold 30	same		
+word	0	-threshold 999	same		
+word	6	-threshold 999	same		
+word	7	-threshold 999	same		
+word	0	-threshold -1	arg-error	Error: Argument "threshold". Illegal value, expected >=0:  `-1'	error: invalid value '-1' for '-threshold <THRESHOLD>': Illegal value, expected greater or equal to 0
+word	6	-threshold -1	arg-error	Error: Argument "threshold". Illegal value, expected >=0:  `-1'	error: invalid value '-1' for '-threshold <THRESHOLD>': Illegal value, expected greater or equal to 0
+word	7	-threshold -1	arg-error	Error: Argument "threshold". Illegal value, expected >=0:  `-1'	error: invalid value '-1' for '-threshold <THRESHOLD>': Illegal value, expected greater or equal to 0
+word	0	-threshold 1e1	same		
+word	6	-threshold 1e1	same		
+word	7	-threshold 1e1	same		
+word	0	-threshold 0x10	losat-rejects	error: invalid value '0x10' for '-threshold <THRESHOLD>': expected a decimal number (other forms, which NCBI BLAST+ may read, are not supported by LOSAT's TBLAS	error: invalid value '0x10' for '-threshold <THRESHOLD>': expected a decimal number (other forms, which NCBI BLAST+ may read, are not supported by LOSAT's TBLAS
+word	6	-threshold 0x10	losat-rejects	error: invalid value '0x10' for '-threshold <THRESHOLD>': expected a decimal number (other forms, which NCBI BLAST+ may read, are not supported by LOSAT's TBLAS	error: invalid value '0x10' for '-threshold <THRESHOLD>': expected a decimal number (other forms, which NCBI BLAST+ may read, are not supported by LOSAT's TBLAS
+word	7	-threshold 0x10	losat-rejects	error: invalid value '0x10' for '-threshold <THRESHOLD>': expected a decimal number (other forms, which NCBI BLAST+ may read, are not supported by LOSAT's TBLAS	error: invalid value '0x10' for '-threshold <THRESHOLD>': expected a decimal number (other forms, which NCBI BLAST+ may read, are not supported by LOSAT's TBLAS
+word	0	-threshold nan	arg-error	Error: Cannot convert string 'nan' to double (m_Pos = 0)	error: invalid value 'nan' for '-threshold <THRESHOLD>': expected a number
+word	6	-threshold nan	arg-error	Error: Cannot convert string 'nan' to double (m_Pos = 0)	error: invalid value 'nan' for '-threshold <THRESHOLD>': expected a number
+word	7	-threshold nan	arg-error	Error: Cannot convert string 'nan' to double (m_Pos = 0)	error: invalid value 'nan' for '-threshold <THRESHOLD>': expected a number
+word	0	-threshold +inf	same		
+word	6	-threshold +inf	same		
+word	7	-threshold +inf	same		
+word	0	-word_size 2 -threshold 1	losat-rejects	Error: -word_size 2 is not supported by LOSAT's TBLASTX (it implements word size 3)	Error: -word_size 2 is not supported by LOSAT's TBLASTX (it implements word size 3)
+word	6	-word_size 2 -threshold 1	losat-rejects	Error: -word_size 2 is not supported by LOSAT's TBLASTX (it implements word size 3)	Error: -word_size 2 is not supported by LOSAT's TBLASTX (it implements word size 3)
+word	7	-word_size 2 -threshold 1	losat-rejects	Error: -word_size 2 is not supported by LOSAT's TBLASTX (it implements word size 3)	Error: -word_size 2 is not supported by LOSAT's TBLASTX (it implements word size 3)
+word	0	-word_size 2 -threshold 11	losat-rejects	Error: -word_size 2 is not supported by LOSAT's TBLASTX (it implements word size 3)	Error: -word_size 2 is not supported by LOSAT's TBLASTX (it implements word size 3)
+word	6	-word_size 2 -threshold 11	losat-rejects	Error: -word_size 2 is not supported by LOSAT's TBLASTX (it implements word size 3)	Error: -word_size 2 is not supported by LOSAT's TBLASTX (it implements word size 3)
+word	7	-word_size 2 -threshold 11	losat-rejects	Error: -word_size 2 is not supported by LOSAT's TBLASTX (it implements word size 3)	Error: -word_size 2 is not supported by LOSAT's TBLASTX (it implements word size 3)
+word	0	-word_size 2 -threshold 11.5	losat-rejects	Error: -word_size 2 is not supported by LOSAT's TBLASTX (it implements word size 3)	Error: -word_size 2 is not supported by LOSAT's TBLASTX (it implements word size 3)
+word	6	-word_size 2 -threshold 11.5	losat-rejects	Error: -word_size 2 is not supported by LOSAT's TBLASTX (it implements word size 3)	Error: -word_size 2 is not supported by LOSAT's TBLASTX (it implements word size 3)
+word	7	-word_size 2 -threshold 11.5	losat-rejects	Error: -word_size 2 is not supported by LOSAT's TBLASTX (it implements word size 3)	Error: -word_size 2 is not supported by LOSAT's TBLASTX (it implements word size 3)
+word	0	-word_size 2 -threshold 21	losat-rejects	Error: -word_size 2 is not supported by LOSAT's TBLASTX (it implements word size 3)	Error: -word_size 2 is not supported by LOSAT's TBLASTX (it implements word size 3)
+word	6	-word_size 2 -threshold 21	losat-rejects	Error: -word_size 2 is not supported by LOSAT's TBLASTX (it implements word size 3)	Error: -word_size 2 is not supported by LOSAT's TBLASTX (it implements word size 3)
+word	7	-word_size 2 -threshold 21	losat-rejects	Error: -word_size 2 is not supported by LOSAT's TBLASTX (it implements word size 3)	Error: -word_size 2 is not supported by LOSAT's TBLASTX (it implements word size 3)
+word	0	-word_size 3 -threshold 1	same		
+word	6	-word_size 3 -threshold 1	same		
+word	7	-word_size 3 -threshold 1	same		
+word	0	-word_size 3 -threshold 11	same		
+word	6	-word_size 3 -threshold 11	same		
+word	7	-word_size 3 -threshold 11	same		
+word	0	-word_size 3 -threshold 11.5	same		
+word	6	-word_size 3 -threshold 11.5	same		
+word	7	-word_size 3 -threshold 11.5	same		
+word	0	-word_size 3 -threshold 21	same		
+word	6	-word_size 3 -threshold 21	same		
+word	7	-word_size 3 -threshold 21	same		
+word	0	-word_size 4 -threshold 1	losat-rejects	Error: -word_size 4 is not supported by LOSAT's TBLASTX (it implements word size 3)	Error: -word_size 4 is not supported by LOSAT's TBLASTX (it implements word size 3)
+word	6	-word_size 4 -threshold 1	losat-rejects		Error: -word_size 4 is not supported by LOSAT's TBLASTX (it implements word size 3)
+word	7	-word_size 4 -threshold 1	losat-rejects	Error: -word_size 4 is not supported by LOSAT's TBLASTX (it implements word size 3)	Error: -word_size 4 is not supported by LOSAT's TBLASTX (it implements word size 3)
+word	0	-word_size 4 -threshold 11	losat-rejects	Error: -word_size 4 is not supported by LOSAT's TBLASTX (it implements word size 3)	Error: -word_size 4 is not supported by LOSAT's TBLASTX (it implements word size 3)
+word	6	-word_size 4 -threshold 11	losat-rejects	Error: -word_size 4 is not supported by LOSAT's TBLASTX (it implements word size 3)	Error: -word_size 4 is not supported by LOSAT's TBLASTX (it implements word size 3)
+word	7	-word_size 4 -threshold 11	losat-rejects	Error: -word_size 4 is not supported by LOSAT's TBLASTX (it implements word size 3)	Error: -word_size 4 is not supported by LOSAT's TBLASTX (it implements word size 3)
+word	0	-word_size 4 -threshold 11.5	losat-rejects	Error: -word_size 4 is not supported by LOSAT's TBLASTX (it implements word size 3)	Error: -word_size 4 is not supported by LOSAT's TBLASTX (it implements word size 3)
+word	6	-word_size 4 -threshold 11.5	losat-rejects	Error: -word_size 4 is not supported by LOSAT's TBLASTX (it implements word size 3)	Error: -word_size 4 is not supported by LOSAT's TBLASTX (it implements word size 3)
+word	7	-word_size 4 -threshold 11.5	losat-rejects	Error: -word_size 4 is not supported by LOSAT's TBLASTX (it implements word size 3)	Error: -word_size 4 is not supported by LOSAT's TBLASTX (it implements word size 3)
+word	0	-word_size 4 -threshold 21	losat-rejects	Error: -word_size 4 is not supported by LOSAT's TBLASTX (it implements word size 3)	Error: -word_size 4 is not supported by LOSAT's TBLASTX (it implements word size 3)
+word	6	-word_size 4 -threshold 21	losat-rejects	Error: -word_size 4 is not supported by LOSAT's TBLASTX (it implements word size 3)	Error: -word_size 4 is not supported by LOSAT's TBLASTX (it implements word size 3)
+word	7	-word_size 4 -threshold 21	losat-rejects	Error: -word_size 4 is not supported by LOSAT's TBLASTX (it implements word size 3)	Error: -word_size 4 is not supported by LOSAT's TBLASTX (it implements word size 3)
+word	0	-word_size 5 -threshold 1	same-error	BLAST query/options error: Word-size must be less than 6 for protein comparison	BLAST query/options error: Word-size must be less than 6 for protein comparison
+word	6	-word_size 5 -threshold 1	same-error	BLAST query/options error: Word-size must be less than 6 for protein comparison	BLAST query/options error: Word-size must be less than 6 for protein comparison
+word	7	-word_size 5 -threshold 1	same-error	BLAST query/options error: Word-size must be less than 6 for protein comparison	BLAST query/options error: Word-size must be less than 6 for protein comparison
+word	0	-word_size 5 -threshold 11	same-error	BLAST query/options error: Word-size must be less than 6 for protein comparison	BLAST query/options error: Word-size must be less than 6 for protein comparison
+word	6	-word_size 5 -threshold 11	same-error	BLAST query/options error: Word-size must be less than 6 for protein comparison	BLAST query/options error: Word-size must be less than 6 for protein comparison
+word	7	-word_size 5 -threshold 11	same-error	BLAST query/options error: Word-size must be less than 6 for protein comparison	BLAST query/options error: Word-size must be less than 6 for protein comparison
+word	0	-word_size 5 -threshold 11.5	same-error	BLAST query/options error: Word-size must be less than 6 for protein comparison	BLAST query/options error: Word-size must be less than 6 for protein comparison
+word	6	-word_size 5 -threshold 11.5	same-error	BLAST query/options error: Word-size must be less than 6 for protein comparison	BLAST query/options error: Word-size must be less than 6 for protein comparison
+word	7	-word_size 5 -threshold 11.5	same-error	BLAST query/options error: Word-size must be less than 6 for protein comparison	BLAST query/options error: Word-size must be less than 6 for protein comparison
+word	0	-word_size 5 -threshold 21	same-error	BLAST query/options error: Word-size must be less than 6 for protein comparison	BLAST query/options error: Word-size must be less than 6 for protein comparison
+word	6	-word_size 5 -threshold 21	same-error	BLAST query/options error: Word-size must be less than 6 for protein comparison	BLAST query/options error: Word-size must be less than 6 for protein comparison
+word	7	-word_size 5 -threshold 21	same-error	BLAST query/options error: Word-size must be less than 6 for protein comparison	BLAST query/options error: Word-size must be less than 6 for protein comparison
+word	0	-word_size 6 -threshold 1	same-error	BLAST query/options error: Word-size must be less than 6 for protein comparison	BLAST query/options error: Word-size must be less than 6 for protein comparison
+word	6	-word_size 6 -threshold 1	same-error	BLAST query/options error: Word-size must be less than 6 for protein comparison	BLAST query/options error: Word-size must be less than 6 for protein comparison
+word	7	-word_size 6 -threshold 1	same-error	BLAST query/options error: Word-size must be less than 6 for protein comparison	BLAST query/options error: Word-size must be less than 6 for protein comparison
+word	0	-word_size 6 -threshold 11	same-error	BLAST query/options error: Word-size must be less than 6 for protein comparison	BLAST query/options error: Word-size must be less than 6 for protein comparison
+word	6	-word_size 6 -threshold 11	same-error	BLAST query/options error: Word-size must be less than 6 for protein comparison	BLAST query/options error: Word-size must be less than 6 for protein comparison
+word	7	-word_size 6 -threshold 11	same-error	BLAST query/options error: Word-size must be less than 6 for protein comparison	BLAST query/options error: Word-size must be less than 6 for protein comparison
+word	0	-word_size 6 -threshold 11.5	same-error	BLAST query/options error: Word-size must be less than 6 for protein comparison	BLAST query/options error: Word-size must be less than 6 for protein comparison
+word	6	-word_size 6 -threshold 11.5	same-error	BLAST query/options error: Word-size must be less than 6 for protein comparison	BLAST query/options error: Word-size must be less than 6 for protein comparison
+word	7	-word_size 6 -threshold 11.5	same-error	BLAST query/options error: Word-size must be less than 6 for protein comparison	BLAST query/options error: Word-size must be less than 6 for protein comparison
+word	0	-word_size 6 -threshold 21	same-error	BLAST query/options error: Word-size must be less than 6 for protein comparison	BLAST query/options error: Word-size must be less than 6 for protein comparison
+word	6	-word_size 6 -threshold 21	same-error	BLAST query/options error: Word-size must be less than 6 for protein comparison	BLAST query/options error: Word-size must be less than 6 for protein comparison
+word	7	-word_size 6 -threshold 21	same-error	BLAST query/options error: Word-size must be less than 6 for protein comparison	BLAST query/options error: Word-size must be less than 6 for protein comparison
+window	0	-window_size 0	losat-rejects	Error: -window_size 0 (the one-hit word finder) is not supported by LOSAT's TBLASTX	Error: -window_size 0 (the one-hit word finder) is not supported by LOSAT's TBLASTX
+window	6	-window_size 0	losat-rejects	Error: -window_size 0 (the one-hit word finder) is not supported by LOSAT's TBLASTX	Error: -window_size 0 (the one-hit word finder) is not supported by LOSAT's TBLASTX
+window	7	-window_size 0	losat-rejects	Error: -window_size 0 (the one-hit word finder) is not supported by LOSAT's TBLASTX	Error: -window_size 0 (the one-hit word finder) is not supported by LOSAT's TBLASTX
+window	0	-window_size 1	same		
+window	6	-window_size 1	same		
+window	7	-window_size 1	same		
+window	0	-window_size 2	same		
+window	6	-window_size 2	same		
+window	7	-window_size 2	same		
+window	0	-window_size 10	same		
+window	6	-window_size 10	same		
+window	7	-window_size 10	same		
+window	0	-window_size 40	same		
+window	6	-window_size 40	same		
+window	7	-window_size 40	same		
+window	0	-window_size 100	same		
+window	6	-window_size 100	same		
+window	7	-window_size 100	same		
+window	0	-window_size -1	arg-error	Error: Argument "window_size". Illegal value, expected >=0:  `-1'	error: invalid value '-1' for '-window_size <WINDOW_SIZE>': expected an integer >= 0
+window	6	-window_size -1	arg-error	Error: Argument "window_size". Illegal value, expected >=0:  `-1'	error: invalid value '-1' for '-window_size <WINDOW_SIZE>': expected an integer >= 0
+window	7	-window_size -1	arg-error	Error: Argument "window_size". Illegal value, expected >=0:  `-1'	error: invalid value '-1' for '-window_size <WINDOW_SIZE>': expected an integer >= 0
+window	0	-window_size 0x28	same		
+window	6	-window_size 0x28	same		
+window	7	-window_size 0x28	same		
+window	0	-window_size 40.0	arg-error	Error: Cannot convert string '40.0' to Int8 (m_Pos = 2)	error: invalid value '40.0' for '-window_size <WINDOW_SIZE>': expected an integer
+window	6	-window_size 40.0	arg-error	Error: Cannot convert string '40.0' to Int8 (m_Pos = 2)	error: invalid value '40.0' for '-window_size <WINDOW_SIZE>': expected an integer
+window	7	-window_size 40.0	arg-error	Error: Cannot convert string '40.0' to Int8 (m_Pos = 2)	error: invalid value '40.0' for '-window_size <WINDOW_SIZE>': expected an integer
+window	0	-window_size 0 -threshold 15	losat-rejects	Error: -window_size 0 (the one-hit word finder) is not supported by LOSAT's TBLASTX	Error: -window_size 0 (the one-hit word finder) is not supported by LOSAT's TBLASTX
+window	6	-window_size 0 -threshold 15	losat-rejects	Error: -window_size 0 (the one-hit word finder) is not supported by LOSAT's TBLASTX	Error: -window_size 0 (the one-hit word finder) is not supported by LOSAT's TBLASTX
+window	7	-window_size 0 -threshold 15	losat-rejects	Error: -window_size 0 (the one-hit word finder) is not supported by LOSAT's TBLASTX	Error: -window_size 0 (the one-hit word finder) is not supported by LOSAT's TBLASTX
+window	0	-window_size 0 -word_size 2	losat-rejects	Error: -window_size 0 (the one-hit word finder) is not supported by LOSAT's TBLASTX	Error: -window_size 0 (the one-hit word finder) is not supported by LOSAT's TBLASTX
+window	6	-window_size 0 -word_size 2	losat-rejects	Error: -window_size 0 (the one-hit word finder) is not supported by LOSAT's TBLASTX	Error: -window_size 0 (the one-hit word finder) is not supported by LOSAT's TBLASTX
+window	7	-window_size 0 -word_size 2	losat-rejects	Error: -window_size 0 (the one-hit word finder) is not supported by LOSAT's TBLASTX	Error: -window_size 0 (the one-hit word finder) is not supported by LOSAT's TBLASTX
+seg	0	-seg yes	same		
+seg	6	-seg yes	same		
+seg	7	-seg yes	same		
+seg	0	-seg no	same		
+seg	6	-seg no	same		
+seg	7	-seg no	same		
+seg	0	-seg '12 2.2 2.5'	same		
+seg	6	-seg '12 2.2 2.5'	same		
+seg	7	-seg '12 2.2 2.5'	same		
+seg	0	-seg '10 1.8 2.1'	same		
+seg	6	-seg '10 1.8 2.1'	same		
+seg	7	-seg '10 1.8 2.1'	same		
+seg	0	-seg '0 0 0'	same		
+seg	6	-seg '0 0 0'	same		
+seg	7	-seg '0 0 0'	same		
+seg	0	-seg '-1 -1 -1'	same		
+seg	6	-seg '-1 -1 -1'	same		
+seg	7	-seg '-1 -1 -1'	same		
+seg	0	-seg '12 2.2'	same-error	BLAST query/options error: Invalid number of arguments to filtering option	BLAST query/options error: Invalid number of arguments to filtering option
+seg	6	-seg '12 2.2'	same-error	BLAST query/options error: Invalid number of arguments to filtering option	BLAST query/options error: Invalid number of arguments to filtering option
+seg	7	-seg '12 2.2'	same-error	BLAST query/options error: Invalid number of arguments to filtering option	BLAST query/options error: Invalid number of arguments to filtering option
+seg	0	-seg '12 2.2 2.5 1'	same-error	BLAST query/options error: Invalid number of arguments to filtering option	BLAST query/options error: Invalid number of arguments to filtering option
+seg	6	-seg '12 2.2 2.5 1'	same-error	BLAST query/options error: Invalid number of arguments to filtering option	BLAST query/options error: Invalid number of arguments to filtering option
+seg	7	-seg '12 2.2 2.5 1'	same-error	BLAST query/options error: Invalid number of arguments to filtering option	BLAST query/options error: Invalid number of arguments to filtering option
+seg	0	-seg 'x y z'	same-error	BLAST query/options error: Invalid input for filtering parameters	BLAST query/options error: Invalid input for filtering parameters
+seg	6	-seg 'x y z'	same-error	BLAST query/options error: Invalid input for filtering parameters	BLAST query/options error: Invalid input for filtering parameters
+seg	7	-seg 'x y z'	same-error	BLAST query/options error: Invalid input for filtering parameters	BLAST query/options error: Invalid input for filtering parameters
+seg	0	-seg '12 2.5 2.2'	same		
+seg	6	-seg '12 2.5 2.2'	same		
+seg	7	-seg '12 2.5 2.2'	same		
+seg	0	-seg '12 nan 2.5'	same-error	BLAST query/options error: Invalid input for filtering parameters	BLAST query/options error: Invalid input for filtering parameters
+seg	6	-seg '12 nan 2.5'	same-error	BLAST query/options error: Invalid input for filtering parameters	BLAST query/options error: Invalid input for filtering parameters
+seg	7	-seg '12 nan 2.5'	same-error	BLAST query/options error: Invalid input for filtering parameters	BLAST query/options error: Invalid input for filtering parameters
+seg	0	-seg '12 inf 2.5'	same-error	BLAST query/options error: Invalid input for filtering parameters	BLAST query/options error: Invalid input for filtering parameters
+seg	6	-seg '12 inf 2.5'	same-error	BLAST query/options error: Invalid input for filtering parameters	BLAST query/options error: Invalid input for filtering parameters
+seg	7	-seg '12 inf 2.5'	same-error	BLAST query/options error: Invalid input for filtering parameters	BLAST query/options error: Invalid input for filtering parameters
+seg	0	-seg '1e1 2.2 2.5'	same-error	BLAST query/options error: Invalid input for filtering parameters	BLAST query/options error: Invalid input for filtering parameters
+seg	6	-seg '1e1 2.2 2.5'	same-error	BLAST query/options error: Invalid input for filtering parameters	BLAST query/options error: Invalid input for filtering parameters
+seg	7	-seg '1e1 2.2 2.5'	same-error	BLAST query/options error: Invalid input for filtering parameters	BLAST query/options error: Invalid input for filtering parameters
+seg	0	-seg '12  2.2 2.5'	same-error	BLAST query/options error: Invalid number of arguments to filtering option	BLAST query/options error: Invalid number of arguments to filtering option
+seg	6	-seg '12  2.2 2.5'	same-error	BLAST query/options error: Invalid number of arguments to filtering option	BLAST query/options error: Invalid number of arguments to filtering option
+seg	7	-seg '12  2.2 2.5'	same-error	BLAST query/options error: Invalid number of arguments to filtering option	BLAST query/options error: Invalid number of arguments to filtering option
+seg	0	-seg '0x10 2.2 2.5'	same-error	BLAST query/options error: Invalid input for filtering parameters	BLAST query/options error: Invalid input for filtering parameters
+seg	6	-seg '0x10 2.2 2.5'	same-error	BLAST query/options error: Invalid input for filtering parameters	BLAST query/options error: Invalid input for filtering parameters
+seg	7	-seg '0x10 2.2 2.5'	same-error	BLAST query/options error: Invalid input for filtering parameters	BLAST query/options error: Invalid input for filtering parameters
+seg	0	-seg '12 2.2 2.5 '	same-error	BLAST query/options error: Invalid number of arguments to filtering option	BLAST query/options error: Invalid number of arguments to filtering option
+seg	6	-seg '12 2.2 2.5 '	same-error	BLAST query/options error: Invalid number of arguments to filtering option	BLAST query/options error: Invalid number of arguments to filtering option
+seg	7	-seg '12 2.2 2.5 '	same-error	BLAST query/options error: Invalid number of arguments to filtering option	BLAST query/options error: Invalid number of arguments to filtering option
+seg	0	-seg YES	same-error	BLAST query/options error: Invalid number of arguments to filtering option	BLAST query/options error: Invalid number of arguments to filtering option
+seg	6	-seg YES	same-error	BLAST query/options error: Invalid number of arguments to filtering option	BLAST query/options error: Invalid number of arguments to filtering option
+seg	7	-seg YES	same-error	BLAST query/options error: Invalid number of arguments to filtering option	BLAST query/options error: Invalid number of arguments to filtering option
+seg	0	-seg No	same-error	BLAST query/options error: Invalid number of arguments to filtering option	BLAST query/options error: Invalid number of arguments to filtering option
+seg	6	-seg No	same-error	BLAST query/options error: Invalid number of arguments to filtering option	BLAST query/options error: Invalid number of arguments to filtering option
+seg	7	-seg No	same-error	BLAST query/options error: Invalid number of arguments to filtering option	BLAST query/options error: Invalid number of arguments to filtering option
+seg	0	-seg ''	same-error	BLAST query/options error: Invalid number of arguments to filtering option	BLAST query/options error: Invalid number of arguments to filtering option
+seg	6	-seg ''	same-error	BLAST query/options error: Invalid number of arguments to filtering option	BLAST query/options error: Invalid number of arguments to filtering option
+seg	7	-seg ''	same-error	BLAST query/options error: Invalid number of arguments to filtering option	BLAST query/options error: Invalid number of arguments to filtering option
+evalue	0	-evalue 1e-5	same		
+evalue	6	-evalue 1e-5	same		
+evalue	7	-evalue 1e-5	same		
+evalue	0	-evalue 0.001	same		
+evalue	6	-evalue 0.001	same		
+evalue	7	-evalue 0.001	same		
+evalue	0	-evalue 1000	same		
+evalue	6	-evalue 1000	same		
+evalue	7	-evalue 1000	same		
+evalue	0	-evalue 1e3	same		
+evalue	6	-evalue 1e3	same		
+evalue	7	-evalue 1e3	same		
+evalue	0	-evalue +inf	same		
+evalue	6	-evalue +inf	same		
+evalue	7	-evalue +inf	same		
+evalue	0	-evalue inf	arg-error	Error: Cannot convert string 'inf' to double (m_Pos = 0)	error: invalid value 'inf' for '-evalue <EVALUE>': expected a number
+evalue	6	-evalue inf	arg-error	Error: Cannot convert string 'inf' to double (m_Pos = 0)	error: invalid value 'inf' for '-evalue <EVALUE>': expected a number
+evalue	7	-evalue inf	arg-error	Error: Cannot convert string 'inf' to double (m_Pos = 0)	error: invalid value 'inf' for '-evalue <EVALUE>': expected a number
+evalue	0	-evalue nan	arg-error	Error: Cannot convert string 'nan' to double (m_Pos = 0)	error: invalid value 'nan' for '-evalue <EVALUE>': expected a number
+evalue	6	-evalue nan	arg-error	Error: Cannot convert string 'nan' to double (m_Pos = 0)	error: invalid value 'nan' for '-evalue <EVALUE>': expected a number
+evalue	7	-evalue nan	arg-error	Error: Cannot convert string 'nan' to double (m_Pos = 0)	error: invalid value 'nan' for '-evalue <EVALUE>': expected a number
+evalue	0	-evalue -nan	same		
+evalue	6	-evalue -nan	same		
+evalue	7	-evalue -nan	same		
+evalue	0	-evalue 0	same-error	BLAST query/options error: expect value or cutoff score must be greater than zero	BLAST query/options error: expect value or cutoff score must be greater than zero
+evalue	6	-evalue 0	same-error	BLAST query/options error: expect value or cutoff score must be greater than zero	BLAST query/options error: expect value or cutoff score must be greater than zero
+evalue	7	-evalue 0	same-error	BLAST query/options error: expect value or cutoff score must be greater than zero	BLAST query/options error: expect value or cutoff score must be greater than zero
+evalue	0	-evalue -1	same-error	BLAST query/options error: expect value or cutoff score must be greater than zero	BLAST query/options error: expect value or cutoff score must be greater than zero
+evalue	6	-evalue -1	same-error	BLAST query/options error: expect value or cutoff score must be greater than zero	BLAST query/options error: expect value or cutoff score must be greater than zero
+evalue	7	-evalue -1	same-error	BLAST query/options error: expect value or cutoff score must be greater than zero	BLAST query/options error: expect value or cutoff score must be greater than zero
+evalue	0	-evalue 0x10	losat-rejects	error: invalid value '0x10' for '-evalue <EVALUE>': expected a decimal number (other forms, which NCBI BLAST+ may read, are not supported by LOSAT's TBLASTX)	error: invalid value '0x10' for '-evalue <EVALUE>': expected a decimal number (other forms, which NCBI BLAST+ may read, are not supported by LOSAT's TBLASTX)
+evalue	6	-evalue 0x10	losat-rejects	error: invalid value '0x10' for '-evalue <EVALUE>': expected a decimal number (other forms, which NCBI BLAST+ may read, are not supported by LOSAT's TBLASTX)	error: invalid value '0x10' for '-evalue <EVALUE>': expected a decimal number (other forms, which NCBI BLAST+ may read, are not supported by LOSAT's TBLASTX)
+evalue	7	-evalue 0x10	losat-rejects	error: invalid value '0x10' for '-evalue <EVALUE>': expected a decimal number (other forms, which NCBI BLAST+ may read, are not supported by LOSAT's TBLASTX)	error: invalid value '0x10' for '-evalue <EVALUE>': expected a decimal number (other forms, which NCBI BLAST+ may read, are not supported by LOSAT's TBLASTX)
+evalue	0	-evalue 1e999	same		
+evalue	6	-evalue 1e999	same		
+evalue	7	-evalue 1e999	same		
+evalue	0	-evalue .5	same		
+evalue	6	-evalue .5	same		
+evalue	7	-evalue .5	same		
+evalue	0	-evalue 5.	same		
+evalue	6	-evalue 5.	same		
+evalue	7	-evalue 5.	same		
+evalue	0	-evalue 1E-5	same		
+evalue	6	-evalue 1E-5	same		
+evalue	7	-evalue 1E-5	same		
+evalue	0	-evalue ' 1'	arg-error	Error: Cannot convert string ' 1' to double (m_Pos = 0)	error: invalid value ' 1' for '-evalue <EVALUE>': expected a number
+evalue	6	-evalue ' 1'	arg-error	Error: Cannot convert string ' 1' to double (m_Pos = 0)	error: invalid value ' 1' for '-evalue <EVALUE>': expected a number
+evalue	7	-evalue ' 1'	arg-error	Error: Cannot convert string ' 1' to double (m_Pos = 0)	error: invalid value ' 1' for '-evalue <EVALUE>': expected a number
+evalue	0	-evalue 1e-300	same		
+evalue	6	-evalue 1e-300	same		
+evalue	7	-evalue 1e-300	same		
+evalue	0	-evalue 100000	same		
+evalue	6	-evalue 100000	same		
+evalue	7	-evalue 100000	same		
+evalue	0	-evalue 1e-50	same		
+evalue	6	-evalue 1e-50	same		
+evalue	7	-evalue 1e-50	same		
+ints	0	-max_target_seqs 1	same	Warning: [tblastx] Examining 5 or more matches is recommended	Warning: [tblastx] Examining 5 or more matches is recommended
+ints	6	-max_target_seqs 1	same	Warning: [tblastx] Examining 5 or more matches is recommended	Warning: [tblastx] Examining 5 or more matches is recommended
+ints	7	-max_target_seqs 1	same	Warning: [tblastx] Examining 5 or more matches is recommended	Warning: [tblastx] Examining 5 or more matches is recommended
+ints	0	-max_target_seqs 4	same	Warning: [tblastx] Examining 5 or more matches is recommended	Warning: [tblastx] Examining 5 or more matches is recommended
+ints	6	-max_target_seqs 4	same	Warning: [tblastx] Examining 5 or more matches is recommended	Warning: [tblastx] Examining 5 or more matches is recommended
+ints	7	-max_target_seqs 4	same	Warning: [tblastx] Examining 5 or more matches is recommended	Warning: [tblastx] Examining 5 or more matches is recommended
+ints	0	-max_target_seqs 5	same		
+ints	6	-max_target_seqs 5	same		
+ints	7	-max_target_seqs 5	same		
+ints	0	-max_target_seqs 0x10	same		
+ints	6	-max_target_seqs 0x10	same		
+ints	7	-max_target_seqs 0x10	same		
+ints	0	-max_target_seqs 010	same		
+ints	6	-max_target_seqs 010	same		
+ints	7	-max_target_seqs 010	same		
+ints	0	-max_target_seqs +5	same		
+ints	6	-max_target_seqs +5	same		
+ints	7	-max_target_seqs +5	same		
+ints	0	-max_target_seqs -1	arg-error	Error: Argument "max_target_seqs". Illegal value, expected >=1:  `-1'	error: invalid value '-1' for '-max_target_seqs <MAX_TARGET_SEQS>': expected an integer >= 1
+ints	6	-max_target_seqs -1	arg-error	Error: Argument "max_target_seqs". Illegal value, expected >=1:  `-1'	error: invalid value '-1' for '-max_target_seqs <MAX_TARGET_SEQS>': expected an integer >= 1
+ints	7	-max_target_seqs -1	arg-error	Error: Argument "max_target_seqs". Illegal value, expected >=1:  `-1'	error: invalid value '-1' for '-max_target_seqs <MAX_TARGET_SEQS>': expected an integer >= 1
+ints	0	-max_target_seqs 0	arg-error	Error: Argument "max_target_seqs". Illegal value, expected >=1:  `0'	error: invalid value '0' for '-max_target_seqs <MAX_TARGET_SEQS>': expected an integer >= 1
+ints	6	-max_target_seqs 0	arg-error	Error: Argument "max_target_seqs". Illegal value, expected >=1:  `0'	error: invalid value '0' for '-max_target_seqs <MAX_TARGET_SEQS>': expected an integer >= 1
+ints	7	-max_target_seqs 0	arg-error	Error: Argument "max_target_seqs". Illegal value, expected >=1:  `0'	error: invalid value '0' for '-max_target_seqs <MAX_TARGET_SEQS>': expected an integer >= 1
+ints	0	-max_target_seqs 2147483647	same		
+ints	6	-max_target_seqs 2147483647	same		
+ints	7	-max_target_seqs 2147483647	same		
+ints	0	-max_target_seqs 1e1	arg-error	Error: Cannot convert string '1e1' to Int8 (m_Pos = 1)	error: invalid value '1e1' for '-max_target_seqs <MAX_TARGET_SEQS>': expected an integer
+ints	6	-max_target_seqs 1e1	arg-error	Error: Cannot convert string '1e1' to Int8 (m_Pos = 1)	error: invalid value '1e1' for '-max_target_seqs <MAX_TARGET_SEQS>': expected an integer
+ints	7	-max_target_seqs 1e1	arg-error	Error: Cannot convert string '1e1' to Int8 (m_Pos = 1)	error: invalid value '1e1' for '-max_target_seqs <MAX_TARGET_SEQS>': expected an integer
+ints	0	-max_target_seqs 5.0	arg-error	Error: Cannot convert string '5.0' to Int8 (m_Pos = 1)	error: invalid value '5.0' for '-max_target_seqs <MAX_TARGET_SEQS>': expected an integer
+ints	6	-max_target_seqs 5.0	arg-error	Error: Cannot convert string '5.0' to Int8 (m_Pos = 1)	error: invalid value '5.0' for '-max_target_seqs <MAX_TARGET_SEQS>': expected an integer
+ints	7	-max_target_seqs 5.0	arg-error	Error: Cannot convert string '5.0' to Int8 (m_Pos = 1)	error: invalid value '5.0' for '-max_target_seqs <MAX_TARGET_SEQS>': expected an integer
+ints	0	-max_target_seqs 0x	arg-error	Error: Argument "max_target_seqs". Illegal value, expected >=1:  `0x'	error: invalid value '0x' for '-max_target_seqs <MAX_TARGET_SEQS>': Illegal value
+ints	6	-max_target_seqs 0x	arg-error	Error: Argument "max_target_seqs". Illegal value, expected >=1:  `0x'	error: invalid value '0x' for '-max_target_seqs <MAX_TARGET_SEQS>': Illegal value
+ints	7	-max_target_seqs 0x	arg-error	Error: Argument "max_target_seqs". Illegal value, expected >=1:  `0x'	error: invalid value '0x' for '-max_target_seqs <MAX_TARGET_SEQS>': Illegal value
+ints	0	-num_threads 0	arg-error	Error: Argument "num_threads". Illegal value, expected >=1:  `0'	error: invalid value '0' for '-num_threads <NUM_THREADS>': expected an integer >= 1
+ints	6	-num_threads 0	arg-error	Error: Argument "num_threads". Illegal value, expected >=1:  `0'	error: invalid value '0' for '-num_threads <NUM_THREADS>': expected an integer >= 1
+ints	7	-num_threads 0	arg-error	Error: Argument "num_threads". Illegal value, expected >=1:  `0'	error: invalid value '0' for '-num_threads <NUM_THREADS>': expected an integer >= 1
+ints	0	-num_threads 0x1	same		
+ints	6	-num_threads 0x1	same		
+ints	7	-num_threads 0x1	same		
+ints	0	-num_threads +1	same		
+ints	6	-num_threads +1	same		
+ints	7	-num_threads +1	same		
+ints	0	-num_threads -1	arg-error	Error: Argument "num_threads". Illegal value, expected >=1:  `-1'	error: invalid value '-1' for '-num_threads <NUM_THREADS>': expected an integer >= 1
+ints	6	-num_threads -1	arg-error	Error: Argument "num_threads". Illegal value, expected >=1:  `-1'	error: invalid value '-1' for '-num_threads <NUM_THREADS>': expected an integer >= 1
+ints	7	-num_threads -1	arg-error	Error: Argument "num_threads". Illegal value, expected >=1:  `-1'	error: invalid value '-1' for '-num_threads <NUM_THREADS>': expected an integer >= 1
+ints	0	-max_hsps 1	losat-rejects	error: the NCBI BLAST+ option -max_hsps is not supported by LOSAT's TBLASTX	error: the NCBI BLAST+ option -max_hsps is not supported by LOSAT's TBLASTX
+ints	6	-max_hsps 1	losat-rejects	error: the NCBI BLAST+ option -max_hsps is not supported by LOSAT's TBLASTX	error: the NCBI BLAST+ option -max_hsps is not supported by LOSAT's TBLASTX
+ints	7	-max_hsps 1	losat-rejects	error: the NCBI BLAST+ option -max_hsps is not supported by LOSAT's TBLASTX	error: the NCBI BLAST+ option -max_hsps is not supported by LOSAT's TBLASTX
+outfmt	-	-outfmt 6	same		
+outfmt	-	-outfmt 06	same		
+outfmt	-	-outfmt +6	same		
+outfmt	-	-outfmt ' 6'	same		
+outfmt	-	-outfmt '6 '	same		
+outfmt	-	-outfmt '6 std'	losat-rejects	Error: a custom output format specification (fields or a delimiter) is not supported by LOSAT's TBLASTX	Error: a custom output format specification (fields or a delimiter) is not supported by LOSAT's TBLASTX
+outfmt	-	-outfmt '7 std qseqid'	losat-rejects	Error: a custom output format specification (fields or a delimiter) is not supported by LOSAT's TBLASTX	Error: a custom output format specification (fields or a delimiter) is not supported by LOSAT's TBLASTX
+outfmt	-	-outfmt 0x6	same-error	BLAST query/options error: '0x6' is not a valid output format	BLAST query/options error: '0x6' is not a valid output format
+outfmt	-	-outfmt 6.0	same-error	BLAST query/options error: '6.0' is not a valid output format	BLAST query/options error: '6.0' is not a valid output format
+outfmt	-	-outfmt 5	losat-rejects	Error: output format 5 is not supported by LOSAT's TBLASTX	Error: output format 5 is not supported by LOSAT's TBLASTX
+outfmt	-	-outfmt 13	same-error	BLAST query/options error: Please provide a file name for outfmt 13.	BLAST query/options error: Please provide a file name for outfmt 13.
+outfmt	-	-outfmt 18	losat-rejects	Error: output format 18 is not supported by LOSAT's TBLASTX	Error: output format 18 is not supported by LOSAT's TBLASTX
+outfmt	-	-outfmt abc	same-error	BLAST query/options error: 'abc' is not a valid output format	BLAST query/options error: 'abc' is not a valid output format
+outfmt	-	-outfmt ''	same-error	BLAST query/options error: '' is not a valid output format	BLAST query/options error: '' is not a valid output format
+outfmt	-	-outfmt ' '	same-error	BLAST query/options error: '' is not a valid output format	BLAST query/options error: '' is not a valid output format
+outfmt	-	-outfmt '0 std'	same		
+outfmt	-	-outfmt 10	losat-rejects	Error: output format 10 is not supported by LOSAT's TBLASTX	Error: output format 10 is not supported by LOSAT's TBLASTX
+outfmt	-	-outfmt 17	same-error	BLAST query/options error: SAM format is only applicable to blastn	BLAST query/options error: SAM format is only applicable to blastn
+outfmt	-	-outfmt -1	same-error	Error: Formatting choice is out of range	Error: Formatting choice is out of range
+outfmt	-	-outfmt '7 qseqid'	losat-rejects	Error: a custom output format specification (fields or a delimiter) is not supported by LOSAT's TBLASTX	Error: a custom output format specification (fields or a delimiter) is not supported by LOSAT's TBLASTX
+gencode	0	-query_gencode 0	arg-error	Error: Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `0'	error: invalid value '0' for '-query_gencode <QUERY_GENCODE>': unsupported genetic code
+gencode	6	-query_gencode 0	arg-error	Error: Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `0'	error: invalid value '0' for '-query_gencode <QUERY_GENCODE>': unsupported genetic code
+gencode	7	-query_gencode 0	arg-error	Error: Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `0'	error: invalid value '0' for '-query_gencode <QUERY_GENCODE>': unsupported genetic code
+gencode	0	-query_gencode 1	same		
+gencode	6	-query_gencode 1	same		
+gencode	7	-query_gencode 1	same		
+gencode	0	-query_gencode 2	same		
+gencode	6	-query_gencode 2	same		
+gencode	7	-query_gencode 2	same		
+gencode	0	-query_gencode 3	same		
+gencode	6	-query_gencode 3	same		
+gencode	7	-query_gencode 3	same		
+gencode	0	-query_gencode 4	same		
+gencode	6	-query_gencode 4	same		
+gencode	7	-query_gencode 4	same		
+gencode	0	-query_gencode 5	same		
+gencode	6	-query_gencode 5	same		
+gencode	7	-query_gencode 5	same		
+gencode	0	-query_gencode 6	same		
+gencode	6	-query_gencode 6	same		
+gencode	7	-query_gencode 6	same		
+gencode	0	-query_gencode 7	arg-error	Error: Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `7'	error: invalid value '7' for '-query_gencode <QUERY_GENCODE>': unsupported genetic code
+gencode	6	-query_gencode 7	arg-error	Error: Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `7'	error: invalid value '7' for '-query_gencode <QUERY_GENCODE>': unsupported genetic code
+gencode	7	-query_gencode 7	arg-error	Error: Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `7'	error: invalid value '7' for '-query_gencode <QUERY_GENCODE>': unsupported genetic code
+gencode	0	-query_gencode 8	arg-error	Error: Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `8'	error: invalid value '8' for '-query_gencode <QUERY_GENCODE>': unsupported genetic code
+gencode	6	-query_gencode 8	arg-error	Error: Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `8'	error: invalid value '8' for '-query_gencode <QUERY_GENCODE>': unsupported genetic code
+gencode	7	-query_gencode 8	arg-error	Error: Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `8'	error: invalid value '8' for '-query_gencode <QUERY_GENCODE>': unsupported genetic code
+gencode	0	-query_gencode 9	same		
+gencode	6	-query_gencode 9	same		
+gencode	7	-query_gencode 9	same		
+gencode	0	-query_gencode 10	same		
+gencode	6	-query_gencode 10	same		
+gencode	7	-query_gencode 10	same		
+gencode	0	-query_gencode 11	same		
+gencode	6	-query_gencode 11	same		
+gencode	7	-query_gencode 11	same		
+gencode	0	-query_gencode 12	same		
+gencode	6	-query_gencode 12	same		
+gencode	7	-query_gencode 12	same		
+gencode	0	-query_gencode 13	same		
+gencode	6	-query_gencode 13	same		
+gencode	7	-query_gencode 13	same		
+gencode	0	-query_gencode 14	same		
+gencode	6	-query_gencode 14	same		
+gencode	7	-query_gencode 14	same		
+gencode	0	-query_gencode 15	same		
+gencode	6	-query_gencode 15	same		
+gencode	7	-query_gencode 15	same		
+gencode	0	-query_gencode 16	same		
+gencode	6	-query_gencode 16	same		
+gencode	7	-query_gencode 16	same		
+gencode	0	-query_gencode 17	arg-error	Error: Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `17'	error: invalid value '17' for '-query_gencode <QUERY_GENCODE>': unsupported genetic code
+gencode	6	-query_gencode 17	arg-error	Error: Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `17'	error: invalid value '17' for '-query_gencode <QUERY_GENCODE>': unsupported genetic code
+gencode	7	-query_gencode 17	arg-error	Error: Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `17'	error: invalid value '17' for '-query_gencode <QUERY_GENCODE>': unsupported genetic code
+gencode	0	-query_gencode 18	arg-error	Error: Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `18'	error: invalid value '18' for '-query_gencode <QUERY_GENCODE>': unsupported genetic code
+gencode	6	-query_gencode 18	arg-error	Error: Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `18'	error: invalid value '18' for '-query_gencode <QUERY_GENCODE>': unsupported genetic code
+gencode	7	-query_gencode 18	arg-error	Error: Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `18'	error: invalid value '18' for '-query_gencode <QUERY_GENCODE>': unsupported genetic code
+gencode	0	-query_gencode 19	arg-error	Error: Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `19'	error: invalid value '19' for '-query_gencode <QUERY_GENCODE>': unsupported genetic code
+gencode	6	-query_gencode 19	arg-error	Error: Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `19'	error: invalid value '19' for '-query_gencode <QUERY_GENCODE>': unsupported genetic code
+gencode	7	-query_gencode 19	arg-error	Error: Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `19'	error: invalid value '19' for '-query_gencode <QUERY_GENCODE>': unsupported genetic code
+gencode	0	-query_gencode 20	arg-error	Error: Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `20'	error: invalid value '20' for '-query_gencode <QUERY_GENCODE>': unsupported genetic code
+gencode	6	-query_gencode 20	arg-error	Error: Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `20'	error: invalid value '20' for '-query_gencode <QUERY_GENCODE>': unsupported genetic code
+gencode	7	-query_gencode 20	arg-error	Error: Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `20'	error: invalid value '20' for '-query_gencode <QUERY_GENCODE>': unsupported genetic code
+gencode	0	-query_gencode 21	same		
+gencode	6	-query_gencode 21	same		
+gencode	7	-query_gencode 21	same		
+gencode	0	-query_gencode 22	same		
+gencode	6	-query_gencode 22	same		
+gencode	7	-query_gencode 22	same		
+gencode	0	-query_gencode 23	same		
+gencode	6	-query_gencode 23	same		
+gencode	7	-query_gencode 23	same		
+gencode	0	-query_gencode 24	same		
+gencode	6	-query_gencode 24	same		
+gencode	7	-query_gencode 24	same		
+gencode	0	-query_gencode 25	same		
+gencode	6	-query_gencode 25	same		
+gencode	7	-query_gencode 25	same		
+gencode	0	-query_gencode 26	same		
+gencode	6	-query_gencode 26	same		
+gencode	7	-query_gencode 26	same		
+gencode	0	-query_gencode 27	same		
+gencode	6	-query_gencode 27	same		
+gencode	7	-query_gencode 27	same		
+gencode	0	-query_gencode 28	same		
+gencode	6	-query_gencode 28	same		
+gencode	7	-query_gencode 28	same		
+gencode	0	-query_gencode 29	same		
+gencode	6	-query_gencode 29	same		
+gencode	7	-query_gencode 29	same		
+gencode	0	-query_gencode 30	same		
+gencode	6	-query_gencode 30	same		
+gencode	7	-query_gencode 30	same		
+gencode	0	-query_gencode 31	same		
+gencode	6	-query_gencode 31	same		
+gencode	7	-query_gencode 31	same		
+gencode	0	-query_gencode 32	arg-error	Error: Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `32'	error: invalid value '32' for '-query_gencode <QUERY_GENCODE>': unsupported genetic code
+gencode	6	-query_gencode 32	arg-error	Error: Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `32'	error: invalid value '32' for '-query_gencode <QUERY_GENCODE>': unsupported genetic code
+gencode	7	-query_gencode 32	arg-error	Error: Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `32'	error: invalid value '32' for '-query_gencode <QUERY_GENCODE>': unsupported genetic code
+gencode	0	-query_gencode 33	same		
+gencode	6	-query_gencode 33	same		
+gencode	7	-query_gencode 33	same		
+gencode	0	-query_gencode 34	arg-error	Error: Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `34'	error: invalid value '34' for '-query_gencode <QUERY_GENCODE>': unsupported genetic code
+gencode	6	-query_gencode 34	arg-error	Error: Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `34'	error: invalid value '34' for '-query_gencode <QUERY_GENCODE>': unsupported genetic code
+gencode	7	-query_gencode 34	arg-error	Error: Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `34'	error: invalid value '34' for '-query_gencode <QUERY_GENCODE>': unsupported genetic code
+gencode	0	-query_gencode 0x2	arg-error	Error: Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `0x2'	error: invalid value '0x2' for '-query_gencode <QUERY_GENCODE>': invalid genetic code
+gencode	6	-query_gencode 0x2	arg-error	Error: Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `0x2'	error: invalid value '0x2' for '-query_gencode <QUERY_GENCODE>': invalid genetic code
+gencode	7	-query_gencode 0x2	arg-error	Error: Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `0x2'	error: invalid value '0x2' for '-query_gencode <QUERY_GENCODE>': invalid genetic code
+gencode	0	-query_gencode 02	same		
+gencode	6	-query_gencode 02	same		
+gencode	7	-query_gencode 02	same		
+gencode	0	-query_gencode +1	same		
+gencode	6	-query_gencode +1	same		
+gencode	7	-query_gencode +1	same		
+gencode	0	-query_gencode 1.0	arg-error	Error: Cannot convert string '1.0' to Int8 (m_Pos = 1)	error: invalid value '1.0' for '-query_gencode <QUERY_GENCODE>': invalid genetic code
+gencode	6	-query_gencode 1.0	arg-error	Error: Cannot convert string '1.0' to Int8 (m_Pos = 1)	error: invalid value '1.0' for '-query_gencode <QUERY_GENCODE>': invalid genetic code
+gencode	7	-query_gencode 1.0	arg-error	Error: Cannot convert string '1.0' to Int8 (m_Pos = 1)	error: invalid value '1.0' for '-query_gencode <QUERY_GENCODE>': invalid genetic code
+gencode	0	-query_gencode x	arg-error	Error: Cannot convert string 'x' to Int8 (m_Pos = 0)	error: invalid value 'x' for '-query_gencode <QUERY_GENCODE>': invalid genetic code
+gencode	6	-query_gencode x	arg-error	Error: Cannot convert string 'x' to Int8 (m_Pos = 0)	error: invalid value 'x' for '-query_gencode <QUERY_GENCODE>': invalid genetic code
+gencode	7	-query_gencode x	arg-error	Error: Cannot convert string 'x' to Int8 (m_Pos = 0)	error: invalid value 'x' for '-query_gencode <QUERY_GENCODE>': invalid genetic code
+gencode	0	-db_gencode 0	arg-error	Error: Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `0'	error: invalid value '0' for '-db_gencode <DB_GENCODE>': unsupported genetic code
+gencode	6	-db_gencode 0	arg-error	Error: Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `0'	error: invalid value '0' for '-db_gencode <DB_GENCODE>': unsupported genetic code
+gencode	7	-db_gencode 0	arg-error	Error: Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `0'	error: invalid value '0' for '-db_gencode <DB_GENCODE>': unsupported genetic code
+gencode	0	-db_gencode 1	same		
+gencode	6	-db_gencode 1	same		
+gencode	7	-db_gencode 1	same		
+gencode	0	-db_gencode 2	exception-gencode		
+gencode	6	-db_gencode 2	exception-gencode		
+gencode	7	-db_gencode 2	exception-gencode		
+gencode	0	-db_gencode 3	exception-gencode		
+gencode	6	-db_gencode 3	exception-gencode		
+gencode	7	-db_gencode 3	exception-gencode		
+gencode	0	-db_gencode 4	exception-gencode		
+gencode	6	-db_gencode 4	exception-gencode		
+gencode	7	-db_gencode 4	exception-gencode		
+gencode	0	-db_gencode 5	exception-gencode		
+gencode	6	-db_gencode 5	exception-gencode		
+gencode	7	-db_gencode 5	exception-gencode		
+gencode	0	-db_gencode 6	exception-gencode		
+gencode	6	-db_gencode 6	exception-gencode		
+gencode	7	-db_gencode 6	exception-gencode		
+gencode	0	-db_gencode 7	arg-error	Error: Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `7'	error: invalid value '7' for '-db_gencode <DB_GENCODE>': unsupported genetic code
+gencode	6	-db_gencode 7	arg-error	Error: Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `7'	error: invalid value '7' for '-db_gencode <DB_GENCODE>': unsupported genetic code
+gencode	7	-db_gencode 7	arg-error	Error: Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `7'	error: invalid value '7' for '-db_gencode <DB_GENCODE>': unsupported genetic code
+gencode	0	-db_gencode 8	arg-error	Error: Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `8'	error: invalid value '8' for '-db_gencode <DB_GENCODE>': unsupported genetic code
+gencode	6	-db_gencode 8	arg-error	Error: Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `8'	error: invalid value '8' for '-db_gencode <DB_GENCODE>': unsupported genetic code
+gencode	7	-db_gencode 8	arg-error	Error: Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `8'	error: invalid value '8' for '-db_gencode <DB_GENCODE>': unsupported genetic code
+gencode	0	-db_gencode 9	exception-gencode		
+gencode	6	-db_gencode 9	exception-gencode		
+gencode	7	-db_gencode 9	exception-gencode		
+gencode	0	-db_gencode 10	exception-gencode		
+gencode	6	-db_gencode 10	exception-gencode		
+gencode	7	-db_gencode 10	exception-gencode		
+gencode	0	-db_gencode 11	same		
+gencode	6	-db_gencode 11	same		
+gencode	7	-db_gencode 11	same		
+gencode	0	-db_gencode 12	exception-gencode		
+gencode	6	-db_gencode 12	exception-gencode		
+gencode	7	-db_gencode 12	exception-gencode		
+gencode	0	-db_gencode 13	exception-gencode		
+gencode	6	-db_gencode 13	exception-gencode		
+gencode	7	-db_gencode 13	exception-gencode		
+gencode	0	-db_gencode 14	exception-gencode		
+gencode	6	-db_gencode 14	exception-gencode		
+gencode	7	-db_gencode 14	exception-gencode		
+gencode	0	-db_gencode 15	exception-gencode		
+gencode	6	-db_gencode 15	exception-gencode		
+gencode	7	-db_gencode 15	exception-gencode		
+gencode	0	-db_gencode 16	exception-gencode		
+gencode	6	-db_gencode 16	exception-gencode		
+gencode	7	-db_gencode 16	exception-gencode		
+gencode	0	-db_gencode 17	arg-error	Error: Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `17'	error: invalid value '17' for '-db_gencode <DB_GENCODE>': unsupported genetic code
+gencode	6	-db_gencode 17	arg-error	Error: Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `17'	error: invalid value '17' for '-db_gencode <DB_GENCODE>': unsupported genetic code
+gencode	7	-db_gencode 17	arg-error	Error: Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `17'	error: invalid value '17' for '-db_gencode <DB_GENCODE>': unsupported genetic code
+gencode	0	-db_gencode 18	arg-error	Error: Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `18'	error: invalid value '18' for '-db_gencode <DB_GENCODE>': unsupported genetic code
+gencode	6	-db_gencode 18	arg-error	Error: Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `18'	error: invalid value '18' for '-db_gencode <DB_GENCODE>': unsupported genetic code
+gencode	7	-db_gencode 18	arg-error	Error: Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `18'	error: invalid value '18' for '-db_gencode <DB_GENCODE>': unsupported genetic code
+gencode	0	-db_gencode 19	arg-error	Error: Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `19'	error: invalid value '19' for '-db_gencode <DB_GENCODE>': unsupported genetic code
+gencode	6	-db_gencode 19	arg-error	Error: Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `19'	error: invalid value '19' for '-db_gencode <DB_GENCODE>': unsupported genetic code
+gencode	7	-db_gencode 19	arg-error	Error: Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `19'	error: invalid value '19' for '-db_gencode <DB_GENCODE>': unsupported genetic code
+gencode	0	-db_gencode 20	arg-error	Error: Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `20'	error: invalid value '20' for '-db_gencode <DB_GENCODE>': unsupported genetic code
+gencode	6	-db_gencode 20	arg-error	Error: Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `20'	error: invalid value '20' for '-db_gencode <DB_GENCODE>': unsupported genetic code
+gencode	7	-db_gencode 20	arg-error	Error: Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `20'	error: invalid value '20' for '-db_gencode <DB_GENCODE>': unsupported genetic code
+gencode	0	-db_gencode 21	exception-gencode		
+gencode	6	-db_gencode 21	exception-gencode		
+gencode	7	-db_gencode 21	exception-gencode		
+gencode	0	-db_gencode 22	exception-gencode		
+gencode	6	-db_gencode 22	exception-gencode		
+gencode	7	-db_gencode 22	exception-gencode		
+gencode	0	-db_gencode 23	exception-gencode		
+gencode	6	-db_gencode 23	exception-gencode		
+gencode	7	-db_gencode 23	exception-gencode		
+gencode	0	-db_gencode 24	exception-gencode		
+gencode	6	-db_gencode 24	exception-gencode		
+gencode	7	-db_gencode 24	exception-gencode		
+gencode	0	-db_gencode 25	exception-gencode		
+gencode	6	-db_gencode 25	exception-gencode		
+gencode	7	-db_gencode 25	exception-gencode		
+gencode	0	-db_gencode 26	exception-gencode		
+gencode	6	-db_gencode 26	exception-gencode		
+gencode	7	-db_gencode 26	exception-gencode		
+gencode	0	-db_gencode 27	exception-gencode		
+gencode	6	-db_gencode 27	exception-gencode		
+gencode	7	-db_gencode 27	exception-gencode		
+gencode	0	-db_gencode 28	exception-gencode		
+gencode	6	-db_gencode 28	exception-gencode		
+gencode	7	-db_gencode 28	exception-gencode		
+gencode	0	-db_gencode 29	exception-gencode		
+gencode	6	-db_gencode 29	exception-gencode		
+gencode	7	-db_gencode 29	exception-gencode		
+gencode	0	-db_gencode 30	exception-gencode		
+gencode	6	-db_gencode 30	exception-gencode		
+gencode	7	-db_gencode 30	exception-gencode		
+gencode	0	-db_gencode 31	exception-gencode		
+gencode	6	-db_gencode 31	exception-gencode		
+gencode	7	-db_gencode 31	exception-gencode		
+gencode	0	-db_gencode 32	arg-error	Error: Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `32'	error: invalid value '32' for '-db_gencode <DB_GENCODE>': unsupported genetic code
+gencode	6	-db_gencode 32	arg-error	Error: Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `32'	error: invalid value '32' for '-db_gencode <DB_GENCODE>': unsupported genetic code
+gencode	7	-db_gencode 32	arg-error	Error: Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `32'	error: invalid value '32' for '-db_gencode <DB_GENCODE>': unsupported genetic code
+gencode	0	-db_gencode 33	exception-gencode		
+gencode	6	-db_gencode 33	exception-gencode		
+gencode	7	-db_gencode 33	exception-gencode		
+gencode	0	-db_gencode 34	arg-error	Error: Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `34'	error: invalid value '34' for '-db_gencode <DB_GENCODE>': unsupported genetic code
+gencode	6	-db_gencode 34	arg-error	Error: Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `34'	error: invalid value '34' for '-db_gencode <DB_GENCODE>': unsupported genetic code
+gencode	7	-db_gencode 34	arg-error	Error: Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `34'	error: invalid value '34' for '-db_gencode <DB_GENCODE>': unsupported genetic code
+gencode	0	-db_gencode 0x2	arg-error	Error: Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `0x2'	error: invalid value '0x2' for '-db_gencode <DB_GENCODE>': invalid genetic code
+gencode	6	-db_gencode 0x2	arg-error	Error: Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `0x2'	error: invalid value '0x2' for '-db_gencode <DB_GENCODE>': invalid genetic code
+gencode	7	-db_gencode 0x2	arg-error	Error: Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `0x2'	error: invalid value '0x2' for '-db_gencode <DB_GENCODE>': invalid genetic code
+gencode	0	-db_gencode 02	exception-gencode		
+gencode	6	-db_gencode 02	exception-gencode		
+gencode	7	-db_gencode 02	exception-gencode		
+gencode	0	-db_gencode +1	same		
+gencode	6	-db_gencode +1	same		
+gencode	7	-db_gencode +1	same		
+gencode	0	-db_gencode 1.0	arg-error	Error: Cannot convert string '1.0' to Int8 (m_Pos = 1)	error: invalid value '1.0' for '-db_gencode <DB_GENCODE>': invalid genetic code
+gencode	6	-db_gencode 1.0	arg-error	Error: Cannot convert string '1.0' to Int8 (m_Pos = 1)	error: invalid value '1.0' for '-db_gencode <DB_GENCODE>': invalid genetic code
+gencode	7	-db_gencode 1.0	arg-error	Error: Cannot convert string '1.0' to Int8 (m_Pos = 1)	error: invalid value '1.0' for '-db_gencode <DB_GENCODE>': invalid genetic code
+gencode	0	-db_gencode x	arg-error	Error: Cannot convert string 'x' to Int8 (m_Pos = 0)	error: invalid value 'x' for '-db_gencode <DB_GENCODE>': invalid genetic code
+gencode	6	-db_gencode x	arg-error	Error: Cannot convert string 'x' to Int8 (m_Pos = 0)	error: invalid value 'x' for '-db_gencode <DB_GENCODE>': invalid genetic code
+gencode	7	-db_gencode x	arg-error	Error: Cannot convert string 'x' to Int8 (m_Pos = 0)	error: invalid value 'x' for '-db_gencode <DB_GENCODE>': invalid genetic code
+culling	0	-culling_limit 0	same		
+culling	6	-culling_limit 0	same		
+culling	7	-culling_limit 0	same		
+culling	0	-culling_limit 1	same		
+culling	6	-culling_limit 1	same		
+culling	7	-culling_limit 1	same		
+culling	0	-culling_limit 2	same		
+culling	6	-culling_limit 2	same		
+culling	7	-culling_limit 2	same		
+culling	0	-culling_limit 5	same		
+culling	6	-culling_limit 5	same		
+culling	7	-culling_limit 5	same		
+culling	0	-culling_limit -1	arg-error	Error: Argument "culling_limit". Illegal value, expected >=0:  `-1'	error: invalid value '-1' for '-culling_limit <CULLING_LIMIT>': expected an integer >= 0
+culling	6	-culling_limit -1	arg-error	Error: Argument "culling_limit". Illegal value, expected >=0:  `-1'	error: invalid value '-1' for '-culling_limit <CULLING_LIMIT>': expected an integer >= 0
+culling	7	-culling_limit -1	arg-error	Error: Argument "culling_limit". Illegal value, expected >=0:  `-1'	error: invalid value '-1' for '-culling_limit <CULLING_LIMIT>': expected an integer >= 0
+culling	0	-culling_limit 0x1	same		
+culling	6	-culling_limit 0x1	same		
+culling	7	-culling_limit 0x1	same		
+culling	0	-culling_limit +1	same		
+culling	6	-culling_limit +1	same		
+culling	7	-culling_limit +1	same		
+other	0	-sum_stats false	losat-rejects	error: the NCBI BLAST+ option -sum_stats is not supported by LOSAT's TBLASTX	error: the NCBI BLAST+ option -sum_stats is not supported by LOSAT's TBLASTX
+other	6	-sum_stats false	losat-rejects	error: the NCBI BLAST+ option -sum_stats is not supported by LOSAT's TBLASTX	error: the NCBI BLAST+ option -sum_stats is not supported by LOSAT's TBLASTX
+other	7	-sum_stats false	losat-rejects	error: the NCBI BLAST+ option -sum_stats is not supported by LOSAT's TBLASTX	error: the NCBI BLAST+ option -sum_stats is not supported by LOSAT's TBLASTX
+other	0	-num_descriptions 5	losat-rejects	error: the NCBI BLAST+ option -num_descriptions is not supported by LOSAT's TBLASTX	error: the NCBI BLAST+ option -num_descriptions is not supported by LOSAT's TBLASTX
+other	6	-num_descriptions 5	losat-rejects	error: the NCBI BLAST+ option -num_descriptions is not supported by LOSAT's TBLASTX	error: the NCBI BLAST+ option -num_descriptions is not supported by LOSAT's TBLASTX
+other	7	-num_descriptions 5	losat-rejects	error: the NCBI BLAST+ option -num_descriptions is not supported by LOSAT's TBLASTX	error: the NCBI BLAST+ option -num_descriptions is not supported by LOSAT's TBLASTX
+other	0	-num_alignments 5	losat-rejects	error: the NCBI BLAST+ option -num_alignments is not supported by LOSAT's TBLASTX	error: the NCBI BLAST+ option -num_alignments is not supported by LOSAT's TBLASTX
+other	6	-num_alignments 5	losat-rejects	error: the NCBI BLAST+ option -num_alignments is not supported by LOSAT's TBLASTX	error: the NCBI BLAST+ option -num_alignments is not supported by LOSAT's TBLASTX
+other	7	-num_alignments 5	losat-rejects	error: the NCBI BLAST+ option -num_alignments is not supported by LOSAT's TBLASTX	error: the NCBI BLAST+ option -num_alignments is not supported by LOSAT's TBLASTX
+other	0	-line_length 60	losat-rejects	error: the NCBI BLAST+ option -line_length is not supported by LOSAT's TBLASTX	error: the NCBI BLAST+ option -line_length is not supported by LOSAT's TBLASTX
+other	6	-line_length 60	losat-rejects	error: the NCBI BLAST+ option -line_length is not supported by LOSAT's TBLASTX	error: the NCBI BLAST+ option -line_length is not supported by LOSAT's TBLASTX
+other	7	-line_length 60	losat-rejects	error: the NCBI BLAST+ option -line_length is not supported by LOSAT's TBLASTX	error: the NCBI BLAST+ option -line_length is not supported by LOSAT's TBLASTX
+other	0	-sorthits 1	losat-rejects	error: the NCBI BLAST+ option -sorthits is not supported by LOSAT's TBLASTX	error: the NCBI BLAST+ option -sorthits is not supported by LOSAT's TBLASTX
+other	6	-sorthits 1	losat-rejects	error: the NCBI BLAST+ option -sorthits is not supported by LOSAT's TBLASTX	error: the NCBI BLAST+ option -sorthits is not supported by LOSAT's TBLASTX
+other	7	-sorthits 1	losat-rejects	error: the NCBI BLAST+ option -sorthits is not supported by LOSAT's TBLASTX	error: the NCBI BLAST+ option -sorthits is not supported by LOSAT's TBLASTX
+other	0	-sorthsps 1	losat-rejects	error: the NCBI BLAST+ option -sorthsps is not supported by LOSAT's TBLASTX	error: the NCBI BLAST+ option -sorthsps is not supported by LOSAT's TBLASTX
+other	6	-sorthsps 1	losat-rejects	error: the NCBI BLAST+ option -sorthsps is not supported by LOSAT's TBLASTX	error: the NCBI BLAST+ option -sorthsps is not supported by LOSAT's TBLASTX
+other	7	-sorthsps 1	losat-rejects	error: the NCBI BLAST+ option -sorthsps is not supported by LOSAT's TBLASTX	error: the NCBI BLAST+ option -sorthsps is not supported by LOSAT's TBLASTX
+other	0	-lcase_masking	losat-rejects	error: the NCBI BLAST+ option -lcase_masking is not supported by LOSAT's TBLASTX	error: the NCBI BLAST+ option -lcase_masking is not supported by LOSAT's TBLASTX
+other	6	-lcase_masking	losat-rejects	error: the NCBI BLAST+ option -lcase_masking is not supported by LOSAT's TBLASTX	error: the NCBI BLAST+ option -lcase_masking is not supported by LOSAT's TBLASTX
+other	7	-lcase_masking	losat-rejects	error: the NCBI BLAST+ option -lcase_masking is not supported by LOSAT's TBLASTX	error: the NCBI BLAST+ option -lcase_masking is not supported by LOSAT's TBLASTX
+other	0	-strand plus	losat-rejects	error: the NCBI BLAST+ option -strand is not supported by LOSAT's TBLASTX	error: the NCBI BLAST+ option -strand is not supported by LOSAT's TBLASTX
+other	6	-strand plus	losat-rejects	error: the NCBI BLAST+ option -strand is not supported by LOSAT's TBLASTX	error: the NCBI BLAST+ option -strand is not supported by LOSAT's TBLASTX
+other	7	-strand plus	losat-rejects	error: the NCBI BLAST+ option -strand is not supported by LOSAT's TBLASTX	error: the NCBI BLAST+ option -strand is not supported by LOSAT's TBLASTX
+other	0	-qcov_hsp_perc 50	losat-rejects	error: the NCBI BLAST+ option -qcov_hsp_perc is not supported by LOSAT's TBLASTX	error: the NCBI BLAST+ option -qcov_hsp_perc is not supported by LOSAT's TBLASTX
+other	6	-qcov_hsp_perc 50	losat-rejects	error: the NCBI BLAST+ option -qcov_hsp_perc is not supported by LOSAT's TBLASTX	error: the NCBI BLAST+ option -qcov_hsp_perc is not supported by LOSAT's TBLASTX
+other	7	-qcov_hsp_perc 50	losat-rejects	error: the NCBI BLAST+ option -qcov_hsp_perc is not supported by LOSAT's TBLASTX	error: the NCBI BLAST+ option -qcov_hsp_perc is not supported by LOSAT's TBLASTX
+other	0	-xdrop_ungap 10	losat-rejects	error: the NCBI BLAST+ option -xdrop_ungap is not supported by LOSAT's TBLASTX	error: the NCBI BLAST+ option -xdrop_ungap is not supported by LOSAT's TBLASTX
+other	6	-xdrop_ungap 10	losat-rejects	error: the NCBI BLAST+ option -xdrop_ungap is not supported by LOSAT's TBLASTX	error: the NCBI BLAST+ option -xdrop_ungap is not supported by LOSAT's TBLASTX
+other	7	-xdrop_ungap 10	losat-rejects	error: the NCBI BLAST+ option -xdrop_ungap is not supported by LOSAT's TBLASTX	error: the NCBI BLAST+ option -xdrop_ungap is not supported by LOSAT's TBLASTX
+other	0	-searchsp 1000000	losat-rejects	error: the NCBI BLAST+ option -searchsp is not supported by LOSAT's TBLASTX	error: the NCBI BLAST+ option -searchsp is not supported by LOSAT's TBLASTX
+other	6	-searchsp 1000000	losat-rejects	error: the NCBI BLAST+ option -searchsp is not supported by LOSAT's TBLASTX	error: the NCBI BLAST+ option -searchsp is not supported by LOSAT's TBLASTX
+other	7	-searchsp 1000000	losat-rejects	error: the NCBI BLAST+ option -searchsp is not supported by LOSAT's TBLASTX	error: the NCBI BLAST+ option -searchsp is not supported by LOSAT's TBLASTX
+other	0	-dbsize 1000000	losat-rejects	error: the NCBI BLAST+ option -dbsize is not supported by LOSAT's TBLASTX	error: the NCBI BLAST+ option -dbsize is not supported by LOSAT's TBLASTX
+other	6	-dbsize 1000000	losat-rejects	error: the NCBI BLAST+ option -dbsize is not supported by LOSAT's TBLASTX	error: the NCBI BLAST+ option -dbsize is not supported by LOSAT's TBLASTX
+other	7	-dbsize 1000000	losat-rejects	error: the NCBI BLAST+ option -dbsize is not supported by LOSAT's TBLASTX	error: the NCBI BLAST+ option -dbsize is not supported by LOSAT's TBLASTX
+# program=tblastx cases=641 arg-error=123 exception-gencode=75 losat-rejects=90 same=270 same-error=83

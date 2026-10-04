@@ -1,0 +1,27 @@
+[
+  {
+    "engine": "serial",
+    "threads": 1,
+    "program": "tblastx",
+    "cases": [
+      "punct.tblastx"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "tests/fasta/outfmt0/tblastx_many_query.fasta",
+      "-subject",
+      "tests/fasta/outfmt0/punct_hits_subject.fna"
+    ],
+    "formats": {
+      "0": "99957e6a0163a3db08572e8138318a0101039438a408aaf79e7431967e729d18",
+      "6": "732c29d363035341cc1b98b906073bf59d0506d5d4c73a276a10df4a1a6d6833",
+      "7": "c9e39741c87eef3b9f4ca0c434399667e12aef8bf1acc930e3aa10c6fa7801ad"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 12
+  }
+]

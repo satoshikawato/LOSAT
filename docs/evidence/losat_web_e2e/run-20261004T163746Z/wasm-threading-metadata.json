@@ -1,0 +1,77 @@
+{
+  "head": "3bc4d34540340b18364ee0f31a7c98122aeafe58",
+  "node": "{\"node\":\"26.8.2\",\"acorn\":\"8.18.0\",\"ada\":\"4.0.0\",\"amaro\":\"1.1.11\",\"ares\":\"1.34.8\",\"brotli\":\"1.2.0\",\"cldr\":\"48.0\",\"icu\":\"78.3\",\"libffi\":\"3.8.0\",\"lief\":\"0.17.0\",\"llhttp\":\"9.4.3\",\"merve\":\"1.2.2\",\"modules\":\"147\",\"napi\":\"10\",\"nbytes\":\"0.1.4\",\"ncrypto\":\"0.0.1\",\"nghttp2\":\"1.70.0\",\"nghttp3\":\"\",\"ngtcp2\":\"\",\"openssl\":\"3.5.8\",\"simdjson\":\"4.6.9\",\"simdutf\":\"7.7.0\",\"sqlite\":\"3.53.4\",\"tz\":\"2026c\",\"undici\":\"8.10.2\",\"unicode\":\"17.0\",\"uv\":\"1.52.1\",\"uvwasi\":\"0.0.23\",\"v8\":\"14.6.202.34-node.28\",\"zlib\":\"1.3.2.1-motley-5eb4d7e\",\"zstd\":\"1.5.7\"}",
+  "rust": "rustc 1.92.0 (ded5c06cf 2025-12-08)\nbinary: rustc\ncommit-hash: ded5c06cf21d2b93bffd5d884aa6e96934ee4234\ncommit-date: 2025-12-08\nhost: x86_64-unknown-linux-gnu\nrelease: 1.92.0\nLLVM version: 21.1.3\n",
+  "platform": "Linux-5.15.167.4-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+  "artifacts": {
+    "native": {
+      "path": "/home/kawato/.cache/losat-web-gui-target/s08pb2-gate-native/release/LOSAT",
+      "sha256": "6f0705759a9178c93505d4d5e159fff36e4a4774aba777fdfecef3485210bf91"
+    },
+    "native_serial": {
+      "path": "/home/kawato/.cache/losat-web-gui-target/s08pb2-gate-native-serial/release/LOSAT",
+      "sha256": "e8a2e0a81487a8f53ed716e9786cffd63af2e4d5f15d5307d57e9270e3e74659"
+    },
+    "serial": {
+      "path": "/home/kawato/.cache/losat-web-gui-target/s08pb2-gate-wasi-artifacts/losat-serial-command.wasm",
+      "sha256": "bae6fe277df5da51e23a6041b200bd7975d322c0846667dbf3e8a6d02ed99555"
+    },
+    "threaded": {
+      "path": "/home/kawato/.cache/losat-web-gui-target/s08pb2-gate-wasi-artifacts/losat-threaded-command.wasm",
+      "sha256": "222b69363adb73bcb6deeee9d6c0ca05c8769af3a0378e1c92a7921131316078"
+    },
+    "reactor": {
+      "path": "/home/kawato/.cache/losat-web-gui-target/s08pb2-gate-wasi-artifacts/losat-threaded-reactor.wasm",
+      "sha256": "e466be2760407e8da02d20ebcba406b3902d6556fb044ece20c0ff6767204d72"
+    },
+    "serial_reactor": {
+      "path": "/home/kawato/.cache/losat-web-gui-target/s08pb2-gate-wasi-artifacts/losat-serial-reactor.wasm",
+      "sha256": "2492917a917756c42453e5fda4d74d0901f764bfd145db5802cb0a73fd642584"
+    }
+  },
+  "fixtures": {
+    "nuc1": "6eb80dbc12192e998005cc59b63c8b5dc79242a3b1a3eebc467c8754328c78cc",
+    "nuc3": "eb57857f7213b30358558db8e8442401df0e76eb1f4f0cbe805e418b70e8fbd8",
+    "aa1": "1eaf2543ffffea1b2aedd85b2d369598bc20b8143c37ec344631109b67d01dfc",
+    "aa3": "850b755b9d2aab1be56518057b2fef6f52c9c6f022dfa91b93267a1f2917d2cd",
+    "unequal": "9754c108d5b93b0d1cea3a70758a4d255c20edcb7d5945aec4e1492181291c8a",
+    "remainder": "85fd9af09915a7fc691901fb9cc364644be61a4b4fb6e7e824711deed7fbe2b8",
+    "short-context": "c6e14bcabd7c20725e27d84cea1a7b530b01dda3795b2ca9d9323539f5598935",
+    "short-subject": "4ed6014f5ed91940dfb3c468c4122324450b52831f17bcd1aa9042296d56d36a",
+    "aa-query-edge": "a35e2a5cd549f32eec667ff73080d6d3c6683fb430e18926ef0d382f8be8bd77",
+    "aa-subject-edge": "116fefa8375f7a55cde3c1ec407158b71e7624d3ed09537d299a03b3bca8c5bd",
+    "blastx-query": "85ade77ca4f637f3262c5c1b43122fe91ae6abf7f0943044551b3bbfe8507c3d"
+  },
+  "runners": {
+    "benchmark_wasi_reuse.js": "8e02902c54c6b6aa24776ff0c745c5b8c43d227379a86c33d4ec0ac25ef2a2ae",
+    "check_wasi_api_limits.js": "34c3e1da1ced0aaf468baef2832fdbeb2cf93a1d027fbcf88d8a7dbd9d015a2c",
+    "check_wasi_fault.js": "5d73bddf74955394ddc254692e0565b62eb0667407224bee43dce6a050ac9ba9",
+    "check_wasi_reactor.js": "78c887ab797c3a2d5dc30ea55dffdc1b623a51f407fe41f5361aaea55423649c",
+    "run_losat_wasi.js": "32fcfa9b98a04d42649da26ed5852287e0d041330b3da39ba3b8eb4165c6f2db",
+    "run_losat_wasi_threads.js": "faf39e6c83178530c3b21d49ee0929d67e6b9258061cc50c057876617c759c4b",
+    "run_wasm_performance_warm.js": "d86792c0bbaee8458c71535f06db7210e8b1a6549a55767a2512e2af577e47f3",
+    "test_benchmark_wasi_reuse.js": "d381d567824ca86d576e61e63e119a0b8f3cde85d52404f67e4a52307c75373e",
+    "test_wasi_runners.js": "ada5b00fbd89b7cd4c58256b3b7e2d7f54de863c55ba7abd649950c1ce8a2ce3",
+    "test_wasi_shared_memory.js": "54924dc5fc8e3acac3588f675b8871a7725c4504f5e5ed6a6f50cff7da80ac9d",
+    "wasi_artifact.js": "5f8dab1a7500c4e7a1f856e16b7edf125ce28dbf89b9ad711590c5ffcbe017b5",
+    "wasi_shared_memory.js": "a11fad8fdd346b3a93edd35f783552d97cd5c5ccb08c491e732a6b8dae552e50",
+    "wasi_thread_host.js": "5009c6449cbbb45ea381f3d0deb7b27cac4e198b1b8ea67e8cb4ee991b07c252"
+  },
+  "oracles": {
+    "blastn": {
+      "path": "/home/kawato/micromamba/bin/blastn",
+      "sha256": "0b88d4a00cb7fa579c203653151175b24c83d27fe240d420abe7b5261a3083d1",
+      "version": "blastn: 2.17.0+\n Package: blast 2.17.0, build Aug 11 2025 09:46:06\n"
+    },
+    "blastp": {
+      "path": "/home/kawato/micromamba/bin/blastp",
+      "sha256": "fdcbaa25cfdee5359231ae178713d2c28272e694614b847c5b2b7407c3d8a08b",
+      "version": "blastp: 2.17.0+\n Package: blast 2.17.0, build Aug 11 2025 09:46:06\n"
+    },
+    "tblastx": {
+      "path": "/home/kawato/micromamba/bin/tblastx",
+      "sha256": "9b6121d254d2c634114ac91c0bf4faa252b93532b1142cfb3ade2336fb830873",
+      "version": "tblastx: 2.17.0+\n Package: blast 2.17.0, build Aug 11 2025 09:46:06\n"
+    }
+  }
+}

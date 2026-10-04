@@ -14,8 +14,11 @@ empty) with one set of options, in each requested output format, and is classifi
 - exception-gencode: a TBLASTN or TBLASTX search with a non-default `-db_gencode`
   (AGENTS.md's approved exceptions) whose output equals NCBI's search of the subject as a
   BLAST database (`makeblastdb`, then `-db`; NCBI applies `-db_gencode` there) outside
-  the database lines of the report; for TBLASTN's ID 32, which NCBI's CLI rejects, LOSAT
-  succeeds (`PD-TLOSAN-LOCAL-GENCODE-32`, checked by its own C++ API oracle);
+  the database lines of the report, or, for TBLASTN with `--api`, NCBI's local-subject
+  C++ API oracle at that code (gencode_api_check.py: the stdout of TLOSAN Stage E's
+  oracle at the CLI's query batches, calibrated for outfmt 0, and the stderr of NCBI's
+  CLI); for TBLASTN's ID 32, which NCBI's CLI rejects, LOSAT succeeds
+  (`PD-TLOSAN-LOCAL-GENCODE-32`, checked by its own C++ API oracle);
 - DIFF: anything else, with the first difference.
 
 The options of each program are grouped in sets (`--sets`, default all): matrices x gap
@@ -27,7 +30,7 @@ and the spellings of `-outfmt` (which carry their own format). Exits 1 when any 
 DIFF.
 
 Usage: option_sweep.py --program blastp|tblastn|tblastx --bin-dir DIR --losat LOSAT
-       [--ncbi-src C++DIR] [--outfmt 0,6,7] [--sets a,b] [--jobs N] [--work DIR]
+       [--ncbi-src C++DIR] [--outfmt 0,6,7] [--sets a,b] [--jobs N] [--work DIR] [--api ORACLE]
 """
 from __future__ import annotations
 
@@ -230,6 +233,11 @@ class Sweep:
             if (oracle.returncode == 0 and oracle.stderr == ours.stderr
                     and normalize_database_lines(oracle.stdout) == normalize_database_lines(ours.stdout)):
                 return "exception-gencode"
+            if program == "tblastn" and self.args.api and ncbi.returncode == 0 and ncbi.stderr == ours.stderr:
+                from gencode_api_check import api_output, ncbi_integer  # noqa: PLC0415
+                fmt = argv[argv.index("-outfmt") + 1]
+                if fmt in ("0", "6", "7") and api_output(self.args.api, argv, ncbi_integer(code), fmt) == ours.stdout:
+                    return "exception-gencode"
         if ncbi.returncode == 0 and ours.returncode == 0:
             return "DIFF " + ("stdout " + first_difference(ncbi.stdout, ours.stdout) if ncbi.stdout != ours.stdout
                               else "stderr " + first_difference(ncbi.stderr, ours.stderr))
@@ -249,6 +257,7 @@ def main() -> int:
     parser.add_argument("--jobs", type=int, default=8)
     parser.add_argument("--timeout", type=int, default=600)
     parser.add_argument("--work", type=Path, default=Path("/tmp/losat_e2e_option_sweep"))
+    parser.add_argument("--api", type=Path, help="TLOSAN Stage E's local-subject API oracle (TBLASTN gencodes)")
     parser.add_argument("--list", action="store_true", help="print the cases and exit")
     args = parser.parse_args()
     args.work = args.work.resolve()

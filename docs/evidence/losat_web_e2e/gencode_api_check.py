@@ -50,6 +50,17 @@ def ncbi_integer(spelling: str) -> int | None:
         return None
 
 
+def api_output(api: Path, argv: list[str], code: int, fmt: str) -> bytes:
+    """NCBI's local-subject API oracle's stdout for the query and subject of `argv` at
+    `code`, at the CLI's query batches (calibrated for outfmt 0)."""
+    query, subject = argv[argv.index("-query") + 1], argv[argv.index("-subject") + 1]
+    result = subprocess.run([sys.executable, str(BATCH_WRAPPER), str(api.resolve()), query, subject, str(code), fmt],
+                            cwd=ENGINE, capture_output=True, stdin=subprocess.DEVNULL)
+    if result.returncode:
+        raise RuntimeError(f"API oracle failed at code {code} outfmt {fmt}: {result.stderr.decode(errors='replace')}")
+    return calibrate_pairwise(result.stdout) if fmt == "0" else result.stdout
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--api", type=Path, required=True)
@@ -64,10 +75,7 @@ def main() -> int:
         return subprocess.run(argv, cwd=ENGINE, capture_output=True, stdin=subprocess.DEVNULL)
 
     def api(code: int, fmt: str) -> bytes:
-        result = run([sys.executable, str(BATCH_WRAPPER), str(args.api.resolve()), query, subject, str(code), fmt])
-        if result.returncode:
-            raise RuntimeError(f"API oracle failed at code {code} outfmt {fmt}: {result.stderr.decode(errors='replace')}")
-        return calibrate_pairwise(result.stdout) if fmt == "0" else result.stdout
+        return api_output(args.api, ["-query", query, "-subject", subject], code, fmt)
 
     for fmt in ("0", "6", "7"):
         cli = run([str(args.bin_dir / "tblastn"), *inputs, "-outfmt", fmt])

@@ -237,6 +237,57 @@ pub fn check_residues_of(records: &[fasta::Record], role: &str, program: &str) -
     })
 }
 
+/// Rejects the protein records whose deflines or residues NCBI reads differently: the
+/// deflines of `check_deflines_of`, and a residue that is not an ASCII letter or `*`
+/// (NCBI's protein reader removes the other bytes, with a warning for each line).
+///
+/// NCBI reference: c++/src/objtools/readers/fasta.cpp:966-979
+/// ```c
+///         case eCharType_HyphenToIgnoreAndWarn:
+///             bIgnorableHyphenSeen = true;
+///             break;
+///         case eCharType_Comment:
+///             // artificially advance pos to the end to break the pos loop
+///             pos = s_len;
+///             break;
+///         case eCharType_Bad:
+///             if( bad_pos_line_num < 0 ) {
+///                 bad_pos_line_num = LineNumber();
+///             }
+///             bad_pos_vec.push_back(pos);
+///             break;
+/// ```
+/// `role` is `query` or `subject`.
+pub fn check_protein_input_of(
+    bytes: &[u8],
+    records: &[fasta::Record],
+    role: &str,
+    program: &str,
+) -> Result<()> {
+    if is_blank(bytes) {
+        return Ok(());
+    }
+    check_deflines_of(bytes, role, program)?;
+    first_problem(records, |index, record| {
+        let position = record
+            .seq()
+            .iter()
+            .position(|&byte| !(byte.is_ascii_alphabetic() || byte == b'*'))?;
+        let byte = record.seq()[position];
+        let shown = if byte.is_ascii_graphic() {
+            format!("'{}'", byte as char)
+        } else {
+            format!("byte 0x{byte:02x}")
+        };
+        Some(format!(
+            "{role} record {} ({}) has the residue {shown} at position {}; NCBI BLAST+ removes such a character from a protein sequence, which is not supported by LOSAT's {program} (use letters and '*')",
+            index + 1,
+            record.id(),
+            position + 1
+        ))
+    })
+}
+
 /// Rejects a record without residues: NCBI reads it without a message and reports it when
 /// it sets up the search ("Sequence contains no data"), which LOSAT does not reproduce.
 /// `role` is `query` or `subject`.

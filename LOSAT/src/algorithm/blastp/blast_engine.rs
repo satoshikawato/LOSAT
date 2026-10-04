@@ -27,7 +27,7 @@ use crate::algorithm::tblastx::constants::{
     GAP_TRIGGER_BIT_SCORE, X_DROP_GAPPED_FINAL, X_DROP_GAPPED_PRELIM, X_DROP_UNGAPPED_BITS,
 };
 use crate::algorithm::tblastx::lookup::compressed::{
-    build_blosum62_compressed_lookup, BlastCompressedAaLookupTable,
+    try_build_blosum62_compressed_lookup, BlastCompressedAaLookupTable,
 };
 use crate::algorithm::tblastx::lookup::prepare_blosum62_lookup_query_for_word_size;
 use crate::algorithm::tblastx::lookup::{build_ncbi_lookup, BlastAaLookupTable, QueryContext};
@@ -723,15 +723,6 @@ fn prepare_blastp_subjects_preserving_order(
 // }
 // ```
 const NCBI_BLASTP_VERSION: &str = "2.17.0+";
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:2258-2266
-// ```c
-// m_Outfile << "\n\nMatrix: " << options.GetMatrixName() << "\n";
-// ```
-//
-// Current pure-Rust blastp runtime support is restricted to the default
-// BLOSUM62 path by `validate_requested_blastp_support`, so the NCBI matrix
-// footer text is always `BLOSUM62`.
-const BLASTP_DEFAULT_MATRIX_NAME: &str = "BLOSUM62";
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3698-3699
 // ```c
 // const double kRestrictedMult = 0.68;/* fraction of the ordinary cutoff score
@@ -1908,70 +1899,54 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
     // ```c
     // arg_desc.AddFlag(kArgUngapped, "Perform ungapped alignment only?", true);
     // ```
+    // LOSAT's limits, checked where NCBI starts the search: the options that NCBI runs and
+    // LOSAT's BLASTP does not implement.
     if args.ungapped {
-        bail!(
-            "unsupported pure-Rust blastp -ungapped: ungapped-only blastp search is not yet ported"
-        );
+        bail!("-ungapped (an ungapped search) is not supported by LOSAT's BLASTP");
     }
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:113
     // ```c
     // const string kArgUseSWTraceback(\"use_sw_tback\");
     // ```
     if args.use_sw_tback {
-        bail!(
-            "unsupported pure-Rust blastp -use_sw_tback: Smith-Waterman traceback is not yet ported"
-        );
+        bail!("-use_sw_tback (the Smith-Waterman traceback) is not supported by LOSAT's BLASTP");
     }
     if args.word_size != 3
         && !(args.lookup_table_type == BlastpLookupTableType::CompressedAaLookupTable
             && args.word_size == 5)
     {
         bail!(
-            "unsupported pure-Rust blastp word_size={}: only standard word_size 3 and NCBI compressed word_size 5 are currently comparison-gated",
-            args.word_size
+            "-word_size {} ({} lookup table) is not supported by LOSAT's BLASTP",
+            args.word_size,
+            if args.lookup_table_type == BlastpLookupTableType::CompressedAaLookupTable {
+                "the compressed"
+            } else {
+                "the"
+            }
         );
     }
-    if args.scoring.matrix != ScoringMatrix::Blosum62
+    if !args.matrix_name.eq_ignore_ascii_case("BLOSUM62")
         || args.scoring.gap_open != 11
         || args.scoring.gap_extend != 1
     {
         bail!(
-            "unsupported pure-Rust blastp scoring {:?} with gap penalties {}/{}: matrix-aware protein gap alignment is not yet ported; only BLOSUM62 with gap open 11 and gap extend 1 is currently supported",
-            args.scoring.matrix,
+            "the matrix {} with gap costs {}/{} is not supported by LOSAT's BLASTP",
+            args.matrix_name,
             args.scoring.gap_open,
             args.scoring.gap_extend
         );
     }
     // NCBI api/blast_advprot_options.cpp:57:
     // m_Opts->SetCompositionBasedStats(eCompositionMatrixAdjust);
-    if args.comp_based_stats.mode != BlastpCompositionMode::CompositionMatrixAdjust
-        || args.comp_based_stats.unified_p
-    {
+    if args.comp_based_stats.unified_p {
         bail!(
-            "unsupported pure-Rust blastp composition mode {:?}{}: only -comp_based_stats 2 is currently supported",
-            args.comp_based_stats.mode,
-            if args.comp_based_stats.unified_p {
-                " with unified P-values"
-            } else {
-                ""
-            }
+            "unified P-values (a 'u' after the -comp_based_stats mode) are not supported by LOSAT's BLASTP (NCBI BLAST+ 2.17.0 gives different reports for the same search)"
         );
     }
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_options.c:908-936
-    // ```c
-    // if ((status=Blast_KarlinBlkGappedLoadFromTables(NULL, options->gap_open,
-    //       options->gap_extend, options->matrix, std_matrix_only)) != 0)
-    // {
-    //     ...
-    //     return BLASTERR_OPTION_VALUE_INVALID;
-    // }
-    // ```
-    if !protein_scoring_supported(&args.scoring) {
+    if args.comp_based_stats.mode != BlastpCompositionMode::CompositionMatrixAdjust {
         bail!(
-            "blastp matrix {:?} gap penalties {}/{} are not present in the NCBI protein statistics tables used by LOSAT",
-            args.scoring.matrix,
-            args.scoring.gap_open,
-            args.scoring.gap_extend
+            "-comp_based_stats {} is not supported by LOSAT's BLASTP",
+            args.comp_based_stats.to_ncbi_cli_string()
         );
     }
     Ok(())
@@ -2148,74 +2123,134 @@ pub(crate) fn validate_cli_outfmt(spec: &str) -> Result<String, String> {
     Ok(spec.into())
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/format_flags.cpp:39-145
+// NCBI reference: c++/src/objtools/align_format/tabular.cpp:70-99
 // ```c
-// const char* kDfltArgTabularOutputFmtTag("std");
-// const SFormatSpec sc_FormatSpecifiers[] = {
-//     SFormatSpec("qseqid", ...),
-//     SFormatSpec("qaccver", ...),
-//     ...
-//     SFormatSpec("btop", ...),
-//     SFormatSpec("stitle", ...)
-// };
+// void CBlastTabularInfo::x_SetFieldsToShow(const string& format)
+// {
+// ...
+//     vector<string> format_tokens;
+//     NStr::Split(format, " ", format_tokens);
+//
+//     if (format_tokens.empty())
+//         x_AddDefaultFieldsToShow();
+//
+//     ITERATE (vector<string>, iter, format_tokens) {
+//         if (*iter == kDfltArgTabularOutputFmtTag)
+//             x_AddDefaultFieldsToShow();
+//         else if ((*iter)[0] == '-') {
+//             string field = (*iter).substr(1);
+//             if (m_FieldMap.count(field) > 0)
+//                 x_DeleteFieldToShow(m_FieldMap[field]);
+//         } else {
+//             if (m_FieldMap.count(*iter) > 0)
+//                 x_AddFieldToShow(m_FieldMap[*iter]);
+//         }
+//     }
+//
+//     if (m_FieldsToShow.empty()) {
+//         x_AddDefaultFieldsToShow();
+//     }
+// }
 // ```
+// NCBI reference: c++/src/objtools/align_format/tabular.cpp:1393-1408
+// ```c
+// CBlastTabularInfo::x_AddFieldToShow(ETabularField field)
+// {
+//     if ( !x_IsFieldRequested(field) ) {
+//         m_FieldsToShow.push_back(field);
+//     }
+// }
+// ...
+//     while ((iter = find(m_FieldsToShow.begin(), m_FieldsToShow.end(), field))
+//            != m_FieldsToShow.end())
+//         m_FieldsToShow.erase(iter);
+// ```
+// The tokens are split at single spaces and matched exactly; NCBI ignores a token that is
+// not a field name. A field that NCBI writes and LOSAT's BLASTP does not is rejected.
 fn parse_blastp_tabular_fields(spec: &str) -> Result<Vec<BlastpTabularField>> {
     let mut fields = Vec::new();
-
-    for token in spec.split_whitespace() {
-        let expanded = if token.eq_ignore_ascii_case("std") {
-            DEFAULT_BLASTP_TABULAR_FIELDS.to_vec()
-        } else {
-            vec![match token {
-                "qseqid" => BlastpTabularField::QuerySeqId,
-                // NCBI reference: c++/src/objtools/align_format/tabular.cpp:179-188,1132-1149
-                // eAccession uses GetLabel(...,0), eAccVersion uses fLabel_Version.
-                // Local FASTA IDs retain their spelling in both fields; fields remain distinct.
-                "qacc" => BlastpTabularField::QueryAccession,
-                "qaccver" => BlastpTabularField::QueryAccessionVersion,
-                "qlen" => BlastpTabularField::QueryLength,
-                "sseqid" => BlastpTabularField::SubjectSeqId,
-                "sacc" => BlastpTabularField::SubjectAccession,
-                "saccver" => BlastpTabularField::SubjectAccessionVersion,
-                "slen" => BlastpTabularField::SubjectLength,
-                "qstart" => BlastpTabularField::QueryStart,
-                "qend" => BlastpTabularField::QueryEnd,
-                "sstart" => BlastpTabularField::SubjectStart,
-                "send" => BlastpTabularField::SubjectEnd,
-                "qseq" => BlastpTabularField::QuerySeq,
-                "sseq" => BlastpTabularField::SubjectSeq,
-                "evalue" => BlastpTabularField::Evalue,
-                "bitscore" => BlastpTabularField::BitScore,
-                "score" => BlastpTabularField::Score,
-                "length" => BlastpTabularField::AlignmentLength,
-                "pident" => BlastpTabularField::PercentIdentical,
-                "nident" => BlastpTabularField::NumIdentical,
-                "mismatch" => BlastpTabularField::Mismatches,
-                "positive" => BlastpTabularField::Positives,
-                "gapopen" => BlastpTabularField::GapOpenings,
-                "gaps" => BlastpTabularField::Gaps,
-                "ppos" => BlastpTabularField::PercentPositives,
-                "qframe" => BlastpTabularField::QueryFrame,
-                "sframe" => BlastpTabularField::SubjectFrame,
-                "frames" => BlastpTabularField::Frames,
-                "btop" => BlastpTabularField::Btop,
-                "stitle" => BlastpTabularField::SubjectTitle,
-                other => bail!("unsupported blastp tabular field '{other}'"),
-            }]
-        };
-
-        for field in expanded {
+    for token in spec.split(' ') {
+        if token == "std" {
+            for field in DEFAULT_BLASTP_TABULAR_FIELDS {
+                if !fields.contains(&field) {
+                    fields.push(field);
+                }
+            }
+        } else if let Some(name) = token.strip_prefix('-') {
+            if let Some(field) = blastp_tabular_field(name)? {
+                fields.retain(|shown| *shown != field);
+            }
+        } else if let Some(field) = blastp_tabular_field(token)? {
             if !fields.contains(&field) {
                 fields.push(field);
             }
         }
     }
-
     if fields.is_empty() {
-        bail!("blastp custom tabular field list cannot be empty");
+        fields = DEFAULT_BLASTP_TABULAR_FIELDS.to_vec();
     }
-
     Ok(fields)
+}
+
+// NCBI reference: c++/src/objtools/align_format/format_flags.cpp:41-195
+// ```c
+// const char* kDfltArgTabularOutputFmtTag("std");
+//
+// const size_t kNumTabularOutputFormatSpecifiers = 50;
+// const SFormatSpec sc_FormatSpecifiers[kNumTabularOutputFormatSpecifiers] = {
+//     SFormatSpec("qseqid",
+//                 "Query Seq-id",
+//                 eQuerySeqId),
+// ...
+//     SFormatSpec("qcovus",
+//                 "Query Coverage Per Unique Subject (blastn only)",
+//                 eQueryCovUniqSubject),
+// };
+// ```
+/// The field of a field name: `None` for a name that is not one of NCBI's field names, an
+/// error for a field that NCBI writes and LOSAT's BLASTP does not.
+fn blastp_tabular_field(name: &str) -> Result<Option<BlastpTabularField>> {
+    Ok(Some(match name {
+        "qseqid" => BlastpTabularField::QuerySeqId,
+        // NCBI reference: c++/src/objtools/align_format/tabular.cpp:179-188,1132-1149
+        // eAccession uses GetLabel(...,0), eAccVersion uses fLabel_Version.
+        // Local FASTA IDs retain their spelling in both fields; fields remain distinct.
+        "qacc" => BlastpTabularField::QueryAccession,
+        "qaccver" => BlastpTabularField::QueryAccessionVersion,
+        "qlen" => BlastpTabularField::QueryLength,
+        "sseqid" => BlastpTabularField::SubjectSeqId,
+        "sacc" => BlastpTabularField::SubjectAccession,
+        "saccver" => BlastpTabularField::SubjectAccessionVersion,
+        "slen" => BlastpTabularField::SubjectLength,
+        "qstart" => BlastpTabularField::QueryStart,
+        "qend" => BlastpTabularField::QueryEnd,
+        "sstart" => BlastpTabularField::SubjectStart,
+        "send" => BlastpTabularField::SubjectEnd,
+        "qseq" => BlastpTabularField::QuerySeq,
+        "sseq" => BlastpTabularField::SubjectSeq,
+        "evalue" => BlastpTabularField::Evalue,
+        "bitscore" => BlastpTabularField::BitScore,
+        "score" => BlastpTabularField::Score,
+        "length" => BlastpTabularField::AlignmentLength,
+        "pident" => BlastpTabularField::PercentIdentical,
+        "nident" => BlastpTabularField::NumIdentical,
+        "mismatch" => BlastpTabularField::Mismatches,
+        "positive" => BlastpTabularField::Positives,
+        "gapopen" => BlastpTabularField::GapOpenings,
+        "gaps" => BlastpTabularField::Gaps,
+        "ppos" => BlastpTabularField::PercentPositives,
+        "qframe" => BlastpTabularField::QueryFrame,
+        "sframe" => BlastpTabularField::SubjectFrame,
+        "frames" => BlastpTabularField::Frames,
+        "btop" => BlastpTabularField::Btop,
+        "stitle" => BlastpTabularField::SubjectTitle,
+        "qgi" | "sallseqid" | "sgi" | "sallgi" | "sallacc" | "staxid" | "ssciname" | "scomname"
+        | "sblastname" | "sskingdom" | "staxids" | "sscinames" | "scomnames" | "sblastnames"
+        | "sskingdoms" | "salltitles" | "sstrand" | "qcovs" | "qcovhsp" | "qcovus" => {
+            bail!("the output field {name} is not supported by LOSAT's BLASTP")
+        }
+        _ => return Ok(None),
+    }))
 }
 
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/tabular.cpp:985-1027
@@ -2774,6 +2809,115 @@ fn query_nomask_sequence(ctx: &QueryContext) -> &[u8] {
 // ```c
 // status = BlastHSPStreamWrite(hsp_stream, &hsp_list);
 // ```
+// NCBI reference: c++/src/algo/blast/format/blast_format.cpp:1547-1556
+// ```c++
+//     TMaskedQueryRegions masklocs;
+//     results.GetMaskedQueryRegions(masklocs);
+// ...
+//     CDisplaySeqalign display(copy_aln_set, *m_Scope, &masklocs, NULL, m_MatrixName);
+// ```
+// NCBI reference: c++/src/algo/blast/api/blast_aux.cpp:936-951
+// ```c++
+//                 TSeqRange masked_range(loc->ssr->left, loc->ssr->right);
+//                 TSeqRange range(Map(kTarget, masked_range));
+//                 if (range.NotEmpty() && range != kTarget) {
+//                     int frame = BLAST_ContextToFrame(program, index);
+//     ...
+//                     CRef<CSeqLocInfo> seqloc_info
+//                         (new CSeqLocInfo(seqint, frame));
+// ```
+// NCBI reference: c++/src/objtools/align_format/showalign.cpp:4305-4318
+// ```c++
+//             if(interval.GetId().Match(m_AV->GetSeqId(i)) &&
+//                m_AV->GetSeqRange(i).IntersectingWith(loc_range)){
+//                 int actualAlnStart = 0, actualAlnStop = 0;
+//                 if(m_AV->IsPositiveStrand(i)){
+//                     actualAlnStart =
+//                         m_AV->GetAlnPosFromSeqPos(i,
+//                                                   interval.GetFrom(),
+//                                                           CAlnMap::eBackwards, true);
+//                     actualAlnStop =
+//                         m_AV->GetAlnPosFromSeqPos(i,
+//                                                   interval.GetTo(),
+//                                                   CAlnMap::eBackwards, true);
+// ```
+// NCBI reference: c++/src/objtools/align_format/showalign.cpp:2518-2521
+// ```c++
+//                     } else if (m_SeqLocChar==eLowerCase){
+//                         actualSeq[i-start]=tolower((unsigned char) actualSeq[i-start]);
+//                     }
+// ```
+/// The outfmt 0 copies of the hits whose query rows a SEG mask covers, with the masked
+/// columns in lowercase (`None` when no query is masked). A mask that covers the whole
+/// query is not shown; a mask position outside the aligned range is the first or last
+/// column (`GetAlnPosFromSeqPos` with `try_reverse_dir`).
+fn masked_query_rows(
+    hits: &[PairwiseHit],
+    query_frames: &[Vec<QueryFrame>],
+) -> Option<Vec<PairwiseHit>> {
+    let masks: Vec<Vec<(i32, i32)>> = query_frames
+        .iter()
+        .map(|frames| {
+            let Some(frame) = frames.first() else {
+                return Vec::new();
+            };
+            let ranges = frame
+                .seg_masks
+                .iter()
+                .map(|&(start, end)| (start as i32, end as i32 - 1))
+                .collect();
+            crate::algorithm::blastx::query_setup::combine_masks(ranges)
+                .into_iter()
+                .filter(|&(from, to)| from <= to && !(from == 0 && to == frame.aa_len as i32 - 1))
+                .collect()
+        })
+        .collect();
+    if masks.iter().all(Vec::is_empty) {
+        return None;
+    }
+    Some(
+        hits.iter()
+            .map(|hit| {
+                let mut hit = hit.clone();
+                let query_masks = &masks[hit.hit.q_idx as usize];
+                if let Some(row) = hit.query_seq.as_mut().filter(|_| !query_masks.is_empty()) {
+                    let mut bytes = std::mem::take(row).into_bytes();
+                    // The 0-based query position of each column that holds a residue.
+                    let first = hit.hit.q_start as i32 - 1;
+                    let last = hit.hit.q_end as i32 - 1;
+                    let mut columns = Vec::with_capacity(bytes.len());
+                    for (column, &residue) in bytes.iter().enumerate() {
+                        if residue != b'-' {
+                            columns.push(column);
+                        }
+                    }
+                    let width = bytes.len();
+                    let column_of = |position: i32| -> usize {
+                        if position < first {
+                            0
+                        } else if position > last {
+                            width - 1
+                        } else {
+                            columns[(position - first) as usize]
+                        }
+                    };
+                    for &(from, to) in query_masks {
+                        if to < first || from > last {
+                            continue;
+                        }
+                        let (start, stop) = (column_of(from), column_of(to));
+                        for residue in &mut bytes[start..=stop] {
+                            *residue = residue.to_ascii_lowercase();
+                        }
+                    }
+                    *row = String::from_utf8(bytes).expect("ASCII alignment row");
+                }
+                hit
+            })
+            .collect(),
+    )
+}
+
 fn build_pairwise_hits(
     hits: Vec<(Hit, u8)>,
     query_contexts: &[QueryContext],
@@ -4055,6 +4199,8 @@ pub fn run_web_pair_records(
 }
 
 pub fn run(args: BlastpArgs) -> Result<()> {
+    use crate::algorithm::blastn::input as fasta_input;
+    use crate::blastinput::app;
     // NCBI reference: ncbi-blast/c++/src/app/blast/blastp_app.cpp:128-133
     // ```c
     // if(RecoverSearchStrategy(args, m_CmdLineArgs)) {
@@ -4064,68 +4210,192 @@ pub fn run(args: BlastpArgs) -> Result<()> {
     // 	m_OptsHndl.Reset(&*m_CmdLineArgs->SetOptions(args));
     // }
     // ```
-    // NCBI reference: ncbi-blast/c++/src/app/blast/blastp_app.cpp:201-203
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3624-3627
     // ```c
-    // /*** Get the query sequence(s) ***/
-    // CRef<CQueryOptionsArgs> query_opts =
-    //     m_CmdLineArgs->GetQueryOptionsArgs();
-    // ```
-    // The options are resolved and checked before the inputs are read, as before;
-    // `run_local` repeats both steps, which is idempotent.
-    let resolved = args.clone().resolve()?;
-    validate_requested_blastp_support(&resolved)?;
-
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:518-543
-    // ```c
-    // for(TSeqPos index = 0; index < queries.Size(); index++) {
-    //     if (const CSeq_id* id = queries.GetSeqId(index)) {
-    //         const string kTitle = queries.GetTitle(index);
-    //         messages[index].SetQueryId(query_id);
+    //     if (GetExportSearchStrategyStream(args) ||
+    //            m_FormattingArgs->ArchiveFormatRequested(args)) {
+    //         locality = CBlastOptions::eBoth;
     //     }
-    // }
     // ```
-    let query_records: Vec<fasta::Record> = fasta::Reader::from_file(&resolved.query)
-        .with_context(|| format!("failed to open query FASTA {}", resolved.query.display()))?
-        .records()
-        .collect::<std::result::Result<Vec<_>, _>>()
-        .with_context(|| format!("failed to read query FASTA {}", resolved.query.display()))?;
-
-    let subject_records: Vec<fasta::Record> = fasta::Reader::from_file(&resolved.subject)
-        .with_context(|| {
-            format!(
-                "failed to open subject FASTA {}",
-                resolved.subject.display()
-            )
-        })?
-        .records()
-        .collect::<std::result::Result<Vec<_>, _>>()
-        .with_context(|| {
-            format!(
-                "failed to read subject FASTA {}",
-                resolved.subject.display()
-            )
-        })?;
-
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3441-3443
+    // `ArchiveFormatRequested` parses `-outfmt` (blast_args.cpp:2745-2748) before the
+    // option handlers run; a format that NCBI runs and LOSAT does not write is rejected
+    // there too, and the custom tabular fields are checked (LOSAT's own list).
+    let choice = app::parse_formatting_string(&args.outfmt)?;
+    let format = app::report_format(&choice, "BLASTP", false, args.out.as_deref(), true)?;
+    if format.is_some() {
+        validate_cli_outfmt(&choice.normalized()).map_err(anyhow::Error::msg)?;
+    }
+    // LOSAT's thread capability is checked before any input or output, as for BLASTN.
+    crate::utils::threading::validate_threads(args.num_threads)?;
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2553-2562
     // ```c
-    // arg_desc.AddDefaultKey(kArgOutput, "output_file",
-    //                "Output file name",
-    //                CArgDescriptions::eOutputFile, "-");
+    //         CRef<blast::CBlastQueryVector> subjects;
+    //         m_Scope = ReadSequencesToBlast(*subj_input_stream, IsProtein(),
+    //                                        subj_range, parse_deflines,
+    //                                        use_lcase_masks, subjects, m_IsMapper);
+    //         m_Subjects.Reset(new blast::CObjMgr_QueryFactory(*subjects));
+    //
+    //     } else if (!m_IsIgBlast){
+    //         // IgBlast permits use of germline database
+    //         NCBI_THROW(CInputException, eInvalidInput,
+    //            "Either a BLAST database or subject sequence(s) must be specified");
+    //     }
     // ```
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3478-3480
+    // The handler of the database arguments reads the subjects (an empty subject set
+    // fails there), before the query and the output are opened.
+    let Some(subject_path) = args.subject.as_deref() else {
+        return Err(app::missing_subject_error());
+    };
+    fasta_input::check_utf8_file_name(subject_path, "subject", "BLASTP")?;
+    let mut subject_file = fasta_input::open_input(subject_path, "subject", "BLASTP")?;
+    let subject_bytes = fasta_input::read_fasta_bytes(&mut subject_file, subject_path, "subject")?;
+    drop(subject_file);
+    let subjects = fasta_input::bio_records_of(&subject_bytes, subject_path, "subject", "BLASTP")?;
+    if subjects.is_empty() {
+        return Err(app::empty_subjects_error());
+    }
+    // NCBI reads these deflines and residues without an error; LOSAT rejects them where the
+    // search would start.
+    let subject_checks =
+        fasta_input::check_protein_input_of(&subject_bytes, &subjects, "subject", "BLASTP");
+    drop(subject_bytes);
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3456-3481
     // ```c
-    // else {
-    //     m_OutputStream = &args[kArgOutput].AsOutputFile();
-    // }
+    //     if (args.Exist(kArgQuery) && args[kArgQuery].HasValue() &&
+    //         m_InputStream == NULL) {
+    // ...
+    //         else {
+    //             m_InputStream = &args[kArgQuery].AsInputFile();
+    //         }
+    //     }
+    // ...
+    //     else {
+    //         m_OutputStream = &args[kArgOutput].AsOutputFile();
+    //     }
     // ```
-    let outfmt = args.outfmt.clone();
-    let sink = resolved
-        .out
-        .as_deref()
-        .map_or(OutputSink::Stdout, OutputSink::File);
+    // The query is opened and the output file created before the options are checked;
+    // `-` is standard input and standard output.
+    fasta_input::check_utf8_file_name(&args.query, "query", "BLASTP")?;
+    let query_file = fasta_input::open_input(&args.query, "query", "BLASTP")?;
+    if let Some(path) = args.out.as_deref() {
+        fasta_input::check_utf8_file_name(path, "out", "BLASTP")?;
+    }
+    let out_file = match args.out.as_deref().filter(|path| path.as_os_str() != "-") {
+        Some(path) => Some(std::io::BufWriter::new(
+            std::fs::File::create(path).map_err(|_| crate::cli::inaccessible("out", path))?,
+        )),
+        None => None,
+    };
+    let pairwise = format == Some(crate::blastinput::app::ReportFormat::Pairwise);
+    // LOSAT's reports read the format number and the custom fields that NCBI keeps.
+    let outfmt = choice.normalized();
     let mut stderr = std::io::stderr();
-    let mut outputs = ReportOutputs::single(&outfmt, sink, &mut stderr);
-    run_local(args, &query_records, &subject_records, "", "", &mut outputs)
+    let mut stream = crate::cli::ReportStream {
+        inner: match out_file {
+            Some(file) => Box::new(file) as Box<dyn std::io::Write + Send>,
+            None => crate::cli::report_standard_output(),
+        },
+        failed: false,
+    };
+    let result = {
+        let mut outputs =
+            ReportOutputs::single(&outfmt, OutputSink::Writer(&mut stream), &mut stderr);
+        search_cli(
+            args,
+            query_file,
+            &subjects,
+            subject_checks,
+            &mut outputs,
+            choice,
+        )
+    };
+    let flushed = std::io::Write::flush(&mut stream);
+    // NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.hpp:252-255
+    // ```c
+    //     catch (const std::ios::failure&) {                                      \
+    //         LOG_POST(Error << "BLAST failed to write output");                  \
+    //         exit_code = BLAST_OUTPUT_ERROR;                                     \
+    //     }                                                                       \
+    // ```
+    // The outfmt 0 formatter's stream throws when a write fails; for outfmt 6/7 NCBI aborts
+    // and LOSAT reports the error (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 3).
+    if stream.failed && pairwise {
+        return Err(crate::cli::NativeError {
+            exit: 6,
+            message: "BLAST failed to write output\n".to_string(),
+        }
+        .into());
+    }
+    result?;
+    flushed.context("failed to write the output")
+}
+
+/// The checks of the options alone, without the inputs (the `validate` of web ABI v2):
+/// NCBI's processing of the options (`BlastpArgs::check_options`) and LOSAT's limits.
+pub fn check_options(args: &BlastpArgs) -> Result<()> {
+    let resolved = args.resolve()?;
+    validate_requested_blastp_support(&resolved)
+}
+
+/// The part of `run` after the files are opened: NCBI's processing of the options,
+/// `Query is Empty!`, LOSAT's deferred checks of the inputs, LOSAT's limits and the search.
+fn search_cli(
+    args: BlastpArgs,
+    mut query_file: std::fs::File,
+    subjects: &[fasta::Record],
+    subject_checks: Result<()>,
+    outputs: &mut ReportOutputs<'_>,
+    choice: crate::blastinput::app::FormatChoice,
+) -> Result<()> {
+    use crate::algorithm::blastn::input as fasta_input;
+    let resolved = args.check_options(outputs.diagnostics)?;
+    // NCBI reference: ncbi-blast/c++/src/app/blast/blastp_app.cpp:211-214
+    // ```c
+    //         if(IsIStreamEmpty(m_CmdLineArgs->GetInputStream())){
+    //            	ERR_POST(Warning << "Query is Empty!");
+    //            	return BLAST_EXIT_SUCCESS;
+    //         }
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.cpp:856-860
+    // ```c
+    // 	char c;
+    // 	CNcbiStreampos orig_p = in.tellg();
+    // 	// Piped input
+    // 	if(orig_p < 0)
+    // 		return false;
+    // ```
+    // When the subjects were read from standard input too, `cin` has reached its end, so
+    // NCBI gets no position for the query either.
+    let seekable = !(args.query.as_os_str() == "-"
+        && args
+            .subject
+            .as_deref()
+            .is_some_and(|path| path.as_os_str() == "-"))
+        && std::io::Seek::stream_position(&mut query_file).is_ok();
+    let query_bytes = fasta_input::read_fasta_bytes(&mut query_file, &args.query, "query")?;
+    drop(query_file);
+    if fasta_input::is_blank(&query_bytes) {
+        if !seekable {
+            anyhow::bail!(
+                "an empty query from a stream without a position (such as a pipe) is not supported by LOSAT's BLASTP"
+            );
+        }
+        outputs
+            .diagnostics
+            .write_all(b"Warning: [blastp] Query is Empty!\n")?;
+        return Ok(());
+    }
+    // NCBI reference: ncbi-blast/c++/src/app/blast/blastp_app.cpp:250-253
+    // ```c
+    // 	if(UseXInclude(*fmt_args, args[kArgOutput].AsString())) {
+    // ```
+    crate::blastinput::app::xinclude_check(&choice)?;
+    subject_checks?;
+    let queries = fasta_input::bio_records_of(&query_bytes, &args.query, "query", "BLASTP")?;
+    fasta_input::check_protein_input_of(&query_bytes, &queries, "query", "BLASTP")?;
+    drop(query_bytes);
+    validate_requested_blastp_support(&resolved)?;
+    run_resolved_with_records(resolved, &queries, subjects, "", "", outputs)
 }
 
 // NCBI reference: ncbi-blast/c++/src/app/blast/blastp_app.cpp:195-295
@@ -4203,15 +4473,25 @@ pub fn run_local(
 // ```
 fn resolve_for_formats(
     args: &BlastpArgs,
-    outputs: &ReportOutputs<'_>,
+    outputs: &mut ReportOutputs<'_>,
 ) -> Result<ResolvedBlastpArgs> {
-    // Each format is parsed later, inside the search pool, as web ABI v1 always did; the
-    // CLI has already validated its single `-outfmt` while parsing the command line.
+    // Each format is checked as the CLI checks its single `-outfmt`; NCBI's warnings of the
+    // option handlers are written once, for the first format.
     let mut resolved_formats = Vec::with_capacity(outputs.formats.len());
-    for format in &outputs.formats {
+    for (index, format) in outputs.formats.iter().enumerate() {
         let mut requested = args.clone();
         requested.outfmt = format.outfmt.to_string();
-        resolved_formats.push(requested.resolve()?);
+        let choice = crate::blastinput::app::parse_formatting_string(&requested.outfmt)?;
+        if crate::blastinput::app::report_format(&choice, "BLASTP", false, None, true)?.is_none() {
+            crate::blastinput::app::formatting_handler_check(&choice, false)?;
+            crate::blastinput::app::xinclude_check(&choice)?;
+        }
+        validate_cli_outfmt(&choice.normalized()).map_err(anyhow::Error::msg)?;
+        resolved_formats.push(if index == 0 {
+            requested.check_options(&mut *outputs.diagnostics)?
+        } else {
+            requested.resolve()?
+        });
     }
     let search_options = |resolved: &ResolvedBlastpArgs| {
         let mut options = resolved.clone();
@@ -4254,6 +4534,13 @@ fn run_resolved_with_records(
     subject_label: &str,
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
+    check_blastp_environment(
+        &args,
+        query_records,
+        subject_records,
+        subject_label,
+        outputs,
+    )?;
     crate::utils::threading::with_search_pool(args.num_threads, "blastp", |pool| {
         run_resolved_in_pool(
             args,
@@ -4265,6 +4552,66 @@ fn run_resolved_with_records(
             pool,
         )
     })
+}
+
+// NCBI reference: ncbi-blast/c++/src/app/blast/blastp_app.cpp:215-219
+// ```c
+//         CBlastFastaInputSource fasta(m_CmdLineArgs->GetInputStream(), iconfig);
+//         CBlastInput input(&fasta, m_CmdLineArgs->GetQueryBatchSize());
+// ```
+// NCBI reference: ncbi-blast/c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
+// ```c
+// CObjMgr_QueryFactory::CObjMgr_QueryFactory(CBlastQueryVector & queries)
+//     : m_QueryVector(& queries)
+// {
+//     if (queries.Empty()) {
+//         NCBI_THROW(CBlastException, eInvalidArgument, "Empty CBlastQueryVector");
+//     }
+// ```
+/// The environment that NCBI's blastp reads around its search: the variables that LOSAT
+/// rejects (`BL2SEQ_LEGACY`, `OLD_FSC`, values that NCBI cannot convert), and a
+/// `BATCH_SIZE` of 0, with which the first query batch is empty and NCBI fails after the
+/// outfmt 0 prolog. Other batch sizes do not change a blastp report.
+fn check_blastp_environment(
+    args: &ResolvedBlastpArgs,
+    query_records: &[fasta::Record],
+    subject_records: &[fasta::Record],
+    subject_label: &str,
+    outputs: &mut ReportOutputs<'_>,
+) -> Result<()> {
+    use crate::blastinput::app;
+    app::check_unsupported_environment("BLASTP")?;
+    app::check_old_fsc("BLASTP")?;
+    app::check_query_split_environment("BLASTP", false)??;
+    if app::query_batch_size("BLASTP", 10000)? == 0 && !query_records.is_empty() {
+        let subject_input_label = if subject_label.is_empty() {
+            args.subject.display().to_string()
+        } else {
+            subject_label.to_string()
+        };
+        for format in outputs.formats.iter_mut() {
+            if app::parse_formatting_string(format.outfmt)?.number == 0 {
+                let mut writer = format.sink.open()?;
+                crate::report::pairwise::write_blastp_pairwise_prolog(
+                    &mut writer,
+                    NCBI_BLASTP_VERSION,
+                    &format!("User specified sequence set (Input: {subject_input_label})"),
+                    subject_records.len(),
+                    subject_records
+                        .iter()
+                        .map(|record| record.seq().len())
+                        .sum(),
+                )?;
+                writer.flush()?;
+            }
+        }
+        return Err(crate::cli::NativeError {
+            exit: 3,
+            message: "BLAST engine error: Empty CBlastQueryVector\n".to_string(),
+        }
+        .into());
+    }
+    Ok(())
 }
 
 // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
@@ -4450,9 +4797,14 @@ fn run_resolved_in_pool(
     // ```
     let (lookup, contexts) = match args.lookup_table_type {
         BlastpLookupTableType::AaLookupTable => {
+            // NCBI reference: c++/src/algo/blast/core/blast_aalookup.c:245
+            // ```c
+            //     lookup->threshold = (Int4)opt->threshold;
+            // ```
+            // The x86-64 conversion: `INT_MIN` for a threshold beyond `Int4` (every word).
             let (lookup, contexts) = build_ncbi_lookup(
                 &query_frames,
-                args.threshold as i32,
+                crate::core::blast_util::ncbi_int4_from_double(args.threshold),
                 &lookup_ideal_params,
                 false,
             );
@@ -4467,13 +4819,24 @@ fn run_resolved_in_pool(
             // ```
             let (query, locations, contexts) =
                 prepare_blosum62_lookup_query_for_word_size(&query_frames, args.word_size, false);
-            let lookup = build_blosum62_compressed_lookup(
+            // NCBI reference: c++/src/algo/blast/core/blast_aalookup.c:1292
+            // ```c
+            //     lookup->threshold = (Int4)(kMatrixScale * opt->threshold);
+            // ```
+            let lookup = try_build_blosum62_compressed_lookup(
                 args.word_size,
-                args.threshold,
+                crate::core::blast_util::ncbi_int4_from_double(100.0 * args.threshold),
                 &query,
                 &locations,
             )
-            .context("failed to build NCBI compressed amino-acid lookup table")?;
+            .context("failed to build NCBI compressed amino-acid lookup table")?
+            .map_err(|()| {
+                anyhow::anyhow!(
+                    "-threshold {} with the compressed lookup table of -word_size {} is not supported by LOSAT's BLASTP: its neighboring words fill NCBI BLAST+'s 1024 overflow banks, past which NCBI BLAST+ 2.17.0 writes and corrupts its heap",
+                    args.threshold,
+                    args.word_size
+                )
+            })?;
             (BlastpRuntimeLookup::Compressed(lookup), contexts)
         }
     };
@@ -6260,6 +6623,38 @@ fn run_resolved_in_pool(
             hit_list.prune_by_size(args.max_target_seqs);
         }
     }
+    // NCBI reference: c++/src/algo/blast/api/blast_seqalign.cpp:672-674
+    // ```c++
+    //     if (hsp->score == 0) {
+    //         return CRef<CSeq_align>();
+    //     }
+    // ```
+    // NCBI reference: c++/src/algo/blast/api/blast_seqalign.cpp:1484-1490
+    // ```c++
+    //             seqalign =
+    //                 s_BlastHSP2SeqAlign(program, hsp, query_id, subject_id,
+    //                                     query_length, subject_length);
+    //         }
+    //
+    //         if (seqalign.Empty()) continue;
+    // ```
+    // The reports are made from the Seq-aligns of the final hit lists: an HSP of score 0
+    // (kept by a very large -evalue) is in no report, and a subject with only such HSPs has
+    // none (the hit list was already cut to -max_target_seqs).
+    for hit_list in hit_lists.iter_mut().flatten() {
+        let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+        let mut kept: Vec<_> = hit_list
+            .hsplist_array
+            .drain(..count)
+            .filter_map(|mut hsp_list| {
+                hsp_list.hsps.retain(|hsp| hsp.raw_score != 0);
+                (!hsp_list.hsps.is_empty()).then_some(hsp_list)
+            })
+            .collect();
+        hit_list.hsplist_count = kept.len();
+        kept.append(&mut hit_list.hsplist_array);
+        hit_list.hsplist_array = kept;
+    }
 
     let query_header = query_headers.first().cloned();
     let subject_name_label = if subject_label.is_empty() {
@@ -6449,18 +6844,21 @@ fn run_resolved_in_pool(
                     ),
                     database_num_sequences: subject_records.len(),
                     database_total_letters: total_db_len,
-                    matrix_name: BLASTP_DEFAULT_MATRIX_NAME.to_string(),
+                    // NCBI blast_format.cpp:2266: options.GetMatrixName(), as typed.
+                    matrix_name: args.matrix_name.clone(),
                     gap_open: args.scoring.gap_open,
                     gap_extend: args.scoring.gap_extend,
-                    word_threshold: args.threshold as i32,
+                    word_threshold: args.threshold,
                     window_size: args.window_size as i32,
                     gapped_karlin: gapped_params,
                     gumbel: gapped_gumbel,
                 };
+                let pairwise_hits = pairwise_hits
+                    .as_ref()
+                    .expect("pairwise hits prepared for blastp outfmt 0");
+                let masked_hits = masked_query_rows(pairwise_hits, &query_frames);
                 write_blastp_pairwise_report(
-                    pairwise_hits
-                        .as_ref()
-                        .expect("pairwise hits prepared for blastp outfmt 0"),
+                    masked_hits.as_deref().unwrap_or(pairwise_hits),
                     &mut writer,
                     &pairwise_config,
                     &pairwise_queries,
@@ -6653,21 +7051,21 @@ mod tests {
     fn make_blastp_args() -> BlastpArgs {
         BlastpArgs {
             query: PathBuf::from("query.faa"),
-            subject: PathBuf::from("subject.faa"),
+            subject: Some(PathBuf::from("subject.faa")),
             task: "blastp".to_string(),
             evalue: None,
             threshold: None,
             word_size: None,
             num_threads: 1,
             out: None,
-            max_target_seqs: 500,
+            max_target_seqs: None,
             max_hsps_per_subject: None,
             ungapped: false,
             window_size: None,
             matrix: None,
             gap_open: None,
             gap_extend: None,
-            comp_based_stats: None,
+            comp_based_stats: "2".to_string(),
             seg: None,
             use_sw_tback: false,
             outfmt: "6".to_string(),
@@ -7634,7 +8032,7 @@ mod tests {
         args.word_size = Some(6);
         let resolved = args.resolve().expect("resolved blastp args");
         let err = validate_requested_blastp_support(&resolved).expect_err("unsupported word size");
-        assert!(err.to_string().contains("comparison-gated"));
+        assert!(err.to_string().contains("not supported by LOSAT's BLASTP"));
     }
 
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3036-3062
@@ -7645,13 +8043,10 @@ mod tests {
     #[test]
     fn test_validate_requested_blastp_support_rejects_unified_p_mode() {
         let mut args = make_blastp_args();
-        args.comp_based_stats = Some(BlastpCompBasedStats {
-            mode: BlastpCompositionMode::CompositionMatrixAdjust,
-            unified_p: true,
-        });
+        args.comp_based_stats = "2u".to_string();
         let resolved = args.resolve().expect("resolved blastp args");
         let err = validate_requested_blastp_support(&resolved).expect_err("unsupported unified p");
-        assert!(err.to_string().contains("only -comp_based_stats 2"));
+        assert!(err.to_string().contains("not supported by LOSAT's BLASTP"));
     }
 
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4209-4319
@@ -7665,12 +8060,10 @@ mod tests {
         args.matrix = Some("PAM70".to_string());
         args.gap_open = Some(10);
         args.gap_extend = Some(1);
-        args.seg = Some(BlastpSegSpec::No);
+        args.seg = Some("no".to_string());
         let resolved = args.resolve().expect("resolved blastp args");
         let err = validate_requested_blastp_support(&resolved).expect_err("unsupported scoring");
-        assert!(err
-            .to_string()
-            .contains("matrix-aware protein gap alignment"));
+        assert!(err.to_string().contains("not supported by LOSAT's BLASTP"));
     }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:2387-2415
@@ -7791,15 +8184,21 @@ mod tests {
     //     BLAST_OneSubjectUpdateParameters(..., seq_arg.seq->length, ...);
     // }
     // ```
+    // NCBI api/seqsrc_multiseq.cpp:226-240: the shortest record, raised to
+    // BLAST_SEQSRC_MINLENGTH (10).
     #[test]
     fn test_blastp_preliminary_cutoff_subject_length_uses_global_min_subject_len() {
         let subjects = vec![
+            encode_protein_sequence(b"AAAAAAAAAAAAAAA"),
+            encode_protein_sequence(b"AAAAAAAAAAAA"),
+            encode_protein_sequence(b"AAAAAAAAAAAAAAAAAAAAAAAAA"),
+        ];
+        assert_eq!(blastp_preliminary_cutoff_subject_length(&subjects), 12);
+        let short = vec![
             encode_protein_sequence(b"AAAAAA"),
             encode_protein_sequence(b"AAA"),
-            encode_protein_sequence(b"AAAAAAAAAA"),
         ];
-
-        assert_eq!(blastp_preliminary_cutoff_subject_length(&subjects), 3);
+        assert_eq!(blastp_preliminary_cutoff_subject_length(&short), 10);
     }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:555

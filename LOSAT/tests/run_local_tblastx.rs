@@ -490,10 +490,9 @@ fn outfmt0_titles_that_ncbi_reads_past_or_decodes() {
 
 // NCBI reference: c++/src/objtools/readers/fasta.cpp:919-935 (CFastaReader: a residue that is
 // not an IUPAC nucleotide letter is removed with a warning) and the "Sequence contains no
-// data" warning of a record without residues; LOSAT rejects both, as BLASTN does. NCBI culls
-// with hspfilter_culling.c, which LOSAT's culling does not reproduce.
+// data" warning of a record without residues; LOSAT rejects both, as BLASTN does.
 #[test]
-fn inputs_ncbi_reads_differently_and_culling_are_rejected() {
+fn inputs_ncbi_reads_differently_are_rejected() {
     let inputs = Inputs::new();
     let queries = read_records(&inputs.query.0);
     let subjects = read_records(&inputs.subject.0);
@@ -524,11 +523,6 @@ fn inputs_ncbi_reads_differently_and_culling_are_rejected() {
     assert!(
         error.contains("subject record 1 (empty) has no residues")
             && error.contains("LOSAT's TBLASTX"),
-        "{error}"
-    );
-    let error = run(&["-culling_limit", "2"], &queries, &subjects);
-    assert!(
-        error.contains("-culling_limit 2 is not supported by LOSAT's TBLASTX"),
         "{error}"
     );
     // NCBI's check of the hit saving options (blast_options.c:1518-1523), before

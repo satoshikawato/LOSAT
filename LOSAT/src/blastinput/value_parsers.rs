@@ -230,12 +230,40 @@ pub fn ncbi_integer(value: &str) -> Result<i32, String> {
 ///         }
 /// ```
 pub fn ncbi_double(value: &str, program: &str) -> Result<f64, String> {
+    ncbi_string_to_double(value).map_err(|error| match error {
+        NcbiDoubleError::Invalid => "expected a number".into(),
+        NcbiDoubleError::Unsupported => format!("expected a decimal number (other forms, which NCBI BLAST+ may read, are not supported by LOSAT's {program})"),
+    })
+}
+
+/// Why `ncbi_string_to_double` does not read a value: NCBI's conversion error (the first
+/// character is not a digit, a point or a sign), or a form that LOSAT does not read
+/// (hexadecimal numbers, an exponent mark without digits).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NcbiDoubleError {
+    Invalid,
+    Unsupported,
+}
+
+/// `NStr::StringToDouble(value, fDecimalPosixOrLocal)` for the forms that LOSAT reads (see
+/// `ncbi_double`).
+///
+/// NCBI reference: c++/src/corelib/ncbistr.cpp:1313-1318
+/// ```c
+///     // Because strtod() may just skip such symbols.
+///     if (!(flags & NStr::fAllowLeadingSymbols)) {
+///         char c = str[pos];
+///         if ( !isdigit((unsigned char)c)  &&  !s_IsDecimalPoint(c,flags)  &&  c != '-'  &&  c != '+') {
+///             S2N_CONVERT_ERROR_INVAL(double);
+///         }
+/// ```
+pub fn ncbi_string_to_double(value: &str) -> Result<f64, NcbiDoubleError> {
     if !value
         .chars()
         .next()
         .is_some_and(|first| first.is_ascii_digit() || matches!(first, '.' | '-' | '+'))
     {
-        return Err("expected a number".into());
+        return Err(NcbiDoubleError::Invalid);
     }
     // glibc's strtod reads `nan(...)` as NaN; NCBI then checks that it ended at the end of
     // the string (ncbistr.cpp:1332-1376).
@@ -250,9 +278,9 @@ pub fn ncbi_double(value: &str, program: &str) -> Result<f64, String> {
     {
         return Ok(f64::NAN);
     }
-    value.parse::<f64>().map_err(|_| {
-        format!("expected a decimal number (other forms, which NCBI BLAST+ may read, are not supported by LOSAT's {program})")
-    })
+    value
+        .parse::<f64>()
+        .map_err(|_| NcbiDoubleError::Unsupported)
 }
 
 /// An integer argument with a constraint: NCBI's constraint reads the value again with
@@ -627,6 +655,80 @@ fn ncbi_file_name_length(path: &[u8]) -> usize {
 pub fn blastn_input_path() -> impl clap::builder::TypedValueParser<Value = PathBuf> {
     use clap::builder::TypedValueParser;
     clap::builder::OsStringValueParser::new().map(PathBuf::from)
+}
+
+/// An input file of any program (`blastn_input_path`).
+pub fn ncbi_input_path() -> impl clap::builder::TypedValueParser<Value = PathBuf> {
+    blastn_input_path()
+}
+
+/// An output file of any program (`blastn_output_path`).
+pub fn ncbi_output_path() -> impl clap::builder::TypedValueParser<Value = PathBuf> {
+    blastn_output_path()
+}
+
+/// A real argument of BLASTP (`ncbi_double`).
+pub fn blastp_real(value: &str) -> Result<f64, String> {
+    ncbi_double(value, "BLASTP")
+}
+
+/// A real argument of TBLASTN (`ncbi_double`).
+pub fn tblastn_real(value: &str) -> Result<f64, String> {
+    ncbi_double(value, "TBLASTN")
+}
+
+/// A real argument of TBLASTX (`ncbi_double`).
+pub fn tblastx_real(value: &str) -> Result<f64, String> {
+    ncbi_double(value, "TBLASTX")
+}
+
+/// A `-threshold` value: NCBI's constraint reads it again with `NStr::StringToDouble` and
+/// requires at least 0 (a NaN fails it).
+///
+/// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:578-583
+/// ```c
+///     arg_desc.AddOptionalKey(kArgWordScoreThreshold, "float_value",
+///                  "Minimum word score such that the word is added to the "
+///                  "BLAST lookup table",
+///                  CArgDescriptions::eDouble);
+///     arg_desc.SetConstraint(kArgWordScoreThreshold,
+///                            new CArgAllowValuesGreaterThanOrEqual(0));
+/// ```
+fn ncbi_threshold(value: &str, program: &str) -> Result<f64, String> {
+    let threshold = ncbi_double(value, program)?;
+    if !(threshold >= 0.0) {
+        return Err("Illegal value, expected greater or equal to 0".into());
+    }
+    Ok(threshold)
+}
+
+/// A BLASTP `-threshold` value (`ncbi_threshold`).
+pub fn blastp_threshold(value: &str) -> Result<f64, String> {
+    ncbi_threshold(value, "BLASTP")
+}
+
+/// A TBLASTN `-threshold` value (`ncbi_threshold`).
+pub fn tblastn_threshold_value(value: &str) -> Result<f64, String> {
+    ncbi_threshold(value, "TBLASTN")
+}
+
+/// A TBLASTX `-threshold` value (`ncbi_threshold`).
+pub fn tblastx_threshold(value: &str) -> Result<f64, String> {
+    ncbi_threshold(value, "TBLASTX")
+}
+
+/// A protein `-word_size` (`CArgAllowValuesGreaterThanOrEqual(2)` for a protein query).
+///
+/// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:166-170
+/// ```c
+///         arg_desc.AddOptionalKey(kArgWordSize, "int_value", description,
+///                                 CArgDescriptions::eInteger);
+///         arg_desc.SetConstraint(kArgWordSize, m_QueryIsProtein
+///                                ? new CArgAllowValuesGreaterThanOrEqual(2)
+///                                : new CArgAllowValuesGreaterThanOrEqual(4));
+/// ```
+pub fn protein_word_size(value: &str) -> Result<i32, String> {
+    ncbi_integer_at_least(value, 2)
 }
 
 // LOSAT CLI v2 capability boundary: both inputs are required file paths.

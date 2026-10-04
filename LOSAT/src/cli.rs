@@ -116,6 +116,25 @@ where
                     format!("the NCBI BLAST+ option -{name} is not supported by LOSAT's BLASTN"),
                 ));
             }
+            if scope.get_name() == "blastp" && is_unported_blastp_arg(name) {
+                return Err(clap::Error::raw(
+                    ErrorKind::InvalidValue,
+                    format!("the NCBI BLAST+ option -{name} is not supported by LOSAT's BLASTP"),
+                ));
+            }
+            if let Some(program) = ["blastn", "blastp", "tblastn", "tblastx"]
+                .into_iter()
+                .find(|program| scope.get_name() == *program)
+                .filter(|_| is_ncbi_toolkit_arg(name))
+            {
+                return Err(clap::Error::raw(
+                    ErrorKind::InvalidValue,
+                    format!(
+                        "the NCBI C++ Toolkit option -{name} is not supported by LOSAT's {}",
+                        program.to_ascii_uppercase()
+                    ),
+                ));
+            }
             if scope.get_name() == "tblastn" && is_unported_tblastn_arg(name) {
                 return Err(clap::Error::raw(
                     ErrorKind::InvalidValue,
@@ -255,6 +274,95 @@ fn is_unported_blastn_arg(name: &str) -> bool {
             | "xdrop_gap"
             | "xdrop_gap_final"
             | "xdrop_ungap"
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastp_args.cpp:44-50
+// ```c++
+// CBlastpAppArgs::CBlastpAppArgs()
+// {
+//     CRef<IBlastCmdLineArgs> arg;
+//     static const string kProgram("blastp");
+//     arg.Reset(new CProgramDescriptionArgs(kProgram, "Protein-Protein BLAST"));
+//     const bool kQueryIsProtein = true;
+//     bool const kFilterByDefault = false;
+// ```
+// The options of NCBI blastp 2.17.0+ (-help) that LOSAT's BLASTP does not implement
+// (AGENTS.md rule 2: explicit unsupported errors).
+fn is_unported_blastp_arg(name: &str) -> bool {
+    matches!(
+        name,
+        "best_hit_overhang"
+            | "best_hit_score_edge"
+            | "culling_limit"
+            | "db"
+            | "db_hard_mask"
+            | "db_soft_mask"
+            | "dbsize"
+            | "entrez_query"
+            | "export_search_strategy"
+            | "gilist"
+            | "h"
+            | "html"
+            | "import_search_strategy"
+            | "ipglist"
+            | "lcase_masking"
+            | "line_length"
+            | "mt_mode"
+            | "negative_gilist"
+            | "negative_ipglist"
+            | "negative_seqidlist"
+            | "negative_taxidlist"
+            | "negative_taxids"
+            | "no_taxid_expansion"
+            | "num_alignments"
+            | "num_descriptions"
+            | "parse_deflines"
+            | "qcov_hsp_perc"
+            | "query_loc"
+            | "remote"
+            | "searchsp"
+            | "seqidlist"
+            | "show_gis"
+            | "soft_masking"
+            | "sorthits"
+            | "sorthsps"
+            | "subject_besthit"
+            | "subject_loc"
+            | "taxidlist"
+            | "taxids"
+            | "version"
+            | "xdrop_gap"
+            | "xdrop_gap_final"
+            | "xdrop_ungap"
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:78-87
+// ```c++
+// static const char* s_AutoHelpShowAll  = "help-full";
+// static const char* s_AutoHelpXml  = "xmlhelp";
+// static const char* s_ExtraName    = "....";
+//
+// const char* s_ArgLogFile         = "-logfile";
+// const char* s_ArgCfgFile         = "-conffile";
+// const char* s_ArgVersion         = "-version";
+// const char* s_ArgFullVersion     = "-version-full";
+// const char* s_ArgFullVersionXml  = "-version-full-xml";
+// const char* s_ArgFullVersionJson = "-version-full-json";
+// ```
+// The standard options of an NCBI C++ Toolkit application, which NCBI's BLAST+ programs
+// accept without listing them in -help.
+fn is_ncbi_toolkit_arg(name: &str) -> bool {
+    matches!(
+        name,
+        "help-full"
+            | "xmlhelp"
+            | "logfile"
+            | "conffile"
+            | "version-full"
+            | "version-full-xml"
+            | "version-full-json"
     )
 }
 

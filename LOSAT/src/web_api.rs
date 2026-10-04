@@ -491,21 +491,21 @@ fn parse_blastp_args(
 ) -> Result<blastp::BlastpArgs, String> {
     let mut args = blastp::BlastpArgs {
         query,
-        subject,
+        subject: Some(subject),
         task: "blastp".to_string(),
         evalue: None,
         threshold: None,
         word_size: None,
         num_threads: 1,
         out: Some(out),
-        max_target_seqs: 500,
+        max_target_seqs: None,
         max_hsps_per_subject: None,
         ungapped: false,
         window_size: None,
         matrix: None,
         gap_open: None,
         gap_extend: None,
-        comp_based_stats: None,
+        comp_based_stats: "2".to_string(),
         seg: None,
         use_sw_tback: false,
         outfmt: "6".to_string(),
@@ -549,14 +549,16 @@ fn parse_blastp_args(
         } else if flag == "-word_size" {
             args.word_size = Some(
                 next_arg(extra_args, &mut index, flag)?
-                    .parse()
-                    .map_err(|err| format!("{flag} parse error: {err}"))?,
+                    .parse::<usize>()
+                    .map_err(|err| format!("{flag} parse error: {err}"))?
+                    .min(i32::MAX as usize) as i32,
             );
         } else if let Some(value) = flag.strip_prefix("-word_size=") {
             args.word_size = Some(
                 value
-                    .parse()
-                    .map_err(|err| format!("{flag} parse error: {err}"))?,
+                    .parse::<usize>()
+                    .map_err(|err| format!("{flag} parse error: {err}"))?
+                    .min(i32::MAX as usize) as i32,
             );
         } else if flag == "-num_threads" {
             args.num_threads = next_arg(extra_args, &mut index, flag)?
@@ -567,13 +569,17 @@ fn parse_blastp_args(
                 .parse()
                 .map_err(|err| format!("{flag} parse error: {err}"))?;
         } else if flag == "-max_target_seqs" {
-            args.max_target_seqs = next_arg(extra_args, &mut index, flag)?
-                .parse()
-                .map_err(|err| format!("{flag} parse error: {err}"))?;
+            args.max_target_seqs = Some(
+                next_arg(extra_args, &mut index, flag)?
+                    .parse()
+                    .map_err(|err| format!("{flag} parse error: {err}"))?,
+            );
         } else if let Some(value) = flag.strip_prefix("-max_target_seqs=") {
-            args.max_target_seqs = value
-                .parse()
-                .map_err(|err| format!("{flag} parse error: {err}"))?;
+            args.max_target_seqs = Some(
+                value
+                    .parse()
+                    .map_err(|err| format!("{flag} parse error: {err}"))?,
+            );
         } else if flag == "-max_hsps" {
             args.max_hsps_per_subject = Some(
                 next_arg(extra_args, &mut index, flag)?
@@ -589,14 +595,16 @@ fn parse_blastp_args(
         } else if flag == "-window_size" {
             args.window_size = Some(
                 next_arg(extra_args, &mut index, flag)?
-                    .parse()
-                    .map_err(|err| format!("{flag} parse error: {err}"))?,
+                    .parse::<usize>()
+                    .map_err(|err| format!("{flag} parse error: {err}"))?
+                    .min(i32::MAX as usize) as i32,
             );
         } else if let Some(value) = flag.strip_prefix("-window_size=") {
             args.window_size = Some(
                 value
-                    .parse()
-                    .map_err(|err| format!("{flag} parse error: {err}"))?,
+                    .parse::<usize>()
+                    .map_err(|err| format!("{flag} parse error: {err}"))?
+                    .min(i32::MAX as usize) as i32,
             );
         } else if flag == "-matrix" {
             args.matrix = Some(next_arg(extra_args, &mut index, flag)?.to_string());
@@ -629,15 +637,19 @@ fn parse_blastp_args(
                     .map_err(|err| format!("{flag} parse error: {err}"))?,
             );
         } else if flag == "-comp_based_stats" {
-            args.comp_based_stats = Some(parse_blastp_comp_based_stats(next_arg(
-                extra_args, &mut index, flag,
-            )?)?);
+            let value = next_arg(extra_args, &mut index, flag)?;
+            parse_blastp_comp_based_stats(value)?;
+            args.comp_based_stats = value.to_string();
         } else if let Some(value) = flag.strip_prefix("-comp_based_stats=") {
-            args.comp_based_stats = Some(parse_blastp_comp_based_stats(value)?);
+            parse_blastp_comp_based_stats(value)?;
+            args.comp_based_stats = value.to_string();
         } else if flag == "-seg" {
-            args.seg = Some(parse_blastp_seg(next_arg(extra_args, &mut index, flag)?)?);
+            let value = next_arg(extra_args, &mut index, flag)?;
+            parse_blastp_seg(value)?;
+            args.seg = Some(value.to_string());
         } else if let Some(value) = flag.strip_prefix("-seg=") {
-            args.seg = Some(parse_blastp_seg(value)?);
+            parse_blastp_seg(value)?;
+            args.seg = Some(value.to_string());
         } else if flag == "-ungapped" {
             args.ungapped = true;
         } else if let Some(value) = flag.strip_prefix("-ungapped=") {

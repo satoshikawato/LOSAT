@@ -1547,7 +1547,7 @@ fn pairwise_metadata(
         matrix_name: options.matrix.clone(),
         gap_open: options.gap_open,
         gap_extend: options.gap_extend,
-        word_threshold: 0,
+        word_threshold: 0.0,
         window_size: options.window_size,
         gapped_karlin: lookup_protein_params(&scoring),
         gumbel: lookup_protein_gumbel_params(&scoring, total as i64)

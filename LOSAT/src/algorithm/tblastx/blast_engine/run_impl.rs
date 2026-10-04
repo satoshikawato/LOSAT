@@ -931,7 +931,7 @@ fn search_cli(
     // ```
     // The batch size is read before the queries, which NCBI reads one batch at a time after
     // the outfmt 0 prolog; LOSAT's rejections of the inputs come after it.
-    let batch_size = tblastx_query_batch_size()?;
+    let batch_size = crate::blastinput::app::query_batch_size("TBLASTX", 10002)?;
     subject_checks?;
     let queries = fasta_input::parse_fasta(&query_bytes, &args.query, "query", "TBLASTX")?;
     search(args, &queries, subjects, outputs, batch_size)
@@ -977,7 +977,7 @@ pub fn run_local(
             .write_all(b"Warning: [tblastx] Query is Empty!\n")?;
         return Ok(());
     }
-    let batch_size = tblastx_query_batch_size()?;
+    let batch_size = crate::blastinput::app::query_batch_size("TBLASTX", 10002)?;
     search(args, query_records, subject_records, outputs, batch_size)
 }
 
@@ -1003,7 +1003,7 @@ fn search(
     }
     check_report_titles(query_records, subject_records, outputs)?;
     check_losat_limits(&args)?;
-    check_unsupported_environment()?;
+    crate::blastinput::app::check_unsupported_environment("TBLASTX")?;
     // NCBI reads the records with `CFastaReader`, which removes residues that are not IUPAC
     // nucleotide letters with a warning and reports a record without residues when it sets
     // up the search; LOSAT rejects both, as BLASTN does (`blastn/input.rs`), and reads `U`
@@ -1409,121 +1409,6 @@ fn write_tblastx_outputs(
 //         retval = 10002;
 //         break;
 // ```
-/// The query splitter that NCBI sets up for every query batch (`CBlastPrelimSearch`, in
-/// `BlastSetupPreliminarySearchEx`), which reads `CHUNK_SIZE` and then `OVERLAP_CHUNK_SIZE`
-/// but does not split an ungapped search. The outer `Err` is LOSAT's rejection of a value
-/// that NCBI cannot convert (its `CStringException` names its build's source files, exit
-/// 255); the inner one is NCBI's error for a chunk size that is not divisible by 3.
-///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_cxx.cpp:55-61
-/// ```c
-///     m_ChunkSize = SplitQuery_GetChunkSize(m_Options->GetProgram());
-///     m_LocalQueryData = m_QueryFactory->MakeLocalQueryData(m_Options);
-///     m_TotalQueryLength = m_LocalQueryData->GetSumOfSequenceLengths();
-///     m_NumChunks = SplitQuery_CalculateNumChunks(m_Options->GetProgramType(),
-///         &m_ChunkSize, m_TotalQueryLength, m_LocalQueryData->GetNumQueries());
-///     /* No split for ungapped mode JIRA SB-1082 */
-///     if (!options->GetGappedMode()) m_NumChunks = 1;
-/// ```
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/local_blast.cpp:98-103
-/// ```c
-///     const EBlastProgramType prog_type(EProgramToEBlastProgramType(program));
-///     if (Blast_QueryIsTranslated(prog_type) && !Blast_SubjectIsPssm(prog_type) &&
-///         (retval % CODON_LENGTH) != 0) {
-///         NCBI_THROW(CBlastException, eInvalidArgument,
-///                    "Split query chunk size must be divisible by 3");
-///     }
-/// ```
-/// `SplitQuery_ShouldSplit` is true for tblastx (split_query_aux_priv.cpp:73-97), so
-/// `SplitQuery_CalculateNumChunks` always reads the overlap (`blastn/query_split.rs`
-/// `SplitSizes`; the `int` becomes a 64-bit `size_t`).
-fn check_query_split_environment() -> Result<Result<()>> {
-    let read = |variable: &str| -> Result<Option<i32>> {
-        match std::env::var_os(variable) {
-            Some(value)
-                if !crate::algorithm::blastn::input::is_blank(value.as_encoded_bytes()) =>
-            {
-                match crate::blastinput::query_batch::ncbi_string_to_int(&value) {
-                    Some(number) => Ok(Some(number)),
-                    None => anyhow::bail!(
-                        "the environment variable {variable} has the value {:?}, which NCBI BLAST+ cannot convert to an int (it stops with a CStringException that names its build's source files); this is not supported by LOSAT's TBLASTX",
-                        value.to_string_lossy()
-                    ),
-                }
-            }
-            _ => Ok(None),
-        }
-    };
-    if let Some(chunk_size) = read("CHUNK_SIZE")? {
-        if (i64::from(chunk_size) as u64) % 3 != 0 {
-            return Ok(Err(crate::cli::NativeError {
-                exit: 3,
-                message: "BLAST engine error: Split query chunk size must be divisible by 3\n"
-                    .to_string(),
-            }
-            .into()));
-        }
-    }
-    read("OVERLAP_CHUNK_SIZE")?;
-    Ok(Ok(()))
-}
-
-/// The environment that changes NCBI's tblastx in a way that LOSAT does not reproduce.
-///
-/// NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.cpp:206-210
-/// ```c
-/// 	char* bl2seq_legacy = getenv("BL2SEQ_LEGACY");
-/// 	if (bl2seq_legacy)
-///         	db_adapter.Reset(new CLocalDbAdapter(subjects, opts_hndl, false));
-/// 	else
-///         	db_adapter.Reset(new CLocalDbAdapter(subjects, opts_hndl, true));
-/// ```
-///
-/// NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.cpp:732-737
-/// ```c
-/// 		char * pre_fetch_limit_str = getenv("PRE_FETCH_SEQS_LIMIT");
-/// 		if (pre_fetch_limit_str) {
-/// 			int pre_fetch_limit = NStr::StringToInt(pre_fetch_limit_str);
-/// 			if(pre_fetch_limit == 0) {
-/// 				return false;
-/// 			}
-/// ```
-/// An integer only decides whether the report's sequences are fetched ahead; a value
-/// that `NStr::StringToInt` cannot convert (an empty one too) stops NCBI before the report
-/// of each query batch with a `CStringException` that names its build's source files (as
-/// BLASTN's `check_unsupported_environment`).
-fn check_unsupported_environment() -> Result<()> {
-    if std::env::var_os("BL2SEQ_LEGACY").is_some() {
-        anyhow::bail!(
-            "the environment variable BL2SEQ_LEGACY, which makes NCBI BLAST+ search each subject on its own and write its legacy bl2seq report, is not supported by LOSAT's TBLASTX"
-        );
-    }
-    if let Some(value) = std::env::var_os("PRE_FETCH_SEQS_LIMIT") {
-        if crate::blastinput::query_batch::ncbi_string_to_int(&value).is_none() {
-            anyhow::bail!(
-                "the environment variable PRE_FETCH_SEQS_LIMIT has the value {:?}, which NCBI BLAST+ cannot convert to an int (it stops with a CStringException that names its build's source files); this is not supported by LOSAT's TBLASTX",
-                value.to_string_lossy()
-            );
-        }
-    }
-    Ok(())
-}
-
-/// The query batch size of tblastx in nucleotides (`CTblastxAppArgs::GetQueryBatchSize`,
-/// tblastx_args.cpp:129-133), as the `TSeqPos` that `CBlastInput` compares with.
-fn tblastx_query_batch_size() -> Result<u32> {
-    match crate::blastinput::query_batch::get_query_batch_size(
-        std::env::var_os("BATCH_SIZE").as_deref(),
-    ) {
-        Ok(0) if std::env::var_os("BATCH_SIZE").is_none() => Ok(10002),
-        // `CBlastInput` stores the `int` as a `TSeqPos` (blast_input.hpp:258-259).
-        Ok(size) => Ok(size as u32),
-        Err(value) => Err(anyhow::anyhow!(
-            "the BATCH_SIZE value '{value}' is not an integer; NCBI stops with a \
-             CStringException for it, which is not supported by LOSAT's TBLASTX"
-        )),
-    }
-}
 
 // NCBI reference: ncbi-blast/c++/src/app/blast/tblastx_app.cpp:136-137
 // ```c
@@ -1606,7 +1491,7 @@ fn run_in_pool(
     let lengths: Vec<usize> = query_records.iter().map(|r| r.seq().len()).collect();
     // The query splitter of the first batch fails after `CFastaReader` read the batch and
     // wrote its title warnings (`write_tblastx_outputs` writes them for the reports).
-    if let Err(error) = check_query_split_environment()? {
+    if let Err(error) = crate::blastinput::app::check_query_split_environment("TBLASTX", true)? {
         let end = crate::blastinput::query_batch::next_query_batch_end(&lengths, 0, batch_size);
         crate::algorithm::blastn::input::write_title_warnings(
             &query_records[..end],

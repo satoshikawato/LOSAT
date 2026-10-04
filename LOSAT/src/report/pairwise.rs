@@ -170,7 +170,8 @@ pub struct BlastpPairwiseReport {
     pub matrix_name: String,
     pub gap_open: i32,
     pub gap_extend: i32,
-    pub word_threshold: i32,
+    /// `GetWordThreshold()`, a double.
+    pub word_threshold: f64,
     pub window_size: i32,
     pub gapped_karlin: KarlinParams,
     pub gumbel: BlastGumbelBlk,
@@ -558,12 +559,14 @@ fn write_alignment_with_sequences<W: Write>(
         //                 if (m_AlignOption & eShowMiddleLine){
         //                     middle_line[i] = ' ';
         // ```
-        // The nucleotide rows may carry lowercase masking, which NCBI applies only when it
-        // prints a row (showalign.cpp:2495-2521), so they are compared without case.
+        // The rows may carry lowercase masking, which NCBI applies only when it prints a
+        // row (showalign.cpp:2495-2521), so they are compared without case, and the protein
+        // middle line shows the uppercase residue.
         let middle: String = q_chars[offset..end]
             .iter()
             .zip(s_chars[offset..end].iter())
             .map(|(q, s)| {
+                let q = &q.to_ascii_uppercase();
                 if nucleotide {
                     if q.eq_ignore_ascii_case(s) {
                         '|'
@@ -1184,6 +1187,26 @@ fn write_flatfile_wrapped(writer: &mut impl Write, text: &str, width: usize) -> 
     Ok(())
 }
 
+/// The outfmt 0 prolog of blastp (the version, the references and the database), which
+/// NCBI writes before it reads the first query batch (blast_format.cpp, `PrintProlog`).
+pub fn write_blastp_pairwise_prolog<W: Write>(
+    writer: &mut W,
+    version: &str,
+    database_name: &str,
+    database_num_sequences: usize,
+    database_total_letters: usize,
+) -> io::Result<()> {
+    write_blastp_pairwise_intro(writer, version)?;
+    // The blank lines before the first query are the query's (as TBLASTX's prolog).
+    write_blastp_database_header_spacing(
+        writer,
+        database_name,
+        database_num_sequences,
+        database_total_letters,
+        1,
+    )
+}
+
 fn write_blastp_database_header<W: Write>(
     writer: &mut W,
     database_name: &str,
@@ -1454,11 +1477,12 @@ fn write_blastp_final_footer<W: Write>(
         "Gap Penalties: Existence: {}, Extension: {}",
         report.gap_open, report.gap_extend
     )?;
-    if report.word_threshold != 0 {
+    if report.word_threshold != 0.0 {
+        // `GetWordThreshold()` is a double, written with the stream's default format.
         writeln!(
             writer,
             "Neighboring words threshold: {}",
-            report.word_threshold
+            cpp_default_double(report.word_threshold)
         )?;
     }
     if report.window_size != 0 {
@@ -2737,6 +2761,18 @@ fn cpp_default_double(value: f64) -> String {
     }
     if value == 0.0 {
         return "0".to_string();
+    }
+    // glibc's `%g` of an infinity or a NaN.
+    if value.is_infinite() {
+        return if value < 0.0 { "-inf" } else { "inf" }.to_string();
+    }
+    if value.is_nan() {
+        return if value.is_sign_negative() {
+            "-nan"
+        } else {
+            "nan"
+        }
+        .to_string();
     }
     let scientific = format!("{value:.5e}");
     let (mantissa, exponent) = scientific.split_once('e').expect("exponent");

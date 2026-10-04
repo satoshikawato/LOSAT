@@ -26,6 +26,8 @@ Deterministic: the files are cut from committed fixtures, so a rerun writes the 
 - e2e_titles_subject.faa: the first homolog of e2e_protein_subject.faa under protein titles
   that NCBI's GenerateDefline rewrites (trailing punctuation, double spaces, `. [`, `, [`,
   ` ,`, `( `, prefixes) and one ending in 60 letters (the CFastaReader title warning).
+- e2e_amb_subject.fna: e2e_tblastn_subject.fna with 2 % of the bases replaced by IUPAC
+  ambiguity codes (seeded): the displayed Sbjct rows of TBLASTN (B, Z, J, X).
 
 Usage: make_inputs.py
 """
@@ -101,6 +103,19 @@ def titles_input() -> None:
         "".join(f">t{i} {title}\n{residues}" for i, title in enumerate(TITLES)))
 
 
+def amb_input() -> None:
+    import random
+    rng = random.Random(11)
+    out = []
+    for line in (OUT / "e2e_tblastn_subject.fna").read_text().split("\n"):
+        if line.startswith(">") or not line:
+            out.append(line)
+            continue
+        out.append("".join(rng.choice("NRYKMSWBDHV") if (c in "ACGT" and rng.random() < 0.02) else c
+                           for c in line))
+    (OUT / "e2e_amb_subject.fna").write_text("\n".join(out))
+
+
 def main() -> None:
     records = [chunk.split("\n", 1)[1] for chunk in (OUT / "tblastx_many_subject.fasta").read_text().split(">")[1:4]]
     for name, deflines in (("punct_hits_subject.fna", DEFLINES), ("punct_hits_standin.fna", STAND_INS)):
@@ -113,6 +128,7 @@ def main() -> None:
     sweep_inputs()
     many_inputs()
     titles_input()
+    amb_input()
 
 
 if __name__ == "__main__":

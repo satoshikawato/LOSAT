@@ -28,6 +28,14 @@ S08（E2b、[ゲート記録](../evidence/losat_web_e2b/README.md)）は、BLAST
 - SEG：NCBI の `s_SegSeq` は左の部分の再帰で見つけた区間のうち先頭の 1 つだけを残す（`c++/src/algo/blast/core/blast_seg.c:2086-2101` の `leftsegs->next = *segs`）。S08 で `LOSAT/src/utils/seg.rs` を NCBI と同じにし、BLASTX の 2 か所（`algorithm/blastx/query_setup.rs`、`algorithm/blastx/kappa.rs`）だけが `keeping_all_left_segments()` で前の振る舞いを保つ。取り込んだ後にこの 2 つを外し、LOSATX の比較ゲートで確かめる（S08 の調べでは、低複雑度の領域を持つ蛋白の 388 件の組で BLASTX の 344 件が NCBI と違い、直すと 0 件）。
 - `-seg` の値（S08 の独立監査の後、`7fbbfad96`）：BLASTP・TBLASTN・TBLASTX は NCBI と同じに 1 つの空白で分け、0 以下の窓・locut・hicut を NCBI の既定のままにする（`c++/src/algo/blast/core/blast_filter.c:1147-1154`、`blastinput/value_parsers.rs` の `SegSpec::params`）。BLASTX は自分の `seg` の解析器（`algorithm/blastx/args.rs` の `BlastxSeg`）のままなので、取り込むときに同じにする。閉じた標準出力（`cli.rs` の `report_standard_output`）も BLASTX の報告はまだ使っていない。
 
+## S08+ からの引き継ぎ（2026-10-04）
+
+S08+（E2e、[ゲート記録](../evidence/losat_web_e2e/README.md)、[権威の記録](../evidence/losat_web_e2e/AUTHORITY.md)）は BLASTP・TBLASTN・TBLASTX を NCBI の app の層（`LOSAT/src/blastinput/app.rs`：`-outfmt` の読み方、NativeError の誤り、`-seg`・`-comp_based_stats` の読み方、環境の検査）と引数の読み方（`blastinput/value_parsers.rs` の `ncbi_*`）に移した。BLASTX は DW-10 に従い変えていない。第 6 項で BLASTX に同じことをするときの材料：
+
+- `app.rs` の `parse_formatting_string`・`report_format`・`formatting_handler_check`・`xinclude_check`、`parse_seg_option`、`parse_comp_based_stats`（BLASTX も最初の文字の規則）、`check_unsupported_environment`・`check_old_fsc`・`check_query_split_environment(program, translated_query)`・`query_batch_size`、`stats/protein_options.rs`（行列の表、BEST の gap、推奨の threshold と window、`validate_protein_options`、NCBI の行列と gap の誤りの文言）、`cli.rs` の `is_ncbi_toolkit_arg`（`-help-full`・`-xmlhelp`・`-logfile`・`-conffile`・`-version-full*`。BLASTX は未適用）。
+- 共有のコードで BLASTX の振る舞いを保った箇所：`tblastx/lookup/compressed.rs` の `build_blosum62_compressed_lookup` は overflow の bank を使い切ると今も panic する（BLASTP は `try_build_blosum62_compressed_lookup` で明示的に拒否。NCBI は heap を壊す）。threshold は今も Rust の飽和する変換（BLASTP・TBLASTX は x86-64 の `(Int4)` を再現、`core/blast_util.rs` の `ncbi_int4_from_double`）。`BlastpPairwiseReport.num_descriptions`・`num_alignments` は BLASTX では `usize::MAX`（BLASTX は自分の writer を使う）。`write_blastn_description_table` に `protein` の引数ができた（蛋白の題は `report/defline.rs` の `ncbi_protein_title`、`check_shown_protein_subject_title`）。BLASTX の説明の一覧と蛋白の subject の題（BLASTX の subject は蛋白）は、これに移せる。
+- BLASTP で直した NCBI の規則で、BLASTX にも当てはまりうるもの：得点 0 の HSP は報告に出ない（`blast_seqalign.cpp:672-674`）、SEG で mask した query の列の小文字（BLASTX は既にする）、epilog の行列の名前は入力どおり・threshold は `%g`、`O` は X として検索し警告（`blast_setup_cxx.cpp:894-932`。BLASTX の subject は蛋白）、残基の無い subject の「Subject sequence contains no data」の警告、蛋白の題の 50 文字の警告（`fasta.cpp:1650-1673`）、query の警告を各 query の報告の前に書く（`QueryWarnings`）。
+
 ## 終了・引き継ぎ
 
 README の規則 8 に従う。SX を終えた後は、中断していた順番のセッションに戻る。

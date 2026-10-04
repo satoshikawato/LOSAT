@@ -19,7 +19,7 @@ mkdir -p $RUN
 step "lint and tests"
 git rev-parse HEAD > $RUN/head.txt
 git status --short > $RUN/worktree-status.txt
-python3 $S/verify_refs.py $(git diff --name-only $BASE..HEAD -- '*.rs') > $RUN/verify-refs.log 2>&1; echo "exit $?" >> $RUN/verify-refs.log
+python3 $S/verify_refs.py $(git diff --name-only --diff-filter=d $BASE..HEAD -- '*.rs') > $RUN/verify-refs.log 2>&1; echo "exit $?" >> $RUN/verify-refs.log
 python3 $W/docs/evidence/losat_web_e2e/gates/verify_added.py $RUN/verify-refs.log > $RUN/verify-refs-session-added.txt 2>&1; echo "exit $?" >> $RUN/verify-refs-session-added.txt
 python3 docs/evidence/losat_web_e2e/gen_protein_tables.py --ncbi-src $S/ncbi/c++ --check > $RUN/protein-tables-check.log 2>&1; echo "exit $?" >> $RUN/protein-tables-check.log
 (cd LOSAT && cargo fmt --check) > $RUN/fmt.log 2>&1; echo "exit $?" >> $RUN/fmt.log

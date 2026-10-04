@@ -1,0 +1,39 @@
+# E2e（S08+・S08+a・S08+b）独立監査 第 2 回
+
+- 対象：S08+a を merge した後の本線。1 回目の監査は `491292327`（S08+b の 2.1〜2.3 の後。native `d8d18ec0…cb116`、指摘を直す前のゲートの run の native と同じ）、(a) の 2 回目は最後のエンジン `75cc8e565`（最後のゲートの native `4d6c036f…`）。監査の写しは `~/.cache/losat-web-gui-target/s08pb-audit/`（`src/`・`src2/`、`/mnt/c` の外）。
+- 方式：Sonnet の監査役が 4 観点を並行して、読み取り専用で NCBI BLAST+ 2.17.0 と LOSAT を同じ引数で実行して比べた（stdout、stderr、終了コード、`2>&1`）。第 1 回の 5 つの報告を (a) BLASTP、(b) TBLASTN、(c) TBLASTX、(d) 報告と入力 の 4 つにまとめ、第 1 回の全ての再現の命令と harness（S08+a が `/mnt/c` の外に直したもの）を繰り返し、S08+a・S08+b の変更の周り（query の分割、巨大な X-drop、BLOSUM45 の同点、hard mask、窓の右端、toolkit の語、BLASTP の同順位）を新しく調べた。指示は [`round2/brief/`](round2/brief/)（`COMMON.md`、`ANGLE_A.md`〜`ANGLE_D.md`、2 回目の `ANGLE_A2.md`）、報告は [`round2/`](round2/)。
+- 保守者の判断待ちの項目（D11、D12、D13、D14）は「pending the maintainer」として扱わせた。
+
+## 1 回目の結果（`491292327`）
+
+| 観点 | 結論 | 比べた数 | 新しい指摘 |
+|---|---|---|---|
+| (a) BLASTP（[`a_blastp.md`](round2/a_blastp.md)） | unsupported | 第 1 回の argv 約 1,443、sweep 約 3,600、無作為 約 10,700、分割 約 2,100、同順位 約 1,900 | R2A-1・R2A-2（abort 2 件） |
+| (b) TBLASTN（[`b_tblastn.md`](round2/b_tblastn.md)） | supported | 約 8,000 | R2b-1、R2b-2 |
+| (c) TBLASTX（[`c_tblastx.md`](round2/c_tblastx.md)） | supported | 第 1 回の 730、新しい約 900 | R2c-1、R2c-2、R2c-3 |
+| (d) 報告と入力（[`d_reports_inputs.md`](round2/d_reports_inputs.md)） | supported | 報告 2,183、入力 6,390、再現 133、新しい 2,552 | R2D-1 |
+
+第 1 回の指摘は 4 観点とも、一致、決めたとおりの明示的な拒否、受け入れのどれかで、差は無かった（S08+a が直した TN-1 の残り・TN-2・TN-4・TN-5・RP-4・`-out -version` を含む）。
+
+## 指摘と対応
+
+| ID | 重さ | 内容 | 対応 |
+|---|---|---|---|
+| R2A-1 | 高 | BLASTP の compressed の lookup（`-word_size 5`、blastp-fast）で、1〜2 残基の subject があると abort（終了コード 134）。NCBI は走査の範囲を広げて 1 度 prime し、word は subject の後ろの NULLB（compressed の文字が無い）を含むので何も見つけない（aa_ungapped.c:496-500、blast_aascan.c:264-286） | 直した（`0e59e2f64`）：prime の word の subject の外を NULLB として読む（`tblastx/lookup/compressed.rs` の `scan_subject`。BLASTX も同じ関数を使う、SX に記録）。fixture `e2e.blastp.compressed_short_subject` |
+| R2A-2 | 中 | BLASTP の one-hit（`-window_size 0`）と低い `-threshold` で、ungapped の Int4 の長さが負になり abort。NCBI は負の長さを `BlastGetStartForGappedAlignment` に `Uint4` で渡し、最初の 11 文字の窓だけを数える（aa_ungapped.c:1054,1083、blast_gapalign.c:3394-3437） | 直した（`0e59e2f64`）：同じ読み方。窓が context か subject の終わりを越えるときは NULLB（`BLAST_SCORE_MIN`）を含むので、和は負で `q_start` になる。fixture `e2e.blastp.one_hit_negative_width`。2.6 MB の出力の realistic な例も NCBI と一致 |
+| R2b-1 | 低〜中 | 有限の DBL_MAX の `-evalue`（`1.7976931348623157e308`）で NCBI の tblastn と blastp は SIGSEGV（blast_kappa.c:409,3687 の `best_evalue <= expect_value` が DBL_MAX で真、blast_hits.c:3266）。LOSAT は結果を出した（D12 は無限大だけを拒否） | 直した（`141e49567`）：D12 の拒否を DBL_MAX 以上に広げた（BLASTP・TBLASTN）。`1.7976931348623156e308` は実行し NCBI と一致 |
+| R2b-2 | 低（情報） | 小さい `CHUNK_SIZE`（1、7）で LOSAT の TBLASTN は chunk ごとに NCBI の約 10 倍遅い（出力は同じ。chunk ごとの `query_set_setup`） | 残件（実験用の環境変数だけ。既定では chunk は数個） |
+| R2c-1 | 中（資源だけ） | TBLASTX の `-threshold` が `INT_MIN` になる値（`+inf` など、完全な近傍）で、LOSAT の記憶が NCBI の最大 2.3 倍（30 kb の query で NCBI 3.8 GB、LOSAT 8.7 GB）。出力は同じ。NCBI は tblastx の長い query を 10002 塩基の chunk に分け、chunk ごとに lookup を作る（LOSAT の TBLASTX は分けない。NCBI の出力は `CHUNK_SIZE` 3000 と 999999 で同じ。`s08pb/txsplit/`） | 残件。最後のゲートの前のゲートの sweep で、この 2 行の LOSAT が並列の実行の中で記憶不足で止まった（単独では outfmt 0・6・7 とも NCBI とバイト一致、LOSAT 8.6 GB、NCBI 5.9 GB。`s08pb/thrinf/`）。最後のゲートの sweep は TBLASTX の並列を 3 にした |
+| R2c-2 | 低 | 末尾の `--`：NCBI は位置の引数の始まりとして読み、最後なら何もしない（ncbiargs.cpp:2866-2872）。LOSAT は引数の誤り（終了コード 2） | 直した（`13493774f`）：BLASTN・BLASTP・TBLASTN・TBLASTX で最後の `--` を落とす。後ろに語があれば今までどおり引数の誤り（例外 1）。BLASTX は変えない |
+| R2c-3 | 低（文言） | TX-3 の拒否の文言が、標準入力が普通のファイルでも「such as a pipe」と言う | 受け入れ（D10 の拒否の理由は正しい） |
+| R2D-1 | 低（注釈） | `blastn/input.rs:418` の `fasta.cpp:966-979`（引用は 967 から） | 直した（`75cc8e565`） |
+
+ゲートの v1 の WASI の行列で見つかったもの（監査の外）：S08+ が BLASTP を NCBI の app の層に移したため、web ABI v1 の BLASTP の振る舞いが E1d の記録から変わっていた（誤りの文言、2 つの誤りの順、知らない tabular の field を誤りにしない）。v1 は凍結（計画 TD-1）なので、v1 の経路で option を先に確かめ、書かない field を以前の文言で拒否するようにした（`efa445b19`。試験 `web_api::tests::blastp_web_pair_keeps_v1_error_order_and_fields`）。option の誤りの文言はエンジンの今の文言（ゲート記録の「v1」）。
+
+## 2 回目（(a)、`75cc8e565`）
+
+（2 回目の結果をここに書く）
+
+## 結論
+
+（4 観点の最後の結論をここに書く）

@@ -28,6 +28,7 @@ NCBI のソースは固定 commit `598d8ae6`（`/mnt/c/Users/genom/GitHub/ncbi-b
 | `blast_args.cpp:387-408` | `-seg` は filtering の handler が読む。`no`・`yes` 以外は 1 つの空白で 3 つに分け、数でなければ `Invalid input for filtering parameters`、3 つでなければ `Invalid number of arguments to filtering option`（終了コード 1） | `app.rs` の `parse_seg_option`（3 つの program が共有。TBLASTN・TBLASTX の既定値は `12 2.2 2.5`） |
 | `blast_args.cpp:834-892` | `-comp_based_stats` は最初の文字だけで決める（`0Ff` 0、`1` 1、`2DdTt` 2、`3` 3、それ以外は 0）。blastp だけ 2 文字目の `u`・`U` で unified P。`-ungapped` と 0 以外の組は `Composition-adjusted searched are not supported with an ungapped search…` | `app.rs` の `parse_comp_based_stats` |
 | `blast_args.cpp:3158-3163` | `-task` は大文字小文字を区別する集合（blastp・blastp-fast・blastp-short、tblastn・tblastn-fast） | clap の `value_parser`（構文の誤りは承認済みの例外 1） |
+| `ncbiargs.cpp:2866-2872` | `--` の後は位置の引数（BLAST の program には無い）。最後の `--` は何もせず、後ろに語があれば USAGE の誤り | `cli.rs` の `try_parse_from` が BLASTN・BLASTP・TBLASTN・TBLASTX の最後の `--` を落とす（S08+b、第 2 回の監査 R2c-2）。後ろの語は引数の誤り（承認済みの例外 1）。BLASTX は変えない |
 | `tabular.cpp:70-99,1393-1408`、`format_flags.cpp:41-195` | custom の field は 1 つの空白で分け、名前に完全に一致するものだけを足す（`std` は既定の 12、`-<名前>` は消す）。知らない名前は黙って捨て、何も残らなければ既定 | BLASTP の `parse_blastp_tabular_fields`・`blastp_tabular_field`。NCBI が書き LOSAT が書かない field（`qgi`・`sallseqid`・`staxid`・`qcovs` など 20）と `delim=` は明示的な拒否。TBLASTN・TBLASTX は custom の指定を拒否する（S08 から） |
 
 ## C. task の既定値
@@ -101,16 +102,16 @@ LOSAT は誤りを出す handler だけを同じ順に置いた（filtering、fo
 
 | NCBI | 振る舞い | LOSAT |
 |---|---|---|
-| `fasta.cpp:966-979` | 蛋白の残基でない文字は警告して落とす | `blastn/input.rs` の `check_protein_input_of`・`check_protein_residues_of`（明示的な拒否。BLASTP の query・subject、TBLASTN の query） |
+| `fasta.cpp:967-979` | 蛋白の残基でない文字は警告して落とす | `blastn/input.rs` の `check_protein_input_of`・`check_protein_residues_of`（明示的な拒否。BLASTP の query・subject、TBLASTN の query） |
 | `fasta.cpp:375-384` ほか | 核酸の subject：最初の定義行の前の空行と注釈、IUPAC でない残基、中身の無いレコード、`U`、題の警告 | `read_nucleotide_subjects`（TBLASTN は S08+ で TBLASTX と同じ読み方になった。最初の作業 2） |
 
 ## K. LOSAT が対応する値と拒否する値（S12 の検索画面の入力）
 
 明示的な拒否の文言は全て「… is not supported by LOSAT's <PROGRAM>」。
 
-**BLASTP**：対応する値は、`-task blastp`・`blastp-fast`、BLOSUM62 と gap 11/1、word size 3 と compressed の 5（`-task blastp-fast` か `-word_size 5`）、threshold は任意の正の実数（`+inf` を含む。compressed で overflow の bank を使い切る値は拒否）、`-window_size` は 0 以上の整数（0 は one-hit。query の batch の長さとの和が 2^30 を超える値は拒否、D11）、`-comp_based_stats` は mode 2（`2`・`D`・`d`・`T`・`t` と、それで始まる任意の文字列）、`-seg`（`no`・`yes`・3 つの値）、`-evalue`（正の有限の実数。`+inf`・`1e999` は拒否、D12）、`-max_target_seqs`（予備の hit list の大きさが NCBI の `int` で正になる値。2147483624 以上は NCBI と同じく 2〜48 に回り込む）・`-max_hsps`（1 以上）、`-outfmt` の 0・6・7（NCBI の書き方。6・7 は LOSAT が書く field の custom の指定）。拒否する値は、BLOSUM62 以外の行列と 11/1 以外の gap（NCBI の表にある組）、word size 2・4・6・7（`-task blastp-short` を含む）、`-comp_based_stats` の 0・1・3 と unified P（`u`）、`-ungapped`、`-use_sw_tback`、§B の field と `delim=`、NCBI の blastp の option のうち LOSAT に無いもの（`cli.rs` の `is_unported_blastp_arg`：`-db` の一族、`-culling_limit`、`-best_hit_*`、`-subject_besthit`、`-lcase_masking`、`-soft_masking`、`-xdrop_*`、`-searchsp`、`-dbsize`、`-qcov_hsp_perc`、`-query_loc`、`-subject_loc`、`-num_descriptions`・`-num_alignments` ほか、`-h`、`-version`）、NCBI C++ Toolkit の option（`-help-full`・`-xmlhelp`・`-logfile`・`-conffile`・`-version-full*`。4 つの program）。
+**BLASTP**：対応する値は、`-task blastp`・`blastp-fast`、BLOSUM62 と gap 11/1、word size 3 と compressed の 5（`-task blastp-fast` か `-word_size 5`）、threshold は任意の正の実数（`+inf` を含む。compressed で overflow の bank を使い切る値は拒否）、`-window_size` は 0 以上の整数（0 は one-hit。query の batch の長さとの和が 2^30 を超える値は拒否、D11）、`-comp_based_stats` は mode 2（`2`・`D`・`d`・`T`・`t` と、それで始まる任意の文字列）、`-seg`（`no`・`yes`・3 つの値）、`-evalue`（正の有限の実数。`+inf`・`1e999` と DBL_MAX 以上は拒否、D12）、`-max_target_seqs`（予備の hit list の大きさが NCBI の `int` で正になる値。2147483624 以上は NCBI と同じく 2〜48 に回り込む）・`-max_hsps`（1 以上）、`-outfmt` の 0・6・7（NCBI の書き方。6・7 は LOSAT が書く field の custom の指定）。拒否する値は、BLOSUM62 以外の行列と 11/1 以外の gap（NCBI の表にある組）、word size 2・4・6・7（`-task blastp-short` を含む）、`-comp_based_stats` の 0・1・3 と unified P（`u`）、`-ungapped`、`-use_sw_tback`、§B の field と `delim=`、NCBI の blastp の option のうち LOSAT に無いもの（`cli.rs` の `is_unported_blastp_arg`：`-db` の一族、`-culling_limit`、`-best_hit_*`、`-subject_besthit`、`-lcase_masking`、`-soft_masking`、`-xdrop_*`、`-searchsp`、`-dbsize`、`-qcov_hsp_perc`、`-query_loc`、`-subject_loc`、`-num_descriptions`・`-num_alignments` ほか、`-h`、`-version`）、NCBI C++ Toolkit の option（`-help-full`・`-xmlhelp`・`-logfile`・`-conffile`・`-version-full*`。4 つの program）。
 
-**TBLASTN**：対応する値は、`-task tblastn`、BLOSUM62 の 11/1・word size 3・threshold 13・window 40（cbs 0 と 2）と、BLOSUM45 の 14/2・word size 2・threshold 16・window 60（cbs 0）、`-db_gencode`（承認済みの例外。32 を含む）、`-seg`、`-soft_masking`・`-sum_stats`（NCBI の真偽値）、`-lcase_masking`、`-xdrop_gap`・`-xdrop_gap_final`（任意の実数。1e7 bit 以上の巨大な値は LOSAT が遅く大量の記憶を使う、S08+b の TN-4）、`-evalue`（正の有限の実数。無限大は拒否、D12）、`-max_target_seqs`（予備の大きさが正になる値）、`-outfmt` の 0・6・7（custom の指定は拒否）。拒否する値は、上の 2 つ以外の行列・gap・word size・threshold・window の組（`-task tblastn-fast`、compressed の lookup、`-window_size 0`、`-threshold 13.5` を含む）、`-comp_based_stats` の 1・3、`-ungapped`、`-max_intron_length` の 0 以外、NCBI の tblastn の option のうち LOSAT に無いもの（`is_unported_tblastn_arg`：`-db`・`-in_pssm`・`-remote`・`-subject_loc`・`-use_sw_tback`・`-xdrop_ungap`・`-max_hsps`・`-culling_limit` ほか）。
+**TBLASTN**：対応する値は、`-task tblastn`、BLOSUM62 の 11/1・word size 3・threshold 13・window 40（cbs 0 と 2）と、BLOSUM45 の 14/2・word size 2・threshold 16・window 60（cbs 0）、`-db_gencode`（承認済みの例外。32 を含む）、`-seg`、`-soft_masking`・`-sum_stats`（NCBI の真偽値）、`-lcase_masking`、`-xdrop_gap`・`-xdrop_gap_final`（任意の実数。巨大な値も NCBI が触れる DP の cell だけを書く、S08+a の TN-4）、`-evalue`（正の有限の実数。無限大と DBL_MAX 以上は拒否、D12）、`-max_target_seqs`（予備の大きさが正になる値）、`-outfmt` の 0・6・7（custom の指定は拒否）。拒否する値は、上の 2 つ以外の行列・gap・word size・threshold・window の組（`-task tblastn-fast`、compressed の lookup、`-window_size 0`、`-threshold 13.5` を含む）、`-comp_based_stats` の 1・3、`-ungapped`、`-max_intron_length` の 0 以外、NCBI の tblastn の option のうち LOSAT に無いもの（`is_unported_tblastn_arg`：`-db`・`-in_pssm`・`-remote`・`-subject_loc`・`-use_sw_tback`・`-xdrop_ungap`・`-max_hsps`・`-culling_limit` ほか）。
 
 **TBLASTX**：対応する値は、word size 3、threshold は任意の正の実数（`+inf` を含む）、`-window_size` の 1 以上（query の batch の翻訳の長さとの和が 2^30 を超える値は拒否、D8・D11）、`-seg`、`-query_gencode`・`-db_gencode`（承認済みの例外）、`-culling_limit`（0 以上。S08+ で移植）、`-evalue`、`-max_target_seqs`、`-outfmt` の 0・6・7（custom の指定は拒否）。拒否する値は、word size 2・4、`-window_size 0`、NCBI の tblastx の option のうち LOSAT に無いもの（`is_unported_tblastx_arg`：`-matrix`・`-max_hsps`・`-sum_stats`・`-lcase_masking`・`-soft_masking`・`-strand`・`-max_intron_length`・`-xdrop_ungap`・`-best_hit_*`・`-subject_besthit`・`-num_descriptions`・`-num_alignments` ほか）。
 
@@ -125,14 +126,13 @@ LOSAT は誤りを出す handler だけを同じ順に置いた（filtering、fo
 - D14（S08+a、BP-8 の残り）：NCBI の argv の前処理（ncbiapp.cpp:926-1001）は `--` までの全ての語を調べ、option の値の位置の `-version`・`-version-full*` でも version を出して終了 0、`-dryrun` を取り除き、`-logfile`・`-conffile` は次の語を値に取る。LOSAT は D9 の範囲として、値の位置のこれらの語も option の位置と同じ文言で明示的に拒否する（`cli.rs` の `ncbi_preparsed_toolkit_word`、4 program とアダプタの `validate`）。推奨：このまま。保守者の確認を待つ。
 - TBLASTN の `-db_gencode` の承認済みの例外（`AGENTS.md`）：sweep の oracle（NCBI の `-db` の検索）は、NCBI の `-db` と `-subject` の結果が既定の遺伝暗号でも e-value・cbs によって違う（予備の cutoff と連結の違い）ため、厳密な oracle でない。TLOSAN Stage E/G の比較専用の C++ API の oracle（subject の検索の経路で、選んだ遺伝暗号を sequence source に与える。`docs/evidence/tlosan_stage_e/tblastn_stage_e_local_oracle.cpp`、[`gates/build_api_oracle.sh`](gates/build_api_oracle.sh) で Stage G の実行ファイルとバイト一致に作り直した）で確かめた：遺伝暗号 1 で CLI と一致（較正）、sweep の 27 の綴りの outfmt 0/6/7 の 81 件で LOSAT と一致（[`gencode_api/check.tsv`](gencode_api/check.tsv)、[`gencode_api_check.py`](gencode_api_check.py)）。
 
-## N. 残り（次のセッション S08+b）
+## N. 残り（S08+b の後）
 
-第 1 回の独立監査（[`audit/ROUND1.md`](audit/ROUND1.md)）で見つかり、このセッションで直さなかったもの。どれも NCBI とバイト一致にするか明示的に拒否する。
+第 1 回の監査の残り（TN-2・TN-4・TN-5・RP-4・`-out -version`）は S08+a が直し（§M の D13・D14、[`s08pa/NOTES.md`](s08pa/NOTES.md)）、第 2 回の監査の指摘は S08+b が直すか記録した（[`audit/ROUND2.md`](audit/ROUND2.md)）。出力に関わる残りは無い。次は資源・性能・文言と、保守者の確認。
 
-- TN-2：TBLASTN の `-comp_based_stats 0`、hard mask の `-lcase_masking -seg no`、少ない `-max_target_seqs` で、和の統計の e-value が 1〜4 % 違う（`-sum_stats false` では一致）。NCBI の linking の `Blast_HSPListGetEvalues` の呼び出し（subject の長さ/3）と Spouge の `db_length` を、LOSAT の linking の値と比べる（TLOSAN Stage D の trace の shim `ncbi_d_call_trace.c` で NCBI の値が取れる）。
-- TN-4：巨大な `-xdrop_gap`・`-xdrop_gap_final`（1e7〜5e8 bit）で LOSAT の DP の帯の `resize` が全 cell を書き、数十秒・数 GB（NCBI は `malloc` で 1 秒未満）。BLASTP・TBLASTN の共有の経路（`blastp/gapalign.rs` の `gap_dp_reserve_initial`・`gap_dp_reserve_band` と traceback の状態）を、書く前に読まない cell を初期化しない形にするか、閾値で明示的に拒否する。V-PERF が要る。
-- TN-5：BLOSUM45 の組で `-evalue` 5000 以上の同じ得点の HSP の frame・座標。
-- RP-4（既定の option、前から）：60000 残基の query の長い一致の composition の行列の調整で bit score が違う（入力は `audit/round1/rp4/`）。
-- `-out -version`（BP-8 の残り）：NCBI は `-version` を version の option として読む。
-- 第 2 回の独立監査（上を直した後、4 観点）。
-- 保守者の確認：D11、D12（推奨の別案の承認済みの例外を含む）。
+- R2c-1（資源だけ）：TBLASTX の `-threshold` が `INT_MIN` になる値（`+inf` など、完全な近傍）で、LOSAT の記憶が NCBI の最大 2.3 倍（30 kb の query で NCBI 3.8 GB、LOSAT 8.7 GB。出力は同じ）。NCBI は tblastx の長い query を 10002 塩基の chunk（重なり 297）に分け、chunk ごとに lookup を作る（split_query_aux_priv.cpp の `SplitQuery_ShouldSplit`）。LOSAT の TBLASTX は分けない。NCBI の出力は chunk の大きさで変わらなかった（`s08pb/txsplit/`）ので、移すなら記憶のため。BLASTX も同じ分割（SX の指示書）。
+- R2b-2（性能、実験用の環境変数だけ）：小さい `CHUNK_SIZE`（1、7）で LOSAT の TBLASTN は chunk ごとに NCBI の約 10 倍遅い（chunk ごとの `query_set_setup`）。既定では chunk は数個。
+- 性能（前から）：TBLASTN の 300 の subject（`e2e_many_subject.fna`）で LOSAT は約 2〜4 秒、NCBI は 0.2〜0.4 秒（SD の成果物から同じ。V-PERF は変更前との比較なので退行ではない）。BLASTP の分割される batch（約 9,800 残基を超える query）は、全体の検索でも一度検索する（結果は捨てる）。
+- R2c-3（文言）：TX-3 の拒否の文言が、標準入力が普通のファイルでも「such as a pipe」と言う。
+- BLASTX と共有の箇所（SX）：`core/composition_adjustment/redo_alignment.rs` の `sort_unstable_by`（NCBI の安定な `qsort` に当たる）、compressed の lookup の走査の修正（R2A-1）と gapped DP の確保（TN-4）が BLASTX にも及ぶこと、最後の `--` は BLASTX に当てていない（[SX の指示書](../../losat_web_gui_sessions/session_sx_blastx_integration.md)）。
+- 保守者の確認：D11、D12（推奨の別案の承認済みの例外を含む）、D13、D14。

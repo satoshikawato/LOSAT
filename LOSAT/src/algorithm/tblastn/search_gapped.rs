@@ -8,6 +8,7 @@ use super::search_seed::{
 use crate::algorithm::blastn::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
 use crate::algorithm::blastp::encoding::encode_protein_query_frame_with_seg;
 use crate::algorithm::blastp::gapalign::{
+    blast_gapped_alignment_with_traceback_in_window,
     blast_gapped_alignment_with_traceback_with_scratch, blastp_get_start_for_gapped_alignment,
     blastp_score_only_gapped_alignment_with_scratch, protein_identities_from_edit_ops,
     BlastpGappedAlignmentMode, GapAlignScratch,
@@ -1590,13 +1591,22 @@ pub(super) fn full_translation_traceback_with_matrix_and_events_with_mask_mode_o
             };
             let mut fence_hit = false;
             let mut scratch = GapAlignScratch::new();
-            let alignment = blast_gapped_alignment_with_traceback_with_scratch(
+            // NCBI reference: c++/src/algo/blast/core/blast_traceback.c:509-512
+            // ```c
+            //            BLAST_GappedAlignmentWithTraceback(program_number, query,
+            //                  adjusted_subject, gap_align, score_params, q_start, s_start,
+            //                  query_length, adjusted_s_length,
+            //                  fence_hit);
+            // ```
+            // The window's letters end before its sentinel (`subject_sequence` ends with it),
+            // which only the last column of the right extension reads (TN-1).
+            let alignment = blast_gapped_alignment_with_traceback_in_window(
                 query_sequence,
                 subject_sequence,
+                subject_sequence.len() - 1,
                 q_start,
                 s_start,
                 matrix,
-                None,
                 gap_open,
                 gap_extend,
                 x_drop_final,

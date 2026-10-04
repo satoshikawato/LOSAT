@@ -101,6 +101,26 @@ BLASTP（`blastp/blast_engine.rs` の `search_split_query_batches`、`blastp/que
 - fixture：`e2e.tblastn.query_split`（outfmt 6）、`query_split_fmt0`、`query_split_two`（19000 と 21000 残基の 2 query、`-comp_based_stats 0 -evalue 1000`）。変更前の実行ファイルは 3 件とも違う。
 - TBLASTN の単体試験 110 件、分割の単体試験 3 件、TBLASTN の fixture 20 件。
 
+## TN-1 の残り：窓の右端の traceback（監査の再現で見つかった差）
+
+### 最初に値が食い違う箇所
+
+TBLASTN の監査の再現の agent が見つけた（ROUND1 に無い、変更前の実行ファイルも同じ）：`-comp_based_stats 0`、最終の X-drop が 1e9 bit 以上（`INT_MIN` の経路で、`ALIGN_EX` の X-drop は gap の開始と伸長の和 12 になる）、大きい `-evalue`（生成の入力で 1000 以上、fixture で 1e5 以上）で、NCBI だけにある行があり e-value も違う。最小の再現：`audit-rerun/tblastn/r/min_q.faa`（gq4）× `min_s.fna`（gs37）、`-comp_based_stats 0 -xdrop_gap_final 1e10 -evalue 1000 -outfmt 6`（NCBI 0.36、LOSAT 0.40）。
+
+1. NCBI の trace（`s08pa/tb_trace.c` と Stage D の shim）：fence に触れず、traceback の後の `BLAST_LinkHsps` の `stat_length` は 542（最後の翻訳は frame 2 の窓の終わり）。LOSAT（診断の写しで出力）は 36 番目の HSP（frame 1、`s_start` 879・`s_end` 880、窓は subject の frame の終わり 881 まで）で右の fence に触れて全翻訳でやり直し、`stat_length` は 880。
+2. NCBI の `ALIGN_EX`（blast_gapalign.c:429-432）は `N <= 0` なら何も読まずに 0 を返す。右の伸長の `N` は `s_length - s_start - 1` で、`s_length` は翻訳の窓の終わり（blast_traceback.c:463-464,509-512、`Blast_HSPGetTargetTranslation` の `translated_length` blast_hits.c:1230-1235）。列 `b_index` は `B[b_index + 1]` を読む（blast_gapalign.c:563-578）ので、`N >= 1` の最後の列（`b_size == N + 1`）は窓の後ろの番兵（部分の窓は右の fence、全翻訳は NULLB）を読む。
+3. LOSAT は窓の slice（左の fence、残基、右の番兵）を丸ごと traceback に渡し、右の伸長の `len2` を slice の長さから計算していたので、`N` が 1 大きかった。gapped start が窓の最後の残基（`N = 0`）でも DP を回して右の fence を読んだ。
+
+### 直し方
+
+TBLASTN の traceback は新しい入口 `blast_gapped_alignment_with_traceback_in_window`（`blastp/gapalign.rs`）を使い、窓の長さ（番兵を除く）を渡す。右の伸長の `len2` は窓の長さから計算し、DP の最後の列は番兵を読む（`align_ex_protein` の `read_end_sentinel`）。BLASTP・BLASTX が使う従来の入口は、本体を内部の関数に移しただけで動作は変えていない（`read_end_sentinel` は偽で、最後の列は今までどおり 0。DW-10）。
+
+### 確かめ
+
+- 最小の再現と、agent の 3 つの組（`-xdrop_gap_final 1e10 -evalue 1e5`、`-xdrop_gap 1e10 -evalue 1e5`、`-xdrop_gap_final +inf -evalue 1e10`、`gen_q_lc.faa` の `-xdrop_gap_final -5 -xdrop_gap 1e10 -evalue 1e5 -comp_based_stats F -outfmt 0`）、TN-1 の組（`-xdrop_gap 5 -xdrop_gap_final 5`、`-xdrop_gap_final 1e10`）、既定と cbs 0 の `-evalue 1e5`：全て NCBI と一致。
+- 途中で、右の伸長に番兵を外した slice を渡すだけの直しを試したが、`N >= 1` で NCBI が読む右の fence を読まなくなり、fixture の組で 12148 行中 5218 行が違った（最後の列で番兵を読む形に改めた）。
+- fixture `e2e.tblastn.window_end`（変更前の実行ファイルは違う）。TBLASTN・BLASTP・BLASTX の単体試験、全 fixture 147 件（1・4 スレッド）。
+
 ## `-out -version`（BP-8 の残り）
 
 ### NCBI の振る舞い

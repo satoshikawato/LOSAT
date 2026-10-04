@@ -1690,6 +1690,7 @@ fn align_ex_protein(
     reverse: bool,
     scratch: &mut GapAlignScratch,
     fence_hit: &mut bool,
+    read_end_sentinel: bool,
 ) -> (usize, usize, i32, Vec<GapEditOp>) {
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:543-578
     // ```c
@@ -1712,6 +1713,7 @@ fn align_ex_protein(
             x_drop,
             scratch,
             fence_hit,
+            read_end_sentinel,
         ),
         (true, false) => align_ex_protein_impl::<true, false>(
             q_seq,
@@ -1724,6 +1726,7 @@ fn align_ex_protein(
             x_drop,
             scratch,
             fence_hit,
+            read_end_sentinel,
         ),
         (false, true) => align_ex_protein_impl::<false, true>(
             q_seq,
@@ -1736,6 +1739,7 @@ fn align_ex_protein(
             x_drop,
             scratch,
             fence_hit,
+            read_end_sentinel,
         ),
         (false, false) => align_ex_protein_impl::<false, false>(
             q_seq,
@@ -1748,6 +1752,7 @@ fn align_ex_protein(
             x_drop,
             scratch,
             fence_hit,
+            read_end_sentinel,
         ),
     }
 }
@@ -1772,6 +1777,7 @@ fn align_ex_protein_impl<const BLOSUM62: bool, const REVERSE: bool>(
     x_drop: i32,
     scratch: &mut GapAlignScratch,
     fence_hit: &mut bool,
+    read_end_sentinel: bool,
 ) -> (usize, usize, i32, Vec<GapEditOp>) {
     if len1 == 0 || len2 == 0 {
         return (0, 0, 0, Vec::new());
@@ -1938,7 +1944,21 @@ fn align_ex_protein_impl<const BLOSUM62: bool, const REVERSE: bool>(
             dp_band.iter_mut().zip(trace_band.iter_mut()).enumerate()
         {
             let b_index = band_start + band_index;
-            let sc = if b_index < len2 {
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:563-569
+            // ```c
+            //         for (b_index = first_b_index; b_index < b_size; b_index++) {
+            //             int matrix_index = 0;
+            //
+            //             b_ptr += b_increment;
+            //             score_gap_col = score_array[b_index].best_gap;
+            //
+            //             matrix_index = *b_ptr;
+            // ```
+            // Column `b_index` reads `B[b_index + 1]`, so the last column (`b_size == N + 1`)
+            // reads the byte after the extension's letters. A translated subject window
+            // keeps its sentinel (the right fence, or the end of a full translation) there
+            // (`read_end_sentinel`); other callers read 0.
+            let sc = if b_index < len2 || read_end_sentinel {
                 blastp_subject_residue::<REVERSE>(s_seq, 0, len2, b_index)
             } else {
                 0
@@ -2251,9 +2271,92 @@ pub(crate) fn blast_gapped_alignment_with_traceback_with_scratch(
     gap_extend: i32,
     x_drop: i32,
     scratch: &mut GapAlignScratch,
+    fence_hit_out: Option<&mut bool>,
+) -> Option<BlastpGapAlignResult> {
+    gapped_alignment_with_traceback(
+        query,
+        subject,
+        None,
+        q_start,
+        s_start,
+        matrix,
+        adjusted_matrix,
+        gap_open,
+        gap_extend,
+        x_drop,
+        scratch,
+        fence_hit_out,
+    )
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:463-464,509-512
+// ```c
+//          adjusted_s_length = subject_length;
+//          adjusted_subject = subject;
+//          ...
+//            BLAST_GappedAlignmentWithTraceback(program_number, query,
+//                  adjusted_subject, gap_align, score_params, q_start, s_start,
+//                  query_length, adjusted_s_length,
+//                  fence_hit);
+// ```
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1230-1235
+// ```c
+//     if (translated_length)
+//         *translated_length = target_t->range[2*context+1];
+//
+//     /* +1 as the first byte is a sentinel. */
+//     return target_t->translations[context] - target_t->range[2*context] + 1;
+// ```
+/// The traceback of a translated subject window (TBLASTN): `subject` ends with the window's
+/// sentinel, which is not one of the `subject_length` letters (NCBI's subject length is the
+/// end of the translated window). The right extension stops before the sentinel, and its last
+/// column reads it as NCBI's does (a right fence, or the end of a full translation).
+pub(crate) fn blast_gapped_alignment_with_traceback_in_window(
+    query: &[u8],
+    subject: &[u8],
+    subject_length: usize,
+    q_start: usize,
+    s_start: usize,
+    matrix: ScoringMatrix,
+    gap_open: i32,
+    gap_extend: i32,
+    x_drop: i32,
+    scratch: &mut GapAlignScratch,
+    fence_hit_out: Option<&mut bool>,
+) -> Option<BlastpGapAlignResult> {
+    gapped_alignment_with_traceback(
+        query,
+        subject,
+        Some(subject_length),
+        q_start,
+        s_start,
+        matrix,
+        None,
+        gap_open,
+        gap_extend,
+        x_drop,
+        scratch,
+        fence_hit_out,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn gapped_alignment_with_traceback(
+    query: &[u8],
+    subject: &[u8],
+    window_length: Option<usize>,
+    q_start: usize,
+    s_start: usize,
+    matrix: ScoringMatrix,
+    adjusted_matrix: Option<&AdjustedProteinMatrix>,
+    gap_open: i32,
+    gap_extend: i32,
+    x_drop: i32,
+    scratch: &mut GapAlignScratch,
     mut fence_hit_out: Option<&mut bool>,
 ) -> Option<BlastpGapAlignResult> {
-    if q_start >= query.len() || s_start >= subject.len() {
+    let subject_length = window_length.unwrap_or(subject.len());
+    if q_start >= query.len() || s_start >= subject_length {
         return None;
     }
 
@@ -2283,6 +2386,7 @@ pub(crate) fn blast_gapped_alignment_with_traceback_with_scratch(
         true,
         scratch,
         &mut fence_hit,
+        false,
     );
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4614-4615
     // ```c
@@ -2317,12 +2421,12 @@ pub(crate) fn blast_gapped_alignment_with_traceback_with_scratch(
     // }
     // ```
     let (mut query_stop, mut subject_stop, mut score_right, right_edit_ops) =
-        if !fence_hit && q_start < query.len() && s_start < subject.len() {
+        if !fence_hit && q_start < query.len() && s_start < subject_length {
             let (right_q, right_s, score_right, right_edit_ops) = align_ex_protein(
                 &query[q_start..],
                 &subject[s_start..],
                 query.len().saturating_sub(q_start + 1),
-                subject.len().saturating_sub(s_start + 1),
+                subject_length.saturating_sub(s_start + 1),
                 score_matrix,
                 gap_open,
                 gap_extend,
@@ -2330,6 +2434,7 @@ pub(crate) fn blast_gapped_alignment_with_traceback_with_scratch(
                 false,
                 scratch,
                 &mut fence_hit,
+                window_length.is_some(),
             );
             (
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4646-4647:
@@ -4018,6 +4123,7 @@ mod tests {
             false,
             &mut scratch,
             &mut fence_hit,
+            false,
         );
 
         assert!(fence_hit);
@@ -4136,6 +4242,7 @@ mod tests {
                                     reverse,
                                     scratch,
                                     &mut fence,
+                                    false,
                                 );
                                 // Empty inputs return before resetting existing scratch.
                                 let used = if len == 0 { 0 } else { scratch.trace_rows_used };
@@ -4200,6 +4307,7 @@ mod tests {
                     reverse,
                     &mut scratch,
                     &mut fence,
+                    false,
                 );
                 assert!(fence);
                 assert!(result.3.is_empty());

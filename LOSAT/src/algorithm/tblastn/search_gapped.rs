@@ -1347,6 +1347,13 @@ fn full_translation_traceback_with_matrix_and_events_with_mask_mode(
     containment_events: Option<&mut Vec<(bool, i8, i32, i32, i32, i32)>>,
     identity_events: Option<&mut Vec<(usize, usize)>>,
 ) -> Result<Vec<(GappedHsp, bool)>> {
+    // NCBI c++/src/algo/blast/core/blast_engine.c:539-552,840-850:
+    // Blast_HSPListSortByScore(hsp_list);
+    // Blast_HSPListAppend(&hsp_list_for_chunks, &hsp_list_out, kHspNumMax);
+    // The Stage C observers pass one subject's preliminary HSPs, which reach the
+    // traceback in this score order.
+    let mut ordered = gapped.to_vec();
+    sort_gapped_score_if_needed(&mut ordered);
     // NCBI c++/src/algo/blast/core/blast_traceback.c:583-605,675-693:
     // Blast_HSPUpdateWithTraceback(...); Blast_HSPListSortByScore(...);
     // return the retained HSPs in source order to existing Stage C observers.
@@ -1355,7 +1362,7 @@ fn full_translation_traceback_with_matrix_and_events_with_mask_mode(
             query,
             subject,
             db_gencode,
-            gapped,
+            &ordered,
             matrix,
             gap_open,
             gap_extend,
@@ -1419,11 +1426,30 @@ pub(super) fn full_translation_traceback_with_matrix_and_events_with_mask_mode_o
         .aa_seq_nomask
         .as_ref()
         .map_or(query_sequence, |bytes| &bytes[1..bytes.len() - 1]);
-    // NCBI c++/src/algo/blast/core/blast_engine.c:539-552,840-850:
-    // Blast_HSPListSortByScore(hsp_list);
-    // Blast_HSPListAppend(&hsp_list_for_chunks, &hsp_list_out, kHspNumMax);
-    let mut ordered = gapped.to_vec();
-    sort_gapped_score_if_needed(&mut ordered);
+    // NCBI reference: c++/src/algo/blast/core/blast_traceback.c:358-365
+    // ```c
+    //    /* Make sure the HSPs in the HSP list are sorted by score, as they should
+    //       be. */
+    // #ifdef _DEBUG
+    //    {
+    //        Blast_HSPListSortByScore(hsp_list);
+    //    }
+    // #endif
+    //    ASSERT(Blast_HSPListIsSortedByScore(hsp_list));
+    // ```
+    // NCBI reference: c++/src/algo/blast/core/blast_hits.c:3269-3284
+    // ```c
+    //       if (!hit_list->heapified) {
+    //     	  /* make sure all hsp_list is sorted */
+    //           for (index =0; index < hit_list->hsplist_count; index++) {
+    //               Blast_HSPListSortByEvalue(hit_list->hsplist_array[index]);
+    //       ...
+    //       Blast_HSPListSortByEvalue(hsp_list);
+    // ```
+    // The release traceback keeps the order the preliminary hit list left: by
+    // score, or by E-value once that hit list was full and heapified. The order
+    // decides which HSP is translated last, i.e. `stat_length` (TN-2).
+    let ordered = gapped.to_vec();
     let query_length = i32::try_from(query.len())?;
     let subject_limit = i32::try_from(subject.len() / 3)? + 1;
     let mut target = TargetTranslation::new(subject, &code);

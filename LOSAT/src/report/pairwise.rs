@@ -1612,8 +1612,18 @@ pub fn write_blastp_pairwise_report<W: Write>(
         //                               defline_length == -1 ? kFormatLineLength:defline_length,
         //                               m_NumSummary + additional);
         // ```
+        // The table follows `x_InitDeflineTable` (`write_blastn_description_table`): the
+        // subject's highest bit score and that HSP's E-value, and the protein title.
         let described = &subject_order[..subject_order.len().min(report.num_descriptions)];
-        write_subject_summary_table(writer, described, &subject_hits, subject_ids)?;
+        write_blastn_description_table(
+            writer,
+            described,
+            subject_order.len() <= report.num_descriptions,
+            &subject_hits,
+            subject_ids,
+            false,
+            true,
+        )?;
         // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:1520-1589
         // x_DisplayDeflines(aln_set, ...); ... display.DisplaySeqalign(m_Outfile);
         writeln!(writer)?;
@@ -1648,12 +1658,16 @@ pub fn write_blastp_pairwise_report<W: Write>(
                 writer.flush()?;
                 probe.subject_begin(first_index);
             }
-            write_subject_header(
-                writer,
-                subject_id,
-                first_hit.subject_title.as_deref(),
-                first_hit.subject_length,
-            )?;
+            // NCBI reference: c++/src/objtools/align_format/showalign.cpp:2273
+            // ```c++
+            //             alnDispParams->title = CDeflineGenerator().GenerateDefline(bsp_handle);
+            // ```
+            // The subject (a protein sequence) is shown with its title (`defline.rs`).
+            let heading = super::defline::ncbi_protein_title(
+                &subject_defline(subject_id, first_hit.subject_title.as_deref()),
+                false,
+            );
+            write_subject_header(writer, &heading, None, first_hit.subject_length)?;
             if let Some(probe) = probe.as_mut() {
                 writer.flush()?;
                 probe.subject_end(first_index);
@@ -1835,6 +1849,7 @@ fn write_blastn_description_table<W: Write>(
     subject_hits: &std::collections::HashMap<u32, Vec<&PairwiseHit>>,
     subject_ids: &[Arc<str>],
     show_sum_n: bool,
+    protein: bool,
 ) -> io::Result<()> {
     let rows: Vec<(u32, &PairwiseHit, f64, i32)> = described
         .iter()
@@ -1910,7 +1925,11 @@ fn write_blastn_description_table<W: Write>(
         // NCBI reference: c++/src/objtools/align_format/showdefline.cpp:498
         // The description keeps the prefixes (`fLeavePrefixSuffix`, `defline.rs`).
         let defline = subject_defline(subject_id, best.subject_title.as_deref());
-        let label = super::defline::ncbi_nucleotide_title(&defline, true);
+        let label = if protein {
+            super::defline::ncbi_protein_title(&defline, true)
+        } else {
+            super::defline::ncbi_nucleotide_title(&defline, true)
+        };
         // NCBI reference: c++/src/objtools/align_format/showdefline.cpp:915-918,930
         // ```c++
         //         if(line_component.size()+line_length > m_LineLen){
@@ -2290,6 +2309,7 @@ pub fn write_blastn_pairwise_report<W: Write>(
             subject_order.len() <= report.num_descriptions,
             &subject_hits,
             subject_ids,
+            false,
             false,
         )?;
         writeln!(writer)?;
@@ -2918,6 +2938,7 @@ pub fn write_tblastx_pairwise_report<W: Write>(
             &subject_hits,
             subject_ids,
             true,
+            false,
         )?;
         writeln!(writer)?;
 
@@ -3514,6 +3535,7 @@ pub fn write_tblastn_pairwise_report<W: Write>(
             subject_order.len() <= report.num_descriptions,
             &subject_hits,
             subject_ids,
+            false,
             false,
         )?;
         writeln!(writer)?;
@@ -4528,7 +4550,7 @@ mod tblastx_tests {
                 .collect();
         let ids: Vec<Arc<str>> = vec![Arc::from("s0"), Arc::from("s1")];
         let mut out = Vec::new();
-        write_blastn_description_table(&mut out, &[0, 1], true, &hits, &ids, true).unwrap();
+        write_blastn_description_table(&mut out, &[0, 1], true, &hits, &ids, true, false).unwrap();
         let text = String::from_utf8(out).unwrap();
         let lines: Vec<&str> = text.lines().collect();
         assert!(lines[0].ends_with("Score     E"), "{text}");

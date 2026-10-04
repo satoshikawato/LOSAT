@@ -719,6 +719,7 @@ fn search_cli(
     crate::blastinput::app::xinclude_check(choice)?;
     subject_checks?;
     let queries = fasta_input::bio_records_of(&query_bytes, &args.query, "query", "TBLASTN")?;
+    fasta_input::write_protein_title_warnings(&queries, outputs.diagnostics)?;
     fasta_input::check_protein_input_of(&query_bytes, &queries, "query", "TBLASTN")?;
     drop(query_bytes);
     search(&args, resolved, &queries, subjects, outputs)
@@ -785,6 +786,10 @@ pub fn run_local(
             .write_all(b"Warning: [tblastn] Query is Empty!\n")?;
         return Ok(());
     }
+    crate::algorithm::blastn::input::write_protein_title_warnings(
+        query_records,
+        outputs.diagnostics,
+    )?;
     search(&args, resolved, query_records, subject_records, outputs)
 }
 

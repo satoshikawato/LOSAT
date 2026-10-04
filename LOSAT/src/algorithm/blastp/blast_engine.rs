@@ -4254,6 +4254,7 @@ pub fn run(args: BlastpArgs) -> Result<()> {
     if subjects.is_empty() {
         return Err(app::empty_subjects_error());
     }
+    fasta_input::write_protein_title_warnings(&subjects, &mut std::io::stderr())?;
     // NCBI reads these deflines and residues without an error; LOSAT rejects them where the
     // search would start.
     let subject_checks =
@@ -4392,6 +4393,7 @@ fn search_cli(
     crate::blastinput::app::xinclude_check(&choice)?;
     subject_checks?;
     let queries = fasta_input::bio_records_of(&query_bytes, &args.query, "query", "BLASTP")?;
+    fasta_input::write_protein_title_warnings(&queries, outputs.diagnostics)?;
     fasta_input::check_protein_input_of(&query_bytes, &queries, "query", "BLASTP")?;
     drop(query_bytes);
     validate_requested_blastp_support(&resolved)?;
@@ -4453,7 +4455,17 @@ pub fn run_local(
     subject_label: &str,
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
+    // NCBI warns about the titles when it reads the subjects (before the option handlers)
+    // and the queries (`blastn/input.rs`).
+    crate::algorithm::blastn::input::write_protein_title_warnings(
+        subject_records,
+        outputs.diagnostics,
+    )?;
     let args = resolve_for_formats(&args, outputs)?;
+    crate::algorithm::blastn::input::write_protein_title_warnings(
+        query_records,
+        outputs.diagnostics,
+    )?;
     validate_requested_blastp_support(&args)?;
     run_resolved_with_records(
         args,
@@ -6860,6 +6872,25 @@ fn run_resolved_in_pool(
                 let pairwise_hits = pairwise_hits
                     .as_ref()
                     .expect("pairwise hits prepared for blastp outfmt 0");
+                // NCBI makes the titles of the subjects that the report shows, those with
+                // hits; LOSAT rejects the titles that it does not write as NCBI
+                // (`report/defline.rs`).
+                let shown: std::collections::BTreeSet<usize> = pairwise_hits
+                    .iter()
+                    .map(|hit| hit.hit.s_idx as usize)
+                    .collect();
+                for index in shown {
+                    let record = &subject_records[index];
+                    let defline = match record.desc() {
+                        Some(desc) => format!("{} {desc}", record.id()),
+                        None => record.id().to_string(),
+                    };
+                    crate::report::defline::check_shown_protein_subject_title(
+                        &defline,
+                        index + 1,
+                        "BLASTP",
+                    )?;
+                }
                 let masked_hits = masked_query_rows(pairwise_hits, &query_frames);
                 write_blastp_pairwise_report(
                     masked_hits.as_deref().unwrap_or(pairwise_hits),

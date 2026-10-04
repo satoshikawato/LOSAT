@@ -35,3 +35,24 @@ traceback の入口の並べ直しを除いた（NCBI の blast_traceback.c:358-
 ### 直し方
 
 `dp_mem_alloc` は NCBI の値のまま（再確保の時点と、LOSAT の範囲の検査 `b_size < dp_mem_alloc` に使う）にし、`dp_mem` の実際の長さを `MIN(dp_mem_alloc, N + 1)`（`gap_dp_ensure_cells`）にした。後の伸長の `N` が長ければ伸ばす。traceback の行の容量の予約も、行に入りうる `N + 2 - first_b_index` 個までにした（容量は性能のための予約で、出力に関わらない）。DP が読む cell と値は変わらない（cell は書いてから読む。`s_RestrictedGappedAlign` の最初の行の上限 `dp_mem.len() - 1` も、`len2` か以前と同じ `dp_mem_alloc - 1`）。BLASTP・TBLASTN・BLASTX が共有する経路で、出力は変わらない。
+
+## TN-5：BLOSUM45 の組の大きな `-evalue` で同じ得点の HSP の frame
+
+### 最初に値が食い違う箇所
+
+再現：`e2e_protein_query.faa` × `e2e_tblastn_subject.fna`、`-matrix BLOSUM45 -word_size 2 -comp_based_stats 0 -evalue 1e4 -outfmt 6`。29900 行中 4 行で subject の座標だけが違う（NCBI `4712 4695`、LOSAT `4710 4693`）。
+
+1. 違う行は、subject の frame f と f+2（1 と 3、−1 と −3）で protein の座標・得点・query の範囲が同じ 2 つの HSP の、どちらが残るか。`4712 4695` は frame −1 の `s.offset` 96、`4710 4693` は frame −3 の同じ 96（`LvMJNV_160001_165000` は 5000 塩基）。
+2. traceback に入る HSP の一覧（`s08pa/tn2/tb_trace.c` の `Blast_TracebackFromHSPList` の入力、BDT62620.1 × subject 2 の 662 個）は同じ集合で、5 組だけ順が逆（NCBI は frame −1 が先、LOSAT は −3 が先）。後の方は、containment の検査と common endpoint の purge で落ちる。
+3. 予備の段の linking の入力（Stage D の shim の `BLAST_LinkHsps` の `link_before`、5928 個）で既に 12 か所（6 組）の順が逆。NCBI の `s_BlastUnevenGapLinkHSPs`（link_hsps.c:1613-1757）は別の配列で連結し、`hsp_array` の順を変えない。最後の `Blast_HSPListSortByScore`（link_hsps.c:1802-1803）は安定。
+4. 順を作るのは frame ごとの HSP の追加：`Blast_HSPListAppend` → `s_BlastHSPListsCombineByScore`（blast_hits.c:2749-2768）は新しい frame の HSP を後ろに足して `Blast_HSPListSortByScore`（blast_hits.c:1374-1383、`qsort` と `ScoreCompareHSPs`）。`ScoreCompareHSPs`（blast_hits.c:1330-1356）は frame を比べないので、f と f+2 の同じ座標の HSP は同順位になる。固定した NCBI BLAST+ 2.17.0 は glibc 2.39 の上で動き、その `qsort` は安定な merge sort（同順位は追加の順、つまり frame 1, 2, 3, −1, −2, −3 の順に残る）。
+5. LOSAT の `search_gapped.rs` の `sort_preliminary_by_score`（frame の追加の後の並べ替え）は `sort_unstable_by` で、同順位の順を保たなかった。traceback の `purge_traceback_common_endpoints`（blast_hits.c:2478-2486,2504 の `qsort`。比較は frame を見ず、削除は隣の HSP が同じ frame の時だけ）、chunk の併合、初めの hit の並べ替え（blast_extend.c:306-310）も `sort_unstable_by` だった。
+
+### 直し方
+
+TBLASTN だけが使う、NCBI の `qsort` に当たる並べ替え（`search_gapped.rs` の 7 か所と `search_init.rs` の 1 か所）を安定な `sort_by` にした（NCBI の `qsort` の行を直上に引用）。BLASTP（`blastp/hsp.rs`、`blast_engine.rs`）と BLASTX と共有する composition の窓の並べ替え（`redo_alignment.rs`）は変えていない（下の「残り」）。
+
+### fixture と確かめ
+
+- fixture `e2e.tblastn.b45_frame_ties`（outfmt 6）と `e2e.tblastn.b45_frame_ties_fmt0`（outfmt 0）：BDT62620.1 × `LvMJNV_160001_165000`（`e2e_frame_tie_query.faa`・`e2e_frame_tie_subject.fna`）、`-matrix BLOSUM45 -word_size 2 -comp_based_stats 0 -evalue 1000`。変更前は 3 行（outfmt 0 は 6 行）違う。
+- 監査の再現：`-evalue` 5000・1e4・1e5・1e10 で全て一致（19033〜69454 行）。

@@ -388,7 +388,13 @@ pub(super) fn find_protein_init_hsps_by_chunk_with_mask_mode(
             // Blast_InitHitListSortByScore(init_hitlist);
             // NCBI c++/src/algo/blast/core/blast_extend.c:273-313:
             // compare score DESC, subject start ASC, length DESC, query start ASC.
-            hits.sort_unstable_by(|a, b| {
+            // NCBI reference: c++/src/algo/blast/core/blast_extend.c:306-310
+            // ```c
+            //     qsort(init_hitlist->init_hsp_array, init_hitlist->total,
+            //           sizeof(BlastInitHSP), score_compare_match);
+            // ```
+            // Stable, as glibc's qsort under the pinned NCBI BLAST+ (TN-5).
+            hits.sort_by(|a, b| {
                 b.score
                     .cmp(&a.score)
                     .then(a.s_start.cmp(&b.s_start))

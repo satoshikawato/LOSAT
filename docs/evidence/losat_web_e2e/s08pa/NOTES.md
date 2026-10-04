@@ -185,6 +185,7 @@ TBLASTN の traceback は新しい入口 `blast_gapped_alignment_with_traceback_
 - 無し（第 1 回の監査の 5 件と、再現で見つかった TN-1 の残りを直した）。
 - 既知の、このセッションの前からの性能の差：TBLASTN の `e2e_many_subject.fna`（300 subject）で、既定の option でも LOSAT は約 2〜4 秒（負荷による）、NCBI は 0.2〜0.4 秒（変更前も同じ）。V-PERF は変更前との比較なので退行ではない。
 - BLASTP の分割される batch の query は、全体の検索でも一度検索する（結果は捨てる）。約 9,800 残基を超える query だけの費用。
+- TN-5 で変えなかった並べ替え：BLASTP の `blastp/hsp.rs`（535・556・1128・1687・1719 行）と `blast_engine.rs`（3493・3505 行）、BLASTP・TBLASTN・BLASTX が共有する composition の窓の `core/composition_adjustment/redo_alignment.rs`（1385・1403・1503・1522・1827 行）は `sort_unstable_by` のまま。NCBI の `qsort`（glibc 2.39 では安定）に当たり、比べ方が全てを区別しなければ同順位の順が NCBI と違いうる。BLASTP の sweep・fixture・監査の再現に差は無く、同順位が出力に届く例は見つけていない。BLASTP は S08+b、BLASTX は SX で確かめる（DW-10 のため BLASTX と共有する箇所はこのセッションで変えない）。
 
 ## 保守者に諮る項目（推奨の案で進めた）
 

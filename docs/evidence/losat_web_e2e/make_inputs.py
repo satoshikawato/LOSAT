@@ -28,6 +28,13 @@ Deterministic: the files are cut from committed fixtures, so a rerun writes the 
   ` ,`, `( `, prefixes) and one ending in 60 letters (the CFastaReader title warning).
 - e2e_amb_subject.fna: e2e_tblastn_subject.fna with 2 % of the bases replaced by IUPAC
   ambiguity codes (seeded): the displayed Sbjct rows of TBLASTN (B, Z, J, X).
+- e2e_invalid_query.faa: a query of X only (no ungapped Karlin-Altschul parameters) and
+  two queries made from the first 60 residues of the first query with A, then A and L,
+  replaced by O (pyrrolysine, which NCBI reads as X with a warning); e2e_allx_query.faa:
+  the X query alone (a query batch that NCBI does not search); e2e_o_subject.faa:
+  e2e_protein_subject.faa with every K replaced by O.
+- e2e_empty_subject.faa: e2e_protein_subject.faa between two records without residues
+  (NCBI's "Subject sequence contains no data" warnings).
 
 Usage: make_inputs.py
 """
@@ -116,6 +123,21 @@ def amb_input() -> None:
     (OUT / "e2e_amb_subject.fna").write_text("\n".join(out))
 
 
+def invalid_inputs() -> None:
+    first = (OUT / "e2e_protein_query.faa").read_text().split(">")[1].split("\n", 1)[1].replace("\n", "")[:60]
+    allx = ">q1 allx\n" + "X" * 30 + "\n"
+    (OUT / "e2e_allx_query.faa").write_text(allx)
+    (OUT / "e2e_invalid_query.faa").write_text(
+        allx + ">q2 withO\n" + first.replace("A", "O") + "\n"
+        + ">q3 manyO\n" + first.replace("A", "O").replace("L", "O") + "\n")
+    (OUT / "e2e_empty_subject.faa").write_text(
+        ">emptyA some long title for the subject record\n"
+        + (OUT / "e2e_protein_subject.faa").read_text() + ">empty1\n")
+    (OUT / "e2e_o_subject.faa").write_text("".join(
+        line if line.startswith(">") else line.replace("K", "O")
+        for line in (OUT / "e2e_protein_subject.faa").read_text().splitlines(keepends=True)))
+
+
 def main() -> None:
     records = [chunk.split("\n", 1)[1] for chunk in (OUT / "tblastx_many_subject.fasta").read_text().split(">")[1:4]]
     for name, deflines in (("punct_hits_subject.fna", DEFLINES), ("punct_hits_standin.fna", STAND_INS)):
@@ -129,6 +151,7 @@ def main() -> None:
     many_inputs()
     titles_input()
     amb_input()
+    invalid_inputs()
 
 
 if __name__ == "__main__":

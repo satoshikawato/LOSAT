@@ -1,0 +1,25 @@
+# BLASTP 2.17.0+
+# Query: q1 allx
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/e2e_protein_subject.faa)
+# 0 hits found
+# BLASTP 2.17.0+
+# Query: q2 withO
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/e2e_protein_subject.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 5 hits found
+q2	BDT62167.1	47.368	19	10	0	28	46	2062	2080	0.11	20.8
+q2	BDT62167.1	27.451	51	36	1	5	55	1923	1972	0.13	20.4
+q2	BDT62167.1	35.294	34	22	0	13	46	2000	2033	0.53	18.9
+q2	BDT62167.1	50.000	14	7	0	29	42	1262	1275	4.1	16.2
+q2	BDT62149.1	31.579	19	13	0	4	22	7	25	9.0	15.4
+# BLASTP 2.17.0+
+# Query: q3 manyO
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/e2e_protein_subject.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 5 hits found
+q3	BDT62167.1	27.451	51	36	1	5	55	1923	1972	0.083	20.8
+q3	BDT62167.1	50.000	18	9	0	28	45	2062	2079	0.12	20.4
+q3	BDT62167.1	35.294	34	22	0	13	46	2000	2033	0.31	19.2
+q3	BDT62167.1	50.000	14	7	0	29	42	1262	1275	4.6	16.2
+q3	BDT62149.1	31.579	19	13	0	4	22	7	25	9.4	15.4
+# BLAST processed 3 queries

@@ -415,7 +415,7 @@ pub fn check_residues_of(records: &[fasta::Record], role: &str, program: &str) -
 /// deflines of `check_deflines_of`, and a residue that is not an ASCII letter or `*`
 /// (NCBI's protein reader removes the other bytes, with a warning for each line).
 ///
-/// NCBI reference: c++/src/objtools/readers/fasta.cpp:966-979
+/// NCBI reference: c++/src/objtools/readers/fasta.cpp:967-979
 /// ```c
 ///         case eCharType_HyphenToIgnoreAndWarn:
 ///             bIgnorableHyphenSeen = true;

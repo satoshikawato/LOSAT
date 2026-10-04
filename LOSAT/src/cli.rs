@@ -12,7 +12,7 @@ use clap::{error::ErrorKind, CommandFactory, Parser, Subcommand};
 // ```
 use crate::algorithm::{blastn, blastp, blastx, tblastn, tblastx};
 
-// NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:107,143
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46,51,75
 // ```c++
 // const string kArgQuery("query");
 // const string kArgSubject("subject");
@@ -169,7 +169,7 @@ pub fn render_message(error: &clap::Error) -> String {
         .replace("-V, --version", "--version")
 }
 
-// NCBI reference: c++/src/algo/blast/blastinput/tblastn_args.cpp:63-110
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastn_args.cpp:63-125
 // ```c++
 // m_BlastDbArgs.Reset(new CBlastDatabaseArgs);
 // arg.Reset(new CGenericSearchArgs(kQueryIsProtein));

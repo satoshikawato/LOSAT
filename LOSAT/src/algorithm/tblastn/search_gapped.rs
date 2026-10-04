@@ -787,7 +787,7 @@ fn merge_adjusted_chunk(
 // if either new endpoint is inside the old HSP, score_density is
 // (old.score + new.score) / (old.query length + new.query length);
 // merged score = MAX((int)(score_density * merged query length), old.score).
-fn merge_two_chunk_hsps(old: &mut GappedHsp, new: &GappedHsp, allow_gap: bool) -> bool {
+pub(super) fn merge_two_chunk_hsps(old: &mut GappedHsp, new: &GappedHsp, allow_gap: bool) -> bool {
     if !allow_gap && old.s_start - new.s_start - old.q_start + new.q_start != 0 {
         return false;
     }
@@ -1906,6 +1906,7 @@ mod tests {
                 word_xdrop_bits: 7.0,
                 scale_factor: 1.0,
                 gumbel: Some(&gumbel),
+                eff_searchsp_override: None,
             },
             LocalParameterCall::Initial {
                 min_subject_length: (subject.len() / 3) as i32,
@@ -2030,6 +2031,7 @@ mod tests {
                 word_xdrop_bits: 7.0,
                 scale_factor: 1.0,
                 gumbel: Some(&gumbel),
+                eff_searchsp_override: None,
             },
             LocalParameterCall::Initial {
                 min_subject_length: (subject.len() / 3) as i32,

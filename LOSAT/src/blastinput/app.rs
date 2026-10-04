@@ -590,14 +590,34 @@ fn read_query_split_variable(program: &str, variable: &str) -> anyhow::Result<Op
     }
 }
 
-/// Rejects a blastp or tblastn query batch that NCBI splits into query chunks.
+/// NCBI's query chunk size and overlap of a blastp or tblastn search
+/// (`common/protein_query_split.rs` `protein_split_sizes`), with the environment variables
+/// `CHUNK_SIZE` and `OVERLAP_CHUNK_SIZE` read as NCBI reads them.
 ///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/local_blast.cpp:74-76,91-94
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_cxx.cpp:55-58
 /// ```c
-///         case eTblastn:
-///             retval = 20000;
-///             break;
-///         ...
+///     m_ChunkSize = SplitQuery_GetChunkSize(m_Options->GetProgram());
+///     m_LocalQueryData = m_QueryFactory->MakeLocalQueryData(m_Options);
+///     m_TotalQueryLength = m_LocalQueryData->GetSumOfSequenceLengths();
+///     m_NumChunks = SplitQuery_CalculateNumChunks(m_Options->GetProgramType(),
+/// ```
+pub fn protein_query_split_sizes(
+    program: &str,
+    default_chunk_size: u32,
+) -> anyhow::Result<crate::algorithm::blastn::query_split::SplitSizes> {
+    Ok(
+        crate::algorithm::common::protein_query_split::protein_split_sizes(
+            default_chunk_size,
+            read_query_split_variable(program, "CHUNK_SIZE")?,
+            read_query_split_variable(program, "OVERLAP_CHUNK_SIZE")?,
+        ),
+    )
+}
+
+/// Rejects a blastp query batch that NCBI splits into query chunks.
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/local_blast.cpp:91-94
+/// ```c
 ///         case eBlastp:
 ///         default:
 ///             retval = 10000;
@@ -609,12 +629,11 @@ fn read_query_split_variable(program: &str, variable: &str) -> anyhow::Result<Op
 ///     if (query_splitter->IsQuerySplit()) {
 /// ```
 /// NCBI searches every query batch (`GetQueryBatchSize`) of a gapped search in
-/// `SplitQuery_CalculateNumChunks` chunks (`blastn/query_split.rs`
-/// `calculate_num_chunks`): with the default sizes, a blastp batch of 19800 residues or
-/// more, and a tblastn batch of 39800 or more. Each chunk has its own preliminary search,
-/// and the merged HSP lists differ from one search of the whole batch (RP-4). LOSAT has
-/// not ported the split for blastp and tblastn (BLASTN's is `blastn/query_split.rs`), so it
-/// rejects such a batch before the search.
+/// `SplitQuery_CalculateNumChunks` chunks (`blastn/query_split.rs` `calculate_num_chunks`):
+/// with the default sizes, a blastp batch of 19800 residues or more. Each chunk has its own
+/// preliminary search, and the merged HSP lists differ from one search of the whole batch
+/// (RP-4). TBLASTN searches the chunks (`tblastn/stage_d_pipeline.rs`); until BLASTP does,
+/// it rejects such a batch before the search.
 pub fn check_protein_query_split(
     program: &str,
     default_chunk_size: u32,
@@ -955,8 +974,8 @@ mod tests {
     //     // Only one chunk, just return;
     //     if (num_chunks <= 1) {
     // ```
-    // NCBI splits a blastp batch from 2 * (10000 - 100) residues and a tblastn batch from
-    // 2 * (20000 - 100); the batches are those of `GetQueryBatchSize` (10000 and 20000).
+    // NCBI splits a blastp batch from 2 * (10000 - 100) residues; the batches are those of
+    // `GetQueryBatchSize` (10000).
     #[test]
     fn protein_query_batches_that_ncbi_splits_are_rejected() {
         if std::env::var_os("CHUNK_SIZE").is_some()
@@ -975,12 +994,6 @@ mod tests {
         // 9000 + 9000 reaches the batch size; the third query is the next batch.
         assert!(check_protein_query_split("BLASTP", 10000, &[9_000, 9_000, 9_000], 10_000).is_ok());
         assert!(check_protein_query_split("BLASTP", 10000, &[9_999, 9_801], 10_000).is_err());
-        assert!(check_protein_query_split("TBLASTN", 20000, &[39_799], 20_000).is_ok());
-        let error = check_protein_query_split("TBLASTN", 20000, &[60_000], 20_000).unwrap_err();
-        assert_eq!(
-            error.to_string(),
-            "a query batch of 60000 residues, which NCBI BLAST+ searches in 3 query chunks (the query chunk size 20000, overlap 100), is not supported by LOSAT's TBLASTN"
-        );
-        assert!(check_protein_query_split("TBLASTN", 20000, &[], 20_000).is_ok());
+        assert!(check_protein_query_split("BLASTP", 10000, &[], 10_000).is_ok());
     }
 }

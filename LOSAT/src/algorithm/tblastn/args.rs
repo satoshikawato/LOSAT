@@ -873,18 +873,6 @@ fn search(
         .into());
     }
     let queries = query_records;
-    // NCBI c++/src/algo/blast/api/prelim_stage.cpp:232-233:
-    // if (query_splitter->IsQuerySplit()) { ... }
-    // A query batch that NCBI splits into query chunks is rejected (RP-4).
-    app::check_protein_query_split(
-        "TBLASTN",
-        20000,
-        &queries
-            .iter()
-            .map(|record| record.seq().len())
-            .collect::<Vec<_>>(),
-        batch_size as usize,
-    )?;
     let query_seqs: Vec<_> = queries.iter().map(|record| record.seq().to_vec()).collect();
     let subject_seqs: Vec<_> = subjects
         .iter()

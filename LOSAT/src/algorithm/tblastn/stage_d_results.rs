@@ -311,6 +311,338 @@ fn heapify_down(lists: &mut [KappaResultList], start: usize) {
     }
 }
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hspstream.c:476-534
+// ```c
+//        for (j = 0; j < contexts_per_query; j++) {
+//            split_points[j] = -1;
+//        }
+//
+//        for (j = 0; j < contexts_per_query; j++) {
+//            Int4 local_context = i * contexts_per_query + j;
+//            if (context_list[local_context] >= 0) {
+//                split_points[context_list[local_context] % contexts_per_query] =
+//                                 offset_list[local_context];
+//            }
+//        }
+//        ...
+//                hsp->context = context_list[local_context];
+//                hsp->query.offset += offset_list[local_context];
+//                hsp->query.end += offset_list[local_context];
+//                hsp->query.gapped_start += offset_list[local_context];
+//                hsp->query.frame = BLAST_ContextToFrame(stream2->program,
+//                                                        hsp->context);
+//        ...
+//        Blast_HitListMerge(results1->hitlist_array + i,
+//                           results2->hitlist_array + global_query,
+//                           contexts_per_query, split_points,
+//                           (Int4)SplitQueryBlk_GetChunkOverlapSize(squery_blk),
+//                           SplitQueryBlk_AllowGap(squery_blk));
+//    }
+//
+//    /* Sort to the canonical order, which the merge may not have done. */
+//    for (i = 0; i < results2->num_queries; i++) {
+//        BlastHitList *hitlist = results2->hitlist_array[i];
+//        if (hitlist == NULL)
+//            continue;
+//
+//        for (j = 0; j < hitlist->hsplist_count; j++)
+//            Blast_HSPListSortByScore(hitlist->hsplist_array[j]);
+//    }
+// ```
+/// NCBI's `BlastHSPStreamMerge` of a query chunk (RP-4): the HSPs of each part's preliminary
+/// hit list move to the part's query (a protein query has one context and frame 0), and the
+/// list merges with the query's hit list of the chunks before. `chunk_lists[i]` is the hit
+/// list of the chunk's part `parts[i] = (query, offset)`. The split blocks of a gapped search
+/// allow gaps (split_query_cxx.cpp:864-865, `GetGappedMode`).
+pub(super) fn merge_query_chunk(
+    merged: &mut [Option<KappaResultHitList>],
+    chunk_lists: Vec<Option<KappaResultHitList>>,
+    parts: &[(usize, i32)],
+    chunk_overlap_size: i32,
+) -> Result<()> {
+    ensure!(
+        chunk_lists.len() == parts.len(),
+        "one preliminary hit list is required per query part of a chunk"
+    );
+    for (hitlist, &(query, offset)) in chunk_lists.into_iter().zip(parts) {
+        let Some(mut hitlist) = hitlist else {
+            continue;
+        };
+        for list in &mut hitlist.lists {
+            for linked in &mut list.hsps.hsps {
+                linked.context = query;
+                linked.hsp.q_start += offset;
+                linked.hsp.q_end += offset;
+                linked.hsp.q_gapped_start += offset;
+            }
+        }
+        hit_list_merge(hitlist, &mut merged[query], offset, chunk_overlap_size)?;
+    }
+    for hitlist in merged.iter_mut().flatten() {
+        for list in &mut hitlist.lists {
+            sort_hsps_by_score(list);
+        }
+    }
+    Ok(())
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2132-2217
+// ```c
+//     if (hitlist1 == NULL)
+//         return 0;
+//     if (hitlist2 == NULL) {
+//         *combined_hit_list_ptr = hitlist1;
+//         *old_hit_list_ptr = NULL;
+//         return 0;
+//     }
+//     num_hsplists1 = hitlist1->hsplist_count;
+//     num_hsplists2 = hitlist2->hsplist_count;
+//     new_hitlist = Blast_HitListNew(hitlist1->hsplist_max);
+//
+//     /* sort the lists of HSPs by oid */
+//
+//     if (num_hsplists1 > 1) {
+//         qsort(hitlist1->hsplist_array, num_hsplists1,
+//               sizeof(BlastHSPList*), s_SortHSPListByOid);
+//     }
+//     ...
+//     query_is_split = FALSE;
+//     for (i = 0; i < contexts_per_query; i++) {
+//         if (split_offsets[i] > 0) {
+//             query_is_split = TRUE;
+//     ...
+//         if (hsplist1->oid < hsplist2->oid) {
+//             Blast_HitListUpdate(new_hitlist, hsplist1);
+//             i++;
+//         }
+//         else if (hsplist1->oid > hsplist2->oid) {
+//             Blast_HitListUpdate(new_hitlist, hsplist2);
+//             j++;
+//         }
+//         else {
+//             ...
+//             if (query_is_split) {
+//                 Blast_HSPListsMerge(hitlist1->hsplist_array + i,
+//                                     hitlist2->hsplist_array + j,
+//                                     hsplist2->hsp_max, split_offsets,
+//                                     contexts_per_query,
+//                                     chunk_overlap_size,
+//                                     allow_gap, FALSE);
+//             }
+//             else {
+//                 Blast_HSPListAppend(hitlist1->hsplist_array + i,
+//                                     hitlist2->hsplist_array + j,
+//                                     hsplist2->hsp_max);
+//             }
+//             Blast_HitListUpdate(new_hitlist, hitlist2->hsplist_array[j]);
+//     ...
+//     *old_hit_list_ptr = NULL;
+//     *combined_hit_list_ptr = new_hitlist;
+// ```
+// `Blast_HitListUpdate` keeps the best `prelim_hitlist_size` subjects; the subjects of a hit
+// list are distinct, so the OID sort is total.
+fn hit_list_merge(
+    mut hitlist1: KappaResultHitList,
+    combined: &mut Option<KappaResultHitList>,
+    split_offset: i32,
+    chunk_overlap_size: i32,
+) -> Result<()> {
+    let Some(mut hitlist2) = combined.take() else {
+        *combined = Some(hitlist1);
+        return Ok(());
+    };
+    let mut new_hitlist = KappaResultHitList::new(hitlist1.max)?;
+    hitlist1.lists.sort_by_key(|list| list.oid);
+    hitlist2.lists.sort_by_key(|list| list.oid);
+    let query_is_split = split_offset > 0;
+    let mut lists1 = std::mem::take(&mut hitlist1.lists).into_iter().peekable();
+    let mut lists2 = std::mem::take(&mut hitlist2.lists).into_iter().peekable();
+    while let (Some(list1), Some(list2)) = (lists1.peek(), lists2.peek()) {
+        match list1.oid.cmp(&list2.oid) {
+            Ordering::Less => {
+                new_hitlist.update(lists1.next().expect("peeked"))?;
+            }
+            Ordering::Greater => {
+                new_hitlist.update(lists2.next().expect("peeked"))?;
+            }
+            Ordering::Equal => {
+                let list1 = lists1.next().expect("peeked");
+                let mut list2 = lists2.next().expect("peeked");
+                if query_is_split {
+                    query_hsp_lists_merge(list1, &mut list2, split_offset, chunk_overlap_size);
+                } else {
+                    hsp_list_append(list1, &mut list2);
+                }
+                new_hitlist.update(list2)?;
+            }
+        }
+    }
+    for list in lists1.chain(lists2) {
+        new_hitlist.update(list)?;
+    }
+    *combined = Some(new_hitlist);
+    Ok(())
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2921-3029
+// ```c
+//       for (index1 = 0; index1 < combined_hsp_list->hspcnt; index1++) {
+//          hsp1 = combined_hsp_list->hsp_array[index1];
+//          offset_idx = hsp1->context % contexts_per_query;
+//          if (split_offsets[offset_idx] < 0) continue;
+//          if ((hsp1->query.frame >= 0 && hsp1->query.end >
+//                          split_offsets[offset_idx]) ||
+//          ...
+//             hsp_var = combined_hsp_list->hsp_array[hspcnt1];
+//             combined_hsp_list->hsp_array[hspcnt1] = hsp1;
+//             combined_hsp_list->hsp_array[index1] = hsp_var;
+//             ++hspcnt1;
+//       ...
+//          if ((hsp2->query.frame < 0 && hsp2->query.end >
+//                          split_offsets[offset_idx]) ||
+//              (hsp2->query.frame >= 0 && hsp2->query.offset <
+//                          split_offsets[offset_idx] + chunk_overlap_size)) {
+//       ...
+//             /* Skip already deleted HSPs, or HSPs from different contexts */
+//             if (!hsp2 || hsp1->context != hsp2->context)
+//                continue;
+//       ...
+//             if (contexts_per_query < 0 || hsp1->query.frame >= 0) {
+//                end_diag = s_HSPEndDiag(hsp1);
+//                start_diag = s_HSPStartDiag(hsp2);
+//             }
+//       ...
+//             if (ABS(end_diag - start_diag) < OVERLAP_DIAG_CLOSE) {
+//                if (s_BlastMergeTwoHSPs(hsp1, hsp2, allow_gap)) {
+//                   /* Free the second HSP. */
+//                   hspp2[index2] = Blast_HSPFree(hsp2);
+//       ...
+//    new_hspcnt =
+//       MIN(hsp_list->hspcnt + combined_hsp_list->hspcnt, hsp_num_max);
+//    ...
+//    s_BlastHSPListsCombineByScore(hsp_list, combined_hsp_list, new_hspcnt);
+// ```
+// The query split branch of `Blast_HSPListsMerge` for a protein query (one context, frame 0),
+// with gaps allowed; TBLASTN has no `-max_hsps`, so `hsp_num_max` keeps every HSP.
+fn query_hsp_lists_merge(
+    new: KappaResultList,
+    combined: &mut KappaResultList,
+    split_offset: i32,
+    chunk_overlap_size: i32,
+) {
+    if new.hsps.hsps.is_empty() {
+        return;
+    }
+    let mut incoming = new.hsps.hsps;
+    let old = &mut combined.hsps.hsps;
+    let mut hspcnt1 = 0;
+    if split_offset >= 0 {
+        for index1 in 0..old.len() {
+            if old[index1].hsp.q_end > split_offset {
+                old.swap(hspcnt1, index1);
+                hspcnt1 += 1;
+            }
+        }
+    }
+    let mut hspcnt2 = 0;
+    if split_offset >= 0 {
+        for index2 in 0..incoming.len() {
+            if incoming[index2].hsp.q_start < split_offset + chunk_overlap_size {
+                incoming.swap(hspcnt2, index2);
+                hspcnt2 += 1;
+            }
+        }
+    }
+    if hspcnt1 > 0 && hspcnt2 > 0 {
+        let mut slots: Vec<Option<LinkedHsp>> = incoming.into_iter().map(Some).collect();
+        for index1 in 0..hspcnt1 {
+            for slot in slots.iter_mut().take(hspcnt2) {
+                let Some(candidate) = slot.as_ref() else {
+                    continue;
+                };
+                if old[index1].context != candidate.context {
+                    continue;
+                }
+                let end_diag = old[index1].hsp.q_end - old[index1].hsp.s_end;
+                let start_diag = candidate.hsp.q_start - candidate.hsp.s_start;
+                // NCBI blast_hits.c:1537: #define OVERLAP_DIAG_CLOSE 10
+                if (end_diag - start_diag).abs() < 10
+                    && super::search_gapped::merge_two_chunk_hsps(
+                        &mut old[index1].hsp,
+                        &candidate.hsp,
+                        true,
+                    )
+                {
+                    *slot = None;
+                }
+            }
+        }
+        incoming = slots.into_iter().flatten().collect();
+    }
+    combine_by_score(incoming, combined);
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2819-2829,2849
+// ```c
+//    /* If no previous HSP list, return a pointer to the old one */
+//    if (!combined_hsp_list) {
+//       *combined_hsp_list_ptr = hsp_list;
+//       *old_hsp_list_ptr = NULL;
+//       return 0;
+//    }
+//
+//    /* Just append new list to the end of the old list, in case of
+//       multiple frames of the subject sequence */
+//    new_hspcnt = MIN(combined_hsp_list->hspcnt + hsp_list->hspcnt,
+//                     hsp_num_max);
+//    ...
+//    s_BlastHSPListsCombineByScore(hsp_list, combined_hsp_list, new_hspcnt);
+// ```
+fn hsp_list_append(new: KappaResultList, combined: &mut KappaResultList) {
+    combine_by_score(new.hsps.hsps, combined);
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2758-2766
+// ```c
+//    if (new_hspcnt >= hsp_list->hspcnt + combined_hsp_list->hspcnt) {
+//       /* All HSPs from both arrays are saved */
+//       for (index=combined_hsp_list->hspcnt, index1=0;
+//            index1<hsp_list->hspcnt; index1++) {
+//          if (hsp_list->hsp_array[index1] != NULL)
+//             combined_hsp_list->hsp_array[index++] = hsp_list->hsp_array[index1];
+//       }
+//       combined_hsp_list->hspcnt = new_hspcnt;
+//       Blast_HSPListSortByScore(combined_hsp_list);
+// ```
+fn combine_by_score(incoming: Vec<LinkedHsp>, combined: &mut KappaResultList) {
+    combined.hsps.hsps.extend(incoming);
+    sort_hsps_by_score(combined);
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1374-1383
+// ```c
+// void Blast_HSPListSortByScore(BlastHSPList* hsp_list)
+// {
+//     if (!hsp_list || hsp_list->hspcnt <= 1)
+//         return;
+//
+//     if (!Blast_HSPListIsSortedByScore(hsp_list)) {
+//         qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
+//               ScoreCompareHSPs);
+//     }
+// }
+// ```
+// Stable, as glibc's qsort under the pinned NCBI BLAST+ (TN-5).
+fn sort_hsps_by_score(list: &mut KappaResultList) {
+    let hsps = &mut list.hsps.hsps;
+    if hsps
+        .windows(2)
+        .any(|pair| score_compare(&pair[0].hsp, &pair[1].hsp) == Ordering::Greater)
+    {
+        hsps.sort_by(|a, b| score_compare(&a.hsp, &b.hsp));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;

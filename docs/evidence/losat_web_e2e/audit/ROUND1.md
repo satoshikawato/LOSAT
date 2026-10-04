@@ -37,13 +37,14 @@
 | TX-10 | 低 | AUTHORITY.md の §K と §M の window の記述の食い違い | 直した（§K・§M・§N） |
 | BP-10 | 低 | `LOSAT_STARTUP_TRACE` の診断の出力 | 受け入れ：LOSAT の診断の環境変数（abi_v2.md の `LOSAT_TIMING` と同じ扱い） |
 | BP-11 | 低 | `--help` の終了コード | 承認済みの例外 1 |
-| BP-8（残り） | 低 | `-out -version` で LOSAT は `-version` という名のファイルを作る（NCBI は version を出す）。末尾の `--` | `--` は例外 1（引数の構文）。`-out -version` は S08+b |
-| TN-2 | 高 | TBLASTN の `-comp_based_stats 0`、`-lcase_masking -seg no`（hard mask）、少ない `-max_target_seqs`：和の統計の e-value が 1〜4 % 違う | **S08+b**：`-sum_stats false` では一致。NCBI の linking は `Blast_HSPListGetEvalues` を subject の長さ/3 で呼ぶ（trace：`link` 489、`evalue` 163）。LOSAT の Spouge の長さ（`db_length`）か、予備の段で残る subject に依る値を確かめる |
-| TN-4 | 高 | 巨大な `-xdrop_gap`・`-xdrop_gap_final`（1e7〜5e8 bit）で LOSAT は数十秒・数 GB（NCBI は 1 秒未満）。出力は同じ | **S08+b**：LOSAT の DP の帯（`blastp/gapalign.rs` の `gap_dp_reserve_*`）は `resize` で全要素を書く。NCBI は `malloc`（触れない page は確保されない）。BLASTP・TBLASTN が共有する経路で V-PERF が要る |
-| TN-5 | 高 | BLOSUM45 の組で `-evalue` 5000 以上：同じ得点の HSP の frame・座標が違う（29900 行中 4〜12 行） | **S08+b**：同点の順（blast_hits.c の並べ替え・heap） |
-| RP-4 | 低（前から） | 既定の option の TBLASTN：60000 残基の query の 4998 残基の一致で bit score が違う（NCBI 10404、LOSAT 10412。変更前の実行ファイルも同じ） | **S08+b**：composition の行列の調整。入力は [`round1/rp4/`](round1/rp4/)（gzip） |
+| BP-8（残り） | 低 | `-out -version` で LOSAT は `-version` という名のファイルを作る（NCBI は version を出す）。末尾の `--` | `--` は例外 1（引数の構文）。`-out -version` は明示的な拒否にした（S08+a `6fa06cb6a`、[`s08pa/NOTES.md`](../s08pa/NOTES.md)）：NCBI の argv の前処理（ncbiapp.cpp:926-1001）と同じく `--` までの全ての語を調べ、値の位置の toolkit の語も option の位置と同じ文言で拒否する（判断 D9。保守者の判断待ち） |
+| TN-2 | 高 | TBLASTN の `-comp_based_stats 0`、`-lcase_masking -seg no`（hard mask）、少ない `-max_target_seqs`：和の統計の e-value が 1〜4 % 違う | 直した（S08+a `36572eace`、[`s08pa/NOTES.md`](../s08pa/NOTES.md)）：予備の hit list が heap になると NCBI は HSP list を e-value の順にし（blast_hits.c:3266-3284）、traceback は並べ直さない（blast_traceback.c:358-365）。最後に翻訳する HSP が `stat_length` を決める。LOSAT の traceback の入口の得点の順の並べ直しを除いた。fixture `e2e.tblastn.hardmask_mts1`・`hardmask_b45_mts2` |
+| TN-4 | 高 | 巨大な `-xdrop_gap`・`-xdrop_gap_final`（1e7〜5e8 bit）で LOSAT は数十秒・数 GB（NCBI は 1 秒未満）。出力は同じ | 直した（S08+a `20856865e`、[`s08pa/NOTES.md`](../s08pa/NOTES.md)）：`dp_mem_alloc` は NCBI の値のまま、触れる cell を `MIN(dp_mem_alloc, N + 1)` にした（blast_gapalign.c:797-808,923-931）。`-xdrop_gap_final 1e8` で 26.9 秒・3.9 GB が 0.12 秒・8.4 MB（NCBI 0.23 秒・68 MB）。出力は変わらない |
+| TN-5 | 高 | BLOSUM45 の組で `-evalue` 5000 以上：同じ得点の HSP の frame・座標が違う（29900 行中 4〜12 行） | 直した（S08+a `5c5132987`、[`s08pa/NOTES.md`](../s08pa/NOTES.md)）：`ScoreCompareHSPs` は frame を比べず、glibc の `qsort` は安定。TBLASTN の NCBI の `qsort` に当たる並べ替えを安定にした。fixture `e2e.tblastn.b45_frame_ties`・`b45_frame_ties_fmt0`。BLASTP の同じ並べ替えは S08+b `1f3a8fc18` |
+| RP-4 | 低（前から） | 既定の option の TBLASTN：60000 残基の query の 4998 残基の一致で bit score が違う（NCBI 10404、LOSAT 10412。変更前の実行ファイルも同じ） | 直した（S08+a `44ccde85c`・`61d3bf4f5`、[`s08pa/NOTES.md`](../s08pa/NOTES.md)）：原因は composition でなく NCBI の query の分割（split_query_aux_priv.cpp:73-138、chunk は tblastn 20000・blastp 10000、重なり 100）。BLASTP と TBLASTN に移植した。NCBI が落ちる分割の設定は明示的な拒否（保守者の判断待ち）。fixture `e2e.tblastn.query_split`・`query_split_fmt0`・`query_split_two`、`e2e.blastp.query_split`・`query_split_two`。入力は [`round1/rp4/`](round1/rp4/)（gzip） |
+| TN-1 の残り | 高 | S08+a の監査の再現で見つかった（変更前も同じ）：TBLASTN の `-comp_based_stats 0`、`INT_MIN` になる巨大な最終の X-drop、大きい `-evalue` で、窓の右端に届く traceback の e-value と行が違う | 直した（S08+a `68154c73e`、[`s08pa/NOTES.md`](../s08pa/NOTES.md)）：右の伸長の `N` を翻訳の窓の長さから計算し（blast_traceback.c:463-464,509-512）、`N <= 0` なら DP を回さず（blast_gapalign.c:429-432）、最後の列で窓の後ろの番兵を読む（blast_gapalign.c:563-578）。fixture `e2e.tblastn.window_end` |
 
-TN-2・TN-5 の入力は [`round1/tblastn_inputs/`](round1/tblastn_inputs/)。
+TN-2・TN-5 の入力は [`round1/tblastn_inputs/`](round1/tblastn_inputs/)。第 1 回の後に S08+b に残した 5 件（TN-2・TN-4・TN-5・RP-4・`-out -version`）は、並行の S08+a が別のブランチで直した（S08+b が `e1d4f98a0` で本線に merge した）。第 2 回の監査は [`ROUND2.md`](ROUND2.md)。
 
 ## 確かめ
 

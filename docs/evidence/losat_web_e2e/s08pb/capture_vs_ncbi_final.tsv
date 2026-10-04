@@ -1,0 +1,14 @@
+# final gate capture (~/.cache/losat-web-gui-target/capture-s08pb, native 4d6c036f...) vs NCBI blastp 2.17.0: the 11 cases whose bytes changed since SD's final capture
+all_hsp_forward_serial.fmt0	ncbi_exit=0	losat_exit=0	stdout=same	bytes=482104	ncbi_stderr=''
+all_hsp_forward_thread4.fmt0	ncbi_exit=0	losat_exit=0	stdout=same	bytes=482104	ncbi_stderr="Warning: [blastp] 'num_threads' is currently ignored when 'subject' is specified."
+all_hsp_reverse_limit5_serial.fmt0	ncbi_exit=0	losat_exit=0	stdout=same	bytes=444246	ncbi_stderr=''
+all_hsp_self_serial.fmt0	ncbi_exit=0	losat_exit=0	stdout=same	bytes=568562	ncbi_stderr=''
+pairwise_default_serial.fmt0	ncbi_exit=0	losat_exit=0	stdout=same	bytes=440679	ncbi_stderr=''
+pairwise_default_thread4.fmt0	ncbi_exit=0	losat_exit=0	stdout=same	bytes=440679	ncbi_stderr="Warning: [blastp] 'num_threads' is currently ignored when 'subject' is specified."
+pairwise_limit1_serial	ncbi_exit=0	losat_exit=0	stdout=same	bytes=5782	ncbi_stderr='Warning: [blastp] Examining 5 or more matches is recommended'
+pairwise_limit1_serial.fmt0	ncbi_exit=0	losat_exit=0	stdout=same	bytes=242703	ncbi_stderr='Warning: [blastp] Examining 5 or more matches is recommended'
+pairwise_limit1_serial.fmt7	ncbi_exit=0	losat_exit=0	stdout=same	bytes=37809	ncbi_stderr='Warning: [blastp] Examining 5 or more matches is recommended'
+pairwise_limit5_serial.fmt0	ncbi_exit=0	losat_exit=0	stdout=same	bytes=390037	ncbi_stderr=''
+pairwise_nohit_serial.fmt0	ncbi_exit=0	losat_exit=0	stdout=same	bytes=222278	ncbi_stderr=''
+# stderr (LOSAT run directly): pairwise_limit1_serial, .fmt0, .fmt7 same as NCBI (the few-matches warning); pairwise_default_thread4.fmt0 differs only by NCBI's num_threads warning (approved exception 1, as at SD)
+# all 236 capture hashes equal those of the superseded run's capture (capture-s08p)

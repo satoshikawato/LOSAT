@@ -30,9 +30,18 @@
 
 ゲートの v1 の WASI の行列で見つかったもの（監査の外）：S08+ が BLASTP を NCBI の app の層に移したため、web ABI v1 の BLASTP の振る舞いが E1d の記録から変わっていた（誤りの文言、2 つの誤りの順、知らない tabular の field を誤りにしない）。v1 は凍結（計画 TD-1）なので、v1 の経路で option を先に確かめ、書かない field を以前の文言で拒否するようにした（`efa445b19`。試験 `web_api::tests::blastp_web_pair_keeps_v1_error_order_and_fields`）。option の誤りの文言はエンジンの今の文言（ゲート記録の「v1」）。
 
-## 2 回目（(a)、`75cc8e565`）
+## (a) の 2 回目（`75cc8e565`、native `4d6c036f…`）
 
-（2 回目の結果をここに書く）
+[`round2/a2_blastp.md`](round2/a2_blastp.md)（指示 [`brief/ANGLE_A2.md`](round2/brief/ANGLE_A2.md)）。結論は unsupported（狭い）。R2A-1・R2A-2 は直った（短い subject の約 4,000 と負の one-hit の長さの約 17,000 の比較で abort なし）。D12 の DBL_MAX と最後の `--` は決めたとおり（4 つの program × 35 の argv）。第 1 回の harness の差は、R2A-1・R2A-2 の abort（sweep の 41）と `cfuzz`・`ofuzz` の 15 が 0 になった。新しい指摘が 2 件：
+
+| ID | 重さ | 内容 | 対応 |
+|---|---|---|---|
+| R2A2-1 | 中 | `-task blastp-fast`（NCBI は HSP の chaining を有効にする、blast_options_handle.cpp:395-399）で明示的な低い `-threshold`（13 以下）のとき、LOSAT は NCBI が落とす短い HSP を 1 つ多く報告する（約 12,000 の比較のうち 68）。NCBI は init hit list が空の時だけ chaining を飛ばし（blast_gapalign.c:3707-3708）、HSP が 1 つの context もその得点で drop の検査（3628-3636）にかける。LOSAT は list が 1 つ以下で返っていた。第 1 回の実行ファイルも同じ（退行ではない） | 直した（`3b84ce6c4`）：空の時だけ返す。fixture `e2e.blastp.fast_lone_hsp`（outfmt 0）・`fast_lone_hsp_window`（outfmt 7）。監査の harness の blastp-fast の行と差のあった行 7,053 のうち 7,032 が NCBI と一致（R2A2-1 の 68 件を含む）、21 は NCBI が落ちる行（R2A2-2）（[`../s08pb/r2a2_1/`](../s08pb/r2a2_1/)） |
+| R2A2-2 | 低（NCBI の不具合） | `-window_size 0` と `-threshold` 1〜3 の一部の one-hit の検索で NCBI が SIGSEGV（5,000 の無作為の組のうち 21）。`BlastGetStartForGappedAlignment`（blast_gapalign.c:3393-3416）が負の長さの 11 文字の窓を配列の外まで読み（valgrind：「0 bytes after a block」）、その値で行列を引く。LOSAT は配列の外を NULLB として読み（`blastp_get_start_for_gapped_alignment_int4_length`）、NCBI を `valgrind -q` の下で走らせた出力とバイト一致（21 件とも） | 保守者に諮る（NCBI の不具合の方針の「確かめられる妥当な結果を承認済みの例外にする」に当たる。推奨は承認済みの例外。それまで LOSAT の振る舞いは変えない） |
+
+## (a) の 3 回目（`3b84ce6c4`）
+
+（3 回目の結果をここに書く）
 
 ## 結論
 

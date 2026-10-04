@@ -1,0 +1,24 @@
+# web ABI v1 BLASTP requests (docs/evidence/losat_web_e1a/v1_requests.js): E1d (docs/evidence/losat_web_e1d/run-20260928T221453Z) vs the final E2e gate (docs/evidence/losat_web_e2e/run-20261004T120250Z)
+# only the error text of 4 records differs (status, output length and hash, and the order of the checks are the same): the engine's option checks now give NCBI's text or LOSAT's explicit rejection (plan TD-1)
+DIFF	bad fields + bad matrix	error
+	E1d:	"Unknown scoring matrix: FOO"
+	E2e:	"BLAST query/options error: FOO is not a supported matrix, supported matrices are:\nBLOSUM80 \nBLOSUM62 \nBLOSUM50 \nBLOSUM45 \nPAM250 \nBLOSUM90 \nPAM30 \nPAM70 \nIDENTITY \n\nPlease refer to the BLAST+ user manual.\n"
+DIFF	custom outfmt 0 + unsupported matrix	error
+	E1d:	"unsupported pure-Rust blastp scoring Blosum45 with gap penalties 14/2: matrix-aware protein gap alignment is not yet ported; only BLOSUM62 with gap open 11 and gap extend 1 is currently supported"
+	E2e:	"the matrix BLOSUM45 with gap costs 14/2 is not supported by LOSAT's BLASTP"
+DIFF	unsupported outfmt + ungapped	error
+	E1d:	"Composition-adjusted searched are not supported with an ungapped search, please add -comp_based_stats F or do a gapped search"
+	E2e:	"BLAST query/options error: Composition-adjusted searched are not supported with an ungapped search, please add -comp_based_stats F or do a gapped search\nPlease refer to the BLAST+ user manual.\n"
+SAME	unsupported outfmt + zero threads	
+SAME	unsupported outfmt + bad evalue	
+SAME	bad fields only	
+SAME	custom outfmt 0 only	
+SAME	unsupported outfmt only	
+DIFF	unsupported matrix only	error
+	E1d:	"unsupported pure-Rust blastp scoring Blosum45 with gap penalties 14/2: matrix-aware protein gap alignment is not yet ported; only BLOSUM62 with gap open 11 and gap extend 1 is currently supported"
+	E2e:	"the matrix BLOSUM45 with gap costs 14/2 is not supported by LOSAT's BLASTP"
+SAME	outfmt 0	
+SAME	outfmt 0, max_target_seqs 1	
+SAME	outfmt 6	
+SAME	outfmt 7, 2 threads	
+SAME	custom fields	

@@ -89,6 +89,8 @@ pub fn validate(words: &[&str]) -> Result<(), String> {
             LOSAT::algorithm::tblastx::blast_engine::check_options(&args)
                 .map_err(|error| format!("{error:#}"))?
         }
+        (_, Commands::Blastp(args)) => LOSAT::algorithm::blastp::blast_engine::check_options(&args)
+            .map_err(|error| format!("{error:#}"))?,
         _ => {}
     }
     Ok(())

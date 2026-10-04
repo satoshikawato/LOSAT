@@ -104,6 +104,28 @@ where
             translated.push(token);
             continue;
         }
+        // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:2866-2872
+        // ```c++
+        //     if (*n_plain == kMax_UInt || m_PositionalMode == ePositionalMode_Loose) {
+        //         // Check for the s_ArgDelimiter delimiter
+        //         if (arg1.compare(s_ArgDelimiter) == 0) {
+        //             if (*n_plain == kMax_UInt) {
+        //                 *n_plain = 0;  // pos.args started
+        //             }
+        //             return false;
+        // ```
+        // `--` starts NCBI's positional arguments, which the BLAST programs do not have:
+        // a last `--` changes nothing, and a word after it is an extra positional
+        // argument (NCBI's USAGE error; LOSAT's parser error, exception 1).
+        if text == "--"
+            && input.len() == 0
+            && matches!(
+                scope.get_name(),
+                "blastn" | "blastp" | "tblastn" | "tblastx"
+            )
+        {
+            continue;
+        }
         let key = text.strip_prefix('-').filter(|key| !key.starts_with('-'));
         let (name, inline) = key
             .unwrap_or("")

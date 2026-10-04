@@ -878,3 +878,19 @@ fn toolkit_words_in_an_option_value_are_rejected_as_options() {
         assert!(parse(program, &["-out", "o.txt"]).is_ok(), "{program}");
     }
 }
+
+#[test]
+fn a_last_double_dash_changes_nothing_and_a_word_after_it_is_an_error() {
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:2866-2872: `--` starts the
+    // positional arguments, which the BLAST programs do not have.
+    for program in ["blastn", "blastp", "tblastn", "tblastx"] {
+        assert!(parse(program, &["-evalue", "1", "--"]).is_ok(), "{program}");
+        assert!(
+            parse(program, &["--", "-outfmt", "6"]).is_err(),
+            "{program}"
+        );
+        assert!(parse(program, &["--", "--"]).is_err(), "{program}");
+        // As the value of an option, `--` is that value.
+        assert!(parse(program, &["-out", "--"]).is_ok(), "{program}");
+    }
+}

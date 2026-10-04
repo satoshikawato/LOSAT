@@ -1,0 +1,66 @@
+# TBLASTN 2.17.0+
+# Query: BDT62569.1 wsv282-like protein [Metapenaeus ensis majanivirus]
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/e2e_tblastn_subject.fna)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+BDT62569.1	LvMJNV_93001_98000	57.098	317	130	5	157	472	2306	3241	1.13e-106	339
+# TBLASTN 2.17.0+
+# Query: BDT62529.1 innexin [Metapenaeus ensis majanivirus]
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/e2e_tblastn_subject.fna)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 5 hits found
+BDT62529.1	LvMJNV_160001_165000	35.566	433	164	7	54	381	1633	2901	3.57e-86	276
+BDT62529.1	LvMJNV_160001_165000	48.214	56	29	0	1	56	1227	1394	1.96e-12	59.3
+BDT62529.1	LvMJNV_160001_165000	23.301	103	65	6	257	349	548	844	3.9	19.6
+BDT62529.1	LvMJNV_242001_247000	26.923	52	38	0	58	109	3979	3824	0.20	23.9
+BDT62529.1	LvMJNV_199001_206000	24.590	61	46	0	254	314	6383	6565	7.6	18.9
+# TBLASTN 2.17.0+
+# Query: BDT62562.1 wsv306-like protein [Metapenaeus ensis majanivirus]
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/e2e_tblastn_subject.fna)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 5 hits found
+BDT62562.1	LvMJNV_199001_206000	45.275	455	183	7	18	408	4051	5409	5.99e-124	386
+BDT62562.1	LvMJNV_199001_206000	29.730	37	24	1	249	285	600	704	2.0	20.8
+BDT62562.1	LvMJNV_199001_206000	40.000	20	12	0	369	388	3154	3095	2.4	20.4
+BDT62562.1	LvMJNV_160001_165000	56.250	16	7	0	284	299	2032	1985	0.96	21.9
+BDT62562.1	LvMJNV_242001_247000	40.909	22	13	0	154	175	1710	1645	5.0	19.6
+# TBLASTN 2.17.0+
+# Query: BDT62620.1 wsv325-like protein [Metapenaeus ensis majanivirus]
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/e2e_tblastn_subject.fna)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 4 hits found
+BDT62620.1	LvMJNV_143001_152000	38.497	439	188	11	17	436	3293	2166	2.79e-73	241
+BDT62620.1	LvMJNV_242001_247000	42.857	35	18	2	117	151	4288	4190	0.91	21.9
+BDT62620.1	LvMJNV_199001_206000	45.833	24	9	1	46	65	5807	5878	1.8	21.2
+BDT62620.1	LvMJNV_199001_206000	34.211	38	22	1	103	140	6564	6460	6.7	19.2
+# TBLASTN 2.17.0+
+# Query: BDT62567.1 wsv332-like protein [Metapenaeus ensis majanivirus]
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/e2e_tblastn_subject.fna)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+BDT62567.1	LvMJNV_199001_206000	47.447	803	358	20	25	797	1028	3334	0.0	678
+BDT62567.1	LvMJNV_242001_247000	44.000	25	14	0	260	284	3943	3869	0.37	24.3
+BDT62567.1	LvMJNV_93001_98000	30.000	30	21	0	306	335	138	49	2.5	21.6
+# TBLASTN 2.17.0+
+# Query: BDT62581.1 wsv303-like protein [Metapenaeus ensis majanivirus]
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/e2e_tblastn_subject.fna)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+BDT62581.1	LvMJNV_242001_247000	58.586	396	112	3	1	390	3447	2398	7.70e-144	456
+BDT62581.1	LvMJNV_242001_247000	33.884	121	74	3	577	697	1938	1594	6.08e-12	59.3
+BDT62581.1	LvMJNV_93001_98000	35.714	28	18	0	12	39	3982	4065	10.0	19.2
+# TBLASTN 2.17.0+
+# Query: BDT63274.1 hypothetical protein [Armadillidium vulgare clopovirus]
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/e2e_tblastn_subject.fna)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+BDT63274.1	LvMJNV_143001_152000	41.176	34	14	1	739	766	4459	4560	6.4	20.8
+# TBLASTN 2.17.0+
+# Query: BDT62533.1 dUTPase [Metapenaeus ensis majanivirus]
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/e2e_tblastn_subject.fna)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+BDT62533.1	LvMJNV_143001_152000	34.783	69	44	1	36	103	7281	7487	2.77e-07	39.7
+BDT62533.1	LvMJNV_143001_152000	22.819	149	69	3	16	119	6717	7160	1.69e-06	37.4
+BDT62533.1	LvMJNV_143001_152000	32.051	78	48	4	74	149	7821	8045	0.005	26.9
+# BLAST processed 8 queries

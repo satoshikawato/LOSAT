@@ -1,0 +1,50 @@
+e2e.blastp.seg_lcase	same	
+e2e.blastp.seg_window	same	
+e2e.blastp.matrix_case	same	
+e2e.blastp.threshold_real	same	
+e2e.blastp.threshold_inf	same	
+e2e.blastp.word5	same	
+e2e.blastp.fast	same	
+e2e.blastp.evalue_huge	same	
+e2e.blastp.evalue_huge7	same	
+e2e.blastp.mts3	same	
+e2e.tblastn.evalue_huge	same	
+e2e.tblastn.evalue_inf	same	
+e2e.tblastn.xdrop_final	same	
+e2e.tblastn.xdrop_prelim	same	
+e2e.tblastn.matrix_case	same	
+e2e.tblastn.b45	same	
+e2e.tblastn.flags	same	
+e2e.tblastx.threshold_real	same	
+e2e.blastp.many	same	
+e2e.blastp.many_mts280	same	
+e2e.tblastn.many	same	
+e2e.tblastn.many_mts280	same	
+e2e.blastp.titles	same	
+e2e.tblastn.amb	same	
+e2e.blastp.invalid_o	same	
+e2e.blastp.invalid_o7	same	
+e2e.blastp.allx	same	
+e2e.blastp.allx7	same	
+e2e.blastp.o_subject	same	
+e2e.tblastn.invalid_o	same	
+e2e.blastp.empty_subject	same	
+e2e.blastp.o_identity	same	
+e2e.blastp.o_identity0	same	
+e2e.blastp.empty_only	same	
+e2e.blastp.o_invalid_order	same	
+e2e.tblastn.o_invalid_order	same	
+e2e.blastp.mts_wrap	same	
+e2e.tblastn.fence_xdrop	same	
+e2e.tblastn.fence_xdrop_huge	same	
+e2e.tblastn.hardmask_mts1	DIFF	stdout line 1: expected b'gl0\tgs20\t100.000\t250\t0\t0\t33\t282\t753\t4\t9.33e-177\t479', got b'gl0\tgs20\t100.000\t250\t0\t0\t33\t282\t753\t4\t9.00e-177\t479'
+e2e.tblastn.hardmask_b45_mts2	DIFF	stdout line 1: expected b'gl0\tgs20\t100.000\t250\t0\t0\t33\t282\t753\t4\t4.31e-157\t427', got b'gl0\tgs20\t100.000\t250\t0\t0\t33\t282\t753\t4\t4.21e-157\t427'
+e2e.tblastn.b45_frame_ties	DIFF	stdout line 277: expected b'BDT62620.1\tLvMJNV_160001_165000\t50.000\t6\t3\t0\t39\t44\t4736\t4719\t625\t10.3', got b'BDT62620.1\tLvMJNV_160001_165000\t50.000\t6\t3\t0\t39\t44\t4734\t4717\t625\t10.3'
+e2e.tblastn.b45_frame_ties_fmt0	DIFF	stdout line 2519: expected b' Frame = -1', got b' Frame = -3'
+e2e.tblastn.query_split	DIFF	stdout line 1: expected b'bigq\tsbig4\t100.000\t4998\t0\t0\t1\t4998\t1\t14994\t0.0\t10383', got b'bigq\tsbig4\t100.000\t4998\t0\t0\t1\t4998\t1\t14994\t0.0\t10404'
+e2e.tblastn.query_split_fmt0	DIFF	stdout line 23: expected b'sbig4                                                                 10383   0.0  ', got b'sbig4                                                                 10404   0.0  '
+e2e.tblastn.query_split_two	DIFF	stdout line 1159: expected b'qb\tsbig4\t27.174\t92\t50\t4\t930\t1008\t2813\t3076\t9.6\t24.6', got b'qb\tsbig4\t25.664\t113\t50\t6\t8428\t8537\t5098\t5343\t9.6\t24.6'
+e2e.blastp.query_split	DIFF	stdout line 1: expected b'bigq\ts218\t41.026\t39\t20\t3\t34145\t34182\t159\t195\t21\t26.6', got b'bigq\ts34\t30.612\t49\t33\t1\t20309\t20357\t52\t99\t52\t25.4'
+e2e.blastp.query_split_two	DIFF	stdout line 220: expected b'qb\ts191\t25.581\t43\t31\t1\t15275\t15317\t159\t200\t299\t21.6', got b'qb\ts287\t41.176\t17\t10\t0\t2791\t2807\t178\t194\t321\t21.6'
+e2e.tblastn.window_end	DIFF	stdout line 1: expected b'gq4\tgs37\t32.143\t28\t18\t1\t160\t187\t505\t585\t0.36\t19.2', got b'gq4\tgs37\t32.143\t28\t18\t1\t160\t187\t505\t585\t0.40\t19.2'
+# fixtures=49 differing=['e2e.tblastn.hardmask_mts1', 'e2e.tblastn.hardmask_b45_mts2', 'e2e.tblastn.b45_frame_ties', 'e2e.tblastn.b45_frame_ties_fmt0', 'e2e.tblastn.query_split', 'e2e.tblastn.query_split_fmt0', 'e2e.tblastn.query_split_two', 'e2e.blastp.query_split', 'e2e.blastp.query_split_two', 'e2e.tblastn.window_end']

@@ -1,0 +1,42 @@
+blastp [CHUNK_SIZE=1000] e2e_many_query.faa e2e_many_subject.faa -outfmt 6 :: same
+blastp [CHUNK_SIZE=1000] e2e_many_query.faa e2e_many_subject.faa -evalue 1000 -outfmt 6 :: same
+blastp [CHUNK_SIZE=1000] e2e_many_query.faa e2e_many_subject.faa -max_target_seqs 3 -outfmt 6 :: same
+blastp [CHUNK_SIZE=1000] e2e_many_query.faa e2e_many_subject.faa -task blastp-fast -outfmt 6 :: same
+blastp [CHUNK_SIZE=1000] e2e_many_query.faa e2e_many_subject.faa -outfmt 7 :: same
+blastp [CHUNK_SIZE=1000] e2e_many_query.faa e2e_many_subject.faa -num_threads 4 -outfmt 6 :: DIFF rc 0/0 out 0 err 1
+blastp [CHUNK_SIZE=1000] e2e_protein_query.faa e2e_protein_subject.faa -outfmt 0 :: same
+blastp [CHUNK_SIZE=500] e2e_many_query.faa e2e_many_subject.faa -outfmt 6 :: same
+blastp [CHUNK_SIZE=500] e2e_many_query.faa e2e_many_subject.faa -evalue 1000 -outfmt 6 :: same
+blastp [CHUNK_SIZE=500] e2e_many_query.faa e2e_many_subject.faa -max_target_seqs 3 -outfmt 6 :: same
+blastp [CHUNK_SIZE=500] e2e_many_query.faa e2e_many_subject.faa -task blastp-fast -outfmt 6 :: same
+blastp [CHUNK_SIZE=500] e2e_many_query.faa e2e_many_subject.faa -outfmt 7 :: same
+blastp [CHUNK_SIZE=500] e2e_many_query.faa e2e_many_subject.faa -num_threads 4 -outfmt 6 :: DIFF rc 0/0 out 0 err 1
+blastp [CHUNK_SIZE=500] e2e_protein_query.faa e2e_protein_subject.faa -outfmt 0 :: same
+blastp [CHUNK_SIZE=300 OVERLAP_CHUNK_SIZE=50] e2e_many_query.faa e2e_many_subject.faa -outfmt 6 :: same
+blastp [CHUNK_SIZE=300 OVERLAP_CHUNK_SIZE=50] e2e_many_query.faa e2e_many_subject.faa -evalue 1000 -outfmt 6 :: same
+blastp [CHUNK_SIZE=300 OVERLAP_CHUNK_SIZE=50] e2e_many_query.faa e2e_many_subject.faa -max_target_seqs 3 -outfmt 6 :: same
+blastp [CHUNK_SIZE=300 OVERLAP_CHUNK_SIZE=50] e2e_many_query.faa e2e_many_subject.faa -task blastp-fast -outfmt 6 :: same
+blastp [CHUNK_SIZE=300 OVERLAP_CHUNK_SIZE=50] e2e_many_query.faa e2e_many_subject.faa -outfmt 7 :: same
+blastp [CHUNK_SIZE=300 OVERLAP_CHUNK_SIZE=50] e2e_many_query.faa e2e_many_subject.faa -num_threads 4 -outfmt 6 :: DIFF rc 0/0 out 0 err 1
+blastp [CHUNK_SIZE=300 OVERLAP_CHUNK_SIZE=50] e2e_protein_query.faa e2e_protein_subject.faa -outfmt 0 :: same
+blastp [CHUNK_SIZE=2000 OVERLAP_CHUNK_SIZE=300] e2e_many_query.faa e2e_many_subject.faa -outfmt 6 :: same
+blastp [CHUNK_SIZE=2000 OVERLAP_CHUNK_SIZE=300] e2e_many_query.faa e2e_many_subject.faa -evalue 1000 -outfmt 6 :: same
+blastp [CHUNK_SIZE=2000 OVERLAP_CHUNK_SIZE=300] e2e_many_query.faa e2e_many_subject.faa -max_target_seqs 3 -outfmt 6 :: same
+blastp [CHUNK_SIZE=2000 OVERLAP_CHUNK_SIZE=300] e2e_many_query.faa e2e_many_subject.faa -task blastp-fast -outfmt 6 :: same
+blastp [CHUNK_SIZE=2000 OVERLAP_CHUNK_SIZE=300] e2e_many_query.faa e2e_many_subject.faa -outfmt 7 :: same
+blastp [CHUNK_SIZE=2000 OVERLAP_CHUNK_SIZE=300] e2e_many_query.faa e2e_many_subject.faa -num_threads 4 -outfmt 6 :: DIFF rc 0/0 out 0 err 1
+blastp [CHUNK_SIZE=2000 OVERLAP_CHUNK_SIZE=300] e2e_protein_query.faa e2e_protein_subject.faa -outfmt 0 :: same
+blastp [CHUNK_SIZE=700 OVERLAP_CHUNK_SIZE=0] e2e_many_query.faa e2e_many_subject.faa -outfmt 6 :: same
+blastp [CHUNK_SIZE=700 OVERLAP_CHUNK_SIZE=0] e2e_many_query.faa e2e_many_subject.faa -evalue 1000 -outfmt 6 :: same
+blastp [CHUNK_SIZE=700 OVERLAP_CHUNK_SIZE=0] e2e_many_query.faa e2e_many_subject.faa -max_target_seqs 3 -outfmt 6 :: same
+blastp [CHUNK_SIZE=700 OVERLAP_CHUNK_SIZE=0] e2e_many_query.faa e2e_many_subject.faa -task blastp-fast -outfmt 6 :: same
+blastp [CHUNK_SIZE=700 OVERLAP_CHUNK_SIZE=0] e2e_many_query.faa e2e_many_subject.faa -outfmt 7 :: same
+blastp [CHUNK_SIZE=700 OVERLAP_CHUNK_SIZE=0] e2e_many_query.faa e2e_many_subject.faa -num_threads 4 -outfmt 6 :: DIFF rc 0/0 out 0 err 1
+blastp [CHUNK_SIZE=700 OVERLAP_CHUNK_SIZE=0] e2e_protein_query.faa e2e_protein_subject.faa -outfmt 0 :: same
+blastp [CHUNK_SIZE=1000 BATCH_SIZE=1500] e2e_many_query.faa e2e_many_subject.faa -outfmt 6 :: same
+blastp [CHUNK_SIZE=1000 BATCH_SIZE=1500] e2e_many_query.faa e2e_many_subject.faa -evalue 1000 -outfmt 6 :: same
+blastp [CHUNK_SIZE=1000 BATCH_SIZE=1500] e2e_many_query.faa e2e_many_subject.faa -max_target_seqs 3 -outfmt 6 :: same
+blastp [CHUNK_SIZE=1000 BATCH_SIZE=1500] e2e_many_query.faa e2e_many_subject.faa -task blastp-fast -outfmt 6 :: same
+blastp [CHUNK_SIZE=1000 BATCH_SIZE=1500] e2e_many_query.faa e2e_many_subject.faa -outfmt 7 :: same
+blastp [CHUNK_SIZE=1000 BATCH_SIZE=1500] e2e_many_query.faa e2e_many_subject.faa -num_threads 4 -outfmt 6 :: DIFF rc 0/0 out 0 err 1
+blastp [CHUNK_SIZE=1000 BATCH_SIZE=1500] e2e_protein_query.faa e2e_protein_subject.faa -outfmt 0 :: same

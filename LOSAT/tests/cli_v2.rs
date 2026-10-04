@@ -849,3 +849,32 @@ fn values_on_which_ncbi_crashes_are_rejected_with_the_options() {
     );
     tblastn(&["-evalue", "1e308"]).unwrap();
 }
+
+#[test]
+fn toolkit_words_in_an_option_value_are_rejected_as_options() {
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:926-1001: the application reads
+    // -version, -version-full*, -dryrun, -logfile and -conffile anywhere before `--`, also
+    // in an option's value (`-out -version` prints the version). LOSAT rejects them (D9)
+    // in that place too, instead of writing a file named "-version".
+    for (program, upper) in [
+        ("blastn", "BLASTN"),
+        ("blastp", "BLASTP"),
+        ("tblastn", "TBLASTN"),
+        ("tblastx", "TBLASTX"),
+    ] {
+        for words in [
+            &["-out", "-version"][..],
+            &["-out", "-dryrun"],
+            &["-evalue", "-version-full"],
+            &["-out", "-logfile"],
+            &["-out", "-conffile=x.ini"],
+        ] {
+            let error = parse(program, words).unwrap_err().to_string();
+            assert!(
+                error.contains(&format!("is not supported by LOSAT's {upper}")),
+                "{program} {words:?}: {error}"
+            );
+        }
+        assert!(parse(program, &["-out", "o.txt"]).is_ok(), "{program}");
+    }
+}

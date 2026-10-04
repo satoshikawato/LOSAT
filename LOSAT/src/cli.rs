@@ -67,7 +67,26 @@ where
     S: Into<OsString>,
 {
     let command = T::command();
-    let mut input = argv.into_iter().map(Into::into);
+    let tokens: Vec<OsString> = argv.into_iter().map(Into::into).collect();
+    // NCBI's application reads its own toolkit words before the program's arguments.
+    if let Some(program) = tokens
+        .get(1)
+        .and_then(|token| token.to_str())
+        .and_then(|text| command.find_subcommand(text))
+        .filter(|program| {
+            matches!(
+                program.get_name(),
+                "blastn" | "blastp" | "tblastn" | "tblastx"
+            )
+        })
+    {
+        if let Some(word) = ncbi_preparsed_toolkit_word(&tokens[2..]) {
+            let name = word.trim_start_matches('-');
+            let name = name.split_once('=').map_or(name, |(key, _)| key);
+            return Err(unknown_option_error(program, name, word));
+        }
+    }
+    let mut input = tokens.into_iter();
     let mut translated = vec![input.next().unwrap_or_else(|| "losat".into())];
     let mut scope = &command;
     while let Some(token) = input.next() {
@@ -94,63 +113,7 @@ where
             .get_arguments()
             .find(|arg| arg.get_long() == Some(name))
         else {
-            // NCBI c++/src/algo/blast/blastinput/tblastn_args.cpp:64-129:
-            // m_Args.push_back(arg) registers shared, formatting, DB, and PSI groups.
-            // The named NCBI options below have no Stage B Rust behavior.
-            // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:62-66
-            // ```c++
-            //     m_BlastDbArgs.Reset(new CBlastDatabaseArgs);
-            //     m_BlastDbArgs->SetDatabaseMaskingSupport(true);
-            //     m_BlastDbArgs->SetIPGFilteringSupport(true);
-            //     arg.Reset(m_BlastDbArgs);
-            //     m_Args.push_back(arg);
-            // ```
-            // Product scope explicitly refuses unported NCBI capabilities.
-            if scope.get_name() == "blastx" && is_unported_blastx_arg(name) {
-                return Err(clap::Error::raw(ErrorKind::InvalidValue,
-                    format!("unsupported BLASTX option '-{name}': outside the declared local FASTA scope")));
-            }
-            if scope.get_name() == "blastn" && is_unported_blastn_arg(name) {
-                return Err(clap::Error::raw(
-                    ErrorKind::InvalidValue,
-                    format!("the NCBI BLAST+ option -{name} is not supported by LOSAT's BLASTN"),
-                ));
-            }
-            if scope.get_name() == "blastp" && is_unported_blastp_arg(name) {
-                return Err(clap::Error::raw(
-                    ErrorKind::InvalidValue,
-                    format!("the NCBI BLAST+ option -{name} is not supported by LOSAT's BLASTP"),
-                ));
-            }
-            if let Some(program) = ["blastn", "blastp", "tblastn", "tblastx"]
-                .into_iter()
-                .find(|program| scope.get_name() == *program)
-                .filter(|_| is_ncbi_toolkit_arg(name))
-            {
-                return Err(clap::Error::raw(
-                    ErrorKind::InvalidValue,
-                    format!(
-                        "the NCBI C++ Toolkit option -{name} is not supported by LOSAT's {}",
-                        program.to_ascii_uppercase()
-                    ),
-                ));
-            }
-            if scope.get_name() == "tblastx" && is_unported_tblastx_arg(name) {
-                return Err(clap::Error::raw(
-                    ErrorKind::InvalidValue,
-                    format!("the NCBI BLAST+ option -{name} is not supported by LOSAT's TBLASTX"),
-                ));
-            }
-            if scope.get_name() == "tblastn" && is_unported_tblastn_arg(name) {
-                return Err(clap::Error::raw(
-                    ErrorKind::InvalidValue,
-                    format!("the NCBI BLAST+ option -{name} is not supported by LOSAT's TBLASTN"),
-                ));
-            }
-            return Err(clap::Error::raw(
-                ErrorKind::UnknownArgument,
-                format!("unknown option or argument '{text}'; use -help for CLI v2 syntax"),
-            ));
+            return Err(unknown_option_error(scope, name, text));
         };
         if arg.get_action().takes_values() {
             let value = match inline {
@@ -342,6 +305,126 @@ fn is_unported_blastp_arg(name: &str) -> bool {
             | "xdrop_gap_final"
             | "xdrop_ungap"
     )
+}
+
+// The rejection of an option that a program does not have: NCBI's options that LOSAT
+// has not ported, the NCBI C++ Toolkit options, and the rest (unknown to NCBI too).
+fn unknown_option_error(scope: &clap::Command, name: &str, text: &str) -> clap::Error {
+    // NCBI c++/src/algo/blast/blastinput/tblastn_args.cpp:64-129:
+    // m_Args.push_back(arg) registers shared, formatting, DB, and PSI groups.
+    // The named NCBI options below have no Stage B Rust behavior.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:62-66
+    // ```c++
+    //     m_BlastDbArgs.Reset(new CBlastDatabaseArgs);
+    //     m_BlastDbArgs->SetDatabaseMaskingSupport(true);
+    //     m_BlastDbArgs->SetIPGFilteringSupport(true);
+    //     arg.Reset(m_BlastDbArgs);
+    //     m_Args.push_back(arg);
+    // ```
+    // Product scope explicitly refuses unported NCBI capabilities.
+    if scope.get_name() == "blastx" && is_unported_blastx_arg(name) {
+        return clap::Error::raw(
+            ErrorKind::InvalidValue,
+            format!("unsupported BLASTX option '-{name}': outside the declared local FASTA scope"),
+        );
+    }
+    if scope.get_name() == "blastn" && is_unported_blastn_arg(name) {
+        return clap::Error::raw(
+            ErrorKind::InvalidValue,
+            format!("the NCBI BLAST+ option -{name} is not supported by LOSAT's BLASTN"),
+        );
+    }
+    if scope.get_name() == "blastp" && is_unported_blastp_arg(name) {
+        return clap::Error::raw(
+            ErrorKind::InvalidValue,
+            format!("the NCBI BLAST+ option -{name} is not supported by LOSAT's BLASTP"),
+        );
+    }
+    if let Some(program) = ["blastn", "blastp", "tblastn", "tblastx"]
+        .into_iter()
+        .find(|program| scope.get_name() == *program)
+        .filter(|_| is_ncbi_toolkit_arg(name))
+    {
+        return clap::Error::raw(
+            ErrorKind::InvalidValue,
+            format!(
+                "the NCBI C++ Toolkit option -{name} is not supported by LOSAT's {}",
+                program.to_ascii_uppercase()
+            ),
+        );
+    }
+    if scope.get_name() == "tblastx" && is_unported_tblastx_arg(name) {
+        return clap::Error::raw(
+            ErrorKind::InvalidValue,
+            format!("the NCBI BLAST+ option -{name} is not supported by LOSAT's TBLASTX"),
+        );
+    }
+    if scope.get_name() == "tblastn" && is_unported_tblastn_arg(name) {
+        return clap::Error::raw(
+            ErrorKind::InvalidValue,
+            format!("the NCBI BLAST+ option -{name} is not supported by LOSAT's TBLASTN"),
+        );
+    }
+    clap::Error::raw(
+        ErrorKind::UnknownArgument,
+        format!("unknown option or argument '{text}'; use -help for CLI v2 syntax"),
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:926-1001
+// ```c++
+//         for (int i = 1;  i < argc;  i++) {
+//             if ( !argv[i] ) {
+//                 continue;
+//             }
+//             if ( NStr::strcmp(argv[i], s_ArgDelimiter) == 0 ) {
+//                 skip = true;
+//             }
+//             if (skip) {
+//                 v[real_arg_index++] = argv[i];
+//                 continue;
+//             }
+//             // Log file - ignore if diag is eDS_User - the user wants to
+//             // take care about logging.
+//             if ( diag != eDS_User  &&
+//                 NStr::strcmp(argv[i], s_ArgLogFile) == 0 ) {
+//             ...
+//             } else if ( NStr::strcmp(argv[i], s_ArgCfgFile) == 0 ) {
+//             ...
+//             else if (NStr::StartsWith(argv[i], s_ArgCfgFile)) {
+//             ...
+//             } else if ( NStr::strcmp(argv[i], s_ArgVersion) == 0 ) {
+//                 delete[] v;
+//                 // Print VERSION
+//             ...
+//             } else if ( NStr::strcmp(argv[i], s_ArgDryRun) == 0 ) {
+//                 m_DryRun = true;
+// ```
+// NCBI's application reads these words anywhere before `--`, also where another option
+// expects its value: `-out -version` prints the version, and `-out -dryrun` loses the
+// value of `-out`. LOSAT rejects each of them (decision D9), so the first one found is
+// rejected there as it is in an option's place, rather than read as the value.
+fn ncbi_preparsed_toolkit_word(tokens: &[OsString]) -> Option<&str> {
+    for token in tokens {
+        let text = token.to_str().unwrap_or("");
+        if text == "--" {
+            return None;
+        }
+        if matches!(
+            text,
+            "-logfile"
+                | "-conffile"
+                | "-version"
+                | "-version-full"
+                | "-version-full-xml"
+                | "-version-full-json"
+                | "-dryrun"
+        ) || text.starts_with("-conffile=")
+        {
+            return Some(text);
+        }
+    }
+    None
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:78-88

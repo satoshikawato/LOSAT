@@ -1,0 +1,12 @@
+07:33:12 verify-refs
+07:33:20 fmt
+07:33:21 clippy --all-targets --all-features
+07:33:25 clippy --all-targets --no-default-features
+07:33:28 clippy --lib --target wasm32-wasip1 --no-default-features
+07:33:30 clippy --lib --target wasm32-wasip1-threads --features wasm-threads
+07:33:32 adapter clippy --all-targets
+07:33:35 adapter clippy --lib --target wasm32-wasip1
+07:33:36 adapter clippy --lib --target wasm32-wasip1-threads --features threads
+07:33:38 cargo-test
+07:34:54 adapter-test
+07:35:00 done

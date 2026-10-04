@@ -1,0 +1,25 @@
+   Compiling LOSAT v0.2.0 (/home/kawato/.cache/losat-web-gui-target/s08pa/head-src/LOSAT)
+   Compiling losat-web-adapter v0.1.0 (/home/kawato/.cache/losat-web-gui-target/s08pa/head-src/web/adapter)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.20s
+     Running unittests src/lib.rs (/home/kawato/.cache/losat-web-gui-target/s08pa-adapter/debug/deps/losat_web_adapter-5b6062ad978c9738)
+
+running 5 tests
+test json::tests::strings_and_numbers_are_valid_json ... ok
+test run::tests::unmatched_or_repeated_hsp_events_are_faults ... ok
+test store::tests::a_scan_that_disagrees_with_the_parser_fails_register ... ok
+
+thread 'store::tests::blastn_register_rejects_records_that_ncbi_reads_differently' (1068843) panicked at src/store.rs:253:64:
+called `Result::unwrap()` on an `Err` value: "query record 1 has a defline that has the control character 0x09; NCBI BLAST+ reads such a defline differently, which is not supported by LOSAT's BLASTP (use ASCII deflines without control characters)"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test store::tests::blastn_register_rejects_records_that_ncbi_reads_differently ... FAILED
+test run::tests::argv_is_parsed_as_on_the_command_line ... ok
+
+failures:
+
+failures:
+    store::tests::blastn_register_rejects_records_that_ncbi_reads_differently
+
+test result: FAILED. 4 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+error: test failed, to rerun pass `--lib`
+exit 101

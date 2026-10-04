@@ -1,0 +1,21 @@
+tblastn [CHUNK_SIZE=1000] e2e_many_query.faa e2e_many_subject.fna -outfmt 6 :: same
+tblastn [CHUNK_SIZE=1000] e2e_many_query.faa e2e_many_subject.fna -max_target_seqs 5 -outfmt 6 :: same
+tblastn [CHUNK_SIZE=1000] e2e_many_query.faa e2e_many_subject.fna -comp_based_stats 0 -max_target_seqs 3 -outfmt 6 :: same
+tblastn [CHUNK_SIZE=1000] e2e_many_query.faa e2e_many_subject.fna -num_threads 4 -outfmt 6 :: DIFF rc 0/0 out 0 err 1
+tblastn [CHUNK_SIZE=1000] e2e_many_query.faa e2e_many_subject.fna -soft_masking true -outfmt 6 :: same
+tblastn [CHUNK_SIZE=1000] e2e_many_query.faa e2e_many_subject.fna -outfmt 7 :: same
+tblastn [CHUNK_SIZE=1000] gen_q.faa gen_s.fna -comp_based_stats 0 -max_target_seqs 2 -outfmt 6 :: same
+tblastn [CHUNK_SIZE=700 OVERLAP_CHUNK_SIZE=0] e2e_many_query.faa e2e_many_subject.fna -outfmt 6 :: same
+tblastn [CHUNK_SIZE=700 OVERLAP_CHUNK_SIZE=0] e2e_many_query.faa e2e_many_subject.fna -max_target_seqs 5 -outfmt 6 :: same
+tblastn [CHUNK_SIZE=700 OVERLAP_CHUNK_SIZE=0] e2e_many_query.faa e2e_many_subject.fna -comp_based_stats 0 -max_target_seqs 3 -outfmt 6 :: same
+tblastn [CHUNK_SIZE=700 OVERLAP_CHUNK_SIZE=0] e2e_many_query.faa e2e_many_subject.fna -num_threads 4 -outfmt 6 :: DIFF rc 0/0 out 0 err 1
+tblastn [CHUNK_SIZE=700 OVERLAP_CHUNK_SIZE=0] e2e_many_query.faa e2e_many_subject.fna -soft_masking true -outfmt 6 :: same
+tblastn [CHUNK_SIZE=700 OVERLAP_CHUNK_SIZE=0] e2e_many_query.faa e2e_many_subject.fna -outfmt 7 :: same
+tblastn [CHUNK_SIZE=700 OVERLAP_CHUNK_SIZE=0] gen_q.faa gen_s.fna -comp_based_stats 0 -max_target_seqs 2 -outfmt 6 :: same
+tblastn [CHUNK_SIZE=1500 OVERLAP_CHUNK_SIZE=10] e2e_many_query.faa e2e_many_subject.fna -outfmt 6 :: same
+tblastn [CHUNK_SIZE=1500 OVERLAP_CHUNK_SIZE=10] e2e_many_query.faa e2e_many_subject.fna -max_target_seqs 5 -outfmt 6 :: same
+tblastn [CHUNK_SIZE=1500 OVERLAP_CHUNK_SIZE=10] e2e_many_query.faa e2e_many_subject.fna -comp_based_stats 0 -max_target_seqs 3 -outfmt 6 :: same
+tblastn [CHUNK_SIZE=1500 OVERLAP_CHUNK_SIZE=10] e2e_many_query.faa e2e_many_subject.fna -num_threads 4 -outfmt 6 :: DIFF rc 0/0 out 0 err 1
+tblastn [CHUNK_SIZE=1500 OVERLAP_CHUNK_SIZE=10] e2e_many_query.faa e2e_many_subject.fna -soft_masking true -outfmt 6 :: same
+tblastn [CHUNK_SIZE=1500 OVERLAP_CHUNK_SIZE=10] e2e_many_query.faa e2e_many_subject.fna -outfmt 7 :: same
+tblastn [CHUNK_SIZE=1500 OVERLAP_CHUNK_SIZE=10] gen_q.faa gen_s.fna -comp_based_stats 0 -max_target_seqs 2 -outfmt 6 :: same

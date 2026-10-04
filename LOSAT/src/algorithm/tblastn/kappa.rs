@@ -683,6 +683,7 @@ mod tests {
                 word_xdrop_bits: 7.0,
                 scale_factor: 1.0,
                 gumbel: Some(&gumbel),
+                eff_searchsp_override: None,
             },
             LocalParameterCall::Initial {
                 min_subject_length: (subject_nt.len() / 3) as i32,
@@ -955,6 +956,7 @@ mod tests {
                 word_xdrop_bits: 7.0,
                 scale_factor: 1.0,
                 gumbel: Some(&gumbel),
+                eff_searchsp_override: None,
             },
             LocalParameterCall::Initial {
                 min_subject_length: 120,
@@ -1356,6 +1358,7 @@ mod tests {
                 word_xdrop_bits: 7.0,
                 scale_factor: 1.0,
                 gumbel: Some(&gumbel),
+                eff_searchsp_override: None,
             },
             LocalParameterCall::Initial {
                 min_subject_length: 2_125,
@@ -2136,6 +2139,7 @@ mod tests {
                 word_xdrop_bits: 7.0,
                 scale_factor: 1.0,
                 gumbel: Some(&gumbel),
+                eff_searchsp_override: None,
             },
             LocalParameterCall::Initial {
                 min_subject_length: 120,

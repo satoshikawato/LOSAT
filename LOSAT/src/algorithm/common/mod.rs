@@ -9,3 +9,4 @@
 pub mod chaining;
 pub mod diagnostics;
 pub mod evalue;
+pub mod protein_query_split;

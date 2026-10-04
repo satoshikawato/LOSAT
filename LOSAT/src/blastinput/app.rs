@@ -542,31 +542,17 @@ pub fn parse_comp_based_stats(
 ///                    "Split query chunk size must be divisible by 3");
 ///     }
 /// ```
-/// `SplitQuery_ShouldSplit` is true for tblastx (split_query_aux_priv.cpp:73-97), so
-/// `SplitQuery_CalculateNumChunks` always reads the overlap (`blastn/query_split.rs`
-/// `SplitSizes`; the `int` becomes a 64-bit `size_t`). The chunk size must be divisible
-/// by 3 only for a translated query (`translated_query`, tblastx); blastp and tblastn read
-/// the values and do not split a protein query.
+/// `SplitQuery_ShouldSplit` is true for blastp, tblastn and tblastx
+/// (split_query_aux_priv.cpp:73-97), so `SplitQuery_CalculateNumChunks` always reads the
+/// overlap (`blastn/query_split.rs` `SplitSizes`; the `int` becomes a 64-bit `size_t`). The
+/// chunk size must be divisible by 3 only for a translated query (`translated_query`,
+/// tblastx). Whether a blastp or tblastn query batch is split is
+/// `common/protein_query_split.rs`.
 pub fn check_query_split_environment(
     program: &str,
     translated_query: bool,
 ) -> anyhow::Result<anyhow::Result<()>> {
-    let read = |variable: &str| -> anyhow::Result<Option<i32>> {
-        match std::env::var_os(variable) {
-            Some(value)
-                if !crate::algorithm::blastn::input::is_blank(value.as_encoded_bytes()) =>
-            {
-                match crate::blastinput::query_batch::ncbi_string_to_int(&value) {
-                    Some(number) => Ok(Some(number)),
-                    None => anyhow::bail!(
-                        "the environment variable {variable} has the value {:?}, which NCBI BLAST+ cannot convert to an int (it stops with a CStringException that names its build's source files); this is not supported by LOSAT's {program}",
-                        value.to_string_lossy()
-                    ),
-                }
-            }
-            _ => Ok(None),
-        }
-    };
+    let read = |variable: &str| read_query_split_variable(program, variable);
     if let Some(chunk_size) = read("CHUNK_SIZE")? {
         if translated_query && (i64::from(chunk_size) as u64) % 3 != 0 {
             return Ok(Err(NativeError {
@@ -579,6 +565,53 @@ pub fn check_query_split_environment(
     }
     read("OVERLAP_CHUNK_SIZE")?;
     Ok(Ok(()))
+}
+
+/// `CHUNK_SIZE` or `OVERLAP_CHUNK_SIZE` as NCBI reads it (`None` when unset or blank).
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/local_blast.cpp:58-61
+/// ```c
+///     char* chunk_sz_str = getenv("CHUNK_SIZE");
+///     if (chunk_sz_str && !NStr::IsBlank(chunk_sz_str)) {
+///         retval = NStr::StringToInt(chunk_sz_str);
+/// ```
+fn read_query_split_variable(program: &str, variable: &str) -> anyhow::Result<Option<i32>> {
+    match std::env::var_os(variable) {
+        Some(value) if !crate::algorithm::blastn::input::is_blank(value.as_encoded_bytes()) => {
+            match crate::blastinput::query_batch::ncbi_string_to_int(&value) {
+                Some(number) => Ok(Some(number)),
+                None => anyhow::bail!(
+                    "the environment variable {variable} has the value {:?}, which NCBI BLAST+ cannot convert to an int (it stops with a CStringException that names its build's source files); this is not supported by LOSAT's {program}",
+                    value.to_string_lossy()
+                ),
+            }
+        }
+        _ => Ok(None),
+    }
+}
+
+/// NCBI's query chunk size and overlap of a blastp or tblastn search
+/// (`common/protein_query_split.rs` `protein_split_sizes`), with the environment variables
+/// `CHUNK_SIZE` and `OVERLAP_CHUNK_SIZE` read as NCBI reads them.
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_cxx.cpp:55-58
+/// ```c
+///     m_ChunkSize = SplitQuery_GetChunkSize(m_Options->GetProgram());
+///     m_LocalQueryData = m_QueryFactory->MakeLocalQueryData(m_Options);
+///     m_TotalQueryLength = m_LocalQueryData->GetSumOfSequenceLengths();
+///     m_NumChunks = SplitQuery_CalculateNumChunks(m_Options->GetProgramType(),
+/// ```
+pub fn protein_query_split_sizes(
+    program: &str,
+    default_chunk_size: u32,
+) -> anyhow::Result<crate::algorithm::blastn::query_split::SplitSizes> {
+    Ok(
+        crate::algorithm::common::protein_query_split::protein_split_sizes(
+            default_chunk_size,
+            read_query_split_variable(program, "CHUNK_SIZE")?,
+            read_query_split_variable(program, "OVERLAP_CHUNK_SIZE")?,
+        ),
+    )
 }
 
 /// The environment that changes NCBI's blastp, tblastn or tblastx in a way that LOSAT does

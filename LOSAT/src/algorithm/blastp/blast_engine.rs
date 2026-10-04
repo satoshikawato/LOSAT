@@ -3608,7 +3608,14 @@ fn chain_blastp_init_hsps(
     keep: &mut Vec<bool>,
     nodes: &mut Vec<BlastpInitHspNode>,
 ) -> Vec<InitHSP> {
-    if init_hsps.len() <= 1 {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3707-3708
+    // ```c
+    // if (init_hitlist->total == 0)
+    //    return 0;
+    // ```
+    // A list of one ungapped alignment is chained too: its node keeps its own score
+    // and the drop test below can remove it.
+    if init_hsps.is_empty() {
         return init_hsps;
     }
 
@@ -9373,6 +9380,49 @@ mod tests {
         assert_eq!(chained.len(), 2);
         assert_eq!(chained[0].ungapped_data.score, 60);
         assert_eq!(chained[1].ungapped_data.score, 50);
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3628-3636
+    // ```c
+    // if (nodes[k].best_score - gap_score + word_params->cutoffs[context].cutoff_score - 1 < hit_params->cutoffs[context].cutoff_score) {
+    //     ...
+    //     nodes[k].init_hsp->ungapped_data = NULL;
+    // }
+    // ```
+    #[test]
+    fn test_chain_blastp_init_hsps_drops_a_lone_hsp_below_the_gapped_cutoff() {
+        let contexts = vec![QueryContext {
+            aa_len: 256,
+            ..make_query_context(0, 0)
+        }];
+        let mut keep = Vec::new();
+        let mut nodes = Vec::new();
+
+        // 20 - 12 + 15 - 1 = 22 < 23: dropped.
+        let dropped = chain_blastp_init_hsps(
+            vec![make_init_hsp(0, 10, 0, 0, 0, 20)],
+            &contexts,
+            &[15],
+            &[23],
+            11,
+            1,
+            &mut keep,
+            &mut nodes,
+        );
+        assert!(dropped.is_empty());
+
+        // 20 - 12 + 15 - 1 = 22, not below 22: kept.
+        let kept = chain_blastp_init_hsps(
+            vec![make_init_hsp(0, 10, 0, 0, 0, 20)],
+            &contexts,
+            &[15],
+            &[22],
+            11,
+            1,
+            &mut keep,
+            &mut nodes,
+        );
+        assert_eq!(kept.len(), 1);
     }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3468-3499

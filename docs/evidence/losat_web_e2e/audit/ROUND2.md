@@ -37,18 +37,18 @@
 | ID | 重さ | 内容 | 対応 |
 |---|---|---|---|
 | R2A2-1 | 中 | `-task blastp-fast`（NCBI は HSP の chaining を有効にする、blast_options_handle.cpp:395-399）で明示的な低い `-threshold`（13 以下）のとき、LOSAT は NCBI が落とす短い HSP を 1 つ多く報告する（約 12,000 の比較のうち 68）。NCBI は init hit list が空の時だけ chaining を飛ばし（blast_gapalign.c:3707-3708）、HSP が 1 つの context もその得点で drop の検査（3628-3636）にかける。LOSAT は list が 1 つ以下で返っていた。第 1 回の実行ファイルも同じ（退行ではない） | 直した（`3b84ce6c4`）：空の時だけ返す。fixture `e2e.blastp.fast_lone_hsp`（outfmt 0）・`fast_lone_hsp_window`（outfmt 7）。監査の harness の blastp-fast の行と差のあった行 7,053 のうち 7,032 が NCBI と一致（R2A2-1 の 68 件を含む）、21 は NCBI が落ちる行（R2A2-2）（[`../s08pb/r2a2_1/`](../s08pb/r2a2_1/)） |
-| R2A2-2 | 低（NCBI の不具合） | `-window_size 0` と `-threshold` 1〜3 の一部の one-hit の検索で NCBI が SIGSEGV（5,000 の無作為の組のうち 21）。`BlastGetStartForGappedAlignment`（blast_gapalign.c:3393-3416）が負の長さの 11 文字の窓を配列の外まで読み（valgrind：「0 bytes after a block」）、その値で行列を引く。LOSAT は配列の外を NULLB として読み（`blastp_get_start_for_gapped_alignment_int4_length`）、NCBI を `valgrind -q` の下で走らせた出力とバイト一致（21 件とも） | 保守者に諮る（NCBI の不具合の方針の「確かめられる妥当な結果を承認済みの例外にする」に当たる。推奨は承認済みの例外。それまで LOSAT の振る舞いは変えない） |
+| R2A2-2 | 低（NCBI の不具合） | `-window_size 0` と `-threshold` 1〜3 の一部の one-hit の検索で NCBI が SIGSEGV（5,000 の無作為の組のうち 21）。`BlastGetStartForGappedAlignment`（blast_gapalign.c:3393-3416）が負の長さの 11 文字の窓を配列の外まで読み（valgrind：「0 bytes after a block」）、その値で行列を引く。LOSAT は配列の外を NULLB として読み（`blastp_get_start_for_gapped_alignment_int4_length`）、NCBI を `valgrind -q` の下で走らせた出力とバイト一致（21 件とも） | 保守者に諮った（NCBI の不具合の方針の「確かめられる妥当な結果を承認済みの例外にする」に当たる）。2026-10-05 に保守者が承認済みの例外 3 にした（計画 DW-19、`PD-LOSAT-NCBI-DEFECTS` 版 1.3）。LOSAT の振る舞いは変えない |
 
 ## (a) の 3 回目（`3b84ce6c4`、native `6f070575…`）
 
 [`round2/a3_blastp.md`](round2/a3_blastp.md)（指示 [`brief/ANGLE_A3.md`](round2/brief/ANGLE_A3.md)。実行ファイルは最後のゲート `run-20261004T163746Z` の native と同じ bytes）。結論は **supported**。新しい指摘は無い。
 
 - R2A2-1：直った。2 回目の再現と新しい fixture の組 160 件が一致。chaining の広い探索（`w4.py`：短い組、subject ごとに ungapped の整列が 1 つの組、1 つと複数の query（context）を混ぜた batch、100〜1,000 残基、e2e の入力と 300 の subject、query の分割、`-threshold` 1〜30、window・e-value・`-comp_based_stats`・`-max_target_seqs`・outfmt 0/6/7）21,500 件で一致 20,074、LOSAT の拒否 1,424（全て `-comp_based_stats 0`、§K の拒否）、NCBI が落ちる 2（R2A2-2）、差 0。2 回目の実行ファイルと違う 68 件は全て新しい実行ファイルが NCBI と一致。blastp-fast を使わない対照 1,100 件は 2 回目の実行ファイルとバイト一致。blastp-fast の差は約 12,000 件中 68 件から約 28,000 件中 0 件になった。
-- R2A2-2：変わらない。NCBI が落ちる 23 件（`w2` の 21、`w4` の 2）で、LOSAT の出力は NCBI の `valgrind -q` の下の出力と 23 件とも一致（保守者の判断待ち、D15）。
+- R2A2-2：変わらない。NCBI が落ちる 23 件（`w2` の 21、`w4` の 2）で、LOSAT の出力は NCBI の `valgrind -q` の下の出力と 23 件とも一致（保守者の判断待ち、D15。後に保守者が承認済みの例外 3 にした、DW-19）。
 - 2 回目の全ての harness を繰り返した：argv 1,443（差 5 は承認済みの `-help` 4 件と両方が timeout の `-task blastp-fast -threshold +inf`。13 行が負荷の下の時間で類が移った）、sweep 3,635（2 回目と行ごとに同じ）、無作為の比較 8,271（差 0）、`w1`・`w1` fast・`g1`・`w2`・`w3`・`w2L`・`g2`・`d12`・`dd` は R2A2-1 の行が一致になった以外は 2 回目と同じ。
 
 ## 結論
 
 4 観点とも supported：(b) TBLASTN、(c) TBLASTX、(d) 報告と入力は 1 回目で、(a) BLASTP は 3 回目で（1 回目の R2A-1・R2A-2 と 2 回目の R2A2-1 を直した後）。比べた数は 4 観点で約 12 万（(a) 1 回目 約 19,700、2 回目 約 33,000、3 回目 約 51,000、(b) 約 8,000、(c) 約 2,200、(d) 約 11,000。回をまたぐ繰り返しを含む）。出力に関わる残りの差は無い。
 
-保守者の判断待ち（supported の判断の外）：D11、D12（DBL_MAX 以上を含む）、D13、D14、D15（R2A2-2）。残件（資源・性能・文言）：R2c-1、R2b-2、R2c-3（[`../AUTHORITY.md`](../AUTHORITY.md) §N）。
+保守者の判断（supported の判断の外）：D11、D12（DBL_MAX 以上を含む）、D13、D14 は明示的な拒否のまま、D15（R2A2-2）は承認済みの例外 3（2026-10-05、計画 DW-19、`PD-LOSAT-NCBI-DEFECTS` 版 1.3）。残件（資源・性能・文言）：R2c-1、R2b-2、R2c-3（[`../AUTHORITY.md`](../AUTHORITY.md) §N）。

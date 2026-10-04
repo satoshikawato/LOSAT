@@ -1,10 +1,11 @@
 # Product Decision: CLI behaviour outside the search results
 
 - Decision ID: `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`
-- Version: 1.3
+- Version: 1.4
 - Date: 2026-10-02 (1.0); 1.1 the same day (exception 5, Session S07+++b); 1.2 the same day
   (the timing of a closed pipe, exceptions 3 and 5, Session S07+++b); 1.3 2026-10-03
-  (exception 6, a standard output closed at the start, Session S08b)
+  (exception 6, a standard output closed at the start, Session S08b); 1.4 2026-10-05 (NCBI
+  C++ Toolkit words in an option's value, Session S08+b, plan DW-19)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++ (E2g), on the items
   that the BLASTN inventory (`docs/evidence/losat_web_e2g/INVENTORY.tsv`, actions `S08` and
   `OPEN`) left for a maintainer decision. Plan decision DW-13 in
@@ -81,6 +82,16 @@ BLAST+.
   example `[BLAST] LONG_SEQID`; the list comes from the NCBI source). A `.ncbirc` that
   only sets keys without an output effect (such as `BLASTDB`) is accepted. BLASTN in
   S07+++b.
+- **NCBI C++ Toolkit words** (`-version`, `-version-full*`, `-dryrun`, `-logfile`,
+  `-conffile`, `-xmlhelp`, `-help-full`; decisions D9 and D14 of
+  `docs/evidence/losat_web_e2e/AUTHORITY.md` §M): LOSAT rejects them with the explicit
+  "not supported by LOSAT's <PROGRAM>" error, in an option's place and, since version 1.4
+  (accepted by the maintainer on 2026-10-05 in Session S08+b, plan DW-19), also in an
+  option's value (`-out -version`), where NCBI's argv pre-pass (`ncbiapp.cpp:926-1001`)
+  acts on them up to `--` (it prints the version and exits 0, drops `-dryrun`, or takes
+  the next word as the log or configuration file). BLASTN, BLASTP, TBLASTN, TBLASTX and the
+  adapter's `validate` (S08+a). A last `--` changes nothing, as in NCBI
+  (`ncbiargs.cpp:2866-2872`); a word after it is an argument syntax error (exception 1).
 - **FASTA input that NCBI's `CFastaReader` reads differently**: the explicit rejections
   stay (TD-12) until a dedicated session before S17 ports the `CFastaReader` functions
   on the path, together with the adapter's index scan (plan §10).

@@ -67,8 +67,9 @@ authoritative, current guidance for agent behavior in LOSAT.
      as the search ends. Errors raised after argument parsing, the outfmt 0 write
      failure ("BLAST failed to write output", exit 6), all other warnings, and
      every search result must still match NCBI. Non-UTF-8
-     file names and `.ncbirc` keys that change output are explicit
-     rejections, not exceptions.
+     file names, `.ncbirc` keys that change output, and NCBI C++ Toolkit
+     words (`-version`, `-dryrun`, `-logfile`, ...; also in an option's value)
+     are explicit rejections, not exceptions.
    - Approved exceptions for NCBI defects (`PD-LOSAT-NCBI-DEFECTS`): where
      NCBI BLAST+ fails (a crash, a debug-only assumption, a read past a buffer)
      and LOSAT's result was shown to equal NCBI's output for a nearby input
@@ -76,7 +77,10 @@ authoritative, current guidance for agent behavior in LOSAT.
      split again (CHUNK_SIZE/OVERLAP_CHUNK_SIZE; NCBI stops with a
      CCoreException) is searched once. BLASTN, TBLASTX and TBLASTN: outfmt 0
      titles made only of punctuation stop at the end of the string (NCBI
-     reads past it and crashes). Deterministic NCBI results, even wrong-looking ones, are
+     reads past it and crashes). BLASTP: a one-hit gapped start whose window
+     of 11 letters passes the end of a sequence reads the letters past it as
+     the sentinel (NCBI reads past its buffer and can crash; LOSAT's output
+     equals NCBI's under valgrind). Deterministic NCBI results, even wrong-looking ones, are
      reproduced, not excepted; NCBI failures without a checkable valid result
      are explicit rejections.
 

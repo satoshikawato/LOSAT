@@ -1,9 +1,10 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.2
+- Version: 1.3
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
-  1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b)
+  1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
+  (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`) and the independent audits found to be
@@ -15,8 +16,9 @@ NCBI BLAST+ 2.17.0 behaviour that is a defect rather than a design: a crash, an
 exception that only a debug-build assertion was meant to prevent, a read past the end of
 a buffer, or an integer that wraps. Everything else stays under the root
 [`AGENTS.md`](../../AGENTS.md) bit-perfect rule. Versions 1.0 and 1.1 list the BLASTN
-items; version 1.2 adds TBLASTX and TBLASTN; the other programs add theirs in their
-sessions under the same rule.
+items; version 1.2 adds TBLASTX and TBLASTN; version 1.3 the BLASTP, TBLASTN and TBLASTX
+items of their non-default options (E2e); BLASTX adds its own in its session under the same
+rule.
 
 ## Rule
 
@@ -87,6 +89,54 @@ Version 1.2, accepted by the maintainer on 2026-10-03 in Session S08b (E2b), pla
    `docs/evidence/losat_web_e2e/title_sweep.py`; fixtures `punct.tblastx` and
    `punct.tblastn` of `LOSAT/tests/outfmt0_manifest.tsv` (contract `approved_punct_title`).
    This records the implementation; the decision of version 1.2 is unchanged.
+
+## BLASTP, TBLASTN and TBLASTX non-default options (version 1.3)
+
+Version 1.3, accepted by the maintainer on 2026-10-05 in Session S08+b (E2e), plan DW-19:
+the decisions D11 to D15 of `docs/evidence/losat_web_e2e/AUTHORITY.md` §M as recommended.
+
+3. **Approved exception (BLASTP): a one-hit gapped start that reads past a sequence.**
+   With `-window_size 0` (one-hit) and a low `-threshold`, NCBI's ungapped extension can
+   give a negative `Int4` length that `BlastGetStartForGappedAlignment` receives as
+   `Uint4` (`aa_ungapped.c:1054,1083`, `blast_gapalign.c:3393-3437`): it scores only the
+   first window of 11 letters, and when that window passes the end of the query or the
+   subject it reads past the sequence buffer and indexes the matrix with the stray byte;
+   some such searches crash (SIGSEGV, exit 139; 21 of 5,000 random short searches with
+   `-threshold` 1 to 3 in the round-2 audit). LOSAT reads the letters past the sequence
+   as the sentinel (`NULLB`, `BLAST_SCORE_MIN`), as for the letter right after it. NCBI run
+   under `valgrind -q`, which reports the invalid reads and does not crash, gives LOSAT's
+   output byte for byte in all 23 crashing cases of the audit's second and third passes
+   (`docs/evidence/losat_web_e2e/audit/round2/a2_blastp.md`, `a3_blastp.md`). Searches
+   whose window stays inside the sequences and its sentinel match NCBI (fixture
+   `e2e.blastp.one_hit_negative_width`).
+
+Explicit rejections (rule 3):
+
+- `-evalue` infinite or of DBL_MAX or more (BLASTP, TBLASTN; decision D12): a hit list
+  whose HSPs all drop keeps the best e-value DBL_MAX, which passes `best_evalue <=
+  expect_value` (`blast_kappa.c:409,3687`), and the empty list is read
+  (`blast_hits.c:3266`): NCBI crashes on some inputs, and LOSAT cannot tell in advance
+  which. `1.7976931348623156e308` and below run and match NCBI. TBLASTX runs these values
+  and matches NCBI.
+- Query-split settings that NCBI fails on (BLASTP, TBLASTN; decision D13): a
+  `CHUNK_SIZE`/`OVERLAP_CHUNK_SIZE` pair with which a chunk would be split again, and a
+  negative `CHUNK_SIZE` that splits a batch. Unlike BLASTN's exception 1, the maintainer
+  kept the rejection for these programs.
+- Settings on which NCBI crashes (decision D3): an IDENTITY word size of 5 or 6,
+  `-use_sw_tback -ungapped -comp_based_stats 0`, compressed-lookup thresholds that
+  exhaust its overflow bank, and `-max_target_seqs` values that make the preliminary hit
+  list size not positive. A query length plus `-window_size` in (2^30, 2^31 - 1], where
+  NCBI does not finish (decision D8).
+
+Kept as explicit rejections although NCBI's result is deterministic (rule 2's
+maintainer clause; decision D11): a query length plus `-window_size` above 2^31 - 1, where
+NCBI's `Int4` diagonal table wraps to one cell and no hit is found (BLASTP, TBLASTX;
+together with D8, every sum above 2^30 is rejected).
+
+Reproduced as NCBI (rule 2): the out-of-range `double` to `Int4` conversions of
+`-threshold` and the X-drops (INT_MIN, decision D4); `-max_target_seqs` of 2147483624 or
+more in BLASTP, whose preliminary hit list size wraps to 2 to 48; TBLASTX's culling limit
+plus 3 wrapping in `Int4` (decision D1).
 
 ## Reproduced as NCBI (rule 2)
 

@@ -16,7 +16,7 @@ LOSAT の段階 E2d を実行する。これはエンジン（`LOSAT/`）の NCB
 
 ## E2e（S08+・S08+a・S08+b）からの引き継ぎ（2026-10-05）
 
-- 保守者の判断待ちの項目（[E2e のゲート記録](../evidence/losat_web_e2e/README.md)の「保守者に諮ること」：D11〜D15、web ABI v1 の BLASTP の誤りの文言）に判断が出ていれば、`PD-LOSAT-NCBI-DEFECTS`・`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`・`AGENTS.md` と E2e の `AUTHORITY.md` §M への反映を最初の作業にする（D15 が明示的な拒否に決まった場合は、BLASTP の one-hit の窓が配列の外を読む検索の拒否の実装と fixture）。
+- E2e の保守者の判断（D11〜D15、web ABI v1 の BLASTP の誤りの文言）は 2026-10-05 に推奨の案で決まり、`PD-LOSAT-NCBI-DEFECTS` 版 1.3・`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` 版 1.4・`AGENTS.md` に反映した（計画 DW-19）。E2e から残る完了条件は無い。範囲の指定で同じ種類の NCBI の不具合に当たったら、同じ方針（`PD-LOSAT-NCBI-DEFECTS` の規則）で扱う。
 - 範囲と query の分割：BLASTP・TBLASTN は NCBI と同じ chunk（blastp 10000・tblastn 20000 残基、重なり 100、`split_query_aux_priv.cpp`）で query を分ける（S08+a、判断 D13）。範囲を指定した query がいつ分割されるか（範囲の長さか、レコードの長さか）を NCBI の経路で確かめ、境界をまたぐ範囲を fixture に入れる。TBLASTX は NCBI が 10002 塩基で分けるが出力は変わらず、LOSAT は分けない（E2e の残件 R2c-1、記憶だけ）。
 - option の値の検査は 3 つの program とも NCBI の app の層（`blastinput/app.rs` の `check_options`、NCBI の順）にある。`-query_loc` / `-subject_loc` の文法の検査（`CArgAllow`、逆向きの範囲の誤り）はこの順に入れる。
 - ゲートの script の出発点：[`docs/evidence/losat_web_e2e/gates/s08pb_gates.sh`](../evidence/losat_web_e2e/gates/s08pb_gates.sh)（`GATE` で build の directory を分ける）と `s08pb_gate_a.sh`。fixture は 151 件（E2e の終わり）。V-PERF の変更前は E2e の最後の成果物（`~/.cache/losat-web-gui-target/s08pb2-gate-*`、native `6f070575…`）。

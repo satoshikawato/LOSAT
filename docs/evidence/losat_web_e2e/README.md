@@ -2,13 +2,13 @@
 
 - 段階：E2e BLASTP・TBLASTN・TBLASTX の既定以外の option（[総合計画書](../../losat_web_gui_plan.md) §7 の S08+、計画 TD-13・DW-12・DW-15・DW-16・DW-17。指示書 [S08+](../../losat_web_gui_sessions/session_s08p_e2e_protein_options.md)、[S08+a](../../losat_web_gui_sessions/session_s08pa_e2e_audit_open_items.md)、[S08+b](../../losat_web_gui_sessions/session_s08pb_e2e_close.md)）
 - ブランチ：`feature/losat-web-gui`。変更前は S08+ の開始の `78c06fe61`（エンジンは SD の最後の `eeeea4fb2`。native の SHA-256 `487ac387…`、SD の最後の成果物 `~/.cache/losat-web-gui-target/sd-final-*`）。変更後は最後のエンジンのコミット `75cc8e565`（最後のゲートは記録と script を足した `8c905ccc5` で、native `4d6c036f…`）。S08+ は 2026-10-03〜04、S08+a は S08+ の第 1 回の監査の残件を別のブランチ `feature/losat-web-gui-s08pa` で並行して直し（2026-10-04）、S08+b が merge して閉じた（2026-10-04）
-- 状態：（最後に書く）
+- 状態：**完了（2026-10-05）**。計画 §7 の S08+ の行の完了条件をすべて満たした：3 つの program の sweep の全組合せが一致・同じ拒否・明示的な拒否・承認済みの例外のどれか（最後のゲートで DIFF 0）、直した組合せの fixture（E2e の 56 行と TBLASTX の culling 11 件）で NCBI とバイト一致、既存のゲートと fixture に退行なし（Gate A を含む）、V-PERF の非退行、V-ABI、独立監査（第 2 回で 4 観点とも supported）。保守者は諮った 6 項目を全て推奨の案で決めた（2026-10-05、計画 DW-19）
 
 ## 完了条件（計画 §7 の S08+ の行）
 
 | 条件 | 状態 | 根拠 |
 |---|---|---|
-| 各 program の sweep の全組合せが、NCBI と同じ拒否、outfmt 0/6/7 のバイト一致、明示的な拒否のどれか | 満たした（1 件は保守者の判断待ち） | 最後のゲートの sweep：BLASTP 1196・TBLASTN 1427・TBLASTX 641 で DIFF 0・timeout 0（変更前は DIFF 987・1073・194）。TBLASTN の既定以外の `-db_gencode` は承認済みの例外で、C++ API の oracle と一致。2 回の独立監査の約 13 万の比較でも、一致、同じ誤り、承認済みの例外、明示的な拒否だけ。保守者の判断待ちは D11〜D14（明示的な拒否）と D15（NCBI が落ちる検索で LOSAT は NCBI の valgrind の下の出力を出す。推奨は承認済みの例外。断られれば明示的な拒否にする）（下の「保守者に諮ること」） |
+| 各 program の sweep の全組合せが、NCBI と同じ拒否、outfmt 0/6/7 のバイト一致、明示的な拒否のどれか | 満たした | 最後のゲートの sweep：BLASTP 1196・TBLASTN 1427・TBLASTX 641 で DIFF 0・timeout 0（変更前は DIFF 987・1073・194）。TBLASTN の既定以外の `-db_gencode` は承認済みの例外で、C++ API の oracle と一致。2 回の独立監査の約 13 万の比較でも、一致、同じ誤り、承認済みの例外、明示的な拒否だけ。保守者は D11〜D14（明示的な拒否）を承認し、D15（NCBI が落ちる検索で LOSAT は NCBI の valgrind の下の出力を出す）を承認済みの例外 3 にした（`PD-LOSAT-NCBI-DEFECTS` 版 1.3、下の「保守者に諮ること」） |
 | 直した組合せの fixture で NCBI とバイト一致 | 満たした | outfmt 0/7 の manifest の E2e の 56 行（1・2・4 スレッドで差 0）、TBLASTX の `culling.*` 11 件。変更前の実行ファイルは足した行で違う（S08+ の [`audit/ROUND1.md`](audit/ROUND1.md) の確かめ、S08+a の `s08pa/checks/fixtures-base-e2e.log`、S08+b の `s08pb/r2a2_1/check-losat-old-n1.tsv`） |
 | 各 program の既存のゲートと S07・S08 の fixture に退行なし | 満たした | Gate A（TBLASTX v0.1.0 の 20 組：EXACT_TEXT 14、承認済みの `-db_gencode` の HSP_SET_DIFF 6）、capture 236 件が S02 の基準と差 0（S08+ が NCBI とバイト一致にした BLASTP の 11 行の hash を更新）、CI の速い検査の全件 236 件で失敗 0（Gate A と TLOSAN Stage G の凍結ハッシュを含む）、TBLASTX 84・BLASTN 183 の回帰 fixture、題の sweep、BLASTN の入力、`CTOOLKIT_COMPATIBLE`、v1 の WASI の行列で形式の失敗 0 |
 | V-PERF の非退行 | 満たした | 24 組のうち出力が同じ 21 組が閾値以内（`perf-1` で超えた 4 組は `--repeat 5` で ×0.437〜×1.029）。出力が違う `blastp-fmt0` の 3 組は変更後が NCBI とバイト一致（S08+ の outfmt 0 の修正）で、時間の比も ×1.046 以内（下の「V-PERF」） |
@@ -109,7 +109,7 @@ fixture の数は 151（SD の 95 に 56）。凍結と確かめは各ゲート�
 [`AUTHORITY.md`](AUTHORITY.md) §M。推奨の案で進め、記録した（保守者の常の指示）。
 
 - D1 TBLASTX の `-culling_limit` を移植。D2 TBLASTN の subject は `blastn/input.rs` の部品で読む（`CFastaReader` の全体の移植は SF）。D3 NCBI が落ちる組は明示的な拒否。D4 `double` から `Int4` への未定義の変換は `INT_MIN`。D5 unified P は拒否。D6 実数は `CArg_Double` の書き方。D7 未知の行列は NCBI の engine error。D8 NCBI が終わらない window は拒否。D9 `-remote`・`-db` の一族・toolkit の option は拒否。D10 パイプの空の query は拒否。
-- D11・D12（第 1 回の監査）、D13・D14（S08+a）は保守者の確認を待つ（下の「保守者に諮ること」）。
+- D11・D12（第 1 回の監査）、D13・D14（S08+a）、D15（S08+b、第 2 回の監査 R2A2-2）は、2026-10-05 に保守者が推奨の案で決めた（D11〜D14 は明示的な拒否のまま、D15 は承認済みの例外 3。計画 DW-19、下の「保守者に諮ること」）。
 
 ## ゲート
 
@@ -167,14 +167,14 @@ fixture の数は 151（SD の 95 に 56）。凍結と確かめは各ゲート�
 
 | 観点 | 結論 | 指摘と対応 |
 |---|---|---|
-| (a) BLASTP | 1 回目 unsupported（`491292327`）→ 2 回目 unsupported（`75cc8e565`）→ **3 回目 supported**（`3b84ce6c4`） | R2A-1 compressed の lookup の短い subject と R2A-2 one-hit の負の長さの abort（`0e59e2f64`、fixture 2 件）、R2A2-1 blastp-fast の 1 つの ungapped の整列の chaining（`3b84ce6c4`、fixture 2 件）。R2A2-2 は NCBI が配列の外を読んで落ちる検索で、LOSAT は NCBI の `valgrind -q` の下の出力と一致（D15、保守者の判断待ち） |
+| (a) BLASTP | 1 回目 unsupported（`491292327`）→ 2 回目 unsupported（`75cc8e565`）→ **3 回目 supported**（`3b84ce6c4`） | R2A-1 compressed の lookup の短い subject と R2A-2 one-hit の負の長さの abort（`0e59e2f64`、fixture 2 件）、R2A2-1 blastp-fast の 1 つの ungapped の整列の chaining（`3b84ce6c4`、fixture 2 件）。R2A2-2 は NCBI が配列の外を読んで落ちる検索で、LOSAT は NCBI の `valgrind -q` の下の出力と一致（D15、保守者が承認済みの例外 3 にした、DW-19） |
 | (b) TBLASTN | supported（1 回目） | R2b-1 DBL_MAX の `-evalue` で NCBI が落ちる（D12 を広げた、`141e49567`）、R2b-2 小さい `CHUNK_SIZE` の速さ（残件） |
 | (c) TBLASTX | supported（1 回目） | R2c-1 完全な近傍の記憶（残件、出力は同じ）、R2c-2 最後の `--`（`13493774f`）、R2c-3 文言（受け入れ） |
 | (d) 報告と入力 | supported（1 回目） | R2D-1 注釈の行（`75cc8e565`） |
 
 ## 保守者に諮ること
 
-推奨の案で進め、記録した。判断が出たら、`PD-LOSAT-NCBI-DEFECTS`・`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` と `AGENTS.md` の承認済みの例外の記述を、承認の範囲で更新する。出なければ今のまま残件として次のエンジン側のセッションに渡す。
+推奨の案で進め、記録した。2026-10-05 に保守者が 1〜6 を全て推奨の案で決めた（計画 DW-19）。`PD-LOSAT-NCBI-DEFECTS` 版 1.3（承認済みの例外 3 と、BLASTP・TBLASTN・TBLASTX の拒否と再現）、`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` 版 1.4（値の位置の toolkit の語）、`AGENTS.md` を承認の範囲で更新した。
 
 1. **D11**（第 1 回の監査 TX-1）：query の長さ＋window が 2^31 − 1 を超えると NCBI の `Int4` が回り込み hit が無い（決まった結果）。実用が無く再現の費用が高いので、D8 と合わせて和が 2^30 を超える値を BLASTP・TBLASTX で明示的に拒否した。推奨：このまま。
 2. **D12**（BP-4・TN-6・R2b-1）：無限大と DBL_MAX 以上の `-evalue` で NCBI の blastp・tblastn は入力によって SIGSEGV。LOSAT はいつ落ちるかを事前に知れないので明示的に拒否した（1 つ下の有限の値は実行し NCBI と一致）。推奨：このまま。別案：近い有限の値の NCBI の出力と一致を確かめた LOSAT の結果を承認済みの例外にする。
@@ -200,4 +200,4 @@ S08b の V-PERF の `tblastx-multi`（E2b のゲート記録）は今も保守�
 - **残件**（[`AUTHORITY.md`](AUTHORITY.md) §N。出力に関わるものは無い）：R2c-1 TBLASTX の完全な近傍の記憶（NCBI の最大 2.3 倍。NCBI は tblastx の query を 10002 塩基の chunk に分ける）、R2b-2 小さい `CHUNK_SIZE` の TBLASTN の速さ、TBLASTN の 300 の subject の速さ（前から）、BLASTP の分割される batch の全体の検索の費用、R2c-3 文言。
 - **SX**（[指示書](../../losat_web_gui_sessions/session_sx_blastx_integration.md)の「S08+a・S08+b からの引き継ぎ」）：BLASTX と共有の gapped DP の確保と compressed の走査の修正、`read_end_sentinel`、`redo_alignment.rs` の `sort_unstable_by`、blastx の query の分割（重なり 297）、toolkit の語、最後の `--`、one-hit の負の長さ。
 - **S12**（[指示書](../../losat_web_gui_sessions/session_s12_w3_search_ui.md)）：S08+b の 2 つの点を足した（長い query の分割、値の位置の toolkit の語）。
-- **次のエンジン側のセッション**：[S11 — 領域の指定](../../losat_web_gui_sessions/session_s11_e2d_query_subject_loc.md)。保守者の判断（上）が出たら、その反映を最初の作業にする。
+- **次のエンジン側のセッション**：[S11 — 領域の指定](../../losat_web_gui_sessions/session_s11_e2d_query_subject_loc.md)。保守者の判断（上）は反映済みで、E2e から残る完了条件は無い。指示書に E2e からの引き継ぎ（範囲と query の分割、option の検査の順、ゲートの script）を書いた。

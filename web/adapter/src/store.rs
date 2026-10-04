@@ -241,16 +241,16 @@ mod tests {
         assert!(check_scan("query", &recounted, &records).is_err());
     }
 
-    // BLASTN refuses a record that NCBI BLAST+ reads differently; the other programs
-    // keep their readers.
+    // BLASTN refuses a record that NCBI BLAST+ reads differently.
     #[test]
     fn blastn_register_rejects_records_that_ncbi_reads_differently() {
         let bytes = b">q\tt\nACXGT\n";
         let error = register("blastn", ROLE_QUERY, bytes).unwrap_err();
         assert!(error.contains("not supported by LOSAT's BLASTN"), "{error}");
         assert!(register("blastn", ROLE_QUERY, b">q t\nACGUT\n").is_ok());
-        // Another program's handle cannot bring the record to a BLASTN run.
-        let (query, _) = register("blastp", ROLE_QUERY, bytes).unwrap();
+        // Another program's handle cannot bring a record to a BLASTN run (BLASTP also
+        // refuses the tab in the defline of `bytes`, so its record has none).
+        let (query, _) = register("blastp", ROLE_QUERY, b">q t\nACXGT\n").unwrap();
         let (subject, _) = register("blastn", ROLE_SUBJECT, b">s\nACGT\n").unwrap();
         let error = with_inputs(Program::Blastn, query, subject, |_, _| ()).unwrap_err();
         assert!(

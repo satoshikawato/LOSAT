@@ -79,3 +79,15 @@ TBLASTN だけが使う、NCBI の `qsort` に当たる並べ替え（`search_ga
 
 - 推奨（実施）：分割される batch は明示的な拒否のままにし、BLASTP と TBLASTN の `CQuerySplitter` の経路（chunk の作成、chunk ごとの予備の検索と linking、`BlastHSPStreamMerge`・`Blast_HitListMerge`、chunk の query の情報）を、後のセッションで BLASTN の移植（`blastn/query_split.rs`）を基に一括で移植する（S12 の検索画面の前が望ましい：BLASTP で約 9,800 残基を超える query、例えば PKS・NRPS の巨大な蛋白が拒否される）。
 - 別案：このまま拒否を恒久の制限として、S12 の入力の上限に書く。
+
+## `-out -version`（BP-8 の残り）
+
+### NCBI の振る舞い
+
+`CNcbiApplicationAPI::AppMain` の argv の前処理（ncbiapp.cpp:926-1001）は、`--`（`s_ArgDelimiter`、ncbiargs.cpp:89）より前の全ての語を、他の option の値の位置でも調べる：`-version`・`-version-full`・`-version-full-xml`・`-version-full-json` は version を出して終了 0、`-dryrun` は argv から取り除く（`-out -dryrun` は `-out` の値が無くなり USAGE）、`-logfile`・`-conffile` は次の語を値として取る。LOSAT は `-out -version` の `-version` を `-out` の値として読み、`-version` という名のファイルを作っていた。
+
+### 直し方（明示的な拒否）
+
+`cli.rs` の `try_parse_from` が、program の名の後の語を NCBI と同じく `--` まで調べ（`ncbi_preparsed_toolkit_word`）、最初に見つかった上の語（と `-conffile=…`）を、option の位置と同じ文言で拒否する（`unknown_option_error` に既存の分岐をくくり出して共有。`-version` は「the NCBI BLAST+ option -version is not supported by LOSAT's <PROGRAM>」、他は「the NCBI C++ Toolkit option …」、終了コード 2）。BLASTN・BLASTP・TBLASTN・TBLASTX（BLASTX は DW-10 で変えない）。アダプタの `validate` も同じ `try_parse_from` で読むので、同じ拒否になる。決定 D9（toolkit の option と `-version` は拒否）の範囲で、`-version` を出す NCBI と同じにはしない。
+
+試験 `tests/cli_v2.rs` の `toolkit_words_in_an_option_value_are_rejected_as_options`（4 program × 5 つの組）。`-out o.txt` は今までどおり。

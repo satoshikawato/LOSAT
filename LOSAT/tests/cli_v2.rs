@@ -105,9 +105,9 @@ fn legacy_and_unsupported_syntax_is_unknown() {
             "--dust-window",
         ] {
             let err = parse(program, &["-outfmt", "6", old]).unwrap_err();
-            // BLASTN and BLASTP name the NCBI options that they do not implement (AGENTS.md
+            // The programs name the NCBI options that they do not implement (AGENTS.md
             // rule 2).
-            if program != "tblastx" && matches!(old, "-db" | "-remote") {
+            if matches!(old, "-db" | "-remote") {
                 assert!(
                     err.to_string().contains(&format!(
                         "not supported by LOSAT's {}",
@@ -388,11 +388,7 @@ fn numeric_values_are_validated_before_io() {
     for program in ["blastn", "blastp", "tblastx"] {
         // NCBI rejects an e-value that does not start with a digit, a point or a sign
         // (`inf`, `nan`, ` 1`) and one with trailing text; BLASTN's other forms are below.
-        let evalues = if program == "tblastx" {
-            vec!["NaN", "inf", "-inf", "-1"]
-        } else {
-            vec!["NaN", "inf", "nan", " 1", "1 ", "1,5", ""]
-        };
+        let evalues = vec!["NaN", "inf", "nan", " 1", "1 ", "1,5", ""];
         for (key, values) in [
             ("-num_threads", vec!["0", "-1"]),
             ("-word_size", vec!["0", "-1"]),
@@ -411,8 +407,23 @@ fn numeric_values_are_validated_before_io() {
         assert!(parse(program, &["-outfmt", "6", "-max_hsps", "0"]).is_err());
         parse(program, &["-outfmt", "6", "-max_hsps", "1"]).unwrap();
     }
-    for value in ["2", "4"] {
-        assert!(parse("tblastx", &["-outfmt", "6", "-word_size", value]).is_err());
+    // NCBI tblastx runs word sizes 2 to 4 (blast_options.c:1342-1364), which LOSAT's
+    // TBLASTX rejects where the search starts; 5 or more is NCBI's error.
+    for (value, message) in [
+        ("2", "not supported by LOSAT's TBLASTX"),
+        ("4", "not supported by LOSAT's TBLASTX"),
+        ("5", "Word-size must be less than 6 for protein comparison"),
+    ] {
+        let Commands::Tblastx(args) = parse("tblastx", &["-outfmt", "6", "-word_size", value])
+            .unwrap()
+            .command
+        else {
+            unreachable!("tblastx")
+        };
+        let error = LOSAT::algorithm::tblastx::blast_engine::check_options(&args)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains(message), "{value}: {error}");
     }
     // NCBI blast_args.cpp:168-170: the argument is 4 or more; blast_options.c:1326-1333:
     // an option check rejects more than 100, with NCBI's message.
@@ -573,7 +584,30 @@ fn numeric_values_are_validated_before_io() {
         assert!(parse(program, &["-outfmt", "6", "-window_size", "2147483648"]).is_err());
         parse(program, &["-outfmt", "6", "-window_size", "0"]).unwrap();
     }
-    assert!(parse("tblastx", &["-outfmt", "6", "-threshold", "0"]).is_err());
+    // TBLASTX checks its options after the files are opened, with NCBI's messages.
+    for (words, message) in [
+        (&["-threshold", "0"][..], "Non-zero threshold required"),
+        (
+            &["-evalue", "-inf"],
+            "expect value or cutoff score must be greater than zero",
+        ),
+        (
+            &["-evalue", "0"],
+            "expect value or cutoff score must be greater than zero",
+        ),
+        (
+            &["-seg", "12 2.2"],
+            "Invalid number of arguments to filtering option",
+        ),
+    ] {
+        let Commands::Tblastx(args) = parse("tblastx", words).unwrap().command else {
+            unreachable!("tblastx")
+        };
+        let error = LOSAT::algorithm::tblastx::blast_engine::check_options(&args)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains(message), "{words:?}: {error}");
+    }
     // BLASTP checks its options after the files are opened, with NCBI's messages
     // (blast_options.c BLAST_ValidateOptions).
     for (words, message) in [
@@ -671,8 +705,18 @@ fn flags_and_value_tokens_are_not_reinterpreted() {
 #[test]
 fn output_capabilities_fail_explicitly_and_help_is_canonical() {
     parse("blastp", &["-outfmt", "6 qseqid sseqid pident length"]).unwrap();
-    for spec in ["5", "6 qseqid", "7 std"] {
-        assert!(parse("tblastx", &["-outfmt", spec]).is_err());
+    // TBLASTX reads -outfmt as NCBI and writes no other format, custom field list or
+    // delimiter.
+    for spec in ["5", "6 qseqid", "7 std", "6 delim=,"] {
+        parse("tblastx", &["-outfmt", spec]).unwrap();
+        let choice = LOSAT::blastinput::app::parse_formatting_string(spec).unwrap();
+        assert!(
+            LOSAT::blastinput::app::report_format(&choice, "TBLASTX", false, None, false)
+                .unwrap_err()
+                .to_string()
+                .contains("not supported by LOSAT's TBLASTX"),
+            "{spec}"
+        );
     }
     // BLASTP reads -outfmt when the options are set, as NCBI (blast_args.cpp:2801-2851);
     // a custom specification counts only for the tabular formats.

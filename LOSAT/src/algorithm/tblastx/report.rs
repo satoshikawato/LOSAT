@@ -639,9 +639,9 @@ pub(crate) enum TblastxOutputFormat {
 ///             NStr::TruncateSpaces(args[kArgOutputFormat].AsString());
 /// ```
 pub(crate) fn output_format(outfmt: &str) -> TblastxOutputFormat {
-    match outfmt.trim() {
-        "0" => TblastxOutputFormat::Pairwise,
-        "7" => TblastxOutputFormat::TabularWithComments,
+    match crate::blastinput::app::parse_formatting_string(outfmt).map(|choice| choice.number) {
+        Ok(0) => TblastxOutputFormat::Pairwise,
+        Ok(7) => TblastxOutputFormat::TabularWithComments,
         _ => TblastxOutputFormat::Tabular,
     }
 }

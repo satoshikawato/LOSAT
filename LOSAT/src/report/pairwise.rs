@@ -2400,7 +2400,7 @@ pub struct TblastxPairwiseReport {
     pub database_num_sequences: usize,
     pub database_total_letters: usize,
     /// `-threshold` and `-window_size` (the epilog prints them when they are not 0).
-    pub word_threshold: i32,
+    pub word_threshold: f64,
     pub window_size: usize,
     /// Subjects in the description table and with alignments, per query.
     pub num_descriptions: usize,
@@ -2735,12 +2735,12 @@ fn write_tblastx_epilog<W: Write>(
         report.database_total_letters,
     )?;
     writeln!(writer, "Matrix: BLOSUM62")?;
-    if report.word_threshold != 0 {
+    if report.word_threshold != 0.0 {
         // `GetWordThreshold()` is a double, written with the stream's default format.
         writeln!(
             writer,
             "Neighboring words threshold: {}",
-            cpp_default_double(f64::from(report.word_threshold))
+            cpp_default_double(report.word_threshold)
         )?;
     }
     if report.window_size != 0 {

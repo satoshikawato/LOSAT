@@ -348,9 +348,9 @@ fn parse_tblastx_args(
     // ```
     let mut args = tblastx::TblastxArgs {
         query,
-        subject,
+        subject: Some(subject),
         evalue: 10.0,
-        threshold: 13,
+        threshold: 13.0,
         word_size: 3,
         num_threads: 1,
         out: Some(out),
@@ -358,7 +358,7 @@ fn parse_tblastx_args(
         db_gencode: 1,
         max_target_seqs: None,
         // NCBI blast_options.c:83-85: window=kSegWindow; locut=kSegLocut; hicut=kSegHicut.
-        seg: BlastpSegSpec::Yes,
+        seg: "yes".to_string(),
         window_size: 40,
         outfmt: "6".to_string(),
         culling_limit: 0,

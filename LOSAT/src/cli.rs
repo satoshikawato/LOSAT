@@ -135,6 +135,12 @@ where
                     ),
                 ));
             }
+            if scope.get_name() == "tblastx" && is_unported_tblastx_arg(name) {
+                return Err(clap::Error::raw(
+                    ErrorKind::InvalidValue,
+                    format!("the NCBI BLAST+ option -{name} is not supported by LOSAT's TBLASTX"),
+                ));
+            }
             if scope.get_name() == "tblastn" && is_unported_tblastn_arg(name) {
                 return Err(clap::Error::raw(
                     ErrorKind::InvalidValue,
@@ -418,6 +424,66 @@ fn is_unported_tblastn_arg(name: &str) -> bool {
             | "taxidlist"
             | "taxids"
             | "use_sw_tback"
+            | "version"
+            | "xdrop_ungap"
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastx_args.cpp:44-50
+// ```c++
+// CTblastxAppArgs::CTblastxAppArgs()
+// {
+//     CRef<IBlastCmdLineArgs> arg;
+//     static const string kProgram("tblastx");
+//     arg.Reset(new CProgramDescriptionArgs(kProgram,
+//                                   "Translated Query-Translated Subject BLAST"));
+//     const bool kQueryIsProtein = false;
+// ```
+// The options of NCBI tblastx 2.17.0+ (-help) that LOSAT's TBLASTX does not implement
+// (AGENTS.md rule 2: explicit unsupported errors).
+fn is_unported_tblastx_arg(name: &str) -> bool {
+    matches!(
+        name,
+        "best_hit_overhang"
+            | "best_hit_score_edge"
+            | "db"
+            | "db_hard_mask"
+            | "db_soft_mask"
+            | "dbsize"
+            | "entrez_query"
+            | "export_search_strategy"
+            | "gilist"
+            | "h"
+            | "html"
+            | "import_search_strategy"
+            | "lcase_masking"
+            | "line_length"
+            | "matrix"
+            | "max_hsps"
+            | "max_intron_length"
+            | "negative_gilist"
+            | "negative_seqidlist"
+            | "negative_taxidlist"
+            | "negative_taxids"
+            | "no_taxid_expansion"
+            | "num_alignments"
+            | "num_descriptions"
+            | "parse_deflines"
+            | "qcov_hsp_perc"
+            | "query_loc"
+            | "remote"
+            | "searchsp"
+            | "seqidlist"
+            | "show_gis"
+            | "soft_masking"
+            | "sorthits"
+            | "sorthsps"
+            | "strand"
+            | "subject_besthit"
+            | "subject_loc"
+            | "sum_stats"
+            | "taxidlist"
+            | "taxids"
             | "version"
             | "xdrop_ungap"
     )

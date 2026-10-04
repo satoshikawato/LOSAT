@@ -19,6 +19,10 @@ Deterministic: the files are cut from committed fixtures, so a rerun writes the 
 - e2e_tblastn_subject.fna: five windows of the LvMJNV genome that hold the TBLASTN hits of
   e2e_protein_query.faa, the second with 300 lowercase bases and the fourth with a run of
   40 N; the TBLASTN subject of option_sweep.py.
+- e2e_many_query.faa, e2e_many_subject.faa, e2e_many_subject.fna: the first 200 residues
+  of the first query and 300 variants of it (each residue replaced with probability 0.3,
+  seeded), as proteins and as nucleotides (one codon per residue): more than 250 subjects
+  with hits, for the numbers of descriptions (500) and alignments (250) of outfmt 0.
 
 Usage: make_inputs.py
 """
@@ -67,6 +71,22 @@ def sweep_inputs() -> None:
     (OUT / "e2e_tblastn_subject.fna").write_text("".join(out))
 
 
+def many_inputs() -> None:
+    import random
+    rng = random.Random(7)
+    first = (OUT / "e2e_protein_query.faa").read_text().split(">")[1]
+    base = first.split("\n", 1)[1].replace("\n", "")[:200]
+    residues = "ACDEFGHIKLMNPQRSTVWY"
+    codon = {"A": "GCT", "C": "TGT", "D": "GAT", "E": "GAA", "F": "TTT", "G": "GGT", "H": "CAT", "I": "ATT",
+             "K": "AAA", "L": "CTT", "M": "ATG", "N": "AAT", "P": "CCT", "Q": "CAA", "R": "CGT", "S": "TCT",
+             "T": "ACT", "V": "GTT", "W": "TGG", "Y": "TAT"}
+    (OUT / "e2e_many_query.faa").write_text(f">q1\n{base}\n")
+    variant = lambda: "".join(c if rng.random() > 0.3 else rng.choice(residues) for c in base)
+    (OUT / "e2e_many_subject.faa").write_text("".join(f">s{i}\n{variant()}\n" for i in range(300)))
+    (OUT / "e2e_many_subject.fna").write_text(
+        "".join(f">n{i}\n" + "".join(codon.get(c, "NNN") for c in variant()) + "\n" for i in range(300)))
+
+
 def main() -> None:
     records = [chunk.split("\n", 1)[1] for chunk in (OUT / "tblastx_many_subject.fasta").read_text().split(">")[1:4]]
     for name, deflines in (("punct_hits_subject.fna", DEFLINES), ("punct_hits_standin.fna", STAND_INS)):
@@ -77,6 +97,7 @@ def main() -> None:
                       for i in range(30, len(seq) - 32, 3)).replace("*", "")
     (OUT / "punct_hits_query.faa").write_text(f">pep frame +1 of the many query\n{peptide}\n")
     sweep_inputs()
+    many_inputs()
 
 
 if __name__ == "__main__":

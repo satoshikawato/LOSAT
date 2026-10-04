@@ -1,0 +1,643 @@
+set	outfmt	options	result	ncbi_message	losat_message
+word	0	-word_size 1	arg-error	Error: Argument "word_size". Illegal value, expected >=2:  `1'	error: invalid value '1' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+word	6	-word_size 1	arg-error	Error: Argument "word_size". Illegal value, expected >=2:  `1'	error: invalid value '1' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+word	7	-word_size 1	arg-error	Error: Argument "word_size". Illegal value, expected >=2:  `1'	error: invalid value '1' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+word	0	-word_size 2	DIFF exit 0/2: stdout line 1: b'TBLASTX 2.17.0+' / b''	error: invalid value '2' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented	error: invalid value '2' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+word	6	-word_size 2	DIFF exit 0/2: stdout line 1: b'LC738874_100001_110000\tLC738875_120001_130000\t47.872\t188\t98\t0\t8919\t9482\t3288\t385' / b''	error: invalid value '2' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented	error: invalid value '2' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+word	7	-word_size 2	DIFF exit 0/2: stdout line 1: b'# TBLASTX 2.17.0+' / b''	error: invalid value '2' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented	error: invalid value '2' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+word	0	-word_size 3	same		
+word	6	-word_size 3	same		
+word	7	-word_size 3	same		
+word	0	-word_size 4	DIFF exit 0/2: stdout line 1: b'TBLASTX 2.17.0+' / b''	error: invalid value '4' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented	error: invalid value '4' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+word	6	-word_size 4	DIFF exit 0/2: stdout line 1: b'LC738874_100001_110000\tLC738875_120001_130000\t47.872\t188\t98\t0\t8919\t9482\t3288\t385' / b''	error: invalid value '4' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented	error: invalid value '4' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+word	7	-word_size 4	DIFF exit 0/2: stdout line 1: b'# TBLASTX 2.17.0+' / b''	error: invalid value '4' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented	error: invalid value '4' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+word	0	-word_size 5	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Word-size must be less than 6 for protein comparison' / b"error: invalid value '5' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_"	BLAST query/options error: Word-size must be less than 6 for protein comparison	error: invalid value '5' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+word	6	-word_size 5	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Word-size must be less than 6 for protein comparison' / b"error: invalid value '5' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_"	BLAST query/options error: Word-size must be less than 6 for protein comparison	error: invalid value '5' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+word	7	-word_size 5	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Word-size must be less than 6 for protein comparison' / b"error: invalid value '5' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_"	BLAST query/options error: Word-size must be less than 6 for protein comparison	error: invalid value '5' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+word	0	-word_size 6	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Word-size must be less than 6 for protein comparison' / b"error: invalid value '6' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_"	BLAST query/options error: Word-size must be less than 6 for protein comparison	error: invalid value '6' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+word	6	-word_size 6	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Word-size must be less than 6 for protein comparison' / b"error: invalid value '6' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_"	BLAST query/options error: Word-size must be less than 6 for protein comparison	error: invalid value '6' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+word	7	-word_size 6	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Word-size must be less than 6 for protein comparison' / b"error: invalid value '6' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_"	BLAST query/options error: Word-size must be less than 6 for protein comparison	error: invalid value '6' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+word	0	-word_size 0x3	DIFF exit 0/2: stdout line 1: b'TBLASTX 2.17.0+' / b''	error: invalid value '0x3' for '-word_size <WORD_SIZE>': expected a positive integer	error: invalid value '0x3' for '-word_size <WORD_SIZE>': expected a positive integer
+word	6	-word_size 0x3	DIFF exit 0/2: stdout line 1: b'LC738874_100001_110000\tLC738875_120001_130000\t47.872\t188\t98\t0\t8919\t9482\t3288\t385' / b''	error: invalid value '0x3' for '-word_size <WORD_SIZE>': expected a positive integer	error: invalid value '0x3' for '-word_size <WORD_SIZE>': expected a positive integer
+word	7	-word_size 0x3	DIFF exit 0/2: stdout line 1: b'# TBLASTX 2.17.0+' / b''	error: invalid value '0x3' for '-word_size <WORD_SIZE>': expected a positive integer	error: invalid value '0x3' for '-word_size <WORD_SIZE>': expected a positive integer
+word	0	-word_size 03	same		
+word	6	-word_size 03	same		
+word	7	-word_size 03	same		
+word	0	-word_size +3	same		
+word	6	-word_size +3	same		
+word	7	-word_size +3	same		
+word	0	-word_size 3.0	arg-error	Error: Cannot convert string '3.0' to Int8 (m_Pos = 1)	error: invalid value '3.0' for '-word_size <WORD_SIZE>': expected a positive integer
+word	6	-word_size 3.0	arg-error	Error: Cannot convert string '3.0' to Int8 (m_Pos = 1)	error: invalid value '3.0' for '-word_size <WORD_SIZE>': expected a positive integer
+word	7	-word_size 3.0	arg-error	Error: Cannot convert string '3.0' to Int8 (m_Pos = 1)	error: invalid value '3.0' for '-word_size <WORD_SIZE>': expected a positive integer
+word	0	-threshold 0	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Non-zero threshold required' / b"error: invalid value '0' for '-threshold <THRESHOLD>': expected an integer in 1."	BLAST query/options error: Non-zero threshold required	error: invalid value '0' for '-threshold <THRESHOLD>': expected an integer in 1..=2147483647
+word	6	-threshold 0	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Non-zero threshold required' / b"error: invalid value '0' for '-threshold <THRESHOLD>': expected an integer in 1."	BLAST query/options error: Non-zero threshold required	error: invalid value '0' for '-threshold <THRESHOLD>': expected an integer in 1..=2147483647
+word	7	-threshold 0	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Non-zero threshold required' / b"error: invalid value '0' for '-threshold <THRESHOLD>': expected an integer in 1."	BLAST query/options error: Non-zero threshold required	error: invalid value '0' for '-threshold <THRESHOLD>': expected an integer in 1..=2147483647
+word	0	-threshold 1	same		
+word	6	-threshold 1	same		
+word	7	-threshold 1	same		
+word	0	-threshold 11	same		
+word	6	-threshold 11	same		
+word	7	-threshold 11	same		
+word	0	-threshold 11.5	DIFF exit 0/2: stdout line 1: b'TBLASTX 2.17.0+' / b''	error: invalid value '11.5' for '-threshold <THRESHOLD>': expected a positive integer	error: invalid value '11.5' for '-threshold <THRESHOLD>': expected a positive integer
+word	6	-threshold 11.5	DIFF exit 0/2: stdout line 1: b'LC738874_100001_110000\tLC738875_120001_130000\t47.872\t188\t98\t0\t8919\t9482\t3288\t385' / b''	error: invalid value '11.5' for '-threshold <THRESHOLD>': expected a positive integer	error: invalid value '11.5' for '-threshold <THRESHOLD>': expected a positive integer
+word	7	-threshold 11.5	DIFF exit 0/2: stdout line 1: b'# TBLASTX 2.17.0+' / b''	error: invalid value '11.5' for '-threshold <THRESHOLD>': expected a positive integer	error: invalid value '11.5' for '-threshold <THRESHOLD>': expected a positive integer
+word	0	-threshold 13	same		
+word	6	-threshold 13	same		
+word	7	-threshold 13	same		
+word	0	-threshold 30	same		
+word	6	-threshold 30	same		
+word	7	-threshold 30	same		
+word	0	-threshold 999	same		
+word	6	-threshold 999	same		
+word	7	-threshold 999	same		
+word	0	-threshold -1	arg-error	Error: Argument "threshold". Illegal value, expected >=0:  `-1'	error: invalid value '-1' for '-threshold <THRESHOLD>': expected a positive integer
+word	6	-threshold -1	arg-error	Error: Argument "threshold". Illegal value, expected >=0:  `-1'	error: invalid value '-1' for '-threshold <THRESHOLD>': expected a positive integer
+word	7	-threshold -1	arg-error	Error: Argument "threshold". Illegal value, expected >=0:  `-1'	error: invalid value '-1' for '-threshold <THRESHOLD>': expected a positive integer
+word	0	-threshold 1e1	DIFF exit 0/2: stdout line 1: b'TBLASTX 2.17.0+' / b''	error: invalid value '1e1' for '-threshold <THRESHOLD>': expected a positive integer	error: invalid value '1e1' for '-threshold <THRESHOLD>': expected a positive integer
+word	6	-threshold 1e1	DIFF exit 0/2: stdout line 1: b'LC738874_100001_110000\tLC738875_120001_130000\t47.872\t188\t98\t0\t8919\t9482\t3288\t385' / b''	error: invalid value '1e1' for '-threshold <THRESHOLD>': expected a positive integer	error: invalid value '1e1' for '-threshold <THRESHOLD>': expected a positive integer
+word	7	-threshold 1e1	DIFF exit 0/2: stdout line 1: b'# TBLASTX 2.17.0+' / b''	error: invalid value '1e1' for '-threshold <THRESHOLD>': expected a positive integer	error: invalid value '1e1' for '-threshold <THRESHOLD>': expected a positive integer
+word	0	-threshold 0x10	DIFF exit 0/2: stdout line 1: b'TBLASTX 2.17.0+' / b''	error: invalid value '0x10' for '-threshold <THRESHOLD>': expected a positive integer	error: invalid value '0x10' for '-threshold <THRESHOLD>': expected a positive integer
+word	6	-threshold 0x10	DIFF exit 0/2: stdout line 1: b'LC738874_100001_110000\tLC738875_120001_130000\t47.872\t188\t98\t0\t8919\t9482\t3288\t385' / b''	error: invalid value '0x10' for '-threshold <THRESHOLD>': expected a positive integer	error: invalid value '0x10' for '-threshold <THRESHOLD>': expected a positive integer
+word	7	-threshold 0x10	DIFF exit 0/2: stdout line 1: b'# TBLASTX 2.17.0+' / b''	error: invalid value '0x10' for '-threshold <THRESHOLD>': expected a positive integer	error: invalid value '0x10' for '-threshold <THRESHOLD>': expected a positive integer
+word	0	-threshold nan	arg-error	Error: Cannot convert string 'nan' to double (m_Pos = 0)	error: invalid value 'nan' for '-threshold <THRESHOLD>': expected a positive integer
+word	6	-threshold nan	arg-error	Error: Cannot convert string 'nan' to double (m_Pos = 0)	error: invalid value 'nan' for '-threshold <THRESHOLD>': expected a positive integer
+word	7	-threshold nan	arg-error	Error: Cannot convert string 'nan' to double (m_Pos = 0)	error: invalid value 'nan' for '-threshold <THRESHOLD>': expected a positive integer
+word	0	-threshold +inf	DIFF exit 0/2: stdout line 1: b'TBLASTX 2.17.0+' / b''	error: invalid value '+inf' for '-threshold <THRESHOLD>': expected a positive integer	error: invalid value '+inf' for '-threshold <THRESHOLD>': expected a positive integer
+word	6	-threshold +inf	DIFF exit 0/2: stdout line 1: b'LC738874_100001_110000\tLC738875_120001_130000\t47.872\t188\t98\t0\t8919\t9482\t3288\t385' / b''	error: invalid value '+inf' for '-threshold <THRESHOLD>': expected a positive integer	error: invalid value '+inf' for '-threshold <THRESHOLD>': expected a positive integer
+word	7	-threshold +inf	DIFF exit 0/2: stdout line 1: b'# TBLASTX 2.17.0+' / b''	error: invalid value '+inf' for '-threshold <THRESHOLD>': expected a positive integer	error: invalid value '+inf' for '-threshold <THRESHOLD>': expected a positive integer
+word	0	-word_size 2 -threshold 1	DIFF exit 0/2: stdout line 1: b'TBLASTX 2.17.0+' / b''	error: invalid value '2' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented	error: invalid value '2' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+word	6	-word_size 2 -threshold 1	DIFF exit 0/2: stdout line 1: b'LC738874_100001_110000\tLC738875_120001_130000\t47.872\t188\t98\t0\t8919\t9482\t3288\t385' / b''	error: invalid value '2' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented	error: invalid value '2' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+word	7	-word_size 2 -threshold 1	DIFF exit 0/2: stdout line 1: b'# TBLASTX 2.17.0+' / b''	error: invalid value '2' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented	error: invalid value '2' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+word	0	-word_size 2 -threshold 11	DIFF exit 0/2: stdout line 1: b'TBLASTX 2.17.0+' / b''	error: invalid value '2' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented	error: invalid value '2' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+word	6	-word_size 2 -threshold 11	DIFF exit 0/2: stdout line 1: b'LC738874_100001_110000\tLC738875_120001_130000\t47.872\t188\t98\t0\t8919\t9482\t3288\t385' / b''	error: invalid value '2' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented	error: invalid value '2' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+word	7	-word_size 2 -threshold 11	DIFF exit 0/2: stdout line 1: b'# TBLASTX 2.17.0+' / b''	error: invalid value '2' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented	error: invalid value '2' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+word	0	-word_size 2 -threshold 11.5	DIFF exit 0/2: stdout line 1: b'TBLASTX 2.17.0+' / b''	error: invalid value '2' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented	error: invalid value '2' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+word	6	-word_size 2 -threshold 11.5	DIFF exit 0/2: stdout line 1: b'LC738874_100001_110000\tLC738875_120001_130000\t47.872\t188\t98\t0\t8919\t9482\t3288\t385' / b''	error: invalid value '2' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented	error: invalid value '2' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+word	7	-word_size 2 -threshold 11.5	DIFF exit 0/2: stdout line 1: b'# TBLASTX 2.17.0+' / b''	error: invalid value '2' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented	error: invalid value '2' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+word	0	-word_size 2 -threshold 21	DIFF exit 0/2: stdout line 1: b'TBLASTX 2.17.0+' / b''	error: invalid value '2' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented	error: invalid value '2' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+word	6	-word_size 2 -threshold 21	DIFF exit 0/2: stdout line 1: b'LC738874_100001_110000\tLC738875_120001_130000\t47.872\t188\t98\t0\t8919\t9482\t3288\t385' / b''	error: invalid value '2' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented	error: invalid value '2' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+word	7	-word_size 2 -threshold 21	DIFF exit 0/2: stdout line 1: b'# TBLASTX 2.17.0+' / b''	error: invalid value '2' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented	error: invalid value '2' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+word	0	-word_size 3 -threshold 1	same		
+word	6	-word_size 3 -threshold 1	same		
+word	7	-word_size 3 -threshold 1	same		
+word	0	-word_size 3 -threshold 11	same		
+word	6	-word_size 3 -threshold 11	same		
+word	7	-word_size 3 -threshold 11	same		
+word	0	-word_size 3 -threshold 11.5	DIFF exit 0/2: stdout line 1: b'TBLASTX 2.17.0+' / b''	error: invalid value '11.5' for '-threshold <THRESHOLD>': expected a positive integer	error: invalid value '11.5' for '-threshold <THRESHOLD>': expected a positive integer
+word	6	-word_size 3 -threshold 11.5	DIFF exit 0/2: stdout line 1: b'LC738874_100001_110000\tLC738875_120001_130000\t47.872\t188\t98\t0\t8919\t9482\t3288\t385' / b''	error: invalid value '11.5' for '-threshold <THRESHOLD>': expected a positive integer	error: invalid value '11.5' for '-threshold <THRESHOLD>': expected a positive integer
+word	7	-word_size 3 -threshold 11.5	DIFF exit 0/2: stdout line 1: b'# TBLASTX 2.17.0+' / b''	error: invalid value '11.5' for '-threshold <THRESHOLD>': expected a positive integer	error: invalid value '11.5' for '-threshold <THRESHOLD>': expected a positive integer
+word	0	-word_size 3 -threshold 21	same		
+word	6	-word_size 3 -threshold 21	same		
+word	7	-word_size 3 -threshold 21	same		
+word	0	-word_size 4 -threshold 1	timeout		
+word	6	-word_size 4 -threshold 1	timeout		
+word	7	-word_size 4 -threshold 1	timeout		
+word	0	-word_size 4 -threshold 11	DIFF exit 0/2: stdout line 1: b'TBLASTX 2.17.0+' / b''	error: invalid value '4' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented	error: invalid value '4' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+word	6	-word_size 4 -threshold 11	DIFF exit 0/2: stdout line 1: b'LC738874_100001_110000\tLC738875_120001_130000\t47.872\t188\t98\t0\t8919\t9482\t3288\t385' / b''	error: invalid value '4' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented	error: invalid value '4' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+word	7	-word_size 4 -threshold 11	DIFF exit 0/2: stdout line 1: b'# TBLASTX 2.17.0+' / b''	error: invalid value '4' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented	error: invalid value '4' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+word	0	-word_size 4 -threshold 11.5	DIFF exit 0/2: stdout line 1: b'TBLASTX 2.17.0+' / b''	error: invalid value '4' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented	error: invalid value '4' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+word	6	-word_size 4 -threshold 11.5	DIFF exit 0/2: stdout line 1: b'LC738874_100001_110000\tLC738875_120001_130000\t47.872\t188\t98\t0\t8919\t9482\t3288\t385' / b''	error: invalid value '4' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented	error: invalid value '4' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+word	7	-word_size 4 -threshold 11.5	DIFF exit 0/2: stdout line 1: b'# TBLASTX 2.17.0+' / b''	error: invalid value '4' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented	error: invalid value '4' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+word	0	-word_size 4 -threshold 21	DIFF exit 0/2: stdout line 1: b'TBLASTX 2.17.0+' / b''	error: invalid value '4' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented	error: invalid value '4' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+word	6	-word_size 4 -threshold 21	DIFF exit 0/2: stdout line 1: b'LC738874_100001_110000\tLC738875_120001_130000\t47.872\t188\t98\t0\t8919\t9482\t3288\t385' / b''	error: invalid value '4' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented	error: invalid value '4' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+word	7	-word_size 4 -threshold 21	DIFF exit 0/2: stdout line 1: b'# TBLASTX 2.17.0+' / b''	error: invalid value '4' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented	error: invalid value '4' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+word	0	-word_size 5 -threshold 1	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Word-size must be less than 6 for protein comparison' / b"error: invalid value '5' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_"	BLAST query/options error: Word-size must be less than 6 for protein comparison	error: invalid value '5' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+word	6	-word_size 5 -threshold 1	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Word-size must be less than 6 for protein comparison' / b"error: invalid value '5' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_"	BLAST query/options error: Word-size must be less than 6 for protein comparison	error: invalid value '5' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+word	7	-word_size 5 -threshold 1	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Word-size must be less than 6 for protein comparison' / b"error: invalid value '5' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_"	BLAST query/options error: Word-size must be less than 6 for protein comparison	error: invalid value '5' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+word	0	-word_size 5 -threshold 11	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Word-size must be less than 6 for protein comparison' / b"error: invalid value '5' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_"	BLAST query/options error: Word-size must be less than 6 for protein comparison	error: invalid value '5' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+word	6	-word_size 5 -threshold 11	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Word-size must be less than 6 for protein comparison' / b"error: invalid value '5' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_"	BLAST query/options error: Word-size must be less than 6 for protein comparison	error: invalid value '5' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+word	7	-word_size 5 -threshold 11	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Word-size must be less than 6 for protein comparison' / b"error: invalid value '5' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_"	BLAST query/options error: Word-size must be less than 6 for protein comparison	error: invalid value '5' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+word	0	-word_size 5 -threshold 11.5	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Word-size must be less than 6 for protein comparison' / b"error: invalid value '5' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_"	BLAST query/options error: Word-size must be less than 6 for protein comparison	error: invalid value '5' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+word	6	-word_size 5 -threshold 11.5	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Word-size must be less than 6 for protein comparison' / b"error: invalid value '5' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_"	BLAST query/options error: Word-size must be less than 6 for protein comparison	error: invalid value '5' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+word	7	-word_size 5 -threshold 11.5	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Word-size must be less than 6 for protein comparison' / b"error: invalid value '5' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_"	BLAST query/options error: Word-size must be less than 6 for protein comparison	error: invalid value '5' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+word	0	-word_size 5 -threshold 21	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Word-size must be less than 6 for protein comparison' / b"error: invalid value '5' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_"	BLAST query/options error: Word-size must be less than 6 for protein comparison	error: invalid value '5' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+word	6	-word_size 5 -threshold 21	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Word-size must be less than 6 for protein comparison' / b"error: invalid value '5' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_"	BLAST query/options error: Word-size must be less than 6 for protein comparison	error: invalid value '5' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+word	7	-word_size 5 -threshold 21	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Word-size must be less than 6 for protein comparison' / b"error: invalid value '5' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_"	BLAST query/options error: Word-size must be less than 6 for protein comparison	error: invalid value '5' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+word	0	-word_size 6 -threshold 1	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Word-size must be less than 6 for protein comparison' / b"error: invalid value '6' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_"	BLAST query/options error: Word-size must be less than 6 for protein comparison	error: invalid value '6' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+word	6	-word_size 6 -threshold 1	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Word-size must be less than 6 for protein comparison' / b"error: invalid value '6' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_"	BLAST query/options error: Word-size must be less than 6 for protein comparison	error: invalid value '6' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+word	7	-word_size 6 -threshold 1	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Word-size must be less than 6 for protein comparison' / b"error: invalid value '6' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_"	BLAST query/options error: Word-size must be less than 6 for protein comparison	error: invalid value '6' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+word	0	-word_size 6 -threshold 11	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Word-size must be less than 6 for protein comparison' / b"error: invalid value '6' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_"	BLAST query/options error: Word-size must be less than 6 for protein comparison	error: invalid value '6' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+word	6	-word_size 6 -threshold 11	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Word-size must be less than 6 for protein comparison' / b"error: invalid value '6' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_"	BLAST query/options error: Word-size must be less than 6 for protein comparison	error: invalid value '6' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+word	7	-word_size 6 -threshold 11	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Word-size must be less than 6 for protein comparison' / b"error: invalid value '6' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_"	BLAST query/options error: Word-size must be less than 6 for protein comparison	error: invalid value '6' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+word	0	-word_size 6 -threshold 11.5	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Word-size must be less than 6 for protein comparison' / b"error: invalid value '6' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_"	BLAST query/options error: Word-size must be less than 6 for protein comparison	error: invalid value '6' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+word	6	-word_size 6 -threshold 11.5	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Word-size must be less than 6 for protein comparison' / b"error: invalid value '6' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_"	BLAST query/options error: Word-size must be less than 6 for protein comparison	error: invalid value '6' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+word	7	-word_size 6 -threshold 11.5	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Word-size must be less than 6 for protein comparison' / b"error: invalid value '6' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_"	BLAST query/options error: Word-size must be less than 6 for protein comparison	error: invalid value '6' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+word	0	-word_size 6 -threshold 21	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Word-size must be less than 6 for protein comparison' / b"error: invalid value '6' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_"	BLAST query/options error: Word-size must be less than 6 for protein comparison	error: invalid value '6' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+word	6	-word_size 6 -threshold 21	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Word-size must be less than 6 for protein comparison' / b"error: invalid value '6' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_"	BLAST query/options error: Word-size must be less than 6 for protein comparison	error: invalid value '6' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+word	7	-word_size 6 -threshold 21	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Word-size must be less than 6 for protein comparison' / b"error: invalid value '6' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_"	BLAST query/options error: Word-size must be less than 6 for protein comparison	error: invalid value '6' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+window	0	-window_size 0	losat-rejects	Error: -window_size 0 (the one-hit word finder) is not supported by LOSAT's TBLASTX	Error: -window_size 0 (the one-hit word finder) is not supported by LOSAT's TBLASTX
+window	6	-window_size 0	losat-rejects	Error: -window_size 0 (the one-hit word finder) is not supported by LOSAT's TBLASTX	Error: -window_size 0 (the one-hit word finder) is not supported by LOSAT's TBLASTX
+window	7	-window_size 0	losat-rejects	Error: -window_size 0 (the one-hit word finder) is not supported by LOSAT's TBLASTX	Error: -window_size 0 (the one-hit word finder) is not supported by LOSAT's TBLASTX
+window	0	-window_size 1	same		
+window	6	-window_size 1	same		
+window	7	-window_size 1	same		
+window	0	-window_size 2	same		
+window	6	-window_size 2	same		
+window	7	-window_size 2	same		
+window	0	-window_size 10	same		
+window	6	-window_size 10	same		
+window	7	-window_size 10	same		
+window	0	-window_size 40	same		
+window	6	-window_size 40	same		
+window	7	-window_size 40	same		
+window	0	-window_size 100	same		
+window	6	-window_size 100	same		
+window	7	-window_size 100	same		
+window	0	-window_size -1	arg-error	Error: Argument "window_size". Illegal value, expected >=0:  `-1'	error: invalid value '-1' for '-window_size <WINDOW_SIZE>': expected an integer >= 0
+window	6	-window_size -1	arg-error	Error: Argument "window_size". Illegal value, expected >=0:  `-1'	error: invalid value '-1' for '-window_size <WINDOW_SIZE>': expected an integer >= 0
+window	7	-window_size -1	arg-error	Error: Argument "window_size". Illegal value, expected >=0:  `-1'	error: invalid value '-1' for '-window_size <WINDOW_SIZE>': expected an integer >= 0
+window	0	-window_size 0x28	DIFF exit 0/2: stdout line 1: b'TBLASTX 2.17.0+' / b''	error: invalid value '0x28' for '-window_size <WINDOW_SIZE>': expected an integer >= 0	error: invalid value '0x28' for '-window_size <WINDOW_SIZE>': expected an integer >= 0
+window	6	-window_size 0x28	DIFF exit 0/2: stdout line 1: b'LC738874_100001_110000\tLC738875_120001_130000\t47.872\t188\t98\t0\t8919\t9482\t3288\t385' / b''	error: invalid value '0x28' for '-window_size <WINDOW_SIZE>': expected an integer >= 0	error: invalid value '0x28' for '-window_size <WINDOW_SIZE>': expected an integer >= 0
+window	7	-window_size 0x28	DIFF exit 0/2: stdout line 1: b'# TBLASTX 2.17.0+' / b''	error: invalid value '0x28' for '-window_size <WINDOW_SIZE>': expected an integer >= 0	error: invalid value '0x28' for '-window_size <WINDOW_SIZE>': expected an integer >= 0
+window	0	-window_size 40.0	arg-error	Error: Cannot convert string '40.0' to Int8 (m_Pos = 2)	error: invalid value '40.0' for '-window_size <WINDOW_SIZE>': expected an integer >= 0
+window	6	-window_size 40.0	arg-error	Error: Cannot convert string '40.0' to Int8 (m_Pos = 2)	error: invalid value '40.0' for '-window_size <WINDOW_SIZE>': expected an integer >= 0
+window	7	-window_size 40.0	arg-error	Error: Cannot convert string '40.0' to Int8 (m_Pos = 2)	error: invalid value '40.0' for '-window_size <WINDOW_SIZE>': expected an integer >= 0
+window	0	-window_size 0 -threshold 15	losat-rejects	Error: -window_size 0 (the one-hit word finder) is not supported by LOSAT's TBLASTX	Error: -window_size 0 (the one-hit word finder) is not supported by LOSAT's TBLASTX
+window	6	-window_size 0 -threshold 15	losat-rejects	Error: -window_size 0 (the one-hit word finder) is not supported by LOSAT's TBLASTX	Error: -window_size 0 (the one-hit word finder) is not supported by LOSAT's TBLASTX
+window	7	-window_size 0 -threshold 15	losat-rejects	Error: -window_size 0 (the one-hit word finder) is not supported by LOSAT's TBLASTX	Error: -window_size 0 (the one-hit word finder) is not supported by LOSAT's TBLASTX
+window	0	-window_size 0 -word_size 2	DIFF exit 0/2: stdout line 1: b'TBLASTX 2.17.0+' / b''	error: invalid value '2' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented	error: invalid value '2' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+window	6	-window_size 0 -word_size 2	DIFF exit 0/2: stdout line 1: b'LC738874_100001_110000\tLC738875_120001_130000\t47.872\t188\t98\t0\t8919\t9482\t3288\t385' / b''	error: invalid value '2' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented	error: invalid value '2' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+window	7	-window_size 0 -word_size 2	DIFF exit 0/2: stdout line 1: b'# TBLASTX 2.17.0+' / b''	error: invalid value '2' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented	error: invalid value '2' for '-word_size <WORD_SIZE>': unsupported TBLASTX word_size: only 3 is implemented
+seg	0	-seg yes	same		
+seg	6	-seg yes	same		
+seg	7	-seg yes	same		
+seg	0	-seg no	same		
+seg	6	-seg no	same		
+seg	7	-seg no	same		
+seg	0	-seg '12 2.2 2.5'	same		
+seg	6	-seg '12 2.2 2.5'	same		
+seg	7	-seg '12 2.2 2.5'	same		
+seg	0	-seg '10 1.8 2.1'	same		
+seg	6	-seg '10 1.8 2.1'	same		
+seg	7	-seg '10 1.8 2.1'	same		
+seg	0	-seg '0 0 0'	same		
+seg	6	-seg '0 0 0'	same		
+seg	7	-seg '0 0 0'	same		
+seg	0	-seg '-1 -1 -1'	same		
+seg	6	-seg '-1 -1 -1'	same		
+seg	7	-seg '-1 -1 -1'	same		
+seg	0	-seg '12 2.2'	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Invalid number of arguments to filtering option' / b"error: invalid value '12 2.2' for '-seg <SEG>': Invalid number of arguments to f"	BLAST query/options error: Invalid number of arguments to filtering option	error: invalid value '12 2.2' for '-seg <SEG>': Invalid number of arguments to filtering option
+seg	6	-seg '12 2.2'	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Invalid number of arguments to filtering option' / b"error: invalid value '12 2.2' for '-seg <SEG>': Invalid number of arguments to f"	BLAST query/options error: Invalid number of arguments to filtering option	error: invalid value '12 2.2' for '-seg <SEG>': Invalid number of arguments to filtering option
+seg	7	-seg '12 2.2'	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Invalid number of arguments to filtering option' / b"error: invalid value '12 2.2' for '-seg <SEG>': Invalid number of arguments to f"	BLAST query/options error: Invalid number of arguments to filtering option	error: invalid value '12 2.2' for '-seg <SEG>': Invalid number of arguments to filtering option
+seg	0	-seg '12 2.2 2.5 1'	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Invalid number of arguments to filtering option' / b"error: invalid value '12 2.2 2.5 1' for '-seg <SEG>': Invalid number of argument"	BLAST query/options error: Invalid number of arguments to filtering option	error: invalid value '12 2.2 2.5 1' for '-seg <SEG>': Invalid number of arguments to filtering option
+seg	6	-seg '12 2.2 2.5 1'	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Invalid number of arguments to filtering option' / b"error: invalid value '12 2.2 2.5 1' for '-seg <SEG>': Invalid number of argument"	BLAST query/options error: Invalid number of arguments to filtering option	error: invalid value '12 2.2 2.5 1' for '-seg <SEG>': Invalid number of arguments to filtering option
+seg	7	-seg '12 2.2 2.5 1'	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Invalid number of arguments to filtering option' / b"error: invalid value '12 2.2 2.5 1' for '-seg <SEG>': Invalid number of argument"	BLAST query/options error: Invalid number of arguments to filtering option	error: invalid value '12 2.2 2.5 1' for '-seg <SEG>': Invalid number of arguments to filtering option
+seg	0	-seg 'x y z'	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Invalid input for filtering parameters' / b"error: invalid value 'x y z' for '-seg <SEG>': Invalid input for filtering param"	BLAST query/options error: Invalid input for filtering parameters	error: invalid value 'x y z' for '-seg <SEG>': Invalid input for filtering parameters
+seg	6	-seg 'x y z'	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Invalid input for filtering parameters' / b"error: invalid value 'x y z' for '-seg <SEG>': Invalid input for filtering param"	BLAST query/options error: Invalid input for filtering parameters	error: invalid value 'x y z' for '-seg <SEG>': Invalid input for filtering parameters
+seg	7	-seg 'x y z'	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Invalid input for filtering parameters' / b"error: invalid value 'x y z' for '-seg <SEG>': Invalid input for filtering param"	BLAST query/options error: Invalid input for filtering parameters	error: invalid value 'x y z' for '-seg <SEG>': Invalid input for filtering parameters
+seg	0	-seg '12 2.5 2.2'	same		
+seg	6	-seg '12 2.5 2.2'	same		
+seg	7	-seg '12 2.5 2.2'	same		
+seg	0	-seg '12 nan 2.5'	losat-rejects	BLAST query/options error: Invalid input for filtering parameters	error: invalid value '12 nan 2.5' for '-seg <SEG>': a SEG locut or hicut that is not finite is not supported by LOSAT
+seg	6	-seg '12 nan 2.5'	losat-rejects	BLAST query/options error: Invalid input for filtering parameters	error: invalid value '12 nan 2.5' for '-seg <SEG>': a SEG locut or hicut that is not finite is not supported by LOSAT
+seg	7	-seg '12 nan 2.5'	losat-rejects	BLAST query/options error: Invalid input for filtering parameters	error: invalid value '12 nan 2.5' for '-seg <SEG>': a SEG locut or hicut that is not finite is not supported by LOSAT
+seg	0	-seg '12 inf 2.5'	losat-rejects	BLAST query/options error: Invalid input for filtering parameters	error: invalid value '12 inf 2.5' for '-seg <SEG>': a SEG locut or hicut that is not finite is not supported by LOSAT
+seg	6	-seg '12 inf 2.5'	losat-rejects	BLAST query/options error: Invalid input for filtering parameters	error: invalid value '12 inf 2.5' for '-seg <SEG>': a SEG locut or hicut that is not finite is not supported by LOSAT
+seg	7	-seg '12 inf 2.5'	losat-rejects	BLAST query/options error: Invalid input for filtering parameters	error: invalid value '12 inf 2.5' for '-seg <SEG>': a SEG locut or hicut that is not finite is not supported by LOSAT
+seg	0	-seg '1e1 2.2 2.5'	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Invalid input for filtering parameters' / b"error: invalid value '1e1 2.2 2.5' for '-seg <SEG>': Invalid input for filtering"	BLAST query/options error: Invalid input for filtering parameters	error: invalid value '1e1 2.2 2.5' for '-seg <SEG>': Invalid input for filtering parameters
+seg	6	-seg '1e1 2.2 2.5'	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Invalid input for filtering parameters' / b"error: invalid value '1e1 2.2 2.5' for '-seg <SEG>': Invalid input for filtering"	BLAST query/options error: Invalid input for filtering parameters	error: invalid value '1e1 2.2 2.5' for '-seg <SEG>': Invalid input for filtering parameters
+seg	7	-seg '1e1 2.2 2.5'	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Invalid input for filtering parameters' / b"error: invalid value '1e1 2.2 2.5' for '-seg <SEG>': Invalid input for filtering"	BLAST query/options error: Invalid input for filtering parameters	error: invalid value '1e1 2.2 2.5' for '-seg <SEG>': Invalid input for filtering parameters
+seg	0	-seg '12  2.2 2.5'	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Invalid number of arguments to filtering option' / b"error: invalid value '12  2.2 2.5' for '-seg <SEG>': Invalid number of arguments"	BLAST query/options error: Invalid number of arguments to filtering option	error: invalid value '12  2.2 2.5' for '-seg <SEG>': Invalid number of arguments to filtering option
+seg	6	-seg '12  2.2 2.5'	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Invalid number of arguments to filtering option' / b"error: invalid value '12  2.2 2.5' for '-seg <SEG>': Invalid number of arguments"	BLAST query/options error: Invalid number of arguments to filtering option	error: invalid value '12  2.2 2.5' for '-seg <SEG>': Invalid number of arguments to filtering option
+seg	7	-seg '12  2.2 2.5'	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Invalid number of arguments to filtering option' / b"error: invalid value '12  2.2 2.5' for '-seg <SEG>': Invalid number of arguments"	BLAST query/options error: Invalid number of arguments to filtering option	error: invalid value '12  2.2 2.5' for '-seg <SEG>': Invalid number of arguments to filtering option
+seg	0	-seg '0x10 2.2 2.5'	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Invalid input for filtering parameters' / b"error: invalid value '0x10 2.2 2.5' for '-seg <SEG>': Invalid input for filterin"	BLAST query/options error: Invalid input for filtering parameters	error: invalid value '0x10 2.2 2.5' for '-seg <SEG>': Invalid input for filtering parameters
+seg	6	-seg '0x10 2.2 2.5'	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Invalid input for filtering parameters' / b"error: invalid value '0x10 2.2 2.5' for '-seg <SEG>': Invalid input for filterin"	BLAST query/options error: Invalid input for filtering parameters	error: invalid value '0x10 2.2 2.5' for '-seg <SEG>': Invalid input for filtering parameters
+seg	7	-seg '0x10 2.2 2.5'	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Invalid input for filtering parameters' / b"error: invalid value '0x10 2.2 2.5' for '-seg <SEG>': Invalid input for filterin"	BLAST query/options error: Invalid input for filtering parameters	error: invalid value '0x10 2.2 2.5' for '-seg <SEG>': Invalid input for filtering parameters
+seg	0	-seg '12 2.2 2.5 '	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Invalid number of arguments to filtering option' / b"error: invalid value '12 2.2 2.5 ' for '-seg <SEG>': Invalid number of arguments"	BLAST query/options error: Invalid number of arguments to filtering option	error: invalid value '12 2.2 2.5 ' for '-seg <SEG>': Invalid number of arguments to filtering option
+seg	6	-seg '12 2.2 2.5 '	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Invalid number of arguments to filtering option' / b"error: invalid value '12 2.2 2.5 ' for '-seg <SEG>': Invalid number of arguments"	BLAST query/options error: Invalid number of arguments to filtering option	error: invalid value '12 2.2 2.5 ' for '-seg <SEG>': Invalid number of arguments to filtering option
+seg	7	-seg '12 2.2 2.5 '	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Invalid number of arguments to filtering option' / b"error: invalid value '12 2.2 2.5 ' for '-seg <SEG>': Invalid number of arguments"	BLAST query/options error: Invalid number of arguments to filtering option	error: invalid value '12 2.2 2.5 ' for '-seg <SEG>': Invalid number of arguments to filtering option
+seg	0	-seg YES	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Invalid number of arguments to filtering option' / b"error: invalid value 'YES' for '-seg <SEG>': Invalid number of arguments to filt"	BLAST query/options error: Invalid number of arguments to filtering option	error: invalid value 'YES' for '-seg <SEG>': Invalid number of arguments to filtering option
+seg	6	-seg YES	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Invalid number of arguments to filtering option' / b"error: invalid value 'YES' for '-seg <SEG>': Invalid number of arguments to filt"	BLAST query/options error: Invalid number of arguments to filtering option	error: invalid value 'YES' for '-seg <SEG>': Invalid number of arguments to filtering option
+seg	7	-seg YES	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Invalid number of arguments to filtering option' / b"error: invalid value 'YES' for '-seg <SEG>': Invalid number of arguments to filt"	BLAST query/options error: Invalid number of arguments to filtering option	error: invalid value 'YES' for '-seg <SEG>': Invalid number of arguments to filtering option
+seg	0	-seg No	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Invalid number of arguments to filtering option' / b"error: invalid value 'No' for '-seg <SEG>': Invalid number of arguments to filte"	BLAST query/options error: Invalid number of arguments to filtering option	error: invalid value 'No' for '-seg <SEG>': Invalid number of arguments to filtering option
+seg	6	-seg No	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Invalid number of arguments to filtering option' / b"error: invalid value 'No' for '-seg <SEG>': Invalid number of arguments to filte"	BLAST query/options error: Invalid number of arguments to filtering option	error: invalid value 'No' for '-seg <SEG>': Invalid number of arguments to filtering option
+seg	7	-seg No	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Invalid number of arguments to filtering option' / b"error: invalid value 'No' for '-seg <SEG>': Invalid number of arguments to filte"	BLAST query/options error: Invalid number of arguments to filtering option	error: invalid value 'No' for '-seg <SEG>': Invalid number of arguments to filtering option
+seg	0	-seg ''	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Invalid number of arguments to filtering option' / b"error: invalid value '' for '-seg <SEG>': Invalid number of arguments to filteri"	BLAST query/options error: Invalid number of arguments to filtering option	error: invalid value '' for '-seg <SEG>': Invalid number of arguments to filtering option
+seg	6	-seg ''	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Invalid number of arguments to filtering option' / b"error: invalid value '' for '-seg <SEG>': Invalid number of arguments to filteri"	BLAST query/options error: Invalid number of arguments to filtering option	error: invalid value '' for '-seg <SEG>': Invalid number of arguments to filtering option
+seg	7	-seg ''	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Invalid number of arguments to filtering option' / b"error: invalid value '' for '-seg <SEG>': Invalid number of arguments to filteri"	BLAST query/options error: Invalid number of arguments to filtering option	error: invalid value '' for '-seg <SEG>': Invalid number of arguments to filtering option
+evalue	0	-evalue 1e-5	same		
+evalue	6	-evalue 1e-5	same		
+evalue	7	-evalue 1e-5	same		
+evalue	0	-evalue 0.001	same		
+evalue	6	-evalue 0.001	same		
+evalue	7	-evalue 0.001	same		
+evalue	0	-evalue 1000	same		
+evalue	6	-evalue 1000	same		
+evalue	7	-evalue 1000	same		
+evalue	0	-evalue 1e3	same		
+evalue	6	-evalue 1e3	same		
+evalue	7	-evalue 1e3	same		
+evalue	0	-evalue +inf	DIFF exit 0/2: stdout line 1: b'TBLASTX 2.17.0+' / b''	error: invalid value '+inf' for '-evalue <EVALUE>': expected a finite number >= 0	error: invalid value '+inf' for '-evalue <EVALUE>': expected a finite number >= 0
+evalue	6	-evalue +inf	DIFF exit 0/2: stdout line 1: b'LC738874_100001_110000\tLC738875_120001_130000\t47.872\t188\t98\t0\t8919\t9482\t3288\t385' / b''	error: invalid value '+inf' for '-evalue <EVALUE>': expected a finite number >= 0	error: invalid value '+inf' for '-evalue <EVALUE>': expected a finite number >= 0
+evalue	7	-evalue +inf	DIFF exit 0/2: stdout line 1: b'# TBLASTX 2.17.0+' / b''	error: invalid value '+inf' for '-evalue <EVALUE>': expected a finite number >= 0	error: invalid value '+inf' for '-evalue <EVALUE>': expected a finite number >= 0
+evalue	0	-evalue inf	arg-error	Error: Cannot convert string 'inf' to double (m_Pos = 0)	error: invalid value 'inf' for '-evalue <EVALUE>': expected a finite number >= 0
+evalue	6	-evalue inf	arg-error	Error: Cannot convert string 'inf' to double (m_Pos = 0)	error: invalid value 'inf' for '-evalue <EVALUE>': expected a finite number >= 0
+evalue	7	-evalue inf	arg-error	Error: Cannot convert string 'inf' to double (m_Pos = 0)	error: invalid value 'inf' for '-evalue <EVALUE>': expected a finite number >= 0
+evalue	0	-evalue nan	arg-error	Error: Cannot convert string 'nan' to double (m_Pos = 0)	error: invalid value 'nan' for '-evalue <EVALUE>': expected a finite number >= 0
+evalue	6	-evalue nan	arg-error	Error: Cannot convert string 'nan' to double (m_Pos = 0)	error: invalid value 'nan' for '-evalue <EVALUE>': expected a finite number >= 0
+evalue	7	-evalue nan	arg-error	Error: Cannot convert string 'nan' to double (m_Pos = 0)	error: invalid value 'nan' for '-evalue <EVALUE>': expected a finite number >= 0
+evalue	0	-evalue -nan	DIFF exit 0/2: stdout line 1: b'TBLASTX 2.17.0+' / b''	error: invalid value '-nan' for '-evalue <EVALUE>': expected a finite number >= 0	error: invalid value '-nan' for '-evalue <EVALUE>': expected a finite number >= 0
+evalue	6	-evalue -nan	DIFF exit 0/2: stdout line 1: b'LC738874_100001_110000\tLC738875_120001_130000\t47.872\t188\t98\t0\t8919\t9482\t3288\t385' / b''	error: invalid value '-nan' for '-evalue <EVALUE>': expected a finite number >= 0	error: invalid value '-nan' for '-evalue <EVALUE>': expected a finite number >= 0
+evalue	7	-evalue -nan	DIFF exit 0/2: stdout line 1: b'# TBLASTX 2.17.0+' / b''	error: invalid value '-nan' for '-evalue <EVALUE>': expected a finite number >= 0	error: invalid value '-nan' for '-evalue <EVALUE>': expected a finite number >= 0
+evalue	0	-evalue 0	same-error	BLAST query/options error: expect value or cutoff score must be greater than zero	BLAST query/options error: expect value or cutoff score must be greater than zero
+evalue	6	-evalue 0	same-error	BLAST query/options error: expect value or cutoff score must be greater than zero	BLAST query/options error: expect value or cutoff score must be greater than zero
+evalue	7	-evalue 0	same-error	BLAST query/options error: expect value or cutoff score must be greater than zero	BLAST query/options error: expect value or cutoff score must be greater than zero
+evalue	0	-evalue -1	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: expect value or cutoff score must be greater than zer' / b"error: invalid value '-1' for '-evalue <EVALUE>': expected a finite number >= 0"	BLAST query/options error: expect value or cutoff score must be greater than zero	error: invalid value '-1' for '-evalue <EVALUE>': expected a finite number >= 0
+evalue	6	-evalue -1	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: expect value or cutoff score must be greater than zer' / b"error: invalid value '-1' for '-evalue <EVALUE>': expected a finite number >= 0"	BLAST query/options error: expect value or cutoff score must be greater than zero	error: invalid value '-1' for '-evalue <EVALUE>': expected a finite number >= 0
+evalue	7	-evalue -1	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: expect value or cutoff score must be greater than zer' / b"error: invalid value '-1' for '-evalue <EVALUE>': expected a finite number >= 0"	BLAST query/options error: expect value or cutoff score must be greater than zero	error: invalid value '-1' for '-evalue <EVALUE>': expected a finite number >= 0
+evalue	0	-evalue 0x10	DIFF exit 0/2: stdout line 1: b'TBLASTX 2.17.0+' / b''	error: invalid value '0x10' for '-evalue <EVALUE>': expected a finite number	error: invalid value '0x10' for '-evalue <EVALUE>': expected a finite number
+evalue	6	-evalue 0x10	DIFF exit 0/2: stdout line 1: b'LC738874_100001_110000\tLC738875_120001_130000\t47.872\t188\t98\t0\t8919\t9482\t3288\t385' / b''	error: invalid value '0x10' for '-evalue <EVALUE>': expected a finite number	error: invalid value '0x10' for '-evalue <EVALUE>': expected a finite number
+evalue	7	-evalue 0x10	DIFF exit 0/2: stdout line 1: b'# TBLASTX 2.17.0+' / b''	error: invalid value '0x10' for '-evalue <EVALUE>': expected a finite number	error: invalid value '0x10' for '-evalue <EVALUE>': expected a finite number
+evalue	0	-evalue 1e999	DIFF exit 0/2: stdout line 1: b'TBLASTX 2.17.0+' / b''	error: invalid value '1e999' for '-evalue <EVALUE>': expected a finite number >= 0	error: invalid value '1e999' for '-evalue <EVALUE>': expected a finite number >= 0
+evalue	6	-evalue 1e999	DIFF exit 0/2: stdout line 1: b'LC738874_100001_110000\tLC738875_120001_130000\t47.872\t188\t98\t0\t8919\t9482\t3288\t385' / b''	error: invalid value '1e999' for '-evalue <EVALUE>': expected a finite number >= 0	error: invalid value '1e999' for '-evalue <EVALUE>': expected a finite number >= 0
+evalue	7	-evalue 1e999	DIFF exit 0/2: stdout line 1: b'# TBLASTX 2.17.0+' / b''	error: invalid value '1e999' for '-evalue <EVALUE>': expected a finite number >= 0	error: invalid value '1e999' for '-evalue <EVALUE>': expected a finite number >= 0
+evalue	0	-evalue .5	same		
+evalue	6	-evalue .5	same		
+evalue	7	-evalue .5	same		
+evalue	0	-evalue 5.	same		
+evalue	6	-evalue 5.	same		
+evalue	7	-evalue 5.	same		
+evalue	0	-evalue 1E-5	same		
+evalue	6	-evalue 1E-5	same		
+evalue	7	-evalue 1E-5	same		
+evalue	0	-evalue ' 1'	arg-error	Error: Cannot convert string ' 1' to double (m_Pos = 0)	error: invalid value ' 1' for '-evalue <EVALUE>': expected a finite number
+evalue	6	-evalue ' 1'	arg-error	Error: Cannot convert string ' 1' to double (m_Pos = 0)	error: invalid value ' 1' for '-evalue <EVALUE>': expected a finite number
+evalue	7	-evalue ' 1'	arg-error	Error: Cannot convert string ' 1' to double (m_Pos = 0)	error: invalid value ' 1' for '-evalue <EVALUE>': expected a finite number
+evalue	0	-evalue 1e-300	same		
+evalue	6	-evalue 1e-300	same		
+evalue	7	-evalue 1e-300	same		
+evalue	0	-evalue 100000	same		
+evalue	6	-evalue 100000	same		
+evalue	7	-evalue 100000	same		
+evalue	0	-evalue 1e-50	same		
+evalue	6	-evalue 1e-50	same		
+evalue	7	-evalue 1e-50	same		
+ints	0	-max_target_seqs 1	same	Warning: [tblastx] Examining 5 or more matches is recommended	Warning: [tblastx] Examining 5 or more matches is recommended
+ints	6	-max_target_seqs 1	same	Warning: [tblastx] Examining 5 or more matches is recommended	Warning: [tblastx] Examining 5 or more matches is recommended
+ints	7	-max_target_seqs 1	same	Warning: [tblastx] Examining 5 or more matches is recommended	Warning: [tblastx] Examining 5 or more matches is recommended
+ints	0	-max_target_seqs 4	same	Warning: [tblastx] Examining 5 or more matches is recommended	Warning: [tblastx] Examining 5 or more matches is recommended
+ints	6	-max_target_seqs 4	same	Warning: [tblastx] Examining 5 or more matches is recommended	Warning: [tblastx] Examining 5 or more matches is recommended
+ints	7	-max_target_seqs 4	same	Warning: [tblastx] Examining 5 or more matches is recommended	Warning: [tblastx] Examining 5 or more matches is recommended
+ints	0	-max_target_seqs 5	same		
+ints	6	-max_target_seqs 5	same		
+ints	7	-max_target_seqs 5	same		
+ints	0	-max_target_seqs 0x10	DIFF exit 0/2: stdout line 1: b'TBLASTX 2.17.0+' / b''	error: invalid value '0x10' for '-max_target_seqs <MAX_TARGET_SEQS>': expected a positive integer	error: invalid value '0x10' for '-max_target_seqs <MAX_TARGET_SEQS>': expected a positive integer
+ints	6	-max_target_seqs 0x10	DIFF exit 0/2: stdout line 1: b'LC738874_100001_110000\tLC738875_120001_130000\t47.872\t188\t98\t0\t8919\t9482\t3288\t385' / b''	error: invalid value '0x10' for '-max_target_seqs <MAX_TARGET_SEQS>': expected a positive integer	error: invalid value '0x10' for '-max_target_seqs <MAX_TARGET_SEQS>': expected a positive integer
+ints	7	-max_target_seqs 0x10	DIFF exit 0/2: stdout line 1: b'# TBLASTX 2.17.0+' / b''	error: invalid value '0x10' for '-max_target_seqs <MAX_TARGET_SEQS>': expected a positive integer	error: invalid value '0x10' for '-max_target_seqs <MAX_TARGET_SEQS>': expected a positive integer
+ints	0	-max_target_seqs 010	same		
+ints	6	-max_target_seqs 010	same		
+ints	7	-max_target_seqs 010	same		
+ints	0	-max_target_seqs +5	same		
+ints	6	-max_target_seqs +5	same		
+ints	7	-max_target_seqs +5	same		
+ints	0	-max_target_seqs -1	arg-error	Error: Argument "max_target_seqs". Illegal value, expected >=1:  `-1'	error: invalid value '-1' for '-max_target_seqs <MAX_TARGET_SEQS>': expected a positive integer
+ints	6	-max_target_seqs -1	arg-error	Error: Argument "max_target_seqs". Illegal value, expected >=1:  `-1'	error: invalid value '-1' for '-max_target_seqs <MAX_TARGET_SEQS>': expected a positive integer
+ints	7	-max_target_seqs -1	arg-error	Error: Argument "max_target_seqs". Illegal value, expected >=1:  `-1'	error: invalid value '-1' for '-max_target_seqs <MAX_TARGET_SEQS>': expected a positive integer
+ints	0	-max_target_seqs 0	arg-error	Error: Argument "max_target_seqs". Illegal value, expected >=1:  `0'	error: invalid value '0' for '-max_target_seqs <MAX_TARGET_SEQS>': expected an integer in 1..=2147483647
+ints	6	-max_target_seqs 0	arg-error	Error: Argument "max_target_seqs". Illegal value, expected >=1:  `0'	error: invalid value '0' for '-max_target_seqs <MAX_TARGET_SEQS>': expected an integer in 1..=2147483647
+ints	7	-max_target_seqs 0	arg-error	Error: Argument "max_target_seqs". Illegal value, expected >=1:  `0'	error: invalid value '0' for '-max_target_seqs <MAX_TARGET_SEQS>': expected an integer in 1..=2147483647
+ints	0	-max_target_seqs 2147483647	same		
+ints	6	-max_target_seqs 2147483647	same		
+ints	7	-max_target_seqs 2147483647	same		
+ints	0	-max_target_seqs 1e1	arg-error	Error: Cannot convert string '1e1' to Int8 (m_Pos = 1)	error: invalid value '1e1' for '-max_target_seqs <MAX_TARGET_SEQS>': expected a positive integer
+ints	6	-max_target_seqs 1e1	arg-error	Error: Cannot convert string '1e1' to Int8 (m_Pos = 1)	error: invalid value '1e1' for '-max_target_seqs <MAX_TARGET_SEQS>': expected a positive integer
+ints	7	-max_target_seqs 1e1	arg-error	Error: Cannot convert string '1e1' to Int8 (m_Pos = 1)	error: invalid value '1e1' for '-max_target_seqs <MAX_TARGET_SEQS>': expected a positive integer
+ints	0	-max_target_seqs 5.0	arg-error	Error: Cannot convert string '5.0' to Int8 (m_Pos = 1)	error: invalid value '5.0' for '-max_target_seqs <MAX_TARGET_SEQS>': expected a positive integer
+ints	6	-max_target_seqs 5.0	arg-error	Error: Cannot convert string '5.0' to Int8 (m_Pos = 1)	error: invalid value '5.0' for '-max_target_seqs <MAX_TARGET_SEQS>': expected a positive integer
+ints	7	-max_target_seqs 5.0	arg-error	Error: Cannot convert string '5.0' to Int8 (m_Pos = 1)	error: invalid value '5.0' for '-max_target_seqs <MAX_TARGET_SEQS>': expected a positive integer
+ints	0	-max_target_seqs 0x	arg-error	Error: Argument "max_target_seqs". Illegal value, expected >=1:  `0x'	error: invalid value '0x' for '-max_target_seqs <MAX_TARGET_SEQS>': expected a positive integer
+ints	6	-max_target_seqs 0x	arg-error	Error: Argument "max_target_seqs". Illegal value, expected >=1:  `0x'	error: invalid value '0x' for '-max_target_seqs <MAX_TARGET_SEQS>': expected a positive integer
+ints	7	-max_target_seqs 0x	arg-error	Error: Argument "max_target_seqs". Illegal value, expected >=1:  `0x'	error: invalid value '0x' for '-max_target_seqs <MAX_TARGET_SEQS>': expected a positive integer
+ints	0	-num_threads 0	arg-error	Error: Argument "num_threads". Illegal value, expected >=1:  `0'	error: invalid value '0' for '-num_threads <NUM_THREADS>': expected an integer in 1..=2147483647
+ints	6	-num_threads 0	arg-error	Error: Argument "num_threads". Illegal value, expected >=1:  `0'	error: invalid value '0' for '-num_threads <NUM_THREADS>': expected an integer in 1..=2147483647
+ints	7	-num_threads 0	arg-error	Error: Argument "num_threads". Illegal value, expected >=1:  `0'	error: invalid value '0' for '-num_threads <NUM_THREADS>': expected an integer in 1..=2147483647
+ints	0	-num_threads 0x1	DIFF exit 0/2: stdout line 1: b'TBLASTX 2.17.0+' / b''	error: invalid value '0x1' for '-num_threads <NUM_THREADS>': expected a positive integer	error: invalid value '0x1' for '-num_threads <NUM_THREADS>': expected a positive integer
+ints	6	-num_threads 0x1	DIFF exit 0/2: stdout line 1: b'LC738874_100001_110000\tLC738875_120001_130000\t47.872\t188\t98\t0\t8919\t9482\t3288\t385' / b''	error: invalid value '0x1' for '-num_threads <NUM_THREADS>': expected a positive integer	error: invalid value '0x1' for '-num_threads <NUM_THREADS>': expected a positive integer
+ints	7	-num_threads 0x1	DIFF exit 0/2: stdout line 1: b'# TBLASTX 2.17.0+' / b''	error: invalid value '0x1' for '-num_threads <NUM_THREADS>': expected a positive integer	error: invalid value '0x1' for '-num_threads <NUM_THREADS>': expected a positive integer
+ints	0	-num_threads +1	same		
+ints	6	-num_threads +1	same		
+ints	7	-num_threads +1	same		
+ints	0	-num_threads -1	arg-error	Error: Argument "num_threads". Illegal value, expected >=1:  `-1'	error: invalid value '-1' for '-num_threads <NUM_THREADS>': expected a positive integer
+ints	6	-num_threads -1	arg-error	Error: Argument "num_threads". Illegal value, expected >=1:  `-1'	error: invalid value '-1' for '-num_threads <NUM_THREADS>': expected a positive integer
+ints	7	-num_threads -1	arg-error	Error: Argument "num_threads". Illegal value, expected >=1:  `-1'	error: invalid value '-1' for '-num_threads <NUM_THREADS>': expected a positive integer
+ints	0	-max_hsps 1	DIFF exit 0/2: stdout line 1: b'TBLASTX 2.17.0+' / b''	error: unknown option or argument '-max_hsps'; use -help for CLI v2 syntax	error: unknown option or argument '-max_hsps'; use -help for CLI v2 syntax
+ints	6	-max_hsps 1	DIFF exit 0/2: stdout line 1: b'LC738874_100001_110000\tLC738875_120001_130000\t47.872\t188\t98\t0\t8919\t9482\t3288\t385' / b''	error: unknown option or argument '-max_hsps'; use -help for CLI v2 syntax	error: unknown option or argument '-max_hsps'; use -help for CLI v2 syntax
+ints	7	-max_hsps 1	DIFF exit 0/2: stdout line 1: b'# TBLASTX 2.17.0+' / b''	error: unknown option or argument '-max_hsps'; use -help for CLI v2 syntax	error: unknown option or argument '-max_hsps'; use -help for CLI v2 syntax
+outfmt	-	-outfmt 6	same		
+outfmt	-	-outfmt 06	DIFF exit 0/2: stdout line 1: b'LC738874_100001_110000\tLC738875_120001_130000\t47.872\t188\t98\t0\t8919\t9482\t3288\t385' / b''	error: invalid value '06' for '-outfmt <SPEC>': unsupported TBLASTX outfmt: only 0, 6 and 7 without custom fields are implemented	error: invalid value '06' for '-outfmt <SPEC>': unsupported TBLASTX outfmt: only 0, 6 and 7 without custom fields are implemented
+outfmt	-	-outfmt +6	DIFF exit 0/2: stdout line 1: b'LC738874_100001_110000\tLC738875_120001_130000\t47.872\t188\t98\t0\t8919\t9482\t3288\t385' / b''	error: invalid value '+6' for '-outfmt <SPEC>': unsupported TBLASTX outfmt: only 0, 6 and 7 without custom fields are implemented	error: invalid value '+6' for '-outfmt <SPEC>': unsupported TBLASTX outfmt: only 0, 6 and 7 without custom fields are implemented
+outfmt	-	-outfmt ' 6'	same		
+outfmt	-	-outfmt '6 '	same		
+outfmt	-	-outfmt '6 std'	DIFF exit 0/2: stdout line 1: b'LC738874_100001_110000\tLC738875_120001_130000\t47.872\t188\t98\t0\t8919\t9482\t3288\t385' / b''	error: invalid value '6 std' for '-outfmt <SPEC>': unsupported TBLASTX outfmt: only 0, 6 and 7 without custom fields are implemented	error: invalid value '6 std' for '-outfmt <SPEC>': unsupported TBLASTX outfmt: only 0, 6 and 7 without custom fields are implemented
+outfmt	-	-outfmt '7 std qseqid'	DIFF exit 0/2: stdout line 1: b'# TBLASTX 2.17.0+' / b''	error: invalid value '7 std qseqid' for '-outfmt <SPEC>': unsupported TBLASTX outfmt: only 0, 6 and 7 without custom fields are implemented	error: invalid value '7 std qseqid' for '-outfmt <SPEC>': unsupported TBLASTX outfmt: only 0, 6 and 7 without custom fields are implemented
+outfmt	-	-outfmt 0x6	DIFF exit 1/2: stderr line 1: b"BLAST query/options error: '0x6' is not a valid output format" / b"error: invalid value '0x6' for '-outfmt <SPEC>': unsupported TBLASTX outfmt: onl"	BLAST query/options error: '0x6' is not a valid output format	error: invalid value '0x6' for '-outfmt <SPEC>': unsupported TBLASTX outfmt: only 0, 6 and 7 without custom fields are implemented
+outfmt	-	-outfmt 6.0	DIFF exit 1/2: stderr line 1: b"BLAST query/options error: '6.0' is not a valid output format" / b"error: invalid value '6.0' for '-outfmt <SPEC>': unsupported TBLASTX outfmt: onl"	BLAST query/options error: '6.0' is not a valid output format	error: invalid value '6.0' for '-outfmt <SPEC>': unsupported TBLASTX outfmt: only 0, 6 and 7 without custom fields are implemented
+outfmt	-	-outfmt 5	DIFF exit 0/2: stdout line 1: b'<?xml version="1.0" encoding="US-ASCII"?>' / b''	error: invalid value '5' for '-outfmt <SPEC>': unsupported TBLASTX outfmt: only 0, 6 and 7 without custom fields are implemented	error: invalid value '5' for '-outfmt <SPEC>': unsupported TBLASTX outfmt: only 0, 6 and 7 without custom fields are implemented
+outfmt	-	-outfmt 13	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: Please provide a file name for outfmt 13.' / b"error: invalid value '13' for '-outfmt <SPEC>': unsupported TBLASTX outfmt: only"	BLAST query/options error: Please provide a file name for outfmt 13.	error: invalid value '13' for '-outfmt <SPEC>': unsupported TBLASTX outfmt: only 0, 6 and 7 without custom fields are implemented
+outfmt	-	-outfmt 18	DIFF exit 0/2: stdout 1778 / 0 bytes	error: invalid value '18' for '-outfmt <SPEC>': unsupported TBLASTX outfmt: only 0, 6 and 7 without custom fields are implemented	error: invalid value '18' for '-outfmt <SPEC>': unsupported TBLASTX outfmt: only 0, 6 and 7 without custom fields are implemented
+outfmt	-	-outfmt abc	DIFF exit 1/2: stderr line 1: b"BLAST query/options error: 'abc' is not a valid output format" / b"error: invalid value 'abc' for '-outfmt <SPEC>': unsupported TBLASTX outfmt: onl"	BLAST query/options error: 'abc' is not a valid output format	error: invalid value 'abc' for '-outfmt <SPEC>': unsupported TBLASTX outfmt: only 0, 6 and 7 without custom fields are implemented
+outfmt	-	-outfmt ''	DIFF exit 1/2: stderr line 1: b"BLAST query/options error: '' is not a valid output format" / b"error: invalid value '' for '-outfmt <SPEC>': unsupported TBLASTX outfmt: only 0"	BLAST query/options error: '' is not a valid output format	error: invalid value '' for '-outfmt <SPEC>': unsupported TBLASTX outfmt: only 0, 6 and 7 without custom fields are implemented
+outfmt	-	-outfmt ' '	DIFF exit 1/2: stderr line 1: b"BLAST query/options error: '' is not a valid output format" / b"error: invalid value ' ' for '-outfmt <SPEC>': unsupported TBLASTX outfmt: only "	BLAST query/options error: '' is not a valid output format	error: invalid value ' ' for '-outfmt <SPEC>': unsupported TBLASTX outfmt: only 0, 6 and 7 without custom fields are implemented
+outfmt	-	-outfmt '0 std'	DIFF exit 0/2: stdout line 1: b'TBLASTX 2.17.0+' / b''	error: invalid value '0 std' for '-outfmt <SPEC>': unsupported TBLASTX outfmt: only 0, 6 and 7 without custom fields are implemented	error: invalid value '0 std' for '-outfmt <SPEC>': unsupported TBLASTX outfmt: only 0, 6 and 7 without custom fields are implemented
+outfmt	-	-outfmt 10	DIFF exit 0/2: stdout line 1: b'LC738874_100001_110000,LC738875_120001_130000,47.872,188,98,0,8919,9482,3288,385' / b''	error: invalid value '10' for '-outfmt <SPEC>': unsupported TBLASTX outfmt: only 0, 6 and 7 without custom fields are implemented	error: invalid value '10' for '-outfmt <SPEC>': unsupported TBLASTX outfmt: only 0, 6 and 7 without custom fields are implemented
+outfmt	-	-outfmt 17	DIFF exit 1/2: stderr line 1: b'BLAST query/options error: SAM format is only applicable to blastn' / b"error: invalid value '17' for '-outfmt <SPEC>': unsupported TBLASTX outfmt: only"	BLAST query/options error: SAM format is only applicable to blastn	error: invalid value '17' for '-outfmt <SPEC>': unsupported TBLASTX outfmt: only 0, 6 and 7 without custom fields are implemented
+outfmt	-	-outfmt -1	DIFF exit 255/2: stderr line 1: b'Error: Formatting choice is out of range' / b"error: invalid value '-1' for '-outfmt <SPEC>': unsupported TBLASTX outfmt: only"	Error: Formatting choice is out of range	error: invalid value '-1' for '-outfmt <SPEC>': unsupported TBLASTX outfmt: only 0, 6 and 7 without custom fields are implemented
+outfmt	-	-outfmt '7 qseqid'	DIFF exit 0/2: stdout line 1: b'# TBLASTX 2.17.0+' / b''	error: invalid value '7 qseqid' for '-outfmt <SPEC>': unsupported TBLASTX outfmt: only 0, 6 and 7 without custom fields are implemented	error: invalid value '7 qseqid' for '-outfmt <SPEC>': unsupported TBLASTX outfmt: only 0, 6 and 7 without custom fields are implemented
+gencode	0	-query_gencode 0	arg-error	Error: Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `0'	error: invalid value '0' for '-query_gencode <QUERY_GENCODE>': unsupported genetic code
+gencode	6	-query_gencode 0	arg-error	Error: Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `0'	error: invalid value '0' for '-query_gencode <QUERY_GENCODE>': unsupported genetic code
+gencode	7	-query_gencode 0	arg-error	Error: Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `0'	error: invalid value '0' for '-query_gencode <QUERY_GENCODE>': unsupported genetic code
+gencode	0	-query_gencode 1	same		
+gencode	6	-query_gencode 1	same		
+gencode	7	-query_gencode 1	same		
+gencode	0	-query_gencode 2	same		
+gencode	6	-query_gencode 2	same		
+gencode	7	-query_gencode 2	same		
+gencode	0	-query_gencode 3	same		
+gencode	6	-query_gencode 3	same		
+gencode	7	-query_gencode 3	same		
+gencode	0	-query_gencode 4	same		
+gencode	6	-query_gencode 4	same		
+gencode	7	-query_gencode 4	same		
+gencode	0	-query_gencode 5	same		
+gencode	6	-query_gencode 5	same		
+gencode	7	-query_gencode 5	same		
+gencode	0	-query_gencode 6	same		
+gencode	6	-query_gencode 6	same		
+gencode	7	-query_gencode 6	same		
+gencode	0	-query_gencode 7	arg-error	Error: Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `7'	error: invalid value '7' for '-query_gencode <QUERY_GENCODE>': unsupported genetic code
+gencode	6	-query_gencode 7	arg-error	Error: Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `7'	error: invalid value '7' for '-query_gencode <QUERY_GENCODE>': unsupported genetic code
+gencode	7	-query_gencode 7	arg-error	Error: Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `7'	error: invalid value '7' for '-query_gencode <QUERY_GENCODE>': unsupported genetic code
+gencode	0	-query_gencode 8	arg-error	Error: Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `8'	error: invalid value '8' for '-query_gencode <QUERY_GENCODE>': unsupported genetic code
+gencode	6	-query_gencode 8	arg-error	Error: Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `8'	error: invalid value '8' for '-query_gencode <QUERY_GENCODE>': unsupported genetic code
+gencode	7	-query_gencode 8	arg-error	Error: Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `8'	error: invalid value '8' for '-query_gencode <QUERY_GENCODE>': unsupported genetic code
+gencode	0	-query_gencode 9	same		
+gencode	6	-query_gencode 9	same		
+gencode	7	-query_gencode 9	same		
+gencode	0	-query_gencode 10	same		
+gencode	6	-query_gencode 10	same		
+gencode	7	-query_gencode 10	same		
+gencode	0	-query_gencode 11	same		
+gencode	6	-query_gencode 11	same		
+gencode	7	-query_gencode 11	same		
+gencode	0	-query_gencode 12	same		
+gencode	6	-query_gencode 12	same		
+gencode	7	-query_gencode 12	same		
+gencode	0	-query_gencode 13	same		
+gencode	6	-query_gencode 13	same		
+gencode	7	-query_gencode 13	same		
+gencode	0	-query_gencode 14	same		
+gencode	6	-query_gencode 14	same		
+gencode	7	-query_gencode 14	same		
+gencode	0	-query_gencode 15	same		
+gencode	6	-query_gencode 15	same		
+gencode	7	-query_gencode 15	same		
+gencode	0	-query_gencode 16	same		
+gencode	6	-query_gencode 16	same		
+gencode	7	-query_gencode 16	same		
+gencode	0	-query_gencode 17	arg-error	Error: Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `17'	error: invalid value '17' for '-query_gencode <QUERY_GENCODE>': unsupported genetic code
+gencode	6	-query_gencode 17	arg-error	Error: Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `17'	error: invalid value '17' for '-query_gencode <QUERY_GENCODE>': unsupported genetic code
+gencode	7	-query_gencode 17	arg-error	Error: Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `17'	error: invalid value '17' for '-query_gencode <QUERY_GENCODE>': unsupported genetic code
+gencode	0	-query_gencode 18	arg-error	Error: Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `18'	error: invalid value '18' for '-query_gencode <QUERY_GENCODE>': unsupported genetic code
+gencode	6	-query_gencode 18	arg-error	Error: Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `18'	error: invalid value '18' for '-query_gencode <QUERY_GENCODE>': unsupported genetic code
+gencode	7	-query_gencode 18	arg-error	Error: Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `18'	error: invalid value '18' for '-query_gencode <QUERY_GENCODE>': unsupported genetic code
+gencode	0	-query_gencode 19	arg-error	Error: Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `19'	error: invalid value '19' for '-query_gencode <QUERY_GENCODE>': unsupported genetic code
+gencode	6	-query_gencode 19	arg-error	Error: Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `19'	error: invalid value '19' for '-query_gencode <QUERY_GENCODE>': unsupported genetic code
+gencode	7	-query_gencode 19	arg-error	Error: Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `19'	error: invalid value '19' for '-query_gencode <QUERY_GENCODE>': unsupported genetic code
+gencode	0	-query_gencode 20	arg-error	Error: Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `20'	error: invalid value '20' for '-query_gencode <QUERY_GENCODE>': unsupported genetic code
+gencode	6	-query_gencode 20	arg-error	Error: Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `20'	error: invalid value '20' for '-query_gencode <QUERY_GENCODE>': unsupported genetic code
+gencode	7	-query_gencode 20	arg-error	Error: Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `20'	error: invalid value '20' for '-query_gencode <QUERY_GENCODE>': unsupported genetic code
+gencode	0	-query_gencode 21	same		
+gencode	6	-query_gencode 21	same		
+gencode	7	-query_gencode 21	same		
+gencode	0	-query_gencode 22	same		
+gencode	6	-query_gencode 22	same		
+gencode	7	-query_gencode 22	same		
+gencode	0	-query_gencode 23	same		
+gencode	6	-query_gencode 23	same		
+gencode	7	-query_gencode 23	same		
+gencode	0	-query_gencode 24	same		
+gencode	6	-query_gencode 24	same		
+gencode	7	-query_gencode 24	same		
+gencode	0	-query_gencode 25	same		
+gencode	6	-query_gencode 25	same		
+gencode	7	-query_gencode 25	same		
+gencode	0	-query_gencode 26	same		
+gencode	6	-query_gencode 26	same		
+gencode	7	-query_gencode 26	same		
+gencode	0	-query_gencode 27	same		
+gencode	6	-query_gencode 27	same		
+gencode	7	-query_gencode 27	same		
+gencode	0	-query_gencode 28	same		
+gencode	6	-query_gencode 28	same		
+gencode	7	-query_gencode 28	same		
+gencode	0	-query_gencode 29	same		
+gencode	6	-query_gencode 29	same		
+gencode	7	-query_gencode 29	same		
+gencode	0	-query_gencode 30	same		
+gencode	6	-query_gencode 30	same		
+gencode	7	-query_gencode 30	same		
+gencode	0	-query_gencode 31	same		
+gencode	6	-query_gencode 31	same		
+gencode	7	-query_gencode 31	same		
+gencode	0	-query_gencode 32	arg-error	Error: Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `32'	error: invalid value '32' for '-query_gencode <QUERY_GENCODE>': unsupported genetic code
+gencode	6	-query_gencode 32	arg-error	Error: Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `32'	error: invalid value '32' for '-query_gencode <QUERY_GENCODE>': unsupported genetic code
+gencode	7	-query_gencode 32	arg-error	Error: Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `32'	error: invalid value '32' for '-query_gencode <QUERY_GENCODE>': unsupported genetic code
+gencode	0	-query_gencode 33	same		
+gencode	6	-query_gencode 33	same		
+gencode	7	-query_gencode 33	same		
+gencode	0	-query_gencode 34	arg-error	Error: Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `34'	error: invalid value '34' for '-query_gencode <QUERY_GENCODE>': unsupported genetic code
+gencode	6	-query_gencode 34	arg-error	Error: Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `34'	error: invalid value '34' for '-query_gencode <QUERY_GENCODE>': unsupported genetic code
+gencode	7	-query_gencode 34	arg-error	Error: Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `34'	error: invalid value '34' for '-query_gencode <QUERY_GENCODE>': unsupported genetic code
+gencode	0	-query_gencode 0x2	arg-error	Error: Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `0x2'	error: invalid value '0x2' for '-query_gencode <QUERY_GENCODE>': invalid genetic code
+gencode	6	-query_gencode 0x2	arg-error	Error: Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `0x2'	error: invalid value '0x2' for '-query_gencode <QUERY_GENCODE>': invalid genetic code
+gencode	7	-query_gencode 0x2	arg-error	Error: Argument "query_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `0x2'	error: invalid value '0x2' for '-query_gencode <QUERY_GENCODE>': invalid genetic code
+gencode	0	-query_gencode 02	same		
+gencode	6	-query_gencode 02	same		
+gencode	7	-query_gencode 02	same		
+gencode	0	-query_gencode +1	same		
+gencode	6	-query_gencode +1	same		
+gencode	7	-query_gencode +1	same		
+gencode	0	-query_gencode 1.0	arg-error	Error: Cannot convert string '1.0' to Int8 (m_Pos = 1)	error: invalid value '1.0' for '-query_gencode <QUERY_GENCODE>': invalid genetic code
+gencode	6	-query_gencode 1.0	arg-error	Error: Cannot convert string '1.0' to Int8 (m_Pos = 1)	error: invalid value '1.0' for '-query_gencode <QUERY_GENCODE>': invalid genetic code
+gencode	7	-query_gencode 1.0	arg-error	Error: Cannot convert string '1.0' to Int8 (m_Pos = 1)	error: invalid value '1.0' for '-query_gencode <QUERY_GENCODE>': invalid genetic code
+gencode	0	-query_gencode x	arg-error	Error: Cannot convert string 'x' to Int8 (m_Pos = 0)	error: invalid value 'x' for '-query_gencode <QUERY_GENCODE>': invalid genetic code
+gencode	6	-query_gencode x	arg-error	Error: Cannot convert string 'x' to Int8 (m_Pos = 0)	error: invalid value 'x' for '-query_gencode <QUERY_GENCODE>': invalid genetic code
+gencode	7	-query_gencode x	arg-error	Error: Cannot convert string 'x' to Int8 (m_Pos = 0)	error: invalid value 'x' for '-query_gencode <QUERY_GENCODE>': invalid genetic code
+gencode	0	-db_gencode 0	arg-error	Error: Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `0'	error: invalid value '0' for '-db_gencode <DB_GENCODE>': unsupported genetic code
+gencode	6	-db_gencode 0	arg-error	Error: Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `0'	error: invalid value '0' for '-db_gencode <DB_GENCODE>': unsupported genetic code
+gencode	7	-db_gencode 0	arg-error	Error: Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `0'	error: invalid value '0' for '-db_gencode <DB_GENCODE>': unsupported genetic code
+gencode	0	-db_gencode 1	same		
+gencode	6	-db_gencode 1	same		
+gencode	7	-db_gencode 1	same		
+gencode	0	-db_gencode 2	exception-gencode		
+gencode	6	-db_gencode 2	exception-gencode		
+gencode	7	-db_gencode 2	exception-gencode		
+gencode	0	-db_gencode 3	exception-gencode		
+gencode	6	-db_gencode 3	exception-gencode		
+gencode	7	-db_gencode 3	exception-gencode		
+gencode	0	-db_gencode 4	exception-gencode		
+gencode	6	-db_gencode 4	exception-gencode		
+gencode	7	-db_gencode 4	exception-gencode		
+gencode	0	-db_gencode 5	exception-gencode		
+gencode	6	-db_gencode 5	exception-gencode		
+gencode	7	-db_gencode 5	exception-gencode		
+gencode	0	-db_gencode 6	exception-gencode		
+gencode	6	-db_gencode 6	exception-gencode		
+gencode	7	-db_gencode 6	exception-gencode		
+gencode	0	-db_gencode 7	arg-error	Error: Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `7'	error: invalid value '7' for '-db_gencode <DB_GENCODE>': unsupported genetic code
+gencode	6	-db_gencode 7	arg-error	Error: Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `7'	error: invalid value '7' for '-db_gencode <DB_GENCODE>': unsupported genetic code
+gencode	7	-db_gencode 7	arg-error	Error: Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `7'	error: invalid value '7' for '-db_gencode <DB_GENCODE>': unsupported genetic code
+gencode	0	-db_gencode 8	arg-error	Error: Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `8'	error: invalid value '8' for '-db_gencode <DB_GENCODE>': unsupported genetic code
+gencode	6	-db_gencode 8	arg-error	Error: Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `8'	error: invalid value '8' for '-db_gencode <DB_GENCODE>': unsupported genetic code
+gencode	7	-db_gencode 8	arg-error	Error: Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `8'	error: invalid value '8' for '-db_gencode <DB_GENCODE>': unsupported genetic code
+gencode	0	-db_gencode 9	exception-gencode		
+gencode	6	-db_gencode 9	exception-gencode		
+gencode	7	-db_gencode 9	exception-gencode		
+gencode	0	-db_gencode 10	exception-gencode		
+gencode	6	-db_gencode 10	exception-gencode		
+gencode	7	-db_gencode 10	exception-gencode		
+gencode	0	-db_gencode 11	same		
+gencode	6	-db_gencode 11	same		
+gencode	7	-db_gencode 11	same		
+gencode	0	-db_gencode 12	exception-gencode		
+gencode	6	-db_gencode 12	exception-gencode		
+gencode	7	-db_gencode 12	exception-gencode		
+gencode	0	-db_gencode 13	exception-gencode		
+gencode	6	-db_gencode 13	exception-gencode		
+gencode	7	-db_gencode 13	exception-gencode		
+gencode	0	-db_gencode 14	exception-gencode		
+gencode	6	-db_gencode 14	exception-gencode		
+gencode	7	-db_gencode 14	exception-gencode		
+gencode	0	-db_gencode 15	exception-gencode		
+gencode	6	-db_gencode 15	exception-gencode		
+gencode	7	-db_gencode 15	exception-gencode		
+gencode	0	-db_gencode 16	exception-gencode		
+gencode	6	-db_gencode 16	exception-gencode		
+gencode	7	-db_gencode 16	exception-gencode		
+gencode	0	-db_gencode 17	arg-error	Error: Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `17'	error: invalid value '17' for '-db_gencode <DB_GENCODE>': unsupported genetic code
+gencode	6	-db_gencode 17	arg-error	Error: Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `17'	error: invalid value '17' for '-db_gencode <DB_GENCODE>': unsupported genetic code
+gencode	7	-db_gencode 17	arg-error	Error: Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `17'	error: invalid value '17' for '-db_gencode <DB_GENCODE>': unsupported genetic code
+gencode	0	-db_gencode 18	arg-error	Error: Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `18'	error: invalid value '18' for '-db_gencode <DB_GENCODE>': unsupported genetic code
+gencode	6	-db_gencode 18	arg-error	Error: Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `18'	error: invalid value '18' for '-db_gencode <DB_GENCODE>': unsupported genetic code
+gencode	7	-db_gencode 18	arg-error	Error: Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `18'	error: invalid value '18' for '-db_gencode <DB_GENCODE>': unsupported genetic code
+gencode	0	-db_gencode 19	arg-error	Error: Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `19'	error: invalid value '19' for '-db_gencode <DB_GENCODE>': unsupported genetic code
+gencode	6	-db_gencode 19	arg-error	Error: Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `19'	error: invalid value '19' for '-db_gencode <DB_GENCODE>': unsupported genetic code
+gencode	7	-db_gencode 19	arg-error	Error: Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `19'	error: invalid value '19' for '-db_gencode <DB_GENCODE>': unsupported genetic code
+gencode	0	-db_gencode 20	arg-error	Error: Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `20'	error: invalid value '20' for '-db_gencode <DB_GENCODE>': unsupported genetic code
+gencode	6	-db_gencode 20	arg-error	Error: Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `20'	error: invalid value '20' for '-db_gencode <DB_GENCODE>': unsupported genetic code
+gencode	7	-db_gencode 20	arg-error	Error: Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `20'	error: invalid value '20' for '-db_gencode <DB_GENCODE>': unsupported genetic code
+gencode	0	-db_gencode 21	exception-gencode		
+gencode	6	-db_gencode 21	exception-gencode		
+gencode	7	-db_gencode 21	exception-gencode		
+gencode	0	-db_gencode 22	exception-gencode		
+gencode	6	-db_gencode 22	exception-gencode		
+gencode	7	-db_gencode 22	exception-gencode		
+gencode	0	-db_gencode 23	exception-gencode		
+gencode	6	-db_gencode 23	exception-gencode		
+gencode	7	-db_gencode 23	exception-gencode		
+gencode	0	-db_gencode 24	exception-gencode		
+gencode	6	-db_gencode 24	exception-gencode		
+gencode	7	-db_gencode 24	exception-gencode		
+gencode	0	-db_gencode 25	exception-gencode		
+gencode	6	-db_gencode 25	exception-gencode		
+gencode	7	-db_gencode 25	exception-gencode		
+gencode	0	-db_gencode 26	exception-gencode		
+gencode	6	-db_gencode 26	exception-gencode		
+gencode	7	-db_gencode 26	exception-gencode		
+gencode	0	-db_gencode 27	exception-gencode		
+gencode	6	-db_gencode 27	exception-gencode		
+gencode	7	-db_gencode 27	exception-gencode		
+gencode	0	-db_gencode 28	exception-gencode		
+gencode	6	-db_gencode 28	exception-gencode		
+gencode	7	-db_gencode 28	exception-gencode		
+gencode	0	-db_gencode 29	exception-gencode		
+gencode	6	-db_gencode 29	exception-gencode		
+gencode	7	-db_gencode 29	exception-gencode		
+gencode	0	-db_gencode 30	exception-gencode		
+gencode	6	-db_gencode 30	exception-gencode		
+gencode	7	-db_gencode 30	exception-gencode		
+gencode	0	-db_gencode 31	exception-gencode		
+gencode	6	-db_gencode 31	exception-gencode		
+gencode	7	-db_gencode 31	exception-gencode		
+gencode	0	-db_gencode 32	arg-error	Error: Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `32'	error: invalid value '32' for '-db_gencode <DB_GENCODE>': unsupported genetic code
+gencode	6	-db_gencode 32	arg-error	Error: Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `32'	error: invalid value '32' for '-db_gencode <DB_GENCODE>': unsupported genetic code
+gencode	7	-db_gencode 32	arg-error	Error: Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `32'	error: invalid value '32' for '-db_gencode <DB_GENCODE>': unsupported genetic code
+gencode	0	-db_gencode 33	exception-gencode		
+gencode	6	-db_gencode 33	exception-gencode		
+gencode	7	-db_gencode 33	exception-gencode		
+gencode	0	-db_gencode 34	arg-error	Error: Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `34'	error: invalid value '34' for '-db_gencode <DB_GENCODE>': unsupported genetic code
+gencode	6	-db_gencode 34	arg-error	Error: Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `34'	error: invalid value '34' for '-db_gencode <DB_GENCODE>': unsupported genetic code
+gencode	7	-db_gencode 34	arg-error	Error: Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `34'	error: invalid value '34' for '-db_gencode <DB_GENCODE>': unsupported genetic code
+gencode	0	-db_gencode 0x2	arg-error	Error: Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `0x2'	error: invalid value '0x2' for '-db_gencode <DB_GENCODE>': invalid genetic code
+gencode	6	-db_gencode 0x2	arg-error	Error: Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `0x2'	error: invalid value '0x2' for '-db_gencode <DB_GENCODE>': invalid genetic code
+gencode	7	-db_gencode 0x2	arg-error	Error: Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `0x2'	error: invalid value '0x2' for '-db_gencode <DB_GENCODE>': invalid genetic code
+gencode	0	-db_gencode 02	exception-gencode		
+gencode	6	-db_gencode 02	exception-gencode		
+gencode	7	-db_gencode 02	exception-gencode		
+gencode	0	-db_gencode +1	same		
+gencode	6	-db_gencode +1	same		
+gencode	7	-db_gencode +1	same		
+gencode	0	-db_gencode 1.0	arg-error	Error: Cannot convert string '1.0' to Int8 (m_Pos = 1)	error: invalid value '1.0' for '-db_gencode <DB_GENCODE>': invalid genetic code
+gencode	6	-db_gencode 1.0	arg-error	Error: Cannot convert string '1.0' to Int8 (m_Pos = 1)	error: invalid value '1.0' for '-db_gencode <DB_GENCODE>': invalid genetic code
+gencode	7	-db_gencode 1.0	arg-error	Error: Cannot convert string '1.0' to Int8 (m_Pos = 1)	error: invalid value '1.0' for '-db_gencode <DB_GENCODE>': invalid genetic code
+gencode	0	-db_gencode x	arg-error	Error: Cannot convert string 'x' to Int8 (m_Pos = 0)	error: invalid value 'x' for '-db_gencode <DB_GENCODE>': invalid genetic code
+gencode	6	-db_gencode x	arg-error	Error: Cannot convert string 'x' to Int8 (m_Pos = 0)	error: invalid value 'x' for '-db_gencode <DB_GENCODE>': invalid genetic code
+gencode	7	-db_gencode x	arg-error	Error: Cannot convert string 'x' to Int8 (m_Pos = 0)	error: invalid value 'x' for '-db_gencode <DB_GENCODE>': invalid genetic code
+culling	0	-culling_limit 0	same		
+culling	6	-culling_limit 0	same		
+culling	7	-culling_limit 0	same		
+culling	0	-culling_limit 1	losat-rejects	Error: -culling_limit 1 is not supported by LOSAT's TBLASTX (its HSP culling differs from NCBI's)	Error: -culling_limit 1 is not supported by LOSAT's TBLASTX (its HSP culling differs from NCBI's)
+culling	6	-culling_limit 1	losat-rejects	Error: -culling_limit 1 is not supported by LOSAT's TBLASTX (its HSP culling differs from NCBI's)	Error: -culling_limit 1 is not supported by LOSAT's TBLASTX (its HSP culling differs from NCBI's)
+culling	7	-culling_limit 1	losat-rejects	Error: -culling_limit 1 is not supported by LOSAT's TBLASTX (its HSP culling differs from NCBI's)	Error: -culling_limit 1 is not supported by LOSAT's TBLASTX (its HSP culling differs from NCBI's)
+culling	0	-culling_limit 2	losat-rejects	Error: -culling_limit 2 is not supported by LOSAT's TBLASTX (its HSP culling differs from NCBI's)	Error: -culling_limit 2 is not supported by LOSAT's TBLASTX (its HSP culling differs from NCBI's)
+culling	6	-culling_limit 2	losat-rejects	Error: -culling_limit 2 is not supported by LOSAT's TBLASTX (its HSP culling differs from NCBI's)	Error: -culling_limit 2 is not supported by LOSAT's TBLASTX (its HSP culling differs from NCBI's)
+culling	7	-culling_limit 2	losat-rejects	Error: -culling_limit 2 is not supported by LOSAT's TBLASTX (its HSP culling differs from NCBI's)	Error: -culling_limit 2 is not supported by LOSAT's TBLASTX (its HSP culling differs from NCBI's)
+culling	0	-culling_limit 5	losat-rejects	Error: -culling_limit 5 is not supported by LOSAT's TBLASTX (its HSP culling differs from NCBI's)	Error: -culling_limit 5 is not supported by LOSAT's TBLASTX (its HSP culling differs from NCBI's)
+culling	6	-culling_limit 5	losat-rejects	Error: -culling_limit 5 is not supported by LOSAT's TBLASTX (its HSP culling differs from NCBI's)	Error: -culling_limit 5 is not supported by LOSAT's TBLASTX (its HSP culling differs from NCBI's)
+culling	7	-culling_limit 5	losat-rejects	Error: -culling_limit 5 is not supported by LOSAT's TBLASTX (its HSP culling differs from NCBI's)	Error: -culling_limit 5 is not supported by LOSAT's TBLASTX (its HSP culling differs from NCBI's)
+culling	0	-culling_limit -1	arg-error	Error: Argument "culling_limit". Illegal value, expected >=0:  `-1'	error: invalid value '-1' for '-culling_limit <CULLING_LIMIT>': -1 is not in 0..=4294967295
+culling	6	-culling_limit -1	arg-error	Error: Argument "culling_limit". Illegal value, expected >=0:  `-1'	error: invalid value '-1' for '-culling_limit <CULLING_LIMIT>': -1 is not in 0..=4294967295
+culling	7	-culling_limit -1	arg-error	Error: Argument "culling_limit". Illegal value, expected >=0:  `-1'	error: invalid value '-1' for '-culling_limit <CULLING_LIMIT>': -1 is not in 0..=4294967295
+culling	0	-culling_limit 0x1	DIFF exit 0/2: stdout line 1: b'TBLASTX 2.17.0+' / b''	error: invalid value '0x1' for '-culling_limit <CULLING_LIMIT>': invalid digit found in string	error: invalid value '0x1' for '-culling_limit <CULLING_LIMIT>': invalid digit found in string
+culling	6	-culling_limit 0x1	DIFF exit 0/2: stdout line 1: b'LC738874_100001_110000\tLC738875_120001_130000\t47.872\t188\t98\t0\t8919\t9482\t3288\t385' / b''	error: invalid value '0x1' for '-culling_limit <CULLING_LIMIT>': invalid digit found in string	error: invalid value '0x1' for '-culling_limit <CULLING_LIMIT>': invalid digit found in string
+culling	7	-culling_limit 0x1	DIFF exit 0/2: stdout line 1: b'# TBLASTX 2.17.0+' / b''	error: invalid value '0x1' for '-culling_limit <CULLING_LIMIT>': invalid digit found in string	error: invalid value '0x1' for '-culling_limit <CULLING_LIMIT>': invalid digit found in string
+culling	0	-culling_limit +1	losat-rejects	Error: -culling_limit 1 is not supported by LOSAT's TBLASTX (its HSP culling differs from NCBI's)	Error: -culling_limit 1 is not supported by LOSAT's TBLASTX (its HSP culling differs from NCBI's)
+culling	6	-culling_limit +1	losat-rejects	Error: -culling_limit 1 is not supported by LOSAT's TBLASTX (its HSP culling differs from NCBI's)	Error: -culling_limit 1 is not supported by LOSAT's TBLASTX (its HSP culling differs from NCBI's)
+culling	7	-culling_limit +1	losat-rejects	Error: -culling_limit 1 is not supported by LOSAT's TBLASTX (its HSP culling differs from NCBI's)	Error: -culling_limit 1 is not supported by LOSAT's TBLASTX (its HSP culling differs from NCBI's)
+other	0	-sum_stats false	DIFF exit 0/2: stdout line 1: b'TBLASTX 2.17.0+' / b''	error: unknown option or argument '-sum_stats'; use -help for CLI v2 syntax	error: unknown option or argument '-sum_stats'; use -help for CLI v2 syntax
+other	6	-sum_stats false	DIFF exit 0/2: stdout line 1: b'LC738874_100001_110000\tLC738875_120001_130000\t47.872\t188\t98\t0\t8919\t9482\t3288\t385' / b''	error: unknown option or argument '-sum_stats'; use -help for CLI v2 syntax	error: unknown option or argument '-sum_stats'; use -help for CLI v2 syntax
+other	7	-sum_stats false	DIFF exit 0/2: stdout line 1: b'# TBLASTX 2.17.0+' / b''	error: unknown option or argument '-sum_stats'; use -help for CLI v2 syntax	error: unknown option or argument '-sum_stats'; use -help for CLI v2 syntax
+other	0	-num_descriptions 5	DIFF exit 0/2: stdout line 1: b'TBLASTX 2.17.0+' / b''	error: unknown option or argument '-num_descriptions'; use -help for CLI v2 syntax	error: unknown option or argument '-num_descriptions'; use -help for CLI v2 syntax
+other	6	-num_descriptions 5	DIFF exit 0/2: stdout line 1: b'LC738874_100001_110000\tLC738875_120001_130000\t47.872\t188\t98\t0\t8919\t9482\t3288\t385' / b''	error: unknown option or argument '-num_descriptions'; use -help for CLI v2 syntax	error: unknown option or argument '-num_descriptions'; use -help for CLI v2 syntax
+other	7	-num_descriptions 5	DIFF exit 0/2: stdout line 1: b'# TBLASTX 2.17.0+' / b''	error: unknown option or argument '-num_descriptions'; use -help for CLI v2 syntax	error: unknown option or argument '-num_descriptions'; use -help for CLI v2 syntax
+other	0	-num_alignments 5	DIFF exit 0/2: stdout line 1: b'TBLASTX 2.17.0+' / b''	error: unknown option or argument '-num_alignments'; use -help for CLI v2 syntax	error: unknown option or argument '-num_alignments'; use -help for CLI v2 syntax
+other	6	-num_alignments 5	DIFF exit 0/2: stdout line 1: b'LC738874_100001_110000\tLC738875_120001_130000\t47.872\t188\t98\t0\t8919\t9482\t3288\t385' / b''	error: unknown option or argument '-num_alignments'; use -help for CLI v2 syntax	error: unknown option or argument '-num_alignments'; use -help for CLI v2 syntax
+other	7	-num_alignments 5	DIFF exit 0/2: stdout line 1: b'# TBLASTX 2.17.0+' / b''	error: unknown option or argument '-num_alignments'; use -help for CLI v2 syntax	error: unknown option or argument '-num_alignments'; use -help for CLI v2 syntax
+other	0	-line_length 60	DIFF exit 0/2: stdout line 1: b'TBLASTX 2.17.0+' / b''	error: unknown option or argument '-line_length'; use -help for CLI v2 syntax	error: unknown option or argument '-line_length'; use -help for CLI v2 syntax
+other	6	-line_length 60	DIFF exit 0/2: stdout line 1: b'LC738874_100001_110000\tLC738875_120001_130000\t47.872\t188\t98\t0\t8919\t9482\t3288\t385' / b''	error: unknown option or argument '-line_length'; use -help for CLI v2 syntax	error: unknown option or argument '-line_length'; use -help for CLI v2 syntax
+other	7	-line_length 60	DIFF exit 0/2: stdout line 1: b'# TBLASTX 2.17.0+' / b''	error: unknown option or argument '-line_length'; use -help for CLI v2 syntax	error: unknown option or argument '-line_length'; use -help for CLI v2 syntax
+other	0	-sorthits 1	DIFF exit 0/2: stdout line 1: b'TBLASTX 2.17.0+' / b''	error: unknown option or argument '-sorthits'; use -help for CLI v2 syntax	error: unknown option or argument '-sorthits'; use -help for CLI v2 syntax
+other	6	-sorthits 1	DIFF exit 0/2: stdout line 1: b'LC738874_100001_110000\tLC738875_120001_130000\t47.872\t188\t98\t0\t8919\t9482\t3288\t385' / b''	error: unknown option or argument '-sorthits'; use -help for CLI v2 syntax	error: unknown option or argument '-sorthits'; use -help for CLI v2 syntax
+other	7	-sorthits 1	DIFF exit 0/2: stdout line 1: b'# TBLASTX 2.17.0+' / b''	error: unknown option or argument '-sorthits'; use -help for CLI v2 syntax	error: unknown option or argument '-sorthits'; use -help for CLI v2 syntax
+other	0	-sorthsps 1	DIFF exit 0/2: stdout line 1: b'TBLASTX 2.17.0+' / b''	error: unknown option or argument '-sorthsps'; use -help for CLI v2 syntax	error: unknown option or argument '-sorthsps'; use -help for CLI v2 syntax
+other	6	-sorthsps 1	DIFF exit 0/2: stdout line 1: b'LC738874_100001_110000\tLC738875_120001_130000\t47.872\t188\t98\t0\t8919\t9482\t3288\t385' / b''	error: unknown option or argument '-sorthsps'; use -help for CLI v2 syntax	error: unknown option or argument '-sorthsps'; use -help for CLI v2 syntax
+other	7	-sorthsps 1	DIFF exit 0/2: stdout line 1: b'# TBLASTX 2.17.0+' / b''	error: unknown option or argument '-sorthsps'; use -help for CLI v2 syntax	error: unknown option or argument '-sorthsps'; use -help for CLI v2 syntax
+other	0	-lcase_masking	DIFF exit 0/2: stdout line 1: b'TBLASTX 2.17.0+' / b''	error: unknown option or argument '-lcase_masking'; use -help for CLI v2 syntax	error: unknown option or argument '-lcase_masking'; use -help for CLI v2 syntax
+other	6	-lcase_masking	DIFF exit 0/2: stdout line 1: b'LC738874_100001_110000\tLC738875_120001_130000\t47.872\t188\t98\t0\t8919\t9482\t3288\t385' / b''	error: unknown option or argument '-lcase_masking'; use -help for CLI v2 syntax	error: unknown option or argument '-lcase_masking'; use -help for CLI v2 syntax
+other	7	-lcase_masking	DIFF exit 0/2: stdout line 1: b'# TBLASTX 2.17.0+' / b''	error: unknown option or argument '-lcase_masking'; use -help for CLI v2 syntax	error: unknown option or argument '-lcase_masking'; use -help for CLI v2 syntax
+other	0	-strand plus	DIFF exit 0/2: stdout line 1: b'TBLASTX 2.17.0+' / b''	error: unknown option or argument '-strand'; use -help for CLI v2 syntax	error: unknown option or argument '-strand'; use -help for CLI v2 syntax
+other	6	-strand plus	DIFF exit 0/2: stdout line 1: b'LC738874_100001_110000\tLC738875_120001_130000\t47.872\t188\t98\t0\t8919\t9482\t3288\t385' / b''	error: unknown option or argument '-strand'; use -help for CLI v2 syntax	error: unknown option or argument '-strand'; use -help for CLI v2 syntax
+other	7	-strand plus	DIFF exit 0/2: stdout line 1: b'# TBLASTX 2.17.0+' / b''	error: unknown option or argument '-strand'; use -help for CLI v2 syntax	error: unknown option or argument '-strand'; use -help for CLI v2 syntax
+other	0	-qcov_hsp_perc 50	DIFF exit 0/2: stdout line 1: b'TBLASTX 2.17.0+' / b''	error: unknown option or argument '-qcov_hsp_perc'; use -help for CLI v2 syntax	error: unknown option or argument '-qcov_hsp_perc'; use -help for CLI v2 syntax
+other	6	-qcov_hsp_perc 50	DIFF exit 0/2: stderr line 1: b'' / b"error: unknown option or argument '-qcov_hsp_perc'; use -help for CLI v2 syntax"	error: unknown option or argument '-qcov_hsp_perc'; use -help for CLI v2 syntax	error: unknown option or argument '-qcov_hsp_perc'; use -help for CLI v2 syntax
+other	7	-qcov_hsp_perc 50	DIFF exit 0/2: stdout line 1: b'# TBLASTX 2.17.0+' / b''	error: unknown option or argument '-qcov_hsp_perc'; use -help for CLI v2 syntax	error: unknown option or argument '-qcov_hsp_perc'; use -help for CLI v2 syntax
+other	0	-xdrop_ungap 10	DIFF exit 0/2: stdout line 1: b'TBLASTX 2.17.0+' / b''	error: unknown option or argument '-xdrop_ungap'; use -help for CLI v2 syntax	error: unknown option or argument '-xdrop_ungap'; use -help for CLI v2 syntax
+other	6	-xdrop_ungap 10	DIFF exit 0/2: stdout line 1: b'LC738874_100001_110000\tLC738875_120001_130000\t47.872\t188\t98\t0\t8919\t9482\t3288\t385' / b''	error: unknown option or argument '-xdrop_ungap'; use -help for CLI v2 syntax	error: unknown option or argument '-xdrop_ungap'; use -help for CLI v2 syntax
+other	7	-xdrop_ungap 10	DIFF exit 0/2: stdout line 1: b'# TBLASTX 2.17.0+' / b''	error: unknown option or argument '-xdrop_ungap'; use -help for CLI v2 syntax	error: unknown option or argument '-xdrop_ungap'; use -help for CLI v2 syntax
+other	0	-searchsp 1000000	DIFF exit 0/2: stdout line 1: b'TBLASTX 2.17.0+' / b''	error: unknown option or argument '-searchsp'; use -help for CLI v2 syntax	error: unknown option or argument '-searchsp'; use -help for CLI v2 syntax
+other	6	-searchsp 1000000	DIFF exit 0/2: stdout line 1: b'LC738874_100001_110000\tLC738875_120001_130000\t47.872\t188\t98\t0\t8919\t9482\t3288\t385' / b''	error: unknown option or argument '-searchsp'; use -help for CLI v2 syntax	error: unknown option or argument '-searchsp'; use -help for CLI v2 syntax
+other	7	-searchsp 1000000	DIFF exit 0/2: stdout line 1: b'# TBLASTX 2.17.0+' / b''	error: unknown option or argument '-searchsp'; use -help for CLI v2 syntax	error: unknown option or argument '-searchsp'; use -help for CLI v2 syntax
+other	0	-dbsize 1000000	DIFF exit 0/2: stdout line 1: b'TBLASTX 2.17.0+' / b''	error: unknown option or argument '-dbsize'; use -help for CLI v2 syntax	error: unknown option or argument '-dbsize'; use -help for CLI v2 syntax
+other	6	-dbsize 1000000	DIFF exit 0/2: stdout line 1: b'LC738874_100001_110000\tLC738875_120001_130000\t47.872\t188\t98\t0\t8919\t9482\t3288\t385' / b''	error: unknown option or argument '-dbsize'; use -help for CLI v2 syntax	error: unknown option or argument '-dbsize'; use -help for CLI v2 syntax
+other	7	-dbsize 1000000	DIFF exit 0/2: stdout line 1: b'# TBLASTX 2.17.0+' / b''	error: unknown option or argument '-dbsize'; use -help for CLI v2 syntax	error: unknown option or argument '-dbsize'; use -help for CLI v2 syntax
+# program=tblastx cases=641 DIFF=194 arg-error=123 exception-gencode=75 losat-rejects=24 same=219 same-error=3 timeout=3

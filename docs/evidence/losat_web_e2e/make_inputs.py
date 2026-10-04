@@ -23,6 +23,9 @@ Deterministic: the files are cut from committed fixtures, so a rerun writes the 
   of the first query and 300 variants of it (each residue replaced with probability 0.3,
   seeded), as proteins and as nucleotides (one codon per residue): more than 250 subjects
   with hits, for the numbers of descriptions (500) and alignments (250) of outfmt 0.
+- e2e_titles_subject.faa: the first homolog of e2e_protein_subject.faa under protein titles
+  that NCBI's GenerateDefline rewrites (trailing punctuation, double spaces, `. [`, `, [`,
+  ` ,`, `( `, prefixes) and one ending in 60 letters (the CFastaReader title warning).
 
 Usage: make_inputs.py
 """
@@ -87,6 +90,17 @@ def many_inputs() -> None:
         "".join(f">n{i}\n" + "".join(codon.get(c, "NNN") for c in variant()) + "\n" for i in range(300)))
 
 
+TITLES = ("hypothetical protein.", "hypothetical  protein   double  space", "protein. [Homo sapiens]",
+          "protein, [Homo sapiens]", "a ,b ;c", "hyp ( fragment )", "TPA: hyp", "MULTISPECIES: hyp~",
+          "x" + "y" * 60)
+
+
+def titles_input() -> None:
+    residues = (OUT / "e2e_protein_subject.faa").read_text().split(">")[1].split("\n", 1)[1]
+    (OUT / "e2e_titles_subject.faa").write_text(
+        "".join(f">t{i} {title}\n{residues}" for i, title in enumerate(TITLES)))
+
+
 def main() -> None:
     records = [chunk.split("\n", 1)[1] for chunk in (OUT / "tblastx_many_subject.fasta").read_text().split(">")[1:4]]
     for name, deflines in (("punct_hits_subject.fna", DEFLINES), ("punct_hits_standin.fna", STAND_INS)):
@@ -98,6 +112,7 @@ def main() -> None:
     (OUT / "punct_hits_query.faa").write_text(f">pep frame +1 of the many query\n{peptide}\n")
     sweep_inputs()
     many_inputs()
+    titles_input()
 
 
 if __name__ == "__main__":

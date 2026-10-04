@@ -451,6 +451,8 @@ fn pairwise_hits(
                 };
                 let (qseq, sseq) = aligned_sequences(
                     query,
+                    subject.seq(),
+                    &code,
                     &mut translation,
                     hsp.frame,
                     hsp.q_start,
@@ -661,8 +663,25 @@ fn write_pairwise(
 // alnVec->GetWholeAlnSeqString(0,m_QuerySeq);
 // alnVec->GetWholeAlnSeqString(1,m_SubjectSeq);
 // the edit script consumes query and translated subject residues in order.
+// NCBI reference: c++/src/objtools/alnmgr/alnvec.cpp:911-918
+// ```c++
+//     int state = 0;
+//     size_t aa_i = 0;
+//     for (size_t na_i = 0; na_i < na_size; ) {
+//         for (size_t i = 0; i < 3; i++) {
+//             state = tbl.NextCodonState(state, na[na_i++]);
+//         }
+//         aa[aa_i++] = tbl.GetCodonResidue(state);
+//     }
+// ```
+// The subject row is translated again from the nucleotides for the display, with the
+// table of `CTrans_table` (an ambiguous codon is B, Z or J where its residues are D/N, E/Q
+// or I/L; TBLASTX's `display_residue`), not taken from the search's translation.
+#[allow(clippy::too_many_arguments)]
 fn aligned_sequences(
     query: &[u8],
+    subject: &[u8],
+    code: &GeneticCode,
     target: &mut TargetTranslation<'_>,
     frame: i8,
     q_start: i32,
@@ -677,6 +696,9 @@ fn aligned_sequences(
     let mut s = usize::try_from(s_start)?
         .checked_sub(base)
         .context("TBLASTN report translation window starts after HSP")?;
+    let displayed_subject = |s: usize| -> u8 {
+        crate::algorithm::tblastx::report::display_residue(subject, frame, base + s, code)
+    };
     const NCBISTDAA_TO_AA: &[u8; 28] = b"-ABCDEFGHIKLMNPQRSTVWXYZU*OJ";
     let mut query_string = String::new();
     let mut subject_string = String::new();
@@ -722,11 +744,11 @@ fn aligned_sequences(
                         qa
                     };
                     query_string.push(char::from(displayed));
-                    subject_string.push(char::from(
-                        *NCBISTDAA_TO_AA
-                            .get(sa as usize)
-                            .context("invalid TBLASTN subject amino acid")?,
-                    ));
+                    ensure!(
+                        NCBISTDAA_TO_AA.get(sa as usize).is_some(),
+                        "invalid TBLASTN subject amino acid"
+                    );
+                    subject_string.push(char::from(displayed_subject(s)));
                     q += 1;
                     s += 1;
                 }
@@ -735,11 +757,11 @@ fn aligned_sequences(
                         .get(s)
                         .context("TBLASTN report subject offset overflow")?;
                     query_string.push('-');
-                    subject_string.push(char::from(
-                        *NCBISTDAA_TO_AA
-                            .get(sa as usize)
-                            .context("invalid TBLASTN subject amino acid")?,
-                    ));
+                    ensure!(
+                        NCBISTDAA_TO_AA.get(sa as usize).is_some(),
+                        "invalid TBLASTN subject amino acid"
+                    );
+                    subject_string.push(char::from(displayed_subject(s)));
                     s += 1;
                 }
                 GapEditOp::Ins(_) => {

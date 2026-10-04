@@ -101,7 +101,7 @@ fn display_base(base: u8) -> u8 {
 /// The displayed residue of codon `offset` of `frame` (+1..+3, -1..-3) of `sequence`: the
 /// codon's bases read on the frame's strand (the IUPAC complement on the minus strand) and
 /// translated with the display's table (`display_codon`, which merges D/N, E/Q and I/L).
-fn display_residue(sequence: &[u8], frame: i8, offset: usize, code: &GeneticCode) -> u8 {
+pub(crate) fn display_residue(sequence: &[u8], frame: i8, offset: usize, code: &GeneticCode) -> u8 {
     let first = 3 * offset + frame.unsigned_abs() as usize - 1;
     let masks = std::array::from_fn(|i| {
         if frame > 0 {

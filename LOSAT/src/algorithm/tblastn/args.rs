@@ -879,7 +879,10 @@ fn search(
     app::check_protein_query_split(
         "TBLASTN",
         20000,
-        &queries.iter().map(|record| record.seq().len()).collect::<Vec<_>>(),
+        &queries
+            .iter()
+            .map(|record| record.seq().len())
+            .collect::<Vec<_>>(),
         batch_size as usize,
     )?;
     let query_seqs: Vec<_> = queries.iter().map(|record| record.seq().to_vec()).collect();

@@ -323,8 +323,10 @@ fn unknown_option_error(scope: &clap::Command, name: &str, text: &str) -> clap::
     // ```
     // Product scope explicitly refuses unported NCBI capabilities.
     if scope.get_name() == "blastx" && is_unported_blastx_arg(name) {
-        return clap::Error::raw(ErrorKind::InvalidValue,
-            format!("unsupported BLASTX option '-{name}': outside the declared local FASTA scope"));
+        return clap::Error::raw(
+            ErrorKind::InvalidValue,
+            format!("unsupported BLASTX option '-{name}': outside the declared local FASTA scope"),
+        );
     }
     if scope.get_name() == "blastn" && is_unported_blastn_arg(name) {
         return clap::Error::raw(

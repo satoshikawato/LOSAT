@@ -1105,7 +1105,7 @@ fn traceback_tree_hsp(hsp: &GappedHsp, query_length: i32) -> TreeHsp {
 // This internal Stage C list has one protein query context; multi-query
 // context offsets remain a separate Stage C boundary.
 fn purge_traceback_common_endpoints(mut hsps: Vec<TracebackOwnedHsp>) -> Vec<TracebackOwnedHsp> {
-    // NCBI reference: c++/src/algo/blast/core/blast_hits.c:2478-2486
+    // NCBI reference: c++/src/algo/blast/core/blast_hits.c:2478-2487
     // ```c
     //    qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryOffsetCompareHSPs);
     //    i = 0;

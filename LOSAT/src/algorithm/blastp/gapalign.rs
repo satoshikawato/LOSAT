@@ -4309,9 +4309,11 @@ mod tests {
     // extension never reaches.
     #[test]
     fn huge_xdrop_keeps_ncbi_cell_count_and_touches_only_cells_up_to_n() {
-        let encode = |text: &[u8]| -> Vec<u8> { text.iter().map(|&c| aa_char_to_ncbistdaa(c)).collect() };
+        let encode =
+            |text: &[u8]| -> Vec<u8> { text.iter().map(|&c| aa_char_to_ncbistdaa(c)).collect() };
         let query = encode(b"MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ");
-        let subject = encode(b"MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQGGAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQWW");
+        let subject =
+            encode(b"MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQGGAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQWW");
         let huge = 1_000_000_000;
         let run_traceback = |x_drop: i32| {
             let mut scratch = GapAlignScratch::new();

@@ -624,7 +624,9 @@ pub fn check_protein_query_split(
     use crate::algorithm::blastn::query_split::{calculate_num_chunks, SplitSizes};
     let sizes = SplitSizes {
         chunk_size: read_query_split_variable(program, "CHUNK_SIZE")?
-            .map_or(u64::from(default_chunk_size), |value| i64::from(value) as u64),
+            .map_or(u64::from(default_chunk_size), |value| {
+                i64::from(value) as u64
+            }),
         overlap: read_query_split_variable(program, "OVERLAP_CHUNK_SIZE")?.map_or(
             crate::algorithm::blastn::query_split::QUERY_CHUNK_OVERLAP as u64,
             |value| i64::from(value) as u64,
@@ -957,13 +959,17 @@ mod tests {
     // 2 * (20000 - 100); the batches are those of `GetQueryBatchSize` (10000 and 20000).
     #[test]
     fn protein_query_batches_that_ncbi_splits_are_rejected() {
-        if std::env::var_os("CHUNK_SIZE").is_some() || std::env::var_os("OVERLAP_CHUNK_SIZE").is_some() {
+        if std::env::var_os("CHUNK_SIZE").is_some()
+            || std::env::var_os("OVERLAP_CHUNK_SIZE").is_some()
+        {
             return;
         }
         assert!(check_protein_query_split("BLASTP", 10000, &[19_799], 10_000).is_ok());
         let error = check_protein_query_split("BLASTP", 10000, &[19_800], 10_000).unwrap_err();
         assert!(
-            error.to_string().ends_with("is not supported by LOSAT's BLASTP"),
+            error
+                .to_string()
+                .ends_with("is not supported by LOSAT's BLASTP"),
             "{error}"
         );
         // 9000 + 9000 reaches the batch size; the third query is the next batch.

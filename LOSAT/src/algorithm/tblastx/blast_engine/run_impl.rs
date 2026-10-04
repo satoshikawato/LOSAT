@@ -2344,7 +2344,15 @@ fn search_query_batch(
             while let Ok(h) = rx.recv() {
                 all.extend(h);
             }
-            all.retain(|h| h.hit.e_value <= evalue_threshold);
+            // NCBI reference: c++/src/algo/blast/core/blast_hits.c:1988-1996
+            // ```c
+            //    cutoff = hit_options->expect_value;
+            // ...
+            //       if (hsp->evalue > cutoff) {
+            // ```
+            // An HSP is removed when its e-value is greater than the cutoff, so a NaN cutoff
+            // (`-evalue -nan`) keeps every HSP.
+            all.retain(|h| !(h.hit.e_value > evalue_threshold));
             all
         }))
     } else {
@@ -3347,7 +3355,15 @@ fn search_query_batch(
             );
         }
         let prelim_linked_count = prelinked_ungapped_hits.len();
-        prelinked_ungapped_hits.retain(|h| h.e_value <= evalue_threshold);
+        // NCBI reference: c++/src/algo/blast/core/blast_hits.c:1988-1996
+        // ```c
+        //    cutoff = hit_options->expect_value;
+        // ...
+        //       if (hsp->evalue > cutoff) {
+        // ```
+        // An HSP is removed when its e-value is greater than the cutoff, so a NaN cutoff
+        // (`-evalue -nan`) keeps every HSP.
+        prelinked_ungapped_hits.retain(|h| !(h.e_value > evalue_threshold));
         if diag_enabled && prelim_linked_count != prelinked_ungapped_hits.len() {
             eprintln!(
                 "[DEBUG PRELIM_REAP] linked_before={} kept={} filtered_by_prelim_evalue={} threshold={}",
@@ -4114,7 +4130,15 @@ fn search_query_batch(
             for (_, hits) in subject_hit_batches {
                 all.extend(hits);
             }
-            all.retain(|h| h.hit.e_value <= evalue_threshold);
+            // NCBI reference: c++/src/algo/blast/core/blast_hits.c:1988-1996
+            // ```c
+            //    cutoff = hit_options->expect_value;
+            // ...
+            //       if (hsp->evalue > cutoff) {
+            // ```
+            // An HSP is removed when its e-value is greater than the cutoff, so a NaN cutoff
+            // (`-evalue -nan`) keeps every HSP.
+            all.retain(|h| !(h.hit.e_value > evalue_threshold));
             all
         });
     #[cfg(not(all(feature = "parallel", target_arch = "wasm32", feature = "wasm-threads")))]
@@ -4127,7 +4151,15 @@ fn search_query_batch(
         for h in rx {
             all.extend(h);
         }
-        all.retain(|h| h.hit.e_value <= evalue_threshold);
+        // NCBI reference: c++/src/algo/blast/core/blast_hits.c:1988-1996
+        // ```c
+        //    cutoff = hit_options->expect_value;
+        // ...
+        //       if (hsp->evalue > cutoff) {
+        // ```
+        // An HSP is removed when its e-value is greater than the cutoff, so a NaN cutoff
+        // (`-evalue -nan`) keeps every HSP.
+        all.retain(|h| !(h.hit.e_value > evalue_threshold));
         Some(all)
     } else if let Some(state) = single_state {
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1497
@@ -4138,7 +4170,15 @@ fn search_query_batch(
         // }
         // ```
         let mut all = state.hits;
-        all.retain(|h| h.hit.e_value <= evalue_threshold);
+        // NCBI reference: c++/src/algo/blast/core/blast_hits.c:1988-1996
+        // ```c
+        //    cutoff = hit_options->expect_value;
+        // ...
+        //       if (hsp->evalue > cutoff) {
+        // ```
+        // An HSP is removed when its e-value is greater than the cutoff, so a NaN cutoff
+        // (`-evalue -nan`) keeps every HSP.
+        all.retain(|h| !(h.hit.e_value > evalue_threshold));
         Some(all)
     } else {
         None

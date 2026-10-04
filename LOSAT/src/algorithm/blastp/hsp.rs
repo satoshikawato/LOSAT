@@ -532,7 +532,17 @@ pub(crate) fn sort_hsplist_by_score(list: &mut BlastpHspList) {
         index += 1;
     }
     if index < list.hsps.len() - 1 {
-        list.hsps.sort_unstable_by(score_compare_hsps);
+        // NCBI reference: c++/src/algo/blast/core/blast_hits.c:1379-1382
+        // ```c
+        //     if (!Blast_HSPListIsSortedByScore(hsp_list)) {
+        //         qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
+        //               ScoreCompareHSPs);
+        // ```
+        // The pinned NCBI BLAST+ runs on glibc, whose qsort is a stable merge sort.
+        // ScoreCompareHSPs ties HSPs with the same score and ends (other gapped starts
+        // or edit scripts); they keep their order, as the containment test and the
+        // endpoint purge keep the first.
+        list.hsps.sort_by(score_compare_hsps);
     }
 }
 
@@ -553,7 +563,14 @@ fn sort_hsplist_by_evalue(list: &mut BlastpHspList) {
             index += 1;
         }
         if index < list.hsps.len() - 1 {
-            list.hsps.sort_unstable_by(evalue_compare_hsps);
+            // NCBI reference: c++/src/algo/blast/core/blast_hits.c:1453-1454
+            // ```c
+            //       qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
+            //             s_EvalueCompareHSPs);
+            // ```
+            // Stable, as glibc's qsort under the pinned NCBI BLAST+ (ties of
+            // ScoreCompareHSPs keep their order).
+            list.hsps.sort_by(evalue_compare_hsps);
         }
     }
 }
@@ -1684,7 +1701,9 @@ fn purge_hits_for_subject_ex_impl<const TRACK_STATS: bool>(
     // ```c
     // qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryOffsetCompareHSPs);
     // ```
-    hits.sort_unstable_by(hit_query_offset_compare);
+    // Stable, as glibc's qsort under the pinned NCBI BLAST+: HSPs with the same
+    // context, ends and score tie, and the purge keeps the first.
+    hits.sort_by(hit_query_offset_compare);
     let (active_hits, mut start_trimmed_hits, start_stats) =
         purge_sorted_hits_with_common_endpoints::<TRACK_STATS, _, _>(
             hits,
@@ -1716,7 +1735,8 @@ fn purge_hits_for_subject_ex_impl<const TRACK_STATS: bool>(
     // ```c
     // qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryEndCompareHSPs);
     // ```
-    hits.sort_unstable_by(hit_query_end_compare);
+    // Stable, as glibc's qsort under the pinned NCBI BLAST+ (as above).
+    hits.sort_by(hit_query_end_compare);
     let (active_hits, mut end_trimmed_hits, end_stats) =
         purge_sorted_hits_with_common_endpoints::<TRACK_STATS, _, _>(
             hits,

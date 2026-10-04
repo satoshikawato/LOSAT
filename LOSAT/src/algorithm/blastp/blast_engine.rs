@@ -3490,7 +3490,20 @@ fn ncbi_qsort_init_hsps_by_query_offset_score(init_hsps: &mut [InitHSP]) {
     if init_hsps.len() <= 1 {
         return;
     }
-    init_hsps.sort_unstable_by(compare_init_hsps_by_query_offset_score);
+    // NCBI reference: c++/src/algo/blast/core/blast_gapalign.c:3584-3613
+    // ```c
+    //        for (k = num_nodes - 1;k >= 0;k--) {
+    //            ...
+    //            for (j = k + 1;j < num_nodes;j++) {
+    //                ...
+    //                if (new_score > nodes[k].best_score) {
+    //                    nodes[k].best_score = new_score;
+    //                    nodes[k].next = &nodes[j];
+    // ```
+    // Stable, as glibc's qsort under the pinned NCBI BLAST+: ungapped alignments
+    // with the same query start and score tie, and their order decides which one
+    // the chaining links to the other.
+    init_hsps.sort_by(compare_init_hsps_by_query_offset_score);
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:306-309
@@ -3502,7 +3515,9 @@ fn ncbi_qsort_init_hsps_by_score(init_hsps: &mut [InitHSP]) {
     if init_hsps.len() <= 1 {
         return;
     }
-    init_hsps.sort_unstable_by(compare_init_hsps_by_score_ncbi);
+    // Stable, as glibc's qsort under the pinned NCBI BLAST+: score_compare_match
+    // ties ungapped alignments of the same segment from other seeds.
+    init_hsps.sort_by(compare_init_hsps_by_score_ncbi);
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3642-3657

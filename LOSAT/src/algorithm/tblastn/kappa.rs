@@ -244,8 +244,7 @@ pub(super) fn postredo_num_ident(
         alignment.match_start,
         alignment.match_end,
     )?;
-    let subject_start = usize::try_from(alignment.match_start)?
-        .checked_sub(subject_base)
+    let subject_start = super::search_gapped::window_index(alignment.match_start, subject_base)
         .context("TBLASTN identity subject offset before translation range")?;
     Ok(protein_identities_from_edit_ops(
         query_sequence,
@@ -283,8 +282,7 @@ pub(super) fn postredo_converted_stats_with_matrix(
 ) -> Result<(usize, usize, usize, usize, usize, usize)> {
     let hsp = &converted.hsp;
     let (subject, _, subject_base) = target.get(hsp.frame, hsp.s_start, hsp.s_end)?;
-    let subject_start = usize::try_from(hsp.s_start)?
-        .checked_sub(subject_base)
+    let subject_start = super::search_gapped::window_index(hsp.s_start, subject_base)
         .context("TBLASTN positive subject offset before translation range")?;
     let (ident, positive, mismatch, gap_opens, gap_letters) = stats_from_edit_ops_protein(
         query_sequence,

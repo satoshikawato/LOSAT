@@ -437,18 +437,12 @@ impl TblastnArgs {
     }
 }
 
-// NCBI c++/src/algo/blast/blastinput/blast_args.cpp:838-866;
-// core/blast_traceback.c:1481-1501:
-// compo_mode selects ordinary traceback or composition redo.
-// The Stage D port covers only these two choices.
 /// LOSAT's limits, checked where NCBI starts the search: the options that NCBI runs and
 /// LOSAT's TBLASTN does not implement are rejected, and the others select the search.
 fn search_settings(args: &ResolvedTblastnArgs) -> Result<SearchSettings> {
     use crate::blastinput::app::CompositionMode;
-    // NCBI reference: c++/src/algo/blast/core/blast_aalookup.c:1292
-    // ```c
-    //     lookup->threshold = (Int4)(kMatrixScale * opt->threshold);
-    // ```
+    // NCBI's compressed lookup table (blast_aalookup.c, word size 5 and more or
+    // tblastn-fast) is not implemented by LOSAT's TBLASTN.
     if args.compressed_lookup {
         if args.task == "tblastn-fast" {
             anyhow::bail!(
@@ -472,6 +466,18 @@ fn search_settings(args: &ResolvedTblastnArgs) -> Result<SearchSettings> {
             args.max_intron_length
         );
     }
+    // NCBI reference: c++/src/algo/blast/core/blast_traceback.c:1486-1499
+    // ```c
+    //     } else if (ext_params->options->compositionBasedStats > 0 ||
+    //                ext_params->options->eTbackExt == eSmithWatermanTbck) {
+    // ...
+    //         retval =
+    //                 Blast_RedoAlignmentCore_MT(program_number,
+    // ...
+    //     } else {
+    // ```
+    // The composition mode selects the ordinary traceback (mode 0) or the composition
+    // redo; LOSAT's TBLASTN implements modes 0 and 2.
     let composition_mode2 = match args.composition_mode {
         CompositionMode::NoCompositionBasedStats => false,
         CompositionMode::CompositionMatrixAdjust => true,
@@ -488,6 +494,16 @@ fn search_settings(args: &ResolvedTblastnArgs) -> Result<SearchSettings> {
     // NCBI c++/src/algo/blast/api/prelim_stage.cpp:145-147:
     // TBlastThreads the_threads(GetNumberOfThreads());
     crate::utils::threading::validate_threads(args.num_threads)?;
+    // NCBI's tblastn dies of SIGSEGV with an infinite -evalue (+inf, 1e999) when the search
+    // keeps enough HSPs (300 subjects), and runs otherwise; LOSAT cannot tell beforehand, so
+    // it rejects the value (decision D12 of docs/evidence/losat_web_e2e/AUTHORITY.md). A
+    // finite -evalue such as 1e308 runs.
+    if args.evalue.is_infinite() {
+        anyhow::bail!(
+            "an infinite -evalue ({}), with which NCBI BLAST+'s tblastn crashes on some inputs, is not supported by LOSAT's TBLASTN",
+            args.evalue
+        );
+    }
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:43-70 (the
     // preliminary hit list size through NCBI's `int`; `blastn/hsp.rs`)
     // A hit list size whose preliminary size is not positive crashes NCBI.
@@ -717,8 +733,8 @@ fn search_cli(
     }
     crate::blastinput::app::xinclude_check(choice)?;
     subject_checks?;
+    fasta_input::check_protein_sequence_lines_of(&query_bytes, "query", "TBLASTN")?;
     let queries = fasta_input::bio_records_of(&query_bytes, &args.query, "query", "TBLASTN")?;
-    fasta_input::write_protein_title_warnings(&queries, outputs.diagnostics)?;
     fasta_input::check_protein_input_of(&query_bytes, &queries, "query", "TBLASTN")?;
     // NCBI warns about a query without residues ("Sequence contains no data") and fails
     // when no query has any; LOSAT rejects such a query, as BLASTN does.
@@ -788,10 +804,6 @@ pub fn run_local(
             .write_all(b"Warning: [tblastn] Query is Empty!\n")?;
         return Ok(());
     }
-    crate::algorithm::blastn::input::write_protein_title_warnings(
-        query_records,
-        outputs.diagnostics,
-    )?;
     search(&args, resolved, query_records, subject_records, outputs)
 }
 
@@ -956,9 +968,9 @@ fn search(
     // NCBI c++/src/algo/blast/format/blast_format.cpp:1443-1451:
     // if (results.HasWarnings()) ERR_POST(Warning << results.GetWarningStrings());
     // The warnings belong to the result: each query's are written before its report, once
-    // (`QueryWarnings`). A query's O characters (read as X, `report/query_warnings.rs`)
-    // come before its Karlin-Altschul message, on the same line.
-    let query_warning_lines: Vec<Vec<u8>> = queries
+    // (`QueryWarnings`), on one line in NCBI's order (`query_warning`). The reader's
+    // warnings about the titles of a query batch come before the batch's first report.
+    let mut query_warning_lines: Vec<Vec<u8>> = queries
         .iter()
         .zip(&query_validity)
         .enumerate()
@@ -973,6 +985,13 @@ fn search(
             crate::report::query_warnings::query_warning("tblastn", index, query, &messages)
         })
         .collect();
+    crate::report::query_warnings::prepend_batch_title_warnings(
+        &mut query_warning_lines,
+        queries,
+        &query_lengths,
+        batch_size as usize,
+        crate::algorithm::blastn::input::protein_title_warning,
+    );
     render(
         outputs,
         queries,

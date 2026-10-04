@@ -900,8 +900,16 @@ fn merge_subject_chunk_hsps(
 struct TargetFrameTranslation {
     start: usize,
     stop: usize,
-    base: usize,
+    /// The subject position of `sequence[0]`: -1 for the left fence of a window that
+    /// starts at the first residue.
+    base: isize,
     sequence: Vec<u8>,
+}
+
+/// The index in a translated window (`TargetTranslation::get`, whose subject position of the
+/// first byte is `base`) of subject position `position`, or `None` before the window.
+pub(super) fn window_index(position: i32, base: isize) -> Option<usize> {
+    usize::try_from(position as isize - base).ok()
 }
 
 pub(super) struct TargetTranslation<'a> {
@@ -938,7 +946,7 @@ impl<'a> TargetTranslation<'a> {
         frame: i8,
         offset: i32,
         end: i32,
-    ) -> Result<(&[u8], usize, usize)> {
+    ) -> Result<(&[u8], usize, isize)> {
         let context = if frame > 0 { frame - 1 } else { 2 - frame };
         let context = usize::try_from(context).context("invalid subject frame")?;
         if context >= self.frames.len() || frame == 0 {
@@ -978,19 +986,28 @@ impl<'a> TargetTranslation<'a> {
                     .context("missing translated subject frame")?;
                 target.start = start_shift;
                 target.stop = start_shift + translated.aa_len;
-                // NCBI c++/src/algo/blast/core/blast_hits.c:1213-1228:
-                // translations[context][0] = FENCE_SENTRY;
-                // return translations[context] - range[2*context] + 1;
-                // The Rust slice begins at the left fence and `base` restores
-                // NCBI's absolute subject coordinates without allocating the
-                // unused prefix preceding a late partial window.
-                target.base = if offset >= 0 && start_shift > 0 {
-                    start_shift - 1
+                // NCBI reference: c++/src/algo/blast/core/blast_hits.c:1224-1228
+                // ```c
+                //                /* partial translation needs to be fenced */
+                //                if(hsp->subject.offset >= 0) {
+                //                    target_t->translations[context][0] = FENCE_SENTRY;
+                //                    target_t->translations[context][length+1] = FENCE_SENTRY;
+                //                }
+                // ```
+                // NCBI c++/src/algo/blast/core/blast_hits.c:1235:
+                // return target_t->translations[context] - target_t->range[2*context] + 1;
+                // The Rust slice begins at the left fence and `base` restores NCBI's
+                // absolute subject coordinates without allocating the unused prefix
+                // preceding a late partial window. A window from the first residue is
+                // fenced too (its fence is at position -1): a traceback that reaches it
+                // is redone with the full translation.
+                target.base = if offset >= 0 {
+                    start_shift as isize - 1
                 } else {
                     0
                 };
                 target.sequence = Vec::with_capacity(translated.aa_len + 2);
-                if offset >= 0 && start_shift > 0 {
+                if offset >= 0 {
                     target.sequence.push(201);
                 }
                 target
@@ -1462,11 +1479,9 @@ pub(super) fn full_translation_traceback_with_matrix_and_events_with_mask_mode_o
             let (q_start, s_start) = if hit.q_gapped_start == 0 && hit.s_gapped_start == 0 {
                 let q_offset = usize::try_from(hit.q_start)?;
                 let q_end = usize::try_from(hit.q_end)?;
-                let s_offset = usize::try_from(hit.s_start)?
-                    .checked_sub(subject_base)
+                let s_offset = window_index(hit.s_start, subject_base)
                     .context("HSP subject start before translated window")?;
-                let s_end = usize::try_from(hit.s_end)?
-                    .checked_sub(subject_base)
+                let s_end = window_index(hit.s_end, subject_base)
                     .context("HSP subject end before translated window")?;
                 let start = blast_get_offsets_for_gapped_alignment_protein(
                     query_sequence,
@@ -1485,7 +1500,7 @@ pub(super) fn full_translation_traceback_with_matrix_and_events_with_mask_mode_o
                         hit.s_start,
                         hit.s_end,
                         start.map_or(-1, |row| row.0 as i32),
-                        start.map_or(-1, |row| (row.1 + subject_base) as i32),
+                        start.map_or(-1, |row| (row.1 as isize + subject_base) as i32),
                     ));
                 }
                 let Some(start) = start else { continue };
@@ -1493,8 +1508,7 @@ pub(super) fn full_translation_traceback_with_matrix_and_events_with_mask_mode_o
             } else {
                 (
                     usize::try_from(hit.q_gapped_start)?,
-                    usize::try_from(hit.s_gapped_start)?
-                        .checked_sub(subject_base)
+                    window_index(hit.s_gapped_start, subject_base)
                         .context("gapped start before translated window")?,
                 )
             };
@@ -1567,8 +1581,8 @@ pub(super) fn full_translation_traceback_with_matrix_and_events_with_mask_mode_o
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:583-596: observer sees the post-fence updated HSP offsets.
                     query_start,
                     query_stop,
-                    subject_start + subject_base,
-                    subject_stop + subject_base,
+                    (subject_start as isize + subject_base) as usize,
+                    (subject_stop as isize + subject_base) as usize,
                 ));
             }
             if delete_hsp {
@@ -1588,7 +1602,7 @@ pub(super) fn full_translation_traceback_with_matrix_and_events_with_mask_mode_o
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:599: Blast_HSPAdjustSubjectOffset(hsp, start_shift);
                 s_start: alignment.subject_start + i32::try_from(subject_base)?,
                 s_end: alignment.subject_stop + i32::try_from(subject_base)?,
-                s_gapped_start: i32::try_from(s_start + subject_base)?,
+                s_gapped_start: i32::try_from(s_start as isize + subject_base)?,
             };
             tree.add_hsp(
                 traceback_tree_hsp(&saved, query_length),

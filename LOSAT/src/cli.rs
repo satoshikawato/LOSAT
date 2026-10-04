@@ -12,7 +12,7 @@ use clap::{error::ErrorKind, CommandFactory, Parser, Subcommand};
 // ```
 use crate::algorithm::{blastn, blastp, blastx, tblastn, tblastx};
 
-// NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94
+// NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:107,143
 // ```c++
 // const string kArgQuery("query");
 // const string kArgSubject("subject");
@@ -178,7 +178,7 @@ where
     T::try_parse_from(translated)
 }
 
-// NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94
+// NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:107,143
 // ```c++
 // const string kArgWordSize("word_size");
 // const string kArgCompBasedStats("comp_based_stats");
@@ -206,7 +206,7 @@ pub fn render_message(error: &clap::Error) -> String {
         .replace("-V, --version", "--version")
 }
 
-// NCBI reference: c++/src/algo/blast/blastinput/tblastn_args.cpp:64-129
+// NCBI reference: c++/src/algo/blast/blastinput/tblastn_args.cpp:63-110
 // ```c++
 // m_BlastDbArgs.Reset(new CBlastDatabaseArgs);
 // arg.Reset(new CGenericSearchArgs(kQueryIsProtein));
@@ -344,7 +344,7 @@ fn is_unported_blastp_arg(name: &str) -> bool {
     )
 }
 
-// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:78-87
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:78-88
 // ```c++
 // static const char* s_AutoHelpShowAll  = "help-full";
 // static const char* s_AutoHelpXml  = "xmlhelp";
@@ -356,6 +356,7 @@ fn is_unported_blastp_arg(name: &str) -> bool {
 // const char* s_ArgFullVersion     = "-version-full";
 // const char* s_ArgFullVersionXml  = "-version-full-xml";
 // const char* s_ArgFullVersionJson = "-version-full-json";
+// const char* s_ArgDryRun          = "-dryrun";
 // ```
 // The standard options of an NCBI C++ Toolkit application, which NCBI's BLAST+ programs
 // accept without listing them in -help.
@@ -369,6 +370,7 @@ fn is_ncbi_toolkit_arg(name: &str) -> bool {
             | "version-full"
             | "version-full-xml"
             | "version-full-json"
+            | "dryrun"
     )
 }
 

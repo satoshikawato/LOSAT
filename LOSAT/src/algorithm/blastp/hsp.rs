@@ -289,42 +289,6 @@ const COMPO_HEAP_RESIZE_FACTOR: f64 = 1.5;
 // ```
 const COMPO_HEAP_EVALUE_STRETCH: f64 = 5.0;
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:43-70
-// ```c
-// Int4
-// GetPrelimHitlistSize(Int4 hitlist_size, Int4 compositionBasedStats, Boolean gapped_calculation)
-// {
-//     ...
-// }
-// ```
-pub(crate) fn get_prelim_hitlist_size(
-    hitlist_size: usize,
-    composition_based_stats: bool,
-    gapped_calculation: bool,
-) -> usize {
-    let mut prelim_hitlist_size = hitlist_size;
-    let adaptive_cbs = std::env::var_os("ADAPTIVE_CBS").is_some();
-    if composition_based_stats {
-        if adaptive_cbs {
-            if hitlist_size < 1000 {
-                prelim_hitlist_size = std::cmp::max(prelim_hitlist_size + 1000, 1500);
-            } else {
-                prelim_hitlist_size = prelim_hitlist_size.saturating_mul(2).saturating_add(50);
-            }
-        } else if hitlist_size <= 500 {
-            prelim_hitlist_size = 1050;
-        } else {
-            prelim_hitlist_size = prelim_hitlist_size.saturating_mul(2).saturating_add(50);
-        }
-    } else if gapped_calculation {
-        prelim_hitlist_size = std::cmp::min(
-            std::cmp::max(prelim_hitlist_size.saturating_mul(2), 10),
-            prelim_hitlist_size.saturating_add(50),
-        );
-    }
-    prelim_hitlist_size
-}
-
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1389-1403
 // ```c
 // static int s_EvalueComp(double evalue1, double evalue2)

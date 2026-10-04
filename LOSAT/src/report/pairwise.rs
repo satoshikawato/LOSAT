@@ -3803,10 +3803,32 @@ fn write_tblastn_alignment<W: Write>(
         let s_count = spart.iter().filter(|&&c| c != b'-').count();
         let q_end = q_pos + q_count.saturating_sub(1);
         let s_end = s_pos + direction * (3 * s_count as isize - 1);
-        write!(writer, "Query  {}", q_pos)?;
-        write_spaces(writer, width + 2 - digit_count(q_pos))?;
+        // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1605-1627
+        // ```c++
+        //     //not to display start and stop number for empty row
+        //     if ((j > 0 && end == prev_stop)
+        //         || (j == 0 && start == 1 && end == 1)) {
+        //         startLen = 0;
+        //     } else {
+        //         out << start;
+        // ...
+        //      //not to display stop number for empty row in the middle
+        //     if (!(j > 0 && end == prev_stop)
+        // ```
+        // A row of gaps only shows no coordinates (as `write_blastx_alignment`).
+        write!(writer, "Query  ")?;
+        if q_count > 0 {
+            write!(writer, "{q_pos}")?;
+            write_spaces(writer, width + 2 - digit_count(q_pos))?;
+        } else {
+            write_spaces(writer, width + 2)?;
+        }
         writer.write_all(qpart)?;
-        write!(writer, "  {}\n", q_end)?;
+        write!(writer, "  ")?;
+        if q_count > 0 {
+            write!(writer, "{q_end}")?;
+        }
+        writeln!(writer)?;
         write_spaces(writer, 7 + width + 2)?;
         for (&qc, &sc) in qpart.iter().zip(spart) {
             // NCBI c++/src/objtools/align_format/showalign.cpp:2122-2149:
@@ -3823,13 +3845,22 @@ fn write_tblastn_alignment<W: Write>(
             writer.write_all(&[mid])?;
         }
         writeln!(writer)?;
-        write!(writer, "Sbjct  {}", s_pos)?;
-        write_spaces(writer, width + 2 - digit_count(s_pos.unsigned_abs()))?;
+        write!(writer, "Sbjct  ")?;
+        if s_count > 0 {
+            write!(writer, "{s_pos}")?;
+            write_spaces(writer, width + 2 - digit_count(s_pos.unsigned_abs()))?;
+        } else {
+            write_spaces(writer, width + 2)?;
+        }
         writer.write_all(spart)?;
-        write!(writer, "  {}\n", s_end)?;
+        write!(writer, "  ")?;
+        if s_count > 0 {
+            write!(writer, "{s_end}")?;
+        }
         writeln!(writer)?;
-        q_pos = q_end + 1;
-        s_pos = s_end + direction;
+        writeln!(writer)?;
+        q_pos += q_count;
+        s_pos += direction * 3 * s_count as isize;
     }
     Ok(())
 }

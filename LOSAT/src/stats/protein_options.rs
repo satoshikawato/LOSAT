@@ -387,7 +387,7 @@ pub struct ProteinOptionsCheck<'a> {
 /// ```
 pub fn validate_protein_options(check: &ProteinOptionsCheck<'_>) -> anyhow::Result<()> {
     use crate::blastinput::app::options_error;
-    // NCBI reference: c++/src/algo/blast/core/blast_options.c:913-943 (the scoring
+    // NCBI reference: c++/src/algo/blast/core/blast_options.c:910-936 (the scoring
     // check of BLAST_ValidateOptions; blastp and tblastn may use IDENTITY)
     // ```c
     //                 if (options->gapped_calculation && !Blast_ProgramIsRpsBlast(program_number))
@@ -489,7 +489,7 @@ pub fn validate_protein_options(check: &ProteinOptionsCheck<'_>) -> anyhow::Resu
             "Compressed alphabet lookup table requires word size 5, 6 or 7",
         ));
     }
-    // NCBI reference: c++/src/algo/blast/core/blast_options.c:1515-1520 (the hit
+    // NCBI reference: c++/src/algo/blast/core/blast_options.c:1518-1521 (the hit
     // saving check; LOSAT's blastp and tblastn have no cutoff score option)
     // ```c
     // 	if (options->expect_value <= 0.0 && options->cutoff_score <= 0)

@@ -180,7 +180,7 @@ impl KappaResultHitList {
     //         return CRef<CSeq_align>();
     //     }
     // ```
-    // NCBI reference: c++/src/algo/blast/api/blast_seqalign.cpp:1484-1490
+    // NCBI reference: c++/src/algo/blast/api/blast_seqalign.cpp:1485-1490
     // ```c++
     //             seqalign =
     //                 s_BlastHSP2SeqAlign(program, hsp, query_id, subject_id,

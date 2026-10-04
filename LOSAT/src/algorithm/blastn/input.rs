@@ -87,6 +87,17 @@ pub fn check_deflines(bytes: &[u8], role: &str) -> Result<()> {
 
 /// `check_deflines` for the FASTA input of `program` (as named in the message).
 pub fn check_deflines_of(bytes: &[u8], role: &str, program: &str) -> Result<()> {
+    check_deflines_with(bytes, role, program, false)
+}
+
+/// `check_deflines_of` for protein FASTA input: NCBI's protein reader checks the end of a
+/// title for 50 amino-acid letters instead of 20 nucleotides (`write_protein_title_warnings`),
+/// so the white space at the end of a defline matters after 50 letters.
+pub fn check_protein_deflines_of(bytes: &[u8], role: &str, program: &str) -> Result<()> {
+    check_deflines_with(bytes, role, program, true)
+}
+
+fn check_deflines_with(bytes: &[u8], role: &str, program: &str, protein: bool) -> Result<()> {
     let mut record = 0;
     for line in bytes.split(|&byte| byte == b'\n') {
         let Some(defline) = line.strip_prefix(b">") else {
@@ -99,8 +110,10 @@ pub fn check_deflines_of(bytes: &[u8], role: &str, program: &str) -> Result<()> 
         let defline = defline.trim_ascii_end();
         let problem = if defline.first() == Some(&b'?') {
             "starts with '?' (NCBI BLAST+ reads '>?' as a gap in the sequence, and '>?_' as a defline without the prefix)".to_string()
-        } else if raw.len() != defline.len() && ends_with_nucleotides(defline) {
+        } else if raw.len() != defline.len() && !protein && ends_with_nucleotides(defline) {
             "ends with white space after 20 nucleotide letters (NCBI BLAST+'s warning about the letters depends on that white space, which LOSAT's reader drops)".to_string()
+        } else if raw.len() != defline.len() && protein && ends_with_amino_acids(defline) {
+            "ends with white space after 50 amino-acid letters (NCBI BLAST+'s warning about the letters depends on that white space, which LOSAT's reader drops)".to_string()
         } else if defline.is_empty() {
             "is empty".to_string()
         } else if defline.first().is_some_and(u8::is_ascii_whitespace) {
@@ -146,6 +159,82 @@ pub fn check_sequence_lines_of(bytes: &[u8], role: &str, program: &str) -> Resul
             bail!(
                 "{role} record {record} has a non-ASCII byte in a sequence line; NCBI BLAST+ reads it as an invalid residue, which is not supported by LOSAT's {program} (use IUPAC nucleotide letters)"
             );
+        }
+    }
+    Ok(())
+}
+
+/// Whether the text of a defline (after `>`) makes NCBI's protein reader warn that the title
+/// ends with amino acids: it is longer than 50 bytes and its last 50 are ASCII letters
+/// (`write_protein_title_warnings`).
+fn ends_with_amino_acids(text: &[u8]) -> bool {
+    text.len() > 50 && text[text.len() - 50..].iter().all(u8::is_ascii_alphabetic)
+}
+
+/// Rejects a protein sequence line with a byte that NCBI's reader removes with a warning
+/// ("FASTA-Reader: Ignoring invalid residues", or "CFastaReader: Hyphens are invalid" for
+/// `-`): any byte but a letter, `*` and the white space and `;` comment that NCBI skips
+/// without a message. NCBI writes the warning when it reads the file, so LOSAT rejects the
+/// file there (before `Query is Empty!` and the option checks); the bytes NCBI skips
+/// silently are rejected later, with the other deferred checks (`check_protein_input_of`).
+///
+/// NCBI reference: c++/src/objtools/readers/fasta.cpp:920-931
+/// ```c
+///         case '-':
+///             char_type = (
+///                 bHyphensAreGaps ? eCharType_Gap :
+///                 bHyphensIgnoreAndWarn ? eCharType_HyphenToIgnoreAndWarn :
+///                 eCharType_NormalNonGap );
+///             break;
+///         case ';':
+///             char_type = eCharType_Comment;
+///             break;
+///
+///         case '\t': case '\n': case '\v': case '\f': case '\r': case ' ':
+///             continue;
+/// ```
+/// `role` is `query` or `subject`.
+pub fn check_protein_sequence_lines_of(bytes: &[u8], role: &str, program: &str) -> Result<()> {
+    let mut record = 0;
+    for line in bytes.split(|&byte| byte == b'\n') {
+        if line.starts_with(b">") {
+            record += 1;
+            continue;
+        }
+        // NCBI reference: c++/src/objtools/readers/fasta.cpp:376-385
+        // ```c
+        //         CTempString line = NStr::TruncateSpaces_Unsafe(*++GetLineReader());
+        //
+        //         if (line.empty()) {
+        //             continue; // ignore lines containing only whitespace
+        //         }
+        //         c = line[0];
+        //
+        //         if (c == '!'  ||  c == '#' || c == ';') {
+        //             // no content, just a comment or blank line
+        //             continue;
+        // ```
+        let is_space = |byte: &u8| matches!(byte, b'\t' | b'\r' | 0x0b | 0x0c | b' ');
+        let start = line.iter().position(|byte| !is_space(byte));
+        if record == 0 || start.is_none_or(|start| matches!(line[start], b'!' | b'#' | b';')) {
+            continue;
+        }
+        for &byte in line {
+            match byte {
+                b';' => break,
+                b'\t' | b'\r' | 0x0b | 0x0c | b' ' | b'*' => {}
+                byte if byte.is_ascii_alphabetic() => {}
+                byte => {
+                    let shown = if byte.is_ascii_graphic() {
+                        format!("'{}'", byte as char)
+                    } else {
+                        format!("byte 0x{byte:02x}")
+                    };
+                    bail!(
+                        "{role} record {record} has {shown} in a sequence line; NCBI BLAST+ removes it from the protein sequence with a warning, which is not supported by LOSAT's {program} (use letters and '*')"
+                    );
+                }
+            }
         }
     }
     Ok(())
@@ -207,7 +296,7 @@ pub fn write_title_warnings(
 /// NCBI's warning for a protein record whose defline ends with at least 50 ASCII letters,
 /// written when NCBI reads the record (`fAssumeProt`: the nucleotide check is skipped).
 ///
-/// NCBI reference: c++/src/objtools/readers/fasta.cpp:1650-1673
+/// NCBI reference: c++/src/objtools/readers/fasta.cpp:1651-1673
 /// ```c
 ///     if((length > kWarnAminoAcidCharsAtEnd) && !TestFlag(fAssumeNuc)) {
 /// ...
@@ -227,16 +316,22 @@ pub fn write_protein_title_warnings(
     diagnostics: &mut dyn std::io::Write,
 ) -> std::io::Result<()> {
     for record in records {
-        let text = match record.desc() {
-            Some(desc) => format!("{} {desc}", record.id()),
-            None => record.id().to_string(),
-        };
-        let text = text.as_bytes();
-        if text.len() > 50 && text[text.len() - 50..].iter().all(u8::is_ascii_alphabetic) {
-            diagnostics.write_all(b"FASTA-Reader: Title ends with at least 50 valid amino acid characters.  Was the sequence accidentally put in the title line?\n")?;
-        }
+        diagnostics.write_all(protein_title_warning(record))?;
     }
     Ok(())
+}
+
+/// The title warning of one protein record (`write_protein_title_warnings`), or nothing.
+pub fn protein_title_warning(record: &fasta::Record) -> &'static [u8] {
+    let text = match record.desc() {
+        Some(desc) => format!("{} {desc}", record.id()),
+        None => record.id().to_string(),
+    };
+    if ends_with_amino_acids(text.as_bytes()) {
+        b"FASTA-Reader: Title ends with at least 50 valid amino acid characters.  Was the sequence accidentally put in the title line?\n"
+    } else {
+        b""
+    }
 }
 
 /// NCBI's warning for a subject without residues, which it skips when it sets up the
@@ -346,7 +441,7 @@ pub fn check_protein_input_of(
     if is_blank(bytes) {
         return Ok(());
     }
-    check_deflines_of(bytes, role, program)?;
+    check_protein_deflines_of(bytes, role, program)?;
     check_protein_residues_of(records, role, program)
 }
 
@@ -774,10 +869,13 @@ pub fn read_nucleotide_subjects(
     };
     check_residues_of(&subjects, "subject", program)?;
     write_title_warnings(&subjects, &mut std::io::stderr())?;
-    if subject_reading.is_ok() {
-        if subjects.is_empty() {
-            return Err(crate::blastinput::app::empty_subjects_error());
-        }
+    // `bio` reads no record from a file whose first record has an empty defline and no
+    // residues (NCBI reads that record and the rest); the deferred defline check rejects it.
+    if subject_reading.is_ok()
+        && subjects.is_empty()
+        && check_deflines_of(&subject_bytes, "subject", program).is_ok()
+    {
+        return Err(crate::blastinput::app::empty_subjects_error());
     }
     let subject_checks = subject_reading
         .and_then(|()| check_deflines_of(&subject_bytes, "subject", program))
@@ -789,6 +887,61 @@ pub fn read_nucleotide_subjects(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn protein_lines_follow_ncbis_protein_reader() {
+        // NCBI fasta.cpp:376-385,920-931: white space and `;` comments are skipped without
+        // a message; other non-letters are removed with a warning (LOSAT rejects them).
+        for text in [
+            ">p1\nACDE FGH\t*\n; comment 123\n#x 1\n!y\nKLM;9\n",
+            ">p\n\n  \n",
+        ] {
+            assert!(
+                check_protein_sequence_lines_of(text.as_bytes(), "query", "BLASTP").is_ok(),
+                "{text:?}"
+            );
+        }
+        for text in [
+            ">p1\nAC1DE\n",
+            ">p1\nAC-DE\n",
+            ">p1\nACDE\u{a0}\n",
+            ">p1\nAC.DE\n",
+        ] {
+            let error =
+                check_protein_sequence_lines_of(text.as_bytes(), "subject", "TBLASTN").unwrap_err();
+            assert!(
+                format!("{error:#}").contains("not supported by LOSAT's TBLASTN"),
+                "{text:?}"
+            );
+        }
+        // NCBI fasta.cpp:1651-1673: the 50-letter check reads the trailing white space.
+        let letters = "A".repeat(50);
+        assert!(check_protein_deflines_of(
+            format!(">id {letters}\nAC\n").as_bytes(),
+            "query",
+            "BLASTP"
+        )
+        .is_ok());
+        assert!(check_protein_deflines_of(
+            format!(">id {letters} \nAC\n").as_bytes(),
+            "query",
+            "BLASTP"
+        )
+        .is_err());
+        // The nucleotide 20-letter check does not apply to protein deflines.
+        assert!(check_protein_deflines_of(
+            format!(">id {} \nAC\n", "ACGT".repeat(6)).as_bytes(),
+            "query",
+            "BLASTP"
+        )
+        .is_ok());
+        assert!(check_deflines_of(
+            format!(">id {} \nAC\n", "ACGT".repeat(6)).as_bytes(),
+            "query",
+            "BLASTN"
+        )
+        .is_err());
+    }
 
     fn records(text: &str) -> Vec<fasta::Record> {
         fasta::Reader::new(text.as_bytes())

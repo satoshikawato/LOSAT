@@ -790,6 +790,11 @@ fn unported_ncbi_options_are_rejected_explicitly() {
         ("blastp", &["-xmlhelp"]),
         ("tblastn", &["-version-full"]),
         ("tblastx", &["-help-full"]),
+        // NCBI ncbiargs.cpp:88: -dryrun, which NCBI accepts without searching.
+        ("blastp", &["-dryrun"]),
+        ("tblastn", &["-dryrun"]),
+        ("tblastx", &["-dryrun"]),
+        ("blastn", &["-dryrun"]),
     ] {
         let error = LOSAT::cli::render_message(&parse(program, words).unwrap_err());
         assert!(
@@ -800,4 +805,47 @@ fn unported_ncbi_options_are_rejected_explicitly() {
             "{program} {words:?}: {error}"
         );
     }
+}
+
+#[test]
+fn values_on_which_ncbi_crashes_are_rejected_with_the_options() {
+    // Decision D12 (AUTHORITY.md): an infinite -evalue crashes NCBI's blastp and tblastn on
+    // some inputs; blast_hits.c:43-70: a -max_target_seqs whose preliminary size wraps to a
+    // negative int crashes NCBI.
+    let blastp = |words: &[&str]| {
+        let Commands::Blastp(args) = parse("blastp", words).unwrap().command else {
+            unreachable!("blastp")
+        };
+        LOSAT::algorithm::blastp::blast_engine::check_options(&args)
+    };
+    let tblastn = |words: &[&str]| {
+        let Commands::Tblastn(args) = parse("tblastn", words).unwrap().command else {
+            unreachable!("tblastn")
+        };
+        LOSAT::algorithm::tblastn::check_options(&args)
+    };
+    for words in [
+        &["-evalue", "+inf"][..],
+        &["-evalue", "1e999"],
+        &["-max_target_seqs", "1073741799"],
+    ] {
+        let error = format!("{:#}", blastp(words).unwrap_err());
+        assert!(
+            error.contains("not supported by LOSAT's BLASTP"),
+            "{words:?}: {error}"
+        );
+    }
+    for words in [
+        &["-evalue", "1e308"][..],
+        &["-max_target_seqs", "2147483647"],
+        &["-max_target_seqs", "1073741798"],
+    ] {
+        blastp(words).unwrap();
+    }
+    let error = format!("{:#}", tblastn(&["-evalue", "+inf"]).unwrap_err());
+    assert!(
+        error.contains("not supported by LOSAT's TBLASTN"),
+        "{error}"
+    );
+    tblastn(&["-evalue", "1e308"]).unwrap();
 }

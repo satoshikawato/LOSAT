@@ -88,7 +88,7 @@ impl BlastpCompBasedStats {
     }
 }
 
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:845-886
+// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:838-886
 // ```c
 // switch (comp_stat_string[0]) {
 // ...

@@ -283,6 +283,78 @@ pub fn ncbi_string_to_double(value: &str) -> Result<f64, NcbiDoubleError> {
         .map_err(|_| NcbiDoubleError::Unsupported)
 }
 
+/// Whether glibc's `strtod` reads all of `value` (the C locale), as `NStr::StringToDouble`
+/// with its default flags requires (the SEG locut and hicut, blast_args.cpp:405-406; an
+/// argument of type double also tries NCBI's own reader, `fDecimalPosixOrLocal`, which
+/// reads more, such as `1e`): NCBI fails the conversion of a value that it does not end at.
+/// The forms are a sign, then a decimal number (digits with one optional point, at least
+/// one digit, and an optional exponent with digits), a hexadecimal number (`0x`, hex digits
+/// with one optional point, at least one digit, and an optional binary exponent `p` with
+/// digits), `inf`, `infinity`, `nan` or `nan(` letters, digits and `_` `)`, ignoring case.
+///
+/// NCBI reference: c++/src/corelib/ncbistr.cpp:1332-1343,1367-1374
+/// ```c
+///         n = strtod(begptr, &endptr);
+/// ...
+///     if ( !endptr  ||  endptr == begptr ) {
+///         S2N_CONVERT_ERROR(double, kEmptyStr, EINVAL, s_DiffPtr(endptr, begptr) + pos);
+///     }
+/// ...
+///     pos += s_DiffPtr(endptr, begptr);
+/// ...
+///     CHECK_ENDPTR(double);
+/// ```
+pub fn strtod_reads_whole(value: &str) -> bool {
+    let rest = value.strip_prefix(['+', '-']).unwrap_or(value).as_bytes();
+    let lower = rest.to_ascii_lowercase();
+    if lower == b"inf" || lower == b"infinity" || lower == b"nan" {
+        return true;
+    }
+    if let Some(inner) = lower
+        .strip_prefix(b"nan(")
+        .and_then(|r| r.strip_suffix(b")"))
+    {
+        return inner
+            .iter()
+            .all(|&b| b.is_ascii_alphanumeric() || b == b'_');
+    }
+    let (digits, exponent, hex): (fn(&u8) -> bool, u8, bool) = match lower.strip_prefix(b"0x") {
+        Some(_) => (u8::is_ascii_hexdigit, b'p', true),
+        None => (u8::is_ascii_digit, b'e', false),
+    };
+    let mantissa_and_exponent = if hex { &lower[2..] } else { &lower[..] };
+    let mut index = 0;
+    let mut seen_digit = false;
+    let mut seen_point = false;
+    while let Some(byte) = mantissa_and_exponent.get(index) {
+        if digits(byte) {
+            seen_digit = true;
+        } else if *byte == b'.' && !seen_point {
+            seen_point = true;
+        } else {
+            break;
+        }
+        index += 1;
+    }
+    if !seen_digit {
+        return false;
+    }
+    let tail = &mantissa_and_exponent[index..];
+    if tail.is_empty() {
+        return true;
+    }
+    match tail.split_first() {
+        Some((&mark, power)) if mark == exponent => {
+            let power = power
+                .strip_prefix(b"+")
+                .or_else(|| power.strip_prefix(b"-"))
+                .unwrap_or(power);
+            !power.is_empty() && power.iter().all(u8::is_ascii_digit)
+        }
+        _ => false,
+    }
+}
+
 /// An integer argument with a constraint: NCBI's constraint reads the value again with
 /// `NStr::StringToDouble`, which does not read a `0x` prefix without digits (the only form
 /// that `ncbi_integer` reads and `strtod` does not end at), so the value is illegal.
@@ -547,7 +619,7 @@ pub fn genetic_code(value: &str) -> Result<u8, String> {
     Ok(n)
 }
 
-// NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-50
+// NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-51
 // ```c++
 // const string kArgQuery("query");
 // const string kArgSubject("subject");
@@ -996,6 +1068,35 @@ mod tests {
             assert!(ncbi_double(value, "BLASTN")
                 .unwrap_err()
                 .contains("not supported by LOSAT's BLASTN"));
+        }
+    }
+
+    #[test]
+    fn strtod_reads_whole_follows_glibc() {
+        for value in [
+            "1",
+            "+1",
+            "-.5",
+            "5.",
+            "1e5",
+            "1E-5",
+            "0x10",
+            "0X1p3",
+            "0x.8p-1",
+            "0x1.",
+            "inf",
+            "+INFINITY",
+            "-nan",
+            "nan(x_1)",
+            "1e400",
+        ] {
+            assert!(strtod_reads_whole(value), "{value}");
+        }
+        for value in [
+            "1e", "1e+", "2.5x", "2,2", ".", "+.", ".e1", "0x", "0x.", "0x1p", "1_0", "--5",
+            "2.5.5", "nan(", "nan(-)", "infx", "",
+        ] {
+            assert!(!strtod_reads_whole(value), "{value}");
         }
     }
 }

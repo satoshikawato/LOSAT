@@ -873,7 +873,9 @@ fn check_losat_limits(args: &TblastxArgs) -> Result<()> {
 /// NCBI's processing of the options and LOSAT's limits.
 pub fn check_options(args: &TblastxArgs) -> Result<()> {
     check_ncbi_options(args, &mut std::io::sink())?;
-    check_losat_limits(args)
+    check_losat_limits(args)?;
+    // The host validates the argv it runs, with its `-num_threads` (docs/web/abi_v2.md).
+    crate::utils::threading::validate_threads(args.num_threads)
 }
 
 /// The part of `run` after the output is opened: the options, `Query is Empty!`, the
@@ -904,7 +906,14 @@ fn search_cli(
     // 		return false;
     // ```
     // The position is taken on the opened file, before it is read (BLASTN's `search_cli`).
-    let seekable = std::io::Seek::stream_position(&mut query_file).is_ok();
+    // When the subjects were read from standard input too, `cin` has reached its end, so
+    // NCBI gets no position for the query either.
+    let seekable = !(args.query.as_os_str() == "-"
+        && args
+            .subject
+            .as_deref()
+            .is_some_and(|path| path.as_os_str() == "-"))
+        && std::io::Seek::stream_position(&mut query_file).is_ok();
     let query_bytes = fasta_input::read_fasta_bytes(&mut query_file, &args.query, "query")?;
     drop(query_file);
     if fasta_input::is_blank(&query_bytes) {
@@ -2017,6 +2026,7 @@ fn search_query_batch(
         .last()
         .map(|c| c.frame_base + c.aa_len as i32)
         .unwrap_or(0);
+    crate::blastinput::app::check_diag_table_window(query_length, window, "TBLASTX")?;
     let mut diag_array_size: i32 = 1;
     while diag_array_size < (query_length + window) {
         diag_array_size <<= 1;

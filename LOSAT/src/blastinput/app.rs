@@ -414,16 +414,19 @@ pub fn parse_seg_option(value: &str, program: &str) -> anyhow::Result<SegSpec> {
     let window = tokens[0].parse::<i32>().map_err(|_| invalid())?;
     let mut cuts = [0.0; 2];
     for (cut, token) in cuts.iter_mut().zip(&tokens[1..]) {
-        *cut = match crate::blastinput::value_parsers::ncbi_string_to_double(token) {
+        use crate::blastinput::value_parsers::{
+            ncbi_string_to_double, strtod_reads_whole, NcbiDoubleError,
+        };
+        // NCBI reads the values with `strtod` and fails on one that it does not read to the
+        // end (`strtod_reads_whole`); LOSAT reads the finite decimal ones.
+        *cut = match ncbi_string_to_double(token) {
             Ok(number) if number.is_finite() => number,
-            Ok(_) | Err(crate::blastinput::value_parsers::NcbiDoubleError::Unsupported) => {
+            Ok(_) | Err(NcbiDoubleError::Unsupported) if strtod_reads_whole(token) => {
                 anyhow::bail!(
                     "the SEG locut or hicut {token:?} (not a finite decimal number) is not supported by LOSAT's {program}"
                 )
             }
-            Err(crate::blastinput::value_parsers::NcbiDoubleError::Invalid) => {
-                return Err(invalid())
-            }
+            Ok(_) | Err(_) => return Err(invalid()),
         };
     }
     Ok(SegSpec::WindowLocutHicut {
@@ -635,7 +638,7 @@ pub fn query_batch_size(program: &str, default: u32) -> anyhow::Result<u32> {
         std::env::var_os("BATCH_SIZE").as_deref(),
     ) {
         Ok(0) if std::env::var_os("BATCH_SIZE").is_none() => Ok(default),
-        // `CBlastInput` stores the `int` as a `TSeqPos` (blast_input.hpp:258-259).
+        // `CBlastInput` stores the `int` as a `TSeqPos` (blast_input.hpp:313,364).
         Ok(size) => Ok(size as u32),
         Err(value) => Err(anyhow::anyhow!(
             "the BATCH_SIZE value '{value}' is not an integer; NCBI stops with a \
@@ -661,9 +664,83 @@ pub fn check_old_fsc(program: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// The window of the two-hit word finder where NCBI's diagonal table never gets a length.
+///
+/// NCBI doubles the length of the table from 1 while it is less than the query length plus
+/// the window, in `Int4`. When the sum is over 2^30 the length reaches 2^31, wraps to
+/// `INT_MIN` and then 0, and the loop never ends; when the sum itself passes 2^31 − 1 it
+/// wraps negative, the table gets one cell, and the later `Int4` offsets wrap (NCBI reports
+/// no hits). Neither has a use, and LOSAT rejects both (decisions D8 and D11 of
+/// docs/evidence/losat_web_e2e/AUTHORITY.md). `query_length` is the length of the
+/// concatenated query of the batch (`BLAST_SequenceBlk->length`).
+///
+/// NCBI reference: c++/src/algo/blast/core/blast_extend.c:52-57
+/// ```c
+///                 diag_array_length = 1;
+///                 /* What power of 2 is just longer than the query? */
+///                 while (diag_array_length < (qlen+window_size))
+///                 {
+///                         diag_array_length = diag_array_length << 1;
+///                 }
+/// ```
+pub fn check_diag_table_window(
+    query_length: i32,
+    window: i32,
+    program: &str,
+) -> anyhow::Result<()> {
+    if i64::from(query_length) + i64::from(window) > 1 << 30 {
+        anyhow::bail!(
+            "a -window_size of {window} with a query of {query_length} letters (their sum is over 2^30, where NCBI BLAST+ never ends or wraps a 32-bit integer) is not supported by LOSAT's {program}"
+        );
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn diag_table_windows_over_2_to_the_30_are_rejected() {
+        // NCBI blast_extend.c:52-57: the doubling loop ends only when qlen + window <= 2^30.
+        assert!(check_diag_table_window(1000, (1 << 30) - 1000, "BLASTP").is_ok());
+        for window in [(1 << 30) - 999, i32::MAX] {
+            let error = format!(
+                "{:#}",
+                check_diag_table_window(1000, window, "TBLASTX").unwrap_err()
+            );
+            assert!(
+                error.contains("not supported by LOSAT's TBLASTX"),
+                "{window}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn seg_values_that_strtod_does_not_read_are_ncbi_errors() {
+        // NCBI blast_args.cpp:405-406,423-428 (StringToDouble with default flags).
+        for value in [
+            "12 2.5x 2.5",
+            "12 2,2 2.5",
+            "12 1e 2.5",
+            "12 0x 2.5",
+            "12 . 2.5",
+        ] {
+            let error = format!("{:#}", parse_seg_option(value, "TBLASTX").unwrap_err());
+            assert!(
+                error.contains("Invalid input for filtering parameters"),
+                "{value}: {error}"
+            );
+        }
+        for value in ["12 0x10 2.5", "12 +inf 2.5", "12 1e400 2.5", "12 2.2 -nan"] {
+            let error = format!("{:#}", parse_seg_option(value, "TBLASTX").unwrap_err());
+            assert!(
+                error.contains("not supported by LOSAT's TBLASTX"),
+                "{value}: {error}"
+            );
+        }
+        assert!(parse_seg_option("12 2.2 2.5", "TBLASTX").is_ok());
+    }
 
     fn message(error: anyhow::Error) -> String {
         match error.downcast::<NativeError>() {

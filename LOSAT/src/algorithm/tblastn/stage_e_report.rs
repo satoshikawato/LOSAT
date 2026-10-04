@@ -620,7 +620,7 @@ fn write_pairwise(
         ),
         database_num_sequences: subject_records.len(),
         database_total_letters: total_nt,
-        // NCBI blast_format.cpp:2266: options.GetMatrixName(), as typed.
+        // NCBI blast_format.cpp:2267: options.GetMatrixName(), as typed.
         matrix_name: matrix_name.to_string(),
         gap_open: scoring.gap_open,
         gap_extend: scoring.gap_extend,
@@ -717,11 +717,15 @@ fn aligned_sequences(
     ensure!(!script.is_empty(), "TBLASTN report HSP has no edit script");
     let (translated, _, base) = target.get(frame, s_start, s_end)?;
     let mut q = usize::try_from(q_start)?;
-    let mut s = usize::try_from(s_start)?
-        .checked_sub(base)
+    let mut s = super::search_gapped::window_index(s_start, base)
         .context("TBLASTN report translation window starts after HSP")?;
     let displayed_subject = |s: usize| -> u8 {
-        crate::algorithm::tblastx::report::display_residue(subject, frame, base + s, code)
+        crate::algorithm::tblastx::report::display_residue(
+            subject,
+            frame,
+            (base + s as isize) as usize,
+            code,
+        )
     };
     const NCBISTDAA_TO_AA: &[u8; 28] = b"-ABCDEFGHIKLMNPQRSTVWXYZU*OJ";
     let mut query_string = String::new();

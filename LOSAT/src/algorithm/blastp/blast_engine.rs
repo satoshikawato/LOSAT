@@ -6852,6 +6852,10 @@ fn run_resolved_in_pool(
                     window_size: args.window_size as i32,
                     gapped_karlin: gapped_params,
                     gumbel: gapped_gumbel,
+                    // NCBI blast_args.cpp:2910-2927: 500 descriptions and 250 alignments,
+                    // or -max_target_seqs of each when it is given.
+                    num_descriptions: args.max_target_seqs_given.unwrap_or(500),
+                    num_alignments: args.max_target_seqs_given.unwrap_or(250),
                 };
                 let pairwise_hits = pairwise_hits
                     .as_ref()

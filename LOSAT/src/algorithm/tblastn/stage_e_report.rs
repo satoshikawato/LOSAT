@@ -59,6 +59,7 @@ pub(super) fn render(
     query_batch_skipped: &[bool],
     scoring: LocalStageDScoring,
     matrix_name: &str,
+    max_target_seqs_given: Option<usize>,
     genetic_code: u8,
     seg: Option<&SegParams>,
     mask_lowercase: bool,
@@ -131,6 +132,7 @@ pub(super) fn render(
                 query_batch_skipped,
                 scoring,
                 matrix_name,
+                max_target_seqs_given,
                 probe.as_mut(),
             )?,
             _ => bail!("unsupported TBLASTN outfmt {}", format.outfmt),
@@ -370,6 +372,7 @@ mod tests {
                 &vec![false; queries.len()],
                 LocalStageDScoring::default(),
                 "BLOSUM62",
+                None,
                 1,
                 Some(&seg),
                 false,
@@ -569,6 +572,7 @@ fn write_pairwise(
     query_batch_skipped: &[bool],
     scoring: LocalStageDScoring,
     matrix_name: &str,
+    max_target_seqs_given: Option<usize>,
     probe: Option<&mut FormatProbe<'_>>,
 ) -> Result<()> {
     ensure!(
@@ -602,6 +606,18 @@ fn write_pairwise(
         window_size: scoring.window,
         gapped_karlin: lookup_protein_params(&spec),
         gumbel,
+        // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2913-2927
+        // ```c
+        //     m_NumDescriptions = m_DfltNumDescriptions;
+        //     m_NumAlignments = m_DfltNumAlignments;
+        // ...
+        //     if (args.Exist(kArgMaxTargetSequences) && args[kArgMaxTargetSequences]) {
+        //         m_NumDescriptions = args[kArgMaxTargetSequences].AsInteger();
+        //         m_NumAlignments = args[kArgMaxTargetSequences].AsInteger();
+        // ```
+        // The defaults are 500 descriptions and 250 alignments (format_flags.cpp:219,221).
+        num_descriptions: max_target_seqs_given.unwrap_or(500),
+        num_alignments: max_target_seqs_given.unwrap_or(250),
     };
     let queries: Vec<_> = query_records
         .iter()

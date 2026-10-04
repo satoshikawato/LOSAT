@@ -1552,6 +1552,9 @@ fn pairwise_metadata(
         gapped_karlin: lookup_protein_params(&scoring),
         gumbel: lookup_protein_gumbel_params(&scoring, total as i64)
             .expect("pinned BLOSUM62 gap11/1 Gumbel block"),
+        // BLASTX writes its own description table and alignments (`write_blastx_report`).
+        num_descriptions: usize::MAX,
+        num_alignments: usize::MAX,
     }
 }
 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:254-254

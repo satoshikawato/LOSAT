@@ -172,6 +172,9 @@ pub struct ResolvedTblastnArgs {
     pub threshold: f64,
     pub window_size: i32,
     pub hitlist_size: usize,
+    /// The -max_target_seqs value, which also sets the numbers of descriptions and
+    /// alignments of the pairwise report (500 and 250 when it is not given).
+    pub max_target_seqs_given: Option<usize>,
     pub composition_mode: crate::blastinput::app::CompositionMode,
     /// The `-comp_based_stats` value as typed.
     pub comp_based_stats: String,
@@ -427,6 +430,7 @@ impl TblastnArgs {
             threshold,
             window_size,
             hitlist_size: self.max_target_seqs.unwrap_or(500),
+            max_target_seqs_given: self.max_target_seqs,
             composition_mode,
             comp_based_stats: self.comp_based_stats.clone(),
             num_threads: self.num_threads,
@@ -953,6 +957,7 @@ fn search(
         &query_batch_skipped,
         scoring,
         &resolved.matrix_name,
+        resolved.max_target_seqs_given,
         resolved.db_gencode,
         seg.as_ref(),
         resolved.lcase_masking,

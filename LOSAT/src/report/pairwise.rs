@@ -175,6 +175,10 @@ pub struct BlastpPairwiseReport {
     pub window_size: i32,
     pub gapped_karlin: KarlinParams,
     pub gumbel: BlastGumbelBlk,
+    /// Subjects in the description table and with alignments, per query (NCBI's
+    /// `m_NumDescriptions` and `m_NumAlignments`).
+    pub num_descriptions: usize,
+    pub num_alignments: usize,
 }
 
 // =============================================================================
@@ -1602,12 +1606,22 @@ pub fn write_blastp_pairwise_report<W: Write>(
                 .push(hsp_index);
         }
 
-        write_subject_summary_table(writer, &subject_order, &subject_hits, subject_ids)?;
+        // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:606-611
+        // ```c++
+        //     CShowBlastDefline showdef(*aln_set, *m_Scope,
+        //                               defline_length == -1 ? kFormatLineLength:defline_length,
+        //                               m_NumSummary + additional);
+        // ```
+        let described = &subject_order[..subject_order.len().min(report.num_descriptions)];
+        write_subject_summary_table(writer, described, &subject_hits, subject_ids)?;
         // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:1520-1589
         // x_DisplayDeflines(aln_set, ...); ... display.DisplaySeqalign(m_Outfile);
         writeln!(writer)?;
 
-        for s_idx in subject_order {
+        // NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:1014-1040
+        // (PruneSeqalign keeps the alignments of the first `m_NumAlignments` subjects).
+        let aligned = &subject_order[..subject_order.len().min(report.num_alignments)];
+        for &s_idx in aligned {
             let subject_id = subject_ids
                 .get(s_idx as usize)
                 .map(|id| id.as_ref())
@@ -3491,18 +3505,22 @@ pub fn write_tblastn_pairwise_report<W: Write>(
         // ```
         // The table of every program follows `x_InitDeflineTable`
         // (`write_blastn_description_table`): the subject's highest bit score and that HSP's
-        // E-value, and the title of the subject (`CDeflineGenerator`). TBLASTN keeps every
-        // subject of its hit list in the table (500 at most, the descriptions shown).
+        // E-value, and the title of the subject (`CDeflineGenerator`), for the first
+        // `m_NumDescriptions` subjects.
+        let described = &subject_order[..subject_order.len().min(report.num_descriptions)];
         write_blastn_description_table(
             &mut writer,
-            &subject_order,
-            true,
+            described,
+            subject_order.len() <= report.num_descriptions,
             &subject_hits,
             subject_ids,
             false,
         )?;
         writeln!(writer)?;
-        for s_idx in subject_order {
+        // NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:1014-1040
+        // (PruneSeqalign keeps the alignments of the first `m_NumAlignments` subjects).
+        let aligned = &subject_order[..subject_order.len().min(report.num_alignments)];
+        for &s_idx in aligned {
             let shits = &subject_hits[&s_idx];
             let first = shits[0];
             // NCBI reference: c++/src/objtools/align_format/showalign.cpp:3613-3632

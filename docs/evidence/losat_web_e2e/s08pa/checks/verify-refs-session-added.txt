@@ -1,0 +1,4 @@
+LOSAT/src/cli.rs:15 src/algo/blast/blastinput/cmdline_flags.cpp:107-143: 3 line(s) not found, e.g. 'const string kArgQuery("query");'
+LOSAT/src/cli.rs:172 src/algo/blast/blastinput/tblastn_args.cpp:63-110: 1 line(s) not found, e.g. 'm_PsiBlastArgs.Reset(new CPsiBlastArgs(CPsiBlastArgs::eNucleotideDb));'
+# problems on lines added in the session: 2
+exit 1

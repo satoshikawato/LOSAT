@@ -1,0 +1,227 @@
+{
+  "binaries": {
+    "before": [
+      "a3e54fcf5c8a2a333a555049f5ac842d35a2d66a969ef0cee09c88d9bbc86f84",
+      "a3e54fcf5c8a2a333a555049f5ac842d35a2d66a969ef0cee09c88d9bbc86f84",
+      "a3e54fcf5c8a2a333a555049f5ac842d35a2d66a969ef0cee09c88d9bbc86f84"
+    ],
+    "after": [
+      "6f5e268d0765ee649f131b1f888a8bb5c77656f9151d8774d7caea0ff6983389",
+      "6f5e268d0765ee649f131b1f888a8bb5c77656f9151d8774d7caea0ff6983389",
+      "6f5e268d0765ee649f131b1f888a8bb5c77656f9151d8774d7caea0ff6983389"
+    ]
+  },
+  "repeat": 3,
+  "started_at": "2026-10-04T07:51:21+00:00",
+  "cases": [
+    {
+      "case": "blastp",
+      "mode": "native",
+      "threads": 1,
+      "argv": [
+        "blastp",
+        "-query",
+        "/home/kawato/.cache/losat-web-gui-target/s08pa/head-src/LOSAT/tests/fasta/SicyWSV.faa",
+        "-subject",
+        "/home/kawato/.cache/losat-web-gui-target/s08pa/head-src/LOSAT/tests/fasta/PajaWSV.faa",
+        "-max_hsps",
+        "1",
+        "-outfmt",
+        "6",
+        "-num_threads",
+        "1",
+        "-out",
+        "/tmp/tmpnsx0_rsx/blastp.native.after.out"
+      ],
+      "before": {
+        "samples_s": [
+          0.5290937339996162,
+          0.5410751370000071,
+          0.5105802819998644
+        ],
+        "median_s": 0.5290937339996162,
+        "min_s": 0.5105802819998644,
+        "max_s": 0.5410751370000071,
+        "output_sha256": "fd4b010800e32ce6c823cb38b42a10b7845f3342edae892acccc8f554f9edf34"
+      },
+      "after": {
+        "samples_s": [
+          0.5483427640010632,
+          0.5350099329989462,
+          0.5042952970015904
+        ],
+        "median_s": 0.5350099329989462,
+        "min_s": 0.5042952970015904,
+        "max_s": 0.5483427640010632,
+        "output_sha256": "fd4b010800e32ce6c823cb38b42a10b7845f3342edae892acccc8f554f9edf34"
+      }
+    },
+    {
+      "case": "blastp-fmt0",
+      "mode": "native",
+      "threads": 1,
+      "argv": [
+        "blastp",
+        "-query",
+        "/home/kawato/.cache/losat-web-gui-target/s08pa/head-src/LOSAT/tests/fasta/SicyWSV.faa",
+        "-subject",
+        "/home/kawato/.cache/losat-web-gui-target/s08pa/head-src/LOSAT/tests/fasta/PajaWSV.faa",
+        "-max_hsps",
+        "1",
+        "-outfmt",
+        "0",
+        "-num_threads",
+        "1",
+        "-out",
+        "/tmp/tmpnsx0_rsx/blastp-fmt0.native.after.out"
+      ],
+      "before": {
+        "samples_s": [
+          0.49468993700065766,
+          0.494290369000737,
+          0.4949493399999483
+        ],
+        "median_s": 0.49468993700065766,
+        "min_s": 0.494290369000737,
+        "max_s": 0.4949493399999483,
+        "output_sha256": "4007767ebec0547213df345e6d1ead9272d34ed84959aaed483516eb1cb63a7e"
+      },
+      "after": {
+        "samples_s": [
+          0.504695425999671,
+          0.5005129790006322,
+          0.5042685810003604
+        ],
+        "median_s": 0.5042685810003604,
+        "min_s": 0.5005129790006322,
+        "max_s": 0.504695425999671,
+        "output_sha256": "4007767ebec0547213df345e6d1ead9272d34ed84959aaed483516eb1cb63a7e"
+      }
+    },
+    {
+      "case": "tblastn",
+      "mode": "native",
+      "threads": 1,
+      "argv": [
+        "tblastn",
+        "-task",
+        "tblastn",
+        "-query",
+        "/home/kawato/.cache/losat-web-gui-target/s08pa/head-src/docs/evidence/tlosan_stage_g/benchmark/first_AvCLPV_protein.faa",
+        "-subject",
+        "/home/kawato/.cache/losat-web-gui-target/s08pa/head-src/LOSAT/tests/fasta/AvCLPV.fasta",
+        "-outfmt",
+        "6",
+        "-num_threads",
+        "1",
+        "-out",
+        "/tmp/tmpnsx0_rsx/tblastn.native.after.out"
+      ],
+      "before": {
+        "samples_s": [
+          0.043999637999149854,
+          0.04264757899909455,
+          0.04210988699924201
+        ],
+        "median_s": 0.04264757899909455,
+        "min_s": 0.04210988699924201,
+        "max_s": 0.043999637999149854,
+        "output_sha256": "48483fc59eb06f6bd87e733c22896763e32a2a80027a0e5e5cdf0119deb30f52"
+      },
+      "after": {
+        "samples_s": [
+          0.042506723999395035,
+          0.04263779900065856,
+          0.04279416299868899
+        ],
+        "median_s": 0.04263779900065856,
+        "min_s": 0.042506723999395035,
+        "max_s": 0.04279416299868899,
+        "output_sha256": "48483fc59eb06f6bd87e733c22896763e32a2a80027a0e5e5cdf0119deb30f52"
+      }
+    },
+    {
+      "case": "tblastn-fmt0",
+      "mode": "native",
+      "threads": 1,
+      "argv": [
+        "tblastn",
+        "-task",
+        "tblastn",
+        "-query",
+        "/home/kawato/.cache/losat-web-gui-target/s08pa/head-src/docs/evidence/tlosan_stage_g/benchmark/first_AvCLPV_protein.faa",
+        "-subject",
+        "/home/kawato/.cache/losat-web-gui-target/s08pa/head-src/LOSAT/tests/fasta/AvCLPV.fasta",
+        "-outfmt",
+        "0",
+        "-num_threads",
+        "1",
+        "-out",
+        "/tmp/tmpnsx0_rsx/tblastn-fmt0.native.after.out"
+      ],
+      "before": {
+        "samples_s": [
+          0.043193808998694294,
+          0.04298939100044663,
+          0.044348557999910554
+        ],
+        "median_s": 0.043193808998694294,
+        "min_s": 0.04298939100044663,
+        "max_s": 0.044348557999910554,
+        "output_sha256": "926dbd2734d521e62e30d2b2b0ca72e7a6d0ded486d1eb6ce0007d1ce0a8ba98"
+      },
+      "after": {
+        "samples_s": [
+          0.0442860479997762,
+          0.04420410500097205,
+          0.04413288500109047
+        ],
+        "median_s": 0.04420410500097205,
+        "min_s": 0.04413288500109047,
+        "max_s": 0.0442860479997762,
+        "output_sha256": "926dbd2734d521e62e30d2b2b0ca72e7a6d0ded486d1eb6ce0007d1ce0a8ba98"
+      }
+    },
+    {
+      "case": "tblastn-many-e2e",
+      "mode": "native",
+      "threads": 1,
+      "argv": [
+        "tblastn",
+        "-query",
+        "/home/kawato/.cache/losat-web-gui-target/s08pa/head-src/LOSAT/tests/fasta/outfmt0/e2e_protein_query.faa",
+        "-subject",
+        "/home/kawato/.cache/losat-web-gui-target/s08pa/head-src/LOSAT/tests/fasta/outfmt0/e2e_many_subject.fna",
+        "-outfmt",
+        "6",
+        "-num_threads",
+        "1",
+        "-out",
+        "/tmp/tmpnsx0_rsx/tblastn-many-e2e.native.after.out"
+      ],
+      "before": {
+        "samples_s": [
+          1.7974680959996476,
+          1.924690982001266,
+          1.8177359469991643
+        ],
+        "median_s": 1.8177359469991643,
+        "min_s": 1.7974680959996476,
+        "max_s": 1.924690982001266,
+        "output_sha256": "3180cf50378e2587818d9be6245b4bb20ec17e30ff0a73c270960e72452e8115"
+      },
+      "after": {
+        "samples_s": [
+          1.8119579379999777,
+          1.9068962250003096,
+          1.7577229340004124
+        ],
+        "median_s": 1.8119579379999777,
+        "min_s": 1.7577229340004124,
+        "max_s": 1.9068962250003096,
+        "output_sha256": "3180cf50378e2587818d9be6245b4bb20ec17e30ff0a73c270960e72452e8115"
+      }
+    }
+  ],
+  "finished_at": "2026-10-04T07:51:45+00:00"
+}

@@ -36,6 +36,21 @@ traceback の入口の並べ直しを除いた（NCBI の blast_traceback.c:358-
 
 `dp_mem_alloc` は NCBI の値のまま（再確保の時点と、LOSAT の範囲の検査 `b_size < dp_mem_alloc` に使う）にし、`dp_mem` の実際の長さを `MIN(dp_mem_alloc, N + 1)`（`gap_dp_ensure_cells`）にした。後の伸長の `N` が長ければ伸ばす。traceback の行の容量の予約も、行に入りうる `N + 2 - first_b_index` 個までにした（容量は性能のための予約で、出力に関わらない）。DP が読む cell と値は変わらない（cell は書いてから読む。`s_RestrictedGappedAlign` の最初の行の上限 `dp_mem.len() - 1` も、`len2` か以前と同じ `dp_mem_alloc - 1`）。BLASTP・TBLASTN・BLASTX が共有する経路で、出力は変わらない。
 
+### 確かめ
+
+`tn4/run_tn4.sh`（`tn4/tn4.log`）：`e2e_protein_query.faa` × `e2e_tblastn_subject.fna`・`e2e_many_subject.fna`、`-outfmt 6`、`/usr/bin/time` の時間と最大 RSS。標準出力は全て NCBI と同じ（変更前も同じ）。
+
+| option | subject | NCBI | 変更前 | 最後 |
+|---|---|---|---|---|
+| `-comp_based_stats 0 -xdrop_gap_final 1e7` | tblastn_subject | 0.25 s / 68 MB | 3.04 s / 412 MB | 0.14 s / 8.4 MB |
+| `-comp_based_stats 0 -xdrop_gap_final 1e8` | tblastn_subject | 0.23 s / 68 MB | 26.94 s / 3.88 GB | 0.12 s / 8.4 MB |
+| `-xdrop_gap 1e8` | tblastn_subject | 0.42 s / 209 MB | 2.76 s / 3.88 GB | 0.48 s / 8.7 MB |
+| `-comp_based_stats 0 -xdrop_gap_final 1e7` | many_subject（300） | 0.27 s / 73 MB | 27.91 s / 413 MB | 2.16 s / 8.9 MB |
+
+- 監査の再現の agent の表（`audit_rerun/tblastn.md` の TN-4、`LOSAT-head`）：`-xdrop_gap_final` 1e7・1e8・5e8、`-xdrop_gap` 1e7・1e8・5e8 で 0.23〜0.72 s・約 9 MB（tblastn_subject）、NCBI と同じ出力。変更前の `-xdrop_gap_final 5e8` は、終わるのを待たずに止めた（1 回の resize が約 10 GB を書く、上の「原因」）。
+- LOSAT の BLASTP は `-xdrop_gap`・`-xdrop_gap_final` を拒否するので、巨大な X-drop は BLASTP の CLI からは届かない。BLASTP・BLASTX の出力は fixture と単体試験で変わらないことを確かめた。単体試験 `huge_xdrop_keeps_ncbi_cell_count_and_touches_only_cells_up_to_n`（`blastp/gapalign.rs`）は、`dp_mem_alloc` が NCBI の値のままで、`dp_mem` の長さが `N + 1` を超えないことを調べる。
+- `e2e_many_subject.fna` の約 2 秒（既定の X-drop でも同じ、変更前も同じ）は、このセッションの前からの費用（「残り」）。
+
 ## TN-5：BLOSUM45 の組の大きな `-evalue` で同じ得点の HSP の frame
 
 ### 最初に値が食い違う箇所
@@ -132,3 +147,47 @@ TBLASTN の traceback は新しい入口 `blast_gapped_alignment_with_traceback_
 `cli.rs` の `try_parse_from` が、program の名の後の語を NCBI と同じく `--` まで調べ（`ncbi_preparsed_toolkit_word`）、最初に見つかった上の語（と `-conffile=…`）を、option の位置と同じ文言で拒否する（`unknown_option_error` に既存の分岐をくくり出して共有。`-version` は「the NCBI BLAST+ option -version is not supported by LOSAT's <PROGRAM>」、他は「the NCBI C++ Toolkit option …」、終了コード 2）。BLASTN・BLASTP・TBLASTN・TBLASTX（BLASTX は DW-10 で変えない）。アダプタの `validate` も同じ `try_parse_from` で読むので、同じ拒否になる。決定 D9（toolkit の option と `-version` は拒否）の範囲で、`-version` を出す NCBI と同じにはしない。
 
 試験 `tests/cli_v2.rs` の `toolkit_words_in_an_option_value_are_rejected_as_options`（4 program × 5 つの組）。`-out o.txt` は今までどおり。
+
+## 確かめ（このセッションの範囲、最後のコミット）
+
+最後のエンジンのコミット `68154c73e`（記録は `checks/`。HEAD を `git archive` で `/mnt/c` の外に書き出して実行）。
+
+- fixture（`check_losat.py`）：147 件が 1・2・4 スレッドで差 0（`checks/fixtures-final-t{1,2,4}.log`）。変更前の `d96412265` の実行ファイルは、このセッションで足した 10 件（`e2e.tblastn.hardmask_mts1`・`hardmask_b45_mts2`・`b45_frame_ties`・`b45_frame_ties_fmt0`・`query_split`・`query_split_fmt0`・`query_split_two`・`window_end`、`e2e.blastp.query_split`・`query_split_two`）だけが違う（`checks/fixtures-base-e2e.log`）。
+- sweep（`option_sweep.py`、作業ディレクトリ `~/.cache/losat-web-gui-target/s08pa-sweep-*`）：TBLASTN 1427 件（引数の構文の誤り 102、承認済みの `-db_gencode` の例外 78、LOSAT の拒否 720、一致 258、同じ誤り 269）、BLASTP 1196 件（引数の構文の誤り 63、LOSAT の拒否 633、一致 231、同じ誤り 269）。どちらも DIFF 0、timeout 0（`--timeout 1200`、`checks/sweep-final-{tblastn,blastp}.log`）。BLASTP の `-word_size 6 -threshold 1` は、NCBI が `malloc(): corrupted top size` で落ち（単独で約 3 分 20 秒）、LOSAT は拒否する。同じ実行ファイルの 1 回目の sweep（既定の 600 秒の timeout、負荷 30 前後）では、この組の NCBI の側が timeout になった。
+- `cargo fmt --check`（LOSAT とアダプタ）、clippy の 4 構成（`--all-targets --all-features`、`--all-targets --no-default-features`、`--lib --target wasm32-wasip1 --no-default-features`、`--lib --target wasm32-wasip1-threads --features wasm-threads`、`-D warnings`）とアダプタの 3 構成：全て通過（`checks/clippy.log`・`adapter-clippy.log`。LOSAT を compile し直したことを確かめた。新しい target での確かめは 1 つ前の `61d3bf4f5` で、`checks/clippy-fresh.log`・`adapter-clippy-fresh.log`）。
+- `LOSAT_BLASTX_WORKER_LOG=... cargo test --all-features`：909 件が通過、失敗 0、無視 3、終了 0（`checks/cargo-test.log`）。
+- アダプタの `cargo test`：5 件中 1 件失敗（`store::tests::blastn_register_rejects_records_that_ncbi_reads_differently`、`store.rs:253`）。起点の `d96412265` でも同じく失敗し、S08+ のゲートの記録（`run-20261004T034405Z/adapter-test.log`）にも出ている。S08+ の IN-10 の変更（`a2b43ee12`、BLASTP の register が定義行の tab を拒否する）で、試験が `register("blastp", ..., b">q\tt\nACXGT\n")` の成功を前提にしているため。本線と衝突しないよう、このブランチでは直していない（S08+b への申し送り：試験の BLASTP の登録を tab の無い定義行、例えば `b">q t\nACXGT\n"` にする）。
+- NCBI の参照（`verify_refs.py` と `gates/verify_added.py`、BASE `78c06fe61`）：このセッションで足した行の誤り 0。残る 2 件（`cli.rs:15` の `cmdline_flags.cpp:107,143`、`cli.rs:172` の `tblastn_args.cpp:63-110`）は S08+ の行で、S08+ のゲートの記録にも同じ 2 件がある（`:172` は私のくくり出しで `:209` から移った）。
+- 監査の再現（第 1 回の `audit/round1/*.md` の全ての再現の命令と harness を、5 つの agent が `LOSAT-head` = `6fa06cb6a` の実行ファイルで繰り返した。`audit_rerun/`）：
+  - BLASTP（1318 の argv）：一致 938、LOSAT の拒否 316、引数の構文の誤り 61（承認済みの例外 1）、`-help`/`--help`（承認済み）。`blastp-fast -threshold +inf` は NCBI が落ち、LOSAT は拒否するが約 69 秒かかる（遅い拒否、負荷 35）。
+  - TBLASTN：TN-1〜TN-11 は全て一致・拒否・承認済み。harness（pairs、pairs2、TN-2 の grid、sweep の 1690 件、battery の 688 件）に差は無い（承認済みの `-db_gencode` と `-num_threads` の警告を除く）。新しい差 1 件（TN-1 の残り）を見つけ、上で直した。
+  - TBLASTX（730）：TX-1〜TX-6 は ROUND1 の判断どおり。差は `-help` の 2 件（承認済みの例外 1、変更前と同じ）。
+  - 報告（約 2300 組）：説明の付かない差は無い（`-db_gencode` の承認済みの例外と、句読点だけの題の承認済みの例外 2）。RP-4 は当時は拒否で、分割の移植の後に最後の実行ファイルで再現の組（`bigs.fna`・`bigs4.fna` × outfmt 0/6/7 × 既定・cbs 0・`-seg no -evalue 1e-5` の 18 組と BLASTP の 3 組）を繰り返し、全て一致（`query_split/rp4_final.log`）。
+  - 入力（2130 件 × outfmt 0/6/7）：一致 1041 件、拒否 1089 件、差 0。当時の拒否の版で拒否になった BLASTP の 30000 残基の query は、分割の移植の後に一致。
+  - 事故：BLASTP の再現の agent が作業中に `pkill -f` と `kill` を広い条件で使い、TBLASTX の再現の agent の 1 件（`cmp.sh ... -window_size 1500000000`、NCBI が終わらない例）と `bash -c` の 2 件を止めたと報告した。そのとき S08+ のゲートのプロセスは見当たらなかったが、止まったものを後から特定する方法は無い。
+- 性能（`perf_native.py`、変更前 `d96412265` と最後のコミットを交互に、native、1 スレッド）：全て `measure_perf.py` の上限 ×1.05 の内（`checks/perf-final.json` 3 回、`checks/perf-final-r5.json` 5 回。出力は両側で同じ）。他のセッションの pytest が動いていて負荷は約 10（32 core）。
+
+  | case | 変更前の中央値 | 最後の中央値 | 比 |
+  |---|---|---|---|
+  | blastp（3 回） | 0.529 s | 0.535 s | ×1.011 |
+  | blastp-fmt0（3 回） | 0.495 s | 0.504 s | ×1.019 |
+  | tblastn（3 回） | 0.043 s | 0.043 s | ×1.000 |
+  | tblastn-fmt0（3 回） | 0.043 s | 0.044 s | ×1.023 |
+  | tblastn-many-e2e（3 回、300 subject） | 1.818 s | 1.812 s | ×0.997 |
+  | blastp（5 回） | 0.485 s | 0.492 s | ×1.014 |
+  | blastp-fmt0（5 回） | 0.521 s | 0.529 s | ×1.015 |
+  | tblastn-fmt0（5 回） | 0.044 s | 0.044 s | ×0.990 |
+
+  3 回の実行で範囲が重ならなかった `blastp-fmt0` と `tblastn-fmt0` を 5 回で測り直し、範囲は重なった。BLASTP は 2 回とも約 1〜2% 遅い側に出た（上限の内。正式の V-PERF は S08+b）。
+
+## 残り（このセッションで直さなかったもの）
+
+- 無し（第 1 回の監査の 5 件と、再現で見つかった TN-1 の残りを直した）。
+- 既知の、このセッションの前からの性能の差：TBLASTN の `e2e_many_subject.fna`（300 subject）で、既定の option でも LOSAT は約 2〜4 秒（負荷による）、NCBI は 0.2〜0.4 秒（変更前も同じ）。V-PERF は変更前との比較なので退行ではない。
+- BLASTP の分割される batch の query は、全体の検索でも一度検索する（結果は捨てる）。約 9,800 残基を超える query だけの費用。
+
+## 保守者に諮る項目（推奨の案で進めた）
+
+1. RP-4 の query の分割：拒否の版を、保守者の指示（2026-10-04）で BLASTP と TBLASTN の移植に替えた。NCBI が落ちる 2 つの組（chunk をもう一度分ける重なり、batch を分ける負の `CHUNK_SIZE` の組）は明示的な拒否（BLASTN の DW-15・DW-16 と同じ扱い。BLASTN では前者を承認済みの例外 1 で検索しているが、BLASTP・TBLASTN には例外を広げていない）。推奨：このまま。
+2. `-out -version` などの toolkit の語：決定 D9 のとおり、値の位置でも明示的に拒否した（NCBI は version を出す）。推奨：このまま。
+3. S08+b への申し送り：アダプタの試験の失敗（上）と、`cli.rs` の 2 つの参照の範囲（S08+ の行）。

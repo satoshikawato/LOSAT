@@ -4904,7 +4904,8 @@ fn run_resolved_with_records(
 /// The environment that NCBI's blastp reads around its search: the variables that LOSAT
 /// rejects (`BL2SEQ_LEGACY`, `OLD_FSC`, values that NCBI cannot convert), and a
 /// `BATCH_SIZE` of 0, with which the first query batch is empty and NCBI fails after the
-/// outfmt 0 prolog. Other batch sizes do not change a blastp report.
+/// outfmt 0 prolog. Other batch sizes change a blastp report only through the query
+/// split, which is rejected (`check_protein_query_split`).
 fn check_blastp_environment(
     args: &ResolvedBlastpArgs,
     query_records: &[fasta::Record],
@@ -4944,6 +4945,18 @@ fn check_blastp_environment(
         }
         .into());
     }
+    // NCBI c++/src/algo/blast/api/prelim_stage.cpp:232-233:
+    // if (query_splitter->IsQuerySplit()) { ... }
+    // A query batch that NCBI splits into query chunks is rejected (RP-4).
+    app::check_protein_query_split(
+        "BLASTP",
+        10000,
+        &query_records
+            .iter()
+            .map(|record| record.seq().len())
+            .collect::<Vec<_>>(),
+        app::query_batch_size("BLASTP", 10000)? as usize,
+    )?;
     Ok(())
 }
 

@@ -56,3 +56,26 @@ TBLASTN だけが使う、NCBI の `qsort` に当たる並べ替え（`search_ga
 
 - fixture `e2e.tblastn.b45_frame_ties`（outfmt 6）と `e2e.tblastn.b45_frame_ties_fmt0`（outfmt 0）：BDT62620.1 × `LvMJNV_160001_165000`（`e2e_frame_tie_query.faa`・`e2e_frame_tie_subject.fna`）、`-matrix BLOSUM45 -word_size 2 -comp_based_stats 0 -evalue 1000`。変更前は 3 行（outfmt 0 は 6 行）違う。
 - 監査の再現：`-evalue` 5000・1e4・1e5・1e10 で全て一致（19033〜69454 行）。
+
+## RP-4：60000 残基の query の TBLASTN の bit score
+
+### 最初に値が食い違う箇所
+
+再現：`audit/round1/rp4/` の `bigq.faa`（60000 残基）× `bigs4.fna`（sbig4 だけ）、既定の option、`-outfmt 6`。最初の HSP の bit score が NCBI 10383、LOSAT 10404（5 subject の `bigs.fna` では NCBI 10404、LOSAT 10412）。
+
+1. TLOSAN Stage D の composition の shim（`ncbi_kappa_composition_trace.c`）で、最初の `Blast_AdjustScores` の subject の長さ（窓の長さ）が NCBI 11000（sbig4 の frame の全長）、LOSAT 5649。呼び出しの数も NCBI 330、LOSAT 143。窓は kappa に入る HSP から作る（redo_alignment.c:683-731、`kWindowBorder` 200）ので、HSP の一覧が既に違う。
+2. 原因は予備の段の query の分割：NCBI は gapped の検索の query の batch を `SplitQuery_CalculateNumChunks`（split_query_aux_priv.cpp:73-138）で分ける。chunk の大きさは tblastn 20000、blastp 10000（local_blast.cpp:74-76,91-94）、重なり 100（split_query_aux_priv.cpp:53-60）。`SplitQuery_ShouldSplit` は blastp・tblastn で真（73-97）。60000 残基は 3 つの chunk になり、chunk ごとの予備の検索の HSP を合わせて traceback と composition の調整に進む（prelim_stage.cpp:232-233）。
+3. 確かめ：NCBI を `CHUNK_SIZE=100000`（分割しない）で動かすと、LOSAT と完全に一致する（`bigs4.fna` 8 行、`bigs.fna` 7 行）。BLASTP も同じ：`bigq.faa` × `e2e_many_subject.faa`、`-evalue 1000` で、NCBI の分割あり（136 行）と分割なし（126 行）が 11 行違い、LOSAT は分割なしと一致（TBLASTN は `e2e_many_subject.fna` で 78 行中 6 行、LOSAT は分割なしの 72 行と一致）。
+4. LOSAT は BLASTN の分割（S07++、`blastn/query_split.rs`）を移植したが、BLASTP と TBLASTN には無い。`check_query_split_environment` の注釈（「blastp と tblastn は protein の query を分割しない」）は誤りだった。
+5. 認証の範囲：TLOSAN Stage G と E2 の fixture の protein の query の batch（20000 残基ごと）は最大 25,086 残基（`TrcuMJNV.faa`）で、TBLASTN の閾値 39,800 に届かない。BLASTP の batch（10000 残基ごと）は 16,729 残基未満で、閾値 19,800 に届かない。RP-4 は認証の範囲の外。
+
+### 直し方（明示的な拒否）
+
+`blastinput/app.rs` の `check_protein_query_split`：BLASTP と TBLASTN の各 query の batch（`query_batches`、`GetQueryBatchSize`）の残基の和から NCBI の chunk の数を求め（`blastn/query_split.rs` の `calculate_num_chunks`。`CHUNK_SIZE`・`OVERLAP_CHUNK_SIZE` を NCBI と同じく読む）、2 以上なら検索の前に「a query batch of N residues, which NCBI BLAST+ searches in M query chunks (the query chunk size C, overlap O), is not supported by LOSAT's TBLASTN」（BLASTP も同じ）で止める（終了コード 1）。CLI とアダプタの `run_local` が共有する経路（TBLASTN の `search`、BLASTP の `check_blastp_environment`）に置いた。アダプタの `validate` は配列を見ないので、拒否は実行の時（TX-9 と同じ扱い）。既定の大きさで拒否されるのは、BLASTP の batch が 19,800 残基以上、TBLASTN の batch が 39,800 残基以上の検索（およそ 9,800・19,800 残基を超える 1 本の query）。`CHUNK_SIZE` を小さくすると短い query も拒否する（今までは黙って違う結果を出した）。
+
+単体試験 `protein_query_batches_that_ncbi_splits_are_rejected`（境界 19,799/19,800、39,799/39,800、batch の区切り）。
+
+### 保守者に諮る項目（推奨の案で進めた）
+
+- 推奨（実施）：分割される batch は明示的な拒否のままにし、BLASTP と TBLASTN の `CQuerySplitter` の経路（chunk の作成、chunk ごとの予備の検索と linking、`BlastHSPStreamMerge`・`Blast_HitListMerge`、chunk の query の情報）を、後のセッションで BLASTN の移植（`blastn/query_split.rs`）を基に一括で移植する（S12 の検索画面の前が望ましい：BLASTP で約 9,800 残基を超える query、例えば PKS・NRPS の巨大な蛋白が拒否される）。
+- 別案：このまま拒否を恒久の制限として、S12 の入力の上限に書く。

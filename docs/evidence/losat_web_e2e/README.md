@@ -6,7 +6,14 @@
 
 ## 完了条件（計画 §7 の S08+ の行）
 
-（最後に書く）
+| 条件 | 状態 | 根拠 |
+|---|---|---|
+| 各 program の sweep の全組合せが、NCBI と同じ拒否、outfmt 0/6/7 のバイト一致、明示的な拒否のどれか | 満たした（1 件は保守者の判断待ち） | 最後のゲートの sweep：BLASTP 1196・TBLASTN 1427・TBLASTX 641 で DIFF 0・timeout 0（変更前は DIFF 987・1073・194）。TBLASTN の既定以外の `-db_gencode` は承認済みの例外で、C++ API の oracle と一致。2 回の独立監査の約 13 万の比較でも、一致、同じ誤り、承認済みの例外、明示的な拒否だけ。保守者の判断待ちは D11〜D14（明示的な拒否）と D15（NCBI が落ちる検索で LOSAT は NCBI の valgrind の下の出力を出す。推奨は承認済みの例外。断られれば明示的な拒否にする）（下の「保守者に諮ること」） |
+| 直した組合せの fixture で NCBI とバイト一致 | 満たした | outfmt 0/7 の manifest の E2e の 56 行（1・2・4 スレッドで差 0）、TBLASTX の `culling.*` 11 件。変更前の実行ファイルは足した行で違う（S08+ の [`audit/ROUND1.md`](audit/ROUND1.md) の確かめ、S08+a の `s08pa/checks/fixtures-base-e2e.log`、S08+b の `s08pb/r2a2_1/check-losat-old-n1.tsv`） |
+| 各 program の既存のゲートと S07・S08 の fixture に退行なし | 満たした（Gate A は下の「Gate A」） | capture 236 件が S02 の基準と差 0（S08+ が NCBI とバイト一致にした BLASTP の 11 行の hash を更新）、CI の速い検査の全件 236 件で失敗 0（Gate A と TLOSAN Stage G の凍結ハッシュを含む）、TBLASTX 84・BLASTN 183 の回帰 fixture、題の sweep、BLASTN の入力、`CTOOLKIT_COMPATIBLE`、v1 の WASI の行列で形式の失敗 0 |
+| V-PERF の非退行 | （V-PERF の後に書く） | 下の「V-PERF」 |
+| 変えた program の V-ABI | 満たした | V-ABI full 800 の実行で失敗した部分 0（E2e の fixture の 50 の検索を含む）、凍結ハッシュ 1080/1084（違う 4 件は既知の Sakai）、V-ABI quick 60 の実行と凍結ハッシュ 16/16。`docs/web/verification_cells.tsv` に E2e の 4 行を `checked` で足した |
+| 独立監査 | 満たした | 第 1 回（S08+、5 観点）の指摘を直し、第 2 回（S08+b、4 観点）で 4 観点とも supported（(a) は 3 回目） |
 
 ## NCBI の経路の記録
 
@@ -106,17 +113,19 @@ fixture の数は 151（SD の 95 に 56）。凍結と確かめは各ゲート�
 
 ## ゲート
 
-最後のゲートは `8c905ccc5`（エンジンは最後のエンジンのコミット `75cc8e565`。後のコミットは記録だけ）：run [`run-20261004T120250Z/`](run-20261004T120250Z/)（`head.txt`）。script は [`gates/s08pb_gates.sh`](gates/s08pb_gates.sh)（S08+ の [`gates/s08p_gates.sh`](gates/s08p_gates.sh) を写し、build の directory を `s08pb-gate-*` にし、sweep の timeout を 1200 秒、TBLASTX の sweep の並列を 3 にした）。成果物のハッシュは `artifacts.sha256`（native `4d6c036f…`、reactor `617e04ce…`・`73dbad11…`。第 2 回の監査 (a) の 2 回目の実行ファイルと同じ）。変更前は SD の最後の成果物（native `487ac387…`）。
+最後のゲートは `70a1bb5a3`（エンジンは最後のエンジンのコミット `3b84ce6c4`。後のコミットは記録と script だけ）：run [`run-20261004T163746Z/`](run-20261004T163746Z/)（`head.txt`）。script は [`gates/s08pb_gates.sh`](gates/s08pb_gates.sh)（S08+ の [`gates/s08p_gates.sh`](gates/s08p_gates.sh) を写し、sweep の timeout を 1200 秒、TBLASTX の sweep の並列を 3 にした。build の directory は `GATE=s08pb2-gate` の `s08pb2-gate-*`）、Gate A は [`gates/s08pb_gate_a.sh`](gates/s08pb_gate_a.sh)。成果物のハッシュは `artifacts.sha256`（native `6f070575…`、reactor `cb0734e3…`・`2080b5b4…`。第 2 回の監査 (a) の 3 回目の実行ファイルと同じ）。変更前は SD の最後の成果物（native `487ac387…`）。
+
+その前の 2 つのゲートは、どちらも後でエンジンを直したので記録に使わない（`~/.cache/losat-web-gui-target/s08pb/superseded-run-*`）：`491292327` の run（監査の第 2 回の 1 回目の指摘の前）と `8c905ccc5` の run（R2A2-1 の前。全ての検査が通り、Gate A は EXACT_TEXT 14・`-db_gencode` の HSP_SET_DIFF 6）。最後のゲートの結果は、R2A2-1 の 2 つの fixture のほかは `8c905ccc5` の run と同じ（sweep の行の分類、capture の 236 の hash、v1 の記録）。
 
 | 検査 | 結果 |
 |---|---|
 | `cargo fmt --check`（LOSAT、アダプタ）、clippy `-D warnings` の 4 構成とアダプタの 3 構成 | すべて終了コード 0 |
-| `cargo test --all-features`、アダプタ、wasm32 の web API の試験 | 910 件通過・失敗 0（無視 3）、アダプタ 5 件と 2 件、web API 6 件（`blastp_web_pair_keeps_v1_error_order_and_fields` を含む） |
+| `cargo test --all-features`、アダプタ、wasm32 の web API の試験 | 911 件通過・失敗 0（無視 3）、アダプタ 5 件と 2 件、web API 6 件（`blastp_web_pair_keeps_v1_error_order_and_fields` を含む） |
 | pure-Rust の境界、`ci_fast_regressions.py` の単体試験、`protein_tables` の検査、このセッションで足した行の NCBI の参照（`verify_added.py`、BASE `78c06fe61`） | 通過、誤り 0（`verify-refs-session-added.txt`） |
-| outfmt 0 の fixture（`check_losat.py`、1・2・4 スレッド） | 149 件、差 0（3 つのスレッド数とも。承認済みの `-db_gencode` の例外 2 行 `tblastx.code4.0`・`code4.7` は分類どおり） |
-| `run_oracle.py`（NCBI の凍結の確かめ） | 149 件、差 0 |
+| outfmt 0 の fixture（`check_losat.py`、1・2・4 スレッド） | 151 件、差 0（3 つのスレッド数とも。承認済みの `-db_gencode` の例外 2 行 `tblastx.code4.0`・`code4.7` は分類どおり） |
+| `run_oracle.py`（NCBI の凍結の確かめ） | 151 件、差 0 |
 | TBLASTX の回帰 fixture（`culling.*` 11 件を含む）、BLASTN の回帰 fixture | 84 件差 0、183 件差 0 |
-| `CTOOLKIT_COMPATIBLE`（`ctoolkit_compare.py`）、句読点の定義行（`punct-defline.tsv`） | 145 行 435 実行で差 0、予期しない 0 |
+| `CTOOLKIT_COMPATIBLE`（`ctoolkit_compare.py`）、句読点の定義行（`punct-defline.tsv`） | 147 行 441 実行で差 0、予期しない 0 |
 | 句読点だけの subject の題（[`title_sweep.py`](title_sweep.py)） | TBLASTX・TBLASTN とも 1023 の定義行で一致 957、例外 2 が 66、予期しない 0 |
 | BLASTN の入力（E2g の `check_inputs.py`） | 300 件、予期しない 0 |
 | CI の速い検査の全件（`ci_fast_regressions.py --all-cases`。Gate A の凍結ハッシュと TLOSAN Stage G を含む） | 236 件、失敗 0、許可した既知の不一致 1（`Sakai.MG1655.megablast`） |
@@ -125,9 +134,9 @@ fixture の数は 151（SD の 95 に 56）。凍結と確かめは各ゲート�
 | capture（`capture_outputs.py`） | 236 件が S02 の基準と差 0（S08+ が BLASTP の 11 行の hash を NCBI とバイト一致の出力に更新した、[`s02_baseline_updates.tsv`](s02_baseline_updates.tsv)）。SD の最後の成果物とは BLASTP の 11 件（12 の hash）が違い、11 件とも stdout が NCBI とバイト一致、stderr は `pairwise_limit1` の 3 件が NCBI と同じ警告になり、4 スレッドの 1 件は NCBI のスレッドの警告だけ（承認済みの例外 1、SD と同じ）（[`s08pb/capture_vs_ncbi_final.tsv`](s08pb/capture_vs_ncbi_final.tsv)） |
 | v1 の WASI の行列（`check_wasm_threading.py`） | 433 の記録、reactor の lifecycle の gate 通過、形式の失敗 0。`v1-requests` は E1d と 14 件中 10 件が同じで、4 件は誤りの文言だけが違う（下の注） |
 | V-ABI quick | 60 の実行が native の CLI と一致、凍結ハッシュ 16/16 |
-| V-ABI full | （ゲートの後に書く） |
+| V-ABI full | 200 の検索（BLASTN 77、TBLASTN 49、TBLASTX 38、BLASTP 36。E2e の fixture の検索は BLASTP 27・TBLASTN 21・TBLASTX 2 の 50）× 4（serial n1、threads n1・n2・n4）= 800 の実行、失敗した部分 0。各実行の 0/6/7 の stream が native の CLI と一致。凍結ハッシュ 1084 件中 1080 件一致、違う 4 件は既知の `Sakai.MG1655.megablast` outfmt 7 |
 
-**TBLASTX の `-threshold +inf`（第 2 回の監査 R2c-1）。** 指摘を直す前のゲート（`491292327`、記録には使わない）では、TBLASTX の sweep のこの 2 行で LOSAT が並列の実行の中で記憶不足で止まった（signal 9）。単独では outfmt 0・6・7 とも NCBI とバイト一致（LOSAT 8.6 GB・約 225 秒、NCBI 5.9 GB・約 175 秒、`s08pb/thrinf/`）。最後のゲートは TBLASTX の sweep の並列を 3 にし、3 行とも一致した。記憶の差は残件（AUTHORITY §N）。
+**TBLASTX の `-threshold +inf`（第 2 回の監査 R2c-1）。** 最初のゲート（`491292327`、記録には使わない）では、TBLASTX の sweep のこの 2 行で LOSAT が並列の実行の中で記憶不足で止まった（signal 9）。単独では outfmt 0・6・7 とも NCBI とバイト一致（LOSAT 8.6 GB・約 225 秒、NCBI 5.9 GB・約 175 秒、`s08pb/thrinf/`）。最後のゲートは TBLASTX の sweep の並列を 3 にし、3 行とも一致した。記憶の差は残件（AUTHORITY §N）。
 
 **web ABI v1 の BLASTP（計画 TD-1）。** S08+ が BLASTP を NCBI の app の層に移したため、v1 の BLASTP の誤りの順と、書かない tabular の field の扱いが E1d の記録から変わっていた。`efa445b19` で v1 の経路だけ、option を先に確かめ、書かない field を以前の文言で拒否するようにした。残る差は 4 件の誤りの文言で（[`s08pb/v1_requests_vs_e1d.txt`](s08pb/v1_requests_vs_e1d.txt)：未知の行列、BLOSUM45、`-ungapped`）、エンジンの今の option の検査の文言（NCBI の文言か LOSAT の明示的な拒否）である。状態（−1）、出力の無さ、検査の順は E1d と同じ。TD-1 は v1 の引数・形式・誤りの扱いを凍結し、エンジンの修正が v1 に及ぶことと、共有の誤りの文言が変わること（S07+ のスレッドの上限）を認めているので、この扱いにした（保守者に諮る、下）。
 
@@ -158,12 +167,30 @@ fixture の数は 151（SD の 95 に 56）。凍結と確かめは各ゲート�
 
 ## 保守者に諮ること
 
-（最後に書く）
+推奨の案で進め、記録した。判断が出たら、`PD-LOSAT-NCBI-DEFECTS`・`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` と `AGENTS.md` の承認済みの例外の記述を、承認の範囲で更新する。出なければ今のまま残件として次のエンジン側のセッションに渡す。
+
+1. **D11**（第 1 回の監査 TX-1）：query の長さ＋window が 2^31 − 1 を超えると NCBI の `Int4` が回り込み hit が無い（決まった結果）。実用が無く再現の費用が高いので、D8 と合わせて和が 2^30 を超える値を BLASTP・TBLASTX で明示的に拒否した。推奨：このまま。
+2. **D12**（BP-4・TN-6・R2b-1）：無限大と DBL_MAX 以上の `-evalue` で NCBI の blastp・tblastn は入力によって SIGSEGV。LOSAT はいつ落ちるかを事前に知れないので明示的に拒否した（1 つ下の有限の値は実行し NCBI と一致）。推奨：このまま。別案：近い有限の値の NCBI の出力と一致を確かめた LOSAT の結果を承認済みの例外にする。
+3. **D13**（S08+a、RP-4）：BLASTP・TBLASTN は NCBI と同じ chunk で query を分ける。NCBI が落ちる分割の設定（chunk をもう一度分けるほど大きい重なり、batch を分ける負の `CHUNK_SIZE`）は明示的な拒否（BLASTN は前者を承認済みの例外 1 で検索している）。推奨：このまま。
+4. **D14**（S08+a、BP-8 の残り）：option の値の位置の `-version` などの toolkit の語も、option の位置と同じ文言で拒否する（NCBI は version を出して終了 0）。推奨：このまま。
+5. **D15**（第 2 回の監査 R2A2-2）：BLASTP の one-hit と `-threshold` 1〜3 の一部で NCBI は配列の外を読んで SIGSEGV。LOSAT は配列の外を NULLB として読み、NCBI を `valgrind -q` の下で走らせた出力と 23 件ともバイト一致。推奨：承認済みの例外（NCBI の不具合の方針の「確かめられる妥当な結果」）。別案：窓が配列の外を読む検索の明示的な拒否。
+6. **web ABI v1 の BLASTP の誤りの文言**（計画 TD-1）：4 つの要求の誤りの文言がエンジンの今の文言（NCBI の文言か LOSAT の明示的な拒否）に変わった。状態、出力の無さ、検査の順は E1d と同じ。推奨：TD-1 の S07+ のスレッドの上限の文言と同じ扱いで受け入れる。
+7. V-PERF：（V-PERF の後に書く）
+
+S08b の V-PERF の `tblastx-multi`（E2b のゲート記録）は今も保守者の確認待ち。
 
 ## アプリ側（S09・S12）への注意
 
-（最後に書く）
+- 検索画面の option の値は [`AUTHORITY.md`](AUTHORITY.md) §K（S12 の指示書の S08+ の項、S08+b で更新）：BLASTP・TBLASTN の長い query は NCBI と同じに分けて検索する。`-version` などの toolkit の語は値の位置でも拒否する。`-evalue` は DBL_MAX 以上を拒否する。最後の `--` は何もしない。
+- ABI v2 の `validate` は BLASTP・TBLASTN・TBLASTX の NCBI の option の検査と LOSAT の上限を CLI と同じ順と文言で返す（S08+）。
+- BLASTP・TBLASTN の outfmt 0 は NCBI の既定の 500 の説明と 250 の整列を出す（S08+）。300 の subject の検索で報告は大きくなる。
+- web ABI v1 は凍結のまま（TD-1）。BLASTP の 4 つの誤りの文言だけが E1d と違う（上の「ゲート」の注）。
+- verification の升目：`docs/web/verification_cells.tsv` に E2e の 4 行（fixture、TBLASTX の culling、sweep、V-ABI）を `checked` で足した。
 
 ## 残件と引き継ぎ
 
-（最後に書く）
+- **`main` への PR**：（PR の後に書く）
+- **残件**（[`AUTHORITY.md`](AUTHORITY.md) §N。出力に関わるものは無い）：R2c-1 TBLASTX の完全な近傍の記憶（NCBI の最大 2.3 倍。NCBI は tblastx の query を 10002 塩基の chunk に分ける）、R2b-2 小さい `CHUNK_SIZE` の TBLASTN の速さ、TBLASTN の 300 の subject の速さ（前から）、BLASTP の分割される batch の全体の検索の費用、R2c-3 文言。
+- **SX**（[指示書](../../losat_web_gui_sessions/session_sx_blastx_integration.md)の「S08+a・S08+b からの引き継ぎ」）：BLASTX と共有の gapped DP の確保と compressed の走査の修正、`read_end_sentinel`、`redo_alignment.rs` の `sort_unstable_by`、blastx の query の分割（重なり 297）、toolkit の語、最後の `--`、one-hit の負の長さ。
+- **S12**（[指示書](../../losat_web_gui_sessions/session_s12_w3_search_ui.md)）：S08+b の 2 つの点を足した（長い query の分割、値の位置の toolkit の語）。
+- **次のエンジン側のセッション**：[S11 — 領域の指定](../../losat_web_gui_sessions/session_s11_e2d_query_subject_loc.md)。保守者の判断（上）が出たら、その反映を最初の作業にする。

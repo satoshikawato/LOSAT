@@ -12,3 +12,4 @@ pairwise_limit5_serial.fmt0	ncbi_exit=0	losat_exit=0	stdout=same	bytes=390037	nc
 pairwise_nohit_serial.fmt0	ncbi_exit=0	losat_exit=0	stdout=same	bytes=222278	ncbi_stderr=''
 # stderr (LOSAT run directly): pairwise_limit1_serial, .fmt0, .fmt7 same as NCBI (the few-matches warning); pairwise_default_thread4.fmt0 differs only by NCBI's num_threads warning (approved exception 1, as at SD)
 # all 236 capture hashes equal those of the superseded run's capture (capture-s08p)
+# the final gate's capture (~/.cache/losat-web-gui-target/capture-s08pb2-gate, run-20261004T163746Z, native 6f070575...) has the same 236 hashes as capture-s08pb, so the check above holds for it

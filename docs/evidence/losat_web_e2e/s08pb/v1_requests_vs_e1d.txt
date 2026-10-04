@@ -1,4 +1,4 @@
-# web ABI v1 BLASTP requests (docs/evidence/losat_web_e1a/v1_requests.js): E1d (docs/evidence/losat_web_e1d/run-20260928T221453Z) vs the final E2e gate (docs/evidence/losat_web_e2e/run-20261004T120250Z)
+# web ABI v1 BLASTP requests (docs/evidence/losat_web_e1a/v1_requests.js): E1d (docs/evidence/losat_web_e1d/run-20260928T221453Z) vs the E2e gates (run-20261004T120250Z, superseded, and the final run-20261004T163746Z: byte-identical records)
 # only the error text of 4 records differs (status, output length and hash, and the order of the checks are the same): the engine's option checks now give NCBI's text or LOSAT's explicit rejection (plan TD-1)
 DIFF	bad fields + bad matrix	error
 	E1d:	"Unknown scoring matrix: FOO"

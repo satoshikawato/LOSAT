@@ -4254,6 +4254,58 @@ fn rebuild_preliminary_interval_tree_from_list(
 //     max_offset - init_hsp->offsets.qs_offsets.q_off;
 // init_hsp->offsets.qs_offsets.q_off = max_offset;
 // ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1054,1083
+// ```c
+//     init_hit_width = q_right_off - q_left_off + 1;
+//     *hsp_len = left_disp + right_disp + init_hit_width;
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3394,3401,3419-3420,3435-3437
+// ```c
+//    const BlastScoreBlk* sbp, Uint4 q_start, Uint4 q_length,
+//     if (q_length <= HSP_MAX_WINDOW) {
+//     hsp_end = q_start + MIN(q_length, s_length);
+//     for (index1=q_start + HSP_MAX_WINDOW; index1<hsp_end; index1++) {
+//        max_offset -= HSP_MAX_WINDOW/2;
+//     else
+//        max_offset = q_start;
+// ```
+// The one-hit extension's best segment can end before the last reset of its running
+// sum, so the Int4 length can be negative (a low -threshold with -window_size 0). NCBI
+// passes it as Uint4: above HSP_MAX_WINDOW, and q_start + MIN(q_length, s_length) wraps
+// back to q_start + length, so only the first window of HSP_MAX_WINDOW letters is scored.
+// A window that runs past the context or the subject holds its NULLB, whose
+// BLAST_SCORE_MIN makes the sum negative whatever letters follow, so it gives q_start.
+fn blastp_get_start_for_gapped_alignment_int4_length(
+    query: &[u8],
+    subject: &[u8],
+    q_start: usize,
+    length: i32,
+    s_start: usize,
+    matrix: ScoringMatrix,
+) -> usize {
+    if let Ok(length) = usize::try_from(length) {
+        return blastp_get_start_for_gapped_alignment(
+            query, subject, q_start, length, s_start, length, matrix,
+        );
+    }
+    const HSP_MAX_WINDOW: usize = 11;
+    let letter = |sequence: &[u8], index: usize| sequence.get(index).copied().unwrap_or(0);
+    let score: i32 = (0..HSP_MAX_WINDOW)
+        .map(|offset| {
+            blastp_standard_score(
+                matrix,
+                letter(query, q_start + offset),
+                letter(subject, s_start + offset),
+            )
+        })
+        .sum();
+    if score > 0 {
+        q_start + HSP_MAX_WINDOW - 1 - HSP_MAX_WINDOW / 2
+    } else {
+        q_start
+    }
+}
+
 fn extend_preliminary_blastp_hit(
     init_hsp: &mut InitHSP,
     s_idx: u32,
@@ -4277,8 +4329,6 @@ fn extend_preliminary_blastp_hit(
     // s_start = init_hsp->ungapped_data->s_start;
     // s_end = s_start + init_hsp->ungapped_data->length;
     // ```
-    let ungapped_len = usize::try_from(init_hsp.ungapped_data.length)
-        .expect("NCBI BLAST preliminary ungapped HSP length must fit in size_t");
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3900-3945
     // ```c
     // q_start = init_hsp->ungapped_data->q_start;
@@ -4305,15 +4355,14 @@ fn extend_preliminary_blastp_hit(
     //     max_offset - init_hsp->offsets.qs_offsets.q_off;
     // init_hsp->offsets.qs_offsets.q_off = max_offset;
     // ```
-    let gapped_q_start = blastp_get_start_for_gapped_alignment(
+    let gapped_q_start = blastp_get_start_for_gapped_alignment_int4_length(
         query_sequence,
         subject_sequence,
         usize::try_from(init_hsp.ungapped_data.q_start)
             .expect("NCBI BLAST preliminary q_start must be non-negative"),
-        ungapped_len,
+        init_hsp.ungapped_data.length,
         usize::try_from(init_hsp.ungapped_data.s_start)
             .expect("NCBI BLAST preliminary s_start must be non-negative"),
-        ungapped_len,
         matrix,
     );
     let gapped_q_start = i32::try_from(gapped_q_start)

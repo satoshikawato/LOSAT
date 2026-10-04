@@ -196,7 +196,7 @@ S08b の V-PERF の `tblastx-multi`（E2b のゲート記録）は今も保守�
 
 ## 残件と引き継ぎ
 
-- **`main` への PR**：[#113](https://github.com/satoshikawato/LOSAT/pull/113)（S08+ の最初のコミット `b4bd7768e` から S08+b の最後のコミットまで）。merge は保守者。
+- **`main` への PR**：[#113](https://github.com/satoshikawato/LOSAT/pull/113)（S08+ の最初のコミット `b4bd7768e` から S08+b の最後のコミットまで）。`23d9005e1` で CI（`rust`、fast output regressions、adapter、app、engine-web-api）はすべて緑。merge は保守者。
 - **残件**（[`AUTHORITY.md`](AUTHORITY.md) §N。出力に関わるものは無い）：R2c-1 TBLASTX の完全な近傍の記憶（NCBI の最大 2.3 倍。NCBI は tblastx の query を 10002 塩基の chunk に分ける）、R2b-2 小さい `CHUNK_SIZE` の TBLASTN の速さ、TBLASTN の 300 の subject の速さ（前から）、BLASTP の分割される batch の全体の検索の費用、R2c-3 文言。
 - **SX**（[指示書](../../losat_web_gui_sessions/session_sx_blastx_integration.md)の「S08+a・S08+b からの引き継ぎ」）：BLASTX と共有の gapped DP の確保と compressed の走査の修正、`read_end_sentinel`、`redo_alignment.rs` の `sort_unstable_by`、blastx の query の分割（重なり 297）、toolkit の語、最後の `--`、one-hit の負の長さ。
 - **S12**（[指示書](../../losat_web_gui_sessions/session_s12_w3_search_ui.md)）：S08+b の 2 つの点を足した（長い query の分割、値の位置の toolkit の語）。

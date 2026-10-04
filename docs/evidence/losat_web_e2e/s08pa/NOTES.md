@@ -24,3 +24,14 @@ traceback の入口の並べ直しを除いた（NCBI の blast_traceback.c:358-
 ### 確かめ
 
 `gen_q_lc.faa`・`gen_q.faa` × `gen_s.fna`、`-comp_based_stats 0 -lcase_masking -seg no`、mts 1・2・5・10・11・12・20・100・500、BLOSUM62 と BLOSUM45（`-matrix BLOSUM45 -word_size 2`）：全て NCBI と一致（変更前は mts 1〜12 で 5 行が違った）。
+
+## TN-4：巨大な `-xdrop_gap`・`-xdrop_gap_final` の時間と記憶
+
+### 原因
+
+- NCBI の 3 つの gapped DP（`ALIGN_EX` blast_gapalign.c:457-470、`Blast_SemiGappedAlign` 797-808、`s_RestrictedGappedAlign` 1040-1050）は、`num_extra_cells = x_dropoff / gap_extend + 3` が `dp_mem_alloc` を超えると `malloc`（帯を広げる時は `realloc`、923-931 など）で `dp_mem_alloc` 個の cell を取る。DP は cell に書いてから読み、`N`（subject の残りの長さ）より先の cell を使わない（最初の行 811-821、帯の延長と番兵 945-958 は `b_size <= N`）。そのため触れるのは最初の `MIN(dp_mem_alloc, N + 1)` 個で、残りの page は確保されない。traceback の行の状態（`s_GapGetState` 70-115）も、chunk を `malloc` して使った分だけ触れる。
+- LOSAT（`blastp/gapalign.rs` の `gap_dp_reserve_initial`・`gap_dp_reserve_band`）は `Vec::resize` で `dp_mem_alloc` 個の全ての cell を書いていた。`-xdrop_gap 5e8` の raw の X-drop は約 1.3e9 で、1 回の resize が約 10 GB を書く。しかも TBLASTN の traceback は HSP ごとに新しい `GapAlignScratch` を作る（`search_gapped.rs`）ので、HSP ごとに書き直した。traceback の行の `Vec` も `num_extra_cells` の容量（最大 1.7 GB の仮想記憶）を予約していた。
+
+### 直し方
+
+`dp_mem_alloc` は NCBI の値のまま（再確保の時点と、LOSAT の範囲の検査 `b_size < dp_mem_alloc` に使う）にし、`dp_mem` の実際の長さを `MIN(dp_mem_alloc, N + 1)`（`gap_dp_ensure_cells`）にした。後の伸長の `N` が長ければ伸ばす。traceback の行の容量の予約も、行に入りうる `N + 2 - first_b_index` 個までにした（容量は性能のための予約で、出力に関わらない）。DP が読む cell と値は変わらない（cell は書いてから読む。`s_RestrictedGappedAlign` の最初の行の上限 `dp_mem.len() - 1` も、`len2` か以前と同じ `dp_mem_alloc - 1`）。BLASTP・TBLASTN・BLASTX が共有する経路で、出力は変わらない。

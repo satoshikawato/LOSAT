@@ -34,7 +34,13 @@ Deterministic: the files are cut from committed fixtures, so a rerun writes the 
   the X query alone (a query batch that NCBI does not search); e2e_o_subject.faa:
   e2e_protein_subject.faa with every K replaced by O.
 - e2e_empty_subject.faa: e2e_protein_subject.faa between two records without residues
-  (NCBI's "Subject sequence contains no data" warnings).
+  (NCBI's "Subject sequence contains no data" warnings); e2e_empty_only_subject.faa: two
+  records without residues only (NCBI's effective search space 0).
+- e2e_o_identity_query.faa, e2e_o_identity_subject.faa: the first query with residue 101
+  replaced by O and residue 151 by X, and the same sequence with X at 101 and O at 151:
+  NCBI's reports count O and X as different letters, while the search reads O as X.
+- e2e_o_invalid_query.faa: queries of O only and of X and O, which are invalid after O is
+  read as X (the order of NCBI's two warnings of one query).
 
 Usage: make_inputs.py
 """
@@ -136,6 +142,15 @@ def invalid_inputs() -> None:
     (OUT / "e2e_o_subject.faa").write_text("".join(
         line if line.startswith(">") else line.replace("K", "O")
         for line in (OUT / "e2e_protein_subject.faa").read_text().splitlines(keepends=True)))
+    (OUT / "e2e_empty_only_subject.faa").write_text(">emptyonly\n>emptyB some title\n")
+    whole = (OUT / "e2e_protein_query.faa").read_text().split(">")[1].split("\n", 1)[1].replace("\n", "")
+
+    def with_letters(at_101: str, at_151: str) -> str:
+        residues = whole[:100] + at_101 + whole[101:150] + at_151 + whole[151:]
+        return "\n".join(residues[i:i + 60] for i in range(0, len(residues), 60)) + "\n"
+    (OUT / "e2e_o_identity_query.faa").write_text(">qO O at 101, X at 151\n" + with_letters("O", "X"))
+    (OUT / "e2e_o_identity_subject.faa").write_text(">sX X at 101, O at 151\n" + with_letters("X", "O"))
+    (OUT / "e2e_o_invalid_query.faa").write_text(">oonly\n" + "O" * 12 + "\n>xo mixed\n" + "XO" * 15 + "\n")
 
 
 def main() -> None:

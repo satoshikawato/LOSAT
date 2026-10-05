@@ -1,7 +1,7 @@
 # LOSAT Web E2d（Session S11）ゲート記録
 
 - 段階：E2d `-query_loc` / `-subject_loc`（[総合計画書](../../losat_web_gui_plan.md) §7 の S11、§4 の G9、計画 DW-9〜DW-11。指示書 [S11](../../losat_web_gui_sessions/session_s11_e2d_query_subject_loc.md)）
-- ブランチ：`feature/losat-web-gui`。変更前は E2e の最後のコミット `4fab73fdb`（native の SHA-256 `6f070575…`、E2e の最後のゲートの成果物 `~/.cache/losat-web-gui-target/s08pb2-gate-*`）。変更後は最後のエンジンのコミット `095171eda`（最後のゲートもこのコミットで、native `【G:native】…`。記録は後のコミット）。2026-10-05
+- ブランチ：`feature/losat-web-gui`。変更前は E2e の最後のコミット `4fab73fdb`（native の SHA-256 `6f070575…`、E2e の最後のゲートの成果物 `~/.cache/losat-web-gui-target/s08pb2-gate-*`）。変更後は最後のエンジンのコミット `095171eda`（最後のゲートは記録を足した `dc129ea34` で、エンジンは同じ。native `f0b8916b…`、再監査 2 の再生の実行ファイルと同じ）。2026-10-05
 - 状態：**作業中（2026-10-05 に中断）**。移植、fixture、sweep、4 観点の監査と再監査 2 回は済み。残りは最後のゲート・Gate A・V-PERF と、この記録の【G】の欄（下の「中断の時点と再開の手順」）
 
 ## 中断の時点と再開の手順（2026-10-05）

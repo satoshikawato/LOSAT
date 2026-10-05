@@ -1,0 +1,918 @@
+[
+  {
+    "program": "blastp",
+    "argv": [
+      "blastp",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/SicyWSV.faa",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/PajaWSV.faa",
+      "-max_hsps",
+      "1"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT-web-gui",
+    "cases": [
+      "pairwise_default_serial",
+      "pairwise_default_serial.fmt0",
+      "pairwise_default_serial.fmt7",
+      "pairwise_default_thread4",
+      "pairwise_default_thread4.fmt0",
+      "pairwise_default_thread4.fmt7"
+    ],
+    "frozen": {
+      "6": "fd4b010800e32ce6c823cb38b42a10b7845f3342edae892acccc8f554f9edf34"
+    }
+  },
+  {
+    "program": "blastp",
+    "argv": [
+      "blastp",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/SicyWSV.faa",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/PajaWSV.faa",
+      "-max_hsps",
+      "1",
+      "-max_target_seqs",
+      "1"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT-web-gui",
+    "cases": [
+      "pairwise_limit1_serial",
+      "pairwise_limit1_serial.fmt0",
+      "pairwise_limit1_serial.fmt7"
+    ],
+    "frozen": {
+      "6": "2825ce099d7858d7d23a811bff98f4c42fee96c9519003ee936f25855648d3af"
+    }
+  },
+  {
+    "program": "blastp",
+    "argv": [
+      "blastp",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/SicyWSV.faa",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/PajaWSV.faa",
+      "-max_hsps",
+      "1",
+      "-max_target_seqs",
+      "5"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT-web-gui",
+    "cases": [
+      "pairwise_limit5_serial",
+      "pairwise_limit5_serial.fmt0",
+      "pairwise_limit5_serial.fmt7"
+    ],
+    "frozen": {
+      "6": "cd02727a3d7bd2548e1db2759a96b6be72ab0709e7bb0e2179312c01d42419c7"
+    }
+  },
+  {
+    "program": "blastp",
+    "argv": [
+      "blastp",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/SicyWSV.faa",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/AP027078.faa",
+      "-max_hsps",
+      "1"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT-web-gui",
+    "cases": [
+      "pairwise_nohit_serial",
+      "pairwise_nohit_serial.fmt0",
+      "pairwise_nohit_serial.fmt7"
+    ],
+    "frozen": {
+      "6": "8c39d7c6c27963e78c01fac416bd86542b64501301919bd74df280e31aa6f4b8"
+    }
+  },
+  {
+    "program": "blastp",
+    "argv": [
+      "blastp",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/SicyWSV.faa",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/PajaWSV.faa"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT-web-gui",
+    "cases": [
+      "all_hsp_forward_serial",
+      "all_hsp_forward_serial.fmt0",
+      "all_hsp_forward_serial.fmt7",
+      "all_hsp_forward_thread4",
+      "all_hsp_forward_thread4.fmt0",
+      "all_hsp_forward_thread4.fmt7"
+    ],
+    "frozen": {
+      "6": "a6d38a3200c9570726550a12858101d1eaa414dca236f925da5651e95d819b5d"
+    }
+  },
+  {
+    "program": "blastp",
+    "argv": [
+      "blastp",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/PajaWSV.faa",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/SicyWSV.faa",
+      "-max_target_seqs",
+      "5"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT-web-gui",
+    "cases": [
+      "all_hsp_reverse_limit5_serial",
+      "all_hsp_reverse_limit5_serial.fmt0",
+      "all_hsp_reverse_limit5_serial.fmt7"
+    ],
+    "frozen": {
+      "6": "2db7a6604c7d44731e69f75546340b127037e63fe56ad9370e7d64849ad7162d"
+    }
+  },
+  {
+    "program": "blastp",
+    "argv": [
+      "blastp",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/SicyWSV.faa",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/SicyWSV.faa"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT-web-gui",
+    "cases": [
+      "all_hsp_self_serial",
+      "all_hsp_self_serial.fmt0",
+      "all_hsp_self_serial.fmt7"
+    ],
+    "frozen": {
+      "6": "67911f4a93327e9622afe10d15a66d9e52ae8e1c3d905db9ca5fb018d6612e46"
+    }
+  },
+  {
+    "program": "blastp",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/pwidth_q.faa",
+      "-subject",
+      "tests/fasta/outfmt0/pwidth_s.faa"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT",
+    "cases": [
+      "width.blastp"
+    ],
+    "frozen": {
+      "0": "2f540da2e4394efa8938825e18298dad06358eccba2367a3fec3bdffc92b2f52"
+    }
+  },
+  {
+    "program": "blastp",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/blastp_seg_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/blastp_seg_subject.faa",
+      "-seg",
+      "yes"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT",
+    "cases": [
+      "seg.blastp.6"
+    ],
+    "frozen": {
+      "6": "61c0c1f8ee7ed77bc2f8997415a839280f7a14f3786045f9b3eb99a1aa9db6c5"
+    }
+  },
+  {
+    "program": "blastp",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT",
+    "cases": [
+      "method.blastp"
+    ],
+    "frozen": {
+      "0": "8490f138d942322c85f15c56de85415e2db297182f2fe55112fa0f6ecb2a18c4"
+    }
+  },
+  {
+    "program": "blastp",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-seg",
+      "yes"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT",
+    "cases": [
+      "e2e.blastp.seg_lcase"
+    ],
+    "frozen": {
+      "0": "7359a923e6093f8e2b79b3dcfcfaa07dc4d4b898da0d639eb3b00c7d212acb0e"
+    }
+  },
+  {
+    "program": "blastp",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-seg",
+      "10 1.8 2.1"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT",
+    "cases": [
+      "e2e.blastp.seg_window"
+    ],
+    "frozen": {
+      "0": "9ea0a25075234e7d3133d74aef342c217971e92a155464b56e546d4ec20e30f9"
+    }
+  },
+  {
+    "program": "blastp",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-matrix",
+      "blosum62"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT",
+    "cases": [
+      "e2e.blastp.matrix_case"
+    ],
+    "frozen": {
+      "0": "a4a033bdaca09ae14d3c2cb6ad439a1ca27e46fc88da57456849c61c264ad0d3"
+    }
+  },
+  {
+    "program": "blastp",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-threshold",
+      "11.5"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT",
+    "cases": [
+      "e2e.blastp.threshold_real"
+    ],
+    "frozen": {
+      "0": "8f8f6e33c5f19074e93d69ed241a02403c7dd77f692bc74c166c904e23c63602"
+    }
+  },
+  {
+    "program": "blastp",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_many_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-threshold",
+      "+inf"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT",
+    "cases": [
+      "e2e.blastp.threshold_inf"
+    ],
+    "frozen": {
+      "6": "949682fa2a9896252b9d5b9afb66585f48592c177b176895ff8634c690343b21"
+    }
+  },
+  {
+    "program": "blastp",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-word_size",
+      "5"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT",
+    "cases": [
+      "e2e.blastp.word5"
+    ],
+    "frozen": {
+      "0": "0c4e34fd4b6e9002b5c4038952a67afdd2df0f9b7387208d4f17702599323b41"
+    }
+  },
+  {
+    "program": "blastp",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-task",
+      "blastp-fast"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT",
+    "cases": [
+      "e2e.blastp.fast"
+    ],
+    "frozen": {
+      "0": "e0d6b5a38a853f622367cb6d5088a7ebd5fa3687178a6301dd7f56ec4274339a"
+    }
+  },
+  {
+    "program": "blastp",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-evalue",
+      "1e308"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT",
+    "cases": [
+      "e2e.blastp.evalue_huge",
+      "e2e.blastp.evalue_huge7"
+    ],
+    "frozen": {
+      "0": "97960564a8cda3147ca2e3e09053dcc824f6c8a68033f9b9019bec7e8c0e528e",
+      "7": "6d4657e17254068ff4d680a9217aeb3700f694d1a967f6e520e30bc590db7784"
+    }
+  },
+  {
+    "program": "blastp",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-max_target_seqs",
+      "3"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT",
+    "cases": [
+      "e2e.blastp.mts3"
+    ],
+    "frozen": {
+      "0": "61dd2271558626fbdec246fcf158f38b520dee8788f66317c97a13525ec7e72c"
+    }
+  },
+  {
+    "program": "blastp",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_many_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_many_subject.faa"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT",
+    "cases": [
+      "e2e.blastp.many"
+    ],
+    "frozen": {
+      "0": "bc6446b64314a7f2c9d3db0f1ff8d2f3fa7c2e72e8c352f9288eb8bfd050e88b"
+    }
+  },
+  {
+    "program": "blastp",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_many_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_many_subject.faa",
+      "-max_target_seqs",
+      "280"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT",
+    "cases": [
+      "e2e.blastp.many_mts280"
+    ],
+    "frozen": {
+      "0": "a3c2f8162e320eca9713509b5fa83965236d7536cf0c0d31a962bbd5b9fdb214"
+    }
+  },
+  {
+    "program": "blastp",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_titles_subject.faa"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT",
+    "cases": [
+      "e2e.blastp.titles"
+    ],
+    "frozen": {
+      "0": "b06378f3798cd4d48f5017e3966e62f0420d98a54fde2fa7f1d5333e43b18e04"
+    }
+  },
+  {
+    "program": "blastp",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_invalid_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT",
+    "cases": [
+      "e2e.blastp.invalid_o",
+      "e2e.blastp.invalid_o7"
+    ],
+    "frozen": {
+      "0": "95c5fca59c88a42d10810ffe3968cb0e9621d55936d84363032b980c94d735d2",
+      "7": "9c8b7c39b1f2a091f8420ca21c0c8ebfbd7c08b2d3a6b77058a6c7b945626529"
+    }
+  },
+  {
+    "program": "blastp",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_allx_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT",
+    "cases": [
+      "e2e.blastp.allx",
+      "e2e.blastp.allx7"
+    ],
+    "frozen": {
+      "0": "86e5d8f27df63edd6b0fd8ce51fa4bf5e4c35782952ee1fdbe47b1bb3ff3c8bb",
+      "7": "349e73a052be4825f30a0da5cff44292516a2bc1fa6ae820e8392a9be0266ae3"
+    }
+  },
+  {
+    "program": "blastp",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_o_subject.faa"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT",
+    "cases": [
+      "e2e.blastp.o_subject"
+    ],
+    "frozen": {
+      "0": "c0278dff742ff07cb52d678390ae9218d66a69b84e22fa221dd48b8daed548a4"
+    }
+  },
+  {
+    "program": "blastp",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_empty_subject.faa"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT",
+    "cases": [
+      "e2e.blastp.empty_subject"
+    ],
+    "frozen": {
+      "0": "03ecc7763f59f1d4043b174b68de76fb0391bb379543ddd71891e3c150d0107c"
+    }
+  },
+  {
+    "program": "blastp",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_o_identity_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_o_identity_subject.faa"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT",
+    "cases": [
+      "e2e.blastp.o_identity",
+      "e2e.blastp.o_identity0"
+    ],
+    "frozen": {
+      "6": "b081ddc7d170430002582262e449dba8cb3318d47f40d1f9d25273098ebf3ab9",
+      "0": "df51c54c4084bd803bf92b35704ba9ff3ea1a7f9ce1ad8a5b67808eed7016294"
+    }
+  },
+  {
+    "program": "blastp",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_empty_only_subject.faa"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT",
+    "cases": [
+      "e2e.blastp.empty_only"
+    ],
+    "frozen": {
+      "0": "89f69329c5b0f22e231a9bc33ebe9f4c03b32d7e3b917879e1b4c60348362469"
+    }
+  },
+  {
+    "program": "blastp",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_o_invalid_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT",
+    "cases": [
+      "e2e.blastp.o_invalid_order"
+    ],
+    "frozen": {
+      "6": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  },
+  {
+    "program": "blastp",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_many_subject.faa",
+      "-max_target_seqs",
+      "2147483647"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT",
+    "cases": [
+      "e2e.blastp.mts_wrap"
+    ],
+    "frozen": {
+      "6": "fcc6520fda9a7829af333b6bfb47c888288799ae9d5c31e771ad77d40ec39ff0"
+    }
+  },
+  {
+    "program": "blastp",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_split_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_many_subject.faa",
+      "-evalue",
+      "1000"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT",
+    "cases": [
+      "e2e.blastp.query_split"
+    ],
+    "frozen": {
+      "6": "dfdd8fbbecf509858a23a02ceb06b6aa595dc26c7f6ace22bd954353fa1db344"
+    }
+  },
+  {
+    "program": "blastp",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_split_two_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_many_subject.faa",
+      "-evalue",
+      "1000"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT",
+    "cases": [
+      "e2e.blastp.query_split_two"
+    ],
+    "frozen": {
+      "6": "35ef36bf0bb18b2acf191d67dd3e36178883a7a06fffd5ddbc816dd3c664d808"
+    }
+  },
+  {
+    "program": "blastp",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_short_mixed_subject.faa",
+      "-word_size",
+      "5"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT",
+    "cases": [
+      "e2e.blastp.compressed_short_subject"
+    ],
+    "frozen": {
+      "0": "3536cd9a985ff0b81aba9d09535abe0516c9d3da1e60ad8c402fabaf44484548"
+    }
+  },
+  {
+    "program": "blastp",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_one_hit_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_one_hit_subject.faa",
+      "-word_size",
+      "5",
+      "-threshold",
+      "5",
+      "-window_size",
+      "0",
+      "-evalue",
+      "1e5"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT",
+    "cases": [
+      "e2e.blastp.one_hit_negative_width"
+    ],
+    "frozen": {
+      "0": "a33c4ebd38ea20584ec7f845d445791054ff89d1aa6c416f5f610b7f5062c040"
+    }
+  },
+  {
+    "program": "blastp",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_fast_lone_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_fast_lone_subject.faa",
+      "-task",
+      "blastp-fast",
+      "-window_size",
+      "0",
+      "-threshold",
+      "6",
+      "-evalue",
+      "1000"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT",
+    "cases": [
+      "e2e.blastp.fast_lone_hsp"
+    ],
+    "frozen": {
+      "0": "a839f198a741b260fac79fab9e1b9848bf38d0ca2e4e86bd97b52bba9f87875f"
+    }
+  },
+  {
+    "program": "blastp",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_fast_lone2_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_fast_lone2_subject.faa",
+      "-task",
+      "blastp-fast",
+      "-threshold",
+      "8",
+      "-evalue",
+      "1e5",
+      "-comp_based_stats",
+      "D"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT",
+    "cases": [
+      "e2e.blastp.fast_lone_hsp_window"
+    ],
+    "frozen": {
+      "7": "8546e9d4003b0513caaf96d35bee2913bbdde7040803eeed3a62e39eaad8e940"
+    }
+  },
+  {
+    "program": "blastp",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2d_p_q.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_p_s3.faa",
+      "-query_loc",
+      "100-400"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT",
+    "cases": [
+      "e2d.blastp.qloc.0",
+      "e2d.blastp.qloc.6",
+      "e2d.blastp.qloc.7"
+    ],
+    "frozen": {
+      "0": "3d948319e1254ce006a8bf75bc474968458d0f35e0599554ec8c514bb8bc38a3",
+      "6": "29ac0621bad5996c65695ee8ad82c3bf0765ebe5e28b8aa2fbf2e880a6242af1",
+      "7": "2d634664cdfd5b7d83ef3622c1955c0e25f901d31e99290f6a489ad72f6ffc7a"
+    }
+  },
+  {
+    "program": "blastp",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2d_p_qmulti.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_p_s3.faa",
+      "-query_loc",
+      "100-400",
+      "-subject_loc",
+      "20-5000"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT",
+    "cases": [
+      "e2d.blastp.fields.6f",
+      "e2d.blastp.fields.7f"
+    ],
+    "frozen": {
+      "6 qseqid qlen slen qstart qend sstart send qframe sframe frames qseq sseq btop": "32f0878c880f719a5d324bf6e6cc853550cf80d38186b1d9a606aecd0dc6eac8",
+      "7 qseqid qlen slen qstart qend sstart send length pident evalue bitscore": "eaa4957f1c9d52e108984dbee730924c2387d880452c371deedce31def08bf45"
+    }
+  },
+  {
+    "program": "blastp",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2d_p_q.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_p_s3.faa",
+      "-query_loc",
+      "600-1000"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT",
+    "cases": [
+      "e2d.blastp.end_past.6f"
+    ],
+    "frozen": {
+      "6 std qlen slen": "234574f0f0dbc35fbe09977ad970abb49f97f5cb56f9576239a2434c564ee42c"
+    }
+  },
+  {
+    "program": "blastp",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2d_p_qmulti.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_p_s3.faa",
+      "-query_loc",
+      "700-900"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT",
+    "cases": [
+      "e2d.blastp.multi_skip.0",
+      "e2d.blastp.multi_skip.7"
+    ],
+    "frozen": {
+      "0": "4431ae5cbacbb8317e0b40b3fae7ac27750a4e365df2c440cff63986f95d4dfe",
+      "7": "afe6ba0afd5a6f6d8c63a4ff9e578a6f0d0d5bcbd66d43d74d3de8b3353a1942"
+    }
+  },
+  {
+    "program": "blastp",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2d_p_qp75.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_p_sp75m.faa",
+      "-subject_loc",
+      "201-600"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT",
+    "cases": [
+      "e2d.blastp.sloc.0",
+      "e2d.blastp.sloc.7"
+    ],
+    "frozen": {
+      "0": "aaf84690a9b1c141c9c2dccba6b667531017749fe8a51807494199cb6e0c69d3",
+      "7": "c1ac5d9edf3d91d4a869883c746b3cade05f709f2ab3a9b81803532266d32335"
+    }
+  },
+  {
+    "program": "blastp",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2d_p_qp75.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_p_sp_multi.faa",
+      "-subject_loc",
+      "201-600"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT",
+    "cases": [
+      "e2d.blastp.sloc_empty.0"
+    ],
+    "frozen": {
+      "0": "ef25de3b9f911d39c3bcac3a4a30dd2aad0912cff340159ac89df9c335b9c093"
+    }
+  },
+  {
+    "program": "blastp",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2d_p_qlc.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_p_s3.faa",
+      "-query_loc",
+      "100-400",
+      "-seg",
+      "yes"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT",
+    "cases": [
+      "e2d.blastp.seg.0"
+    ],
+    "frozen": {
+      "0": "69637d3cca4447ef8af523fa585774392bf152e751b0670939b5b8ff4c1b13f8"
+    }
+  },
+  {
+    "program": "blastp",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2d_p_qo.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_p_s3.faa",
+      "-query_loc",
+      "100-400"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT",
+    "cases": [
+      "e2d.blastp.o.0"
+    ],
+    "frozen": {
+      "0": "76698821691db04ad51bc8772bf130cdac795673b34fb015d34e27196c5abb4e"
+    }
+  },
+  {
+    "program": "blastp",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2d_p_qskew25k.faa",
+      "-subject",
+      "tests/fasta/LvMJNV.faa",
+      "-evalue",
+      "1000",
+      "-query_loc",
+      "3001-22800"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT",
+    "cases": [
+      "e2d.blastp.split.6"
+    ],
+    "frozen": {
+      "6": "62dee90e159fd45ab6e8dabcde13c0bcbd46b1228ace0f25887997f9216e9eae"
+    }
+  },
+  {
+    "program": "blastp",
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2d_p_qmulti.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_p_s3.faa",
+      "-task",
+      "blastp-fast",
+      "-query_loc",
+      "100-400"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT",
+    "cases": [
+      "e2d.blastp.fast.0"
+    ],
+    "frozen": {
+      "0": "960a0ab437e952e18ac16b4f8527cde274e5fb83f7074cee535a370dd395d156"
+    }
+  }
+]

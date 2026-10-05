@@ -1,0 +1,692 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/e2e_titles_subject.faa).
+           9 sequences; 3,753 total letters
+
+
+
+Query= BDT62569.1 wsv282-like protein [Metapenaeus ensis majanivirus]
+
+Length=480
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+t8 xyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy      340     1e-116
+t7 MULTISPECIES: hyp                                                  340     1e-116
+t6 TPA: hyp                                                           340     1e-116
+t5 hyp (fragment)                                                     340     1e-116
+t4 a, b; c                                                            340     1e-116
+t3 protein [Homo sapiens]                                             340     1e-116
+t2 protein [Homo sapiens]                                             340     1e-116
+t1 hypothetical protein double space                                  340     1e-116
+t0 hypothetical protein                                               340     1e-116
+
+
+> t8 xyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy
+Length=417
+
+ Score = 340 bits (871),  Expect = 1e-116, Method: Compositional matrix adjust.
+ Identities = 181/317 (57%), Positives = 235/317 (74%), Gaps = 6/317 (2%)
+
+Query  157  TNPRIVVDEIMKEEKKTISDG-EYFLYCTSAKSSSNQHLEILNTFRKEIILILQLYANLR  215
+            TN  +V   I+   +K +S G E F+   S K    +H+E L  F++EI LIL+ YA L 
+Sbjct  98   TNSEMV--NIISNHEKIVSKGTESFIVYASTKMP-REHVECLIMFKEEITLILREYAQLV  154
+
+Query  216  CRQQLLGSFNTNSVNYSDEMIKKMIDIILRIDRNSMSFDKYKNVVREALYVYYLVVTKMT  275
+             RQQLL +FNTNS +YS EMIKKMI+IIL+ID N+M  DKYK+VVREALY+Y+LVV+KMT
+Sbjct  155  RRQQLLRNFNTNSTSYSGEMIKKMINIILKID-NNMPIDKYKDVVREALYIYHLVVSKMT  213
+
+Query  276  GPKHLKRLRTPELHFEYCVVIALLAHNVDIFKKISFPKYRTTNLIQFVSALDCPWYLSVI  335
+            GPKHLKRLRTPELHF++C +IALL+HNV+I K IS  KYR +++IQFVSALDC WYLSV+
+Sbjct  214  GPKHLKRLRTPELHFDFCTLIALLSHNVEIVKNIS-TKYRVSSIIQFVSALDCQWYLSVV  272
+
+Query  336  PNILSVLNRTRSICQTLDFSISDHAKINITLCLLSEIAEKKPNNLILATILYLFPRSLKL  395
+            PNILSV NR+ SICQTL FS   HA++NITLCL   + E    NL+L  ILYLFP  L+ 
+Sbjct  273  PNILSVFNRSNSICQTLCFSYERHAQVNITLCLTYALTEINTTNLVLGVILYLFPECLED  332
+
+Query  396  IKEKGLVRDENTIVLLAKKISEYLKNQWINCNDIACASNLLEGDWVKDECTLKLFKKQCC  455
+            IK   L++DE+ IV LA+KI E+L++ WI  +DIA A++ L G  V+   T+K+F+KQ  
+Sbjct  333  IKRAELIKDESLIVPLARKIMEHLRSLWIEKSDIANAAHFLLGSCVEGLDTIKVFRKQNY  392
+
+Query  456  DTKFAAISLLVQQQMKK  472
+            D K  A+S++VQQ++K+
+Sbjct  393  DKKILAVSVMVQQKLKQ  409
+
+
+> t7 MULTISPECIES: hyp
+Length=417
+
+ Score = 340 bits (871),  Expect = 1e-116, Method: Compositional matrix adjust.
+ Identities = 181/317 (57%), Positives = 235/317 (74%), Gaps = 6/317 (2%)
+
+Query  157  TNPRIVVDEIMKEEKKTISDG-EYFLYCTSAKSSSNQHLEILNTFRKEIILILQLYANLR  215
+            TN  +V   I+   +K +S G E F+   S K    +H+E L  F++EI LIL+ YA L 
+Sbjct  98   TNSEMV--NIISNHEKIVSKGTESFIVYASTKMP-REHVECLIMFKEEITLILREYAQLV  154
+
+Query  216  CRQQLLGSFNTNSVNYSDEMIKKMIDIILRIDRNSMSFDKYKNVVREALYVYYLVVTKMT  275
+             RQQLL +FNTNS +YS EMIKKMI+IIL+ID N+M  DKYK+VVREALY+Y+LVV+KMT
+Sbjct  155  RRQQLLRNFNTNSTSYSGEMIKKMINIILKID-NNMPIDKYKDVVREALYIYHLVVSKMT  213
+
+Query  276  GPKHLKRLRTPELHFEYCVVIALLAHNVDIFKKISFPKYRTTNLIQFVSALDCPWYLSVI  335
+            GPKHLKRLRTPELHF++C +IALL+HNV+I K IS  KYR +++IQFVSALDC WYLSV+
+Sbjct  214  GPKHLKRLRTPELHFDFCTLIALLSHNVEIVKNIS-TKYRVSSIIQFVSALDCQWYLSVV  272
+
+Query  336  PNILSVLNRTRSICQTLDFSISDHAKINITLCLLSEIAEKKPNNLILATILYLFPRSLKL  395
+            PNILSV NR+ SICQTL FS   HA++NITLCL   + E    NL+L  ILYLFP  L+ 
+Sbjct  273  PNILSVFNRSNSICQTLCFSYERHAQVNITLCLTYALTEINTTNLVLGVILYLFPECLED  332
+
+Query  396  IKEKGLVRDENTIVLLAKKISEYLKNQWINCNDIACASNLLEGDWVKDECTLKLFKKQCC  455
+            IK   L++DE+ IV LA+KI E+L++ WI  +DIA A++ L G  V+   T+K+F+KQ  
+Sbjct  333  IKRAELIKDESLIVPLARKIMEHLRSLWIEKSDIANAAHFLLGSCVEGLDTIKVFRKQNY  392
+
+Query  456  DTKFAAISLLVQQQMKK  472
+            D K  A+S++VQQ++K+
+Sbjct  393  DKKILAVSVMVQQKLKQ  409
+
+
+> t6 TPA: hyp
+Length=417
+
+ Score = 340 bits (871),  Expect = 1e-116, Method: Compositional matrix adjust.
+ Identities = 181/317 (57%), Positives = 235/317 (74%), Gaps = 6/317 (2%)
+
+Query  157  TNPRIVVDEIMKEEKKTISDG-EYFLYCTSAKSSSNQHLEILNTFRKEIILILQLYANLR  215
+            TN  +V   I+   +K +S G E F+   S K    +H+E L  F++EI LIL+ YA L 
+Sbjct  98   TNSEMV--NIISNHEKIVSKGTESFIVYASTKMP-REHVECLIMFKEEITLILREYAQLV  154
+
+Query  216  CRQQLLGSFNTNSVNYSDEMIKKMIDIILRIDRNSMSFDKYKNVVREALYVYYLVVTKMT  275
+             RQQLL +FNTNS +YS EMIKKMI+IIL+ID N+M  DKYK+VVREALY+Y+LVV+KMT
+Sbjct  155  RRQQLLRNFNTNSTSYSGEMIKKMINIILKID-NNMPIDKYKDVVREALYIYHLVVSKMT  213
+
+Query  276  GPKHLKRLRTPELHFEYCVVIALLAHNVDIFKKISFPKYRTTNLIQFVSALDCPWYLSVI  335
+            GPKHLKRLRTPELHF++C +IALL+HNV+I K IS  KYR +++IQFVSALDC WYLSV+
+Sbjct  214  GPKHLKRLRTPELHFDFCTLIALLSHNVEIVKNIS-TKYRVSSIIQFVSALDCQWYLSVV  272
+
+Query  336  PNILSVLNRTRSICQTLDFSISDHAKINITLCLLSEIAEKKPNNLILATILYLFPRSLKL  395
+            PNILSV NR+ SICQTL FS   HA++NITLCL   + E    NL+L  ILYLFP  L+ 
+Sbjct  273  PNILSVFNRSNSICQTLCFSYERHAQVNITLCLTYALTEINTTNLVLGVILYLFPECLED  332
+
+Query  396  IKEKGLVRDENTIVLLAKKISEYLKNQWINCNDIACASNLLEGDWVKDECTLKLFKKQCC  455
+            IK   L++DE+ IV LA+KI E+L++ WI  +DIA A++ L G  V+   T+K+F+KQ  
+Sbjct  333  IKRAELIKDESLIVPLARKIMEHLRSLWIEKSDIANAAHFLLGSCVEGLDTIKVFRKQNY  392
+
+Query  456  DTKFAAISLLVQQQMKK  472
+            D K  A+S++VQQ++K+
+Sbjct  393  DKKILAVSVMVQQKLKQ  409
+
+
+> t5 hyp (fragment)
+Length=417
+
+ Score = 340 bits (871),  Expect = 1e-116, Method: Compositional matrix adjust.
+ Identities = 181/317 (57%), Positives = 235/317 (74%), Gaps = 6/317 (2%)
+
+Query  157  TNPRIVVDEIMKEEKKTISDG-EYFLYCTSAKSSSNQHLEILNTFRKEIILILQLYANLR  215
+            TN  +V   I+   +K +S G E F+   S K    +H+E L  F++EI LIL+ YA L 
+Sbjct  98   TNSEMV--NIISNHEKIVSKGTESFIVYASTKMP-REHVECLIMFKEEITLILREYAQLV  154
+
+Query  216  CRQQLLGSFNTNSVNYSDEMIKKMIDIILRIDRNSMSFDKYKNVVREALYVYYLVVTKMT  275
+             RQQLL +FNTNS +YS EMIKKMI+IIL+ID N+M  DKYK+VVREALY+Y+LVV+KMT
+Sbjct  155  RRQQLLRNFNTNSTSYSGEMIKKMINIILKID-NNMPIDKYKDVVREALYIYHLVVSKMT  213
+
+Query  276  GPKHLKRLRTPELHFEYCVVIALLAHNVDIFKKISFPKYRTTNLIQFVSALDCPWYLSVI  335
+            GPKHLKRLRTPELHF++C +IALL+HNV+I K IS  KYR +++IQFVSALDC WYLSV+
+Sbjct  214  GPKHLKRLRTPELHFDFCTLIALLSHNVEIVKNIS-TKYRVSSIIQFVSALDCQWYLSVV  272
+
+Query  336  PNILSVLNRTRSICQTLDFSISDHAKINITLCLLSEIAEKKPNNLILATILYLFPRSLKL  395
+            PNILSV NR+ SICQTL FS   HA++NITLCL   + E    NL+L  ILYLFP  L+ 
+Sbjct  273  PNILSVFNRSNSICQTLCFSYERHAQVNITLCLTYALTEINTTNLVLGVILYLFPECLED  332
+
+Query  396  IKEKGLVRDENTIVLLAKKISEYLKNQWINCNDIACASNLLEGDWVKDECTLKLFKKQCC  455
+            IK   L++DE+ IV LA+KI E+L++ WI  +DIA A++ L G  V+   T+K+F+KQ  
+Sbjct  333  IKRAELIKDESLIVPLARKIMEHLRSLWIEKSDIANAAHFLLGSCVEGLDTIKVFRKQNY  392
+
+Query  456  DTKFAAISLLVQQQMKK  472
+            D K  A+S++VQQ++K+
+Sbjct  393  DKKILAVSVMVQQKLKQ  409
+
+
+> t4 a, b; c
+Length=417
+
+ Score = 340 bits (871),  Expect = 1e-116, Method: Compositional matrix adjust.
+ Identities = 181/317 (57%), Positives = 235/317 (74%), Gaps = 6/317 (2%)
+
+Query  157  TNPRIVVDEIMKEEKKTISDG-EYFLYCTSAKSSSNQHLEILNTFRKEIILILQLYANLR  215
+            TN  +V   I+   +K +S G E F+   S K    +H+E L  F++EI LIL+ YA L 
+Sbjct  98   TNSEMV--NIISNHEKIVSKGTESFIVYASTKMP-REHVECLIMFKEEITLILREYAQLV  154
+
+Query  216  CRQQLLGSFNTNSVNYSDEMIKKMIDIILRIDRNSMSFDKYKNVVREALYVYYLVVTKMT  275
+             RQQLL +FNTNS +YS EMIKKMI+IIL+ID N+M  DKYK+VVREALY+Y+LVV+KMT
+Sbjct  155  RRQQLLRNFNTNSTSYSGEMIKKMINIILKID-NNMPIDKYKDVVREALYIYHLVVSKMT  213
+
+Query  276  GPKHLKRLRTPELHFEYCVVIALLAHNVDIFKKISFPKYRTTNLIQFVSALDCPWYLSVI  335
+            GPKHLKRLRTPELHF++C +IALL+HNV+I K IS  KYR +++IQFVSALDC WYLSV+
+Sbjct  214  GPKHLKRLRTPELHFDFCTLIALLSHNVEIVKNIS-TKYRVSSIIQFVSALDCQWYLSVV  272
+
+Query  336  PNILSVLNRTRSICQTLDFSISDHAKINITLCLLSEIAEKKPNNLILATILYLFPRSLKL  395
+            PNILSV NR+ SICQTL FS   HA++NITLCL   + E    NL+L  ILYLFP  L+ 
+Sbjct  273  PNILSVFNRSNSICQTLCFSYERHAQVNITLCLTYALTEINTTNLVLGVILYLFPECLED  332
+
+Query  396  IKEKGLVRDENTIVLLAKKISEYLKNQWINCNDIACASNLLEGDWVKDECTLKLFKKQCC  455
+            IK   L++DE+ IV LA+KI E+L++ WI  +DIA A++ L G  V+   T+K+F+KQ  
+Sbjct  333  IKRAELIKDESLIVPLARKIMEHLRSLWIEKSDIANAAHFLLGSCVEGLDTIKVFRKQNY  392
+
+Query  456  DTKFAAISLLVQQQMKK  472
+            D K  A+S++VQQ++K+
+Sbjct  393  DKKILAVSVMVQQKLKQ  409
+
+
+> t3 protein [Homo sapiens]
+Length=417
+
+ Score = 340 bits (871),  Expect = 1e-116, Method: Compositional matrix adjust.
+ Identities = 181/317 (57%), Positives = 235/317 (74%), Gaps = 6/317 (2%)
+
+Query  157  TNPRIVVDEIMKEEKKTISDG-EYFLYCTSAKSSSNQHLEILNTFRKEIILILQLYANLR  215
+            TN  +V   I+   +K +S G E F+   S K    +H+E L  F++EI LIL+ YA L 
+Sbjct  98   TNSEMV--NIISNHEKIVSKGTESFIVYASTKMP-REHVECLIMFKEEITLILREYAQLV  154
+
+Query  216  CRQQLLGSFNTNSVNYSDEMIKKMIDIILRIDRNSMSFDKYKNVVREALYVYYLVVTKMT  275
+             RQQLL +FNTNS +YS EMIKKMI+IIL+ID N+M  DKYK+VVREALY+Y+LVV+KMT
+Sbjct  155  RRQQLLRNFNTNSTSYSGEMIKKMINIILKID-NNMPIDKYKDVVREALYIYHLVVSKMT  213
+
+Query  276  GPKHLKRLRTPELHFEYCVVIALLAHNVDIFKKISFPKYRTTNLIQFVSALDCPWYLSVI  335
+            GPKHLKRLRTPELHF++C +IALL+HNV+I K IS  KYR +++IQFVSALDC WYLSV+
+Sbjct  214  GPKHLKRLRTPELHFDFCTLIALLSHNVEIVKNIS-TKYRVSSIIQFVSALDCQWYLSVV  272
+
+Query  336  PNILSVLNRTRSICQTLDFSISDHAKINITLCLLSEIAEKKPNNLILATILYLFPRSLKL  395
+            PNILSV NR+ SICQTL FS   HA++NITLCL   + E    NL+L  ILYLFP  L+ 
+Sbjct  273  PNILSVFNRSNSICQTLCFSYERHAQVNITLCLTYALTEINTTNLVLGVILYLFPECLED  332
+
+Query  396  IKEKGLVRDENTIVLLAKKISEYLKNQWINCNDIACASNLLEGDWVKDECTLKLFKKQCC  455
+            IK   L++DE+ IV LA+KI E+L++ WI  +DIA A++ L G  V+   T+K+F+KQ  
+Sbjct  333  IKRAELIKDESLIVPLARKIMEHLRSLWIEKSDIANAAHFLLGSCVEGLDTIKVFRKQNY  392
+
+Query  456  DTKFAAISLLVQQQMKK  472
+            D K  A+S++VQQ++K+
+Sbjct  393  DKKILAVSVMVQQKLKQ  409
+
+
+> t2 protein [Homo sapiens]
+Length=417
+
+ Score = 340 bits (871),  Expect = 1e-116, Method: Compositional matrix adjust.
+ Identities = 181/317 (57%), Positives = 235/317 (74%), Gaps = 6/317 (2%)
+
+Query  157  TNPRIVVDEIMKEEKKTISDG-EYFLYCTSAKSSSNQHLEILNTFRKEIILILQLYANLR  215
+            TN  +V   I+   +K +S G E F+   S K    +H+E L  F++EI LIL+ YA L 
+Sbjct  98   TNSEMV--NIISNHEKIVSKGTESFIVYASTKMP-REHVECLIMFKEEITLILREYAQLV  154
+
+Query  216  CRQQLLGSFNTNSVNYSDEMIKKMIDIILRIDRNSMSFDKYKNVVREALYVYYLVVTKMT  275
+             RQQLL +FNTNS +YS EMIKKMI+IIL+ID N+M  DKYK+VVREALY+Y+LVV+KMT
+Sbjct  155  RRQQLLRNFNTNSTSYSGEMIKKMINIILKID-NNMPIDKYKDVVREALYIYHLVVSKMT  213
+
+Query  276  GPKHLKRLRTPELHFEYCVVIALLAHNVDIFKKISFPKYRTTNLIQFVSALDCPWYLSVI  335
+            GPKHLKRLRTPELHF++C +IALL+HNV+I K IS  KYR +++IQFVSALDC WYLSV+
+Sbjct  214  GPKHLKRLRTPELHFDFCTLIALLSHNVEIVKNIS-TKYRVSSIIQFVSALDCQWYLSVV  272
+
+Query  336  PNILSVLNRTRSICQTLDFSISDHAKINITLCLLSEIAEKKPNNLILATILYLFPRSLKL  395
+            PNILSV NR+ SICQTL FS   HA++NITLCL   + E    NL+L  ILYLFP  L+ 
+Sbjct  273  PNILSVFNRSNSICQTLCFSYERHAQVNITLCLTYALTEINTTNLVLGVILYLFPECLED  332
+
+Query  396  IKEKGLVRDENTIVLLAKKISEYLKNQWINCNDIACASNLLEGDWVKDECTLKLFKKQCC  455
+            IK   L++DE+ IV LA+KI E+L++ WI  +DIA A++ L G  V+   T+K+F+KQ  
+Sbjct  333  IKRAELIKDESLIVPLARKIMEHLRSLWIEKSDIANAAHFLLGSCVEGLDTIKVFRKQNY  392
+
+Query  456  DTKFAAISLLVQQQMKK  472
+            D K  A+S++VQQ++K+
+Sbjct  393  DKKILAVSVMVQQKLKQ  409
+
+
+> t1 hypothetical protein double space
+Length=417
+
+ Score = 340 bits (871),  Expect = 1e-116, Method: Compositional matrix adjust.
+ Identities = 181/317 (57%), Positives = 235/317 (74%), Gaps = 6/317 (2%)
+
+Query  157  TNPRIVVDEIMKEEKKTISDG-EYFLYCTSAKSSSNQHLEILNTFRKEIILILQLYANLR  215
+            TN  +V   I+   +K +S G E F+   S K    +H+E L  F++EI LIL+ YA L 
+Sbjct  98   TNSEMV--NIISNHEKIVSKGTESFIVYASTKMP-REHVECLIMFKEEITLILREYAQLV  154
+
+Query  216  CRQQLLGSFNTNSVNYSDEMIKKMIDIILRIDRNSMSFDKYKNVVREALYVYYLVVTKMT  275
+             RQQLL +FNTNS +YS EMIKKMI+IIL+ID N+M  DKYK+VVREALY+Y+LVV+KMT
+Sbjct  155  RRQQLLRNFNTNSTSYSGEMIKKMINIILKID-NNMPIDKYKDVVREALYIYHLVVSKMT  213
+
+Query  276  GPKHLKRLRTPELHFEYCVVIALLAHNVDIFKKISFPKYRTTNLIQFVSALDCPWYLSVI  335
+            GPKHLKRLRTPELHF++C +IALL+HNV+I K IS  KYR +++IQFVSALDC WYLSV+
+Sbjct  214  GPKHLKRLRTPELHFDFCTLIALLSHNVEIVKNIS-TKYRVSSIIQFVSALDCQWYLSVV  272
+
+Query  336  PNILSVLNRTRSICQTLDFSISDHAKINITLCLLSEIAEKKPNNLILATILYLFPRSLKL  395
+            PNILSV NR+ SICQTL FS   HA++NITLCL   + E    NL+L  ILYLFP  L+ 
+Sbjct  273  PNILSVFNRSNSICQTLCFSYERHAQVNITLCLTYALTEINTTNLVLGVILYLFPECLED  332
+
+Query  396  IKEKGLVRDENTIVLLAKKISEYLKNQWINCNDIACASNLLEGDWVKDECTLKLFKKQCC  455
+            IK   L++DE+ IV LA+KI E+L++ WI  +DIA A++ L G  V+   T+K+F+KQ  
+Sbjct  333  IKRAELIKDESLIVPLARKIMEHLRSLWIEKSDIANAAHFLLGSCVEGLDTIKVFRKQNY  392
+
+Query  456  DTKFAAISLLVQQQMKK  472
+            D K  A+S++VQQ++K+
+Sbjct  393  DKKILAVSVMVQQKLKQ  409
+
+
+> t0 hypothetical protein
+Length=417
+
+ Score = 340 bits (871),  Expect = 1e-116, Method: Compositional matrix adjust.
+ Identities = 181/317 (57%), Positives = 235/317 (74%), Gaps = 6/317 (2%)
+
+Query  157  TNPRIVVDEIMKEEKKTISDG-EYFLYCTSAKSSSNQHLEILNTFRKEIILILQLYANLR  215
+            TN  +V   I+   +K +S G E F+   S K    +H+E L  F++EI LIL+ YA L 
+Sbjct  98   TNSEMV--NIISNHEKIVSKGTESFIVYASTKMP-REHVECLIMFKEEITLILREYAQLV  154
+
+Query  216  CRQQLLGSFNTNSVNYSDEMIKKMIDIILRIDRNSMSFDKYKNVVREALYVYYLVVTKMT  275
+             RQQLL +FNTNS +YS EMIKKMI+IIL+ID N+M  DKYK+VVREALY+Y+LVV+KMT
+Sbjct  155  RRQQLLRNFNTNSTSYSGEMIKKMINIILKID-NNMPIDKYKDVVREALYIYHLVVSKMT  213
+
+Query  276  GPKHLKRLRTPELHFEYCVVIALLAHNVDIFKKISFPKYRTTNLIQFVSALDCPWYLSVI  335
+            GPKHLKRLRTPELHF++C +IALL+HNV+I K IS  KYR +++IQFVSALDC WYLSV+
+Sbjct  214  GPKHLKRLRTPELHFDFCTLIALLSHNVEIVKNIS-TKYRVSSIIQFVSALDCQWYLSVV  272
+
+Query  336  PNILSVLNRTRSICQTLDFSISDHAKINITLCLLSEIAEKKPNNLILATILYLFPRSLKL  395
+            PNILSV NR+ SICQTL FS   HA++NITLCL   + E    NL+L  ILYLFP  L+ 
+Sbjct  273  PNILSVFNRSNSICQTLCFSYERHAQVNITLCLTYALTEINTTNLVLGVILYLFPECLED  332
+
+Query  396  IKEKGLVRDENTIVLLAKKISEYLKNQWINCNDIACASNLLEGDWVKDECTLKLFKKQCC  455
+            IK   L++DE+ IV LA+KI E+L++ WI  +DIA A++ L G  V+   T+K+F+KQ  
+Sbjct  333  IKRAELIKDESLIVPLARKIMEHLRSLWIEKSDIANAAHFLLGSCVEGLDTIKVFRKQNY  392
+
+Query  456  DTKFAAISLLVQQQMKK  472
+            D K  A+S++VQQ++K+
+Sbjct  393  DKKILAVSVMVQQKLKQ  409
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.132    0.379    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 1434672
+
+
+Query= BDT62529.1 innexin [Metapenaeus ensis majanivirus]
+
+Length=386
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.326    0.141    0.439    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 1135260
+
+
+Query= BDT62562.1 wsv306-like protein [Metapenaeus ensis majanivirus]
+
+Length=408
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+t8 xyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy      17.7    6.3  
+t7 MULTISPECIES: hyp                                                  17.7    6.3  
+t6 TPA: hyp                                                           17.7    6.3  
+t5 hyp (fragment)                                                     17.7    6.3  
+t4 a, b; c                                                            17.7    6.3  
+t3 protein [Homo sapiens]                                             17.7    6.3  
+t2 protein [Homo sapiens]                                             17.7    6.3  
+t1 hypothetical protein double space                                  17.7    6.3  
+t0 hypothetical protein                                               17.7    6.3  
+
+
+> t8 xyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy
+Length=417
+
+ Score = 17.7 bits (34),  Expect = 6.3, Method: Compositional matrix adjust.
+ Identities = 26/104 (25%), Positives = 44/104 (42%), Gaps = 18/104 (17%)
+
+Query  135  FYENLSFHLKEGTLLDAAIQRIINEHKKNNKRNYSNKL--QQINIVDDDNDNISMD----  188
+            F E ++  L+E   L    Q + N +   N  +YS ++  + INI+   ++N+ +D    
+Sbjct  139  FKEEITLILREYAQLVRRQQLLRNFN--TNSTSYSGEMIKKMINIILKIDNNMPIDKYKD  196
+
+Query  189  -----LYVKQLFGRTAKPSSSQDIILTRDLEHDKKRGEYCTLIA  227
+                 LY+  L             + T +L  D     +CTLIA
+Sbjct  197  VVREALYIYHLVVSKMTGPKHLKRLRTPELHFD-----FCTLIA  235
+
+
+ Score = 17.3 bits (33),  Expect = 7.2, Method: Compositional matrix adjust.
+ Identities = 10/37 (27%), Positives = 17/37 (46%), Gaps = 0/37 (0%)
+
+Query  22   NFNQLHYKPNCATVNIFCTSDKDCHLQCSSAVHYANS  58
+            N + L ++ N   VNI    +K       S + YA++
+Sbjct  90   NKSLLSFETNSEMVNIISNHEKIVSKGTESFIVYAST  126
+
+
+> t7 MULTISPECIES: hyp
+Length=417
+
+ Score = 17.7 bits (34),  Expect = 6.3, Method: Compositional matrix adjust.
+ Identities = 26/104 (25%), Positives = 44/104 (42%), Gaps = 18/104 (17%)
+
+Query  135  FYENLSFHLKEGTLLDAAIQRIINEHKKNNKRNYSNKL--QQINIVDDDNDNISMD----  188
+            F E ++  L+E   L    Q + N +   N  +YS ++  + INI+   ++N+ +D    
+Sbjct  139  FKEEITLILREYAQLVRRQQLLRNFN--TNSTSYSGEMIKKMINIILKIDNNMPIDKYKD  196
+
+Query  189  -----LYVKQLFGRTAKPSSSQDIILTRDLEHDKKRGEYCTLIA  227
+                 LY+  L             + T +L  D     +CTLIA
+Sbjct  197  VVREALYIYHLVVSKMTGPKHLKRLRTPELHFD-----FCTLIA  235
+
+
+ Score = 17.3 bits (33),  Expect = 7.2, Method: Compositional matrix adjust.
+ Identities = 10/37 (27%), Positives = 17/37 (46%), Gaps = 0/37 (0%)
+
+Query  22   NFNQLHYKPNCATVNIFCTSDKDCHLQCSSAVHYANS  58
+            N + L ++ N   VNI    +K       S + YA++
+Sbjct  90   NKSLLSFETNSEMVNIISNHEKIVSKGTESFIVYAST  126
+
+
+> t6 TPA: hyp
+Length=417
+
+ Score = 17.7 bits (34),  Expect = 6.3, Method: Compositional matrix adjust.
+ Identities = 26/104 (25%), Positives = 44/104 (42%), Gaps = 18/104 (17%)
+
+Query  135  FYENLSFHLKEGTLLDAAIQRIINEHKKNNKRNYSNKL--QQINIVDDDNDNISMD----  188
+            F E ++  L+E   L    Q + N +   N  +YS ++  + INI+   ++N+ +D    
+Sbjct  139  FKEEITLILREYAQLVRRQQLLRNFN--TNSTSYSGEMIKKMINIILKIDNNMPIDKYKD  196
+
+Query  189  -----LYVKQLFGRTAKPSSSQDIILTRDLEHDKKRGEYCTLIA  227
+                 LY+  L             + T +L  D     +CTLIA
+Sbjct  197  VVREALYIYHLVVSKMTGPKHLKRLRTPELHFD-----FCTLIA  235
+
+
+ Score = 17.3 bits (33),  Expect = 7.2, Method: Compositional matrix adjust.
+ Identities = 10/37 (27%), Positives = 17/37 (46%), Gaps = 0/37 (0%)
+
+Query  22   NFNQLHYKPNCATVNIFCTSDKDCHLQCSSAVHYANS  58
+            N + L ++ N   VNI    +K       S + YA++
+Sbjct  90   NKSLLSFETNSEMVNIISNHEKIVSKGTESFIVYAST  126
+
+
+> t5 hyp (fragment)
+Length=417
+
+ Score = 17.7 bits (34),  Expect = 6.3, Method: Compositional matrix adjust.
+ Identities = 26/104 (25%), Positives = 44/104 (42%), Gaps = 18/104 (17%)
+
+Query  135  FYENLSFHLKEGTLLDAAIQRIINEHKKNNKRNYSNKL--QQINIVDDDNDNISMD----  188
+            F E ++  L+E   L    Q + N +   N  +YS ++  + INI+   ++N+ +D    
+Sbjct  139  FKEEITLILREYAQLVRRQQLLRNFN--TNSTSYSGEMIKKMINIILKIDNNMPIDKYKD  196
+
+Query  189  -----LYVKQLFGRTAKPSSSQDIILTRDLEHDKKRGEYCTLIA  227
+                 LY+  L             + T +L  D     +CTLIA
+Sbjct  197  VVREALYIYHLVVSKMTGPKHLKRLRTPELHFD-----FCTLIA  235
+
+
+ Score = 17.3 bits (33),  Expect = 7.2, Method: Compositional matrix adjust.
+ Identities = 10/37 (27%), Positives = 17/37 (46%), Gaps = 0/37 (0%)
+
+Query  22   NFNQLHYKPNCATVNIFCTSDKDCHLQCSSAVHYANS  58
+            N + L ++ N   VNI    +K       S + YA++
+Sbjct  90   NKSLLSFETNSEMVNIISNHEKIVSKGTESFIVYAST  126
+
+
+> t4 a, b; c
+Length=417
+
+ Score = 17.7 bits (34),  Expect = 6.3, Method: Compositional matrix adjust.
+ Identities = 26/104 (25%), Positives = 44/104 (42%), Gaps = 18/104 (17%)
+
+Query  135  FYENLSFHLKEGTLLDAAIQRIINEHKKNNKRNYSNKL--QQINIVDDDNDNISMD----  188
+            F E ++  L+E   L    Q + N +   N  +YS ++  + INI+   ++N+ +D    
+Sbjct  139  FKEEITLILREYAQLVRRQQLLRNFN--TNSTSYSGEMIKKMINIILKIDNNMPIDKYKD  196
+
+Query  189  -----LYVKQLFGRTAKPSSSQDIILTRDLEHDKKRGEYCTLIA  227
+                 LY+  L             + T +L  D     +CTLIA
+Sbjct  197  VVREALYIYHLVVSKMTGPKHLKRLRTPELHFD-----FCTLIA  235
+
+
+ Score = 17.3 bits (33),  Expect = 7.2, Method: Compositional matrix adjust.
+ Identities = 10/37 (27%), Positives = 17/37 (46%), Gaps = 0/37 (0%)
+
+Query  22   NFNQLHYKPNCATVNIFCTSDKDCHLQCSSAVHYANS  58
+            N + L ++ N   VNI    +K       S + YA++
+Sbjct  90   NKSLLSFETNSEMVNIISNHEKIVSKGTESFIVYAST  126
+
+
+> t3 protein [Homo sapiens]
+Length=417
+
+ Score = 17.7 bits (34),  Expect = 6.3, Method: Compositional matrix adjust.
+ Identities = 26/104 (25%), Positives = 44/104 (42%), Gaps = 18/104 (17%)
+
+Query  135  FYENLSFHLKEGTLLDAAIQRIINEHKKNNKRNYSNKL--QQINIVDDDNDNISMD----  188
+            F E ++  L+E   L    Q + N +   N  +YS ++  + INI+   ++N+ +D    
+Sbjct  139  FKEEITLILREYAQLVRRQQLLRNFN--TNSTSYSGEMIKKMINIILKIDNNMPIDKYKD  196
+
+Query  189  -----LYVKQLFGRTAKPSSSQDIILTRDLEHDKKRGEYCTLIA  227
+                 LY+  L             + T +L  D     +CTLIA
+Sbjct  197  VVREALYIYHLVVSKMTGPKHLKRLRTPELHFD-----FCTLIA  235
+
+
+ Score = 17.3 bits (33),  Expect = 7.2, Method: Compositional matrix adjust.
+ Identities = 10/37 (27%), Positives = 17/37 (46%), Gaps = 0/37 (0%)
+
+Query  22   NFNQLHYKPNCATVNIFCTSDKDCHLQCSSAVHYANS  58
+            N + L ++ N   VNI    +K       S + YA++
+Sbjct  90   NKSLLSFETNSEMVNIISNHEKIVSKGTESFIVYAST  126
+
+
+> t2 protein [Homo sapiens]
+Length=417
+
+ Score = 17.7 bits (34),  Expect = 6.3, Method: Compositional matrix adjust.
+ Identities = 26/104 (25%), Positives = 44/104 (42%), Gaps = 18/104 (17%)
+
+Query  135  FYENLSFHLKEGTLLDAAIQRIINEHKKNNKRNYSNKL--QQINIVDDDNDNISMD----  188
+            F E ++  L+E   L    Q + N +   N  +YS ++  + INI+   ++N+ +D    
+Sbjct  139  FKEEITLILREYAQLVRRQQLLRNFN--TNSTSYSGEMIKKMINIILKIDNNMPIDKYKD  196
+
+Query  189  -----LYVKQLFGRTAKPSSSQDIILTRDLEHDKKRGEYCTLIA  227
+                 LY+  L             + T +L  D     +CTLIA
+Sbjct  197  VVREALYIYHLVVSKMTGPKHLKRLRTPELHFD-----FCTLIA  235
+
+
+ Score = 17.3 bits (33),  Expect = 7.2, Method: Compositional matrix adjust.
+ Identities = 10/37 (27%), Positives = 17/37 (46%), Gaps = 0/37 (0%)
+
+Query  22   NFNQLHYKPNCATVNIFCTSDKDCHLQCSSAVHYANS  58
+            N + L ++ N   VNI    +K       S + YA++
+Sbjct  90   NKSLLSFETNSEMVNIISNHEKIVSKGTESFIVYAST  126
+
+
+> t1 hypothetical protein double space
+Length=417
+
+ Score = 17.7 bits (34),  Expect = 6.3, Method: Compositional matrix adjust.
+ Identities = 26/104 (25%), Positives = 44/104 (42%), Gaps = 18/104 (17%)
+
+Query  135  FYENLSFHLKEGTLLDAAIQRIINEHKKNNKRNYSNKL--QQINIVDDDNDNISMD----  188
+            F E ++  L+E   L    Q + N +   N  +YS ++  + INI+   ++N+ +D    
+Sbjct  139  FKEEITLILREYAQLVRRQQLLRNFN--TNSTSYSGEMIKKMINIILKIDNNMPIDKYKD  196
+
+Query  189  -----LYVKQLFGRTAKPSSSQDIILTRDLEHDKKRGEYCTLIA  227
+                 LY+  L             + T +L  D     +CTLIA
+Sbjct  197  VVREALYIYHLVVSKMTGPKHLKRLRTPELHFD-----FCTLIA  235
+
+
+ Score = 17.3 bits (33),  Expect = 7.2, Method: Compositional matrix adjust.
+ Identities = 10/37 (27%), Positives = 17/37 (46%), Gaps = 0/37 (0%)
+
+Query  22   NFNQLHYKPNCATVNIFCTSDKDCHLQCSSAVHYANS  58
+            N + L ++ N   VNI    +K       S + YA++
+Sbjct  90   NKSLLSFETNSEMVNIISNHEKIVSKGTESFIVYAST  126
+
+
+> t0 hypothetical protein
+Length=417
+
+ Score = 17.7 bits (34),  Expect = 6.3, Method: Compositional matrix adjust.
+ Identities = 26/104 (25%), Positives = 44/104 (42%), Gaps = 18/104 (17%)
+
+Query  135  FYENLSFHLKEGTLLDAAIQRIINEHKKNNKRNYSNKL--QQINIVDDDNDNISMD----  188
+            F E ++  L+E   L    Q + N +   N  +YS ++  + INI+   ++N+ +D    
+Sbjct  139  FKEEITLILREYAQLVRRQQLLRNFN--TNSTSYSGEMIKKMINIILKIDNNMPIDKYKD  196
+
+Query  189  -----LYVKQLFGRTAKPSSSQDIILTRDLEHDKKRGEYCTLIA  227
+                 LY+  L             + T +L  D     +CTLIA
+Sbjct  197  VVREALYIYHLVVSKMTGPKHLKRLRTPELHFD-----FCTLIA  235
+
+
+ Score = 17.3 bits (33),  Expect = 7.2, Method: Compositional matrix adjust.
+ Identities = 10/37 (27%), Positives = 17/37 (46%), Gaps = 0/37 (0%)
+
+Query  22   NFNQLHYKPNCATVNIFCTSDKDCHLQCSSAVHYANS  58
+            N + L ++ N   VNI    +K       S + YA++
+Sbjct  90   NKSLLSFETNSEMVNIISNHEKIVSKGTESFIVYAST  126
+
+
+
+Lambda      K        H        a         alpha
+   0.321    0.135    0.409    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 1208718
+
+
+Query= BDT62620.1 wsv325-like protein [Metapenaeus ensis majanivirus]
+
+Length=436
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.315    0.130    0.377    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 1295370
+
+
+Query= BDT62567.1 wsv332-like protein [Metapenaeus ensis majanivirus]
+
+Length=849
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.317    0.132    0.377    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 2618145
+
+
+Query= BDT62581.1 wsv303-like protein [Metapenaeus ensis majanivirus]
+
+Length=698
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.135    0.391    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 2140344
+
+
+Query= BDT63274.1 hypothetical protein [Armadillidium vulgare clopovirus]
+
+Length=1046
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.310    0.129    0.354    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 3253068
+
+
+Query= BDT62533.1 dUTPase [Metapenaeus ensis majanivirus]
+
+Length=154
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.320    0.140    0.414    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 395676
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/e2e_titles_subject.faa).
+    Posted date:  Unknown
+  Number of letters in database: 3,753
+  Number of sequences in database:  9
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

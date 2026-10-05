@@ -20,6 +20,7 @@ pub(crate) mod extension;
 // BLASTP and TBLASTN use the same protein gapped-score path.
 pub(crate) mod gapalign;
 mod hsp;
+mod query_split;
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:102-3691
 // ```c
 // static void s_HSPListNormalizeScores(...);

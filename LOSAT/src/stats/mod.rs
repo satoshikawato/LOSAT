@@ -13,3 +13,5 @@ pub use search_space::*;
 pub use spouge::*;
 pub use sum_statistics::*;
 pub use tables::*;
+pub mod protein_options;
+pub mod protein_tables;

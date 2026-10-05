@@ -1,0 +1,86 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/punct_hits_subject.fna).
+           3 sequences; 540 total letters
+
+
+
+Query= pep frame +1 of the many query
+
+Length=40
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+,                                                                     88.6    9e-31
+x1 ok                                                                 85.9    1e-29
+;~;                                                                   83.6    8e-29
+
+
+> , 
+Length=180
+
+ Score = 88.6 bits (218),  Expect = 9e-31, Method: Compositional matrix adjust.
+ Identities = 40/40 (100%), Positives = 40/40 (100%), Gaps = 0/40 (0%)
+ Frame = +1
+
+Query  1    WCDMTMSVIQVGGQFKPRTASAYFPYCISLCGKNQIVEHV  40
+            WCDMTMSVIQVGGQFKPRTASAYFPYCISLCGKNQIVEHV
+Sbjct  31   WCDMTMSVIQVGGQFKPRTASAYFPYCISLCGKNQIVEHV  150
+
+
+> x1 ok
+Length=180
+
+ Score = 85.9 bits (211),  Expect = 1e-29, Method: Compositional matrix adjust.
+ Identities = 39/40 (98%), Positives = 39/40 (98%), Gaps = 0/40 (0%)
+ Frame = +1
+
+Query  1    WCDMTMSVIQVGGQFKPRTASAYFPYCISLCGKNQIVEHV  40
+            WCDMTMSVIQVGGQFKPRTASAYFPYCIS CGKNQIVEHV
+Sbjct  31   WCDMTMSVIQVGGQFKPRTASAYFPYCISSCGKNQIVEHV  150
+
+
+> ;~;
+Length=180
+
+ Score = 83.6 bits (205),  Expect = 8e-29, Method: Compositional matrix adjust.
+ Identities = 38/40 (95%), Positives = 39/40 (98%), Gaps = 0/40 (0%)
+ Frame = +1
+
+Query  1    WCDMTMSVIQVGGQFKPRTASAYFPYCISLCGKNQIVEHV  40
+            WCDMT SVIQVGGQFKPRTASA+FPYCISLCGKNQIVEHV
+Sbjct  31   WCDMTPSVIQVGGQFKPRTASAWFPYCISLCGKNQIVEHV  150
+
+
+
+Lambda      K        H        a         alpha
+   0.327    0.138    0.474    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 5247
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/punct_hits_subject.fna).
+    Posted date:  Unknown
+  Number of letters in database: 540
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40

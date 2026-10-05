@@ -12,6 +12,8 @@
 //! - `blastp_args` - BLASTP-specific arguments
 //! - `tblastx_args` - TBLASTX-specific arguments
 
+// NCBI app/blast/blast_app_util.hpp and blastinput/blast_args.cpp: the application layer.
+pub mod app;
 pub mod blast_args;
 pub mod blastn_args;
 pub mod blastp_args;

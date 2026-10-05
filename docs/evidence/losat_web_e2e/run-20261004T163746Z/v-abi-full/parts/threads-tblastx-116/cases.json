@@ -1,0 +1,21 @@
+[
+  {
+    "program": "tblastx",
+    "argv": [
+      "tblastx",
+      "-query",
+      "tests/fasta/outfmt0/tblastx_batch_query.fasta",
+      "-subject",
+      "tests/fasta/outfmt0/tblastx_multi_subject.fasta"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT",
+    "cases": [
+      "tblastx.batch.0",
+      "tblastx.batch.7"
+    ],
+    "frozen": {
+      "0": "c117ab1246890a40d58f82fdb5e716dbbab6a5a863a93f3915028df1527098be",
+      "7": "f4e67cd5eec6d0fd92eade1940c65c9e82bb59a5299106cb0fb49391f9a58a2d"
+    }
+  }
+]

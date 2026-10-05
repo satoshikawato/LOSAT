@@ -200,6 +200,31 @@ _CASES = [
     # 76964; audit (b) F-1) gives a cutoff of 1, not a negative one, to the linking.
     ("cutoff.floor_evalue_1e10", f"-query {I}/cutoff_q150.fa -subject tests/fasta/LC738875.fasta"
                                  " -evalue 1e10 -outfmt 6", ""),
+    # Session S08+: -culling_limit (hspfilter_culling.c: the preliminary writer with merit
+    # N+3 above 1, the hit list cut in the traceback, the pipe with merit N; Int4 merits as
+    # NCBI's binary wraps them). The inputs come from the inventory (range XC, not from
+    # `generate`): 3-kb windows of LC738874 and LC738875 (culling_q0/s0), two queries
+    # against ten subjects with identical copies, reverse complements and mutated copies
+    # (culling_ties, exact ties for the hit list), and three queries against seven subjects
+    # (culling_multi).
+    ("culling.cl1", f"-query {I}/culling_q0.fa -subject {I}/culling_s0.fa -culling_limit 1 -outfmt 6", ""),
+    ("culling.cl2_fmt0", f"-query {I}/culling_q0.fa -subject {I}/culling_s0.fa -culling_limit 2 -outfmt 0", ""),
+    ("culling.cl5_fmt7", f"-query {I}/culling_q0.fa -subject {I}/culling_s0.fa -culling_limit 5 -outfmt 7", ""),
+    ("culling.hex_0x2", f"-query {I}/culling_q0.fa -subject {I}/culling_s0.fa -culling_limit 0x2 -outfmt 6", ""),
+    ("culling.wrap_2147483645", f"-query {I}/culling_q0.fa -subject {I}/culling_s0.fa"
+                                " -culling_limit 2147483645 -outfmt 6", ""),
+    ("culling.wrap_2147483646", f"-query {I}/culling_q0.fa -subject {I}/culling_s0.fa"
+                                " -culling_limit 2147483646 -outfmt 6", ""),
+    ("culling.ties_cl1_mts3_fmt0", f"-query {I}/culling_ties_query.fa -subject {I}/culling_ties_subject.fa"
+                                   " -culling_limit 1 -max_target_seqs 3 -outfmt 0", ""),
+    ("culling.ties_cl2_mts3", f"-query {I}/culling_ties_query.fa -subject {I}/culling_ties_subject.fa"
+                              " -culling_limit 2 -max_target_seqs 3 -outfmt 6", ""),
+    ("culling.ties_cl7_mts5_fmt7", f"-query {I}/culling_ties_query.fa -subject {I}/culling_ties_subject.fa"
+                                   " -culling_limit 7 -max_target_seqs 5 -outfmt 7", ""),
+    ("culling.multi_cl2_mts1", f"-query {I}/culling_multi_query.fa -subject {I}/culling_multi_subject.fa"
+                               " -culling_limit 2 -max_target_seqs 1 -outfmt 6", ""),
+    ("culling.multi_cl5_evalue1000", f"-query {I}/culling_multi_query.fa -subject {I}/culling_multi_subject.fa"
+                                     " -culling_limit 5 -evalue 1000 -outfmt 6", ""),
 ]
 CASES = [(*case, *[""] * (5 - len(case))) for case in _CASES]
 

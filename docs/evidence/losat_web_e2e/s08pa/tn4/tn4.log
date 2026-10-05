@@ -1,0 +1,20 @@
+tbs_final1e7	ncbi	-comp_based_stats 0 -xdrop_gap_final 1e7	rc=0	0.25 s / 69632 KB
+tbs_final1e7	base	-comp_based_stats 0 -xdrop_gap_final 1e7	rc=0	3.04 s / 422272 KB
+tbs_final1e7	final	-comp_based_stats 0 -xdrop_gap_final 1e7	rc=0	0.14 s / 8576 KB
+tbs_final1e7	base	stdout vs NCBI: same (41 lines)
+tbs_final1e7	final	stdout vs NCBI: same (41 lines)
+tbs_final1e8	ncbi	-comp_based_stats 0 -xdrop_gap_final 1e8	rc=0	0.23 s / 69612 KB
+tbs_final1e8	base	-comp_based_stats 0 -xdrop_gap_final 1e8	rc=0	26.94 s / 4067944 KB
+tbs_final1e8	final	-comp_based_stats 0 -xdrop_gap_final 1e8	rc=0	0.12 s / 8556 KB
+tbs_final1e8	base	stdout vs NCBI: same (41 lines)
+tbs_final1e8	final	stdout vs NCBI: same (41 lines)
+tbs_prelim1e8	ncbi	-xdrop_gap 1e8	rc=0	0.42 s / 213928 KB
+tbs_prelim1e8	base	-xdrop_gap 1e8	rc=0	2.76 s / 4064488 KB
+tbs_prelim1e8	final	-xdrop_gap 1e8	rc=0	0.48 s / 8876 KB
+tbs_prelim1e8	base	stdout vs NCBI: same (22 lines)
+tbs_prelim1e8	final	stdout vs NCBI: same (22 lines)
+many_final1e7	ncbi	-comp_based_stats 0 -xdrop_gap_final 1e7	rc=0	0.27 s / 74584 KB
+many_final1e7	base	-comp_based_stats 0 -xdrop_gap_final 1e7	rc=0	27.91 s / 422464 KB
+many_final1e7	final	-comp_based_stats 0 -xdrop_gap_final 1e7	rc=0	2.16 s / 9112 KB
+many_final1e7	base	stdout vs NCBI: same (380 lines)
+many_final1e7	final	stdout vs NCBI: same (380 lines)

@@ -101,7 +101,7 @@ fn display_base(base: u8) -> u8 {
 /// The displayed residue of codon `offset` of `frame` (+1..+3, -1..-3) of `sequence`: the
 /// codon's bases read on the frame's strand (the IUPAC complement on the minus strand) and
 /// translated with the display's table (`display_codon`, which merges D/N, E/Q and I/L).
-fn display_residue(sequence: &[u8], frame: i8, offset: usize, code: &GeneticCode) -> u8 {
+pub(crate) fn display_residue(sequence: &[u8], frame: i8, offset: usize, code: &GeneticCode) -> u8 {
     let first = 3 * offset + frame.unsigned_abs() as usize - 1;
     let masks = std::array::from_fn(|i| {
         if frame > 0 {
@@ -639,9 +639,9 @@ pub(crate) enum TblastxOutputFormat {
 ///             NStr::TruncateSpaces(args[kArgOutputFormat].AsString());
 /// ```
 pub(crate) fn output_format(outfmt: &str) -> TblastxOutputFormat {
-    match outfmt.trim() {
-        "0" => TblastxOutputFormat::Pairwise,
-        "7" => TblastxOutputFormat::TabularWithComments,
+    match crate::blastinput::app::parse_formatting_string(outfmt).map(|choice| choice.number) {
+        Ok(0) => TblastxOutputFormat::Pairwise,
+        Ok(7) => TblastxOutputFormat::TabularWithComments,
         _ => TblastxOutputFormat::Tabular,
     }
 }
@@ -787,6 +787,162 @@ pub(crate) fn final_hit_order(hits: Vec<TblastxHsp>, hitlist_size: usize) -> Vec
         hit_list.sort_by_evalue();
         for mut list in hit_list.hsplist_array {
             crate::algorithm::blastn::hsp::HitListEntry::sort_by_evalue(&mut list);
+            ordered.extend(list.hsps);
+        }
+    }
+    ordered
+}
+
+/// The final HSP list of a run with `-culling_limit` (`culling_limit` > 0) in NCBI's order:
+/// `final_hit_order` with NCBI's culling writer in the preliminary stage and its culling
+/// pipe after the traceback (`hsp_culling.rs`). `query_lengths` are the queries'
+/// nucleotide lengths (the lengths of their frames are the culling trees' ranges).
+///
+/// NCBI reference: c++/src/algo/blast/api/blast_options_local_priv.hpp:1320-1341
+/// ```c
+///     if (s <= 0) {
+///         return;
+///     }
+/// ...
+///     if (m_HitSaveOpts->hsp_filt_opt->culling_opts == NULL) {
+///         BlastHSPCullingOptions* culling = BlastHSPCullingOptionsNew(s);
+///         BlastHSPFilteringOptions_AddCulling(m_HitSaveOpts->hsp_filt_opt,
+///                                             &culling,
+///                                             eBoth);
+/// ```
+/// NCBI reference: c++/src/algo/blast/api/setup_factory.cpp:330-341
+/// ```c
+///         else if (filt_opts->culling_opts &&
+///                  (filt_opts->culling_stage & ePrelimSearch))
+///         {
+///             BlastHSPCullingParams* params =
+///                 BlastHSPCullingParamsNew(opts_memento->m_HitSaveOpts,
+///                      filt_opts->culling_opts,
+///                      opts_memento->m_ExtnOpts->compositionBasedStats,
+///                      opts_memento->m_ScoringOpts->gapped_calculation);
+///             if(params->culling_max > 1){
+///             	params->culling_max += 3;
+///             }
+///             writer_info = BlastHSPCullingInfoNew(params);
+///         }
+/// ```
+/// NCBI reference: c++/src/algo/blast/api/setup_factory.cpp:386-394
+/// ```c
+///         } else if (filt_opts->culling_opts &&
+///                    (filt_opts->culling_stage & eTracebackSearch)) {
+///             BlastHSPCullingParams* params =
+///                 BlastHSPCullingParamsNew(opts_memento->m_HitSaveOpts,
+///                      filt_opts->culling_opts,
+///                      opts_memento->m_ExtnOpts->compositionBasedStats,
+///                      opts_memento->m_ScoringOpts->gapped_calculation);
+///             BlastHSPPipeInfo_Add(&pipe_info,
+///                                  BlastHSPCullingPipeInfoNew(params));
+/// ```
+/// NCBI reference: c++/src/algo/blast/core/hspfilter_culling.c:699-730
+/// ```c
+///    s_BlastHSPCullingInit(data, results);
+///    for (qid = 0; qid < results->num_queries; ++qid) {
+///          if (!(results->hitlist_array[qid])) continue;
+///          num_list = results->hitlist_array[qid]->hsplist_count;
+///          for (sid = 0; sid < num_list; ++sid) {
+///         	 hsp_list = results->hitlist_array[qid]->hsplist_array[sid];
+///         	 Blast_HSPListSortByEvalue(hsp_list);
+///         	 hsp_list->best_evalue = hsp_list->hsp_array[0]->evalue;
+///          }
+///          Blast_HitListSortByEvalue(results->hitlist_array[qid]);
+///    }
+///
+///    for (qid = 0; qid < results->num_queries; ++qid) {
+/// ...
+///       for (sid = 0; sid < num_list; ++sid) {
+///          s_BlastHSPCullingRun(data,
+///                    results->hitlist_array[qid]->hsplist_array[sid]);
+/// ...
+///    s_BlastHSPCullingFinal(data, results);
+/// ```
+/// NCBI reference: c++/src/algo/blast/core/blast_traceback.c:1720-1721
+/// ```c
+///         /* post-traceback pipes */
+///         BlastHSPStreamTBackClose(hsp_stream, results);
+/// ```
+/// The culling writer replaces the preliminary hit list (the collector): each subject's
+/// HSPs (after the `-evalue` reap, in score order) go into the trees, subject by subject
+/// in OID order, with the merit `culling_max` (+3 above 1, an `Int4` that NCBI's binary
+/// wraps). The trees' HSPs then reach the hit list of the traceback in OID order, where
+/// the `-max_target_seqs` cut is made (`Blast_HitListUpdate`), and the pipe culls the kept
+/// lists again, sorted by e-value, with the merit `culling_limit`. The rest is
+/// `final_hit_order`'s: the lists sorted by e-value (their HSPs in score order) and each
+/// list's HSPs sorted by e-value. The trees belong to the query's contexts, so the
+/// queries are culled one after another.
+pub(crate) fn culled_hit_order(
+    hits: Vec<TblastxHsp>,
+    hitlist_size: usize,
+    culling_limit: i32,
+    query_lengths: &[usize],
+) -> Vec<TblastxHsp> {
+    use super::hsp_culling::{tblastx_context_lengths, CullingWriter};
+    use crate::algorithm::blastn::hsp::{HitList, HitListEntry};
+    type Subjects = std::collections::BTreeMap<u32, Vec<TblastxHsp>>;
+    let mut lists: std::collections::BTreeMap<u32, Subjects> = std::collections::BTreeMap::new();
+    for hsp in hits {
+        lists
+            .entry(hsp.hit.q_idx)
+            .or_default()
+            .entry(hsp.hit.s_idx)
+            .or_default()
+            .push(hsp);
+    }
+    let prelim_max = if culling_limit > 1 {
+        culling_limit.wrapping_add(3)
+    } else {
+        culling_limit
+    };
+    let mut ordered = Vec::new();
+    for (q_idx, subjects) in lists {
+        let context_lengths = tblastx_context_lengths(query_lengths[q_idx as usize]);
+        let mut writer = CullingWriter::new(prelim_max, context_lengths);
+        for (oid, mut hsps) in subjects {
+            hsps.sort_by(|a, b| crate::common::score_compare_hsps(&a.hit, &b.hit));
+            writer.run(hsps, oid);
+        }
+        let mut culled = writer.finalize();
+        culled.sort_by_key(|(oid, _)| *oid);
+        let mut hit_list: HitList<TblastxHspList> = HitList::new(hitlist_size);
+        for (oid, hsps) in culled {
+            hit_list.update(TblastxHspList {
+                oid,
+                hsps,
+                best_evalue: 0.0,
+            });
+        }
+        let mut kept = hit_list.hsplist_array;
+        for list in &mut kept {
+            HitListEntry::sort_by_evalue(list);
+            list.best_evalue = list.hsps[0].hit.e_value;
+        }
+        let mut pipe_lists: HitList<TblastxHspList> = HitList::new(hitlist_size);
+        pipe_lists.hsplist_count = kept.len();
+        pipe_lists.hsplist_array = kept;
+        pipe_lists.sort_by_evalue();
+        let mut pipe = CullingWriter::new(culling_limit, context_lengths);
+        for list in pipe_lists.hsplist_array {
+            pipe.run(list.hsps, list.oid);
+        }
+        let mut final_lists: HitList<TblastxHspList> = HitList::new(hitlist_size);
+        for (oid, hsps) in pipe.finalize() {
+            let mut list = TblastxHspList {
+                oid,
+                hsps,
+                best_evalue: 0.0,
+            };
+            list.update_best_evalue();
+            final_lists.hsplist_array.push(list);
+        }
+        final_lists.hsplist_count = final_lists.hsplist_array.len();
+        final_lists.sort_by_evalue();
+        final_lists.prune_by_size(hitlist_size);
+        for mut list in final_lists.hsplist_array {
+            HitListEntry::sort_by_evalue(&mut list);
             ordered.extend(list.hsps);
         }
     }

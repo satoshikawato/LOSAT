@@ -100,18 +100,20 @@ fn cli_help_and_version_are_available_without_inputs() {
     );
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:275-285
+// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3631-3639
 // ```c
-// if (m_QueryIsProtein && args[kArgWordSize].AsInteger() > 4){
-//     opt.SetLookupTableType(eCompressedAaLookupTable);
-//     opt.SetWordThreshold(19.3);
-//     if (args[kArgWordSize].AsInteger() > 5) {
-//         opt.SetWordThreshold(21.0);
+//     NON_CONST_ITERATE(TBlastCmdLineArgs, arg, m_Args) {
+//         (*arg)->ExtractAlgorithmOptions(args, opts);
 //     }
-// }
+//
+//     m_IsUngapped = !opts.GetGappedMode();
+//     try { retval->Validate(); }
 // ```
+// NCBI's handlers read the subjects and open the query before the options are checked, so a
+// missing file is reported first; LOSAT's rejection of an option that NCBI runs comes where
+// NCBI checks the options.
 #[test]
-fn unsupported_blastp_option_fails_before_file_io() {
+fn unsupported_blastp_option_fails_after_ncbis_file_checks() {
     let missing_query = temp_path("missing_query", "faa");
     let missing_subject = temp_path("missing_subject", "faa");
     let output = clean_losat_command()
@@ -122,17 +124,36 @@ fn unsupported_blastp_option_fails_before_file_io() {
         .args(["-word_size", "7"])
         .output()
         .expect("run unsupported blastp");
+    assert!(!output.status.success(), "a missing subject should fail");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("not supported by LOSAT's BLASTP"),
+        "the subject is read before the options are checked: {stderr}"
+    );
 
+    let query = temp_path("word7_query", "faa");
+    let subject = temp_path("word7_subject", "faa");
+    std::fs::write(&query, ">q\nMKTAYIAKQRQISFVKSHFSRQ\n").unwrap();
+    std::fs::write(&subject, ">s\nMKTAYIAKQRQISFVKSHFSRQ\n").unwrap();
+    let output = clean_losat_command()
+        .args(["blastp", "-query"])
+        .arg(&query)
+        .arg("-subject")
+        .arg(&subject)
+        .args(["-word_size", "7"])
+        .output()
+        .expect("run unsupported blastp");
+    let _ = std::fs::remove_file(&query);
+    let _ = std::fs::remove_file(&subject);
     assert!(!output.status.success(), "unsupported blastp should fail");
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("unsupported pure-Rust blastp word_size=7"),
+        stderr.contains(
+            "-word_size 7 (the compressed lookup table) is not supported by LOSAT's BLASTP"
+        ),
         "unsupported error should name program, option, and reason: {stderr}"
     );
-    assert!(
-        !stderr.contains("failed to open query FASTA"),
-        "unsupported option should fail before file I/O: {stderr}"
-    );
+    assert!(output.stdout.is_empty(), "nothing is written: {stderr}");
 }
 
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/blastinput/blast_input_aux.cpp:242-246

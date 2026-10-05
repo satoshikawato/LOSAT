@@ -44,10 +44,18 @@ pub fn register(program: &str, role: u32, bytes: &[u8]) -> Result<(u32, String),
         other => return Err(format!("unknown input role {other}")),
     };
     use LOSAT::algorithm::blastn::input as blastn_input;
-    // The nucleotide programs whose CLI reads its FASTA inputs as BLASTN's does.
-    let nucleotide = match program {
-        Program::Blastn => Some("BLASTN"),
-        Program::Tblastx => Some("TBLASTX"),
+    // The nucleotide inputs that the CLI reads as BLASTN's does (TBLASTN's subjects too).
+    let nucleotide = match (program, role) {
+        (Program::Blastn, _) => Some("BLASTN"),
+        (Program::Tblastx, _) => Some("TBLASTX"),
+        (Program::Tblastn, ROLE_SUBJECT) => Some("TBLASTN"),
+        _ => None,
+    };
+    // The protein inputs that the CLI checks with NCBI's protein reader rules
+    // (`blastn/input.rs`: `check_protein_sequence_lines_of`, `check_protein_input_of`).
+    let protein = match (program, role) {
+        (Program::Blastp, _) => Some("BLASTP"),
+        (Program::Tblastn, ROLE_QUERY) => Some("TBLASTN"),
         _ => None,
     };
     // BLASTN and TBLASTX reject the inputs that NCBI BLAST+ reads differently from bio, in
@@ -63,9 +71,14 @@ pub fn register(program: &str, role: u32, bytes: &[u8]) -> Result<(u32, String),
             bytes, role_name, name,
         ))?;
     }
-    // BLASTN and TBLASTX, as the CLI: a file of white space only has no record (NCBI's
-    // empty query, or its error for no subject at run time).
-    let records = if nucleotide.is_some() && blank {
+    if let (Some(name), false) = (protein, blank) {
+        check(blastn_input::check_protein_sequence_lines_of(
+            bytes, role_name, name,
+        ))?;
+    }
+    // As the CLI: a file of white space only has no record (NCBI's empty query, or its
+    // error for no subject at run time).
+    let records = if (nucleotide.is_some() || protein.is_some()) && blank {
         Vec::new()
     } else {
         // BLASTP, TBLASTN, BLASTN and TBLASTX read their inputs with bio::io::fasta.
@@ -93,6 +106,17 @@ pub fn register(program: &str, role: u32, bytes: &[u8]) -> Result<(u32, String),
         check(blastn_input::check_records_have_residues_of(
             &records, role_name, name,
         ))?;
+    }
+    if let (Some(name), false) = (protein, blank) {
+        check(blastn_input::check_protein_input_of(
+            bytes, &records, role_name, name,
+        ))?;
+        // A subject without residues is NCBI's warning at run time (`run_local`).
+        if role == ROLE_QUERY {
+            check(blastn_input::check_records_have_residues_of(
+                &records, role_name, name,
+            ))?;
+        }
     }
     let mut response = String::from("{\"handle\":");
     let mut store = store().lock().expect("input store");
@@ -217,16 +241,16 @@ mod tests {
         assert!(check_scan("query", &recounted, &records).is_err());
     }
 
-    // BLASTN refuses a record that NCBI BLAST+ reads differently; the other programs
-    // keep their readers.
+    // BLASTN refuses a record that NCBI BLAST+ reads differently.
     #[test]
     fn blastn_register_rejects_records_that_ncbi_reads_differently() {
         let bytes = b">q\tt\nACXGT\n";
         let error = register("blastn", ROLE_QUERY, bytes).unwrap_err();
         assert!(error.contains("not supported by LOSAT's BLASTN"), "{error}");
         assert!(register("blastn", ROLE_QUERY, b">q t\nACGUT\n").is_ok());
-        // Another program's handle cannot bring the record to a BLASTN run.
-        let (query, _) = register("blastp", ROLE_QUERY, bytes).unwrap();
+        // Another program's handle cannot bring a record to a BLASTN run (BLASTP also
+        // refuses the tab in the defline of `bytes`, so its record has none).
+        let (query, _) = register("blastp", ROLE_QUERY, b">q t\nACXGT\n").unwrap();
         let (subject, _) = register("blastn", ROLE_SUBJECT, b">s\nACGT\n").unwrap();
         let error = with_inputs(Program::Blastn, query, subject, |_, _| ()).unwrap_err();
         assert!(

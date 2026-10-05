@@ -980,11 +980,32 @@ fn hsplist_from_distinct_alignments(
     // }
     // BlastCompo_AlignmentsFree(alignments, s_FreeEditScript);
     // ```
+    // NCBI reference: c++/src/algo/blast/core/blast_kappa.c:332-342
+    // ```c
+    //         switch (align->matrix_adjust_rule) {
+    //         case eDontAdjustMatrix:
+    //             new_hsp->comp_adjustment_method = eNoCompositionBasedStats;
+    //             break;
+    //         case eCompoScaleOldMatrix:
+    //             new_hsp->comp_adjustment_method = eCompositionBasedStats;
+    //             break;
+    //         default:
+    //             new_hsp->comp_adjustment_method = eCompositionMatrixAdjust;
+    //             break;
+    //         }
+    // ```
     let mut current = alignments.take();
     while let Some(mut align) = current {
         current = align.next.take();
+        let comp_adjustment_method = match align.matrix_adjust_rule {
+            EMatrixAdjustRule::DontAdjustMatrix => 0,
+            EMatrixAdjustRule::CompoScaleOldMatrix => 1,
+            _ => 2,
+        };
         if let Some(redone_hit) = redone_hit_from_alignment_owned(*align, template_hit) {
-            hsp_list.hsps.push(BlastpHsp::from_hit(redone_hit.hit));
+            let mut hsp = BlastpHsp::from_hit(redone_hit.hit);
+            hsp.comp_adjustment_method = comp_adjustment_method;
+            hsp_list.hsps.push(hsp);
         }
     }
     sort_hsplist_by_score(&mut hsp_list);

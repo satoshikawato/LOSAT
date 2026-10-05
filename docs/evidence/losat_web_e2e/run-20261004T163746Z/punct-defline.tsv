@@ -1,0 +1,9 @@
+program	outfmt	ncbi_exit	losat_exit	result
+tblastx	0	-11	0	ncbi-crash, exception-2
+tblastx	6	0	0	same
+tblastx	7	0	0	same
+tblastn	0	-11	0	ncbi-crash, exception-2
+tblastn	6	0	0	same
+tblastn	7	0	0	same
+# unexpected=0
+exit 0

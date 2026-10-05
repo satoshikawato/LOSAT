@@ -1,0 +1,3 @@
+# tblastx deflines=1023 same=957 exception-2=66 unexpected=0
+# tblastn deflines=1023 same=957 exception-2=66 unexpected=0
+exit 0

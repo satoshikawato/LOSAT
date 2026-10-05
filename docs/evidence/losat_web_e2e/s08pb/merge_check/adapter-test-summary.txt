@@ -1,0 +1,4 @@
+test store::tests::blastn_register_rejects_records_that_ncbi_reads_differently ... FAILED
+thread 'store::tests::blastn_register_rejects_records_that_ncbi_reads_differently' (1421564) panicked at src/store.rs:253:64:
+test result: FAILED. 4 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+exit 101

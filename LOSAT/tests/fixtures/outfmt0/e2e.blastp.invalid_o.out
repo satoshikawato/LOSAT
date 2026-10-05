@@ -1,0 +1,186 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/e2e_protein_subject.faa).
+           13 sequences; 11,222 total letters
+
+
+
+Query= q1 allx
+
+Length=30
+
+
+***** No hits found *****
+
+
+
+
+
+Effective search space used: 0
+
+
+Query= q2 withO
+
+Length=60
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT62167.1 wsv343-like protein [Litopenaeus vannamei majanivirus ...  20.8    0.11 
+BDT62149.1 dUTPase [Litopenaeus vannamei majanivirus Nimav-1_LVa]     15.4    9.0  
+
+
+> BDT62167.1 wsv343-like protein [Litopenaeus vannamei majanivirus 
+Nimav-1_LVa]
+Length=4337
+
+ Score = 20.8 bits (42),  Expect = 0.11, Method: Compositional matrix adjust.
+ Identities = 9/19 (47%), Positives = 11/19 (58%), Gaps = 0/19 (0%)
+
+Query  28    NNNKDDRDDVDDDDDDDDD  46
+             NN K  R  VDDD++D   
+Sbjct  2062  NNKKRKRSTVDDDNEDQSK  2080
+
+
+ Score = 20.4 bits (41),  Expect = 0.13, Method: Compositional matrix adjust.
+ Identities = 14/51 (27%), Positives = 26/51 (51%), Gaps = 1/51 (2%)
+
+Query  5     DNDDDYMSISSGDNDDEVKDTILNNNKDDRDDVDDDDDDDDDSDIEFDIDT  55
+             + DDDY  I S ++ +E+K  I N NK   D  +   ++    ++ + + T
+Sbjct  1923  ETDDDY-KIFSKEDKEEIKRAIANWNKIVEDTANSIVNEYVVENVHYPLFT  1972
+
+
+ Score = 18.9 bits (37),  Expect = 0.53, Method: Compositional matrix adjust.
+ Identities = 12/34 (35%), Positives = 17/34 (50%), Gaps = 0/34 (0%)
+
+Query  13    ISSGDNDDEVKDTILNNNKDDRDDVDDDDDDDDD  46
+             ISS  N ++VK T     K  RD+    D+D+  
+Sbjct  2000  ISSKKNTEDVKRTKRRITKRKRDENAQLDNDEQQ  2033
+
+
+ Score = 16.2 bits (30),  Expect = 4.1, Method: Compositional matrix adjust.
+ Identities = 7/14 (50%), Positives = 8/14 (57%), Gaps = 0/14 (0%)
+
+Query  29    NNKDDRDDVDDDDD  42
+             N K  R + D DDD
+Sbjct  1262  NRKKKRSEYDGDDD  1275
+
+
+> BDT62149.1 dUTPase [Litopenaeus vannamei majanivirus Nimav-1_LVa]
+Length=462
+
+ Score = 15.4 bits (28),  Expect = 9.0, Method: Compositional matrix adjust.
+ Identities = 6/19 (32%), Positives = 9/19 (47%), Gaps = 0/19 (0%)
+
+Query  4   SDNDDDYMSISSGDNDDEV  22
+           + N+D YM      ND  +
+Sbjct  7   AKNNDYYMGFYKVHNDAFI  25
+
+
+
+Lambda      K        H        a         alpha
+   0.305    0.133    0.365    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 280280
+
+
+Query= q3 manyO
+
+Length=60
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT62167.1 wsv343-like protein [Litopenaeus vannamei majanivirus ...  20.8    0.083
+BDT62149.1 dUTPase [Litopenaeus vannamei majanivirus Nimav-1_LVa]     15.4    9.4  
+
+
+> BDT62167.1 wsv343-like protein [Litopenaeus vannamei majanivirus 
+Nimav-1_LVa]
+Length=4337
+
+ Score = 20.8 bits (42),  Expect = 0.083, Method: Compositional matrix adjust.
+ Identities = 14/51 (27%), Positives = 26/51 (51%), Gaps = 1/51 (2%)
+
+Query  5     DNDDDYMSISSGDNDDEVKDTIONNNKDDRDDVDDDDDDDDDSDIEFDIDT  55
+             + DDDY  I S ++ +E+K  I N NK   D  +   ++    ++ + + T
+Sbjct  1923  ETDDDY-KIFSKEDKEEIKRAIANWNKIVEDTANSIVNEYVVENVHYPLFT  1972
+
+
+ Score = 20.4 bits (41),  Expect = 0.12, Method: Compositional matrix adjust.
+ Identities = 9/18 (50%), Positives = 11/18 (61%), Gaps = 0/18 (0%)
+
+Query  28    NNNKDDRDDVDDDDDDDD  45
+             NN K  R  VDDD++D  
+Sbjct  2062  NNKKRKRSTVDDDNEDQS  2079
+
+
+ Score = 19.2 bits (38),  Expect = 0.31, Method: Compositional matrix adjust.
+ Identities = 12/34 (35%), Positives = 17/34 (50%), Gaps = 0/34 (0%)
+
+Query  13    ISSGDNDDEVKDTIONNNKDDRDDVDDDDDDDDD  46
+             ISS  N ++VK T     K  RD+    D+D+  
+Sbjct  2000  ISSKKNTEDVKRTKRRITKRKRDENAQLDNDEQQ  2033
+
+
+ Score = 16.2 bits (30),  Expect = 4.6, Method: Compositional matrix adjust.
+ Identities = 7/14 (50%), Positives = 8/14 (57%), Gaps = 0/14 (0%)
+
+Query  29    NNKDDRDDVDDDDD  42
+             N K  R + D DDD
+Sbjct  1262  NRKKKRSEYDGDDD  1275
+
+
+> BDT62149.1 dUTPase [Litopenaeus vannamei majanivirus Nimav-1_LVa]
+Length=462
+
+ Score = 15.4 bits (28),  Expect = 9.4, Method: Compositional matrix adjust.
+ Identities = 6/19 (32%), Positives = 9/19 (47%), Gaps = 0/19 (0%)
+
+Query  4   SDNDDDYMSISSGDNDDEV  22
+           + N+D YM      ND  +
+Sbjct  7   AKNNDYYMGFYKVHNDAFI  25
+
+
+
+Lambda      K        H        a         alpha
+   0.304    0.133    0.363    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 280280
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/e2e_protein_subject.faa).
+    Posted date:  Unknown
+  Number of letters in database: 11,222
+  Number of sequences in database:  13
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

@@ -1,0 +1,1085 @@
+0	's1'	same
+1	's1  '	same
+2	's1 hypothetical protein'	same
+3	's1 hypothetical protein.'	same
+4	's1 hypothetical protein,'	same
+5	's1 hypothetical protein;'	same
+6	's1 hypothetical protein~'	same
+7	's1 hypothetical protein . , ; ~ '	same
+8	's1 hypothetical  protein   double  space'	same
+9	's1 hypothetical protein [Homo sapiens]'	same
+10	's1 hypothetical protein [Homo sapiens].'	same
+11	's1 protein. [Homo sapiens]'	same
+12	's1 protein, [Homo sapiens]'	same
+13	's1 [Homo sapiens]'	same
+14	's1 x [a] [b]'	same
+15	's1 partial'	same
+16	's1 protein, partial'	same
+17	's1 &amp; protein'	losat-rejects
+18	's1 a &lt; b'	losat-rejects
+19	's1 a < b > c & d "q" \'r\''	same
+20	's1 MULTISPECIES: hypothetical protein'	same
+21	's1 TPA: hyp'	same
+22	's1 UNVERIFIED: hyp'	same
+23	's1 MAG: hyp'	same
+24	's1 MAG hyp'	same
+25	's1 TPA_exp: hyp'	same
+26	's1 TSA: hyp'	same
+27	's1 LOW QUALITY PROTEIN: hyp'	same
+28	's1 PREDICTED: hyp'	same
+29	's1 hyp (fragment)'	same
+30	's1 hyp ( fragment )'	same
+31	's1 a ,b'	same
+32	's1 a ;b'	same
+33	's1 a,,b'	same
+34	's1 a, ,b'	same
+35	's1 ( x'	same
+36	's1 x )'	same
+37	's1 uncharacterized protein'	same
+38	's1 Hypothetical protein'	same
+39	's1 ABC'	same
+40	's1 A'	same
+41	's1 .'	same
+42	's1 ,'	same
+43	's1 ...'	same
+44	's1 ('	same
+45	's1 )'	same
+46	's1 !!!'	same
+47	's1 ?'	same
+48	's1 <>'	same
+49	's1 &'	same
+50	's1 &&'	same
+51	's1 &#65;'	same
+52	's1 &nbsp;x'	losat-rejects
+53	's1 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'	same
+54	's1 word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word '	same
+55	's1 a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z'	same
+56	's1 a-b-c-d-e-f-g-h-i-j-k-l-m-n-o-p-q-r-s-t-u-v-w-x-y-z-a-b-c-d-e-f-g-h-i-j-k-l-m-n-o-p-q-r-s-t-u-v-w-x-y-z'	same
+57	's1 word word word word word word word word word word word word word end'	same
+58	's1 wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww vvvvvvvvvvvvvvvvvvvv'	same
+59	's1 wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww tail'	same
+60	','	same
+61	';'	same
+62	'~'	same
+63	',,'	same
+64	',;'	same
+65	',~'	same
+66	', '	same
+67	';,'	same
+68	';;'	same
+69	';~'	same
+70	'; '	same
+71	'~,'	same
+72	'~;'	same
+73	'~~'	same
+74	'~ '	same
+75	',,,'	same
+76	',,;'	same
+77	',,~'	same
+78	',, '	same
+79	',;,'	same
+80	',;;'	same
+81	',;~'	same
+82	',; '	same
+83	',~,'	same
+84	',~;'	same
+85	',~~'	same
+86	',~ '	same
+87	', ,'	losat-rejects
+88	', ;'	same
+89	', ~'	same
+90	',  '	same
+91	';,,'	same
+92	';,;'	same
+93	';,~'	same
+94	';, '	same
+95	';;,'	same
+96	';;;'	same
+97	';;~'	same
+98	';; '	same
+99	';~,'	same
+100	';~;'	same
+101	';~~'	same
+102	';~ '	same
+103	'; ,'	same
+104	'; ;'	losat-rejects
+105	'; ~'	same
+106	';  '	same
+107	'~,,'	same
+108	'~,;'	same
+109	'~,~'	same
+110	'~, '	same
+111	'~;,'	same
+112	'~;;'	same
+113	'~;~'	same
+114	'~; '	same
+115	'~~,'	same
+116	'~~;'	same
+117	'~~~'	same
+118	'~~ '	same
+119	'~ ,'	same
+120	'~ ;'	same
+121	'~ ~'	same
+122	'~  '	same
+123	',,,,'	same
+124	',,,;'	same
+125	',,,~'	same
+126	',,, '	same
+127	',,;,'	same
+128	',,;;'	same
+129	',,;~'	same
+130	',,; '	same
+131	',,~,'	same
+132	',,~;'	same
+133	',,~~'	same
+134	',,~ '	same
+135	',, ,'	losat-rejects
+136	',, ;'	same
+137	',, ~'	same
+138	',,  '	same
+139	',;,,'	same
+140	',;,;'	same
+141	',;,~'	same
+142	',;, '	same
+143	',;;,'	same
+144	',;;;'	same
+145	',;;~'	same
+146	',;; '	same
+147	',;~,'	same
+148	',;~;'	same
+149	',;~~'	same
+150	',;~ '	same
+151	',; ,'	same
+152	',; ;'	losat-rejects
+153	',; ~'	same
+154	',;  '	same
+155	',~,,'	same
+156	',~,;'	same
+157	',~,~'	same
+158	',~, '	same
+159	',~;,'	same
+160	',~;;'	same
+161	',~;~'	same
+162	',~; '	same
+163	',~~,'	same
+164	',~~;'	same
+165	',~~~'	same
+166	',~~ '	same
+167	',~ ,'	same
+168	',~ ;'	same
+169	',~ ~'	same
+170	',~  '	same
+171	', ,,'	losat-rejects
+172	', ,;'	same
+173	', ,~'	same
+174	', , '	losat-rejects
+175	', ;,'	same
+176	', ;;'	same
+177	', ;~'	same
+178	', ; '	same
+179	', ~,'	same
+180	', ~;'	same
+181	', ~~'	same
+182	', ~ '	same
+183	',  ,'	losat-rejects
+184	',  ;'	same
+185	',  ~'	same
+186	',   '	same
+187	';,,,'	same
+188	';,,;'	same
+189	';,,~'	same
+190	';,, '	same
+191	';,;,'	same
+192	';,;;'	same
+193	';,;~'	same
+194	';,; '	same
+195	';,~,'	same
+196	';,~;'	same
+197	';,~~'	same
+198	';,~ '	same
+199	';, ,'	losat-rejects
+200	';, ;'	same
+201	';, ~'	same
+202	';,  '	same
+203	';;,,'	same
+204	';;,;'	same
+205	';;,~'	same
+206	';;, '	same
+207	';;;,'	same
+208	';;;;'	same
+209	';;;~'	same
+210	';;; '	same
+211	';;~,'	same
+212	';;~;'	same
+213	';;~~'	same
+214	';;~ '	same
+215	';; ,'	same
+216	';; ;'	losat-rejects
+217	';; ~'	same
+218	';;  '	same
+219	';~,,'	same
+220	';~,;'	same
+221	';~,~'	same
+222	';~, '	same
+223	';~;,'	same
+224	';~;;'	same
+225	';~;~'	same
+226	';~; '	same
+227	';~~,'	same
+228	';~~;'	same
+229	';~~~'	same
+230	';~~ '	same
+231	';~ ,'	same
+232	';~ ;'	same
+233	';~ ~'	same
+234	';~  '	same
+235	'; ,,'	same
+236	'; ,;'	same
+237	'; ,~'	same
+238	'; , '	same
+239	'; ;,'	same
+240	'; ;;'	losat-rejects
+241	'; ;~'	same
+242	'; ; '	losat-rejects
+243	'; ~,'	same
+244	'; ~;'	same
+245	'; ~~'	same
+246	'; ~ '	same
+247	';  ,'	same
+248	';  ;'	losat-rejects
+249	';  ~'	same
+250	';   '	same
+251	'~,,,'	same
+252	'~,,;'	same
+253	'~,,~'	same
+254	'~,, '	same
+255	'~,;,'	same
+256	'~,;;'	same
+257	'~,;~'	same
+258	'~,; '	same
+259	'~,~,'	same
+260	'~,~;'	same
+261	'~,~~'	same
+262	'~,~ '	same
+263	'~, ,'	losat-rejects
+264	'~, ;'	same
+265	'~, ~'	same
+266	'~,  '	same
+267	'~;,,'	same
+268	'~;,;'	same
+269	'~;,~'	same
+270	'~;, '	same
+271	'~;;,'	same
+272	'~;;;'	same
+273	'~;;~'	same
+274	'~;; '	same
+275	'~;~,'	same
+276	'~;~;'	same
+277	'~;~~'	same
+278	'~;~ '	same
+279	'~; ,'	same
+280	'~; ;'	losat-rejects
+281	'~; ~'	same
+282	'~;  '	same
+283	'~~,,'	same
+284	'~~,;'	same
+285	'~~,~'	same
+286	'~~, '	same
+287	'~~;,'	same
+288	'~~;;'	same
+289	'~~;~'	same
+290	'~~; '	same
+291	'~~~,'	same
+292	'~~~;'	same
+293	'~~~~'	same
+294	'~~~ '	same
+295	'~~ ,'	same
+296	'~~ ;'	same
+297	'~~ ~'	same
+298	'~~  '	same
+299	'~ ,,'	same
+300	'~ ,;'	same
+301	'~ ,~'	same
+302	'~ , '	same
+303	'~ ;,'	same
+304	'~ ;;'	same
+305	'~ ;~'	same
+306	'~ ; '	same
+307	'~ ~,'	same
+308	'~ ~;'	same
+309	'~ ~~'	same
+310	'~ ~ '	same
+311	'~  ,'	same
+312	'~  ;'	same
+313	'~  ~'	same
+314	'~   '	same
+315	',,,,,'	same
+316	',,,,;'	same
+317	',,,,~'	same
+318	',,,, '	same
+319	',,,;,'	same
+320	',,,;;'	same
+321	',,,;~'	same
+322	',,,; '	same
+323	',,,~,'	same
+324	',,,~;'	same
+325	',,,~~'	same
+326	',,,~ '	same
+327	',,, ,'	losat-rejects
+328	',,, ;'	same
+329	',,, ~'	same
+330	',,,  '	same
+331	',,;,,'	same
+332	',,;,;'	same
+333	',,;,~'	same
+334	',,;, '	same
+335	',,;;,'	same
+336	',,;;;'	same
+337	',,;;~'	same
+338	',,;; '	same
+339	',,;~,'	same
+340	',,;~;'	same
+341	',,;~~'	same
+342	',,;~ '	same
+343	',,; ,'	same
+344	',,; ;'	losat-rejects
+345	',,; ~'	same
+346	',,;  '	same
+347	',,~,,'	same
+348	',,~,;'	same
+349	',,~,~'	same
+350	',,~, '	same
+351	',,~;,'	same
+352	',,~;;'	same
+353	',,~;~'	same
+354	',,~; '	same
+355	',,~~,'	same
+356	',,~~;'	same
+357	',,~~~'	same
+358	',,~~ '	same
+359	',,~ ,'	same
+360	',,~ ;'	same
+361	',,~ ~'	same
+362	',,~  '	same
+363	',, ,,'	losat-rejects
+364	',, ,;'	same
+365	',, ,~'	same
+366	',, , '	losat-rejects
+367	',, ;,'	same
+368	',, ;;'	same
+369	',, ;~'	same
+370	',, ; '	same
+371	',, ~,'	same
+372	',, ~;'	same
+373	',, ~~'	same
+374	',, ~ '	same
+375	',,  ,'	losat-rejects
+376	',,  ;'	same
+377	',,  ~'	same
+378	',,   '	same
+379	',;,,,'	same
+380	',;,,;'	same
+381	',;,,~'	same
+382	',;,, '	same
+383	',;,;,'	same
+384	',;,;;'	same
+385	',;,;~'	same
+386	',;,; '	same
+387	',;,~,'	same
+388	',;,~;'	same
+389	',;,~~'	same
+390	',;,~ '	same
+391	',;, ,'	losat-rejects
+392	',;, ;'	same
+393	',;, ~'	same
+394	',;,  '	same
+395	',;;,,'	same
+396	',;;,;'	same
+397	',;;,~'	same
+398	',;;, '	same
+399	',;;;,'	same
+400	',;;;;'	same
+401	',;;;~'	same
+402	',;;; '	same
+403	',;;~,'	same
+404	',;;~;'	same
+405	',;;~~'	same
+406	',;;~ '	same
+407	',;; ,'	same
+408	',;; ;'	losat-rejects
+409	',;; ~'	same
+410	',;;  '	same
+411	',;~,,'	same
+412	',;~,;'	same
+413	',;~,~'	same
+414	',;~, '	same
+415	',;~;,'	same
+416	',;~;;'	same
+417	',;~;~'	same
+418	',;~; '	same
+419	',;~~,'	same
+420	',;~~;'	same
+421	',;~~~'	same
+422	',;~~ '	same
+423	',;~ ,'	same
+424	',;~ ;'	same
+425	',;~ ~'	same
+426	',;~  '	same
+427	',; ,,'	same
+428	',; ,;'	same
+429	',; ,~'	same
+430	',; , '	same
+431	',; ;,'	same
+432	',; ;;'	losat-rejects
+433	',; ;~'	same
+434	',; ; '	losat-rejects
+435	',; ~,'	same
+436	',; ~;'	same
+437	',; ~~'	same
+438	',; ~ '	same
+439	',;  ,'	same
+440	',;  ;'	losat-rejects
+441	',;  ~'	same
+442	',;   '	same
+443	',~,,,'	same
+444	',~,,;'	same
+445	',~,,~'	same
+446	',~,, '	same
+447	',~,;,'	same
+448	',~,;;'	same
+449	',~,;~'	same
+450	',~,; '	same
+451	',~,~,'	same
+452	',~,~;'	same
+453	',~,~~'	same
+454	',~,~ '	same
+455	',~, ,'	losat-rejects
+456	',~, ;'	same
+457	',~, ~'	same
+458	',~,  '	same
+459	',~;,,'	same
+460	',~;,;'	same
+461	',~;,~'	same
+462	',~;, '	same
+463	',~;;,'	same
+464	',~;;;'	same
+465	',~;;~'	same
+466	',~;; '	same
+467	',~;~,'	same
+468	',~;~;'	same
+469	',~;~~'	same
+470	',~;~ '	same
+471	',~; ,'	same
+472	',~; ;'	losat-rejects
+473	',~; ~'	same
+474	',~;  '	same
+475	',~~,,'	same
+476	',~~,;'	same
+477	',~~,~'	same
+478	',~~, '	same
+479	',~~;,'	same
+480	',~~;;'	same
+481	',~~;~'	same
+482	',~~; '	same
+483	',~~~,'	same
+484	',~~~;'	same
+485	',~~~~'	same
+486	',~~~ '	same
+487	',~~ ,'	same
+488	',~~ ;'	same
+489	',~~ ~'	same
+490	',~~  '	same
+491	',~ ,,'	same
+492	',~ ,;'	same
+493	',~ ,~'	same
+494	',~ , '	same
+495	',~ ;,'	same
+496	',~ ;;'	same
+497	',~ ;~'	same
+498	',~ ; '	same
+499	',~ ~,'	same
+500	',~ ~;'	same
+501	',~ ~~'	same
+502	',~ ~ '	same
+503	',~  ,'	same
+504	',~  ;'	same
+505	',~  ~'	same
+506	',~   '	same
+507	', ,,,'	losat-rejects
+508	', ,,;'	same
+509	', ,,~'	same
+510	', ,, '	losat-rejects
+511	', ,;,'	same
+512	', ,;;'	same
+513	', ,;~'	same
+514	', ,; '	same
+515	', ,~,'	same
+516	', ,~;'	same
+517	', ,~~'	same
+518	', ,~ '	same
+519	', , ,'	losat-rejects
+520	', , ;'	same
+521	', , ~'	same
+522	', ,  '	losat-rejects
+523	', ;,,'	same
+524	', ;,;'	same
+525	', ;,~'	same
+526	', ;, '	same
+527	', ;;,'	same
+528	', ;;;'	same
+529	', ;;~'	same
+530	', ;; '	same
+531	', ;~,'	same
+532	', ;~;'	same
+533	', ;~~'	same
+534	', ;~ '	same
+535	', ; ,'	same
+536	', ; ;'	losat-rejects
+537	', ; ~'	same
+538	', ;  '	same
+539	', ~,,'	same
+540	', ~,;'	same
+541	', ~,~'	same
+542	', ~, '	same
+543	', ~;,'	same
+544	', ~;;'	same
+545	', ~;~'	same
+546	', ~; '	same
+547	', ~~,'	same
+548	', ~~;'	same
+549	', ~~~'	same
+550	', ~~ '	same
+551	', ~ ,'	same
+552	', ~ ;'	same
+553	', ~ ~'	same
+554	', ~  '	same
+555	',  ,,'	losat-rejects
+556	',  ,;'	same
+557	',  ,~'	same
+558	',  , '	losat-rejects
+559	',  ;,'	same
+560	',  ;;'	same
+561	',  ;~'	same
+562	',  ; '	same
+563	',  ~,'	same
+564	',  ~;'	same
+565	',  ~~'	same
+566	',  ~ '	same
+567	',   ,'	losat-rejects
+568	',   ;'	same
+569	',   ~'	same
+570	',    '	same
+571	';,,,,'	same
+572	';,,,;'	same
+573	';,,,~'	same
+574	';,,, '	same
+575	';,,;,'	same
+576	';,,;;'	same
+577	';,,;~'	same
+578	';,,; '	same
+579	';,,~,'	same
+580	';,,~;'	same
+581	';,,~~'	same
+582	';,,~ '	same
+583	';,, ,'	losat-rejects
+584	';,, ;'	same
+585	';,, ~'	same
+586	';,,  '	same
+587	';,;,,'	same
+588	';,;,;'	same
+589	';,;,~'	same
+590	';,;, '	same
+591	';,;;,'	same
+592	';,;;;'	same
+593	';,;;~'	same
+594	';,;; '	same
+595	';,;~,'	same
+596	';,;~;'	same
+597	';,;~~'	same
+598	';,;~ '	same
+599	';,; ,'	same
+600	';,; ;'	losat-rejects
+601	';,; ~'	same
+602	';,;  '	same
+603	';,~,,'	same
+604	';,~,;'	same
+605	';,~,~'	same
+606	';,~, '	same
+607	';,~;,'	same
+608	';,~;;'	same
+609	';,~;~'	same
+610	';,~; '	same
+611	';,~~,'	same
+612	';,~~;'	same
+613	';,~~~'	same
+614	';,~~ '	same
+615	';,~ ,'	same
+616	';,~ ;'	same
+617	';,~ ~'	same
+618	';,~  '	same
+619	';, ,,'	losat-rejects
+620	';, ,;'	same
+621	';, ,~'	same
+622	';, , '	losat-rejects
+623	';, ;,'	same
+624	';, ;;'	same
+625	';, ;~'	same
+626	';, ; '	same
+627	';, ~,'	same
+628	';, ~;'	same
+629	';, ~~'	same
+630	';, ~ '	same
+631	';,  ,'	losat-rejects
+632	';,  ;'	same
+633	';,  ~'	same
+634	';,   '	same
+635	';;,,,'	same
+636	';;,,;'	same
+637	';;,,~'	same
+638	';;,, '	same
+639	';;,;,'	same
+640	';;,;;'	same
+641	';;,;~'	same
+642	';;,; '	same
+643	';;,~,'	same
+644	';;,~;'	same
+645	';;,~~'	same
+646	';;,~ '	same
+647	';;, ,'	losat-rejects
+648	';;, ;'	same
+649	';;, ~'	same
+650	';;,  '	same
+651	';;;,,'	same
+652	';;;,;'	same
+653	';;;,~'	same
+654	';;;, '	same
+655	';;;;,'	same
+656	';;;;;'	same
+657	';;;;~'	same
+658	';;;; '	same
+659	';;;~,'	same
+660	';;;~;'	same
+661	';;;~~'	same
+662	';;;~ '	same
+663	';;; ,'	same
+664	';;; ;'	losat-rejects
+665	';;; ~'	same
+666	';;;  '	same
+667	';;~,,'	same
+668	';;~,;'	same
+669	';;~,~'	same
+670	';;~, '	same
+671	';;~;,'	same
+672	';;~;;'	same
+673	';;~;~'	same
+674	';;~; '	same
+675	';;~~,'	same
+676	';;~~;'	same
+677	';;~~~'	same
+678	';;~~ '	same
+679	';;~ ,'	same
+680	';;~ ;'	same
+681	';;~ ~'	same
+682	';;~  '	same
+683	';; ,,'	same
+684	';; ,;'	same
+685	';; ,~'	same
+686	';; , '	same
+687	';; ;,'	same
+688	';; ;;'	losat-rejects
+689	';; ;~'	same
+690	';; ; '	losat-rejects
+691	';; ~,'	same
+692	';; ~;'	same
+693	';; ~~'	same
+694	';; ~ '	same
+695	';;  ,'	same
+696	';;  ;'	losat-rejects
+697	';;  ~'	same
+698	';;   '	same
+699	';~,,,'	same
+700	';~,,;'	same
+701	';~,,~'	same
+702	';~,, '	same
+703	';~,;,'	same
+704	';~,;;'	same
+705	';~,;~'	same
+706	';~,; '	same
+707	';~,~,'	same
+708	';~,~;'	same
+709	';~,~~'	same
+710	';~,~ '	same
+711	';~, ,'	losat-rejects
+712	';~, ;'	same
+713	';~, ~'	same
+714	';~,  '	same
+715	';~;,,'	same
+716	';~;,;'	same
+717	';~;,~'	same
+718	';~;, '	same
+719	';~;;,'	same
+720	';~;;;'	same
+721	';~;;~'	same
+722	';~;; '	same
+723	';~;~,'	same
+724	';~;~;'	same
+725	';~;~~'	same
+726	';~;~ '	same
+727	';~; ,'	same
+728	';~; ;'	losat-rejects
+729	';~; ~'	same
+730	';~;  '	same
+731	';~~,,'	same
+732	';~~,;'	same
+733	';~~,~'	same
+734	';~~, '	same
+735	';~~;,'	same
+736	';~~;;'	same
+737	';~~;~'	same
+738	';~~; '	same
+739	';~~~,'	same
+740	';~~~;'	same
+741	';~~~~'	same
+742	';~~~ '	same
+743	';~~ ,'	same
+744	';~~ ;'	same
+745	';~~ ~'	same
+746	';~~  '	same
+747	';~ ,,'	same
+748	';~ ,;'	same
+749	';~ ,~'	same
+750	';~ , '	same
+751	';~ ;,'	same
+752	';~ ;;'	same
+753	';~ ;~'	same
+754	';~ ; '	same
+755	';~ ~,'	same
+756	';~ ~;'	same
+757	';~ ~~'	same
+758	';~ ~ '	same
+759	';~  ,'	same
+760	';~  ;'	same
+761	';~  ~'	same
+762	';~   '	same
+763	'; ,,,'	same
+764	'; ,,;'	same
+765	'; ,,~'	same
+766	'; ,, '	same
+767	'; ,;,'	same
+768	'; ,;;'	same
+769	'; ,;~'	same
+770	'; ,; '	same
+771	'; ,~,'	same
+772	'; ,~;'	same
+773	'; ,~~'	same
+774	'; ,~ '	same
+775	'; , ,'	losat-rejects
+776	'; , ;'	same
+777	'; , ~'	same
+778	'; ,  '	same
+779	'; ;,,'	same
+780	'; ;,;'	same
+781	'; ;,~'	same
+782	'; ;, '	same
+783	'; ;;,'	same
+784	'; ;;;'	losat-rejects
+785	'; ;;~'	same
+786	'; ;; '	losat-rejects
+787	'; ;~,'	same
+788	'; ;~;'	same
+789	'; ;~~'	same
+790	'; ;~ '	same
+791	'; ; ,'	same
+792	'; ; ;'	losat-rejects
+793	'; ; ~'	same
+794	'; ;  '	losat-rejects
+795	'; ~,,'	same
+796	'; ~,;'	same
+797	'; ~,~'	same
+798	'; ~, '	same
+799	'; ~;,'	same
+800	'; ~;;'	same
+801	'; ~;~'	same
+802	'; ~; '	same
+803	'; ~~,'	same
+804	'; ~~;'	same
+805	'; ~~~'	same
+806	'; ~~ '	same
+807	'; ~ ,'	same
+808	'; ~ ;'	same
+809	'; ~ ~'	same
+810	'; ~  '	same
+811	';  ,,'	same
+812	';  ,;'	same
+813	';  ,~'	same
+814	';  , '	same
+815	';  ;,'	same
+816	';  ;;'	losat-rejects
+817	';  ;~'	same
+818	';  ; '	losat-rejects
+819	';  ~,'	same
+820	';  ~;'	same
+821	';  ~~'	same
+822	';  ~ '	same
+823	';   ,'	same
+824	';   ;'	losat-rejects
+825	';   ~'	same
+826	';    '	same
+827	'~,,,,'	same
+828	'~,,,;'	same
+829	'~,,,~'	same
+830	'~,,, '	same
+831	'~,,;,'	same
+832	'~,,;;'	same
+833	'~,,;~'	same
+834	'~,,; '	same
+835	'~,,~,'	same
+836	'~,,~;'	same
+837	'~,,~~'	same
+838	'~,,~ '	same
+839	'~,, ,'	losat-rejects
+840	'~,, ;'	same
+841	'~,, ~'	same
+842	'~,,  '	same
+843	'~,;,,'	same
+844	'~,;,;'	same
+845	'~,;,~'	same
+846	'~,;, '	same
+847	'~,;;,'	same
+848	'~,;;;'	same
+849	'~,;;~'	same
+850	'~,;; '	same
+851	'~,;~,'	same
+852	'~,;~;'	same
+853	'~,;~~'	same
+854	'~,;~ '	same
+855	'~,; ,'	same
+856	'~,; ;'	losat-rejects
+857	'~,; ~'	same
+858	'~,;  '	same
+859	'~,~,,'	same
+860	'~,~,;'	same
+861	'~,~,~'	same
+862	'~,~, '	same
+863	'~,~;,'	same
+864	'~,~;;'	same
+865	'~,~;~'	same
+866	'~,~; '	same
+867	'~,~~,'	same
+868	'~,~~;'	same
+869	'~,~~~'	same
+870	'~,~~ '	same
+871	'~,~ ,'	same
+872	'~,~ ;'	same
+873	'~,~ ~'	same
+874	'~,~  '	same
+875	'~, ,,'	losat-rejects
+876	'~, ,;'	same
+877	'~, ,~'	same
+878	'~, , '	losat-rejects
+879	'~, ;,'	same
+880	'~, ;;'	same
+881	'~, ;~'	same
+882	'~, ; '	same
+883	'~, ~,'	same
+884	'~, ~;'	same
+885	'~, ~~'	same
+886	'~, ~ '	same
+887	'~,  ,'	losat-rejects
+888	'~,  ;'	same
+889	'~,  ~'	same
+890	'~,   '	same
+891	'~;,,,'	same
+892	'~;,,;'	same
+893	'~;,,~'	same
+894	'~;,, '	same
+895	'~;,;,'	same
+896	'~;,;;'	same
+897	'~;,;~'	same
+898	'~;,; '	same
+899	'~;,~,'	same
+900	'~;,~;'	same
+901	'~;,~~'	same
+902	'~;,~ '	same
+903	'~;, ,'	losat-rejects
+904	'~;, ;'	same
+905	'~;, ~'	same
+906	'~;,  '	same
+907	'~;;,,'	same
+908	'~;;,;'	same
+909	'~;;,~'	same
+910	'~;;, '	same
+911	'~;;;,'	same
+912	'~;;;;'	same
+913	'~;;;~'	same
+914	'~;;; '	same
+915	'~;;~,'	same
+916	'~;;~;'	same
+917	'~;;~~'	same
+918	'~;;~ '	same
+919	'~;; ,'	same
+920	'~;; ;'	losat-rejects
+921	'~;; ~'	same
+922	'~;;  '	same
+923	'~;~,,'	same
+924	'~;~,;'	same
+925	'~;~,~'	same
+926	'~;~, '	same
+927	'~;~;,'	same
+928	'~;~;;'	same
+929	'~;~;~'	same
+930	'~;~; '	same
+931	'~;~~,'	same
+932	'~;~~;'	same
+933	'~;~~~'	same
+934	'~;~~ '	same
+935	'~;~ ,'	same
+936	'~;~ ;'	same
+937	'~;~ ~'	same
+938	'~;~  '	same
+939	'~; ,,'	same
+940	'~; ,;'	same
+941	'~; ,~'	same
+942	'~; , '	same
+943	'~; ;,'	same
+944	'~; ;;'	losat-rejects
+945	'~; ;~'	same
+946	'~; ; '	losat-rejects
+947	'~; ~,'	same
+948	'~; ~;'	same
+949	'~; ~~'	same
+950	'~; ~ '	same
+951	'~;  ,'	same
+952	'~;  ;'	losat-rejects
+953	'~;  ~'	same
+954	'~;   '	same
+955	'~~,,,'	same
+956	'~~,,;'	same
+957	'~~,,~'	same
+958	'~~,, '	same
+959	'~~,;,'	same
+960	'~~,;;'	same
+961	'~~,;~'	same
+962	'~~,; '	same
+963	'~~,~,'	same
+964	'~~,~;'	same
+965	'~~,~~'	same
+966	'~~,~ '	same
+967	'~~, ,'	losat-rejects
+968	'~~, ;'	same
+969	'~~, ~'	same
+970	'~~,  '	same
+971	'~~;,,'	same
+972	'~~;,;'	same
+973	'~~;,~'	same
+974	'~~;, '	same
+975	'~~;;,'	same
+976	'~~;;;'	same
+977	'~~;;~'	same
+978	'~~;; '	same
+979	'~~;~,'	same
+980	'~~;~;'	same
+981	'~~;~~'	same
+982	'~~;~ '	same
+983	'~~; ,'	same
+984	'~~; ;'	losat-rejects
+985	'~~; ~'	same
+986	'~~;  '	same
+987	'~~~,,'	same
+988	'~~~,;'	same
+989	'~~~,~'	same
+990	'~~~, '	same
+991	'~~~;,'	same
+992	'~~~;;'	same
+993	'~~~;~'	same
+994	'~~~; '	same
+995	'~~~~,'	same
+996	'~~~~;'	same
+997	'~~~~~'	same
+998	'~~~~ '	same
+999	'~~~ ,'	same
+1000	'~~~ ;'	same
+1001	'~~~ ~'	same
+1002	'~~~  '	same
+1003	'~~ ,,'	same
+1004	'~~ ,;'	same
+1005	'~~ ,~'	same
+1006	'~~ , '	same
+1007	'~~ ;,'	same
+1008	'~~ ;;'	same
+1009	'~~ ;~'	same
+1010	'~~ ; '	same
+1011	'~~ ~,'	same
+1012	'~~ ~;'	same
+1013	'~~ ~~'	same
+1014	'~~ ~ '	same
+1015	'~~  ,'	same
+1016	'~~  ;'	same
+1017	'~~  ~'	same
+1018	'~~   '	same
+1019	'~ ,,,'	same
+1020	'~ ,,;'	same
+1021	'~ ,,~'	same
+1022	'~ ,, '	same
+1023	'~ ,;,'	same
+1024	'~ ,;;'	same
+1025	'~ ,;~'	same
+1026	'~ ,; '	same
+1027	'~ ,~,'	same
+1028	'~ ,~;'	same
+1029	'~ ,~~'	same
+1030	'~ ,~ '	same
+1031	'~ , ,'	same
+1032	'~ , ;'	same
+1033	'~ , ~'	same
+1034	'~ ,  '	same
+1035	'~ ;,,'	same
+1036	'~ ;,;'	same
+1037	'~ ;,~'	same
+1038	'~ ;, '	same
+1039	'~ ;;,'	same
+1040	'~ ;;;'	same
+1041	'~ ;;~'	same
+1042	'~ ;; '	same
+1043	'~ ;~,'	same
+1044	'~ ;~;'	same
+1045	'~ ;~~'	same
+1046	'~ ;~ '	same
+1047	'~ ; ,'	same
+1048	'~ ; ;'	same
+1049	'~ ; ~'	same
+1050	'~ ;  '	same
+1051	'~ ~,,'	same
+1052	'~ ~,;'	same
+1053	'~ ~,~'	same
+1054	'~ ~, '	same
+1055	'~ ~;,'	same
+1056	'~ ~;;'	same
+1057	'~ ~;~'	same
+1058	'~ ~; '	same
+1059	'~ ~~,'	same
+1060	'~ ~~;'	same
+1061	'~ ~~~'	same
+1062	'~ ~~ '	same
+1063	'~ ~ ,'	same
+1064	'~ ~ ;'	same
+1065	'~ ~ ~'	same
+1066	'~ ~  '	same
+1067	'~  ,,'	same
+1068	'~  ,;'	same
+1069	'~  ,~'	same
+1070	'~  , '	same
+1071	'~  ;,'	same
+1072	'~  ;;'	same
+1073	'~  ;~'	same
+1074	'~  ; '	same
+1075	'~  ~,'	same
+1076	'~  ~;'	same
+1077	'~  ~~'	same
+1078	'~  ~ '	same
+1079	'~   ,'	same
+1080	'~   ;'	same
+1081	'~   ~'	same
+1082	'~    '	same
+# {'same': 1014, 'losat-rejects': 69}
+exit 0

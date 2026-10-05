@@ -1,0 +1,40 @@
+(node:832208) ExperimentalWarning: WASI is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ok serial describe, validate, register, scan
+ok serial n1 pairwise_default_serial,pairwise_default_serial.fmt0,pairwise_default_serial.fmt7,pairwise_default_thread4,pairwise_default_thread4.fmt0,pairwise_default_thread4.fmt7
+ok serial n1 pairwise_limit1_serial,pairwise_limit1_serial.fmt0,pairwise_limit1_serial.fmt7
+ok serial n1 pairwise_limit5_serial,pairwise_limit5_serial.fmt0,pairwise_limit5_serial.fmt7
+ok serial n1 pairwise_nohit_serial,pairwise_nohit_serial.fmt0,pairwise_nohit_serial.fmt7
+ok serial n1 all_hsp_forward_serial,all_hsp_forward_serial.fmt0,all_hsp_forward_serial.fmt7,all_hsp_forward_thread4,all_hsp_forward_thread4.fmt0,all_hsp_forward_thread4.fmt7
+ok serial n1 all_hsp_reverse_limit5_serial,all_hsp_reverse_limit5_serial.fmt0,all_hsp_reverse_limit5_serial.fmt7
+ok serial n1 all_hsp_self_serial,all_hsp_self_serial.fmt0,all_hsp_self_serial.fmt7
+ok serial n1 width.blastp
+ok serial n1 seg.blastp.6
+ok serial n1 method.blastp
+ok serial n1 e2e.blastp.seg_lcase
+ok serial n1 e2e.blastp.seg_window
+ok serial n1 e2e.blastp.matrix_case
+ok serial n1 e2e.blastp.threshold_real
+ok serial n1 e2e.blastp.threshold_inf
+ok serial n1 e2e.blastp.word5
+ok serial n1 e2e.blastp.fast
+ok serial n1 e2e.blastp.evalue_huge,e2e.blastp.evalue_huge7
+ok serial n1 e2e.blastp.mts3
+ok serial n1 e2e.blastp.many
+ok serial n1 e2e.blastp.many_mts280
+ok serial n1 e2e.blastp.titles
+ok serial n1 e2e.blastp.invalid_o,e2e.blastp.invalid_o7
+ok serial n1 e2e.blastp.allx,e2e.blastp.allx7
+ok serial n1 e2e.blastp.o_subject
+ok serial n1 e2e.blastp.empty_subject
+ok serial n1 e2e.blastp.o_identity,e2e.blastp.o_identity0
+ok serial n1 e2e.blastp.empty_only
+ok serial n1 e2e.blastp.o_invalid_order
+ok serial n1 e2e.blastp.mts_wrap
+ok serial n1 e2e.blastp.query_split
+ok serial n1 e2e.blastp.query_split_two
+ok serial n1 e2e.blastp.compressed_short_subject
+ok serial n1 e2e.blastp.one_hit_negative_width
+ok serial n1 e2e.blastp.fast_lone_hsp
+ok serial n1 e2e.blastp.fast_lone_hsp_window
+36 runs matched the native CLI; frozen hashes: 40/40 equal

@@ -1,0 +1,157 @@
+{
+  "binaries": {
+    "before": [
+      "a3e54fcf5c8a2a333a555049f5ac842d35a2d66a969ef0cee09c88d9bbc86f84",
+      "a3e54fcf5c8a2a333a555049f5ac842d35a2d66a969ef0cee09c88d9bbc86f84",
+      "a3e54fcf5c8a2a333a555049f5ac842d35a2d66a969ef0cee09c88d9bbc86f84"
+    ],
+    "after": [
+      "6f5e268d0765ee649f131b1f888a8bb5c77656f9151d8774d7caea0ff6983389",
+      "6f5e268d0765ee649f131b1f888a8bb5c77656f9151d8774d7caea0ff6983389",
+      "6f5e268d0765ee649f131b1f888a8bb5c77656f9151d8774d7caea0ff6983389"
+    ]
+  },
+  "repeat": 5,
+  "started_at": "2026-10-04T07:51:54+00:00",
+  "cases": [
+    {
+      "case": "blastp",
+      "mode": "native",
+      "threads": 1,
+      "argv": [
+        "blastp",
+        "-query",
+        "/home/kawato/.cache/losat-web-gui-target/s08pa/head-src/LOSAT/tests/fasta/SicyWSV.faa",
+        "-subject",
+        "/home/kawato/.cache/losat-web-gui-target/s08pa/head-src/LOSAT/tests/fasta/PajaWSV.faa",
+        "-max_hsps",
+        "1",
+        "-outfmt",
+        "6",
+        "-num_threads",
+        "1",
+        "-out",
+        "/tmp/tmpx2njq80o/blastp.native.after.out"
+      ],
+      "before": {
+        "samples_s": [
+          0.4728117899994686,
+          0.475492101000782,
+          0.48475914300070144,
+          0.5001178809998237,
+          0.4963142169999628
+        ],
+        "median_s": 0.48475914300070144,
+        "min_s": 0.4728117899994686,
+        "max_s": 0.5001178809998237,
+        "output_sha256": "fd4b010800e32ce6c823cb38b42a10b7845f3342edae892acccc8f554f9edf34"
+      },
+      "after": {
+        "samples_s": [
+          0.48619151399907423,
+          0.48130655299974023,
+          0.491757444000541,
+          0.49227508599869907,
+          0.51834041300026
+        ],
+        "median_s": 0.491757444000541,
+        "min_s": 0.48130655299974023,
+        "max_s": 0.51834041300026,
+        "output_sha256": "fd4b010800e32ce6c823cb38b42a10b7845f3342edae892acccc8f554f9edf34"
+      }
+    },
+    {
+      "case": "blastp-fmt0",
+      "mode": "native",
+      "threads": 1,
+      "argv": [
+        "blastp",
+        "-query",
+        "/home/kawato/.cache/losat-web-gui-target/s08pa/head-src/LOSAT/tests/fasta/SicyWSV.faa",
+        "-subject",
+        "/home/kawato/.cache/losat-web-gui-target/s08pa/head-src/LOSAT/tests/fasta/PajaWSV.faa",
+        "-max_hsps",
+        "1",
+        "-outfmt",
+        "0",
+        "-num_threads",
+        "1",
+        "-out",
+        "/tmp/tmpx2njq80o/blastp-fmt0.native.after.out"
+      ],
+      "before": {
+        "samples_s": [
+          0.5088960329994734,
+          0.5212624740015599,
+          0.5108626169985655,
+          0.5257831090002583,
+          0.5417546589997073
+        ],
+        "median_s": 0.5212624740015599,
+        "min_s": 0.5088960329994734,
+        "max_s": 0.5417546589997073,
+        "output_sha256": "4007767ebec0547213df345e6d1ead9272d34ed84959aaed483516eb1cb63a7e"
+      },
+      "after": {
+        "samples_s": [
+          0.5256593960002647,
+          0.5293130750014825,
+          0.5163917600002605,
+          0.5505219179995038,
+          0.5747426259986241
+        ],
+        "median_s": 0.5293130750014825,
+        "min_s": 0.5163917600002605,
+        "max_s": 0.5747426259986241,
+        "output_sha256": "4007767ebec0547213df345e6d1ead9272d34ed84959aaed483516eb1cb63a7e"
+      }
+    },
+    {
+      "case": "tblastn-fmt0",
+      "mode": "native",
+      "threads": 1,
+      "argv": [
+        "tblastn",
+        "-task",
+        "tblastn",
+        "-query",
+        "/home/kawato/.cache/losat-web-gui-target/s08pa/head-src/docs/evidence/tlosan_stage_g/benchmark/first_AvCLPV_protein.faa",
+        "-subject",
+        "/home/kawato/.cache/losat-web-gui-target/s08pa/head-src/LOSAT/tests/fasta/AvCLPV.fasta",
+        "-outfmt",
+        "0",
+        "-num_threads",
+        "1",
+        "-out",
+        "/tmp/tmpx2njq80o/tblastn-fmt0.native.after.out"
+      ],
+      "before": {
+        "samples_s": [
+          0.045935067000755225,
+          0.043370586001401534,
+          0.04447513299965067,
+          0.043381722000049194,
+          0.043994094001391204
+        ],
+        "median_s": 0.043994094001391204,
+        "min_s": 0.043370586001401534,
+        "max_s": 0.045935067000755225,
+        "output_sha256": "926dbd2734d521e62e30d2b2b0ca72e7a6d0ded486d1eb6ce0007d1ce0a8ba98"
+      },
+      "after": {
+        "samples_s": [
+          0.04533752699899196,
+          0.044270981999943615,
+          0.043509825998626184,
+          0.04230227199877845,
+          0.043534761000046274
+        ],
+        "median_s": 0.043534761000046274,
+        "min_s": 0.04230227199877845,
+        "max_s": 0.04533752699899196,
+        "output_sha256": "926dbd2734d521e62e30d2b2b0ca72e7a6d0ded486d1eb6ce0007d1ce0a8ba98"
+      }
+    }
+  ],
+  "finished_at": "2026-10-04T07:52:07+00:00"
+}

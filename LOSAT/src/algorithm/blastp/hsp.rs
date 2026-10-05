@@ -43,6 +43,16 @@ pub(crate) struct BlastpHsp {
     pub raw_score: i32,
     pub gap_info: Option<Vec<GapEditOp>>,
     pub num_positives: usize,
+    // NCBI reference: c++/include/algo/blast/core/blast_hits.h:139-141
+    // ```c
+    //    Int2		comp_adjustment_method;  /**< which mode of composition
+    //                                               adjustment was used; relevant
+    //                                               only for blastp and tblastn */
+    // ```
+    /// `BlastHSP::comp_adjustment_method`: 0 (no adjustment), 1 (composition-based
+    /// statistics) or 2 (compositional matrix adjustment), set from the redone
+    /// alignment's matrix adjustment rule (`kappa.rs`).
+    pub comp_adjustment_method: u8,
 }
 
 impl BlastpHsp {
@@ -106,6 +116,7 @@ impl BlastpHsp {
             raw_score,
             gap_info,
             num_positives,
+            comp_adjustment_method: 0,
         }
     }
 
@@ -277,42 +288,6 @@ const COMPO_HEAP_RESIZE_FACTOR: f64 = 1.5;
 // #define EVALUE_STRETCH 5
 // ```
 const COMPO_HEAP_EVALUE_STRETCH: f64 = 5.0;
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:43-70
-// ```c
-// Int4
-// GetPrelimHitlistSize(Int4 hitlist_size, Int4 compositionBasedStats, Boolean gapped_calculation)
-// {
-//     ...
-// }
-// ```
-pub(crate) fn get_prelim_hitlist_size(
-    hitlist_size: usize,
-    composition_based_stats: bool,
-    gapped_calculation: bool,
-) -> usize {
-    let mut prelim_hitlist_size = hitlist_size;
-    let adaptive_cbs = std::env::var_os("ADAPTIVE_CBS").is_some();
-    if composition_based_stats {
-        if adaptive_cbs {
-            if hitlist_size < 1000 {
-                prelim_hitlist_size = std::cmp::max(prelim_hitlist_size + 1000, 1500);
-            } else {
-                prelim_hitlist_size = prelim_hitlist_size.saturating_mul(2).saturating_add(50);
-            }
-        } else if hitlist_size <= 500 {
-            prelim_hitlist_size = 1050;
-        } else {
-            prelim_hitlist_size = prelim_hitlist_size.saturating_mul(2).saturating_add(50);
-        }
-    } else if gapped_calculation {
-        prelim_hitlist_size = std::cmp::min(
-            std::cmp::max(prelim_hitlist_size.saturating_mul(2), 10),
-            prelim_hitlist_size.saturating_add(50),
-        );
-    }
-    prelim_hitlist_size
-}
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1389-1403
 // ```c
@@ -557,7 +532,17 @@ pub(crate) fn sort_hsplist_by_score(list: &mut BlastpHspList) {
         index += 1;
     }
     if index < list.hsps.len() - 1 {
-        list.hsps.sort_unstable_by(score_compare_hsps);
+        // NCBI reference: c++/src/algo/blast/core/blast_hits.c:1379-1382
+        // ```c
+        //     if (!Blast_HSPListIsSortedByScore(hsp_list)) {
+        //         qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
+        //               ScoreCompareHSPs);
+        // ```
+        // The pinned NCBI BLAST+ runs on glibc, whose qsort is a stable merge sort.
+        // ScoreCompareHSPs ties HSPs with the same score and ends (other gapped starts
+        // or edit scripts); they keep their order, as the containment test and the
+        // endpoint purge keep the first.
+        list.hsps.sort_by(score_compare_hsps);
     }
 }
 
@@ -578,7 +563,14 @@ fn sort_hsplist_by_evalue(list: &mut BlastpHspList) {
             index += 1;
         }
         if index < list.hsps.len() - 1 {
-            list.hsps.sort_unstable_by(evalue_compare_hsps);
+            // NCBI reference: c++/src/algo/blast/core/blast_hits.c:1453-1454
+            // ```c
+            //       qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
+            //             s_EvalueCompareHSPs);
+            // ```
+            // Stable, as glibc's qsort under the pinned NCBI BLAST+ (ties of
+            // ScoreCompareHSPs keep their order).
+            list.hsps.sort_by(evalue_compare_hsps);
         }
     }
 }
@@ -1709,7 +1701,9 @@ fn purge_hits_for_subject_ex_impl<const TRACK_STATS: bool>(
     // ```c
     // qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryOffsetCompareHSPs);
     // ```
-    hits.sort_unstable_by(hit_query_offset_compare);
+    // Stable, as glibc's qsort under the pinned NCBI BLAST+: HSPs with the same
+    // context, ends and score tie, and the purge keeps the first.
+    hits.sort_by(hit_query_offset_compare);
     let (active_hits, mut start_trimmed_hits, start_stats) =
         purge_sorted_hits_with_common_endpoints::<TRACK_STATS, _, _>(
             hits,
@@ -1741,7 +1735,8 @@ fn purge_hits_for_subject_ex_impl<const TRACK_STATS: bool>(
     // ```c
     // qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryEndCompareHSPs);
     // ```
-    hits.sort_unstable_by(hit_query_end_compare);
+    // Stable, as glibc's qsort under the pinned NCBI BLAST+ (as above).
+    hits.sort_by(hit_query_end_compare);
     let (active_hits, mut end_trimmed_hits, end_stats) =
         purge_sorted_hits_with_common_endpoints::<TRACK_STATS, _, _>(
             hits,
@@ -1782,6 +1777,17 @@ fn purge_hits_for_subject_ex_impl<const TRACK_STATS: bool>(
 // typedef struct BlastHitList { ... } BlastHitList;
 // ```
 pub(crate) fn collect_hits_from_hit_lists(hit_lists: &[Option<BlastpHitList>]) -> Vec<Hit> {
+    collect_hits_and_methods_from_hit_lists(hit_lists)
+        .into_iter()
+        .map(|(hit, _)| hit)
+        .collect()
+}
+
+/// `collect_hits_from_hit_lists` with each HSP's `comp_adjustment_method`, which the
+/// outfmt 0 report prints (showalign.cpp:3600-3603).
+pub(crate) fn collect_hits_and_methods_from_hit_lists(
+    hit_lists: &[Option<BlastpHitList>],
+) -> Vec<(Hit, u8)> {
     let mut hits = Vec::new();
     for hit_list_opt in hit_lists {
         let Some(hit_list) = hit_list_opt else {
@@ -1789,7 +1795,7 @@ pub(crate) fn collect_hits_from_hit_lists(hit_lists: &[Option<BlastpHitList>]) -
         };
         for hsp_list in hit_list.hsplist_array.iter().take(hit_list.hsplist_count) {
             for hsp in &hsp_list.hsps {
-                hits.push(hsp.clone().into_hit());
+                hits.push((hsp.clone().into_hit(), hsp.comp_adjustment_method));
             }
         }
     }

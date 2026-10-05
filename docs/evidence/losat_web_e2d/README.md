@@ -156,6 +156,7 @@ A-1 の修正の再監査：
 3. **A-1**（option の値の UTF-8 でないバイト）：parse の後の明示的な拒否。推奨：このまま。
 4. **O-1**（`validate` と CLI の誤りの順）：引数とレコードの両方に誤りがある入力で、Web は引数の誤りを先に出す。推奨：ABI v2 の設計として受け入れる（`validate` はレコードを持たない。`run` の結果は CLI と同じ）。
 5. V-PERF：【G】
+6. **最後のゲートで省いた工程**（下の「ゲート」）：TBLASTX の option の sweep、TBLASTN の `-db_gencode` の C++ API の oracle、蛋白の題の sweep、capture、Gate A の後半の 10 組、V-ABI full の TBLASTX の E2d 以外の検索。どれも E2e までの確かめで、S11 が変えていない経路か、同じゲートの別の検査（CI の速い検査の全件、BLASTP・TBLASTN の sweep、V-ABI）と重なる。推奨：このまま受け入れる。別案：次のエンジン側のゲート（SX）の前に `s11_gates.sh` の全体を流す（TBLASTX の sweep と Gate A を並行させない）。
 
 ## アプリ側（S12）への注意
 
@@ -166,6 +167,8 @@ A-1 の修正の再監査：
 
 ## 残件と引き継ぎ
 
-- 【G:残件】
+- **`main` への PR**：S11 のコミット（`46d93c06d` から）は `feature/losat-web-gui` に push 済み。`main` への PR は作っていない（保守者の指示を待つ）。
+- **ゲートの工程の並行**：TBLASTX の option の sweep（`-threshold +inf` の行は 1 件で約 8.6 GB）、V-ABI full、Gate A を同時に流すと、この計算機（WSL、31 GB）では WSL が再起動した（2026-10-05）。`s11_gates.sh` の Gate A は sweep の後に流す。
+- **範囲の外**（[`AUTHORITY.md`](AUTHORITY.md) §G）：`qcovs`・`qcovhsp`・`qcovus`・`sstrand` の field（LOSAT はどの program も書かない）、`-strand`（判断 R4）、`-db`・`-remote`・`-import_search_strategy`。
 - **SX**：BLASTX の `-query_loc` / `-subject_loc`（`is_unported_blastx_arg` は変えていない）。`seq_range.rs` の部品と、この記録の §B〜§D がそのまま使える。
 - **次のセッション**：[S12 — 検索画面](../../losat_web_gui_sessions/session_s12_w3_search_ui.md)。

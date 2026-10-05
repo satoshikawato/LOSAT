@@ -27,3 +27,16 @@
 [6/20] p06_pemojnva_lvmjnv: native run 1
 [6/20] p06_pemojnva_lvmjnv: native run 2
 [6/20] p06_pemojnva_lvmjnv: native run 3
+[6/20] p06_pemojnva_lvmjnv: EXACT_TEXT rows=16173/16173 contract=PASS repeatability=REPEATABLE
+[7/20] p07_lvmjnv_trcumjnv: oracle
+[7/20] p07_lvmjnv_trcumjnv: native run 1
+[7/20] p07_lvmjnv_trcumjnv: native run 2
+[7/20] p07_lvmjnv_trcumjnv: native run 3
+[7/20] p07_lvmjnv_trcumjnv: EXACT_TEXT rows=3301/3301 contract=PASS repeatability=REPEATABLE
+[8/20] p08_trcumjnv_mellatmjnv: oracle
+[8/20] p08_trcumjnv_mellatmjnv: native run 1
+[8/20] p08_trcumjnv_mellatmjnv: native run 2
+[8/20] p08_trcumjnv_mellatmjnv: native run 3
+[8/20] p08_trcumjnv_mellatmjnv: EXACT_TEXT rows=5804/5804 contract=PASS repeatability=REPEATABLE
+[9/20] p09_mellatmjnv_meenmjnv: oracle
+[9/20] p09_mellatmjnv_meenmjnv: native run 1

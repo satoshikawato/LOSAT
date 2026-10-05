@@ -1,0 +1,96 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/e2d_n_sub8k.fa).
+           1 sequences; 8,001 total letters
+
+
+
+Query= A recA
+
+Length=12000
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sub8k                                                                 16.9    4.0  
+
+
+> sub8k
+Length=8001
+
+ Score = 16.9 bits (32),  Expect = 4.0, Method: Compositional matrix adjust.
+ Identities = 9/24 (38%), Positives = 12/24 (50%), Gaps = 0/24 (0%)
+ Frame = -3
+
+Query  109   KIFCPEEISAMILTKMKTVAETHL  132
+             K FC + I  +IL   +    THL
+Sbjct  4429  K*FCNKYI*YLILNIKQ*TLNTHL  4358
+
+
+ Score = 16.5 bits (31),  Expect = 4.7, Method: Compositional matrix adjust.
+ Identities = 6/17 (35%), Positives = 8/17 (47%), Gaps = 0/17 (0%)
+ Frame = +2
+
+Query  168   AGLNVLRIINEPTAAAL  184
+             A L    I+N P A  +
+Sbjct  5999  ASLCTFSILNNPNAVVV  6049
+
+
+
+Lambda      K        H        a         alpha
+   0.319    0.134    0.372    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 425736
+
+
+Query= B recB
+
+Length=12000
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sub8k                                                                 16.9    4.0  
+
+
+> sub8k
+Length=8001
+
+ Score = 16.9 bits (32),  Expect = 4.0, Method: Compositional matrix adjust.
+ Identities = 9/24 (38%), Positives = 12/24 (50%), Gaps = 0/24 (0%)
+ Frame = -3
+
+Query  109   KIFCPEEISAMILTKMKTVAETHL  132
+             K FC + I  +IL   +    THL
+Sbjct  4429  K*FCNKYI*YLILNIKQ*TLNTHL  4358
+
+
+ Score = 16.5 bits (31),  Expect = 4.7, Method: Compositional matrix adjust.
+ Identities = 6/17 (35%), Positives = 8/17 (47%), Gaps = 0/17 (0%)
+ Frame = +2
+
+Query  168   AGLNVLRIINEPTAAAL  184
+             A L    I+N P A  +
+Sbjct  5999  ASLCTFSILNNPNAVVV  6049
+
+
+
+Lambda      K        H        a         alpha
+   0.319    0.134    0.372    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 425736

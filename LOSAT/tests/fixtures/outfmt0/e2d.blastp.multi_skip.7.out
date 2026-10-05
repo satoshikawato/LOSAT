@@ -1,0 +1,11 @@
+# BLASTP 2.17.0+
+# Query: BDT63331.1 wsv035-like protein [Armadillidium vulgare clopovirus]
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/e2d_p_s3.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 5 hits found
+BDT63331.1	BDT62128.1	37.143	35	20	1	710	744	421	453	0.37	19.6
+BDT63331.1	BDT62128.1	50.000	12	6	0	707	718	173	184	4.0	16.5
+BDT63331.1	BDT62181.1	44.444	18	10	0	706	723	432	449	3.1	16.5
+BDT63331.1	BDT62181.1	50.000	10	5	0	778	787	746	755	4.1	16.2
+BDT63331.1	BDT62181.1	27.778	18	13	0	723	740	535	552	4.9	16.2
+# BLAST processed 1 queries

@@ -1,0 +1,68 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/e2d_t_lts.fa).
+           1 sequences; 435 total letters
+
+
+
+Query= lpq lc prot query
+
+Length=215
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+lts lc nt subject                                                     177     1e-62
+
+
+> lts lc nt subject
+Length=512
+
+ Score = 177 bits (449),  Expect = 1e-62, Method: Compositional matrix adjust.
+ Identities = 143/143 (100%), Positives = 143/143 (100%), Gaps = 0/143 (0%)
+ Frame = -2
+
+Query  41   QHKNQYVMNKWLVECEMMKTCVVSHIGWYRVHLFEAFVWWfrppngaqdresinwqdqaa  100
+            QHKNQYVMNKWLVECEMMKTCVVSHIGWYRVHLFEAFVWWFRPPNGAQDRESINWQDQAA
+Sbjct  475  QHKNQYVMNKWLVECEMMKTCVVSHIGWYRVHLFEAFVWWFRPPNGAQDRESINWQDQAA  296
+
+Query  101  qqqqqqqqqqqqqqqqqqqqqqqqqpkmwqqqfqLLMQKHASPERVLKHWFWVHNKESYF  160
+            QQQQQQQQQQQQQQQQQQQQQQQQQPKMWQQQFQLLMQKHASPERVLKHWFWVHNKESYF
+Sbjct  295  QQQQQQQQQQQQQQQQQQQQQQQQQPKMWQQQFQLLMQKHASPERVLKHWFWVHNKESYF  116
+
+Query  161  MVSCMPPFMERTGPWENKQSQHQ  183
+            MVSCMPPFMERTGPWENKQSQHQ
+Sbjct  115  MVSCMPPFMERTGPWENKQSQHQ  47
+
+
+
+Lambda      K        H        a         alpha
+   0.324    0.133    0.492    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 19712
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/e2d_t_lts.fa).
+    Posted date:  Unknown
+  Number of letters in database: 435
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40

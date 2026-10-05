@@ -1,0 +1,28 @@
+# BLASTP 2.17.0+
+# Query: BDT63331.1 wsv035-like protein [Armadillidium vulgare clopovirus]
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/e2d_p_s3.faa)
+# Fields: query id, query length, subject length, q. start, q. end, s. start, s. end, alignment length, % identity, evalue, bit score
+# 5 hits found
+BDT63331.1	301	970	216	400	225	411	197	25.888	7.07e-17	69.3
+BDT63331.1	301	365	295	342	116	165	52	28.846	0.33	20.4
+BDT63331.1	301	365	313	326	22	35	14	35.714	9.0	15.8
+BDT63331.1	301	365	323	330	169	176	8	62.500	9.6	15.8
+BDT63331.1	301	707	346	355	584	593	10	50.000	8.8	15.8
+# BLASTP 2.17.0+
+# Query: BDT63357.1 heat shock protein 70-like protein [Armadillidium vulgare clopovirus]
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/e2d_p_s3.faa)
+# Fields: query id, query length, subject length, q. start, q. end, s. start, s. end, alignment length, % identity, evalue, bit score
+# 3 hits found
+BDT63357.1	301	707	101	400	110	392	300	61.333	4.14e-130	375
+BDT63357.1	301	707	148	171	42	67	26	42.308	0.14	21.6
+BDT63357.1	301	970	332	357	611	636	26	26.923	4.2	16.9
+# BLASTP 2.17.0+
+# Query: BDT63360.1 heat shock protein 40-like protein [Armadillidium vulgare clopovirus]
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/e2d_p_s3.faa)
+# Fields: query id, query length, subject length, q. start, q. end, s. start, s. end, alignment length, % identity, evalue, bit score
+# 4 hits found
+BDT63360.1	301	365	213	394	177	361	188	37.234	9.51e-37	123
+BDT63360.1	301	707	211	239	474	502	29	41.379	0.049	23.1
+BDT63360.1	301	970	347	384	626	661	38	23.684	2.5	17.7
+BDT63360.1	301	970	107	126	804	823	20	30.000	5.5	16.5
+# BLAST processed 3 queries

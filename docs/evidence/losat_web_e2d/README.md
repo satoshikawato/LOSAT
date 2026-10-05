@@ -2,7 +2,7 @@
 
 - 段階：E2d `-query_loc` / `-subject_loc`（[総合計画書](../../losat_web_gui_plan.md) §7 の S11、§4 の G9、計画 DW-9〜DW-11。指示書 [S11](../../losat_web_gui_sessions/session_s11_e2d_query_subject_loc.md)）
 - ブランチ：`feature/losat-web-gui`。変更前は E2e の最後のコミット `4fab73fdb`（native の SHA-256 `6f070575…`、E2e の最後のゲートの成果物 `~/.cache/losat-web-gui-target/s08pb2-gate-*`）。変更後は最後のエンジンのコミット `095171eda`（最後のゲートは記録を足した `dc129ea34` で、エンジンは同じ。native `f0b8916b…`、再監査 2 の再生の実行ファイルと同じ）。2026-10-05
-- 状態：**完了（2026-10-06）**。計画 §7 の S11 の行の完了条件（固定した fixture で NCBI とバイト一致、独立監査）と指示書の 5. を満たした。保守者に諮ること（判断 R1・R2・A-1、`validate` の誤りの順）は下の「保守者に諮ること」
+- 状態：**完了（2026-10-06）**。計画 §7 の S11 の行の完了条件（固定した fixture で NCBI とバイト一致、独立監査）と指示書の 5. を満たした。諮ったこと（判断 R1・R2・A-1、`validate` の誤りの順、ゲートで省いた工程、V-PERF）は 2026-10-06 に保守者が全て推奨の案で決めた（計画 DW-20、下の「保守者に諮ること」）
 
 ## 経過（2026-10-05〜06）
 
@@ -157,7 +157,7 @@ A-1 の修正の再監査：
 
 ## 保守者に諮ること
 
-推奨の案で進め、記録した。
+推奨の案で進め、記録した。2026-10-06 に保守者が 1〜6 を全て推奨の案で決めた（計画 DW-20）。`main` への PR は今は作らない。
 
 1. **R1**（`StringToInt` が読めない範囲の部分）：明示的な拒否。推奨：このまま（TD-15 と同じ）。
 2. **R2**（文字の無い区間）：明示的な拒否。推奨：このまま（実用が無く、LOSAT は文字の無いレコードも拒否している）。
@@ -175,7 +175,7 @@ A-1 の修正の再監査：
 
 ## 残件と引き継ぎ
 
-- **`main` への PR**：S11 のコミット（`46d93c06d` から）は `feature/losat-web-gui` に push 済み。`main` への PR は作っていない（保守者の指示を待つ）。
+- **`main` への PR**：S11 のコミット（`46d93c06d` から）は `feature/losat-web-gui` に push 済み。`main` への PR は、2026-10-06 の保守者の判断で今は作らない（DW-20）。
 - **ゲートの工程の並行**：TBLASTX の option の sweep（`-threshold +inf` の行は 1 件で約 8.6 GB）、V-ABI full、Gate A を同時に流すと、この計算機（WSL、31 GB）では WSL が再起動した（2026-10-05）。`s11_gates.sh` の Gate A は sweep の後に流す。
 - **範囲の外**（[`AUTHORITY.md`](AUTHORITY.md) §G）：`qcovs`・`qcovhsp`・`qcovus`・`sstrand` の field（LOSAT はどの program も書かない）、`-strand`（判断 R4）、`-db`・`-remote`・`-import_search_strategy`。
 - **SX**：BLASTX の `-query_loc` / `-subject_loc`（`is_unported_blastx_arg` は変えていない）。`seq_range.rs` の部品と、この記録の §B〜§D がそのまま使える。

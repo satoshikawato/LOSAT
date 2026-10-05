@@ -40,3 +40,12 @@
 [8/20] p08_trcumjnv_mellatmjnv: EXACT_TEXT rows=5804/5804 contract=PASS repeatability=REPEATABLE
 [9/20] p09_mellatmjnv_meenmjnv: oracle
 [9/20] p09_mellatmjnv_meenmjnv: native run 1
+[9/20] p09_mellatmjnv_meenmjnv: native run 2
+[9/20] p09_mellatmjnv_meenmjnv: native run 3
+[9/20] p09_mellatmjnv_meenmjnv: EXACT_TEXT rows=18560/18560 contract=PASS repeatability=REPEATABLE
+[10/20] p10_meenmjnv_mejomjnv: oracle
+[10/20] p10_meenmjnv_mejomjnv: native run 1
+[10/20] p10_meenmjnv_mejomjnv: native run 2
+[10/20] p10_meenmjnv_mejomjnv: native run 3
+[10/20] p10_meenmjnv_mejomjnv: EXACT_TEXT rows=23240/23240 contract=PASS repeatability=REPEATABLE
+[11/20] p11_avclpv_psclpv: oracle

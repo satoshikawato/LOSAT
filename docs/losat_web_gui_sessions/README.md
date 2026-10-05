@@ -48,7 +48,7 @@
 | S09 | [ブラウザでの実行基盤](session_s09_w1_browser_runtime.md) | W1 | V-BR、前処理の割合の実測（アプリ側。S10 の後、入口の条件は S08） | 着手（2026-10-03、S08b と並行。保守者の指示） |
 | S09+ | 前処理キャッシュ（条件付き） | R2 | DW-8 の条件を満たした program だけ。S09 の結果で行を足す | 未定 |
 | S10 | [データ層](session_s10_w2_data_layer.md) | W2 | BlockStore の契約試験、回収・保護・容量不足（アプリ側。S09 より先に行う） | 完了（2026-09-30、[ゲート記録](../evidence/losat_web_w2/README.md)） |
-| S11 | [領域の指定](session_s11_e2d_query_subject_loc.md) | E2d | `-query_loc` / `-subject_loc` が NCBI とバイト一致 | 未着手 |
+| S11 | [領域の指定](session_s11_e2d_query_subject_loc.md) | E2d | `-query_loc` / `-subject_loc` が NCBI とバイト一致 | 着手（2026-10-05、[ゲート記録](../evidence/losat_web_e2d/README.md)） |
 | S12 | [検索画面](session_s12_w3_search_ui.md) | W3 | 研究作業と境界条件の E2E | 未着手 |
 | S13 | [結果画面](session_s13_w4_results_ui.md) | W4 | 5 program の E2E、HSP と行・節の対応 | 未着手 |
 | S14 | [抽出と候補](session_s14_w5_extraction_candidates.md) | W5 | 原配列との一致 | 未着手 |

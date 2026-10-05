@@ -16,3 +16,14 @@
 [4/20] p04_pemojnva_pesemjnv: oracle
 [4/20] p04_pemojnva_pesemjnv: native run 1
 [4/20] p04_pemojnva_pesemjnv: native run 2
+[4/20] p04_pemojnva_pesemjnv: native run 3
+[4/20] p04_pemojnva_pesemjnv: EXACT_TEXT rows=34062/34062 contract=PASS repeatability=REPEATABLE
+[5/20] p05_pesemjnv_pemojnva: oracle
+[5/20] p05_pesemjnv_pemojnva: native run 1
+[5/20] p05_pesemjnv_pemojnva: native run 2
+[5/20] p05_pesemjnv_pemojnva: native run 3
+[5/20] p05_pesemjnv_pemojnva: EXACT_TEXT rows=44838/44838 contract=PASS repeatability=REPEATABLE
+[6/20] p06_pemojnva_lvmjnv: oracle
+[6/20] p06_pemojnva_lvmjnv: native run 1
+[6/20] p06_pemojnva_lvmjnv: native run 2
+[6/20] p06_pemojnva_lvmjnv: native run 3

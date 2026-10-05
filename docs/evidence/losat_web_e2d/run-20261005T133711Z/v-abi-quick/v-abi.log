@@ -2,3 +2,40 @@
 (Use `node --trace-warnings ...` to show where the warning was created)
 ok serial describe, validate, register, scan
 ok serial n1 pairwise_default_serial
+ok serial n1 pairwise_limit1_serial
+ok serial n1 MjPMNV.MlPMNV.task_blastn
+ok serial n1 compact.multi_query.outfmt6,compact.multi_query.outfmt7
+ok serial n1 compact.multi_query.no_hit.outfmt7
+ok serial n1 p02_mje_mela
+ok serial n1 code1,code1,code1
+ok serial n1 code4,code4,code4
+ok serial n1 code11,code11,code11
+ok serial n1 code32,code32,code32
+ok serial n1 valid_then_skipped
+ok serial n1 skipped_then_valid
+ok serial n1 dc.default,dc.default.7
+ok serial n1 short.default,short.default.7
+ok serial n1 tblastx-threaded-direct
+ok threads describe, validate, register, scan
+ok threads n1 pairwise_default_serial
+(node:48692) ExperimentalWarning: WASI is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ok threads n2 pairwise_default_serial
+(node:48692) ExperimentalWarning: WASI is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:48692) ExperimentalWarning: WASI is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:48692) ExperimentalWarning: WASI is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ok threads n4 pairwise_default_serial
+ok threads n1 pairwise_limit1_serial
+(node:48692) ExperimentalWarning: WASI is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ok threads n2 pairwise_limit1_serial
+(node:48692) ExperimentalWarning: WASI is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:48692) ExperimentalWarning: WASI is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:48692) ExperimentalWarning: WASI is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ok threads n4 pairwise_limit1_serial

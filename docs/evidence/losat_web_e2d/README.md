@@ -20,12 +20,12 @@
 
 | 条件 | 状態 | 根拠 |
 |---|---|---|
-| 固定した fixture で outfmt 0/6/7 が NCBI とバイト一致 | 【G】 | outfmt 0/6/7 の manifest の E2d の 53 行（1・2・4 スレッドで差 0、NCBI の凍結の確かめも差 0）、範囲の回帰 fixture 35 件（stdout・stderr・終了コード、NCBI の誤りと誤りの順を含む）。変更前の LOSAT はどの行も「the NCBI BLAST+ option -query_loc is not supported by LOSAT's <PROGRAM>」で拒否する |
-| 範囲の全ての書き方と端で NCBI と同じか明示的な拒否 | 【G】 | [`range_sweep.py`](range_sweep.py) の 1860 件で DIFF 0（下の「sweep」）。4 人の監査役の約 11 万の比較でも、一致、同じ誤り、承認済みの例外、明示的な拒否だけ（指摘 A-1 = D-1 は直した） |
-| 既存の認証済みの出力に退行なし | 【G】 | fixture 151 件、capture 236 件が S02 の基準と差 0、Gate A、TBLASTX 84・BLASTN 183 の回帰 fixture、CI の速い検査の全件、E2e の option の sweep 3 つ、v1 の WASI の行列 |
-| `run_local` と ABI v2 の `validate` から使える | 【G】 | V-ABI full（E2d の fixture の検索を含む）、監査 D の Web の harness（`validate`・`register`・`run` と CLI の約 18,400 件 × 3 形式） |
+| 固定した fixture で outfmt 0/6/7 が NCBI とバイト一致 | 満たした | outfmt 0/6/7 の manifest の E2d の 53 行（1・2・4 スレッドで差 0、NCBI の凍結の確かめも差 0）、範囲の回帰 fixture 35 件（stdout・stderr・終了コード、NCBI の誤りと誤りの順を含む）。変更前の LOSAT はどの行も「the NCBI BLAST+ option -query_loc is not supported by LOSAT's <PROGRAM>」で拒否する |
+| 範囲の全ての書き方と端で NCBI と同じか明示的な拒否 | 満たした | [`range_sweep.py`](range_sweep.py) の 1860 件で DIFF 0（下の「sweep」）。4 人の監査役の約 11 万の比較でも、一致、同じ誤り、承認済みの例外、明示的な拒否だけ（指摘 A-1 = D-1 は直した） |
+| 既存の認証済みの出力に退行なし | 満たした | fixture 151 件、CI の速い検査の全件 236 件（capture と同じ case、S02 の基準と Gate A・TLOSAN Stage G の凍結ハッシュ）で失敗 0、Gate A の 20 組のうち 10 組を再実行して全て EXACT_TEXT・REPEATABLE、TBLASTX 84・BLASTN 183 の回帰 fixture、E2e の BLASTP・TBLASTN の option の sweep が E2e と同じ分類、v1 の WASI の行列（下の「ゲート」） |
+| `run_local` と ABI v2 の `validate` から使える | 満たした | V-ABI（BLASTN・BLASTP・TBLASTN の全ての検索 191 と TBLASTX の E2d の検索 7。E2d の 36 の検索を全て含む）、監査 D の Web の harness（`validate`・`register`・`run` と CLI の約 18,400 件 × 3 形式） |
 | `docs/web/verification_cells.tsv` に升目を足す | 満たした | E2d の 4 行（fixture、範囲の回帰 fixture、sweep、V-ABI）を `checked` で足した |
-| 独立監査 | 【G】 | 4 観点（BLASTN、BLASTP、TBLASTN・TBLASTX、引数・端・アダプタ）と、指摘の修正の再監査 2 回（下の「独立監査」） |
+| 独立監査 | 満たした | 4 観点（BLASTN、BLASTP、TBLASTN・TBLASTX、引数・端・アダプタ）と、指摘の修正の再監査 2 回（下の「独立監査」） |
 | V-PERF の非退行 | 【G】 | 下の「V-PERF」 |
 
 ## 範囲の意味（要約。詳しくは [`AUTHORITY.md`](AUTHORITY.md)）
@@ -80,10 +80,10 @@ NCBI は、範囲を、その役割（query か subject）の入力が読む**�
 
 | | 件数 | 変更前（`4fab73fdb`） | 最後のゲート |
 |---|---|---|---|
-| BLASTN | 540 | 全て LOSAT の拒否（option が未移植） | 【G】 |
-| BLASTP | 480 | 同上 | 【G】 |
-| TBLASTN | 420 | 同上 | 【G】 |
-| TBLASTX | 420 | 同上 | 【G】 |
+| BLASTN | 540 | 全て LOSAT の拒否（option が未移植） | DIFF 0：一致 318、同じ誤り 135、LOSAT の拒否 87 |
+| BLASTP | 480 | 同上 | DIFF 0：一致 186、同じ誤り 216、LOSAT の拒否 78 |
+| TBLASTN | 420 | 同上 | DIFF 0：一致 180、同じ誤り 156、LOSAT の拒否 84 |
+| TBLASTX | 420 | 同上 | DIFF 0：一致 198、同じ誤り 138、LOSAT の拒否 84 |
 
 LOSAT の拒否は R1（`StringToInt` が読めない部分）と R2（文字の無い区間）だけ。
 
@@ -99,11 +99,37 @@ LOSAT の拒否は R1（`StringToInt` が読めない部分）と R2（文字の
 
 ## ゲート
 
-【G:ゲート】
+最後のゲートは `dc129ea34`（エンジンは最後のエンジンのコミット `095171eda` と同じ。後のコミットは記録だけ）：run [`run-20261005T133711Z/`](run-20261005T133711Z/)（`head.txt`）。script は [`gates/s11_gates.sh`](gates/s11_gates.sh)（E2e の `s08pb_gates.sh` を写し、E2d の範囲の fixture と範囲の sweep を足した。build の directory は `s11-gate-*`）。成果物のハッシュは `artifacts.sha256`（native `f0b8916b…`、reactor `2fde198f…`・`cc6cc653…`）。変更前は E2e の最後のゲートの成果物（native `6f070575…`）。
+
+**中断と再開。** ゲートは TBLASTX の option の sweep の途中で WSL の再起動で止まった（2026-10-05。直前に TBLASTX の sweep（`-threshold +inf` の行は 1 件で約 8.6 GB）、V-ABI full、Gate A が並行していた。記憶の不足と考えられる）。同じ run の directory と成果物（`artifacts-resume.sha256` が `artifacts.sha256` と同じ）で、残りの工程を [`gates/s11_gates_resume.sh`](gates/s11_gates_resume.sh) で行った（`head-resume.txt`）。保守者の問い（2026-10-06、工程の多さ）を受けて、確かめが重なる次の工程は省いた：
+
+- TBLASTX の option の sweep（E2e の確かめ。S11 は範囲のほかの option の扱いを変えていない。BLASTP・TBLASTN の sweep は E2e と同じ分類）、TBLASTN の `-db_gencode` の C++ API の oracle と蛋白の題の sweep（同じく E2e の確かめ）。
+- capture（CI の速い検査の全件と同じ 236 の case を、S02 の基準の hash と比べる。速い検査は同じ実行ファイルで失敗 0。開発中の `LOSAT-wip2` の capture も 236 件が S02 の基準と差 0）。
+- Gate A の残りの 10 組（Gate A の凍結ハッシュは速い検査の全件に入っている。再起動の前の 10 組は全て EXACT_TEXT・REPEATABLE）。
+- V-ABI full の TBLASTX の残りの検索（BLASTN・BLASTP・TBLASTN は全ての検索が終わっていた。TBLASTX は E2d の 7 つの検索を V-ABI で確かめた）。
+
+| 検査 | 結果 |
+|---|---|
+| `cargo fmt --check`（LOSAT、アダプタ）、clippy `-D warnings` の 4 構成とアダプタの 3 構成 | すべて終了コード 0 |
+| `cargo test --all-features`、アダプタ、wasm32 の web API の試験 | 920 件通過・失敗 0（無視 3）、アダプタと web API の試験は終了コード 0 |
+| pure-Rust の境界、`ci_fast_regressions.py` の単体試験、`protein_tables` の検査、このセッションで足した行の NCBI の参照（`verify_added.py`、BASE `4fab73fdb`） | 通過、誤り 0（`verify-refs-session-added.txt`） |
+| outfmt 0 の fixture（`check_losat.py`、1・2・4 スレッド） | 204 件（E2d の 53 を含む）、差 0（3 つのスレッド数とも） |
+| `run_oracle.py`（NCBI の凍結の確かめ） | 204 件、差 0 |
+| 範囲の回帰 fixture（`range_regression_fixtures.py`）、TBLASTX の回帰 fixture、BLASTN の回帰 fixture | 35 件差 0、84 件差 0、183 件差 0 |
+| `CTOOLKIT_COMPATIBLE`（`ctoolkit_compare.py`）、句読点の定義行（`punct-defline.tsv`） | 200 行 600 実行で差 0、予期しない 0 |
+| 句読点だけの subject の題（E2e の `title_sweep.py`） | TBLASTX・TBLASTN とも 1023 の定義行で一致 957、例外 2 が 66、予期しない 0 |
+| BLASTN の入力（E2g の `check_inputs.py`） | 300 件、予期しない 0 |
+| CI の速い検査の全件（`ci_fast_regressions.py --all-cases`。S02 の基準、Gate A の凍結ハッシュと TLOSAN Stage G を含む） | 236 件、失敗 0、許可した既知の不一致 1（`Sakai.MG1655.megablast`） |
+| 範囲の sweep（[`range_sweep.py`](range_sweep.py)） | 1860 件で DIFF 0（上の「sweep」） |
+| E2e の option の sweep（BLASTP 1196・TBLASTN 1427） | DIFF 0。全ての行が E2e の最後のゲートと同じ分類 |
+| Gate A（再起動の前、`audit-tblastx-v010.log`） | 20 組のうち 10 組（`p01`〜`p10`）が EXACT_TEXT・contract PASS・REPEATABLE |
+| V-ABI（`v-abi-full/parts/` の BLASTN・BLASTP・TBLASTN、`v-abi-tblastx-e2d/`） | BLASTN 90・BLASTP 46・TBLASTN 55 の全ての検索と TBLASTX の E2d の 7 の検索 × 4（serial n1、threads n1・n2・n4）。全ての実行が native の CLI と一致。凍結ハッシュは、違う 4 件（既知の `Sakai.MG1655.megablast` outfmt 7）のほか全て一致 |
+| V-ABI quick | 【G:quick】 |
+| v1 の WASI の行列（`check_wasm_threading.py`）、`v1-requests` | 【G:v1】 |
 
 ## Gate A
 
-【G:Gate A】
+[`gates/s11_gate_a.sh`](gates/s11_gate_a.sh)（出力は `/tmp/claude-1000/` の下。`audit_tblastx_v010.py` は `/tmp` の外を拒否する）が最後のゲートの native（`f0b8916b…`）で `LOSAT/tests/audit_tblastx_v010.py` を実行し、WSL の再起動までに TBLASTX v0.1.0 の outfmt 6 の 20 組のうち 10 組（`p01`〜`p10`）を終えた：全て EXACT_TEXT（全行一致）、contract PASS、3 回の実行で REPEATABLE（`run-20261005T133711Z/audit-tblastx-v010.log`）。残りの 10 組（`p11`〜`p14` と承認済みの `-db_gencode` の例外の組 `d01`〜`d06`）は再実行しなかった。20 組の凍結ハッシュは CI の速い検査の全件に入っていて、同じ実行ファイルで失敗 0。
 
 ## V-PERF
 

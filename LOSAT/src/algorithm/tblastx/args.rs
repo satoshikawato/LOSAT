@@ -135,6 +135,36 @@ pub struct TblastxArgs {
     /// higher-scoring hits, delete the hit (default: 0, no culling).
     #[arg(long, default_value_t = 0, value_parser = nonnegative_ncbi_integer)]
     pub culling_limit: i32,
+    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:1945-1949
+    // ```c++
+    //     // query location
+    //     arg_desc.AddOptionalKey(kArgQueryLocation, "range",
+    //                             "Location on the query sequence in 1-based offsets "
+    //                             "(Format: start-stop)",
+    //                             CArgDescriptions::eString);
+    // ```
+    // Read by the query options handler (`check_ncbi_options`).
+    #[arg(
+        long = "query_loc",
+        value_name = "RANGE",
+        help = "Location on the query sequence in 1-based offsets (Format: start-stop)"
+    )]
+    pub query_loc: Option<String>,
+    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2372-2376
+    // ```c++
+    //         // subject location
+    //         arg_desc.AddOptionalKey(kArgSubjectLocation, "range",
+    //                         "Location on the subject sequence in 1-based offsets "
+    //                         "(Format: start-stop)",
+    //                         CArgDescriptions::eString);
+    // ```
+    // Read by the database arguments handler when it reads the subjects (`run`).
+    #[arg(
+        long = "subject_loc",
+        value_name = "RANGE",
+        help = "Location on the subject sequence in 1-based offsets (Format: start-stop)"
+    )]
+    pub subject_loc: Option<String>,
 }
 
 impl TblastxArgs {

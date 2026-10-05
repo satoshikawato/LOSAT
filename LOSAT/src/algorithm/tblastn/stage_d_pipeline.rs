@@ -69,6 +69,9 @@ pub(super) struct LocalStageDProfile<'a> {
     pub genetic_code: u8,
     pub expect_value: f64,
     pub max_target_seqs: usize,
+    /// Where each query's searched letters start in its record (`-query_loc`; empty: 0),
+    /// which the masks of a split query's chunks depend on (`protein_chunk_part`).
+    pub query_offsets: &'a [usize],
 }
 
 // NCBI c++/src/algo/blast/core/blast_options.c:903-936;
@@ -976,7 +979,17 @@ fn split_preliminary_hitlists(
             .queries
             .iter()
             .map(|part| {
-                protein_chunk_part(&queries[part.query], part, inputs.profile.mask_lowercase)
+                protein_chunk_part(
+                    &queries[part.query],
+                    part,
+                    inputs.profile.mask_lowercase,
+                    inputs
+                        .profile
+                        .query_offsets
+                        .get(part.query)
+                        .copied()
+                        .unwrap_or(0),
+                )
             })
             .collect();
         let setup = query_set_setup(&parts, inputs, Some(&batch_eff_searchsp))?;
@@ -1629,6 +1642,7 @@ mod tests {
                 genetic_code: 1,
                 expect_value: 10.0,
                 max_target_seqs: 500,
+                query_offsets: &[],
             },
             true,
             true,
@@ -1675,6 +1689,7 @@ mod tests {
                 genetic_code: 1,
                 expect_value: 10.0,
                 max_target_seqs: 500,
+                query_offsets: &[],
             },
             true,
             true,
@@ -1961,6 +1976,7 @@ mod tests {
                 genetic_code: 1,
                 expect_value: 10.0,
                 max_target_seqs: 2,
+                query_offsets: &[],
             },
             true,
             true,
@@ -2045,6 +2061,7 @@ mod tests {
                 genetic_code: 1,
                 expect_value: 10.0,
                 max_target_seqs: 500,
+                query_offsets: &[],
             },
             true,
             true,
@@ -2198,6 +2215,7 @@ mod tests {
                 genetic_code: 32,
                 expect_value: 10.0,
                 max_target_seqs: 500,
+                query_offsets: &[],
             },
         )
         .unwrap();
@@ -2287,6 +2305,7 @@ mod tests {
                     genetic_code: 1,
                     expect_value: 10.0,
                     max_target_seqs: 500,
+                    query_offsets: &[],
                 },
             )
             .unwrap();
@@ -2467,6 +2486,7 @@ mod tests {
                     genetic_code: 1,
                     expect_value: 10000.0,
                     max_target_seqs: 500,
+                    query_offsets: &[],
                 };
                 let mut boundary = StageDBoundaryTrace::default();
                 let results = run_local_search(
@@ -2690,6 +2710,7 @@ mod tests {
                     genetic_code: 1,
                     expect_value: 10000.0,
                     max_target_seqs: 500,
+                    query_offsets: &[],
                 };
                 let mut boundary = StageDBoundaryTrace::default();
                 let results = run_local_search(
@@ -2896,6 +2917,7 @@ mod tests {
                 genetic_code: 1,
                 expect_value: 10000.0,
                 max_target_seqs: 500,
+                query_offsets: &[],
             },
             false,
             false,
@@ -3040,6 +3062,7 @@ mod tests {
                 genetic_code: 1,
                 expect_value: 10000.0,
                 max_target_seqs: 500,
+                query_offsets: &[],
             },
             false,
             false,
@@ -3205,6 +3228,7 @@ mod tests {
                 genetic_code: 1,
                 expect_value: 10.0,
                 max_target_seqs: 500,
+                query_offsets: &[],
             };
             let mut boundary = StageDBoundaryTrace::default();
             let result = run_local_search(
@@ -3398,6 +3422,7 @@ mod tests {
                     genetic_code: 1,
                     expect_value: 10000.0,
                     max_target_seqs: 500,
+                    query_offsets: &[],
                 };
                 let mut boundary = StageDBoundaryTrace::default();
                 let results = run_local_search(
@@ -3554,6 +3579,7 @@ mod tests {
                         genetic_code: selected,
                         expect_value: 10.0,
                         max_target_seqs: 500,
+                        query_offsets: &[],
                     },
                     true,
                     true,
@@ -3861,6 +3887,7 @@ mod tests {
                 genetic_code: 1,
                 expect_value: 10.0,
                 max_target_seqs: 112,
+                query_offsets: &[],
             },
         )
         .unwrap();
@@ -4047,6 +4074,7 @@ mod tests {
                     genetic_code: 1,
                     expect_value: 10.0,
                     max_target_seqs: 500,
+                    query_offsets: &[],
                 },
             )
             .unwrap();
@@ -4158,6 +4186,7 @@ mod tests {
                 genetic_code: 1,
                 expect_value: 10000.0,
                 max_target_seqs: 1,
+                query_offsets: &[],
             },
         )
         .unwrap();
@@ -4251,6 +4280,7 @@ mod tests {
                 genetic_code: 1,
                 expect_value: 10000.0,
                 max_target_seqs: 1,
+                query_offsets: &[],
             },
         )
         .unwrap();
@@ -4361,6 +4391,7 @@ mod tests {
                 genetic_code: 1,
                 expect_value: 10000.0,
                 max_target_seqs: 1,
+                query_offsets: &[],
             },
         )
         .unwrap();

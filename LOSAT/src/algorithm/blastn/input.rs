@@ -805,10 +805,14 @@ pub fn check_utf8_file_name(path: &std::path::Path, role: &str, program: &str) -
 /// warns about or reads differently are rejected (or their title warnings written), and a
 /// file without records fails with NCBI's error. Returns the records and the checks that
 /// LOSAT makes where the search would start (NCBI reads those inputs without a message).
+///
+/// With `-subject_loc` (`subject_loc`), the records are returned cut to their intervals,
+/// with where each lies in its record (`seq_range::cut_subjects`).
 pub fn read_nucleotide_subjects(
     path: &std::path::Path,
     program: &str,
-) -> Result<(Vec<fasta::Record>, Result<()>)> {
+    subject_loc: Option<&str>,
+) -> Result<NucleotideSubjects> {
     // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2553-2557
     // ```c
     //         CRef<blast::CBlastQueryVector> subjects;
@@ -822,6 +826,24 @@ pub fn read_nucleotide_subjects(
     // (`blastn/input.rs`).
     check_utf8_file_name(path, "subject", program)?;
     let mut subject_file = open_input(path, "subject", program)?;
+    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2537-2545
+    // ```c++
+    //             subj_input_stream = &args[kArgSubject].AsInputFile();
+    //         }
+    //
+    //         TSeqRange subj_range;
+    //         if (args.Exist(kArgSubjectLocation) && args[kArgSubjectLocation]) {
+    //             subj_range =
+    //                 ParseSequenceRange(args[kArgSubjectLocation].AsString(),
+    //                             "Invalid specification of subject location");
+    //         }
+    // ```
+    // The subject range is read after the subject file is opened, before it is read.
+    let subject_range = crate::blastinput::seq_range::parse_optional_range(
+        subject_loc,
+        crate::blastinput::seq_range::RangeRole::Subject,
+        program,
+    )?;
     let subject_bytes = read_fasta_bytes(&mut subject_file, path, "subject")?;
     drop(subject_file);
     // NCBI warns about the residues that LOSAT rejects when it reads them, so they are
@@ -868,7 +890,14 @@ pub fn read_nucleotide_subjects(
         Err(error) => return Err(error),
     };
     check_residues_of(&subjects, "subject", program)?;
-    write_title_warnings(&subjects, &mut std::io::stderr())?;
+    // NCBI reads the records one at a time and checks each one's range after reading it:
+    // a range that starts past the end of a record stops it there, after the title
+    // warnings of the records read.
+    write_title_warnings(
+        &subjects[..crate::blastinput::seq_range::subjects_read(&subjects, subject_range.as_ref())],
+        &mut std::io::stderr(),
+    )?;
+    let ranged = crate::blastinput::seq_range::cut_subjects(&subjects, subject_range.as_ref())?;
     // `bio` reads no record from a file whose first record has an empty defline and no
     // residues (NCBI reads that record and the rest); the deferred defline check rejects it.
     if subject_reading.is_ok()
@@ -881,7 +910,27 @@ pub fn read_nucleotide_subjects(
         .and_then(|()| check_deflines_of(&subject_bytes, "subject", program))
         .and_then(|()| check_records_have_residues_of(&subjects, "subject", program));
     drop(subject_bytes);
-    Ok((subjects, subject_checks))
+    let (records, placements) = ranged.unwrap_or_else(|| {
+        (
+            subjects,
+            crate::blastinput::seq_range::Placements::default(),
+        )
+    });
+    Ok(NucleotideSubjects {
+        records,
+        checks: subject_checks,
+        placements,
+    })
+}
+
+/// The subjects of a translated search as `read_nucleotide_subjects` reads them: the
+/// records as searched (cut to their `-subject_loc` intervals), the checks that LOSAT
+/// makes where the search would start, and where each record's searched letters lie in
+/// the record.
+pub struct NucleotideSubjects {
+    pub records: Vec<fasta::Record>,
+    pub checks: Result<()>,
+    pub placements: crate::blastinput::seq_range::Placements,
 }
 
 #[cfg(test)]

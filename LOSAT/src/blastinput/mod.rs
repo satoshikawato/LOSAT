@@ -20,6 +20,9 @@ pub mod blastp_args;
 // NCBI corelib/ncbiapp.cpp, metareg.cpp: the application layer's environment and registry.
 pub mod ncbi_environment;
 pub mod query_batch;
+// NCBI blastinput/blast_input_aux.cpp:145-179 and blast_fasta_input.cpp:433-460: the
+// `-query_loc` and `-subject_loc` ranges.
+pub mod seq_range;
 pub mod tblastx_args;
 
 // NCBI blastinput/blast_args.cpp:332-349: shared string-valued filtering arguments.

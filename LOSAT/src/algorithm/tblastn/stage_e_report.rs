@@ -47,6 +47,16 @@ pub(super) fn format_number(outfmt: &str) -> i32 {
     crate::blastinput::app::parse_formatting_string(outfmt).map_or(-1, |choice| choice.number)
 }
 
+/// The ranges of a search as the reports use them: where the searched letters of each
+/// query and subject lie in its record (`-query_loc`, `-subject_loc`), and whether the
+/// reports end with the epilog (a search that stops at a query batch writes none).
+pub(super) struct ReportRanges<'a> {
+    pub queries: &'a crate::blastinput::seq_range::Placements,
+    pub subjects: &'a crate::blastinput::seq_range::Placements,
+    pub epilog: bool,
+}
+
+#[allow(clippy::too_many_arguments)]
 pub(super) fn render(
     outputs: &mut ReportOutputs<'_>,
     query_records: &[fasta::Record],
@@ -64,6 +74,7 @@ pub(super) fn render(
     seg: Option<&SegParams>,
     mask_lowercase: bool,
     query_warning_lines: &[Vec<u8>],
+    ranges: &ReportRanges<'_>,
 ) -> Result<()> {
     ensure!(
         query_records.len() == hitlists.len(),
@@ -94,6 +105,7 @@ pub(super) fn render(
             genetic_code,
             seg,
             mask_lowercase,
+            ranges,
         )?)
     } else {
         None
@@ -124,6 +136,7 @@ pub(super) fn render(
                 subject_path,
                 hitlists,
                 query_batch_skipped,
+                ranges,
                 probe.as_mut(),
                 warnings.as_mut(),
             )?,
@@ -142,6 +155,7 @@ pub(super) fn render(
                 scoring,
                 matrix_name,
                 max_target_seqs_given,
+                ranges,
                 probe.as_mut(),
                 warnings.as_mut(),
             )?,
@@ -166,6 +180,7 @@ fn write_tabular(
     subject_path: &Path,
     hitlists: &[KappaResultHitList],
     query_batch_skipped: &[bool],
+    ranges: &ReportRanges<'_>,
     mut probe: Option<&mut FormatProbe<'_>>,
     mut warnings: Option<&mut crate::report::query_warnings::QueryWarnings<'_>>,
 ) -> Result<()> {
@@ -249,6 +264,14 @@ fn write_tabular(
                         subject_len - 3 * hsp.s_end + frame + 2,
                     )
                 };
+                // The coordinates in the searched letters, moved into the records
+                // (`record_coordinates`).
+                let (q_start, q_end, s_start, s_end) = record_coordinates(
+                    ranges,
+                    q_idx,
+                    oid,
+                    (hsp.q_start + 1, hsp.q_end, s_start, s_end),
+                )?;
                 let percent =
                     format_percent_identity_ncbi(payload.report_num_ident, payload.align_length, 3);
                 let bits = format_bitscore_ncbi(payload.bit_score);
@@ -275,8 +298,8 @@ fn write_tabular(
                     payload.align_length,
                     payload.report_mismatches,
                     payload.gap_opens,
-                    hsp.q_start + 1,
-                    hsp.q_end,
+                    q_start,
+                    q_end,
                     s_start,
                     s_end,
                     evalue,
@@ -293,10 +316,63 @@ fn write_tabular(
             }
         }
     }
-    if comments {
+    // NCBI reference: c++/src/app/blast/tblastn_app.cpp:342
+    // ```c++
+    //         formatter.PrintEpilog(opt);
+    // ```
+    // A search that stops at a query batch (`Empty CBlastQueryVector` with `-query_loc`)
+    // writes no epilog.
+    if comments && ranges.epilog {
         writeln!(writer, "# BLAST processed {} queries", query_records.len())?;
     }
     Ok(())
+}
+
+/// The 1-based reported coordinates of an HSP (query start and end, subject start and end
+/// in nucleotides) moved from the searched letters into the records: by the start of the
+/// query's interval and of the subject's interval, on either frame. Without ranges nothing
+/// moves.
+///
+/// NCBI reference: c++/src/algo/blast/api/blast_seqalign.cpp:1630-1637
+/// ```c++
+/// 	if (seqinfo_src->CanReturnPartialSequence() == true)
+/// 	{
+///         	CConstRef<CSeq_loc> subj_loc = seqinfo_src->GetSeqLoc(kOid);
+///         	NON_CONST_ITERATE(vector<CRef<CSeq_align > >, iter, hit_align) {
+///              	   RemapToQueryLoc(*iter, query_loc);
+///              	   if ( !is_ooframe )
+///                    	s_RemapToSubjectLoc(*iter, *subj_loc);
+/// ```
+/// NCBI reference: c++/src/algo/blast/api/blast_seqalign.cpp:1520-1534
+/// ```c++
+/// void RemapToQueryLoc(CRef<CSeq_align> sar, const CSeq_loc & query)
+/// {
+///     ...
+///     if (query.IsInt()) {
+///         q_shift = query.GetInt().GetFrom();
+///     }
+///
+///     if (q_shift > 0) {
+///         sar->OffsetRow(query_row, q_shift);
+///     }
+/// }
+/// ```
+/// A subject interval has the strand both, so `RemapAlignToLoc` (seq_align_util.cpp:71-78)
+/// moves its row by the interval's start.
+fn record_coordinates(
+    ranges: &ReportRanges<'_>,
+    q_idx: usize,
+    s_idx: usize,
+    (q_start, q_end, s_start, s_end): (i32, i32, i32, i32),
+) -> Result<(i32, i32, i32, i32)> {
+    let q_shift = i32::try_from(ranges.queries.offset(q_idx))?;
+    let s_shift = i32::try_from(ranges.subjects.offset(s_idx))?;
+    Ok((
+        q_start + q_shift,
+        q_end + q_shift,
+        s_start + s_shift,
+        s_end + s_shift,
+    ))
 }
 
 #[cfg(test)]
@@ -356,6 +432,7 @@ mod tests {
                     genetic_code: 1,
                     expect_value: 10.0,
                     max_target_seqs: 500,
+                    query_offsets: &[],
                 },
                 mode == 2,
                 true,
@@ -395,6 +472,11 @@ mod tests {
                 Some(&seg),
                 false,
                 &[],
+                &ReportRanges {
+                    queries: &Default::default(),
+                    subjects: &Default::default(),
+                    epilog: true,
+                },
             )
             .unwrap();
             drop(outputs);
@@ -425,6 +507,7 @@ mod tests {
 // the formatted result contains full aligned protein strings and the
 // translated subject nucleotide endpoints.
 /// The final HSP list with rendered alignments, in the order of the tabular rows.
+#[allow(clippy::too_many_arguments)]
 fn pairwise_hits(
     query_records: &[fasta::Record],
     subject_records: &[fasta::Record],
@@ -433,6 +516,7 @@ fn pairwise_hits(
     genetic_code: u8,
     seg: Option<&SegParams>,
     mask_lowercase: bool,
+    ranges: &ReportRanges<'_>,
 ) -> Result<Vec<PairwiseHit>> {
     let code = GeneticCode::try_from_id(genetic_code).map_err(anyhow::Error::msg)?;
     let mut hits = Vec::new();
@@ -520,6 +604,39 @@ fn pairwise_hits(
                 // ```
                 let report_positives =
                     crate::utils::matrix::protein_display_positives(&qseq, &sseq, scoring.matrix);
+                // The rows are read from the searched letters; the report prints record
+                // coordinates (`record_coordinates`).
+                let (q_start, q_end, s_start, s_end) = record_coordinates(
+                    ranges,
+                    q_idx,
+                    oid,
+                    (hsp.q_start + 1, hsp.q_end, s_start, s_end),
+                )?;
+                // NCBI reference: c++/src/objtools/align_format/showalign.cpp:411-422
+                // ```c++
+                // static int s_GetFrame (int start, ENa_strand strand, const CSeq_id& id,
+                //                        CScope& sp)
+                // {
+                //     int frame = 0;
+                //     if (strand == eNa_strand_plus) {
+                //         frame = (start % 3) + 1;
+                //     } else if (strand == eNa_strand_minus) {
+                //         frame = -(((int)sp.GetBioseqHandle(id).GetBioseqLength() - start - 1)
+                //                   % 3 + 1);
+                //
+                //     }
+                //     return frame;
+                // }
+                // ```
+                // The report's frame comes from the record coordinate of the subject row's
+                // start and the record's length (the search's frame without
+                // `-subject_loc`).
+                let subject_length = ranges.subjects.length(oid, subject.seq().len());
+                let subject_frame = crate::blastinput::seq_range::record_frame(
+                    frame > 0,
+                    usize::try_from(s_start - 1)?,
+                    subject_length,
+                );
                 let hit = Hit {
                     identity: if payload.align_length > 0 {
                         100.0 * payload.report_num_ident as f64 / payload.align_length as f64
@@ -529,8 +646,8 @@ fn pairwise_hits(
                     length: payload.align_length,
                     mismatch: payload.report_mismatches,
                     gapopen: payload.gap_opens,
-                    q_start: usize::try_from(hsp.q_start + 1)?,
-                    q_end: usize::try_from(hsp.q_end)?,
+                    q_start: usize::try_from(q_start)?,
+                    q_end: usize::try_from(q_end)?,
                     s_start: usize::try_from(s_start)?,
                     s_end: usize::try_from(s_end)?,
                     e_value: linked.evalue,
@@ -554,10 +671,10 @@ fn pairwise_hits(
                     query_seq: Some(qseq),
                     subject_seq: Some(sseq),
                     query_frame: None,
-                    subject_frame: Some(hsp.frame),
+                    subject_frame: Some(i8::try_from(subject_frame)?),
                     positives: Some(report_positives),
                     gaps: Some(payload.gap_letters),
-                    subject_length: Some(subject.seq().len()),
+                    subject_length: Some(subject_length),
                     subject_title: subject.desc().map(str::to_owned),
                     // NCBI core/blast_kappa.c:331-342:
                     // eDontAdjustMatrix -> 0; eCompoScaleOldMatrix -> 1;
@@ -594,6 +711,7 @@ fn write_pairwise(
     scoring: LocalStageDScoring,
     matrix_name: &str,
     max_target_seqs_given: Option<usize>,
+    ranges: &ReportRanges<'_>,
     probe: Option<&mut FormatProbe<'_>>,
     warnings: Option<&mut crate::report::query_warnings::QueryWarnings<'_>>,
 ) -> Result<()> {
@@ -645,7 +763,8 @@ fn write_pairwise(
         .iter()
         .zip(ungapped_karlin)
         .zip(&parameters.lengths)
-        .map(|((query, &karlin), length)| BlastpPairwiseQuery {
+        .enumerate()
+        .map(|(q_idx, ((query, &karlin), length))| BlastpPairwiseQuery {
             // TBLASTN's report reads the validity from its own arrays.
             valid: true,
             batch_skipped: false,
@@ -653,7 +772,14 @@ fn write_pairwise(
                 Some(desc) => format!("{} {desc}", query.id()),
                 None => query.id().to_string(),
             },
-            query_length: query.seq().len(),
+            // NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:741-743
+            // ```c++
+            //         if(cbs.IsSetInst() && cbs.GetInst().CanGetLength()){
+            //             out << "\nLength=";
+            //             out << cbs.GetInst().GetLength() <<"\n";
+            // ```
+            // The query record's length, also with `-query_loc`.
+            query_length: ranges.queries.length(q_idx, query.seq().len()),
             ungapped_karlin: karlin,
             effective_search_space: length.eff_searchsp,
         })
@@ -678,6 +804,7 @@ fn write_pairwise(
         &report,
         probe,
         warnings,
+        ranges.epilog,
     )?;
     Ok(())
 }

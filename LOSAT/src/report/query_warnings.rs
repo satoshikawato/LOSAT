@@ -82,6 +82,45 @@ pub fn prepend_batch_title_warnings(
     }
 }
 
+/// `prepend_batch_title_warnings` for the batches of a query input read with
+/// `-query_loc` (`seq_range::QueryInput::batches`): NCBI's reader reads every record of a
+/// batch, also those it skips, so their title warnings go before the first searched query
+/// of the batch. `lines` are by searched query. Returns the title warnings of the last
+/// batch when it has no searched query: NCBI writes them as it reads that batch, then
+/// stops (`Empty CBlastQueryVector`).
+///
+/// NCBI reference: c++/src/algo/blast/blastinput/blast_input.cpp:144-155
+/// ```c++
+///         CRef<CBlastSearchQuery> q;
+///         try { q.Reset(m_Source->GetNextSequence(scope)); }
+///         ...
+///         catch (const exception&) {
+///             continue; //SB-2307. ignore well formed, not found accession
+///         }
+/// ```
+pub fn prepend_ranged_batch_title_warnings(
+    lines: &mut [Vec<u8>],
+    input: &[fasta::Record],
+    batches: &[crate::blastinput::seq_range::RangedBatch],
+    title_warning: impl Fn(&fasta::Record) -> &'static [u8],
+) -> Vec<u8> {
+    let mut unsearched = Vec::new();
+    for batch in batches {
+        let mut warnings: Vec<u8> = input[batch.input.clone()]
+            .iter()
+            .flat_map(|query| title_warning(query).iter().copied())
+            .collect();
+        match lines.get_mut(batch.searched.start) {
+            Some(first) if !batch.searched.is_empty() => {
+                warnings.append(first);
+                *first = warnings;
+            }
+            _ => unsearched = warnings,
+        }
+    }
+    unsearched
+}
+
 /// The warning for a query whose ungapped Karlin-Altschul parameters cannot be computed.
 ///
 /// NCBI reference: c++/src/algo/blast/core/blast_stat.c:2783-2790

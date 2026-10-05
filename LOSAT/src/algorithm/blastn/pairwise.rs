@@ -20,9 +20,12 @@ use super::lookup::reverse_complement;
 
 /// The regions that the report prints in lowercase.
 pub(crate) struct DisplayMasks<'a> {
-    /// Per query, on its plus strand: DUST and, with `-lcase_masking`, the input lowercase.
+    /// Per query, on its plus strand of the searched letters: DUST and, with
+    /// `-lcase_masking`, the input lowercase.
     pub query: &'a [Vec<MaskedInterval>],
-    /// Per subject, with `-lcase_masking`: the input lowercase.
+    /// Where each query's searched letters lie in its record (`-query_loc`).
+    pub query_offsets: &'a crate::blastinput::seq_range::Placements,
+    /// Per subject, with `-lcase_masking`: the input lowercase of the subject's record.
     pub subject: Option<&'a [Vec<MaskedInterval>]>,
 }
 
@@ -42,13 +45,24 @@ pub(crate) fn pairwise_hits(
         .query
         .iter()
         .zip(queries)
-        .map(|(masks, query)| shown_query_masks(masks, query.seq().len()))
+        .enumerate()
+        .map(|(q_idx, (query_masks, query))| {
+            shown_query_masks(
+                query_masks,
+                query.seq().len(),
+                masks.query_offsets.offset(q_idx),
+            )
+        })
         .collect();
     let subject_masks: Option<Vec<Vec<MaskedInterval>>> = masks
         .subject
         .map(|masks| masks.iter().map(|masks| merged(masks)).collect());
     for hit_list in hit_lists.iter().flatten() {
         for hsp_list in &hit_list.hsplist_array {
+            let list_subject_masks = subject_masks.as_ref().and_then(|subject_masks| {
+                let s_idx = hsp_list.hsps.first()?.s_idx as usize;
+                Some(shown_subject_masks(&subject_masks[s_idx], &hsp_list.hsps))
+            });
             for hsp in &hsp_list.hsps {
                 let query = queries
                     .get(hsp.q_idx as usize)
@@ -64,14 +78,9 @@ pub(crate) fn pairwise_hits(
                     1,
                     &query_masks[hsp.q_idx as usize],
                 );
-                if let Some(subject_masks) = &subject_masks {
+                if let Some(subject_masks) = &list_subject_masks {
                     let step = if hsp.s_start > hsp.s_end { -1 } else { 1 };
-                    lowercase_masked(
-                        &mut subject_row,
-                        hsp.s_start,
-                        step,
-                        &subject_masks[hsp.s_idx as usize],
-                    );
+                    lowercase_masked(&mut subject_row, hsp.s_start, step, subject_masks);
                 }
                 let gaps = query_row
                     .iter()
@@ -192,15 +201,96 @@ fn displayed_rows(hsp: &BlastnHsp, query: &[u8], subject: &[u8]) -> Result<(Vec<
 //                 CRef<CSeqLocInfo> seqlocinfo
 //                     (new CSeqLocInfo(seqint, CSeqLocInfo::eFrameNotSet));
 // ```
-// A mask that covers the whole query is not reported, so it is not shown.
-fn shown_query_masks(masks: &[MaskedInterval], query_length: usize) -> Vec<MaskedInterval> {
+// NCBI reference: c++/src/algo/blast/api/blast_aux.cpp:825-842
+// ```c++
+// template <class Position>
+// CRange<Position> Map(const CRange<Position>& target,
+//                      const CRange<Position>& range)
+// {
+//     if (target.Empty()) {
+//         throw std::runtime_error("Target range is empty");
+//     }
+//
+//     if (range.Empty() ||
+//         (range.GetFrom() > target.GetTo()) ||
+//         ((range.GetFrom() + target.GetFrom()) > target.GetTo())) {
+//         return target;
+//     }
+//
+//     CRange<Position> retval;
+//     retval.SetFrom(max(target.GetFrom() + range.GetFrom(), target.GetFrom()));
+//     retval.SetTo(min(target.GetFrom() + range.GetTo(), target.GetTo()));
+//     return retval;
+// }
+// ```
+// A mask that covers the whole query (its searched interval, `kTarget`) is not reported,
+// so it is not shown. The masks of the search lie in the searched letters (`query_length`
+// of them); `Map` moves them by the start of the query's interval (`offset`, 0 without
+// `-query_loc`) into record coordinates, as the report's HSPs.
+fn shown_query_masks(
+    masks: &[MaskedInterval],
+    query_length: usize,
+    offset: usize,
+) -> Vec<MaskedInterval> {
     merged(
         &masks
             .iter()
             .filter(|mask| !(mask.start == 0 && mask.end >= query_length))
-            .cloned()
+            .map(|mask| MaskedInterval::new(mask.start + offset, mask.end + offset))
             .collect::<Vec<_>>(),
     )
+}
+
+// NCBI reference: c++/src/algo/blast/api/blast_seqalign.cpp:1590-1603
+// ```c++
+//         // Union subject sequence ranges
+//         vector <TSeqRange> ranges;
+//         for (int i=0; i<hsp_list->hspcnt; i++) {
+//             const BlastHSP* hsp = hsp_list->hsp_array[i];
+//             TSeqRange rg;
+//             rg.SetFrom(hsp->subject.offset);
+//             rg.SetTo(hsp->subject.end);
+//             ranges.push_back(rg);
+//         }
+//
+//         // Extract subject masks
+//         TMaskedSubjRegions masks;
+//         if (!ranges.empty() && seqinfo_src->GetMasks(kOid, ranges, masks)) {
+// ```
+// NCBI reference: c++/src/algo/blast/api/seqinfosrc_seqvec.cpp:110-125
+// ```c++
+// static void
+// s_SeqIntervalToSeqLocInfo(CRef<CSeq_interval> interval,
+//                           const vector <TSeqRange>& target_ranges,
+//                           const CSeqLocInfo::ETranslationFrame frame,
+//                           TMaskedSubjRegions& retval)
+// {
+//     TSeqRange loc(interval->GetFrom(), interval->GetTo());
+//
+//     for (size_t ir=0; ir< target_ranges.size(); ir++) {
+//         if (target_ranges[ir] != TSeqRange::GetEmpty() &&
+//            loc.IntersectingWith(target_ranges[ir])) {
+//            CRef<CSeqLocInfo> sli(new CSeqLocInfo(interval, frame));
+//            retval.push_back(sli);
+//            return;
+//         }
+//     }
+// }
+// ```
+// The subject masks shown with the HSPs of one subject: the lowercase regions of its record
+// (record coordinates) that meet the closed range `[offset, end]` of an HSP in the searched
+// letters (the end is one past the HSP). With `-subject_loc` the two coordinates differ by
+// the interval's start, so a region of the record is kept by where it would lie in the
+// interval, and shown where it lies in the record.
+fn shown_subject_masks(masks: &[MaskedInterval], hsps: &[BlastnHsp]) -> Vec<MaskedInterval> {
+    masks
+        .iter()
+        .filter(|mask| {
+            hsps.iter()
+                .any(|hsp| mask.start <= hsp.internal_s_end_0 && hsp.internal_s_offset_0 < mask.end)
+        })
+        .cloned()
+        .collect()
 }
 
 /// The masked positions as disjoint intervals in order, for `lowercase_masked`.

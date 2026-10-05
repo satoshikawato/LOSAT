@@ -58,6 +58,8 @@ fn db_gencode_controls_local_subject_search_translation() {
         window_size: 40,
         outfmt: "6".to_string(),
         culling_limit: 0,
+        query_loc: None,
+        subject_loc: None,
     };
 
     run(args).expect("tblastx run");

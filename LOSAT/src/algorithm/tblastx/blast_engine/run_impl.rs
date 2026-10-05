@@ -5,6 +5,22 @@
 use super::*;
 use std::sync::Arc;
 
+use crate::blastinput::seq_range::{
+    check_no_empty_interval, cut_queries, Placements, QueryInput, RangeRole, RangedBatch,
+    SequenceRange,
+};
+
+/// The queries of a search: the input records, the searched queries (each cut to its
+/// `-query_loc` interval), the query input (where each searched query lies in its record,
+/// its input position, the skipped records), and where each subject's searched letters
+/// lie in its record.
+pub(crate) struct QueryRuns<'a> {
+    pub input_records: &'a [fasta::Record],
+    pub records: &'a [fasta::Record],
+    pub input: &'a QueryInput,
+    pub subject_placements: &'a Placements,
+}
+
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_gapalign.h:54
 // ```c
 // #define MAX_DBSEQ_LEN 5000000
@@ -666,8 +682,11 @@ pub fn run(args: TblastxArgs) -> Result<()> {
     let Some(subject_path) = args.subject.clone() else {
         return Err(crate::blastinput::app::missing_subject_error());
     };
-    let (subjects, subject_checks) =
-        fasta_input::read_nucleotide_subjects(&subject_path, "TBLASTX")?;
+    let subjects = fasta_input::read_nucleotide_subjects(
+        &subject_path,
+        "TBLASTX",
+        args.subject_loc.as_deref(),
+    )?;
     // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3456-3481
     // ```c
     //     if (args.Exist(kArgQuery) && args[kArgQuery].HasValue() &&
@@ -712,8 +731,9 @@ pub fn run(args: TblastxArgs) -> Result<()> {
         search_cli(
             args,
             query_file,
-            &subjects,
-            subject_checks,
+            &subjects.records,
+            &subjects.placements,
+            subjects.checks,
             &mut outputs,
             &choice,
         )
@@ -807,11 +827,29 @@ fn check_subjects_not_empty(subjects: &[fasta::Record]) -> Result<()> {
 ///     }
 /// ```
 /// TBLASTX has no cutoff score option, so an `-evalue` of 0 (or one that reads as 0) fails.
-fn check_ncbi_options(args: &TblastxArgs, diagnostics: &mut dyn std::io::Write) -> Result<()> {
+fn check_ncbi_options(
+    args: &TblastxArgs,
+    diagnostics: &mut dyn std::io::Write,
+) -> Result<Option<SequenceRange>> {
     use crate::blastinput::app::{
         formatting_handler_check, options_error, parse_formatting_string,
     };
     args.seg_spec()?;
+    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:1995-1999
+    // ```c++
+    //     // set the sequence range
+    //     if (args.Exist(kArgQueryLocation) && args[kArgQueryLocation]) {
+    //         m_Range = ParseSequenceRange(args[kArgQueryLocation].AsString(),
+    //                                      "Invalid specification of query location");
+    //     }
+    // ```
+    // The query options handler comes after the filtering handler and before the
+    // formatting handler (tblastx_args.cpp:44-125).
+    let query_range = crate::blastinput::seq_range::parse_optional_range(
+        args.query_loc.as_deref(),
+        crate::blastinput::seq_range::RangeRole::Query,
+        "TBLASTX",
+    )?;
     formatting_handler_check(&parse_formatting_string(&args.outfmt)?, false)?;
     if args
         .max_target_seqs
@@ -835,7 +873,7 @@ fn check_ncbi_options(args: &TblastxArgs, diagnostics: &mut dyn std::io::Write) 
             "expect value or cutoff score must be greater than zero",
         ));
     }
-    Ok(())
+    Ok(query_range)
 }
 
 /// The options that LOSAT's TBLASTX rejects, where NCBI would start the search.
@@ -880,16 +918,18 @@ pub fn check_options(args: &TblastxArgs) -> Result<()> {
 
 /// The part of `run` after the output is opened: the options, `Query is Empty!`, the
 /// query batch size, the reading of the queries and the search.
+#[allow(clippy::too_many_arguments)]
 fn search_cli(
     args: TblastxArgs,
     mut query_file: std::fs::File,
     subjects: &[fasta::Record],
+    subject_placements: &Placements,
     subject_checks: Result<()>,
     outputs: &mut ReportOutputs<'_>,
     choice: &crate::blastinput::app::FormatChoice,
 ) -> Result<()> {
     use crate::algorithm::blastn::input as fasta_input;
-    check_ncbi_options(&args, outputs.diagnostics)?;
+    let query_range = check_ncbi_options(&args, outputs.diagnostics)?;
     // NCBI reference: ncbi-blast/c++/src/app/blast/tblastx_app.cpp:132-135
     // ```c
     //         if(IsIStreamEmpty(m_CmdLineArgs->GetInputStream())){
@@ -940,7 +980,15 @@ fn search_cli(
     let batch_size = crate::blastinput::app::query_batch_size("TBLASTX", 10002)?;
     subject_checks?;
     let queries = fasta_input::parse_fasta(&query_bytes, &args.query, "query", "TBLASTX")?;
-    search(args, &queries, subjects, outputs, batch_size)
+    search(
+        args,
+        &queries,
+        query_range,
+        subjects,
+        subject_placements,
+        outputs,
+        batch_size,
+    )
 }
 
 // NCBI reference: ncbi-blast/c++/src/app/blast/blast_formatter.cpp:429-467
@@ -971,9 +1019,23 @@ pub fn run_local(
     // NCBI parses -outfmt before its option handlers read the subjects (BLASTN's
     // `run_local`); `search` checks the formats again.
     check_report_formats(outputs)?;
-    crate::algorithm::blastn::input::write_title_warnings(subject_records, outputs.diagnostics)?;
+    // The subject range and its record checks come where NCBI reads the subjects (`run`).
+    let subject_range = crate::blastinput::seq_range::parse_optional_range(
+        args.subject_loc.as_deref(),
+        crate::blastinput::seq_range::RangeRole::Subject,
+        "TBLASTX",
+    )?;
+    crate::algorithm::blastn::input::write_title_warnings(
+        &subject_records[..crate::blastinput::seq_range::subjects_read(
+            subject_records,
+            subject_range.as_ref(),
+        )],
+        outputs.diagnostics,
+    )?;
+    let ranged_subjects =
+        crate::blastinput::seq_range::cut_subjects(subject_records, subject_range.as_ref())?;
     check_subjects_not_empty(subject_records)?;
-    check_ncbi_options(&args, outputs.diagnostics)?;
+    let query_range = check_ncbi_options(&args, outputs.diagnostics)?;
     if query_records.is_empty() {
         outputs
             .diagnostics
@@ -981,7 +1043,26 @@ pub fn run_local(
         return Ok(());
     }
     let batch_size = crate::blastinput::app::query_batch_size("TBLASTX", 10002)?;
-    search(args, query_records, subject_records, outputs, batch_size)
+    match &ranged_subjects {
+        Some((cut, placements)) => search(
+            args,
+            query_records,
+            query_range,
+            cut,
+            placements,
+            outputs,
+            batch_size,
+        ),
+        None => search(
+            args,
+            query_records,
+            query_range,
+            subject_records,
+            &Placements::default(),
+            outputs,
+            batch_size,
+        ),
+    }
 }
 
 /// Each requested format as NCBI reads `-outfmt`: NCBI's errors, and a rejection of a
@@ -1000,10 +1081,13 @@ fn check_report_formats(outputs: &ReportOutputs<'_>) -> Result<()> {
 
 /// The search of `run_local` and of the CLI, after NCBI's checks of the options and the
 /// inputs.
+#[allow(clippy::too_many_arguments)]
 fn search(
     args: TblastxArgs,
     query_records: &[fasta::Record],
+    query_range: Option<SequenceRange>,
     subject_records: &[fasta::Record],
+    subject_placements: &Placements,
     outputs: &mut ReportOutputs<'_>,
     batch_size: u32,
 ) -> Result<()> {
@@ -1023,6 +1107,16 @@ fn search(
     // nucleotide letters with a warning and reports a record without residues when it sets
     // up the search; LOSAT rejects both, as BLASTN does (`blastn/input.rs`), and reads `U`
     // as `T`.
+    // An interval without letters (a subject range that starts just past a record's end)
+    // is a subject without data for NCBI, as a record without residues.
+    crate::algorithm::blastn::input::check_residues_of(subject_records, "subject", "TBLASTX")?;
+    check_no_empty_interval(
+        subject_records,
+        subject_placements,
+        &[],
+        RangeRole::Subject,
+        "TBLASTX",
+    )?;
     for (records, role) in [(subject_records, "subject"), (query_records, "query")] {
         crate::algorithm::blastn::input::check_residues_of(records, role, "TBLASTX")?;
         crate::algorithm::blastn::input::check_records_have_residues_of(records, role, "TBLASTX")?;
@@ -1031,13 +1125,38 @@ fn search(
     let queries_read = crate::algorithm::blastn::input::with_u_as_t(query_records);
     let subject_records = subjects_read.as_deref().unwrap_or(subject_records);
     let query_records = queries_read.as_deref().unwrap_or(query_records);
+    // The query range applies to every query record as NCBI's batch reader reads it
+    // (`seq_range::cut_queries`): the records were checked whole, and are searched cut.
+    let input_records = query_records;
+    let (query_records, query_input) = match query_range.as_ref() {
+        Some(range) => {
+            let ranged = cut_queries(query_records, range);
+            (std::borrow::Cow::Owned(ranged.records), ranged.input)
+        }
+        None => (
+            std::borrow::Cow::Borrowed(query_records),
+            QueryInput::whole(query_records),
+        ),
+    };
+    check_no_empty_interval(
+        &query_records,
+        &query_input.placements,
+        &query_input.ordinals,
+        RangeRole::Query,
+        "TBLASTX",
+    )?;
     // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
     // TBlastThreads the_threads(GetNumberOfThreads());
     // (*thread)->Run(); (*thread)->Join(&result);
     crate::utils::threading::with_search_pool(args.num_threads, "tblastx", |pool| {
         run_in_pool(
             args,
-            query_records,
+            &QueryRuns {
+                input_records,
+                records: &query_records,
+                input: &query_input,
+                subject_placements,
+            },
             subject_records,
             outputs,
             pool,
@@ -1111,8 +1230,11 @@ pub(crate) struct TblastxReportRun<'a> {
     /// The per-query statistics and whether the query's batch was searched.
     pub query_stats: &'a [TblastxQueryStats],
     pub searched: &'a [bool],
-    /// The index of the first query of each query batch.
-    pub batch_starts: &'a [usize],
+    /// The query batches (`QueryInput::batches`), the queries' input and ranges.
+    pub batches: &'a [RangedBatch],
+    pub ranges: &'a QueryRuns<'a>,
+    /// Whether the reports end with the epilog (not when the search stops at a batch).
+    pub epilog: bool,
 }
 
 /// The `Database:` text of the reports of a local `-subject` search.
@@ -1254,8 +1376,17 @@ fn write_tblastx_outputs(
             run.query_stats,
             &query_code,
             &db_code,
+            &run.ranges.input.placements,
+            run.ranges.subject_placements,
         )
     });
+    // The tabular rows print record coordinates (`report::shift_to_records`); the outfmt 0
+    // rows above were read from the searched letters first.
+    report::shift_to_records(
+        &mut hits,
+        &run.ranges.input.placements,
+        run.ranges.subject_placements,
+    );
     if let (Some(hits_sink), Some(pairwise)) = (outputs.hits.as_mut(), pairwise.as_ref()) {
         hits_sink(pairwise);
     }
@@ -1290,21 +1421,24 @@ fn write_tblastx_outputs(
     // ```
     // `CFastaReader` warns about the titles of a batch's queries when it reads them, after
     // the report of the batch before: before the report of the batch's first query.
-    for (batch, &start) in run.batch_starts.iter().enumerate() {
-        let end = run
-            .batch_starts
-            .get(batch + 1)
-            .copied()
-            .unwrap_or(run.queries.len());
+    // The reader reads every record of a batch, also those that `-query_loc` skips; a last
+    // batch of skipped records only is reported after the reports (`run_in_pool`).
+    for batch in run
+        .batches
+        .iter()
+        .filter(|batch| !batch.searched.is_empty())
+    {
         crate::algorithm::blastn::input::write_title_warnings(
-            &run.queries[start..end],
-            &mut warnings[start],
+            &run.ranges.input_records[batch.input.clone()],
+            &mut warnings[batch.searched.start],
         )?;
     }
     for (index, query) in run.queries.iter().enumerate() {
         if unsearched[index] {
             warnings[index].extend(crate::report::query_warnings::invalid_query_warning(
-                "tblastx", index, query,
+                "tblastx",
+                run.ranges.input.ordinal(index),
+                query,
             ));
         }
     }
@@ -1338,14 +1472,26 @@ fn write_tblastx_outputs(
                     .iter()
                     .zip(run.query_stats)
                     .zip(&query_titles)
-                    .map(
-                        |((query, stats), title)| crate::report::pairwise::TblastxPairwiseQuery {
+                    .enumerate()
+                    .map(|(q_idx, ((query, stats), title))| {
+                        crate::report::pairwise::TblastxPairwiseQuery {
                             query_name: title.clone(),
-                            query_length: query.seq().len(),
+                            // NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:741-743
+                            // ```c++
+                            //         if(cbs.IsSetInst() && cbs.GetInst().CanGetLength()){
+                            //             out << "\nLength=";
+                            //             out << cbs.GetInst().GetLength() <<"\n";
+                            // ```
+                            // The query record's length, also with `-query_loc`.
+                            query_length: run
+                                .ranges
+                                .input
+                                .placements
+                                .length(q_idx, query.seq().len()),
                             karlin: stats.karlin,
                             effective_search_space: stats.eff_searchsp,
-                        },
-                    )
+                        }
+                    })
                     .collect();
                 let (num_descriptions, num_alignments) = match args.max_target_seqs {
                     Some(max_target_seqs) => (max_target_seqs, max_target_seqs),
@@ -1361,7 +1507,9 @@ fn write_tblastx_outputs(
                     num_descriptions,
                     num_alignments,
                     unsearched: unsearched.clone(),
-                    epilog: true,
+                    // A search that stops at a query batch (`Empty CBlastQueryVector` with
+                    // `-query_loc`) writes no epilog (tblastx_app.cpp:209, `PrintEpilog`).
+                    epilog: run.epilog,
                     prolog,
                 };
                 crate::report::pairwise::write_tblastx_pairwise_report(
@@ -1389,7 +1537,7 @@ fn write_tblastx_outputs(
                     run.query_ids,
                     run.subject_ids,
                     &unsearched,
-                    true,
+                    run.epilog,
                     probe.as_mut(),
                     warnings.as_mut(),
                 )?;
@@ -1451,29 +1599,14 @@ fn write_tblastx_outputs(
 // batches change the HSPs of a run with several queries.
 fn run_in_pool(
     args: TblastxArgs,
-    query_records: &[fasta::Record],
+    query_runs: &QueryRuns<'_>,
     subject_records: &[fasta::Record],
     outputs: &mut ReportOutputs<'_>,
     parallel_pool: &crate::utils::threading::SearchPool<'_>,
     batch_size: u32,
 ) -> Result<()> {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2657-2660
-    // ```c
-    // arg_desc.AddDefaultKey(kArgOutputFormat, "format",
-    //                        kOutputFormatDescription,
-    //                        CArgDescriptions::eString,
-    //                        NStr::IntToString(dft_outfmt));
-    // ```
-    // Each requested output format is read exactly as the single CLI `-outfmt` was.
     check_report_formats(outputs)?;
-    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
-    // ```c
-    // typedef struct BlastHSPList {
-    //    Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
-    //    Int4 query_index; /**< Index of the query which this HSPList corresponds to.
-    //                       Set to 0 if not applicable */
-    // } BlastHSPList;
-    // ```
+    let query_records = query_runs.records;
     let query_ids: Vec<Arc<str>> = query_records
         .iter()
         .map(|r| Arc::<str>::from(r.id().split_whitespace().next().unwrap_or("unknown")))
@@ -1482,59 +1615,63 @@ fn run_in_pool(
         .iter()
         .map(|r| Arc::<str>::from(r.id().split_whitespace().next().unwrap_or("unknown")))
         .collect();
-    // NCBI writes the outfmt 0 prolog before it reads the first query batch.
+    // NCBI reference: ncbi-blast/c++/src/app/blast/tblastx_app.cpp:173
+    // ```c
+    //         formatter.PrintProlog();
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
+    // ```c
+    //     if (queries.Empty()) {
+    //         NCBI_THROW(CBlastException, eInvalidArgument, "Empty CBlastQueryVector");
+    //     }
+    // ```
+    // A first batch without a query (a batch size of 0, or with `-query_loc` every
+    // record of the first batch skipped) fails after the prolog, when NCBI has read that
+    // batch (its title warnings).
     write_pairwise_prologs(outputs, &args, subject_records)?;
-    if batch_size == 0 && !query_records.is_empty() {
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
-        // ```c
-        // CObjMgr_QueryFactory::CObjMgr_QueryFactory(CBlastQueryVector & queries)
-        //     : m_QueryVector(& queries)
-        // {
-        //     if (queries.Empty()) {
-        //         NCBI_THROW(CBlastException, eInvalidArgument, "Empty CBlastQueryVector");
-        //     }
-        // ```
-        // A batch size of 0 reads no query into the first batch, after the prolog.
+    let batches = query_runs.input.batches(batch_size);
+    if let Some(first) = batches.first().filter(|batch| batch.searched.is_empty()) {
+        crate::algorithm::blastn::input::write_title_warnings(
+            &query_runs.input_records[first.input.clone()],
+            outputs.diagnostics,
+        )?;
         return Err(crate::cli::NativeError {
             exit: 3,
             message: "BLAST engine error: Empty CBlastQueryVector\n".to_string(),
         }
         .into());
     }
-    let lengths: Vec<usize> = query_records.iter().map(|r| r.seq().len()).collect();
-    // The query splitter of the first batch fails after `CFastaReader` read the batch and
-    // wrote its title warnings (`write_tblastx_outputs` writes them for the reports).
     if let Err(error) = crate::blastinput::app::check_query_split_environment("TBLASTX", true)? {
-        let end = crate::blastinput::query_batch::next_query_batch_end(&lengths, 0, batch_size);
+        let end = batches.first().map_or(0, |batch| batch.input.end);
         crate::algorithm::blastn::input::write_title_warnings(
-            &query_records[..end],
+            &query_runs.input_records[..end],
             outputs.diagnostics,
         )?;
         return Err(error);
     }
     let mut hits: Vec<TblastxHsp> = Vec::new();
-    let mut queries: Vec<TblastxQueryStats> = Vec::with_capacity(lengths.len());
-    let mut searched: Vec<bool> = Vec::with_capacity(lengths.len());
-    let mut batch_starts = Vec::new();
-    let mut start = 0;
-    while start < lengths.len() {
-        let end = crate::blastinput::query_batch::next_query_batch_end(&lengths, start, batch_size);
-        batch_starts.push(start);
-        let batch = search_query_batch(
+    let mut queries: Vec<TblastxQueryStats> = Vec::with_capacity(query_records.len());
+    let mut searched: Vec<bool> = Vec::with_capacity(query_records.len());
+    // The batches count whole records; with `-query_loc`, a last batch of skipped records
+    // stops NCBI after the reports of the batches before (`write_tblastx_outputs`).
+    for batch in batches.iter().filter(|batch| !batch.searched.is_empty()) {
+        let std::ops::Range { start, end } = batch.searched.clone();
+        let batch_result = search_query_batch(
             &args,
             &query_records[start..end],
             subject_records,
             parallel_pool,
         )?;
-        // The batch numbers its queries from 0.
-        hits.extend(batch.hits.into_iter().map(|mut hsp| {
+        hits.extend(batch_result.hits.into_iter().map(|mut hsp| {
             hsp.hit.q_idx += start as u32;
             hsp
         }));
-        queries.extend(batch.queries);
-        searched.extend(std::iter::repeat_n(batch.searched, end - start));
-        start = end;
+        queries.extend(batch_result.queries);
+        searched.extend(std::iter::repeat_n(batch_result.searched, end - start));
     }
+    let last_batch_empty = batches
+        .last()
+        .is_some_and(|batch| batch.searched.is_empty());
     write_tblastx_outputs(
         hits,
         outputs,
@@ -1546,22 +1683,34 @@ fn run_in_pool(
             subject_ids: &subject_ids,
             query_stats: &queries,
             searched: &searched,
-            batch_starts: &batch_starts,
+            batches: &batches,
+            ranges: query_runs,
+            epilog: !last_batch_empty,
         },
-    )
+    )?;
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
+    // ```c
+    //     if (queries.Empty()) {
+    //         NCBI_THROW(CBlastException, eInvalidArgument, "Empty CBlastQueryVector");
+    //     }
+    // ```
+    // With `-query_loc`, a last batch whose records are all skipped stops NCBI after the
+    // reports of the batches before (written without the epilog), when it has read that
+    // batch (its title warnings).
+    if let Some(last) = batches.last().filter(|_| last_batch_empty) {
+        crate::algorithm::blastn::input::write_title_warnings(
+            &query_runs.input_records[last.input.clone()],
+            outputs.diagnostics,
+        )?;
+        return Err(crate::cli::NativeError {
+            exit: 3,
+            message: "BLAST engine error: Empty CBlastQueryVector\n".to_string(),
+        }
+        .into());
+    }
+    Ok(())
 }
 
-// NCBI reference: ncbi-blast/c++/src/app/blast/tblastx_app.cpp:191-195
-// ```c
-//                 CLocalBlast lcl_blast(queries, opts_hndl, db_adapter);
-//                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
-//                 results = lcl_blast.Run();
-// ```
-// NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
-// TBlastThreads the_threads(GetNumberOfThreads());
-// (*thread)->Run(); (*thread)->Join(&result);
-/// Searches one query batch (`query_records`) against every subject. The HSPs and the
-/// query statistics are indexed by the query's position in the batch.
 fn search_query_batch(
     args: &TblastxArgs,
     query_records: &[fasta::Record],

@@ -96,6 +96,10 @@ use super::super::scoring::{
     context_ungapped_blocks, gap_x_dropoffs, karlin_error, ContextKarlin,
 };
 use crate::blastinput::query_batch::{next_query_batch_end, BatchSizeMixer};
+use crate::blastinput::seq_range::{
+    check_no_empty_interval, cut_queries, cut_subjects, next_ranged_batch_end,
+    parse_optional_range, subjects_read, Placements, QueryInput, RangeRole, SequenceRange,
+};
 use crate::report::pairwise::{
     write_blastn_pairwise_prolog, write_blastn_pairwise_report, BlastnPairwiseQuery,
     BlastnPairwiseReport, PairwiseConfig,
@@ -4572,6 +4576,8 @@ fn update_hitlists_with_subject_hits(
 struct BlastnReportInputs<'a> {
     queries: &'a [bio::io::fasta::Record],
     subjects: &'a [bio::io::fasta::Record],
+    /// Where the searched letters lie in the records (`-query_loc`, `-subject_loc`).
+    ranges: &'a ReportRanges<'a>,
     /// Per query, plus strand: DUST and, with `-lcase_masking`, the input lowercase.
     query_masks: &'a [Vec<MaskedInterval>],
     lcase_masking: bool,
@@ -4617,7 +4623,18 @@ fn blastn_pairwise_report(
         .enumerate()
         .map(|(q_idx, query)| BlastnPairwiseQuery {
             query_name: query_titles[q_idx].to_string(),
-            query_length: query.seq().len(),
+            // NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:741-743
+            // ```c++
+            //         if(cbs.IsSetInst() && cbs.GetInst().CanGetLength()){
+            //             out << "\nLength=";
+            //             out << cbs.GetInst().GetLength() <<"\n";
+            // ```
+            // The length of the query's record, also where `-query_loc` searches part of it.
+            query_length: report
+                .ranges
+                .queries
+                .placements
+                .length(q_idx, query.seq().len()),
             karlin: context_karlin[2 * q_idx].map(|blocks| (blocks.ungapped, blocks.gapped)),
             // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_results.cpp:82-104
             // ```c
@@ -4666,6 +4683,59 @@ fn blastn_pairwise_report(
         prolog: report.prolog,
     };
     Ok((queries, pairwise_report))
+}
+
+/// Moves the reported coordinates of every HSP from the searched letters to the records:
+/// by the start of the query's interval (`RemapToQueryLoc`) and of the subject's interval
+/// (`s_RemapToSubjectLoc`), on both strands. Without ranges nothing moves.
+///
+/// NCBI reference: c++/src/algo/blast/api/blast_seqalign.cpp:1520-1534
+/// ```c++
+/// void RemapToQueryLoc(CRef<CSeq_align> sar, const CSeq_loc & query)
+/// {
+///     _ASSERT(sar);
+///     const int query_row = 0;
+///
+///     TSeqPos q_shift = 0;
+///
+///     if (query.IsInt()) {
+///         q_shift = query.GetInt().GetFrom();
+///     }
+///
+///     if (q_shift > 0) {
+///         sar->OffsetRow(query_row, q_shift);
+///     }
+/// }
+/// ```
+/// NCBI reference: c++/src/objmgr/util/seq_align_util.cpp:71-78
+/// ```c++
+///     // Create source seq-loc
+///     CSeq_loc src_loc(*id, 0, GetLength(loc, scope) - 1);
+///     ENa_strand strand = loc.GetStrand();
+///     if (strand != eNa_strand_unknown) {
+///         src_loc.SetStrand(strand);
+///     }
+///     CSeq_loc_Mapper mapper(src_loc, loc, scope);
+///     return mapper.Map(align, row);
+/// ```
+/// A subject interval has the strand both, so its mapping is the shift by its start.
+fn shift_to_records(hit_lists: &mut [Option<BlastnHitList>], ranges: &ReportRanges<'_>) {
+    let (queries, subjects) = (&ranges.queries.placements, ranges.subjects.placements);
+    if !queries.ranged() && !subjects.ranged() {
+        return;
+    }
+    for hit_list in hit_lists.iter_mut().flatten() {
+        for hsp_list in &mut hit_list.hsplist_array {
+            for hsp in &mut hsp_list.hsps {
+                let q_shift = queries.offset(hsp.q_idx as usize);
+                let s_shift = subjects.offset(hsp.s_idx as usize);
+                hsp.q_start += q_shift;
+                hsp.q_end += q_shift;
+                hsp.s_start += s_shift;
+                hsp.s_end += s_shift;
+            }
+        }
+    }
 }
 
 fn post_process_hits_and_write(
@@ -4866,24 +4936,52 @@ fn post_process_hits_and_write(
     // does not search (outfmt 0 and 7 show them without results).
     // Rendered hits are needed by outfmt 0 and by the caller's hit records; both get the
     // same final hit list, built once.
+    // NCBI reference: c++/src/algo/blast/api/blast_seqalign.cpp:1630-1637
+    // ```c++
+    // 	if (seqinfo_src->CanReturnPartialSequence() == true)
+    // 	{
+    //         	CConstRef<CSeq_loc> subj_loc = seqinfo_src->GetSeqLoc(kOid);
+    //         	NON_CONST_ITERATE(vector<CRef<CSeq_align > >, iter, hit_align) {
+    //              	   RemapToQueryLoc(*iter, query_loc);
+    //              	   if ( !is_ooframe )
+    //                    	s_RemapToSubjectLoc(*iter, *subj_loc);
+    // ```
+    // The reports print record coordinates: the HSPs move by the start of the query's and
+    // the subject's interval (`shift_to_records`); their internal offsets stay those of
+    // the searched letters, from which the shown rows are read.
+    shift_to_records(&mut hit_lists, report.ranges);
     let pairwise_hits =
         if outputs.hits.is_some() || output_formats.contains(&BlastnOutputFormat::Pairwise) {
+            let subject_records = report.ranges.subjects.records.unwrap_or(report.subjects);
             let subject_masks = report.lcase_masking.then(|| {
-                report
-                    .subjects
+                subject_records
                     .iter()
                     .map(|subject| collect_lowercase_masks(subject.seq()))
                     .collect::<Vec<_>>()
             });
-            Some(pairwise_hits(
+            let mut hits = pairwise_hits(
                 &hit_lists,
                 report.queries,
                 report.subjects,
                 &DisplayMasks {
                     query: report.query_masks,
+                    query_offsets: &report.ranges.queries.placements,
                     subject: subject_masks.as_deref(),
                 },
-            )?)
+            )?;
+            // NCBI reference: c++/src/objtools/align_format/showalign.cpp:2478
+            // ```c++
+            //     out<<kLengthString<<bsp_handle.GetBioseqLength()<<"\n";
+            // ```
+            // The length of the subject's record, also where `-subject_loc` searches part
+            // of it.
+            for hit in &mut hits {
+                let s_idx = hit.hit.s_idx as usize;
+                hit.subject_length = hit
+                    .subject_length
+                    .map(|searched| report.ranges.subjects.placements.length(s_idx, searched));
+            }
+            Some(hits)
         } else {
             None
         };
@@ -5212,15 +5310,41 @@ pub fn run(args: BlastnArgs) -> Result<()> {
     };
     check_utf8_file_name(subject_path, "subject", "BLASTN")?;
     let mut subject_file = open_input(subject_path, "subject", "BLASTN")?;
+    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2537-2545
+    // ```c++
+    //             subj_input_stream = &args[kArgSubject].AsInputFile();
+    //         }
+    //
+    //         TSeqRange subj_range;
+    //         if (args.Exist(kArgSubjectLocation) && args[kArgSubjectLocation]) {
+    //             subj_range =
+    //                 ParseSequenceRange(args[kArgSubjectLocation].AsString(),
+    //                             "Invalid specification of subject location");
+    //         }
+    // ```
+    // The subject range is read after the subject file is opened, before it is read.
+    let subject_range =
+        parse_optional_range(args.subject_loc.as_deref(), RangeRole::Subject, "BLASTN")?;
     let subject_bytes = read_fasta_bytes(&mut subject_file, subject_path, "subject")?;
     drop(subject_file);
-    let subjects = read_records(&subject_bytes, subject_path, "subject", "BLASTN")?;
-    write_title_warnings(&subjects, &mut std::io::stderr())?;
+    let read_subjects = read_records(&subject_bytes, subject_path, "subject", "BLASTN")?;
+    // NCBI reads the records one at a time and checks each one's range after reading it:
+    // a range that starts past the end of a record stops it there, after the title
+    // warnings of the records read (`cut_subjects`).
+    write_title_warnings(
+        &read_subjects[..subjects_read(&read_subjects, subject_range.as_ref())],
+        &mut std::io::stderr(),
+    )?;
+    let ranged_subjects = cut_subjects(&read_subjects, subject_range.as_ref())?;
     // NCBI reads these deflines and records without a message; LOSAT rejects them where
     // the search would start.
     let subject_deflines = check_deflines(&subject_bytes, "subject")
-        .and_then(|()| check_records_have_residues(&subjects, "subject"));
+        .and_then(|()| check_records_have_residues(&read_subjects, "subject"));
     drop(subject_bytes);
+    let (subjects, subject_placements, full_subjects) = match ranged_subjects {
+        Some((cut, placements)) => (cut, placements, Some(read_subjects)),
+        None => (read_subjects, Placements::default(), None),
+    };
     check_subjects_not_empty(&subjects)?;
     // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3456-3481
     // ```c
@@ -5276,6 +5400,10 @@ pub fn run(args: BlastnArgs) -> Result<()> {
             args,
             query_file,
             &subjects,
+            SubjectRanges {
+                placements: &subject_placements,
+                records: full_subjects.as_deref(),
+            },
             subject_deflines,
             &mut outputs,
             output_formats,
@@ -5316,11 +5444,13 @@ fn search_cli(
     mut args: BlastnArgs,
     mut query_file: std::fs::File,
     subjects: &[bio::io::fasta::Record],
+    subject_ranges: SubjectRanges<'_>,
     subject_deflines: Result<()>,
     outputs: &mut ReportOutputs<'_>,
     output_formats: Vec<BlastnOutputFormat>,
 ) -> Result<()> {
     args.resolve_dust()?;
+    let query_range = parse_query_range(&args)?;
     process_options(&args, outputs)?;
     // NCBI reference: ncbi-blast/c++/src/app/blast/blastn_app.cpp:209-212
     // ```c
@@ -5363,7 +5493,58 @@ fn search_cli(
     // sequences = input->GetAllSeqs(*scope);
     // ```
     let queries = parse_fasta(&query_bytes, &args.query, "query", "BLASTN")?;
-    search(args, &queries, subjects, outputs, output_formats)
+    search(
+        args,
+        &queries,
+        Ranges {
+            query: query_range,
+            subjects: subject_ranges,
+        },
+        subjects,
+        outputs,
+        output_formats,
+    )
+}
+
+/// The query range, read by NCBI's query options handler: after the filtering handler
+/// (`-dust`), before the formatting handler and the check of the options.
+///
+/// NCBI reference: c++/src/algo/blast/blastinput/blastn_args.cpp:96-99
+/// ```c++
+///     m_QueryOptsArgs.Reset(new CQueryOptionsArgs(kQueryIsProtein));
+///     arg.Reset(m_QueryOptsArgs);
+///     m_Args.push_back(arg);
+/// ```
+/// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:1995-1999
+/// ```c++
+///     // set the sequence range
+///     if (args.Exist(kArgQueryLocation) && args[kArgQueryLocation]) {
+///         m_Range = ParseSequenceRange(args[kArgQueryLocation].AsString(),
+///                                      "Invalid specification of query location");
+///     }
+/// ```
+fn parse_query_range(args: &BlastnArgs) -> Result<Option<SequenceRange>> {
+    parse_optional_range(args.query_loc.as_deref(), RangeRole::Query, "BLASTN")
+}
+
+/// The ranges of a search: the query range as given, and the subjects' ranges.
+struct Ranges<'a> {
+    query: Option<SequenceRange>,
+    subjects: SubjectRanges<'a>,
+}
+
+/// Where each subject's searched letters lie in its record, and the records as read
+/// (with `-subject_loc`; the report shows their lowercase letters).
+#[derive(Clone, Copy)]
+struct SubjectRanges<'a> {
+    placements: &'a Placements,
+    records: Option<&'a [bio::io::fasta::Record]>,
+}
+
+/// The ranges as the report uses them: the query input and the subjects' ranges.
+struct ReportRanges<'a> {
+    queries: &'a QueryInput,
+    subjects: SubjectRanges<'a>,
 }
 
 /// NCBI's error for a subject file without records, raised when it reads the subjects
@@ -5460,14 +5641,33 @@ pub fn run_local(
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
     let output_formats = parse_output_formats(outputs.formats.iter().map(|format| format.outfmt))?;
-    write_title_warnings(subject_records, outputs.diagnostics)?;
-    check_subjects_not_empty(subject_records)?;
+    // The subject range and its record checks come where NCBI reads the subjects (`run`).
+    let subject_range =
+        parse_optional_range(args.subject_loc.as_deref(), RangeRole::Subject, "BLASTN")?;
+    write_title_warnings(
+        &subject_records[..subjects_read(subject_records, subject_range.as_ref())],
+        outputs.diagnostics,
+    )?;
+    let ranged_subjects = cut_subjects(subject_records, subject_range.as_ref())?;
+    let (searched_subjects, subject_placements) = match &ranged_subjects {
+        Some((records, placements)) => (records.as_slice(), placements.clone()),
+        None => (subject_records, Placements::default()),
+    };
+    check_subjects_not_empty(searched_subjects)?;
     args.resolve_dust()?;
+    let query_range = parse_query_range(&args)?;
     process_options(&args, outputs)?;
     search(
         args,
         query_records,
-        subject_records,
+        Ranges {
+            query: query_range,
+            subjects: SubjectRanges {
+                placements: &subject_placements,
+                records: ranged_subjects.is_some().then_some(subject_records),
+            },
+        },
+        searched_subjects,
         outputs,
         output_formats,
     )
@@ -5476,6 +5676,7 @@ pub fn run_local(
 fn search(
     args: BlastnArgs,
     query_records: &[bio::io::fasta::Record],
+    ranges: Ranges<'_>,
     subject_records: &[bio::io::fasta::Record],
     outputs: &mut ReportOutputs<'_>,
     output_formats: Vec<BlastnOutputFormat>,
@@ -5491,6 +5692,15 @@ fn search(
             .write_all(b"Warning: [blastn] Query is Empty!\n")?;
         return Ok(());
     }
+    // An interval without letters (a subject range that starts just past a record's end)
+    // is a subject without data for NCBI, as a record without residues.
+    check_no_empty_interval(
+        subject_records,
+        ranges.subjects.placements,
+        &[],
+        RangeRole::Subject,
+        "BLASTN",
+    )?;
     check_records_have_residues(subject_records, "subject")?;
     // NCBI reads the queries after `Query is Empty!`, one batch at a time, with its
     // reader's warnings (`run_in_pool`).
@@ -5528,6 +5738,27 @@ fn search(
     let queries_read = with_u_as_t(query_records);
     let subject_records = subjects_read.as_deref().unwrap_or(subject_records);
     let query_records = queries_read.as_deref().unwrap_or(query_records);
+    // The query range applies to every query record as NCBI's batch reader reads it
+    // (`cut_queries`): the records are checked whole (above), and searched cut.
+    let ranged_queries = ranges
+        .query
+        .as_ref()
+        .map(|range| cut_queries(query_records, range));
+    let input_records = query_records;
+    let (query_records, query_input) = match ranged_queries {
+        Some(ranged) => (std::borrow::Cow::Owned(ranged.records), ranged.input),
+        None => (
+            std::borrow::Cow::Borrowed(query_records),
+            QueryInput::whole(query_records),
+        ),
+    };
+    check_no_empty_interval(
+        &query_records,
+        &query_input.placements,
+        &query_input.ordinals,
+        RangeRole::Query,
+        "BLASTN",
+    )?;
     // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:129-138
     // ```c
     // 	int num_seqs=0;
@@ -5556,8 +5787,11 @@ fn search(
     crate::utils::threading::with_search_pool(args.num_threads, "blastn", |pool| {
         run_in_pool(
             args,
-            query_records,
+            input_records,
+            &query_records,
+            &query_input,
             subject_records,
+            ranges.subjects,
             outputs,
             output_formats,
             pool,
@@ -5744,8 +5978,9 @@ struct QueryBatch {
 enum BatchStage<'a> {
     /// The preliminary search and the traceback of a query batch (`CLocalBlast::Run`). A
     /// batch that NCBI splits has its preliminary search run in query chunks
-    /// (`search_query_chunks`).
-    Search,
+    /// (`search_query_chunks`), which need where each query's searched letters start in
+    /// its record (`-query_loc`).
+    Search { query_offsets: &'a [usize] },
     /// The preliminary search of one query chunk of a split batch
     /// (`SplitQuery_CreateChunkData`), with the masks of its query parts and the search
     /// spaces of the batch's contexts.
@@ -5786,19 +6021,22 @@ enum BatchStage<'a> {
 #[allow(clippy::too_many_arguments)]
 fn run_in_pool(
     args: BlastnArgs,
+    input_records: &[bio::io::fasta::Record],
     query_records: &[bio::io::fasta::Record],
+    query_input: &QueryInput,
     subject_records: &[bio::io::fasta::Record],
+    subject_ranges: SubjectRanges<'_>,
     outputs: &mut ReportOutputs<'_>,
     output_formats: Vec<BlastnOutputFormat>,
     parallel_pool: &crate::utils::threading::SearchPool<'_>,
     mut batching: QueryBatching,
 ) -> Result<()> {
-    if query_records.is_empty() {
+    if input_records.is_empty() {
         return Ok(());
     }
     let metadata = subject_metadata_from_records(subject_records);
     if metadata.db_num_seqs == 0 {
-        write_title_warnings(query_records, outputs.diagnostics)?;
+        write_title_warnings(input_records, outputs.diagnostics)?;
         return Ok(());
     }
     let subjects = PreparedSubjects {
@@ -5879,9 +6117,17 @@ fn run_in_pool(
         .into());
     }
 
+    // The lengths of the searched queries (their intervals with `-query_loc`).
     let lengths: Vec<usize> = query_records
         .iter()
         .map(|record| record.seq().len())
+        .collect();
+    let report_ranges = ReportRanges {
+        queries: query_input,
+        subjects: subject_ranges,
+    };
+    let query_offsets: Vec<usize> = (0..query_records.len())
+        .map(|index| query_input.placements.offset(index))
         .collect();
     let mut hit_lists: Vec<Option<BlastnHitList>> = Vec::with_capacity(lengths.len());
     let mut unsearched = Vec::with_capacity(lengths.len());
@@ -5890,9 +6136,19 @@ fn run_in_pool(
     // The warnings written before each query's report (`QueryWarnings`).
     let mut warnings: Vec<Vec<u8>> = vec![Vec::new(); lengths.len()];
     let mut query_eff_searchsp = Vec::with_capacity(2 * lengths.len());
-    let mut start = 0;
-    while start < lengths.len() {
-        let end = next_query_batch_end(&lengths, start, batching.batch_size);
+    // A batch is read from the input records (`input_start..input_end`); its searched
+    // queries are `start..end` (all of them without `-query_loc`). A batch size counts the
+    // whole records, and a record whose range starts past its end is skipped
+    // (`next_ranged_batch_end`).
+    let mut input_start = 0;
+    while input_start < query_input.input_lengths.len() {
+        let input_end = next_ranged_batch_end(
+            &query_input.input_lengths,
+            &query_input.skipped,
+            input_start,
+            batching.batch_size,
+        );
+        let std::ops::Range { start, end } = query_input.searched_in(input_start..input_end);
         // NCBI reference: ncbi-blast/c++/src/app/blast/blastn_app.cpp:277-279
         // ```c
         //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup() ) {
@@ -5901,8 +6157,61 @@ fn run_in_pool(
         // ```
         // `CFastaReader` warns about the titles of a batch's queries when it reads them,
         // after the report of the batch before: before the report of the batch's first
-        // query (`QueryWarnings`).
-        write_title_warnings(&query_records[start..end], &mut warnings[start])?;
+        // query (`QueryWarnings`). Skipped records are read too.
+        let mut batch_title_warnings = Vec::new();
+        write_title_warnings(
+            &input_records[input_start..input_end],
+            &mut batch_title_warnings,
+        )?;
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
+        // ```c
+        // CObjMgr_QueryFactory::CObjMgr_QueryFactory(CBlastQueryVector & queries)
+        //     : m_QueryVector(& queries)
+        // {
+        //     if (queries.Empty()) {
+        //         NCBI_THROW(CBlastException, eInvalidArgument, "Empty CBlastQueryVector");
+        //     }
+        // ```
+        // A batch of skipped records only (with `-query_loc`) fails after the reports of
+        // the batches before, without the epilog.
+        if start == end {
+            if start == 0 {
+                write_pairwise_prologs(
+                    outputs,
+                    &output_formats,
+                    megablast,
+                    &subject_title,
+                    &subjects.metadata,
+                    false,
+                )?;
+            } else {
+                write_batch_reports(
+                    &args,
+                    &query_records[..start],
+                    &subjects,
+                    &report_ranges,
+                    outputs,
+                    &output_formats,
+                    BatchResults {
+                        hit_lists,
+                        warnings: &warnings[..start],
+                        lengths: &lengths[..start],
+                        unsearched,
+                        query_masks: &query_masks,
+                        context_karlin: &context_karlin,
+                        query_eff_searchsp: &query_eff_searchsp,
+                    },
+                    false,
+                )?;
+            }
+            outputs.diagnostics.write_all(&batch_title_warnings)?;
+            return Err(crate::cli::NativeError {
+                exit: 3,
+                message: "BLAST engine error: Empty CBlastQueryVector\n".to_string(),
+            }
+            .into());
+        }
+        warnings[start].extend(batch_title_warnings);
         let batch = match search_query_batch(
             &args,
             &query_records[start..end],
@@ -5911,8 +6220,10 @@ fn run_in_pool(
             &output_formats,
             parallel_pool,
             batching,
-            start == 0,
-            BatchStage::Search,
+            input_start == 0,
+            BatchStage::Search {
+                query_offsets: &query_offsets[start..end],
+            },
         ) {
             Ok(batch) => batch,
             Err(error) => match error.downcast::<KarlinErrorAfterInvalidBatches>() {
@@ -5938,6 +6249,7 @@ fn run_in_pool(
                         &args,
                         &query_records[..start],
                         &subjects,
+                        &report_ranges,
                         outputs,
                         &output_formats,
                         BatchResults {
@@ -5992,7 +6304,7 @@ fn run_in_pool(
             if karlin.is_none() {
                 warnings[start + index].extend(invalid_query_warning(
                     "blastn",
-                    start + index,
+                    query_input.ordinal(start + index),
                     &query_records[start + index],
                 ));
             }
@@ -6004,13 +6316,14 @@ fn run_in_pool(
             batching.batch_size =
                 mixer.batch_size(Some(batch.good_init_extends as u32 as i32)) as u32;
         }
-        start = end;
+        input_start = input_end;
     }
 
     write_batch_reports(
         &args,
         query_records,
         &subjects,
+        &report_ranges,
         outputs,
         &output_formats,
         BatchResults {
@@ -6077,10 +6390,12 @@ struct BatchResults<'a> {
 
 /// Writes the reports of `query_records` (the queries of the batches searched), with
 /// NCBI's epilog (`PrintEpilog`) when `epilog`.
+#[allow(clippy::too_many_arguments)]
 fn write_batch_reports(
     args: &BlastnArgs,
     query_records: &[bio::io::fasta::Record],
     subjects: &PreparedSubjects<'_>,
+    ranges: &ReportRanges<'_>,
     outputs: &mut ReportOutputs<'_>,
     output_formats: &[BlastnOutputFormat],
     results: BatchResults<'_>,
@@ -6091,6 +6406,7 @@ fn write_batch_reports(
     let report_inputs = BlastnReportInputs {
         queries: query_records,
         subjects: subjects.records,
+        ranges,
         query_masks: results.query_masks,
         lcase_masking: args.lcase_masking,
         query_eff_searchsp: results.query_eff_searchsp,
@@ -6389,7 +6705,7 @@ fn search_query_batch(
     // seq_arg.encoding = eBlastEncodingProtein;
     // ```
     let masks = match stage {
-        BatchStage::Search => query_masks(args, &queries),
+        BatchStage::Search { .. } => query_masks(args, &queries),
         BatchStage::ChunkPrelim { query_masks, .. } => query_masks.to_vec(),
     };
     let seq_data = prepare_sequence_data(queries, query_ids, masks, subject_metadata);
@@ -6871,7 +7187,7 @@ fn search_query_batch(
         .enumerate()
         .map(|(index, ((ctx, blocks), &valid))| {
             let options_searchsp = match stage {
-                BatchStage::Search => 0,
+                BatchStage::Search { .. } => 0,
                 BatchStage::ChunkPrelim {
                     batch_eff_searchsp, ..
                 } => batch_eff_searchsp[index],
@@ -6906,10 +7222,11 @@ fn search_query_batch(
     //         CRef<CSplitQueryBlk> split_query_blk = query_splitter->Split();
     // ```
     let split_prelim_lists = match stage {
-        BatchStage::Search if any_valid_context => search_query_chunks(
+        BatchStage::Search { query_offsets } if any_valid_context => search_query_chunks(
             args,
             &seq_data.queries,
             &seq_data.query_masks,
+            query_offsets,
             &query_eff_searchsp,
             &query_context_offsets,
             subjects,
@@ -12683,6 +13000,7 @@ fn search_query_chunks(
     args: &BlastnArgs,
     queries: &[bio::io::fasta::Record],
     query_masks: &[Vec<MaskedInterval>],
+    query_offsets: &[usize],
     batch_eff_searchsp: &[i64],
     context_offsets: &[i32],
     subjects: &PreparedSubjects<'_>,
@@ -12736,7 +13054,7 @@ fn search_query_chunks(
         let restricted = chunk
             .queries
             .iter()
-            .map(|part| restrict_masks(&query_masks[part.query], part))
+            .map(|part| restrict_masks(&query_masks[part.query], part, query_offsets[part.query]))
             .collect();
         let part_masks = chunk_query_masks(args, &parts, restricted);
         let batch = search_query_batch(

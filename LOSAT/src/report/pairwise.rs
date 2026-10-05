@@ -1556,6 +1556,7 @@ pub fn write_blastp_pairwise_report<W: Write>(
     report: &BlastpPairwiseReport,
     mut probe: Option<&mut FormatProbe<'_>>,
     mut warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
+    epilog: bool,
 ) -> io::Result<()> {
     let mut buffered = io::BufWriter::new(writer);
     let writer = &mut buffered;
@@ -1736,6 +1737,17 @@ pub fn write_blastp_pairwise_report<W: Write>(
             query.effective_search_space,
             false,
         )?;
+    }
+
+    // NCBI reference: c++/src/app/blast/blastp_app.cpp:294-295
+    // ```c++
+    //         BLAST_PROF_START( APP.POST );
+    //         formatter.PrintEpilog(opt);
+    // ```
+    // A search that stops at a query batch (`Empty CBlastQueryVector` with `-query_loc`)
+    // writes no epilog.
+    if !epilog {
+        return writer.flush();
     }
 
     // The blank lines before the epilog (blast_format.cpp:2249).
@@ -3476,6 +3488,7 @@ pub fn write_tblastn_pairwise_report<W: Write>(
     report: &BlastpPairwiseReport,
     mut probe: Option<&mut FormatProbe<'_>>,
     mut warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
+    epilog: bool,
 ) -> io::Result<()> {
     // NCBI c++/src/algo/blast/api/local_blast.cpp:177-224:
     // an all-invalid Run() batch carries -1 Karlin sentinel blocks only for
@@ -3664,6 +3677,15 @@ pub fn write_tblastn_pairwise_report<W: Write>(
             query.effective_search_space,
             false,
         )?;
+    }
+    // NCBI reference: c++/src/app/blast/tblastn_app.cpp:342
+    // ```c++
+    //         formatter.PrintEpilog(opt);
+    // ```
+    // A search that stops at a query batch (`Empty CBlastQueryVector` with `-query_loc`)
+    // writes no epilog.
+    if !epilog {
+        return writer.flush();
     }
     // The blank lines before the epilog (blast_format.cpp:2249).
     writeln!(&mut writer)?;

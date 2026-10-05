@@ -74,26 +74,39 @@ pub fn parse(words: &[&str]) -> Result<(Program, Commands), String> {
     Ok((program, cli.command))
 }
 
-/// `validate`: `parse`, then BLASTN's `-dust` value and the scoring options that NCBI
-/// rejects or that its Karlin-Altschul tables do not support, with NCBI's message (for a
-/// batch of one query), and TBLASTX's checks of its options alone (NCBI's `-evalue`
-/// check, the options that LOSAT's TBLASTX rejects).
+/// `validate`: `parse`, then the syntax of `-subject_loc` and `-query_loc`, BLASTN's
+/// `-dust` value and the scoring options that NCBI rejects or that its Karlin-Altschul
+/// tables do not support, with NCBI's message (for a batch of one query), and TBLASTX's
+/// checks of its options alone (NCBI's `-evalue` check, the options that LOSAT's TBLASTX
+/// rejects).
 /// `run` leaves them to the engine, which reports them as the CLI does.
 pub fn validate(words: &[&str]) -> Result<(), String> {
+    use LOSAT::blastinput::seq_range::{parse_optional_range, RangeRole};
+    // The ranges' syntax, in NCBI's order: the subject range where the subjects are read
+    // (before the other option handlers), the query range with the query options (the
+    // engine's option checks read it). Whether a range fits the records is checked by
+    // `run`, which has them.
+    let subject_range = |subject_loc: Option<&str>, program: &str| {
+        parse_optional_range(subject_loc, RangeRole::Subject, program).map(|_| ())
+    };
     match parse(words)? {
-        (_, Commands::Blastn(mut args)) => args
-            .resolve_dust()
+        (_, Commands::Blastn(mut args)) => subject_range(args.subject_loc.as_deref(), "BLASTN")
+            .and_then(|()| args.resolve_dust())
+            .and_then(|()| {
+                parse_optional_range(args.query_loc.as_deref(), RangeRole::Query, "BLASTN")
+                    .map(|_| ())
+            })
             .and_then(|()| LOSAT::algorithm::blastn::scoring::check_scoring(&args))
             .map_err(|error| format!("{error:#}"))?,
-        (_, Commands::Tblastx(args)) => {
-            LOSAT::algorithm::tblastx::blast_engine::check_options(&args)
-                .map_err(|error| format!("{error:#}"))?
-        }
-        (_, Commands::Blastp(args)) => LOSAT::algorithm::blastp::blast_engine::check_options(&args)
+        (_, Commands::Tblastx(args)) => subject_range(args.subject_loc.as_deref(), "TBLASTX")
+            .and_then(|()| LOSAT::algorithm::tblastx::blast_engine::check_options(&args))
             .map_err(|error| format!("{error:#}"))?,
-        (_, Commands::Tblastn(args)) => {
-            LOSAT::algorithm::tblastn::check_options(&args).map_err(|error| format!("{error:#}"))?
-        }
+        (_, Commands::Blastp(args)) => subject_range(args.subject_loc.as_deref(), "BLASTP")
+            .and_then(|()| LOSAT::algorithm::blastp::blast_engine::check_options(&args))
+            .map_err(|error| format!("{error:#}"))?,
+        (_, Commands::Tblastn(args)) => subject_range(args.subject_loc.as_deref(), "TBLASTN")
+            .and_then(|()| LOSAT::algorithm::tblastn::check_options(&args))
+            .map_err(|error| format!("{error:#}"))?,
         _ => {}
     }
     Ok(())

@@ -14,12 +14,12 @@
 | 条件 | 状態 | 根拠 |
 |---|---|---|
 | 固定した fixture で outfmt 0/6/7 が NCBI とバイト一致 | 満たした | outfmt 0/6/7 の manifest の E2d の 53 行（1・2・4 スレッドで差 0、NCBI の凍結の確かめも差 0）、範囲の回帰 fixture 35 件（stdout・stderr・終了コード、NCBI の誤りと誤りの順を含む）。変更前の LOSAT はどの行も「the NCBI BLAST+ option -query_loc is not supported by LOSAT's <PROGRAM>」で拒否する |
-| 範囲の全ての書き方と端で NCBI と同じか明示的な拒否 | 満たした | [`range_sweep.py`](range_sweep.py) の 1860 件で DIFF 0（下の「sweep」）。4 人の監査役の約 11 万の比較でも、一致、同じ誤り、承認済みの例外、明示的な拒否だけ（指摘 A-1 = D-1 は直した） |
+| 範囲の全ての書き方と端で NCBI と同じか明示的な拒否 | 満たした | [`range_sweep.py`](range_sweep.py) の 1860 件で DIFF 0（下の「sweep」）。4 人の監査役の比較（CLI で約 10 万、Web で約 18,400 件 × 3 形式）でも、一致、同じ誤り、承認済みの例外、明示的な拒否だけ（指摘 A-1 = D-1 は直した） |
 | 既存の認証済みの出力に退行なし | 満たした | fixture 151 件、CI の速い検査の全件 236 件（capture と同じ case、S02 の基準と Gate A・TLOSAN Stage G の凍結ハッシュ）で失敗 0、Gate A の 20 組のうち 10 組を再実行して全て EXACT_TEXT・REPEATABLE、TBLASTX 84・BLASTN 183 の回帰 fixture、E2e の BLASTP・TBLASTN の option の sweep が E2e と同じ分類、v1 の WASI の行列（下の「ゲート」） |
 | `run_local` と ABI v2 の `validate` から使える | 満たした | V-ABI（BLASTN・BLASTP・TBLASTN の全ての検索 191 と TBLASTX の E2d の検索 7。E2d の 36 の検索を全て含む）、監査 D の Web の harness（`validate`・`register`・`run` と CLI の約 18,400 件 × 3 形式） |
 | `docs/web/verification_cells.tsv` に升目を足す | 満たした | E2d の 4 行（fixture、範囲の回帰 fixture、sweep、V-ABI）を `checked` で足した |
 | 独立監査 | 満たした | 4 観点（BLASTN、BLASTP、TBLASTN・TBLASTX、引数・端・アダプタ）と、指摘の修正の再監査 2 回（下の「独立監査」） |
-| V-PERF の非退行 | 【G】 | 下の「V-PERF」 |
+| V-PERF の非退行 | 満たした | 24 組の全てで出力が同じ。閾値（×1.05）を超えた組は、静かな計算機で `--repeat 5` で測り直して全て閾値以内（下の「V-PERF」） |
 
 ## 範囲の意味（要約。詳しくは [`AUTHORITY.md`](AUTHORITY.md)）
 
@@ -126,7 +126,15 @@ LOSAT の拒否は R1（`StringToInt` が読めない部分）と R2（文字の
 
 ## V-PERF
 
-【G:V-PERF】
+[`gates/s11_perf.sh`](gates/s11_perf.sh)、V-PERF の lock を取って（アプリ側は止まる）。変更前は E2e の最後のゲートの成果物（native `6f070575…`、`s08pb2-gate-wasi-artifacts`）、変更後は最後のゲートの成果物（`s11-gate-*`、native `f0b8916b…`）。case は E2b の [`perf_cases.py`](../losat_web_e2b/perf_cases.py) の `blastp`・`blastp-fmt0`・`tblastn`・`tblastn-fmt0`・`tblastx`・`tblastx-multi`・`tblastx-many`・`blastn-large` × native・serial-WASI・threaded-WASI（4 スレッド）、変更前と変更後を交互に（暖機 1 回）。範囲を付けない検索の速さを測る（範囲の経路は区間に切ったレコードの検索と同じ）。結果は run [`run-20261005T133711Z/`](run-20261005T133711Z/)（`perf-{1,2,3}.*`、`perf-check-*.txt`）。
+
+| 計測 | 結果 |
+|---|---|
+| `perf-1`（`--repeat 3`、24 組） | 出力は 24 組とも同じ。17 組が閾値（×1.05）以内。超えた 7 組：`tblastn` native ×1.261（0.103 → 0.130 秒）・serial-WASI ×1.412、`tblastx` serial-WASI ×1.054・threaded-WASI ×1.096、`tblastx-multi` threaded-WASI ×1.363、`blastn-large` native ×1.129・threaded-WASI ×1.101（幅は広く、`blastn-large` threaded-WASI の変更後は 1.8〜6.7 秒）。計測の間、別の作業（gbdraw の試験）が 5 つの CPU を使っていた |
+| `perf-2`（`tblastn`・`tblastx`・`tblastx-multi`・`blastn-large` を `--repeat 5`、CPU の 95 % 以上が空いた計算機で、12 組） | 出力は同じ。11 組が閾値以内（×0.958〜×1.002）。`tblastx` threaded-WASI だけ ×1.243：時間が約 1.6 秒と約 2.0 秒の 2 つに分かれ、変更前の 5 回が全て速い側、変更後の 5 回のうち 3 回が遅い側だった |
+| `perf-3`（`tblastx` を `--repeat 5`、同じく静かな計算機で、3 組） | 3 組とも閾値以内：native ×0.990、serial-WASI ×0.992、threaded-WASI ×1.023。threaded-WASI の 2 つの時間は変更前にも出た（1.975 秒） |
+
+`tblastx` threaded-WASI の 2 つの時間：3 回の計測を合わせると、1.8 秒を超えた実行は変更前 13 回のうち 3 回、変更後 13 回のうち 7 回（Fisher の正確検定で p = 0.23、差とは言えない）。S11 の TBLASTX の変更はスレッドの扱い（pool、並列の反復）を変えていない（query の batch と報告の座標の移しだけ）。native と serial-WASI は 3 回とも閾値以内。
 
 ## 独立監査
 
@@ -155,8 +163,8 @@ A-1 の修正の再監査：
 2. **R2**（文字の無い区間）：明示的な拒否。推奨：このまま（実用が無く、LOSAT は文字の無いレコードも拒否している）。
 3. **A-1**（option の値の UTF-8 でないバイト）：parse の後の明示的な拒否。推奨：このまま。
 4. **O-1**（`validate` と CLI の誤りの順）：引数とレコードの両方に誤りがある入力で、Web は引数の誤りを先に出す。推奨：ABI v2 の設計として受け入れる（`validate` はレコードを持たない。`run` の結果は CLI と同じ）。
-5. V-PERF：【G】
-6. **最後のゲートで省いた工程**（下の「ゲート」）：TBLASTX の option の sweep、TBLASTN の `-db_gencode` の C++ API の oracle、蛋白の題の sweep、capture、Gate A の後半の 10 組、V-ABI full の TBLASTX の E2d 以外の検索。どれも E2e までの確かめで、S11 が変えていない経路か、同じゲートの別の検査（CI の速い検査の全件、BLASTP・TBLASTN の sweep、V-ABI）と重なる。推奨：このまま受け入れる。別案：次のエンジン側のゲート（SX）の前に `s11_gates.sh` の全体を流す（TBLASTX の sweep と Gate A を並行させない）。
+5. **V-PERF**：上限を超えた組は無い（`perf-1` の 7 組は静かな計算機で測り直して閾値以内）。`tblastx` threaded-WASI は時間が 2 つに分かれ、変更後に遅い側が少し多かった（有意ではない）。推奨：非退行として受け入れる。
+6. **最後のゲートで省いた工程**（上の「ゲート」）：TBLASTX の option の sweep、TBLASTN の `-db_gencode` の C++ API の oracle、蛋白の題の sweep、capture、Gate A の後半の 10 組、V-ABI full の TBLASTX の E2d 以外の検索。どれも E2e までの確かめで、S11 が変えていない経路か、同じゲートの別の検査（CI の速い検査の全件、BLASTP・TBLASTN の sweep、V-ABI）と重なる。推奨：このまま受け入れる。別案：次のエンジン側のゲート（SX）の前に `s11_gates.sh` の全体を流す（TBLASTX の sweep と Gate A を並行させない）。
 
 ## アプリ側（S12）への注意
 

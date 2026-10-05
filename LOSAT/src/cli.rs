@@ -90,7 +90,14 @@ where
     let mut translated = vec![input.next().unwrap_or_else(|| "losat".into())];
     let mut scope = &command;
     while let Some(token) = input.next() {
-        let text = token.to_str().unwrap_or("");
+        // In the four programs a word that is not UTF-8 keeps its key readable
+        // (`-name=value` with a value that is not UTF-8 is rejected below).
+        let lossy = token.to_string_lossy();
+        let text: &str = if is_ncbi_search_program(scope) {
+            &lossy
+        } else {
+            token.to_str().unwrap_or("")
+        };
         if let Some(subcommand) = scope.find_subcommand(text) {
             scope = subcommand;
             translated.push(token);
@@ -139,7 +146,8 @@ where
         };
         if arg.get_action().takes_values() {
             let value = match inline {
-                Some(value) => OsString::from(value),
+                Some(value) if token.to_str().is_some() => OsString::from(value),
+                Some(_) => return Err(non_utf8_value_error(scope, name)),
                 None => input.next().ok_or_else(|| {
                     clap::Error::raw(
                         ErrorKind::InvalidValue,
@@ -147,6 +155,23 @@ where
                     )
                 })?,
             };
+            // NCBI reference: c++/src/corelib/ncbiargs.cpp:266-270
+            // ```c++
+            // inline CArg_String::CArg_String(const string& name, const string& value)
+            //     : CArgValue(name)
+            // {
+            //     m_StringList.push_back(value);
+            // }
+            // ```
+            // NCBI keeps the bytes of an option's value. LOSAT's options are UTF-8 strings,
+            // so a value that is not UTF-8 is rejected explicitly; the file names have their
+            // own check where the files are opened (`check_utf8_file_name`).
+            if value.to_str().is_none()
+                && !matches!(name, "query" | "subject" | "out")
+                && is_ncbi_search_program(scope)
+            {
+                return Err(non_utf8_value_error(scope, name));
+            }
             let mut internal = OsString::from(format!("--{name}="));
             internal.push(value);
             translated.push(internal);
@@ -161,6 +186,35 @@ where
         }
     }
     T::try_parse_from(translated)
+}
+
+/// Whether `scope` is one of the programs whose command lines follow NCBI's (BLASTX keeps
+/// its own until SX).
+fn is_ncbi_search_program(scope: &clap::Command) -> bool {
+    matches!(
+        scope.get_name(),
+        "blastn" | "blastp" | "tblastn" | "tblastx"
+    )
+}
+
+/// The explicit rejection of an option's value that is not UTF-8 (`try_parse_from`).
+///
+/// NCBI reference: c++/src/corelib/ncbiargs.cpp:266-270
+/// ```c++
+/// inline CArg_String::CArg_String(const string& name, const string& value)
+///     : CArgValue(name)
+/// {
+///     m_StringList.push_back(value);
+/// }
+/// ```
+fn non_utf8_value_error(scope: &clap::Command, name: &str) -> clap::Error {
+    clap::Error::raw(
+        ErrorKind::InvalidUtf8,
+        format!(
+            "the value of -{name} is not UTF-8; NCBI BLAST+ reads the bytes of an option's value, which is not supported by LOSAT's {}",
+            scope.get_name().to_uppercase()
+        ),
+    )
 }
 
 // NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:107,143
@@ -812,5 +866,45 @@ pub fn exit_on_native_error(error: &anyhow::Error) {
             std::process::abort();
         }
         std::process::exit(e.exit);
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::os::unix::ffi::OsStringExt;
+
+    // NCBI c++/src/corelib/ncbiargs.cpp:266-270 keeps the bytes of a string value; LOSAT
+    // rejects a value that is not UTF-8 explicitly, in both spellings of an option.
+    #[test]
+    fn option_values_that_are_not_utf8_are_rejected_explicitly() {
+        for (option, value) in [
+            ("-query_loc", vec![0xff]),
+            ("-subject_loc", b"1-\xff".to_vec()),
+            ("-dust", vec![0xfe]),
+        ] {
+            let separate = vec![
+                OsString::from("losat"),
+                OsString::from("blastn"),
+                OsString::from(option),
+                OsString::from_vec(value.clone()),
+            ];
+            let mut inline = format!("{option}=").into_bytes();
+            inline.extend(&value);
+            let joined = vec![
+                OsString::from("losat"),
+                OsString::from("blastn"),
+                OsString::from_vec(inline),
+            ];
+            for argv in [separate, joined] {
+                let error = try_parse_from::<Cli, _, _>(argv).unwrap_err();
+                let message = render_message(&error);
+                assert!(
+                    message.contains(&format!("the value of {option} is not UTF-8"))
+                        && message.contains("not supported by LOSAT's BLASTN"),
+                    "{message}"
+                );
+            }
+        }
     }
 }

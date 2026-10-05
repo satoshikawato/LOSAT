@@ -13,7 +13,7 @@ LOSAT Web の段階 W3 を実行する。先に [セッション README](README.
    - 文法：`start < stop`、どちらも 1 以上の 10 進数。1 文字の範囲（`5-5`）、逆向き、0 は NCBI の誤り（`BLAST engine error: Invalid specification of query location (range cannot be empty)` などで、`validate` がその文言を返す。subject は `subject location`）。空白・小数点・`0x`・2^31 以上は LOSAT の拒否（NCBI は build のパスを含む文言で終了コード 255。計画 TD-15 と同じ扱い）。フォームは 2 つの整数の欄から空白の無い `start-stop` を作る。
    - レコードの端：終わりがレコードの長さを越えると、NCBI は黙ってレコードの終わりで切る（ただし BLASTP の tabular の `qlen` は入力どおりの範囲の長さを出す）。始まりが長さ + 1 は LOSAT の拒否（`run` が「has no letters in the -query_loc range」、BLASTP の subject は NCBI と同じ警告で続ける）、長さ + 2 以上は、subject なら NCBI の誤り（`Invalid from coordinate (greater than sequence length)`、終了コード 1）、query ならそのレコードを黙って飛ばす（レコードが 1 つなら `Empty CBlastQueryVector`、終了コード 3）。推奨：プレビューの選択と同じく、入力も 1〜レコードの長さに制限する（`qlen` の違いと、端の誤りを画面で起こさないため）。
    - 結果：座標はレコードの座標（範囲の始まりを足した値、両 strand・全 frame）、`Length=`・`slen` はレコードの長さ、TBLASTN・TBLASTX の frame はレコードから計算した値。e-value と検索空間は範囲の長さから（範囲を変えると e-value も変わる）、outfmt 0 の database の合計は範囲の長さの和。アダプタの HSP レコード（`hits`）の座標もレコードの座標。
-   - `validate` は範囲の文法だけを調べる（subject の範囲、program の検査と query の範囲の順）。レコードとの関係（始まりがレコードを越える）は `run` が調べ、その誤りの文言をそのまま見せる。
+   - `validate` は範囲の文法だけを調べる（subject の範囲、program の検査と query の範囲の順）。レコードとの関係（始まりがレコードを越える）は `run` が調べ、その誤りの文言をそのまま見せる。引数とレコードの両方に誤りがあると、CLI はレコードの誤り（subject を先に読む）を、`validate` は引数の誤りを先に出す（S11 の監査 D の O-1。`docs/web/abi_v2.md` の `validate`）。
 4. パラメーターのフォーム。`ProgramDescriptor` に、表示する引数・節・ラベルを足し、既定値・選択肢・help は `describe` から取る（初期値は BLAST+ CLI の既定値）。既定値と同じ値は argv に書かない。遺伝暗号の選択肢は、program ごとの許可リスト（`describe`）から出す。
 5. Combined / Separate の切り替え（計画 §5.2）。Separate は、ファイルごとの RunSnapshot を同じグループ ID で積み、「グループを取消」を用意する。
 6. スレッドの Auto / 手動、実行中の段階と経過時間、診断情報（RunRecord の経路・スレッド数・切り替えの理由）。query ごとの途中経過は出さない（DW-5）。

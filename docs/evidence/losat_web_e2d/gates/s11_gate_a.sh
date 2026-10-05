@@ -6,7 +6,7 @@ A=/home/kawato/.cache/losat-web-gui-target
 B=$A/s11
 W=/mnt/c/Users/genom/GitHub/LOSAT-web-gui
 RUN=$W/$(cat $B/rundir)
-OUT=$A/${GATE:-s11-gate}-tblastx-v010
+OUT=/tmp/claude-1000/${GATE:-s11-gate}-tblastx-v010
 step() { echo "$(date -u +%H:%M:%S) $*"; }
 cd $W
 N=$A/${GATE:-s11-gate}-native/release/LOSAT

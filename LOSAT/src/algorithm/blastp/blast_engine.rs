@@ -7734,7 +7734,7 @@ fn run_resolved_in_pool(
                     .enumerate()
                     .map(|(q_idx, (query_name, &query_length))| BlastpPairwiseQuery {
                         query_name: query_name.clone(),
-                        // NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:741-743
+                        // NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:742-744
                         // ```c++
                         //         if(cbs.IsSetInst() && cbs.GetInst().CanGetLength()){
                         //             out << "\nLength=";

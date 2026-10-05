@@ -496,7 +496,7 @@ pub(crate) fn pairwise_hits(
                 hit.q_start.min(hit.q_end) as i32 - 1,
                 hit.q_start.max(hit.q_end) as i32 - 1,
             );
-            // NCBI reference: c++/src/objtools/align_format/showalign.cpp:427-438
+            // NCBI reference: c++/src/objtools/align_format/showalign.cpp:430-440
             // ```c++
             // static int s_GetStdsegMasterFrame(const CStd_seg& ss, CScope& scope)
             // {

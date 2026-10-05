@@ -4623,7 +4623,7 @@ fn blastn_pairwise_report(
         .enumerate()
         .map(|(q_idx, query)| BlastnPairwiseQuery {
             query_name: query_titles[q_idx].to_string(),
-            // NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:741-743
+            // NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:742-744
             // ```c++
             //         if(cbs.IsSetInst() && cbs.GetInst().CanGetLength()){
             //             out << "\nLength=";
@@ -4969,7 +4969,7 @@ fn post_process_hits_and_write(
                     subject: subject_masks.as_deref(),
                 },
             )?;
-            // NCBI reference: c++/src/objtools/align_format/showalign.cpp:2478
+            // NCBI reference: c++/src/objtools/align_format/showalign.cpp:2479
             // ```c++
             //     out<<kLengthString<<bsp_handle.GetBioseqLength()<<"\n";
             // ```
@@ -5509,7 +5509,7 @@ fn search_cli(
 /// The query range, read by NCBI's query options handler: after the filtering handler
 /// (`-dust`), before the formatting handler and the check of the options.
 ///
-/// NCBI reference: c++/src/algo/blast/blastinput/blastn_args.cpp:96-99
+/// NCBI reference: c++/src/algo/blast/blastinput/blastn_args.cpp:100-102
 /// ```c++
 ///     m_QueryOptsArgs.Reset(new CQueryOptionsArgs(kQueryIsProtein));
 ///     arg.Reset(m_QueryOptsArgs);

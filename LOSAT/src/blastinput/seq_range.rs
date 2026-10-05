@@ -99,7 +99,7 @@ impl SequenceRange {
 ///     }
 ///     from--, to--;   // decrement to make range 0-based
 /// ```
-/// NCBI reference: c++/src/app/blast/blast_app_util.hpp:221-227
+/// NCBI reference: c++/src/app/blast/blast_app_util.hpp:216-227
 /// ```c++
 ///     catch (const blast::CBlastException& e) {                               \
 ///         ...
@@ -271,24 +271,29 @@ fn cut(record: &fasta::Record, from: usize, to_exclusive: usize) -> fasta::Recor
 /// A record whose interval starts more than one letter past its end stops NCBI, in file
 /// order, while the subjects are read.
 ///
-/// NCBI reference: c++/src/algo/blast/blastinput/blast_input.cpp:199-217
+/// NCBI reference: c++/src/algo/blast/blastinput/blast_input.cpp:198-219
 /// ```c++
 /// CRef<CBlastQueryVector>
 /// CBlastInput::GetAllSeqs(CScope& scope)
 /// {
 ///     CRef<CBlastQueryVector> retval(new CBlastQueryVector);
 ///
-///     try {
-///         while (!End()) {
-///             retval->AddQuery(m_Source->GetNextSequence(scope));
-///         }
-///     } catch (const CObjReaderParseException& e) {
-///         static const string kEOF("eEOF");
-///         if (e.GetErrCodeString() != kEOF) {
+///     while (!End()) {
+///         try { retval->AddQuery(m_Source->GetNextSequence(scope)); }
+///         catch (const CObjReaderParseException& e) {
+///             auto err = e.GetErrCode();
+///             if (err == CObjReaderParseException::eEOF) {
+///                 break;
+///             } else if (err == CObjReaderParseException::eNoDefline) {
+///                 ...
+///             }
 ///             throw;
 ///         }
 ///     }
+///
+///     return retval;
 /// ```
+/// The range's `CInputException` is not caught here.
 /// NCBI reference: c++/src/app/blast/blast_app_util.hpp:172-176
 /// ```c++
 ///     catch (const blast::CInputException& e) {                               \

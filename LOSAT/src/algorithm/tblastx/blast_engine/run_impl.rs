@@ -1476,7 +1476,7 @@ fn write_tblastx_outputs(
                     .map(|(q_idx, ((query, stats), title))| {
                         crate::report::pairwise::TblastxPairwiseQuery {
                             query_name: title.clone(),
-                            // NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:741-743
+                            // NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:742-744
                             // ```c++
                             //         if(cbs.IsSetInst() && cbs.GetInst().CanGetLength()){
                             //             out << "\nLength=";

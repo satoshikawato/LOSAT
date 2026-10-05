@@ -772,7 +772,7 @@ fn write_pairwise(
                 Some(desc) => format!("{} {desc}", query.id()),
                 None => query.id().to_string(),
             },
-            // NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:741-743
+            // NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:742-744
             // ```c++
             //         if(cbs.IsSetInst() && cbs.GetInst().CanGetLength()){
             //             out << "\nLength=";

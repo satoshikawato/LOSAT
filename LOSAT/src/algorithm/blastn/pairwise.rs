@@ -241,7 +241,7 @@ fn shown_query_masks(
     )
 }
 
-// NCBI reference: c++/src/algo/blast/api/blast_seqalign.cpp:1590-1603
+// NCBI reference: c++/src/algo/blast/api/blast_seqalign.cpp:1588-1600
 // ```c++
 //         // Union subject sequence ranges
 //         vector <TSeqRange> ranges;
@@ -257,7 +257,7 @@ fn shown_query_masks(
 //         TMaskedSubjRegions masks;
 //         if (!ranges.empty() && seqinfo_src->GetMasks(kOid, ranges, masks)) {
 // ```
-// NCBI reference: c++/src/algo/blast/api/seqinfosrc_seqvec.cpp:110-125
+// NCBI reference: c++/src/algo/blast/api/seqinfosrc_seqvec.cpp:109-125
 // ```c++
 // static void
 // s_SeqIntervalToSeqLocInfo(CRef<CSeq_interval> interval,

@@ -2,19 +2,12 @@
 
 - 段階：E2d `-query_loc` / `-subject_loc`（[総合計画書](../../losat_web_gui_plan.md) §7 の S11、§4 の G9、計画 DW-9〜DW-11。指示書 [S11](../../losat_web_gui_sessions/session_s11_e2d_query_subject_loc.md)）
 - ブランチ：`feature/losat-web-gui`。変更前は E2e の最後のコミット `4fab73fdb`（native の SHA-256 `6f070575…`、E2e の最後のゲートの成果物 `~/.cache/losat-web-gui-target/s08pb2-gate-*`）。変更後は最後のエンジンのコミット `095171eda`（最後のゲートは記録を足した `dc129ea34` で、エンジンは同じ。native `f0b8916b…`、再監査 2 の再生の実行ファイルと同じ）。2026-10-05
-- 状態：**作業中（2026-10-05 に中断）**。移植、fixture、sweep、4 観点の監査と再監査 2 回は済み。残りは最後のゲート・Gate A・V-PERF と、この記録の【G】の欄（下の「中断の時点と再開の手順」）
+- 状態：**完了（2026-10-06）**。計画 §7 の S11 の行の完了条件（固定した fixture で NCBI とバイト一致、独立監査）と指示書の 5. を満たした。保守者に諮ること（判断 R1・R2・A-1、`validate` の誤りの順）は下の「保守者に諮ること」
 
-## 中断の時点と再開の手順（2026-10-05）
+## 経過（2026-10-05〜06）
 
-保守者の指示で、最後のゲートの途中で中断した。エンジンの最後のコミットは `095171eda`（中断の時点で push 済み）。
-
-- 中断したゲート（`095171eda`、記録には使わない。`~/.cache/losat-web-gui-target/s11/paused-run-20261005T074458Z/`）の途中の結果は全て通過：fmt・clippy の 4 構成とアダプタの 3 構成、`cargo test --all-features` 920 件・失敗 0、アダプタと wasm32 の web API の試験、pure-Rust の境界、このセッションで足した行の NCBI の参照の誤り 0、fixture 204 件 × 1・2・4 スレッドで差 0、`run_oracle.py` 204 件差 0、範囲の回帰 fixture 35 件差 0、TBLASTX 84・BLASTN 183 の回帰 fixture 差 0、`CTOOLKIT_COMPATIBLE` 200 行 600 実行で差 0、句読点の定義行と題の sweep で予期しない 0、BLASTN の入力 300 件で予期しない 0、CI の速い検査の全件 236 件で失敗 0（既知の Sakai 1）、範囲の sweep 1860 件で DIFF 0、E2e の BLASTP・TBLASTN の option の sweep は終了コード 0。TBLASTX の option の sweep、capture、v1 の行列、V-ABI は途中で止めた。
-- その前の 2 つのゲート（`3d46b4cd8`、`bbceeb330`）は、後でエンジンを直したので記録に使わない（`superseded-run-*`）。`3d46b4cd8` の run の capture の前の検査も全て通過。開発中の capture（`LOSAT-wip2`）は 236 件が S02 の基準と差 0。
-- 再開の手順：
-  1. `echo docs/evidence/losat_web_e2d/run-$(date -u +%Y%m%dT%H%M%SZ) > ~/.cache/losat-web-gui-target/s11/rundir` で run の directory を決め、`bash docs/evidence/losat_web_e2d/gates/s11_gates.sh`（約 3.5 時間、V-ABI full が最も長い）。
-  2. 並行して `bash docs/evidence/losat_web_e2d/gates/s11_gate_a.sh`（出力は `/tmp/claude-1000/` の下。`audit_tblastx_v010.py` は `/tmp` の外を拒否する。中断の前に `OUT` を直した）。
-  3. ゲートの後、静かな計算機で `bash docs/evidence/losat_web_e2d/gates/s11_perf.sh`（`REPEAT=3`。閾値を超えた case は `REPEAT=5 SUFFIX=2 CASES=…` で測り直す）。
-  4. この記録の【G】の欄、`docs/web/verification_cells.tsv` の S11 の 4 行（`run-<S11 final gate>` を run の directory に、`pending` を `checked` に）、計画の状態の行と §7 の S11 の行、セッション README の表、`evidence.sha256` を書き、コミットして push する。
+- 監査の指摘（A-1・D-1、再監査 1 の R-1・R-2、再監査 2 の F-1）を直すたびに、走っていたゲートを止めて新しいエンジンのコミットでやり直した。記録に使わないゲート：`3d46b4cd8`・`bbceeb330` の run（`~/.cache/losat-web-gui-target/s11/superseded-run-*`）、保守者の指示で中断した `095171eda` の run（`paused-run-20261005T074458Z`）。どれも止めた時点までの検査は全て通過していた。
+- 最後のゲート（`dc129ea34`、エンジンは `095171eda`）は、TBLASTX の option の sweep の途中で WSL の再起動で止まり、残りの工程を同じ成果物で再開した（下の「ゲート」）。
 
 ## 完了条件（計画 §7 の S11 の行と指示書の 5.）
 
@@ -124,8 +117,8 @@ LOSAT の拒否は R1（`StringToInt` が読めない部分）と R2（文字の
 | E2e の option の sweep（BLASTP 1196・TBLASTN 1427） | DIFF 0。全ての行が E2e の最後のゲートと同じ分類 |
 | Gate A（再起動の前、`audit-tblastx-v010.log`） | 20 組のうち 10 組（`p01`〜`p10`）が EXACT_TEXT・contract PASS・REPEATABLE |
 | V-ABI（`v-abi-full/parts/` の BLASTN・BLASTP・TBLASTN、`v-abi-tblastx-e2d/`） | BLASTN 90・BLASTP 46・TBLASTN 55 の全ての検索と TBLASTX の E2d の 7 の検索 × 4（serial n1、threads n1・n2・n4）。全ての実行が native の CLI と一致。凍結ハッシュは、違う 4 件（既知の `Sakai.MG1655.megablast` outfmt 7）のほか全て一致 |
-| V-ABI quick | 【G:quick】 |
-| v1 の WASI の行列（`check_wasm_threading.py`）、`v1-requests` | 【G:v1】 |
+| V-ABI quick | 60 の実行が native の CLI と一致、凍結ハッシュ 16/16 |
+| v1 の WASI の行列（`check_wasm_threading.py`）、`v1-requests` | 433 の記録、reactor の lifecycle の gate 通過、形式の失敗 0。`v1-requests` は E2e の最後のゲートとバイト一致（`v1-requests-compare.txt`） |
 
 ## Gate A
 

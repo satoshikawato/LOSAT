@@ -5,7 +5,7 @@
 // and recovery; renewal of the runtime; and the serial fallback. Every project (Chromium,
 // Firefox, WebKit) runs them, on a harness server (support/harness-server.ts). The
 // storage-full cases need the Chrome DevTools Protocol and run in contracts.spec.ts.
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
@@ -30,10 +30,12 @@ let notIsolated: HarnessServer;
 /**
  * A TBLASTN search of several query batches (62,500 residues of NZ_CP006932's proteins
  * against 437,500 nt of its genome), as files in a directory of their own: the query is
- * searched in batches of 20,000 residues, each with its own thread pool.
+ * searched in batches of 20,000 residues, each with its own thread pool. The directory is
+ * made by the worker that runs these tests and removed after them.
  */
-const BATCHES_DIR = mkdtempSync(join(tmpdir(), 'losat-web-batches-'));
+let batchesDir: string | undefined;
 function writeBatchInputs(): Map<string, Uint8Array> {
+  batchesDir = mkdtempSync(join(tmpdir(), 'losat-web-batches-'));
   const read = (path: string) => readFileSync(join(REPOSITORY, path), 'utf8');
   let query = '';
   let residues = 0;
@@ -48,7 +50,7 @@ function writeBatchInputs(): Map<string, Uint8Array> {
     ['batches_query.faa', new TextEncoder().encode(query)],
     ['batches_subject.fasta', new TextEncoder().encode(subject)],
   ]);
-  for (const [name, bytes] of files) writeFileSync(join(BATCHES_DIR, name), bytes);
+  for (const [name, bytes] of files) writeFileSync(join(batchesDir, name), bytes);
   return files;
 }
 
@@ -61,6 +63,7 @@ test.beforeAll(async () => {
 test.afterAll(async () => {
   await isolated?.close();
   await notIsolated?.close();
+  if (batchesDir !== undefined) rmSync(batchesDir, { recursive: true, force: true });
 });
 
 const failures = (results: ReadonlyArray<{ ok: boolean }>) => results.filter((result) => !result.ok);
@@ -218,7 +221,7 @@ test('a search that builds one thread pool after another runs threaded from a ne
     id: 'tblastn.query_batches',
     program: 'tblastn',
     options: [],
-    cwd: BATCHES_DIR,
+    cwd: batchesDir!,
     query: 'batches_query.faa',
     subject: 'batches_subject.fasta',
     frozen: {},

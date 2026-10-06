@@ -15,6 +15,7 @@ import {
   type RecordKey,
 } from '../../domain/dataset';
 import type { OutputFormat } from '../../domain/output-format';
+import type { InputRole, ProgramId } from '../../domain/programs';
 import type {
   CleanupState,
   DataGateway,
@@ -24,6 +25,7 @@ import type {
   StorageInfo,
 } from '../../ports/data';
 import type { HspRecord } from '../../ports/engine';
+import type { InputCheck, InputChecker } from '../../ports/input-check';
 import { DIAGNOSTICS_STREAM, HITS_STREAM, OUTPUT_STREAMS, type OutputStream } from '../../ports/run-output';
 import type { RecordScanner } from '../../ports/scan';
 import { RunOutputReceiver } from '../run-output/receiver';
@@ -33,6 +35,8 @@ import { asStorageFull, isStorageFull, type BlockStore, type BlockWriter } from 
 export interface DataServiceDeps {
   readonly store: BlockStore;
   readonly scanner: RecordScanner;
+  /** The engine's reading of an input (`register`), for checkInput. */
+  readonly checker: InputChecker;
   /** Lower-case hex SHA-256. */
   readonly digest: (bytes: Uint8Array) => Promise<string>;
   /** A new random token; tokens name blocks, so they never contain input names. */
@@ -149,6 +153,16 @@ export class DataService implements DataGateway {
     }
     const bytes = concatBytes(parts);
     return { bytes, sha256: await this.deps.digest(bytes), records: Object.freeze(records) };
+  }
+
+  async checkInput(program: ProgramId, role: InputRole, revisionIds: readonly string[]): Promise<InputCheck> {
+    const { bytes } = await this.buildRunInput(revisionIds);
+    return this.deps.checker.check(program, role, bytes);
+  }
+
+  async previewSource(sourceId: string, maxBytes: number): Promise<Uint8Array> {
+    const file = this.source(sourceId);
+    return readRange(file, 0, Math.min(file.size, Math.max(0, maxBytes)));
   }
 
   // --- runs -----------------------------------------------------------------------------

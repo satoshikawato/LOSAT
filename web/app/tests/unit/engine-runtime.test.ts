@@ -9,7 +9,11 @@ import { findReactors } from '../../build/reactors';
 import { ReactorAbi, stopMessage, type AbiExports } from '../../src/infra/reactor/abi';
 import { ABI_EXPORTS, inspectReactor } from '../../src/infra/reactor/artifact';
 import { instantiateSerial } from '../../src/infra/reactor/instance';
+import { ReactorInputChecker } from '../../src/infra/reactor/checker';
+import { toProgramDescription } from '../../src/infra/reactor/control';
 import { ReactorScanner, reopening } from '../../src/infra/reactor/scanner';
+import { FakeEngine } from '../../src/infra/fake/fake-engine';
+import { PROGRAMS } from '../../src/domain/programs';
 import { AUTO_MAX_THREADS, AUTO_SERIAL_BELOW_BYTES, chooseThreads, DEFAULT_RENEWAL, renewalReason } from '../../src/infra/engine-worker/policy';
 import { RECORD_SCANNER_CASES } from '../contract/record-scanner.contract';
 
@@ -247,4 +251,42 @@ describe.skipIf(reactors === undefined)('RecordScanner contract: the serial reac
       await contractCase.run({ scanner });
     });
   }
+});
+
+describe.skipIf(reactors === undefined)('the serial reactor answers the search form', () => {
+  const open = async () => (await instantiateSerial(new WebAssembly.Module(reactors!.serial.bytes as BufferSource))).abi;
+
+  it("FakeEngine's describe.json is the reactor's describe of every program", async () => {
+    const abi = await open();
+    const fake = new FakeEngine();
+    for (const program of ['blastn', 'blastp', 'tblastn', 'tblastx'] as const) {
+      expect(await fake.describe(program)).toEqual(toProgramDescription(abi.describe(program)));
+    }
+  });
+
+  it('every field of the search form is an option that the engine describes', async () => {
+    const abi = await open();
+    for (const program of PROGRAMS.filter((p) => p.unavailable === undefined)) {
+      const described = new Set(toProgramDescription(abi.describe(program.id)).parameters.map((option) => option.flag));
+      for (const section of program.sections) {
+        for (const field of section.fields) expect(described, `${program.id} ${field.flag}`).toContain(field.flag);
+      }
+    }
+  });
+
+  it("checks an input with the engine's register: the verdict and the message", async () => {
+    const checker = new ReactorInputChecker(reopening(open));
+    expect(await checker.check('blastn', 'query', new TextEncoder().encode('>a\nACGT\n>b\nACGT\n'))).toEqual({
+      ok: true,
+      records: [
+        { id: 'a', length: 4 },
+        { id: 'b', length: 4 },
+      ],
+    });
+    const refused = await checker.check('blastn', 'query', new TextEncoder().encode('>a\nACGT\n>b\nACLGT\n'));
+    expect(refused.ok).toBe(false);
+    expect(!refused.ok && refused.message).toMatch(/^query record 2 \(b\) has 'L' at residue 3, .*not supported by LOSAT's BLASTN/);
+    const protein = await checker.check('blastp', 'subject', new TextEncoder().encode('>p\nMK-LV\n'));
+    expect(!protein.ok && protein.message).toContain("not supported by LOSAT's BLASTP");
+  });
 });

@@ -43,6 +43,7 @@ test('a BLASTN query of white space only is refused with the index scan error, b
   await page.getByTestId('query-input').fill(' \n');
   await page.getByTestId('subject-input').fill('>s1\nACGTACGTACGT\n');
   await page.getByTestId('add-to-queue').click();
-  await expect(page.getByTestId('search-message')).toHaveText('Query FASTA: Expected > at record start.');
+  await expect(page.getByTestId('search-message')).toHaveText('Query (pasted): Expected > at record start.');
+  await expect(page.getByTestId('query-source-0-error')).toHaveText('This input cannot be read: Expected > at record start.');
   await expect(page.getByTestId('run-1')).toHaveCount(0);
 });

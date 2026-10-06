@@ -1,0 +1,546 @@
+{
+ "blastn": {
+  "program": "blastn",
+  "formats": [
+   0,
+   6,
+   7
+  ],
+  "parameters": [
+   {
+    "flag": "-query",
+    "help": "",
+    "takes_value": true,
+    "default": "-"
+   },
+   {
+    "flag": "-subject",
+    "help": "",
+    "takes_value": true
+   },
+   {
+    "flag": "-task",
+    "help": "Task to execute: megablast, blastn, dc-megablast or blastn-short",
+    "takes_value": true,
+    "default": "megablast"
+   },
+   {
+    "flag": "-template_type",
+    "help": "Discontiguous MegaBLAST template type: coding, optimal or coding_and_optimal",
+    "takes_value": true
+   },
+   {
+    "flag": "-template_length",
+    "help": "Discontiguous MegaBLAST template length: 16, 18 or 21",
+    "takes_value": true
+   },
+   {
+    "flag": "-word_size",
+    "help": "Word size for wordfinder algorithm (default: 28 for megablast, 11 for blastn and dc-megablast, 7 for blastn-short)",
+    "takes_value": true
+   },
+   {
+    "flag": "-evalue",
+    "help": "Expectation value (E) threshold for saving hits (default: 10; 1000 for blastn-short)",
+    "takes_value": true
+   },
+   {
+    "flag": "-perc_identity",
+    "help": "Percent identity threshold for filtering HSPs (Blast_HSPTest)",
+    "takes_value": true,
+    "default": "0"
+   },
+   {
+    "flag": "-max_target_seqs",
+    "help": "Maximum number of aligned sequences to keep (default: 500)",
+    "takes_value": true
+   },
+   {
+    "flag": "-max_hsps",
+    "help": "Maximum number of HSPs per subject (unlimited when omitted) Reference: ncbi-blast/c++/src/algo/blast/api/blast_nucl_options.cpp:231-270",
+    "takes_value": true
+   },
+   {
+    "flag": "-reward",
+    "help": "Reward for a nucleotide match (default: 1 for megablast and blastn-short, 2 for blastn and dc-megablast; LOSAT does not support 0)",
+    "takes_value": true
+   },
+   {
+    "flag": "-penalty",
+    "help": "Penalty for a nucleotide mismatch (default: -2 for megablast, -3 for the other tasks)",
+    "takes_value": true
+   },
+   {
+    "flag": "-gapopen",
+    "help": "Cost to open a gap (default: 0 for megablast, 5 for the other tasks)",
+    "takes_value": true
+   },
+   {
+    "flag": "-gapextend",
+    "help": "Cost to extend a gap (default: 0 for megablast, 2 for the other tasks)",
+    "takes_value": true
+   },
+   {
+    "flag": "-dust",
+    "help": "DUST: no, yes, or LEVEL WINDOW LINKER (default: 20 64 1; no for blastn-short)",
+    "takes_value": true
+   },
+   {
+    "flag": "-lcase_masking",
+    "help": "",
+    "takes_value": false,
+    "default": "false",
+    "choices": [
+     "true",
+     "false"
+    ]
+   },
+   {
+    "flag": "-query_loc",
+    "help": "Location on the query sequence in 1-based offsets (Format: start-stop)",
+    "takes_value": true
+   },
+   {
+    "flag": "-subject_loc",
+    "help": "Location on the subject sequence in 1-based offsets (Format: start-stop)",
+    "takes_value": true
+   },
+   {
+    "flag": "-subject_besthit",
+    "help": "Apply subject best hit filtering (disabled by default). Reference: ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:135",
+    "takes_value": false,
+    "default": "false",
+    "choices": [
+     "true",
+     "false"
+    ]
+   }
+  ]
+ },
+ "blastp": {
+  "program": "blastp",
+  "formats": [
+   0,
+   6,
+   7
+  ],
+  "parameters": [
+   {
+    "flag": "-query",
+    "help": "",
+    "takes_value": true,
+    "default": "-"
+   },
+   {
+    "flag": "-subject",
+    "help": "",
+    "takes_value": true
+   },
+   {
+    "flag": "-task",
+    "help": "",
+    "takes_value": true,
+    "default": "blastp",
+    "choices": [
+     "blastp",
+     "blastp-fast",
+     "blastp-short"
+    ]
+   },
+   {
+    "flag": "-evalue",
+    "help": "Expectation value (E) threshold for saving hits [default: 10; 20000 for blastp-short]",
+    "takes_value": true
+   },
+   {
+    "flag": "-threshold",
+    "help": "Minimum word score such that the word is added to the BLAST lookup table [default: 11, or the matrix's suggestion; 19.3, 21 or 20.25 for word sizes 5, 6 and 7; 20 for blastp-fast]",
+    "takes_value": true
+   },
+   {
+    "flag": "-word_size",
+    "help": "Word size for wordfinder algorithm [default: 3; 5 for blastp-fast, 2 for blastp-short]",
+    "takes_value": true
+   },
+   {
+    "flag": "-max_target_seqs",
+    "help": "Maximum number of aligned sequences to keep [default: 500]",
+    "takes_value": true
+   },
+   {
+    "flag": "-max_hsps",
+    "help": "",
+    "takes_value": true
+   },
+   {
+    "flag": "-ungapped",
+    "help": "",
+    "takes_value": false,
+    "choices": [
+     "true",
+     "false"
+    ]
+   },
+   {
+    "flag": "-window_size",
+    "help": "Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40, or the matrix's suggestion]",
+    "takes_value": true
+   },
+   {
+    "flag": "-matrix",
+    "help": "Scoring matrix name [default: BLOSUM62; PAM30 for blastp-short]",
+    "takes_value": true
+   },
+   {
+    "flag": "-gapopen",
+    "help": "Cost to open a gap [default: 11, or the matrix's best value]",
+    "takes_value": true
+   },
+   {
+    "flag": "-gapextend",
+    "help": "Cost to extend a gap [default: 1, or the matrix's best value]",
+    "takes_value": true
+   },
+   {
+    "flag": "-comp_based_stats",
+    "help": "Use composition-based statistics: 0 (F, f) none, 1 composition-based statistics, 2 (D, d, T, t) conditional compositional score matrix adjustment, 3 unconditional compositional score matrix adjustment",
+    "takes_value": true,
+    "default": "2"
+   },
+   {
+    "flag": "-seg",
+    "help": "SEG: no, yes, or \"WINDOW LOCUT HICUT\" [default: no]",
+    "takes_value": true
+   },
+   {
+    "flag": "-use_sw_tback",
+    "help": "",
+    "takes_value": false,
+    "choices": [
+     "true",
+     "false"
+    ]
+   },
+   {
+    "flag": "-query_loc",
+    "help": "Location on the query sequence in 1-based offsets (Format: start-stop)",
+    "takes_value": true
+   },
+   {
+    "flag": "-subject_loc",
+    "help": "Location on the subject sequence in 1-based offsets (Format: start-stop)",
+    "takes_value": true
+   }
+  ]
+ },
+ "tblastn": {
+  "program": "tblastn",
+  "formats": [
+   0,
+   6,
+   7
+  ],
+  "parameters": [
+   {
+    "flag": "-query",
+    "help": "",
+    "takes_value": true,
+    "default": "-"
+   },
+   {
+    "flag": "-subject",
+    "help": "",
+    "takes_value": true
+   },
+   {
+    "flag": "-task",
+    "help": "",
+    "takes_value": true,
+    "default": "tblastn",
+    "choices": [
+     "tblastn",
+     "tblastn-fast"
+    ]
+   },
+   {
+    "flag": "-evalue",
+    "help": "Expectation value (E) threshold for saving hits [default: 10]",
+    "takes_value": true
+   },
+   {
+    "flag": "-word_size",
+    "help": "Word size for wordfinder algorithm [default: 3; 5 for tblastn-fast]",
+    "takes_value": true
+   },
+   {
+    "flag": "-gapopen",
+    "help": "Cost to open a gap [default: 11, or the matrix's best value]",
+    "takes_value": true
+   },
+   {
+    "flag": "-gapextend",
+    "help": "Cost to extend a gap [default: 1, or the matrix's best value]",
+    "takes_value": true
+   },
+   {
+    "flag": "-db_gencode",
+    "help": "",
+    "takes_value": true,
+    "default": "1"
+   },
+   {
+    "flag": "-max_intron_length",
+    "help": "Length of the largest intron allowed in a translated nucleotide sequence when linking multiple distinct alignments [default: 0]",
+    "takes_value": true
+   },
+   {
+    "flag": "-matrix",
+    "help": "Scoring matrix name [default: BLOSUM62]",
+    "takes_value": true
+   },
+   {
+    "flag": "-threshold",
+    "help": "Minimum word score such that the word is added to the BLAST lookup table [default: 13, or the matrix's suggestion; 19.3, 21 or 20.25 for word sizes 5, 6 and 7; 20 for tblastn-fast]",
+    "takes_value": true
+   },
+   {
+    "flag": "-xdrop_gap",
+    "help": "X-dropoff value (in bits) for preliminary gapped extensions [default: 15]",
+    "takes_value": true
+   },
+   {
+    "flag": "-xdrop_gap_final",
+    "help": "X-dropoff value (in bits) for final gapped alignment [default: 25]",
+    "takes_value": true
+   },
+   {
+    "flag": "-comp_based_stats",
+    "help": "Use composition-based statistics: 0 (F, f) none, 1 composition-based statistics, 2 (D, d, T, t) conditional compositional score matrix adjustment, 3 unconditional compositional score matrix adjustment",
+    "takes_value": true,
+    "default": "2"
+   },
+   {
+    "flag": "-query_loc",
+    "help": "Location on the query sequence in 1-based offsets (Format: start-stop)",
+    "takes_value": true
+   },
+   {
+    "flag": "-subject_loc",
+    "help": "Location on the subject sequence in 1-based offsets (Format: start-stop)",
+    "takes_value": true
+   },
+   {
+    "flag": "-seg",
+    "help": "SEG: no, yes, or \"WINDOW LOCUT HICUT\" [default: 12 2.2 2.5]",
+    "takes_value": true
+   },
+   {
+    "flag": "-lcase_masking",
+    "help": "",
+    "takes_value": false,
+    "choices": [
+     "true",
+     "false"
+    ]
+   },
+   {
+    "flag": "-soft_masking",
+    "help": "Apply filtering locations as soft masks [default: false]",
+    "takes_value": true
+   },
+   {
+    "flag": "-sum_stats",
+    "help": "Use sum statistics [default: true]",
+    "takes_value": true
+   },
+   {
+    "flag": "-window_size",
+    "help": "Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40, or the matrix's suggestion]",
+    "takes_value": true
+   },
+   {
+    "flag": "-max_target_seqs",
+    "help": "Maximum number of aligned sequences to keep [default: 500]",
+    "takes_value": true
+   },
+   {
+    "flag": "-ungapped",
+    "help": "",
+    "takes_value": false,
+    "choices": [
+     "true",
+     "false"
+    ]
+   }
+  ],
+  "subject_gencodes": [
+   1,
+   2,
+   3,
+   4,
+   5,
+   6,
+   9,
+   10,
+   11,
+   12,
+   13,
+   14,
+   15,
+   16,
+   21,
+   22,
+   23,
+   24,
+   25,
+   26,
+   27,
+   28,
+   29,
+   30,
+   31,
+   32,
+   33
+  ]
+ },
+ "tblastx": {
+  "program": "tblastx",
+  "formats": [
+   0,
+   6,
+   7
+  ],
+  "parameters": [
+   {
+    "flag": "-query",
+    "help": "",
+    "takes_value": true,
+    "default": "-"
+   },
+   {
+    "flag": "-subject",
+    "help": "",
+    "takes_value": true
+   },
+   {
+    "flag": "-evalue",
+    "help": "",
+    "takes_value": true,
+    "default": "10"
+   },
+   {
+    "flag": "-threshold",
+    "help": "",
+    "takes_value": true,
+    "default": "13"
+   },
+   {
+    "flag": "-word_size",
+    "help": "",
+    "takes_value": true,
+    "default": "3"
+   },
+   {
+    "flag": "-query_gencode",
+    "help": "",
+    "takes_value": true,
+    "default": "1"
+   },
+   {
+    "flag": "-db_gencode",
+    "help": "",
+    "takes_value": true,
+    "default": "1"
+   },
+   {
+    "flag": "-max_target_seqs",
+    "help": "Maximum number of aligned sequences to keep (default: 500)",
+    "takes_value": true
+   },
+   {
+    "flag": "-seg",
+    "help": "SEG: no, yes, or WINDOW LOCUT HICUT",
+    "takes_value": true,
+    "default": "12 2.2 2.5"
+   },
+   {
+    "flag": "-window_size",
+    "help": "Two-hit window size for triggering ungapped extension (default: 40). Smaller values are more strict, larger values are more sensitive. 0 (NCBI's one-hit word finder) is not supported by LOSAT's TBLASTX",
+    "takes_value": true,
+    "default": "40"
+   },
+   {
+    "flag": "-culling_limit",
+    "help": "If the query range of a hit is enveloped by that of at least this many higher-scoring hits, delete the hit (default: 0, no culling)",
+    "takes_value": true,
+    "default": "0"
+   },
+   {
+    "flag": "-query_loc",
+    "help": "Location on the query sequence in 1-based offsets (Format: start-stop)",
+    "takes_value": true
+   },
+   {
+    "flag": "-subject_loc",
+    "help": "Location on the subject sequence in 1-based offsets (Format: start-stop)",
+    "takes_value": true
+   }
+  ],
+  "query_gencodes": [
+   1,
+   2,
+   3,
+   4,
+   5,
+   6,
+   9,
+   10,
+   11,
+   12,
+   13,
+   14,
+   15,
+   16,
+   21,
+   22,
+   23,
+   24,
+   25,
+   26,
+   27,
+   28,
+   29,
+   30,
+   31,
+   33
+  ],
+  "subject_gencodes": [
+   1,
+   2,
+   3,
+   4,
+   5,
+   6,
+   9,
+   10,
+   11,
+   12,
+   13,
+   14,
+   15,
+   16,
+   21,
+   22,
+   23,
+   24,
+   25,
+   26,
+   27,
+   28,
+   29,
+   30,
+   31,
+   33
+  ]
+ }
+}

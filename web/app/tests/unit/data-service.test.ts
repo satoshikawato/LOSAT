@@ -5,7 +5,7 @@ import { sha256Hex } from '../../src/infra/browser/platform';
 import { MEMORY_FULL_MESSAGE } from '../../src/infra/data/block-store';
 import { DataService, type DataServiceDeps } from '../../src/infra/data/data-service';
 import { MemoryBlockStore } from '../../src/infra/data/memory-block-store';
-import { FakeScanner } from '../../src/infra/fake/fake-fasta';
+import { FakeInputChecker, FakeScanner } from '../../src/infra/fake/fake-fasta';
 import { RunOutputWriter } from '../../src/infra/run-output/writer';
 import type { RecordScanner } from '../../src/ports/scan';
 
@@ -19,6 +19,7 @@ function service(overrides: Partial<DataServiceDeps> & { store?: MemoryBlockStor
   const data = new DataService({
     store,
     scanner: new FakeScanner(),
+    checker: new FakeInputChecker(),
     digest: sha256Hex,
     newToken: () => `token-${++token}`,
     cleanup: Promise.resolve({ state: 'done', removedSessions: 0 }),

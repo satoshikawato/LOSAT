@@ -9,6 +9,8 @@ export const DATA_GATEWAY_METHODS = [
   'indexSource',
   'reviseDataset',
   'buildRunInput',
+  'checkInput',
+  'previewSource',
   'openRun',
   'commitRun',
   'discardRun',

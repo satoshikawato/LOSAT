@@ -37,6 +37,18 @@ export interface RunSnapshot {
   readonly subject: InputSnapshot;
   readonly requestedThreads: number | 'auto';
   readonly queuedAt: number;
+  /**
+   * The group of runs queued together as separate searches (plan §5.2, Separate): one
+   * run for each file. Undefined for a run queued alone.
+   */
+  readonly group?: RunGroup;
+}
+
+export interface RunGroup {
+  readonly groupId: string;
+  /** 1-based position of the run in its group, and the group's size. */
+  readonly position: number;
+  readonly size: number;
 }
 
 export interface RunRecord {

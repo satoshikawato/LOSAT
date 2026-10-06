@@ -6,7 +6,7 @@ import { sha256Hex } from '../../src/infra/browser/platform';
 import { DataService } from '../../src/infra/data/data-service';
 import { MemoryBlockStore } from '../../src/infra/data/memory-block-store';
 import { FakeEngine, FAKE_MARKER } from '../../src/infra/fake/fake-engine';
-import { FakeScanner } from '../../src/infra/fake/fake-fasta';
+import { FakeInputChecker, FakeScanner } from '../../src/infra/fake/fake-fasta';
 import { RunOutputWriter } from '../../src/infra/run-output/writer';
 import type { DataGateway } from '../../src/ports/data';
 import type { Downloader } from '../../src/ports/download';
@@ -33,6 +33,7 @@ function setup(engine: EngineGateway = new FakeEngine(), wrap: (data: DataServic
   const data = new DataService({
     store,
     scanner: new FakeScanner(),
+    checker: new FakeInputChecker(),
     digest: sha256Hex,
     newToken: () => `token-${++token}`,
     cleanup: Promise.resolve({ state: 'done', removedSessions: 0 }),
@@ -281,5 +282,61 @@ describe('Coordinator', () => {
     expect(saved).toHaveLength(1);
     expect(saved[0]!.fileName).toBe('losat-run1-blastn.outfmt7.txt');
     expect(saved[0]!.text).toContain(FAKE_MARKER);
+  });
+
+  it('queues a group in order, numbered without gaps, and cancels the group together', async () => {
+    const engine = new ManualEngine();
+    const { coordinator } = setup(engine);
+    const result = await coordinator.enqueueAll([request, { ...request, query: { text: '>q2\nACGT\n' } }, request]);
+    expect(result.ok).toBe(true);
+    const ids = result.runIds!;
+    const runs = coordinator.state.get().runs;
+    expect(runs.map((run) => run.snapshot.number)).toEqual([1, 2, 3]);
+    expect(runs.map((run) => run.snapshot.group?.position)).toEqual([1, 2, 3]);
+    expect(new Set(runs.map((run) => run.snapshot.group?.groupId)).size).toBe(1);
+    expect(runs.every((run) => run.snapshot.group?.size === 3)).toBe(true);
+    await waitFor(coordinator, ids[0]!, 'running');
+    coordinator.cancelGroup(runs[0]!.snapshot.group!.groupId);
+    expect(statusOf(coordinator, ids[1]!)).toBe('cancelled');
+    expect(statusOf(coordinator, ids[2]!)).toBe('cancelled');
+    engine.finish(ids[0]!);
+    await waitFor(coordinator, ids[0]!, 'cancelled');
+    // The cancelled runs of the group never started.
+    expect(engine.started).toEqual([ids[0]]);
+  });
+
+  it('queues nothing of a group when one request is invalid, and keeps the numbering', async () => {
+    const engine = new ManualEngine();
+    engine.validate = async (argv?: readonly string[]): Promise<ValidationResult> =>
+      argv?.includes('-word_size') === true ? { ok: false, message: 'bad word size' } : { ok: true };
+    const { coordinator } = setup(engine);
+    const bad = { ...request, parameters: [['-word_size', '1']] as const };
+    expect(await coordinator.enqueueAll([request, bad])).toEqual({ ok: false, message: 'bad word size' });
+    expect(coordinator.state.get().runs).toHaveLength(0);
+    const runId = (await coordinator.enqueue(request)).runId!;
+    expect(viewOf(coordinator, runId)!.snapshot.number).toBe(1);
+    expect(viewOf(coordinator, runId)!.snapshot.group).toBeUndefined();
+  });
+
+  it('runs dataset inputs as the revisions say, and shares the bytes of the same revisions', async () => {
+    const { coordinator, data } = setup();
+    const add = async (name: string, text: string) => {
+      const source = await data.addSource(new File([text], name));
+      return (await data.indexSource(source.sourceId, 0)).revisionId;
+    };
+    const subject = await add('s.fa', '>s1\nACGT\n>s2\nGGCC\n');
+    const query = await add('q.fa', '>q\nACGT\n');
+    const revised = (await data.reviseDataset(subject, [0])).revisionId;
+    const result = await coordinator.enqueueAll([
+      { ...request, query: { dataset: { name: 'q.fa', revisionIds: [query] } }, subject: { dataset: { name: 's.fa', revisionIds: [subject] } } },
+      { ...request, query: { dataset: { name: 'q.fa', revisionIds: [query] } }, subject: { dataset: { name: 's.fa', revisionIds: [subject] } } },
+      { ...request, query: { dataset: { name: 'q.fa', revisionIds: [query] } }, subject: { dataset: { name: 's2.fa', revisionIds: [revised] } } },
+    ]);
+    const [a, b, c] = result.runIds!.map((id) => viewOf(coordinator, id)!.snapshot);
+    expect(a!.argv).toEqual(['blastn', '-query', 'q.fa', '-subject', 's.fa']);
+    expect(a!.subject.revisionIds).toEqual([subject]);
+    expect(a!.subject.bytes).toBe(b!.subject.bytes);
+    expect(new TextDecoder().decode(c!.subject.bytes)).toBe('>s2\nGGCC\n');
+    expect(c!.subject.records).toEqual([{ id: 's2', length: 4 }]);
   });
 });

@@ -6,13 +6,15 @@
 // composition root.
 import { ENGINE_ASSETS } from 'virtual:losat-engine';
 import type { DataGateway } from '../../ports/data';
+import type { InputChecker } from '../../ports/input-check';
 import type { RecordScanner } from '../../ports/scan';
 import { sha256Hex } from '../browser/platform';
 import { DataService } from '../data/data-service';
 import { opfsAccess } from '../data/opfs-block-store';
 import { startDataSession, type SessionLocks } from '../data/session';
-import { FakeScanner } from '../fake/fake-fasta';
+import { FakeInputChecker, FakeScanner } from '../fake/fake-fasta';
 import type { ReactorAbi } from '../reactor/abi';
+import { ReactorInputChecker } from '../reactor/checker';
 import { reactorControl, type EngineControl } from '../reactor/control';
 import { compileReactor, fetchReactor, instantiateSerial } from '../reactor/instance';
 import { ReactorScanner, reopening } from '../reactor/scanner';
@@ -23,10 +25,12 @@ const token = crypto.randomUUID();
 const locks = 'locks' in navigator ? (navigator.locks as unknown as SessionLocks) : undefined;
 
 let scanner: RecordScanner;
+let checker: InputChecker;
 let control: EngineControl;
 if (ENGINE_ASSETS === null) {
-  // A build without the engine (build/reactors.ts): the development build's FakeScanner.
+  // A build without the engine (build/reactors.ts): the development build's fakes.
   scanner = new FakeScanner();
+  checker = new FakeInputChecker();
   control = {
     describe: () => Promise.reject(new Error('this build has no engine')),
     validate: () => Promise.reject(new Error('this build has no engine')),
@@ -49,6 +53,7 @@ if (ENGINE_ASSETS === null) {
   };
   const reactor: () => Promise<ReactorAbi> = reopening(async () => (await instantiateSerial(await module())).abi);
   scanner = new ReactorScanner(reactor);
+  checker = new ReactorInputChecker(reactor);
   control = reactorControl(reactor);
 }
 
@@ -59,6 +64,7 @@ const service = startDataSession({ token, locks, opfs: opfsAccess }).then(
       ...(session.fallbackReason === undefined ? {} : { fallbackReason: session.fallbackReason }),
       cleanup: session.cleanup,
       scanner,
+      checker,
       digest: sha256Hex,
       newToken: () => crypto.randomUUID(),
       estimate: estimateStorage,

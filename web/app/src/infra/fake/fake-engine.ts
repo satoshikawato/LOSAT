@@ -37,10 +37,10 @@ export class FakeEngine implements EngineGateway {
   }
 
   /**
-   * The engine's *describe* of the program, as the engine of the commit that added this
-   * file wrote it (describe.json; tests/unit/engine-runtime.test.ts compares it with the
-   * reactor when one is built), so that the search form has the engine's options, defaults
-   * and help without the engine.
+   * The engine's *describe* of the program, copied into describe.json (a file snapshot of
+   * tests/unit/engine-runtime.test.ts: compared with the reactor when one is built, and
+   * written again with `vitest -u`), so that the search form has the engine's options,
+   * defaults and help without the engine.
    */
   async describe(program: ProgramId): Promise<ProgramDescription> {
     const json = (DESCRIBE as Readonly<Record<string, unknown>>)[program];

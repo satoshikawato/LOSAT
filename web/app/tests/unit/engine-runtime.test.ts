@@ -12,7 +12,6 @@ import { instantiateSerial } from '../../src/infra/reactor/instance';
 import { ReactorInputChecker } from '../../src/infra/reactor/checker';
 import { toProgramDescription } from '../../src/infra/reactor/control';
 import { ReactorScanner, reopening } from '../../src/infra/reactor/scanner';
-import { FakeEngine } from '../../src/infra/fake/fake-engine';
 import { PROGRAMS } from '../../src/domain/programs';
 import { AUTO_MAX_THREADS, AUTO_SERIAL_BELOW_BYTES, chooseThreads, DEFAULT_RENEWAL, renewalReason } from '../../src/infra/engine-worker/policy';
 import { RECORD_SCANNER_CASES } from '../contract/record-scanner.contract';
@@ -256,12 +255,13 @@ describe.skipIf(reactors === undefined)('RecordScanner contract: the serial reac
 describe.skipIf(reactors === undefined)('the serial reactor answers the search form', () => {
   const open = async () => (await instantiateSerial(new WebAssembly.Module(reactors!.serial.bytes as BufferSource))).abi;
 
+  // FakeEngine's describe.json is a copy of the reactor's describe. After an engine change
+  // to an option, its help or its default, `vitest run tests/unit/engine-runtime.test.ts -u`
+  // (with LOSAT_WEB_REACTORS) writes it again.
   it("FakeEngine's describe.json is the reactor's describe of every program", async () => {
     const abi = await open();
-    const fake = new FakeEngine();
-    for (const program of ['blastn', 'blastp', 'tblastn', 'tblastx'] as const) {
-      expect(await fake.describe(program)).toEqual(toProgramDescription(abi.describe(program)));
-    }
+    const described = Object.fromEntries(['blastn', 'blastp', 'tblastn', 'tblastx'].map((program) => [program, abi.describe(program)]));
+    await expect(`${JSON.stringify(described, null, 1)}\n`).toMatchFileSnapshot('../../src/infra/fake/describe.json');
   });
 
   it('every field of the search form is an option that the engine describes', async () => {

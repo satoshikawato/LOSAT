@@ -6,7 +6,7 @@ import { sha256Hex } from '../../src/infra/browser/platform';
 import { DataService } from '../../src/infra/data/data-service';
 import { MemoryBlockStore } from '../../src/infra/data/memory-block-store';
 import { FakeEngine } from '../../src/infra/fake/fake-engine';
-import { FakeScanner } from '../../src/infra/fake/fake-fasta';
+import { FakeInputChecker, FakeScanner } from '../../src/infra/fake/fake-fasta';
 import { RunOutputWriter } from '../../src/infra/run-output/writer';
 import { BLOCK_STORE_CASES } from '../contract/block-store.contract';
 import { ENGINE_INPUT_CASES } from '../contract/engine-input.contract';
@@ -50,6 +50,7 @@ describe('Run output contract: DataService with the memory store, in one thread'
       const data = new DataService({
         store,
         scanner: new FakeScanner(),
+        checker: new FakeInputChecker(),
         digest: sha256Hex,
         newToken: () => `token-${++token}`,
         cleanup: Promise.resolve({ state: 'done', removedSessions: 0 }),

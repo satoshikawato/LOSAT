@@ -1,0 +1,196 @@
+
+ RUN  v5.0.2 /mnt/c/Users/genom/GitHub/LOSAT-web-gui-app/web/app
+
+ ✓ tests/unit/headers.test.ts > _headers > enables cross-origin isolation for every path 9ms
+ ✓ tests/unit/headers.test.ts > _headers > limits every fetch to the site itself and allows Wasm compilation 7ms
+ ✓ tests/unit/headers.test.ts > _headers > rejects a header line outside any path rule 1ms
+ ✓ tests/unit/rpc.test.ts > rpc > calls the served methods and returns their results 35ms
+ ✓ tests/unit/rpc.test.ts > rpc > keeps the name and message of an error 1ms
+ ✓ tests/unit/rpc.test.ts > rpc > serves only the listed methods 2ms
+ ✓ tests/unit/rpc.test.ts > rpc > transfers a returned MessagePort 1ms
+ ✓ tests/unit/rpc.test.ts > rpc > rejects every call when the service fails to start 1ms
+ ✓ tests/unit/rpc.test.ts > rpc > keeps working after an error event of a worker that has answered 1ms
+ ✓ tests/unit/rpc.test.ts > rpc > rejects pending and later calls when the worker fails to start 1ms
+ ✓ tests/unit/thread-host.test.ts > ThreadHost > prepares thread workers and starts threads in them with increasing thread IDs 106ms
+ ✓ tests/unit/dataset.test.ts > dataset revisions > lists the included records in the original order 3ms
+ ✓ tests/unit/dataset.test.ts > dataset revisions > sorts and deduplicates an exclusion and rejects indices outside the table 1ms
+ ✓ tests/unit/dataset.test.ts > record tables at register > agrees when every ID and length is the same 0ms
+ ✓ tests/unit/dataset.test.ts > record tables at register > names the first record that differs 0ms
+ ✓ tests/unit/dataset.test.ts > record tables at register > reports a different number of records 0ms
+ ✓ tests/unit/thread-host.test.ts > ThreadHost > waits for a thread worker whose thread is still ending (a new pool of the same search) 105ms
+ ✓ tests/unit/thread-host.test.ts > ThreadHost > fails to prepare when a thread worker does not become ready in time 101ms
+ ✓ tests/unit/thread-host.test.ts > ThreadHost > abandons a thread that does not start in time, reports a fault, and the thread can no longer start 75ms
+ ✓ tests/unit/argv.test.ts > buildArgv > puts the program and input names first, then parameters in the given order 3ms
+ ✓ tests/unit/argv.test.ts > buildArgv > rejects the application-managed flag -query 1ms
+ ✓ tests/unit/argv.test.ts > buildArgv > rejects the application-managed flag -subject 0ms
+ ✓ tests/unit/argv.test.ts > buildArgv > rejects the application-managed flag -out 0ms
+ ✓ tests/unit/argv.test.ts > buildArgv > rejects the application-managed flag -outfmt 0ms
+ ✓ tests/unit/argv.test.ts > buildArgv > rejects the application-managed flag -num_threads 0ms
+ ✓ tests/unit/argv.test.ts > buildArgv > rejects parameters that are not flags 0ms
+ ✓ tests/unit/argv.test.ts > toShellCommand > quotes only the words that need quoting and always writes -outfmt 0ms
+ ✓ tests/unit/session.test.ts > working session ownership > holds the session lock until the worker ends 3ms
+ ✓ tests/unit/session.test.ts > working session ownership > removes only the sessions whose lock is free, holding their lock while it removes 2ms
+ ✓ tests/unit/session.test.ts > working session ownership > leaves a directory that cannot be removed and goes on 1ms
+ ✓ tests/unit/session.test.ts > working session ownership > takes its lock before it opens its directory, then reclaims in the background 1ms
+ ✓ tests/unit/session.test.ts > working session ownership > reclaims abandoned sessions first when OPFS is too full to open, then opens it 1ms
+ ✓ tests/unit/session.test.ts > working session ownership > keeps its data in memory when OPFS stays full after the reclaim 1ms
+ ✓ tests/unit/session.test.ts > working session ownership > keeps its data in memory and removes nothing without Web Locks 1ms
+ ✓ tests/unit/session.test.ts > working session ownership > keeps its data in memory when its lock cannot be taken, so no other tab can remove it 1ms
+ ✓ tests/unit/session.test.ts > working session ownership > falls back to memory with the reason when OPFS cannot be used 1ms
+ ✓ tests/unit/data-service.test.ts > DataService sources and record tables > keeps a File reference and builds its record table with per-record SHA-256 10ms
+ ✓ tests/unit/data-service.test.ts > DataService sources and record tables > keeps records with the same ID apart and keeps the original headers and case (REQ-05) 3ms
+ ✓ tests/unit/data-service.test.ts > DataService sources and record tables > rejects a source that the parser cannot read 2ms
+ ✓ tests/unit/data-service.test.ts > DataService sources and record tables > rejects a record table whose offsets are not ordered inside the source 0ms
+ ✓ tests/unit/data-service.test.ts > DataService sources and record tables > makes a new revision for a new selection and refuses unknown records 2ms
+ ✓ tests/unit/data-service.test.ts > DataService sources and record tables > gives the source unchanged when every record is included 2ms
+ ✓ tests/unit/data-service.test.ts > DataService sources and record tables > gives the included original records in order when records are left out 2ms
+ ✓ tests/unit/data-service.test.ts > DataService sources and record tables > adds one newline after a source without a final newline when another follows 2ms
+ ✓ tests/unit/data-service.test.ts > DataService runs and storage status > reports the storage it uses, the session bytes and the cleanup state 30ms
+ ✓ tests/unit/data-service.test.ts > DataService runs and storage status > refuses a second run with the same id and a commit of an unknown run 1ms
+ ✓ tests/unit/data-service.test.ts > DataService runs and storage status > reports the storage failure even if removing the failed run fails too 1ms
+ ✓ tests/unit/data-service.test.ts > DataService runs and storage status > counts the HSP records as readHits reads them: blank lines and empty chunks are not records 1ms
+ ✓ tests/unit/data-service.test.ts > DataService runs and storage status > commits a run once when the commit is asked for twice 1ms
+ ✓ tests/unit/data-service.test.ts > DataService runs and storage status > frees the bytes of a run that runs out of storage at once 1ms
+ ✓ tests/unit/data-service.test.ts > DataService runs and storage status > reports the memory budget of results kept in memory with its own message 2ms
+ ✓ tests/unit/coordinator.test.ts > Coordinator > runs one job at a time in FIFO order and stores the outputs and diagnostics 46ms
+ ✓ tests/unit/coordinator.test.ts > Coordinator > freezes the snapshot so later edits cannot change a queued job 5ms
+ ✓ tests/unit/coordinator.test.ts > Coordinator > reads a chosen file by reference and names the input after it 3ms
+ ✓ tests/unit/coordinator.test.ts > Coordinator > does not queue an input that the index scan cannot read 1ms
+ ✓ tests/unit/coordinator.test.ts > Coordinator > cancels a queued job without starting it 3ms
+ ✓ tests/unit/coordinator.test.ts > Coordinator > discards a cancelled run and ignores its late events 4ms
+ ✓ tests/unit/coordinator.test.ts > Coordinator > cancels a FakeEngine run between phases 22ms
+ ✓ tests/unit/coordinator.test.ts > Coordinator > marks a failed run and keeps earlier results 4ms
+ ✓ tests/unit/coordinator.test.ts > Coordinator > fails a run whose records the engine reads differently from the record table 4ms
+ ✓ tests/unit/coordinator.test.ts > Coordinator > fails a run with the reason when storage runs out, keeps earlier results and recovers 17ms
+ ✓ tests/unit/coordinator.test.ts > Coordinator > publishes the temporary storage in use 6ms
+ ✓ tests/unit/coordinator.test.ts > Coordinator > refuses BLASTX as ABI v2 does until session SX 0ms
+ ✓ tests/unit/coordinator.test.ts > Coordinator > does not queue a request that the engine rejects 1ms
+ ✓ tests/unit/coordinator.test.ts > Coordinator > exports a completed output byte for byte under a descriptive name 6ms
+ ✓ tests/unit/engine-gateway.test.ts > WasmEngine > starts a generation, relays phases and resolves with the runtime of the search 13ms
+ ✓ tests/unit/engine-gateway.test.ts > WasmEngine > runs the next search in the same generation 5ms
+ ✓ tests/unit/engine-gateway.test.ts > WasmEngine > cancels by ending the worker; the next search starts a new generation and late messages are dropped 4ms
+ ✓ tests/unit/engine-gateway.test.ts > WasmEngine > ignores a cancel of another or a finished run 2ms
+ ✓ tests/unit/engine-gateway.test.ts > WasmEngine > renews the runtime before the next search when the instance ran too many searches 5ms
+ ✓ tests/unit/engine-gateway.test.ts > WasmEngine > renews the runtime when the memory of the instance reached the high-water mark 2ms
+ ✓ tests/unit/engine-gateway.test.ts > WasmEngine > keeps the name, role and detail of an InputMismatchError 3ms
+ ✓ tests/unit/engine-gateway.test.ts > WasmEngine > ends the runtime after an error that stopped the instance 2ms
+ ✓ tests/unit/engine-gateway.test.ts > WasmEngine > fails the search when the worker fails, and starts a new generation for the next one 5ms
+ ✓ tests/unit/engine-gateway.test.ts > WasmEngine > fails the search when a thread worker reports a fault 30ms
+ ✓ tests/unit/engine-gateway.test.ts > WasmEngine > runs one search at a time 1ms
+ ✓ tests/unit/engine-runtime.test.ts > chooseThreads > keeps an explicit request 2ms
+ ✓ tests/unit/engine-runtime.test.ts > chooseThreads > runs Auto serially below the size threshold 0ms
+ ✓ tests/unit/engine-runtime.test.ts > chooseThreads > runs Auto with up to half the logical processors from the threshold on, within the maximum 0ms
+ ✓ tests/unit/engine-runtime.test.ts > renewalReason > renews at the high-water mark of the linear memory 0ms
+ ✓ tests/unit/engine-runtime.test.ts > renewalReason > renews after a maximum number of searches when one is set, and by default never for the count 0ms
+ ✓ tests/unit/engine-runtime.test.ts > inspectReactor > finds a serial reactor and its own memory 3ms
+ ✓ tests/unit/engine-runtime.test.ts > inspectReactor > finds a threaded reactor and the maximum of the shared memory it imports 1ms
+ ✓ tests/unit/engine-runtime.test.ts > inspectReactor > rejects a module without every ABI v2 export 1ms
+ ✓ tests/unit/engine-runtime.test.ts > inspectReactor > rejects a threaded module without a shared memory with a maximum, or without wasi_thread_start 1ms
+ ✓ tests/unit/engine-runtime.test.ts > inspectReactor > rejects bytes that are not a WebAssembly module 1ms
+ ✓ tests/unit/engine-runtime.test.ts > stopMessage > reports the last line that the engine wrote, and the trap 1ms
+ ✓ tests/unit/engine-runtime.test.ts > stopMessage > says when the engine ran out of memory 0ms
+ ✓ tests/unit/engine-runtime.test.ts > ReactorAbi > joins a response that the engine sends in several chunks (1 MiB each in the adapter) 1ms
+ ✓ tests/unit/engine-runtime.test.ts > ReactorAbi > releases a registered handle whose response cannot be read 1ms
+ ✓ tests/unit/engine-runtime.test.ts > the built reactors > are the two reactor kinds, with the shared memory of the certified threaded build (plan TD-7) 8ms
+ ✓ tests/unit/engine-runtime.test.ts > responses of more than 1 MiB from the serial reactor > scans and registers thousands of records 251ms
+ ✓ tests/unit/contracts.test.ts > BlockStore contract: memory > write and seal: a block reads back exactly the bytes appended to it 3ms
+ ✓ tests/unit/contracts.test.ts > BlockStore contract: memory > read: any range of a sealed block, and nothing beyond its end 1ms
+ ✓ tests/unit/contracts.test.ts > BlockStore contract: memory > write: the store keeps a copy, so the caller may reuse its buffer 0ms
+ ✓ tests/unit/contracts.test.ts > BlockStore contract: memory > staging: a block cannot be read before it is sealed 0ms
+ ✓ tests/unit/contracts.test.ts > BlockStore contract: memory > seal: a sealed block takes no more bytes and cannot be sealed again 0ms
+ ✓ tests/unit/contracts.test.ts > BlockStore contract: memory > discard: a staged or sealed block disappears and its bytes are freed 0ms
+ ✓ tests/unit/contracts.test.ts > BlockStore contract: memory > create: a path that exists cannot be created again 0ms
+ ✓ tests/unit/contracts.test.ts > BlockStore contract: memory > removeAll: removes one directory, sealed or not, and leaves the rest 0ms
+ ✓ tests/unit/contracts.test.ts > BlockStore contract: memory > paths: empty and relative names are rejected 1ms
+ ✓ tests/unit/contracts.test.ts > BlockStore contract: memory > an empty block can be sealed and read 0ms
+ ✓ tests/unit/contracts.test.ts > BlockStore contract: memory > a large block: 48 MiB in 1 MiB appends reads back unchanged 500ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan: one record with regular lines (LF) 2ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan: CRLF line ends 0ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan: lines of different lengths 0ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan: several records, the last without a final newline 0ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan: a blank line inside a sequence 0ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan: interior white space belongs to the sequence, trailing white space does not 0ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan: a non-ASCII header 0ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan: residues keep their case 0ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan: a record without residues 0ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan: an empty record ends the input (bio stops reading there) 0ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan: a header line without a newline at the end of the input 0ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan: an empty input has no records 0ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan: a U+FEFF at the start of a header is part of the ID 0ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan: bytes after the empty record that ends the input are not read 0ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan: a long record (4 checkpoints) with lines of 60 and 61 residues 183ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan: a long record with regular 80-residue lines 189ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan: the parser's error for text before the first header 1ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan: the parser's error for a blank line before the first header 0ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan: the parser's error for white space only 0ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan: the parser's error for a first line that is not a header, before bytes that are not UTF-8 0ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan: the parser's error for bytes that are not UTF-8 0ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan: a multi-byte character split across chunks 0ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan: parser kind 1 is refused until SX 0ms
+ ✓ tests/unit/contracts.test.ts > BlockStore contract: memory > storage full: an append fails with StorageFullError, the block can only be discarded, and sealed blocks stay readable 7ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan: one record with regular lines (LF) 7ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan: CRLF line ends 1ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan: lines of different lengths 0ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan: several records, the last without a final newline 1ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan: a blank line inside a sequence 0ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan: interior white space belongs to the sequence, trailing white space does not 0ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan: a non-ASCII header 0ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan: residues keep their case 0ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan: a record without residues 0ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan: an empty record ends the input (bio stops reading there) 0ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan: a header line without a newline at the end of the input 0ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan: an empty input has no records 0ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan: a U+FEFF at the start of a header is part of the ID 0ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan: bytes after the empty record that ends the input are not read 0ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan: a long record (4 checkpoints) with lines of 60 and 61 residues 265ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan: a long record with regular 80-residue lines 198ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan: the parser's error for text before the first header 0ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan: the parser's error for a blank line before the first header 0ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan: the parser's error for white space only 0ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan: the parser's error for a first line that is not a header, before bytes that are not UTF-8 0ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan: the parser's error for bytes that are not UTF-8 0ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan: a multi-byte character split across chunks 0ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan: parser kind 1 is refused until SX 0ms
+ ✓ tests/unit/contracts.test.ts > Run output contract: DataService with the memory store, in one thread > every stream arrives in order and the run commits 23ms
+ ✓ tests/unit/contracts.test.ts > Run output contract: DataService with the memory store, in one thread > many small chunks and one large chunk arrive unchanged 104ms
+ ✓ tests/unit/contracts.test.ts > Run output contract: DataService with the memory store, in one thread > a run without output commits with empty outputs 2ms
+ ✓ tests/unit/contracts.test.ts > Run output contract: DataService with the memory store, in one thread > staging: a run cannot be read before it is committed, and the commit waits for end 301ms
+ ✓ tests/unit/contracts.test.ts > Run output contract: DataService with the memory store, in one thread > an end whose totals disagree fails the commit and discards the run 1ms
+ ✓ tests/unit/contracts.test.ts > Run output contract: DataService with the memory store, in one thread > a message outside the protocol fails the commit 0ms
+ ✓ tests/unit/contracts.test.ts > Run output contract: DataService with the memory store, in one thread > discard drops a staged run and ignores its late chunks 302ms
+ ✓ tests/unit/contracts.test.ts > Run output contract: DataService with the memory store, in one thread > a committed run is kept by discard and removed by delete 1ms
+ ✓ tests/unit/contracts.test.ts > Run output contract: DataService with the memory store, in one thread > two staged runs keep their outputs apart 1ms
+ ✓ tests/unit/contracts.test.ts > Run output contract: DataService with the memory store, in one thread > the writer refuses to write after end 0ms
+ ✓ tests/unit/contracts.test.ts > Run output contract: DataService with the memory store, in one thread > storage full: the run fails with the reason, and committed runs stay readable 8ms
+ ✓ tests/unit/contracts.test.ts > Engine input contract: FakeEngine > register: the run proceeds when the record tables agree 17ms
+ ✓ tests/unit/contracts.test.ts > Engine input contract: FakeEngine > register: a query record with another ID stops the run before any output 303ms
+ ✓ tests/unit/contracts.test.ts > Engine input contract: FakeEngine > register: a subject record with another length stops the run before any output 303ms
+ ✓ tests/unit/contracts.test.ts > Engine input contract: FakeEngine > register: a missing record stops the run before any output 303ms
+ ✓ tests/unit/layers.test.ts > layer boundaries > src/domain/probe.ts may not import ../application/coordinator 13ms
+ ✓ tests/unit/layers.test.ts > layer boundaries > src/domain/probe.ts may not import ../ports/engine 8ms
+ ✓ tests/unit/layers.test.ts > layer boundaries > src/domain/probe.ts may not import ../infra/fake/fake-engine 5ms
+ ✓ tests/unit/layers.test.ts > layer boundaries > src/domain/probe.ts may not import vue 4ms
+ ✓ tests/unit/layers.test.ts > layer boundaries > src/ports/probe.ts may not import ../application/coordinator 22ms
+ ✓ tests/unit/layers.test.ts > layer boundaries > src/ports/probe.ts may not import ../infra/fake/fake-engine 3ms
+ ✓ tests/unit/layers.test.ts > layer boundaries > src/application/probe.ts may not import ../infra/fake/fake-engine 11ms
+ ✓ tests/unit/layers.test.ts > layer boundaries > src/application/probe.ts may not import ../ui/useStore 6ms
+ ✓ tests/unit/layers.test.ts > layer boundaries > src/application/probe.ts may not import vue 3ms
+ ✓ tests/unit/layers.test.ts > layer boundaries > src/infra/probe.ts may not import ../application/coordinator 9ms
+ ✓ tests/unit/layers.test.ts > layer boundaries > src/infra/probe.ts may not import vue 2ms
+ ✓ tests/unit/layers.test.ts > layer boundaries > src/ui/probe.ts may not import ../infra/fake/fake-engine 9ms
+ ✓ tests/unit/layers.test.ts > layer boundaries > src/ports/probe.ts may import ../domain/programs 2ms
+ ✓ tests/unit/layers.test.ts > layer boundaries > src/application/probe.ts may import ../ports/engine 2ms
+ ✓ tests/unit/layers.test.ts > layer boundaries > src/infra/probe.ts may import ../ports/engine 2ms
+ ✓ tests/unit/layers.test.ts > layer boundaries > src/ui/probe.ts may import ../application/coordinator 4ms
+ ✓ tests/unit/layers.test.ts > layer boundaries > src/ui/probe.ts may import ../domain/argv 3ms
+ ✓ tests/unit/layers.test.ts > layer boundaries > src/composition.ts may import ./infra/fake/fake-engine 15ms
+
+ Test Files  12 passed (12)
+      Tests  183 passed (183)
+   Start at  13:43:47
+   Duration  28.99s (tests 53%, transform 31%, import 15%, worker 1%)
+
+  Transform  transforming modules took 16.13s · 31% of tracked time, re-done on every run
+             persist transforms across runs with fsModuleCache: true
+             learn more: https://vitest.dev/guide/improving-performance#caching-between-reruns
+

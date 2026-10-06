@@ -6,6 +6,8 @@
 // UTF-8 line by line (only the lines that bio reads), and it always reports the
 // checkpoints layout.
 import { recordKey, type IndexedRecord, type RecordKey } from '../../domain/dataset';
+import type { InputRole, ProgramId } from '../../domain/programs';
+import type { InputCheck, InputChecker } from '../../ports/input-check';
 import type { RecordScanner, ScanResponse } from '../../ports/scan';
 import { concatBytes } from '../bytes';
 
@@ -132,3 +134,29 @@ function isAsciiWhitespace(byte: number): boolean {
   return byte === 0x20 || (byte >= 0x09 && byte <= 0x0d);
 }
 
+
+/**
+ * The input check of the development build (ports/input-check.ts). It is not the engine's:
+ * it accepts what the FakeScanner reads, except a record with `!` in its sequence, which
+ * it refuses with a message shaped as the engine's (the record's number and ID), so that
+ * the screen's handling of a refused record can be tried without the engine.
+ */
+export class FakeInputChecker implements InputChecker {
+  async check(program: ProgramId, role: InputRole, bytes: Uint8Array): Promise<InputCheck> {
+    if (program === 'blastx') return { ok: false, message: 'blastx is not available in LOSAT Web ABI v2 yet' };
+    let records: IndexedRecord[];
+    try {
+      records = fakeScan(bytes);
+    } catch (error) {
+      return { ok: false, message: `failed to read ${role} FASTA: ${error instanceof Error ? error.message : String(error)}` };
+    }
+    const refused = records.find((record) => (record.residue_counts['!'] ?? 0) > 0);
+    if (refused !== undefined) {
+      return {
+        ok: false,
+        message: `${role} record ${refused.index + 1} (${refused.id}) has '!' in its sequence (FAKE ENGINE check, not LOSAT's)`,
+      };
+    }
+    return { ok: true, records: records.map(recordKey) };
+  }
+}

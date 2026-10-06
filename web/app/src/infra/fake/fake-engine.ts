@@ -16,7 +16,9 @@ import {
   type ValidationResult,
 } from '../../ports/engine';
 import { DIAGNOSTICS_STREAM, HITS_STREAM } from '../../ports/run-output';
+import { toProgramDescription } from '../reactor/control';
 import { RunOutputWriter } from '../run-output/writer';
+import DESCRIBE from './describe.json';
 import { fakeRecordKeys } from './fake-fasta';
 
 export const FAKE_MARKER = 'FAKE ENGINE OUTPUT - not a LOSAT search result';
@@ -34,8 +36,16 @@ export class FakeEngine implements EngineGateway {
     this.phaseDelayMs = options.phaseDelayMs ?? 0;
   }
 
+  /**
+   * The engine's *describe* of the program, copied into describe.json (a file snapshot of
+   * tests/unit/engine-runtime.test.ts: compared with the reactor when one is built, and
+   * written again with `vitest -u`), so that the search form has the engine's options,
+   * defaults and help without the engine.
+   */
   async describe(program: ProgramId): Promise<ProgramDescription> {
-    return { program, formats: OUTPUT_FORMATS, parameters: [] };
+    const json = (DESCRIBE as Readonly<Record<string, unknown>>)[program];
+    if (json === undefined) return { program, formats: OUTPUT_FORMATS, parameters: [] };
+    return toProgramDescription(json);
   }
 
   async validate(argv: readonly string[]): Promise<ValidationResult> {

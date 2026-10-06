@@ -1,0 +1,14 @@
+commit: 3669ad28fbe38aeec292a5956efa9305d95f386d
+branch: feature/losat-web-gui-app
+uncommitted files under web/app: 0
+node: v26.8.2
+npm: 11.19.1
+playwright: Version 1.61.1
+playwright browsers: chromium-1228 chromium_headless_shell-1228 ffmpeg-1011 firefox-1532 webkit-2311 
+webkit launcher: /home/kawato/.cache/losat-web-gui-target/app-s09-webkit-deps/pw_run.sh
+os: Linux 5.15.167.4-microsoft-standard-WSL2 x86_64
+processors: 32
+native: /home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT sha256 213b3c644f3fc5c00663b13eb76511f09f2f3f6d63f40a3156eabe26d2646a21
+reactors: /home/kawato/.cache/losat-web-gui-target/app-s09-reactors-dfa65/out
+8c3ba33adca05e673d942a04fbecacdad23388dcbc937f05b8e8b70713448a54  losat-web-serial.wasm
+a83376643e459cb14ab0b6bc5d90b5c3b733eeb4e45c7099e095e1c9b2e833c8  losat-web-threads.wasm

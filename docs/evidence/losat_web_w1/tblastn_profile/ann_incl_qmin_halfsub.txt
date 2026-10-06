@@ -1,0 +1,59 @@
+--------------------------------------------------------------------------------
+Profile data file 'cg_qmin_halfsub.out' (creator: callgrind-3.22.0)
+--------------------------------------------------------------------------------
+I1 cache: 
+D1 cache: 
+LL cache: 
+Timerange: Basic block 0 - 30278150
+Trigger: Program termination
+Profiled target:  /home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT tblastn -task tblastn -query /tmp/claude-1000/-mnt-c-Users-genom-GitHub-LOSAT/e09c9cb4-4139-44a0-a544-40af9a99d58f/scratchpad/tblastn-profile/qmin.faa -subject /tmp/claude-1000/-mnt-c-Users-genom-GitHub-LOSAT/e09c9cb4-4139-44a0-a544-40af9a99d58f/scratchpad/tblastn-profile/subject_half.fasta -outfmt 6 -num_threads 1 (PID 1059624, part 1)
+Events recorded:  Ir
+Events shown:     Ir
+Event sort order: Ir
+Thresholds:       99
+Include dirs:     
+User annotated:   
+Auto-annotation:  on
+
+--------------------------------------------------------------------------------
+Ir                   
+--------------------------------------------------------------------------------
+121,090,295 (100.0%)  PROGRAM TOTALS
+
+--------------------------------------------------------------------------------
+Ir                    file:function
+--------------------------------------------------------------------------------
+121,090,295 (100.0%)  ???:0x000000000001f540 [/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2]
+120,726,271 (99.70%)  ???:(below main) [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+120,726,259 (99.70%)  ./csu/../csu/libc-start.c:__libc_start_main@@GLIBC_2.34 [/usr/lib/x86_64-linux-gnu/libc.so.6]
+120,726,076 (99.70%)  ./csu/../sysdeps/nptl/libc_start_call_main.h:(below main) [/usr/lib/x86_64-linux-gnu/libc.so.6]
+120,724,023 (99.70%)  ???:main [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+120,613,654 (99.61%)  ???:std::sys::backtrace::__rust_begin_short_backtrace [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+120,613,650 (99.61%)  ???:LOSAT::main [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+120,206,027 (99.27%)  ???:LOSAT::algorithm::tblastn::args::TblastnArgs::run [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+118,391,240 (97.77%)  ???:LOSAT::algorithm::tblastn::stage_d_pipeline::run_local_for_report_threads::{{closure}} [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+118,390,834 (97.77%)  ???:LOSAT::algorithm::tblastn::stage_d_pipeline::run_local_search_with_pool [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+105,824,598 (87.39%)  ???:LOSAT::algorithm::tblastn::stage_d_pipeline::run_local_search_with_pool::{{closure}} [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+ 76,737,693 (63.37%)  ???:LOSAT::algorithm::tblastx::translation::generate_frames [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+ 74,656,254 (61.65%)  ???:LOSAT::algorithm::tblastx::translation::translate_sequence [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+ 66,332,525 (54.78%)  ???:LOSAT::utils::genetic_code::GeneticCode::get [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+ 16,757,473 (13.84%)  ???:LOSAT::algorithm::tblastx::lookup::backbone::build_ncbi_lookup_for_profile [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+ 11,573,423 ( 9.56%)  ???:LOSAT::stats::karlin_calc::compute_karlin_params_ungapped [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+  7,814,526 ( 6.45%)  ???:LOSAT::algorithm::tblastx::lookup::backbone::ideal_karlin_params_for_matrix [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+  7,697,263 ( 6.36%)  ???:<core::iter::adapters::GenericShunt<I,R> as core::iter::traits::iterator::Iterator>::next [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+  5,048,480 ( 4.17%)  ???:LOSAT::algorithm::tblastx::lookup::backbone::build_lookup_from_prepared [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+  3,996,562 ( 3.30%)  ???:LOSAT::algorithm::tblastn::stage_d_kappa_params::local_kappa_redo_params [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+  3,920,172 ( 3.24%)  ???:LOSAT::core::blast_stat::composition::compute_blosum62_ideal_karlin_params [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+  3,894,305 ( 3.22%)  ???:LOSAT::algorithm::tblastx::lookup::backbone::prepare_lookup_query [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+  2,500,731 ( 2.07%)  ???:LOSAT::core::blast_encoding::resolve_ncbi4na_to_ncbi2na [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+  1,594,006 ( 1.32%)  ???:LOSAT::algorithm::tblastn::args::TblastnArgs::run::{{closure}} [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+  1,550,455 ( 1.28%)  ???:core::iter::adapters::try_process [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+  1,549,476 ( 1.28%)  ???:<bio::io::fasta::Records<B> as core::iter::traits::iterator::Iterator>::next [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+  1,099,328 ( 0.91%)  ???:std::io::BufRead::read_line [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+
+--------------------------------------------------------------------------------
+The following files chosen for auto-annotation could not be found:
+--------------------------------------------------------------------------------
+  ./csu/../csu/libc-start.c
+  ./csu/../sysdeps/nptl/libc_start_call_main.h
+

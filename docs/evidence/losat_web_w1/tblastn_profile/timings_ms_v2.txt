@@ -1,0 +1,4 @@
+full_fullsub: wall median 82.5 ms (min 74.9, max 92.4); cpu(user+sys) median 85.6 ms  n=25 interleaved, inputs on scratch fs
+qmin_fullsub: wall median 47.7 ms (min 41.4, max 53.0); cpu(user+sys) median 49.7 ms  n=25 interleaved, inputs on scratch fs
+full_halfsub: wall median 56.6 ms (min 47.3, max 62.5); cpu(user+sys) median 59.0 ms  n=25 interleaved, inputs on scratch fs
+qmin_halfsub: wall median 27.8 ms (min 21.7, max 31.0); cpu(user+sys) median 28.8 ms  n=25 interleaved, inputs on scratch fs

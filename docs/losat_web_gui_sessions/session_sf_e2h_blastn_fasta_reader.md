@@ -22,7 +22,7 @@ NCBI の経路（固定 commit 598d8ae6 のソースで確かめ、`AUTHORITY.md
 - 中身の無いレコード：`c++/src/algo/blast/api/blast_setup_cxx.cpp:485-650`（`SetupQueries_OMF`、「Sequence contains no data」）、`:733-800`（`SetupSubjects_OMF`、「Subject sequence contains no data」）、`blast_setup.hpp:190-198`、`c++/src/algo/blast/core/blast_message.c:216`。
 - 読んだ結果を使う報告：`c++/src/objtools/align_format/tabular.cpp:474-504`（`s_ReplaceLocalId`：題の最初の `' '` までの語、題が無ければ `Query_N`・`Subject_N`）、outfmt 0 の `Query=`・説明の一覧・subject の見出し（`showdefline.cpp`、`showalign.cpp`、`create_defline.cpp`。byte 単位の折り返し、E2c の `AUTHORITY.md` §E・§N）、outfmt 7 の `# Query:`。
 
-0. **始める前に**：規則 2 の確認（アプリ側の W1・W3 は `57b4b4330` で merge 済み）。下の「保守者に確かめること」を推奨の案で決めて記録する（範囲を変えたら、計画 §7 の SF の行も直す）。変更前の成果物（下の「S11 からの引き継ぎ」）を `~/.cache/losat-web-gui-target/sf/bin/` に写し、capture（`docs/evidence/losat_web_e1a/capture_outputs.py`）を取る。
+0. **始める前に**：規則 2 の確認（アプリ側の W1・W3 は `57b4b4330` で merge 済み）。下の「保守者の判断」（計画 DW-23）に従う。変更前の成果物（下の「S11 からの引き継ぎ」）を `~/.cache/losat-web-gui-target/sf/bin/` に写し、capture（`docs/evidence/losat_web_e1a/capture_outputs.py`）を取る。
 1. **権威の記録**（`docs/evidence/losat_web_e2h/AUTHORITY.md`）：program（BLASTN・TBLASTX・TBLASTN・BLASTP）× 役割（query・subject）× 分子（核酸・蛋白）ごとに、上の経路の旗、各分岐がレコード・局所 ID・題・残基・mask・警告・誤りに何をするか、その時点（subject は引数の処理の中で prolog の前、query は batch ごとに prolog と前の batch の報告の後。E2g の T9 と同じ考え方）、文言と終了コードを、ソースと 2.17.0 の実行で記録する。
 2. **棚卸し**（計画 DW-12、`docs/evidence/losat_web_e2h/INVENTORY.tsv`）：E2d の方式（`docs/evidence/losat_web_e2d/inventory/COMMON.md`、範囲ごとの `_brief.md`・`_notes.md`）で、上の経路の関数を分岐ごとに表にする。E2g の A-141〜A-202・B-061・C-023 と、E2b・E2e の読み込みの行を出発点にし、`status_before`（今の LOSAT）と、BLASTX の移植の対応する箇所が忠実かの列を持つ。範囲の例：LR 行の読み込みと流れ（`CStreamLineReader`、`IsIStreamEmpty`、標準入力とパイプ）、RD レコード（`ReadOneSeq` から `AssembleSeq` まで、警告）、BI blastinput の層（旗、data loader と Seq-id の経路、batch と誤りの時点、中身の無いレコード）、RP 報告（ID、題の byte、折り返し）、AD アダプタと ABI。読み取り専用の sonnet の agent に範囲ごとに分けてよい。
 3. **一括の移植**：未移植と差のある移植を、NCBI の関数ごとに簡略化せずに transpile する。移植した箇所の直上に NCBI のファイル・行と断片を書く。読み込み器は共有の新しい module（例：`LOSAT/src/blastinput/fasta_reader.rs`）に置く。BLASTX の移植は参照し写してよいが、BLASTX の関数は変えない。レコードの型は題の byte、局所 ID、残基、mask（`x_OpenMask`・`x_CloseMask` と同じ区間）、警告（行の番号）を持ち、4 つの program の `run_local` と入口、`seq_range.rs`、アダプタの `register` がこの型を使う（計画 TD-2 の 1 本の入口を保つ）。移植で要らなくなった拒否（上の背景の一覧）は消す。残す拒否は理由とともに明示的な拒否にし、`not supported by LOSAT's <PROGRAM>` を含む文言にする（data loader の Seq-id の経路、範囲の外の `-parse_deflines`、保守者の判断で残すもの）。`.ncbirc` の `DATA_LOADERS`・`BLASTDB_NUCL_DATA_LOADER`・`BLASTDB_PROT_DATA_LOADER` の扱い（`ncbi_environment.rs`）は、Seq-id の経路を変えるので見直す。`BLASTINPUT_GEN_DELTA_SEQ`（E2g の A-148 では出力が変わらない）は gap の行を移植した後に確かめ直す。速度のための LOSAT の方式（行の分け方、表引き）は、出力が同じなら使ってよい。
@@ -35,9 +35,9 @@ NCBI の経路（固定 commit 598d8ae6 のソースで確かめ、`AUTHORITY.md
 
 完了条件は計画 §7 の SF の行による。記録は `docs/evidence/losat_web_e2h/`（`README.md`、`AUTHORITY.md`、`INVENTORY.tsv`、`evidence.sha256`、run の directory）。1 セッションで終わらなければ、核酸の入力を先に終え、残り（蛋白の入力など）を SFb とし、README の表に行を足す。
 
-## 保守者に確かめること
+## 保守者の判断
 
-推奨の案で進め、ゲート記録に書く（保守者の常の指示）。NCBI の不具合に当たる挙動は `PD-LOSAT-NCBI-DEFECTS` の規則で扱い、まとめて諮る。
+2026-10-06 に保守者が、次の 5 つとも推奨の案に決めた（計画 DW-23）。別案は記録のために残す。作業の中で新しく生じた判断は推奨の案で進めてゲート記録に書き、NCBI の不具合に当たる挙動は `PD-LOSAT-NCBI-DEFECTS` の規則で扱い、まとめて諮る。
 
 1. **範囲**：DW-13 は BLASTN（TD-12）を挙げるが、同じ部品と同じ種類の拒否を TBLASTX・TBLASTN・BLASTP も使う。推奨：4 program の全入力（BLASTX は SX）。NCBI では 1 つの経路で、核酸と蛋白は旗が違うだけなので、まとめて棚卸しし移植する（DW-12）。別案：核酸の入力（BLASTN、TBLASTX、TBLASTN の subject）だけにし、蛋白の入力の拒否は残す。
 2. **Seq-id として読まれる最初の行**：NCBI は data loader で GenBank や BLAST DB から配列を取り寄せ、見つからなければそのレコードを黙って飛ばす。推奨：明示的な拒否（LOSAT はネットワークも BLAST DB も使わない）。どの行が Seq-id として試されるかは `CSeq_id` の解析（`Seq_id.cpp`）で決め、忠実に移せない部分は広めに拒否する（配列だけの行は oracle のとおり配列として読む。`DATA_LOADERS` が `none` なら NCBI と同じく配列として読む）。

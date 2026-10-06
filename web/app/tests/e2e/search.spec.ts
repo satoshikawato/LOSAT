@@ -470,7 +470,16 @@ test.describe('leaving and returning', () => {
 
 test('narrow screens put the inputs and the queue one under the other, without horizontal scrolling', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await paste(page, 'query', '>q\nACGTACGTACGTACGTAC\n');
+  await paste(page, 'query', '>NZ_CP006932.1 first\nACGTACGTACGTACGTAC\n>NZ_CP006932.1 second\nACGT!ACGT\n');
+  // A record row puts its tags on a second line: the ID and the "refused" tag stay in the list.
+  await expect(page.getByTestId('query-source-0-check')).toHaveAttribute('data-check', 'refused');
+  await showRecords(page, 'query');
+  const list = (await page.getByTestId('query-source-0-records').locator('.record-viewport').boundingBox())!;
+  const tag = (await page.getByTestId('query-source-0-refused-tag').boundingBox())!;
+  expect(tag.x + tag.width).toBeLessThanOrEqual(list.x + list.width);
+  for (const id of await page.getByTestId('query-source-0-records').locator('.record-id').all()) {
+    expect(await id.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  }
   const query = (await page.getByTestId('query-panel').boundingBox())!;
   const subject = (await page.getByTestId('subject-panel').boundingBox())!;
   const queue = (await page.getByTestId('queue').boundingBox())!;

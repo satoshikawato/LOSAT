@@ -372,8 +372,26 @@ textarea {
   font-variant-numeric: tabular-nums;
 }
 
-.record-row .badge {
+.record-tags {
+  display: flex;
+  gap: 6px;
   flex: 0 0 auto;
+}
+
+.record-tags:empty {
+  display: none;
+}
+
+/* Narrow screens: the tags go to a second line under the ID (RecordList.vue). */
+.record-row.two-lines {
+  flex-wrap: wrap;
+  align-content: center;
+  row-gap: 4px;
+}
+
+.record-row.two-lines .record-tags {
+  flex-basis: 100%;
+  padding-left: 28px;
 }
 
 .badge {

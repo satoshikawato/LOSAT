@@ -1,0 +1,54 @@
+
+> losat-web@0.0.0 check
+> npm run typecheck && npm run lint && npm run test && npm run build
+
+
+> losat-web@0.0.0 typecheck
+> vue-tsc --noEmit
+
+
+> losat-web@0.0.0 lint
+> eslint .
+
+
+> losat-web@0.0.0 test
+> vitest run
+
+
+ RUN  v5.0.2 /mnt/c/Users/genom/GitHub/LOSAT-web-gui-app/web/app
+
+
+ Test Files  15 passed (15)
+      Tests  277 passed | 28 skipped (305)
+   Start at  11:54:28
+   Duration  59.02s (transform 54%, tests 30%, import 15%, worker 1%)
+
+  Transform  transforming modules took 97.42s · 54% of tracked time, re-done on every run
+             persist transforms across runs with fsModuleCache: true
+             learn more: https://vitest.dev/guide/improving-performance#caching-between-reruns
+
+
+> losat-web@0.0.0 build
+> vite build
+
+vite v8.3.1 building client environment for production...
+transforming...
+✓ 79 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                          0.39 kB │ gzip:  0.26 kB
+dist/assets/thread-worker-BFsv56lD.js   17.92 kB
+dist/assets/data-worker-DmgCVKcB.js     19.41 kB
+dist/assets/engine-worker-uOxZ35d8.js   30.17 kB
+dist/assets/index-D5vTptmd.css           8.26 kB │ gzip:  2.38 kB
+dist/assets/index-Bg4SUlUK.js          144.04 kB │ gzip: 49.92 kB
+
+✓ built in 4.36s
+[33m[PLUGIN_TIMINGS] [0mJavaScript callbacks ran for 3.7s of this 4.3s build (86%).
+The slowest callbacks, timed inside each callback (the wait before a callback starts is excluded, the time it awaits is included):
+  - plugin vite:css-post renderChunk (36%, 1.6s, 1 call)
+Additional callback time came from the callbacks below and from callbacks under 1s.
+1 callback is listed without a time. Its calls overlapped, so the time inside one call includes work from other calls. To find its cost, profile the build with `node --cpu-prof`:
+  - plugin vite:worker-import-meta-url transform (2 calls)
+See https://rolldown.rs/reference/InputOptions.checks#bundlertimings for more details.
+

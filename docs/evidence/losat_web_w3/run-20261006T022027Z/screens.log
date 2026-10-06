@@ -1,0 +1,11 @@
+
+Running 6 tests using 2 workers
+
+  ✓  2 [chromium] › tests/e2e/screens.spec.ts:36:3 › search screen at the phone size (8.8s)
+  ✓  1 [chromium] › tests/e2e/screens.spec.ts:36:3 › search screen at the desktop size (9.5s)
+  ✓  3 [firefox] › tests/e2e/screens.spec.ts:36:3 › search screen at the desktop size (12.1s)
+  ✓  4 [firefox] › tests/e2e/screens.spec.ts:36:3 › search screen at the phone size (12.0s)
+  ✓  6 [webkit] › tests/e2e/screens.spec.ts:36:3 › search screen at the phone size (12.4s)
+  ✓  5 [webkit] › tests/e2e/screens.spec.ts:36:3 › search screen at the desktop size (13.6s)
+
+  6 passed (53.9s)

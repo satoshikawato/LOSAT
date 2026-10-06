@@ -1,0 +1,188 @@
+[
+  {
+    "count": 1000,
+    "bytes": 336786,
+    "samples": [
+      {
+        "indexMs": 106,
+        "indexInApp": 79.18000000000006,
+        "checkInApp": 29.82000000000005,
+        "excludeMs": 856,
+        "recheckInApp": 32.77999999999997,
+        "enqueueMs": 58
+      },
+      {
+        "indexMs": 214,
+        "indexInApp": 100.08000000000004,
+        "checkInApp": 32.24000000000001,
+        "excludeMs": 859,
+        "recheckInApp": 32.42000000000007,
+        "enqueueMs": 49
+      },
+      {
+        "indexMs": 107,
+        "indexInApp": 82.93999999999994,
+        "checkInApp": 29.860000000000014,
+        "excludeMs": 859,
+        "recheckInApp": 33.179999999999836,
+        "enqueueMs": 55
+      }
+    ],
+    "summary": {
+      "indexMs": {
+        "median": 107,
+        "min": 106,
+        "max": 214
+      },
+      "indexInApp": {
+        "median": 82.93999999999994,
+        "min": 79.18000000000006,
+        "max": 100.08000000000004
+      },
+      "checkInApp": {
+        "median": 29.860000000000014,
+        "min": 29.82000000000005,
+        "max": 32.24000000000001
+      },
+      "excludeMs": {
+        "median": 859,
+        "min": 856,
+        "max": 859
+      },
+      "recheckInApp": {
+        "median": 32.77999999999997,
+        "min": 32.42000000000007,
+        "max": 33.179999999999836
+      },
+      "enqueueMs": {
+        "median": 55,
+        "min": 49,
+        "max": 58
+      }
+    }
+  },
+  {
+    "count": 10000,
+    "bytes": 3387788,
+    "samples": [
+      {
+        "indexMs": 1373,
+        "indexInApp": 1072.58,
+        "checkInApp": 327.68000000000006,
+        "excludeMs": 865,
+        "recheckInApp": 340.96000000000004,
+        "enqueueMs": 116
+      },
+      {
+        "indexMs": 1384,
+        "indexInApp": 875.0000000000001,
+        "checkInApp": 312.48,
+        "excludeMs": 874,
+        "recheckInApp": 356.5799999999999,
+        "enqueueMs": 121
+      },
+      {
+        "indexMs": 1382,
+        "indexInApp": 870.54,
+        "checkInApp": 292.9000000000001,
+        "excludeMs": 869,
+        "recheckInApp": 358.9200000000001,
+        "enqueueMs": 121
+      }
+    ],
+    "summary": {
+      "indexMs": {
+        "median": 1382,
+        "min": 1373,
+        "max": 1384
+      },
+      "indexInApp": {
+        "median": 875.0000000000001,
+        "min": 870.54,
+        "max": 1072.58
+      },
+      "checkInApp": {
+        "median": 312.48,
+        "min": 292.9000000000001,
+        "max": 327.68000000000006
+      },
+      "excludeMs": {
+        "median": 869,
+        "min": 865,
+        "max": 874
+      },
+      "recheckInApp": {
+        "median": 356.5799999999999,
+        "min": 340.96000000000004,
+        "max": 358.9200000000001
+      },
+      "enqueueMs": {
+        "median": 121,
+        "min": 116,
+        "max": 121
+      }
+    }
+  },
+  {
+    "count": 100000,
+    "bytes": 34077790,
+    "samples": [
+      {
+        "indexMs": 9605,
+        "indexInApp": 7798.159999999999,
+        "checkInApp": 3077.540000000001,
+        "excludeMs": 3976,
+        "recheckInApp": 3219.5,
+        "enqueueMs": 207
+      },
+      {
+        "indexMs": 9207,
+        "indexInApp": 8078.379999999999,
+        "checkInApp": 3411.779999999999,
+        "excludeMs": 4079,
+        "recheckInApp": 3597.4400000000005,
+        "enqueueMs": 282
+      },
+      {
+        "indexMs": 10532,
+        "indexInApp": 8560.72,
+        "checkInApp": 3058.6800000000003,
+        "excludeMs": 3982,
+        "recheckInApp": 3266.760000000002,
+        "enqueueMs": 224
+      }
+    ],
+    "summary": {
+      "indexMs": {
+        "median": 9605,
+        "min": 9207,
+        "max": 10532
+      },
+      "indexInApp": {
+        "median": 8078.379999999999,
+        "min": 7798.159999999999,
+        "max": 8560.72
+      },
+      "checkInApp": {
+        "median": 3077.540000000001,
+        "min": 3058.6800000000003,
+        "max": 3411.779999999999
+      },
+      "excludeMs": {
+        "median": 3982,
+        "min": 3976,
+        "max": 4079
+      },
+      "recheckInApp": {
+        "median": 3266.760000000002,
+        "min": 3219.5,
+        "max": 3597.4400000000005
+      },
+      "enqueueMs": {
+        "median": 224,
+        "min": 207,
+        "max": 282
+      }
+    }
+  }
+]

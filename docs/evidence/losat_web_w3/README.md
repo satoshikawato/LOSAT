@@ -183,6 +183,7 @@ S08 が TBLASTX の outfmt 0/7 の升目を `checked` にしたので（`docs/we
 4. `docs/web/abi_v2.md`：§5 に stream 2 も 1 MiB ごとに届くこと、§9 に空白だけの入力はアプリが `scan` の誤りで拒否すること（W1 の判断 8。`scan` は変えない）。
 5. W1 の項目 5（`native.ts` の `UNCERTIFIED`）は、このブランチで行った（`bd63f29ad`）。
 6. S16 の指示書：本番の 304 に COOP / COEP / CORP / CSP が付くこと、WebKit / Safari で取消の後の検索が動くことを確かめる。
+7. 別のセッション：エンジン側に作業が無いので、S17 の前に要る SF（E2h、NCBI の `CFastaReader` の移植。DW-13）の[指示書](../../losat_web_gui_sessions/session_sf_e2h_blastn_fasta_reader.md)を書き、計画 §7 に SF の行を足した（エンジン側で、アプリ側の S13 と並行できる。範囲などの保守者に確かめることは、推奨の案で進めて記録する）。下調べで NCBI BLAST+ を一度、Seq-id として読まれる最初の行で実行し、NCBI が GenBank から `AB123456.1` を取り寄せた（ネットワークに出た。研究データは送っていない）。
 
 ## S13 への申し送り
 

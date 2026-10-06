@@ -54,7 +54,7 @@
 | S14 | [抽出と候補](session_s14_w5_extraction_candidates.md) | W5 | 原配列との一致 | 未着手 |
 | S15 | [出力と再現性](session_s15_w6_export_session.md) | W6 | 再計算しない再読込、明示的なつなぎ直し | 未着手 |
 | S16 | [配信の仕上げ](session_s16_w7_delivery.md) | W7 | V-OFF・V-PRIV、プレビューでの隔離 | 未着手 |
-| SF | BLASTN の FASTA の読み方（`CFastaReader` の移植） | E2h | NCBI の `CFastaReader` の経路の関数の移植とアダプタの索引の走査で、TD-12 の拒否をなくす（DW-13） | 未着手（S17 の前。指示書は S07+++b の後に作る） |
+| SF | [BLASTN の FASTA の読み方（`CFastaReader` の移植）](session_sf_e2h_blastn_fasta_reader.md) | E2h | NCBI の `CFastaReader` の経路の関数の移植とアダプタの索引の走査で、TD-12 の拒否をなくす（DW-13。推奨の範囲は TBLASTX・TBLASTN・BLASTP の同じ種類の拒否を含む） | 未着手（S17 の前。エンジン側で、アプリ側の S13 と並行できる） |
 | SX | [BLASTX の統合](session_sx_blastx_integration.md)（条件付き） | SX | LOSATX の v0.2.0 の認証が `main` に入った後の最初の区切りで実施。S17 の前に必ず終える | 条件待ち |
 | S17 | [公開判定](session_s17_g_release_decision.md) | G | 初期の要求に未達が無い | 未着手 |
 

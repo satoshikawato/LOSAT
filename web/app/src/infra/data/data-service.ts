@@ -130,6 +130,12 @@ export class DataService implements DataGateway {
   }
 
   async buildRunInput(revisionIds: readonly string[]): Promise<RunInput> {
+    const { bytes, records } = await this.runInputBytes(revisionIds);
+    return { bytes, sha256: await this.deps.digest(bytes), records };
+  }
+
+  /** The bytes and record keys of a run input, without its SHA-256. */
+  private async runInputBytes(revisionIds: readonly string[]): Promise<Omit<RunInput, 'sha256'>> {
     if (revisionIds.length === 0) throw new Error('a run input needs at least one dataset revision');
     const parts: Uint8Array[] = [];
     const records: RecordKey[] = [];
@@ -149,14 +155,14 @@ export class DataService implements DataGateway {
         parts.push(NEWLINE);
       }
       if (bytes.length > 0) parts.push(bytes);
-      records.push(...included.map(recordKey));
+      // One by one: spreading a large table into push() overflows the call stack.
+      for (const record of included) records.push(recordKey(record));
     }
-    const bytes = concatBytes(parts);
-    return { bytes, sha256: await this.deps.digest(bytes), records: Object.freeze(records) };
+    return { bytes: concatBytes(parts), records: Object.freeze(records) };
   }
 
   async checkInput(program: ProgramId, role: InputRole, revisionIds: readonly string[]): Promise<InputCheck> {
-    const { bytes } = await this.buildRunInput(revisionIds);
+    const { bytes } = await this.runInputBytes(revisionIds);
     return this.deps.checker.check(program, role, bytes);
   }
 

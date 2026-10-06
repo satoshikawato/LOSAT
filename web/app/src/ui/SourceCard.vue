@@ -28,7 +28,7 @@ const otherKind = computed(
 );
 const otherKindName = computed(() => (kind.value === 'nucleotide' ? 'protein' : 'nucleotide'));
 const programLabel = computed(() => programById(props.state.program).label);
-const title = computed(() => (props.source.origin === 'paste' ? 'Pasted sequences' : props.source.name));
+const title = computed(() => (props.source.origin === 'paste' ? `Pasted sequences (${props.source.name})` : props.source.name));
 /** A pasted text without a defline: the index scan's error for text before the first '>'. */
 const needsDefline = computed(() => {
   const text = props.state[props.role].paste.trimStart();
@@ -95,7 +95,7 @@ const testid = computed(() => `${props.role}-source-${props.index}`);
         </button>
       </div>
       <p v-else-if="source.check?.state === 'error'" class="error" :data-testid="`${testid}-check`" data-check="error">
-        The input could not be checked: {{ source.check.message }}
+        The input could not be checked here ({{ source.check.message }}). The search reads it with the engine again.
       </p>
 
       <p v-if="otherKind > 0" class="warning" :data-testid="`${testid}-kind-warning`">

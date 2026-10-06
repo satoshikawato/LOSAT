@@ -53,14 +53,15 @@ class FakeThreadWorker {
   }
 }
 
-function host(behaviour: Behaviour) {
+/** `readyTimeoutMs` bounds only the cases that fail; a test whose worker must become ready in time raises it. */
+function host(behaviour: Behaviour, readyTimeoutMs = 100) {
   const workers: FakeThreadWorker[] = [];
   const faultChannel = `test-faults-${Math.random()}`;
   const threads = new ThreadHost({
     module: {} as WebAssembly.Module,
     memory: {} as WebAssembly.Memory,
     faultChannel,
-    readyTimeoutMs: 100,
+    readyTimeoutMs,
     startTimeoutMs: 50,
     createWorker: () => {
       const worker = new FakeThreadWorker(behaviour);
@@ -101,7 +102,8 @@ describe('ThreadHost', () => {
   });
 
   it('waits for a thread worker that is being prepared again after its thread returned', async () => {
-    const { threads, workers } = host('ready-and-start');
+    // A Node worker can take more than 100 ms to start while the other test files run.
+    const { threads, workers } = host('ready-and-start', 5_000);
     await threads.prepare(1);
     expect(threads.spawn(1000)).toBe(1);
     expect(threads.spawn(2000)).toBe(2);

@@ -9,7 +9,13 @@ import { FakeEngine } from '../../src/infra/fake/fake-engine';
 import { FakeInputChecker, FakeScanner } from '../../src/infra/fake/fake-fasta';
 import type { ValidationResult } from '../../src/ports/engine';
 
-function setup(options: { validate?: (argv: readonly string[]) => ValidationResult; useCoordinator?: boolean } = {}) {
+function setup(
+  options: {
+    validate?: (argv: readonly string[]) => ValidationResult;
+    useCoordinator?: boolean;
+    checkInput?: DataService['checkInput'];
+  } = {},
+) {
   let token = 0;
   const data = new DataService({
     store: new MemoryBlockStore(),
@@ -19,6 +25,12 @@ function setup(options: { validate?: (argv: readonly string[]) => ValidationResu
     newToken: () => `token-${++token}`,
     cleanup: Promise.resolve({ state: 'done', removedSessions: 0 }),
   });
+  const checks: string[] = [];
+  const checkInput = data.checkInput.bind(data);
+  data.checkInput = async (program, role, revisionIds) => {
+    checks.push(`${program}|${role}|${revisionIds.join(',')}`);
+    return (options.checkInput ?? checkInput)(program, role, revisionIds);
+  };
   const fake = new FakeEngine();
   const validated: Array<readonly string[]> = [];
   const engine = {
@@ -47,7 +59,7 @@ function setup(options: { validate?: (argv: readonly string[]) => ValidationResu
     now: () => 0,
     debounceMs: 0,
   });
-  return { draft, data, requests, validated, coordinator };
+  return { draft, data, requests, validated, coordinator, checks };
 }
 
 const file = (name: string, text: string) => new File([text], name, { type: 'text/plain' });
@@ -215,11 +227,14 @@ describe('SearchDraft submit', () => {
     await draft.idle();
     expect(draft.regionRecord('query')).toBeUndefined();
     expect(draft.regionRecord('subject')?.id).toBe('s');
+    // A role of two records has no region.
     draft.setRegion('query', { start: '2', stop: '5' });
+    expect(draft.region('query')).toBeUndefined();
     draft.setRegion('subject', { start: ' 3', stop: '012 ' });
     expect(draft.parameters()).toEqual([['-subject_loc', '3-12']]);
     draft.setIncluded('query', 'paste', [1], false);
     await draft.idle();
+    draft.setRegion('query', { start: '2', stop: '5' });
     expect(draft.parameters()).toEqual([
       ['-query_loc', '2-5'],
       ['-subject_loc', '3-12'],
@@ -299,5 +314,87 @@ describe('SearchDraft submit', () => {
     expect(runs[0]!.snapshot.group?.groupId).toBe(runs[1]!.snapshot.group?.groupId);
     expect(runs[0]!.snapshot.subject.bytes).toBe(runs[1]!.snapshot.subject.bytes);
     expect(runs.map((run) => run.snapshot.query.name)).toEqual(['q1.fa', 'q2.fa']);
+  });
+
+  it('reports a failure to queue instead of dropping it', async () => {
+    const { draft } = setup({ useCoordinator: true, validate: () => { throw new Error('the Data worker stopped'); } });
+    draft.setPaste('query', '>q\nACGT\n');
+    draft.setPaste('subject', '>s\nACGT\n');
+    const result = await draft.submit();
+    expect(result).toEqual({ ok: false, message: 'The options could not be checked: the Data worker stopped' });
+    expect(draft.state.get()).toMatchObject({ submitting: false, message: { kind: 'error' } });
+  });
+
+  it("maps a subject record that the engine refuses, and reports it in short above the button", async () => {
+    const { draft } = setup();
+    draft.setPaste('query', '>q\nACGT\n');
+    draft.setPaste('subject', '>s1\nACGT\n>s2\nAC!GT\n');
+    await draft.idle();
+    expect(sourceOf(draft, 'subject').check).toMatchObject({ state: 'refused', record: 1 });
+    expect(draft.readiness()).toBe(
+      'Subject (pasted): the engine refuses a record. Exclude it or correct the input to search.',
+    );
+    draft.setIncluded('subject', 'paste', [1], false);
+    await draft.idle();
+    expect(draft.readiness()).toBeUndefined();
+  });
+
+  it('does not let a check that could not run keep the search from the queue', async () => {
+    const { draft, requests } = setup({
+      checkInput: async () => {
+        throw new Error('the engine could not allocate 9 bytes for an input');
+      },
+    });
+    draft.setPaste('query', '>q\nACGT\n');
+    draft.setPaste('subject', '>s\nACGT\n');
+    await draft.idle();
+    expect(sourceOf(draft, 'query').check).toEqual({
+      state: 'error',
+      message: 'the engine could not allocate 9 bytes for an input',
+    });
+    expect(draft.readiness()).toBeUndefined();
+    expect((await draft.submit()).ok).toBe(true);
+    expect(requests).toHaveLength(1);
+  });
+
+  it('checks a selection once: going back to an earlier selection or program uses its verdict', async () => {
+    const { draft, checks } = setup();
+    draft.setPaste('query', '>a\nACGT\n>b\nACGT\n');
+    await draft.idle();
+    draft.setIncluded('query', 'paste', [1], false);
+    await draft.idle();
+    draft.setIncluded('query', 'paste', [1], true);
+    await draft.idle();
+    draft.setProgram('tblastx');
+    await draft.idle();
+    draft.setProgram('blastn');
+    await draft.idle();
+    expect(checks.map((check) => check.split('|').slice(0, 2).join('|'))).toEqual([
+      'blastn|query',
+      'blastn|query',
+      'tblastx|query',
+    ]);
+  });
+
+  it('shows a pasted text as being read at once, before it is indexed', async () => {
+    const { draft } = setup();
+    draft.setPaste('query', '>a\nACGT\n');
+    await draft.idle();
+    draft.setPaste('query', '>b\nACGT\n');
+    expect(sourceOf(draft, 'query')).toMatchObject({ status: 'indexing' });
+    await draft.idle();
+    expect(sourceOf(draft, 'query').base?.records[0]?.id).toBe('b');
+  });
+
+  it("keeps a region with its record: another record leaves it aside", async () => {
+    const { draft } = setup();
+    draft.setPaste('subject', '>s1\nACGTACGTACGTACGTACGT\n');
+    await draft.idle();
+    draft.setRegion('subject', { start: '3', stop: '12' });
+    expect(draft.parameters()).toEqual([['-subject_loc', '3-12']]);
+    draft.setPaste('subject', '>s2\nACGTACGT\n');
+    await draft.idle();
+    expect(draft.region('subject')).toBeUndefined();
+    expect(draft.parameters()).toEqual([]);
   });
 });

@@ -73,22 +73,23 @@ function set(field: ParameterField, value: string | boolean): void {
             <label :for="testid(field)">
               {{ field.label }} <code class="flag">{{ field.flag }}</code>
             </label>
-            <input
-              v-if="field.kind === 'text'"
+            <template v-if="field.kind === 'text'">
+              <input
               :id="testid(field)"
               type="text"
               :inputmode="field.inputMode ?? 'text'"
               autocomplete="off"
               spellcheck="false"
               :value="text(field)"
-              :placeholder="option(field)?.defaultValue ?? 'default'"
+              :placeholder="option(field)?.defaultValue === undefined ? 'default' : `default: ${option(field)!.defaultValue}`"
               :list="field.suggestions ? `${testid(field)}-list` : undefined"
               :data-testid="testid(field)"
               @input="set(field, ($event.target as HTMLInputElement).value)"
             />
-            <datalist v-if="field.kind === 'text' && field.suggestions" :id="`${testid(field)}-list`">
-              <option v-for="s in field.suggestions" :key="s" :value="s" />
-            </datalist>
+              <datalist v-if="field.suggestions" :id="`${testid(field)}-list`">
+                <option v-for="s in field.suggestions" :key="s" :value="s" />
+              </datalist>
+            </template>
             <select
               v-else-if="field.kind === 'choice' || field.kind === 'boolean'"
               :id="testid(field)"
@@ -120,9 +121,8 @@ function set(field: ParameterField, value: string | boolean): void {
         </div>
       </div>
       <p v-if="section.title.startsWith('Genetic code') && subjectCodeNote" class="note" data-testid="subject-gencode-note">
-        LOSAT translates the subject sequences with this code. This is an approved LOSAT exception: NCBI BLAST+ treats a
-        non-default subject code differently for <code>-subject</code> sequences, so results with this code can differ
-        from NCBI's.
+        Approved LOSAT exception: LOSAT translates the subjects with this code. NCBI BLAST+ treats a non-default subject
+        code differently for local subject files, so results with this code can differ from NCBI's.
       </p>
     </fieldset>
   </div>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { onMounted, onUnmounted, ref } from 'vue';
 import type { Attention } from '../application/attention';
 import type { Coordinator } from '../application/coordinator';
 import type { SearchDraft } from '../application/draft';
@@ -20,6 +20,20 @@ const props = defineProps<{
 const state = useStore(props.coordinator.state);
 const attentionState = useStore(props.attention.state);
 const tab = ref<'search' | 'results'>('search');
+
+// A file dropped outside an input's drop zone would make the browser open it in place of
+// the application (and end the searches of this tab).
+const keep = (event: DragEvent) => {
+  if (event.dataTransfer?.types.includes('Files')) event.preventDefault();
+};
+onMounted(() => {
+  window.addEventListener('dragover', keep);
+  window.addEventListener('drop', keep);
+});
+onUnmounted(() => {
+  window.removeEventListener('dragover', keep);
+  window.removeEventListener('drop', keep);
+});
 </script>
 
 <template>

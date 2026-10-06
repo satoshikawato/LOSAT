@@ -257,7 +257,7 @@ test('the region of a role with one record: the drag, the fields, the limits and
   await program(page, 'blastn');
   await paste(page, 'query', '>q1\nACGTACGTACGTAAACCCGGGTTT\n>q2\nACGTACGTACGTAAACCCGGGTTA\n');
   await paste(page, 'subject', `>s1\n${'ACGTACGTAC'.repeat(10)}\n`);
-  await expect(page.getByTestId('query-region-unavailable')).toContainText('2 are included');
+  await expect(page.getByTestId('query-region-unavailable')).toContainText('(2 are)');
   await expect(page.getByTestId('subject-region')).toContainText('Region of s1');
 
   // Drag across the middle of the bar.
@@ -308,14 +308,14 @@ test('the region of a role with one record: the drag, the fields, the limits and
 
 test("the options form: the engine's defaults are not written; tasks, templates and genetic codes", async ({ page }) => {
   await program(page, 'tblastx');
-  await expect(page.getByTestId('param-evalue')).toHaveAttribute('placeholder', '10');
+  await expect(page.getByTestId('param-evalue')).toHaveAttribute('placeholder', 'default: 10');
   const queryCodes = page.getByTestId('param-query_gencode').locator('option');
   await expect(queryCodes).toHaveCount(27); // Default and the engine's 26 codes
   await expect(queryCodes.nth(0)).toHaveText('Default (1. Standard)');
   await expect(page.getByTestId('param-query_gencode')).toContainText('11. Bacterial, Archaeal and Plant Plastid');
   await page.getByTestId('param-evalue').fill('10');
   await page.getByTestId('param-db_gencode').selectOption('11');
-  await expect(page.getByTestId('subject-gencode-note')).toContainText('approved LOSAT exception');
+  await expect(page.getByTestId('subject-gencode-note')).toContainText('Approved LOSAT exception');
   await paste(page, 'query', '>q\nACGTACGTACGTACGTAC\n');
   await paste(page, 'subject', '>s\nACGTACGTACGTACGTAC\n');
   await submit(page);
@@ -445,8 +445,8 @@ test.describe('leaving and returning', () => {
     await page.evaluate(() => (window as unknown as { __setVisible: (v: boolean) => void }).__setVisible(false));
     await page.waitForTimeout(1200);
     await page.evaluate(() => (window as unknown as { __setVisible: (v: boolean) => void }).__setVisible(true));
-    await expect(page.getByTestId('resume-notice')).toContainText('This tab was in the background for 0:01');
-    await expect(page.getByTestId('resume-run-1')).toContainText('Run 1: running then');
+    await expect(page.getByTestId('resume-notice')).toContainText(/This tab was in the background for 0:0[1-9]/);
+    await expect(page.getByTestId('resume-run-1')).toContainText('Run 1 was running when the tab was hidden');
     await expect(page.getByTestId('resume-data')).toHaveText('The stored results are available.');
 
     if (browserName === 'chromium') {

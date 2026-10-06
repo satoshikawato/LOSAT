@@ -7,7 +7,7 @@
 // Inputs go through the data layer (plan §5.4): each input becomes a source, the source
 // gets a record table (a dataset revision), and the run snapshot holds the bytes of the
 // included records with their IDs and lengths, which the engine checks at `register`.
-import { buildArgv } from '../domain/argv';
+import { buildArgv, PASTED_NAMES } from '../domain/argv';
 import type { FastaParserKind } from '../domain/dataset';
 import type { OutputFormat } from '../domain/output-format';
 import { programById, type ProgramId } from '../domain/programs';
@@ -66,7 +66,6 @@ export interface CoordinatorDeps {
 export type EnqueueResult = ValidationResult & { readonly runId?: string };
 export type EnqueueAllResult = ValidationResult & { readonly runIds?: readonly string[] };
 
-const PASTED_NAMES = { query: 'query.fa', subject: 'subject.fa' } as const;
 const PHASE_STATUS: Readonly<Record<EnginePhase, RunStatus>> = {
   preparing: 'preparing',
   running: 'running',
@@ -111,7 +110,12 @@ export class Coordinator {
       } catch (error) {
         return { ok: false, message: errorMessage(error) };
       }
-      const validation = await this.deps.engine.validate(argv);
+      let validation: ValidationResult;
+      try {
+        validation = await this.deps.engine.validate(argv);
+      } catch (error) {
+        return { ok: false, message: `The options could not be checked: ${errorMessage(error)}` };
+      }
       if (!validation.ok) return validation;
       prepared.push({ request, argv, queryName, subjectName });
     }
@@ -148,7 +152,7 @@ export class Coordinator {
       ...this.state.get().runs,
       ...numbered.map((snapshot): RunView => ({ snapshot, status: 'queued', record: {} })),
     ]);
-    this.queue.push(...numbered.map((snapshot) => snapshot.runId));
+    for (const snapshot of numbered) this.queue.push(snapshot.runId);
     this.pump();
     return { ok: true, runIds: numbered.map((snapshot) => snapshot.runId) };
   }

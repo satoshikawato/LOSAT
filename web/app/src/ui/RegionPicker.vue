@@ -47,12 +47,13 @@ function down(event: PointerEvent): void {
   if (props.record.length < 1) return;
   bar.value!.setPointerCapture(event.pointerId);
   dragFrom.value = position(event);
-  props.draft.setRegion(props.role, regionFromPositions(dragFrom.value, dragFrom.value, props.record.length));
 }
 
+/** A drag sets the region; a click alone does not (a range of one letter is not a region). */
 function move(event: PointerEvent): void {
   if (dragFrom.value === undefined) return;
-  props.draft.setRegion(props.role, regionFromPositions(dragFrom.value, position(event), props.record.length));
+  const region = regionFromPositions(dragFrom.value, position(event), props.record.length);
+  if (region.start !== region.stop) props.draft.setRegion(props.role, region);
 }
 
 function up(): void {

@@ -1,7 +1,8 @@
 // Keeping a search alive (design §9.4, REQ-22). Browsers slow down or stop the work of a
 // hidden page, mobile browsers end it, and closing the tab ends the search: LOSAT Web does
 // not say that a search continues without the tab. This module
-// - holds the screen wake lock while a search runs, if the user chose it;
+// - holds the screen wake lock while runs are active or queued, if the user chose it (not
+//   released and requested again between the runs of a queue);
 // - asks the browser to warn before the page is left while runs are active or queued;
 // - when the page becomes visible again after being hidden with runs in progress, reports
 //   how long it was hidden, what became of those runs, and whether the Data worker (which
@@ -42,6 +43,8 @@ export interface AttentionDeps {
   readonly now: () => number;
   /** How long the Data worker may take to answer after the page comes back. */
   readonly probeTimeoutMs?: number;
+  /** Shorter hides (a quick switch of tabs) make no report. */
+  readonly minHiddenMs?: number;
 }
 
 const ACTIVE: ReadonlySet<RunStatus> = new Set(['preparing', 'running', 'finalizing']);
@@ -85,9 +88,9 @@ export class Attention {
   }
 
   private updateWakeLock(): void {
-    const { keepAwake, active, wakeLock } = this.state.get();
+    const { keepAwake, busy, wakeLock } = this.state.get();
     if (wakeLock === 'unsupported') return;
-    const wanted = keepAwake && active && this.deps.page.isVisible();
+    const wanted = keepAwake && busy && this.deps.page.isVisible();
     if (wanted && (wakeLock === 'off' || wakeLock === 'failed')) {
       this.set({ wakeLock: 'requesting', wakeLockError: undefined });
       this.deps.page.requestWakeLock().then(
@@ -128,7 +131,7 @@ export class Attention {
     const hidden = this.hidden;
     this.hidden = undefined;
     this.updateWakeLock();
-    if (hidden === undefined) return;
+    if (hidden === undefined || this.deps.now() - hidden.at < (this.deps.minHiddenMs ?? 1000)) return;
     const current = new Map(this.deps.runs.get().runs.map((run) => [run.snapshot.runId, run.status]));
     const runs = [...hidden.runs].map(([runId, before]) => ({
       number: before.number,
@@ -137,17 +140,27 @@ export class Attention {
     }));
     this.set({ resume: { hiddenMs: this.deps.now() - hidden.at, runs, dataWorker: 'checking' } });
     const generation = ++this.probeGeneration;
-    const timeout = new Promise<'not-responding'>((resolve) =>
-      setTimeout(() => resolve('not-responding'), this.deps.probeTimeoutMs ?? 10_000),
-    );
-    const answer = this.deps.probe().then(
-      () => 'responding' as const,
-      () => 'not-responding' as const,
-    );
-    void Promise.race([answer, timeout]).then((dataWorker) => {
+    const report = (dataWorker: ResumeReport['dataWorker']) => {
       const resume = this.state.get().resume;
       if (generation === this.probeGeneration && resume !== undefined) this.set({ resume: { ...resume, dataWorker } });
-    });
+    };
+    let answered = false;
+    const timer = setTimeout(() => {
+      if (!answered) report('not-responding');
+    }, this.deps.probeTimeoutMs ?? 10_000);
+    // A late answer still corrects the report.
+    this.deps.probe().then(
+      () => {
+        answered = true;
+        clearTimeout(timer);
+        report('responding');
+      },
+      () => {
+        answered = true;
+        clearTimeout(timer);
+        report('not-responding');
+      },
+    );
   }
 
   private set(change: { readonly [K in keyof AttentionState]?: AttentionState[K] | undefined }): void {

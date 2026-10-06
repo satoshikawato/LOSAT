@@ -12,7 +12,7 @@
 // Whether the engine reads a source is the engine's verdict (`checkInput`, the program's
 // `register`), shown with its message. Several sources of a role are one combined search
 // input, or separate searches (one run per source, queued as a group).
-import { buildArgv } from '../domain/argv';
+import { buildArgv, COMBINED_NAMES, PASTED_NAMES } from '../domain/argv';
 import { includedRecords, type DatasetRecord, type DatasetRevision, type FastaParserKind } from '../domain/dataset';
 import { formParameters, setField, type FieldValue, type FormValues } from '../domain/parameters';
 import { PROGRAMS, programById, type InputRole, type ProgramId } from '../domain/programs';
@@ -64,8 +64,12 @@ export interface RoleDraft {
   /** The paste source first, then the files in the order they were added. */
   readonly sources: readonly DraftSource[];
   readonly mode: InputMode;
-  /** The region of the role's only record (DW-9); ignored while the role has another count. */
-  readonly region?: RegionText;
+  /**
+   * The region of the role's only record (DW-9), and that record (`regionIdentity`). It
+   * applies only while that record is still the role's only included record; another
+   * record, or another count of records, leaves it aside.
+   */
+  readonly region?: { readonly text: RegionText; readonly record: string };
 }
 
 export type Validation =
@@ -101,11 +105,6 @@ export interface DraftDeps {
 }
 
 const ROLES: readonly InputRole[] = ['query', 'subject'];
-const PASTED_NAMES: Readonly<Record<InputRole, string>> = { query: 'query.fa', subject: 'subject.fa' };
-const COMBINED_NAMES: Readonly<Record<InputRole, string>> = {
-  query: 'combined_query.fa',
-  subject: 'combined_subject.fa',
-};
 const PASTE_KEY = 'paste';
 /** Bytes of a source read for its preview, and the lines shown. */
 const HEAD_BYTES = 2048;
@@ -121,6 +120,8 @@ export class SearchDraft {
   private readonly descriptions = new Map<ProgramId, Promise<ProgramDescription>>();
   /** The descriptions that have arrived, so that a program's form is complete when it is chosen again. */
   private readonly described = new Map<ProgramId, ProgramDescription>();
+  /** The engine's verdicts, by program, role and revision: a selection checked once is not checked again. */
+  private readonly verdicts = new Map<string, Promise<InputCheck>>();
   /** Revisions of a selection, by base revision and excluded records (revisionFor). */
   private readonly revisions = new Map<string, Promise<string>>();
   /** The latest request of each asynchronous task; older results are dropped. */
@@ -185,11 +186,38 @@ export class SearchDraft {
 
   // --- inputs -----------------------------------------------------------------------------
 
-  /** The paste box's text; it is indexed after a pause in typing. */
+  /**
+   * The paste box's text. Its source shows that it is being read at once, and is indexed
+   * after a pause in typing.
+   */
   setPaste(role: InputRole, text: string): void {
     this.updateRole(role, (draft) => ({ ...draft, paste: text }));
     this.set({ message: undefined });
-    this.debounce(`paste:${role}`, () => this.indexPaste(role));
+    if (text === '') {
+      this.removeSource(role, PASTE_KEY);
+      return;
+    }
+    const file = new File([text], PASTED_NAMES[role], { type: 'text/plain' });
+    const source: DraftSource = {
+      key: PASTE_KEY,
+      origin: 'paste',
+      name: PASTED_NAMES[role],
+      size: file.size,
+      file,
+      status: 'indexing',
+      excluded: [],
+    };
+    // A newer text supersedes an index of the older one that is still running.
+    this.nextGeneration(`${role}:${PASTE_KEY}`);
+    this.cancelTask(`check:${role}:${PASTE_KEY}`);
+    this.updateRole(role, (draft) => ({
+      ...draft,
+      sources: draft.sources.some((s) => s.key === PASTE_KEY)
+        ? draft.sources.map((s) => (s.key === PASTE_KEY ? source : s))
+        : [source, ...draft.sources],
+    }));
+    this.debounce(`paste:${role}`, () => this.track(this.index(role, PASTE_KEY, file)));
+    this.scheduleValidation();
   }
 
   /**
@@ -250,10 +278,11 @@ export class SearchDraft {
   }
 
   setRegion(role: InputRole, region: RegionText | undefined): void {
+    const record = this.regionIdentity(role);
     this.updateRole(role, (draft) => {
       const next = { ...draft };
-      if (region === undefined) delete next.region;
-      else next.region = region;
+      if (region === undefined || record === undefined) delete next.region;
+      else next.region = { text: region, record };
       return next;
     });
     this.set({ message: undefined });
@@ -264,10 +293,26 @@ export class SearchDraft {
 
   /** The record that the role's region applies to: the role's only included record. */
   regionRecord(role: InputRole): DatasetRecord | undefined {
+    return this.onlyRecord(role)?.record;
+  }
+
+  /** The region of the role, if it was chosen on the record that `regionRecord` gives now. */
+  region(role: InputRole): RegionText | undefined {
+    const region = this.role(role).region;
+    return region !== undefined && region.record === this.regionIdentity(role) ? region.text : undefined;
+  }
+
+  private onlyRecord(role: InputRole): { readonly source: DraftSource; readonly record: DatasetRecord } | undefined {
     const included = this.role(role).sources.flatMap((source) =>
-      source.status === 'ready' && source.base !== undefined ? includedOf(source) : [],
+      source.status === 'ready' && source.base !== undefined ? includedOf(source).map((record) => ({ source, record })) : [],
     );
     return included.length === 1 ? included[0] : undefined;
+  }
+
+  /** The source, record table and record of the role's only record. */
+  private regionIdentity(role: InputRole): string | undefined {
+    const only = this.onlyRecord(role);
+    return only === undefined ? undefined : `${only.source.key}|${only.source.base!.revisionId}|${only.record.index}`;
   }
 
   /** The parameters of the argv: the form's and the regions'. */
@@ -275,7 +320,7 @@ export class SearchDraft {
     const { program, values, description } = this.state.get();
     const parameters = formParameters(programById(program), values[program], description?.parameters);
     for (const role of ROLES) {
-      const region = this.role(role).region;
+      const region = this.region(role);
       const record = this.regionRecord(role);
       if (region === undefined || record === undefined) continue;
       if (regionProblem(region, record.length) === undefined) parameters.push([REGION_FLAG[role], regionValue(region)]);
@@ -300,9 +345,14 @@ export class SearchDraft {
   /** Freezes the draft into queued runs (one, or a group of separate searches). */
   async submit(): Promise<EnqueueAllResult> {
     if (this.state.get().submitting) return { ok: false, message: 'The draft is being added already.' };
-    this.set({ submitting: true, message: undefined });
+    this.set({ submitting: true, message: { kind: 'info', text: 'Preparing the inputs…' } });
     try {
-      const result = await this.prepareAndEnqueue();
+      let result: EnqueueAllResult;
+      try {
+        result = await this.prepareAndEnqueue();
+      } catch (error) {
+        result = { ok: false, message: `The search could not be queued: ${messageOf(error)}` };
+      }
       if (result.ok) {
         const count = result.runIds?.length ?? 0;
         this.set({ message: { kind: 'info', text: count > 1 ? `Added ${count} runs to the queue as a group.` : 'Added to the queue.' } });
@@ -343,12 +393,13 @@ export class SearchDraft {
       const problem = this.inputProblem(role);
       if (problem !== undefined) return { ok: false, message: problem };
     }
+    // Everything from one state, before any wait.
     const groups = { query: this.inputGroups('query'), subject: this.inputGroups('subject') };
+    const parameters = this.parameters();
     const resolved = {
       query: await Promise.all(groups.query.map((group) => this.resolveGroup(group))),
       subject: await Promise.all(groups.subject.map((group) => this.resolveGroup(group))),
     };
-    const parameters = this.parameters();
     const requests: SearchRequest[] = [];
     for (const query of resolved.query) {
       for (const subject of resolved.subject) {
@@ -358,30 +409,66 @@ export class SearchDraft {
     return this.deps.enqueueAll(requests);
   }
 
-  /** Why the role cannot be searched as it is, or undefined. */
+  /** Why the role cannot be searched as it is (the full message), or undefined. */
   private inputProblem(role: InputRole): string | undefined {
+    return this.problemOf(role)?.message;
+  }
+
+  /**
+   * What keeps the draft from being queued now, in short, for the line above the button;
+   * undefined when nothing does. "Add to queue" reports the full message.
+   */
+  readiness(): string | undefined {
+    if (programById(this.state.get().program).unavailable !== undefined) return undefined;
+    for (const role of ROLES) {
+      const problem = this.problemOf(role);
+      if (problem !== undefined) return problem.short;
+    }
+    return undefined;
+  }
+
+  private problemOf(role: InputRole): { readonly message: string; readonly short: string } | undefined {
     const draft = this.role(role);
     const title = role === 'query' ? 'query' : 'subject';
     const label = role === 'query' ? 'Query' : 'Subject';
-    if (draft.sources.length === 0) return `Add the ${title} sequences: paste them or open FASTA files.`;
+    if (draft.sources.length === 0) {
+      const message = `Add the ${title} sequences: paste them or open FASTA files.`;
+      return { message, short: message };
+    }
     for (const source of draft.sources) {
       const where = `${label} (${describeSource(source)})`;
-      if (source.status === 'failed') return `${where}: ${source.error ?? 'the input cannot be read'}`;
-      if (source.status !== 'ready') return `${where} is still being read.`;
+      if (source.status === 'failed') {
+        return { message: `${where}: ${source.error ?? 'the input cannot be read'}`, short: `${where} cannot be read.` };
+      }
+      if (source.status !== 'ready') {
+        const message = `${where} is still being read.`;
+        return { message, short: message };
+      }
     }
     if (draft.sources.every((source) => includedOf(source).length === 0 && (source.base?.records.length ?? 0) > 0)) {
-      return `Every ${title} record is excluded.`;
+      const message = `Every ${title} record is excluded.`;
+      return { message, short: message };
     }
     for (const source of draft.sources) {
       const where = `${label} (${describeSource(source)})`;
       const check = source.check;
-      if (check?.state === 'refused') return `${where}: ${check.message}`;
-      if (check?.state === 'error') return `${where} could not be checked: ${check.message}`;
+      if (check?.state === 'refused') {
+        return {
+          message: `${where}: ${check.message}`,
+          short: `${where}: the engine refuses ${check.record === undefined ? 'this input' : 'a record'}. Exclude it or correct the input to search.`,
+        };
+      }
+      // A check that could not run is not the engine's verdict: the search reads the input
+      // with the engine again, and reports what it finds.
     }
     const record = this.regionRecord(role);
-    if (draft.region !== undefined && record !== undefined) {
-      const problem = regionProblem(draft.region, record.length);
-      if (problem !== undefined) return `${label} region: ${problem}`;
+    const region = this.region(role);
+    if (region !== undefined && record !== undefined) {
+      const problem = regionProblem(region, record.length);
+      if (problem !== undefined) {
+        const message = `${label} region: ${problem}`;
+        return { message, short: message };
+      }
     }
     return undefined;
   }
@@ -427,31 +514,6 @@ export class SearchDraft {
     );
   }
 
-  private indexPaste(role: InputRole): void {
-    const text = this.role(role).paste;
-    const existing = this.role(role).sources.find((source) => source.key === PASTE_KEY);
-    if (text === '') {
-      if (existing !== undefined) this.removeSource(role, PASTE_KEY);
-      return;
-    }
-    const file = new File([text], PASTED_NAMES[role], { type: 'text/plain' });
-    const source: DraftSource = {
-      key: PASTE_KEY,
-      origin: 'paste',
-      name: PASTED_NAMES[role],
-      size: file.size,
-      file,
-      status: 'indexing',
-      excluded: [],
-    };
-    this.updateRole(role, (draft) => ({
-      ...draft,
-      sources: existing === undefined ? [source, ...draft.sources] : draft.sources.map((s) => (s.key === PASTE_KEY ? source : s)),
-    }));
-    this.track(this.index(role, PASTE_KEY, file));
-    this.scheduleValidation();
-  }
-
   private reindex(role: InputRole, key: string): void {
     const source = this.role(role).sources.find((s) => s.key === key);
     if (source === undefined) return;
@@ -469,10 +531,11 @@ export class SearchDraft {
     const generation = this.nextGeneration(task);
     const current = () => this.generations.get(task) === generation;
     const started = this.deps.now();
+    const parser = indexParser(this.state.get().program);
     try {
       const ref = await this.deps.data.addSource(file);
       const head = await this.deps.data.previewSource(ref.sourceId, HEAD_BYTES).then(headText, () => undefined);
-      const base = await this.deps.data.indexSource(ref.sourceId, indexParser(this.state.get().program));
+      const base = await this.deps.data.indexSource(ref.sourceId, parser);
       if (!current()) return;
       this.updateSource(role, key, (source) => ({
         ...source,
@@ -521,7 +584,15 @@ export class SearchDraft {
     let check: SourceCheck;
     try {
       const revisionId = await this.revisionFor(source);
-      check = toSourceCheck(await this.deps.data.checkInput(program, role, [revisionId]), source);
+      const key = `${program}|${role}|${revisionId}`;
+      let verdict = this.verdicts.get(key);
+      if (verdict === undefined) {
+        verdict = this.deps.data.checkInput(program, role, [revisionId]);
+        this.verdicts.set(key, verdict);
+        // A check that could not run is tried again next time.
+        verdict.catch(() => this.verdicts.delete(key));
+      }
+      check = toSourceCheck(await verdict, source);
     } catch (error) {
       check = { state: 'error', message: messageOf(error) };
     }
@@ -548,11 +619,13 @@ export class SearchDraft {
   }
 
   private scheduleValidation(): void {
+    // A validation of an older argv that is still running is not shown.
+    this.nextGeneration('validate');
     this.debounce('validate', () => this.track(this.validate()));
   }
 
   private async validate(): Promise<void> {
-    const generation = this.nextGeneration('validate');
+    const generation = this.generations.get('validate');
     const { program } = this.state.get();
     if (programById(program).unavailable !== undefined) {
       this.set({ validation: { state: 'idle' } });

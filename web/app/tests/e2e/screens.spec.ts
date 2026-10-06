@@ -90,34 +90,61 @@ for (const size of SIZES) {
     await page.getByTestId('program-blastx').check();
     await shoot(page, browserName, size.name, '05-blastx-unavailable');
 
-    if (BUILD_HAS_ENGINE) {
-      // A search in progress, and the notice after the page was hidden.
-      await page.getByTestId('program-blastp').check();
-      for (const role of ['query', 'subject'] as const) {
-        const sources = page.locator(`[data-testid^="${role}-source-"][data-status]`);
-        while ((await sources.count()) > 0) await page.getByTestId(`${role}-source-0-remove`).click();
-        await page.getByTestId(`${role}-files`).setInputFiles({
-          name: 'NZ_CP006932.faa',
-          mimeType: 'text/plain',
-          buffer: readFileSync(join(REPOSITORY, 'LOSAT/tests/fasta/NZ_CP006932.faa')),
-        });
-        await ready(page, role);
-      }
-      await page.getByTestId('add-to-queue').click();
-      const run = page.locator('[data-testid^="run-"][data-status="running"]');
-      await expect(run).toHaveCount(1, { timeout: 60_000 });
-      await page.evaluate(() => {
-        Object.defineProperty(document, 'visibilityState', { get: () => 'hidden', configurable: true });
-        document.dispatchEvent(new Event('visibilitychange'));
-      });
-      await page.waitForTimeout(2100);
-      await page.evaluate(() => {
-        Object.defineProperty(document, 'visibilityState', { get: () => 'visible', configurable: true });
-        document.dispatchEvent(new Event('visibilitychange'));
-      });
-      await expect(page.getByTestId('resume-data')).not.toHaveText('Checking the stored results…');
-      await shoot(page, browserName, size.name, '06-running-resume');
-      await run.getByRole('button', { name: 'Cancel' }).first().click();
+    // A run that fails: TBLASTX refuses at run time a subject title with an HTML character
+    // reference, which NCBI decodes in outfmt 0 (docs/web/abi_v2.md §4).
+    let sequence = '';
+    let state = 7;
+    for (let i = 0; i < 300; i++) {
+      state = (Math.imul(state, 1103515245) + 12345) >>> 0;
+      sequence += 'ACGT'[(state >>> 16) % 4];
     }
+    await page.getByTestId('program-tblastx').check();
+    for (const role of ['query', 'subject'] as const) {
+      const sources = page.locator(`[data-testid^="${role}-source-"][data-status]`);
+      while ((await sources.count()) > 0) await page.getByTestId(`${role}-source-0-remove`).click();
+    }
+    await page.getByTestId('query-input').fill(`>q1\n${sequence}\n`);
+    await page.getByTestId('subject-input').fill(`>s1 alpha &amp; beta\n${sequence}\n`);
+    await ready(page, 'query');
+    await ready(page, 'subject');
+    await page.getByTestId('add-to-queue').click();
+    await expect(page.locator('li[data-testid^="run-"][data-status="failed"]')).toHaveCount(1, { timeout: 60_000 });
+
+    // A search in progress, one cancelled before it started, one waiting, and the notice
+    // after the page was hidden.
+    await page.getByTestId('program-blastp').check();
+    for (const role of ['query', 'subject'] as const) {
+      const sources = page.locator(`[data-testid^="${role}-source-"][data-status]`);
+      while ((await sources.count()) > 0) await page.getByTestId(`${role}-source-0-remove`).click();
+      await page.getByTestId(`${role}-files`).setInputFiles({
+        name: 'NZ_CP006932.faa',
+        mimeType: 'text/plain',
+        buffer: readFileSync(join(REPOSITORY, 'LOSAT/tests/fasta/NZ_CP006932.faa')),
+      });
+      await ready(page, role);
+    }
+    const running = page.locator('li[data-testid^="run-"][data-status="running"]');
+    const queued = page.locator('li[data-testid^="run-"][data-status="queued"]');
+    await page.getByTestId('add-to-queue').click();
+    await expect(running).toHaveCount(1, { timeout: 60_000 });
+    await page.getByTestId('add-to-queue').click();
+    await expect(queued).toHaveCount(1);
+    await queued.getByRole('button', { name: 'Cancel' }).click();
+    await page.getByTestId('param-evalue').fill('1e-10');
+    await page.getByTestId('add-to-queue').click();
+    await expect(queued).toHaveCount(1);
+    await page.evaluate(() => {
+      Object.defineProperty(document, 'visibilityState', { get: () => 'hidden', configurable: true });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await page.waitForTimeout(2100);
+    await page.evaluate(() => {
+      Object.defineProperty(document, 'visibilityState', { get: () => 'visible', configurable: true });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await expect(page.getByTestId('resume-data')).not.toHaveText('Checking the stored results…');
+    await shoot(page, browserName, size.name, '06-running-queued-failed-resume');
+    await queued.getByRole('button', { name: 'Cancel' }).click();
+    await running.getByRole('button', { name: 'Cancel' }).first().click();
   });
 }

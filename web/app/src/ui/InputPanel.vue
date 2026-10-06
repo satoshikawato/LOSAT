@@ -19,6 +19,10 @@ const regionRecord = computed(() => {
   void props.state;
   return props.draft.regionRecord(props.role);
 });
+const region = computed(() => {
+  void props.state;
+  return props.draft.region(props.role);
+});
 
 function onPaste(event: Event): void {
   props.draft.setPaste(props.role, (event.target as HTMLTextAreaElement).value);
@@ -48,8 +52,8 @@ function onDrop(event: DragEvent): void {
       :class="{ dragging }"
       :data-testid="`${role}-dropzone`"
       @dragover.prevent="dragging = true"
-      @dragleave="dragging = false"
-      @drop.prevent="onDrop"
+      @dragleave.self="dragging = false"
+      @drop.prevent.stop="onDrop"
     >
       <label class="paste">
         <span class="visually-hidden">Paste {{ title.toLowerCase() }} sequences</span>
@@ -121,11 +125,12 @@ function onDrop(event: DragEvent): void {
       :draft="draft"
       :role="role"
       :record="regionRecord"
-      :region="roleState.region"
+      :region="region"
       :unit="residueUnit(kind)"
     />
     <p v-else-if="includedCount > 1" class="hint" :data-testid="`${role}-region-unavailable`">
-      A region can be set when the {{ title.toLowerCase() }} has one record ({{ includedCount }} are included).
+      A {{ title.toLowerCase() }} region can be set when exactly one {{ title.toLowerCase() }} record is included
+      ({{ includedCount }} are).
     </p>
   </section>
 </template>

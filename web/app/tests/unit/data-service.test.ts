@@ -65,6 +65,19 @@ describe('DataService sources and record tables', () => {
     expect(decoder.decode(input.bytes)).toBe('>dup second\nGGCC\n');
   });
 
+  it('builds the run input and checks an input of more records than a call can take as arguments', async () => {
+    const { data } = service();
+    const count = 150_000;
+    const text = Array.from({ length: count }, (_, i) => `>r${i}\nA\n`).join('');
+    const source = await data.addSource(new File([text], 'many.fa'));
+    const revision = await data.indexSource(source.sourceId, 0);
+    const excluded = await data.reviseDataset(revision.revisionId, [0]);
+    const input = await data.buildRunInput([excluded.revisionId]);
+    expect(input.records).toHaveLength(count - 1);
+    expect(input.records[0]).toEqual({ id: 'r1', length: 1 });
+    expect(await data.checkInput('blastn', 'query', [excluded.revisionId])).toMatchObject({ ok: true });
+  }, 60_000);
+
   it('rejects a source that the parser cannot read', async () => {
     const { data } = service();
     const source = await data.addSource(new File(['ACGT\n'], 'plain.txt'));

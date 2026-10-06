@@ -174,6 +174,13 @@ textarea {
 .program-tab.unavailable {
   color: var(--muted);
   font-weight: 400;
+  border-style: dashed;
+}
+
+.program-tab.unavailable.selected {
+  color: var(--accent);
+  background: var(--accent-bg);
+  border-color: var(--accent);
 }
 
 .program-tab:focus-within {
@@ -346,19 +353,27 @@ textarea {
 
 .record-number {
   color: var(--muted);
+  flex: 0 0 auto;
   min-width: 3.5em;
 }
 
 .record-id {
-  flex: 1 1 auto;
-  min-width: 0;
+  flex: 1 1 6em;
+  min-width: 4em;
   overflow: hidden;
   text-overflow: ellipsis;
   font-family: ui-monospace, monospace;
 }
 
 .record-length {
+  flex: 0 0 auto;
+  min-width: 4.5em;
+  text-align: right;
   font-variant-numeric: tabular-nums;
+}
+
+.record-row .badge {
+  flex: 0 0 auto;
 }
 
 .badge {
@@ -557,6 +572,27 @@ textarea {
 
 .status {
   color: var(--muted);
+  font-size: 0.88em;
+  padding: 0 6px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+
+.status[data-status='completed'] {
+  color: var(--ok);
+  border-color: currentColor;
+}
+
+.status[data-status='failed'] {
+  color: var(--error);
+  border-color: currentColor;
+}
+
+.status[data-status='running'],
+.status[data-status='preparing'],
+.status[data-status='finalizing'] {
+  color: var(--accent);
+  border-color: currentColor;
 }
 
 .phase {
@@ -576,7 +612,7 @@ textarea {
 .diagnostics dl {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  gap: 2px 8px;
+  gap: 2px 12px;
   margin: 4px 0;
   font-size: 0.88em;
 }
@@ -648,7 +684,29 @@ pre.output {
   .program-tab {
     flex: 1 1 auto;
     text-align: center;
-    padding: 6px 8px;
+    padding: 10px 8px;
+  }
+
+  /* Larger targets for touch. */
+  input[type='checkbox'],
+  input[type='radio'] {
+    width: 20px;
+    height: 20px;
+  }
+
+  button,
+  select,
+  input[type='text'],
+  input[type='search'] {
+    min-height: 40px;
+  }
+
+  button.link {
+    min-height: 0;
+  }
+
+  .region-bar {
+    height: 36px;
   }
 }
 

@@ -1,10 +1,10 @@
 // The input check of the Data worker (ports/input-check.ts): `register` of the program on
 // the serial reactor, then `release` (docs/web/abi_v2.md §4). The engine's refusal (an
-// export that returned -1) is the verdict with the engine's message; a stopped instance is
-// a failure of the check itself.
+// export that returned -1) is the verdict with the engine's message; an input that does not
+// fit in the instance's memory, or a stopped instance, is a failure of the check itself.
 import type { InputRole, ProgramId } from '../../domain/programs';
 import type { InputCheck, InputChecker } from '../../ports/input-check';
-import { EngineCallError, ROLE_QUERY, ROLE_SUBJECT, type ReactorAbi } from './abi';
+import { EngineAllocationError, EngineCallError, ROLE_QUERY, ROLE_SUBJECT, type ReactorAbi } from './abi';
 
 export class ReactorInputChecker implements InputChecker {
   constructor(private readonly reactor: () => Promise<ReactorAbi>) {}
@@ -15,7 +15,9 @@ export class ReactorInputChecker implements InputChecker {
     try {
       registered = abi.register(program, role === 'query' ? ROLE_QUERY : ROLE_SUBJECT, bytes);
     } catch (error) {
-      if (error instanceof EngineCallError) return { ok: false, message: error.message };
+      if (error instanceof EngineCallError && !(error instanceof EngineAllocationError)) {
+        return { ok: false, message: error.message };
+      }
       throw error;
     }
     abi.release(registered.handle);

@@ -65,7 +65,7 @@ function phaseTimes(run: RunView): string {
 </script>
 
 <template>
-  <section class="queue-panel">
+  <section id="queue" class="queue-panel">
     <h2>Queue</h2>
     <p v-if="runs.length === 0" class="muted">No runs yet.</p>
     <ol class="queue" data-testid="queue">
@@ -79,7 +79,9 @@ function phaseTimes(run: RunView): string {
         <div class="run-line">
           <strong>Run {{ run.snapshot.number }}</strong>
           <span>{{ programById(run.snapshot.program).label }}</span>
-          <span class="status" :data-testid="`run-${run.snapshot.number}-status`">{{ run.status }}</span>
+          <span class="status" :data-status="run.status" :data-testid="`run-${run.snapshot.number}-status`">{{
+            run.status
+          }}</span>
           <span v-if="!isTerminal(run.status) && run.status !== 'queued'" class="phase" :data-testid="`run-${run.snapshot.number}-phase`">
             {{ PHASE_LABELS[run.status] }}
           </span>

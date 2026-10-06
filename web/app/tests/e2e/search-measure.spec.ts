@@ -31,8 +31,8 @@ function proteins(count: number): Buffer {
   for (let i = 0; i < count; i++) {
     let sequence = '';
     for (let j = 0; j < 300; j++) {
-      state = (state * 1103515245 + 12345) & 0x7fffffff;
-      sequence += LETTERS[state % LETTERS.length];
+      state = (Math.imul(state, 1103515245) + 12345) >>> 0;
+      sequence += LETTERS[(state >>> 16) % LETTERS.length];
     }
     parts.push(`>prot_${i + 1} synthetic protein ${i + 1}\n${sequence.replace(/(.{60})/g, '$1\n').replace(/\n$/, '')}\n`);
   }

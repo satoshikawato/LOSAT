@@ -20,14 +20,32 @@ const threadChoices = computed(() => {
 });
 
 const waiting = computed(() => props.runs.filter((run) => !isTerminal(run.status)).length);
+const active = computed(() => props.runs.find((run) => !isTerminal(run.status) && run.status !== 'queued'));
 const runCount = computed(() => {
   void state.value; // recompute with the draft
   return props.draft.runCount();
 });
+const readiness = computed(() => {
+  void state.value;
+  return props.draft.readiness();
+});
 const buttonLabel = computed(() => {
-  const runs = runCount.value > 1 ? ` (${runCount.value} runs)` : '';
+  const runs = runCount.value > 1 && program.value.unavailable === undefined ? ` (${runCount.value} runs)` : '';
   return waiting.value === 0 ? `Run locally${runs}` : `Add to queue${runs}`;
 });
+/** One line about the queue next to the button; on narrow screens the queue is far below. */
+const queueSummary = computed(() => {
+  if (waiting.value === 0) return undefined;
+  const queued = waiting.value - (active.value === undefined ? 0 : 1);
+  const parts = [];
+  if (active.value !== undefined) parts.push(`Run ${active.value.snapshot.number} is running`);
+  if (queued > 0) parts.push(`${queued} waiting`);
+  return parts.join(', ');
+});
+
+function showQueue(): void {
+  document.getElementById('queue')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
 
 function onThreads(event: Event): void {
   const value = (event.target as HTMLSelectElement).value;
@@ -80,7 +98,8 @@ function onThreads(event: Event): void {
       <span class="hint">Auto runs small searches on one thread and larger ones on up to four.</span>
     </div>
 
-    <p class="validation" :data-state="state.validation.state" data-testid="argv-validation">
+    <p v-if="readiness" class="notice" data-testid="draft-readiness">{{ readiness }}</p>
+    <p class="validation" :data-state="state.validation.state" data-testid="argv-validation" aria-live="polite">
       <template v-if="state.validation.state === 'invalid'">
         <span class="error">The engine refuses these options: {{ state.validation.message }}</span>
       </template>
@@ -97,7 +116,11 @@ function onThreads(event: Event): void {
       >
         {{ buttonLabel }}
       </button>
-      <span v-if="waiting > 0" class="hint">{{ waiting }} {{ waiting === 1 ? 'run' : 'runs' }} in the queue.</span>
+      <span v-if="program.unavailable" class="hint">{{ program.label }} is not available yet.</span>
+      <span v-else-if="queueSummary" class="hint" data-testid="queue-summary">
+        {{ queueSummary }}.
+        <button type="button" class="link" @click="showQueue">Show the queue</button>
+      </span>
     </div>
     <p
       v-if="state.message"

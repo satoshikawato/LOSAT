@@ -63,7 +63,15 @@ const flush = async (): Promise<void> => {
 };
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
-function setup(options: { supported?: boolean; runs?: RunView[]; probe?: AttentionDeps['probe']; probeTimeoutMs?: number } = {}) {
+function setup(
+  options: {
+    supported?: boolean;
+    runs?: RunView[];
+    probe?: AttentionDeps['probe'];
+    probeTimeoutMs?: number;
+    minHiddenMs?: number;
+  } = {},
+) {
   const page = new FakePage(options.supported ?? true);
   const runs = new Store<AppState>({ runs: options.runs ?? [] });
   const clock = { now: 1_000 };
@@ -73,6 +81,7 @@ function setup(options: { supported?: boolean; runs?: RunView[]; probe?: Attenti
     probe: options.probe ?? (() => Promise.resolve()),
     now: () => clock.now,
     probeTimeoutMs: options.probeTimeoutMs ?? 5_000,
+    minHiddenMs: options.minHiddenMs ?? 0,
   });
   const setRuns = (next: RunView[]) => runs.set({ runs: next });
   return { page, runs, clock, attention, setRuns, state: () => attention.state.get() };
@@ -125,15 +134,24 @@ describe('wake lock', () => {
     expect(page.requestWakeLock).not.toHaveBeenCalled();
   });
 
-  it('is not requested while no run is active, even with keepAwake', async () => {
-    const { page, attention, setRuns, state } = setup({ runs: [run('a', 1, 'queued')] });
+  it('is not requested without runs, and is held from a queued run to the end of the queue', async () => {
+    const { page, attention, setRuns, state } = setup({ runs: [run('a', 1, 'completed')] });
     attention.setKeepAwake(true);
     await flush();
     expect(page.requestWakeLock).not.toHaveBeenCalled();
     expect(state().wakeLock).toBe('off');
-    setRuns([run('a', 1, 'preparing')]);
+    setRuns([run('a', 1, 'completed'), run('b', 2, 'queued'), run('c', 3, 'queued')]);
     await flush();
     expect(page.requestWakeLock).toHaveBeenCalledTimes(1);
+    // Between the runs of the queue the lock is kept, not released and requested again.
+    setRuns([run('a', 1, 'completed'), run('b', 2, 'completed'), run('c', 3, 'preparing')]);
+    await flush();
+    expect(page.requestWakeLock).toHaveBeenCalledTimes(1);
+    expect(page.locks[0]!.releaseCalls).toBe(0);
+    setRuns([run('a', 1, 'completed'), run('b', 2, 'completed'), run('c', 3, 'completed')]);
+    await flush();
+    expect(page.locks[0]!.releaseCalls).toBe(1);
+    expect(state().wakeLock).toBe('off');
   });
 
   it('is requested when keepAwake is turned on during a run, and released when the run completes', async () => {
@@ -357,6 +375,34 @@ describe('resume report', () => {
     await flush();
     expect(state().resume?.dataWorker).toBe('responding');
     answers[0]!();
+    await flush();
+    expect(state().resume?.dataWorker).toBe('responding');
+  });
+
+  it('makes no report for a hide shorter than minHiddenMs', () => {
+    const { page, clock, state } = setup({ runs: [run('a', 1, 'running')], minHiddenMs: 1000 });
+    page.setVisible(false);
+    clock.now += 999;
+    page.setVisible(true);
+    expect(state().resume).toBeUndefined();
+    page.setVisible(false);
+    clock.now += 1000;
+    page.setVisible(true);
+    expect(state().resume?.hiddenMs).toBe(1000);
+  });
+
+  it('lets a late answer of the Data worker correct "not-responding"', async () => {
+    let answer: (() => void) | undefined;
+    const { page, state } = setup({
+      runs: [run('a', 1, 'running')],
+      probe: () => new Promise<void>((resolve) => (answer = resolve)),
+      probeTimeoutMs: 20,
+    });
+    page.setVisible(false);
+    page.setVisible(true);
+    await sleep(40);
+    expect(state().resume?.dataWorker).toBe('not-responding');
+    answer!();
     await flush();
     expect(state().resume?.dataWorker).toBe('responding');
   });

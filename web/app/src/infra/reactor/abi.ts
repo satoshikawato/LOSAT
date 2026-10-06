@@ -40,6 +40,17 @@ export class EngineCallError extends Error {
 }
 
 /**
+ * The host could not place an input in the instance's memory (`losat_web2_alloc` returned
+ * 0). The engine did not read the input, so this is not the engine's verdict on it.
+ */
+export class EngineAllocationError extends EngineCallError {
+  constructor(message: string) {
+    super(message);
+    this.name = 'EngineAllocationError';
+  }
+}
+
+/**
  * A call into the instance threw (a trap, such as a panic, which aborts, or an out of
  * memory condition). The engine's state may be inconsistent, so the instance is not used
  * again.
@@ -190,7 +201,7 @@ export class ReactorAbi {
           continue;
         }
         const ptr = this.exports.losat_web2_alloc(arg.length);
-        if (ptr === 0) throw new EngineCallError(`the engine could not allocate ${arg.length} bytes for an input`);
+        if (ptr === 0) throw new EngineAllocationError(`the engine could not allocate ${arg.length} bytes for an input`);
         allocations.push([ptr, arg.length]);
         new Uint8Array(this.exports.memory.buffer, ptr, arg.length).set(arg);
         flat.push(ptr, arg.length);

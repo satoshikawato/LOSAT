@@ -13,7 +13,7 @@ defineEmits<{ dismiss: [] }>();
     </p>
     <ul>
       <li v-for="run in report.runs" :key="run.number" :data-testid="`resume-run-${run.number}`">
-        Run {{ run.number }}: {{ run.before }} then, {{ run.now }} now.
+        Run {{ run.number }} was {{ run.before }} when the tab was hidden{{ run.now === run.before ? ' and still is' : `; it is ${run.now} now` }}.
         <template v-if="run.now === 'preparing' || run.now === 'running'">
           If it does not end, the browser may have stopped it in the background: cancel it and queue it again.
         </template>

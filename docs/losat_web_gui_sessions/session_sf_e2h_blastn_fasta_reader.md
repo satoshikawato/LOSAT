@@ -37,7 +37,7 @@ NCBI の経路（固定 commit 598d8ae6 のソースで確かめ、`AUTHORITY.md
 
 ## 保守者の判断
 
-2026-10-06 に保守者が、次の 5 つとも推奨の案に決めた（計画 DW-23）。別案は記録のために残す。作業の中で新しく生じた判断は推奨の案で進めてゲート記録に書き、NCBI の不具合に当たる挙動は `PD-LOSAT-NCBI-DEFECTS` の規則で扱い、まとめて諮る。
+2026-10-06 に保守者が、次の 5 つとも推奨の案に決め、エンジン側では SF を S09+（R2）より先に行うことにした（計画 DW-23）。別案は記録のために残す。作業の中で新しく生じた判断は推奨の案で進めてゲート記録に書き、NCBI の不具合に当たる挙動は `PD-LOSAT-NCBI-DEFECTS` の規則で扱い、まとめて諮る。
 
 1. **範囲**：DW-13 は BLASTN（TD-12）を挙げるが、同じ部品と同じ種類の拒否を TBLASTX・TBLASTN・BLASTP も使う。推奨：4 program の全入力（BLASTX は SX）。NCBI では 1 つの経路で、核酸と蛋白は旗が違うだけなので、まとめて棚卸しし移植する（DW-12）。別案：核酸の入力（BLASTN、TBLASTX、TBLASTN の subject）だけにし、蛋白の入力の拒否は残す。
 2. **Seq-id として読まれる最初の行**：NCBI は data loader で GenBank や BLAST DB から配列を取り寄せ、見つからなければそのレコードを黙って飛ばす。推奨：明示的な拒否（LOSAT はネットワークも BLAST DB も使わない）。どの行が Seq-id として試されるかは `CSeq_id` の解析（`Seq_id.cpp`）で決め、忠実に移せない部分は広めに拒否する（配列だけの行は oracle のとおり配列として読む。`DATA_LOADERS` が `none` なら NCBI と同じく配列として読む）。
@@ -61,7 +61,7 @@ NCBI の経路（固定 commit 598d8ae6 のソースで確かめ、`AUTHORITY.md
 
 ## 終了・引き継ぎ
 
-README の規則 8 に従う。計画（§0.5 の TD-8・TD-12、§5.4、§7、§10 の FASTA の読み方の行、状態の行）、`docs/web/abi_v2.md`、`docs/web/verification_cells.tsv`、README の表の SF の行を直す。[S17 の指示書](session_s17_g_release_decision.md) の 1. の前提に SF を、6. の既知の例外の一覧に SF で残した明示的な拒否を書き足す。エンジン側の次は [SX — BLASTX の統合](session_sx_blastx_integration.md)（条件待ち）で、その指示書に、BLASTX を共有の読み込み器と `scan` の種類（query は核酸、subject は蛋白）へ寄せること（LOSATX の比較のゲートが変わらないことを条件に）を書き足す。
+README の規則 8 に従う。計画（§0.5 の TD-8・TD-12、§5.4、§7、§10 の FASTA の読み方の行、状態の行）、`docs/web/abi_v2.md`、`docs/web/verification_cells.tsv`、README の表の SF の行を直す。[S17 の指示書](session_s17_g_release_decision.md) の 1. の前提に SF を、6. の既知の例外の一覧に SF で残した明示的な拒否を書き足す。エンジン側の次は [S09+ — R2：TBLASTN の subject の前処理](session_s09p_r2_tblastn_subject_cache.md)（DW-22 の順）で、その後が [SX — BLASTX の統合](session_sx_blastx_integration.md)（条件待ち）である。SX の指示書に、BLASTX を共有の読み込み器と `scan` の種類（query は核酸、subject は蛋白）へ寄せること（LOSATX の比較のゲートが変わらないことを条件に）を書き足す。
 
 アプリ側への引き継ぎ（SF はアプリを変えない。SF の merge の後に始まるアプリ側の最初のセッションの指示書に、最初の作業として書き足す。アプリ側が同じ指示書を直すので、節を足すだけにする）：
 

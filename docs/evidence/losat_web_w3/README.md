@@ -175,7 +175,7 @@ S08 が TBLASTX の outfmt 0/7 の升目を `checked` にしたので（`docs/we
 
 ## 合流（エンジン側の作業がこの時点で無いので、このセッションがコーディネーターとして行った）
 
-`feature/losat-web-gui-app` を `feature/losat-web-gui` に merge し（merge コミットは merge の後に記入）、W1 と W3 のゲート記録の「合流のときにエンジン側が行うこと」を反映した（反映のコミットは merge の後に記入）：
+`feature/losat-web-gui-app`（`d4503b355`）を `feature/losat-web-gui` に merge し（`57b4b4330`）、W1 と W3 のゲート記録の「合流のときにエンジン側が行うこと」を、その次の文書のコミットで反映した（このファイルのこの行もそのコミットで書いた）：
 
 1. README の表：S09 を完了（2026-10-03）、S09+ を R2 TBLASTN（条件付き、保守者の判断 1 の後）、S12 を完了（2026-10-06）にした。
 2. 計画：状態の行、§0.4 に DW-21（表示名）、§7 の S09・S12 を完了、§10 の表示名と instance の作り直しを決定済み・取消の閾値を判断待ちに、§2.3（Memory の上限 512 MB、レコード表の実測、取消の後の再準備の実測）、§3.2 のコード配置、§5.3 の `combined_query.fa`、§5.5 の Auto と作り直しの値と S12 の Attention、§8 のリスク（Chromium の共有メモリの境界、WebKit の 304）。

@@ -45,11 +45,11 @@
 | S08+ | [BLASTP・TBLASTN・TBLASTX の既定以外のオプション](session_s08p_e2e_protein_options.md) | E2e | 既定以外のオプションが NCBI と同じか、明示的に拒否される（S07+ で追加、TD-13。S12 の前に終える） | 完了（2026-10-05、S08+a・S08+b とともに、[ゲート記録](../evidence/losat_web_e2e/README.md)） |
 | S08+a | [E2e：第 1 回の独立監査の残件](session_s08pa_e2e_audit_open_items.md) | E2e | 監査の TN-2・TN-4・TN-5・RP-4 などを NCBI と同じにするか明示的に拒否（別の worktree・ブランチ、S08+ の仕上げと並行。保守者の指示、2026-10-04） | 完了（2026-10-04、ブランチ `feature/losat-web-gui-s08pa` の `c6fb13915`、[記録](../evidence/losat_web_e2e/s08pa/NOTES.md)。TN-1 の残り・TN-2・TN-4・TN-5・RP-4 の query の分割を移植、`-out -version` は明示的な拒否。本線への merge は S08+b） |
 | S08+b | [E2e の仕上げ](session_s08pb_e2e_close.md) | E2e | S08+a の merge、最後のコミットの全ゲート・Gate A・V-ABI・v1 の WASI の行列、独立監査の第 2 回、V-PERF、ゲート記録、`main` への PR | 完了（2026-10-05、[ゲート記録](../evidence/losat_web_e2e/README.md)。保守者の判断 DW-19。`main` への PR は記録に） |
-| S09 | [ブラウザでの実行基盤](session_s09_w1_browser_runtime.md) | W1 | V-BR、前処理の割合の実測（アプリ側。S10 の後、入口の条件は S08） | 着手（2026-10-03、S08b と並行。保守者の指示） |
-| S09+ | 前処理キャッシュ（条件付き） | R2 | DW-8 の条件を満たした program だけ。S09 の結果で行を足す | 未定 |
+| S09 | [ブラウザでの実行基盤](session_s09_w1_browser_runtime.md) | W1 | V-BR、前処理の割合の実測（アプリ側。S10 の後、入口の条件は S08） | 完了（2026-10-03、[ゲート記録](../evidence/losat_web_w1/README.md)。V-BR は 3 ブラウザ × 1/2/4 スレッドでネイティブの CLI と一致、取消の後の実行、メモリと前処理の割合の記録。DW-8 の条件を TBLASTN が満たした） |
+| S09+ | [TBLASTN の subject の前処理](session_s09p_r2_tblastn_subject_cache.md)（条件付き） | R2 | DW-8 の条件を TBLASTN が満たした（S09）。連続実行の出力が CLI と一致 | 保守者の判断待ち（W1 の判断待ち 1：翻訳の表引きを先にするか） |
 | S10 | [データ層](session_s10_w2_data_layer.md) | W2 | BlockStore の契約試験、回収・保護・容量不足（アプリ側。S09 より先に行う） | 完了（2026-09-30、[ゲート記録](../evidence/losat_web_w2/README.md)） |
 | S11 | [領域の指定](session_s11_e2d_query_subject_loc.md) | E2d | `-query_loc` / `-subject_loc` が NCBI とバイト一致 | 完了（2026-10-06、[ゲート記録](../evidence/losat_web_e2d/README.md)。4 program への範囲指定の移植、fixture 53 と回帰 fixture 35、範囲の sweep 1860 件で差 0、独立監査は 4 観点と再監査 2 回（指摘 A-1 と F-1 を直した）） |
-| S12 | [検索画面](session_s12_w3_search_ui.md) | W3 | 研究作業と境界条件の E2E | 未着手 |
+| S12 | [検索画面](session_s12_w3_search_ui.md) | W3 | 研究作業と境界条件の E2E | 完了（2026-10-06、[ゲート記録](../evidence/losat_web_w3/README.md)。研究作業と境界条件の E2E 12 件 × 3 ブラウザ、多数のレコードの計測、コードレビューと 2 回の画面レビュー。表示名は BLASTN 系（DW-21）） |
 | S13 | [結果画面](session_s13_w4_results_ui.md) | W4 | 5 program の E2E、HSP と行・節の対応 | 未着手 |
 | S14 | [抽出と候補](session_s14_w5_extraction_candidates.md) | W5 | 原配列との一致 | 未着手 |
 | S15 | [出力と再現性](session_s15_w6_export_session.md) | W6 | 再計算しない再読込、明示的なつなぎ直し | 未着手 |

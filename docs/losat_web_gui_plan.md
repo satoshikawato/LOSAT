@@ -1,6 +1,6 @@
 # LOSAT Web GUI 総合実装計画
 
-状態：**S01（W0）から S07++（E2f）までは完了条件を満たした（[W0](evidence/losat_web_w0/README.md)、[E1a](evidence/losat_web_e1a/README.md)、[E1b](evidence/losat_web_e1b/README.md)、[E1c](evidence/losat_web_e1c/README.md)、[E1d](evidence/losat_web_e1d/README.md)、[E2a-1・E2a-2](evidence/losat_web_e2a/README.md)、[E2c](evidence/losat_web_e2c/README.md)、[E2f](evidence/losat_web_e2f/README.md) のゲート記録。アプリ側の S10（W2）も完了した（[W2](evidence/losat_web_w2/README.md)）。E1a〜E1c の V-PERF の判断と、E1c の CLI の 2 つの振る舞いの差は、2026-10-02 に保守者が記録どおり承認した（DW-13））。`PD-LOSAT-WEB-APP-BOUNDARY` は 2026-09-29 に承認された。S07+++ と S07+++b（E2g）も完了条件を満たした（[E2g](evidence/losat_web_e2g/README.md)。棚卸し `INVENTORY.tsv` 1015 行の一括の transpile、NCBI の不具合の扱いの保守者の判断 DW-15、独立監査は第 4 回で supported）。S08・S08b（E2b：TBLASTX outfmt 0/7）も完了条件を満たした（[E2b](evidence/losat_web_e2b/README.md)。独立監査は第 3 回で supported、保守者の判断 DW-17。V-PERF の 1 case は保守者の確認待ち）。SD（E2i：BLASTN の dc-megablast と blastn-short、DW-18）も完了条件を満たした（[E2i](evidence/losat_web_e2i/README.md)。棚卸し `INVENTORY.tsv` 285 行の一括の移植、独立監査は第 1 回で 4 観点とも supported）。S08+・S08+a・S08+b（E2e：BLASTP・TBLASTN・TBLASTX の既定以外の option、TD-13）も完了条件を満たした（[E2e](evidence/losat_web_e2e/README.md)。棚卸し `INVENTORY.tsv` 1063 行、sweep 3264 組で差 0、独立監査は第 2 回で 4 観点とも supported、保守者の判断 DW-19）。S11（E2d：`-query_loc` / `-subject_loc`、DW-9〜DW-11）も完了条件を満たした（[E2d](evidence/losat_web_e2d/README.md)。棚卸し `INVENTORY.tsv` 248 行、範囲の fixture 53 と回帰 fixture 35 で NCBI とバイト一致、範囲の sweep 1860 件で差 0、独立監査は 4 観点と再監査 2 回、保守者の判断 DW-20）。エンジン側の残りは SX（条件待ち）。アプリ側の S09 は 2026-10-03 に S08b と並行して始めた（DW-7）。** 作成 2026-09-28、改訂 2026-10-06。
+状態：**S01（W0）から S07++（E2f）までは完了条件を満たした（[W0](evidence/losat_web_w0/README.md)、[E1a](evidence/losat_web_e1a/README.md)、[E1b](evidence/losat_web_e1b/README.md)、[E1c](evidence/losat_web_e1c/README.md)、[E1d](evidence/losat_web_e1d/README.md)、[E2a-1・E2a-2](evidence/losat_web_e2a/README.md)、[E2c](evidence/losat_web_e2c/README.md)、[E2f](evidence/losat_web_e2f/README.md) のゲート記録。アプリ側の S10（W2）も完了した（[W2](evidence/losat_web_w2/README.md)）。E1a〜E1c の V-PERF の判断と、E1c の CLI の 2 つの振る舞いの差は、2026-10-02 に保守者が記録どおり承認した（DW-13））。`PD-LOSAT-WEB-APP-BOUNDARY` は 2026-09-29 に承認された。S07+++ と S07+++b（E2g）も完了条件を満たした（[E2g](evidence/losat_web_e2g/README.md)。棚卸し `INVENTORY.tsv` 1015 行の一括の transpile、NCBI の不具合の扱いの保守者の判断 DW-15、独立監査は第 4 回で supported）。S08・S08b（E2b：TBLASTX outfmt 0/7）も完了条件を満たした（[E2b](evidence/losat_web_e2b/README.md)。独立監査は第 3 回で supported、保守者の判断 DW-17。V-PERF の 1 case は保守者の確認待ち）。SD（E2i：BLASTN の dc-megablast と blastn-short、DW-18）も完了条件を満たした（[E2i](evidence/losat_web_e2i/README.md)。棚卸し `INVENTORY.tsv` 285 行の一括の移植、独立監査は第 1 回で 4 観点とも supported）。S08+・S08+a・S08+b（E2e：BLASTP・TBLASTN・TBLASTX の既定以外の option、TD-13）も完了条件を満たした（[E2e](evidence/losat_web_e2e/README.md)。棚卸し `INVENTORY.tsv` 1063 行、sweep 3264 組で差 0、独立監査は第 2 回で 4 観点とも supported、保守者の判断 DW-19）。S11（E2d：`-query_loc` / `-subject_loc`、DW-9〜DW-11）も完了条件を満たした（[E2d](evidence/losat_web_e2d/README.md)。棚卸し `INVENTORY.tsv` 248 行、範囲の fixture 53 と回帰 fixture 35 で NCBI とバイト一致、範囲の sweep 1860 件で差 0、独立監査は 4 観点と再監査 2 回、保守者の判断 DW-20）。エンジン側の残りは SX（条件待ち）。アプリ側の S09（W1：ブラウザでの実行基盤、V-BR）と S12（W3：検索画面、研究作業と境界条件の E2E）も完了条件を満たした（[W1](evidence/losat_web_w1/README.md)、[W3](evidence/losat_web_w3/README.md)。program の表示名は保守者の判断 DW-21）。保守者の判断待ちは W1 の 2 件（TBLASTN の R2 の進め方、協調取消の閾値）。次はアプリ側の S13（W4）。** 作成 2026-09-28、改訂 2026-10-06。
 
 | 項目 | 内容 |
 |---|---|
@@ -71,6 +71,7 @@ LOSAT は、NCBI BLAST+ を純 Rust で再実装したものである。宣言�
 | DW-18 | 2026-10-03 | BLASTN の dc-megablast | 保守者の依頼で、BLASTN の `-task dc-megablast` を NCBI と同じにする。v0.1.0 の CLI の前の LOSAT は `dc-megablast` を受け付けたが、blastn の既定値で megablast の lookup を使うだけで、discontiguous の template（`-template_type`・`-template_length`、`blast_nalookup.c` の表、`blast_nascan.c` の走査）は無かった。v0.1.0 の CLI が task を 2 つに絞り、S07+ が明示的に拒否した。エンジン側のセッション SD（段階 E2i）として、S08b の後、S08+ の前に、DW-12 の棚卸しと一括の移植で行う。続けて保守者の依頼で `blastn-short`（NCBI では blastn に reward 1・penalty −3・e-value 1000・word size 7・filter なしを重ねた task、`blast_options_handle.cpp:343-360`）も SD に入れた。`rmblastn` は明示的な拒否のまま（S08b）。SD で完了した（2026-10-04、[E2i のゲート記録](evidence/losat_web_e2i/README.md)。`-template_type`・`-template_length` はどの task にも NCBI と同じに効く。task が内部で決める `-window_size` などは E2c からの明示的な拒否のままで、S08+ の指示書に引き継いだ） |
 | DW-19 | 2026-10-05 | S08+・S08+a・S08+b（E2e）が諮った NCBI との差 | 保守者が全て推奨の案で決めた（S08+b）。(1) D11（query の長さ＋window が 2^31 − 1 を超えると NCBI の `Int4` が回り込みヒット無し、決まった結果）は、D8（NCBI が終わらない (2^30, 2^31 − 1]）と合わせて和が 2^30 を超える値の明示的な拒否のまま（BLASTP・TBLASTX）。(2) D12：無限大と DBL_MAX 以上の `-evalue`（NCBI の blastp・tblastn は入力によって SIGSEGV）は明示的な拒否のまま。(3) D13：NCBI が落ちる query の分割の設定は BLASTP・TBLASTN で明示的な拒否のまま（BLASTN の承認済みの例外 1 を広げない）。(4) D14：option の値の位置の NCBI C++ Toolkit の語も明示的な拒否（`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` 版 1.4）。(5) D15：BLASTP の one-hit の gapped の始点の窓が配列の外を読む検索（NCBI は配列の外を読み、落ちることがある）は、LOSAT が配列の外を番兵として読む結果（NCBI の valgrind の下の出力とバイト一致）を承認済みの例外 3 にする（`PD-LOSAT-NCBI-DEFECTS` 版 1.3、AGENTS.md）。(6) web ABI v1 の BLASTP の 4 つの要求の誤りの文言がエンジンの今の文言に変わったこと（状態・出力の無さ・検査の順は E1d と同じ）は、TD-1 の S07+ のスレッドの上限の文言と同じ扱いで受け入れる（[E2e のゲート記録](evidence/losat_web_e2e/README.md)） |
 | DW-20 | 2026-10-06 | S11（E2d）が諮ったこと | 保守者が全て推奨の案で決めた。(1) R1：`NStr::StringToInt` が読めない範囲の部分（NCBI は build のパスを含む文言で終了コード 255）は明示的な拒否（TD-15 と同じ扱い）。(2) R2：文字の無い区間（範囲の始まりがレコードの長さ + 1）は明示的な拒否（BLASTP の subject は NCBI と同じ）。(3) A-1：BLASTN・BLASTP・TBLASTN・TBLASTX の option の値の UTF-8 でないバイトは、引数の解析の後の明示的な拒否（`-help` と parser の誤りが先）。(4) O-1：ABI v2 の `validate` はレコードを持たないので、引数とレコードの両方に誤りがあると、CLI と違い引数の誤りを先に返す（`docs/web/abi_v2.md`）。(5) 最後のゲートで省いた工程（TBLASTX の option の sweep、capture、Gate A の後半 10 組、V-ABI full の TBLASTX の残り）を受け入れる。(6) V-PERF は非退行として受け入れる（`tblastx` threaded-WASI の 2 つの時間は有意でない）。`main` への PR は今は作らない（[E2d のゲート記録](evidence/losat_web_e2d/README.md)） |
+| DW-21 | 2026-10-06 | program の表示名 | BLASTN 系（BLASTN・BLASTP・BLASTX・TBLASTN・TBLASTX）。NCBI BLAST+ と LOSAT の CLI の program 名に合わせる。§10 の項目を閉じる（S12 の最初に保守者が決めた。[W3 のゲート記録](evidence/losat_web_w3/README.md)） |
 | DW-12 | 2026-09-30 | NCBI の経路の棚卸しと一括の transpile | エンジンの NCBI との一致は、独立監査の指摘を 1 つずつ直すのでなく、アプリが出すオプションの範囲で NCBI の実行経路に現れる関数を program ごとに棚卸しし（忠実な移植・差のある移植・未移植・明示的な拒否）、未移植と差のある移植を NCBI の関数ごとに簡略化せずに transpile してから、棚卸しの表を基準に監査する。NCBI の C++ の層（object manager、ASN.1、`CFastaReader` など）は経路にある関数だけを移植する。LOSAT が速度のために NCBI と違う実装にしている箇所（詰めた配列の走査、並列化など）は、出力が同じなら、新しく移植する部分にも同じ方式を使ってよい（S07+ の 16 回の監査の後の、保守者の指示） |
 | DW-12 | 2026-09-29 | `PD-LOSAT-WEB-APP-BOUNDARY` を承認する | 状態を Accepted（版 1.0）にした。S02 の入口の条件を満たす |
 
@@ -154,7 +155,7 @@ LOSAT は、NCBI BLAST+ を純 Rust で再実装したものである。宣言�
 
 | 設計書の提案、または起こり得る要求 | 初期の実装 | 後から入れる条件 |
 |---|---|---|
-| 共有メモリ上の協調取消フラグ（設計書 §9.4） | Engine worker とスレッド用 worker をすべて終了する。Data worker の保持物は残す | 取消の後の再準備（instance の生成と Subject の再登録）の実測時間が、保守者の決める閾値を超えたとき。そのときは NCBI の `TInterruptFnPtr` を移植する（§4.9） |
+| 共有メモリ上の協調取消フラグ（設計書 §9.4） | Engine worker とスレッド用 worker をすべて終了する。Data worker の保持物は残す | 取消の後の再準備（instance の生成と Subject の再登録）の実測時間が、保守者の決める閾値を超えたとき。そのときは NCBI の `TInterruptFnPtr` を移植する（§4.9）。S09 の実測：取消そのものは 0〜1 ms、取消の後の再準備は最大 0.61 s（Firefox、4.6 Mb の Subject と 5.5 Mb の query）、Chromium と WebKit は 0.14 s 以下で、Subject の長さにほぼ比例する。閾値は保守者の判断待ち（W1 の推奨は 1 秒） |
 | SequenceProvider、部分読み出し、巨大な単一レコードへの範囲供給（設計書 §6.3、§8.2） | 選択したレコードの原バイトを、wasm メモリへまとめて渡す。扱える規模の上限は実測して公開する | 目標とするデータ規模が、実測したメモリ上限を超えるとき |
 | 共有メモリの最大値の拡大 | 1 GiB のまま（TD-7） | 目標とする入力の実測で 1 GiB が足りないとき。そのときは `--max-memory` だけを link の引数の差として認め、成果物の JSON に記録する |
 | PreparedSubject（エンコード・翻訳のキャッシュ）（設計書 §5、§8.1） | 解析済みのレコードと warm な instance を保持する（§4.6 の R1） | DW-8：ブラウザでの実測で、前処理が warm 実行時間の 20% 以上を占めた program |
@@ -162,8 +163,8 @@ LOSAT は、NCBI BLAST+ を純 Rust で再実装したものである。宣言�
 | 構造化バッチ、結果アーカイブからの再整形（設計書 §10.1） | 実行の完了時に、その program が対応する形式と構造化レコードを同時に作り、保存する | 生成していない形式（例：別のカスタム列）を後から出す要求が確定したとき |
 | 一時領域の staging から committed への移動（設計書 §7.1） | 移動しない。Data worker の登録簿で「確定」かどうかを区別する | 無し |
 | 残存領域の回収（設計書 §7.2） | Web Locks の保持状態だけで判断する。時刻では判断しない。Web Locks が使えない環境では回収しない | 無し |
-| レコード表の保存（設計書 §7.1 の `datasets/<revision>/index.blocks`） | Data worker のメモリに置く（S10） | S12 の実測で、レコード表がメモリの負担になったとき |
-| Memory の BlockStore の上限 | 既定は無制限（S10） | S09 のメモリの実測で決める |
+| レコード表の保存（設計書 §7.1 の `datasets/<revision>/index.blocks`） | Data worker のメモリに置く（S10）。S12 の実測：10 万レコード（34 MB）の索引は 3〜10 秒、表は 1 つの写しで約 51 MiB（V8 での見積り）。負担にならないと判断した | S17 で公開する対応規模が 10 万レコードを大きく超えるとき、または V-MOB の実機で負担が見えたとき |
+| Memory の BlockStore の上限 | 1 つのタブで 512 MB（S09。`MEMORY_RESULTS_CAPACITY_BYTES`）。超えた実行は理由付きで失敗し、前の結果は残る | 実機（V-MOB）で 512 MB が合わないとき |
 | 進捗率と残り時間（設計書 §3.1） | 出さない。段階と経過時間だけを出す | エンジンが測定できる進捗を持ったとき |
 | 図と一覧の集約表示（設計書 §11.1） | 仮想化した一覧と Canvas での描画だけ | 描画件数の実測値が、保守者の決める閾値を超えたとき |
 | 複数の計算プール、独立した直列 Wasm の並列実行（設計書 §9.1） | 作らない | 作らない（単一 query の高速化には効かないため） |
@@ -205,11 +206,14 @@ web/
     build/headers.ts         # _headers を読み、Vite と試験に渡す
     src/
       domain/                # program、argv、出力形式、run の型（Vue 非依存、何にも依存しない）
-      application/           # coordinator（キュー、状態機械）、Store（Vue 非依存）
-      ports/                 # EngineGateway / DataGateway / Downloader の interface
-      infra/                 # fake/（FakeEngine、FakeScanner）、data/（BlockStore の OPFS / Memory、DataService、セッション）、
-                             # data-worker/、run-output/（Engine worker から Data worker への出力の経路）、browser/（ダウンロード、SHA-256）
-                             # 後で engine-worker/、sw/ を足す
+      application/           # coordinator（キュー、状態機械、グループ）、draft（検索画面の下書き、S12）、
+                             # attention（Wake Lock、離れる前の注意、復帰時の確認、S12）、Store（Vue 非依存）
+      ports/                 # EngineGateway / DataGateway / Downloader / InputChecker / PagePort の interface
+      infra/                 # fake/（FakeEngine、FakeScanner、describe.json）、data/（BlockStore の OPFS / Memory、DataService、セッション）、
+                             # data-worker/、run-output/（Engine worker から Data worker への出力の経路）、browser/（ダウンロード、SHA-256、ページ）、
+                             # engine-worker/（Engine worker、ThreadHost、Auto と作り直しの規則、S09）、reactor/（ABI v2 の結合、入力の検査、S09・S12）
+                             # 後で sw/ を足す
+    build/reactors.ts        # LOSAT_WEB_REACTORS の reactor をビルドに入れる（無ければ FakeEngine）、threaded の module の共有メモリの guard（S09）
       ui/                    # Vue コンポーネント
       composition.ts         # 実装を選んで組み立てる唯一の場所
     tests/  unit/ contract/ e2e/（harness/、support/）
@@ -360,7 +364,7 @@ Combined は、複数ファイルのレコードをつないだ 1 回の実行�
 - 「Add to queue」を押したとき、`validate(argv)` が通った場合にだけ RunSnapshot を確定する。エラーは CLI と同じ文で出す（S01 で実装）。
 - この argv を、実行、CLI コマンドの表示、NCBI との比較用コマンド、セッションで共通に使う。`-query`・`-subject`・`-out`・`-outfmt`・`-num_threads` はアプリが管理し、利用者はパラメーターとして入力できない（S01 で実装）。
 - 表示する CLI コマンドは、出力形式ごとに作り、必ず `-outfmt N` を付ける。いくつかの program は CLI の既定の形式を受け付けないためである（S01 で実装）。
-- `-query` / `-subject` の名前の規則：ファイルが 1 つならそのファイル名。貼り付けなら `query.fa` / `subject.fa`。複数ファイルをつないだ場合は `combined_subject.fa`。つなぐとき、末尾に改行の無いファイルには改行を 1 つ補う。
+- `-query` / `-subject` の名前の規則：ファイルが 1 つならそのファイル名。貼り付けなら `query.fa` / `subject.fa`。複数ファイルをつないだ場合は `combined_query.fa` / `combined_subject.fa`（S12）。つなぐとき、末尾に改行の無いファイルには改行を 1 つ補う。
 - レコードを除外した実行やファイルをつないだ実行では、「この実行に使った入力 FASTA」（エンジンに渡したバイトそのもの）を書き出せるようにする。CLI での再現には、このファイルを使う。
 - 領域は、その役割のレコードが 1 つのときだけ指定でき、`-query_loc` / `-subject_loc` として argv に入る（DW-9）。
 
@@ -377,9 +381,9 @@ Combined は、複数ファイルのレコードをつないだ 1 回の実行�
 - 状態は `Queued → Preparing → Running → Finalizing → Completed | Cancelled | Failed`。実行は常に 1 つで、待ち行列は FIFO（S01 で実装）。
 - 取消と確定の順序：実行は `Finalizing` に入るまで取消せる。`Finalizing` の後の取消は受け付けず、その実行は完了する（S01 で実装）。
 - 段階のイベントは、実行中で取消されていない実行のものだけを受け付ける。S09 で Worker を作り直すようになったら、イベントに `runtimeGeneration` を付け、古い世代のものを捨てる。
-- Auto のスレッド数は、gbdraw の既定値（FASTA が 500,000 文字未満なら serial）を初期値にし、S09 で測り直す。
-- instance の作り直し：実行回数の上限、またはメモリの高水位で作り直す（G12 の対策）。値は S09 で実測して決める。
-- 設計書 §9.4 の Wake Lock の選択、終了前の注意、スリープやバックグラウンドからの復帰時の状態確認を入れる（S12、`REQ-22`）。
+- Auto のスレッド数（S09 で決めた）：入力（query と subject の FASTA）が 20,000 バイト未満なら serial、それ以上なら論理プロセッサの半分（最大 4）。手動の指定はそのまま使う（`src/infra/engine-worker/policy.ts`）。
+- instance の作り直し（S09 で決めた）：検索の後の linear memory が 512 MiB（threaded の最大値の半分）以上なら作り直す。実行回数では作り直さない（G12 の対策。linear memory は最初の 1〜3 回の検索で水準に達し、増え続けなかった）。
+- 設計書 §9.4 の Wake Lock の選択、終了前の注意、スリープやバックグラウンドからの復帰時の状態確認（S12、`REQ-22`）：Wake Lock は利用者が選び、Run が実行中か待っている間、ページが見えている間だけ持つ。Run が実行中か待っている間は離れる前に注意する。Run があるまま 1 秒以上隠れたページが戻ると、隠れていた時間、Run ごとの前と今の状態、Data worker の応答を示す。タブを閉じても検索が続くとは言わない。
 
 ### 5.6 保存層と寿命
 
@@ -471,11 +475,11 @@ NCBI BLAST+（oracle） ─[既存の認証]─► ネイティブ LOSAT の凍�
 | S08 | **E2b** TBLASTX outfmt 0/7 | 権威の記録、fixture の固定、移植、`PairwiseHit` の作成 | 固定した fixture で NCBI とバイト一致（承認済みの遺伝暗号の例外を除く）。既存の 6 に退行なし。TBLASTX の全升目の V-ABI。独立監査 |
 | SD | **E2i** BLASTN の dc-megablast と blastn-short | NCBI の discontiguous megablast の経路（task の既定値、`-template_type`・`-template_length`、`s_DiscWordOptionsValidate`、discontiguous の template の lookup と走査、拡張）と blastn-short の task の既定値の棚卸しと一括の移植（DW-18） | 固定した fixture で NCBI とバイト一致（outfmt 0/6/7、スレッド 1/2/4、dc-megablast は template の種類・長さ・word size の全組、blastn-short は短い query と既定値の上書き）。NCBI が受け付ける両 task の組合せの sweep が、同じ拒否、バイト一致、明示的な拒否のどれか。BLASTN の既存のゲートと fixture に退行なし。V-PERF の非退行（megablast と blastn）。両 task の升目の V-ABI。独立監査 |
 | S08+ | **E2e** BLASTP・TBLASTN・TBLASTX の既定以外のオプション | NCBI のオプションの検査（同じ拒否と文言）の移植。既定以外の値で NCBI と違う原因の調査と修正。直せない値の明示的な拒否（TD-13） | 各 program の sweep の全組合せが、NCBI と同じ拒否、outfmt 0/6/7 のバイト一致、明示的な拒否のどれかになる。直した組合せの fixture で NCBI とバイト一致。各 program の既存のゲートと S07・S08 の fixture に退行なし。V-PERF の非退行。変えた program の V-ABI。独立監査。**完了（2026-10-05、[E2e のゲート記録](evidence/losat_web_e2e/README.md)）** |
-| S09 | **W1** ブラウザでの実行基盤 | Engine worker、WASI shim、ThreadHost、機能の確認、serial への切り替え、取消、instance の作り直し、R1。DW-8 のための前処理の割合の実測。S10 の port（`RecordScanner`、`EngineInput`、run の出力の経路）を本物の reactor と Engine worker につなぐ | V-BR（BLASTX を除く 4 program、3 ブラウザ、n=1/2/4）。取消の後の実行が成功する。メモリの推移と前処理の割合を記録する。S10 の契約試験（`record-scanner`・`engine-input`・`run-output`）が本物の reactor と Engine worker で通る |
-| S09+ | **R2**（条件付き） | DW-8 の条件を満たした program ごとに、前処理キャッシュを移植する | 連続実行の出力が CLI と一致。独立監査。README の表に行を足して実施する |
+| S09 | **W1** ブラウザでの実行基盤 | Engine worker、WASI shim、ThreadHost、機能の確認、serial への切り替え、取消、instance の作り直し、R1。DW-8 のための前処理の割合の実測。S10 の port（`RecordScanner`、`EngineInput`、run の出力の経路）を本物の reactor と Engine worker につなぐ | V-BR（BLASTX を除く 4 program、3 ブラウザ、n=1/2/4）。取消の後の実行が成功する。メモリの推移と前処理の割合を記録する。S10 の契約試験（`record-scanner`・`engine-input`・`run-output`）が本物の reactor と Engine worker で通る。**完了（2026-10-03、[W1 のゲート記録](evidence/losat_web_w1/README.md)）** |
+| S09+ | **R2**（条件付き） | DW-8 の条件を満たした program ごとに、前処理キャッシュを移植する。S09 の実測で TBLASTN が条件を満たした（subject だけの前処理が命令数の 40.9%。その 76% は codon ごとの `GeneticCode::get`）。進め方は保守者の判断待ち（W1） | 連続実行の出力が CLI と一致。独立監査。README の表に行を足して実施する |
 | S10 | **W2** データ層 | Data worker、SourceStore、索引、DatasetRevision、BlockStore（OPFS / Memory）、登録簿、Web Locks、回収、容量不足 | 両方の実装が契約試験を通る。強制終了の後の回収、2 つのタブの保護、容量不足の試験が通る。**完了（2026-09-30、[ゲート記録](evidence/losat_web_w2/README.md)）** |
 | S11 | **E2d** `-query_loc` / `-subject_loc` | BLASTN・BLASTP・TBLASTN・TBLASTX への移植（BLASTX は SX） | 固定した fixture で NCBI とバイト一致。独立監査。**完了（2026-10-06、[E2d のゲート記録](evidence/losat_web_e2d/README.md)）** |
-| S12 | **W3** 検索画面 | program のタブ、入力、レコード一覧と除外、領域の指定（DW-9）、`describe` から作るフォーム、キュー、スレッド、段階と経過時間、診断、モバイル、Wake Lock など | 研究作業と境界条件の E2E |
+| S12 | **W3** 検索画面 | program のタブ、入力、レコード一覧と除外、領域の指定（DW-9）、`describe` から作るフォーム、キュー、スレッド、段階と経過時間、診断、モバイル、Wake Lock など | 研究作業と境界条件の E2E。**完了（2026-10-06、[W3 のゲート記録](evidence/losat_web_w3/README.md)）** |
 | S13 | **W4** 結果画面 | Subject 一覧、HSP、詳細、ドットプロット、Run の詳細、検証バッジ、フィルター、列定義表 | 対応済みの全 program の E2E。HSP と行・節との対応の試験 |
 | S14 | **W5** 抽出と候補 | flank、ヒット区間、全長、複数 HSP、multi-FASTA、ギャップ付きアラインメント、候補トレイ、メモ | 領域指定、端、逆向き、翻訳の各場合で原配列と一致 |
 | S15 | **W6** 出力と再現性 | CSV / JSON、レポート、設定ファイル、セッション、CLI コマンド、NCBI との比較用コマンド、使った入力 FASTA の書き出し | セッションを再読込しても再計算しない。元配列が無いとできない操作を明示する。勝手につなぎ直さない |
@@ -496,7 +500,8 @@ NCBI BLAST+（oracle） ─[既存の認証]─► ネイティブ LOSAT の凍�
 | BLASTN の outfmt 0 の移植が大きい（NCBI の `align_format`） | 公開の時期 | 権威と fixture の固定（S06）と移植（S07）を分ける |
 | BLASTX の認証が HOLD のまま | 5 program での公開 | LOSATX 計画で完了させる。SX と S17 の前提にする |
 | COEP の下で GA4 の iframe が動かない | GA4 の方式 | S16 で (b) 案と比べる |
-| Chromium での共有メモリの境界の問題（Node には `LOSAT/tests/wasi_shared_memory.js` という回避策がある） | threaded の経路 | S09 で判定する。必要なら同じ変換を使う |
+| Chromium での共有メモリの境界の問題（Node には `LOSAT/tests/wasi_shared_memory.js` という回避策がある） | threaded の経路 | S09 で判定した：Chromium 149 で起きる（60 回に 1〜2 回）。Node と同じ guard をビルドの時に threaded の module にかける（`build/reactors.ts`） |
+| 304（条件付きの要求への応答）に COOP / COEP / CORP が付かない | WebKit が、作り直す Engine worker の読み込みを拒否する（取消の後の検索が失敗する） | 開発とプレビューのサーバーは、すべての応答に付ける（S12）。本番の Cloudflare は S16 で確かめる |
 | reactor を繰り返し呼ぶとメモリが増える | 長時間の作業 | instance を作り直す方針。メモリの推移を RunRecord に記録する |
 | メモリの上限（1 GiB、端末、モバイル） | 扱える規模 | 実測して上限を公開する。上限を超えたら理由を示して失敗にする。拡大は §2.3 |
 | WebKit での OPFS の同期ハンドルと SAB の対応の差 | 機能の経路 | 機能を実際に確かめて経路を選ぶ。Memory / serial に切り替える |
@@ -533,10 +538,10 @@ NCBI BLAST+（oracle） ─[既存の認証]─► ネイティブ LOSAT の凍�
 
 | 項目 | 決める時点 |
 |---|---|
-| program の表示名（BLASTN 系か、LOSATN 系か、併記か） | S12 の前 |
+| program の表示名（BLASTN 系か、LOSATN 系か、併記か） | 決定（2026-10-06、DW-21：BLASTN 系） |
 | GA4 の方式（(a) iframe か、(b) Measurement Protocol への転送か） | S16 |
-| §2.3 の閾値（取消の後の再準備、描画件数） | S09 と S13 の実測の後 |
-| instance を作り直す条件 | S09 の実測の後 |
+| §2.3 の閾値（取消の後の再準備、描画件数） | 取消の後の再準備は保守者の判断待ち（S09 の実測と推奨は W1 のゲート記録）。描画件数は S13 の実測の後 |
+| instance を作り直す条件 | 決定（S09：検索の後の linear memory が 512 MiB 以上。§5.5） |
 | セッションファイルに候補とメモを含めるか | S15 の前 |
 | Cloudflare に残す旧版の数、ドメイン名 | S16 の前 |
 | BLASTX の範囲の拡大（DW-11）を LOSATX 計画の範囲の記録に書くこと | SX の前（保守者） |

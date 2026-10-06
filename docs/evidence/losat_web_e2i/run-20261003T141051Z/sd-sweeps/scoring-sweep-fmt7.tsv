@@ -1,0 +1,883 @@
+input	task	reward	penalty	gaps	result	message
+multi	dc-megablast	1	-5	default	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 1 and -5
+multi	dc-megablast	1	-5	2 2	same-error	BLAST engine error: Error: Gap existence and extension values 2 and 2 are not supported for substitution scores 1 and -5
+multi	dc-megablast	1	-5	5 2	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 1 and -5
+multi	dc-megablast	1	-5	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+multi	dc-megablast	1	-5	4 4	same	
+multi	dc-megablast	1	-5	6 4	same	
+multi	dc-megablast	1	-5	10 10	same	
+multi	dc-megablast	1	-5	0 2	same-error	BLAST engine error: Error: Gap existence and extension values 0 and 2 are not supported for substitution scores 1 and -5
+multi	dc-megablast	1	-5	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+multi	dc-megablast	1	-5	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 1 and -5
+multi	dc-megablast	1	-4	default	same	
+multi	dc-megablast	1	-4	2 2	same	
+multi	dc-megablast	1	-4	5 2	same	
+multi	dc-megablast	1	-4	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+multi	dc-megablast	1	-4	4 4	same	
+multi	dc-megablast	1	-4	6 4	same	
+multi	dc-megablast	1	-4	10 10	same	
+multi	dc-megablast	1	-4	0 2	same	
+multi	dc-megablast	1	-4	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+multi	dc-megablast	1	-4	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 1 and -4
+multi	dc-megablast	2	-7	default	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 2 and -7
+multi	dc-megablast	2	-7	2 2	same	
+multi	dc-megablast	2	-7	5 2	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 2 and -7
+multi	dc-megablast	2	-7	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+multi	dc-megablast	2	-7	4 4	same	
+multi	dc-megablast	2	-7	6 4	same	
+multi	dc-megablast	2	-7	10 10	same	
+multi	dc-megablast	2	-7	0 2	same-error	BLAST engine error: Error: Gap existence and extension values 0 and 2 are not supported for substitution scores 2 and -7
+multi	dc-megablast	2	-7	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+multi	dc-megablast	2	-7	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 2 and -7
+multi	dc-megablast	1	-3	default	same	
+multi	dc-megablast	1	-3	2 2	same	
+multi	dc-megablast	1	-3	5 2	same	
+multi	dc-megablast	1	-3	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+multi	dc-megablast	1	-3	4 4	same	
+multi	dc-megablast	1	-3	6 4	same	
+multi	dc-megablast	1	-3	10 10	same	
+multi	dc-megablast	1	-3	0 2	same	
+multi	dc-megablast	1	-3	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+multi	dc-megablast	1	-3	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 1 and -3
+multi	dc-megablast	2	-5	default	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 2 and -5
+multi	dc-megablast	2	-5	2 2	same	
+multi	dc-megablast	2	-5	5 2	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 2 and -5
+multi	dc-megablast	2	-5	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+multi	dc-megablast	2	-5	4 4	same	
+multi	dc-megablast	2	-5	6 4	same	
+multi	dc-megablast	2	-5	10 10	same	
+multi	dc-megablast	2	-5	0 2	same-error	BLAST engine error: Error: Gap existence and extension values 0 and 2 are not supported for substitution scores 2 and -5
+multi	dc-megablast	2	-5	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+multi	dc-megablast	2	-5	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 2 and -5
+multi	dc-megablast	1	-2	default	same	
+multi	dc-megablast	1	-2	2 2	same	
+multi	dc-megablast	1	-2	5 2	same	
+multi	dc-megablast	1	-2	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+multi	dc-megablast	1	-2	4 4	same	
+multi	dc-megablast	1	-2	6 4	same	
+multi	dc-megablast	1	-2	10 10	same	
+multi	dc-megablast	1	-2	0 2	same	
+multi	dc-megablast	1	-2	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+multi	dc-megablast	1	-2	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 1 and -2
+multi	dc-megablast	2	-3	default	same	
+multi	dc-megablast	2	-3	2 2	same	
+multi	dc-megablast	2	-3	5 2	same	
+multi	dc-megablast	2	-3	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+multi	dc-megablast	2	-3	4 4	same	
+multi	dc-megablast	2	-3	6 4	same	
+multi	dc-megablast	2	-3	10 10	same	
+multi	dc-megablast	2	-3	0 2	same-error	BLAST engine error: Error: Gap existence and extension values 0 and 2 are not supported for substitution scores 2 and -3
+multi	dc-megablast	2	-3	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+multi	dc-megablast	2	-3	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 2 and -3
+multi	dc-megablast	3	-4	default	same	
+multi	dc-megablast	3	-4	2 2	same-error	BLAST engine error: Error: Gap existence and extension values 2 and 2 are not supported for substitution scores 3 and -4
+multi	dc-megablast	3	-4	5 2	same	
+multi	dc-megablast	3	-4	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+multi	dc-megablast	3	-4	4 4	same-error	BLAST engine error: Error: Gap existence and extension values 4 and 4 are not supported for substitution scores 3 and -4
+multi	dc-megablast	3	-4	6 4	same	
+multi	dc-megablast	3	-4	10 10	same	
+multi	dc-megablast	3	-4	0 2	same-error	BLAST engine error: Error: Gap existence and extension values 0 and 2 are not supported for substitution scores 3 and -4
+multi	dc-megablast	3	-4	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+multi	dc-megablast	3	-4	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 3 and -4
+multi	dc-megablast	1	-1	default	same	
+multi	dc-megablast	1	-1	2 2	same	
+multi	dc-megablast	1	-1	5 2	same	
+multi	dc-megablast	1	-1	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+multi	dc-megablast	1	-1	4 4	same	
+multi	dc-megablast	1	-1	6 4	same	
+multi	dc-megablast	1	-1	10 10	same	
+multi	dc-megablast	1	-1	0 2	same	
+multi	dc-megablast	1	-1	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+multi	dc-megablast	1	-1	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 1 and -1
+multi	dc-megablast	3	-2	default	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 3 and -2
+multi	dc-megablast	3	-2	2 2	same-error	BLAST engine error: Error: Gap existence and extension values 2 and 2 are not supported for substitution scores 3 and -2
+multi	dc-megablast	3	-2	5 2	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 3 and -2
+multi	dc-megablast	3	-2	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+multi	dc-megablast	3	-2	4 4	same-error	BLAST engine error: Error: Gap existence and extension values 4 and 4 are not supported for substitution scores 3 and -2
+multi	dc-megablast	3	-2	6 4	same-error	BLAST engine error: Error: Gap existence and extension values 6 and 4 are not supported for substitution scores 3 and -2
+multi	dc-megablast	3	-2	10 10	same	
+multi	dc-megablast	3	-2	0 2	same-error	BLAST engine error: Error: Gap existence and extension values 0 and 2 are not supported for substitution scores 3 and -2
+multi	dc-megablast	3	-2	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+multi	dc-megablast	3	-2	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 3 and -2
+multi	dc-megablast	4	-5	default	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 4 and -5
+multi	dc-megablast	4	-5	2 2	same-error	BLAST engine error: Error: Gap existence and extension values 2 and 2 are not supported for substitution scores 4 and -5
+multi	dc-megablast	4	-5	5 2	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 4 and -5
+multi	dc-megablast	4	-5	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+multi	dc-megablast	4	-5	4 4	same-error	BLAST engine error: Error: Gap existence and extension values 4 and 4 are not supported for substitution scores 4 and -5
+multi	dc-megablast	4	-5	6 4	same-error	BLAST engine error: Error: Gap existence and extension values 6 and 4 are not supported for substitution scores 4 and -5
+multi	dc-megablast	4	-5	10 10	same-error	BLAST engine error: Error: Gap existence and extension values 10 and 10 are not supported for substitution scores 4 and -5
+multi	dc-megablast	4	-5	0 2	same-error	BLAST engine error: Error: Gap existence and extension values 0 and 2 are not supported for substitution scores 4 and -5
+multi	dc-megablast	4	-5	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+multi	dc-megablast	4	-5	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 4 and -5
+multi	dc-megablast	5	-4	default	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 5 and -4
+multi	dc-megablast	5	-4	2 2	same-error	BLAST engine error: Error: Gap existence and extension values 2 and 2 are not supported for substitution scores 5 and -4
+multi	dc-megablast	5	-4	5 2	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 5 and -4
+multi	dc-megablast	5	-4	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+multi	dc-megablast	5	-4	4 4	same-error	BLAST engine error: Error: Gap existence and extension values 4 and 4 are not supported for substitution scores 5 and -4
+multi	dc-megablast	5	-4	6 4	same-error	BLAST engine error: Error: Gap existence and extension values 6 and 4 are not supported for substitution scores 5 and -4
+multi	dc-megablast	5	-4	10 10	same-error	BLAST engine error: Error: Gap existence and extension values 10 and 10 are not supported for substitution scores 5 and -4
+multi	dc-megablast	5	-4	0 2	same-error	BLAST engine error: Error: Gap existence and extension values 0 and 2 are not supported for substitution scores 5 and -4
+multi	dc-megablast	5	-4	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+multi	dc-megablast	5	-4	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 5 and -4
+multi	dc-megablast	2	-2	default	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 2 and -2
+multi	dc-megablast	2	-2	2 2	same-error	BLAST engine error: Error: Gap existence and extension values 2 and 2 are not supported for substitution scores 2 and -2
+multi	dc-megablast	2	-2	5 2	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 2 and -2
+multi	dc-megablast	2	-2	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+multi	dc-megablast	2	-2	4 4	same	
+multi	dc-megablast	2	-2	6 4	same	
+multi	dc-megablast	2	-2	10 10	same	
+multi	dc-megablast	2	-2	0 2	same-error	BLAST engine error: Error: Gap existence and extension values 0 and 2 are not supported for substitution scores 2 and -2
+multi	dc-megablast	2	-2	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+multi	dc-megablast	2	-2	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 2 and -2
+multi	dc-megablast	2	-4	default	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 2 and -4
+multi	dc-megablast	2	-4	2 2	same	
+multi	dc-megablast	2	-4	5 2	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 2 and -4
+multi	dc-megablast	2	-4	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+multi	dc-megablast	2	-4	4 4	same	
+multi	dc-megablast	2	-4	6 4	same	
+multi	dc-megablast	2	-4	10 10	same	
+multi	dc-megablast	2	-4	0 2	same-error	BLAST engine error: Error: Gap existence and extension values 0 and 2 are not supported for substitution scores 2 and -4
+multi	dc-megablast	2	-4	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+multi	dc-megablast	2	-4	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 2 and -4
+multi	dc-megablast	2	-6	default	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 2 and -6
+multi	dc-megablast	2	-6	2 2	same	
+multi	dc-megablast	2	-6	5 2	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 2 and -6
+multi	dc-megablast	2	-6	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+multi	dc-megablast	2	-6	4 4	same	
+multi	dc-megablast	2	-6	6 4	same	
+multi	dc-megablast	2	-6	10 10	same	
+multi	dc-megablast	2	-6	0 2	same-error	BLAST engine error: Error: Gap existence and extension values 0 and 2 are not supported for substitution scores 2 and -6
+multi	dc-megablast	2	-6	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+multi	dc-megablast	2	-6	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 2 and -6
+multi	dc-megablast	4	-6	default	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 4 and -6
+multi	dc-megablast	4	-6	2 2	same-error	BLAST engine error: Error: Gap existence and extension values 2 and 2 are not supported for substitution scores 4 and -6
+multi	dc-megablast	4	-6	5 2	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 4 and -6
+multi	dc-megablast	4	-6	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+multi	dc-megablast	4	-6	4 4	same	
+multi	dc-megablast	4	-6	6 4	same-error	BLAST engine error: Error: Gap existence and extension values 6 and 4 are not supported for substitution scores 4 and -6
+multi	dc-megablast	4	-6	10 10	same-error	BLAST engine error: Error: Gap existence and extension values 10 and 10 are not supported for substitution scores 4 and -6
+multi	dc-megablast	4	-6	0 2	same-error	BLAST engine error: Error: Gap existence and extension values 0 and 2 are not supported for substitution scores 4 and -6
+multi	dc-megablast	4	-6	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+multi	dc-megablast	4	-6	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 4 and -6
+multi	dc-megablast	3	-6	default	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 3 and -6
+multi	dc-megablast	3	-6	2 2	same-error	BLAST engine error: Error: Gap existence and extension values 2 and 2 are not supported for substitution scores 3 and -6
+multi	dc-megablast	3	-6	5 2	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 3 and -6
+multi	dc-megablast	3	-6	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+multi	dc-megablast	3	-6	4 4	same-error	BLAST engine error: Error: Gap existence and extension values 4 and 4 are not supported for substitution scores 3 and -6
+multi	dc-megablast	3	-6	6 4	same-error	BLAST engine error: Error: Gap existence and extension values 6 and 4 are not supported for substitution scores 3 and -6
+multi	dc-megablast	3	-6	10 10	same	
+multi	dc-megablast	3	-6	0 2	same-error	BLAST engine error: Error: Gap existence and extension values 0 and 2 are not supported for substitution scores 3 and -6
+multi	dc-megablast	3	-6	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+multi	dc-megablast	3	-6	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 3 and -6
+multi	dc-megablast	4	-10	default	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 4 and -10
+multi	dc-megablast	4	-10	2 2	same-error	BLAST engine error: Error: Gap existence and extension values 2 and 2 are not supported for substitution scores 4 and -10
+multi	dc-megablast	4	-10	5 2	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 4 and -10
+multi	dc-megablast	4	-10	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+multi	dc-megablast	4	-10	4 4	same	
+multi	dc-megablast	4	-10	6 4	same-error	BLAST engine error: Error: Gap existence and extension values 6 and 4 are not supported for substitution scores 4 and -10
+multi	dc-megablast	4	-10	10 10	same	
+multi	dc-megablast	4	-10	0 2	same-error	BLAST engine error: Error: Gap existence and extension values 0 and 2 are not supported for substitution scores 4 and -10
+multi	dc-megablast	4	-10	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+multi	dc-megablast	4	-10	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 4 and -10
+multi	dc-megablast	1	-6	default	same-error	BLAST engine error: Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and
+multi	dc-megablast	1	-6	2 2	same-error	BLAST engine error: Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and
+multi	dc-megablast	1	-6	5 2	same-error	BLAST engine error: Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and
+multi	dc-megablast	1	-6	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+multi	dc-megablast	1	-6	4 4	same-error	BLAST engine error: Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and
+multi	dc-megablast	1	-6	6 4	same-error	BLAST engine error: Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and
+multi	dc-megablast	1	-6	10 10	same-error	BLAST engine error: Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and
+multi	dc-megablast	1	-6	0 2	same-error	BLAST engine error: Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and
+multi	dc-megablast	1	-6	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+multi	dc-megablast	1	-6	-1 2	same-error	BLAST engine error: Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and
+multi	dc-megablast	3	-5	default	same-error	BLAST engine error: Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and
+multi	dc-megablast	3	-5	2 2	same-error	BLAST engine error: Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and
+multi	dc-megablast	3	-5	5 2	same-error	BLAST engine error: Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and
+multi	dc-megablast	3	-5	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+multi	dc-megablast	3	-5	4 4	same-error	BLAST engine error: Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and
+multi	dc-megablast	3	-5	6 4	same-error	BLAST engine error: Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and
+multi	dc-megablast	3	-5	10 10	same-error	BLAST engine error: Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and
+multi	dc-megablast	3	-5	0 2	same-error	BLAST engine error: Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and
+multi	dc-megablast	3	-5	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+multi	dc-megablast	3	-5	-1 2	same-error	BLAST engine error: Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and
+multi	dc-megablast	2	-1	default	same-error	BLAST engine error: Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and
+multi	dc-megablast	2	-1	2 2	same-error	BLAST engine error: Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and
+multi	dc-megablast	2	-1	5 2	same-error	BLAST engine error: Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and
+multi	dc-megablast	2	-1	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+multi	dc-megablast	2	-1	4 4	same-error	BLAST engine error: Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and
+multi	dc-megablast	2	-1	6 4	same-error	BLAST engine error: Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and
+multi	dc-megablast	2	-1	10 10	same-error	BLAST engine error: Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and
+multi	dc-megablast	2	-1	0 2	same-error	BLAST engine error: Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and
+multi	dc-megablast	2	-1	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+multi	dc-megablast	2	-1	-1 2	same-error	BLAST engine error: Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and
+multi	dc-megablast	1	0	default	same-error	BLAST query/options error: BLASTN penalty must be negative
+multi	dc-megablast	1	0	2 2	same-error	BLAST query/options error: BLASTN penalty must be negative
+multi	dc-megablast	1	0	5 2	same-error	BLAST query/options error: BLASTN penalty must be negative
+multi	dc-megablast	1	0	0 0	same-error	BLAST query/options error: BLASTN penalty must be negative
+multi	dc-megablast	1	0	4 4	same-error	BLAST query/options error: BLASTN penalty must be negative
+multi	dc-megablast	1	0	6 4	same-error	BLAST query/options error: BLASTN penalty must be negative
+multi	dc-megablast	1	0	10 10	same-error	BLAST query/options error: BLASTN penalty must be negative
+multi	dc-megablast	1	0	0 2	same-error	BLAST query/options error: BLASTN penalty must be negative
+multi	dc-megablast	1	0	3 0	same-error	BLAST query/options error: BLASTN penalty must be negative
+multi	dc-megablast	1	0	-1 2	same-error	BLAST query/options error: BLASTN penalty must be negative
+multi	blastn-short	1	-5	default	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 1 and -5
+multi	blastn-short	1	-5	2 2	same-error	BLAST engine error: Error: Gap existence and extension values 2 and 2 are not supported for substitution scores 1 and -5
+multi	blastn-short	1	-5	5 2	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 1 and -5
+multi	blastn-short	1	-5	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+multi	blastn-short	1	-5	4 4	same	
+multi	blastn-short	1	-5	6 4	same	
+multi	blastn-short	1	-5	10 10	same	
+multi	blastn-short	1	-5	0 2	same-error	BLAST engine error: Error: Gap existence and extension values 0 and 2 are not supported for substitution scores 1 and -5
+multi	blastn-short	1	-5	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+multi	blastn-short	1	-5	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 1 and -5
+multi	blastn-short	1	-4	default	same	
+multi	blastn-short	1	-4	2 2	same	
+multi	blastn-short	1	-4	5 2	same	
+multi	blastn-short	1	-4	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+multi	blastn-short	1	-4	4 4	same	
+multi	blastn-short	1	-4	6 4	same	
+multi	blastn-short	1	-4	10 10	same	
+multi	blastn-short	1	-4	0 2	same	
+multi	blastn-short	1	-4	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+multi	blastn-short	1	-4	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 1 and -4
+multi	blastn-short	2	-7	default	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 2 and -7
+multi	blastn-short	2	-7	2 2	same	
+multi	blastn-short	2	-7	5 2	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 2 and -7
+multi	blastn-short	2	-7	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+multi	blastn-short	2	-7	4 4	same	
+multi	blastn-short	2	-7	6 4	same	
+multi	blastn-short	2	-7	10 10	same	
+multi	blastn-short	2	-7	0 2	same-error	BLAST engine error: Error: Gap existence and extension values 0 and 2 are not supported for substitution scores 2 and -7
+multi	blastn-short	2	-7	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+multi	blastn-short	2	-7	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 2 and -7
+multi	blastn-short	1	-3	default	same	
+multi	blastn-short	1	-3	2 2	same	
+multi	blastn-short	1	-3	5 2	same	
+multi	blastn-short	1	-3	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+multi	blastn-short	1	-3	4 4	same	
+multi	blastn-short	1	-3	6 4	same	
+multi	blastn-short	1	-3	10 10	same	
+multi	blastn-short	1	-3	0 2	same	
+multi	blastn-short	1	-3	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+multi	blastn-short	1	-3	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 1 and -3
+multi	blastn-short	2	-5	default	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 2 and -5
+multi	blastn-short	2	-5	2 2	same	
+multi	blastn-short	2	-5	5 2	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 2 and -5
+multi	blastn-short	2	-5	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+multi	blastn-short	2	-5	4 4	same	
+multi	blastn-short	2	-5	6 4	same	
+multi	blastn-short	2	-5	10 10	same	
+multi	blastn-short	2	-5	0 2	same-error	BLAST engine error: Error: Gap existence and extension values 0 and 2 are not supported for substitution scores 2 and -5
+multi	blastn-short	2	-5	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+multi	blastn-short	2	-5	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 2 and -5
+multi	blastn-short	1	-2	default	same	
+multi	blastn-short	1	-2	2 2	same	
+multi	blastn-short	1	-2	5 2	same	
+multi	blastn-short	1	-2	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+multi	blastn-short	1	-2	4 4	same	
+multi	blastn-short	1	-2	6 4	same	
+multi	blastn-short	1	-2	10 10	same	
+multi	blastn-short	1	-2	0 2	same	
+multi	blastn-short	1	-2	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+multi	blastn-short	1	-2	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 1 and -2
+multi	blastn-short	2	-3	default	same	
+multi	blastn-short	2	-3	2 2	same	
+multi	blastn-short	2	-3	5 2	same	
+multi	blastn-short	2	-3	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+multi	blastn-short	2	-3	4 4	same	
+multi	blastn-short	2	-3	6 4	same	
+multi	blastn-short	2	-3	10 10	same	
+multi	blastn-short	2	-3	0 2	same-error	BLAST engine error: Error: Gap existence and extension values 0 and 2 are not supported for substitution scores 2 and -3
+multi	blastn-short	2	-3	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+multi	blastn-short	2	-3	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 2 and -3
+multi	blastn-short	3	-4	default	same	
+multi	blastn-short	3	-4	2 2	same-error	BLAST engine error: Error: Gap existence and extension values 2 and 2 are not supported for substitution scores 3 and -4
+multi	blastn-short	3	-4	5 2	same	
+multi	blastn-short	3	-4	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+multi	blastn-short	3	-4	4 4	same-error	BLAST engine error: Error: Gap existence and extension values 4 and 4 are not supported for substitution scores 3 and -4
+multi	blastn-short	3	-4	6 4	same	
+multi	blastn-short	3	-4	10 10	same	
+multi	blastn-short	3	-4	0 2	same-error	BLAST engine error: Error: Gap existence and extension values 0 and 2 are not supported for substitution scores 3 and -4
+multi	blastn-short	3	-4	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+multi	blastn-short	3	-4	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 3 and -4
+multi	blastn-short	1	-1	default	same	
+multi	blastn-short	1	-1	2 2	same	
+multi	blastn-short	1	-1	5 2	same	
+multi	blastn-short	1	-1	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+multi	blastn-short	1	-1	4 4	same	
+multi	blastn-short	1	-1	6 4	same	
+multi	blastn-short	1	-1	10 10	same	
+multi	blastn-short	1	-1	0 2	same	
+multi	blastn-short	1	-1	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+multi	blastn-short	1	-1	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 1 and -1
+multi	blastn-short	3	-2	default	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 3 and -2
+multi	blastn-short	3	-2	2 2	same-error	BLAST engine error: Error: Gap existence and extension values 2 and 2 are not supported for substitution scores 3 and -2
+multi	blastn-short	3	-2	5 2	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 3 and -2
+multi	blastn-short	3	-2	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+multi	blastn-short	3	-2	4 4	same-error	BLAST engine error: Error: Gap existence and extension values 4 and 4 are not supported for substitution scores 3 and -2
+multi	blastn-short	3	-2	6 4	same-error	BLAST engine error: Error: Gap existence and extension values 6 and 4 are not supported for substitution scores 3 and -2
+multi	blastn-short	3	-2	10 10	same	
+multi	blastn-short	3	-2	0 2	same-error	BLAST engine error: Error: Gap existence and extension values 0 and 2 are not supported for substitution scores 3 and -2
+multi	blastn-short	3	-2	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+multi	blastn-short	3	-2	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 3 and -2
+multi	blastn-short	4	-5	default	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 4 and -5
+multi	blastn-short	4	-5	2 2	same-error	BLAST engine error: Error: Gap existence and extension values 2 and 2 are not supported for substitution scores 4 and -5
+multi	blastn-short	4	-5	5 2	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 4 and -5
+multi	blastn-short	4	-5	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+multi	blastn-short	4	-5	4 4	same-error	BLAST engine error: Error: Gap existence and extension values 4 and 4 are not supported for substitution scores 4 and -5
+multi	blastn-short	4	-5	6 4	same-error	BLAST engine error: Error: Gap existence and extension values 6 and 4 are not supported for substitution scores 4 and -5
+multi	blastn-short	4	-5	10 10	same-error	BLAST engine error: Error: Gap existence and extension values 10 and 10 are not supported for substitution scores 4 and -5
+multi	blastn-short	4	-5	0 2	same-error	BLAST engine error: Error: Gap existence and extension values 0 and 2 are not supported for substitution scores 4 and -5
+multi	blastn-short	4	-5	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+multi	blastn-short	4	-5	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 4 and -5
+multi	blastn-short	5	-4	default	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 5 and -4
+multi	blastn-short	5	-4	2 2	same-error	BLAST engine error: Error: Gap existence and extension values 2 and 2 are not supported for substitution scores 5 and -4
+multi	blastn-short	5	-4	5 2	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 5 and -4
+multi	blastn-short	5	-4	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+multi	blastn-short	5	-4	4 4	same-error	BLAST engine error: Error: Gap existence and extension values 4 and 4 are not supported for substitution scores 5 and -4
+multi	blastn-short	5	-4	6 4	same-error	BLAST engine error: Error: Gap existence and extension values 6 and 4 are not supported for substitution scores 5 and -4
+multi	blastn-short	5	-4	10 10	same-error	BLAST engine error: Error: Gap existence and extension values 10 and 10 are not supported for substitution scores 5 and -4
+multi	blastn-short	5	-4	0 2	same-error	BLAST engine error: Error: Gap existence and extension values 0 and 2 are not supported for substitution scores 5 and -4
+multi	blastn-short	5	-4	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+multi	blastn-short	5	-4	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 5 and -4
+multi	blastn-short	2	-2	default	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 2 and -2
+multi	blastn-short	2	-2	2 2	same-error	BLAST engine error: Error: Gap existence and extension values 2 and 2 are not supported for substitution scores 2 and -2
+multi	blastn-short	2	-2	5 2	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 2 and -2
+multi	blastn-short	2	-2	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+multi	blastn-short	2	-2	4 4	same	
+multi	blastn-short	2	-2	6 4	same	
+multi	blastn-short	2	-2	10 10	same	
+multi	blastn-short	2	-2	0 2	same-error	BLAST engine error: Error: Gap existence and extension values 0 and 2 are not supported for substitution scores 2 and -2
+multi	blastn-short	2	-2	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+multi	blastn-short	2	-2	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 2 and -2
+multi	blastn-short	2	-4	default	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 2 and -4
+multi	blastn-short	2	-4	2 2	same	
+multi	blastn-short	2	-4	5 2	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 2 and -4
+multi	blastn-short	2	-4	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+multi	blastn-short	2	-4	4 4	same	
+multi	blastn-short	2	-4	6 4	same	
+multi	blastn-short	2	-4	10 10	same	
+multi	blastn-short	2	-4	0 2	same-error	BLAST engine error: Error: Gap existence and extension values 0 and 2 are not supported for substitution scores 2 and -4
+multi	blastn-short	2	-4	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+multi	blastn-short	2	-4	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 2 and -4
+multi	blastn-short	2	-6	default	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 2 and -6
+multi	blastn-short	2	-6	2 2	same	
+multi	blastn-short	2	-6	5 2	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 2 and -6
+multi	blastn-short	2	-6	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+multi	blastn-short	2	-6	4 4	same	
+multi	blastn-short	2	-6	6 4	same	
+multi	blastn-short	2	-6	10 10	same	
+multi	blastn-short	2	-6	0 2	same-error	BLAST engine error: Error: Gap existence and extension values 0 and 2 are not supported for substitution scores 2 and -6
+multi	blastn-short	2	-6	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+multi	blastn-short	2	-6	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 2 and -6
+multi	blastn-short	4	-6	default	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 4 and -6
+multi	blastn-short	4	-6	2 2	same-error	BLAST engine error: Error: Gap existence and extension values 2 and 2 are not supported for substitution scores 4 and -6
+multi	blastn-short	4	-6	5 2	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 4 and -6
+multi	blastn-short	4	-6	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+multi	blastn-short	4	-6	4 4	same	
+multi	blastn-short	4	-6	6 4	same-error	BLAST engine error: Error: Gap existence and extension values 6 and 4 are not supported for substitution scores 4 and -6
+multi	blastn-short	4	-6	10 10	same-error	BLAST engine error: Error: Gap existence and extension values 10 and 10 are not supported for substitution scores 4 and -6
+multi	blastn-short	4	-6	0 2	same-error	BLAST engine error: Error: Gap existence and extension values 0 and 2 are not supported for substitution scores 4 and -6
+multi	blastn-short	4	-6	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+multi	blastn-short	4	-6	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 4 and -6
+multi	blastn-short	3	-6	default	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 3 and -6
+multi	blastn-short	3	-6	2 2	same-error	BLAST engine error: Error: Gap existence and extension values 2 and 2 are not supported for substitution scores 3 and -6
+multi	blastn-short	3	-6	5 2	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 3 and -6
+multi	blastn-short	3	-6	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+multi	blastn-short	3	-6	4 4	same-error	BLAST engine error: Error: Gap existence and extension values 4 and 4 are not supported for substitution scores 3 and -6
+multi	blastn-short	3	-6	6 4	same-error	BLAST engine error: Error: Gap existence and extension values 6 and 4 are not supported for substitution scores 3 and -6
+multi	blastn-short	3	-6	10 10	same	
+multi	blastn-short	3	-6	0 2	same-error	BLAST engine error: Error: Gap existence and extension values 0 and 2 are not supported for substitution scores 3 and -6
+multi	blastn-short	3	-6	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+multi	blastn-short	3	-6	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 3 and -6
+multi	blastn-short	4	-10	default	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 4 and -10
+multi	blastn-short	4	-10	2 2	same-error	BLAST engine error: Error: Gap existence and extension values 2 and 2 are not supported for substitution scores 4 and -10
+multi	blastn-short	4	-10	5 2	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 4 and -10
+multi	blastn-short	4	-10	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+multi	blastn-short	4	-10	4 4	same	
+multi	blastn-short	4	-10	6 4	same-error	BLAST engine error: Error: Gap existence and extension values 6 and 4 are not supported for substitution scores 4 and -10
+multi	blastn-short	4	-10	10 10	same	
+multi	blastn-short	4	-10	0 2	same-error	BLAST engine error: Error: Gap existence and extension values 0 and 2 are not supported for substitution scores 4 and -10
+multi	blastn-short	4	-10	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+multi	blastn-short	4	-10	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 4 and -10
+multi	blastn-short	1	-6	default	same-error	BLAST engine error: Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and
+multi	blastn-short	1	-6	2 2	same-error	BLAST engine error: Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and
+multi	blastn-short	1	-6	5 2	same-error	BLAST engine error: Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and
+multi	blastn-short	1	-6	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+multi	blastn-short	1	-6	4 4	same-error	BLAST engine error: Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and
+multi	blastn-short	1	-6	6 4	same-error	BLAST engine error: Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and
+multi	blastn-short	1	-6	10 10	same-error	BLAST engine error: Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and
+multi	blastn-short	1	-6	0 2	same-error	BLAST engine error: Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and
+multi	blastn-short	1	-6	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+multi	blastn-short	1	-6	-1 2	same-error	BLAST engine error: Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and
+multi	blastn-short	3	-5	default	same-error	BLAST engine error: Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and
+multi	blastn-short	3	-5	2 2	same-error	BLAST engine error: Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and
+multi	blastn-short	3	-5	5 2	same-error	BLAST engine error: Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and
+multi	blastn-short	3	-5	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+multi	blastn-short	3	-5	4 4	same-error	BLAST engine error: Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and
+multi	blastn-short	3	-5	6 4	same-error	BLAST engine error: Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and
+multi	blastn-short	3	-5	10 10	same-error	BLAST engine error: Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and
+multi	blastn-short	3	-5	0 2	same-error	BLAST engine error: Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and
+multi	blastn-short	3	-5	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+multi	blastn-short	3	-5	-1 2	same-error	BLAST engine error: Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and
+multi	blastn-short	2	-1	default	same-error	BLAST engine error: Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and
+multi	blastn-short	2	-1	2 2	same-error	BLAST engine error: Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and
+multi	blastn-short	2	-1	5 2	same-error	BLAST engine error: Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and
+multi	blastn-short	2	-1	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+multi	blastn-short	2	-1	4 4	same-error	BLAST engine error: Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and
+multi	blastn-short	2	-1	6 4	same-error	BLAST engine error: Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and
+multi	blastn-short	2	-1	10 10	same-error	BLAST engine error: Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and
+multi	blastn-short	2	-1	0 2	same-error	BLAST engine error: Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and
+multi	blastn-short	2	-1	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+multi	blastn-short	2	-1	-1 2	same-error	BLAST engine error: Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and
+multi	blastn-short	1	0	default	same-error	BLAST query/options error: BLASTN penalty must be negative
+multi	blastn-short	1	0	2 2	same-error	BLAST query/options error: BLASTN penalty must be negative
+multi	blastn-short	1	0	5 2	same-error	BLAST query/options error: BLASTN penalty must be negative
+multi	blastn-short	1	0	0 0	same-error	BLAST query/options error: BLASTN penalty must be negative
+multi	blastn-short	1	0	4 4	same-error	BLAST query/options error: BLASTN penalty must be negative
+multi	blastn-short	1	0	6 4	same-error	BLAST query/options error: BLASTN penalty must be negative
+multi	blastn-short	1	0	10 10	same-error	BLAST query/options error: BLASTN penalty must be negative
+multi	blastn-short	1	0	0 2	same-error	BLAST query/options error: BLASTN penalty must be negative
+multi	blastn-short	1	0	3 0	same-error	BLAST query/options error: BLASTN penalty must be negative
+multi	blastn-short	1	0	-1 2	same-error	BLAST query/options error: BLASTN penalty must be negative
+iupac	dc-megablast	1	-5	default	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 1 and -5
+iupac	dc-megablast	1	-5	2 2	same-error	BLAST engine error: Error: Gap existence and extension values 2 and 2 are not supported for substitution scores 1 and -5
+iupac	dc-megablast	1	-5	5 2	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 1 and -5
+iupac	dc-megablast	1	-5	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+iupac	dc-megablast	1	-5	4 4	same	
+iupac	dc-megablast	1	-5	6 4	same	
+iupac	dc-megablast	1	-5	10 10	same	
+iupac	dc-megablast	1	-5	0 2	same-error	BLAST engine error: Error: Gap existence and extension values 0 and 2 are not supported for substitution scores 1 and -5
+iupac	dc-megablast	1	-5	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+iupac	dc-megablast	1	-5	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 1 and -5
+iupac	dc-megablast	1	-4	default	same	
+iupac	dc-megablast	1	-4	2 2	same	
+iupac	dc-megablast	1	-4	5 2	same	
+iupac	dc-megablast	1	-4	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+iupac	dc-megablast	1	-4	4 4	same	
+iupac	dc-megablast	1	-4	6 4	same	
+iupac	dc-megablast	1	-4	10 10	same	
+iupac	dc-megablast	1	-4	0 2	same	
+iupac	dc-megablast	1	-4	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+iupac	dc-megablast	1	-4	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 1 and -4
+iupac	dc-megablast	2	-7	default	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 2 and -7
+iupac	dc-megablast	2	-7	2 2	same	
+iupac	dc-megablast	2	-7	5 2	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 2 and -7
+iupac	dc-megablast	2	-7	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+iupac	dc-megablast	2	-7	4 4	same	
+iupac	dc-megablast	2	-7	6 4	same	
+iupac	dc-megablast	2	-7	10 10	same	
+iupac	dc-megablast	2	-7	0 2	same-error	BLAST engine error: Error: Gap existence and extension values 0 and 2 are not supported for substitution scores 2 and -7
+iupac	dc-megablast	2	-7	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+iupac	dc-megablast	2	-7	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 2 and -7
+iupac	dc-megablast	1	-3	default	same	
+iupac	dc-megablast	1	-3	2 2	same	
+iupac	dc-megablast	1	-3	5 2	same	
+iupac	dc-megablast	1	-3	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+iupac	dc-megablast	1	-3	4 4	same	
+iupac	dc-megablast	1	-3	6 4	same	
+iupac	dc-megablast	1	-3	10 10	same	
+iupac	dc-megablast	1	-3	0 2	same	
+iupac	dc-megablast	1	-3	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+iupac	dc-megablast	1	-3	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 1 and -3
+iupac	dc-megablast	2	-5	default	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 2 and -5
+iupac	dc-megablast	2	-5	2 2	same	
+iupac	dc-megablast	2	-5	5 2	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 2 and -5
+iupac	dc-megablast	2	-5	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+iupac	dc-megablast	2	-5	4 4	same	
+iupac	dc-megablast	2	-5	6 4	same	
+iupac	dc-megablast	2	-5	10 10	same	
+iupac	dc-megablast	2	-5	0 2	same-error	BLAST engine error: Error: Gap existence and extension values 0 and 2 are not supported for substitution scores 2 and -5
+iupac	dc-megablast	2	-5	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+iupac	dc-megablast	2	-5	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 2 and -5
+iupac	dc-megablast	1	-2	default	same	
+iupac	dc-megablast	1	-2	2 2	same	
+iupac	dc-megablast	1	-2	5 2	same	
+iupac	dc-megablast	1	-2	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+iupac	dc-megablast	1	-2	4 4	same	
+iupac	dc-megablast	1	-2	6 4	same	
+iupac	dc-megablast	1	-2	10 10	same	
+iupac	dc-megablast	1	-2	0 2	same	
+iupac	dc-megablast	1	-2	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+iupac	dc-megablast	1	-2	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 1 and -2
+iupac	dc-megablast	2	-3	default	same	
+iupac	dc-megablast	2	-3	2 2	same	
+iupac	dc-megablast	2	-3	5 2	same	
+iupac	dc-megablast	2	-3	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+iupac	dc-megablast	2	-3	4 4	same	
+iupac	dc-megablast	2	-3	6 4	same	
+iupac	dc-megablast	2	-3	10 10	same	
+iupac	dc-megablast	2	-3	0 2	same-error	BLAST engine error: Error: Gap existence and extension values 0 and 2 are not supported for substitution scores 2 and -3
+iupac	dc-megablast	2	-3	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+iupac	dc-megablast	2	-3	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 2 and -3
+iupac	dc-megablast	3	-4	default	same	
+iupac	dc-megablast	3	-4	2 2	same-error	BLAST engine error: Error: Gap existence and extension values 2 and 2 are not supported for substitution scores 3 and -4
+iupac	dc-megablast	3	-4	5 2	same	
+iupac	dc-megablast	3	-4	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+iupac	dc-megablast	3	-4	4 4	same-error	BLAST engine error: Error: Gap existence and extension values 4 and 4 are not supported for substitution scores 3 and -4
+iupac	dc-megablast	3	-4	6 4	same	
+iupac	dc-megablast	3	-4	10 10	same	
+iupac	dc-megablast	3	-4	0 2	same-error	BLAST engine error: Error: Gap existence and extension values 0 and 2 are not supported for substitution scores 3 and -4
+iupac	dc-megablast	3	-4	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+iupac	dc-megablast	3	-4	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 3 and -4
+iupac	dc-megablast	1	-1	default	same	
+iupac	dc-megablast	1	-1	2 2	same	
+iupac	dc-megablast	1	-1	5 2	same	
+iupac	dc-megablast	1	-1	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+iupac	dc-megablast	1	-1	4 4	same	
+iupac	dc-megablast	1	-1	6 4	same	
+iupac	dc-megablast	1	-1	10 10	same	
+iupac	dc-megablast	1	-1	0 2	same	
+iupac	dc-megablast	1	-1	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+iupac	dc-megablast	1	-1	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 1 and -1
+iupac	dc-megablast	3	-2	default	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 3 and -2
+iupac	dc-megablast	3	-2	2 2	same-error	BLAST engine error: Error: Gap existence and extension values 2 and 2 are not supported for substitution scores 3 and -2
+iupac	dc-megablast	3	-2	5 2	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 3 and -2
+iupac	dc-megablast	3	-2	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+iupac	dc-megablast	3	-2	4 4	same-error	BLAST engine error: Error: Gap existence and extension values 4 and 4 are not supported for substitution scores 3 and -2
+iupac	dc-megablast	3	-2	6 4	same-error	BLAST engine error: Error: Gap existence and extension values 6 and 4 are not supported for substitution scores 3 and -2
+iupac	dc-megablast	3	-2	10 10	same	
+iupac	dc-megablast	3	-2	0 2	same-error	BLAST engine error: Error: Gap existence and extension values 0 and 2 are not supported for substitution scores 3 and -2
+iupac	dc-megablast	3	-2	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+iupac	dc-megablast	3	-2	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 3 and -2
+iupac	dc-megablast	4	-5	default	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 4 and -5
+iupac	dc-megablast	4	-5	2 2	same-error	BLAST engine error: Error: Gap existence and extension values 2 and 2 are not supported for substitution scores 4 and -5
+iupac	dc-megablast	4	-5	5 2	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 4 and -5
+iupac	dc-megablast	4	-5	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+iupac	dc-megablast	4	-5	4 4	same-error	BLAST engine error: Error: Gap existence and extension values 4 and 4 are not supported for substitution scores 4 and -5
+iupac	dc-megablast	4	-5	6 4	same-error	BLAST engine error: Error: Gap existence and extension values 6 and 4 are not supported for substitution scores 4 and -5
+iupac	dc-megablast	4	-5	10 10	same-error	BLAST engine error: Error: Gap existence and extension values 10 and 10 are not supported for substitution scores 4 and -5
+iupac	dc-megablast	4	-5	0 2	same-error	BLAST engine error: Error: Gap existence and extension values 0 and 2 are not supported for substitution scores 4 and -5
+iupac	dc-megablast	4	-5	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+iupac	dc-megablast	4	-5	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 4 and -5
+iupac	dc-megablast	5	-4	default	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 5 and -4
+iupac	dc-megablast	5	-4	2 2	same-error	BLAST engine error: Error: Gap existence and extension values 2 and 2 are not supported for substitution scores 5 and -4
+iupac	dc-megablast	5	-4	5 2	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 5 and -4
+iupac	dc-megablast	5	-4	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+iupac	dc-megablast	5	-4	4 4	same-error	BLAST engine error: Error: Gap existence and extension values 4 and 4 are not supported for substitution scores 5 and -4
+iupac	dc-megablast	5	-4	6 4	same-error	BLAST engine error: Error: Gap existence and extension values 6 and 4 are not supported for substitution scores 5 and -4
+iupac	dc-megablast	5	-4	10 10	same-error	BLAST engine error: Error: Gap existence and extension values 10 and 10 are not supported for substitution scores 5 and -4
+iupac	dc-megablast	5	-4	0 2	same-error	BLAST engine error: Error: Gap existence and extension values 0 and 2 are not supported for substitution scores 5 and -4
+iupac	dc-megablast	5	-4	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+iupac	dc-megablast	5	-4	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 5 and -4
+iupac	dc-megablast	2	-2	default	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 2 and -2
+iupac	dc-megablast	2	-2	2 2	same-error	BLAST engine error: Error: Gap existence and extension values 2 and 2 are not supported for substitution scores 2 and -2
+iupac	dc-megablast	2	-2	5 2	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 2 and -2
+iupac	dc-megablast	2	-2	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+iupac	dc-megablast	2	-2	4 4	same	
+iupac	dc-megablast	2	-2	6 4	same	
+iupac	dc-megablast	2	-2	10 10	same	
+iupac	dc-megablast	2	-2	0 2	same-error	BLAST engine error: Error: Gap existence and extension values 0 and 2 are not supported for substitution scores 2 and -2
+iupac	dc-megablast	2	-2	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+iupac	dc-megablast	2	-2	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 2 and -2
+iupac	dc-megablast	2	-4	default	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 2 and -4
+iupac	dc-megablast	2	-4	2 2	same	
+iupac	dc-megablast	2	-4	5 2	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 2 and -4
+iupac	dc-megablast	2	-4	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+iupac	dc-megablast	2	-4	4 4	same	
+iupac	dc-megablast	2	-4	6 4	same	
+iupac	dc-megablast	2	-4	10 10	same	
+iupac	dc-megablast	2	-4	0 2	same-error	BLAST engine error: Error: Gap existence and extension values 0 and 2 are not supported for substitution scores 2 and -4
+iupac	dc-megablast	2	-4	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+iupac	dc-megablast	2	-4	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 2 and -4
+iupac	dc-megablast	2	-6	default	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 2 and -6
+iupac	dc-megablast	2	-6	2 2	same	
+iupac	dc-megablast	2	-6	5 2	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 2 and -6
+iupac	dc-megablast	2	-6	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+iupac	dc-megablast	2	-6	4 4	same	
+iupac	dc-megablast	2	-6	6 4	same	
+iupac	dc-megablast	2	-6	10 10	same	
+iupac	dc-megablast	2	-6	0 2	same-error	BLAST engine error: Error: Gap existence and extension values 0 and 2 are not supported for substitution scores 2 and -6
+iupac	dc-megablast	2	-6	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+iupac	dc-megablast	2	-6	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 2 and -6
+iupac	dc-megablast	4	-6	default	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 4 and -6
+iupac	dc-megablast	4	-6	2 2	same-error	BLAST engine error: Error: Gap existence and extension values 2 and 2 are not supported for substitution scores 4 and -6
+iupac	dc-megablast	4	-6	5 2	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 4 and -6
+iupac	dc-megablast	4	-6	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+iupac	dc-megablast	4	-6	4 4	same	
+iupac	dc-megablast	4	-6	6 4	same-error	BLAST engine error: Error: Gap existence and extension values 6 and 4 are not supported for substitution scores 4 and -6
+iupac	dc-megablast	4	-6	10 10	same-error	BLAST engine error: Error: Gap existence and extension values 10 and 10 are not supported for substitution scores 4 and -6
+iupac	dc-megablast	4	-6	0 2	same-error	BLAST engine error: Error: Gap existence and extension values 0 and 2 are not supported for substitution scores 4 and -6
+iupac	dc-megablast	4	-6	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+iupac	dc-megablast	4	-6	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 4 and -6
+iupac	dc-megablast	3	-6	default	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 3 and -6
+iupac	dc-megablast	3	-6	2 2	same-error	BLAST engine error: Error: Gap existence and extension values 2 and 2 are not supported for substitution scores 3 and -6
+iupac	dc-megablast	3	-6	5 2	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 3 and -6
+iupac	dc-megablast	3	-6	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+iupac	dc-megablast	3	-6	4 4	same-error	BLAST engine error: Error: Gap existence and extension values 4 and 4 are not supported for substitution scores 3 and -6
+iupac	dc-megablast	3	-6	6 4	same-error	BLAST engine error: Error: Gap existence and extension values 6 and 4 are not supported for substitution scores 3 and -6
+iupac	dc-megablast	3	-6	10 10	same	
+iupac	dc-megablast	3	-6	0 2	same-error	BLAST engine error: Error: Gap existence and extension values 0 and 2 are not supported for substitution scores 3 and -6
+iupac	dc-megablast	3	-6	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+iupac	dc-megablast	3	-6	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 3 and -6
+iupac	dc-megablast	4	-10	default	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 4 and -10
+iupac	dc-megablast	4	-10	2 2	same-error	BLAST engine error: Error: Gap existence and extension values 2 and 2 are not supported for substitution scores 4 and -10
+iupac	dc-megablast	4	-10	5 2	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 4 and -10
+iupac	dc-megablast	4	-10	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+iupac	dc-megablast	4	-10	4 4	same	
+iupac	dc-megablast	4	-10	6 4	same-error	BLAST engine error: Error: Gap existence and extension values 6 and 4 are not supported for substitution scores 4 and -10
+iupac	dc-megablast	4	-10	10 10	same	
+iupac	dc-megablast	4	-10	0 2	same-error	BLAST engine error: Error: Gap existence and extension values 0 and 2 are not supported for substitution scores 4 and -10
+iupac	dc-megablast	4	-10	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+iupac	dc-megablast	4	-10	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 4 and -10
+iupac	dc-megablast	1	-6	default	same-error	BLAST engine error: Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and
+iupac	dc-megablast	1	-6	2 2	same-error	BLAST engine error: Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and
+iupac	dc-megablast	1	-6	5 2	same-error	BLAST engine error: Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and
+iupac	dc-megablast	1	-6	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+iupac	dc-megablast	1	-6	4 4	same-error	BLAST engine error: Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and
+iupac	dc-megablast	1	-6	6 4	same-error	BLAST engine error: Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and
+iupac	dc-megablast	1	-6	10 10	same-error	BLAST engine error: Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and
+iupac	dc-megablast	1	-6	0 2	same-error	BLAST engine error: Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and
+iupac	dc-megablast	1	-6	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+iupac	dc-megablast	1	-6	-1 2	same-error	BLAST engine error: Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and
+iupac	dc-megablast	3	-5	default	same-error	BLAST engine error: Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and
+iupac	dc-megablast	3	-5	2 2	same-error	BLAST engine error: Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and
+iupac	dc-megablast	3	-5	5 2	same-error	BLAST engine error: Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and
+iupac	dc-megablast	3	-5	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+iupac	dc-megablast	3	-5	4 4	same-error	BLAST engine error: Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and
+iupac	dc-megablast	3	-5	6 4	same-error	BLAST engine error: Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and
+iupac	dc-megablast	3	-5	10 10	same-error	BLAST engine error: Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and
+iupac	dc-megablast	3	-5	0 2	same-error	BLAST engine error: Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and
+iupac	dc-megablast	3	-5	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+iupac	dc-megablast	3	-5	-1 2	same-error	BLAST engine error: Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and
+iupac	dc-megablast	2	-1	default	same-error	BLAST engine error: Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and
+iupac	dc-megablast	2	-1	2 2	same-error	BLAST engine error: Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and
+iupac	dc-megablast	2	-1	5 2	same-error	BLAST engine error: Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and
+iupac	dc-megablast	2	-1	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+iupac	dc-megablast	2	-1	4 4	same-error	BLAST engine error: Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and
+iupac	dc-megablast	2	-1	6 4	same-error	BLAST engine error: Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and
+iupac	dc-megablast	2	-1	10 10	same-error	BLAST engine error: Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and
+iupac	dc-megablast	2	-1	0 2	same-error	BLAST engine error: Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and
+iupac	dc-megablast	2	-1	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+iupac	dc-megablast	2	-1	-1 2	same-error	BLAST engine error: Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and
+iupac	dc-megablast	1	0	default	same-error	BLAST query/options error: BLASTN penalty must be negative
+iupac	dc-megablast	1	0	2 2	same-error	BLAST query/options error: BLASTN penalty must be negative
+iupac	dc-megablast	1	0	5 2	same-error	BLAST query/options error: BLASTN penalty must be negative
+iupac	dc-megablast	1	0	0 0	same-error	BLAST query/options error: BLASTN penalty must be negative
+iupac	dc-megablast	1	0	4 4	same-error	BLAST query/options error: BLASTN penalty must be negative
+iupac	dc-megablast	1	0	6 4	same-error	BLAST query/options error: BLASTN penalty must be negative
+iupac	dc-megablast	1	0	10 10	same-error	BLAST query/options error: BLASTN penalty must be negative
+iupac	dc-megablast	1	0	0 2	same-error	BLAST query/options error: BLASTN penalty must be negative
+iupac	dc-megablast	1	0	3 0	same-error	BLAST query/options error: BLASTN penalty must be negative
+iupac	dc-megablast	1	0	-1 2	same-error	BLAST query/options error: BLASTN penalty must be negative
+iupac	blastn-short	1	-5	default	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 1 and -5
+iupac	blastn-short	1	-5	2 2	same-error	BLAST engine error: Error: Gap existence and extension values 2 and 2 are not supported for substitution scores 1 and -5
+iupac	blastn-short	1	-5	5 2	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 1 and -5
+iupac	blastn-short	1	-5	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+iupac	blastn-short	1	-5	4 4	same	
+iupac	blastn-short	1	-5	6 4	same	
+iupac	blastn-short	1	-5	10 10	same	
+iupac	blastn-short	1	-5	0 2	same-error	BLAST engine error: Error: Gap existence and extension values 0 and 2 are not supported for substitution scores 1 and -5
+iupac	blastn-short	1	-5	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+iupac	blastn-short	1	-5	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 1 and -5
+iupac	blastn-short	1	-4	default	same	
+iupac	blastn-short	1	-4	2 2	same	
+iupac	blastn-short	1	-4	5 2	same	
+iupac	blastn-short	1	-4	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+iupac	blastn-short	1	-4	4 4	same	
+iupac	blastn-short	1	-4	6 4	same	
+iupac	blastn-short	1	-4	10 10	same	
+iupac	blastn-short	1	-4	0 2	same	
+iupac	blastn-short	1	-4	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+iupac	blastn-short	1	-4	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 1 and -4
+iupac	blastn-short	2	-7	default	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 2 and -7
+iupac	blastn-short	2	-7	2 2	same	
+iupac	blastn-short	2	-7	5 2	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 2 and -7
+iupac	blastn-short	2	-7	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+iupac	blastn-short	2	-7	4 4	same	
+iupac	blastn-short	2	-7	6 4	same	
+iupac	blastn-short	2	-7	10 10	same	
+iupac	blastn-short	2	-7	0 2	same-error	BLAST engine error: Error: Gap existence and extension values 0 and 2 are not supported for substitution scores 2 and -7
+iupac	blastn-short	2	-7	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+iupac	blastn-short	2	-7	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 2 and -7
+iupac	blastn-short	1	-3	default	same	
+iupac	blastn-short	1	-3	2 2	same	
+iupac	blastn-short	1	-3	5 2	same	
+iupac	blastn-short	1	-3	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+iupac	blastn-short	1	-3	4 4	same	
+iupac	blastn-short	1	-3	6 4	same	
+iupac	blastn-short	1	-3	10 10	same	
+iupac	blastn-short	1	-3	0 2	same	
+iupac	blastn-short	1	-3	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+iupac	blastn-short	1	-3	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 1 and -3
+iupac	blastn-short	2	-5	default	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 2 and -5
+iupac	blastn-short	2	-5	2 2	same	
+iupac	blastn-short	2	-5	5 2	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 2 and -5
+iupac	blastn-short	2	-5	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+iupac	blastn-short	2	-5	4 4	same	
+iupac	blastn-short	2	-5	6 4	same	
+iupac	blastn-short	2	-5	10 10	same	
+iupac	blastn-short	2	-5	0 2	same-error	BLAST engine error: Error: Gap existence and extension values 0 and 2 are not supported for substitution scores 2 and -5
+iupac	blastn-short	2	-5	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+iupac	blastn-short	2	-5	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 2 and -5
+iupac	blastn-short	1	-2	default	same	
+iupac	blastn-short	1	-2	2 2	same	
+iupac	blastn-short	1	-2	5 2	same	
+iupac	blastn-short	1	-2	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+iupac	blastn-short	1	-2	4 4	same	
+iupac	blastn-short	1	-2	6 4	same	
+iupac	blastn-short	1	-2	10 10	same	
+iupac	blastn-short	1	-2	0 2	same	
+iupac	blastn-short	1	-2	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+iupac	blastn-short	1	-2	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 1 and -2
+iupac	blastn-short	2	-3	default	same	
+iupac	blastn-short	2	-3	2 2	same	
+iupac	blastn-short	2	-3	5 2	same	
+iupac	blastn-short	2	-3	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+iupac	blastn-short	2	-3	4 4	same	
+iupac	blastn-short	2	-3	6 4	same	
+iupac	blastn-short	2	-3	10 10	same	
+iupac	blastn-short	2	-3	0 2	same-error	BLAST engine error: Error: Gap existence and extension values 0 and 2 are not supported for substitution scores 2 and -3
+iupac	blastn-short	2	-3	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+iupac	blastn-short	2	-3	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 2 and -3
+iupac	blastn-short	3	-4	default	same	
+iupac	blastn-short	3	-4	2 2	same-error	BLAST engine error: Error: Gap existence and extension values 2 and 2 are not supported for substitution scores 3 and -4
+iupac	blastn-short	3	-4	5 2	same	
+iupac	blastn-short	3	-4	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+iupac	blastn-short	3	-4	4 4	same-error	BLAST engine error: Error: Gap existence and extension values 4 and 4 are not supported for substitution scores 3 and -4
+iupac	blastn-short	3	-4	6 4	same	
+iupac	blastn-short	3	-4	10 10	same	
+iupac	blastn-short	3	-4	0 2	same-error	BLAST engine error: Error: Gap existence and extension values 0 and 2 are not supported for substitution scores 3 and -4
+iupac	blastn-short	3	-4	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+iupac	blastn-short	3	-4	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 3 and -4
+iupac	blastn-short	1	-1	default	same	
+iupac	blastn-short	1	-1	2 2	same	
+iupac	blastn-short	1	-1	5 2	same	
+iupac	blastn-short	1	-1	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+iupac	blastn-short	1	-1	4 4	same	
+iupac	blastn-short	1	-1	6 4	same	
+iupac	blastn-short	1	-1	10 10	same	
+iupac	blastn-short	1	-1	0 2	same	
+iupac	blastn-short	1	-1	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+iupac	blastn-short	1	-1	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 1 and -1
+iupac	blastn-short	3	-2	default	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 3 and -2
+iupac	blastn-short	3	-2	2 2	same-error	BLAST engine error: Error: Gap existence and extension values 2 and 2 are not supported for substitution scores 3 and -2
+iupac	blastn-short	3	-2	5 2	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 3 and -2
+iupac	blastn-short	3	-2	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+iupac	blastn-short	3	-2	4 4	same-error	BLAST engine error: Error: Gap existence and extension values 4 and 4 are not supported for substitution scores 3 and -2
+iupac	blastn-short	3	-2	6 4	same-error	BLAST engine error: Error: Gap existence and extension values 6 and 4 are not supported for substitution scores 3 and -2
+iupac	blastn-short	3	-2	10 10	same	
+iupac	blastn-short	3	-2	0 2	same-error	BLAST engine error: Error: Gap existence and extension values 0 and 2 are not supported for substitution scores 3 and -2
+iupac	blastn-short	3	-2	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+iupac	blastn-short	3	-2	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 3 and -2
+iupac	blastn-short	4	-5	default	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 4 and -5
+iupac	blastn-short	4	-5	2 2	same-error	BLAST engine error: Error: Gap existence and extension values 2 and 2 are not supported for substitution scores 4 and -5
+iupac	blastn-short	4	-5	5 2	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 4 and -5
+iupac	blastn-short	4	-5	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+iupac	blastn-short	4	-5	4 4	same-error	BLAST engine error: Error: Gap existence and extension values 4 and 4 are not supported for substitution scores 4 and -5
+iupac	blastn-short	4	-5	6 4	same-error	BLAST engine error: Error: Gap existence and extension values 6 and 4 are not supported for substitution scores 4 and -5
+iupac	blastn-short	4	-5	10 10	same-error	BLAST engine error: Error: Gap existence and extension values 10 and 10 are not supported for substitution scores 4 and -5
+iupac	blastn-short	4	-5	0 2	same-error	BLAST engine error: Error: Gap existence and extension values 0 and 2 are not supported for substitution scores 4 and -5
+iupac	blastn-short	4	-5	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+iupac	blastn-short	4	-5	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 4 and -5
+iupac	blastn-short	5	-4	default	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 5 and -4
+iupac	blastn-short	5	-4	2 2	same-error	BLAST engine error: Error: Gap existence and extension values 2 and 2 are not supported for substitution scores 5 and -4
+iupac	blastn-short	5	-4	5 2	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 5 and -4
+iupac	blastn-short	5	-4	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+iupac	blastn-short	5	-4	4 4	same-error	BLAST engine error: Error: Gap existence and extension values 4 and 4 are not supported for substitution scores 5 and -4
+iupac	blastn-short	5	-4	6 4	same-error	BLAST engine error: Error: Gap existence and extension values 6 and 4 are not supported for substitution scores 5 and -4
+iupac	blastn-short	5	-4	10 10	same-error	BLAST engine error: Error: Gap existence and extension values 10 and 10 are not supported for substitution scores 5 and -4
+iupac	blastn-short	5	-4	0 2	same-error	BLAST engine error: Error: Gap existence and extension values 0 and 2 are not supported for substitution scores 5 and -4
+iupac	blastn-short	5	-4	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+iupac	blastn-short	5	-4	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 5 and -4
+iupac	blastn-short	2	-2	default	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 2 and -2
+iupac	blastn-short	2	-2	2 2	same-error	BLAST engine error: Error: Gap existence and extension values 2 and 2 are not supported for substitution scores 2 and -2
+iupac	blastn-short	2	-2	5 2	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 2 and -2
+iupac	blastn-short	2	-2	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+iupac	blastn-short	2	-2	4 4	same	
+iupac	blastn-short	2	-2	6 4	same	
+iupac	blastn-short	2	-2	10 10	same	
+iupac	blastn-short	2	-2	0 2	same-error	BLAST engine error: Error: Gap existence and extension values 0 and 2 are not supported for substitution scores 2 and -2
+iupac	blastn-short	2	-2	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+iupac	blastn-short	2	-2	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 2 and -2
+iupac	blastn-short	2	-4	default	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 2 and -4
+iupac	blastn-short	2	-4	2 2	same	
+iupac	blastn-short	2	-4	5 2	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 2 and -4
+iupac	blastn-short	2	-4	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+iupac	blastn-short	2	-4	4 4	same	
+iupac	blastn-short	2	-4	6 4	same	
+iupac	blastn-short	2	-4	10 10	same	
+iupac	blastn-short	2	-4	0 2	same-error	BLAST engine error: Error: Gap existence and extension values 0 and 2 are not supported for substitution scores 2 and -4
+iupac	blastn-short	2	-4	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+iupac	blastn-short	2	-4	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 2 and -4
+iupac	blastn-short	2	-6	default	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 2 and -6
+iupac	blastn-short	2	-6	2 2	same	
+iupac	blastn-short	2	-6	5 2	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 2 and -6
+iupac	blastn-short	2	-6	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+iupac	blastn-short	2	-6	4 4	same	
+iupac	blastn-short	2	-6	6 4	same	
+iupac	blastn-short	2	-6	10 10	same	
+iupac	blastn-short	2	-6	0 2	same-error	BLAST engine error: Error: Gap existence and extension values 0 and 2 are not supported for substitution scores 2 and -6
+iupac	blastn-short	2	-6	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+iupac	blastn-short	2	-6	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 2 and -6
+iupac	blastn-short	4	-6	default	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 4 and -6
+iupac	blastn-short	4	-6	2 2	same-error	BLAST engine error: Error: Gap existence and extension values 2 and 2 are not supported for substitution scores 4 and -6
+iupac	blastn-short	4	-6	5 2	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 4 and -6
+iupac	blastn-short	4	-6	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+iupac	blastn-short	4	-6	4 4	same	
+iupac	blastn-short	4	-6	6 4	same-error	BLAST engine error: Error: Gap existence and extension values 6 and 4 are not supported for substitution scores 4 and -6
+iupac	blastn-short	4	-6	10 10	same-error	BLAST engine error: Error: Gap existence and extension values 10 and 10 are not supported for substitution scores 4 and -6
+iupac	blastn-short	4	-6	0 2	same-error	BLAST engine error: Error: Gap existence and extension values 0 and 2 are not supported for substitution scores 4 and -6
+iupac	blastn-short	4	-6	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+iupac	blastn-short	4	-6	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 4 and -6
+iupac	blastn-short	3	-6	default	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 3 and -6
+iupac	blastn-short	3	-6	2 2	same-error	BLAST engine error: Error: Gap existence and extension values 2 and 2 are not supported for substitution scores 3 and -6
+iupac	blastn-short	3	-6	5 2	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 3 and -6
+iupac	blastn-short	3	-6	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+iupac	blastn-short	3	-6	4 4	same-error	BLAST engine error: Error: Gap existence and extension values 4 and 4 are not supported for substitution scores 3 and -6
+iupac	blastn-short	3	-6	6 4	same-error	BLAST engine error: Error: Gap existence and extension values 6 and 4 are not supported for substitution scores 3 and -6
+iupac	blastn-short	3	-6	10 10	same	
+iupac	blastn-short	3	-6	0 2	same-error	BLAST engine error: Error: Gap existence and extension values 0 and 2 are not supported for substitution scores 3 and -6
+iupac	blastn-short	3	-6	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+iupac	blastn-short	3	-6	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 3 and -6
+iupac	blastn-short	4	-10	default	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 4 and -10
+iupac	blastn-short	4	-10	2 2	same-error	BLAST engine error: Error: Gap existence and extension values 2 and 2 are not supported for substitution scores 4 and -10
+iupac	blastn-short	4	-10	5 2	same-error	BLAST engine error: Error: Gap existence and extension values 5 and 2 are not supported for substitution scores 4 and -10
+iupac	blastn-short	4	-10	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+iupac	blastn-short	4	-10	4 4	same	
+iupac	blastn-short	4	-10	6 4	same-error	BLAST engine error: Error: Gap existence and extension values 6 and 4 are not supported for substitution scores 4 and -10
+iupac	blastn-short	4	-10	10 10	same	
+iupac	blastn-short	4	-10	0 2	same-error	BLAST engine error: Error: Gap existence and extension values 0 and 2 are not supported for substitution scores 4 and -10
+iupac	blastn-short	4	-10	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+iupac	blastn-short	4	-10	-1 2	same-error	BLAST engine error: Error: Gap existence and extension values -1 and 2 are not supported for substitution scores 4 and -10
+iupac	blastn-short	1	-6	default	same-error	BLAST engine error: Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and
+iupac	blastn-short	1	-6	2 2	same-error	BLAST engine error: Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and
+iupac	blastn-short	1	-6	5 2	same-error	BLAST engine error: Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and
+iupac	blastn-short	1	-6	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+iupac	blastn-short	1	-6	4 4	same-error	BLAST engine error: Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and
+iupac	blastn-short	1	-6	6 4	same-error	BLAST engine error: Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and
+iupac	blastn-short	1	-6	10 10	same-error	BLAST engine error: Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and
+iupac	blastn-short	1	-6	0 2	same-error	BLAST engine error: Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and
+iupac	blastn-short	1	-6	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+iupac	blastn-short	1	-6	-1 2	same-error	BLAST engine error: Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and
+iupac	blastn-short	3	-5	default	same-error	BLAST engine error: Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and
+iupac	blastn-short	3	-5	2 2	same-error	BLAST engine error: Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and
+iupac	blastn-short	3	-5	5 2	same-error	BLAST engine error: Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and
+iupac	blastn-short	3	-5	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+iupac	blastn-short	3	-5	4 4	same-error	BLAST engine error: Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and
+iupac	blastn-short	3	-5	6 4	same-error	BLAST engine error: Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and
+iupac	blastn-short	3	-5	10 10	same-error	BLAST engine error: Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and
+iupac	blastn-short	3	-5	0 2	same-error	BLAST engine error: Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and
+iupac	blastn-short	3	-5	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+iupac	blastn-short	3	-5	-1 2	same-error	BLAST engine error: Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and
+iupac	blastn-short	2	-1	default	same-error	BLAST engine error: Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and
+iupac	blastn-short	2	-1	2 2	same-error	BLAST engine error: Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and
+iupac	blastn-short	2	-1	5 2	same-error	BLAST engine error: Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and
+iupac	blastn-short	2	-1	0 0	same-error	BLAST query/options error: Greedy extension must be used if gap existence and extension options are zero
+iupac	blastn-short	2	-1	4 4	same-error	BLAST engine error: Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and
+iupac	blastn-short	2	-1	6 4	same-error	BLAST engine error: Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and
+iupac	blastn-short	2	-1	10 10	same-error	BLAST engine error: Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and
+iupac	blastn-short	2	-1	0 2	same-error	BLAST engine error: Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and
+iupac	blastn-short	2	-1	3 0	same-error	BLAST query/options error: BLASTN gap extension penalty cannot be 0
+iupac	blastn-short	2	-1	-1 2	same-error	BLAST engine error: Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and -1 are not supported Error: Substitution scores 2 and
+iupac	blastn-short	1	0	default	same-error	BLAST query/options error: BLASTN penalty must be negative
+iupac	blastn-short	1	0	2 2	same-error	BLAST query/options error: BLASTN penalty must be negative
+iupac	blastn-short	1	0	5 2	same-error	BLAST query/options error: BLASTN penalty must be negative
+iupac	blastn-short	1	0	0 0	same-error	BLAST query/options error: BLASTN penalty must be negative
+iupac	blastn-short	1	0	4 4	same-error	BLAST query/options error: BLASTN penalty must be negative
+iupac	blastn-short	1	0	6 4	same-error	BLAST query/options error: BLASTN penalty must be negative
+iupac	blastn-short	1	0	10 10	same-error	BLAST query/options error: BLASTN penalty must be negative
+iupac	blastn-short	1	0	0 2	same-error	BLAST query/options error: BLASTN penalty must be negative
+iupac	blastn-short	1	0	3 0	same-error	BLAST query/options error: BLASTN penalty must be negative
+iupac	blastn-short	1	0	-1 2	same-error	BLAST query/options error: BLASTN penalty must be negative
+# same=260 same-error=620
+exit 0

@@ -1,0 +1,34 @@
+ok serial-tblastx-6
+ok serial-tblastx-0
+ok serial-tblastx-5
+ok serial-tblastx-4
+ok threads-tblastx-6
+ok threads-tblastx-0
+ok threads-tblastx-5
+ok serial-tblastx-1
+ok threads-tblastx-4
+ok serial-tblastx-2
+ok threads-tblastx-1
+ok serial-tblastx-3
+ok threads-tblastx-2
+ok threads-tblastx-3
+{
+  "artifacts": {
+    "native": "f0b8916b76ded426a3de4cad8ab4e26d376d2f56981bb5408ba9c7ff0991d654",
+    "serial": "2fde198fd7372380e0e50eed2febef7b241b435db12ef8c24c293206eb6efd1f",
+    "threads": "cc6cc65313990976265f69ee71e868c199e2e71409b0b58cd7f9c25ad9b16a54"
+  },
+  "runs": 28,
+  "searches": 7,
+  "by_engine_and_threads": {
+    "serial n1": 7,
+    "threads n1": 7,
+    "threads n2": 7,
+    "threads n4": 7
+  },
+  "frozen_equal": 36,
+  "frozen_compared": 36,
+  "frozen_differing": [],
+  "failed_parts": []
+}
+exit 0

@@ -1,0 +1,21 @@
+# Closed pipe (approved exception 5 for outfmt 0; outfmt 6/7 write failures are non-zero).
+outfmt 0: exit 6; stderr: BLAST failed to write output|
+outfmt 6: exit 1; stderr: Error: Broken pipe (os error 32)|
+outfmt 7: exit 1; stderr: Error: Broken pipe (os error 32)|
+# Standard output closed at the start (>&-): NCBI exit 6 in outfmt 0, abort (134) in 6/7.
+tblastx outfmt 0: exit 0; stderr: 
+NCBI tblastx outfmt 0: exit 6; stderr: BLAST failed to write output|
+tblastx outfmt 6: exit 0; stderr: 
+/home/kawato/.cache/losat-web-gui-target/s08/s08_gates.sh: line 92: 951942 Aborted                 (core dumped) sh -c "exec $NCBI/$prog -query tests/fasta/LC738874.fasta -subject tests/fasta/LC738875.fasta -outfmt $f >&-" 2> $A/s08-pipe-err.txt
+NCBI tblastx outfmt 6: exit 134; stderr: terminate called after throwing an instance of 'std::__ios_f
+tblastx outfmt 7: exit 0; stderr: 
+/home/kawato/.cache/losat-web-gui-target/s08/s08_gates.sh: line 92: 952046 Aborted                 (core dumped) sh -c "exec $NCBI/$prog -query tests/fasta/LC738874.fasta -subject tests/fasta/LC738875.fasta -outfmt $f >&-" 2> $A/s08-pipe-err.txt
+NCBI tblastx outfmt 7: exit 134; stderr: terminate called after throwing an instance of 'std::__ios_f
+blastn outfmt 0: exit 0; stderr: 
+NCBI blastn outfmt 0: exit 6; stderr: BLAST failed to write output|
+blastn outfmt 6: exit 0; stderr: 
+/home/kawato/.cache/losat-web-gui-target/s08/s08_gates.sh: line 92: 952113 Aborted                 (core dumped) sh -c "exec $NCBI/$prog -query tests/fasta/LC738874.fasta -subject tests/fasta/LC738875.fasta -outfmt $f >&-" 2> $A/s08-pipe-err.txt
+NCBI blastn outfmt 6: exit 134; stderr: terminate called after throwing an instance of 'std::__ios_f
+blastn outfmt 7: exit 0; stderr: 
+/home/kawato/.cache/losat-web-gui-target/s08/s08_gates.sh: line 92: 952125 Aborted                 (core dumped) sh -c "exec $NCBI/$prog -query tests/fasta/LC738874.fasta -subject tests/fasta/LC738875.fasta -outfmt $f >&-" 2> $A/s08-pipe-err.txt
+NCBI blastn outfmt 7: exit 134; stderr: terminate called after throwing an instance of 'std::__ios_f

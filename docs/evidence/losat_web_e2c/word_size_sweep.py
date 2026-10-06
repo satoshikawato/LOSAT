@@ -7,9 +7,10 @@ from one strand, where NCBI sizes it from the query block of both strands
 HSPs were lost. Small word sizes and large e-values make many seeds and show it. This
 sweep runs the outfmt 0 fixture pairs with both tasks, word sizes 4 to 28 and e-values 10
 and 1e5, with -outfmt 6, and prints each combination whose stdout, stderr or exit status
-differs from NCBI's. Exits 1 when any does.
+differs from NCBI's. Exits 1 when any does. --tasks takes a comma-separated list of BLASTN
+tasks to sweep instead of blastn,megablast.
 
-Usage: word_size_sweep.py --bin-dir DIR --losat LOSAT [--jobs N]
+Usage: word_size_sweep.py --bin-dir DIR --losat LOSAT [--jobs N] [--tasks A,B]
 """
 from __future__ import annotations
 
@@ -38,10 +39,12 @@ def main() -> int:
     parser.add_argument("--bin-dir", type=Path, required=True)
     parser.add_argument("--losat", type=Path, required=True)
     parser.add_argument("--jobs", type=int, default=4)
+    parser.add_argument("--tasks", default=",".join(TASKS))
     args = parser.parse_args()
+    tasks = args.tasks.split(",")
     cases = [["-query", f"{F}/{query}.fasta", "-subject", f"{F}/{subject}.fasta", "-task", task,
               "-word_size", str(word_size), "-evalue", evalue, "-outfmt", "6"]
-             for (query, subject), task, word_size, evalue in itertools.product(PAIRS, TASKS, WORD_SIZES, EVALUES)]
+             for (query, subject), task, word_size, evalue in itertools.product(PAIRS, tasks, WORD_SIZES, EVALUES)]
 
     def run(argv: list[str]) -> tuple[list[str], bool, int, int]:
         ncbi = subprocess.run([str(args.bin_dir / "blastn"), *argv], cwd=ENGINE, capture_output=True)

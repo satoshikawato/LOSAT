@@ -40,6 +40,15 @@ NCBI の経路（固定 commit 598d8ae6 のソースで確かめ、表にする�
 - NCBI の不具合に当たる挙動は `PD-LOSAT-NCBI-DEFECTS` の規則で扱い、まとめて保守者に諮る。ほかは推奨の案で進めて記録する。
 - ゲートの script は S08 のもの（`~/.cache/losat-web-gui-target/s08/s08_gates.sh`。最初に Gate A の字句のパスを `ci_fast_regressions.py` の `stage_lexical_fixtures` で用意する）を写して使う。
 
+## S08b からの引き継ぎ（2026-10-03 の実測）
+
+- **状態**：S08 と S08b は完了した（[E2b のゲート記録](../evidence/losat_web_e2b/README.md)）。エンジンの最後のコミットは `24fcfe41b`（native `2a46c2e4…`）。`main` への PR は S08b が作った（merge は保守者）。SD は PR の merge を待たずに同じブランチで始めてよい（S07+++ の後と同じ）。V-PERF の `tblastx-multi`（NCBI の batch の費用）は保守者の確認待ち。
+- **変更前の基準**：S08b のゲートの成果物（`~/.cache/losat-web-gui-target/s08-gate-native/release/LOSAT`、`s08-gate-native-serial`、`s08-gate-wasi-artifacts`、`s08-gate-reactors`。ハッシュは `docs/evidence/losat_web_e2b/run-20261003T021918Z/artifacts.sha256`）。SD を始める前に `~/.cache/losat-web-gui-target/sd/bin/` に写し、capture（`docs/evidence/losat_web_e1a/capture_outputs.py`）を取る。
+- **ゲートの script**：`docs/evidence/losat_web_e2b/gates/`（`s08_gates.sh`、`s08_gate_a.sh`、`s08_gate_a_after_build.sh`、`s08_perf.sh`、`s08_perf_rerun.sh`、`perf_precheck.py`、`verify_added.py`）。ゲートは約 3 時間（lint と試験 10 分、fixture 40 分、capture 35 分、V-ABI full 2.5 時間）、Gate A は約 3.5 時間で、別に並行して走らせてよい（native のビルドの後）。
+- **環境の注意**：WSL の再起動で `/tmp` が空になる（Gate A の字句のパスは script が用意する）。Claude Code が再起動すると background のコマンドが止まった扱いになるが、実際には動き続けることがある：`ps` で確かめ、重ねて起動しない。長い実行は `setsid nohup … &` で起動し、待つのは log の until-loop（2 時間の上限があるので、切れたら起動し直す）。`pkill -f <パターン>` は自分の shell の command line にも一致するので、PID で止める。
+- **監査**：S08 の 4 観点の指示（`~/.cache/losat-web-gui-target/s08-audit/COMMON.md`、`ANGLE_{A,B,C,D}.md`、`ROUND{2,3}.md`、写しは `docs/evidence/losat_web_e2b/audit/`）を BLASTN の task に直して使う。agent には監査する実行ファイルの写しを渡す（ゲートが同じ path を作り直すので）。agent が止まったら SendMessage で同じ文脈のまま再開できる。
+- **アプリ側**：S09 が worktree `LOSAT-web-gui-app` で並行している。その directory（`app-s09-*`）には触れない。V-PERF の間は lock を置く（S09 は lock の間、試験とビルドを止める）。
+
 ## 終了・引き継ぎ
 
 README の規則 8 に従う。`main` への PR を作り（merge は保守者）、CI が緑であることを確かめる。次は [S08+ — BLASTP・TBLASTN・TBLASTX の既定以外のオプション](session_s08p_e2e_protein_options.md)。

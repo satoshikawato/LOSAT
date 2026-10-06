@@ -1,0 +1,51 @@
+# /home/kawato/micromamba/bin/blastn sha256=0b88d4a00cb7fa579c203653151175b24c83d27fe240d420abe7b5261a3083d1 blastn: 2.17.0+ /  Package: blast 2.17.0, build Aug 11 2025 09:46:06
+# /home/kawato/micromamba/bin/blastp sha256=fdcbaa25cfdee5359231ae178713d2c28272e694614b847c5b2b7407c3d8a08b blastp: 2.17.0+ /  Package: blast 2.17.0, build Aug 11 2025 09:46:06
+# /home/kawato/micromamba/bin/tblastn sha256=e3956f1e107a30439d56c8f72fae4267a7d62ebcc16e4f99d4baf2bdf00402e0 tblastn: 2.17.0+ /  Package: blast 2.17.0, build Aug 11 2025 09:46:06
+# /home/kawato/micromamba/bin/tblastx sha256=9b6121d254d2c634114ac91c0bf4faa252b93532b1142cfb3ade2336fb830873 tblastx: 2.17.0+ /  Package: blast 2.17.0, build Aug 11 2025 09:46:06
+# /home/kawato/micromamba/bin/makeblastdb sha256=407bf59ec36ee6444104a90f28eab282e374a0dfe4c7ffee89a65d82dc51c4bf makeblastdb: 2.17.0+ /  Package: blast 2.17.0, build Aug 11 2025 09:46:06
+fixture_id	wall_s	stdout_sha256	stdout_bytes	stderr_sha256	command
+dc.default	0.14	83cac590ee9802a1f2c987569acb5468781a4fcd4a9a9ac8c8b46967c1fbff25	62546		blastn -query tests/fasta/outfmt0/dc_query.fasta -subject tests/fasta/outfmt0/dc_subject.fasta -task dc-megablast -outfmt 0
+dc.default.7	0.17	9db2a6385a2a654f84459fe44355c70d3ed598f7c30fceca7f7c95813aca55e0	1988		blastn -query tests/fasta/outfmt0/dc_query.fasta -subject tests/fasta/outfmt0/dc_subject.fasta -task dc-megablast -outfmt 7
+dc.small	0.06	4c84fd3428b0114f7d0f8f8418d602818307db190d0af6c4184dc39e92346726	8634		blastn -query tests/fasta/outfmt0/dc_small_query.fasta -subject tests/fasta/outfmt0/dc_subject.fasta -task dc-megablast -outfmt 0
+dc.optimal16	0.10	c9906cc1ee690fadb365101d8bdc8ca452687de0b04c0217c22d126eb9b16451	58476		blastn -query tests/fasta/outfmt0/dc_query.fasta -subject tests/fasta/outfmt0/dc_subject.fasta -task dc-megablast -template_type optimal -template_length 16 -outfmt 0
+dc.two21	0.13	13ae6920df79b0c07df877346ba88c3e638a6a416274a8e7a6e7039d2e4f9a3b	62546		blastn -query tests/fasta/outfmt0/dc_query.fasta -subject tests/fasta/outfmt0/dc_subject.fasta -task dc-megablast -template_type coding_and_optimal -template_length 21 -outfmt 0
+dc.word12_coding18.7	0.10	f4136da550a5be54f263dec116b7115cfa436021d358ea0ef7157cd90f8ad8b1	1866		blastn -query tests/fasta/outfmt0/dc_query.fasta -subject tests/fasta/outfmt0/dc_subject.fasta -task dc-megablast -word_size 12 -template_type coding -template_length 18 -outfmt 7
+dc.lcase	0.09	d6f86f219c05280d25204f7f7dcf080dee9a6c6f9374809ef03b22bf92227641	62546		blastn -query tests/fasta/outfmt0/dc_query.fasta -subject tests/fasta/outfmt0/dc_subject.fasta -task dc-megablast -lcase_masking -outfmt 0
+dc.nodust	0.19	8fd05b774c9351fe7bdcceb55cf2df92fd0d614290adb689aaaded5cd7a2df0f	200938		blastn -query tests/fasta/outfmt0/dc_query.fasta -subject tests/fasta/outfmt0/dc_subject.fasta -task dc-megablast -dust no -outfmt 0
+dc.scores	0.11	bb1069555b84db1ad3154c59b44eb585d2a1509cc530faf4aedbe51911aacb6a	36447		blastn -query tests/fasta/outfmt0/dc_query.fasta -subject tests/fasta/outfmt0/dc_subject.fasta -task dc-megablast -reward 1 -penalty -2 -gapopen 5 -gapextend 2 -outfmt 0
+dc.max	0.12	2d1423c28f2b72e3d34511cea8170162b2f69c2937be585954b9257bac78feb1	21991	9fb709f79f6e6e7ff87c07795879687085de8b2340e851228b1d14f0d13cc664	blastn -query tests/fasta/outfmt0/dc_query.fasta -subject tests/fasta/outfmt0/dc_subject.fasta -task dc-megablast -max_target_seqs 1 -max_hsps 2 -evalue 1e-10 -outfmt 0
+dc.megablast_template	0.13	6dadcf5cac4c9b98022ba9585b5542f55df5bdf13bad53c64321d4b154fb2103	55846		blastn -query tests/fasta/outfmt0/dc_query.fasta -subject tests/fasta/outfmt0/dc_subject.fasta -task megablast -word_size 12 -template_type optimal -template_length 18 -outfmt 0
+dc.nohit	0.11	86330b175145f148985d5655e2125628f675f9a54c9f88650b859cfcbdac1a94	17041		blastn -query tests/fasta/outfmt0/dc_query.fasta -subject tests/fasta/outfmt0/dc_subject.fasta -task dc-megablast -evalue 1e-200 -outfmt 0
+# fixtures=12 differing=[]
+# /home/kawato/micromamba/bin/blastn sha256=0b88d4a00cb7fa579c203653151175b24c83d27fe240d420abe7b5261a3083d1 blastn: 2.17.0+ /  Package: blast 2.17.0, build Aug 11 2025 09:46:06
+# /home/kawato/micromamba/bin/blastp sha256=fdcbaa25cfdee5359231ae178713d2c28272e694614b847c5b2b7407c3d8a08b blastp: 2.17.0+ /  Package: blast 2.17.0, build Aug 11 2025 09:46:06
+# /home/kawato/micromamba/bin/tblastn sha256=e3956f1e107a30439d56c8f72fae4267a7d62ebcc16e4f99d4baf2bdf00402e0 tblastn: 2.17.0+ /  Package: blast 2.17.0, build Aug 11 2025 09:46:06
+# /home/kawato/micromamba/bin/tblastx sha256=9b6121d254d2c634114ac91c0bf4faa252b93532b1142cfb3ade2336fb830873 tblastx: 2.17.0+ /  Package: blast 2.17.0, build Aug 11 2025 09:46:06
+# /home/kawato/micromamba/bin/makeblastdb sha256=407bf59ec36ee6444104a90f28eab282e374a0dfe4c7ffee89a65d82dc51c4bf makeblastdb: 2.17.0+ /  Package: blast 2.17.0, build Aug 11 2025 09:46:06
+fixture_id	wall_s	stdout_sha256	stdout_bytes	stderr_sha256	command
+short.default	0.11	041c5d5508f104c76c960a3e650f41dacfdbf7e9a8aea67ed013a54254f5ba56	58535		blastn -query tests/fasta/outfmt0/short_query.fasta -subject tests/fasta/outfmt0/short_subject.fasta -task blastn-short -outfmt 0
+short.default.7	0.12	01a2cddae50ce85529ad5583a72cd8e4fbd4fdfe4494355d8d7f2c2e85a5fc63	16175		blastn -query tests/fasta/outfmt0/short_query.fasta -subject tests/fasta/outfmt0/short_subject.fasta -task blastn-short -outfmt 7
+short.word11	0.08	55f043d86d019394aacbc431aaabde4372ed167f20808318eca22c49d6f729fc	5684		blastn -query tests/fasta/outfmt0/short_query.fasta -subject tests/fasta/outfmt0/short_subject.fasta -task blastn-short -word_size 11 -outfmt 0
+short.scores	0.12	38ebaed465752438a3fda1825f978a47e06a269f09832d80529b9018fd90e576	58981		blastn -query tests/fasta/outfmt0/short_query.fasta -subject tests/fasta/outfmt0/short_subject.fasta -task blastn-short -reward 2 -penalty -3 -outfmt 0
+short.evalue10	0.11	d66c4076830fb0edc2f8e98eba7a52c73a43efad86c6fbeefd388fdb85280ce1	47351		blastn -query tests/fasta/outfmt0/short_query.fasta -subject tests/fasta/outfmt0/short_subject.fasta -task blastn-short -evalue 10 -outfmt 0
+short.dust	0.11	041c5d5508f104c76c960a3e650f41dacfdbf7e9a8aea67ed013a54254f5ba56	58535		blastn -query tests/fasta/outfmt0/short_query.fasta -subject tests/fasta/outfmt0/short_subject.fasta -task blastn-short -dust yes -outfmt 0
+short.lcase	0.11	a6b2e2c78d3a2becce107168a2eacbf7a12a1f3cd6d5a6e83e93bcb5476039e5	51052		blastn -query tests/fasta/outfmt0/short_query.fasta -subject tests/fasta/outfmt0/short_subject.fasta -task blastn-short -lcase_masking -outfmt 0
+short.max	0.11	d01449bf8441cd6485d79249f7cdac145fdc05c72a23113b2f0bfc2dab313d76	8390	9fb709f79f6e6e7ff87c07795879687085de8b2340e851228b1d14f0d13cc664	blastn -query tests/fasta/outfmt0/short_query.fasta -subject tests/fasta/outfmt0/short_subject.fasta -task blastn-short -max_target_seqs 1 -max_hsps 3 -outfmt 0
+short.nohit	0.10	4d29ab0ca8c40b73d5531dead08210464b61e5583495f6044769e52ee66d1998	893		blastn -query tests/fasta/outfmt0/short_nohit_query.fasta -subject tests/fasta/outfmt0/short_subject.fasta -task blastn-short -evalue 1e-5 -outfmt 0
+# fixtures=9 differing=[]
+# /home/kawato/micromamba/bin/blastn sha256=0b88d4a00cb7fa579c203653151175b24c83d27fe240d420abe7b5261a3083d1 blastn: 2.17.0+ /  Package: blast 2.17.0, build Aug 11 2025 09:46:06
+# /home/kawato/micromamba/bin/blastp sha256=fdcbaa25cfdee5359231ae178713d2c28272e694614b847c5b2b7407c3d8a08b blastp: 2.17.0+ /  Package: blast 2.17.0, build Aug 11 2025 09:46:06
+# /home/kawato/micromamba/bin/tblastn sha256=e3956f1e107a30439d56c8f72fae4267a7d62ebcc16e4f99d4baf2bdf00402e0 tblastn: 2.17.0+ /  Package: blast 2.17.0, build Aug 11 2025 09:46:06
+# /home/kawato/micromamba/bin/tblastx sha256=9b6121d254d2c634114ac91c0bf4faa252b93532b1142cfb3ade2336fb830873 tblastx: 2.17.0+ /  Package: blast 2.17.0, build Aug 11 2025 09:46:06
+# /home/kawato/micromamba/bin/makeblastdb sha256=407bf59ec36ee6444104a90f28eab282e374a0dfe4c7ffee89a65d82dc51c4bf makeblastdb: 2.17.0+ /  Package: blast 2.17.0, build Aug 11 2025 09:46:06
+fixture_id	wall_s	stdout_sha256	stdout_bytes	stderr_sha256	command
+short.default	0.08	ef22741569925214494ab2f5308c44ebbaae909517d53d74630a01741e10ccb5	86690		blastn -query tests/fasta/outfmt0/short_query.fasta -subject tests/fasta/outfmt0/short_subject.fasta -task blastn-short -outfmt 0
+short.default.7	0.07	dc37ce17936aaaf699cda94fe6e8ae1ab6a4fc1be78a0c26fa7d328e9ab998f7	22643		blastn -query tests/fasta/outfmt0/short_query.fasta -subject tests/fasta/outfmt0/short_subject.fasta -task blastn-short -outfmt 7
+short.word11	0.07	1790c5a311de41b3ba992db7c28897eaf2e7f1ea45d0ca544c9482e065243369	15280		blastn -query tests/fasta/outfmt0/short_query.fasta -subject tests/fasta/outfmt0/short_subject.fasta -task blastn-short -word_size 11 -outfmt 0
+short.scores	0.07	23f9cf261c62912f566981f29a3cd5c1b58488bb9933beed05a9eae8e7b6b8d6	87045		blastn -query tests/fasta/outfmt0/short_query.fasta -subject tests/fasta/outfmt0/short_subject.fasta -task blastn-short -reward 2 -penalty -3 -outfmt 0
+short.evalue10	0.11	3d292dba3ff9f5847cd2d0a8b29ec8649d803fdda4e2ecd0a013d8f283d2142c	58690		blastn -query tests/fasta/outfmt0/short_query.fasta -subject tests/fasta/outfmt0/short_subject.fasta -task blastn-short -evalue 10 -outfmt 0
+short.dust	0.11	b44d8379b8bcb26f25e1b9d1f4b7b3855d2df2d3b39bd2912651012d2c190d9a	63338		blastn -query tests/fasta/outfmt0/short_query.fasta -subject tests/fasta/outfmt0/short_subject.fasta -task blastn-short -dust yes -outfmt 0
+short.lcase	0.14	79d3c17503ae6bed63455b29b28df10c6ea8887af3c58f6800baefc1e00c5c41	78751		blastn -query tests/fasta/outfmt0/short_query.fasta -subject tests/fasta/outfmt0/short_subject.fasta -task blastn-short -lcase_masking -outfmt 0
+short.max	0.11	1b3d9933a387484f8c57044a8a290589bef460c1f7aff47aeb0a5529340d5bf3	9750	9fb709f79f6e6e7ff87c07795879687085de8b2340e851228b1d14f0d13cc664	blastn -query tests/fasta/outfmt0/short_query.fasta -subject tests/fasta/outfmt0/short_subject.fasta -task blastn-short -max_target_seqs 1 -max_hsps 3 -outfmt 0
+short.nohit	0.10	51bc2d8a1a0bde20405bd4d2bb667c7d054e8ffeca085031ca98d1759e5434fb	893		blastn -query tests/fasta/outfmt0/short_nohit_query.fasta -subject tests/fasta/outfmt0/short_subject.fasta -task blastn-short -evalue 1e-5 -outfmt 0
+# fixtures=9 differing=[]

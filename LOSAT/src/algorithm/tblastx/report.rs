@@ -8,6 +8,7 @@ use std::sync::Arc;
 use bio::io::fasta;
 
 use crate::api::local_blast::{FormatProbe, HspIndex};
+use crate::blastinput::seq_range::{record_frame, Placements};
 use crate::config::ScoringMatrix;
 use crate::report::outfmt6::{write_hit_fields, OutputConfig};
 use crate::report::pairwise::PairwiseHit;
@@ -101,7 +102,7 @@ fn display_base(base: u8) -> u8 {
 /// The displayed residue of codon `offset` of `frame` (+1..+3, -1..-3) of `sequence`: the
 /// codon's bases read on the frame's strand (the IUPAC complement on the minus strand) and
 /// translated with the display's table (`display_codon`, which merges D/N, E/Q and I/L).
-fn display_residue(sequence: &[u8], frame: i8, offset: usize, code: &GeneticCode) -> u8 {
+pub(crate) fn display_residue(sequence: &[u8], frame: i8, offset: usize, code: &GeneticCode) -> u8 {
     let first = 3 * offset + frame.unsigned_abs() as usize - 1;
     let masks = std::array::from_fn(|i| {
         if frame > 0 {
@@ -369,14 +370,47 @@ fn query_dna_masks(stats: &TblastxQueryStats, query_length: usize) -> Vec<(i8, V
 //                     } else if (m_SeqLocChar==eLowerCase){
 //                         actualSeq[i-start]=tolower((unsigned char) actualSeq[i-start]);
 // ```
-/// Lowercases the residues of a displayed query row that a SEG mask of the row's frame
-/// covers. `[low, high]` is the 0-based nucleotide range of the row on the plus strand.
+/// The masks that the report shows for a query: NCBI's `Map` puts each mask of the searched
+/// letters (nucleotide coordinates of its frame) into the query's record by the start of
+/// its interval (`offset`, 0 without `-query_loc`), cut at the interval's end, and drops a
+/// mask that covers the whole interval (`kTarget`). Each keeps the frame of the search
+/// (`BLAST_ContextToFrame`), which counts from the interval's ends.
+fn shown_query_masks(
+    masks: Vec<(i8, Vec<(i32, i32)>)>,
+    query_length: usize,
+    offset: usize,
+) -> Vec<(i8, Vec<(i32, i32)>)> {
+    let target = (offset as i32, (offset + query_length) as i32 - 1);
+    masks
+        .into_iter()
+        .map(|(frame, ranges)| {
+            let shown = ranges
+                .into_iter()
+                .filter_map(|(from, to)| {
+                    if from > to || from > target.1 || from + target.0 > target.1 {
+                        return None;
+                    }
+                    let mapped = (target.0 + from, (target.0 + to).min(target.1));
+                    (mapped != target).then_some(mapped)
+                })
+                .collect();
+            (frame, shown)
+        })
+        .collect()
+}
+
+/// Lowercases the residues of a displayed query row that a shown SEG mask (record
+/// coordinates, `shown_query_masks`) labelled with the row's frame covers. `[low, high]` is
+/// the 0-based nucleotide range of the row on the plus strand of the record, and `frame`
+/// the row's frame in the record (`s_GetStdsegMasterFrame`). With `-query_loc` a mask's
+/// label is the frame of the searched letters, which can differ from the frame the record
+/// gives the same letters: NCBI then shows a mask of another frame on the row (`locFrame ==
+/// frame`), and so does LOSAT.
 fn lowercase_query_row(
     row: &mut [u8],
     frame: i8,
     low: i32,
     high: i32,
-    query_length: usize,
     masks: &[(i8, Vec<(i32, i32)>)],
 ) {
     let columns = row.len() as i32;
@@ -400,8 +434,7 @@ fn lowercase_query_row(
     };
     for (_, frame_masks) in masks.iter().filter(|(mask_frame, _)| *mask_frame == frame) {
         for &(from, to) in frame_masks {
-            if from > to || (from == 0 && to == query_length as i32 - 1) || to < low || from > high
-            {
+            if to < low || from > high {
                 continue;
             }
             let (first, last) = if frame > 0 {
@@ -420,6 +453,11 @@ fn lowercase_query_row(
 /// frames, counts, linked-set size and subject.
 // Kept out of line: this runs only for outfmt 0 or hit records.
 #[inline(never)]
+///
+/// With `-query_loc` and `-subject_loc` the rows are read from the searched letters, and
+/// the hits move into the records (`shift_to_records`) with the records' frames and
+/// lengths.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn pairwise_hits(
     hits: &[TblastxHsp],
     queries: &[fasta::Record],
@@ -427,11 +465,20 @@ pub(crate) fn pairwise_hits(
     query_stats: &[TblastxQueryStats],
     query_code: &GeneticCode,
     db_code: &GeneticCode,
+    query_placements: &Placements,
+    subject_placements: &Placements,
 ) -> Vec<PairwiseHit> {
     let query_masks: Vec<Vec<(i8, Vec<(i32, i32)>)>> = query_stats
         .iter()
         .zip(queries)
-        .map(|(stats, query)| query_dna_masks(stats, query.seq().len()))
+        .enumerate()
+        .map(|(q_idx, (stats, query))| {
+            shown_query_masks(
+                query_dna_masks(stats, query.seq().len()),
+                query.seq().len(),
+                query_placements.offset(q_idx),
+            )
+        })
         .collect();
     hits.iter()
         .map(|hsp| {
@@ -440,36 +487,96 @@ pub(crate) fn pairwise_hits(
             let (mut query_row, subject_row) =
                 displayed_rows(hsp, query.seq(), subject.seq(), query_code, db_code);
             let (identities, positives) = row_counts(&query_row, &subject_row);
-            let (low, high) = (
-                hsp.hit.q_start.min(hsp.hit.q_end) as i32 - 1,
-                hsp.hit.q_start.max(hsp.hit.q_end) as i32 - 1,
-            );
-            lowercase_query_row(
-                &mut query_row,
-                hsp.hit.query_frame as i8,
-                low,
-                high,
-                query.seq().len(),
-                &query_masks[hsp.hit.q_idx as usize],
-            );
+            let (q_idx, s_idx) = (hsp.hit.q_idx as usize, hsp.hit.s_idx as usize);
             let mut hit = hsp.hit.clone();
+            shift_hit(&mut hit, query_placements, subject_placements);
+            let query_length = query_placements.length(q_idx, query.seq().len());
+            let subject_length = subject_placements.length(s_idx, subject.seq().len());
+            let (low, high) = (
+                hit.q_start.min(hit.q_end) as i32 - 1,
+                hit.q_start.max(hit.q_end) as i32 - 1,
+            );
+            // NCBI reference: c++/src/objtools/align_format/showalign.cpp:430-440
+            // ```c++
+            // static int s_GetStdsegMasterFrame(const CStd_seg& ss, CScope& scope)
+            // {
+            //     const CRef<CSeq_loc> slc = ss.GetLoc().front();
+            //     ENa_strand strand = GetStrand(*slc);
+            //     int frame = s_GetFrame(strand ==  eNa_strand_plus ?
+            //                            GetStart(*slc, &scope) : GetStop(*slc, &scope),
+            //                            strand ==  eNa_strand_plus ?
+            //                            eNa_strand_plus : eNa_strand_minus,
+            //                            *(ss.GetIds().front()), scope);
+            //     return frame;
+            // }
+            // ```
+            // The frames that the report prints come from the records' coordinates and
+            // lengths (`seq_range::record_frame`); without ranges they are the search's.
+            let query_frame =
+                record_frame(hit.query_frame > 0, hit.q_start as usize - 1, query_length) as i8;
+            let subject_frame = record_frame(
+                hsp.subject_frame > 0,
+                hit.s_start as usize - 1,
+                subject_length,
+            ) as i8;
+            lowercase_query_row(&mut query_row, query_frame, low, high, &query_masks[q_idx]);
             hit.num_ident = identities;
             hit.num_positives = positives;
             PairwiseHit {
                 hit,
                 query_seq: Some(String::from_utf8_lossy(&query_row).into_owned()),
                 subject_seq: Some(String::from_utf8_lossy(&subject_row).into_owned()),
-                query_frame: Some(hsp.hit.query_frame as i8),
-                subject_frame: Some(hsp.subject_frame),
+                query_frame: Some(query_frame),
+                subject_frame: Some(subject_frame),
                 positives: Some(positives),
                 gaps: Some(0),
-                subject_length: Some(subject.seq().len()),
+                subject_length: Some(subject_length),
                 subject_title: subject.desc().map(str::to_string),
                 comp_adjust_method: None,
                 sum_n: Some(hsp.num),
             }
         })
         .collect()
+}
+
+/// Moves a hit's reported coordinates from the searched letters into the records: by the
+/// start of the query's interval (`RemapToQueryLoc`) and of the subject's interval
+/// (`s_RemapToSubjectLoc`), in nucleotides, on either strand.
+///
+/// NCBI reference: c++/src/algo/blast/api/blast_seqalign.cpp:1630-1637
+/// ```c++
+/// 	if (seqinfo_src->CanReturnPartialSequence() == true)
+/// 	{
+///         	CConstRef<CSeq_loc> subj_loc = seqinfo_src->GetSeqLoc(kOid);
+///         	NON_CONST_ITERATE(vector<CRef<CSeq_align > >, iter, hit_align) {
+///              	   RemapToQueryLoc(*iter, query_loc);
+///              	   if ( !is_ooframe )
+///                    	s_RemapToSubjectLoc(*iter, *subj_loc);
+/// ```
+/// A subject interval has the strand both, so `RemapAlignToLoc` (seq_align_util.cpp:71-78)
+/// moves its row by the interval's start.
+fn shift_hit(hit: &mut crate::common::Hit, queries: &Placements, subjects: &Placements) {
+    let q_shift = queries.offset(hit.q_idx as usize);
+    let s_shift = subjects.offset(hit.s_idx as usize);
+    hit.q_start += q_shift;
+    hit.q_end += q_shift;
+    hit.s_start += s_shift;
+    hit.s_end += s_shift;
+}
+
+/// `shift_hit` for every HSP of the final hit list (the tabular rows). Without ranges
+/// nothing moves.
+pub(crate) fn shift_to_records(
+    hits: &mut [TblastxHsp],
+    queries: &Placements,
+    subjects: &Placements,
+) {
+    if !queries.ranged() && !subjects.ranged() {
+        return;
+    }
+    for hsp in hits {
+        shift_hit(&mut hsp.hit, queries, subjects);
+    }
 }
 
 /// The `# Query:` and `Query=` text of a query: its FASTA defline.
@@ -639,9 +746,9 @@ pub(crate) enum TblastxOutputFormat {
 ///             NStr::TruncateSpaces(args[kArgOutputFormat].AsString());
 /// ```
 pub(crate) fn output_format(outfmt: &str) -> TblastxOutputFormat {
-    match outfmt.trim() {
-        "0" => TblastxOutputFormat::Pairwise,
-        "7" => TblastxOutputFormat::TabularWithComments,
+    match crate::blastinput::app::parse_formatting_string(outfmt).map(|choice| choice.number) {
+        Ok(0) => TblastxOutputFormat::Pairwise,
+        Ok(7) => TblastxOutputFormat::TabularWithComments,
         _ => TblastxOutputFormat::Tabular,
     }
 }
@@ -793,6 +900,162 @@ pub(crate) fn final_hit_order(hits: Vec<TblastxHsp>, hitlist_size: usize) -> Vec
     ordered
 }
 
+/// The final HSP list of a run with `-culling_limit` (`culling_limit` > 0) in NCBI's order:
+/// `final_hit_order` with NCBI's culling writer in the preliminary stage and its culling
+/// pipe after the traceback (`hsp_culling.rs`). `query_lengths` are the queries'
+/// nucleotide lengths (the lengths of their frames are the culling trees' ranges).
+///
+/// NCBI reference: c++/src/algo/blast/api/blast_options_local_priv.hpp:1320-1341
+/// ```c
+///     if (s <= 0) {
+///         return;
+///     }
+/// ...
+///     if (m_HitSaveOpts->hsp_filt_opt->culling_opts == NULL) {
+///         BlastHSPCullingOptions* culling = BlastHSPCullingOptionsNew(s);
+///         BlastHSPFilteringOptions_AddCulling(m_HitSaveOpts->hsp_filt_opt,
+///                                             &culling,
+///                                             eBoth);
+/// ```
+/// NCBI reference: c++/src/algo/blast/api/setup_factory.cpp:330-341
+/// ```c
+///         else if (filt_opts->culling_opts &&
+///                  (filt_opts->culling_stage & ePrelimSearch))
+///         {
+///             BlastHSPCullingParams* params =
+///                 BlastHSPCullingParamsNew(opts_memento->m_HitSaveOpts,
+///                      filt_opts->culling_opts,
+///                      opts_memento->m_ExtnOpts->compositionBasedStats,
+///                      opts_memento->m_ScoringOpts->gapped_calculation);
+///             if(params->culling_max > 1){
+///             	params->culling_max += 3;
+///             }
+///             writer_info = BlastHSPCullingInfoNew(params);
+///         }
+/// ```
+/// NCBI reference: c++/src/algo/blast/api/setup_factory.cpp:386-394
+/// ```c
+///         } else if (filt_opts->culling_opts &&
+///                    (filt_opts->culling_stage & eTracebackSearch)) {
+///             BlastHSPCullingParams* params =
+///                 BlastHSPCullingParamsNew(opts_memento->m_HitSaveOpts,
+///                      filt_opts->culling_opts,
+///                      opts_memento->m_ExtnOpts->compositionBasedStats,
+///                      opts_memento->m_ScoringOpts->gapped_calculation);
+///             BlastHSPPipeInfo_Add(&pipe_info,
+///                                  BlastHSPCullingPipeInfoNew(params));
+/// ```
+/// NCBI reference: c++/src/algo/blast/core/hspfilter_culling.c:699-730
+/// ```c
+///    s_BlastHSPCullingInit(data, results);
+///    for (qid = 0; qid < results->num_queries; ++qid) {
+///          if (!(results->hitlist_array[qid])) continue;
+///          num_list = results->hitlist_array[qid]->hsplist_count;
+///          for (sid = 0; sid < num_list; ++sid) {
+///         	 hsp_list = results->hitlist_array[qid]->hsplist_array[sid];
+///         	 Blast_HSPListSortByEvalue(hsp_list);
+///         	 hsp_list->best_evalue = hsp_list->hsp_array[0]->evalue;
+///          }
+///          Blast_HitListSortByEvalue(results->hitlist_array[qid]);
+///    }
+///
+///    for (qid = 0; qid < results->num_queries; ++qid) {
+/// ...
+///       for (sid = 0; sid < num_list; ++sid) {
+///          s_BlastHSPCullingRun(data,
+///                    results->hitlist_array[qid]->hsplist_array[sid]);
+/// ...
+///    s_BlastHSPCullingFinal(data, results);
+/// ```
+/// NCBI reference: c++/src/algo/blast/core/blast_traceback.c:1720-1721
+/// ```c
+///         /* post-traceback pipes */
+///         BlastHSPStreamTBackClose(hsp_stream, results);
+/// ```
+/// The culling writer replaces the preliminary hit list (the collector): each subject's
+/// HSPs (after the `-evalue` reap, in score order) go into the trees, subject by subject
+/// in OID order, with the merit `culling_max` (+3 above 1, an `Int4` that NCBI's binary
+/// wraps). The trees' HSPs then reach the hit list of the traceback in OID order, where
+/// the `-max_target_seqs` cut is made (`Blast_HitListUpdate`), and the pipe culls the kept
+/// lists again, sorted by e-value, with the merit `culling_limit`. The rest is
+/// `final_hit_order`'s: the lists sorted by e-value (their HSPs in score order) and each
+/// list's HSPs sorted by e-value. The trees belong to the query's contexts, so the
+/// queries are culled one after another.
+pub(crate) fn culled_hit_order(
+    hits: Vec<TblastxHsp>,
+    hitlist_size: usize,
+    culling_limit: i32,
+    query_lengths: &[usize],
+) -> Vec<TblastxHsp> {
+    use super::hsp_culling::{tblastx_context_lengths, CullingWriter};
+    use crate::algorithm::blastn::hsp::{HitList, HitListEntry};
+    type Subjects = std::collections::BTreeMap<u32, Vec<TblastxHsp>>;
+    let mut lists: std::collections::BTreeMap<u32, Subjects> = std::collections::BTreeMap::new();
+    for hsp in hits {
+        lists
+            .entry(hsp.hit.q_idx)
+            .or_default()
+            .entry(hsp.hit.s_idx)
+            .or_default()
+            .push(hsp);
+    }
+    let prelim_max = if culling_limit > 1 {
+        culling_limit.wrapping_add(3)
+    } else {
+        culling_limit
+    };
+    let mut ordered = Vec::new();
+    for (q_idx, subjects) in lists {
+        let context_lengths = tblastx_context_lengths(query_lengths[q_idx as usize]);
+        let mut writer = CullingWriter::new(prelim_max, context_lengths);
+        for (oid, mut hsps) in subjects {
+            hsps.sort_by(|a, b| crate::common::score_compare_hsps(&a.hit, &b.hit));
+            writer.run(hsps, oid);
+        }
+        let mut culled = writer.finalize();
+        culled.sort_by_key(|(oid, _)| *oid);
+        let mut hit_list: HitList<TblastxHspList> = HitList::new(hitlist_size);
+        for (oid, hsps) in culled {
+            hit_list.update(TblastxHspList {
+                oid,
+                hsps,
+                best_evalue: 0.0,
+            });
+        }
+        let mut kept = hit_list.hsplist_array;
+        for list in &mut kept {
+            HitListEntry::sort_by_evalue(list);
+            list.best_evalue = list.hsps[0].hit.e_value;
+        }
+        let mut pipe_lists: HitList<TblastxHspList> = HitList::new(hitlist_size);
+        pipe_lists.hsplist_count = kept.len();
+        pipe_lists.hsplist_array = kept;
+        pipe_lists.sort_by_evalue();
+        let mut pipe = CullingWriter::new(culling_limit, context_lengths);
+        for list in pipe_lists.hsplist_array {
+            pipe.run(list.hsps, list.oid);
+        }
+        let mut final_lists: HitList<TblastxHspList> = HitList::new(hitlist_size);
+        for (oid, hsps) in pipe.finalize() {
+            let mut list = TblastxHspList {
+                oid,
+                hsps,
+                best_evalue: 0.0,
+            };
+            list.update_best_evalue();
+            final_lists.hsplist_array.push(list);
+        }
+        final_lists.hsplist_count = final_lists.hsplist_array.len();
+        final_lists.sort_by_evalue();
+        final_lists.prune_by_size(hitlist_size);
+        for mut list in final_lists.hsplist_array {
+            HitListEntry::sort_by_evalue(&mut list);
+            ordered.extend(list.hsps);
+        }
+    }
+    ordered
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -882,14 +1145,27 @@ mod tests {
         let masks = query_dna_masks(&stats, 30);
         assert_eq!(masks[0], (1, vec![(6, 12)]));
         assert_eq!(masks[1], (-1, vec![(18, 23)]));
+        let masks = shown_query_masks(masks, 30, 0);
         let mut plus = b"AAAAAAAAAA".to_vec();
-        lowercase_query_row(&mut plus, 1, 0, 29, 30, &masks);
+        lowercase_query_row(&mut plus, 1, 0, 29, &masks);
         assert_eq!(&plus, b"AAaaaAAAAA");
         // Frame -1 residue i covers 0-based nucleotides 27-3i..29-3i: the mask 18-23 covers
         // residues 2 and 3 only.
         let mut minus = b"AAAAAAAAAA".to_vec();
-        lowercase_query_row(&mut minus, -1, 0, 29, 30, &masks);
+        lowercase_query_row(&mut minus, -1, 0, 29, &masks);
         assert_eq!(&minus, b"AAaaAAAAAA");
+    }
+
+    // NCBI c++/src/algo/blast/api/blast_aux.cpp:825-842 (`Map`): with `-query_loc` a mask
+    // moves by the interval's start and is cut at its end; one that covers the whole
+    // interval, or starts past it, is not shown.
+    #[test]
+    fn shown_query_masks_follow_ncbis_map() {
+        let masks = vec![(2, vec![(0, 9), (3, 20), (0, 29), (31, 40), (5, 4)])];
+        assert_eq!(
+            shown_query_masks(masks, 30, 100),
+            vec![(2, vec![(100, 109), (103, 120)])]
+        );
     }
 
     // NCBI c++/src/algo/blast/core/blast_hits.c:3243-3299 (Blast_HitListUpdate) and

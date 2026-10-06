@@ -115,7 +115,22 @@ fn main() -> Result<()> {
             }
         }
         Commands::Blastp(args) => {
-            blastp::run(args)?;
+            // NCBI reference: ncbi-blast/c++/src/corelib/ncbiapp.cpp:1031-1044
+            // ```c
+            //     // Setup some debugging features from environment variables.
+            //     if ( !m_Environ->Get(DIAG_TRACE).empty() ) {
+            //         SetDiagTrace(eDT_Enable, eDT_Enable);
+            //     }
+            //     string post_level = m_Environ->Get(DIAG_POST_LEVEL);
+            // ```
+            // NCBI's application layer reads its environment and registry files before
+            // blastp's own code runs; LOSAT rejects the settings that change the output.
+            LOSAT::blastinput::ncbi_environment::check_ncbi_application_settings("blastp")
+                .map_err(anyhow::Error::msg)?;
+            if let Err(error) = blastp::run(args) {
+                LOSAT::cli::exit_on_native_error(&error);
+                return Err(error);
+            }
         }
         // NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.hpp:225-227,252-255
         // ```c
@@ -127,6 +142,11 @@ fn main() -> Result<()> {
         //         exit_code = BLAST_OUTPUT_ERROR;                                     \
         // ```
         Commands::Tblastx(args) => {
+            // NCBI's application layer reads its environment and registry files before
+            // tblastx's own code runs (as for BLASTN); LOSAT rejects the settings that change
+            // the output.
+            LOSAT::blastinput::ncbi_environment::check_ncbi_application_settings("tblastx")
+                .map_err(anyhow::Error::msg)?;
             if let Err(error) = tblastx::run(args) {
                 LOSAT::cli::exit_on_native_error(&error);
                 return Err(error);
@@ -136,7 +156,15 @@ fn main() -> Result<()> {
         // results = lcl_blast.Run();
         // formatter.PrintOneResultSet(**result, query);
         Commands::Tblastn(args) => {
-            tblastn::TblastnArgs::run(args)?;
+            // NCBI's application layer reads its environment and registry files before
+            // tblastn's own code runs (as for BLASTN); LOSAT rejects the settings that change
+            // the output.
+            LOSAT::blastinput::ncbi_environment::check_ncbi_application_settings("tblastn")
+                .map_err(anyhow::Error::msg)?;
+            if let Err(error) = tblastn::TblastnArgs::run(args) {
+                LOSAT::cli::exit_on_native_error(&error);
+                return Err(error);
+            }
         }
     }
     Ok(())

@@ -1,0 +1,31 @@
+[
+  {
+    "engine": "serial",
+    "threads": 1,
+    "program": "tblastx",
+    "cases": [
+      "d05_ap027133_ap027132_code4"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/AP027133.fasta",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/AP027132.fasta",
+      "-query_gencode",
+      "4",
+      "-db_gencode",
+      "4"
+    ],
+    "formats": {
+      "0": "aaa3d86e42a255bc9f60a0cb698522a7c8f24f2879a7d670c2c0251a5d2c0aa2",
+      "6": "cf8417264eac80d6dcf145a319c8f0fef4c3f8a0a41654c0d6dc8bf97fa8d8c3",
+      "7": "6500d06d9dd7351d39b9701835485ad60e8fc9e78ebfed5cd1fabb2263dc9ce5"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 84791
+  }
+]

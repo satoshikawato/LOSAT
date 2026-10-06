@@ -1,0 +1,43 @@
+# E2i inventory results: what the dc-megablast / blastn-short port did with each NCBI row
+
+Session SD (E2i) made LOSAT's BLASTN run `-task dc-megablast` and `-task blastn-short` as NCBI does. Before the port, read-only agents inventoried NCBI's path for these tasks in 6 ranges (A application and arguments, B C++ options layer and option checks, C core setup and parameters, D lookup/scan/ungapped extension, E gapped extension/traceback/hit saving, F formatting): the TSVs `/mnt/c/Users/genom/GitHub/LOSAT-web-gui/docs/evidence/losat_web_e2i/inventory/<R>.tsv` (conventions: `COMMON.md` in the same directory). Each row's `status` was LOSAT's state BEFORE the port (git HEAD `a92fa902f`; the inventory's LOSAT line numbers are of that commit). You now record, read-only, what the FINAL code does for each row of your range, and you check that nothing on the path was left neither ported nor rejected.
+
+Do not modify, build or commit anything in the repositories. Write only your result TSV and notes (paths in your range part) and scratch files under your scratch directory.
+
+## Sources
+- NCBI C/C++ (the only authority): `/mnt/c/Users/genom/GitHub/ncbi-blast/c++` (pinned 598d8ae6; CRLF line endings; do not run git there).
+- LOSAT final code (commit `90c5f0181`, branch `feature/losat-web-gui`): `/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/src`. Main places of the port (`git -C /mnt/c/Users/genom/GitHub/LOSAT-web-gui show 90c5f0181 --stat` lists them):
+  - `algorithm/blastn/disc_lookup.rs` (new): `DiscWordType`, `DiscTemplateType` (`next` = template + 1), `get_disc_template_type` (s_GetDiscTemplateType), the 12 `discontig_index_*` and `compute_discontiguous_index`, `choose_disc_scan_subject` (s_MBChooseScanSubject's discontiguous branch), `disc_word_scan_subject` and the four scans `mb_disc_word_scan_subject_1`, `_two_templates_1`, `_11_18_1`, `_11_21_1`. Each scan calls `on_word(s_off, index, index2)` for every word; the caller looks the word up (NCBI's MB_ACCESS_HITS/MB_ACCESS_HITS2 inside the scan, with its offset-array `break`, is replaced by streaming the words in the same order).
+  - `algorithm/blastn/lookup.rs`: `TwoStageLookup` gained `disc: Option<DiscTemplates>` (template types, length, `hashtable2`/`next_pos2`); `lut_word_length()`/`word_length()` return the template length for a discontiguous table; `for_each_hit2` (s_BlastMBLookupRetrieve2 with the shared PV); `build_disc_mb_lookup` (BlastMBLookupTableNew's discontiguous branch + s_FillDiscMBTable).
+  - `algorithm/blastn/coordination.rs`: `task_defaults` (all four tasks), `determine_evalue`, `task_dust_by_default`, `task_uses_megablast_chunks`, `determine_template`, `configure_task` (new `TaskConfig` fields `window_size`, `mb_template_type`, `mb_template_length`), `build_lookup_tables` (discontiguous table when `mb_template_length > 0`).
+  - `algorithm/blastn/blast_engine/run.rs`: the two-hit window is `config.window_size` everywhere (was the constant `TWO_HIT_WINDOW = 0`; grep `window_size`), `SubjectScratch::new(.., window_size)`, `scan_subject_disc_words_with_ranges`, the two-stage branch's `on_word` closure (template 1 chain, then template 2 chain), `discontig_template = config.mb_template_length > 0`, query chunks via `task_uses_megablast_chunks`, `determine_evalue`, report inputs `zero_gap_extension_formula`/`window_size`.
+  - `algorithm/blastn/scoring.rs` `check_scoring_options` (template checks after the word-size limit), `algorithm/blastn/args.rs` (`-template_type`, `-template_length` with `requires`, `evalue: Option<f64>`, `resolve_dust` with no DUST for blastn-short), `blastinput/value_parsers.rs` (`blastn_task`, `blastn_template_type`, `blastn_template_length`), `cli.rs` (the two options left the unported list), `report/pairwise.rs` (`Window for multiple hits`, the zero gap extension formula only for megablast and blastn), `web_api.rs` (ABI v1 keeps megablast and blastn only; plan TD-1 freezes v1).
+- LOSAT binary built from that code: `/home/kawato/.cache/losat-web-gui-target/sd/bin/LOSAT-90c5f0181` (`LOSAT-90c5f0181 blastn -task dc-megablast -query Q -subject S -outfmt 6 ...`). NCBI 2.17.0 (comparison only): `/home/kawato/micromamba/bin/blastn`. Test inputs: `LOSAT/tests/fasta` (genomes) and `LOSAT/tests/fasta/outfmt0/dc_*.fasta`, `short_*.fasta` (this session's fixture inputs). Keep runs small; write inputs/outputs only in your scratch directory; do not set BATCH_SIZE, CHUNK_SIZE etc. except in one command's environment when a row needs it.
+- What was already compared byte for byte with NCBI after the port (outfmt 6 unless noted): the 18 template type x length x word size combinations and megablast with a template on LC738874/LC738875; dc-megablast on MelaMJNV/MejoMJNV, AP027131/AP027133 and EDL933.fna/Sakai.fna (5.5 Mb each, 11602 HSPs); blastn-short on LC738874/LC738875 (81055 HSPs, outfmt 0 and 6); 50 cases on the BLASTN regression inputs (`LOSAT/tests/fixtures/blastn_regression/inputs`: s600 hit lists, query batches, ambiguity, lowercase masking with outfmt 0, DUST yes/no/levels, palindromes, small queries, warnings, -max_target_seqs/-max_hsps/-evalue, scoring overrides, -word_size 13 and 4, -evalue 0, zero gap costs, the template errors with blastn, blastn-short and megablast) with stdout, stderr and exit status equal except NCBI's approved `-num_threads` warning with `-subject`.
+
+## Known decisions (classify accordingly, do not re-decide)
+- Approved exceptions (AGENTS.md `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`): argument-parser errors (constraint and dependency violations of `-template_type`/`-template_length`, invalid values) use clap text and exit 2 (NCBI USAGE, exit 1); with `-subject` LOSAT honors `-num_threads` and prints no thread warning.
+- Explicit rejections kept (LOSAT stops with an "unsupported"/"not supported by LOSAT" message; not a gap): `-task rmblastn`; the options in `cli.rs` `is_unported_blastn_arg` (`-window_size`, `-off_diagonal_range`, `-xdrop_ungap`, `-xdrop_gap`, `-xdrop_gap_final`, `-no_greedy`, `-ungapped`, `-soft_masking`, `-use_index`, `-index_name`, `-min_raw_gapped_score`, `-culling_limit`, ...).
+- ABI v1 (`web_api.rs`) stays frozen at megablast and blastn (plan TD-1): not a gap.
+
+## What to produce
+For EVERY row of your range's TSV (in order), one result row. Columns (tab-separated, header first):
+`range	row	ncbi_file	ncbi_lines	ncbi_function	branch	status_before	e2i_result	losat_location	evidence	notes`
+- `row`: the 1-based row number in your range's TSV (header excluded).
+- `ncbi_file`, `ncbi_lines`, `ncbi_function`, `branch`, `status_before`: copied from the inventory row (`status_before` = the inventory's `status`).
+- `e2i_result`, one of:
+  - `ported`: the final code now does what NCBI does (it was unported or divergent).
+  - `faithful`: LOSAT already did it before SD and still does.
+  - `rejected`: LOSAT stops with an explicit message before this branch (cite the check and the message start).
+  - `exception`: an approved exception above.
+  - `n/a`: no effect on outfmt 0/6/7 bytes, stderr or exit status (keep the inventory's reason).
+  - `GAP`: the final code neither does it as NCBI nor rejects it. Give a concrete input that shows the difference (run NCBI and LOSAT on it, and put the command and the differing bytes in `notes`).
+- `losat_location`: `path:line(function)` relative to `LOSAT/src` in the FINAL code (`-` if none).
+- `evidence`: what shows it: an oracle command you ran (short), one of the comparisons listed above, a unit test name (`cargo test` names in `disc_lookup.rs`, `lookup.rs` `disc_lookup_tests`, `coordination.rs` `task_defaults_follow_ncbi_handles`, `scoring.rs` `discontiguous_templates_are_checked_after_the_word_size_limit`, `tests/cli_v2.rs`), or `-`.
+- No tabs or newlines inside a field.
+
+Append each result row as soon as you have it (open, append, close), creating the file with the header if absent; continue after existing rows without duplicating. Write the notes file incrementally too: the GAP rows in detail (input, NCBI bytes, LOSAT bytes), rows you could not decide (start with `UNSURE:`), anything the inventory got wrong, and NCBI functions on the path of your range that the inventory missed (as extra rows with `row` = `X1`, `X2`, ... and `status_before` = `-`).
+
+Read the NCBI source for each row before deciding; read the LOSAT code; when a row is not covered by the comparisons above and you are unsure, run both binaries on a small input. Never guess.
+
+When done, reply with: counts per `e2i_result`, every GAP and UNSURE row (row number, function, one line), the extra rows, and anything in the inventory you found to be wrong.

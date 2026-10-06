@@ -25,12 +25,18 @@ use super::stage_d_linking::{
     compare_preliminary_lists_for_kappa, link_preliminary_hsps, reap_by_evalue, LinkedHsp,
     LinkedHspList,
 };
-use super::stage_d_results::{KappaHspPayload, KappaResultHitList, KappaResultList};
+use super::stage_d_results::{
+    merge_query_chunk, KappaHspPayload, KappaResultHitList, KappaResultList,
+};
 use super::stage_d_stats::{
     local_parameters_for_call, LocalParameterCall, LocalParameterOptions, LocalSubjectParameters,
 };
+use crate::algorithm::blastn::query_split::SplitSizes;
 use crate::algorithm::blastp::encoding::encode_protein_query_frame_with_seg;
 use crate::algorithm::blastp::gapalign::GapAlignScratch;
+use crate::algorithm::common::protein_query_split::{
+    protein_chunk_part, protein_chunk_would_be_split, split_protein_batch, ProteinQueryChunk,
+};
 use crate::algorithm::tblastx::lookup::build_ncbi_lookup_for_profile;
 use crate::config::{ProteinScoringSpec, ScoringMatrix};
 use crate::core::composition_adjustment::adjust_scores::{
@@ -63,6 +69,9 @@ pub(super) struct LocalStageDProfile<'a> {
     pub genetic_code: u8,
     pub expect_value: f64,
     pub max_target_seqs: usize,
+    /// Where each query's searched letters start in its record (`-query_loc`; empty: 0),
+    /// which the masks of a split query's chunks depend on (`protein_chunk_part`).
+    pub query_offsets: &'a [usize],
 }
 
 // NCBI c++/src/algo/blast/core/blast_options.c:903-936;
@@ -360,7 +369,52 @@ fn run_local_search_with_pool(
     );
     let code = GeneticCode::try_from_id(profile.genetic_code).map_err(anyhow::Error::msg)?;
     let total_nt: usize = subjects.iter().map(Vec::len).sum();
-    let min_subject_length = subjects.iter().map(Vec::len).min().unwrap() / 3;
+    // NCBI reference: c++/src/algo/blast/api/local_db_adapter.cpp:133-135
+    // ```c
+    //             if ( !m_Subjects.empty() ) {
+    //                 //m_SeqSrc = QueryFactoryBlastSeqSrcInit(m_Subjects, program);
+    //                 m_SeqSrc = MultiSeqBlastSeqSrcInit(m_Subjects, program, m_DbScanMode);
+    // ```
+    // NCBI reference: c++/src/algo/blast/api/seqsrc_multiseq.cpp:226-240
+    // ```c
+    // s_MultiSeqGetMinLength(void* multiseq_handle, void*)
+    // {
+    //     Int4 retval = INT4_MAX;
+    //     Uint4 index;
+    //     CRef<CMultiSeqInfo>* seq_info =
+    //         static_cast<CRef<CMultiSeqInfo>*>(multiseq_handle);
+    //
+    //     for (index=0; index<(*seq_info)->GetNumSeqs(); ++index)
+    //         retval = MIN(retval, (*seq_info)->GetSeqBlk(index)->length);
+    //
+    //     if(retval < BLAST_SEQSRC_MINLENGTH)
+    // 	retval = BLAST_SEQSRC_MINLENGTH;
+    //
+    //     return retval;
+    // }
+    // ```
+    // NCBI reference: c++/include/algo/blast/core/blast_seqsrc.h:205
+    // ```c
+    // #define BLAST_SEQSRC_MINLENGTH  10    /**< Default minimal sequence length */
+    // ```
+    // NCBI reference: c++/src/algo/blast/core/blast_setup.c:969-973
+    // ```c
+    //    if (sbp->gbp) {
+    //        min_subject_length = BlastSeqSrcGetMinSeqLen(seq_src);
+    //        if (Blast_SubjectIsTranslated(program_number)) {
+    //            min_subject_length/=3;
+    //        }
+    // ```
+    // The local `-subject` sequences are a multi-sequence source: the shortest record (an
+    // empty one counts as 0, in nucleotides) is raised to 10 before the division.
+    const BLAST_SEQSRC_MINLENGTH: usize = 10;
+    let min_subject_length = subjects
+        .iter()
+        .map(Vec::len)
+        .min()
+        .unwrap_or(i32::MAX as usize)
+        .max(BLAST_SEQSRC_MINLENGTH)
+        / 3;
     let query_lengths: Vec<i32> = queries
         .iter()
         .map(|query| i32::try_from(query.len()))
@@ -383,89 +437,32 @@ fn run_local_search_with_pool(
     );
     let gapped = lookup_protein_params(&spec);
     let ungapped = lookup_protein_params_ungapped(scoring.matrix);
-    // NCBI c++/src/algo/blast/core/blast_stat.c:2778-2803;
-    // c++/src/algo/blast/core/blast_setup.c:770-847:
-    // if (Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]))
-    //     contexts[context].is_valid = FALSE;
-    // if (query_info->contexts[index].is_valid) BLAST_CalcEffLengths(...);
-    // Reuse the Stage C score-frequency calculation on the query bytes after
-    // BlastSetUp_MaskQuery, which precedes BlastSetup_ScoreBlkInit at
-    // pinned blast_setup.c:614-654.
-    let working_frames: Vec<_> = queries
-        .iter()
-        .map(|query| {
-            let frame = if profile.soft_masking {
-                encode_protein_query_frame_with_seg(query, None)
-            } else {
-                super::search_seed::encode_tblastn_lookup_query(
-                    query,
-                    profile.seg,
-                    profile.mask_lowercase,
-                )
-            };
-            vec![frame]
-        })
-        .collect();
-    // NCBI c++/src/algo/blast/core/blast_stat.c:2778-2803;
-    // c++/src/algo/blast/core/lookup_wrap.c:91-100:
-    // Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
-    // BlastAaLookupTableNew(..., lookup_options->word_size, ...);
-    // The active matrix determines context validity; the active word size
-    // determines the lookup state used by Stage C.
-    let (_, contexts) = build_ncbi_lookup_for_profile(
-        &working_frames,
-        scoring.threshold,
-        &ungapped,
-        false,
-        scoring.matrix,
-        scoring.word_size,
-    );
-    let query_contexts: Vec<_> = queries
-        .iter()
-        .zip(&contexts)
-        .map(|(query, context)| (query.len(), context.is_valid))
-        .collect();
-    let valid_contexts: Vec<_> = contexts.iter().map(|context| context.is_valid).collect();
-    let gapped_by_context = vec![gapped; queries.len()];
-    // NCBI c++/src/algo/blast/core/blast_stat.c:2777-2827;
-    // c++/src/algo/blast/core/blast_parameters.c:208-223,335-347:
-    // Blast_KarlinBlkUngappedCalc(kbp_std[context], sbp->sfp[context]);
-    // sbp->kbp = sbp->kbp_std;
-    // Word x-drop and gap trigger both use each query context's Karlin block.
-    let ungapped_by_context: Vec<_> = contexts
-        .iter()
-        .map(|context| context.karlin_params)
-        .collect();
     // NCBI c++/src/algo/blast/core/blast_stat.c:4091-4171;
     // core/blast_hits.c:1870-1895: gbp is optional; absent gbp selects
     // BLAST_KarlinStoE_simple with the context's effective search space.
     let gumbel = lookup_protein_gumbel_params(&spec, (total_nt / 3) as i64);
-
-    // NCBI c++/src/algo/blast/core/blast_setup.c:964-985,1011-1024;
-    // c++/src/algo/blast/core/blast_parameters.c:457-463:
-    // BlastHitSavingParametersNew(..., min_subject_length,
-    //     options->compositionBasedStats, ...);
-    // params->gap_x_dropoff = (Int4)(options->gap_x_dropoff*LN2/min_lambda);
-    let parameters = local_parameters_for_call(
-        &query_contexts,
-        total_nt,
-        subjects.len(),
-        &gapped_by_context,
-        &ungapped_by_context,
-        LocalParameterOptions {
-            expect_value: profile.expect_value,
-            do_sum_stats,
-            max_intron_length: 0,
-            gap_trigger_bits: 22.0,
-            word_xdrop_bits: 7.0,
-            scale_factor: 1.0,
+    let QuerySetSetup {
+        working_frames,
+        contexts,
+        valid_contexts,
+        gapped_by_context,
+        parameters,
+    } = query_set_setup(
+        queries,
+        QuerySetInputs {
+            profile,
+            scoring,
+            gapped,
+            ungapped: &ungapped,
             gumbel: gumbel.as_ref(),
+            total_nt,
+            num_subjects: subjects.len(),
+            min_subject_length,
+            composition_mode2,
+            do_sum_stats,
         },
-        LocalParameterCall::Initial {
-            min_subject_length: i32::try_from(min_subject_length)?,
-            composition_based_stats: if composition_mode2 { 2 } else { 0 },
-        },
-    );
+        None,
+    )?;
     if let Some(ref mut trace) = observer {
         trace.parameters = Some(parameters.clone());
         // NCBI c++/src/algo/blast/api/blast_results.cpp:72-115:
@@ -498,26 +495,8 @@ fn run_local_search_with_pool(
             .collect();
     }
     let link = parameters.link;
-    let word_xdrop: Vec<_> = parameters.cutoffs.iter().map(|v| v.word_xdrop).collect();
-    let word_cutoff: Vec<_> = parameters.cutoffs.iter().map(|v| v.word_cutoff).collect();
-    let hit_cutoff: Vec<_> = parameters.cutoffs.iter().map(|v| v.hit_cutoff).collect();
-    let search = PreliminaryProfile {
-        seg: profile.seg,
-        soft_masking: profile.soft_masking,
-        threshold: scoring.threshold,
-        window: scoring.window,
-        word_xdrop: &word_xdrop,
-        word_cutoff: &word_cutoff,
-        mask_lowercase: profile.mask_lowercase,
-        matrix: scoring.matrix,
-        word_size: scoring.word_size,
-        gap_open: scoring.gap_open,
-        gap_extend: scoring.gap_extend,
-        gap_xdrop: ((scoring.gap_xdrop_bits * std::f64::consts::LN_2) / gapped.lambda) as i32,
-        gapped_cutoff: &hit_cutoff,
-        hsp_num_max: i32::MAX as usize,
-    };
-    let query_refs: Vec<_> = queries.iter().map(Vec::as_slice).collect();
+    let cutoff_arrays = ContextCutoffArrays::of(&parameters);
+    let search = preliminary_profile(profile, scoring, gapped, &cutoff_arrays);
     // NCBI c++/src/algo/blast/core/blast_hits.c:43-70;
     // c++/src/algo/blast/core/hspfilter_collector.c:105-161:
     // if (compositionBasedStats) {
@@ -533,201 +512,65 @@ fn run_local_search_with_pool(
     // rejects the environment mode until the close operation is ported.
     ensure!(
         !composition_mode2 || std::env::var_os("ADAPTIVE_CBS").is_none(),
-        "TBLASTN ADAPTIVE_CBS preliminary stream close is unimplemented"
+        "the environment variable ADAPTIVE_CBS, which makes NCBI BLAST+ close its preliminary stream of composition-adjusted HSPs early, is not supported by LOSAT's TBLASTN"
     );
     // NCBI c++/src/algo/blast/core/blast_hits.c:43-70:
     // if (compositionBasedStats) ... 1050 or 2*hitlist+50;
     // else if (gapped_calculation)
     //   prelim_hitlist_size = MIN(MAX(2*hitlist_size,10), hitlist_size+50);
-    let prelim_size = if composition_mode2 {
-        if profile.max_target_seqs <= 500 {
-            1050
-        } else {
-            profile
-                .max_target_seqs
-                .checked_mul(2)
-                .and_then(|v| v.checked_add(50))
-                .context("TBLASTN preliminary cap overflow")?
-        }
-    } else {
-        profile
-            .max_target_seqs
-            .saturating_mul(2)
-            .max(10)
-            .min(profile.max_target_seqs.saturating_add(50))
+    // The size is NCBI's `int` (`blastn/hsp.rs` `get_prelim_hitlist_size`); a size that is
+    // not positive (NCBI crashes) is rejected with the options (`args.rs`).
+    let prelim_size = usize::try_from(crate::algorithm::blastn::hsp::get_prelim_hitlist_size(
+        profile.max_target_seqs,
+        composition_mode2,
+        true,
+    ))
+    .ok()
+    .filter(|&size| size > 0)
+    .context("TBLASTN preliminary hit list size is not positive")?;
+    let query_refs: Vec<_> = queries.iter().map(Vec::as_slice).collect();
+    let protein_split = crate::blastinput::app::protein_query_split_sizes("TBLASTN", 20000)?;
+    let batch_lengths: Vec<usize> = queries.iter().map(Vec::len).collect();
+    let preliminary_hitlists = match split_protein_batch(&batch_lengths, protein_split) {
+        None => run_preliminary_subjects(
+            &PreliminaryInputs {
+                queries: &query_refs,
+                genetic_code: profile.genetic_code,
+                search,
+                link,
+                query_lengths: &query_lengths,
+                lengths: &parameters.lengths,
+                gapped_by_context: &gapped_by_context,
+                gumbel: gumbel.as_ref(),
+                prelim_evalue: parameters.prelim_evalue,
+                prelim_size,
+            },
+            subjects,
+            pool,
+            observer.as_deref_mut(),
+        )?,
+        Some(chunks) => split_preliminary_hitlists(
+            queries,
+            &chunks,
+            protein_split,
+            &parameters,
+            QuerySetInputs {
+                profile,
+                scoring,
+                gapped,
+                ungapped: &ungapped,
+                gumbel: gumbel.as_ref(),
+                total_nt,
+                num_subjects: subjects.len(),
+                min_subject_length,
+                composition_mode2,
+                do_sum_stats,
+            },
+            subjects,
+            prelim_size,
+            pool,
+        )?,
     };
-    let mut preliminary_hitlists: Vec<Option<KappaResultHitList>> =
-        (0..queries.len()).map(|_| None).collect();
-    // NCBI c++/src/algo/blast/core/blast_engine.c:1469-1475,872-905:
-    //      status =
-    //          s_BlastSearchEngineCore(program_number, query, query_info,
-    //                                  seq_arg.seq, lookup_wrap, gap_align,
-    // if (hit_params->link_hsp_params) {
-    //     status = BLAST_LinkHsps(program_number, hsp_list_out, query_info,
-    //               subject->length, gap_align->sbp, hit_params->link_hsp_params,
-    //               score_options->gapped_calculation);
-    // }
-    // status = s_Blast_HSPListReapByPrelimEvalue(hsp_list_out, hit_params);
-    // Finish search, link/direct E-value and preliminary reap inside one subject
-    // job, before its OID-ordered list enters the shared collector.
-    let subject_core = |subject: &[u8]| -> Result<(Vec<(usize, GappedHsp)>, LinkedHspList)> {
-        let (preliminary, _) = preliminary_protein_hsps_in_ncbi_order(
-            &query_refs,
-            subject,
-            profile.genetic_code,
-            search,
-        )?;
-        // NCBI c++/src/algo/blast/core/blast_engine.c:870-905:
-        // BLAST_LinkHsps(..., hsp_list_out, ...);
-        // s_Blast_HSPListReapByPrelimEvalue(hsp_list_out, ...);
-        // Even an allocated empty subject list enters link/E-value.
-        let mut linked = if let Some(link) = link {
-            link_preliminary_hsps(
-                &preliminary,
-                &query_lengths,
-                &parameters.lengths,
-                i32::try_from(subject.len())?,
-                &gapped_by_context,
-                gumbel
-                    .as_ref()
-                    .context("TBLASTN sum-statistics Spouge state is missing")?,
-                &link,
-            )?
-        } else {
-            // NCBI c++/src/algo/blast/core/blast_engine.c:728-729,804-813,882-887:
-            // if (subject->length > 0) stat_length = subject->length;
-            // Blast_HSPListGetEvalues(..., stat_length, ...);
-            let stat_length = initial_translated_stat_length(subject.len());
-            direct_local_evalues(
-                &preliminary,
-                &query_lengths,
-                i32::try_from(stat_length)?,
-                &gapped_by_context,
-                &parameters.lengths,
-                gumbel.as_ref(),
-            )
-        };
-        reap_by_evalue(&mut linked, parameters.prelim_evalue);
-        Ok((preliminary, linked))
-    };
-    // NCBI c++/src/algo/blast/core/blast_engine.c:1411-1414,1469-1475:
-    // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-    //        != BLAST_SEQSRC_EOF) {
-    //      status =
-    //          s_BlastSearchEngineCore(program_number, query, query_info,
-    //                                  seq_arg.seq, lookup_wrap, gap_align,
-    // NCBI c++/src/algo/blast/api/prelim_stage.cpp:172-188:
-    // (*thread)->Run(); (*thread)->Join(&result);
-    // Each subject keeps the NCBI search-to-link-to-reap order. Indexed
-    // collection finishes before the OID-ordered shared collector below.
-    let parallel_selected = pool.is_some_and(SearchPool::enabled) && subjects.len() > 1;
-    crate::utils::threading::report_stage(
-        "tblastn",
-        "subject_core",
-        subjects.len(),
-        parallel_selected,
-    );
-    // NCBI c++/src/algo/blast/api/prelim_stage.cpp:145-145:
-    // TBlastThreads the_threads(GetNumberOfThreads());
-    // NCBI c++/src/algo/blast/core/blast_engine.c:1409-1414:
-    // itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
-    // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-    //        != BLAST_SEQSRC_EOF) {
-    // Keep at most one pool-sized batch of subject results before OID reduction;
-    // memory follows NCBI's bounded number of workers, not total subject count.
-    #[cfg(feature = "parallel")]
-    let mut parallel_batch = std::collections::VecDeque::new();
-    #[cfg(feature = "parallel")]
-    let diagnose = crate::utils::threading::diagnostics_enabled();
-    #[cfg(feature = "parallel")]
-    let active = AtomicUsize::new(0);
-    #[cfg(feature = "parallel")]
-    let peak = AtomicUsize::new(0);
-    #[cfg(feature = "parallel")]
-    let mut workers = std::collections::BTreeSet::new();
-    for (oid, subject) in subjects.iter().enumerate() {
-        // NCBI c++/src/algo/blast/core/blast_engine.c:870-905:
-        // BLAST_LinkHsps(..., subject->length, ...);
-        // s_Blast_HSPListReapByPrelimEvalue(hsp_list_out, hit_params);
-        #[cfg(feature = "parallel")]
-        let (preliminary, linked) = if parallel_selected {
-            if parallel_batch.is_empty() {
-                let pool = pool.expect("parallel pool selected");
-                let end = oid.saturating_add(pool.threads()).min(subjects.len());
-                let batch: Vec<_> = pool.install(|| {
-                    subjects[oid..end]
-                        .par_iter()
-                        .map(|subject| {
-                            if diagnose {
-                                let now = active.fetch_add(1, Ordering::SeqCst) + 1;
-                                peak.fetch_max(now, Ordering::SeqCst);
-                            }
-                            let result = subject_core(subject);
-                            if diagnose {
-                                active.fetch_sub(1, Ordering::SeqCst);
-                            }
-                            (result, rayon::current_thread_index())
-                        })
-                        .collect()
-                });
-                if diagnose {
-                    workers.extend(batch.iter().filter_map(|(_, worker)| *worker));
-                }
-                parallel_batch.extend(batch);
-            }
-            parallel_batch
-                .pop_front()
-                .context("missing ordered TBLASTN subject result")?
-                .0?
-        } else {
-            subject_core(subject)?
-        };
-        #[cfg(not(feature = "parallel"))]
-        let (preliminary, linked) = subject_core(subject)?;
-        // NCBI c++/src/algo/blast/core/blast_engine.c:870-905:
-        // BLAST_LinkHsps(..., hsp_list_out, ...);
-        // s_Blast_HSPListReapByPrelimEvalue(hsp_list_out, ...);
-        // The comparison-only trace retains pre-link HSP bytes by OID.
-        if let Some(ref mut trace) = observer {
-            trace.preliminary.push((oid, preliminary.clone()));
-        }
-        // NCBI c++/src/algo/blast/core/blast_engine.c:1553-1555:
-        // status = BlastHSPStreamWrite(hsp_stream, &hsp_list);
-        // NCBI c++/src/algo/blast/core/blast_hspstream.c:289-319:
-        // Query-indexed lists are consumed in
-        // reverse-sorted order by BlastHSPStreamRead.
-        for context in 0..queries.len() {
-            let hsps: Vec<_> = linked
-                .hsps
-                .iter()
-                .copied()
-                .filter(|h| h.context == context)
-                .collect();
-            if !hsps.is_empty() {
-                let best_evalue = hsps.iter().map(|h| h.evalue).reduce(f64::min).unwrap();
-                // NCBI c++/src/algo/blast/core/hspfilter_collector.c:129-161:
-                // Blast_HitListUpdate(results->hitlist_array[index], hsp_list);
-                // Each context owns an independently capped preliminary list.
-                let collector = preliminary_hitlists[context]
-                    .get_or_insert(KappaResultHitList::new(prelim_size)?);
-                collector.update(KappaResultList {
-                    oid: i32::try_from(oid)?,
-                    hsps: LinkedHspList { hsps, best_evalue },
-                    payloads: Vec::new(),
-                })?;
-            }
-        }
-    }
-    // NCBI c++/src/algo/blast/core/blast_engine.c:1659-1668:
-    // /* Use a local diagnostics structure, because the one passed in an input
-    //    argument can be shared between multiple threads */
-    #[cfg(feature = "parallel")]
-    if parallel_selected && diagnose {
-        eprintln!(
-            "[losat-thread-activity] program=tblastn stage=subject_core work_items={} worker_slots={:?} peak_active={}",
-            subjects.len(), workers, peak.load(Ordering::SeqCst)
-        );
-    }
     // NCBI c++/src/algo/blast/core/blast_hspstream.c:144-152,289-319:
     // Blast_HSPResultsReverseSort(results); stream reads from the end.
     let mut preliminary_lists: Vec<_> = preliminary_hitlists
@@ -1005,6 +848,528 @@ fn run_local_search_with_pool(
     Ok(results)
 }
 
+// The per-context cutoffs of the preliminary stage of a query set.
+struct ContextCutoffArrays {
+    word_xdrop: Vec<i32>,
+    word_cutoff: Vec<i32>,
+    hit_cutoff: Vec<i32>,
+}
+
+impl ContextCutoffArrays {
+    fn of(parameters: &LocalSubjectParameters) -> Self {
+        Self {
+            word_xdrop: parameters.cutoffs.iter().map(|v| v.word_xdrop).collect(),
+            word_cutoff: parameters.cutoffs.iter().map(|v| v.word_cutoff).collect(),
+            hit_cutoff: parameters.cutoffs.iter().map(|v| v.hit_cutoff).collect(),
+        }
+    }
+}
+
+// NCBI c++/src/algo/blast/core/blast_parameters.c:302-383,455-463:
+// BlastInitialWordParametersNew(...); BlastExtensionParametersNew(...);
+// The word and extension parameters of the preliminary stage of a query set.
+fn preliminary_profile<'a>(
+    profile: LocalStageDProfile<'a>,
+    scoring: LocalStageDScoring,
+    gapped: KarlinParams,
+    cutoffs: &'a ContextCutoffArrays,
+) -> PreliminaryProfile<'a> {
+    PreliminaryProfile {
+        seg: profile.seg,
+        soft_masking: profile.soft_masking,
+        threshold: scoring.threshold,
+        window: scoring.window,
+        word_xdrop: &cutoffs.word_xdrop,
+        word_cutoff: &cutoffs.word_cutoff,
+        mask_lowercase: profile.mask_lowercase,
+        matrix: scoring.matrix,
+        word_size: scoring.word_size,
+        gap_open: scoring.gap_open,
+        gap_extend: scoring.gap_extend,
+        // NCBI blast_parameters.c:457-458: (Int4)(gap_x_dropoff*NCBIMATH_LN2/min_lambda),
+        // converted as the x86-64 build does (INT_MIN beyond Int4).
+        gap_xdrop: crate::core::blast_util::ncbi_int4_from_double(
+            (scoring.gap_xdrop_bits * std::f64::consts::LN_2) / gapped.lambda,
+        ),
+        gapped_cutoff: &cutoffs.hit_cutoff,
+        hsp_num_max: i32::MAX as usize,
+    }
+}
+
+// NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:219-290
+// ```c++
+//     CEffectiveSearchSpacesMemento eff_memento(m_Options);
+//     SplitQuery_SetEffectiveSearchSpace(m_Options, m_QueryFactory,
+//                                        m_InternalData);
+//     ...
+//     if (query_splitter->IsQuerySplit()) {
+//
+//         CRef<CSplitQueryBlk> split_query_blk = query_splitter->Split();
+//
+//         for (Uint4 i = 0; i < query_splitter->GetNumberOfChunks(); i++) {
+//             try {
+//                 CRef<IQueryFactory> chunk_qf =
+//                     query_splitter->GetQueryFactoryForChunk(i);
+//                 ...
+//                 CRef<SInternalData> chunk_data =
+//                     SplitQuery_CreateChunkData(chunk_qf, m_Options,
+//                                                m_InternalData,
+//                                                GetNumberOfThreads());
+//                 ...
+//                 BlastHSPStreamMerge(split_query_blk->GetCStruct(), i,
+//                                 chunk_data->m_HspStream->GetPointer(),
+//                                 m_InternalData->m_HspStream->GetPointer());
+//             ...
+//             } catch (const CBlastException& e) {
+//                 // This error message is safe to ignore for a given chunk,
+//                 // because the chunks might end up producing a region of
+//                 // the query for which ungapped Karlin-Altschul blocks
+//                 // cannot be calculated
+// ```
+// NCBI reference: c++/src/algo/blast/api/split_query_aux_priv.cpp:171-182
+// ```c++
+//     BlastQueryInfo* qinfo = full_data->m_QueryInfo;
+//     _ASSERT(qinfo);
+//
+//     vector<Int8> eff_searchsp;
+//     for (size_t index = 0; index <= (size_t)qinfo->last_context; index++) {
+//         eff_searchsp.push_back(calc.GetEffSearchSpaceForContext(index));
+//     }
+//     options->SetEffectiveSearchSpace(eff_searchsp);
+// ```
+// The preliminary stage of a split batch (RP-4): each chunk is a query set of its parts
+// (the chunk's query factory, with the lower-case masks restricted to each part), with the
+// batch's effective search spaces, and its hit lists merge into the batch's. A chunk whose
+// contexts all fail the Karlin-Altschul setup finds nothing (NCBI ignores its error).
+#[allow(clippy::too_many_arguments)]
+fn split_preliminary_hitlists(
+    queries: &[Vec<u8>],
+    chunks: &[ProteinQueryChunk],
+    sizes: SplitSizes,
+    batch_parameters: &LocalSubjectParameters,
+    inputs: QuerySetInputs<'_>,
+    subjects: &[Vec<u8>],
+    prelim_size: usize,
+    pool: Option<&SearchPool<'_>>,
+) -> Result<Vec<Option<KappaResultHitList>>> {
+    // A negative CHUNK_SIZE splits a batch only with a negative OVERLAP_CHUNK_SIZE below
+    // it; NCBI's `size_t` chunk ranges then wrap (split_query_cxx.cpp:145-171).
+    ensure!(
+        !sizes.negative_chunk_size(),
+        "a negative CHUNK_SIZE above a negative OVERLAP_CHUNK_SIZE splits this query batch with NCBI BLAST+'s size_t chunk ranges wrapped, which is not supported by LOSAT's TBLASTN"
+    );
+    ensure!(
+        !protein_chunk_would_be_split(chunks, sizes),
+        "an OVERLAP_CHUNK_SIZE so close to CHUNK_SIZE that NCBI BLAST+ would split a query chunk again (it then stops with a null reference) is not supported by LOSAT's TBLASTN"
+    );
+    let batch_eff_searchsp: Vec<i64> = batch_parameters
+        .lengths
+        .iter()
+        .map(|length| length.eff_searchsp)
+        .collect();
+    let mut merged: Vec<Option<KappaResultHitList>> = (0..queries.len()).map(|_| None).collect();
+    for chunk in chunks {
+        // NCBI fails to make the query factory of a chunk without a query ("Empty
+        // CBlastQueryVector"); `split_protein_batch` makes none.
+        ensure!(
+            !chunk.queries.is_empty(),
+            "a query chunk without a query is not supported by LOSAT's TBLASTN"
+        );
+        let parts: Vec<Vec<u8>> = chunk
+            .queries
+            .iter()
+            .map(|part| {
+                protein_chunk_part(
+                    &queries[part.query],
+                    part,
+                    inputs.profile.mask_lowercase,
+                    inputs
+                        .profile
+                        .query_offsets
+                        .get(part.query)
+                        .copied()
+                        .unwrap_or(0),
+                )
+            })
+            .collect();
+        let setup = query_set_setup(&parts, inputs, Some(&batch_eff_searchsp))?;
+        if !setup.valid_contexts.iter().any(|&valid| valid) {
+            continue;
+        }
+        let query_lengths: Vec<i32> = parts
+            .iter()
+            .map(|part| i32::try_from(part.len()))
+            .collect::<std::result::Result<_, _>>()?;
+        let cutoff_arrays = ContextCutoffArrays::of(&setup.parameters);
+        let part_refs: Vec<&[u8]> = parts.iter().map(Vec::as_slice).collect();
+        let chunk_lists = run_preliminary_subjects(
+            &PreliminaryInputs {
+                queries: &part_refs,
+                genetic_code: inputs.profile.genetic_code,
+                search: preliminary_profile(
+                    inputs.profile,
+                    inputs.scoring,
+                    inputs.gapped,
+                    &cutoff_arrays,
+                ),
+                link: setup.parameters.link,
+                query_lengths: &query_lengths,
+                lengths: &setup.parameters.lengths,
+                gapped_by_context: &setup.gapped_by_context,
+                gumbel: inputs.gumbel,
+                prelim_evalue: setup.parameters.prelim_evalue,
+                prelim_size,
+            },
+            subjects,
+            pool,
+            None,
+        )?;
+        let parts_and_offsets: Vec<(usize, i32)> = chunk
+            .queries
+            .iter()
+            .zip(&chunk.context_offsets)
+            .map(|(part, &offset)| (part.query, offset))
+            .collect();
+        // NCBI reference: c++/src/algo/blast/api/split_query_cxx.cpp:174-178
+        // ```c++
+        //     const size_t kOverlap =
+        //         Blast_QueryIsTranslated(m_Options->GetProgramType())
+        //         ? kOverlapSize / CODON_LENGTH : kOverlapSize;
+        //     m_SplitBlk->SetChunkOverlapSize(kOverlap);
+        // ```
+        merge_query_chunk(
+            &mut merged,
+            chunk_lists,
+            &parts_and_offsets,
+            sizes.overlap as u32 as i32,
+        )?;
+    }
+    Ok(merged)
+}
+
+// The query-set inputs of `query_set_setup`: the whole query batch, or the parts of one query
+// chunk of a split batch (RP-4).
+#[derive(Clone, Copy)]
+struct QuerySetInputs<'a> {
+    profile: LocalStageDProfile<'a>,
+    scoring: LocalStageDScoring,
+    gapped: KarlinParams,
+    ungapped: &'a KarlinParams,
+    gumbel: Option<&'a BlastGumbelBlk>,
+    total_nt: usize,
+    num_subjects: usize,
+    min_subject_length: usize,
+    composition_mode2: bool,
+    do_sum_stats: bool,
+}
+
+struct QuerySetSetup {
+    working_frames: Vec<Vec<crate::algorithm::tblastx::translation::QueryFrame>>,
+    contexts: Vec<crate::algorithm::tblastx::lookup::QueryContext>,
+    valid_contexts: Vec<bool>,
+    gapped_by_context: Vec<KarlinParams>,
+    parameters: LocalSubjectParameters,
+}
+
+// NCBI c++/src/algo/blast/core/blast_setup.c:614-654,964-1024:
+// BlastSetUp_MaskQuery(...); BlastSetup_ScoreBlkInit(...); BLAST_CalcEffLengths(...);
+// BlastHitSavingParametersNew(...); the score block, effective lengths and cutoffs of a
+// query set. `eff_searchsp_override` is the options' effective search spaces that NCBI sets
+// from the whole batch before it searches a query chunk (`SplitQuery_SetEffectiveSearchSpace`).
+fn query_set_setup(
+    queries: &[Vec<u8>],
+    inputs: QuerySetInputs<'_>,
+    eff_searchsp_override: Option<&[i64]>,
+) -> Result<QuerySetSetup> {
+    // NCBI c++/src/algo/blast/core/blast_stat.c:2778-2803;
+    // c++/src/algo/blast/core/blast_setup.c:770-847:
+    // if (Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]))
+    //     contexts[context].is_valid = FALSE;
+    // if (query_info->contexts[index].is_valid) BLAST_CalcEffLengths(...);
+    // Reuse the Stage C score-frequency calculation on the query bytes after
+    // BlastSetUp_MaskQuery, which precedes BlastSetup_ScoreBlkInit at
+    // pinned blast_setup.c:614-654.
+    let working_frames: Vec<_> = queries
+        .iter()
+        .map(|query| {
+            let frame = if inputs.profile.soft_masking {
+                encode_protein_query_frame_with_seg(query, None)
+            } else {
+                super::search_seed::encode_tblastn_lookup_query(
+                    query,
+                    inputs.profile.seg,
+                    inputs.profile.mask_lowercase,
+                )
+            };
+            vec![frame]
+        })
+        .collect();
+    // NCBI c++/src/algo/blast/core/blast_stat.c:2778-2803;
+    // c++/src/algo/blast/core/lookup_wrap.c:91-100:
+    // Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
+    // BlastAaLookupTableNew(..., lookup_options->word_size, ...);
+    // The active matrix determines context validity; the active word size
+    // determines the lookup state used by Stage C.
+    let (_, contexts) = build_ncbi_lookup_for_profile(
+        &working_frames,
+        inputs.scoring.threshold,
+        inputs.ungapped,
+        false,
+        inputs.scoring.matrix,
+        inputs.scoring.word_size,
+    );
+    let query_contexts: Vec<_> = queries
+        .iter()
+        .zip(&contexts)
+        .map(|(query, context)| (query.len(), context.is_valid))
+        .collect();
+    let valid_contexts: Vec<_> = contexts.iter().map(|context| context.is_valid).collect();
+    let gapped_by_context = vec![inputs.gapped; queries.len()];
+    // NCBI c++/src/algo/blast/core/blast_stat.c:2777-2827;
+    // c++/src/algo/blast/core/blast_parameters.c:208-223,335-347:
+    // Blast_KarlinBlkUngappedCalc(kbp_std[context], sbp->sfp[context]);
+    // sbp->kbp = sbp->kbp_std;
+    // Word x-drop and gap trigger both use each query context's Karlin block.
+    let ungapped_by_context: Vec<_> = contexts
+        .iter()
+        .map(|context| context.karlin_params)
+        .collect();
+
+    // NCBI c++/src/algo/blast/core/blast_setup.c:964-985,1011-1024;
+    // c++/src/algo/blast/core/blast_parameters.c:457-463:
+    // BlastHitSavingParametersNew(..., min_subject_length,
+    //     options->compositionBasedStats, ...);
+    // params->gap_x_dropoff = (Int4)(options->gap_x_dropoff*LN2/min_lambda);
+    let parameters = local_parameters_for_call(
+        &query_contexts,
+        inputs.total_nt,
+        inputs.num_subjects,
+        &gapped_by_context,
+        &ungapped_by_context,
+        LocalParameterOptions {
+            expect_value: inputs.profile.expect_value,
+            do_sum_stats: inputs.do_sum_stats,
+            max_intron_length: 0,
+            gap_trigger_bits: 22.0,
+            word_xdrop_bits: 7.0,
+            scale_factor: 1.0,
+            gumbel: inputs.gumbel,
+            eff_searchsp_override,
+        },
+        LocalParameterCall::Initial {
+            min_subject_length: i32::try_from(inputs.min_subject_length)?,
+            composition_based_stats: if inputs.composition_mode2 { 2 } else { 0 },
+        },
+    );
+    Ok(QuerySetSetup {
+        working_frames,
+        contexts,
+        valid_contexts,
+        gapped_by_context,
+        parameters,
+    })
+}
+
+// The inputs of the preliminary stage over the subjects for one query set (the whole batch,
+// or one query chunk of a split batch).
+struct PreliminaryInputs<'a> {
+    queries: &'a [&'a [u8]],
+    genetic_code: u8,
+    search: PreliminaryProfile<'a>,
+    link: Option<super::stage_d_stats::LocalLinkParameters>,
+    query_lengths: &'a [i32],
+    lengths: &'a [super::stage_d_stats::LocalContextLength],
+    gapped_by_context: &'a [KarlinParams],
+    gumbel: Option<&'a BlastGumbelBlk>,
+    prelim_evalue: f64,
+    prelim_size: usize,
+}
+
+// NCBI c++/src/algo/blast/core/blast_engine.c:1411-1414,1469-1475,1553-1555:
+// while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr)) != BLAST_SEQSRC_EOF) {
+//     status = s_BlastSearchEngineCore(...); ... BlastHSPStreamWrite(hsp_stream, &hsp_list);
+// The preliminary hit list of each query context of the query set.
+fn run_preliminary_subjects(
+    inputs: &PreliminaryInputs<'_>,
+    subjects: &[Vec<u8>],
+    pool: Option<&SearchPool<'_>>,
+    mut observer: Option<&mut StageDBoundaryTrace>,
+) -> Result<Vec<Option<KappaResultHitList>>> {
+    let mut preliminary_hitlists: Vec<Option<KappaResultHitList>> =
+        (0..inputs.queries.len()).map(|_| None).collect();
+    // NCBI c++/src/algo/blast/core/blast_engine.c:1469-1475,872-905:
+    //      status =
+    //          s_BlastSearchEngineCore(program_number, query, query_info,
+    //                                  seq_arg.seq, lookup_wrap, gap_align,
+    // if (hit_params->link_hsp_params) {
+    //     status = BLAST_LinkHsps(program_number, hsp_list_out, query_info,
+    //               subject->length, gap_align->sbp, hit_params->link_hsp_params,
+    //               score_options->gapped_calculation);
+    // }
+    // status = s_Blast_HSPListReapByPrelimEvalue(hsp_list_out, hit_params);
+    // Finish search, link/direct E-value and preliminary reap inside one subject
+    // job, before its OID-ordered list enters the shared collector.
+    let subject_core = |subject: &[u8]| -> Result<(Vec<(usize, GappedHsp)>, LinkedHspList)> {
+        let (preliminary, _) = preliminary_protein_hsps_in_ncbi_order(
+            inputs.queries,
+            subject,
+            inputs.genetic_code,
+            inputs.search,
+        )?;
+        // NCBI c++/src/algo/blast/core/blast_engine.c:870-905:
+        // BLAST_LinkHsps(..., hsp_list_out, ...);
+        // s_Blast_HSPListReapByPrelimEvalue(hsp_list_out, ...);
+        // Even an allocated empty subject list enters link/E-value.
+        let mut linked = if let Some(link) = inputs.link {
+            link_preliminary_hsps(
+                &preliminary,
+                inputs.query_lengths,
+                inputs.lengths,
+                i32::try_from(subject.len())?,
+                inputs.gapped_by_context,
+                inputs
+                    .gumbel
+                    .context("TBLASTN sum-statistics Spouge state is missing")?,
+                &link,
+            )?
+        } else {
+            // NCBI c++/src/algo/blast/core/blast_engine.c:728-729,804-813,882-887:
+            // if (subject->length > 0) stat_length = subject->length;
+            // Blast_HSPListGetEvalues(..., stat_length, ...);
+            let stat_length = initial_translated_stat_length(subject.len());
+            direct_local_evalues(
+                &preliminary,
+                inputs.query_lengths,
+                i32::try_from(stat_length)?,
+                inputs.gapped_by_context,
+                inputs.lengths,
+                inputs.gumbel,
+            )
+        };
+        reap_by_evalue(&mut linked, inputs.prelim_evalue);
+        Ok((preliminary, linked))
+    };
+    // NCBI c++/src/algo/blast/core/blast_engine.c:1411-1414,1469-1475:
+    // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+    //        != BLAST_SEQSRC_EOF) {
+    //      status =
+    //          s_BlastSearchEngineCore(program_number, query, query_info,
+    //                                  seq_arg.seq, lookup_wrap, gap_align,
+    // NCBI c++/src/algo/blast/api/prelim_stage.cpp:172-188:
+    // (*thread)->Run(); (*thread)->Join(&result);
+    // Each subject keeps the NCBI search-to-link-to-reap order. Indexed
+    // collection finishes before the OID-ordered shared collector below.
+    let parallel_selected = pool.is_some_and(SearchPool::enabled) && subjects.len() > 1;
+    crate::utils::threading::report_stage(
+        "tblastn",
+        "subject_core",
+        subjects.len(),
+        parallel_selected,
+    );
+    // NCBI c++/src/algo/blast/api/prelim_stage.cpp:145-145:
+    // TBlastThreads the_threads(GetNumberOfThreads());
+    // NCBI c++/src/algo/blast/core/blast_engine.c:1409-1414:
+    // itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
+    // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+    //        != BLAST_SEQSRC_EOF) {
+    // Keep at most one pool-sized batch of subject results before OID reduction;
+    // memory follows NCBI's bounded number of workers, not total subject count.
+    #[cfg(feature = "parallel")]
+    let mut parallel_batch = std::collections::VecDeque::new();
+    #[cfg(feature = "parallel")]
+    let diagnose = crate::utils::threading::diagnostics_enabled();
+    #[cfg(feature = "parallel")]
+    let active = AtomicUsize::new(0);
+    #[cfg(feature = "parallel")]
+    let peak = AtomicUsize::new(0);
+    #[cfg(feature = "parallel")]
+    let mut workers = std::collections::BTreeSet::new();
+    for (oid, subject) in subjects.iter().enumerate() {
+        // NCBI c++/src/algo/blast/core/blast_engine.c:870-905:
+        // BLAST_LinkHsps(..., subject->length, ...);
+        // s_Blast_HSPListReapByPrelimEvalue(hsp_list_out, hit_params);
+        #[cfg(feature = "parallel")]
+        let (preliminary, linked) = if parallel_selected {
+            if parallel_batch.is_empty() {
+                let pool = pool.expect("parallel pool selected");
+                let end = oid.saturating_add(pool.threads()).min(subjects.len());
+                let batch: Vec<_> = pool.install(|| {
+                    subjects[oid..end]
+                        .par_iter()
+                        .map(|subject| {
+                            if diagnose {
+                                let now = active.fetch_add(1, Ordering::SeqCst) + 1;
+                                peak.fetch_max(now, Ordering::SeqCst);
+                            }
+                            let result = subject_core(subject);
+                            if diagnose {
+                                active.fetch_sub(1, Ordering::SeqCst);
+                            }
+                            (result, rayon::current_thread_index())
+                        })
+                        .collect()
+                });
+                if diagnose {
+                    workers.extend(batch.iter().filter_map(|(_, worker)| *worker));
+                }
+                parallel_batch.extend(batch);
+            }
+            parallel_batch
+                .pop_front()
+                .context("missing ordered TBLASTN subject result")?
+                .0?
+        } else {
+            subject_core(subject)?
+        };
+        #[cfg(not(feature = "parallel"))]
+        let (preliminary, linked) = subject_core(subject)?;
+        // NCBI c++/src/algo/blast/core/blast_engine.c:870-905:
+        // BLAST_LinkHsps(..., hsp_list_out, ...);
+        // s_Blast_HSPListReapByPrelimEvalue(hsp_list_out, ...);
+        // The comparison-only trace retains pre-link HSP bytes by OID.
+        if let Some(ref mut trace) = observer {
+            trace.preliminary.push((oid, preliminary.clone()));
+        }
+        // NCBI c++/src/algo/blast/core/blast_engine.c:1553-1555:
+        // status = BlastHSPStreamWrite(hsp_stream, &hsp_list);
+        // NCBI c++/src/algo/blast/core/blast_hspstream.c:289-319:
+        // Query-indexed lists are consumed in
+        // reverse-sorted order by BlastHSPStreamRead.
+        for context in 0..inputs.queries.len() {
+            let hsps: Vec<_> = linked
+                .hsps
+                .iter()
+                .copied()
+                .filter(|h| h.context == context)
+                .collect();
+            if !hsps.is_empty() {
+                let best_evalue = hsps.iter().map(|h| h.evalue).reduce(f64::min).unwrap();
+                // NCBI c++/src/algo/blast/core/hspfilter_collector.c:129-161:
+                // Blast_HitListUpdate(results->hitlist_array[index], hsp_list);
+                // Each context owns an independently capped preliminary list.
+                let collector = preliminary_hitlists[context]
+                    .get_or_insert(KappaResultHitList::new(inputs.prelim_size)?);
+                collector.update(KappaResultList {
+                    oid: i32::try_from(oid)?,
+                    hsps: LinkedHspList { hsps, best_evalue },
+                    payloads: Vec::new(),
+                })?;
+            }
+        }
+    }
+    // NCBI c++/src/algo/blast/core/blast_engine.c:1659-1668:
+    // /* Use a local diagnostics structure, because the one passed in an input
+    //    argument can be shared between multiple threads */
+    #[cfg(feature = "parallel")]
+    if parallel_selected && diagnose {
+        eprintln!(
+            "[losat-thread-activity] program=tblastn stage=subject_core work_items={} worker_slots={:?} peak_active={}",
+            subjects.len(), workers, peak.load(Ordering::SeqCst)
+        );
+    }
+    Ok(preliminary_hitlists)
+}
+
 // NCBI c++/src/algo/blast/core/blast_engine.c:728-729,804-813,882-887:
 // Int4 stat_length = subject->length;
 // if (subject->length > 0) stat_length = subject->length;
@@ -1109,6 +1474,24 @@ fn finish_local_mode0_no_sum_stats(
         let input: Vec<_> = preliminary.hsps.iter().map(|linked| linked.hsp).collect();
         // NCBI c++/src/algo/blast/core/blast_traceback.c:503-536:
         // traceback uses the selected scoring matrix and gap costs.
+        // NCBI reference: c++/src/algo/blast/core/blast_parameters.c:455-463
+        // ```c
+        //       double min_lambda = s_BlastFindSmallestLambda(sbp->kbp_gap, query_info, NULL);
+        //       params->gap_x_dropoff = (Int4)
+        //           (options->gap_x_dropoff*NCBIMATH_LN2 / min_lambda);
+        //       /* Note that this conversion from bits to raw score is done prematurely
+        //          when rescaling and composition based statistics is applied, as we
+        //          lose precision. Therefore this is redone in Kappa_RedoAlignmentCore */
+        //       params->gap_x_dropoff_final = (Int4)
+        //           MAX(options->gap_x_dropoff_final*NCBIMATH_LN2 / min_lambda, params->gap_x_dropoff);
+        // ```
+        // The final X-drop is at least the preliminary one (`-xdrop_gap` above
+        // `-xdrop_gap_final`).
+        let final_xdrop = local_extension_final_xdrop(
+            scoring.gap_xdrop_bits,
+            scoring.final_xdrop_bits,
+            gapped_params[context].lambda,
+        )?;
         let (traced, stat_length) =
             full_translation_traceback_with_matrix_and_events_with_mask_mode_owned(
                 &queries[context],
@@ -1118,8 +1501,7 @@ fn finish_local_mode0_no_sum_stats(
                 scoring.matrix,
                 scoring.gap_open,
                 scoring.gap_extend,
-                ((scoring.final_xdrop_bits * std::f64::consts::LN_2)
-                    / gapped_params[context].lambda) as i32,
+                final_xdrop,
                 0.0,
                 0,
                 profile.seg,
@@ -1260,6 +1642,7 @@ mod tests {
                 genetic_code: 1,
                 expect_value: 10.0,
                 max_target_seqs: 500,
+                query_offsets: &[],
             },
             true,
             true,
@@ -1306,6 +1689,7 @@ mod tests {
                 genetic_code: 1,
                 expect_value: 10.0,
                 max_target_seqs: 500,
+                query_offsets: &[],
             },
             true,
             true,
@@ -1592,6 +1976,7 @@ mod tests {
                 genetic_code: 1,
                 expect_value: 10.0,
                 max_target_seqs: 2,
+                query_offsets: &[],
             },
             true,
             true,
@@ -1676,6 +2061,7 @@ mod tests {
                 genetic_code: 1,
                 expect_value: 10.0,
                 max_target_seqs: 500,
+                query_offsets: &[],
             },
             true,
             true,
@@ -1829,6 +2215,7 @@ mod tests {
                 genetic_code: 32,
                 expect_value: 10.0,
                 max_target_seqs: 500,
+                query_offsets: &[],
             },
         )
         .unwrap();
@@ -1918,6 +2305,7 @@ mod tests {
                     genetic_code: 1,
                     expect_value: 10.0,
                     max_target_seqs: 500,
+                    query_offsets: &[],
                 },
             )
             .unwrap();
@@ -2098,6 +2486,7 @@ mod tests {
                     genetic_code: 1,
                     expect_value: 10000.0,
                     max_target_seqs: 500,
+                    query_offsets: &[],
                 };
                 let mut boundary = StageDBoundaryTrace::default();
                 let results = run_local_search(
@@ -2321,6 +2710,7 @@ mod tests {
                     genetic_code: 1,
                     expect_value: 10000.0,
                     max_target_seqs: 500,
+                    query_offsets: &[],
                 };
                 let mut boundary = StageDBoundaryTrace::default();
                 let results = run_local_search(
@@ -2527,6 +2917,7 @@ mod tests {
                 genetic_code: 1,
                 expect_value: 10000.0,
                 max_target_seqs: 500,
+                query_offsets: &[],
             },
             false,
             false,
@@ -2671,6 +3062,7 @@ mod tests {
                 genetic_code: 1,
                 expect_value: 10000.0,
                 max_target_seqs: 500,
+                query_offsets: &[],
             },
             false,
             false,
@@ -2836,6 +3228,7 @@ mod tests {
                 genetic_code: 1,
                 expect_value: 10.0,
                 max_target_seqs: 500,
+                query_offsets: &[],
             };
             let mut boundary = StageDBoundaryTrace::default();
             let result = run_local_search(
@@ -3029,6 +3422,7 @@ mod tests {
                     genetic_code: 1,
                     expect_value: 10000.0,
                     max_target_seqs: 500,
+                    query_offsets: &[],
                 };
                 let mut boundary = StageDBoundaryTrace::default();
                 let results = run_local_search(
@@ -3185,6 +3579,7 @@ mod tests {
                         genetic_code: selected,
                         expect_value: 10.0,
                         max_target_seqs: 500,
+                        query_offsets: &[],
                     },
                     true,
                     true,
@@ -3492,6 +3887,7 @@ mod tests {
                 genetic_code: 1,
                 expect_value: 10.0,
                 max_target_seqs: 112,
+                query_offsets: &[],
             },
         )
         .unwrap();
@@ -3678,6 +4074,7 @@ mod tests {
                     genetic_code: 1,
                     expect_value: 10.0,
                     max_target_seqs: 500,
+                    query_offsets: &[],
                 },
             )
             .unwrap();
@@ -3789,6 +4186,7 @@ mod tests {
                 genetic_code: 1,
                 expect_value: 10000.0,
                 max_target_seqs: 1,
+                query_offsets: &[],
             },
         )
         .unwrap();
@@ -3882,6 +4280,7 @@ mod tests {
                 genetic_code: 1,
                 expect_value: 10000.0,
                 max_target_seqs: 1,
+                query_offsets: &[],
             },
         )
         .unwrap();
@@ -3992,6 +4391,7 @@ mod tests {
                 genetic_code: 1,
                 expect_value: 10000.0,
                 max_target_seqs: 1,
+                query_offsets: &[],
             },
         )
         .unwrap();

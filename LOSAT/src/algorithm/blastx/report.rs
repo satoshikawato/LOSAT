@@ -1375,6 +1375,8 @@ fn write_pairwise(
             let first = (qidx * 6..qidx * 6 + 6).find(|&c| batch.parameters[c].valid);
             let stat = first.map(|c| &batch.parameters[c]);
             qinfo.push(BlastpPairwiseQuery {
+                valid: true,
+                batch_skipped: false,
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:630-637
                 // ```c++
                 // CAlignFormatUtil::GetSeqIdString(const list<CRef<CSeq_id> > & ids, bool believe_local_id)
@@ -1547,11 +1549,14 @@ fn pairwise_metadata(
         matrix_name: options.matrix.clone(),
         gap_open: options.gap_open,
         gap_extend: options.gap_extend,
-        word_threshold: 0,
+        word_threshold: 0.0,
         window_size: options.window_size,
         gapped_karlin: lookup_protein_params(&scoring),
         gumbel: lookup_protein_gumbel_params(&scoring, total as i64)
             .expect("pinned BLOSUM62 gap11/1 Gumbel block"),
+        // BLASTX writes its own description table and alignments (`write_blastx_report`).
+        num_descriptions: usize::MAX,
+        num_alignments: usize::MAX,
     }
 }
 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:254-254

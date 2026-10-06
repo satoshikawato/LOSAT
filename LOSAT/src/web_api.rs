@@ -241,9 +241,11 @@ fn parse_blastn_args(
         query,
         subject: Some(subject),
         task: "megablast".to_string(),
+        template_type: None,
+        template_length: None,
         word_size: None,
         num_threads: 1,
-        evalue: 10.0,
+        evalue: Some(10.0),
         percent_identity: 0.0,
         min_hit_length: 0,
         max_target_seqs: None,
@@ -261,6 +263,9 @@ fn parse_blastn_args(
         dust_filtering: None,
         dust: crate::blastinput::value_parsers::DustSpec::Yes,
         lcase_masking: false,
+        // The frozen web ABI v1 (plan TD-1) has no ranges.
+        query_loc: None,
+        subject_loc: None,
         subject_besthit: false,
         verbose: false,
         scan_step: 0,
@@ -297,13 +302,17 @@ fn parse_blastn_args(
             args.num_threads = parse_num_threads_arg(value, flag)?;
         } else if flag == "-evalue" {
             // The forms that NCBI's CArg_Double reads, as the CLI (`blastn_evalue`).
-            args.evalue = crate::blastinput::value_parsers::blastn_evalue(next_arg(
-                extra_args, &mut index, flag,
-            )?)
-            .map_err(|err| format!("{flag} parse error: {err}"))?;
+            args.evalue = Some(
+                crate::blastinput::value_parsers::blastn_evalue(next_arg(
+                    extra_args, &mut index, flag,
+                )?)
+                .map_err(|err| format!("{flag} parse error: {err}"))?,
+            );
         } else if let Some(value) = flag.strip_prefix("-evalue=") {
-            args.evalue = crate::blastinput::value_parsers::blastn_evalue(value)
-                .map_err(|err| format!("{flag} parse error: {err}"))?;
+            args.evalue = Some(
+                crate::blastinput::value_parsers::blastn_evalue(value)
+                    .map_err(|err| format!("{flag} parse error: {err}"))?,
+            );
         } else {
             return Err(format!("unsupported blastn argument for web API: {flag}"));
         }
@@ -342,9 +351,9 @@ fn parse_tblastx_args(
     // ```
     let mut args = tblastx::TblastxArgs {
         query,
-        subject,
+        subject: Some(subject),
         evalue: 10.0,
-        threshold: 13,
+        threshold: 13.0,
         word_size: 3,
         num_threads: 1,
         out: Some(out),
@@ -352,10 +361,13 @@ fn parse_tblastx_args(
         db_gencode: 1,
         max_target_seqs: None,
         // NCBI blast_options.c:83-85: window=kSegWindow; locut=kSegLocut; hicut=kSegHicut.
-        seg: BlastpSegSpec::Yes,
+        seg: "yes".to_string(),
         window_size: 40,
         outfmt: "6".to_string(),
         culling_limit: 0,
+        // The frozen web ABI v1 (plan TD-1) has no ranges.
+        query_loc: None,
+        subject_loc: None,
     };
 
     let mut index = 0;
@@ -485,23 +497,26 @@ fn parse_blastp_args(
 ) -> Result<blastp::BlastpArgs, String> {
     let mut args = blastp::BlastpArgs {
         query,
-        subject,
+        subject: Some(subject),
         task: "blastp".to_string(),
         evalue: None,
         threshold: None,
         word_size: None,
         num_threads: 1,
         out: Some(out),
-        max_target_seqs: 500,
+        max_target_seqs: None,
         max_hsps_per_subject: None,
         ungapped: false,
         window_size: None,
         matrix: None,
         gap_open: None,
         gap_extend: None,
-        comp_based_stats: None,
+        comp_based_stats: "2".to_string(),
         seg: None,
         use_sw_tback: false,
+        // The frozen web ABI v1 (plan TD-1) has no ranges.
+        query_loc: None,
+        subject_loc: None,
         outfmt: "6".to_string(),
     };
 
@@ -543,14 +558,16 @@ fn parse_blastp_args(
         } else if flag == "-word_size" {
             args.word_size = Some(
                 next_arg(extra_args, &mut index, flag)?
-                    .parse()
-                    .map_err(|err| format!("{flag} parse error: {err}"))?,
+                    .parse::<usize>()
+                    .map_err(|err| format!("{flag} parse error: {err}"))?
+                    .min(i32::MAX as usize) as i32,
             );
         } else if let Some(value) = flag.strip_prefix("-word_size=") {
             args.word_size = Some(
                 value
-                    .parse()
-                    .map_err(|err| format!("{flag} parse error: {err}"))?,
+                    .parse::<usize>()
+                    .map_err(|err| format!("{flag} parse error: {err}"))?
+                    .min(i32::MAX as usize) as i32,
             );
         } else if flag == "-num_threads" {
             args.num_threads = next_arg(extra_args, &mut index, flag)?
@@ -561,13 +578,17 @@ fn parse_blastp_args(
                 .parse()
                 .map_err(|err| format!("{flag} parse error: {err}"))?;
         } else if flag == "-max_target_seqs" {
-            args.max_target_seqs = next_arg(extra_args, &mut index, flag)?
-                .parse()
-                .map_err(|err| format!("{flag} parse error: {err}"))?;
+            args.max_target_seqs = Some(
+                next_arg(extra_args, &mut index, flag)?
+                    .parse()
+                    .map_err(|err| format!("{flag} parse error: {err}"))?,
+            );
         } else if let Some(value) = flag.strip_prefix("-max_target_seqs=") {
-            args.max_target_seqs = value
-                .parse()
-                .map_err(|err| format!("{flag} parse error: {err}"))?;
+            args.max_target_seqs = Some(
+                value
+                    .parse()
+                    .map_err(|err| format!("{flag} parse error: {err}"))?,
+            );
         } else if flag == "-max_hsps" {
             args.max_hsps_per_subject = Some(
                 next_arg(extra_args, &mut index, flag)?
@@ -583,14 +604,16 @@ fn parse_blastp_args(
         } else if flag == "-window_size" {
             args.window_size = Some(
                 next_arg(extra_args, &mut index, flag)?
-                    .parse()
-                    .map_err(|err| format!("{flag} parse error: {err}"))?,
+                    .parse::<usize>()
+                    .map_err(|err| format!("{flag} parse error: {err}"))?
+                    .min(i32::MAX as usize) as i32,
             );
         } else if let Some(value) = flag.strip_prefix("-window_size=") {
             args.window_size = Some(
                 value
-                    .parse()
-                    .map_err(|err| format!("{flag} parse error: {err}"))?,
+                    .parse::<usize>()
+                    .map_err(|err| format!("{flag} parse error: {err}"))?
+                    .min(i32::MAX as usize) as i32,
             );
         } else if flag == "-matrix" {
             args.matrix = Some(next_arg(extra_args, &mut index, flag)?.to_string());
@@ -623,15 +646,19 @@ fn parse_blastp_args(
                     .map_err(|err| format!("{flag} parse error: {err}"))?,
             );
         } else if flag == "-comp_based_stats" {
-            args.comp_based_stats = Some(parse_blastp_comp_based_stats(next_arg(
-                extra_args, &mut index, flag,
-            )?)?);
+            let value = next_arg(extra_args, &mut index, flag)?;
+            parse_blastp_comp_based_stats(value)?;
+            args.comp_based_stats = value.to_string();
         } else if let Some(value) = flag.strip_prefix("-comp_based_stats=") {
-            args.comp_based_stats = Some(parse_blastp_comp_based_stats(value)?);
+            parse_blastp_comp_based_stats(value)?;
+            args.comp_based_stats = value.to_string();
         } else if flag == "-seg" {
-            args.seg = Some(parse_blastp_seg(next_arg(extra_args, &mut index, flag)?)?);
+            let value = next_arg(extra_args, &mut index, flag)?;
+            parse_blastp_seg(value)?;
+            args.seg = Some(value.to_string());
         } else if let Some(value) = flag.strip_prefix("-seg=") {
-            args.seg = Some(parse_blastp_seg(value)?);
+            parse_blastp_seg(value)?;
+            args.seg = Some(value.to_string());
         } else if flag == "-ungapped" {
             args.ungapped = true;
         } else if let Some(value) = flag.strip_prefix("-ungapped=") {
@@ -1088,6 +1115,38 @@ mod tests {
         assert!(parse(&["-outfmt", "0"]).is_err());
         assert!(parse(&["-outfmt=7"]).is_err());
         assert!(parse(&["-outfmt", "6 qseqid sseqid"]).is_err());
+    }
+
+    // Plan TD-1: ABI v1 is frozen, so its BLASTP checks the options before the output
+    // format and refuses a tabular field that it does not write, as before S08+ (the CLI
+    // and ABI v2 follow NCBI: -outfmt first, an unknown token ignored).
+    #[test]
+    fn blastp_web_pair_keeps_v1_error_order_and_fields() {
+        let args = |outfmt: &str, extra: &[&str]| {
+            let mut words = vec!["-outfmt", outfmt];
+            words.extend_from_slice(extra);
+            parse_blastp_args(&words, PathBuf::new(), PathBuf::new(), PathBuf::new())
+                .expect("blastp web args")
+        };
+        let fasta = ">q\nMKVLAAGIVGLLLAQPAMAAEIPVDPALAV\n";
+        let error = |outfmt: &str, extra: &[&str]| {
+            engine_error(blastp::run_web_pair(args(outfmt, extra), fasta, fasta).unwrap_err())
+        };
+        assert_eq!(
+            error("6 nosuch", &[]),
+            "unsupported blastp tabular field 'nosuch'"
+        );
+        assert_eq!(
+            error("9", &[]),
+            "Unsupported output format: 9. Supported: 0, 6, 7"
+        );
+        assert_eq!(
+            error("9", &["-num_threads", "0"]),
+            "num_threads must be greater than zero"
+        );
+        assert!(!error("9", &["-ungapped"]).contains("output format"));
+        assert!(error("6 nosuch", &["-matrix", "FOO"]).contains("FOO"));
+        assert!(blastp::run_web_pair(args("6 qseqid sseqid std", &[]), fasta, fasta).is_ok());
     }
 
     // Plan TD-1: ABI v1 is frozen, so its BLASTN keeps outfmt 6 and 7 and rejects

@@ -1,0 +1,19 @@
+{
+  "programs": [
+    "blastn",
+    "blastp",
+    "tblastx",
+    "tblastn",
+    "blastx"
+  ],
+  "selection": "all programs",
+  "all_cases": true,
+  "failures": [],
+  "allowed": [
+    "blastn/Sakai.MG1655.megablast"
+  ],
+  "capture_seconds": 2059.7,
+  "cases": 236,
+  "fixture_seconds": 86.3,
+  "losat_sha256": "f0b8916b76ded426a3de4cad8ab4e26d376d2f56981bb5408ba9c7ff0991d654"
+}

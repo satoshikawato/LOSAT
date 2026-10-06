@@ -1,0 +1,17 @@
+[
+  {
+    "program": "tblastx",
+    "argv": [
+      "tblastx",
+      "-query",
+      "docs/evidence/losat_web_e1c/run-20260928T203929Z/tblastx-threaded-direct/q.fna",
+      "-subject",
+      "docs/evidence/losat_web_e1c/run-20260928T203929Z/tblastx-threaded-direct/s.fna"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT-web-gui",
+    "cases": [
+      "tblastx-threaded-direct"
+    ],
+    "frozen": {}
+  }
+]

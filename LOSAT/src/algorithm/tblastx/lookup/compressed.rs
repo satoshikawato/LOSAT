@@ -153,6 +153,9 @@ pub struct BlastCompressedAaLookupTable {
     scaled_compress_table_u8: [i32; 256],
     pub neighbor_matches: i32,
     pub exact_matches: i32,
+    /// Whether the words filled NCBI's overflow banks: NCBI then writes past
+    /// `overflow_banks` and corrupts its heap, so the table is not used.
+    pub overflow_banks_exhausted: bool,
 }
 
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:935-952
@@ -215,6 +218,7 @@ impl BlastCompressedAaLookupTable {
             scaled_compress_table_u8,
             neighbor_matches: 0,
             exact_matches: 0,
+            overflow_banks_exhausted: false,
         })
     }
 
@@ -228,13 +232,29 @@ impl BlastCompressedAaLookupTable {
     // return lookup->overflow_banks[lookup->curr_overflow_bank] +
     //                            lookup->curr_overflow_cell++;
     // ```
+    // NCBI reference: c++/src/algo/blast/core/blast_aalookup.c:759-768
+    // ```c
+    //     if (lookup->curr_overflow_cell ==
+    //                         COMPRESSED_OVERFLOW_CELLS_IN_BANK) {
+    //         /* need a new bank */
+    //         Int4 bank_idx = lookup->curr_overflow_bank + 1;
+    //         lookup->overflow_banks[bank_idx] = (CompressedOverflowCell*) malloc(
+    //                                            COMPRESSED_OVERFLOW_CELLS_IN_BANK *
+    //                                            sizeof(CompressedOverflowCell));
+    //         ASSERT(bank_idx < COMPRESSED_OVERFLOW_MAX_BANKS);
+    //         ASSERT(lookup->overflow_banks[bank_idx]);
+    //         lookup->curr_overflow_bank++;
+    // ```
+    // The release build has no ASSERT, so after the last bank NCBI writes past
+    // `overflow_banks`; the table is marked and the last cell is reused, and the words that
+    // are left are not added.
     fn compressed_list_get_new_cell(&mut self) -> usize {
         let cell_index = self.overflow_cells.len();
         let max_cells = COMPRESSED_OVERFLOW_CELLS_IN_BANK * COMPRESSED_OVERFLOW_MAX_BANKS;
-        assert!(
-            cell_index < max_cells,
-            "NCBI BLAST compressed overflow bank capacity exceeded"
-        );
+        if cell_index >= max_cells {
+            self.overflow_banks_exhausted = true;
+            return max_cells - 1;
+        }
         if cell_index == self.overflow_cells.capacity() {
             let additional = COMPRESSED_OVERFLOW_CELLS_IN_BANK.min(max_cells - cell_index);
             self.overflow_cells.reserve_exact(additional);
@@ -474,6 +494,9 @@ impl BlastCompressedAaLookupTable {
         current_pos: usize,
         query_offset: i32,
     ) {
+        if self.overflow_banks_exhausted {
+            return;
+        }
         let curr_query_char = query_word[current_pos] as usize;
         score -= info.row_max[curr_query_char];
         let row_sorted = &info.matrix_sorted[curr_query_char];
@@ -755,11 +778,32 @@ impl BlastCompressedAaLookupTable {
             let mut s = s_first;
             let mut index = 0i32;
 
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:496-500
+            // ```c
+            //     scan_range[1] = subject->seq_ranges[0].left;
+            //     scan_range[2] = subject->seq_ranges[0].right - wordsize;
+            //
+            //     if (scan_range[2] < scan_range[1])
+            //         scan_range[2] = scan_range[1];
+            // ```
+            // A subject shorter than the word is still primed once, and the priming word
+            // reads past the subject into its closing NULLB and beyond. The NULLB has no
+            // compressed letter (its scaled_compress_table entry is -1, so skip is set), so
+            // the scan finds nothing whatever follows; letters past the subject are read
+            // here as NULLB.
+            let mut padded_word = [0u8; 8];
             while s <= s_last {
                 let end = s + word_length - 1;
-                let word = subject
-                    .get(s..end)
-                    .expect("NCBI BLAST compressed scan prime word must be in range");
+                let word = match subject.get(s..end) {
+                    Some(word) => word,
+                    None => {
+                        let available = subject.get(s..).unwrap_or(&[]);
+                        let word = &mut padded_word[..word_length - 1];
+                        word.fill(0);
+                        word[..available.len()].copy_from_slice(available);
+                        &padded_word[..word_length - 1]
+                    }
+                };
                 let computed = compute_compressed_index_u8(
                     word_length - 1,
                     word,
@@ -1212,8 +1256,32 @@ pub fn build_blosum62_compressed_lookup(
     let mut lookup = BlastCompressedAaLookupTable::new(word_size, threshold)?;
     let matrix = build_blosum62_compressed_score_matrix(lookup.compressed_alphabet_size as usize)?;
     lookup.add_neighboring_words(&matrix, query, locations);
+    assert!(
+        !lookup.overflow_banks_exhausted,
+        "NCBI BLAST compressed overflow bank capacity exceeded"
+    );
     lookup.finalize();
     Some(lookup)
+}
+
+/// The table of `build_blosum62_compressed_lookup` for a threshold already in NCBI's
+/// matrix units (`(Int4)(kMatrixScale * opt->threshold)`, converted by the caller as the
+/// x86-64 build does). `Some(Err(()))` is a table whose words filled NCBI's overflow banks.
+pub fn try_build_blosum62_compressed_lookup(
+    word_size: usize,
+    scaled_threshold: i32,
+    query: &[u8],
+    locations: &[(i32, i32)],
+) -> Option<Result<BlastCompressedAaLookupTable, ()>> {
+    let mut lookup = BlastCompressedAaLookupTable::new(word_size, 0.0)?;
+    lookup.threshold = scaled_threshold;
+    let matrix = build_blosum62_compressed_score_matrix(lookup.compressed_alphabet_size as usize)?;
+    lookup.add_neighboring_words(&matrix, query, locations);
+    if lookup.overflow_banks_exhausted {
+        return Some(Err(()));
+    }
+    lookup.finalize();
+    Some(Ok(lookup))
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:1339-1347

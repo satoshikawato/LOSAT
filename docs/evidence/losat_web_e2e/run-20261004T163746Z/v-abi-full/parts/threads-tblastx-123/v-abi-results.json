@@ -1,0 +1,89 @@
+[
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "tblastx",
+    "cases": [
+      "tblastx.thrwin.0"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "tests/fasta/outfmt0/tblastx_multi_query.fasta",
+      "-subject",
+      "tests/fasta/outfmt0/tblastx_multi_subject.fasta",
+      "-threshold",
+      "11",
+      "-window_size",
+      "25"
+    ],
+    "formats": {
+      "0": "e002b02d42e49cbbbbfab3dd3931594140f61a20806426f3ca6e1a95f5c7a280",
+      "6": "4ead7d5b65f8c8360344fa91180bcf09366161a08f035837ebaadd75ec3b107b",
+      "7": "6c7b6cdc5a909ee193b45eeaf9ca860ab57a888907c7e2d0c481c6dd205e8f86"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 228
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "tblastx",
+    "cases": [
+      "tblastx.thrwin.0"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "tests/fasta/outfmt0/tblastx_multi_query.fasta",
+      "-subject",
+      "tests/fasta/outfmt0/tblastx_multi_subject.fasta",
+      "-threshold",
+      "11",
+      "-window_size",
+      "25"
+    ],
+    "formats": {
+      "0": "e002b02d42e49cbbbbfab3dd3931594140f61a20806426f3ca6e1a95f5c7a280",
+      "6": "4ead7d5b65f8c8360344fa91180bcf09366161a08f035837ebaadd75ec3b107b",
+      "7": "6c7b6cdc5a909ee193b45eeaf9ca860ab57a888907c7e2d0c481c6dd205e8f86"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 228
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "tblastx",
+    "cases": [
+      "tblastx.thrwin.0"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "tests/fasta/outfmt0/tblastx_multi_query.fasta",
+      "-subject",
+      "tests/fasta/outfmt0/tblastx_multi_subject.fasta",
+      "-threshold",
+      "11",
+      "-window_size",
+      "25"
+    ],
+    "formats": {
+      "0": "e002b02d42e49cbbbbfab3dd3931594140f61a20806426f3ca6e1a95f5c7a280",
+      "6": "4ead7d5b65f8c8360344fa91180bcf09366161a08f035837ebaadd75ec3b107b",
+      "7": "6c7b6cdc5a909ee193b45eeaf9ca860ab57a888907c7e2d0c481c6dd205e8f86"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 228
+  }
+]

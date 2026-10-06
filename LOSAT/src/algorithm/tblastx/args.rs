@@ -31,23 +31,32 @@ use std::path::PathBuf;
 // arg_desc.SetConstraint(kArgMaxHSPsPerSubject, new CArgAllowValuesGreaterThanOrEqual(1));
 // arg_desc.AddDefaultKey(kArgNumThreads, "int_value", ..., NStr::IntToString(kDfltValue));
 // The single-dash lexical translation is owned by crate::cli.
-#[derive(Args, Debug)]
+// The arguments are read with NCBI's grammar (`blastinput/value_parsers.rs`); the values
+// that NCBI checks after parsing (-seg, -threshold, -word_size, -evalue, -outfmt) are
+// checked in NCBI's order by `blast_engine::check_options`.
+#[derive(Args, Debug, Clone)]
 #[command(rename_all = "snake_case")]
 pub struct TblastxArgs {
-    #[arg(long, value_parser = file_path(), value_name = "PATH")]
+    // NCBI blast_args.cpp:3425-3427:
+    // arg_desc.AddDefaultKey(kArgQuery, "input_file", "Input file name",
+    //                        CArgDescriptions::eInputFile, kDfltArgQuery);
+    // The default `-` is standard input.
+    #[arg(long, value_parser = ncbi_input_path(), value_name = "PATH", default_value = "-")]
     pub query: PathBuf,
-    #[arg(long, value_parser = file_path(), value_name = "PATH")]
-    pub subject: PathBuf,
-    #[arg(long, default_value_t = 10.0, value_parser = nonnegative_f64)]
+    #[arg(long, value_parser = ncbi_input_path(), value_name = "PATH")]
+    pub subject: Option<PathBuf>,
+    #[arg(long, default_value_t = 10.0, value_parser = tblastx_real)]
     pub evalue: f64,
-    #[arg(long, default_value_t = 13, value_parser = positive_i32)]
-    pub threshold: i32,
-    #[arg(long, default_value_t = 3, value_parser = tblastx_word_size)]
-    pub word_size: usize,
-    #[arg(long, default_value_t = 1, value_parser = positive_usize)]
+    // NCBI blast_args.cpp:578-583: a double of at least 0; the lookup table takes its
+    // (Int4) value and the report prints the double.
+    #[arg(long, default_value_t = 13.0, value_parser = tblastx_threshold)]
+    pub threshold: f64,
+    #[arg(long, default_value_t = 3, value_parser = protein_word_size)]
+    pub word_size: i32,
+    #[arg(long, default_value_t = 1, value_parser = blastn_count)]
     pub num_threads: usize,
 
-    #[arg(long, value_name = "PATH")]
+    #[arg(long, value_name = "PATH", value_parser = ncbi_output_path())]
     pub out: Option<PathBuf>,
     #[arg(long, default_value_t = 1, value_parser = genetic_code)]
     pub query_gencode: u8,
@@ -71,7 +80,7 @@ pub struct TblastxArgs {
     // ```
     // An omitted value keeps the default hit list size (500) but the pairwise report then
     // shows 250 alignments, so the option has no clap default.
-    #[arg(long, value_parser = positive_usize, help = "Maximum number of aligned sequences to keep (default: 500)")]
+    #[arg(long, value_parser = blastn_count, help = "Maximum number of aligned sequences to keep (default: 500)")]
     pub max_target_seqs: Option<usize>,
     // NCBI low-complexity filtering selection:
     // - dust is used only for blastn (and mapping)
@@ -94,22 +103,82 @@ pub struct TblastxArgs {
     // NCBI blast_args.cpp:396-406: opt.SetSegFiltering(false/true);
     // opt.SetSegFilteringWindow(...); opt.SetSegFilteringLocut(...);
     // opt.SetSegFilteringHicut(...);
-    #[arg(long, default_value = "12 2.2 2.5", value_parser = parse_seg_filtering, help = "SEG: no, yes, or WINDOW LOCUT HICUT")]
-    pub seg: SegSpec,
+    // Read when NCBI's filtering handler reads it (`blastinput/app.rs` `parse_seg_option`).
+    #[arg(
+        long,
+        default_value = "12 2.2 2.5",
+        help = "SEG: no, yes, or WINDOW LOCUT HICUT"
+    )]
+    pub seg: String,
 
     /// Two-hit window size for triggering ungapped extension (default: 40).
     /// Smaller values are more strict, larger values are more sensitive.
     /// 0 (NCBI's one-hit word finder) is not supported by LOSAT's TBLASTX.
-    #[arg(long, default_value_t = 40, value_parser = nonnegative_usize)]
-    pub window_size: usize,
+    #[arg(long, default_value_t = 40, value_parser = nonnegative_ncbi_integer)]
+    pub window_size: i32,
 
     /// Output format: 0 (pairwise), 6 or 7 (tabular), without custom fields.
-    #[arg(long, default_value = "0", value_name = "SPEC", value_parser = tblastx_outfmt)]
+    // Read when NCBI reads it (`blastinput/app.rs` `parse_formatting_string`).
+    #[arg(long, default_value = "0", value_name = "SPEC")]
     pub outfmt: String,
 
-    // NCBI reference: cmdline_flags.cpp:127-128 (kDfltArgCullingLimit = 0)
-    /// HSP culling limit (default: 0, no culling). A limit above 0 is not supported by
-    /// LOSAT's TBLASTX (its HSP culling differs from NCBI's hspfilter_culling.c).
-    #[arg(long, default_value_t = 0)]
-    pub culling_limit: u32,
+    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3335-3340
+    // ```c
+    // CHspFilteringArgs::ExtractAlgorithmOptions(const CArgs& args,
+    //                                            CBlastOptions& opts)
+    // {
+    //     if (args[kArgCullingLimit]) {
+    //         opts.SetCullingLimit(args[kArgCullingLimit].AsInteger());
+    //     }
+    // ```
+    /// If the query range of a hit is enveloped by that of at least this many
+    /// higher-scoring hits, delete the hit (default: 0, no culling).
+    #[arg(long, default_value_t = 0, value_parser = nonnegative_ncbi_integer)]
+    pub culling_limit: i32,
+    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:1945-1949
+    // ```c++
+    //     // query location
+    //     arg_desc.AddOptionalKey(kArgQueryLocation, "range",
+    //                             "Location on the query sequence in 1-based offsets "
+    //                             "(Format: start-stop)",
+    //                             CArgDescriptions::eString);
+    // ```
+    // Read by the query options handler (`check_ncbi_options`).
+    #[arg(
+        long = "query_loc",
+        value_name = "RANGE",
+        help = "Location on the query sequence in 1-based offsets (Format: start-stop)"
+    )]
+    pub query_loc: Option<String>,
+    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2372-2376
+    // ```c++
+    //         // subject location
+    //         arg_desc.AddOptionalKey(kArgSubjectLocation, "range",
+    //                         "Location on the subject sequence in 1-based offsets "
+    //                         "(Format: start-stop)",
+    //                         CArgDescriptions::eString);
+    // ```
+    // Read by the database arguments handler when it reads the subjects (`run`).
+    #[arg(
+        long = "subject_loc",
+        value_name = "RANGE",
+        help = "Location on the subject sequence in 1-based offsets (Format: start-stop)"
+    )]
+    pub subject_loc: Option<String>,
+}
+
+impl TblastxArgs {
+    /// The -seg value as NCBI's filtering handler reads it (`check_options` reports its
+    /// errors first).
+    pub fn seg_spec(&self) -> anyhow::Result<SegSpec> {
+        crate::blastinput::app::parse_seg_option(&self.seg, "TBLASTX")
+    }
+
+    /// The subject file name as the reports show it.
+    pub fn subject_label(&self) -> std::path::Display<'_> {
+        self.subject
+            .as_deref()
+            .unwrap_or(std::path::Path::new(""))
+            .display()
+    }
 }

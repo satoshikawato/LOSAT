@@ -1,0 +1,78 @@
+BLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/e2d_n_s60.fa).
+           1 sequences; 660 total letters
+
+
+
+Query= q
+
+Length=660
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s                                                                     596     6e-175
+
+
+> s
+Length=660
+
+ Score = 596 bits (660),  Expect = 6e-175
+ Identities = 330/330 (100%), Gaps = 0/330 (0%)
+ Strand=Plus/Plus
+
+Query  331  atatatatatatatatatatatatatatatTCATGTGCAACCTAGGGAGAATGTGTACAT  390
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  331  ATATATATATATATATATATATATATATATTCATGTGCAACCTAGGGAGAATGTGTACAT  390
+
+Query  391  ACGCTCTTACTGCGGTCGCGTCTAATAATATACATTTGCTTCGTTGACTAGCAACCCAGG  450
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  391  ACGCTCTTACTGCGGTCGCGTCTAATAATATACATTTGCTTCGTTGACTAGCAACCCAGG  450
+
+Query  451  GCTATAGCTATTCCCCCCGCGGCCCACCCAGTATTCCTAACGGAGCATAAATCCCACCCG  510
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  451  GCTATAGCTATTCCCCCCGCGGCCCACCCAGTATTCCTAACGGAGCATAAATCCCACCCG  510
+
+Query  511  AACTAAGTTTGTCGAACCTTGGTCCAAGATCGGGACTCGGTCTCCAGGTAAGACGGGCTC  570
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  511  AACTAAGTTTGTCGAACCTTGGTCCAAGATCGGGACTCGGTCTCCAGGTAAGACGGGCTC  570
+
+Query  571  ATTCATAAACGTTACTAAGGGGTATAATCTTCTATTTGTGGGTGGGAACACTTAGTAGAC  630
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  571  ATTCATAAACGTTACTAAGGGGTATAATCTTCTATTTGTGGGTGGGAACACTTAGTAGAC  630
+
+Query  631  TTGCAATCCAATTACAGCAGTCTTGTGCGC  660
+            ||||||||||||||||||||||||||||||
+Sbjct  631  TTGCAATCCAATTACAGCAGTCTTGTGCGC  660
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 206064
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/e2d_n_s60.fa).
+    Posted date:  Unknown
+  Number of letters in database: 660
+  Number of sequences in database:  1
+
+
+
+Matrix: blastn matrix 2 -3
+Gap Penalties: Existence: 5, Extension: 2

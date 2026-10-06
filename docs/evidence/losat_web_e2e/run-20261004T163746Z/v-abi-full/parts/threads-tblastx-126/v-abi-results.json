@@ -1,0 +1,86 @@
+[
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "tblastx",
+    "cases": [
+      "tblastx.code4.0",
+      "tblastx.code4.7"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "tests/fasta/outfmt0/tblastx_code4_query.fasta",
+      "-subject",
+      "tests/fasta/outfmt0/tblastx_code4_subject.fasta",
+      "-query_gencode",
+      "4",
+      "-db_gencode",
+      "4"
+    ],
+    "formats": {
+      "0": "9b4bc569932c56fea76e568fd4c201f96ae7fd62d82f896b616e1d7ce074f3b3",
+      "6": "ac70a1f6cee9552db493fdf75a0c984b79c2630576b5e0b3deb3154fba4a1139",
+      "7": "83be463ce6602b9c13f25431c39f6400bf1db6c7c7953f50b2f74a003b61444c"
+    },
+    "frozen": {},
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 122
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "tblastx",
+    "cases": [
+      "tblastx.code4.0",
+      "tblastx.code4.7"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "tests/fasta/outfmt0/tblastx_code4_query.fasta",
+      "-subject",
+      "tests/fasta/outfmt0/tblastx_code4_subject.fasta",
+      "-query_gencode",
+      "4",
+      "-db_gencode",
+      "4"
+    ],
+    "formats": {
+      "0": "9b4bc569932c56fea76e568fd4c201f96ae7fd62d82f896b616e1d7ce074f3b3",
+      "6": "ac70a1f6cee9552db493fdf75a0c984b79c2630576b5e0b3deb3154fba4a1139",
+      "7": "83be463ce6602b9c13f25431c39f6400bf1db6c7c7953f50b2f74a003b61444c"
+    },
+    "frozen": {},
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 122
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "tblastx",
+    "cases": [
+      "tblastx.code4.0",
+      "tblastx.code4.7"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "tests/fasta/outfmt0/tblastx_code4_query.fasta",
+      "-subject",
+      "tests/fasta/outfmt0/tblastx_code4_subject.fasta",
+      "-query_gencode",
+      "4",
+      "-db_gencode",
+      "4"
+    ],
+    "formats": {
+      "0": "9b4bc569932c56fea76e568fd4c201f96ae7fd62d82f896b616e1d7ce074f3b3",
+      "6": "ac70a1f6cee9552db493fdf75a0c984b79c2630576b5e0b3deb3154fba4a1139",
+      "7": "83be463ce6602b9c13f25431c39f6400bf1db6c7c7953f50b2f74a003b61444c"
+    },
+    "frozen": {},
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 122
+  }
+]

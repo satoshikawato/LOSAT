@@ -1,0 +1,1135 @@
+{
+  "binaries": {
+    "before": [
+      "331fcba364472ea472329384a9a4c01e6f578b959f072591c3c27ddbd91e44d8",
+      "8162ec3eb2dafdcabd2d14caa7a10a4893c64967dad3a5981fabcd3ee0a7e0f9",
+      "c8ffbb225023eb1298e05466e23afd8b9484b0c9c9d16b48c7e05e73ecfbc7c3"
+    ],
+    "after": [
+      "2a46c2e421ae6474cf48639d2ebb8e278ba18cc34ad83a3c636067ac33d2bc46",
+      "533aeddde9ecbc4b4e9e1e0f95e713a371d006399187c539c007a6bef71f117f",
+      "5309d850c4c3a71920d0a9595b6e0c45eb0b0149ef4a7a7b085f6e413ecd4c31"
+    ]
+  },
+  "repeat": 3,
+  "started_at": "2026-10-03T06:11:51+00:00",
+  "cases": [
+    {
+      "case": "tblastx",
+      "mode": "native",
+      "threads": 1,
+      "argv": [
+        "tblastx",
+        "-query",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/LC738884.fasta",
+        "-subject",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/LC741431.fasta",
+        "-outfmt",
+        "6",
+        "-num_threads",
+        "1",
+        "-out",
+        "/tmp/tmp56lhsblm/tblastx.native.after.out"
+      ],
+      "before": {
+        "samples_s": [
+          1.0049137370006065,
+          1.0443459449998045,
+          1.0887514400019427
+        ],
+        "median_s": 1.0443459449998045,
+        "min_s": 1.0049137370006065,
+        "max_s": 1.0887514400019427,
+        "output_sha256": "f0c2e096d09fbe7b00721b06ffb16c0a6e0099a6b66106fe85c7e210132b8c28"
+      },
+      "after": {
+        "samples_s": [
+          1.0565546470024856,
+          1.0666111980026471,
+          0.9408069959972636
+        ],
+        "median_s": 1.0565546470024856,
+        "min_s": 0.9408069959972636,
+        "max_s": 1.0666111980026471,
+        "output_sha256": "f0c2e096d09fbe7b00721b06ffb16c0a6e0099a6b66106fe85c7e210132b8c28"
+      }
+    },
+    {
+      "case": "tblastx",
+      "mode": "serial-wasi",
+      "threads": 1,
+      "argv": [
+        "tblastx",
+        "-query",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/LC738884.fasta",
+        "-subject",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/LC741431.fasta",
+        "-outfmt",
+        "6",
+        "-num_threads",
+        "1",
+        "-out",
+        "/tmp/tmp56lhsblm/tblastx.serial-wasi.after.out"
+      ],
+      "before": {
+        "samples_s": [
+          1.5335912749978888,
+          1.2409170430000813,
+          1.2408731850009644
+        ],
+        "median_s": 1.2409170430000813,
+        "min_s": 1.2408731850009644,
+        "max_s": 1.5335912749978888,
+        "output_sha256": "f0c2e096d09fbe7b00721b06ffb16c0a6e0099a6b66106fe85c7e210132b8c28"
+      },
+      "after": {
+        "samples_s": [
+          1.3206932549983321,
+          1.4887636749990634,
+          1.2385187479994784
+        ],
+        "median_s": 1.3206932549983321,
+        "min_s": 1.2385187479994784,
+        "max_s": 1.4887636749990634,
+        "output_sha256": "f0c2e096d09fbe7b00721b06ffb16c0a6e0099a6b66106fe85c7e210132b8c28"
+      }
+    },
+    {
+      "case": "tblastx",
+      "mode": "threaded-wasi",
+      "threads": 4,
+      "argv": [
+        "tblastx",
+        "-query",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/LC738884.fasta",
+        "-subject",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/LC741431.fasta",
+        "-outfmt",
+        "6",
+        "-num_threads",
+        "4",
+        "-out",
+        "/tmp/tmp56lhsblm/tblastx.threaded-wasi.after.out"
+      ],
+      "before": {
+        "samples_s": [
+          1.4535294490015076,
+          1.4773966109969479,
+          1.594010338998487
+        ],
+        "median_s": 1.4773966109969479,
+        "min_s": 1.4535294490015076,
+        "max_s": 1.594010338998487,
+        "output_sha256": "f0c2e096d09fbe7b00721b06ffb16c0a6e0099a6b66106fe85c7e210132b8c28"
+      },
+      "after": {
+        "samples_s": [
+          2.1940424970016466,
+          1.4223600160003116,
+          1.5115633580026042
+        ],
+        "median_s": 1.5115633580026042,
+        "min_s": 1.4223600160003116,
+        "max_s": 2.1940424970016466,
+        "output_sha256": "f0c2e096d09fbe7b00721b06ffb16c0a6e0099a6b66106fe85c7e210132b8c28"
+      }
+    },
+    {
+      "case": "tblastx-multi",
+      "mode": "native",
+      "threads": 1,
+      "argv": [
+        "tblastx",
+        "-query",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/outfmt0/tblastx_multi_query.fasta",
+        "-subject",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/LC741431.fasta",
+        "-outfmt",
+        "6",
+        "-num_threads",
+        "1",
+        "-out",
+        "/tmp/tmp56lhsblm/tblastx-multi.native.after.out"
+      ],
+      "before": {
+        "samples_s": [
+          0.11013794999962556,
+          0.1133325849987159,
+          0.10444624600131647
+        ],
+        "median_s": 0.11013794999962556,
+        "min_s": 0.10444624600131647,
+        "max_s": 0.1133325849987159,
+        "output_sha256": "b3d9ce48a336fe636fa6c4d60c58347c411fcbb2e1bdb1a7113e14d1fc6047e9"
+      },
+      "after": {
+        "samples_s": [
+          0.12504357500074548,
+          0.12397914699977264,
+          0.16499097899941262
+        ],
+        "median_s": 0.12504357500074548,
+        "min_s": 0.12397914699977264,
+        "max_s": 0.16499097899941262,
+        "output_sha256": "b3d9ce48a336fe636fa6c4d60c58347c411fcbb2e1bdb1a7113e14d1fc6047e9"
+      }
+    },
+    {
+      "case": "tblastx-multi",
+      "mode": "serial-wasi",
+      "threads": 1,
+      "argv": [
+        "tblastx",
+        "-query",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/outfmt0/tblastx_multi_query.fasta",
+        "-subject",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/LC741431.fasta",
+        "-outfmt",
+        "6",
+        "-num_threads",
+        "1",
+        "-out",
+        "/tmp/tmp56lhsblm/tblastx-multi.serial-wasi.after.out"
+      ],
+      "before": {
+        "samples_s": [
+          0.2517232840000361,
+          0.4833772889978718,
+          0.41971291200025007
+        ],
+        "median_s": 0.41971291200025007,
+        "min_s": 0.2517232840000361,
+        "max_s": 0.4833772889978718,
+        "output_sha256": "b3d9ce48a336fe636fa6c4d60c58347c411fcbb2e1bdb1a7113e14d1fc6047e9"
+      },
+      "after": {
+        "samples_s": [
+          0.4311721160011075,
+          0.44003487800000585,
+          0.21659727500082226
+        ],
+        "median_s": 0.4311721160011075,
+        "min_s": 0.21659727500082226,
+        "max_s": 0.44003487800000585,
+        "output_sha256": "b3d9ce48a336fe636fa6c4d60c58347c411fcbb2e1bdb1a7113e14d1fc6047e9"
+      }
+    },
+    {
+      "case": "tblastx-multi",
+      "mode": "threaded-wasi",
+      "threads": 4,
+      "argv": [
+        "tblastx",
+        "-query",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/outfmt0/tblastx_multi_query.fasta",
+        "-subject",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/LC741431.fasta",
+        "-outfmt",
+        "6",
+        "-num_threads",
+        "4",
+        "-out",
+        "/tmp/tmp56lhsblm/tblastx-multi.threaded-wasi.after.out"
+      ],
+      "before": {
+        "samples_s": [
+          0.37499734700031695,
+          0.3679852329987625,
+          0.3702202260028571
+        ],
+        "median_s": 0.3702202260028571,
+        "min_s": 0.3679852329987625,
+        "max_s": 0.37499734700031695,
+        "output_sha256": "b3d9ce48a336fe636fa6c4d60c58347c411fcbb2e1bdb1a7113e14d1fc6047e9"
+      },
+      "after": {
+        "samples_s": [
+          0.38272322500051814,
+          0.39957831500214525,
+          0.40883665599903907
+        ],
+        "median_s": 0.39957831500214525,
+        "min_s": 0.38272322500051814,
+        "max_s": 0.40883665599903907,
+        "output_sha256": "b3d9ce48a336fe636fa6c4d60c58347c411fcbb2e1bdb1a7113e14d1fc6047e9"
+      }
+    },
+    {
+      "case": "tblastx-many",
+      "mode": "native",
+      "threads": 1,
+      "argv": [
+        "tblastx",
+        "-query",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/outfmt0/tblastx_many_query.fasta",
+        "-subject",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/outfmt0/tblastx_many_subject.fasta",
+        "-outfmt",
+        "6",
+        "-num_threads",
+        "1",
+        "-out",
+        "/tmp/tmp56lhsblm/tblastx-many.native.after.out"
+      ],
+      "before": {
+        "samples_s": [
+          0.01101930700315279,
+          0.01319749400136061,
+          0.019396112002141308
+        ],
+        "median_s": 0.01319749400136061,
+        "min_s": 0.01101930700315279,
+        "max_s": 0.019396112002141308,
+        "output_sha256": "929e7917407ea84f296b15cba12f6a8e14e2da515e3e338e45dee5a9693a198d"
+      },
+      "after": {
+        "samples_s": [
+          0.012791512999683619,
+          0.012784693000867264,
+          0.013353490001463797
+        ],
+        "median_s": 0.012791512999683619,
+        "min_s": 0.012784693000867264,
+        "max_s": 0.013353490001463797,
+        "output_sha256": "929e7917407ea84f296b15cba12f6a8e14e2da515e3e338e45dee5a9693a198d"
+      }
+    },
+    {
+      "case": "tblastx-many",
+      "mode": "serial-wasi",
+      "threads": 1,
+      "argv": [
+        "tblastx",
+        "-query",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/outfmt0/tblastx_many_query.fasta",
+        "-subject",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/outfmt0/tblastx_many_subject.fasta",
+        "-outfmt",
+        "6",
+        "-num_threads",
+        "1",
+        "-out",
+        "/tmp/tmp56lhsblm/tblastx-many.serial-wasi.after.out"
+      ],
+      "before": {
+        "samples_s": [
+          0.08681807499669958,
+          0.08646730799955549,
+          0.08976194700153428
+        ],
+        "median_s": 0.08681807499669958,
+        "min_s": 0.08646730799955549,
+        "max_s": 0.08976194700153428,
+        "output_sha256": "929e7917407ea84f296b15cba12f6a8e14e2da515e3e338e45dee5a9693a198d"
+      },
+      "after": {
+        "samples_s": [
+          0.08465465400149697,
+          0.08797467100157519,
+          0.12293385600059992
+        ],
+        "median_s": 0.08797467100157519,
+        "min_s": 0.08465465400149697,
+        "max_s": 0.12293385600059992,
+        "output_sha256": "929e7917407ea84f296b15cba12f6a8e14e2da515e3e338e45dee5a9693a198d"
+      }
+    },
+    {
+      "case": "tblastx-many",
+      "mode": "threaded-wasi",
+      "threads": 4,
+      "argv": [
+        "tblastx",
+        "-query",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/outfmt0/tblastx_many_query.fasta",
+        "-subject",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/outfmt0/tblastx_many_subject.fasta",
+        "-outfmt",
+        "6",
+        "-num_threads",
+        "4",
+        "-out",
+        "/tmp/tmp56lhsblm/tblastx-many.threaded-wasi.after.out"
+      ],
+      "before": {
+        "samples_s": [
+          0.25228101900211186,
+          0.2492698339992785,
+          0.25420478700107196
+        ],
+        "median_s": 0.25228101900211186,
+        "min_s": 0.2492698339992785,
+        "max_s": 0.25420478700107196,
+        "output_sha256": "929e7917407ea84f296b15cba12f6a8e14e2da515e3e338e45dee5a9693a198d"
+      },
+      "after": {
+        "samples_s": [
+          0.2514847929996904,
+          0.25404068299758364,
+          0.25822745899859
+        ],
+        "median_s": 0.25404068299758364,
+        "min_s": 0.2514847929996904,
+        "max_s": 0.25822745899859,
+        "output_sha256": "929e7917407ea84f296b15cba12f6a8e14e2da515e3e338e45dee5a9693a198d"
+      }
+    },
+    {
+      "case": "tblastn",
+      "mode": "native",
+      "threads": 1,
+      "argv": [
+        "tblastn",
+        "-task",
+        "tblastn",
+        "-query",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/docs/evidence/tlosan_stage_g/benchmark/first_AvCLPV_protein.faa",
+        "-subject",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/AvCLPV.fasta",
+        "-outfmt",
+        "6",
+        "-num_threads",
+        "1",
+        "-out",
+        "/tmp/tmp56lhsblm/tblastn.native.after.out"
+      ],
+      "before": {
+        "samples_s": [
+          0.04697941400081618,
+          0.04714233200138551,
+          0.05261925699960557
+        ],
+        "median_s": 0.04714233200138551,
+        "min_s": 0.04697941400081618,
+        "max_s": 0.05261925699960557,
+        "output_sha256": "48483fc59eb06f6bd87e733c22896763e32a2a80027a0e5e5cdf0119deb30f52"
+      },
+      "after": {
+        "samples_s": [
+          0.045537078000052134,
+          0.0487731889988936,
+          0.047456514002988115
+        ],
+        "median_s": 0.047456514002988115,
+        "min_s": 0.045537078000052134,
+        "max_s": 0.0487731889988936,
+        "output_sha256": "48483fc59eb06f6bd87e733c22896763e32a2a80027a0e5e5cdf0119deb30f52"
+      }
+    },
+    {
+      "case": "tblastn",
+      "mode": "serial-wasi",
+      "threads": 1,
+      "argv": [
+        "tblastn",
+        "-task",
+        "tblastn",
+        "-query",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/docs/evidence/tlosan_stage_g/benchmark/first_AvCLPV_protein.faa",
+        "-subject",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/AvCLPV.fasta",
+        "-outfmt",
+        "6",
+        "-num_threads",
+        "1",
+        "-out",
+        "/tmp/tmp56lhsblm/tblastn.serial-wasi.after.out"
+      ],
+      "before": {
+        "samples_s": [
+          0.12688496700138785,
+          0.14131845099836937,
+          0.12827739500062307
+        ],
+        "median_s": 0.12827739500062307,
+        "min_s": 0.12688496700138785,
+        "max_s": 0.14131845099836937,
+        "output_sha256": "48483fc59eb06f6bd87e733c22896763e32a2a80027a0e5e5cdf0119deb30f52"
+      },
+      "after": {
+        "samples_s": [
+          0.12783621099879383,
+          0.1321650319987384,
+          0.12494846600020537
+        ],
+        "median_s": 0.12783621099879383,
+        "min_s": 0.12494846600020537,
+        "max_s": 0.1321650319987384,
+        "output_sha256": "48483fc59eb06f6bd87e733c22896763e32a2a80027a0e5e5cdf0119deb30f52"
+      }
+    },
+    {
+      "case": "tblastn",
+      "mode": "threaded-wasi",
+      "threads": 4,
+      "argv": [
+        "tblastn",
+        "-task",
+        "tblastn",
+        "-query",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/docs/evidence/tlosan_stage_g/benchmark/first_AvCLPV_protein.faa",
+        "-subject",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/AvCLPV.fasta",
+        "-outfmt",
+        "6",
+        "-num_threads",
+        "4",
+        "-out",
+        "/tmp/tmp56lhsblm/tblastn.threaded-wasi.after.out"
+      ],
+      "before": {
+        "samples_s": [
+          0.3054640730006213,
+          0.3403869700014184,
+          0.2898516749992268
+        ],
+        "median_s": 0.3054640730006213,
+        "min_s": 0.2898516749992268,
+        "max_s": 0.3403869700014184,
+        "output_sha256": "48483fc59eb06f6bd87e733c22896763e32a2a80027a0e5e5cdf0119deb30f52"
+      },
+      "after": {
+        "samples_s": [
+          0.30089836199840647,
+          0.29525572700003977,
+          0.29312692700113985
+        ],
+        "median_s": 0.29525572700003977,
+        "min_s": 0.29312692700113985,
+        "max_s": 0.30089836199840647,
+        "output_sha256": "48483fc59eb06f6bd87e733c22896763e32a2a80027a0e5e5cdf0119deb30f52"
+      }
+    },
+    {
+      "case": "tblastn-fmt0",
+      "mode": "native",
+      "threads": 1,
+      "argv": [
+        "tblastn",
+        "-task",
+        "tblastn",
+        "-query",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/docs/evidence/tlosan_stage_g/benchmark/first_AvCLPV_protein.faa",
+        "-subject",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/AvCLPV.fasta",
+        "-outfmt",
+        "0",
+        "-num_threads",
+        "1",
+        "-out",
+        "/tmp/tmp56lhsblm/tblastn-fmt0.native.after.out"
+      ],
+      "before": {
+        "samples_s": [
+          0.054754515000240644,
+          0.045851822000258835,
+          0.04728199500095798
+        ],
+        "median_s": 0.04728199500095798,
+        "min_s": 0.045851822000258835,
+        "max_s": 0.054754515000240644,
+        "output_sha256": "c147f334d8fa977f9137e63f28d20b1c76799fe1753f0d3660fcdd2012538604"
+      },
+      "after": {
+        "samples_s": [
+          0.04676785899937386,
+          0.04713543500110973,
+          0.05578363200038439
+        ],
+        "median_s": 0.04713543500110973,
+        "min_s": 0.04676785899937386,
+        "max_s": 0.05578363200038439,
+        "output_sha256": "c147f334d8fa977f9137e63f28d20b1c76799fe1753f0d3660fcdd2012538604"
+      }
+    },
+    {
+      "case": "tblastn-fmt0",
+      "mode": "serial-wasi",
+      "threads": 1,
+      "argv": [
+        "tblastn",
+        "-task",
+        "tblastn",
+        "-query",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/docs/evidence/tlosan_stage_g/benchmark/first_AvCLPV_protein.faa",
+        "-subject",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/AvCLPV.fasta",
+        "-outfmt",
+        "0",
+        "-num_threads",
+        "1",
+        "-out",
+        "/tmp/tmp56lhsblm/tblastn-fmt0.serial-wasi.after.out"
+      ],
+      "before": {
+        "samples_s": [
+          0.12747000699891942,
+          0.12318584799868404,
+          0.1317466840009729
+        ],
+        "median_s": 0.12747000699891942,
+        "min_s": 0.12318584799868404,
+        "max_s": 0.1317466840009729,
+        "output_sha256": "c147f334d8fa977f9137e63f28d20b1c76799fe1753f0d3660fcdd2012538604"
+      },
+      "after": {
+        "samples_s": [
+          0.1260313969978597,
+          0.12407451000035508,
+          0.1358417269984784
+        ],
+        "median_s": 0.1260313969978597,
+        "min_s": 0.12407451000035508,
+        "max_s": 0.1358417269984784,
+        "output_sha256": "c147f334d8fa977f9137e63f28d20b1c76799fe1753f0d3660fcdd2012538604"
+      }
+    },
+    {
+      "case": "tblastn-fmt0",
+      "mode": "threaded-wasi",
+      "threads": 4,
+      "argv": [
+        "tblastn",
+        "-task",
+        "tblastn",
+        "-query",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/docs/evidence/tlosan_stage_g/benchmark/first_AvCLPV_protein.faa",
+        "-subject",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/AvCLPV.fasta",
+        "-outfmt",
+        "0",
+        "-num_threads",
+        "4",
+        "-out",
+        "/tmp/tmp56lhsblm/tblastn-fmt0.threaded-wasi.after.out"
+      ],
+      "before": {
+        "samples_s": [
+          0.29952851699999883,
+          0.2992096310008492,
+          0.29128006499740877
+        ],
+        "median_s": 0.2992096310008492,
+        "min_s": 0.29128006499740877,
+        "max_s": 0.29952851699999883,
+        "output_sha256": "c147f334d8fa977f9137e63f28d20b1c76799fe1753f0d3660fcdd2012538604"
+      },
+      "after": {
+        "samples_s": [
+          0.2954000520003319,
+          0.31581306099906215,
+          0.29262442999970517
+        ],
+        "median_s": 0.2954000520003319,
+        "min_s": 0.29262442999970517,
+        "max_s": 0.31581306099906215,
+        "output_sha256": "c147f334d8fa977f9137e63f28d20b1c76799fe1753f0d3660fcdd2012538604"
+      }
+    },
+    {
+      "case": "blastp",
+      "mode": "native",
+      "threads": 1,
+      "argv": [
+        "blastp",
+        "-query",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/SicyWSV.faa",
+        "-subject",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/PajaWSV.faa",
+        "-max_hsps",
+        "1",
+        "-outfmt",
+        "6",
+        "-num_threads",
+        "1",
+        "-out",
+        "/tmp/tmp56lhsblm/blastp.native.after.out"
+      ],
+      "before": {
+        "samples_s": [
+          0.422481630997936,
+          0.42671748399880016,
+          0.4568322950035508
+        ],
+        "median_s": 0.42671748399880016,
+        "min_s": 0.422481630997936,
+        "max_s": 0.4568322950035508,
+        "output_sha256": "fd4b010800e32ce6c823cb38b42a10b7845f3342edae892acccc8f554f9edf34"
+      },
+      "after": {
+        "samples_s": [
+          0.42232029500155477,
+          0.4177208069995686,
+          0.497782146998361
+        ],
+        "median_s": 0.42232029500155477,
+        "min_s": 0.4177208069995686,
+        "max_s": 0.497782146998361,
+        "output_sha256": "fd4b010800e32ce6c823cb38b42a10b7845f3342edae892acccc8f554f9edf34"
+      }
+    },
+    {
+      "case": "blastp",
+      "mode": "serial-wasi",
+      "threads": 1,
+      "argv": [
+        "blastp",
+        "-query",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/SicyWSV.faa",
+        "-subject",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/PajaWSV.faa",
+        "-max_hsps",
+        "1",
+        "-outfmt",
+        "6",
+        "-num_threads",
+        "1",
+        "-out",
+        "/tmp/tmp56lhsblm/blastp.serial-wasi.after.out"
+      ],
+      "before": {
+        "samples_s": [
+          0.6035142660002748,
+          0.6155019470024854,
+          0.610789061000105
+        ],
+        "median_s": 0.610789061000105,
+        "min_s": 0.6035142660002748,
+        "max_s": 0.6155019470024854,
+        "output_sha256": "fd4b010800e32ce6c823cb38b42a10b7845f3342edae892acccc8f554f9edf34"
+      },
+      "after": {
+        "samples_s": [
+          0.6030177510001522,
+          0.6082003000010445,
+          0.6178616029974364
+        ],
+        "median_s": 0.6082003000010445,
+        "min_s": 0.6030177510001522,
+        "max_s": 0.6178616029974364,
+        "output_sha256": "fd4b010800e32ce6c823cb38b42a10b7845f3342edae892acccc8f554f9edf34"
+      }
+    },
+    {
+      "case": "blastp",
+      "mode": "threaded-wasi",
+      "threads": 4,
+      "argv": [
+        "blastp",
+        "-query",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/SicyWSV.faa",
+        "-subject",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/PajaWSV.faa",
+        "-max_hsps",
+        "1",
+        "-outfmt",
+        "6",
+        "-num_threads",
+        "4",
+        "-out",
+        "/tmp/tmp56lhsblm/blastp.threaded-wasi.after.out"
+      ],
+      "before": {
+        "samples_s": [
+          0.47771123200072907,
+          0.8995611159989494,
+          0.5119084580001072
+        ],
+        "median_s": 0.5119084580001072,
+        "min_s": 0.47771123200072907,
+        "max_s": 0.8995611159989494,
+        "output_sha256": "fd4b010800e32ce6c823cb38b42a10b7845f3342edae892acccc8f554f9edf34"
+      },
+      "after": {
+        "samples_s": [
+          0.5116564060008386,
+          0.905070185999648,
+          0.492641207001725
+        ],
+        "median_s": 0.5116564060008386,
+        "min_s": 0.492641207001725,
+        "max_s": 0.905070185999648,
+        "output_sha256": "fd4b010800e32ce6c823cb38b42a10b7845f3342edae892acccc8f554f9edf34"
+      }
+    },
+    {
+      "case": "blastp-fmt0",
+      "mode": "native",
+      "threads": 1,
+      "argv": [
+        "blastp",
+        "-query",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/SicyWSV.faa",
+        "-subject",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/PajaWSV.faa",
+        "-max_hsps",
+        "1",
+        "-outfmt",
+        "0",
+        "-num_threads",
+        "1",
+        "-out",
+        "/tmp/tmp56lhsblm/blastp-fmt0.native.after.out"
+      ],
+      "before": {
+        "samples_s": [
+          0.4316351769994071,
+          0.4402761780002038,
+          0.45253380500071216
+        ],
+        "median_s": 0.4402761780002038,
+        "min_s": 0.4316351769994071,
+        "max_s": 0.45253380500071216,
+        "output_sha256": "6ae2ee96ae7cb70bc8bc1e572f262f10e0e2621d0451f64926aeb5540780bd50"
+      },
+      "after": {
+        "samples_s": [
+          0.4364334029996826,
+          0.4344357299996773,
+          0.508134236002661
+        ],
+        "median_s": 0.4364334029996826,
+        "min_s": 0.4344357299996773,
+        "max_s": 0.508134236002661,
+        "output_sha256": "6ae2ee96ae7cb70bc8bc1e572f262f10e0e2621d0451f64926aeb5540780bd50"
+      }
+    },
+    {
+      "case": "blastp-fmt0",
+      "mode": "serial-wasi",
+      "threads": 1,
+      "argv": [
+        "blastp",
+        "-query",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/SicyWSV.faa",
+        "-subject",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/PajaWSV.faa",
+        "-max_hsps",
+        "1",
+        "-outfmt",
+        "0",
+        "-num_threads",
+        "1",
+        "-out",
+        "/tmp/tmp56lhsblm/blastp-fmt0.serial-wasi.after.out"
+      ],
+      "before": {
+        "samples_s": [
+          0.6475631460016302,
+          0.7315378849998524,
+          0.6296933039993746
+        ],
+        "median_s": 0.6475631460016302,
+        "min_s": 0.6296933039993746,
+        "max_s": 0.7315378849998524,
+        "output_sha256": "6ae2ee96ae7cb70bc8bc1e572f262f10e0e2621d0451f64926aeb5540780bd50"
+      },
+      "after": {
+        "samples_s": [
+          0.7773689370005741,
+          0.7641822789992148,
+          0.6449883479981509
+        ],
+        "median_s": 0.7641822789992148,
+        "min_s": 0.6449883479981509,
+        "max_s": 0.7773689370005741,
+        "output_sha256": "6ae2ee96ae7cb70bc8bc1e572f262f10e0e2621d0451f64926aeb5540780bd50"
+      }
+    },
+    {
+      "case": "blastp-fmt0",
+      "mode": "threaded-wasi",
+      "threads": 4,
+      "argv": [
+        "blastp",
+        "-query",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/SicyWSV.faa",
+        "-subject",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/PajaWSV.faa",
+        "-max_hsps",
+        "1",
+        "-outfmt",
+        "0",
+        "-num_threads",
+        "4",
+        "-out",
+        "/tmp/tmp56lhsblm/blastp-fmt0.threaded-wasi.after.out"
+      ],
+      "before": {
+        "samples_s": [
+          1.303962418998708,
+          0.5145137190011155,
+          0.5273779620001733
+        ],
+        "median_s": 0.5273779620001733,
+        "min_s": 0.5145137190011155,
+        "max_s": 1.303962418998708,
+        "output_sha256": "6ae2ee96ae7cb70bc8bc1e572f262f10e0e2621d0451f64926aeb5540780bd50"
+      },
+      "after": {
+        "samples_s": [
+          0.8315618410015304,
+          0.5221268630011764,
+          0.9320305549990735
+        ],
+        "median_s": 0.8315618410015304,
+        "min_s": 0.5221268630011764,
+        "max_s": 0.9320305549990735,
+        "output_sha256": "6ae2ee96ae7cb70bc8bc1e572f262f10e0e2621d0451f64926aeb5540780bd50"
+      }
+    },
+    {
+      "case": "blastn-large-fmt0",
+      "mode": "native",
+      "threads": 1,
+      "argv": [
+        "blastn",
+        "-task",
+        "megablast",
+        "-query",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/EDL933.fna",
+        "-subject",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/Sakai.fna",
+        "-outfmt",
+        "0",
+        "-num_threads",
+        "1",
+        "-out",
+        "/tmp/tmp56lhsblm/blastn-large-fmt0.native.after.out"
+      ],
+      "before": {
+        "samples_s": [
+          1.1704201959983038,
+          1.1358516219988815,
+          1.5240134409978054
+        ],
+        "median_s": 1.1704201959983038,
+        "min_s": 1.1358516219988815,
+        "max_s": 1.5240134409978054,
+        "output_sha256": "9172be8699582a5bac568f0a51edd9fec9627d5acb010d562e88548bb8d12c8b"
+      },
+      "after": {
+        "samples_s": [
+          1.3189475700019102,
+          1.1797494040001766,
+          1.0888771989993984
+        ],
+        "median_s": 1.1797494040001766,
+        "min_s": 1.0888771989993984,
+        "max_s": 1.3189475700019102,
+        "output_sha256": "9172be8699582a5bac568f0a51edd9fec9627d5acb010d562e88548bb8d12c8b"
+      }
+    },
+    {
+      "case": "blastn-large-fmt0",
+      "mode": "serial-wasi",
+      "threads": 1,
+      "argv": [
+        "blastn",
+        "-task",
+        "megablast",
+        "-query",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/EDL933.fna",
+        "-subject",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/Sakai.fna",
+        "-outfmt",
+        "0",
+        "-num_threads",
+        "1",
+        "-out",
+        "/tmp/tmp56lhsblm/blastn-large-fmt0.serial-wasi.after.out"
+      ],
+      "before": {
+        "samples_s": [
+          1.917683242001658,
+          1.5630126830001245,
+          1.537648433000868
+        ],
+        "median_s": 1.5630126830001245,
+        "min_s": 1.537648433000868,
+        "max_s": 1.917683242001658,
+        "output_sha256": "9172be8699582a5bac568f0a51edd9fec9627d5acb010d562e88548bb8d12c8b"
+      },
+      "after": {
+        "samples_s": [
+          1.58817482700033,
+          1.5636683289994835,
+          1.5652062550034316
+        ],
+        "median_s": 1.5652062550034316,
+        "min_s": 1.5636683289994835,
+        "max_s": 1.58817482700033,
+        "output_sha256": "9172be8699582a5bac568f0a51edd9fec9627d5acb010d562e88548bb8d12c8b"
+      }
+    },
+    {
+      "case": "blastn-large-fmt0",
+      "mode": "threaded-wasi",
+      "threads": 4,
+      "argv": [
+        "blastn",
+        "-task",
+        "megablast",
+        "-query",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/EDL933.fna",
+        "-subject",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/Sakai.fna",
+        "-outfmt",
+        "0",
+        "-num_threads",
+        "4",
+        "-out",
+        "/tmp/tmp56lhsblm/blastn-large-fmt0.threaded-wasi.after.out"
+      ],
+      "before": {
+        "samples_s": [
+          1.8151021119992947,
+          2.2085301219995017,
+          1.790783010001178
+        ],
+        "median_s": 1.8151021119992947,
+        "min_s": 1.790783010001178,
+        "max_s": 2.2085301219995017,
+        "output_sha256": "9172be8699582a5bac568f0a51edd9fec9627d5acb010d562e88548bb8d12c8b"
+      },
+      "after": {
+        "samples_s": [
+          2.107905925000523,
+          1.8223598090007727,
+          1.7501777199977369
+        ],
+        "median_s": 1.8223598090007727,
+        "min_s": 1.7501777199977369,
+        "max_s": 2.107905925000523,
+        "output_sha256": "9172be8699582a5bac568f0a51edd9fec9627d5acb010d562e88548bb8d12c8b"
+      }
+    },
+    {
+      "case": "blastn-large",
+      "mode": "native",
+      "threads": 1,
+      "argv": [
+        "blastn",
+        "-task",
+        "megablast",
+        "-query",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/EDL933.fna",
+        "-subject",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/Sakai.fna",
+        "-outfmt",
+        "6",
+        "-num_threads",
+        "1",
+        "-out",
+        "/tmp/tmp56lhsblm/blastn-large.native.after.out"
+      ],
+      "before": {
+        "samples_s": [
+          0.7853368149990274,
+          0.7598264759981248,
+          0.7782864569999219
+        ],
+        "median_s": 0.7782864569999219,
+        "min_s": 0.7598264759981248,
+        "max_s": 0.7853368149990274,
+        "output_sha256": "300a925ef86f20af9c0eff53f1c73638bdf80d47f5153352086a3e7bfd416c0c"
+      },
+      "after": {
+        "samples_s": [
+          0.7753032309992705,
+          0.7875089420012955,
+          0.7820456659974298
+        ],
+        "median_s": 0.7820456659974298,
+        "min_s": 0.7753032309992705,
+        "max_s": 0.7875089420012955,
+        "output_sha256": "300a925ef86f20af9c0eff53f1c73638bdf80d47f5153352086a3e7bfd416c0c"
+      }
+    },
+    {
+      "case": "blastn-large",
+      "mode": "serial-wasi",
+      "threads": 1,
+      "argv": [
+        "blastn",
+        "-task",
+        "megablast",
+        "-query",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/EDL933.fna",
+        "-subject",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/Sakai.fna",
+        "-outfmt",
+        "6",
+        "-num_threads",
+        "1",
+        "-out",
+        "/tmp/tmp56lhsblm/blastn-large.serial-wasi.after.out"
+      ],
+      "before": {
+        "samples_s": [
+          1.1579736319981748,
+          1.1071486920009193,
+          1.0800356430008833
+        ],
+        "median_s": 1.1071486920009193,
+        "min_s": 1.0800356430008833,
+        "max_s": 1.1579736319981748,
+        "output_sha256": "300a925ef86f20af9c0eff53f1c73638bdf80d47f5153352086a3e7bfd416c0c"
+      },
+      "after": {
+        "samples_s": [
+          1.1381489519990282,
+          1.1075968590012053,
+          1.0684564330003923
+        ],
+        "median_s": 1.1075968590012053,
+        "min_s": 1.0684564330003923,
+        "max_s": 1.1381489519990282,
+        "output_sha256": "300a925ef86f20af9c0eff53f1c73638bdf80d47f5153352086a3e7bfd416c0c"
+      }
+    },
+    {
+      "case": "blastn-large",
+      "mode": "threaded-wasi",
+      "threads": 4,
+      "argv": [
+        "blastn",
+        "-task",
+        "megablast",
+        "-query",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/EDL933.fna",
+        "-subject",
+        "/mnt/c/Users/genom/GitHub/LOSAT-web-gui/LOSAT/tests/fasta/Sakai.fna",
+        "-outfmt",
+        "6",
+        "-num_threads",
+        "4",
+        "-out",
+        "/tmp/tmp56lhsblm/blastn-large.threaded-wasi.after.out"
+      ],
+      "before": {
+        "samples_s": [
+          1.2393235159979668,
+          1.2895050209990586,
+          1.809244909996778
+        ],
+        "median_s": 1.2895050209990586,
+        "min_s": 1.2393235159979668,
+        "max_s": 1.809244909996778,
+        "output_sha256": "300a925ef86f20af9c0eff53f1c73638bdf80d47f5153352086a3e7bfd416c0c"
+      },
+      "after": {
+        "samples_s": [
+          1.2769770199993218,
+          2.189259487000527,
+          1.2922000360013044
+        ],
+        "median_s": 1.2922000360013044,
+        "min_s": 1.2769770199993218,
+        "max_s": 2.189259487000527,
+        "output_sha256": "300a925ef86f20af9c0eff53f1c73638bdf80d47f5153352086a3e7bfd416c0c"
+      }
+    }
+  ],
+  "finished_at": "2026-10-03T06:14:25+00:00"
+}

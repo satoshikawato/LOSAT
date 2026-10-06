@@ -99,12 +99,56 @@ pub fn ncbi_nucleotide_title(defline: &str, leave_prefix: bool) -> String {
     String::from_utf8(cleaned).expect("ASCII deflines")
 }
 
+/// The title of a protein subject with the defline `defline`, for the alignment heading
+/// (`leave_prefix` false) or the description table (true): the steps of
+/// `ncbi_nucleotide_title` with `x_CleanAndCompress`'s protein rule (`m_IsAA`). A FASTA
+/// record has no BioSource, so `x_AdjustProteinTitleSuffix` returns at once.
+///
+/// NCBI reference: c++/src/objmgr/util/create_defline.cpp:3273
+/// ```c
+///     if (m_Source.Empty()) return;
+/// ```
+pub fn ncbi_protein_title(defline: &str, leave_prefix: bool) -> String {
+    let (cleaned, _) = clean_and_compress(
+        &nucleotide_title_before_cleanup(defline, leave_prefix),
+        true,
+    );
+    String::from_utf8(cleaned).expect("ASCII deflines")
+}
+
+/// Rejects the outfmt 0 title of the protein subject record `record` (from 1) of
+/// `program` that LOSAT does not write as NCBI: a title that NCBI decodes
+/// (`NStr::HtmlDecode`), or one that NCBI's `x_CleanAndCompress` reads past (NCBI crashes;
+/// approved exception 2 of PD-LOSAT-NCBI-DEFECTS covers the nucleotide subjects of
+/// BLASTN, TBLASTX and TBLASTN only).
+pub fn check_shown_protein_subject_title(
+    defline: &str,
+    record: usize,
+    program: &str,
+) -> anyhow::Result<()> {
+    check_shown_subject_title(defline, record, program)?;
+    let reads_past_end = [false, true].into_iter().any(|leave_prefix| {
+        clean_and_compress(
+            &nucleotide_title_before_cleanup(defline, leave_prefix),
+            true,
+        )
+        .1
+    });
+    if reads_past_end {
+        anyhow::bail!(
+            "subject record {record} has a title of punctuation that NCBI BLAST+'s x_CleanAndCompress reads past the end of (NCBI BLAST+ 2.17.0 crashes in outfmt 0); this is not supported by LOSAT's {program}"
+        );
+    }
+    Ok(())
+}
+
 /// Whether NCBI's `x_CleanAndCompress` reads past the end of the outfmt 0 title of a
 /// nucleotide subject with the defline `defline`, in the alignment heading or in the
 /// description table (NCBI crashes when it writes the title of such a subject with hits).
-/// Approved exception 2 of PD-LOSAT-NCBI-DEFECTS covers BLASTN only; the other programs
-/// reject such subjects.
-pub fn ncbi_nucleotide_title_reads_past_end(defline: &str) -> bool {
+/// Approved exception 2 of PD-LOSAT-NCBI-DEFECTS covers BLASTN, TBLASTX and TBLASTN: they
+/// write the title that `ncbi_nucleotide_title` stops at the end of the string.
+#[cfg(test)]
+fn ncbi_nucleotide_title_reads_past_end(defline: &str) -> bool {
     [false, true].into_iter().any(|leave_prefix| {
         clean_and_compress(
             &nucleotide_title_before_cleanup(defline, leave_prefix),
@@ -150,11 +194,20 @@ pub fn ncbi_nucleotide_title_is_decoded(defline: &str) -> bool {
 }
 
 /// Rejects the outfmt 0 title of the subject record `record` (from 1) of `program` that
-/// LOSAT does not write as NCBI: a title that NCBI decodes (`NStr::HtmlDecode`), or one
-/// that NCBI's `x_CleanAndCompress` reads past (NCBI crashes; approved exception 2 of
-/// PD-LOSAT-NCBI-DEFECTS covers BLASTN only). NCBI makes the titles only of the subjects
-/// that a report shows, those with hits, so the callers check those subjects after the
-/// search.
+/// LOSAT does not write as NCBI: a title that NCBI decodes (`NStr::HtmlDecode`). NCBI makes
+/// the titles only of the subjects that a report shows, those with hits, so the callers
+/// check those subjects after the search. A title that NCBI's `x_CleanAndCompress` reads
+/// past (NCBI crashes) is written as `ncbi_nucleotide_title` stops it at the end of the
+/// string (approved exception 2 of PD-LOSAT-NCBI-DEFECTS, extended to TBLASTX and TBLASTN
+/// by the maintainer in session S08b, DW-17).
+///
+/// NCBI reference: c++/src/objmgr/util/create_defline.cpp:4092-4095
+/// ```c
+///     // produce final result
+///     string penult = mag + prefix + decoded + suffix;
+///
+///     x_CleanAndCompress (final, penult, m_IsAA);
+/// ```
 ///
 /// NCBI reference: c++/src/algo/blast/format/blast_format.cpp:1540
 /// ```c
@@ -173,11 +226,6 @@ pub fn check_shown_subject_title(
     if ncbi_nucleotide_title_is_decoded(defline) {
         anyhow::bail!(
             "subject record {record} has an HTML character reference (such as &amp;) in its defline, which NCBI BLAST+ decodes in the outfmt 0 titles; this is not supported by LOSAT's {program}"
-        );
-    }
-    if ncbi_nucleotide_title_reads_past_end(defline) {
-        anyhow::bail!(
-            "subject record {record} has a defline of punctuation that NCBI BLAST+ reads past its end when it writes the subject's outfmt 0 title (it crashes); this is not supported by LOSAT's {program}"
         );
     }
     Ok(())

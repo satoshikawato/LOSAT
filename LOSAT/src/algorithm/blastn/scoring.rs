@@ -47,6 +47,45 @@ fn scoring_spec(args: &BlastnArgs) -> NuclScoringSpec {
 ///         int bytes_written = snprintf(buffer, DIM(buffer),
 ///                   "Word-size must be less than or equal to %d", DBSEQ_CHUNK_OVERLAP);
 /// ```
+/// NCBI reference: c++/src/algo/blast/core/blast_options.c:1247-1261,1399-1413
+/// ```c
+/// static Boolean
+/// s_DiscWordOptionsValidate(Int4 word_size, Uint1 template_length,
+///                           Uint1 template_type,
+///                           Blast_Message** blast_msg)
+/// {
+///    if (template_length == 0)
+///       return TRUE;
+///
+///
+///    if (word_size != 11 && word_size != 12) {
+///       Blast_MessageWrite(blast_msg, eBlastSevError, kBlastMessageNoContext,
+///                          "Invalid discontiguous template parameters: word "
+///                          "size must be either 11 or 12");
+///       return FALSE;
+///    }
+/// ...
+///     if (/*program_number == eBlastTypeBlastn &&*/
+///         Blast_ProgramIsNucleotide(program_number) &&
+///         !Blast_QueryIsPattern(program_number) &&
+///         options->mb_template_length > 0) {
+///       if (!s_DiscWordOptionsValidate(options->word_size,
+///               options->mb_template_length,
+///               options->mb_template_type,
+///               blast_msg)) {
+///          return BLASTERR_OPTION_VALUE_INVALID;
+///       } else if (options->lut_type != eMBLookupTable) {
+///          Blast_MessageWrite(blast_msg, eBlastSevError, kBlastMessageNoContext,
+///             "Invalid lookup table type for discontiguous Mega BLAST");
+///          return BLASTERR_OPTION_VALUE_INVALID;
+///       }
+///    }
+/// ```
+/// The template length and type are 16, 18 or 21 and 0, 1 or 2 by the argument
+/// constraints (`-template_length`, `-template_type`), so their two checks cannot fail.
+/// The lookup table type of the options is the task's: megablast and dc-megablast
+/// `eMBLookupTable`, blastn and blastn-short `eNaLookupTable`
+/// (blast_nucl_options.cpp:137-150, disc_nucl_options.cpp:55-64).
 /// NCBI reference: c++/src/algo/blast/core/blast_options.c:1518-1523
 /// ```c
 /// 	if (options->expect_value <= 0.0 && options->cutoff_score <= 0)
@@ -85,12 +124,15 @@ fn scoring_spec(args: &BlastnArgs) -> NuclScoringSpec {
 ///         LOG_POST(Error << "Please refer to the BLAST+ user manual.");       \
 ///         exit_code = BLAST_INPUT_ERROR;                                      \
 /// ```
-/// Only megablast extends greedily. The reward and the penalty are NCBI's 16-bit values
+/// Only megablast extends greedily (dc-megablast and blastn-short use dynamic programming,
+/// `coordination.rs` `task_defaults`). The reward and the penalty are NCBI's 16-bit values
 /// (`determine_scoring_params`). LOSAT's own limits are `check_losat_limits`.
 pub fn check_scoring_options(args: &BlastnArgs) -> anyhow::Result<()> {
     let spec = scoring_spec(args);
     let word_size = super::coordination::determine_effective_word_size(args);
     let greedy = args.task == "megablast";
+    let mb_lookup_options = matches!(args.task.as_str(), "megablast" | "dc-megablast");
+    let (_, template_length) = super::coordination::determine_template(args);
     let matrix_only = spec.reward == 0 && spec.penalty == 0;
     let message = if !matrix_only && spec.penalty >= 0 {
         "BLASTN penalty must be negative".to_string()
@@ -98,7 +140,11 @@ pub fn check_scoring_options(args: &BlastnArgs) -> anyhow::Result<()> {
         "BLASTN gap extension penalty cannot be 0".to_string()
     } else if word_size > DBSEQ_CHUNK_OVERLAP {
         format!("Word-size must be less than or equal to {DBSEQ_CHUNK_OVERLAP}")
-    } else if args.evalue <= 0.0 {
+    } else if template_length > 0 && word_size != 11 && word_size != 12 {
+        "Invalid discontiguous template parameters: word size must be either 11 or 12".to_string()
+    } else if template_length > 0 && !mb_lookup_options {
+        "Invalid lookup table type for discontiguous Mega BLAST".to_string()
+    } else if super::coordination::determine_evalue(args) <= 0.0 {
         "expect value or cutoff score must be greater than zero".to_string()
     } else if spec.gap_open == 0 && spec.gap_extend == 0 && !greedy {
         "Greedy extension must be used if gap existence and extension options are zero".to_string()
@@ -161,7 +207,8 @@ pub fn check_losat_limits(args: &BlastnArgs) -> anyhow::Result<()> {
     // (-32768) out of the score range of the ungapped Karlin-Altschul computation. It then
     // counts a reward of 32767 beyond the end of the frequency array (oracle: invalid
     // queries, or a crash), and without a penalty of -32768 every query is invalid (oracle:
-    // the warnings and no hits), which LOSAT's computation does not reproduce. LOSAT's
+    // the warnings and no hits for a 3000-base query, a crash for primer-length queries of
+    // every task, SD audit (c)), which LOSAT's computation does not reproduce. LOSAT's
     // scores below these values were compared with NCBI's up to 24000/-30000 (E2g V1).
     if spec.reward >= i32::from(i16::MAX) || spec.penalty <= i32::from(i16::MIN) {
         anyhow::bail!(
@@ -417,6 +464,77 @@ mod tests {
             .downcast::<NativeError>()
             .expect("an NCBI error")
             .message
+    }
+
+    // NCBI reference: c++/src/algo/blast/core/blast_options.c:1247-1261,1399-1413
+    // ```c
+    //    if (word_size != 11 && word_size != 12) {
+    //       Blast_MessageWrite(blast_msg, eBlastSevError, kBlastMessageNoContext,
+    //                          "Invalid discontiguous template parameters: word "
+    //                          "size must be either 11 or 12");
+    // ...
+    //       } else if (options->lut_type != eMBLookupTable) {
+    //          Blast_MessageWrite(blast_msg, eBlastSevError, kBlastMessageNoContext,
+    //             "Invalid lookup table type for discontiguous Mega BLAST");
+    // ```
+    #[test]
+    fn discontiguous_templates_are_checked_after_the_word_size_limit() {
+        let word = "Invalid discontiguous template parameters: word size must be either 11 or 12";
+        let table = "Invalid lookup table type for discontiguous Mega BLAST";
+        assert!(check_scoring_options(&args(&["-task", "dc-megablast"])).is_ok());
+        assert!(
+            check_scoring_options(&args(&["-task", "dc-megablast", "-word_size", "12"])).is_ok()
+        );
+        assert!(message(check_scoring_options(&args(&[
+            "-task",
+            "dc-megablast",
+            "-word_size",
+            "13"
+        ])))
+        .contains(word));
+        // The template applies to any task: megablast keeps its MB table, blastn and
+        // blastn-short have the standard table.
+        let template = ["-template_type", "coding", "-template_length", "18"];
+        let with = |words: &[&str]| args(&[words, &template[..]].concat());
+        assert!(check_scoring_options(&with(&["-word_size", "11"])).is_ok());
+        assert!(message(check_scoring_options(&with(&[]))).contains(word));
+        assert!(message(check_scoring_options(&with(&["-task", "blastn"]))).contains(table));
+        assert!(message(check_scoring_options(&with(&["-task", "blastn-short"]))).contains(word));
+        assert!(message(check_scoring_options(&with(&[
+            "-task",
+            "blastn-short",
+            "-word_size",
+            "12"
+        ])))
+        .contains(table));
+        // The word size limit (100) comes first, the zero gap costs last.
+        assert!(message(check_scoring_options(&args(&[
+            "-task",
+            "dc-megablast",
+            "-word_size",
+            "101"
+        ])))
+        .contains("Word-size must be less than or equal to 100"));
+        assert!(message(check_scoring_options(&args(&[
+            "-task",
+            "dc-megablast",
+            "-word_size",
+            "13",
+            "-gapopen",
+            "0",
+            "-gapextend",
+            "0"
+        ])))
+        .contains(word));
+        assert!(message(check_scoring_options(&args(&[
+            "-task",
+            "dc-megablast",
+            "-gapopen",
+            "0",
+            "-gapextend",
+            "0"
+        ])))
+        .contains("Greedy extension must be used"));
     }
 
     #[test]

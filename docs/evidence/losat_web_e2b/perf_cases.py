@@ -2,7 +2,7 @@
 """The S08 performance cases: docs/evidence/losat_web_e2c/perf_cases.py with two more
 TBLASTX cases. S08 searches TBLASTX queries in NCBI's 10002-nt batches, orders the hit
 list as Blast_HitListUpdate and resolves ambiguous subject bases for the preliminary
-search, so the added cases are a search of 4 queries in 3 batches (`tblastx-multi`, the
+search, so the added cases are a search of 4 queries in 2 batches (`tblastx-multi`, the
 multi_query records of the outfmt 0 fixtures against LC741431) and a search of 260
 subjects (`tblastx-many`, the many records of the outfmt 0 fixtures). Both give the same
 outfmt 6 bytes before and after S08.

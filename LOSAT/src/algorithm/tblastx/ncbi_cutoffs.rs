@@ -536,11 +536,23 @@ pub fn cutoff_score_max_for_tblastx(
 ) -> i32 {
     // NCBI: BLAST_Cutoffs(&new_cutoff, &evalue, kbp, searchsp, FALSE, 0)
     // dodecay=FALSE means no gap decay adjustment
-    blast_cutoffs_from_one(cutoff_score_from_evalue(
-        evalue_threshold,
-        eff_searchsp,
-        ungapped_params,
-    ))
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:4108-4121
+    // ```c
+    //    es = 1;
+    //    esave = e;
+    //    if (e > 0.)
+    //    {
+    // ...
+    //         es = BlastKarlinEtoS_simple(e, kbp, searchsp);
+    //    }
+    // ```
+    // A NaN e-value (`-evalue -nan`) is not greater than 0, so the cutoff stays 1.
+    let es = if evalue_threshold > 0.0 {
+        cutoff_score_from_evalue(evalue_threshold, eff_searchsp, ungapped_params)
+    } else {
+        1
+    };
+    blast_cutoffs_from_one(es)
 }
 
 /// The cutoff score that `BLAST_Cutoffs` returns to a caller whose cutoff starts at 1

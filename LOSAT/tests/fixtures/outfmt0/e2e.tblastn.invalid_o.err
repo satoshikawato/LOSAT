@@ -1,0 +1,3 @@
+Warning: [tblastn] Query_1 q1 allx: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options 
+Warning: [tblastn] Query_2 q2 withO: One or more O characters replaced by X for alignment score calculations at positions 58 
+Warning: [tblastn] Query_3 q3 manyO: One or more O characters replaced by X for alignment score calculations at positions 26, 58 

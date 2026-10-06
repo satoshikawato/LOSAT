@@ -1,0 +1,17 @@
+# TBLASTN 2.17.0+
+# Query: BDT63274.1
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/e2d_n_sub8k.fa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 4 hits found
+BDT63274.1	sub8k	100.000	636	0	0	169	804	3125	1218	0.0	1044
+BDT63274.1	sub8k	98.980	98	1	0	29	126	3834	3541	1.17e-38	144
+BDT63274.1	sub8k	97.826	46	1	0	124	169	3370	3233	5.14e-23	94.0
+BDT63274.1	sub8k	50.000	16	8	0	99	114	2509	2462	1.7	20.0
+# TBLASTN 2.17.0+
+# Query: BDT63275.1
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/e2d_n_sub8k.fa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 2 hits found
+BDT63275.1	sub8k	100.000	490	0	0	1	490	4529	5998	0.0	854
+BDT63275.1	sub8k	54.545	11	5	0	800	810	2654	2686	7.4	17.7
+# BLAST processed 2 queries

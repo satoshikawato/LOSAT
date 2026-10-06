@@ -1,0 +1,10 @@
+{
+  "baseline_case_id": "p12_lc738874_lc738875_default",
+  "ncbi_exit": 0,
+  "losat_exit": 0,
+  "implicit_ncbi_sha256": "86c05a04efb50e4026720e2d44fe2db2e6446f9594e174f3fde56931d09d5b49",
+  "explicit_ncbi_sha256": "86c05a04efb50e4026720e2d44fe2db2e6446f9594e174f3fde56931d09d5b49",
+  "implicit_losat_sha256": "86c05a04efb50e4026720e2d44fe2db2e6446f9594e174f3fde56931d09d5b49",
+  "explicit_losat_sha256": "86c05a04efb50e4026720e2d44fe2db2e6446f9594e174f3fde56931d09d5b49",
+  "status": "PASS"
+}

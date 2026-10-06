@@ -1,0 +1,39 @@
+# rerun_fast.py with the fix (native 6f070575..., commit 3b84ce6c4) over the second audit pass's blastp-fast rows and every row that differed (inputs in ~/.cache/losat-web-gui-target/s08pb-audit/a2/; full table ~/.cache/losat-web-gui-target/s08pb/r2a21/rerun_fixed.tsv)
+# rows=7021 {'SAME': 7000, 'NCBI-CRASH': 21}
+# per source file and class:
+#      14 NCBI-CRASH	w2_21.tsv
+#       7 NCBI-CRASH	w2_22.tsv
+#    1500 SAME	w1_12f.tsv
+#     231 SAME	w2_21.tsv
+#     269 SAME	w2_22.tsv
+#    2500 SAME	w3_31.tsv
+#    2500 SAME	w3_32.tsv
+# the rows that are not SAME (NCBI SIGSEGV, R2A2-2):
+NCBI-CRASH	w2_21.tsv	DIFF	n=-11 l=0	nb=0 lb=880	-word_size 5 -window_size 0 -threshold 3 -evalue 1e5 -outfmt 7 -comp_based_stats t	/home/kawato/.cache/losat-web-gui-target/s08pb-audit/a2/w2/q21_286.faa	/home/kawato/.cache/losat-web-gui-target/s08pb-audit/a2/w2/s21_286.faa
+NCBI-CRASH	w2_21.tsv	DIFF	n=-11 l=0	nb=0 lb=1630	-word_size 5 -window_size 0 -threshold 3 -evalue 1e5 -outfmt 7 -comp_based_stats D	/home/kawato/.cache/losat-web-gui-target/s08pb-audit/a2/w2/q21_562.faa	/home/kawato/.cache/losat-web-gui-target/s08pb-audit/a2/w2/s21_562.faa
+NCBI-CRASH	w2_21.tsv	DIFF	n=-11 l=0	nb=0 lb=3947	-word_size 5 -window_size 0 -threshold 1 -evalue 1000 -outfmt 6	/home/kawato/.cache/losat-web-gui-target/s08pb-audit/a2/w2/q21_693.faa	/home/kawato/.cache/losat-web-gui-target/s08pb-audit/a2/w2/s21_693.faa
+NCBI-CRASH	w2_21.tsv	DIFF	n=-11 l=0	nb=0 lb=2347	-word_size 5 -window_size 0 -threshold 2 -evalue 1e5 -outfmt 6	/home/kawato/.cache/losat-web-gui-target/s08pb-audit/a2/w2/q21_898.faa	/home/kawato/.cache/losat-web-gui-target/s08pb-audit/a2/w2/s21_898.faa
+NCBI-CRASH	w2_21.tsv	DIFF	n=-11 l=0	nb=0 lb=14741	-word_size 5 -window_size 0 -threshold 1 -evalue 1e5 -outfmt 6 -seg yes	/home/kawato/.cache/losat-web-gui-target/s08pb-audit/a2/w2/q21_964.faa	/home/kawato/.cache/losat-web-gui-target/s08pb-audit/a2/w2/s21_964.faa
+NCBI-CRASH	w2_21.tsv	DIFF	n=-11 l=0	nb=0 lb=16771	-word_size 3 -window_size 0 -threshold 2 -evalue 1e5 -outfmt 6	/home/kawato/.cache/losat-web-gui-target/s08pb-audit/a2/w2/q21_1391.faa	/home/kawato/.cache/losat-web-gui-target/s08pb-audit/a2/w2/s21_1391.faa
+NCBI-CRASH	w2_21.tsv	DIFF	n=-11 l=0	nb=17 lb=5194	-word_size 5 -window_size 0 -threshold 1 -evalue 1000 -outfmt 0	/home/kawato/.cache/losat-web-gui-target/s08pb-audit/a2/w2/q21_1453.faa	/home/kawato/.cache/losat-web-gui-target/s08pb-audit/a2/w2/s21_1453.faa
+NCBI-CRASH	w2_21.tsv	DIFF	n=-11 l=0	nb=0 lb=3772	-word_size 3 -window_size 0 -threshold 1 -evalue 1e5 -outfmt 6 -comp_based_stats t	/home/kawato/.cache/losat-web-gui-target/s08pb-audit/a2/w2/q21_1511.faa	/home/kawato/.cache/losat-web-gui-target/s08pb-audit/a2/w2/s21_1511.faa
+NCBI-CRASH	w2_21.tsv	DIFF	n=-11 l=0	nb=0 lb=448	-word_size 3 -window_size 0 -threshold 1 -evalue 1e5 -outfmt 6 -seg yes	/home/kawato/.cache/losat-web-gui-target/s08pb-audit/a2/w2/q21_1600.faa	/home/kawato/.cache/losat-web-gui-target/s08pb-audit/a2/w2/s21_1600.faa
+NCBI-CRASH	w2_21.tsv	DIFF	n=-11 l=0	nb=17 lb=6877	-word_size 5 -window_size 0 -threshold 1 -evalue 1e8 -outfmt 0	/home/kawato/.cache/losat-web-gui-target/s08pb-audit/a2/w2/q21_1858.faa	/home/kawato/.cache/losat-web-gui-target/s08pb-audit/a2/w2/s21_1858.faa
+NCBI-CRASH	w2_21.tsv	DIFF	n=-11 l=0	nb=0 lb=7272	-word_size 5 -window_size 0 -threshold 1 -evalue 1e8 -outfmt 6	/home/kawato/.cache/losat-web-gui-target/s08pb-audit/a2/w2/q21_1899.faa	/home/kawato/.cache/losat-web-gui-target/s08pb-audit/a2/w2/s21_1899.faa
+NCBI-CRASH	w2_21.tsv	DIFF	n=-11 l=0	nb=0 lb=0	-word_size 5 -window_size 0 -threshold 1 -evalue 10 -outfmt 6	/home/kawato/.cache/losat-web-gui-target/s08pb-audit/a2/w2/q21_2077.faa	/home/kawato/.cache/losat-web-gui-target/s08pb-audit/a2/w2/s21_2077.faa
+NCBI-CRASH	w2_21.tsv	DIFF	n=-11 l=0	nb=0 lb=2680	-word_size 3 -window_size 0 -threshold 1 -evalue 1e8 -outfmt 6	/home/kawato/.cache/losat-web-gui-target/s08pb-audit/a2/w2/q21_2320.faa	/home/kawato/.cache/losat-web-gui-target/s08pb-audit/a2/w2/s21_2320.faa
+NCBI-CRASH	w2_21.tsv	DIFF	n=-11 l=0	nb=0 lb=1205	-word_size 5 -window_size 0 -threshold 2 -evalue 1e5 -outfmt 6 -comp_based_stats D	/home/kawato/.cache/losat-web-gui-target/s08pb-audit/a2/w2/q21_2372.faa	/home/kawato/.cache/losat-web-gui-target/s08pb-audit/a2/w2/s21_2372.faa
+NCBI-CRASH	w2_22.tsv	DIFF	n=-11 l=0	nb=0 lb=1294	-word_size 3 -window_size 0 -threshold 2 -evalue 1e5 -outfmt 6	/home/kawato/.cache/losat-web-gui-target/s08pb-audit/a2/w2/q22_703.faa	/home/kawato/.cache/losat-web-gui-target/s08pb-audit/a2/w2/s22_703.faa
+NCBI-CRASH	w2_22.tsv	DIFF	n=-11 l=0	nb=17 lb=34431	-word_size 3 -window_size 0 -threshold 1 -evalue 1000 -outfmt 0	/home/kawato/.cache/losat-web-gui-target/s08pb-audit/a2/w2/q22_1159.faa	/home/kawato/.cache/losat-web-gui-target/s08pb-audit/a2/w2/s22_1159.faa
+NCBI-CRASH	w2_22.tsv	DIFF	n=-11 l=0	nb=0 lb=9398	-word_size 3 -window_size 0 -threshold 1 -evalue 1000 -outfmt 6 -comp_based_stats t	/home/kawato/.cache/losat-web-gui-target/s08pb-audit/a2/w2/q22_1273.faa	/home/kawato/.cache/losat-web-gui-target/s08pb-audit/a2/w2/s22_1273.faa
+NCBI-CRASH	w2_22.tsv	DIFF	n=-11 l=0	nb=0 lb=45	-word_size 5 -window_size 0 -threshold 2 -evalue 1e5 -outfmt 6 -max_hsps 1	/home/kawato/.cache/losat-web-gui-target/s08pb-audit/a2/w2/q22_1332.faa	/home/kawato/.cache/losat-web-gui-target/s08pb-audit/a2/w2/s22_1332.faa
+NCBI-CRASH	w2_22.tsv	DIFF	n=-11 l=0	nb=0 lb=4764	-word_size 3 -window_size 0 -threshold 1 -evalue 1000 -outfmt 6 -comp_based_stats t	/home/kawato/.cache/losat-web-gui-target/s08pb-audit/a2/w2/q22_1556.faa	/home/kawato/.cache/losat-web-gui-target/s08pb-audit/a2/w2/s22_1556.faa
+NCBI-CRASH	w2_22.tsv	DIFF	n=-11 l=0	nb=0 lb=558	-word_size 5 -window_size 0 -threshold 2 -evalue 1000 -outfmt 6	/home/kawato/.cache/losat-web-gui-target/s08pb-audit/a2/w2/q22_2059.faa	/home/kawato/.cache/losat-web-gui-target/s08pb-audit/a2/w2/s22_2059.faa
+NCBI-CRASH	w2_22.tsv	DIFF	n=-11 l=0	nb=0 lb=0	-word_size 5 -window_size 0 -threshold 1 -evalue 1e8 -outfmt 6	/home/kawato/.cache/losat-web-gui-target/s08pb-audit/a2/w2/q22_2342.faa	/home/kawato/.cache/losat-web-gui-target/s08pb-audit/a2/w2/s22_2342.faa
+# the second pass's 68 R2A2-1 rows (status DIFF in its tables, blastp-fast) now:
+#      66 SAME
+# the g2 grid (e2e inputs) rows, run separately with G2_ONLY=1 (the first run skipped them):
+# rows=32 {'SAME': 32}
+SAME	g2.tsv	DIFF_STDOUT	n=0 l=0	nb=0 lb=0	-task blastp-fast -window_size 0 -threshold 5 -evalue 1e5 -outfmt 6	/home/kawato/.cache/losat-web-gui-target/s08pb-audit/src2/LOSAT/tests/fasta/outfmt0/e2e_one_hit_query.faa	/home/kawato/.cache/losat-web-gui-target/s08pb-audit/src2/LOSAT/tests/fasta/outfmt0/e2e_one_hit_subject.faa
+SAME	g2.tsv	DIFF_STDOUT	n=0 l=0	nb=1476 lb=1476	-task blastp-fast -window_size 0 -threshold 5 -evalue 1e8 -outfmt 0	/home/kawato/.cache/losat-web-gui-target/s08pb-audit/src2/LOSAT/tests/fasta/outfmt0/e2e_one_hit_query.faa	/home/kawato/.cache/losat-web-gui-target/s08pb-audit/src2/LOSAT/tests/fasta/outfmt0/e2e_one_hit_subject.faa
+# the second pass's 68 R2A2-1 rows: 66 above and these 2, all SAME

@@ -1,4 +1,7 @@
 use super::constants::MAX_DIRECT_LOOKUP_WORD_SIZE;
+use super::disc_lookup::{
+    compute_discontiguous_index, get_disc_template_type, DiscTemplateType, DiscWordType,
+};
 use crate::core::blast_encoding::{encode_subject_ncbi2na_packed, COMPRESSION_RATIO};
 use crate::utils::dust::MaskedInterval;
 use bio::io::fasta;
@@ -728,6 +731,37 @@ pub struct TwoStageLookup {
     lut_word_length: usize,
     /// Extension word length (for triggering extension)
     word_length: usize,
+    /// The discontiguous templates of a discontiguous megablast table (NCBI
+    /// `mb_lt->discontiguous`); `None` for a contiguous table.
+    disc: Option<DiscTemplates>,
+}
+
+/// The templates of a discontiguous megablast table and the second template's chains.
+///
+/// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_nalookup.h:238-256
+/// ```c
+/// typedef struct BlastMBLookupTable {
+///     ...
+///     Boolean discontiguous; /**< Are discontiguous words used? */
+///     Int4 template_length; /**< Length of the discontiguous word template */
+///     EDiscTemplateType template_type; /**< Type of the discontiguous
+///                                          word template */
+///     Boolean two_templates; /**< Use two templates simultaneously */
+///     EDiscTemplateType second_template_type; /**< Type of the second
+///                                                 discontiguous word template */
+///     ...
+///     Int4* hashtable2;  /**< Array of positions for second template */
+///     ...
+///     Int4* next_pos2;   /**< Extra positions for the second template */
+/// ```
+pub struct DiscTemplates {
+    pub template_type: DiscTemplateType,
+    /// The second template (`two_templates`), or `Contiguous` for one template.
+    pub second_template_type: DiscTemplateType,
+    pub two_templates: bool,
+    pub template_length: usize,
+    hashtable2: Vec<u32>,
+    next_pos2: Vec<u32>,
 }
 
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_nalookup.h:238-269
@@ -820,6 +854,56 @@ impl TwoStageLookup {
         self.mb_lookup.has_hits(lut_kmer)
     }
 
+    /// The discontiguous templates, for a discontiguous megablast table.
+    #[inline(always)]
+    pub fn disc(&self) -> Option<&DiscTemplates> {
+        self.disc.as_ref()
+    }
+
+    /// Visits the second template's query offsets (1-based) of a discontiguous word; the
+    /// presence vector is shared by both templates.
+    ///
+    /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:1465-1469
+    /// ```c
+    ///    if (s_BlastMBLookupHasHits(mb_lt, index2)) {         \
+    ///        total_hits += s_BlastMBLookupRetrieve2(mb_lt,    \
+    ///                   index2, offset_pairs + total_hits,    \
+    ///                   scan_range[0]);                               \
+    ///    }
+    /// ```
+    /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:1428-1444
+    /// ```c
+    /// static NCBI_INLINE Int4 s_BlastMBLookupRetrieve2(BlastMBLookupTable * lookup,
+    ///                                                  Int8 index,
+    ///                                                  BlastOffsetPair * offset_pairs,
+    ///                                                  Int4 s_off)
+    /// {
+    ///     Int4 i=0;
+    ///     Int4 q_off = lookup->hashtable2[index];
+    ///
+    ///     while (q_off) {
+    ///         offset_pairs[i].qs_offsets.q_off   = q_off - 1;
+    ///         offset_pairs[i++].qs_offsets.s_off = s_off;
+    ///         q_off = lookup->next_pos2[q_off];
+    ///     }
+    ///     return i;
+    /// }
+    /// ```
+    #[inline(always)]
+    pub fn for_each_hit2(&self, index: u64, mut callback: impl FnMut(u32)) {
+        let Some(disc) = self.disc.as_ref() else {
+            return;
+        };
+        if !self.mb_lookup.has_hits(index) {
+            return;
+        }
+        let mut q_off = disc.hashtable2[index as usize];
+        while q_off != 0 {
+            callback(q_off);
+            q_off = disc.next_pos2[q_off as usize];
+        }
+    }
+
     /// Visit hits for a lut_word_length k-mer.
     #[inline(always)]
     pub fn for_each_hit(&self, lut_kmer: u64, callback: impl FnMut(u32)) {
@@ -836,16 +920,37 @@ impl TwoStageLookup {
         self.mb_lookup.count_hits(lut_kmer)
     }
 
-    /// Get lookup word length
+    /// Get lookup word length. A discontiguous table scans and extends template-length
+    /// words.
+    ///
+    /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1624-1634
+    /// ```c
+    ///     else if (lookup_wrap->lut_type == eMBLookupTable) {
+    ///         BlastMBLookupTable *lookup =
+    ///                                 (BlastMBLookupTable *) lookup_wrap->lut;
+    ///         if (lookup->discontiguous) {
+    ///             word_length = lookup->template_length;
+    ///             lut_word_length = lookup->template_length;
+    ///         } else {
+    ///             word_length = lookup->word_length;
+    ///             lut_word_length = lookup->lut_word_length;
+    ///         }
+    /// ```
     #[inline(always)]
     pub fn lut_word_length(&self) -> usize {
-        self.lut_word_length
+        match &self.disc {
+            Some(disc) => disc.template_length,
+            None => self.lut_word_length,
+        }
     }
 
-    /// Get extension word length
+    /// Get extension word length (the template length for a discontiguous table).
     #[inline(always)]
     pub fn word_length(&self) -> usize {
-        self.word_length
+        match &self.disc {
+            Some(disc) => disc.template_length,
+            None => self.word_length,
+        }
     }
 
     /// Calculate optimal scan step
@@ -1744,6 +1849,278 @@ pub fn build_two_stage_lookup(
         mb_lookup,
         lut_word_length,
         word_length,
+        disc: None,
+    }
+}
+
+/// Builds the discontiguous megablast table: the megablast table of the discontiguous
+/// words of the first template (and of the second one, which shares the presence
+/// vector), `lut_width` = the word size.
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1253-1260
+/// ```c
+///    ASSERT(lut_width >= 9);
+///    mb_lt->word_length = lookup_options->word_size;
+/// /*   mb_lt->skip = lookup_options->skip; */
+///    mb_lt->stride = lookup_options->stride > 0;
+///    mb_lt->lut_word_length = lut_width;
+///    mb_lt->hashsize = 1ULL << (BITS_PER_NUC * mb_lt->lut_word_length);
+/// ```
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1327-1331
+/// ```c
+///    if (lookup_options->mb_template_length > 0) {
+///         /* discontiguous megablast */
+///         mb_lt->scan_step = 1;
+///         status = s_FillDiscMBTable(query, location, mb_lt, lookup_options);
+///    }
+/// ```
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:645-827
+/// ```c
+/// static Int2
+/// s_FillDiscMBTable(BLAST_SequenceBlk* query, BlastSeqLoc* location,
+///         BlastMBLookupTable* mb_lt,
+///         const LookupTableOptions* lookup_options)
+///
+/// {
+///    ...
+///    const Int4 kCompressionFactor=2048; /* compress helper_array by this much */
+///    ...
+///    mb_lt->next_pos = (Int4 *)calloc(query->length + 1, sizeof(Int4));
+///    ...
+///    helper_array = (Uint4*) calloc(mb_lt->hashsize/kCompressionFactor,
+///                                   sizeof(Uint4));
+///    ...
+///    template_type = s_GetDiscTemplateType(lookup_options->word_size,
+///                       lookup_options->mb_template_length,
+///                       (EDiscWordType)lookup_options->mb_template_type);
+///    ...
+///    if (kTwoTemplates) {
+///       /* Use the temporaray to avoid annoying ICC warning. */
+///       int temp_int = template_type + 1;
+///       second_template_type =
+///            mb_lt->second_template_type = (EDiscTemplateType) temp_int;
+///
+///       mb_lt->hashtable2 = (Int4*)calloc(mb_lt->hashsize, sizeof(Int4));
+///       mb_lt->next_pos2 = (Int4*)calloc(query->length + 1, sizeof(Int4));
+///       helper_array2 = (Uint4*) calloc(mb_lt->hashsize/kCompressionFactor,
+///                                       sizeof(Uint4));
+///       ...
+///    }
+///
+///    mb_lt->discontiguous = TRUE;
+///    mb_lt->template_length = lookup_options->mb_template_length;
+///    template_length = lookup_options->mb_template_length;
+///    pv_array = mb_lt->pv_array;
+///    pv_array_bts = mb_lt->pv_array_bts;
+///
+///    for (loc = location; loc; loc = loc->next) {
+///       Int4 from;
+///       Int4 to;
+///       Uint8 accum = 0;
+///       Int4 ecode1 = 0;
+///       Int4 ecode2 = 0;
+///       Uint1* pos;
+///       Uint1* seq;
+///       Uint1 val;
+///
+///       /* A word is added to the table after the last base
+///          in the word is read in. At that point, the start
+///          offset of the word is (template_length-1) positions
+///          behind. This index is also incremented, because
+///          lookup table indices are 1-based (offset 0 is reserved). */
+///
+///       from = loc->ssr->left - (template_length - 2);
+///       to = loc->ssr->right - (template_length - 2);
+///       seq = query->sequence_start + loc->ssr->left;
+///       pos = seq + template_length;
+///
+///       for (index = from; index <= to; index++) {
+///          val = *++seq;
+///          /* if an ambiguity is encountered, do not add
+///             any words that would contain it */
+///          if ((val & BLAST2NA_MASK) != 0) {
+///             accum = 0;
+///             pos = seq + template_length;
+///             continue;
+///          }
+///
+///          /* get next base */
+///          accum = (accum << BITS_PER_NUC) | val;
+///          if (seq < pos)
+///             continue;
+///          ...
+///          ecode1 = ComputeDiscontiguousIndex(accum, template_type);
+///          if (mb_lt->hashtable[ecode1] == 0) {
+///             ...
+///             PV_SET(pv_array, ecode1, pv_array_bts);
+///          }
+///          else {
+///             helper_array[ecode1/kCompressionFactor]++;
+///          }
+///          mb_lt->next_pos[index] = mb_lt->hashtable[ecode1];
+///          mb_lt->hashtable[ecode1] = index;
+///
+///          if (!kTwoTemplates)
+///             continue;
+///
+///          /* repeat for the second template, if applicable */
+///
+///          ecode2 = ComputeDiscontiguousIndex(accum, second_template_type);
+///          if (mb_lt->hashtable2[ecode2] == 0) {
+///             ...
+///             PV_SET(pv_array, ecode2, pv_array_bts);
+///          }
+///          else {
+///             helper_array2[ecode2/kCompressionFactor]++;
+///          }
+///          mb_lt->next_pos2[index] = mb_lt->hashtable2[ecode2];
+///          mb_lt->hashtable2[ecode2] = index;
+///       }
+///    }
+///
+///    longest_chain = 2;
+///    for (index = 0; index < mb_lt->hashsize / kCompressionFactor; index++)
+///        longest_chain = MAX(longest_chain, helper_array[index]);
+///     /* +1 because helper_array is not incremented for the first position of a
+///       word */
+///    mb_lt->longest_chain = longest_chain + 1;
+///    sfree(helper_array);
+///
+///    if (kTwoTemplates) {
+///       longest_chain = 2;
+///       for (index = 0; index < mb_lt->hashsize / kCompressionFactor; index++)
+///          longest_chain = MAX(longest_chain, helper_array2[index]);
+///       /* +1 because helper_array2 is not incremented for the first position of a
+///          word */
+///       mb_lt->longest_chain += longest_chain + 1;
+///       sfree(helper_array2);
+///    }
+///    return 0;
+/// }
+/// ```
+/// The locations are the unmasked ranges of each context, in the order of
+/// `build_mb_lookup`; `left`/`right` are offsets in the concatenated query.
+#[allow(clippy::too_many_arguments)]
+pub fn build_disc_mb_lookup(
+    queries_blastna: &[Vec<u8>],
+    query_offsets: &[i32],
+    word_size: usize,
+    template_length: usize,
+    word_type: DiscWordType,
+    query_masks: &[Vec<MaskedInterval>],
+    approx_table_entries: usize,
+) -> TwoStageLookup {
+    debug_assert_eq!(queries_blastna.len(), query_offsets.len());
+    let lut_word_length = word_size;
+    let hashsize = 1usize << (2 * lut_word_length);
+    let (pv_size, pv_array_bts) =
+        compute_mb_pv_params(hashsize, approx_table_entries, false, lut_word_length);
+    let template_type = get_disc_template_type(word_size as i32, template_length as u8, word_type);
+    debug_assert!(template_type != DiscTemplateType::Contiguous);
+    let two_templates = word_type == DiscWordType::TwoTemplates;
+    let second_template_type = if two_templates {
+        template_type.next()
+    } else {
+        DiscTemplateType::Contiguous
+    };
+    let query_length = queries_blastna
+        .iter()
+        .zip(query_offsets.iter())
+        .map(|(seq, &query_offset)| query_offset.max(0) as usize + seq.len())
+        .max()
+        .unwrap_or(0);
+    const K_COMPRESSION_FACTOR: usize = 2048;
+    let mut hashtable = vec![0u32; hashsize];
+    let mut next_pos = vec![0u32; query_length + 1];
+    let mut helper_array = vec![0u32; hashsize / K_COMPRESSION_FACTOR];
+    let (mut hashtable2, mut next_pos2, mut helper_array2) = if two_templates {
+        (
+            vec![0u32; hashsize],
+            vec![0u32; query_length + 1],
+            vec![0u32; hashsize / K_COMPRESSION_FACTOR],
+        )
+    } else {
+        (Vec::new(), Vec::new(), Vec::new())
+    };
+    let mut pv_array = vec![0u32; pv_size];
+
+    for (q_idx, seq_blastna) in queries_blastna.iter().enumerate() {
+        let seq = seq_blastna.as_slice();
+        let masks = query_masks.get(q_idx).map(|v| v.as_slice()).unwrap_or(&[]);
+        let query_offset = query_offsets[q_idx].max(0) as usize;
+        for (range_start, range_end) in build_unmasked_ranges(seq.len(), masks) {
+            let mut accum: u64 = 0;
+            let mut valid_bases = 0usize;
+            for pos in range_start..range_end {
+                let val = seq[pos];
+                if (val & BLAST2NA_MASK) != 0 {
+                    accum = 0;
+                    valid_bases = 0;
+                    continue;
+                }
+                accum = (accum << 2) | val as u64;
+                valid_bases += 1;
+                if valid_bases < template_length {
+                    continue;
+                }
+                // The 1-based start of the word in the concatenated query.
+                let index = (query_offset + pos + 2 - template_length) as u32;
+                let ecode1 = compute_discontiguous_index(accum, template_type) as usize;
+                if hashtable[ecode1] == 0 {
+                    pv_set_shift(&mut pv_array, ecode1, pv_array_bts);
+                } else {
+                    helper_array[ecode1 / K_COMPRESSION_FACTOR] =
+                        helper_array[ecode1 / K_COMPRESSION_FACTOR].wrapping_add(1);
+                }
+                next_pos[index as usize] = hashtable[ecode1];
+                hashtable[ecode1] = index;
+                if !two_templates {
+                    continue;
+                }
+                let ecode2 = compute_discontiguous_index(accum, second_template_type) as usize;
+                if hashtable2[ecode2] == 0 {
+                    pv_set_shift(&mut pv_array, ecode2, pv_array_bts);
+                } else {
+                    helper_array2[ecode2 / K_COMPRESSION_FACTOR] =
+                        helper_array2[ecode2 / K_COMPRESSION_FACTOR].wrapping_add(1);
+                }
+                next_pos2[index as usize] = hashtable2[ecode2];
+                hashtable2[ecode2] = index;
+            }
+        }
+    }
+
+    let mut longest_chain = 2u32;
+    for &value in &helper_array {
+        longest_chain = longest_chain.max(value);
+    }
+    let mut total_longest_chain = longest_chain as usize + 1;
+    if two_templates {
+        let mut longest_chain2 = 2u32;
+        for &value in &helper_array2 {
+            longest_chain2 = longest_chain2.max(value);
+        }
+        total_longest_chain += longest_chain2 as usize + 1;
+    }
+
+    TwoStageLookup {
+        mb_lookup: MbLookupTable {
+            hashtable,
+            next_pos,
+            pv_array,
+            pv_array_bts,
+            longest_chain: total_longest_chain,
+        },
+        lut_word_length,
+        word_length: word_size,
+        disc: Some(DiscTemplates {
+            template_type,
+            second_template_type,
+            two_templates,
+            template_length,
+            hashtable2,
+            next_pos2,
+        }),
     }
 }
 
@@ -1957,5 +2334,96 @@ mod chain_order_tests {
         assert_eq!(newest_first.first(), Some(&37));
         newest_first.reverse();
         assert_eq!(newest_first, ascending);
+    }
+}
+
+#[cfg(test)]
+mod disc_lookup_tests {
+    use super::build_disc_mb_lookup;
+    use crate::algorithm::blastn::disc_lookup::{
+        compute_discontiguous_index, DiscTemplateType, DiscWordType,
+    };
+    use crate::utils::dust::MaskedInterval;
+
+    fn index_at(seq: &[u8], start: usize, len: usize, t: DiscTemplateType) -> u64 {
+        let mut accum = 0u64;
+        for &b in &seq[start..start + len] {
+            accum = (accum << 2) | b as u64;
+        }
+        compute_discontiguous_index(accum, t) as u64
+    }
+
+    fn chain(lookup: &super::TwoStageLookup, index: u64, second: bool) -> Vec<u32> {
+        let mut hits = Vec::new();
+        if second {
+            lookup.for_each_hit2(index, |q| hits.push(q));
+        } else {
+            lookup.for_each_hit(index, |q| hits.push(q));
+        }
+        hits
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:741-813
+    // ```c
+    //       from = loc->ssr->left - (template_length - 2);
+    //       to = loc->ssr->right - (template_length - 2);
+    //       seq = query->sequence_start + loc->ssr->left;
+    //       pos = seq + template_length;
+    //
+    //       for (index = from; index <= to; index++) {
+    //          val = *++seq;
+    //          /* if an ambiguity is encountered, do not add
+    //             any words that would contain it */
+    //          if ((val & BLAST2NA_MASK) != 0) {
+    //             accum = 0;
+    //             pos = seq + template_length;
+    //             continue;
+    //          }
+    // ...
+    //          mb_lt->next_pos[index] = mb_lt->hashtable[ecode1];
+    //          mb_lt->hashtable[ecode1] = index;
+    // ```
+    #[test]
+    fn words_are_indexed_newest_first_with_one_based_starts() {
+        // Two contexts in the concatenated query (offsets 0 and 41); the second repeats
+        // the first's 18-mer at 0 and has an ambiguity code (14) inside its copy at 20.
+        let word: Vec<u8> = (0..18).map(|i| (i * 7 % 4) as u8).collect();
+        let mut first = word.clone();
+        first.extend([1, 2, 3]);
+        let mut second = word.clone();
+        second.extend([0, 0]);
+        second.extend(&word);
+        second[20 + 5] = 14;
+        let lookup = build_disc_mb_lookup(
+            &[first.clone(), second.clone()],
+            &[0, 41],
+            11,
+            18,
+            DiscWordType::TwoTemplates,
+            &[Vec::new(), Vec::new()],
+            1000,
+        );
+        let disc = lookup.disc().expect("discontiguous table");
+        assert_eq!(disc.template_type, DiscTemplateType::T11_18Coding);
+        assert_eq!(disc.second_template_type, DiscTemplateType::T11_18Optimal);
+        assert_eq!((lookup.word_length(), lookup.lut_word_length()), (18, 18));
+        let coding = index_at(&word, 0, 18, DiscTemplateType::T11_18Coding);
+        let optimal = index_at(&word, 0, 18, DiscTemplateType::T11_18Optimal);
+        // The word at 0 of each context; the copy at 20 holds the ambiguity code.
+        assert_eq!(chain(&lookup, coding, false), vec![42, 1]);
+        assert_eq!(chain(&lookup, optimal, true), vec![42, 1]);
+        // A masked range is not indexed.
+        let masked = build_disc_mb_lookup(
+            &[first, second],
+            &[0, 41],
+            11,
+            18,
+            DiscWordType::Coding,
+            &[vec![MaskedInterval::new(3, 4)], Vec::new()],
+            1000,
+        );
+        assert_eq!(chain(&masked, coding, false), vec![42]);
+        assert!(masked.disc().is_some_and(|d| !d.two_templates));
+        assert!(chain(&masked, optimal, true).is_empty());
     }
 }

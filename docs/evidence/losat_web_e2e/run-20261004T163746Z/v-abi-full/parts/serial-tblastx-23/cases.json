@@ -1,0 +1,23 @@
+[
+  {
+    "program": "tblastx",
+    "argv": [
+      "tblastx",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/PemoMJNVA.fasta",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/PeseMJNV.fasta",
+      "-query_gencode",
+      "1",
+      "-db_gencode",
+      "1"
+    ],
+    "cwd": "/mnt/c/Users/genom/GitHub/LOSAT-web-gui",
+    "cases": [
+      "p04_pemojnva_pesemjnv"
+    ],
+    "frozen": {
+      "6": "dcc2b425418ecd3ed63a870dfbb6b6e4312e941355db271abbb5ba3243b72b27"
+    }
+  }
+]

@@ -12,7 +12,7 @@ use clap::{error::ErrorKind, CommandFactory, Parser, Subcommand};
 // ```
 use crate::algorithm::{blastn, blastp, blastx, tblastn, tblastx};
 
-// NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46,51,75
 // ```c++
 // const string kArgQuery("query");
 // const string kArgSubject("subject");
@@ -67,11 +67,40 @@ where
     S: Into<OsString>,
 {
     let command = T::command();
-    let mut input = argv.into_iter().map(Into::into);
+    let tokens: Vec<OsString> = argv.into_iter().map(Into::into).collect();
+    // NCBI's application reads its own toolkit words before the program's arguments.
+    if let Some(program) = tokens
+        .get(1)
+        .and_then(|token| token.to_str())
+        .and_then(|text| command.find_subcommand(text))
+        .filter(|program| {
+            matches!(
+                program.get_name(),
+                "blastn" | "blastp" | "tblastn" | "tblastx"
+            )
+        })
+    {
+        if let Some(word) = ncbi_preparsed_toolkit_word(&tokens[2..]) {
+            let name = word.trim_start_matches('-');
+            let name = name.split_once('=').map_or(name, |(key, _)| key);
+            return Err(unknown_option_error(program, name, word));
+        }
+    }
+    let mut input = tokens.into_iter();
     let mut translated = vec![input.next().unwrap_or_else(|| "losat".into())];
     let mut scope = &command;
+    // The first option of the four programs whose value is not UTF-8, rejected once the
+    // command line parses (`non_utf8_value_error`).
+    let mut non_utf8_value: Option<(&clap::Command, String)> = None;
     while let Some(token) = input.next() {
-        let text = token.to_str().unwrap_or("");
+        // In the four programs a word that is not UTF-8 keeps its key readable
+        // (`-name=value` with a value that is not UTF-8 is read below).
+        let lossy = token.to_string_lossy();
+        let text: &str = if is_ncbi_search_program(scope) {
+            &lossy
+        } else {
+            token.to_str().unwrap_or("")
+        };
         if let Some(subcommand) = scope.find_subcommand(text) {
             scope = subcommand;
             translated.push(token);
@@ -85,6 +114,28 @@ where
             translated.push(token);
             continue;
         }
+        // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:2866-2872
+        // ```c++
+        //     if (*n_plain == kMax_UInt || m_PositionalMode == ePositionalMode_Loose) {
+        //         // Check for the s_ArgDelimiter delimiter
+        //         if (arg1.compare(s_ArgDelimiter) == 0) {
+        //             if (*n_plain == kMax_UInt) {
+        //                 *n_plain = 0;  // pos.args started
+        //             }
+        //             return false;
+        // ```
+        // `--` starts NCBI's positional arguments, which the BLAST programs do not have:
+        // a last `--` changes nothing, and a word after it is an extra positional
+        // argument (NCBI's USAGE error; LOSAT's parser error, exception 1).
+        if text == "--"
+            && input.len() == 0
+            && matches!(
+                scope.get_name(),
+                "blastn" | "blastp" | "tblastn" | "tblastx"
+            )
+        {
+            continue;
+        }
         let key = text.strip_prefix('-').filter(|key| !key.starts_with('-'));
         let (name, inline) = key
             .unwrap_or("")
@@ -94,48 +145,40 @@ where
             .get_arguments()
             .find(|arg| arg.get_long() == Some(name))
         else {
-            // NCBI c++/src/algo/blast/blastinput/tblastn_args.cpp:64-129:
-            // m_Args.push_back(arg) registers shared, formatting, DB, and PSI groups.
-            // The named NCBI options below have no Stage B Rust behavior.
-            // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:62-66
-            // ```c++
-            //     m_BlastDbArgs.Reset(new CBlastDatabaseArgs);
-            //     m_BlastDbArgs->SetDatabaseMaskingSupport(true);
-            //     m_BlastDbArgs->SetIPGFilteringSupport(true);
-            //     arg.Reset(m_BlastDbArgs);
-            //     m_Args.push_back(arg);
-            // ```
-            // Product scope explicitly refuses unported NCBI capabilities.
-            if scope.get_name() == "blastx" && is_unported_blastx_arg(name) {
-                return Err(clap::Error::raw(ErrorKind::InvalidValue,
-                    format!("unsupported BLASTX option '-{name}': outside the declared local FASTA scope")));
-            }
-            if scope.get_name() == "blastn" && is_unported_blastn_arg(name) {
-                return Err(clap::Error::raw(
-                    ErrorKind::InvalidValue,
-                    format!("the NCBI BLAST+ option -{name} is not supported by LOSAT's BLASTN"),
-                ));
-            }
-            if scope.get_name() == "tblastn" && is_unported_tblastn_arg(name) {
-                return Err(clap::Error::raw(
-                    ErrorKind::InvalidValue,
-                    format!("unsupported TBLASTN option '-{name}': Rust behavior is unimplemented"),
-                ));
-            }
-            return Err(clap::Error::raw(
-                ErrorKind::UnknownArgument,
-                format!("unknown option or argument '{text}'; use -help for CLI v2 syntax"),
-            ));
+            return Err(unknown_option_error(scope, name, text));
         };
         if arg.get_action().takes_values() {
             let value = match inline {
-                Some(value) => OsString::from(value),
+                Some(value) if token.to_str().is_some() => OsString::from(value),
+                Some(_) => inline_value(&token, name),
                 None => input.next().ok_or_else(|| {
                     clap::Error::raw(
                         ErrorKind::InvalidValue,
                         format!("-{name} requires one value"),
                     )
                 })?,
+            };
+            // NCBI reference: c++/src/corelib/ncbiargs.cpp:266-270
+            // ```c++
+            // inline CArg_String::CArg_String(const string& name, const string& value)
+            //     : CArgValue(name)
+            // {
+            //     m_StringList.push_back(value);
+            // }
+            // ```
+            // NCBI keeps the bytes of an option's value. LOSAT's options are UTF-8 strings,
+            // so a value that is not UTF-8 is rejected explicitly, after the parser: NCBI's
+            // USAGE errors and `-help` come first, as for any value. The parser reads the
+            // value with U+FFFD in place of the bytes. The file names keep their bytes and
+            // have their own check where the files are opened (`check_utf8_file_name`).
+            let value = if value.to_str().is_none()
+                && !matches!(name, "query" | "subject" | "out")
+                && is_ncbi_search_program(scope)
+            {
+                non_utf8_value.get_or_insert_with(|| (scope, name.to_string()));
+                OsString::from(value.to_string_lossy().into_owned())
+            } else {
+                value
             };
             let mut internal = OsString::from(format!("--{name}="));
             internal.push(value);
@@ -150,10 +193,54 @@ where
             translated.push(format!("--{name}").into());
         }
     }
-    T::try_parse_from(translated)
+    let parsed = T::try_parse_from(translated)?;
+    match non_utf8_value {
+        Some((scope, name)) => Err(non_utf8_value_error(scope, &name)),
+        None => Ok(parsed),
+    }
 }
 
-// NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94
+/// The value of a word `-name=value` that is not UTF-8: its bytes after the `=` that
+/// follows `-name` (`try_parse_from`; `name` is an argument's ASCII name).
+fn inline_value(token: &std::ffi::OsStr, name: &str) -> OsString {
+    let bytes = token.as_encoded_bytes();
+    let start = 1 + name.len() + 1;
+    debug_assert_eq!(bytes.get(start - 1), Some(&b'='));
+    // SAFETY: `start` is just after an ASCII `=`, a split point that
+    // `OsStr::from_encoded_bytes_unchecked` allows (after a valid non-empty UTF-8 substring).
+    unsafe { std::ffi::OsStr::from_encoded_bytes_unchecked(&bytes[start..]) }.to_os_string()
+}
+
+/// Whether `scope` is one of the programs whose command lines follow NCBI's (BLASTX keeps
+/// its own until SX).
+fn is_ncbi_search_program(scope: &clap::Command) -> bool {
+    matches!(
+        scope.get_name(),
+        "blastn" | "blastp" | "tblastn" | "tblastx"
+    )
+}
+
+/// The explicit rejection of an option's value that is not UTF-8 (`try_parse_from`).
+///
+/// NCBI reference: c++/src/corelib/ncbiargs.cpp:266-270
+/// ```c++
+/// inline CArg_String::CArg_String(const string& name, const string& value)
+///     : CArgValue(name)
+/// {
+///     m_StringList.push_back(value);
+/// }
+/// ```
+fn non_utf8_value_error(scope: &clap::Command, name: &str) -> clap::Error {
+    clap::Error::raw(
+        ErrorKind::InvalidUtf8,
+        format!(
+            "the value of -{name} is not UTF-8; NCBI BLAST+ reads the bytes of an option's value, which is not supported by LOSAT's {}",
+            scope.get_name().to_uppercase()
+        ),
+    )
+}
+
+// NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:107,143
 // ```c++
 // const string kArgWordSize("word_size");
 // const string kArgCompBasedStats("comp_based_stats");
@@ -181,7 +268,7 @@ pub fn render_message(error: &clap::Error) -> String {
         .replace("-V, --version", "--version")
 }
 
-// NCBI reference: c++/src/algo/blast/blastinput/tblastn_args.cpp:64-129
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastn_args.cpp:63-125
 // ```c++
 // m_BlastDbArgs.Reset(new CBlastDatabaseArgs);
 // arg.Reset(new CGenericSearchArgs(kQueryIsProtein));
@@ -234,7 +321,6 @@ fn is_unported_blastn_arg(name: &str) -> bool {
             | "off_diagonal_range"
             | "parse_deflines"
             | "qcov_hsp_perc"
-            | "query_loc"
             | "remote"
             | "searchsp"
             | "seqidlist"
@@ -243,11 +329,8 @@ fn is_unported_blastn_arg(name: &str) -> bool {
             | "sorthits"
             | "sorthsps"
             | "strand"
-            | "subject_loc"
             | "taxidlist"
             | "taxids"
-            | "template_length"
-            | "template_type"
             | "ungapped"
             | "use_index"
             | "version"
@@ -260,47 +343,325 @@ fn is_unported_blastn_arg(name: &str) -> bool {
     )
 }
 
-// Names are from the pinned 2.17.0+ -help and have no implemented Rust path yet.
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastp_args.cpp:44-50
+// ```c++
+// CBlastpAppArgs::CBlastpAppArgs()
+// {
+//     CRef<IBlastCmdLineArgs> arg;
+//     static const string kProgram("blastp");
+//     arg.Reset(new CProgramDescriptionArgs(kProgram, "Protein-Protein BLAST"));
+//     const bool kQueryIsProtein = true;
+//     bool const kFilterByDefault = false;
+// ```
+// The options of NCBI blastp 2.17.0+ (-help) that LOSAT's BLASTP does not implement
+// (AGENTS.md rule 2: explicit unsupported errors).
+fn is_unported_blastp_arg(name: &str) -> bool {
+    matches!(
+        name,
+        "best_hit_overhang"
+            | "best_hit_score_edge"
+            | "culling_limit"
+            | "db"
+            | "db_hard_mask"
+            | "db_soft_mask"
+            | "dbsize"
+            | "entrez_query"
+            | "export_search_strategy"
+            | "gilist"
+            | "h"
+            | "html"
+            | "import_search_strategy"
+            | "ipglist"
+            | "lcase_masking"
+            | "line_length"
+            | "mt_mode"
+            | "negative_gilist"
+            | "negative_ipglist"
+            | "negative_seqidlist"
+            | "negative_taxidlist"
+            | "negative_taxids"
+            | "no_taxid_expansion"
+            | "num_alignments"
+            | "num_descriptions"
+            | "parse_deflines"
+            | "qcov_hsp_perc"
+            | "remote"
+            | "searchsp"
+            | "seqidlist"
+            | "show_gis"
+            | "soft_masking"
+            | "sorthits"
+            | "sorthsps"
+            | "subject_besthit"
+            | "taxidlist"
+            | "taxids"
+            | "version"
+            | "xdrop_gap"
+            | "xdrop_gap_final"
+            | "xdrop_ungap"
+    )
+}
+
+// The rejection of an option that a program does not have: NCBI's options that LOSAT
+// has not ported, the NCBI C++ Toolkit options, and the rest (unknown to NCBI too).
+fn unknown_option_error(scope: &clap::Command, name: &str, text: &str) -> clap::Error {
+    // NCBI c++/src/algo/blast/blastinput/tblastn_args.cpp:64-129:
+    // m_Args.push_back(arg) registers shared, formatting, DB, and PSI groups.
+    // The named NCBI options below have no Stage B Rust behavior.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:62-66
+    // ```c++
+    //     m_BlastDbArgs.Reset(new CBlastDatabaseArgs);
+    //     m_BlastDbArgs->SetDatabaseMaskingSupport(true);
+    //     m_BlastDbArgs->SetIPGFilteringSupport(true);
+    //     arg.Reset(m_BlastDbArgs);
+    //     m_Args.push_back(arg);
+    // ```
+    // Product scope explicitly refuses unported NCBI capabilities.
+    if scope.get_name() == "blastx" && is_unported_blastx_arg(name) {
+        return clap::Error::raw(
+            ErrorKind::InvalidValue,
+            format!("unsupported BLASTX option '-{name}': outside the declared local FASTA scope"),
+        );
+    }
+    if scope.get_name() == "blastn" && is_unported_blastn_arg(name) {
+        return clap::Error::raw(
+            ErrorKind::InvalidValue,
+            format!("the NCBI BLAST+ option -{name} is not supported by LOSAT's BLASTN"),
+        );
+    }
+    if scope.get_name() == "blastp" && is_unported_blastp_arg(name) {
+        return clap::Error::raw(
+            ErrorKind::InvalidValue,
+            format!("the NCBI BLAST+ option -{name} is not supported by LOSAT's BLASTP"),
+        );
+    }
+    if let Some(program) = ["blastn", "blastp", "tblastn", "tblastx"]
+        .into_iter()
+        .find(|program| scope.get_name() == *program)
+        .filter(|_| is_ncbi_toolkit_arg(name))
+    {
+        return clap::Error::raw(
+            ErrorKind::InvalidValue,
+            format!(
+                "the NCBI C++ Toolkit option -{name} is not supported by LOSAT's {}",
+                program.to_ascii_uppercase()
+            ),
+        );
+    }
+    if scope.get_name() == "tblastx" && is_unported_tblastx_arg(name) {
+        return clap::Error::raw(
+            ErrorKind::InvalidValue,
+            format!("the NCBI BLAST+ option -{name} is not supported by LOSAT's TBLASTX"),
+        );
+    }
+    if scope.get_name() == "tblastn" && is_unported_tblastn_arg(name) {
+        return clap::Error::raw(
+            ErrorKind::InvalidValue,
+            format!("the NCBI BLAST+ option -{name} is not supported by LOSAT's TBLASTN"),
+        );
+    }
+    clap::Error::raw(
+        ErrorKind::UnknownArgument,
+        format!("unknown option or argument '{text}'; use -help for CLI v2 syntax"),
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:926-1001
+// ```c++
+//         for (int i = 1;  i < argc;  i++) {
+//             if ( !argv[i] ) {
+//                 continue;
+//             }
+//             if ( NStr::strcmp(argv[i], s_ArgDelimiter) == 0 ) {
+//                 skip = true;
+//             }
+//             if (skip) {
+//                 v[real_arg_index++] = argv[i];
+//                 continue;
+//             }
+//             // Log file - ignore if diag is eDS_User - the user wants to
+//             // take care about logging.
+//             if ( diag != eDS_User  &&
+//                 NStr::strcmp(argv[i], s_ArgLogFile) == 0 ) {
+//             ...
+//             } else if ( NStr::strcmp(argv[i], s_ArgCfgFile) == 0 ) {
+//             ...
+//             else if (NStr::StartsWith(argv[i], s_ArgCfgFile)) {
+//             ...
+//             } else if ( NStr::strcmp(argv[i], s_ArgVersion) == 0 ) {
+//                 delete[] v;
+//                 // Print VERSION
+//             ...
+//             } else if ( NStr::strcmp(argv[i], s_ArgDryRun) == 0 ) {
+//                 m_DryRun = true;
+// ```
+// NCBI's application reads these words anywhere before `--`, also where another option
+// expects its value: `-out -version` prints the version, and `-out -dryrun` loses the
+// value of `-out`. LOSAT rejects each of them (decision D9), so the first one found is
+// rejected there as it is in an option's place, rather than read as the value.
+fn ncbi_preparsed_toolkit_word(tokens: &[OsString]) -> Option<&str> {
+    for token in tokens {
+        let text = token.to_str().unwrap_or("");
+        if text == "--" {
+            return None;
+        }
+        if matches!(
+            text,
+            "-logfile"
+                | "-conffile"
+                | "-version"
+                | "-version-full"
+                | "-version-full-xml"
+                | "-version-full-json"
+                | "-dryrun"
+        ) || text.starts_with("-conffile=")
+        {
+            return Some(text);
+        }
+    }
+    None
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:78-88
+// ```c++
+// static const char* s_AutoHelpShowAll  = "help-full";
+// static const char* s_AutoHelpXml  = "xmlhelp";
+// static const char* s_ExtraName    = "....";
+//
+// const char* s_ArgLogFile         = "-logfile";
+// const char* s_ArgCfgFile         = "-conffile";
+// const char* s_ArgVersion         = "-version";
+// const char* s_ArgFullVersion     = "-version-full";
+// const char* s_ArgFullVersionXml  = "-version-full-xml";
+// const char* s_ArgFullVersionJson = "-version-full-json";
+// const char* s_ArgDryRun          = "-dryrun";
+// ```
+// The standard options of an NCBI C++ Toolkit application, which NCBI's BLAST+ programs
+// accept without listing them in -help.
+fn is_ncbi_toolkit_arg(name: &str) -> bool {
+    matches!(
+        name,
+        "help-full"
+            | "xmlhelp"
+            | "logfile"
+            | "conffile"
+            | "version-full"
+            | "version-full-xml"
+            | "version-full-json"
+            | "dryrun"
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastn_args.cpp:44-50
+// ```c++
+// CTblastnAppArgs::CTblastnAppArgs()
+// {
+//     CRef<IBlastCmdLineArgs> arg;
+//     static const string kProgram("tblastn");
+//     arg.Reset(new CProgramDescriptionArgs(kProgram,
+//                                   "Protein Query-Translated Subject BLAST"));
+// ```
+// The options of NCBI tblastn 2.17.0+ (-help) that LOSAT's TBLASTN does not implement
+// (AGENTS.md rule 2: explicit unsupported errors).
 fn is_unported_tblastn_arg(name: &str) -> bool {
     matches!(
         name,
-        "query_loc"
-            | "show_gis"
-            | "num_descriptions"
-            | "num_alignments"
-            | "line_length"
-            | "html"
-            | "sorthits"
-            | "sorthsps"
-            | "lcase_masking"
+        "best_hit_overhang"
+            | "best_hit_score_edge"
+            | "culling_limit"
+            | "db"
+            | "db_hard_mask"
+            | "db_soft_mask"
+            | "dbsize"
+            | "entrez_query"
+            | "export_search_strategy"
             | "gilist"
-            | "seqidlist"
+            | "h"
+            | "html"
+            | "import_search_strategy"
+            | "in_pssm"
+            | "line_length"
+            | "max_hsps"
+            | "mt_mode"
             | "negative_gilist"
             | "negative_seqidlist"
-            | "taxids"
-            | "negative_taxids"
-            | "taxidlist"
             | "negative_taxidlist"
+            | "negative_taxids"
             | "no_taxid_expansion"
-            | "entrez_query"
-            | "db_soft_mask"
-            | "db_hard_mask"
-            | "qcov_hsp_perc"
-            | "max_hsps"
-            | "culling_limit"
-            | "best_hit_overhang"
-            | "best_hit_score_edge"
-            | "subject_besthit"
-            | "dbsize"
-            | "searchsp"
-            | "import_search_strategy"
-            | "export_search_strategy"
-            | "xdrop_ungap"
-            | "xdrop_gap"
-            | "xdrop_gap_final"
+            | "num_alignments"
+            | "num_descriptions"
             | "parse_deflines"
-            | "mt_mode"
+            | "qcov_hsp_perc"
+            | "remote"
+            | "searchsp"
+            | "seqidlist"
+            | "show_gis"
+            | "sorthits"
+            | "sorthsps"
+            | "subject_besthit"
+            | "taxidlist"
+            | "taxids"
             | "use_sw_tback"
+            | "version"
+            | "xdrop_ungap"
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastx_args.cpp:44-50
+// ```c++
+// CTblastxAppArgs::CTblastxAppArgs()
+// {
+//     CRef<IBlastCmdLineArgs> arg;
+//     static const string kProgram("tblastx");
+//     arg.Reset(new CProgramDescriptionArgs(kProgram,
+//                                   "Translated Query-Translated Subject BLAST"));
+//     const bool kQueryIsProtein = false;
+// ```
+// The options of NCBI tblastx 2.17.0+ (-help) that LOSAT's TBLASTX does not implement
+// (AGENTS.md rule 2: explicit unsupported errors).
+fn is_unported_tblastx_arg(name: &str) -> bool {
+    matches!(
+        name,
+        "best_hit_overhang"
+            | "best_hit_score_edge"
+            | "db"
+            | "db_hard_mask"
+            | "db_soft_mask"
+            | "dbsize"
+            | "entrez_query"
+            | "export_search_strategy"
+            | "gilist"
+            | "h"
+            | "html"
+            | "import_search_strategy"
+            | "lcase_masking"
+            | "line_length"
+            | "matrix"
+            | "max_hsps"
+            | "max_intron_length"
+            | "negative_gilist"
+            | "negative_seqidlist"
+            | "negative_taxidlist"
+            | "negative_taxids"
+            | "no_taxid_expansion"
+            | "num_alignments"
+            | "num_descriptions"
+            | "parse_deflines"
+            | "qcov_hsp_perc"
+            | "remote"
+            | "searchsp"
+            | "seqidlist"
+            | "show_gis"
+            | "soft_masking"
+            | "sorthits"
+            | "sorthsps"
+            | "strand"
+            | "subject_besthit"
+            | "sum_stats"
+            | "taxidlist"
+            | "taxids"
+            | "version"
+            | "xdrop_ungap"
     )
 }
 
@@ -528,5 +889,90 @@ pub fn exit_on_native_error(error: &anyhow::Error) {
             std::process::abort();
         }
         std::process::exit(e.exit);
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::os::unix::ffi::OsStringExt;
+
+    fn blastn_argv(words: Vec<OsString>) -> Vec<OsString> {
+        let mut argv = vec![
+            OsString::from("losat"),
+            OsString::from("blastn"),
+            OsString::from("-query"),
+            OsString::from("q.fa"),
+            OsString::from("-subject"),
+            OsString::from("s.fa"),
+        ];
+        argv.extend(words);
+        argv
+    }
+
+    // NCBI c++/src/corelib/ncbiargs.cpp:266-270 keeps the bytes of a string value; LOSAT
+    // rejects a value that is not UTF-8 explicitly, in both spellings of an option.
+    #[test]
+    fn option_values_that_are_not_utf8_are_rejected_explicitly() {
+        for (option, value) in [
+            ("-query_loc", vec![0xff]),
+            ("-subject_loc", b"1-\xff".to_vec()),
+            ("-dust", vec![0xfe]),
+        ] {
+            let separate = blastn_argv(vec![
+                OsString::from(option),
+                OsString::from_vec(value.clone()),
+            ]);
+            let mut inline = format!("{option}=").into_bytes();
+            inline.extend(&value);
+            let joined = blastn_argv(vec![OsString::from_vec(inline)]);
+            for argv in [separate, joined] {
+                let error = try_parse_from::<Cli, _, _>(argv).unwrap_err();
+                let message = render_message(&error);
+                assert!(
+                    message.contains(&format!("the value of {option} is not UTF-8"))
+                        && message.contains("not supported by LOSAT's BLASTN"),
+                    "{message}"
+                );
+            }
+        }
+    }
+
+    // The rejection comes after the parser, as NCBI reads the value only after its
+    // arguments parse: `-help` and the parser's errors come first.
+    #[test]
+    fn help_and_parser_errors_come_before_a_value_that_is_not_utf8() {
+        let mut argv = vec![OsString::from("losat"), OsString::from("blastn")];
+        argv.push(OsString::from("-help"));
+        argv.push(OsString::from("-query_loc"));
+        argv.push(OsString::from_vec(vec![0xff]));
+        let error = try_parse_from::<Cli, _, _>(argv).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::DisplayHelp);
+        let argv = blastn_argv(vec![
+            OsString::from("-query_loc"),
+            OsString::from_vec(vec![0xff]),
+            OsString::from("-no_such_option"),
+        ]);
+        let message = render_message(&try_parse_from::<Cli, _, _>(argv).unwrap_err());
+        assert!(!message.contains("not UTF-8"), "{message}");
+    }
+
+    // A file name keeps its bytes in both spellings (`check_utf8_file_name` reads it).
+    #[test]
+    fn file_names_keep_their_bytes_in_both_spellings() {
+        let name = b"q\xff.fa".to_vec();
+        let mut inline = b"-query=".to_vec();
+        inline.extend(&name);
+        let argv = vec![
+            OsString::from("losat"),
+            OsString::from("blastn"),
+            OsString::from_vec(inline),
+            OsString::from("-subject"),
+            OsString::from("s.fa"),
+        ];
+        let Commands::Blastn(args) = try_parse_from::<Cli, _, _>(argv).unwrap().command else {
+            panic!("not blastn");
+        };
+        assert_eq!(args.query.into_os_string(), OsString::from_vec(name));
     }
 }

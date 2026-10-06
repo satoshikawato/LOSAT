@@ -143,6 +143,11 @@ pub struct BlastpPairwiseQuery {
     pub query_length: usize,
     pub ungapped_karlin: KarlinParams,
     pub effective_search_space: i64,
+    /// Whether the query's Karlin-Altschul parameters could be computed (`is_valid`).
+    pub valid: bool,
+    /// Whether every query of the query's batch is invalid, so NCBI did not search the
+    /// batch (local_blast.cpp:177-207: -1 parameters and no Seq-align set).
+    pub batch_skipped: bool,
 }
 
 /// NCBI BLASTP pairwise run-level footer/header data.
@@ -170,10 +175,15 @@ pub struct BlastpPairwiseReport {
     pub matrix_name: String,
     pub gap_open: i32,
     pub gap_extend: i32,
-    pub word_threshold: i32,
+    /// `GetWordThreshold()`, a double.
+    pub word_threshold: f64,
     pub window_size: i32,
     pub gapped_karlin: KarlinParams,
     pub gumbel: BlastGumbelBlk,
+    /// Subjects in the description table and with alignments, per query (NCBI's
+    /// `m_NumDescriptions` and `m_NumAlignments`).
+    pub num_descriptions: usize,
+    pub num_alignments: usize,
 }
 
 // =============================================================================
@@ -274,17 +284,22 @@ pub fn write_hsp_info<W: Write>(
     let bit_score_str = format_bitscore_ncbi(h.bit_score);
     let evalue_str = format_evalue_ncbi(h.e_value);
     if config.program == "blastp" {
-        // NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:3578-3604
+        // NCBI reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp:3600-3603
         // ```c
-        // out << " Score = " << bit_score
-        //     << " bits (" << score << "),  Expect = " << evalue;
-        // ...
-        // out << ", Method: Compositional matrix adjust.";
+        //             if (aln_vec_info->comp_adj_method == 1)
+        //             out << ", Method: Composition-based stats.";
+        //             else if (aln_vec_info->comp_adj_method == 2)
+        //             out << ", Method: Compositional matrix adjust.";
         // ```
+        let method = match hit.comp_adjust_method {
+            Some(1) => ", Method: Composition-based stats.",
+            Some(2) => ", Method: Compositional matrix adjust.",
+            _ => "",
+        };
         writeln!(
             writer,
-            " Score = {} bits ({}),  Expect = {}, Method: Compositional matrix adjust.",
-            bit_score_str, h.raw_score, evalue_str
+            " Score = {} bits ({}),  Expect = {}{}",
+            bit_score_str, h.raw_score, evalue_str, method
         )?;
     } else {
         writeln!(
@@ -553,12 +568,14 @@ fn write_alignment_with_sequences<W: Write>(
         //                 if (m_AlignOption & eShowMiddleLine){
         //                     middle_line[i] = ' ';
         // ```
-        // The nucleotide rows may carry lowercase masking, which NCBI applies only when it
-        // prints a row (showalign.cpp:2495-2521), so they are compared without case.
+        // The rows may carry lowercase masking, which NCBI applies only when it prints a
+        // row (showalign.cpp:2495-2521), so they are compared without case, and the protein
+        // middle line shows the uppercase residue.
         let middle: String = q_chars[offset..end]
             .iter()
             .zip(s_chars[offset..end].iter())
             .map(|(q, s)| {
+                let q = &q.to_ascii_uppercase();
                 if nucleotide {
                     if q.eq_ignore_ascii_case(s) {
                         '|'
@@ -1179,6 +1196,26 @@ fn write_flatfile_wrapped(writer: &mut impl Write, text: &str, width: usize) -> 
     Ok(())
 }
 
+/// The outfmt 0 prolog of blastp (the version, the references and the database), which
+/// NCBI writes before it reads the first query batch (blast_format.cpp, `PrintProlog`).
+pub fn write_blastp_pairwise_prolog<W: Write>(
+    writer: &mut W,
+    version: &str,
+    database_name: &str,
+    database_num_sequences: usize,
+    database_total_letters: usize,
+) -> io::Result<()> {
+    write_blastp_pairwise_intro(writer, version)?;
+    // The blank lines before the first query are the query's (as TBLASTX's prolog).
+    write_blastp_database_header_spacing(
+        writer,
+        database_name,
+        database_num_sequences,
+        database_total_letters,
+        1,
+    )
+}
+
 fn write_blastp_database_header<W: Write>(
     writer: &mut W,
     database_name: &str,
@@ -1449,11 +1486,12 @@ fn write_blastp_final_footer<W: Write>(
         "Gap Penalties: Existence: {}, Extension: {}",
         report.gap_open, report.gap_extend
     )?;
-    if report.word_threshold != 0 {
+    if report.word_threshold != 0.0 {
+        // `GetWordThreshold()` is a double, written with the stream's default format.
         writeln!(
             writer,
             "Neighboring words threshold: {}",
-            report.word_threshold
+            cpp_default_double(report.word_threshold)
         )?;
     }
     if report.window_size != 0 {
@@ -1517,16 +1555,21 @@ pub fn write_blastp_pairwise_report<W: Write>(
     subject_ids: &[Arc<str>],
     report: &BlastpPairwiseReport,
     mut probe: Option<&mut FormatProbe<'_>>,
+    mut warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
+    epilog: bool,
 ) -> io::Result<()> {
     let mut buffered = io::BufWriter::new(writer);
     let writer = &mut buffered;
 
     write_blastp_pairwise_intro(writer, &report.version)?;
-    write_blastp_database_header(
+    // The prolog ends with one blank line; each query's preamble starts with two
+    // (blast_format.cpp:1491), after the query's warnings.
+    write_blastp_database_header_spacing(
         writer,
         &report.database_name,
         report.database_num_sequences,
         report.database_total_letters,
+        1,
     )?;
 
     // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:1411
@@ -1543,17 +1586,41 @@ pub fn write_blastp_pairwise_report<W: Write>(
     }
 
     for (q_idx, query) in queries.iter().enumerate() {
+        // The query's warnings come before its preamble (`QueryWarnings`).
+        if let Some(warnings) = warnings.as_deref_mut() {
+            warnings.before_query(q_idx, writer)?;
+        }
+        // NCBI blast_format.cpp:1491: m_Outfile << "\n\n";
+        writeln!(writer)?;
+        writeln!(writer)?;
         write_blastp_query_header(writer, &query.query_name, query.query_length)?;
         let query_hits = &hits_by_query[q_idx];
         if query_hits.is_empty() {
             write_no_hits_found(writer)?;
-            write_blastp_query_footer(
-                writer,
-                query.ungapped_karlin,
-                report.gapped_karlin,
-                report.gumbel,
-                query.effective_search_space,
-            )?;
+            // NCBI c++/src/algo/blast/api/local_blast.cpp:177-180,204-208:
+            // if (m_PrelimSearch->CheckInternalData() != 0)
+            //     new CBlastAncillaryData(tmp_pair, tmp_pair, tmp_pair, 0);
+            // The all-invalid batch uses -1 sentinel blocks. An invalid query
+            // within a searched batch has null blocks (blast_results.cpp:82-103),
+            // so only the blank lines and the zero search space are written
+            // (blast_format.cpp:445-477), as TBLASTN does.
+            if query.batch_skipped {
+                write_tblastn_unsearched_query_footer_spacing(writer, false)?;
+            } else if !query.valid {
+                writeln!(writer)?;
+                writeln!(writer)?;
+                writeln!(writer)?;
+                writeln!(writer, "Effective search space used: 0")?;
+            } else {
+                write_blastp_query_footer_spacing(
+                    writer,
+                    query.ungapped_karlin,
+                    report.gapped_karlin,
+                    report.gumbel,
+                    query.effective_search_space,
+                    false,
+                )?;
+            }
             continue;
         }
 
@@ -1573,12 +1640,32 @@ pub fn write_blastp_pairwise_report<W: Write>(
                 .push(hsp_index);
         }
 
-        write_subject_summary_table(writer, &subject_order, &subject_hits, subject_ids)?;
+        // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:606-611
+        // ```c++
+        //     CShowBlastDefline showdef(*aln_set, *m_Scope,
+        //                               defline_length == -1 ? kFormatLineLength:defline_length,
+        //                               m_NumSummary + additional);
+        // ```
+        // The table follows `x_InitDeflineTable` (`write_blastn_description_table`): the
+        // subject's highest bit score and that HSP's E-value, and the protein title.
+        let described = &subject_order[..subject_order.len().min(report.num_descriptions)];
+        write_blastn_description_table(
+            writer,
+            described,
+            subject_order.len() <= report.num_descriptions,
+            &subject_hits,
+            subject_ids,
+            false,
+            true,
+        )?;
         // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:1520-1589
         // x_DisplayDeflines(aln_set, ...); ... display.DisplaySeqalign(m_Outfile);
         writeln!(writer)?;
 
-        for s_idx in subject_order {
+        // NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:1014-1040
+        // (PruneSeqalign keeps the alignments of the first `m_NumAlignments` subjects).
+        let aligned = &subject_order[..subject_order.len().min(report.num_alignments)];
+        for &s_idx in aligned {
             let subject_id = subject_ids
                 .get(s_idx as usize)
                 .map(|id| id.as_ref())
@@ -1605,12 +1692,16 @@ pub fn write_blastp_pairwise_report<W: Write>(
                 writer.flush()?;
                 probe.subject_begin(first_index);
             }
-            write_subject_header(
-                writer,
-                subject_id,
-                first_hit.subject_title.as_deref(),
-                first_hit.subject_length,
-            )?;
+            // NCBI reference: c++/src/objtools/align_format/showalign.cpp:2273
+            // ```c++
+            //             alnDispParams->title = CDeflineGenerator().GenerateDefline(bsp_handle);
+            // ```
+            // The subject (a protein sequence) is shown with its title (`defline.rs`).
+            let heading = super::defline::ncbi_protein_title(
+                &subject_defline(subject_id, first_hit.subject_title.as_deref()),
+                false,
+            );
+            write_subject_header(writer, &heading, None, first_hit.subject_length)?;
             if let Some(probe) = probe.as_mut() {
                 writer.flush()?;
                 probe.subject_end(first_index);
@@ -1638,14 +1729,32 @@ pub fn write_blastp_pairwise_report<W: Write>(
             }
         }
 
-        write_blastp_query_footer(
+        write_blastp_query_footer_spacing(
             writer,
             query.ungapped_karlin,
             report.gapped_karlin,
             report.gumbel,
             query.effective_search_space,
+            false,
         )?;
     }
+
+    // NCBI reference: c++/src/app/blast/blastp_app.cpp:294-295
+    // ```c++
+    //         BLAST_PROF_START( APP.POST );
+    //         formatter.PrintEpilog(opt);
+    // ```
+    // A search that stops at a query batch (`Empty CBlastQueryVector` with `-query_loc`)
+    // writes no epilog.
+    if !epilog {
+        return writer.flush();
+    }
+
+    // The blank lines before the epilog (blast_format.cpp:2249).
+
+    writeln!(writer)?;
+
+    writeln!(writer)?;
 
     write_blastp_final_footer(writer, report)?;
     writer.flush()
@@ -1690,6 +1799,11 @@ pub struct BlastnPairwiseReport {
     pub penalty: i32,
     pub gap_open: i32,
     pub gap_extend: i32,
+    /// The task is megablast or blastn, for which a gap extension cost of 0 is printed as
+    /// the PMID 10890397 value (NCBI compares the task name, `m_Program`).
+    pub zero_gap_extension_formula: bool,
+    /// The two-hit window (`options.GetWindowSize()`): 40 for dc-megablast.
+    pub window_size: usize,
     /// Subjects in the description table and with alignments, per query.
     pub num_descriptions: usize,
     pub num_alignments: usize,
@@ -1787,6 +1901,7 @@ fn write_blastn_description_table<W: Write>(
     subject_hits: &std::collections::HashMap<u32, Vec<&PairwiseHit>>,
     subject_ids: &[Arc<str>],
     show_sum_n: bool,
+    protein: bool,
 ) -> io::Result<()> {
     let rows: Vec<(u32, &PairwiseHit, f64, i32)> = described
         .iter()
@@ -1862,7 +1977,11 @@ fn write_blastn_description_table<W: Write>(
         // NCBI reference: c++/src/objtools/align_format/showdefline.cpp:498
         // The description keeps the prefixes (`fLeavePrefixSuffix`, `defline.rs`).
         let defline = subject_defline(subject_id, best.subject_title.as_deref());
-        let label = super::defline::ncbi_nucleotide_title(&defline, true);
+        let label = if protein {
+            super::defline::ncbi_protein_title(&defline, true)
+        } else {
+            super::defline::ncbi_nucleotide_title(&defline, true)
+        };
         // NCBI reference: c++/src/objtools/align_format/showdefline.cpp:915-918,930
         // ```c++
         //         if(line_component.size()+line_length > m_LineLen){
@@ -2053,7 +2172,31 @@ fn write_blastn_final_footer<W: Write>(
         "Matrix: blastn matrix {} {}",
         report.reward, report.penalty
     )?;
-    let gap_extension = if report.gap_extend == 0 {
+    // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:2270-2288
+    // ```c
+    //     if (options.GetGappedMode() == true) {
+    //         double gap_extension = (double) options.GetGapExtensionCost();
+    //         if ((m_Program == "megablast" || m_Program == "blastn") && options.GetGapExtensionCost() == 0)
+    //         { // Formula from PMID 10890397 applies if both gap values are zero.
+    //                gap_extension = -2*options.GetMismatchPenalty() + options.GetMatchReward();
+    //                gap_extension /= 2.0;
+    //         }
+    //         m_Outfile << "Gap Penalties: Existence: "
+    //                 << options.GetGapOpeningCost() << ", Extension: "
+    //                 << gap_extension << "\n";
+    //     }
+    //     if (options.GetWordThreshold()) {
+    //         m_Outfile << "Neighboring words threshold: " <<
+    //                         options.GetWordThreshold() << "\n";
+    //     }
+    //     if (options.GetWindowSize()) {
+    //         m_Outfile << "Window for multiple hits: " <<
+    //                         options.GetWindowSize() << "\n";
+    //     }
+    // ```
+    // BLASTN's word threshold is 0 for every task (BLAST_WORD_THRESHOLD_BLASTN and
+    // BLAST_WORD_THRESHOLD_MEGABLAST, blast_options.h).
+    let gap_extension = if report.zero_gap_extension_formula && report.gap_extend == 0 {
         f64::from(-2 * report.penalty + report.reward) / 2.0
     } else {
         f64::from(report.gap_extend)
@@ -2062,7 +2205,11 @@ fn write_blastn_final_footer<W: Write>(
         writer,
         "Gap Penalties: Existence: {}, Extension: {}",
         report.gap_open, gap_extension
-    )
+    )?;
+    if report.window_size != 0 {
+        writeln!(writer, "Window for multiple hits: {}", report.window_size)?;
+    }
+    Ok(())
 }
 
 /// The start of the BLASTN report, which NCBI writes before it searches: the program
@@ -2215,6 +2362,7 @@ pub fn write_blastn_pairwise_report<W: Write>(
             &subject_hits,
             subject_ids,
             false,
+            false,
         )?;
         writeln!(writer)?;
 
@@ -2338,7 +2486,7 @@ pub struct TblastxPairwiseReport {
     pub database_num_sequences: usize,
     pub database_total_letters: usize,
     /// `-threshold` and `-window_size` (the epilog prints them when they are not 0).
-    pub word_threshold: i32,
+    pub word_threshold: f64,
     pub window_size: usize,
     /// Subjects in the description table and with alignments, per query.
     pub num_descriptions: usize,
@@ -2673,12 +2821,12 @@ fn write_tblastx_epilog<W: Write>(
         report.database_total_letters,
     )?;
     writeln!(writer, "Matrix: BLOSUM62")?;
-    if report.word_threshold != 0 {
+    if report.word_threshold != 0.0 {
         // `GetWordThreshold()` is a double, written with the stream's default format.
         writeln!(
             writer,
             "Neighboring words threshold: {}",
-            cpp_default_double(f64::from(report.word_threshold))
+            cpp_default_double(report.word_threshold)
         )?;
     }
     if report.window_size != 0 {
@@ -2699,6 +2847,18 @@ fn cpp_default_double(value: f64) -> String {
     }
     if value == 0.0 {
         return "0".to_string();
+    }
+    // glibc's `%g` of an infinity or a NaN.
+    if value.is_infinite() {
+        return if value < 0.0 { "-inf" } else { "inf" }.to_string();
+    }
+    if value.is_nan() {
+        return if value.is_sign_negative() {
+            "-nan"
+        } else {
+            "nan"
+        }
+        .to_string();
     }
     let scientific = format!("{value:.5e}");
     let (mantissa, exponent) = scientific.split_once('e').expect("exponent");
@@ -2830,6 +2990,7 @@ pub fn write_tblastx_pairwise_report<W: Write>(
             &subject_hits,
             subject_ids,
             true,
+            false,
         )?;
         writeln!(writer)?;
 
@@ -3297,6 +3458,25 @@ mod tests {
 // PrintProlog(); AcknowledgeBlastQuery(...); x_DisplayDeflines(...);
 // display.DisplaySeqalign(...); x_PrintOneQueryFooter(...);
 // This uses the local-subject database header and TBLASTN translated alignment.
+/// The outfmt 0 prolog of tblastn (the version, the references and the database), which
+/// NCBI writes before it reads the first query batch (as `write_tblastx_pairwise_prolog`).
+pub fn write_tblastn_pairwise_prolog<W: Write>(
+    writer: &mut W,
+    version: &str,
+    database_name: &str,
+    database_num_sequences: usize,
+    database_total_letters: usize,
+) -> io::Result<()> {
+    write_translated_pairwise_intro(writer, "TBLASTN", version)?;
+    write_blastp_database_header_spacing(
+        writer,
+        database_name,
+        database_num_sequences,
+        database_total_letters,
+        1,
+    )
+}
+
 pub fn write_tblastn_pairwise_report<W: Write>(
     hits: &[PairwiseHit],
     writer: &mut W,
@@ -3307,6 +3487,8 @@ pub fn write_tblastn_pairwise_report<W: Write>(
     subject_ids: &[Arc<str>],
     report: &BlastpPairwiseReport,
     mut probe: Option<&mut FormatProbe<'_>>,
+    mut warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
+    epilog: bool,
 ) -> io::Result<()> {
     // NCBI c++/src/algo/blast/api/local_blast.cpp:177-224:
     // an all-invalid Run() batch carries -1 Karlin sentinel blocks only for
@@ -3321,11 +3503,14 @@ pub fn write_tblastn_pairwise_report<W: Write>(
     // NCBI c++/src/algo/blast/format/blast_format.cpp:372-424:
     // BlastPrintVersionInfo(m_Program,...); BlastPrintReference(...);
     write_translated_pairwise_intro(&mut writer, "TBLASTN", &report.version)?;
-    write_blastp_database_header(
+    // The prolog ends with one blank line; each query's preamble starts with two
+    // (blast_format.cpp:1491), after the query's warnings.
+    write_blastp_database_header_spacing(
         &mut writer,
         &report.database_name,
         report.database_num_sequences,
         report.database_total_letters,
+        1,
     )?;
 
     // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:1411
@@ -3341,6 +3526,13 @@ pub fn write_tblastn_pairwise_report<W: Write>(
         }
     }
     for (q_idx, query) in queries.iter().enumerate() {
+        // The query's warnings come before its preamble (`QueryWarnings`).
+        if let Some(warnings) = warnings.as_deref_mut() {
+            warnings.before_query(q_idx, &mut writer)?;
+        }
+        // NCBI blast_format.cpp:1491: m_Outfile << "\n\n";
+        writeln!(&mut writer)?;
+        writeln!(&mut writer)?;
         write_blastp_query_header(&mut writer, &query.query_name, query.query_length)?;
         let query_hits = &hits_by_query[q_idx];
         if query_hits.is_empty() {
@@ -3354,21 +3546,20 @@ pub fn write_tblastn_pairwise_report<W: Write>(
             // The all-invalid batch uses -1 sentinel blocks. An invalid query
             // within a searched batch has null blocks (blast_results.cpp:82-103).
             if query_batch_skipped[q_idx] {
-                write_tblastn_unsearched_query_footer(&mut writer)?;
+                write_tblastn_unsearched_query_footer_spacing(&mut writer, false)?;
             } else if !query_validity[q_idx] {
                 writeln!(writer)?;
                 writeln!(writer)?;
                 writeln!(writer)?;
                 writeln!(writer, "Effective search space used: 0")?;
-                writeln!(writer)?;
-                writeln!(writer)?;
             } else {
-                write_blastp_query_footer(
+                write_blastp_query_footer_spacing(
                     &mut writer,
                     query.ungapped_karlin,
                     report.gapped_karlin,
                     report.gumbel,
                     query.effective_search_space,
+                    false,
                 )?;
             }
             continue;
@@ -3398,18 +3589,23 @@ pub fn write_tblastn_pairwise_report<W: Write>(
         // ```
         // The table of every program follows `x_InitDeflineTable`
         // (`write_blastn_description_table`): the subject's highest bit score and that HSP's
-        // E-value, and the title of the subject (`CDeflineGenerator`). TBLASTN keeps every
-        // subject of its hit list in the table (500 at most, the descriptions shown).
+        // E-value, and the title of the subject (`CDeflineGenerator`), for the first
+        // `m_NumDescriptions` subjects.
+        let described = &subject_order[..subject_order.len().min(report.num_descriptions)];
         write_blastn_description_table(
             &mut writer,
-            &subject_order,
-            true,
+            described,
+            subject_order.len() <= report.num_descriptions,
             &subject_hits,
             subject_ids,
             false,
+            false,
         )?;
         writeln!(writer)?;
-        for s_idx in subject_order {
+        // NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:1014-1040
+        // (PruneSeqalign keeps the alignments of the first `m_NumAlignments` subjects).
+        let aligned = &subject_order[..subject_order.len().min(report.num_alignments)];
+        for &s_idx in aligned {
             let shits = &subject_hits[&s_idx];
             let first = shits[0];
             // NCBI reference: c++/src/objtools/align_format/showalign.cpp:3613-3632
@@ -3473,14 +3669,27 @@ pub fn write_tblastn_pairwise_report<W: Write>(
                 }
             }
         }
-        write_blastp_query_footer(
+        write_blastp_query_footer_spacing(
             &mut writer,
             query.ungapped_karlin,
             report.gapped_karlin,
             report.gumbel,
             query.effective_search_space,
+            false,
         )?;
     }
+    // NCBI reference: c++/src/app/blast/tblastn_app.cpp:342
+    // ```c++
+    //         formatter.PrintEpilog(opt);
+    // ```
+    // A search that stops at a query batch (`Empty CBlastQueryVector` with `-query_loc`)
+    // writes no epilog.
+    if !epilog {
+        return writer.flush();
+    }
+    // The blank lines before the epilog (blast_format.cpp:2249).
+    writeln!(&mut writer)?;
+    writeln!(&mut writer)?;
     write_blastp_final_footer(&mut writer, report)?;
     writer.flush()
 }
@@ -3616,10 +3825,32 @@ fn write_tblastn_alignment<W: Write>(
         let s_count = spart.iter().filter(|&&c| c != b'-').count();
         let q_end = q_pos + q_count.saturating_sub(1);
         let s_end = s_pos + direction * (3 * s_count as isize - 1);
-        write!(writer, "Query  {}", q_pos)?;
-        write_spaces(writer, width + 2 - digit_count(q_pos))?;
+        // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1605-1627
+        // ```c++
+        //     //not to display start and stop number for empty row
+        //     if ((j > 0 && end == prev_stop)
+        //         || (j == 0 && start == 1 && end == 1)) {
+        //         startLen = 0;
+        //     } else {
+        //         out << start;
+        // ...
+        //      //not to display stop number for empty row in the middle
+        //     if (!(j > 0 && end == prev_stop)
+        // ```
+        // A row of gaps only shows no coordinates (as `write_blastx_alignment`).
+        write!(writer, "Query  ")?;
+        if q_count > 0 {
+            write!(writer, "{q_pos}")?;
+            write_spaces(writer, width + 2 - digit_count(q_pos))?;
+        } else {
+            write_spaces(writer, width + 2)?;
+        }
         writer.write_all(qpart)?;
-        write!(writer, "  {}\n", q_end)?;
+        write!(writer, "  ")?;
+        if q_count > 0 {
+            write!(writer, "{q_end}")?;
+        }
+        writeln!(writer)?;
         write_spaces(writer, 7 + width + 2)?;
         for (&qc, &sc) in qpart.iter().zip(spart) {
             // NCBI c++/src/objtools/align_format/showalign.cpp:2122-2149:
@@ -3636,13 +3867,22 @@ fn write_tblastn_alignment<W: Write>(
             writer.write_all(&[mid])?;
         }
         writeln!(writer)?;
-        write!(writer, "Sbjct  {}", s_pos)?;
-        write_spaces(writer, width + 2 - digit_count(s_pos.unsigned_abs()))?;
+        write!(writer, "Sbjct  ")?;
+        if s_count > 0 {
+            write!(writer, "{s_pos}")?;
+            write_spaces(writer, width + 2 - digit_count(s_pos.unsigned_abs()))?;
+        } else {
+            write_spaces(writer, width + 2)?;
+        }
         writer.write_all(spart)?;
-        write!(writer, "  {}\n", s_end)?;
+        write!(writer, "  ")?;
+        if s_count > 0 {
+            write!(writer, "{s_end}")?;
+        }
         writeln!(writer)?;
-        q_pos = q_end + 1;
-        s_pos = s_end + direction;
+        writeln!(writer)?;
+        q_pos += q_count;
+        s_pos += direction * 3 * s_count as isize;
     }
     Ok(())
 }
@@ -4417,7 +4657,7 @@ mod tblastx_tests {
                 .collect();
         let ids: Vec<Arc<str>> = vec![Arc::from("s0"), Arc::from("s1")];
         let mut out = Vec::new();
-        write_blastn_description_table(&mut out, &[0, 1], true, &hits, &ids, true).unwrap();
+        write_blastn_description_table(&mut out, &[0, 1], true, &hits, &ids, true, false).unwrap();
         let text = String::from_utf8(out).unwrap();
         let lines: Vec<&str> = text.lines().collect();
         assert!(lines[0].ends_with("Score     E"), "{text}");

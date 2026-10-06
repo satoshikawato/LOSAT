@@ -1,0 +1,18 @@
+tblastn [] bigq.faa bigs.fna -outfmt 0 :: same
+tblastn [] bigq.faa bigs.fna -outfmt 6 :: same
+tblastn [] bigq.faa bigs.fna -outfmt 7 :: same
+tblastn [] bigq.faa bigs.fna -comp_based_stats 0 -outfmt 0 :: same
+tblastn [] bigq.faa bigs.fna -comp_based_stats 0 -outfmt 6 :: same
+tblastn [] bigq.faa bigs.fna -comp_based_stats 0 -outfmt 7 :: same
+tblastn [] bigq.faa bigs.fna -seg no -evalue 1e-5 -outfmt 0 :: same
+tblastn [] bigq.faa bigs.fna -seg no -evalue 1e-5 -outfmt 6 :: same
+tblastn [] bigq.faa bigs.fna -seg no -evalue 1e-5 -outfmt 7 :: same
+tblastn [] bigq.faa bigs4.fna -outfmt 0 :: same
+tblastn [] bigq.faa bigs4.fna -outfmt 6 :: same
+tblastn [] bigq.faa bigs4.fna -outfmt 7 :: same
+tblastn [] bigq.faa bigs4.fna -comp_based_stats 0 -outfmt 0 :: same
+tblastn [] bigq.faa bigs4.fna -comp_based_stats 0 -outfmt 6 :: same
+tblastn [] bigq.faa bigs4.fna -comp_based_stats 0 -outfmt 7 :: same
+tblastn [] bigq.faa bigs4.fna -seg no -evalue 1e-5 -outfmt 0 :: same
+tblastn [] bigq.faa bigs4.fna -seg no -evalue 1e-5 -outfmt 6 :: same
+tblastn [] bigq.faa bigs4.fna -seg no -evalue 1e-5 -outfmt 7 :: same

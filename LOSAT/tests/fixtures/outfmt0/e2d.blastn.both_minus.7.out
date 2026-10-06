@@ -1,0 +1,12 @@
+# BLASTN 2.17.0+
+# Query: q1
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/e2d_n_s_rc.fa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 6 hits found
+q1	s1rc	96.137	906	12	4	5098	6003	3288	4170	0.0	1458
+q1	s1rc	99.001	801	4	4	2428	3225	2482	3281	0.0	1432
+q1	s1rc	99.611	772	0	2	1660	2428	1425	2196	0.0	1406
+q1	s1rc	79.615	260	27	21	2979	3225	3118	3364	1.59e-42	163
+q1	s1rc	89.412	85	2	2	3064	3141	3033	3117	1.26e-23	100
+q1	s1rc	96.078	51	2	0	2378	2428	2233	2283	1.27e-18	84.2
+# BLAST processed 1 queries

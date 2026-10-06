@@ -1,0 +1,32 @@
+tblastn [CHUNK_SIZE=1000] e2e_protein_query.faa e2e_tblastn_subject.fna -outfmt 6 :: same
+tblastn [CHUNK_SIZE=1000] e2e_protein_query.faa e2e_tblastn_subject.fna -comp_based_stats 0 -outfmt 6 :: same
+tblastn [CHUNK_SIZE=1000] e2e_protein_query.faa e2e_tblastn_subject.fna -sum_stats false -outfmt 6 :: same
+tblastn [CHUNK_SIZE=1000] e2e_protein_query.faa e2e_tblastn_subject.fna -evalue 1000 -outfmt 6 :: same
+tblastn [CHUNK_SIZE=1000] e2e_protein_query.faa e2e_tblastn_subject.fna -outfmt 0 :: same
+tblastn [CHUNK_SIZE=1000] gen_q_lc.faa gen_s.fna -lcase_masking -seg no -comp_based_stats 0 -outfmt 6 :: same
+tblastn [CHUNK_SIZE=1000] gen_q_lc.faa gen_s.fna -lcase_masking -outfmt 6 :: same
+tblastn [CHUNK_SIZE=1000] e2e_protein_query.faa e2e_tblastn_subject.fna -matrix BLOSUM45 -word_size 2 -comp_based_stats 0 -outfmt 6 :: same
+tblastn [CHUNK_SIZE=500] e2e_protein_query.faa e2e_tblastn_subject.fna -outfmt 6 :: same
+tblastn [CHUNK_SIZE=500] e2e_protein_query.faa e2e_tblastn_subject.fna -comp_based_stats 0 -outfmt 6 :: same
+tblastn [CHUNK_SIZE=500] e2e_protein_query.faa e2e_tblastn_subject.fna -sum_stats false -outfmt 6 :: same
+tblastn [CHUNK_SIZE=500] e2e_protein_query.faa e2e_tblastn_subject.fna -evalue 1000 -outfmt 6 :: same
+tblastn [CHUNK_SIZE=500] e2e_protein_query.faa e2e_tblastn_subject.fna -outfmt 0 :: same
+tblastn [CHUNK_SIZE=500] gen_q_lc.faa gen_s.fna -lcase_masking -seg no -comp_based_stats 0 -outfmt 6 :: same
+tblastn [CHUNK_SIZE=500] gen_q_lc.faa gen_s.fna -lcase_masking -outfmt 6 :: same
+tblastn [CHUNK_SIZE=500] e2e_protein_query.faa e2e_tblastn_subject.fna -matrix BLOSUM45 -word_size 2 -comp_based_stats 0 -outfmt 6 :: same
+tblastn [CHUNK_SIZE=300 OVERLAP_CHUNK_SIZE=50] e2e_protein_query.faa e2e_tblastn_subject.fna -outfmt 6 :: same
+tblastn [CHUNK_SIZE=300 OVERLAP_CHUNK_SIZE=50] e2e_protein_query.faa e2e_tblastn_subject.fna -comp_based_stats 0 -outfmt 6 :: same
+tblastn [CHUNK_SIZE=300 OVERLAP_CHUNK_SIZE=50] e2e_protein_query.faa e2e_tblastn_subject.fna -sum_stats false -outfmt 6 :: same
+tblastn [CHUNK_SIZE=300 OVERLAP_CHUNK_SIZE=50] e2e_protein_query.faa e2e_tblastn_subject.fna -evalue 1000 -outfmt 6 :: same
+tblastn [CHUNK_SIZE=300 OVERLAP_CHUNK_SIZE=50] e2e_protein_query.faa e2e_tblastn_subject.fna -outfmt 0 :: same
+tblastn [CHUNK_SIZE=300 OVERLAP_CHUNK_SIZE=50] gen_q_lc.faa gen_s.fna -lcase_masking -seg no -comp_based_stats 0 -outfmt 6 :: same
+tblastn [CHUNK_SIZE=300 OVERLAP_CHUNK_SIZE=50] gen_q_lc.faa gen_s.fna -lcase_masking -outfmt 6 :: same
+tblastn [CHUNK_SIZE=300 OVERLAP_CHUNK_SIZE=50] e2e_protein_query.faa e2e_tblastn_subject.fna -matrix BLOSUM45 -word_size 2 -comp_based_stats 0 -outfmt 6 :: same
+tblastn [CHUNK_SIZE=2000 OVERLAP_CHUNK_SIZE=300] e2e_protein_query.faa e2e_tblastn_subject.fna -outfmt 6 :: same
+tblastn [CHUNK_SIZE=2000 OVERLAP_CHUNK_SIZE=300] e2e_protein_query.faa e2e_tblastn_subject.fna -comp_based_stats 0 -outfmt 6 :: same
+tblastn [CHUNK_SIZE=2000 OVERLAP_CHUNK_SIZE=300] e2e_protein_query.faa e2e_tblastn_subject.fna -sum_stats false -outfmt 6 :: same
+tblastn [CHUNK_SIZE=2000 OVERLAP_CHUNK_SIZE=300] e2e_protein_query.faa e2e_tblastn_subject.fna -evalue 1000 -outfmt 6 :: same
+tblastn [CHUNK_SIZE=2000 OVERLAP_CHUNK_SIZE=300] e2e_protein_query.faa e2e_tblastn_subject.fna -outfmt 0 :: same
+tblastn [CHUNK_SIZE=2000 OVERLAP_CHUNK_SIZE=300] gen_q_lc.faa gen_s.fna -lcase_masking -seg no -comp_based_stats 0 -outfmt 6 :: same
+tblastn [CHUNK_SIZE=2000 OVERLAP_CHUNK_SIZE=300] gen_q_lc.faa gen_s.fna -lcase_masking -outfmt 6 :: same
+tblastn [CHUNK_SIZE=2000 OVERLAP_CHUNK_SIZE=300] e2e_protein_query.faa e2e_tblastn_subject.fna -matrix BLOSUM45 -word_size 2 -comp_based_stats 0 -outfmt 6 :: same

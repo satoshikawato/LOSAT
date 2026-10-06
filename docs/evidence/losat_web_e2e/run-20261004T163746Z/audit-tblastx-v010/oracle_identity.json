@@ -1,0 +1,8 @@
+{
+  "path": "/home/kawato/tools/ncbi-blast-oracle/ncbi-blast-2.17.0+/bin/tblastx",
+  "sha256": "583e5d60bbd444ac455d20e0956c5aa0aeef675da8daee8204d8f9376ddb8804",
+  "version": [
+    "tblastx: 2.17.0+",
+    " Package: blast 2.17.0, build Jul  1 2025 08:59:18"
+  ]
+}

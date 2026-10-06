@@ -1,0 +1,5 @@
+(node:1268447) ExperimentalWarning: WASI is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ok serial describe, validate, register, scan
+ok serial n1 p12_lc738874_lc738875_default
+1 runs matched the native CLI; frozen hashes: 1/1 equal

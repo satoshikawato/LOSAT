@@ -1,0 +1,303 @@
+case	expect	result	losat_stderr
+rna.fmt6	same	same	
+rna.fmt7.blastn	same	same	
+rna.lcase	same	same	
+tab_after_id	losat-rejects	losat-rejects	Error: query record 1 has a defline that has the control character 0x09; NCBI BLAST+ reads such a defline differently, which is not supported by LOSAT's BLASTN (use ASCII deflines without control char
+tab_in_title	losat-rejects	losat-rejects	Error: query record 1 has a defline that has the control character 0x09; NCBI BLAST+ reads such a defline differently, which is not supported by LOSAT's BLASTN (use ASCII deflines without control char
+leading_space	losat-rejects	losat-rejects	Error: query record 1 has a defline that starts with white space; NCBI BLAST+ reads such a defline differently, which is not supported by LOSAT's BLASTN (use ASCII deflines without control characters)
+x_residue	losat-rejects	losat-rejects	Error: query record 1 (x) has 'X' at residue 101, which is not an IUPAC nucleotide letter; NCBI BLAST+ reads such a record differently, which is not supported by LOSAT's BLASTN (use IUPAC nucleotide l
+hyphen	losat-rejects	losat-rejects	Error: query record 1 (h) has '-' at residue 101, which is not an IUPAC nucleotide letter; NCBI BLAST+ reads such a record differently, which is not supported by LOSAT's BLASTN (use IUPAC nucleotide l
+digits	losat-rejects	losat-rejects	Error: query record 1 (d) has '1' at residue 1, which is not an IUPAC nucleotide letter; NCBI BLAST+ reads such a record differently, which is not supported by LOSAT's BLASTN (use IUPAC nucleotide let
+utf8_subject	losat-rejects	losat-rejects	Error: subject record 1 has a defline that has a non-ASCII byte; NCBI BLAST+ reads such a defline differently, which is not supported by LOSAT's BLASTN (use ASCII deflines without control characters)
+empty_query	same	same	Warning: [blastn] Query is Empty!
+white_space_query	same	same	Warning: [blastn] Examining 5 or more matches is recommended
+empty_query.penalty0	same-error	same-error	Warning: [blastn] Examining 5 or more matches is recommended
+few_matches.fmt6	same	same	Warning: [blastn] Examining 5 or more matches is recommended
+all_n.fmt7	same	same	Warning: [blastn] Query_1 allN query of only N: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or 
+batch_all_n.fmt7	same	same	Warning: [blastn] Query_1 batchN 5000 N fil.. : Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or 
+batch_all_n.blastn.fmt7	same	same	Warning: [blastn] Query_1 batchN 5000 N fil.. : Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or 
+mixed_all_n.fmt7	same	same	Warning: [blastn] Query_2 allN query of only N: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or 
+short_invalid.fmt7	same	same	Warning: [blastn] Query_2 shortN1 40 N: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filterin
+invalid_at_end.fmt7	same	same	Warning: [blastn] Query_3 n1 short N: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering 
+invalid_at_end.fmt6	same	same	Warning: [blastn] Query_3 n1 short N: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering 
+long_invalid_run.fmt0	same	same	Warning: [blastn] Query_2 n1 long N: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering o
+scoring_error.first_batch_invalid	same-error	same-error	Warning: [blastn] Query_1 batchN 5000 N fil.. : Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or 
+scoring_error.all_invalid	same	same	Warning: [blastn] Query_1 allN query of only N: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or 
+scoring_error.outfmt0_prolog	same-error	same-error	BLAST engine error: Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and -5 are not supported Error: Substitution scores 3 and -5 are not supported
+scoring_error.megablast_prolog	same-error	same-error	Warning: [blastn] Examining 5 or more matches is recommended
+audit.invalid_first_batch.table_error	losat-rejects	losat-rejects	Error: these scoring options have no Karlin-Altschul values, and the query batch (up to 5000 residues) has an invalid query; NCBI BLAST+ goes on without the gapped values and crashes, which is not sup
+audit.invalid_first_batch.gap_error	losat-rejects	losat-rejects	Error: these scoring options have no Karlin-Altschul values, and the query batch (up to 5000 residues) has an invalid query; NCBI BLAST+ goes on without the gapped values and crashes, which is not sup
+audit.invalid_strand.3_-1	losat-rejects	losat-rejects	Error: these scoring options have no Karlin-Altschul values, and the query batch (up to 5000 residues) has an invalid query; NCBI BLAST+ goes on without the gapped values and crashes, which is not sup
+audit.empty_query.subject_x	losat-rejects	losat-rejects	Error: subject record 1 (msA) has 'X' at residue 11, which is not an IUPAC nucleotide letter; NCBI BLAST+ reads such a record differently, which is not supported by LOSAT's BLASTN (use IUPAC nucleotid
+audit.empty_defline	losat-rejects	losat-rejects	Error: query record 1 has a defline that is empty; NCBI BLAST+ reads such a defline differently, which is not supported by LOSAT's BLASTN (use ASCII deflines without control characters)
+audit.blank_defline	losat-rejects	losat-rejects	Error: query record 1 has a defline that is empty; NCBI BLAST+ reads such a defline differently, which is not supported by LOSAT's BLASTN (use ASCII deflines without control characters)
+audit.empty_record	losat-rejects	losat-rejects	Error: query record 1 (e1) has no residues; NCBI BLAST+ reports such a record differently, which is not supported by LOSAT's BLASTN
+audit.empty_records_only	losat-rejects	losat-rejects	Error: query record 1 (e1) has no residues; NCBI BLAST+ reports such a record differently, which is not supported by LOSAT's BLASTN
+audit.empty_subject_record	losat-rejects	losat-rejects	Error: subject record 1 (s0) has no residues; NCBI BLAST+ reports such a record differently, which is not supported by LOSAT's BLASTN
+audit.penalty_-40000	same-error	same-error	BLAST query/options error: BLASTN penalty must be negative
+audit.reward_65538	same	same	
+audit.reward_2147483647	losat-rejects	losat-rejects	Error: a reward of -1 (NCBI BLAST+'s 16-bit value; 0 is NCBI's matrix scoring of rmblastn, otherwise no query is valid) is not supported by LOSAT's BLASTN
+audit.reward_32767	losat-rejects	losat-rejects	Error: a reward of 32767 or a penalty of -32768 (NCBI BLAST+'s BLAST_SCORE_MAX and BLAST_SCORE_MIN, which it leaves out of the score range of its Karlin-Altschul computation) is not supported by LOSAT
+audit.megablast_gap_max	losat-rejects	losat-rejects	Error: gap costs above 32767 with greedy extension (-task megablast) are not supported by LOSAT's BLASTN
+audit.megablast_gap_32767	same	same	
+audit.megablast_gap_4000	same	same	
+audit.large_divisible	same	same	
+audit.evalue_0	same-error	same-error	BLAST query/options error: expect value or cutoff score must be greater than zero
+audit.evalue_0.greedy_order	same-error	same-error	BLAST query/options error: expect value or cutoff score must be greater than zero
+audit.word_size_101	same-error	same-error	BLAST query/options error: Word-size must be less than or equal to 100
+audit.word_size_101.penalty_order	same-error	same-error	BLAST query/options error: BLASTN penalty must be negative
+audit.all_invalid_positive_score	same	same	Warning: [blastn] Query_1 edl933_100k first.. : Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or 
+audit.reward_0	losat-rejects	losat-rejects	Error: a reward of 0 (NCBI BLAST+'s 16-bit value; 0 is NCBI's matrix scoring of rmblastn, otherwise no query is valid) is not supported by LOSAT's BLASTN
+audit.piped_empty_query	losat-rejects	losat-rejects	Error: an empty query from a stream without a position (such as a pipe) is not supported by LOSAT's BLASTN
+audit.out_file.options_error	same-error	same-error	BLAST query/options error: BLASTN penalty must be negative
+audit.out_file.empty_query	same	same	Warning: [blastn] Query is Empty!
+audit.out_file.table_error.fmt7	same-error	same-error	BLAST engine error: Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and -6 are not supported Error: Substitution scores 1 and -6 are not supported
+audit.leading_blank_line	losat-rejects	losat-rejects	Error: failed to read query FASTA /home/kawato/.cache/losat-web-gui-target/s08pb2-gate-inputs/leading_blank_line.fa (FASTA that bio cannot read (such as text before the first defline or bytes that are
+audit.byte_order_mark	losat-rejects	losat-rejects	Error: failed to read query FASTA /home/kawato/.cache/losat-web-gui-target/s08pb2-gate-inputs/byte_order_mark.fa (FASTA that bio cannot read (such as text before the first defline or bytes that are no
+audit2.empty_subject	same-error	same-error	BLAST engine error: Empty CBlastQueryVector
+audit2.white_space_subject	same-error	same-error	BLAST engine error: Empty CBlastQueryVector
+audit2.empty_query_and_subject	same-error	same-error	BLAST engine error: Empty CBlastQueryVector
+audit2.penalty_16bit.word_size	same-error	same-error	BLAST query/options error: BLASTN penalty must be negative
+audit2.penalty_16bit.evalue	same-error	same-error	BLAST query/options error: BLASTN penalty must be negative
+audit2.penalty_16bit.greedy	same-error	same-error	BLAST query/options error: BLASTN penalty must be negative
+audit2.reward_16bit_0.penalty_0	losat-rejects	losat-rejects	Error: a reward of 0 (NCBI BLAST+'s 16-bit value; 0 is NCBI's matrix scoring of rmblastn, otherwise no query is valid) is not supported by LOSAT's BLASTN
+audit2.reward_16bit_0.word_size	same-error	same-error	BLAST query/options error: Word-size must be less than or equal to 100
+audit2.scores_16bit_wrap.fmt0	same	same	
+audit2.scores_16bit_wrap.fmt6	same	same	
+audit2.reward_16bit_negative	losat-rejects	losat-rejects	Error: a reward of -31072 (NCBI BLAST+'s 16-bit value; 0 is NCBI's matrix scoring of rmblastn, otherwise no query is valid) is not supported by LOSAT's BLASTN
+audit2.evalue_negative.word_size	same-error	same-error	BLAST query/options error: Word-size must be less than or equal to 100
+audit2.evalue_minus_inf	same-error	same-error	BLAST query/options error: expect value or cutoff score must be greater than zero
+audit2.evalue_overflow	same	same	
+audit2.missing_query.out	same-error	same-error	Command line argument error: Argument "query". File is not accessible:  `/home/kawato/.cache/losat-web-gui-target/s08pb2-gate-inputs/missing.fa'
+audit2.dev_null_query	same	same	Warning: [blastn] Query is Empty!
+audit2.batch_size_env.penalty_0.out	same-error	same-error	BLAST query/options error: BLASTN penalty must be negative
+audit2.batch_size_env	same	same	
+audit2.greedy_gap_table_error	same-error	same-error	BLAST engine error: Error: Gap existence and extension values 32768 and 1 are not supported for substitution scores 1 and -2
+audit2.greedy_gap_limit	losat-rejects	losat-rejects	Error: gap costs above 32767 with greedy extension (-task megablast) are not supported by LOSAT's BLASTN
+audit3.empty_subject.penalty_0	same-error	same-error	BLAST engine error: Empty CBlastQueryVector
+audit3.empty_subject.evalue_0	same-error	same-error	BLAST engine error: Empty CBlastQueryVector
+audit3.empty_subject.word_size_101	same-error	same-error	BLAST engine error: Empty CBlastQueryVector
+audit3.empty_subject.max_target_seqs_1	same-error	same-error	BLAST engine error: Empty CBlastQueryVector
+audit3.empty_subject.out	same-error	same-error	BLAST engine error: Empty CBlastQueryVector
+audit3.empty_subject.missing_query	same-error	same-error	BLAST engine error: Empty CBlastQueryVector
+audit3.piped_query	same	same	
+audit3.piped_query.fmt0	same	same	
+audit3.piped_subject	same	same	
+audit3.piped_empty_subject	same-error	same-error	BLAST engine error: Empty CBlastQueryVector
+audit3.piped_white_space_query	losat-rejects	losat-rejects	Error: an empty query from a stream without a position (such as a pipe) is not supported by LOSAT's BLASTN
+audit3.directory_query	same	same	Warning: [blastn] Query is Empty!
+audit3.directory_subject	same-error	same-error	BLAST engine error: Empty CBlastQueryVector
+audit3.evalue_inf	arg-error	arg-error	error: invalid value 'inf' for '-evalue <EVALUE>': expected a number
+audit3.evalue_nan	arg-error	arg-error	error: invalid value 'nan' for '-evalue <EVALUE>': expected a number
+audit3.evalue_space	arg-error	arg-error	error: invalid value ' 1' for '-evalue <EVALUE>': expected a number
+audit3.evalue_plus_inf	same	same	
+audit3.evalue_plus_nan	same	same	
+audit3.evalue_hex	losat-rejects	losat-rejects	error: invalid value '0x10' for '-evalue <EVALUE>': expected a decimal number (other forms, which NCBI BLAST+ may read, are not supported by LOSAT's BLASTN)
+audit3.evalue_exponent	same	same	
+audit4.hex.reward	same	same	
+audit4.hex.gaps	same	same	
+audit4.hex.word_size	same	same	
+audit4.hex.word_size_16	same	same	
+audit4.hex.max_target_seqs	same	same	Warning: [blastn] Examining 5 or more matches is recommended
+audit4.hex.penalty_0	same-error	same-error	BLAST query/options error: BLASTN penalty must be negative
+audit4.hex.no_digits	arg-error	arg-error	error: invalid value '0x' for '-max_target_seqs <MAX_TARGET_SEQS>': Illegal value
+audit4.tab_subject.penalty_0.out	same-error	same-error	BLAST query/options error: BLASTN penalty must be negative
+audit4.tab_subject.evalue_0	same-error	same-error	BLAST query/options error: expect value or cutoff score must be greater than zero
+audit4.tab_subject.empty_query	same	same	Warning: [blastn] Query is Empty!
+audit4.tab_subject	losat-rejects	losat-rejects	Error: subject record 1 has a defline that has the control character 0x09; NCBI BLAST+ reads such a defline differently, which is not supported by LOSAT's BLASTN (use ASCII deflines without control ch
+audit4.leading_blank_subject.penalty_0	losat-rejects	losat-rejects	Error: failed to read subject FASTA /home/kawato/.cache/losat-web-gui-target/s08pb2-gate-inputs/leading_blank_subject.fa (FASTA that bio cannot read (such as text before the first defline or bytes tha
+audit4.missing_subject	same-error	same-error	Command line argument error: Argument "subject". File is not accessible:  `/home/kawato/.cache/losat-web-gui-target/s08pb2-gate-inputs/missing.fa'
+audit4.missing_query_and_subject	same-error	same-error	Command line argument error: Argument "subject". File is not accessible:  `/home/kawato/.cache/losat-web-gui-target/s08pb2-gate-inputs/missing.fa'
+audit4.missing_query.bad_out	same-error	same-error	Command line argument error: Argument "query". File is not accessible:  `/home/kawato/.cache/losat-web-gui-target/s08pb2-gate-inputs/missing.fa'
+audit4.bad_out	same-error	same-error	Command line argument error: Argument "out". File is not accessible:  `/home/kawato/.cache/losat-web-gui-target/s08pb2-gate-inputs/missing_dir/out.txt'
+audit4.directory_out	same-error	same-error	Command line argument error: Argument "out". File is not accessible:  `/home/kawato/.cache/losat-web-gui-target/s08pb2-gate-inputs'
+audit4.empty_query.reward_0	same	same	Warning: [blastn] Query is Empty!
+audit4.empty_query.score_range	same	same	Warning: [blastn] Query is Empty!
+audit4.empty_query.evalue_plus_inf	same	same	Warning: [blastn] Query is Empty!
+audit4.empty_query.batch_size	same	same	Warning: [blastn] Query is Empty!
+audit4.evalue_plus_nan.empty_subject	same-error	same-error	BLAST engine error: Empty CBlastQueryVector
+audit4.evalue_plus_nan.penalty_0	same-error	same-error	BLAST query/options error: BLASTN penalty must be negative
+audit4.stdin_query.pipe	same	same	
+audit4.stdin_query.file	same	same	
+audit4.stdin_query.default	same	same	
+audit4.stdin_subject.file	same	same	
+audit4.stdin_subject.pipe	same	same	
+audit4.stdin_both.file	losat-rejects	losat-rejects	Error: an empty query from a stream without a position (such as a pipe) is not supported by LOSAT's BLASTN
+audit4.dev_stdin_both.file	same	same	
+audit4.stdin_both.pipe	losat-rejects	losat-rejects	Error: an empty query from a stream without a position (such as a pipe) is not supported by LOSAT's BLASTN
+audit4.stdin_empty_query.file	same	same	Warning: [blastn] Query is Empty!
+audit4.out_stdout	same	same	
+audit4.option.verbose	arg-error	arg-error	error: unknown option or argument '-verbose'; use -help for CLI v2 syntax
+audit4.option.limit_lookup	arg-error	arg-error	error: unknown option or argument '-limit_lookup'; use -help for CLI v2 syntax
+audit4.option.max_db_word_count	arg-error	arg-error	error: unknown option or argument '-max_db_word_count'; use -help for CLI v2 syntax
+audit4.option.min_hit_length	arg-error	arg-error	error: unknown option or argument '-min_hit_length'; use -help for CLI v2 syntax
+audit4.outfmt.custom_0	same	same	
+audit4.outfmt.plus_6	same	same	
+audit4.outfmt.leading_zero	same	same	
+audit4.outfmt.word	same-error	same-error	BLAST query/options error: 'abc' is not a valid output format
+audit4.outfmt.out_of_range	same-error	same-error	Error: Formatting choice is out of range
+audit4.outfmt.no_break_space	same-error	same-error	BLAST query/options error: '6 ' is not a valid output format
+audit4.outfmt.empty	same-error	same-error	BLAST query/options error: '' is not a valid output format
+audit4.outfmt.word.missing_subject	same-error	same-error	BLAST query/options error: 'abc' is not a valid output format
+audit4.outfmt.delimiter	losat-rejects	losat-rejects	Error: the custom output format specification "6 delim=," (fields or a delimiter) is not supported by LOSAT's BLASTN
+audit4.fifo.subject_then_query	same	same	
+audit4.fifo.query	same	same	
+audit4.fifo.empty_query	losat-rejects	losat-rejects	Error: an empty query from a stream without a position (such as a pipe) is not supported by LOSAT's BLASTN
+audit5.outfmt.delim_without_value	same-error	same-error	BLAST query/options error: Delimiter format is invalid. Valid format is delim=<delimiter value>
+audit5.outfmt.word_delim	same-error	same-error	BLAST query/options error: Delimiter format is invalid. Valid format is delim=<delimiter value>
+audit5.outfmt.out_of_range_delim	same-error	same-error	BLAST query/options error: Delimiter format is invalid. Valid format is delim=<delimiter value>
+audit5.outfmt.pairwise_delim	same	same	
+audit5.outfmt.empty_delim	same	same	
+audit5.outfmt.tabular_delim	losat-rejects	losat-rejects	Error: the custom output format specification "6 delim=;" (fields or a delimiter) is not supported by LOSAT's BLASTN
+audit5.bare_0x.reward	arg-error	arg-error	error: invalid value '0x' for '-reward <REWARD>': Illegal value
+audit5.bare_0x.penalty	arg-error	arg-error	error: invalid value '0X' for '-penalty <PENALTY>': Illegal value
+audit5.bare_0x.word_size	arg-error	arg-error	error: invalid value '0x' for '-word_size <WORD_SIZE>': Illegal value
+audit5.bare_0x.gaps	same	same	
+audit5.hitlist.below_wrap	same	same	
+audit5.hitlist.wrap	same	same	
+audit5.hitlist.wrap.hex.fmt0	same	same	
+audit5.hitlist.wrap.fmt7	same	same	
+audit5.hitlist.negative	losat-rejects	losat-rejects	Error: a -max_target_seqs of 2147483598, whose preliminary hit list size overflows NCBI BLAST+'s 32-bit int (NCBI crashes), is not supported by LOSAT's BLASTN
+audit5.hitlist.negative.empty_query	same	same	Warning: [blastn] Query is Empty!
+audit5.dust.double_space	same-error	same-error	BLAST query/options error: Invalid number of arguments to filtering option
+audit5.dust.leading_space	same-error	same-error	BLAST query/options error: Invalid number of arguments to filtering option
+audit5.dust.no_break_space	same-error	same-error	BLAST query/options error: Invalid number of arguments to filtering option
+audit5.dust.capital_yes	same-error	same-error	BLAST query/options error: Invalid number of arguments to filtering option
+audit5.dust.empty	same-error	same-error	BLAST query/options error: Invalid number of arguments to filtering option
+audit5.dust.hex	same-error	same-error	BLAST query/options error: Invalid input for filtering parameters
+audit5.dust.negative_level	same	same	
+audit5.dust.zero_window	same	same	
+audit5.dust.negative_linker	same	same	
+audit5.dust.negative_window	same	same	
+audit5.dust.error.penalty_0.out	same-error	same-error	BLAST query/options error: Invalid number of arguments to filtering option
+audit5.dust.error.empty_subject	same-error	same-error	BLAST engine error: Empty CBlastQueryVector
+audit5.dust.error.empty_query	same-error	same-error	BLAST query/options error: Invalid number of arguments to filtering option
+audit5.out_fifo	same	same	
+audit5.out_fifo.fmt0	same	same	
+audit5.empty_name.query	same-error	same-error	Command line argument error: Argument "query". File is not accessible
+audit5.empty_name.subject	same-error	same-error	Command line argument error: Argument "subject". File is not accessible
+audit5.empty_name.out	same-error	same-error	Command line argument error: Argument "out". File is not accessible
+audit5.long_name.out	arg-error	arg-error	error: invalid value '/home/kawato/.cache/losat-web-gui-target/s08pb2-gate-inputs/oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo
+audit5.long_name.out.255	same	same	
+audit5.threads.above_rayon	losat-rejects	losat-rejects	Error: requested 70000 threads exceeds Rayon maximum 65535, which is not supported by LOSAT
+audit5.empty_record_subject.penalty_0	same-error	same-error	BLAST query/options error: BLASTN penalty must be negative
+audit5.empty_record_subject.empty_query	same	same	Warning: [blastn] Query is Empty!
+audit5.empty_record_subject	losat-rejects	losat-rejects	Error: subject record 1 (s0) has no residues; NCBI BLAST+ reports such a record differently, which is not supported by LOSAT's BLASTN
+audit5.chunk_size.blank	same	same	
+audit5.chunk_size.empty	same	same	
+audit6.diagonals.inverted_repeat	same	same	
+audit6.diagonals.inverted_repeat.blastn	same	same	
+audit6.diagonals.inverted_repeat.fmt0	same	same	
+audit6.diagonals.strand	same	same	
+audit6.task.dc_megablast	same	same	
+audit6.task.blastn_short	same	same	
+audit6.task.rmblastn	losat-rejects	losat-rejects	error: invalid value 'rmblastn' for '-task <TASK>': the task rmblastn is not supported by LOSAT's BLASTN (use megablast, blastn, dc-megablast or blastn-short)
+audit6.task.capitals	arg-error	arg-error	error: invalid value 'BLASTN' for '-task <TASK>': expected one of blastn, blastn-short, dc-megablast, megablast, rmblastn
+audit6.option.strand	losat-rejects	losat-rejects	error: the NCBI BLAST+ option -strand is not supported by LOSAT's BLASTN
+audit6.option.ungapped	losat-rejects	losat-rejects	error: the NCBI BLAST+ option -ungapped is not supported by LOSAT's BLASTN
+audit6.option.xdrop_gap	losat-rejects	losat-rejects	error: the NCBI BLAST+ option -xdrop_gap is not supported by LOSAT's BLASTN
+audit6.option.num_alignments	losat-rejects	losat-rejects	error: the NCBI BLAST+ option -num_alignments is not supported by LOSAT's BLASTN
+audit6.out_name.trailing_dot	same-error	same-error	Command line argument error: Argument "out". File is not accessible:  `/home/kawato/.cache/losat-web-gui-target/s08pb2-gate-inputs/missing_dir/ooooooooooooooooooooooooooooooooooooooooooooooooooooooooo
+audit7.gap_reduction.subject_start	same	same	
+audit7.gap_reduction.subject_start.fmt6	same	same	
+audit7.bit_score_99.fmt0	same	same	
+audit7.bit_score_99.fmt6	same	same	
+audit7.bit_score_99.fmt7	same	same	
+audit7.subject_besthit.prelim	same	same	
+audit7.subject_besthit.prelim.fmt0	same	same	
+audit8.ambiguity.minimal.query_c	same	same	
+audit8.ambiguity.minimal.query_t	same	same	
+audit8.ambiguity.minimal.query_t.fmt0	same	same	
+audit8.ambiguity.sakai_edl933.blastn	same	same	
+audit8.ambiguity.besthit_edl933	same	same	
+audit9.gap_line.subject	losat-rejects	losat-rejects	Error: subject record 2 has a defline that starts with '?' (NCBI BLAST+ reads '>?' as a gap in the sequence, and '>?_' as a defline without the prefix); NCBI BLAST+ reads such a defline differently, w
+audit9.gap_line.query	losat-rejects	losat-rejects	Error: query record 2 has a defline that starts with '?' (NCBI BLAST+ reads '>?' as a gap in the sequence, and '>?_' as a defline without the prefix); NCBI BLAST+ reads such a defline differently, whi
+audit9.gap_line.underscore	losat-rejects	losat-rejects	Error: query record 1 has a defline that starts with '?' (NCBI BLAST+ reads '>?' as a gap in the sequence, and '>?_' as a defline without the prefix); NCBI BLAST+ reads such a defline differently, whi
+audit9.title_warning.query.fmt0	same	same	FASTA-Reader: Title ends with at least 20 valid nucleotide characters.  Was the sequence accidentally put in the title line?
+audit9.title_warning.query.fmt6	same	same	FASTA-Reader: Title ends with at least 20 valid nucleotide characters.  Was the sequence accidentally put in the title line?
+audit9.title_warning.query.fmt7	same	same	FASTA-Reader: Title ends with at least 20 valid nucleotide characters.  Was the sequence accidentally put in the title line?
+audit9.title_warning.crlf	same	same	FASTA-Reader: Title ends with at least 20 valid nucleotide characters.  Was the sequence accidentally put in the title line?
+audit9.title_warning.id	same	same	FASTA-Reader: Title ends with at least 20 valid nucleotide characters.  Was the sequence accidentally put in the title line?
+audit9.title_warning.trailing_space	losat-rejects	losat-rejects	Error: query record 1 has a defline that ends with white space after 20 nucleotide letters (NCBI BLAST+'s warning about the letters depends on that white space, which LOSAT's reader drops); NCBI BLAST
+audit9.title_warning.subject	same	same	FASTA-Reader: Title ends with at least 20 valid nucleotide characters.  Was the sequence accidentally put in the title line?
+audit9.title_warning.subject.penalty_0	same-error	same-error	FASTA-Reader: Title ends with at least 20 valid nucleotide characters.  Was the sequence accidentally put in the title line?
+audit9.title_warning.query.empty_subject	same-error	same-error	BLAST engine error: Empty CBlastQueryVector
+audit10.nbsp.query	losat-rejects	losat-rejects	Error: query record 1 has a non-ASCII byte in a sequence line; NCBI BLAST+ reads it as an invalid residue, which is not supported by LOSAT's BLASTN (use IUPAC nucleotide letters)
+audit10.ideographic_space.subject	losat-rejects	losat-rejects	Error: subject record 6 has a non-ASCII byte in a sequence line; NCBI BLAST+ reads it as an invalid residue, which is not supported by LOSAT's BLASTN (use IUPAC nucleotide letters)
+audit10.title_0.fmt0	same	same	
+audit10.title_1.fmt0	same	same	
+audit10.title_2.fmt0	same	same	
+audit10.title_3.fmt0	same	same	
+audit10.title_4.fmt0	same	same	
+audit10.title_5.fmt0	same	same	
+audit10.title_6.fmt0	same	same	
+audit10.title_7.fmt0	same	same	
+audit10.title_8.fmt0	same	same	
+audit10.title_9.fmt0	losat-rejects	losat-rejects	Error: subject record 1 has an HTML character reference (such as &amp;) in its defline, which NCBI BLAST+ decodes in the outfmt 0 titles; this is not supported by LOSAT's BLASTN
+audit10.title_10.fmt0	exception-2	exception-2	
+audit10.title_11.fmt0	exception-2	exception-2	
+audit10.title_12.fmt0	same	same	
+audit11.title_overrun.fmt6	same	same	
+audit10.title_html.fmt6	same	same	
+audit12.lcase_subject.fmt0	same	same	
+audit12.lcase_subject.fmt6	same	same	
+audit12.lcase_subject.fmt7	same	same	
+audit12.lcase_subject.minus	same	same	
+audit12.lcase_island.megablast	same	same	
+audit12.lcase_island.blastn	same	same	
+audit12.n_run.fmt6	same	same	
+audit12.bom_query	losat-rejects	losat-rejects	Error: failed to read query FASTA /home/kawato/.cache/losat-web-gui-target/s08pb2-gate-inputs/bom_query.fa (FASTA that bio cannot read (such as text before the first defline or bytes that are not UTF-
+audit12.crash_title_no_hit.fmt0	same	same	
+audit14.iupac_seed.fmt0	same	same	
+audit14.iupac_seed.fmt6	same	same	
+audit14.iupac_seed.fmt7	same	same	
+audit14.iupac_seed.word_size_24	same	same	
+audit15.small_evalue.1e-300	same	same	
+audit15.small_evalue.1e-297	same	same	
+audit15.small_evalue.1e-295	same	same	
+audit13.one_letter_minus.fmt0	same	same	
+audit12.score0.fmt0	same	same	
+audit12.score0.fmt6	same	same	
+audit12.score0.fmt7	same	same	
+batches.many_acgt.megablast.1--2-5-2.fmt0	same	same	
+batches.many_acgt.megablast.1--2-5-2.fmt6	same	same	
+batches.many_iupac.megablast.1--2-5-2.fmt0	same	same	
+batches.many_iupac.megablast.1--2-5-2.fmt6	same	same	
+batches.many_acgt.megablast.1--3-3-2.fmt0	same	same	
+batches.many_acgt.megablast.1--3-3-2.fmt6	same	same	
+batches.many_iupac.megablast.1--3-3-2.fmt0	same	same	
+batches.many_iupac.megablast.1--3-3-2.fmt6	same	same	
+batches.many_acgt.megablast.1--3-4-4.fmt0	same	same	
+batches.many_acgt.megablast.1--3-4-4.fmt6	same	same	
+batches.many_iupac.megablast.1--3-4-4.fmt0	same	same	
+batches.many_iupac.megablast.1--3-4-4.fmt6	same	same	
+batches.many_acgt.megablast.default.fmt0	same	same	
+batches.many_acgt.megablast.default.fmt6	same	same	
+batches.many_iupac.megablast.default.fmt0	same	same	
+batches.many_iupac.megablast.default.fmt6	same	same	
+batches.many_acgt.blastn.1--2-5-2.fmt0	same	same	
+batches.many_acgt.blastn.1--2-5-2.fmt6	same	same	
+batches.many_iupac.blastn.1--2-5-2.fmt0	same	same	
+batches.many_iupac.blastn.1--2-5-2.fmt6	same	same	
+batches.many_acgt.blastn.1--3-3-2.fmt0	same	same	
+batches.many_acgt.blastn.1--3-3-2.fmt6	same	same	
+batches.many_iupac.blastn.1--3-3-2.fmt0	same	same	
+batches.many_iupac.blastn.1--3-3-2.fmt6	same	same	
+batches.many_acgt.blastn.1--3-4-4.fmt0	same	same	
+batches.many_acgt.blastn.1--3-4-4.fmt6	same	same	
+batches.many_iupac.blastn.1--3-4-4.fmt0	same	same	
+batches.many_iupac.blastn.1--3-4-4.fmt6	same	same	
+batches.many_acgt.blastn.default.fmt0	same	same	
+batches.many_acgt.blastn.default.fmt6	same	same	
+batches.many_iupac.blastn.default.fmt0	same	same	
+batches.many_iupac.blastn.default.fmt6	same	same	
+s07pp.query_split	same	same	
+s07pp.query_unsplit	same	same	
+e2g.t8.later_batch.fmt0	same-error	same-error	Warning: [blastn] Query_1 batchN 5000 N fil.. : Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or 
+e2g.t8.later_batch.fmt7	same-error	same-error	Warning: [blastn] Query_1 batchN 5000 N fil.. : Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or 
+e2g.t7.batch_size_100	same	same	
+e2g.t7.chunk_size_500	same	same	
+e2g.t7.batch_size_text	losat-rejects	losat-rejects	Error: the environment variable BATCH_SIZE has the value "abc", which NCBI BLAST+ cannot convert to an int (it stops with a CStringException that names its build's source files); this is not supported
+e2g.t10.no_subject	same-error	same-error	BLAST query/options error: Either a BLAST database or subject sequence(s) must be specified
+# cases=300 unexpected=[]
+exit 0

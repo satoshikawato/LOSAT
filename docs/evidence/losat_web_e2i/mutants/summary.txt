@@ -1,0 +1,16 @@
+# SD fixture discrimination (2026-10-04): mutants of c0849e604 built by build.sh in a scratch
+# worktree, run by compare.py (outfmt 6) on the existing pair (dc_query x dc_subject) and the
+# divergent pair (the windows of make_inputs.py's DIV_*_WINDOWS, deflines dcq/dcs; the committed
+# dc_div_*.fasta have the same sequences with deflines dvq/dvs), 18 template combinations and
+# the megablast template row (19). LOSAT is the gate build of b99f42493 (487ac387...).
+LOSAT	existing	0 of 19 differ from NCBI
+LOSAT	divergent	0 of 19 differ from NCBI
+LOSAT-M1 (second template skipped)	existing	5 of 19: w11_coding_and_optimal_16 w11_coding_and_optimal_21 w12_coding_and_optimal_16 w12_coding_and_optimal_18 w12_coding_and_optimal_21
+LOSAT-M1 (second template skipped)	divergent	6 of 19: all six coding_and_optimal combinations
+LOSAT-M2 (dc-megablast window 0)	existing	18 of 19: every dc-megablast combination
+LOSAT-M2 (dc-megablast window 0)	divergent	18 of 19: every dc-megablast combination
+LOSAT-M3 (11/21 coding scanned by the 11/18 scanner)	existing	1 of 19: w11_coding_21
+LOSAT-M3 (11/21 coding scanned by the 11/18 scanner)	divergent	1 of 19: w11_coding_21
+LOSAT-M4 (11/18 and 11/21 coding scanned by the general scanner)	existing	0 of 19 (equivalent mutant)
+LOSAT-M4 (11/18 and 11/21 coding scanned by the general scanner)	divergent	0 of 19 (equivalent mutant)
+NCBI distinct outputs of the 18 combinations: existing 9, divergent 18

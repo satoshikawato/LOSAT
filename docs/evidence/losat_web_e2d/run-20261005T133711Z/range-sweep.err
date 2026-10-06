@@ -1,0 +1,13 @@
+# blastn	losat-rejects	87
+# blastn	same	318
+# blastn	same-error	135
+# blastp	losat-rejects	78
+# blastp	same	186
+# blastp	same-error	216
+# tblastn	losat-rejects	84
+# tblastn	same	180
+# tblastn	same-error	156
+# tblastx	losat-rejects	84
+# tblastx	same	198
+# tblastx	same-error	138
+exit 0

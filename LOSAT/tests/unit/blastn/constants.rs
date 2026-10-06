@@ -11,12 +11,6 @@ fn test_x_drop_constants() {
 }
 
 #[test]
-fn test_two_hit_window() {
-    // TWO_HIT_WINDOW is 0 for one-hit mode (NCBI BLAST default for megablast)
-    assert_eq!(TWO_HIT_WINDOW, 0);
-}
-
-#[test]
 fn test_max_hits_per_kmer() {
     // MAX_HITS_PER_KMER should limit memory usage
     assert!(MAX_HITS_PER_KMER > 0);

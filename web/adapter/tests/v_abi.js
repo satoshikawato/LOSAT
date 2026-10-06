@@ -41,6 +41,9 @@ function parseArgs(argv) {
   for (const required of ["native", "serial", "threads", "cases"]) {
     if (!options[required]) throw new Error(`--${required} is required`);
   }
+  // Searches run from their own working directory (the repository or LOSAT/), so a relative
+  // CLI path is resolved against the directory v_abi.js was started from.
+  options.native = path.resolve(options.native);
   return options;
 }
 
@@ -127,7 +130,7 @@ function nativeOutputs(native, search, scratch) {
     const out = path.join(scratch, `native.${format}.out`);
     const argv = [...search.argv, "-outfmt", String(format), "-num_threads", "1", "-out", out];
     const result = require("node:child_process").spawnSync(native, argv, { cwd: search.cwd, maxBuffer: 1 << 30 });
-    if (result.status !== 0) throw new Error(`native ${argv.join(" ")} failed: ${result.stderr}`);
+    if (result.status !== 0) throw new Error(`native ${argv.join(" ")} failed: ${result.error ?? result.stderr}`);
     outputs.set(format, fs.readFileSync(out));
     fs.rmSync(out);
     if (stderr === null) stderr = result.stderr;
@@ -178,13 +181,22 @@ function checkSurface(reactor, native) {
     assert.ok(flags.includes("-evalue") && flags.includes("-query"), `${program}: parameters`);
     assert.ok(!flags.includes("-outfmt") && !flags.includes("-out") && !flags.includes("-num_threads"), `${program}: adapter-owned options`);
     if (program === "tblastn") assert.ok(description.subject_gencodes.includes(32), "tblastn: genetic code 32");
+    if (program === "blastn") {
+      assert.ok(flags.includes("-template_type") && flags.includes("-template_length"), "blastn: dc-megablast templates");
+      const task = description.parameters.find((parameter) => parameter.flag === "-task");
+      assert.ok(task.help.includes("dc-megablast") && task.help.includes("blastn-short"), "blastn: tasks in -task's help");
+    }
   }
   assert.equal(reactor.call("losat_web2_describe", "blastx").status, -1, "blastx joins in SX");
   // validate: accepted argv, and CLI errors with the CLI's words.
   assert.equal(reactor.call("losat_web2_validate", ["blastp", "-query", "q", "-subject", "s"].join("\0")).status, 0);
   for (const argv of [["blastp", "-query", "q", "-subject", "s", "-evalue", "abc"],
                       ["tblastn", "-query", "q", "-subject", "s", "-db_gencode", "7"],
-                      ["blastn", "-query", "q", "-subject", "s", "-nosuchoption", "1"]]) {
+                      ["blastn", "-query", "q", "-subject", "s", "-nosuchoption", "1"],
+                      ["blastn", "-query", "q", "-subject", "s", "-task", "dc-megablast", "-template_type", "coding"],
+                      ["blastn", "-query", "q", "-subject", "s", "-task", "dc-megablast", "-template_type", "coding",
+                       "-template_length", "17"],
+                      ["blastn", "-query", "q", "-subject", "s", "-task", "rmblastn"]]) {
     const validated = reactor.call("losat_web2_validate", argv.join("\0"));
     assert.equal(validated.status, -1, argv.join(" "));
     const cli = require("node:child_process").spawnSync(native, argv);
@@ -201,6 +213,13 @@ function checkSurface(reactor, native) {
     assert.equal(validated.error, cli.stderr.toString(), `${argv.join(" ")}: the CLI's error`);
   }
   assert.match(reactor.call("losat_web2_validate", ["blastp", "-query", "q", "-subject", "s", "-outfmt", "6"].join("\0")).error, /not accepted/);
+  // The tasks of Session SD and NCBI's option check of a template (blast_options.c:1247-1261).
+  for (const task of ["dc-megablast", "blastn-short"]) {
+    assert.equal(reactor.call("losat_web2_validate", ["blastn", "-query", "q", "-subject", "s", "-task", task].join("\0")).status, 0, task);
+  }
+  assert.match(reactor.call("losat_web2_validate", ["blastn", "-query", "q", "-subject", "s", "-task", "dc-megablast",
+                                                    "-word_size", "13"].join("\0")).error,
+               /^BLAST query\/options error: Invalid discontiguous template parameters: word size must be either 11 or 12/);
   // register and scan agree on a multi-record input, in chunks of any size.
   const input = fs.readFileSync(path.join(ROOT, "docs/evidence/tlosan_stage_c/multi_query_20260924/query.faa"));
   const registered = reactor.call("losat_web2_register", "tblastn", 0, input);

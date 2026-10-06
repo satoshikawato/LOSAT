@@ -39,14 +39,16 @@
 | S07++b | [E2f の仕上げ](session_s07ppb_e2f_close.md) | E2f | 独立監査の第 2 回で supported、ゲート記録、`main` への merge | 完了（2026-10-01、[ゲート記録](../evidence/losat_web_e2f/README.md)） |
 | S07+++ | [BLASTN の経路の棚卸しと一括の移植](session_s07ppp_e2g_blastn_inventory.md) | E2g | NCBI の BLASTN の経路の関数を棚卸しし、未移植と差のある移植を一括で transpile する（DW-12。S12 の前に終える） | 完了（2026-10-02、[ゲート記録](../evidence/losat_web_e2g/README.md)。CI の整備、棚卸し `INVENTORY.tsv`、予備の hit list の単体試験。transpile と完了条件は S07+++b） |
 | S07+++b | [E2g の続き：一括の transpile、試験、独立監査](session_s07pppb_e2g_transpile.md) | E2g | T1〜T13・R1・R2・V1 の移植、S07+ と S07++ の全検査・Gate A・fixture に退行なし、V-PERF、棚卸しの表を基準にした独立監査、毎晩の WASI の TIMEOUT の解消 | 完了（2026-10-02、[ゲート記録](../evidence/losat_web_e2g/README.md)。T1〜T14・R1〜R3・V1 の移植、NCBI の不具合の扱いの保守者の判断（DW-15、`PD-LOSAT-NCBI-DEFECTS`）、独立監査は第 4 回で supported） |
-| S08 | [TBLASTX outfmt 0/7](session_s08_e2b_tblastx_outfmt0_7.md) | E2b | NCBI とバイト一致（承認済みの例外を除く） | 一部完了（2026-10-03、[ゲート記録](../evidence/losat_web_e2b/README.md)。移植、fixture、棚卸し、独立監査の第 1・2 回と指摘への対応。最後のゲートと完了条件は S08b） |
-| S08b | [E2b の仕上げ](session_s08b_e2b_final_gates.md) | E2b | 最後のコミットの全ゲート、独立監査の第 3 回、Gate A、V-PERF、TBLASTX の全升目の V-ABI、`main` への PR | 未着手 |
-| SD | [BLASTN の dc-megablast と blastn-short](session_sd_e2i_blastn_dc_megablast.md) | E2i | `-task dc-megablast`（discontiguous の template の lookup と走査、`-template_type`・`-template_length`）と `-task blastn-short` が NCBI とバイト一致。保守者の依頼（DW-18）。S08b の次、S08+ の前 | 未着手 |
-| S08+ | [BLASTP・TBLASTN・TBLASTX の既定以外のオプション](session_s08p_e2e_protein_options.md) | E2e | 既定以外のオプションが NCBI と同じか、明示的に拒否される（S07+ で追加、TD-13。S12 の前に終える） | 未着手 |
+| S08 | [TBLASTX outfmt 0/7](session_s08_e2b_tblastx_outfmt0_7.md) | E2b | NCBI とバイト一致（承認済みの例外を除く） | 完了（2026-10-03、S08b と合わせて。[ゲート記録](../evidence/losat_web_e2b/README.md)） |
+| S08b | [E2b の仕上げ](session_s08b_e2b_final_gates.md) | E2b | 最後のコミットの全ゲート、独立監査の第 3 回、Gate A、V-PERF、TBLASTX の全升目の V-ABI、`main` への PR | 完了（2026-10-03、[ゲート記録](../evidence/losat_web_e2b/README.md)。第 3 回の監査の指摘を `bc521f450` で直し、4 観点とも supported。保守者の判断 DW-17。V-PERF の `tblastx-multi` は保守者の確認待ち） |
+| SD | [BLASTN の dc-megablast と blastn-short](session_sd_e2i_blastn_dc_megablast.md) | E2i | `-task dc-megablast`（discontiguous の template の lookup と走査、`-template_type`・`-template_length`）と `-task blastn-short` が NCBI とバイト一致。保守者の依頼（DW-18）。S08b の次、S08+ の前 | 完了（2026-10-04、[ゲート記録](../evidence/losat_web_e2i/README.md)。棚卸しの一括の移植、template の全組の fixture、独立監査は第 1 回で 4 観点とも supported） |
+| S08+ | [BLASTP・TBLASTN・TBLASTX の既定以外のオプション](session_s08p_e2e_protein_options.md) | E2e | 既定以外のオプションが NCBI と同じか、明示的に拒否される（S07+ で追加、TD-13。S12 の前に終える） | 完了（2026-10-05、S08+a・S08+b とともに、[ゲート記録](../evidence/losat_web_e2e/README.md)） |
+| S08+a | [E2e：第 1 回の独立監査の残件](session_s08pa_e2e_audit_open_items.md) | E2e | 監査の TN-2・TN-4・TN-5・RP-4 などを NCBI と同じにするか明示的に拒否（別の worktree・ブランチ、S08+ の仕上げと並行。保守者の指示、2026-10-04） | 完了（2026-10-04、ブランチ `feature/losat-web-gui-s08pa` の `c6fb13915`、[記録](../evidence/losat_web_e2e/s08pa/NOTES.md)。TN-1 の残り・TN-2・TN-4・TN-5・RP-4 の query の分割を移植、`-out -version` は明示的な拒否。本線への merge は S08+b） |
+| S08+b | [E2e の仕上げ](session_s08pb_e2e_close.md) | E2e | S08+a の merge、最後のコミットの全ゲート・Gate A・V-ABI・v1 の WASI の行列、独立監査の第 2 回、V-PERF、ゲート記録、`main` への PR | 完了（2026-10-05、[ゲート記録](../evidence/losat_web_e2e/README.md)。保守者の判断 DW-19。`main` への PR は記録に） |
 | S09 | [ブラウザでの実行基盤](session_s09_w1_browser_runtime.md) | W1 | V-BR、前処理の割合の実測（アプリ側。S10 の後、入口の条件は S08） | 着手（2026-10-03、S08b と並行。保守者の指示） |
 | S09+ | 前処理キャッシュ（条件付き） | R2 | DW-8 の条件を満たした program だけ。S09 の結果で行を足す | 未定 |
 | S10 | [データ層](session_s10_w2_data_layer.md) | W2 | BlockStore の契約試験、回収・保護・容量不足（アプリ側。S09 より先に行う） | 完了（2026-09-30、[ゲート記録](../evidence/losat_web_w2/README.md)） |
-| S11 | [領域の指定](session_s11_e2d_query_subject_loc.md) | E2d | `-query_loc` / `-subject_loc` が NCBI とバイト一致 | 未着手 |
+| S11 | [領域の指定](session_s11_e2d_query_subject_loc.md) | E2d | `-query_loc` / `-subject_loc` が NCBI とバイト一致 | 完了（2026-10-06、[ゲート記録](../evidence/losat_web_e2d/README.md)。4 program への範囲指定の移植、fixture 53 と回帰 fixture 35、範囲の sweep 1860 件で差 0、独立監査は 4 観点と再監査 2 回（指摘 A-1 と F-1 を直した）） |
 | S12 | [検索画面](session_s12_w3_search_ui.md) | W3 | 研究作業と境界条件の E2E | 未着手 |
 | S13 | [結果画面](session_s13_w4_results_ui.md) | W4 | 5 program の E2E、HSP と行・節の対応 | 未着手 |
 | S14 | [抽出と候補](session_s14_w5_extraction_candidates.md) | W5 | 原配列との一致 | 未着手 |

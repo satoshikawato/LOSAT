@@ -1,0 +1,13 @@
+output_sha256 differs: ('blastp', 'all_hsp_forward_serial.fmt0')
+output_sha256 differs: ('blastp', 'all_hsp_forward_thread4.fmt0')
+output_sha256 differs: ('blastp', 'all_hsp_reverse_limit5_serial.fmt0')
+output_sha256 differs: ('blastp', 'all_hsp_self_serial.fmt0')
+output_sha256 differs: ('blastp', 'pairwise_default_serial.fmt0')
+output_sha256 differs: ('blastp', 'pairwise_default_thread4.fmt0')
+stderr_sha256 differs: ('blastp', 'pairwise_limit1_serial')
+output_sha256 differs: ('blastp', 'pairwise_limit1_serial.fmt0')
+stderr_sha256 differs: ('blastp', 'pairwise_limit1_serial.fmt0')
+stderr_sha256 differs: ('blastp', 'pairwise_limit1_serial.fmt7')
+output_sha256 differs: ('blastp', 'pairwise_limit5_serial.fmt0')
+output_sha256 differs: ('blastp', 'pairwise_nohit_serial.fmt0')
+236 shared cases, 12 differences

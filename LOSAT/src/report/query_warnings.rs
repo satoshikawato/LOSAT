@@ -47,6 +47,80 @@ impl QueryWarnings<'_> {
     }
 }
 
+/// Puts the reader's warnings about the query titles (`title_warning`) before the report of
+/// the first query of each query batch. NCBI reads the queries one batch at a time, after
+/// the outfmt 0 prolog and the reports of the previous batch, and its reader writes the
+/// warnings of a batch's records as it reads them. `lengths` are the query lengths and
+/// `batch_size` the residues of a batch (`query_batches`).
+///
+/// NCBI reference: c++/src/app/blast/blastp_app.cpp:253-259
+/// ```c++
+///         formatter.PrintProlog();
+///
+/// 	BLAST_PROF_ADD( BATCH_SIZE, (int)input.GetBatchSize() );
+///         /*** Process the input ***/
+///         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
+/// 	    BLAST_PROF_START( APP.LOOP.PRE );
+///             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
+/// ```
+pub fn prepend_batch_title_warnings(
+    lines: &mut [Vec<u8>],
+    queries: &[fasta::Record],
+    lengths: &[usize],
+    batch_size: usize,
+    title_warning: impl Fn(&fasta::Record) -> &'static [u8],
+) {
+    for range in crate::blastinput::query_batch::query_batches(lengths, batch_size) {
+        let mut warnings: Vec<u8> = queries[range.clone()]
+            .iter()
+            .flat_map(|query| title_warning(query).iter().copied())
+            .collect();
+        if let Some(first) = lines.get_mut(range.start) {
+            warnings.append(first);
+            *first = warnings;
+        }
+    }
+}
+
+/// `prepend_batch_title_warnings` for the batches of a query input read with
+/// `-query_loc` (`seq_range::QueryInput::batches`): NCBI's reader reads every record of a
+/// batch, also those it skips, so their title warnings go before the first searched query
+/// of the batch. `lines` are by searched query. Returns the title warnings of the last
+/// batch when it has no searched query: NCBI writes them as it reads that batch, then
+/// stops (`Empty CBlastQueryVector`).
+///
+/// NCBI reference: c++/src/algo/blast/blastinput/blast_input.cpp:144-155
+/// ```c++
+///         CRef<CBlastSearchQuery> q;
+///         try { q.Reset(m_Source->GetNextSequence(scope)); }
+///         ...
+///         catch (const exception&) {
+///             continue; //SB-2307. ignore well formed, not found accession
+///         }
+/// ```
+pub fn prepend_ranged_batch_title_warnings(
+    lines: &mut [Vec<u8>],
+    input: &[fasta::Record],
+    batches: &[crate::blastinput::seq_range::RangedBatch],
+    title_warning: impl Fn(&fasta::Record) -> &'static [u8],
+) -> Vec<u8> {
+    let mut unsearched = Vec::new();
+    for batch in batches {
+        let mut warnings: Vec<u8> = input[batch.input.clone()]
+            .iter()
+            .flat_map(|query| title_warning(query).iter().copied())
+            .collect();
+        match lines.get_mut(batch.searched.start) {
+            Some(first) if !batch.searched.is_empty() => {
+                warnings.append(first);
+                *first = warnings;
+            }
+            _ => unsearched = warnings,
+        }
+    }
+    unsearched
+}
+
 /// The warning for a query whose ungapped Karlin-Altschul parameters cannot be computed.
 ///
 /// NCBI reference: c++/src/algo/blast/core/blast_stat.c:2783-2790
@@ -96,6 +170,59 @@ impl QueryWarnings<'_> {
 /// `index` is the 0-based position of the query in the input; `program` is the lower-case
 /// program name that NCBI's diagnostics print (`[tblastn]`, `[blastn]`).
 pub fn invalid_query_warning(program: &str, index: usize, query: &fasta::Record) -> Vec<u8> {
+    query_warning(program, index, query, &[INVALID_QUERY_MESSAGE.to_string()])
+}
+
+/// NCBI's `kBlastErrMsg_CantCalculateUngappedKAParams` (see `invalid_query_warning`).
+pub const INVALID_QUERY_MESSAGE: &str = "Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options";
+
+/// The warning line of query `index` with its warning messages, each followed by a space
+/// (`GetWarningStrings`, see `invalid_query_warning`); empty when there is none.
+///
+/// NCBI keeps a query's messages sorted and without repeats. Every message of one query
+/// has the same severity (warning) and the same error id (the query's index), so NCBI's
+/// `operator<` reduces to the comparison of the message strings.
+///
+/// NCBI reference: c++/src/algo/blast/api/blast_aux.cpp:1043-1054
+/// ```c++
+/// TSearchMessages::RemoveDuplicates()
+/// {
+///     NON_CONST_ITERATE(TSearchMessages, sm, (*this)) {
+///         if (sm->empty()) {
+///             continue;
+///         }
+///         sort(sm->begin(), sm->end(), TQueryMessagesLessComparator());
+///         TQueryMessages::iterator new_end =
+///             unique(sm->begin(), sm->end(), TQueryMessagesEqualComparator());
+///         sm->erase(new_end, sm->end());
+/// ```
+/// NCBI reference: c++/include/algo/blast/api/blast_types.hpp:295-304
+/// ```c++
+/// CSearchMessage::operator<(const CSearchMessage& rhs) const
+/// {
+///     if (m_ErrorId < rhs.m_ErrorId ||
+///         m_Severity < rhs.m_Severity ||
+///         m_Message < rhs.m_Message) {
+///         return true;
+/// ```
+/// NCBI reference: c++/src/algo/blast/api/blast_setup_cxx.cpp:620-622
+/// ```c++
+///                     CRef<CSearchMessage> m
+///                         (new CSearchMessage(eBlastSevWarning, index, warnings));
+///                     messages[index].push_back(m);
+/// ```
+pub fn query_warning(
+    program: &str,
+    index: usize,
+    query: &fasta::Record,
+    messages: &[String],
+) -> Vec<u8> {
+    if messages.is_empty() {
+        return Vec::new();
+    }
+    let mut messages = messages.to_vec();
+    messages.sort();
+    messages.dedup();
     let mut query_id = format!("Query_{} {}", index + 1, query.id()).into_bytes();
     if let Some(desc) = query.desc() {
         query_id.extend_from_slice(b" ");
@@ -107,8 +234,54 @@ pub fn invalid_query_warning(program: &str, index: usize, query: &fasta::Record)
     }
     let mut warning = format!("Warning: [{program}] ").into_bytes();
     warning.extend_from_slice(&query_id);
-    warning.extend_from_slice(b": Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options \n");
+    warning.extend_from_slice(b": ");
+    for message in &messages {
+        warning.extend_from_slice(message.as_bytes());
+        warning.push(b' ');
+    }
+    warning.push(b'\n');
     warning
+}
+
+/// The warning of a protein query with pyrrolysine (O), which NCBI reads as X, or `None`.
+///
+/// NCBI reference: c++/src/algo/blast/api/blast_setup_cxx.cpp:920-932
+/// ```c
+///     if (warnings && replaced_residues.size() > 0) {
+///         *warnings += "One or more O characters replaced by X for ";
+///         *warnings += "alignment score calculations at positions ";
+///         *warnings += NStr::IntToString(replaced_residues[0]);
+///         for (i = 1; i < min(kMaxResiduesToWarnAbout, replaced_residues.size());
+///              i++) {
+///             *warnings += ", " + NStr::IntToString(replaced_residues[i]);
+///         }
+///         if (replaced_residues.size() > kMaxResiduesToWarnAbout) {
+///             *warnings += ",... (only first ";
+///             *warnings += NStr::SizetToString(kMaxResiduesToWarnAbout);
+///             *warnings += " shown)";
+///         }
+///     }
+/// ```
+/// `query_warning` puts the query's messages in NCBI's order (its Karlin-Altschul message
+/// sorts before this one).
+pub fn replaced_o_message(sequence: &[u8]) -> Option<String> {
+    let positions: Vec<usize> = sequence
+        .iter()
+        .enumerate()
+        .filter(|(_, residue)| residue.eq_ignore_ascii_case(&b'O'))
+        .map(|(position, _)| position)
+        .collect();
+    let first = *positions.first()?;
+    let mut message = format!(
+        "One or more O characters replaced by X for alignment score calculations at positions {first}"
+    );
+    for position in positions.iter().take(20).skip(1) {
+        message.push_str(&format!(", {position}"));
+    }
+    if positions.len() > 20 {
+        message.push_str(",... (only first 20 shown)");
+    }
+    Some(message)
 }
 
 /// The warning for a hit list size below 5.
@@ -125,6 +298,48 @@ pub fn few_matches_warning(program: &str) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn messages_of_a_query_are_in_ncbis_sorted_order() {
+        // NCBI blast_aux.cpp:1043-1054 sorts a query's messages (same error id and
+        // severity, so by text) and removes repeats.
+        let query = fasta::Record::with_attrs("q1", None, b"OOO");
+        let o = replaced_o_message(b"OOO").unwrap();
+        let line = query_warning(
+            "blastp",
+            0,
+            &query,
+            &[o.clone(), INVALID_QUERY_MESSAGE.to_string(), o.clone()],
+        );
+        let text = String::from_utf8(line).unwrap();
+        assert!(
+            text.starts_with("Warning: [blastp] Query_1 q1: Could not calculate"),
+            "{text}"
+        );
+        assert_eq!(text.matches("One or more O").count(), 1, "{text}");
+    }
+
+    #[test]
+    fn title_warnings_go_before_the_first_report_of_each_batch() {
+        let records: Vec<_> = ["a", "b", "c"]
+            .iter()
+            .map(|id| fasta::Record::with_attrs(id, None, b"ACDEFGHIKL"))
+            .collect();
+        let mut lines = vec![b"w0\n".to_vec(), Vec::new(), b"w2\n".to_vec()];
+        // Batches of 15 residues: [a, b] and [c].
+        prepend_batch_title_warnings(&mut lines, &records, &[10, 10, 10], 15, |record| {
+            if record.id() == "c" {
+                b""
+            } else {
+                b"T\n"
+            }
+        });
+        assert_eq!(
+            lines,
+            vec![b"T\nT\nw0\n".to_vec(), Vec::new(), b"w2\n".to_vec()]
+        );
+    }
+
     use super::*;
 
     // Query_1 + FASTA title is shortened after 35 bytes, then the invalid-Karlin

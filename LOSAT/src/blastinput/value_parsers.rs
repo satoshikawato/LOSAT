@@ -230,19 +230,47 @@ pub fn ncbi_integer(value: &str) -> Result<i32, String> {
 ///         }
 /// ```
 pub fn ncbi_double(value: &str, program: &str) -> Result<f64, String> {
+    ncbi_string_to_double(value).map_err(|error| match error {
+        NcbiDoubleError::Invalid => "expected a number".into(),
+        NcbiDoubleError::Unsupported => format!("expected a decimal number (other forms, which NCBI BLAST+ may read, are not supported by LOSAT's {program})"),
+    })
+}
+
+/// Why `ncbi_string_to_double` does not read a value: NCBI's conversion error (the first
+/// character is not a digit, a point or a sign), or a form that LOSAT does not read
+/// (hexadecimal numbers, an exponent mark without digits).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NcbiDoubleError {
+    Invalid,
+    Unsupported,
+}
+
+/// `NStr::StringToDouble(value, fDecimalPosixOrLocal)` for the forms that LOSAT reads (see
+/// `ncbi_double`).
+///
+/// NCBI reference: c++/src/corelib/ncbistr.cpp:1313-1318
+/// ```c
+///     // Because strtod() may just skip such symbols.
+///     if (!(flags & NStr::fAllowLeadingSymbols)) {
+///         char c = str[pos];
+///         if ( !isdigit((unsigned char)c)  &&  !s_IsDecimalPoint(c,flags)  &&  c != '-'  &&  c != '+') {
+///             S2N_CONVERT_ERROR_INVAL(double);
+///         }
+/// ```
+pub fn ncbi_string_to_double(value: &str) -> Result<f64, NcbiDoubleError> {
     if !value
         .chars()
         .next()
         .is_some_and(|first| first.is_ascii_digit() || matches!(first, '.' | '-' | '+'))
     {
-        return Err("expected a number".into());
+        return Err(NcbiDoubleError::Invalid);
     }
     // glibc's strtod reads `nan(...)` as NaN; NCBI then checks that it ended at the end of
     // the string (ncbistr.cpp:1332-1376).
     let unsigned = value.trim_start_matches(['+', '-']);
     if unsigned.len() + 1 == value.len()
         && unsigned.len() >= 5
-        && unsigned[..4].eq_ignore_ascii_case("nan(")
+        && unsigned.as_bytes()[..4].eq_ignore_ascii_case(b"nan(")
         && unsigned.ends_with(')')
         && unsigned[4..unsigned.len() - 1]
             .bytes()
@@ -250,9 +278,81 @@ pub fn ncbi_double(value: &str, program: &str) -> Result<f64, String> {
     {
         return Ok(f64::NAN);
     }
-    value.parse::<f64>().map_err(|_| {
-        format!("expected a decimal number (other forms, which NCBI BLAST+ may read, are not supported by LOSAT's {program})")
-    })
+    value
+        .parse::<f64>()
+        .map_err(|_| NcbiDoubleError::Unsupported)
+}
+
+/// Whether glibc's `strtod` reads all of `value` (the C locale), as `NStr::StringToDouble`
+/// with its default flags requires (the SEG locut and hicut, blast_args.cpp:405-406; an
+/// argument of type double also tries NCBI's own reader, `fDecimalPosixOrLocal`, which
+/// reads more, such as `1e`): NCBI fails the conversion of a value that it does not end at.
+/// The forms are a sign, then a decimal number (digits with one optional point, at least
+/// one digit, and an optional exponent with digits), a hexadecimal number (`0x`, hex digits
+/// with one optional point, at least one digit, and an optional binary exponent `p` with
+/// digits), `inf`, `infinity`, `nan` or `nan(` letters, digits and `_` `)`, ignoring case.
+///
+/// NCBI reference: c++/src/corelib/ncbistr.cpp:1332-1343,1367-1374
+/// ```c
+///         n = strtod(begptr, &endptr);
+/// ...
+///     if ( !endptr  ||  endptr == begptr ) {
+///         S2N_CONVERT_ERROR(double, kEmptyStr, EINVAL, s_DiffPtr(endptr, begptr) + pos);
+///     }
+/// ...
+///     pos += s_DiffPtr(endptr, begptr);
+/// ...
+///     CHECK_ENDPTR(double);
+/// ```
+pub fn strtod_reads_whole(value: &str) -> bool {
+    let rest = value.strip_prefix(['+', '-']).unwrap_or(value).as_bytes();
+    let lower = rest.to_ascii_lowercase();
+    if lower == b"inf" || lower == b"infinity" || lower == b"nan" {
+        return true;
+    }
+    if let Some(inner) = lower
+        .strip_prefix(b"nan(")
+        .and_then(|r| r.strip_suffix(b")"))
+    {
+        return inner
+            .iter()
+            .all(|&b| b.is_ascii_alphanumeric() || b == b'_');
+    }
+    let (digits, exponent, hex): (fn(&u8) -> bool, u8, bool) = match lower.strip_prefix(b"0x") {
+        Some(_) => (u8::is_ascii_hexdigit, b'p', true),
+        None => (u8::is_ascii_digit, b'e', false),
+    };
+    let mantissa_and_exponent = if hex { &lower[2..] } else { &lower[..] };
+    let mut index = 0;
+    let mut seen_digit = false;
+    let mut seen_point = false;
+    while let Some(byte) = mantissa_and_exponent.get(index) {
+        if digits(byte) {
+            seen_digit = true;
+        } else if *byte == b'.' && !seen_point {
+            seen_point = true;
+        } else {
+            break;
+        }
+        index += 1;
+    }
+    if !seen_digit {
+        return false;
+    }
+    let tail = &mantissa_and_exponent[index..];
+    if tail.is_empty() {
+        return true;
+    }
+    match tail.split_first() {
+        Some((&mark, power)) if mark == exponent => {
+            let power = power
+                .strip_prefix(b"+")
+                .or_else(|| power.strip_prefix(b"-"))
+                .unwrap_or(power);
+            !power.is_empty() && power.iter().all(u8::is_ascii_digit)
+        }
+        _ => false,
+    }
 }
 
 /// An integer argument with a constraint: NCBI's constraint reads the value again with
@@ -284,8 +384,9 @@ fn ncbi_constrained_integer(value: &str) -> Result<i32, String> {
     ncbi_integer(value)
 }
 
-/// A BLASTN integer argument of `CArg_Integer` with NCBI's lower bound (`at_least`).
-fn blastn_integer_at_least(value: &str, at_least: i32) -> Result<i32, String> {
+/// An integer argument of `CArg_Integer` with NCBI's lower bound (`at_least`,
+/// `CArgAllowValuesGreaterThanOrEqual`).
+pub fn ncbi_integer_at_least(value: &str, at_least: i32) -> Result<i32, String> {
     let n = ncbi_constrained_integer(value)?;
     if n < at_least {
         return Err(format!("expected an integer >= {at_least}"));
@@ -293,8 +394,26 @@ fn blastn_integer_at_least(value: &str, at_least: i32) -> Result<i32, String> {
     Ok(n)
 }
 
+/// A non-negative integer argument (`CArg_Integer` with `CArgAllowValuesGreaterThanOrEqual(0)`),
+/// such as `-culling_limit`.
+///
+/// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3296-3302
+/// ```c
+///     arg_desc.AddOptionalKey(kArgCullingLimit, "int_value",
+///                      "If the query range of a hit is enveloped by that of at "
+///                      "least this many higher-scoring hits, delete the hit",
+///                      CArgDescriptions::eInteger);
+///     arg_desc.SetConstraint(kArgCullingLimit,
+///     // best hit algorithm arguments
+///                new CArgAllowValuesGreaterThanOrEqual(kDfltArgCullingLimit));
+/// ```
+pub fn nonnegative_ncbi_integer(value: &str) -> Result<i32, String> {
+    ncbi_integer_at_least(value, 0)
+}
+
 /// A BLASTN task: NCBI's blastn tasks (case-sensitive), of which LOSAT implements
-/// megablast and blastn and rejects the others explicitly.
+/// megablast, blastn, dc-megablast and blastn-short and rejects rmblastn (matrix scoring
+/// and masklevel) explicitly.
 ///
 /// NCBI reference: c++/src/algo/blast/api/blast_options_handle.cpp:211-222
 /// ```c
@@ -318,11 +437,90 @@ fn blastn_integer_at_least(value: &str, at_least: i32) -> Result<i32, String> {
 /// ```
 pub fn blastn_task(value: &str) -> Result<String, String> {
     match value {
-        "megablast" | "blastn" => Ok(value.to_string()),
-        "blastn-short" | "dc-megablast" | "rmblastn" => Err(format!(
-            "the task {value} is not supported by LOSAT's BLASTN (use megablast or blastn)"
+        "megablast" | "blastn" | "dc-megablast" | "blastn-short" => Ok(value.to_string()),
+        "rmblastn" => Err(format!(
+            "the task {value} is not supported by LOSAT's BLASTN (use megablast, blastn, dc-megablast or blastn-short)"
         )),
         _ => Err("expected one of blastn, blastn-short, dc-megablast, megablast, rmblastn".into()),
+    }
+}
+/// A discontiguous megablast template type: `coding`, `optimal` or `coding_and_optimal`.
+///
+/// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:688-693,708-714
+/// ```c
+/// /// Value to specify coding template type
+/// const char* kTemplType_Coding = "coding";
+/// /// Value to specify optimal template type
+/// const char* kTemplType_Optimal = "optimal";
+/// /// Value to specify coding+optimal template type
+/// const char* kTemplType_CodingAndOptimal = "coding_and_optimal";
+/// ...
+///     arg_desc.AddOptionalKey(kArgDMBTemplateType, "type",
+///                  "Discontiguous MegaBLAST template type",
+///                  CArgDescriptions::eString);
+///     arg_desc.SetConstraint(kArgDMBTemplateType, &(*new CArgAllow_Strings,
+///                                                   kTemplType_Coding,
+///                                                   kTemplType_Optimal,
+///                                                   kTemplType_CodingAndOptimal));
+/// ```
+/// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:747-752
+/// ```c
+///         if (type == kTemplType_Coding) {
+///             temp_type = eMBWordCoding;
+///         } else if (type == kTemplType_Optimal) {
+///             temp_type = eMBWordOptimal;
+///         } else if (type == kTemplType_CodingAndOptimal) {
+///             temp_type = eMBWordTwoTemplates;
+/// ```
+pub fn blastn_template_type(
+    value: &str,
+) -> Result<crate::algorithm::blastn::disc_lookup::DiscWordType, String> {
+    use crate::algorithm::blastn::disc_lookup::DiscWordType;
+    match value {
+        "coding" => Ok(DiscWordType::Coding),
+        "optimal" => Ok(DiscWordType::Optimal),
+        "coding_and_optimal" => Ok(DiscWordType::TwoTemplates),
+        _ => Err("expected one of coding, coding_and_optimal, optimal".into()),
+    }
+}
+/// A discontiguous megablast template length: 16, 18 or 21.
+///
+/// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:719-727
+/// ```c
+///     arg_desc.AddOptionalKey(kArgDMBTemplateLength, "int_value",
+///                  "Discontiguous MegaBLAST template length",
+///                  CArgDescriptions::eInteger);
+///     set<int> allowed_values;
+///     allowed_values.insert(16);
+///     allowed_values.insert(18);
+///     allowed_values.insert(21);
+///     arg_desc.SetConstraint(kArgDMBTemplateLength,
+///                            new CArgAllowIntegerSet(allowed_values));
+/// ```
+/// The constraint converts the value again with `NStr::StringToInt` in base 10, so a
+/// hexadecimal value that the integer argument reads fails it.
+///
+/// NCBI reference: c++/include/algo/blast/blastinput/blast_input_aux.hpp:214-222,239
+/// ```c
+///     virtual bool Verify(const string& value) const {                        \
+///         DataType value2check = String2DataTypeFn(value);                    \
+///         ITERATE(set<DataType>, itr, m_AllowedValues) {                      \
+///             if (*itr == value2check) {                                      \
+///                 return true;                                                \
+///             }                                                               \
+///         }                                                                   \
+///         return false;                                                       \
+///     }                                                                       \
+/// ...
+/// DEFINE_CARGALLOW_SET_CLASS(CArgAllowIntegerSet, int, NStr::StringToInt);
+/// ```
+/// `NStr::StringToInt` in base 10 reads what `i32::from_str` reads (an optional sign and
+/// ASCII digits, `ncbi_integer`).
+pub fn blastn_template_length(value: &str) -> Result<u8, String> {
+    ncbi_constrained_integer(value)?;
+    match value.parse::<i32>() {
+        Ok(n @ (16 | 18 | 21)) => Ok(n as u8),
+        _ => Err("expected one of 16, 18, 21".into()),
     }
 }
 /// A BLASTN word size: 4 or more (the upper bound, 100, is an option check,
@@ -335,17 +533,17 @@ pub fn blastn_task(value: &str) -> Result<String, String> {
 ///                                : new CArgAllowValuesGreaterThanOrEqual(4));
 /// ```
 pub fn blastn_word_size(value: &str) -> Result<usize, String> {
-    blastn_integer_at_least(value, 4).map(|n| n as usize)
+    ncbi_integer_at_least(value, 4).map(|n| n as usize)
 }
 /// A BLASTN count of 1 or more (`-num_threads`, `-max_target_seqs`, `-max_hsps`), as
 /// NCBI's arguments (blast_args.cpp:203-207,2731-2732,3162-3163).
 pub fn blastn_count(value: &str) -> Result<usize, String> {
-    blastn_integer_at_least(value, 1).map(|n| n as usize)
+    ncbi_integer_at_least(value, 1).map(|n| n as usize)
 }
 /// A BLASTN reward: 0 or more, as NCBI's argument (blast_args.cpp:658-659). A reward of 0
 /// is an option that LOSAT rejects before the search (`blastn/scoring.rs`).
 pub fn blastn_reward(value: &str) -> Result<i32, String> {
-    blastn_integer_at_least(value, 0)
+    ncbi_integer_at_least(value, 0)
 }
 /// A BLASTN penalty: 0 or less, as NCBI's argument (blast_args.cpp:651-652), whose
 /// constraint reads the value as the `>=` constraint does (blast_input_aux.hpp:135-138).
@@ -421,7 +619,7 @@ pub fn genetic_code(value: &str) -> Result<u8, String> {
     Ok(n)
 }
 
-// NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-50
+// NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-51
 // ```c++
 // const string kArgQuery("query");
 // const string kArgSubject("subject");
@@ -529,6 +727,100 @@ fn ncbi_file_name_length(path: &[u8]) -> usize {
 pub fn blastn_input_path() -> impl clap::builder::TypedValueParser<Value = PathBuf> {
     use clap::builder::TypedValueParser;
     clap::builder::OsStringValueParser::new().map(PathBuf::from)
+}
+
+/// An input file of any program (`blastn_input_path`).
+pub fn ncbi_input_path() -> impl clap::builder::TypedValueParser<Value = PathBuf> {
+    blastn_input_path()
+}
+
+/// An output file of any program (`blastn_output_path`).
+pub fn ncbi_output_path() -> impl clap::builder::TypedValueParser<Value = PathBuf> {
+    blastn_output_path()
+}
+
+/// A real argument of BLASTP (`ncbi_double`).
+pub fn blastp_real(value: &str) -> Result<f64, String> {
+    ncbi_double(value, "BLASTP")
+}
+
+/// A real argument of TBLASTN (`ncbi_double`).
+pub fn tblastn_real(value: &str) -> Result<f64, String> {
+    ncbi_double(value, "TBLASTN")
+}
+
+/// A real argument of TBLASTX (`ncbi_double`).
+pub fn tblastx_real(value: &str) -> Result<f64, String> {
+    ncbi_double(value, "TBLASTX")
+}
+
+/// A `-threshold` value: NCBI's constraint reads it again with `NStr::StringToDouble` and
+/// requires at least 0 (a NaN fails it).
+///
+/// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:578-583
+/// ```c
+///     arg_desc.AddOptionalKey(kArgWordScoreThreshold, "float_value",
+///                  "Minimum word score such that the word is added to the "
+///                  "BLAST lookup table",
+///                  CArgDescriptions::eDouble);
+///     arg_desc.SetConstraint(kArgWordScoreThreshold,
+///                            new CArgAllowValuesGreaterThanOrEqual(0));
+/// ```
+fn ncbi_threshold(value: &str, program: &str) -> Result<f64, String> {
+    let threshold = ncbi_double(value, program)?;
+    if !(threshold >= 0.0) {
+        return Err("Illegal value, expected greater or equal to 0".into());
+    }
+    Ok(threshold)
+}
+
+/// A BLASTP `-threshold` value (`ncbi_threshold`).
+pub fn blastp_threshold(value: &str) -> Result<f64, String> {
+    ncbi_threshold(value, "BLASTP")
+}
+
+/// A TBLASTN `-threshold` value (`ncbi_threshold`).
+pub fn tblastn_threshold_value(value: &str) -> Result<f64, String> {
+    ncbi_threshold(value, "TBLASTN")
+}
+
+/// A TBLASTX `-threshold` value (`ncbi_threshold`).
+pub fn tblastx_threshold(value: &str) -> Result<f64, String> {
+    ncbi_threshold(value, "TBLASTX")
+}
+
+/// A Boolean argument (`CArg_Boolean`, read with `NStr::StringToBool`:
+/// `blastinput/ncbi_environment.rs` `ncbi_string_to_bool`).
+///
+/// NCBI reference: c++/src/corelib/ncbiargs.cpp:489-497
+/// ```c
+/// inline CArg_Boolean::CArg_Boolean(const string& name, const string& value)
+///     : CArg_String(name, value)
+/// {
+///     try {
+///         m_Boolean = NStr::StringToBool(value);
+///     } catch (const CException& e) {
+///         NCBI_RETHROW(e,CArgException,eConvert, s_ArgExptMsg(GetName(),
+///             "Argument cannot be converted",value));
+///     }
+/// ```
+pub fn ncbi_boolean(value: &str) -> Result<bool, String> {
+    crate::blastinput::ncbi_environment::ncbi_string_to_bool(value)
+        .ok_or_else(|| format!("Argument cannot be converted: `{value}'"))
+}
+
+/// A protein `-word_size` (`CArgAllowValuesGreaterThanOrEqual(2)` for a protein query).
+///
+/// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:166-170
+/// ```c
+///         arg_desc.AddOptionalKey(kArgWordSize, "int_value", description,
+///                                 CArgDescriptions::eInteger);
+///         arg_desc.SetConstraint(kArgWordSize, m_QueryIsProtein
+///                                ? new CArgAllowValuesGreaterThanOrEqual(2)
+///                                : new CArgAllowValuesGreaterThanOrEqual(4));
+/// ```
+pub fn protein_word_size(value: &str) -> Result<i32, String> {
+    ncbi_integer_at_least(value, 2)
 }
 
 // LOSAT CLI v2 capability boundary: both inputs are required file paths.
@@ -765,6 +1057,10 @@ mod tests {
         ] {
             assert!(ncbi_double(value, "BLASTN").is_err(), "{value}");
         }
+        // A character of several bytes across the fourth byte (S11 audit F-1).
+        for value in ["-xx€", "-in\u{fffd}", "+\u{fffd}\u{fffd}", "-1éé"] {
+            assert!(ncbi_double(value, "BLASTN").is_err(), "{value}");
+        }
         for value in ["inf", "nan", " 1", "", "e5"] {
             assert_eq!(
                 ncbi_double(value, "BLASTN"),
@@ -776,6 +1072,35 @@ mod tests {
             assert!(ncbi_double(value, "BLASTN")
                 .unwrap_err()
                 .contains("not supported by LOSAT's BLASTN"));
+        }
+    }
+
+    #[test]
+    fn strtod_reads_whole_follows_glibc() {
+        for value in [
+            "1",
+            "+1",
+            "-.5",
+            "5.",
+            "1e5",
+            "1E-5",
+            "0x10",
+            "0X1p3",
+            "0x.8p-1",
+            "0x1.",
+            "inf",
+            "+INFINITY",
+            "-nan",
+            "nan(x_1)",
+            "1e400",
+        ] {
+            assert!(strtod_reads_whole(value), "{value}");
+        }
+        for value in [
+            "1e", "1e+", "2.5x", "2,2", ".", "+.", ".e1", "0x", "0x.", "0x1p", "1_0", "--5",
+            "2.5.5", "nan(", "nan(-)", "infx", "",
+        ] {
+            assert!(!strtod_reads_whole(value), "{value}");
         }
     }
 }

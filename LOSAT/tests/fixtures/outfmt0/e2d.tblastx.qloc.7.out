@@ -1,0 +1,23 @@
+# TBLASTX 2.17.0+
+# Query: xq1 nt query one
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/e2d_t_ts.fa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 17 hits found
+xq1	ts1	89.815	108	11	0	763	440	784	461	8.57e-83	259
+xq1	ts1	80.000	30	6	0	390	301	400	311	8.57e-83	50.6
+xq1	ts1	71.296	108	31	0	444	767	465	788	1.80e-66	175
+xq1	ts1	100.000	30	0	0	302	391	312	401	1.80e-66	79.9
+xq1	ts1	41.667	108	63	0	440	763	461	784	7.65e-30	100
+xq1	ts1	53.125	32	15	0	300	395	310	405	7.65e-30	31.8
+xq1	ts1	42.453	106	61	0	758	441	779	462	1.15e-27	78.5
+xq1	ts1	56.667	30	13	0	391	302	401	312	1.15e-27	46.4
+xq1	ts1	43.333	90	51	0	445	714	466	735	2.39e-16	68.0
+xq1	ts1	42.391	92	53	0	714	439	735	460	1.17e-15	65.7
+xq1	ts1	40.000	10	6	0	480	509	574	545	0.67	16.6
+xq1	ts1	26.923	26	19	0	561	638	148	225	1.3	15.7
+xq1	ts1	35.000	20	13	0	553	494	501	560	1.3	15.7
+xq1	ts1	18.182	11	9	0	690	722	588	556	1.7	15.3
+xq1	ts1	66.667	6	2	0	477	494	460	477	2.4	14.8
+xq1	ts1	66.667	9	3	0	531	505	582	608	6.2	13.4
+xq1	ts1	44.444	9	5	0	468	494	550	576	8.5	13.0
+# BLAST processed 1 queries

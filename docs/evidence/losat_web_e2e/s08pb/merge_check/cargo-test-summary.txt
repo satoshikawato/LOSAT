@@ -1,0 +1,24 @@
+     Running unittests src/lib.rs (/home/kawato/.cache/losat-web-gui-target/s08pb-test/debug/deps/LOSAT-0a48b7d25b44f124)
+test result: ok. 687 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 10.57s
+     Running unittests src/main.rs (/home/kawato/.cache/losat-web-gui-target/s08pb-test/debug/deps/LOSAT-e6ea6f26972184de)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/cli_smoke.rs (/home/kawato/.cache/losat-web-gui-target/s08pb-test/debug/deps/cli_smoke-6e1dfd5a07668592)
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+     Running tests/cli_v2.rs (/home/kawato/.cache/losat-web-gui-target/s08pb-test/debug/deps/cli_v2-c627586deac5cdfd)
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+     Running tests/compressed_lookup.rs (/home/kawato/.cache/losat-web-gui-target/s08pb-test/debug/deps/compressed_lookup-218dd0b75d1a1c57)
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+     Running tests/megablast_xdrop.rs (/home/kawato/.cache/losat-web-gui-target/s08pb-test/debug/deps/megablast_xdrop-84100e988fd937b6)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.27s
+     Running tests/run_local_blastn.rs (/home/kawato/.cache/losat-web-gui-target/s08pb-test/debug/deps/run_local_blastn-36299c211ba8fe14)
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.37s
+     Running tests/run_local_blastp.rs (/home/kawato/.cache/losat-web-gui-target/s08pb-test/debug/deps/run_local_blastp-3bd7b5f5567ff9b3)
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.92s
+     Running tests/run_local_tblastn.rs (/home/kawato/.cache/losat-web-gui-target/s08pb-test/debug/deps/run_local_tblastn-c9a5fc59f26ddeb4)
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.40s
+     Running tests/run_local_tblastx.rs (/home/kawato/.cache/losat-web-gui-target/s08pb-test/debug/deps/run_local_tblastx-ed8e765e695dde27)
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.47s
+     Running tests/unit_tests.rs (/home/kawato/.cache/losat-web-gui-target/s08pb-test/debug/deps/unit_tests-eaaec695773143fa)
+test result: ok. 178 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 32.47s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+exit 0

@@ -1,0 +1,31 @@
+[
+  {
+    "engine": "serial",
+    "threads": 1,
+    "program": "tblastx",
+    "cases": [
+      "d01_nz_self_code4"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/NZ_CP006932.fasta",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/NZ_CP006932.fasta",
+      "-query_gencode",
+      "4",
+      "-db_gencode",
+      "4"
+    ],
+    "formats": {
+      "0": "a52557f254f7882db0cccee1af05254062cfae0611550e53a12ef9c1b2b125ce",
+      "6": "2d26ca704ea2dd8764a863f24c20264e62ace04f311f23fee992b186966903e1",
+      "7": "3193a7ca5ee54f6d8c9e9387a23d2f09851c70ed1ccd9b51f597f0fe5ead2fde"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 94440
+  }
+]

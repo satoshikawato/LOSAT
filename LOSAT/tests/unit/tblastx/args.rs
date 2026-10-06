@@ -22,7 +22,7 @@ fn test_default_values() {
     let args = parse_args(&["-query", "query.fasta", "-subject", "subject.fasta"]);
 
     assert_eq!(args.evalue, 10.0);
-    assert_eq!(args.threshold, 13);
+    assert_eq!(args.threshold, 13.0);
     assert_eq!(args.word_size, 3);
     assert_eq!(args.num_threads, 1);
     assert_eq!(args.query_gencode, 1);
@@ -30,7 +30,7 @@ fn test_default_values() {
     // An omitted -max_target_seqs keeps NCBI's default hit list size of 500 (and the
     // pairwise report's 250 alignments).
     assert_eq!(args.max_target_seqs, None);
-    let params = args.seg.params().unwrap();
+    let params = args.seg_spec().unwrap().params().unwrap();
     assert_eq!((params.window, params.locut, params.hicut), (12, 2.2, 2.5));
 }
 
@@ -57,7 +57,7 @@ fn test_custom_threshold() {
         "-threshold",
         "20",
     ]);
-    assert_eq!(args.threshold, 20);
+    assert_eq!(args.threshold, 20.0);
 }
 
 #[test]
@@ -125,7 +125,7 @@ fn test_seg_options() {
         "-seg",
         "15 1.9 2.3",
     ]);
-    let params = args.seg.params().unwrap();
+    let params = args.seg_spec().unwrap().params().unwrap();
     assert_eq!((params.window, params.locut, params.hicut), (15, 1.9, 2.3));
 }
 
@@ -146,5 +146,5 @@ fn test_output_path() {
 fn test_query_and_subject_paths() {
     let args = parse_args(&["-query", "query.fasta", "-subject", "subject.fasta"]);
     assert_eq!(args.query, PathBuf::from("query.fasta"));
-    assert_eq!(args.subject, PathBuf::from("subject.fasta"));
+    assert_eq!(args.subject, Some(PathBuf::from("subject.fasta")));
 }

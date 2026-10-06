@@ -1,0 +1,9 @@
+== cargo clippy --locked --all-targets -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.18s
+exit 0
+== cargo clippy --locked --lib --target wasm32-wasip1 -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.47s
+exit 0
+== cargo clippy --locked --lib --target wasm32-wasip1-threads --features threads -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.93s
+exit 0

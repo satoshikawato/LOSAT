@@ -74,21 +74,39 @@ pub fn parse(words: &[&str]) -> Result<(Program, Commands), String> {
     Ok((program, cli.command))
 }
 
-/// `validate`: `parse`, then BLASTN's `-dust` value and the scoring options that NCBI
-/// rejects or that its Karlin-Altschul tables do not support, with NCBI's message (for a
-/// batch of one query), and TBLASTX's checks of its options alone (NCBI's `-evalue`
-/// check, the options that LOSAT's TBLASTX rejects).
+/// `validate`: `parse`, then the syntax of `-subject_loc` and `-query_loc`, BLASTN's
+/// `-dust` value and the scoring options that NCBI rejects or that its Karlin-Altschul
+/// tables do not support, with NCBI's message (for a batch of one query), and TBLASTX's
+/// checks of its options alone (NCBI's `-evalue` check, the options that LOSAT's TBLASTX
+/// rejects).
 /// `run` leaves them to the engine, which reports them as the CLI does.
 pub fn validate(words: &[&str]) -> Result<(), String> {
+    use LOSAT::blastinput::seq_range::{parse_optional_range, RangeRole};
+    // The ranges' syntax, in NCBI's order: the subject range where the subjects are read
+    // (before the other option handlers), the query range with the query options (the
+    // engine's option checks read it). Whether a range fits the records is checked by
+    // `run`, which has them.
+    let subject_range = |subject_loc: Option<&str>, program: &str| {
+        parse_optional_range(subject_loc, RangeRole::Subject, program).map(|_| ())
+    };
     match parse(words)? {
-        (_, Commands::Blastn(mut args)) => args
-            .resolve_dust()
+        (_, Commands::Blastn(mut args)) => subject_range(args.subject_loc.as_deref(), "BLASTN")
+            .and_then(|()| args.resolve_dust())
+            .and_then(|()| {
+                parse_optional_range(args.query_loc.as_deref(), RangeRole::Query, "BLASTN")
+                    .map(|_| ())
+            })
             .and_then(|()| LOSAT::algorithm::blastn::scoring::check_scoring(&args))
             .map_err(|error| format!("{error:#}"))?,
-        (_, Commands::Tblastx(args)) => {
-            LOSAT::algorithm::tblastx::blast_engine::check_options(&args)
-                .map_err(|error| format!("{error:#}"))?
-        }
+        (_, Commands::Tblastx(args)) => subject_range(args.subject_loc.as_deref(), "TBLASTX")
+            .and_then(|()| LOSAT::algorithm::tblastx::blast_engine::check_options(&args))
+            .map_err(|error| format!("{error:#}"))?,
+        (_, Commands::Blastp(args)) => subject_range(args.subject_loc.as_deref(), "BLASTP")
+            .and_then(|()| LOSAT::algorithm::blastp::blast_engine::check_options(&args))
+            .map_err(|error| format!("{error:#}"))?,
+        (_, Commands::Tblastn(args)) => subject_range(args.subject_loc.as_deref(), "TBLASTN")
+            .and_then(|()| LOSAT::algorithm::tblastn::check_options(&args))
+            .map_err(|error| format!("{error:#}"))?,
         _ => {}
     }
     Ok(())
@@ -346,6 +364,44 @@ mod tests {
             error.starts_with("BLAST engine error: Error: Substitution scores 1 and -6"),
             "{error}"
         );
+        // dc-megablast and blastn-short (Session SD): the task defaults and NCBI's template
+        // checks, with NCBI's messages (blast_options.c:1247-1261,1399-1413).
+        for task in ["dc-megablast", "blastn-short"] {
+            assert!(validate(&["blastn", "-query", "q", "-subject", "s", "-task", task]).is_ok());
+        }
+        let dc = [
+            "blastn",
+            "-query",
+            "q",
+            "-subject",
+            "s",
+            "-task",
+            "dc-megablast",
+        ];
+        let template = [
+            "-template_type",
+            "coding_and_optimal",
+            "-template_length",
+            "21",
+        ];
+        assert!(validate(&[&dc[..], &template[..], &["-word_size", "12"]].concat()).is_ok());
+        let error = validate(&[&dc[..], &["-word_size", "13"]].concat()).unwrap_err();
+        assert!(
+            error.starts_with(
+                "BLAST query/options error: Invalid discontiguous template parameters: word size must be either 11 or 12"
+            ),
+            "{error}"
+        );
+        let error =
+            validate(&[&blastn[..], &template[..], &["-word_size", "11"]].concat()).unwrap_err();
+        assert!(
+            error.starts_with(
+                "BLAST query/options error: Invalid lookup table type for discontiguous Mega BLAST"
+            ),
+            "{error}"
+        );
+        // The options require each other: a parser error, the CLI's message.
+        assert!(validate(&[&dc[..], &["-template_type", "coding"]].concat()).is_err());
         // validate reports TBLASTX's checks of its options alone, as the run does.
         let tblastx = ["tblastx", "-query", "q", "-subject", "s"];
         assert!(validate(&tblastx).is_ok());
@@ -355,7 +411,6 @@ mod tests {
                 ["-window_size", "0"],
                 "-window_size 0 (the one-hit word finder)",
             ),
-            (["-culling_limit", "2"], "-culling_limit 2 is not supported"),
         ] {
             let error = validate(&[&tblastx[..], &extra[..]].concat()).unwrap_err();
             assert!(error.starts_with(start), "{error}");

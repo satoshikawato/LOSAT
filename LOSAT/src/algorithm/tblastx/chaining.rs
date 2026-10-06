@@ -266,7 +266,9 @@ pub fn chain_and_filter_hsps_protein(
 
         // Output all HSPs that pass e-value threshold (no clustering)
         for ext_hit in group_hits {
-            if ext_hit.hit.e_value <= evalue_threshold {
+            // NCBI blast_hits.c:1996: `if (hsp->evalue > cutoff)` removes the HSP, so a NaN
+            // cutoff keeps it.
+            if !(ext_hit.hit.e_value > evalue_threshold) {
                 result_hits.push(ext_hit);
             }
         }

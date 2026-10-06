@@ -1,5 +1,6 @@
 //! Source-derived TBLASTN Kappa redo parameters for local subjects.
 
+use crate::core::blast_util::ncbi_int4_from_double;
 use std::cell::Cell;
 
 use anyhow::{ensure, Context, Result};
@@ -32,16 +33,18 @@ use crate::utils::matrix::BLASTAA_SIZE;
 // params->gap_x_dropoff_final = (Int4)
 //     MAX(options->gap_x_dropoff_final*NCBIMATH_LN2/min_lambda,
 //         params->gap_x_dropoff);
-#[allow(dead_code)] // Calculated at extension-parameter setup before Kappa.
 pub(super) fn local_extension_final_xdrop(
     prelim_bits: f64,
     final_bits: f64,
     min_lambda: f64,
 ) -> Result<i32> {
     ensure!(min_lambda > 0.0, "TBLASTN gapped lambda must be positive");
-    let prelim = ((prelim_bits * std::f64::consts::LN_2) / min_lambda) as i32;
-    let final_drop = ((final_bits * std::f64::consts::LN_2) / min_lambda) as i32;
-    Ok(final_drop.max(prelim))
+    // The MAX is taken of doubles and then converted as the x86-64 build does
+    // (`core/blast_util.rs` `ncbi_int4_from_double`: INT_MIN beyond Int4).
+    let prelim = ncbi_int4_from_double((prelim_bits * std::f64::consts::LN_2) / min_lambda);
+    Ok(ncbi_int4_from_double(
+        ((final_bits * std::f64::consts::LN_2) / min_lambda).max(f64::from(prelim)),
+    ))
 }
 
 #[allow(dead_code)] // The public local-subject path stays gated through Stage E.
@@ -116,7 +119,10 @@ pub(super) fn local_kappa_redo_params(
     // gapping_params->x_dropoff = (Int4)
     //     MAX(options->gap_x_dropoff_final*NCBIMATH_LN2/min_lambda,
     //         extendParams->gap_x_dropoff_final);
-    let redo_xdrop = ((final_xdrop_bits * std::f64::consts::LN_2) / scaled_lambda) as i32;
+    let redo_xdrop = ncbi_int4_from_double(
+        ((final_xdrop_bits * std::f64::consts::LN_2) / scaled_lambda)
+            .max(f64::from(extension_final_xdrop)),
+    );
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2833-2852;
     // blast_kappa.c:2216-2231:
     // Blast_ScoreBlkKbpIdealCalc(sbp);
@@ -137,7 +143,7 @@ pub(super) fn local_kappa_redo_params(
             gap_open: ((gap_open as f64) * scale).round() as i32,
             gap_extend: ((gap_extend as f64) * scale).round() as i32,
             decline_align: 0,
-            x_dropoff: redo_xdrop.max(extension_final_xdrop),
+            x_dropoff: redo_xdrop,
             context: Cell::new(None),
         },
         compo_adjust_mode: mode,

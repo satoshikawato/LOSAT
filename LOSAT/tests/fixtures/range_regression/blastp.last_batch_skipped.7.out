@@ -1,0 +1,16 @@
+# BLASTP 2.17.0+
+# Query: A recA
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/e2d_p_s3.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 4 hits found
+A	BDT62128.1	55.224	201	73	2	100	300	109	292	2.25e-75	229
+A	BDT62128.1	42.308	26	13	1	148	171	42	67	0.088	21.6
+A	BDT62128.1	38.095	21	12	1	272	292	60	79	6.2	15.8
+A	BDT62135.1	35.714	14	9	0	234	247	125	138	9.4	15.0
+# BLASTP 2.17.0+
+# Query: B recB
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/e2d_p_s3.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 2 hits found
+B	BDT62181.1	45.455	11	6	0	250	260	330	340	0.73	18.9
+B	BDT62135.1	24.324	37	27	1	105	140	305	341	1.3	17.7

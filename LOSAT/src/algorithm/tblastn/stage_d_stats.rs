@@ -73,6 +73,9 @@ pub(super) struct LocalParameterOptions<'a> {
     pub word_xdrop_bits: f64,
     pub scale_factor: f64,
     pub gumbel: Option<&'a BlastGumbelBlk>,
+    // NCBI c++/src/algo/blast/core/blast_setup.c:676-697: the options' effective search
+    // spaces (`searchsp_eff`), which NCBI sets from the whole batch for a query chunk.
+    pub eff_searchsp_override: Option<&'a [i64]>,
 }
 
 // NCBI c++/src/algo/blast/core/blast_setup.c:964-985,1001-1024:
@@ -109,13 +112,72 @@ pub(super) fn local_subject_effective_lengths(
     db_num_seqs: usize,
     gapped_params: &[KarlinParams],
 ) -> Vec<LocalContextLength> {
+    local_subject_effective_lengths_with_search_spaces(
+        query_contexts,
+        subject_nt_length,
+        db_num_seqs,
+        gapped_params,
+        None,
+    )
+}
+
+// NCBI reference: c++/src/algo/blast/core/blast_setup.c:676-697
+// ```c
+// static Int8 s_GetEffectiveSearchSpaceForContext(
+//                         const BlastEffectiveLengthsOptions* eff_len_options,
+//                         int context_index, Blast_Message **blast_message)
+// {
+//     Int8 retval = 0;
+//
+//     if (eff_len_options->num_searchspaces == 0) {
+//         retval = 0;
+//     } else if (eff_len_options->num_searchspaces == 1) {
+//         if (context_index != 0) {
+//             Blast_MessageWrite(blast_message, eBlastSevWarning, context_index,
+//                     "One search space is being used for multiple sequences");
+//         }
+//         retval = eff_len_options->searchsp_eff[0];
+//     } else if (eff_len_options->num_searchspaces > 1) {
+//         ASSERT(context_index < eff_len_options->num_searchspaces);
+//         retval = eff_len_options->searchsp_eff[context_index];
+// ```
+// NCBI reference: c++/src/algo/blast/core/blast_setup.c:778-847
+// ```c
+//       Int8 effective_search_space =
+//           s_GetEffectiveSearchSpaceForContext(eff_len_options, index,
+//                                               blast_message);
+//       ...
+//       if (query_info->contexts[index].is_valid &&
+//           ((query_length = query_info->contexts[index].query_length) > 0) ) {
+//          ...
+//          if (effective_search_space == 0) {
+//          ...
+//       query_info->contexts[index].eff_searchsp = effective_search_space;
+//       query_info->contexts[index].length_adjustment = length_adjustment;
+// ```
+// A query chunk reads the search spaces of the whole batch by its own context index (RP-4);
+// its length adjustment is that of the chunk's part. The warning is not written: a chunk
+// with one search space has one context.
+pub(super) fn local_subject_effective_lengths_with_search_spaces(
+    query_contexts: &[(usize, bool)],
+    subject_nt_length: usize,
+    db_num_seqs: usize,
+    gapped_params: &[KarlinParams],
+    search_spaces: Option<&[i64]>,
+) -> Vec<LocalContextLength> {
     assert_eq!(query_contexts.len(), gapped_params.len());
     assert!(db_num_seqs > 0);
     let db_length = (subject_nt_length / 3) as i64;
     query_contexts
         .iter()
         .zip(gapped_params)
-        .map(|(&(query_length, is_valid), params)| {
+        .enumerate()
+        .map(|(index, (&(query_length, is_valid), params))| {
+            let search_space = match search_spaces {
+                None | Some([]) => 0,
+                Some([only]) => *only,
+                Some(spaces) => spaces[index],
+            };
             // NCBI blast_setup.c:802-847:
             // if (query_info->contexts[index].is_valid &&
             //     ((query_length = query_info->contexts[index].query_length) > 0))
@@ -124,7 +186,7 @@ pub(super) fn local_subject_effective_lengths(
             if !is_valid || query_length == 0 {
                 return LocalContextLength {
                     length_adjustment: 0,
-                    eff_searchsp: 0,
+                    eff_searchsp: search_space,
                     subject_stat_length: db_length,
                 };
             }
@@ -135,7 +197,11 @@ pub(super) fn local_subject_effective_lengths(
             let effective_db_length = (db_length - db_num_seqs as i64 * adjustment).max(1);
             LocalContextLength {
                 length_adjustment: adjustment,
-                eff_searchsp: effective_db_length * (query_length - adjustment),
+                eff_searchsp: if search_space == 0 {
+                    effective_db_length * (query_length - adjustment)
+                } else {
+                    search_space
+                },
                 subject_stat_length: db_length,
             }
         })
@@ -163,11 +229,12 @@ pub(super) fn local_parameters_for_call(
     assert!(!query_contexts.is_empty());
     assert_eq!(query_contexts.len(), gapped_params.len());
     assert_eq!(query_contexts.len(), ungapped_params.len());
-    let lengths = local_subject_effective_lengths(
+    let lengths = local_subject_effective_lengths_with_search_spaces(
         query_contexts,
         subject_nt_length,
         db_num_seqs,
         gapped_params,
+        options.eff_searchsp_override,
     );
     // NCBI c++/src/algo/blast/core/blast_setup.c:964-985,1011-1024:
     // initial creation passes min_subject_length and compositionBasedStats;
@@ -366,6 +433,7 @@ mod tests {
                 word_xdrop_bits: 7.0,
                 scale_factor: 1.0,
                 gumbel: Some(&gumbel),
+                eff_searchsp_override: None,
             },
             LocalParameterCall::Initial {
                 min_subject_length: (subject_length / 3) as i32,
@@ -508,6 +576,7 @@ mod tests {
                 word_xdrop_bits: 7.0,
                 scale_factor: 1.0,
                 gumbel: Some(&gumbel),
+                eff_searchsp_override: None,
             },
             LocalParameterCall::Initial {
                 min_subject_length: (subject_length / 3) as i32,

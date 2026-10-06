@@ -1,0 +1,806 @@
+[
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "tblastx",
+    "cases": [
+      "e2d.tblastx.skip.7"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "tests/fasta/outfmt0/e2d_x_ba15.fa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_n_s_plus.fa",
+      "-query_loc",
+      "502-1000"
+    ],
+    "formats": {
+      "0": "6cd76f586e8a7f8bf1b56da5a429c60dd63042fa98a200d36149f250f993361d",
+      "6": "3359d69e12915feb982b8404c43db5d3eb44a59da04d5d41fe83619d6fe3ff32",
+      "7": "3664d5840aee2cc31d6895f07b9127a40155b8b73e3682f157d5578e65a5ad41"
+    },
+    "frozen": {
+      "7": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 22
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "tblastx",
+    "cases": [
+      "e2d.tblastx.skip.7"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "tests/fasta/outfmt0/e2d_x_ba15.fa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_n_s_plus.fa",
+      "-query_loc",
+      "502-1000"
+    ],
+    "formats": {
+      "0": "6cd76f586e8a7f8bf1b56da5a429c60dd63042fa98a200d36149f250f993361d",
+      "6": "3359d69e12915feb982b8404c43db5d3eb44a59da04d5d41fe83619d6fe3ff32",
+      "7": "3664d5840aee2cc31d6895f07b9127a40155b8b73e3682f157d5578e65a5ad41"
+    },
+    "frozen": {
+      "7": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 22
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "tblastx",
+    "cases": [
+      "e2d.tblastx.skip.7"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "tests/fasta/outfmt0/e2d_x_ba15.fa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_n_s_plus.fa",
+      "-query_loc",
+      "502-1000"
+    ],
+    "formats": {
+      "0": "6cd76f586e8a7f8bf1b56da5a429c60dd63042fa98a200d36149f250f993361d",
+      "6": "3359d69e12915feb982b8404c43db5d3eb44a59da04d5d41fe83619d6fe3ff32",
+      "7": "3664d5840aee2cc31d6895f07b9127a40155b8b73e3682f157d5578e65a5ad41"
+    },
+    "frozen": {
+      "7": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 22
+  },
+  {
+    "engine": "serial",
+    "threads": 1,
+    "program": "tblastx",
+    "cases": [
+      "e2d.tblastx.skip.7"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "tests/fasta/outfmt0/e2d_x_ba15.fa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_n_s_plus.fa",
+      "-query_loc",
+      "502-1000"
+    ],
+    "formats": {
+      "0": "6cd76f586e8a7f8bf1b56da5a429c60dd63042fa98a200d36149f250f993361d",
+      "6": "3359d69e12915feb982b8404c43db5d3eb44a59da04d5d41fe83619d6fe3ff32",
+      "7": "3664d5840aee2cc31d6895f07b9127a40155b8b73e3682f157d5578e65a5ad41"
+    },
+    "frozen": {
+      "7": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 22
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "tblastx",
+    "cases": [
+      "e2d.tblastx.sloc_multi.0"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "tests/fasta/outfmt0/e2d_n_qn.fa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_n_sub_multi_t.fa",
+      "-subject_loc",
+      "1001-2500"
+    ],
+    "formats": {
+      "0": "01598b19305c90a6c1d2d56860d890931cefc8d163c7a2e85ebd9349c5924331",
+      "6": "8310073d456f15e3709a2534584c8e82ab4f0abba3143c4c761a17bd2c5cdf87",
+      "7": "75aabe1ca11ab4423c16d6939767af1dd36bf5290d7c00add6e2248ff5223e7b"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 67
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "tblastx",
+    "cases": [
+      "e2d.tblastx.sloc_multi.0"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "tests/fasta/outfmt0/e2d_n_qn.fa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_n_sub_multi_t.fa",
+      "-subject_loc",
+      "1001-2500"
+    ],
+    "formats": {
+      "0": "01598b19305c90a6c1d2d56860d890931cefc8d163c7a2e85ebd9349c5924331",
+      "6": "8310073d456f15e3709a2534584c8e82ab4f0abba3143c4c761a17bd2c5cdf87",
+      "7": "75aabe1ca11ab4423c16d6939767af1dd36bf5290d7c00add6e2248ff5223e7b"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 67
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "tblastx",
+    "cases": [
+      "e2d.tblastx.sloc_multi.0"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "tests/fasta/outfmt0/e2d_n_qn.fa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_n_sub_multi_t.fa",
+      "-subject_loc",
+      "1001-2500"
+    ],
+    "formats": {
+      "0": "01598b19305c90a6c1d2d56860d890931cefc8d163c7a2e85ebd9349c5924331",
+      "6": "8310073d456f15e3709a2534584c8e82ab4f0abba3143c4c761a17bd2c5cdf87",
+      "7": "75aabe1ca11ab4423c16d6939767af1dd36bf5290d7c00add6e2248ff5223e7b"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 67
+  },
+  {
+    "engine": "serial",
+    "threads": 1,
+    "program": "tblastx",
+    "cases": [
+      "e2d.tblastx.sloc_multi.0"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "tests/fasta/outfmt0/e2d_n_qn.fa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_n_sub_multi_t.fa",
+      "-subject_loc",
+      "1001-2500"
+    ],
+    "formats": {
+      "0": "01598b19305c90a6c1d2d56860d890931cefc8d163c7a2e85ebd9349c5924331",
+      "6": "8310073d456f15e3709a2534584c8e82ab4f0abba3143c4c761a17bd2c5cdf87",
+      "7": "75aabe1ca11ab4423c16d6939767af1dd36bf5290d7c00add6e2248ff5223e7b"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 67
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "tblastx",
+    "cases": [
+      "e2d.tblastx.both.0",
+      "e2d.tblastx.both.6",
+      "e2d.tblastx.both.7"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "tests/fasta/outfmt0/e2d_x_q.fa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_t_ts.fa",
+      "-query_loc",
+      "30-5000",
+      "-subject_loc",
+      "42-700"
+    ],
+    "formats": {
+      "0": "5b4537c3eaf12f27110401d0615a1921303fd19ab21080bb4e0009535d42db73",
+      "6": "36cdf824a51bfc3b742fe24705ccb75c3978269e953bb52abea4adc6bd4389ac",
+      "7": "204a97758051f4c312a089db21dc08bc638a07b0dce3f5cb3dc6824788a07049"
+    },
+    "frozen": {
+      "0": true,
+      "6": true,
+      "7": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 21
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "tblastx",
+    "cases": [
+      "e2d.tblastx.both.0",
+      "e2d.tblastx.both.6",
+      "e2d.tblastx.both.7"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "tests/fasta/outfmt0/e2d_x_q.fa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_t_ts.fa",
+      "-query_loc",
+      "30-5000",
+      "-subject_loc",
+      "42-700"
+    ],
+    "formats": {
+      "0": "5b4537c3eaf12f27110401d0615a1921303fd19ab21080bb4e0009535d42db73",
+      "6": "36cdf824a51bfc3b742fe24705ccb75c3978269e953bb52abea4adc6bd4389ac",
+      "7": "204a97758051f4c312a089db21dc08bc638a07b0dce3f5cb3dc6824788a07049"
+    },
+    "frozen": {
+      "0": true,
+      "6": true,
+      "7": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 21
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "tblastx",
+    "cases": [
+      "e2d.tblastx.both.0",
+      "e2d.tblastx.both.6",
+      "e2d.tblastx.both.7"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "tests/fasta/outfmt0/e2d_x_q.fa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_t_ts.fa",
+      "-query_loc",
+      "30-5000",
+      "-subject_loc",
+      "42-700"
+    ],
+    "formats": {
+      "0": "5b4537c3eaf12f27110401d0615a1921303fd19ab21080bb4e0009535d42db73",
+      "6": "36cdf824a51bfc3b742fe24705ccb75c3978269e953bb52abea4adc6bd4389ac",
+      "7": "204a97758051f4c312a089db21dc08bc638a07b0dce3f5cb3dc6824788a07049"
+    },
+    "frozen": {
+      "0": true,
+      "6": true,
+      "7": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 21
+  },
+  {
+    "engine": "serial",
+    "threads": 1,
+    "program": "tblastx",
+    "cases": [
+      "e2d.tblastx.both.0",
+      "e2d.tblastx.both.6",
+      "e2d.tblastx.both.7"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "tests/fasta/outfmt0/e2d_x_q.fa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_t_ts.fa",
+      "-query_loc",
+      "30-5000",
+      "-subject_loc",
+      "42-700"
+    ],
+    "formats": {
+      "0": "5b4537c3eaf12f27110401d0615a1921303fd19ab21080bb4e0009535d42db73",
+      "6": "36cdf824a51bfc3b742fe24705ccb75c3978269e953bb52abea4adc6bd4389ac",
+      "7": "204a97758051f4c312a089db21dc08bc638a07b0dce3f5cb3dc6824788a07049"
+    },
+    "frozen": {
+      "0": true,
+      "6": true,
+      "7": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 21
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "tblastx",
+    "cases": [
+      "e2d.tblastx.qloc.7"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "tests/fasta/outfmt0/e2d_x_q.fa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_t_ts.fa",
+      "-query_loc",
+      "300-5000"
+    ],
+    "formats": {
+      "0": "36b20b47a0151280d5a8c7e9a3794e979ba81d551a080e0cf7bb408ea86ba923",
+      "6": "68a98f12a7244a428b7dcf86c1457285bd2f519d529b3eea0d91f6825a7c72b9",
+      "7": "d0c445f3167516093c56f5ab08ee65aa7270cac02233ecf44ac9d894af8d9ab6"
+    },
+    "frozen": {
+      "7": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 17
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "tblastx",
+    "cases": [
+      "e2d.tblastx.qloc.7"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "tests/fasta/outfmt0/e2d_x_q.fa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_t_ts.fa",
+      "-query_loc",
+      "300-5000"
+    ],
+    "formats": {
+      "0": "36b20b47a0151280d5a8c7e9a3794e979ba81d551a080e0cf7bb408ea86ba923",
+      "6": "68a98f12a7244a428b7dcf86c1457285bd2f519d529b3eea0d91f6825a7c72b9",
+      "7": "d0c445f3167516093c56f5ab08ee65aa7270cac02233ecf44ac9d894af8d9ab6"
+    },
+    "frozen": {
+      "7": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 17
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "tblastx",
+    "cases": [
+      "e2d.tblastx.qloc.7"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "tests/fasta/outfmt0/e2d_x_q.fa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_t_ts.fa",
+      "-query_loc",
+      "300-5000"
+    ],
+    "formats": {
+      "0": "36b20b47a0151280d5a8c7e9a3794e979ba81d551a080e0cf7bb408ea86ba923",
+      "6": "68a98f12a7244a428b7dcf86c1457285bd2f519d529b3eea0d91f6825a7c72b9",
+      "7": "d0c445f3167516093c56f5ab08ee65aa7270cac02233ecf44ac9d894af8d9ab6"
+    },
+    "frozen": {
+      "7": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 17
+  },
+  {
+    "engine": "serial",
+    "threads": 1,
+    "program": "tblastx",
+    "cases": [
+      "e2d.tblastx.qloc.7"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "tests/fasta/outfmt0/e2d_x_q.fa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_t_ts.fa",
+      "-query_loc",
+      "300-5000"
+    ],
+    "formats": {
+      "0": "36b20b47a0151280d5a8c7e9a3794e979ba81d551a080e0cf7bb408ea86ba923",
+      "6": "68a98f12a7244a428b7dcf86c1457285bd2f519d529b3eea0d91f6825a7c72b9",
+      "7": "d0c445f3167516093c56f5ab08ee65aa7270cac02233ecf44ac9d894af8d9ab6"
+    },
+    "frozen": {
+      "7": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 17
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "tblastx",
+    "cases": [
+      "e2d.tblastx.seg5.0"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "tests/fasta/outfmt0/e2d_x_lq.fa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_t_lts.fa",
+      "-seg",
+      "yes",
+      "-query_loc",
+      "5-5000"
+    ],
+    "formats": {
+      "0": "008c4aac1b497bfa968d7d22e4fad083b103480c5824027f64c422bcee60fca2",
+      "6": "022e2d1e77aa7f619401bc43e4b0ec4cdfb4afe31e1d1299fdf7d69953a32b60",
+      "7": "04b842c554e9c4742f136bd67a4f4bd23301890949d7dcfeb37ebe49c1622fdc"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 31
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "tblastx",
+    "cases": [
+      "e2d.tblastx.seg5.0"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "tests/fasta/outfmt0/e2d_x_lq.fa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_t_lts.fa",
+      "-seg",
+      "yes",
+      "-query_loc",
+      "5-5000"
+    ],
+    "formats": {
+      "0": "008c4aac1b497bfa968d7d22e4fad083b103480c5824027f64c422bcee60fca2",
+      "6": "022e2d1e77aa7f619401bc43e4b0ec4cdfb4afe31e1d1299fdf7d69953a32b60",
+      "7": "04b842c554e9c4742f136bd67a4f4bd23301890949d7dcfeb37ebe49c1622fdc"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 31
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "tblastx",
+    "cases": [
+      "e2d.tblastx.seg5.0"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "tests/fasta/outfmt0/e2d_x_lq.fa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_t_lts.fa",
+      "-seg",
+      "yes",
+      "-query_loc",
+      "5-5000"
+    ],
+    "formats": {
+      "0": "008c4aac1b497bfa968d7d22e4fad083b103480c5824027f64c422bcee60fca2",
+      "6": "022e2d1e77aa7f619401bc43e4b0ec4cdfb4afe31e1d1299fdf7d69953a32b60",
+      "7": "04b842c554e9c4742f136bd67a4f4bd23301890949d7dcfeb37ebe49c1622fdc"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 31
+  },
+  {
+    "engine": "serial",
+    "threads": 1,
+    "program": "tblastx",
+    "cases": [
+      "e2d.tblastx.seg5.0"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "tests/fasta/outfmt0/e2d_x_lq.fa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_t_lts.fa",
+      "-seg",
+      "yes",
+      "-query_loc",
+      "5-5000"
+    ],
+    "formats": {
+      "0": "008c4aac1b497bfa968d7d22e4fad083b103480c5824027f64c422bcee60fca2",
+      "6": "022e2d1e77aa7f619401bc43e4b0ec4cdfb4afe31e1d1299fdf7d69953a32b60",
+      "7": "04b842c554e9c4742f136bd67a4f4bd23301890949d7dcfeb37ebe49c1622fdc"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 31
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "tblastx",
+    "cases": [
+      "e2d.tblastx.seg31.0"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "tests/fasta/outfmt0/e2d_x_lq.fa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_t_lts.fa",
+      "-seg",
+      "yes",
+      "-query_loc",
+      "31-5000"
+    ],
+    "formats": {
+      "0": "7fcfa98edbb188094915ccdc7f9586f74afd0eb45505a80a1aa99f10c1f14815",
+      "6": "61cc6d3e9909221c33a33b25d4d3403669417258cb43f964dd49f7da161dfc8f",
+      "7": "02258dd54a07a71616cc547cf1751e21dc2a595a71dc283bea2c7c6bfef2d07f"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 31
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "tblastx",
+    "cases": [
+      "e2d.tblastx.seg31.0"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "tests/fasta/outfmt0/e2d_x_lq.fa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_t_lts.fa",
+      "-seg",
+      "yes",
+      "-query_loc",
+      "31-5000"
+    ],
+    "formats": {
+      "0": "7fcfa98edbb188094915ccdc7f9586f74afd0eb45505a80a1aa99f10c1f14815",
+      "6": "61cc6d3e9909221c33a33b25d4d3403669417258cb43f964dd49f7da161dfc8f",
+      "7": "02258dd54a07a71616cc547cf1751e21dc2a595a71dc283bea2c7c6bfef2d07f"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 31
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "tblastx",
+    "cases": [
+      "e2d.tblastx.seg31.0"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "tests/fasta/outfmt0/e2d_x_lq.fa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_t_lts.fa",
+      "-seg",
+      "yes",
+      "-query_loc",
+      "31-5000"
+    ],
+    "formats": {
+      "0": "7fcfa98edbb188094915ccdc7f9586f74afd0eb45505a80a1aa99f10c1f14815",
+      "6": "61cc6d3e9909221c33a33b25d4d3403669417258cb43f964dd49f7da161dfc8f",
+      "7": "02258dd54a07a71616cc547cf1751e21dc2a595a71dc283bea2c7c6bfef2d07f"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 31
+  },
+  {
+    "engine": "serial",
+    "threads": 1,
+    "program": "tblastx",
+    "cases": [
+      "e2d.tblastx.seg31.0"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "tests/fasta/outfmt0/e2d_x_lq.fa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_t_lts.fa",
+      "-seg",
+      "yes",
+      "-query_loc",
+      "31-5000"
+    ],
+    "formats": {
+      "0": "7fcfa98edbb188094915ccdc7f9586f74afd0eb45505a80a1aa99f10c1f14815",
+      "6": "61cc6d3e9909221c33a33b25d4d3403669417258cb43f964dd49f7da161dfc8f",
+      "7": "02258dd54a07a71616cc547cf1751e21dc2a595a71dc283bea2c7c6bfef2d07f"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 31
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "tblastx",
+    "cases": [
+      "e2d.tblastx.seg61.0"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "tests/fasta/outfmt0/e2d_x_lq.fa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_t_lts.fa",
+      "-seg",
+      "yes",
+      "-query_loc",
+      "61-5000"
+    ],
+    "formats": {
+      "0": "69f009d0234d3e4b68338acaec6427e6528a0be96f4f534e473f769d6dbc94bb",
+      "6": "4a69c89108c3877cfce1167c9f426a7026be3d04b5259d87ce7b53af1f4f2081",
+      "7": "fe2c8f582fb248000613f33b249f2e2ac7eaf629e902c20959cc4ef0d68b70bf"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 31
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "tblastx",
+    "cases": [
+      "e2d.tblastx.seg61.0"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "tests/fasta/outfmt0/e2d_x_lq.fa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_t_lts.fa",
+      "-seg",
+      "yes",
+      "-query_loc",
+      "61-5000"
+    ],
+    "formats": {
+      "0": "69f009d0234d3e4b68338acaec6427e6528a0be96f4f534e473f769d6dbc94bb",
+      "6": "4a69c89108c3877cfce1167c9f426a7026be3d04b5259d87ce7b53af1f4f2081",
+      "7": "fe2c8f582fb248000613f33b249f2e2ac7eaf629e902c20959cc4ef0d68b70bf"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 31
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "tblastx",
+    "cases": [
+      "e2d.tblastx.seg61.0"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "tests/fasta/outfmt0/e2d_x_lq.fa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_t_lts.fa",
+      "-seg",
+      "yes",
+      "-query_loc",
+      "61-5000"
+    ],
+    "formats": {
+      "0": "69f009d0234d3e4b68338acaec6427e6528a0be96f4f534e473f769d6dbc94bb",
+      "6": "4a69c89108c3877cfce1167c9f426a7026be3d04b5259d87ce7b53af1f4f2081",
+      "7": "fe2c8f582fb248000613f33b249f2e2ac7eaf629e902c20959cc4ef0d68b70bf"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 31
+  },
+  {
+    "engine": "serial",
+    "threads": 1,
+    "program": "tblastx",
+    "cases": [
+      "e2d.tblastx.seg61.0"
+    ],
+    "argv": [
+      "tblastx",
+      "-query",
+      "tests/fasta/outfmt0/e2d_x_lq.fa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_t_lts.fa",
+      "-seg",
+      "yes",
+      "-query_loc",
+      "61-5000"
+    ],
+    "formats": {
+      "0": "69f009d0234d3e4b68338acaec6427e6528a0be96f4f534e473f769d6dbc94bb",
+      "6": "4a69c89108c3877cfce1167c9f426a7026be3d04b5259d87ce7b53af1f4f2081",
+      "7": "fe2c8f582fb248000613f33b249f2e2ac7eaf629e902c20959cc4ef0d68b70bf"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 31
+  }
+]

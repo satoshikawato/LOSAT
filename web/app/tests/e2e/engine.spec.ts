@@ -76,7 +76,7 @@ interface Outputs {
   readonly diagnosticsSha256?: string;
 }
 
-/** Compares one search's stored outputs with the native CLI and the certified frozen bytes. */
+/** Compares one search's stored outputs with the native CLI and NCBI's frozen bytes. */
 function expectOutputs(vbr: VbrCase, result: Outputs) {
   const native = nativeExpectation(result.argv!, vbr.cwd);
   const frozen: Partial<Record<OutputFormat, boolean>> = {};
@@ -85,7 +85,7 @@ function expectOutputs(vbr: VbrCase, result: Outputs) {
     const fixed = vbr.frozen[format];
     if (fixed === undefined) continue;
     frozen[format] = result.sha256[format] === fixed.sha256;
-    if (fixed.certified) expect.soft(result.sha256[format], `${result.id} outfmt ${format} = NCBI frozen`).toBe(fixed.sha256);
+    expect.soft(result.sha256[format], `${result.id} outfmt ${format} = NCBI frozen`).toBe(fixed.sha256);
   }
   expect.soft(result.diagnosticsSha256, `${result.id} diagnostics = native CLI standard error`).toBe(native.stderrSha256);
   return { native: native.sha256, frozen };

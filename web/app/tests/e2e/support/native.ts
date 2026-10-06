@@ -1,7 +1,6 @@
 // The expectations of V-BR (plan §6.1, §6.2, TD-5): the native CLI of the same commit, run
 // with the argv that the application ran (one format at a time, one thread), as V-ABI does
-// (web/adapter/tests/v_abi.js), and the NCBI-frozen bytes of LOSAT/tests/outfmt0_manifest.tsv
-// for the cells that are certified.
+// (web/adapter/tests/v_abi.js), and the NCBI-frozen bytes of LOSAT/tests/outfmt0_manifest.tsv.
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -59,8 +58,8 @@ export interface VbrCase {
   readonly cwd: string;
   readonly query: string;
   readonly subject: string;
-  /** NCBI BLAST+ 2.17.0 stdout SHA-256 by format, and whether that cell is certified yet. */
-  readonly frozen: Partial<Record<OutputFormat, { readonly sha256: string; readonly certified: boolean }>>;
+  /** NCBI BLAST+ 2.17.0 stdout SHA-256 by format (every V-BR cell is certified, S08). */
+  readonly frozen: Partial<Record<OutputFormat, { readonly sha256: string }>>;
 }
 
 /** The search of a V-BR case at `threads`. */
@@ -77,16 +76,6 @@ export function searchOf(vbr: VbrCase, threads: number | 'auto'): SearchCase {
 }
 
 /**
- * Formats whose frozen NCBI bytes are not certified yet: TBLASTX outfmt 0 and 7
- * (docs/web/verification_cells.tsv, `pending` until S08b checks them). Until then, V-BR
- * compares them with the native CLI only and reports the frozen comparison.
- */
-const UNCERTIFIED: ReadonlyArray<readonly [SearchCase['program'], OutputFormat]> = [
-  ['tblastx', 0],
-  ['tblastx', 7],
-];
-
-/**
  * Cases from LOSAT/tests/outfmt0_manifest.tsv (run from LOSAT/). Rows of the same search
  * (program, task, inputs and options) that freeze different formats become one case.
  */
@@ -97,7 +86,7 @@ export function manifestCase(id: string, rowIds: readonly string[]): VbrCase {
     .filter((line) => line !== '' && !line.startsWith('#') && !line.startsWith('fixture_id\t'))
     .map((line) => Object.fromEntries(line.split('\t').map((value, i) => [header[i]!, value])) as Record<string, string>);
   let vbr: VbrCase | undefined;
-  const frozen: { [F in OutputFormat]?: { sha256: string; certified: boolean } } = {};
+  const frozen: { [F in OutputFormat]?: { sha256: string } } = {};
   for (const rowId of rowIds) {
     const row = rows.find((candidate) => candidate['fixture_id'] === rowId);
     if (row === undefined) throw new Error(`no fixture ${rowId} in outfmt0_manifest.tsv`);
@@ -111,16 +100,15 @@ export function manifestCase(id: string, rowIds: readonly string[]): VbrCase {
     }
     vbr = next;
     const format = Number(row['outfmt'] || '0') as OutputFormat;
-    const certified = !UNCERTIFIED.some(([p, f]) => p === program && f === format);
-    frozen[format] = { sha256: row['stdout_sha256']!, certified };
+    frozen[format] = { sha256: row['stdout_sha256']! };
   }
   return vbr!;
 }
 
 /**
  * The V-BR cells (plan §7 S09): BLASTP, TBLASTN, BLASTN and TBLASTX, every format each
- * supports (0, 6, 7), compared with the native CLI, and with NCBI's frozen bytes where the
- * cell is certified. BLASTX joins in SX.
+ * supports (0, 6, 7), compared with the native CLI and with NCBI's frozen bytes. BLASTX
+ * joins in SX.
  */
 export function vbrCases(): VbrCase[] {
   return [

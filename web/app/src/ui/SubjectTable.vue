@@ -59,6 +59,8 @@ function description(sIdx: number, inOutfmt0: boolean): string {
         :row-px="ROW_PX"
         :max-rows="MAX_ROWS"
         :reveal="selectedPosition"
+        :reveal-key="`${state.runId}:${state.qIdx}:${state.sIdx}`"
+        :order-key="`${state.subjectSort.key}:${state.subjectSort.descending}`"
         label="Subjects"
         testid="subject-list"
         @scroll="onScroll(Math.floor(($event.target as HTMLElement).scrollTop / ROW_PX))"

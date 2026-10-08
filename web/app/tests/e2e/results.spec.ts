@@ -394,11 +394,17 @@ test('an HSP that outfmt 0 does not show, and a hit list that may have reached i
   // Fewer subjects than the default hit list (500): no limit notice.
   expect(await noticeKinds(page)).toEqual([]);
 
-  // The last subject in the engine's order: the "#" column the other way round. The list
-  // keeps the selected (first) subject in view, at its end now; scroll back to the top.
+  // The last subject in the engine's order: the "#" column the other way round. The sort keeps
+  // the selected (first) subject, at the list's end now, and shows the list's first rows.
+  const selected = await page.getByTestId('hsp-detail').getAttribute('data-hsp');
   await page.getByTestId('subject-sort-order').click();
   await expect(page.getByTestId('subject-sort-order').locator('..')).toHaveAttribute('aria-sort', 'descending');
-  await page.getByTestId('subject-list').evaluate((element) => (element.scrollTop = 0));
+  const subjectList = page.getByTestId('subject-list');
+  await expect.poll(() => subjectList.evaluate((element) => element.scrollTop)).toBe(0);
+  await expect(page.getByTestId('hsp-detail')).toHaveAttribute('data-hsp', selected!);
+  await subjectList.evaluate((element) => (element.scrollTop = element.scrollHeight));
+  await expect(subjectRows(page).and(page.locator('[aria-pressed="true"]'))).toHaveAttribute('data-order', '1');
+  await subjectList.evaluate((element) => (element.scrollTop = 0));
   const last = subjectRows(page).first();
   await expect(last).toHaveAttribute('data-order', String(total));
   await expect(last.locator('[data-field="description"]')).toHaveText('not in outfmt 0');
@@ -572,8 +578,12 @@ test('many queries; view filters change the view, not the search; the notices te
   await list.evaluate((element) => (element.scrollTop = element.scrollHeight));
   await expect(page.getByTestId('query-row-149')).toBeVisible();
   await expect(page.getByTestId('query-row-0')).toHaveCount(0);
+  // The selected query (#4, no hits) leaves the list: the first query listed is selected.
   await page.getByTestId('filter-hits-only').check();
   await expect(page.getByTestId('query-count')).toHaveText('113 of 150 queries');
+  await expect(page.getByTestId('query-row-0')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('hsp-detail')).toHaveAttribute('data-hsp', /^0:/);
+  expect(await noticeKinds(page)).not.toContain('no-hits');
   await page.getByTestId('filter-hits-only').uncheck();
   await page.getByTestId('query-filter').fill('rec137');
   await expect(page.getByTestId('query-count')).toHaveText('1 of 150 queries');
@@ -629,6 +639,10 @@ test('many queries; view filters change the view, not the search; the notices te
     // A run that fails: TBLASTX refuses at run time a subject title with an HTML character
     // reference, which NCBI decodes in outfmt 0 (docs/web/abi_v2.md §4; screens.spec.ts).
     const sequence = dna(7, 300);
+    // A view filter of run 1 is not carried to the next run that opens.
+    await page.getByTestId('filter-subject').fill('s1');
+    await page.getByTestId('filter-subject').press('Enter');
+    await expect(subjectRows(page)).toHaveCount(1);
     await page.getByTestId('tab-search').click();
     await program(page, 'tblastx');
     await paste(page, 'query', `>q1\n${sequence}\n`);
@@ -646,6 +660,11 @@ test('many queries; view filters change the view, not the search; the notices te
     await expect(status).toContainText('A failed run keeps no results.');
     await expect(page.getByTestId('results-hits')).toHaveCount(0);
     await expect(page.getByTestId('results-notice')).toHaveCount(0);
+    const run1 = await select.locator('option', { hasText: /^Run 1 · / }).getAttribute('value');
+    await select.selectOption(run1!);
+    await expect(page.getByTestId('filter-subject')).toHaveValue('');
+    await expect(subjectRows(page)).toHaveCount(Number(subjects));
+    expect(await noticeKinds(page)).toEqual([]);
   }
 });
 

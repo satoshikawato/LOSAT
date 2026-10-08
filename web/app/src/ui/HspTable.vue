@@ -50,7 +50,16 @@ const ORIENTATION: Readonly<Record<HspEntry['orientation'], string>> = {
         <span role="columnheader">Orientation</span>
         <span role="columnheader">outfmt 0</span>
       </div>
-      <VirtualRows :count="state.hsps.length" :row-px="ROW_PX" :max-rows="8" :reveal="selectedPosition" label="HSPs" testid="hsp-list">
+      <VirtualRows
+        :count="state.hsps.length"
+        :row-px="ROW_PX"
+        :max-rows="8"
+        :reveal="selectedPosition"
+        :reveal-key="`${state.runId}:${state.hsp?.qIdx}:${state.hsp?.rank}`"
+        :order-key="`${state.hspSort.key}:${state.hspSort.descending}`"
+        label="HSPs"
+        testid="hsp-list"
+      >
         <template #row="{ position }">
           <button
             type="button"

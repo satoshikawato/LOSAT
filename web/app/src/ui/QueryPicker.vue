@@ -42,7 +42,15 @@ function setHitsOnly(event: Event): void {
       </label>
     </div>
     <p class="muted small" data-testid="query-count">{{ formatCount(state.queries.length) }} of {{ formatCount(total) }} queries</p>
-    <VirtualRows :count="state.queries.length" :row-px="ROW_PX" :max-rows="8" :reveal="selectedPosition" label="Queries" testid="query-list">
+    <VirtualRows
+      :count="state.queries.length"
+      :row-px="ROW_PX"
+      :max-rows="8"
+      :reveal="selectedPosition"
+      :reveal-key="`${state.runId}:${state.qIdx}`"
+      label="Queries"
+      testid="query-list"
+    >
       <template #row="{ position }">
         <button
           type="button"

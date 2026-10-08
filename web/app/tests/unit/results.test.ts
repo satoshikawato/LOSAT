@@ -403,6 +403,46 @@ describe('ResultsBrowser', () => {
     expect(results.state.get().queries.map((q) => q.id)).toEqual(['q0']);
   });
 
+  it('moves off a query that a query filter hides, and selects none when no query is listed', async () => {
+    const { results } = setup();
+    await results.open('r1');
+    results.selectQuery(1);
+    results.setFilters({ queriesWithHitsOnly: true });
+    let state = results.state.get();
+    expect(state.queries.map((q) => q.id)).toEqual(['q0']);
+    expect(state.qIdx).toBe(0);
+    expect(state.hsp).toEqual({ runId: 'r1', qIdx: 0, rank: 0 });
+    expect(state.queryTotals).toEqual({ subjects: 3, hsps: 4 });
+
+    results.setFilters({ queryText: 'none' });
+    state = results.state.get();
+    expect(state.queries).toEqual([]);
+    expect([state.qIdx, state.sIdx, state.hsp, state.queryTotals]).toEqual([undefined, undefined, undefined, undefined]);
+    expect(state.subjects).toEqual([]);
+
+    results.setFilters({ queryText: 'q1' });
+    state = results.state.get();
+    expect(state.qIdx).toBe(1);
+    expect(state.queryTotals).toEqual({ subjects: 0, hsps: 0 });
+    results.setFilters({ queryText: 'q' });
+    expect(results.state.get().qIdx).toBe(1);
+  });
+
+  it('opens another run without view filters, and keeps them for the same run', async () => {
+    const { results, runs, view } = setup();
+    runs.set({ runs: [view, { ...view, snapshot: snapshot('r2') }] });
+    await results.open('r1');
+    results.setFilters({ subjectText: 's0' });
+    await results.open('r1');
+    expect(results.state.get().filters).toEqual({ subjectText: 's0' });
+    expect(results.state.get().subjects.map((s) => s.sIdx)).toEqual([0]);
+    await results.open('r2');
+    const state = results.state.get();
+    expect(state.runId).toBe('r2');
+    expect(state.filters).toEqual({});
+    expect(state.subjects.map((s) => s.sIdx)).toEqual([1, 0, 2]);
+  });
+
   it('says that a query reached the hit list limit, and a subject the HSP limit', async () => {
     const { results } = setup({ argv: ['blastn', '-query', 'q.fa', '-subject', 's.fa', '-max_target_seqs', '3', '-max_hsps', '2'] });
     await results.open('r1');

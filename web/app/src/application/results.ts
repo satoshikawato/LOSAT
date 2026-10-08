@@ -186,7 +186,11 @@ export class ResultsBrowser {
     });
   }
 
-  /** Shows the results of a run: the run's HSP records and outfmt 6 text are read once. */
+  /**
+   * Shows the results of a run: the run's HSP records and outfmt 6 text are read once. Another
+   * run starts without view filters, as with the selection and the sort orders; the same run
+   * (opened again, or completing while it is shown) keeps them.
+   */
   async open(runId: string): Promise<void> {
     const token = ++this.loadToken;
     const run = this.deps.runs.get().runs.find((r) => r.snapshot.runId === runId);
@@ -194,11 +198,12 @@ export class ResultsBrowser {
     this.rowById = new Map();
     this.headingQueue.length = 0;
     if (run === undefined) return;
+    const filters = this.state.get().runId === runId ? this.state.get().filters : NO_FILTERS;
     if (run.status !== 'completed') {
-      this.state.set({ ...INITIAL, filters: this.state.get().filters, runId, phase: 'unavailable', message: unavailableMessage(run) });
+      this.state.set({ ...INITIAL, filters, runId, phase: 'unavailable', message: unavailableMessage(run) });
       return;
     }
-    this.state.set({ ...INITIAL, filters: this.state.get().filters, runId, phase: 'loading' });
+    this.state.set({ ...INITIAL, filters, runId, phase: 'loading' });
     try {
       const [table, out6, description, diagnostics] = await Promise.all([
         this.deps.data.readHitTable(runId),
@@ -277,9 +282,27 @@ export class ResultsBrowser {
     void this.loadDetail(state.loaded, id, row);
   }
 
+  /**
+   * Applies the view filters. A query filter that hides the selected query moves the selection
+   * to the first query listed (as a subject filter does for subjects); none listed, none selected.
+   */
   setFilters(filters: ViewFilters): void {
     const state = this.state.get();
-    this.set({ filters, ...(state.loaded === undefined ? {} : { queries: this.queryEntries(state.loaded, filters) }) });
+    if (state.loaded === undefined) {
+      this.set({ filters });
+      return;
+    }
+    const queries = this.queryEntries(state.loaded, filters);
+    this.set({ filters, queries });
+    if (!queries.some((query) => query.qIdx === state.qIdx)) {
+      const first = queries[0];
+      if (first !== undefined) this.selectQuery(first.qIdx);
+      else {
+        this.set({ qIdx: undefined, sIdx: undefined, hsp: undefined, detail: undefined });
+        this.refresh();
+      }
+      return;
+    }
     this.refresh();
     this.keepSelection();
   }

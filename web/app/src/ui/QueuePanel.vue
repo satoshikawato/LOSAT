@@ -8,6 +8,18 @@ import { programById } from '../domain/programs';
 import { formatBytes, formatDuration } from './format';
 
 const props = defineProps<{ coordinator: Coordinator; runs: readonly RunView[] }>();
+defineEmits<{ 'open-results': [runId: string] }>();
+
+/**
+ * The runs in the order that matters while working (S12's screen review L-e): the running
+ * one first, then those waiting in queue order, then the finished ones, newest first.
+ */
+const ordered = computed(() => {
+  const active = props.runs.filter((run) => !isTerminal(run.status) && run.status !== 'queued');
+  const waiting = props.runs.filter((run) => run.status === 'queued');
+  const finished = props.runs.filter((run) => isTerminal(run.status)).reverse();
+  return [...active, ...waiting, ...finished];
+});
 
 const PHASE_LABELS: Readonly<Record<RunStatus, string>> = {
   queued: 'Waiting',
@@ -46,12 +58,11 @@ function elapsed(run: RunView): string | undefined {
   return formatDuration((endedAt ?? now.value) - startedAt);
 }
 
-/** The first run of a group shows the group's cancel button while any of its runs can be cancelled. */
+/** The first listed run of a group that can be cancelled shows the group's cancel button. */
 function groupCancellable(run: RunView): boolean {
   const group = run.snapshot.group;
   if (group === undefined) return false;
-  const members = props.runs.filter((other) => other.snapshot.group?.groupId === group.groupId);
-  return members[0] === run && members.some(cancellable);
+  return ordered.value.find((other) => other.snapshot.group?.groupId === group.groupId && cancellable(other)) === run;
 }
 
 function phaseTimes(run: RunView): string {
@@ -70,7 +81,7 @@ function phaseTimes(run: RunView): string {
     <p v-if="runs.length === 0" class="muted">No runs yet.</p>
     <ol class="queue" data-testid="queue">
       <li
-        v-for="run in runs"
+        v-for="run in ordered"
         :key="run.snapshot.runId"
         class="run"
         :data-status="run.status"
@@ -95,6 +106,14 @@ function phaseTimes(run: RunView): string {
             @click="coordinator.cancel(run.snapshot.runId)"
           >
             Cancel
+          </button>
+          <button
+            v-if="run.status === 'completed'"
+            type="button"
+            :data-testid="`run-${run.snapshot.number}-open`"
+            @click="$emit('open-results', run.snapshot.runId)"
+          >
+            Open results
           </button>
         </div>
         <div class="run-inputs muted">

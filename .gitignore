@@ -12,3 +12,8 @@ tests/*_out/
 # Python caches.
 __pycache__/
 *.pyc
+
+# Local Claude Code files and worktrees (see CLAUDE.md).
+.claude/settings.local.json
+CLAUDE.local.md
+.worktrees/

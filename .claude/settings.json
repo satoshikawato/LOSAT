@@ -1,7 +1,28 @@
 {
-  "permissions": {
-    "allow": [
-      "Read(//mnt/c/Users/kawato/Documents/GitHub/**)"
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "compact|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/campaign-state.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/deny-pkill-full.py\"",
+            "timeout": 10
+          }
+        ]
+      }
     ]
   }
 }

@@ -239,39 +239,8 @@ authoritative, current guidance for agent behavior in LOSAT.
 
 ## Debug/Diagnostics Environment Variables
 
-- `LOSAT_TRACE_HSP="qstart,qend,sstart,send"` trace a specific TBLASTX HSP.
-- `LOSAT_TRACE_HSP_MASKS=1` print mask coverage for the traced TBLASTX HSP.
-- `LOSAT_TRACE_CHAIN_HSP="qstart,qend,sstart,send"` trace TBLASTX chain
-  selection for a specific HSP.
-- `LOSAT_TRACE_LINK_SELECTIONS=1` print TBLASTX link-selection details.
-- `LOSAT_DUMP_TBLASTX_STAGE=<dir>` append TBLASTX stage snapshots as TSV files.
-- `LOSAT_TRACE_BLASTN_HSP="qstart,qend,sstart,send"` trace a specific BLASTN
-  HSP.
-- `LOSAT_TRACE_BLASTN_SEED="q,s"` trace a specific BLASTN seed.
-- `LOSAT_TRACE_BLASTN_CONTEXT=<context_idx>` restrict BLASTN tracing by context.
-- `LOSAT_TRACE_BLASTN_SUBJECT=<subject_id_or_index>` restrict BLASTN tracing by
-  subject.
-- `LOSAT_TRACE_BLASTN_STAGE=<seed|ungapped|prelim|traceback|purge|hitlist|all>`
-  restrict BLASTN tracing by stage.
-- `LOSAT_DEBUG_CUTOFFS=1` cutoff calculations (tblastx + blastn).
-- `LOSAT_DEBUG_CUTOFFS_ALL=1` verbose TBLASTX cutoff diagnostics.
-- `LOSAT_DEBUG_CHAINING=1` chaining debug (legacy; tblastx).
-- `LOSAT_DEBUG_EXTENSION=1` tblastx extension debug.
-- `LOSAT_DEBUG_HSP_SAVING=1` TBLASTX HSP-save diagnostics.
-- `LOSAT_DEBUG_OUTPUT_FILTER=1` TBLASTX output filter diagnostics.
-- `LOSAT_DEBUG_BLASTN=1` blastn hit loss diagnostics.
-- `LOSAT_DEBUG_COORDS=1` blastn coordinate transforms.
-- `LOSAT_DEBUG_COORDS_START=<int>` narrow selected BLASTN coordinate diagnostics.
-- `LOSAT_DEBUG_SCAN_SOFF=<int>` tblastx scan debug center subject offset.
-- `LOSAT_DEBUG_SCAN_WINDOW=<int>` tblastx scan debug window size.
-- `LOSAT_TIMING=1` timing breakdown.
-- `LOSAT_DIAGNOSTICS=1` general diagnostics counters.
-- `LOSAT_STARTUP_TRACE=1` startup trace.
-- `LOSAT_WASI_THREADS_DEBUG=1` threaded-WASI scheduling diagnostics.
-- `LOSAT_TBLASTX_PARALLEL_CHUNKS=1` force TBLASTX subject-chunk parallel path
-  for diagnostics.
-- `LOSAT_TBLASTX_SERIAL_SCAN_CHUNKS=1` diagnostic-only sequential TBLASTX
-  scan-interior chunking; this does not enable parallel scan work.
+The `LOSAT_TRACE_*`, `LOSAT_DEBUG_*`, `LOSAT_TIMING`, `LOSAT_DIAGNOSTICS` and related
+variables are listed in [`docs/agents/diagnostics.md`](docs/agents/diagnostics.md).
 
 ---
 
@@ -287,9 +256,13 @@ cd LOSAT && cargo fmt
 ## Testing Expectations
 
 - Use `$verify-ncbi-parity-and-speed` for parity, benchmark, native/Wasm, and
-  release-evidence work.
+  release-evidence work (Claude Code: skill `verify-ncbi-parity-and-speed`).
 - Ask the `ncbi_parity_auditor` custom agent for an independent read-only check
-  before accepting a release-facing parity or performance claim.
+  before accepting a release-facing parity or performance claim (Claude Code:
+  agent `losat-reviewer`, independent audit).
+- Choose verification by what the change touches; Claude Code's tiers (quick,
+  standard, full) are in the skill `losat-gates`. Rule 10 above governs parity test
+  runs; `web/AGENTS.md` governs checks for application commits.
 - Add unit tests for NCBI-ported functions, including edge cases and boundaries.
 - Reference NCBI unit tests when available:
   `ncbi-blast/c++/src/algo/blast/unit_tests/`.
@@ -377,17 +350,9 @@ requirements above.
 ## Key References
 
 ### NCBI Source Locations
-- Primary NCBI repo: `/mnt/c/Users/kawato/Documents/GitHub/ncbi-blast/`
-- Alternate NCBI repo: `/mnt/c/Users/genom/GitHub/ncbi-blast/`
-
-### Local NCBI Snapshot (subset, for quick lookup)
-- `.ncbi_ref/blast_gapalign.c`
-- `.ncbi_ref/blast_engine.c`
-- `.ncbi_ref/blast_parameters.c`
-- `.ncbi_ref/blast_setup.c`
-- `.ncbi_ref/na_ungapped.c`
-- `.ncbi_ref/greedy_align.c`
-- `.ncbi_ref/blast_encoding.c`
+- Pinned NCBI C/C++ source: `satoshikawato/ncbi-blast` at commit
+  `598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4` (NCBI BLAST+ 2.17.0). The local
+  checkout path is machine-specific (Claude Code: `$NCBI_SRC` in `CLAUDE.local.md`).
 
 ### NCBI Source Files (examples)
 - `c++/src/algo/blast/core/aa_ungapped.c`

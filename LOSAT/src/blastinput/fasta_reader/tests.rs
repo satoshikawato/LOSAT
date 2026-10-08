@@ -1047,3 +1047,298 @@ fn reader_speed_against_bio() {
         );
     }
 }
+
+/// The exit code and message of a program error (`crate::cli::NativeError`).
+fn native(error: &anyhow::Error) -> (i32, String) {
+    let native = error
+        .downcast_ref::<crate::cli::NativeError>()
+        .unwrap_or_else(|| panic!("not a NativeError: {error:#}"));
+    (native.exit, native.message.clone())
+}
+
+const NUC_TITLE_WARNING: &str = "FASTA-Reader: Title ends with at least 20 valid nucleotide characters.  Was the sequence accidentally put in the title line?\n";
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:198-219 and
+// blast_fasta_input.cpp:450-453 (GetAllSeqs reads a record whole, its messages written as
+// it is read, then x_FastaToSeqLoc checks the range; the range's CInputException is not
+// caught, so no later record is read).
+#[test]
+fn read_subjects_writes_messages_per_record_and_stops_at_a_range_past_the_end() {
+    let input = b">s1 ACGTACGTACGTACGTACGTA\nACGTACGTAC-GT\n>s2 GGGGGGGGGGGGGGGGGGGGG\nACG\n>s3 TTTTTTTTTTTTTTTTTTTTTT\nACGTACGT\n";
+    let config = ReaderConfig::subject("BLASTN", false, false);
+    let mut written = Vec::new();
+    let mut source = FastaInputSource::from_bytes(input, config);
+    let range = crate::blastinput::seq_range::SequenceRange { from: 5, to: 9 };
+    let error = read_subjects(&mut source, Some(&range), &mut |message: &[u8]| {
+        written.extend_from_slice(message);
+        Ok(())
+    })
+    .unwrap_err();
+    assert_eq!(
+        native(&error),
+        (
+            1,
+            "BLAST query/options error: Invalid from coordinate (greater than sequence length)\nPlease refer to the BLAST+ user manual.\n".to_string()
+        )
+    );
+    // s1's hyphen and title warnings and s2's title warning; s3 is never read.
+    assert_eq!(
+        String::from_utf8(written).unwrap(),
+        format!(
+            "CFastaReader: Hyphens are invalid and will be ignored around line 2\n{NUC_TITLE_WARNING}{NUC_TITLE_WARNING}"
+        )
+    );
+
+    // A range that starts just past a record's end (from == length) is not an error, and
+    // the records come back whole, each with its messages.
+    let mut written = Vec::new();
+    let mut source = FastaInputSource::from_bytes(input, config);
+    let range = crate::blastinput::seq_range::SequenceRange { from: 3, to: 9 };
+    let records = read_subjects(&mut source, Some(&range), &mut |message: &[u8]| {
+        written.extend_from_slice(message);
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(
+        records
+            .iter()
+            .map(|record| (record.local_id.as_str(), record.sequence.as_slice()))
+            .collect::<Vec<_>>(),
+        vec![
+            ("Subject_1", &b"ACGTACGTACGT"[..]),
+            ("Subject_2", b"ACG"),
+            ("Subject_3", b"ACGTACGT")
+        ]
+    );
+    assert_eq!(written.iter().filter(|&&byte| byte == b'\n').count(), 4);
+    assert_eq!(
+        records[0].warnings,
+        format!("CFastaReader: Hyphens are invalid and will be ignored around line 2\n{NUC_TITLE_WARNING}").into_bytes()
+    );
+    let without_range = read_subjects(
+        &mut FastaInputSource::from_bytes(input, config),
+        None,
+        &mut |_| Ok(()),
+    )
+    .unwrap();
+    assert_eq!(without_range, records);
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:181-184 (a reader
+// exception while the subjects are read is `BLAST query error: <msg>`, exit 1; the
+// messages of the records before it were written).
+#[test]
+fn read_subjects_reader_errors_end_the_program() {
+    let mut written = Vec::new();
+    let error = read_subjects(
+        &mut FastaInputSource::from_bytes(
+            b">s1 ACGTACGTACGTACGTACGTA\nACGT\n>s2\n12345\n>s3\nACGT\n",
+            ReaderConfig::subject("TBLASTX", false, false),
+        ),
+        None,
+        &mut |message: &[u8]| {
+            written.extend_from_slice(message);
+            Ok(())
+        },
+    )
+    .unwrap_err();
+    assert_eq!(
+        native(&error),
+        (
+            1,
+            "BLAST query error: CFastaReader: Near line 4, there's a line that doesn't look like plausible data, but it's not marked as defline or comment.\n".to_string()
+        )
+    );
+    assert_eq!(written, NUC_TITLE_WARNING.as_bytes());
+    // A first line that NCBI may fetch as a Seq-id is LOSAT's explicit rejection (NCBI's
+    // GetAllSeqs does not skip a subject it cannot fetch).
+    let input = b"SRA:SRR000001\nACGT\n>s1\nACGT\n\n\n";
+    let error = read_subjects(
+        &mut FastaInputSource::from_bytes(input, ReaderConfig::subject("TBLASTN", false, true)),
+        None,
+        &mut |_| Ok(()),
+    )
+    .unwrap_err();
+    assert!(error.downcast_ref::<crate::cli::NativeError>().is_none());
+    assert!(
+        format!("{error:#}").contains("not supported by LOSAT's TBLASTN"),
+        "{error:#}"
+    );
+    // Without data loaders the same line is FASTA data (oracle BI fl_colon), and only
+    // blank lines follow the last record: the reader ends there (`End()`).
+    let mut written = Vec::new();
+    let records = read_subjects(
+        &mut FastaInputSource::from_bytes(input, ReaderConfig::subject("TBLASTN", false, false)),
+        None,
+        &mut |message: &[u8]| {
+            written.extend_from_slice(message);
+            Ok(())
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        records
+            .iter()
+            .map(|record| (record.local_id.as_str(), record.sequence.as_slice()))
+            .collect::<Vec<_>>(),
+        vec![("Subject_1", &b"SRASRRACGT"[..]), ("Subject_2", b"ACGT")]
+    );
+    assert_eq!(
+        written,
+        b"FASTA-Reader: Ignoring invalid residues at position(s): On line 1: 4, 8-13\n"
+    );
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:855-873 (IsIStreamEmpty,
+// non-Windows branch: a stream without a position is never empty; otherwise skipws `>>`
+// either fails (empty) or the position is restored).
+#[test]
+fn stream_is_empty_reads_files_and_never_pipes() {
+    let path = std::env::temp_dir().join(format!(
+        "losat-fasta-reader-stream-is-empty-{}",
+        std::process::id()
+    ));
+    let config = ReaderConfig::query("BLASTN", false, false);
+    for (bytes, empty) in [
+        (&b""[..], true),
+        (b" \t\n\r\n\x0b\x0c", true),
+        (b"\n\n>q1\nACGT\n", false),
+        (b"  ACGT", false),
+        (b"\x00", false),
+    ] {
+        std::fs::write(&path, bytes).unwrap();
+        let mut source = FastaInputSource::from_file(std::fs::File::open(&path).unwrap(), config);
+        assert_eq!(source.stream_is_empty(), empty, "{bytes:?}");
+        if !empty && bytes.contains(&b'A') {
+            // The position is restored: the reader sees the whole input.
+            let records = read_all(&mut source, &mut |_| Ok(())).unwrap();
+            assert_eq!(records.len(), 1, "{bytes:?}");
+            assert_eq!(records[0].sequence, b"ACGT", "{bytes:?}");
+        }
+    }
+    std::fs::remove_file(&path).unwrap();
+    #[cfg(unix)]
+    for bytes in [&b""[..], b"  \n\n", b">q1\nACGT\n"] {
+        let (reader, mut writer) = std::io::pipe().unwrap();
+        std::io::Write::write_all(&mut writer, bytes).unwrap();
+        drop(writer);
+        let file = std::fs::File::from(std::os::fd::OwnedFd::from(reader));
+        let mut source = FastaInputSource::from_file(file, config);
+        assert!(!source.stream_is_empty(), "pipe {bytes:?}");
+        if !bytes.is_empty() && bytes[0] == b'>' {
+            let records = read_all(&mut source, &mut |_| Ok(())).unwrap();
+            assert_eq!(records[0].sequence, b"ACGT");
+        }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1444-1447, 1616-1679,
+// 2038-2043 and fasta_reader_utils.cpp:466-483 (the bridge gives the reader's record for
+// the inputs that today's checks accept: the title, `U` stored as `T` for nucleotides,
+// the lowercase letters, the local ID and the title warning).
+#[test]
+fn from_bio_gives_the_readers_record_for_accepted_inputs() {
+    let fifty = "A".repeat(50);
+    let inputs: [(&[u8], bool); 6] = [
+        (b">q1 a description\nACGTacgtNNRY\n", false),
+        (b">q1\nACGUacguTT\nAC\n", false),
+        (b">q1 x ACGTACGTACGTACGTACGTA\nACGT\n", false),
+        (b">q1  two  spaces\nAC\n>q2 second\nGG\n", false),
+        (b">p1 desc\nMKVLUuX*\n", true),
+        (format!(">p1 q{fifty}\nMKV\n").leak().as_bytes(), true),
+    ];
+    for (bytes, protein) in inputs {
+        let config = ReaderConfig::query("BLASTN", protein, false);
+        let reader = read_all(
+            &mut FastaInputSource::from_bytes(bytes, config),
+            &mut |_| Ok(()),
+        )
+        .unwrap();
+        let bio: Vec<FastaRecord> = bio::io::fasta::Reader::new(bytes)
+            .records()
+            .enumerate()
+            .map(|(index, record)| {
+                FastaRecord::from_bio(&record.unwrap(), index + 1, "Query_", protein)
+            })
+            .collect();
+        assert_eq!(bio, reader, "{:?}", String::from_utf8_lossy(bytes));
+    }
+    let record = FastaRecord::from_bio(
+        &bio::io::fasta::Record::with_attrs("s", None, b"ACGU"),
+        7,
+        "Subject_",
+        false,
+    );
+    assert_eq!(
+        (record.local_id.as_str(), record.sequence.as_slice()),
+        ("Subject_7", &b"ACGT"[..])
+    );
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:458-466
+// (a range keeps the record and its ID; the search sees the interval). The generic range,
+// warning and metadata code gives the same results for a `bio` record and its bridge.
+#[test]
+fn cut_and_the_input_record_bridge_agree() {
+    let mut record = FastaRecord::new("Query_2", b"q2 title", b"ACGTacgtAC");
+    record.warnings = b"w\n".to_vec();
+    let cut = record.cut(2, 6);
+    assert_eq!(cut, FastaRecord::new("Query_2", b"q2 title", b"GTac"));
+    assert_eq!(InputRecord::cut(&record, 2, 6), cut);
+
+    let bio_records = vec![
+        bio::io::fasta::Record::with_attrs("q1", Some("first query"), b"ACGTACGTAC"),
+        bio::io::fasta::Record::with_attrs("q2", None, b"AC"),
+        bio::io::fasta::Record::with_attrs("q3", Some("x"), b"acgtACGTacgtAC"),
+    ];
+    let records: Vec<FastaRecord> = bio_records
+        .iter()
+        .enumerate()
+        .map(|(index, record)| FastaRecord::from_bio(record, index + 1, "Query_", false))
+        .collect();
+    for (bio_record, record) in bio_records.iter().zip(&records) {
+        assert_eq!(bio_record.title_bytes(), record.title_bytes());
+        assert_eq!(InputRecord::seq(bio_record), InputRecord::seq(record));
+    }
+    let range = crate::blastinput::seq_range::SequenceRange { from: 3, to: 7 };
+    let from_bio = crate::blastinput::seq_range::cut_queries(&bio_records, &range);
+    let from_reader = crate::blastinput::seq_range::cut_queries(&records, &range);
+    assert_eq!(from_bio.input.ordinals, from_reader.input.ordinals);
+    assert_eq!(from_bio.input.skipped, vec![false, true, false]);
+    for (a, b) in from_bio.records.iter().zip(&from_reader.records) {
+        assert_eq!(
+            (InputRecord::seq(a), a.title_bytes()),
+            (InputRecord::seq(b), b.title_bytes())
+        );
+    }
+    // As subjects, q2's interval starts past its end: NCBI's range error for both.
+    assert!(crate::blastinput::seq_range::cut_subjects(&bio_records, Some(&range)).is_err());
+    assert!(crate::blastinput::seq_range::cut_subjects(&records, Some(&range)).is_err());
+    let first_two = crate::blastinput::seq_range::SequenceRange { from: 0, to: 1 };
+    let (cut_bio, _) = crate::blastinput::seq_range::cut_subjects(&bio_records, Some(&first_two))
+        .unwrap()
+        .unwrap();
+    let (cut_reader, placements) =
+        crate::blastinput::seq_range::cut_subjects(&records, Some(&first_two))
+            .unwrap()
+            .unwrap();
+    assert_eq!(placements.length(2, 2), 14);
+    for (a, b) in cut_bio.iter().zip(&cut_reader) {
+        assert_eq!(InputRecord::seq(a), InputRecord::seq(b));
+    }
+    for index in 0..3 {
+        assert_eq!(
+            crate::report::query_warnings::invalid_query_warning(
+                "blastn",
+                index,
+                &bio_records[index]
+            ),
+            crate::report::query_warnings::invalid_query_warning("blastn", index, &records[index])
+        );
+    }
+    assert_eq!(
+        crate::algorithm::blastn::coordination::subject_metadata_from_records(&bio_records)
+            .subject_ids,
+        crate::algorithm::blastn::coordination::subject_metadata_from_records(&records).subject_ids
+    );
+}

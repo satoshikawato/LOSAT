@@ -5229,7 +5229,23 @@ pub fn run_web_pair(args: BlastnArgs, query_fasta: &str, subject_fasta: &str) ->
     Ok(output)
 }
 
-pub fn run(args: BlastnArgs) -> Result<()> {
+/// `settings` are the NCBI application settings that LOSAT reproduces
+/// (`ncbi_environment::check_ncbi_application_settings`): the input readers use them once
+/// the program reads with `fasta_reader` (steps S3-S8 of the port plan).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_scope_src.cpp:67-72
+/// ```c++
+///     CNcbiApplication* app = CNcbiApplication::Instance();
+///     if (app) {
+///         const CNcbiRegistry& registry = app->GetConfig();
+///         x_LoadDataLoadersConfig(registry);
+///         x_LoadBlastDbDataLoaderConfig(registry);
+///     }
+/// ```
+pub fn run(
+    args: BlastnArgs,
+    _settings: crate::blastinput::ncbi_environment::ApplicationSettings,
+) -> Result<()> {
     // NCBI reference: ncbi-blast/c++/src/app/blast/blastn_app.cpp:128-133
     // ```c
     // if(RecoverSearchStrategy(args, m_CmdLineArgs)) {
@@ -13736,7 +13752,11 @@ mod tests {
             ])
             .unwrap()
             .blastn;
-            run(args).unwrap();
+            run(
+                args,
+                crate::blastinput::ncbi_environment::ApplicationSettings::default(),
+            )
+            .unwrap();
             std::fs::read(&output_path).unwrap()
         };
         let sequential = execute(1, "6");

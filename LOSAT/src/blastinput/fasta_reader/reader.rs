@@ -1962,28 +1962,82 @@ impl<R: Read> FastaReader<R> {
         text: &[u8],
         warn: Warn<'_>,
     ) -> Result<(), ReadError> {
-        let length = text.len();
-        if !self.config.protein {
-            if length > 20
-                && text[length - 20..].iter().all(|byte| {
-                    matches!(byte, b'A' | b'C' | b'G' | b'T' | b'a' | b'c' | b'g' | b't')
-                })
-            {
-                self.post_warning(
-                    Problem::UnexpectedNucResidues,
-                    b"FASTA-Reader: Title ends with at least 20 valid nucleotide characters.  Was the sequence accidentally put in the title line?",
-                    warn,
-                )?;
-            }
-        } else if length > 50 && text[length - 50..].iter().all(u8::is_ascii_alphabetic) {
-            self.post_warning(
-                Problem::UnexpectedAminoAcids,
-                b"FASTA-Reader: Title ends with at least 50 valid amino acid characters.  Was the sequence accidentally put in the title line?",
-                warn,
-            )?;
+        if let Some(message) = seq_data_in_title_warning(text, self.config.protein) {
+            let problem = if self.config.protein {
+                Problem::UnexpectedAminoAcids
+            } else {
+                Problem::UnexpectedNucResidues
+            };
+            self.post_warning(problem, message, warn)?;
         }
         Ok(())
     }
+}
+
+/// The message of `CreateWarningsForSeqDataInTitle` for the title text `text` (see
+/// `FastaReader::create_warnings_for_seq_data_in_title`, which posts it), or `None`;
+/// `protein` is `fAssumeProt` (else `fAssumeNuc`).
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1624-1643
+/// ```c++
+///     const static size_t kWarnNumNucCharsAtEnd = 20;
+///     const static size_t kWarnAminoAcidCharsAtEnd = 50;
+///
+///     const size_t length = sLineText.length();
+///     SIZE_TYPE pos_to_check = length-1;
+///
+///     if((length > kWarnNumNucCharsAtEnd) && !TestFlag(fAssumeProt)) {
+///         // find last non-nuc character, within the last kWarnNumNucCharsAtEnd characters
+///         const SIZE_TYPE last_pos_to_check_for_nuc = (sLineText.length() - kWarnNumNucCharsAtEnd);
+///         for( ; pos_to_check >= last_pos_to_check_for_nuc; --pos_to_check ) {
+///             if( ! s_ASCII_IsUnAmbigNuc(sLineText[pos_to_check]) ) {
+///                 // found a character which is not an unambiguous nucleotide
+///                 break;
+///             }
+///         }
+///         if( pos_to_check < last_pos_to_check_for_nuc ) {
+///             FASTA_WARNING(iLineNum,
+///                 "FASTA-Reader: Title ends with at least " << kWarnNumNucCharsAtEnd
+///                 << " valid nucleotide characters.  Was the sequence "
+///                 << "accidentally put in the title line?",
+/// ```
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1651-1673
+/// ```c++
+///     if((length > kWarnAminoAcidCharsAtEnd) && !TestFlag(fAssumeNuc)) {
+///         ...
+///         for( ; pos_to_check >= last_pos_to_check_for_amino_acid; --pos_to_check ) {
+///             // can't just use "isalpha" in case it includes characters
+///             // with diacritics (an accent, tilde, umlaut, etc.)
+///             const char ch = sLineText[pos_to_check];
+///             if( ( ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') ) {
+///                 // potential amino acid, so keep going
+///             } else {
+///                 // non-amino-acid found
+///                 break;
+///             }
+///         }
+///
+///         if( pos_to_check < last_pos_to_check_for_amino_acid ) {
+///             FASTA_WARNING(iLineNum,
+///                 "FASTA-Reader: Title ends with at least " << kWarnAminoAcidCharsAtEnd
+///                 << " valid amino acid characters.  Was the sequence "
+///                 << "accidentally put in the title line?",
+/// ```
+/// Exactly one of `fAssumeNuc` and `fAssumeProt` is set, so exactly one test runs.
+pub(super) fn seq_data_in_title_warning(text: &[u8], protein: bool) -> Option<&'static [u8]> {
+    let length = text.len();
+    if !protein {
+        if length > 20
+            && text[length - 20..]
+                .iter()
+                .all(|byte| matches!(byte, b'A' | b'C' | b'G' | b'T' | b'a' | b'c' | b'g' | b't'))
+        {
+            return Some(b"FASTA-Reader: Title ends with at least 20 valid nucleotide characters.  Was the sequence accidentally put in the title line?");
+        }
+    } else if length > 50 && text[length - 50..].iter().all(u8::is_ascii_alphabetic) {
+        return Some(b"FASTA-Reader: Title ends with at least 50 valid amino acid characters.  Was the sequence accidentally put in the title line?");
+    }
+    None
 }
 
 /// The positions of the bad residues of one line, as ranges of 1-based positions.

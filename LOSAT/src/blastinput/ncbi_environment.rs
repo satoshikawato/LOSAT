@@ -424,9 +424,211 @@ fn check_registry_file(path: &Path) -> Result<Vec<(String, String, String)>, Str
     Ok(entries)
 }
 
+/// The NCBI application settings that LOSAT reproduces (`check_ncbi_application_settings`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ApplicationSettings {
+    /// `SDataLoaderConfig::UseDataLoaders()` of the query and subject readers: whether
+    /// NCBI's reader tries a record's first line as a sequence identifier
+    /// (`fasta_reader::ReaderConfig::data_loaders`).
+    pub data_loaders: bool,
+}
+
+impl Default for ApplicationSettings {
+    /// No registry entry and no variable: both data loaders on.
+    ///
+    /// NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_scope_src.hpp:73,81
+    /// ```c++
+    ///         eDefault = (eUseBlastDbDataLoader | eUseGenbankDataLoader)
+    /// ...
+    ///     SDataLoaderConfig(bool load_proteins, EConfigOpts options = eDefault)
+    /// ```
+    fn default() -> Self {
+        Self { data_loaders: true }
+    }
+}
+
+/// `NStr::FindNoCase(value, word) != NPOS` for an ASCII `word` (case folded in the C
+/// locale, where bytes above 0x7f fold to themselves).
+fn contains_no_case(value: &[u8], word: &[u8]) -> bool {
+    value
+        .windows(word.len())
+        .any(|window| window.eq_ignore_ascii_case(word))
+}
+
+/// Whether the data loaders are used, from the values of `[BLAST] DATA_LOADERS` in the
+/// layers of NCBI's registry, highest priority first: the environment
+/// (`NCBI_CONFIG__BLAST__DATA_LOADERS`), the program's `.ini` file, then `.ncbirc` (`None`:
+/// the layer has no such entry). An empty value counts as no entry (`DECISIONS.md`
+/// 2026-10-08, `AUTHORITY.md` §G1), so a lower layer decides.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_scope_src.cpp:75-92
+/// ```c++
+/// void
+/// SDataLoaderConfig::x_LoadDataLoadersConfig(const CNcbiRegistry& registry)
+/// {
+///     static const string kDataLoadersConfig("DATA_LOADERS");
+///
+///     if (registry.HasEntry("BLAST", kDataLoadersConfig)) {
+///         const string& kLoaders = registry.Get("BLAST", kDataLoadersConfig);
+///         if (NStr::FindNoCase(kLoaders, "blastdb") == NPOS) {
+///             m_UseBlastDbs = false;
+///         }
+///         if (NStr::FindNoCase(kLoaders, "genbank") == NPOS) {
+///             m_UseGenbank = false;
+///         }
+///         if (NStr::FindNoCase(kLoaders, "none") != NPOS) {
+///             m_UseBlastDbs = false;
+///             m_UseGenbank = false;
+///         }
+///     }
+/// ```
+/// NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_scope_src.hpp:111
+/// ```c++
+///     bool UseDataLoaders() const { return m_UseBlastDbs || m_UseGenbank; }
+/// ```
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:1577-1583
+/// ```c++
+///     x_Add(*m_EnvRegistry, ePriority_Environment, sm_EnvRegName);
+///
+///     m_FileRegistry.Reset(new CTwoLayerRegistry(NULL, cf));
+///     x_Add(*m_FileRegistry, ePriority_File, sm_FileRegName);
+///
+///     m_SysRegistry.Reset(new CCompoundRWRegistry(cf));
+///     x_Add(*m_SysRegistry, ePriority_Default - 1, sm_SysRegName);
+/// ```
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:1235-1246
+/// ```c++
+/// CConstRef<IRegistry> CCompoundRegistry::FindByContents(const string& section,
+///                                                        const string& entry,
+///                                                        TFlags flags) const
+/// {
+///     TFlags has_entry_flags = (flags | fCountCleared) & ~fJustCore;
+///     REVERSE_ITERATE(TPriorityMap, it, m_PriorityMap) {
+///         if (it->second->HasEntry(section, entry, has_entry_flags)) {
+///             return it->second;
+///         }
+///     }
+///     return null;
+/// }
+/// ```
+fn data_loaders_of(layers: [Option<&[u8]>; 3]) -> bool {
+    let Some(value) = layers.into_iter().flatten().find(|value| !value.is_empty()) else {
+        return ApplicationSettings::default().data_loaders;
+    };
+    let mut use_blast_dbs = true;
+    let mut use_genbank = true;
+    if !contains_no_case(value, b"blastdb") {
+        use_blast_dbs = false;
+    }
+    if !contains_no_case(value, b"genbank") {
+        use_genbank = false;
+    }
+    if contains_no_case(value, b"none") {
+        use_blast_dbs = false;
+        use_genbank = false;
+    }
+    use_blast_dbs || use_genbank
+}
+
+/// A registry file's value of an entry as NCBI stores it: an unescaped `"` at either end
+/// is removed, and one elsewhere is NCBI's error. LOSAT does not port `NStr::ParseEscapes`
+/// and rejects a value with a backslash (which also marks an escaped `"`).
+///
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:753-781
+/// ```c++
+///                 // Historically, " may appear unescaped at the beginning,
+///                 // end, both, or neither.
+///                 beg = 0;
+///                 SIZE_TYPE end = value.size();
+///                 for (SIZE_TYPE pos = value.find('\"');
+///                      pos < end  &&  pos != NPOS;
+///                      pos = value.find('\"', pos + 1)) {
+///                     if (s_Backslashed(value, pos)) {
+///                         continue;
+///                     } else if (pos == beg) {
+///                         ++beg;
+///                     } else if (pos == end - 1) {
+///                         --end;
+///                     } else {
+///                         NCBI_THROW2(CRegistryException, eValue,
+///                                     "Single(unescaped) '\"' in the middle "
+///                                     "of registry value" + in_path + ": '"
+///                                     + str + "'", line);
+///                     }
+///                 }
+///
+///                 try {
+///                     value = NStr::ParseEscapes(value.substr(beg, end - beg));
+///                 } catch (CStringException&) {
+///                     NCBI_THROW2(CRegistryException, eValue,
+///                                 "Badly placed '\\' in the registry value"
+///                                 + in_path + ": '" + str + "'", line);
+///
+///                 }
+/// ```
+fn stored_registry_value(value: &str) -> Result<&str, &'static str> {
+    if value.contains('\\') {
+        return Err("a backslash escape, which LOSAT does not read");
+    }
+    let bytes = value.as_bytes();
+    let mut beg = 0;
+    let mut end = bytes.len();
+    let mut pos = 0;
+    while let Some(found) = bytes[pos..].iter().position(|&byte| byte == b'"') {
+        let at = pos + found;
+        if at >= end {
+            break;
+        }
+        if at == beg {
+            beg += 1;
+        } else if at == end - 1 {
+            end -= 1;
+        } else {
+            return Err("an unescaped '\"' in the middle, which NCBI BLAST+ reports as an error");
+        }
+        pos = at + 1;
+    }
+    Ok(&value[beg..end.max(beg)])
+}
+
+/// The value of `[BLAST] DATA_LOADERS` that a registry file stores: that of its last
+/// entry (a later entry replaces an earlier one, `Set` without `fNoOverride`).
+///
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:794-801
+/// ```c++
+///                 } else if (was_empty  &&  HasEntry(section, name, flags)) {
+///                     ERR_POST_X(8, Warning
+///                                << "Found multiple [" << section << "] "
+///                                << name << " settings" << in_path
+///                                << "; using the one from line " << line);
+///                 }
+///                 Set(section, name, value, set_flags, comment);
+///                 comment.erase();
+/// ```
+fn file_data_loaders(
+    path: &Path,
+    entries: &[(String, String, String)],
+) -> Result<Option<String>, String> {
+    let Some((_, _, value)) = entries.iter().rev().find(|(section, name, _)| {
+        section.eq_ignore_ascii_case("BLAST") && name.eq_ignore_ascii_case("DATA_LOADERS")
+    }) else {
+        return Ok(None);
+    };
+    stored_registry_value(value)
+        .map(|value| Some(value.to_string()))
+        .map_err(|reason| {
+            format!(
+                "the registry file {} sets [BLAST] DATA_LOADERS to a value with {reason}; this is not supported by LOSAT",
+                path.display()
+            )
+        })
+}
+
 /// Rejects the NCBI application settings that change `program`'s output: the environment
 /// variables of the NCBI C++ Toolkit and the entries of the registry files that NCBI loads
-/// (`<program>.ini`, then `.ncbirc` unless it is turned off).
+/// (`<program>.ini`, then `.ncbirc` unless it is turned off). Returns the settings that
+/// LOSAT reproduces: whether the data loaders are used (`[BLAST] DATA_LOADERS`, which
+/// decides whether a record's first line can be a sequence identifier).
 ///
 /// NCBI reference: ncbi-blast/c++/src/corelib/ncbiapp.cpp:1254-1259
 /// ```c
@@ -458,15 +660,58 @@ fn check_registry_file(path: &Path) -> Result<Vec<(String, String, String)>, Str
 ///             return x_FindRegistry(CDirEntry::MakePath(dir, '.' + base, ext)
 ///                                   + "rc", eName_AsIs);
 /// ```
-pub fn check_ncbi_application_settings(program: &str) -> Result<(), String> {
-    for (name, value) in std::env::vars_os() {
+pub fn check_ncbi_application_settings(program: &str) -> Result<ApplicationSettings, String> {
+    application_settings(program, std::env::vars_os(), &|name: &str| {
+        std::env::var_os(name)
+    })
+}
+
+/// `check_ncbi_application_settings` over the environment `variables` (all of them) and
+/// `env` (one of them by name).
+///
+/// NCBI reference (598d8ae6): c++/src/corelib/env_reg.cpp:366-375
+/// ```c++
+/// string CNcbiEnvRegMapper::RegToEnv(const string& section, const string& name)
+///     const
+/// {
+///     string result;
+///     result.assign(kPrefix, kPrefixLen);
+///     if (NStr::StartsWith(name, ".")) {
+///         result += name.substr(1) + "__" + section;
+///     } else {
+///         result += "_" + section + "__" + name;
+///     }
+/// ```
+/// NCBI reference (598d8ae6): c++/src/corelib/env_reg.cpp:142-153
+/// ```c++
+///     REVERSE_ITERATE (TPriorityMap, it, m_PriorityMap) {
+///         string        var_name = it->second->RegToEnv(section, name);
+///         const string* resultp  = &m_Env->Get(var_name, &found);
+///         if ((m_Flags & fCaseFlags) == 0  &&  !found) {
+///             // try capitalizing the name
+///             resultp = &m_Env->Get(NStr::ToUpper(var_name), &found);
+///         }
+///         if (found) {
+///             return *resultp;
+///         }
+///     }
+/// ```
+/// The environment layer of `HasEntry("NCBI", "DONT_USE_NCBIRC")` (`IncludeNcbircIfAllowed`,
+/// quoted above) is `NCBI_CONFIG__NCBI__DONT_USE_NCBIRC`, set with any value.
+fn application_settings(
+    program: &str,
+    variables: impl Iterator<Item = (OsString, OsString)>,
+    env: &dyn Fn(&str) -> Option<OsString>,
+) -> Result<ApplicationSettings, String> {
+    for (name, value) in variables {
         if let Some(reason) = rejected_variable(&name, &value) {
             return Err(reason);
         }
     }
-    let env = |name: &str| std::env::var_os(name);
-    let search_path = registry_search_path(&env);
-    let mut use_ncbirc = env("NCBI_DONT_USE_NCBIRC").is_none();
+    let search_path = registry_search_path(env);
+    let mut use_ncbirc = env("NCBI_DONT_USE_NCBIRC").is_none()
+        && env("NCBI_CONFIG__NCBI__DONT_USE_NCBIRC").is_none();
+    let mut ini_data_loaders = None;
     if let Some(path) = find_registry(&search_path, &format!("{program}.ini")) {
         let entries = check_registry_file(&path)?;
         if entries.iter().any(|(section, name, _)| {
@@ -474,13 +719,23 @@ pub fn check_ncbi_application_settings(program: &str) -> Result<(), String> {
         }) {
             use_ncbirc = false;
         }
+        ini_data_loaders = file_data_loaders(&path, &entries)?;
     }
+    let mut ncbirc_data_loaders = None;
     if use_ncbirc {
         if let Some(path) = find_registry(&search_path, ".ncbirc") {
-            check_registry_file(&path)?;
+            let entries = check_registry_file(&path)?;
+            ncbirc_data_loaders = file_data_loaders(&path, &entries)?;
         }
     }
-    Ok(())
+    let env_data_loaders = env("NCBI_CONFIG__BLAST__DATA_LOADERS");
+    Ok(ApplicationSettings {
+        data_loaders: data_loaders_of([
+            env_data_loaders.as_deref().map(OsStr::as_encoded_bytes),
+            ini_data_loaders.as_deref().map(str::as_bytes),
+            ncbirc_data_loaders.as_deref().map(str::as_bytes),
+        ]),
+    })
 }
 
 #[cfg(test)]
@@ -553,6 +808,145 @@ mod tests {
         let no_local =
             registry_search_path(&env(&[("NCBI_DONT_USE_LOCAL_CONFIG", ""), ("NCBI", "/n")]));
         assert_eq!(&no_local[..1], &[PathBuf::from("/n")]);
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_scope_src.cpp:75-92
+    // (case-insensitive substrings `blastdb`, `genbank` and `none`) and
+    // c++/src/corelib/ncbireg.cpp:1235-1246, 1577-1583 (the environment, then the program's
+    // `.ini`, then `.ncbirc`); an empty value counts as no entry (DECISIONS.md 2026-10-08).
+    #[test]
+    fn data_loaders_follow_the_registry_layers_and_the_substring_rules() {
+        let only = |value: &str| data_loaders_of([None, None, Some(value.as_bytes())]);
+        for (value, used) in [
+            ("blastdb", true),
+            ("genbank", true),
+            ("BlastDB", true),
+            ("GENBANK", true),
+            ("blastdb,genbank", true),
+            ("genbank blastdb", true),
+            ("myblastdbs", true),
+            ("none", false),
+            ("NONE", false),
+            ("blastdb,none", false),
+            ("genbank none blastdb", false),
+            ("nonexistent", false),
+            ("x", false),
+            ("blast db", false),
+            ("gen bank", false),
+        ] {
+            assert_eq!(only(value), used, "{value:?}");
+        }
+        let layers = |env: Option<&str>, ini: Option<&str>, ncbirc: Option<&str>| {
+            data_loaders_of([
+                env.map(str::as_bytes),
+                ini.map(str::as_bytes),
+                ncbirc.map(str::as_bytes),
+            ])
+        };
+        assert!(layers(None, None, None));
+        assert!(!layers(Some("none"), Some("blastdb"), Some("genbank")));
+        assert!(layers(Some("genbank"), Some("none"), Some("none")));
+        assert!(!layers(None, Some("none"), Some("blastdb")));
+        assert!(layers(None, Some("blastdb"), Some("none")));
+        assert!(!layers(None, None, Some("none")));
+        // An empty value is no entry: the next layer decides, and with none left the
+        // data loaders stay on.
+        assert!(!layers(Some(""), Some("none"), None));
+        assert!(!layers(Some(""), Some(""), Some("x")));
+        assert!(layers(Some(""), None, Some("")));
+    }
+
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:753-781 (an unescaped `"` at
+    // either end is removed; one elsewhere is an error; escapes are not ported).
+    #[test]
+    fn registry_values_lose_the_quotes_at_their_ends() {
+        for (raw, stored) in [
+            ("none", "none"),
+            ("\"none\"", "none"),
+            ("\"none", "none"),
+            ("none\"", "none"),
+            ("\"\"", ""),
+            ("\"", ""),
+            ("\"\"\"", ""),
+            ("", ""),
+        ] {
+            assert_eq!(stored_registry_value(raw), Ok(stored), "{raw:?}");
+        }
+        for raw in ["no\"ne", "\"a\"b\"", "none\\x", "\\\"none\""] {
+            assert!(stored_registry_value(raw).is_err(), "{raw:?}");
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:1636-1651 (`.ncbirc` is read
+    // unless NCBI_DONT_USE_NCBIRC is set or the registry has [NCBI] DONT_USE_NCBIRC, also
+    // from the environment) and c++/src/corelib/env_reg.cpp:366-375 (the variable of
+    // [BLAST] DATA_LOADERS is NCBI_CONFIG__BLAST__DATA_LOADERS).
+    #[test]
+    fn application_settings_read_the_environment_and_the_registry_files() {
+        let dir = std::env::temp_dir().join(format!(
+            "losat-ncbi-environment-data-loaders-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let ini = dir.join("blastn.ini");
+        let ncbirc = dir.join(".ncbirc");
+        let settings = |pairs: &[(&str, &str)]| {
+            let mut all = vec![("NCBI_CONFIG_PATH".to_string(), dir.display().to_string())];
+            all.extend(pairs.iter().map(|(n, v)| (n.to_string(), v.to_string())));
+            let env = |name: &str| {
+                all.iter()
+                    .find(|(key, _)| key == name)
+                    .map(|(_, value)| OsString::from(value))
+            };
+            application_settings(
+                "blastn",
+                all.iter()
+                    .map(|(n, v)| (OsString::from(n), OsString::from(v))),
+                &env,
+            )
+            .map(|settings| settings.data_loaders)
+        };
+        let _ = std::fs::remove_file(&ini);
+        let _ = std::fs::remove_file(&ncbirc);
+        assert_eq!(settings(&[]), Ok(true));
+        std::fs::write(&ncbirc, "[BLAST]\nDATA_LOADERS = none\n").unwrap();
+        assert_eq!(settings(&[]), Ok(false));
+        // The environment comes first; an empty variable leaves the decision to the files.
+        assert_eq!(
+            settings(&[("NCBI_CONFIG__BLAST__DATA_LOADERS", "blastdb")]),
+            Ok(true)
+        );
+        assert_eq!(
+            settings(&[("NCBI_CONFIG__BLAST__DATA_LOADERS", "")]),
+            Ok(false)
+        );
+        // Only the exact variable name is the entry.
+        assert_eq!(
+            settings(&[("NCBI_CONFIG__blast__data_loaders", "blastdb")]),
+            Ok(false)
+        );
+        // The program's .ini comes before .ncbirc; its last entry counts, without quotes.
+        std::fs::write(
+            &ini,
+            "[blast]\ndata_loaders = none\n[BLAST]\nDATA_LOADERS = \"GenBank\"\n",
+        )
+        .unwrap();
+        assert_eq!(settings(&[]), Ok(true));
+        std::fs::write(&ini, "[BLAST]\nDATA_LOADERS = \"\"\n").unwrap();
+        assert_eq!(settings(&[]), Ok(false));
+        std::fs::write(&ini, "[BLAST]\nDATA_LOADERS = no\"ne\n").unwrap();
+        assert!(settings(&[]).unwrap_err().contains("[BLAST] DATA_LOADERS"));
+        // [NCBI] DONT_USE_NCBIRC in the .ini or the environment turns .ncbirc off.
+        std::fs::write(&ini, "[NCBI]\nDONT_USE_NCBIRC = 1\n").unwrap();
+        assert_eq!(settings(&[]), Ok(true));
+        std::fs::remove_file(&ini).unwrap();
+        assert_eq!(
+            settings(&[("NCBI_CONFIG__NCBI__DONT_USE_NCBIRC", "")]),
+            Ok(true)
+        );
+        assert_eq!(settings(&[("NCBI_DONT_USE_NCBIRC", "1")]), Ok(true));
+        std::fs::remove_file(&ncbirc).unwrap();
+        std::fs::remove_dir(&dir).unwrap();
     }
 
     #[test]

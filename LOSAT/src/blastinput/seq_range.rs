@@ -9,9 +9,9 @@
 //! print the record's length.
 
 use anyhow::{bail, Result};
-use bio::io::fasta;
 
 use crate::blastinput::app;
+use crate::blastinput::fasta_reader::InputRecord;
 
 /// The role whose input a range applies to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -256,16 +256,6 @@ impl Placements {
     }
 }
 
-/// The record cut to its interval: the same identifier, description and letters (their
-/// case too) of the interval.
-fn cut(record: &fasta::Record, from: usize, to_exclusive: usize) -> fasta::Record {
-    fasta::Record::with_attrs(
-        record.id(),
-        record.desc(),
-        &record.seq()[from..to_exclusive],
-    )
-}
-
 /// The subjects as NCBI searches them with `-subject_loc`: every record cut to its interval
 /// (an empty one for an interval without letters), and where each lies in its record.
 /// A record whose interval starts more than one letter past its end stops NCBI, in file
@@ -301,10 +291,10 @@ fn cut(record: &fasta::Record, from: usize, to_exclusive: usize) -> fasta::Recor
 ///         LOG_POST(Error << "Please refer to the BLAST+ user manual.");       \
 ///         exit_code = BLAST_INPUT_ERROR;                                      \
 /// ```
-pub fn cut_subjects(
-    records: &[fasta::Record],
+pub fn cut_subjects<R: InputRecord>(
+    records: &[R],
     range: Option<&SequenceRange>,
-) -> Result<Option<(Vec<fasta::Record>, Placements)>> {
+) -> Result<Option<(Vec<R>, Placements)>> {
     let Some(range) = range else {
         return Ok(None);
     };
@@ -321,7 +311,7 @@ pub fn cut_subjects(
                 ))
             }
         };
-        cut_records.push(cut(record, from, to_exclusive));
+        cut_records.push(record.cut(from, to_exclusive));
         placements.push(RecordPlacement {
             offset: from,
             length,
@@ -334,7 +324,7 @@ pub fn cut_subjects(
 /// the range stops it: every record, or the records up to the first one whose interval
 /// starts more than one letter past its end (`GetAllSeqs` reads a record whole, then
 /// checks its range).
-pub fn subjects_read(records: &[fasta::Record], range: Option<&SequenceRange>) -> usize {
+pub fn subjects_read<R: InputRecord>(records: &[R], range: Option<&SequenceRange>) -> usize {
     let Some(range) = range else {
         return records.len();
     };
@@ -348,8 +338,8 @@ pub fn subjects_read(records: &[fasta::Record], range: Option<&SequenceRange>) -
 /// a record's end), which NCBI searches as a sequence without data ("Sequence contains no
 /// data"); LOSAT does not search records without letters either.
 /// `ordinals` are the input positions of the records (empty: their indexes).
-pub fn check_no_empty_interval(
-    records: &[fasta::Record],
+pub fn check_no_empty_interval<R: InputRecord>(
+    records: &[R],
     placements: &Placements,
     ordinals: &[usize],
     role: RangeRole,
@@ -365,11 +355,21 @@ pub fn check_no_empty_interval(
             bail!(
                 "{role_name} record {} ({}) has no letters in the {option} range (the range starts just past its end); NCBI BLAST+ searches it as a sequence without data, which is not supported by LOSAT's {program}",
                 index + 1,
-                record.id()
+                first_word(&record.title_bytes())
             );
         }
     }
     Ok(())
+}
+
+/// The title of a record up to its first space, as text (the `bio` ID of a `bio` record),
+/// for LOSAT's messages.
+fn first_word(title: &[u8]) -> String {
+    let end = title
+        .iter()
+        .position(|&byte| byte == b' ')
+        .unwrap_or(title.len());
+    String::from_utf8_lossy(&title[..end]).into_owned()
 }
 
 /// The query input as NCBI reads it, one record at a time: where each searched query lies
@@ -391,7 +391,7 @@ pub struct QueryInput {
 
 impl QueryInput {
     /// Every record searched whole (no `-query_loc`).
-    pub fn whole(records: &[fasta::Record]) -> Self {
+    pub fn whole<R: InputRecord>(records: &[R]) -> Self {
         Self {
             placements: Placements::default(),
             ordinals: (0..records.len()).collect(),
@@ -444,8 +444,8 @@ impl QueryInput {
 /// The queries as NCBI searches them with `-query_loc`: the searched queries, each cut to
 /// its interval, in input order, and the input they come from.
 #[derive(Clone, Debug)]
-pub struct RangedQueries {
-    pub records: Vec<fasta::Record>,
+pub struct RangedQueries<R = bio::io::fasta::Record> {
+    pub records: Vec<R>,
     pub input: QueryInput,
 }
 
@@ -467,7 +467,7 @@ pub struct RangedQueries {
 ///             continue; //SB-2307. ignore well formed, not found accession
 ///         }
 /// ```
-pub fn cut_queries(records: &[fasta::Record], range: &SequenceRange) -> RangedQueries {
+pub fn cut_queries<R: InputRecord>(records: &[R], range: &SequenceRange) -> RangedQueries<R> {
     let mut ranged = RangedQueries {
         records: Vec::with_capacity(records.len()),
         input: QueryInput {
@@ -490,7 +490,7 @@ pub fn cut_queries(records: &[fasta::Record], range: &SequenceRange) -> RangedQu
             }
         };
         ranged.input.skipped.push(false);
-        ranged.records.push(cut(record, from, to_exclusive));
+        ranged.records.push(record.cut(from, to_exclusive));
         ranged.input.placements.0.push(RecordPlacement {
             offset: from,
             length,
@@ -660,11 +660,11 @@ mod tests {
 
     #[test]
     fn skipped_queries_keep_their_ordinals_and_batches_count_whole_records() {
-        let records: Vec<fasta::Record> = [8000usize, 400, 3000, 200]
+        let records: Vec<bio::io::fasta::Record> = [8000usize, 400, 3000, 200]
             .iter()
             .enumerate()
             .map(|(index, &length)| {
-                fasta::Record::with_attrs(&format!("q{index}"), None, &vec![b'A'; length])
+                bio::io::fasta::Record::with_attrs(&format!("q{index}"), None, &vec![b'A'; length])
             })
             .collect();
         let ranged = cut_queries(&records, &SequenceRange { from: 500, to: 999 });

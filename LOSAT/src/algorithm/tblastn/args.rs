@@ -628,7 +628,23 @@ impl TblastnArgs {
     // formatter.PrintOneResultSet(**result, query);
     // NCBI c++/src/algo/blast/format/blast_format.cpp:1411-1458:
     // PrintOneResultSet dispatches the complete result to outfmt 0/6/7.
-    pub fn run(self) -> Result<()> {
+    /// `settings` are the NCBI application settings that LOSAT reproduces
+    /// (`ncbi_environment::check_ncbi_application_settings`): the input readers use them once
+    /// the program reads with `fasta_reader` (steps S3-S8 of the port plan).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_scope_src.cpp:67-72
+    /// ```c++
+    ///     CNcbiApplication* app = CNcbiApplication::Instance();
+    ///     if (app) {
+    ///         const CNcbiRegistry& registry = app->GetConfig();
+    ///         x_LoadDataLoadersConfig(registry);
+    ///         x_LoadBlastDbDataLoaderConfig(registry);
+    ///     }
+    /// ```
+    pub fn run(
+        self,
+        _settings: crate::blastinput::ncbi_environment::ApplicationSettings,
+    ) -> Result<()> {
         use crate::algorithm::blastn::input as fasta_input;
         use crate::blastinput::app;
         let args = self;

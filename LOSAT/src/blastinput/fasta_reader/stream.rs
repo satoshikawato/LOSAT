@@ -1067,6 +1067,22 @@ pub(crate) struct LineReader<R: Read> {
     unget_line: bool,
 }
 
+impl<R: Read + Seek> LineReader<R> {
+    /// `IsIStreamEmpty` on the stream under the line reader, before its first line is
+    /// read (`stream_is_empty`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:845-847
+    /// ```c++
+    /// bool
+    /// IsIStreamEmpty(CNcbiIstream & in)
+    /// {
+    /// ```
+    pub(crate) fn stream_is_empty(&mut self) -> bool {
+        debug_assert!(self.line_number == 0 && !self.unget_line);
+        stream_is_empty(&mut self.stream)
+    }
+}
+
 impl<R: Read> LineReader<R> {
     pub(crate) fn new(stream: FastaStream<R>) -> Self {
         Self {

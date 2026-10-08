@@ -878,10 +878,15 @@ label.inline {
 }
 
 .table-head {
-  font-size: 0.85em;
   font-weight: 600;
   padding: 4px 8px;
   color: var(--muted);
+}
+
+/* The smaller type is set on the cells, not on the grid: the grid's columns are in em, and
+   would otherwise be narrower than the rows' columns below the header. */
+.table-head > * {
+  font-size: 0.85em;
 }
 
 .sort-button {

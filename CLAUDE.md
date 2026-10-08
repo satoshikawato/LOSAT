@@ -23,7 +23,8 @@ Machine paths (`$WORK_ROOT`, `$TASK_DIR`, `$BUILD_ROOT`, `$NCBI_SRC`, `$NCBI_BIN
 - Agents (`.claude/agents/`): `losat-implementer` (one step of a port or fix),
   `losat-mechanic` (merges, records, CI fixes with a clear log), `losat-test-runner` (runs named
   checks, reports only failures), `losat-inventory` (one range of an NCBI call-path inventory),
-  and `losat-reviewer` (plan review, independent parity audit, screen review; read-only).
+  and `losat-reviewer` (plan review, code review, independent parity audit, screen review;
+  read-only).
 - The main session orchestrates. It hands reading and porting to `losat-implementer` and long
   runs to `losat-test-runner`, and keeps logs in files rather than in the conversation.
 

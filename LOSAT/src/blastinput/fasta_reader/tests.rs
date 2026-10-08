@@ -125,15 +125,30 @@ fn data_lines_follow_parse_data_line() {
         messages,
         "CFastaReader: Hyphens are invalid and will be ignored around line 3\nFASTA-Reader: Ignoring invalid residues at position(s): On line 3: 4\n"
     );
-    // U+00A0 is two bad bytes; a byte order mark before the sequence is three.
-    let (records, messages, _) = read(b">q\nACGT\xc2\xa0\n", false);
-    assert_eq!(records[0].sequence, b"ACGT");
+    // U+00A0 is two bad bytes (not white space for `isspace` in the C locale); a byte
+    // order mark before the sequence is three. The lines are long enough to pass
+    // CheckDataLine, as in the oracle inputs scratch_RD/s_nbsp (50 letters, U+00A0,
+    // 50 letters: "On line 2: 51-52") and p_bom_nodef ("On line 1: 1-3"); shorter
+    // lines fail it (`check_data_line_errors`).
+    let fifty = b"GTGTGAATCG".repeat(5);
+    let mut text = b">q\n".to_vec();
+    text.extend_from_slice(&fifty);
+    text.extend_from_slice(b"\xc2\xa0");
+    text.extend_from_slice(&fifty);
+    text.push(b'\n');
+    let (records, messages, error) = read(&text, false);
+    assert!(error.is_none());
+    assert_eq!(records[0].sequence, [&fifty[..], &fifty[..]].concat());
     assert_eq!(
         messages,
-        "FASTA-Reader: Ignoring invalid residues at position(s): On line 2: 5-6\n"
+        "FASTA-Reader: Ignoring invalid residues at position(s): On line 2: 51-52\n"
     );
-    let (records, messages, _) = read(b"\xef\xbb\xbfACGTACGT\n", false);
-    assert_eq!(records[0].sequence, b"ACGTACGT");
+    let mut text = b"\xef\xbb\xbf".to_vec();
+    text.extend_from_slice(&fifty);
+    text.push(b'\n');
+    let (records, messages, error) = read(&text, false);
+    assert!(error.is_none());
+    assert_eq!(records[0].sequence, fifty);
     assert_eq!(records[0].title, b"");
     assert_eq!(
         messages,
@@ -151,6 +166,10 @@ fn check_data_line_errors() {
         (b">q\nAC;rest\n", 2),
         (b">a\nACGT\n>b\nAC\n>c\n\n123456\n", 7),
         (b"\xef\xbb\xbf>q1\nACGT\n", 1),
+        // `bad >= good / 3` with `len_to_check > 3` (fasta.cpp:751-758): 4 letters and
+        // the two bytes of U+00A0; 8 letters after a byte order mark.
+        (b">q\nACGT\xc2\xa0\n", 2),
+        (b"\xef\xbb\xbfACGTACGT\n", 1),
     ] {
         let (_, _, error) = read(text, false);
         assert_eq!(
@@ -174,9 +193,12 @@ fn gap_lines_become_runs_of_n_or_x() {
     assert!(error.is_none());
     assert_eq!(records.len(), 1);
     assert_eq!(records[0].sequence, b"ACNNNGTNNNNNN");
+    // `>?abc` has no digits ("Bad gap size", size 1), and the `abc` left after them is
+    // not a `[key=value]` modifier, so the modifier loop warns once and gives up
+    // (fasta.cpp:1118-1166; oracle scratch_RD/g_abc: both warnings for line 3).
     assert_eq!(
         messages,
-        "CFastaReader: Bad gap size at line 6\nCFastaReader: Bad gap size at line 7\n"
+        "CFastaReader: Bad gap size at line 6\nCFastaReader: Bad gap size at line 7\nCFastaReader: Problem parsing gap mods at line 7\n"
     );
     let (records, _, _) = read(b">p\nAC\n>?2\nW\n", true);
     assert_eq!(records[0].sequence, b"ACXXW");
@@ -225,15 +247,16 @@ fn records_without_defline_or_residues() {
             ("Query_4", 1)
         ]
     );
-    // ` >q1` is a data line; only comment lines: no record (eEOF, `Expected defline`).
-    let (records, messages, _) = read(b" >q1\nACGT\n", false);
-    assert_eq!(
-        records[0].sequence,
-        b"QACGT".iter().skip(1).copied().collect::<Vec<_>>()
-    );
+    // ` >q1` is a data line (trimmed to `>q1`, which passes CheckDataLine: 1 good, 1
+    // bad, 3 bytes). `>`, `q` (not a nucleotide letter) and `1` are all bad residues
+    // (fasta.cpp:892-898,933-935; oracle scratch_RD/p_lead_ws_gt: "On line 1: 1-3").
+    // Only comment lines: no record (eEOF, `Expected defline`).
+    let (records, messages, error) = read(b" >q1\nACGT\n", false);
+    assert!(error.is_none());
+    assert_eq!(records[0].sequence, b"ACGT");
     assert_eq!(
         messages,
-        "FASTA-Reader: Ignoring invalid residues at position(s): On line 1: 1\n"
+        "FASTA-Reader: Ignoring invalid residues at position(s): On line 1: 1-3\n"
     );
     let mut source = FastaInputSource::from_bytes(b"; only\n\n", config(false));
     assert!(matches!(
@@ -271,8 +294,21 @@ fn line_ends_give_the_same_records() {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:128-159
-// (with data loaders the first line is tried as a Seq-id).
+/// The CheckDataLine error of `line` (fasta.cpp:751-758).
+fn is_check_data_line_error(result: &Result<FastaRecord, ReadError>, line: u64) -> bool {
+    matches!(
+        result,
+        Err(ReadError::Parse {
+            code: ParseErrorCode::Format,
+            line: error_line,
+            ..
+        }) if *error_line == line
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:130-159
+// (with data loaders the first line that each ReadOneSeq call reads is tried as a
+// Seq-id; a blank, `>` or comment line is not).
 #[test]
 fn seq_id_lines_are_rejected_with_data_loaders() {
     let with_loaders = ReaderConfig::query("BLASTN", false, true);
@@ -285,13 +321,64 @@ fn seq_id_lines_are_rejected_with_data_loaders() {
             ),
             "{text:?}"
         );
+        assert!(source.end(), "{text:?}");
     }
+    // After a rejection the source is past the one line that NCBI reads as the Seq-id
+    // (`*++GetLineReader()` with no `UngetLine` when the CSeq_id parse succeeds,
+    // blast_fasta_input.cpp:132-144), and the local-ID counter has not moved: the next
+    // call reads from the following line, as NCBI's next ReadOneSeq does after a Seq-id
+    // record (oracle BI net2: `AB123456` then `>q1`; net5: five Seq-id lines, then the
+    // first FASTA record is Query_1). LOSAT's callers stop at the rejection (`read_all`,
+    // `read_queries`).
+    let mut source =
+        FastaInputSource::from_bytes(b"AB123456\n12345\n>q1\nACGT\n>\nGG\n", with_loaders);
+    for _ in 0..2 {
+        assert!(matches!(
+            source.next_sequence(&mut |_| Ok(())),
+            Err(ReadError::Unsupported(_))
+        ));
+    }
+    let q1 = source.next_sequence(&mut |_| Ok(())).unwrap();
+    assert_eq!(
+        (q1.local_id.as_str(), q1.title(), q1.seq()),
+        ("Query_1", &b"q1"[..], &b"ACGT"[..])
+    );
+    let untitled = source.next_sequence(&mut |_| Ok(())).unwrap();
+    assert_eq!(
+        (untitled.local_id.as_str(), untitled.title(), untitled.seq()),
+        ("Query_2", &b""[..], &b"GG"[..])
+    );
+    assert!(source.end());
+    // A line of letters only throws "Malformatted ID" (Seq_id.cpp:2496-2503 on the retry
+    // without fParse_ValidLocal): it is FASTA data, and the record takes the next lines.
     let mut source = FastaInputSource::from_bytes(b"ACGTACGT\nACGT\n", with_loaders);
     assert_eq!(
         source.next_sequence(&mut |_| Ok(())).unwrap().sequence,
         b"ACGTACGTACGT"
     );
-    // A blank first line is not tried.
+    // A blank first line is not tried (`line.empty()`): CFastaReader reads `AB123456` as
+    // data, and two letters in eight bytes fail CheckDataLine.
     let mut source = FastaInputSource::from_bytes(b"\nAB123456\n", with_loaders);
-    assert!(source.next_sequence(&mut |_| Ok(())).is_ok());
+    assert!(is_check_data_line_error(
+        &source.next_sequence(&mut |_| Ok(())),
+        2
+    ));
+    // Without data loaders (`DATA_LOADERS=none`: CCustomizedFastaReader,
+    // blast_fasta_input.cpp:353-356) no line is tried: oracle BI fl_acc, fl_gb and fl_dig
+    // fail CheckDataLine at line 1, fl_text (`ACGT ACGT`) is one record.
+    let without_loaders = ReaderConfig::query("BLASTN", false, false);
+    for first in [&b"AB123456"[..], b"gb|AB123456.1|", b"1234"] {
+        let text = [first, b"\nGCTAAAGACAATTACATAACATACACGTCAGC\n"].concat();
+        let mut source = FastaInputSource::from_bytes(&text, without_loaders);
+        assert!(
+            is_check_data_line_error(&source.next_sequence(&mut |_| Ok(())), 1),
+            "{first:?}"
+        );
+    }
+    let mut source = FastaInputSource::from_bytes(b"ACGT ACGT\nGCTA\n", without_loaders);
+    let record = source.next_sequence(&mut |_| Ok(())).unwrap();
+    assert_eq!(
+        (record.local_id.as_str(), record.seq()),
+        ("Query_1", &b"ACGTACGTGCTA"[..])
+    );
 }

@@ -491,7 +491,10 @@ impl<R: Read> FastaReader<R> {
     /// ```
     /// NCBI reads a line that is a Seq-id as a sequence to fetch with its data loaders
     /// (GenBank over the network, or a BLAST database), which LOSAT does not do: such a
-    /// line is an explicit rejection (`seq_id::seq_id_line`).
+    /// line is an explicit rejection (`seq_id::reject_seq_id_line`). The rejection leaves
+    /// the reader where NCBI's Seq-id record leaves it: the line is consumed (no
+    /// `UngetLine` on that path) and the local-ID counter has not moved, so a further call
+    /// reads from the next line (oracle BI net2, net5).
     pub(crate) fn read_one_seq(&mut self, warn: Warn<'_>) -> Result<FastaRecord, ReadError> {
         if self.config.data_loaders {
             let line = trim_input_space(self.lines.next_line()).to_vec();

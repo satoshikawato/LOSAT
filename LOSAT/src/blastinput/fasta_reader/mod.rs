@@ -297,6 +297,12 @@ impl<R: Read> FastaInputSource<R> {
     /// ```
     /// The molecule checks after it (`Nucleotide FASTA provided for protein sequence` and
     /// the reverse) cannot fail: `AssignMolType` sets the molecule of the input.
+    ///
+    /// A line that NCBI's data loaders would fetch as a Seq-id gives
+    /// `ReadError::Unsupported`; the source is then past that one line, with the local-ID
+    /// counter unchanged, so a further call reads from the next line, as NCBI's next
+    /// `ReadOneSeq` does. The programs stop at the rejection (`read_all`, `read_queries`),
+    /// where NCBI skips a query it cannot fetch and fails on such a subject.
     pub fn next_sequence(
         &mut self,
         warn: &mut dyn FnMut(&[u8]) -> std::io::Result<()>,

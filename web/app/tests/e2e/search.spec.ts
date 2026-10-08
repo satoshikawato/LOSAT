@@ -2,15 +2,10 @@
 // application. The tests run with the FakeEngine build and with the engine build
 // (LOSAT_WEB_REACTORS); what only the engine can show (its messages, the kept subject, a
 // search long enough to edit or cancel while it runs) is checked in the engine build.
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import { BUILD_HAS_ENGINE } from './support/browser';
-import { REPOSITORY } from './support/harness-server';
+import { fasta, openFiles, paste, program, result, settled, showRecords, submit, waitStatus } from './support/search';
 
-type Role = 'query' | 'subject';
-
-const fasta = (path: string) => readFileSync(join(REPOSITORY, 'LOSAT/tests/fasta', path));
 /**
  * A BLASTP search of a proteome against itself (about 500,000 residues): many seconds in
  * every browser (S09's "Auto" measurements), long enough to edit or cancel during it.
@@ -23,71 +18,6 @@ async function startSlowSearch(page: Page): Promise<void> {
   await openFiles(page, 'subject', [{ name: SLOW.subject, text: fasta(SLOW.subject) }]);
   await submit(page);
   await expect(page.getByTestId('run-1-status')).toHaveText('running', { timeout: 60_000 });
-}
-
-async function settled(page: Page, role: Role, index = 0): Promise<void> {
-  const source = page.getByTestId(`${role}-source-${index}`);
-  await expect(source).toHaveAttribute('data-status', /ready|failed/, { timeout: 30_000 });
-  if ((await source.getAttribute('data-status')) === 'ready') {
-    await expect(page.getByTestId(`${role}-source-${index}-check`)).not.toHaveAttribute('data-check', 'pending', {
-      timeout: 30_000,
-    });
-  }
-}
-
-async function paste(page: Page, role: Role, text: string): Promise<void> {
-  await page.getByTestId(`${role}-input`).fill(text);
-  await settled(page, role);
-}
-
-async function openFiles(page: Page, role: Role, files: ReadonlyArray<{ name: string; text: string | Buffer }>) {
-  const before = await page.locator(`[data-testid^="${role}-source-"][data-status]`).count();
-  await page.getByTestId(`${role}-files`).setInputFiles(
-    files.map((file) => ({ name: file.name, mimeType: 'text/plain', buffer: Buffer.from(file.text) })),
-  );
-  for (let i = 0; i < files.length; i++) await settled(page, role, before + i);
-}
-
-/** Opens the record list of a source (it starts open for a few records). */
-async function showRecords(page: Page, role: Role, index = 0): Promise<void> {
-  await page
-    .getByTestId(`${role}-source-${index}`)
-    .locator('details.records')
-    .evaluate((details) => ((details as HTMLDetailsElement).open = true));
-}
-
-async function program(page: Page, id: string): Promise<void> {
-  await page.getByTestId(`program-${id}`).check();
-}
-
-async function submit(page: Page): Promise<void> {
-  await expect(page.getByTestId('argv-validation')).not.toHaveAttribute('data-state', 'checking');
-  await page.getByTestId('add-to-queue').click();
-}
-
-/** Waits until run `run` ends, and fails with its error if it ends otherwise than `status`. */
-async function waitStatus(page: Page, run: number, status: 'completed' | 'cancelled', timeout = 120_000): Promise<void> {
-  const element = page.getByTestId(`run-${run}-status`);
-  await expect(element).toHaveText(/^(completed|cancelled|failed)$/, { timeout });
-  const actual = await element.textContent();
-  if (actual !== status) {
-    const error = (await page.getByTestId(`run-${run}-error`).textContent({ timeout: 1000 }).catch(() => null)) ?? '';
-    throw new Error(`run ${run} ended ${actual}, not ${status}: ${error}`);
-  }
-}
-
-/** The CLI command of a completed run, and its stored output of one format. */
-async function result(page: Page, run: number, format: 0 | 6 | 7): Promise<{ command: string; output: string }> {
-  await page.getByTestId('tab-results').click();
-  const select = page.getByTestId('result-run');
-  const label = await select.locator('option', { hasText: new RegExp(`Run ${run} ·`) }).textContent();
-  await select.selectOption({ label: label!.trim() });
-  await page.getByTestId(`format-${format}`).click();
-  await expect(page.getByTestId('result-output')).toHaveAttribute('data-shown', `${run}:${format}`);
-  const command = (await page.getByTestId('result-command').textContent()) ?? '';
-  const output = (await page.getByTestId('result-output').textContent()) ?? '';
-  await page.getByTestId('tab-search').click();
-  return { command, output };
 }
 
 // Engine searches are slower in Firefox and WebKit than in Chromium (W1 README).

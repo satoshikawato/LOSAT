@@ -53,7 +53,8 @@
 | S14 | [抽出と候補](session_s14_w5_extraction_candidates.md) | W5 | 原配列との一致 | 未着手 |
 | S15 | [出力と再現性](session_s15_w6_export_session.md) | W6 | 再計算しない再読込、明示的なつなぎ直し | 未着手 |
 | S16 | [配信の仕上げ](session_s16_w7_delivery.md) | W7 | V-OFF・V-PRIV、プレビューでの隔離 | 未着手 |
-| SF | [BLASTN の FASTA の読み方（`CFastaReader` の移植）](session_sf_e2h_blastn_fasta_reader.md) | E2h | NCBI の `CFastaReader` の経路の関数の移植とアダプタの索引の走査で、TD-12 の拒否をなくす（DW-13。範囲は TBLASTX・TBLASTN・BLASTP の同じ種類の拒否を含む、DW-23） | 未着手（エンジン側の次。S09+ より先に行う（DW-23）。アプリ側の S13 と並行できる） |
+| SF | [BLASTN の FASTA の読み方（`CFastaReader` の移植）](session_sf_e2h_blastn_fasta_reader.md) | E2h | NCBI の `CFastaReader` の経路の関数の移植とアダプタの索引の走査で、TD-12 の拒否をなくす（DW-13。範囲は TBLASTX・TBLASTN・BLASTP の同じ種類の拒否を含む、DW-23） | 途中（2026-10-08、[ゲート記録](../evidence/losat_web_e2h/README.md)。棚卸し 222 行、権威の記録、移植の計画、読み込み器（S0）、NCBI の fixture 3932 行。program への接続と移植、ゲート、監査は SFb） |
+| SFb | [E2h の続き：読み込み器の接続と移植、fixture、ゲート](session_sfb_e2h_port.md) | E2h | SF の行と同じ（移植 S1〜S10、fixture の全行が NCBI と一致か明示的な拒否、sweep、全ゲート、V-PERF、独立監査） | 未着手（エンジン側の次。S09+ より先。アプリ側の S13 と並行できる） |
 | S09+ | [TBLASTN の subject の前処理](session_s09p_r2_tblastn_subject_cache.md)（条件付き） | R2 | DW-8 の条件を TBLASTN が満たした（S09）。連続実行の出力が CLI と一致 | 未着手（エンジン側、SF の後。進め方は保守者が決めた：翻訳の表引きを先にし、20% 未満ならキャッシュは入れない。DW-22） |
 | SX | [BLASTX の統合](session_sx_blastx_integration.md)（条件付き） | SX | LOSATX の v0.2.0 の認証が `main` に入った後の最初の区切りで実施。S17 の前に必ず終える | 条件待ち |
 | S17 | [公開判定](session_s17_g_release_decision.md) | G | 初期の要求に未達が無い | 未着手 |

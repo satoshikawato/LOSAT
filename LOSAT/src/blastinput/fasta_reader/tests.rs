@@ -382,3 +382,664 @@ fn seq_id_lines_are_rejected_with_data_loaders() {
         ("Query_1", &b"ACGTACGTGCTA"[..])
     );
 }
+
+// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:2457-2551 (CSeq_id::Set with
+// fParse_AnyRaw | fParse_ValidLocal), 632-642 (s_CheckForFastaTag), 1634-1830
+// (IdentifyAccession), 96-124 (kSupportedRawDbtags); blast_fasta_input.cpp:132-151.
+#[test]
+fn seq_id_lines_follow_cseq_id() {
+    use super::seq_id::{classify, SeqIdLine::*};
+    for (line, kind) in [
+        // Oracle BI net1-net6 (data loaders on): fetched, or skipped / fatal as Seq-ids.
+        (&b"AB123456"[..], GuideFormat),
+        (b"AB000000", GuideFormat),
+        (b"AB123456.1", GuideFormat),
+        (b"ab123456", GuideFormat),
+        (b"gb|AB123456.1|", FastaTag),
+        (b"lcl|foo", FastaTag),
+        (b"P01308", GuideFormat),
+        // ... and read as FASTA (net4, net5).
+        (b"MKVLAAGIVGLLLAQ", Fasta),
+        (b"GCTAAAGACAATTACATAACATACACGTCAGCACGAAACT", Fasta),
+        // FASTA tags: the position of the bar first, then the tag in any case.
+        (b"gi|abc|", FastaTag),
+        (b"GB|x", FastaTag),
+        (b"gnl|db|x", FastaTag),
+        (b"ref|NC_000001|", FastaTag),
+        (b"tr|x", FastaTag),
+        (b"gb|", Fasta),
+        (b"xx|abc", Fasta),
+        (b"abc|x", Fasta),
+        (b"AB|123456", Fasta),
+        // GI, PDB, PRF and Swiss-Prot shapes (no table).
+        (b"1", Gi),
+        (b"1234", Gi),
+        (b"2024", Gi),
+        (b"0123", Fasta),
+        (b"12.5", Fasta),
+        (b"1234.1", Fasta),
+        (b"1ABC", Pdb),
+        (b"1abc_B", Pdb),
+        (b"1ABC-A", Pdb),
+        (b"1ABC|A", Pdb),
+        (b"1ABC\x00", Pdb),
+        (b"1ABCD", Fasta),
+        (b"1AB", Fasta),
+        (b"1 acgt acgt", Fasta),
+        (b"123456A", Prf),
+        (b"123456AB", Prf),
+        (b"123456AB:x", Prf),
+        (b"123456ABC", Fasta),
+        (b"Q9XYZ1", Swissprot),
+        (b"Q9XYZ1.2", Swissprot),
+        (b"A0A023GPI8", Swissprot),
+        // Accession-guide formats (letters + digits), rejected without the guide's rules:
+        // `ZZ123456` and `N12345` are FASTA for NCBI (unreserved prefixes).
+        (b"NC_000001.11", GuideFormat),
+        (b"NP_000001", GuideFormat),
+        (b"P12345", GuideFormat),
+        (b"ZZ123456", GuideFormat),
+        (b"N12345", GuideFormat),
+        (b"A?B12345", GuideFormat),
+        (b"ABCD01P000001", GuideFormat),
+        (b"ABCD01S00000", Fasta),
+        (b"ABC_01P000001", Fasta),
+        (b"XP_123", Fasta),
+        (b"ACGT1234", Fasta),
+        (b"contig1", Fasta),
+        (b"AB 123456", Fasta),
+        (b"A-B12345", Fasta),
+        (b"AB123456.1.2", Fasta),
+        (b"AB123456.", Fasta),
+        (b"AB123456.x", Fasta),
+        // General IDs of the whitelist (`dbGSS` and `dbSTS` never match).
+        (b"SRA:SRR000001", General),
+        (b"sra:x", General),
+        (b"TIGR:abc", General),
+        (b"DBGSS:x", Fasta),
+        (b"dbGSS:x", Fasta),
+        (b"FOO:bar", Fasta),
+        (b"SRA", Fasta),
+        // Not tried (empty, or not alphanumeric first), and trimmed.
+        (b"", Fasta),
+        (b">q", Fasta),
+        (b";c", Fasta),
+        (b"\xef\xbb\xbfAB123456", Fasta),
+        (b"-AB123456", Fasta),
+        (b" \tAB123456 \x0b", GuideFormat),
+        (b"ACGT ACGT", Fasta),
+        (b"ACGTACGT", Fasta),
+        (b"A*0", Fasta),
+    ] {
+        assert_eq!(classify(line), kind, "{:?}", String::from_utf8_lossy(line));
+    }
+}
+
+/// The records and rejections of an input read to its end, as the oracle's batches see
+/// them (each rejected Seq-id line is one step).
+fn steps(bytes: &[u8], config: ReaderConfig) -> Vec<Result<(String, Vec<u8>, Vec<u8>), String>> {
+    let mut source = FastaInputSource::from_bytes(bytes, config);
+    let mut steps = Vec::new();
+    while !source.end() {
+        match source.next_sequence(&mut |_| Ok(())) {
+            Ok(record) => steps.push(Ok((record.local_id, record.title, record.sequence))),
+            Err(ReadError::Unsupported(error)) => steps.push(Err(format!("{error:#}"))),
+            Err(other) => panic!("{other}"),
+        }
+    }
+    steps
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:132-159
+// (oracle BI net4 and net5: each Seq-id line is one record, the next line starts a new
+// one; a malformatted line is FASTA and takes the lines up to the next `>`).
+#[test]
+fn seq_id_records_of_the_network_oracle() {
+    let blastp = ReaderConfig::query("BLASTP", true, true);
+    let got = steps(
+        b"P01308\nAB123456\nMKVLAAGIVGLLLAQ\nMKVLAAGIVGLL\n>pq2 two\nAYMLPDDDHWIAYNNYRFWSWFPGFLIYIHGVHPSYDQCEECTKIPKQYSLTGDFISVYY\nDKHHADKQRICCGLNTWFDNFRMTWFWCASNLCAYDSDLMFDDRVNCFMNDSDQASWAYP\n",
+        blastp,
+    );
+    assert_eq!(got.len(), 4);
+    assert!(got[0]
+        .as_ref()
+        .unwrap_err()
+        .contains("(\"P01308\") is not a defline"));
+    assert!(got[0]
+        .as_ref()
+        .unwrap_err()
+        .contains("not supported by LOSAT's BLASTP"));
+    assert!(got[1].is_err());
+    assert_eq!(
+        got[2],
+        Ok((
+            "Query_1".to_string(),
+            Vec::new(),
+            b"MKVLAAGIVGLLLAQMKVLAAGIVGLL".to_vec()
+        ))
+    );
+    let (id, title, sequence) = got[3].clone().unwrap();
+    assert_eq!(
+        (id.as_str(), &title[..], sequence.len()),
+        ("Query_2", &b"pq2 two"[..], 120)
+    );
+
+    let blastn = ReaderConfig::query("BLASTN", false, true);
+    let got = steps(
+        b"AB123456.1\ngb|AB123456.1|\nab123456\nlcl|foo\nP01308\nGCTAAAGACAATTACATAACATACACGTCAGCACGAAACT\nTGTTGGCCCAGTGTGAATCGCTTAAGGGTTAAGTAAGTGTGATGCATACGCCTTTACTTG\nCTGTGTCCACCCCATCGGACTGGCATTTTTATTACACTCAGAAACAGAACTCGGGTAATT\nTTGACAGGTCACGCAGAGGCGCGCCCTCCTGAAGTGCGTGGACACTCGCTATGAATCTCT\nGATTTACCCACTCTGCCAAACTCCAGCGCGGTCAGTTCCATCACCCTAAGTAACCGAATA\nATGCGTTCGCTCTATTGACT\n>q3 three\nTTCGTACCTTGGGGGTCGTTACCACTCTGTTCCCACGAGCGGCATTTCTGGATGGCCAGC\n",
+        blastn,
+    );
+    assert_eq!(got.len(), 7);
+    assert!(got[..5].iter().all(Result::is_err));
+    let (id, title, sequence) = got[5].clone().unwrap();
+    assert_eq!(
+        (id.as_str(), title.len(), sequence.len()),
+        ("Query_1", 0, 300)
+    );
+    assert!(sequence.starts_with(b"GCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGG"));
+    let (id, title, _) = got[6].clone().unwrap();
+    assert_eq!((id.as_str(), &title[..]), ("Query_2", &b"q3 three"[..]));
+
+    // A subject (net6) is rejected the same way, naming its role.
+    let subject = ReaderConfig::subject("BLASTN", false, true);
+    let got = steps(b"AB000000\n", subject);
+    assert!(got[0]
+        .as_ref()
+        .unwrap_err()
+        .starts_with("the first line of the subject (\"AB000000\")"));
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:352-356
+// (DATA_LOADERS=none: CCustomizedFastaReader tries no line as a Seq-id; oracle BI fl_*).
+#[test]
+fn first_lines_without_data_loaders() {
+    let sequence_line = b"\nGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG\n";
+    for (first, messages) in [
+        // fl_colon, fl_lcl: data with bad residues.
+        (
+            &b"SRA:SRR000001"[..],
+            "FASTA-Reader: Ignoring invalid residues at position(s): On line 1: 4, 8-13\n",
+        ),
+        (
+            b"lcl|foo",
+            "FASTA-Reader: Ignoring invalid residues at position(s): On line 1: 1, 3-7\n",
+        ),
+        // fl_long: 60 letters.
+        (&[b'A'; 60][..], ""),
+    ] {
+        let (records, got, error) = read(&[first, &sequence_line[..]].concat(), false);
+        assert!(error.is_none(), "{first:?}");
+        assert_eq!(got, messages, "{first:?}");
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].local_id, "Query_1");
+    }
+    // fl_dig0, fl_gi, fl_prot: CheckDataLine fails at line 1.
+    for first in [&b"0123"[..], b"gi|abc|", b"P01308"] {
+        let (_, _, error) = read(&[first, &sequence_line[..]].concat(), false);
+        assert_eq!(
+            error.unwrap(),
+            "CFastaReader: Near line 1, there's a line that doesn't look like plausible data, but it's not marked as defline or comment.",
+            "{first:?}"
+        );
+    }
+}
+
+/// The lines of the hyphen warnings in `messages`.
+fn hyphen_lines(messages: &str) -> Vec<u64> {
+    messages
+        .lines()
+        .filter_map(|line| {
+            line.strip_prefix("CFastaReader: Hyphens are invalid and will be ignored around line ")
+        })
+        .map(|number| number.parse().unwrap())
+        .collect()
+}
+
+/// The probe of the LR inventory (`scratch_LR/in/probe_*.fa`): eight lines, five of them
+/// data lines with a hyphen.
+fn probe(eol: &[u8], final_eol: bool) -> Vec<u8> {
+    let lines: [&[u8]; 8] = [
+        b">p1 one",
+        b"TTTCCTCATGCAATTCAAAACCATGTCCGT-AATGTAGGCGAAATAGTAAA",
+        b"CCATTTTACGGAGGATACCAAATTC-CTCCTTATTCAGGACCTAAC",
+        b"",
+        b"CTGAGGTAAACCAGGTCTCTCC-GCCCCCTTATAAAAGCTGTT",
+        b">p2 two",
+        b"GCACCTAGCCAAGTTCAACGGCAGCTGCAATGGAAATAGG-CAATGACGGATATATATTAAA",
+        b"AAGTGTTTTAAGATACATTG-AGGCCCGTTCGTGCTCCTCGC",
+    ];
+    let mut text = lines.join(eol);
+    if final_eol {
+        text.extend_from_slice(eol);
+    }
+    text
+}
+
+// NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:219-296 (the first line decides
+// the end-of-line style; `\n\r` switches the reader to the mixed style, where it is two
+// breaks). Oracle LR n_blastn_probe_{lf,cr,crlf,lfcr} and n_blastn_probe_{lf,cr}_nofinal
+// (the other two files without a final line end were not run).
+#[test]
+fn line_end_style_is_decided_by_the_first_line() {
+    // The records without their messages (whose line numbers differ).
+    let records = |records: Vec<FastaRecord>| {
+        records
+            .into_iter()
+            .map(|record| (record.local_id, record.title, record.sequence))
+            .collect::<Vec<_>>()
+    };
+    let expected = read(&probe(b"\n", true), false);
+    assert_eq!(hyphen_lines(&expected.1), vec![2, 3, 5, 7, 8]);
+    let expected = records(expected.0);
+    for (eol, lines) in [
+        (&b"\n"[..], vec![2, 3, 5, 7, 8]),
+        (b"\r", vec![2, 3, 5, 7, 8]),
+        (b"\r\n", vec![2, 3, 5, 7, 8]),
+        (b"\n\r", vec![3, 4, 7, 11, 13]),
+    ] {
+        for final_eol in [true, false] {
+            let got = read(&probe(eol, final_eol), false);
+            assert_eq!(hyphen_lines(&got.1), lines, "{eol:?} {final_eol}");
+            assert_eq!(records(got.0), expected, "{eol:?} {final_eol}");
+            assert!(got.2.is_none());
+        }
+    }
+    // A CR-style file reads a CRLF as one break, an LF-style file a CR before the LF
+    // (n_blastn_w_cr_crlf, w_lf_then_crlf, w_crlf_then_lf): the same records.
+    let a = b"GGCCCAGTCCAGATCCTCGGAAGTCC";
+    let b = b"ATTGGGTCATAAACAAACATCATG";
+    for text in [
+        [&b">q1 x\r"[..], a, b"\r\n>q2 y\r", b, b"\r\n"].concat(),
+        [&b">q1 x\n"[..], a, b"\r\n>q2 y\r\n", b, b"\n"].concat(),
+        [&b">q1 x\r\n"[..], a, b"\n>q2 y\n", b, b"\n"].concat(),
+        [&b">q1 x\r\r\n"[..], a, b"\r\r\n>q2 y\r\r\n", b, b"\r\r\n"].concat(),
+        [&b">q1 x\n"[..], a, b"\n>q2 y\n", b, b"\r"].concat(),
+    ] {
+        let (records, messages, error) = read(&text, false);
+        assert!(error.is_none() && messages.is_empty(), "{text:?}");
+        assert_eq!(
+            records
+                .iter()
+                .map(|record| (record.title.as_slice(), record.sequence.as_slice()))
+                .collect::<Vec<_>>(),
+            vec![(&b"q1 x"[..], &a[..]), (b"q2 y", &b[..])],
+            "{text:?}"
+        );
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:245-267 (x_AdvanceEOLSimple: the
+// tail after an embedded alternate end of line is pushed back without the line's own
+// terminator, so it is glued to the next line). Oracle LR n_blastn_two_mixed, n_lost_c.
+#[test]
+fn a_lone_cr_glues_the_tail_to_the_next_line() {
+    let second = b"TGGCATTTTTATTACACTCAGAAACAGAACTCGGGTAATTTTGACAGGTCACGCAGAGGCGCGCCCTCCTGAAGTGCGTGGACACTCGCT";
+    let text = [
+        &b">q1 first\nGCTAAAGACAATTACATAACATACACGTCAGCACGAAACTTGTTGGCCCAGTGTGAATCG\r\nCTTAAGGGTTAAGTAAGTGTGATGCATACGCCTTTACTTGCTGTGTCCACCCCATCGGAC\r>q2 second\n"[..],
+        second,
+        b"\n",
+    ]
+    .concat();
+    let (records, messages, error) = read(&text, false);
+    assert!(error.is_none());
+    assert_eq!(records.len(), 2);
+    assert_eq!(records[0].title, b"q1 first");
+    assert_eq!(records[0].sequence.len(), 120);
+    assert_eq!(records[1].title, [&b"q2 second"[..], second].concat());
+    assert!(records[1].sequence.is_empty());
+    assert_eq!(
+        messages,
+        "FASTA-Reader: Title ends with at least 20 valid nucleotide characters.  Was the sequence accidentally put in the title line?\n"
+    );
+    // lost_c: CR style; the LF inside line 3 pushes `ATTAC-...` back, which is then
+    // glued to `TT-GG...` (one line 4, no line 5).
+    let (records, messages, _) = read(
+        b">f\rAC-GTACGTAGGCTAGCTAGGATCGATCG\rGG-ACACGTAGGCTAGCTAGGATCGATCG\nATTAC-CAGACGTAGGCTAGCTAGGATCGATCG\rTT-GGACGTAGGCTAGCTAGGATCGATCG\r",
+        false,
+    );
+    assert_eq!(hyphen_lines(&messages), vec![2, 3, 4]);
+    assert_eq!(
+        records[0].sequence,
+        b"ACGTACGTAGGCTAGCTAGGATCGATCGGGACACGTAGGCTAGCTAGGATCGATCGATTACCAGACGTAGGCTAGCTAGGATCGATCGTTGGACGTAGGCTAGCTAGGATCGATCG"
+    );
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:413-443 (a pushed-back tail
+// of at most 256 bytes steps back into the current buffer, which keeps the stream's
+// end-of-file state) and c++/src/util/line_reader.cpp:100-104 (AtEOF). Oracle LR
+// n_lost_g55 and n_lost_g55_nl: the tail after the second embedded end of line of the
+// last line is never read (no warning for its hyphen); n_lost_a, _b, _d (one embedded
+// end of line): nothing is lost.
+#[test]
+fn the_tail_after_a_second_embedded_line_end_can_be_lost() {
+    let head = b">first\r\nTC-TTGGCTCAATCCTAGGTGGGCATGTTTCCTAATGCCC\rTT-TTTAACGTGAGGGTTCGCGTTTTTATCCCACCTAGC\r\r\nACGTACGT\n-ACGTACGTACGTACGTACGTAC";
+    for final_lf in [false, true] {
+        let mut text = head.to_vec();
+        if final_lf {
+            text.push(b'\n');
+        }
+        let (records, messages, error) = read(&text, false);
+        assert!(error.is_none());
+        assert_eq!(hyphen_lines(&messages), vec![2, 3], "{final_lf}");
+        assert_eq!(
+            records[0].sequence,
+            b"TCTTGGCTCAATCCTAGGTGGGCATGTTTCCTAATGCCCTTTTTAACGTGAGGGTTCGCGTTTTTATCCCACCTAGCACGTACGT"
+        );
+    }
+    for text in [
+        &b">f\rAC-GTACGTAGGCTAGCTAGGATCGATCG\rGG-ACACGTAGGCTAGCTAGGATCGATCG\nATTAC-CAGACGTAGGCTAGCTAGGATCGATCG"[..],
+        b">f\rAC-GTACGTAGGCTAGCTAGGATCGATCG\rGG-ACACGTAGGCTAGCTAGGATCGATCG\nATTAC-CAGACGTAGGCTAGCTAGGATCGATCG\n",
+        b">f\nAC-GTACGTAGGCTAGCTAGGATCGATCG\nGG-ACACGTAGGCTAGCTAGGATCGATCG\rATTAC-CAGACGTAGGCTAGCTAGGATCGATCG",
+    ] {
+        let (records, messages, _) = read(text, false);
+        assert_eq!(hyphen_lines(&messages), vec![2, 3, 4], "{text:?}");
+        assert_eq!(
+            records[0].sequence,
+            b"ACGTACGTAGGCTAGCTAGGATCGATCGGGACACGTAGGCTAGCTAGGATCGATCGATTACCAGACGTAGGCTAGCTAGGATCGATCG"
+        );
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:155-163 (every line read counts,
+// blank, white-space and comment lines too). Oracle LR n_cmt_probe, n_cmt_probe_cr and
+// n_near_{lf,cr,crlf}.
+#[test]
+fn line_numbers_count_skipped_lines() {
+    for text in [
+        &b"#c1\n;c2\n  \n>p\nAC-GTACGTAGGCTAGCTAGGATCGATCG\n"[..],
+        b"#c1\r;c2\r  \r>p\rAC-GTACGTAGGCTAGCTAGGATCGATCG\r",
+    ] {
+        let (records, messages, error) = read(text, false);
+        assert!(error.is_none());
+        assert_eq!(records[0].title, b"p");
+        assert_eq!(hyphen_lines(&messages), vec![5], "{text:?}");
+    }
+    for eol in [&b"\n"[..], b"\r", b"\r\n"] {
+        let text = [
+            &b">q1 a"[..],
+            b"ACGTACGTAGCTAGCTAGCTAGCATCGATCGACTAGC",
+            b">q2 b",
+            b"@@@@@@@@@@@@@@@@@@@@@@@@@@",
+            b"",
+        ]
+        .join(eol);
+        let (records, _, error) = read(&text, false);
+        assert_eq!(records.len(), 1);
+        assert_eq!(
+            error.unwrap(),
+            "CFastaReader: Near line 4, there's a line that doesn't look like plausible data, but it's not marked as defline or comment.",
+            "{eol:?}"
+        );
+    }
+}
+
+/// What reading an input gives, step by step: records, rejected lines and the error that
+/// ends it, with the messages written on the way.
+#[derive(Debug, PartialEq)]
+enum Step {
+    Record(FastaRecord),
+    Rejected(String),
+    Failed {
+        code: ParseErrorCode,
+        message: String,
+        line: u64,
+    },
+}
+
+fn outcome<R: Read>(mut source: FastaInputSource<R>) -> (Vec<Step>, Vec<u8>) {
+    let mut steps = Vec::new();
+    let mut messages = Vec::new();
+    while !source.end() {
+        match source.next_sequence(&mut |message: &[u8]| {
+            messages.extend_from_slice(message);
+            Ok(())
+        }) {
+            Ok(record) => steps.push(Step::Record(record)),
+            Err(ReadError::Unsupported(error)) => steps.push(Step::Rejected(format!("{error:#}"))),
+            Err(ReadError::Parse {
+                code,
+                message,
+                line,
+            }) => {
+                steps.push(Step::Failed {
+                    code,
+                    message,
+                    line,
+                });
+                break;
+            }
+            Err(ReadError::Write(error)) => panic!("{error}"),
+        }
+    }
+    (steps, messages)
+}
+
+/// splitmix64.
+struct Rng(u64);
+
+impl Rng {
+    fn next(&mut self) -> u64 {
+        self.0 = self.0.wrapping_add(0x9e37_79b9_7f4a_7c15);
+        let mut z = self.0;
+        z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+        z ^ (z >> 31)
+    }
+
+    fn below(&mut self, n: usize) -> usize {
+        (self.next() % n as u64) as usize
+    }
+
+    fn pick<'a, T>(&mut self, items: &'a [T]) -> &'a T {
+        &items[self.below(items.len())]
+    }
+}
+
+const LINE_ENDS: [&[u8]; 4] = [b"\n", b"\r\n", b"\r", b"\n\r"];
+
+/// One generated line (without its end): deflines, gap lines, comments, blank lines,
+/// Seq-id-like lines, odd bytes and data lines with the reader's edge cases.
+fn generated_line(rng: &mut Rng, out: &mut Vec<u8>) {
+    const DEFLINES: [&[u8]; 14] = [
+        b">q1 title",
+        b">",
+        b">   ",
+        b"> lead",
+        b">q\tx",
+        b">q ACGTACGTACGTACGTACGTAC",
+        b">?3",
+        b">?",
+        b">?abc",
+        b">?unk 2",
+        b">?_x y",
+        b">?5 [gap-type=centromere]",
+        b">q\x01c",
+        b">\xff\xfe t",
+    ];
+    const OTHER: [&[u8]; 19] = [
+        b";c",
+        b"#c",
+        b"!c",
+        b" ;x",
+        b"",
+        b"  ",
+        b"\t",
+        b"\x0b",
+        b"AB123456",
+        b"1234",
+        b"gb|X|",
+        b"lcl|foo",
+        b"SRA:x",
+        b"ACGT ACGT",
+        b"0123",
+        b"\xef\xbb\xbfACGT",
+        b"\x00",
+        b"AC\xc2\xa0GT",
+        b"\xff",
+    ];
+    const RESIDUES: &[u8] = b"ACGTACGTACGTNacgtnURYE*-;  1x\t";
+    match rng.below(10) {
+        0 | 1 => out.extend_from_slice(*rng.pick(&DEFLINES)),
+        2 | 3 => out.extend_from_slice(*rng.pick(&OTHER)),
+        _ => {
+            for _ in 0..rng.below(90) {
+                out.push(*rng.pick(RESIDUES));
+            }
+        }
+    }
+}
+
+/// A generated input: a few to a few thousand lines in one line-end style, with lines
+/// in other styles, an embedded line end or none at the end now and then.
+fn generated_input(rng: &mut Rng, large: bool) -> Vec<u8> {
+    let style = *rng.pick(&LINE_ENDS);
+    let lines = if large {
+        100 + rng.below(400)
+    } else {
+        rng.below(12)
+    };
+    let mut text = Vec::new();
+    for index in 0..lines {
+        if large && index % 40 != 0 {
+            // Long runs of plain data lines, to cross the 8191-byte windows.
+            for _ in 0..40 + rng.below(80) {
+                text.push(*rng.pick(b"ACGTACGTacgtN-"));
+            }
+        } else {
+            generated_line(rng, &mut text);
+        }
+        if rng.below(if large { 60 } else { 8 }) == 0 {
+            // An embedded line end of another style inside the line.
+            text.extend_from_slice(*rng.pick(&LINE_ENDS));
+            for _ in 0..rng.below(40) {
+                text.push(*rng.pick(b"ACGT-"));
+            }
+        }
+        let last = index + 1 == lines;
+        if !(last && rng.below(2) == 0) {
+            let end = if rng.below(if large { 80 } else { 6 }) == 0 {
+                *rng.pick(&LINE_ENDS)
+            } else {
+                style
+            };
+            text.extend_from_slice(end);
+        }
+    }
+    text
+}
+
+/// A file in which an LF sits inside a CR-style line `offset` bytes before the end of
+/// window `window` (8191 bytes each), followed by `tail` bytes and `end`. The CRLF style
+/// of line 1 switches to CR at the embedded CR of line 2, whose tail is pushed back, so
+/// every later byte comes through the pushback buffers; `CPushback_Streambuf` refills
+/// them with `in_avail`, the rest of the file for an `ifstream`, when a window is used
+/// up. With `offset` 1 and no `end`, a tail of 2 to 256 bytes is lost from a file
+/// (`file_rows_through_from_file_and_from_bytes` has the oracle's rows of this kind).
+fn window_boundary_input(window: usize, offset: usize, tail: usize, end: &[u8]) -> Vec<u8> {
+    let lf = 8191 * window - offset;
+    let mut text = b">first\r\nAC-GT\rACGT\n".to_vec();
+    while text.len() + 53 < lf - 10 {
+        text.extend_from_slice(b"ACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGT\r");
+    }
+    while text.len() < lf {
+        text.push(b'C');
+    }
+    text.push(b'\n');
+    text.extend(std::iter::repeat_n(b'G', tail));
+    text.extend_from_slice(end);
+    text
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:224-236 (the pushback
+// buffer refills with `in_avail()`). The CLI reads a file; the ABI reads bytes as a file
+// with the same bytes: both must give the same records, messages and errors.
+#[test]
+fn bytes_read_as_a_file_with_the_same_bytes() {
+    let path = std::env::temp_dir().join(format!(
+        "losat-fasta-reader-bytes-vs-file-{}",
+        std::process::id()
+    ));
+    let configs = [
+        ReaderConfig::query("BLASTN", false, false),
+        ReaderConfig::subject("BLASTP", true, false),
+        ReaderConfig::query("TBLASTX", false, true),
+    ];
+    let mut check = |bytes: &[u8], what: &str| {
+        std::fs::write(&path, bytes).unwrap();
+        for config in configs {
+            let from_bytes = outcome(FastaInputSource::from_bytes(bytes, config));
+            let from_file = outcome(FastaInputSource::from_file(
+                std::fs::File::open(&path).unwrap(),
+                config,
+            ));
+            assert_eq!(from_bytes, from_file, "{what} {config:?} {bytes:?}");
+        }
+    };
+    for window in 1..=2 {
+        for offset in 1..=4 {
+            for tail in [0, 1, 2, 23, 255, 256, 257, 4100] {
+                for end in [&b""[..], b"\r", b"\n", b"\r\n"] {
+                    check(
+                        &window_boundary_input(window, offset, tail, end),
+                        &format!("window {window} offset {offset} tail {tail} end {end:?}"),
+                    );
+                }
+            }
+        }
+    }
+    let mut rng = Rng(0x5f0e_2026_1008);
+    for case in 0..3000 {
+        check(&generated_input(&mut rng, false), &format!("small {case}"));
+    }
+    for case in 0..150 {
+        check(&generated_input(&mut rng, true), &format!("large {case}"));
+    }
+    std::fs::remove_file(&path).unwrap();
+}
+
+/// Reader-only speed against `bio::io::fasta` (port plan R1), median of three runs per
+/// file. Run with `LOSAT_FASTA_READER_BENCH=<file>[,<file>...] cargo test --release --lib
+/// fasta_reader::tests::reader_speed -- --ignored --nocapture`.
+#[test]
+#[ignore]
+fn reader_speed_against_bio() {
+    let Ok(files) = std::env::var("LOSAT_FASTA_READER_BENCH") else {
+        return;
+    };
+    let median = |mut times: Vec<f64>| {
+        times.sort_by(f64::total_cmp);
+        times[times.len() / 2]
+    };
+    for path in files.split(',') {
+        let (mut reader_times, mut bio_times) = (Vec::new(), Vec::new());
+        for _ in 0..3 {
+            let start = std::time::Instant::now();
+            let mut source = FastaInputSource::from_file(
+                std::fs::File::open(path).unwrap(),
+                ReaderConfig::subject("BLASTN", false, false),
+            );
+            let records = read_all(&mut source, &mut |_| Ok(())).unwrap();
+            reader_times.push(start.elapsed().as_secs_f64());
+            let reader_letters: usize = records.iter().map(|record| record.sequence.len()).sum();
+            let reader_records = records.len();
+            drop(records);
+            let start = std::time::Instant::now();
+            let records: Vec<bio::io::fasta::Record> = bio::io::fasta::Reader::from_file(path)
+                .unwrap()
+                .records()
+                .map(Result::unwrap)
+                .collect();
+            bio_times.push(start.elapsed().as_secs_f64());
+            let bio_letters: usize = records.iter().map(|record| record.seq().len()).sum();
+            assert_eq!(
+                (reader_records, reader_letters),
+                (records.len(), bio_letters)
+            );
+        }
+        let (reader, bio) = (median(reader_times), median(bio_times));
+        println!(
+            "reader_speed\t{path}\treader {reader:.3} s\tbio {bio:.3} s\tratio {:.2}",
+            reader / bio
+        );
+    }
+}

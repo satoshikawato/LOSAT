@@ -252,9 +252,10 @@ impl FastaInputSource<std::fs::File> {
 
 impl<'a> FastaInputSource<&'a [u8]> {
     /// An input source over bytes in memory (the ABI's registered inputs), read as a
-    /// file with the same bytes.
+    /// regular file with the same bytes (`FastaStream::from_bytes`; test
+    /// `bytes_read_as_a_file_with_the_same_bytes`).
     pub fn from_bytes(bytes: &'a [u8], config: ReaderConfig) -> Self {
-        Self::from_stream(FastaStream::new(bytes), config)
+        Self::from_stream(FastaStream::from_bytes(bytes), config)
     }
 }
 

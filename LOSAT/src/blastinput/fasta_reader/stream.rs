@@ -724,6 +724,27 @@ fn file_available(file: &mut std::fs::File) -> std::io::Result<usize> {
 // typedef IO_PREFIX::ifstream      CNcbiIfstream;
 // #endif
 // ```
+// NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:235-236
+// ```c++
+//     x_FillBuffer((size_t) m_Sb->in_avail());
+//     return gptr() < egptr() ? CT_TO_INT_TYPE(*gptr()) : CT_EOF;
+// ```
+// Bytes in memory are read as a regular file with the same bytes (`file_available`): the
+// readable-byte hint is the number of bytes not yet taken from them.
+fn bytes_available(rest: &mut &[u8]) -> std::io::Result<usize> {
+    Ok(rest.len())
+}
+
+impl<'a> FastaStream<&'a [u8]> {
+    /// A stream over bytes in memory that reads them as `from_file` reads a regular file
+    /// with the same bytes (the same refills of the pushback buffers, so the same lines).
+    pub(crate) fn from_bytes(input: &'a [u8]) -> Self {
+        let mut stream = Self::new(input);
+        stream.backend_available = Some(bytes_available);
+        stream
+    }
+}
+
 impl FastaStream<std::fs::File> {
     // NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:224-236
     // ```c++
@@ -1078,3 +1099,7 @@ impl<R: Read> LineReader<R> {
         self.line_number
     }
 }
+
+#[cfg(test)]
+#[path = "stream_tests.rs"]
+mod tests;

@@ -419,8 +419,11 @@ export class ResultsBrowser {
 
   private hspEntry(loaded: LoadedRun, row: number): HspEntry {
     const { table } = loaded.index;
-    const queryFrame = frame(table.queryFrame, row);
-    const subjectFrame = frame(table.subjectFrame, row);
+    // Frames belong to the translated roles only (docs/web/results_columns.md "Frames": TBLASTN
+    // and TBLASTX): the engine's BLASTP records carry frame 1 for both sequences.
+    const translated = (kind: SequenceKind) => kind === 'nucleotide' && loaded.run.snapshot.program !== 'blastn';
+    const queryFrame = translated(loaded.kinds.query) ? frame(table.queryFrame, row) : undefined;
+    const subjectFrame = translated(loaded.kinds.subject) ? frame(table.subjectFrame, row) : undefined;
     return {
       row,
       id: { runId: loaded.run.snapshot.runId, qIdx: table.qIdx[row]!, rank: table.rank[row]! },

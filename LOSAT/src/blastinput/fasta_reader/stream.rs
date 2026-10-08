@@ -132,6 +132,9 @@ pub(crate) struct FastaStream<R: Read> {
     //     return gptr() < egptr() ? CT_TO_INT_TYPE(*gptr()) : CT_EOF;
     // ```
     backend_available: Option<fn(&mut R) -> std::io::Result<usize>>,
+    /// Whether lines are copied from the buffered input at once while no pushback buffer
+    /// is active (LOSAT's speed). Tests turn it off to compare with one byte at a time.
+    pub(crate) bulk: bool,
 }
 // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:81-89
 // ```c++
@@ -196,6 +199,7 @@ impl<R: Read> FastaStream<R> {
             //     return gptr() < egptr() ? CT_TO_INT_TYPE(*gptr()) : CT_EOF;
             // ```
             backend_available: None,
+            bulk: true,
         }
     }
     // NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:224-236
@@ -539,26 +543,27 @@ impl<R: Read> FastaStream<R> {
     // ```
     fn getline(&mut self, delimiters: &[u8], line: &mut Vec<u8>) -> Option<u8> {
         line.clear();
-        let mut last = None;
         loop {
             // Without pushback buffers the bytes come from the buffered input in order, so
-            // the bytes before a delimiter are copied at once (LOSAT's speed; the bytes,
-            // the delimiter taken and the stream state are those of one byte at a time).
-            if self.pushback.is_empty() && (delimiters.len() > 1 || !self.failed) {
+            // the bytes before a delimiter are copied at once and the delimiter is taken
+            // from the buffer (LOSAT's speed; the bytes, the delimiter taken and the
+            // stream state are those of one byte at a time).
+            if self.bulk && self.pushback.is_empty() && (delimiters.len() > 1 || !self.failed) {
                 let buffered = match self.input.fill_buf() {
                     Ok(bytes) => bytes,
                     Err(_) => &[],
                 };
                 if !buffered.is_empty() {
-                    match buffered.iter().position(|byte| delimiters.contains(byte)) {
+                    match find_delimiter(buffered, delimiters) {
                         Some(end) => {
+                            let delimiter = buffered[end];
                             line.extend_from_slice(&buffered[..end]);
-                            self.input.consume(end);
+                            self.input.consume(end + 1);
+                            return self.end_of_getline(delimiters, delimiter);
                         }
                         None => {
-                            let length = buffered.len();
-                            last = Some(buffered[length - 1]);
                             line.extend_from_slice(buffered);
+                            let length = buffered.len();
                             self.input.consume(length);
                             continue;
                         }
@@ -572,20 +577,82 @@ impl<R: Read> FastaStream<R> {
             };
             let Some(byte) = byte else {
                 self.failed = true;
-                break;
+                return line.last().copied();
             };
-            last = Some(byte);
-            if let Some(position) = delimiters.iter().position(|&delimiter| delimiter == byte) {
-                if delimiters.len() > 1 {
-                    if let Some(next) = self.raw_peek() {
-                        if delimiters[position + 1..].contains(&next) {
-                            last = self.raw_take();
-                        }
-                    }
-                }
-                break;
+            if delimiters.contains(&byte) {
+                return self.end_of_getline(delimiters, byte);
             }
             line.push(byte);
+        }
+    }
+
+    /// `getline` with the one delimiter `eol`, which also gives the first position of
+    /// `watch` in the line (the `m_Line.find(alt_eol)` of `x_AdvanceEOLSimple`, found while
+    /// the line is read: LOSAT's speed only).
+    fn getline_watching(&mut self, eol: u8, watch: u8, line: &mut Vec<u8>) -> Option<usize> {
+        line.clear();
+        let mut watched = None;
+        loop {
+            if self.bulk && self.pushback.is_empty() && !self.failed {
+                let buffered = match self.input.fill_buf() {
+                    Ok(bytes) => bytes,
+                    Err(_) => &[],
+                };
+                if !buffered.is_empty() {
+                    let found = if watched.is_none() {
+                        find_delimiter(buffered, &[eol, watch])
+                    } else {
+                        find_byte(buffered, eol)
+                    };
+                    match found {
+                        Some(end) if buffered[end] == eol => {
+                            line.extend_from_slice(&buffered[..end]);
+                            self.input.consume(end + 1);
+                            return watched;
+                        }
+                        Some(end) => {
+                            watched = Some(line.len() + end);
+                            line.extend_from_slice(&buffered[..=end]);
+                            self.input.consume(end + 1);
+                        }
+                        None => {
+                            line.extend_from_slice(buffered);
+                            let length = buffered.len();
+                            self.input.consume(length);
+                        }
+                    }
+                    continue;
+                }
+            }
+            let Some(byte) = self.next_byte() else {
+                self.failed = true;
+                return watched;
+            };
+            if byte == eol {
+                return watched;
+            }
+            if byte == watch && watched.is_none() {
+                watched = Some(line.len());
+            }
+            line.push(byte);
+        }
+    }
+
+    /// The end of `getline` at `delimiter`: with two delimiters, a second one that comes
+    /// after it in `delimiters` is taken too (CR LF is one end of line, LF CR two). The
+    /// last byte taken.
+    fn end_of_getline(&mut self, delimiters: &[u8], delimiter: u8) -> Option<u8> {
+        let mut last = Some(delimiter);
+        if delimiters.len() > 1 {
+            let position = delimiters
+                .iter()
+                .position(|&other| other == delimiter)
+                .unwrap_or(delimiters.len());
+            if let Some(next) = self.raw_peek() {
+                if delimiters[position + 1..].contains(&next) {
+                    last = self.raw_take();
+                }
+            }
         }
         last
     }
@@ -626,8 +693,7 @@ impl<R: Read> FastaStream<R> {
     // }
     // ```
     fn advance_simple(&mut self, eol: u8, alternate: u8, line: &mut Vec<u8>) -> EolStyle {
-        self.getline(&[eol], line);
-        if let Some(position) = line.iter().position(|&byte| byte == alternate) {
+        if let Some(position) = self.getline_watching(eol, alternate, line) {
             let position = position + 1;
             if eol != b'\n' || position != line.len() {
                 let rest = line[position..].to_vec();
@@ -869,12 +935,66 @@ impl<R: Read> FastaStream<R> {
         }
     }
 }
+/// The bytes of a word that are `byte`, as the high bit of each byte of the word. The
+/// lowest set bit marks the first such byte exactly; bits above it can be set for bytes
+/// that are not `byte`, so only the lowest one is used.
+fn equal_bytes(word: u64, byte: u8) -> u64 {
+    const LOW: u64 = 0x0101_0101_0101_0101;
+    const HIGH: u64 = 0x8080_8080_8080_8080;
+    let difference = word ^ (LOW * u64::from(byte));
+    difference.wrapping_sub(LOW) & !difference & HIGH
+}
+
+/// The first position of `needle` in `haystack` (`memchr`, a word at a time: LOSAT's
+/// speed only).
+pub(crate) fn find_byte(haystack: &[u8], needle: u8) -> Option<usize> {
+    let mut words = haystack.chunks_exact(8);
+    let mut offset = 0;
+    for word in &mut words {
+        let found = equal_bytes(u64::from_le_bytes(word.try_into().unwrap()), needle);
+        if found != 0 {
+            return Some(offset + (found.trailing_zeros() / 8) as usize);
+        }
+        offset += 8;
+    }
+    words
+        .remainder()
+        .iter()
+        .position(|&byte| byte == needle)
+        .map(|position| offset + position)
+}
+
+/// The first position in `haystack` of one of the one or two `delimiters`.
+fn find_delimiter(haystack: &[u8], delimiters: &[u8]) -> Option<usize> {
+    match *delimiters {
+        [only] => find_byte(haystack, only),
+        [first, second] => {
+            let mut words = haystack.chunks_exact(8);
+            let mut offset = 0;
+            for word in &mut words {
+                let word = u64::from_le_bytes(word.try_into().unwrap());
+                let found = equal_bytes(word, first) | equal_bytes(word, second);
+                if found != 0 {
+                    return Some(offset + (found.trailing_zeros() / 8) as usize);
+                }
+                offset += 8;
+            }
+            words
+                .remainder()
+                .iter()
+                .position(|&byte| byte == first || byte == second)
+                .map(|position| offset + position)
+        }
+        _ => haystack.iter().position(|byte| delimiters.contains(byte)),
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:930-931
 // ```c++
 //         case '\t': case '\n': case '\v': case '\f': case '\r': case ' ':
 //             continue;
 // ```
-pub(crate) fn input_space(byte: u8) -> bool {
+pub(crate) const fn input_space(byte: u8) -> bool {
     matches!(byte, b' ' | b'\t' | b'\n' | b'\r' | 0x0b | 0x0c)
 }
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3153-3161
@@ -1081,6 +1201,23 @@ impl<R: Read> LineReader<R> {
         }
         self.stream.advance(&mut self.line);
         &self.line
+    }
+
+    /// Takes the current line out (`*reader`), to be read while the reader goes on with
+    /// other work; `put_line` gives it back before the next line, `UngetLine` or
+    /// `PeekChar` (LOSAT's speed: no copy of the line).
+    pub(crate) fn take_line(&mut self) -> Vec<u8> {
+        std::mem::take(&mut self.line)
+    }
+
+    /// Gives back the line of `take_line`.
+    pub(crate) fn put_line(&mut self, line: Vec<u8>) {
+        self.line = line;
+    }
+
+    /// `FastaStream::bulk`.
+    pub(crate) fn bulk(&self) -> bool {
+        self.stream.bulk
     }
 
     /// NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:211-219

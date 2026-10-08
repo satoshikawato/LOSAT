@@ -259,6 +259,17 @@ impl<'a> FastaInputSource<&'a [u8]> {
     }
 }
 
+impl<'a> FastaInputSource<&'a [u8]> {
+    /// `from_bytes` with LOSAT's bulk paths off: one byte at a time, the reference that
+    /// the tests compare the bulk paths with.
+    #[cfg(test)]
+    pub(crate) fn from_bytes_byte_at_a_time(bytes: &'a [u8], config: ReaderConfig) -> Self {
+        let mut stream = FastaStream::from_bytes(bytes);
+        stream.bulk = false;
+        Self::from_stream(stream, config)
+    }
+}
+
 impl<R: Read> FastaInputSource<R> {
     fn from_stream(stream: FastaStream<R>, config: ReaderConfig) -> Self {
         Self {

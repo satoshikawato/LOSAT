@@ -952,7 +952,8 @@ fn window_boundary_input(window: usize, offset: usize, tail: usize, end: &[u8]) 
 
 // NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:224-236 (the pushback
 // buffer refills with `in_avail()`). The CLI reads a file; the ABI reads bytes as a file
-// with the same bytes: both must give the same records, messages and errors.
+// with the same bytes: both must give the same records, messages and errors, and so must
+// the reader with its bulk paths off (one byte at a time).
 #[test]
 fn bytes_read_as_a_file_with_the_same_bytes() {
     let path = std::env::temp_dir().join(format!(
@@ -973,6 +974,9 @@ fn bytes_read_as_a_file_with_the_same_bytes() {
                 config,
             ));
             assert_eq!(from_bytes, from_file, "{what} {config:?} {bytes:?}");
+            // LOSAT's bulk paths (port plan R1) against one byte at a time.
+            let reference = outcome(FastaInputSource::from_bytes_byte_at_a_time(bytes, config));
+            assert_eq!(from_bytes, reference, "{what} {config:?} bulk {bytes:?}");
         }
     };
     for window in 1..=2 {

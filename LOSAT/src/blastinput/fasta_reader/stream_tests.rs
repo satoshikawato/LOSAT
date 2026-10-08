@@ -123,7 +123,11 @@ fn stream_matches_the_pinned_cpp_oracle() {
         } else {
             &[false, true]
         };
-        for &error in errors {
+        // With and without LOSAT's bulk copy of lines (`FastaStream::bulk`).
+        for (&error, bulk) in errors
+            .iter()
+            .flat_map(|error| [(error, true), (error, false)])
+        {
             let temporary = std::env::temp_dir().join(format!(
                 "losat-fasta-reader-stream-{}-{}",
                 std::process::id(),
@@ -142,8 +146,14 @@ fn stream_matches_the_pinned_cpp_oracle() {
             };
             let mut stream = FastaStream::new(input);
             stream.backend_available = Some(|input| input.available());
+            stream.bulk = bulk;
             let empty = fields[3] == "1" && stream_is_empty(&mut stream);
-            assert_eq!(empty, fields[6] == "1", "{} empty error={error}", fields[0]);
+            assert_eq!(
+                empty,
+                fields[6] == "1",
+                "{} empty error={error} bulk={bulk}",
+                fields[0]
+            );
             let lines = if empty {
                 Vec::new()
             } else {
@@ -152,15 +162,20 @@ fn stream_matches_the_pinned_cpp_oracle() {
             if file_backend {
                 std::fs::remove_file(&temporary).unwrap();
             }
-            assert_eq!(lines, expected, "{} lines error={error}", fields[0]);
+            assert_eq!(
+                lines, expected,
+                "{} lines error={error} bulk={bulk}",
+                fields[0]
+            );
             checked += 1;
         }
     }
     // 9674 rows read through this stream (1413 of them real files, the others with and
-    // without a read error), 2506 CMemoryLineReader rows skipped.
+    // without a read error), each with and without the bulk copy; 2506 CMemoryLineReader
+    // rows skipped.
     assert_eq!(
         (checked, memory_rows),
-        (1413 + 2 * (12180 - 2506 - 1413), 2506)
+        (2 * (1413 + 2 * (12180 - 2506 - 1413)), 2506)
     );
 }
 

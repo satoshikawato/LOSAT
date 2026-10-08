@@ -5,7 +5,7 @@
 
 use std::io::Read;
 
-use super::stream::{input_space, trim_input_space, trim_input_start, LineReader};
+use super::stream::{input_space, trim_input_end, trim_input_space, trim_input_start, LineReader};
 use super::{FastaRecord, ReadError, ReaderConfig};
 
 /// The kinds of reader problems (`ILineError::EProblem`) that LOSAT meets, for
@@ -320,6 +320,133 @@ const fn char_types(protein: bool) -> [CharType; 256] {
 const NUCLEOTIDE_CHAR_TYPES: [CharType; 256] = char_types(false);
 const PROTEIN_CHAR_TYPES: [CharType; 256] = char_types(true);
 
+/// 1 for the bytes of `types` that are `kind`, 0 for the others.
+const fn kind_table(types: &[CharType; 256], kind: CharType) -> [u8; 256] {
+    let mut table = [0; 256];
+    let mut index = 0;
+    while index < 256 {
+        table[index] = (types[index] as u8 == kind as u8) as u8;
+        index += 1;
+    }
+    table
+}
+
+const NUCLEOTIDE_RESIDUES: [u8; 256] = kind_table(&NUCLEOTIDE_CHAR_TYPES, CharType::Residue);
+const NUCLEOTIDE_MASKED: [u8; 256] = kind_table(&NUCLEOTIDE_CHAR_TYPES, CharType::MaskedResidue);
+const PROTEIN_RESIDUES: [u8; 256] = kind_table(&PROTEIN_CHAR_TYPES, CharType::Residue);
+const PROTEIN_MASKED: [u8; 256] = kind_table(&PROTEIN_CHAR_TYPES, CharType::MaskedResidue);
+
+/// The number of bytes at the start of `s` that `table` marks: first 32 at a time while
+/// `sure` (a subset of the table's bytes, tested without it) holds for them, then eight at
+/// a time with the table (LOSAT's speed only).
+fn run_length(s: &[u8], table: &[u8; 256], sure: impl Fn(u8) -> bool) -> usize {
+    let mut length = 0;
+    for block in s.chunks_exact(32) {
+        if !block.iter().fold(true, |all, &byte| all & sure(byte)) {
+            break;
+        }
+        length += 32;
+    }
+    for chunk in s[length..].chunks_exact(8) {
+        let all = table[chunk[0] as usize]
+            & table[chunk[1] as usize]
+            & table[chunk[2] as usize]
+            & table[chunk[3] as usize]
+            & table[chunk[4] as usize]
+            & table[chunk[5] as usize]
+            & table[chunk[6] as usize]
+            & table[chunk[7] as usize];
+        if all == 0 {
+            break;
+        }
+        length += 8;
+    }
+    length
+        + s[length..]
+            .iter()
+            .take_while(|&&byte| table[byte as usize] != 0)
+            .count()
+}
+
+/// Nucleotide residues and masked residues that `run_length` tests without the table.
+fn sure_nucleotide(byte: u8) -> bool {
+    (byte == b'A') | (byte == b'C') | (byte == b'G') | (byte == b'T') | (byte == b'N')
+}
+
+fn sure_nucleotide_masked(byte: u8) -> bool {
+    (byte == b'a') | (byte == b'c') | (byte == b'g') | (byte == b't') | (byte == b'n')
+}
+
+/// Protein residues (every upper-case letter and `*`) and masked residues (every
+/// lower-case letter).
+fn sure_protein(byte: u8) -> bool {
+    (byte.wrapping_sub(b'A') < 26) | (byte == b'*')
+}
+
+fn sure_protein_masked(byte: u8) -> bool {
+    byte.wrapping_sub(b'a') < 26
+}
+
+/// How `CheckDataLine` counts a byte.
+#[derive(Clone, Copy)]
+enum CheckClass {
+    Good,
+    Neutral,
+    Comment,
+    Bad,
+}
+
+/// `CheckDataLine`'s classes of the bytes (`check_data_line`), looked up in a table
+/// (LOSAT's speed only): letters and `*` are good; hyphens (`fHyphensIgnoreAndWarn`),
+/// white space and digits count for nothing; `;` ends the check; the others are bad.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:730-750
+/// ```c++
+///     for (size_t pos = 0;  pos < len_to_check;  ++pos) {
+///         unsigned char c = s[pos];
+///         if (s_ASCII_IsAlpha(c) ||  c == '*') {
+///             ++good;
+///             if( bIsNuc && s_ASCII_IsAmbigNuc(c) ) {
+///                 ++ambig_nuc;
+///             }
+///         } else if( c == '-' ) {
+///             if( ! bIgnoreHyphens ) {
+///                 ++good;
+///             }
+///             // if bIgnoreHyphens == true, the "hyphens are ignored" warning
+///             // will be triggered elsewhere
+///         } else if (isspace(c)  ||  (c >= '0' && c <= '9')) {
+///             // treat whitespace and digits as neutral
+///         } else if (c == ';') {
+///             break; // comment -- ignore rest of line
+///         } else {
+///             ++bad;
+///         }
+///     }
+/// ```
+const CHECK_CLASSES: [CheckClass; 256] = {
+    let mut table = [CheckClass::Bad; 256];
+    let mut index = 0;
+    while index < 256 {
+        let byte = index as u8;
+        table[index] = if byte.is_ascii_alphabetic() || byte == b'*' {
+            CheckClass::Good
+        } else if byte == b'-' || input_space(byte) || byte.is_ascii_digit() {
+            CheckClass::Neutral
+        } else if byte == b';' {
+            CheckClass::Comment
+        } else {
+            CheckClass::Bad
+        };
+        index += 1;
+    }
+    table
+};
+
+/// Records shorter than this give a copy of the residue buffer, which is kept for the
+/// next record; longer ones take the buffer.
+const SEQ_DATA_KEPT: usize = 1 << 20;
+
 /// NCBI's `CFastaReader` state of the record being read (`ReadOneSeq` resets it).
 pub(crate) struct FastaReader<R: Read> {
     pub(crate) lines: LineReader<R>,
@@ -345,8 +472,6 @@ pub(crate) struct FastaReader<R: Read> {
     local_id: Option<String>,
     /// Bad positions of a data line, reused.
     bad_positions: Vec<u32>,
-    /// A trimmed data line, reused.
-    data_line: Vec<u8>,
 }
 
 /// Where a reader message goes: `LOG_POST_X(1, Warning << message)` with no listener.
@@ -385,7 +510,6 @@ impl<R: Read> FastaReader<R> {
             title: Vec::new(),
             local_id: None,
             bad_positions: Vec::new(),
-            data_line: Vec::new(),
         }
     }
 
@@ -642,44 +766,46 @@ impl<R: Read> FastaReader<R> {
                 ));
             }
             if c == Some(b'>') {
-                let raw = self.lines.next_line();
+                self.lines.next_line();
+                let raw = self.lines.take_line();
+                let modified;
                 let next_line = match raw.strip_prefix(b">?_") {
-                    Some(rest) => [b">".as_slice(), rest].concat(),
-                    None => raw.to_vec(),
+                    Some(rest) => {
+                        modified = [b">".as_slice(), rest].concat();
+                        &modified
+                    }
+                    None => &raw[..],
                 };
                 if next_line.starts_with(b">?") {
+                    self.lines.put_line(raw);
                     self.lines.unget_line();
                 } else if need_defline {
-                    self.parse_def_line(&next_line);
+                    self.parse_def_line(next_line);
+                    self.lines.put_line(raw);
                     need_defline = false;
                     continue;
                 } else {
+                    self.lines.put_line(raw);
                     self.lines.unget_line();
                     break;
                 }
             }
-            let line = trim_input_space(self.lines.next_line());
-            if line.is_empty() {
+            self.lines.next_line();
+            let raw = self.lines.take_line();
+            let line = trim_input_space(&raw);
+            if line.is_empty() || matches!(line[0], b'!' | b'#' | b';') {
+                self.lines.put_line(raw);
                 continue;
-            }
-            if matches!(line[0], b'!' | b'#' | b';') {
-                continue;
-            }
-            self.data_line.clear();
-            match line.strip_prefix(b">?_") {
-                Some(rest) => {
-                    self.data_line.push(b'>');
-                    self.data_line.extend_from_slice(rest);
-                }
-                None => self.data_line.extend_from_slice(line),
             }
             if need_defline {
                 self.parse_def_line(b">");
                 need_defline = false;
             }
-            let data_line = std::mem::take(&mut self.data_line);
-            let parsed = self.parse_data_line(&data_line, warn);
-            self.data_line = data_line;
+            let parsed = match line.strip_prefix(b">?_") {
+                Some(rest) => self.parse_data_line(&[b">".as_slice(), rest].concat(), warn),
+                None => self.parse_data_line(line, warn),
+            };
+            self.lines.put_line(raw);
             parsed?;
         }
         if need_defline && self.lines.at_eof() {
@@ -895,15 +1021,11 @@ impl<R: Read> FastaReader<R> {
         let (mut good, mut bad) = (0usize, 0usize);
         let len_to_check = s.len().min(70);
         for &c in &s[..len_to_check] {
-            if c.is_ascii_alphabetic() || c == b'*' {
-                good += 1;
-            } else if c == b'-' {
-                // fHyphensIgnoreAndWarn: hyphens are neither good nor bad.
-            } else if input_space(c) || c.is_ascii_digit() {
-            } else if c == b';' {
-                break;
-            } else {
-                bad += 1;
+            match CHECK_CLASSES[c as usize] {
+                CheckClass::Good => good += 1,
+                CheckClass::Neutral => {}
+                CheckClass::Comment => break,
+                CheckClass::Bad => bad += 1,
             }
         }
         if bad >= good / 3 && (len_to_check > 3 || good == 0 || bad > good) {
@@ -1002,28 +1124,59 @@ impl<R: Read> FastaReader<R> {
             return self.parse_gap_line(s, warn);
         }
         self.check_data_line(s)?;
-        let types = if self.config.protein {
-            &PROTEIN_CHAR_TYPES
+        let (types, residues, masked) = if self.config.protein {
+            (&PROTEIN_CHAR_TYPES, &PROTEIN_RESIDUES, &PROTEIN_MASKED)
         } else {
-            &NUCLEOTIDE_CHAR_TYPES
+            (
+                &NUCLEOTIDE_CHAR_TYPES,
+                &NUCLEOTIDE_RESIDUES,
+                &NUCLEOTIDE_MASKED,
+            )
         };
         let mut hyphen_seen = false;
         self.bad_positions.clear();
-        for (pos, &c) in s.iter().enumerate() {
+        let bulk = self.lines.bulk();
+        let mut pos = 0;
+        while pos < s.len() {
+            let c = s[pos];
             match types[c as usize] {
+                // After the first residue of a run, `CloseMask` (`OpenMask`) has nothing
+                // left to do for the others, which are copied at once (LOSAT's speed).
                 CharType::Residue => {
                     self.seq_data.push(c);
                     self.close_mask();
+                    let rest = &s[pos + 1..];
+                    let run = if !bulk {
+                        0
+                    } else if self.config.protein {
+                        run_length(rest, residues, sure_protein)
+                    } else {
+                        run_length(rest, residues, sure_nucleotide)
+                    };
+                    self.seq_data.extend_from_slice(&s[pos + 1..pos + 1 + run]);
+                    pos += run;
                 }
                 CharType::MaskedResidue => {
                     self.seq_data.push(c.to_ascii_uppercase());
                     self.open_mask();
+                    let rest = &s[pos + 1..];
+                    let run = if !bulk {
+                        0
+                    } else if self.config.protein {
+                        run_length(rest, masked, sure_protein_masked)
+                    } else {
+                        run_length(rest, masked, sure_nucleotide_masked)
+                    };
+                    self.seq_data
+                        .extend(s[pos + 1..pos + 1 + run].iter().map(u8::to_ascii_uppercase));
+                    pos += run;
                 }
                 CharType::HyphenToIgnoreAndWarn => hyphen_seen = true,
                 CharType::Comment => break,
                 CharType::Space => {}
                 CharType::Bad => self.bad_positions.push(pos as u32),
             }
+            pos += 1;
         }
         self.check_length()?;
         if hyphen_seen {
@@ -1624,10 +1777,11 @@ impl<R: Read> FastaReader<R> {
         if let Some(start) = self.mask_range_start.take() {
             self.mask.push((start, self.current_pos_with_gaps() - 1));
         }
-        let titles = std::mem::take(&mut self.titles);
-        for title in &titles {
+        let mut titles = std::mem::take(&mut self.titles);
+        for title in titles.drain(..) {
             self.parse_title(title, warn)?;
         }
+        self.titles = titles;
         let gap_char = if self.config.protein { b'X' } else { b'N' };
         let mut sequence = if self.total_gap_length > 0 {
             let mut new_data =
@@ -1645,6 +1799,11 @@ impl<R: Read> FastaReader<R> {
                 new_data.extend_from_slice(&self.seq_data[pos..]);
             }
             new_data
+        } else if self.seq_data.len() < SEQ_DATA_KEPT {
+            // The buffer stays for the next record (LOSAT's speed: no regrowth per record).
+            let sequence = self.seq_data.clone();
+            self.seq_data.clear();
+            sequence
         } else {
             std::mem::take(&mut self.seq_data)
         };
@@ -1657,9 +1816,8 @@ impl<R: Read> FastaReader<R> {
             //         }
             // ```
             for residue in sequence.iter_mut() {
-                if *residue == b'U' {
-                    *residue = b'T';
-                }
+                // A select rather than a conditional store (LOSAT's speed: vectorized).
+                *residue = if *residue == b'U' { b'T' } else { *residue };
             }
         }
         for &(from, to) in &self.mask {
@@ -1725,9 +1883,14 @@ impl<R: Read> FastaReader<R> {
     /// }
     /// ```
     /// The long-title and modifier warnings are ignored problems.
-    fn parse_title(&mut self, title: &LineText, warn: Warn<'_>) -> Result<(), ReadError> {
+    fn parse_title(&mut self, title: LineText, warn: Warn<'_>) -> Result<(), ReadError> {
         self.create_warnings_for_seq_data_in_title(&title.text, warn)?;
-        self.title = trim_input_space(&title.text).to_vec();
+        // `TruncateSpacesInPlace` on the title's own bytes.
+        let mut text = title.text;
+        text.truncate(trim_input_end(&text).len());
+        let leading = text.len() - trim_input_start(&text).len();
+        text.drain(..leading);
+        self.title = text;
         Ok(())
     }
 
@@ -1916,5 +2079,66 @@ fn convert_bad_indexes_to_string(out: &mut Vec<u8>, line: u64, positions: &[u32]
         if first != second {
             out.extend_from_slice(format!("-{}", second + 1).as_bytes());
         }
+    }
+}
+
+// The tables and sets of LOSAT's fast paths against the definitions they replace.
+#[cfg(test)]
+#[test]
+fn fast_path_tables_match_their_definitions() {
+    for byte in 0..=255u8 {
+        for (types, residues, masked, sure, sure_masked) in [
+            (
+                &NUCLEOTIDE_CHAR_TYPES,
+                &NUCLEOTIDE_RESIDUES,
+                &NUCLEOTIDE_MASKED,
+                sure_nucleotide as fn(u8) -> bool,
+                sure_nucleotide_masked as fn(u8) -> bool,
+            ),
+            (
+                &PROTEIN_CHAR_TYPES,
+                &PROTEIN_RESIDUES,
+                &PROTEIN_MASKED,
+                sure_protein,
+                sure_protein_masked,
+            ),
+        ] {
+            let kind = types[byte as usize];
+            assert_eq!(residues[byte as usize] == 1, kind == CharType::Residue);
+            assert_eq!(masked[byte as usize] == 1, kind == CharType::MaskedResidue);
+            assert!(!sure(byte) || kind == CharType::Residue, "{byte}");
+            assert!(
+                !sure_masked(byte) || kind == CharType::MaskedResidue,
+                "{byte}"
+            );
+        }
+        // CheckDataLine (fasta.cpp:730-750).
+        let class = if byte.is_ascii_alphabetic() || byte == b'*' {
+            "good"
+        } else if byte == b'-' || input_space(byte) || byte.is_ascii_digit() {
+            "neutral"
+        } else if byte == b';' {
+            "comment"
+        } else {
+            "bad"
+        };
+        let table = match CHECK_CLASSES[byte as usize] {
+            CheckClass::Good => "good",
+            CheckClass::Neutral => "neutral",
+            CheckClass::Comment => "comment",
+            CheckClass::Bad => "bad",
+        };
+        assert_eq!(table, class, "{byte}");
+    }
+    // Protein: the sure sets are the whole kinds.
+    for byte in 0..=255u8 {
+        assert_eq!(
+            sure_protein(byte),
+            PROTEIN_CHAR_TYPES[byte as usize] == CharType::Residue
+        );
+        assert_eq!(
+            sure_protein_masked(byte),
+            PROTEIN_CHAR_TYPES[byte as usize] == CharType::MaskedResidue
+        );
     }
 }

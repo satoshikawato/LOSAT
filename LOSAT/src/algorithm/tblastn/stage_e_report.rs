@@ -5,7 +5,6 @@ use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{bail, ensure, Context, Result};
-use bio::io::fasta;
 
 use super::search_gapped::TargetTranslation;
 use super::search_seed::encode_tblastn_lookup_query;
@@ -13,6 +12,7 @@ use super::stage_d_pipeline::LocalStageDScoring;
 use super::stage_d_results::KappaResultHitList;
 use super::stage_d_stats::LocalSubjectParameters;
 use crate::api::local_blast::{FormatProbe, HspIndex, ReportOutputs};
+use crate::blastinput::fasta_reader::FastaRecord;
 use crate::common::{GapEditOp, Hit};
 use crate::config::ProteinScoringSpec;
 use crate::core::composition_adjustment::redo_alignment::EMatrixAdjustRule;
@@ -59,8 +59,8 @@ pub(super) struct ReportRanges<'a> {
 #[allow(clippy::too_many_arguments)]
 pub(super) fn render(
     outputs: &mut ReportOutputs<'_>,
-    query_records: &[fasta::Record],
-    subject_records: &[fasta::Record],
+    query_records: &[FastaRecord],
+    subject_records: &[FastaRecord],
     subject_path: &Path,
     hitlists: &mut [KappaResultHitList],
     parameters: &LocalSubjectParameters,
@@ -87,6 +87,18 @@ pub(super) fn render(
         hitlist.drop_zero_score_hsps();
     }
     let hitlists: &[KappaResultHitList] = hitlists;
+    // The tabular subject IDs, made before any format is written: a subject that NCBI
+    // writes part of a row for and then stops at (RP-20) is rejected first
+    // (`tabular_subject_ids`).
+    let subject_ids = if outputs
+        .formats
+        .iter()
+        .any(|format| matches!(format_number(format.outfmt), 6 | 7))
+    {
+        tabular_subject_ids(hitlists, subject_records)?
+    } else {
+        Vec::new()
+    };
     // NCBI c++/src/algo/blast/format/blast_format.cpp:1411:
     // CBlastFormat::PrintOneResultSet(const blast::CSearchResults& results,
     // The alignments are rendered once from the final result, for outfmt 0 and for
@@ -133,6 +145,7 @@ pub(super) fn render(
                 format_number(format.outfmt) == 7,
                 query_records,
                 subject_records,
+                &subject_ids,
                 subject_path,
                 hitlists,
                 query_batch_skipped,
@@ -175,8 +188,9 @@ pub(super) fn render(
 fn write_tabular(
     writer: &mut impl Write,
     comments: bool,
-    query_records: &[fasta::Record],
-    subject_records: &[fasta::Record],
+    query_records: &[FastaRecord],
+    subject_records: &[FastaRecord],
+    subject_ids: &[Arc<[u8]>],
     subject_path: &Path,
     hitlists: &[KappaResultHitList],
     query_batch_skipped: &[bool],
@@ -216,14 +230,8 @@ fn write_tabular(
             //                                             m_ParseLocalIds, kHtmlFormat,
             //                                             kTabularFormat, rid);
             // ```
-            // The title's bytes (`write_outfmt7_query_line`): `bio`'s ID, a space and the
-            // rest of the defline.
-            let mut title = query.id().as_bytes().to_vec();
-            if let Some(desc) = query.desc() {
-                title.push(b' ');
-                title.extend_from_slice(desc.as_bytes());
-            }
-            crate::report::outfmt6::write_outfmt7_query_line(writer, &title)?;
+            // The title's bytes (`write_outfmt7_query_line`).
+            crate::report::outfmt6::write_outfmt7_query_line(writer, query.title())?;
             writeln!(
                 writer,
                 "# Database: User specified sequence set (Input: {})",
@@ -298,11 +306,33 @@ fn write_tabular(
                     writer.flush()?;
                     probe.begin(hsp_index);
                 }
+                // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:482-497
+                // ```c++
+                //         if (sid_in->IsLocal()) {
+                //             string id_token;
+                //             vector<string> title_tokens;
+                //             title_tokens =
+                //                 NStr::Split(CAlignFormatUtil::GetTitle(bh), " ", title_tokens);
+                //             if(title_tokens.empty()){
+                //                 id_token = NcbiEmptyString;
+                //             } else {
+                //                 id_token = title_tokens[0];
+                //             }
+                //
+                //             if (id_token == NcbiEmptyString || parse_local) {
+                //                 const CObject_id& obj_id = sid_in->GetLocal();
+                //                 if (obj_id.IsStr())
+                //                     id_token = obj_id.GetStr();
+                // ```
+                // The query ID is the first word of its title, or its local ID without a title
+                // (`FastaRecord::shown_id`); the subject's is `tabular_subject_ids`'s. Both are
+                // written as bytes.
+                writer.write_all(query.shown_id())?;
+                writer.write_all(b"\t")?;
+                writer.write_all(&subject_ids[oid])?;
                 writeln!(
                     writer,
-                    "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
-                    query.id(),
-                    subject.id(),
+                    "\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
                     percent,
                     payload.align_length,
                     payload.report_mismatches,
@@ -384,6 +414,62 @@ fn record_coordinates(
     ))
 }
 
+/// The subject ID of the tabular formats of every subject, by subject index
+/// (`report::defline::tabular_subject_id`: the title's first word, or the local ID, and
+/// for `lcl|Subject_...` the first word of `GenerateDefline`), as BLASTN's and TBLASTX's.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:863-870
+/// ```c++
+///         } catch (const CException&) {
+///             list<CRef<CSeq_id> > subject_ids;
+///             CRef<CSeq_id> id(new CSeq_id());
+///             id->Assign(align.GetSeq_id(1));
+///             subject_ids.push_back(id);
+///             SetSubjectId(subject_ids);
+///             bioseqs_found = false;
+///         }
+/// ```
+/// A subject with a row whose `GenerateDefline` throws (a `Subject_` first word and a title
+/// in no encoding that `CUtf8::GuessEncoding` recognises) makes NCBI 2.17.0 write part of the
+/// row and stop with a `CCoreException` that names its build's source files (exit 255;
+/// `AUTHORITY.md` §J-6, §K-1, RP-20). No result can be defined for it, so LOSAT rejects such
+/// a subject explicitly before it writes any format; a subject without rows is never
+/// named.
+fn tabular_subject_ids(
+    hitlists: &[KappaResultHitList],
+    subjects: &[FastaRecord],
+) -> Result<Vec<Arc<[u8]>>> {
+    let ids: Vec<Option<Arc<[u8]>>> = subjects
+        .iter()
+        .map(|subject| {
+            crate::report::defline::tabular_subject_id(
+                subject.local_id.as_bytes(),
+                &subject.title,
+                false,
+            )
+            .ok()
+            .map(Arc::from)
+        })
+        .collect();
+    for list in hitlists.iter().flat_map(KappaResultHitList::lists) {
+        if list.hsps.hsps.is_empty() {
+            continue;
+        }
+        let s_idx = usize::try_from(list.oid).context("negative TBLASTN subject OID")?;
+        if ids.get(s_idx).is_some_and(Option::is_none) {
+            bail!(
+                "subject record {} ({}) has a title whose first word starts with 'Subject_' and whose non-UTF-8 bytes are in no encoding that NCBI BLAST+ recognises; NCBI BLAST+ writes part of a tabular row for such a subject and stops with an exception that names its build's source files (exit 255), which is not supported by LOSAT's TBLASTN",
+                s_idx + 1,
+                String::from_utf8_lossy(subjects[s_idx].shown_id())
+            );
+        }
+    }
+    Ok(ids
+        .into_iter()
+        .map(|id| id.unwrap_or_else(|| Arc::from(&b""[..])))
+        .collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -415,15 +501,19 @@ mod tests {
             env!("CARGO_MANIFEST_DIR"),
             "/../docs/evidence/tlosan_stage_c/multi_hsp_20260924/subjects.fna"
         ));
-        let read = |path: &Path| {
-            fasta::Reader::from_file(path)
+        let read = |path: &Path, prefix: &str, protein: bool| {
+            bio::io::fasta::Reader::from_file(path)
                 .unwrap()
                 .records()
                 .collect::<std::result::Result<Vec<_>, _>>()
                 .unwrap()
+                .iter()
+                .enumerate()
+                .map(|(index, record)| FastaRecord::from_bio(record, index + 1, prefix, protein))
+                .collect::<Vec<_>>()
         };
-        let queries = read(query_path);
-        let subjects = read(full_subject_path);
+        let queries = read(query_path, "Query_", true);
+        let subjects = read(full_subject_path, "Subject_", false);
         let query_seqs: Vec<_> = queries.iter().map(|record| record.seq().to_vec()).collect();
         let subject_seqs: Vec<_> = subjects
             .iter()
@@ -518,8 +608,8 @@ mod tests {
 /// The final HSP list with rendered alignments, in the order of the tabular rows.
 #[allow(clippy::too_many_arguments)]
 fn pairwise_hits(
-    query_records: &[fasta::Record],
-    subject_records: &[fasta::Record],
+    query_records: &[FastaRecord],
+    subject_records: &[FastaRecord],
     hitlists: &[KappaResultHitList],
     scoring: LocalStageDScoring,
     genetic_code: u8,
@@ -684,7 +774,12 @@ fn pairwise_hits(
                     positives: Some(report_positives),
                     gaps: Some(payload.gap_letters),
                     subject_length: Some(subject_length),
-                    subject_title: subject.desc().map(str::to_owned),
+                    // The title after its first word (the `bio` description of the inputs
+                    // that `bio` read alike), as BLASTN's and TBLASTX's; the reports take the
+                    // subject's title bytes by subject index (`write_tblastn_pairwise_report`).
+                    subject_title: subject.title.iter().position(|&byte| byte == b' ').map(
+                        |space| String::from_utf8_lossy(&subject.title[space + 1..]).into_owned(),
+                    ),
                     // NCBI core/blast_kappa.c:331-342:
                     // eDontAdjustMatrix -> 0; eCompoScaleOldMatrix -> 1;
                     // every other adjusted matrix -> 2.
@@ -710,8 +805,8 @@ fn pairwise_hits(
 fn write_pairwise(
     writer: &mut impl Write,
     hits: &[PairwiseHit],
-    query_records: &[fasta::Record],
-    subject_records: &[fasta::Record],
+    query_records: &[FastaRecord],
+    subject_records: &[FastaRecord],
     subject_path: &Path,
     parameters: &LocalSubjectParameters,
     ungapped_karlin: &[crate::stats::tables::KarlinParams],
@@ -777,10 +872,8 @@ fn write_pairwise(
             // TBLASTN's report reads the validity from its own arrays.
             valid: true,
             batch_skipped: false,
-            query_name: match query.desc() {
-                Some(desc) => format!("{} {desc}", query.id()),
-                None => query.id().to_string(),
-            },
+            // TBLASTN's report reads the query's title bytes by query index (`query_titles`).
+            query_name: String::new(),
             // NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:742-744
             // ```c++
             //         if(cbs.IsSetInst() && cbs.GetInst().CanGetLength()){
@@ -793,9 +886,13 @@ fn write_pairwise(
             effective_search_space: length.eff_searchsp,
         })
         .collect();
-    let subject_ids: Vec<Arc<str>> = subject_records
+    let query_titles: Vec<Arc<[u8]>> = query_records
         .iter()
-        .map(|record| Arc::from(record.id()))
+        .map(|record| Arc::from(record.title()))
+        .collect();
+    let subject_titles: Vec<Arc<[u8]>> = subject_records
+        .iter()
+        .map(|record| Arc::from(record.title()))
         .collect();
     let config = PairwiseConfig {
         program: "tblastn".into(),
@@ -807,9 +904,10 @@ fn write_pairwise(
         writer,
         &config,
         &queries,
+        &query_titles,
         query_validity,
         query_batch_skipped,
-        &subject_ids,
+        &subject_titles,
         &report,
         probe,
         warnings,

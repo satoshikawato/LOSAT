@@ -199,13 +199,13 @@ impl FormatObserver for RangeRecorder {
     }
 }
 
-/// The records of NCBI's nucleotide reader made from the registered `bio` records
-/// (`Query_N`, `Subject_N`).
-fn reader_records(records: &[fasta::Record], prefix: &str) -> Vec<FastaRecord> {
+/// The records of NCBI's reader made from the registered `bio` records (`Query_N`,
+/// `Subject_N`); `protein` is the molecule of the input (TBLASTN's query).
+fn reader_records(records: &[fasta::Record], prefix: &str, protein: bool) -> Vec<FastaRecord> {
     records
         .iter()
         .enumerate()
-        .map(|(index, record)| FastaRecord::from_bio(record, index + 1, prefix, false))
+        .map(|(index, record)| FastaRecord::from_bio(record, index + 1, prefix, protein))
         .collect()
 }
 
@@ -250,20 +250,25 @@ pub fn run(
         };
         let result = match command {
             Commands::Blastp(args) => run_local_blastp(args, query, subject, "", "", &mut outputs),
-            Commands::Tblastn(args) => run_local_tblastn(args, query, subject, &mut outputs),
-            // The registered records enter the searches of BLASTN and TBLASTX as NCBI's
-            // reader's records (`FastaRecord::from_bio`): `register` reads only inputs that
-            // `bio` reads as NCBI does (port plan, steps S3, S5 and S10).
+            // The registered records enter the searches of BLASTN, TBLASTX and TBLASTN as
+            // NCBI's reader's records (`FastaRecord::from_bio`): `register` reads only inputs
+            // that `bio` reads as NCBI does (port plan, steps S3, S5, S6 and S10).
+            Commands::Tblastn(args) => run_local_tblastn(
+                args,
+                &reader_records(query, "Query_", true),
+                &reader_records(subject, "Subject_", false),
+                &mut outputs,
+            ),
             Commands::Blastn(args) => run_local_blastn(
                 args,
-                &reader_records(query, "Query_"),
-                &reader_records(subject, "Subject_"),
+                &reader_records(query, "Query_", false),
+                &reader_records(subject, "Subject_", false),
                 &mut outputs,
             ),
             Commands::Tblastx(args) => run_local_tblastx(
                 args,
-                &reader_records(query, "Query_"),
-                &reader_records(subject, "Subject_"),
+                &reader_records(query, "Query_", false),
+                &reader_records(subject, "Subject_", false),
                 &mut outputs,
             ),
             Commands::Blastx(_) => unreachable!("rejected by Program::parse"),

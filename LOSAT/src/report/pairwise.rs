@@ -3508,14 +3508,18 @@ pub fn write_tblastn_pairwise_prolog<W: Write>(
     )
 }
 
+/// `query_titles` and `subject_titles` are the title bytes of the records by query and
+/// subject index (`Query=`, the description table and the alignment headings); the
+/// `query_name` of `queries` is not read.
 pub fn write_tblastn_pairwise_report<W: Write>(
     hits: &[PairwiseHit],
     writer: &mut W,
     config: &PairwiseConfig,
     queries: &[BlastpPairwiseQuery],
+    query_titles: &[Arc<[u8]>],
     query_validity: &[bool],
     query_batch_skipped: &[bool],
-    subject_ids: &[Arc<str>],
+    subject_titles: &[Arc<[u8]>],
     report: &BlastpPairwiseReport,
     mut probe: Option<&mut FormatProbe<'_>>,
     mut warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
@@ -3524,7 +3528,10 @@ pub fn write_tblastn_pairwise_report<W: Write>(
     // NCBI c++/src/algo/blast/api/local_blast.cpp:177-224:
     // an all-invalid Run() batch carries -1 Karlin sentinel blocks only for
     // its own queries, even if another batch of the input has valid contexts.
-    if query_batch_skipped.len() != queries.len() || query_validity.len() != queries.len() {
+    if query_batch_skipped.len() != queries.len()
+        || query_validity.len() != queries.len()
+        || query_titles.len() != queries.len()
+    {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "TBLASTN batch validity count mismatch",
@@ -3564,7 +3571,7 @@ pub fn write_tblastn_pairwise_report<W: Write>(
         // NCBI blast_format.cpp:1491: m_Outfile << "\n\n";
         writeln!(&mut writer)?;
         writeln!(&mut writer)?;
-        write_blastp_query_header(&mut writer, query.query_name.as_bytes(), query.query_length)?;
+        write_blastp_query_header(&mut writer, &query_titles[q_idx], query.query_length)?;
         let query_hits = &hits_by_query[q_idx];
         if query_hits.is_empty() {
             write_no_hits_found(&mut writer)?;
@@ -3621,8 +3628,17 @@ pub fn write_tblastn_pairwise_report<W: Write>(
         // The table of every program follows `x_InitDeflineTable`
         // (`write_blastn_description_table`): the subject's highest bit score and that HSP's
         // E-value, and the title of the subject (`CDeflineGenerator`), for the first
-        // `m_NumDescriptions` subjects.
-        let subject_titles = bio_subject_titles(&subject_order, &subject_hits, subject_ids);
+        // `m_NumDescriptions` subjects. The titles are those of the records read (by
+        // subject index), as BLASTN's and TBLASTX's.
+        let subject_titles: std::collections::HashMap<u32, Vec<u8>> = subject_order
+            .iter()
+            .map(|&s_idx| {
+                let title = subject_titles
+                    .get(s_idx as usize)
+                    .map_or(&b""[..], |title| title.as_ref());
+                (s_idx, title.to_vec())
+            })
+            .collect();
         let described = &subject_order[..subject_order.len().min(report.num_descriptions)];
         write_blastn_description_table(
             &mut writer,

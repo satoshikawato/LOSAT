@@ -188,8 +188,12 @@ CONDITIONS = [
     ("two_deflines_in_a_row", lambda d: d.recs.insert(1, [b"extra defline", []])),
 ]
 # Subject titles of the first word with a non-UTF-8 byte in a tabular report: NCBI writes a partial
-# row and dies (AUTHORITY.md section K-1, J-6): LOSAT keeps an explicit rejection of outfmt 6.
+# row and dies (AUTHORITY.md section K-1, J-6) only for a `Subject_` first word (RP-20); for this
+# case's first word (`\x81bad`) NCBI 2.17.0 exits 0. The programs that read with the CFastaReader
+# port (TBLASTX since S5, TBLASTN since S6) write NCBI's bytes; the others keep LOSAT's explicit
+# rejection of outfmt 6 until their step (BLASTP: S7).
 EXPECT_OVERRIDE = {("non_utf8_title", "s", "6"): "auto", ("non_utf8_title_id", "s", "6"): "explicit-rejection"}
+EXPECT_OVERRIDE_PORTED = ("tblastx", "tblastn")
 NONUTF8_ID_TITLE = ("non_utf8_title_id", _set(0, lambda t, d: b"\x81bad" + b" " + t.split(b" ", 1)[1]))
 
 NEW_PROGRAMS = (("tblastx", "nuc", "nuc"), ("tblastn", "prot", "nuc"), ("blastp", "prot", "prot"))
@@ -230,7 +234,7 @@ def new_rows(work: Path) -> list[Row]:
                 for fmt in ("0", "6"):
                     if name == "non_utf8_title_id" and role == "q":
                         continue
-                    expect = EXPECT_OVERRIDE.get((name, role, fmt), "auto")
+                    expect = "auto" if program in EXPECT_OVERRIDE_PORTED else EXPECT_OVERRIDE.get((name, role, fmt), "auto")
                     rows.append(Row(f"e2h.{program}.{name}.{role}.o{fmt}", program, [*inputs, "-outfmt", fmt], expect, role=role))
         # Files that are empty or have no residue, and the standard input in its forms.
         for role in ("q", "s"):

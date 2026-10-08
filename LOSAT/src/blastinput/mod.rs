@@ -17,6 +17,9 @@ pub mod app;
 pub mod blast_args;
 pub mod blastn_args;
 pub mod blastp_args;
+// NCBI blastinput/blast_fasta_input.cpp, objtools/readers/fasta.cpp, util/line_reader.cpp:
+// the FASTA input of BLASTN, TBLASTX, TBLASTN and BLASTP.
+pub mod fasta_reader;
 // NCBI corelib/ncbiapp.cpp, metareg.cpp: the application layer's environment and registry.
 pub mod ncbi_environment;
 pub mod query_batch;

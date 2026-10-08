@@ -467,3 +467,258 @@ fn subject_ids_of_subject_titles_follow_get_seq_id_list() {
         "{report}"
     );
 }
+
+/// Runs `run_local` with one writer per format and returns the outputs, the diagnostics
+/// and the result.
+fn run_local_outputs(
+    inputs: &Inputs,
+    formats: &[&str],
+    extra: &[&str],
+) -> (Vec<Vec<u8>>, Vec<u8>, anyhow::Result<()>) {
+    let queries = reader_records(&inputs.query.0, ReaderConfig::query("BLASTN", false, true));
+    let subjects = reader_records(
+        &inputs.subject.0,
+        ReaderConfig::subject("BLASTN", false, true),
+    );
+    let mut sinks: Vec<Vec<u8>> = vec![Vec::new(); formats.len()];
+    let mut diagnostics = Vec::new();
+    let result = {
+        let mut outputs = ReportOutputs {
+            formats: formats
+                .iter()
+                .zip(sinks.iter_mut())
+                .map(|(outfmt, sink)| FormatOutput {
+                    outfmt,
+                    sink: OutputSink::Writer(sink),
+                })
+                .collect(),
+            diagnostics: &mut diagnostics,
+            hits: None,
+            observer: None,
+        };
+        run_local_blastn(inputs.args(extra), &queries, &subjects, &mut outputs)
+    };
+    (sinks, diagnostics, result)
+}
+
+/// The exit code and the message of NCBI's error that a run ended with.
+fn native_error(result: anyhow::Result<()>) -> (i32, String) {
+    let error = result.expect_err("the run fails");
+    let native = error
+        .downcast_ref::<LOSAT::cli::NativeError>()
+        .unwrap_or_else(|| panic!("NCBI's error: {error:#}"));
+    (native.exit, native.message.clone())
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:773-788
+// ```c
+//         catch(CBlastException & e ) {
+//         	// Skip bad subject sequence
+//         	if(e.GetErrCode() == CBlastException::eInvalidArgument) {
+//         		seqblk_vec->push_back(subj);
+//         ...
+//         		warning += "Subject sequence contains no data";
+//         		ERR_POST(Warning << warning);
+// ```
+// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:632-636
+// ```c
+//         } catch (const CException& e) {
+//             // FIXME: is index this the right value for the 2nd arg? Also, how
+//             // to determine whether the message should contain a warning or
+//             // error?
+//             CRef<CSearchMessage> m
+// ```
+// A record without residues stays in its role (oracle BI e01, e02, e06, e10): a subject
+// gets its warning before the search, counts in the database statistics and never hits; a
+// query gets its warning before its report, which has no hits, and is counted.
+#[test]
+fn records_without_residues_are_kept_with_ncbis_warnings() {
+    let genome = fixture_sequence("LC738884.fasta");
+    let inputs = Inputs {
+        query: TempFasta::new(
+            "blastn_empty_records_query.fna",
+            &[
+                ("q1", &genome[0..2_000]),
+                ("q2 empty two", b""),
+                ("q3", &genome[10_000..12_000]),
+            ],
+        ),
+        subject: TempFasta::new(
+            "blastn_empty_records_subject.fna",
+            &[
+                ("s1", &genome[0..5_000]),
+                ("s2 no letters", b""),
+                ("s3", &genome[9_000..13_000]),
+            ],
+        ),
+    };
+    let run = inputs.run(&FORMATS, &[], false);
+    assert_eq!(
+        String::from_utf8_lossy(&run.diagnostics),
+        "Warning: [blastn] Subject_2 s2 no letters: Subject sequence contains no data\n\
+         Warning: [blastn] Query_2 q2 empty two: Sequence contains no data \n"
+    );
+    let pairwise = String::from_utf8_lossy(&run.outputs[0]);
+    assert!(
+        pairwise.contains("3 sequences; 9,000 total letters"),
+        "{pairwise}"
+    );
+    assert!(
+        pairwise.contains("Query= q2 empty two\n\nLength=0\n\n\n***** No hits found *****\n"),
+        "{pairwise}"
+    );
+    let tabular = String::from_utf8_lossy(&run.outputs[1]);
+    assert!(
+        tabular.lines().any(|row| row.starts_with("q1\ts1\t")),
+        "{tabular}"
+    );
+    assert!(
+        tabular.lines().any(|row| row.starts_with("q3\ts3\t")),
+        "{tabular}"
+    );
+    assert!(
+        !tabular.contains("q2") && !tabular.contains("s2"),
+        "{tabular}"
+    );
+    let commented = String::from_utf8_lossy(&run.outputs[2]);
+    assert!(
+        commented.contains("# Query: q2 empty two\n# Database: ")
+            && commented.contains("# BLAST processed 3 queries\n"),
+        "{commented}"
+    );
+    for (index, outfmt) in FORMATS.into_iter().enumerate() {
+        let (cli_output, cli_stderr) = inputs.cli(outfmt, &[]);
+        assert_eq!(run.outputs[index], cli_output, "outfmt {outfmt}");
+        assert_eq!(run.diagnostics, cli_stderr, "outfmt {outfmt}");
+    }
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:649-652
+// ```c
+//     // Validate that at least one query context is valid
+//     if (BlastSetup_Validate(qinfo, NULL) != 0 && messages.HasMessages()) {
+//         NCBI_THROW(CBlastException, eSetup, messages.ToString());
+//     }
+// ```
+// A batch of queries without residues only stops NCBI after the prolog with one message
+// per query (oracle BI e03).
+#[test]
+fn a_batch_of_queries_without_residues_stops_after_the_prolog() {
+    let genome = fixture_sequence("LC738884.fasta");
+    let inputs = Inputs {
+        query: TempFasta::new(
+            "blastn_all_empty_query.fna",
+            &[("q1", b""), ("q2 two", b"")],
+        ),
+        subject: TempFasta::new("blastn_all_empty_subject.fna", &[("s1", &genome[0..5_000])]),
+    };
+    let (outputs, diagnostics, result) = run_local_outputs(&inputs, &["0", "6"], &[]);
+    assert_eq!(
+        native_error(result),
+        (
+            3,
+            "BLAST engine error: Warning: Sequence contains no data Warning: Sequence contains no data \n"
+                .to_string()
+        )
+    );
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let prolog = String::from_utf8_lossy(&outputs[0]);
+    assert!(
+        prolog.starts_with("BLASTN 2.17.0+") && !prolog.contains("Query="),
+        "{prolog}"
+    );
+    assert!(outputs[1].is_empty());
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:969-980
+// ```c
+//    if (sbp->gbp) {
+//        min_subject_length = BlastSeqSrcGetMinSeqLen(seq_src);
+//        if (Blast_SubjectIsTranslated(program_number)) {
+//            min_subject_length/=3;
+//        }
+//    } else {
+//        min_subject_length = (Int4) (total_length/num_seqs);
+//    }
+//
+//    if(min_subject_length <=0) {
+// 	   return BLASTERR_SUBJECT_LENGTH_INVALID;
+//    }
+// ```
+// Subjects with fewer letters than subjects (every subject without residues, oracle BI e08)
+// stop NCBI when it searches the first batch, after the subjects' warnings and the prolog.
+#[test]
+fn subjects_with_fewer_letters_than_subjects_stop_the_search() {
+    let genome = fixture_sequence("LC738884.fasta");
+    for (subjects, warnings) in [
+        (
+            vec![("s1", &b"A"[..]), ("s2", &b""[..])],
+            "Warning: [blastn] Subject_2 s2: Subject sequence contains no data\n",
+        ),
+        (
+            vec![("s1 one", &b""[..]), ("s2", &b""[..])],
+            "Warning: [blastn] Subject_1 s1 one: Subject sequence contains no data\n\
+             Warning: [blastn] Subject_2 s2: Subject sequence contains no data\n",
+        ),
+    ] {
+        let inputs = Inputs {
+            query: TempFasta::new(
+                "blastn_short_subjects_query.fna",
+                &[("q1", &genome[0..500])],
+            ),
+            subject: TempFasta::new("blastn_short_subjects.fna", &subjects),
+        };
+        let (outputs, diagnostics, result) = run_local_outputs(&inputs, &["0", "7"], &[]);
+        assert_eq!(
+            native_error(result),
+            (
+                3,
+                "BLAST engine error: The average subject length is too short\n".to_string()
+            )
+        );
+        assert_eq!(String::from_utf8_lossy(&diagnostics), warnings);
+        assert!(String::from_utf8_lossy(&outputs[0]).starts_with("BLASTN 2.17.0+"));
+        assert!(outputs[1].is_empty());
+    }
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_fasta_input.cpp:458-460
+// ```c++
+//     // set sequence range
+//     retval->SetInt().SetFrom(from);
+//     retval->SetInt().SetTo((to > 0 && to < seqlen) ? to : (seqlen-1));
+// ```
+// A range that starts just past a record's end gives an interval without letters, which
+// NCBI sets up as a record without residues (oracle BI r3, r4).
+#[test]
+fn intervals_without_letters_are_records_without_residues() {
+    let genome = fixture_sequence("LC738884.fasta");
+    let inputs = Inputs {
+        query: TempFasta::new(
+            "blastn_empty_interval_query.fna",
+            &[("q1", &genome[0..2_000]), ("q2 short", &genome[0..300])],
+        ),
+        subject: TempFasta::new(
+            "blastn_empty_interval_subject.fna",
+            &[("s1", &genome[0..5_000]), ("s2 short", &genome[0..300])],
+        ),
+    };
+    let run = inputs.run(&["6"], &["-subject_loc", "301-1000"], false);
+    assert_eq!(
+        String::from_utf8_lossy(&run.diagnostics),
+        "Warning: [blastn] Subject_2 s2 short: Subject sequence contains no data\n"
+    );
+    let rows = String::from_utf8_lossy(&run.outputs[0]);
+    assert!(rows.lines().all(|row| row.contains("\ts1\t")), "{rows}");
+    assert!(!rows.is_empty());
+    let run = inputs.run(&["7"], &["-query_loc", "301-1000"], false);
+    assert_eq!(
+        String::from_utf8_lossy(&run.diagnostics),
+        "Warning: [blastn] Query_2 q2 short: Sequence contains no data \n"
+    );
+    let report = String::from_utf8_lossy(&run.outputs[0]);
+    assert!(
+        report.contains("# Query: q2 short\n") && report.contains("# BLAST processed 2 queries\n"),
+        "{report}"
+    );
+}

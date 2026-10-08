@@ -335,8 +335,10 @@ pub fn protein_title_warning(record: &fasta::Record) -> &'static [u8] {
 }
 
 /// NCBI's warning for a subject without residues, which it skips when it sets up the
-/// subjects (`InitializeSubject`, after the option handlers and before `Query is Empty!`).
-/// The ID of a subject is `Subject_<n>` and its title is the defline.
+/// subjects for the search (`CBlastFormat` is made after `Query is Empty!` and before the
+/// outfmt 0 prolog; `AUTHORITY.md` §B row 7, BI-43, BI-49). The ID of a subject is
+/// `Subject_<n>` and its title is the record's title (`InputRecord::title_bytes`), written
+/// as bytes; a subject without a title gives `Subject_<n> : ...`.
 ///
 /// NCBI reference: c++/src/algo/blast/api/blast_setup_cxx.cpp:773-788
 /// ```c
@@ -357,22 +359,17 @@ pub fn protein_title_warning(record: &fasta::Record) -> &'static [u8] {
 ///         		warning += "Subject sequence contains no data";
 ///         		ERR_POST(Warning << warning);
 /// ```
-pub fn write_empty_subject_warnings(
-    records: &[fasta::Record],
+pub fn write_empty_subject_warnings<R: crate::blastinput::fasta_reader::InputRecord>(
+    records: &[R],
     program: &str,
     diagnostics: &mut dyn std::io::Write,
 ) -> std::io::Result<()> {
     for (index, record) in records.iter().enumerate() {
         if record.seq().is_empty() {
-            let title = match record.desc() {
-                Some(desc) => format!("{} {desc}", record.id()),
-                None => record.id().to_string(),
-            };
-            writeln!(
-                diagnostics,
-                "Warning: [{program}] Subject_{} {title}: Subject sequence contains no data",
-                index + 1
-            )?;
+            let mut warning = format!("Warning: [{program}] Subject_{} ", index + 1).into_bytes();
+            warning.extend_from_slice(&record.title_bytes());
+            warning.extend_from_slice(b": Subject sequence contains no data\n");
+            diagnostics.write_all(&warning)?;
         }
     }
     Ok(())
@@ -477,28 +474,6 @@ pub fn check_records_have_residues_of(
     first_problem(records, |index, record| {
         no_residues(index, record, role, program)
     })
-}
-
-/// `check_records_have_residues_of` for the records of NCBI's reader (`fasta_reader`), each
-/// named by its title up to the first space, or its local ID without a title
-/// (`FastaRecord::shown_id`). The program reports them as NCBI does in step S4 of the port
-/// plan.
-pub fn check_reader_records_have_residues(
-    records: &[crate::blastinput::fasta_reader::FastaRecord],
-    role: &str,
-    program: &str,
-) -> Result<()> {
-    match records
-        .iter()
-        .position(|record| record.sequence.is_empty())
-    {
-        Some(index) => bail!(
-            "{role} record {} ({}) has no residues; NCBI BLAST+ reports such a record differently, which is not supported by LOSAT's {program}",
-            index + 1,
-            String::from_utf8_lossy(records[index].shown_id())
-        ),
-        None => Ok(()),
-    }
 }
 
 /// Both checks, record by record (the order of ABI v1, which plan TD-1 freezes).

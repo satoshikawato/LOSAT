@@ -538,6 +538,31 @@ pub fn next_ranged_batch_end(
     start: usize,
     batch_size: u32,
 ) -> usize {
+    next_ranged_batch(input_lengths, skipped, start, batch_size).0
+}
+
+/// `next_ranged_batch_end`, and whether the batch reached its size (`size_read` is no
+/// longer below the batch size). A batch that did not reach it ends where the records end,
+/// and NCBI's reader reads on while lines are left (`End()` is false), so what ends the
+/// reading after the last record (an `eEOF`, a reader error) comes in that batch; after a
+/// batch that reached its size it comes in the next one.
+///
+/// NCBI reference: c++/src/algo/blast/blastinput/blast_input.cpp:140-146
+/// ```c++
+///     while (size_read < GetBatchSize()) {
+///
+///         if (End())
+///             break;
+///
+///         CRef<CBlastSearchQuery> q;
+///         try { q.Reset(m_Source->GetNextSequence(scope)); }
+/// ```
+pub fn next_ranged_batch(
+    input_lengths: &[usize],
+    skipped: &[bool],
+    start: usize,
+    batch_size: u32,
+) -> (usize, bool) {
     let mut end = start;
     let mut size_read: u32 = 0;
     while end < input_lengths.len() && size_read < batch_size {
@@ -546,7 +571,7 @@ pub fn next_ranged_batch_end(
         }
         end += 1;
     }
-    end
+    (end, size_read >= batch_size)
 }
 
 /// NCBI's frame of an aligned nucleotide row as its reports print it: from the record

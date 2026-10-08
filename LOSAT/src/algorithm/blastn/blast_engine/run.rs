@@ -81,7 +81,7 @@ use super::super::hsp::{
     BlastnHsp, BlastnHspList, BlastnOutputFormat, HitList, HitListEntry, NCBI_BLASTN_VERSION,
 };
 use super::super::input::{
-    check_reader_records_have_residues, check_utf8_file_name, is_blank, open_input,
+    check_utf8_file_name, is_blank, open_input, write_empty_subject_warnings,
 };
 use super::super::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
 use super::super::lookup::{build_unmasked_ranges, reverse_complement, DiscTemplates};
@@ -94,19 +94,19 @@ use super::super::scoring::{
     context_ungapped_blocks, gap_x_dropoffs, karlin_error, ContextKarlin,
 };
 use crate::blastinput::fasta_reader::{
-    read_queries, read_subjects, FastaInputSource, FastaRecord, QueryEnd, QueryRecords,
+    read_queries, read_subjects, FastaInputSource, FastaRecord, QueryEnd, QueryRecords, ReadError,
     ReaderConfig,
 };
 use crate::blastinput::query_batch::{next_query_batch_end, BatchSizeMixer};
 use crate::blastinput::seq_range::{
-    check_no_empty_interval, cut_queries, cut_subjects, next_ranged_batch_end,
-    parse_optional_range, subjects_read, Placements, QueryInput, RangeRole, SequenceRange,
+    cut_queries, cut_subjects, next_ranged_batch, parse_optional_range, subjects_read, Placements,
+    QueryInput, RangeRole, SequenceRange,
 };
 use crate::report::pairwise::{
     write_blastn_pairwise_prolog, write_blastn_pairwise_report, BlastnPairwiseQuery,
     BlastnPairwiseReport, PairwiseConfig,
 };
-use crate::report::query_warnings::{few_matches_warning, invalid_query_warning};
+use crate::report::query_warnings::{few_matches_warning, invalid_query_warning, query_warning};
 use crate::stats::KarlinParams;
 // NCBI reference: c++/src/algo/blast/core/blast_parameters.c:342-344,370-374
 // gap_trigger = (Int4)((kOptions->gap_trigger * NCBIMATH_LN2 + kbp->logK) / kbp->Lambda);
@@ -5459,11 +5459,9 @@ pub fn run(
         )?
     };
     drop(subject_source);
+    // NCBI reads records without residues (and intervals without letters) without a message
+    // and reports them when it sets up the search (`search`).
     let ranged_subjects = cut_subjects(&read_subjects, subject_range.as_ref())?;
-    // NCBI reads records without residues without a message and reports them when it sets
-    // up the search; LOSAT rejects them where the search would start (port plan, step S4).
-    let subject_records_checked =
-        check_reader_records_have_residues(&read_subjects, "subject", "BLASTN");
     let (subjects, subject_placements, full_subjects) = match ranged_subjects {
         Some((cut, placements)) => (cut, placements, Some(read_subjects)),
         None => (read_subjects, Placements::default(), None),
@@ -5527,7 +5525,6 @@ pub fn run(
                 placements: &subject_placements,
                 records: full_subjects.as_deref(),
             },
-            subject_records_checked,
             &mut outputs,
             output_formats,
             settings,
@@ -5562,15 +5559,13 @@ pub fn run(
 }
 
 /// The part of `run` after the output is opened: NCBI's filtering handler (`-dust`), the
-/// processing of the options, `Query is Empty!`, LOSAT's deferred checks of the subjects,
-/// the reading of the queries and the search.
+/// processing of the options, `Query is Empty!`, the reading of the queries and the search.
 #[allow(clippy::too_many_arguments)]
 fn search_cli(
     mut args: BlastnArgs,
     query_file: std::fs::File,
     subjects: &[FastaRecord],
     subject_ranges: SubjectRanges<'_>,
-    subject_records_checked: Result<()>,
     outputs: &mut ReportOutputs<'_>,
     output_formats: Vec<BlastnOutputFormat>,
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
@@ -5621,29 +5616,22 @@ fn search_cli(
             .write_all(b"Warning: [blastn] Query is Empty!\n")?;
         return Ok(());
     }
-    subject_records_checked?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:277-279
     // ```c++
     //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup() ) {
     // 	    BLAST_PROF_START( APP.LOOP.PRE );
     //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
     // ```
-    // The records are read here and their messages are written batch by batch
-    // (`run_in_pool`). A reader error or an explicit rejection of a later record stops the
-    // run before the search, after the messages of the records before it; NCBI writes it
-    // when it reads the batch of that record (port plan, step S4).
+    // The records are read here, and their messages are written batch by batch
+    // (`run_in_pool`). What ends the reading (the end of the input, an `eEOF`, a reader
+    // error or LOSAT's rejection of a Seq-id line) comes in the batch that NCBI reads it in,
+    // after the reports of the batches before (`run_in_pool`).
     let QueryRecords { records, end } = read_queries(&mut query_source);
     drop(query_source);
     let reading = match end {
         QueryEnd::Input => QueryReading::End,
         QueryEnd::EofError => QueryReading::BlankLines,
-        QueryEnd::Error { error, warnings } => {
-            for record in &records {
-                outputs.diagnostics.write_all(&record.warnings)?;
-            }
-            outputs.diagnostics.write_all(&warnings)?;
-            return Err(error.into_app_error());
-        }
+        QueryEnd::Error { error, warnings } => QueryReading::Error { error, warnings },
     };
     search(
         args,
@@ -5659,8 +5647,8 @@ fn search_cli(
     )
 }
 
-/// How the queries of a search were read.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// How the reading of the queries of a search ended, after its records.
+#[derive(Debug)]
 enum QueryReading {
     /// The records of `run_local`: an input without records is NCBI's `Query is Empty!`
     /// (the inputs of the ABI are read as regular files).
@@ -5671,6 +5659,18 @@ enum QueryReading {
     /// The CLI's reader found only blank and comment lines where it expected a record
     /// (`eEOF`), which ends the batch being read.
     BlankLines,
+    /// The CLI's reader failed on the record after the last one read (a reader error, or
+    /// LOSAT's explicit rejection of a line that NCBI would fetch as a Seq-id), after
+    /// writing `warnings`.
+    Error { error: ReadError, warnings: Vec<u8> },
+}
+
+impl QueryReading {
+    /// Whether NCBI's reader reads on after the last record (`End()` is false): an `eEOF`
+    /// or an error then comes in the batch being read.
+    fn reads_past_records(&self) -> bool {
+        matches!(self, QueryReading::BlankLines | QueryReading::Error { .. })
+    }
 }
 
 /// The query range, read by NCBI's query options handler: after the filtering handler
@@ -5854,23 +5854,39 @@ fn search(
     // reader (`fasta_reader`; `run_local`'s callers read them so). The CLI has already
     // reported an empty query file and read its queries; the records of the other callers
     // get NCBI's warning for an input without records.
-    if query_records.is_empty() && reading == QueryReading::Records {
+    if query_records.is_empty() && matches!(reading, QueryReading::Records) {
         outputs
             .diagnostics
             .write_all(b"Warning: [blastn] Query is Empty!\n")?;
         return Ok(());
     }
-    // An interval without letters (a subject range that starts just past a record's end)
-    // is a subject without data for NCBI, as a record without residues (port plan, step
-    // S4).
-    check_no_empty_interval(
-        subject_records,
-        ranges.subjects.placements,
-        &[],
-        RangeRole::Subject,
-        "BLASTN",
-    )?;
-    check_reader_records_have_residues(subject_records, "subject", "BLASTN")?;
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:129-136
+    // ```c
+    //     if(m_IsDbScan) {
+    // 	int num_seqs=0;
+    //         int total_length=0;
+    // 	if (!is_remote_search)
+    //         {
+    //                 BlastSeqSrc* seqsrc = db_adapter.MakeSeqSrc();
+    //                 num_seqs=BlastSeqSrcGetNumSeqs(seqsrc);
+    //                 total_length=static_cast<int>(BlastSeqSrcGetTotLen(seqsrc));
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:773-789
+    // ```c
+    //         catch(CBlastException & e ) {
+    //         	// Skip bad subject sequence
+    //         	if(e.GetErrCode() == CBlastException::eInvalidArgument) {
+    //         		seqblk_vec->push_back(subj);
+    //         ...
+    //         		warning += "Subject sequence contains no data";
+    //         		ERR_POST(Warning << warning);
+    //         		continue;
+    // ```
+    // The formatter, made after `Query is Empty!` and before the outfmt 0 prolog, sets up
+    // the subjects: a subject without letters (a record without residues, or an interval
+    // that starts just past its record's end) gets its warning, stays in the database
+    // statistics with no letters, and never hits.
+    write_empty_subject_warnings(subject_records, "blastn", outputs.diagnostics)?;
     // NCBI reads the queries after `Query is Empty!`, one batch at a time, with its
     // reader's warnings (`run_in_pool`).
     // NCBI's x_CleanAndCompress reads past the end of some titles of punctuation (NCBI
@@ -5883,9 +5899,9 @@ fn search(
     let batching = query_batching_from_environment(
         super::super::coordination::task_uses_megablast_chunks(&args.task),
     )?;
-    check_reader_records_have_residues(query_records, "query", "BLASTN")?;
     // The query range applies to every query record as NCBI's batch reader reads it
-    // (`cut_queries`): the records are checked whole (above), and searched cut.
+    // (`cut_queries`): a record is searched cut, and one whose interval starts just past
+    // its end is a query without data (`run_in_pool`).
     let ranged_queries = ranges
         .query
         .as_ref()
@@ -5898,13 +5914,6 @@ fn search(
             QueryInput::whole(query_records),
         ),
     };
-    check_no_empty_interval(
-        &query_records,
-        &query_input.placements,
-        &query_input.ordinals,
-        RangeRole::Query,
-        "BLASTN",
-    )?;
     // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:129-138
     // ```c
     // 	int num_seqs=0;
@@ -6002,18 +6011,20 @@ fn check_unsupported_environment() -> Result<()> {
     Ok(())
 }
 
-/// The Karlin-Altschul error of a query batch after the first (`search_query_batch`), which
-/// NCBI raises after the reports of the batches before.
+/// An error of a query batch after the first that does not depend on the batch's queries
+/// (the Karlin-Altschul error of the scoring options, or the average subject length;
+/// `search_query_batch`): the first batch with a valid query meets it, and NCBI raises it
+/// after the reports of the batches before, whose queries were all invalid.
 #[derive(Debug)]
-struct KarlinErrorAfterInvalidBatches(anyhow::Error);
+struct ErrorAfterInvalidBatches(anyhow::Error);
 
-impl std::fmt::Display for KarlinErrorAfterInvalidBatches {
+impl std::fmt::Display for ErrorAfterInvalidBatches {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
     }
 }
 
-impl std::error::Error for KarlinErrorAfterInvalidBatches {}
+impl std::error::Error for ErrorAfterInvalidBatches {}
 
 /// NCBI's query batch size (`GetQueryBatchSize`, 0 for the adaptive `CBatchSizeMixer`) and
 /// query chunk sizes, as a query batch of the search uses them.
@@ -6248,7 +6259,7 @@ fn run_in_pool(
     // ```
     // A reader at the end of its input reads no batch (`!input.End()`): the report of no
     // query, the prolog and the epilog (an empty pipe, or `-query -` after `-subject -`).
-    if input_records.is_empty() && reading == QueryReading::End {
+    if input_records.is_empty() && matches!(reading, QueryReading::End) {
         return write_batch_reports(
             &args,
             &[],
@@ -6272,11 +6283,8 @@ fn run_in_pool(
         );
     }
     // A batch size of 0 (`CHUNK_SIZE` 1000 without `BATCH_SIZE`: the mixer's maximum is
-    // 0) reads no query, and a reader that finds only blank and comment lines ends its
-    // first batch without a query (`eEOF`), so the first batch fails after the prolog
-    // (outfmt 0).
-    if batching.batch_size == 0 || (input_records.is_empty() && reading == QueryReading::BlankLines)
-    {
+    // 0) reads no query, so the first batch fails after the prolog (outfmt 0).
+    if batching.batch_size == 0 {
         write_pairwise_prologs(
             outputs,
             &output_formats,
@@ -6314,16 +6322,33 @@ fn run_in_pool(
     // A batch is read from the input records (`input_start..input_end`); its searched
     // queries are `start..end` (all of them without `-query_loc`). A batch size counts the
     // whole records, and a record whose range starts past its end is skipped
-    // (`next_ranged_batch_end`).
+    // (`next_ranged_batch`).
+    let mut reading = reading;
+    // Whether what ended the reading after the records (`reading`) has come.
+    let mut reading_ended = false;
     let mut input_start = 0;
-    while input_start < query_input.input_lengths.len() {
-        let input_end = next_ranged_batch_end(
+    // NCBI reference: ncbi-blast/c++/src/app/blast/blastn_app.cpp:277-279
+    // ```c
+    //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup() ) {
+    // 	    BLAST_PROF_START( APP.LOOP.PRE );
+    //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
+    // ```
+    // The reader is at the end of its input after the last record, unless an `eEOF` or an
+    // error ends the reading there; that comes in the batch being read when the records
+    // run out before the batch reaches its size, and otherwise in a batch of its own.
+    while input_start < query_input.input_lengths.len()
+        || (reading.reads_past_records() && !reading_ended)
+    {
+        let (input_end, reached_size) = next_ranged_batch(
             &query_input.input_lengths,
             &query_input.skipped,
             input_start,
             batching.batch_size,
         );
         let std::ops::Range { start, end } = query_input.searched_in(input_start..input_end);
+        let reading_ends_here = input_end == query_input.input_lengths.len()
+            && !reached_size
+            && reading.reads_past_records();
         // NCBI reference: ncbi-blast/c++/src/app/blast/blastn_app.cpp:277-279
         // ```c
         //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup() ) {
@@ -6337,35 +6362,35 @@ fn run_in_pool(
             .iter()
             .flat_map(|record| record.warnings.iter().copied())
             .collect();
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_input.cpp:145-152
         // ```c
-        // CObjMgr_QueryFactory::CObjMgr_QueryFactory(CBlastQueryVector & queries)
-        //     : m_QueryVector(& queries)
-        // {
-        //     if (queries.Empty()) {
-        //         NCBI_THROW(CBlastException, eInvalidArgument, "Empty CBlastQueryVector");
-        //     }
+        //         try { q.Reset(m_Source->GetNextSequence(scope)); }
+        //         catch (const CObjReaderParseException& e) {
+        //             if (e.GetErrCode() == CObjReaderParseException::eEOF) {
+        //                 break;
+        //             }
+        //             throw;
+        //         }
         // ```
-        // A batch of skipped records only (with `-query_loc`) fails after the reports of
-        // the batches before, without the epilog.
-        if start == end {
-            if start == 0 {
-                write_pairwise_prologs(
-                    outputs,
-                    &output_formats,
-                    megablast,
-                    &subject_title,
-                    &subjects.metadata,
-                    false,
-                )?;
-            } else {
-                write_batch_reports(
+        // An `eEOF` ends the batch with the records read so far. A reader error (or LOSAT's
+        // rejection of a Seq-id line) stops the run while the batch is read: after the
+        // reports of the batches before (without the epilog) and the messages of the
+        // batch's records, which are neither searched nor reported.
+        if reading_ends_here {
+            reading_ended = true;
+            if let QueryReading::Error {
+                error,
+                warnings: error_warnings,
+            } = std::mem::replace(&mut reading, QueryReading::End)
+            {
+                write_before_failed_batch(
                     &args,
                     &query_records[..start],
                     &subjects,
                     &report_ranges,
                     outputs,
                     &output_formats,
+                    &subject_title,
                     BatchResults {
                         hit_lists,
                         warnings: &warnings[..start],
@@ -6375,15 +6400,117 @@ fn run_in_pool(
                         context_karlin: &context_karlin,
                         query_eff_searchsp: &query_eff_searchsp,
                     },
-                    false,
                 )?;
+                outputs.diagnostics.write_all(&batch_title_warnings)?;
+                outputs.diagnostics.write_all(&error_warnings)?;
+                return Err(error.into_app_error());
             }
+        }
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
+        // ```c
+        // CObjMgr_QueryFactory::CObjMgr_QueryFactory(CBlastQueryVector & queries)
+        //     : m_QueryVector(& queries)
+        // {
+        //     if (queries.Empty()) {
+        //         NCBI_THROW(CBlastException, eInvalidArgument, "Empty CBlastQueryVector");
+        //     }
+        // ```
+        // A batch of skipped records only (with `-query_loc`), or a batch that an `eEOF`
+        // ends before its first record, fails after the reports of the batches before,
+        // without the epilog.
+        if start == end {
+            write_before_failed_batch(
+                &args,
+                &query_records[..start],
+                &subjects,
+                &report_ranges,
+                outputs,
+                &output_formats,
+                &subject_title,
+                BatchResults {
+                    hit_lists,
+                    warnings: &warnings[..start],
+                    lengths: &lengths[..start],
+                    unsearched,
+                    query_masks: &query_masks,
+                    context_karlin: &context_karlin,
+                    query_eff_searchsp: &query_eff_searchsp,
+                },
+            )?;
             outputs.diagnostics.write_all(&batch_title_warnings)?;
             return Err(crate::cli::NativeError {
                 exit: 3,
                 message: "BLAST engine error: Empty CBlastQueryVector\n".to_string(),
             }
             .into());
+        }
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:632-652
+        // ```c
+        //         } catch (const CException& e) {
+        //             ...
+        //             CRef<CSearchMessage> m
+        //                 (new CSearchMessage(eBlastSevWarning, index, e.GetMsg()));
+        //             messages[index].push_back(m);
+        //             s_InvalidateQueryContexts(qinfo, index);
+        //         }
+        //     ...
+        //     // Validate that at least one query context is valid
+        //     if (BlastSetup_Validate(qinfo, NULL) != 0 && messages.HasMessages()) {
+        //         NCBI_THROW(CBlastException, eSetup, messages.ToString());
+        //     }
+        // ```
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_aux.cpp:1013-1025
+        // ```c
+        // TSearchMessages::ToString() const
+        // {
+        //     string retval;
+        //     ITERATE(vector<TQueryMessages>, qm, *this) {
+        //         if (qm->empty()) {
+        //             continue;
+        //         }
+        //         ITERATE(TQueryMessages, msg, *qm) {
+        //             retval += (*msg)->GetMessage() + " ";
+        //         }
+        //     }
+        //     return retval;
+        // }
+        // ```
+        // A query without letters (`Sequence contains no data`, blast_setup.hpp:190-198) has
+        // no valid context, and the strands of every other BLASTN query are valid when the
+        // queries are set up: a batch of such queries only stops NCBI with one message per
+        // query (`GetMessage` puts the severity first), after the reports of the batches
+        // before (`CATCH_ALL`: `BLAST engine error: `, exit 3).
+        if query_records[start..end]
+            .iter()
+            .all(|record| record.seq().is_empty())
+        {
+            write_before_failed_batch(
+                &args,
+                &query_records[..start],
+                &subjects,
+                &report_ranges,
+                outputs,
+                &output_formats,
+                &subject_title,
+                BatchResults {
+                    hit_lists,
+                    warnings: &warnings[..start],
+                    lengths: &lengths[..start],
+                    unsearched,
+                    query_masks: &query_masks,
+                    context_karlin: &context_karlin,
+                    query_eff_searchsp: &query_eff_searchsp,
+                },
+            )?;
+            outputs.diagnostics.write_all(&batch_title_warnings)?;
+            let mut message = String::from("BLAST engine error: ");
+            for _ in start..end {
+                message.push_str("Warning: ");
+                message.push_str(NO_DATA_MESSAGE);
+                message.push(' ');
+            }
+            message.push('\n');
+            return Err(crate::cli::NativeError { exit: 3, message }.into());
         }
         warnings[start].extend(batch_title_warnings);
         let batch = match search_query_batch(
@@ -6400,7 +6527,7 @@ fn run_in_pool(
             },
         ) {
             Ok(batch) => batch,
-            Err(error) => match error.downcast::<KarlinErrorAfterInvalidBatches>() {
+            Err(error) => match error.downcast::<ErrorAfterInvalidBatches>() {
                 // NCBI reference: ncbi-blast/c++/src/app/blast/blastn_app.cpp:295-318
                 // ```c
                 //                 CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
@@ -6418,7 +6545,7 @@ fn run_in_pool(
                 // ```
                 // The reports of the batches before are written, then the error, which
                 // skips `PrintEpilog` (the outfmt 0 footer and outfmt 7's last line).
-                Ok(KarlinErrorAfterInvalidBatches(error)) => {
+                Ok(ErrorAfterInvalidBatches(error)) => {
                     write_batch_reports(
                         &args,
                         &query_records[..start],
@@ -6473,14 +6600,18 @@ fn run_in_pool(
         //     }
         // ```
         // The warning of an invalid query comes with its report (`PrintOneResultSet`),
-        // before its preamble (`QueryWarnings`).
+        // before its preamble (`QueryWarnings`): a query without letters has the message of
+        // its set-up (`SetupQueries_OMF`, above), any other invalid query that of its
+        // Karlin-Altschul parameters.
         for (index, karlin) in batch.context_karlin.iter().step_by(2).enumerate() {
             if karlin.is_none() {
-                warnings[start + index].extend(invalid_query_warning(
-                    "blastn",
-                    query_input.ordinal(start + index),
-                    &query_records[start + index],
-                ));
+                let query = &query_records[start + index];
+                let ordinal = query_input.ordinal(start + index);
+                warnings[start + index].extend(if query.seq().is_empty() {
+                    query_warning("blastn", ordinal, query, &[NO_DATA_MESSAGE.to_string()])
+                } else {
+                    invalid_query_warning("blastn", ordinal, query)
+                });
             }
         }
         context_karlin.extend(batch.context_karlin);
@@ -6560,6 +6691,59 @@ struct BatchResults<'a> {
     query_masks: &'a [Vec<MaskedInterval>],
     context_karlin: &'a [Option<ContextKarlin>],
     query_eff_searchsp: &'a [i64],
+}
+
+/// NCBI's message for a query or subject without letters.
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup.hpp:190-198
+/// ```c
+///     TSeqPos size() const {
+///         TSeqPos retval = x_Size();
+///         if (retval == 0) {
+///             NCBI_THROW(CBlastException, eInvalidArgument,
+///                        "Sequence contains no data");
+///         }
+///         return retval;
+///     }
+/// ```
+const NO_DATA_MESSAGE: &str = "Sequence contains no data";
+
+/// Writes what NCBI has written when a query batch fails, before its error: the reports of
+/// the batches before (`before`, the queries searched so far; without the epilog), or, for
+/// the first batch, the outfmt 0 prolog of the sinks that write it with the reports (the
+/// others wrote it before the search, `write_pairwise_prologs`).
+#[allow(clippy::too_many_arguments)]
+fn write_before_failed_batch(
+    args: &BlastnArgs,
+    before: &[FastaRecord],
+    subjects: &PreparedSubjects<'_>,
+    ranges: &ReportRanges<'_>,
+    outputs: &mut ReportOutputs<'_>,
+    output_formats: &[BlastnOutputFormat],
+    subject_title: &str,
+    results: BatchResults<'_>,
+) -> Result<()> {
+    if before.is_empty() {
+        write_pairwise_prologs(
+            outputs,
+            output_formats,
+            args.task == "megablast",
+            subject_title,
+            &subjects.metadata,
+            false,
+        )
+    } else {
+        write_batch_reports(
+            args,
+            before,
+            subjects,
+            ranges,
+            outputs,
+            output_formats,
+            results,
+            false,
+        )
+    }
 }
 
 /// Writes the reports of `query_records` (the queries of the batches searched), with
@@ -6966,7 +7150,24 @@ fn search_query_batch(
     // query_info->contexts[0].query_offset = 0;
     // query_info->contexts[1].query_offset = kStrandLength + 1;
     // ```
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:71-81
+    // ```c
+    //     if (index) {
+    //         Uint4 prev_loc = qinfo->contexts[index-1].query_offset;
+    //         Uint4 prev_len = qinfo->contexts[index-1].query_length;
+    //
+    //         Uint4 shift = prev_len ? prev_len + 1 : 0;
+    //
+    //         qinfo->contexts[index].query_offset = prev_loc + shift;
+    //         qinfo->contexts[index].query_length = length;
+    //         if (length == 0)
+    //            qinfo->contexts[index].is_valid = false;
+    //     } else {
+    // ```
+    // Each context starts after the context before and its sentinel; the contexts of a
+    // query without letters take no room (and are invalid, `context_ungapped` below).
     let mut query_concat_offset: usize = 0;
+    let context_room = |length: usize| if length == 0 { 0 } else { length + 1 };
     for (q_idx, q_record) in seq_data.queries.iter().enumerate() {
         let seq = q_record.seq();
         let q_len = seq.len();
@@ -6974,7 +7175,7 @@ fn search_query_batch(
         let plus_masks = seq_data.query_masks[q_idx].clone();
         let minus_masks = reverse_mask_intervals(&plus_masks, q_len);
         let plus_offset = query_concat_offset;
-        let minus_offset = query_concat_offset + q_len + 1;
+        let minus_offset = plus_offset + context_room(q_len);
 
         query_base_offsets.push(plus_offset);
         query_contexts.push(QueryContext {
@@ -6994,24 +7195,28 @@ fn search_query_batch(
 
         query_context_masks.push(plus_masks);
         query_context_masks.push(minus_masks);
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:65-77
-        // ```c
-        // Uint4 prev_loc = qinfo->contexts[index-1].query_offset;
-        // Uint4 prev_len = qinfo->contexts[index-1].query_length;
-        // Uint4 shift = prev_len ? prev_len + 1 : 0;
-        // qinfo->contexts[index].query_offset = prev_loc + shift;
-        // ```
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_query_info.c:246-249
-        // ```c
-        // BlastContextInfo * cinfo = & qinfo->contexts[qinfo->last_context];
-        // return cinfo->query_offset + cinfo->query_length + (cinfo->query_length ? 2 : 1);
-        // ```
-        query_concat_offset += q_len * 2 + 1;
-        if q_idx + 1 < seq_data.queries.len() {
-            query_concat_offset += 1;
-        }
+        query_concat_offset = minus_offset + context_room(q_len);
     }
-    let query_concat_length = query_concat_offset;
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_query_info.c:245-250
+    // ```c
+    // Uint4
+    // QueryInfo_GetSeqBufLen(const BlastQueryInfo* qinfo)
+    // {
+    //     BlastContextInfo * cinfo = & qinfo->contexts[qinfo->last_context];
+    //     return cinfo->query_offset + cinfo->query_length + (cinfo->query_length ? 2 : 1);
+    // }
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:654
+    // ```c
+    //     BlastSeqBlkSetSequence(*seqblk, buf.release(), buflen - 2);
+    // ```
+    // The searched block leaves out the first and the last sentinel of the buffer. A batch
+    // has a query with letters (`run_in_pool` stops on a batch without one).
+    let query_concat_length = query_contexts.last().map_or(0, |last| {
+        let length = last.seq.len();
+        (last.query_offset.max(0) as usize + length + if length == 0 { 1 } else { 2 })
+            .saturating_sub(2)
+    });
     // NCBI reference: ncbi-blast/c++/src/algo/blast/unit_tests/api/ntscan_unit_test.cpp:166-174
     // ```c
     // query_info->contexts[0].query_offset = 0;
@@ -7236,7 +7441,13 @@ fn search_query_batch(
             // batch raises it). LOSAT reproduces the error only for a first batch of valid
             // queries (the error does not depend on the queries, so the first batch with a valid
             // query meets it; NCBI writes the results and warnings of the batches before it).
-            if context_ungapped.iter().any(Option::is_none) {
+            // The contexts of a query without letters are invalid from their set-up and put
+            // no message here (`context_ungapped_blocks`).
+            if query_contexts
+                .iter()
+                .zip(&context_ungapped)
+                .any(|(context, block)| !context.seq.is_empty() && block.is_none())
+            {
                 anyhow::bail!(
                     "these scoring options have no Karlin-Altschul values, and the query batch (up to {} residues) has an invalid query; NCBI BLAST+ goes on without the gapped values and crashes, which is not supported by LOSAT's BLASTN",
                     batching.batch_size
@@ -7246,7 +7457,7 @@ fn search_query_batch(
             // with a valid query would have raised the error), and NCBI has written their
             // reports (`run_in_pool`).
             if !first_batch {
-                return Err(KarlinErrorAfterInvalidBatches(karlin_error(
+                return Err(ErrorAfterInvalidBatches(karlin_error(
                     &message,
                     seq_data.queries.len(),
                 ))
@@ -7289,6 +7500,100 @@ fn search_query_batch(
     // hit reads.
     let context_valid: Vec<bool> = context_karlin.iter().map(Option::is_some).collect();
     let any_valid_context = context_valid.iter().any(|&valid| valid);
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:908-939
+    // ```c
+    //    if (seq_src) {
+    //       total_length = BlastSeqSrcGetTotLenStats(seq_src);
+    //       if (total_length <= 0)
+    //           total_length = BlastSeqSrcGetTotLen(seq_src);
+    //       ...
+    //       if (total_length > 0) {
+    //           num_seqs = BlastSeqSrcGetNumSeqsStats(seq_src);
+    //           if (num_seqs <= 0)
+    //               num_seqs = BlastSeqSrcGetNumSeqs(seq_src);
+    //       } else {
+    //           /* Not a database search; each subject sequence is considered
+    //              individually */
+    //           Int4 oid = 0;  /* Get length of first sequence. */
+    //           if ( (total_length = BlastSeqSrcGetSeqLen(seq_src, (void*) &oid)) < 0) {
+    //               total_length = -1;
+    //               num_seqs = -1;
+    //           }
+    //           num_seqs = 1;
+    //       }
+    //    }
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:969-980
+    // ```c
+    //    if (sbp->gbp) {
+    //        min_subject_length = BlastSeqSrcGetMinSeqLen(seq_src);
+    //        if (Blast_SubjectIsTranslated(program_number)) {
+    //            min_subject_length/=3;
+    //        }
+    //    } else {
+    //        min_subject_length = (Int4) (total_length/num_seqs);
+    //    }
+    //
+    //    if(min_subject_length <=0) {
+    // 	   return BLASTERR_SUBJECT_LENGTH_INVALID;
+    //    }
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_message.c:215-219
+    // ```c
+    //     case BLASTERR_SUBJECT_LENGTH_INVALID:
+    //         new_msg->message = strdup("The average subject length is too short");
+    //         new_msg->severity = eBlastSevFatal;
+    //         new_msg->context = context;
+    //         break;
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:310-314
+    // ```c
+    //             retval = CPrelimSearchRunner(*m_InternalData, opts_memento.get())();
+    //             if (retval) {
+    //                 NCBI_THROW(CBlastException, eCoreBlastError,
+    //                            BlastErrorCode2String(retval));
+    //             }
+    // ```
+    // The subject set has no BLAST database statistics, and BLASTN has no Gumbel block
+    // (blast_setup.c:475-480): a batch with a valid context stops NCBI when the subjects
+    // have fewer letters than subjects (subjects without letters count with none). A batch
+    // without a valid context is not searched (`CheckInternalData`), so it does not.
+    if any_valid_context {
+        let total_length = seq_data.db_len_total as i64;
+        let (total_length, num_seqs) = if total_length > 0 {
+            (total_length, seq_data.db_num_seqs as i64)
+        } else {
+            (
+                subjects
+                    .records
+                    .first()
+                    .map_or(0, |record| record.seq().len()) as i64,
+                1,
+            )
+        };
+        if total_length / num_seqs <= 0 {
+            let error = anyhow::Error::from(crate::cli::NativeError {
+                exit: 3,
+                message: "BLAST engine error: The average subject length is too short\n"
+                    .to_string(),
+            });
+            // A batch after the first: the batches before had no valid query (one with a
+            // valid query would have raised the error), and NCBI has written their reports
+            // (`run_in_pool`).
+            if !first_batch {
+                return Err(ErrorAfterInvalidBatches(error).into());
+            }
+            write_pairwise_prologs(
+                outputs,
+                output_formats,
+                megablast,
+                &subject_title,
+                &subjects.metadata,
+                false,
+            )?;
+            return Err(error);
+        }
+    }
     // Gap costs that the tables accept but LOSAT's greedy extension does not (`scoring.rs`);
     // with no valid context, NCBI extends nothing.
     if any_valid_context {

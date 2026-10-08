@@ -1,0 +1,507 @@
+// The results screen's state (plan §5.7, design §11.1): which run, query, subject and HSP
+// are selected, the view filters and sort orders (ViewState, never a new search), and what
+// the screen shows for them. The selection is held by the HSP's identity (run, query,
+// rank), never by a row number of a table, and a detail that arrives after the selection
+// moved on is dropped. Values shown come from the stored outputs and the HSP records
+// (docs/web/results_columns.md); the domain functions group, sort and filter them.
+import type { RecordKey } from '../domain/dataset';
+import { frame, out0Range, out0SubjectRange, out6Range, type ByteRange } from '../domain/hsp-table';
+import { splitOutfmt6Row, type Outfmt6Row } from '../domain/outfmt6';
+import type { OutputFormat } from '../domain/output-format';
+import { programById, residueUnit, type ProgramId, type SequenceKind } from '../domain/programs';
+import {
+  buildResultIndex,
+  filterQuery,
+  hitLimits,
+  NO_FILTERS,
+  orientation,
+  sortHsps,
+  sortSubjects,
+  type HitLimits,
+  type HspSortKey,
+  type Orientation,
+  type ResultIndex,
+  type SortSpec,
+  type SubjectGroup,
+  type SubjectSortKey,
+  type ViewFilters,
+} from '../domain/result-index';
+import { verificationBadge, type Badge, type VerificationTable } from '../domain/verification';
+import type { RunStore } from '../ports/data';
+import type { ProgramDescription } from '../ports/engine';
+import type { AppState, RunView } from './coordinator';
+import { Store } from './store';
+
+/** The identity of an HSP: its run, its query record and its rank among the query's HSPs. */
+export interface HspId {
+  readonly runId: string;
+  readonly qIdx: number;
+  readonly rank: number;
+}
+
+export const sameHsp = (a: HspId | undefined, b: HspId | undefined): boolean =>
+  a !== undefined && b !== undefined && a.runId === b.runId && a.qIdx === b.qIdx && a.rank === b.rank;
+
+export interface QueryEntry {
+  readonly qIdx: number;
+  readonly id: string;
+  readonly length: number;
+  readonly subjects: number;
+  readonly hsps: number;
+}
+
+export interface SubjectEntry {
+  readonly sIdx: number;
+  /** The subject's ID in the run's record table. */
+  readonly recordId: string;
+  readonly length: number;
+  /** Position of the subject in the engine's order for this query (1-based). */
+  readonly order: number;
+  /** The outfmt 6 row of the subject's first HSP. */
+  readonly first: Outfmt6Row;
+  /** HSPs of the subject in this query (before the view filters). */
+  readonly hspCount: number;
+  /** HSPs that pass the view filters, in the HSP sort order. */
+  readonly rows: readonly number[];
+  readonly inOutfmt0: boolean;
+  /** The subject has as many HSPs as -max_hsps keeps. */
+  readonly atHspLimit: boolean;
+}
+
+export interface HspEntry {
+  readonly row: number;
+  readonly id: HspId;
+  readonly fields: Outfmt6Row;
+  readonly orientation: Orientation;
+  readonly queryFrame?: number;
+  readonly subjectFrame?: number;
+  readonly inOutfmt0: boolean;
+}
+
+export interface Detail {
+  readonly id: HspId;
+  readonly state: 'loading' | 'ready' | 'failed';
+  /** The outfmt 6 row, as written. */
+  readonly row?: string;
+  /** The subject heading of outfmt 0 (defline and Length=), as written. */
+  readonly heading?: string;
+  /** The HSP's section of outfmt 0 (score lines and alignment), as written. */
+  readonly section?: string;
+  readonly error?: string;
+}
+
+export interface Units {
+  readonly query: string;
+  readonly subject: string;
+}
+
+export interface LoadedRun {
+  readonly run: RunView;
+  readonly index: ResultIndex;
+  readonly out6: Uint8Array;
+  readonly description: ProgramDescription;
+  readonly limits: HitLimits;
+  readonly badge: Badge;
+  readonly diagnostics: string;
+  readonly kinds: { readonly query: SequenceKind; readonly subject: SequenceKind };
+  readonly units: Units;
+}
+
+export interface ResultsState {
+  readonly runId?: string;
+  readonly phase: 'none' | 'loading' | 'ready' | 'unavailable' | 'failed';
+  /** Why the run has no results to show (not completed, cancelled, failed, or a read error). */
+  readonly message?: string;
+  readonly loaded?: LoadedRun;
+  readonly filters: ViewFilters;
+  readonly subjectSort: SortSpec<SubjectSortKey>;
+  readonly hspSort: SortSpec<HspSortKey>;
+  /** The queries listed, after the query filters. */
+  readonly queries: readonly QueryEntry[];
+  readonly qIdx?: number;
+  /** Subjects of the query that pass the view filters, in the subject sort order. */
+  readonly subjects: readonly SubjectEntry[];
+  /** The selected query's subjects and HSPs before the view filters. */
+  readonly queryTotals?: { readonly subjects: number; readonly hsps: number };
+  readonly hidden: { readonly subjects: number; readonly hsps: number };
+  /** The query has as many subjects as the hit list keeps. */
+  readonly atSubjectLimit: boolean;
+  /** Subjects of the query that outfmt 0 shows alignments for. */
+  readonly outfmt0Subjects: number;
+  readonly sIdx?: number;
+  readonly hsps: readonly HspEntry[];
+  readonly hsp?: HspId;
+  readonly detail?: Detail;
+  /** Subject headings of outfmt 0 read so far, by subject record index (the same in every query). */
+  readonly headings: ReadonlyMap<number, string>;
+}
+
+export interface ResultsDeps {
+  readonly data: Pick<RunStore, 'readHitTable' | 'readOutput' | 'readOutputRange' | 'readDiagnostics'>;
+  readonly describe: (program: ProgramId) => Promise<ProgramDescription>;
+  readonly runs: Store<AppState>;
+  readonly verification: VerificationTable;
+}
+
+const INITIAL: ResultsState = Object.freeze<ResultsState>({
+  phase: 'none',
+  filters: NO_FILTERS,
+  subjectSort: { key: 'order', descending: false },
+  hspSort: { key: 'rank', descending: false },
+  queries: [],
+  subjects: [],
+  hidden: { subjects: 0, hsps: 0 },
+  atSubjectLimit: false,
+  outfmt0Subjects: 0,
+  hsps: [],
+  headings: new Map(),
+});
+
+const decoder = new TextDecoder();
+
+export class ResultsBrowser {
+  readonly state = new Store<ResultsState>(INITIAL);
+  /** Outfmt 6 rows already split, by table row, for the loaded run. */
+  private rows = new Map<number, Outfmt6Row>();
+  /** Table rows by `${qIdx}:${rank}`, for the loaded run. */
+  private rowById = new Map<string, number>();
+  private loadToken = 0;
+  /** Subjects whose heading is being read, and those waiting. */
+  private readonly headingQueue: number[] = [];
+  private readingHeadings = false;
+
+  /** The table the verification badges come from (generated at build time). */
+  get verification(): VerificationTable {
+    return this.deps.verification;
+  }
+
+  constructor(private readonly deps: ResultsDeps) {
+    // A run that the screen shows may finish, or be cancelled, while it is selected.
+    deps.runs.subscribe((app) => {
+      const { runId, phase } = this.state.get();
+      if (runId === undefined || phase === 'ready' || phase === 'loading') return;
+      const run = app.runs.find((r) => r.snapshot.runId === runId);
+      if (run?.status === 'completed') void this.open(runId);
+      else if (run !== undefined) this.set({ message: unavailableMessage(run) });
+    });
+  }
+
+  /** Shows the results of a run: the run's HSP records and outfmt 6 text are read once. */
+  async open(runId: string): Promise<void> {
+    const token = ++this.loadToken;
+    const run = this.deps.runs.get().runs.find((r) => r.snapshot.runId === runId);
+    this.rows = new Map();
+    this.rowById = new Map();
+    this.headingQueue.length = 0;
+    if (run === undefined) return;
+    if (run.status !== 'completed') {
+      this.state.set({ ...INITIAL, filters: this.state.get().filters, runId, phase: 'unavailable', message: unavailableMessage(run) });
+      return;
+    }
+    this.state.set({ ...INITIAL, filters: this.state.get().filters, runId, phase: 'loading' });
+    try {
+      const [table, out6, description, diagnostics] = await Promise.all([
+        this.deps.data.readHitTable(runId),
+        this.deps.data.readOutput(runId, 6),
+        this.deps.describe(run.snapshot.program),
+        this.deps.data.readDiagnostics(runId),
+      ]);
+      if (token !== this.loadToken) return;
+      const program = programById(run.snapshot.program);
+      const kinds = { query: program.query, subject: program.subject };
+      const loaded: LoadedRun = {
+        run,
+        index: buildResultIndex(table),
+        out6,
+        description,
+        limits: hitLimits(run.snapshot.argv, description.parameters),
+        badge: verificationBadge(
+          {
+            program: run.snapshot.program,
+            argv: run.snapshot.argv,
+            formats: description.formats,
+            runtimePath: run.record.runtimePath,
+            threads: run.record.threads,
+            grammar: grammarOf(description),
+          },
+          this.deps.verification,
+        ),
+        diagnostics,
+        kinds,
+        units: { query: residueUnit(kinds.query), subject: residueUnit(kinds.subject) },
+      };
+      for (let row = 0; row < table.count; row++) this.rowById.set(`${table.qIdx[row]}:${table.rank[row]}`, row);
+      const queries = this.queryEntries(loaded, this.state.get().filters);
+      const first = queries.find((q) => q.hsps > 0) ?? queries[0];
+      this.state.set({ ...this.state.get(), phase: 'ready', loaded, queries });
+      if (first !== undefined) this.selectQuery(first.qIdx);
+    } catch (error) {
+      if (token !== this.loadToken) return;
+      this.set({ phase: 'failed', message: `The results of run ${run.snapshot.number} could not be read: ${errorMessage(error)}` });
+    }
+  }
+
+  selectQuery(qIdx: number): void {
+    const state = this.state.get();
+    if (state.loaded === undefined) return;
+    this.set({ qIdx, sIdx: undefined, hsp: undefined, detail: undefined });
+    this.refresh();
+    const subject = this.state.get().subjects[0];
+    if (subject !== undefined) this.selectSubject(subject.sIdx);
+  }
+
+  selectSubject(sIdx: number): void {
+    this.set({ sIdx });
+    this.refresh();
+    const first = this.state.get().hsps[0];
+    this.selectHsp(first?.id);
+  }
+
+  /** Selects an HSP of the loaded run; its query and subject follow. */
+  selectHsp(id: HspId | undefined): void {
+    const state = this.state.get();
+    if (id === undefined || state.loaded === undefined || id.runId !== state.runId) {
+      this.set({ hsp: undefined, detail: undefined });
+      return;
+    }
+    const row = this.rowById.get(`${id.qIdx}:${id.rank}`);
+    if (row === undefined) return;
+    const table = state.loaded.index.table;
+    const sIdx = table.sIdx[row]!;
+    if (state.qIdx !== id.qIdx || state.sIdx !== sIdx) {
+      this.set({ qIdx: id.qIdx, sIdx });
+      this.refresh();
+    }
+    if (sameHsp(this.state.get().hsp, id) && this.state.get().detail !== undefined) return;
+    this.set({ hsp: id });
+    void this.loadDetail(state.loaded, id, row);
+  }
+
+  setFilters(filters: ViewFilters): void {
+    const state = this.state.get();
+    this.set({ filters, ...(state.loaded === undefined ? {} : { queries: this.queryEntries(state.loaded, filters) }) });
+    this.refresh();
+    this.keepSelection();
+  }
+
+  setSubjectSort(subjectSort: SortSpec<SubjectSortKey>): void {
+    this.set({ subjectSort });
+    this.refresh();
+  }
+
+  setHspSort(hspSort: SortSpec<HspSortKey>): void {
+    this.set({ hspSort });
+    this.refresh();
+  }
+
+  /** The outfmt 6 row of a table row of the loaded run, split into its fields. */
+  row(row: number): Outfmt6Row {
+    let fields = this.rows.get(row);
+    if (fields === undefined) {
+      const loaded = this.state.get().loaded!;
+      const range = out6Range(loaded.index.table, row);
+      if (range === undefined) throw new Error(`HSP row ${row} has no outfmt 6 row`);
+      fields = splitOutfmt6Row(decoder.decode(loaded.out6.subarray(range[0], range[1])));
+      this.rows.set(row, fields);
+    }
+    return fields;
+  }
+
+  /**
+   * Reads the outfmt 0 headings of subjects of the selected query (the rows in view of the
+   * subject list), once per subject. Subjects that outfmt 0 does not show have none.
+   */
+  requestHeadings(sIdxs: readonly number[]): void {
+    const state = this.state.get();
+    if (state.loaded === undefined) return;
+    for (const sIdx of sIdxs) {
+      if (!state.headings.has(sIdx) && !this.headingQueue.includes(sIdx)) this.headingQueue.push(sIdx);
+    }
+    if (!this.readingHeadings) void this.readHeadings(this.loadToken);
+  }
+
+  private async readHeadings(token: number): Promise<void> {
+    this.readingHeadings = true;
+    try {
+      while (this.headingQueue.length > 0 && token === this.loadToken) {
+        const batch = this.headingQueue.splice(0, 40);
+        const state = this.state.get();
+        const loaded = state.loaded;
+        const query = state.qIdx === undefined ? undefined : loaded?.index.queries.get(state.qIdx);
+        if (loaded === undefined || query === undefined) break;
+        const read = new Map<number, string>();
+        for (const sIdx of batch) {
+          const subject = query.subjects.find((s) => s.sIdx === sIdx);
+          const range = subject === undefined ? undefined : out0SubjectRange(loaded.index.table, subject.rows[0]!);
+          if (range === undefined) continue;
+          const bytes = await this.deps.data.readOutputRange(loaded.run.snapshot.runId, 0, range[0], range[1]);
+          read.set(sIdx, decoder.decode(bytes));
+        }
+        if (token !== this.loadToken) break;
+        if (read.size > 0) this.set({ headings: new Map([...this.state.get().headings, ...read]) });
+      }
+    } catch {
+      // A heading that cannot be read leaves the description empty; the detail reports read errors.
+    } finally {
+      this.readingHeadings = false;
+      this.headingQueue.length = 0;
+    }
+  }
+
+  /** Recomputes the lists from the selection, the filters and the sort orders. */
+  private refresh(): void {
+    const state = this.state.get();
+    const loaded = state.loaded;
+    if (loaded === undefined || state.qIdx === undefined) {
+      this.set({ subjects: [], hsps: [], hidden: { subjects: 0, hsps: 0 }, queryTotals: undefined, atSubjectLimit: false, outfmt0Subjects: 0 });
+      return;
+    }
+    const { table } = loaded.index;
+    const query = loaded.index.queries.get(state.qIdx);
+    if (query === undefined) {
+      this.set({ subjects: [], hsps: [], hidden: { subjects: 0, hsps: 0 }, queryTotals: { subjects: 0, hsps: 0 }, atSubjectLimit: false, outfmt0Subjects: 0 });
+      return;
+    }
+    const subjectRecords = loaded.run.snapshot.subject.records;
+    const filtered = filterQuery(query, state.filters, table, (subject) => [
+      subjectRecords[subject.sIdx]?.id ?? '',
+      this.row(subject.rows[0]!).sseqid,
+    ]);
+    const order = new Map(query.subjects.map((subject, i) => [subject.sIdx, i + 1]));
+    const sorted = sortSubjects(filtered.subjects, state.subjectSort, table, (sIdx) => subjectRecords[sIdx]?.length ?? 0);
+    const unfiltered = new Map(query.subjects.map((subject) => [subject.sIdx, subject]));
+    const subjects = sorted.map((subject) => this.subjectEntry(loaded, subject, unfiltered.get(subject.sIdx)!, order.get(subject.sIdx)!, state.hspSort));
+    const selected = subjects.find((s) => s.sIdx === state.sIdx);
+    const hsps = selected === undefined ? [] : selected.rows.map((row) => this.hspEntry(loaded, row));
+    this.set({
+      subjects,
+      hsps,
+      hidden: { subjects: filtered.hiddenSubjects, hsps: filtered.hiddenHsps },
+      queryTotals: { subjects: query.subjects.length, hsps: query.hspCount },
+      atSubjectLimit: loaded.limits.maxTargetSeqs !== undefined && query.subjects.length >= loaded.limits.maxTargetSeqs,
+      outfmt0Subjects: query.subjects.filter((s) => out0SubjectRange(table, s.rows[0]!) !== undefined).length,
+    });
+  }
+
+  /** After a filter change, keeps the selected HSP if it is still shown, else selects the first shown. */
+  private keepSelection(): void {
+    const state = this.state.get();
+    if (state.hsps.some((hsp) => sameHsp(hsp.id, state.hsp))) return;
+    const subject = state.subjects.find((s) => s.sIdx === state.sIdx) ?? state.subjects[0];
+    if (subject === undefined) {
+      this.set({ sIdx: undefined, hsps: [], hsp: undefined, detail: undefined });
+      return;
+    }
+    this.selectSubject(subject.sIdx);
+  }
+
+  private subjectEntry(
+    loaded: LoadedRun,
+    shown: SubjectGroup,
+    all: SubjectGroup,
+    order: number,
+    hspSort: SortSpec<HspSortKey>,
+  ): SubjectEntry {
+    const record: RecordKey | undefined = loaded.run.snapshot.subject.records[shown.sIdx];
+    const first = all.rows[0]!;
+    return {
+      sIdx: shown.sIdx,
+      recordId: record?.id ?? '',
+      length: record?.length ?? 0,
+      order,
+      first: this.row(first),
+      hspCount: all.rows.length,
+      rows: sortHsps(shown.rows, hspSort, loaded.index.table),
+      inOutfmt0: out0SubjectRange(loaded.index.table, first) !== undefined,
+      atHspLimit: loaded.limits.maxHsps !== undefined && all.rows.length >= loaded.limits.maxHsps,
+    };
+  }
+
+  private hspEntry(loaded: LoadedRun, row: number): HspEntry {
+    const { table } = loaded.index;
+    const queryFrame = frame(table.queryFrame, row);
+    const subjectFrame = frame(table.subjectFrame, row);
+    return {
+      row,
+      id: { runId: loaded.run.snapshot.runId, qIdx: table.qIdx[row]!, rank: table.rank[row]! },
+      fields: this.row(row),
+      orientation: orientation(table, row, loaded.kinds),
+      ...(queryFrame === undefined ? {} : { queryFrame }),
+      ...(subjectFrame === undefined ? {} : { subjectFrame }),
+      inOutfmt0: out0Range(table, row) !== undefined,
+    };
+  }
+
+  private queryEntries(loaded: LoadedRun, filters: ViewFilters): readonly QueryEntry[] {
+    const text = (filters.queryText ?? '').toLowerCase();
+    const entries: QueryEntry[] = [];
+    loaded.run.snapshot.query.records.forEach((record, qIdx) => {
+      const group = loaded.index.queries.get(qIdx);
+      if (filters.queriesWithHitsOnly && group === undefined) return;
+      if (text !== '' && !record.id.toLowerCase().includes(text)) return;
+      entries.push({ qIdx, id: record.id, length: record.length, subjects: group?.subjects.length ?? 0, hsps: group?.hspCount ?? 0 });
+    });
+    return entries;
+  }
+
+  /** Reads the HSP's row, subject heading and section; drops the answer if the selection moved on. */
+  private async loadDetail(loaded: LoadedRun, id: HspId, row: number): Promise<void> {
+    const runId = loaded.run.snapshot.runId;
+    const table = loaded.index.table;
+    const read = (format: OutputFormat, range: ByteRange | undefined) =>
+      range === undefined ? Promise.resolve(undefined) : this.deps.data.readOutputRange(runId, format, range[0], range[1]).then((b) => decoder.decode(b));
+    const range6 = out6Range(table, row);
+    const rowText = range6 === undefined ? undefined : decoder.decode(loaded.out6.subarray(range6[0], range6[1]));
+    this.set({ detail: { id, state: 'loading', ...(rowText === undefined ? {} : { row: rowText }) } });
+    try {
+      const [heading, section] = await Promise.all([read(0, out0SubjectRange(table, row)), read(0, out0Range(table, row))]);
+      if (!sameHsp(this.state.get().hsp, id)) return;
+      this.set({
+        detail: {
+          id,
+          state: 'ready',
+          ...(rowText === undefined ? {} : { row: rowText }),
+          ...(heading === undefined ? {} : { heading }),
+          ...(section === undefined ? {} : { section }),
+        },
+      });
+    } catch (error) {
+      if (!sameHsp(this.state.get().hsp, id)) return;
+      this.set({ detail: { id, state: 'failed', error: errorMessage(error) } });
+    }
+  }
+
+  private set(change: { [K in keyof ResultsState]?: ResultsState[K] | undefined }): void {
+    const next = { ...this.state.get() } as Record<string, unknown>;
+    for (const [key, value] of Object.entries(change)) {
+      if (value === undefined) delete next[key];
+      else next[key] = value;
+    }
+    this.state.set(next as unknown as ResultsState);
+  }
+}
+
+/** The option grammar of `describe` that the verification badge reads options with. */
+function grammarOf(description: ProgramDescription) {
+  const valued = new Set(description.parameters.filter((p) => p.takesValue).map((p) => p.flag));
+  const task = description.parameters.find((p) => p.flag === '-task')?.defaultValue;
+  return { takesValue: (flag: string) => valued.has(flag), ...(task === undefined ? {} : { defaultTask: task }) };
+}
+
+function unavailableMessage(run: RunView): string {
+  const n = run.snapshot.number;
+  switch (run.status) {
+    case 'cancelled':
+      return `Run ${n} was cancelled. A cancelled run keeps no results.`;
+    case 'failed':
+      return `Run ${n} failed: ${run.record.error ?? 'no reason was recorded'}. A failed run keeps no results.`;
+    case 'completed':
+      return '';
+    default:
+      return `Run ${n} has not finished yet. Its results appear when it completes.`;
+  }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}

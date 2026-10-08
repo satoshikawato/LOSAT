@@ -3,6 +3,7 @@ import vue from '@vitejs/plugin-vue';
 import type { Plugin } from 'vite';
 import { siteHeaders } from './build/headers.ts';
 import { findReactors, losatEngine } from './build/reactors.ts';
+import { losatVerification } from './build/verification.ts';
 
 const headers = siteHeaders();
 const reactors = findReactors();
@@ -42,7 +43,7 @@ function headersOnEveryResponse(): Plugin {
 
 export default defineConfig({
   // The engine modules (LOSAT_WEB_REACTORS); the worker bundles read the same description.
-  plugins: [vue(), losatEngine({ reactors }), headersOnEveryResponse()],
+  plugins: [vue(), losatEngine({ reactors }), losatVerification(), headersOnEveryResponse()],
   define: { __LOSAT_TEST_HOOKS__: 'false' },
   server: { headers: devHeaders },
   preview: { headers },

@@ -5649,7 +5649,7 @@ fn search_cli(
 
 /// How the reading of the queries of a search ended, after its records.
 #[derive(Debug)]
-enum QueryReading {
+pub(crate) enum QueryReading {
     /// The records of `run_local`: an input without records is NCBI's `Query is Empty!`
     /// (the inputs of the ABI are read as regular files).
     Records,
@@ -5668,7 +5668,7 @@ enum QueryReading {
 impl QueryReading {
     /// Whether NCBI's reader reads on after the last record (`End()` is false): an `eEOF`
     /// or an error then comes in the batch being read.
-    fn reads_past_records(&self) -> bool {
+    pub(crate) fn reads_past_records(&self) -> bool {
         matches!(self, QueryReading::BlankLines | QueryReading::Error { .. })
     }
 }
@@ -6706,7 +6706,7 @@ struct BatchResults<'a> {
 ///         return retval;
 ///     }
 /// ```
-const NO_DATA_MESSAGE: &str = "Sequence contains no data";
+pub(crate) const NO_DATA_MESSAGE: &str = "Sequence contains no data";
 
 /// Writes what NCBI has written when a query batch fails, before its error: the reports of
 /// the batches before (`before`, the queries searched so far; without the epilog), or, for

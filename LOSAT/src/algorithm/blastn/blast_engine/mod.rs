@@ -21,6 +21,9 @@ pub use run::run;
 pub use run::run_local;
 #[cfg(target_arch = "wasm32")]
 pub use run::run_web_pair;
+// The end of a query reading and NCBI's message for a sequence without letters, shared with
+// TBLASTX (port plan step S5).
+pub(crate) use run::{QueryReading, NO_DATA_MESSAGE};
 
 use super::alignment::build_blastna_matrix;
 use super::filtering::{

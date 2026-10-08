@@ -199,6 +199,16 @@ impl FormatObserver for RangeRecorder {
     }
 }
 
+/// The records of NCBI's nucleotide reader made from the registered `bio` records
+/// (`Query_N`, `Subject_N`).
+fn reader_records(records: &[fasta::Record], prefix: &str) -> Vec<FastaRecord> {
+    records
+        .iter()
+        .enumerate()
+        .map(|(index, record)| FastaRecord::from_bio(record, index + 1, prefix, false))
+        .collect()
+}
+
 /// Runs one search and emits its streams. On failure nothing more is emitted and the
 /// host discards what it received.
 pub fn run(
@@ -241,27 +251,21 @@ pub fn run(
         let result = match command {
             Commands::Blastp(args) => run_local_blastp(args, query, subject, "", "", &mut outputs),
             Commands::Tblastn(args) => run_local_tblastn(args, query, subject, &mut outputs),
-            Commands::Blastn(args) => {
-                // The registered records enter BLASTN's search as NCBI's reader's records
-                // (`FastaRecord::from_bio`): `register` reads only inputs that `bio` reads
-                // as NCBI does (port plan, steps S3 and S10).
-                let records = |records: &[fasta::Record], prefix: &str| -> Vec<FastaRecord> {
-                    records
-                        .iter()
-                        .enumerate()
-                        .map(|(index, record)| {
-                            FastaRecord::from_bio(record, index + 1, prefix, false)
-                        })
-                        .collect()
-                };
-                run_local_blastn(
-                    args,
-                    &records(query, "Query_"),
-                    &records(subject, "Subject_"),
-                    &mut outputs,
-                )
-            }
-            Commands::Tblastx(args) => run_local_tblastx(args, query, subject, &mut outputs),
+            // The registered records enter the searches of BLASTN and TBLASTX as NCBI's
+            // reader's records (`FastaRecord::from_bio`): `register` reads only inputs that
+            // `bio` reads as NCBI does (port plan, steps S3, S5 and S10).
+            Commands::Blastn(args) => run_local_blastn(
+                args,
+                &reader_records(query, "Query_"),
+                &reader_records(subject, "Subject_"),
+                &mut outputs,
+            ),
+            Commands::Tblastx(args) => run_local_tblastx(
+                args,
+                &reader_records(query, "Query_"),
+                &reader_records(subject, "Subject_"),
+                &mut outputs,
+            ),
             Commands::Blastx(_) => unreachable!("rejected by Program::parse"),
         };
         result.map_err(|error| format!("{error:#}"))?;

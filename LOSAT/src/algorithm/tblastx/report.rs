@@ -5,12 +5,11 @@
 use std::io::{self, Write};
 use std::sync::Arc;
 
-use bio::io::fasta;
-
 use crate::api::local_blast::{FormatProbe, HspIndex};
+use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range::{record_frame, Placements};
 use crate::config::ScoringMatrix;
-use crate::report::outfmt6::{write_hit_fields, OutputConfig};
+use crate::report::outfmt6::{write_hit_fields_bytes, OutputConfig};
 use crate::report::pairwise::PairwiseHit;
 use crate::utils::genetic_code::GeneticCode;
 use crate::utils::matrix::protein_display_score;
@@ -208,8 +207,8 @@ fn row_counts(query_row: &[u8], subject_row: &[u8]) -> (usize, usize) {
 /// ```
 pub(crate) fn set_displayed_identities(
     hits: &mut [TblastxHsp],
-    queries: &[fasta::Record],
-    subjects: &[fasta::Record],
+    queries: &[FastaRecord],
+    subjects: &[FastaRecord],
     query_code: &GeneticCode,
     db_code: &GeneticCode,
 ) {
@@ -460,8 +459,8 @@ fn lowercase_query_row(
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn pairwise_hits(
     hits: &[TblastxHsp],
-    queries: &[fasta::Record],
-    subjects: &[fasta::Record],
+    queries: &[FastaRecord],
+    subjects: &[FastaRecord],
     query_stats: &[TblastxQueryStats],
     query_code: &GeneticCode,
     db_code: &GeneticCode,
@@ -531,7 +530,14 @@ pub(crate) fn pairwise_hits(
                 positives: Some(positives),
                 gaps: Some(0),
                 subject_length: Some(subject_length),
-                subject_title: subject.desc().map(str::to_string),
+                // The title after its first word (the `bio` description of the inputs
+                // that `bio` read alike), as BLASTN's; the reports take the subject's
+                // title bytes by subject index (`write_tblastx_pairwise_report`).
+                subject_title: subject
+                    .title
+                    .iter()
+                    .position(|&byte| byte == b' ')
+                    .map(|space| String::from_utf8_lossy(&subject.title[space + 1..]).into_owned()),
                 comp_adjust_method: None,
                 sum_n: Some(hsp.num),
             }
@@ -579,23 +585,6 @@ pub(crate) fn shift_to_records(
     }
 }
 
-/// The `# Query:` and `Query=` text of a query: its FASTA defline.
-///
-/// NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:729-734
-/// ```c++
-///         out << label << "= ";
-///     ...
-///         string all_id_str = GetSeqIdString(cbs, believe_query);
-///         all_id_str += " ";
-///         all_id_str = NStr::TruncateSpaces(all_id_str + GetSeqDescrString(cbs));
-/// ```
-pub(crate) fn fasta_defline(record: &fasta::Record) -> String {
-    match record.desc() {
-        Some(desc) => format!("{} {desc}", record.id()),
-        None => record.id().to_string(),
-    }
-}
-
 // NCBI reference: c++/src/objtools/align_format/tabular.cpp:1275-1283
 // ```c++
 //     x_PrintQueryAndDbNames(program_version, bioseq, dbname, rid, iteration, subj_bioseq);
@@ -613,7 +602,7 @@ pub(crate) fn fasta_defline(record: &fasta::Record) -> String {
 /// count of HSPs.
 fn write_outfmt7_query_header<W: Write>(
     writer: &mut W,
-    query_title: &str,
+    query_title: &[u8],
     database: &str,
     num_hits: Option<usize>,
 ) -> io::Result<()> {
@@ -625,7 +614,7 @@ fn write_outfmt7_query_header<W: Write>(
     //                                             kTabularFormat, rid);
     // ```
     // The title's bytes (`write_outfmt7_query_line`).
-    crate::report::outfmt6::write_outfmt7_query_line(writer, query_title.as_bytes())?;
+    crate::report::outfmt6::write_outfmt7_query_line(writer, query_title)?;
     writeln!(writer, "# Database: {database}")?;
     let Some(num_hits) = num_hits else {
         return Ok(());
@@ -659,10 +648,10 @@ pub(crate) fn write_tabular<W: Write>(
     hits: &[TblastxHsp],
     writer: &mut W,
     comments: bool,
-    query_titles: &[String],
+    query_titles: &[&[u8]],
     database: &str,
-    query_ids: &[Arc<str>],
-    subject_ids: &[Arc<str>],
+    query_ids: &[Arc<[u8]>],
+    subject_ids: &[Arc<[u8]>],
     unsearched: &[bool],
     epilog: bool,
     mut probe: Option<&mut FormatProbe<'_>>,
@@ -681,20 +670,27 @@ pub(crate) fn write_tabular<W: Write>(
         if comments {
             write_outfmt7_query_header(
                 writer,
-                &query_titles[q_idx],
+                query_titles[q_idx],
                 database,
                 (!unsearched[q_idx]).then_some(query_hits.len()),
             )?;
         }
         for &(hsp_index, hsp) in query_hits {
             let hit = &hsp.hit;
-            let (query_id, subject_id) = hit.resolve_ids(query_ids, subject_ids);
+            // The query ID of the record (`FastaRecord::shown_id`) and the subject's
+            // `GetSeqIdList` ID (`tabular_subject_id`), as bytes.
+            let query_id = query_ids
+                .get(hit.q_idx as usize)
+                .map_or(&b""[..], |id| id.as_ref());
+            let subject_id = subject_ids
+                .get(hit.s_idx as usize)
+                .map_or(&b""[..], |id| id.as_ref());
             // One printed row is one HSP; the probe marks it without changing it.
             if let Some(probe) = probe.as_mut() {
                 writer.flush()?;
                 probe.begin(hsp_index);
             }
-            write_hit_fields(
+            write_hit_fields_bytes(
                 writer,
                 query_id,
                 subject_id,
@@ -1202,7 +1198,7 @@ mod tests {
     fn outfmt7_headers_follow_print_header() {
         let header = |hits| {
             let mut out = Vec::new();
-            write_outfmt7_query_header(&mut out, "q1 title", "db", hits).unwrap();
+            write_outfmt7_query_header(&mut out, b"q1 title", "db", hits).unwrap();
             String::from_utf8(out).unwrap()
         };
         assert_eq!(

@@ -307,7 +307,7 @@ fn x_identify_accession(main: &[u8], has_version: bool) -> Option<SeqIdLine> {
         .position(|&byte| !digit(byte))
         .map(|offset| digit_pos + offset);
     if let Some(non_dig_pos) = non_dig_pos {
-        // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1678-1712
+        // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1678-1711
         // ```c++
         //             if ( !has_version  &&  digit_pos == 0  &&  main_size >= 4
         //                 &&  non_dig_pos < 5  &&  isalnum(ucdata[1])
@@ -320,12 +320,13 @@ fn x_identify_accession(main: &[u8], has_version: bool) -> Option<SeqIdLine> {
         //                     // Conventionally delimited
         //                     return eAcc_pdb;
         //                 } else switch (main_size) {
-        //  /* ... (cases 7, 6 and 5 are commented out) */
+        //                 ...
         //                 case 4:
         //                     return eAcc_pdb;
         //                 }
         //             }
         // ```
+        // (NCBI has the cases 7, 6 and 5 inside a `/* */` comment; the elided lines are that comment.)
         // `strchr` also finds the terminating NUL, so a NUL byte at index 4 counts as a
         // delimiter.
         if !has_version

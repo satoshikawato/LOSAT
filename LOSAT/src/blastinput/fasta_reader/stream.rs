@@ -1156,7 +1156,7 @@ impl<R: Read> LineReader<R> {
         }
     }
 
-    /// NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:143-152
+    /// NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:142-151
     /// ```c++
     /// void CStreamLineReader::UngetLine(void)
     /// {
@@ -1180,7 +1180,7 @@ impl<R: Read> LineReader<R> {
     /// `++reader` followed by `*reader`: the next line (the ungot line again after
     /// `UngetLine`, an empty line at the end).
     ///
-    /// NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:155-174
+    /// NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:154-175
     /// ```c++
     /// CStreamLineReader& CStreamLineReader::operator++(void)
     /// {
@@ -1236,7 +1236,7 @@ impl<R: Read> LineReader<R> {
         self.stream.bulk
     }
 
-    /// NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:211-219
+    /// NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:208-216
     /// ```c++
     /// Uint8 CStreamLineReader::GetLineNumber(void) const
     /// {

@@ -11,7 +11,7 @@ use super::{FastaRecord, ReadError, ReaderConfig};
 /// The kinds of reader problems (`ILineError::EProblem`) that LOSAT meets, for
 /// `PostWarning`'s list of ignored problems.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:357-359
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:358-360
 /// ```c++
 ///     m_InputReader->IgnoreProblem(ILineError::eProblem_ModifierFoundButNoneExpected);
 ///     m_InputReader->IgnoreProblem(ILineError::eProblem_TooLong);
@@ -518,7 +518,7 @@ impl<R: Read> FastaReader<R> {
         self.lines.line_number()
     }
 
-    /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:2197-2219
+    /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:2196-2214
     /// ```c++
     /// void CFastaReader::PostWarning(
     ///             ILineErrorListener * pMessageListener,
@@ -577,7 +577,7 @@ impl<R: Read> FastaReader<R> {
 
     /// One record (`ReadOneSeq` of `CBlastInputReader`, then of `CFastaReader`).
     ///
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:128-159
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:130-162
     /// ```c++
     ///     virtual CRef<CSeq_entry> ReadOneSeq(ILineErrorListener * pMessageListener) {
     ///
@@ -923,7 +923,7 @@ impl<R: Read> FastaReader<R> {
         self.local_id = Some(self.generate_id());
     }
 
-    /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta_reader_utils.cpp:458-476
+    /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta_reader_utils.cpp:466-483
     /// ```c++
     /// CRef<CSeq_id> CSeqIdGenerator::GenerateID(const string& defline, const bool advance)
     /// {
@@ -1244,7 +1244,7 @@ impl<R: Read> FastaReader<R> {
     ///     }
     /// }
     /// ```
-    /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1062-1066
+    /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1079-1083
     /// ```c++
     /// void CFastaReader::x_OpenMask(void)
     /// {
@@ -1264,7 +1264,7 @@ impl<R: Read> FastaReader<R> {
     ///     void CloseMask(void)
     ///         { if (m_MaskRangeStart != kInvalidSeqPos) { x_CloseMask(); } }
     /// ```
-    /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1068-1075
+    /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1085-1092
     /// ```c++
     /// void CFastaReader::x_CloseMask(void)
     /// {
@@ -1452,7 +1452,7 @@ impl<R: Read> FastaReader<R> {
     /// gap type and linkage evidence are not kept (`AssembleSeq` warns that the
     /// modifiers are ignored, an ignored problem).
     ///
-    /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1194-1342
+    /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1190-1340
     /// ```c++
     ///     // remember if there is a gap-type conflict
     ///     bool bConflictingGapTypes = false;
@@ -1698,7 +1698,7 @@ impl<R: Read> FastaReader<R> {
         Ok(())
     }
 
-    /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1351-1438
+    /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1351-1448
     /// ```c++
     /// void CFastaReader::AssembleSeq(ILineErrorListener * pMessageListener)
     /// {
@@ -1808,7 +1808,7 @@ impl<R: Read> FastaReader<R> {
             std::mem::take(&mut self.seq_data)
         };
         if !self.config.protein {
-            // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1438-1441
+            // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1444-1447
             // ```c++
             //         CRef<CSeq_data> data(new CSeq_data(m_SeqData, format));
             //         if ( !TestFlag(fLeaveAsText) ) {
@@ -1894,7 +1894,7 @@ impl<R: Read> FastaReader<R> {
         Ok(())
     }
 
-    /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1616-1679
+    /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1623-1680
     /// ```c++
     ///     // check for nuc or aa sequences at the end of the title
     ///     const static size_t kWarnNumNucCharsAtEnd = 20;

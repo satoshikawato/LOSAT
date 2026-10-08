@@ -110,13 +110,15 @@ impl ReaderConfig {
 
     /// The subject reader of `program`.
     ///
-    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:236-242
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:230-237
     /// ```c++
     ///     SDataLoaderConfig dlconfig(read_proteins);
     ///     dlconfig.OptimizeForWholeLargeSequenceRetrieval();
-    ///     CBlastInputSourceConfig iconfig(dlconfig, objects::eNa_strand_other,
-    ///                                  lowercase_masking, believe_deflines);
+    ///
+    ///     CBlastInputSourceConfig iconfig(dlconfig);
     ///     iconfig.SetRange(range);
+    ///     iconfig.SetBelieveDeflines(parse_deflines);
+    ///     iconfig.SetLowercaseMask(use_lcase_masking);
     ///     iconfig.SetSubjectLocalIdMode();
     /// ```
     pub fn subject(program: &'static str, protein: bool, data_loaders: bool) -> Self {

@@ -25,6 +25,7 @@
 #   LOSAT_WEB_WEBKIT_EXECUTABLE  a launcher for Playwright's WebKit on a host whose system
 #                                libraries Playwright cannot install (W1 README)
 #   LOSAT_WEB_MEASURE_QUERIES    query counts of the results measurement (10000,100000)
+#   LOSAT_WEB_MEASURE_COPIES     copies of the repeated unit of its dot-plot case (1500,3000,4000)
 #   LOSAT_WEB_GATE_STEPS         `all` (the gate), or `after-review`: npm ci, check, the unit
 #                                tests, both E2E builds and the screen records only (the
 #                                run after a fix of a review finding; README)

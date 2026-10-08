@@ -618,7 +618,14 @@ fn write_outfmt7_query_header<W: Write>(
     num_hits: Option<usize>,
 ) -> io::Result<()> {
     writeln!(writer, "# TBLASTX {NCBI_TBLASTX_VERSION}")?;
-    writeln!(writer, "# Query: {query_title}")?;
+    // NCBI reference: c++/src/objtools/align_format/tabular.cpp:1305-1308
+    // ```c
+    //     CAlignFormatUtil::AcknowledgeBlastQuery(bioseq, kLineLength, m_Ostream,
+    //                                             m_ParseLocalIds, kHtmlFormat,
+    //                                             kTabularFormat, rid);
+    // ```
+    // The title's bytes (`write_outfmt7_query_line`).
+    crate::report::outfmt6::write_outfmt7_query_line(writer, query_title.as_bytes())?;
     writeln!(writer, "# Database: {database}")?;
     let Some(num_hits) = num_hits else {
         return Ok(());

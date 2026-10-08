@@ -2348,8 +2348,15 @@ fn write_blastp_outfmt7_header<W: Write>(
         context.program.to_uppercase(),
         version_str
     )?;
+    // NCBI reference: c++/src/objtools/align_format/tabular.cpp:1305-1308
+    // ```c
+    //     CAlignFormatUtil::AcknowledgeBlastQuery(bioseq, kLineLength, m_Ostream,
+    //                                             m_ParseLocalIds, kHtmlFormat,
+    //                                             kTabularFormat, rid);
+    // ```
+    // The title's bytes (`write_outfmt7_query_line`).
     if let Some(ref query) = context.query_name {
-        writeln!(writer, "# Query: {}", query)?;
+        crate::report::outfmt6::write_outfmt7_query_line(writer, query.as_bytes())?;
     }
     // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:790-803
     // dbname = string("User specified sequence set (Input: ") + m_SubjectTag + string(")");

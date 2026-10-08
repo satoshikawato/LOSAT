@@ -210,11 +210,20 @@ fn write_tabular(
             .sum();
         if comments {
             writeln!(writer, "# TBLASTN 2.17.0+")?;
-            write!(writer, "# Query: {}", query.id())?;
+            // NCBI reference: c++/src/objtools/align_format/tabular.cpp:1305-1308
+            // ```c
+            //     CAlignFormatUtil::AcknowledgeBlastQuery(bioseq, kLineLength, m_Ostream,
+            //                                             m_ParseLocalIds, kHtmlFormat,
+            //                                             kTabularFormat, rid);
+            // ```
+            // The title's bytes (`write_outfmt7_query_line`): `bio`'s ID, a space and the
+            // rest of the defline.
+            let mut title = query.id().as_bytes().to_vec();
             if let Some(desc) = query.desc() {
-                write!(writer, " {desc}")?;
+                title.push(b' ');
+                title.extend_from_slice(desc.as_bytes());
             }
-            writeln!(writer)?;
+            crate::report::outfmt6::write_outfmt7_query_line(writer, &title)?;
             writeln!(
                 writer,
                 "# Database: User specified sequence set (Input: {})",

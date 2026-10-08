@@ -223,16 +223,10 @@ pub fn query_warning<R: InputRecord>(
     let mut messages = messages.to_vec();
     messages.sort();
     messages.dedup();
-    let mut query_id = format!("Query_{}", index + 1).into_bytes();
-    let title = query.title_bytes();
-    if !title.is_empty() {
-        query_id.push(b' ');
-        query_id.extend_from_slice(&title);
-    }
-    if query_id.len() > 35 {
-        query_id.truncate(25);
-        query_id.extend_from_slice(b".. ");
-    }
+    let query_id = warning_query_id(
+        format!("Query_{}", index + 1).as_bytes(),
+        &query.title_bytes(),
+    );
     let mut warning = format!("Warning: [{program}] ").into_bytes();
     warning.extend_from_slice(&query_id);
     warning.extend_from_slice(b": ");
@@ -242,6 +236,38 @@ pub fn query_warning<R: InputRecord>(
     }
     warning.push(b'\n');
     warning
+}
+
+/// The query ID that NCBI's warnings of a query show: the local ID (`Query_N`), then a
+/// space and the title when the query has one, cut to its first 25 bytes and `.. ` when
+/// it is longer than 35 bytes. The bytes are the title's, raw; the cut can fall inside a
+/// UTF-8 sequence.
+///
+/// NCBI reference: c++/src/algo/blast/api/blast_setup_cxx.cpp:533-543
+/// ```c++
+///             if (const CSeq_id* id = queries.GetSeqId(index)) {
+///                 const string kTitle = queries.GetTitle(index);
+///                 string query_id = id->GetSeqIdString();
+///                 if (kTitle != kEmptyStr) {
+///                     query_id += " " + kTitle;
+///                 }
+///                  if(query_id.size() > 35) {
+///                 	 query_id = query_id.substr(0, 25) + ".. ";
+///                  }
+///
+///                 messages[index].SetQueryId(query_id);
+/// ```
+pub fn warning_query_id(local_id: &[u8], title: &[u8]) -> Vec<u8> {
+    let mut query_id = local_id.to_vec();
+    if !title.is_empty() {
+        query_id.push(b' ');
+        query_id.extend_from_slice(title);
+    }
+    if query_id.len() > 35 {
+        query_id.truncate(25);
+        query_id.extend_from_slice(b".. ");
+    }
+    query_id
 }
 
 /// The warning of a protein query with pyrrolysine (O), which NCBI reads as X, or `None`.
@@ -359,5 +385,40 @@ mod tests {
         );
         assert!(invalid_query_warning("blastn", 1, &long)
             .starts_with(b"Warning: [blastn] Query_2 long_header abcde.. : "));
+    }
+
+    // NCBI BLAST+ 2.17.0, the invalid-query warning of BLASTN for one query with each
+    // defline (inventory range RP, `scratch_RP/warn/iq_*_nuc_q.fa` and
+    // `warn/out/iq_*_blastn_6.err`): the query ID between `[blastn] ` and `: Could`.
+    #[test]
+    fn warning_query_ids_follow_the_ncbi_oracle() {
+        use crate::blastinput::fasta_reader::{read_all, FastaInputSource, ReaderConfig};
+        let w = |count: usize| vec![b'w'; count];
+        let long = [&b"id "[..], &w(100)].concat();
+        let cjk = [&[b'a'; 23][..], b"\xe6\xbc\xa2", &[b'z'; 14]].concat();
+        let z27 = vec![b'z'; 27];
+        let z28 = vec![b'z'; 28];
+        for (defline, shown) in [
+            (&b"sid sdesc"[..], &b"Query_1 sid sdesc"[..]),
+            (b"", b"Query_1"),
+            (b"id \xc3\xa9 x", b"Query_1 id \xc3\xa9 x"),
+            (b"id \xe9 x", b"Query_1 id \xe9 x"),
+            (b"id\tx", b"Query_1 id"),
+            (&long, b"Query_1 id wwwwwwwwwwwwww.. "),
+            (&cjk, b"Query_1 aaaaaaaaaaaaaaaaa.. "),
+            (b"id x\xff", b"Query_1 id x\xff"),
+            (&z27, b"Query_1 zzzzzzzzzzzzzzzzzzzzzzzzzzz"),
+            (&z28, b"Query_1 zzzzzzzzzzzzzzzzz.. "),
+        ] {
+            let bytes = [&b">"[..], defline, b"\nACGTACGT\n"].concat();
+            let mut source =
+                FastaInputSource::from_bytes(&bytes, ReaderConfig::query("BLASTN", false, false));
+            let records = read_all(&mut source, &mut |_| Ok(())).unwrap();
+            assert_eq!(
+                warning_query_id(records[0].local_id.as_bytes(), &records[0].title),
+                shown,
+                "{defline:?}"
+            );
+        }
     }
 }

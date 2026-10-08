@@ -23,11 +23,11 @@ cargo build --release --target wasm32-wasip1 --no-default-features
 cargo build --release --target wasm32-wasip1-threads --features wasm-threads
 ```
 
-Use `rg` in the available NCBI trees before relying on a remembered function or line number:
+Use `rg` in the pinned NCBI tree (`satoshikawato/ncbi-blast` at commit `598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4`;
+the local path is machine-specific, `$NCBI_SRC` in Claude Code) before relying on a remembered function or line number:
 
 ```bash
-rg -n "<function-or-symbol>" /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast
-rg -n "<function-or-symbol>" /mnt/c/Users/kawato/Documents/GitHub/ncbi-blast/c++/src/algo/blast
+rg -n "<function-or-symbol>" "$NCBI_SRC/c++/src/algo/blast"
 ```
 
 Prefer temporary output directories. Existing `tests/*_out` files may be old evidence or release-hygiene targets; do not overwrite them blindly.

@@ -62,8 +62,8 @@ use super::super::args::BlastnArgs;
 use super::super::blast_extend::DiagStruct;
 use super::super::coordination::{
     build_lookup_tables, chunk_query_masks, collect_lowercase_masks, configure_task,
-    finalize_task_config, prepare_sequence_data, query_masks, scan_subjects_metadata,
-    subject_metadata_from_records, LookupTables, SubjectMetadata,
+    finalize_task_config, prepare_sequence_data, query_masks, subject_metadata_from_records,
+    LookupTables, SubjectMetadata,
 };
 use super::super::disc_lookup::{choose_disc_scan_subject, disc_word_scan_subject};
 use super::super::extension::{
@@ -81,9 +81,7 @@ use super::super::hsp::{
     BlastnHsp, BlastnHspList, BlastnOutputFormat, HitList, HitListEntry, NCBI_BLASTN_VERSION,
 };
 use super::super::input::{
-    check_deflines, check_records, check_records_have_residues, check_residues,
-    check_sequence_lines, check_utf8_file_name, is_blank, open_input, parse_fasta,
-    read_fasta_bytes, read_records, with_u_as_t, write_title_warnings,
+    check_reader_records_have_residues, check_utf8_file_name, is_blank, open_input,
 };
 use super::super::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
 use super::super::lookup::{build_unmasked_ranges, reverse_complement, DiscTemplates};
@@ -94,6 +92,10 @@ use super::super::query_split::{
 use super::super::scoring::{
     check_greedy_gap_costs, check_losat_limits, check_scoring_options, context_blocks,
     context_ungapped_blocks, gap_x_dropoffs, karlin_error, ContextKarlin,
+};
+use crate::blastinput::fasta_reader::{
+    read_queries, read_subjects, FastaInputSource, FastaRecord, QueryEnd, QueryRecords,
+    ReaderConfig,
 };
 use crate::blastinput::query_batch::{next_query_batch_end, BatchSizeMixer};
 use crate::blastinput::seq_range::{
@@ -122,19 +124,25 @@ use crate::utils::dust::MaskedInterval;
 // ```
 const NCBIMATH_LN2: f64 = 0.69314718055994530941723212145818;
 
-// NCBI reference: ncbi-blast/c++/src/objtools/align_format/showdefline.cpp:69-79
-// ```c
-// string CShowBlastDefline::GetDefline(const CBioseq_Handle& bioseq) const
-// {
-//     return bioseq.GetSeqId()->AsFastaString();
-// }
-// ```
+/// The text of a query's outfmt 0 `Query=` line and outfmt 7 `# Query:` line: the record's
+/// title bytes (the local ID is not shown without `-parse_deflines`; the writers apply
+/// `TruncateSpaces`).
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:732-734
+/// ```c++
+///     string all_id_str = GetSeqIdString(cbs, believe_query);
+///     all_id_str += " ";
+///     all_id_str = NStr::TruncateSpaces(all_id_str + GetSeqDescrString(cbs));
+/// ```
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:633-635
+/// ```c++
+///     CRef<CSeq_id> wid = FindBestChoice(ids, CSeq_id::WorstRank);
+///
+///     if (wid && (wid->Which()!= CSeq_id::e_Local || believe_local_id)){
+/// ```
 #[inline]
-fn fasta_defline(record: &bio::io::fasta::Record) -> Arc<str> {
-    match record.desc() {
-        Some(desc) => Arc::<str>::from(format!("{} {}", record.id(), desc)),
-        None => Arc::<str>::from(record.id()),
-    }
+fn record_title(record: &FastaRecord) -> Arc<[u8]> {
+    Arc::from(record.title.as_slice())
 }
 
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/include/algo/blast/core/gapinfo.h:43-61
@@ -4574,8 +4582,8 @@ fn update_hitlists_with_subject_hits(
 /// What the pairwise report, the hit records and the query warnings need besides the
 /// final hit list.
 struct BlastnReportInputs<'a> {
-    queries: &'a [bio::io::fasta::Record],
-    subjects: &'a [bio::io::fasta::Record],
+    queries: &'a [FastaRecord],
+    subjects: &'a [FastaRecord],
     /// Where the searched letters lie in the records (`-query_loc`, `-subject_loc`).
     ranges: &'a ReportRanges<'a>,
     /// Per query, plus strand: DUST and, with `-lcase_masking`, the input lowercase.
@@ -4613,7 +4621,7 @@ struct BlastnReportInputs<'a> {
 fn blastn_pairwise_report(
     report: &BlastnReportInputs<'_>,
     unsearched: Vec<bool>,
-    query_titles: &[Arc<str>],
+    query_titles: &[Arc<[u8]>],
     subject_title: &str,
 ) -> Result<(Vec<BlastnPairwiseQuery>, BlastnPairwiseReport)> {
     let context_karlin = report.context_karlin;
@@ -4622,7 +4630,7 @@ fn blastn_pairwise_report(
         .iter()
         .enumerate()
         .map(|(q_idx, query)| BlastnPairwiseQuery {
-            query_name: query_titles[q_idx].to_string(),
+            query_name: query_titles[q_idx].to_vec(),
             // NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:742-744
             // ```c++
             //         if(cbs.IsSetInst() && cbs.GetInst().CanGetLength()){
@@ -4738,6 +4746,81 @@ fn shift_to_records(hit_lists: &mut [Option<BlastnHitList>], ranges: &ReportRang
     }
 }
 
+/// The subject ID of the tabular formats (`sseqid`, `sacc`, `saccver`) of every subject, by
+/// subject index (`report::defline::tabular_subject_id`: the title's first word, or the
+/// local ID, and for `lcl|Subject_...` the first word of `GenerateDefline`).
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:828-841
+/// ```c++
+///     bool setSubjectId = (x_IsFieldRequested(eSubjectSeqId) ||
+///     		 	 	 	 x_IsFieldRequested(eSubjectGi) ||
+///     		 	 	 	 x_IsFieldRequested(eSubjectAccession) ||
+///     		 	 	 	 x_IsFieldRequested(eSubjAccessionVersion));
+///
+///     if(setSubjectIds || setSubjectTaxInfo || setSubjectTaxInfoAll || setSubjectTitle ||
+///        x_IsFieldRequested(eSubjectStrand) || setSubjectId)
+///     {
+///         try {
+///        		const CBioseq_Handle& subject_bh =
+///                 scope.GetBioseqHandle(align.GetSeq_id(1));
+///             if(setSubjectId) {
+///             	SetSubjectId(subject_bh);
+///             }
+/// ```
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:862-869
+/// ```c++
+///         } catch (const CException&) {
+///             list<CRef<CSeq_id> > subject_ids;
+///             CRef<CSeq_id> id(new CSeq_id());
+///             id->Assign(align.GetSeq_id(1));
+///             subject_ids.push_back(id);
+///             SetSubjectId(subject_ids);
+///             bioseqs_found = false;
+///         }
+/// ```
+/// A subject with a row whose `GenerateDefline` throws (a `Subject_` first word and a title
+/// in no encoding that `CUtf8::GuessEncoding` recognises) makes NCBI 2.17.0 write part of the
+/// row and stop with a `CCoreException` that names its build's source files (exit 255;
+/// `AUTHORITY.md` §J-6, §K-1, RP-20). No result can be defined for it, so LOSAT rejects such
+/// a subject explicitly before it writes any format, pending the PD-LOSAT-NCBI-DEFECTS
+/// question; a subject without rows is never named.
+fn tabular_subject_ids(
+    hit_lists: &[Option<BlastnHitList>],
+    subjects: &[FastaRecord],
+) -> Result<Vec<Arc<[u8]>>> {
+    let ids: Vec<Option<Arc<[u8]>>> = subjects
+        .iter()
+        .map(|subject| {
+            crate::report::defline::tabular_subject_id(
+                subject.local_id.as_bytes(),
+                &subject.title,
+                false,
+            )
+            .ok()
+            .map(Arc::from)
+        })
+        .collect();
+    for hit_list in hit_lists.iter().flatten() {
+        for hsp_list in &hit_list.hsplist_array {
+            let Some(hsp) = hsp_list.hsps.first() else {
+                continue;
+            };
+            let s_idx = hsp.s_idx as usize;
+            if ids.get(s_idx).is_some_and(Option::is_none) {
+                anyhow::bail!(
+                    "subject record {} ({}) has a title whose first word starts with 'Subject_' and whose non-UTF-8 bytes are in no encoding that NCBI BLAST+ recognises; NCBI BLAST+ writes part of a tabular row for such a subject and stops with an exception that names its build's source files (exit 255), which is not supported by LOSAT's BLASTN",
+                    s_idx + 1,
+                    String::from_utf8_lossy(subjects[s_idx].shown_id())
+                );
+            }
+        }
+    }
+    Ok(ids
+        .into_iter()
+        .map(|id| id.unwrap_or_else(|| Arc::from(&b""[..])))
+        .collect())
+}
+
 fn post_process_hits_and_write(
     mut hit_lists: Vec<Option<BlastnHitList>>,
     hitlist_size: usize,
@@ -4746,10 +4829,9 @@ fn post_process_hits_and_write(
     query_lengths: &[usize],
     outputs: &mut ReportOutputs<'_>,
     verbose: bool,
-    query_ids: &[Arc<str>],
-    subject_ids: &[Arc<str>],
+    query_ids: &[Arc<[u8]>],
     output_formats: &[BlastnOutputFormat],
-    query_titles: &[Arc<str>],
+    query_titles: &[Arc<[u8]>],
     subject_title: &str,
     timing: Option<&BlastnTiming>,
     report: &BlastnReportInputs<'_>,
@@ -5005,6 +5087,30 @@ fn post_process_hits_and_write(
     } else {
         None
     };
+    let subject_ids = if output_formats
+        .iter()
+        .any(|&format| format != BlastnOutputFormat::Pairwise)
+    {
+        tabular_subject_ids(&hit_lists, report.subjects)?
+    } else {
+        Vec::new()
+    };
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:497-498
+    // ```c++
+    //     //get defline
+    //     sdl->defline = CDeflineGenerator().GenerateDefline(m_ScopeRef->GetBioseqHandle(*(sdl->id)), sequence::CDeflineGenerator::fLeavePrefixSuffix);
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2273
+    // ```c++
+    // 	alnDispParams->title = CDeflineGenerator().GenerateDefline(bsp_handle);
+    // ```
+    // The outfmt 0 descriptions and headings are made from the subjects' title bytes
+    // (`report::defline::generate_defline`), by subject index.
+    let subject_titles: Vec<Arc<[u8]>> = if output_formats.contains(&BlastnOutputFormat::Pairwise) {
+        report.subjects.iter().map(record_title).collect()
+    } else {
+        Vec::new()
+    };
     let observer = &mut outputs.observer;
     // The warnings are written once, with the first format (`QueryWarnings`).
     let mut warnings = Some(crate::report::query_warnings::QueryWarnings {
@@ -5040,7 +5146,7 @@ fn post_process_hits_and_write(
                     ..PairwiseConfig::default()
                 },
                 queries,
-                subject_ids,
+                &subject_titles,
                 pairwise_report,
                 probe.as_mut(),
                 format_warnings.as_mut(),
@@ -5050,7 +5156,7 @@ fn post_process_hits_and_write(
                 &hit_lists,
                 &mut writer,
                 query_ids,
-                subject_ids,
+                &subject_ids,
                 output_format,
                 query_titles,
                 subject_title,
@@ -5121,34 +5227,6 @@ fn fasta_records_from_bytes(bytes: &[u8]) -> Result<Vec<bio::io::fasta::Record>>
         .context("failed to parse in-memory FASTA")
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/blastinput/blast_input_aux.cpp:242-246
-// ```c
-// CRef<CBlastFastaInputSource> fasta(new CBlastFastaInputSource(in, iconfig));
-// CRef<CBlastInput> input(new CBlastInput(fasta));
-// CRef<CScope> scope(new CScope(*CObjectManager::GetInstance()));
-// sequences = input->GetAllSeqs(*scope);
-// ```
-//
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/readers/fasta.cpp:428-431
-// ```c
-// if (need_defline  &&  GetLineReader().AtEOF()) {
-//     FASTA_ERROR(LineNumber(),
-//         "CFastaReader: Expected defline around line " << LineNumber(),
-//         CObjReaderParseException::eEOF);
-// ```
-fn read_blastn_fasta_records(
-    path: &std::path::Path,
-    role: &str,
-) -> Result<Vec<bio::io::fasta::Record>> {
-    let mut file = open_input(path, role, "BLASTN")?;
-    parse_fasta(
-        &read_fasta_bytes(&mut file, path, role)?,
-        path,
-        role,
-        "BLASTN",
-    )
-}
-
 /// ABI v1's reading of a BLASTN `-outfmt` value, which is frozen (plan TD-1): it keeps the
 /// values that it accepted before `parse_blastn_output_format` followed NCBI.
 #[cfg(target_arch = "wasm32")]
@@ -5208,6 +5286,7 @@ pub fn run_web_pair(args: BlastnArgs, query_fasta: &str, subject_fasta: &str) ->
         check_scoring_options(&args)?;
         return Ok(output);
     }
+    use super::super::input::{check_deflines, check_records, check_sequence_lines};
     // The deflines that NCBI reads differently are rejected (a fail-fast fix, plan TD-1).
     check_deflines(subject_fasta.as_bytes(), "subject")?;
     check_deflines(query_fasta.as_bytes(), "query")?;
@@ -5219,6 +5298,19 @@ pub fn run_web_pair(args: BlastnArgs, query_fasta: &str, subject_fasta: &str) ->
         check_records(&subjects, "subject")?;
         check_records(&queries, "query")?;
     }
+    // ABI v1 keeps `bio` and its checks (plan TD-1, `AUTHORITY.md` §J-5): the records that
+    // pass them are those that NCBI's reader reads alike, and enter the search as its
+    // records (`FastaRecord::from_bio`, which reads `U` as `T`).
+    let queries: Vec<FastaRecord> = queries
+        .iter()
+        .enumerate()
+        .map(|(index, record)| FastaRecord::from_bio(record, index + 1, "Query_", false))
+        .collect();
+    let subjects: Vec<FastaRecord> = subjects
+        .iter()
+        .enumerate()
+        .map(|(index, record)| FastaRecord::from_bio(record, index + 1, "Subject_", false))
+        .collect();
     let mut stderr = std::io::stderr();
     run_local(
         args,
@@ -5230,8 +5322,9 @@ pub fn run_web_pair(args: BlastnArgs, query_fasta: &str, subject_fasta: &str) ->
 }
 
 /// `settings` are the NCBI application settings that LOSAT reproduces
-/// (`ncbi_environment::check_ncbi_application_settings`): the input readers use them once
-/// the program reads with `fasta_reader` (steps S3-S8 of the port plan).
+/// (`ncbi_environment::check_ncbi_application_settings`): the data loaders decide whether
+/// the readers of the subjects and the queries try a first line as a Seq-id
+/// (`ReaderConfig`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_scope_src.cpp:67-72
 /// ```c++
@@ -5244,7 +5337,7 @@ pub fn run_web_pair(args: BlastnArgs, query_fasta: &str, subject_fasta: &str) ->
 /// ```
 pub fn run(
     args: BlastnArgs,
-    _settings: crate::blastinput::ncbi_environment::ApplicationSettings,
+    settings: crate::blastinput::ncbi_environment::ApplicationSettings,
 ) -> Result<()> {
     // NCBI reference: ncbi-blast/c++/src/app/blast/blastn_app.cpp:128-133
     // ```c
@@ -5325,7 +5418,7 @@ pub fn run(
         .into());
     };
     check_utf8_file_name(subject_path, "subject", "BLASTN")?;
-    let mut subject_file = open_input(subject_path, "subject", "BLASTN")?;
+    let subject_file = open_input(subject_path, "subject", "BLASTN")?;
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2537-2545
     // ```c++
     //             subj_input_stream = &args[kArgSubject].AsInputFile();
@@ -5341,22 +5434,36 @@ pub fn run(
     // The subject range is read after the subject file is opened, before it is read.
     let subject_range =
         parse_optional_range(args.subject_loc.as_deref(), RangeRole::Subject, "BLASTN")?;
-    let subject_bytes = read_fasta_bytes(&mut subject_file, subject_path, "subject")?;
-    drop(subject_file);
-    let read_subjects = read_records(&subject_bytes, subject_path, "subject", "BLASTN")?;
-    // NCBI reads the records one at a time and checks each one's range after reading it:
-    // a range that starts past the end of a record stops it there, after the title
-    // warnings of the records read (`cut_subjects`).
-    write_title_warnings(
-        &read_subjects[..subjects_read(&read_subjects, subject_range.as_ref())],
-        &mut std::io::stderr(),
-    )?;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:242-246
+    // ```c++
+    //     CRef<CBlastFastaInputSource> fasta(new CBlastFastaInputSource(in, iconfig));
+    //     CRef<CBlastInput> input(new CBlastInput(fasta));
+    //     CRef<CScope> scope(new CScope(*CObjectManager::GetInstance()));
+    //     sequences = input->GetAllSeqs(*scope);
+    //     return scope;
+    // ```
+    // NCBI reads the records one at a time, writes each one's messages as it reads it, and
+    // checks each one's range after reading it: a range that starts past the end of a
+    // record stops the reading there (`read_subjects`).
+    let mut subject_source = FastaInputSource::from_argument(
+        subject_path,
+        subject_file,
+        ReaderConfig::subject("BLASTN", false, settings.data_loaders),
+    );
+    let read_subjects = {
+        let mut stderr = std::io::stderr();
+        read_subjects(
+            &mut subject_source,
+            subject_range.as_ref(),
+            &mut |message: &[u8]| std::io::Write::write_all(&mut stderr, message),
+        )?
+    };
+    drop(subject_source);
     let ranged_subjects = cut_subjects(&read_subjects, subject_range.as_ref())?;
-    // NCBI reads these deflines and records without a message; LOSAT rejects them where
-    // the search would start.
-    let subject_deflines = check_deflines(&subject_bytes, "subject")
-        .and_then(|()| check_records_have_residues(&read_subjects, "subject"));
-    drop(subject_bytes);
+    // NCBI reads records without residues without a message and reports them when it sets
+    // up the search; LOSAT rejects them where the search would start (port plan, step S4).
+    let subject_records_checked =
+        check_reader_records_have_residues(&read_subjects, "subject", "BLASTN");
     let (subjects, subject_placements, full_subjects) = match ranged_subjects {
         Some((cut, placements)) => (cut, placements, Some(read_subjects)),
         None => (read_subjects, Placements::default(), None),
@@ -5387,7 +5494,7 @@ pub fn run(
     // The output file is created here, before the options are checked, so a run that
     // stops at a check leaves an empty file; `-` is standard output.
     check_utf8_file_name(&args.query, "query", "BLASTN")?;
-    let mut query_file = open_input(&args.query, "query", "BLASTN")?;
+    let query_file = open_input(&args.query, "query", "BLASTN")?;
     // The output file is opened once, as NCBI's stream (a named pipe gives one reader one
     // end of file).
     if let Some(path) = args.out.as_deref() {
@@ -5420,9 +5527,10 @@ pub fn run(
                 placements: &subject_placements,
                 records: full_subjects.as_deref(),
             },
-            subject_deflines,
+            subject_records_checked,
             &mut outputs,
             output_formats,
+            settings,
         )
     };
     // What was written before an error (such as the outfmt 0 prolog) stays in the file.
@@ -5455,63 +5563,92 @@ pub fn run(
 
 /// The part of `run` after the output is opened: NCBI's filtering handler (`-dust`), the
 /// processing of the options, `Query is Empty!`, LOSAT's deferred checks of the subjects,
-/// and the search.
+/// the reading of the queries and the search.
+#[allow(clippy::too_many_arguments)]
 fn search_cli(
     mut args: BlastnArgs,
-    mut query_file: std::fs::File,
-    subjects: &[bio::io::fasta::Record],
+    query_file: std::fs::File,
+    subjects: &[FastaRecord],
     subject_ranges: SubjectRanges<'_>,
-    subject_deflines: Result<()>,
+    subject_records_checked: Result<()>,
     outputs: &mut ReportOutputs<'_>,
     output_formats: Vec<BlastnOutputFormat>,
+    settings: crate::blastinput::ncbi_environment::ApplicationSettings,
 ) -> Result<()> {
     args.resolve_dust()?;
     let query_range = parse_query_range(&args)?;
     process_options(&args, outputs)?;
-    // NCBI reference: ncbi-blast/c++/src/app/blast/blastn_app.cpp:209-212
-    // ```c
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:201-214
+    // ```c++
+    //         SDataLoaderConfig dlconfig =
+    //             InitializeQueryDataLoaderConfiguration(query_opts->QueryIsProtein(),
+    //                                                    db_adapter);
+    //         CBlastInputSourceConfig iconfig(dlconfig, query_opts->GetStrand(),
+    //                                      query_opts->UseLowercaseMasks(),
+    //                                      query_opts->GetParseDeflines(),
+    //                                      query_opts->GetRange());
     //         if(IsIStreamEmpty(m_CmdLineArgs->GetInputStream())) {
     //            	ERR_POST(Warning << "Query is Empty!");
     //            	return BLAST_EXIT_SUCCESS;
     //         }
+    //         CBlastFastaInputSource fasta(m_CmdLineArgs->GetInputStream(), iconfig);
+    //         CBlastInput input(&fasta);
     // ```
-    // NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.cpp:856-860
-    // ```c
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:856-860
+    // ```c++
     // 	char c;
     // 	CNcbiStreampos orig_p = in.tellg();
     // 	// Piped input
     // 	if(orig_p < 0)
     // 		return false;
     // ```
-    // The position is taken on the opened file, before it is read. When the subjects were
-    // read from standard input too, `cin` has reached its end (a failed stream), so NCBI
-    // gets no position for the query either.
-    let seekable = !(args.query.as_os_str() == "-" && args.subject_path().as_os_str() == "-")
-        && std::io::Seek::stream_position(&mut query_file).is_ok();
-    let query_bytes = read_fasta_bytes(&mut query_file, &args.query, "query")?;
-    drop(query_file);
-    if is_blank(&query_bytes) {
-        // NCBI reads a stream without a position (a pipe) as not empty, and then prints
-        // the report of no query.
-        if !seekable {
-            anyhow::bail!(
-                "an empty query from a stream without a position (such as a pipe) is not supported by LOSAT's BLASTN"
-            );
-        }
+    // The query's data loaders are those of the subjects (`SDataLoaderConfig`; the BLAST
+    // database of a database search is added only to the loaders' databases). The position
+    // is taken on the opened file, before it is read (`stream_is_empty`). When the subjects
+    // were read from standard input too, `cin` has reached its end (a failed stream), so
+    // NCBI gets no position for the query either, and its reader is at its end: no query
+    // batch is read.
+    let shared_standard_input =
+        args.query.as_os_str() == "-" && args.subject_path().as_os_str() == "-";
+    let mut query_source = FastaInputSource::from_argument(
+        &args.query,
+        query_file,
+        ReaderConfig::query("BLASTN", false, settings.data_loaders),
+    );
+    if !shared_standard_input && query_source.stream_is_empty() {
         outputs
             .diagnostics
             .write_all(b"Warning: [blastn] Query is Empty!\n")?;
         return Ok(());
     }
-    subject_deflines?;
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/blastinput/blast_input_aux.cpp:242-246
-    // ```c
-    // sequences = input->GetAllSeqs(*scope);
+    subject_records_checked?;
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:277-279
+    // ```c++
+    //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup() ) {
+    // 	    BLAST_PROF_START( APP.LOOP.PRE );
+    //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
     // ```
-    let queries = parse_fasta(&query_bytes, &args.query, "query", "BLASTN")?;
+    // The records are read here and their messages are written batch by batch
+    // (`run_in_pool`). A reader error or an explicit rejection of a later record stops the
+    // run before the search, after the messages of the records before it; NCBI writes it
+    // when it reads the batch of that record (port plan, step S4).
+    let QueryRecords { records, end } = read_queries(&mut query_source);
+    drop(query_source);
+    let reading = match end {
+        QueryEnd::Input => QueryReading::End,
+        QueryEnd::EofError => QueryReading::BlankLines,
+        QueryEnd::Error { error, warnings } => {
+            for record in &records {
+                outputs.diagnostics.write_all(&record.warnings)?;
+            }
+            outputs.diagnostics.write_all(&warnings)?;
+            return Err(error.into_app_error());
+        }
+    };
     search(
         args,
-        &queries,
+        &records,
+        reading,
         Ranges {
             query: query_range,
             subjects: subject_ranges,
@@ -5520,6 +5657,20 @@ fn search_cli(
         outputs,
         output_formats,
     )
+}
+
+/// How the queries of a search were read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum QueryReading {
+    /// The records of `run_local`: an input without records is NCBI's `Query is Empty!`
+    /// (the inputs of the ABI are read as regular files).
+    Records,
+    /// The CLI's reader reached the end of its input (`CBlastInput::End()`); without
+    /// records, no query batch is read.
+    End,
+    /// The CLI's reader found only blank and comment lines where it expected a record
+    /// (`eEOF`), which ends the batch being read.
+    BlankLines,
 }
 
 /// The query range, read by NCBI's query options handler: after the filtering handler
@@ -5554,7 +5705,7 @@ struct Ranges<'a> {
 #[derive(Clone, Copy)]
 struct SubjectRanges<'a> {
     placements: &'a Placements,
-    records: Option<&'a [bio::io::fasta::Record]>,
+    records: Option<&'a [FastaRecord]>,
 }
 
 /// The ranges as the report uses them: the query input and the subjects' ranges.
@@ -5580,7 +5731,7 @@ struct ReportRanges<'a> {
 ///             LOG_POST(Error << "BLAST engine error: " << e.GetMsg());        \
 ///             exit_code = BLAST_ENGINE_ERROR;                                 \
 /// ```
-fn check_subjects_not_empty(subjects: &[bio::io::fasta::Record]) -> Result<()> {
+fn check_subjects_not_empty<R>(subjects: &[R]) -> Result<()> {
     if subjects.is_empty() {
         return Err(crate::cli::NativeError {
             exit: 3,
@@ -5652,18 +5803,18 @@ fn process_options(args: &BlastnArgs, outputs: &mut ReportOutputs<'_>) -> Result
 /// records (`ReportOutputs::hits`) are not produced yet.
 pub fn run_local(
     mut args: BlastnArgs,
-    query_records: &[bio::io::fasta::Record],
-    subject_records: &[bio::io::fasta::Record],
+    query_records: &[FastaRecord],
+    subject_records: &[FastaRecord],
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
     let output_formats = parse_output_formats(outputs.formats.iter().map(|format| format.outfmt))?;
-    // The subject range and its record checks come where NCBI reads the subjects (`run`).
+    // The subject range and its record checks come where NCBI reads the subjects (`run`):
+    // the messages of each record read, up to a record whose range starts past its end.
     let subject_range =
         parse_optional_range(args.subject_loc.as_deref(), RangeRole::Subject, "BLASTN")?;
-    write_title_warnings(
-        &subject_records[..subjects_read(subject_records, subject_range.as_ref())],
-        outputs.diagnostics,
-    )?;
+    for record in &subject_records[..subjects_read(subject_records, subject_range.as_ref())] {
+        outputs.diagnostics.write_all(&record.warnings)?;
+    }
     let ranged_subjects = cut_subjects(subject_records, subject_range.as_ref())?;
     let (searched_subjects, subject_placements) = match &ranged_subjects {
         Some((records, placements)) => (records.as_slice(), placements.clone()),
@@ -5676,6 +5827,7 @@ pub fn run_local(
     search(
         args,
         query_records,
+        QueryReading::Records,
         Ranges {
             query: query_range,
             subjects: SubjectRanges {
@@ -5691,25 +5843,26 @@ pub fn run_local(
 
 fn search(
     args: BlastnArgs,
-    query_records: &[bio::io::fasta::Record],
+    query_records: &[FastaRecord],
+    reading: QueryReading,
     ranges: Ranges<'_>,
-    subject_records: &[bio::io::fasta::Record],
+    subject_records: &[FastaRecord],
     outputs: &mut ReportOutputs<'_>,
     output_formats: Vec<BlastnOutputFormat>,
 ) -> Result<()> {
-    // NCBI reads the subjects before the queries (`run`). Residues that NCBI reads
-    // differently are rejected, and `U` is read as `T` (`input.rs`); the callers check the
-    // deflines, in the bytes of the files, and an empty subject set. The CLI has already
-    // reported an empty query file; records of the other callers get NCBI's warning.
-    check_residues(subject_records, "subject")?;
-    if query_records.is_empty() {
+    // NCBI reads the subjects before the queries (`run`); the records are those of NCBI's
+    // reader (`fasta_reader`; `run_local`'s callers read them so). The CLI has already
+    // reported an empty query file and read its queries; the records of the other callers
+    // get NCBI's warning for an input without records.
+    if query_records.is_empty() && reading == QueryReading::Records {
         outputs
             .diagnostics
             .write_all(b"Warning: [blastn] Query is Empty!\n")?;
         return Ok(());
     }
     // An interval without letters (a subject range that starts just past a record's end)
-    // is a subject without data for NCBI, as a record without residues.
+    // is a subject without data for NCBI, as a record without residues (port plan, step
+    // S4).
     check_no_empty_interval(
         subject_records,
         ranges.subjects.placements,
@@ -5717,30 +5870,12 @@ fn search(
         RangeRole::Subject,
         "BLASTN",
     )?;
-    check_records_have_residues(subject_records, "subject")?;
+    check_reader_records_have_residues(subject_records, "subject", "BLASTN")?;
     // NCBI reads the queries after `Query is Empty!`, one batch at a time, with its
     // reader's warnings (`run_in_pool`).
-    // NCBI decodes HTML character references in the outfmt 0 titles of the subjects
-    // (`NStr::HtmlDecode` in `CDeflineGenerator::GenerateDefline`, create_defline.cpp:4066),
-    // which LOSAT does not reproduce (`report/defline.rs`).
-    // NCBI's x_CleanAndCompress also reads past the end of some titles of punctuation
-    // (NCBI crashes when it writes the title of such a subject with hits); LOSAT stops at
-    // the end of the title (`report/defline.rs`, approved exception 2 of
-    // PD-LOSAT-NCBI-DEFECTS).
-    if output_formats.contains(&BlastnOutputFormat::Pairwise) {
-        for (index, record) in subject_records.iter().enumerate() {
-            let defline = match record.desc() {
-                Some(desc) => format!("{} {desc}", record.id()),
-                None => record.id().to_string(),
-            };
-            if crate::report::defline::ncbi_nucleotide_title_is_decoded(&defline) {
-                anyhow::bail!(
-                    "subject record {} has an HTML character reference (such as &amp;) in its defline, which NCBI BLAST+ decodes in the outfmt 0 titles; this is not supported by LOSAT's BLASTN",
-                    index + 1
-                );
-            }
-        }
-    }
+    // NCBI's x_CleanAndCompress reads past the end of some titles of punctuation (NCBI
+    // crashes when it writes the title of such a subject with hits); LOSAT stops at the end
+    // of the title (`report/defline.rs`, approved exception 2 of PD-LOSAT-NCBI-DEFECTS).
     // LOSAT's limits come where NCBI starts the search, after its checks and its
     // `Query is Empty!` success.
     check_losat_limits(&args)?;
@@ -5748,12 +5883,7 @@ fn search(
     let batching = query_batching_from_environment(
         super::super::coordination::task_uses_megablast_chunks(&args.task),
     )?;
-    check_residues(query_records, "query")?;
-    check_records_have_residues(query_records, "query")?;
-    let subjects_read = with_u_as_t(subject_records);
-    let queries_read = with_u_as_t(query_records);
-    let subject_records = subjects_read.as_deref().unwrap_or(subject_records);
-    let query_records = queries_read.as_deref().unwrap_or(query_records);
+    check_reader_records_have_residues(query_records, "query", "BLASTN")?;
     // The query range applies to every query record as NCBI's batch reader reads it
     // (`cut_queries`): the records are checked whole (above), and searched cut.
     let ranged_queries = ranges
@@ -5804,6 +5934,7 @@ fn search(
         run_in_pool(
             args,
             input_records,
+            reading,
             &query_records,
             &query_input,
             subject_records,
@@ -5969,7 +6100,7 @@ fn query_batching_from_environment(megablast: bool) -> Result<QueryBatching> {
 ///                               compressed_seq.data.release());
 /// ```
 struct PreparedSubjects<'a> {
-    records: &'a [bio::io::fasta::Record],
+    records: &'a [FastaRecord],
     metadata: SubjectMetadata,
     blastna: Vec<Vec<u8>>,
     packed: Vec<Vec<u8>>,
@@ -6037,22 +6168,22 @@ enum BatchStage<'a> {
 #[allow(clippy::too_many_arguments)]
 fn run_in_pool(
     args: BlastnArgs,
-    input_records: &[bio::io::fasta::Record],
-    query_records: &[bio::io::fasta::Record],
+    input_records: &[FastaRecord],
+    reading: QueryReading,
+    query_records: &[FastaRecord],
     query_input: &QueryInput,
-    subject_records: &[bio::io::fasta::Record],
+    subject_records: &[FastaRecord],
     subject_ranges: SubjectRanges<'_>,
     outputs: &mut ReportOutputs<'_>,
     output_formats: Vec<BlastnOutputFormat>,
     parallel_pool: &crate::utils::threading::SearchPool<'_>,
     mut batching: QueryBatching,
 ) -> Result<()> {
-    if input_records.is_empty() {
-        return Ok(());
-    }
     let metadata = subject_metadata_from_records(subject_records);
     if metadata.db_num_seqs == 0 {
-        write_title_warnings(input_records, outputs.diagnostics)?;
+        for record in input_records {
+            outputs.diagnostics.write_all(&record.warnings)?;
+        }
         return Ok(());
     }
     let subjects = PreparedSubjects {
@@ -6115,9 +6246,37 @@ fn run_in_pool(
     //         NCBI_THROW(CBlastException, eInvalidArgument, "Empty CBlastQueryVector");
     //     }
     // ```
+    // A reader at the end of its input reads no batch (`!input.End()`): the report of no
+    // query, the prolog and the epilog (an empty pipe, or `-query -` after `-subject -`).
+    if input_records.is_empty() && reading == QueryReading::End {
+        return write_batch_reports(
+            &args,
+            &[],
+            &subjects,
+            &ReportRanges {
+                queries: query_input,
+                subjects: subject_ranges,
+            },
+            outputs,
+            &output_formats,
+            BatchResults {
+                hit_lists: Vec::new(),
+                warnings: &[],
+                lengths: &[],
+                unsearched: Vec::new(),
+                query_masks: &[],
+                context_karlin: &[],
+                query_eff_searchsp: &[],
+            },
+            true,
+        );
+    }
     // A batch size of 0 (`CHUNK_SIZE` 1000 without `BATCH_SIZE`: the mixer's maximum is
-    // 0) reads no query, so the first batch fails after the prolog (outfmt 0).
-    if batching.batch_size == 0 {
+    // 0) reads no query, and a reader that finds only blank and comment lines ends its
+    // first batch without a query (`eEOF`), so the first batch fails after the prolog
+    // (outfmt 0).
+    if batching.batch_size == 0 || (input_records.is_empty() && reading == QueryReading::BlankLines)
+    {
         write_pairwise_prologs(
             outputs,
             &output_formats,
@@ -6171,14 +6330,13 @@ fn run_in_pool(
         // 	    BLAST_PROF_START( APP.LOOP.PRE );
         //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
         // ```
-        // `CFastaReader` warns about the titles of a batch's queries when it reads them,
-        // after the report of the batch before: before the report of the batch's first
-        // query (`QueryWarnings`). Skipped records are read too.
-        let mut batch_title_warnings = Vec::new();
-        write_title_warnings(
-            &input_records[input_start..input_end],
-            &mut batch_title_warnings,
-        )?;
+        // `CFastaReader` writes its messages about a batch's queries (their lines and
+        // titles) when it reads them, after the report of the batch before: before the
+        // report of the batch's first query (`QueryWarnings`). Skipped records are read too.
+        let batch_title_warnings: Vec<u8> = input_records[input_start..input_end]
+            .iter()
+            .flat_map(|record| record.warnings.iter().copied())
+            .collect();
         // NCBI reference: ncbi-blast/c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
         // ```c
         // CObjMgr_QueryFactory::CObjMgr_QueryFactory(CBlastQueryVector & queries)
@@ -6409,7 +6567,7 @@ struct BatchResults<'a> {
 #[allow(clippy::too_many_arguments)]
 fn write_batch_reports(
     args: &BlastnArgs,
-    query_records: &[bio::io::fasta::Record],
+    query_records: &[FastaRecord],
     subjects: &PreparedSubjects<'_>,
     ranges: &ReportRanges<'_>,
     outputs: &mut ReportOutputs<'_>,
@@ -6450,17 +6608,31 @@ fn write_batch_reports(
                 output_format == BlastnOutputFormat::Pairwise && !prolog_before_search(&format.sink)
             }),
     };
-    let query_ids: Vec<Arc<str>> = query_records
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:482-496
+    // ```c++
+    //         if (sid_in->IsLocal()) {
+    //             string id_token;
+    //             vector<string> title_tokens;
+    //             title_tokens =
+    //                 NStr::Split(CAlignFormatUtil::GetTitle(bh), " ", title_tokens);
+    //             if(title_tokens.empty()){
+    //                 id_token = NcbiEmptyString;
+    //             } else {
+    //                 id_token = title_tokens[0];
+    //             }
+    //
+    //             if (id_token == NcbiEmptyString || parse_local) {
+    //                 const CObject_id& obj_id = sid_in->GetLocal();
+    //                 if (obj_id.IsStr())
+    //                     id_token = obj_id.GetStr();
+    // ```
+    // The query ID of the tabular formats is the title's first word, or the local ID
+    // (`FastaRecord::shown_id`).
+    let query_ids: Vec<Arc<[u8]>> = query_records
         .iter()
-        .map(|record| Arc::from(record.id().split_whitespace().next().unwrap_or("unknown")))
+        .map(|record| Arc::from(record.shown_id()))
         .collect();
-    let subject_ids: Vec<Arc<str>> = subjects
-        .metadata
-        .subject_ids
-        .iter()
-        .map(|id: &String| Arc::<str>::from(id.as_str()))
-        .collect();
-    let query_titles: Vec<Arc<str>> = query_records.iter().map(fasta_defline).collect();
+    let query_titles: Vec<Arc<[u8]>> = query_records.iter().map(record_title).collect();
     let subject_title = format!(
         "User specified sequence set (Input: {})",
         args.subject_path().display()
@@ -6478,7 +6650,6 @@ fn write_batch_reports(
         outputs,
         args.verbose,
         &query_ids,
-        &subject_ids,
         output_formats,
         &query_titles,
         &subject_title,
@@ -6494,7 +6665,7 @@ fn write_batch_reports(
 /// `run_in_pool` reads.
 fn search_query_batch(
     args: &BlastnArgs,
-    query_records: &[bio::io::fasta::Record],
+    query_records: &[FastaRecord],
     subjects: &PreparedSubjects<'_>,
     outputs: &mut ReportOutputs<'_>,
     output_formats: &[BlastnOutputFormat],
@@ -6621,14 +6792,7 @@ fn search_query_batch(
     let queries = query_records.to_vec();
     let query_ids = queries
         .iter()
-        .map(|record| {
-            record
-                .id()
-                .split_whitespace()
-                .next()
-                .unwrap_or("unknown")
-                .to_string()
-        })
+        .map(|record| String::from_utf8_lossy(record.shown_id()).into_owned())
         .collect();
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1312-1325
     // ```c
@@ -6664,7 +6828,7 @@ fn search_query_batch(
     //     }
     // }
     // ```
-    let subject_records: Option<&[bio::io::fasta::Record]> = Some(subjects.records);
+    let subject_records: Option<&[FastaRecord]> = Some(subjects.records);
     let subject_metadata = subjects.metadata.clone();
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1475
@@ -6735,8 +6899,8 @@ fn search_query_batch(
         seq_data
             .queries
             .iter()
-            .map(fasta_defline)
-            .collect::<Vec<Arc<str>>>(),
+            .map(record_title)
+            .collect::<Vec<Arc<[u8]>>>(),
     );
     let subject_title = Arc::<str>::from(format!(
         "User specified sequence set (Input: {})",
@@ -7269,7 +7433,7 @@ fn search_query_batch(
     //                               lookup_options->max_db_word_count);
     // }
     // ```
-    let subjects_for_lookup: &[bio::io::fasta::Record] = subject_records.as_deref().unwrap_or(&[]);
+    let subjects_for_lookup: &[FastaRecord] = subject_records.as_deref().unwrap_or(&[]);
     // A split batch has no lookup table of its own; its chunks have theirs.
     // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_aux_priv.cpp:206-207
     // ```c
@@ -7613,7 +7777,7 @@ fn search_query_batch(
     // size the next batch.
     let good_init_extends = std::sync::atomic::AtomicU64::new(0);
     let process_subject = |s_idx: usize,
-                           s_record: &bio::io::fasta::Record,
+                           s_record: &FastaRecord,
                            gap_scratch: &mut GapAlignScratch,
                            subject_scratch: &mut SubjectScratch,
                            prelim_source: Option<&Vec<PrelimHit>>,
@@ -13014,7 +13178,7 @@ fn search_query_batch(
 #[allow(clippy::too_many_arguments)]
 fn search_query_chunks(
     args: &BlastnArgs,
-    queries: &[bio::io::fasta::Record],
+    queries: &[FastaRecord],
     query_masks: &[Vec<MaskedInterval>],
     query_offsets: &[usize],
     batch_eff_searchsp: &[i64],
@@ -13055,17 +13219,10 @@ fn search_query_chunks(
             !chunk.queries.is_empty(),
             "a query chunk without a query is not supported by LOSAT's BLASTN"
         );
-        let parts: Vec<bio::io::fasta::Record> = chunk
+        let parts: Vec<FastaRecord> = chunk
             .queries
             .iter()
-            .map(|part| {
-                let record = &queries[part.query];
-                bio::io::fasta::Record::with_attrs(
-                    record.id(),
-                    record.desc(),
-                    &record.seq()[part.from..part.to],
-                )
-            })
+            .map(|part| queries[part.query].cut(part.from, part.to))
             .collect();
         let restricted = chunk
             .queries
@@ -13328,6 +13485,15 @@ fn merge_prelim_hit_list(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The records of a FASTA text as NCBI's reader reads them (`config`).
+    fn reader_records(fasta: &str, config: ReaderConfig) -> Vec<FastaRecord> {
+        crate::blastinput::fasta_reader::read_all(
+            &mut FastaInputSource::from_bytes(fasta.as_bytes(), config),
+            &mut |_| Ok(()),
+        )
+        .unwrap()
+    }
 
     #[test]
     fn evalue_reap_keeps_unless_greater_than_cutoff() {
@@ -13649,18 +13815,12 @@ mod tests {
             .unwrap();
             // NCBI reference: c++/src/algo/blast/api/blast_setup_cxx.cpp:836-847
             // BlastSeqBlkSetSequence(subj, sequence.data.release(), ...);
-            let read_records = |fasta: &str| {
-                bio::io::fasta::Reader::new(fasta.as_bytes())
-                    .records()
-                    .collect::<std::result::Result<Vec<_>, _>>()
-                    .unwrap()
-            };
             let mut output = Vec::new();
             let mut stderr = std::io::stderr();
             run_local(
                 options.blastn,
-                &read_records(&query),
-                &read_records(&subject),
+                &reader_records(&query, ReaderConfig::query("BLASTN", false, false)),
+                &reader_records(&subject, ReaderConfig::subject("BLASTN", false, false)),
                 &mut ReportOutputs::single("6", OutputSink::Writer(&mut output), &mut stderr),
             )
             .unwrap();
@@ -13780,10 +13940,18 @@ mod tests {
         // Multiple seeds extend to the same gapped HSP. Compute in reverse input
         // order with independent scratch, then replay in the original seed order.
         let q = encode_iupac_to_blastna(
-            &read_blastn_fasta_records(&query_path, "query").unwrap()[0].seq(),
+            &reader_records(
+                &std::fs::read_to_string(&query_path).unwrap(),
+                ReaderConfig::query("BLASTN", false, false),
+            )[0]
+            .seq(),
         );
         let subj = encode_iupac_to_blastna(
-            &read_blastn_fasta_records(&subject_path, "subject").unwrap()[0].seq(),
+            &reader_records(
+                &std::fs::read_to_string(&subject_path).unwrap(),
+                ReaderConfig::subject("BLASTN", false, false),
+            )[0]
+            .seq(),
         );
         let matrix = build_blastna_matrix(2, -3);
         let seeds = [60, 200, 300, 400, 80, 180, 320, 420];

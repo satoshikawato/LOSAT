@@ -1859,8 +1859,8 @@ pub fn write_blastp_pairwise_report<W: Write>(
 /// ```
 #[derive(Debug, Clone)]
 pub struct BlastnPairwiseQuery {
-    /// The FASTA defline without `>`.
-    pub query_name: String,
+    /// The query's title bytes (`Query=`; empty without a title).
+    pub query_name: Vec<u8>,
     pub query_length: usize,
     /// The ungapped and the gapped block of the query's first valid context; `None` for
     /// an invalid query.
@@ -2364,7 +2364,7 @@ pub fn write_blastn_pairwise_report<W: Write>(
     writer: &mut W,
     config: &PairwiseConfig,
     queries: &[BlastnPairwiseQuery],
-    subject_ids: &[Arc<str>],
+    subject_titles: &[Arc<[u8]>],
     report: &BlastnPairwiseReport,
     mut probe: Option<&mut FormatProbe<'_>>,
     mut warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
@@ -2402,7 +2402,7 @@ pub fn write_blastn_pairwise_report<W: Write>(
         //     m_Outfile << "\n\n";
         // ```
         writer.write_all(b"\n\n")?;
-        write_blastp_query_header(writer, query.query_name.as_bytes(), query.query_length)?;
+        write_blastp_query_header(writer, &query.query_name, query.query_length)?;
         let query_hits = &hits_by_query[q_idx];
         if query_hits.is_empty() {
             write_no_hits_found(writer)?;
@@ -2441,7 +2441,16 @@ pub fn write_blastn_pairwise_report<W: Write>(
         //                               defline_length == -1 ? kFormatLineLength:defline_length,
         //                               m_NumSummary + additional);
         // ```
-        let subject_titles = bio_subject_titles(&subject_order, &subject_hits, subject_ids);
+        // The titles of the subjects of the records read (by subject index).
+        let subject_titles: HashMap<u32, Vec<u8>> = subject_order
+            .iter()
+            .map(|&s_idx| {
+                let title = subject_titles
+                    .get(s_idx as usize)
+                    .map_or(&b""[..], |title| title.as_ref());
+                (s_idx, title.to_vec())
+            })
+            .collect();
         let described = &subject_order[..subject_order.len().min(report.num_descriptions)];
         write_blastn_description_table(
             writer,

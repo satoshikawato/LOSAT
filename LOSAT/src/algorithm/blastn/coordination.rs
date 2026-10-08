@@ -18,40 +18,14 @@ use super::lookup::{
     build_db_word_counts, build_disc_mb_lookup, build_na_lookup, build_pv_direct_lookup,
     build_two_stage_lookup, NaLookupTable, PvDirectLookup, TwoStageLookup,
 };
-use crate::blastinput::fasta_reader::InputRecord;
+use crate::blastinput::fasta_reader::{FastaRecord, InputRecord};
 use crate::utils::dust::{DustMasker, MaskedInterval};
-use anyhow::{Context, Result};
-use bio::io::fasta;
-use std::path::Path;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum LookupTableKind {
     Small,
     Mb,
     Na,
-}
-
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/blastinput/blast_input_aux.cpp:242-246
-// ```c
-// CRef<CBlastFastaInputSource> fasta(new CBlastFastaInputSource(in, iconfig));
-// CRef<CBlastInput> input(new CBlastInput(fasta));
-// CRef<CScope> scope(new CScope(*CObjectManager::GetInstance()));
-// sequences = input->GetAllSeqs(*scope);
-// ```
-//
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/readers/fasta.cpp:391-396
-// ```c
-// NCBI_THROW2(CObjReaderParseException, eNoDefline,
-//             "CFastaReader: Input doesn't start with"
-//             " a defline or comment around line " + NStr::NumericToString(lineNum),
-//              lineNum);
-// ```
-fn read_fasta_records(path: &Path, role: &str) -> Result<Vec<fasta::Record>> {
-    fasta::Reader::from_file(path)
-        .with_context(|| format!("failed to open {role} FASTA {}", path.display()))?
-        .records()
-        .collect::<std::result::Result<Vec<_>, _>>()
-        .with_context(|| format!("failed to read {role} FASTA {}", path.display()))
 }
 
 /// Task-specific configuration for BLASTN
@@ -117,7 +91,7 @@ pub struct SubjectMetadata {
 }
 
 /// Sequence data and metadata (`R`: the query records, `InputRecord`)
-pub struct SequenceData<R = fasta::Record> {
+pub struct SequenceData<R = FastaRecord> {
     pub queries: Vec<R>,
     pub query_ids: Vec<String>,
     pub query_masks: Vec<Vec<MaskedInterval>>,
@@ -812,35 +786,6 @@ pub fn finalize_task_config(
     config.scan_step = (config.effective_word_size - config.lut_word_length + 1).max(1);
 }
 
-/// Read query and subject sequences
-pub fn read_sequences(
-    args: &BlastnArgs,
-) -> Result<(Vec<fasta::Record>, Vec<String>, Vec<fasta::Record>)> {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:486-860
-    // ```c
-    // SetupQueries_OMF(...);
-    // SetupSubjects_OMF(...);
-    // ```
-    if args.verbose {
-        eprintln!("Reading query & subject...");
-    }
-    let queries = read_fasta_records(&args.query, "query")?;
-    let query_ids: Vec<String> = queries
-        .iter()
-        .map(|r| {
-            r.id()
-                .split_whitespace()
-                .next()
-                .unwrap_or("unknown")
-                .to_string()
-        })
-        .collect();
-
-    let subjects = read_fasta_records(args.subject_path(), "subject")?;
-
-    Ok((queries, query_ids, subjects))
-}
-
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1407-1413
 // ```c
 // db_length = BlastSeqSrcGetTotLen(seq_src);
@@ -871,54 +816,6 @@ pub fn subject_metadata_from_records<R: InputRecord>(records: &[R]) -> SubjectMe
         db_num_seqs: records.len(),
         subject_ids,
     }
-}
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1407-1427
-// ```c
-// db_length = BlastSeqSrcGetTotLen(seq_src);
-// itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
-// while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-//        != BLAST_SEQSRC_EOF) {
-//     if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0) {
-//         continue;
-//     }
-// }
-// ```
-pub fn scan_subjects_metadata(args: &BlastnArgs) -> Result<SubjectMetadata> {
-    let subject_reader = fasta::Reader::from_file(args.subject_path()).with_context(|| {
-        format!(
-            "failed to open subject FASTA {}",
-            args.subject_path().display()
-        )
-    })?;
-    let mut subject_ids: Vec<String> = Vec::new();
-    let mut db_len_total: usize = 0;
-    let mut db_num_seqs: usize = 0;
-
-    for record_result in subject_reader.records() {
-        let record = record_result.with_context(|| {
-            format!(
-                "failed to read subject FASTA {}",
-                args.subject_path().display()
-            )
-        })?;
-        subject_ids.push(
-            record
-                .id()
-                .split_whitespace()
-                .next()
-                .unwrap_or("unknown")
-                .to_string(),
-        );
-        db_len_total += record.seq().len();
-        db_num_seqs += 1;
-    }
-
-    Ok(SubjectMetadata {
-        db_len_total,
-        db_num_seqs,
-        subject_ids,
-    })
 }
 
 // NCBI reference: ncbi-blast/c++/src/objtools/readers/fasta.cpp:856-874

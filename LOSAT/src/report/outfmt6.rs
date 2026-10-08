@@ -534,8 +534,64 @@ pub fn write_hit_fields<W: Write>(
     bit_score: f64,
     config: &OutputConfig,
 ) -> io::Result<()> {
+    write_hit_fields_bytes(
+        writer,
+        query_id.as_bytes(),
+        subject_id.as_bytes(),
+        identity,
+        num_ident,
+        length,
+        mismatch,
+        gapopen,
+        q_start,
+        q_end,
+        s_start,
+        s_end,
+        e_value,
+        bit_score,
+        config,
+    )
+}
+
+/// `write_hit_fields` with the query and subject IDs as bytes, written as they are (NCBI
+/// writes the IDs that it takes from the titles without converting them).
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:214-217
+/// ```c++
+/// void CBlastTabularInfo::x_PrintQueryAccessionVersion()
+/// {
+///     m_Ostream << s_GetSeqIdListString(m_QueryId, eAccVersion);
+/// }
+/// ```
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:252-255
+/// ```c++
+/// void CBlastTabularInfo::x_PrintSubjectAccessionVersion(void)
+/// {
+///     m_Ostream << s_GetSeqIdListString(m_SubjectId, eAccVersion);
+/// }
+/// ```
+#[allow(clippy::too_many_arguments)]
+pub fn write_hit_fields_bytes<W: Write>(
+    writer: &mut W,
+    query_id: &[u8],
+    subject_id: &[u8],
+    identity: f64,
+    num_ident: usize,
+    length: usize,
+    mismatch: usize,
+    gapopen: usize,
+    q_start: usize,
+    q_end: usize,
+    s_start: usize,
+    s_end: usize,
+    e_value: f64,
+    bit_score: f64,
+    config: &OutputConfig,
+) -> io::Result<()> {
     let delim = config.delimiter;
-    write!(writer, "{}{}{}", query_id, delim, subject_id)?;
+    writer.write_all(query_id)?;
+    write!(writer, "{}", delim)?;
+    writer.write_all(subject_id)?;
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/include/objtools/align_format/tabular.hpp:437-441
     // ```c
     // double perc_ident =

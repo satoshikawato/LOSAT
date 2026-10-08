@@ -3,8 +3,8 @@
 
 use std::iter::repeat_n;
 
+use crate::blastinput::fasta_reader::FastaRecord;
 use anyhow::{ensure, Context, Result};
-use bio::io::fasta;
 
 use crate::common::GapEditOp;
 use crate::core::blast_encoding::encode_iupac_to_blastna;
@@ -36,8 +36,8 @@ pub(crate) struct DisplayMasks<'a> {
 #[inline(never)]
 pub(crate) fn pairwise_hits(
     hit_lists: &[Option<BlastnHitList>],
-    queries: &[fasta::Record],
-    subjects: &[fasta::Record],
+    queries: &[FastaRecord],
+    subjects: &[FastaRecord],
     masks: &DisplayMasks<'_>,
 ) -> Result<Vec<PairwiseHit>> {
     let mut hits = Vec::new();
@@ -98,7 +98,12 @@ pub(crate) fn pairwise_hits(
                     positives: None,
                     gaps: Some(gaps),
                     subject_length: Some(subject.seq().len()),
-                    subject_title: subject.desc().map(str::to_string),
+                    // The title after its first word (the `bio` description of the
+                    // inputs that `bio` read alike); the reports take the subject's title
+                    // bytes by subject index.
+                    subject_title: subject.title.iter().position(|&byte| byte == b' ').map(
+                        |space| String::from_utf8_lossy(&subject.title[space + 1..]).into_owned(),
+                    ),
                     comp_adjust_method: None,
                     sum_n: None,
                 });
@@ -428,8 +433,8 @@ pub(crate) fn query_ungapped_karlin(
 mod tests {
     use super::*;
 
-    fn record(seq: &[u8]) -> fasta::Record {
-        fasta::Record::with_attrs("q", None, seq)
+    fn record(seq: &[u8]) -> FastaRecord {
+        FastaRecord::new("Query_1", b"q", seq)
     }
 
     fn hsp(

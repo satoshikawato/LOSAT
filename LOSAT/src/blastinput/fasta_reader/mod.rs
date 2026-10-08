@@ -451,6 +451,25 @@ impl FastaInputSource<std::fs::File> {
     pub fn from_file(file: std::fs::File, config: ReaderConfig) -> Self {
         Self::from_stream(FastaStream::from_file(file), config)
     }
+
+    /// An input source over standard input (`-`, NCBI's `cin`; `FastaStream::from_standard_input`).
+    pub fn from_standard_input(file: std::fs::File, config: ReaderConfig) -> Self {
+        Self::from_stream(FastaStream::from_standard_input(file), config)
+    }
+
+    /// The input source of an opened `-query` or `-subject` argument: standard input for `-`
+    /// (`from_standard_input`), else a file (`from_file`).
+    pub fn from_argument(
+        path: &std::path::Path,
+        file: std::fs::File,
+        config: ReaderConfig,
+    ) -> Self {
+        if path.as_os_str() == "-" {
+            Self::from_standard_input(file, config)
+        } else {
+            Self::from_file(file, config)
+        }
+    }
 }
 
 impl<'a> FastaInputSource<&'a [u8]> {

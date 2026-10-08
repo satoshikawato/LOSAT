@@ -13,7 +13,7 @@
 //!   because `bio` drops the character that ends the ID;
 //! - a record without residues, or a residue that is not an IUPAC nucleotide letter (NCBI
 //!   warns that the sequence contains no data, ignores white space and hyphens, ends the
-//!   line at `;`, and removes other characters with a warning): `check_residues`.
+//!   line at `;`, and removes other characters with a warning): `check_residues_of`.
 
 use anyhow::{bail, Context, Result};
 use bio::io::fasta;
@@ -399,12 +399,7 @@ pub fn write_empty_subject_warnings(
 ///             char_type = eCharType_Bad;
 ///             break;
 /// ```
-/// `role` is `query` or `subject`.
-pub fn check_residues(records: &[fasta::Record], role: &str) -> Result<()> {
-    check_residues_of(records, role, "BLASTN")
-}
-
-/// `check_residues` for the nucleotide records of `program` (as named in the message).
+/// `role` is `query` or `subject`; `program` is named in the message.
 pub fn check_residues_of(records: &[fasta::Record], role: &str, program: &str) -> Result<()> {
     first_problem(records, |index, record| {
         invalid_residue(index, record, role, program)
@@ -473,12 +468,7 @@ pub fn check_protein_residues_of(
 
 /// Rejects a record without residues: NCBI reads it without a message and reports it when
 /// it sets up the search ("Sequence contains no data"), which LOSAT does not reproduce.
-/// `role` is `query` or `subject`.
-pub fn check_records_have_residues(records: &[fasta::Record], role: &str) -> Result<()> {
-    check_records_have_residues_of(records, role, "BLASTN")
-}
-
-/// `check_records_have_residues` for the nucleotide records of `program`.
+/// `role` is `query` or `subject`; `program` is named in the message.
 pub fn check_records_have_residues_of(
     records: &[fasta::Record],
     role: &str,
@@ -487,6 +477,28 @@ pub fn check_records_have_residues_of(
     first_problem(records, |index, record| {
         no_residues(index, record, role, program)
     })
+}
+
+/// `check_records_have_residues_of` for the records of NCBI's reader (`fasta_reader`), each
+/// named by its title up to the first space, or its local ID without a title
+/// (`FastaRecord::shown_id`). The program reports them as NCBI does in step S4 of the port
+/// plan.
+pub fn check_reader_records_have_residues(
+    records: &[crate::blastinput::fasta_reader::FastaRecord],
+    role: &str,
+    program: &str,
+) -> Result<()> {
+    match records
+        .iter()
+        .position(|record| record.sequence.is_empty())
+    {
+        Some(index) => bail!(
+            "{role} record {} ({}) has no residues; NCBI BLAST+ reports such a record differently, which is not supported by LOSAT's {program}",
+            index + 1,
+            String::from_utf8_lossy(records[index].shown_id())
+        ),
+        None => Ok(()),
+    }
 }
 
 /// Both checks, record by record (the order of ABI v1, which plan TD-1 freezes).
@@ -1003,7 +1015,7 @@ mod tests {
     fn only_inputs_read_as_ncbi_reads_them_are_accepted() {
         let text = ">q1 a b\nACGTNRY\nacgtn\n>q2\t\nU\r\n";
         assert!(check_deflines(text.as_bytes(), "query").is_ok());
-        assert!(check_residues(&records(text), "query").is_ok());
+        assert!(check_residues_of(&records(text), "query", "BLASTN").is_ok());
         for (text, problem) in [
             (">q1\tb\nACGT\n", "control character 0x09"),
             (
@@ -1037,15 +1049,16 @@ mod tests {
             (">q1\nAC-GT\n", "'-' at residue 3"),
             (">q1\nAC GT\n", "0x20 at residue 3"),
         ] {
-            let error = check_residues(&records(text), "query")
+            let error = check_residues_of(&records(text), "query", "BLASTN")
                 .unwrap_err()
                 .to_string();
             assert!(error.contains(problem), "{text:?}: {error}");
             assert!(error.contains("not supported by LOSAT"), "{error}");
         }
-        let error = check_records_have_residues(&records(">q1 empty\n>q2\nACGT\n"), "query")
-            .unwrap_err()
-            .to_string();
+        let error =
+            check_records_have_residues_of(&records(">q1 empty\n>q2\nACGT\n"), "query", "BLASTN")
+                .unwrap_err()
+                .to_string();
         assert!(
             error.contains("query record 1 (q1) has no residues"),
             "{error}"
@@ -1056,7 +1069,7 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("query record 1 (q1) has 'X' at residue 2"));
-        assert!(check_records_have_residues(&both, "query")
+        assert!(check_records_have_residues_of(&both, "query", "BLASTN")
             .unwrap_err()
             .to_string()
             .contains("query record 2 (q2) has no residues"));

@@ -1232,6 +1232,57 @@ fn stream_is_empty_reads_files_and_never_pipes() {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:717-721 (`-` is `cin`) and
+// c++/src/corelib/stream_utils.cpp:235-236, 306-310 (a refill asks for `in_avail()` bytes,
+// at least one). `cin` stays synchronised with stdio (ncbiapp.cpp:1342-1344), so its
+// `in_avail` is 0 and every refill of a pushback buffer reads one byte: the tail that a file
+// named by its path loses (`the_tail_after_a_second_embedded_line_end_can_be_lost`) is kept
+// when the same bytes come on standard input, from a regular file or a pipe (fixture rows
+// `stdin_q_lost_g55_file`, `stdin_q_lost_g55_pipe`).
+#[test]
+fn standard_input_refills_one_byte_and_keeps_the_tail() {
+    let text = b">first\r\nTC-TTGGCTCAATCCTAGGTGGGCATGTTTCCTAATGCCC\rTT-TTTAACGTGAGGGTTCGCGTTTTTATCCCACCTAGC\r\r\nACGTACGT\n-ACGTACGTACGTACGTACGTAC";
+    let kept = b"TCTTGGCTCAATCCTAGGTGGGCATGTTTCCTAATGCCCTTTTTAACGTGAGGGTTCGCGTTTTTATCCCACCTAGCACGTACGTACGTACGTACGTACGTACGTAC";
+    let path = std::env::temp_dir().join(format!(
+        "losat-fasta-reader-standard-input-{}",
+        std::process::id()
+    ));
+    std::fs::write(&path, text).unwrap();
+    let config = ReaderConfig::query("BLASTN", false, false);
+    let read_source = |mut source: FastaInputSource<std::fs::File>| {
+        let mut messages = Vec::new();
+        let records = read_all(&mut source, &mut |message: &[u8]| {
+            messages.extend_from_slice(message);
+            Ok(())
+        })
+        .unwrap();
+        (records, String::from_utf8(messages).unwrap())
+    };
+    let (records, messages) = read_source(FastaInputSource::from_file(
+        std::fs::File::open(&path).unwrap(),
+        config,
+    ));
+    assert_eq!(records[0].sequence.len(), 85);
+    assert_eq!(hyphen_lines(&messages), vec![2, 3]);
+    let (records, messages) = read_source(FastaInputSource::from_standard_input(
+        std::fs::File::open(&path).unwrap(),
+        config,
+    ));
+    assert_eq!(records[0].sequence, kept);
+    // The oracle's warnings (blastn.megablast.stdin_q_lost_g55_file.o6.err).
+    assert_eq!(hyphen_lines(&messages), vec![2, 3, 6]);
+    std::fs::remove_file(&path).unwrap();
+    #[cfg(unix)]
+    {
+        let (reader, mut writer) = std::io::pipe().unwrap();
+        std::io::Write::write_all(&mut writer, text).unwrap();
+        drop(writer);
+        let file = std::fs::File::from(std::os::fd::OwnedFd::from(reader));
+        let (records, _) = read_source(FastaInputSource::from_standard_input(file, config));
+        assert_eq!(records[0].sequence, kept);
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1444-1447, 1616-1679,
 // 2038-2043 and fasta_reader_utils.cpp:466-483 (the bridge gives the reader's record for
 // the inputs that today's checks accept: the title, `U` stored as `T` for nucleotides,

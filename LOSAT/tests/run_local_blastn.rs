@@ -12,10 +12,11 @@ mod run_local_support;
 use std::process::Command;
 
 use run_local_support::{
-    assert_observer_ranges, fixture_sequence, read_records, run_formats, Run, TempFasta,
+    assert_observer_ranges, fixture_sequence, reader_records, run_formats, Run, TempFasta,
 };
 use LOSAT::algorithm::blastn::BlastnArgs;
 use LOSAT::api::local_blast::{run_local_blastn, FormatOutput, OutputSink, ReportOutputs};
+use LOSAT::blastinput::fasta_reader::ReaderConfig;
 use LOSAT::cli::{try_parse_from, Cli, Commands};
 
 const FORMATS: [&str; 3] = ["0", "6", "7"];
@@ -67,8 +68,11 @@ impl Inputs {
     }
 
     fn run(&self, formats: &[&str], extra: &[&str], observe: bool) -> Run {
-        let queries = read_records(&self.query.0);
-        let subjects = read_records(&self.subject.0);
+        let queries = reader_records(&self.query.0, ReaderConfig::query("BLASTN", false, true));
+        let subjects = reader_records(
+            &self.subject.0,
+            ReaderConfig::subject("BLASTN", false, true),
+        );
         run_formats(formats, observe, |outputs| {
             run_local_blastn(self.args(extra), &queries, &subjects, outputs)
         })
@@ -192,8 +196,11 @@ fn observer_ranges_are_exact_rows_and_sections_of_the_same_hsp() {
 #[test]
 fn unsupported_formats_fail_before_searching() {
     let inputs = Inputs::new();
-    let queries = read_records(&inputs.query.0);
-    let subjects = read_records(&inputs.subject.0);
+    let queries = reader_records(&inputs.query.0, ReaderConfig::query("BLASTN", false, true));
+    let subjects = reader_records(
+        &inputs.subject.0,
+        ReaderConfig::subject("BLASTN", false, true),
+    );
     // NCBI ignores a custom specification with outfmt 0 (blast_args.cpp:2845-2851).
     for outfmt in ["5", "6 qseqid", "abc"] {
         let (mut valid, mut invalid, mut diagnostics) = (Vec::new(), Vec::new(), Vec::new());
@@ -247,8 +254,11 @@ fn an_invalid_query_after_the_first_batch_is_reported_with_its_batch() {
         );
         let subject = TempFasta::new("blastn_batches_subject.fna", &[("s", &genome[0..20_000])]);
         let inputs = Inputs { query, subject };
-        let queries = read_records(&inputs.query.0);
-        let subjects = read_records(&inputs.subject.0);
+        let queries = reader_records(&inputs.query.0, ReaderConfig::query("BLASTN", false, true));
+        let subjects = reader_records(
+            &inputs.subject.0,
+            ReaderConfig::subject("BLASTN", false, true),
+        );
         for outfmt in FORMATS {
             let (mut output, mut diagnostics) = (Vec::new(), Vec::new());
             let mut outputs = ReportOutputs {
@@ -353,4 +363,107 @@ fn a_lowercase_query_finds_the_same_hits_on_both_strands() {
             "{task}: the fixture has a minus-strand hit"
         );
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:218-225
+// ```c++
+//     ITERATE(vector< CConstRef<CSeq_id> >, itr, original_seqids) {
+//         CRef<CSeq_id> next_seqid(new CSeq_id());
+//         string id_token = NcbiEmptyString;
+//
+//         if (((*itr)->IsGeneral() &&
+//             (*itr)->AsFastaString().find("gnl|BL_ORD_ID")
+//             != string::npos) ||
+// 		(*itr)->AsFastaString().find("lcl|Subject_") != string::npos) {
+// ```
+// The tabular subject ID of a title whose first word starts with `Subject_` is the first
+// word of the decoded title (oracle RP v01: `Subject_&amp;x desc` -> `Subject_&x`; v09:
+// `Subject_4.` -> `Subject_4`); the query ID stays the title's first word. A title that NCBI
+// cannot decode (v06, `Subject_\x81`) stops NCBI in the tabular formats (exit 255), which
+// LOSAT rejects; its outfmt 0 report names it `Unknown`.
+#[test]
+fn subject_ids_of_subject_titles_follow_get_seq_id_list() {
+    let genome = fixture_sequence("LC738884.fasta");
+    let segment = &genome[1_000..1_330];
+    let mut subject_sequence = genome[5_000..5_060].to_vec();
+    subject_sequence.extend_from_slice(segment);
+    let write = |name: &str, title: &[u8], sequence: &[u8]| {
+        let path = std::env::temp_dir().join(format!(
+            "losat_run_local_subject_ids_{}_{name}",
+            std::process::id()
+        ));
+        let mut text = b">".to_vec();
+        text.extend_from_slice(title);
+        text.push(b'\n');
+        for line in sequence.chunks(60) {
+            text.extend_from_slice(line);
+            text.push(b'\n');
+        }
+        std::fs::write(&path, text).expect("write temporary FASTA");
+        TempFasta(path)
+    };
+    for (title, query_id, subject_id) in [
+        (
+            &b"Subject_&amp;x desc"[..],
+            &b"Subject_&amp;x"[..],
+            &b"Subject_&x"[..],
+        ),
+        (b"Subject_4.", b"Subject_4.", b"Subject_4"),
+        (b"s1 Subject_&amp;x", b"s1", b"s1"),
+    ] {
+        let inputs = Inputs {
+            query: write("q.fna", title, segment),
+            subject: write("s.fna", title, &subject_sequence),
+        };
+        let run = inputs.run(&["6"], &[], false);
+        let row = run.outputs[0].split(|&byte| byte == b'\n').next().unwrap();
+        let fields: Vec<&[u8]> = row.split(|&byte| byte == b'\t').collect();
+        assert_eq!(fields[0], query_id, "{:?}", String::from_utf8_lossy(title));
+        assert_eq!(
+            fields[1],
+            subject_id,
+            "{:?}",
+            String::from_utf8_lossy(title)
+        );
+    }
+    let unknown = b"Subject_\x81 desc";
+    let inputs = Inputs {
+        query: write("q.fna", b"q1", segment),
+        subject: write("s.fna", unknown, &subject_sequence),
+    };
+    let queries = reader_records(&inputs.query.0, ReaderConfig::query("BLASTN", false, true));
+    let subjects = reader_records(
+        &inputs.subject.0,
+        ReaderConfig::subject("BLASTN", false, true),
+    );
+    for outfmt in ["6", "7"] {
+        let (mut output, mut diagnostics) = (Vec::new(), Vec::new());
+        let mut outputs = ReportOutputs {
+            formats: vec![FormatOutput {
+                outfmt,
+                sink: OutputSink::Writer(&mut output),
+            }],
+            diagnostics: &mut diagnostics,
+            hits: None,
+            observer: None,
+        };
+        let error = run_local_blastn(inputs.args(&[]), &queries, &subjects, &mut outputs)
+            .expect_err("a Subject_ title that NCBI cannot decode is rejected");
+        drop(outputs);
+        let message = format!("{error:#}");
+        assert!(
+            message.contains("non-UTF-8") && message.contains("not supported by LOSAT's BLASTN"),
+            "{message}"
+        );
+        assert!(output.is_empty(), "outfmt {outfmt}: nothing is written");
+    }
+    let run = inputs.run(&["0"], &[], false);
+    let report = String::from_utf8_lossy(&run.outputs[0]);
+    assert!(report.contains("\nUnknown "), "{report}");
+    assert!(
+        report.contains(
+            "Sequence with id Subject_1 no longer exists in database...alignment skipped"
+        ),
+        "{report}"
+    );
 }

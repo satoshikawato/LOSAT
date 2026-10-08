@@ -613,7 +613,7 @@ pub(super) fn reject_seq_id_line(line: &[u8], config: &ReaderConfig) -> Option<a
         return None;
     }
     Some(anyhow::anyhow!(
-        "the first line of the {role} ({:?}) is not a defline, and NCBI BLAST+ may read it as a sequence identifier to fetch from GenBank or a BLAST database, which is not supported by LOSAT's {program} (start the {role} with a '>' defline, or set DATA_LOADERS=none in the [BLAST] section of .ncbirc)",
+        "the first line of the {role} ({:?}) is not a defline and may be a sequence identifier that NCBI BLAST+ fetches through a data loader (from GenBank or a BLAST database), which is not supported by LOSAT's {program} (start the {role} with a '>' defline, or set DATA_LOADERS=none in the [BLAST] section of .ncbirc)",
         String::from_utf8_lossy(line),
         role = config.role,
         program = config.program,

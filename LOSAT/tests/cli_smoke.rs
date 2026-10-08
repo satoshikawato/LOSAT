@@ -190,18 +190,31 @@ fn missing_input_file_reports_ncbi_error() {
     );
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/readers/fasta.cpp:391-396
-// ```c
-// NCBI_THROW2(CObjReaderParseException, eNoDefline,
-//             "CFastaReader: Input doesn't start with"
-//             " a defline or comment around line " + NStr::NumericToString(lineNum),
-//              lineNum);
+// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:751-758
+// ```c++
+//     if (bad >= good / 3  &&
+//         (len_to_check > 3  ||  good == 0  ||  bad > good))
+//     {
+//         FASTA_ERROR( LineNumber(),
+//             "CFastaReader: Near line " << LineNumber()
+//             << ", there's a line that doesn't look like plausible data, "
+//             "but it's not marked as defline or comment.",
+//             CObjReaderParseException::eFormat);
 // ```
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:181-184
+// ```c++
+//     catch (const CObjReaderParseException& e) {                             \
+//         LOG_POST(Error << "BLAST query error: " << e.GetMsg());             \
+//         exit_code = BLAST_INPUT_ERROR;                                      \
+//     }                                                                       \
+// ```
+// A comment line before the first defline is skipped; a first data line that does not
+// look like sequence data stops BLASTN with NCBI's reader error.
 #[test]
 fn malformed_fasta_reports_parse_error() {
     let query = temp_path("malformed_query", "fa");
     let subject = temp_path("valid_subject", "fa");
-    fs::write(&query, "!not a FASTA defline\nACGTACGT\n").expect("write malformed FASTA");
+    fs::write(&query, "!a comment line\n@@@@ACGT\n").expect("write malformed FASTA");
     fs::write(&subject, ">s\nACGTACGTACGT\n").expect("write subject FASTA");
 
     let output = clean_losat_command()
@@ -215,15 +228,10 @@ fn malformed_fasta_reports_parse_error() {
     let _ = fs::remove_file(&query);
     let _ = fs::remove_file(&subject);
 
-    assert!(!output.status.success(), "malformed FASTA should fail");
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("failed to read query FASTA"),
-        "malformed FASTA error should preserve query role: {stderr}"
-    );
-    assert!(
-        stderr.contains("Expected > at record start."),
-        "malformed FASTA error should preserve parser reason: {stderr}"
+    assert_eq!(output.status.code(), Some(1), "malformed FASTA should fail");
+    assert_eq!(
+        String::from_utf8_lossy(&output.stderr),
+        "BLAST query error: CFastaReader: Near line 2, there's a line that doesn't look like plausible data, but it's not marked as defline or comment.\n"
     );
 }
 

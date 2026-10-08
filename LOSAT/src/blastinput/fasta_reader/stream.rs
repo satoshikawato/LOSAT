@@ -132,6 +132,9 @@ pub(crate) struct FastaStream<R: Read> {
     //     return gptr() < egptr() ? CT_TO_INT_TYPE(*gptr()) : CT_EOF;
     // ```
     backend_available: Option<fn(&mut R) -> std::io::Result<usize>>,
+    /// Whether the input's buffered bytes count as readable (`in_avail` of a `filebuf`'s get
+    /// area); false for `cin`, whose `stdio_sync_filebuf` has no get area.
+    get_area: bool,
     /// Whether lines are copied from the buffered input at once while no pushback buffer
     /// is active (LOSAT's speed). Tests turn it off to compare with one byte at a time.
     pub(crate) bulk: bool,
@@ -199,6 +202,7 @@ impl<R: Read> FastaStream<R> {
             //     return gptr() < egptr() ? CT_TO_INT_TYPE(*gptr()) : CT_EOF;
             // ```
             backend_available: None,
+            get_area: true,
             bulk: true,
         }
     }
@@ -322,7 +326,11 @@ impl<R: Read> FastaStream<R> {
             //     }
             //
             // ```
-            let buffered = self.input.buffer().len();
+            let buffered = if self.get_area {
+                self.input.buffer().len()
+            } else {
+                0
+            };
             let available = if buffered != 0 {
                 buffered
             } else if let Some(in_avail) = self.backend_available {
@@ -831,6 +839,40 @@ impl FastaStream<std::fs::File> {
     pub(crate) fn from_file(input: std::fs::File) -> Self {
         let mut stream = Self::new(input);
         stream.backend_available = Some(file_available);
+        stream
+    }
+
+    /// A stream over standard input (`-`), which NCBI reads through `cin`.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:717-721
+    /// ```c++
+    ///     if (AsString() == "-") {
+    /// #if defined(NCBI_OS_MSWIN)
+    ///         NcbiSys_setmode(NcbiSys_fileno(stdin), (mode & IOS_BASE::binary) ? O_BINARY : O_TEXT);
+    /// #endif
+    ///         m_Ios  = &cin;
+    /// ```
+    /// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1342-1344
+    /// ```c++
+    ///     if ((m_StdioFlags & fNoSyncWithStdio) != 0) {
+    ///         IOS_BASE::sync_with_stdio(false);
+    ///     }
+    /// ```
+    /// NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:235-236
+    /// ```c++
+    ///     x_FillBuffer((size_t) m_Sb->in_avail());
+    ///     return gptr() < egptr() ? CT_TO_INT_TYPE(*gptr()) : CT_EOF;
+    /// ```
+    /// The BLAST applications keep `cin` synchronised with stdio, so its streambuf (libstdc++'s
+    /// `stdio_sync_filebuf`) has no get area and the default `showmanyc` of 0: `in_avail` is
+    /// always 0, and each refill of a pushback buffer reads one byte (`x_FillBuffer` raises 0
+    /// to 1), whether standard input is a pipe or a regular file (fixture rows
+    /// `stdin_q_lost_g55_pipe` and `stdin_q_lost_g55_file` keep the tail that a file named by
+    /// its path loses).
+    pub(crate) fn from_standard_input(input: std::fs::File) -> Self {
+        let mut stream = Self::new(input);
+        stream.backend_available = Some(|_| Ok(0));
+        stream.get_area = false;
         stream
     }
 }

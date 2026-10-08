@@ -9,6 +9,7 @@ use LOSAT::api::local_blast::{
     run_local_blastn, run_local_blastp, run_local_tblastn, run_local_tblastx, FormatObserver,
     FormatOutput, HspIndex, OutputSink, ReportOutputs,
 };
+use LOSAT::blastinput::fasta_reader::FastaRecord;
 use LOSAT::cli::{Cli, Commands};
 use LOSAT::report::PairwiseHit;
 
@@ -240,7 +241,26 @@ pub fn run(
         let result = match command {
             Commands::Blastp(args) => run_local_blastp(args, query, subject, "", "", &mut outputs),
             Commands::Tblastn(args) => run_local_tblastn(args, query, subject, &mut outputs),
-            Commands::Blastn(args) => run_local_blastn(args, query, subject, &mut outputs),
+            Commands::Blastn(args) => {
+                // The registered records enter BLASTN's search as NCBI's reader's records
+                // (`FastaRecord::from_bio`): `register` reads only inputs that `bio` reads
+                // as NCBI does (port plan, steps S3 and S10).
+                let records = |records: &[fasta::Record], prefix: &str| -> Vec<FastaRecord> {
+                    records
+                        .iter()
+                        .enumerate()
+                        .map(|(index, record)| {
+                            FastaRecord::from_bio(record, index + 1, prefix, false)
+                        })
+                        .collect()
+                };
+                run_local_blastn(
+                    args,
+                    &records(query, "Query_"),
+                    &records(subject, "Subject_"),
+                    &mut outputs,
+                )
+            }
             Commands::Tblastx(args) => run_local_tblastx(args, query, subject, &mut outputs),
             Commands::Blastx(_) => unreachable!("rejected by Program::parse"),
         };

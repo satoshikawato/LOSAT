@@ -142,7 +142,9 @@ st_build() {
 st_pychecks() { # engine/python checks that need the binary but not the oracle
   cd "$W" || fail worktree
   for n in 1 2 4; do rec2 check-losat-n$n "$OUT/check-losat-n$n.tsv" "$OUT/check-losat-n$n.err" python3 docs/evidence/losat_web_e2a/check_losat.py --losat "$N" --threads $n; done
-  rec oracle-check "$OUT/oracle-check-gate.log" python3 docs/evidence/losat_web_e2a/run_oracle.py --bin-dir "$NCBI" --out "$OUT/work/oracle-check"
+  # TMPDIR=/tmp: the -db_gencode stand-in report names its BLAST database path (# Database: $TMPDIR/losat_outfmt0_db/...),
+  # frozen under /tmp (SFc, 2026-10-10).
+  rec oracle-check "$OUT/oracle-check-gate.log" env TMPDIR=/tmp python3 docs/evidence/losat_web_e2a/run_oracle.py --bin-dir "$NCBI" --out "$OUT/work/oracle-check"
 }
 st_quick-fixtures() { st_pychecks; }
 
@@ -259,7 +261,13 @@ st_capture() { # all 236 cases (jobs 4); compared with the S02 baseline and with
   cd "$W" || fail worktree
   need_load
   rm -rf "$OUT/capture"
-  rec capture "$OUT/capture.log" python3 docs/evidence/losat_web_e1a/capture_outputs.py run --losat "$N" --out "$OUT/capture" --jobs 4
+  # capture_outputs.py exits 1 on any frozen-hash mismatch; the one known mismatch blastn/Sakai.MG1655.megablast is allowed
+  # (ci_fast_regressions.py's allowlist, S02); the two comparisons below are the gate (SFc, 2026-10-10).
+  rec capture "$OUT/capture.log" bash -c 'python3 docs/evidence/losat_web_e1a/capture_outputs.py run --losat "$1" --out "$2" --jobs 4 > "$2.run.log" 2>&1; rc=$?
+    cat "$2.run.log"; [ $rc = 0 ] && exit 0
+    other=$(grep "mismatch:" "$2.run.log" | grep -v "^expected-hash mismatch: blastn Sakai.MG1655.megablast$" | wc -l)
+    [ "$other" = 0 ] && grep -q "^236 cases, 1 frozen-hash mismatches" "$2.run.log" && { echo "allowed known mismatch: blastn/Sakai.MG1655.megablast"; exit 0; }
+    exit $rc' _ "$N" "$OUT/capture"
   rec capture-compare-s02 "$OUT/capture-compare-s02.txt" python3 docs/evidence/losat_web_e1a/capture_outputs.py compare docs/evidence/losat_web_e1a/baseline/hashes.tsv "$OUT/capture/hashes.tsv"
   rec capture-compare-before "$OUT/capture-compare-before.txt" python3 docs/evidence/losat_web_e1a/capture_outputs.py compare "$OLD/sf/capture-before/hashes.tsv" "$OUT/capture/hashes.tsv"
   wc -l < "$OUT/capture/hashes.tsv" > "$OUT/capture-rows.txt"   # 237 = header + 236 cases
@@ -288,6 +296,7 @@ st_vabi-tblastx() { vabi_program tblastx; }
 # Copy the small results into the tracked run directory; large files keep a hash and a tail.
 keep_file() { # keep_file SRC DEST_NAME
   [ -f "$1" ] || return 0
+  mkdir -p "$(dirname "$RUN/$2")"
   if [ "$(stat -c %s "$1")" -le 300000 ]; then cp "$1" "$RUN/$2"
   else
     sha256sum "$1" > "$RUN/$2.sha256"

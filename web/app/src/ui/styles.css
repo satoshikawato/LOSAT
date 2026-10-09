@@ -231,12 +231,14 @@ textarea {
   background: var(--accent-bg);
 }
 
-/* W4b search: the paste box and, beside it from 801 px, the subrange. */
+/* W4b search: the paste box and, beside it from 801 px, the subrange. Its sides are those of the
+   block's rows (.param-row), so that the paste box, the drop zone and the Job Title start and end
+   at the same x (W4b screen review L13). */
 .entry {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 8px 24px;
-  padding: 4px 0 6px;
+  padding: 4px 6px 6px;
 }
 
 .entry-label {
@@ -410,9 +412,12 @@ textarea {
   border-color: var(--accent);
 }
 
+/* Its border and padding inside its width: at 100% it ended 14 px past the other fields on a
+   phone (W4b screen review L13). */
 #job-title {
   width: 32em;
   max-width: 100%;
+  box-sizing: border-box;
 }
 
 textarea,
@@ -1265,9 +1270,17 @@ label.inline {
   align-items: center;
 }
 
-/* NCBI's order (W4b): #, Description, Score (bits), E value, HSPs, Length, Subject ID. */
+/* NCBI's order (W4b): #, Description, Score (bits), E value, HSPs, Length, Subject ID. The Subject
+   ID column is as wide as its longest value (--id-width, measured by SubjectTable), within 10ch
+   and 24ch, and starts 12 px further from the right-aligned lengths; the Description has the rest
+   (W4b screen review L8). */
 .subject-grid {
-  grid-template-columns: 4ch minmax(12ch, 2.4fr) 9ch 8.25ch 7ch 8.25ch minmax(9ch, 1.2fr);
+  grid-template-columns: 4ch minmax(12ch, 1fr) 9ch 8.25ch 7ch 8.25ch calc(clamp(10ch, var(--id-width, 24ch), 24ch) + 12px);
+}
+
+.subject-grid > [data-col='sseqid'],
+.subject-grid > [data-field='sseqid'] {
+  padding-left: 12px;
 }
 
 /* #, Bit score, E value, Identity, Length, Mismatches, Gap opens, Query, Subject, [Frames],
@@ -1437,6 +1450,12 @@ pre.range-text {
   overflow-wrap: anywhere;
 }
 
+/* The Run details tab has no tool band: its first heading keeps off the tab strip's line (W4b
+   screen review L13), about as far as the Outputs tab's first line. */
+.run-details {
+  padding-top: 12px;
+}
+
 .details-list {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);
@@ -1536,6 +1555,11 @@ pre.range-text {
      Subject column keeps 12ch, so that IDs with a common prefix stay apart (second screen review). */
   .subject-grid {
     grid-template-columns: 4ch minmax(12ch, 1fr) 9ch 8.25ch 6ch 8.25ch minmax(16ch, 2fr);
+  }
+
+  .subject-grid > [data-col='sseqid'],
+  .subject-grid > [data-field='sseqid'] {
+    padding-left: 0;
   }
 
   .subject-grid > [data-col='sseqid'],

@@ -3,7 +3,7 @@
 // A run of many queries is drawn a screenful at a time.
 import { computed } from 'vue';
 import type { ResultsBrowser, ResultsState } from '../application/results';
-import { formatCount } from './format';
+import { formatCount, formatCounted } from './format';
 import VirtualRows from './VirtualRows.vue';
 
 const props = defineProps<{ results: ResultsBrowser; state: ResultsState }>();
@@ -66,7 +66,9 @@ function setHitsOnly(event: Event): void {
           <span class="pick-meta">
             {{ formatCount(state.queries[position]!.length) }} {{ unit }} ·
             <template v-if="state.queries[position]!.hsps === 0">no hits</template>
-            <template v-else>{{ formatCount(state.queries[position]!.subjects) }} subj., {{ formatCount(state.queries[position]!.hsps) }} HSPs</template>
+            <template v-else
+              >{{ formatCounted(state.queries[position]!.subjects, 'subject') }}, {{ formatCounted(state.queries[position]!.hsps, 'HSP') }}</template
+            >
           </span>
         </button>
       </template>

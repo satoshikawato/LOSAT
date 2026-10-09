@@ -574,7 +574,7 @@ for (const c of PROGRAM_CASES) {
       const queryRows = rows.filter((fields) => fields[0] === qseqid);
       const sseqids = [...new Set(queryRows.map((fields) => fields[1]!))];
       expect(queryRows.length).toBeGreaterThan(0);
-      if (queries.length > 1) await expect(queryRow).toContainText(`${c.units.query} · ${count(sseqids.length)} subj., ${count(queryRows.length)} HSPs`);
+      if (queries.length > 1) await expect(queryRow).toContainText(`${c.units.query} · ${plural(sseqids.length, 'subject')}, ${plural(queryRows.length, 'HSP')}`);
       last = { qIdx, rows: queryRows, subjects: sseqids.length };
 
       // The Descriptions: each subject's first outfmt 6 row, in the engine's order.
@@ -688,6 +688,33 @@ for (const c of PROGRAM_CASES) {
     await expectTableFits(page, 'hsp-table');
     await show(page, 'hits');
     await expectTableFits(page, 'subject-table');
+    // The Subject ID column is as wide as its values (from 10ch to 24ch) and starts 12 px further
+    // from the lengths; the Description has the rest of the row (W4b screen review L8).
+    const ids = await page.getByTestId('subject-table').evaluate((table) => {
+      const rows = [...table.querySelectorAll<HTMLElement>('.table-row')];
+      const ch = (n: number) => {
+        const probe = document.createElement('span');
+        probe.style.cssText = `position:absolute;visibility:hidden;width:${n}ch`;
+        rows[0]!.append(probe);
+        const width = probe.getBoundingClientRect().width;
+        probe.remove();
+        return width;
+      };
+      const cells = rows.map((row) => row.querySelector<HTMLElement>('[data-field="sseqid"]')!);
+      const pad = parseFloat(getComputedStyle(cells[0]!).paddingLeft);
+      return {
+        all: rows.length === Number(table.querySelector('[data-testid="subject-list"]')!.getAttribute('data-count')),
+        column: cells[0]!.clientWidth - pad,
+        widest: Math.max(...cells.map((cell) => cell.scrollWidth - pad)),
+        least: ch(10),
+        most: ch(24),
+        gap: cells[0]!.getBoundingClientRect().left + pad - rows[0]!.querySelector('[data-field="length"]')!.getBoundingClientRect().right,
+      };
+    });
+    expect(ids.gap).toBeGreaterThanOrEqual(12);
+    expect(ids.column).toBeLessThanOrEqual(ids.most + 1);
+    expect(ids.column).toBeGreaterThanOrEqual(Math.min(ids.widest, ids.most) - 1);
+    if (ids.all) expect(ids.column).toBeLessThanOrEqual(Math.max(ids.widest, ids.least) + 2);
     // The "With hits only" box sits next to its label (S13 screen review L1).
     if (queries.length > 1) expect((await page.getByTestId('filter-hits-only').boundingBox())!.width).toBeLessThan(30);
     test.info().annotations.push({
@@ -1179,7 +1206,7 @@ test('many queries; view filters change the view, not the search; the notices te
 
   // A subject filter that matches nothing: every HSP of the query is hidden, and one click clears it.
   await show(page, 'hits');
-  const [, subjects, hsps] = /([\d,]+) subj\., ([\d,]+) HSPs/.exec(await text(page.getByTestId('query-row-0')))!;
+  const [, subjects, hsps] = /([\d,]+) subjects?, ([\d,]+) HSPs?/.exec(await text(page.getByTestId('query-row-0')))!;
   await page.getByTestId('filter-subject').fill('no-such-subject');
   await page.getByTestId('filter-apply').click();
   const filteredOut = page.locator('[data-testid="results-notice"][data-kind="filtered-out"]');

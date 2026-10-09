@@ -1,6 +1,6 @@
 // The UI's display helpers (src/ui/format.ts).
 import { describe, expect, it } from 'vitest';
-import { formatDateTime, framesLabel, framesPhrase, framesText } from '../../src/ui/format';
+import { formatCounted, formatDateTime, framesLabel, framesPhrase, framesText } from '../../src/ui/format';
 
 describe('formatDateTime', () => {
   it('writes a local time in ISO 8601 form, day and month never swapped', () => {
@@ -10,6 +10,16 @@ describe('formatDateTime', () => {
 
   it('pads every field and drops the milliseconds', () => {
     expect(formatDateTime(new Date(999, 11, 31, 0, 0, 0, 999).getTime())).toBe('0999-12-31 00:00:00');
+  });
+});
+
+describe('formatCounted', () => {
+  it('writes the noun in the singular for one only', () => {
+    expect(formatCounted(1, 'subject')).toBe('1 subject');
+    expect(formatCounted(3, 'subject')).toBe('3 subjects');
+    expect(formatCounted(1, 'HSP')).toBe('1 HSP');
+    expect(formatCounted(12345, 'HSP')).toBe('12,345 HSPs');
+    expect(formatCounted(0, 'HSP')).toBe('0 HSPs');
   });
 });
 

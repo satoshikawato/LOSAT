@@ -657,6 +657,14 @@ test('narrow screens put the inputs and the queue one under the other, without h
   expect(subject.y).toBeGreaterThan(query.y + query.height - 1);
   expect(queue.y).toBeGreaterThan(subject.y);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  // The query block's paste box, drop zone and Job Title start and end at the same x (W4b screen review L13).
+  const edges = await Promise.all(
+    ['query-input', 'query-dropzone', 'job-title'].map(async (id) => {
+      const box = (await page.getByTestId(id).boundingBox())!;
+      return [Math.round(box.x), Math.round(box.x + box.width)];
+    }),
+  );
+  expect(edges.slice(1)).toEqual([edges[0], edges[0]]);
 
   // With Algorithm parameters open, and the longest labels (W4b): still no horizontal scrolling.
   await openParameters(page);

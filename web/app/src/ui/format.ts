@@ -38,6 +38,11 @@ export function formatDateTime(ms: number): string {
   return `${date} ${two(time.getHours())}:${two(time.getMinutes())}:${two(time.getSeconds())}`;
 }
 
+/** A count and its noun, singular for one: "1 subject", "3 subjects", "1 HSP", "5 HSPs" (W4b screen review L12). */
+export function formatCounted(count: number, noun: string): string {
+  return `${formatCount(count)} ${count === 1 ? noun : `${noun}s`}`;
+}
+
 /** The frames of an HSP of a translated search: the translated sequences' only (results.ts hspEntry). */
 export interface Frames {
   readonly queryFrame?: number;

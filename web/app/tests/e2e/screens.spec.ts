@@ -100,8 +100,9 @@ for (const size of SIZES) {
     await page.getByTestId('program-blastx').check();
     await shoot(page, browserName, size.name, '05-blastx-unavailable');
 
-    // A run that fails: TBLASTX refuses at run time a subject title with an HTML character
-    // reference, which NCBI decodes in outfmt 0 (docs/web/abi_v2.md §4).
+    // A run that fails: a TBLASTX subject record without residues. `register` and `validate`
+    // accept it, and the run ends with NCBI's `BLAST engine error: The average subject length
+    // is too short`, as the CLI does.
     let sequence = '';
     let state = 7;
     for (let i = 0; i < 300; i++) {
@@ -114,7 +115,7 @@ for (const size of SIZES) {
       while ((await sources.count()) > 0) await page.getByTestId(`${role}-source-0-remove`).click();
     }
     await page.getByTestId('query-input').fill(`>q1\n${sequence}\n`);
-    await page.getByTestId('subject-input').fill(`>s1 alpha &amp; beta\n${sequence}\n`);
+    await page.getByTestId('subject-input').fill('>s1 alpha\n');
     await ready(page, 'query');
     await ready(page, 'subject');
     await page.getByTestId('add-to-queue').click();

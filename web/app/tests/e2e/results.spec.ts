@@ -1261,8 +1261,10 @@ test('many queries; view filters change the view, not the search; the notices te
   await expect(page.getByTestId('run-1-status')).toHaveText('completed');
 
   if (BUILD_HAS_ENGINE) {
-    // A run that fails: TBLASTX refuses at run time a subject title with an HTML character
-    // reference, which NCBI decodes in outfmt 0 (docs/web/abi_v2.md §4; screens.spec.ts).
+    // A run that fails: a TBLASTX subject record without residues. `register` and `validate`
+    // accept it (the engine registers every record the reader returns), and the run ends with
+    // NCBI's `BLAST engine error: The average subject length is too short`, as the CLI does
+    // (screens.spec.ts has the same input).
     const sequence = dna(7, 300);
     // A view filter of run 1 is not carried to the next run that opens.
     await page.getByTestId('filter-subject').fill('s1');
@@ -1271,7 +1273,7 @@ test('many queries; view filters change the view, not the search; the notices te
     await page.getByTestId('tab-search').click();
     await program(page, 'tblastx');
     await paste(page, 'query', `>q1\n${sequence}\n`);
-    await paste(page, 'subject', `>s1 alpha &amp; beta\n${sequence}\n`);
+    await paste(page, 'subject', '>s1 alpha\n');
     await submit(page);
     await waitStatus(page, 2, 'failed');
     await expect(page.getByTestId('run-2-open')).toHaveCount(0);

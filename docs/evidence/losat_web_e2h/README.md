@@ -102,6 +102,8 @@ run `20261009T145447Z`（HEAD `9dfe7efd`）は 23 工程を流した。build 7 �
 - 両方の入力に不備があるとき CLI と同じ最初の誤りを出すには、subject を先に `register` する（D-1）。
 - CI の firefox・webkit の E2E の 5 秒の待ちの timeout（`smoke.spec.ts:10`、`:37`、`search.spec.ts:391`）が繰り返し出る。
 - ABI v1 の host には、空・空白だけ・先頭が空白の定義行で `unknown` の代わりに `Query_1`・`Subject_1`・`unnamed`・最初の語が返る（D-2）。subject を `records: []` で登録したときは、run の `Empty CBlastQueryVector` の誤りとして扱う。
+- `screens.spec.ts` の検索画面の 2 つの試験（`LOSAT_WEB_SCREENS` を付けたときだけ流れる、CI には無い）は、エンジンの build で `query-source-0-exclude-refused` を待って止まる（10 分の timeout）。`register` の拒否の文言が行を名指すため（上の 1 つ目）。結果の画面の試験は通る。
+- S13 の `results.spec.ts` の「失敗した run」は、TBLASTX の題の HTML の文字参照（E2h で NCBI と同じく復号されて完了する）から、中身の無い subject だけの TBLASTX（NCBI の `The average subject length is too short`）に変えた（tests only）。
 
 ## 推奨の案で進めた判断（保守者に委ねられた判断、2026-09-29 の常設の指示、10-07 に再掲）
 

@@ -8,7 +8,7 @@
 // TBLASTN dot plot.
 import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { BUILD_HAS_ENGINE } from './support/browser';
 import { REPOSITORY } from './support/harness-server';
 import { fasta, openFiles, openParameters, program, submit, task, waitStatus } from './support/search';
@@ -179,6 +179,21 @@ async function search(page: Page, id: string, number: number, query: string, sub
   await waitStatus(page, number, 'completed');
 }
 
+/**
+ * Presses a table's row with the mouse at its part in view, as a finger would (W4b screen review
+ * L5): Playwright's click() scrolls the whole row's button into view first, which scrolled a
+ * phone's table sideways in the records, though the app keeps it where it is (results.spec.ts).
+ */
+async function pressRow(page: Page, row: Locator): Promise<void> {
+  await row.scrollIntoViewIfNeeded();
+  await row.evaluate((element) => {
+    const scroll = element.closest<HTMLElement>('.table-scroll');
+    if (scroll !== null) scroll.scrollLeft = 0;
+  });
+  const box = (await row.boundingBox())!;
+  await page.mouse.click(box.x + 24, box.y + box.height / 2);
+}
+
 /** Opens a completed run from the queue and waits until its first query's first HSP is read. */
 async function openResults(page: Page, number: number): Promise<void> {
   await page.getByTestId(`run-${number}-open`).click();
@@ -212,7 +227,7 @@ for (const size of SIZES) {
 
     // The Alignments: the first subject's block, an HSP selected with its section of outfmt 0.
     await openResults(page, 1);
-    await hspRows.first().click();
+    await pressRow(page, hspRows.first());
     await expect(hspRows.first()).toHaveAttribute('aria-pressed', 'true');
     await expect(page.getByTestId('detail-section')).toBeVisible();
     await shoot(page, browserName, size.name, '07-results-hits-alignment');
@@ -222,7 +237,7 @@ for (const size of SIZES) {
     await subjectRow('msD').click();
     await page.getByTestId('pane-dotplot').click();
     await expect(hspRows).toHaveCount(2);
-    await hspRows.nth(1).click();
+    await pressRow(page, hspRows.nth(1));
     const canvas = page.getByTestId('dotplot-canvas');
     await expect(canvas).toHaveAttribute('data-segments', '2');
     await expect(canvas).toHaveAttribute('data-selected', /^0:\d+$/);

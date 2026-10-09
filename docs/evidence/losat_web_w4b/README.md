@@ -3,7 +3,7 @@
 - 段階：W4b 画面を NCBI BLAST Web に寄せる（[総合計画書](../../losat_web_gui_plan.md) §7 の S13 と S14 の間に足す S13b、[指示書](../../losat_web_gui_sessions/session_s13b_w4b_ncbi_style_ui.md)、[対応表](../../web/ncbi_ui_mapping.md)）
 - ブランチ：`feature/losat-web-gui-app`（アプリ側。worktree `$WORK_ROOT/.worktrees/web-gui-app`、Linux の clone）。起点は `ff9ebc49`（S13 の最後）。エンジン側は W4 を `feature/losat-web-gui` に merge していない（`origin/feature/losat-web-gui` は `4596b82f`）ので、起点に merge するものは無く、reactor とネイティブの CLI は S13 のもの（`app-s12-reactors`、ネイティブ sha256 `f0b8916b…`）を使った。エンジン（`LOSAT/`、`web/adapter/`）は変えていない
 - 実行記録：[`run-20261009T184556Z/`](run-20261009T184556Z/)（ゲート、commit `f097595d` の木、`21cc0ff5`）、[`run-20261009T210300Z-after-review/`](run-20261009T210300Z-after-review/)（`087eaa13`、`81e012b8`）、計測だけの実行 [`run-20261009T211154Z-measure/`](run-20261009T211154Z-measure/)（`087eaa13`、`81e012b8`）、[`run-20261009T215513Z-after-review/`](run-20261009T215513Z-after-review/)（`492fad48`、最後のアプリの木、`10443d06`）。どれも作成後は書き換えない。ファイルのハッシュは [`evidence.sha256`](evidence.sha256)、再現は [`run_gate.sh`](run_gate.sh)
-- 判定：**完了条件を満たした**。ゲートの実行（`f097595d`）のすべての段階、コードレビュー（妨げになる指摘無し。M1・L2〜L8 を直した）、画面レビュー 3 回（どれも High 無しの合格。1 回目と 2 回目の中程度の指摘は直し、3 回目の低 1 と参考 1 は S14 へ）、レビューの後の実行 2 回と計測だけの実行が通った。下の「完了条件と結果」。計測は `087eaa13` の木で行い、最後の木（`492fad48`）では測り直していない（下の「実測」）
+- 判定：**完了条件を満たした**。ゲートの実行（`f097595d`）のすべての段階、コードレビュー 2 回（1 回目：妨げになる指摘無し、M1・L2〜L8 を直した。2 回目（修正の後）：妨げになる指摘無し、低 2 件は S14 へ）、画面レビュー 3 回（どれも High 無しの合格。1 回目と 2 回目の中程度の指摘は直し、3 回目の低 1 と参考 1 は S14 へ）、レビューの後の実行 2 回と計測だけの実行が通った。下の「完了条件と結果」。計測は `087eaa13` の木で行い、最後の木（`492fad48`）では測り直していない（下の「実測」）
 - 保守者の判断待ち：判断 1〜88（下の「判断」）は推奨案で進めた（Owner-delegated、2026-09-29 の常設の指示、2026-10-07 に再掲）。判断 7（ボタンの名前「Run LOSAT」）は保守者の指示（2026-10-10）であり、委任ではない。目に付くのは 5（Job Title を RunSnapshot に持つ）、6（BLASTN の既定は NCBI の 2 配列の画面の blastn でなく、CLI と同じ megablast）、18（Edit Search は S15）、20（Percent Identity のフィルターを採らない）、24（ドットプロットの SVG の書き出しは S15）
 - `feature/losat-web-gui` への merge：このセッションでは行わない。エンジン側が W4 と W4b をまとめて merge する（下の「合流」）
 - このセッションは `/home/kawato/losat-baselines` で起動した（clone の外なので skill と agent が読み込まれなかった）。skill はファイルから読み、`losat-reviewer` の定義は general-purpose の agent に渡した（S13 と同じ）
@@ -343,6 +343,10 @@ agent `losat-reviewer`（code review の役。このセッションは clone の
 
 修正（F1〜F3）の後にコードレビューはもう一度行っていない。修正には試験をつけ、画面レビュー 2 回と 3 回が見える変化を確かめた。
 
+### 2 回目（修正の後）
+
+agent `losat-reviewer`（code review の役）が修正の差分 `f097595d..492fad48`（`web/app`、23 ファイル）を読んだ（記録は作業フォルダの `reviews/code-review-2.md`）。結論は「妨げになる指摘は無い」。1 回目の 8 件（M1 の時計、L2〜L8、判断 26 の 3 nt per aa）は報告どおり直っている。確かめて指摘の無かったもの：query ごとの表を必要なときに作る（`rowOf`、`selectHsp` は索引の前の query の HSP にも効き、古い表は残らない、Run を開く主スレッドに HSP ごとの仕事が無い）、見出しの読み取りの共有（`sIdx` の鍵、失敗は読み直せる）、節を 1 フレームでまとめて当てる（重複の読み取り無し、Run の切り替え、読み直しは繰り返さない）、ドットプロットの比と間引きと選び方、ポップアップの置き場所、TBLASTN の frame、計測の時計（それぞれ名前どおり）、規則（`web/` で BLAST の値を計算しない、層、英語、FakeEngine、ネットワーク）。低 2 件は下の「残件と注意」。
+
 ## 画面レビュー
 
 agent `losat-reviewer`（screen review の役）が、画面の記録を対応表、NCBI の参照画面、前の記録と並べて見た。3 回とも「合格（High 無し）」だが、レビュー自身が「完全な合格ではない」と書いた回があり、中程度の指摘は次の回の前に直した。
@@ -423,6 +427,6 @@ agent `losat-reviewer`（screen review の役）が、画面の記録を対応�
 - **画面レビューの残り**：低 1（電話の入力のカード）と参考 1（電話の radio の 14 px）。直す場合は電話の 02・03・06 を 3 ブラウザで撮り直す。撮らなかった状態（Alignments の「Try again」、TBLASTN のポップアップ、「Cancel the group」）は状態 24 以降で足せる。
 - **対応表の外**：撮らなかった NCBI の画面（Taxonomy タブ、Download と Select columns のメニュー、Edit Search の画面）の採否は、指示書と下調べの文書による。Edit Search は S15。
 - **列定義表**：`results_columns.md` の列の表は W4 の並びのまま（結果画面の列の並びの正本は対応表）。E2j の後に両方を合わせる。
-- **コードレビュー**：F1〜F3 の修正の後に 2 回目のコードレビューは行っていない（上）。
+- **コードレビュー 2 回目の低 2 件**（`f097595d..492fad48`、妨げになる指摘無し）：(1) 「Try again」は選んでいない Range の塊だけで、選んだ HSP の詳細の読み取りが失敗したときは同じ HSP を選び直しても読み直さない（W4 からの振る舞い）。また、失敗した塊は、同じ節が詳細として読めた後も、見えたままなら誤りを示し続ける（`AlignmentsView.vue:115,188-191,282,316-326`、`results.ts:308`）。(2) 横の広い組（例：1280 px で 100 kbp 対 5 kbp の BLASTN、図の高さ約 180 px）で、最初のクリックでポップアップが図の下に回ったとき、見える所まで scroll しない（`DotPlot.vue:531,575,625,657`。電話は scroll する）。どちらも S14 で直す（S14 の指示書の残件）。
 - 画面の記録（PNG）はリポジトリに入れない：ゲートの 150 枚は `$BUILD_ROOT/s13b-gate-screens/`、レビューの後の 150 枚は `s13b-review-screens/`（`087eaa13`）、`s13b-screens-f2/`、`s13b-screens-f3/`、最後の after-review の 150 枚は `$BUILD_ROOT/s13b-final-screens/`（`/home/kawato/.cache/losat-work/s13b-final-screens/`。S14 はこれと比べる）。SHA-256 は実行記録の `screens.sha256`（`s13b-screens-f2` と `s13b-screens-f3` は実行記録を残していない）。
 - NCBI の参照画面（174 個）もリポジトリに入れない。SHA-256 は [`ncbi_reference.sha256`](ncbi_reference.sha256)。

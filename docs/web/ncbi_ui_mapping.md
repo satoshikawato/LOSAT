@@ -9,7 +9,7 @@
 
 ## 参照画面
 
-2026-10-10 に Chromium（Playwright、headless）で NCBI BLAST の画面を撮った。検索は公開の RefSeq の配列だけで行った（NM_000518.5、NM_000519.4、NM_000558.5、NP_000509.1、NP_000510.1）。画像はリポジトリに入れず `$BUILD_ROOT/s13b-ncbi-reference/`（`/home/kawato/.cache/losat-work/s13b-ncbi-reference/`）に置き、URL・時刻・RID・SHA-256 をその `INDEX.md` と [W4b のゲート記録](../evidence/losat_web_w4b/README.md)に残した。
+2026-10-10 に Chromium（Playwright、headless）で NCBI BLAST の画面を撮った。検索は公開の RefSeq の配列だけで行った（NM_000518.5、NM_000519.4、NM_000558.5、NP_000509.1、NP_000510.1）。検索は 6 件（RID CJ5K9KV3114 blastn、CJ5W8ZCC114 blastp、CJ6FDRHH114 tblastn、CJ6G5X6T114 tblastx、CJ6GXH5H114 と CJ7C8J2Y114 は 2 query）。画像はリポジトリに入れず `$BUILD_ROOT/s13b-ncbi-reference/`（`/home/kawato/.cache/losat-work/s13b-ncbi-reference/`）に置き、URL・時刻・RID・SHA-256 をその `INDEX.md` と [W4b のゲート記録](../evidence/losat_web_w4b/README.md)に残した。
 
 | 画面 | ファイル（1280 px。†は 390 px も） |
 |---|---|
@@ -79,6 +79,7 @@ NCBI の結果は、上から操作の行（Edit Search、Save Search、Search S
 | 「Subject ID」「Subject Descr」「Subject Length」 | 「Subject ID」と「Subject Length」（subject が 1 レコードの Run）。複数なら「Subjects」：入力名とレコード数 | 寄せる | Subject Descr は Descriptions と Alignments に（outfmt 0 の見出し） |
 | 「Other reports」（MSA viewer、Distance tree） | なし | 採らない | LOSAT に無い |
 | 「Results for」（複数 query の select） | 「Results for」：Query の一覧（`query-list`、仮想化、ID の絞り込み `query-filter`、「With hits only」`filter-hits-only`）。複数 query の Run だけ | 寄せる | 10 万 query を 1 つの select には入れられない。仮想化した一覧を同じ場所と名前で置く |
+| 当たりの無い query：黄色の帯「No significant similarity found.」、タブが消える | 「No significant similarity found for this query.」（`results-notice` の `no-hits`）。タブは残す（Run details と Outputs は query に依らない） | 寄せる | outfmt 0 の「No hits found」と同じ事実。値は作らない |
 | 「Filter Results」：Percent Identity、E value、Query Coverage の from / to、「Filter」「Reset」 | 「Filter Results」：E value ≤、Bit score ≥、Subject ID contains、「Filter」（`filter-apply`）「Reset」（`filter-clear`） | 寄せる | Percent Identity は採らない（レコードに原値が無い、`results_columns.md`）。Query Coverage はエンジン待ち（E2j）。表示だけを変え、検索をやり直さない（ViewState の規則は変えない） |
 
 ### タブ
@@ -90,6 +91,7 @@ NCBI と同じ順で「Descriptions」（`results-view-hits`）、「Graphic Sum
 | NCBI の要素 | LOSAT Web | 採否 | 理由 |
 |---|---|---|---|
 | 見出し「Sequences producing significant alignments」 | 同じ見出し | 採る | |
+| BLASTP の最初のタブ「Clusters」（「Clusters producing significant alignments」、Cluster Representative Sequence） | 「Descriptions」のまま | 採らない | NCBI のデータベースの配列のまとまり。ローカルの subject はまとめない |
 | 「Download」「Select columns」「Show」、「select all」と行の印、「GenBank」「Graphics」「MSA Viewer」 | なし | 採らない（Download は Outputs、行の選択は S14 で検討） | 抽出（S14）が行の選択を求めれば、その段階で足す |
 | 列 Description（リンク） | 「Description」：outfmt 0 の見出しの題（`results_columns.md`）。行を選ぶとその subject が選ばれ、Alignments・Graphic Summary・Dot Plot が従う | 寄せる | 行は 1 つのボタン（中にリンクを入れない）。選んだ subject の Alignments へは「Alignments」タブで |
 | 列 Scientific Name、Common Name、Taxid | なし | 採らない | ローカルの FASTA に無い |
@@ -135,7 +137,7 @@ NCBI と同じ順で「Descriptions」（`results-view-hits`）、「Graphic Sum
 
 ### Dot Plot
 
-NCBI の Dot Plot は、題「Plot of <query> vs <subject>」とサーバーが描いた画像である。タブの名前と位置を NCBI に寄せ、図の描き方は保守者の [`blast2dotplot.py`](https://github.com/satoshikawato/bio_small_scripts/blob/main/blast2dotplot.py)（commit `3b55d116`、2023-12-25、sha256 `4f0731f769eaa755e940f82f373a9bb86c8fa311df030c8810d272ed66f23f84`）を出発点にする。NCBI と違うところはスクリプトを先にする（保守者の指示、2026-10-09）。
+NCBI の Dot Plot は、題「Plot of <query> vs <subject>」とサーバーが描いた 600×300 の画像（薄い緑の地、灰色の格子、HSP はすべて濃い灰色の線で鎖を色で分けない、題は画像の外）である。タブの名前と位置を NCBI に寄せ、図の描き方は保守者の [`blast2dotplot.py`](https://github.com/satoshikawato/bio_small_scripts/blob/main/blast2dotplot.py)（commit `3b55d116`、2023-12-25、sha256 `4f0731f769eaa755e940f82f373a9bb86c8fa311df030c8810d272ed66f23f84`）を出発点にする。NCBI と違うところはスクリプトを先にする（保守者の指示、2026-10-09）。
 
 | 要素 | スクリプト | LOSAT Web | 理由 |
 |---|---|---|---|

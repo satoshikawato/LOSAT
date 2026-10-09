@@ -4721,29 +4721,11 @@ pub fn run_web_pair_records(
     let mut outputs = ReportOutputs::single(&outfmt, OutputSink::Writer(&mut output), &mut stderr);
     // ABI v1 keeps `bio` and its checks (plan TD-1): the checks that it made in the search
     // come where they came (`V1Records`), and the records that pass them enter the search
-    // as NCBI's reader's records (`FastaRecord::from_bio`; the protein title warning of
-    // each record is the one that ABI v1 wrote).
-    //
-    // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta_reader_utils.cpp:209-213
-    // ```c++
-    //     // trim leading whitespace from title (is this appropriate?)
-    //     while (title_start < len
-    //         &&  isspace((unsigned char)defline[title_start])) {
-    //         ++title_start;
-    //     }
-    // ```
-    // ABI v1's BLASTP has no check of the deflines: `bio` gives a defline that starts with
-    // white space an empty ID, so the title of `from_bio` starts with white space, which
-    // NCBI's reader skips.
+    // as NCBI's reader's records (`FastaRecord::from_bio`, which skips the white space at the
+    // start of a title as NCBI's defline parser does; ABI v1's BLASTP has no check of the
+    // deflines).
     let v1_record = |index: usize, record: &fasta::Record, prefix: &str| {
-        let mut record = FastaRecord::from_bio(record, index + 1, prefix, true);
-        let start = record
-            .title
-            .iter()
-            .position(|&byte| !matches!(byte, b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r'))
-            .unwrap_or(record.title.len());
-        record.title.drain(..start);
-        record
+        FastaRecord::from_bio(record, index + 1, prefix, true)
     };
     let queries: Vec<FastaRecord> = query_records
         .iter()
@@ -4787,9 +4769,9 @@ pub fn run(
     args: BlastpArgs,
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
 ) -> Result<()> {
-    use crate::algorithm::blastn::input as fasta_input;
     use crate::blastinput::app;
     use crate::blastinput::fasta_reader::{read_subjects, FastaInputSource, ReaderConfig};
+    use crate::blastinput::input_files;
     // NCBI reference: ncbi-blast/c++/src/app/blast/blastp_app.cpp:128-133
     // ```c
     // if(RecoverSearchStrategy(args, m_CmdLineArgs)) {
@@ -4835,8 +4817,8 @@ pub fn run(
     let Some(subject_path) = args.subject.as_deref() else {
         return Err(app::missing_subject_error());
     };
-    fasta_input::check_utf8_file_name(subject_path, "subject", "BLASTP")?;
-    let subject_file = fasta_input::open_input(subject_path, "subject", "BLASTP")?;
+    input_files::check_utf8_file_name(subject_path, "subject", "BLASTP")?;
+    let subject_file = input_files::open_input(subject_path, "subject", "BLASTP")?;
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2537-2545
     // ```c++
     //             subj_input_stream = &args[kArgSubject].AsInputFile();
@@ -4929,10 +4911,10 @@ pub fn run(
     // ```
     // The query is opened and the output file created before the options are checked;
     // `-` is standard input and standard output.
-    fasta_input::check_utf8_file_name(&args.query, "query", "BLASTP")?;
-    let query_file = fasta_input::open_input(&args.query, "query", "BLASTP")?;
+    input_files::check_utf8_file_name(&args.query, "query", "BLASTP")?;
+    let query_file = input_files::open_input(&args.query, "query", "BLASTP")?;
     if let Some(path) = args.out.as_deref() {
-        fasta_input::check_utf8_file_name(path, "out", "BLASTP")?;
+        input_files::check_utf8_file_name(path, "out", "BLASTP")?;
     }
     let out_file = match args.out.as_deref().filter(|path| path.as_os_str() != "-") {
         Some(path) => Some(std::io::BufWriter::new(
@@ -5210,7 +5192,7 @@ impl V1Records<'_> {
     /// a query without residues. NCBI reads those inputs with a warning (or reports a query
     /// without residues), and ABI v1 rejects them as it did.
     fn check_records(&self) -> Result<()> {
-        use crate::algorithm::blastn::input::{
+        use crate::blastinput::bio_checks::{
             check_protein_residues_of, check_records_have_residues_of,
         };
         check_protein_residues_of(self.subjects, "subject", "BLASTP")?;
@@ -5402,7 +5384,7 @@ fn search(
     // up the subjects: a subject without letters (a record without residues, or an
     // interval that starts just past its record's end) gets its warning, stays in the
     // database statistics with no letters, and is never searched.
-    crate::algorithm::blastn::input::write_empty_subject_warnings(
+    crate::blastinput::input_files::write_empty_subject_warnings(
         &subjects.records,
         "blastp",
         outputs.diagnostics,
@@ -5443,7 +5425,7 @@ fn search(
         v1.check_query_intervals(&searched_queries, &query_input)?;
     }
     check_blastp_environment()?;
-    let batches = read_query_batches(
+    let batches = crate::blastinput::query_batch::read_query_batches(
         query_records,
         &searched_queries,
         &query_input,
@@ -5516,181 +5498,6 @@ fn search(
         return Err(error);
     }
     Ok(())
-}
-
-/// The query batches as NCBI's batch loop reads them, up to the batch that stops the run.
-struct QueryBatches {
-    /// The reader's messages of each batch's records (skipped ones too), before the
-    /// report of the batch's first searched query, by searched query.
-    warnings: Vec<Vec<u8>>,
-    /// The input records and the searched queries of the batches that NCBI searches.
-    input_done: usize,
-    searched_done: usize,
-    /// What stops the run at the batch after them: the messages that NCBI writes as it
-    /// reads that batch, and its error.
-    stop: Option<(Vec<u8>, anyhow::Error)>,
-}
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_input.cpp:134-171
-// ```c
-// CRef<CBlastQueryVector>
-// CBlastInput::GetNextSeqBatch(CScope& scope)
-// {
-//     CRef<CBlastQueryVector> retval(new CBlastQueryVector);
-//     TSeqPos size_read = 0;
-//
-//     while (size_read < GetBatchSize()) {
-//
-//         if (End())
-//             break;
-//
-//         CRef<CBlastSearchQuery> q;
-//         try { q.Reset(m_Source->GetNextSequence(scope)); }
-//         catch (const CObjReaderParseException& e) {
-//             if (e.GetErrCode() == CObjReaderParseException::eEOF) {
-//                 break;
-//             }
-//             throw;
-//         }
-// ```
-// NCBI reference: ncbi-blast/c++/src/algo/blast/api/objmgr_query_data.cpp:378-380
-// ```c
-//     if (queries.Empty()) {
-//         NCBI_THROW(CBlastException, eInvalidArgument, "Empty CBlastQueryVector");
-//     }
-// ```
-// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:632-652
-// ```c
-//         } catch (const CException& e) {
-//             ...
-//             CRef<CSearchMessage> m
-//                 (new CSearchMessage(eBlastSevWarning, index, e.GetMsg()));
-//             messages[index].push_back(m);
-//             s_InvalidateQueryContexts(qinfo, index);
-//         }
-//     ...
-//     // Validate that at least one query context is valid
-//     if (BlastSetup_Validate(qinfo, NULL) != 0 && messages.HasMessages()) {
-//         NCBI_THROW(CBlastException, eSetup, messages.ToString());
-//     }
-// ```
-// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_aux.cpp:1013-1025
-// ```c
-// TSearchMessages::ToString() const
-// {
-//     string retval;
-//     ITERATE(vector<TQueryMessages>, qm, *this) {
-//         if (qm->empty()) {
-//             continue;
-//         }
-//         ITERATE(TQueryMessages, msg, *qm) {
-//             retval += (*msg)->GetMessage() + " ";
-//         }
-//     }
-//     return retval;
-// }
-// ```
-/// Reads the query batches as NCBI's loop reads them (`input` and `searched` are the
-/// records read and the queries searched, `seq_range::cut_queries`): a batch counts the
-/// whole records up to the batch size, and the reader's messages of its records come
-/// before the report of its first searched query. The run stops at the first batch that
-/// NCBI fails, after the reports of the batches before (without the epilog) and the
-/// messages of that batch's records:
-/// - the reading ends there with a reader error (or LOSAT's rejection of a Seq-id line);
-/// - the batch has no query (a batch size of 0, a batch of records that `-query_loc`
-///   skips, or a batch that an `eEOF` ends before its first record): `Empty
-///   CBlastQueryVector`;
-/// - every query of the batch has no letters: the context of a protein query is valid at
-///   the set-up exactly when it has letters, so NCBI's set-up fails with one `Sequence
-///   contains no data` per query (`GetMessage` puts the severity first) and `CATCH_ALL`
-///   writes `BLAST engine error: ` (exit 3).
-///
-/// A batch whose queries have letters but no Karlin-Altschul parameters is set up and not
-/// searched (`run_resolved_in_pool`).
-fn read_query_batches(
-    input_records: &[FastaRecord],
-    searched: &[FastaRecord],
-    input: &seq_range::QueryInput,
-    mut reading: QueryReading,
-    batch_size: u32,
-) -> QueryBatches {
-    let mut warnings: Vec<Vec<u8>> = vec![Vec::new(); searched.len()];
-    // Whether what ended the reading after the records (`reading`) has come.
-    let mut reading_ended = false;
-    let mut input_start = 0;
-    // The reader is at the end of its input after the last record, unless an `eEOF` or an
-    // error ends the reading there; that comes in the batch being read when the records
-    // run out before the batch reaches its size, and otherwise in a batch of its own.
-    while input_start < input.input_lengths.len()
-        || (reading.reads_past_records() && !reading_ended)
-    {
-        let (input_end, reached_size) = seq_range::next_ranged_batch(
-            &input.input_lengths,
-            &input.skipped,
-            input_start,
-            batch_size,
-        );
-        let std::ops::Range { start, end } = input.searched_in(input_start..input_end);
-        let reading_ends_here =
-            input_end == input.input_lengths.len() && !reached_size && reading.reads_past_records();
-        // `CFastaReader` writes its messages about a batch's records (their lines and
-        // titles) when it reads them, after the report of the batch before.
-        let mut batch_warnings: Vec<u8> = input_records[input_start..input_end]
-            .iter()
-            .flat_map(|record| record.warnings.iter().copied())
-            .collect();
-        let mut stop_error = None;
-        if reading_ends_here {
-            reading_ended = true;
-            if let QueryReading::Error {
-                error,
-                warnings: error_warnings,
-            } = std::mem::replace(&mut reading, QueryReading::End)
-            {
-                batch_warnings.extend_from_slice(&error_warnings);
-                stop_error = Some(error.into_app_error());
-            }
-        }
-        if stop_error.is_none() && start == end {
-            stop_error = Some(
-                crate::cli::NativeError {
-                    exit: 3,
-                    message: "BLAST engine error: Empty CBlastQueryVector\n".to_string(),
-                }
-                .into(),
-            );
-        }
-        if stop_error.is_none()
-            && searched[start..end]
-                .iter()
-                .all(|record| record.seq().is_empty())
-        {
-            let mut message = String::from("BLAST engine error: ");
-            for _ in start..end {
-                message.push_str("Warning: ");
-                message.push_str(NO_DATA_MESSAGE);
-                message.push(' ');
-            }
-            message.push('\n');
-            stop_error = Some(crate::cli::NativeError { exit: 3, message }.into());
-        }
-        if let Some(error) = stop_error {
-            return QueryBatches {
-                warnings,
-                input_done: input_start,
-                searched_done: start,
-                stop: Some((batch_warnings, error)),
-            };
-        }
-        warnings[start].extend_from_slice(&batch_warnings);
-        input_start = input_end;
-    }
-    QueryBatches {
-        warnings,
-        input_done: input_start,
-        searched_done: searched.len(),
-        stop: None,
-    }
 }
 
 /// The `Database:` text of the reports of a local `-subject` search (`subject_label`, or

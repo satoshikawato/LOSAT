@@ -14,12 +14,16 @@
 
 // NCBI app/blast/blast_app_util.hpp and blastinput/blast_args.cpp: the application layer.
 pub mod app;
+// ABI v1's and the Web adapter's (until S10) checks of `bio` FASTA records.
+pub mod bio_checks;
 pub mod blast_args;
 pub mod blastn_args;
 pub mod blastp_args;
 // NCBI blastinput/blast_fasta_input.cpp, objtools/readers/fasta.cpp, util/line_reader.cpp:
 // the FASTA input of BLASTN, TBLASTX, TBLASTN and BLASTP.
 pub mod fasta_reader;
+// NCBI corelib/ncbiargs.cpp: the input files of the command line as NCBI opens them.
+pub mod input_files;
 // NCBI corelib/ncbiapp.cpp, metareg.cpp: the application layer's environment and registry.
 pub mod ncbi_environment;
 pub mod query_batch;

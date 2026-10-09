@@ -7,7 +7,6 @@ pub mod coordination;
 pub mod disc_lookup;
 pub mod extension;
 pub mod filtering;
-pub mod input;
 pub mod interval_tree;
 pub mod lookup;
 pub mod ncbi_cutoffs;

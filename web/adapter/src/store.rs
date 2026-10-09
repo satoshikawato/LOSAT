@@ -43,7 +43,7 @@ pub fn register(program: &str, role: u32, bytes: &[u8]) -> Result<(u32, String),
         ROLE_SUBJECT => "subject",
         other => return Err(format!("unknown input role {other}")),
     };
-    use LOSAT::algorithm::blastn::input as blastn_input;
+    use LOSAT::blastinput::bio_checks as blastn_input;
     // The nucleotide inputs that the CLI reads as BLASTN's does (TBLASTN's subjects too).
     let nucleotide = match (program, role) {
         (Program::Blastn, _) => Some("BLASTN"),
@@ -52,7 +52,7 @@ pub fn register(program: &str, role: u32, bytes: &[u8]) -> Result<(u32, String),
         _ => None,
     };
     // The protein inputs that the CLI checks with NCBI's protein reader rules
-    // (`blastn/input.rs`: `check_protein_sequence_lines_of`, `check_protein_input_of`).
+    // (`blastinput/bio_checks.rs`: `check_protein_sequence_lines_of`, `check_protein_input_of`).
     let protein = match (program, role) {
         (Program::Blastp, _) => Some("BLASTP"),
         (Program::Tblastn, ROLE_QUERY) => Some("TBLASTN"),
@@ -62,7 +62,7 @@ pub fn register(program: &str, role: u32, bytes: &[u8]) -> Result<(u32, String),
     // the CLI's order: a query's deflines first (`parse_fasta`); a subject's deflines after
     // its residues, which NCBI warns about when it reads the subjects (TBLASTX's `run`).
     let check = |checked: Result<(), _>| checked.map_err(|error| format!("{error:#}"));
-    let blank = blastn_input::is_blank(bytes);
+    let blank = LOSAT::blastinput::input_files::is_blank(bytes);
     if let (Some(name), false) = (nucleotide, blank) {
         if role == ROLE_QUERY {
             check(blastn_input::check_deflines_of(bytes, role_name, name))?;

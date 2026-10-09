@@ -216,15 +216,25 @@ impl FastaRecord {
     }
 
     /// The record of a `bio` record (the bridge of the port plan, §1): only where LOSAT's
-    /// checks of today guarantee that `bio` reads the input as NCBI's reader does (ABI v1,
-    /// the adapter until step S10, TBLASTN's query until step S8). `n` is the `N` of the
-    /// local ID (`Query_N`, `Subject_N`, 1-based) and `prefix` its prefix; `protein` is the
-    /// molecule of the input (`fAssumeProt`, else `fAssumeNuc`).
+    /// checks guarantee that `bio` reads the input as NCBI's reader does (ABI v1, plan TD-1;
+    /// the Web adapter until step S10). `n` is the `N` of the local ID (`Query_N`,
+    /// `Subject_N`, 1-based) and `prefix` its prefix; `protein` is the molecule of the input
+    /// (`fAssumeProt`, else `fAssumeNuc`).
     ///
     /// The title is the defline as `bio` splits it (the ID, a space and the description),
-    /// which is NCBI's title for the deflines those checks accept; the messages are the
-    /// title warning that NCBI writes at the end of such a record.
+    /// without the white space at its start, which NCBI's defline parser skips (`bio` gives
+    /// such a defline an empty ID); that is NCBI's title for the deflines those checks
+    /// accept. The messages are the title warning that NCBI writes at the end of such a
+    /// record.
     ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta_reader_utils.cpp:209-213
+    /// ```c++
+    ///     // trim leading whitespace from title (is this appropriate?)
+    ///     while (title_start < len
+    ///         &&  isspace((unsigned char)defline[title_start])) {
+    ///         ++title_start;
+    ///     }
+    /// ```
     /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:2038-2043
     /// ```c++
     ///     NStr::TruncateSpacesInPlace(processed_title);
@@ -259,15 +269,25 @@ impl FastaRecord {
     ///         }
     /// ```
     /// A nucleotide `U` is stored as `T` (`u` as `t` inside the lowercase mask), as the
-    /// reader stores it (`reader.rs`, `assemble_seq`) and as `blastn::input::with_u_as_t`
-    /// does for the `bio` records of today.
+    /// reader stores it (`reader.rs`, `assemble_seq`).
     pub fn from_bio(
         record: &bio::io::fasta::Record,
         n: usize,
         prefix: &str,
         protein: bool,
     ) -> Self {
-        let title = InputRecord::title_bytes(record).into_owned();
+        let mut title = Vec::with_capacity(record.id().len() + 1);
+        title.extend_from_slice(record.id().as_bytes());
+        if let Some(desc) = record.desc() {
+            title.push(b' ');
+            title.extend_from_slice(desc.as_bytes());
+        }
+        // `isspace` of the C locale.
+        let start = title
+            .iter()
+            .position(|&byte| !matches!(byte, b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r'))
+            .unwrap_or(title.len());
+        title.drain(..start);
         let mut sequence = record.seq().to_vec();
         if !protein {
             for residue in sequence.iter_mut() {
@@ -293,10 +313,9 @@ impl FastaRecord {
 }
 
 /// A record as the programs use it: its residues, the record cut to a range, and its title
-/// bytes. A temporary bridge of the port plan (§1): it is implemented for `FastaRecord` and
-/// for the `bio` records that the programs read until they switch reader (steps S3-S8), so
-/// that the ranges (`seq_range.rs`), the query warnings, the masks and the lookup tables
-/// build for both; step S8 deletes the `bio` implementation.
+/// bytes (the ranges in `seq_range.rs`, the query warnings, the masks and the lookup
+/// tables). The bridge of the port plan (§1) also implemented it for the `bio` records until
+/// every program read with NCBI's reader (step S8).
 pub trait InputRecord: Sized {
     /// The residues (the search's letters, lower case where the lowercase mask covers
     /// them).
@@ -332,35 +351,6 @@ impl InputRecord for FastaRecord {
 
     fn title_bytes(&self) -> Cow<'_, [u8]> {
         Cow::Borrowed(&self.title)
-    }
-}
-
-/// The `bio` records of today: the title is the ID, then a space and the description when
-/// there is one (`FastaRecord::from_bio`).
-impl InputRecord for bio::io::fasta::Record {
-    fn seq(&self) -> &[u8] {
-        bio::io::fasta::Record::seq(self)
-    }
-
-    fn cut(&self, from: usize, to_exclusive: usize) -> Self {
-        bio::io::fasta::Record::with_attrs(
-            self.id(),
-            self.desc(),
-            &bio::io::fasta::Record::seq(self)[from..to_exclusive],
-        )
-    }
-
-    fn title_bytes(&self) -> Cow<'_, [u8]> {
-        match self.desc() {
-            Some(desc) => {
-                let mut title = Vec::with_capacity(self.id().len() + 1 + desc.len());
-                title.extend_from_slice(self.id().as_bytes());
-                title.push(b' ');
-                title.extend_from_slice(desc.as_bytes());
-                Cow::Owned(title)
-            }
-            None => Cow::Borrowed(self.id().as_bytes()),
-        }
     }
 }
 

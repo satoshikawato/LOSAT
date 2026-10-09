@@ -13,9 +13,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use run_local_support::{
-    assert_observer_ranges, read_records, reader_records, run_formats, Run, TempFasta,
-};
+use run_local_support::{assert_observer_ranges, reader_records, run_formats, Run, TempFasta};
 use LOSAT::algorithm::tblastn::TblastnArgs;
 use LOSAT::api::local_blast::{run_local_tblastn, FormatOutput, OutputSink, ReportOutputs};
 use LOSAT::blastinput::fasta_reader::{FastaRecord, ReaderConfig};
@@ -38,14 +36,9 @@ fn tblastn_args(query: &str, subject: &str, extra: &[&str]) -> TblastnArgs {
     }
 }
 
-/// The queries as the CLI searches them until step S8 of the port plan: the `bio` records,
-/// made NCBI's reader's records with `FastaRecord::from_bio`.
+/// The queries as NCBI's protein reader reads them (the CLI's `fasta_reader`).
 fn queries(path: &Path) -> Vec<FastaRecord> {
-    read_records(path)
-        .iter()
-        .enumerate()
-        .map(|(index, record)| FastaRecord::from_bio(record, index + 1, "Query_", true))
-        .collect()
+    reader_records(path, ReaderConfig::query("TBLASTN", true, true))
 }
 
 /// The subjects as NCBI's nucleotide reader reads them (the CLI's `fasta_reader`).
@@ -523,6 +516,66 @@ fn subjects_without_residues_are_kept_with_ncbis_warnings() {
             "0" => assert!(report.contains("***** No hits found *****"), "{report}"),
             "6" => assert!(report.is_empty(), "{report}"),
             _ => assert!(report.contains("# 0 hits found"), "{report}"),
+        }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:632-652
+// ```c++
+//         } catch (const CException& e) {
+//             ...
+//             CRef<CSearchMessage> m
+//                 (new CSearchMessage(eBlastSevWarning, index, e.GetMsg()));
+//             messages[index].push_back(m);
+//             s_InvalidateQueryContexts(qinfo, index);
+//         }
+//     ...
+//     // Validate that at least one query context is valid
+//     if (BlastSetup_Validate(qinfo, NULL) != 0 && messages.HasMessages()) {
+//         NCBI_THROW(CBlastException, eSetup, messages.ToString());
+//     }
+// ```
+// A query without residues is set up without data: its warning comes before its report and
+// the other queries' rows do not change; a batch of such queries only stops the run with
+// NCBI's set-up error (exit 3), after the outfmt 0 prolog (oracle `tblastn.batch_late_empty.*`,
+// `tblastn.both_all_empty_records.*`).
+#[test]
+fn queries_without_residues_are_kept_and_a_batch_of_them_stops() {
+    let query = repository("docs/evidence/tlosan_stage_c/run_20260923/query.faa");
+    let subject = repository("docs/evidence/tlosan_stage_c/run_20260923/subjects.fna");
+    let first = queries(&query)[0].sequence.clone();
+    let with_empty = TempFasta::new(
+        "tblastn_empty_query.faa",
+        &[("q1 first", first.as_slice()), ("q2 no letters", &b""[..])],
+    );
+    let (code, rows, stderr) = cli_run(&with_empty.0, &subject, &["-outfmt", "6"]);
+    assert_eq!(code, Some(0), "{stderr}");
+    assert_eq!(
+        stderr,
+        "Warning: [tblastn] Query_2 q2 no letters: Sequence contains no data \n"
+    );
+    let only_first = TempFasta::new("tblastn_first_query.faa", &[("q1 first", first.as_slice())]);
+    let (_, expected_rows, _) = cli_run(&only_first.0, &subject, &["-outfmt", "6"]);
+    assert!(!rows.is_empty() && rows == expected_rows);
+    let all_empty = TempFasta::new(
+        "tblastn_all_empty_query.faa",
+        &[("e1", &b""[..]), ("e2", &b""[..])],
+    );
+    for outfmt in ["0", "6", "7"] {
+        let (code, stdout, stderr) = cli_run(&all_empty.0, &subject, &["-outfmt", outfmt]);
+        assert_eq!(code, Some(3), "{stderr}");
+        assert_eq!(
+            stderr,
+            "BLAST engine error: Warning: Sequence contains no data Warning: Sequence contains no data \n"
+        );
+        let report = String::from_utf8_lossy(&stdout);
+        if outfmt == "0" {
+            assert!(
+                report.starts_with("TBLASTN 2.17.0+\n") && report.ends_with(" total letters\n\n"),
+                "{report}"
+            );
+        } else {
+            assert!(report.is_empty(), "{report}");
         }
     }
 }

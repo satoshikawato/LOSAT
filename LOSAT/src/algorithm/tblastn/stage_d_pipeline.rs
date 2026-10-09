@@ -1110,7 +1110,7 @@ fn query_set_setup(
     // BlastAaLookupTableNew(..., lookup_options->word_size, ...);
     // The active matrix determines context validity; the active word size
     // determines the lookup state used by Stage C.
-    let (_, contexts) = build_ncbi_lookup_for_profile(
+    let (_, mut contexts) = build_ncbi_lookup_for_profile(
         &working_frames,
         inputs.scoring.threshold,
         inputs.ungapped,
@@ -1118,6 +1118,30 @@ fn query_set_setup(
         inputs.scoring.matrix,
         inputs.scoring.word_size,
     );
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:632-640
+    // ```c++
+    //         } catch (const CException& e) {
+    //             ...
+    //             CRef<CSearchMessage> m
+    //                 (new CSearchMessage(eBlastSevWarning, index, e.GetMsg()));
+    //             messages[index].push_back(m);
+    //             s_InvalidateQueryContexts(qinfo, index);
+    //         }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2771-2772
+    // ```c
+    //       if ( !contexts[context].is_valid )
+    //           continue;
+    // ```
+    // A query without letters (`Sequence contains no data`) is invalidated when the queries
+    // are set up, before its Karlin-Altschul parameters would be computed: it is never
+    // searched, and its effective lengths stay 0 (`local_parameters_for_call`).
+    for context in &mut contexts {
+        if context.aa_len == 0 {
+            context.is_valid = false;
+            context.karlin_params = Default::default();
+        }
+    }
     let query_contexts: Vec<_> = queries
         .iter()
         .zip(&contexts)

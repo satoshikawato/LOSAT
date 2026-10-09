@@ -1053,6 +1053,14 @@ label.inline {
   max-width: 100%;
 }
 
+/* A select whose box can cut its chosen label (the run, a genetic code; in their clipping spans)
+   keeps room for its arrow: Chromium drew the cut label under the arrow (W4b second screen
+   review L1). */
+.results-run-select select,
+.select-clip select {
+  padding-right: 24px;
+}
+
 .results-message {
   padding: 6px 10px;
   border: 1px solid var(--border);

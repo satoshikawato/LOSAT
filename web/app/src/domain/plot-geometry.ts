@@ -3,7 +3,10 @@
 // positions growing downward, and the same scale on both axes. Positions run from 0 to the
 // record's length, and an HSP is drawn from (qstart, sstart) to (qend, send) of its record, as the
 // script draws it. The view is the visible range; zoom keeps the two axes' spans in the ratio of
-// the whole plot, so that the scale stays the same on both axes at every zoom.
+// the whole plot, so that the scale stays the same on both axes at every zoom. Where one axis is
+// protein and the other nucleotide (TBLASTN, BLASTX), a residue counts as 3 letters for the
+// proportions only (S13b decision 26), so that the HSPs run at 45°; positions stay the records'.
+import type { SequenceKind } from './programs';
 
 /** The lengths of the query (x) and the subject (y) records, in their letters. */
 export interface Extent {
@@ -43,17 +46,36 @@ export interface PlotSize {
   readonly toScale: boolean;
 }
 
+/** The letters that one position of each axis counts as for the plot's proportions. */
+export interface Weights {
+  readonly x: number;
+  readonly y: number;
+}
+
+export const EQUAL_WEIGHTS: Weights = { x: 1, y: 1 };
+
 /**
- * The size of the plot area (inside the frame): the longer sequence spans `available` pixels (at
- * most MAX_SIDE), the shorter one in proportion, but at least MIN_SIDE.
+ * The weights of the axes of a query and a subject of these kinds: a protein axis against a
+ * nucleotide one counts 3 per residue (a codon; TBLASTN's query, BLASTX's subject), else 1 each.
  */
-export function plotSize(extent: Extent, available: number): PlotSize {
+export function codonWeights(query: SequenceKind, subject: SequenceKind): Weights {
+  if (query === subject) return EQUAL_WEIGHTS;
+  return query === 'protein' ? { x: 3, y: 1 } : { x: 1, y: 3 };
+}
+
+/**
+ * The size of the plot area (inside the frame): the longer sequence (its length times its
+ * weight) spans `available` pixels (at most MAX_SIDE), the shorter one in proportion, but at least
+ * MIN_SIDE.
+ */
+export function plotSize(extent: Extent, available: number, weights: Weights = EQUAL_WEIGHTS): PlotSize {
   const longest = Math.max(1, Math.floor(Math.min(MAX_SIDE, available)));
-  const longer = Math.max(extent.x, extent.y, 1);
-  const side = (length: number) => (longest * Math.max(length, 0)) / longer;
+  const [x, y] = [Math.max(extent.x, 0) * weights.x, Math.max(extent.y, 0) * weights.y];
+  const longer = Math.max(x, y, 1);
+  const side = (length: number) => (longest * length) / longer;
   const minimum = Math.min(MIN_SIDE, longest);
-  const width = side(extent.x);
-  const height = side(extent.y);
+  const width = side(x);
+  const height = side(y);
   return {
     width: Math.max(minimum, Math.round(width)),
     height: Math.max(minimum, Math.round(height)),
@@ -140,6 +162,79 @@ export function segmentDistance(x: number, y: number, ax: number, ay: number, bx
   const length = lx * lx + ly * ly;
   const t = length === 0 ? 0 : Math.max(0, Math.min(1, ((x - ax) * lx + (y - ay) * ly) / length));
   return Math.hypot(x - (ax + t * lx), y - (ay + t * ly));
+}
+
+/**
+ * Whether a line from (ax, ay) to (bx, by) can show in the view: its bounding box, widened by
+ * `padX` and `padY` (the reach of its stroke beyond the line, in the axes' positions), meets the
+ * view. A line that is left out leaves no pixel in the frame.
+ */
+export function lineNearView(ax: number, ay: number, bx: number, by: number, view: View, padX: number, padY: number): boolean {
+  return (
+    (ax > bx ? ax : bx) >= view.x0 - padX &&
+    (ax < bx ? ax : bx) <= view.x1 + padX &&
+    (ay > by ? ay : by) >= view.y0 - padY &&
+    (ay < by ? ay : by) <= view.y1 + padY
+  );
+}
+
+/** The part of the segment from (ax, ay) to (bx, by) inside a box (Liang–Barsky), or undefined if none. */
+export function clipToBox(ax: number, ay: number, bx: number, by: number, box: Box): [number, number, number, number] | undefined {
+  const [dx, dy] = [bx - ax, by - ay];
+  let [t0, t1] = [0, 1];
+  // For each edge: the segment's motion towards the outside, and the room inside at its start.
+  const edges: readonly (readonly [number, number])[] = [
+    [-dx, ax - box.left],
+    [dx, box.left + box.width - ax],
+    [-dy, ay - box.top],
+    [dy, box.top + box.height - ay],
+  ];
+  for (const [p, q] of edges) {
+    if (p === 0) {
+      if (q < 0) return undefined;
+      continue;
+    }
+    const r = q / p;
+    if (p < 0) {
+      if (r > t1) return undefined;
+      if (r > t0) t0 = r;
+    } else {
+      if (r < t0) return undefined;
+      if (r < t1) t1 = r;
+    }
+  }
+  return [ax + t0 * dx, ay + t0 * dy, ax + t1 * dx, ay + t1 * dy];
+}
+
+/**
+ * The line nearest to a point within `reach` pixels, or -1: lines `0 .. count - 1` with their
+ * ends in pixels (`ends`). Only what the frame `box` shows counts: a point outside the frame picks
+ * nothing, and a line is measured by its part inside the frame, so that a line drawn outside the
+ * view (or its part outside it) is never picked. Of lines at the same distance, the last wins.
+ */
+export function pickLine(
+  x: number,
+  y: number,
+  count: number,
+  ends: (i: number) => readonly [number, number, number, number],
+  box: Box,
+  reach: number,
+): number {
+  if (x < box.left || x > box.left + box.width || y < box.top || y > box.top + box.height) return -1;
+  let best = -1;
+  let bestDistance = reach;
+  for (let i = 0; i < count; i++) {
+    const [ax, ay, bx, by] = ends(i);
+    if (Math.max(ax, bx) < x - reach || Math.min(ax, bx) > x + reach || Math.max(ay, by) < y - reach || Math.min(ay, by) > y + reach) continue;
+    const seen = clipToBox(ax, ay, bx, by, box);
+    if (seen === undefined) continue;
+    const d = segmentDistance(x, y, ...seen);
+    if (d <= bestDistance) {
+      best = i;
+      bestDistance = d;
+    }
+  }
+  return best;
 }
 
 /**

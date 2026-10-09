@@ -1,15 +1,21 @@
-// The dot plot's geometry (src/domain/plot-geometry.ts): the same scale on both axes, the mapping
-// between positions and pixels with the origin at the top left, zoom and pan within the records,
-// and the placing of the HSP popup.
+// The dot plot's geometry (src/domain/plot-geometry.ts): the same scale on both axes (3 letters a
+// residue on a protein axis against a nucleotide one), the mapping between positions and pixels
+// with the origin at the top left, zoom and pan within the records, the lines that can show in the
+// view and the line under a point, and the placing of the HSP popup.
 import { describe, expect, it } from 'vitest';
 import {
   clampView,
+  clipToBox,
+  codonWeights,
+  EQUAL_WEIGHTS,
   frameRange,
   fromPixelX,
   fromPixelY,
   fullView,
+  lineNearView,
   MIN_SIDE,
   panView,
+  pickLine,
   placeBox,
   plotSize,
   segmentDistance,
@@ -32,6 +38,20 @@ describe('plotSize', () => {
     expect(plotSize({ x: 5000, y: 5000 }, 1400)).toEqual({ width: 1000, height: 1000, toScale: true });
     const thin = plotSize({ x: 100000, y: 500 }, 900);
     expect(thin).toEqual({ width: 900, height: MIN_SIDE, toScale: false });
+  });
+
+  it('counts 3 letters a residue on a protein axis against a nucleotide one (TBLASTN, BLASTX; decision 26)', () => {
+    expect(codonWeights('protein', 'nucleotide')).toEqual({ x: 3, y: 1 });
+    expect(codonWeights('nucleotide', 'protein')).toEqual({ x: 1, y: 3 });
+    expect(codonWeights('nucleotide', 'nucleotide')).toEqual(EQUAL_WEIGHTS);
+    expect(codonWeights('protein', 'protein')).toEqual(EQUAL_WEIGHTS);
+    // TBLASTN: a 300 aa query against 3,000 nt is 900 against 3,000, to scale (not 60 px raised to 120).
+    expect(plotSize({ x: 300, y: 3000 }, 600)).toEqual({ width: MIN_SIDE, height: 600, toScale: false });
+    expect(plotSize({ x: 300, y: 3000 }, 600, codonWeights('protein', 'nucleotide'))).toEqual({ width: 180, height: 600, toScale: true });
+    // BLASTX: 900 nt against 300 aa is square.
+    expect(plotSize({ x: 900, y: 300 }, 600, codonWeights('nucleotide', 'protein'))).toEqual({ width: 600, height: 600, toScale: true });
+    // A short protein against a genome still meets the 120 px minimum, and says so.
+    expect(plotSize({ x: 100, y: 1_000_000 }, 800, codonWeights('protein', 'nucleotide'))).toEqual({ width: MIN_SIDE, height: 800, toScale: false });
   });
 });
 
@@ -104,6 +124,53 @@ describe('zoom and pan', () => {
     expect(edge.x0).toBe(0);
     expect(edge.y1).toBe(180);
     expect(edge.x1).toBeGreaterThanOrEqual(30);
+  });
+});
+
+describe('the lines that show in the view, and the line under a point', () => {
+  it('keeps a line whose stroke reaches into the view, and leaves out one that cannot', () => {
+    const view = { x0: 1000, x1: 2000, y0: 0, y1: 1000 };
+    // 0.002 px a letter (a 1 Mbp pair zoomed 2x): a stroke of 1.5 px reaches 750 letters.
+    const pad = 1.5 / 0.002;
+    expect(lineNearView(100, 10, 600, 20, view, 0, 0)).toBe(false);
+    expect(lineNearView(100, 10, 600, 20, view, pad, pad)).toBe(true);
+    expect(lineNearView(600, 20, 100, 10, view, pad, pad)).toBe(true);
+    expect(lineNearView(0, 10, 200, 20, view, pad, pad)).toBe(false);
+    expect(lineNearView(1500, 1200, 1600, 1700, view, pad, pad)).toBe(true);
+    expect(lineNearView(1500, 1800, 1600, 1900, view, pad, pad)).toBe(false);
+    expect(lineNearView(1200, 300, 1300, 400, view, 0, 0)).toBe(true);
+  });
+
+  const box = { left: 10, top: 10, width: 100, height: 100 };
+
+  it('clips a segment to a box', () => {
+    expect(clipToBox(20, 20, 80, 80, box)).toEqual([20, 20, 80, 80]);
+    expect(clipToBox(0, 60, 50, 60, box)).toEqual([10, 60, 50, 60]);
+    expect(clipToBox(0, 0, 120, 120, box)).toEqual([10, 10, 110, 110]);
+    expect(clipToBox(0, 40, 9, 52, box)).toBeUndefined();
+    expect(clipToBox(5, 5, 5, 5, box)).toBeUndefined();
+    expect(clipToBox(50, 50, 50, 50, box)).toEqual([50, 50, 50, 50]);
+  });
+
+  it('picks the nearest line within reach by its part inside the frame, and nothing outside the frame', () => {
+    const lines: [number, number, number, number][] = [
+      [0, 40, 9, 52], // wholly left of the frame, 3.6 px from (12, 50)
+      [5, 15, 60, 120], // enters the frame at (10, 24.5): its part 6.7 px from (11, 12) lies outside
+      [20, 20, 80, 80],
+      [0, 60, 50, 60], // crosses the left edge
+      [60, 90, 100, 90],
+      [60, 92, 100, 92],
+    ];
+    const pick = (x: number, y: number) => pickLine(x, y, lines.length, (i) => lines[i]!, box, 8);
+    expect(pick(12, 50)).toBe(-1);
+    expect(pick(11, 12)).toBe(-1);
+    expect(pick(52, 48)).toBe(2);
+    expect(pick(12, 62)).toBe(3);
+    // Outside the frame, nothing; the line at x 12 is 4 px away.
+    expect(pick(8, 60)).toBe(-1);
+    // Of two lines at the same distance, the last.
+    expect(pick(80, 91)).toBe(5);
+    expect(pick(80, 30)).toBe(-1);
   });
 });
 

@@ -11,18 +11,21 @@
 // n and p) act on the same selection as the tables. The wheel alone and a finger moving up or down
 // scroll the page (S13 screen review L4). The grid and the HSPs are drawn on a base canvas, the
 // HSPs by colour and opacity class, one stroke each; hover and selection on a canvas above it, so
-// that they redraw cheaply. Input is gathered and drawn once per animation frame.
+// that they redraw cheaply. Input is gathered and drawn once per animation frame. A TBLASTN or
+// BLASTX plot counts 3 nt per aa for its proportions (S13b decision 26).
 import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, useId, watch } from 'vue';
 import type { HspEntry, HspId, ResultsBrowser, ResultsState } from '../application/results';
 import {
+  codonWeights,
   frameRange,
   fromPixelX,
   fromPixelY,
   fullView,
+  lineNearView,
   panView,
+  pickLine,
   placeBox,
   plotSize,
-  segmentDistance,
   toPixelX,
   toPixelY,
   zoomView,
@@ -49,6 +52,8 @@ const HALO = 'rgba(255, 196, 0, 0.75)';
 const FONT = '12px system-ui, sans-serif';
 const TITLE_FONT = '600 13px system-ui, sans-serif';
 const PICK_PX = 8;
+/** How far a line's stroke reaches beyond the line: half the 3 px dash of a short HSP (the 2 px line reaches 1 px). */
+const STROKE_REACH_PX = 1.5;
 /** Minor ticks and their grid lines closer than this are left out: on a narrow plot they would fill it grey. */
 const MIN_MINOR_PX = 5;
 // Each axis's band, from the outside in: its title, the tick labels, the ticks.
@@ -79,7 +84,8 @@ const subjectId = computed(() => subject.value?.first.sseqid ?? '');
 const units = computed(() => loaded.value?.units ?? { query: '', subject: '' });
 const extent = computed(() => ({ x: Math.max(1, queryLength.value), y: Math.max(1, subjectLength.value) }));
 
-const size = computed(() => plotSize(extent.value, stageWidth.value - MARGIN.left - MARGIN.right));
+const weights = computed(() => (loaded.value === undefined ? undefined : codonWeights(loaded.value.kinds.query, loaded.value.kinds.subject)));
+const size = computed(() => plotSize(extent.value, stageWidth.value - MARGIN.left - MARGIN.right, weights.value));
 const box = computed<Box>(() => ({ left: MARGIN.left, top: MARGIN.top, width: size.value.width, height: size.value.height }));
 const canvasWidth = computed(() => MARGIN.left + size.value.width + MARGIN.right);
 const canvasHeight = computed(() => MARGIN.top + size.value.height + MARGIN.bottom);
@@ -228,8 +234,8 @@ function drawBase(): void {
   }
   context.stroke();
 
-  // The HSPs, batch by batch (colour and opacity set once), one stroke each, lines outside the view
-  // left out. A stroke per line is 2 to 3 times faster than a path of thousands of lines that
+  // The HSPs, batch by batch (colour and opacity set once), one stroke each, lines whose stroke
+  // cannot reach the view left out. A stroke per line is 2 to 3 times faster than a path of thousands of lines that
   // overlap (2,995 repeats: 30 to 45 ms against 70 to 125 ms in Firefox and Chromium, W4b), and
   // overlapping lines of a lower identity darken each other, as the script's separate SVG lines
   // do. Their ends are square (SVG's default, as the script's).
@@ -240,6 +246,7 @@ function drawBase(): void {
   context.lineWidth = 2;
   context.lineCap = 'butt';
   const s = segments.value;
+  const [padX, padY] = [STROKE_REACH_PX / sx, STROKE_REACH_PX / sy];
   s.batches.forEach((members, k) => {
     if (members.length === 0) return;
     const opacity = IDENTITY_CLASSES[k & 3]!.opacity;
@@ -252,7 +259,7 @@ function drawBase(): void {
     const drawn = opacity === 1 ? new Set<string>() : undefined;
     for (const i of members) {
       const [ax, bx, ay, by] = [s.x0[i]!, s.x1[i]!, s.y0[i]!, s.y1[i]!];
-      if ((ax > bx ? ax : bx) < v.x0 || (ax < bx ? ax : bx) > v.x1 || (ay > by ? ay : by) < v.y0 || (ay < by ? ay : by) > v.y1) continue;
+      if (!lineNearView(ax, ay, bx, by, v, padX, padY)) continue;
       const [px0, py0, px1, py1] = [b.left + (ax - v.x0) * sx, b.top + (ay - v.y0) * sy, b.left + (bx - v.x0) * sx, b.top + (by - v.y0) * sy];
       if (drawn !== undefined) {
         const key = `${Math.round(px0)},${Math.round(py0)},${Math.round(px1)},${Math.round(py1)}`;
@@ -395,22 +402,9 @@ function ends(i: number, v = view.value): [number, number, number, number] {
   return [toPixelX(s.x0[i]!, v, b), toPixelY(s.y0[i]!, v, b), toPixelX(s.x1[i]!, v, b), toPixelY(s.y1[i]!, v, b)];
 }
 
-/** The HSP whose line is nearest to a point of the canvas, within PICK_PX, or -1. */
+/** The HSP whose line, as the frame shows it, is nearest to a point of the plot, within PICK_PX, or -1. */
 function pick(x: number, y: number): number {
-  const b = box.value;
-  if (x < b.left - PICK_PX || x > b.left + b.width + PICK_PX || y < b.top - PICK_PX || y > b.top + b.height + PICK_PX) return -1;
-  let best = -1;
-  let bestDistance = PICK_PX;
-  for (let i = 0; i < segments.value.list.length; i++) {
-    const [ax, ay, bx, by] = ends(i);
-    if (Math.max(ax, bx) < x - PICK_PX || Math.min(ax, bx) > x + PICK_PX || Math.max(ay, by) < y - PICK_PX || Math.min(ay, by) > y + PICK_PX) continue;
-    const d = segmentDistance(x, y, ax, ay, bx, by);
-    if (d <= bestDistance) {
-      best = i;
-      bestDistance = d;
-    }
-  }
-  return best;
+  return pickLine(x, y, segments.value.list.length, (i) => ends(i), box.value, PICK_PX);
 }
 
 // --- zoom, pan and selection ---------------------------------------------------------------------
@@ -667,13 +661,14 @@ const framed = (hsp: HspEntry) => hsp.queryFrame !== undefined || hsp.subjectFra
           ref="base"
           class="plot-base"
           tabindex="0"
-          role="img"
-          :aria-label="`Dot plot of ${segments.list.length} HSPs. Use + and -, or Ctrl or ⌘ and the mouse wheel, to zoom; the arrow keys to move; n and p to select the next or previous HSP; Enter to show the selected HSP.`"
+          role="application"
+          :aria-label="`Dot plot of ${segments.list.length} HSPs. Use + and -, or Ctrl or ⌘ and the mouse wheel, to zoom; the arrow keys to move; n and p to select the next or previous HSP; Enter to show the selected HSP, and Escape to close it.`"
           :style="{ width: `${canvasWidth}px`, height: `${canvasHeight}px` }"
           data-testid="dotplot-canvas"
           :data-segments="segments.list.length"
           :data-selected="selected ? `${selected.id.qIdx}:${selected.id.rank}` : ''"
           :data-view="viewText"
+          :data-plot="`${size.width}x${size.height}`"
           :data-targets="targets"
           @pointerdown="onPointerDown"
           @pointermove="onPointerMove"

@@ -704,6 +704,17 @@ for (const c of PROGRAM_CASES) {
       `query ${fields[6]}–${fields[7]} ${c.units.query}, subject ${fields[8]}–${fields[9]} ${c.units.subject}` +
         (translated ? `, frames ${frames.replace('/', ' / ')}.` : '.'),
     );
+    // The same scale on both axes, a residue counting as 3 nt against nucleotides (S13b decision
+    // 26: TBLASTN's query), unless the shorter side was raised to 120 px (then the note says so).
+    const [queryLength, subjectLength] = /\(([\d,]+) \w+\) against subject .* \(([\d,]+) \w+\)\./
+      .exec(await text(page.getByTestId('dotplot')))!
+      .slice(1)
+      .map((n) => Number(n.replace(/,/g, '')));
+    const ratio = (queryLength! * (c.units.query === 'aa' && c.units.subject === 'nt' ? 3 : 1)) / subjectLength!;
+    const [width, height] = (await canvas.getAttribute('data-plot'))!.split('x').map(Number);
+    if ((await page.getByTestId('dotplot-scale-note').count()) === 0) {
+      expect(Math.min(Math.abs(width! - height! * ratio), Math.abs(height! - width! / ratio))).toBeLessThanOrEqual(0.5);
+    } else expect(Math.min(width!, height!)).toBe(120);
 
     // Run details: the command of each format is the Outputs view's, and the verification badge.
     await show(page, 'details');
@@ -1315,7 +1326,13 @@ test('the dot plot: the HSPs of the pair on a canvas; zoom; choosing an HSP on i
     await page.getByTestId('dotplot-reset').click();
     await expect(canvas).toHaveAttribute('data-view', full);
   }
-  await expect(canvas).toHaveAttribute('aria-label', /Ctrl or ⌘ and the mouse wheel/);
+  // Screen readers: the plot is an application (they pass its keys to it, as for the Graphic
+  // Summary), whose name gives the keys.
+  await expect(
+    page.getByRole('application', {
+      name: /^Dot plot of 2 HSPs\. .*Ctrl or ⌘ and the mouse wheel.* n and p to select the next or previous HSP; Enter to show the selected HSP, and Escape to close it\.$/,
+    }),
+  ).toHaveAttribute('data-testid', 'dotplot-canvas');
   await expect(canvas).toHaveCSS('touch-action', 'pan-y');
   await expect(page.getByTestId('dotplot-legend-selected')).toBeVisible();
 
@@ -1371,6 +1388,7 @@ test('the dot plot: the HSPs of the pair on a canvas; zoom; choosing an HSP on i
   await page.keyboard.press('Enter');
   await expect(popup).toHaveAttribute('data-hsp', secondId);
   await expect(popup).toBeFocused();
+  await expect(page.getByRole('dialog', { name: `HSP ${Number(secondId.split(':')[1]) + 1}` })).toHaveAttribute('data-testid', 'dotplot-popup');
   await page.keyboard.press('Escape');
   await expect(popup).toHaveCount(0);
   await expect(canvas).toBeFocused();

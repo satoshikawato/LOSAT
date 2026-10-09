@@ -14,6 +14,7 @@ import {
   type IndexedRecord,
   type RecordKey,
 } from '../../domain/dataset';
+import { hspTable, type HspTable } from '../../domain/hsp-table';
 import type { OutputFormat } from '../../domain/output-format';
 import type { InputRole, ProgramId } from '../../domain/programs';
 import type {
@@ -239,8 +240,21 @@ export class DataService implements DataGateway {
     return this.readStream(runId, format);
   }
 
+  async readOutputRange(runId: string, format: OutputFormat, start: number, end: number): Promise<Uint8Array> {
+    const run = this.runs.get(runId);
+    if (run?.state !== 'committed') throw new Error(`run ${runId} has no committed result`);
+    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end < start || end > run.lengths[format]) {
+      throw new RangeError(`bytes [${start}, ${end}) are not in outfmt ${format} of run ${runId} (${run.lengths[format]} bytes)`);
+    }
+    return this.deps.store.read(blockPath(run.token, format), start, end - start);
+  }
+
   async readHits(runId: string): Promise<readonly HspRecord[]> {
     return parseHitLines(new TextDecoder().decode(await this.readStream(runId, HITS_STREAM)));
+  }
+
+  async readHitTable(runId: string): Promise<HspTable> {
+    return hspTable(await this.readHits(runId));
   }
 
   async readDiagnostics(runId: string): Promise<string> {

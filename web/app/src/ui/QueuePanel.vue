@@ -8,6 +8,18 @@ import { programById } from '../domain/programs';
 import { formatBytes, formatDuration } from './format';
 
 const props = defineProps<{ coordinator: Coordinator; runs: readonly RunView[] }>();
+defineEmits<{ 'open-results': [runId: string] }>();
+
+/**
+ * The runs in the order that matters while working (S12's screen review L-e): the running
+ * one first, then those waiting in queue order, then the finished ones, newest first.
+ */
+const ordered = computed(() => {
+  const active = props.runs.filter((run) => !isTerminal(run.status) && run.status !== 'queued');
+  const waiting = props.runs.filter((run) => run.status === 'queued');
+  const finished = props.runs.filter((run) => isTerminal(run.status)).reverse();
+  return [...active, ...waiting, ...finished];
+});
 
 const PHASE_LABELS: Readonly<Record<RunStatus, string>> = {
   queued: 'Waiting',
@@ -46,12 +58,17 @@ function elapsed(run: RunView): string | undefined {
   return formatDuration((endedAt ?? now.value) - startedAt);
 }
 
-/** The first run of a group shows the group's cancel button while any of its runs can be cancelled. */
+/** The card's second line: the phase of a waiting or active run; "Took" (and the time) or "Not started" for a finished one. */
+function phase(run: RunView): string {
+  if (!isTerminal(run.status)) return PHASE_LABELS[run.status];
+  return run.record.startedAt === undefined ? 'Not started' : 'Took';
+}
+
+/** The first listed run of a group that can be cancelled shows the group's cancel button. */
 function groupCancellable(run: RunView): boolean {
   const group = run.snapshot.group;
   if (group === undefined) return false;
-  const members = props.runs.filter((other) => other.snapshot.group?.groupId === group.groupId);
-  return members[0] === run && members.some(cancellable);
+  return ordered.value.find((other) => other.snapshot.group?.groupId === group.groupId && cancellable(other)) === run;
 }
 
 function phaseTimes(run: RunView): string {
@@ -70,24 +87,35 @@ function phaseTimes(run: RunView): string {
     <p v-if="runs.length === 0" class="muted">No runs yet.</p>
     <ol class="queue" data-testid="queue">
       <li
-        v-for="run in runs"
+        v-for="run in ordered"
         :key="run.snapshot.runId"
         class="run"
         :data-status="run.status"
         :data-testid="`run-${run.snapshot.number}`"
       >
-        <div class="run-line">
+        <!-- One layout for every card, at every width (W4b screen review L7): the run and its
+             status, then its phase and time, then its actions at the right; what it searched
+             under them. The phase and the actions are on the same lines in a waiting and a
+             running card. -->
+        <div class="run-head">
           <strong>Run {{ run.snapshot.number }}</strong>
           <span>{{ programById(run.snapshot.program).label }}</span>
-          <span class="status" :data-status="run.status" :data-testid="`run-${run.snapshot.number}-status`">{{
-            run.status
-          }}</span>
-          <span v-if="!isTerminal(run.status) && run.status !== 'queued'" class="phase" :data-testid="`run-${run.snapshot.number}-phase`">
-            {{ PHASE_LABELS[run.status] }}
-          </span>
-          <span v-if="elapsed(run)" class="elapsed muted" :data-testid="`run-${run.snapshot.number}-elapsed`">
-            {{ elapsed(run) }}
-          </span>
+          <span class="status" :data-status="run.status" :data-testid="`run-${run.snapshot.number}-status`">{{ run.status }}</span>
+        </div>
+        <div class="run-progress" :data-testid="`run-${run.snapshot.number}-progress`">
+          <span class="phase" :data-testid="`run-${run.snapshot.number}-phase`">{{ phase(run) }}</span>
+          <span v-if="elapsed(run)" class="elapsed muted" :data-testid="`run-${run.snapshot.number}-elapsed`">{{ elapsed(run) }}</span>
+        </div>
+        <div v-if="cancellable(run) || run.status === 'completed'" class="run-actions" :data-testid="`run-${run.snapshot.number}-actions`">
+          <button
+            v-if="groupCancellable(run)"
+            type="button"
+            class="link"
+            :data-testid="`run-${run.snapshot.number}-cancel-group`"
+            @click="coordinator.cancelGroup(run.snapshot.group!.groupId)"
+          >
+            Cancel the group
+          </button>
           <button
             v-if="cancellable(run)"
             type="button"
@@ -96,6 +124,17 @@ function phaseTimes(run: RunView): string {
           >
             Cancel
           </button>
+          <button
+            v-if="run.status === 'completed'"
+            type="button"
+            :data-testid="`run-${run.snapshot.number}-open`"
+            @click="$emit('open-results', run.snapshot.runId)"
+          >
+            Open results
+          </button>
+        </div>
+        <div v-if="run.snapshot.title" class="run-title" :data-testid="`run-${run.snapshot.number}-title`">
+          {{ run.snapshot.title }}
         </div>
         <div class="run-inputs muted">
           {{ run.snapshot.query.name }} vs {{ run.snapshot.subject.name }}
@@ -107,15 +146,6 @@ function phaseTimes(run: RunView): string {
           Options:
           <template v-for="(word, i) in options(run)" :key="i"><span class="word">{{ word }}</span>{{ ' ' }}</template>
         </div>
-        <button
-          v-if="groupCancellable(run)"
-          type="button"
-          class="link"
-          :data-testid="`run-${run.snapshot.number}-cancel-group`"
-          @click="coordinator.cancelGroup(run.snapshot.group!.groupId)"
-        >
-          Cancel the group
-        </button>
         <p v-if="run.record.error" class="error" :data-testid="`run-${run.snapshot.number}-error`">{{ run.record.error }}</p>
         <details v-if="run.record.startedAt !== undefined" class="diagnostics">
           <summary>Details</summary>

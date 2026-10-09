@@ -1,65 +1,224 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+// The results screen (plan §5.7, design §3.4), in the order and words of NCBI BLAST's results
+// page (S13b, docs/web/ncbi_ui_mapping.md §2): the run's header block with "Filter Results"
+// beside it, "Results for" (the query) and the notices, then the tabs Descriptions, Graphic
+// Summary, Alignments and Dot Plot, and LOSAT's Run details and Outputs. Every tab follows one
+// selection, held by the HSP's identity (application/results.ts).
+import { computed, nextTick, ref, watch } from 'vue';
 import type { Coordinator, RunView } from '../application/coordinator';
-import { toShellCommand } from '../domain/argv';
-import { programById } from '../domain/programs';
-import { OUTPUT_FORMATS, type OutputFormat } from '../domain/output-format';
+import type { HspId, ResultsBrowser } from '../application/results';
+import { programById, residueUnit } from '../domain/programs';
+import { useStore } from './useStore';
+import AlignmentsView from './AlignmentsView.vue';
+import CommandText from './CommandText.vue';
+import DotPlot from './DotPlot.vue';
+import { formatCount } from './format';
+import GraphicSummary from './GraphicSummary.vue';
+import HspTable from './HspTable.vue';
+import OutputsView from './OutputsView.vue';
+import QueryPicker from './QueryPicker.vue';
+import ResultFilters from './ResultFilters.vue';
+import ResultNotices from './ResultNotices.vue';
+import RunDetails from './RunDetails.vue';
+import SubjectTable from './SubjectTable.vue';
+import VerificationBadge from './VerificationBadge.vue';
 
-const props = defineProps<{ coordinator: Coordinator; runs: readonly RunView[] }>();
-const completed = computed(() => props.runs.filter((run) => run.status === 'completed'));
-const selectedId = ref<string>();
-const format = ref<OutputFormat>(6);
-const text = ref('');
-/** Which run and format `text` shows ("<number>:<format>"), once it is read. */
-const shown = ref('');
+export type ResultsView = 'hits' | 'graphic' | 'alignment' | 'dotplot' | 'details' | 'outputs';
 
-const selected = computed(
-  () => completed.value.find((run) => run.snapshot.runId === selectedId.value) ?? completed.value.at(-1),
-);
+const props = defineProps<{ coordinator: Coordinator; results: ResultsBrowser; runs: readonly RunView[] }>();
+/** The tab shown. The main view keeps it, so that another run, or the results shown again, open on the same tab. */
+const view = defineModel<ResultsView>('view', { default: 'hits' });
+const state = useStore(props.results.state);
+const heading = ref<HTMLElement>();
+const alignments = ref<InstanceType<typeof AlignmentsView>>();
 
+/** NCBI's tabs, then LOSAT's. The test IDs are W4's (the hits view, the HSP's panes, the run's views). */
+const TABS: readonly { readonly view: ResultsView; readonly label: string; readonly testid: string }[] = [
+  { view: 'hits', label: 'Descriptions', testid: 'results-view-hits' },
+  { view: 'graphic', label: 'Graphic Summary', testid: 'results-view-graphic' },
+  { view: 'alignment', label: 'Alignments', testid: 'pane-alignment' },
+  { view: 'dotplot', label: 'Dot Plot', testid: 'pane-dotplot' },
+  { view: 'details', label: 'Run details', testid: 'results-view-details' },
+  { view: 'outputs', label: 'Outputs', testid: 'results-view-outputs' },
+];
+const HITS_VIEWS: readonly ResultsView[] = ['hits', 'graphic', 'alignment', 'dotplot'];
+
+/**
+ * Brings the panel's heading into view and moves the focus to it (a run opened from the
+ * queue). The scroll is instant: Firefox ended a smooth one early while the run was read.
+ */
+function showHeading(): void {
+  heading.value?.scrollIntoView({ block: 'start' });
+  heading.value?.focus({ preventScroll: true });
+}
+defineExpose({ showHeading });
+
+/** Every run of the working session, newest first: a run without results says why. */
+const choices = computed(() => [...props.runs].reverse());
+const selected = computed(() => props.runs.find((run) => run.snapshot.runId === state.value.runId));
+const loaded = computed(() => state.value.loaded);
+
+// With no run chosen, show the newest completed one.
 watch(
-  [selected, format],
-  async ([run, fmt]) => {
-    shown.value = '';
-    const value = run === undefined ? '' : await props.coordinator.readOutput(run.snapshot.runId, fmt);
-    // A later selection may have been read first.
-    if (run !== selected.value || fmt !== format.value) return;
-    text.value = value;
-    shown.value = run === undefined ? '' : `${run.snapshot.number}:${fmt}`;
+  () => props.runs.filter((run) => run.status === 'completed').at(-1)?.snapshot.runId,
+  (runId) => {
+    if (runId !== undefined && state.value.runId === undefined) void props.results.open(runId);
   },
   { immediate: true },
 );
+
+function runLabel(run: RunView): string {
+  const { number, program, query, subject } = run.snapshot;
+  const status = run.status === 'completed' ? '' : ` (${run.status})`;
+  return `Run ${number} · ${programById(program).label} · ${query.name} vs ${subject.name}${status}`;
+}
+
+/** The options of the run's argv: the words after the program and the two inputs (plan §5.3). */
+function options(run: RunView): string {
+  const words = run.snapshot.argv.slice(5);
+  return words.length === 0 ? 'defaults' : words.join(' ');
+}
+
+/** The program and the task that the search used (the argv's, or the engine's default once the run is read). */
+const programText = computed(() => {
+  const run = selected.value;
+  if (run === undefined) return '';
+  const task = loaded.value?.run.snapshot.runId === run.snapshot.runId ? loaded.value.task : undefined;
+  const label = programById(run.snapshot.program).label;
+  return task === undefined ? label : `${label} (task ${task})`;
+});
+const units = computed(() => {
+  const program = selected.value === undefined ? undefined : programById(selected.value.snapshot.program);
+  return program === undefined ? { query: '', subject: '' } : { query: residueUnit(program.query), subject: residueUnit(program.subject) };
+});
+const plural = (count: number, one: string) => `${formatCount(count)} ${count === 1 ? one : `${one}s`}`;
+/** "Results for" (the query list) is for runs of more than one query, as NCBI's. */
+const multiQuery = computed(() => (loaded.value?.run.snapshot.query.records.length ?? 0) > 1);
+
+/** "Show alignment" of the Graphic Summary and the Dot Plot: the Alignments tab, with the HSP's Range in view. */
+async function toAlignments(id: HspId): Promise<void> {
+  view.value = 'alignment';
+  await nextTick();
+  alignments.value?.reveal(id, true);
+}
 </script>
 
 <template>
-  <h2>Results</h2>
-  <p v-if="selected === undefined">No completed runs yet.</p>
-  <template v-else>
-    <label>
-      Run
-      <select v-model="selectedId" data-testid="result-run">
-        <option v-for="run in completed" :key="run.snapshot.runId" :value="run.snapshot.runId">
-          Run {{ run.snapshot.number }} · {{ programById(run.snapshot.program).label }}
-        </option>
-      </select>
-    </label>
-    <p class="command">
-      Command: <code data-testid="result-command">{{ toShellCommand(selected.snapshot.argv, format) }}</code>
-    </p>
-    <nav class="tabs" aria-label="Output format">
-      <button
-        v-for="f in OUTPUT_FORMATS"
-        :key="f"
-        :aria-pressed="format === f"
-        :data-testid="`format-${f}`"
-        @click="format = f"
+  <section class="results" data-testid="results-panel">
+    <h2 ref="heading" tabindex="-1" data-testid="results-heading">Results</h2>
+    <p v-if="runs.length === 0" class="muted" data-testid="results-empty">No runs yet. Searches appear here when they complete.</p>
+    <template v-else>
+      <div class="results-top">
+        <dl class="results-summary" data-testid="results-summary">
+          <template v-if="selected?.snapshot.title">
+            <dt>Job Title</dt>
+            <dd class="results-title" data-testid="results-job-title">{{ selected.snapshot.title }}</dd>
+          </template>
+          <dt>Run</dt>
+          <dd class="results-run">
+            <label class="results-run-select">
+              <span class="visually-hidden">Run</span>
+              <select
+                :value="state.runId ?? ''"
+                data-testid="results-run"
+                @change="results.open(($event.target as HTMLSelectElement).value)"
+              >
+                <option value="" disabled>Choose a run</option>
+                <option v-for="run in choices" :key="run.snapshot.runId" :value="run.snapshot.runId">{{ runLabel(run) }}</option>
+              </select>
+            </label>
+            <button v-if="state.phase === 'ready'" type="button" class="link" data-testid="results-download-all" @click="view = 'outputs'">
+              Download All
+            </button>
+          </dd>
+          <template v-if="selected">
+            <dt>Program</dt>
+            <dd class="results-program">
+              <span data-testid="results-program">{{ programText }}</span>
+              <VerificationBadge v-if="loaded" :badge="loaded.badge" compact @details="view = 'details'" />
+            </dd>
+            <dt>Options</dt>
+            <dd class="run-inputs" data-testid="results-run-options">
+              <CommandText :text="options(selected)" />
+              <template v-if="selected.snapshot.group">
+                · group run {{ selected.snapshot.group.position }} of {{ selected.snapshot.group.size }}
+              </template>
+            </dd>
+            <template v-if="selected.snapshot.query.records.length === 1">
+              <dt>Query ID</dt>
+              <dd data-testid="results-query-id">{{ selected.snapshot.query.records[0]!.id }}</dd>
+              <dt>Query Length</dt>
+              <dd data-testid="results-query-length">{{ formatCount(selected.snapshot.query.records[0]!.length) }} {{ units.query }}</dd>
+            </template>
+            <template v-if="selected.snapshot.subject.records.length === 1">
+              <dt>Subject ID</dt>
+              <dd data-testid="results-subject-id">{{ selected.snapshot.subject.records[0]!.id }}</dd>
+              <dt>Subject Length</dt>
+              <dd data-testid="results-subject-length">{{ formatCount(selected.snapshot.subject.records[0]!.length) }} {{ units.subject }}</dd>
+            </template>
+            <template v-else>
+              <dt>Subjects</dt>
+              <dd data-testid="results-subjects">
+                {{ selected.snapshot.subject.name }}, {{ plural(selected.snapshot.subject.records.length, 'record') }}
+              </dd>
+            </template>
+          </template>
+        </dl>
+        <ResultFilters v-if="state.phase === 'ready' && loaded" :results="results" :filters="state.filters" />
+      </div>
+
+      <p v-if="state.phase === 'loading'" class="muted" data-testid="results-status" data-phase="loading">Reading the results…</p>
+      <p
+        v-else-if="state.phase === 'unavailable' || state.phase === 'failed'"
+        class="results-message"
+        :class="{ error: selected?.status === 'failed' || state.phase === 'failed' }"
+        data-testid="results-status"
+        :data-phase="state.phase"
+        :data-run-status="selected?.status"
       >
-        outfmt {{ f }}
-      </button>
-    </nav>
-    <pre class="output" data-testid="result-output" :data-shown="shown">{{ text }}</pre>
-    <button data-testid="export-output" @click="coordinator.exportOutput(selected.snapshot.runId, format)">
-      Export outfmt {{ format }}
-    </button>
-  </template>
+        {{ state.message }}
+      </p>
+
+      <template v-if="state.phase === 'ready' && loaded">
+        <QueryPicker v-if="multiQuery" :results="results" :state="state" />
+        <ResultNotices :state="state" @clear="results.setFilters({ queriesWithHitsOnly: state.filters.queriesWithHitsOnly ?? false })" />
+
+        <nav class="tabs results-tabs" aria-label="Results view">
+          <button
+            v-for="tab in TABS"
+            :key="tab.view"
+            type="button"
+            :aria-pressed="view === tab.view"
+            :data-testid="tab.testid"
+            @click="view = tab.view"
+          >
+            {{ tab.label }}
+          </button>
+        </nav>
+
+        <div v-show="HITS_VIEWS.includes(view)" class="hits-view" data-testid="results-hits" :data-run="loaded.run.snapshot.number">
+          <SubjectTable v-if="view === 'hits' && state.subjects.length > 0" :results="results" :state="state" />
+          <GraphicSummary
+            v-else-if="view === 'graphic' && state.subjects.length > 0"
+            :results="results"
+            :state="state"
+            @show-alignment="toAlignments"
+          />
+          <AlignmentsView
+            v-else-if="view === 'alignment' && state.hsps.length > 0"
+            ref="alignments"
+            :results="results"
+            :state="state"
+            @descriptions="view = 'hits'"
+          />
+          <template v-else-if="view === 'dotplot' && state.hsps.length > 0">
+            <DotPlot :results="results" :state="state" @show-alignment="toAlignments" />
+            <HspTable :results="results" :state="state" />
+          </template>
+        </div>
+        <RunDetails v-if="view === 'details'" :run="loaded.run" :loaded="loaded" />
+        <OutputsView v-if="view === 'outputs'" :coordinator="coordinator" :run="loaded.run" />
+      </template>
+    </template>
+  </section>
 </template>

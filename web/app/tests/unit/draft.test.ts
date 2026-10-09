@@ -271,11 +271,12 @@ describe('SearchDraft submit', () => {
     draft.setField('-template_type', 'optimal');
     draft.setField('-template_length', '21');
     draft.setField('-lcase_masking', true);
+    // The argv follows the sections of the page: Filters and Masking, then Discontiguous Word Options.
     expect(draft.parameters()).toEqual([
       ['-task', 'dc-megablast'],
-      ['-template_type', 'optimal'],
-      ['-template_length', '21'],
       ['-lcase_masking', true],
+      ['-template_length', '21'],
+      ['-template_type', 'optimal'],
     ]);
     draft.setField('-task', 'blastn');
     expect(draft.parameters()).toEqual([
@@ -287,6 +288,44 @@ describe('SearchDraft submit', () => {
       ['-max_target_seqs', '50'],
       ['-seg', 'no'],
     ]);
+  });
+
+  it('restores the defaults of some fields: their values are cleared, the others kept, and the argv validated again', async () => {
+    const { draft, validated } = setup();
+    draft.setField('-task', 'dc-megablast');
+    draft.setField('-evalue', '1e-5');
+    draft.setField('-lcase_masking', true);
+    draft.setField('-template_length', '18');
+    draft.setProgram('tblastx');
+    draft.setField('-evalue', '5');
+    draft.setProgram('blastn');
+    await draft.idle();
+    draft.resetFields(['-evalue', '-lcase_masking', '-template_length', '-word_size']);
+    expect(draft.state.get().values.blastn).toEqual({ '-task': 'dc-megablast' });
+    expect(Object.isFrozen(draft.state.get().values.blastn)).toBe(true);
+    // Another program's values stay.
+    expect(draft.state.get().values.tblastx).toEqual({ '-evalue': '5' });
+    await draft.idle();
+    expect(validated.at(-1)).toEqual(['blastn', '-query', 'query.fa', '-subject', 'subject.fa', '-task', 'dc-megablast']);
+  });
+
+  it('gives every run of the draft its Job Title, outside the argv', async () => {
+    const { draft, requests, coordinator } = setup({ useCoordinator: true });
+    draft.addFiles('subject', [file('s1.fa', '>s1\nACGT\n'), file('s2.fa', '>s2\nACGT\n')]);
+    draft.setPaste('query', '>q\nACGT\n');
+    await draft.idle();
+    draft.setMode('subject', 'separate');
+    expect(draft.state.get().title).toBe('');
+    draft.setTitle(' Two plasmids ');
+    expect(draft.state.get().title).toBe(' Two plasmids ');
+    await draft.submit();
+    expect(requests[0]!.map((r) => r.title)).toEqual([' Two plasmids ', ' Two plasmids ']);
+    expect(coordinator.state.get().runs.map((run) => run.snapshot.title)).toEqual(['Two plasmids', 'Two plasmids']);
+    expect(coordinator.state.get().runs[0]!.snapshot.argv).not.toContain('Two plasmids');
+    // An empty title is no title.
+    draft.setTitle('   ');
+    await draft.submit();
+    expect(requests[1]!.every((r) => !('title' in r))).toBe(true);
   });
 
   it("validates the draft's argv with the engine and shows its message", async () => {

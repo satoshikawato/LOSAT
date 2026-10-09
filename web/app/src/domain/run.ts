@@ -32,6 +32,11 @@ export interface RunSnapshot {
   /** 1-based position in this working session, used for display and file names. */
   readonly number: number;
   readonly program: ProgramId;
+  /**
+   * The run's name (NCBI's "Job Title"), without the white space around it; absent when
+   * none was given. It is never part of the argv.
+   */
+  readonly title?: string;
   readonly argv: readonly string[];
   readonly query: InputSnapshot;
   readonly subject: InputSnapshot;

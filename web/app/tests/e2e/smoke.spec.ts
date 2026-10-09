@@ -18,7 +18,11 @@ test(`paste, queue, run, view and export with ${BUILD_HAS_ENGINE ? 'the engine' 
   await page.getByTestId('add-to-queue').click();
 
   await expect(page.getByTestId('run-1-status')).toHaveText('completed');
+  // The results tab shows the newest completed run; the outputs as written are in its Outputs view.
   await page.getByTestId('tab-results').click();
+  await expect(page.getByTestId('results-hits')).toHaveAttribute('data-run', '1');
+  await page.getByTestId('results-view-outputs').click();
+  await expect(page.getByTestId('result-output')).toHaveAttribute('data-shown', '1:6');
   await expect(page.getByTestId('result-command')).toHaveText(
     'LOSAT tblastx -query query.fa -subject subject.fa -outfmt 6',
   );
@@ -26,6 +30,7 @@ test(`paste, queue, run, view and export with ${BUILD_HAS_ENGINE ? 'the engine' 
   await expect(page.getByTestId('result-command')).toHaveText(
     'LOSAT tblastx -query query.fa -subject subject.fa -outfmt 0',
   );
+  await expect(page.getByTestId('result-output')).toHaveAttribute('data-shown', '1:0');
   await expect(page.getByTestId('result-output')).toContainText(BUILD_HAS_ENGINE ? 'TBLASTX 2.17.0+' : 'FAKE ENGINE OUTPUT');
 
   const download = page.waitForEvent('download');

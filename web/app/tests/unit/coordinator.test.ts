@@ -305,6 +305,19 @@ describe('Coordinator', () => {
     expect(engine.started).toEqual([ids[0]]);
   });
 
+  it('keeps the Job Title trimmed in each snapshot of a group, outside the argv, and none when it is empty', async () => {
+    const { coordinator } = setup(new ManualEngine());
+    const titled = { ...request, title: '  Plasmid screen  ' };
+    const group = await coordinator.enqueueAll([titled, titled]);
+    const snapshots = group.runIds!.map((id) => viewOf(coordinator, id)!.snapshot);
+    expect(snapshots.map((snapshot) => snapshot.title)).toEqual(['Plasmid screen', 'Plasmid screen']);
+    expect(snapshots[0]!.argv).toEqual(['blastn', '-query', 'query.fa', '-subject', 'subject.fa']);
+    for (const title of [undefined, '', '   ']) {
+      const runId = (await coordinator.enqueue(title === undefined ? request : { ...request, title })).runId!;
+      expect('title' in viewOf(coordinator, runId)!.snapshot).toBe(false);
+    }
+  });
+
   it('queues nothing of a group when one request is invalid, and keeps the numbering', async () => {
     const engine = new ManualEngine();
     engine.validate = async (argv?: readonly string[]): Promise<ValidationResult> =>

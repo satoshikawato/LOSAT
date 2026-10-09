@@ -80,9 +80,44 @@ enum LinkEvid {
 ///         { "within-scaffold", { CSeq_gap::eType_scaffold, eLinkEvid_Forbidden } },
 ///     };
 /// ```
-/// `NameToGapTypeInfo` looks the name up after `CanonicalizeString` (Seq_gap.cpp:158-172).
+/// `NameToGapTypeInfo` looks the name up after `CanonicalizeString` as a C string: the map
+/// compares `const char*` keys with `strcmp` (`PCase_CStr`), so a value is looked up up to
+/// its first NUL byte and the bytes after it are ignored (audit finding A-1 of session SFc).
+/// The warning for an unknown value still writes the whole value (`gap_mod_warnings`).
+///
+/// NCBI reference (598d8ae6): c++/src/objects/seq/Seq_gap.cpp:157-172
+/// ```c++
+/// const CSeq_gap::SGapTypeInfo *
+/// CSeq_gap::NameToGapTypeInfo(const CTempString & sName)
+/// {
+///     const CSeq_gap::TGapTypeMap & gapTypeMap =
+///         GetNameToGapTypeInfoMap();
+///
+///     TGapTypeMap::const_iterator find_iter =
+///         gapTypeMap.find(CanonicalizeString(sName).c_str());
+///     if (find_iter == gapTypeMap.end()) {
+///         // not found
+///         return NULL;
+///     }
+/// ```
+/// NCBI reference (598d8ae6): c++/include/objects/seq/Seq_gap.hpp:90-93
+/// ```c++
+///     /// Map a gap-type string to its information
+///     /// Note that PCase_CStr, which means direct lookup is
+///     /// NOT insensitive to case, etc.
+///     typedef CStaticArrayMap<const char *, SGapTypeInfo, PCase_CStr> TGapTypeMap;
+/// ```
+/// `Seq_gap.cpp`'s own `CanonicalizeString` (:51-70) maps the bytes as `fasta.cpp`'s
+/// (`canonicalize_string`). The other lookups of a gap line compare whole byte strings:
+/// the keys with `std::string::operator==` and the linkage evidence in a
+/// `map<CTempString, ..., PQuickStringLess>` (serial/enumvalues.hpp:55).
 fn gap_type_info(name: &[u8]) -> Option<(GapType, LinkEvid)> {
-    Some(match canonicalize_string(name).as_slice() {
+    let canonical = canonicalize_string(name);
+    let c_string = canonical
+        .iter()
+        .position(|&byte| byte == 0)
+        .map_or(&canonical[..], |nul| &canonical[..nul]);
+    Some(match c_string {
         b"between-scaffolds" => (GapType::Contig, LinkEvid::Required),
         b"centromere" => (GapType::Centromere, LinkEvid::Forbidden),
         b"contamination" => (GapType::Contamination, LinkEvid::Required),

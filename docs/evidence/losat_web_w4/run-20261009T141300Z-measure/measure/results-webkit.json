@@ -1,0 +1,1436 @@
+{
+  "queries": [
+    {
+      "count": 10000,
+      "queryBytes": 1378904,
+      "subjectBytes": 257758,
+      "kinds": {
+        "unique": 6990,
+        "shared": 2000,
+        "wide": 10,
+        "random": 1000
+      },
+      "search": {
+        "indexMs": 913,
+        "checkMs": 14,
+        "enqueueMs": 104,
+        "searchMs": 1372,
+        "elapsed": "0:00",
+        "path": "threaded, 4 threads (requested: Auto)"
+      },
+      "smallSearch": {
+        "indexMs": 57,
+        "checkMs": 21,
+        "enqueueMs": 79,
+        "searchMs": 52,
+        "elapsed": "0:00",
+        "path": "threaded, 4 threads (requested: Auto)"
+      },
+      "warmup": {
+        "open": {
+          "ms": 62,
+          "paintMs": 89
+        },
+        "firstHsp": {
+          "ms": 81,
+          "paintMs": 103
+        },
+        "queryRowsDrawn": 20,
+        "scrollToEnd": {
+          "ms": 14,
+          "paintMs": 28
+        },
+        "rowsDrawnAtEnd": 14,
+        "scrollToStart": {
+          "ms": 2,
+          "paintMs": 16
+        },
+        "findFar": {
+          "ms": 33,
+          "paintMs": 65
+        },
+        "selectFar": {
+          "ms": 7,
+          "paintMs": 27
+        },
+        "clearFilter": {
+          "ms": 17,
+          "paintMs": 37
+        },
+        "hitsOnly": {
+          "ms": 11,
+          "paintMs": 31
+        },
+        "hitsOnlyQueries": 9000,
+        "hitsOnlyOff": {
+          "ms": 7,
+          "paintMs": 28
+        },
+        "selectWide": {
+          "ms": 14,
+          "paintMs": 56
+        },
+        "wideSubjects": 200,
+        "subjectRowsDrawn": 22,
+        "sortSubjects": {
+          "length": {
+            "ms": 8,
+            "paintMs": 47
+          },
+          "bitScore": {
+            "ms": 8,
+            "paintMs": 51
+          },
+          "eValue": {
+            "ms": 5,
+            "paintMs": 46
+          },
+          "hsps": {
+            "ms": 4,
+            "paintMs": 40
+          },
+          "order": {
+            "ms": 8,
+            "paintMs": 44
+          }
+        }
+      },
+      "samples": [
+        {
+          "open": {
+            "ms": 61,
+            "paintMs": 86
+          },
+          "firstHsp": {
+            "ms": 87,
+            "paintMs": 107
+          },
+          "queryRowsDrawn": 20,
+          "scrollToEnd": {
+            "ms": 10,
+            "paintMs": 24
+          },
+          "rowsDrawnAtEnd": 14,
+          "scrollToStart": {
+            "ms": 15,
+            "paintMs": 30
+          },
+          "findFar": {
+            "ms": 6,
+            "paintMs": 33
+          },
+          "selectFar": {
+            "ms": 25,
+            "paintMs": 46
+          },
+          "clearFilter": {
+            "ms": 15,
+            "paintMs": 37
+          },
+          "hitsOnly": {
+            "ms": 7,
+            "paintMs": 26
+          },
+          "hitsOnlyQueries": 9000,
+          "hitsOnlyOff": {
+            "ms": 7,
+            "paintMs": 28
+          },
+          "selectWide": {
+            "ms": 53,
+            "paintMs": 100
+          },
+          "wideSubjects": 200,
+          "subjectRowsDrawn": 22,
+          "sortSubjects": {
+            "length": {
+              "ms": 4,
+              "paintMs": 45
+            },
+            "bitScore": {
+              "ms": 4,
+              "paintMs": 42
+            },
+            "eValue": {
+              "ms": 8,
+              "paintMs": 49
+            },
+            "hsps": {
+              "ms": 4,
+              "paintMs": 44
+            },
+            "order": {
+              "ms": 5,
+              "paintMs": 43
+            }
+          }
+        },
+        {
+          "open": {
+            "ms": 56,
+            "paintMs": 83
+          },
+          "firstHsp": {
+            "ms": 85,
+            "paintMs": 109
+          },
+          "queryRowsDrawn": 20,
+          "scrollToEnd": {
+            "ms": 6,
+            "paintMs": 21
+          },
+          "rowsDrawnAtEnd": 14,
+          "scrollToStart": {
+            "ms": 3,
+            "paintMs": 18
+          },
+          "findFar": {
+            "ms": 7,
+            "paintMs": 35
+          },
+          "selectFar": {
+            "ms": 15,
+            "paintMs": 37
+          },
+          "clearFilter": {
+            "ms": 16,
+            "paintMs": 36
+          },
+          "hitsOnly": {
+            "ms": 7,
+            "paintMs": 29
+          },
+          "hitsOnlyQueries": 9000,
+          "hitsOnlyOff": {
+            "ms": 8,
+            "paintMs": 29
+          },
+          "selectWide": {
+            "ms": 9,
+            "paintMs": 52
+          },
+          "wideSubjects": 200,
+          "subjectRowsDrawn": 22,
+          "sortSubjects": {
+            "length": {
+              "ms": 6,
+              "paintMs": 44
+            },
+            "bitScore": {
+              "ms": 7,
+              "paintMs": 44
+            },
+            "eValue": {
+              "ms": 10,
+              "paintMs": 56
+            },
+            "hsps": {
+              "ms": 11,
+              "paintMs": 50
+            },
+            "order": {
+              "ms": 8,
+              "paintMs": 49
+            }
+          }
+        },
+        {
+          "open": {
+            "ms": 62,
+            "paintMs": 89
+          },
+          "firstHsp": {
+            "ms": 83,
+            "paintMs": 105
+          },
+          "queryRowsDrawn": 20,
+          "scrollToEnd": {
+            "ms": 13,
+            "paintMs": 28
+          },
+          "rowsDrawnAtEnd": 14,
+          "scrollToStart": {
+            "ms": 8,
+            "paintMs": 23
+          },
+          "findFar": {
+            "ms": 8,
+            "paintMs": 32
+          },
+          "selectFar": {
+            "ms": 8,
+            "paintMs": 29
+          },
+          "clearFilter": {
+            "ms": 10,
+            "paintMs": 31
+          },
+          "hitsOnly": {
+            "ms": 12,
+            "paintMs": 32
+          },
+          "hitsOnlyQueries": 9000,
+          "hitsOnlyOff": {
+            "ms": 9,
+            "paintMs": 34
+          },
+          "selectWide": {
+            "ms": 47,
+            "paintMs": 90
+          },
+          "wideSubjects": 200,
+          "subjectRowsDrawn": 22,
+          "sortSubjects": {
+            "length": {
+              "ms": 4,
+              "paintMs": 38
+            },
+            "bitScore": {
+              "ms": 15,
+              "paintMs": 51
+            },
+            "eValue": {
+              "ms": 15,
+              "paintMs": 52
+            },
+            "hsps": {
+              "ms": 13,
+              "paintMs": 53
+            },
+            "order": {
+              "ms": 10,
+              "paintMs": 44
+            }
+          }
+        }
+      ],
+      "summary": {
+        "open": {
+          "ms": {
+            "median": 61,
+            "min": 56,
+            "max": 62
+          },
+          "paintMs": {
+            "median": 86,
+            "min": 83,
+            "max": 89
+          }
+        },
+        "firstHsp": {
+          "ms": {
+            "median": 85,
+            "min": 83,
+            "max": 87
+          },
+          "paintMs": {
+            "median": 107,
+            "min": 105,
+            "max": 109
+          }
+        },
+        "queryRowsDrawn": {
+          "median": 20,
+          "min": 20,
+          "max": 20
+        },
+        "scrollToEnd": {
+          "ms": {
+            "median": 10,
+            "min": 6,
+            "max": 13
+          },
+          "paintMs": {
+            "median": 24,
+            "min": 21,
+            "max": 28
+          }
+        },
+        "rowsDrawnAtEnd": {
+          "median": 14,
+          "min": 14,
+          "max": 14
+        },
+        "scrollToStart": {
+          "ms": {
+            "median": 8,
+            "min": 3,
+            "max": 15
+          },
+          "paintMs": {
+            "median": 23,
+            "min": 18,
+            "max": 30
+          }
+        },
+        "findFar": {
+          "ms": {
+            "median": 7,
+            "min": 6,
+            "max": 8
+          },
+          "paintMs": {
+            "median": 33,
+            "min": 32,
+            "max": 35
+          }
+        },
+        "selectFar": {
+          "ms": {
+            "median": 15,
+            "min": 8,
+            "max": 25
+          },
+          "paintMs": {
+            "median": 37,
+            "min": 29,
+            "max": 46
+          }
+        },
+        "clearFilter": {
+          "ms": {
+            "median": 15,
+            "min": 10,
+            "max": 16
+          },
+          "paintMs": {
+            "median": 36,
+            "min": 31,
+            "max": 37
+          }
+        },
+        "hitsOnly": {
+          "ms": {
+            "median": 7,
+            "min": 7,
+            "max": 12
+          },
+          "paintMs": {
+            "median": 29,
+            "min": 26,
+            "max": 32
+          }
+        },
+        "hitsOnlyQueries": {
+          "median": 9000,
+          "min": 9000,
+          "max": 9000
+        },
+        "hitsOnlyOff": {
+          "ms": {
+            "median": 8,
+            "min": 7,
+            "max": 9
+          },
+          "paintMs": {
+            "median": 29,
+            "min": 28,
+            "max": 34
+          }
+        },
+        "selectWide": {
+          "ms": {
+            "median": 47,
+            "min": 9,
+            "max": 53
+          },
+          "paintMs": {
+            "median": 90,
+            "min": 52,
+            "max": 100
+          }
+        },
+        "wideSubjects": {
+          "median": 200,
+          "min": 200,
+          "max": 200
+        },
+        "subjectRowsDrawn": {
+          "median": 22,
+          "min": 22,
+          "max": 22
+        },
+        "sortSubjects": {
+          "length": {
+            "ms": {
+              "median": 4,
+              "min": 4,
+              "max": 6
+            },
+            "paintMs": {
+              "median": 44,
+              "min": 38,
+              "max": 45
+            }
+          },
+          "bitScore": {
+            "ms": {
+              "median": 7,
+              "min": 4,
+              "max": 15
+            },
+            "paintMs": {
+              "median": 44,
+              "min": 42,
+              "max": 51
+            }
+          },
+          "eValue": {
+            "ms": {
+              "median": 10,
+              "min": 8,
+              "max": 15
+            },
+            "paintMs": {
+              "median": 52,
+              "min": 49,
+              "max": 56
+            }
+          },
+          "hsps": {
+            "ms": {
+              "median": 11,
+              "min": 4,
+              "max": 13
+            },
+            "paintMs": {
+              "median": 50,
+              "min": 44,
+              "max": 53
+            }
+          },
+          "order": {
+            "ms": {
+              "median": 8,
+              "min": 5,
+              "max": 10
+            },
+            "paintMs": {
+              "median": 44,
+              "min": 43,
+              "max": 49
+            }
+          }
+        }
+      },
+      "outfmt6": {
+        "bytes": 896542,
+        "hsps": 14981,
+        "showMs": 6,
+        "showPaintMs": 14
+      }
+    },
+    {
+      "count": 100000,
+      "queryBytes": 13888995,
+      "subjectBytes": 257758,
+      "kinds": {
+        "unique": 69900,
+        "shared": 20000,
+        "wide": 100,
+        "random": 10000
+      },
+      "search": {
+        "indexMs": 4901,
+        "checkMs": 497,
+        "enqueueMs": 434,
+        "searchMs": 7130,
+        "elapsed": "0:07",
+        "path": "threaded, 4 threads (requested: Auto)"
+      },
+      "smallSearch": {
+        "indexMs": 57,
+        "checkMs": 24,
+        "enqueueMs": 110,
+        "searchMs": 85,
+        "elapsed": "0:00",
+        "path": "threaded, 4 threads (requested: Auto)"
+      },
+      "warmup": {
+        "open": {
+          "ms": 481,
+          "paintMs": 508
+        },
+        "firstHsp": {
+          "ms": 486,
+          "paintMs": 513
+        },
+        "queryRowsDrawn": 20,
+        "scrollToEnd": {
+          "ms": 12,
+          "paintMs": 26
+        },
+        "rowsDrawnAtEnd": 14,
+        "scrollToStart": {
+          "ms": 15,
+          "paintMs": 29
+        },
+        "findFar": {
+          "ms": 56,
+          "paintMs": 80
+        },
+        "selectFar": {
+          "ms": 31,
+          "paintMs": 52
+        },
+        "clearFilter": {
+          "ms": 26,
+          "paintMs": 47
+        },
+        "hitsOnly": {
+          "ms": 19,
+          "paintMs": 40
+        },
+        "hitsOnlyQueries": 90000,
+        "hitsOnlyOff": {
+          "ms": 17,
+          "paintMs": 36
+        },
+        "selectWide": {
+          "ms": 17,
+          "paintMs": 57
+        },
+        "wideSubjects": 200,
+        "subjectRowsDrawn": 22,
+        "sortSubjects": {
+          "length": {
+            "ms": 12,
+            "paintMs": 49
+          },
+          "bitScore": {
+            "ms": 12,
+            "paintMs": 57
+          },
+          "eValue": {
+            "ms": 16,
+            "paintMs": 57
+          },
+          "hsps": {
+            "ms": 4,
+            "paintMs": 42
+          },
+          "order": {
+            "ms": 11,
+            "paintMs": 48
+          }
+        }
+      },
+      "samples": [
+        {
+          "open": {
+            "ms": 432,
+            "paintMs": 462
+          },
+          "firstHsp": {
+            "ms": 477,
+            "paintMs": 499
+          },
+          "queryRowsDrawn": 20,
+          "scrollToEnd": {
+            "ms": 11,
+            "paintMs": 26
+          },
+          "rowsDrawnAtEnd": 14,
+          "scrollToStart": {
+            "ms": 8,
+            "paintMs": 22
+          },
+          "findFar": {
+            "ms": 34,
+            "paintMs": 59
+          },
+          "selectFar": {
+            "ms": 29,
+            "paintMs": 52
+          },
+          "clearFilter": {
+            "ms": 18,
+            "paintMs": 39
+          },
+          "hitsOnly": {
+            "ms": 17,
+            "paintMs": 39
+          },
+          "hitsOnlyQueries": 90000,
+          "hitsOnlyOff": {
+            "ms": 17,
+            "paintMs": 38
+          },
+          "selectWide": {
+            "ms": 12,
+            "paintMs": 51
+          },
+          "wideSubjects": 200,
+          "subjectRowsDrawn": 22,
+          "sortSubjects": {
+            "length": {
+              "ms": 11,
+              "paintMs": 50
+            },
+            "bitScore": {
+              "ms": 10,
+              "paintMs": 51
+            },
+            "eValue": {
+              "ms": 9,
+              "paintMs": 46
+            },
+            "hsps": {
+              "ms": 13,
+              "paintMs": 49
+            },
+            "order": {
+              "ms": 14,
+              "paintMs": 51
+            }
+          }
+        },
+        {
+          "open": {
+            "ms": 521,
+            "paintMs": 551
+          },
+          "firstHsp": {
+            "ms": 502,
+            "paintMs": 526
+          },
+          "queryRowsDrawn": 20,
+          "scrollToEnd": {
+            "ms": 6,
+            "paintMs": 21
+          },
+          "rowsDrawnAtEnd": 14,
+          "scrollToStart": {
+            "ms": 8,
+            "paintMs": 23
+          },
+          "findFar": {
+            "ms": 35,
+            "paintMs": 60
+          },
+          "selectFar": {
+            "ms": 13,
+            "paintMs": 33
+          },
+          "clearFilter": {
+            "ms": 17,
+            "paintMs": 36
+          },
+          "hitsOnly": {
+            "ms": 17,
+            "paintMs": 38
+          },
+          "hitsOnlyQueries": 90000,
+          "hitsOnlyOff": {
+            "ms": 16,
+            "paintMs": 36
+          },
+          "selectWide": {
+            "ms": 15,
+            "paintMs": 56
+          },
+          "wideSubjects": 200,
+          "subjectRowsDrawn": 22,
+          "sortSubjects": {
+            "length": {
+              "ms": 16,
+              "paintMs": 54
+            },
+            "bitScore": {
+              "ms": 10,
+              "paintMs": 49
+            },
+            "eValue": {
+              "ms": 8,
+              "paintMs": 53
+            },
+            "hsps": {
+              "ms": 4,
+              "paintMs": 42
+            },
+            "order": {
+              "ms": 8,
+              "paintMs": 44
+            }
+          }
+        },
+        {
+          "open": {
+            "ms": 568,
+            "paintMs": 597
+          },
+          "firstHsp": {
+            "ms": 695,
+            "paintMs": 719
+          },
+          "queryRowsDrawn": 20,
+          "scrollToEnd": {
+            "ms": 12,
+            "paintMs": 27
+          },
+          "rowsDrawnAtEnd": 14,
+          "scrollToStart": {
+            "ms": 6,
+            "paintMs": 21
+          },
+          "findFar": {
+            "ms": 32,
+            "paintMs": 57
+          },
+          "selectFar": {
+            "ms": 15,
+            "paintMs": 36
+          },
+          "clearFilter": {
+            "ms": 18,
+            "paintMs": 41
+          },
+          "hitsOnly": {
+            "ms": 19,
+            "paintMs": 40
+          },
+          "hitsOnlyQueries": 90000,
+          "hitsOnlyOff": {
+            "ms": 19,
+            "paintMs": 40
+          },
+          "selectWide": {
+            "ms": 19,
+            "paintMs": 65
+          },
+          "wideSubjects": 200,
+          "subjectRowsDrawn": 22,
+          "sortSubjects": {
+            "length": {
+              "ms": 6,
+              "paintMs": 51
+            },
+            "bitScore": {
+              "ms": 6,
+              "paintMs": 56
+            },
+            "eValue": {
+              "ms": 5,
+              "paintMs": 52
+            },
+            "hsps": {
+              "ms": 17,
+              "paintMs": 60
+            },
+            "order": {
+              "ms": 5,
+              "paintMs": 43
+            }
+          }
+        }
+      ],
+      "summary": {
+        "open": {
+          "ms": {
+            "median": 521,
+            "min": 432,
+            "max": 568
+          },
+          "paintMs": {
+            "median": 551,
+            "min": 462,
+            "max": 597
+          }
+        },
+        "firstHsp": {
+          "ms": {
+            "median": 502,
+            "min": 477,
+            "max": 695
+          },
+          "paintMs": {
+            "median": 526,
+            "min": 499,
+            "max": 719
+          }
+        },
+        "queryRowsDrawn": {
+          "median": 20,
+          "min": 20,
+          "max": 20
+        },
+        "scrollToEnd": {
+          "ms": {
+            "median": 11,
+            "min": 6,
+            "max": 12
+          },
+          "paintMs": {
+            "median": 26,
+            "min": 21,
+            "max": 27
+          }
+        },
+        "rowsDrawnAtEnd": {
+          "median": 14,
+          "min": 14,
+          "max": 14
+        },
+        "scrollToStart": {
+          "ms": {
+            "median": 8,
+            "min": 6,
+            "max": 8
+          },
+          "paintMs": {
+            "median": 22,
+            "min": 21,
+            "max": 23
+          }
+        },
+        "findFar": {
+          "ms": {
+            "median": 34,
+            "min": 32,
+            "max": 35
+          },
+          "paintMs": {
+            "median": 59,
+            "min": 57,
+            "max": 60
+          }
+        },
+        "selectFar": {
+          "ms": {
+            "median": 15,
+            "min": 13,
+            "max": 29
+          },
+          "paintMs": {
+            "median": 36,
+            "min": 33,
+            "max": 52
+          }
+        },
+        "clearFilter": {
+          "ms": {
+            "median": 18,
+            "min": 17,
+            "max": 18
+          },
+          "paintMs": {
+            "median": 39,
+            "min": 36,
+            "max": 41
+          }
+        },
+        "hitsOnly": {
+          "ms": {
+            "median": 17,
+            "min": 17,
+            "max": 19
+          },
+          "paintMs": {
+            "median": 39,
+            "min": 38,
+            "max": 40
+          }
+        },
+        "hitsOnlyQueries": {
+          "median": 90000,
+          "min": 90000,
+          "max": 90000
+        },
+        "hitsOnlyOff": {
+          "ms": {
+            "median": 17,
+            "min": 16,
+            "max": 19
+          },
+          "paintMs": {
+            "median": 38,
+            "min": 36,
+            "max": 40
+          }
+        },
+        "selectWide": {
+          "ms": {
+            "median": 15,
+            "min": 12,
+            "max": 19
+          },
+          "paintMs": {
+            "median": 56,
+            "min": 51,
+            "max": 65
+          }
+        },
+        "wideSubjects": {
+          "median": 200,
+          "min": 200,
+          "max": 200
+        },
+        "subjectRowsDrawn": {
+          "median": 22,
+          "min": 22,
+          "max": 22
+        },
+        "sortSubjects": {
+          "length": {
+            "ms": {
+              "median": 11,
+              "min": 6,
+              "max": 16
+            },
+            "paintMs": {
+              "median": 51,
+              "min": 50,
+              "max": 54
+            }
+          },
+          "bitScore": {
+            "ms": {
+              "median": 10,
+              "min": 6,
+              "max": 10
+            },
+            "paintMs": {
+              "median": 51,
+              "min": 49,
+              "max": 56
+            }
+          },
+          "eValue": {
+            "ms": {
+              "median": 8,
+              "min": 5,
+              "max": 9
+            },
+            "paintMs": {
+              "median": 52,
+              "min": 46,
+              "max": 53
+            }
+          },
+          "hsps": {
+            "ms": {
+              "median": 13,
+              "min": 4,
+              "max": 17
+            },
+            "paintMs": {
+              "median": 49,
+              "min": 42,
+              "max": 60
+            }
+          },
+          "order": {
+            "ms": {
+              "median": 8,
+              "min": 5,
+              "max": 14
+            },
+            "paintMs": {
+              "median": 44,
+              "min": 43,
+              "max": 51
+            }
+          }
+        }
+      },
+      "outfmt6": {
+        "bytes": 8966787,
+        "hsps": 149828,
+        "showMs": 10,
+        "showPaintMs": 26
+      }
+    }
+  ],
+  "pair": [
+    {
+      "unit": 20,
+      "copies": 1500,
+      "bytes": 30452,
+      "search": {
+        "indexMs": 36,
+        "checkMs": 6,
+        "enqueueMs": 99,
+        "searchMs": 4306,
+        "elapsed": "0:03",
+        "path": "threaded, 4 threads (requested: Auto)"
+      },
+      "warmup": {
+        "open": {
+          "ms": 155,
+          "paintMs": 179
+        },
+        "hsps": 2995,
+        "hspRowsDrawn": 20,
+        "showDotPlot": {
+          "ms": 16,
+          "paintMs": 288
+        },
+        "segments": 2995,
+        "coloured": 1451234,
+        "zoomIn": {
+          "ms": 16,
+          "paintMs": 66
+        },
+        "zoomOut": {
+          "ms": 15,
+          "paintMs": 121
+        },
+        "zoomToHsp": {
+          "ms": 12,
+          "paintMs": 113
+        },
+        "reset": {
+          "ms": 13,
+          "paintMs": 115
+        },
+        "selectByKey": {
+          "ms": 138,
+          "paintMs": 248
+        },
+        "selectByClick": {
+          "ms": 149,
+          "paintMs": 257
+        },
+        "clickHitTarget": 0,
+        "selectInList": {
+          "ms": 12,
+          "paintMs": 35
+        },
+        "sortHsps": {
+          "ms": 8,
+          "paintMs": 28
+        },
+        "scrollHspList": {
+          "ms": 11,
+          "paintMs": 26
+        }
+      },
+      "samples": [
+        {
+          "open": {
+            "ms": 139,
+            "paintMs": 168
+          },
+          "hsps": 2995,
+          "hspRowsDrawn": 20,
+          "showDotPlot": {
+            "ms": 9,
+            "paintMs": 224
+          },
+          "segments": 2995,
+          "coloured": 1451234,
+          "zoomIn": {
+            "ms": 9,
+            "paintMs": 54
+          },
+          "zoomOut": {
+            "ms": 4,
+            "paintMs": 115
+          },
+          "zoomToHsp": {
+            "ms": 4,
+            "paintMs": 103
+          },
+          "reset": {
+            "ms": 15,
+            "paintMs": 112
+          },
+          "selectByKey": {
+            "ms": 142,
+            "paintMs": 259
+          },
+          "selectByClick": {
+            "ms": 252,
+            "paintMs": 266
+          },
+          "clickHitTarget": 0,
+          "selectInList": {
+            "ms": 13,
+            "paintMs": 36
+          },
+          "sortHsps": {
+            "ms": 13,
+            "paintMs": 32
+          },
+          "scrollHspList": {
+            "ms": 13,
+            "paintMs": 28
+          }
+        },
+        {
+          "open": {
+            "ms": 132,
+            "paintMs": 156
+          },
+          "hsps": 2995,
+          "hspRowsDrawn": 20,
+          "showDotPlot": {
+            "ms": 11,
+            "paintMs": 216
+          },
+          "segments": 2995,
+          "coloured": 1451234,
+          "zoomIn": {
+            "ms": 11,
+            "paintMs": 59
+          },
+          "zoomOut": {
+            "ms": 12,
+            "paintMs": 120
+          },
+          "zoomToHsp": {
+            "ms": 3,
+            "paintMs": 102
+          },
+          "reset": {
+            "ms": 13,
+            "paintMs": 115
+          },
+          "selectByKey": {
+            "ms": 229,
+            "paintMs": 238
+          },
+          "selectByClick": {
+            "ms": 229,
+            "paintMs": 234
+          },
+          "clickHitTarget": 0,
+          "selectInList": {
+            "ms": 14,
+            "paintMs": 37
+          },
+          "sortHsps": {
+            "ms": 12,
+            "paintMs": 32
+          },
+          "scrollHspList": {
+            "ms": 13,
+            "paintMs": 28
+          }
+        },
+        {
+          "open": {
+            "ms": 143,
+            "paintMs": 167
+          },
+          "hsps": 2995,
+          "hspRowsDrawn": 20,
+          "showDotPlot": {
+            "ms": 13,
+            "paintMs": 240
+          },
+          "segments": 2995,
+          "coloured": 1451234,
+          "zoomIn": {
+            "ms": 10,
+            "paintMs": 68
+          },
+          "zoomOut": {
+            "ms": 13,
+            "paintMs": 136
+          },
+          "zoomToHsp": {
+            "ms": 7,
+            "paintMs": 127
+          },
+          "reset": {
+            "ms": 10,
+            "paintMs": 138
+          },
+          "selectByKey": {
+            "ms": 151,
+            "paintMs": 280
+          },
+          "selectByClick": {
+            "ms": 168,
+            "paintMs": 299
+          },
+          "clickHitTarget": 0,
+          "selectInList": {
+            "ms": 18,
+            "paintMs": 57
+          },
+          "sortHsps": {
+            "ms": 11,
+            "paintMs": 38
+          },
+          "scrollHspList": {
+            "ms": 2,
+            "paintMs": 16
+          }
+        }
+      ],
+      "summary": {
+        "open": {
+          "ms": {
+            "median": 139,
+            "min": 132,
+            "max": 143
+          },
+          "paintMs": {
+            "median": 167,
+            "min": 156,
+            "max": 168
+          }
+        },
+        "hsps": {
+          "median": 2995,
+          "min": 2995,
+          "max": 2995
+        },
+        "hspRowsDrawn": {
+          "median": 20,
+          "min": 20,
+          "max": 20
+        },
+        "showDotPlot": {
+          "ms": {
+            "median": 11,
+            "min": 9,
+            "max": 13
+          },
+          "paintMs": {
+            "median": 224,
+            "min": 216,
+            "max": 240
+          }
+        },
+        "segments": {
+          "median": 2995,
+          "min": 2995,
+          "max": 2995
+        },
+        "coloured": {
+          "median": 1451234,
+          "min": 1451234,
+          "max": 1451234
+        },
+        "zoomIn": {
+          "ms": {
+            "median": 10,
+            "min": 9,
+            "max": 11
+          },
+          "paintMs": {
+            "median": 59,
+            "min": 54,
+            "max": 68
+          }
+        },
+        "zoomOut": {
+          "ms": {
+            "median": 12,
+            "min": 4,
+            "max": 13
+          },
+          "paintMs": {
+            "median": 120,
+            "min": 115,
+            "max": 136
+          }
+        },
+        "zoomToHsp": {
+          "ms": {
+            "median": 4,
+            "min": 3,
+            "max": 7
+          },
+          "paintMs": {
+            "median": 103,
+            "min": 102,
+            "max": 127
+          }
+        },
+        "reset": {
+          "ms": {
+            "median": 13,
+            "min": 10,
+            "max": 15
+          },
+          "paintMs": {
+            "median": 115,
+            "min": 112,
+            "max": 138
+          }
+        },
+        "selectByKey": {
+          "ms": {
+            "median": 151,
+            "min": 142,
+            "max": 229
+          },
+          "paintMs": {
+            "median": 259,
+            "min": 238,
+            "max": 280
+          }
+        },
+        "selectByClick": {
+          "ms": {
+            "median": 229,
+            "min": 168,
+            "max": 252
+          },
+          "paintMs": {
+            "median": 266,
+            "min": 234,
+            "max": 299
+          }
+        },
+        "clickHitTarget": {
+          "median": 0,
+          "min": 0,
+          "max": 0
+        },
+        "selectInList": {
+          "ms": {
+            "median": 14,
+            "min": 13,
+            "max": 18
+          },
+          "paintMs": {
+            "median": 37,
+            "min": 36,
+            "max": 57
+          }
+        },
+        "sortHsps": {
+          "ms": {
+            "median": 12,
+            "min": 11,
+            "max": 13
+          },
+          "paintMs": {
+            "median": 32,
+            "min": 32,
+            "max": 38
+          }
+        },
+        "scrollHspList": {
+          "ms": {
+            "median": 13,
+            "min": 2,
+            "max": 13
+          },
+          "paintMs": {
+            "median": 28,
+            "min": 16,
+            "max": 28
+          }
+        }
+      }
+    },
+    {
+      "unit": 20,
+      "copies": 3000,
+      "bytes": 60881,
+      "error": "run 3 ended failed: Not enough temporary storage for the results of this run: this browser keeps results in memory, at most 512 MB in a tab. Earlier results are kept."
+    },
+    {
+      "unit": 20,
+      "copies": 4000,
+      "bytes": 81166,
+      "error": "run 4 ended failed: The engine stopped (it ran out of memory): memory allocation of 49881 bytes failed (Unreachable code should not be executed (evaluating 'e(...t)'))"
+    }
+  ]
+}

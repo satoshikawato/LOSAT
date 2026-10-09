@@ -86,36 +86,87 @@ export class FakeEngine implements EngineGateway {
     }
   }
 
+  /**
+   * Writes outputs with the structure of a search, so that the results screen can be built
+   * and tested without the engine: up to 200 queries, each but every fourth with HSPs on
+   * up to three subjects (the third subject is left out of outfmt 0, as subjects past
+   * -num_alignments are), a reverse HSP and, for BLASTN, a one-letter HSP. Every text
+   * says that it is not a search result, and the values are marked FAKE.
+   */
   private writeOutputs(request: EngineRunRequest, writer: RunOutputWriter): void {
     const encoder = new TextEncoder();
     const program = request.argv[0] ?? '';
-    const row = `${FAKE_MARKER}\tquery\tsubject\n`;
-    const out0 = `${FAKE_MARKER}\nProgram: ${program}\n`;
+    const queries = fakeRecordKeys(request.query.bytes).slice(0, 200);
+    const subjects = fakeRecordKeys(request.subject.bytes).slice(0, 3);
+    const nucleotide = { query: program === 'blastn' || program === 'tblastx', subject: program !== 'blastp' };
+    const translated = { query: program === 'tblastx', subject: program === 'tblastn' || program === 'tblastx' };
+    let out0 = `${FAKE_MARKER}\nProgram: ${program}\n`;
+    // outfmt 6 has no comment lines; this first line is what makes an exported fake outfmt 6
+    // say that it is not a search result. The rows are read by their `out6` ranges.
+    let out6 = `# ${FAKE_MARKER}\n`;
+    let out7 = `# ${FAKE_MARKER}\n`;
+    let hits = '';
+    let index = 0;
+    const length = (text: string) => encoder.encode(text).length;
+    queries.forEach((query, qIdx) => {
+      out0 += `\nQuery= ${query.id}\n`;
+      if (qIdx % 4 === 3) {
+        out0 += '\n***** No hits found ***** (FAKE)\n';
+        return;
+      }
+      let rank = 0;
+      subjects.forEach((subject, sIdx) => {
+        const shown = sIdx < 2;
+        const heading = `> ${subject.id}\nLength=${subject.length}\n\n`;
+        const headingStart = length(out0);
+        if (shown) out0 += heading;
+        const count = 1 + ((qIdx + sIdx) % 2);
+        for (let j = 0; j < count; j++) {
+          const single = program === 'blastn' && qIdx === 2 && sIdx === 0 && j === 0;
+          const span = (total: number) => (single ? 1 : Math.max(1, Math.floor(total / 2)));
+          const qStart = 1 + j;
+          const qEnd = Math.min(query.length, qStart + span(query.length) - 1);
+          const reverse = nucleotide.subject && j === 1;
+          const sFrom = 1 + j;
+          const sTo = Math.min(subject.length, sFrom + span(subject.length) - 1);
+          const [sStart, sEnd] = reverse ? [sTo, sFrom] : [sFrom, sTo];
+          const row = [query.id, subject.id, 'FAKE', String(qEnd - qStart + 1), '0', '0', qStart, qEnd, sStart, sEnd, 'FAKE', 'FAKE'].join('\t') + '\n';
+          const out6Start = length(out6);
+          out6 += row;
+          out7 += row;
+          const sectionStart = length(out0);
+          if (shown) out0 += ` Score = FAKE, Expect = FAKE (${FAKE_MARKER})\n Strand=Plus/${reverse ? 'Minus' : 'Plus'}\n\n`;
+          const hit: HspRecord = {
+            index,
+            q_idx: qIdx,
+            s_idx: sIdx,
+            rank,
+            raw_score: 100 - index,
+            bit_score: 50 - index / 2,
+            e_value: index * 1e-5,
+            q_start: qStart,
+            q_end: qEnd,
+            s_start: sStart,
+            s_end: sEnd,
+            query_frame: translated.query ? 1 : null,
+            subject_frame: translated.subject ? (reverse ? -1 : 1) : null,
+            subject_length: subject.length,
+            query_aligned: null,
+            subject_aligned: null,
+            out6: [out6Start, length(out6)],
+            out0: shown ? [sectionStart, length(out0)] : null,
+            out0_subject: shown ? [headingStart, headingStart + length(heading)] : null,
+          };
+          hits += `${JSON.stringify(hit)}\n`;
+          index++;
+          rank++;
+        }
+      });
+    });
     writer.write(0, encoder.encode(out0));
-    writer.write(6, encoder.encode(row));
-    writer.write(7, encoder.encode(`# ${FAKE_MARKER}\n# 1 hits found\n${row}`));
-    const hit: HspRecord = {
-      index: 0,
-      q_idx: 0,
-      s_idx: 0,
-      rank: 0,
-      raw_score: 0,
-      bit_score: 0,
-      e_value: 0,
-      q_start: 1,
-      q_end: 1,
-      s_start: 1,
-      s_end: 1,
-      query_frame: null,
-      subject_frame: null,
-      subject_length: null,
-      query_aligned: null,
-      subject_aligned: null,
-      out6: [0, encoder.encode(row).length],
-      out0: [0, encoder.encode(out0).length],
-      out0_subject: null,
-    };
-    writer.write(HITS_STREAM, encoder.encode(`${JSON.stringify(hit)}\n`));
+    writer.write(6, encoder.encode(out6));
+    writer.write(7, encoder.encode(`${out7}# ${index} hits found\n`));
+    writer.write(HITS_STREAM, encoder.encode(hits));
     writer.write(DIAGNOSTICS_STREAM, encoder.encode(`Warning: ${FAKE_MARKER}\n`));
   }
 

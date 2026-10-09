@@ -6,8 +6,10 @@ import { fileURLToPath } from 'node:url';
 import { build } from 'vite';
 import { siteHeaders } from '../../../build/headers';
 import { findReactors, losatEngine } from '../../../build/reactors';
+import { losatVerification } from '../../../build/verification';
 import { SESSION_LOCK_PREFIX, TMP_DIRECTORY } from '../../../src/infra/data/session';
 import { E2E_ORIGIN } from './origin';
+import { showOutput } from './search';
 
 export const ORIGIN = E2E_ORIGIN;
 
@@ -125,11 +127,13 @@ export async function runSearch(page: Page, number: number): Promise<void> {
   await expect(page.getByTestId(`run-${number}-status`)).toHaveText('completed');
 }
 
-/** Shows run `number` on the results tab and checks that its stored output can be read. */
+/**
+ * Shows the outfmt 7 of run `number` (a BLASTN run) in the results tab's Outputs view, and
+ * checks that its stored output can be read; the view stays open for its export button.
+ */
 export async function expectResult(page: Page, number: number): Promise<void> {
-  await page.getByTestId('tab-results').click();
-  await page.getByTestId('result-run').selectOption({ label: `Run ${number} · BLASTN` });
-  await page.getByTestId('format-7').click();
+  await showOutput(page, number, 7);
+  await expect(page.getByTestId('results-run').locator('option:checked')).toHaveText(new RegExp(`^Run ${number} · BLASTN · `));
   await expect(page.getByTestId('result-output')).toContainText(OUTFMT7_MARK);
 }
 
@@ -144,8 +148,9 @@ const TYPES: Readonly<Record<string, string>> = {
 
 /**
  * Builds tests/e2e/harness in memory with Vite; the application build is not touched. The
- * harness build has the engine modules of LOSAT_WEB_REACTORS, as the application build does,
- * and the test hooks of the Engine worker (`__LOSAT_TEST_HOOKS__`).
+ * harness build has the engine modules of LOSAT_WEB_REACTORS and the verification table (the
+ * composition root imports both), as the application build does, and the test hooks of the
+ * Engine worker (`__LOSAT_TEST_HOOKS__`).
  */
 export async function buildHarness(): Promise<HarnessFiles> {
   const result = await build({
@@ -154,7 +159,7 @@ export async function buildHarness(): Promise<HarnessFiles> {
     configFile: false,
     publicDir: false,
     logLevel: 'warn',
-    plugins: [losatEngine({ reactors: REACTORS })],
+    plugins: [losatEngine({ reactors: REACTORS }), losatVerification()],
     define: { __LOSAT_TEST_HOOKS__: 'true' },
     worker: { format: 'es', plugins: () => [losatEngine({ reactors: REACTORS, emit: false })] },
     build: { write: false, target: 'es2022', minify: false, modulePreload: false },

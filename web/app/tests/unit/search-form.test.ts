@@ -3,13 +3,19 @@ import { duplicateIds } from '../../src/domain/dataset';
 import { geneticCodeLabel } from '../../src/domain/genetic-codes';
 import {
   describedSections,
+  effectiveValue,
   fieldChoices,
+  fieldRows,
   formParameters,
+  placementFlags,
+  sectionShown,
+  sectionsAt,
   setField,
+  writtenValue,
   type EngineOption,
   type FormValues,
 } from '../../src/domain/parameters';
-import { PROGRAMS, programById, residueUnit, sequenceKind } from '../../src/domain/programs';
+import { PROGRAMS, programById, residueUnit, searchSummary, sequenceKind, type ParameterField } from '../../src/domain/programs';
 import {
   REGION_FLAG,
   regionFromPositions,
@@ -95,16 +101,27 @@ describe('formParameters', () => {
     ]);
   });
 
-  it('works for TBLASTX with its sections in order', () => {
+  it('works for TBLASTX with its sections in the order of the page: the genetic codes, then the algorithm parameters', () => {
     const tblastx = programById('tblastx');
     const values: FormValues = { '-db_gencode': '11', '-query_gencode': '4', '-seg': 'yes', '-culling_limit': '2', '-evalue': '1' };
     expect(formParameters(tblastx, values, undefined)).toEqual([
+      ['-query_gencode', '4'],
+      ['-db_gencode', '11'],
       ['-evalue', '1'],
       ['-culling_limit', '2'],
       ['-seg', 'yes'],
-      ['-query_gencode', '4'],
-      ['-db_gencode', '11'],
     ]);
+  });
+
+  it('gives the parameters of one place of the screen', () => {
+    const tblastx = programById('tblastx');
+    const values: FormValues = { '-db_gencode': '11', '-query_gencode': '4', '-seg': 'yes', '-evalue': '1' };
+    expect(formParameters(tblastx, values, undefined, 'algorithm')).toEqual([
+      ['-evalue', '1'],
+      ['-seg', 'yes'],
+    ]);
+    expect(formParameters(tblastx, values, undefined, 'subject')).toEqual([['-db_gencode', '11']]);
+    expect(formParameters(blastn, { '-task': 'blastn', '-evalue': '1' }, options, 'program')).toEqual([['-task', 'blastn']]);
   });
 
   it('omits a TBLASTX value equal to the engine default', () => {
@@ -154,8 +171,8 @@ describe('describedSections', () => {
   it('keeps only described fields and drops empty sections', () => {
     const sections = describedSections(blastp, [valueOption('-evalue'), valueOption('-matrix')]);
     expect(sections.map((s) => [s.title, s.fields.map((f) => f.flag)])).toEqual([
-      ['General parameters', ['-evalue']],
-      ['Scoring parameters', ['-matrix']],
+      ['General Parameters', ['-evalue']],
+      ['Scoring Parameters', ['-matrix']],
     ]);
   });
 
@@ -186,6 +203,120 @@ describe('fieldChoices', () => {
     const flagOption: EngineOption = { flag: '-x', takesValue: false, choices: ['true', 'false'] };
     expect(fieldChoices(field, flagOption)).toEqual(['a', 'b']);
     expect(fieldChoices({ flag: '-x', label: 'X', kind: 'boolean' }, flagOption)).toEqual([]);
+  });
+});
+
+describe('writtenValue', () => {
+  const text: ParameterField = { flag: '-evalue', label: 'Expect threshold', kind: 'text' };
+  const flag: ParameterField = { flag: '-lcase_masking', label: 'Mask lower case letters', kind: 'flag' };
+
+  it('writes a value other than empty and the default, trimmed', () => {
+    expect(writtenValue(text, ' 1e-5 ', valueOption('-evalue', '10'))).toBe('1e-5');
+    expect(writtenValue(text, ' 10 ', valueOption('-evalue', '10'))).toBeUndefined();
+    expect(writtenValue(text, '  ', valueOption('-evalue', '10'))).toBeUndefined();
+    expect(writtenValue(text, undefined, valueOption('-evalue', '10'))).toBeUndefined();
+  });
+
+  it('writes a value equal to no default, as when the engine states none (a default that depends on the task)', () => {
+    expect(writtenValue(text, '10', valueOption('-evalue'))).toBe('10');
+    expect(writtenValue(text, '10', undefined)).toBe('10');
+  });
+
+  it('writes a flag only when it is set', () => {
+    expect(writtenValue(flag, true, undefined)).toBe(true);
+    expect(writtenValue(flag, false, undefined)).toBeUndefined();
+    expect(writtenValue(flag, 'true', undefined)).toBeUndefined();
+    expect(writtenValue(text, true, undefined)).toBeUndefined();
+  });
+});
+
+describe('effectiveValue', () => {
+  const options = [valueOption('-task', 'megablast')];
+
+  it('is the value set, trimmed, or else the default', () => {
+    expect(effectiveValue('-task', { '-task': ' blastn ' }, options)).toBe('blastn');
+    expect(effectiveValue('-task', { '-task': '' }, options)).toBe('megablast');
+    expect(effectiveValue('-task', {}, options)).toBe('megablast');
+    expect(effectiveValue('-task', {}, undefined)).toBeUndefined();
+    expect(effectiveValue('-task', { '-task': 'dc-megablast' }, undefined)).toBe('dc-megablast');
+  });
+});
+
+describe('sections by place, and the Discontiguous Word Options', () => {
+  const blastn = programById('blastn');
+  const discontiguous = blastn.sections.find((section) => section.title === 'Discontiguous Word Options')!;
+  const options = [valueOption('-task', 'megablast'), valueOption('-template_type'), valueOption('-template_length')];
+
+  it('shows the section for the dc-megablast task, set or the default', () => {
+    expect(sectionShown(discontiguous, { '-task': 'dc-megablast' }, options)).toBe(true);
+    expect(sectionShown(discontiguous, {}, [valueOption('-task', 'dc-megablast')])).toBe(true);
+  });
+
+  it('hides it for the other tasks while its fields are empty', () => {
+    expect(sectionShown(discontiguous, {}, options)).toBe(false);
+    expect(sectionShown(discontiguous, { '-task': 'blastn', '-template_type': ' ' }, options)).toBe(false);
+    expect(sectionShown(discontiguous, {}, undefined)).toBe(false);
+  });
+
+  it('shows it while one of its fields has a value, so that no hidden value is written', () => {
+    expect(sectionShown(discontiguous, { '-task': 'megablast', '-template_length': '18' }, options)).toBe(true);
+    expect(sectionShown(discontiguous, { '-template_type': 'coding' }, options)).toBe(true);
+  });
+
+  it('always shows a section without a rule', () => {
+    expect(sectionShown(blastn.sections[1]!, {}, options)).toBe(true);
+  });
+
+  it('places the task, the genetic codes and the algorithm parameters', () => {
+    const tblastx = programById('tblastx');
+    expect(sectionsAt(tblastx, undefined, 'query').flatMap((s) => s.fields.map((f) => f.flag))).toEqual(['-query_gencode']);
+    expect(sectionsAt(tblastx, undefined, 'subject').flatMap((s) => s.fields.map((f) => f.flag))).toEqual(['-db_gencode']);
+    expect(sectionsAt(tblastx, undefined, 'program')).toEqual([]);
+    expect(sectionsAt(blastn, [valueOption('-evalue')], 'program')).toEqual([]);
+    expect(sectionsAt(blastn, undefined, 'program').flatMap((s) => s.fields.map((f) => f.flag))).toEqual(['-task']);
+    expect(placementFlags(programById('tblastn'), 'algorithm')).not.toContain('-db_gencode');
+    expect(placementFlags(programById('tblastn'), 'algorithm')).not.toContain('-task');
+    expect(placementFlags(programById('tblastn'), 'algorithm')).toContain('-evalue');
+    expect(placementFlags(programById('blastx'), 'algorithm')).toEqual([]);
+  });
+});
+
+describe('fieldRows', () => {
+  it("puts the consecutive fields of a row together (NCBI's Match/Mismatch Scores and Gap Costs)", () => {
+    const scoring = programById('blastn').sections.find((section) => section.title === 'Scoring Parameters')!;
+    expect(fieldRows(scoring.fields).map((row) => [row.row, row.fields.map((f) => f.label)])).toEqual([
+      ['Match/Mismatch Scores', ['Match', 'Mismatch']],
+      ['Gap Costs', ['Existence', 'Extension']],
+    ]);
+    const blastp = programById('blastp').sections.find((section) => section.title === 'Scoring Parameters')!;
+    expect(fieldRows(blastp.fields).map((row) => [row.row, row.fields.map((f) => f.flag)])).toEqual([
+      [undefined, ['-matrix']],
+      ['Gap Costs', ['-gapopen', '-gapextend']],
+      [undefined, ['-comp_based_stats']],
+    ]);
+  });
+});
+
+describe('searchSummary', () => {
+  it('says what is searched, with which program and task, and where', () => {
+    expect(searchSummary(programById('blastn'), 'megablast')).toBe(
+      'Search nucleotide subjects with BLASTN, task megablast (optimized for highly similar sequences). Runs in this browser.',
+    );
+    expect(searchSummary(programById('blastn'), 'dc-megablast')).toContain('task dc-megablast (optimized for more dissimilar sequences)');
+    expect(searchSummary(programById('blastp'), 'blastp')).toBe(
+      'Search protein subjects with BLASTP, task blastp (protein-protein BLAST). Runs in this browser.',
+    );
+    expect(searchSummary(programById('tblastn'), 'tblastn')).toBe(
+      'Search translated nucleotide subjects with TBLASTN (protein query), task tblastn. Runs in this browser.',
+    );
+    expect(searchSummary(programById('tblastx'), undefined)).toBe(
+      'Search translated nucleotide subjects with TBLASTX (translated nucleotide query). Runs in this browser.',
+    );
+  });
+
+  it('names a task without a note, and leaves the task out while it is unknown', () => {
+    expect(searchSummary(programById('blastp'), 'other')).toBe('Search protein subjects with BLASTP, task other. Runs in this browser.');
+    expect(searchSummary(programById('blastn'), undefined)).toBe('Search nucleotide subjects with BLASTN. Runs in this browser.');
   });
 });
 
@@ -350,6 +481,20 @@ describe('program descriptors', () => {
   it.each(PROGRAMS.map((p) => [p.id, p] as const))('%s uses no reserved flag', (_id, program) => {
     const flags = program.sections.flatMap((s) => s.fields.map((f) => f.flag));
     for (const flag of flags) expect(RESERVED).not.toContain(flag);
+  });
+
+  it.each(available.map((p) => [p.id, p] as const))("%s has NCBI's sections in NCBI's order under Algorithm parameters", (_id, program) => {
+    const order = ['General Parameters', 'Scoring Parameters', 'Filters and Masking', 'Discontiguous Word Options', 'Other Parameters'];
+    const titles = program.sections.filter((s) => s.placement === 'algorithm').map((s) => s.title);
+    expect(titles.map((title) => order.indexOf(title))).toEqual([...titles.map((title) => order.indexOf(title))].sort((a, b) => a - b));
+    expect(titles.every((title) => order.includes(title))).toBe(true);
+    // The task is chosen with radio buttons in Program Selection, before every other option.
+    const task = program.sections.flatMap((s) => s.fields).find((f) => f.flag === '-task');
+    if (task !== undefined) {
+      expect(task.kind).toBe('radio');
+      expect(program.sections[0]!.placement).toBe('program');
+      expect(program.sections[0]!.fields[0]).toBe(task);
+    }
   });
 
   it('gives the sequence kind and unit of each input', () => {

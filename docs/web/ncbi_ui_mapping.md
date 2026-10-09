@@ -78,7 +78,7 @@ NCBI の結果は、上から操作の行（Edit Search、Save Search、Search S
 | 「Query ID」「Query Descr」「Query Length」 | 「Query ID」と「Query Length」（1 query の Run） | 寄せる | Query Descr は採らない（Run の記録が持つのは ID と長さ。outfmt 0 の `Query=` の行は Alignments と Outputs で読める） |
 | 「Subject ID」「Subject Descr」「Subject Length」 | 「Subject ID」と「Subject Length」（subject が 1 レコードの Run）。複数なら「Subjects」：入力名とレコード数 | 寄せる | Subject Descr は Descriptions と Alignments に（outfmt 0 の見出し） |
 | 「Other reports」（MSA viewer、Distance tree） | なし | 採らない | LOSAT に無い |
-| 「Results for」（複数 query の select） | 「Results for」：Query の一覧（`query-list`、仮想化、ID の絞り込み `query-filter`、「With hits only」`filter-hits-only`）。複数 query の Run だけ | 寄せる | 10 万 query を 1 つの select には入れられない。仮想化した一覧を同じ場所と名前で置く |
+| 「Results for」（複数 query の select） | 「Results for」：Query の一覧（`query-list`、仮想化、ID の絞り込み `query-filter`、「With hits only」`filter-hits-only`）。複数 query の Run だけ。行は ID・長さ・subject と HSP の数。ID は 12ch 以上を保ち（共通の接頭辞を持つ ID が見分けられる）、800 px 以下では長さと数を ID の下の 2 行目に置く | 寄せる | 10 万 query を 1 つの select には入れられない。仮想化した一覧を同じ場所と名前で置く |
 | 当たりの無い query：黄色の帯「No significant similarity found.」、タブが消える | 「No significant similarity found for this query.」（`results-notice` の `no-hits`）。タブは残す（Run details と Outputs は query に依らない） | 寄せる | outfmt 0 の「No hits found」と同じ事実。値は作らない |
 | 「Filter Results」：Percent Identity、E value、Query Coverage の from / to、「Filter」「Reset」 | 「Filter Results」：E value ≤、Bit score ≥、Subject ID contains、「Filter」（`filter-apply`）「Reset」（`filter-clear`） | 寄せる | Percent Identity は採らない（レコードに原値が無い、`results_columns.md`）。Query Coverage はエンジン待ち（E2j）。表示だけを変え、検索をやり直さない（ViewState の規則は変えない） |
 
@@ -156,7 +156,7 @@ LOSAT が足すもの（W4 の判断 18 を保つ）：ズーム（ボタン、+
 
 | LOSAT の要素 | 置き場所 |
 |---|---|
-| キュー（Run の状態、取消、「Open results」） | 右の補助の領域（どのタブでも同じ幅と位置）。カードはどの状態も同じ形：1 行目 Run の番号・program・状態、2 行目 段階と時間（終わった Run は「Took」）、3 行目 操作（Cancel・Open results）を右に、その下に題・入力・option |
+| キュー（Run の状態、取消、「Open results」） | 右の補助の領域（どのタブでも同じ幅と位置）。カードはどの状態も同じ形：1 行目 Run の番号・program・状態、2 行目 段階と時間（終わった Run は「Took」）と、同じ行の右端に操作（Cancel・Open results。入らなければその下の右）、グループの Run には 3 行目の右に「Cancel the group」、その下に題・入力・option |
 | 離れることへの備え（wake lock、戻ったときの確認）、保存の状態 | 右の補助の領域、キューの下 |
 | Combined / Separate、レコード一覧と除外 | 検索画面の各枠の中 |
 | Subject の保持（R1） | キューの Run の詳細 |

@@ -1,0 +1,50 @@
+
+> losat-web@0.0.0 check
+> npm run typecheck && npm run lint && npm run test && npm run build
+
+
+> losat-web@0.0.0 typecheck
+> vue-tsc --noEmit
+
+
+> losat-web@0.0.0 lint
+> eslint .
+
+
+> losat-web@0.0.0 test
+> vitest run
+
+(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+  - import "./output-format" without a file extension (src/domain/verification.ts:9:35). Add the file extension
+  - import "./programs" without a file extension (src/domain/verification.ts:10:32). Add the file extension
+Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+
+ RUN  v5.0.2 /home/kawato/losat-work/.worktrees/web-gui-app/web/app
+
+
+ Test Files  20 passed | 1 skipped (21)
+      Tests  378 passed | 29 skipped (407)
+   Start at  06:55:20
+   Duration  6.36s (tests 72%, transform 23%, import 4%, worker 1%)
+
+
+> losat-web@0.0.0 build
+> vite build
+
+(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+  - import "./output-format" without a file extension (src/domain/verification.ts:9:35). Add the file extension
+  - import "./programs" without a file extension (src/domain/verification.ts:10:32). Add the file extension
+Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+vite v8.3.1 building client environment for production...
+transforming...
+✓ 121 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                          0.39 kB │ gzip:  0.26 kB
+dist/assets/thread-worker-BFsv56lD.js   17.92 kB
+dist/assets/data-worker-BAAWOHej.js     20.97 kB
+dist/assets/engine-worker-uOxZ35d8.js   30.17 kB
+dist/assets/index-C-rtt4tn.css          22.58 kB │ gzip:  5.14 kB
+dist/assets/index-CmsxyhWM.js          270.62 kB │ gzip: 85.43 kB
+
+✓ built in 379ms

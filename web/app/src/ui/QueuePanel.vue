@@ -94,9 +94,10 @@ function phaseTimes(run: RunView): string {
         :data-testid="`run-${run.snapshot.number}`"
       >
         <!-- One layout for every card, at every width (W4b screen review L7): the run and its
-             status, then its phase and time, then its actions at the right; what it searched
-             under them. The phase and the actions are on the same lines in a waiting and a
-             running card. -->
+             status, then its phase and time with Cancel or Open results at the right end of that
+             line (second screen review L2: a finished card does not gain a line), "Cancel the
+             group" under them, then what it searched. The phase and Cancel are on the same line
+             in a waiting and a running card. -->
         <div class="run-head">
           <strong>Run {{ run.snapshot.number }}</strong>
           <span>{{ programById(run.snapshot.program).label }}</span>
@@ -105,32 +106,33 @@ function phaseTimes(run: RunView): string {
         <div class="run-progress" :data-testid="`run-${run.snapshot.number}-progress`">
           <span class="phase" :data-testid="`run-${run.snapshot.number}-phase`">{{ phase(run) }}</span>
           <span v-if="elapsed(run)" class="elapsed muted" :data-testid="`run-${run.snapshot.number}-elapsed`">{{ elapsed(run) }}</span>
+          <div v-if="cancellable(run) || run.status === 'completed'" class="run-actions" :data-testid="`run-${run.snapshot.number}-actions`">
+            <button
+              v-if="cancellable(run)"
+              type="button"
+              :data-testid="`run-${run.snapshot.number}-cancel`"
+              @click="coordinator.cancel(run.snapshot.runId)"
+            >
+              Cancel
+            </button>
+            <button
+              v-if="run.status === 'completed'"
+              type="button"
+              :data-testid="`run-${run.snapshot.number}-open`"
+              @click="$emit('open-results', run.snapshot.runId)"
+            >
+              Open results
+            </button>
+          </div>
         </div>
-        <div v-if="cancellable(run) || run.status === 'completed'" class="run-actions" :data-testid="`run-${run.snapshot.number}-actions`">
+        <div v-if="groupCancellable(run)" class="run-group-actions">
           <button
-            v-if="groupCancellable(run)"
             type="button"
             class="link"
             :data-testid="`run-${run.snapshot.number}-cancel-group`"
             @click="coordinator.cancelGroup(run.snapshot.group!.groupId)"
           >
             Cancel the group
-          </button>
-          <button
-            v-if="cancellable(run)"
-            type="button"
-            :data-testid="`run-${run.snapshot.number}-cancel`"
-            @click="coordinator.cancel(run.snapshot.runId)"
-          >
-            Cancel
-          </button>
-          <button
-            v-if="run.status === 'completed'"
-            type="button"
-            :data-testid="`run-${run.snapshot.number}-open`"
-            @click="$emit('open-results', run.snapshot.runId)"
-          >
-            Open results
           </button>
         </div>
         <div v-if="run.snapshot.title" class="run-title" :data-testid="`run-${run.snapshot.number}-title`">

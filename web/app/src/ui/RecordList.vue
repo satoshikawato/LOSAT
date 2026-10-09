@@ -1,11 +1,12 @@
 <script setup lang="ts">
 // The records of a source, with a box to include or leave out each one. Only the rows in
 // view are drawn, so a source of many records stays responsive.
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { computed, ref } from 'vue';
 import type { DraftSource, SearchDraft } from '../application/draft';
 import type { InputRole, SequenceKind } from '../domain/programs';
 import { looksLikeOtherKind } from '../domain/sequence-kind';
 import { formatCount } from './format';
+import { useNarrow } from './useNarrow';
 
 const props = defineProps<{
   draft: SearchDraft;
@@ -16,22 +17,13 @@ const props = defineProps<{
   testid: string;
 }>();
 
-// Narrow screens (the same query as styles.css) give a row two lines: the record, then its
-// tags, so that the ID and the tags are not cut off.
-const NARROW = '(max-width: 800px)';
+// Narrow screens give a row two lines: the record, then its tags, so that the ID and the tags
+// are not cut off.
 const ROW_PX = { wide: 30, narrow: 52 } as const;
 const VISIBLE_ROWS = 10;
 const SPARE_ROWS = 6;
 
-const narrow = ref(false);
-let narrowQuery: MediaQueryList | undefined;
-const onNarrow = (event: MediaQueryListEvent) => (narrow.value = event.matches);
-onMounted(() => {
-  narrowQuery = window.matchMedia(NARROW);
-  narrow.value = narrowQuery.matches;
-  narrowQuery.addEventListener('change', onNarrow);
-});
-onUnmounted(() => narrowQuery?.removeEventListener('change', onNarrow));
+const narrow = useNarrow();
 const rowPx = computed(() => (narrow.value ? ROW_PX.narrow : ROW_PX.wide));
 
 const filter = ref('');

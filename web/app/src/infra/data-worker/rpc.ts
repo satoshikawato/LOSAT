@@ -2,7 +2,8 @@
 // serves the methods of one object; the main thread gets an object with the same methods,
 // each of which returns a promise. Errors keep their name and message.
 //
-// Transfer rule for results: a MessagePort, and a Uint8Array that owns its whole buffer
+// Transfer rule for results: a MessagePort, and a typed array (a Uint8Array, or a column of
+// an HSP table) that owns its whole buffer
 // (at the top level or as a property of the result), are transferred instead of copied.
 // A served object must therefore return buffers that it does not keep.
 
@@ -117,7 +118,8 @@ function transferables(value: unknown): Transferable[] {
   const add = (item: unknown) => {
     if (item instanceof MessagePort) found.push(item);
     else if (
-      item instanceof Uint8Array &&
+      ArrayBuffer.isView(item) &&
+      !(item instanceof DataView) &&
       item.buffer instanceof ArrayBuffer &&
       item.byteOffset === 0 &&
       item.byteLength === item.buffer.byteLength &&
@@ -127,7 +129,7 @@ function transferables(value: unknown): Transferable[] {
     }
   };
   add(value);
-  if (typeof value === 'object' && value !== null && !(value instanceof Uint8Array)) {
+  if (typeof value === 'object' && value !== null && !ArrayBuffer.isView(value)) {
     for (const item of Object.values(value)) add(item);
   }
   return found;

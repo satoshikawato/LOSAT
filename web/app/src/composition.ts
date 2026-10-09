@@ -1,8 +1,10 @@
 // Composition root: the only module that chooses implementations for the ports.
 import { ENGINE_ASSETS } from 'virtual:losat-engine';
+import { VERIFICATION_TABLE } from 'virtual:losat-verification';
 import { Attention } from './application/attention';
 import { Coordinator } from './application/coordinator';
 import { SearchDraft } from './application/draft';
+import { ResultsBrowser } from './application/results';
 import type { Downloader } from './ports/download';
 import type { EngineGateway } from './ports/engine';
 import { browserPage } from './infra/browser/page';
@@ -16,6 +18,8 @@ export interface App {
   readonly coordinator: Coordinator;
   /** The job being edited on the search screen. */
   readonly draft: SearchDraft;
+  /** What the results screen shows (application/results.ts). */
+  readonly results: ResultsBrowser;
   /** Wake lock, the warning before leaving, and the check after the page was hidden. */
   readonly attention: Attention;
   /** True while the engine is the FakeEngine; the UI shows a warning banner. */
@@ -56,11 +60,17 @@ export function createApp(options: AppOptions = {}): App {
     enqueueAll: (requests) => coordinator.enqueueAll(requests),
     now: () => performance.now(),
   });
+  const results = new ResultsBrowser({
+    data,
+    describe: (program) => engine.describe(program),
+    runs: coordinator.state,
+    verification: VERIFICATION_TABLE,
+  });
   const attention = new Attention({
     page: browserPage,
     runs: coordinator.state,
     probe: () => data.storageInfo(),
     now: () => Date.now(),
   });
-  return { coordinator, draft, attention, usesFakeEngine: ENGINE_ASSETS === null };
+  return { coordinator, draft, results, attention, usesFakeEngine: ENGINE_ASSETS === null };
 }

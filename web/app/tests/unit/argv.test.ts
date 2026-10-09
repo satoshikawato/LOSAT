@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildArgv, RESERVED_FLAGS, toShellCommand } from '../../src/domain/argv';
+import { buildArgv, optionValue, RESERVED_FLAGS, toShellCommand } from '../../src/domain/argv';
 
 describe('buildArgv', () => {
   it('puts the program and input names first, then parameters in the given order', () => {
@@ -35,5 +35,15 @@ describe('toShellCommand', () => {
     expect(toShellCommand(['blastn', '-query', 'my query.fa', '-subject', "it's.fa"], 6)).toBe(
       "LOSAT blastn -query 'my query.fa' -subject 'it'\\''s.fa' -outfmt 6",
     );
+  });
+});
+
+describe('optionValue', () => {
+  it("reads the word after an option's last occurrence, and nothing where it is not given", () => {
+    const argv = ['blastn', '-query', 'q.fa', '-subject', 's.fa', '-task', 'blastn', '-evalue', '1e-5', '-task', 'dc-megablast'];
+    expect(optionValue(argv, '-task')).toBe('dc-megablast');
+    expect(optionValue(argv, '-evalue')).toBe('1e-5');
+    expect(optionValue(argv, '-word_size')).toBeUndefined();
+    expect(optionValue(['blastn', '-task'], '-task')).toBeUndefined();
   });
 });

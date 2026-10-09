@@ -1,7 +1,7 @@
 <script setup lang="ts">
-// The region of a role's only record (DW-9): two position fields, and a bar that shows the
-// record, on which a range can be chosen by dragging. The region becomes -query_loc or
-// -subject_loc start-stop.
+// The region of a role's only record (DW-9; NCBI's "Query subrange" / "Subject subrange"):
+// two position fields, and a bar that shows the record, on which a range can be chosen by
+// dragging. The region becomes -query_loc or -subject_loc start-stop.
 import { computed, ref } from 'vue';
 import type { SearchDraft } from '../application/draft';
 import type { DatasetRecord } from '../domain/dataset';
@@ -12,6 +12,8 @@ import { formatCount } from './format';
 const props = defineProps<{
   draft: SearchDraft;
   role: InputRole;
+  /** The fieldset's legend ("Query subrange"). */
+  title: string;
   record: DatasetRecord;
   region: RegionText | undefined;
   unit: string;
@@ -63,7 +65,8 @@ function up(): void {
 
 <template>
   <fieldset class="region" :data-testid="testid">
-    <legend>Region of {{ record.id }}</legend>
+    <legend>{{ title }}</legend>
+    <p class="region-record" :data-testid="`${testid}-record`">Record {{ record.id }}</p>
     <div
       ref="bar"
       class="region-bar"

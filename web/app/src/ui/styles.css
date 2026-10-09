@@ -130,11 +130,19 @@ textarea {
   background: var(--accent-bg);
 }
 
+/* W4b search: the same columns in the Search and Results tabs, so that the queue does not
+   move between them (mapping decision 25); the queue keeps 260 to 300 px and the tables
+   take the rest (S13 screen review H1). */
 .layout {
   display: grid;
-  grid-template-columns: minmax(0, 3fr) minmax(260px, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 300px);
   gap: 24px;
   align-items: start;
+}
+
+/* An option name is not broken after its leading hyphen (S13 screen review L2). */
+.option-name {
+  white-space: nowrap;
 }
 
 /* Search screen */
@@ -188,31 +196,65 @@ textarea {
   outline-offset: 1px;
 }
 
+/* W4b search: the program's sentence under the tabs, as NCBI's, in the panel's type. */
 .program-summary {
   margin: 4px 0 8px;
   color: var(--muted);
+  font-size: 0.92em;
 }
 
-.inputs {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
-  margin: 12px 0;
-}
-
-.input-panel {
+/* W4b search: NCBI's blocks ("Enter Query Sequence", "Program Selection", the sections of
+   "Algorithm parameters"): a light grey panel whose legend is a tab on its top edge, in
+   LOSAT's accent. */
+.search-block {
   border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 10px 12px;
+  border-radius: 4px;
   background: var(--panel);
+  margin: 14px 0 0;
+  padding: 4px 12px 10px;
   min-width: 0;
 }
 
-.input-header {
+.search-block > legend {
+  padding: 1px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px 4px 0 0;
+  background: var(--bg);
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 1.05em;
+}
+
+/* W4b search: a file dragged over a block. */
+.input-panel.dragging {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+
+/* W4b search: the paste box and, beside it from 801 px, the subrange. Its sides are those of the
+   block's rows (.param-row), so that the paste box, the drop zone and the Job Title start and end
+   at the same x (W4b screen review L13). */
+.entry {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px 24px;
+  padding: 4px 6px 6px;
+}
+
+.entry-label {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: 8px;
-  margin-bottom: 6px;
+  gap: 4px 10px;
+  margin-bottom: 4px;
+}
+
+.entry-label label {
+  font-weight: 600;
+}
+
+.entry-label .link {
+  font-size: 0.88em;
 }
 
 .kind {
@@ -220,20 +262,162 @@ textarea {
   font-size: 0.9em;
 }
 
+.subrange-title,
+.region > legend {
+  font-weight: 600;
+  margin: 0 0 4px;
+  padding: 0;
+}
+
+.entry-subrange .hint {
+  margin: 0;
+}
+
+.entry-subrange .region {
+  border: none;
+  margin: 0;
+  padding: 0;
+}
+
+.region-record {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.88em;
+  overflow-wrap: anywhere;
+}
+
+/* W4b search: a row of the blocks, NCBI's label on the left and its control on the right
+   (one column below 801 px). */
+.param-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2px 16px;
+  padding: 5px 6px;
+  border-radius: 3px;
+}
+
+.param-label {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.param-label code.flag {
+  font-size: 0.8em;
+  font-weight: 400;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.param-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  justify-items: start;
+  gap: 2px;
+  min-width: 0;
+}
+
+.param-control > input[type='text'] {
+  width: 16em;
+  max-width: 100%;
+}
+
+/* A select is as wide as its longest choice (a genetic code's name), within the column; its
+   span clips the label that WebKit draws beyond it (ParameterField.vue), with room inside for
+   the focus ring. */
+.select-clip {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 3px;
+  margin: -3px;
+}
+
+.select-clip select {
+  min-width: min(16em, 100%);
+  max-width: 100%;
+}
+
+.param-control .help {
+  margin: 0;
+  color: var(--muted);
+}
+
+/* W4b search: a row of several fields (Match/Mismatch Scores, Gap Costs). */
+.param-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+}
+
+.param-inline {
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  flex: 0 1 17em;
+  min-width: 0;
+}
+
+.param-inline .param-label {
+  font-weight: 400;
+}
+
+.param-inline input[type='text'] {
+  width: 8em;
+}
+
+/* W4b search: a value that differs from the engine's default (it is written to the argv),
+   as NCBI marks it: yellow (LOSAT's warning colour) and a diamond. */
+.param-row.changed,
+.param-inline.changed {
+  background: var(--warn-bg);
+}
+
+.changed-mark {
+  color: var(--warn-fg);
+  margin-right: 4px;
+}
+
+.radios {
+  display: grid;
+  gap: 2px;
+}
+
+.radio {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+}
+
+.radio input {
+  margin: 0;
+}
+
+/* W4b search: "Or, upload file": the open button and the drop zone. */
 .dropzone {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
   border: 1px dashed var(--border);
   border-radius: 4px;
   padding: 6px;
   background: var(--bg);
 }
 
-.dropzone.dragging {
+.input-panel.dragging .dropzone {
   border-color: var(--accent);
-  background: var(--accent-bg);
 }
 
-.paste {
-  display: block;
+/* Its border and padding inside its width: at 100% it ended 14 px past the other fields on a
+   phone (W4b screen review L13). */
+#job-title {
+  width: 32em;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 textarea,
@@ -245,14 +429,6 @@ pre.output {
 
 textarea {
   resize: vertical;
-}
-
-.file-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 10px;
-  margin-top: 6px;
 }
 
 .sources {
@@ -312,7 +488,8 @@ textarea {
   margin: 6px 0;
 }
 
-.record-tools input {
+/* The search box only: a checkbox keeps its own size, next to its label (S13 screen review L1). */
+.record-tools input[type='search'] {
   width: 10em;
 }
 
@@ -412,13 +589,16 @@ textarea {
 }
 
 .mode,
-.region,
-.parameter-section {
+.region {
   border: 1px solid var(--border);
   border-radius: 4px;
   margin: 8px 0 0;
   padding: 6px 10px 8px;
   min-width: 0;
+}
+
+.mode {
+  background: var(--bg);
 }
 
 .mode label {
@@ -467,57 +647,102 @@ textarea {
   width: 9em;
 }
 
-.parameters > summary {
-  font-weight: 600;
-  cursor: pointer;
-  margin: 8px 0;
+/* W4b search: the "Run LOSAT" button (NCBI's BLAST button) and the line that says what it
+   searches (NCBI's "Search nucleotide sequence using ..."), then LOSAT's lines under it. */
+.blast-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin: 14px 0 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
 }
 
-.parameter-section legend {
-  font-weight: 600;
-}
-
-.fields {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 10px 16px;
-}
-
-.field {
-  display: grid;
-  align-content: start;
-  gap: 2px;
+.blast-row p {
+  margin: 0;
+  flex: 1 1 18em;
   min-width: 0;
 }
 
-.field label code.flag,
-.flag-label code.flag {
-  font-size: 0.8em;
-  color: var(--muted);
-  white-space: nowrap;
+.blast-notes {
+  padding: 0 4px;
 }
 
-.field .help {
-  margin: 0;
-  color: var(--muted);
+.blast-notes > p {
+  margin: 6px 0;
 }
 
-.flag-label {
-  display: block;
-}
-
-.flag-label input {
-  margin: 0 6px 0 0;
-  vertical-align: middle;
-}
-
-.run-options,
-.actions {
+.run-options {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px 12px;
-  margin: 12px 0;
+  margin: 8px 0;
+}
+
+/* W4b search: "Algorithm parameters", a bar across the width that opens and closes. */
+.algorithm-parameters {
+  margin: 16px 0 0;
+}
+
+.parameters-heading {
+  margin: 0;
+  font-size: 1em;
+}
+
+/* A block of inline words, so that the name and the count wrap as text on a phone. */
+.parameters-bar {
+  display: block;
+  width: 100%;
+  min-height: 32px;
+  padding: 4px 12px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 700;
+  font-size: 1.05em;
+  text-align: left;
+}
+
+.parameters-bar:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.bar-mark {
+  display: inline-block;
+  width: 1em;
+  margin-right: 6px;
+  text-align: center;
+  font-size: 1.2em;
+  line-height: 1;
+}
+
+.bar-count {
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+.parameters-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 12px;
+  margin: 8px 0 0;
+}
+
+.parameters-note {
+  margin: 0;
+  padding: 2px 8px;
+  border-radius: 3px;
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+  font-size: 0.9em;
 }
 
 .run-options label {
@@ -544,6 +769,24 @@ textarea {
   padding: 8px 18px;
 }
 
+/* W4b search: the Job Title on a run's card. */
+.run-title {
+  font-weight: 600;
+  font-size: 0.92em;
+  overflow-wrap: anywhere;
+}
+
+/* W4b search: labels on the left of their controls from 801 px (NCBI's two columns). */
+@media (min-width: 801px) {
+  .param-row {
+    grid-template-columns: 14em minmax(0, 1fr);
+  }
+
+  .entry {
+    grid-template-columns: minmax(0, 3fr) minmax(15em, 2fr);
+  }
+}
+
 /* Queue and side panels */
 
 .queue {
@@ -567,15 +810,30 @@ textarea {
   background: var(--accent-bg);
 }
 
-.run-line {
+/* A run's card has one layout in every state and at every width (W4b screen review L7): the run
+   and its status badge, its phase and time, its actions at the right, then what it searched. The
+   cards no longer wrap three ways or move between the tabs (W4 screen review low 5, S13 L3). */
+.run-head,
+.run-progress {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px 8px;
+  gap: 2px 8px;
 }
 
-.run-line button {
-  margin-left: auto;
+.run-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 4px 12px;
+  margin: 2px 0;
+}
+
+/* Cancel and Open results are the same size in every card. */
+.run-actions > button:not(.link) {
+  font-size: 0.88em;
+  padding: 2px 10px;
 }
 
 .run-inputs {
@@ -613,8 +871,33 @@ textarea {
   border-color: currentColor;
 }
 
+/* Waiting and cancelled runs differ by more than their words (S12's screen review L-e). */
+.status[data-status='queued'] {
+  color: var(--warn-fg);
+  background: var(--warn-bg);
+  border-color: currentColor;
+}
+
+/* A cancelled run: a dashed badge and border, its word not struck through (S13 screen review L7). */
+.status[data-status='cancelled'] {
+  border-style: dashed;
+  border-color: currentColor;
+}
+
+.run[data-status='cancelled'] {
+  border-style: dashed;
+}
+
 .phase {
   font-weight: 600;
+}
+
+/* A finished run's "Took" or "Not started": its badge says how it ended. */
+.run[data-status='completed'] .phase,
+.run[data-status='cancelled'] .phase,
+.run[data-status='failed'] .phase {
+  font-weight: 400;
+  color: var(--muted);
 }
 
 .elapsed {
@@ -681,17 +964,540 @@ pre.output {
   max-height: 60vh;
 }
 
+/* Results screen (S13) */
+
+.small {
+  font-size: 0.85em;
+}
+
+label.inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* W4b: the header block of NCBI's results (Job Title, RID, Program, Query ID ...) as a list of
+   rows, with "Filter Results" on its right where there is room, under it where there is not. */
+.results-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 12px 24px;
+}
+
+.results-summary {
+  flex: 1 1 26em;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  margin: 0;
+}
+
+.results-summary dt,
+.results-summary dd {
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.results-summary dt {
+  padding-right: 16px;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.results-summary dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.results-title {
+  font-weight: 600;
+}
+
+.results-run,
+.results-program {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+}
+
+.results-summary .run-inputs {
+  font-size: 1em;
+}
+
+/* WebKit draws the chosen run's label at its whole length beyond the select's box (overflow
+   on a select does not clip it), which made the page wider than a phone's screen (S13 screen
+   review H2): the label clips it, with room inside for the select's focus ring. */
+.results-run-select {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 3px;
+  margin: -3px;
+}
+
+.results-run-select select {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.results-message {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel);
+}
+
+.verification-badge {
+  font-size: 0.85em;
+  padding: 2px 10px;
+  border-radius: 12px;
+  border: 1px solid currentColor;
+  background: var(--panel);
+  color: var(--muted);
+}
+
+.verification-badge[data-level='certified'] {
+  color: var(--ok);
+  background: #e7f5ec;
+}
+
+.verification-badge[data-level='outside'] {
+  color: var(--warn-fg);
+  background: var(--warn-bg);
+}
+
+.verification ul {
+  margin: 4px 0 8px;
+  padding-left: 20px;
+}
+
+.hits-view h3 {
+  margin: 12px 0 4px;
+}
+
+.hits-view h4,
+.hsp-detail h4 {
+  margin: 10px 0 4px;
+  font-size: 0.95em;
+}
+
+.result-filters {
+  flex: 1 1 18em;
+  max-width: 28em;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel);
+}
+
+.result-filters .filter-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin-top: 6px;
+}
+
+.result-filters p {
+  margin: 6px 0 0;
+}
+
+.result-filters label {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.88em;
+  gap: 2px;
+}
+
+.result-filters input {
+  width: 8em;
+}
+
+.filter-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.filter-submit {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+/* "Results for": the query list of a run of several queries. */
+.query-picker {
+  margin-top: 12px;
+}
+
+/* W4b: NCBI's tab strip, in LOSAT's colours: the selected tab filled with the accent and white
+   text, the others grey, over a line of the accent; under it, each tab's light tool band. */
+.results-tabs {
+  gap: 4px;
+  margin: 12px 0 0;
+  border-bottom: 3px solid var(--accent);
+}
+
+.results-tabs button {
+  border-color: var(--border);
+  border-bottom: none;
+  border-radius: 4px 4px 0 0;
+  background: var(--panel);
+  padding: 6px 14px;
+}
+
+.results-tabs button[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+.tool-band {
+  margin: 0 0 8px;
+  padding: 6px 10px;
+  background: var(--accent-bg);
+}
+
+.hits-view .tool-band h3 {
+  margin: 0;
+}
+
+.result-notices .notice {
+  margin: 6px 0;
+}
+
+.virtual-rows {
+  position: relative;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+}
+
+.virtual-spacer {
+  position: relative;
+}
+
+.virtual-row {
+  position: absolute;
+  left: 0;
+  right: 0;
+}
+
+.pick-row,
+.table-row {
+  width: 100%;
+  height: 100%;
+  border: none;
+  border-bottom: 1px solid var(--panel);
+  border-radius: 0;
+  background: transparent;
+  text-align: left;
+  padding: 0 8px;
+  color: var(--fg);
+}
+
+.pick-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pick-row .record-id {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pick-meta {
+  color: var(--muted);
+  font-size: 0.85em;
+  white-space: nowrap;
+}
+
+.pick-row.empty .record-id {
+  color: var(--muted);
+}
+
+.pick-row.selected,
+.table-row.selected {
+  background: var(--accent-bg);
+  box-shadow: inset 3px 0 var(--accent);
+}
+
+/* The subject and HSP tables (S13 screen review H1, M1, M2). Their columns are sized in ch
+   for the values they show (BLAST+'s longest E value and bit score are 9 characters, such
+   as 1.02e-129 and 1.213e+06), at the tables' type size; a header label wraps to a second line
+   where it needs to, and a value that its column cuts ends in an ellipsis and has its full text
+   in its title. The one track of .table-scroll is at least as wide as the header's columns
+   (its min-content), so the table scrolls sideways only when its pane is narrower. */
+.table-scroll {
+  display: grid;
+  grid-template-columns: minmax(min-content, 1fr);
+  overflow-x: auto;
+  font-size: 0.875em;
+}
+
+.table-hint {
+  margin: 0 0 4px;
+}
+
+.sort-button {
+  width: 100%;
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-align: inherit;
+  text-decoration: underline dotted;
+}
+
+.subject-grid,
+.hsp-grid {
+  display: grid;
+  gap: 6px;
+  align-items: center;
+}
+
+/* NCBI's order (W4b): #, Description, Score (bits), E value, HSPs, Length, Subject ID. The Subject
+   ID column is as wide as its longest value (--id-width, measured by SubjectTable), within 10ch
+   and 24ch, and starts 12 px further from the right-aligned lengths; the Description has the rest
+   (W4b screen review L8). */
+.subject-grid {
+  grid-template-columns: 4ch minmax(12ch, 1fr) 9ch 8.25ch 7ch 8.25ch calc(clamp(10ch, var(--id-width, 24ch), 24ch) + 12px);
+}
+
+.subject-grid > [data-col='sseqid'],
+.subject-grid > [data-field='sseqid'] {
+  padding-left: 12px;
+}
+
+/* #, Bit score, E value, Identity, Length, Mismatches, Gap opens, Query, Subject, [Frames],
+   Orientation, outfmt 0. The columns are 5 px apart: with the frames, the table fits the results'
+   column at 1280 px beside the queue's column of the same width in both tabs (W4b). */
+.hsp-grid {
+  column-gap: 5px;
+  grid-template-columns: 3.5ch 9ch 8.25ch 7ch 6ch 9.75ch 5.25ch minmax(11ch, 1fr) minmax(11ch, 1fr) 9.5ch 8.25ch;
+}
+
+.hsp-grid.framed {
+  grid-template-columns: 3.5ch 9ch 8.25ch 7ch 6ch 9.75ch 5.25ch minmax(11ch, 1fr) minmax(11ch, 1fr) 6ch 9.5ch 8.25ch;
+}
+
+/* The header's columns are the rows' columns: the same borders, and room for the rows'
+   scroll bar (--row-gutter, measured by VirtualRows). The grid keeps the tables' type size
+   and weight, so that its ch are the rows' ch; the labels are set smaller and bold. */
+.table-head {
+  border: 1px solid var(--border);
+  border-bottom: none;
+  border-radius: 4px 4px 0 0;
+  padding: 4px calc(8px + var(--row-gutter, 0px)) 4px 8px;
+  background: var(--accent-bg);
+  color: var(--fg);
+  align-items: end;
+}
+
+.table-head > * {
+  min-width: 0;
+  font-size: 0.9em;
+  font-weight: 600;
+}
+
+/* The header of a column of right-aligned values ends where its values end (S13 screen review M1). */
+.table-head > .num-head {
+  text-align: right;
+}
+
+.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.table-row > * {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.orientation[data-orientation='reverse'] {
+  color: #c2410c;
+}
+
+.orientation[data-orientation='unknown'] {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.hsp-detail pre.output {
+  margin: 0 0 6px;
+}
+
+/* W4b: the Alignments, after NCBI's block of a subject and its Ranges. The view keeps the Range in
+   view in place itself as sections are read and Ranges added (AlignmentsView keepInPlace), the same
+   in every browser: the browsers' own scroll anchoring (not in WebKit) is left out for the blocks. */
+.alignments {
+  overflow-anchor: none;
+}
+
+.alignments-nav {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px 12px;
+}
+
+.alignments-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+pre.subject-heading {
+  max-height: none;
+  margin: 8px 0 4px;
+  font-weight: 600;
+}
+
+.alignments-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  margin: 4px 0 10px;
+}
+
+.range-more {
+  margin: 8px 0;
+}
+
+.range-block {
+  border-top: 1px solid var(--border);
+  padding: 8px 0 4px;
+  scroll-margin-top: 8px;
+}
+
+.range-block.selected {
+  padding-left: 8px;
+  box-shadow: inset 3px 0 var(--accent);
+}
+
+.range-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 4px 16px;
+}
+
+.range-label {
+  margin: 0;
+  font-size: 0.95em;
+}
+
+.range-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-size: 0.9em;
+}
+
+.range-buttons button.link {
+  min-height: 24px;
+}
+
+.range-buttons button.link:disabled {
+  color: var(--muted);
+  text-decoration: none;
+}
+
+pre.range-text {
+  max-height: none;
+  margin: 6px 0;
+}
+
+/* A Range whose section waits to be read keeps some height, so that a screenful holds a few of them. */
+.range-pending {
+  min-height: 6em;
+  margin: 6px 0;
+}
+
+.row-label {
+  margin: 6px 0 2px;
+  font-size: 0.9em;
+  color: var(--muted);
+}
+
+/* All twelve fields of the outfmt 6 row show in the Range block: on one line at the sections' type
+   size, its bit score was cut at 1280 px (W4b screen review M1). At the tables' type size the row
+   of short IDs fits on one line there; a longer one wraps at its tabs (or inside a field longer
+   than a line). The text stays the row as written; only its lines are broken on the screen. */
+.row-text {
+  max-height: none;
+  font-size: 0.875em;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* The Run details tab has no tool band: its first heading keeps off the tab strip's line (W4b
+   screen review L13), about as far as the Outputs tab's first line. */
+.run-details {
+  padding-top: 12px;
+}
+
+.details-list {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 12px;
+  margin: 4px 0 8px;
+}
+
+/* The run details' lists share their columns, so that their values start at the same x (S13 screen review L5). */
+.details-grid {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: 12px;
+}
+
+.details-grid > * {
+  grid-column: 1 / -1;
+}
+
+.details-grid > .details-list {
+  grid-template-columns: subgrid;
+}
+
+.details-list dt {
+  color: var(--muted);
+}
+
+.details-list dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.commands {
+  padding-left: 18px;
+}
+
+.commands code {
+  overflow-wrap: anywhere;
+}
+
 /* Narrow screens: one column, in the order search, queue, notes (design §3.4). */
 @media (max-width: 800px) {
   .layout {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .inputs {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .fields {
     grid-template-columns: minmax(0, 1fr);
   }
 
@@ -725,6 +1531,121 @@ pre.output {
 
   .region-bar {
     height: 36px;
+  }
+
+  /* List rows are whole-width targets with their own height. */
+  .pick-row,
+  .table-row {
+    min-height: 0;
+  }
+
+  /* The results' tabs share their rows. */
+  .results-tabs button {
+    flex: 1 1 auto;
+    padding: 6px 10px;
+  }
+
+  /* Sort headers are touch targets of at least 24 px (WCAG 2.5.8; S13 screen review L8). */
+  .sort-button {
+    min-height: 24px;
+  }
+
+  /* The key values first (S13 screen review M2): the header's cells and the rows' cells take
+     the same order. Subjects: #, Subject, Score (bits), E value, HSPs, Length, Description. The
+     Subject column keeps 12ch, so that IDs with a common prefix stay apart (second screen review). */
+  .subject-grid {
+    grid-template-columns: 4ch minmax(12ch, 1fr) 9ch 8.25ch 6ch 8.25ch minmax(16ch, 2fr);
+  }
+
+  .subject-grid > [data-col='sseqid'],
+  .subject-grid > [data-field='sseqid'] {
+    padding-left: 0;
+  }
+
+  .subject-grid > [data-col='sseqid'],
+  .subject-grid > [data-field='sseqid'] {
+    order: 1;
+  }
+
+  .subject-grid > [data-col='bitscore'],
+  .subject-grid > [data-field='bitscore'] {
+    order: 2;
+  }
+
+  .subject-grid > [data-col='evalue'],
+  .subject-grid > [data-field='evalue'] {
+    order: 3;
+  }
+
+  .subject-grid > [data-col='hsps'],
+  .subject-grid > [data-field='hsps'] {
+    order: 4;
+  }
+
+  .subject-grid > [data-col='length'],
+  .subject-grid > [data-field='length'] {
+    order: 5;
+  }
+
+  .subject-grid > [data-col='description'],
+  .subject-grid > [data-field='description'] {
+    order: 6;
+  }
+
+  /* HSPs: #, Bit score, E value, [Frames], Query, Subject, Orientation, Identity, Length,
+     Mismatches, Gap opens, outfmt 0. The frames come before the ranges, so that a phone shows
+     them (W4 screen review middle 2: the screen ended inside the subject range). */
+  .hsp-grid {
+    grid-template-columns: 3.5ch 9ch 8.25ch 11ch 11ch 9.5ch 7ch 6ch 9.75ch 5.25ch 8.25ch;
+  }
+
+  .hsp-grid.framed {
+    grid-template-columns: 3.5ch 9ch 8.25ch 6ch 11ch 11ch 9.5ch 7ch 6ch 9.75ch 5.25ch 8.25ch;
+  }
+
+  .hsp-grid > [data-col='frames'],
+  .hsp-grid > [data-field='frames'] {
+    order: 3;
+  }
+
+  .hsp-grid > [data-col='query'],
+  .hsp-grid > [data-field='query'] {
+    order: 4;
+  }
+
+  .hsp-grid > [data-col='subject'],
+  .hsp-grid > [data-field='subject'] {
+    order: 5;
+  }
+
+  .hsp-grid > [data-col='orientation'],
+  .hsp-grid > [data-field='orientation'] {
+    order: 6;
+  }
+
+  .hsp-grid > [data-col='pident'],
+  .hsp-grid > [data-field='pident'] {
+    order: 7;
+  }
+
+  .hsp-grid > [data-col='length'],
+  .hsp-grid > [data-field='length'] {
+    order: 8;
+  }
+
+  .hsp-grid > [data-col='mismatch'],
+  .hsp-grid > [data-field='mismatch'] {
+    order: 9;
+  }
+
+  .hsp-grid > [data-col='gapopen'],
+  .hsp-grid > [data-field='gapopen'] {
+    order: 10;
+  }
+
+  .hsp-grid > [data-col='outfmt0'],
+  .hsp-grid > [data-field='outfmt0'] {
+    order: 11;
   }
 }
 

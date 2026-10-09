@@ -1,16 +1,26 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+// The search screen in the order of NCBI BLAST's two-sequence page (docs/web/ncbi_ui_mapping.md
+// §1): the program tabs and sentence, "Enter Query Sequence", "Enter Subject Sequence",
+// "Program Selection", the "Run LOSAT" button (NCBI's BLAST button) with the line that says
+// what it searches, and "Algorithm parameters", which opens and closes, with a second button
+// below it. LOSAT's own lines (threads, readiness, the engine's check of the options, the
+// queue) are under the first button.
+import { computed, ref, watch } from 'vue';
 import type { RunView } from '../application/coordinator';
 import type { SearchDraft } from '../application/draft';
 import { isTerminal } from '../domain/run';
-import { PROGRAMS, programById, type InputRole } from '../domain/programs';
+import { effectiveValue, formParameters, placementFlags, sectionsAt } from '../domain/parameters';
+import { PROGRAMS, programById, searchSummary, type InputRole } from '../domain/programs';
 import { useStore } from './useStore';
 import InputPanel from './InputPanel.vue';
+import ParameterField from './ParameterField.vue';
 import ParameterForm from './ParameterForm.vue';
 
 const props = defineProps<{ draft: SearchDraft; runs: readonly RunView[] }>();
 const state = useStore(props.draft.state);
 const program = computed(() => programById(state.value.program));
+const options = computed(() => state.value.description?.parameters);
+const values = computed(() => state.value.values[state.value.program]);
 const roles: readonly InputRole[] = ['query', 'subject'];
 
 /** Threads offered besides Auto: up to the logical processors (at most 16). */
@@ -29,10 +39,18 @@ const readiness = computed(() => {
   void state.value;
   return props.draft.readiness();
 });
+/**
+ * The button runs LOSAT (the Owner's words, 2026-10-10: not "BLAST", which names NCBI's
+ * service), and says when the search waits in the queue and how many runs it makes.
+ */
 const buttonLabel = computed(() => {
-  const runs = runCount.value > 1 && program.value.unavailable === undefined ? ` (${runCount.value} runs)` : '';
-  return waiting.value === 0 ? `Run locally${runs}` : `Add to queue${runs}`;
+  const notes = [];
+  if (runCount.value > 1 && program.value.unavailable === undefined) notes.push(`${runCount.value} runs`);
+  if (waiting.value > 0) notes.push('add to queue');
+  return notes.length === 0 ? 'Run LOSAT' : `Run LOSAT (${notes.join(', ')})`;
 });
+const taskFields = computed(() => sectionsAt(program.value, options.value, 'program').flatMap((section) => section.fields));
+const summaryLine = computed(() => searchSummary(program.value, effectiveValue('-task', values.value, options.value)));
 /** One line about the queue next to the button; on narrow screens the queue is far below. */
 const queueSummary = computed(() => {
   if (waiting.value === 0) return undefined;
@@ -42,6 +60,33 @@ const queueSummary = computed(() => {
   if (queued > 0) parts.push(`${queued} waiting`);
   return parts.join(', ');
 });
+
+/** The Algorithm parameters that the argv writes: each differs from the engine's default. */
+const changed = computed(() => formParameters(program.value, values.value, options.value, 'algorithm').length);
+/**
+ * "Algorithm parameters" starts closed, as on NCBI's page, unless one of its values is
+ * written to the argv; a program whose values differ from the defaults opens it when it is
+ * chosen, so that no written value is hidden from view. It never closes by itself.
+ */
+const open = ref(changed.value > 0);
+watch(
+  () => state.value.program,
+  () => {
+    if (changed.value > 0) open.value = true;
+  },
+);
+/** Where the latest search was asked for: its message is shown next to that button, while it is shown. */
+const submittedFrom = ref<'top' | 'bottom'>('top');
+const messageBelow = computed(() => submittedFrom.value === 'bottom' && open.value);
+
+function submit(from: 'top' | 'bottom'): void {
+  submittedFrom.value = from;
+  void props.draft.submit();
+}
+
+function restoreDefaults(): void {
+  props.draft.resetFields(placementFlags(program.value, 'algorithm'));
+}
 
 function showQueue(): void {
   document.getElementById('queue')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -75,60 +120,106 @@ function onThreads(event: Event): void {
         {{ p.label }}
       </label>
     </fieldset>
-    <p class="program-summary">{{ program.summary }}</p>
+    <p class="program-summary" data-testid="program-summary">{{ program.summary }}</p>
     <p v-if="program.unavailable" class="notice" data-testid="program-unavailable">{{ program.unavailable }}</p>
 
-    <div class="inputs">
-      <InputPanel v-for="role in roles" :key="role" :draft="draft" :state="state" :role="role" />
-    </div>
+    <InputPanel v-for="role in roles" :key="role" :draft="draft" :state="state" :role="role" />
 
-    <details v-if="!program.unavailable" class="parameters" open>
-      <summary>Program parameters</summary>
-      <ParameterForm :draft="draft" :state="state" />
-    </details>
+    <fieldset v-if="taskFields.length > 0" class="search-block" data-testid="program-selection">
+      <legend>Program Selection</legend>
+      <ParameterField v-for="field in taskFields" :key="field.flag" :draft="draft" :state="state" :field="field" />
+    </fieldset>
 
-    <div class="run-options">
-      <label>
-        Threads
-        <select data-testid="threads" :value="String(state.threads)" @change="onThreads">
-          <option value="auto">Auto</option>
-          <option v-for="n in threadChoices" :key="n" :value="String(n)">{{ n }}</option>
-        </select>
-      </label>
-      <span class="hint">Auto runs small searches on one thread and larger ones on up to four.</span>
-    </div>
-
-    <p v-if="readiness" class="notice" data-testid="draft-readiness">{{ readiness }}</p>
-    <p class="validation" :data-state="state.validation.state" data-testid="argv-validation" aria-live="polite">
-      <template v-if="state.validation.state === 'invalid'">
-        <span class="error">The engine refuses these options: {{ state.validation.message }}</span>
-      </template>
-      <template v-else-if="state.validation.state === 'checking'">Checking the options with the engine…</template>
-      <template v-else-if="state.validation.state === 'ok'">The engine accepts these options.</template>
-    </p>
-
-    <div class="actions">
+    <div class="blast-row">
       <button
         class="primary-action"
         data-testid="add-to-queue"
         :disabled="state.submitting || program.unavailable !== undefined"
-        @click="draft.submit()"
+        @click="submit('top')"
       >
         {{ buttonLabel }}
       </button>
-      <span v-if="program.unavailable" class="hint">{{ program.label }} is not available yet.</span>
-      <span v-else-if="queueSummary" class="hint" data-testid="queue-summary">
+      <p v-if="program.unavailable" class="hint">{{ program.label }} is not available yet.</p>
+      <p v-else class="search-summary-line" data-testid="search-summary-line">{{ summaryLine }}</p>
+    </div>
+
+    <div class="blast-notes">
+      <div class="run-options">
+        <label>
+          Threads
+          <select data-testid="threads" :value="String(state.threads)" @change="onThreads">
+            <option value="auto">Auto</option>
+            <option v-for="n in threadChoices" :key="n" :value="String(n)">{{ n }}</option>
+          </select>
+        </label>
+        <span class="hint">Auto runs small searches on one thread and larger ones on up to four.</span>
+      </div>
+      <p v-if="readiness" class="notice" data-testid="draft-readiness">{{ readiness }}</p>
+      <p class="validation" :data-state="state.validation.state" data-testid="argv-validation" aria-live="polite">
+        <template v-if="state.validation.state === 'invalid'">
+          <span class="error">The engine refuses these options: {{ state.validation.message }}</span>
+        </template>
+        <template v-else-if="state.validation.state === 'checking'">Checking the options with the engine…</template>
+        <template v-else-if="state.validation.state === 'ok'">The engine accepts these options.</template>
+      </p>
+      <p v-if="queueSummary" class="hint" data-testid="queue-summary">
         {{ queueSummary }}.
         <button type="button" class="link" @click="showQueue">Show the queue</button>
-      </span>
+      </p>
+      <p
+        v-if="state.message && !messageBelow"
+        role="status"
+        :class="state.message.kind === 'error' ? 'error' : 'note'"
+        data-testid="search-message"
+      >
+        {{ state.message.text }}
+      </p>
     </div>
-    <p
-      v-if="state.message"
-      role="status"
-      :class="state.message.kind === 'error' ? 'error' : 'note'"
-      data-testid="search-message"
-    >
-      {{ state.message.text }}
-    </p>
+
+    <section v-if="!program.unavailable" class="algorithm-parameters" data-testid="algorithm-parameters">
+      <h3 class="parameters-heading">
+        <button
+          type="button"
+          class="parameters-bar"
+          :aria-expanded="open"
+          aria-controls="algorithm-parameters-body"
+          data-testid="algorithm-parameters-toggle"
+          @click="open = !open"
+        >
+          <span class="bar-mark" aria-hidden="true">{{ open ? '−' : '+' }}</span>
+          Algorithm parameters
+          <span v-if="changed > 0" class="bar-count" data-testid="algorithm-parameters-changed">({{ changed }} changed)</span>
+        </button>
+      </h3>
+      <div v-if="open" id="algorithm-parameters-body" class="parameters-body">
+        <div class="parameters-tools">
+          <p class="parameters-note">
+            Parameter values that differ from the default are highlighted in yellow and marked with
+            <span aria-hidden="true">♦</span><span class="visually-hidden">a diamond</span> sign
+          </p>
+          <button type="button" data-testid="restore-defaults" @click="restoreDefaults">Restore default search parameters</button>
+        </div>
+        <ParameterForm :draft="draft" :state="state" />
+        <div class="blast-row">
+          <button
+            class="primary-action"
+            data-testid="add-to-queue-bottom"
+            :disabled="state.submitting || program.unavailable !== undefined"
+            @click="submit('bottom')"
+          >
+            {{ buttonLabel }}
+          </button>
+          <p class="search-summary-line">{{ summaryLine }}</p>
+        </div>
+        <p
+          v-if="state.message && messageBelow"
+          role="status"
+          :class="state.message.kind === 'error' ? 'error' : 'note'"
+          data-testid="search-message"
+        >
+          {{ state.message.text }}
+        </p>
+      </div>
+    </section>
   </div>
 </template>

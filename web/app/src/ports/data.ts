@@ -4,6 +4,7 @@
 // outputs of a run arrive over the MessagePort that `openRun` returns
 // (ports/run-output.ts), not through these methods.
 import type { DatasetRevision, FastaParserKind, RecordKey } from '../domain/dataset';
+import type { HspTable } from '../domain/hsp-table';
 import type { OutputFormat } from '../domain/output-format';
 import type { InputRole, ProgramId } from '../domain/programs';
 import type { HspRecord } from './engine';
@@ -76,7 +77,15 @@ export interface RunStore {
   /** Drops a staged run. Committed and unknown runs are left alone. */
   discardRun(runId: string): Promise<void>;
   readOutput(runId: string, format: OutputFormat): Promise<Uint8Array>;
+  /** Bytes [start, end) of one output of a committed run (an HSP's row or section). */
+  readOutputRange(runId: string, format: OutputFormat, start: number, end: number): Promise<Uint8Array>;
   readHits(runId: string): Promise<readonly HspRecord[]>;
+  /**
+   * The HSP records of a committed run as columns, without the aligned sequences
+   * (domain/hsp-table.ts). The Data worker builds it, so the records never cross to the
+   * UI thread as objects (design §10.2).
+   */
+  readHitTable(runId: string): Promise<HspTable>;
   readDiagnostics(runId: string): Promise<string>;
   deleteRun(runId: string): Promise<void>;
 }

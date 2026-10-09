@@ -13,6 +13,27 @@ LOSAT Web の段階 W5 を実行する。先に [セッション README](README.
 
 完了条件は計画 §7 の S14 の行による。記録は `docs/evidence/losat_web_w5/README.md`。
 
+## 開始の条件と最初の作業
+
+- 場所と手順：Linux の clone の worktree `/home/kawato/losat-work/.worktrees/web-gui-app`（ブランチ `feature/losat-web-gui-app`）。場所は clone の `CLAUDE.local.md`、手順は skill `losat-campaign`・`losat-worktree`・`losat-gates`・`losat-ship-pr` に従う（README の規則 1・5 の `/mnt/c` のパスは `CLAUDE.local.md` の表で読み替える）。
+- 開始の条件：S13b（W4b、画面を NCBI BLAST Web に寄せる。保守者の指示、2026-10-09）が完了し、エンジン側が W4 と W4b（このブランチ）を `feature/losat-web-gui` に merge し、SF（E2h、`CFastaReader` の移植）がそのブランチに入っていること（DW-23 (6)：抽出は SF の読み方に乗る）。満たさないときは始めず、保守者に伝える。
+- 最初に `git merge origin/feature/losat-web-gui` を行い（衝突の解消は独立したコミット）、reactor とネイティブの CLI をその木から作り直す（`$BUILD_ROOT/s14-reactors`・`$BUILD_ROOT/native`）。FakeEngine の `describe.json` は `LOSAT_WEB_REACTORS=<dir> npx vitest run tests/unit/engine-runtime.test.ts -u` で書き直す。
+- S13+（E2j、subject ごとの集約の値と HSP の鎖）が merge されていて、S13b がまだその指示書の 6.（アプリへの申し送り）を行っていなければ、最初に行う：列定義表の「採用・エンジン待ち」の列を NCBI の表形式の並びで出し、鎖の欄で BLASTN の 1 文字の HSP の向きを示す。
+
+## S13（W4）から引き継ぐこと
+
+[W4 のゲート記録](../evidence/losat_web_w4/README.md)の要点：
+
+- **結果画面の構成**：`src/application/results.ts` の `ResultsBrowser` が、選択（run、query、subject、HSP）・表示用のフィルター（ViewState）・並べ替えを持つ。選択の中心は HSP の ID（`runId`・`qIdx`・`rank`、`HspId`）で、表の行番号ではない。候補トレイ（5.）の「元の結果へ戻る」は、この ID で `ResultsBrowser.open(runId)` と `selectQuery`・`selectSubject`・`selectHsp` を呼べばよい。 S13b が見出し・タブ・配置を NCBI BLAST Web に寄せる（Descriptions・Graphic Summary・Alignments・Dot Plot）が、`ResultsBrowser` と test ID は保つ。候補の操作の置き場所は S13b の対応表（`docs/web/ncbi_ui_mapping.md`）に合わせる。
+- **データの読み方**：`RunStore.readHitTable(runId)` は HSP レコードを列の形（`src/domain/hsp-table.ts` の `HspTable`、typed array を Data worker から transfer）で返し、整列文字列（`query_aligned`・`subject_aligned`）を含まない。ギャップ付きアラインメントの書き出し（4.）は `readHits(runId)` のレコードの整列文字列から作る。outfmt 6 の行と outfmt 0 の節は `readOutputRange(runId, format, start, end)` で、HSP の `out6`・`out0`・`out0_subject` の範囲を読む。
+- **座標と向き**：表示用の向きは `src/domain/result-index.ts` の `orientation`（`forward`・`reverse`・`unknown`）、frame は `hsp-table.ts` の `frame`（0 は無し）。単位は `src/domain/programs.ts` の `residueUnit`。1.（座標の変換を 1 か所に置く）は、これらと重ねずに domain にまとめ、結果画面もそれを使うように寄せる。BLASTN の 1 文字の HSP は start = end で向きが座標から分からない（S13 は「not in the record」と outfmt 0 の `Strand=` を示す。S13+ が鎖の欄を足すまで、抽出では向きを決めずに理由を示す）。
+- **E2E の補助**：検索の入力を作って Run を完了させる補助は `tests/e2e/support/search.ts`（`paste`・`openFiles`・`settled`・`program`・`submit`・`waitStatus`・`result`）。結果画面の操作は `tests/e2e/results.spec.ts` を見る。キューの「Open results」（`run-N-open`）で完了した Run の結果を開ける。
+- **FakeEngine**：検索の形をした出力（200 query まで、3 subject まで、3 つ目の subject は outfmt 0 に無い、逆向きの HSP、BLASTN の 1 文字の HSP）を書く。値は `FAKE`。FakeEngine の outfmt 6 は先頭に印の行がある（行は範囲で読む）。
+- **検証バッジ**：`build/verification.ts` が `docs/web/verification_cells.tsv` と認証の記録から表を生成する（手で書かない）。認証の記録を足せば、表は次のビルドで変わる。
+- **Run の入力**：`Coordinator.runInputs` は解放しない（Run の削除は S13 で入れなかった。W4 の判断 5）。候補トレイの削除は Run の削除ではない。
+- **画面の記録と画面レビュー**：`tests/e2e/screens.spec.ts` が検索画面と結果画面の状態 01〜18 を撮る（17 は翻訳する program のドットプロット、18 は「Open results」の直後の電話の画面）。W4 の最後の記録は `$BUILD_ROOT/s13-review2-screens/`（`/home/kawato/.cache/losat-work/s13-review2-screens/`、SHA-256 は W4 の 2 回目のレビューの後の実行記録の `screens.sha256`）。S13b が画面を NCBI に寄せるので、W5 の画面レビューは S13b の最後の記録と比べ、検索画面と結果画面が変わらないことを確かめる。
+- **ゲートの script と計測**：W4 の [`run_gate.sh`](../evidence/losat_web_w4/run_gate.sh) を元にできる（`LOSAT_WEB_GATE_STEPS` は `all`・`after-review`・`measure`）。ネイティブの CLI は `LOSAT` の名前で渡す（`LOSAT-native` の名前では V-ABI quick の CLI の文言が食い違う）。W4 の計測（`results-measure.spec.ts`、計測だけの実行の数値は W4 のゲート記録の「実測」）：10 万 query（149,828 HSP）の Run を開くのは 0.30〜0.59 秒、最初の HSP の詳細まで 0.31〜0.66 秒、その後の選択・絞り込み・並べ替えは 1〜2 フレーム。5,993 HSP の 1 組のドットプロットは出すのに 86〜179 ms、拡大と移動は 55〜89 ms（Chromium と Firefox）。20 nt の単位の 4000 写しの自己検索はエンジンのメモリ不足、WebKit は 512 MB を超える結果を保てない。抽出と候補トレイは、この規模で同じ操作の速さを保つ。
+
 ## 終了・引き継ぎ
 
 README の規則 8 に従う。次は [S15 — 出力と再現性](session_s15_w6_export_session.md)。

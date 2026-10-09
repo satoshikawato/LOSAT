@@ -8184,6 +8184,34 @@ fn run_resolved_in_pool(
                         reports.epilog,
                     )?;
                 }
+                // NCBI reference: ncbi-blast/c++/src/corelib/ncbidiag.cpp:4086
+                // ```c
+                //         CDiagHandler* handler = new CStreamDiagHandler(&NcbiCerr, true, kLogName_Stderr);
+                // ```
+                // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:134-146
+                // ```c++
+                // CRef<CBlastQueryVector>
+                // CBlastInput::GetNextSeqBatch(CScope& scope)
+                // {
+                //     CRef<CBlastQueryVector> retval(new CBlastQueryVector);
+                //     TSeqPos size_read = 0;
+                //
+                //     while (size_read < GetBatchSize()) {
+                //
+                //         if (End())
+                //             break;
+                //
+                //         CRef<CBlastSearchQuery> q;
+                //         try { q.Reset(m_Source->GetNextSequence(scope)); }
+                // ```
+                // NCBI reads the next query batch (blastp_app.cpp:257-259) after this
+                // batch's report, and the reader's messages and error go to `cerr`, which
+                // the C++ library ties to `cout`: the rows written so far reach standard
+                // output before them. The report is flushed when it is written, as the
+                // pairwise report is and as TBLASTN's and TBLASTX's are, so a later
+                // batch's stop messages (`search`, `batches.stop`) follow the rows of the
+                // batches before it (audit findings A-3 and C-1 of session SFc).
+                writer.flush()?;
                 Ok(())
             })(),
         };

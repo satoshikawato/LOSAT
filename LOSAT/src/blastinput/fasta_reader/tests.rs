@@ -215,6 +215,37 @@ fn gap_lines_become_runs_of_n_or_x() {
     );
 }
 
+// NCBI reference (598d8ae6): c++/src/objects/seq/Seq_gap.cpp:157-172 and
+// c++/include/objects/seq/Seq_gap.hpp:93 (`gapTypeMap.find(CanonicalizeString(sName).c_str())`
+// on a `const char*` map: a gap-type is looked up up to its first NUL byte). The messages are
+// NCBI BLAST+ 2.17.0's for the same lines (`blastn -outfmt 6`, audit A-1 of session SFc):
+// `within-scaffold` forbids linkage evidence (an ignored problem, no message),
+// `between-scaffolds` needs one, a value that starts with NUL is unknown (the message keeps
+// the whole value), two values that differ before their NULs conflict, and `unknown` takes
+// only `unspecified`.
+#[test]
+fn gap_types_are_looked_up_as_c_strings() {
+    let (records, messages, error) = read(
+        b">q\nACGTACGTACGTACGTACGTACGT\n>?5 [gap-type=within-scaffold\0zz] [linkage-evidence=pcr]\n>?5 [gap-type=Between Scaffolds\0x]\n>?5 [gap-type=\0telomere]\n>?5 [gap-type=telomere\0a][gap-type=centromere\0b]\n>?5 [gap-type=unknown\0q][linkage-evidence=map]\nACGTAC\n",
+        false,
+    );
+    assert!(error.is_none());
+    assert_eq!(records.len(), 1);
+    assert_eq!(
+        messages,
+        "CFastaReader: This gap-type should have at least one specified linkage-evidence.\nUnknown gap-type: \0telomere\nThere were conflicting gap-types around line 6\nFASTA-Reader: Unknown gap-type can have linkage-evidence of type 'unspecified' only.\n"
+    );
+    // The keys and the linkage evidence are compared as whole byte strings.
+    let (_, messages, _) = read(
+        b">q\nACGTACGTACGTACGTACGTACGT\n>?5 [gap-type\0=telomere]\n>?5 [gap-type=unknown][linkage-evidence=pcr\0x]\nACGTAC\n",
+        false,
+    );
+    assert_eq!(
+        messages,
+        "Unknown gap modifier name(s): gap-type\0\nUnknown linkage-evidence: pcr\0x\n"
+    );
+}
+
 // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1062-1075 (masks stay
 // open over white space, bad bytes, comments, line ends and gap lines).
 #[test]

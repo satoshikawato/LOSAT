@@ -457,9 +457,58 @@ fn contains_no_case(value: &[u8], word: &[u8]) -> bool {
 
 /// Whether the data loaders are used, from the values of `[BLAST] DATA_LOADERS` in the
 /// layers of NCBI's registry, highest priority first: the environment
-/// (`NCBI_CONFIG__BLAST__DATA_LOADERS`), the program's `.ini` file, then `.ncbirc` (`None`:
-/// the layer has no such entry). An empty value counts as no entry (`DECISIONS.md`
-/// 2026-10-08, `AUTHORITY.md` §G1), so a lower layer decides.
+/// (`NCBI_CONFIG__BLAST__DATA_LOADERS`, `env`), then the registry files (`files`: the
+/// program's `.ini` file, then `.ncbirc`); `None`: the layer has no such entry.
+///
+/// A variable that is set is an entry of the environment layer even when its value is
+/// empty, so an empty `NCBI_CONFIG__BLAST__DATA_LOADERS=` answers first and turns both
+/// loaders off (it contains neither `blastdb` nor `genbank`; audit finding B-1 of session
+/// SFc, `AUTHORITY.md` §G1). In a registry file an empty value is no entry
+/// (`CMemoryRegistry::x_HasEntry`, ncbireg.cpp:984-991; confirmed with the oracle in
+/// session SFb), so the next layer decides.
+///
+/// NCBI reference (598d8ae6): c++/src/corelib/env_reg.cpp:157-167
+/// ```c++
+/// bool CEnvironmentRegistry::x_HasEntry(const string& section,
+///                                       const string& name,
+///                                       TFlags flags) const
+/// {
+///     if (name.empty()) {
+///         return x_HasSection(section, flags);
+///     }
+///     bool found = false;
+///     x_Get(section, name, flags, found);
+///     return found;
+/// }
+/// ```
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbienv.cpp:97-104,117-124
+/// ```c++
+///     for ( ;  *envp;  envp++) {
+///         const char* s = *envp;
+///         const char* eq = strchr(s, '=');
+///         ...
+///         m_Cache[string(s, (size_t)(eq - s))] = SEnvValue(eq + 1, kEmptyXCStr);
+/// ...
+///     if ( i != m_Cache.end() ) {
+///         if (i->second.ptr == NULL  &&  i->second.value.empty()) {
+///             *found = false;
+///             return kEmptyStr;
+///         } else {
+///             *found = true;
+///             return i->second.value;
+///         }
+/// ```
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:984-991
+/// ```c++
+///     TEntries::const_iterator eit = entries.find(name);
+///     if (eit == entries.end()) {
+///         return false;
+///     } else if ((flags & fCountCleared) != 0) {
+///         return true;
+///     } else {
+///         return !eit->second.value.empty();
+///     }
+/// ```
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_scope_src.cpp:75-92
 /// ```c++
@@ -511,8 +560,9 @@ fn contains_no_case(value: &[u8], word: &[u8]) -> bool {
 ///     return null;
 /// }
 /// ```
-fn data_loaders_of(layers: [Option<&[u8]>; 3]) -> bool {
-    let Some(value) = layers.into_iter().flatten().find(|value| !value.is_empty()) else {
+fn data_loaders_of(env: Option<&[u8]>, files: [Option<&[u8]>; 2]) -> bool {
+    let Some(value) = env.or_else(|| files.into_iter().flatten().find(|value| !value.is_empty()))
+    else {
         return ApplicationSettings::default().data_loaders;
     };
     let mut use_blast_dbs = true;
@@ -730,11 +780,13 @@ fn application_settings(
     }
     let env_data_loaders = env("NCBI_CONFIG__BLAST__DATA_LOADERS");
     Ok(ApplicationSettings {
-        data_loaders: data_loaders_of([
+        data_loaders: data_loaders_of(
             env_data_loaders.as_deref().map(OsStr::as_encoded_bytes),
-            ini_data_loaders.as_deref().map(str::as_bytes),
-            ncbirc_data_loaders.as_deref().map(str::as_bytes),
-        ]),
+            [
+                ini_data_loaders.as_deref().map(str::as_bytes),
+                ncbirc_data_loaders.as_deref().map(str::as_bytes),
+            ],
+        ),
     })
 }
 
@@ -813,10 +865,12 @@ mod tests {
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_scope_src.cpp:75-92
     // (case-insensitive substrings `blastdb`, `genbank` and `none`) and
     // c++/src/corelib/ncbireg.cpp:1235-1246, 1577-1583 (the environment, then the program's
-    // `.ini`, then `.ncbirc`); an empty value counts as no entry (DECISIONS.md 2026-10-08).
+    // `.ini`, then `.ncbirc`); an empty value in a registry file counts as no entry
+    // (ncbireg.cpp:984-991), while a variable set to an empty value is an entry
+    // (env_reg.cpp:157-167; audit finding B-1 of session SFc).
     #[test]
     fn data_loaders_follow_the_registry_layers_and_the_substring_rules() {
-        let only = |value: &str| data_loaders_of([None, None, Some(value.as_bytes())]);
+        let only = |value: &str| data_loaders_of(None, [None, Some(value.as_bytes())]);
         for (value, used) in [
             ("blastdb", true),
             ("genbank", true),
@@ -837,11 +891,10 @@ mod tests {
             assert_eq!(only(value), used, "{value:?}");
         }
         let layers = |env: Option<&str>, ini: Option<&str>, ncbirc: Option<&str>| {
-            data_loaders_of([
+            data_loaders_of(
                 env.map(str::as_bytes),
-                ini.map(str::as_bytes),
-                ncbirc.map(str::as_bytes),
-            ])
+                [ini.map(str::as_bytes), ncbirc.map(str::as_bytes)],
+            )
         };
         assert!(layers(None, None, None));
         assert!(!layers(Some("none"), Some("blastdb"), Some("genbank")));
@@ -849,11 +902,17 @@ mod tests {
         assert!(!layers(None, Some("none"), Some("blastdb")));
         assert!(layers(None, Some("blastdb"), Some("none")));
         assert!(!layers(None, None, Some("none")));
-        // An empty value is no entry: the next layer decides, and with none left the
-        // data loaders stay on.
-        assert!(!layers(Some(""), Some("none"), None));
-        assert!(!layers(Some(""), Some(""), Some("x")));
-        assert!(layers(Some(""), None, Some("")));
+        // An empty value in a registry file is no entry: the next layer decides, and with
+        // none left the data loaders stay on.
+        assert!(!layers(None, Some(""), Some("x")));
+        assert!(layers(None, Some(""), Some("genbank")));
+        assert!(layers(None, None, Some("")));
+        assert!(layers(None, Some(""), Some("")));
+        // An empty variable is an entry: it answers first and turns both loaders off, also
+        // over a registry file that turns them on.
+        assert!(!layers(Some(""), None, None));
+        assert!(!layers(Some(""), Some("blastdb"), Some("genbank")));
+        assert!(!layers(Some(""), None, Some("genbank")));
     }
 
     // NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:753-781 (an unescaped `"` at
@@ -911,7 +970,8 @@ mod tests {
         assert_eq!(settings(&[]), Ok(true));
         std::fs::write(&ncbirc, "[BLAST]\nDATA_LOADERS = none\n").unwrap();
         assert_eq!(settings(&[]), Ok(false));
-        // The environment comes first; an empty variable leaves the decision to the files.
+        // The environment comes first; an empty variable is an entry that turns both
+        // loaders off (env_reg.cpp:157-167).
         assert_eq!(
             settings(&[("NCBI_CONFIG__BLAST__DATA_LOADERS", "blastdb")]),
             Ok(true)
@@ -920,6 +980,19 @@ mod tests {
             settings(&[("NCBI_CONFIG__BLAST__DATA_LOADERS", "")]),
             Ok(false)
         );
+        std::fs::write(&ncbirc, "[BLAST]\nDATA_LOADERS = genbank\n").unwrap();
+        assert_eq!(settings(&[]), Ok(true));
+        assert_eq!(
+            settings(&[("NCBI_CONFIG__BLAST__DATA_LOADERS", "")]),
+            Ok(false)
+        );
+        std::fs::write(&ncbirc, "[BLAST]\nDATA_LOADERS =\n").unwrap();
+        assert_eq!(settings(&[]), Ok(true));
+        assert_eq!(
+            settings(&[("NCBI_CONFIG__BLAST__DATA_LOADERS", "")]),
+            Ok(false)
+        );
+        std::fs::write(&ncbirc, "[BLAST]\nDATA_LOADERS = none\n").unwrap();
         // Only the exact variable name is the entry.
         assert_eq!(
             settings(&[("NCBI_CONFIG__blast__data_loaders", "blastdb")]),

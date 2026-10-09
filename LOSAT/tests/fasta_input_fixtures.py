@@ -40,8 +40,10 @@ NCBI is run without ~/.ncbirc, with BLASTDB, BATCH_SIZE, CHUNK_SIZE, OVERLAP_CHU
 BLASTINPUT_GEN_DELTA_SEQ unset (a row sets them in `env`), and no byte of its output is
 normalised. The first line of every NCBI input is checked first: NCBI tries a first line that
 starts with a letter or digit as a Seq-id and contacts the network, so only files that start
-with `>`, a blank line, a non-alphanumeric byte or a letters-only line are run (and `unshare -rn`
-cuts the network, where it works).
+with `>`, a blank line, a non-alphanumeric byte or a letters-only line are run, or a row whose
+environment turns both data loaders off (an empty `NCBI_CONFIG__BLAST__DATA_LOADERS=`, rows
+`*.seqid0_loaders_env_empty.*`), where NCBI reads the first line as data (and `unshare -rn` cuts
+the network, where it works).
 
 Usage:
   fasta_input_fixtures.py generate
@@ -321,6 +323,12 @@ def _(c): return gap_at(c, b">? 100")
 def _(c): return gap_at(c, b">?100 [gap-type=within scaffold] [linkage-evidence=paired-ends]")
 @V("gap_mods_bad")
 def _(c): return gap_at(c, b">?100 [gap-type=nonsense] [linkage-evidence=nope]")
+@V("gap_mods_nul", note="audit A-1 of SFc: NCBI looks a gap-type up as a C string (Seq_gap.cpp:157-172)")
+def _(c):
+    c.recs[1][1].insert(1, b">?100 [gap-type=within-scaffold\x00zz] [linkage-evidence=pcr]")
+    c.recs[1][1].insert(3, b">?50 [gap-type=Between Scaffolds\x00x]")
+    c.recs[1][1].insert(5, b">?20 [gap-type=\x00telomere]")
+    return c.render()
 @V("gap_lead_space")
 def _(c): return gap_at(c, b" >?7")
 @V("gap_start")
@@ -823,12 +831,12 @@ def extra_rows() -> list[Row]:
         kind = "prot" if program in ("blastp", "tblastn") else "nuc"
         _, s = base_pair(program)
         for name in ("batch_clean", "batch_late_bad", "batch_late_warn", "batch_late_empty", "batch_late_allempty",
-                     "batch_late_title_warn", "batch_late_hyphen_cr"):
+                     "batch_late_title_warn", "batch_late_hyphen_cr", "batch_late_warn_bad"):
             path = f"@/{name}.{kind}.{EXT[kind]}"
             for size_name, size in batch_sizes[kind]:
                 add(f"{name}.{size_name}", program, task, path, s, env=f"BATCH_SIZE={size}",
                     fmts=(6, 0, 7) if name in ("batch_late_bad", "batch_late_warn", "batch_late_empty",
-                                               "batch_late_allempty") else (6, 0))
+                                               "batch_late_allempty", "batch_late_warn_bad") else (6, 0))
             if name != "batch_clean":
                 add(f"{name}.default", program, task, path, s, fmts=(6, 0))
     # default batches of BLASTN: the first batch holds five queries of 1000 nucleotides or more
@@ -874,6 +882,13 @@ def extra_rows() -> list[Row]:
             rows.append(make_row(f"{program}{'.' + task if task else ''}.seqid{i}.{role}.o6", program, task, q, s, outfmt=6,
                                  kind="losat-rejection", note=f"first line {line.decode()}: NCBI fetches it (network)",
                                  tier="seqid"))
+            # An empty NCBI_CONFIG__BLAST__DATA_LOADERS is an entry of NCBI's environment registry
+            # (env_reg.cpp:157-167): both data loaders are off and the first line is read as FASTA data,
+            # without the network (audit B-1 of SFc).
+            if i == 0:
+                rows.append(make_row(f"{program}{'.' + task if task else ''}.seqid{i}_loaders_env_empty.{role}.o6",
+                                     program, task, q, s, outfmt=6, env="NCBI_CONFIG__BLAST__DATA_LOADERS=",
+                                     note="empty NCBI_CONFIG__BLAST__DATA_LOADERS: data loaders off", tier="seqid"))
     return rows
 
 
@@ -905,6 +920,11 @@ def batch_files() -> dict[str, bytes]:
         out[f"batch_late_title_warn.{kind}.{EXT[kind]}"] = c.render()
         c = bctx(); c.recs[4][1][0] = ins(c.recs[4][1][0], 5, b"-")
         out[f"batch_late_hyphen_cr.{kind}.{EXT[kind]}"] = c.render(eol=b"\r")
+        # record 5: invalid residue warning, record 6: CheckDataLine error; with two records a
+        # batch, the batch that stops holds the warning (audit A-3/C-1 of SFc: the rows of the
+        # batches before come first)
+        c = bctx(); c.recs[4][1][1] = ins(c.recs[4][1][1], 8, b"7"); c.recs[5][1].insert(0, BAD_TEXT[kind])
+        out[f"batch_late_warn_bad.{kind}.{EXT[kind]}"] = c.render()
     return out
 
 
@@ -1058,8 +1078,23 @@ def seqid_risk(data: bytes) -> bool:
     return re.fullmatch(rb"[A-Za-z]+", line) is None
 
 
+def loaders_off(case_env: str) -> bool:
+    """True when the row's environment turns both data loaders off (blast_scope_src.cpp:76-92): its
+    NCBI_CONFIG__BLAST__DATA_LOADERS, empty included (env_reg.cpp:157-167), names neither blastdb nor
+    genbank, or names none. NCBI then never tries a line as a Seq-id."""
+    for item in shlex.split(case_env):
+        key, _, value = item.partition("=")
+        if key == "NCBI_CONFIG__BLAST__DATA_LOADERS":
+            value = value.lower()
+            return "none" in value or ("blastdb" not in value and "genbank" not in value)
+    return False
+
+
 def network_safe(row: Row) -> str | None:
-    """None when no input of the row starts with a Seq-id candidate, else a reason."""
+    """None when no input of the row starts with a Seq-id candidate (or the row turns the data
+    loaders off), else a reason."""
+    if loaders_off(row.env):
+        return None
     sources = []
     mode, spath = stdin_of(row)
     stdin_file = ENGINE / spath if mode in ("pipe", "file") and spath != "/dev/null" else None

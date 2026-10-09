@@ -49,7 +49,7 @@
 | BLASTP | same 243、rejects 567、pending 6 | 変わらない | S7 |
 
 - sweep（S6 の後、移植した program と役割）：BLASTN・TBLASTX・TBLASTN の subject は、一致、同じ誤り、記録した明示的な拒否（Seq-id の行）、承認済みの例外（句読点の題で NCBI が落ちる）だけ。`check_inputs.py` の想定外は 0。
-- oracle で決着させた端（NCBI 2.17.0、`unshare -rn`、記録は `/home/kawato/losat-baselines/sfb-e2h-20261008/probes/`）：空の `DATA_LOADERS=` は項目なしと同じ（data loader は有効。SF の判断どおり、S1 の implementer の別の読みは誤り）、split される query の前の空のレコード（`CHUNK_SIZE=20000`、59 行で一致）、TBLASTX の空の query と短い query の batch（outfmt 0/6/7 で一致）、TBLASTN の `-subject_loc` が record の終わりを越える 3 通り（一致）。
+- oracle で決着させた端（NCBI 2.17.0、`unshare -rn`、記録は `/home/kawato/losat-baselines/sfb-e2h-20261008/probes/`）：registry の file の空の `DATA_LOADERS=` は項目なしと同じ（data loader は有効。SF の判断どおり、S1 の implementer の別の読みは誤り。環境変数の空の値は別：判断 5、SFc の監査 B-1）、split される query の前の空のレコード（`CHUNK_SIZE=20000`、59 行で一致）、TBLASTX の空の query と短い query の batch（outfmt 0/6/7 で一致）、TBLASTN の `-subject_loc` が record の終わりを越える 3 通り（一致）。
 
 ## 推奨の案で進めた判断（保守者に委ねられた判断、2026-09-29 の常設の指示、10-07 に再掲）
 
@@ -57,7 +57,7 @@
 2. **ABI v1**：v1 は `bio` と今の検査のまま、`FastaRecord::from_bio` で `run_local` に入る（v1 の出力と文言は変わらない）。保守者の判断 4 の目的（TD-1 の凍結）を保つ。判断 4 の前提「v1 が受け付ける入力は bio と NCBI で読み方が同じ」は TBLASTX と BLASTP の v1 で成り立たない（棚卸し AD-24・AD-25）。
 3. **Seq-id の行**：`CSeq_id` の解析（BI-15〜19・55）を移した。広めに拒否するのは accession の guide の形（文字と数字の数の 26 の形、先頭の byte が `A-Z`・`_`・`?` のときだけ）。guide の表（1458 の規則）は移さない。`ZZ123456` などは NCBI では FASTA だが LOSAT は拒否する（判断 2 の範囲）。
 4. Web の `register` は data loader を有効とし（CLI の既定）、読み込みの誤りと注釈だけの query を NCBI の文言で早く拒否する。
-5. 空の `DATA_LOADERS=` は項目なし（data loader は有効、`ncbireg.cpp:984-991`）。`blastdb` も `genbank` も含まない空でない値は両方を無効にする。
+5. registry の file（`<prog>.ini`・`.ncbirc`）の空の `DATA_LOADERS=` は項目なし（data loader は有効、`ncbireg.cpp:984-991`）。`blastdb` も `genbank` も含まない空でない値は両方を無効にする。環境変数の空の `NCBI_CONFIG__BLAST__DATA_LOADERS=` は項目があり、両方を無効にする（`env_reg.cpp:157-167`。SFc の監査 B-1 で訂正。以前は file の規則を環境変数にも当てはめていた）。
 6. 読み込み器の API：Seq-id の拒否の後は、拒否した 1 行の次から読める（局所 ID の番号は進まない）。program は拒否で止まる。
 7. `from_bytes` は同じ byte の通常の file と同じに読む（NCBI の stream の補充の大きさによる尾の消失を含む）。
 8. まとめて読む経路は `FastaStream::bulk` の旗の後ろに置く（program では常に有効。試験では 1 byte ずつの参照の経路と比べる）。

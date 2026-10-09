@@ -431,10 +431,12 @@ textarea {
   resize: vertical;
 }
 
+/* The source cards and the choice between several inputs (.mode) keep to the sides of the block's
+   fields, 6 px in from its edges as .entry and .param-row (W4b second screen review L3). */
 .sources {
   list-style: none;
   padding: 0;
-  margin: 8px 0 0;
+  margin: 8px 6px 0;
   display: grid;
   gap: 8px;
 }
@@ -599,6 +601,7 @@ textarea {
 
 .mode {
   background: var(--bg);
+  margin: 8px 6px 0;
 }
 
 .mode label {

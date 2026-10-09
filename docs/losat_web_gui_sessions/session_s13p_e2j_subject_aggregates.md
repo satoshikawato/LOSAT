@@ -20,6 +20,10 @@ LOSAT Web の段階 E2j を実行する（エンジン側。Linux の clone の 
 5. **ゲート**：固定した fixture で NCBI とバイト一致。各 program の既存のゲート、Gate A、TLOSAN の Stage G、S07〜S11・SF の fixture と sweep、v1 の検査に退行なし。変えた program の V-ABI（新しい欄を含む）。V-PERF の非退行（集約は出力の時だけ）。棚卸しの表を基準にした独立監査。
 6. **アプリへの申し送り**：結果画面は、エンジンが値を出したら列定義表の「採用・エンジン待ち」の列（Max score、Total score、Query cover、E value（表形式）、Per. ident）を NCBI の表形式の並びで出し、鎖の欄で BLASTN の 1 文字の HSP の向きを示す（`src/domain/result-index.ts` の `orientation`）。その作業は、この段階が merge された後の最初のアプリ側のセッションの最初に行う。
 
+## アプリ側からの申し送り（S13、2026-10-09）
+
+エンジンのメモリ不足：20 nt の単位を 4000 回繰り返す配列（81 KB）の自己検索（約 8,000 HSP）で、3 ブラウザとも「memory allocation of 49881 bytes failed」で止まった（3000 回、5,993 HSP は Chromium と Firefox で完了）。メモリの上限と HSP の数の関係を調べる（[W4 のゲート記録](../evidence/losat_web_w4/README.md)）。
+
 ## 終了・引き継ぎ
 
 README の規則 8 に従う。次はエンジン側の S09+（R2）。

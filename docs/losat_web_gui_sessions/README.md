@@ -49,13 +49,16 @@
 | S10 | [データ層](session_s10_w2_data_layer.md) | W2 | BlockStore の契約試験、回収・保護・容量不足（アプリ側。S09 より先に行う） | 完了（2026-09-30、[ゲート記録](../evidence/losat_web_w2/README.md)） |
 | S11 | [領域の指定](session_s11_e2d_query_subject_loc.md) | E2d | `-query_loc` / `-subject_loc` が NCBI とバイト一致 | 完了（2026-10-06、[ゲート記録](../evidence/losat_web_e2d/README.md)。4 program への範囲指定の移植、fixture 53 と回帰 fixture 35、範囲の sweep 1860 件で差 0、独立監査は 4 観点と再監査 2 回（指摘 A-1 と F-1 を直した）） |
 | S12 | [検索画面](session_s12_w3_search_ui.md) | W3 | 研究作業と境界条件の E2E | 完了（2026-10-06、[ゲート記録](../evidence/losat_web_w3/README.md)。研究作業と境界条件の E2E 12 件 × 3 ブラウザ、多数のレコードの計測、コードレビューと 2 回の画面レビュー。表示名は BLASTN 系（DW-21）） |
-| S13 | [結果画面](session_s13_w4_results_ui.md) | W4 | 5 program の E2E、HSP と行・節の対応 | 未着手 |
+| S13 | [結果画面](session_s13_w4_results_ui.md) | W4 | 5 program の E2E、HSP と行・節の対応 | 完了（2026-10-09、[ゲート記録](../evidence/losat_web_w4/README.md)。`feature/losat-web-gui` への merge は SFc、`39a563f1`） |
+| S13b | [画面を NCBI BLAST Web に寄せる](session_s13b_w4b_ncbi_style_ui.md) | W4b | NCBI の参照画面との対応表、検索画面と結果画面がそれに従う（画面レビュー）、E2E と HSP の対応の試験、計測が S13 から大きく悪くならない | 未着手（アプリ側、S14 の前。保守者の指示 2026-10-09、DW-25） |
 | S14 | [抽出と候補](session_s14_w5_extraction_candidates.md) | W5 | 原配列との一致 | 未着手 |
 | S15 | [出力と再現性](session_s15_w6_export_session.md) | W6 | 再計算しない再読込、明示的なつなぎ直し | 未着手 |
 | S16 | [配信の仕上げ](session_s16_w7_delivery.md) | W7 | V-OFF・V-PRIV、プレビューでの隔離 | 未着手 |
 | SF | [BLASTN の FASTA の読み方（`CFastaReader` の移植）](session_sf_e2h_blastn_fasta_reader.md) | E2h | NCBI の `CFastaReader` の経路の関数の移植とアダプタの索引の走査で、TD-12 の拒否をなくす（DW-13。範囲は TBLASTX・TBLASTN・BLASTP の同じ種類の拒否を含む、DW-23） | 途中（2026-10-08、[ゲート記録](../evidence/losat_web_e2h/README.md)。棚卸し 222 行、権威の記録、移植の計画、読み込み器（S0）、NCBI の fixture 3932 行。program への接続と移植、ゲート、監査は SFb） |
 | SFb | [E2h の続き：読み込み器の接続と移植、fixture、ゲート](session_sfb_e2h_port.md) | E2h | SF の行と同じ（移植 S1〜S10、fixture の全行が NCBI と一致か明示的な拒否、sweep、全ゲート、V-PERF、独立監査） | 途中（2026-10-09、[ゲート記録](../evidence/losat_web_e2h/README.md)。移植 S1〜S6 で BLASTN・TBLASTX・TBLASTN の subject が NCBI の読み方になった（fixture：BLASTN same 1969、TBLASTX 625、TBLASTN 297。残りは Seq-id と `-lcase_masking` の明示的な拒否と蛋白の側）。sweep の script、ゲートの script の下書き。残りは SFc） |
-| SFc | [E2h の続き：蛋白の入力の移植（S7〜S10）、fixture の仕上げ、ゲート](session_sfc_e2h_protein_gates.md) | E2h | SF の行と同じ（移植 S7〜S10、fixture の全行が NCBI と一致か明示的な拒否、sweep、全ゲート、V-PERF、独立監査） | 未着手（エンジン側の次。S09+ より先。アプリ側の S13 と並行できる） |
+| SFc | [E2h の続き：蛋白の入力の移植（S7〜S10）、fixture の仕上げ、ゲート](session_sfc_e2h_protein_gates.md) | E2h | SF の行と同じ（移植 S7〜S10、fixture の全行が NCBI と一致か明示的な拒否、sweep、全ゲート、V-PERF、独立監査） | 途中（2026-10-10、[ゲート記録](../evidence/losat_web_e2h/README.md)。移植 S7〜S10、fixture の全行が NCBI と一致か明示的な拒否、CI の速い検査、ゲートの試走、独立監査 4 観点と指摘の修正。`main` へ #116〜#118。最後のコミットでのゲート・Gate A・V-PERF・再監査は SFd） |
+| SFd | [E2h の続き：最後のコミットでのゲート、Gate A、V-PERF、修正の再監査、終了](session_sfd_e2h_final_gate.md) | E2h | SF の行と同じ | 未着手（エンジン側の次。アプリ側の S13b と並行できる） |
+| S13+ | [subject ごとの集約の値と HSP の鎖](session_s13p_e2j_subject_aggregates.md) | E2j | NCBI の `align_format` の集約の値と HSP の鎖が ABI v2 で NCBI と同じ（S13 の判断 1〜3） | 未着手（エンジン側、SF の後。S13 の判断 1〜3 は保守者の確認待ち） |
 | S09+ | [TBLASTN の subject の前処理](session_s09p_r2_tblastn_subject_cache.md)（条件付き） | R2 | DW-8 の条件を TBLASTN が満たした（S09）。連続実行の出力が CLI と一致 | 未着手（エンジン側、SF の後。進め方は保守者が決めた：翻訳の表引きを先にし、20% 未満ならキャッシュは入れない。DW-22） |
 | SX | [BLASTX の統合](session_sx_blastx_integration.md)（条件付き） | SX | LOSATX の v0.2.0 の認証が `main` に入った後の最初の区切りで実施。S17 の前に必ず終える | 条件待ち |
 | S17 | [公開判定](session_s17_g_release_decision.md) | G | 初期の要求に未達が無い | 未着手 |

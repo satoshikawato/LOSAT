@@ -652,6 +652,9 @@ for (const c of PROGRAM_CASES) {
         await expect(page.getByTestId(`range-${id.replace(':', '-')}`).getByTestId('hsp-detail')).toHaveCount(1);
         const fields = queryRows[Number(id.split(':')[1])]!;
         expect((await text(page.getByTestId('detail-row'))).replace(/\n$/, '')).toBe(fields.join('\t'));
+        // At 1280 px the row shows all its fields in the Range block: it does not run past its
+        // box (W4b screen review M1: the bit score was cut).
+        expect(await page.getByTestId('detail-row').evaluate((row) => row.scrollWidth - row.clientWidth), 'the outfmt 6 row overflows').toBeLessThanOrEqual(0);
         await expectRanges(page, queryRows, pairRanks, out0, 3);
         seen.subjects++;
         if (!inOutfmt0) {

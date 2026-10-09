@@ -1417,8 +1417,15 @@ pre.range-text {
   color: var(--muted);
 }
 
+/* All twelve fields of the outfmt 6 row show in the Range block: on one line at the sections' type
+   size, its bit score was cut at 1280 px (W4b screen review M1). At the tables' type size the row
+   of short IDs fits on one line there; a longer one wraps at its tabs (or inside a field longer
+   than a line). The text stays the row as written; only its lines are broken on the screen. */
 .row-text {
   max-height: none;
+  font-size: 0.875em;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .details-list {

@@ -1,0 +1,584 @@
+
+> losat-web@0.0.0 e2e
+> playwright test --reporter=list
+
+[WebServer] (!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+[WebServer]   - import "./output-format" without a file extension (src/domain/verification.ts:9:35). Add the file extension
+[WebServer]   - import "./programs" without a file extension (src/domain/verification.ts:10:32). Add the file extension
+[WebServer] Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+[WebServer] (!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+[WebServer]   - import "./output-format" without a file extension (src/domain/verification.ts:9:35). Add the file extension
+[WebServer]   - import "./programs" without a file extension (src/domain/verification.ts:10:32). Add the file extension
+[WebServer] Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+
+Running 192 tests using 2 workers
+
+  -    1 [chromium] › tests/e2e/browsers.spec.ts:34:3 › BlockStore contract: opfs store in a dedicated worker (without storage full)
+  -    2 [chromium] › tests/e2e/browsers.spec.ts:49:1 › run output contract: a writer in its own worker and the real Data worker (without storage full)
+  -    3 [chromium] › tests/e2e/browsers.spec.ts:34:3 › BlockStore contract: memory store in a dedicated worker (without storage full)
+  -    4 [chromium] › tests/e2e/browsers.spec.ts:59:1 › the application keeps results in OPFS, or in memory with the reason shown
+pass [opfs] write and seal: a block reads back exactly the bytes appended to it
+pass [opfs] read: any range of a sealed block, and nothing beyond its end
+pass [opfs] write: the store keeps a copy, so the caller may reuse its buffer
+pass [opfs] staging: a block cannot be read before it is sealed
+pass [opfs] seal: a sealed block takes no more bytes and cannot be sealed again
+pass [opfs] discard: a staged or sealed block disappears and its bytes are freed
+pass [run output] every stream arrives in order and the run commits
+pass [opfs] create: a path that exists cannot be created again
+pass [opfs] removeAll: removes one directory, sealed or not, and leaves the rest
+pass [opfs] paths: empty and relative names are rejected
+pass [opfs] an empty block can be sealed and read
+pass [run output] many small chunks and one large chunk arrive unchanged
+pass [run output] a run without output commits with empty outputs
+pass [opfs] a large block: 48 MiB in 1 MiB appends reads back unchanged
+pass [opfs] storage full: an append fails with StorageFullError, the block can only be discarded, and sealed blocks stay readable
+  ✓    5 [chromium] › tests/e2e/contracts.spec.ts:32:3 › BlockStore contract: opfs store in a dedicated worker (631ms)
+pass [run output] staging: a run cannot be read before it is committed, and the commit waits for end
+pass [run output] an end whose totals disagree fails the commit and discards the run
+pass [run output] a message outside the protocol fails the commit
+pass [memory] write and seal: a block reads back exactly the bytes appended to it
+pass [memory] read: any range of a sealed block, and nothing beyond its end
+pass [memory] write: the store keeps a copy, so the caller may reuse its buffer
+pass [memory] staging: a block cannot be read before it is sealed
+pass [memory] seal: a sealed block takes no more bytes and cannot be sealed again
+pass [memory] discard: a staged or sealed block disappears and its bytes are freed
+pass [memory] create: a path that exists cannot be created again
+pass [memory] removeAll: removes one directory, sealed or not, and leaves the rest
+pass [memory] paths: empty and relative names are rejected
+pass [memory] an empty block can be sealed and read
+pass [memory] a large block: 48 MiB in 1 MiB appends reads back unchanged
+pass [memory] storage full: an append fails with StorageFullError, the block can only be discarded, and sealed blocks stay readable
+  ✓    7 [chromium] › tests/e2e/contracts.spec.ts:32:3 › BlockStore contract: memory store in a dedicated worker (410ms)
+pass [run output] discard drops a staged run and ignores its late chunks
+pass [run output] a committed run is kept by discard and removed by delete
+pass [run output] two staged runs keep their outputs apart
+pass [run output] the writer refuses to write after end
+pass [run output] storage full: the run fails with the reason, and committed runs stay readable
+  ✓    6 [chromium] › tests/e2e/contracts.spec.ts:40:1 › run output contract: a writer in its own worker and the real Data worker (OPFS) (1.3s)
+pass [record scanner] scan: one record with regular lines (LF)
+pass [record scanner] scan: CRLF line ends
+pass [record scanner] scan: lines of different lengths
+pass [record scanner] scan: several records, the last without a final newline
+pass [record scanner] scan: a blank line inside a sequence
+pass [record scanner] scan: interior white space belongs to the sequence, trailing white space does not
+pass [record scanner] scan: a non-ASCII header
+pass [record scanner] scan: residues keep their case
+pass [record scanner] scan: a record without residues
+pass [record scanner] scan: an empty record ends the input (bio stops reading there)
+pass [record scanner] scan: a header line without a newline at the end of the input
+pass [record scanner] scan: an empty input has no records
+pass [record scanner] scan: a U+FEFF at the start of a header is part of the ID
+pass [record scanner] scan: bytes after the empty record that ends the input are not read
+pass [record scanner] scan: a long record (4 checkpoints) with lines of 60 and 61 residues
+pass [record scanner] scan: a long record with regular 80-residue lines
+pass [record scanner] scan: the parser's error for text before the first header
+pass [record scanner] scan: the parser's error for a blank line before the first header
+pass [record scanner] scan: the parser's error for white space only
+pass [record scanner] scan: the parser's error for a first line that is not a header, before bytes that are not UTF-8
+pass [record scanner] scan: the parser's error for bytes that are not UTF-8
+pass [record scanner] scan: a multi-byte character split across chunks
+pass [record scanner] scan: parser kind 1 is refused until SX
+  ✓    8 [chromium] › tests/e2e/engine.spec.ts:97:1 › record scanner contract: the serial reactor (385ms)
+pass [engine input] register: the run proceeds when the record tables agree
+multi.blastn n=1: subject registered
+multi.megablast n=1: subject retained
+iupac.beyond_table.blastn n=1: subject retained
+rna.megablast n=1: subject retained
+multi.mts3.blastn n=1: subject retained
+multi.ws7_e1000.blastn n=4: subject registered
+multi.besthit.blastn n=4: subject retained
+tblastx.multi n=1: subject registered
+tblastx.batch n=1: subject retained
+pass [engine input] register: a query record with another ID stops the run before any output
+tblastx.mts1 n=4: subject registered
+tblastx.thrwin n=4: subject retained
+pass [engine input] register: a subject record with another length stops the run before any output
+pass [engine input] register: a missing record stops the run before any output
+  ✓   10 [chromium] › tests/e2e/engine.spec.ts:105:3 › engine input contract: the real EngineGateway at 1 thread(s) (1.1s)
+pass [engine input] register: the run proceeds when the record tables agree
+  ✓    9 [chromium] › tests/e2e/engine.spec.ts:174:1 › R1: searches of one subject with other queries and options reuse it and give the expected bytes (1.5s)
+pass [engine input] register: a query record with another ID stops the run before any output
+pass [engine input] register: a subject record with another length stops the run before any output
+pass [engine input] register: a missing record stops the run before any output
+  ✓   11 [chromium] › tests/e2e/engine.spec.ts:105:3 › engine input contract: the real EngineGateway at 4 thread(s) (1.1s)
+pass [run output, Engine worker] every stream arrives in order and the run commits
+pass [run output, Engine worker] many small chunks and one large chunk arrive unchanged
+pass [run output, Engine worker] a run without output commits with empty outputs
+pass [run output, Engine worker] staging: a run cannot be read before it is committed, and the commit waits for end
+pass [run output, Engine worker] an end whose totals disagree fails the commit and discards the run
+pass [run output, Engine worker] a message outside the protocol fails the commit
+pass [run output, Engine worker] discard drops a staged run and ignores its late chunks
+pass [run output, Engine worker] a committed run is kept by discard and removed by delete
+pass [run output, Engine worker] two staged runs keep their outputs apart
+pass [run output, Engine worker] the writer refuses to write after end
+FAIL [run output, Engine worker] storage full: the run fails with the reason, and committed runs stay readable: ContractError: commit: expected a rejection matching /StorageFullError: Not enough temporary storage/, but it resolved
+  ✓   13 [chromium] › tests/e2e/engine.spec.ts:132:1 › run output contract: the writer in the Engine worker, the real Data worker (without storage full) (1.0s)
+completed compact.blastn n=1 n=1 142 ms
+completed compact.blastn n=2 n=2 40 ms
+completed compact.blastn n=4 n=4 25 ms
+completed multi.blastn n=1 n=1 21 ms
+completed multi.blastn n=2 n=2 25 ms
+completed multi.blastn n=4 n=4 24 ms
+completed mask.lcase.megablast n=1 n=1 18 ms
+completed mask.lcase.megablast n=2 n=2 20 ms
+completed mask.lcase.megablast n=4 n=4 19 ms
+completed width.blastp n=1 n=1 27 ms
+completed width.blastp n=2 n=2 34 ms
+completed width.blastp n=4 n=4 26 ms
+completed width.tblastn n=1 n=1 21 ms
+completed width.tblastn n=2 n=2 24 ms
+completed width.tblastn n=4 n=4 20 ms
+completed tblastx.multi n=1 n=1 84 ms
+completed tblastx.multi n=2 n=2 82 ms
+completed tblastx.multi n=4 n=4 64 ms
+completed tblastn.code4 n=1 n=1 17 ms
+completed tblastn.code4 n=2 n=2 22 ms
+completed tblastn.code4 n=4 n=4 22 ms
+completed tblastn.batches n=1 n=1 662 ms
+completed tblastn.query_batches n=2 n=2 3732 ms
+completed tblastn.batches n=2 n=2 577 ms
+completed tblastn.batches n=4 n=4 610 ms
+completed tblastx.threaded-direct n=1 n=1 32 ms
+completed tblastx.threaded-direct n=2 n=2 35 ms
+completed tblastx.threaded-direct n=4 n=4 35 ms
+  ✓   14 [chromium] › tests/e2e/engine.spec.ts:141:1 › V-BR: searches through the application give the expected bytes at 1, 2 and 4 threads (4.8s)
+  -   15 [chromium] › tests/e2e/measure.spec.ts:207:1 › dw8: the share of a warm search that subject-only preprocessing can take
+  -   16 [chromium] › tests/e2e/measure.spec.ts:238:1 › memory: the linear memory of one instance over repeated searches
+  -   17 [chromium] › tests/e2e/measure.spec.ts:272:1 › auto: the search phase at 1, 2 and 4 threads by input size
+  -   18 [chromium] › tests/e2e/measure.spec.ts:298:1 › cancel: the time to cancel and to prepare the next search in a new runtime
+  -   19 [chromium] › tests/e2e/results-measure.spec.ts:560:3 › 10,000 queries: opening the run, the query picker, finding and sorting
+  -   20 [chromium] › tests/e2e/results-measure.spec.ts:560:3 › 100,000 queries: opening the run, the query picker, finding and sorting
+  -   21 [chromium] › tests/e2e/results-measure.spec.ts:831:1 › many HSPs in one query-subject pair: the dot plot and the HSP list
+  ✓   22 [chromium] › tests/e2e/results.spec.ts:478:3 › BLASTN: the header block is the run's; the Descriptions, Graphic Summary and HSP table are the outfmt 6 rows, the Alignments outfmt 0's text; units, frames and run details (3.0s)
+  ✓   23 [chromium] › tests/e2e/results.spec.ts:478:3 › BLASTP: the header block is the run's; the Descriptions, Graphic Summary and HSP table are the outfmt 6 rows, the Alignments outfmt 0's text; units, frames and run details (5.8s)
+completed tblastn.query_batches n=4 n=4 3910 ms
+  ✓   12 [chromium] › tests/e2e/engine.spec.ts:216:1 › a search that builds one thread pool after another runs threaded from a new runtime (16.2s)
+cancel n=1: cancelled in 2 ms; next search prepared in 13 ms
+cancel n=4: cancelled in 3 ms; next search prepared in 30 ms
+  ✓   25 [chromium] › tests/e2e/engine.spec.ts:241:1 › a cancelled search ends its runtime; the next search runs in a new one with the expected bytes (1.1s)
+renewed 0 n=1: subject registered
+renewed 1 n=1: subject retained
+renewed 2 n=4: subject registered
+renewed 3 n=4: subject retained
+renewed 0 n=1: subject registered
+renewed 1 n=1: subject registered
+renewed 2 n=4: subject registered
+renewed 3 n=4: subject registered
+  ✓   26 [chromium] › tests/e2e/engine.spec.ts:270:1 › a runtime renewed after every search gives the same bytes and registers the subject again (595ms)
+completed compact.blastn n=4 n=4 170 ms
+  ✓   27 [chromium] › tests/e2e/engine.spec.ts:293:1 › without cross-origin isolation, a threaded search runs on the serial module with the reason (245ms)
+  ✓   24 [chromium] › tests/e2e/results.spec.ts:478:3 › TBLASTN: the header block is the run's; the Descriptions, Graphic Summary and HSP table are the outfmt 6 rows, the Alignments outfmt 0's text; units, frames and run details (4.7s)
+  ✓   29 [chromium] › tests/e2e/results.spec.ts:800:1 › an HSP that outfmt 0 does not show, and a hit list that may have reached its limit (1.9s)
+  ✓   28 [chromium] › tests/e2e/results.spec.ts:478:3 › TBLASTX: the header block is the run's; the Descriptions, Graphic Summary and HSP table are the outfmt 6 rows, the Alignments outfmt 0's text; units, frames and run details (4.8s)
+  ✓   30 [chromium] › tests/e2e/results.spec.ts:888:1 › BLASTN: an HSP of one letter has no orientation in its record; the note points to outfmt 0's Strand= line (2.4s)
+  ✓   31 [chromium] › tests/e2e/results.spec.ts:948:1 › selection by HSP identity: sorting keeps the selected HSP; another subject or query moves it (6.5s)
+  ✓   32 [chromium] › tests/e2e/results.spec.ts:1007:1 › the Alignments: a block per Range; Next, Previous and First Match; the previous and next subject; Ranges far apart in a window (7.8s)
+  ✓   33 [chromium] › tests/e2e/results.spec.ts:1146:1 › many queries; view filters change the view, not the search; the notices tell filtered out, no hits and a failed run apart (5.5s)
+  ✓   34 [chromium] › tests/e2e/results.spec.ts:1323:1 › the dot plot: the HSPs of the pair on a canvas; zoom; choosing an HSP on it or in the list; its popup (3.2s)
+  -   36 [chromium] › tests/e2e/screens.spec.ts:41:3 › search screen at the desktop size
+  -   37 [chromium] › tests/e2e/screens.spec.ts:41:3 › search screen at the phone size
+  -   38 [chromium] › tests/e2e/screens.spec.ts:206:3 › results screen at the desktop size
+  -   39 [chromium] › tests/e2e/screens.spec.ts:206:3 › results screen at the phone size
+  -   40 [chromium] › tests/e2e/search-measure.spec.ts:90:1 › index, check, exclusion and queueing of many records
+  ✓   41 [chromium] › tests/e2e/search.spec.ts:49:1 › a file is summarized with its records, not put in the paste box; files can also be dropped (261ms)
+  ✓   35 [chromium] › tests/e2e/results.spec.ts:1476:1 › narrow screens: the results are no wider than the screen; "Open results" shows them; the tables show the key values first (1.6s)
+  ✓   43 [chromium] › tests/e2e/search.spec.ts:113:1 › the same subject, another query: the engine keeps the subject (R1) (2.5s)
+  ✓   42 [chromium] › tests/e2e/search.spec.ts:77:1 › records: duplicate IDs by number, the engine refuses a record, exclusion, and a run after exclusion (3.6s)
+  ✓   45 [chromium] › tests/e2e/search.spec.ts:208:1 › cancel a running search; the next one runs (1.8s)
+  ✓   44 [chromium] › tests/e2e/search.spec.ts:131:1 › several runs in the queue; the next job is edited while one runs; separate searches as a group (2.5s)
+  ✓   46 [chromium] › tests/e2e/search.spec.ts:224:1 › the region of a role with one record: the drag, the fields, the limits and the argv (2.8s)
+  ✓   47 [chromium] › tests/e2e/search.spec.ts:278:1 › the options form: the engine's defaults are not written; tasks, templates and genetic codes (5.2s)
+  ✓   48 [chromium] › tests/e2e/search.spec.ts:351:1 › the engine's refusals of option values are shown as the engine writes them, and nothing is queued (4.3s)
+  ✓   50 [chromium] › tests/e2e/search.spec.ts:402:1 › the sequence kind warning is an estimate and does not change the program (952ms)
+  ✓   49 [chromium] › tests/e2e/search.spec.ts:378:1 › empty inputs, every record excluded, a sequence without a defline, and BLASTX (2.8s)
+  ✓   52 [chromium] › tests/e2e/search.spec.ts:472:1 › the search screen in NCBI's order and words (W4b) (1.5s)
+  ✓   51 [chromium] › tests/e2e/search.spec.ts:414:3 › leaving and returning › the wake lock is held during a search; the page warns before it is left; the state is checked on return (2.0s)
+  ✓   54 [chromium] › tests/e2e/search.spec.ts:642:1 › narrow screens put the inputs and the queue one under the other, without horizontal scrolling (777ms)
+  ✓   55 [chromium] › tests/e2e/smoke.spec.ts:4:1 › the page is cross-origin isolated, so the threaded engine can use shared memory (86ms)
+  ✓   56 [chromium] › tests/e2e/smoke.spec.ts:10:1 › paste, queue, run, view and export with the engine (684ms)
+  ✓   57 [chromium] › tests/e2e/smoke.spec.ts:42:1 › a BLASTN query of white space only is refused with the index scan error, before it is queued (221ms)
+  ✓   53 [chromium] › tests/e2e/search.spec.ts:573:1 › Algorithm parameters: closed at start, the changed values marked and counted, the defaults restored; the Job Title and the second button (2.5s)
+  ✓   58 [chromium] › tests/e2e/storage.spec.ts:24:1 › a tab keeps its outputs in OPFS under tmp/<session>/runs/<run>/, named by tokens only (787ms)
+  ✓   59 [chromium] › tests/e2e/storage.spec.ts:47:3 › the next tab removes the data of a tab that is killed, and keeps its own (1.7s)
+  ✓   60 [chromium] › tests/e2e/storage.spec.ts:47:3 › the next tab removes the data of a tab that is closed, and keeps its own (1.6s)
+  ✓   62 [chromium] › tests/e2e/storage.spec.ts:107:1 › two tabs that start at the same time remove an abandoned session once and keep each other (1.3s)
+  ✓   61 [chromium] › tests/e2e/storage.spec.ts:80:1 › two open tabs, started one after the other, never remove each other's data (2.3s)
+  ✓   63 [chromium] › tests/e2e/storage.spec.ts:128:1 › a stopped (frozen) tab keeps its data while another tab starts (1.3s)
+  ✓   64 [chromium] › tests/e2e/storage.spec.ts:147:1 › a run that runs out of storage fails with the reason; earlier results stay and later runs work (1.3s)
+pass [opfs] write and seal: a block reads back exactly the bytes appended to it
+pass [opfs] read: any range of a sealed block, and nothing beyond its end
+pass [opfs] write: the store keeps a copy, so the caller may reuse its buffer
+pass [opfs] staging: a block cannot be read before it is sealed
+pass [opfs] seal: a sealed block takes no more bytes and cannot be sealed again
+pass [opfs] discard: a staged or sealed block disappears and its bytes are freed
+pass [opfs] create: a path that exists cannot be created again
+pass [opfs] removeAll: removes one directory, sealed or not, and leaves the rest
+pass [opfs] paths: empty and relative names are rejected
+pass [opfs] an empty block can be sealed and read
+pass [opfs] a large block: 48 MiB in 1 MiB appends reads back unchanged
+FAIL [opfs] storage full: an append fails with StorageFullError, the block can only be discarded, and sealed blocks stay readable: ContractError: an append beyond the storage: expected an error matching /StorageFullError/, but nothing was thrown
+  ✓   65 [firefox] › tests/e2e/browsers.spec.ts:34:3 › BlockStore contract: opfs store in a dedicated worker (without storage full) (2.1s)
+pass [run output] every stream arrives in order and the run commits
+pass [memory] write and seal: a block reads back exactly the bytes appended to it
+pass [memory] read: any range of a sealed block, and nothing beyond its end
+pass [memory] write: the store keeps a copy, so the caller may reuse its buffer
+pass [memory] staging: a block cannot be read before it is sealed
+pass [memory] seal: a sealed block takes no more bytes and cannot be sealed again
+pass [memory] discard: a staged or sealed block disappears and its bytes are freed
+pass [memory] create: a path that exists cannot be created again
+pass [memory] removeAll: removes one directory, sealed or not, and leaves the rest
+pass [memory] paths: empty and relative names are rejected
+pass [memory] an empty block can be sealed and read
+pass [run output] many small chunks and one large chunk arrive unchanged
+pass [memory] a large block: 48 MiB in 1 MiB appends reads back unchanged
+pass [memory] storage full: an append fails with StorageFullError, the block can only be discarded, and sealed blocks stay readable
+  ✓   67 [firefox] › tests/e2e/browsers.spec.ts:34:3 › BlockStore contract: memory store in a dedicated worker (without storage full) (377ms)
+  -   68 [firefox] › tests/e2e/contracts.spec.ts:32:3 › BlockStore contract: opfs store in a dedicated worker
+  -   69 [firefox] › tests/e2e/contracts.spec.ts:32:3 › BlockStore contract: memory store in a dedicated worker
+  -   70 [firefox] › tests/e2e/contracts.spec.ts:40:1 › run output contract: a writer in its own worker and the real Data worker (OPFS)
+pass [run output] a run without output commits with empty outputs
+pass [run output] staging: a run cannot be read before it is committed, and the commit waits for end
+pass [record scanner] scan: one record with regular lines (LF)
+pass [record scanner] scan: CRLF line ends
+pass [record scanner] scan: lines of different lengths
+pass [record scanner] scan: several records, the last without a final newline
+pass [record scanner] scan: a blank line inside a sequence
+pass [record scanner] scan: interior white space belongs to the sequence, trailing white space does not
+pass [record scanner] scan: a non-ASCII header
+pass [record scanner] scan: residues keep their case
+pass [record scanner] scan: a record without residues
+pass [record scanner] scan: an empty record ends the input (bio stops reading there)
+pass [record scanner] scan: a header line without a newline at the end of the input
+pass [record scanner] scan: an empty input has no records
+pass [record scanner] scan: a U+FEFF at the start of a header is part of the ID
+pass [record scanner] scan: bytes after the empty record that ends the input are not read
+pass [run output] an end whose totals disagree fails the commit and discards the run
+pass [run output] a message outside the protocol fails the commit
+pass [run output] discard drops a staged run and ignores its late chunks
+pass [run output] a committed run is kept by discard and removed by delete
+pass [record scanner] scan: a long record (4 checkpoints) with lines of 60 and 61 residues
+pass [run output] two staged runs keep their outputs apart
+pass [run output] the writer refuses to write after end
+FAIL [run output] storage full: the run fails with the reason, and committed runs stay readable: ContractError: commit: expected a rejection matching /StorageFullError: Not enough temporary storage/, but it resolved
+run output contract on the opfs store
+  ✓   66 [firefox] › tests/e2e/browsers.spec.ts:49:1 › run output contract: a writer in its own worker and the real Data worker (without storage full) (3.4s)
+  ✓   72 [firefox] › tests/e2e/browsers.spec.ts:59:1 › the application keeps results in OPFS, or in memory with the reason shown (378ms)
+pass [record scanner] scan: a long record with regular 80-residue lines
+pass [record scanner] scan: the parser's error for text before the first header
+pass [record scanner] scan: the parser's error for a blank line before the first header
+pass [record scanner] scan: the parser's error for white space only
+pass [record scanner] scan: the parser's error for a first line that is not a header, before bytes that are not UTF-8
+pass [record scanner] scan: the parser's error for bytes that are not UTF-8
+pass [record scanner] scan: a multi-byte character split across chunks
+pass [record scanner] scan: parser kind 1 is refused until SX
+  ✓   71 [firefox] › tests/e2e/engine.spec.ts:97:1 › record scanner contract: the serial reactor (2.4s)
+pass [engine input] register: the run proceeds when the record tables agree
+multi.blastn n=1: subject registered
+multi.megablast n=1: subject retained
+pass [engine input] register: a query record with another ID stops the run before any output
+iupac.beyond_table.blastn n=1: subject retained
+rna.megablast n=1: subject retained
+pass [engine input] register: a subject record with another length stops the run before any output
+multi.mts3.blastn n=1: subject retained
+multi.ws7_e1000.blastn n=4: subject registered
+pass [engine input] register: a missing record stops the run before any output
+  ✓   74 [firefox] › tests/e2e/engine.spec.ts:105:3 › engine input contract: the real EngineGateway at 1 thread(s) (1.2s)
+multi.besthit.blastn n=4: subject retained
+pass [engine input] register: the run proceeds when the record tables agree
+pass [engine input] register: a query record with another ID stops the run before any output
+tblastx.multi n=1: subject registered
+pass [engine input] register: a subject record with another length stops the run before any output
+tblastx.batch n=1: subject retained
+pass [engine input] register: a missing record stops the run before any output
+  ✓   75 [firefox] › tests/e2e/engine.spec.ts:105:3 › engine input contract: the real EngineGateway at 4 thread(s) (1.2s)
+tblastx.mts1 n=4: subject registered
+pass [run output, Engine worker] every stream arrives in order and the run commits
+pass [run output, Engine worker] many small chunks and one large chunk arrive unchanged
+tblastx.thrwin n=4: subject retained
+pass [run output, Engine worker] a run without output commits with empty outputs
+pass [run output, Engine worker] staging: a run cannot be read before it is committed, and the commit waits for end
+pass [run output, Engine worker] an end whose totals disagree fails the commit and discards the run
+pass [run output, Engine worker] a message outside the protocol fails the commit
+  ✓   73 [firefox] › tests/e2e/engine.spec.ts:174:1 › R1: searches of one subject with other queries and options reuse it and give the expected bytes (4.1s)
+pass [run output, Engine worker] discard drops a staged run and ignores its late chunks
+pass [run output, Engine worker] a committed run is kept by discard and removed by delete
+pass [run output, Engine worker] two staged runs keep their outputs apart
+pass [run output, Engine worker] the writer refuses to write after end
+FAIL [run output, Engine worker] storage full: the run fails with the reason, and committed runs stay readable: ContractError: commit: expected a rejection matching /StorageFullError: Not enough temporary storage/, but it resolved
+  ✓   76 [firefox] › tests/e2e/engine.spec.ts:132:1 › run output contract: the writer in the Engine worker, the real Data worker (without storage full) (2.7s)
+completed compact.blastn n=1 n=1 372 ms
+completed compact.blastn n=2 n=2 159 ms
+completed compact.blastn n=4 n=4 146 ms
+completed multi.blastn n=1 n=1 146 ms
+completed multi.blastn n=2 n=2 142 ms
+completed multi.blastn n=4 n=4 154 ms
+completed mask.lcase.megablast n=1 n=1 133 ms
+completed mask.lcase.megablast n=2 n=2 139 ms
+completed mask.lcase.megablast n=4 n=4 147 ms
+completed width.blastp n=1 n=1 136 ms
+completed width.blastp n=2 n=2 145 ms
+completed width.blastp n=4 n=4 140 ms
+completed width.tblastn n=1 n=1 143 ms
+completed width.tblastn n=2 n=2 145 ms
+completed width.tblastn n=4 n=4 157 ms
+completed tblastx.multi n=1 n=1 385 ms
+completed tblastx.multi n=2 n=2 365 ms
+completed tblastx.multi n=4 n=4 352 ms
+completed tblastn.code4 n=1 n=1 143 ms
+completed tblastn.code4 n=2 n=2 159 ms
+completed tblastn.code4 n=4 n=4 163 ms
+completed tblastn.batches n=1 n=1 4258 ms
+completed tblastn.batches n=2 n=2 3565 ms
+completed tblastn.batches n=4 n=4 3488 ms
+completed tblastx.threaded-direct n=1 n=1 235 ms
+completed tblastx.threaded-direct n=2 n=2 241 ms
+completed tblastx.threaded-direct n=4 n=4 233 ms
+  ✓   78 [firefox] › tests/e2e/engine.spec.ts:141:1 › V-BR: searches through the application give the expected bytes at 1, 2 and 4 threads (18.3s)
+  -   79 [firefox] › tests/e2e/measure.spec.ts:207:1 › dw8: the share of a warm search that subject-only preprocessing can take
+  -   80 [firefox] › tests/e2e/measure.spec.ts:238:1 › memory: the linear memory of one instance over repeated searches
+  -   81 [firefox] › tests/e2e/measure.spec.ts:272:1 › auto: the search phase at 1, 2 and 4 threads by input size
+  -   82 [firefox] › tests/e2e/measure.spec.ts:298:1 › cancel: the time to cancel and to prepare the next search in a new runtime
+  -   83 [firefox] › tests/e2e/results-measure.spec.ts:560:3 › 10,000 queries: opening the run, the query picker, finding and sorting
+  -   84 [firefox] › tests/e2e/results-measure.spec.ts:560:3 › 100,000 queries: opening the run, the query picker, finding and sorting
+  -   85 [firefox] › tests/e2e/results-measure.spec.ts:831:1 › many HSPs in one query-subject pair: the dot plot and the HSP list
+  ✓   86 [firefox] › tests/e2e/results.spec.ts:478:3 › BLASTN: the header block is the run's; the Descriptions, Graphic Summary and HSP table are the outfmt 6 rows, the Alignments outfmt 0's text; units, frames and run details (4.2s)
+completed tblastn.query_batches n=2 n=2 24558 ms
+  ✓   87 [firefox] › tests/e2e/results.spec.ts:478:3 › BLASTP: the header block is the run's; the Descriptions, Graphic Summary and HSP table are the outfmt 6 rows, the Alignments outfmt 0's text; units, frames and run details (7.7s)
+  ✓   88 [firefox] › tests/e2e/results.spec.ts:478:3 › TBLASTN: the header block is the run's; the Descriptions, Graphic Summary and HSP table are the outfmt 6 rows, the Alignments outfmt 0's text; units, frames and run details (6.3s)
+  ✓   89 [firefox] › tests/e2e/results.spec.ts:478:3 › TBLASTX: the header block is the run's; the Descriptions, Graphic Summary and HSP table are the outfmt 6 rows, the Alignments outfmt 0's text; units, frames and run details (6.0s)
+  ✓   90 [firefox] › tests/e2e/results.spec.ts:800:1 › an HSP that outfmt 0 does not show, and a hit list that may have reached its limit (3.1s)
+  ✓   91 [firefox] › tests/e2e/results.spec.ts:888:1 › BLASTN: an HSP of one letter has no orientation in its record; the note points to outfmt 0's Strand= line (2.8s)
+  ✓   92 [firefox] › tests/e2e/results.spec.ts:948:1 › selection by HSP identity: sorting keeps the selected HSP; another subject or query moves it (8.8s)
+completed tblastn.query_batches n=4 n=4 25287 ms
+  ✓   77 [firefox] › tests/e2e/engine.spec.ts:216:1 › a search that builds one thread pool after another runs threaded from a new runtime (58.6s)
+cancel n=1: cancelled in 57 ms; next search prepared in 84 ms
+cancel n=4: cancelled in 51 ms; next search prepared in 99 ms
+  ✓   94 [firefox] › tests/e2e/engine.spec.ts:241:1 › a cancelled search ends its runtime; the next search runs in a new one with the expected bytes (2.1s)
+renewed 0 n=1: subject registered
+renewed 1 n=1: subject retained
+renewed 2 n=4: subject registered
+renewed 3 n=4: subject retained
+renewed 0 n=1: subject registered
+renewed 1 n=1: subject registered
+renewed 2 n=4: subject registered
+renewed 3 n=4: subject registered
+  ✓   95 [firefox] › tests/e2e/engine.spec.ts:270:1 › a runtime renewed after every search gives the same bytes and registers the subject again (2.3s)
+completed compact.blastn n=4 n=4 437 ms
+  ✓   96 [firefox] › tests/e2e/engine.spec.ts:293:1 › without cross-origin isolation, a threaded search runs on the serial module with the reason (651ms)
+  ✓   93 [firefox] › tests/e2e/results.spec.ts:1007:1 › the Alignments: a block per Range; Next, Previous and First Match; the previous and next subject; Ranges far apart in a window (8.5s)
+  ✓   97 [firefox] › tests/e2e/results.spec.ts:1146:1 › many queries; view filters change the view, not the search; the notices tell filtered out, no hits and a failed run apart (6.0s)
+  ✓   98 [firefox] › tests/e2e/results.spec.ts:1323:1 › the dot plot: the HSPs of the pair on a canvas; zoom; choosing an HSP on it or in the list; its popup (4.0s)
+  -  100 [firefox] › tests/e2e/screens.spec.ts:41:3 › search screen at the desktop size
+  -  101 [firefox] › tests/e2e/screens.spec.ts:41:3 › search screen at the phone size
+  -  102 [firefox] › tests/e2e/screens.spec.ts:206:3 › results screen at the desktop size
+  -  103 [firefox] › tests/e2e/screens.spec.ts:206:3 › results screen at the phone size
+  -  104 [firefox] › tests/e2e/search-measure.spec.ts:90:1 › index, check, exclusion and queueing of many records
+  ✓  105 [firefox] › tests/e2e/search.spec.ts:49:1 › a file is summarized with its records, not put in the paste box; files can also be dropped (690ms)
+  ✓   99 [firefox] › tests/e2e/results.spec.ts:1476:1 › narrow screens: the results are no wider than the screen; "Open results" shows them; the tables show the key values first (3.1s)
+  ✓  107 [firefox] › tests/e2e/search.spec.ts:113:1 › the same subject, another query: the engine keeps the subject (R1) (3.6s)
+  ✓  106 [firefox] › tests/e2e/search.spec.ts:77:1 › records: duplicate IDs by number, the engine refuses a record, exclusion, and a run after exclusion (4.9s)
+  ✓  109 [firefox] › tests/e2e/search.spec.ts:208:1 › cancel a running search; the next one runs (3.6s)
+  ✓  108 [firefox] › tests/e2e/search.spec.ts:131:1 › several runs in the queue; the next job is edited while one runs; separate searches as a group (4.4s)
+  ✓  110 [firefox] › tests/e2e/search.spec.ts:224:1 › the region of a role with one record: the drag, the fields, the limits and the argv (3.6s)
+  ✓  111 [firefox] › tests/e2e/search.spec.ts:278:1 › the options form: the engine's defaults are not written; tasks, templates and genetic codes (6.6s)
+  ✓  112 [firefox] › tests/e2e/search.spec.ts:351:1 › the engine's refusals of option values are shown as the engine writes them, and nothing is queued (4.6s)
+  ✓  114 [firefox] › tests/e2e/search.spec.ts:402:1 › the sequence kind warning is an estimate and does not change the program (1.1s)
+  ✓  113 [firefox] › tests/e2e/search.spec.ts:378:1 › empty inputs, every record excluded, a sequence without a defline, and BLASTX (3.3s)
+  ✓  115 [firefox] › tests/e2e/search.spec.ts:414:3 › leaving and returning › the wake lock is held during a search; the page warns before it is left; the state is checked on return (2.5s)
+  ✓  116 [firefox] › tests/e2e/search.spec.ts:472:1 › the search screen in NCBI's order and words (W4b) (1.8s)
+  ✓  118 [firefox] › tests/e2e/search.spec.ts:642:1 › narrow screens put the inputs and the queue one under the other, without horizontal scrolling (1.5s)
+  ✓  119 [firefox] › tests/e2e/smoke.spec.ts:4:1 › the page is cross-origin isolated, so the threaded engine can use shared memory (236ms)
+  ✓  117 [firefox] › tests/e2e/search.spec.ts:573:1 › Algorithm parameters: closed at start, the changed values marked and counted, the defaults restored; the Job Title and the second button (3.6s)
+  ✓  120 [firefox] › tests/e2e/smoke.spec.ts:10:1 › paste, queue, run, view and export with the engine (1.6s)
+  -  122 [firefox] › tests/e2e/storage.spec.ts:24:1 › a tab keeps its outputs in OPFS under tmp/<session>/runs/<run>/, named by tokens only
+  -  123 [firefox] › tests/e2e/storage.spec.ts:47:3 › the next tab removes the data of a tab that is killed, and keeps its own
+  -  124 [firefox] › tests/e2e/storage.spec.ts:47:3 › the next tab removes the data of a tab that is closed, and keeps its own
+  -  125 [firefox] › tests/e2e/storage.spec.ts:80:1 › two open tabs, started one after the other, never remove each other's data
+  -  126 [firefox] › tests/e2e/storage.spec.ts:107:1 › two tabs that start at the same time remove an abandoned session once and keep each other
+  -  127 [firefox] › tests/e2e/storage.spec.ts:128:1 › a stopped (frozen) tab keeps its data while another tab starts
+  -  128 [firefox] › tests/e2e/storage.spec.ts:147:1 › a run that runs out of storage fails with the reason; earlier results stay and later runs work
+  ✓  121 [firefox] › tests/e2e/smoke.spec.ts:42:1 › a BLASTN query of white space only is refused with the index scan error, before it is queued (561ms)
+  -  129 [webkit] › tests/e2e/browsers.spec.ts:34:3 › BlockStore contract: opfs store in a dedicated worker (without storage full)
+pass [memory] write and seal: a block reads back exactly the bytes appended to it
+pass [memory] read: any range of a sealed block, and nothing beyond its end
+pass [memory] write: the store keeps a copy, so the caller may reuse its buffer
+pass [memory] staging: a block cannot be read before it is sealed
+pass [memory] seal: a sealed block takes no more bytes and cannot be sealed again
+pass [memory] discard: a staged or sealed block disappears and its bytes are freed
+pass [memory] create: a path that exists cannot be created again
+pass [memory] removeAll: removes one directory, sealed or not, and leaves the rest
+pass [memory] paths: empty and relative names are rejected
+pass [memory] an empty block can be sealed and read
+pass [run output] every stream arrives in order and the run commits
+pass [run output] many small chunks and one large chunk arrive unchanged
+pass [run output] a run without output commits with empty outputs
+pass [memory] a large block: 48 MiB in 1 MiB appends reads back unchanged
+pass [memory] storage full: an append fails with StorageFullError, the block can only be discarded, and sealed blocks stay readable
+  ✓  131 [webkit] › tests/e2e/browsers.spec.ts:34:3 › BlockStore contract: memory store in a dedicated worker (without storage full) (551ms)
+  -  132 [webkit] › tests/e2e/contracts.spec.ts:32:3 › BlockStore contract: opfs store in a dedicated worker
+  -  133 [webkit] › tests/e2e/contracts.spec.ts:32:3 › BlockStore contract: memory store in a dedicated worker
+  -  134 [webkit] › tests/e2e/contracts.spec.ts:40:1 › run output contract: a writer in its own worker and the real Data worker (OPFS)
+pass [run output] staging: a run cannot be read before it is committed, and the commit waits for end
+pass [run output] an end whose totals disagree fails the commit and discards the run
+pass [run output] a message outside the protocol fails the commit
+pass [run output] discard drops a staged run and ignores its late chunks
+pass [run output] a committed run is kept by discard and removed by delete
+pass [run output] two staged runs keep their outputs apart
+pass [run output] the writer refuses to write after end
+FAIL [run output] storage full: the run fails with the reason, and committed runs stay readable: ContractError: commit: expected a rejection matching /StorageFullError: Not enough temporary storage/, but it resolved
+run output contract on the memory store
+  ✓  130 [webkit] › tests/e2e/browsers.spec.ts:49:1 › run output contract: a writer in its own worker and the real Data worker (without storage full) (1.1s)
+pass [record scanner] scan: one record with regular lines (LF)
+pass [record scanner] scan: CRLF line ends
+pass [record scanner] scan: lines of different lengths
+pass [record scanner] scan: several records, the last without a final newline
+pass [record scanner] scan: a blank line inside a sequence
+pass [record scanner] scan: interior white space belongs to the sequence, trailing white space does not
+pass [record scanner] scan: a non-ASCII header
+pass [record scanner] scan: residues keep their case
+pass [record scanner] scan: a record without residues
+pass [record scanner] scan: an empty record ends the input (bio stops reading there)
+pass [record scanner] scan: a header line without a newline at the end of the input
+pass [record scanner] scan: an empty input has no records
+pass [record scanner] scan: a U+FEFF at the start of a header is part of the ID
+pass [record scanner] scan: bytes after the empty record that ends the input are not read
+pass [record scanner] scan: a long record (4 checkpoints) with lines of 60 and 61 residues
+pass [record scanner] scan: a long record with regular 80-residue lines
+pass [record scanner] scan: the parser's error for text before the first header
+pass [record scanner] scan: the parser's error for a blank line before the first header
+pass [record scanner] scan: the parser's error for white space only
+pass [record scanner] scan: the parser's error for a first line that is not a header, before bytes that are not UTF-8
+pass [record scanner] scan: the parser's error for bytes that are not UTF-8
+pass [record scanner] scan: a multi-byte character split across chunks
+pass [record scanner] scan: parser kind 1 is refused until SX
+  ✓  135 [webkit] › tests/e2e/engine.spec.ts:97:1 › record scanner contract: the serial reactor (639ms)
+  ✓  136 [webkit] › tests/e2e/browsers.spec.ts:59:1 › the application keeps results in OPFS, or in memory with the reason shown (600ms)
+pass [engine input] register: the run proceeds when the record tables agree
+pass [engine input] register: a query record with another ID stops the run before any output
+pass [engine input] register: a subject record with another length stops the run before any output
+multi.blastn n=1: subject registered
+multi.megablast n=1: subject retained
+iupac.beyond_table.blastn n=1: subject retained
+rna.megablast n=1: subject retained
+multi.mts3.blastn n=1: subject retained
+multi.ws7_e1000.blastn n=4: subject registered
+multi.besthit.blastn n=4: subject retained
+pass [engine input] register: a missing record stops the run before any output
+  ✓  137 [webkit] › tests/e2e/engine.spec.ts:105:3 › engine input contract: the real EngineGateway at 1 thread(s) (1.6s)
+tblastx.multi n=1: subject registered
+tblastx.batch n=1: subject retained
+tblastx.mts1 n=4: subject registered
+tblastx.thrwin n=4: subject retained
+pass [engine input] register: the run proceeds when the record tables agree
+pass [engine input] register: a query record with another ID stops the run before any output
+pass [engine input] register: a subject record with another length stops the run before any output
+  ✓  138 [webkit] › tests/e2e/engine.spec.ts:174:1 › R1: searches of one subject with other queries and options reuse it and give the expected bytes (2.2s)
+pass [engine input] register: a missing record stops the run before any output
+  ✓  139 [webkit] › tests/e2e/engine.spec.ts:105:3 › engine input contract: the real EngineGateway at 4 thread(s) (1.4s)
+pass [run output, Engine worker] every stream arrives in order and the run commits
+pass [run output, Engine worker] many small chunks and one large chunk arrive unchanged
+pass [run output, Engine worker] a run without output commits with empty outputs
+pass [run output, Engine worker] staging: a run cannot be read before it is committed, and the commit waits for end
+pass [run output, Engine worker] an end whose totals disagree fails the commit and discards the run
+pass [run output, Engine worker] a message outside the protocol fails the commit
+pass [run output, Engine worker] discard drops a staged run and ignores its late chunks
+pass [run output, Engine worker] a committed run is kept by discard and removed by delete
+pass [run output, Engine worker] two staged runs keep their outputs apart
+pass [run output, Engine worker] the writer refuses to write after end
+FAIL [run output, Engine worker] storage full: the run fails with the reason, and committed runs stay readable: ContractError: commit: expected a rejection matching /StorageFullError: Not enough temporary storage/, but it resolved
+  ✓  141 [webkit] › tests/e2e/engine.spec.ts:132:1 › run output contract: the writer in the Engine worker, the real Data worker (without storage full) (1.1s)
+completed compact.blastn n=1 n=1 184 ms
+completed compact.blastn n=2 n=2 36 ms
+completed compact.blastn n=4 n=4 51 ms
+completed multi.blastn n=1 n=1 27 ms
+completed multi.blastn n=2 n=2 46 ms
+completed multi.blastn n=4 n=4 83 ms
+completed mask.lcase.megablast n=1 n=1 13 ms
+completed mask.lcase.megablast n=2 n=2 60 ms
+completed mask.lcase.megablast n=4 n=4 38 ms
+completed width.blastp n=1 n=1 36 ms
+completed width.blastp n=2 n=2 39 ms
+completed width.blastp n=4 n=4 23 ms
+completed width.tblastn n=1 n=1 16 ms
+completed width.tblastn n=2 n=2 30 ms
+completed width.tblastn n=4 n=4 27 ms
+completed tblastx.multi n=1 n=1 106 ms
+completed tblastx.multi n=2 n=2 102 ms
+completed tblastx.multi n=4 n=4 75 ms
+completed tblastn.code4 n=1 n=1 15 ms
+completed tblastn.code4 n=2 n=2 19 ms
+completed tblastn.code4 n=4 n=4 19 ms
+completed tblastn.batches n=1 n=1 731 ms
+completed tblastn.batches n=2 n=2 626 ms
+completed tblastn.query_batches n=2 n=2 4335 ms
+completed tblastn.batches n=4 n=4 633 ms
+completed tblastx.threaded-direct n=1 n=1 30 ms
+completed tblastx.threaded-direct n=2 n=2 34 ms
+completed tblastx.threaded-direct n=4 n=4 33 ms
+  ✓  142 [webkit] › tests/e2e/engine.spec.ts:141:1 › V-BR: searches through the application give the expected bytes at 1, 2 and 4 threads (5.4s)
+  -  143 [webkit] › tests/e2e/measure.spec.ts:207:1 › dw8: the share of a warm search that subject-only preprocessing can take
+  -  144 [webkit] › tests/e2e/measure.spec.ts:238:1 › memory: the linear memory of one instance over repeated searches
+  -  145 [webkit] › tests/e2e/measure.spec.ts:272:1 › auto: the search phase at 1, 2 and 4 threads by input size
+  -  146 [webkit] › tests/e2e/measure.spec.ts:298:1 › cancel: the time to cancel and to prepare the next search in a new runtime
+  -  147 [webkit] › tests/e2e/results-measure.spec.ts:560:3 › 10,000 queries: opening the run, the query picker, finding and sorting
+  -  148 [webkit] › tests/e2e/results-measure.spec.ts:560:3 › 100,000 queries: opening the run, the query picker, finding and sorting
+  -  149 [webkit] › tests/e2e/results-measure.spec.ts:831:1 › many HSPs in one query-subject pair: the dot plot and the HSP list
+  ✓  150 [webkit] › tests/e2e/results.spec.ts:478:3 › BLASTN: the header block is the run's; the Descriptions, Graphic Summary and HSP table are the outfmt 6 rows, the Alignments outfmt 0's text; units, frames and run details (4.4s)
+  ✓  151 [webkit] › tests/e2e/results.spec.ts:478:3 › BLASTP: the header block is the run's; the Descriptions, Graphic Summary and HSP table are the outfmt 6 rows, the Alignments outfmt 0's text; units, frames and run details (7.4s)
+completed tblastn.query_batches n=4 n=4 4720 ms
+  ✓  140 [webkit] › tests/e2e/engine.spec.ts:216:1 › a search that builds one thread pool after another runs threaded from a new runtime (19.1s)
+cancel n=1: cancelled in 1 ms; next search prepared in 8 ms
+cancel n=4: cancelled in 1 ms; next search prepared in 84 ms
+  ✓  153 [webkit] › tests/e2e/engine.spec.ts:241:1 › a cancelled search ends its runtime; the next search runs in a new one with the expected bytes (1.7s)
+renewed 0 n=1: subject registered
+renewed 1 n=1: subject retained
+renewed 2 n=4: subject registered
+renewed 3 n=4: subject retained
+renewed 0 n=1: subject registered
+renewed 1 n=1: subject registered
+renewed 2 n=4: subject registered
+renewed 3 n=4: subject registered
+  ✓  154 [webkit] › tests/e2e/engine.spec.ts:270:1 › a runtime renewed after every search gives the same bytes and registers the subject again (1.4s)
+completed compact.blastn n=4 n=4 186 ms
+  ✓  155 [webkit] › tests/e2e/engine.spec.ts:293:1 › without cross-origin isolation, a threaded search runs on the serial module with the reason (406ms)
+  ✓  152 [webkit] › tests/e2e/results.spec.ts:478:3 › TBLASTN: the header block is the run's; the Descriptions, Graphic Summary and HSP table are the outfmt 6 rows, the Alignments outfmt 0's text; units, frames and run details (7.8s)
+  ✓  156 [webkit] › tests/e2e/results.spec.ts:478:3 › TBLASTX: the header block is the run's; the Descriptions, Graphic Summary and HSP table are the outfmt 6 rows, the Alignments outfmt 0's text; units, frames and run details (6.4s)
+  ✓  157 [webkit] › tests/e2e/results.spec.ts:800:1 › an HSP that outfmt 0 does not show, and a hit list that may have reached its limit (3.6s)
+  ✓  158 [webkit] › tests/e2e/results.spec.ts:888:1 › BLASTN: an HSP of one letter has no orientation in its record; the note points to outfmt 0's Strand= line (3.2s)
+  ✓  159 [webkit] › tests/e2e/results.spec.ts:948:1 › selection by HSP identity: sorting keeps the selected HSP; another subject or query moves it (9.2s)
+  ✓  160 [webkit] › tests/e2e/results.spec.ts:1007:1 › the Alignments: a block per Range; Next, Previous and First Match; the previous and next subject; Ranges far apart in a window (9.8s)
+  ✓  161 [webkit] › tests/e2e/results.spec.ts:1146:1 › many queries; view filters change the view, not the search; the notices tell filtered out, no hits and a failed run apart (7.4s)
+  ✓  162 [webkit] › tests/e2e/results.spec.ts:1323:1 › the dot plot: the HSPs of the pair on a canvas; zoom; choosing an HSP on it or in the list; its popup (4.5s)
+  -  164 [webkit] › tests/e2e/screens.spec.ts:41:3 › search screen at the desktop size
+  -  165 [webkit] › tests/e2e/screens.spec.ts:41:3 › search screen at the phone size
+  -  166 [webkit] › tests/e2e/screens.spec.ts:206:3 › results screen at the desktop size
+  -  167 [webkit] › tests/e2e/screens.spec.ts:206:3 › results screen at the phone size
+  -  168 [webkit] › tests/e2e/search-measure.spec.ts:90:1 › index, check, exclusion and queueing of many records
+  ✓  169 [webkit] › tests/e2e/search.spec.ts:49:1 › a file is summarized with its records, not put in the paste box; files can also be dropped (975ms)
+  ✓  163 [webkit] › tests/e2e/results.spec.ts:1476:1 › narrow screens: the results are no wider than the screen; "Open results" shows them; the tables show the key values first (2.9s)
+  ✓  170 [webkit] › tests/e2e/search.spec.ts:77:1 › records: duplicate IDs by number, the engine refuses a record, exclusion, and a run after exclusion (4.5s)
+  ✓  171 [webkit] › tests/e2e/search.spec.ts:113:1 › the same subject, another query: the engine keeps the subject (R1) (3.7s)
+  ✓  173 [webkit] › tests/e2e/search.spec.ts:208:1 › cancel a running search; the next one runs (2.9s)
+  ✓  172 [webkit] › tests/e2e/search.spec.ts:131:1 › several runs in the queue; the next job is edited while one runs; separate searches as a group (4.2s)
+  ✓  174 [webkit] › tests/e2e/search.spec.ts:224:1 › the region of a role with one record: the drag, the fields, the limits and the argv (3.5s)
+  ✓  175 [webkit] › tests/e2e/search.spec.ts:278:1 › the options form: the engine's defaults are not written; tasks, templates and genetic codes (6.6s)
+  ✓  176 [webkit] › tests/e2e/search.spec.ts:351:1 › the engine's refusals of option values are shown as the engine writes them, and nothing is queued (4.5s)
+  ✓  178 [webkit] › tests/e2e/search.spec.ts:402:1 › the sequence kind warning is an estimate and does not change the program (916ms)
+  ✓  177 [webkit] › tests/e2e/search.spec.ts:378:1 › empty inputs, every record excluded, a sequence without a defline, and BLASTX (3.4s)
+  ✓  179 [webkit] › tests/e2e/search.spec.ts:414:3 › leaving and returning › the wake lock is held during a search; the page warns before it is left; the state is checked on return (2.8s)
+  ✓  180 [webkit] › tests/e2e/search.spec.ts:472:1 › the search screen in NCBI's order and words (W4b) (2.2s)
+  ✓  182 [webkit] › tests/e2e/search.spec.ts:642:1 › narrow screens put the inputs and the queue one under the other, without horizontal scrolling (1.6s)
+  ✓  183 [webkit] › tests/e2e/smoke.spec.ts:4:1 › the page is cross-origin isolated, so the threaded engine can use shared memory (520ms)
+  ✓  181 [webkit] › tests/e2e/search.spec.ts:573:1 › Algorithm parameters: closed at start, the changed values marked and counted, the defaults restored; the Job Title and the second button (3.0s)
+  ✓  185 [webkit] › tests/e2e/smoke.spec.ts:42:1 › a BLASTN query of white space only is refused with the index scan error, before it is queued (895ms)
+  -  186 [webkit] › tests/e2e/storage.spec.ts:24:1 › a tab keeps its outputs in OPFS under tmp/<session>/runs/<run>/, named by tokens only
+  -  187 [webkit] › tests/e2e/storage.spec.ts:47:3 › the next tab removes the data of a tab that is killed, and keeps its own
+  -  188 [webkit] › tests/e2e/storage.spec.ts:47:3 › the next tab removes the data of a tab that is closed, and keeps its own
+  -  189 [webkit] › tests/e2e/storage.spec.ts:80:1 › two open tabs, started one after the other, never remove each other's data
+  -  190 [webkit] › tests/e2e/storage.spec.ts:107:1 › two tabs that start at the same time remove an abandoned session once and keep each other
+  -  191 [webkit] › tests/e2e/storage.spec.ts:128:1 › a stopped (frozen) tab keeps its data while another tab starts
+  -  192 [webkit] › tests/e2e/storage.spec.ts:147:1 › a run that runs out of storage fails with the reason; earlier results stay and later runs work
+  ✓  184 [webkit] › tests/e2e/smoke.spec.ts:10:1 › paste, queue, run, view and export with the engine (1.4s)
+
+  61 skipped
+  131 passed (4.1m)

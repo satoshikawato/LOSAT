@@ -33,12 +33,12 @@ mod run_impl;
 pub use run_impl::check_options;
 pub use run_impl::run;
 pub use run_impl::run_local;
+// ABI v1 (`web_api::v1_tblastx`) searches through `run_local_with` with its checks.
 #[cfg(target_arch = "wasm32")]
-pub use run_impl::run_web_pair;
+pub(crate) use run_impl::{check_losat_limits, run_local_with, V1Checks};
 
 // Imports used by submodules
 pub(crate) use anyhow::{Context, Result};
-pub(crate) use bio::io::fasta;
 pub(crate) use indicatif::ProgressBar;
 // NCBI reference: ncbi-blast/c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
 // ```c

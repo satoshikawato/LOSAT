@@ -586,77 +586,6 @@ fn preliminary_subject_bases(subject: &[u8]) -> Option<Vec<u8>> {
     )
 }
 
-#[cfg(target_arch = "wasm32")]
-fn fasta_records_from_bytes(bytes: &[u8]) -> Result<Vec<fasta::Record>> {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:486-651
-    // ```c
-    // void
-    // SetupQueries_OMF(IBlastQuerySource& queries,
-    //                  BlastQueryInfo* qinfo,
-    //                  BLAST_SequenceBlk** seqblk,
-    //                  EBlastProgramType prog,
-    //                  ...)
-    // ```
-    fasta::Reader::new(bytes)
-        .records()
-        // NCBI reference: c++/src/objtools/readers/fasta.cpp:428-431
-        // FASTA_ERROR(LineNumber(), "CFastaReader: Expected defline around line " << LineNumber(), ...);
-        .collect::<std::result::Result<Vec<_>, _>>()
-        .context("failed to parse in-memory FASTA")
-}
-
-#[cfg(target_arch = "wasm32")]
-pub fn run_web_pair(args: TblastxArgs, query_fasta: &str, subject_fasta: &str) -> Result<Vec<u8>> {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1407-1427
-    // ```c
-    // db_length = BlastSeqSrcGetTotLen(seq_src);
-    // itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
-    // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-    //        != BLAST_SEQSRC_EOF) {
-    //     if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0) {
-    //         continue;
-    //     }
-    // }
-    // ```
-    let queries = fasta_records_from_bytes(query_fasta.as_bytes()).context("query FASTA")?;
-    let subjects = fasta_records_from_bytes(subject_fasta.as_bytes()).context("subject FASTA")?;
-    // NCBI reference: ncbi-blast/c++/include/algo/blast/api/local_blast.hpp:76-78
-    // ```c
-    // CLocalBlast(CRef<IQueryFactory> query_factory,
-    //             CRef<CBlastOptionsHandle> opts_handle,
-    //             CRef<CLocalDbAdapter> db);
-    // ```
-    // Web ABI v1 runs the same local search as the CLI and keeps the report in memory.
-    let mut output = Vec::new();
-    let outfmt = args.outfmt.clone();
-    let mut stderr = std::io::stderr();
-    // ABI v1 keeps `bio` and its checks (plan TD-1): the checks that it made in the search
-    // come where they came (`V1Records`), and the records that pass them, which NCBI's
-    // reader reads alike, enter the search as its records (`FastaRecord::from_bio`, which
-    // reads `U` as `T`).
-    let query_records: Vec<FastaRecord> = queries
-        .iter()
-        .enumerate()
-        .map(|(index, record)| FastaRecord::from_bio(record, index + 1, "Query_", false))
-        .collect();
-    let subject_records: Vec<FastaRecord> = subjects
-        .iter()
-        .enumerate()
-        .map(|(index, record)| FastaRecord::from_bio(record, index + 1, "Subject_", false))
-        .collect();
-    run_local_with(
-        args,
-        &query_records,
-        &subject_records,
-        &mut ReportOutputs::single(&outfmt, OutputSink::Writer(&mut output), &mut stderr),
-        Some(&V1Records {
-            queries: &queries,
-            subjects: &subjects,
-        }),
-    )?;
-    Ok(output)
-}
-
 /// `settings` are the NCBI application settings that LOSAT reproduces
 /// (`ncbi_environment::check_ncbi_application_settings`): the input readers use them once
 /// the program reads with `fasta_reader` (steps S3-S8 of the port plan).
@@ -960,7 +889,7 @@ fn check_ncbi_options(
 }
 
 /// The options that LOSAT's TBLASTX rejects, where NCBI would start the search.
-fn check_losat_limits(args: &TblastxArgs) -> Result<()> {
+pub(crate) fn check_losat_limits(args: &TblastxArgs) -> Result<()> {
     // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:214-224
     // ```c
     //     if (ewp->diag_table->multiple_hits) {
@@ -1114,13 +1043,13 @@ pub fn run_local(
 }
 
 /// `run_local`, with the checks that ABI v1 makes of its `bio` records (`v1`,
-/// `run_web_pair`).
-fn run_local_with(
+/// `web_api::v1_tblastx::run_web_pair`).
+pub(crate) fn run_local_with(
     args: TblastxArgs,
     query_records: &[FastaRecord],
     subject_records: &[FastaRecord],
     outputs: &mut ReportOutputs<'_>,
-    v1: Option<&V1Records<'_>>,
+    v1: Option<&dyn V1Checks>,
 ) -> Result<()> {
     // NCBI parses -outfmt before its option handlers read the subjects (BLASTN's
     // `run_local`); `search` checks the formats again.
@@ -1178,7 +1107,7 @@ fn search(
     subject_records: &[FastaRecord],
     subject_placements: &Placements,
     outputs: &mut ReportOutputs<'_>,
-    v1: Option<&V1Records<'_>>,
+    v1: Option<&dyn V1Checks>,
 ) -> Result<()> {
     // NCBI reads the subjects before the queries (`run`); the records are those of NCBI's
     // reader (`fasta_reader`; `run_local`'s callers read them so). The CLI has already
@@ -1285,141 +1214,29 @@ fn search(
     })
 }
 
-/// ABI v1's records as `bio` reads them (`run_web_pair`). Plan TD-1 freezes ABI v1's
-/// accepted inputs, its messages and their order: the search makes ABI v1's checks of
-/// these records where it made them when it searched them (`check_search`, and
-/// `check_shown_subject_titles` before the reports), and searches the records of NCBI's
-/// reader made from them (`FastaRecord::from_bio`), which those checks guarantee to be
+/// ABI v1's checks of its `bio` records (plan TD-1), which the v1 layer makes on its own
+/// records (`web_api::v1_tblastx`): the search calls them where ABI v1 made them when it
+/// searched those records (and `check_shown_subject_titles` before the reports), and
+/// searches the records of NCBI's reader made from them, which those checks guarantee to be
 /// read alike.
-#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-struct V1Records<'a> {
-    queries: &'a [fasta::Record],
-    subjects: &'a [fasta::Record],
-}
-
-impl V1Records<'_> {
+pub(crate) trait V1Checks: Sync {
     /// ABI v1's checks where the search starts, in their order: the outfmt 0 and 7 titles,
     /// LOSAT's limits and environment, the residues, the records without residues and the
     /// intervals without letters (the subjects cut to `-subject_loc`, the queries to
-    /// `-query_loc`). NCBI reads those inputs without a message (or with a warning about
-    /// removed residues), and the records of NCBI's reader search them as NCBI does; ABI v1
-    /// rejects them as it did.
+    /// `-query_loc`).
     fn check_search(
         &self,
         args: &TblastxArgs,
         query_range: Option<&SequenceRange>,
         outputs: &ReportOutputs<'_>,
-    ) -> Result<()> {
-        use crate::blastinput::bio_checks::{check_records_have_residues_of, check_residues_of};
-        use crate::blastinput::seq_range::check_no_empty_interval;
-        // The ranges cut records of NCBI's reader (`seq_range`); these have the residues of
-        // ABI v1's records and their `bio` ID as the title, which ABI v1's messages name them
-        // by. The cut `bio` subjects keep their ID and description.
-        let named_by_id = |records: &[fasta::Record]| -> Vec<FastaRecord> {
-            records
-                .iter()
-                .map(|record| FastaRecord::new(String::new(), record.id().as_bytes(), record.seq()))
-                .collect()
-        };
-        let subject_range =
-            parse_optional_range(args.subject_loc.as_deref(), RangeRole::Subject, "TBLASTX")?;
-        let whole_named_subjects = named_by_id(self.subjects);
-        let ranged_subjects = cut_subjects(&whole_named_subjects, subject_range.as_ref())?;
-        let whole_subjects = Placements::default();
-        let cut_subjects_bio: Vec<fasta::Record>;
-        let (subjects, named_subjects, subject_placements) = match &ranged_subjects {
-            Some((cut, placements)) => {
-                cut_subjects_bio = self
-                    .subjects
-                    .iter()
-                    .zip(cut)
-                    .map(|(record, cut)| {
-                        fasta::Record::with_attrs(record.id(), record.desc(), cut.seq())
-                    })
-                    .collect();
-                (cut_subjects_bio.as_slice(), cut.as_slice(), placements)
-            }
-            None => (
-                self.subjects,
-                whole_named_subjects.as_slice(),
-                &whole_subjects,
-            ),
-        };
-        check_report_titles(self.queries, subjects, outputs)?;
-        check_losat_limits(args)?;
-        crate::blastinput::app::check_unsupported_environment("TBLASTX")?;
-        check_residues_of(subjects, "subject", "TBLASTX")?;
-        check_no_empty_interval(
-            named_subjects,
-            subject_placements,
-            &[],
-            RangeRole::Subject,
-            "TBLASTX",
-        )?;
-        for (records, role) in [(subjects, "subject"), (self.queries, "query")] {
-            check_residues_of(records, role, "TBLASTX")?;
-            check_records_have_residues_of(records, role, "TBLASTX")?;
-        }
-        if let Some(range) = query_range {
-            let ranged = cut_queries(&named_by_id(self.queries), range);
-            check_no_empty_interval(
-                &ranged.records,
-                &ranged.input.placements,
-                &ranged.input.ordinals,
-                RangeRole::Query,
-                "TBLASTX",
-            )?;
-        }
-        Ok(())
-    }
+    ) -> Result<()>;
 }
 
-/// ABI v1's limits on the titles that outfmt 0 and 7 print (`V1Records`).
-///
-/// ABI v1 reads the deflines with `bio`, which does not reproduce NCBI's `CFastaReader`
-/// for every defline (the title ends at the first byte below a space,
-/// fasta_reader_utils.cpp:215-225). Those reports therefore reject a defline that is
-/// empty, starts with white space, or has a control character or a non-ASCII byte. The
-/// outfmt 0 titles of the subjects are checked where the report shows them
-/// (`check_shown_subject_titles`).
-fn check_report_titles(
-    queries: &[fasta::Record],
-    subjects: &[fasta::Record],
-    outputs: &ReportOutputs<'_>,
-) -> Result<()> {
-    if outputs
-        .formats
-        .iter()
-        .all(|format| report::output_format(format.outfmt) == report::TblastxOutputFormat::Tabular)
-    {
-        return Ok(());
-    }
-    for (role, records) in [("query", queries), ("subject", subjects)] {
-        for (index, record) in records.iter().enumerate() {
-            let defline = match record.desc() {
-                Some(desc) => format!("{} {desc}", record.id()),
-                None => record.id().to_string(),
-            };
-            if defline.is_empty()
-                || !defline.is_ascii()
-                || defline.bytes().any(|byte| byte < b' ')
-                || record.id().is_empty()
-            {
-                anyhow::bail!(
-                    "{role} record {} has a defline that is empty, starts with white space or has a control character or a non-ASCII byte, which NCBI BLAST+ reads differently in the outfmt 0 and 7 titles; this is not supported by LOSAT's TBLASTX",
-                    index + 1
-                );
-            }
-        }
-    }
-    Ok(())
-}
-
-/// ABI v1's rejection (`V1Records`) of the outfmt 0 titles that it did not write as NCBI,
+/// ABI v1's rejection (`V1Checks`) of the outfmt 0 titles that it did not write as NCBI,
 /// of the subjects that the reports show: those with hits in the final hit lists, which
 /// NCBI's description tables list (blast_format.cpp:1540, `report/defline.rs`). The check
 /// comes after the outfmt 0 prolog, where NCBI writes the titles of the first query's
-/// report. ABI v1's titles are its `bio` deflines (`FastaRecord::from_bio`), which
+/// report. ABI v1's titles are its `bio` deflines (`web_api::v1_bio::from_bio`), which
 /// `check_report_titles` keeps ASCII.
 fn check_shown_subject_titles(hits: &[TblastxHsp], subjects: &[FastaRecord]) -> Result<()> {
     let shown: std::collections::BTreeSet<usize> =
@@ -1452,7 +1269,7 @@ pub(crate) struct TblastxReportRun<'a> {
     pub ranges: &'a QueryRuns<'a>,
     /// Whether the reports end with the epilog (not when the search stops at a batch).
     pub epilog: bool,
-    /// Whether ABI v1's rejection of outfmt 0 titles applies (`V1Records`).
+    /// Whether ABI v1's rejection of outfmt 0 titles applies (`V1Checks`).
     pub v1_titles: bool,
 }
 

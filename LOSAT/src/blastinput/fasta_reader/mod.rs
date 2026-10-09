@@ -66,6 +66,9 @@ use std::borrow::Cow;
 use std::io::{Read, Seek};
 
 pub(crate) use stream::FastaStream;
+// The title warning of a record, for ABI v1's records (`web_api::v1_bio::from_bio`).
+#[cfg(target_arch = "wasm32")]
+pub(crate) use reader::seq_data_in_title_warning;
 use stream::LineReader;
 
 /// How an input is read: the molecule, the role's local ID prefix and whether the data
@@ -212,102 +215,6 @@ impl FastaRecord {
             title: self.title.clone(),
             sequence: self.sequence[from..to_exclusive].to_vec(),
             warnings: Vec::new(),
-        }
-    }
-
-    /// The record of a `bio` record (the bridge of the port plan, §1): only where LOSAT's
-    /// checks guarantee that `bio` reads the input as NCBI's reader does (ABI v1, plan TD-1;
-    /// the Web adapter until step S10). `n` is the `N` of the local ID (`Query_N`,
-    /// `Subject_N`, 1-based) and `prefix` its prefix; `protein` is the molecule of the input
-    /// (`fAssumeProt`, else `fAssumeNuc`).
-    ///
-    /// The title is the defline as `bio` splits it (the ID, a space and the description),
-    /// without the white space at its start, which NCBI's defline parser skips (`bio` gives
-    /// such a defline an empty ID); that is NCBI's title for the deflines those checks
-    /// accept. The messages are the title warning that NCBI writes at the end of such a
-    /// record.
-    ///
-    /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta_reader_utils.cpp:209-213
-    /// ```c++
-    ///     // trim leading whitespace from title (is this appropriate?)
-    ///     while (title_start < len
-    ///         &&  isspace((unsigned char)defline[title_start])) {
-    ///         ++title_start;
-    ///     }
-    /// ```
-    /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:2038-2043
-    /// ```c++
-    ///     NStr::TruncateSpacesInPlace(processed_title);
-    ///     if (!processed_title.empty()) {
-    ///         auto pDesc = Ref(new CSeqdesc());
-    ///         pDesc->SetTitle() = processed_title;
-    ///         bioseq.SetDescr().Set().push_back(std::move(pDesc));
-    ///     }
-    /// ```
-    /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta_reader_utils.cpp:469-482
-    /// ```c++
-    ///     auto n = m_Counter.load();
-    ///     if (advance)
-    ///         m_Counter++;
-    ///
-    ///     if (m_Prefix.empty()  &&  m_Suffix.empty()) {
-    ///         seq_id->SetLocal().SetId(n);
-    ///     } else {
-    ///         string& id = seq_id->SetLocal().SetStr();
-    ///         id.reserve(128);
-    ///         id += m_Prefix;
-    ///         id += NStr::IntToString(n);
-    ///         id += m_Suffix;
-    ///     }
-    ///     return seq_id;
-    /// ```
-    /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1444-1447
-    /// ```c++
-    ///         CRef<CSeq_data> data(new CSeq_data(m_SeqData, format));
-    ///         if ( !TestFlag(fLeaveAsText) ) {
-    ///             CSeqportUtil::Pack(data, inst.GetLength());
-    ///         }
-    /// ```
-    /// A nucleotide `U` is stored as `T` (`u` as `t` inside the lowercase mask), as the
-    /// reader stores it (`reader.rs`, `assemble_seq`).
-    pub fn from_bio(
-        record: &bio::io::fasta::Record,
-        n: usize,
-        prefix: &str,
-        protein: bool,
-    ) -> Self {
-        let mut title = Vec::with_capacity(record.id().len() + 1);
-        title.extend_from_slice(record.id().as_bytes());
-        if let Some(desc) = record.desc() {
-            title.push(b' ');
-            title.extend_from_slice(desc.as_bytes());
-        }
-        // `isspace` of the C locale.
-        let start = title
-            .iter()
-            .position(|&byte| !matches!(byte, b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r'))
-            .unwrap_or(title.len());
-        title.drain(..start);
-        let mut sequence = record.seq().to_vec();
-        if !protein {
-            for residue in sequence.iter_mut() {
-                *residue = match *residue {
-                    b'U' => b'T',
-                    b'u' => b't',
-                    other => other,
-                };
-            }
-        }
-        let mut warnings = Vec::new();
-        if let Some(warning) = reader::seq_data_in_title_warning(&title, protein) {
-            warnings.extend_from_slice(warning);
-            warnings.push(b'\n');
-        }
-        Self {
-            local_id: format!("{prefix}{n}"),
-            title,
-            sequence,
-            warnings,
         }
     }
 }

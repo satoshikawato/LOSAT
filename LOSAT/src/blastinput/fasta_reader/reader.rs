@@ -2024,7 +2024,7 @@ impl<R: Read> FastaReader<R> {
 ///                 << "accidentally put in the title line?",
 /// ```
 /// Exactly one of `fAssumeNuc` and `fAssumeProt` is set, so exactly one test runs.
-pub(super) fn seq_data_in_title_warning(text: &[u8], protein: bool) -> Option<&'static [u8]> {
+pub(crate) fn seq_data_in_title_warning(text: &[u8], protein: bool) -> Option<&'static [u8]> {
     let length = text.len();
     if !protein {
         if length > 20

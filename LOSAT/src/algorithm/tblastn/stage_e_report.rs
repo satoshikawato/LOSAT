@@ -501,16 +501,18 @@ mod tests {
             env!("CARGO_MANIFEST_DIR"),
             "/../docs/evidence/tlosan_stage_c/multi_hsp_20260924/subjects.fna"
         ));
+        // The records of NCBI's reader, as TBLASTN reads the query and the subjects.
         let read = |path: &Path, prefix: &str, protein: bool| {
-            bio::io::fasta::Reader::from_file(path)
-                .unwrap()
-                .records()
-                .collect::<std::result::Result<Vec<_>, _>>()
-                .unwrap()
-                .iter()
-                .enumerate()
-                .map(|(index, record)| FastaRecord::from_bio(record, index + 1, prefix, protein))
-                .collect::<Vec<_>>()
+            use crate::blastinput::fasta_reader::{read_all, FastaInputSource, ReaderConfig};
+            let config = match prefix {
+                "Query_" => ReaderConfig::query("TBLASTN", protein, false),
+                _ => ReaderConfig::subject("TBLASTN", protein, false),
+            };
+            let file = std::fs::File::open(path).unwrap();
+            read_all(&mut FastaInputSource::from_file(file, config), &mut |_| {
+                Ok(())
+            })
+            .unwrap()
         };
         let queries = read(query_path, "Query_", true);
         let subjects = read(full_subject_path, "Subject_", false);

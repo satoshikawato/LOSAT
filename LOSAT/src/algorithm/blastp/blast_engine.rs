@@ -3,8 +3,6 @@
 //! Reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c
 
 use anyhow::{bail, Context, Result};
-#[cfg(target_arch = "wasm32")]
-use bio::io::fasta;
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -1980,7 +1978,7 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
 // const char* kDfltArgTabularOutputFmtTag("std");
 // ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum BlastpTabularField {
+pub(crate) enum BlastpTabularField {
     QuerySeqId,
     // NCBI reference: c++/src/objtools/align_format/tabular.cpp:1132-1135,1146-1149
     // case eQueryAccession: ... "query acc."; case eQueryAccessionVersion: ... "query acc.ver";
@@ -2229,7 +2227,7 @@ fn parse_blastp_tabular_fields(spec: &str) -> Result<Vec<BlastpTabularField>> {
 // ```
 /// The field of a field name: `None` for a name that is not one of NCBI's field names, an
 /// error for a field that NCBI writes and LOSAT's BLASTP does not.
-fn blastp_tabular_field(name: &str) -> Result<Option<BlastpTabularField>> {
+pub(crate) fn blastp_tabular_field(name: &str) -> Result<Option<BlastpTabularField>> {
     Ok(Some(match name {
         "qseqid" => BlastpTabularField::QuerySeqId,
         // NCBI reference: c++/src/objtools/align_format/tabular.cpp:175-186,1132-1149
@@ -4594,164 +4592,6 @@ fn extend_preliminary_blastp_hit(
     }
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:606-617
-// ```c
-// sequence = queries.GetBlastSequence(index, encoding,
-//                                     eNa_strand_unknown,
-//                                     eSentinels,
-//                                     &warnings);
-// int offset = qinfo->contexts[ctx_index].query_offset;
-// memcpy(&buf.get()[offset], sequence.data.get(), sequence.length);
-// ```
-//
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1407-1427
-// ```c
-// db_length = BlastSeqSrcGetTotLen(seq_src);
-// itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
-// while ((seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr)) != BLAST_SEQSRC_EOF) {
-//     if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0) {
-//         continue;
-//     }
-// }
-// ```
-#[cfg(target_arch = "wasm32")]
-fn fasta_records_from_bytes(bytes: &[u8]) -> Result<Vec<fasta::Record>> {
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:486-651
-    // ```c
-    // void
-    // SetupQueries_OMF(IBlastQuerySource& queries,
-    //                  BlastQueryInfo* qinfo,
-    //                  BLAST_SequenceBlk** seqblk,
-    //                  EBlastProgramType prog,
-    //                  ...)
-    // ```
-    fasta::Reader::new(bytes)
-        .records()
-        .collect::<std::result::Result<Vec<_>, _>>()
-        .map_err(anyhow::Error::from)
-}
-
-#[cfg(target_arch = "wasm32")]
-pub fn run_web_pair(args: BlastpArgs, query_fasta: &str, subject_fasta: &str) -> Result<Vec<u8>> {
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:606-617
-    // ```c
-    // sequence = queries.GetBlastSequence(index, encoding,
-    //                                     eNa_strand_unknown,
-    //                                     eSentinels,
-    //                                     &warnings);
-    // memcpy(&buf.get()[offset], sequence.data.get(), sequence.length);
-    // ```
-    //
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1407-1427
-    // ```c
-    // db_length = BlastSeqSrcGetTotLen(seq_src);
-    // while ((seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr)) != BLAST_SEQSRC_EOF) {
-    //     if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0) {
-    //         continue;
-    //     }
-    // }
-    // ```
-    let queries = fasta_records_from_bytes(query_fasta.as_bytes())
-        .context("failed to parse web query FASTA")?;
-    let subjects = fasta_records_from_bytes(subject_fasta.as_bytes())
-        .context("failed to parse web subject FASTA")?;
-    run_web_pair_records(args, &queries, &subjects, "", "")
-}
-
-/// ABI v1's checks of a BLASTP request, whose arguments, formats and errors are frozen
-/// (plan TD-1): the options are checked before the output format, and a tabular field that
-/// LOSAT's BLASTP does not write is an error, as in v1 before S08+ moved BLASTP to NCBI's
-/// application layer (which reads `-outfmt` first and ignores a token that is not a field).
-#[cfg(target_arch = "wasm32")]
-fn check_web_v1_request(args: &BlastpArgs) -> Result<()> {
-    check_options(args)?;
-    let (format, fields) = OutputFormat::parse(&args.outfmt).map_err(anyhow::Error::msg)?;
-    if let Some(fields) = fields {
-        if format == OutputFormat::Pairwise {
-            bail!("blastp outfmt 0 does not accept custom field lists");
-        }
-        for token in fields.split_whitespace() {
-            if !token.eq_ignore_ascii_case("std")
-                && !matches!(blastp_tabular_field(token), Ok(Some(_)))
-            {
-                bail!("unsupported blastp tabular field '{token}'");
-            }
-        }
-    }
-    Ok(())
-}
-
-#[cfg(target_arch = "wasm32")]
-pub fn run_web_pair_records(
-    args: BlastpArgs,
-    query_records: &[fasta::Record],
-    subject_records: &[fasta::Record],
-    query_label: &str,
-    subject_label: &str,
-) -> Result<Vec<u8>> {
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:486-651
-    // ```c
-    // SetupQueries_OMF(IBlastQuerySource& queries,
-    //                  BlastQueryInfo* qinfo,
-    //                  BLAST_SequenceBlk** seqblk,
-    //                  EBlastProgramType prog,
-    //                  ...)
-    // ```
-    //
-    // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1407-1427
-    // ```c
-    // db_length = BlastSeqSrcGetTotLen(seq_src);
-    // while ((seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr)) != BLAST_SEQSRC_EOF) {
-    //     if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0) {
-    //         continue;
-    //     }
-    // }
-    // ```
-    // NCBI reference: ncbi-blast/c++/include/algo/blast/api/local_blast.hpp:76-78
-    // ```c
-    // CLocalBlast(CRef<IQueryFactory> query_factory,
-    //             CRef<CBlastOptionsHandle> opts_handle,
-    //             CRef<CLocalDbAdapter> db);
-    // ```
-    // Web ABI v1 runs the same local search as the CLI and keeps the report in memory.
-    check_web_v1_request(&args)?;
-    let mut output = Vec::new();
-    let outfmt = args.outfmt.clone();
-    let mut stderr = std::io::stderr();
-    let mut outputs = ReportOutputs::single(&outfmt, OutputSink::Writer(&mut output), &mut stderr);
-    // ABI v1 keeps `bio` and its checks (plan TD-1): the checks that it made in the search
-    // come where they came (`V1Records`), and the records that pass them enter the search
-    // as NCBI's reader's records (`FastaRecord::from_bio`, which skips the white space at the
-    // start of a title as NCBI's defline parser does; ABI v1's BLASTP has no check of the
-    // deflines).
-    let v1_record = |index: usize, record: &fasta::Record, prefix: &str| {
-        FastaRecord::from_bio(record, index + 1, prefix, true)
-    };
-    let queries: Vec<FastaRecord> = query_records
-        .iter()
-        .enumerate()
-        .map(|(index, record)| v1_record(index, record, "Query_"))
-        .collect();
-    let subjects: Vec<FastaRecord> = subject_records
-        .iter()
-        .enumerate()
-        .map(|(index, record)| v1_record(index, record, "Subject_"))
-        .collect();
-    run_local_with(
-        args,
-        &queries,
-        &subjects,
-        query_label,
-        subject_label,
-        &mut outputs,
-        Some(&V1Records {
-            queries: query_records,
-            subjects: subject_records,
-        }),
-    )?;
-    Ok(output)
-}
-
 /// `settings` are the NCBI application settings that LOSAT reproduces
 /// (`ncbi_environment::check_ncbi_application_settings`): the readers of the query and the
 /// subjects use their data loaders (`ReaderConfig`).
@@ -5126,15 +4966,15 @@ pub fn run_local(
 }
 
 /// `run_local`, with the checks that ABI v1 makes of its `bio` records (`v1`,
-/// `run_web_pair_records`).
-fn run_local_with(
+/// `web_api::v1_blastp::run_web_pair_records`).
+pub(crate) fn run_local_with(
     args: BlastpArgs,
     query_records: &[FastaRecord],
     subject_records: &[FastaRecord],
     _query_label: &str,
     subject_label: &str,
     outputs: &mut ReportOutputs<'_>,
-    v1: Option<&V1Records<'_>>,
+    v1: Option<&dyn V1Checks>,
 ) -> Result<()> {
     // The subject range and its record checks come where NCBI reads the subjects (`run`):
     // the messages of each record read, up to a record whose range starts past its end.
@@ -5174,54 +5014,38 @@ fn run_local_with(
     )
 }
 
-/// ABI v1's records as `bio` reads them (`run_web_pair_records`). Plan TD-1 freezes ABI
-/// v1's accepted inputs, its messages and their order: the search makes ABI v1's checks of
-/// these records where it made them when it searched them (`check_records`,
-/// `check_query_intervals`, and `check_shown_subject_titles` before the outfmt 0 report),
-/// and searches the records of NCBI's reader made from them (`FastaRecord::from_bio`),
-/// which those checks guarantee to be read alike.
-#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-struct V1Records<'a> {
-    queries: &'a [bio::io::fasta::Record],
-    subjects: &'a [bio::io::fasta::Record],
-}
-
-impl V1Records<'_> {
+/// ABI v1's checks of its `bio` records (plan TD-1), which the v1 layer makes on its own
+/// records (`web_api::v1_blastp`): the search calls them where ABI v1 made them when it
+/// searched those records, and searches the records of NCBI's reader made from them, which
+/// those checks guarantee to be read alike.
+pub(crate) trait V1Checks: Sync {
     /// ABI v1's checks of the residues, after the warnings of the subjects without
     /// residues: a residue that NCBI's protein reader removes (subjects, then queries), and
     /// a query without residues. NCBI reads those inputs with a warning (or reports a query
     /// without residues), and ABI v1 rejects them as it did.
-    fn check_records(&self) -> Result<()> {
-        use crate::blastinput::bio_checks::{
-            check_protein_residues_of, check_records_have_residues_of,
-        };
-        check_protein_residues_of(self.subjects, "subject", "BLASTP")?;
-        check_protein_residues_of(self.queries, "query", "BLASTP")?;
-        check_records_have_residues_of(self.queries, "query", "BLASTP")
-    }
-
-    /// ABI v1's rejection of a query interval without letters (`-query_loc` starting just
-    /// past a record's end), after LOSAT's limits, as ABI v1 made it.
-    fn check_query_intervals(
-        &self,
-        searched: &[FastaRecord],
-        query_input: &seq_range::QueryInput,
-    ) -> Result<()> {
-        seq_range::check_no_empty_interval(
-            searched,
-            &query_input.placements,
-            &query_input.ordinals,
-            seq_range::RangeRole::Query,
-            "BLASTP",
-        )
-    }
+    fn check_records(&self) -> Result<()>;
 }
 
-/// ABI v1's rejection (`V1Records`) of the outfmt 0 titles that it did not write as NCBI,
+/// ABI v1's rejection of a query interval without letters (`-query_loc` starting just
+/// past a record's end), after LOSAT's limits, as ABI v1 made it (`V1Checks`).
+fn check_v1_query_intervals(
+    searched: &[FastaRecord],
+    query_input: &seq_range::QueryInput,
+) -> Result<()> {
+    seq_range::check_no_empty_interval(
+        searched,
+        &query_input.placements,
+        &query_input.ordinals,
+        seq_range::RangeRole::Query,
+        "BLASTP",
+    )
+}
+
+/// ABI v1's rejection (`V1Checks`) of the outfmt 0 titles that it did not write as NCBI,
 /// of the subjects that the report shows (those with hits): a title that NCBI decodes
 /// (`NStr::HtmlDecode`) and a title of punctuation that NCBI's `x_CleanAndCompress` reads
 /// past (`report::defline::check_shown_protein_subject_title`). ABI v1's titles are its
-/// `bio` deflines (`FastaRecord::from_bio`).
+/// `bio` deflines (`web_api::v1_bio::from_bio`).
 fn check_v1_shown_subject_titles(
     shown: &std::collections::BTreeSet<usize>,
     subject_records: &[FastaRecord],
@@ -5343,7 +5167,7 @@ fn search(
     subject_label: &str,
     outputs: &mut ReportOutputs<'_>,
     xinclude: Option<&crate::blastinput::app::FormatChoice>,
-    v1: Option<&V1Records<'_>>,
+    v1: Option<&dyn V1Checks>,
 ) -> Result<()> {
     // NCBI reads the subjects before the queries (`run`); the records are those of NCBI's
     // reader (`fasta_reader`; `run_local`'s callers read them so). The CLI has already
@@ -5421,8 +5245,8 @@ fn search(
             seq_range::QueryInput::whole(query_records),
         ),
     };
-    if let Some(v1) = v1 {
-        v1.check_query_intervals(&searched_queries, &query_input)?;
+    if v1.is_some() {
+        check_v1_query_intervals(&searched_queries, &query_input)?;
     }
     check_blastp_environment()?;
     let batches = crate::blastinput::query_batch::read_query_batches(
@@ -5631,7 +5455,7 @@ fn write_reports_without_queries(
 /// What the reports of the searched batches need besides the search: the reader's
 /// messages before each query's report (`read_query_batches`), whether the reports end
 /// with the epilog, and whether ABI v1's rejection of outfmt 0 titles applies
-/// (`V1Records`).
+/// (`V1Checks`).
 struct BlastpReports<'a> {
     reader_warnings: &'a [Vec<u8>],
     epilog: bool,

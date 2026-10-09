@@ -5,6 +5,14 @@ use std::sync::{Mutex, OnceLock};
 
 use bio::io::fasta;
 
+// ABI v1's `bio` records and its searches of BLASTN, BLASTP and TBLASTX (plan TD-1): the
+// v1 layer reads its inputs with `bio` and makes its frozen checks; the engines take the
+// records of NCBI's reader only (session SFc, S10).
+pub mod v1_bio;
+mod v1_blastn;
+mod v1_blastp;
+mod v1_tblastx;
+
 use crate::algorithm::blastp::args::{BlastpCompBasedStats, BlastpCompositionMode, BlastpSegSpec};
 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:277-279
 // ```c++
@@ -719,7 +727,7 @@ fn run_pair(
             // arg.Reset(new CGappedArgs);
             // arg.Reset(new CCompositionBasedStatsArgs);
             // ```
-            blastp::run_web_pair(
+            v1_blastp::run_web_pair(
                 parse_blastp_args(
                     &extra,
                     std::path::PathBuf::new(),
@@ -731,7 +739,7 @@ fn run_pair(
             )
             .map_err(engine_error)
         }
-        "blastn" => blastn::run_web_pair(
+        "blastn" => v1_blastn::run_web_pair(
             parse_blastn_args(
                 &extra,
                 std::path::PathBuf::new(),
@@ -742,7 +750,7 @@ fn run_pair(
             subject_fasta,
         )
         .map_err(engine_error),
-        "tblastx" => tblastx::run_web_pair(
+        "tblastx" => v1_tblastx::run_web_pair(
             parse_tblastx_args(
                 &extra,
                 std::path::PathBuf::new(),
@@ -826,7 +834,7 @@ fn run_pair_handles(
                 .entries
                 .get(&subject_handle)
                 .ok_or_else(|| format!("unknown subject FASTA handle: {subject_handle}"))?;
-            blastp::run_web_pair_records(
+            v1_blastp::run_web_pair_records(
                 parse_blastp_args(
                     &extra,
                     std::path::PathBuf::new(),
@@ -1130,7 +1138,7 @@ mod tests {
         };
         let fasta = ">q\nMKVLAAGIVGLLLAQPAMAAEIPVDPALAV\n";
         let error = |outfmt: &str, extra: &[&str]| {
-            engine_error(blastp::run_web_pair(args(outfmt, extra), fasta, fasta).unwrap_err())
+            engine_error(v1_blastp::run_web_pair(args(outfmt, extra), fasta, fasta).unwrap_err())
         };
         assert_eq!(
             error("6 nosuch", &[]),
@@ -1146,7 +1154,7 @@ mod tests {
         );
         assert!(!error("9", &["-ungapped"]).contains("output format"));
         assert!(error("6 nosuch", &["-matrix", "FOO"]).contains("FOO"));
-        assert!(blastp::run_web_pair(args("6 qseqid sseqid std", &[]), fasta, fasta).is_ok());
+        assert!(v1_blastp::run_web_pair(args("6 qseqid sseqid std", &[]), fasta, fasta).is_ok());
     }
 
     // Plan TD-1: ABI v1 is frozen, so its BLASTN keeps outfmt 6 and 7 and rejects
@@ -1164,9 +1172,9 @@ mod tests {
             .expect("blastn web args")
         };
         let fasta = ">q\nACGTACGTACGTACGTACGTACGTACGTACGT\n";
-        let error = blastn::run_web_pair(args("0"), fasta, fasta).unwrap_err();
+        let error = v1_blastn::run_web_pair(args("0"), fasta, fasta).unwrap_err();
         assert_eq!(engine_error(error), "unsupported BLASTN output format: 0");
-        assert!(blastn::run_web_pair(args("6"), fasta, fasta).is_ok());
+        assert!(v1_blastn::run_web_pair(args("6"), fasta, fasta).is_ok());
         // Plan TD-1: LOSAT's limits come after NCBI's checks and before the records; an
         // empty query gives the empty report of NCBI and of v1 before S07+.
         let with = |extra: &[&str]| {
@@ -1176,15 +1184,15 @@ mod tests {
                 .expect("blastn web args")
         };
         let empty_record = ">s0\n>s1\nACGTACGTACGTACGTACGTACGTACGTACGT\n";
-        assert!(blastn::run_web_pair(with(&[]), "", empty_record).is_ok());
+        assert!(v1_blastn::run_web_pair(with(&[]), "", empty_record).is_ok());
         // An empty query gives the empty report whatever the subject's deflines or LOSAT's
         // limits (as before S07+ and in NCBI); the serial build still checks threads first.
         let tab_defline = ">s0\tx\nACGTACGTACGTACGTACGTACGTACGTACGT\n";
-        assert!(blastn::run_web_pair(with(&[]), "", tab_defline).is_ok());
-        assert!(blastn::run_web_pair(with(&["-evalue", "1e400"]), "", fasta).is_ok());
+        assert!(v1_blastn::run_web_pair(with(&[]), "", tab_defline).is_ok());
+        assert!(v1_blastn::run_web_pair(with(&["-evalue", "1e400"]), "", fasta).is_ok());
         #[cfg(not(feature = "parallel"))]
-        assert!(blastn::run_web_pair(with(&["-num_threads", "2"]), "", fasta).is_err());
-        let error = blastn::run_web_pair(with(&[]), fasta, empty_record).unwrap_err();
+        assert!(v1_blastn::run_web_pair(with(&["-num_threads", "2"]), "", fasta).is_err());
+        let error = v1_blastn::run_web_pair(with(&[]), fasta, empty_record).unwrap_err();
         assert!(engine_error(error).contains("subject record 1 (s0) has no residues"));
         // NCBI's CArg_Double reads a signed infinity and NaN, not a bare `inf`, and NCBI
         // searches with them (E2g).
@@ -1196,8 +1204,8 @@ mod tests {
         )
         .unwrap_err();
         assert!(error.contains("expected a number"), "{error}");
-        assert!(blastn::run_web_pair(with(&["-evalue", "+inf"]), fasta, fasta).is_ok());
-        assert!(blastn::run_web_pair(with(&["-evalue=+nan"]), fasta, fasta).is_ok());
+        assert!(v1_blastn::run_web_pair(with(&["-evalue", "+inf"]), fasta, fasta).is_ok());
+        assert!(v1_blastn::run_web_pair(with(&["-evalue=+nan"]), fasta, fasta).is_ok());
     }
 
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1407-1427

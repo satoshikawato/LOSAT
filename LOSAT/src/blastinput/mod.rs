@@ -14,8 +14,6 @@
 
 // NCBI app/blast/blast_app_util.hpp and blastinput/blast_args.cpp: the application layer.
 pub mod app;
-// ABI v1's and the Web adapter's (until S10) checks of `bio` FASTA records.
-pub mod bio_checks;
 pub mod blast_args;
 pub mod blastn_args;
 pub mod blastp_args;

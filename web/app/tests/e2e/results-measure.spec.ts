@@ -104,6 +104,15 @@ interface Timing {
   readonly paintMs: number;
 }
 
+/** The distance in pixels from a point to the line segment `[ax, ay, bx, by]`. */
+function segmentDistance(x: number, y: number, [ax, ay, bx, by]: readonly number[]): number {
+  const lx = bx! - ax!;
+  const ly = by! - ay!;
+  const length = lx * lx + ly * ly;
+  const t = length === 0 ? 0 : Math.max(0, Math.min(1, ((x - ax!) * lx + (y - ay!) * ly) / length));
+  return Math.hypot(x - (ax! + t * lx), y - (ay! + t * ly));
+}
+
 async function arm(page: Page, testid: string, event: string): Promise<void> {
   await page.evaluate(
     ({ testid: id, event: name }) => {
@@ -661,9 +670,17 @@ async function pairRepetition(page: Page, number: number, other: number): Promis
     hsp: string;
     x: number;
     y: number;
+    ends: [number, number, number, number];
   }[];
   const now = (await canvas.getAttribute('data-selected'))!;
-  const target = targets.find((t) => t.hsp !== now && t.hsp !== selected)!;
+  // The click selects the nearest line, so it aims at the HSP whose midpoint lies farthest from the
+  // selected HSP's line: where lines lie a pixel apart (the repeats), a target next to the selected
+  // line would leave the selection unchanged.
+  const current = targets.find((t) => t.hsp === now);
+  const away = (t: { x: number; y: number }) => (current === undefined ? 0 : segmentDistance(t.x, t.y, current.ends));
+  const target = targets
+    .filter((t) => t.hsp !== now && t.hsp !== selected)
+    .reduce((best, t) => (away(t) > away(best) ? t : best));
   await arm(page, 'dotplot-canvas', 'pointerdown');
   await canvas.click({ position: { x: target.x, y: target.y } });
   const selectByClick = await step(page, { kind: 'armed' }, [{ testid: 'dotplot-canvas', attr: 'data-selected', differs: now }], 30_000);

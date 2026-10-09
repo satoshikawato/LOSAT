@@ -327,13 +327,14 @@ watch(
 );
 watch([segments, selected, view, width, height], () => draw(), { flush: 'post' });
 
-/** Midpoints of the drawn HSPs in CSS pixels of the canvas, for tests (at most 200). */
+/** Midpoints and ends of the drawn HSPs in CSS pixels of the canvas, for tests (at most 200). */
 const targets = computed(() =>
   JSON.stringify(
     segments.value.slice(0, 200).map((s) => ({
       hsp: `${s.hsp.id.qIdx}:${s.hsp.id.rank}`,
       x: Math.round((px(s.x0) + px(s.x1)) / 2),
       y: Math.round((py(s.y0) + py(s.y1)) / 2),
+      ends: [px(s.x0), py(s.y0), px(s.x1), py(s.y1)].map((n) => Math.round(n * 10) / 10),
     })),
   ),
 );

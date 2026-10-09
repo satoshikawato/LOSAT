@@ -1218,9 +1218,11 @@ label.inline {
   gap: 8px;
 }
 
+/* The query's ID keeps at least 12ch, as the Subject column does, so that IDs with a common
+   prefix stay apart; the length and counts give way first (W4b second screen review M1). */
 .pick-row .record-id {
   flex: 1 1 auto;
-  min-width: 0;
+  min-width: 12ch;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1230,6 +1232,21 @@ label.inline {
   color: var(--muted);
   font-size: 0.85em;
   white-space: nowrap;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* On a narrow screen (QueryPicker.vue) the length and counts are a second line under the ID. */
+.pick-row.two-lines {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-content: center;
+  gap: 2px 8px;
+}
+
+.pick-row.two-lines .pick-meta {
+  grid-column: 2;
 }
 
 .pick-row.empty .record-id {

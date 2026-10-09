@@ -414,6 +414,35 @@ async function expectNoSideScroll(page: Page, state: string): Promise<void> {
   expect(scrollWidth, `${state}: the page is wider than the window (${beyond.join(', ')})`).toBeLessThanOrEqual(innerWidth);
 }
 
+/**
+ * The rows of "Results for" as drawn: each query's ID, whether it shows whole, how many characters
+ * its box holds, the text that it shows, and whether its length and counts are on a line under it.
+ */
+async function queryRowsDrawn(page: Page): Promise<{ id: string; whole: boolean; holds: number; shown: string; below: boolean }[]> {
+  return page.getByTestId('query-list').evaluate((list) =>
+    [...list.querySelectorAll<HTMLElement>('.pick-row')].map((row) => {
+      const id = row.querySelector<HTMLElement>('.record-id')!;
+      const meta = row.querySelector<HTMLElement>('.pick-meta')!;
+      const text = id.textContent!.trim();
+      const whole = id.scrollWidth <= id.clientWidth;
+      const width = id.clientWidth;
+      const probe = document.createElement('span');
+      probe.style.cssText = 'position:absolute;visibility:hidden;width:10ch';
+      id.append(probe);
+      const holds = Math.floor((width * 10) / probe.getBoundingClientRect().width + 0.01);
+      probe.remove();
+      return {
+        id: text,
+        whole,
+        holds,
+        // A cut ID ends in an ellipsis, which takes the place of a character (a monospace font).
+        shown: whole ? text : `${text.slice(0, holds - 1)}…`,
+        below: meta.getBoundingClientRect().top >= id.getBoundingClientRect().bottom - 1,
+      };
+    }),
+  );
+}
+
 /** The columns of a table whose headers are inside the table's box, from left to right. */
 function columnsInView(page: Page, table: string): Promise<string[]> {
   return page
@@ -759,8 +788,20 @@ for (const c of PROGRAM_CASES) {
       // screen review finding 4).
       await expect(page.getByTestId('dotplot-scale-note')).toHaveCount(0);
       expect((await titles())[0]).toBe(`Query ${fields[0]} (aa; drawn at 3 nt per aa)`);
+      // "Results for" (8 queries, IDs with common prefixes such as BDT6256): one line a query at
+      // 1280 px; on a phone the length and counts go under the ID, which shows whole or holds at
+      // least 12 characters, and two IDs never look the same (W4b second screen review M1).
+      const desktopRows = await queryRowsDrawn(page);
+      expect(desktopRows.map((row) => [row.id, row.whole, row.below])).toEqual(queries.map((query) => [query.id, true, false]));
       await page.setViewportSize({ width: 390, height: 844 });
       await expect(page.getByTestId('dotplot-scale-note')).toBeVisible();
+      await expect.poll(async () => (await queryRowsDrawn(page)).every((row) => row.below)).toBe(true);
+      const phoneRows = await queryRowsDrawn(page);
+      expect(phoneRows.map((row) => row.id)).toEqual(queries.map((query) => query.id));
+      for (const row of phoneRows) {
+        expect(row.whole || (row.id.length > 12 && row.holds >= 12), `query ${row.id} shows as ${row.shown}`).toBe(true);
+      }
+      expect(new Set(phoneRows.map((row) => row.shown)).size).toBe(new Set(phoneRows.map((row) => row.id)).size);
       await expect.poll(async () => (await titles())[0]).toBe(`Query ${fields[0]} (aa)`);
       await page.setViewportSize({ width: 1280, height: 900 });
       await expect(page.getByTestId('dotplot-scale-note')).toHaveCount(0);

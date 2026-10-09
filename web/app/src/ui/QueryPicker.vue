@@ -1,13 +1,17 @@
 <script setup lang="ts">
 // The queries of the run (its query records, in order), with their subject and HSP counts.
-// A run of many queries is drawn a screenful at a time.
+// A run of many queries is drawn a screenful at a time. On a narrow screen a row has two lines,
+// the query's ID, then its length and counts under it, so that the counts never cut the ID and
+// IDs with a common prefix stay apart (W4b second screen review M1).
 import { computed } from 'vue';
 import type { ResultsBrowser, ResultsState } from '../application/results';
 import { formatCount, formatCounted } from './format';
+import { useNarrow } from './useNarrow';
 import VirtualRows from './VirtualRows.vue';
 
 const props = defineProps<{ results: ResultsBrowser; state: ResultsState }>();
-const ROW_PX = 30;
+const ROW_PX = { wide: 30, narrow: 46 } as const;
+const narrow = useNarrow();
 const selectedPosition = computed(() => props.state.queries.findIndex((query) => query.qIdx === props.state.qIdx));
 const unit = computed(() => props.state.loaded?.units.query ?? '');
 const total = computed(() => props.state.loaded?.run.snapshot.query.records.length ?? 0);
@@ -44,7 +48,7 @@ function setHitsOnly(event: Event): void {
     <p class="muted small" data-testid="query-count">{{ formatCount(state.queries.length) }} of {{ formatCount(total) }} queries</p>
     <VirtualRows
       :count="state.queries.length"
-      :row-px="ROW_PX"
+      :row-px="narrow ? ROW_PX.narrow : ROW_PX.wide"
       :max-rows="8"
       :reveal="selectedPosition"
       :reveal-key="`${state.runId}:${state.qIdx}`"
@@ -55,7 +59,7 @@ function setHitsOnly(event: Event): void {
         <button
           type="button"
           class="pick-row"
-          :class="{ selected: state.queries[position]!.qIdx === state.qIdx, empty: state.queries[position]!.hsps === 0 }"
+          :class="{ selected: state.queries[position]!.qIdx === state.qIdx, empty: state.queries[position]!.hsps === 0, 'two-lines': narrow }"
           :aria-pressed="state.queries[position]!.qIdx === state.qIdx"
           :data-testid="`query-row-${state.queries[position]!.qIdx}`"
           :title="state.queries[position]!.id"

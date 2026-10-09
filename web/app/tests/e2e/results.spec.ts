@@ -899,7 +899,21 @@ test('narrow screens: the results are no wider than the screen; "Open results" s
   await expectNoSideScroll(page, 'hits');
 
   // The key values first; the tables say that they scroll sideways.
-  expect((await columnsInView(page, 'subject-table')).slice(0, 5)).toEqual(['order', 'sseqid', 'bitscore', 'evalue', 'hsps']);
+  expect((await columnsInView(page, 'subject-table')).slice(0, 4)).toEqual(['order', 'sseqid', 'bitscore', 'evalue']);
+  // The Subject column is at least 12ch wide, so that IDs with a common prefix stay apart.
+  const subjectWidth = await page
+    .getByTestId('subject-table')
+    .locator('.table-row')
+    .first()
+    .evaluate((row) => {
+      const probe = document.createElement('span');
+      probe.style.cssText = 'position:absolute;visibility:hidden;width:12ch';
+      row.append(probe);
+      const twelve = probe.getBoundingClientRect().width;
+      probe.remove();
+      return row.querySelector<HTMLElement>('[data-field="sseqid"]')!.getBoundingClientRect().width - twelve;
+    });
+  expect(subjectWidth).toBeGreaterThanOrEqual(-0.5);
   expect((await columnsInView(page, 'hsp-table')).slice(0, 4)).toEqual(['rank', 'bitscore', 'evalue', 'query']);
   for (const table of ['subject-table', 'hsp-table']) {
     await expect(page.getByTestId(`${table}-scroll-hint`)).toBeVisible();

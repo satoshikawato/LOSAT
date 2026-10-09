@@ -1185,9 +1185,10 @@ label.inline {
   }
 
   /* The key values first (S13 screen review M2): the header's cells and the rows' cells take
-     the same order. Subjects: #, Subject, Score (bits), E value, HSPs, Length, Description. */
+     the same order. Subjects: #, Subject, Score (bits), E value, HSPs, Length, Description. The
+     Subject column keeps 12ch, so that IDs with a common prefix stay apart (second screen review). */
   .subject-grid {
-    grid-template-columns: 4ch minmax(6.5ch, 1fr) 9ch 8.25ch 6ch 8.25ch minmax(16ch, 2fr);
+    grid-template-columns: 4ch minmax(12ch, 1fr) 9ch 8.25ch 6ch 8.25ch minmax(16ch, 2fr);
   }
 
   .subject-grid > [data-col='sseqid'],

@@ -64,7 +64,7 @@ onUnmounted(() => {
     <button :aria-pressed="tab === 'search'" data-testid="tab-search" @click="tab = 'search'">Search</button>
     <button :aria-pressed="tab === 'results'" data-testid="tab-results" @click="tab = 'results'">Results</button>
   </nav>
-  <main class="layout" :class="{ 'results-shown': tab === 'results' }">
+  <main class="layout">
     <section class="primary">
       <!-- The search form stays mounted, so the next job keeps its edits while results are viewed. -->
       <SearchPanel v-show="tab === 'search'" :draft="draft" :runs="state.runs" />

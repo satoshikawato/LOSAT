@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import { BUILD_HAS_ENGINE } from './support/browser';
 import { REPOSITORY } from './support/harness-server';
-import { fasta, openFiles, program, submit, waitStatus } from './support/search';
+import { fasta, openFiles, openParameters, program, submit, task, waitStatus } from './support/search';
 
 const SCREENS = process.env['LOSAT_WEB_SCREENS'] || undefined;
 test.skip(SCREENS === undefined, 'screen records are taken only with LOSAT_WEB_SCREENS');
@@ -59,8 +59,11 @@ for (const size of SIZES) {
     await ready(page, 'subject');
     await page.getByTestId('subject-region-start').fill('1001');
     await page.getByTestId('subject-region-stop').fill('25000');
+    // Algorithm parameters open from here on (W4b), with a changed value.
+    await openParameters(page);
     await page.getByTestId('param-evalue').fill('1e-5');
-    await page.getByTestId('param-task').selectOption('blastn');
+    await task(page, 'blastn');
+    await page.getByTestId('job-title').fill('Contigs against LC738884');
     await expect(page.getByTestId('argv-validation')).not.toHaveAttribute('data-state', 'checking');
     await shoot(page, browserName, size.name, '02-inputs-refused-region');
 
@@ -192,7 +195,7 @@ for (const size of SIZES) {
     // run 2: one query with 260 subjects, of which outfmt 0 shows 250 alignments; run 3: TBLASTX.
     await search(page, 'blastn', 1, 'outfmt0/multi_query.fasta', 'outfmt0/multi_subject.fasta');
     await clearInputs(page);
-    await page.getByTestId('param-task').selectOption('blastn');
+    await task(page, 'blastn');
     await openFiles(page, 'query', [{ name: 'many_query.fasta', text: fasta('outfmt0/many_query.fasta') }]);
     await openFiles(page, 'subject', [{ name: 'many_subject.fasta', text: fasta('outfmt0/many_subject.fasta') }]);
     await submit(page);

@@ -40,6 +40,8 @@ export interface SearchRequest {
   readonly subject: SequenceInput;
   readonly parameters: ReadonlyArray<readonly [string, string | true]>;
   readonly requestedThreads: number | 'auto';
+  /** The run's name (NCBI's "Job Title"); the snapshot keeps it trimmed, or not at all when empty. */
+  readonly title?: string;
 }
 
 export interface RunView {
@@ -132,11 +134,13 @@ export class Coordinator {
       } catch (error) {
         return { ok: false, message: errorMessage(error) };
       }
+      const title = request.title?.trim();
       snapshots.push(
         Object.freeze({
           runId: this.deps.newRunId(),
           number: 0,
           program: request.program,
+          ...(title ? { title } : {}),
           argv,
           query,
           subject,

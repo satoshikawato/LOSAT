@@ -130,19 +130,14 @@ textarea {
   background: var(--accent-bg);
 }
 
+/* W4b search: the same columns in the Search and Results tabs, so that the queue does not
+   move between them (mapping decision 25); the queue keeps 260 to 300 px and the tables
+   take the rest (S13 screen review H1). */
 .layout {
   display: grid;
-  grid-template-columns: minmax(0, 3fr) minmax(260px, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 300px);
   gap: 24px;
   align-items: start;
-}
-
-/* The results tab gives its tables more of the width; the queue keeps at least 260 px
-   (S13 screen review H1). The search tab keeps its columns. */
-@media (min-width: 801px) {
-  .layout.results-shown {
-    grid-template-columns: minmax(0, 4fr) minmax(260px, 1fr);
-  }
 }
 
 /* An option name is not broken after its leading hyphen (S13 screen review L2). */
@@ -201,31 +196,63 @@ textarea {
   outline-offset: 1px;
 }
 
+/* W4b search: the program's sentence under the tabs, as NCBI's, in the panel's type. */
 .program-summary {
   margin: 4px 0 8px;
   color: var(--muted);
+  font-size: 0.92em;
 }
 
-.inputs {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
-  margin: 12px 0;
-}
-
-.input-panel {
+/* W4b search: NCBI's blocks ("Enter Query Sequence", "Program Selection", the sections of
+   "Algorithm parameters"): a light grey panel whose legend is a tab on its top edge, in
+   LOSAT's accent. */
+.search-block {
   border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 10px 12px;
+  border-radius: 4px;
   background: var(--panel);
+  margin: 14px 0 0;
+  padding: 4px 12px 10px;
   min-width: 0;
 }
 
-.input-header {
+.search-block > legend {
+  padding: 1px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px 4px 0 0;
+  background: var(--bg);
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 1.05em;
+}
+
+/* W4b search: a file dragged over a block. */
+.input-panel.dragging {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+
+/* W4b search: the paste box and, beside it from 801 px, the subrange. */
+.entry {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px 24px;
+  padding: 4px 0 6px;
+}
+
+.entry-label {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: 8px;
-  margin-bottom: 6px;
+  gap: 4px 10px;
+  margin-bottom: 4px;
+}
+
+.entry-label label {
+  font-weight: 600;
+}
+
+.entry-label .link {
+  font-size: 0.88em;
 }
 
 .kind {
@@ -233,20 +260,159 @@ textarea {
   font-size: 0.9em;
 }
 
+.subrange-title,
+.region > legend {
+  font-weight: 600;
+  margin: 0 0 4px;
+  padding: 0;
+}
+
+.entry-subrange .hint {
+  margin: 0;
+}
+
+.entry-subrange .region {
+  border: none;
+  margin: 0;
+  padding: 0;
+}
+
+.region-record {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.88em;
+  overflow-wrap: anywhere;
+}
+
+/* W4b search: a row of the blocks, NCBI's label on the left and its control on the right
+   (one column below 801 px). */
+.param-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2px 16px;
+  padding: 5px 6px;
+  border-radius: 3px;
+}
+
+.param-label {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.param-label code.flag {
+  font-size: 0.8em;
+  font-weight: 400;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.param-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  justify-items: start;
+  gap: 2px;
+  min-width: 0;
+}
+
+.param-control > input[type='text'] {
+  width: 16em;
+  max-width: 100%;
+}
+
+/* A select is as wide as its longest choice (a genetic code's name), within the column; its
+   span clips the label that WebKit draws beyond it (ParameterField.vue), with room inside for
+   the focus ring. */
+.select-clip {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 3px;
+  margin: -3px;
+}
+
+.select-clip select {
+  min-width: min(16em, 100%);
+  max-width: 100%;
+}
+
+.param-control .help {
+  margin: 0;
+  color: var(--muted);
+}
+
+/* W4b search: a row of several fields (Match/Mismatch Scores, Gap Costs). */
+.param-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+}
+
+.param-inline {
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  flex: 0 1 17em;
+  min-width: 0;
+}
+
+.param-inline .param-label {
+  font-weight: 400;
+}
+
+.param-inline input[type='text'] {
+  width: 8em;
+}
+
+/* W4b search: a value that differs from the engine's default (it is written to the argv),
+   as NCBI marks it: yellow (LOSAT's warning colour) and a diamond. */
+.param-row.changed,
+.param-inline.changed {
+  background: var(--warn-bg);
+}
+
+.changed-mark {
+  color: var(--warn-fg);
+  margin-right: 4px;
+}
+
+.radios {
+  display: grid;
+  gap: 2px;
+}
+
+.radio {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+}
+
+.radio input {
+  margin: 0;
+}
+
+/* W4b search: "Or, upload file": the open button and the drop zone. */
 .dropzone {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
   border: 1px dashed var(--border);
   border-radius: 4px;
   padding: 6px;
   background: var(--bg);
 }
 
-.dropzone.dragging {
+.input-panel.dragging .dropzone {
   border-color: var(--accent);
-  background: var(--accent-bg);
 }
 
-.paste {
-  display: block;
+#job-title {
+  width: 32em;
+  max-width: 100%;
 }
 
 textarea,
@@ -258,14 +424,6 @@ pre.output {
 
 textarea {
   resize: vertical;
-}
-
-.file-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 10px;
-  margin-top: 6px;
 }
 
 .sources {
@@ -426,13 +584,16 @@ textarea {
 }
 
 .mode,
-.region,
-.parameter-section {
+.region {
   border: 1px solid var(--border);
   border-radius: 4px;
   margin: 8px 0 0;
   padding: 6px 10px 8px;
   min-width: 0;
+}
+
+.mode {
+  background: var(--bg);
 }
 
 .mode label {
@@ -481,57 +642,102 @@ textarea {
   width: 9em;
 }
 
-.parameters > summary {
-  font-weight: 600;
-  cursor: pointer;
-  margin: 8px 0;
+/* W4b search: the "Run LOSAT" button (NCBI's BLAST button) and the line that says what it
+   searches (NCBI's "Search nucleotide sequence using ..."), then LOSAT's lines under it. */
+.blast-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin: 14px 0 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
 }
 
-.parameter-section legend {
-  font-weight: 600;
-}
-
-.fields {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 10px 16px;
-}
-
-.field {
-  display: grid;
-  align-content: start;
-  gap: 2px;
+.blast-row p {
+  margin: 0;
+  flex: 1 1 18em;
   min-width: 0;
 }
 
-.field label code.flag,
-.flag-label code.flag {
-  font-size: 0.8em;
-  color: var(--muted);
-  white-space: nowrap;
+.blast-notes {
+  padding: 0 4px;
 }
 
-.field .help {
-  margin: 0;
-  color: var(--muted);
+.blast-notes > p {
+  margin: 6px 0;
 }
 
-.flag-label {
-  display: block;
-}
-
-.flag-label input {
-  margin: 0 6px 0 0;
-  vertical-align: middle;
-}
-
-.run-options,
-.actions {
+.run-options {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px 12px;
-  margin: 12px 0;
+  margin: 8px 0;
+}
+
+/* W4b search: "Algorithm parameters", a bar across the width that opens and closes. */
+.algorithm-parameters {
+  margin: 16px 0 0;
+}
+
+.parameters-heading {
+  margin: 0;
+  font-size: 1em;
+}
+
+/* A block of inline words, so that the name and the count wrap as text on a phone. */
+.parameters-bar {
+  display: block;
+  width: 100%;
+  min-height: 32px;
+  padding: 4px 12px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 700;
+  font-size: 1.05em;
+  text-align: left;
+}
+
+.parameters-bar:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.bar-mark {
+  display: inline-block;
+  width: 1em;
+  margin-right: 6px;
+  text-align: center;
+  font-size: 1.2em;
+  line-height: 1;
+}
+
+.bar-count {
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+.parameters-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 12px;
+  margin: 8px 0 0;
+}
+
+.parameters-note {
+  margin: 0;
+  padding: 2px 8px;
+  border-radius: 3px;
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+  font-size: 0.9em;
 }
 
 .run-options label {
@@ -556,6 +762,24 @@ textarea {
   color: #fff;
   font-weight: 600;
   padding: 8px 18px;
+}
+
+/* W4b search: the Job Title on a run's card. */
+.run-title {
+  font-weight: 600;
+  font-size: 0.92em;
+  overflow-wrap: anywhere;
+}
+
+/* W4b search: labels on the left of their controls from 801 px (NCBI's two columns). */
+@media (min-width: 801px) {
+  .param-row {
+    grid-template-columns: 14em minmax(0, 1fr);
+  }
+
+  .entry {
+    grid-template-columns: minmax(0, 3fr) minmax(15em, 2fr);
+  }
 }
 
 /* Queue and side panels */
@@ -1126,14 +1350,6 @@ label.inline {
 /* Narrow screens: one column, in the order search, queue, notes (design §3.4). */
 @media (max-width: 800px) {
   .layout {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .inputs {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .fields {
     grid-template-columns: minmax(0, 1fr);
   }
 

@@ -51,6 +51,18 @@ export async function program(page: Page, id: string): Promise<void> {
   await page.getByTestId(`program-${id}`).check();
 }
 
+/** Opens "Algorithm parameters" (W4b: it starts closed), where most options are set. */
+export async function openParameters(page: Page): Promise<void> {
+  const toggle = page.getByTestId('algorithm-parameters-toggle');
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+  await expect(page.getByTestId('parameter-form')).toBeVisible();
+}
+
+/** Chooses a task in "Program Selection" (W4b: radio buttons). */
+export async function task(page: Page, value: string): Promise<void> {
+  await page.getByTestId(`param-task-${value}`).check();
+}
+
 export async function submit(page: Page): Promise<void> {
   await expect(page.getByTestId('argv-validation')).not.toHaveAttribute('data-state', 'checking');
   await page.getByTestId('add-to-queue').click();

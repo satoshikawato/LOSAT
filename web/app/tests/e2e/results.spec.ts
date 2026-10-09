@@ -16,7 +16,7 @@ import type { OutputFormat } from '../../src/domain/output-format';
 import { optionKey } from '../../src/domain/verification';
 import { BUILD_HAS_ENGINE } from './support/browser';
 import { REPOSITORY } from './support/harness-server';
-import { fasta, openFiles, paste, program, showOutput, submit, waitStatus } from './support/search';
+import { fasta, openFiles, openParameters, paste, program, showOutput, submit, task, waitStatus } from './support/search';
 
 type ProgramId = 'blastn' | 'blastp' | 'tblastn' | 'tblastx';
 type Unit = 'nt' | 'aa';
@@ -476,7 +476,7 @@ test('an HSP that outfmt 0 does not show, and a hit list that may have reached i
   // of the first 250 (BLAST+'s -num_alignments). The FakeEngine leaves its third subject out.
   const [total, shown] = BUILD_HAS_ENGINE ? [260, 250] : [3, 2];
   await program(page, 'blastn');
-  await page.getByTestId('param-task').selectOption('blastn');
+  await task(page, 'blastn');
   await openFiles(page, 'query', [{ name: 'many_query.fasta', text: fasta('outfmt0/many_query.fasta') }]);
   await openFiles(page, 'subject', [{ name: 'many_subject.fasta', text: fasta('outfmt0/many_subject.fasta') }]);
   await run(page, 1);
@@ -525,6 +525,7 @@ test('an HSP that outfmt 0 does not show, and a hit list that may have reached i
   // notice says that more subjects may match, not that hits were lost.
   const limit = BUILD_HAS_ENGINE ? 255 : 3;
   await page.getByTestId('tab-search').click();
+  await openParameters(page);
   await page.getByTestId('param-max_target_seqs').fill(String(limit));
   await run(page, 2);
   await openFromQueue(page, 2);
@@ -547,7 +548,8 @@ test("BLASTN: an HSP of one letter has no orientation in its record; the note po
   // strand. The FakeEngine writes a one-letter BLASTN HSP for its third query.
   const qIdx = BUILD_HAS_ENGINE ? 0 : 2;
   await program(page, 'blastn');
-  await page.getByTestId('param-task').selectOption('blastn');
+  await task(page, 'blastn');
+  await openParameters(page);
   await page.getByTestId('param-word_size').fill('4');
   await paste(page, 'query', BUILD_HAS_ENGINE ? '>q\nTAGGACGG\n' : '>q1\nACGTACGTACGT\n>q2\nACGTACGTACGT\n>q\nTAGGACGG\n');
   await paste(page, 'subject', '>s\nYCAYAANTNCRGYACT\n');

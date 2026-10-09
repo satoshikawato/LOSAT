@@ -82,6 +82,8 @@ export interface DraftState {
   readonly subject: RoleDraft;
   /** The form's values of each program: what the user set, nothing else. */
   readonly values: Readonly<Record<ProgramId, FormValues>>;
+  /** The Job Title of the next runs, as typed ('' for none); never part of the argv. */
+  readonly title: string;
   readonly threads: number | 'auto';
   /** The engine's `describe` of the program, once it has arrived. */
   readonly description?: ProgramDescription;
@@ -141,6 +143,7 @@ export class SearchDraft {
       query: emptyRole(),
       subject: emptyRole(),
       values,
+      title: '',
       threads: 'auto',
       validation: { state: 'idle' },
       submitting: false,
@@ -178,6 +181,23 @@ export class SearchDraft {
     const { program, values } = this.state.get();
     this.set({ values: { ...values, [program]: setField(values[program], flag, value) }, message: undefined });
     this.scheduleValidation();
+  }
+
+  /**
+   * Clears the values of some fields of the program ("Restore default search parameters"):
+   * the engine's defaults apply to them again.
+   */
+  resetFields(flags: readonly string[]): void {
+    const { program, values } = this.state.get();
+    const next: Record<string, FieldValue> = { ...values[program] };
+    for (const flag of flags) delete next[flag];
+    this.set({ values: { ...values, [program]: Object.freeze(next) }, message: undefined });
+    this.scheduleValidation();
+  }
+
+  /** The Job Title of the runs that "Add to queue" makes next. */
+  setTitle(title: string): void {
+    this.set({ title, message: undefined });
   }
 
   setThreads(threads: number | 'auto'): void {
@@ -386,7 +406,7 @@ export class SearchDraft {
 
   private async prepareAndEnqueue(): Promise<EnqueueAllResult> {
     await this.idle();
-    const { program, threads } = this.state.get();
+    const { program, threads, title } = this.state.get();
     const descriptor = programById(program);
     if (descriptor.unavailable !== undefined) return { ok: false, message: descriptor.unavailable };
     for (const role of ROLES) {
@@ -403,7 +423,14 @@ export class SearchDraft {
     const requests: SearchRequest[] = [];
     for (const query of resolved.query) {
       for (const subject of resolved.subject) {
-        requests.push({ program, query: { dataset: query }, subject: { dataset: subject }, parameters, requestedThreads: threads });
+        requests.push({
+          program,
+          query: { dataset: query },
+          subject: { dataset: subject },
+          parameters,
+          requestedThreads: threads,
+          ...(title.trim() === '' ? {} : { title }),
+        });
       }
     }
     return this.deps.enqueueAll(requests);

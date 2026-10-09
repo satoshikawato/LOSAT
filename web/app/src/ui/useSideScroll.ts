@@ -22,3 +22,13 @@ export function useSideScroll(scroller: Ref<HTMLElement | undefined>): Ref<boole
   onUnmounted(() => observer?.disconnect());
   return overflows;
 }
+
+/**
+ * Focuses a row that the mouse or a finger presses without scrolling its table: the browsers
+ * scrolled a table that is wider than its box sideways to the pressed row's button (Firefox on a
+ * phone, W4 screen review middle 2). A row reached with the keyboard still scrolls into view.
+ */
+export function focusPressed(event: MouseEvent): void {
+  event.preventDefault();
+  (event.currentTarget as HTMLElement).focus({ preventScroll: true });
+}

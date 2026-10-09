@@ -24,7 +24,7 @@ function setHitsOnly(event: Event): void {
 
 <template>
   <div class="query-picker">
-    <h3>Query</h3>
+    <h3>Results for</h3>
     <div class="record-tools">
       <label>
         <span class="visually-hidden">Find queries by ID</span>

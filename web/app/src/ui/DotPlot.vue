@@ -615,6 +615,12 @@ const framed = (hsp: HspEntry) => hsp.queryFrame !== undefined || hsp.subjectFra
 
 <template>
   <figure class="dot-plot" data-testid="dotplot">
+    <div class="plot-tools tool-band">
+      <button type="button" data-testid="dotplot-zoom-in" @click="zoom(1.5)">Zoom in</button>
+      <button type="button" data-testid="dotplot-zoom-out" @click="zoom(1 / 1.5)">Zoom out</button>
+      <button type="button" data-testid="dotplot-zoom-hsp" :disabled="!selected" @click="zoomToSelected">Zoom to HSP</button>
+      <button type="button" data-testid="dotplot-reset" @click="setView(fullView(extent))">Whole sequences</button>
+    </div>
     <figcaption class="plot-caption">
       <span class="plot-title" data-testid="dotplot-title">Plot of {{ queryId }} vs {{ subjectId }}</span>
       <span class="muted small"
@@ -622,12 +628,6 @@ const framed = (hsp: HspEntry) => hsp.queryFrame !== undefined || hsp.subjectFra
         {{ units.subject }}). Each line is an HSP from its start to its end.</span
       >
     </figcaption>
-    <div class="plot-tools">
-      <button type="button" data-testid="dotplot-zoom-in" @click="zoom(1.5)">Zoom in</button>
-      <button type="button" data-testid="dotplot-zoom-out" @click="zoom(1 / 1.5)">Zoom out</button>
-      <button type="button" data-testid="dotplot-zoom-hsp" :disabled="!selected" @click="zoomToSelected">Zoom to HSP</button>
-      <button type="button" data-testid="dotplot-reset" @click="setView(fullView(extent))">Whole sequences</button>
-    </div>
     <div class="plot-help muted small" data-testid="dotplot-help">
       <p>Mouse: hold Ctrl (⌘ on a Mac) and turn the wheel to zoom; drag to move; click a line to show its HSP.</p>
       <p>Touch: use the Zoom buttons; slide a finger sideways to move (up and down scrolls the page); tap a line to show its HSP.</p>

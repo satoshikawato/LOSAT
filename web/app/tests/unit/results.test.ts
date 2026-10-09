@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import type { AppState, RunView } from '../../src/application/coordinator';
 import { ResultsBrowser, type ResultsDeps } from '../../src/application/results';
 import { Store } from '../../src/application/store';
-import { hspTable, out0Range, out6Range, frame } from '../../src/domain/hsp-table';
+import { hspTable, out0Range, out6Range, frame, subjectSpan } from '../../src/domain/hsp-table';
 import { headingTitle } from '../../src/domain/outfmt0';
 import { splitOutfmt6Row } from '../../src/domain/outfmt6';
 import {
@@ -15,6 +15,7 @@ import {
   orientation,
   sortHsps,
   sortSubjects,
+  windowAround,
   type SubjectGroup,
 } from '../../src/domain/result-index';
 import {
@@ -157,6 +158,23 @@ describe('the HSP table and its index', () => {
     expect(filterQuery(query, { queriesWithHitsOnly: true, queryText: 'x' }, table, ids).subjects).toBe(query.subjects);
   });
 
+  it("gives an HSP's subject coordinates in ascending order (NCBI's Range)", () => {
+    const rowOf = (i: number) => [...table.index].indexOf(i);
+    expect(subjectSpan(table, rowOf(0))).toEqual([101, 150]);
+    expect(subjectSpan(table, rowOf(1))).toEqual([280, 300]);
+    expect(subjectSpan(table, rowOf(3))).toEqual([9, 9]);
+  });
+
+  it('puts a window of Ranges around a position, within the list', () => {
+    expect(windowAround(30, 100, 25)).toEqual({ start: 5, end: 56 });
+    expect(windowAround(0, 100, 25)).toEqual({ start: 0, end: 26 });
+    expect(windowAround(99, 100, 25)).toEqual({ start: 74, end: 100 });
+    expect(windowAround(3, 5, 25)).toEqual({ start: 0, end: 5 });
+    expect(windowAround(-1, 5, 25)).toEqual({ start: 0, end: 5 });
+    expect(windowAround(7, 5, 1)).toEqual({ start: 3, end: 5 });
+    expect(windowAround(0, 0, 25)).toEqual({ start: 0, end: 0 });
+  });
+
   it('gives the orientation from coordinates, frames, or not at all', () => {
     const nucleotide = { query: 'nucleotide', subject: 'nucleotide' } as const;
     const rowOf = (i: number) => [...table.index].indexOf(i);
@@ -296,6 +314,8 @@ function setup(options: { status?: RunView['status']; specs?: readonly Spec[]; a
   const pending: Array<() => void> = [];
   let hold = false;
   let tableReads = 0;
+  let rangeReads = 0;
+  let failRanges = false;
   const deps: ResultsDeps = {
     data: {
       readHitTable: async () => {
@@ -305,8 +325,9 @@ function setup(options: { status?: RunView['status']; specs?: readonly Spec[]; a
       },
       readOutput: async (_id, format) => (format === 6 ? run.out6.slice() : run.out0.slice()),
       readOutputRange: (_id, _format, start, end) =>
-        new Promise((resolve) => {
-          const answer = () => resolve(run.out0.slice(start, end));
+        new Promise((resolve, reject) => {
+          rangeReads++;
+          const answer = () => (failRanges ? reject(new Error('the stored output is gone')) : resolve(run.out0.slice(start, end)));
           if (hold) pending.push(answer);
           else answer();
         }),
@@ -328,6 +349,8 @@ function setup(options: { status?: RunView['status']; specs?: readonly Spec[]; a
       (lastFirst ? answers.reverse() : answers).forEach((answer) => answer());
     },
     tableReads: () => tableReads,
+    rangeReads: () => rangeReads,
+    failRanges: (on: boolean) => (failRanges = on),
   };
 }
 
@@ -527,5 +550,70 @@ describe('ResultsBrowser', () => {
     expect(shown().map(([sIdx]) => sIdx)).toEqual([1, 0]);
     results.setSubjectSort({ key: 'hsps', descending: false });
     expect(shown().map(([sIdx]) => sIdx)).toEqual([0, 1]);
+  });
+
+  it("lists the selected subject's Ranges in the engine's order, numbered among all its HSPs, as the filters show them", async () => {
+    const { results } = setup({
+      specs: [
+        { q: 0, s: 1, bits: 60, e: 1e-10, coords: [1, 50, 101, 150] },
+        { q: 0, s: 0, bits: 50, e: 1e-16, coords: [5, 45, 1, 41] },
+        { q: 0, s: 1, bits: 40, e: 1e-20, coords: [60, 80, 300, 280] },
+      ],
+    });
+    await results.open('r1');
+    const ranges = () => results.state.get().ranges.map((r) => [r.id.rank, r.n, r.from, r.to, r.inOutfmt0]);
+    expect(results.state.get().sIdx).toBe(1);
+    expect(ranges()).toEqual([
+      [0, 1, 101, 150, true],
+      [2, 2, 280, 300, true],
+    ]);
+    // The HSP table's order does not change the Ranges'.
+    results.setHspSort({ key: 'bitScore', descending: false });
+    expect(ranges()).toEqual([
+      [0, 1, 101, 150, true],
+      [2, 2, 280, 300, true],
+    ]);
+    // A filter that hides the first HSP keeps the second's number.
+    results.setFilters({ maxEValue: 1e-15 });
+    expect(ranges()).toEqual([[2, 2, 280, 300, true]]);
+    results.selectSubject(0);
+    expect(ranges()).toEqual([[1, 1, 1, 41, true]]);
+    results.setFilters({ minBitScore: 1000 });
+    expect(results.state.get().ranges).toEqual([]);
+  });
+
+  it('reads a section of outfmt 0 once per run, none for an HSP that outfmt 0 does not show, and again after a failed read', async () => {
+    const { results, runs, view, rangeReads, failRanges } = setup();
+    runs.set({ runs: [view, { ...view, snapshot: snapshot('r2') }] });
+    await results.open('r1');
+    await settle();
+    // The selected HSP's detail has read its section: the Range reads none.
+    const reads = rangeReads();
+    expect(await results.readSection({ runId: 'r1', qIdx: 0, rank: 0 })).toBe(' Score = 90 bits\n\nQuery  1  ACGT  50\n');
+    expect(rangeReads()).toBe(reads);
+    expect(await results.readSection({ runId: 'r1', qIdx: 0, rank: 1 })).toBe(' Score = 40 bits\n\nQuery  60  ACGT  80\n');
+    expect(await results.readSection({ runId: 'r1', qIdx: 0, rank: 1 })).toBe(' Score = 40 bits\n\nQuery  60  ACGT  80\n');
+    expect(rangeReads()).toBe(reads + 1);
+    expect(await results.readSection({ runId: 'r1', qIdx: 0, rank: 3 })).toBeUndefined();
+    expect(await results.readSection({ runId: 'r2', qIdx: 0, rank: 1 })).toBeUndefined();
+    expect(rangeReads()).toBe(reads + 1);
+    // Another run reads its own sections.
+    await results.open('r2');
+    await settle();
+    const before = rangeReads();
+    failRanges(true);
+    await expect(results.readSection({ runId: 'r2', qIdx: 0, rank: 2 })).rejects.toThrow('the stored output is gone');
+    failRanges(false);
+    expect(await results.readSection({ runId: 'r2', qIdx: 0, rank: 2 })).toBe(' Score = 70 bits\n\nQuery  5  ACGT  45\n');
+    expect(rangeReads()).toBe(before + 2);
+  });
+
+  it("names the task of a run: the argv's, else the engine's default", async () => {
+    const byDefault = setup();
+    await byDefault.results.open('r1');
+    expect(byDefault.results.state.get().loaded!.task).toBe('megablast');
+    const given = setup({ argv: ['blastn', '-query', 'q.fa', '-subject', 's.fa', '-task', 'blastn'] });
+    await given.results.open('r1');
+    expect(given.results.state.get().loaded!.task).toBe('blastn');
   });
 });

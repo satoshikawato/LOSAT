@@ -3,14 +3,16 @@
 // "HSP 一覧"): the fields of each HSP's outfmt 6 row as written, the frames of the record,
 // and the orientation that the record's coordinates and frames give.
 import { computed, ref } from 'vue';
-import type { HspEntry, ResultsBrowser, ResultsState } from '../application/results';
+import type { HspEntry, HspId, ResultsBrowser, ResultsState } from '../application/results';
 import type { HspSortKey } from '../domain/result-index';
 import SortButton from './SortButton.vue';
-import { useSideScroll } from './useSideScroll';
+import { focusPressed, useSideScroll } from './useSideScroll';
 import VirtualRows from './VirtualRows.vue';
 
 const props = defineProps<{ results: ResultsBrowser; state: ResultsState }>();
-const ROW_PX = 32;
+/** An HSP chosen in the table (after it is selected): the Alignments bring its Range into view. */
+const emit = defineEmits<{ chosen: [id: HspId] }>();
+const ROW_PX = 28;
 const selectedPosition = computed(() =>
   props.state.hsps.findIndex((hsp) => hsp.id.qIdx === props.state.hsp?.qIdx && hsp.id.rank === props.state.hsp?.rank),
 );
@@ -23,6 +25,11 @@ const gutter = ref(0);
 
 function sortBy(key: HspSortKey, descending: boolean): void {
   props.results.setHspSort({ key, descending });
+}
+
+function choose(id: HspId): void {
+  props.results.selectHsp(id);
+  emit('chosen', id);
 }
 
 const signed = (value: number | undefined) => (value === undefined ? '' : value > 0 ? `+${value}` : String(value));
@@ -104,7 +111,8 @@ const ORIENTATION: Readonly<Record<HspEntry['orientation'], string>> = {
             :aria-pressed="position === selectedPosition"
             :data-testid="`hsp-row-${hsp.id.qIdx}-${hsp.id.rank}`"
             :data-orientation="hsp.orientation"
-            @click="results.selectHsp(hsp.id)"
+            @mousedown="focusPressed"
+            @click="choose(hsp.id)"
           >
             <span class="num" data-field="rank" :title="String(hsp.id.rank + 1)">{{ hsp.id.rank + 1 }}</span>
             <span class="num" data-field="bitscore" :title="hsp.fields.bitscore">{{ hsp.fields.bitscore }}</span>

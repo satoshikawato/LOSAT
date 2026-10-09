@@ -71,7 +71,7 @@ ViewState は表示だけを変え、検索をやり直さない（設計書 §1
 | 状態 | 条件 | 表示 |
 |---|---|---|
 | 表示 0 件 | HSP はあるが、フィルターがすべてを隠した | 「No HSPs of this query match the view filters」と、隠した数、フィルターを外す操作 |
-| ヒット無し | Run は完了し、その query の HSP レコードが無い | 「No hits for this query.」（outfmt 0 の「No hits found」と同じ事実。値は作らない） |
+| ヒット無し | Run は完了し、その query の HSP レコードが無い | 「No significant similarity found for this query.」（NCBI の結果画面の帯の言葉。outfmt 0 の「No hits found」と同じ事実。値は作らない。W4b でタブは残す） |
 | 未完了・取消・失敗 | Run の状態 | 結果を出さず、状態と失敗の文言（RunRecord の `error`） |
 | 結果数の上限に達した可能性 | その query の subject の数が hit list の上限（argv の `-max_target_seqs`、無ければ `describe` の help の「default: N」）と同じ。または subject の HSP の数が `-max_hsps` と同じ | 上限に達したことと、より大きい `-max_target_seqs` で検索すれば示されることだけを示す。取れなかったヒットがあるとは言わない |
 | outfmt 0 にアラインメントが無い | `out0` が null（outfmt 0 は query ごとに先頭の `num_alignments` 個の subject だけアラインメントを示す。既定は 250（`format_flags.cpp:221`）、`-max_target_seqs` を与えるとその値（`blast_args.cpp:2909-2928`）） | 詳細に理由と、outfmt 6 の行を示す |

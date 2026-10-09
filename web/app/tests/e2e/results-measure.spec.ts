@@ -23,8 +23,10 @@
 //    again until the first query's first HSP is read as well, the rows the query picker draws,
 //    scrolling it to its end, finding the last query but one with `query-filter` (which selects
 //    it), clearing the filter, selecting the query before it by a click, "With hits only",
-//    selecting the second query with 200 subjects by a click and sorting its subject list by
-//    each column. In Chromium also the JS heap (after a garbage
+//    selecting the second query with 200 subjects by a click, showing its Graphic Summary (W4b)
+//    and sorting its subject list (the Descriptions) by each column. Since W4b the results screen
+//    has tabs: the selection and the HSP's detail are timed in the Alignments tab (the detail is
+//    there), the subject list in the Descriptions. In Chromium also the JS heap (after a garbage
 //    collection) before opening, after the first opening and after the repetitions, and the
 //    memory of the page and its workers where the browser exposes it.
 // 2. `pair`: a query that repeats a unit of 20 letters (with 1% differences between the copies)
@@ -32,7 +34,7 @@
 //    about two HSPs per copy. It records the search, the segments on the dot plot, and, in one
 //    warm-up and three repetitions, the time to open the run, to show the dot plot, to zoom in,
 //    out and to the selected HSP, to select an HSP by `n`, by a click on its segment and in the
-//    list, to sort and to scroll the HSP list.
+//    list, to open the selected HSP's popup with Enter (W4b), to sort and to scroll the HSP list.
 //
 // Times are milliseconds, taken in the page with `performance.now()` from the action to the first
 // animation frame in which the screen shows the result (`ms`) and to the frame after it
@@ -391,6 +393,8 @@ interface Repetition {
   hitsOnlyQueries: number;
   hitsOnlyOff: Timing;
   selectWide: Timing;
+  showGraphic: Timing;
+  graphicRows: number;
   wideSubjects: number;
   subjectRowsDrawn: number;
   sortSubjects: Record<string, Timing>;
@@ -418,9 +422,11 @@ async function openRun(page: Page, number: number, other: number): Promise<{ ope
 async function repetition(page: Page, count: number): Promise<Repetition> {
   const far = count - 2;
   const total = countText(count);
-  // The small run (run 2) first, so that opening run 1 is a change of run.
+  // The small run (run 2) first, so that opening run 1 is a change of run. The Alignments tab,
+  // which the next run opens on, shows the selected HSP's detail.
   await page.getByTestId('run-2-open').click();
   await expect(page.getByTestId('results-hits')).toHaveAttribute('data-run', '2', { timeout: 120_000 });
+  await page.getByTestId('pane-alignment').click();
   const { open, firstHsp } = await openRun(page, 1, 2);
   await expect(page.getByTestId('query-count')).toHaveText(`${total} of ${total} queries`);
   const queryRowsDrawn = await rowsDrawn(page, 'query-row-');
@@ -467,8 +473,15 @@ async function repetition(page: Page, count: number): Promise<Repetition> {
   const selectWide = await step(page, { kind: 'click', testid: `query-row-${wideIdx}` }, [
     { testid: 'hsp-detail', attr: 'data-hsp', matches: `^${wideIdx}:` },
     { testid: 'hsp-detail', attr: 'data-state', equals: 'ready' },
-    { testid: 'subject-list', attr: 'data-count', matches: '^[1-9]\\d{2,}$' },
+    { testid: 'alignments-subject' },
   ]);
+  // Its Graphic Summary: the first 100 of its subjects drawn.
+  const showGraphic = await step(page, { kind: 'click', testid: 'results-view-graphic' }, [
+    { testid: 'graphic-canvas', attr: 'data-rows', matches: '^[1-9]\\d{2,}$' },
+  ]);
+  const graphicRows = Number(await page.getByTestId('graphic-canvas').getAttribute('data-rows'));
+  await page.getByTestId('results-view-hits').click();
+  await expect(page.getByTestId('subject-list')).toHaveAttribute('data-count', /^[1-9]\d{2,}$/);
   const wideSubjects = Number(await page.getByTestId('subject-list').getAttribute('data-count'));
   const subjectRowsDrawn = await rowsDrawn(page, 'subject-row-');
   const sortSubjects: Record<string, Timing> = {};
@@ -503,6 +516,8 @@ async function repetition(page: Page, count: number): Promise<Repetition> {
     hitsOnlyQueries: Number(withHits!.replace(/,/g, '')),
     hitsOnlyOff: rounded(hitsOnlyOff),
     selectWide: rounded(selectWide),
+    showGraphic: rounded(showGraphic),
+    graphicRows,
     wideSubjects,
     subjectRowsDrawn,
     sortSubjects,
@@ -613,6 +628,7 @@ interface PairRepetition {
   selectByKey: Timing;
   selectByClick: Timing;
   clickHitTarget: number;
+  popupByKey: Timing;
   selectInList: Timing;
   sortHsps: Timing;
   scrollHspList: Timing;
@@ -621,6 +637,8 @@ interface PairRepetition {
 async function pairRepetition(page: Page, number: number, other: number): Promise<PairRepetition> {
   await page.getByTestId(`run-${other}-open`).click();
   await expect(page.getByTestId('results-hits')).toHaveAttribute('data-run', String(other), { timeout: 120_000 });
+  // The run opens on the Alignments tab, which shows the selected HSP's detail (W4b).
+  await page.getByTestId('pane-alignment').click();
   const open = await step(page, { kind: 'click', testid: `run-${number}-open` }, [
     { testid: 'results-hits', attr: 'data-run', equals: String(number) },
     { testid: 'hsp-detail', attr: 'data-state', equals: 'ready' },
@@ -634,14 +652,19 @@ async function pairRepetition(page: Page, number: number, other: number): Promis
   ]);
   const canvas = page.getByTestId('dotplot-canvas');
   const segments = Number(await canvas.getAttribute('data-segments'));
-  // Pixels in the colours of the HSPs (forward blue, reverse orange): the plot is drawn.
+  // Pixels in the colours of the HSPs (blast2dotplot.py's #1f77b4 and #ff7f0e at the opacities of
+  // the identity classes, over the white plot): the plot is drawn.
   const coloured = await canvas.evaluate((element) => {
     const c = element as HTMLCanvasElement;
     const { data } = c.getContext('2d')!.getImageData(0, 0, c.width, c.height);
+    const tints = [
+      [31, 119, 180],
+      [255, 127, 14],
+    ].flatMap((rgb) => [1, 0.8, 0.6, 0.4].map((alpha) => rgb.map((v) => Math.round(255 - alpha * (255 - v)))));
     let n = 0;
     for (let i = 0; i < data.length; i += 4) {
       const [r, g, b] = [data[i]!, data[i + 1]!, data[i + 2]!];
-      if (Math.abs(r - 31) + Math.abs(g - 95) + Math.abs(b - 191) < 60 || Math.abs(r - 194) + Math.abs(g - 65) + Math.abs(b - 12) < 60) n++;
+      if (tints.some(([tr, tg, tb]) => Math.abs(r - tr!) + Math.abs(g - tg!) + Math.abs(b - tb!) < 30)) n++;
     }
     return n;
   });
@@ -686,6 +709,19 @@ async function pairRepetition(page: Page, number: number, other: number): Promis
   const selectByClick = await step(page, { kind: 'armed' }, [{ testid: 'dotplot-canvas', attr: 'data-selected', differs: now }], 30_000);
   // Where segments lie closer together than the click's reach, the click picks the nearest of them, not always the one aimed at.
   const clickHitTarget = (await canvas.getAttribute('data-selected')) === target.hsp ? 1 : 0;
+
+  // The popup of the selected HSP (W4b): the click opened it; closed, Enter on the plot opens it again.
+  const popup = page.getByTestId('dotplot-popup');
+  await expect(popup).toHaveCount(1);
+  await canvas.focus();
+  await page.keyboard.press('Escape');
+  await expect(popup).toHaveCount(0);
+  const chosen = (await canvas.getAttribute('data-selected'))!;
+  await arm(page, 'dotplot-canvas', 'keydown');
+  await page.keyboard.press('Enter');
+  const popupByKey = await step(page, { kind: 'armed' }, [{ testid: 'dotplot-popup', attr: 'data-hsp', equals: chosen }], 30_000);
+  await page.keyboard.press('Escape');
+  await expect(popup).toHaveCount(0);
 
   // "Zoom to HSP" frames the selected HSP. An HSP that spans nearly the whole of both sequences hardly changes the view, so the clock stops at the next frame.
   const zoomToHsp = await step(page, { kind: 'click', testid: 'dotplot-zoom-hsp' }, [{ testid: 'dotplot-zoom-hsp' }]);
@@ -735,6 +771,7 @@ async function pairRepetition(page: Page, number: number, other: number): Promis
     selectByKey: rounded(selectByKey),
     selectByClick: rounded(selectByClick),
     clickHitTarget,
+    popupByKey: rounded(popupByKey),
     selectInList: rounded(selectInList),
     sortHsps: rounded(sortHsps),
     scrollHspList: rounded(lastRow),

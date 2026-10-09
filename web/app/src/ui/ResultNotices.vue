@@ -22,7 +22,7 @@ const plural = (count: number, one: string, many = `${one}s`) => `${formatCount(
     </p>
     <template v-else-if="totals">
       <p v-if="totals.hsps === 0" class="notice" data-testid="results-notice" data-kind="no-hits">
-        No hits for this query.
+        No significant similarity found for this query.
       </p>
       <p v-else-if="state.subjects.length === 0" class="notice warn" data-testid="results-notice" data-kind="filtered-out">
         No HSPs of this query match the view filters ({{ plural(state.hidden.hsps, 'HSP') }} on

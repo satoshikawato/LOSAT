@@ -5,7 +5,8 @@
 // moved on is dropped. Values shown come from the stored outputs and the HSP records
 // (docs/web/results_columns.md); the domain functions group, sort and filter them.
 import type { RecordKey } from '../domain/dataset';
-import { frame, out0Range, out0SubjectRange, out6Range, type ByteRange } from '../domain/hsp-table';
+import { optionValue } from '../domain/argv';
+import { frame, out0Range, out0SubjectRange, out6Range, subjectSpan, type ByteRange } from '../domain/hsp-table';
 import { splitOutfmt6Row, type Outfmt6Row } from '../domain/outfmt6';
 import type { OutputFormat } from '../domain/output-format';
 import { programById, residueUnit, type ProgramId, type SequenceKind } from '../domain/programs';
@@ -78,6 +79,18 @@ export interface HspEntry {
   readonly inOutfmt0: boolean;
 }
 
+/** An HSP of the selected subject as the Alignments show it: NCBI's "Range n: a to b". */
+export interface RangeEntry {
+  readonly id: HspId;
+  readonly row: number;
+  /** The HSP's position among its subject's HSPs in the engine's order (1-based), whatever the view filters hide. */
+  readonly n: number;
+  /** The smaller and the larger subject coordinate of the HSP record. */
+  readonly from: number;
+  readonly to: number;
+  readonly inOutfmt0: boolean;
+}
+
 export interface Detail {
   readonly id: HspId;
   readonly state: 'loading' | 'ready' | 'failed';
@@ -105,6 +118,8 @@ export interface LoadedRun {
   readonly diagnostics: string;
   readonly kinds: { readonly query: SequenceKind; readonly subject: SequenceKind };
   readonly units: Units;
+  /** The task that the search used: the argv's -task, or the engine's default; undefined for a program without tasks. */
+  readonly task?: string;
 }
 
 export interface ResultsState {
@@ -130,6 +145,8 @@ export interface ResultsState {
   readonly outfmt0Subjects: number;
   readonly sIdx?: number;
   readonly hsps: readonly HspEntry[];
+  /** The selected subject's HSPs that pass the view filters, in the engine's order (the Ranges of the Alignments). */
+  readonly ranges: readonly RangeEntry[];
   readonly hsp?: HspId;
   readonly detail?: Detail;
   /** Subject headings of outfmt 0 read so far, by subject record index (the same in every query). */
@@ -154,6 +171,7 @@ const INITIAL: ResultsState = Object.freeze<ResultsState>({
   atSubjectLimit: false,
   outfmt0Subjects: 0,
   hsps: [],
+  ranges: [],
   headings: new Map(),
 });
 
@@ -170,6 +188,8 @@ export class ResultsBrowser {
   private readonly headingQueue: number[] = [];
   /** The load token of the heading reader that runs, if one does. */
   private headingReader: number | undefined;
+  /** Outfmt 0 sections of the loaded run read or being read, by `${qIdx}:${rank}`; another run drops them. */
+  private sections = new Map<string, Promise<string | undefined>>();
 
   /** The table the verification badges come from (generated at build time). */
   get verification(): VerificationTable {
@@ -198,6 +218,7 @@ export class ResultsBrowser {
     const run = this.deps.runs.get().runs.find((r) => r.snapshot.runId === runId);
     this.rows = new Map();
     this.rowById = new Map();
+    this.sections = new Map();
     this.headingQueue.length = 0;
     if (run === undefined) return;
     const filters = this.state.get().runId === runId ? this.state.get().filters : NO_FILTERS;
@@ -236,6 +257,7 @@ export class ResultsBrowser {
         diagnostics,
         kinds,
         units: { query: residueUnit(kinds.query), subject: residueUnit(kinds.subject) },
+        ...taskOf(run.snapshot.argv, description),
       };
       for (let row = 0; row < table.count; row++) this.rowById.set(`${table.qIdx[row]}:${table.rank[row]}`, row);
       const queries = this.queryEntries(loaded, this.state.get().filters);
@@ -333,6 +355,34 @@ export class ResultsBrowser {
   }
 
   /**
+   * The outfmt 0 section of an HSP of the loaded run (its score lines and alignment), as written;
+   * undefined for an HSP that outfmt 0 does not show, or of another run. Each section is read once
+   * per run (the Alignments read the Ranges that come into view); a read that fails is tried again
+   * at the next request.
+   */
+  readSection(id: HspId): Promise<string | undefined> {
+    const state = this.state.get();
+    const loaded = state.loaded;
+    if (loaded === undefined || id.runId !== state.runId) return Promise.resolve(undefined);
+    const key = `${id.qIdx}:${id.rank}`;
+    let read = this.sections.get(key);
+    if (read === undefined) {
+      const sections = this.sections;
+      const row = this.rowById.get(key);
+      const range = row === undefined ? undefined : out0Range(loaded.index.table, row);
+      read =
+        range === undefined
+          ? Promise.resolve(undefined)
+          : this.deps.data.readOutputRange(loaded.run.snapshot.runId, 0, range[0], range[1]).then((bytes) => decoder.decode(bytes));
+      sections.set(key, read);
+      read.catch(() => {
+        if (sections.get(key) === read) sections.delete(key);
+      });
+    }
+    return read;
+  }
+
+  /**
    * Reads the outfmt 0 headings of subjects of the selected query (the rows in view of the
    * subject list), once per subject. Subjects that outfmt 0 does not show have none.
    */
@@ -382,13 +432,21 @@ export class ResultsBrowser {
     const state = this.state.get();
     const loaded = state.loaded;
     if (loaded === undefined || state.qIdx === undefined) {
-      this.set({ subjects: [], hsps: [], hidden: { subjects: 0, hsps: 0 }, queryTotals: undefined, atSubjectLimit: false, outfmt0Subjects: 0 });
+      this.set({ subjects: [], hsps: [], ranges: [], hidden: { subjects: 0, hsps: 0 }, queryTotals: undefined, atSubjectLimit: false, outfmt0Subjects: 0 });
       return;
     }
     const { table } = loaded.index;
     const query = loaded.index.queries.get(state.qIdx);
     if (query === undefined) {
-      this.set({ subjects: [], hsps: [], hidden: { subjects: 0, hsps: 0 }, queryTotals: { subjects: 0, hsps: 0 }, atSubjectLimit: false, outfmt0Subjects: 0 });
+      this.set({
+        subjects: [],
+        hsps: [],
+        ranges: [],
+        hidden: { subjects: 0, hsps: 0 },
+        queryTotals: { subjects: 0, hsps: 0 },
+        atSubjectLimit: false,
+        outfmt0Subjects: 0,
+      });
       return;
     }
     const subjectRecords = loaded.run.snapshot.subject.records;
@@ -409,9 +467,11 @@ export class ResultsBrowser {
     const subjects = sorted.map((all) => this.subjectEntry(loaded, shown.get(all.sIdx)!, all, order.get(all.sIdx)!, state.hspSort));
     const selected = subjects.find((s) => s.sIdx === state.sIdx);
     const hsps = selected === undefined ? [] : selected.rows.map((row) => this.hspEntry(loaded, row));
+    const ranges = selected === undefined ? [] : this.rangeEntries(loaded, unfiltered.get(selected.sIdx)!, new Set(selected.rows));
     this.set({
       subjects,
       hsps,
+      ranges,
       hidden: { subjects: filtered.hiddenSubjects, hsps: filtered.hiddenHsps },
       queryTotals: { subjects: query.subjects.length, hsps: query.hspCount },
       atSubjectLimit: loaded.limits.maxTargetSeqs !== undefined && query.subjects.length >= loaded.limits.maxTargetSeqs,
@@ -425,7 +485,7 @@ export class ResultsBrowser {
     if (state.hsps.some((hsp) => sameHsp(hsp.id, state.hsp))) return;
     const subject = state.subjects.find((s) => s.sIdx === state.sIdx) ?? state.subjects[0];
     if (subject === undefined) {
-      this.set({ sIdx: undefined, hsps: [], hsp: undefined, detail: undefined });
+      this.set({ sIdx: undefined, hsps: [], ranges: [], hsp: undefined, detail: undefined });
       return;
     }
     this.selectSubject(subject.sIdx);
@@ -451,6 +511,17 @@ export class ResultsBrowser {
       inOutfmt0: out0SubjectRange(loaded.index.table, first) !== undefined,
       atHspLimit: loaded.limits.maxHsps !== undefined && all.rows.length >= loaded.limits.maxHsps,
     };
+  }
+
+  /** The subject's HSPs in the engine's order, numbered among all of them, that the view filters show. */
+  private rangeEntries(loaded: LoadedRun, subject: SubjectGroup, shown: ReadonlySet<number>): readonly RangeEntry[] {
+    const { table } = loaded.index;
+    const runId = loaded.run.snapshot.runId;
+    return subject.rows.flatMap((row, i) => {
+      if (!shown.has(row)) return [];
+      const [from, to] = subjectSpan(table, row);
+      return [{ id: { runId, qIdx: table.qIdx[row]!, rank: table.rank[row]! }, row, n: i + 1, from, to, inOutfmt0: out0Range(table, row) !== undefined }];
+    });
   }
 
   private hspEntry(loaded: LoadedRun, row: number): HspEntry {
@@ -493,7 +564,7 @@ export class ResultsBrowser {
     const rowText = range6 === undefined ? undefined : decoder.decode(loaded.out6.subarray(range6[0], range6[1]));
     this.set({ detail: { id, state: 'loading', ...(rowText === undefined ? {} : { row: rowText }) } });
     try {
-      const [heading, section] = await Promise.all([read(0, out0SubjectRange(table, row)), read(0, out0Range(table, row))]);
+      const [heading, section] = await Promise.all([read(0, out0SubjectRange(table, row)), this.readSection(id)]);
       if (!sameHsp(this.state.get().hsp, id)) return;
       this.set({
         detail: {
@@ -518,6 +589,12 @@ export class ResultsBrowser {
     }
     this.state.set(next as unknown as ResultsState);
   }
+}
+
+/** The task of a run: the argv's -task, else the default that the engine describes (none for a program without tasks). */
+function taskOf(argv: readonly string[], description: ProgramDescription): { task?: string } {
+  const task = optionValue(argv, '-task') ?? description.parameters.find((p) => p.flag === '-task')?.defaultValue;
+  return task === undefined ? {} : { task };
 }
 
 /** The option grammar of `describe` that the verification badge reads options with. */

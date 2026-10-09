@@ -114,3 +114,13 @@ export const out0SubjectRange = (table: HspTable, row: number) =>
 
 /** A frame of the record, or undefined where it has none. */
 export const frame = (column: Int8Array, row: number): number | undefined => (column[row] === 0 ? undefined : column[row]);
+
+/**
+ * The smaller and the larger subject coordinate of an HSP record: NCBI's "Range n: a to b" of an
+ * alignment names the subject's positions in ascending order (docs/web/ncbi_ui_mapping.md
+ * "Alignments"). The coordinates are the record's; nothing is computed from them.
+ */
+export function subjectSpan(table: HspTable, row: number): readonly [number, number] {
+  const [start, end] = [table.sStart[row]!, table.sEnd[row]!];
+  return start <= end ? [start, end] : [end, start];
+}

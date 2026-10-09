@@ -1,19 +1,21 @@
 <script setup lang="ts">
-// The subjects of the selected query (docs/web/results_columns.md "Subject 一覧"): the
-// values of the subject's first HSP as outfmt 6 wrote them (the HSP whose score outfmt 0's
-// description table shows), the title of its outfmt 0 heading, and counts. Sorting uses
-// the engine's values; ties keep the engine's order.
+// The Descriptions: the subjects of the selected query (docs/web/results_columns.md "Subject
+// 一覧"), in the columns of NCBI's "Sequences producing significant alignments" where LOSAT has
+// the values (docs/web/ncbi_ui_mapping.md "Descriptions"): the values of the subject's first HSP as
+// outfmt 6 wrote them (the HSP whose score outfmt 0's description table shows), the title of its
+// outfmt 0 heading, counts, and the subject's ID last (NCBI's Accession). Sorting uses the
+// engine's values; ties keep the engine's order.
 import { computed, ref, watch } from 'vue';
 import type { ResultsBrowser, ResultsState, SubjectEntry } from '../application/results';
 import { headingTitle } from '../domain/outfmt0';
 import type { SubjectSortKey } from '../domain/result-index';
 import { formatCount } from './format';
 import SortButton from './SortButton.vue';
-import { useSideScroll } from './useSideScroll';
+import { focusPressed, useSideScroll } from './useSideScroll';
 import VirtualRows from './VirtualRows.vue';
 
 const props = defineProps<{ results: ResultsBrowser; state: ResultsState }>();
-const ROW_PX = 34;
+const ROW_PX = 28;
 const MAX_ROWS = 10;
 const selectedPosition = computed(() => props.state.subjects.findIndex((subject) => subject.sIdx === props.state.sIdx));
 const unit = computed(() => props.state.loaded?.units.subject ?? '');
@@ -50,26 +52,17 @@ function description(sIdx: number, inOutfmt0: boolean): string {
 
 <template>
   <div class="result-table subject-table" data-testid="subject-table">
-    <h3>
-      Subjects
-      <span class="muted small">{{ formatCount(state.subjects.length) }} shown</span>
-    </h3>
+    <div class="tool-band">
+      <h3>
+        Sequences producing significant alignments
+        <span class="muted small" data-testid="subject-count">{{ formatCount(state.subjects.length) }} shown</span>
+      </h3>
+    </div>
     <p v-if="sideScroll" class="table-hint muted small" data-testid="subject-table-scroll-hint">Scroll the table sideways for more columns →</p>
     <div ref="scroller" class="table-scroll" :style="{ '--row-gutter': `${gutter}px` }">
       <div class="table-head subject-grid" role="row">
         <SortButton class="num-head" data-col="order" label="#" sort-key="order" :sort="state.subjectSort" scope="subject" @sort="sortBy" />
-        <span data-col="sseqid" role="columnheader">Subject</span>
-        <span data-col="description" role="columnheader">Description (outfmt 0)</span>
-        <SortButton
-          class="num-head"
-          data-col="length"
-          :label="`Length (${unit})`"
-          sort-key="length"
-          :sort="state.subjectSort"
-          scope="subject"
-          first-descending
-          @sort="sortBy"
-        />
+        <span data-col="description" role="columnheader">Description</span>
         <SortButton
           class="num-head"
           data-col="bitscore"
@@ -91,6 +84,17 @@ function description(sIdx: number, inOutfmt0: boolean): string {
           first-descending
           @sort="sortBy"
         />
+        <SortButton
+          class="num-head"
+          data-col="length"
+          :label="`Length (${unit})`"
+          sort-key="length"
+          :sort="state.subjectSort"
+          scope="subject"
+          first-descending
+          @sort="sortBy"
+        />
+        <span data-col="sseqid" role="columnheader">Subject ID</span>
       </div>
       <VirtualRows
         :count="state.subjects.length"
@@ -114,22 +118,23 @@ function description(sIdx: number, inOutfmt0: boolean): string {
             :aria-pressed="subject.sIdx === state.sIdx"
             :data-testid="`subject-row-${subject.sIdx}`"
             :data-order="subject.order"
+            @mousedown="focusPressed"
             @click="results.selectSubject(subject.sIdx)"
           >
             <span class="num" data-field="order" :title="String(subject.order)">{{ subject.order }}</span>
-            <span :title="subject.first.sseqid" data-field="sseqid">{{ subject.first.sseqid }}</span>
             <span
               :class="{ muted: !subject.inOutfmt0 }"
               :title="description(subject.sIdx, subject.inOutfmt0)"
               data-field="description"
               >{{ description(subject.sIdx, subject.inOutfmt0) }}</span
             >
-            <span class="num" data-field="length" :title="formatCount(subject.length)">{{ formatCount(subject.length) }}</span>
             <span class="num" data-field="bitscore" :title="subject.first.bitscore">{{ subject.first.bitscore }}</span>
             <span class="num" data-field="evalue" :title="subject.first.evalue">{{ subject.first.evalue }}</span>
             <span class="num" data-field="hsps" :title="hspCount(subject) + (subject.atHspLimit ? ' max' : '')">
               {{ hspCount(subject) }}<span v-if="subject.atHspLimit" class="badge" title="The subject has as many HSPs as -max_hsps keeps">max</span>
             </span>
+            <span class="num" data-field="length" :title="formatCount(subject.length)">{{ formatCount(subject.length) }}</span>
+            <span :title="subject.first.sseqid" data-field="sseqid">{{ subject.first.sseqid }}</span>
           </button>
         </template>
       </VirtualRows>

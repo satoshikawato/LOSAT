@@ -3,7 +3,9 @@
 // browsers chosen with --project, and writes full-page PNGs of the same states at a desktop
 // size (1280 x 900) and a phone size (390 x 844). S13 added the states of the results screen
 // (files 07 to 18, which sort after the search screen's 01 to 06); 18 is the window, not the
-// whole page, right after "Open results" (S13 screen review M3).
+// whole page, right after "Open results" (S13 screen review M3). W4b added 19 to 23: the
+// Descriptions, the Graphic Summary, the Alignments with two Ranges, the dot plot's popup and a
+// TBLASTN dot plot.
 import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
@@ -181,6 +183,7 @@ async function search(page: Page, id: string, number: number, query: string, sub
 async function openResults(page: Page, number: number): Promise<void> {
   await page.getByTestId(`run-${number}-open`).click();
   await expect(page.getByTestId('results-hits')).toHaveAttribute('data-run', String(number), { timeout: 60_000 });
+  await page.getByTestId('pane-alignment').click();
   await expect(page.getByTestId('hsp-detail')).toHaveAttribute('data-state', 'ready', { timeout: 60_000 });
 }
 
@@ -190,19 +193,24 @@ for (const size of SIZES) {
     await page.goto('/');
     await expect(page.getByTestId('storage-status')).toBeVisible();
     const hspRows = page.getByTestId('hsp-list').locator('[data-testid^="hsp-row-"]');
+    const subjectRow = (text: string) => page.getByTestId('subject-list').locator('[data-testid^="subject-row-"]', { hasText: text });
 
     // Run 1: three queries (one without hits, one on the minus strand) against six subjects;
-    // run 2: one query with 260 subjects, of which outfmt 0 shows 250 alignments; run 3: TBLASTX.
+    // run 2: one query with 260 subjects, of which outfmt 0 shows 250 alignments; run 3: TBLASTX;
+    // run 4: TBLASTN (W4b: amino acids against nucleotides on the dot plot).
     await search(page, 'blastn', 1, 'outfmt0/multi_query.fasta', 'outfmt0/multi_subject.fasta');
     await clearInputs(page);
     await task(page, 'blastn');
     await openFiles(page, 'query', [{ name: 'many_query.fasta', text: fasta('outfmt0/many_query.fasta') }]);
     await openFiles(page, 'subject', [{ name: 'many_subject.fasta', text: fasta('outfmt0/many_subject.fasta') }]);
+    await page.getByTestId('job-title').fill('Many subjects');
     await submit(page);
     await waitStatus(page, 2, 'completed');
+    await page.getByTestId('job-title').fill('');
     await search(page, 'tblastx', 3, 'outfmt0/tblastx_ambig_query.fasta', 'outfmt0/tblastx_ambig_subject.fasta');
+    await search(page, 'tblastn', 4, 'outfmt0/e2e_protein_query.faa', 'outfmt0/e2e_amb_subject.fna');
 
-    // The hits view: an HSP selected, with its alignment from outfmt 0.
+    // The Alignments: the first subject's block, an HSP selected with its section of outfmt 0.
     await openResults(page, 1);
     await hspRows.first().click();
     await expect(hspRows.first()).toHaveAttribute('aria-pressed', 'true');
@@ -210,18 +218,19 @@ for (const size of SIZES) {
     await shoot(page, browserName, size.name, '07-results-hits-alignment');
 
     // The dot plot of a pair with an HSP on each strand (subject msD), the second HSP selected.
-    await page.getByTestId('subject-list').locator('[data-testid^="subject-row-"]', { hasText: 'msD' }).click();
+    await page.getByTestId('results-view-hits').click();
+    await subjectRow('msD').click();
+    await page.getByTestId('pane-dotplot').click();
     await expect(hspRows).toHaveCount(2);
     await hspRows.nth(1).click();
-    await page.getByTestId('pane-dotplot').click();
     const canvas = page.getByTestId('dotplot-canvas');
     await expect(canvas).toHaveAttribute('data-segments', '2');
     await expect(canvas).toHaveAttribute('data-selected', /^0:\d+$/);
     await shoot(page, browserName, size.name, '08-results-dotplot');
-    await page.getByTestId('pane-alignment').click();
 
     // An HSP that outfmt 0 does not show: the last subject of run 2, in the engine's order.
     await openResults(page, 2);
+    await page.getByTestId('results-view-hits').click();
     await page.getByTestId('subject-sort-order').click();
     await expect(page.getByTestId('subject-sort-order').locator('..')).toHaveAttribute('aria-sort', 'descending');
     await page.getByTestId('subject-list').evaluate((element) => (element.scrollTop = 0));
@@ -229,6 +238,7 @@ for (const size of SIZES) {
     await expect(last).toHaveAttribute('data-order', '260');
     await last.click();
     await expect(last).toHaveAttribute('aria-pressed', 'true');
+    await page.getByTestId('pane-alignment').click();
     await expect(page.getByTestId('detail-not-in-outfmt0')).toBeVisible();
     await shoot(page, browserName, size.name, '09-results-hsp-not-in-outfmt0');
 
@@ -242,12 +252,13 @@ for (const size of SIZES) {
     // HSPs hidden by the view filters: the notice that tells them from a query without hits.
     await page.getByTestId('query-row-0').click();
     await expect(page.getByTestId('query-row-0')).toHaveAttribute('aria-pressed', 'true');
+    await page.getByTestId('results-view-hits').click();
     await page.getByTestId('filter-subject').fill('no-such-subject');
     await page.getByTestId('filter-apply').click();
     await expect(page.locator('[data-testid="results-notice"][data-kind="filtered-out"]')).toBeVisible();
     await shoot(page, browserName, size.name, '11-results-filtered-out');
     await page.getByTestId('results-notice-clear').click();
-    await expect(page.getByTestId('hsp-table')).toBeVisible();
+    await expect(page.getByTestId('subject-table')).toBeVisible();
 
     // The run's details with the verification badge, then its outputs.
     await page.getByTestId('results-view-details').click();
@@ -258,11 +269,52 @@ for (const size of SIZES) {
     await expect(page.getByTestId('result-output')).toHaveAttribute('data-shown', '1:0');
     await shoot(page, browserName, size.name, '13-results-outputs');
 
-    // Frames of a translated search.
+    // Frames of a translated search, in the HSP table of the Alignments.
     await openResults(page, 3);
-    await page.getByTestId('results-view-hits').click();
     await expect(page.locator('[data-field="frames"]').first()).toBeVisible();
     await shoot(page, browserName, size.name, '14-results-translated-frames');
+
+    // W4b states. The Descriptions of run 1, under the header block, "Filter Results" and "Results for".
+    await openResults(page, 1);
+    await page.getByTestId('results-view-hits').click();
+    await expect(page.getByTestId('subject-list')).toBeVisible();
+    await shoot(page, browserName, size.name, '19-results-descriptions');
+
+    // The Graphic Summary of the query with 260 subjects (run 2), the popover of an HSP.
+    await openResults(page, 2);
+    await page.getByTestId('results-view-graphic').click();
+    const graphic = page.getByTestId('graphic-canvas');
+    await expect(graphic).toHaveAttribute('data-rows', '100');
+    const bars = JSON.parse((await graphic.getAttribute('data-targets'))!) as { x: number; y: number }[];
+    await graphic.hover({ position: { x: bars[2]!.x, y: bars[2]!.y } });
+    await expect(page.getByTestId('graphic-popover')).toBeVisible();
+    await shoot(page, browserName, size.name, '20-results-graphic-summary');
+
+    // The Alignments of a subject with two Ranges (run 1, subject msD), the second selected.
+    await openResults(page, 1);
+    await page.getByTestId('results-view-hits').click();
+    await subjectRow('msD').click();
+    await page.getByTestId('pane-alignment').click();
+    await expect(page.locator('[data-testid^="range-0-"]')).toHaveCount(2);
+    await page.locator('[data-testid^="range-0-"]').first().getByTestId('range-next').click();
+    await expect(page.getByTestId('hsp-detail')).toHaveAttribute('data-state', 'ready');
+    await expect(page.getByTestId('range-section')).toHaveAttribute('data-state', 'ready');
+    await shoot(page, browserName, size.name, '21-results-alignments-two-ranges');
+
+    // The dot plot's popup of the selected HSP (the pair of state 08).
+    await page.getByTestId('pane-dotplot').click();
+    await canvas.focus();
+    await page.keyboard.press('Enter');
+    await expect(page.getByTestId('dotplot-popup')).toBeVisible();
+    await shoot(page, browserName, size.name, '22-results-dotplot-popup');
+    await page.keyboard.press('Escape');
+
+    // The dot plot of TBLASTN (run 4): amino acids along the query, nucleotides along the subject.
+    await openResults(page, 4);
+    await page.getByTestId('pane-dotplot').click();
+    await expect(canvas).toHaveAttribute('data-segments', /^[1-9]/);
+    await expect(page.getByTestId('dotplot-selected')).toContainText('frames');
+    await shoot(page, browserName, size.name, '23-results-tblastn-dotplot');
 
     // The queue: finished runs with "Open results", a search in progress, one cancelled before
     // it started, and one waiting (queued after the cancel). BLASTP of a bacterial proteome
@@ -280,16 +332,16 @@ for (const size of SIZES) {
     await submit(page);
     await expect(queued).toHaveCount(1);
     await queued.getByRole('button', { name: 'Cancel' }).click();
-    await expect(page.getByTestId('run-5-status')).toHaveText('cancelled');
+    await expect(page.getByTestId('run-6-status')).toHaveText('cancelled');
     await submit(page);
     await expect(queued).toHaveCount(1);
-    // The queue shows beside either tab; the results tab keeps the page short, so that the queue is most of it.
+    // The queue shows beside either tab, at the same place (W4b).
     await page.getByTestId('tab-results').click();
     await shoot(page, browserName, size.name, '15-results-queue-open-waiting-cancelled');
 
     // The results screen for the cancelled run.
     const select = page.getByTestId('results-run');
-    const label = await select.locator('option', { hasText: /^Run 5 · / }).textContent();
+    const label = await select.locator('option', { hasText: /^Run 6 · / }).textContent();
     await select.selectOption({ label: label!.trim() });
     await expect(page.getByTestId('results-status')).toHaveAttribute('data-run-status', 'cancelled');
     await shoot(page, browserName, size.name, '16-results-cancelled-run');
@@ -298,7 +350,6 @@ for (const size of SIZES) {
     const run3 = await select.locator('option', { hasText: /^Run 3 · / }).textContent();
     await select.selectOption({ label: run3!.trim() });
     await expect(page.getByTestId('results-hits')).toHaveAttribute('data-run', '3', { timeout: 60_000 });
-    await expect(page.getByTestId('hsp-detail')).toHaveAttribute('data-state', 'ready', { timeout: 60_000 });
     await page.getByTestId('pane-dotplot').click();
     await expect(page.getByTestId('dotplot-canvas')).toHaveAttribute('data-segments', /^[1-9]/);
     await expect(page.getByTestId('dotplot-selected')).toContainText('frames');

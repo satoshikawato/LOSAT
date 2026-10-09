@@ -806,41 +806,23 @@ textarea {
 }
 
 /* "Open results" (or Cancel) shares a line with the run's state where it fits (S13 screen
-   review L3): beside the state, which wraps in the width that the button leaves; in a narrow
-   run (the results tab's queue column), at the end of the state's last line. */
-.run {
-  container-type: inline-size;
-}
-
+   review L3): the state's words and the button wrap as one line of items, the button at the end
+   of the last line. One layout at every width (W4 screen review low 5: the cards wrapped three
+   ways, and moved between the tabs). */
 .run-line {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  gap: 4px 8px;
-}
-
-.run-state {
-  flex: 1 1 0;
-  min-width: 9.5em;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 4px 8px;
 }
 
+.run-state {
+  display: contents;
+}
+
 .run-line > button {
   flex: none;
   margin-left: auto;
-}
-
-@container (max-width: 270px) {
-  .run-line {
-    align-items: center;
-  }
-
-  .run-state {
-    display: contents;
-  }
 }
 
 .run-open {
@@ -980,11 +962,55 @@ label.inline {
   gap: 4px;
 }
 
-.results-run {
+/* W4b: the header block of NCBI's results (Job Title, RID, Program, Query ID ...) as a list of
+   rows, with "Filter Results" on its right where there is room, under it where there is not. */
+.results-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 12px 24px;
+}
+
+.results-summary {
+  flex: 1 1 26em;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  margin: 0;
+}
+
+.results-summary dt,
+.results-summary dd {
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.results-summary dt {
+  padding-right: 16px;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.results-summary dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.results-title {
+  font-weight: 600;
+}
+
+.results-run,
+.results-program {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px 12px;
+  gap: 4px 12px;
+}
+
+.results-summary .run-inputs {
+  font-size: 1em;
 }
 
 /* WebKit draws the chosen run's label at its whole length beyond the select's box (overflow
@@ -1047,11 +1073,13 @@ label.inline {
   font-size: 0.95em;
 }
 
-.hits-top {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 16px;
-  align-items: start;
+.result-filters {
+  flex: 1 1 18em;
+  max-width: 28em;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel);
 }
 
 .result-filters .filter-fields {
@@ -1059,6 +1087,10 @@ label.inline {
   flex-wrap: wrap;
   gap: 6px 12px;
   margin-top: 6px;
+}
+
+.result-filters p {
+  margin: 6px 0 0;
 }
 
 .result-filters label {
@@ -1074,8 +1106,54 @@ label.inline {
 
 .filter-actions {
   display: flex;
+  justify-content: flex-end;
   gap: 6px;
-  margin-top: 6px;
+  margin-top: 8px;
+}
+
+.filter-submit {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+/* "Results for": the query list of a run of several queries. */
+.query-picker {
+  margin-top: 12px;
+}
+
+/* W4b: NCBI's tab strip, in LOSAT's colours: the selected tab filled with the accent and white
+   text, the others grey, over a line of the accent; under it, each tab's light tool band. */
+.results-tabs {
+  gap: 4px;
+  margin: 12px 0 0;
+  border-bottom: 3px solid var(--accent);
+}
+
+.results-tabs button {
+  border-color: var(--border);
+  border-bottom: none;
+  border-radius: 4px 4px 0 0;
+  background: var(--panel);
+  padding: 6px 14px;
+}
+
+.results-tabs button[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+.tool-band {
+  margin: 0 0 8px;
+  padding: 6px 10px;
+  background: var(--accent-bg);
+}
+
+.hits-view .tool-band h3 {
+  margin: 0;
 }
 
 .result-notices .notice {
@@ -1178,14 +1256,16 @@ label.inline {
   align-items: center;
 }
 
-/* #, Subject, Description, Length, Score (bits), E value, HSPs. */
+/* NCBI's order (W4b): #, Description, Score (bits), E value, HSPs, Length, Subject ID. */
 .subject-grid {
-  grid-template-columns: 4ch minmax(9ch, 1.2fr) minmax(12ch, 2.4fr) 8.25ch 9ch 8.25ch 7ch;
+  grid-template-columns: 4ch minmax(12ch, 2.4fr) 9ch 8.25ch 7ch 8.25ch minmax(9ch, 1.2fr);
 }
 
 /* #, Bit score, E value, Identity, Length, Mismatches, Gap opens, Query, Subject, [Frames],
-   Orientation, outfmt 0. */
+   Orientation, outfmt 0. The columns are 5 px apart: with the frames, the table fits the results'
+   column at 1280 px beside the queue's column of the same width in both tabs (W4b). */
 .hsp-grid {
+  column-gap: 5px;
   grid-template-columns: 3.5ch 9ch 8.25ch 7ch 6ch 9.75ch 5.25ch minmax(11ch, 1fr) minmax(11ch, 1fr) 9.5ch 8.25ch;
 }
 
@@ -1197,10 +1277,12 @@ label.inline {
    scroll bar (--row-gutter, measured by VirtualRows). The grid keeps the tables' type size
    and weight, so that its ch are the rows' ch; the labels are set smaller and bold. */
 .table-head {
-  border: solid transparent;
-  border-width: 0 1px;
+  border: 1px solid var(--border);
+  border-bottom: none;
+  border-radius: 4px 4px 0 0;
   padding: 4px calc(8px + var(--row-gutter, 0px)) 4px 8px;
-  color: var(--muted);
+  background: var(--accent-bg);
+  color: var(--fg);
   align-items: end;
 }
 
@@ -1238,6 +1320,101 @@ label.inline {
 
 .hsp-detail pre.output {
   margin: 0 0 6px;
+}
+
+/* W4b: the Alignments, after NCBI's block of a subject and its Ranges. The view keeps the Range in
+   view in place itself as sections are read and Ranges added (AlignmentsView keepInPlace), the same
+   in every browser: the browsers' own scroll anchoring (not in WebKit) is left out for the blocks. */
+.alignments {
+  overflow-anchor: none;
+}
+
+.alignments-nav {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px 12px;
+}
+
+.alignments-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+pre.subject-heading {
+  max-height: none;
+  margin: 8px 0 4px;
+  font-weight: 600;
+}
+
+.alignments-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  margin: 4px 0 10px;
+}
+
+.range-more {
+  margin: 8px 0;
+}
+
+.range-block {
+  border-top: 1px solid var(--border);
+  padding: 8px 0 4px;
+  scroll-margin-top: 8px;
+}
+
+.range-block.selected {
+  padding-left: 8px;
+  box-shadow: inset 3px 0 var(--accent);
+}
+
+.range-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 4px 16px;
+}
+
+.range-label {
+  margin: 0;
+  font-size: 0.95em;
+}
+
+.range-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-size: 0.9em;
+}
+
+.range-buttons button.link {
+  min-height: 24px;
+}
+
+.range-buttons button.link:disabled {
+  color: var(--muted);
+  text-decoration: none;
+}
+
+pre.range-text {
+  max-height: none;
+  margin: 6px 0;
+}
+
+/* A Range whose section waits to be read keeps some height, so that a screenful holds a few of them. */
+.range-pending {
+  min-height: 6em;
+  margin: 6px 0;
+}
+
+.row-label {
+  margin: 6px 0 2px;
+  font-size: 0.9em;
+  color: var(--muted);
 }
 
 .row-text {
@@ -1321,14 +1498,16 @@ label.inline {
     height: 36px;
   }
 
-  .hits-top {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
   /* List rows are whole-width targets with their own height. */
   .pick-row,
   .table-row {
     min-height: 0;
+  }
+
+  /* The results' tabs share their rows. */
+  .results-tabs button {
+    flex: 1 1 auto;
+    padding: 6px 10px;
   }
 
   /* Sort headers are touch targets of at least 24 px (WCAG 2.5.8; S13 screen review L8). */
@@ -1373,28 +1552,29 @@ label.inline {
     order: 6;
   }
 
-  /* HSPs: #, Bit score, E value, Query, Subject, [Frames], Orientation, Identity, Length,
-     Mismatches, Gap opens, outfmt 0. */
+  /* HSPs: #, Bit score, E value, [Frames], Query, Subject, Orientation, Identity, Length,
+     Mismatches, Gap opens, outfmt 0. The frames come before the ranges, so that a phone shows
+     them (W4 screen review middle 2: the screen ended inside the subject range). */
   .hsp-grid {
     grid-template-columns: 3.5ch 9ch 8.25ch 11ch 11ch 9.5ch 7ch 6ch 9.75ch 5.25ch 8.25ch;
   }
 
   .hsp-grid.framed {
-    grid-template-columns: 3.5ch 9ch 8.25ch 11ch 11ch 6ch 9.5ch 7ch 6ch 9.75ch 5.25ch 8.25ch;
-  }
-
-  .hsp-grid > [data-col='query'],
-  .hsp-grid > [data-field='query'] {
-    order: 3;
-  }
-
-  .hsp-grid > [data-col='subject'],
-  .hsp-grid > [data-field='subject'] {
-    order: 4;
+    grid-template-columns: 3.5ch 9ch 8.25ch 6ch 11ch 11ch 9.5ch 7ch 6ch 9.75ch 5.25ch 8.25ch;
   }
 
   .hsp-grid > [data-col='frames'],
   .hsp-grid > [data-field='frames'] {
+    order: 3;
+  }
+
+  .hsp-grid > [data-col='query'],
+  .hsp-grid > [data-field='query'] {
+    order: 4;
+  }
+
+  .hsp-grid > [data-col='subject'],
+  .hsp-grid > [data-field='subject'] {
     order: 5;
   }
 

@@ -7,7 +7,7 @@ import type { ResultsBrowser } from '../application/results';
 import { useStore } from './useStore';
 import AttentionPanel from './AttentionPanel.vue';
 import QueuePanel from './QueuePanel.vue';
-import ResultsPanel from './ResultsPanel.vue';
+import ResultsPanel, { type ResultsView } from './ResultsPanel.vue';
 import ResumeNotice from './ResumeNotice.vue';
 import SearchPanel from './SearchPanel.vue';
 import StorageStatus from './StorageStatus.vue';
@@ -23,6 +23,8 @@ const state = useStore(props.coordinator.state);
 const attentionState = useStore(props.attention.state);
 const tab = ref<'search' | 'results'>('search');
 const resultsPanel = ref<InstanceType<typeof ResultsPanel>>();
+/** The results tab's view, kept while the search tab is shown and when another run opens. */
+const resultsView = ref<ResultsView>('hits');
 
 /**
  * Opens a run's results from the queue (S12's screen review L7), and brings the results
@@ -68,7 +70,14 @@ onUnmounted(() => {
     <section class="primary">
       <!-- The search form stays mounted, so the next job keeps its edits while results are viewed. -->
       <SearchPanel v-show="tab === 'search'" :draft="draft" :runs="state.runs" />
-      <ResultsPanel v-if="tab === 'results'" ref="resultsPanel" :coordinator="coordinator" :results="results" :runs="state.runs" />
+      <ResultsPanel
+        v-if="tab === 'results'"
+        ref="resultsPanel"
+        v-model:view="resultsView"
+        :coordinator="coordinator"
+        :results="results"
+        :runs="state.runs"
+      />
     </section>
     <aside class="secondary">
       <QueuePanel :coordinator="coordinator" :runs="state.runs" @open-results="openResults" />

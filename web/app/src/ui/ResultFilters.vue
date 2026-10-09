@@ -69,8 +69,8 @@ function clear(): void {
 </script>
 
 <template>
-  <form class="result-filters" aria-label="View filters" data-testid="view-filters" @submit.prevent="apply">
-    <h3>Show</h3>
+  <form class="result-filters" aria-label="Filter Results" data-testid="view-filters" @submit.prevent="apply">
+    <h3>Filter Results</h3>
     <div class="filter-fields">
       <label>
         E value ≤
@@ -86,8 +86,8 @@ function clear(): void {
       </label>
     </div>
     <div class="filter-actions">
-      <button type="submit" data-testid="filter-apply">Apply</button>
-      <button type="button" data-testid="filter-clear" @click="clear">Clear</button>
+      <button type="submit" class="filter-submit" data-testid="filter-apply">Filter</button>
+      <button type="button" data-testid="filter-clear" @click="clear">Reset</button>
     </div>
     <p class="muted small">Filters change the view only. Exports of outfmt 0, 6 and 7 always hold the whole result.</p>
     <p v-if="problem" class="error" role="alert" data-testid="filter-problem">{{ problem }}</p>

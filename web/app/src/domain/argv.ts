@@ -52,3 +52,9 @@ export function toShellCommand(argv: readonly string[], outfmt: OutputFormat): s
     /^[A-Za-z0-9_@%+=:,./-]+$/.test(word) ? word : `'${word.replaceAll("'", "'\\''")}'`;
   return ['LOSAT', ...argv, '-outfmt', String(outfmt)].map(quote).join(' ');
 }
+
+/** The value of an option in an argv (the word after its last occurrence), or undefined where it is not given. */
+export function optionValue(argv: readonly string[], flag: string): string | undefined {
+  const at = argv.lastIndexOf(flag);
+  return at < 0 || at + 1 >= argv.length ? undefined : argv[at + 1];
+}

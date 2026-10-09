@@ -240,3 +240,17 @@ export function orientation(table: HspTable, row: number, kinds: { readonly quer
   if (q === 0 || s === 0) return 'unknown';
   return q === s ? 'forward' : 'reverse';
 }
+
+// --- the window of the Alignments ------------------------------------------------------------------
+
+/**
+ * The positions [start, end) of a list of `count` items that a window shows around `position`: the
+ * item and up to `reach` items on each side. The Alignments show the selected Range and 25 Ranges
+ * before and after it, so that a pair of thousands of HSPs is not drawn at once
+ * (docs/web/ncbi_ui_mapping.md "Alignments").
+ */
+export function windowAround(position: number, count: number, reach: number): { readonly start: number; readonly end: number } {
+  if (count <= 0) return { start: 0, end: 0 };
+  const at = Math.max(0, Math.min(count - 1, position));
+  return { start: Math.max(0, at - reach), end: Math.min(count, at + reach + 1) };
+}

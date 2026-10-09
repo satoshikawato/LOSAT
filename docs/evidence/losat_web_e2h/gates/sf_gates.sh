@@ -69,7 +69,9 @@ load_state() {
 guard() {
   cd "$W" || fail worktree
   (cd LOSAT/tests && python3 -c 'import ci_fast_regressions as c; c.stage_lexical_fixtures()') || fail lexical-fixtures
-  [ -d "$STAGE_G_ROOT" ] || fail "$STAGE_G_ROOT is missing: the TBLASTN Stage G cases name it (ci_fast_regressions.py, capture_outputs.py); see NOTES.md"
+  # Only inside the private namespace (SF_NS=1), where $STAGE_G_ROOT is the bound worktree; outside it the path is on
+  # /mnt/c (9p), which the gate never reads.
+  if [ -n "${SF_NS:-}" ]; then [ -d "$STAGE_G_ROOT/LOSAT" ] || fail "$STAGE_G_ROOT is not bound to the worktree; see NOTES.md"; fi
   [ -d "$FIXNCBI" ] || fail "frozen NCBI fixtures missing: $FIXNCBI"
   if [ -f "$OUT/head.txt" ]; then [ "$(git rev-parse HEAD)" = "$(cat "$OUT/head.txt")" ] || fail "HEAD moved since prep ($(cat "$OUT/head.txt"))"; fi
 }
@@ -123,7 +125,7 @@ st_tests() {
     fi
   done
   rec wasm32-web-api-tests "$OUT/wasm32-web-api-tests.log" in_dir LOSAT env CARGO_TARGET_WASM32_WASIP1_RUNNER="node $W/web/tools/wasi-test-runner.mjs" \
-    cargo test --locked --lib --target wasm32-wasip1 --no-default-features --target-dir "$BUILD_ROOT/$P/wasm32-test" -- web_api::tests
+    cargo test --locked --lib --target wasm32-wasip1 --no-default-features --target-dir "$BUILD_ROOT/$P/wasm32-test" -- web_api::
 }
 
 st_build() {
@@ -351,11 +353,12 @@ PY
 if [ "${1:-}" = --stage ]; then
   STAGE=$2; load_state
   grep -v "^$STAGE	" "$OUT/status.tsv" > "$OUT/status.tsv.new" 2>/dev/null; mv "$OUT/status.tsv.new" "$OUT/status.tsv" 2>/dev/null || : > "$OUT/status.tsv"
-  # STAGE_G_BIND=1: the stages that run the TLOSAN Stage G cases (their commands name $STAGE_G_ROOT/...) see the
-  # worktree at that path through a private mount namespace (unshare -rm, no sudo), so nothing is read from /mnt/c.
-  if [ "${STAGE_G_BIND:-0}" = 1 ] && [ -z "${SF_NS:-}" ]; then
+  # STAGE_G_BIND=1 (default): the stages that run the TLOSAN Stage G cases (their commands name $STAGE_G_ROOT/...) see
+  # the worktree at that path through a private mount namespace (unshare -rm, no sudo): a tmpfs on /mnt hides the 9p
+  # mounts, the path is created in it and the worktree is bound there, so nothing is read from /mnt/c (SFc, 2026-10-09).
+  if [ "${STAGE_G_BIND:-1}" = 1 ] && [ -z "${SF_NS:-}" ]; then
     case " capture fast-all vabi-quick vabi-blastn vabi-blastp vabi-tblastn vabi-tblastx " in *" $STAGE "*)
-      exec unshare -rm bash -c 'mount --bind "$1" "$2" && SF_NS=1 exec "$3" --stage "$4"' _ "$W" "$STAGE_G_ROOT" "$SELF" "$STAGE";; esac
+      exec unshare -rm bash -c 'mount -t tmpfs none /mnt && mkdir -p "$2" && mount --bind "$1" "$2" && SF_NS=1 exec "$3" --stage "$4"' _ "$W" "$STAGE_G_ROOT" "$SELF" "$STAGE";; esac
   fi
   start=$(date -u +%FT%TZ)
   [ "$STAGE" = prep ] || [ "$STAGE" = collect ] || guard

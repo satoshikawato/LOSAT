@@ -1,6 +1,6 @@
 # SFb (E2h) gate scripts: notes
 
-**Status (2026-10-09):** drafts written in SFb and checked with `bash -n` / `py_compile` only; none has run. SFc tests them (start with `STAGES=fast-all`, see open item 1 below) before the stage gate.
+**Status (2026-10-09):** drafts written in SFb and checked with `bash -n` / `py_compile` only. SFc changed `sf_gates.sh` before the first run: the Stage G namespace mounts a tmpfs on `/mnt` and binds the worktree at the path inside it (`STAGE_G_BIND` defaults to 1; `guard` checks the path only inside the namespace, so nothing outside reads `/mnt/c`), and the wasm32 test filter is `web_api::` (S10 moved the `bio` tests to `web_api::v1_bio`). SFc tries `STAGES=fast-all` first.
 
 Drafts written 2026-10-08, not run (checked with `bash -n` and `py_compile` only). They go to
 `$WT/docs/evidence/losat_web_e2h/gates/` (all files in this directory; `verify_added.py` is the one with E2h changes).
@@ -71,8 +71,8 @@ Whole `sf_gates.sh` about 6-7 h (V-ABI 2.8 h, option sweeps 1.2 h, capture + fas
 ## Open decisions (recommendation first)
 
 1. TBLASTN Stage G cases name `/mnt/c/Users/genom/GitHub/LOSAT/...` (capture, fast-all, V-ABI; `guard` checks the directory exists). Reading the Owner's Windows
-   checkout over 9p breaks the "never read /mnt/c" rule and risks EIO. Recommend `export STAGE_G_BIND=1`: those stages run under `unshare -rm` with
-   `mount --bind $WT /mnt/c/Users/genom/GitHub/LOSAT` (private namespace, no sudo, nothing read from /mnt/c). Untested; try it on `STAGES=fast-all` first. Else the Owner accepts a read-only dependency.
+   checkout over 9p breaks the "never read /mnt/c" rule and risks EIO. SFc (2026-10-09): `STAGE_G_BIND=1` is the default: those stages run under `unshare -rm` with a tmpfs on `/mnt`,
+   the path created in it and `$WT` bound there (private namespace, no sudo, nothing read from /mnt/c; probe 2026-10-09 listed and wrote through the bind).
 2. Capture (37 min) repeats the 236 cases that fast-all already hashes. Recommend keeping both (instruction names capture; cheap against the rest).
 3. `v_abi_cases.py --suite full` has no SF fasta-input cases, so V-ABI full does not exercise the new reader's rows through the ABI beyond existing cases. Recommend the implementer add a `fasta_input` group before the gate (or the verification cell cites the scan property tests only).
 4. Read-heavy perf sizes (100k x 300 nt, 5 Mb, 20k proteins) are not timed; the 100k query in WASI modes may run minutes per sample. Recommend one native timing first, then `gen_perf_inputs.py --queries/--proteins` smaller or `PERF_READ_MODES=native,serial-wasi`.

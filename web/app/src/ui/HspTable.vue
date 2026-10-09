@@ -5,6 +5,7 @@
 import { computed, ref } from 'vue';
 import type { HspEntry, HspId, ResultsBrowser, ResultsState } from '../application/results';
 import type { HspSortKey } from '../domain/result-index';
+import { framesLabel, framesText } from './format';
 import SortButton from './SortButton.vue';
 import { focusPressed, useSideScroll } from './useSideScroll';
 import VirtualRows from './VirtualRows.vue';
@@ -18,6 +19,8 @@ const selectedPosition = computed(() =>
 );
 const units = computed(() => props.state.loaded?.units ?? { query: '', subject: '' });
 const framed = computed(() => props.state.hsps.some((hsp) => hsp.queryFrame !== undefined || hsp.subjectFrame !== undefined));
+/** "Subject frame" (TBLASTN), "Query frame" (BLASTX) or "Frames (q/s)" (TBLASTX): the HSPs of a run have the same frames. */
+const framesHead = computed(() => (props.state.hsps[0] === undefined ? '' : (framesLabel(props.state.hsps[0]) ?? '')));
 const subject = computed(() => props.state.subjects.find((s) => s.sIdx === props.state.sIdx));
 const scroller = ref<HTMLElement>();
 const sideScroll = useSideScroll(scroller);
@@ -32,10 +35,8 @@ function choose(id: HspId): void {
   emit('chosen', id);
 }
 
-const signed = (value: number | undefined) => (value === undefined ? '' : value > 0 ? `+${value}` : String(value));
 /** The texts of the cells that join two values of the record. */
 const range = (start: string | undefined, end: string | undefined) => `${start}–${end}`;
-const frames = (hsp: HspEntry) => `${signed(hsp.queryFrame) || '–'}/${signed(hsp.subjectFrame) || '–'}`;
 const ORIENTATION: Readonly<Record<HspEntry['orientation'], string>> = {
   forward: 'Forward',
   reverse: 'Reverse',
@@ -86,7 +87,7 @@ const ORIENTATION: Readonly<Record<HspEntry['orientation'], string>> = {
           scope="hsp"
           @sort="sortBy"
         />
-        <span v-if="framed" class="num-head" data-col="frames" role="columnheader">Frames (q/s)</span>
+        <span v-if="framed" class="num-head" data-col="frames" role="columnheader">{{ framesHead }}</span>
         <span data-col="orientation" role="columnheader">Orientation</span>
         <span data-col="outfmt0" role="columnheader">outfmt 0</span>
       </div>
@@ -127,7 +128,7 @@ const ORIENTATION: Readonly<Record<HspEntry['orientation'], string>> = {
             <span class="num" data-field="subject" :title="range(hsp.fields.sstart, hsp.fields.send)">{{
               range(hsp.fields.sstart, hsp.fields.send)
             }}</span>
-            <span v-if="framed" class="num" data-field="frames" :title="frames(hsp)">{{ frames(hsp) }}</span>
+            <span v-if="framed" class="num" data-field="frames" :title="framesText(hsp)">{{ framesText(hsp) }}</span>
             <span class="orientation" :data-orientation="hsp.orientation" data-field="orientation" :title="ORIENTATION[hsp.orientation]">{{
               ORIENTATION[hsp.orientation]
             }}</span>

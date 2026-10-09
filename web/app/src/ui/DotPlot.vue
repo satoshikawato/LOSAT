@@ -34,7 +34,7 @@ import {
   type View,
 } from '../domain/plot-geometry';
 import { axisTicks, axisUnit, identityClass, IDENTITY_CLASSES, tickLabel, type AxisTicks } from '../domain/plot-scale';
-import { formatCount } from './format';
+import { formatCount, framesLabel, framesPhrase, framesText } from './format';
 import './plots.css';
 
 const props = defineProps<{ results: ResultsBrowser; state: ResultsState }>();
@@ -685,8 +685,6 @@ const targets = computed(() => {
   return JSON.stringify(out);
 });
 const viewText = computed(() => [view.value.x0, view.value.x1, view.value.y0, view.value.y1].map((n) => Math.round(n)).join(','));
-const signed = (value: number | undefined) => (value === undefined ? '' : value > 0 ? `+${value}` : String(value));
-const framed = (hsp: HspEntry) => hsp.queryFrame !== undefined || hsp.subjectFrame !== undefined;
 </script>
 
 <template>
@@ -759,9 +757,9 @@ const framed = (hsp: HspEntry) => hsp.queryFrame !== undefined || hsp.subjectFra
               <dd data-field="query">{{ selected.fields.qstart }}–{{ selected.fields.qend }} {{ units.query }}</dd>
               <dt>Subject</dt>
               <dd data-field="subject">{{ selected.fields.sstart }}–{{ selected.fields.send }} {{ units.subject }}</dd>
-              <template v-if="framed(selected)">
-                <dt>Frames</dt>
-                <dd data-field="frames">{{ signed(selected.queryFrame) || '–' }} / {{ signed(selected.subjectFrame) || '–' }}</dd>
+              <template v-if="framesLabel(selected)">
+                <dt>{{ framesLabel(selected) }}</dt>
+                <dd data-field="frames">{{ framesText(selected, ' / ') }}</dd>
               </template>
               <dt>Orientation</dt>
               <dd data-field="orientation">{{ ORIENTATION_TEXT[selected.orientation] }}</dd>
@@ -793,8 +791,8 @@ const framed = (hsp: HspEntry) => hsp.queryFrame !== undefined || hsp.subjectFra
     </ul>
     <p v-if="selected" class="muted small" data-testid="dotplot-selected">
       Selected: HSP {{ selected.id.rank + 1 }}, query {{ selected.fields.qstart }}–{{ selected.fields.qend }} {{ units.query }}, subject
-      {{ selected.fields.sstart }}–{{ selected.fields.send }} {{ units.subject }}<template v-if="framed(selected)"
-        >, frames {{ signed(selected.queryFrame) || '–' }} / {{ signed(selected.subjectFrame) || '–' }}</template
+      {{ selected.fields.sstart }}–{{ selected.fields.send }} {{ units.subject }}<template v-if="framesPhrase(selected)"
+        >, {{ framesPhrase(selected) }}</template
       >.
     </p>
   </figure>

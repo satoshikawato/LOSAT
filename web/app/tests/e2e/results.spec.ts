@@ -633,10 +633,11 @@ for (const c of PROGRAM_CASES) {
           const orientation = orientationOf(fields, c.units, translated);
           if (orientation !== undefined) expect(await row.getAttribute('data-orientation')).toBe(orientation);
           if (translated) {
-            expect(await field('frames')).toMatch(c.id === 'tblastn' ? /^–\/[+-][123]$/ : /^[+-][123]\/[+-][123]$/);
+            // TBLASTN shows the subject's frame only (W4b screen review L9), TBLASTX both.
+            expect(await field('frames')).toMatch(c.id === 'tblastn' ? /^[+-][123]$/ : /^[+-][123]\/[+-][123]$/);
             // The frames' signs agree with the coordinates' directions.
-            const [q, s] = (await field('frames')).split('/');
-            const sign = (frame: string | undefined) => (frame === '–' ? 1 : frame!.startsWith('-') ? -1 : 1);
+            const [q, s] = c.id === 'tblastn' ? [undefined, await field('frames')] : (await field('frames')).split('/');
+            const sign = (frame: string | undefined) => (frame === undefined ? 1 : frame.startsWith('-') ? -1 : 1);
             expect(sign(q) === sign(s) ? 'forward' : 'reverse').toBe(await row.getAttribute('data-orientation'));
             seen.frames.add(await field('frames'));
           } else {
@@ -676,7 +677,8 @@ for (const c of PROGRAM_CASES) {
         const orientation = await first.getAttribute('data-orientation');
         if (c.id === 'blastn') expect(section).toContain(` Strand=Plus/${orientation === 'reverse' ? 'Minus' : 'Plus'}\n`);
         if (translated && BUILD_HAS_ENGINE) {
-          const [q, s] = (await text(first.locator('[data-field="frames"]'))).split('/');
+          const shown = await text(first.locator('[data-field="frames"]'));
+          const [q, s] = c.id === 'tblastn' ? ['', shown] : shown.split('/');
           expect(section).toContain(c.frameLine!(q!, s!));
         }
       }
@@ -708,7 +710,7 @@ for (const c of PROGRAM_CASES) {
     await expect(page.getByTestId('dotplot')).toContainText(new RegExp(`\\([\\d,]+ ${c.units.query}\\) against subject .* \\([\\d,]+ ${c.units.subject}\\)\\.`));
     await expect(page.getByTestId('dotplot-selected')).toContainText(
       `query ${fields[6]}–${fields[7]} ${c.units.query}, subject ${fields[8]}–${fields[9]} ${c.units.subject}` +
-        (translated ? `, frames ${frames.replace('/', ' / ')}.` : '.'),
+        (c.id === 'tblastn' ? `, subject frame ${frames}.` : translated ? `, frames ${frames.replace('/', ' / ')}.` : '.'),
     );
     // The same scale on both axes, a residue counting as 3 nt against nucleotides (S13b decision
     // 26: TBLASTN's query), unless the shorter side was raised to 120 px (then the note says so).

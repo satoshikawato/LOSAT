@@ -313,7 +313,7 @@ for (const size of SIZES) {
     await openResults(page, 4);
     await page.getByTestId('pane-dotplot').click();
     await expect(canvas).toHaveAttribute('data-segments', /^[1-9]/);
-    await expect(page.getByTestId('dotplot-selected')).toContainText('frames');
+    await expect(page.getByTestId('dotplot-selected')).toContainText('subject frame');
     await shoot(page, browserName, size.name, '23-results-tblastn-dotplot');
 
     // The queue: finished runs with "Open results", a search in progress, one cancelled before

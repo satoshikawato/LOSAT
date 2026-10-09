@@ -6,8 +6,12 @@ deflines, sequence lines, line ends, text before the first defline, empty record
 input, query batches (BATCH_SIZE), -lcase_masking, for BLASTN (megablast, blastn, dc-megablast,
 blastn-short), TBLASTX, TBLASTN (protein query, nucleotide subject) and BLASTP, with outfmt 0, 6
 and 7 and, on a core subset, -num_threads 2 and 4. Rows of kind `losat-rejection` (first lines
-that NCBI would parse as a Seq-id and fetch over the network) are never run on NCBI: LOSAT must
-reject them, and the port fills their expectation (hash columns `pending`).
+that NCBI would parse as a Seq-id and fetch over the network) and the `-lcase_masking` rows of
+TBLASTX and BLASTP are never run on NCBI: LOSAT rejects them explicitly (a Seq-id first line:
+AUTHORITY.md section G4 of docs/evidence/losat_web_e2h/, exit 1, "not supported by LOSAT's <PROGRAM>";
+`-lcase_masking`: E2e, AUTHORITY.md section A of docs/evidence/losat_web_e2e/, exit 2, "the NCBI BLAST+
+option -lcase_masking is not supported by LOSAT's <PROGRAM>"). The expectation of such a row is that
+rejection: its exit code and the SHA-256 of the stdout, stderr and combined streams of the final LOSAT.
 
 - generate: writes the inputs to LOSAT/tests/fixtures/fasta_input/ (deterministic; the files are
   committed, so later runs never regenerate them).
@@ -19,14 +23,18 @@ reject them, and the port fills their expectation (hash columns `pending`).
   other rows of the manifests stay as they are); `--verify` runs NCBI again and compares with the
   manifest. -num_threads is passed to LOSAT only (NCBI ignores it with -subject and prints a
   warning that LOSAT omits: PD-LOSAT-CLI-NONSEARCH-DIFFERENCES), as the other fixtures do.
+- freeze-rejections --losat BIN --jobs N: runs LOSAT on every row of kind `losat-rejection`, requires
+  the exit code and the message of the rule above, and writes the hashes into the manifests.
 - refresh: rewrites the manifests from their existing hashes and the current row definitions.
 - check --losat BIN --out TSV --jobs N: runs `LOSAT <program> <argv>` on the same rows from
   LOSAT/ and compares stdout, stderr, the exit code and the combined `2>&1` stream with the
   manifest. One line per row: `same`, `differs` (with the first differing line, when the frozen
   files of --expected are present), `rejects` (LOSAT's explicit "not supported by LOSAT"
-  rejection where NCBI reads the input: the port must turn it into `same`), `pending` (the
-  expectation is not filled yet) or `error`. A last column `group` marks the rows whose option LOSAT rejects today
-  (`-lcase_masking` of TBLASTX/BLASTP; port or explicit rejection is decided in SFb) and the summary counts them apart.
+  rejection where NCBI reads the input: the port must turn it into `same`), `rejection` (a row of kind
+  `losat-rejection` with LOSAT's frozen explicit rejection: expected), `pending` (the expectation is not
+  filled yet) or `error`. A last column `group` marks the rows whose option LOSAT rejects
+  (`-lcase_masking` of TBLASTX/BLASTP) and the summary counts them apart. The exit status is 0 only when every
+  selected row is `same` or `rejection`; `pending`, `rejects`, `differs` and `error` fail.
 
 NCBI is run without ~/.ncbirc, with BLASTDB, BATCH_SIZE, CHUNK_SIZE, OVERLAP_CHUNK_SIZE and
 BLASTINPUT_GEN_DELTA_SEQ unset (a row sets them in `env`), and no byte of its output is
@@ -38,6 +46,7 @@ cuts the network, where it works).
 Usage:
   fasta_input_fixtures.py generate
   fasta_input_fixtures.py refresh
+  fasta_input_fixtures.py freeze-rejections --losat BIN [--jobs N] [--rows blastn]
   fasta_input_fixtures.py freeze --ncbi-bin DIR --out DIR [--jobs N] [--rows blastn,tblastx] [--verify]
   fasta_input_fixtures.py check --losat BIN --out TSV [--jobs N] [--rows blastn] [--expected DIR]
 """
@@ -62,7 +71,7 @@ FIXTURES = ENGINE / "tests/fixtures/fasta_input"
 REL = "tests/fixtures/fasta_input"
 MANIFEST_DIR = ENGINE / "tests/fasta_input_fixtures"      # one <program>.tsv per program
 EMPTY_SHA256 = hashlib.sha256(b"").hexdigest()
-OPTION_NOTE = "option rejected today; port or keep as an explicit rejection is decided in SFb"
+OPTION_NOTE = "option rejected explicitly by LOSAT (E2e, AUTHORITY.md section A of losat_web_e2e)"
 TIMEOUT = 180
 # NCBI reads these and each one changes the batches or the report.
 REPORT_ENV = ("BL2SEQ_LEGACY", "CTOOLKIT_COMPATIBLE", "OLD_FSC", "BATCH_SIZE", "CHUNK_SIZE", "ADAPTIVE_CBS",
@@ -81,7 +90,7 @@ class Row:
     threads: str
     stdin: str          # "", "pipe:<path>", "file:<path>" or "empty" (an empty pipe)
     env: str
-    kind: str           # ncbi | losat-rejection
+    kind: str           # ncbi | losat-rejection (never run on NCBI; the expectation is LOSAT's explicit rejection)
     tier: str = ""      # core (all BLASTN tasks, outfmt 0/6/7), full (fewer), extra (stdin, batches, ...), seqid
     rc: str = "pending"
     stdout_sha256: str = "pending"
@@ -733,7 +742,9 @@ def build_rows() -> list[Row]:
                             note = v["note"]
                             if args and program in ("tblastx", "blastp"):
                                 note = (note + "; " if note else "") + "-lcase_masking: " + OPTION_NOTE
-                            rows.append(make_row(rid, program, task, query, subject, args, fmt, note=note, tier=v["tier"]))
+                            lcm_rejected = bool(args) and program in ("tblastx", "blastp")
+                            rows.append(make_row(rid, program, task, query, subject, args, fmt, note=note, tier=v["tier"],
+                                                 kind="losat-rejection" if lcm_rejected else "ncbi"))
                             if v["threads"] and not args and (fmt == 0 or (fmt == 6 and task == "megablast")) \
                                     and task in ("", "megablast"):
                                 for n in (2, 4):
@@ -848,8 +859,8 @@ def extra_rows() -> list[Row]:
     add("prot_in_tblastn_subject", "tblastn", "", f"@/base.q.prot.faa", f"@/base.s.prot.faa", fmts=(6, 0))
     add("nuc_in_tblastn_query", "tblastn", "", f"@/base.q.nuc.fa", f"@/base.s.nuc.fa", fmts=(6, 0))
     add("prot_in_tblastx", "tblastx", "", f"@/base.q.prot.faa", f"@/base.s.nuc.fa", fmts=(6, 0))
-    # Seq-id first lines: NCBI fetches these over the network, so they are never run on NCBI. LOSAT must
-    # reject them with "not supported by LOSAT"; the port fills the expected output.
+    # Seq-id first lines: NCBI fetches these over the network, so they are never run on NCBI. LOSAT rejects
+    # them with "not supported by LOSAT's <PROGRAM>" (exit 1; freeze-rejections stores the hashes).
     for i, line in enumerate(SEQID_LINES):
         for program, task, role in (("blastn", "megablast", "q"), ("blastn", "blastn", "q"), ("blastn", "megablast", "s"),
                                     ("tblastx", "", "q"), ("tblastn", "", "q"), ("tblastn", "", "s"),
@@ -1078,10 +1089,10 @@ def filter_rows(rows: list[Row], selector: str | None, match: str | None = None,
 
 MANIFEST_HEAD = (
     "# Frozen outputs of {version} for FASTA-input cases (comparison oracle only; see fasta_input_fixtures.py).\n"
-    "# Only what `freeze` measured is stored; the row definitions (inputs, args, outfmt, threads, stdin, env, kind, tier, note) are in the script's generator.\n"
+    "# Only what `freeze`/`freeze-rejections` measured is stored; the row definitions (inputs, args, outfmt, threads, stdin, env, kind, tier, note) are in the script's generator.\n"
     "# `@S <n> <sha256>` lines are a table of the distinct non-empty stderr hashes. Row lines: row_id, rc, stdout sha256,\n"
     "# stderr (`-` = empty stream, else a table index n), combined `2>&1` stream (`=` = same as stdout, `~` = same as stderr, else its sha256).\n"
-    "# Rows of kind losat-rejection and rows not frozen yet have no line (their expectation is `pending`). Written by `freeze`/`refresh`; do not edit.\n")
+    "# Rows of kind losat-rejection hold the hashes of LOSAT's explicit rejection (`freeze-rejections`), not NCBI's. Rows not frozen yet have no line (`pending`). Written by `freeze`/`freeze-rejections`/`refresh`; do not edit.\n")
 
 
 def manifest_files() -> list[Path]:
@@ -1120,7 +1131,7 @@ def read_manifest() -> list[Row]:
     frozen = load_frozen()
     rows = build_rows()
     for row in rows:
-        if row.kind == "ncbi" and row.row_id in frozen:
+        if row.row_id in frozen:
             row.rc, row.stdout_sha256, row.stderr_sha256, row.combined_sha256 = frozen[row.row_id]
     return rows
 
@@ -1129,7 +1140,7 @@ def write_manifest(rows: list[Row], version: str) -> None:
     MANIFEST_DIR.mkdir(parents=True, exist_ok=True)
     by_program: dict[str, list[Row]] = {}
     for row in rows:
-        if row.kind == "ncbi" and row.rc != "pending":
+        if row.rc != "pending":
             by_program.setdefault(row.program, []).append(row)
     for stale in manifest_files():
         if stale.stem not in by_program:
@@ -1171,6 +1182,50 @@ def freeze_one(ncbi_bin: Path, out: Path, row: Row, netns: bool) -> tuple[Row, s
     row.stderr_sha256 = sha256(result["stderr"])
     row.combined_sha256 = sha256(result["combined"])
     return row, note
+
+
+def rejection_rule(row: Row) -> tuple[int, str]:
+    """(exit code, text of stderr) that a row of kind losat-rejection must give."""
+    name = f"LOSAT's {row.program.upper()}"
+    if "-lcase_masking" in row.args:
+        return 2, f"the NCBI BLAST+ option -lcase_masking is not supported by {name}"
+    return 1, f"not supported by {name}"
+
+
+def freeze_rejection(losat: Path, row: Row) -> tuple[Row, str]:
+    result = streams([str(losat), row.program, *row_argv(row, True)], row)
+    if result["rc"] == -999 or result["rc_merged"] == -999:
+        return row, "error: timeout"
+    rc, text = rejection_rule(row)
+    if result["rc"] != rc or result["rc_merged"] != rc or text.encode() not in result["stderr"] \
+            or text.encode() not in result["combined"] or result["stdout"]:
+        first = result["stderr"].split(b"\n")[0][:140].decode(errors="replace")
+        return row, f"error: not the expected rejection (exit {result['rc']}, expected {rc} with `{text}`): {first}"
+    row.rc = str(rc)
+    row.stdout_sha256 = sha256(result["stdout"])
+    row.stderr_sha256 = sha256(result["stderr"])
+    row.combined_sha256 = sha256(result["combined"])
+    return row, ""
+
+
+def command_freeze_rejections(args) -> int:
+    """Write the exit code and the stream hashes of LOSAT's explicit rejection into the manifests."""
+    losat = Path(args.losat).resolve()
+    rows = read_manifest()
+    selected = filter_rows([r for r in rows if r.kind == "losat-rejection"], args.rows, args.match, args.tier)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
+        results = list(pool.map(lambda r: freeze_rejection(losat, r), selected))
+    problems = 0
+    for row, note in results:
+        if note:
+            problems += 1
+            print(f"{row.row_id}\t{note}", flush=True)
+    if problems:
+        print(f"{problems} problems; the manifests are not written")
+        return 1
+    write_manifest(rows, manifest_version())
+    print(f"{len(results)} rejection rows frozen")
+    return 0
 
 
 def command_freeze(args) -> int:
@@ -1228,7 +1283,7 @@ def command_refresh(args) -> int:
     frozen = load_frozen()
     ids = {r.row_id for r in rows}
     stale = sorted(set(frozen) - ids)
-    new = sum(1 for r in rows if r.kind == "ncbi" and r.rc == "pending")
+    new = sum(1 for r in rows if r.rc == "pending")
     write_manifest(rows, manifest_version())
     print(f"{len(rows)} rows, {new} without a frozen expectation (run freeze for them), {len(stale)} stale frozen rows dropped")
     return 0
@@ -1258,7 +1313,7 @@ def check_one(losat: Path, expected_dir: Path | None, row: Row) -> tuple[Row, st
     names = {"rc": "exit", "stdout_sha256": "stdout", "stderr_sha256": "stderr", "combined_sha256": "combined"}
     differing = [names[f] for f in EXPECTED if actual[f] != getattr(row, f)]
     if not differing:
-        return row, "same", ""
+        return row, "rejection" if row.kind == "losat-rejection" else "same", ""
     detail = []
     if "exit" in differing:
         detail.append(f"exit {actual['rc']}, expected {row.rc}")
@@ -1305,7 +1360,7 @@ def command_check(args) -> int:
     if grouped:
         print(f"separate group, {OPTION_NOTE}: " + " ".join(f"{k}={v}" for k, v in sorted(grouped.items())),
               f"rows={sum(grouped.values())}")
-    return 0 if set(counts) <= {"same", "pending"} else 1
+    return 0 if set(counts) <= {"same", "rejection"} else 1
 
 
 def main() -> int:
@@ -1313,6 +1368,12 @@ def main() -> int:
     sub = parser.add_subparsers(dest="action", required=True)
     sub.add_parser("generate")
     sub.add_parser("refresh", help="rewrite the manifest from the row definitions, keeping the frozen hashes")
+    frej = sub.add_parser("freeze-rejections")
+    frej.add_argument("--losat", required=True)
+    frej.add_argument("--jobs", type=int, default=3)
+    frej.add_argument("--rows", help="comma-separated programs")
+    frej.add_argument("--match", help="only rows whose id contains this text")
+    frej.add_argument("--tier", help="comma-separated tiers: core, full, extra, seqid")
     freeze = sub.add_parser("freeze")
     freeze.add_argument("--ncbi-bin", required=True)
     freeze.add_argument("--out", required=True)
@@ -1332,6 +1393,7 @@ def main() -> int:
     check.add_argument("--expected", help="directory of the frozen files (default $BUILD_ROOT/sf-e2h/fixtures/ncbi)")
     args = parser.parse_args()
     return {"generate": command_generate, "refresh": command_refresh, "freeze": command_freeze,
+            "freeze-rejections": command_freeze_rejections,
             "check": command_check}[args.action](args)
 
 

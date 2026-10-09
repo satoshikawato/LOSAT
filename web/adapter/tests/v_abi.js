@@ -10,7 +10,9 @@
 // reactor with 1, 2 and 4 (the host appends -num_threads, docs/web/abi_v2.md §7).
 //
 // The searches come from web/adapter/tools/v_abi_cases.py; where a frozen SHA-256
-// exists (Gate A, the Stage G matrix) the match is recorded as well.
+// exists (Gate A, the Stage G matrix, NCBI's fixtures) the match is recorded as well. A
+// search marked `"expect": "failure"` must fail in the CLI and in the ABI with the same
+// error.
 //
 // Usage: node v_abi.js --native LOSAT --serial losat-web-serial.wasm
 //          --threads losat-web-threads.wasm --cases CASES.json [--engines serial,threads]
@@ -123,20 +125,39 @@ function inputPath(search, option) {
   return path.resolve(search.cwd, search.argv[search.argv.indexOf(option) + 1]);
 }
 
+// The CLI's outputs of a search, one run per format with -out. A search with
+// `"expect": "failure"` fails in the CLI (exit 3 or 1), whose files keep what was written
+// before the failure (the outfmt 0 prolog before a first query batch fails).
 function nativeOutputs(native, search, scratch) {
   const outputs = new Map();
-  let stderr = null;
+  let stderr = null, status = null;
   for (const format of FORMATS[search.program]) {
     const out = path.join(scratch, `native.${format}.out`);
     const argv = [...search.argv, "-outfmt", String(format), "-num_threads", "1", "-out", out];
     const result = require("node:child_process").spawnSync(native, argv, { cwd: search.cwd, maxBuffer: 1 << 30 });
-    if (result.status !== 0) throw new Error(`native ${argv.join(" ")} failed: ${result.error ?? result.stderr}`);
-    outputs.set(format, fs.readFileSync(out));
-    fs.rmSync(out);
-    if (stderr === null) stderr = result.stderr;
+    const failed = result.status !== 0;
+    if (failed !== (search.expect === "failure")) {
+      throw new Error(`native ${argv.join(" ")} ${failed ? "failed" : "succeeded"} (exit ${result.status}): ${result.error ?? result.stderr}`);
+    }
+    outputs.set(format, fs.existsSync(out) ? fs.readFileSync(out) : Buffer.alloc(0));
+    fs.rmSync(out, { force: true });
+    if (stderr === null) [stderr, status] = [result.stderr, result.status];
     else assert.equal(sha256(result.stderr), sha256(stderr), "the CLI writes the same warnings for every format");
   }
-  return { outputs, stderr };
+  return { outputs, stderr, status };
+}
+
+// A run that fails as the CLI fails: the CLI's error is the last message of its standard
+// error (the warnings before it go to stream 3, which a failed run does not send), and
+// whatever the run sent of an output before it failed is the start of the CLI's file.
+function checkFailure(run, expected, program, label) {
+  assert.equal(run.status, -1, `${label}: the run fails as the CLI (exit ${expected.status})`);
+  assert.ok(run.error.length > 0 && expected.stderr.toString().endsWith(run.error), `${label}: the CLI's error (${run.error})`);
+  for (const format of FORMATS[program]) {
+    const sent = run.streams.get(format) || Buffer.alloc(0);
+    assert.ok(expected.outputs.get(format).subarray(0, sent.length).equals(sent), `${label}: outfmt ${format} before the failure`);
+  }
+  assert.ok(expected.outputs.get(0).length > 0, `${label}: the CLI's outfmt 0 file has the prolog`);
 }
 
 function checkHits(streams, program, label) {
@@ -220,12 +241,13 @@ function checkSurface(reactor, native) {
   assert.match(reactor.call("losat_web2_validate", ["blastn", "-query", "q", "-subject", "s", "-task", "dc-megablast",
                                                     "-word_size", "13"].join("\0")).error,
                /^BLAST query\/options error: Invalid discontiguous template parameters: word size must be either 11 or 12/);
-  // register and scan agree on a multi-record input, in chunks of any size.
+  // register and the scan of the program's kind (2: the TBLASTN query) agree on a
+  // multi-record input, in chunks of any size.
   const input = fs.readFileSync(path.join(ROOT, "docs/evidence/tlosan_stage_c/multi_query_20260924/query.faa"));
   const registered = reactor.call("losat_web2_register", "tblastn", 0, input);
   assert.ok(registered.status > 0, registered.error);
   const records = JSON.parse(registered.streams.get(2).toString()).records;
-  const scanner = reactor.exports.losat_web2_scan_begin(0);
+  const scanner = reactor.exports.losat_web2_scan_begin(2);
   assert.ok(scanner > 0);
   for (let at = 0; at < input.length; at += 37) {
     assert.equal(reactor.call("losat_web2_scan_chunk", scanner, input.subarray(at, at + 37)).status, 0);
@@ -236,9 +258,16 @@ function checkSurface(reactor, native) {
   assert.deepEqual(index.map((r) => [r.id, r.length]), records.map((r) => [r.id, r.length]), "scan and register agree");
   assert.equal(reactor.call("losat_web2_release", registered.status).status, 0);
   assert.equal(reactor.call("losat_web2_release", registered.status).status, -1, "a released handle is gone");
-  const bad = reactor.call("losat_web2_register", "blastp", 0, Buffer.from("ACGT\n>x\nAC\n"));
-  assert.equal(bad.status, -1);
-  assert.match(bad.error, /Expected > at record start/);
+  // NCBI's protein reader reads a first record without a defline (its ID is empty), and
+  // LOSAT Web rejects a gap line, which its index cannot locate (abi_v2.md §4, §9).
+  const headless = reactor.call("losat_web2_register", "blastp", 0, Buffer.from("ACGT\n>x\nAC\n"));
+  assert.ok(headless.status > 0, headless.error);
+  assert.deepEqual(JSON.parse(headless.streams.get(2).toString()).records.map((r) => [r.id, r.length]),
+                   [["", 4], ["x", 2]]);
+  assert.equal(reactor.call("losat_web2_release", headless.status).status, 0);
+  const gap = reactor.call("losat_web2_register", "blastn", 1, Buffer.from(">s\nACGT\n>?10\nACGT\n"));
+  assert.equal(gap.status, -1);
+  assert.match(gap.error, /^line 3 is a gap line .*not supported by LOSAT Web$/);
 }
 
 async function main() {
@@ -274,6 +303,13 @@ async function main() {
         const run = reactor.call("losat_web2_run", argv, q.status, subjects.get(subjectKey));
         if (waitForWorkers) await waitForWorkers();
         const label = `${engine.name} n${threads} ${search.cases.join(",")}`;
+        if (search.expect === "failure") {
+          checkFailure(run, expected, program, label);
+          results.push({ engine: engine.name, threads, program, cases: search.cases, argv: search.argv, formats: {}, frozen: {},
+                         failure: run.error });
+          console.log(`ok ${label} (fails as the CLI)`);
+          continue;
+        }
         assert.equal(run.status, 0, `${label}: ${run.error}`);
         const row = { engine: engine.name, threads, program, cases: search.cases, argv: search.argv, formats: {}, frozen: {} };
         for (const format of FORMATS[program]) {

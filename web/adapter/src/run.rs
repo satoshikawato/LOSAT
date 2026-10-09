@@ -4,7 +4,6 @@ use std::fmt::Write as _;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use bio::io::fasta;
 use LOSAT::api::local_blast::{
     run_local_blastn, run_local_blastp, run_local_tblastn, run_local_tblastx, FormatObserver,
     FormatOutput, HspIndex, OutputSink, ReportOutputs,
@@ -199,24 +198,50 @@ impl FormatObserver for RangeRecorder {
     }
 }
 
-/// The records of NCBI's reader made from the registered `bio` records (`Query_N`,
-/// `Subject_N`); `protein` is the molecule of the input (BLASTP's query and subjects,
-/// TBLASTN's query).
-fn reader_records(records: &[fasta::Record], prefix: &str, protein: bool) -> Vec<FastaRecord> {
-    records
-        .iter()
-        .enumerate()
-        .map(|(index, record)| FastaRecord::from_bio(record, index + 1, prefix, protein))
-        .collect()
+/// The registered index of each query that the engine searches: NCBI's batch reader skips
+/// a query whose `-query_loc` interval starts more than one letter past its end
+/// (`seq_range::cut_queries`), so the engine's `q_idx` counts the searched queries; the
+/// HSP records give the registered index (docs/web/abi_v2.md §8, port plan Q8). `None`
+/// without `-query_loc` (every query is searched); a range that does not parse fails the
+/// run before any hit.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:146-155
+/// ```c++
+///         try { q.Reset(m_Source->GetNextSequence(scope)); }
+///         catch (const CObjReaderParseException& e) {
+///             if (e.GetErrCode() == CObjReaderParseException::eEOF) {
+///                 break;
+///             }
+///             throw;
+///         }
+///         catch (const exception&) {
+///             continue; //SB-2307. ignore well formed, not found accession
+///         }
+/// ```
+fn searched_queries(
+    query_loc: Option<&str>,
+    program: &str,
+    records: &[FastaRecord],
+) -> Option<Vec<usize>> {
+    use LOSAT::blastinput::seq_range::{
+        parse_optional_range, record_interval, RangeRole, RecordInterval,
+    };
+    let range = parse_optional_range(query_loc, RangeRole::Query, program).ok()??;
+    Some(
+        records
+            .iter()
+            .enumerate()
+            .filter(|(_, record)| {
+                record_interval(&range, record.seq().len()) != RecordInterval::PastEnd
+            })
+            .map(|(index, _)| index)
+            .collect(),
+    )
 }
 
 /// Runs one search and emits its streams. On failure nothing more is emitted and the
 /// host discards what it received.
-pub fn run(
-    words: &[&str],
-    query: &[fasta::Record],
-    subject: &[fasta::Record],
-) -> Result<(), String> {
+pub fn run(words: &[&str], query: &[FastaRecord], subject: &[FastaRecord]) -> Result<(), String> {
     let (program, command) = parse(words)?;
     let formats = program.formats();
     let mut writers: Vec<StreamWriter> = formats.iter().map(|&f| StreamWriter::new(f)).collect();
@@ -234,6 +259,7 @@ pub fn run(
     };
     let outfmts: Vec<String> = formats.iter().map(u32::to_string).collect();
     let mut collected: Option<Vec<PairwiseHit>> = None;
+    let ordinals;
     {
         let mut on_hits = |hits: &[PairwiseHit]| collected = Some(hits.to_vec());
         let mut outputs = ReportOutputs {
@@ -250,35 +276,22 @@ pub fn run(
             observer: Some(&mut recorder),
         };
         let result = match command {
-            // The registered records enter the searches as NCBI's reader's records
-            // (`FastaRecord::from_bio`): `register` reads only inputs that `bio` reads as
-            // NCBI does (port plan, steps S3, S5, S6, S7 and S10).
-            Commands::Blastp(args) => run_local_blastp(
-                args,
-                &reader_records(query, "Query_", true),
-                &reader_records(subject, "Subject_", true),
-                "",
-                "",
-                &mut outputs,
-            ),
-            Commands::Tblastn(args) => run_local_tblastn(
-                args,
-                &reader_records(query, "Query_", true),
-                &reader_records(subject, "Subject_", false),
-                &mut outputs,
-            ),
-            Commands::Blastn(args) => run_local_blastn(
-                args,
-                &reader_records(query, "Query_", false),
-                &reader_records(subject, "Subject_", false),
-                &mut outputs,
-            ),
-            Commands::Tblastx(args) => run_local_tblastx(
-                args,
-                &reader_records(query, "Query_", false),
-                &reader_records(subject, "Subject_", false),
-                &mut outputs,
-            ),
+            Commands::Blastp(args) => {
+                ordinals = searched_queries(args.query_loc.as_deref(), "BLASTP", query);
+                run_local_blastp(args, query, subject, "", "", &mut outputs)
+            }
+            Commands::Tblastn(args) => {
+                ordinals = searched_queries(args.query_loc.as_deref(), "TBLASTN", query);
+                run_local_tblastn(args, query, subject, &mut outputs)
+            }
+            Commands::Blastn(args) => {
+                ordinals = searched_queries(args.query_loc.as_deref(), "BLASTN", query);
+                run_local_blastn(args, query, subject, &mut outputs)
+            }
+            Commands::Tblastx(args) => {
+                ordinals = searched_queries(args.query_loc.as_deref(), "TBLASTX", query);
+                run_local_tblastx(args, query, subject, &mut outputs)
+            }
             Commands::Blastx(_) => unreachable!("rejected by Program::parse"),
         };
         result.map_err(|error| format!("{error:#}"))?;
@@ -296,22 +309,26 @@ pub fn run(
     }
     diagnostics.finish();
     if let Some(hits) = collected {
-        emit_hit_records(&hits, &recorder);
+        emit_hit_records(&hits, &recorder, ordinals.as_deref());
     }
     Ok(())
 }
 
-/// Emits one JSON object per HSP on stream 1 (docs/web/abi_v2.md §8).
-fn emit_hit_records(hits: &[PairwiseHit], recorder: &RangeRecorder) {
+/// Emits one JSON object per HSP on stream 1 (docs/web/abi_v2.md §8); `ordinals` maps the
+/// engine's `q_idx` (searched queries) to the registered index (`searched_queries`).
+fn emit_hit_records(hits: &[PairwiseHit], recorder: &RangeRecorder, ordinals: Option<&[usize]>) {
     let mut lines = String::new();
-    let mut ranks: std::collections::HashMap<u32, usize> = std::collections::HashMap::new();
+    let mut ranks: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
     for (index, record) in hits.iter().enumerate() {
         let hit = &record.hit;
-        let rank = ranks.entry(hit.q_idx).or_default();
+        let q_idx = ordinals
+            .and_then(|ordinals| ordinals.get(hit.q_idx as usize).copied())
+            .unwrap_or(hit.q_idx as usize);
+        let rank = ranks.entry(q_idx).or_default();
         let _ = write!(
             lines,
-            "{{\"index\":{index},\"q_idx\":{},\"s_idx\":{},\"rank\":{rank},\"raw_score\":{},\"bit_score\":",
-            hit.q_idx, hit.s_idx, hit.raw_score
+            "{{\"index\":{index},\"q_idx\":{q_idx},\"s_idx\":{},\"rank\":{rank},\"raw_score\":{},\"bit_score\":",
+            hit.s_idx, hit.raw_score
         );
         *rank += 1;
         json::number(&mut lines, hit.bit_score);
@@ -498,6 +515,54 @@ mod tests {
             subject: None,
             fault: None,
         }
+    }
+
+    // The HSP records give the registered index of a query where `-query_loc` skips
+    // an earlier record (its interval starts past its end), and records without residues
+    // are registered records too.
+    #[test]
+    fn q_idx_is_the_registered_index() {
+        let protein = b"MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ";
+        let query = [
+            FastaRecord::new("Query_1", b"short", b"MK"),
+            FastaRecord::new("Query_2", b"empty", b""),
+            FastaRecord::new("Query_3", b"q", protein),
+        ];
+        let subject = [FastaRecord::new("Subject_1", b"s", protein)];
+        let q_idx = |words: &[&str]| {
+            crate::emit::EMITTED.with(|emitted| emitted.borrow_mut().clear());
+            run(words, &query[1..], &subject).unwrap();
+            let hits = crate::emit::EMITTED.with(|emitted| {
+                emitted
+                    .borrow()
+                    .iter()
+                    .filter(|(stream, _)| *stream == crate::emit::STREAM_HITS)
+                    .flat_map(|(_, bytes)| bytes.clone())
+                    .collect::<Vec<u8>>()
+            });
+            let hits = String::from_utf8(hits).unwrap();
+            assert!(!hits.is_empty(), "{words:?}");
+            hits.lines()
+                .map(|line| {
+                    let at = line.find("\"q_idx\":").unwrap() + 8;
+                    line[at..]
+                        .split(',')
+                        .next()
+                        .unwrap()
+                        .parse::<usize>()
+                        .unwrap()
+                })
+                .collect::<Vec<_>>()
+        };
+        // The query without residues is searched as a query without data (engine q_idx 1);
+        // with the range it is skipped (engine q_idx 0), and the record stays the second.
+        let words = ["blastp", "-query", "q", "-subject", "s"];
+        assert!(q_idx(&words).iter().all(|&index| index == 1));
+        let ranged = [&words[..], &["-query_loc", "5-40"]].concat();
+        assert!(q_idx(&ranged).iter().all(|&index| index == 1));
+        let ordinals = searched_queries(Some("5-40"), "BLASTP", &query).unwrap();
+        assert_eq!(ordinals, vec![2]);
+        assert_eq!(searched_queries(None, "BLASTP", &query), None);
     }
 
     // Observer events that break the formatter contract fail the run instead of

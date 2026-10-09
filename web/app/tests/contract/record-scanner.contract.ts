@@ -4,7 +4,7 @@
 // reports; the adapter is the authority (plan TD-8). The FakeScanner runs these cases in
 // Vitest; S09 runs them against the adapter's serial reactor. The layout kind is not
 // prescribed: the cases check that the layout finds every residue.
-import type { IndexedRecord } from '../../src/domain/dataset';
+import type { FastaParserKind, IndexedRecord } from '../../src/domain/dataset';
 import type { RecordScanner, ScanResponse } from '../../src/ports/scan';
 import { check, rejects, same, sameBytes, sameValue, type ContractCase } from './contract';
 
@@ -255,10 +255,12 @@ export const RECORD_SCANNER_CASES: readonly ContractCase<RecordScannerEnv>[] = [
     },
   },
   {
-    // Parser kind 1 (BLASTX's reader) joins in SX; SX replaces this case with its corpus.
-    name: 'scan: parser kind 1 is refused until SX',
+    // Kinds 1 (NCBI's reader with the nucleotide flags) and 2 (with the protein flags) are the
+    // adapter's (abi_v2.md §4, §9; tests/unit/engine-runtime.test.ts scans with them). SX joins
+    // BLASTX to them later. The FakeScanner has kind 0 only, so every scanner refuses another kind (the app's type has kinds 0 and 1 only).
+    name: 'scan: an unknown parser kind is refused',
     async run({ scanner }) {
-      await rejects(scanner.scan(1, chunked(encoder.encode('>a\nAC\n'), 0)), /parser kind 1/, 'kind 1');
+      await rejects(scanner.scan(3 as unknown as FastaParserKind, chunked(encoder.encode('>a\nAC\n'), 0)), /parser kind 3/, 'kind 3');
     },
   },
 ];

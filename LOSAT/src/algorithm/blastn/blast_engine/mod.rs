@@ -19,8 +19,9 @@ mod run;
 // Re-export the main run function
 pub use run::run;
 pub use run::run_local;
+// ABI v1 (`web_api::v1_blastn`) checks a search without subjects as the CLI does.
 #[cfg(target_arch = "wasm32")]
-pub use run::run_web_pair;
+pub(crate) use run::check_subjects_not_empty;
 // The end of a query reading and NCBI's message for a sequence without letters, shared with
 // TBLASTX (port plan step S5).
 pub(crate) use run::{QueryReading, NO_DATA_MESSAGE};

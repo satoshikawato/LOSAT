@@ -1,4 +1,4 @@
-# SFb step 6 sweeps: scripts, frozen NCBI side, before counts (2026-10-08)
+# SFb step 6 sweeps: scripts, frozen NCBI side, before counts (2026-10-08), final counts (SFc, 2026-10-09)
 
 Scripts `fasta_sweep.py` and `check_inputs.py` in this directory (both
 scripts import each other from their own directory, and `check_inputs.py` finds E2g's script in
@@ -6,7 +6,7 @@ scripts import each other from their own directory, and `check_inputs.py` finds 
 
 - `fasta_sweep.py`: seeded FASTA mutation sweep (also the shared library: runner, classes, summary).
 - `check_inputs.py`: E2g's `check_inputs.py` with the E2h expectations plus TBLASTX/TBLASTN/BLASTP input cases.
-- `before-counts.md`: class counts of the S11 build (before any port) per program x role x outfmt.
+- `sweeps-before-counts.md`: class counts of the S11 build (before any port) per program x role x outfmt.
 
 Outputs: `$BUILD_ROOT/sfb-e2h/sweeps/` (`fasta_sweep/` inputs and `cases.tsv`, `work/check_inputs/`,
 `ncbi/{fasta_sweep,check_inputs}/` frozen NCBI, `ncbi-run2/` the determinism run, `before/*.tsv`).
@@ -31,9 +31,24 @@ python3 $S/fasta_sweep.py summary <TSV> [<TSV> ...]
 python3 $S/fasta_sweep.py compare-frozen $R/ncbi/fasta_sweep $R/ncbi-run2/fasta_sweep
 ```
 
-`<LOSAT>` is the binary that has the port (the before run used `~/.cache/losat-web-gui-target/sf/bin/LOSAT-native`).
+`<LOSAT>` is the binary that has the port (the before run used `~/.cache/losat-web-gui-target/sf/bin/LOSAT-native`;
+the final run, SFc 2026-10-09, `$BUILD_ROOT/sfb-e2h/final/LOSAT`, a release build of the worktree at `02277def`).
 Both `check` commands exit 1 when a case is `differs`, `timeout`, an unlisted rejection, or (check_inputs)
 not the expected class. Take the load average under 12 first (`freeze` and `check` wait by themselves).
+
+## Final counts (SFc, 2026-10-09)
+
+Final binary above, `--jobs 3`; TSVs and summaries in `$TASK_DIR/logs/sweeps-final/`.
+
+| Script | Cases | same | same-error | explicit-rejection | unlisted | approved-exception | differs | timeout | LOSAT check |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `fasta_sweep.py` | 2280 | 2134 | 68 | 70 | 0 | 8 | 0 | 0 | 9.1 s |
+| `check_inputs.py` | 1032 | 841 | 149 | 23 | 0 | 19 | 0 | 0 | 4.5 s (0 unexpected) |
+
+The 70 explicit rejections of fasta_sweep are 68 Seq-id first lines (NCBI cannot reach the network under
+`unshare -rn`) and the 2 BLASTP punctuation subject titles in outfmt 0 (`prots.052/053.o0`). The 23 of check_inputs are
+E2g's option rejections, the non-integer `BATCH_SIZE` and the same 2 BLASTP punctuation rows. Before the port: 759 `same`
+and 1513 `explicit-rejection/unlisted` of 2280, and 396 `same` and 485 unlisted of 1032 (`sweeps-before-counts.md`).
 
 ## Cases and run times
 
@@ -63,14 +78,14 @@ may try as a Seq-id; NCBI is run in `unshare -rn` and cannot reach the network: 
 | --- | --- |
 | `same` | NCBI succeeds; LOSAT has the same exit code, stdout, stderr and `2>&1` stream |
 | `same-error` | NCBI fails; LOSAT has the same exit code and NCBI's stdout, stderr and `2>&1` |
-| `explicit-rejection` | LOSAT exits non-zero, stderr contains `not supported by LOSAT's <PROGRAM>`, and the message is one AUTHORITY.md section J lists (`LISTED_REJECTIONS` in `fasta_sweep.py`: Seq-id line, `-parse_deflines`, record over 2147483647 letters, non-UTF-8 `Subject_` title). In check_inputs also the option rejections of E2g (the case expects it) |
-| `explicit-rejection/unlisted` | the same, with a message that J does not list: a failure of the port (turn it into `same` or add it to AUTHORITY.md) |
+| `explicit-rejection` | LOSAT exits non-zero, stderr contains `not supported by LOSAT's <PROGRAM>`, and the message is one the port keeps (`LISTED_REJECTIONS` in `fasta_sweep.py`: Seq-id line (G4), `-parse_deflines`, record over 2147483647 letters, non-UTF-8 `Subject_` title (RP-20), `-lcase_masking`, a non-integer `BATCH_SIZE` (J-7), and BLASTP's punctuation-only subject title in outfmt 0, kept as an explicit rejection while the Owner decides whether approved exception 2 extends to BLASTP (S7 decision 4)). In check_inputs also the option rejections of E2g (the case expects it) |
+| `explicit-rejection/unlisted` | the same, with a message that is not listed: a failure of the port (turn it into `same` or list it in the script and AUTHORITY.md) |
 | `approved-exception` | NCBI dies of a signal and LOSAT exits 0 (approved exception 2 of PD-LOSAT-NCBI-DEFECTS, punctuation title; column `approval` names it), or both argument parsers reject (approved exception 1 of PD-LOSAT-CLI-NONSEARCH-DIFFERENCES; check_inputs only) |
 | `differs` | anything else, with the first differing line in `detail` |
 | `timeout` | a run took over 120 s |
 
 check_inputs `expect` values: `same`, `same-error`, `explicit-rejection` and `approved-exception` as E2g (its
-`losat-rejects` = `explicit-rejection`, `arg-error` and `exception-2` = `approved-exception`); `fixed` = the 31
+`losat-rejects` = `explicit-rejection`, `arg-error` and `exception-2` = `approved-exception`); `explicit-rejection` is also the expectation of the two BLASTP punctuation-title rows (`e2h.blastp.punctuation_title{,_semicolon}.s.o0`, `EXPECT_OVERRIDE`); `fixed` = the 31
 E2g `losat-rejects` rows about reading the FASTA file (set `FIXED` in the script), and `auto` = the new rows: the
 expected class is decided by the frozen NCBI exit code (0: `same`, signal: `approved-exception`, otherwise
 `same-error`), so a port that reads a file differently from NCBI cannot pass by expectation.
@@ -81,5 +96,6 @@ expected class is decided by the frozen NCBI exit code (0: `same`, signal: `appr
   LOSAT's report is checked by E2g's `title_sweep.py` (stand-in subject), not here.
 - The inputs of check_inputs are read from the engine worktree (`LOSAT/tests/fasta/`) and E2c's `inputs/`;
   `check` compares their hashes with `inputs.sha256` and warns when they changed.
-- Not covered: `-lcase_masking`, `-num_threads`, `BATCH_SIZE` batches of the new programs, queries over one batch.
-  They are in `LOSAT/tests/fasta_input_fixtures.py`.
+- Not covered: `-lcase_masking` (an explicit rejection in TBLASTX and BLASTP), `-num_threads`, `BATCH_SIZE` batches of
+  the new programs, queries over one batch. They are in `LOSAT/tests/fasta_input_fixtures.py`, which
+  `LOSAT/tests/ci_fast_regressions.py` runs per program.

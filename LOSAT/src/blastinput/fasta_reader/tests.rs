@@ -1283,89 +1283,13 @@ fn standard_input_refills_one_byte_and_keeps_the_tail() {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1444-1447, 1616-1679,
-// 2038-2043 and fasta_reader_utils.cpp:466-483 (the bridge gives the reader's record for
-// the inputs that today's checks accept: the title, `U` stored as `T` for nucleotides,
-// the lowercase letters, the local ID and the title warning).
-#[test]
-fn from_bio_gives_the_readers_record_for_accepted_inputs() {
-    let fifty = "A".repeat(50);
-    let inputs: [(&[u8], bool); 6] = [
-        (b">q1 a description\nACGTacgtNNRY\n", false),
-        (b">q1\nACGUacguTT\nAC\n", false),
-        (b">q1 x ACGTACGTACGTACGTACGTA\nACGT\n", false),
-        (b">q1  two  spaces\nAC\n>q2 second\nGG\n", false),
-        (b">p1 desc\nMKVLUuX*\n", true),
-        (format!(">p1 q{fifty}\nMKV\n").leak().as_bytes(), true),
-    ];
-    for (bytes, protein) in inputs {
-        let config = ReaderConfig::query("BLASTN", protein, false);
-        let reader = read_all(
-            &mut FastaInputSource::from_bytes(bytes, config),
-            &mut |_| Ok(()),
-        )
-        .unwrap();
-        let bio: Vec<FastaRecord> = bio::io::fasta::Reader::new(bytes)
-            .records()
-            .enumerate()
-            .map(|(index, record)| {
-                FastaRecord::from_bio(&record.unwrap(), index + 1, "Query_", protein)
-            })
-            .collect();
-        assert_eq!(bio, reader, "{:?}", String::from_utf8_lossy(bytes));
-    }
-    let record = FastaRecord::from_bio(
-        &bio::io::fasta::Record::with_attrs("s", None, b"ACGU"),
-        7,
-        "Subject_",
-        false,
-    );
-    assert_eq!(
-        (record.local_id.as_str(), record.sequence.as_slice()),
-        ("Subject_7", &b"ACGT"[..])
-    );
-}
-
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:458-466
 // (a range keeps the record and its ID; the search sees the interval).
-// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta_reader_utils.cpp:209-213
-// ```c++
-//     // trim leading whitespace from title (is this appropriate?)
-//     while (title_start < len
-//         &&  isspace((unsigned char)defline[title_start])) {
-//         ++title_start;
-//     }
-// ```
-// The `bio` bridge of ABI v1 and the adapter (`FastaRecord::from_bio`): the title is the ID,
-// a space and the description, without the white space at its start (a defline that starts
-// with white space has an empty `bio` ID), and a nucleotide `U` is `T`.
 #[test]
-fn cut_and_the_bio_bridge_keep_ncbis_records() {
+fn cut_keeps_ncbis_record() {
     let mut record = FastaRecord::new("Query_2", b"q2 title", b"ACGTacgtAC");
     record.warnings = b"w\n".to_vec();
     let cut = record.cut(2, 6);
     assert_eq!(cut, FastaRecord::new("Query_2", b"q2 title", b"GTac"));
     assert_eq!(InputRecord::cut(&record, 2, 6), cut);
-
-    let bio_records = [
-        bio::io::fasta::Record::with_attrs("q1", Some("first query"), b"ACGTACGTAC"),
-        bio::io::fasta::Record::with_attrs("q2", None, b"AC"),
-        bio::io::fasta::Record::with_attrs("", Some("q3 x"), b"acgu"),
-    ];
-    let records: Vec<FastaRecord> = bio_records
-        .iter()
-        .enumerate()
-        .map(|(index, record)| FastaRecord::from_bio(record, index + 1, "Query_", false))
-        .collect();
-    assert_eq!(
-        records,
-        vec![
-            FastaRecord::new("Query_1", b"q1 first query", b"ACGTACGTAC"),
-            FastaRecord::new("Query_2", b"q2", b"AC"),
-            FastaRecord::new("Query_3", b"q3 x", b"acgt"),
-        ]
-    );
-    assert_eq!(records[2].shown_id(), b"q3");
-    let protein = FastaRecord::from_bio(&bio_records[2], 1, "Subject_", true);
-    assert_eq!(protein, FastaRecord::new("Subject_1", b"q3 x", b"acgu"));
 }

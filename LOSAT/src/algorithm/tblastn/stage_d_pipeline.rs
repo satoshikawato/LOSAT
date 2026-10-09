@@ -1644,16 +1644,24 @@ mod tests {
     #[test]
     fn query_specific_word_xdrop_preserves_ncbi_bdt63307_seed() {
         let base = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fasta"));
-        let queries: Vec<Vec<u8>> = bio::io::fasta::Reader::from_file(base.join("AvCLPV.faa"))
+        // The residues of NCBI's reader, as TBLASTN reads the query and the subjects.
+        let residues = |name: &str, config| {
+            use crate::blastinput::fasta_reader::{read_all, FastaInputSource};
+            let file = std::fs::File::open(base.join(name)).unwrap();
+            read_all(&mut FastaInputSource::from_file(file, config), &mut |_| {
+                Ok(())
+            })
             .unwrap()
-            .records()
-            .map(|r| r.unwrap().seq().to_vec())
-            .collect();
-        let subjects: Vec<Vec<u8>> = bio::io::fasta::Reader::from_file(base.join("AvCLPV.fasta"))
-            .unwrap()
-            .records()
-            .map(|r| r.unwrap().seq().to_vec())
-            .collect();
+            .into_iter()
+            .map(|record| record.sequence)
+            .collect::<Vec<Vec<u8>>>()
+        };
+        use crate::blastinput::fasta_reader::ReaderConfig;
+        let queries = residues("AvCLPV.faa", ReaderConfig::query("TBLASTN", true, false));
+        let subjects = residues(
+            "AvCLPV.fasta",
+            ReaderConfig::subject("TBLASTN", false, false),
+        );
         let seg = SegParams::default();
         let mut trace = StageDBoundaryTrace::default();
         let results = run_local_search(

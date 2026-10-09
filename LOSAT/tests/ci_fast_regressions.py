@@ -11,7 +11,10 @@ the outfmt 0 fixtures (docs/evidence/losat_web_e2a/check_losat.py) of the
 selected programs at 1 and 4 threads, for BLASTN the frozen NCBI outputs of
 blastn_regression_fixtures.py (preliminary hit lists, batches, split, ambiguity,
 lowercase masking) and for TBLASTX those of tblastx_regression_fixtures.py (query
-batches, warnings, hit lists, ambiguity, empty inputs, failed writes).
+batches, warnings, hit lists, ambiguity, empty inputs, failed writes); for each
+selected program the FASTA-input fixtures of fasta_input_fixtures.py (`check --rows
+<program>`: stdout, stderr, exit code and combined stream against the frozen NCBI
+hashes, and LOSAT's explicit rejections where it rejects an input or option).
 
 Programs are selected from the changed paths (--changed-from): a program's own
 directory selects it and every program that imports it; any other engine or
@@ -58,6 +61,9 @@ FAST_TBLASTX = frozenset({
     "p02_mje_mela", "p03_mela_pemojnva", "p04_pemojnva_pesemjnv", "p07_lvmjnv_trcumjnv",
     "p08_trcumjnv_mellatmjnv", "p12_lc738874_lc738875_default", "p13_mela_mje_reverse",
 })
+# A change to the FASTA-input reader (NCBI's CFastaReader port), its fixture script, manifests or
+# inputs selects all four programs (they share the reader).
+FASTA_INPUT_PATHS = ("LOSAT/src/blastinput/", "LOSAT/tests/fasta_input_fixtures", "LOSAT/tests/fixtures/fasta_input/")
 PROGRAM_DIR = re.compile(r"^LOSAT/src/algorithm/(blastn|blastp|blastx|tblastn|tblastx)/")
 STAGE_G_PREFIX = "/mnt/c/Users/genom/GitHub/LOSAT/"
 
@@ -88,6 +94,8 @@ def select_programs(paths: list[str]) -> set[str]:
         match = PROGRAM_DIR.match(path)
         if match:
             selected |= dependents[match.group(1)]
+        elif path.startswith(FASTA_INPUT_PATHS):
+            return set(PROGRAMS)
         elif path.startswith(("LOSAT/", "docs/evidence/losat_web_e1a/", "docs/evidence/losat_web_e2a/",
                               "docs/evidence/tlosan_stage_g/", "docs/evidence/tlosan_stage_d/")) \
                 or path == ".github/workflows/ci.yml":
@@ -170,6 +178,28 @@ def check_rows(rows, baseline, allowlist: Allowlist, programs: set[str], all_cas
     return failures, allowed
 
 
+def run_fasta_input_fixtures(losat: Path, programs: set[str], out: Path, jobs: int) -> tuple[list[str], dict[str, float]]:
+    """fasta_input_fixtures.py check for each selected program: every row `same` or an expected explicit rejection."""
+    failures, seconds = [], {}
+    for program in FIXTURE_PROGRAMS:
+        if program not in programs:
+            continue
+        log = out / f"{program}-fasta-input-fixtures.tsv"
+        started = time.perf_counter()
+        result = subprocess.run([sys.executable, str(TESTS / "fasta_input_fixtures.py"), "check", "--losat", str(losat),
+                                 "--out", str(log), "--rows", program, "--jobs", str(jobs)],
+                                capture_output=True, text=True)
+        seconds[program] = round(time.perf_counter() - started, 1)
+        if result.returncode != 0:
+            if log.exists():
+                rows = [line.split("\t") for line in log.read_text().splitlines()[1:]]
+                failures += [f"{program.upper()} FASTA-input fixture {row[0]}: {row[4]}" for row in rows
+                             if len(row) > 4 and row[4] not in ("same", "rejection")][:20]
+            failures.append(f"{program.upper()} FASTA-input fixtures differ: see {log.name} "
+                            f"({result.stdout.strip() or result.stderr.strip()[-200:]})")
+    return failures, seconds
+
+
 def run_fixtures(losat: Path, programs: set[str], out: Path) -> list[str]:
     failures = []
     selected = [program for program in FIXTURE_PROGRAMS if program in programs]
@@ -242,6 +272,9 @@ def main() -> int:
         started = time.perf_counter()
         failures += run_fixtures(losat, programs, out)
         summary["fixture_seconds"] = round(time.perf_counter() - started, 1)
+        fasta_failures, fasta_seconds = run_fasta_input_fixtures(losat, programs, out, args.jobs)
+        failures += fasta_failures
+        summary["fasta_input_seconds"] = fasta_seconds
         summary["failures"], summary["allowed"] = failures, allowed
         summary["losat_sha256"] = capture_outputs.sha256_bytes(losat.read_bytes())
     (out / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")

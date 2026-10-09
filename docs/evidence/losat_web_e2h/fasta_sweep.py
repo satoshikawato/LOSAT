@@ -60,10 +60,16 @@ REPORT_ENV = ("BL2SEQ_LEGACY", "CTOOLKIT_COMPATIBLE", "OLD_FSC", "BATCH_SIZE", "
               "BLASTINPUT_GEN_DELTA_SEQ", "NCBI", "BLAST_USAGE_REPORT")
 SEED = 20261008
 REJECT_RE = re.compile(rb"not supported by LOSAT's (BLASTN|TBLASTX|TBLASTN|BLASTP)")
-# AUTHORITY.md section J: the explicit rejections LOSAT keeps (message fragments).
-#   J-1 Seq-id lines, J-2 -parse_deflines, J-4 records over 2^31-1 letters, J-6 non-UTF-8 Subject_ titles
+# The explicit rejections LOSAT keeps after the port (message fragments; AUTHORITY.md section J):
+#   J-1 Seq-id lines (G4), J-2 -parse_deflines, J-4 records over 2^31-1 letters, J-6 titles of `Subject_` words with
+#   non-UTF-8 bytes in a subject's tabular report (RP-20), J-7 -lcase_masking of TBLASTX and BLASTP and a BATCH_SIZE
+#   that is no integer, and BLASTP's punctuation-only subject title in outfmt 0 (NCBI crashes; kept as an explicit
+#   rejection while the Owner decides whether approved exception 2 extends to BLASTP: S7 decision 4).
 LISTED_REJECTIONS = (rb"may be a sequence identifier", rb"-parse_deflines", rb"longer than 2147483647 letters",
-                     rb"non-UTF-8")
+                     rb"first word starts with 'Subject_' and whose non-UTF-8 bytes",
+                     rb"option -lcase_masking is not supported", rb"BATCH_SIZE value '[^']*' is not an integer",
+                     rb"environment variable BATCH_SIZE has the value",
+                     rb"title of punctuation that NCBI BLAST\+'s x_CleanAndCompress")
 APPROVAL_ARG_ERROR = "PD-LOSAT-CLI-NONSEARCH-DIFFERENCES approved exception 1 (argument parser messages)"
 APPROVAL_EXCEPTION_2 = "PD-LOSAT-NCBI-DEFECTS approved exception 2 (punctuation title; docs/evidence/losat_web_e2g/title_sweep.py)"
 

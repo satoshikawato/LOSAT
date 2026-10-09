@@ -1,8 +1,8 @@
 # Frozen outputs of blastn: 2.17.0+;  Package: blast 2.17.0, build Aug 11 2025 09:46:06 for FASTA-input cases (comparison oracle only; see fasta_input_fixtures.py).
-# Only what `freeze` measured is stored; the row definitions (inputs, args, outfmt, threads, stdin, env, kind, tier, note) are in the script's generator.
+# Only what `freeze`/`freeze-rejections` measured is stored; the row definitions (inputs, args, outfmt, threads, stdin, env, kind, tier, note) are in the script's generator.
 # `@S <n> <sha256>` lines are a table of the distinct non-empty stderr hashes. Row lines: row_id, rc, stdout sha256,
 # stderr (`-` = empty stream, else a table index n), combined `2>&1` stream (`=` = same as stdout, `~` = same as stderr, else its sha256).
-# Rows of kind losat-rejection and rows not frozen yet have no line (their expectation is `pending`). Written by `freeze`/`refresh`; do not edit.
+# Rows of kind losat-rejection hold the hashes of LOSAT's explicit rejection (`freeze-rejections`), not NCBI's. Rows not frozen yet have no line (`pending`). Written by `freeze`/`freeze-rejections`/`refresh`; do not edit.
 @S	1	a9d8df5a106416bce0bfc772d08867697cacf43ecd7c41f3dede5862a2a61aab
 @S	2	49cbfb27c6563f3d9bd993baa96493dd244f9108a8de0aab14c999356bdd3ecc
 @S	3	221c2f44268833a6ab3cf7c99fc5017e6b33f2bcac302038495cd6788d120844
@@ -103,6 +103,14 @@
 @S	98	f7147eb5cb239cca698c1483e54ab00941f30113c438ba33307cab4d4cd7adf4
 @S	99	324c9ae38664219d1db0eef1e249c8308a0262807c75f0d2de5a45d7412822f1
 @S	100	155ea2acc5eaa318780a5a93f904d3a9179fe1855c8e21a8a58d19a35fa281de
+@S	101	2616b14e5e881febbdb8c29f7d16f21eb571e8739c3a4ce9785ae1d75ad44faa
+@S	102	d9ca9ecc2a04aaae65bbf0870f0e72c4a6fa9b4b7036c63be40763ce862de0f2
+@S	103	21486067246a040910333594300ef912aabd3244321d9018076a43bc277fff20
+@S	104	1fced2dfbce850ed113f1204412e112f9385337101e4779c892de53b59b5b904
+@S	105	58038e61f09f16757be887383845656a24c639ae78b172f85a09c82751d7e3f0
+@S	106	c0e2021fc2accdb8ef65b5f8c90efae46ffa777d21636d64b6195d388eb6983c
+@S	107	24837b23ab7970cce76507ed386c45743979fd89f3c9779c6724de5bc799d284
+@S	108	e6a77d1003f6955ffb40bbc7f6e46797ef0cb48aaad0069dbde3a3ff1a600da3
 blastn.megablast.def_empty.q.o6	0	50adffb45f6b673a2a57cb777ebcc56eda39defbc1b6f5c7464fbd91408f5dd1	-	=
 blastn.megablast.def_empty.q.o6.t2	0	50adffb45f6b673a2a57cb777ebcc56eda39defbc1b6f5c7464fbd91408f5dd1	-	=
 blastn.megablast.def_empty.q.o6.t4	0	50adffb45f6b673a2a57cb777ebcc56eda39defbc1b6f5c7464fbd91408f5dd1	-	=
@@ -2072,3 +2080,15 @@ blastn.blastn.prot_in_blastn.o6	0	e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b93
 blastn.blastn.prot_in_blastn.o0	0	120b802be9e8770e02fb1677544bf57c41f77cb3f651bf1473a8bcc8342bcf62	99	46a3f370b434884ed916e41ada6d1ccee008c51ce47a1888a1c25c6cd4a9a248
 blastn.blastn.prot_in_blastn_subject.o6	0	e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	100	~
 blastn.blastn.prot_in_blastn_subject.o0	0	855561ef1db652c91f81ef3b57cd07e2e1eac6b35f33749a6da1b1e69c380948	100	9688429572de679e6e6e1c88f5ba29439f94c64a9e4046f2621b3167636559fd
+blastn.megablast.seqid0.q.o6	1	e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	101	~
+blastn.blastn.seqid0.q.o6	1	e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	101	~
+blastn.megablast.seqid0.s.o6	1	e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	102	~
+blastn.megablast.seqid1.q.o6	1	e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	103	~
+blastn.blastn.seqid1.q.o6	1	e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	103	~
+blastn.megablast.seqid1.s.o6	1	e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	104	~
+blastn.megablast.seqid2.q.o6	1	e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	105	~
+blastn.blastn.seqid2.q.o6	1	e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	105	~
+blastn.megablast.seqid2.s.o6	1	e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	106	~
+blastn.megablast.seqid3.q.o6	1	e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	107	~
+blastn.blastn.seqid3.q.o6	1	e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	107	~
+blastn.megablast.seqid3.s.o6	1	e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	108	~

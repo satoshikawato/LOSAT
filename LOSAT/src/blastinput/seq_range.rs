@@ -444,7 +444,7 @@ impl QueryInput {
 /// The queries as NCBI searches them with `-query_loc`: the searched queries, each cut to
 /// its interval, in input order, and the input they come from.
 #[derive(Clone, Debug)]
-pub struct RangedQueries<R = bio::io::fasta::Record> {
+pub struct RangedQueries<R = crate::blastinput::fasta_reader::FastaRecord> {
     pub records: Vec<R>,
     pub input: QueryInput,
 }
@@ -685,13 +685,18 @@ mod tests {
 
     #[test]
     fn skipped_queries_keep_their_ordinals_and_batches_count_whole_records() {
-        let records: Vec<bio::io::fasta::Record> = [8000usize, 400, 3000, 200]
-            .iter()
-            .enumerate()
-            .map(|(index, &length)| {
-                bio::io::fasta::Record::with_attrs(&format!("q{index}"), None, &vec![b'A'; length])
-            })
-            .collect();
+        let records: Vec<crate::blastinput::fasta_reader::FastaRecord> =
+            [8000usize, 400, 3000, 200]
+                .iter()
+                .enumerate()
+                .map(|(index, &length)| {
+                    crate::blastinput::fasta_reader::FastaRecord::new(
+                        format!("Query_{}", index + 1),
+                        format!("q{index}").as_bytes(),
+                        &vec![b'A'; length],
+                    )
+                })
+                .collect();
         let ranged = cut_queries(&records, &SequenceRange { from: 500, to: 999 });
         let input = &ranged.input;
         assert_eq!(input.ordinals, vec![0, 2]);

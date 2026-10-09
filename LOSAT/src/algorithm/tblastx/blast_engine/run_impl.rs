@@ -717,12 +717,12 @@ pub fn run(
     // ```
     // The first handler opens and reads the subjects (an empty subject set fails there),
     // as BLASTN's `run`.
-    use crate::algorithm::blastn::input as fasta_input;
+    use crate::blastinput::input_files;
     let Some(subject_path) = args.subject.clone() else {
         return Err(crate::blastinput::app::missing_subject_error());
     };
-    fasta_input::check_utf8_file_name(&subject_path, "subject", "TBLASTX")?;
-    let subject_file = fasta_input::open_input(&subject_path, "subject", "TBLASTX")?;
+    input_files::check_utf8_file_name(&subject_path, "subject", "TBLASTX")?;
+    let subject_file = input_files::open_input(&subject_path, "subject", "TBLASTX")?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2537-2545
     // ```c++
     //             subj_input_stream = &args[kArgSubject].AsInputFile();
@@ -787,10 +787,10 @@ pub fn run(
     // ```
     // The query is opened, then the output file is created (`-` is standard output); the
     // query is read after both, so an output file that is the query file reads empty.
-    fasta_input::check_utf8_file_name(&args.query, "query", "TBLASTX")?;
-    let query_file = fasta_input::open_input(&args.query, "query", "TBLASTX")?;
+    input_files::check_utf8_file_name(&args.query, "query", "TBLASTX")?;
+    let query_file = input_files::open_input(&args.query, "query", "TBLASTX")?;
     if let Some(path) = args.out.as_deref() {
-        fasta_input::check_utf8_file_name(path, "out", "TBLASTX")?;
+        input_files::check_utf8_file_name(path, "out", "TBLASTX")?;
     }
     let out_file = match args.out.as_deref().filter(|path| path.as_os_str() != "-") {
         Some(path) => Some(std::io::BufWriter::new(
@@ -1230,7 +1230,7 @@ fn search(
     // residues, or an interval that starts just past its record's end) gets its warning,
     // stays in the database statistics with no letters, and is never searched
     // (`process_subject` skips subjects shorter than a word).
-    crate::algorithm::blastn::input::write_empty_subject_warnings(
+    crate::blastinput::input_files::write_empty_subject_warnings(
         subject_records,
         "tblastx",
         outputs.diagnostics,
@@ -1310,22 +1310,47 @@ impl V1Records<'_> {
         query_range: Option<&SequenceRange>,
         outputs: &ReportOutputs<'_>,
     ) -> Result<()> {
-        use crate::algorithm::blastn::input::{check_records_have_residues_of, check_residues_of};
+        use crate::blastinput::bio_checks::{check_records_have_residues_of, check_residues_of};
         use crate::blastinput::seq_range::check_no_empty_interval;
+        // The ranges cut records of NCBI's reader (`seq_range`); these have the residues of
+        // ABI v1's records and their `bio` ID as the title, which ABI v1's messages name them
+        // by. The cut `bio` subjects keep their ID and description.
+        let named_by_id = |records: &[fasta::Record]| -> Vec<FastaRecord> {
+            records
+                .iter()
+                .map(|record| FastaRecord::new(String::new(), record.id().as_bytes(), record.seq()))
+                .collect()
+        };
         let subject_range =
             parse_optional_range(args.subject_loc.as_deref(), RangeRole::Subject, "TBLASTX")?;
-        let ranged_subjects = cut_subjects(self.subjects, subject_range.as_ref())?;
+        let whole_named_subjects = named_by_id(self.subjects);
+        let ranged_subjects = cut_subjects(&whole_named_subjects, subject_range.as_ref())?;
         let whole_subjects = Placements::default();
-        let (subjects, subject_placements) = match &ranged_subjects {
-            Some((cut, placements)) => (cut.as_slice(), placements),
-            None => (self.subjects, &whole_subjects),
+        let cut_subjects_bio: Vec<fasta::Record>;
+        let (subjects, named_subjects, subject_placements) = match &ranged_subjects {
+            Some((cut, placements)) => {
+                cut_subjects_bio = self
+                    .subjects
+                    .iter()
+                    .zip(cut)
+                    .map(|(record, cut)| {
+                        fasta::Record::with_attrs(record.id(), record.desc(), cut.seq())
+                    })
+                    .collect();
+                (cut_subjects_bio.as_slice(), cut.as_slice(), placements)
+            }
+            None => (
+                self.subjects,
+                whole_named_subjects.as_slice(),
+                &whole_subjects,
+            ),
         };
         check_report_titles(self.queries, subjects, outputs)?;
         check_losat_limits(args)?;
         crate::blastinput::app::check_unsupported_environment("TBLASTX")?;
         check_residues_of(subjects, "subject", "TBLASTX")?;
         check_no_empty_interval(
-            subjects,
+            named_subjects,
             subject_placements,
             &[],
             RangeRole::Subject,
@@ -1336,7 +1361,7 @@ impl V1Records<'_> {
             check_records_have_residues_of(records, role, "TBLASTX")?;
         }
         if let Some(range) = query_range {
-            let ranged = cut_queries(self.queries, range);
+            let ranged = cut_queries(&named_by_id(self.queries), range);
             check_no_empty_interval(
                 &ranged.records,
                 &ranged.input.placements,

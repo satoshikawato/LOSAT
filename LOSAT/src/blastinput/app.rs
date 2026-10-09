@@ -577,7 +577,7 @@ pub fn check_query_split_environment(
 /// ```
 fn read_query_split_variable(program: &str, variable: &str) -> anyhow::Result<Option<i32>> {
     match std::env::var_os(variable) {
-        Some(value) if !crate::algorithm::blastn::input::is_blank(value.as_encoded_bytes()) => {
+        Some(value) if !crate::blastinput::input_files::is_blank(value.as_encoded_bytes()) => {
             match crate::blastinput::query_batch::ncbi_string_to_int(&value) {
                 Some(number) => Ok(Some(number)),
                 None => anyhow::bail!(

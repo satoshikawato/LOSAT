@@ -1327,69 +1327,45 @@ fn from_bio_gives_the_readers_record_for_accepted_inputs() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:458-466
-// (a range keeps the record and its ID; the search sees the interval). The generic range,
-// warning and metadata code gives the same results for a `bio` record and its bridge.
+// (a range keeps the record and its ID; the search sees the interval).
+// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta_reader_utils.cpp:209-213
+// ```c++
+//     // trim leading whitespace from title (is this appropriate?)
+//     while (title_start < len
+//         &&  isspace((unsigned char)defline[title_start])) {
+//         ++title_start;
+//     }
+// ```
+// The `bio` bridge of ABI v1 and the adapter (`FastaRecord::from_bio`): the title is the ID,
+// a space and the description, without the white space at its start (a defline that starts
+// with white space has an empty `bio` ID), and a nucleotide `U` is `T`.
 #[test]
-fn cut_and_the_input_record_bridge_agree() {
+fn cut_and_the_bio_bridge_keep_ncbis_records() {
     let mut record = FastaRecord::new("Query_2", b"q2 title", b"ACGTacgtAC");
     record.warnings = b"w\n".to_vec();
     let cut = record.cut(2, 6);
     assert_eq!(cut, FastaRecord::new("Query_2", b"q2 title", b"GTac"));
     assert_eq!(InputRecord::cut(&record, 2, 6), cut);
 
-    let bio_records = vec![
+    let bio_records = [
         bio::io::fasta::Record::with_attrs("q1", Some("first query"), b"ACGTACGTAC"),
         bio::io::fasta::Record::with_attrs("q2", None, b"AC"),
-        bio::io::fasta::Record::with_attrs("q3", Some("x"), b"acgtACGTacgtAC"),
+        bio::io::fasta::Record::with_attrs("", Some("q3 x"), b"acgu"),
     ];
     let records: Vec<FastaRecord> = bio_records
         .iter()
         .enumerate()
         .map(|(index, record)| FastaRecord::from_bio(record, index + 1, "Query_", false))
         .collect();
-    for (bio_record, record) in bio_records.iter().zip(&records) {
-        assert_eq!(bio_record.title_bytes(), record.title_bytes());
-        assert_eq!(InputRecord::seq(bio_record), InputRecord::seq(record));
-    }
-    let range = crate::blastinput::seq_range::SequenceRange { from: 3, to: 7 };
-    let from_bio = crate::blastinput::seq_range::cut_queries(&bio_records, &range);
-    let from_reader = crate::blastinput::seq_range::cut_queries(&records, &range);
-    assert_eq!(from_bio.input.ordinals, from_reader.input.ordinals);
-    assert_eq!(from_bio.input.skipped, vec![false, true, false]);
-    for (a, b) in from_bio.records.iter().zip(&from_reader.records) {
-        assert_eq!(
-            (InputRecord::seq(a), a.title_bytes()),
-            (InputRecord::seq(b), b.title_bytes())
-        );
-    }
-    // As subjects, q2's interval starts past its end: NCBI's range error for both.
-    assert!(crate::blastinput::seq_range::cut_subjects(&bio_records, Some(&range)).is_err());
-    assert!(crate::blastinput::seq_range::cut_subjects(&records, Some(&range)).is_err());
-    let first_two = crate::blastinput::seq_range::SequenceRange { from: 0, to: 1 };
-    let (cut_bio, _) = crate::blastinput::seq_range::cut_subjects(&bio_records, Some(&first_two))
-        .unwrap()
-        .unwrap();
-    let (cut_reader, placements) =
-        crate::blastinput::seq_range::cut_subjects(&records, Some(&first_two))
-            .unwrap()
-            .unwrap();
-    assert_eq!(placements.length(2, 2), 14);
-    for (a, b) in cut_bio.iter().zip(&cut_reader) {
-        assert_eq!(InputRecord::seq(a), InputRecord::seq(b));
-    }
-    for index in 0..3 {
-        assert_eq!(
-            crate::report::query_warnings::invalid_query_warning(
-                "blastn",
-                index,
-                &bio_records[index]
-            ),
-            crate::report::query_warnings::invalid_query_warning("blastn", index, &records[index])
-        );
-    }
     assert_eq!(
-        crate::algorithm::blastn::coordination::subject_metadata_from_records(&bio_records)
-            .subject_ids,
-        crate::algorithm::blastn::coordination::subject_metadata_from_records(&records).subject_ids
+        records,
+        vec![
+            FastaRecord::new("Query_1", b"q1 first query", b"ACGTACGTAC"),
+            FastaRecord::new("Query_2", b"q2", b"AC"),
+            FastaRecord::new("Query_3", b"q3 x", b"acgt"),
+        ]
     );
+    assert_eq!(records[2].shown_id(), b"q3");
+    let protein = FastaRecord::from_bio(&bio_records[2], 1, "Subject_", true);
+    assert_eq!(protein, FastaRecord::new("Subject_1", b"q3 x", b"acgu"));
 }

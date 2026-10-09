@@ -1,9 +1,12 @@
-//! The FASTA records that BLASTN reads as NCBI BLAST+ does.
+//! The checks of `bio` FASTA records that ABI v1 (plan TD-1, which freezes its accepted
+//! inputs and messages) and the Web adapter's `register` (until step S10 of the port plan)
+//! make before they search records made from them (`FastaRecord::from_bio`). LOSAT's
+//! programs read their inputs with NCBI's reader (`fasta_reader`) and make none of them.
 //!
-//! LOSAT parses FASTA with `bio` (and the Web adapter's index scan reproduces it), while
-//! NCBI BLAST+ reads it with `CFastaReader`. For the inputs accepted here the two agree,
-//! except that `U` is read as `T`, which `FastaRecord::from_bio` applies. The others are
-//! rejected, because the reader of NCBI would change them:
+//! LOSAT's ABI v1 parses FASTA with `bio` (and the Web adapter's index scan reproduces it),
+//! while NCBI BLAST+ reads it with `CFastaReader`. For the inputs accepted here the two
+//! agree, except that `U` is read as `T`, which `FastaRecord::from_bio` applies. The others
+//! are rejected, because the reader of NCBI would change them:
 //!
 //! - an empty defline, or one that starts with white space or has a control character or
 //!   a non-ASCII byte (NCBI names an empty one `Query_1`, skips the white space, ends the
@@ -15,34 +18,16 @@
 //!   warns that the sequence contains no data, ignores white space and hyphens, ends the
 //!   line at `;`, and removes other characters with a warning): `check_residues_of`.
 
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
 use bio::io::fasta;
 
-use crate::blastinput::fasta_reader::InputRecord;
+use crate::blastinput::input_files::is_blank;
 
 /// Why a FASTA file that `bio` cannot parse is not read: `bio` fails on text before the
 /// first defline (blank lines, `;` comments, a byte order mark) and on bytes that are not
 /// UTF-8, which NCBI reads.
 pub fn unreadable_fasta(program: &str) -> String {
     format!("FASTA that bio cannot read (such as text before the first defline or bytes that are not UTF-8), which NCBI BLAST+ may read, is not supported by LOSAT's {program}")
-}
-
-/// Whether a FASTA file has no character but white space: NCBI reads it as a file without
-/// records (an empty query, or no subject).
-///
-/// NCBI reference: c++/src/app/blast/blast_app_util.cpp:862-866
-/// ```c
-/// 	IOS_BASE::iostate orig_state = in.rdstate();
-/// 	IOS_BASE::fmtflags orig_flags = in.setf(ios::skipws);
-///
-/// 	if(! (in >> c))
-/// 		return true;
-/// ```
-/// `in >> c` skips the characters of C's `isspace`.
-pub fn is_blank(bytes: &[u8]) -> bool {
-    bytes
-        .iter()
-        .all(|byte| matches!(byte, b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r'))
 }
 
 /// The IUPAC nucleotide letters, both cases.
@@ -275,47 +260,6 @@ fn ends_with_nucleotides(text: &[u8]) -> bool {
             .all(|byte| b"ACGTacgt".contains(byte))
 }
 
-/// NCBI's warning for a subject without residues, which it skips when it sets up the
-/// subjects for the search (`CBlastFormat` is made after `Query is Empty!` and before the
-/// outfmt 0 prolog; `AUTHORITY.md` §B row 7, BI-43, BI-49). The ID of a subject is
-/// `Subject_<n>` and its title is the record's title (`InputRecord::title_bytes`), written
-/// as bytes; a subject without a title gives `Subject_<n> : ...`.
-///
-/// NCBI reference: c++/src/algo/blast/api/blast_setup_cxx.cpp:773-788
-/// ```c
-///         catch(CBlastException & e ) {
-///         	// Skip bad subject sequence
-///         	if(e.GetErrCode() == CBlastException::eInvalidArgument) {
-///         		seqblk_vec->push_back(subj);
-///         		string warning = kEmptyStr;
-///         		const CSeq_id *  id = subjects.GetSeqId(i);
-///         		string title = subjects.GetTitle(i);
-///         		if(id != NULL) {
-///         			warning = id->GetSeqIdString() + " ";
-///         		}
-///         		warning += subjects.GetTitle(i);
-///         		if(warning != kEmptyStr){
-///         			warning += ": ";
-///         		}
-///         		warning += "Subject sequence contains no data";
-///         		ERR_POST(Warning << warning);
-/// ```
-pub fn write_empty_subject_warnings<R: crate::blastinput::fasta_reader::InputRecord>(
-    records: &[R],
-    program: &str,
-    diagnostics: &mut dyn std::io::Write,
-) -> std::io::Result<()> {
-    for (index, record) in records.iter().enumerate() {
-        if record.seq().is_empty() {
-            let mut warning = format!("Warning: [{program}] Subject_{} ", index + 1).into_bytes();
-            warning.extend_from_slice(&record.title_bytes());
-            warning.extend_from_slice(b": Subject sequence contains no data\n");
-            diagnostics.write_all(&warning)?;
-        }
-    }
-    Ok(())
-}
-
 /// Rejects the records with a residue that NCBI reads differently (see the module).
 ///
 /// NCBI reference: c++/src/objtools/readers/fasta.cpp:919-935
@@ -378,10 +322,9 @@ pub fn check_protein_input_of(
     check_protein_residues_of(records, role, program)
 }
 
-/// The residue check of `check_protein_input_of` for records already read (the `bio`
-/// records, or the records made from them with `FastaRecord::from_bio`).
-pub fn check_protein_residues_of<R: InputRecord>(
-    records: &[R],
+/// The residue check of `check_protein_input_of` for the `bio` records already read.
+pub fn check_protein_residues_of(
+    records: &[fasta::Record],
     role: &str,
     program: &str,
 ) -> Result<()> {
@@ -408,8 +351,8 @@ pub fn check_protein_residues_of<R: InputRecord>(
 /// Rejects a record without residues: NCBI reads it without a message and reports it when
 /// it sets up the search ("Sequence contains no data"), which LOSAT does not reproduce.
 /// `role` is `query` or `subject`; `program` is named in the message.
-pub fn check_records_have_residues_of<R: InputRecord>(
-    records: &[R],
+pub fn check_records_have_residues_of(
+    records: &[fasta::Record],
     role: &str,
     program: &str,
 ) -> Result<()> {
@@ -437,12 +380,7 @@ fn first_problem<R>(records: &[R], problem: impl Fn(usize, &R) -> Option<String>
     }
 }
 
-fn no_residues<R: InputRecord>(
-    index: usize,
-    record: &R,
-    role: &str,
-    program: &str,
-) -> Option<String> {
+fn no_residues(index: usize, record: &fasta::Record, role: &str, program: &str) -> Option<String> {
     record.seq().is_empty().then(|| {
         format!(
             "{role} record {} ({}) has no residues; NCBI BLAST+ reports such a record differently, which is not supported by LOSAT's {program}",
@@ -452,15 +390,9 @@ fn no_residues<R: InputRecord>(
     })
 }
 
-/// The ID that LOSAT's messages name a record by: the title up to its first space, which is
-/// the `bio` ID of a `bio` record and of a record made from one (`FastaRecord::from_bio`).
-fn record_id<R: InputRecord>(record: &R) -> String {
-    let title = record.title_bytes();
-    let end = title
-        .iter()
-        .position(|&byte| byte == b' ')
-        .unwrap_or(title.len());
-    String::from_utf8_lossy(&title[..end]).into_owned()
+/// The ID that LOSAT's messages name a record by: its `bio` ID.
+fn record_id(record: &fasta::Record) -> String {
+    record.id().to_string()
 }
 
 fn invalid_residue(
@@ -485,170 +417,6 @@ fn invalid_residue(
         record.id(),
         position + 1
     ))
-}
-
-/// Opens a FASTA input of `program` as NCBI's argument does when a handler asks for its stream: `-` is
-/// standard input, and a file that does not open gets NCBI's error
-/// (`crate::cli::inaccessible`).
-///
-/// NCBI reference: ncbi-blast/c++/src/corelib/ncbiargs.cpp:717-735
-/// ```c
-///     if (AsString() == "-") {
-/// #if defined(NCBI_OS_MSWIN)
-///         NcbiSys_setmode(NcbiSys_fileno(stdin), (mode & IOS_BASE::binary) ? O_BINARY : O_TEXT);
-/// #endif
-///         m_Ios  = &cin;
-///     } else if ( !AsString().empty() ) {
-///         if (!fstrm) {
-///             fstrm = new CNcbiIfstream;
-///         }
-///         if (fstrm) {
-///             fstrm->open(AsString().c_str(),IOS_BASE::in | mode);
-///             if ( !fstrm->is_open() ) {
-///                 delete fstrm;
-///                 fstrm = NULL;
-///             } else {
-///                 m_DeleteFlag = true;
-///             }
-///         }
-///         m_Ios = fstrm;
-///     }
-/// ```
-pub fn open_input(path: &std::path::Path, role: &str, program: &str) -> Result<std::fs::File> {
-    if path.as_os_str() == "-" {
-        return standard_input().map_err(|_| {
-            anyhow::anyhow!(
-                "reading the {role} from standard input ('-') on this platform is not supported by LOSAT's {program}"
-            )
-        });
-    }
-    std::fs::File::open(path).map_err(|_| crate::cli::inaccessible(role, path))
-}
-
-/// Standard input as a file that shares its position, as `cin` does.
-fn standard_input() -> std::io::Result<std::fs::File> {
-    #[cfg(any(unix, target_os = "wasi"))]
-    {
-        use std::os::fd::AsFd;
-        std::io::stdin()
-            .as_fd()
-            .try_clone_to_owned()
-            .map(std::fs::File::from)
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::io::AsHandle;
-        std::io::stdin()
-            .as_handle()
-            .try_clone_to_owned()
-            .map(std::fs::File::from)
-    }
-    #[cfg(not(any(unix, windows, target_os = "wasi")))]
-    {
-        Err(std::io::ErrorKind::Unsupported.into())
-    }
-}
-
-/// The bytes of an opened FASTA file; a directory reads as no bytes, as NCBI's stream does.
-pub fn read_fasta_bytes(
-    file: &mut std::fs::File,
-    path: &std::path::Path,
-    role: &str,
-) -> Result<Vec<u8>> {
-    let mut bytes = Vec::new();
-    match std::io::Read::read_to_end(file, &mut bytes) {
-        Ok(_) => Ok(bytes),
-        Err(error) if error.kind() == std::io::ErrorKind::IsADirectory => Ok(Vec::new()),
-        Err(error) => {
-            Err(error).with_context(|| format!("failed to read {role} FASTA {}", path.display()))
-        }
-    }
-}
-
-/// The records of a FASTA file, after rejecting the residues that NCBI reads differently
-/// (`input.rs`); a file of white space only has no record, as in NCBI. NCBI reads the
-/// deflines that LOSAT rejects (`check_deflines`) without a message, so the callers check
-/// them where the difference would change a result.
-pub fn read_records(
-    bytes: &[u8],
-    path: &std::path::Path,
-    role: &str,
-    program: &str,
-) -> Result<Vec<bio::io::fasta::Record>> {
-    if is_blank(bytes) {
-        return Ok(Vec::new());
-    }
-    check_sequence_lines_of(bytes, role, program)?;
-    let records = bio_records_of(bytes, path, role, program)?;
-    check_residues_of(&records, role, program)?;
-    Ok(records)
-}
-
-/// The records that `bio` reads from a FASTA file (none from white space only), or the
-/// error that names what `bio` cannot read, without the checks of `read_records`.
-pub fn bio_records_of(
-    bytes: &[u8],
-    path: &std::path::Path,
-    role: &str,
-    program: &str,
-) -> Result<Vec<bio::io::fasta::Record>> {
-    if is_blank(bytes) {
-        return Ok(Vec::new());
-    }
-    bio::io::fasta::Reader::new(bytes)
-        .records()
-        .collect::<std::result::Result<Vec<_>, _>>()
-        .with_context(|| {
-            format!(
-                "failed to read {role} FASTA {} ({})",
-                path.display(),
-                unreadable_fasta(program)
-            )
-        })
-}
-
-/// The records of a FASTA file read where its deflines matter (the query), with the
-/// deflines checked first, so that a defline that bio cannot read is named.
-pub fn parse_fasta(
-    bytes: &[u8],
-    path: &std::path::Path,
-    role: &str,
-    program: &str,
-) -> Result<Vec<bio::io::fasta::Record>> {
-    if !is_blank(bytes) {
-        check_deflines_of(bytes, role, program)?;
-    }
-    let records = read_records(bytes, path, role, program)?;
-    check_records_have_residues_of(&records, role, program)?;
-    Ok(records)
-}
-
-/// Rejects a file name that is not UTF-8, where NCBI opens the file (the subjects, then the
-/// queries, then the output: `CBlastDatabaseArgs` comes before `CStdCmdLineArgs`).
-///
-/// NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.cpp:903-911
-/// ```c
-/// GetSubjectFile(const CArgs& args)
-/// {
-/// 	string filename="";
-///
-/// 	if (args.Exist(kArgSubject) && args[kArgSubject].HasValue())
-/// 		filename = args[kArgSubject].AsString();
-///
-/// 	return filename;
-/// }
-/// ```
-/// NCBI takes a file name as bytes: it writes the `-subject` name into the outfmt 0 and 7
-/// reports (`Database: User specified sequence set (Input: ...)`) and every name into its
-/// error messages as they are, which LOSAT's UTF-8 strings do not reproduce (plan DW-13).
-pub fn check_utf8_file_name(path: &std::path::Path, role: &str, program: &str) -> Result<()> {
-    if path.to_str().is_none() {
-        anyhow::bail!(
-            "the -{role} file name {:?} is not UTF-8; NCBI BLAST+ writes the bytes of file names as they are, which is not supported by LOSAT's {program}",
-            path.to_string_lossy()
-        );
-    }
-    Ok(())
 }
 
 #[cfg(test)]

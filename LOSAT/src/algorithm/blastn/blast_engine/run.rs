@@ -80,9 +80,6 @@ use super::super::hsp::{
     sort_hsps_by_score, trim_by_max_hsps, write_output_blastn_hitlists_to_writer, BlastnHitList,
     BlastnHsp, BlastnHspList, BlastnOutputFormat, HitList, HitListEntry, NCBI_BLASTN_VERSION,
 };
-use super::super::input::{
-    check_utf8_file_name, is_blank, open_input, write_empty_subject_warnings,
-};
 use super::super::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
 use super::super::lookup::{build_unmasked_ranges, reverse_complement, DiscTemplates};
 use super::super::pairwise::{pairwise_hits, DisplayMasks};
@@ -96,6 +93,9 @@ use super::super::scoring::{
 use crate::blastinput::fasta_reader::{
     read_queries, read_subjects, FastaInputSource, FastaRecord, QueryEnd, QueryRecords, ReadError,
     ReaderConfig,
+};
+use crate::blastinput::input_files::{
+    check_utf8_file_name, is_blank, open_input, write_empty_subject_warnings,
 };
 use crate::blastinput::query_batch::{next_query_batch_end, BatchSizeMixer};
 use crate::blastinput::seq_range::{
@@ -5286,7 +5286,7 @@ pub fn run_web_pair(args: BlastnArgs, query_fasta: &str, subject_fasta: &str) ->
         check_scoring_options(&args)?;
         return Ok(output);
     }
-    use super::super::input::{check_deflines, check_records, check_sequence_lines};
+    use crate::blastinput::bio_checks::{check_deflines, check_records, check_sequence_lines};
     // The deflines that NCBI reads differently are rejected (a fail-fast fix, plan TD-1).
     check_deflines(subject_fasta.as_bytes(), "subject")?;
     check_deflines(query_fasta.as_bytes(), "query")?;

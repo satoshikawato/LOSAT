@@ -622,6 +622,21 @@ test('many queries; view filters change the view, not the search; the notices te
   await expect(page.locator('[data-testid="results-notice"][data-kind="filtered-some"]')).toContainText(
     `The view filters hide ${plural(Number(hsps) - kept, 'HSP')} and ${plural(Number(subjects) - 1, 'subject')} of this query.`,
   );
+  // The boxes show the filters in force when the results tab is shown again (the form is drawn
+  // again), and applying one box keeps the others.
+  await page.getByTestId('filter-bits').fill('5000');
+  await page.getByTestId('filter-apply').click();
+  await expect(filteredOut).toHaveCount(1);
+  await page.getByTestId('tab-search').click();
+  await page.getByTestId('tab-results').click();
+  await expect(page.getByTestId('filter-bits')).toHaveValue('5000');
+  await expect(page.getByTestId('filter-subject')).toHaveValue('s1');
+  await page.getByTestId('filter-subject').press('Enter');
+  await expect(filteredOut).toHaveCount(1);
+  await page.getByTestId('filter-bits').fill('');
+  await page.getByTestId('filter-apply').click();
+  await expect(subjectRows(page)).toHaveCount(1);
+  await expect(filteredOut).toHaveCount(0);
   // A value that is not a number is not applied.
   await page.getByTestId('filter-evalue').fill('abc');
   await page.getByTestId('filter-apply').click();

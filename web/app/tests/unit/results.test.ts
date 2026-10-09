@@ -285,7 +285,7 @@ function snapshot(runId: string, argv: readonly string[] = ['blastn', '-query', 
   return { runId, number: 1, program: 'blastn', argv, query: input(['q0', 'q1']), subject: input(['s0', 's1', 's2']), requestedThreads: 1, queuedAt: 0 };
 }
 
-function setup(options: { status?: RunView['status']; specs?: readonly Spec[]; argv?: readonly string[] } = {}) {
+function setup(options: { status?: RunView['status']; specs?: readonly Spec[]; argv?: readonly string[]; unreadable?: boolean } = {}) {
   const run = makeRun(options.specs);
   const view: RunView = {
     snapshot: snapshot('r1', options.argv),
@@ -295,9 +295,14 @@ function setup(options: { status?: RunView['status']; specs?: readonly Spec[]; a
   const runs = new Store<AppState>({ runs: [view] });
   const pending: Array<() => void> = [];
   let hold = false;
+  let tableReads = 0;
   const deps: ResultsDeps = {
     data: {
-      readHitTable: async () => hspTable(run.records),
+      readHitTable: async () => {
+        tableReads++;
+        if (options.unreadable === true) throw new Error('the stored records are gone');
+        return hspTable(run.records);
+      },
       readOutput: async (_id, format) => (format === 6 ? run.out6.slice() : run.out0.slice()),
       readOutputRange: (_id, _format, start, end) =>
         new Promise((resolve) => {
@@ -317,7 +322,12 @@ function setup(options: { status?: RunView['status']; specs?: readonly Spec[]; a
     runs,
     view,
     hold: (on: boolean) => (hold = on),
-    release: () => pending.splice(0).forEach((answer) => answer()),
+    /** Answers the held reads in the order they were made, or the last first. */
+    release: (lastFirst = false) => {
+      const answers = pending.splice(0);
+      (lastFirst ? answers.reverse() : answers).forEach((answer) => answer());
+    },
+    tableReads: () => tableReads,
   };
 }
 
@@ -376,7 +386,8 @@ describe('ResultsBrowser', () => {
     hold(true);
     results.selectHsp({ runId: 'r1', qIdx: 0, rank: 1 });
     results.selectHsp({ runId: 'r1', qIdx: 0, rank: 2 });
-    release();
+    // The reads for rank 2 answer first: rank 1's detail arrives last, and is dropped.
+    release(true);
     await settle();
     hold(false);
     const { detail, hsp } = results.state.get();
@@ -463,5 +474,58 @@ describe('ResultsBrowser', () => {
     await settle();
     await settle();
     expect(running.results.state.get().phase).toBe('ready');
+  });
+
+  it('reads a run whose results could not be read once, not at each change of the runs', async () => {
+    const { results, runs, view, tableReads } = setup({ unreadable: true });
+    await results.open('r1');
+    expect(results.state.get().phase).toBe('failed');
+    expect(results.state.get().message).toContain('The results of run 1 could not be read: ');
+    runs.set({ runs: [view, { ...view, snapshot: snapshot('r2'), status: 'running' }] });
+    await settle();
+    expect(tableReads()).toBe(1);
+    expect(results.state.get().phase).toBe('failed');
+  });
+
+  it('reads the headings of a run opened while those of the run before were being read', async () => {
+    const { results, runs, view, hold, release } = setup();
+    runs.set({ runs: [view, { ...view, snapshot: snapshot('r2') }] });
+    await results.open('r1');
+    await settle();
+    hold(true);
+    results.requestHeadings([0, 1]);
+    hold(false);
+    await results.open('r2');
+    await settle();
+    results.requestHeadings([1]);
+    await settle();
+    release();
+    await settle();
+    const state = results.state.get();
+    expect(state.runId).toBe('r2');
+    expect([...state.headings]).toEqual([[1, '> s1 subject number 1\nLength=500\n\n']]);
+  });
+
+  it('sorts subjects by the values that the list shows: the first HSP and the HSP count before the filters', async () => {
+    const { results } = setup({
+      specs: [
+        { q: 0, s: 1, bits: 60, e: 1e-10, coords: [1, 50, 101, 150] },
+        { q: 0, s: 1, bits: 40, e: 1e-20, coords: [60, 80, 300, 280] },
+        { q: 0, s: 0, bits: 50, e: 1e-16, coords: [5, 45, 1, 41] },
+      ],
+    });
+    await results.open('r1');
+    // The filter hides the first HSP of s1 and keeps its second.
+    results.setFilters({ maxEValue: 1e-15 });
+    const shown = () => results.state.get().subjects.map((s) => [s.sIdx, s.first.bitscore, s.first.evalue, s.hspCount, s.rows.length]);
+    results.setSubjectSort({ key: 'eValue', descending: false });
+    expect(shown()).toEqual([
+      [0, '50', '1e-16', 1, 1],
+      [1, '60', '1e-10', 2, 1],
+    ]);
+    results.setSubjectSort({ key: 'bitScore', descending: true });
+    expect(shown().map(([sIdx]) => sIdx)).toEqual([1, 0]);
+    results.setSubjectSort({ key: 'hsps', descending: false });
+    expect(shown().map(([sIdx]) => sIdx)).toEqual([0, 1]);
   });
 });

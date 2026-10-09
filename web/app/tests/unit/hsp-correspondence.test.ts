@@ -8,6 +8,7 @@
 //   as docs/evidence/losat_web_e2a/check_losat.py compares them),
 // - the HSP records' `out6` ranges tile the outfmt 6 text in the order of the records, and
 //   each row's coordinates are the record's,
+// - outfmt 0 has as many sections and subject headings as the records point to,
 // - each `out0` range is the HSP's section (its score lines and its alignment, whose first
 //   and last Query and Sbjct coordinates are the record's), in the order of the records,
 // - each `out0_subject` range is the subject's heading, the same for the HSPs of one subject
@@ -214,6 +215,12 @@ function check(fixture: Fixture, outputs: Outputs): { hsps: number; sections: nu
     expect(alignmentEnds(section, 'Sbjct'), `${where(record)} Sbjct lines`).toEqual([record.s_start, record.s_end]);
     previousEnd = end;
   }
+  // The text has as many sections and subject headings as the records point to: no section or
+  // heading of outfmt 0 lacks its records.
+  const text = decoder.decode(out0);
+  expect(text.match(/^ Score =/gm)?.length ?? 0, `${fixture.id}: outfmt 0 sections and records with one`).toBe(sections);
+  const pointed = new Set([...headings.values()].flatMap((range) => (range === null ? [] : [range[0]])));
+  expect(text.match(/^>/gm)?.length ?? 0, `${fixture.id}: outfmt 0 subject headings and the records' headings`).toBe(pointed.size);
 
   // Subjects without alignments in outfmt 0 come after those with them, in each query.
   const table = hspTable(outputs.records);
@@ -266,6 +273,8 @@ describe.skipIf(reactors === undefined)('HSP records and the rows and sections o
       );
       expect([...summary.programs].sort()).toEqual(['blastn', 'blastp', 'tblastn', 'tblastx']);
       expect(summary.unshown, 'the fixtures include HSPs that outfmt 0 does not show').toBeGreaterThan(0);
+      expect(summary.frozen.bytes, 'fixtures compared byte for byte').toBeGreaterThan(0);
+      expect(summary.frozen.database, 'fixtures of the -db_gencode exception compared').toBeGreaterThan(0);
     },
     1_800_000,
   );

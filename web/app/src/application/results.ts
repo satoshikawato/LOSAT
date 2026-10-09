@@ -166,9 +166,10 @@ export class ResultsBrowser {
   /** Table rows by `${qIdx}:${rank}`, for the loaded run. */
   private rowById = new Map<string, number>();
   private loadToken = 0;
-  /** Subjects whose heading is being read, and those waiting. */
+  /** Subjects of the loaded run whose heading waits to be read. */
   private readonly headingQueue: number[] = [];
-  private readingHeadings = false;
+  /** The load token of the heading reader that runs, if one does. */
+  private headingReader: number | undefined;
 
   /** The table the verification badges come from (generated at build time). */
   get verification(): VerificationTable {
@@ -176,10 +177,11 @@ export class ResultsBrowser {
   }
 
   constructor(private readonly deps: ResultsDeps) {
-    // A run that the screen shows may finish, or be cancelled, while it is selected.
+    // A run that the screen shows may finish, or be cancelled, while it is selected. A completed
+    // run whose results could not be read ('failed') is not read again at each change of the runs.
     deps.runs.subscribe((app) => {
       const { runId, phase } = this.state.get();
-      if (runId === undefined || phase === 'ready' || phase === 'loading') return;
+      if (runId === undefined || phase !== 'unavailable') return;
       const run = app.runs.find((r) => r.snapshot.runId === runId);
       if (run?.status === 'completed') void this.open(runId);
       else if (run !== undefined) this.set({ message: unavailableMessage(run) });
@@ -340,11 +342,12 @@ export class ResultsBrowser {
     for (const sIdx of sIdxs) {
       if (!state.headings.has(sIdx) && !this.headingQueue.includes(sIdx)) this.headingQueue.push(sIdx);
     }
-    if (!this.readingHeadings) void this.readHeadings(this.loadToken);
+    // A reader of a run shown before stops at its next read, and leaves the queue to this one.
+    if (this.headingReader !== this.loadToken) void this.readHeadings(this.loadToken);
   }
 
   private async readHeadings(token: number): Promise<void> {
-    this.readingHeadings = true;
+    this.headingReader = token;
     try {
       while (this.headingQueue.length > 0 && token === this.loadToken) {
         const batch = this.headingQueue.splice(0, 40);
@@ -354,6 +357,7 @@ export class ResultsBrowser {
         if (loaded === undefined || query === undefined) break;
         const read = new Map<number, string>();
         for (const sIdx of batch) {
+          if (token !== this.loadToken) break;
           const subject = query.subjects.find((s) => s.sIdx === sIdx);
           const range = subject === undefined ? undefined : out0SubjectRange(loaded.index.table, subject.rows[0]!);
           if (range === undefined) continue;
@@ -366,8 +370,10 @@ export class ResultsBrowser {
     } catch {
       // A heading that cannot be read leaves the description empty; the detail reports read errors.
     } finally {
-      this.readingHeadings = false;
-      this.headingQueue.length = 0;
+      if (this.headingReader === token) {
+        this.headingReader = undefined;
+        this.headingQueue.length = 0;
+      }
     }
   }
 
@@ -391,9 +397,16 @@ export class ResultsBrowser {
       this.row(subject.rows[0]!).sseqid,
     ]);
     const order = new Map(query.subjects.map((subject, i) => [subject.sIdx, i + 1]));
-    const sorted = sortSubjects(filtered.subjects, state.subjectSort, table, (sIdx) => subjectRecords[sIdx]?.length ?? 0);
+    // The list shows each subject's first HSP and HSP count before the filters, and sorts by them.
     const unfiltered = new Map(query.subjects.map((subject) => [subject.sIdx, subject]));
-    const subjects = sorted.map((subject) => this.subjectEntry(loaded, subject, unfiltered.get(subject.sIdx)!, order.get(subject.sIdx)!, state.hspSort));
+    const shown = new Map(filtered.subjects.map((subject) => [subject.sIdx, subject]));
+    const sorted = sortSubjects(
+      filtered.subjects.map((subject) => unfiltered.get(subject.sIdx)!),
+      state.subjectSort,
+      table,
+      (sIdx) => subjectRecords[sIdx]?.length ?? 0,
+    );
+    const subjects = sorted.map((all) => this.subjectEntry(loaded, shown.get(all.sIdx)!, all, order.get(all.sIdx)!, state.hspSort));
     const selected = subjects.find((s) => s.sIdx === state.sIdx);
     const hsps = selected === undefined ? [] : selected.rows.map((row) => this.hspEntry(loaded, row));
     this.set({

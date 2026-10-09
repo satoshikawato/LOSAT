@@ -13,15 +13,24 @@ const bits = ref('');
 const subject = ref('');
 const problem = ref('');
 
+// The boxes show the filters in force, also when this form is drawn again for the same run (the
+// results tab shown again, the run opened again). A number keeps the text typed for it.
 watch(
   () => props.filters,
   (filters) => {
-    if (filters.maxEValue === undefined) evalue.value = '';
-    if (filters.minBitScore === undefined) bits.value = '';
+    if (typed(evalue.value) !== filters.maxEValue) evalue.value = filters.maxEValue === undefined ? '' : String(filters.maxEValue);
+    if (typed(bits.value) !== filters.minBitScore) bits.value = filters.minBitScore === undefined ? '' : String(filters.minBitScore);
     subject.value = filters.subjectText ?? '';
   },
   { immediate: true },
 );
+
+/** The number that a box's text gives, if any. */
+function typed(text: string): number | undefined {
+  const trimmed = text.trim();
+  const value = Number(trimmed);
+  return trimmed === '' || !Number.isFinite(value) ? undefined : value;
+}
 
 /** A number typed in a filter; empty means no filter. */
 function number(text: string, name: string): number | undefined | null {

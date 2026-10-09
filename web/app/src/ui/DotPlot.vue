@@ -49,6 +49,8 @@ const HALO = 'rgba(255, 196, 0, 0.75)';
 const FONT = '12px system-ui, sans-serif';
 const TITLE_FONT = '600 13px system-ui, sans-serif';
 const PICK_PX = 8;
+/** Minor ticks and their grid lines closer than this are left out: on a narrow plot they would fill it grey. */
+const MIN_MINOR_PX = 5;
 // Each axis's band, from the outside in: its title, the tick labels, the ticks.
 const PAD = 4;
 const TITLE_PX = 16;
@@ -198,16 +200,20 @@ function drawBase(): void {
   const yTicks = axisTicks(v.y0, v.y1, units.value.subject);
   const xs = (t: number) => Math.round(toPixelX(t, v, b)) + 0.5;
   const ys = (t: number) => Math.round(toPixelY(t, v, b)) + 0.5;
+  const sx = b.width / (v.x1 - v.x0);
+  const sy = b.height / (v.y1 - v.y0);
+  const xMinor = xTicks.steps.minor * sx >= MIN_MINOR_PX ? xTicks.minor : [];
+  const yMinor = yTicks.steps.minor * sy >= MIN_MINOR_PX ? yTicks.minor : [];
 
   // The grid at the major and minor ticks.
   context.lineWidth = 1;
   context.strokeStyle = GRID;
   context.beginPath();
-  for (const t of [...xTicks.major, ...xTicks.minor]) {
+  for (const t of [...xTicks.major, ...xMinor]) {
     context.moveTo(xs(t), b.top);
     context.lineTo(xs(t), b.top + b.height);
   }
-  for (const t of [...yTicks.major, ...yTicks.minor]) {
+  for (const t of [...yTicks.major, ...yMinor]) {
     context.moveTo(b.left, ys(t));
     context.lineTo(b.left + b.width, ys(t));
   }
@@ -221,8 +227,6 @@ function drawBase(): void {
   context.lineWidth = 2;
   context.lineCap = 'round';
   const s = segments.value;
-  const sx = b.width / (v.x1 - v.x0);
-  const sy = b.height / (v.y1 - v.y0);
   s.batches.forEach((members, k) => {
     if (members.length === 0) return;
     context.strokeStyle = COLORS[ORIENTATIONS[k >> 2]!];
@@ -244,7 +248,7 @@ function drawBase(): void {
   context.beginPath();
   for (const [ticks, length] of [
     [xTicks.major, MAJOR_PX],
-    [xTicks.minor, MINOR_PX],
+    [xMinor, MINOR_PX],
   ] as const) {
     for (const t of ticks) {
       context.moveTo(xs(t), b.top - 1);
@@ -253,7 +257,7 @@ function drawBase(): void {
   }
   for (const [ticks, length] of [
     [yTicks.major, MAJOR_PX],
-    [yTicks.minor, MINOR_PX],
+    [yMinor, MINOR_PX],
   ] as const) {
     for (const t of ticks) {
       context.moveTo(b.left - 1, ys(t));

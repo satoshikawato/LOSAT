@@ -48,31 +48,36 @@ export function tickLabel(position: number, unit: AxisUnit): string {
   return (position / unit.divisor).toLocaleString('en-US', { maximumFractionDigits: 3 });
 }
 
-/** Minor ticks are left out when more than this many would be drawn. */
-export const MAX_MINOR_TICKS = 50;
+/**
+ * Minor ticks (and their grid lines) closer than this many pixels are left out: on a narrow plot
+ * they would fill it grey. The rule is the same on both axes, so that two axes of the same scale
+ * and the same minor step both have their minor ticks or neither (W4b screen review M2: a cap on
+ * their count left them out on the longer axis only).
+ */
+export const MIN_MINOR_PX = 5;
 
 export interface AxisTicks {
   readonly unit: AxisUnit;
   readonly steps: TickSteps;
   /** Positions of the major ticks (the labelled ones), in letters. */
   readonly major: readonly number[];
-  /** Positions of the minor ticks that are not major ticks; none when there would be too many. */
+  /** Positions of the minor ticks that are not major ticks; none where they would be closer than MIN_MINOR_PX. */
   readonly minor: readonly number[];
 }
 
-/** The ticks of an axis whose visible range is `from` to `to` (positions 0 to the record's length). */
-export function axisTicks(from: number, to: number, residue: string): AxisTicks {
+/**
+ * The ticks of an axis whose visible range is `from` to `to` (positions 0 to the record's length),
+ * drawn `pxPerLetter` pixels per letter.
+ */
+export function axisTicks(from: number, to: number, residue: string, pxPerLetter: number): AxisTicks {
   const span = to - from;
   const steps = tickSteps(span);
   const unit = axisUnit(span, residue);
   if (!(span > 0)) return { unit, steps, major: [], minor: [] };
   const major = multiples(from, to, steps.major);
-  const minorCount = count(from, to, steps.minor) - major.length;
-  const minor = minorCount > MAX_MINOR_TICKS ? [] : multiples(from, to, steps.minor).filter((t) => t % steps.major !== 0);
+  const minor = steps.minor * pxPerLetter >= MIN_MINOR_PX ? multiples(from, to, steps.minor).filter((t) => t % steps.major !== 0) : [];
   return { unit, steps, major, minor };
 }
-
-const count = (from: number, to: number, step: number): number => Math.max(0, Math.floor(to / step) - Math.ceil(from / step) + 1);
 
 function multiples(from: number, to: number, step: number): number[] {
   const out: number[] = [];

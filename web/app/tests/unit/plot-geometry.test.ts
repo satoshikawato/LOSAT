@@ -16,6 +16,7 @@ import {
   MIN_SIDE,
   panView,
   pickLine,
+  placeBeside,
   placeBox,
   plotSize,
   segmentDistance,
@@ -188,5 +189,44 @@ describe('placeBox', () => {
 
   it('stays inside bounds that have room on neither side', () => {
     expect(placeBox({ x: 100, y: 50 }, { width: 180, height: 100 }, { width: 220, height: 120 })).toEqual({ left: 10, top: 0 });
+  });
+});
+
+describe('placeBeside', () => {
+  /** Whether a box of `size` at `at` covers a point, or (with the margin of half the gap) any of a line. */
+  const covers = (at: { left: number; top: number }, size: { width: number; height: number }, x: number, y: number) =>
+    x >= at.left && x <= at.left + size.width && y >= at.top && y <= at.top + size.height;
+  const touches = (at: { left: number; top: number }, size: { width: number; height: number }, line: readonly [number, number, number, number]) =>
+    clipToBox(...line, { left: at.left - 6, top: at.top - 6, width: size.width + 12, height: size.height + 12 }) !== undefined;
+
+  it('puts the popup off an end of the line, leaving the line uncovered (W4b screen review L10)', () => {
+    // The reverse HSP of the review's capture: its popup hid the upper half of the line.
+    const line = [481, 717, 767, 432] as const;
+    const size = { width: 228, height: 245 };
+    const at = placeBeside(line, size, { width: 924, height: 800 })!;
+    expect(covers(at, size, 624, 574.5)).toBe(false);
+    expect(touches(at, size, line)).toBe(false);
+    // Beside one of the ends: the box's nearest corner is the gap away from it.
+    const near = (x: number, y: number) =>
+      Math.hypot(Math.max(at.left - x, 0, x - at.left - size.width), Math.max(at.top - y, 0, y - at.top - size.height)) <= 12 * Math.SQRT2 + 0.5;
+    expect(near(481, 717) || near(767, 432)).toBe(true);
+  });
+
+  it('takes the first place that covers nothing of the line and needs no move', () => {
+    // A forward HSP from the top left: the boxes beside its first end cover it or leave the bounds.
+    expect(placeBeside([60, 60, 300, 300], { width: 160, height: 100 }, { width: 600, height: 500 })).toEqual({ left: 312, top: 312 });
+    // Near the far corner, the box goes back over the line's side that is free.
+    const at = placeBeside([300, 300, 590, 490], { width: 160, height: 100 }, { width: 600, height: 500 })!;
+    expect(touches(at, { width: 160, height: 100 }, [300, 300, 590, 490])).toBe(false);
+  });
+
+  it('places a box beside a point (a line out of view, or of one pixel)', () => {
+    expect(placeBeside([100, 100, 100, 100], { width: 50, height: 40 }, { width: 400, height: 300 })).toEqual({ left: 112, top: 112 });
+  });
+
+  it('gives no place where the box would cover the midpoint wherever it goes, or does not fit', () => {
+    expect(placeBeside([10, 100, 290, 100], { width: 280, height: 190 }, { width: 300, height: 200 })).toBeUndefined();
+    expect(placeBeside([10, 10, 20, 20], { width: 320, height: 100 }, { width: 300, height: 200 })).toBeUndefined();
+    expect(placeBeside([10, 10, 20, 20], { width: 100, height: 210 }, { width: 300, height: 200 })).toBeUndefined();
   });
 });

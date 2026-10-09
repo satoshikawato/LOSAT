@@ -78,7 +78,8 @@
   pointer-events: none;
 }
 
-/* The HSP popup: a non-modal dialog next to the selected line, inside the figure. */
+/* The HSP popup: a non-modal dialog beside the selected line, inside the figure; under the plot on
+   phones (DotPlot.vue placePopup). */
 .plot-popup {
   position: absolute;
   inset: auto;
@@ -95,9 +96,17 @@
   font-size: 0.875em;
 }
 
+/* The focus moves into the popup when the keyboard opens it. Firefox does not match :focus-visible
+   after that scripted focus (W4b screen review L11), hence :focus as well. */
+.plot-popup:focus,
 .plot-popup:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
+}
+
+.plot-popup.below {
+  position: static;
+  margin-top: 8px;
 }
 
 .plot-popup h4 {

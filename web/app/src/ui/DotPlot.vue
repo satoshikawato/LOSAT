@@ -16,6 +16,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, useId, watch } from 'vue';
 import type { HspEntry, HspId, ResultsBrowser, ResultsState } from '../application/results';
 import {
+  clipToBox,
   codonWeights,
   frameRange,
   fromPixelX,
@@ -24,7 +25,7 @@ import {
   lineNearView,
   panView,
   pickLine,
-  placeBox,
+  placeBeside,
   plotSize,
   toPixelX,
   toPixelY,
@@ -32,7 +33,7 @@ import {
   type Box,
   type View,
 } from '../domain/plot-geometry';
-import { axisTicks, identityClass, IDENTITY_CLASSES, tickLabel, type AxisTicks } from '../domain/plot-scale';
+import { axisTicks, axisUnit, identityClass, IDENTITY_CLASSES, tickLabel, type AxisTicks } from '../domain/plot-scale';
 import { formatCount } from './format';
 import './plots.css';
 
@@ -52,10 +53,10 @@ const HALO = 'rgba(255, 196, 0, 0.75)';
 const FONT = '12px system-ui, sans-serif';
 const TITLE_FONT = '600 13px system-ui, sans-serif';
 const PICK_PX = 8;
+/** Below this width of the plot's stage (phones), the HSP popup is shown under the plot, not over it (W4b screen review L10). */
+const POPUP_BESIDE_MIN_PX = 600;
 /** How far a line's stroke reaches beyond the line: half the 3 px dash of a short HSP (the 2 px line reaches 1 px). */
 const STROKE_REACH_PX = 1.5;
-/** Minor ticks and their grid lines closer than this are left out: on a narrow plot they would fill it grey. */
-const MIN_MINOR_PX = 5;
 // Each axis's band, from the outside in: its title, the tick labels, the ticks.
 const PAD = 4;
 const TITLE_PX = 16;
@@ -87,7 +88,23 @@ const extent = computed(() => ({ x: Math.max(1, queryLength.value), y: Math.max(
 const weights = computed(() => (loaded.value === undefined ? undefined : codonWeights(loaded.value.kinds.query, loaded.value.kinds.subject)));
 const size = computed(() => plotSize(extent.value, stageWidth.value - MARGIN.left - MARGIN.right, weights.value));
 const box = computed<Box>(() => ({ left: MARGIN.left, top: MARGIN.top, width: size.value.width, height: size.value.height }));
-const canvasWidth = computed(() => MARGIN.left + size.value.width + MARGIN.right);
+
+/** What a protein axis's title adds against a nucleotide axis while the axes are to scale (S13b decision 26). */
+const scaleNote = (weight: number): string => (weight !== 1 && size.value.toScale ? `; drawn at ${weight} nt per aa` : '');
+/** A context that measures the query's axis title (in its font) before the canvas is sized. */
+const measuring = document.createElement('canvas').getContext('2d');
+if (measuring !== null) measuring.font = TITLE_FONT;
+/**
+ * The width of the query's axis title in the unit of the whole query (the longest it gets). The
+ * canvas of a narrow plot (a protein against a long nucleotide sequence) is widened to it, within
+ * the stage, so that the title is not cut.
+ */
+const xTitleWidth = computed(() => {
+  if (measuring === null) return 0;
+  const title = `Query ${queryId.value} (${axisUnit(extent.value.x, units.value.query).name}${scaleNote(weights.value?.x ?? 1)})`;
+  return Math.ceil(measuring.measureText(title).width) + 2 * PAD + 4;
+});
+const canvasWidth = computed(() => Math.max(MARGIN.left + size.value.width + MARGIN.right, Math.min(stageWidth.value, xTitleWidth.value)));
 const canvasHeight = computed(() => MARGIN.top + size.value.height + MARGIN.bottom);
 
 /** The HSPs as columns of numbers, and their batches: one per colour and opacity class (orientation × 4 + class). */
@@ -211,14 +228,13 @@ function drawBase(): void {
   context.clearRect(0, 0, W, H);
   context.fillStyle = '#ffffff';
   context.fillRect(0, 0, W, H);
-  const xTicks = axisTicks(v.x0, v.x1, units.value.query);
-  const yTicks = axisTicks(v.y0, v.y1, units.value.subject);
-  const xs = (t: number) => Math.round(toPixelX(t, v, b)) + 0.5;
-  const ys = (t: number) => Math.round(toPixelY(t, v, b)) + 0.5;
   const sx = b.width / (v.x1 - v.x0);
   const sy = b.height / (v.y1 - v.y0);
-  const xMinor = xTicks.steps.minor * sx >= MIN_MINOR_PX ? xTicks.minor : [];
-  const yMinor = yTicks.steps.minor * sy >= MIN_MINOR_PX ? yTicks.minor : [];
+  const xTicks = axisTicks(v.x0, v.x1, units.value.query, sx);
+  const yTicks = axisTicks(v.y0, v.y1, units.value.subject, sy);
+  const xs = (t: number) => Math.round(toPixelX(t, v, b)) + 0.5;
+  const ys = (t: number) => Math.round(toPixelY(t, v, b)) + 0.5;
+  const [xMinor, yMinor] = [xTicks.minor, yTicks.minor];
 
   // The grid at the major and minor ticks.
   context.lineWidth = 1;
@@ -319,14 +335,26 @@ function drawBase(): void {
 
   context.font = TITLE_FONT;
   context.textBaseline = 'top';
-  const xTitle = fit(context, `Query ${queryId.value} (${xTicks.unit.name})`, W - 2 * PAD);
+  const xTitle = axisTitle(context, 'Query', queryId.value, xTicks.unit.name, weights.value?.x ?? 1, W - 2 * PAD);
   context.fillText(xTitle, within(b.left + b.width / 2, context.measureText(xTitle).width, W), PAD);
-  const yTitle = fit(context, `Subject ${subjectId.value} (${yTicks.unit.name})`, H - 2 * PAD);
+  const yTitle = axisTitle(context, 'Subject', subjectId.value, yTicks.unit.name, weights.value?.y ?? 1, H - 2 * PAD);
   context.save();
   context.translate(PAD, within(b.top + b.height / 2, context.measureText(yTitle).width, H));
   context.rotate(-Math.PI / 2);
   context.fillText(yTitle, 0, 0);
   context.restore();
+  // The titles as drawn, for the tests.
+  if (base.value !== undefined) base.value.dataset['titles'] = JSON.stringify([xTitle, yTitle]);
+}
+
+/**
+ * An axis title, "Query <ID> (<unit>)". A protein axis against a nucleotide one says that it is
+ * drawn at 3 nt per aa (S13b decision 26), unless the 120 px minimum changed its scale (the note
+ * under the plot then says so). Where the room is short, the ID is cut and the unit kept (W4b
+ * screen review M3: a phone lost the "(kbp)" of a long subject ID).
+ */
+function axisTitle(context: CanvasRenderingContext2D, role: string, id: string, unit: string, weight: number, room: number): string {
+  return fitId(context, `${role} `, id, ` (${unit}${scaleNote(weight)})`, room);
 }
 
 /** The hovered HSP drawn thicker, and the selected one wider on its halo. */
@@ -382,6 +410,20 @@ function labelled(context: CanvasRenderingContext2D, ticks: AxisTicks, pxPerLett
 
 /** The centre of a text `width` px wide at `at`, moved so that the text stays within 0..`room` (2 px to spare). */
 const within = (at: number, width: number, room: number): number => Math.max(width / 2 + 2, Math.min(room - width / 2 - 2, at));
+
+/** `head`, `id` and `tail` in `room` px: the ID cut with an ellipsis where needed, else the whole text cut. */
+function fitId(context: CanvasRenderingContext2D, head: string, id: string, tail: string, room: number): string {
+  const whole = `${head}${id}${tail}`;
+  if (context.measureText(whole).width <= room) return whole;
+  let [low, high] = [0, id.length];
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    if (context.measureText(`${head}${id.slice(0, mid)}…${tail}`).width <= room) low = mid;
+    else high = mid - 1;
+  }
+  const cut = `${head}${id.slice(0, low)}…${tail}`;
+  return context.measureText(cut).width <= room ? cut : fit(context, whole, room);
+}
 
 /** A text cut with an ellipsis to `room` px. */
 function fit(context: CanvasRenderingContext2D, text: string, room: number): string {
@@ -485,6 +527,8 @@ function onPointerUp(event: PointerEvent): void {
   }
   props.results.selectHsp(segments.value.list[i]!.id);
   popupOpen.value = true;
+  // Under the plot (phones), the popup may open below the screen's edge.
+  if (popupBelow.value) void nextTick(() => popup.value?.scrollIntoView({ block: 'nearest' }));
 }
 function onPointerLeave(): void {
   pointer = undefined;
@@ -525,6 +569,10 @@ function onKey(event: KeyboardEvent): void {
 
 const popupOpen = ref(false);
 const popupAt = ref({ left: 0, top: 0 });
+/** No room beside the selected HSP's line that leaves its midpoint uncovered (placePopup). */
+const noRoomBeside = ref(false);
+/** The popup is shown under the plot, in the page's flow: on phones, or where it has no room beside the line. */
+const popupBelow = computed(() => stageWidth.value < POPUP_BESIDE_MIN_PX || noRoomBeside.value);
 
 /** Opens the popup of the selected HSP; opened from the keyboard, the focus moves into it. */
 function openPopup(byKeyboard: boolean): void {
@@ -559,19 +607,23 @@ function showAlignment(): void {
   emit('show-alignment', hsp.id);
 }
 
-/** Puts the popup next to the middle of the selected line (kept within the plot), inside the figure. */
+/**
+ * Puts the popup beside the selected line as the frame shows it, off one of its ends, leaving its
+ * midpoint uncovered, within the canvas's height and the stage's width (W4b screen review L10);
+ * under the plot where there is no such place. On phones it is always under the plot.
+ */
 function placePopup(): void {
   const element = popup.value;
   const i = selectedIndex.value;
-  if (!popupOpen.value || element === undefined || i < 0) return;
+  if (!popupOpen.value || element === undefined || i < 0 || stageWidth.value < POPUP_BESIDE_MIN_PX) return;
   const [ax, ay, bx, by] = ends(i);
   const b = box.value;
-  const anchor = {
-    x: Math.max(b.left, Math.min(b.left + b.width, (ax + bx) / 2)),
-    y: Math.max(b.top, Math.min(b.top + b.height, (ay + by) / 2)),
-  };
-  const next = placeBox(anchor, { width: element.offsetWidth, height: element.offsetHeight }, { width: canvasWidth.value, height: canvasHeight.value });
-  if (next.left !== popupAt.value.left || next.top !== popupAt.value.top) popupAt.value = next;
+  // The line's part in the frame; a line out of view counts as the point of the frame nearest to its middle.
+  const [cx, cy] = [Math.max(b.left, Math.min(b.left + b.width, (ax + bx) / 2)), Math.max(b.top, Math.min(b.top + b.height, (ay + by) / 2))];
+  const seen = clipToBox(ax, ay, bx, by, b) ?? [cx, cy, cx, cy];
+  const next = placeBeside(seen, { width: element.offsetWidth, height: element.offsetHeight }, { width: stageWidth.value, height: canvasHeight.value });
+  if (noRoomBeside.value !== (next === undefined)) noRoomBeside.value = next === undefined;
+  if (next !== undefined && (next.left !== popupAt.value.left || next.top !== popupAt.value.top)) popupAt.value = next;
 }
 
 // --- life cycle ----------------------------------------------------------------------------------
@@ -602,9 +654,10 @@ watch(pair, () => {
   view.value = fullView(extent.value);
   pendingView = undefined;
   popupOpen.value = false;
+  noRoomBeside.value = false;
   schedule(true);
 });
-watch([segments, box, units, queryId, subjectId], () => {
+watch([segments, box, canvasWidth, units, queryId, subjectId], () => {
   hovered = -1;
   hoverDirty = pointer !== undefined;
   schedule(true);
@@ -656,7 +709,8 @@ const framed = (hsp: HspEntry) => hsp.queryFrame !== undefined || hsp.subjectFra
       <p>Touch: use the Zoom buttons; slide a finger sideways to move (up and down scrolls the page); tap a line to show its HSP.</p>
     </div>
     <div ref="stage" class="plot-stage">
-      <div class="plot-layers" :style="{ width: `${canvasWidth}px`, height: `${canvasHeight}px` }">
+      <!-- As tall as the canvas, and the popup when it is under the plot. -->
+      <div class="plot-layers" :style="{ width: `${canvasWidth}px` }">
         <canvas
           ref="base"
           class="plot-base"
@@ -683,11 +737,13 @@ const framed = (hsp: HspEntry) => hsp.queryFrame !== undefined || hsp.subjectFra
           ref="popup"
           open
           class="plot-popup"
+          :class="{ below: popupBelow }"
           tabindex="-1"
           :aria-labelledby="popupTitle"
           data-testid="dotplot-popup"
           :data-hsp="`${selected.id.qIdx}:${selected.id.rank}`"
-          :style="{ left: `${popupAt.left}px`, top: `${popupAt.top}px` }"
+          :data-place="popupBelow ? 'below' : 'beside'"
+          :style="popupBelow ? undefined : { left: `${popupAt.left}px`, top: `${popupAt.top}px` }"
           @keydown="onPopupKey"
         >
           <div aria-live="polite">

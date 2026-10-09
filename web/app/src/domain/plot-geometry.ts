@@ -255,3 +255,50 @@ export function placeBox(
   };
   return { left: Math.round(side(anchor.x, size.width, bounds.width)), top: Math.round(side(anchor.y, size.height, bounds.height)) };
 }
+
+/**
+ * Where to put a box of `size` beside a line from (ax, ay) to (bx, by), within `bounds` (CSS
+ * pixels from the bounds' top left): the dot plot's popup of the selected HSP, which hid half of
+ * the line when it was put at the line's midpoint (W4b screen review L10). The box goes `gap`
+ * pixels off one of the line's ends, towards one of the four corners; of these eight places, moved
+ * inside the bounds, the one that covers the least of the line (with a margin of half the gap) and
+ * then needs the least move. None that covers the line's midpoint is taken: undefined where every
+ * one does, or where the box is larger than the bounds (the dot plot then shows it below itself).
+ */
+export function placeBeside(
+  line: readonly [number, number, number, number],
+  size: { readonly width: number; readonly height: number },
+  bounds: { readonly width: number; readonly height: number },
+  gap = 12,
+): { left: number; top: number } | undefined {
+  if (size.width > bounds.width || size.height > bounds.height) return undefined;
+  const [ax, ay, bx, by] = line;
+  const [mx, my] = [(ax + bx) / 2, (ay + by) / 2];
+  const margin = gap / 2;
+  let best: { left: number; top: number } | undefined;
+  let bestCost = Infinity;
+  for (const [ex, ey] of [
+    [ax, ay],
+    [bx, by],
+  ] as const) {
+    for (const [dx, dy] of [
+      [1, 1],
+      [1, -1],
+      [-1, 1],
+      [-1, -1],
+    ] as const) {
+      const wanted = { left: dx > 0 ? ex + gap : ex - gap - size.width, top: dy > 0 ? ey + gap : ey - gap - size.height };
+      const left = Math.max(0, Math.min(bounds.width - size.width, wanted.left));
+      const top = Math.max(0, Math.min(bounds.height - size.height, wanted.top));
+      const area: Box = { left: left - margin, top: top - margin, width: size.width + 2 * margin, height: size.height + 2 * margin };
+      if (mx >= area.left && mx <= area.left + area.width && my >= area.top && my <= area.top + area.height) continue;
+      const covered = clipToBox(ax, ay, bx, by, area);
+      const cost = (covered === undefined ? 0 : 1000 * Math.hypot(covered[2] - covered[0], covered[3] - covered[1])) + Math.abs(left - wanted.left) + Math.abs(top - wanted.top);
+      if (cost < bestCost) {
+        bestCost = cost;
+        best = { left: Math.round(left), top: Math.round(top) };
+      }
+    }
+  }
+  return best;
+}

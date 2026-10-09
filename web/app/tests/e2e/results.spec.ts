@@ -161,6 +161,9 @@ async function text(locator: Locator): Promise<string> {
   return (await locator.textContent()) ?? '';
 }
 
+/** A text matched as it is in a regular expression. */
+const literal = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 /** Shows a tab of the results screen. */
 async function show(page: Page, tab: Tab): Promise<void> {
   const button = page.getByTestId(TABS[tab]);
@@ -718,6 +721,23 @@ for (const c of PROGRAM_CASES) {
     if ((await page.getByTestId('dotplot-scale-note').count()) === 0) {
       expect(Math.min(Math.abs(width! - height! * ratio), Math.abs(height! - width! / ratio))).toBeLessThanOrEqual(0.5);
     } else expect(Math.min(width!, height!)).toBe(120);
+    // The axis titles as drawn: the IDs and the units of the visible spans.
+    const titles = async () => JSON.parse((await canvas.getAttribute('data-titles'))!) as [string, string];
+    expect((await titles())[1]).toMatch(new RegExp(`^Subject ${literal(fields[1]!)} \\((${c.units.subject === 'aa' ? 'aa|kaa' : 'bp|kbp'})\\)$`));
+    if (c.id === 'tblastn') {
+      // TBLASTN's pair is to scale at 1280 px, its protein axis drawn at 3 nt per aa, which its title
+      // says; on a phone the 120 px minimum changes the scale, and the note says so instead (W4b
+      // screen review finding 4).
+      await expect(page.getByTestId('dotplot-scale-note')).toHaveCount(0);
+      expect((await titles())[0]).toBe(`Query ${fields[0]} (aa; drawn at 3 nt per aa)`);
+      await page.setViewportSize({ width: 390, height: 844 });
+      await expect(page.getByTestId('dotplot-scale-note')).toBeVisible();
+      await expect.poll(async () => (await titles())[0]).toBe(`Query ${fields[0]} (aa)`);
+      await page.setViewportSize({ width: 1280, height: 900 });
+      await expect(page.getByTestId('dotplot-scale-note')).toHaveCount(0);
+    } else {
+      expect((await titles())[0]).toMatch(new RegExp(`^Query ${literal(fields[0]!)} \\((${c.units.query === 'aa' ? 'aa|kaa' : 'bp|kbp'})\\)$`));
+    }
 
     // Run details: the command of each format is the Outputs view's, and the verification badge.
     await show(page, 'details');
@@ -1371,6 +1391,14 @@ test('the dot plot: the HSPs of the pair on a canvas; zoom; choosing an HSP on i
   await expect(page.getByTestId('dotplot-selected')).toContainText(`query ${firstQuery} nt`);
   const popup = page.getByTestId('dotplot-popup');
   await expect(popup).toHaveAttribute('data-hsp', firstId);
+  // Beside the line, off one of its ends: it does not cover the line's midpoint (W4b screen review L10).
+  await expect(popup).toHaveAttribute('data-place', 'beside');
+  const covers = async (point: { x: number; y: number }) => {
+    const [at, plot] = [(await popup.boundingBox())!, (await canvas.boundingBox())!];
+    const [x, y] = [plot.x + point.x, plot.y + point.y];
+    return x >= at.x && x <= at.x + at.width && y >= at.y && y <= at.y + at.height;
+  };
+  expect(await covers(target)).toBe(false);
   const fields = rows.filter((row) => row[0] === 'q2')[Number(firstId.split(':')[1])]!;
   const value = (name: string) => popup.locator(`dd[data-field="${name}"]`);
   await expect(value('bitscore')).toHaveText(fields[11]!);
@@ -1391,12 +1419,21 @@ test('the dot plot: the HSPs of the pair on a canvas; zoom; choosing an HSP on i
   await page.keyboard.press('Enter');
   await expect(popup).toHaveAttribute('data-hsp', secondId);
   await expect(popup).toBeFocused();
+  expect(await covers(targets.find((t) => t.hsp === secondId)!)).toBe(false);
   await expect(page.getByRole('dialog', { name: `HSP ${Number(secondId.split(':')[1]) + 1}` })).toHaveAttribute('data-testid', 'dotplot-popup');
   await page.keyboard.press('Escape');
   await expect(popup).toHaveCount(0);
   await expect(canvas).toBeFocused();
-  // "Show alignment": the Alignments, with the HSP's Range in view and the focus on its label.
+  // Reached with Tab, the plot opens the popup with Enter, and the popup shows its focus in every
+  // browser (W4b screen review L11: Firefox showed none).
+  await page.getByTestId('dotplot-reset').focus();
+  await page.keyboard.press('Tab');
+  await expect(canvas).toBeFocused();
   await page.keyboard.press('Enter');
+  await expect(popup).toBeFocused();
+  await expect(popup).toHaveCSS('outline-style', 'solid');
+  await expect(popup).toHaveCSS('outline-width', '2px');
+  // "Show alignment": the Alignments, with the HSP's Range in view and the focus on its label.
   await popup.getByTestId('dotplot-popup-alignment').click();
   await expect(page.getByTestId(TABS.alignment)).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByTestId('hsp-detail')).toHaveAttribute('data-hsp', secondId);
@@ -1491,6 +1528,16 @@ test('narrow screens: the results are no wider than the screen; "Open results" s
   await show(page, 'dotplot');
   await expect(page.getByTestId('dotplot-canvas')).toHaveAttribute('data-segments', /^[1-9]/);
   await expectNoSideScroll(page, 'dot plot');
+  // The HSP popup is under the plot on a phone, not over it (W4b screen review L10).
+  await page.getByTestId('dotplot-canvas').focus();
+  await page.keyboard.press('Enter');
+  const popup = page.getByTestId('dotplot-popup');
+  await expect(popup).toHaveAttribute('data-place', 'below');
+  await expect(popup).toBeFocused();
+  expect((await popup.boundingBox())!.y).toBeGreaterThanOrEqual((await page.getByTestId('dotplot-canvas').boundingBox())!.y + (await page.getByTestId('dotplot-canvas').boundingBox())!.height);
+  await expectNoSideScroll(page, 'dot plot popup');
+  await page.keyboard.press('Escape');
+  await expect(popup).toHaveCount(0);
   await show(page, 'details');
   await expect(page.getByTestId('run-details')).toBeVisible();
   await expectNoSideScroll(page, 'run details');

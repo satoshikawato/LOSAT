@@ -7,7 +7,7 @@ import {
   axisUnit,
   identityClass,
   IDENTITY_CLASSES,
-  MAX_MINOR_TICKS,
+  MIN_MINOR_PX,
   rulerTicks,
   scoreBin,
   SCORE_BINS,
@@ -67,7 +67,7 @@ describe('axisUnit and tickLabel', () => {
 
 describe('axisTicks', () => {
   it('places the major and minor ticks of the visible span, minor ticks off the major ones', () => {
-    const ticks = axisTicks(0, 400, 'nt');
+    const ticks = axisTicks(0, 400, 'nt', 1);
     expect(ticks.major).toEqual([0, 100, 200, 300, 400]);
     expect(ticks.minor).toHaveLength(36);
     expect(ticks.minor).not.toContain(100);
@@ -75,7 +75,7 @@ describe('axisTicks', () => {
   });
 
   it('chooses the steps again for a zoomed view and starts at the first multiple in view', () => {
-    const ticks = axisTicks(123456.7, 131000, 'nt');
+    const ticks = axisTicks(123456.7, 131000, 'nt', 0.1);
     expect(ticks.steps).toEqual({ major: 1000, minor: 500 });
     expect(ticks.major[0]).toBe(124000);
     expect(ticks.major.at(-1)).toBe(131000);
@@ -83,15 +83,27 @@ describe('axisTicks', () => {
     expect(ticks.unit.name).toBe('kbp');
   });
 
-  it('leaves out the minor ticks when more than 50 would be drawn', () => {
-    expect(axisTicks(0, 500, 'nt').minor).toHaveLength(45);
-    expect(axisTicks(0, 600, 'nt').minor).toEqual([]);
-    expect(axisTicks(0, 600, 'nt').major).toHaveLength(7);
-    expect(MAX_MINOR_TICKS).toBe(50);
+  it('places minor ticks whatever their count, leaving out only those closer than MIN_MINOR_PX', () => {
+    expect(MIN_MINOR_PX).toBe(5);
+    // The plot of W4b screen review M2: 600 bp against 540 bp, 1.43 px per bp. The 54 minor ticks
+    // of the query and the 49 of the subject are both drawn (a cap of 50 left out the query's).
+    const [x, y] = [axisTicks(0, 600, 'nt', 1.43), axisTicks(0, 540, 'nt', 1.43)];
+    expect(x.minor).toHaveLength(54);
+    expect(y.minor).toHaveLength(49);
+    expect(x.major).toHaveLength(7);
+    // At a scale where 10 bp is under 5 px, neither axis has them.
+    expect(axisTicks(0, 600, 'nt', 0.49).minor).toEqual([]);
+    expect(axisTicks(0, 540, 'nt', 0.49).minor).toEqual([]);
+    expect(axisTicks(0, 600, 'nt', 0.5).minor).toHaveLength(54);
+  });
+
+  it('builds no minor ticks for a long record drawn small', () => {
+    expect(axisTicks(0, 3e9, 'nt', 1000 / 3e9).minor).toEqual([]);
+    expect(axisTicks(0, 3e9, 'nt', 1000 / 3e9).major).toHaveLength(3001);
   });
 
   it('has no ticks for an empty span', () => {
-    expect(axisTicks(10, 10, 'nt').major).toEqual([]);
+    expect(axisTicks(10, 10, 'nt', 1).major).toEqual([]);
   });
 });
 

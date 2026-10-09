@@ -10,18 +10,25 @@ and for each supported output format the frozen SHA-256 where one exists.
   Their inputs use the recorded path spellings, so this needs the Gate A lexical root
   that capture_outputs.py documents. It adds the outfmt 0 and 7 fixtures of
   LOSAT/tests/outfmt0_manifest.tsv, whose frozen hashes are NCBI's.
+  The group `fasta_input` (session SFc, S10) adds SF fixture inputs of
+  LOSAT/tests/fasta_input_fixtures.py that `register` accepts (deflines, sequence lines,
+  line ends, text before the first defline, records without residues, ...), FASTA_INPUT_SEARCHES
+  per program, with NCBI's frozen hashes, and per program one search whose first query batch
+  fails after the outfmt 0 prolog (`"expect": "failure"`: queries without residues only).
 - quick: a few searches per program with repository paths, compared with the native
   CLI only (for CI).
 
 Both suites add a TBLASTX search over several subjects, which the threaded reactor
-reduces in the wasm-threads-only path.
+reduces in the wasm-threads-only path. `--group fasta_input` writes that group of the full
+suite alone.
 
-Usage: v_abi_cases.py --suite quick|full --out FILE.json
+Usage: v_abi_cases.py --suite quick|full [--group fasta_input] --out FILE.json
 """
 from __future__ import annotations
 
 import argparse
 import json
+import shlex
 import sys
 from pathlib import Path
 
@@ -87,6 +94,65 @@ def outfmt0_fixtures() -> list[dict]:
     return list(searches.values())
 
 
+FASTA_INPUT_SEARCHES = 32
+# Queries without residues only: NCBI's first batch has no query to search, so the run fails
+# after the outfmt 0 prolog (on a file sink: AUTHORITY.md of losat_web_e2h, S5 decision 5).
+FIRST_BATCH_FAILURE = "@/rec_empty_all.q.{}"
+
+
+def fasta_input() -> list[dict]:
+    """SF fixture inputs through the ABI (gate NOTES open item 3): the rows of
+    LOSAT/tests/fasta_input_fixtures.py that NCBI runs on files (no standard input, no
+    environment, one thread) and completes in every format of the search, whose inputs
+    `register` accepts (no `>?` gap line: maintainer decision 3), without the
+    `-lcase_masking` rows that LOSAT's TBLASTX and BLASTP reject. One search per program,
+    task, inputs and options, with NCBI's frozen hash of each fixture's format; per program
+    FASTA_INPUT_SEARCHES of them, taken in turn from each family of inputs (the variant
+    name's first word, and the BLASTN task), and the first-batch failure."""
+    sys.path.insert(0, str(REPO / "LOSAT/tests"))
+    import fasta_input_fixtures as fixtures  # noqa: E402  (the row definitions and frozen hashes)
+    grouped: dict[tuple, list] = {}
+    for row in fixtures.read_manifest():
+        if row.program not in FORMATS or row.kind != "ncbi" or row.stdin or row.env or row.threads != "1":
+            continue
+        if row.query in ("", "-") or row.subject in ("", "-"):
+            continue
+        grouped.setdefault((row.program, row.task, row.query, row.subject, row.args), []).append(row)
+    failures, families = [], {}
+    for (program, task, query, subject, args), rows in sorted(grouped.items()):
+        paths = [fixtures.ENGINE / fixtures.rp(query), fixtures.ENGINE / fixtures.rp(subject)]
+        if not all(path.is_file() for path in paths) or any(b">?" in path.read_bytes() for path in paths):
+            continue
+        if "-lcase_masking" in args and program in ("tblastx", "blastp"):
+            continue
+        argv = [program, "-query", fixtures.rp(query), "-subject", fixtures.rp(subject)]
+        argv += ["-task", task] if task else []
+        search = {"program": program, "argv": argv + shlex.split(args), "cwd": str(fixtures.ENGINE),
+                  "cases": [row.row_id for row in rows], "frozen": {}, "group": "fasta_input"}
+        rcs = {row.rc for row in rows}
+        if query.startswith(FIRST_BATCH_FAILURE.format("")):
+            if (rcs == {"3"} and any(row.outfmt == "0" for row in rows) and task in ("", "megablast")
+                    and not args and subject == fixtures.base_pair(program)[1]):
+                failures.append({**search, "expect": "failure"})
+            continue
+        if rcs != {"0"}:
+            continue
+        for row in rows:
+            search["frozen"][row.outfmt] = row.stdout_sha256
+        family = (program, task, rows[0].row_id.removeprefix(f"{program}.").removeprefix(f"{task}.").split("_")[0])
+        families.setdefault(program, {}).setdefault(family, []).append(search)
+    searches = []
+    for program in FORMATS:
+        queues = [list(queue) for _, queue in sorted(families.get(program, {}).items())]
+        chosen: list[dict] = []
+        while len(chosen) < FASTA_INPUT_SEARCHES and any(queues):
+            for queue in queues:
+                if queue and len(chosen) < FASTA_INPUT_SEARCHES:
+                    chosen.append(queue.pop(0))
+        searches += chosen
+    return searches + failures
+
+
 def direct_tblastx() -> dict:
     run = sorted(REPO.glob("docs/evidence/losat_web_e1c/run-*/tblastx-threaded-direct"))[-1]
     rel = run.relative_to(REPO)
@@ -131,13 +197,19 @@ def quick() -> list[dict]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--suite", choices=["quick", "full"], default="quick")
+    parser.add_argument("--group", choices=["fasta_input"], help="one group of the full suite alone")
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
-    if args.suite == "full":
-        searches = group(capture.all_cases(set(FORMATS)), frozen=True) + outfmt0_fixtures()
+    if args.group and args.suite != "full":
+        parser.error("--group selects a group of --suite full")
+    if args.group == "fasta_input":
+        searches = fasta_input()
+    elif args.suite == "full":
+        searches = group(capture.all_cases(set(FORMATS)), frozen=True) + outfmt0_fixtures() + fasta_input()
     else:
         searches = quick()
-    searches.append(direct_tblastx())
+    if not args.group:
+        searches.append(direct_tblastx())
     args.out.write_text(json.dumps(searches, indent=2) + "\n")
     print(f"{len(searches)} searches -> {args.out}")
     return 0

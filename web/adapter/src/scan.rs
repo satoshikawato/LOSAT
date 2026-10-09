@@ -1,6 +1,7 @@
 //! The index scan of FASTA input (docs/web/abi_v2.md §9, plan TD-8). It exists only so
 //! that the application can extract original records; every search reads its input
-//! with the program's own parser, and `register` checks that the two agree.
+//! with the program's own reader, and `register` checks that the scan of the program's
+//! kind (1 or 2) agrees with it.
 //!
 //! Parser kinds 1 (nucleotide input) and 2 (protein input) give the records of NCBI
 //! BLAST+'s reader as the engine reads them (`ncbi.rs`). Parser kind 0 (`BioScanner`)

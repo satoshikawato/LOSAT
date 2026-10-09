@@ -38,7 +38,11 @@
 //
 // Times are milliseconds, taken in the page with `performance.now()` from the action to the first
 // animation frame in which the screen shows the result (`ms`) and to the frame after it
-// (`paintMs`); the resolution is a frame (about 17 ms). An action that the test performs through
+// (`paintMs`); the resolution is a frame (about 17 ms). The canvases (the dot plot, the Graphic
+// Summary) count the frames they have drawn (`data-drawn`) and the dot plot the HSP drawn as
+// selected (`data-drawn-selected`): their clocks wait for the drawing of their own change (W4b F1;
+// W4 decision 14), and the page is first looked at after the act's own updates have asked for
+// their frames. An action that the test performs through
 // Playwright's mouse or keyboard (selecting an HSP by `n` or by a click on the dot plot) starts its
 // clock at the event in the page, and the clock stops at the first frame that shows the result
 // after the test starts looking, so these times include Playwright's round trip (upper bounds).
@@ -165,6 +169,10 @@ async function step(page: Page, act: Act, until: readonly Cond[], timeoutMs = 60
           if (c.text !== undefined) return new RegExp(c.text).test(element.textContent ?? '');
           return true;
         });
+      // The act's updates (Vue's, in microtasks) mount components and ask for the frames that draw
+      // them; the first look is registered after them, so that it comes after their drawing in the
+      // next frame, and does not stop the clock in a frame that has not drawn yet (W4b F1).
+      for (let i = 0; i < 5; i++) await Promise.resolve();
       return new Promise<{ ms: number; paintMs: number }>((resolve, reject) => {
         const poll = () => {
           if (holds()) {
@@ -475,9 +483,10 @@ async function repetition(page: Page, count: number): Promise<Repetition> {
     { testid: 'hsp-detail', attr: 'data-state', equals: 'ready' },
     { testid: 'alignments-subject' },
   ]);
-  // Its Graphic Summary: the first 100 of its subjects drawn.
+  // Its Graphic Summary: the first 100 of its subjects drawn on the canvas.
   const showGraphic = await step(page, { kind: 'click', testid: 'results-view-graphic' }, [
     { testid: 'graphic-canvas', attr: 'data-rows', matches: '^[1-9]\\d{2,}$' },
+    { testid: 'graphic-canvas', attr: 'data-drawn' },
   ]);
   const graphicRows = Number(await page.getByTestId('graphic-canvas').getAttribute('data-rows'));
   await page.getByTestId('results-view-hits').click();
@@ -647,8 +656,11 @@ async function pairRepetition(page: Page, number: number, other: number): Promis
   const hsps = Number(await page.getByTestId('hsp-list').getAttribute('data-count'));
   const hspRowsDrawn = await rowsDrawn(page, 'hsp-row-');
 
+  // Each clock of the dot plot stops at the frame that drew its change (`data-drawn`).
+  const drew: Cond = { testid: 'dotplot-canvas', attr: 'data-drawn', changed: true };
   const showDotPlot = await step(page, { kind: 'click', testid: 'pane-dotplot' }, [
     { testid: 'dotplot-canvas', attr: 'data-segments', equals: String(hsps) },
+    drew,
   ]);
   const canvas = page.getByTestId('dotplot-canvas');
   const segments = Number(await canvas.getAttribute('data-segments'));
@@ -671,9 +683,11 @@ async function pairRepetition(page: Page, number: number, other: number): Promis
   const whole = (await canvas.getAttribute('data-view'))!;
   const zoomIn = await step(page, { kind: 'click', testid: 'dotplot-zoom-in' }, [
     { testid: 'dotplot-canvas', attr: 'data-view', changed: true },
+    drew,
   ]);
   const zoomOut = await step(page, { kind: 'click', testid: 'dotplot-zoom-out' }, [
     { testid: 'dotplot-canvas', attr: 'data-view', equals: whole },
+    drew,
   ]);
 
   // Selection: the key n, a click on a segment (the first 200 are offered to tests), a click in the list.
@@ -681,10 +695,11 @@ async function pairRepetition(page: Page, number: number, other: number): Promis
   await canvas.focus();
   await arm(page, 'dotplot-canvas', 'keydown');
   await page.keyboard.press('n');
+  // The act happened before the clock looks: it waits until the canvas has drawn another HSP as selected.
   const selectByKey = await step(
     page,
     { kind: 'armed' },
-    [{ testid: 'dotplot-canvas', attr: 'data-selected', differs: selected }],
+    [{ testid: 'dotplot-canvas', attr: 'data-drawn-selected', differs: selected }],
     30_000,
   ).catch(() => {
     throw new Error(`n did not change the selected HSP (${selected})`);
@@ -706,7 +721,7 @@ async function pairRepetition(page: Page, number: number, other: number): Promis
     .reduce((best, t) => (away(t) > away(best) ? t : best));
   await arm(page, 'dotplot-canvas', 'pointerdown');
   await canvas.click({ position: { x: target.x, y: target.y } });
-  const selectByClick = await step(page, { kind: 'armed' }, [{ testid: 'dotplot-canvas', attr: 'data-selected', differs: now }], 30_000);
+  const selectByClick = await step(page, { kind: 'armed' }, [{ testid: 'dotplot-canvas', attr: 'data-drawn-selected', differs: now }], 30_000);
   // Where segments lie closer together than the click's reach, the click picks the nearest of them, not always the one aimed at.
   const clickHitTarget = (await canvas.getAttribute('data-selected')) === target.hsp ? 1 : 0;
 
@@ -717,16 +732,27 @@ async function pairRepetition(page: Page, number: number, other: number): Promis
   await page.keyboard.press('Escape');
   await expect(popup).toHaveCount(0);
   const chosen = (await canvas.getAttribute('data-selected'))!;
+  const drawnBefore = (await canvas.getAttribute('data-drawn'))!;
   await arm(page, 'dotplot-canvas', 'keydown');
   await page.keyboard.press('Enter');
-  const popupByKey = await step(page, { kind: 'armed' }, [{ testid: 'dotplot-popup', attr: 'data-hsp', equals: chosen }], 30_000);
+  // The popup is placed by the frame that the key asked for.
+  const popupByKey = await step(
+    page,
+    { kind: 'armed' },
+    [
+      { testid: 'dotplot-popup', attr: 'data-hsp', equals: chosen },
+      { testid: 'dotplot-canvas', attr: 'data-drawn', differs: drawnBefore },
+    ],
+    30_000,
+  );
   await page.keyboard.press('Escape');
   await expect(popup).toHaveCount(0);
 
-  // "Zoom to HSP" frames the selected HSP. An HSP that spans nearly the whole of both sequences hardly changes the view, so the clock stops at the next frame.
-  const zoomToHsp = await step(page, { kind: 'click', testid: 'dotplot-zoom-hsp' }, [{ testid: 'dotplot-zoom-hsp' }]);
+  // "Zoom to HSP" frames the selected HSP. An HSP that spans nearly the whole of both sequences hardly changes the view, so the clock stops at the frame drawn after the click.
+  const zoomToHsp = await step(page, { kind: 'click', testid: 'dotplot-zoom-hsp' }, [drew]);
   const reset = await step(page, { kind: 'click', testid: 'dotplot-reset' }, [
     { testid: 'dotplot-canvas', attr: 'data-view', equals: whole },
+    drew,
   ]);
 
   await page.getByTestId('pane-alignment').click();

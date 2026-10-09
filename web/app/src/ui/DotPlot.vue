@@ -133,6 +133,8 @@ let hovered = -1;
 let pointer: { x: number; y: number } | undefined;
 let drag: { x: number; y: number; moved: boolean; id: number } | undefined;
 let frame = 0;
+/** Frames drawn (`data-drawn`). */
+let drawn = 0;
 let baseDirty = true;
 let hoverDirty = false;
 
@@ -170,6 +172,13 @@ function render(): void {
   }
   drawOverlay();
   placePopup();
+  // What the canvas shows, for the measurements (tests/e2e/results-measure.spec.ts): the frames
+  // drawn and the selected HSP drawn. Set here, not through Vue, so that they are in the page in
+  // the frame that drew them.
+  if (base.value !== undefined) {
+    base.value.dataset['drawn'] = String(++drawn);
+    base.value.dataset['drawnSelected'] = selected.value === undefined ? '' : `${selected.value.id.qIdx}:${selected.value.id.rank}`;
+  }
 }
 
 /** Sizes a canvas for the screen's pixel ratio (only when its size changed: that clears it). */

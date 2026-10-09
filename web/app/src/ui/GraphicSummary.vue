@@ -170,6 +170,8 @@ function schedule(): void {
 }
 
 let requested = '';
+/** Frames drawn (`data-drawn`). */
+let drawn = 0;
 function render(): void {
   frame = 0;
   const top = scroller.value?.scrollTop ?? 0;
@@ -179,6 +181,9 @@ function render(): void {
     hovered.value = -1;
   }
   draw();
+  // The frames drawn, for the measurements (tests/e2e/results-measure.spec.ts): set here, not
+  // through Vue, so that it is in the page in the frame that drew it.
+  if (canvas.value !== undefined) canvas.value.dataset['drawn'] = String(++drawn);
   placePopover();
   // The outfmt 0 headings (the descriptions of the popover) of the rows in view.
   const [first, last] = rowsInView();

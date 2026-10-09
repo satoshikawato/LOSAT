@@ -125,21 +125,35 @@ test('a file is summarized with its records, not put in the paste box; files can
   await expect(page.getByTestId('subject-source-0-summary')).toHaveText('1 record · 10 nt');
 });
 
+// A record that the checker refuses. The FakeEngine names the record in its message ("query record 3
+// (bad) ..."), so the screen offers to exclude it. The engine's register (S10) reads with NCBI's
+// reader: it refuses a gap line ('>?') with a message about the line, which names no record, so the
+// screen shows the refusal without the exclude button and the record is excluded with its checkbox.
+const REFUSED_RECORD = BUILD_HAS_ENGINE ? '>?10\nACGT\n' : '>bad\nACGT!ACGT\n';
+
 test('records: duplicate IDs by number, the engine refuses a record, exclusion, and a run after exclusion', async ({ page }) => {
   await program(page, 'blastn');
-  await paste(page, 'query', '>dup first\nACGTACGTACGTAAACCCGGGTTT\n>dup second\nACGTACGTACGTAAACCCGGGTTA\n>bad\nACGT!ACGT\n');
+  await paste(page, 'query', `>dup first\nACGTACGTACGTAAACCCGGGTTT\n>dup second\nACGTACGTACGTAAACCCGGGTTA\n${REFUSED_RECORD}`);
   await paste(page, 'subject', '>s1\nACGTACGTACGTAAACCCGGGTTTACGTACGTACGTAAACCCGGGTTA\n');
   await expect(page.getByTestId('query-source-0-duplicates')).toContainText('2 records share an ID');
   const check = page.getByTestId('query-source-0-check');
   await expect(check).toHaveAttribute('data-check', 'refused');
-  await expect(check).toContainText('query record 3 (bad)');
-  await expect(check).toContainText(BUILD_HAS_ENGINE ? "not supported by LOSAT's BLASTN" : 'FAKE ENGINE check');
+  await expect(check).toContainText(BUILD_HAS_ENGINE ? 'not supported by LOSAT Web' : 'query record 3 (bad)');
+  if (!BUILD_HAS_ENGINE) await expect(check).toContainText('FAKE ENGINE check');
   // The refused input cannot be queued.
   await submit(page);
-  await expect(page.getByTestId('search-message')).toContainText('Query (pasted): query record 3 (bad)');
+  await expect(page.getByTestId('search-message')).toContainText(
+    BUILD_HAS_ENGINE ? 'Query (pasted): ' : 'Query (pasted): query record 3 (bad)',
+  );
   await expect(page.getByTestId('run-1')).toHaveCount(0);
 
-  await page.getByTestId('query-source-0-exclude-refused').click();
+  if (BUILD_HAS_ENGINE) {
+    await expect(page.getByTestId('query-source-0-exclude-refused')).toHaveCount(0);
+    await showRecords(page, 'query');
+    await page.getByTestId('query-source-0-record-2').uncheck();
+  } else {
+    await page.getByTestId('query-source-0-exclude-refused').click();
+  }
   await expect(check).toHaveAttribute('data-check', 'ok');
   await expect(page.getByTestId('query-source-0-summary')).toContainText('(2 included)');
   await submit(page);
@@ -470,13 +484,16 @@ test.describe('leaving and returning', () => {
 
 test('narrow screens put the inputs and the queue one under the other, without horizontal scrolling', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await paste(page, 'query', '>NZ_CP006932.1 first\nACGTACGTACGTACGTAC\n>NZ_CP006932.1 second\nACGT!ACGT\n');
+  await paste(page, 'query', `>NZ_CP006932.1 first\nACGTACGTACGTACGTAC\n>NZ_CP006932.1 second\n${BUILD_HAS_ENGINE ? 'ACGT\n>?10\nACGT' : 'ACGT!ACGT'}\n`);
   // A record row puts its tags on a second line: the ID and the "refused" tag stay in the list.
+  // The engine's refusals name no record (see REFUSED_RECORD), so only the FakeEngine shows the tag.
   await expect(page.getByTestId('query-source-0-check')).toHaveAttribute('data-check', 'refused');
   await showRecords(page, 'query');
   const list = (await page.getByTestId('query-source-0-records').locator('.record-viewport').boundingBox())!;
-  const tag = (await page.getByTestId('query-source-0-refused-tag').boundingBox())!;
-  expect(tag.x + tag.width).toBeLessThanOrEqual(list.x + list.width);
+  if (!BUILD_HAS_ENGINE) {
+    const tag = (await page.getByTestId('query-source-0-refused-tag').boundingBox())!;
+    expect(tag.x + tag.width).toBeLessThanOrEqual(list.x + list.width);
+  }
   for (const id of await page.getByTestId('query-source-0-records').locator('.record-id').all()) {
     expect(await id.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
   }

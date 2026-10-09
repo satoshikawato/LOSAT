@@ -12,6 +12,7 @@ import { instantiateSerial } from '../../src/infra/reactor/instance';
 import { ReactorInputChecker } from '../../src/infra/reactor/checker';
 import { toProgramDescription } from '../../src/infra/reactor/control';
 import { ReactorScanner, reopening } from '../../src/infra/reactor/scanner';
+import type { FastaParserKind } from '../../src/domain/dataset';
 import { PROGRAMS } from '../../src/domain/programs';
 import { AUTO_MAX_THREADS, AUTO_SERIAL_BELOW_BYTES, chooseThreads, DEFAULT_RENEWAL, renewalReason } from '../../src/infra/engine-worker/policy';
 import { RECORD_SCANNER_CASES } from '../contract/record-scanner.contract';
@@ -252,6 +253,22 @@ describe.skipIf(reactors === undefined)('RecordScanner contract: the serial reac
   }
 });
 
+describe.skipIf(reactors === undefined)('the serial reactor scans with the NCBI reader kinds', () => {
+  const scanner = new ReactorScanner(reopening(async () => (await instantiateSerial(new WebAssembly.Module(reactors!.serial.bytes as BufferSource))).abi));
+  const bytes = () => (async function* () {
+    yield new TextEncoder().encode('>a desc\nACGT\n>b\nACGTAC\n');
+  })();
+
+  // Kinds 1 (nucleotide flags) and 2 (protein flags) are real since S9 (abi_v2.md §4, §9).
+  it.each([1, 2])('scans a small input with parser kind %i', async (kind) => {
+    const scan = await scanner.scan(kind as FastaParserKind, bytes());
+    expect(scan.records.map(({ id, length }) => ({ id, length }))).toEqual([
+      { id: 'a', length: 4 },
+      { id: 'b', length: 6 },
+    ]);
+  });
+});
+
 describe.skipIf(reactors === undefined)('the serial reactor answers the search form', () => {
   const open = async () => (await instantiateSerial(new WebAssembly.Module(reactors!.serial.bytes as BufferSource))).abi;
 
@@ -283,10 +300,26 @@ describe.skipIf(reactors === undefined)('the serial reactor answers the search f
         { id: 'b', length: 4 },
       ],
     });
-    const refused = await checker.check('blastn', 'query', new TextEncoder().encode('>a\nACGT\n>b\nACLGT\n'));
-    expect(refused.ok).toBe(false);
-    expect(!refused.ok && refused.message).toMatch(/^query record 2 \(b\) has 'L' at residue 3, .*not supported by LOSAT's BLASTN/);
-    const protein = await checker.check('blastp', 'subject', new TextEncoder().encode('>p\nMK-LV\n'));
-    expect(!protein.ok && protein.message).toContain("not supported by LOSAT's BLASTP");
+    // The engine's register reads with NCBI's reader (abi_v2.md §4), which accepts what the
+    // bio reader of ABI v1 refused: its records and lengths are the reader's (it stores
+    // the four residues of ACLGT in a nucleotide query and of MK-LV in a protein subject).
+    expect(await checker.check('blastn', 'query', new TextEncoder().encode('>a\nACGT\n>b\nACLGT\n'))).toEqual({
+      ok: true,
+      records: [
+        { id: 'a', length: 4 },
+        { id: 'b', length: 4 },
+      ],
+    });
+    expect(await checker.check('blastp', 'subject', new TextEncoder().encode('>p\nMK-LV\n'))).toEqual({
+      ok: true,
+      records: [{ id: 'p', length: 4 }],
+    });
+    // What register still refuses: a first line that NCBI may read as a Seq-id and a gap line.
+    const seqId = await checker.check('blastn', 'query', new TextEncoder().encode('AB123456\nACGT\n'));
+    expect(seqId.ok).toBe(false);
+    expect(!seqId.ok && seqId.message).toMatch(/not supported by LOSAT Web/);
+    const gap = await checker.check('blastp', 'subject', new TextEncoder().encode('>p\nMK\n>?10\nMK\n'));
+    expect(gap.ok).toBe(false);
+    expect(!gap.ok && gap.message).toMatch(/not supported by LOSAT Web/);
   });
 });

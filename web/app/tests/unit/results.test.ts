@@ -608,6 +608,31 @@ describe('ResultsBrowser', () => {
     expect(rangeReads()).toBe(before + 2);
   });
 
+  it("reads a subject's heading once per run for the selected HSP's detail and the lists, and finds HSPs by rank", async () => {
+    const { results, rangeReads } = setup();
+    await results.open('r1');
+    await settle();
+    // The detail of the first HSP read its subject's heading and its section.
+    expect(rangeReads()).toBe(2);
+    results.requestHeadings([1]);
+    await settle();
+    expect([...results.state.get().headings]).toEqual([[1, '> s1 subject number 1\nLength=500\n\n']]);
+    expect(rangeReads()).toBe(2);
+    // Another HSP of the subject reads only its section.
+    results.selectHsp({ runId: 'r1', qIdx: 0, rank: 1 });
+    await settle();
+    expect(results.state.get().detail).toMatchObject({ state: 'ready', heading: '> s1 subject number 1\nLength=500\n\n' });
+    expect(rangeReads()).toBe(3);
+    // An HSP of another subject: its query's rank finds its row.
+    results.selectHsp({ runId: 'r1', qIdx: 0, rank: 2 });
+    await settle();
+    expect(results.state.get()).toMatchObject({ sIdx: 0, detail: { state: 'ready', heading: '> s0 subject number 0\nLength=500\n\n' } });
+    // A rank that the query does not have selects nothing.
+    results.selectHsp({ runId: 'r1', qIdx: 0, rank: 9 });
+    results.selectHsp({ runId: 'r1', qIdx: 1, rank: 0 });
+    expect(results.state.get().hsp).toEqual({ runId: 'r1', qIdx: 0, rank: 2 });
+  });
+
   it("names the task of a run: the argv's, else the engine's default", async () => {
     const byDefault = setup();
     await byDefault.results.open('r1');

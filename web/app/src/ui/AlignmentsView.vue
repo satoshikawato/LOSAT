@@ -7,7 +7,8 @@
 // 0 does not show it). Nothing of the alignment is drawn again here.
 //
 // A pair may have thousands of HSPs: the blocks are the selected Range and up to 25 on each side
-// (more on request), and a block reads its section only when it comes into view.
+// (more on request), and a block reads its section only when it comes into view. Sections that
+// arrive in the same frame are shown together, so that the page is measured once a frame.
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { sameHsp, type HspId, type RangeEntry, type ResultsBrowser, type ResultsState } from '../application/results';
 import { windowAround } from '../domain/result-index';
@@ -113,51 +114,91 @@ function selectSubject(offset: number): void {
 /** Sections read for this run's Ranges, by `${qIdx}-${rank}`: the text, or null where it could not be read. */
 const sections = reactive(new Map<string, string | null>());
 const reading = new Set<string>();
+/** Failed blocks that left the screen: they are read again when they come back into view. */
+const away = new Set<string>();
+
+/**
+ * Sections read since the last frame. They are shown together at the next frame: each one shown
+ * on its own measured the page again, and a few long sections of a 5,993-HSP pair arriving after
+ * a selection took 10 to 25 ms each to lay out, which held the frame back by 100 ms (W4b F1).
+ */
+const arrived = new Map<string, string | null>();
+let arrival = 0;
+function arrive(k: string, text: string | null): void {
+  arrived.set(k, text);
+  if (arrival !== 0) return;
+  arrival = requestAnimationFrame(() => {
+    arrival = 0;
+    const batch = [...arrived];
+    arrived.clear();
+    void keepInPlace(() => {
+      for (const [k, value] of batch) sections.set(k, value);
+    });
+  });
+}
+
 watch(
   () => props.state.runId,
   () => {
     sections.clear();
     reading.clear();
+    away.clear();
+    arrived.clear();
   },
 );
 
 function read(range: RangeEntry): void {
   const k = key(range.id);
-  if (sections.has(k) || reading.has(k)) return;
+  if (sections.has(k) || reading.has(k) || arrived.has(k)) return;
   reading.add(k);
   const runId = props.state.runId;
   props.results
     .readSection(range.id)
     .then((text) => {
-      if (props.state.runId === runId) void keepInPlace(() => sections.set(k, text ?? ''));
+      if (props.state.runId === runId) arrive(k, text ?? '');
     })
     .catch(() => {
-      if (props.state.runId === runId) void keepInPlace(() => sections.set(k, null));
+      if (props.state.runId === runId) arrive(k, null);
     })
     .finally(() => reading.delete(k));
 }
 
+/** Reads a failed section again ("Try again", or its block back in view). */
+function retry(range: RangeEntry): void {
+  const k = key(range.id);
+  away.delete(k);
+  sections.delete(k);
+  read(range);
+}
+
 let observer: IntersectionObserver | undefined;
-/** Observes the blocks whose section waits to be read (after each change of the blocks shown). */
+/** Observes the blocks whose section waits to be read, or could not be read (after each change of the blocks shown). */
 function observe(): void {
   if (observer === undefined || root.value === undefined) return;
   observer.disconnect();
-  for (const element of root.value.querySelectorAll<HTMLElement>('[data-lazy="pending"]')) observer.observe(element);
+  for (const element of root.value.querySelectorAll<HTMLElement>('[data-lazy]')) observer.observe(element);
 }
 onMounted(() => {
   observer = new IntersectionObserver(
     (entries) => {
       for (const item of entries) {
-        if (!item.isIntersecting) continue;
-        const range = shown.value.find((r) => key(r.id) === (item.target as HTMLElement).dataset['range']);
-        if (range !== undefined) read(range);
+        const k = (item.target as HTMLElement).dataset['range'];
+        const range = shown.value.find((r) => key(r.id) === k);
+        if (range === undefined || k === undefined) continue;
+        if (sections.get(k) !== null) {
+          if (item.isIntersecting) read(range);
+        } else if (!item.isIntersecting) away.add(k);
+        else if (away.has(k)) retry(range);
       }
     },
     { rootMargin: '300px 0px' },
   );
   observe();
 });
-onUnmounted(() => observer?.disconnect());
+onUnmounted(() => {
+  observer?.disconnect();
+  if (arrival !== 0) cancelAnimationFrame(arrival);
+});
 watch([shown, () => props.state.hsp, () => sections.size], () => void nextTick(observe), { flush: 'post' });
 
 // The subject's heading, once per subject.
@@ -272,8 +313,16 @@ const sectionState = (range: RangeEntry): 'pending' | 'ready' | 'failed' => {
             data-state="ready"
             >{{ sections.get(key(range.id)) }}</pre
           >
-          <p v-else-if="sectionState(range) === 'failed'" class="error" data-testid="range-section" data-state="failed">
+          <p
+            v-else-if="sectionState(range) === 'failed'"
+            class="error"
+            data-testid="range-section"
+            data-state="failed"
+            data-lazy="failed"
+            :data-range="key(range.id)"
+          >
             The alignment could not be read.
+            <button type="button" class="link" data-testid="range-retry" @click="retry(range)">Try again</button>
           </p>
           <p v-else class="range-pending muted" data-testid="range-section" data-state="pending" data-lazy="pending" :data-range="key(range.id)">
             Reading the alignment…

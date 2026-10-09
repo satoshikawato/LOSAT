@@ -139,6 +139,18 @@ function ncbiBin(bitscore: string): number {
   return bits < 40 ? 0 : bits < 50 ? 1 : bits < 80 ? 2 : bits < 200 ? 3 : 4;
 }
 
+/**
+ * Whether a bit score as outfmt 6 writes it lies within half a unit of its last digit of a bin
+ * edge (0.05 for one decimal, 0.5 for a whole number): the record's value that the Graphic
+ * Summary bins may then lie on the other side of the edge (39.96 is written 40.0). The tests
+ * have no hook to the record's value, so such HSPs are left out of the bin check.
+ */
+function nearBinEdge(bitscore: string): boolean {
+  const decimals = /\.(\d+)$/.exec(bitscore)?.[1]?.length ?? 0;
+  const half = 0.5 * 10 ** -decimals;
+  return [40, 50, 80, 200].some((edge) => Math.abs(Number(bitscore) - edge) <= half);
+}
+
 /** NCBI's "Range n: a to b" of an HSP: its position among the subject's HSPs, and its outfmt 6 subject coordinates in ascending order. */
 function rangeLabel(n: number, fields: readonly string[]): string {
   const [start, end] = [Number(fields[8]), Number(fields[9])];
@@ -185,6 +197,56 @@ async function readOutputs(page: Page, number: number): Promise<{ command: Recor
 const subjectRows = (page: Page) => page.getByTestId('subject-list').locator('[data-testid^="subject-row-"]');
 const hspRows = (page: Page) => page.getByTestId('hsp-list').locator('[data-testid^="hsp-row-"]');
 const rangeBlocks = (page: Page) => page.getByTestId('alignments').locator('section.range-block');
+
+/**
+ * Watches the reads of outfmt 0 byte ranges that the page asks of the Data worker (its requests
+ * `readOutputRange` of format 0, counted as they are sent, answered or not), and can make the
+ * next ones fail (the worker answers that it has no such method), as a read of storage may.
+ */
+async function watchReads(page: Page): Promise<{ asked: () => Promise<number>; failNext: (n: number) => Promise<void> }> {
+  await page.evaluate(() => {
+    const w = window as unknown as { __reads?: number; __fail?: number };
+    if (w.__reads !== undefined) return;
+    w.__reads = 0;
+    w.__fail = 0;
+    const post = Worker.prototype.postMessage as (this: Worker, message: unknown, transfer: Transferable[]) => void;
+    Worker.prototype.postMessage = function (this: Worker, message: unknown, transfer: Transferable[]) {
+      const request = message as { method?: unknown; args?: unknown[] } | null;
+      if (typeof request === 'object' && request !== null && request.method === 'readOutputRange' && request.args?.[1] === 0) {
+        w.__reads!++;
+        if (w.__fail! > 0) {
+          w.__fail!--;
+          message = { ...request, method: 'readOutputRange (made to fail by the test)' };
+        }
+      }
+      post.call(this, message, transfer);
+    } as typeof Worker.prototype.postMessage;
+  });
+  return {
+    asked: () => page.evaluate(() => (window as unknown as { __reads: number }).__reads),
+    failNext: async (n) => {
+      await page.evaluate((count) => ((window as unknown as { __fail: number }).__fail = count), n);
+    },
+  };
+}
+
+/** Waits until the Alignments ask for no more sections and every section asked for has arrived. */
+async function settledSections(page: Page, asked: () => Promise<number>): Promise<void> {
+  let last = '';
+  const state = async () =>
+    `${await asked()}/${await page.getByTestId('alignments').locator('[data-testid="range-section"]:not([data-state="pending"])').count()}`;
+  await expect
+    .poll(
+      async () => {
+        const now = await state();
+        const same = now === last;
+        last = now;
+        return same;
+      },
+      { intervals: [700], timeout: 30_000 },
+    )
+    .toBe(true);
+}
 const subjectIndex = async (row: Locator) => Number((await row.getAttribute('data-testid'))!.replace('subject-row-', ''));
 
 /** The kinds of the notices shown, without the outfmt 0 notice (which the FakeEngine's third subject adds). */
@@ -283,7 +345,10 @@ async function expectRanges(page: Page, queryRows: readonly string[][], pairRank
     if (checked >= sections || (await section.count()) === 0) continue;
     await section.scrollIntoViewIfNeeded();
     await expect(section).toHaveAttribute('data-state', 'ready');
-    expect(out0).toContain(await text(section));
+    // An HSP's section of outfmt 0 starts with its Score line (an empty text would pass toContain).
+    const body = await text(section);
+    expect(body).toMatch(/^ Score = /);
+    expect(out0).toContain(body);
     checked++;
   }
 }
@@ -308,7 +373,7 @@ async function expectGraphicSummary(page: Page, queryRows: readonly string[][], 
     const [q, rank] = target.hsp.split(':').map(Number);
     expect(q).toBe(qIdx);
     const fields = queryRows[rank!]!;
-    if (BUILD_HAS_ENGINE) expect(target.bin, `${target.hsp}: bit score ${fields[11]}`).toBe(ncbiBin(fields[11]!));
+    if (BUILD_HAS_ENGINE && !nearBinEdge(fields[11]!)) expect(target.bin, `${target.hsp}: bit score ${fields[11]}`).toBe(ncbiBin(fields[11]!));
     else expect([0, 1, 2, 3, 4]).toContain(target.bin);
     // One row per subject: the HSPs of a subject share a row, and no other subject's are on it.
     expect(rowOf.get(fields[1]!) ?? target.y, `the row of ${fields[1]}`).toBe(target.y);
@@ -939,16 +1004,51 @@ test('the Alignments: a block per Range; Next, Previous and First Match; the pre
   await run(page, 2);
   await openFromQueue(page, 2);
   await expect(page.getByTestId(TABS.hits)).toHaveAttribute('aria-pressed', 'true');
+  const { asked, failNext } = await watchReads(page);
+  const before = await asked();
   await show(page, 'alignment');
   const total = Number(await page.getByTestId('hsp-list').getAttribute('data-count'));
   expect(total).toBeGreaterThan(80);
   await expect(rangeBlocks(page)).toHaveCount(26);
   await expect(page.getByTestId('alignments-show-earlier')).toHaveCount(0);
-  const read = () => page.getByTestId('alignments').locator('[data-testid="range-section"][data-state="ready"]').count();
-  expect(await read()).toBeLessThan(26);
+  // Each block that was seen asked for its section once (the reads counted as they were asked
+  // for): every read asked for arrived in a block; the blocks never seen still wait.
+  const sectionsIn = (state: string) => page.getByTestId('alignments').locator(`[data-testid="range-section"][data-state="${state}"]`);
+  await settledSections(page, asked);
+  expect((await asked()) - before).toBe(await sectionsIn('ready').count());
+  // Further down: the blocks around the 13th ask for theirs. The first read asked for fails.
+  await failNext(1);
+  await rangeBlocks(page).nth(12).evaluate((block) => block.scrollIntoView({ block: 'start' }));
+  await settledSections(page, asked);
+  const readNow = await sectionsIn('ready').count();
+  expect(readNow).toBeGreaterThan(0);
+  expect((await asked()) - before).toBe(readNow + 1);
+  expect(readNow).toBeLessThan(24);
+  await expect(rangeBlocks(page).nth(1).getByTestId('range-section')).toHaveAttribute('data-state', 'pending');
+  // The failed block says so; it is read again when it comes back into view.
+  const failed = sectionsIn('failed');
+  await expect(failed).toHaveCount(1);
+  await expect(failed).toContainText('The alignment could not be read.');
+  const failedRange = (await failed.getAttribute('data-range'))!;
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.getByTestId(`range-${failedRange}`).evaluate((block) => block.scrollIntoView({ block: 'start' }));
+  await expect(page.getByTestId(`range-${failedRange}`).getByTestId('range-section')).toHaveAttribute('data-state', 'ready');
+  await expect(page.getByTestId(`range-${failedRange}`).getByTestId('range-section')).toHaveText(/^ Score = /);
   // The buttons are pressed without the mouse: sections read as they come into view move the blocks.
   await page.getByTestId('alignments-show-later').dispatchEvent('click');
   await expect(rangeBlocks(page)).toHaveCount(Math.min(total, 51));
+  // Failed reads, read again with "Try again". Every read fails for a while, so that no section
+  // arrives to move the blocks (a failed block that leaves the screen is read again on its return).
+  await failNext(1000);
+  await rangeBlocks(page).nth(45).evaluate((block) => block.scrollIntoView({ block: 'start' }));
+  await settledSections(page, asked);
+  await failNext(0);
+  const retried = rangeBlocks(page).nth(45).getByTestId('range-section');
+  await expect(retried).toHaveAttribute('data-state', 'failed');
+  await expect(retried).toBeInViewport();
+  await retried.getByTestId('range-retry').click();
+  await expect(retried).toHaveAttribute('data-state', 'ready');
+  await expect(retried).toHaveText(/^ Score = /);
   // The last Range, chosen in the HSP table: the window moves to it.
   await page.getByTestId('hsp-sort-rank').click();
   await expect(page.getByTestId('hsp-sort-rank').locator('..')).toHaveAttribute('aria-sort', 'descending');

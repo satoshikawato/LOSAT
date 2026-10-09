@@ -6,9 +6,8 @@
 // (docs/web/results_columns.md); the domain functions group, sort and filter them.
 import type { RecordKey } from '../domain/dataset';
 import { optionValue } from '../domain/argv';
-import { frame, out0Range, out0SubjectRange, out6Range, subjectSpan, type ByteRange } from '../domain/hsp-table';
+import { frame, out0Range, out0SubjectRange, out6Range, subjectSpan } from '../domain/hsp-table';
 import { splitOutfmt6Row, type Outfmt6Row } from '../domain/outfmt6';
-import type { OutputFormat } from '../domain/output-format';
 import { programById, residueUnit, type ProgramId, type SequenceKind } from '../domain/programs';
 import {
   buildResultIndex,
@@ -181,8 +180,11 @@ export class ResultsBrowser {
   readonly state = new Store<ResultsState>(INITIAL);
   /** Outfmt 6 rows already split, by table row, for the loaded run. */
   private rows = new Map<number, Outfmt6Row>();
-  /** Table rows by `${qIdx}:${rank}`, for the loaded run. */
-  private rowById = new Map<string, number>();
+  /**
+   * Table rows of the loaded run by rank, per query, made when an HSP of the query is first looked
+   * up: a map of every HSP built at each opening cost about 20 ms for 150,000 HSPs (W4b F1).
+   */
+  private rowsByRank = new Map<number, Int32Array>();
   private loadToken = 0;
   /** Subjects of the loaded run whose heading waits to be read. */
   private readonly headingQueue: number[] = [];
@@ -190,6 +192,8 @@ export class ResultsBrowser {
   private headingReader: number | undefined;
   /** Outfmt 0 sections of the loaded run read or being read, by `${qIdx}:${rank}`; another run drops them. */
   private sections = new Map<string, Promise<string | undefined>>();
+  /** Outfmt 0 subject headings of the loaded run read or being read, by subject record index. */
+  private headingReads = new Map<number, Promise<string | undefined>>();
 
   /** The table the verification badges come from (generated at build time). */
   get verification(): VerificationTable {
@@ -217,8 +221,9 @@ export class ResultsBrowser {
     const token = ++this.loadToken;
     const run = this.deps.runs.get().runs.find((r) => r.snapshot.runId === runId);
     this.rows = new Map();
-    this.rowById = new Map();
+    this.rowsByRank = new Map();
     this.sections = new Map();
+    this.headingReads = new Map();
     this.headingQueue.length = 0;
     if (run === undefined) return;
     const filters = this.state.get().runId === runId ? this.state.get().filters : NO_FILTERS;
@@ -259,7 +264,6 @@ export class ResultsBrowser {
         units: { query: residueUnit(kinds.query), subject: residueUnit(kinds.subject) },
         ...taskOf(run.snapshot.argv, description),
       };
-      for (let row = 0; row < table.count; row++) this.rowById.set(`${table.qIdx[row]}:${table.rank[row]}`, row);
       const queries = this.queryEntries(loaded, this.state.get().filters);
       const first = queries.find((q) => q.hsps > 0) ?? queries[0];
       this.state.set({ ...this.state.get(), phase: 'ready', loaded, queries });
@@ -293,7 +297,7 @@ export class ResultsBrowser {
       this.set({ hsp: undefined, detail: undefined });
       return;
     }
-    const row = this.rowById.get(`${id.qIdx}:${id.rank}`);
+    const row = this.rowOf(state.loaded, id.qIdx, id.rank);
     if (row === undefined) return;
     const table = state.loaded.index.table;
     const sIdx = table.sIdx[row]!;
@@ -368,7 +372,7 @@ export class ResultsBrowser {
     let read = this.sections.get(key);
     if (read === undefined) {
       const sections = this.sections;
-      const row = this.rowById.get(key);
+      const row = this.rowOf(loaded, id.qIdx, id.rank);
       const range = row === undefined ? undefined : out0Range(loaded.index.table, row);
       read =
         range === undefined
@@ -409,10 +413,8 @@ export class ResultsBrowser {
         for (const sIdx of batch) {
           if (token !== this.loadToken) break;
           const subject = query.subjects.find((s) => s.sIdx === sIdx);
-          const range = subject === undefined ? undefined : out0SubjectRange(loaded.index.table, subject.rows[0]!);
-          if (range === undefined) continue;
-          const bytes = await this.deps.data.readOutputRange(loaded.run.snapshot.runId, 0, range[0], range[1]);
-          read.set(sIdx, decoder.decode(bytes));
+          const heading = subject === undefined ? undefined : await this.readHeading(loaded, sIdx, subject.rows[0]!);
+          if (heading !== undefined) read.set(sIdx, heading);
         }
         if (token !== this.loadToken) break;
         if (read.size > 0) this.set({ headings: new Map([...this.state.get().headings, ...read]) });
@@ -425,6 +427,46 @@ export class ResultsBrowser {
         this.headingQueue.length = 0;
       }
     }
+  }
+
+  /** The table row of an HSP of the loaded run (its query's rows by rank, made once), or undefined. */
+  private rowOf(loaded: LoadedRun, qIdx: number, rank: number): number | undefined {
+    const table = loaded.index.table;
+    let rows = this.rowsByRank.get(qIdx);
+    if (rows === undefined) {
+      const query = loaded.index.queries.get(qIdx);
+      if (query === undefined) return undefined;
+      rows = new Int32Array(query.hspCount).fill(-1);
+      for (const subject of query.subjects) {
+        for (const row of subject.rows) if (table.rank[row]! >= 0 && table.rank[row]! < rows.length) rows[table.rank[row]!] = row;
+      }
+      this.rowsByRank.set(qIdx, rows);
+    }
+    const row = rank >= 0 && rank < rows.length ? rows[rank]! : -1;
+    return row >= 0 && table.qIdx[row] === qIdx && table.rank[row] === rank ? row : undefined;
+  }
+
+  /**
+   * A subject's outfmt 0 heading (the same in every query), read once per run from the heading
+   * before `row`'s section: the selected HSP's detail and the lists that show headings share it.
+   * Undefined where outfmt 0 does not show the subject for that row's query.
+   */
+  private readHeading(loaded: LoadedRun, sIdx: number, row: number): Promise<string | undefined> {
+    const range = out0SubjectRange(loaded.index.table, row);
+    if (range === undefined) return Promise.resolve(undefined);
+    const known = this.state.get().headings.get(sIdx);
+    if (known !== undefined) return Promise.resolve(known);
+    let read = this.headingReads.get(sIdx);
+    if (read === undefined) {
+      const reads = this.headingReads;
+      read = this.deps.data.readOutputRange(loaded.run.snapshot.runId, 0, range[0], range[1]).then((bytes) => decoder.decode(bytes));
+      reads.set(sIdx, read);
+      // A read that fails is tried again at the next request.
+      read.catch(() => {
+        if (reads.get(sIdx) === read) reads.delete(sIdx);
+      });
+    }
+    return read;
   }
 
   /** Recomputes the lists from the selection, the filters and the sort orders. */
@@ -556,15 +598,12 @@ export class ResultsBrowser {
 
   /** Reads the HSP's row, subject heading and section; drops the answer if the selection moved on. */
   private async loadDetail(loaded: LoadedRun, id: HspId, row: number): Promise<void> {
-    const runId = loaded.run.snapshot.runId;
     const table = loaded.index.table;
-    const read = (format: OutputFormat, range: ByteRange | undefined) =>
-      range === undefined ? Promise.resolve(undefined) : this.deps.data.readOutputRange(runId, format, range[0], range[1]).then((b) => decoder.decode(b));
     const range6 = out6Range(table, row);
     const rowText = range6 === undefined ? undefined : decoder.decode(loaded.out6.subarray(range6[0], range6[1]));
     this.set({ detail: { id, state: 'loading', ...(rowText === undefined ? {} : { row: rowText }) } });
     try {
-      const [heading, section] = await Promise.all([read(0, out0SubjectRange(table, row)), this.readSection(id)]);
+      const [heading, section] = await Promise.all([this.readHeading(loaded, table.sIdx[row]!, row), this.readSection(id)]);
       if (!sameHsp(this.state.get().hsp, id)) return;
       this.set({
         detail: {

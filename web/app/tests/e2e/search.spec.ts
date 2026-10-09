@@ -582,11 +582,11 @@ test('Algorithm parameters: closed at start, the changed values marked and count
   await submit(page);
   await expect(page.getByTestId('run-1-options')).toHaveText('Options: -task blastn -evalue 1e-3 -reward 2');
   await expect(page.getByTestId('run-1-title')).toHaveText('Globin check');
-  // The title comes before the input names on the card.
-  const title = (await page.getByTestId('run-1-title').boundingBox())!;
-  const inputs = (await page.getByTestId('run-1').getByText('query.fa vs subject.fa').boundingBox())!;
-  expect(title.y).toBeLessThan(inputs.y);
   await waitStatus(page, 1, 'completed');
+  // The title comes before the input names on the card (in one reading: the card changes as the run ends).
+  const parts = await page.getByTestId('run-1').evaluate((card) => [...card.children].map((child) => child.className));
+  expect(parts.indexOf('run-title')).toBeGreaterThan(-1);
+  expect(parts.indexOf('run-title')).toBeLessThan(parts.findIndex((name) => name.startsWith('run-inputs')));
 
   // Closed, the bar keeps the count; a program with changed values opens it when it is chosen.
   await toggle.click();

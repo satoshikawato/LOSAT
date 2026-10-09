@@ -173,6 +173,10 @@ test('several runs in the queue; the next job is edited while one runs; separate
     await expect(page.getByTestId('run-2-phase')).toHaveText('Waiting');
     expect(await placeInCard(page, 2, 'progress')).toEqual(await placeInCard(page, 1, 'progress'));
     expect(await placeInCard(page, 2, 'cancel')).toEqual(await placeInCard(page, 1, 'cancel'));
+    // "Cancel the group" is under the phase line, at the right (second screen review L2).
+    const [waiting, group] = [(await page.getByTestId('run-2-progress').boundingBox())!, (await page.getByTestId('run-2-cancel-group').boundingBox())!];
+    expect(group.y).toBeGreaterThanOrEqual(waiting.y + waiting.height - 1);
+    expect((await placeInCard(page, 2, 'cancel-group')).right).toBeLessThanOrEqual(12);
     await page.getByTestId('run-2-cancel-group').click();
     await expect(page.getByTestId('run-2-status')).toHaveText('cancelled');
     await expect(page.getByTestId('run-3-status')).toHaveText('cancelled');
@@ -193,15 +197,19 @@ test('several runs in the queue; the next job is edited while one runs; separate
   }
   const last = await result(page, BUILD_HAS_ENGINE ? 5 : 3, 6);
   expect(last.command).toBe('LOSAT tblastx -query query.fa -subject b.fa -evalue 1e-3 -outfmt 6');
-  // A finished card has the same lines: the run and its status, the time it took, "Open results"
-  // at the right, then what it searched.
+  // A finished card has the same lines: the run and its status, the time it took with "Open
+  // results" at the right end of that line (W4b second screen review L2: no line of its own), then
+  // what it searched.
   const number = BUILD_HAS_ENGINE ? 5 : 3;
   await expect(page.getByTestId(`run-${number}-phase`)).toHaveText('Took');
   const box = async (part: string) => (await page.getByTestId(`run-${number}-${part}`).boundingBox())!;
-  const [head, progress, open, options] = [await box('status'), await box('progress'), await box('open'), await box('options')];
+  const [head, progress, phase, open, options] = [await box('status'), await box('progress'), await box('phase'), await box('open'), await box('options')];
   expect(progress.y).toBeGreaterThanOrEqual(head.y + head.height - 1);
-  expect(open.y).toBeGreaterThanOrEqual(progress.y + progress.height - 1);
-  expect(options.y).toBeGreaterThanOrEqual(open.y + open.height - 1);
+  expect(open.y).toBeGreaterThanOrEqual(progress.y - 1);
+  expect(open.y + open.height).toBeLessThanOrEqual(progress.y + progress.height + 1);
+  expect(open.y).toBeLessThan(phase.y + phase.height);
+  expect(phase.y).toBeLessThan(open.y + open.height);
+  expect(options.y).toBeGreaterThanOrEqual(progress.y + progress.height - 1);
   expect((await placeInCard(page, number, 'open')).right).toBeLessThanOrEqual(12);
 });
 

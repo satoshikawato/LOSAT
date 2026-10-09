@@ -811,8 +811,10 @@ textarea {
 }
 
 /* A run's card has one layout in every state and at every width (W4b screen review L7): the run
-   and its status badge, its phase and time, its actions at the right, then what it searched. The
-   cards no longer wrap three ways or move between the tabs (W4 screen review low 5, S13 L3). */
+   and its status badge, its phase and time with Cancel or Open results at the right end of that
+   line (second screen review L2), "Cancel the group" under them at the right, then what it
+   searched. The cards no longer wrap three ways or move between the tabs (W4 screen review low 5,
+   S13 L3). Actions that do not fit go under the phase, still at the right. */
 .run-head,
 .run-progress {
   display: flex;
@@ -827,7 +829,13 @@ textarea {
   justify-content: flex-end;
   align-items: center;
   gap: 4px 12px;
-  margin: 2px 0;
+  margin: 2px 0 2px auto;
+}
+
+.run-group-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin: 0 0 2px;
 }
 
 /* Cancel and Open results are the same size in every card. */

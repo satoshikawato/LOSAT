@@ -15,14 +15,16 @@
 // 1. `queries`: for each count N, a BLASTN search of N queries of 100 letters (most with hits:
 //    70% one subject, 20% three, every 1000th "wide" query with 200 subjects, 10% random without
 //    hits; tests/e2e/support/synthetic.ts) against 203 subject records. It records the input
-//    (indexing the file), the search (from "Add to queue" until it completes; the run's elapsed
-//    time as the queue shows it, and the runtime path), the number of HSPs (the lines of the run's outfmt 6
-//    in the Outputs view, once), and, in one warm-up and three measured repetitions, in the same
-//    page: opening the run from the queue until the hits view is ready (the HSP records read and
-//    transferred, the index built, and the first query's first HSP read), the rows the query
-//    picker draws, scrolling it to its end, finding the last query but one with `query-filter`,
-//    selecting it, clearing the filter, "With hits only", selecting a query with 200 subjects and
-//    sorting its subject list by each column. In Chromium also the JS heap (after a garbage
+//    (indexing and checking the query file, after the subject's), the search (from "Add to queue"
+//    until it completes; the run's elapsed time as the queue shows it, and the runtime path), the
+//    number of HSPs (the lines of the run's outfmt 6 in the Outputs view, once), and, in one
+//    warm-up and three measured repetitions, in the same page: opening the run from the queue
+//    until the hits view is ready (the HSP records read and transferred, the index built), and
+//    again until the first query's first HSP is read as well, the rows the query picker draws,
+//    scrolling it to its end, finding the last query but one with `query-filter` (which selects
+//    it), clearing the filter, selecting the query before it by a click, "With hits only",
+//    selecting the second query with 200 subjects by a click and sorting its subject list by
+//    each column. In Chromium also the JS heap (after a garbage
 //    collection) before opening, after the first opening and after the repetitions, and the
 //    memory of the page and its workers where the browser exposes it.
 // 2. `pair`: a query that repeats a unit of 20 letters (with 1% differences between the copies)
@@ -35,7 +37,9 @@
 // Times are milliseconds, taken in the page with `performance.now()` from the action to the first
 // animation frame in which the screen shows the result (`ms`) and to the frame after it
 // (`paintMs`); the resolution is a frame (about 17 ms). An action that the test performs through
-// Playwright's mouse or keyboard starts its clock at the event in the page.
+// Playwright's mouse or keyboard (selecting an HSP by `n` or by a click on the dot plot) starts its
+// clock at the event in the page, and the clock stops at the first frame that shows the result
+// after the test starts looking, so these times include Playwright's round trip (upper bounds).
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type CDPSession, type Page } from '@playwright/test';
@@ -275,13 +279,14 @@ async function search(
   await page.getByTestId('tab-search').click();
   await clearInputs(page);
   await program(page, 'blastn');
-  const t0 = Date.now();
   await page.getByTestId('subject-files').setInputFiles({
     name: subject.name,
     mimeType: 'text/plain',
     buffer: subject.buffer,
   });
   await settled(page, 'subject');
+  // The clock of the input starts after the subject is read and checked: it times the query file.
+  const t0 = Date.now();
   await page.getByTestId('query-files').setInputFiles({
     name: query.name,
     mimeType: 'text/plain',
@@ -382,23 +387,23 @@ interface Repetition {
   sortSubjects: Record<string, Timing>;
 }
 
-/** Opens run `number` from the queue and waits until its hits view is ready. */
-async function openRun(page: Page, number: number): Promise<{ open: Timing; firstHsp: Timing }> {
+/**
+ * Opens run `number` from the queue while run `other` is shown, twice: `open` until its hits view
+ * is ready, and `firstHsp` until the first HSP of its first query with hits (selected when the run
+ * opens) is also read from outfmt 0.
+ */
+async function openRun(page: Page, number: number, other: number): Promise<{ open: Timing; firstHsp: Timing }> {
   const open = await step(page, { kind: 'click', testid: `run-${number}-open` }, [
     { testid: 'results-hits', attr: 'data-run', equals: String(number) },
     { testid: 'query-list' },
   ]);
-  // The first query with hits is selected when the run opens; its first HSP is read from outfmt 0.
-  const rest = await step(page, { kind: 'scroll', testid: 'query-list', to: 'start' }, [
+  await page.getByTestId(`run-${other}-open`).click();
+  await expect(page.getByTestId('results-hits')).toHaveAttribute('data-run', String(other), { timeout: 120_000 });
+  const firstHsp = await step(page, { kind: 'click', testid: `run-${number}-open` }, [
+    { testid: 'results-hits', attr: 'data-run', equals: String(number) },
     { testid: 'hsp-detail', attr: 'data-state', equals: 'ready' },
   ]);
-  return {
-    open: rounded(open),
-    firstHsp: {
-      ms: Math.round(open.ms + rest.ms),
-      paintMs: Math.round(open.ms + rest.paintMs),
-    },
-  };
+  return { open: rounded(open), firstHsp: rounded(firstHsp) };
 }
 
 async function repetition(page: Page, count: number): Promise<Repetition> {
@@ -407,7 +412,7 @@ async function repetition(page: Page, count: number): Promise<Repetition> {
   // The small run (run 2) first, so that opening run 1 is a change of run.
   await page.getByTestId('run-2-open').click();
   await expect(page.getByTestId('results-hits')).toHaveAttribute('data-run', '2', { timeout: 120_000 });
-  const { open, firstHsp } = await openRun(page, 1);
+  const { open, firstHsp } = await openRun(page, 1, 2);
   await expect(page.getByTestId('query-count')).toHaveText(`${total} of ${total} queries`);
   const queryRowsDrawn = await rowsDrawn(page, 'query-row-');
 
@@ -415,17 +420,23 @@ async function repetition(page: Page, count: number): Promise<Repetition> {
   const rowsDrawnAtEnd = await rowsDrawn(page, 'query-row-');
   const scrollToStart = await step(page, { kind: 'scroll', testid: 'query-list', to: 'start' }, [{ testid: 'query-row-0' }]);
 
-  // A query far down, by its ID.
+  // A query far down, by its ID: the filter lists it alone and moves the selection to it (the
+  // query selected before is hidden; decision 10), whose first HSP is read.
   const findFar = await step(page, { kind: 'fill', testid: 'query-filter', value: queryId(far) }, [
     { testid: 'query-count', text: `^1 of ${total} queries$` },
     { testid: `query-row-${far}` },
-  ]);
-  const selectFar = await step(page, { kind: 'click', testid: `query-row-${far}` }, [
     { testid: 'hsp-detail', attr: 'data-hsp', matches: `^${far}:` },
     { testid: 'hsp-detail', attr: 'data-state', equals: 'ready' },
   ]);
   const clearFilter = await step(page, { kind: 'fill', testid: 'query-filter', value: '' }, [
     { testid: 'query-count', text: `^${total} of ${total} queries$` },
+  ]);
+  // A click on the query before it (a query with hits; the list keeps the selected query in view).
+  const near = far - 1;
+  await expect(page.getByTestId(`query-row-${near}`)).toHaveCount(1);
+  const selectFar = await step(page, { kind: 'click', testid: `query-row-${near}` }, [
+    { testid: 'hsp-detail', attr: 'data-hsp', matches: `^${near}:` },
+    { testid: 'hsp-detail', attr: 'data-state', equals: 'ready' },
   ]);
 
   // "With hits only" (the selected query has hits).
@@ -435,12 +446,15 @@ async function repetition(page: Page, count: number): Promise<Repetition> {
     { testid: 'query-count', text: `^${total} of ${total} queries$` },
   ]);
 
-  // A query with 200 subjects: its subject list, sorted by each column.
+  // The queries with 200 subjects: the filter selects the first of them (decision 10); a click on
+  // the second, whose subject list is then sorted by each column.
   await page.getByTestId('query-filter').fill('wide');
   await expect(page.getByTestId('query-count')).toHaveText(new RegExp(`^[\\d,]+ of ${total} queries$`));
-  const wideIdx = Number(
-    (await page.locator('[data-testid^="query-row-"]').first().getAttribute('data-testid'))!.replace('query-row-', ''),
-  );
+  const wideRows = page.locator('[data-testid^="query-row-"]');
+  const rowIndex = async (n: number) => Number((await wideRows.nth(n).getAttribute('data-testid'))!.replace('query-row-', ''));
+  await expect(page.getByTestId('hsp-detail')).toHaveAttribute('data-hsp', new RegExp(`^${await rowIndex(0)}:`));
+  await expect(page.getByTestId('hsp-detail')).toHaveAttribute('data-state', 'ready');
+  const wideIdx = await rowIndex(1);
   const selectWide = await step(page, { kind: 'click', testid: `query-row-${wideIdx}` }, [
     { testid: 'hsp-detail', attr: 'data-hsp', matches: `^${wideIdx}:` },
     { testid: 'hsp-detail', attr: 'data-state', equals: 'ready' },

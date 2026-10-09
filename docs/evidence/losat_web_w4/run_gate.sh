@@ -26,9 +26,11 @@
 #                                libraries Playwright cannot install (W1 README)
 #   LOSAT_WEB_MEASURE_QUERIES    query counts of the results measurement (10000,100000)
 #   LOSAT_WEB_MEASURE_COPIES     copies of the repeated unit of its dot-plot case (1500,3000,4000)
-#   LOSAT_WEB_GATE_STEPS         `all` (the gate), or `after-review`: npm ci, check, the unit
+#   LOSAT_WEB_GATE_STEPS         `all` (the gate), `after-review`: npm ci, check, the unit
 #                                tests, both E2E builds and the screen records only (the
-#                                run after a fix of a review finding; README)
+#                                run after a fix of a review finding; README), or `measure`:
+#                                npm ci and the measurements only (after a fix of the
+#                                measurement spec)
 # Usage: docs/evidence/losat_web_w4/run_gate.sh
 set -euo pipefail
 
@@ -44,7 +46,7 @@ native="$(cd "$(dirname "$LOSAT_WEB_NATIVE")" && pwd)/$(basename "$LOSAT_WEB_NAT
 screens="$LOSAT_WEB_SCREENS_OUT"
 queries="${LOSAT_WEB_MEASURE_QUERIES:-10000,100000}"
 steps="${LOSAT_WEB_GATE_STEPS:-all}"
-case "$steps" in all | after-review) ;; *) echo "LOSAT_WEB_GATE_STEPS is all or after-review" >&2; exit 2 ;; esac
+case "$steps" in all | after-review | measure) ;; *) echo "LOSAT_WEB_GATE_STEPS is all, after-review or measure" >&2; exit 2 ;; esac
 # Each step sets the engine variables that it needs; the others build with the FakeEngine.
 unset LOSAT_WEB_REACTORS LOSAT_WEB_NATIVE LOSAT_WEB_EVIDENCE LOSAT_WEB_MEASURE LOSAT_WEB_SCREENS LOSAT_WEB_SCREENS_OUT
 
@@ -94,22 +96,25 @@ fi
 cd "$app"
 wait_for_vperf
 npm ci > "$run/npm-ci.log" 2>&1
-wait_for_vperf
-npm run check > "$run/npm-check.log" 2>&1
-wait_for_vperf
-LOSAT_WEB_REACTORS="$reactors" LOSAT_WEB_VERIFICATION_OUT="$run/verification-table.json" \
-  npx vitest run --reporter=verbose > "$run/unit-cases.log" 2>&1
-wait_for_vperf
-npm run e2e -- --reporter=list > "$run/npm-e2e-fake-engine.log" 2>&1
-wait_for_vperf
-mkdir "$run/records"
-LOSAT_WEB_REACTORS="$reactors" LOSAT_WEB_NATIVE="$native" LOSAT_WEB_EVIDENCE="$run/records" \
-  npm run e2e -- --reporter=list > "$run/npm-e2e-engine.log" 2>&1
+if [ "$steps" != measure ]; then
+  wait_for_vperf
+  npm run check > "$run/npm-check.log" 2>&1
+  wait_for_vperf
+  LOSAT_WEB_REACTORS="$reactors" LOSAT_WEB_VERIFICATION_OUT="$run/verification-table.json" \
+    npx vitest run --reporter=verbose > "$run/unit-cases.log" 2>&1
+  wait_for_vperf
+  npm run e2e -- --reporter=list > "$run/npm-e2e-fake-engine.log" 2>&1
+  wait_for_vperf
+  mkdir "$run/records"
+  LOSAT_WEB_REACTORS="$reactors" LOSAT_WEB_NATIVE="$native" LOSAT_WEB_EVIDENCE="$run/records" \
+    npm run e2e -- --reporter=list > "$run/npm-e2e-engine.log" 2>&1
+fi
 if [ "$steps" = all ]; then
   wait_for_vperf
   LOSAT_WEB_REACTORS="$reactors" \
     npx playwright test tests/e2e/results.spec.ts --repeat-each 2 --reporter=list > "$run/e2e-results-repeat.log" 2>&1
-
+fi
+if [ "$steps" != after-review ]; then
   mkdir -p "$run/measure"
   for project in chromium firefox webkit; do
     wait_for_vperf
@@ -120,10 +125,12 @@ if [ "$steps" = all ]; then
   done
 fi
 
-wait_for_vperf
-mkdir -p "$screens"
-LOSAT_WEB_SCREENS="$screens" LOSAT_WEB_REACTORS="$reactors" \
-  npx playwright test tests/e2e/screens.spec.ts --reporter=list > "$run/screens.log" 2>&1
-(cd "$screens" && find . -name '*.png' | sort | xargs sha256sum) > "$run/screens.sha256"
+if [ "$steps" != measure ]; then
+  wait_for_vperf
+  mkdir -p "$screens"
+  LOSAT_WEB_SCREENS="$screens" LOSAT_WEB_REACTORS="$reactors" \
+    npx playwright test tests/e2e/screens.spec.ts --reporter=list > "$run/screens.log" 2>&1
+  (cd "$screens" && find . -name '*.png' | sort | xargs sha256sum) > "$run/screens.sha256"
+fi
 
 echo "gate run passed: $run"

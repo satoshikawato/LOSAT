@@ -1,0 +1,218 @@
+[
+  {
+    "id": "blastp SicyWSV/PajaWSV",
+    "threads": 1,
+    "runMs": [
+      1592,
+      1719,
+      1806
+    ],
+    "qminRunMs": [
+      15,
+      10,
+      25
+    ],
+    "medianRunMs": 1719,
+    "medianQminRunMs": 15,
+    "upperBoundShare": 0.0089,
+    "retained": [
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  {
+    "id": "tblastn AvCLPV protein/AvCLPV",
+    "threads": 1,
+    "runMs": [
+      100,
+      136,
+      153
+    ],
+    "qminRunMs": [
+      80,
+      91,
+      47
+    ],
+    "medianRunMs": 136,
+    "medianQminRunMs": 80,
+    "upperBoundShare": 0.5911,
+    "retained": [
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  {
+    "id": "blastn megablast AP027152/LC738884",
+    "threads": 1,
+    "runMs": [
+      69,
+      99,
+      88
+    ],
+    "qminRunMs": [
+      4,
+      5,
+      5
+    ],
+    "medianRunMs": 88,
+    "medianQminRunMs": 5,
+    "upperBoundShare": 0.0533,
+    "retained": [
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  {
+    "id": "tblastx LC738884/LC741431",
+    "threads": 1,
+    "runMs": [
+      3138,
+      2942,
+      2989
+    ],
+    "qminRunMs": [
+      24,
+      29,
+      31
+    ],
+    "medianRunMs": 2989,
+    "medianQminRunMs": 29,
+    "upperBoundShare": 0.0098,
+    "retained": [
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  {
+    "id": "blastp SicyWSV/PajaWSV",
+    "threads": 4,
+    "runMs": [
+      614,
+      514,
+      560
+    ],
+    "qminRunMs": [
+      8,
+      9,
+      9
+    ],
+    "medianRunMs": 560,
+    "medianQminRunMs": 9,
+    "upperBoundShare": 0.0152,
+    "retained": [
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  {
+    "id": "tblastn AvCLPV protein/AvCLPV",
+    "threads": 4,
+    "runMs": [
+      83,
+      77,
+      97
+    ],
+    "qminRunMs": [
+      54,
+      61,
+      58
+    ],
+    "medianRunMs": 83,
+    "medianQminRunMs": 58,
+    "upperBoundShare": 0.6935,
+    "retained": [
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  {
+    "id": "blastn megablast AP027152/LC738884",
+    "threads": 4,
+    "runMs": [
+      84,
+      95,
+      65
+    ],
+    "qminRunMs": [
+      5,
+      4,
+      5
+    ],
+    "medianRunMs": 84,
+    "medianQminRunMs": 5,
+    "upperBoundShare": 0.0616,
+    "retained": [
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  {
+    "id": "tblastx LC738884/LC741431",
+    "threads": 4,
+    "runMs": [
+      2661,
+      3090,
+      3051
+    ],
+    "qminRunMs": [
+      26,
+      25,
+      26
+    ],
+    "medianRunMs": 3051,
+    "medianQminRunMs": 26,
+    "upperBoundShare": 0.0084,
+    "retained": [
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  }
+]

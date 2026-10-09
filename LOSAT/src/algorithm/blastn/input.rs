@@ -2,8 +2,8 @@
 //!
 //! LOSAT parses FASTA with `bio` (and the Web adapter's index scan reproduces it), while
 //! NCBI BLAST+ reads it with `CFastaReader`. For the inputs accepted here the two agree,
-//! except that `U` is read as `T`, which `with_u_as_t` applies. The others are rejected,
-//! because the reader of NCBI would change them:
+//! except that `U` is read as `T`, which `FastaRecord::from_bio` applies. The others are
+//! rejected, because the reader of NCBI would change them:
 //!
 //! - an empty defline, or one that starts with white space or has a control character or
 //!   a non-ASCII byte (NCBI names an empty one `Query_1`, skips the white space, ends the
@@ -13,10 +13,12 @@
 //!   because `bio` drops the character that ends the ID;
 //! - a record without residues, or a residue that is not an IUPAC nucleotide letter (NCBI
 //!   warns that the sequence contains no data, ignores white space and hyphens, ends the
-//!   line at `;`, and removes other characters with a warning): `check_residues`.
+//!   line at `;`, and removes other characters with a warning): `check_residues_of`.
 
 use anyhow::{bail, Context, Result};
 use bio::io::fasta;
+
+use crate::blastinput::fasta_reader::InputRecord;
 
 /// Why a FASTA file that `bio` cannot parse is not read: `bio` fails on text before the
 /// first defline (blank lines, `;` comments, a byte order mark) and on bytes that are not
@@ -91,8 +93,8 @@ pub fn check_deflines_of(bytes: &[u8], role: &str, program: &str) -> Result<()> 
 }
 
 /// `check_deflines_of` for protein FASTA input: NCBI's protein reader checks the end of a
-/// title for 50 amino-acid letters instead of 20 nucleotides (`write_protein_title_warnings`),
-/// so the white space at the end of a defline matters after 50 letters.
+/// title for 50 amino-acid letters instead of 20 nucleotides (the title warning of
+/// `fasta_reader`), so the white space at the end of a defline matters after 50 letters.
 pub fn check_protein_deflines_of(bytes: &[u8], role: &str, program: &str) -> Result<()> {
     check_deflines_with(bytes, role, program, true)
 }
@@ -166,7 +168,7 @@ pub fn check_sequence_lines_of(bytes: &[u8], role: &str, program: &str) -> Resul
 
 /// Whether the text of a defline (after `>`) makes NCBI's protein reader warn that the title
 /// ends with amino acids: it is longer than 50 bytes and its last 50 are ASCII letters
-/// (`write_protein_title_warnings`).
+/// (the title warning of `fasta_reader`).
 fn ends_with_amino_acids(text: &[u8]) -> bool {
     text.len() > 50 && text[text.len() - 50..].iter().all(u8::is_ascii_alphabetic)
 }
@@ -273,70 +275,11 @@ fn ends_with_nucleotides(text: &[u8]) -> bool {
             .all(|byte| b"ACGTacgt".contains(byte))
 }
 
-/// NCBI's warning for a record whose defline ends with nucleotides (`ends_with_nucleotides`),
-/// written when NCBI reads the record: the subjects when they are read, the queries after
-/// `Query is Empty!`. The deflines are those of `bio` (the ID, a space and the rest), which
-/// are NCBI's text for the deflines that `check_deflines` accepts.
-pub fn write_title_warnings(
-    records: &[fasta::Record],
-    diagnostics: &mut dyn std::io::Write,
-) -> std::io::Result<()> {
-    for record in records {
-        let text = match record.desc() {
-            Some(desc) => format!("{} {desc}", record.id()),
-            None => record.id().to_string(),
-        };
-        if ends_with_nucleotides(text.as_bytes()) {
-            diagnostics.write_all(b"FASTA-Reader: Title ends with at least 20 valid nucleotide characters.  Was the sequence accidentally put in the title line?\n")?;
-        }
-    }
-    Ok(())
-}
-
-/// NCBI's warning for a protein record whose defline ends with at least 50 ASCII letters,
-/// written when NCBI reads the record (`fAssumeProt`: the nucleotide check is skipped).
-///
-/// NCBI reference: c++/src/objtools/readers/fasta.cpp:1651-1673
-/// ```c
-///     if((length > kWarnAminoAcidCharsAtEnd) && !TestFlag(fAssumeNuc)) {
-/// ...
-///         for( ; pos_to_check >= last_pos_to_check_for_amino_acid; --pos_to_check ) {
-/// ...
-///             const char ch = sLineText[pos_to_check];
-///             if( ( ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') ) {
-/// ...
-///         if( pos_to_check < last_pos_to_check_for_amino_acid ) {
-///             FASTA_WARNING(iLineNum,
-///                 "FASTA-Reader: Title ends with at least " << kWarnAminoAcidCharsAtEnd
-///                 << " valid amino acid characters.  Was the sequence "
-///                 << "accidentally put in the title line?",
-/// ```
-pub fn write_protein_title_warnings(
-    records: &[fasta::Record],
-    diagnostics: &mut dyn std::io::Write,
-) -> std::io::Result<()> {
-    for record in records {
-        diagnostics.write_all(protein_title_warning(record))?;
-    }
-    Ok(())
-}
-
-/// The title warning of one protein record (`write_protein_title_warnings`), or nothing.
-pub fn protein_title_warning(record: &fasta::Record) -> &'static [u8] {
-    let text = match record.desc() {
-        Some(desc) => format!("{} {desc}", record.id()),
-        None => record.id().to_string(),
-    };
-    if ends_with_amino_acids(text.as_bytes()) {
-        b"FASTA-Reader: Title ends with at least 50 valid amino acid characters.  Was the sequence accidentally put in the title line?\n"
-    } else {
-        b""
-    }
-}
-
 /// NCBI's warning for a subject without residues, which it skips when it sets up the
-/// subjects (`InitializeSubject`, after the option handlers and before `Query is Empty!`).
-/// The ID of a subject is `Subject_<n>` and its title is the defline.
+/// subjects for the search (`CBlastFormat` is made after `Query is Empty!` and before the
+/// outfmt 0 prolog; `AUTHORITY.md` §B row 7, BI-43, BI-49). The ID of a subject is
+/// `Subject_<n>` and its title is the record's title (`InputRecord::title_bytes`), written
+/// as bytes; a subject without a title gives `Subject_<n> : ...`.
 ///
 /// NCBI reference: c++/src/algo/blast/api/blast_setup_cxx.cpp:773-788
 /// ```c
@@ -357,22 +300,17 @@ pub fn protein_title_warning(record: &fasta::Record) -> &'static [u8] {
 ///         		warning += "Subject sequence contains no data";
 ///         		ERR_POST(Warning << warning);
 /// ```
-pub fn write_empty_subject_warnings(
-    records: &[fasta::Record],
+pub fn write_empty_subject_warnings<R: crate::blastinput::fasta_reader::InputRecord>(
+    records: &[R],
     program: &str,
     diagnostics: &mut dyn std::io::Write,
 ) -> std::io::Result<()> {
     for (index, record) in records.iter().enumerate() {
         if record.seq().is_empty() {
-            let title = match record.desc() {
-                Some(desc) => format!("{} {desc}", record.id()),
-                None => record.id().to_string(),
-            };
-            writeln!(
-                diagnostics,
-                "Warning: [{program}] Subject_{} {title}: Subject sequence contains no data",
-                index + 1
-            )?;
+            let mut warning = format!("Warning: [{program}] Subject_{} ", index + 1).into_bytes();
+            warning.extend_from_slice(&record.title_bytes());
+            warning.extend_from_slice(b": Subject sequence contains no data\n");
+            diagnostics.write_all(&warning)?;
         }
     }
     Ok(())
@@ -399,12 +337,7 @@ pub fn write_empty_subject_warnings(
 ///             char_type = eCharType_Bad;
 ///             break;
 /// ```
-/// `role` is `query` or `subject`.
-pub fn check_residues(records: &[fasta::Record], role: &str) -> Result<()> {
-    check_residues_of(records, role, "BLASTN")
-}
-
-/// `check_residues` for the nucleotide records of `program` (as named in the message).
+/// `role` is `query` or `subject`; `program` is named in the message.
 pub fn check_residues_of(records: &[fasta::Record], role: &str, program: &str) -> Result<()> {
     first_problem(records, |index, record| {
         invalid_residue(index, record, role, program)
@@ -445,9 +378,10 @@ pub fn check_protein_input_of(
     check_protein_residues_of(records, role, program)
 }
 
-/// The residue check of `check_protein_input_of` for records already read.
-pub fn check_protein_residues_of(
-    records: &[fasta::Record],
+/// The residue check of `check_protein_input_of` for records already read (the `bio`
+/// records, or the records made from them with `FastaRecord::from_bio`).
+pub fn check_protein_residues_of<R: InputRecord>(
+    records: &[R],
     role: &str,
     program: &str,
 ) -> Result<()> {
@@ -465,7 +399,7 @@ pub fn check_protein_residues_of(
         Some(format!(
             "{role} record {} ({}) has the residue {shown} at position {}; NCBI BLAST+ removes such a character from a protein sequence, which is not supported by LOSAT's {program} (use letters and '*')",
             index + 1,
-            record.id(),
+            record_id(record),
             position + 1
         ))
     })
@@ -473,14 +407,9 @@ pub fn check_protein_residues_of(
 
 /// Rejects a record without residues: NCBI reads it without a message and reports it when
 /// it sets up the search ("Sequence contains no data"), which LOSAT does not reproduce.
-/// `role` is `query` or `subject`.
-pub fn check_records_have_residues(records: &[fasta::Record], role: &str) -> Result<()> {
-    check_records_have_residues_of(records, role, "BLASTN")
-}
-
-/// `check_records_have_residues` for the nucleotide records of `program`.
-pub fn check_records_have_residues_of(
-    records: &[fasta::Record],
+/// `role` is `query` or `subject`; `program` is named in the message.
+pub fn check_records_have_residues_of<R: InputRecord>(
+    records: &[R],
     role: &str,
     program: &str,
 ) -> Result<()> {
@@ -497,10 +426,7 @@ pub fn check_records(records: &[fasta::Record], role: &str) -> Result<()> {
     })
 }
 
-fn first_problem(
-    records: &[fasta::Record],
-    problem: impl Fn(usize, &fasta::Record) -> Option<String>,
-) -> Result<()> {
+fn first_problem<R>(records: &[R], problem: impl Fn(usize, &R) -> Option<String>) -> Result<()> {
     match records
         .iter()
         .enumerate()
@@ -511,14 +437,30 @@ fn first_problem(
     }
 }
 
-fn no_residues(index: usize, record: &fasta::Record, role: &str, program: &str) -> Option<String> {
+fn no_residues<R: InputRecord>(
+    index: usize,
+    record: &R,
+    role: &str,
+    program: &str,
+) -> Option<String> {
     record.seq().is_empty().then(|| {
         format!(
             "{role} record {} ({}) has no residues; NCBI BLAST+ reports such a record differently, which is not supported by LOSAT's {program}",
             index + 1,
-            record.id()
+            record_id(record)
         )
     })
+}
+
+/// The ID that LOSAT's messages name a record by: the title up to its first space, which is
+/// the `bio` ID of a `bio` record and of a record made from one (`FastaRecord::from_bio`).
+fn record_id<R: InputRecord>(record: &R) -> String {
+    let title = record.title_bytes();
+    let end = title
+        .iter()
+        .position(|&byte| byte == b' ')
+        .unwrap_or(title.len());
+    String::from_utf8_lossy(&title[..end]).into_owned()
 }
 
 fn invalid_residue(
@@ -543,52 +485,6 @@ fn invalid_residue(
         record.id(),
         position + 1
     ))
-}
-
-/// The records with `U` read as `T` (and `u` as `t`), or `None` when none has a `U`.
-///
-/// NCBI reference: c++/src/objtools/readers/fasta.cpp:856-873
-/// ```c
-///         case 'A': case 'B': case 'C': case 'D':
-///         case 'G': case 'H':
-///         case 'K':
-///         case 'M':
-///         case 'R': case 'S': case 'T': case 'U': case 'V': case 'W':
-///         case 'Y':
-///             CloseGap(pos == 0);
-///             m_SeqData[m_CurrentPos] = c;
-///     ...
-///         case 'r': case 's': case 't': case 'u': case 'v': case 'w':
-///         case 'y':
-///             char_type = eCharType_MaskedNonGap;
-/// ```
-/// `CFastaReader` keeps `U` as a residue; NCBI BLAST+ 2.17.0 searches it as `T` and shows
-/// it as `T`, with or without other `T` and in either case (the oracle runs of
-/// docs/evidence/losat_web_e2c/).
-pub fn with_u_as_t(records: &[fasta::Record]) -> Option<Vec<fasta::Record>> {
-    if !records
-        .iter()
-        .any(|record| record.seq().iter().any(|&byte| matches!(byte, b'U' | b'u')))
-    {
-        return None;
-    }
-    Some(
-        records
-            .iter()
-            .map(|record| {
-                let seq: Vec<u8> = record
-                    .seq()
-                    .iter()
-                    .map(|&byte| match byte {
-                        b'U' => b'T',
-                        b'u' => b't',
-                        other => other,
-                    })
-                    .collect();
-                fasta::Record::with_attrs(record.id(), record.desc(), &seq)
-            })
-            .collect(),
-    )
 }
 
 /// Opens a FASTA input of `program` as NCBI's argument does when a handler asks for its stream: `-` is
@@ -688,51 +584,6 @@ pub fn read_records(
     Ok(records)
 }
 
-/// Whether every line before the first defline is one that NCBI's `CFastaReader` skips
-/// without a message: white space only, or a comment starting with `!`, `#` or `;` after
-/// the white space. Other text there is a record without a defline, or a line that NCBI
-/// stops at ("doesn't look like plausible data", `CheckDataLine`, fasta.cpp:710-760).
-///
-/// NCBI reference: c++/src/objtools/readers/fasta.cpp:375-384
-/// ```c
-///         CTempString line = NStr::TruncateSpaces_Unsafe(*++GetLineReader());
-///
-///         if (line.empty()) {
-///             continue; // ignore lines containing only whitespace
-///         }
-///         c = line[0];
-///
-///         if (c == '!'  ||  c == '#' || c == ';') {
-///             // no content, just a comment or blank line
-///             continue;
-/// ```
-pub fn only_skipped_lines_before_first_defline(bytes: &[u8]) -> bool {
-    bytes
-        .split(|&byte| byte == b'\n')
-        .take_while(|line| line.first() != Some(&b'>'))
-        .all(|line| {
-            let line = line.trim_ascii();
-            line.is_empty() || matches!(line[0], b'!' | b'#' | b';')
-        })
-}
-
-/// The text from the first defline on (the line that starts with `>`), where NCBI starts
-/// to read records after the lines that it skips (`only_skipped_lines_before_first_defline`);
-/// `None` when no line starts with `>`.
-///
-/// NCBI reference: c++/src/objtools/readers/fasta.cpp:375-384 (as above: the lines before
-/// the first defline that `CFastaReader` skips)
-pub fn from_first_defline(bytes: &[u8]) -> Option<&[u8]> {
-    let mut start = 0;
-    for line in bytes.split(|&byte| byte == b'\n') {
-        if line.first() == Some(&b'>') {
-            return Some(&bytes[start..]);
-        }
-        start += line.len() + 1;
-    }
-    None
-}
-
 /// The records that `bio` reads from a FASTA file (none from white space only), or the
 /// error that names what `bio` cannot read, without the checks of `read_records`.
 pub fn bio_records_of(
@@ -798,90 +649,6 @@ pub fn check_utf8_file_name(path: &std::path::Path, role: &str, program: &str) -
         );
     }
     Ok(())
-}
-
-/// The subjects of a translated search (TBLASTN, TBLASTX), read as NCBI's handler of the
-/// database arguments reads them: the file is opened and read, the records that NCBI
-/// warns about or reads differently are rejected (or their title warnings written), and a
-/// file without records fails with NCBI's error. Returns the records and the checks that
-/// LOSAT makes where the search would start (NCBI reads those inputs without a message).
-pub fn read_nucleotide_subjects(
-    path: &std::path::Path,
-    program: &str,
-) -> Result<(Vec<fasta::Record>, Result<()>)> {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2553-2557
-    // ```c
-    //         CRef<blast::CBlastQueryVector> subjects;
-    //         m_Scope = ReadSequencesToBlast(*subj_input_stream, IsProtein(),
-    //                                        subj_range, parse_deflines,
-    //                                        use_lcase_masks, subjects, m_IsMapper);
-    //         m_Subjects.Reset(new blast::CObjMgr_QueryFactory(*subjects));
-    // ```
-    // The first handler opens and reads the subjects (an empty subject set fails there),
-    // as BLASTN's `run`; the inputs are read and checked as BLASTN reads them
-    // (`blastn/input.rs`).
-    check_utf8_file_name(path, "subject", program)?;
-    let mut subject_file = open_input(path, "subject", program)?;
-    let subject_bytes = read_fasta_bytes(&mut subject_file, path, "subject")?;
-    drop(subject_file);
-    // NCBI warns about the residues that LOSAT rejects when it reads them, so they are
-    // rejected here. NCBI reads the FASTA that `bio` cannot read because of blank or
-    // comment lines before the first defline (or a defline that is not UTF-8), these
-    // deflines and records without residues without a message, so LOSAT rejects them
-    // where the search would start. Other text before the first defline is rejected here:
-    // NCBI reads it as a record without a defline or stops at it.
-    let blank = is_blank(&subject_bytes);
-    if !blank {
-        check_sequence_lines_of(&subject_bytes, "subject", program)?;
-    }
-    let (subjects, subject_reading) = match bio_records_of(&subject_bytes, path, "subject", program)
-    {
-        Ok(records) => (records, Ok(())),
-        // NCBI reference: c++/src/objtools/readers/fasta.cpp:375-384
-        // ```c
-        //         if (line.empty()) {
-        //             continue; // ignore lines containing only whitespace
-        //         }
-        //         c = line[0];
-        //
-        //         if (c == '!'  ||  c == '#' || c == ';') {
-        //             // no content, just a comment or blank line
-        //             continue;
-        // ```
-        // NCBI skips these lines and reads the records after them as those of any file:
-        // a file of such lines only has no subject (it fails below as a blank file
-        // does), and the records after them are checked and warned about now, as those
-        // of a file that `bio` reads, so that a query that NCBI finds empty later does
-        // not hide NCBI's failure to read them.
-        Err(error) if only_skipped_lines_before_first_defline(&subject_bytes) => {
-            match from_first_defline(&subject_bytes) {
-                None => (Vec::new(), Ok(())),
-                Some(records_text) => {
-                    if let Ok(records) = bio_records_of(records_text, path, "subject", program) {
-                        check_residues_of(&records, "subject", program)?;
-                        write_title_warnings(&records, &mut std::io::stderr())?;
-                    }
-                    (Vec::new(), Err(error))
-                }
-            }
-        }
-        Err(error) => return Err(error),
-    };
-    check_residues_of(&subjects, "subject", program)?;
-    write_title_warnings(&subjects, &mut std::io::stderr())?;
-    // `bio` reads no record from a file whose first record has an empty defline and no
-    // residues (NCBI reads that record and the rest); the deferred defline check rejects it.
-    if subject_reading.is_ok()
-        && subjects.is_empty()
-        && check_deflines_of(&subject_bytes, "subject", program).is_ok()
-    {
-        return Err(crate::blastinput::app::empty_subjects_error());
-    }
-    let subject_checks = subject_reading
-        .and_then(|()| check_deflines_of(&subject_bytes, "subject", program))
-        .and_then(|()| check_records_have_residues_of(&subjects, "subject", program));
-    drop(subject_bytes);
-    Ok((subjects, subject_checks))
 }
 
 #[cfg(test)]
@@ -954,7 +721,7 @@ mod tests {
     fn only_inputs_read_as_ncbi_reads_them_are_accepted() {
         let text = ">q1 a b\nACGTNRY\nacgtn\n>q2\t\nU\r\n";
         assert!(check_deflines(text.as_bytes(), "query").is_ok());
-        assert!(check_residues(&records(text), "query").is_ok());
+        assert!(check_residues_of(&records(text), "query", "BLASTN").is_ok());
         for (text, problem) in [
             (">q1\tb\nACGT\n", "control character 0x09"),
             (
@@ -988,15 +755,16 @@ mod tests {
             (">q1\nAC-GT\n", "'-' at residue 3"),
             (">q1\nAC GT\n", "0x20 at residue 3"),
         ] {
-            let error = check_residues(&records(text), "query")
+            let error = check_residues_of(&records(text), "query", "BLASTN")
                 .unwrap_err()
                 .to_string();
             assert!(error.contains(problem), "{text:?}: {error}");
             assert!(error.contains("not supported by LOSAT"), "{error}");
         }
-        let error = check_records_have_residues(&records(">q1 empty\n>q2\nACGT\n"), "query")
-            .unwrap_err()
-            .to_string();
+        let error =
+            check_records_have_residues_of(&records(">q1 empty\n>q2\nACGT\n"), "query", "BLASTN")
+                .unwrap_err()
+                .to_string();
         assert!(
             error.contains("query record 1 (q1) has no residues"),
             "{error}"
@@ -1007,22 +775,25 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("query record 1 (q1) has 'X' at residue 2"));
-        assert!(check_records_have_residues(&both, "query")
+        assert!(check_records_have_residues_of(&both, "query", "BLASTN")
             .unwrap_err()
             .to_string()
             .contains("query record 2 (q2) has no residues"));
     }
 
     #[test]
-    fn titles_that_end_with_nucleotides_get_ncbi_warning() {
-        // NCBI 2.17.0: the text after `>` longer than 20 bytes, its last 20 ACGT.
+    fn titles_that_end_with_nucleotides_are_accepted() {
+        // NCBI 2.17.0: the text after `>` longer than 20 bytes, its last 20 ACGT, gets the
+        // reader's title warning (`fasta_reader`); the defline itself is read alike.
         let text = ">q1 ACGTACGTACGTACGTACGTA\nACGT\n>ACGTACGTACGTACGTACGT\nACGT\n>ACGTACGTACGTACGTACGTA\nACGT\n>q2 ACGTNACGTACGTACGTACGTA\nACGT\n";
         assert!(check_deflines(text.as_bytes(), "query").is_ok());
         assert!(check_deflines(b">q1 ACGTACGTACGTACGTACGTA\r\nACGT\r\n", "query").is_ok());
-        let mut out = Vec::new();
-        write_title_warnings(&records(text), &mut out).unwrap();
-        let warning = "FASTA-Reader: Title ends with at least 20 valid nucleotide characters.  Was the sequence accidentally put in the title line?\n";
-        assert_eq!(String::from_utf8(out).unwrap(), warning.repeat(2));
+        let warned = text
+            .lines()
+            .filter_map(|line| line.strip_prefix('>'))
+            .filter(|defline| ends_with_nucleotides(defline.as_bytes()))
+            .count();
+        assert_eq!(warned, 2);
     }
 
     #[test]
@@ -1041,43 +812,5 @@ mod tests {
             assert!(error.contains(record), "{error}");
             assert!(error.contains("not supported by LOSAT"), "{error}");
         }
-    }
-
-    #[test]
-    fn u_is_read_as_t() {
-        assert!(with_u_as_t(&records(">q\nACGT\n")).is_none());
-        let read = with_u_as_t(&records(">q d\nACGUu\n")).unwrap();
-        assert_eq!(read[0].seq(), b"ACGTt");
-        assert_eq!(read[0].desc(), Some("d"));
-    }
-
-    // NCBI reference: c++/src/objtools/readers/fasta.cpp:375-384 (CFastaReader skips lines of
-    // white space and comments starting with `!`, `#` or `;` before reading a defline).
-    #[test]
-    fn lines_that_ncbi_skips_before_the_first_defline() {
-        for text in [
-            &b">s\nACGT\n"[..],
-            b"\n>s\nACGT\n",
-            b"  \n\t\r\n>s\nACGT\n",
-            b";c\n !x\n#y\n>s\nACGT\n",
-            b">s\xe9\nACGT\n",
-        ] {
-            assert!(only_skipped_lines_before_first_defline(text), "{text:?}");
-        }
-        for text in [
-            &b"ACGT\n>s\nACGT\n"[..],
-            b"\xef\xbb\xbf>s\nACGT\n",
-            b" >s\nACGT\n",
-            b"\n\nab%%%\n>s\nACGT\n",
-        ] {
-            assert!(!only_skipped_lines_before_first_defline(text), "{text:?}");
-        }
-        assert_eq!(
-            from_first_defline(b"\n;c\n>s\nACGT\n"),
-            Some(&b">s\nACGT\n"[..])
-        );
-        assert_eq!(from_first_defline(b">s\nACGT\n"), Some(&b">s\nACGT\n"[..]));
-        assert_eq!(from_first_defline(b"; only comment\n"), None);
-        assert_eq!(from_first_defline(b"\n !x\n#y"), None);
     }
 }

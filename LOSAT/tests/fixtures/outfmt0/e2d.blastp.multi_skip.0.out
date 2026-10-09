@@ -1,0 +1,105 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/e2d_p_s3.faa).
+           3 sequences; 2,042 total letters
+
+
+
+Query= BDT63331.1 wsv035-like protein [Armadillidium vulgare clopovirus]
+
+Length=986
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT62128.1 MjHSP70-2-like protein [Litopenaeus vannamei majanivir...  19.6    0.37 
+BDT62181.1 wsv035-like protein [Litopenaeus vannamei majanivirus ...  16.5    3.1  
+
+
+> BDT62128.1 MjHSP70-2-like protein [Litopenaeus vannamei majanivirus 
+Nimav-1_LVa]
+Length=707
+
+ Score = 19.6 bits (39),  Expect = 0.37, Method: Compositional matrix adjust.
+ Identities = 13/35 (37%), Positives = 19/35 (54%), Gaps = 2/35 (6%)
+
+Query  710  TRLLNENTAVMTSTRISKATLVSSNNQKNTKNPFF  744
+            T LLN NT + T+  I+K     S+NQ + +   F
+Sbjct  421  TVLLNRNTTIPTT--ITKDFTTYSDNQTSVQISVF  453
+
+
+ Score = 16.5 bits (31),  Expect = 4.0, Method: Compositional matrix adjust.
+ Identities = 6/12 (50%), Positives = 9/12 (75%), Gaps = 0/12 (0%)
+
+Query  707  FEKTRLLNENTA  718
+            F+  R++NE TA
+Sbjct  173  FKVERIINEPTA  184
+
+
+> BDT62181.1 wsv035-like protein [Litopenaeus vannamei majanivirus 
+Nimav-1_LVa]
+Length=970
+
+ Score = 16.5 bits (31),  Expect = 3.1, Method: Compositional matrix adjust.
+ Identities = 8/18 (44%), Positives = 8/18 (44%), Gaps = 0/18 (0%)
+
+Query  706  LFEKTRLLNENTAVMTST  723
+            LF      N N  VMT T
+Sbjct  432  LFFGLHSCNTNPCVMTRT  449
+
+
+ Score = 16.2 bits (30),  Expect = 4.1, Method: Compositional matrix adjust.
+ Identities = 5/10 (50%), Positives = 5/10 (50%), Gaps = 0/10 (0%)
+
+Query  778  FFRRYRTYAS  787
+              R YR YA 
+Sbjct  746  LLRSYRAYAG  755
+
+
+ Score = 16.2 bits (30),  Expect = 4.9, Method: Compositional matrix adjust.
+ Identities = 5/18 (28%), Positives = 11/18 (61%), Gaps = 0/18 (0%)
+
+Query  723  TRISKATLVSSNNQKNTK  740
+            TR++   + ++NN  + K
+Sbjct  535  TRLASPVIPATNNDSSNK  552
+
+
+
+Lambda      K        H        a         alpha
+   0.313    0.127    0.351    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 316684
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/e2d_p_s3.faa).
+    Posted date:  Unknown
+  Number of letters in database: 2,042
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

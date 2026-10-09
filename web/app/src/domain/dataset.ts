@@ -92,3 +92,17 @@ export function recordMismatch(expected: readonly RecordKey[], actual: readonly 
   }
   return undefined;
 }
+
+/**
+ * The IDs that more than one record of the list has. Records are told apart by their
+ * index in the record table, never by ID (design §2.1: duplicate IDs keep an internal ID).
+ */
+export function duplicateIds(records: ReadonlyArray<{ readonly id: string }>): ReadonlySet<string> {
+  const seen = new Set<string>();
+  const duplicates = new Set<string>();
+  for (const { id } of records) {
+    if (seen.has(id)) duplicates.add(id);
+    else seen.add(id);
+  }
+  return duplicates;
+}

@@ -37,6 +37,18 @@ export interface RunSnapshot {
   readonly subject: InputSnapshot;
   readonly requestedThreads: number | 'auto';
   readonly queuedAt: number;
+  /**
+   * The group of runs queued together as separate searches (plan §5.2, Separate): one
+   * run for each file. Undefined for a run queued alone.
+   */
+  readonly group?: RunGroup;
+}
+
+export interface RunGroup {
+  readonly groupId: string;
+  /** 1-based position of the run in its group, and the group's size. */
+  readonly position: number;
+  readonly size: number;
 }
 
 export interface RunRecord {
@@ -44,7 +56,19 @@ export interface RunRecord {
   readonly threads?: number;
   readonly fallbackReason?: string;
   readonly engineBuild?: string;
+  /** The engine runtime (Engine worker) that ran the search; it changes after a cancel. */
+  readonly runtimeGeneration?: number;
+  /** Linear memory of the engine instance around the search (plan §5.5). */
+  readonly memory?: {
+    readonly linearBytesBefore: number;
+    readonly linearBytesAfter: number;
+    readonly instanceRuns: number;
+  };
+  /** The engine searched the subject that it held from an earlier search (R1). */
+  readonly subjectRetained?: boolean;
   readonly startedAt?: number;
+  /** When each engine phase started. */
+  readonly phaseTimes?: { readonly preparing?: number; readonly running?: number; readonly finalizing?: number };
   readonly endedAt?: number;
   readonly error?: string;
 }

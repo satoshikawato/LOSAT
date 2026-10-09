@@ -1,0 +1,16 @@
+[WebServer] [PLUGIN_TIMINGS] JavaScript callbacks ran for 2.4s of this 3.2s build (74%).
+[WebServer] 1 callback is listed without a time. Its calls overlapped, so the time inside one call includes work from other calls. To find its cost, profile the build with `node --cpu-prof`:
+[WebServer]   - plugin vite:worker-import-meta-url transform (2 calls)
+[WebServer] See https://rolldown.rs/reference/InputOptions.checks#bundlertimings for more details.
+[WebServer] 
+
+Running 6 tests using 2 workers
+
+  ✓  1 [chromium] › tests/e2e/screens.spec.ts:36:3 › search screen at the phone size (10.2s)
+  ✓  2 [chromium] › tests/e2e/screens.spec.ts:36:3 › search screen at the desktop size (10.3s)
+  ✓  3 [firefox] › tests/e2e/screens.spec.ts:36:3 › search screen at the desktop size (14.3s)
+  ✓  4 [firefox] › tests/e2e/screens.spec.ts:36:3 › search screen at the phone size (14.6s)
+  ✓  6 [webkit] › tests/e2e/screens.spec.ts:36:3 › search screen at the phone size (15.5s)
+  ✓  5 [webkit] › tests/e2e/screens.spec.ts:36:3 › search screen at the desktop size (18.0s)
+
+  6 passed (1.0m)

@@ -1,0 +1,585 @@
+
+Running 4 tests using 1 worker
+
+done blastp SicyWSV/PajaWSV query 0 n=1: prepare 85 ms, run 686 ms
+done blastp SicyWSV/PajaWSV query 1 n=1: prepare 1 ms, run 630 ms
+done blastp SicyWSV/PajaWSV query 2 n=1: prepare 1 ms, run 584 ms
+done blastp SicyWSV/PajaWSV query 3 n=1: prepare 1 ms, run 589 ms
+done blastp SicyWSV/PajaWSV qmin 0 n=1: prepare 0 ms, run 5 ms
+done blastp SicyWSV/PajaWSV qmin 1 n=1: prepare 0 ms, run 5 ms
+done blastp SicyWSV/PajaWSV qmin 2 n=1: prepare 0 ms, run 5 ms
+done blastp SicyWSV/PajaWSV qmin 3 n=1: prepare 0 ms, run 6 ms
+{"id":"blastp SicyWSV/PajaWSV","threads":1,"runMs":[630,584,589],"qminRunMs":[5,5,6],"medianRunMs":589,"medianQminRunMs":5,"upperBoundShare":0.0092,"retained":[false,true,true,true,true,true,true,true]}
+done tblastn AvCLPV protein/AvCLPV query 0 n=1: prepare 77 ms, run 74 ms
+done tblastn AvCLPV protein/AvCLPV query 1 n=1: prepare 1 ms, run 48 ms
+done tblastn AvCLPV protein/AvCLPV query 2 n=1: prepare 1 ms, run 45 ms
+done tblastn AvCLPV protein/AvCLPV query 3 n=1: prepare 1 ms, run 45 ms
+done tblastn AvCLPV protein/AvCLPV qmin 0 n=1: prepare 1 ms, run 27 ms
+done tblastn AvCLPV protein/AvCLPV qmin 1 n=1: prepare 1 ms, run 28 ms
+done tblastn AvCLPV protein/AvCLPV qmin 2 n=1: prepare 1 ms, run 27 ms
+done tblastn AvCLPV protein/AvCLPV qmin 3 n=1: prepare 1 ms, run 27 ms
+{"id":"tblastn AvCLPV protein/AvCLPV","threads":1,"runMs":[48,45,45],"qminRunMs":[28,27,27],"medianRunMs":45,"medianQminRunMs":27,"upperBoundShare":0.5993,"retained":[false,true,true,true,true,true,true,true]}
+done blastn megablast AP027152/LC738884 query 0 n=1: prepare 84 ms, run 72 ms
+done blastn megablast AP027152/LC738884 query 1 n=1: prepare 3 ms, run 38 ms
+done blastn megablast AP027152/LC738884 query 2 n=1: prepare 3 ms, run 37 ms
+done blastn megablast AP027152/LC738884 query 3 n=1: prepare 3 ms, run 38 ms
+done blastn megablast AP027152/LC738884 qmin 0 n=1: prepare 0 ms, run 2 ms
+done blastn megablast AP027152/LC738884 qmin 1 n=1: prepare 1 ms, run 2 ms
+done blastn megablast AP027152/LC738884 qmin 2 n=1: prepare 1 ms, run 2 ms
+done blastn megablast AP027152/LC738884 qmin 3 n=1: prepare 1 ms, run 2 ms
+{"id":"blastn megablast AP027152/LC738884","threads":1,"runMs":[38,37,38],"qminRunMs":[2,2,2],"medianRunMs":38,"medianQminRunMs":2,"upperBoundShare":0.0652,"retained":[false,true,true,true,true,true,true,true]}
+done tblastx LC738884/LC741431 query 0 n=1: prepare 82 ms, run 1341 ms
+done tblastx LC738884/LC741431 query 1 n=1: prepare 3 ms, run 1126 ms
+done tblastx LC738884/LC741431 query 2 n=1: prepare 3 ms, run 1172 ms
+done tblastx LC738884/LC741431 query 3 n=1: prepare 2 ms, run 1202 ms
+done tblastx LC738884/LC741431 qmin 0 n=1: prepare 1 ms, run 15 ms
+done tblastx LC738884/LC741431 qmin 1 n=1: prepare 1 ms, run 15 ms
+done tblastx LC738884/LC741431 qmin 2 n=1: prepare 0 ms, run 15 ms
+done tblastx LC738884/LC741431 qmin 3 n=1: prepare 1 ms, run 15 ms
+{"id":"tblastx LC738884/LC741431","threads":1,"runMs":[1126,1172,1202],"qminRunMs":[15,15,15],"medianRunMs":1172,"medianQminRunMs":15,"upperBoundShare":0.0128,"retained":[false,true,true,true,true,true,true,true]}
+done blastp SicyWSV/PajaWSV query 0 n=4: prepare 109 ms, run 335 ms
+done blastp SicyWSV/PajaWSV query 1 n=4: prepare 1 ms, run 281 ms
+done blastp SicyWSV/PajaWSV query 2 n=4: prepare 1 ms, run 274 ms
+done blastp SicyWSV/PajaWSV query 3 n=4: prepare 1 ms, run 277 ms
+done blastp SicyWSV/PajaWSV qmin 0 n=4: prepare 0 ms, run 4 ms
+done blastp SicyWSV/PajaWSV qmin 1 n=4: prepare 0 ms, run 4 ms
+done blastp SicyWSV/PajaWSV qmin 2 n=4: prepare 0 ms, run 4 ms
+done blastp SicyWSV/PajaWSV qmin 3 n=4: prepare 0 ms, run 4 ms
+{"id":"blastp SicyWSV/PajaWSV","threads":4,"runMs":[281,274,277],"qminRunMs":[4,4,4],"medianRunMs":277,"medianQminRunMs":4,"upperBoundShare":0.0138,"retained":[false,true,true,true,true,true,true,true]}
+done tblastn AvCLPV protein/AvCLPV query 0 n=4: prepare 104 ms, run 74 ms
+done tblastn AvCLPV protein/AvCLPV query 1 n=4: prepare 1 ms, run 45 ms
+done tblastn AvCLPV protein/AvCLPV query 2 n=4: prepare 1 ms, run 44 ms
+done tblastn AvCLPV protein/AvCLPV query 3 n=4: prepare 1 ms, run 43 ms
+done tblastn AvCLPV protein/AvCLPV qmin 0 n=4: prepare 1 ms, run 26 ms
+done tblastn AvCLPV protein/AvCLPV qmin 1 n=4: prepare 1 ms, run 26 ms
+done tblastn AvCLPV protein/AvCLPV qmin 2 n=4: prepare 1 ms, run 27 ms
+done tblastn AvCLPV protein/AvCLPV qmin 3 n=4: prepare 1 ms, run 26 ms
+{"id":"tblastn AvCLPV protein/AvCLPV","threads":4,"runMs":[45,44,43],"qminRunMs":[26,27,26],"medianRunMs":44,"medianQminRunMs":26,"upperBoundShare":0.5834,"retained":[false,true,true,true,true,true,true,true]}
+done blastn megablast AP027152/LC738884 query 0 n=4: prepare 110 ms, run 70 ms
+done blastn megablast AP027152/LC738884 query 1 n=4: prepare 3 ms, run 36 ms
+done blastn megablast AP027152/LC738884 query 2 n=4: prepare 3 ms, run 36 ms
+done blastn megablast AP027152/LC738884 query 3 n=4: prepare 3 ms, run 37 ms
+done blastn megablast AP027152/LC738884 qmin 0 n=4: prepare 1 ms, run 3 ms
+done blastn megablast AP027152/LC738884 qmin 1 n=4: prepare 1 ms, run 3 ms
+done blastn megablast AP027152/LC738884 qmin 2 n=4: prepare 1 ms, run 3 ms
+done blastn megablast AP027152/LC738884 qmin 3 n=4: prepare 1 ms, run 3 ms
+{"id":"blastn megablast AP027152/LC738884","threads":4,"runMs":[36,36,37],"qminRunMs":[3,3,3],"medianRunMs":36,"medianQminRunMs":3,"upperBoundShare":0.0747,"retained":[false,true,true,true,true,true,true,true]}
+done tblastx LC738884/LC741431 query 0 n=4: prepare 101 ms, run 1294 ms
+done tblastx LC738884/LC741431 query 1 n=4: prepare 3 ms, run 1293 ms
+done tblastx LC738884/LC741431 query 2 n=4: prepare 3 ms, run 1214 ms
+done tblastx LC738884/LC741431 query 3 n=4: prepare 3 ms, run 1170 ms
+done tblastx LC738884/LC741431 qmin 0 n=4: prepare 1 ms, run 16 ms
+done tblastx LC738884/LC741431 qmin 1 n=4: prepare 1 ms, run 16 ms
+done tblastx LC738884/LC741431 qmin 2 n=4: prepare 1 ms, run 17 ms
+done tblastx LC738884/LC741431 qmin 3 n=4: prepare 1 ms, run 16 ms
+{"id":"tblastx LC738884/LC741431","threads":4,"runMs":[1293,1214,1170],"qminRunMs":[16,17,16],"medianRunMs":1214,"medianQminRunMs":16,"upperBoundShare":0.0133,"retained":[false,true,true,true,true,true,true,true]}
+  ✓  1 [chromium] › tests/e2e/measure.spec.ts:207:1 › dw8: the share of a warm search that subject-only preprocessing can take (17.5s)
+done blastp SicyWSV/PajaWSV 0 n=1: prepare 82 ms, run 661 ms
+done blastp SicyWSV/PajaWSV 1 n=1: prepare 2 ms, run 636 ms
+done blastp SicyWSV/PajaWSV 2 n=1: prepare 2 ms, run 765 ms
+done blastp SicyWSV/PajaWSV 3 n=1: prepare 2 ms, run 595 ms
+done blastp SicyWSV/PajaWSV 4 n=1: prepare 2 ms, run 619 ms
+done blastp SicyWSV/PajaWSV 5 n=1: prepare 2 ms, run 618 ms
+done blastp SicyWSV/PajaWSV 6 n=1: prepare 2 ms, run 623 ms
+done blastp SicyWSV/PajaWSV 7 n=1: prepare 2 ms, run 605 ms
+done blastp SicyWSV/PajaWSV 8 n=1: prepare 2 ms, run 586 ms
+done blastp SicyWSV/PajaWSV 9 n=1: prepare 2 ms, run 643 ms
+done blastp SicyWSV/PajaWSV 10 n=1: prepare 2 ms, run 614 ms
+done blastp SicyWSV/PajaWSV 11 n=1: prepare 2 ms, run 606 ms
+done blastp SicyWSV/PajaWSV 12 n=1: prepare 2 ms, run 610 ms
+done blastp SicyWSV/PajaWSV 13 n=1: prepare 2 ms, run 584 ms
+done blastp SicyWSV/PajaWSV 14 n=1: prepare 2 ms, run 583 ms
+done blastp SicyWSV/PajaWSV 15 n=1: prepare 2 ms, run 586 ms
+done blastp SicyWSV/PajaWSV 16 n=1: prepare 2 ms, run 592 ms
+done blastp SicyWSV/PajaWSV 17 n=1: prepare 2 ms, run 573 ms
+done blastp SicyWSV/PajaWSV 18 n=1: prepare 1 ms, run 584 ms
+done blastp SicyWSV/PajaWSV 19 n=1: prepare 2 ms, run 585 ms
+{"id":"blastp SicyWSV/PajaWSV","threads":1,"last":[23658496,23658496,23658496]}
+done tblastn AvCLPV protein/AvCLPV 0 n=1: prepare 80 ms, run 73 ms
+done tblastn AvCLPV protein/AvCLPV 1 n=1: prepare 3 ms, run 44 ms
+done tblastn AvCLPV protein/AvCLPV 2 n=1: prepare 3 ms, run 44 ms
+done tblastn AvCLPV protein/AvCLPV 3 n=1: prepare 3 ms, run 45 ms
+done tblastn AvCLPV protein/AvCLPV 4 n=1: prepare 3 ms, run 45 ms
+done tblastn AvCLPV protein/AvCLPV 5 n=1: prepare 3 ms, run 44 ms
+done tblastn AvCLPV protein/AvCLPV 6 n=1: prepare 3 ms, run 44 ms
+done tblastn AvCLPV protein/AvCLPV 7 n=1: prepare 3 ms, run 44 ms
+done tblastn AvCLPV protein/AvCLPV 8 n=1: prepare 3 ms, run 45 ms
+done tblastn AvCLPV protein/AvCLPV 9 n=1: prepare 3 ms, run 44 ms
+done tblastn AvCLPV protein/AvCLPV 10 n=1: prepare 3 ms, run 44 ms
+done tblastn AvCLPV protein/AvCLPV 11 n=1: prepare 3 ms, run 46 ms
+done tblastn AvCLPV protein/AvCLPV 12 n=1: prepare 3 ms, run 47 ms
+done tblastn AvCLPV protein/AvCLPV 13 n=1: prepare 3 ms, run 46 ms
+done tblastn AvCLPV protein/AvCLPV 14 n=1: prepare 3 ms, run 45 ms
+done tblastn AvCLPV protein/AvCLPV 15 n=1: prepare 3 ms, run 45 ms
+done tblastn AvCLPV protein/AvCLPV 16 n=1: prepare 3 ms, run 43 ms
+done tblastn AvCLPV protein/AvCLPV 17 n=1: prepare 3 ms, run 44 ms
+done tblastn AvCLPV protein/AvCLPV 18 n=1: prepare 7 ms, run 77 ms
+done tblastn AvCLPV protein/AvCLPV 19 n=1: prepare 3 ms, run 44 ms
+{"id":"tblastn AvCLPV protein/AvCLPV","threads":1,"last":[13697024,13697024,13697024]}
+done blastn megablast AP027152/LC738884 0 n=1: prepare 81 ms, run 63 ms
+done blastn megablast AP027152/LC738884 1 n=1: prepare 5 ms, run 36 ms
+done blastn megablast AP027152/LC738884 2 n=1: prepare 5 ms, run 37 ms
+done blastn megablast AP027152/LC738884 3 n=1: prepare 5 ms, run 37 ms
+done blastn megablast AP027152/LC738884 4 n=1: prepare 4 ms, run 38 ms
+done blastn megablast AP027152/LC738884 5 n=1: prepare 5 ms, run 42 ms
+done blastn megablast AP027152/LC738884 6 n=1: prepare 5 ms, run 36 ms
+done blastn megablast AP027152/LC738884 7 n=1: prepare 5 ms, run 36 ms
+done blastn megablast AP027152/LC738884 8 n=1: prepare 4 ms, run 38 ms
+done blastn megablast AP027152/LC738884 9 n=1: prepare 5 ms, run 37 ms
+done blastn megablast AP027152/LC738884 10 n=1: prepare 5 ms, run 36 ms
+done blastn megablast AP027152/LC738884 11 n=1: prepare 5 ms, run 36 ms
+done blastn megablast AP027152/LC738884 12 n=1: prepare 4 ms, run 35 ms
+done blastn megablast AP027152/LC738884 13 n=1: prepare 5 ms, run 37 ms
+done blastn megablast AP027152/LC738884 14 n=1: prepare 5 ms, run 34 ms
+done blastn megablast AP027152/LC738884 15 n=1: prepare 5 ms, run 37 ms
+done blastn megablast AP027152/LC738884 16 n=1: prepare 4 ms, run 35 ms
+done blastn megablast AP027152/LC738884 17 n=1: prepare 5 ms, run 34 ms
+done blastn megablast AP027152/LC738884 18 n=1: prepare 5 ms, run 35 ms
+done blastn megablast AP027152/LC738884 19 n=1: prepare 5 ms, run 36 ms
+{"id":"blastn megablast AP027152/LC738884","threads":1,"last":[77266944,77266944,77266944]}
+done tblastx LC738884/LC741431 0 n=1: prepare 82 ms, run 1305 ms
+done tblastx LC738884/LC741431 1 n=1: prepare 4 ms, run 1200 ms
+done tblastx LC738884/LC741431 2 n=1: prepare 4 ms, run 1183 ms
+done tblastx LC738884/LC741431 3 n=1: prepare 4 ms, run 1193 ms
+done tblastx LC738884/LC741431 4 n=1: prepare 4 ms, run 1183 ms
+done tblastx LC738884/LC741431 5 n=1: prepare 4 ms, run 1176 ms
+done tblastx LC738884/LC741431 6 n=1: prepare 4 ms, run 1174 ms
+done tblastx LC738884/LC741431 7 n=1: prepare 4 ms, run 1227 ms
+done tblastx LC738884/LC741431 8 n=1: prepare 4 ms, run 1174 ms
+done tblastx LC738884/LC741431 9 n=1: prepare 5 ms, run 1201 ms
+done tblastx LC738884/LC741431 10 n=1: prepare 4 ms, run 1182 ms
+done tblastx LC738884/LC741431 11 n=1: prepare 4 ms, run 1177 ms
+done tblastx LC738884/LC741431 12 n=1: prepare 4 ms, run 1183 ms
+done tblastx LC738884/LC741431 13 n=1: prepare 4 ms, run 1189 ms
+done tblastx LC738884/LC741431 14 n=1: prepare 4 ms, run 1197 ms
+done tblastx LC738884/LC741431 15 n=1: prepare 4 ms, run 1198 ms
+done tblastx LC738884/LC741431 16 n=1: prepare 4 ms, run 1176 ms
+done tblastx LC738884/LC741431 17 n=1: prepare 4 ms, run 1188 ms
+done tblastx LC738884/LC741431 18 n=1: prepare 4 ms, run 1207 ms
+done tblastx LC738884/LC741431 19 n=1: prepare 4 ms, run 1160 ms
+{"id":"tblastx LC738884/LC741431","threads":1,"last":[70451200,70451200,70451200]}
+done blastn megablast Sakai/MG1655 0 n=1: prepare 167 ms, run 1268 ms
+done blastn megablast Sakai/MG1655 1 n=1: prepare 76 ms, run 1065 ms
+done blastn megablast Sakai/MG1655 2 n=1: prepare 73 ms, run 1055 ms
+done blastn megablast Sakai/MG1655 3 n=1: prepare 73 ms, run 1041 ms
+done blastn megablast Sakai/MG1655 4 n=1: prepare 75 ms, run 1054 ms
+done blastn megablast Sakai/MG1655 5 n=1: prepare 73 ms, run 1057 ms
+done blastn megablast Sakai/MG1655 6 n=1: prepare 77 ms, run 1111 ms
+done blastn megablast Sakai/MG1655 7 n=1: prepare 78 ms, run 1096 ms
+done blastn megablast Sakai/MG1655 8 n=1: prepare 75 ms, run 1074 ms
+done blastn megablast Sakai/MG1655 9 n=1: prepare 75 ms, run 1069 ms
+done blastn megablast Sakai/MG1655 10 n=1: prepare 75 ms, run 1064 ms
+done blastn megablast Sakai/MG1655 11 n=1: prepare 75 ms, run 1088 ms
+done blastn megablast Sakai/MG1655 12 n=1: prepare 71 ms, run 1066 ms
+done blastn megablast Sakai/MG1655 13 n=1: prepare 77 ms, run 1055 ms
+done blastn megablast Sakai/MG1655 14 n=1: prepare 76 ms, run 1060 ms
+done blastn megablast Sakai/MG1655 15 n=1: prepare 75 ms, run 1055 ms
+done blastn megablast Sakai/MG1655 16 n=1: prepare 72 ms, run 1052 ms
+done blastn megablast Sakai/MG1655 17 n=1: prepare 76 ms, run 1053 ms
+done blastn megablast Sakai/MG1655 18 n=1: prepare 83 ms, run 1094 ms
+done blastn megablast Sakai/MG1655 19 n=1: prepare 72 ms, run 1093 ms
+{"id":"blastn megablast Sakai/MG1655","threads":1,"last":[248971264,248971264,248971264]}
+done blastp SicyWSV/PajaWSV round 0 n=1: prepare 77 ms, run 628 ms
+done tblastn AvCLPV protein/AvCLPV round 0 n=1: prepare 4 ms, run 56 ms
+done blastn megablast AP027152/LC738884 round 0 n=1: prepare 6 ms, run 59 ms
+done tblastx LC738884/LC741431 round 0 n=1: prepare 5 ms, run 1237 ms
+done blastn megablast Sakai/MG1655 round 0 n=1: prepare 76 ms, run 1104 ms
+done blastp SicyWSV/PajaWSV round 1 n=1: prepare 2 ms, run 579 ms
+done tblastn AvCLPV protein/AvCLPV round 1 n=1: prepare 3 ms, run 45 ms
+done blastn megablast AP027152/LC738884 round 1 n=1: prepare 4 ms, run 37 ms
+done tblastx LC738884/LC741431 round 1 n=1: prepare 4 ms, run 1205 ms
+done blastn megablast Sakai/MG1655 round 1 n=1: prepare 77 ms, run 1080 ms
+done blastp SicyWSV/PajaWSV round 2 n=1: prepare 2 ms, run 567 ms
+done tblastn AvCLPV protein/AvCLPV round 2 n=1: prepare 3 ms, run 44 ms
+done blastn megablast AP027152/LC738884 round 2 n=1: prepare 4 ms, run 36 ms
+done tblastx LC738884/LC741431 round 2 n=1: prepare 4 ms, run 1136 ms
+done blastn megablast Sakai/MG1655 round 2 n=1: prepare 73 ms, run 1058 ms
+done blastp SicyWSV/PajaWSV round 3 n=1: prepare 2 ms, run 565 ms
+done tblastn AvCLPV protein/AvCLPV round 3 n=1: prepare 3 ms, run 41 ms
+done blastn megablast AP027152/LC738884 round 3 n=1: prepare 5 ms, run 36 ms
+done tblastx LC738884/LC741431 round 3 n=1: prepare 4 ms, run 1149 ms
+done blastn megablast Sakai/MG1655 round 3 n=1: prepare 76 ms, run 1049 ms
+done blastp SicyWSV/PajaWSV round 4 n=1: prepare 1 ms, run 560 ms
+done tblastn AvCLPV protein/AvCLPV round 4 n=1: prepare 3 ms, run 42 ms
+done blastn megablast AP027152/LC738884 round 4 n=1: prepare 4 ms, run 36 ms
+done tblastx LC738884/LC741431 round 4 n=1: prepare 4 ms, run 1193 ms
+done blastn megablast Sakai/MG1655 round 4 n=1: prepare 76 ms, run 1101 ms
+done blastp SicyWSV/PajaWSV round 5 n=1: prepare 2 ms, run 579 ms
+done tblastn AvCLPV protein/AvCLPV round 5 n=1: prepare 3 ms, run 45 ms
+done blastn megablast AP027152/LC738884 round 5 n=1: prepare 5 ms, run 36 ms
+done tblastx LC738884/LC741431 round 5 n=1: prepare 4 ms, run 1175 ms
+done blastn megablast Sakai/MG1655 round 5 n=1: prepare 75 ms, run 1079 ms
+done blastp SicyWSV/PajaWSV 0 n=4: prepare 91 ms, run 341 ms
+done blastp SicyWSV/PajaWSV 1 n=4: prepare 2 ms, run 271 ms
+done blastp SicyWSV/PajaWSV 2 n=4: prepare 2 ms, run 304 ms
+done blastp SicyWSV/PajaWSV 3 n=4: prepare 2 ms, run 298 ms
+done blastp SicyWSV/PajaWSV 4 n=4: prepare 2 ms, run 264 ms
+done blastp SicyWSV/PajaWSV 5 n=4: prepare 2 ms, run 267 ms
+done blastp SicyWSV/PajaWSV 6 n=4: prepare 2 ms, run 268 ms
+done blastp SicyWSV/PajaWSV 7 n=4: prepare 2 ms, run 245 ms
+done blastp SicyWSV/PajaWSV 8 n=4: prepare 2 ms, run 279 ms
+done blastp SicyWSV/PajaWSV 9 n=4: prepare 2 ms, run 287 ms
+done blastp SicyWSV/PajaWSV 10 n=4: prepare 2 ms, run 274 ms
+done blastp SicyWSV/PajaWSV 11 n=4: prepare 2 ms, run 267 ms
+done blastp SicyWSV/PajaWSV 12 n=4: prepare 2 ms, run 266 ms
+done blastp SicyWSV/PajaWSV 13 n=4: prepare 2 ms, run 260 ms
+done blastp SicyWSV/PajaWSV 14 n=4: prepare 2 ms, run 262 ms
+done blastp SicyWSV/PajaWSV 15 n=4: prepare 2 ms, run 268 ms
+done blastp SicyWSV/PajaWSV 16 n=4: prepare 2 ms, run 257 ms
+done blastp SicyWSV/PajaWSV 17 n=4: prepare 2 ms, run 259 ms
+done blastp SicyWSV/PajaWSV 18 n=4: prepare 2 ms, run 261 ms
+done blastp SicyWSV/PajaWSV 19 n=4: prepare 2 ms, run 254 ms
+{"id":"blastp SicyWSV/PajaWSV","threads":4,"last":[26935296,26935296,26935296]}
+done tblastn AvCLPV protein/AvCLPV 0 n=4: prepare 102 ms, run 76 ms
+done tblastn AvCLPV protein/AvCLPV 1 n=4: prepare 3 ms, run 45 ms
+done tblastn AvCLPV protein/AvCLPV 2 n=4: prepare 3 ms, run 45 ms
+done tblastn AvCLPV protein/AvCLPV 3 n=4: prepare 3 ms, run 45 ms
+done tblastn AvCLPV protein/AvCLPV 4 n=4: prepare 3 ms, run 44 ms
+done tblastn AvCLPV protein/AvCLPV 5 n=4: prepare 3 ms, run 45 ms
+done tblastn AvCLPV protein/AvCLPV 6 n=4: prepare 3 ms, run 45 ms
+done tblastn AvCLPV protein/AvCLPV 7 n=4: prepare 3 ms, run 45 ms
+done tblastn AvCLPV protein/AvCLPV 8 n=4: prepare 3 ms, run 45 ms
+done tblastn AvCLPV protein/AvCLPV 9 n=4: prepare 3 ms, run 44 ms
+done tblastn AvCLPV protein/AvCLPV 10 n=4: prepare 3 ms, run 45 ms
+done tblastn AvCLPV protein/AvCLPV 11 n=4: prepare 3 ms, run 44 ms
+done tblastn AvCLPV protein/AvCLPV 12 n=4: prepare 3 ms, run 44 ms
+done tblastn AvCLPV protein/AvCLPV 13 n=4: prepare 3 ms, run 44 ms
+done tblastn AvCLPV protein/AvCLPV 14 n=4: prepare 3 ms, run 45 ms
+done tblastn AvCLPV protein/AvCLPV 15 n=4: prepare 3 ms, run 45 ms
+done tblastn AvCLPV protein/AvCLPV 16 n=4: prepare 3 ms, run 45 ms
+done tblastn AvCLPV protein/AvCLPV 17 n=4: prepare 3 ms, run 45 ms
+done tblastn AvCLPV protein/AvCLPV 18 n=4: prepare 3 ms, run 44 ms
+done tblastn AvCLPV protein/AvCLPV 19 n=4: prepare 3 ms, run 44 ms
+{"id":"tblastn AvCLPV protein/AvCLPV","threads":4,"last":[16777216,16777216,16777216]}
+done blastn megablast AP027152/LC738884 0 n=4: prepare 106 ms, run 74 ms
+done blastn megablast AP027152/LC738884 1 n=4: prepare 5 ms, run 36 ms
+done blastn megablast AP027152/LC738884 2 n=4: prepare 5 ms, run 36 ms
+done blastn megablast AP027152/LC738884 3 n=4: prepare 5 ms, run 36 ms
+done blastn megablast AP027152/LC738884 4 n=4: prepare 5 ms, run 37 ms
+done blastn megablast AP027152/LC738884 5 n=4: prepare 5 ms, run 37 ms
+done blastn megablast AP027152/LC738884 6 n=4: prepare 5 ms, run 37 ms
+done blastn megablast AP027152/LC738884 7 n=4: prepare 5 ms, run 36 ms
+done blastn megablast AP027152/LC738884 8 n=4: prepare 5 ms, run 36 ms
+done blastn megablast AP027152/LC738884 9 n=4: prepare 5 ms, run 36 ms
+done blastn megablast AP027152/LC738884 10 n=4: prepare 5 ms, run 37 ms
+done blastn megablast AP027152/LC738884 11 n=4: prepare 5 ms, run 37 ms
+done blastn megablast AP027152/LC738884 12 n=4: prepare 5 ms, run 35 ms
+done blastn megablast AP027152/LC738884 13 n=4: prepare 4 ms, run 36 ms
+done blastn megablast AP027152/LC738884 14 n=4: prepare 5 ms, run 36 ms
+done blastn megablast AP027152/LC738884 15 n=4: prepare 5 ms, run 36 ms
+done blastn megablast AP027152/LC738884 16 n=4: prepare 5 ms, run 36 ms
+done blastn megablast AP027152/LC738884 17 n=4: prepare 5 ms, run 36 ms
+done blastn megablast AP027152/LC738884 18 n=4: prepare 5 ms, run 36 ms
+done blastn megablast AP027152/LC738884 19 n=4: prepare 5 ms, run 36 ms
+{"id":"blastn megablast AP027152/LC738884","threads":4,"last":[80543744,80543744,80543744]}
+done tblastx LC738884/LC741431 0 n=4: prepare 108 ms, run 1306 ms
+done tblastx LC738884/LC741431 1 n=4: prepare 5 ms, run 1194 ms
+done tblastx LC738884/LC741431 2 n=4: prepare 4 ms, run 1097 ms
+done tblastx LC738884/LC741431 3 n=4: prepare 4 ms, run 1088 ms
+done tblastx LC738884/LC741431 4 n=4: prepare 4 ms, run 1070 ms
+done tblastx LC738884/LC741431 5 n=4: prepare 4 ms, run 1073 ms
+done tblastx LC738884/LC741431 6 n=4: prepare 4 ms, run 1078 ms
+done tblastx LC738884/LC741431 7 n=4: prepare 4 ms, run 1115 ms
+done tblastx LC738884/LC741431 8 n=4: prepare 4 ms, run 1129 ms
+done tblastx LC738884/LC741431 9 n=4: prepare 4 ms, run 1079 ms
+done tblastx LC738884/LC741431 10 n=4: prepare 4 ms, run 1070 ms
+done tblastx LC738884/LC741431 11 n=4: prepare 4 ms, run 1067 ms
+done tblastx LC738884/LC741431 12 n=4: prepare 4 ms, run 1164 ms
+done tblastx LC738884/LC741431 13 n=4: prepare 4 ms, run 1119 ms
+done tblastx LC738884/LC741431 14 n=4: prepare 4 ms, run 1077 ms
+done tblastx LC738884/LC741431 15 n=4: prepare 4 ms, run 1128 ms
+done tblastx LC738884/LC741431 16 n=4: prepare 4 ms, run 1107 ms
+done tblastx LC738884/LC741431 17 n=4: prepare 4 ms, run 1067 ms
+done tblastx LC738884/LC741431 18 n=4: prepare 4 ms, run 1135 ms
+done tblastx LC738884/LC741431 19 n=4: prepare 4 ms, run 1145 ms
+{"id":"tblastx LC738884/LC741431","threads":4,"last":[74973184,74973184,74973184]}
+done blastn megablast Sakai/MG1655 0 n=4: prepare 190 ms, run 1252 ms
+done blastn megablast Sakai/MG1655 1 n=4: prepare 71 ms, run 1024 ms
+done blastn megablast Sakai/MG1655 2 n=4: prepare 74 ms, run 1023 ms
+done blastn megablast Sakai/MG1655 3 n=4: prepare 77 ms, run 1357 ms
+done blastn megablast Sakai/MG1655 4 n=4: prepare 86 ms, run 1258 ms
+done blastn megablast Sakai/MG1655 5 n=4: prepare 88 ms, run 1210 ms
+done blastn megablast Sakai/MG1655 6 n=4: prepare 87 ms, run 1204 ms
+done blastn megablast Sakai/MG1655 7 n=4: prepare 94 ms, run 1290 ms
+done blastn megablast Sakai/MG1655 8 n=4: prepare 88 ms, run 1373 ms
+done blastn megablast Sakai/MG1655 9 n=4: prepare 85 ms, run 1362 ms
+done blastn megablast Sakai/MG1655 10 n=4: prepare 96 ms, run 1394 ms
+done blastn megablast Sakai/MG1655 11 n=4: prepare 86 ms, run 1233 ms
+done blastn megablast Sakai/MG1655 12 n=4: prepare 84 ms, run 1211 ms
+done blastn megablast Sakai/MG1655 13 n=4: prepare 88 ms, run 1215 ms
+done blastn megablast Sakai/MG1655 14 n=4: prepare 80 ms, run 1199 ms
+done blastn megablast Sakai/MG1655 15 n=4: prepare 82 ms, run 1307 ms
+done blastn megablast Sakai/MG1655 16 n=4: prepare 86 ms, run 1235 ms
+done blastn megablast Sakai/MG1655 17 n=4: prepare 88 ms, run 1220 ms
+done blastn megablast Sakai/MG1655 18 n=4: prepare 85 ms, run 1225 ms
+done blastn megablast Sakai/MG1655 19 n=4: prepare 86 ms, run 1244 ms
+{"id":"blastn megablast Sakai/MG1655","threads":4,"last":[254345216,254345216,254345216]}
+done blastp SicyWSV/PajaWSV round 0 n=4: prepare 92 ms, run 344 ms
+done tblastn AvCLPV protein/AvCLPV round 0 n=4: prepare 5 ms, run 55 ms
+done blastn megablast AP027152/LC738884 round 0 n=4: prepare 6 ms, run 60 ms
+done tblastx LC738884/LC741431 round 0 n=4: prepare 5 ms, run 1233 ms
+done blastn megablast Sakai/MG1655 round 0 n=4: prepare 76 ms, run 1145 ms
+done blastp SicyWSV/PajaWSV round 1 n=4: prepare 2 ms, run 259 ms
+done tblastn AvCLPV protein/AvCLPV round 1 n=4: prepare 3 ms, run 46 ms
+done blastn megablast AP027152/LC738884 round 1 n=4: prepare 5 ms, run 37 ms
+done tblastx LC738884/LC741431 round 1 n=4: prepare 4 ms, run 1145 ms
+done blastn megablast Sakai/MG1655 round 1 n=4: prepare 78 ms, run 1093 ms
+done blastp SicyWSV/PajaWSV round 2 n=4: prepare 2 ms, run 243 ms
+done tblastn AvCLPV protein/AvCLPV round 2 n=4: prepare 3 ms, run 44 ms
+done blastn megablast AP027152/LC738884 round 2 n=4: prepare 5 ms, run 36 ms
+done tblastx LC738884/LC741431 round 2 n=4: prepare 4 ms, run 1351 ms
+done blastn megablast Sakai/MG1655 round 2 n=4: prepare 77 ms, run 1203 ms
+done blastp SicyWSV/PajaWSV round 3 n=4: prepare 2 ms, run 313 ms
+done tblastn AvCLPV protein/AvCLPV round 3 n=4: prepare 3 ms, run 44 ms
+done blastn megablast AP027152/LC738884 round 3 n=4: prepare 5 ms, run 36 ms
+done tblastx LC738884/LC741431 round 3 n=4: prepare 4 ms, run 1240 ms
+done blastn megablast Sakai/MG1655 round 3 n=4: prepare 78 ms, run 1145 ms
+done blastp SicyWSV/PajaWSV round 4 n=4: prepare 2 ms, run 248 ms
+done tblastn AvCLPV protein/AvCLPV round 4 n=4: prepare 3 ms, run 42 ms
+done blastn megablast AP027152/LC738884 round 4 n=4: prepare 4 ms, run 35 ms
+done tblastx LC738884/LC741431 round 4 n=4: prepare 4 ms, run 1218 ms
+done blastn megablast Sakai/MG1655 round 4 n=4: prepare 79 ms, run 1177 ms
+done blastp SicyWSV/PajaWSV round 5 n=4: prepare 2 ms, run 290 ms
+done tblastn AvCLPV protein/AvCLPV round 5 n=4: prepare 3 ms, run 47 ms
+done blastn megablast AP027152/LC738884 round 5 n=4: prepare 5 ms, run 38 ms
+done tblastx LC738884/LC741431 round 5 n=4: prepare 5 ms, run 1192 ms
+done blastn megablast Sakai/MG1655 round 5 n=4: prepare 80 ms, run 1117 ms
+  ✓  2 [chromium] › tests/e2e/measure.spec.ts:238:1 › memory: the linear memory of one instance over repeated searches (3.0m)
+done blastn 20000 n=1 0 n=1: prepare 90 ms, run 18 ms
+done blastn 20000 n=1 1 n=1: prepare 1 ms, run 4 ms
+done blastn 20000 n=1 2 n=1: prepare 1 ms, run 3 ms
+done blastn 20000 n=1 3 n=1: prepare 1 ms, run 3 ms
+done blastn 20000 n=2 0 n=2: prepare 13 ms, run 15 ms
+done blastn 20000 n=2 1 n=2: prepare 1 ms, run 4 ms
+done blastn 20000 n=2 2 n=2: prepare 1 ms, run 3 ms
+done blastn 20000 n=2 3 n=2: prepare 1 ms, run 3 ms
+done blastn 20000 n=4 0 n=4: prepare 11 ms, run 4 ms
+done blastn 20000 n=4 1 n=4: prepare 1 ms, run 3 ms
+done blastn 20000 n=4 2 n=4: prepare 1 ms, run 3 ms
+done blastn 20000 n=4 3 n=4: prepare 0 ms, run 3 ms
+{"1":3,"2":3,"4":3} blastn 20000
+done tblastx 20000 n=1 0 n=1: prepare 81 ms, run 40 ms
+done tblastx 20000 n=1 1 n=1: prepare 1 ms, run 18 ms
+done tblastx 20000 n=1 2 n=1: prepare 1 ms, run 17 ms
+done tblastx 20000 n=1 3 n=1: prepare 1 ms, run 18 ms
+done tblastx 20000 n=2 0 n=2: prepare 15 ms, run 39 ms
+done tblastx 20000 n=2 1 n=2: prepare 1 ms, run 18 ms
+done tblastx 20000 n=2 2 n=2: prepare 1 ms, run 18 ms
+done tblastx 20000 n=2 3 n=2: prepare 1 ms, run 19 ms
+done tblastx 20000 n=4 0 n=4: prepare 13 ms, run 20 ms
+done tblastx 20000 n=4 1 n=4: prepare 0 ms, run 18 ms
+done tblastx 20000 n=4 2 n=4: prepare 0 ms, run 17 ms
+done tblastx 20000 n=4 3 n=4: prepare 0 ms, run 17 ms
+{"1":18,"2":18,"4":17} tblastx 20000
+done blastp 20000 n=1 0 n=1: prepare 90 ms, run 365 ms
+done blastp 20000 n=1 1 n=1: prepare 1 ms, run 288 ms
+done blastp 20000 n=1 2 n=1: prepare 1 ms, run 298 ms
+done blastp 20000 n=1 3 n=1: prepare 1 ms, run 329 ms
+done blastp 20000 n=2 0 n=2: prepare 13 ms, run 217 ms
+done blastp 20000 n=2 1 n=2: prepare 1 ms, run 190 ms
+done blastp 20000 n=2 2 n=2: prepare 1 ms, run 190 ms
+done blastp 20000 n=2 3 n=2: prepare 1 ms, run 184 ms
+done blastp 20000 n=4 0 n=4: prepare 9 ms, run 100 ms
+done blastp 20000 n=4 1 n=4: prepare 0 ms, run 105 ms
+done blastp 20000 n=4 2 n=4: prepare 1 ms, run 101 ms
+done blastp 20000 n=4 3 n=4: prepare 0 ms, run 111 ms
+{"1":298,"2":190,"4":105} blastp 20000
+done tblastn 20000 n=1 0 n=1: prepare 84 ms, run 101 ms
+done tblastn 20000 n=1 1 n=1: prepare 1 ms, run 58 ms
+done tblastn 20000 n=1 2 n=1: prepare 0 ms, run 59 ms
+done tblastn 20000 n=1 3 n=1: prepare 1 ms, run 58 ms
+done tblastn 20000 n=2 0 n=2: prepare 13 ms, run 93 ms
+done tblastn 20000 n=2 1 n=2: prepare 0 ms, run 60 ms
+done tblastn 20000 n=2 2 n=2: prepare 0 ms, run 57 ms
+done tblastn 20000 n=2 3 n=2: prepare 0 ms, run 58 ms
+done tblastn 20000 n=4 0 n=4: prepare 10 ms, run 60 ms
+done tblastn 20000 n=4 1 n=4: prepare 0 ms, run 58 ms
+done tblastn 20000 n=4 2 n=4: prepare 0 ms, run 57 ms
+done tblastn 20000 n=4 3 n=4: prepare 0 ms, run 57 ms
+{"1":58,"2":58,"4":57} tblastn 20000
+done blastn 60000 n=1 0 n=1: prepare 76 ms, run 23 ms
+done blastn 60000 n=1 1 n=1: prepare 1 ms, run 6 ms
+done blastn 60000 n=1 2 n=1: prepare 1 ms, run 6 ms
+done blastn 60000 n=1 3 n=1: prepare 1 ms, run 5 ms
+done blastn 60000 n=2 0 n=2: prepare 14 ms, run 24 ms
+done blastn 60000 n=2 1 n=2: prepare 1 ms, run 6 ms
+done blastn 60000 n=2 2 n=2: prepare 1 ms, run 5 ms
+done blastn 60000 n=2 3 n=2: prepare 1 ms, run 5 ms
+done blastn 60000 n=4 0 n=4: prepare 8 ms, run 6 ms
+done blastn 60000 n=4 1 n=4: prepare 1 ms, run 6 ms
+done blastn 60000 n=4 2 n=4: prepare 1 ms, run 6 ms
+done blastn 60000 n=4 3 n=4: prepare 1 ms, run 5 ms
+{"1":6,"2":5,"4":6} blastn 60000
+done tblastx 60000 n=1 0 n=1: prepare 73 ms, run 64 ms
+done tblastx 60000 n=1 1 n=1: prepare 1 ms, run 43 ms
+done tblastx 60000 n=1 2 n=1: prepare 1 ms, run 41 ms
+done tblastx 60000 n=1 3 n=1: prepare 1 ms, run 41 ms
+done tblastx 60000 n=2 0 n=2: prepare 14 ms, run 66 ms
+done tblastx 60000 n=2 1 n=2: prepare 1 ms, run 41 ms
+done tblastx 60000 n=2 2 n=2: prepare 1 ms, run 42 ms
+done tblastx 60000 n=2 3 n=2: prepare 1 ms, run 40 ms
+done tblastx 60000 n=4 0 n=4: prepare 8 ms, run 43 ms
+done tblastx 60000 n=4 1 n=4: prepare 1 ms, run 39 ms
+done tblastx 60000 n=4 2 n=4: prepare 1 ms, run 40 ms
+done tblastx 60000 n=4 3 n=4: prepare 1 ms, run 40 ms
+{"1":41,"2":41,"4":40} tblastx 60000
+done blastp 60000 n=1 0 n=1: prepare 81 ms, run 1905 ms
+done blastp 60000 n=1 1 n=1: prepare 1 ms, run 1926 ms
+done blastp 60000 n=1 2 n=1: prepare 1 ms, run 2002 ms
+done blastp 60000 n=1 3 n=1: prepare 1 ms, run 1925 ms
+done blastp 60000 n=2 0 n=2: prepare 15 ms, run 1170 ms
+done blastp 60000 n=2 1 n=2: prepare 1 ms, run 1112 ms
+done blastp 60000 n=2 2 n=2: prepare 1 ms, run 1097 ms
+done blastp 60000 n=2 3 n=2: prepare 1 ms, run 1056 ms
+done blastp 60000 n=4 0 n=4: prepare 10 ms, run 604 ms
+done blastp 60000 n=4 1 n=4: prepare 1 ms, run 629 ms
+done blastp 60000 n=4 2 n=4: prepare 1 ms, run 603 ms
+done blastp 60000 n=4 3 n=4: prepare 1 ms, run 652 ms
+{"1":1926,"2":1097,"4":629} blastp 60000
+done tblastn 60000 n=1 0 n=1: prepare 73 ms, run 250 ms
+done tblastn 60000 n=1 1 n=1: prepare 1 ms, run 207 ms
+done tblastn 60000 n=1 2 n=1: prepare 1 ms, run 205 ms
+done tblastn 60000 n=1 3 n=1: prepare 1 ms, run 204 ms
+done tblastn 60000 n=2 0 n=2: prepare 14 ms, run 247 ms
+done tblastn 60000 n=2 1 n=2: prepare 1 ms, run 203 ms
+done tblastn 60000 n=2 2 n=2: prepare 1 ms, run 204 ms
+done tblastn 60000 n=2 3 n=2: prepare 1 ms, run 204 ms
+done tblastn 60000 n=4 0 n=4: prepare 12 ms, run 205 ms
+done tblastn 60000 n=4 1 n=4: prepare 0 ms, run 204 ms
+done tblastn 60000 n=4 2 n=4: prepare 0 ms, run 203 ms
+done tblastn 60000 n=4 3 n=4: prepare 0 ms, run 202 ms
+{"1":205,"2":204,"4":203} tblastn 60000
+done blastn 200000 n=1 0 n=1: prepare 80 ms, run 38 ms
+done blastn 200000 n=1 1 n=1: prepare 2 ms, run 17 ms
+done blastn 200000 n=1 2 n=1: prepare 1 ms, run 15 ms
+done blastn 200000 n=1 3 n=1: prepare 1 ms, run 15 ms
+done blastn 200000 n=2 0 n=2: prepare 16 ms, run 42 ms
+done blastn 200000 n=2 1 n=2: prepare 2 ms, run 16 ms
+done blastn 200000 n=2 2 n=2: prepare 1 ms, run 15 ms
+done blastn 200000 n=2 3 n=2: prepare 1 ms, run 15 ms
+done blastn 200000 n=4 0 n=4: prepare 10 ms, run 16 ms
+done blastn 200000 n=4 1 n=4: prepare 1 ms, run 15 ms
+done blastn 200000 n=4 2 n=4: prepare 1 ms, run 15 ms
+done blastn 200000 n=4 3 n=4: prepare 1 ms, run 15 ms
+{"1":15,"2":15,"4":15} blastn 200000
+done tblastx 200000 n=1 0 n=1: prepare 81 ms, run 236 ms
+done tblastx 200000 n=1 1 n=1: prepare 1 ms, run 199 ms
+done tblastx 200000 n=1 2 n=1: prepare 1 ms, run 199 ms
+done tblastx 200000 n=1 3 n=1: prepare 1 ms, run 243 ms
+done tblastx 200000 n=2 0 n=2: prepare 20 ms, run 324 ms
+done tblastx 200000 n=2 1 n=2: prepare 1 ms, run 266 ms
+done tblastx 200000 n=2 2 n=2: prepare 1 ms, run 208 ms
+done tblastx 200000 n=2 3 n=2: prepare 1 ms, run 353 ms
+done tblastx 200000 n=4 0 n=4: prepare 12 ms, run 210 ms
+done tblastx 200000 n=4 1 n=4: prepare 2 ms, run 314 ms
+done tblastx 200000 n=4 2 n=4: prepare 1 ms, run 205 ms
+done tblastx 200000 n=4 3 n=4: prepare 1 ms, run 268 ms
+{"1":199,"2":266,"4":268} tblastx 200000
+done blastp 200000 n=1 0 n=1: prepare 91 ms, run 15580 ms
+done blastp 200000 n=1 1 n=1: prepare 2 ms, run 13416 ms
+done blastp 200000 n=1 2 n=1: prepare 2 ms, run 13431 ms
+done blastp 200000 n=1 3 n=1: prepare 2 ms, run 13433 ms
+done blastp 200000 n=2 0 n=2: prepare 17 ms, run 7935 ms
+done blastp 200000 n=2 1 n=2: prepare 2 ms, run 7842 ms
+done blastp 200000 n=2 2 n=2: prepare 2 ms, run 7744 ms
+done blastp 200000 n=2 3 n=2: prepare 2 ms, run 7890 ms
+done blastp 200000 n=4 0 n=4: prepare 10 ms, run 4218 ms
+done blastp 200000 n=4 1 n=4: prepare 2 ms, run 4354 ms
+done blastp 200000 n=4 2 n=4: prepare 2 ms, run 4233 ms
+done blastp 200000 n=4 3 n=4: prepare 2 ms, run 4404 ms
+{"1":13431,"2":7842,"4":4354} blastp 200000
+done tblastn 200000 n=1 0 n=1: prepare 81 ms, run 1232 ms
+done tblastn 200000 n=1 1 n=1: prepare 1 ms, run 1133 ms
+done tblastn 200000 n=1 2 n=1: prepare 1 ms, run 1138 ms
+done tblastn 200000 n=1 3 n=1: prepare 1 ms, run 1144 ms
+done tblastn 200000 n=2 0 n=2: prepare 16 ms, run 1221 ms
+done tblastn 200000 n=2 1 n=2: prepare 1 ms, run 1138 ms
+done tblastn 200000 n=2 2 n=2: prepare 1 ms, run 1151 ms
+done tblastn 200000 n=2 3 n=2: prepare 1 ms, run 1153 ms
+done tblastn 200000 n=4 0 n=4: prepare 12 ms, run 1184 ms
+done tblastn 200000 n=4 1 n=4: prepare 1 ms, run 1163 ms
+done tblastn 200000 n=4 2 n=4: prepare 1 ms, run 1137 ms
+done tblastn 200000 n=4 3 n=4: prepare 1 ms, run 1151 ms
+{"1":1138,"2":1151,"4":1151} tblastn 200000
+done blastn 500000 n=1 0 n=1: prepare 77 ms, run 70 ms
+done blastn 500000 n=1 1 n=1: prepare 3 ms, run 39 ms
+done blastn 500000 n=1 2 n=1: prepare 3 ms, run 37 ms
+done blastn 500000 n=1 3 n=1: prepare 2 ms, run 36 ms
+done blastn 500000 n=2 0 n=2: prepare 18 ms, run 67 ms
+done blastn 500000 n=2 1 n=2: prepare 3 ms, run 38 ms
+done blastn 500000 n=2 2 n=2: prepare 3 ms, run 38 ms
+done blastn 500000 n=2 3 n=2: prepare 2 ms, run 38 ms
+done blastn 500000 n=4 0 n=4: prepare 11 ms, run 38 ms
+done blastn 500000 n=4 1 n=4: prepare 2 ms, run 37 ms
+done blastn 500000 n=4 2 n=4: prepare 2 ms, run 39 ms
+done blastn 500000 n=4 3 n=4: prepare 2 ms, run 37 ms
+{"1":37,"2":38,"4":37} blastn 500000
+done tblastx 500000 n=1 0 n=1: prepare 82 ms, run 1182 ms
+done tblastx 500000 n=1 1 n=1: prepare 2 ms, run 1060 ms
+done tblastx 500000 n=1 2 n=1: prepare 2 ms, run 1094 ms
+done tblastx 500000 n=1 3 n=1: prepare 3 ms, run 1103 ms
+done tblastx 500000 n=2 0 n=2: prepare 18 ms, run 1254 ms
+done tblastx 500000 n=2 1 n=2: prepare 3 ms, run 1103 ms
+done tblastx 500000 n=2 2 n=2: prepare 2 ms, run 1111 ms
+done tblastx 500000 n=2 3 n=2: prepare 2 ms, run 1107 ms
+done tblastx 500000 n=4 0 n=4: prepare 12 ms, run 1066 ms
+done tblastx 500000 n=4 1 n=4: prepare 2 ms, run 1065 ms
+done tblastx 500000 n=4 2 n=4: prepare 2 ms, run 1059 ms
+done tblastx 500000 n=4 3 n=4: prepare 2 ms, run 1059 ms
+{"1":1094,"2":1107,"4":1059} tblastx 500000
+done blastp 500000 n=1 0 n=1: prepare 85 ms, run 39784 ms
+done blastp 500000 n=1 1 n=1: prepare 3 ms, run 39106 ms
+done blastp 500000 n=1 2 n=1: prepare 4 ms, run 39215 ms
+done blastp 500000 n=1 3 n=1: prepare 3 ms, run 38721 ms
+done blastp 500000 n=2 0 n=2: prepare 20 ms, run 22705 ms
+done blastp 500000 n=2 1 n=2: prepare 3 ms, run 22651 ms
+done blastp 500000 n=2 2 n=2: prepare 3 ms, run 22513 ms
+done blastp 500000 n=2 3 n=2: prepare 3 ms, run 22601 ms
+done blastp 500000 n=4 0 n=4: prepare 12 ms, run 12868 ms
+done blastp 500000 n=4 1 n=4: prepare 3 ms, run 12252 ms
+done blastp 500000 n=4 2 n=4: prepare 3 ms, run 12265 ms
+done blastp 500000 n=4 3 n=4: prepare 3 ms, run 12322 ms
+{"1":39106,"2":22601,"4":12265} blastp 500000
+done tblastn 500000 n=1 0 n=1: prepare 79 ms, run 3480 ms
+done tblastn 500000 n=1 1 n=1: prepare 1 ms, run 3365 ms
+done tblastn 500000 n=1 2 n=1: prepare 1 ms, run 3348 ms
+done tblastn 500000 n=1 3 n=1: prepare 1 ms, run 3359 ms
+done tblastn 500000 n=2 0 n=2: prepare 20 ms, run 3585 ms
+done tblastn 500000 n=2 1 n=2: prepare 1 ms, run 3434 ms
+done tblastn 500000 n=2 2 n=2: prepare 2 ms, run 3530 ms
+done tblastn 500000 n=2 3 n=2: prepare 1 ms, run 3671 ms
+done tblastn 500000 n=4 0 n=4: prepare 10 ms, run 3538 ms
+done tblastn 500000 n=4 1 n=4: prepare 1 ms, run 3529 ms
+done tblastn 500000 n=4 2 n=4: prepare 1 ms, run 3519 ms
+done tblastn 500000 n=4 3 n=4: prepare 1 ms, run 3437 ms
+{"1":3359,"2":3530,"4":3519} tblastn 500000
+  ✓  3 [chromium] › tests/e2e/measure.spec.ts:272:1 › auto: the search phase at 1, 2 and 4 threads by input size (8.4m)
+done blastn megablast AP027152/LC738884 first n=1: prepare 82 ms, run 70 ms
+done blastn megablast AP027152/LC738884 warm n=1: prepare 3 ms, run 36 ms
+stopped tblastx LC738884/LC741431 cancelled n=1: prepare 0 ms, run 0 ms
+done blastn megablast AP027152/LC738884 after cancel n=1: prepare 11 ms, run 49 ms
+done blastn megablast AP027152/LC738884 warm again n=1: prepare 3 ms, run 37 ms
+{"next":"blastn megablast AP027152/LC738884","threads":1,"runs":[{"id":"blastn megablast AP027152/LC738884 first","prepareMs":82,"runMs":70,"generation":1,"retained":false},{"id":"blastn megablast AP027152/LC738884 warm","prepareMs":3,"runMs":36,"generation":1,"retained":true},{"id":"tblastx LC738884/LC741431 cancelled","error":"RunCancelledError: run timed-2 was cancelled","prepareMs":null,"runMs":null,"cancelMs":0},{"id":"blastn megablast AP027152/LC738884 after cancel","prepareMs":11,"runMs":49,"generation":2,"retained":false},{"id":"blastn megablast AP027152/LC738884 warm again","prepareMs":3,"runMs":37,"generation":2,"retained":true}]}
+done blastn megablast Sakai/MG1655 first n=1: prepare 161 ms, run 1272 ms
+done blastn megablast Sakai/MG1655 warm n=1: prepare 45 ms, run 1069 ms
+stopped tblastx LC738884/LC741431 cancelled n=1: prepare 0 ms, run 0 ms
+done blastn megablast Sakai/MG1655 after cancel n=1: prepare 93 ms, run 1182 ms
+done blastn megablast Sakai/MG1655 warm again n=1: prepare 45 ms, run 1089 ms
+{"next":"blastn megablast Sakai/MG1655","threads":1,"runs":[{"id":"blastn megablast Sakai/MG1655 first","prepareMs":161,"runMs":1272,"generation":1,"retained":false},{"id":"blastn megablast Sakai/MG1655 warm","prepareMs":45,"runMs":1069,"generation":1,"retained":true},{"id":"tblastx LC738884/LC741431 cancelled","error":"RunCancelledError: run timed-2 was cancelled","prepareMs":null,"runMs":null,"cancelMs":0},{"id":"blastn megablast Sakai/MG1655 after cancel","prepareMs":93,"runMs":1182,"generation":2,"retained":false},{"id":"blastn megablast Sakai/MG1655 warm again","prepareMs":45,"runMs":1089,"generation":2,"retained":true}]}
+done blastn megablast AP027152/LC738884 first n=4: prepare 103 ms, run 66 ms
+done blastn megablast AP027152/LC738884 warm n=4: prepare 3 ms, run 37 ms
+stopped tblastx LC738884/LC741431 cancelled n=4: prepare 0 ms, run 0 ms
+done blastn megablast AP027152/LC738884 after cancel n=4: prepare 27 ms, run 45 ms
+done blastn megablast AP027152/LC738884 warm again n=4: prepare 3 ms, run 41 ms
+{"next":"blastn megablast AP027152/LC738884","threads":4,"runs":[{"id":"blastn megablast AP027152/LC738884 first","prepareMs":103,"runMs":66,"generation":1,"retained":false},{"id":"blastn megablast AP027152/LC738884 warm","prepareMs":3,"runMs":37,"generation":1,"retained":true},{"id":"tblastx LC738884/LC741431 cancelled","error":"RunCancelledError: run timed-2 was cancelled","prepareMs":null,"runMs":null,"cancelMs":0},{"id":"blastn megablast AP027152/LC738884 after cancel","prepareMs":27,"runMs":45,"generation":2,"retained":false},{"id":"blastn megablast AP027152/LC738884 warm again","prepareMs":3,"runMs":41,"generation":2,"retained":true}]}
+done blastn megablast Sakai/MG1655 first n=4: prepare 188 ms, run 1308 ms
+done blastn megablast Sakai/MG1655 warm n=4: prepare 47 ms, run 1148 ms
+stopped tblastx LC738884/LC741431 cancelled n=4: prepare 0 ms, run 0 ms
+done blastn megablast Sakai/MG1655 after cancel n=4: prepare 106 ms, run 1211 ms
+done blastn megablast Sakai/MG1655 warm again n=4: prepare 47 ms, run 1111 ms
+{"next":"blastn megablast Sakai/MG1655","threads":4,"runs":[{"id":"blastn megablast Sakai/MG1655 first","prepareMs":188,"runMs":1308,"generation":1,"retained":false},{"id":"blastn megablast Sakai/MG1655 warm","prepareMs":47,"runMs":1148,"generation":1,"retained":true},{"id":"tblastx LC738884/LC741431 cancelled","error":"RunCancelledError: run timed-2 was cancelled","prepareMs":null,"runMs":null,"cancelMs":0},{"id":"blastn megablast Sakai/MG1655 after cancel","prepareMs":106,"runMs":1211,"generation":2,"retained":false},{"id":"blastn megablast Sakai/MG1655 warm again","prepareMs":47,"runMs":1111,"generation":2,"retained":true}]}
+  ✓  4 [chromium] › tests/e2e/measure.spec.ts:298:1 › cancel: the time to cancel and to prepare the next search in a new runtime (15.2s)
+
+  Slow test file: [chromium] › tests/e2e/measure.spec.ts (11.9m)
+  Consider running tests from slow files in parallel. See: https://playwright.dev/docs/test-parallel
+  4 passed (12.2m)

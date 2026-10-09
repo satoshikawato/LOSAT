@@ -263,6 +263,9 @@ fn parse_blastn_args(
         dust_filtering: None,
         dust: crate::blastinput::value_parsers::DustSpec::Yes,
         lcase_masking: false,
+        // The frozen web ABI v1 (plan TD-1) has no ranges.
+        query_loc: None,
+        subject_loc: None,
         subject_besthit: false,
         verbose: false,
         scan_step: 0,
@@ -362,6 +365,9 @@ fn parse_tblastx_args(
         window_size: 40,
         outfmt: "6".to_string(),
         culling_limit: 0,
+        // The frozen web ABI v1 (plan TD-1) has no ranges.
+        query_loc: None,
+        subject_loc: None,
     };
 
     let mut index = 0;
@@ -508,6 +514,9 @@ fn parse_blastp_args(
         comp_based_stats: "2".to_string(),
         seg: None,
         use_sw_tback: false,
+        // The frozen web ABI v1 (plan TD-1) has no ranges.
+        query_loc: None,
+        subject_loc: None,
         outfmt: "6".to_string(),
     };
 

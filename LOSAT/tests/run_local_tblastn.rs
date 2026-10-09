@@ -13,9 +13,12 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use run_local_support::{assert_observer_ranges, read_records, run_formats, Run};
+use run_local_support::{
+    assert_observer_ranges, read_records, reader_records, run_formats, Run, TempFasta,
+};
 use LOSAT::algorithm::tblastn::TblastnArgs;
 use LOSAT::api::local_blast::{run_local_tblastn, FormatOutput, OutputSink, ReportOutputs};
+use LOSAT::blastinput::fasta_reader::{FastaRecord, ReaderConfig};
 use LOSAT::cli::{try_parse_from, Cli, Commands};
 
 const FORMATS: [&str; 3] = ["0", "6", "7"];
@@ -35,6 +38,21 @@ fn tblastn_args(query: &str, subject: &str, extra: &[&str]) -> TblastnArgs {
     }
 }
 
+/// The queries as the CLI searches them until step S8 of the port plan: the `bio` records,
+/// made NCBI's reader's records with `FastaRecord::from_bio`.
+fn queries(path: &Path) -> Vec<FastaRecord> {
+    read_records(path)
+        .iter()
+        .enumerate()
+        .map(|(index, record)| FastaRecord::from_bio(record, index + 1, "Query_", true))
+        .collect()
+}
+
+/// The subjects as NCBI's nucleotide reader reads them (the CLI's `fasta_reader`).
+fn subjects(path: &Path) -> Vec<FastaRecord> {
+    reader_records(path, ReaderConfig::subject("TBLASTN", false, true))
+}
+
 fn run(
     query: &Path,
     subject: &Path,
@@ -43,8 +61,8 @@ fn run(
     extra: &[&str],
     observe: bool,
 ) -> Run {
-    let queries = read_records(query);
-    let subjects = read_records(subject);
+    let queries = queries(query);
+    let subjects = subjects(subject);
     run_formats(formats, observe, |outputs| {
         run_local_tblastn(
             tblastn_args(names.0, names.1, extra),
@@ -305,8 +323,8 @@ fn observer_ranges_are_exact_rows_and_sections_of_the_same_hsp() {
 #[test]
 fn unsupported_formats_fail_before_searching() {
     let inputs = Inputs::new();
-    let queries = read_records(&inputs.query);
-    let subjects = read_records(&inputs.subject);
+    let queries = queries(&inputs.query);
+    let subjects = subjects(&inputs.subject);
     let (query_name, subject_name) = inputs.names();
     // NCBI blast_args.cpp:2845-2851: a custom specification of outfmt 0 is ignored, so
     // "0 qseqid" is outfmt 0; LOSAT's TBLASTN writes no custom tabular fields or delimiter.
@@ -342,9 +360,9 @@ fn unsupported_formats_fail_before_searching() {
 // 4066 (`NStr::HtmlDecode`): NCBI reads past the end of the title `, ,` (and crashes when
 // such a subject has hits) and decodes `&amp;` in outfmt 0; the tabular formats print
 // only the ids. LOSAT writes the title `, ` stopped at the end of the string (approved
-// exception 2 of PD-LOSAT-NCBI-DEFECTS) and rejects the decoded title.
+// exception 2 of PD-LOSAT-NCBI-DEFECTS) and the decoded title (`report/defline.rs`).
 #[test]
-fn outfmt0_titles_that_ncbi_reads_past_or_decodes() {
+fn outfmt0_titles_are_written_as_ncbi_makes_them() {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("clock")
@@ -365,58 +383,146 @@ fn outfmt0_titles_that_ncbi_reads_past_or_decodes() {
         .skip(1)
         .take_while(|line| !line.starts_with('>'))
         .collect();
-    for (defline, reason) in [(", ,", ""), ("s &amp; t", "HTML character reference")] {
+    let queries = queries(&query);
+    for (defline, heading) in [
+        (", ,", "\n> , \n"),
+        ("s &amp; t", "\n> s & t\n"),
+        ("R&D; x", "\n> R&D; x\n"),
+    ] {
         let subject = dir.join("subject.fna");
         std::fs::write(&subject, format!(">{defline}\n{sequence}\n")).expect("subject");
-        let queries = read_records(&query);
-        let subjects = read_records(&subject);
+        let subjects = subjects(&subject);
         for outfmt in FORMATS {
             let (mut report, mut diagnostics) = (Vec::new(), Vec::new());
             let mut outputs =
                 ReportOutputs::single(outfmt, OutputSink::Writer(&mut report), &mut diagnostics);
-            let result = run_local_tblastn(
+            run_local_tblastn(
                 tblastn_args("q", "s", &[]),
                 &queries,
                 &subjects,
                 &mut outputs,
-            );
+            )
+            .unwrap_or_else(|error| panic!("outfmt {outfmt} {defline:?}: {error}"));
             drop(outputs);
-            if outfmt == "0" && reason.is_empty() {
-                result.unwrap_or_else(|error| panic!("outfmt 0 {defline:?}: {error}"));
+            if outfmt == "0" {
                 let report = String::from_utf8(report).expect("UTF-8 report");
-                assert!(report.contains("\n> , \n"), "{report}");
-            } else if outfmt == "0" {
-                let error = result
-                    .expect_err("outfmt 0 must reject the title")
-                    .to_string();
-                assert!(
-                    error.contains(reason) && error.contains("not supported by LOSAT's TBLASTN"),
-                    "{error}"
-                );
-                assert!(report.is_empty() && diagnostics.is_empty());
-            } else {
-                result.unwrap_or_else(|error| panic!("outfmt {outfmt} {defline:?}: {error}"));
+                assert!(report.contains(heading), "{defline:?}: {report}");
             }
         }
-        // NCBI makes the titles of the subjects that the report shows only: a subject
-        // without hits keeps its title out of the report.
-        let unknown = "N".repeat(900);
-        std::fs::write(
-            &subject,
-            format!(">hit\n{sequence}\n>{defline}\n{unknown}\n"),
-        )
-        .expect("subject");
-        let subjects = read_records(&subject);
-        let (mut report, mut diagnostics) = (Vec::new(), Vec::new());
-        let mut outputs =
-            ReportOutputs::single("0", OutputSink::Writer(&mut report), &mut diagnostics);
-        run_local_tblastn(
-            tblastn_args("q", "s", &[]),
-            &queries,
-            &subjects,
-            &mut outputs,
-        )
-        .unwrap_or_else(|error| panic!("{defline:?} without hits: {error}"));
     }
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// One CLI run: the exit code, standard output and standard error.
+fn cli_run(query: &Path, subject: &Path, extra: &[&str]) -> (Option<i32>, Vec<u8>, String) {
+    let output = Command::new(env!("CARGO_BIN_EXE_LOSAT"))
+        .arg("tblastn")
+        .arg("-query")
+        .arg(query)
+        .arg("-subject")
+        .arg(subject)
+        .args(extra)
+        .output()
+        .expect("run LOSAT CLI");
+    (
+        output.status.code(),
+        output.stdout,
+        String::from_utf8_lossy(&output.stderr).into_owned(),
+    )
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:773-788
+// ```c
+//         catch(CBlastException & e ) {
+//         	// Skip bad subject sequence
+//         	if(e.GetErrCode() == CBlastException::eInvalidArgument) {
+//         		seqblk_vec->push_back(subj);
+//         ...
+//         		warning += "Subject sequence contains no data";
+//         		ERR_POST(Warning << warning);
+// ```
+// NCBI reference: c++/src/algo/blast/core/blast_setup.c:969-979
+// ```c
+//    if (sbp->gbp) {
+//        min_subject_length = BlastSeqSrcGetMinSeqLen(seq_src);
+//        if (Blast_SubjectIsTranslated(program_number)) {
+//            min_subject_length/=3;
+//        }
+//    } else {
+//        min_subject_length = (Int4) (total_length/num_seqs);
+//    }
+//
+//    if(min_subject_length <=0) {
+//	   return BLASTERR_SUBJECT_LENGTH_INVALID;
+// ```
+// A subject without residues gets its warning before the search (after `Query is Empty!`),
+// counts in the database statistics and is never searched; the gapped tblastn raises the
+// shortest subject to 10 letters, so subjects without letters only never stop the search.
+#[test]
+fn subjects_without_residues_are_kept_with_ncbis_warnings() {
+    let query = repository("docs/evidence/tlosan_stage_c/run_20260923/query.faa");
+    let whole = repository("docs/evidence/tlosan_stage_c/run_20260923/subjects.fna");
+    let records = subjects(&whole);
+    assert!(records.len() >= 2, "the fixture has two subjects or more");
+    let mut written: Vec<(String, Vec<u8>)> = Vec::new();
+    for (index, record) in records.iter().enumerate() {
+        written.push((
+            String::from_utf8_lossy(&record.title).into_owned(),
+            record.sequence.clone(),
+        ));
+        if index == 0 {
+            written.push(("s_empty no letters".to_string(), Vec::new()));
+        }
+    }
+    let with_empty = TempFasta::new(
+        "tblastn_empty_subject.fna",
+        &written
+            .iter()
+            .map(|(title, sequence)| (title.as_str(), sequence.as_slice()))
+            .collect::<Vec<_>>(),
+    );
+    let without_empty = TempFasta::new(
+        "tblastn_no_empty_subject.fna",
+        &written
+            .iter()
+            .filter(|(_, sequence)| !sequence.is_empty())
+            .map(|(title, sequence)| (title.as_str(), sequence.as_slice()))
+            .collect::<Vec<_>>(),
+    );
+    let (code, rows, stderr) = cli_run(&query, &with_empty.0, &["-outfmt", "6"]);
+    assert_eq!(code, Some(0), "{stderr}");
+    assert_eq!(
+        stderr,
+        "Warning: [tblastn] Subject_2 s_empty no letters: Subject sequence contains no data\n"
+    );
+    let (_, expected_rows, _) = cli_run(&query, &without_empty.0, &["-outfmt", "6"]);
+    assert!(!rows.is_empty() && rows == expected_rows);
+    let (_, report, _) = cli_run(&query, &with_empty.0, &["-outfmt", "7"]);
+    assert!(String::from_utf8_lossy(&report).contains("hits found"));
+    let (_, report, _) = cli_run(&query, &with_empty.0, &[]);
+    let report = String::from_utf8_lossy(&report).into_owned();
+    assert!(
+        report.contains(&format!(" {} sequences; ", written.len()))
+            && report.contains(&format!(
+                "Number of sequences in database:  {}\n",
+                written.len()
+            )),
+        "{report}"
+    );
+    // Every subject without letters: NCBI warns about each and reports no hits (exit 0).
+    let empty = TempFasta::new("tblastn_all_empty.fna", &[("e1", b""), ("", b"")]);
+    for outfmt in ["0", "6", "7"] {
+        let (code, report, stderr) = cli_run(&query, &empty.0, &["-outfmt", outfmt]);
+        assert_eq!(code, Some(0), "{stderr}");
+        assert_eq!(
+            stderr,
+            "Warning: [tblastn] Subject_1 e1: Subject sequence contains no data\nWarning: [tblastn] Subject_2 : Subject sequence contains no data\n"
+        );
+        let report = String::from_utf8_lossy(&report).into_owned();
+        match outfmt {
+            "0" => assert!(report.contains("***** No hits found *****"), "{report}"),
+            "6" => assert!(report.is_empty(), "{report}"),
+            _ => assert!(report.contains("# 0 hits found"), "{report}"),
+        }
+    }
 }

@@ -1,0 +1,166 @@
+[
+  {
+    "next": "blastn megablast AP027152/LC738884",
+    "threads": 1,
+    "runs": [
+      {
+        "id": "blastn megablast AP027152/LC738884 first",
+        "prepareMs": 101,
+        "runMs": 130,
+        "generation": 1,
+        "retained": false
+      },
+      {
+        "id": "blastn megablast AP027152/LC738884 warm",
+        "prepareMs": 16,
+        "runMs": 118,
+        "generation": 1,
+        "retained": true
+      },
+      {
+        "id": "tblastx LC738884/LC741431 cancelled",
+        "error": "RunCancelledError: run timed-2 was cancelled",
+        "prepareMs": null,
+        "runMs": null,
+        "cancelMs": 0
+      },
+      {
+        "id": "blastn megablast AP027152/LC738884 after cancel",
+        "prepareMs": 42,
+        "runMs": 127,
+        "generation": 2,
+        "retained": false
+      },
+      {
+        "id": "blastn megablast AP027152/LC738884 warm again",
+        "prepareMs": 19,
+        "runMs": 123,
+        "generation": 2,
+        "retained": true
+      }
+    ]
+  },
+  {
+    "next": "blastn megablast Sakai/MG1655",
+    "threads": 1,
+    "runs": [
+      {
+        "id": "blastn megablast Sakai/MG1655 first",
+        "prepareMs": 635,
+        "runMs": 5229,
+        "generation": 1,
+        "retained": false
+      },
+      {
+        "id": "blastn megablast Sakai/MG1655 warm",
+        "prepareMs": 306,
+        "runMs": 5341,
+        "generation": 1,
+        "retained": true
+      },
+      {
+        "id": "tblastx LC738884/LC741431 cancelled",
+        "error": "RunCancelledError: run timed-2 was cancelled",
+        "prepareMs": null,
+        "runMs": null,
+        "cancelMs": 0
+      },
+      {
+        "id": "blastn megablast Sakai/MG1655 after cancel",
+        "prepareMs": 576,
+        "runMs": 5481,
+        "generation": 2,
+        "retained": false
+      },
+      {
+        "id": "blastn megablast Sakai/MG1655 warm again",
+        "prepareMs": 304,
+        "runMs": 4953,
+        "generation": 2,
+        "retained": true
+      }
+    ]
+  },
+  {
+    "next": "blastn megablast AP027152/LC738884",
+    "threads": 4,
+    "runs": [
+      {
+        "id": "blastn megablast AP027152/LC738884 first",
+        "prepareMs": 113,
+        "runMs": 133,
+        "generation": 1,
+        "retained": false
+      },
+      {
+        "id": "blastn megablast AP027152/LC738884 warm",
+        "prepareMs": 17,
+        "runMs": 124,
+        "generation": 1,
+        "retained": true
+      },
+      {
+        "id": "tblastx LC738884/LC741431 cancelled",
+        "error": "RunCancelledError: run timed-2 was cancelled",
+        "prepareMs": null,
+        "runMs": null,
+        "cancelMs": 0
+      },
+      {
+        "id": "blastn megablast AP027152/LC738884 after cancel",
+        "prepareMs": 58,
+        "runMs": 131,
+        "generation": 2,
+        "retained": false
+      },
+      {
+        "id": "blastn megablast AP027152/LC738884 warm again",
+        "prepareMs": 16,
+        "runMs": 155,
+        "generation": 2,
+        "retained": true
+      }
+    ]
+  },
+  {
+    "next": "blastn megablast Sakai/MG1655",
+    "threads": 4,
+    "runs": [
+      {
+        "id": "blastn megablast Sakai/MG1655 first",
+        "prepareMs": 614,
+        "runMs": 5227,
+        "generation": 1,
+        "retained": false
+      },
+      {
+        "id": "blastn megablast Sakai/MG1655 warm",
+        "prepareMs": 317,
+        "runMs": 5232,
+        "generation": 1,
+        "retained": true
+      },
+      {
+        "id": "tblastx LC738884/LC741431 cancelled",
+        "error": "RunCancelledError: run timed-2 was cancelled",
+        "prepareMs": null,
+        "runMs": null,
+        "cancelMs": 0
+      },
+      {
+        "id": "blastn megablast Sakai/MG1655 after cancel",
+        "prepareMs": 606,
+        "runMs": 5560,
+        "generation": 2,
+        "retained": false
+      },
+      {
+        "id": "blastn megablast Sakai/MG1655 warm again",
+        "prepareMs": 362,
+        "runMs": 5457,
+        "generation": 2,
+        "retained": true
+      }
+    ]
+  }
+]

@@ -347,12 +347,26 @@ pub(crate) struct ContextKarlin {
 /// ```
 /// The two strands have the same composition in another order, so their blocks can
 /// differ in the last bits.
+///
+/// NCBI reference: c++/src/algo/blast/core/blast_stat.c:2771-2772
+/// ```c
+///       if ( !contexts[context].is_valid )
+///           continue;
+/// ```
+/// A context without letters (a query without letters) is invalid from its set-up
+/// (`s_QueryInfo_SetContext`): it gets no block and no message here.
 pub(crate) fn context_ungapped_blocks<'a>(
     contexts: impl Iterator<Item = &'a [u8]>,
     spec: &NuclScoringSpec,
 ) -> Vec<Option<KarlinParams>> {
     contexts
-        .map(|context| query_ungapped_karlin(context, spec.reward, spec.penalty))
+        .map(|context| {
+            if context.is_empty() {
+                None
+            } else {
+                query_ungapped_karlin(context, spec.reward, spec.penalty)
+            }
+        })
         .collect()
 }
 

@@ -283,6 +283,36 @@ pub struct BlastpArgs {
     // ```
     #[arg(long)]
     pub use_sw_tback: bool,
+    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:1945-1949
+    // ```c++
+    //     // query location
+    //     arg_desc.AddOptionalKey(kArgQueryLocation, "range",
+    //                             "Location on the query sequence in 1-based offsets "
+    //                             "(Format: start-stop)",
+    //                             CArgDescriptions::eString);
+    // ```
+    // Read by the query options handler (`check_options`).
+    #[arg(
+        long = "query_loc",
+        value_name = "RANGE",
+        help = "Location on the query sequence in 1-based offsets (Format: start-stop)"
+    )]
+    pub query_loc: Option<String>,
+    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2372-2376
+    // ```c++
+    //         // subject location
+    //         arg_desc.AddOptionalKey(kArgSubjectLocation, "range",
+    //                         "Location on the subject sequence in 1-based offsets "
+    //                         "(Format: start-stop)",
+    //                         CArgDescriptions::eString);
+    // ```
+    // Read by the database arguments handler when it reads the subjects (`run`).
+    #[arg(
+        long = "subject_loc",
+        value_name = "RANGE",
+        help = "Location on the subject sequence in 1-based offsets (Format: start-stop)"
+    )]
+    pub subject_loc: Option<String>,
     // NCBI's argument is a string (blast_args.cpp:2657-2660), parsed before the option
     // handlers (`blastinput/app.rs` `parse_formatting_string`).
     #[arg(long, default_value = "0", value_name = "SPEC")]
@@ -439,6 +469,8 @@ pub struct ResolvedBlastpArgs {
     pub seg: BlastpSegSpec,
     pub use_sw_tback: bool,
     pub chaining: bool,
+    /// The `-query_loc` range, as given.
+    pub query_range: Option<crate::blastinput::seq_range::SequenceRange>,
     pub outfmt: String,
 }
 
@@ -600,6 +632,21 @@ impl BlastpArgs {
             Some(window) => window,
             None => suggested_window_size(&options.matrix_name),
         };
+        // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:1995-1999
+        // ```c++
+        //     // set the sequence range
+        //     if (args.Exist(kArgQueryLocation) && args[kArgQueryLocation]) {
+        //         m_Range = ParseSequenceRange(args[kArgQueryLocation].AsString(),
+        //                                      "Invalid specification of query location");
+        //     }
+        // ```
+        // The query options handler comes after the window size handler and before the
+        // formatting handler (blastp_args.cpp:44-120).
+        let query_range = crate::blastinput::seq_range::parse_optional_range(
+            self.query_loc.as_deref(),
+            crate::blastinput::seq_range::RangeRole::Query,
+            "BLASTP",
+        )?;
         // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2874-2886 and
         // 2960-2977 (the formatting handler: other programs' formats, the hit list size
         // and its warning)
@@ -691,6 +738,7 @@ impl BlastpArgs {
             seg: options.seg,
             use_sw_tback: self.use_sw_tback,
             chaining: options.chaining,
+            query_range,
             outfmt: self.outfmt.clone(),
         })
     }

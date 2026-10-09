@@ -89,8 +89,18 @@ where
     let mut input = tokens.into_iter();
     let mut translated = vec![input.next().unwrap_or_else(|| "losat".into())];
     let mut scope = &command;
+    // The first option of the four programs whose value is not UTF-8, rejected once the
+    // command line parses (`non_utf8_value_error`).
+    let mut non_utf8_value: Option<(&clap::Command, String)> = None;
     while let Some(token) = input.next() {
-        let text = token.to_str().unwrap_or("");
+        // In the four programs a word that is not UTF-8 keeps its key readable
+        // (`-name=value` with a value that is not UTF-8 is read below).
+        let lossy = token.to_string_lossy();
+        let text: &str = if is_ncbi_search_program(scope) {
+            &lossy
+        } else {
+            token.to_str().unwrap_or("")
+        };
         if let Some(subcommand) = scope.find_subcommand(text) {
             scope = subcommand;
             translated.push(token);
@@ -139,13 +149,36 @@ where
         };
         if arg.get_action().takes_values() {
             let value = match inline {
-                Some(value) => OsString::from(value),
+                Some(value) if token.to_str().is_some() => OsString::from(value),
+                Some(_) => inline_value(&token, name),
                 None => input.next().ok_or_else(|| {
                     clap::Error::raw(
                         ErrorKind::InvalidValue,
                         format!("-{name} requires one value"),
                     )
                 })?,
+            };
+            // NCBI reference: c++/src/corelib/ncbiargs.cpp:266-270
+            // ```c++
+            // inline CArg_String::CArg_String(const string& name, const string& value)
+            //     : CArgValue(name)
+            // {
+            //     m_StringList.push_back(value);
+            // }
+            // ```
+            // NCBI keeps the bytes of an option's value. LOSAT's options are UTF-8 strings,
+            // so a value that is not UTF-8 is rejected explicitly, after the parser: NCBI's
+            // USAGE errors and `-help` come first, as for any value. The parser reads the
+            // value with U+FFFD in place of the bytes. The file names keep their bytes and
+            // have their own check where the files are opened (`check_utf8_file_name`).
+            let value = if value.to_str().is_none()
+                && !matches!(name, "query" | "subject" | "out")
+                && is_ncbi_search_program(scope)
+            {
+                non_utf8_value.get_or_insert_with(|| (scope, name.to_string()));
+                OsString::from(value.to_string_lossy().into_owned())
+            } else {
+                value
             };
             let mut internal = OsString::from(format!("--{name}="));
             internal.push(value);
@@ -160,7 +193,51 @@ where
             translated.push(format!("--{name}").into());
         }
     }
-    T::try_parse_from(translated)
+    let parsed = T::try_parse_from(translated)?;
+    match non_utf8_value {
+        Some((scope, name)) => Err(non_utf8_value_error(scope, &name)),
+        None => Ok(parsed),
+    }
+}
+
+/// The value of a word `-name=value` that is not UTF-8: its bytes after the `=` that
+/// follows `-name` (`try_parse_from`; `name` is an argument's ASCII name).
+fn inline_value(token: &std::ffi::OsStr, name: &str) -> OsString {
+    let bytes = token.as_encoded_bytes();
+    let start = 1 + name.len() + 1;
+    debug_assert_eq!(bytes.get(start - 1), Some(&b'='));
+    // SAFETY: `start` is just after an ASCII `=`, a split point that
+    // `OsStr::from_encoded_bytes_unchecked` allows (after a valid non-empty UTF-8 substring).
+    unsafe { std::ffi::OsStr::from_encoded_bytes_unchecked(&bytes[start..]) }.to_os_string()
+}
+
+/// Whether `scope` is one of the programs whose command lines follow NCBI's (BLASTX keeps
+/// its own until SX).
+fn is_ncbi_search_program(scope: &clap::Command) -> bool {
+    matches!(
+        scope.get_name(),
+        "blastn" | "blastp" | "tblastn" | "tblastx"
+    )
+}
+
+/// The explicit rejection of an option's value that is not UTF-8 (`try_parse_from`).
+///
+/// NCBI reference: c++/src/corelib/ncbiargs.cpp:266-270
+/// ```c++
+/// inline CArg_String::CArg_String(const string& name, const string& value)
+///     : CArgValue(name)
+/// {
+///     m_StringList.push_back(value);
+/// }
+/// ```
+fn non_utf8_value_error(scope: &clap::Command, name: &str) -> clap::Error {
+    clap::Error::raw(
+        ErrorKind::InvalidUtf8,
+        format!(
+            "the value of -{name} is not UTF-8; NCBI BLAST+ reads the bytes of an option's value, which is not supported by LOSAT's {}",
+            scope.get_name().to_uppercase()
+        ),
+    )
 }
 
 // NCBI reference: c++/src/algo/blast/blastinput/cmdline_flags.cpp:107,143
@@ -244,7 +321,6 @@ fn is_unported_blastn_arg(name: &str) -> bool {
             | "off_diagonal_range"
             | "parse_deflines"
             | "qcov_hsp_perc"
-            | "query_loc"
             | "remote"
             | "searchsp"
             | "seqidlist"
@@ -253,7 +329,6 @@ fn is_unported_blastn_arg(name: &str) -> bool {
             | "sorthits"
             | "sorthsps"
             | "strand"
-            | "subject_loc"
             | "taxidlist"
             | "taxids"
             | "ungapped"
@@ -310,7 +385,6 @@ fn is_unported_blastp_arg(name: &str) -> bool {
             | "num_descriptions"
             | "parse_deflines"
             | "qcov_hsp_perc"
-            | "query_loc"
             | "remote"
             | "searchsp"
             | "seqidlist"
@@ -319,7 +393,6 @@ fn is_unported_blastp_arg(name: &str) -> bool {
             | "sorthits"
             | "sorthsps"
             | "subject_besthit"
-            | "subject_loc"
             | "taxidlist"
             | "taxids"
             | "version"
@@ -519,7 +592,6 @@ fn is_unported_tblastn_arg(name: &str) -> bool {
             | "num_descriptions"
             | "parse_deflines"
             | "qcov_hsp_perc"
-            | "query_loc"
             | "remote"
             | "searchsp"
             | "seqidlist"
@@ -527,7 +599,6 @@ fn is_unported_tblastn_arg(name: &str) -> bool {
             | "sorthits"
             | "sorthsps"
             | "subject_besthit"
-            | "subject_loc"
             | "taxidlist"
             | "taxids"
             | "use_sw_tback"
@@ -577,7 +648,6 @@ fn is_unported_tblastx_arg(name: &str) -> bool {
             | "num_descriptions"
             | "parse_deflines"
             | "qcov_hsp_perc"
-            | "query_loc"
             | "remote"
             | "searchsp"
             | "seqidlist"
@@ -587,7 +657,6 @@ fn is_unported_tblastx_arg(name: &str) -> bool {
             | "sorthsps"
             | "strand"
             | "subject_besthit"
-            | "subject_loc"
             | "sum_stats"
             | "taxidlist"
             | "taxids"
@@ -820,5 +889,90 @@ pub fn exit_on_native_error(error: &anyhow::Error) {
             std::process::abort();
         }
         std::process::exit(e.exit);
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::os::unix::ffi::OsStringExt;
+
+    fn blastn_argv(words: Vec<OsString>) -> Vec<OsString> {
+        let mut argv = vec![
+            OsString::from("losat"),
+            OsString::from("blastn"),
+            OsString::from("-query"),
+            OsString::from("q.fa"),
+            OsString::from("-subject"),
+            OsString::from("s.fa"),
+        ];
+        argv.extend(words);
+        argv
+    }
+
+    // NCBI c++/src/corelib/ncbiargs.cpp:266-270 keeps the bytes of a string value; LOSAT
+    // rejects a value that is not UTF-8 explicitly, in both spellings of an option.
+    #[test]
+    fn option_values_that_are_not_utf8_are_rejected_explicitly() {
+        for (option, value) in [
+            ("-query_loc", vec![0xff]),
+            ("-subject_loc", b"1-\xff".to_vec()),
+            ("-dust", vec![0xfe]),
+        ] {
+            let separate = blastn_argv(vec![
+                OsString::from(option),
+                OsString::from_vec(value.clone()),
+            ]);
+            let mut inline = format!("{option}=").into_bytes();
+            inline.extend(&value);
+            let joined = blastn_argv(vec![OsString::from_vec(inline)]);
+            for argv in [separate, joined] {
+                let error = try_parse_from::<Cli, _, _>(argv).unwrap_err();
+                let message = render_message(&error);
+                assert!(
+                    message.contains(&format!("the value of {option} is not UTF-8"))
+                        && message.contains("not supported by LOSAT's BLASTN"),
+                    "{message}"
+                );
+            }
+        }
+    }
+
+    // The rejection comes after the parser, as NCBI reads the value only after its
+    // arguments parse: `-help` and the parser's errors come first.
+    #[test]
+    fn help_and_parser_errors_come_before_a_value_that_is_not_utf8() {
+        let mut argv = vec![OsString::from("losat"), OsString::from("blastn")];
+        argv.push(OsString::from("-help"));
+        argv.push(OsString::from("-query_loc"));
+        argv.push(OsString::from_vec(vec![0xff]));
+        let error = try_parse_from::<Cli, _, _>(argv).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::DisplayHelp);
+        let argv = blastn_argv(vec![
+            OsString::from("-query_loc"),
+            OsString::from_vec(vec![0xff]),
+            OsString::from("-no_such_option"),
+        ]);
+        let message = render_message(&try_parse_from::<Cli, _, _>(argv).unwrap_err());
+        assert!(!message.contains("not UTF-8"), "{message}");
+    }
+
+    // A file name keeps its bytes in both spellings (`check_utf8_file_name` reads it).
+    #[test]
+    fn file_names_keep_their_bytes_in_both_spellings() {
+        let name = b"q\xff.fa".to_vec();
+        let mut inline = b"-query=".to_vec();
+        inline.extend(&name);
+        let argv = vec![
+            OsString::from("losat"),
+            OsString::from("blastn"),
+            OsString::from_vec(inline),
+            OsString::from("-subject"),
+            OsString::from("s.fa"),
+        ];
+        let Commands::Blastn(args) = try_parse_from::<Cli, _, _>(argv).unwrap().command else {
+            panic!("not blastn");
+        };
+        assert_eq!(args.query.into_os_string(), OsString::from_vec(name));
     }
 }

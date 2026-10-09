@@ -1,3 +1,4 @@
+use crate::blastinput::fasta_reader::InputRecord;
 use rustc_hash::FxHashMap;
 
 /// Type alias for nucleotide k-mer lookup table
@@ -75,9 +76,9 @@ pub fn build_nucl_lookup<S: AsRef<[u8]>>(
     lookup
 }
 
-/// Build a k-mer lookup table from bio::io::fasta::Record sequences
-pub fn build_nucl_lookup_from_records(
-    records: &[bio::io::fasta::Record],
+/// Build a k-mer lookup table from the sequences of FASTA records (`InputRecord`)
+pub fn build_nucl_lookup_from_records<R: InputRecord>(
+    records: &[R],
     word_size: usize,
 ) -> NuclKmerLookup {
     let mut lookup: NuclKmerLookup = FxHashMap::default();
@@ -155,7 +156,7 @@ impl NuclWordFinder {
     }
 
     /// Create a new word finder from FASTA records
-    pub fn from_records(records: &[bio::io::fasta::Record], config: NuclWordFinderConfig) -> Self {
+    pub fn from_records<R: InputRecord>(records: &[R], config: NuclWordFinderConfig) -> Self {
         let mut lookup = build_nucl_lookup_from_records(records, config.word_size);
 
         if let Some(max_hits) = config.max_hits_per_kmer {

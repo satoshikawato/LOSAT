@@ -18,39 +18,14 @@ use super::lookup::{
     build_db_word_counts, build_disc_mb_lookup, build_na_lookup, build_pv_direct_lookup,
     build_two_stage_lookup, NaLookupTable, PvDirectLookup, TwoStageLookup,
 };
+use crate::blastinput::fasta_reader::{FastaRecord, InputRecord};
 use crate::utils::dust::{DustMasker, MaskedInterval};
-use anyhow::{Context, Result};
-use bio::io::fasta;
-use std::path::Path;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum LookupTableKind {
     Small,
     Mb,
     Na,
-}
-
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/blastinput/blast_input_aux.cpp:242-246
-// ```c
-// CRef<CBlastFastaInputSource> fasta(new CBlastFastaInputSource(in, iconfig));
-// CRef<CBlastInput> input(new CBlastInput(fasta));
-// CRef<CScope> scope(new CScope(*CObjectManager::GetInstance()));
-// sequences = input->GetAllSeqs(*scope);
-// ```
-//
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/readers/fasta.cpp:391-396
-// ```c
-// NCBI_THROW2(CObjReaderParseException, eNoDefline,
-//             "CFastaReader: Input doesn't start with"
-//             " a defline or comment around line " + NStr::NumericToString(lineNum),
-//              lineNum);
-// ```
-fn read_fasta_records(path: &Path, role: &str) -> Result<Vec<fasta::Record>> {
-    fasta::Reader::from_file(path)
-        .with_context(|| format!("failed to open {role} FASTA {}", path.display()))?
-        .records()
-        .collect::<std::result::Result<Vec<_>, _>>()
-        .with_context(|| format!("failed to read {role} FASTA {}", path.display()))
 }
 
 /// Task-specific configuration for BLASTN
@@ -115,9 +90,9 @@ pub struct SubjectMetadata {
     pub subject_ids: Vec<String>,
 }
 
-/// Sequence data and metadata
-pub struct SequenceData {
-    pub queries: Vec<fasta::Record>,
+/// Sequence data and metadata (`R`: the query records, `InputRecord`)
+pub struct SequenceData<R = FastaRecord> {
+    pub queries: Vec<R>,
     pub query_ids: Vec<String>,
     pub query_masks: Vec<Vec<MaskedInterval>>,
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1407-1409
@@ -811,35 +786,6 @@ pub fn finalize_task_config(
     config.scan_step = (config.effective_word_size - config.lut_word_length + 1).max(1);
 }
 
-/// Read query and subject sequences
-pub fn read_sequences(
-    args: &BlastnArgs,
-) -> Result<(Vec<fasta::Record>, Vec<String>, Vec<fasta::Record>)> {
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:486-860
-    // ```c
-    // SetupQueries_OMF(...);
-    // SetupSubjects_OMF(...);
-    // ```
-    if args.verbose {
-        eprintln!("Reading query & subject...");
-    }
-    let queries = read_fasta_records(&args.query, "query")?;
-    let query_ids: Vec<String> = queries
-        .iter()
-        .map(|r| {
-            r.id()
-                .split_whitespace()
-                .next()
-                .unwrap_or("unknown")
-                .to_string()
-        })
-        .collect();
-
-    let subjects = read_fasta_records(args.subject_path(), "subject")?;
-
-    Ok((queries, query_ids, subjects))
-}
-
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1407-1413
 // ```c
 // db_length = BlastSeqSrcGetTotLen(seq_src);
@@ -847,18 +793,22 @@ pub fn read_sequences(
 // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
 //        != BLAST_SEQSRC_EOF) {
 // ```
-pub fn subject_metadata_from_records(records: &[fasta::Record]) -> SubjectMetadata {
+pub fn subject_metadata_from_records<R: InputRecord>(records: &[R]) -> SubjectMetadata {
     let mut subject_ids = Vec::with_capacity(records.len());
     let mut db_len_total: usize = 0;
     for record in records {
-        subject_ids.push(
-            record
-                .id()
-                .split_whitespace()
-                .next()
-                .unwrap_or("unknown")
-                .to_string(),
-        );
+        // The title up to its first space: the ID of a `bio` record (whose ID has no white
+        // space), "unknown" when it is empty.
+        let title = record.title_bytes();
+        let end = title
+            .iter()
+            .position(|&byte| byte == b' ')
+            .unwrap_or(title.len());
+        subject_ids.push(if end == 0 {
+            "unknown".to_string()
+        } else {
+            String::from_utf8_lossy(&title[..end]).into_owned()
+        });
         db_len_total += record.seq().len();
     }
     SubjectMetadata {
@@ -866,54 +816,6 @@ pub fn subject_metadata_from_records(records: &[fasta::Record]) -> SubjectMetada
         db_num_seqs: records.len(),
         subject_ids,
     }
-}
-
-// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1407-1427
-// ```c
-// db_length = BlastSeqSrcGetTotLen(seq_src);
-// itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
-// while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-//        != BLAST_SEQSRC_EOF) {
-//     if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0) {
-//         continue;
-//     }
-// }
-// ```
-pub fn scan_subjects_metadata(args: &BlastnArgs) -> Result<SubjectMetadata> {
-    let subject_reader = fasta::Reader::from_file(args.subject_path()).with_context(|| {
-        format!(
-            "failed to open subject FASTA {}",
-            args.subject_path().display()
-        )
-    })?;
-    let mut subject_ids: Vec<String> = Vec::new();
-    let mut db_len_total: usize = 0;
-    let mut db_num_seqs: usize = 0;
-
-    for record_result in subject_reader.records() {
-        let record = record_result.with_context(|| {
-            format!(
-                "failed to read subject FASTA {}",
-                args.subject_path().display()
-            )
-        })?;
-        subject_ids.push(
-            record
-                .id()
-                .split_whitespace()
-                .next()
-                .unwrap_or("unknown")
-                .to_string(),
-        );
-        db_len_total += record.seq().len();
-        db_num_seqs += 1;
-    }
-
-    Ok(SubjectMetadata {
-        db_len_total,
-        db_num_seqs,
-        subject_ids,
-    })
 }
 
 // NCBI reference: ncbi-blast/c++/src/objtools/readers/fasta.cpp:856-874
@@ -967,7 +869,7 @@ pub fn collect_lowercase_masks(seq: &[u8]) -> Vec<MaskedInterval> {
 // const bool use_lcase_masks = args.Exist(kArgUseLCaseMasking) ? ... : kDfltArgUseLCaseMasking;
 // ReadSequencesToBlast(... use_lcase_masks, subjects, ...);
 // ```
-fn collect_lowercase_masks_for_records(records: &[fasta::Record]) -> Vec<Vec<MaskedInterval>> {
+fn collect_lowercase_masks_for_records<R: InputRecord>(records: &[R]) -> Vec<Vec<MaskedInterval>> {
     records
         .iter()
         .map(|record| collect_lowercase_masks(record.seq()))
@@ -1005,9 +907,9 @@ fn merge_mask_intervals(mut intervals: Vec<MaskedInterval>) -> Vec<MaskedInterva
 }
 
 /// Apply DUST filter to query sequences
-pub fn apply_dust_masking(
+pub fn apply_dust_masking<R: InputRecord>(
     args: &BlastnArgs,
-    queries: &[fasta::Record],
+    queries: &[R],
 ) -> Vec<Vec<MaskedInterval>> {
     // NCBI blast_args.cpp:418-420: opt.SetDustFilteringLevel(...);
     // opt.SetDustFilteringWindow(...); opt.SetDustFilteringLinker(...);
@@ -1060,13 +962,13 @@ pub fn apply_dust_masking(
 }
 
 /// Build lookup tables based on configuration
-pub fn build_lookup_tables(
+pub fn build_lookup_tables<R: InputRecord>(
     config: &TaskConfig,
     args: &BlastnArgs,
     queries_blastna: &[Vec<u8>],
     query_masks: &[Vec<MaskedInterval>],
     query_offsets: &[i32],
-    subjects: &[fasta::Record],
+    subjects: &[R],
     subjects_packed: Option<&[Vec<u8>]>,
     approx_table_entries: usize,
 ) -> (LookupTables, usize) {
@@ -1247,7 +1149,7 @@ pub fn build_lookup_tables(
 
 /// The masks of the queries: their DUST masks and, with `-lcase_masking`, their lower-case
 /// letters.
-pub fn query_masks(args: &BlastnArgs, queries: &[fasta::Record]) -> Vec<Vec<MaskedInterval>> {
+pub fn query_masks<R: InputRecord>(args: &BlastnArgs, queries: &[R]) -> Vec<Vec<MaskedInterval>> {
     let mut query_masks = apply_dust_masking(args, queries);
     // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2547-2556
     // ```c
@@ -1300,9 +1202,9 @@ pub fn query_masks(args: &BlastnArgs, queries: &[fasta::Record]) -> Vec<Vec<Mask
 /// ```
 /// The part's own masks are only merged when DUST finds a region; the lookup table and the
 /// search use the masked residues, which merging does not change.
-pub fn chunk_query_masks(
+pub fn chunk_query_masks<R: InputRecord>(
     args: &BlastnArgs,
-    parts: &[fasta::Record],
+    parts: &[R],
     restricted: Vec<Vec<MaskedInterval>>,
 ) -> Vec<Vec<MaskedInterval>> {
     apply_dust_masking(args, parts)
@@ -1316,12 +1218,12 @@ pub fn chunk_query_masks(
 }
 
 /// Prepare all sequence data and configuration
-pub fn prepare_sequence_data(
-    queries: Vec<fasta::Record>,
+pub fn prepare_sequence_data<R>(
+    queries: Vec<R>,
     query_ids: Vec<String>,
     query_masks: Vec<Vec<MaskedInterval>>,
     subject_metadata: SubjectMetadata,
-) -> SequenceData {
+) -> SequenceData<R> {
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1407-1409
     // ```c
     // db_length = BlastSeqSrcGetTotLen(seq_src);

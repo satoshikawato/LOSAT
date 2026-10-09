@@ -1,0 +1,110 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/e2d_p_s3.faa).
+           3 sequences; 2,042 total letters
+
+
+
+Query= BDT63357.1 heat shock protein 70-like protein [Armadillidium vulgare
+clopovirus]
+
+Length=674
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT62128.1 MjHSP70-2-like protein [Litopenaeus vannamei majanivir...  375     7e-130
+BDT62181.1 wsv035-like protein [Litopenaeus vannamei majanivirus ...  16.9    4.3   
+
+
+> BDT62128.1 MjHSP70-2-like protein [Litopenaeus vannamei majanivirus 
+Nimav-1_LVa]
+Length=707
+
+ Score = 375 bits (963),  Expect = 7e-130, Method: Compositional matrix adjust.
+ Identities = 184/301 (61%), Positives = 236/301 (78%), Gaps = 17/301 (6%)
+
+Query  100  FDVTFKGQQKIFCPEEISAMILTKMKTVAETHLGGEQQQQQQTINAVITVPAYFNDAQRR  159
+             ++ +K + K + PEEIS+M+L+KMK  AE +LG       +   AVITVPAYFND+QR+
+Sbjct  109  VNIMYKNEAKSYYPEEISSMVLSKMKETAEAYLG------TKVTRAVITVPAYFNDSQRQ  162
+
+Query  160  ATKDAGAIAGLNVLRIINEPTAAALAYGLGKREKEREVGGGGGEGKEKEKEKNALIFDLG  219
+            ATKDAG IAG  V RIINEPTAAA+AYGL   +KE+  G           EKN L++D G
+Sbjct  163  ATKDAGTIAGFKVERIINEPTAAAIAYGLNFLDKEKVNG-----------EKNILVYDFG  211
+
+Query  220  GGTFDVSILSMEDGIFEVKSTAGDTHLGGEDFDNRLVTHFVEEFKRKFKKDISKNQRSLR  279
+            GGTFDVS+L++++G+FEVK+TAG+THLGGED D+ +V + ++E  RK+KK+I+ N R++R
+Sbjct  212  GGTFDVSVLTVDNGLFEVKATAGNTHLGGEDLDDIMVKYMMDEIMRKYKKNIASNVRAMR  271
+
+Query  280  RLRTSCEQAKRTLSSSAKANIEIDSLFEGIDFYTSITRARFEELCSDLFRSTLEPVEKAL  339
+            RL+T+CEQAK+TLSSS +A I ++SL +G D    ITRARF+ELC+ LF+STLE VEKAL
+Sbjct  272  RLKTACEQAKKTLSSSTQAEITLESLADGTDVTVCITRARFDELCTGLFQSTLELVEKAL  331
+
+Query  340  RDAKFDKSAIHEIVLVGGSTRIPKVQKLLSDFFNGKELNKSINPDEAVAYGAAVQAAILS  399
+             DA+ ++S+I +I+LVGGSTRIPKVQKLLSD+F  KELNKSINPDEAVAYGAAVQAAILS
+Sbjct  332  NDARMERSSIDDIILVGGSTRIPKVQKLLSDYFYQKELNKSINPDEAVAYGAAVQAAILS  391
+
+Query  400  G  400
+            G
+Sbjct  392  G  392
+
+
+ Score = 21.6 bits (44),  Expect = 0.14, Method: Compositional matrix adjust.
+ Identities = 11/26 (42%), Positives = 16/26 (62%), Gaps = 2/26 (8%)
+
+Query  148  TVPAY--FNDAQRRATKDAGAIAGLN  171
+            T P+Y  FND++R   + A   AG+N
+Sbjct  42   TTPSYVAFNDSERLIGEAAKNQAGIN  67
+
+
+> BDT62181.1 wsv035-like protein [Litopenaeus vannamei majanivirus 
+Nimav-1_LVa]
+Length=970
+
+ Score = 16.9 bits (32),  Expect = 4.3, Method: Composition-based stats.
+ Identities = 7/26 (27%), Positives = 15/26 (58%), Gaps = 0/26 (0%)
+
+Query  332  LEPVEKALRDAKFDKSAIHEIVLVGG  357
+            +EP+   L +   +K   HE++++ G
+Sbjct  611  VEPIPNILVNTIPEKPYEHELLVLEG  636
+
+
+
+Lambda      K        H        a         alpha
+   0.316    0.133    0.366    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 501642
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/e2d_p_s3.faa).
+    Posted date:  Unknown
+  Number of letters in database: 2,042
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

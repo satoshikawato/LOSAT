@@ -5,9 +5,21 @@ import { expect, type BrowserContext, type CDPSession, type Page } from '@playwr
 import { fileURLToPath } from 'node:url';
 import { build } from 'vite';
 import { siteHeaders } from '../../../build/headers';
+import { findReactors, losatEngine } from '../../../build/reactors';
 import { SESSION_LOCK_PREFIX, TMP_DIRECTORY } from '../../../src/infra/data/session';
+import { E2E_ORIGIN } from './origin';
 
-export const ORIGIN = 'http://localhost:4173';
+export const ORIGIN = E2E_ORIGIN;
+
+/** Whether the application build has the engine (LOSAT_WEB_REACTORS), or uses the FakeEngine. */
+const REACTORS = findReactors();
+export const BUILD_HAS_ENGINE = REACTORS !== undefined;
+
+/**
+ * Text in the stored outfmt 7 of the BLASTN search of queueSearch: the engine's header, or
+ * the FakeEngine's marker.
+ */
+export const OUTFMT7_MARK = BUILD_HAS_ENGINE ? '# BLASTN 2.17.0+' : 'FAKE ENGINE OUTPUT';
 
 /** Opens a page of the site's origin that does not run the application. */
 export async function openProbe(context: BrowserContext): Promise<Page> {
@@ -99,7 +111,7 @@ export async function openApp(context: BrowserContext): Promise<Page> {
   return page;
 }
 
-/** Pastes a query and a subject and queues a BLASTN search with the fake engine. */
+/** Pastes a query and a subject and queues a BLASTN search. */
 export async function queueSearch(page: Page): Promise<void> {
   await page.getByTestId('tab-search').click();
   await page.getByTestId('query-input').fill('>q1\nACGTACGTACGT\n');
@@ -117,8 +129,8 @@ export async function runSearch(page: Page, number: number): Promise<void> {
 export async function expectResult(page: Page, number: number): Promise<void> {
   await page.getByTestId('tab-results').click();
   await page.getByTestId('result-run').selectOption({ label: `Run ${number} · BLASTN` });
-  await page.getByTestId('format-6').click();
-  await expect(page.getByTestId('result-output')).toContainText('FAKE ENGINE OUTPUT');
+  await page.getByTestId('format-7').click();
+  await expect(page.getByTestId('result-output')).toContainText(OUTFMT7_MARK);
 }
 
 export type HarnessFiles = ReadonlyMap<string, { readonly body: string | Uint8Array; readonly type: string }>;
@@ -127,9 +139,14 @@ const TYPES: Readonly<Record<string, string>> = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
   '.map': 'application/json',
+  '.wasm': 'application/wasm',
 };
 
-/** Builds tests/e2e/harness in memory with Vite; the application build is not touched. */
+/**
+ * Builds tests/e2e/harness in memory with Vite; the application build is not touched. The
+ * harness build has the engine modules of LOSAT_WEB_REACTORS, as the application build does,
+ * and the test hooks of the Engine worker (`__LOSAT_TEST_HOOKS__`).
+ */
 export async function buildHarness(): Promise<HarnessFiles> {
   const result = await build({
     root: fileURLToPath(new URL('../harness/', import.meta.url)),
@@ -137,7 +154,9 @@ export async function buildHarness(): Promise<HarnessFiles> {
     configFile: false,
     publicDir: false,
     logLevel: 'warn',
-    worker: { format: 'es' },
+    plugins: [losatEngine({ reactors: REACTORS })],
+    define: { __LOSAT_TEST_HOOKS__: 'true' },
+    worker: { format: 'es', plugins: () => [losatEngine({ reactors: REACTORS, emit: false })] },
     build: { write: false, target: 'es2022', minify: false, modulePreload: false },
   });
   const files = new Map<string, { body: string | Uint8Array; type: string }>();

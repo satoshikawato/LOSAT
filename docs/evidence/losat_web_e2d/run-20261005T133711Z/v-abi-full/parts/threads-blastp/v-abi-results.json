@@ -1,0 +1,3839 @@
+[
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "blastp",
+    "cases": [
+      "pairwise_default_serial",
+      "pairwise_default_serial.fmt0",
+      "pairwise_default_serial.fmt7",
+      "pairwise_default_thread4",
+      "pairwise_default_thread4.fmt0",
+      "pairwise_default_thread4.fmt7"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/SicyWSV.faa",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/PajaWSV.faa",
+      "-max_hsps",
+      "1"
+    ],
+    "formats": {
+      "0": "e9e1f3f1b7f9dfc03635580b9012eb4a438836bf0cc635428b1f2b28176d874c",
+      "6": "fd4b010800e32ce6c823cb38b42a10b7845f3342edae892acccc8f554f9edf34",
+      "7": "6ba45dd4d62e92b527ecb265eeeb629ef7c01ba09097aa1f50e49ce3f5026405"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 475
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "blastp",
+    "cases": [
+      "pairwise_default_serial",
+      "pairwise_default_serial.fmt0",
+      "pairwise_default_serial.fmt7",
+      "pairwise_default_thread4",
+      "pairwise_default_thread4.fmt0",
+      "pairwise_default_thread4.fmt7"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/SicyWSV.faa",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/PajaWSV.faa",
+      "-max_hsps",
+      "1"
+    ],
+    "formats": {
+      "0": "e9e1f3f1b7f9dfc03635580b9012eb4a438836bf0cc635428b1f2b28176d874c",
+      "6": "fd4b010800e32ce6c823cb38b42a10b7845f3342edae892acccc8f554f9edf34",
+      "7": "6ba45dd4d62e92b527ecb265eeeb629ef7c01ba09097aa1f50e49ce3f5026405"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 475
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "blastp",
+    "cases": [
+      "pairwise_default_serial",
+      "pairwise_default_serial.fmt0",
+      "pairwise_default_serial.fmt7",
+      "pairwise_default_thread4",
+      "pairwise_default_thread4.fmt0",
+      "pairwise_default_thread4.fmt7"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/SicyWSV.faa",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/PajaWSV.faa",
+      "-max_hsps",
+      "1"
+    ],
+    "formats": {
+      "0": "e9e1f3f1b7f9dfc03635580b9012eb4a438836bf0cc635428b1f2b28176d874c",
+      "6": "fd4b010800e32ce6c823cb38b42a10b7845f3342edae892acccc8f554f9edf34",
+      "7": "6ba45dd4d62e92b527ecb265eeeb629ef7c01ba09097aa1f50e49ce3f5026405"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 475
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "blastp",
+    "cases": [
+      "pairwise_limit1_serial",
+      "pairwise_limit1_serial.fmt0",
+      "pairwise_limit1_serial.fmt7"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/SicyWSV.faa",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/PajaWSV.faa",
+      "-max_hsps",
+      "1",
+      "-max_target_seqs",
+      "1"
+    ],
+    "formats": {
+      "0": "121ae6f1b4986a135d9a601b62980991b9e303085e042b1b4d7e39125ea6a6ff",
+      "6": "2825ce099d7858d7d23a811bff98f4c42fee96c9519003ee936f25855648d3af",
+      "7": "b4bb8b0373e7cc38860854e54cf1a3773aca309fb93537ad0642348ec6e6661a"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "ed6f888ae1ef1cf4f7cc1b594f7d64d8e904b079f43032ae6b4d616ca3a77825",
+    "hits": 89
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "blastp",
+    "cases": [
+      "pairwise_limit1_serial",
+      "pairwise_limit1_serial.fmt0",
+      "pairwise_limit1_serial.fmt7"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/SicyWSV.faa",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/PajaWSV.faa",
+      "-max_hsps",
+      "1",
+      "-max_target_seqs",
+      "1"
+    ],
+    "formats": {
+      "0": "121ae6f1b4986a135d9a601b62980991b9e303085e042b1b4d7e39125ea6a6ff",
+      "6": "2825ce099d7858d7d23a811bff98f4c42fee96c9519003ee936f25855648d3af",
+      "7": "b4bb8b0373e7cc38860854e54cf1a3773aca309fb93537ad0642348ec6e6661a"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "ed6f888ae1ef1cf4f7cc1b594f7d64d8e904b079f43032ae6b4d616ca3a77825",
+    "hits": 89
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "blastp",
+    "cases": [
+      "pairwise_limit1_serial",
+      "pairwise_limit1_serial.fmt0",
+      "pairwise_limit1_serial.fmt7"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/SicyWSV.faa",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/PajaWSV.faa",
+      "-max_hsps",
+      "1",
+      "-max_target_seqs",
+      "1"
+    ],
+    "formats": {
+      "0": "121ae6f1b4986a135d9a601b62980991b9e303085e042b1b4d7e39125ea6a6ff",
+      "6": "2825ce099d7858d7d23a811bff98f4c42fee96c9519003ee936f25855648d3af",
+      "7": "b4bb8b0373e7cc38860854e54cf1a3773aca309fb93537ad0642348ec6e6661a"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "ed6f888ae1ef1cf4f7cc1b594f7d64d8e904b079f43032ae6b4d616ca3a77825",
+    "hits": 89
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "blastp",
+    "cases": [
+      "pairwise_limit5_serial",
+      "pairwise_limit5_serial.fmt0",
+      "pairwise_limit5_serial.fmt7"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/SicyWSV.faa",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/PajaWSV.faa",
+      "-max_hsps",
+      "1",
+      "-max_target_seqs",
+      "5"
+    ],
+    "formats": {
+      "0": "3ccf2fe91b8d939b37cb883c60f0bbdbff76defcfec8091d4c202bbb702fa2e9",
+      "6": "cd02727a3d7bd2548e1db2759a96b6be72ab0709e7bb0e2179312c01d42419c7",
+      "7": "b68c17d470b2d3db945b73b90fb0e858a149b78b8152b8476a0d79d5dd9747df"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 373
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "blastp",
+    "cases": [
+      "pairwise_limit5_serial",
+      "pairwise_limit5_serial.fmt0",
+      "pairwise_limit5_serial.fmt7"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/SicyWSV.faa",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/PajaWSV.faa",
+      "-max_hsps",
+      "1",
+      "-max_target_seqs",
+      "5"
+    ],
+    "formats": {
+      "0": "3ccf2fe91b8d939b37cb883c60f0bbdbff76defcfec8091d4c202bbb702fa2e9",
+      "6": "cd02727a3d7bd2548e1db2759a96b6be72ab0709e7bb0e2179312c01d42419c7",
+      "7": "b68c17d470b2d3db945b73b90fb0e858a149b78b8152b8476a0d79d5dd9747df"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 373
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "blastp",
+    "cases": [
+      "pairwise_limit5_serial",
+      "pairwise_limit5_serial.fmt0",
+      "pairwise_limit5_serial.fmt7"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/SicyWSV.faa",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/PajaWSV.faa",
+      "-max_hsps",
+      "1",
+      "-max_target_seqs",
+      "5"
+    ],
+    "formats": {
+      "0": "3ccf2fe91b8d939b37cb883c60f0bbdbff76defcfec8091d4c202bbb702fa2e9",
+      "6": "cd02727a3d7bd2548e1db2759a96b6be72ab0709e7bb0e2179312c01d42419c7",
+      "7": "b68c17d470b2d3db945b73b90fb0e858a149b78b8152b8476a0d79d5dd9747df"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 373
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "blastp",
+    "cases": [
+      "pairwise_nohit_serial",
+      "pairwise_nohit_serial.fmt0",
+      "pairwise_nohit_serial.fmt7"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/SicyWSV.faa",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/AP027078.faa",
+      "-max_hsps",
+      "1"
+    ],
+    "formats": {
+      "0": "a1944ad6caf6e752725ff604f23f0677a97b6dafb1da906cd1f562c6244c704b",
+      "6": "8c39d7c6c27963e78c01fac416bd86542b64501301919bd74df280e31aa6f4b8",
+      "7": "5f8967fd07f087e9bb1fa23aed206953d5a3c83912cd9bd876770cdc2c6f7663"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 334
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "blastp",
+    "cases": [
+      "pairwise_nohit_serial",
+      "pairwise_nohit_serial.fmt0",
+      "pairwise_nohit_serial.fmt7"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/SicyWSV.faa",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/AP027078.faa",
+      "-max_hsps",
+      "1"
+    ],
+    "formats": {
+      "0": "a1944ad6caf6e752725ff604f23f0677a97b6dafb1da906cd1f562c6244c704b",
+      "6": "8c39d7c6c27963e78c01fac416bd86542b64501301919bd74df280e31aa6f4b8",
+      "7": "5f8967fd07f087e9bb1fa23aed206953d5a3c83912cd9bd876770cdc2c6f7663"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 334
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "blastp",
+    "cases": [
+      "pairwise_nohit_serial",
+      "pairwise_nohit_serial.fmt0",
+      "pairwise_nohit_serial.fmt7"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/SicyWSV.faa",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/AP027078.faa",
+      "-max_hsps",
+      "1"
+    ],
+    "formats": {
+      "0": "a1944ad6caf6e752725ff604f23f0677a97b6dafb1da906cd1f562c6244c704b",
+      "6": "8c39d7c6c27963e78c01fac416bd86542b64501301919bd74df280e31aa6f4b8",
+      "7": "5f8967fd07f087e9bb1fa23aed206953d5a3c83912cd9bd876770cdc2c6f7663"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 334
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "blastp",
+    "cases": [
+      "all_hsp_forward_serial",
+      "all_hsp_forward_serial.fmt0",
+      "all_hsp_forward_serial.fmt7",
+      "all_hsp_forward_thread4",
+      "all_hsp_forward_thread4.fmt0",
+      "all_hsp_forward_thread4.fmt7"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/SicyWSV.faa",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/PajaWSV.faa"
+    ],
+    "formats": {
+      "0": "e355b00b7ad82fdaf7c68ff679746f80b51ca336e43d3b8589f7308077883f38",
+      "6": "a6d38a3200c9570726550a12858101d1eaa414dca236f925da5651e95d819b5d",
+      "7": "206bc59f52df0b6b39491c02f781097d3828de9e5250019b386d51d0803e9363"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 530
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "blastp",
+    "cases": [
+      "all_hsp_forward_serial",
+      "all_hsp_forward_serial.fmt0",
+      "all_hsp_forward_serial.fmt7",
+      "all_hsp_forward_thread4",
+      "all_hsp_forward_thread4.fmt0",
+      "all_hsp_forward_thread4.fmt7"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/SicyWSV.faa",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/PajaWSV.faa"
+    ],
+    "formats": {
+      "0": "e355b00b7ad82fdaf7c68ff679746f80b51ca336e43d3b8589f7308077883f38",
+      "6": "a6d38a3200c9570726550a12858101d1eaa414dca236f925da5651e95d819b5d",
+      "7": "206bc59f52df0b6b39491c02f781097d3828de9e5250019b386d51d0803e9363"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 530
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "blastp",
+    "cases": [
+      "all_hsp_forward_serial",
+      "all_hsp_forward_serial.fmt0",
+      "all_hsp_forward_serial.fmt7",
+      "all_hsp_forward_thread4",
+      "all_hsp_forward_thread4.fmt0",
+      "all_hsp_forward_thread4.fmt7"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/SicyWSV.faa",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/PajaWSV.faa"
+    ],
+    "formats": {
+      "0": "e355b00b7ad82fdaf7c68ff679746f80b51ca336e43d3b8589f7308077883f38",
+      "6": "a6d38a3200c9570726550a12858101d1eaa414dca236f925da5651e95d819b5d",
+      "7": "206bc59f52df0b6b39491c02f781097d3828de9e5250019b386d51d0803e9363"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 530
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "blastp",
+    "cases": [
+      "all_hsp_reverse_limit5_serial",
+      "all_hsp_reverse_limit5_serial.fmt0",
+      "all_hsp_reverse_limit5_serial.fmt7"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/PajaWSV.faa",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/SicyWSV.faa",
+      "-max_target_seqs",
+      "5"
+    ],
+    "formats": {
+      "0": "90e5f42b4918a94410b0d5111949904468d3c25053d96b74d1ef1cbf9698d30b",
+      "6": "2db7a6604c7d44731e69f75546340b127037e63fe56ad9370e7d64849ad7162d",
+      "7": "2fd0fa943af500aa953ae13c20be38140ac80312cde2c8291ed2e86fa1b49c97"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 445
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "blastp",
+    "cases": [
+      "all_hsp_reverse_limit5_serial",
+      "all_hsp_reverse_limit5_serial.fmt0",
+      "all_hsp_reverse_limit5_serial.fmt7"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/PajaWSV.faa",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/SicyWSV.faa",
+      "-max_target_seqs",
+      "5"
+    ],
+    "formats": {
+      "0": "90e5f42b4918a94410b0d5111949904468d3c25053d96b74d1ef1cbf9698d30b",
+      "6": "2db7a6604c7d44731e69f75546340b127037e63fe56ad9370e7d64849ad7162d",
+      "7": "2fd0fa943af500aa953ae13c20be38140ac80312cde2c8291ed2e86fa1b49c97"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 445
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "blastp",
+    "cases": [
+      "all_hsp_reverse_limit5_serial",
+      "all_hsp_reverse_limit5_serial.fmt0",
+      "all_hsp_reverse_limit5_serial.fmt7"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/PajaWSV.faa",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/SicyWSV.faa",
+      "-max_target_seqs",
+      "5"
+    ],
+    "formats": {
+      "0": "90e5f42b4918a94410b0d5111949904468d3c25053d96b74d1ef1cbf9698d30b",
+      "6": "2db7a6604c7d44731e69f75546340b127037e63fe56ad9370e7d64849ad7162d",
+      "7": "2fd0fa943af500aa953ae13c20be38140ac80312cde2c8291ed2e86fa1b49c97"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 445
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "blastp",
+    "cases": [
+      "all_hsp_self_serial",
+      "all_hsp_self_serial.fmt0",
+      "all_hsp_self_serial.fmt7"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/SicyWSV.faa",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/SicyWSV.faa"
+    ],
+    "formats": {
+      "0": "3eecf7dec94e98cf59ee66c4dd6318c19b7396c9174dc11b98f5d09b40484cd1",
+      "6": "67911f4a93327e9622afe10d15a66d9e52ae8e1c3d905db9ca5fb018d6612e46",
+      "7": "4db4b2ac42acf6f785ef97f3cc004f8a59efc31f4063c9ecd69f3ebb7c5d806c"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 568
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "blastp",
+    "cases": [
+      "all_hsp_self_serial",
+      "all_hsp_self_serial.fmt0",
+      "all_hsp_self_serial.fmt7"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/SicyWSV.faa",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/SicyWSV.faa"
+    ],
+    "formats": {
+      "0": "3eecf7dec94e98cf59ee66c4dd6318c19b7396c9174dc11b98f5d09b40484cd1",
+      "6": "67911f4a93327e9622afe10d15a66d9e52ae8e1c3d905db9ca5fb018d6612e46",
+      "7": "4db4b2ac42acf6f785ef97f3cc004f8a59efc31f4063c9ecd69f3ebb7c5d806c"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 568
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "blastp",
+    "cases": [
+      "all_hsp_self_serial",
+      "all_hsp_self_serial.fmt0",
+      "all_hsp_self_serial.fmt7"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/SicyWSV.faa",
+      "-subject",
+      "/tmp/losat-pr5-runtime-cert-5845d22/LOSAT/tests/fasta/SicyWSV.faa"
+    ],
+    "formats": {
+      "0": "3eecf7dec94e98cf59ee66c4dd6318c19b7396c9174dc11b98f5d09b40484cd1",
+      "6": "67911f4a93327e9622afe10d15a66d9e52ae8e1c3d905db9ca5fb018d6612e46",
+      "7": "4db4b2ac42acf6f785ef97f3cc004f8a59efc31f4063c9ecd69f3ebb7c5d806c"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 568
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "blastp",
+    "cases": [
+      "width.blastp"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/pwidth_q.faa",
+      "-subject",
+      "tests/fasta/outfmt0/pwidth_s.faa"
+    ],
+    "formats": {
+      "0": "2f540da2e4394efa8938825e18298dad06358eccba2367a3fec3bdffc92b2f52",
+      "6": "06ae846ee38604ef7214f4a5f9806256c30e6a1cfad5125bccc668a95c2256ad",
+      "7": "dac2c39bdc7ddefe36088a649a29cd77fdb542b3955f74696f7d6350dd2ab0bb"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 1
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "blastp",
+    "cases": [
+      "width.blastp"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/pwidth_q.faa",
+      "-subject",
+      "tests/fasta/outfmt0/pwidth_s.faa"
+    ],
+    "formats": {
+      "0": "2f540da2e4394efa8938825e18298dad06358eccba2367a3fec3bdffc92b2f52",
+      "6": "06ae846ee38604ef7214f4a5f9806256c30e6a1cfad5125bccc668a95c2256ad",
+      "7": "dac2c39bdc7ddefe36088a649a29cd77fdb542b3955f74696f7d6350dd2ab0bb"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 1
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "blastp",
+    "cases": [
+      "width.blastp"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/pwidth_q.faa",
+      "-subject",
+      "tests/fasta/outfmt0/pwidth_s.faa"
+    ],
+    "formats": {
+      "0": "2f540da2e4394efa8938825e18298dad06358eccba2367a3fec3bdffc92b2f52",
+      "6": "06ae846ee38604ef7214f4a5f9806256c30e6a1cfad5125bccc668a95c2256ad",
+      "7": "dac2c39bdc7ddefe36088a649a29cd77fdb542b3955f74696f7d6350dd2ab0bb"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 1
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "blastp",
+    "cases": [
+      "seg.blastp.6"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/blastp_seg_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/blastp_seg_subject.faa",
+      "-seg",
+      "yes"
+    ],
+    "formats": {
+      "0": "e6b342bc5221dcda67fbd0e4a029689c064b3d4980c69b06d3a5a230442544cc",
+      "6": "61c0c1f8ee7ed77bc2f8997415a839280f7a14f3786045f9b3eb99a1aa9db6c5",
+      "7": "667bbd744663b109c6e1c44a1d76edf70c506cf8010035f79e3294ab2e344f25"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 1
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "blastp",
+    "cases": [
+      "seg.blastp.6"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/blastp_seg_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/blastp_seg_subject.faa",
+      "-seg",
+      "yes"
+    ],
+    "formats": {
+      "0": "e6b342bc5221dcda67fbd0e4a029689c064b3d4980c69b06d3a5a230442544cc",
+      "6": "61c0c1f8ee7ed77bc2f8997415a839280f7a14f3786045f9b3eb99a1aa9db6c5",
+      "7": "667bbd744663b109c6e1c44a1d76edf70c506cf8010035f79e3294ab2e344f25"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 1
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "blastp",
+    "cases": [
+      "seg.blastp.6"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/blastp_seg_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/blastp_seg_subject.faa",
+      "-seg",
+      "yes"
+    ],
+    "formats": {
+      "0": "e6b342bc5221dcda67fbd0e4a029689c064b3d4980c69b06d3a5a230442544cc",
+      "6": "61c0c1f8ee7ed77bc2f8997415a839280f7a14f3786045f9b3eb99a1aa9db6c5",
+      "7": "667bbd744663b109c6e1c44a1d76edf70c506cf8010035f79e3294ab2e344f25"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 1
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "blastp",
+    "cases": [
+      "method.blastp"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa"
+    ],
+    "formats": {
+      "0": "8490f138d942322c85f15c56de85415e2db297182f2fe55112fa0f6ecb2a18c4",
+      "6": "4b0c9baa378e568a5d362fa7084424c07c8cb6cc126ca281bf5162795854a2a9",
+      "7": "2e7f6ca9be97b89dbf8fb70e404ce64a1d34db9bf24ac0f045994cf3bd35e475"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 46
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "blastp",
+    "cases": [
+      "method.blastp"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa"
+    ],
+    "formats": {
+      "0": "8490f138d942322c85f15c56de85415e2db297182f2fe55112fa0f6ecb2a18c4",
+      "6": "4b0c9baa378e568a5d362fa7084424c07c8cb6cc126ca281bf5162795854a2a9",
+      "7": "2e7f6ca9be97b89dbf8fb70e404ce64a1d34db9bf24ac0f045994cf3bd35e475"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 46
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "blastp",
+    "cases": [
+      "method.blastp"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa"
+    ],
+    "formats": {
+      "0": "8490f138d942322c85f15c56de85415e2db297182f2fe55112fa0f6ecb2a18c4",
+      "6": "4b0c9baa378e568a5d362fa7084424c07c8cb6cc126ca281bf5162795854a2a9",
+      "7": "2e7f6ca9be97b89dbf8fb70e404ce64a1d34db9bf24ac0f045994cf3bd35e475"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 46
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.seg_lcase"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-seg",
+      "yes"
+    ],
+    "formats": {
+      "0": "7359a923e6093f8e2b79b3dcfcfaa07dc4d4b898da0d639eb3b00c7d212acb0e",
+      "6": "eaac2b38b1d1d2a77aba98acfda3eafef68d59428ac086d2cf6b24aee15156e2",
+      "7": "729a149a113dceaa7d46198c84870685854e5011788dca0e15097bcea6240e45"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 34
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.seg_lcase"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-seg",
+      "yes"
+    ],
+    "formats": {
+      "0": "7359a923e6093f8e2b79b3dcfcfaa07dc4d4b898da0d639eb3b00c7d212acb0e",
+      "6": "eaac2b38b1d1d2a77aba98acfda3eafef68d59428ac086d2cf6b24aee15156e2",
+      "7": "729a149a113dceaa7d46198c84870685854e5011788dca0e15097bcea6240e45"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 34
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.seg_lcase"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-seg",
+      "yes"
+    ],
+    "formats": {
+      "0": "7359a923e6093f8e2b79b3dcfcfaa07dc4d4b898da0d639eb3b00c7d212acb0e",
+      "6": "eaac2b38b1d1d2a77aba98acfda3eafef68d59428ac086d2cf6b24aee15156e2",
+      "7": "729a149a113dceaa7d46198c84870685854e5011788dca0e15097bcea6240e45"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 34
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.seg_window"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-seg",
+      "10 1.8 2.1"
+    ],
+    "formats": {
+      "0": "9ea0a25075234e7d3133d74aef342c217971e92a155464b56e546d4ec20e30f9",
+      "6": "0d0576ff3800749a6a449c042954b548d20c2272d10d1a2f2d39fc6b6b7d2378",
+      "7": "222187020d7dd340c5209806ad14726fd2477b2d398b731cbdb5cbe15ecd61d6"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 36
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.seg_window"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-seg",
+      "10 1.8 2.1"
+    ],
+    "formats": {
+      "0": "9ea0a25075234e7d3133d74aef342c217971e92a155464b56e546d4ec20e30f9",
+      "6": "0d0576ff3800749a6a449c042954b548d20c2272d10d1a2f2d39fc6b6b7d2378",
+      "7": "222187020d7dd340c5209806ad14726fd2477b2d398b731cbdb5cbe15ecd61d6"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 36
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.seg_window"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-seg",
+      "10 1.8 2.1"
+    ],
+    "formats": {
+      "0": "9ea0a25075234e7d3133d74aef342c217971e92a155464b56e546d4ec20e30f9",
+      "6": "0d0576ff3800749a6a449c042954b548d20c2272d10d1a2f2d39fc6b6b7d2378",
+      "7": "222187020d7dd340c5209806ad14726fd2477b2d398b731cbdb5cbe15ecd61d6"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 36
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.matrix_case"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-matrix",
+      "blosum62"
+    ],
+    "formats": {
+      "0": "a4a033bdaca09ae14d3c2cb6ad439a1ca27e46fc88da57456849c61c264ad0d3",
+      "6": "4b0c9baa378e568a5d362fa7084424c07c8cb6cc126ca281bf5162795854a2a9",
+      "7": "2e7f6ca9be97b89dbf8fb70e404ce64a1d34db9bf24ac0f045994cf3bd35e475"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 46
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.matrix_case"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-matrix",
+      "blosum62"
+    ],
+    "formats": {
+      "0": "a4a033bdaca09ae14d3c2cb6ad439a1ca27e46fc88da57456849c61c264ad0d3",
+      "6": "4b0c9baa378e568a5d362fa7084424c07c8cb6cc126ca281bf5162795854a2a9",
+      "7": "2e7f6ca9be97b89dbf8fb70e404ce64a1d34db9bf24ac0f045994cf3bd35e475"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 46
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.matrix_case"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-matrix",
+      "blosum62"
+    ],
+    "formats": {
+      "0": "a4a033bdaca09ae14d3c2cb6ad439a1ca27e46fc88da57456849c61c264ad0d3",
+      "6": "4b0c9baa378e568a5d362fa7084424c07c8cb6cc126ca281bf5162795854a2a9",
+      "7": "2e7f6ca9be97b89dbf8fb70e404ce64a1d34db9bf24ac0f045994cf3bd35e475"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 46
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.threshold_real"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-threshold",
+      "11.5"
+    ],
+    "formats": {
+      "0": "8f8f6e33c5f19074e93d69ed241a02403c7dd77f692bc74c166c904e23c63602",
+      "6": "4b0c9baa378e568a5d362fa7084424c07c8cb6cc126ca281bf5162795854a2a9",
+      "7": "2e7f6ca9be97b89dbf8fb70e404ce64a1d34db9bf24ac0f045994cf3bd35e475"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 46
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.threshold_real"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-threshold",
+      "11.5"
+    ],
+    "formats": {
+      "0": "8f8f6e33c5f19074e93d69ed241a02403c7dd77f692bc74c166c904e23c63602",
+      "6": "4b0c9baa378e568a5d362fa7084424c07c8cb6cc126ca281bf5162795854a2a9",
+      "7": "2e7f6ca9be97b89dbf8fb70e404ce64a1d34db9bf24ac0f045994cf3bd35e475"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 46
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.threshold_real"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-threshold",
+      "11.5"
+    ],
+    "formats": {
+      "0": "8f8f6e33c5f19074e93d69ed241a02403c7dd77f692bc74c166c904e23c63602",
+      "6": "4b0c9baa378e568a5d362fa7084424c07c8cb6cc126ca281bf5162795854a2a9",
+      "7": "2e7f6ca9be97b89dbf8fb70e404ce64a1d34db9bf24ac0f045994cf3bd35e475"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 46
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.threshold_inf"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_many_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-threshold",
+      "+inf"
+    ],
+    "formats": {
+      "0": "49400c8ecaac4605c30225eb8244e12b4315398dd5ff348546ad9e44ac87fe1b",
+      "6": "949682fa2a9896252b9d5b9afb66585f48592c177b176895ff8634c690343b21",
+      "7": "d1eb863f3aca6323f14cb1cbc16991b6da5677c1a97914ba8dc4971d59aaf6b4"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 18
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.threshold_inf"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_many_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-threshold",
+      "+inf"
+    ],
+    "formats": {
+      "0": "49400c8ecaac4605c30225eb8244e12b4315398dd5ff348546ad9e44ac87fe1b",
+      "6": "949682fa2a9896252b9d5b9afb66585f48592c177b176895ff8634c690343b21",
+      "7": "d1eb863f3aca6323f14cb1cbc16991b6da5677c1a97914ba8dc4971d59aaf6b4"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 18
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.threshold_inf"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_many_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-threshold",
+      "+inf"
+    ],
+    "formats": {
+      "0": "49400c8ecaac4605c30225eb8244e12b4315398dd5ff348546ad9e44ac87fe1b",
+      "6": "949682fa2a9896252b9d5b9afb66585f48592c177b176895ff8634c690343b21",
+      "7": "d1eb863f3aca6323f14cb1cbc16991b6da5677c1a97914ba8dc4971d59aaf6b4"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 18
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.word5"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-word_size",
+      "5"
+    ],
+    "formats": {
+      "0": "0c4e34fd4b6e9002b5c4038952a67afdd2df0f9b7387208d4f17702599323b41",
+      "6": "f84a03952205a9456e7118ac56fd3e8fbdf43774fa251c6bc996d0935b59cbf9",
+      "7": "0486b0ddbc61f12ec470cf750c74e9efc635cf15a96ca3067bb3218814aeb68b"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 8
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.word5"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-word_size",
+      "5"
+    ],
+    "formats": {
+      "0": "0c4e34fd4b6e9002b5c4038952a67afdd2df0f9b7387208d4f17702599323b41",
+      "6": "f84a03952205a9456e7118ac56fd3e8fbdf43774fa251c6bc996d0935b59cbf9",
+      "7": "0486b0ddbc61f12ec470cf750c74e9efc635cf15a96ca3067bb3218814aeb68b"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 8
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.word5"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-word_size",
+      "5"
+    ],
+    "formats": {
+      "0": "0c4e34fd4b6e9002b5c4038952a67afdd2df0f9b7387208d4f17702599323b41",
+      "6": "f84a03952205a9456e7118ac56fd3e8fbdf43774fa251c6bc996d0935b59cbf9",
+      "7": "0486b0ddbc61f12ec470cf750c74e9efc635cf15a96ca3067bb3218814aeb68b"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 8
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.fast"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-task",
+      "blastp-fast"
+    ],
+    "formats": {
+      "0": "e0d6b5a38a853f622367cb6d5088a7ebd5fa3687178a6301dd7f56ec4274339a",
+      "6": "4187ee23a67088935d8e7f2a269984439dfe46be4b4b38e739184ad0fff5faf5",
+      "7": "565358a7bf818085203965d742c46d42ff844e011d01e607403d3a21855285cd"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 7
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.fast"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-task",
+      "blastp-fast"
+    ],
+    "formats": {
+      "0": "e0d6b5a38a853f622367cb6d5088a7ebd5fa3687178a6301dd7f56ec4274339a",
+      "6": "4187ee23a67088935d8e7f2a269984439dfe46be4b4b38e739184ad0fff5faf5",
+      "7": "565358a7bf818085203965d742c46d42ff844e011d01e607403d3a21855285cd"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 7
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.fast"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-task",
+      "blastp-fast"
+    ],
+    "formats": {
+      "0": "e0d6b5a38a853f622367cb6d5088a7ebd5fa3687178a6301dd7f56ec4274339a",
+      "6": "4187ee23a67088935d8e7f2a269984439dfe46be4b4b38e739184ad0fff5faf5",
+      "7": "565358a7bf818085203965d742c46d42ff844e011d01e607403d3a21855285cd"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 7
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.evalue_huge",
+      "e2e.blastp.evalue_huge7"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-evalue",
+      "1e308"
+    ],
+    "formats": {
+      "0": "97960564a8cda3147ca2e3e09053dcc824f6c8a68033f9b9019bec7e8c0e528e",
+      "6": "8345680f515903989e0496b9a18363dcec7bb4318bfb899608199aef1c34646e",
+      "7": "6d4657e17254068ff4d680a9217aeb3700f694d1a967f6e520e30bc590db7784"
+    },
+    "frozen": {
+      "0": true,
+      "7": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 5245
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.evalue_huge",
+      "e2e.blastp.evalue_huge7"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-evalue",
+      "1e308"
+    ],
+    "formats": {
+      "0": "97960564a8cda3147ca2e3e09053dcc824f6c8a68033f9b9019bec7e8c0e528e",
+      "6": "8345680f515903989e0496b9a18363dcec7bb4318bfb899608199aef1c34646e",
+      "7": "6d4657e17254068ff4d680a9217aeb3700f694d1a967f6e520e30bc590db7784"
+    },
+    "frozen": {
+      "0": true,
+      "7": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 5245
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.evalue_huge",
+      "e2e.blastp.evalue_huge7"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-evalue",
+      "1e308"
+    ],
+    "formats": {
+      "0": "97960564a8cda3147ca2e3e09053dcc824f6c8a68033f9b9019bec7e8c0e528e",
+      "6": "8345680f515903989e0496b9a18363dcec7bb4318bfb899608199aef1c34646e",
+      "7": "6d4657e17254068ff4d680a9217aeb3700f694d1a967f6e520e30bc590db7784"
+    },
+    "frozen": {
+      "0": true,
+      "7": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 5245
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.mts3"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-max_target_seqs",
+      "3"
+    ],
+    "formats": {
+      "0": "61dd2271558626fbdec246fcf158f38b520dee8788f66317c97a13525ec7e72c",
+      "6": "a64c66e39c16a2303be08d005ad3737a484babe327bc5a707933333d290fffbc",
+      "7": "a0f333e8f0680fa4d0680d141bd64c628e632b224106e671ce2a167f4167bd6c"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "ed6f888ae1ef1cf4f7cc1b594f7d64d8e904b079f43032ae6b4d616ca3a77825",
+    "hits": 40
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.mts3"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-max_target_seqs",
+      "3"
+    ],
+    "formats": {
+      "0": "61dd2271558626fbdec246fcf158f38b520dee8788f66317c97a13525ec7e72c",
+      "6": "a64c66e39c16a2303be08d005ad3737a484babe327bc5a707933333d290fffbc",
+      "7": "a0f333e8f0680fa4d0680d141bd64c628e632b224106e671ce2a167f4167bd6c"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "ed6f888ae1ef1cf4f7cc1b594f7d64d8e904b079f43032ae6b4d616ca3a77825",
+    "hits": 40
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.mts3"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa",
+      "-max_target_seqs",
+      "3"
+    ],
+    "formats": {
+      "0": "61dd2271558626fbdec246fcf158f38b520dee8788f66317c97a13525ec7e72c",
+      "6": "a64c66e39c16a2303be08d005ad3737a484babe327bc5a707933333d290fffbc",
+      "7": "a0f333e8f0680fa4d0680d141bd64c628e632b224106e671ce2a167f4167bd6c"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "ed6f888ae1ef1cf4f7cc1b594f7d64d8e904b079f43032ae6b4d616ca3a77825",
+    "hits": 40
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.many"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_many_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_many_subject.faa"
+    ],
+    "formats": {
+      "0": "bc6446b64314a7f2c9d3db0f1ff8d2f3fa7c2e72e8c352f9288eb8bfd050e88b",
+      "6": "e26c79c6469b26c20361f78a67a69421b038c5127ec5b0a920f083f0b3eeb2e7",
+      "7": "bb40d47f53e77815e34401e7d5cc10ba2d4834e96aa80ed738e38963832debae"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 300
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.many"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_many_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_many_subject.faa"
+    ],
+    "formats": {
+      "0": "bc6446b64314a7f2c9d3db0f1ff8d2f3fa7c2e72e8c352f9288eb8bfd050e88b",
+      "6": "e26c79c6469b26c20361f78a67a69421b038c5127ec5b0a920f083f0b3eeb2e7",
+      "7": "bb40d47f53e77815e34401e7d5cc10ba2d4834e96aa80ed738e38963832debae"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 300
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.many"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_many_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_many_subject.faa"
+    ],
+    "formats": {
+      "0": "bc6446b64314a7f2c9d3db0f1ff8d2f3fa7c2e72e8c352f9288eb8bfd050e88b",
+      "6": "e26c79c6469b26c20361f78a67a69421b038c5127ec5b0a920f083f0b3eeb2e7",
+      "7": "bb40d47f53e77815e34401e7d5cc10ba2d4834e96aa80ed738e38963832debae"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 300
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.many_mts280"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_many_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_many_subject.faa",
+      "-max_target_seqs",
+      "280"
+    ],
+    "formats": {
+      "0": "a3c2f8162e320eca9713509b5fa83965236d7536cf0c0d31a962bbd5b9fdb214",
+      "6": "c286c46b6a4775da3ec247c67f3cd491246d22942f70f27a0f8d620d0f10e26b",
+      "7": "1c4046d25a03fbe7b1c275e22892bda9b985393c081bf2b68daf8f08f7d3e90d"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 280
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.many_mts280"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_many_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_many_subject.faa",
+      "-max_target_seqs",
+      "280"
+    ],
+    "formats": {
+      "0": "a3c2f8162e320eca9713509b5fa83965236d7536cf0c0d31a962bbd5b9fdb214",
+      "6": "c286c46b6a4775da3ec247c67f3cd491246d22942f70f27a0f8d620d0f10e26b",
+      "7": "1c4046d25a03fbe7b1c275e22892bda9b985393c081bf2b68daf8f08f7d3e90d"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 280
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.many_mts280"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_many_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_many_subject.faa",
+      "-max_target_seqs",
+      "280"
+    ],
+    "formats": {
+      "0": "a3c2f8162e320eca9713509b5fa83965236d7536cf0c0d31a962bbd5b9fdb214",
+      "6": "c286c46b6a4775da3ec247c67f3cd491246d22942f70f27a0f8d620d0f10e26b",
+      "7": "1c4046d25a03fbe7b1c275e22892bda9b985393c081bf2b68daf8f08f7d3e90d"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 280
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.titles"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_titles_subject.faa"
+    ],
+    "formats": {
+      "0": "b06378f3798cd4d48f5017e3966e62f0420d98a54fde2fa7f1d5333e43b18e04",
+      "6": "73855604e6969efcfbbd9a7a1fd1b3a59ea5855530fdbb9371e320b8ff7fd9cf",
+      "7": "64d1df3a8872b4b34c905a1dda1d7cd3ae5d0a50804b677f98fa6069316863e0"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "071887da2242b5a50130a83fefaab318965c20b0ecd1ae913cbf8746d4f6629a",
+    "hits": 27
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.titles"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_titles_subject.faa"
+    ],
+    "formats": {
+      "0": "b06378f3798cd4d48f5017e3966e62f0420d98a54fde2fa7f1d5333e43b18e04",
+      "6": "73855604e6969efcfbbd9a7a1fd1b3a59ea5855530fdbb9371e320b8ff7fd9cf",
+      "7": "64d1df3a8872b4b34c905a1dda1d7cd3ae5d0a50804b677f98fa6069316863e0"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "071887da2242b5a50130a83fefaab318965c20b0ecd1ae913cbf8746d4f6629a",
+    "hits": 27
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.titles"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_titles_subject.faa"
+    ],
+    "formats": {
+      "0": "b06378f3798cd4d48f5017e3966e62f0420d98a54fde2fa7f1d5333e43b18e04",
+      "6": "73855604e6969efcfbbd9a7a1fd1b3a59ea5855530fdbb9371e320b8ff7fd9cf",
+      "7": "64d1df3a8872b4b34c905a1dda1d7cd3ae5d0a50804b677f98fa6069316863e0"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "071887da2242b5a50130a83fefaab318965c20b0ecd1ae913cbf8746d4f6629a",
+    "hits": 27
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.invalid_o",
+      "e2e.blastp.invalid_o7"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_invalid_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa"
+    ],
+    "formats": {
+      "0": "95c5fca59c88a42d10810ffe3968cb0e9621d55936d84363032b980c94d735d2",
+      "6": "da07aff06bf1ec66ee924ec0525f659981228f314c38ec8931183d867e9475b9",
+      "7": "9c8b7c39b1f2a091f8420ca21c0c8ebfbd7c08b2d3a6b77058a6c7b945626529"
+    },
+    "frozen": {
+      "0": true,
+      "7": true
+    },
+    "diagnostics": "fed7ea1f48b7e077a6ba11a7787339c8740c1cfa0631f205eea9c6c6f25bafd6",
+    "hits": 10
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.invalid_o",
+      "e2e.blastp.invalid_o7"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_invalid_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa"
+    ],
+    "formats": {
+      "0": "95c5fca59c88a42d10810ffe3968cb0e9621d55936d84363032b980c94d735d2",
+      "6": "da07aff06bf1ec66ee924ec0525f659981228f314c38ec8931183d867e9475b9",
+      "7": "9c8b7c39b1f2a091f8420ca21c0c8ebfbd7c08b2d3a6b77058a6c7b945626529"
+    },
+    "frozen": {
+      "0": true,
+      "7": true
+    },
+    "diagnostics": "fed7ea1f48b7e077a6ba11a7787339c8740c1cfa0631f205eea9c6c6f25bafd6",
+    "hits": 10
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.invalid_o",
+      "e2e.blastp.invalid_o7"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_invalid_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa"
+    ],
+    "formats": {
+      "0": "95c5fca59c88a42d10810ffe3968cb0e9621d55936d84363032b980c94d735d2",
+      "6": "da07aff06bf1ec66ee924ec0525f659981228f314c38ec8931183d867e9475b9",
+      "7": "9c8b7c39b1f2a091f8420ca21c0c8ebfbd7c08b2d3a6b77058a6c7b945626529"
+    },
+    "frozen": {
+      "0": true,
+      "7": true
+    },
+    "diagnostics": "fed7ea1f48b7e077a6ba11a7787339c8740c1cfa0631f205eea9c6c6f25bafd6",
+    "hits": 10
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.allx",
+      "e2e.blastp.allx7"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_allx_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa"
+    ],
+    "formats": {
+      "0": "86e5d8f27df63edd6b0fd8ce51fa4bf5e4c35782952ee1fdbe47b1bb3ff3c8bb",
+      "6": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "7": "349e73a052be4825f30a0da5cff44292516a2bc1fa6ae820e8392a9be0266ae3"
+    },
+    "frozen": {
+      "0": true,
+      "7": true
+    },
+    "diagnostics": "c8ee41571ccbc248ebfcc250ab38f862ba7d2654862656772aabd7c8983e3b67",
+    "hits": 0
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.allx",
+      "e2e.blastp.allx7"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_allx_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa"
+    ],
+    "formats": {
+      "0": "86e5d8f27df63edd6b0fd8ce51fa4bf5e4c35782952ee1fdbe47b1bb3ff3c8bb",
+      "6": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "7": "349e73a052be4825f30a0da5cff44292516a2bc1fa6ae820e8392a9be0266ae3"
+    },
+    "frozen": {
+      "0": true,
+      "7": true
+    },
+    "diagnostics": "c8ee41571ccbc248ebfcc250ab38f862ba7d2654862656772aabd7c8983e3b67",
+    "hits": 0
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.allx",
+      "e2e.blastp.allx7"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_allx_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa"
+    ],
+    "formats": {
+      "0": "86e5d8f27df63edd6b0fd8ce51fa4bf5e4c35782952ee1fdbe47b1bb3ff3c8bb",
+      "6": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "7": "349e73a052be4825f30a0da5cff44292516a2bc1fa6ae820e8392a9be0266ae3"
+    },
+    "frozen": {
+      "0": true,
+      "7": true
+    },
+    "diagnostics": "c8ee41571ccbc248ebfcc250ab38f862ba7d2654862656772aabd7c8983e3b67",
+    "hits": 0
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.o_subject"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_o_subject.faa"
+    ],
+    "formats": {
+      "0": "c0278dff742ff07cb52d678390ae9218d66a69b84e22fa221dd48b8daed548a4",
+      "6": "fba321fd9d3cc66db1740ae6be76d889c99a9c84ee9b4f5500dac841812e4ece",
+      "7": "dd50a493f7ebf96141fd497591d52c4802c74b77dfcf8c3204ba43ba398bf685"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 36
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.o_subject"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_o_subject.faa"
+    ],
+    "formats": {
+      "0": "c0278dff742ff07cb52d678390ae9218d66a69b84e22fa221dd48b8daed548a4",
+      "6": "fba321fd9d3cc66db1740ae6be76d889c99a9c84ee9b4f5500dac841812e4ece",
+      "7": "dd50a493f7ebf96141fd497591d52c4802c74b77dfcf8c3204ba43ba398bf685"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 36
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.o_subject"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_o_subject.faa"
+    ],
+    "formats": {
+      "0": "c0278dff742ff07cb52d678390ae9218d66a69b84e22fa221dd48b8daed548a4",
+      "6": "fba321fd9d3cc66db1740ae6be76d889c99a9c84ee9b4f5500dac841812e4ece",
+      "7": "dd50a493f7ebf96141fd497591d52c4802c74b77dfcf8c3204ba43ba398bf685"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 36
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.empty_subject"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_empty_subject.faa"
+    ],
+    "formats": {
+      "0": "03ecc7763f59f1d4043b174b68de76fb0391bb379543ddd71891e3c150d0107c",
+      "6": "6884035b14a244187464c13c9aa3fcdc834d76c177f1f9b1b54d3428e8c5a176",
+      "7": "c1b8c891390d9eebbcbd82c8538650fed74748a75534de35f89735c5b30b20ac"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "ed1b20a590a3a2cd1058b77f0af183dd2567681c25f108b8d81e7446f9701310",
+    "hits": 48
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.empty_subject"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_empty_subject.faa"
+    ],
+    "formats": {
+      "0": "03ecc7763f59f1d4043b174b68de76fb0391bb379543ddd71891e3c150d0107c",
+      "6": "6884035b14a244187464c13c9aa3fcdc834d76c177f1f9b1b54d3428e8c5a176",
+      "7": "c1b8c891390d9eebbcbd82c8538650fed74748a75534de35f89735c5b30b20ac"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "ed1b20a590a3a2cd1058b77f0af183dd2567681c25f108b8d81e7446f9701310",
+    "hits": 48
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.empty_subject"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_empty_subject.faa"
+    ],
+    "formats": {
+      "0": "03ecc7763f59f1d4043b174b68de76fb0391bb379543ddd71891e3c150d0107c",
+      "6": "6884035b14a244187464c13c9aa3fcdc834d76c177f1f9b1b54d3428e8c5a176",
+      "7": "c1b8c891390d9eebbcbd82c8538650fed74748a75534de35f89735c5b30b20ac"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "ed1b20a590a3a2cd1058b77f0af183dd2567681c25f108b8d81e7446f9701310",
+    "hits": 48
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.o_identity",
+      "e2e.blastp.o_identity0"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_o_identity_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_o_identity_subject.faa"
+    ],
+    "formats": {
+      "0": "df51c54c4084bd803bf92b35704ba9ff3ea1a7f9ce1ad8a5b67808eed7016294",
+      "6": "b081ddc7d170430002582262e449dba8cb3318d47f40d1f9d25273098ebf3ab9",
+      "7": "dfbf6ffd9a7e74e20069afd4fb888e0c4c689d56c42a1dafa24bf51b6e5c825e"
+    },
+    "frozen": {
+      "0": true,
+      "6": true
+    },
+    "diagnostics": "298d6e19aa504628bf936e1857b0a7860b4585f9d3d3c9a6bdd2943059e783a6",
+    "hits": 1
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.o_identity",
+      "e2e.blastp.o_identity0"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_o_identity_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_o_identity_subject.faa"
+    ],
+    "formats": {
+      "0": "df51c54c4084bd803bf92b35704ba9ff3ea1a7f9ce1ad8a5b67808eed7016294",
+      "6": "b081ddc7d170430002582262e449dba8cb3318d47f40d1f9d25273098ebf3ab9",
+      "7": "dfbf6ffd9a7e74e20069afd4fb888e0c4c689d56c42a1dafa24bf51b6e5c825e"
+    },
+    "frozen": {
+      "0": true,
+      "6": true
+    },
+    "diagnostics": "298d6e19aa504628bf936e1857b0a7860b4585f9d3d3c9a6bdd2943059e783a6",
+    "hits": 1
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.o_identity",
+      "e2e.blastp.o_identity0"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_o_identity_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_o_identity_subject.faa"
+    ],
+    "formats": {
+      "0": "df51c54c4084bd803bf92b35704ba9ff3ea1a7f9ce1ad8a5b67808eed7016294",
+      "6": "b081ddc7d170430002582262e449dba8cb3318d47f40d1f9d25273098ebf3ab9",
+      "7": "dfbf6ffd9a7e74e20069afd4fb888e0c4c689d56c42a1dafa24bf51b6e5c825e"
+    },
+    "frozen": {
+      "0": true,
+      "6": true
+    },
+    "diagnostics": "298d6e19aa504628bf936e1857b0a7860b4585f9d3d3c9a6bdd2943059e783a6",
+    "hits": 1
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.empty_only"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_empty_only_subject.faa"
+    ],
+    "formats": {
+      "0": "89f69329c5b0f22e231a9bc33ebe9f4c03b32d7e3b917879e1b4c60348362469",
+      "6": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "7": "6a89b537417b7453dfc13b94f369d3504db7e5047ead9e19af5c5ed34267a934"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "252a950dfc6981820b7cfd957a467e99ac29fdc3edd768964c143b3ba8346be1",
+    "hits": 0
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.empty_only"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_empty_only_subject.faa"
+    ],
+    "formats": {
+      "0": "89f69329c5b0f22e231a9bc33ebe9f4c03b32d7e3b917879e1b4c60348362469",
+      "6": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "7": "6a89b537417b7453dfc13b94f369d3504db7e5047ead9e19af5c5ed34267a934"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "252a950dfc6981820b7cfd957a467e99ac29fdc3edd768964c143b3ba8346be1",
+    "hits": 0
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.empty_only"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_empty_only_subject.faa"
+    ],
+    "formats": {
+      "0": "89f69329c5b0f22e231a9bc33ebe9f4c03b32d7e3b917879e1b4c60348362469",
+      "6": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "7": "6a89b537417b7453dfc13b94f369d3504db7e5047ead9e19af5c5ed34267a934"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "252a950dfc6981820b7cfd957a467e99ac29fdc3edd768964c143b3ba8346be1",
+    "hits": 0
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.o_invalid_order"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_o_invalid_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa"
+    ],
+    "formats": {
+      "0": "ce28ab06397ceed1ed8958ace2eb17dba7cca40f8b532aa8d3e29201dea72a00",
+      "6": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "7": "0c014150ee5d71c2d39f9c59ecc925e95fff9f727986d1849ec8fc9de873e6ff"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "2ad18b8f306d3ee35725e64672873228040132639d87c5923c32c6f0b7f02df1",
+    "hits": 0
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.o_invalid_order"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_o_invalid_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa"
+    ],
+    "formats": {
+      "0": "ce28ab06397ceed1ed8958ace2eb17dba7cca40f8b532aa8d3e29201dea72a00",
+      "6": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "7": "0c014150ee5d71c2d39f9c59ecc925e95fff9f727986d1849ec8fc9de873e6ff"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "2ad18b8f306d3ee35725e64672873228040132639d87c5923c32c6f0b7f02df1",
+    "hits": 0
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.o_invalid_order"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_o_invalid_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_protein_subject.faa"
+    ],
+    "formats": {
+      "0": "ce28ab06397ceed1ed8958ace2eb17dba7cca40f8b532aa8d3e29201dea72a00",
+      "6": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "7": "0c014150ee5d71c2d39f9c59ecc925e95fff9f727986d1849ec8fc9de873e6ff"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "2ad18b8f306d3ee35725e64672873228040132639d87c5923c32c6f0b7f02df1",
+    "hits": 0
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.mts_wrap"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_many_subject.faa",
+      "-max_target_seqs",
+      "2147483647"
+    ],
+    "formats": {
+      "0": "c88f06a7e4e6c60cdb4eec17d9e609f03fe4d8853a0c85e25da3ef1fc9aa2b52",
+      "6": "fcc6520fda9a7829af333b6bfb47c888288799ae9d5c31e771ad77d40ec39ff0",
+      "7": "85d560d591dbfe8a1ab892e60d46867fc6cfa8c8120018398baf98ed6110fb8f"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 61
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.mts_wrap"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_many_subject.faa",
+      "-max_target_seqs",
+      "2147483647"
+    ],
+    "formats": {
+      "0": "c88f06a7e4e6c60cdb4eec17d9e609f03fe4d8853a0c85e25da3ef1fc9aa2b52",
+      "6": "fcc6520fda9a7829af333b6bfb47c888288799ae9d5c31e771ad77d40ec39ff0",
+      "7": "85d560d591dbfe8a1ab892e60d46867fc6cfa8c8120018398baf98ed6110fb8f"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 61
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.mts_wrap"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_many_subject.faa",
+      "-max_target_seqs",
+      "2147483647"
+    ],
+    "formats": {
+      "0": "c88f06a7e4e6c60cdb4eec17d9e609f03fe4d8853a0c85e25da3ef1fc9aa2b52",
+      "6": "fcc6520fda9a7829af333b6bfb47c888288799ae9d5c31e771ad77d40ec39ff0",
+      "7": "85d560d591dbfe8a1ab892e60d46867fc6cfa8c8120018398baf98ed6110fb8f"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 61
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.query_split"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_split_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_many_subject.faa",
+      "-evalue",
+      "1000"
+    ],
+    "formats": {
+      "0": "97c6527735f7b2115c9fcf726ece4febf53d07c087a0ff09c5a0213789b3098a",
+      "6": "dfdd8fbbecf509858a23a02ceb06b6aa595dc26c7f6ace22bd954353fa1db344",
+      "7": "3ca4fb05d8a2d351d1e3a2f7d9c9264729e6880ba63336e5566a6b00117abc4c"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 136
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.query_split"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_split_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_many_subject.faa",
+      "-evalue",
+      "1000"
+    ],
+    "formats": {
+      "0": "97c6527735f7b2115c9fcf726ece4febf53d07c087a0ff09c5a0213789b3098a",
+      "6": "dfdd8fbbecf509858a23a02ceb06b6aa595dc26c7f6ace22bd954353fa1db344",
+      "7": "3ca4fb05d8a2d351d1e3a2f7d9c9264729e6880ba63336e5566a6b00117abc4c"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 136
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.query_split"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_split_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_many_subject.faa",
+      "-evalue",
+      "1000"
+    ],
+    "formats": {
+      "0": "97c6527735f7b2115c9fcf726ece4febf53d07c087a0ff09c5a0213789b3098a",
+      "6": "dfdd8fbbecf509858a23a02ceb06b6aa595dc26c7f6ace22bd954353fa1db344",
+      "7": "3ca4fb05d8a2d351d1e3a2f7d9c9264729e6880ba63336e5566a6b00117abc4c"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 136
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.query_split_two"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_split_two_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_many_subject.faa",
+      "-evalue",
+      "1000"
+    ],
+    "formats": {
+      "0": "f90fd41ea26d4074cf01570eb11742aeb43d501374f45914ffe4a0fed0acf563",
+      "6": "35ef36bf0bb18b2acf191d67dd3e36178883a7a06fffd5ddbc816dd3c664d808",
+      "7": "af05f8dc55c16180643d11f11ae8220913c98fbd28250768b8e403ef7090bca2"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 310
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.query_split_two"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_split_two_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_many_subject.faa",
+      "-evalue",
+      "1000"
+    ],
+    "formats": {
+      "0": "f90fd41ea26d4074cf01570eb11742aeb43d501374f45914ffe4a0fed0acf563",
+      "6": "35ef36bf0bb18b2acf191d67dd3e36178883a7a06fffd5ddbc816dd3c664d808",
+      "7": "af05f8dc55c16180643d11f11ae8220913c98fbd28250768b8e403ef7090bca2"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 310
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.query_split_two"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_split_two_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_many_subject.faa",
+      "-evalue",
+      "1000"
+    ],
+    "formats": {
+      "0": "f90fd41ea26d4074cf01570eb11742aeb43d501374f45914ffe4a0fed0acf563",
+      "6": "35ef36bf0bb18b2acf191d67dd3e36178883a7a06fffd5ddbc816dd3c664d808",
+      "7": "af05f8dc55c16180643d11f11ae8220913c98fbd28250768b8e403ef7090bca2"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 310
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.compressed_short_subject"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_short_mixed_subject.faa",
+      "-word_size",
+      "5"
+    ],
+    "formats": {
+      "0": "3536cd9a985ff0b81aba9d09535abe0516c9d3da1e60ad8c402fabaf44484548",
+      "6": "f84a03952205a9456e7118ac56fd3e8fbdf43774fa251c6bc996d0935b59cbf9",
+      "7": "2906045825df17007dd1fe59ad63a577ae05dc16e7c5cc2e03eedc68476f5fa6"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 8
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.compressed_short_subject"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_short_mixed_subject.faa",
+      "-word_size",
+      "5"
+    ],
+    "formats": {
+      "0": "3536cd9a985ff0b81aba9d09535abe0516c9d3da1e60ad8c402fabaf44484548",
+      "6": "f84a03952205a9456e7118ac56fd3e8fbdf43774fa251c6bc996d0935b59cbf9",
+      "7": "2906045825df17007dd1fe59ad63a577ae05dc16e7c5cc2e03eedc68476f5fa6"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 8
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.compressed_short_subject"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_protein_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_short_mixed_subject.faa",
+      "-word_size",
+      "5"
+    ],
+    "formats": {
+      "0": "3536cd9a985ff0b81aba9d09535abe0516c9d3da1e60ad8c402fabaf44484548",
+      "6": "f84a03952205a9456e7118ac56fd3e8fbdf43774fa251c6bc996d0935b59cbf9",
+      "7": "2906045825df17007dd1fe59ad63a577ae05dc16e7c5cc2e03eedc68476f5fa6"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 8
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.one_hit_negative_width"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_one_hit_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_one_hit_subject.faa",
+      "-word_size",
+      "5",
+      "-threshold",
+      "5",
+      "-window_size",
+      "0",
+      "-evalue",
+      "1e5"
+    ],
+    "formats": {
+      "0": "a33c4ebd38ea20584ec7f845d445791054ff89d1aa6c416f5f610b7f5062c040",
+      "6": "2ba8b160eec548262f12edc7b619c395d27e9319d3fe437d8f3a6ee5ab4ed8a0",
+      "7": "28c0ced447806fcc26cb801e1929fa2193d9834d779d22313a7731d0d769cc3e"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 1
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.one_hit_negative_width"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_one_hit_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_one_hit_subject.faa",
+      "-word_size",
+      "5",
+      "-threshold",
+      "5",
+      "-window_size",
+      "0",
+      "-evalue",
+      "1e5"
+    ],
+    "formats": {
+      "0": "a33c4ebd38ea20584ec7f845d445791054ff89d1aa6c416f5f610b7f5062c040",
+      "6": "2ba8b160eec548262f12edc7b619c395d27e9319d3fe437d8f3a6ee5ab4ed8a0",
+      "7": "28c0ced447806fcc26cb801e1929fa2193d9834d779d22313a7731d0d769cc3e"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 1
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.one_hit_negative_width"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_one_hit_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_one_hit_subject.faa",
+      "-word_size",
+      "5",
+      "-threshold",
+      "5",
+      "-window_size",
+      "0",
+      "-evalue",
+      "1e5"
+    ],
+    "formats": {
+      "0": "a33c4ebd38ea20584ec7f845d445791054ff89d1aa6c416f5f610b7f5062c040",
+      "6": "2ba8b160eec548262f12edc7b619c395d27e9319d3fe437d8f3a6ee5ab4ed8a0",
+      "7": "28c0ced447806fcc26cb801e1929fa2193d9834d779d22313a7731d0d769cc3e"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 1
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.fast_lone_hsp"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_fast_lone_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_fast_lone_subject.faa",
+      "-task",
+      "blastp-fast",
+      "-window_size",
+      "0",
+      "-threshold",
+      "6",
+      "-evalue",
+      "1000"
+    ],
+    "formats": {
+      "0": "a839f198a741b260fac79fab9e1b9848bf38d0ca2e4e86bd97b52bba9f87875f",
+      "6": "3973dbb152fd57a5235f6ab83b903dff2231123d709e4a93275ef0e1eba33393",
+      "7": "22eb27c7531a0342981f795e160b89f6691bdcf6e8ed781b693d3186af7ba010"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 10
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.fast_lone_hsp"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_fast_lone_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_fast_lone_subject.faa",
+      "-task",
+      "blastp-fast",
+      "-window_size",
+      "0",
+      "-threshold",
+      "6",
+      "-evalue",
+      "1000"
+    ],
+    "formats": {
+      "0": "a839f198a741b260fac79fab9e1b9848bf38d0ca2e4e86bd97b52bba9f87875f",
+      "6": "3973dbb152fd57a5235f6ab83b903dff2231123d709e4a93275ef0e1eba33393",
+      "7": "22eb27c7531a0342981f795e160b89f6691bdcf6e8ed781b693d3186af7ba010"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 10
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.fast_lone_hsp"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_fast_lone_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_fast_lone_subject.faa",
+      "-task",
+      "blastp-fast",
+      "-window_size",
+      "0",
+      "-threshold",
+      "6",
+      "-evalue",
+      "1000"
+    ],
+    "formats": {
+      "0": "a839f198a741b260fac79fab9e1b9848bf38d0ca2e4e86bd97b52bba9f87875f",
+      "6": "3973dbb152fd57a5235f6ab83b903dff2231123d709e4a93275ef0e1eba33393",
+      "7": "22eb27c7531a0342981f795e160b89f6691bdcf6e8ed781b693d3186af7ba010"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 10
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.fast_lone_hsp_window"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_fast_lone2_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_fast_lone2_subject.faa",
+      "-task",
+      "blastp-fast",
+      "-threshold",
+      "8",
+      "-evalue",
+      "1e5",
+      "-comp_based_stats",
+      "D"
+    ],
+    "formats": {
+      "0": "3dd6f55d36c66b40fd25a114c076507197c0f84f931b3afe5d8b52e0724c1a40",
+      "6": "5e69b9b9ac8b8bcbece4ea6e3e336af6fe014bd6b07a2abaaf9f3a8687e8376b",
+      "7": "8546e9d4003b0513caaf96d35bee2913bbdde7040803eeed3a62e39eaad8e940"
+    },
+    "frozen": {
+      "7": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 2
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.fast_lone_hsp_window"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_fast_lone2_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_fast_lone2_subject.faa",
+      "-task",
+      "blastp-fast",
+      "-threshold",
+      "8",
+      "-evalue",
+      "1e5",
+      "-comp_based_stats",
+      "D"
+    ],
+    "formats": {
+      "0": "3dd6f55d36c66b40fd25a114c076507197c0f84f931b3afe5d8b52e0724c1a40",
+      "6": "5e69b9b9ac8b8bcbece4ea6e3e336af6fe014bd6b07a2abaaf9f3a8687e8376b",
+      "7": "8546e9d4003b0513caaf96d35bee2913bbdde7040803eeed3a62e39eaad8e940"
+    },
+    "frozen": {
+      "7": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 2
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "blastp",
+    "cases": [
+      "e2e.blastp.fast_lone_hsp_window"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2e_fast_lone2_query.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2e_fast_lone2_subject.faa",
+      "-task",
+      "blastp-fast",
+      "-threshold",
+      "8",
+      "-evalue",
+      "1e5",
+      "-comp_based_stats",
+      "D"
+    ],
+    "formats": {
+      "0": "3dd6f55d36c66b40fd25a114c076507197c0f84f931b3afe5d8b52e0724c1a40",
+      "6": "5e69b9b9ac8b8bcbece4ea6e3e336af6fe014bd6b07a2abaaf9f3a8687e8376b",
+      "7": "8546e9d4003b0513caaf96d35bee2913bbdde7040803eeed3a62e39eaad8e940"
+    },
+    "frozen": {
+      "7": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 2
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "blastp",
+    "cases": [
+      "e2d.blastp.qloc.0",
+      "e2d.blastp.qloc.6",
+      "e2d.blastp.qloc.7"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2d_p_q.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_p_s3.faa",
+      "-query_loc",
+      "100-400"
+    ],
+    "formats": {
+      "0": "3d948319e1254ce006a8bf75bc474968458d0f35e0599554ec8c514bb8bc38a3",
+      "6": "29ac0621bad5996c65695ee8ad82c3bf0765ebe5e28b8aa2fbf2e880a6242af1",
+      "7": "2d634664cdfd5b7d83ef3622c1955c0e25f901d31e99290f6a489ad72f6ffc7a"
+    },
+    "frozen": {
+      "0": true,
+      "6": true,
+      "7": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 3
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "blastp",
+    "cases": [
+      "e2d.blastp.qloc.0",
+      "e2d.blastp.qloc.6",
+      "e2d.blastp.qloc.7"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2d_p_q.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_p_s3.faa",
+      "-query_loc",
+      "100-400"
+    ],
+    "formats": {
+      "0": "3d948319e1254ce006a8bf75bc474968458d0f35e0599554ec8c514bb8bc38a3",
+      "6": "29ac0621bad5996c65695ee8ad82c3bf0765ebe5e28b8aa2fbf2e880a6242af1",
+      "7": "2d634664cdfd5b7d83ef3622c1955c0e25f901d31e99290f6a489ad72f6ffc7a"
+    },
+    "frozen": {
+      "0": true,
+      "6": true,
+      "7": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 3
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "blastp",
+    "cases": [
+      "e2d.blastp.qloc.0",
+      "e2d.blastp.qloc.6",
+      "e2d.blastp.qloc.7"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2d_p_q.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_p_s3.faa",
+      "-query_loc",
+      "100-400"
+    ],
+    "formats": {
+      "0": "3d948319e1254ce006a8bf75bc474968458d0f35e0599554ec8c514bb8bc38a3",
+      "6": "29ac0621bad5996c65695ee8ad82c3bf0765ebe5e28b8aa2fbf2e880a6242af1",
+      "7": "2d634664cdfd5b7d83ef3622c1955c0e25f901d31e99290f6a489ad72f6ffc7a"
+    },
+    "frozen": {
+      "0": true,
+      "6": true,
+      "7": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 3
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "blastp",
+    "cases": [
+      "e2d.blastp.fields.6f",
+      "e2d.blastp.fields.7f"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2d_p_qmulti.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_p_s3.faa",
+      "-query_loc",
+      "100-400",
+      "-subject_loc",
+      "20-5000"
+    ],
+    "formats": {
+      "0": "8a174194529a28892f35d9ef5906d52ea63c8d11f5e5d6ab7ffbb0806700b067",
+      "6": "b61b7962b760a6b50b3856c4410c6811d3ba8e6ef67766a7efd34f7edb87bc96",
+      "7": "76058ff02265741298bc2dd20f9509d6fc77477938d7f5987f0270adb7dcefe1"
+    },
+    "frozen": {},
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 12
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "blastp",
+    "cases": [
+      "e2d.blastp.fields.6f",
+      "e2d.blastp.fields.7f"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2d_p_qmulti.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_p_s3.faa",
+      "-query_loc",
+      "100-400",
+      "-subject_loc",
+      "20-5000"
+    ],
+    "formats": {
+      "0": "8a174194529a28892f35d9ef5906d52ea63c8d11f5e5d6ab7ffbb0806700b067",
+      "6": "b61b7962b760a6b50b3856c4410c6811d3ba8e6ef67766a7efd34f7edb87bc96",
+      "7": "76058ff02265741298bc2dd20f9509d6fc77477938d7f5987f0270adb7dcefe1"
+    },
+    "frozen": {},
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 12
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "blastp",
+    "cases": [
+      "e2d.blastp.fields.6f",
+      "e2d.blastp.fields.7f"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2d_p_qmulti.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_p_s3.faa",
+      "-query_loc",
+      "100-400",
+      "-subject_loc",
+      "20-5000"
+    ],
+    "formats": {
+      "0": "8a174194529a28892f35d9ef5906d52ea63c8d11f5e5d6ab7ffbb0806700b067",
+      "6": "b61b7962b760a6b50b3856c4410c6811d3ba8e6ef67766a7efd34f7edb87bc96",
+      "7": "76058ff02265741298bc2dd20f9509d6fc77477938d7f5987f0270adb7dcefe1"
+    },
+    "frozen": {},
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 12
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "blastp",
+    "cases": [
+      "e2d.blastp.end_past.6f"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2d_p_q.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_p_s3.faa",
+      "-query_loc",
+      "600-1000"
+    ],
+    "formats": {
+      "0": "bb2194e94e619b2f3a59fcd10de8f8012c3e7dc4cae5e85ae737a0fb4dcff4dc",
+      "6": "e87149dd2e6e0dd04b643e044d569ebb15ad95ea3fdf6d65ab3984219c8a9284",
+      "7": "1ff45611ed2eefe9616d632ad46a0f66f897bf1454fb5dfe5de0c25509fbf772"
+    },
+    "frozen": {},
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 2
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "blastp",
+    "cases": [
+      "e2d.blastp.end_past.6f"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2d_p_q.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_p_s3.faa",
+      "-query_loc",
+      "600-1000"
+    ],
+    "formats": {
+      "0": "bb2194e94e619b2f3a59fcd10de8f8012c3e7dc4cae5e85ae737a0fb4dcff4dc",
+      "6": "e87149dd2e6e0dd04b643e044d569ebb15ad95ea3fdf6d65ab3984219c8a9284",
+      "7": "1ff45611ed2eefe9616d632ad46a0f66f897bf1454fb5dfe5de0c25509fbf772"
+    },
+    "frozen": {},
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 2
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "blastp",
+    "cases": [
+      "e2d.blastp.end_past.6f"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2d_p_q.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_p_s3.faa",
+      "-query_loc",
+      "600-1000"
+    ],
+    "formats": {
+      "0": "bb2194e94e619b2f3a59fcd10de8f8012c3e7dc4cae5e85ae737a0fb4dcff4dc",
+      "6": "e87149dd2e6e0dd04b643e044d569ebb15ad95ea3fdf6d65ab3984219c8a9284",
+      "7": "1ff45611ed2eefe9616d632ad46a0f66f897bf1454fb5dfe5de0c25509fbf772"
+    },
+    "frozen": {},
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 2
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "blastp",
+    "cases": [
+      "e2d.blastp.multi_skip.0",
+      "e2d.blastp.multi_skip.7"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2d_p_qmulti.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_p_s3.faa",
+      "-query_loc",
+      "700-900"
+    ],
+    "formats": {
+      "0": "4431ae5cbacbb8317e0b40b3fae7ac27750a4e365df2c440cff63986f95d4dfe",
+      "6": "d6fde67267455b23dfab26cc42b4d73d2be1f33c1ee954ee0f8ae40cb4c725e6",
+      "7": "afe6ba0afd5a6f6d8c63a4ff9e578a6f0d0d5bcbd66d43d74d3de8b3353a1942"
+    },
+    "frozen": {
+      "0": true,
+      "7": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 5
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "blastp",
+    "cases": [
+      "e2d.blastp.multi_skip.0",
+      "e2d.blastp.multi_skip.7"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2d_p_qmulti.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_p_s3.faa",
+      "-query_loc",
+      "700-900"
+    ],
+    "formats": {
+      "0": "4431ae5cbacbb8317e0b40b3fae7ac27750a4e365df2c440cff63986f95d4dfe",
+      "6": "d6fde67267455b23dfab26cc42b4d73d2be1f33c1ee954ee0f8ae40cb4c725e6",
+      "7": "afe6ba0afd5a6f6d8c63a4ff9e578a6f0d0d5bcbd66d43d74d3de8b3353a1942"
+    },
+    "frozen": {
+      "0": true,
+      "7": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 5
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "blastp",
+    "cases": [
+      "e2d.blastp.multi_skip.0",
+      "e2d.blastp.multi_skip.7"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2d_p_qmulti.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_p_s3.faa",
+      "-query_loc",
+      "700-900"
+    ],
+    "formats": {
+      "0": "4431ae5cbacbb8317e0b40b3fae7ac27750a4e365df2c440cff63986f95d4dfe",
+      "6": "d6fde67267455b23dfab26cc42b4d73d2be1f33c1ee954ee0f8ae40cb4c725e6",
+      "7": "afe6ba0afd5a6f6d8c63a4ff9e578a6f0d0d5bcbd66d43d74d3de8b3353a1942"
+    },
+    "frozen": {
+      "0": true,
+      "7": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 5
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "blastp",
+    "cases": [
+      "e2d.blastp.sloc.0",
+      "e2d.blastp.sloc.7"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2d_p_qp75.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_p_sp75m.faa",
+      "-subject_loc",
+      "201-600"
+    ],
+    "formats": {
+      "0": "aaf84690a9b1c141c9c2dccba6b667531017749fe8a51807494199cb6e0c69d3",
+      "6": "7b777007d93b60e516263fb0929357fa542d71cf0aa7da4cbf6c6706ed8dc016",
+      "7": "c1ac5d9edf3d91d4a869883c746b3cade05f709f2ab3a9b81803532266d32335"
+    },
+    "frozen": {
+      "0": true,
+      "7": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 2
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "blastp",
+    "cases": [
+      "e2d.blastp.sloc.0",
+      "e2d.blastp.sloc.7"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2d_p_qp75.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_p_sp75m.faa",
+      "-subject_loc",
+      "201-600"
+    ],
+    "formats": {
+      "0": "aaf84690a9b1c141c9c2dccba6b667531017749fe8a51807494199cb6e0c69d3",
+      "6": "7b777007d93b60e516263fb0929357fa542d71cf0aa7da4cbf6c6706ed8dc016",
+      "7": "c1ac5d9edf3d91d4a869883c746b3cade05f709f2ab3a9b81803532266d32335"
+    },
+    "frozen": {
+      "0": true,
+      "7": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 2
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "blastp",
+    "cases": [
+      "e2d.blastp.sloc.0",
+      "e2d.blastp.sloc.7"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2d_p_qp75.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_p_sp75m.faa",
+      "-subject_loc",
+      "201-600"
+    ],
+    "formats": {
+      "0": "aaf84690a9b1c141c9c2dccba6b667531017749fe8a51807494199cb6e0c69d3",
+      "6": "7b777007d93b60e516263fb0929357fa542d71cf0aa7da4cbf6c6706ed8dc016",
+      "7": "c1ac5d9edf3d91d4a869883c746b3cade05f709f2ab3a9b81803532266d32335"
+    },
+    "frozen": {
+      "0": true,
+      "7": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 2
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "blastp",
+    "cases": [
+      "e2d.blastp.sloc_empty.0"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2d_p_qp75.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_p_sp_multi.faa",
+      "-subject_loc",
+      "201-600"
+    ],
+    "formats": {
+      "0": "ef25de3b9f911d39c3bcac3a4a30dd2aad0912cff340159ac89df9c335b9c093",
+      "6": "f0c26573ce81657884ba4fe8c041a61fae6b93cd4bd596a87f6f5b7b167fd805",
+      "7": "93d257f6b3238e41abd9164c0c25d303553e87ea651fd5cbc0ac4eba27ef97c7"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "6cf2b76e54f7266e8af24ed38413bf71631cfc4853f31d8006ccd123d12253dd",
+    "hits": 2
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "blastp",
+    "cases": [
+      "e2d.blastp.sloc_empty.0"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2d_p_qp75.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_p_sp_multi.faa",
+      "-subject_loc",
+      "201-600"
+    ],
+    "formats": {
+      "0": "ef25de3b9f911d39c3bcac3a4a30dd2aad0912cff340159ac89df9c335b9c093",
+      "6": "f0c26573ce81657884ba4fe8c041a61fae6b93cd4bd596a87f6f5b7b167fd805",
+      "7": "93d257f6b3238e41abd9164c0c25d303553e87ea651fd5cbc0ac4eba27ef97c7"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "6cf2b76e54f7266e8af24ed38413bf71631cfc4853f31d8006ccd123d12253dd",
+    "hits": 2
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "blastp",
+    "cases": [
+      "e2d.blastp.sloc_empty.0"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2d_p_qp75.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_p_sp_multi.faa",
+      "-subject_loc",
+      "201-600"
+    ],
+    "formats": {
+      "0": "ef25de3b9f911d39c3bcac3a4a30dd2aad0912cff340159ac89df9c335b9c093",
+      "6": "f0c26573ce81657884ba4fe8c041a61fae6b93cd4bd596a87f6f5b7b167fd805",
+      "7": "93d257f6b3238e41abd9164c0c25d303553e87ea651fd5cbc0ac4eba27ef97c7"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "6cf2b76e54f7266e8af24ed38413bf71631cfc4853f31d8006ccd123d12253dd",
+    "hits": 2
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "blastp",
+    "cases": [
+      "e2d.blastp.seg.0"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2d_p_qlc.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_p_s3.faa",
+      "-query_loc",
+      "100-400",
+      "-seg",
+      "yes"
+    ],
+    "formats": {
+      "0": "69637d3cca4447ef8af523fa585774392bf152e751b0670939b5b8ff4c1b13f8",
+      "6": "486cd0760f6162359e84f03257698db2f150c5ff65b44de635b5d521ed6c25b9",
+      "7": "ff9a8334f4fff2e8236c78e66427e8c9d764b3471b6f6722b18aedd08064484b"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 4
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "blastp",
+    "cases": [
+      "e2d.blastp.seg.0"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2d_p_qlc.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_p_s3.faa",
+      "-query_loc",
+      "100-400",
+      "-seg",
+      "yes"
+    ],
+    "formats": {
+      "0": "69637d3cca4447ef8af523fa585774392bf152e751b0670939b5b8ff4c1b13f8",
+      "6": "486cd0760f6162359e84f03257698db2f150c5ff65b44de635b5d521ed6c25b9",
+      "7": "ff9a8334f4fff2e8236c78e66427e8c9d764b3471b6f6722b18aedd08064484b"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 4
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "blastp",
+    "cases": [
+      "e2d.blastp.seg.0"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2d_p_qlc.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_p_s3.faa",
+      "-query_loc",
+      "100-400",
+      "-seg",
+      "yes"
+    ],
+    "formats": {
+      "0": "69637d3cca4447ef8af523fa585774392bf152e751b0670939b5b8ff4c1b13f8",
+      "6": "486cd0760f6162359e84f03257698db2f150c5ff65b44de635b5d521ed6c25b9",
+      "7": "ff9a8334f4fff2e8236c78e66427e8c9d764b3471b6f6722b18aedd08064484b"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 4
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "blastp",
+    "cases": [
+      "e2d.blastp.o.0"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2d_p_qo.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_p_s3.faa",
+      "-query_loc",
+      "100-400"
+    ],
+    "formats": {
+      "0": "76698821691db04ad51bc8772bf130cdac795673b34fb015d34e27196c5abb4e",
+      "6": "06070ad73308c208d16e11ac457cb1015dd35326f08c187ff9a056381864e92f",
+      "7": "55ceead8281253eb37fd037e75dd0405ca1fa33a219c844b3250b87df1c68e6b"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "3320e2ae917382fc7c8696324faac8b11688ebff6d625bd3fbcbab6166c477ee",
+    "hits": 3
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "blastp",
+    "cases": [
+      "e2d.blastp.o.0"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2d_p_qo.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_p_s3.faa",
+      "-query_loc",
+      "100-400"
+    ],
+    "formats": {
+      "0": "76698821691db04ad51bc8772bf130cdac795673b34fb015d34e27196c5abb4e",
+      "6": "06070ad73308c208d16e11ac457cb1015dd35326f08c187ff9a056381864e92f",
+      "7": "55ceead8281253eb37fd037e75dd0405ca1fa33a219c844b3250b87df1c68e6b"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "3320e2ae917382fc7c8696324faac8b11688ebff6d625bd3fbcbab6166c477ee",
+    "hits": 3
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "blastp",
+    "cases": [
+      "e2d.blastp.o.0"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2d_p_qo.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_p_s3.faa",
+      "-query_loc",
+      "100-400"
+    ],
+    "formats": {
+      "0": "76698821691db04ad51bc8772bf130cdac795673b34fb015d34e27196c5abb4e",
+      "6": "06070ad73308c208d16e11ac457cb1015dd35326f08c187ff9a056381864e92f",
+      "7": "55ceead8281253eb37fd037e75dd0405ca1fa33a219c844b3250b87df1c68e6b"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "3320e2ae917382fc7c8696324faac8b11688ebff6d625bd3fbcbab6166c477ee",
+    "hits": 3
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "blastp",
+    "cases": [
+      "e2d.blastp.split.6"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2d_p_qskew25k.faa",
+      "-subject",
+      "tests/fasta/LvMJNV.faa",
+      "-evalue",
+      "1000",
+      "-query_loc",
+      "3001-22800"
+    ],
+    "formats": {
+      "0": "655a4141954c00df60e536c8765fb06c5e4130ff5b8274a38f842b5edaf12b94",
+      "6": "62dee90e159fd45ab6e8dabcde13c0bcbd46b1228ace0f25887997f9216e9eae",
+      "7": "e9c6a5f4ab0f23b1ce8f9ac7624786216fe303c05ce1284eaa44d42cb69222c0"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 862
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "blastp",
+    "cases": [
+      "e2d.blastp.split.6"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2d_p_qskew25k.faa",
+      "-subject",
+      "tests/fasta/LvMJNV.faa",
+      "-evalue",
+      "1000",
+      "-query_loc",
+      "3001-22800"
+    ],
+    "formats": {
+      "0": "655a4141954c00df60e536c8765fb06c5e4130ff5b8274a38f842b5edaf12b94",
+      "6": "62dee90e159fd45ab6e8dabcde13c0bcbd46b1228ace0f25887997f9216e9eae",
+      "7": "e9c6a5f4ab0f23b1ce8f9ac7624786216fe303c05ce1284eaa44d42cb69222c0"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 862
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "blastp",
+    "cases": [
+      "e2d.blastp.split.6"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2d_p_qskew25k.faa",
+      "-subject",
+      "tests/fasta/LvMJNV.faa",
+      "-evalue",
+      "1000",
+      "-query_loc",
+      "3001-22800"
+    ],
+    "formats": {
+      "0": "655a4141954c00df60e536c8765fb06c5e4130ff5b8274a38f842b5edaf12b94",
+      "6": "62dee90e159fd45ab6e8dabcde13c0bcbd46b1228ace0f25887997f9216e9eae",
+      "7": "e9c6a5f4ab0f23b1ce8f9ac7624786216fe303c05ce1284eaa44d42cb69222c0"
+    },
+    "frozen": {
+      "6": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 862
+  },
+  {
+    "engine": "threads",
+    "threads": 1,
+    "program": "blastp",
+    "cases": [
+      "e2d.blastp.fast.0"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2d_p_qmulti.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_p_s3.faa",
+      "-task",
+      "blastp-fast",
+      "-query_loc",
+      "100-400"
+    ],
+    "formats": {
+      "0": "960a0ab437e952e18ac16b4f8527cde274e5fb83f7074cee535a370dd395d156",
+      "6": "23a978ea9fe3bf5e4b7eea0002ca77d77ec5248675cf21ca3ba15437dbdf0fe4",
+      "7": "2b6c41dcccaf4a1ee62d5efedc3011918e46ce885c2b3cef1437ee9362601ee5"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 3
+  },
+  {
+    "engine": "threads",
+    "threads": 2,
+    "program": "blastp",
+    "cases": [
+      "e2d.blastp.fast.0"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2d_p_qmulti.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_p_s3.faa",
+      "-task",
+      "blastp-fast",
+      "-query_loc",
+      "100-400"
+    ],
+    "formats": {
+      "0": "960a0ab437e952e18ac16b4f8527cde274e5fb83f7074cee535a370dd395d156",
+      "6": "23a978ea9fe3bf5e4b7eea0002ca77d77ec5248675cf21ca3ba15437dbdf0fe4",
+      "7": "2b6c41dcccaf4a1ee62d5efedc3011918e46ce885c2b3cef1437ee9362601ee5"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 3
+  },
+  {
+    "engine": "threads",
+    "threads": 4,
+    "program": "blastp",
+    "cases": [
+      "e2d.blastp.fast.0"
+    ],
+    "argv": [
+      "blastp",
+      "-query",
+      "tests/fasta/outfmt0/e2d_p_qmulti.faa",
+      "-subject",
+      "tests/fasta/outfmt0/e2d_p_s3.faa",
+      "-task",
+      "blastp-fast",
+      "-query_loc",
+      "100-400"
+    ],
+    "formats": {
+      "0": "960a0ab437e952e18ac16b4f8527cde274e5fb83f7074cee535a370dd395d156",
+      "6": "23a978ea9fe3bf5e4b7eea0002ca77d77ec5248675cf21ca3ba15437dbdf0fe4",
+      "7": "2b6c41dcccaf4a1ee62d5efedc3011918e46ce885c2b3cef1437ee9362601ee5"
+    },
+    "frozen": {
+      "0": true
+    },
+    "diagnostics": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "hits": 3
+  }
+]

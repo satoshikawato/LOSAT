@@ -58,9 +58,15 @@ fn db_gencode_controls_local_subject_search_translation() {
         window_size: 40,
         outfmt: "6".to_string(),
         culling_limit: 0,
+        query_loc: None,
+        subject_loc: None,
     };
 
-    run(args).expect("tblastx run");
+    run(
+        args,
+        LOSAT::blastinput::ncbi_environment::ApplicationSettings::default(),
+    )
+    .expect("tblastx run");
     let output = fs::read_to_string(&out).expect("read tblastx output");
 
     let has_full_length_w_hit = output.lines().any(|line| {

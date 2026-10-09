@@ -1,6 +1,6 @@
 //! Warnings that NCBI writes to standard error for a search, whatever the output format.
 
-use bio::io::fasta;
+use crate::blastinput::fasta_reader::InputRecord;
 use std::io::{self, Write};
 
 /// The warnings that NCBI posts between the reports of a search: the title warnings of a
@@ -63,23 +63,62 @@ impl QueryWarnings<'_> {
 /// 	    BLAST_PROF_START( APP.LOOP.PRE );
 ///             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
 /// ```
-pub fn prepend_batch_title_warnings(
+pub fn prepend_batch_title_warnings<R: InputRecord, W: AsRef<[u8]>>(
     lines: &mut [Vec<u8>],
-    queries: &[fasta::Record],
+    queries: &[R],
     lengths: &[usize],
     batch_size: usize,
-    title_warning: impl Fn(&fasta::Record) -> &'static [u8],
+    title_warning: impl Fn(&R) -> W,
 ) {
     for range in crate::blastinput::query_batch::query_batches(lengths, batch_size) {
-        let mut warnings: Vec<u8> = queries[range.clone()]
-            .iter()
-            .flat_map(|query| title_warning(query).iter().copied())
-            .collect();
+        let mut warnings: Vec<u8> = Vec::new();
+        for query in &queries[range.clone()] {
+            warnings.extend_from_slice(title_warning(query).as_ref());
+        }
         if let Some(first) = lines.get_mut(range.start) {
             warnings.append(first);
             *first = warnings;
         }
     }
+}
+
+/// `prepend_batch_title_warnings` for the batches of a query input read with
+/// `-query_loc` (`seq_range::QueryInput::batches`): NCBI's reader reads every record of a
+/// batch, also those it skips, so their title warnings go before the first searched query
+/// of the batch. `lines` are by searched query. Returns the title warnings of the last
+/// batch when it has no searched query: NCBI writes them as it reads that batch, then
+/// stops (`Empty CBlastQueryVector`).
+///
+/// NCBI reference: c++/src/algo/blast/blastinput/blast_input.cpp:144-155
+/// ```c++
+///         CRef<CBlastSearchQuery> q;
+///         try { q.Reset(m_Source->GetNextSequence(scope)); }
+///         ...
+///         catch (const exception&) {
+///             continue; //SB-2307. ignore well formed, not found accession
+///         }
+/// ```
+pub fn prepend_ranged_batch_title_warnings<R: InputRecord, W: AsRef<[u8]>>(
+    lines: &mut [Vec<u8>],
+    input: &[R],
+    batches: &[crate::blastinput::seq_range::RangedBatch],
+    title_warning: impl Fn(&R) -> W,
+) -> Vec<u8> {
+    let mut unsearched = Vec::new();
+    for batch in batches {
+        let mut warnings: Vec<u8> = Vec::new();
+        for query in &input[batch.input.clone()] {
+            warnings.extend_from_slice(title_warning(query).as_ref());
+        }
+        match lines.get_mut(batch.searched.start) {
+            Some(first) if !batch.searched.is_empty() => {
+                warnings.append(first);
+                *first = warnings;
+            }
+            _ => unsearched = warnings,
+        }
+    }
+    unsearched
 }
 
 /// The warning for a query whose ungapped Karlin-Altschul parameters cannot be computed.
@@ -130,7 +169,7 @@ pub fn prepend_batch_title_warnings(
 ///
 /// `index` is the 0-based position of the query in the input; `program` is the lower-case
 /// program name that NCBI's diagnostics print (`[tblastn]`, `[blastn]`).
-pub fn invalid_query_warning(program: &str, index: usize, query: &fasta::Record) -> Vec<u8> {
+pub fn invalid_query_warning<R: InputRecord>(program: &str, index: usize, query: &R) -> Vec<u8> {
     query_warning(program, index, query, &[INVALID_QUERY_MESSAGE.to_string()])
 }
 
@@ -172,10 +211,10 @@ pub const INVALID_QUERY_MESSAGE: &str = "Could not calculate ungapped Karlin-Alt
 ///                         (new CSearchMessage(eBlastSevWarning, index, warnings));
 ///                     messages[index].push_back(m);
 /// ```
-pub fn query_warning(
+pub fn query_warning<R: InputRecord>(
     program: &str,
     index: usize,
-    query: &fasta::Record,
+    query: &R,
     messages: &[String],
 ) -> Vec<u8> {
     if messages.is_empty() {
@@ -184,15 +223,10 @@ pub fn query_warning(
     let mut messages = messages.to_vec();
     messages.sort();
     messages.dedup();
-    let mut query_id = format!("Query_{} {}", index + 1, query.id()).into_bytes();
-    if let Some(desc) = query.desc() {
-        query_id.extend_from_slice(b" ");
-        query_id.extend_from_slice(desc.as_bytes());
-    }
-    if query_id.len() > 35 {
-        query_id.truncate(25);
-        query_id.extend_from_slice(b".. ");
-    }
+    let query_id = warning_query_id(
+        format!("Query_{}", index + 1).as_bytes(),
+        &query.title_bytes(),
+    );
     let mut warning = format!("Warning: [{program}] ").into_bytes();
     warning.extend_from_slice(&query_id);
     warning.extend_from_slice(b": ");
@@ -202,6 +236,38 @@ pub fn query_warning(
     }
     warning.push(b'\n');
     warning
+}
+
+/// The query ID that NCBI's warnings of a query show: the local ID (`Query_N`), then a
+/// space and the title when the query has one, cut to its first 25 bytes and `.. ` when
+/// it is longer than 35 bytes. The bytes are the title's, raw; the cut can fall inside a
+/// UTF-8 sequence.
+///
+/// NCBI reference: c++/src/algo/blast/api/blast_setup_cxx.cpp:533-543
+/// ```c++
+///             if (const CSeq_id* id = queries.GetSeqId(index)) {
+///                 const string kTitle = queries.GetTitle(index);
+///                 string query_id = id->GetSeqIdString();
+///                 if (kTitle != kEmptyStr) {
+///                     query_id += " " + kTitle;
+///                 }
+///                  if(query_id.size() > 35) {
+///                 	 query_id = query_id.substr(0, 25) + ".. ";
+///                  }
+///
+///                 messages[index].SetQueryId(query_id);
+/// ```
+pub fn warning_query_id(local_id: &[u8], title: &[u8]) -> Vec<u8> {
+    let mut query_id = local_id.to_vec();
+    if !title.is_empty() {
+        query_id.push(b' ');
+        query_id.extend_from_slice(title);
+    }
+    if query_id.len() > 35 {
+        query_id.truncate(25);
+        query_id.extend_from_slice(b".. ");
+    }
+    query_id
 }
 
 /// The warning of a protein query with pyrrolysine (O), which NCBI reads as X, or `None`.
@@ -264,7 +330,7 @@ mod tests {
     fn messages_of_a_query_are_in_ncbis_sorted_order() {
         // NCBI blast_aux.cpp:1043-1054 sorts a query's messages (same error id and
         // severity, so by text) and removes repeats.
-        let query = fasta::Record::with_attrs("q1", None, b"OOO");
+        let query = bio::io::fasta::Record::with_attrs("q1", None, b"OOO");
         let o = replaced_o_message(b"OOO").unwrap();
         let line = query_warning(
             "blastp",
@@ -284,13 +350,13 @@ mod tests {
     fn title_warnings_go_before_the_first_report_of_each_batch() {
         let records: Vec<_> = ["a", "b", "c"]
             .iter()
-            .map(|id| fasta::Record::with_attrs(id, None, b"ACDEFGHIKL"))
+            .map(|id| bio::io::fasta::Record::with_attrs(id, None, b"ACDEFGHIKL"))
             .collect();
         let mut lines = vec![b"w0\n".to_vec(), Vec::new(), b"w2\n".to_vec()];
         // Batches of 15 residues: [a, b] and [c].
         prepend_batch_title_warnings(&mut lines, &records, &[10, 10, 10], 15, |record| {
             if record.id() == "c" {
-                b""
+                &b""[..]
             } else {
                 b"T\n"
             }
@@ -307,14 +373,52 @@ mod tests {
     // warning keeps NCBI's trailing space and newline.
     #[test]
     fn invalid_query_warning_matches_ncbi_bytes() {
-        let short = fasta::Record::with_attrs("nohit_query", None, b"W");
+        let short = bio::io::fasta::Record::with_attrs("nohit_query", None, b"W");
         assert_eq!(
             invalid_query_warning("tblastn", 0, &short),
             b"Warning: [tblastn] Query_1 nohit_query: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options \n"
         );
-        let long =
-            fasta::Record::with_attrs("long_header", Some("abcdefghijklmnopqrstuvwxyz"), b"W");
+        let long = bio::io::fasta::Record::with_attrs(
+            "long_header",
+            Some("abcdefghijklmnopqrstuvwxyz"),
+            b"W",
+        );
         assert!(invalid_query_warning("blastn", 1, &long)
             .starts_with(b"Warning: [blastn] Query_2 long_header abcde.. : "));
+    }
+
+    // NCBI BLAST+ 2.17.0, the invalid-query warning of BLASTN for one query with each
+    // defline (inventory range RP, `scratch_RP/warn/iq_*_nuc_q.fa` and
+    // `warn/out/iq_*_blastn_6.err`): the query ID between `[blastn] ` and `: Could`.
+    #[test]
+    fn warning_query_ids_follow_the_ncbi_oracle() {
+        use crate::blastinput::fasta_reader::{read_all, FastaInputSource, ReaderConfig};
+        let w = |count: usize| vec![b'w'; count];
+        let long = [&b"id "[..], &w(100)].concat();
+        let cjk = [&[b'a'; 23][..], b"\xe6\xbc\xa2", &[b'z'; 14]].concat();
+        let z27 = vec![b'z'; 27];
+        let z28 = vec![b'z'; 28];
+        for (defline, shown) in [
+            (&b"sid sdesc"[..], &b"Query_1 sid sdesc"[..]),
+            (b"", b"Query_1"),
+            (b"id \xc3\xa9 x", b"Query_1 id \xc3\xa9 x"),
+            (b"id \xe9 x", b"Query_1 id \xe9 x"),
+            (b"id\tx", b"Query_1 id"),
+            (&long, b"Query_1 id wwwwwwwwwwwwww.. "),
+            (&cjk, b"Query_1 aaaaaaaaaaaaaaaaa.. "),
+            (b"id x\xff", b"Query_1 id x\xff"),
+            (&z27, b"Query_1 zzzzzzzzzzzzzzzzzzzzzzzzzzz"),
+            (&z28, b"Query_1 zzzzzzzzzzzzzzzzz.. "),
+        ] {
+            let bytes = [&b">"[..], defline, b"\nACGTACGT\n"].concat();
+            let mut source =
+                FastaInputSource::from_bytes(&bytes, ReaderConfig::query("BLASTN", false, false));
+            let records = read_all(&mut source, &mut |_| Ok(())).unwrap();
+            assert_eq!(
+                warning_query_id(records[0].local_id.as_bytes(), &records[0].title),
+                shown,
+                "{defline:?}"
+            );
+        }
     }
 }

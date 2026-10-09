@@ -1,0 +1,5 @@
+commit: bd63f29adf4ec80c96fc08b866aaae17aa8a8c97
+uncommitted files under web/app: 0
+purpose: V-BR (tests/e2e/engine.spec.ts) after TBLASTX outfmt 0/7 became certified (supplementary to run-20261006T022027Z)
+native: /home/kawato/.cache/losat-web-gui-target/app-s12-native/release/LOSAT
+reactors: /home/kawato/.cache/losat-web-gui-target/app-s12-reactors (same as the gate run)

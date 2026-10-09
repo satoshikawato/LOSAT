@@ -9,6 +9,7 @@ use LOSAT::api::local_blast::{
     run_local_blastn, run_local_blastp, run_local_tblastn, run_local_tblastx, FormatObserver,
     FormatOutput, HspIndex, OutputSink, ReportOutputs,
 };
+use LOSAT::blastinput::fasta_reader::FastaRecord;
 use LOSAT::cli::{Cli, Commands};
 use LOSAT::report::PairwiseHit;
 
@@ -74,26 +75,39 @@ pub fn parse(words: &[&str]) -> Result<(Program, Commands), String> {
     Ok((program, cli.command))
 }
 
-/// `validate`: `parse`, then BLASTN's `-dust` value and the scoring options that NCBI
-/// rejects or that its Karlin-Altschul tables do not support, with NCBI's message (for a
-/// batch of one query), and TBLASTX's checks of its options alone (NCBI's `-evalue`
-/// check, the options that LOSAT's TBLASTX rejects).
+/// `validate`: `parse`, then the syntax of `-subject_loc` and `-query_loc`, BLASTN's
+/// `-dust` value and the scoring options that NCBI rejects or that its Karlin-Altschul
+/// tables do not support, with NCBI's message (for a batch of one query), and TBLASTX's
+/// checks of its options alone (NCBI's `-evalue` check, the options that LOSAT's TBLASTX
+/// rejects).
 /// `run` leaves them to the engine, which reports them as the CLI does.
 pub fn validate(words: &[&str]) -> Result<(), String> {
+    use LOSAT::blastinput::seq_range::{parse_optional_range, RangeRole};
+    // The ranges' syntax, in NCBI's order: the subject range where the subjects are read
+    // (before the other option handlers), the query range with the query options (the
+    // engine's option checks read it). Whether a range fits the records is checked by
+    // `run`, which has them.
+    let subject_range = |subject_loc: Option<&str>, program: &str| {
+        parse_optional_range(subject_loc, RangeRole::Subject, program).map(|_| ())
+    };
     match parse(words)? {
-        (_, Commands::Blastn(mut args)) => args
-            .resolve_dust()
+        (_, Commands::Blastn(mut args)) => subject_range(args.subject_loc.as_deref(), "BLASTN")
+            .and_then(|()| args.resolve_dust())
+            .and_then(|()| {
+                parse_optional_range(args.query_loc.as_deref(), RangeRole::Query, "BLASTN")
+                    .map(|_| ())
+            })
             .and_then(|()| LOSAT::algorithm::blastn::scoring::check_scoring(&args))
             .map_err(|error| format!("{error:#}"))?,
-        (_, Commands::Tblastx(args)) => {
-            LOSAT::algorithm::tblastx::blast_engine::check_options(&args)
-                .map_err(|error| format!("{error:#}"))?
-        }
-        (_, Commands::Blastp(args)) => LOSAT::algorithm::blastp::blast_engine::check_options(&args)
+        (_, Commands::Tblastx(args)) => subject_range(args.subject_loc.as_deref(), "TBLASTX")
+            .and_then(|()| LOSAT::algorithm::tblastx::blast_engine::check_options(&args))
             .map_err(|error| format!("{error:#}"))?,
-        (_, Commands::Tblastn(args)) => {
-            LOSAT::algorithm::tblastn::check_options(&args).map_err(|error| format!("{error:#}"))?
-        }
+        (_, Commands::Blastp(args)) => subject_range(args.subject_loc.as_deref(), "BLASTP")
+            .and_then(|()| LOSAT::algorithm::blastp::blast_engine::check_options(&args))
+            .map_err(|error| format!("{error:#}"))?,
+        (_, Commands::Tblastn(args)) => subject_range(args.subject_loc.as_deref(), "TBLASTN")
+            .and_then(|()| LOSAT::algorithm::tblastn::check_options(&args))
+            .map_err(|error| format!("{error:#}"))?,
         _ => {}
     }
     Ok(())
@@ -185,6 +199,17 @@ impl FormatObserver for RangeRecorder {
     }
 }
 
+/// The records of NCBI's reader made from the registered `bio` records (`Query_N`,
+/// `Subject_N`); `protein` is the molecule of the input (BLASTP's query and subjects,
+/// TBLASTN's query).
+fn reader_records(records: &[fasta::Record], prefix: &str, protein: bool) -> Vec<FastaRecord> {
+    records
+        .iter()
+        .enumerate()
+        .map(|(index, record)| FastaRecord::from_bio(record, index + 1, prefix, protein))
+        .collect()
+}
+
 /// Runs one search and emits its streams. On failure nothing more is emitted and the
 /// host discards what it received.
 pub fn run(
@@ -225,10 +250,35 @@ pub fn run(
             observer: Some(&mut recorder),
         };
         let result = match command {
-            Commands::Blastp(args) => run_local_blastp(args, query, subject, "", "", &mut outputs),
-            Commands::Tblastn(args) => run_local_tblastn(args, query, subject, &mut outputs),
-            Commands::Blastn(args) => run_local_blastn(args, query, subject, &mut outputs),
-            Commands::Tblastx(args) => run_local_tblastx(args, query, subject, &mut outputs),
+            // The registered records enter the searches as NCBI's reader's records
+            // (`FastaRecord::from_bio`): `register` reads only inputs that `bio` reads as
+            // NCBI does (port plan, steps S3, S5, S6, S7 and S10).
+            Commands::Blastp(args) => run_local_blastp(
+                args,
+                &reader_records(query, "Query_", true),
+                &reader_records(subject, "Subject_", true),
+                "",
+                "",
+                &mut outputs,
+            ),
+            Commands::Tblastn(args) => run_local_tblastn(
+                args,
+                &reader_records(query, "Query_", true),
+                &reader_records(subject, "Subject_", false),
+                &mut outputs,
+            ),
+            Commands::Blastn(args) => run_local_blastn(
+                args,
+                &reader_records(query, "Query_", false),
+                &reader_records(subject, "Subject_", false),
+                &mut outputs,
+            ),
+            Commands::Tblastx(args) => run_local_tblastx(
+                args,
+                &reader_records(query, "Query_", false),
+                &reader_records(subject, "Subject_", false),
+                &mut outputs,
+            ),
             Commands::Blastx(_) => unreachable!("rejected by Program::parse"),
         };
         result.map_err(|error| format!("{error:#}"))?;

@@ -5,7 +5,8 @@ use std::sync::Arc;
 use crate::api::local_blast::{FormatProbe, HspIndex};
 use crate::cli::NativeError;
 use crate::common::{GapEditOp, Hit};
-use crate::report::{write_hit_fields, OutputConfig};
+use crate::report::outfmt6::write_hit_fields_bytes;
+use crate::report::OutputConfig;
 
 use super::tracing as blastn_trace;
 
@@ -178,12 +179,19 @@ pub(crate) const NCBI_BLASTN_VERSION: &str = "2.17.0+";
 // `None`), so its header has no count (local_blast.cpp:177-207).
 fn write_blastn_outfmt7_header<W: Write>(
     writer: &mut W,
-    query_title: &str,
+    query_title: &[u8],
     subject_title: &str,
     num_hits: Option<usize>,
 ) -> io::Result<()> {
     writeln!(writer, "# BLASTN {NCBI_BLASTN_VERSION}")?;
-    writeln!(writer, "# Query: {query_title}")?;
+    // NCBI reference: c++/src/objtools/align_format/tabular.cpp:1305-1308
+    // ```c
+    //     CAlignFormatUtil::AcknowledgeBlastQuery(bioseq, kLineLength, m_Ostream,
+    //                                             m_ParseLocalIds, kHtmlFormat,
+    //                                             kTabularFormat, rid);
+    // ```
+    // The title's bytes (`write_outfmt7_query_line`).
+    crate::report::outfmt6::write_outfmt7_query_line(writer, query_title)?;
     writeln!(writer, "# Database: {subject_title}")?;
     let Some(num_hits) = num_hits else {
         return Ok(());
@@ -1143,10 +1151,10 @@ impl<L: HitListEntry> HitList<L> {
 pub fn write_output_blastn_hitlists_to_writer<W: Write>(
     hit_lists: &[Option<BlastnHitList>],
     writer: &mut W,
-    query_ids: &[Arc<str>],
-    subject_ids: &[Arc<str>],
+    query_ids: &[Arc<[u8]>],
+    subject_ids: &[Arc<[u8]>],
     output_format: BlastnOutputFormat,
-    query_titles: &[Arc<str>],
+    query_titles: &[Arc<[u8]>],
     subject_title: &str,
     unsearched: &[bool],
     epilog: bool,
@@ -1171,7 +1179,7 @@ pub fn write_output_blastn_hitlists_to_writer<W: Write>(
             let query_title = query_titles
                 .get(q_idx)
                 .map(|title| title.as_ref())
-                .unwrap_or("unknown");
+                .unwrap_or(b"unknown");
             write_blastn_outfmt7_header(
                 writer,
                 query_title,
@@ -1189,11 +1197,11 @@ pub fn write_output_blastn_hitlists_to_writer<W: Write>(
                 let query_id = query_ids
                     .get(hsp.q_idx as usize)
                     .map(|id| id.as_ref())
-                    .unwrap_or("unknown");
+                    .unwrap_or(b"unknown");
                 let subject_id = subject_ids
                     .get(hsp.s_idx as usize)
                     .map(|id| id.as_ref())
-                    .unwrap_or("unknown");
+                    .unwrap_or(b"unknown");
                 // NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
                 // ```c
                 // ITERATE(list<ETabularField>, iter, m_FieldsToShow) {
@@ -1208,7 +1216,7 @@ pub fn write_output_blastn_hitlists_to_writer<W: Write>(
                     "hitlist",
                     hsp.q_idx * 2 + if hsp.query_frame < 0 { 1 } else { 0 },
                     hsp.s_idx as usize,
-                    subject_id,
+                    &String::from_utf8_lossy(subject_id),
                     hsp.internal_q_offset_0,
                     hsp.internal_q_end_0,
                     hsp.internal_s_offset_0,
@@ -1220,8 +1228,8 @@ pub fn write_output_blastn_hitlists_to_writer<W: Write>(
                         "hitlist",
                         format!(
                             "query={} subject={} q={}..{} s={}..{} raw_score={} bit_score={:.12} evalue={:.12e} length={} identities={} mismatches={} gapopen={}",
-                            query_id,
-                            subject_id,
+                            String::from_utf8_lossy(query_id),
+                            String::from_utf8_lossy(subject_id),
                             hsp.q_start,
                             hsp.q_end,
                             hsp.s_start,
@@ -1253,7 +1261,7 @@ pub fn write_output_blastn_hitlists_to_writer<W: Write>(
                     writer.flush()?;
                     probe.begin(hsp_index);
                 }
-                write_hit_fields(
+                write_hit_fields_bytes(
                     writer,
                     query_id,
                     subject_id,
@@ -1598,9 +1606,9 @@ mod tests {
     #[test]
     fn test_blastn_outfmt7_header_matches_ncbi_shape() {
         let hit_lists = vec![None];
-        let query_ids = vec![Arc::<str>::from("query")];
-        let subject_ids = vec![Arc::<str>::from("subject")];
-        let query_titles = vec![Arc::<str>::from("query full description")];
+        let query_ids = vec![Arc::<[u8]>::from(&b"query"[..])];
+        let subject_ids = vec![Arc::<[u8]>::from(&b"subject"[..])];
+        let query_titles = vec![Arc::<[u8]>::from(&b"query full description"[..])];
         let mut output = Vec::new();
 
         write_output_blastn_hitlists_to_writer(

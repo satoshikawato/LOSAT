@@ -10,6 +10,8 @@ const completed = computed(() => props.runs.filter((run) => run.status === 'comp
 const selectedId = ref<string>();
 const format = ref<OutputFormat>(6);
 const text = ref('');
+/** Which run and format `text` shows ("<number>:<format>"), once it is read. */
+const shown = ref('');
 
 const selected = computed(
   () => completed.value.find((run) => run.snapshot.runId === selectedId.value) ?? completed.value.at(-1),
@@ -18,7 +20,12 @@ const selected = computed(
 watch(
   [selected, format],
   async ([run, fmt]) => {
-    text.value = run === undefined ? '' : await props.coordinator.readOutput(run.snapshot.runId, fmt);
+    shown.value = '';
+    const value = run === undefined ? '' : await props.coordinator.readOutput(run.snapshot.runId, fmt);
+    // A later selection may have been read first.
+    if (run !== selected.value || fmt !== format.value) return;
+    text.value = value;
+    shown.value = run === undefined ? '' : `${run.snapshot.number}:${fmt}`;
   },
   { immediate: true },
 );
@@ -50,7 +57,7 @@ watch(
         outfmt {{ f }}
       </button>
     </nav>
-    <pre class="output" data-testid="result-output">{{ text }}</pre>
+    <pre class="output" data-testid="result-output" :data-shown="shown">{{ text }}</pre>
     <button data-testid="export-output" @click="coordinator.exportOutput(selected.snapshot.runId, format)">
       Export outfmt {{ format }}
     </button>

@@ -52,7 +52,11 @@ fn megablast_automatic_xdrop_preserves_oracle_scripts() {
     let LOSAT::cli::Commands::Blastn(args) = cli.command else {
         panic!("expected blastn command");
     };
-    LOSAT::algorithm::blastn::run(args).unwrap();
+    LOSAT::algorithm::blastn::run(
+        args,
+        LOSAT::blastinput::ncbi_environment::ApplicationSettings::default(),
+    )
+    .unwrap();
     let actual = std::fs::read(&output).unwrap();
     std::fs::remove_dir_all(&directory).unwrap();
     assert_eq!(

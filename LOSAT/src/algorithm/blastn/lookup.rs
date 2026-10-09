@@ -2,9 +2,9 @@ use super::constants::MAX_DIRECT_LOOKUP_WORD_SIZE;
 use super::disc_lookup::{
     compute_discontiguous_index, get_disc_template_type, DiscTemplateType, DiscWordType,
 };
+use crate::blastinput::fasta_reader::InputRecord;
 use crate::core::blast_encoding::{encode_subject_ncbi2na_packed, COMPRESSION_RATIO};
 use crate::utils::dust::MaskedInterval;
-use bio::io::fasta;
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:37-43
 // ```c
@@ -256,10 +256,10 @@ fn packed_kmer_at(packed: &[u8], start: usize, k: usize) -> u64 {
 /// if (!PV_TEST(pv, word, pv_array_bts)) continue;
 /// if ((counts[index] & 0xf) < max_word_count) counts[index]++;
 /// ```
-pub fn build_db_word_counts(
+pub fn build_db_word_counts<R: InputRecord>(
     queries_blastna: &[Vec<u8>],
     query_masks: &[Vec<MaskedInterval>],
-    subjects: &[fasta::Record],
+    subjects: &[R],
     lut_word_length: usize,
     full_word_size: usize,
     max_word_count: u8,

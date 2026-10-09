@@ -1,0 +1,96 @@
+--------------------------------------------------------------------------------
+Profile data file 'cg_full_halfsub.out' (creator: callgrind-3.22.0)
+--------------------------------------------------------------------------------
+I1 cache: 
+D1 cache: 
+LL cache: 
+Timerange: Basic block 0 - 72118385
+Trigger: Program termination
+Profiled target:  /home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT tblastn -task tblastn -query docs/evidence/tlosan_stage_g/benchmark/first_AvCLPV_protein.faa -subject /tmp/claude-1000/-mnt-c-Users-genom-GitHub-LOSAT/e09c9cb4-4139-44a0-a544-40af9a99d58f/scratchpad/tblastn-profile/subject_half.fasta -outfmt 6 -num_threads 1 (PID 1059623, part 1)
+Events recorded:  Ir
+Events shown:     Ir
+Event sort order: Ir
+Thresholds:       99
+Include dirs:     
+User annotated:   
+Auto-annotation:  on
+
+--------------------------------------------------------------------------------
+Ir                   
+--------------------------------------------------------------------------------
+317,978,243 (100.0%)  PROGRAM TOTALS
+
+--------------------------------------------------------------------------------
+Ir                    file:function
+--------------------------------------------------------------------------------
+317,978,243 (100.0%)  ???:0x000000000001f540 [/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2]
+317,614,261 (99.89%)  ???:(below main) [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+317,614,249 (99.89%)  ./csu/../csu/libc-start.c:__libc_start_main@@GLIBC_2.34 [/usr/lib/x86_64-linux-gnu/libc.so.6]
+317,614,066 (99.89%)  ./csu/../sysdeps/nptl/libc_start_call_main.h:(below main) [/usr/lib/x86_64-linux-gnu/libc.so.6]
+317,612,013 (99.88%)  ???:main [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+317,501,644 (99.85%)  ???:std::sys::backtrace::__rust_begin_short_backtrace [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+317,501,640 (99.85%)  ???:LOSAT::main [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+317,094,286 (99.72%)  ???:LOSAT::algorithm::tblastn::args::TblastnArgs::run [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+315,205,864 (99.13%)  ???:LOSAT::algorithm::tblastn::stage_d_pipeline::run_local_for_report_threads::{{closure}} [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+315,204,830 (99.13%)  ???:LOSAT::algorithm::tblastn::stage_d_pipeline::run_local_search_with_pool [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+160,460,265 (50.46%)  ???:LOSAT::algorithm::tblastn::stage_d_pipeline::run_local_search_with_pool::{{closure}} [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+126,369,266 (39.74%)  ???:LOSAT::algorithm::tblastn::kappa::redo_preliminary_match [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+126,357,095 (39.74%)  ???:LOSAT::core::composition_adjustment::redo_alignment::blast_redo_one_match_with_workspace_queries_and_matrix_observed [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+ 80,521,558 (25.32%)  ???:LOSAT::algorithm::tblastx::translation::generate_frames [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+ 78,330,441 (24.63%)  ???:LOSAT::algorithm::tblastx::translation::translate_sequence [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+ 72,448,391 (22.78%)  ???:LOSAT::utils::genetic_code::GeneticCode::get [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+ 52,317,235 (16.45%)  ???:LOSAT::core::composition_adjustment::adjust_scores::composition_matrix_adjust [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+ 42,813,756 (13.46%)  ???:LOSAT::algorithm::tblastn::kappa::tblastn_redo_one_alignment_callback [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+ 42,808,156 (13.46%)  ???:LOSAT::algorithm::blastp::gapalign::blast_gapped_alignment_with_traceback_with_scratch [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+ 42,757,105 (13.45%)  ???:LOSAT::algorithm::blastp::gapalign::align_ex_protein [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+ 38,336,859 (12.06%)  ???:LOSAT::utils::seg::SegMasker::mask_sequence [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+ 38,327,521 (12.05%)  ???:LOSAT::utils::seg::SegMasker::mask_sequence::seg_seq [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+ 33,953,129 (10.68%)  ???:LOSAT::algorithm::tblastx::lookup::backbone::build_ncbi_lookup_for_profile [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+ 30,665,059 ( 9.64%)  ???:LOSAT::core::composition_adjustment::redo_alignment::translated_subject_get_range [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+ 25,656,646 ( 8.07%)  ???:LOSAT::algorithm::tblastn::search_init::find_protein_init_hsps_by_chunk_with_mask_mode::{{closure}} [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+ 18,553,654 ( 5.83%)  ???:LOSAT::utils::seg::SegWindow::shift_win1 [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+ 17,256,029 ( 5.43%)  ???:LOSAT::algorithm::tblastx::lookup::backbone::build_lookup_from_prepared [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+ 16,586,726 ( 5.22%)  ???:LOSAT::algorithm::tblastx::lookup::backbone::blast_aa_add_word_hits_core'2 [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+ 16,543,884 ( 5.20%)  ???:LOSAT::stats::karlin_calc::compute_karlin_params_ungapped [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+ 16,054,844 ( 5.05%)  ???:LOSAT::algorithm::tblastn::search_gapped::preliminary_protein_hsps_with_comparison_input::{{closure}} [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+ 12,651,658 ( 3.98%)  ???:LOSAT::algorithm::blastp::gapalign::blastp_score_only_gapped_alignment_with_scratch [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+ 12,646,240 ( 3.98%)  ???:LOSAT::algorithm::blastp::gapalign::align_ex_protein_score_only [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+ 11,539,060 ( 3.63%)  ???:<core::iter::adapters::GenericShunt<I,R> as core::iter::traits::iterator::Iterator>::next [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+ 11,504,419 ( 3.62%)  ???:LOSAT::algorithm::tblastn::search_seed::encode_tblastn_lookup_query [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+ 11,504,275 ( 3.62%)  ???:LOSAT::algorithm::blastp::encoding::encode_protein_query_frame_with_seg [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+ 10,313,304 ( 3.24%)  ./math/./w_log_template.c:log@@GLIBC_2.29 [/usr/lib/x86_64-linux-gnu/libm.so.6]
+  9,417,718 ( 2.96%)  ???:LOSAT::algorithm::tblastx::lookup::backbone::blast_aa_add_word_hits_core [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+  9,316,729 ( 2.93%)  ???:0x0000000004888340 [???]
+  8,918,099 ( 2.80%)  ./math/../sysdeps/ieee754/dbl-64/e_log.c:__ieee754_log_fma [/usr/lib/x86_64-linux-gnu/libm.so.6]
+  8,882,622 ( 2.79%)  ???:LOSAT::algorithm::tblastx::lookup::backbone::prepare_lookup_query [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+  8,848,895 ( 2.78%)  ./string/../sysdeps/x86_64/multiarch/memmove-vec-unaligned-erms.S:__memcpy_avx_unaligned_erms [/usr/lib/x86_64-linux-gnu/libc.so.6]
+  7,814,316 ( 2.46%)  ???:LOSAT::algorithm::tblastx::lookup::backbone::ideal_karlin_params_for_matrix [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+  5,857,429 ( 1.84%)  ./malloc/./malloc/malloc.c:calloc [/usr/lib/x86_64-linux-gnu/libc.so.6]
+  5,403,793 ( 1.70%)  ???:core::iter::adapters::try_process [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+  5,291,399 ( 1.66%)  ???:alloc::raw_vec::RawVecInner<A>::finish_grow [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+  5,178,702 ( 1.63%)  ./malloc/./malloc/malloc.c:realloc [/usr/lib/x86_64-linux-gnu/libc.so.6]
+  5,150,051 ( 1.62%)  ./malloc/./malloc/malloc.c:_int_realloc [/usr/lib/x86_64-linux-gnu/libc.so.6]
+  5,012,671 ( 1.58%)  ???:0x00000000049896b0 [???]
+  5,012,104 ( 1.58%)  ./malloc/../string/bits/string_fortified.h:_int_realloc
+  4,785,891 ( 1.51%)  ???:alloc::raw_vec::RawVec<T,A>::grow_one [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+  4,344,058 ( 1.37%)  ???:LOSAT::utils::seg::SegWindow::state_on [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+  3,995,959 ( 1.26%)  ???:LOSAT::algorithm::tblastn::stage_d_kappa_params::local_kappa_redo_params [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+  3,919,585 ( 1.23%)  ???:LOSAT::core::blast_stat::composition::compute_blosum62_ideal_karlin_params [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+  3,840,597 ( 1.21%)  ???:LOSAT::algorithm::tblastn::kappa::postredo_converted_stats_with_matrix [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+  3,802,319 ( 1.20%)  ???:LOSAT::algorithm::tblastn::search_gapped::TargetTranslation::get [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+  3,785,691 ( 1.19%)  ./malloc/./malloc/malloc.c:free [/usr/lib/x86_64-linux-gnu/libc.so.6]
+  3,692,357 ( 1.16%)  ???:LOSAT::algorithm::tblastx::lookup::backbone::blast_lookup_add_word_hit [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+  3,224,967 ( 1.01%)  ???:LOSAT::algorithm::blastp::extension::extend_two_hit_impl [/home/kawato/.cache/losat-web-gui-target/app-s09-native/release/LOSAT]
+  3,131,699 ( 0.98%)  ./malloc/./malloc/malloc.c:_int_malloc [/usr/lib/x86_64-linux-gnu/libc.so.6]
+
+--------------------------------------------------------------------------------
+The following files chosen for auto-annotation could not be found:
+--------------------------------------------------------------------------------
+  ./csu/../csu/libc-start.c
+  ./csu/../sysdeps/nptl/libc_start_call_main.h
+  ./malloc/../string/bits/string_fortified.h
+  ./malloc/./malloc/malloc.c
+  ./math/../sysdeps/ieee754/dbl-64/e_log.c
+  ./math/./w_log_template.c
+  ./string/../sysdeps/x86_64/multiarch/memmove-vec-unaligned-erms.S
+

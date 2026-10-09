@@ -270,7 +270,7 @@ pub fn ncbi_string_to_double(value: &str) -> Result<f64, NcbiDoubleError> {
     let unsigned = value.trim_start_matches(['+', '-']);
     if unsigned.len() + 1 == value.len()
         && unsigned.len() >= 5
-        && unsigned[..4].eq_ignore_ascii_case("nan(")
+        && unsigned.as_bytes()[..4].eq_ignore_ascii_case(b"nan(")
         && unsigned.ends_with(')')
         && unsigned[4..unsigned.len() - 1]
             .bytes()
@@ -1055,6 +1055,10 @@ mod tests {
         for value in [
             "+nan(", "+nan(1", "+nan(-)", "+nan(1)x", "+-nan(1)", "nan(1)",
         ] {
+            assert!(ncbi_double(value, "BLASTN").is_err(), "{value}");
+        }
+        // A character of several bytes across the fourth byte (S11 audit F-1).
+        for value in ["-xx€", "-in\u{fffd}", "+\u{fffd}\u{fffd}", "-1éé"] {
             assert!(ncbi_double(value, "BLASTN").is_err(), "{value}");
         }
         for value in ["inf", "nan", " 1", "", "e5"] {

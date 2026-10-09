@@ -308,7 +308,14 @@ pub fn protein_chunk_would_be_split(chunks: &[ProteinQueryChunk], sizes: SplitSi
 ///             TMaskedQueryRegions split_mask =
 ///                 m_UserSpecifiedMasks[qindex].RestrictToSeqInt(mask_query_loc->GetInt());
 /// ```
-pub fn protein_chunk_part(query: &[u8], part: &ChunkQuery, mask_lowercase: bool) -> Vec<u8> {
+/// With `-query_loc`, `offset` is the start of the query's interval in its record: the
+/// restriction then keeps a mask only from `from + offset` on (`restrict_masks`).
+pub fn protein_chunk_part(
+    query: &[u8],
+    part: &ChunkQuery,
+    mask_lowercase: bool,
+    offset: usize,
+) -> Vec<u8> {
     if !mask_lowercase {
         return query[part.from..part.to].to_vec();
     }
@@ -331,7 +338,7 @@ pub fn protein_chunk_part(query: &[u8], part: &ChunkQuery, mask_lowercase: bool)
         .iter()
         .map(u8::to_ascii_uppercase)
         .collect();
-    for mask in restrict_masks(&masks, part) {
+    for mask in restrict_masks(&masks, part, offset) {
         for residue in &mut residues[mask.start..mask.end] {
             *residue = residue.to_ascii_lowercase();
         }
@@ -412,7 +419,7 @@ mod tests {
             from: 4,
             to: 8,
         };
-        assert_eq!(protein_chunk_part(query, &part, true), b"fghI".to_vec());
-        assert_eq!(protein_chunk_part(query, &part, false), b"fgHI".to_vec());
+        assert_eq!(protein_chunk_part(query, &part, true, 0), b"fghI".to_vec());
+        assert_eq!(protein_chunk_part(query, &part, false, 0), b"fgHI".to_vec());
     }
 }

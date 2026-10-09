@@ -1,0 +1,8 @@
+# BLASTP 2.17.0+
+# Query: P75
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/e2d_p_sp75m.faa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 2 hits found
+P75	S75m	97.750	400	9	0	201	600	201	600	0.0	788
+P75	S75m	31.579	19	13	0	70	88	305	323	9.0	15.0
+# BLAST processed 1 queries

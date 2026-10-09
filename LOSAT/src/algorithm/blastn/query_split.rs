@@ -591,7 +591,8 @@ fn context_offsets(
 ///                                    kStrand));
 /// ```
 /// (`TSeqRange` is a `CRange`, whose constructor takes the last position.) The chunk's query
-/// block then puts the masks in the part's coordinates:
+/// block then puts the masks in the part's coordinates, from the chunk's Seq-interval in
+/// the query's record:
 ///
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:1041-1047
 /// ```c
@@ -603,18 +604,45 @@ fn context_offsets(
 ///          do not add it to the newly constructed list and free its contents. */
 ///       if (seqloc->ssr->left > seqloc->ssr->right) {
 /// ```
-pub fn restrict_masks(masks: &[MaskedInterval], part: &ChunkQuery) -> Vec<MaskedInterval> {
-    // The part is the Seq-interval [from, to - 1]; `loc` is [from, to - 1).
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_cxx.cpp:256-262
+/// ```c
+///             	int q_sl_offset = 0;
+///             	if(query_seqloc->IsInt() && (query_seqloc->GetInt().GetFrom() > 0 )) {
+///             		q_sl_offset = query_seqloc->GetInt().GetFrom();
+///             	}
+///             	s_SetSplitQuerySeqInterval(chunk, query_range, q_sl_offset, split_query_loc);
+/// ```
+/// With `-query_loc` the query's masks are in record coordinates (the searched letters'
+/// masks moved by `offset`, the start of the query's interval) and so is the chunk's
+/// Seq-interval, but the restriction above takes the part in the searched letters
+/// (`query_offset` 0): a mask survives only in `[from + offset, to - 1]`. NCBI does this
+/// for every split query with a range; LOSAT reproduces it. `offset` is 0 without a range.
+pub fn restrict_masks(
+    masks: &[MaskedInterval],
+    part: &ChunkQuery,
+    offset: usize,
+) -> Vec<MaskedInterval> {
+    // `loc` is the part [from, to - 1) in the searched letters' coordinates.
     let last = part.to - 1;
+    // The chunk's Seq-interval: [from + offset, to - 1 + offset] in the record.
+    let (interval_from, interval_to) = (part.from + offset, last + offset);
     masks
         .iter()
         .filter_map(|mask| {
-            // `TSeqRange mask` is [start, end) (the mask's last position is end - 1).
-            let left = mask.start.max(part.from);
-            let right_open = mask.end.min(last);
-            // The new Seq-interval is [left, right_open], within [from, to - 1].
-            (left < right_open)
-                .then(|| MaskedInterval::new(left - part.from, right_open - part.from + 1))
+            // `TSeqRange mask` is [start, end) in the record (the mask's last position is
+            // end - 1).
+            let left = (mask.start + offset).max(part.from);
+            let right_open = (mask.end + offset).min(last);
+            // The new Seq-interval is [left, right_open].
+            if left >= right_open {
+                return None;
+            }
+            // `BlastSeqLoc_RestrictToInterval(mask, interval_from, interval_to)`.
+            let restricted_left = left.saturating_sub(interval_from);
+            let restricted_right = right_open.min(interval_to) as isize - interval_from as isize;
+            (restricted_left as isize <= restricted_right)
+                .then(|| MaskedInterval::new(restricted_left, restricted_right as usize + 1))
         })
         .collect()
 }
@@ -731,6 +759,54 @@ mod tests {
         assert_eq!(chunks[2].context_offsets, vec![1_999_918, 0, 0, 0]);
     }
 
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_cxx.cpp:256-281
+    // ```c
+    //             	s_SetSplitQuerySeqInterval(chunk, query_range, q_sl_offset, split_query_loc);
+    //     ...
+    //             s_SetSplitQuerySeqInterval(chunk, query_range, 0, mask_query_loc);
+    //             TMaskedQueryRegions split_mask =
+    //                 m_UserSpecifiedMasks[qindex].RestrictToSeqInt(mask_query_loc->GetInt());
+    // ```
+    // With `-query_loc 1000001-3200000` a mask survives in a chunk only from the chunk's
+    // start plus the interval's start on (oracle: `-task blastn -lcase_masking` loses the
+    // lower-case runs at record 1.2 Mb and 2.3 Mb, keeps those at 1.05 Mb and 2.12 Mb).
+    #[test]
+    fn ranged_chunk_masks_are_restricted_in_the_searched_coordinates() {
+        let offset = 1_000_000;
+        let masks = [
+            MaskedInterval::new(50_000, 55_000),
+            MaskedInterval::new(200_000, 205_000),
+            MaskedInterval::new(1_120_000, 1_125_000),
+            MaskedInterval::new(1_300_000, 1_305_000),
+        ];
+        let first = ChunkQuery {
+            query: 0,
+            from: 0,
+            to: 1_100_050,
+        };
+        assert_eq!(
+            restrict_masks(&masks, &first, offset),
+            vec![MaskedInterval::new(50_000, 55_001)]
+        );
+        let second = ChunkQuery {
+            query: 0,
+            from: 1_099_950,
+            to: 2_200_000,
+        };
+        assert_eq!(
+            restrict_masks(&masks, &second, offset),
+            vec![MaskedInterval::new(20_050, 25_051)]
+        );
+        // Without a range the same masks are restricted to each part as they are.
+        assert_eq!(
+            restrict_masks(&masks, &second, 0),
+            vec![
+                MaskedInterval::new(20_050, 25_051),
+                MaskedInterval::new(200_050, 205_051)
+            ]
+        );
+    }
+
     // NCBI reference: ncbi-blast/c++/src/objects/seq/seqlocinfo.cpp:102-116
     // ```c
     //     TSeqRange loc(location.GetFrom(), 0);
@@ -753,7 +829,7 @@ mod tests {
             MaskedInterval::new(199, 250),
         ];
         assert_eq!(
-            restrict_masks(&masks, &part),
+            restrict_masks(&masks, &part, 0),
             vec![
                 MaskedInterval::new(0, 11),
                 MaskedInterval::new(50, 61),

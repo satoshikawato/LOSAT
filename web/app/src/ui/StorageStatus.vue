@@ -32,8 +32,9 @@ const removed = computed(() =>
   >
     <h2>Temporary storage</h2>
     <p data-testid="storage-usage">{{ usage }}</p>
-    <p v-if="storage.fallbackReason" class="note">
-      Results are kept in memory because OPFS cannot be used: {{ storage.fallbackReason }}.
+    <p v-if="storage.fallbackReason" class="warning" data-testid="storage-memory-note">
+      Results are kept in memory only and are lost when this tab is closed or reloaded. The browser's private storage
+      (OPFS) cannot be used: {{ storage.fallbackReason }}.
     </p>
     <p v-if="storage.cleanup.state === 'unavailable'" class="note">
       Temporary data left by closed tabs is not removed automatically: {{ storage.cleanup.reason }}.

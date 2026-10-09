@@ -2,9 +2,10 @@ import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import type { IndexedRecord } from '../../src/domain/dataset';
 import { sha256Hex } from '../../src/infra/browser/platform';
+import { MEMORY_FULL_MESSAGE } from '../../src/infra/data/block-store';
 import { DataService, type DataServiceDeps } from '../../src/infra/data/data-service';
 import { MemoryBlockStore } from '../../src/infra/data/memory-block-store';
-import { FakeScanner } from '../../src/infra/fake/fake-fasta';
+import { FakeInputChecker, FakeScanner } from '../../src/infra/fake/fake-fasta';
 import { RunOutputWriter } from '../../src/infra/run-output/writer';
 import type { RecordScanner } from '../../src/ports/scan';
 
@@ -18,6 +19,7 @@ function service(overrides: Partial<DataServiceDeps> & { store?: MemoryBlockStor
   const data = new DataService({
     store,
     scanner: new FakeScanner(),
+    checker: new FakeInputChecker(),
     digest: sha256Hex,
     newToken: () => `token-${++token}`,
     cleanup: Promise.resolve({ state: 'done', removedSessions: 0 }),
@@ -62,6 +64,19 @@ describe('DataService sources and record tables', () => {
     const input = await data.buildRunInput([second.revisionId]);
     expect(decoder.decode(input.bytes)).toBe('>dup second\nGGCC\n');
   });
+
+  it('builds the run input and checks an input of more records than a call can take as arguments', async () => {
+    const { data } = service();
+    const count = 150_000;
+    const text = Array.from({ length: count }, (_, i) => `>r${i}\nA\n`).join('');
+    const source = await data.addSource(new File([text], 'many.fa'));
+    const revision = await data.indexSource(source.sourceId, 0);
+    const excluded = await data.reviseDataset(revision.revisionId, [0]);
+    const input = await data.buildRunInput([excluded.revisionId]);
+    expect(input.records).toHaveLength(count - 1);
+    expect(input.records[0]).toEqual({ id: 'r1', length: 1 });
+    expect(await data.checkInput('blastn', 'query', [excluded.revisionId])).toMatchObject({ ok: true });
+  }, 60_000);
 
   it('rejects a source that the parser cannot read', async () => {
     const { data } = service();
@@ -226,5 +241,15 @@ describe('DataService runs and storage status', () => {
     writer.end();
     await expect(data.commitRun('run-1')).rejects.toThrow('Not enough temporary storage');
     expect(store.usage()).toBe(0);
+  });
+
+  it('reports the memory budget of results kept in memory with its own message', async () => {
+    const store = new MemoryBlockStore({ capacityBytes: 8, fullMessage: MEMORY_FULL_MESSAGE });
+    const { data } = service({ store });
+    const port = await data.openRun('run-1');
+    const writer = new RunOutputWriter(port);
+    writer.write(0, encoder.encode('123456789'));
+    writer.end();
+    await expect(data.commitRun('run-1')).rejects.toMatchObject({ name: 'StorageFullError', message: MEMORY_FULL_MESSAGE });
   });
 });

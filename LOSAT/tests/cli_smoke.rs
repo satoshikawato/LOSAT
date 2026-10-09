@@ -190,18 +190,31 @@ fn missing_input_file_reports_ncbi_error() {
     );
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/readers/fasta.cpp:391-396
-// ```c
-// NCBI_THROW2(CObjReaderParseException, eNoDefline,
-//             "CFastaReader: Input doesn't start with"
-//             " a defline or comment around line " + NStr::NumericToString(lineNum),
-//              lineNum);
+// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:751-758
+// ```c++
+//     if (bad >= good / 3  &&
+//         (len_to_check > 3  ||  good == 0  ||  bad > good))
+//     {
+//         FASTA_ERROR( LineNumber(),
+//             "CFastaReader: Near line " << LineNumber()
+//             << ", there's a line that doesn't look like plausible data, "
+//             "but it's not marked as defline or comment.",
+//             CObjReaderParseException::eFormat);
 // ```
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:181-184
+// ```c++
+//     catch (const CObjReaderParseException& e) {                             \
+//         LOG_POST(Error << "BLAST query error: " << e.GetMsg());             \
+//         exit_code = BLAST_INPUT_ERROR;                                      \
+//     }                                                                       \
+// ```
+// A comment line before the first defline is skipped; a first data line that does not
+// look like sequence data stops BLASTN with NCBI's reader error.
 #[test]
 fn malformed_fasta_reports_parse_error() {
     let query = temp_path("malformed_query", "fa");
     let subject = temp_path("valid_subject", "fa");
-    fs::write(&query, "!not a FASTA defline\nACGTACGT\n").expect("write malformed FASTA");
+    fs::write(&query, "!a comment line\n@@@@ACGT\n").expect("write malformed FASTA");
     fs::write(&subject, ">s\nACGTACGTACGT\n").expect("write subject FASTA");
 
     let output = clean_losat_command()
@@ -215,16 +228,70 @@ fn malformed_fasta_reports_parse_error() {
     let _ = fs::remove_file(&query);
     let _ = fs::remove_file(&subject);
 
-    assert!(!output.status.success(), "malformed FASTA should fail");
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("failed to read query FASTA"),
-        "malformed FASTA error should preserve query role: {stderr}"
+    assert_eq!(output.status.code(), Some(1), "malformed FASTA should fail");
+    assert_eq!(
+        String::from_utf8_lossy(&output.stderr),
+        "BLAST query error: CFastaReader: Near line 2, there's a line that doesn't look like plausible data, but it's not marked as defline or comment.\n"
     );
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_input.cpp:140-152
+// ```c++
+//     while (size_read < GetBatchSize()) {
+//
+//         if (End())
+//             break;
+//
+//         CRef<CBlastSearchQuery> q;
+//         try { q.Reset(m_Source->GetNextSequence(scope)); }
+//         catch (const CObjReaderParseException& e) {
+//             if (e.GetErrCode() == CObjReaderParseException::eEOF) {
+//                 break;
+//             }
+//             throw;
+// ```
+// NCBI reads the queries one batch at a time: a reader error in a later batch comes after
+// the reports of the batches before, without the epilog (oracle BI b_q_b2_bad_7), and in
+// the first batch before any report.
+#[test]
+fn a_reader_error_in_a_later_query_batch_follows_the_earlier_reports() {
+    let query = temp_path("later_batch_query", "fa");
+    let subject = temp_path("later_batch_subject", "fa");
+    let sequence = "ACGTTGCAAGGCTTAACCGTATGCGATCCTAGGATCCAATGGTACCTTAGCAGTCGATCG".repeat(5);
+    let mut lines = String::from(">q1\n");
+    for chunk in sequence.as_bytes().chunks(60) {
+        lines.push_str(std::str::from_utf8(chunk).unwrap());
+        lines.push('\n');
+    }
+    lines.push_str(">q2\n@@@@\n");
+    fs::write(&query, &lines).expect("write query FASTA");
+    fs::write(&subject, format!(">s1\n{sequence}\n")).expect("write subject FASTA");
+    let run = |batch_size: Option<&str>| {
+        let mut command = clean_losat_command();
+        command.args(["blastn", "-outfmt", "7", "-query"]);
+        command.arg(&query).arg("-subject").arg(&subject);
+        match batch_size {
+            Some(size) => command.env("BATCH_SIZE", size),
+            None => command.env_remove("BATCH_SIZE"),
+        };
+        command.output().expect("run blastn")
+    };
+    let later = run(Some("300"));
+    let first = run(None);
+    let _ = fs::remove_file(&query);
+    let _ = fs::remove_file(&subject);
+    let error = "BLAST query error: CFastaReader: Near line 8, there's a line that doesn't look like plausible data, but it's not marked as defline or comment.\n";
+    for output in [&later, &first] {
+        assert_eq!(output.status.code(), Some(1));
+        assert_eq!(String::from_utf8_lossy(&output.stderr), error);
+    }
+    let report = String::from_utf8_lossy(&later.stdout);
     assert!(
-        stderr.contains("Expected > at record start."),
-        "malformed FASTA error should preserve parser reason: {stderr}"
+        report.starts_with("# BLASTN 2.17.0+\n# Query: q1\n")
+            && !report.contains("# BLAST processed"),
+        "{report}"
     );
+    assert!(first.stdout.is_empty(), "{:?}", first.stdout);
 }
 
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3265-3273

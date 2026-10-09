@@ -15,6 +15,7 @@ import {
   type RecordKey,
 } from '../../domain/dataset';
 import type { OutputFormat } from '../../domain/output-format';
+import type { InputRole, ProgramId } from '../../domain/programs';
 import type {
   CleanupState,
   DataGateway,
@@ -24,15 +25,18 @@ import type {
   StorageInfo,
 } from '../../ports/data';
 import type { HspRecord } from '../../ports/engine';
+import type { InputCheck, InputChecker } from '../../ports/input-check';
 import { DIAGNOSTICS_STREAM, HITS_STREAM, OUTPUT_STREAMS, type OutputStream } from '../../ports/run-output';
 import type { RecordScanner } from '../../ports/scan';
 import { RunOutputReceiver } from '../run-output/receiver';
 import { concatBytes } from '../bytes';
-import { isStorageFull, StorageFullError, type BlockStore, type BlockWriter } from './block-store';
+import { asStorageFull, isStorageFull, type BlockStore, type BlockWriter } from './block-store';
 
 export interface DataServiceDeps {
   readonly store: BlockStore;
   readonly scanner: RecordScanner;
+  /** The engine's reading of an input (`register`), for checkInput. */
+  readonly checker: InputChecker;
   /** Lower-case hex SHA-256. */
   readonly digest: (bytes: Uint8Array) => Promise<string>;
   /** A new random token; tokens name blocks, so they never contain input names. */
@@ -126,6 +130,12 @@ export class DataService implements DataGateway {
   }
 
   async buildRunInput(revisionIds: readonly string[]): Promise<RunInput> {
+    const { bytes, records } = await this.runInputBytes(revisionIds);
+    return { bytes, sha256: await this.deps.digest(bytes), records };
+  }
+
+  /** The bytes and record keys of a run input, without its SHA-256. */
+  private async runInputBytes(revisionIds: readonly string[]): Promise<Omit<RunInput, 'sha256'>> {
     if (revisionIds.length === 0) throw new Error('a run input needs at least one dataset revision');
     const parts: Uint8Array[] = [];
     const records: RecordKey[] = [];
@@ -145,10 +155,20 @@ export class DataService implements DataGateway {
         parts.push(NEWLINE);
       }
       if (bytes.length > 0) parts.push(bytes);
-      records.push(...included.map(recordKey));
+      // One by one: spreading a large table into push() overflows the call stack.
+      for (const record of included) records.push(recordKey(record));
     }
-    const bytes = concatBytes(parts);
-    return { bytes, sha256: await this.deps.digest(bytes), records: Object.freeze(records) };
+    return { bytes: concatBytes(parts), records: Object.freeze(records) };
+  }
+
+  async checkInput(program: ProgramId, role: InputRole, revisionIds: readonly string[]): Promise<InputCheck> {
+    const { bytes } = await this.runInputBytes(revisionIds);
+    return this.deps.checker.check(program, role, bytes);
+  }
+
+  async previewSource(sourceId: string, maxBytes: number): Promise<Uint8Array> {
+    const file = this.source(sourceId);
+    return readRange(file, 0, Math.min(file.size, Math.max(0, maxBytes)));
   }
 
   // --- runs -----------------------------------------------------------------------------
@@ -161,7 +181,7 @@ export class DataService implements DataGateway {
       for (const stream of OUTPUT_STREAMS) writers.set(stream, await this.deps.store.create(blockPath(token, stream)));
     } catch (error) {
       await this.deps.store.removeAll(runPrefix(token)).catch(() => undefined);
-      throw isStorageFull(error) ? new StorageFullError() : error;
+      throw isStorageFull(error) ? asStorageFull(error) : error;
     }
     const channel = new MessageChannel();
     const lengths: Lengths = { 0: 0, 6: 0, 7: 0, [HITS_STREAM]: 0, [DIAGNOSTICS_STREAM]: 0 };
@@ -202,7 +222,7 @@ export class DataService implements DataGateway {
       for (const writer of run.writers.values()) await writer.seal();
     } catch (error) {
       await this.discardRun(runId).catch(() => undefined);
-      throw isStorageFull(error) ? new StorageFullError() : error;
+      throw isStorageFull(error) ? asStorageFull(error) : error;
     }
     this.runs.set(runId, { state: 'committed', token: run.token, lengths: Object.freeze({ ...run.lengths }) });
     const hitCount = run.hitLines + (run.hitLineOpen ? 1 : 0);
@@ -251,7 +271,7 @@ export class DataService implements DataGateway {
     try {
       run.writers.get(stream)!.append(bytes);
     } catch (error) {
-      run.failure = isStorageFull(error) ? new StorageFullError() : toError(error);
+      run.failure = isStorageFull(error) ? asStorageFull(error) : toError(error);
       // Give the space back at once; the commit reports the failure.
       void this.deps.store.removeAll(runPrefix(run.token)).catch(() => undefined);
       return;

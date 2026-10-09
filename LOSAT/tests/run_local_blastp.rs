@@ -13,8 +13,11 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use run_local_support::{assert_observer_ranges, field, read_records, run_formats, Run};
+use run_local_support::{
+    assert_observer_ranges, field, read_records, reader_records, run_formats, Run, TempFasta,
+};
 use LOSAT::api::local_blast::{run_local_blastp, FormatOutput, OutputSink, ReportOutputs};
+use LOSAT::blastinput::fasta_reader::{FastaRecord, ReaderConfig};
 use LOSAT::cli::{try_parse_from, Cli, Commands};
 
 const CUSTOM: &str =
@@ -92,9 +95,19 @@ impl Drop for Inputs {
     }
 }
 
+/// The query records of a FASTA file as NCBI's reader reads them for BLASTP.
+fn queries(path: &Path) -> Vec<FastaRecord> {
+    reader_records(path, ReaderConfig::query("BLASTP", true, true))
+}
+
+/// The subject records of a FASTA file as NCBI's reader reads them for BLASTP.
+fn subjects(path: &Path) -> Vec<FastaRecord> {
+    reader_records(path, ReaderConfig::subject("BLASTP", true, true))
+}
+
 fn run(inputs: &Inputs, formats: &[&str], extra: &[&str], observe: bool) -> Run {
-    let queries = read_records(&inputs.query);
-    let subjects = read_records(&inputs.subject);
+    let queries = queries(&inputs.query);
+    let subjects = subjects(&inputs.subject);
     run_formats(formats, observe, |outputs| {
         let args = blastp_args(&inputs.query, &inputs.subject, extra);
         run_local_blastp(args, &queries, &subjects, "", "", outputs)
@@ -222,8 +235,8 @@ fn observer_ranges_are_exact_rows_and_sections_of_the_same_hsp() {
 #[test]
 fn unsupported_formats_fail_before_searching() {
     let inputs = Inputs::new(1);
-    let queries = read_records(&inputs.query);
-    let subjects = read_records(&inputs.subject);
+    let queries = queries(&inputs.query);
+    let subjects = subjects(&inputs.subject);
     // NCBI blast_args.cpp:2845-2851 and tabular.cpp:70-99: a custom specification of
     // outfmt 0 and a token that is not a field name are ignored ("0 qseqid", "6 nosuchfield"
     // run as "0" and "6"); a field that LOSAT's BLASTP does not write is rejected.
@@ -253,4 +266,311 @@ fn unsupported_formats_fail_before_searching() {
             "nothing is written when a requested format is invalid"
         );
     }
+}
+
+/// The first `count` protein sequences of a fixture, from `start` residues on.
+fn protein_sequences(name: &str, count: usize) -> Vec<Vec<u8>> {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fasta")
+        .join(name);
+    read_records(&path)
+        .into_iter()
+        .take(count)
+        .map(|record| record.seq().to_vec())
+        .collect()
+}
+
+/// A BLASTP run of the CLI: the exit code, standard output and standard error.
+fn cli_run(
+    query: &Path,
+    subject: &Path,
+    extra: &[&str],
+    env: &[(&str, &str)],
+) -> (Option<i32>, Vec<u8>, String) {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+    command
+        .arg("blastp")
+        .arg("-query")
+        .arg(query)
+        .arg("-subject")
+        .arg(subject)
+        .args(extra)
+        .env_remove("LOSAT_TIMING")
+        .env_remove("BATCH_SIZE");
+    for (variable, value) in env {
+        command.env(variable, value);
+    }
+    let output = command.output().expect("run LOSAT CLI");
+    (
+        output.status.code(),
+        output.stdout,
+        String::from_utf8_lossy(&output.stderr).into_owned(),
+    )
+}
+
+/// `run_local` with one writer per format: the outputs, the diagnostics and the result.
+fn run_local_outputs(
+    query: &Path,
+    subject: &Path,
+    formats: &[&str],
+) -> (Vec<Vec<u8>>, Vec<u8>, anyhow::Result<()>) {
+    let queries = queries(query);
+    let subjects = subjects(subject);
+    let mut sinks: Vec<Vec<u8>> = vec![Vec::new(); formats.len()];
+    let mut diagnostics = Vec::new();
+    let result = {
+        let mut outputs = ReportOutputs {
+            formats: formats
+                .iter()
+                .zip(sinks.iter_mut())
+                .map(|(outfmt, sink)| FormatOutput {
+                    outfmt,
+                    sink: OutputSink::Writer(sink),
+                })
+                .collect(),
+            diagnostics: &mut diagnostics,
+            hits: None,
+            observer: None,
+        };
+        run_local_blastp(
+            blastp_args(query, subject, &[]),
+            &queries,
+            &subjects,
+            "",
+            "",
+            &mut outputs,
+        )
+    };
+    (sinks, diagnostics, result)
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:632-640
+// ```c
+//         } catch (const CException& e) {
+//             ...
+//             CRef<CSearchMessage> m
+//                 (new CSearchMessage(eBlastSevWarning, index, e.GetMsg()));
+//             messages[index].push_back(m);
+//             s_InvalidateQueryContexts(qinfo, index);
+//         }
+// ```
+// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:773-789
+// ```c
+//         	if(e.GetErrCode() == CBlastException::eInvalidArgument) {
+//         		seqblk_vec->push_back(subj);
+//         ...
+//         		warning += "Subject sequence contains no data";
+//         		ERR_POST(Warning << warning);
+// ```
+// A query without residues stays in its batch with NCBI's warning and a report without
+// hits; a subject without residues gets its warning before the prolog and stays in the
+// database statistics (oracle rows `blastp.rec_empty_mid.*`, `blastp.both_empty_records.*`).
+#[test]
+fn records_without_residues_are_kept_with_ncbis_warnings() {
+    let q = protein_sequences("SicyWSV.faa", 3);
+    let s = protein_sequences("PajaWSV.faa", 3);
+    let query = TempFasta::new(
+        "blastp_empty_records_query.faa",
+        &[("q1", &q[0]), ("q2 empty two", b""), ("q3", &q[2])],
+    );
+    let subject = TempFasta::new(
+        "blastp_empty_records_subject.faa",
+        &[("s1", &s[0]), ("s2 no letters", b""), ("s3", &s[2])],
+    );
+    let (outputs, diagnostics, result) = run_local_outputs(&query.0, &subject.0, &["0", "6", "7"]);
+    result.expect("the run succeeds");
+    assert_eq!(
+        String::from_utf8_lossy(&diagnostics),
+        "Warning: [blastp] Subject_2 s2 no letters: Subject sequence contains no data\n\
+         Warning: [blastp] Query_2 q2 empty two: Sequence contains no data \n"
+    );
+    let pairwise = String::from_utf8_lossy(&outputs[0]);
+    assert!(pairwise.contains(" 3 sequences; "), "{pairwise}");
+    assert!(
+        pairwise.contains(
+            "Query= q2 empty two\n\nLength=0\n\n\n***** No hits found *****\n\n\n\n\n\nEffective search space used: 0\n"
+        ),
+        "{pairwise}"
+    );
+    let commented = String::from_utf8_lossy(&outputs[2]);
+    assert!(
+        commented.contains("# Query: q2 empty two\n# Database: ")
+            && commented.contains("# 0 hits found\n")
+            && commented.ends_with("# BLAST processed 3 queries\n"),
+        "{commented}"
+    );
+    for (index, outfmt) in ["0", "6", "7"].into_iter().enumerate() {
+        let (code, stdout, stderr) = cli_run(&query.0, &subject.0, &["-outfmt", outfmt], &[]);
+        assert_eq!(code, Some(0), "{stderr}");
+        assert!(stdout == outputs[index], "outfmt {outfmt}");
+        assert_eq!(stderr.as_bytes(), &diagnostics[..], "outfmt {outfmt}");
+    }
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:729-732
+// ```c
+//    if (db_length == 0 &&
+//        !BlastEffectiveLengthsOptions_IsSearchSpaceSet(eff_len_options)) {
+//       return 0;
+//    }
+// ```
+// Every subject without residues: the warnings, no hit, and a search space of 0; blastp
+// is gapped, so the average subject length is not checked (oracle `blastp.rec_empty_all.s.*`).
+#[test]
+fn subjects_without_residues_only_give_reports_without_hits() {
+    let q = protein_sequences("SicyWSV.faa", 2);
+    let query = TempFasta::new(
+        "blastp_all_empty_query.faa",
+        &[("q1", &q[0]), ("q2", &q[1])],
+    );
+    let subject = TempFasta::new(
+        "blastp_all_empty_subject.faa",
+        &[("s1 first", b""), ("s2", b"")],
+    );
+    let (code, stdout, stderr) = cli_run(&query.0, &subject.0, &["-outfmt", "0"], &[]);
+    assert_eq!(code, Some(0), "{stderr}");
+    assert_eq!(
+        stderr,
+        "Warning: [blastp] Subject_1 s1 first: Subject sequence contains no data\n\
+         Warning: [blastp] Subject_2 s2: Subject sequence contains no data\n"
+    );
+    let report = String::from_utf8_lossy(&stdout);
+    assert!(report.contains(" 2 sequences; 0 total letters"), "{report}");
+    assert_eq!(report.matches("***** No hits found *****").count(), 2);
+    assert_eq!(
+        report.matches("Effective search space used: 0\n").count(),
+        2
+    );
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:649-652
+// ```c
+//     // Validate that at least one query context is valid
+//     if (BlastSetup_Validate(qinfo, NULL) != 0 && messages.HasMessages()) {
+//         NCBI_THROW(CBlastException, eSetup, messages.ToString());
+//     }
+// ```
+// A batch of queries without residues only stops NCBI after the prolog, with one message
+// per query (oracle `blastp.rec_empty_all.q.*`); with BATCH_SIZE, after the reports of the
+// batches before, without the epilog (`blastp.batch_late_allempty.*`).
+#[test]
+fn a_batch_of_queries_without_residues_stops() {
+    let q = protein_sequences("SicyWSV.faa", 2);
+    let s = protein_sequences("PajaWSV.faa", 2);
+    let subject = TempFasta::new(
+        "blastp_no_data_subject.faa",
+        &[("s1", &s[0]), ("s2", &s[1])],
+    );
+    let query = TempFasta::new("blastp_no_data_query.faa", &[("q1", b""), ("q2", b"")]);
+    let (outputs, diagnostics, result) = run_local_outputs(&query.0, &subject.0, &["0", "6"]);
+    let error = result.expect_err("the batch fails");
+    let native = error
+        .downcast_ref::<LOSAT::cli::NativeError>()
+        .unwrap_or_else(|| panic!("NCBI's error: {error:#}"));
+    assert_eq!(native.exit, 3);
+    assert_eq!(
+        native.message,
+        "BLAST engine error: Warning: Sequence contains no data Warning: Sequence contains no data \n"
+    );
+    assert!(diagnostics.is_empty());
+    let prolog = String::from_utf8_lossy(&outputs[0]);
+    assert!(
+        prolog.starts_with("BLASTP 2.17.0+\n") && prolog.ends_with(" total letters\n\n"),
+        "{prolog}"
+    );
+    assert!(outputs[1].is_empty());
+    let (code, stdout, stderr) = cli_run(&query.0, &subject.0, &["-outfmt", "0"], &[]);
+    assert_eq!(code, Some(3), "{stderr}");
+    assert_eq!(stdout, outputs[0]);
+    assert_eq!(stderr, native.message);
+
+    let mut text = format!(
+        ">q1\n{}\n>q2\n{}\n",
+        String::from_utf8_lossy(&q[0]),
+        String::from_utf8_lossy(&q[1])
+    );
+    text.push_str(">q3\n>q4 empty\n");
+    std::fs::write(&query.0, text).expect("write query");
+    let batch = q[0].len().to_string();
+    let (code, stdout, stderr) = cli_run(
+        &query.0,
+        &subject.0,
+        &["-outfmt", "7"],
+        &[("BATCH_SIZE", &batch)],
+    );
+    assert_eq!(code, Some(3), "{stderr}");
+    let report = String::from_utf8_lossy(&stdout);
+    assert!(
+        report.contains("# Query: q1\n")
+            && report.contains("# Query: q2\n")
+            && !report.contains("# Query: q3")
+            && !report.contains("# BLAST processed"),
+        "{report}"
+    );
+    assert_eq!(
+        stderr,
+        "BLAST engine error: Warning: Sequence contains no data Warning: Sequence contains no data \n"
+    );
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_input.cpp:146-152
+// ```c
+//         try { q.Reset(m_Source->GetNextSequence(scope)); }
+//         catch (const CObjReaderParseException& e) {
+//             if (e.GetErrCode() == CObjReaderParseException::eEOF) {
+//                 break;
+//             }
+//             throw;
+//         }
+// ```
+// A reader error in a later batch comes after the reports of the batches before (without
+// the epilog); in the first batch, before any report. Blank and comment lines after the
+// last record end the reading (oracle `blastp.batch_late_bad.*`).
+#[test]
+fn what_ends_the_query_reading_comes_with_its_batch() {
+    let q = protein_sequences("SicyWSV.faa", 2);
+    let s = protein_sequences("PajaWSV.faa", 1);
+    let subject = TempFasta::new("blastp_batch_subject.faa", &[("s1", &s[0])]);
+    let query = TempFasta::new("blastp_batch_query.faa", &[]);
+    let text = format!(
+        ">q1\n{}\n>q2\n{}\n",
+        String::from_utf8_lossy(&q[0]),
+        String::from_utf8_lossy(&q[1])
+    );
+    let batch = q[0].len().to_string();
+    let mut bad = text.clone().into_bytes();
+    bad.extend_from_slice(b">q3\n$%&()+= <>?@ [] {} ^~\nMKV\n");
+    std::fs::write(&query.0, &bad).expect("write query");
+    let (code, stdout, stderr) = cli_run(
+        &query.0,
+        &subject.0,
+        &["-outfmt", "7"],
+        &[("BATCH_SIZE", &batch)],
+    );
+    assert_eq!(code, Some(1), "{stderr}");
+    let report = String::from_utf8_lossy(&stdout);
+    assert!(
+        report.contains("# Query: q1\n")
+            && report.contains("# Query: q2\n")
+            && !report.contains("# BLAST processed"),
+        "{report}"
+    );
+    assert!(
+        stderr.starts_with("BLAST query error: CFastaReader: "),
+        "{stderr}"
+    );
+    let (code, stdout, stderr) = cli_run(&query.0, &subject.0, &["-outfmt", "7"], &[]);
+    assert_eq!(code, Some(1), "{stderr}");
+    assert!(stdout.is_empty(), "{stderr}");
+    let mut blank = text.into_bytes();
+    blank.extend_from_slice(b"\n; comment\n\n");
+    std::fs::write(&query.0, &blank).expect("write query");
+    let (code, stdout, stderr) = cli_run(
+        &query.0,
+        &subject.0,
+        &["-outfmt", "7"],
+        &[("BATCH_SIZE", &batch)],
+    );
+    assert_eq!(code, Some(0), "{stderr}");
+    assert!(String::from_utf8_lossy(&stdout).ends_with("# BLAST processed 2 queries\n"));
 }

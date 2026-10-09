@@ -1,0 +1,119 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/e2d_p_s3.faa).
+           3 sequences; 2,042 total letters
+
+
+
+Query= BDT63357.1 heat shock protein 70-like protein [Armadillidium vulgare
+clopovirus]
+
+Length=674
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT62128.1 MjHSP70-2-like protein [Litopenaeus vannamei majanivir...  308     4e-104
+BDT62181.1 wsv035-like protein [Litopenaeus vannamei majanivirus ...  16.9    4.7   
+BDT62135.1 heat shock protein 40-like protein [Litopenaeus vannam...  15.8    9.7   
+
+
+> BDT62128.1 MjHSP70-2-like protein [Litopenaeus vannamei majanivirus 
+Nimav-1_LVa]
+Length=707
+
+ Score = 308 bits (790),  Expect = 4e-104, Method: Compositional matrix adjust.
+ Identities = 166/256 (65%), Positives = 208/256 (81%), Gaps = 11/256 (4%)
+
+Query  145  AVITVPAYFNDAQRRATKDAGAIAGLNVLRIINEPTAAALAYGLgkrekerevgggggeg  204
+            AVITVPAYFND+QR+ATKDAG IAG  V RIINEPTAAA+AYGL   +KE+  G      
+Sbjct  148  AVITVPAYFNDSQRQATKDAGTIAGFKVERIINEPTAAAIAYGLNFLDKEKVNGEK----  203
+
+Query  205  kekekekNALIFDLGGGTFDVSILSMEDGIFEVKSTAGDTHLGGEDFDNRLVTHFVEEFK  264
+                   N L++D GGGTFDVS+L++++G+FEVK+TAG+THLGGED D+ +V + ++E  
+Sbjct  204  -------NILVYDFGGGTFDVSVLTVDNGLFEVKATAGNTHLGGEDLDDIMVKYMMDEIM  256
+
+Query  265  RKFKKDISKNQRSLRRLRTSCEQAKRTLSSSAKANIEIDSLFEGIDFYTSITRARFEELC  324
+            RK+KK+I+ N R++RRL+T+CEQAK+TLSSS +A I ++SL +G D    ITRARF+ELC
+Sbjct  257  RKYKKNIASNVRAMRRLKTACEQAKKTLSSSTQAEITLESLADGTDVTVCITRARFDELC  316
+
+Query  325  SDLFRSTLEPVEKALRDAKFDKSAIHEIVLVGGSTRIPKVQKLLSDFFNGKELNKSINPD  384
+            + LF+STLE VEKAL DA+ ++S+I +I+LVGGSTRIPKVQKLLSD+F  KELNKSINPD
+Sbjct  317  TGLFQSTLELVEKALNDARMERSSIDDIILVGGSTRIPKVQKLLSDYFYQKELNKSINPD  376
+
+Query  385  EavaygaavqaaILSG  400
+            EAVAYGAAVQAAILSG
+Sbjct  377  EAVAYGAAVQAAILSG  392
+
+
+ Score = 21.6 bits (44),  Expect = 0.13, Method: Compositional matrix adjust.
+ Identities = 11/26 (42%), Positives = 16/26 (62%), Gaps = 2/26 (8%)
+
+Query  148  TVPAY--FNDAQRRATKDAGAIAGLN  171
+            T P+Y  FND++R   + A   AG+N
+Sbjct  42   TTPSYVAFNDSERLIGEAAKNQAGIN  67
+
+
+> BDT62181.1 wsv035-like protein [Litopenaeus vannamei majanivirus 
+Nimav-1_LVa]
+Length=970
+
+ Score = 16.9 bits (32),  Expect = 4.7, Method: Composition-based stats.
+ Identities = 7/26 (27%), Positives = 15/26 (58%), Gaps = 0/26 (0%)
+
+Query  332  LEPVEKALRDAKFDKSAIHEIVLVGG  357
+            +EP+   L +   +K   HE++++ G
+Sbjct  611  VEPIPNILVNTIPEKPYEHELLVLEG  636
+
+
+> BDT62135.1 heat shock protein 40-like protein [Litopenaeus vannamei 
+majanivirus Nimav-1_LVa]
+Length=365
+
+ Score = 15.8 bits (29),  Expect = 9.7, Method: Compositional matrix adjust.
+ Identities = 10/29 (34%), Positives = 12/29 (41%), Gaps = 9/29 (31%)
+
+Query  219  GGGTFDVSILSMEDGIFEVKSTAGDTHLG  247
+            G GT DV         FE     G +H+G
+Sbjct  119  GHGTHDV---------FEDMLVGGGSHVG  138
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.135    0.374    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 501642
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/e2d_p_s3.faa).
+    Posted date:  Unknown
+  Number of letters in database: 2,042
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

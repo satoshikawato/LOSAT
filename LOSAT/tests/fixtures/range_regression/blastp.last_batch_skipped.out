@@ -1,0 +1,140 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/e2d_p_s3.faa).
+           3 sequences; 2,042 total letters
+
+
+
+Query= A recA
+
+Length=6000
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT62128.1 MjHSP70-2-like protein [Litopenaeus vannamei majanivir...  229     2e-75
+BDT62135.1 heat shock protein 40-like protein [Litopenaeus vannam...  15.0    9.4  
+
+
+> BDT62128.1 MjHSP70-2-like protein [Litopenaeus vannamei majanivirus 
+Nimav-1_LVa]
+Length=707
+
+ Score = 229 bits (585),  Expect = 2e-75, Method: Compositional matrix adjust.
+ Identities = 111/201 (55%), Positives = 150/201 (75%), Gaps = 17/201 (8%)
+
+Query  100  FDVTFKGQQKIFCPEEISAMILTKMKTVAETHLGGEQQQQQQTINAVITVPAYFNDAQRR  159
+             ++ +K + K + PEEIS+M+L+KMK  AE +LG       +   AVITVPAYFND+QR+
+Sbjct  109  VNIMYKNEAKSYYPEEISSMVLSKMKETAEAYLG------TKVTRAVITVPAYFNDSQRQ  162
+
+Query  160  ATKDAGAIAGLNVLRIINEPTAAALAYGLGKREKEREVGGGGGEGKEKEKEKNALIFDLG  219
+            ATKDAG IAG  V RIINEPTAAA+AYGL   +KE+  G           EKN L++D G
+Sbjct  163  ATKDAGTIAGFKVERIINEPTAAAIAYGLNFLDKEKVNG-----------EKNILVYDFG  211
+
+Query  220  GGTFDVSILSMEDGIFEVKSTAGDTHLGGEDFDNRLVTHFVEEFKRKFKKDISKNQRSLR  279
+            GGTFDVS+L++++G+FEVK+TAG+THLGGED D+ +V + ++E  RK+KK+I+ N R++R
+Sbjct  212  GGTFDVSVLTVDNGLFEVKATAGNTHLGGEDLDDIMVKYMMDEIMRKYKKNIASNVRAMR  271
+
+Query  280  RLRTSCEQAKRTLSSSAKANI  300
+            RL+T+CEQAK+TLSSS +A I
+Sbjct  272  RLKTACEQAKKTLSSSTQAEI  292
+
+
+ Score = 21.6 bits (44),  Expect = 0.088, Method: Compositional matrix adjust.
+ Identities = 11/26 (42%), Positives = 16/26 (62%), Gaps = 2/26 (8%)
+
+Query  148  TVPAY--FNDAQRRATKDAGAIAGLN  171
+            T P+Y  FND++R   + A   AG+N
+Sbjct  42   TTPSYVAFNDSERLIGEAAKNQAGIN  67
+
+
+ Score = 15.8 bits (29),  Expect = 6.2, Method: Compositional matrix adjust.
+ Identities = 8/21 (38%), Positives = 11/21 (52%), Gaps = 1/21 (5%)
+
+Query  272  SKNQRSLRRLRTSCEQAKRTL  292
+            +KNQ  +    T C+  KR L
+Sbjct  60   AKNQAGINPTNTVCD-IKRIL  79
+
+
+> BDT62135.1 heat shock protein 40-like protein [Litopenaeus vannamei 
+majanivirus Nimav-1_LVa]
+Length=365
+
+ Score = 15.0 bits (27),  Expect = 9.4, Method: Compositional matrix adjust.
+ Identities = 5/14 (36%), Positives = 8/14 (57%), Gaps = 0/14 (0%)
+
+Query  234  IFEVKSTAGDTHLG  247
+            +FE     G +H+G
+Sbjct  125  VFEDMLVGGGSHVG  138
+
+
+
+Lambda      K        H        a         alpha
+   0.315    0.132    0.364    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 316684
+
+
+Query= B recB
+
+Length=6000
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT62181.1 wsv035-like protein [Litopenaeus vannamei majanivirus ...  18.9    0.73 
+BDT62135.1 heat shock protein 40-like protein [Litopenaeus vannam...  17.7    1.3  
+
+
+> BDT62181.1 wsv035-like protein [Litopenaeus vannamei majanivirus 
+Nimav-1_LVa]
+Length=970
+
+ Score = 18.9 bits (37),  Expect = 0.73, Method: Composition-based stats.
+ Identities = 5/11 (45%), Positives = 7/11 (64%), Gaps = 0/11 (0%)
+
+Query  250  CIYGSYMTTPP  260
+            C+Y  Y+  PP
+Sbjct  330  CLYDPYVHEPP  340
+
+
+> BDT62135.1 heat shock protein 40-like protein [Litopenaeus vannamei 
+majanivirus Nimav-1_LVa]
+Length=365
+
+ Score = 17.7 bits (34),  Expect = 1.3, Method: Compositional matrix adjust.
+ Identities = 9/37 (24%), Positives = 18/37 (49%), Gaps = 1/37 (3%)
+
+Query  105  LNKGQHESKPRQGWRDANW-MPYNASDQASCDFMIYF  140
+            LN  +  +KP+   R   + +PY  +     D +++F
+Sbjct  305  LNFNKETTKPQTTRRLQGYGLPYPKNPTRKGDIIVHF  341
+
+
+
+Lambda      K        H        a         alpha
+   0.323    0.136    0.460    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 316684

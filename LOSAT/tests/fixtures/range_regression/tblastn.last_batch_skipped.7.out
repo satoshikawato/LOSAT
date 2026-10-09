@@ -1,0 +1,14 @@
+# TBLASTN 2.17.0+
+# Query: A recA
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/e2d_n_sub8k.fa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 2 hits found
+A	sub8k	37.500	24	15	0	109	132	4429	4358	4.0	16.9
+A	sub8k	35.294	17	11	0	168	184	5999	6049	4.7	16.5
+# TBLASTN 2.17.0+
+# Query: B recB
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/e2d_n_sub8k.fa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 2 hits found
+B	sub8k	37.500	24	15	0	109	132	4429	4358	4.0	16.9
+B	sub8k	35.294	17	11	0	168	184	5999	6049	4.7	16.5

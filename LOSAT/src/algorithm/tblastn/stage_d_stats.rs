@@ -167,6 +167,63 @@ pub(super) fn local_subject_effective_lengths_with_search_spaces(
 ) -> Vec<LocalContextLength> {
     assert_eq!(query_contexts.len(), gapped_params.len());
     assert!(db_num_seqs > 0);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:716-732
+    // ```c
+    //    if (eff_len_options->db_length > 0)
+    //       db_length = eff_len_options->db_length;
+    //    else
+    //       db_length = eff_len_params->real_db_length;
+    //
+    //    /* If database (subject) length is not available at this stage, and
+    //     * overriding value of effective search space is not provided by user,
+    //     * do nothing.
+    //     * This situation can occur in the initial set up for a non-database search,
+    //     * where each subject is treated as an individual database.
+    //     */
+    //    if (db_length == 0 &&
+    //        !BlastEffectiveLengthsOptions_IsSearchSpaceSet(eff_len_options)) {
+    //       return 0;
+    //    }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1020-1034
+    // ```c
+    // BlastEffectiveLengthsOptions_IsSearchSpaceSet(const
+    //                                               BlastEffectiveLengthsOptions*
+    //                                               options)
+    // {
+    //     int i;
+    //     if ( !options || options->searchsp_eff == NULL) {
+    //         return FALSE;
+    //     }
+    //
+    //     for (i = 0; i < options->num_searchspaces; i++) {
+    //         if (options->searchsp_eff[i] != 0) {
+    //             return TRUE;
+    //         }
+    //     }
+    //     return FALSE;
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:79-80
+    // ```c
+    //     retval->contexts = (BlastContextInfo*) calloc(retval->last_context + 1,
+    //                                                   sizeof(BlastContextInfo));
+    // ```
+    // LOSAT's TBLASTN has no `-dbsize`, so the database length is the subjects' total in
+    // nucleotides (before the division by 3). Without letters in any subject (every
+    // `-subject` record without residues) the contexts keep the search space and length
+    // adjustment of `BlastQueryInfoNew` (zero), unless a search space is set.
+    let search_space_set =
+        search_spaces.is_some_and(|spaces| spaces.iter().any(|&space| space != 0));
+    if subject_nt_length == 0 && !search_space_set {
+        return query_contexts
+            .iter()
+            .map(|_| LocalContextLength {
+                length_adjustment: 0,
+                eff_searchsp: 0,
+                subject_stat_length: 0,
+            })
+            .collect();
+    }
     let db_length = (subject_nt_length / 3) as i64;
     query_contexts
         .iter()

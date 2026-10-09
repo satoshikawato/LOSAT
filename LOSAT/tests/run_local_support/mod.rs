@@ -10,6 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use bio::io::fasta;
 use LOSAT::api::local_blast::{FormatObserver, FormatOutput, HspIndex, OutputSink, ReportOutputs};
+use LOSAT::blastinput::fasta_reader::{read_all, FastaInputSource, FastaRecord, ReaderConfig};
 use LOSAT::report::PairwiseHit;
 
 /// The sequence of the first record of a FASTA file in `LOSAT/tests/fasta`.
@@ -64,6 +65,17 @@ pub fn read_records(path: &Path) -> Vec<fasta::Record> {
         .records()
         .collect::<Result<_, _>>()
         .expect("records")
+}
+
+/// The records of a FASTA file as NCBI's reader reads them (`config`), the records of the
+/// programs that read with `fasta_reader`.
+#[allow(dead_code)]
+pub fn reader_records(path: &Path, config: ReaderConfig) -> Vec<FastaRecord> {
+    let file = std::fs::File::open(path).expect("FASTA");
+    read_all(&mut FastaInputSource::from_file(file, config), &mut |_| {
+        Ok(())
+    })
+    .expect("records")
 }
 
 /// A sink that publishes how many bytes it holds, so the observer can read positions.

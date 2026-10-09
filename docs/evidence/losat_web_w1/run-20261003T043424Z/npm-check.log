@@ -1,0 +1,46 @@
+
+> losat-web@0.0.0 check
+> npm run typecheck && npm run lint && npm run test && npm run build
+
+
+> losat-web@0.0.0 typecheck
+> vue-tsc --noEmit
+
+
+> losat-web@0.0.0 lint
+> eslint .
+
+
+> losat-web@0.0.0 test
+> vitest run
+
+
+ RUN  v5.0.2 /mnt/c/Users/genom/GitHub/LOSAT-web-gui-app/web/app
+
+
+ Test Files  12 passed (12)
+      Tests  158 passed | 25 skipped (183)
+   Start at  13:43:14
+   Duration  21.55s (tests 53%, transform 30%, import 16%, worker 1%)
+
+  Transform  transforming modules took 11.60s · 30% of tracked time, re-done on every run
+             persist transforms across runs with fsModuleCache: true
+             learn more: https://vitest.dev/guide/improving-performance#caching-between-reruns
+
+
+> losat-web@0.0.0 build
+> vite build
+
+vite v8.3.1 building client environment for production...
+transforming...
+✓ 56 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                         0.39 kB │ gzip:  0.26 kB
+dist/assets/thread-worker-BFsv56lD.js  17.92 kB
+dist/assets/data-worker-Bs8mDzJC.js    18.62 kB
+dist/assets/engine-worker-BF2Pyh1h.js  30.13 kB
+dist/assets/index-CpSSZTgd.css          1.21 kB │ gzip:  0.60 kB
+dist/assets/index-D0H0kIY8.js          83.95 kB │ gzip: 32.32 kB
+
+✓ built in 2.08s

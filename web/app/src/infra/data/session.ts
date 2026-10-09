@@ -6,7 +6,7 @@
 // older-release tabs keep their locks, so their data stays. Time stamps are never used,
 // and without Web Locks nothing is removed.
 import type { CleanupState } from '../../ports/data';
-import { isStorageFull, type BlockStore } from './block-store';
+import { isStorageFull, MEMORY_FULL_MESSAGE, MEMORY_RESULTS_CAPACITY_BYTES, type BlockStore } from './block-store';
 import { MemoryBlockStore } from './memory-block-store';
 
 /** The OPFS directory of the working sessions. Shared by every release. */
@@ -138,7 +138,8 @@ export async function startDataSession(env: DataSessionEnv): Promise<DataSession
 }
 
 function memorySession(fallbackReason: string, cleanup: CleanupState): DataSession {
-  return { store: new MemoryBlockStore(), fallbackReason, cleanup: Promise.resolve(cleanup) };
+  const store = new MemoryBlockStore({ capacityBytes: MEMORY_RESULTS_CAPACITY_BYTES, fullMessage: MEMORY_FULL_MESSAGE });
+  return { store, fallbackReason, cleanup: Promise.resolve(cleanup) };
 }
 
 function openFailure(error: unknown): string {

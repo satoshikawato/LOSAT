@@ -1,0 +1,8 @@
+ok serial-tblastn
+ok serial-blastp
+ok threads-tblastn
+ok threads-blastp
+ok serial-blastn
+ok threads-blastn
+ok serial-tblastx-33
+ok threads-tblastx-33

@@ -1,0 +1,99 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/e2d_p_sp75m.faa).
+           1 sequences; 400 total letters
+
+
+
+Query= P75
+
+Length=871
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+S75m                                                                  788     0.0  
+
+
+> S75m
+Length=871
+
+ Score = 788 bits (2035),  Expect = 0.0, Method: Compositional matrix adjust.
+ Identities = 391/400 (98%), Positives = 391/400 (98%), Gaps = 0/400 (0%)
+
+Query  201  HLQRSLFLLKEFIYSVSEIFKDYFSRRGIQLPKYRKTVNEEEGEGGADENEKEEKEKEKE  260
+            HLQRSLFLLKEFIYSVSEIFKDYFSRRGIQLPKYRKTVNEEEGEGGADENEK EKEKEKE
+Sbjct  201  HLQRSLFLLKEFIYSVSEIFKDYFSRRGIQLPKYRKTVNEEEGEGGADENEKREKEKEKE  260
+
+Query  261  EEEEEEEEEEEEEEEDEFSKFLFPIKINNVQHLRVARREEEEEEQYDEISKKDFTNKLQS  320
+            EEEEEEEEEEEEEEEDEFSKF FPIKINNVQHLRVARREEEEEEQYDEISKKDFTNKLQS
+Sbjct  261  EEEEEEEEEEEEEEEDEFSKFDFPIKINNVQHLRVARREEEEEEQYDEISKKDFTNKLQS  320
+
+Query  321  IMGKLKADISEEEIFDSRCCVTFNSTIRDLQDKSILDLLYCGKKTFLRYFTVTGIPVSTM  380
+            IM KLKADISEEEIFDSRCCVTFNSTIRDLQDKSILDLLYCGKKTFLRYFTVTGIP STM
+Sbjct  321  IMYKLKADISEEEIFDSRCCVTFNSTIRDLQDKSILDLLYCGKKTFLRYFTVTGIPWSTM  380
+
+Query  381  MKINNNNNDDDDDDDDDDDDDDSRGNVWKMRLKISDKSFKYPIVSHSIVVADDHPSDENI  440
+            MKINNN NDDDDDDDDDDDDDDSRGNVWKMRLKISDKSFKYPIVSHSIVVADDH SDENI
+Sbjct  381  MKINNNPNDDDDDDDDDDDDDDSRGNVWKMRLKISDKSFKYPIVSHSIVVADDHGSDENI  440
+
+Query  441  FQKDSSSGSSKRNKTKSIKLDENMKFNAVVPIFKPKIAAILKPLIKTQVFASLCTFSILN  500
+            FQKDSSSGSSKRNKTKSIKLDEN KFNAVVPIFKPKIAAILKPLI TQVFASLCTFSILN
+Sbjct  441  FQKDSSSGSSKRNKTKSIKLDENTKFNAVVPIFKPKIAAILKPLIWTQVFASLCTFSILN  500
+
+Query  501  NPNAVVVFSEVHFVALLRLWIKFINFKTQCSHIREKLECIYSTAAVYLDNPDYATYKRVL  560
+            NPNAVVVFSEVHFVALLRLWIKFINFKTQCSHIREKLECIYSTAAVYLDNPDYATYKRVL
+Sbjct  501  NPNAVVVFSEVHFVALLRLWIKFINFKTQCSHIREKLECIYSTAAVYLDNPDYATYKRVL  560
+
+Query  561  INSPEWALSEHVDDGGGGGGGERHFKVESENLVKPLFFMF  600
+            INSPEWALSEHVDDGGGGGGGERHFKVESENLVKPLF MF
+Sbjct  561  INSPEWALSEHVDDGGGGGGGERHFKVESENLVKPLFRMF  600
+
+
+ Score = 15.0 bits (27),  Expect = 9.0, Method: Compositional matrix adjust.
+ Identities = 6/19 (32%), Positives = 10/19 (53%), Gaps = 0/19 (0%)
+
+Query  70   QYPNKEKYNYVSTLDEILY  88
+            QY    K ++ + L  I+Y
+Sbjct  305  QYDEISKKDFTNKLQSIMY  323
+
+
+
+Lambda      K        H        a         alpha
+   0.317    0.137    0.390    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 302742
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/e2d_p_sp75m.faa).
+    Posted date:  Unknown
+  Number of letters in database: 400
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

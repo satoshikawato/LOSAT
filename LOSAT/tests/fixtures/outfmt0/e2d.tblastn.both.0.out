@@ -1,0 +1,95 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/e2d_t_ts.fa).
+           1 sequences; 659 total letters
+
+
+
+Query= pq1 prot query one
+
+Length=295
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+ts1 nt subject one                                                    243     9e-86
+
+
+> ts1 nt subject one
+Length=797
+
+ Score = 243 bits (620),  Expect = 9e-86, Method: Compositional matrix adjust.
+ Identities = 116/120 (97%), Positives = 117/120 (98%), Gaps = 0/120 (0%)
+ Frame = +3
+
+Query  31   EPMQMDTNPINASLTFRWKPAIMYTQVQTNVESSYKLQYSDNFWEPIFAFVLNASGCVRD  90
+            EPMQMDTNPINASLTFRWKPAIMYTQVQTNVESSYKLQYSDNFWE IFAFVLNASG VRD
+Sbjct  42   EPMQMDTNPINASLTFRWKPAIMYTQVQTNVESSYKLQYSDNFWESIFAFVLNASG*VRD  221
+
+Query  91   RIATIRTAWYGTTGIDHLTYSRQWWSQRVNHDVTIWEDLIYFVQYNQIGLAFMRMTRDQW  150
+            RIAT+RTAWYGTTGIDHLTYSRQW SQRVNHDVTIWEDLIYFVQYNQIGLAFMRMTRDQW
+Sbjct  222  RIATVRTAWYGTTGIDHLTYSRQWLSQRVNHDVTIWEDLIYFVQYNQIGLAFMRMTRDQW  401
+
+
+ Score = 168 bits (425),  Expect = 3e-56, Method: Compositional matrix adjust.
+ Identities = 77/81 (95%), Positives = 78/81 (96%), Gaps = 0/81 (0%)
+ Frame = -2
+
+Query  191  SVFDDKAFDLNTYGTEPISMLFRKCWYWWQSPDWWGTLVDYNSCMRIHTFYVKKWSIRCN  250
+            SVFDDKAFDLNTY TEPISMLFRKCWYWWQSPDWWGTLVDYNSCMR HTFYVKKWSIRCN
+Sbjct  700  SVFDDKAFDLNTYCTEPISMLFRKCWYWWQSPDWWGTLVDYNSCMRTHTFYVKKWSIRCN  521
+
+Query  251  VWQFKHEPATRPFYNMLNIHR  271
+            VWQF HEP+TRPFYNMLNIHR
+Sbjct  520  VWQFIHEPSTRPFYNMLNIHR  458
+
+
+ Score = 13.9 bits (24),  Expect = 3.7, Method: Compositional matrix adjust.
+ Identities = 7/21 (33%), Positives = 8/21 (38%), Gaps = 0/21 (0%)
+ Frame = +3
+
+Query  232  NSCMRIHTFYVKKWSIRCNVW  252
+             SCM   T       +  NVW
+Sbjct  498  GSCMNCQTLQRIDHFLT*NVW  560
+
+
+ Score = 12.7 bits (21),  Expect = 8.2, Method: Compositional matrix adjust.
+ Identities = 7/21 (33%), Positives = 10/21 (48%), Gaps = 1/21 (5%)
+ Frame = -2
+
+Query  100  YGTTGIDHLTYSRQWWSQRVN  120
+            Y +    H  Y ++ WS R N
+Sbjct  580  YNSCMRTHTFYVKK-WSIRCN  521
+
+
+
+Lambda      K        H        a         alpha
+   0.327    0.135    0.479    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 49140
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/e2d_t_ts.fa).
+    Posted date:  Unknown
+  Number of letters in database: 659
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40

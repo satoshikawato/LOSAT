@@ -5,7 +5,9 @@
 // (ports/run-output.ts), not through these methods.
 import type { DatasetRevision, FastaParserKind, RecordKey } from '../domain/dataset';
 import type { OutputFormat } from '../domain/output-format';
+import type { InputRole, ProgramId } from '../domain/programs';
 import type { HspRecord } from './engine';
+import type { InputCheck } from './input-check';
 
 export interface SourceRef {
   readonly sourceId: string;
@@ -43,6 +45,14 @@ export interface DatasetStore {
    * a source that does not end with one when another follows (plan §5.3).
    */
   buildRunInput(revisionIds: readonly string[]): Promise<RunInput>;
+  /**
+   * The engine's reading of the run input of the revisions for `program` and `role`
+   * (ports/input-check.ts). Resolves with the engine's verdict; rejects only when the
+   * check itself cannot run.
+   */
+  checkInput(program: ProgramId, role: InputRole, revisionIds: readonly string[]): Promise<InputCheck>;
+  /** The first `maxBytes` bytes of a source, for its preview. */
+  previewSource(sourceId: string, maxBytes: number): Promise<Uint8Array>;
 }
 
 export interface ResultSetRef {

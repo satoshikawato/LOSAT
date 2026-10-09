@@ -534,8 +534,64 @@ pub fn write_hit_fields<W: Write>(
     bit_score: f64,
     config: &OutputConfig,
 ) -> io::Result<()> {
+    write_hit_fields_bytes(
+        writer,
+        query_id.as_bytes(),
+        subject_id.as_bytes(),
+        identity,
+        num_ident,
+        length,
+        mismatch,
+        gapopen,
+        q_start,
+        q_end,
+        s_start,
+        s_end,
+        e_value,
+        bit_score,
+        config,
+    )
+}
+
+/// `write_hit_fields` with the query and subject IDs as bytes, written as they are (NCBI
+/// writes the IDs that it takes from the titles without converting them).
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:214-217
+/// ```c++
+/// void CBlastTabularInfo::x_PrintQueryAccessionVersion()
+/// {
+///     m_Ostream << s_GetSeqIdListString(m_QueryId, eAccVersion);
+/// }
+/// ```
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:252-255
+/// ```c++
+/// void CBlastTabularInfo::x_PrintSubjectAccessionVersion(void)
+/// {
+///     m_Ostream << s_GetSeqIdListString(m_SubjectId, eAccVersion);
+/// }
+/// ```
+#[allow(clippy::too_many_arguments)]
+pub fn write_hit_fields_bytes<W: Write>(
+    writer: &mut W,
+    query_id: &[u8],
+    subject_id: &[u8],
+    identity: f64,
+    num_ident: usize,
+    length: usize,
+    mismatch: usize,
+    gapopen: usize,
+    q_start: usize,
+    q_end: usize,
+    s_start: usize,
+    s_end: usize,
+    e_value: f64,
+    bit_score: f64,
+    config: &OutputConfig,
+) -> io::Result<()> {
     let delim = config.delimiter;
-    write!(writer, "{}{}{}", query_id, delim, subject_id)?;
+    writer.write_all(query_id)?;
+    write!(writer, "{}", delim)?;
+    writer.write_all(subject_id)?;
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/include/objtools/align_format/tabular.hpp:437-441
     // ```c
     // double perc_ident =
@@ -639,6 +695,90 @@ pub fn write_outfmt6<W: Write>(
     }
 
     Ok(())
+}
+
+/// `NStr::TruncateSpaces(text)` (`eTrunc_Both`): `text` without the white space at its
+/// ends (`isspace` of an `unsigned char` in the C locale: 0x09-0x0D and the space).
+///
+/// NCBI reference: c++/src/corelib/ncbistr.cpp:3145-3175
+/// ```c
+/// template <class TStr>
+/// TStr s_TruncateSpaces(const TStr& str, NStr::ETrunc where,
+///                       const TStr& empty_str)
+/// {
+///     SIZE_TYPE length = str.length();
+///     if (length == 0) {
+///         return empty_str;
+///     }
+///     SIZE_TYPE beg = 0;
+///     if (where == NStr::eTrunc_Begin  ||  where == NStr::eTrunc_Both) {
+///         _ASSERT(beg < length);
+///         while ( isspace((unsigned char) str[beg]) ) {
+///             if (++beg == length) {
+///                 return empty_str;
+///             }
+///         }
+///     }
+///     SIZE_TYPE end = length;
+///     if ( where == NStr::eTrunc_End  ||  where == NStr::eTrunc_Both ) {
+///         _ASSERT(beg < end);
+///         while (isspace((unsigned char) str[--end])) {
+///             if (beg == end) {
+///                 return empty_str;
+///             }
+///         }
+///         _ASSERT(beg <= end  &&  !isspace((unsigned char) str[end]));
+///         ++end;
+///     }
+/// ```
+pub fn truncate_spaces(text: &[u8]) -> &[u8] {
+    let is_space = |byte: &u8| matches!(byte, 0x09..=0x0D | b' ');
+    let begin = text
+        .iter()
+        .position(|byte| !is_space(byte))
+        .unwrap_or(text.len());
+    let end = text
+        .iter()
+        .rposition(|byte| !is_space(byte))
+        .map_or(begin, |last| last + 1);
+    &text[begin..end]
+}
+
+/// The `# Query: ` line of the outfmt 7 header of a query with the title `query_title`
+/// (the bytes as they are; the ID of a local query is not shown).
+///
+/// NCBI reference: c++/src/objtools/align_format/tabular.cpp:1305-1308
+/// ```c
+///     CAlignFormatUtil::AcknowledgeBlastQuery(bioseq, kLineLength, m_Ostream,
+///                                             m_ParseLocalIds, kHtmlFormat,
+///                                             kTabularFormat, rid);
+/// ```
+/// NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:725-743
+/// ```c
+///     } else if (tabular) {
+///         out << "# " << label << ": ";
+///     } else {
+///         out << label << "= ";
+///     }
+///
+///     string all_id_str = GetSeqIdString(cbs, believe_query);
+///     all_id_str += " ";
+///     all_id_str = NStr::TruncateSpaces(all_id_str + GetSeqDescrString(cbs));
+///
+///     // For tabular output, there is no limit on the line length.
+///     // There is also no extra line with the sequence length.
+///     if (tabular) {
+///         out << all_id_str;
+/// ```
+/// The line ends with the `\n` that `x_PrintQueryAndDbNames` writes before `# Database:`
+/// (tabular.cpp:1310-1311).
+pub fn write_outfmt7_query_line<W: Write + ?Sized>(
+    writer: &mut W,
+    query_title: &[u8],
+) -> io::Result<()> {
+    writer.write_all(b"# Query: ")?;
+    writer.write_all(truncate_spaces(query_title))?;
+    writer.write_all(b"\n")
 }
 
 // =============================================================================
@@ -1367,5 +1507,45 @@ mod tests {
 
         // Invalid format
         assert!(OutputFormat::parse("99").is_err());
+    }
+
+    // NCBI BLAST+ 2.17.0, `blastn -outfmt 7` (inventory range RP,
+    // `scratch_RP/out/<case>/blastn_f7.out`): the query's title as the reader keeps it,
+    // raw, after `# Query: `.
+    #[test]
+    fn outfmt7_query_lines_follow_the_ncbi_oracle() {
+        use crate::blastinput::fasta_reader::{read_all, FastaInputSource, ReaderConfig};
+        for (defline, line) in [
+            (&b"id desc"[..], &b"# Query: id desc\n"[..]),
+            (b"id\tdesc", b"# Query: id\n"),
+            (b"", b"# Query: \n"),
+            (b"id\xe9x desc", b"# Query: id\xe9x desc\n"),
+            (
+                b"id\xffx desc \xff end",
+                b"# Query: id\xffx desc \xff end\n",
+            ),
+            (
+                b"id &amp; &lt;b&gt; \"q\" desc",
+                b"# Query: id &amp; &lt;b&gt; \"q\" desc\n",
+            ),
+            (b"\x01id desc", b"# Query: \x01id desc\n"),
+            (b"id desc   ", b"# Query: id desc\n"),
+            (b"TPA: id desc", b"# Query: TPA: id desc\n"),
+            (b"id desc\x01more", b"# Query: id desc\n"),
+        ] {
+            let bytes = [&b">"[..], defline, b"\nACGT\n"].concat();
+            let mut source =
+                FastaInputSource::from_bytes(&bytes, ReaderConfig::query("BLASTN", false, false));
+            let title = read_all(&mut source, &mut |_| Ok(())).unwrap()[0]
+                .title
+                .clone();
+            let mut out = Vec::new();
+            write_outfmt7_query_line(&mut out, &title).unwrap();
+            assert_eq!(out, line, "{defline:?}");
+        }
+        // `NStr::TruncateSpaces`: 0x09-0x0D and the space at both ends.
+        assert_eq!(truncate_spaces(b" \x0b\x0cid x\t\r "), b"id x");
+        assert_eq!(truncate_spaces(b" \n "), b"");
+        assert_eq!(truncate_spaces(b"\xa0id\xa0"), b"\xa0id\xa0");
     }
 }

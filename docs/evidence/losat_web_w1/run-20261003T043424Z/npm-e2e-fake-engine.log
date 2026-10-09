@@ -1,0 +1,200 @@
+
+> losat-web@0.0.0 e2e
+> playwright test --reporter=list
+
+
+Running 90 tests using 2 workers
+
+  -   1 [chromium] › tests/e2e/browsers.spec.ts:49:1 › run output contract: a writer in its own worker and the real Data worker (without storage full)
+  -   2 [chromium] › tests/e2e/browsers.spec.ts:34:3 › BlockStore contract: opfs store in a dedicated worker (without storage full)
+  -   4 [chromium] › tests/e2e/browsers.spec.ts:34:3 › BlockStore contract: memory store in a dedicated worker (without storage full)
+  -   3 [chromium] › tests/e2e/browsers.spec.ts:59:1 › the application keeps results in OPFS, or in memory with the reason shown
+pass [opfs] write and seal: a block reads back exactly the bytes appended to it
+pass [opfs] read: any range of a sealed block, and nothing beyond its end
+pass [opfs] write: the store keeps a copy, so the caller may reuse its buffer
+pass [opfs] staging: a block cannot be read before it is sealed
+pass [opfs] seal: a sealed block takes no more bytes and cannot be sealed again
+pass [run output] every stream arrives in order and the run commits
+pass [opfs] discard: a staged or sealed block disappears and its bytes are freed
+pass [opfs] create: a path that exists cannot be created again
+pass [opfs] removeAll: removes one directory, sealed or not, and leaves the rest
+pass [opfs] paths: empty and relative names are rejected
+pass [opfs] an empty block can be sealed and read
+pass [run output] many small chunks and one large chunk arrive unchanged
+pass [run output] a run without output commits with empty outputs
+pass [run output] staging: a run cannot be read before it is committed, and the commit waits for end
+pass [run output] an end whose totals disagree fails the commit and discards the run
+pass [run output] a message outside the protocol fails the commit
+pass [opfs] a large block: 48 MiB in 1 MiB appends reads back unchanged
+pass [opfs] storage full: an append fails with StorageFullError, the block can only be discarded, and sealed blocks stay readable
+  ✓   5 [chromium] › tests/e2e/contracts.spec.ts:32:3 › BlockStore contract: opfs store in a dedicated worker (6.5s)
+pass [run output] discard drops a staged run and ignores its late chunks
+pass [run output] a committed run is kept by discard and removed by delete
+pass [memory] write and seal: a block reads back exactly the bytes appended to it
+pass [memory] read: any range of a sealed block, and nothing beyond its end
+pass [memory] write: the store keeps a copy, so the caller may reuse its buffer
+pass [memory] staging: a block cannot be read before it is sealed
+pass [memory] seal: a sealed block takes no more bytes and cannot be sealed again
+pass [memory] discard: a staged or sealed block disappears and its bytes are freed
+pass [memory] create: a path that exists cannot be created again
+pass [memory] removeAll: removes one directory, sealed or not, and leaves the rest
+pass [memory] paths: empty and relative names are rejected
+pass [memory] an empty block can be sealed and read
+pass [run output] two staged runs keep their outputs apart
+pass [memory] a large block: 48 MiB in 1 MiB appends reads back unchanged
+pass [memory] storage full: an append fails with StorageFullError, the block can only be discarded, and sealed blocks stay readable
+pass [run output] the writer refuses to write after end
+  ✓   7 [chromium] › tests/e2e/contracts.spec.ts:32:3 › BlockStore contract: memory store in a dedicated worker (737ms)
+  -   8 [chromium] › tests/e2e/engine.spec.ts:68:1 › record scanner contract: the serial reactor
+  -   9 [chromium] › tests/e2e/engine.spec.ts:76:3 › engine input contract: the real EngineGateway at 1 thread(s)
+  -  10 [chromium] › tests/e2e/engine.spec.ts:76:3 › engine input contract: the real EngineGateway at 4 thread(s)
+  -  11 [chromium] › tests/e2e/engine.spec.ts:103:1 › run output contract: the writer in the Engine worker, the real Data worker (without storage full)
+  -  12 [chromium] › tests/e2e/engine.spec.ts:112:1 › V-BR: searches through the application give the expected bytes at 1, 2 and 4 threads
+  -  13 [chromium] › tests/e2e/engine.spec.ts:145:1 › R1: searches of one subject with other queries and options reuse it and give the expected bytes
+  -  14 [chromium] › tests/e2e/engine.spec.ts:187:1 › a cancelled search ends its runtime; the next search runs in a new one with the expected bytes
+  -  15 [chromium] › tests/e2e/engine.spec.ts:216:1 › a runtime renewed after every search gives the same bytes and registers the subject again
+  -  16 [chromium] › tests/e2e/engine.spec.ts:239:1 › without cross-origin isolation, a threaded search runs on the serial module with the reason
+  -  17 [chromium] › tests/e2e/measure.spec.ts:207:1 › dw8: the share of a warm search that subject-only preprocessing can take
+  -  18 [chromium] › tests/e2e/measure.spec.ts:238:1 › memory: the linear memory of one instance over repeated searches
+  -  19 [chromium] › tests/e2e/measure.spec.ts:272:1 › auto: the search phase at 1, 2 and 4 threads by input size
+  -  20 [chromium] › tests/e2e/measure.spec.ts:298:1 › cancel: the time to cancel and to prepare the next search in a new runtime
+  ✓  21 [chromium] › tests/e2e/smoke.spec.ts:4:1 › the page is cross-origin isolated, so the threaded engine can use shared memory (212ms)
+pass [run output] storage full: the run fails with the reason, and committed runs stay readable
+  ✓   6 [chromium] › tests/e2e/contracts.spec.ts:40:1 › run output contract: a writer in its own worker and the real Data worker (OPFS) (7.5s)
+  ✓  23 [chromium] › tests/e2e/smoke.spec.ts:37:1 › a BLASTN query of white space only is refused with the index scan error, before it is queued (397ms)
+  ✓  22 [chromium] › tests/e2e/smoke.spec.ts:10:1 › paste, queue, run, view and export with the fake engine (761ms)
+  ✓  24 [chromium] › tests/e2e/storage.spec.ts:24:1 › a tab keeps its outputs in OPFS under tmp/<session>/runs/<run>/, named by tokens only (1.9s)
+  ✓  25 [chromium] › tests/e2e/storage.spec.ts:47:3 › the next tab removes the data of a tab that is killed, and keeps its own (4.4s)
+  ✓  26 [chromium] › tests/e2e/storage.spec.ts:47:3 › the next tab removes the data of a tab that is closed, and keeps its own (4.3s)
+  ✓  28 [chromium] › tests/e2e/storage.spec.ts:107:1 › two tabs that start at the same time remove an abandoned session once and keep each other (3.4s)
+  ✓  27 [chromium] › tests/e2e/storage.spec.ts:80:1 › two open tabs, started one after the other, never remove each other's data (5.1s)
+  ✓  29 [chromium] › tests/e2e/storage.spec.ts:128:1 › a stopped (frozen) tab keeps its data while another tab starts (3.5s)
+  ✓  30 [chromium] › tests/e2e/storage.spec.ts:147:1 › a run that runs out of storage fails with the reason; earlier results stay and later runs work (4.0s)
+[PLUGIN_TIMINGS] JavaScript callbacks ran for 2.6s of this 3.1s build (85%).
+1 callback is listed without a time. Its calls overlapped, so the time inside one call includes work from other calls. To find its cost, profile the build with `node --cpu-prof`:
+  - plugin vite:worker-import-meta-url transform (4 calls)
+See https://rolldown.rs/reference/InputOptions.checks#bundlertimings for more details.
+
+pass [opfs] write and seal: a block reads back exactly the bytes appended to it
+pass [opfs] read: any range of a sealed block, and nothing beyond its end
+pass [opfs] write: the store keeps a copy, so the caller may reuse its buffer
+pass [opfs] staging: a block cannot be read before it is sealed
+pass [opfs] seal: a sealed block takes no more bytes and cannot be sealed again
+pass [opfs] discard: a staged or sealed block disappears and its bytes are freed
+pass [opfs] create: a path that exists cannot be created again
+pass [run output] every stream arrives in order and the run commits
+pass [opfs] removeAll: removes one directory, sealed or not, and leaves the rest
+pass [opfs] paths: empty and relative names are rejected
+pass [opfs] an empty block can be sealed and read
+pass [run output] many small chunks and one large chunk arrive unchanged
+pass [run output] a run without output commits with empty outputs
+pass [opfs] a large block: 48 MiB in 1 MiB appends reads back unchanged
+FAIL [opfs] storage full: an append fails with StorageFullError, the block can only be discarded, and sealed blocks stay readable: ContractError: an append beyond the storage: expected an error matching /StorageFullError/, but nothing was thrown
+  ✓  31 [firefox] › tests/e2e/browsers.spec.ts:34:3 › BlockStore contract: opfs store in a dedicated worker (without storage full) (3.8s)
+pass [run output] staging: a run cannot be read before it is committed, and the commit waits for end
+pass [memory] write and seal: a block reads back exactly the bytes appended to it
+pass [memory] read: any range of a sealed block, and nothing beyond its end
+pass [memory] write: the store keeps a copy, so the caller may reuse its buffer
+pass [memory] staging: a block cannot be read before it is sealed
+pass [memory] seal: a sealed block takes no more bytes and cannot be sealed again
+pass [memory] discard: a staged or sealed block disappears and its bytes are freed
+pass [memory] create: a path that exists cannot be created again
+pass [memory] removeAll: removes one directory, sealed or not, and leaves the rest
+pass [memory] paths: empty and relative names are rejected
+pass [memory] an empty block can be sealed and read
+pass [run output] an end whose totals disagree fails the commit and discards the run
+pass [memory] a large block: 48 MiB in 1 MiB appends reads back unchanged
+pass [memory] storage full: an append fails with StorageFullError, the block can only be discarded, and sealed blocks stay readable
+  ✓  33 [firefox] › tests/e2e/browsers.spec.ts:34:3 › BlockStore contract: memory store in a dedicated worker (without storage full) (728ms)
+pass [run output] a message outside the protocol fails the commit
+  -  34 [firefox] › tests/e2e/contracts.spec.ts:32:3 › BlockStore contract: opfs store in a dedicated worker
+  -  35 [firefox] › tests/e2e/contracts.spec.ts:32:3 › BlockStore contract: memory store in a dedicated worker
+  -  36 [firefox] › tests/e2e/contracts.spec.ts:40:1 › run output contract: a writer in its own worker and the real Data worker (OPFS)
+  -  37 [firefox] › tests/e2e/engine.spec.ts:68:1 › record scanner contract: the serial reactor
+  -  38 [firefox] › tests/e2e/engine.spec.ts:76:3 › engine input contract: the real EngineGateway at 1 thread(s)
+  -  39 [firefox] › tests/e2e/engine.spec.ts:76:3 › engine input contract: the real EngineGateway at 4 thread(s)
+  -  40 [firefox] › tests/e2e/engine.spec.ts:103:1 › run output contract: the writer in the Engine worker, the real Data worker (without storage full)
+  -  41 [firefox] › tests/e2e/engine.spec.ts:112:1 › V-BR: searches through the application give the expected bytes at 1, 2 and 4 threads
+  -  42 [firefox] › tests/e2e/engine.spec.ts:145:1 › R1: searches of one subject with other queries and options reuse it and give the expected bytes
+  -  43 [firefox] › tests/e2e/engine.spec.ts:187:1 › a cancelled search ends its runtime; the next search runs in a new one with the expected bytes
+  -  44 [firefox] › tests/e2e/engine.spec.ts:216:1 › a runtime renewed after every search gives the same bytes and registers the subject again
+  -  45 [firefox] › tests/e2e/engine.spec.ts:239:1 › without cross-origin isolation, a threaded search runs on the serial module with the reason
+  -  46 [firefox] › tests/e2e/measure.spec.ts:207:1 › dw8: the share of a warm search that subject-only preprocessing can take
+  -  47 [firefox] › tests/e2e/measure.spec.ts:238:1 › memory: the linear memory of one instance over repeated searches
+  -  48 [firefox] › tests/e2e/measure.spec.ts:272:1 › auto: the search phase at 1, 2 and 4 threads by input size
+  -  49 [firefox] › tests/e2e/measure.spec.ts:298:1 › cancel: the time to cancel and to prepare the next search in a new runtime
+  ✓  50 [firefox] › tests/e2e/smoke.spec.ts:4:1 › the page is cross-origin isolated, so the threaded engine can use shared memory (422ms)
+pass [run output] discard drops a staged run and ignores its late chunks
+pass [run output] a committed run is kept by discard and removed by delete
+pass [run output] two staged runs keep their outputs apart
+pass [run output] the writer refuses to write after end
+  ✓  51 [firefox] › tests/e2e/smoke.spec.ts:10:1 › paste, queue, run, view and export with the fake engine (1.6s)
+FAIL [run output] storage full: the run fails with the reason, and committed runs stay readable: ContractError: commit: expected a rejection matching /StorageFullError: Not enough temporary storage/, but it resolved
+run output contract on the opfs store
+  ✓  32 [firefox] › tests/e2e/browsers.spec.ts:49:1 › run output contract: a writer in its own worker and the real Data worker (without storage full) (6.2s)
+  ✓  52 [firefox] › tests/e2e/smoke.spec.ts:37:1 › a BLASTN query of white space only is refused with the index scan error, before it is queued (602ms)
+  -  54 [firefox] › tests/e2e/storage.spec.ts:24:1 › a tab keeps its outputs in OPFS under tmp/<session>/runs/<run>/, named by tokens only
+  -  55 [firefox] › tests/e2e/storage.spec.ts:47:3 › the next tab removes the data of a tab that is killed, and keeps its own
+  -  56 [firefox] › tests/e2e/storage.spec.ts:47:3 › the next tab removes the data of a tab that is closed, and keeps its own
+  -  57 [firefox] › tests/e2e/storage.spec.ts:80:1 › two open tabs, started one after the other, never remove each other's data
+  -  58 [firefox] › tests/e2e/storage.spec.ts:107:1 › two tabs that start at the same time remove an abandoned session once and keep each other
+  -  59 [firefox] › tests/e2e/storage.spec.ts:128:1 › a stopped (frozen) tab keeps its data while another tab starts
+  -  60 [firefox] › tests/e2e/storage.spec.ts:147:1 › a run that runs out of storage fails with the reason; earlier results stay and later runs work
+  ✓  53 [firefox] › tests/e2e/browsers.spec.ts:59:1 › the application keeps results in OPFS, or in memory with the reason shown (674ms)
+  -  61 [webkit] › tests/e2e/browsers.spec.ts:34:3 › BlockStore contract: opfs store in a dedicated worker (without storage full)
+pass [run output] every stream arrives in order and the run commits
+pass [run output] many small chunks and one large chunk arrive unchanged
+pass [run output] a run without output commits with empty outputs
+pass [memory] write and seal: a block reads back exactly the bytes appended to it
+pass [memory] read: any range of a sealed block, and nothing beyond its end
+pass [memory] write: the store keeps a copy, so the caller may reuse its buffer
+pass [memory] staging: a block cannot be read before it is sealed
+pass [memory] seal: a sealed block takes no more bytes and cannot be sealed again
+pass [memory] discard: a staged or sealed block disappears and its bytes are freed
+pass [memory] create: a path that exists cannot be created again
+pass [memory] removeAll: removes one directory, sealed or not, and leaves the rest
+pass [memory] paths: empty and relative names are rejected
+pass [memory] an empty block can be sealed and read
+pass [run output] staging: a run cannot be read before it is committed, and the commit waits for end
+pass [run output] an end whose totals disagree fails the commit and discards the run
+pass [run output] a message outside the protocol fails the commit
+pass [memory] a large block: 48 MiB in 1 MiB appends reads back unchanged
+pass [memory] storage full: an append fails with StorageFullError, the block can only be discarded, and sealed blocks stay readable
+  ✓  63 [webkit] › tests/e2e/browsers.spec.ts:34:3 › BlockStore contract: memory store in a dedicated worker (without storage full) (737ms)
+  -  64 [webkit] › tests/e2e/contracts.spec.ts:32:3 › BlockStore contract: opfs store in a dedicated worker
+  -  65 [webkit] › tests/e2e/contracts.spec.ts:32:3 › BlockStore contract: memory store in a dedicated worker
+pass [run output] discard drops a staged run and ignores its late chunks
+pass [run output] a committed run is kept by discard and removed by delete
+  -  66 [webkit] › tests/e2e/contracts.spec.ts:40:1 › run output contract: a writer in its own worker and the real Data worker (OPFS)
+  -  67 [webkit] › tests/e2e/engine.spec.ts:68:1 › record scanner contract: the serial reactor
+  -  68 [webkit] › tests/e2e/engine.spec.ts:76:3 › engine input contract: the real EngineGateway at 1 thread(s)
+  -  69 [webkit] › tests/e2e/engine.spec.ts:76:3 › engine input contract: the real EngineGateway at 4 thread(s)
+  -  70 [webkit] › tests/e2e/engine.spec.ts:103:1 › run output contract: the writer in the Engine worker, the real Data worker (without storage full)
+  -  71 [webkit] › tests/e2e/engine.spec.ts:112:1 › V-BR: searches through the application give the expected bytes at 1, 2 and 4 threads
+  -  72 [webkit] › tests/e2e/engine.spec.ts:145:1 › R1: searches of one subject with other queries and options reuse it and give the expected bytes
+  -  73 [webkit] › tests/e2e/engine.spec.ts:187:1 › a cancelled search ends its runtime; the next search runs in a new one with the expected bytes
+  -  74 [webkit] › tests/e2e/engine.spec.ts:216:1 › a runtime renewed after every search gives the same bytes and registers the subject again
+  -  75 [webkit] › tests/e2e/engine.spec.ts:239:1 › without cross-origin isolation, a threaded search runs on the serial module with the reason
+  -  76 [webkit] › tests/e2e/measure.spec.ts:207:1 › dw8: the share of a warm search that subject-only preprocessing can take
+  -  77 [webkit] › tests/e2e/measure.spec.ts:238:1 › memory: the linear memory of one instance over repeated searches
+  -  78 [webkit] › tests/e2e/measure.spec.ts:272:1 › auto: the search phase at 1, 2 and 4 threads by input size
+  -  79 [webkit] › tests/e2e/measure.spec.ts:298:1 › cancel: the time to cancel and to prepare the next search in a new runtime
+pass [run output] two staged runs keep their outputs apart
+pass [run output] the writer refuses to write after end
+FAIL [run output] storage full: the run fails with the reason, and committed runs stay readable: ContractError: commit: expected a rejection matching /StorageFullError: Not enough temporary storage/, but it resolved
+run output contract on the memory store
+  ✓  62 [webkit] › tests/e2e/browsers.spec.ts:49:1 › run output contract: a writer in its own worker and the real Data worker (without storage full) (1.4s)
+  ✓  80 [webkit] › tests/e2e/smoke.spec.ts:4:1 › the page is cross-origin isolated, so the threaded engine can use shared memory (556ms)
+  ✓  81 [webkit] › tests/e2e/browsers.spec.ts:59:1 › the application keeps results in OPFS, or in memory with the reason shown (673ms)
+  ✓  83 [webkit] › tests/e2e/smoke.spec.ts:37:1 › a BLASTN query of white space only is refused with the index scan error, before it is queued (728ms)
+  -  84 [webkit] › tests/e2e/storage.spec.ts:24:1 › a tab keeps its outputs in OPFS under tmp/<session>/runs/<run>/, named by tokens only
+  -  85 [webkit] › tests/e2e/storage.spec.ts:47:3 › the next tab removes the data of a tab that is killed, and keeps its own
+  -  86 [webkit] › tests/e2e/storage.spec.ts:47:3 › the next tab removes the data of a tab that is closed, and keeps its own
+  -  87 [webkit] › tests/e2e/storage.spec.ts:80:1 › two open tabs, started one after the other, never remove each other's data
+  -  88 [webkit] › tests/e2e/storage.spec.ts:107:1 › two tabs that start at the same time remove an abandoned session once and keep each other
+  -  89 [webkit] › tests/e2e/storage.spec.ts:128:1 › a stopped (frozen) tab keeps its data while another tab starts
+  -  90 [webkit] › tests/e2e/storage.spec.ts:147:1 › a run that runs out of storage fails with the reason; earlier results stay and later runs work
+  ✓  82 [webkit] › tests/e2e/smoke.spec.ts:10:1 › paste, queue, run, view and export with the fake engine (1.2s)
+
+  64 skipped
+  26 passed (57.2s)

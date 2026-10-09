@@ -1,0 +1,10 @@
+# TBLASTN 2.17.0+
+# Query: pq1 prot query one
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/e2d_t_ts.fa)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 4 hits found
+pq1	ts1	96.667	120	4	0	31	150	42	401	9.05e-86	243
+pq1	ts1	95.062	81	4	0	191	271	700	458	2.55e-56	168
+pq1	ts1	33.333	21	14	0	232	252	498	560	3.7	13.9
+pq1	ts1	33.333	21	13	1	100	120	580	521	8.2	12.7
+# BLAST processed 1 queries

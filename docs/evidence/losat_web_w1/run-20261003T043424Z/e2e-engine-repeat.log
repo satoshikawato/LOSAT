@@ -1,0 +1,623 @@
+
+Running 54 tests using 2 workers
+
+pass [record scanner] scan: one record with regular lines (LF)
+pass [record scanner] scan: CRLF line ends
+pass [record scanner] scan: lines of different lengths
+pass [record scanner] scan: several records, the last without a final newline
+pass [record scanner] scan: a blank line inside a sequence
+pass [record scanner] scan: interior white space belongs to the sequence, trailing white space does not
+pass [record scanner] scan: a non-ASCII header
+pass [record scanner] scan: residues keep their case
+pass [record scanner] scan: a record without residues
+pass [record scanner] scan: an empty record ends the input (bio stops reading there)
+pass [record scanner] scan: a header line without a newline at the end of the input
+pass [record scanner] scan: an empty input has no records
+pass [record scanner] scan: a U+FEFF at the start of a header is part of the ID
+pass [record scanner] scan: bytes after the empty record that ends the input are not read
+pass [record scanner] scan: a long record (4 checkpoints) with lines of 60 and 61 residues
+multi.blastn n=1: subject registered
+pass [record scanner] scan: a long record with regular 80-residue lines
+pass [record scanner] scan: the parser's error for text before the first header
+pass [record scanner] scan: the parser's error for a blank line before the first header
+pass [record scanner] scan: the parser's error for white space only
+pass [record scanner] scan: the parser's error for a first line that is not a header, before bytes that are not UTF-8
+pass [record scanner] scan: the parser's error for bytes that are not UTF-8
+pass [record scanner] scan: a multi-byte character split across chunks
+pass [record scanner] scan: parser kind 1 is refused until SX
+multi.megablast n=1: subject retained
+  ✓   1 [chromium] › tests/e2e/engine.spec.ts:68:1 › record scanner contract: the serial reactor (791ms)
+iupac.beyond_table.blastn n=1: subject retained
+rna.megablast n=1: subject retained
+multi.mts3.blastn n=1: subject retained
+multi.ws7_e1000.blastn n=4: subject registered
+multi.besthit.blastn n=4: subject retained
+pass [engine input] register: the run proceeds when the record tables agree
+tblastx.multi n=1: subject registered
+tblastx.batch n=1: subject retained
+pass [engine input] register: a query record with another ID stops the run before any output
+tblastx.mts1 n=4: subject registered
+tblastx.thrwin n=4: subject retained
+pass [engine input] register: a subject record with another length stops the run before any output
+pass [engine input] register: a missing record stops the run before any output
+  ✓   3 [chromium] › tests/e2e/engine.spec.ts:76:3 › engine input contract: the real EngineGateway at 1 thread(s) (1.2s)
+pass [engine input] register: the run proceeds when the record tables agree
+pass [engine input] register: a query record with another ID stops the run before any output
+pass [engine input] register: a subject record with another length stops the run before any output
+pass [engine input] register: a missing record stops the run before any output
+  ✓   4 [chromium] › tests/e2e/engine.spec.ts:76:3 › engine input contract: the real EngineGateway at 4 thread(s) (1.2s)
+pass [run output, Engine worker] every stream arrives in order and the run commits
+  ✓   2 [chromium] › tests/e2e/engine.spec.ts:145:1 › R1: searches of one subject with other queries and options reuse it and give the expected bytes (3.5s)
+pass [run output, Engine worker] many small chunks and one large chunk arrive unchanged
+pass [run output, Engine worker] a run without output commits with empty outputs
+pass [run output, Engine worker] staging: a run cannot be read before it is committed, and the commit waits for end
+pass [run output, Engine worker] an end whose totals disagree fails the commit and discards the run
+pass [run output, Engine worker] a message outside the protocol fails the commit
+cancel n=1: cancelled in 6 ms; next search prepared in 28 ms
+pass [run output, Engine worker] discard drops a staged run and ignores its late chunks
+pass [run output, Engine worker] a committed run is kept by discard and removed by delete
+pass [run output, Engine worker] two staged runs keep their outputs apart
+pass [run output, Engine worker] the writer refuses to write after end
+FAIL [run output, Engine worker] storage full: the run fails with the reason, and committed runs stay readable: ContractError: commit: expected a rejection matching /StorageFullError: Not enough temporary storage/, but it resolved
+  ✓   5 [chromium] › tests/e2e/engine.spec.ts:103:1 › run output contract: the writer in the Engine worker, the real Data worker (without storage full) (1.7s)
+cancel n=4: cancelled in 4 ms; next search prepared in 46 ms
+  ✓   6 [chromium] › tests/e2e/engine.spec.ts:187:1 › a cancelled search ends its runtime; the next search runs in a new one with the expected bytes (1.7s)
+completed compact.blastn n=1 n=1 289 ms
+completed compact.blastn n=2 n=2 112 ms
+completed compact.blastn n=4 n=4 82 ms
+completed multi.blastn n=1 n=1 84 ms
+renewed 0 n=1: subject registered
+renewed 1 n=1: subject retained
+completed multi.blastn n=2 n=2 87 ms
+renewed 2 n=4: subject registered
+renewed 3 n=4: subject retained
+completed multi.blastn n=4 n=4 80 ms
+completed mask.lcase.megablast n=1 n=1 70 ms
+completed mask.lcase.megablast n=2 n=2 61 ms
+completed mask.lcase.megablast n=4 n=4 62 ms
+renewed 0 n=1: subject registered
+completed width.blastp n=1 n=1 66 ms
+renewed 1 n=1: subject registered
+renewed 2 n=4: subject registered
+completed width.blastp n=2 n=2 74 ms
+renewed 3 n=4: subject registered
+completed width.blastp n=4 n=4 55 ms
+  ✓   8 [chromium] › tests/e2e/engine.spec.ts:216:1 › a runtime renewed after every search gives the same bytes and registers the subject again (1.2s)
+completed width.tblastn n=1 n=1 54 ms
+completed width.tblastn n=2 n=2 67 ms
+completed width.tblastn n=4 n=4 57 ms
+completed tblastx.multi n=1 n=1 176 ms
+completed compact.blastn n=4 n=4 271 ms
+  ✓   9 [chromium] › tests/e2e/engine.spec.ts:239:1 › without cross-origin isolation, a threaded search runs on the serial module with the reason (423ms)
+completed tblastx.multi n=2 n=2 190 ms
+completed tblastx.multi n=4 n=4 162 ms
+completed tblastn.code4 n=1 n=1 53 ms
+completed tblastn.code4 n=2 n=2 63 ms
+completed tblastn.code4 n=4 n=4 68 ms
+completed tblastn.batches n=1 n=1 1371 ms
+completed tblastn.batches n=2 n=2 1173 ms
+completed tblastn.batches n=4 n=4 1086 ms
+completed tblastx.threaded-direct n=1 n=1 70 ms
+completed tblastx.threaded-direct n=2 n=2 79 ms
+completed tblastx.threaded-direct n=4 n=4 76 ms
+pass [record scanner] scan: one record with regular lines (LF)
+pass [record scanner] scan: CRLF line ends
+pass [record scanner] scan: lines of different lengths
+pass [record scanner] scan: several records, the last without a final newline
+pass [record scanner] scan: a blank line inside a sequence
+pass [record scanner] scan: interior white space belongs to the sequence, trailing white space does not
+pass [record scanner] scan: a non-ASCII header
+pass [record scanner] scan: residues keep their case
+pass [record scanner] scan: a record without residues
+pass [record scanner] scan: an empty record ends the input (bio stops reading there)
+pass [record scanner] scan: a header line without a newline at the end of the input
+pass [record scanner] scan: an empty input has no records
+pass [record scanner] scan: a U+FEFF at the start of a header is part of the ID
+pass [record scanner] scan: bytes after the empty record that ends the input are not read
+pass [record scanner] scan: a long record (4 checkpoints) with lines of 60 and 61 residues
+pass [record scanner] scan: a long record with regular 80-residue lines
+pass [record scanner] scan: the parser's error for text before the first header
+pass [record scanner] scan: the parser's error for a blank line before the first header
+pass [record scanner] scan: the parser's error for white space only
+pass [record scanner] scan: the parser's error for a first line that is not a header, before bytes that are not UTF-8
+pass [record scanner] scan: the parser's error for bytes that are not UTF-8
+pass [record scanner] scan: a multi-byte character split across chunks
+pass [record scanner] scan: parser kind 1 is refused until SX
+  ✓  10 [chromium] › tests/e2e/engine.spec.ts:68:1 › record scanner contract: the serial reactor (669ms)
+  ✓   7 [chromium] › tests/e2e/engine.spec.ts:112:1 › V-BR: searches through the application give the expected bytes at 1, 2 and 4 threads (10.5s)
+pass [engine input] register: the run proceeds when the record tables agree
+pass [engine input] register: a query record with another ID stops the run before any output
+pass [engine input] register: a subject record with another length stops the run before any output
+pass [engine input] register: a missing record stops the run before any output
+  ✓  11 [chromium] › tests/e2e/engine.spec.ts:76:3 › engine input contract: the real EngineGateway at 1 thread(s) (1.2s)
+pass [engine input] register: the run proceeds when the record tables agree
+pass [engine input] register: a query record with another ID stops the run before any output
+pass [engine input] register: a subject record with another length stops the run before any output
+pass [engine input] register: a missing record stops the run before any output
+  ✓  12 [chromium] › tests/e2e/engine.spec.ts:76:3 › engine input contract: the real EngineGateway at 4 thread(s) (1.2s)
+pass [run output, Engine worker] every stream arrives in order and the run commits
+pass [run output, Engine worker] many small chunks and one large chunk arrive unchanged
+pass [run output, Engine worker] a run without output commits with empty outputs
+pass [run output, Engine worker] staging: a run cannot be read before it is committed, and the commit waits for end
+pass [run output, Engine worker] an end whose totals disagree fails the commit and discards the run
+pass [run output, Engine worker] a message outside the protocol fails the commit
+pass [run output, Engine worker] discard drops a staged run and ignores its late chunks
+pass [run output, Engine worker] a committed run is kept by discard and removed by delete
+pass [run output, Engine worker] two staged runs keep their outputs apart
+pass [run output, Engine worker] the writer refuses to write after end
+FAIL [run output, Engine worker] storage full: the run fails with the reason, and committed runs stay readable: ContractError: commit: expected a rejection matching /StorageFullError: Not enough temporary storage/, but it resolved
+  ✓  13 [chromium] › tests/e2e/engine.spec.ts:103:1 › run output contract: the writer in the Engine worker, the real Data worker (without storage full) (1.7s)
+completed compact.blastn n=1 n=1 267 ms
+completed compact.blastn n=2 n=2 89 ms
+completed compact.blastn n=4 n=4 59 ms
+completed multi.blastn n=1 n=1 58 ms
+completed multi.blastn n=2 n=2 64 ms
+completed multi.blastn n=4 n=4 66 ms
+completed mask.lcase.megablast n=1 n=1 55 ms
+completed mask.lcase.megablast n=2 n=2 59 ms
+completed mask.lcase.megablast n=4 n=4 62 ms
+completed width.blastp n=1 n=1 73 ms
+completed width.blastp n=2 n=2 77 ms
+completed width.blastp n=4 n=4 65 ms
+completed width.tblastn n=1 n=1 64 ms
+completed width.tblastn n=2 n=2 74 ms
+completed width.tblastn n=4 n=4 68 ms
+completed tblastx.multi n=1 n=1 198 ms
+completed tblastx.multi n=2 n=2 174 ms
+completed tblastx.multi n=4 n=4 144 ms
+completed tblastn.code4 n=1 n=1 58 ms
+completed tblastn.code4 n=2 n=2 60 ms
+multi.blastn n=1: subject registered
+multi.megablast n=1: subject retained
+completed tblastn.code4 n=4 n=4 58 ms
+iupac.beyond_table.blastn n=1: subject retained
+rna.megablast n=1: subject retained
+multi.mts3.blastn n=1: subject retained
+multi.ws7_e1000.blastn n=4: subject registered
+multi.besthit.blastn n=4: subject retained
+tblastx.multi n=1: subject registered
+tblastx.batch n=1: subject retained
+tblastx.mts1 n=4: subject registered
+tblastx.thrwin n=4: subject retained
+completed tblastn.batches n=1 n=1 1245 ms
+completed tblastn.batches n=2 n=2 1010 ms
+  ✓  14 [chromium] › tests/e2e/engine.spec.ts:145:1 › R1: searches of one subject with other queries and options reuse it and give the expected bytes (3.2s)
+completed tblastn.batches n=4 n=4 1101 ms
+cancel n=1: cancelled in 6 ms; next search prepared in 29 ms
+completed tblastx.threaded-direct n=1 n=1 76 ms
+completed tblastx.threaded-direct n=2 n=2 92 ms
+completed tblastx.threaded-direct n=4 n=4 101 ms
+cancel n=4: cancelled in 5 ms; next search prepared in 51 ms
+  ✓  16 [chromium] › tests/e2e/engine.spec.ts:187:1 › a cancelled search ends its runtime; the next search runs in a new one with the expected bytes (1.7s)
+renewed 0 n=1: subject registered
+renewed 1 n=1: subject retained
+renewed 2 n=4: subject registered
+renewed 3 n=4: subject retained
+renewed 0 n=1: subject registered
+renewed 1 n=1: subject registered
+renewed 2 n=4: subject registered
+renewed 3 n=4: subject registered
+  ✓  17 [chromium] › tests/e2e/engine.spec.ts:216:1 › a runtime renewed after every search gives the same bytes and registers the subject again (1.1s)
+completed compact.blastn n=4 n=4 252 ms
+  ✓  18 [chromium] › tests/e2e/engine.spec.ts:239:1 › without cross-origin isolation, a threaded search runs on the serial module with the reason (394ms)
+  ✓  15 [chromium] › tests/e2e/engine.spec.ts:112:1 › V-BR: searches through the application give the expected bytes at 1, 2 and 4 threads (10.1s)
+[PLUGIN_TIMINGS] JavaScript callbacks ran for 2.6s of this 3.1s build (84%).
+1 callback is listed without a time. Its calls overlapped, so the time inside one call includes work from other calls. To find its cost, profile the build with `node --cpu-prof`:
+  - plugin vite:worker-import-meta-url transform (4 calls)
+See https://rolldown.rs/reference/InputOptions.checks#bundlertimings for more details.
+
+pass [record scanner] scan: one record with regular lines (LF)
+pass [record scanner] scan: CRLF line ends
+pass [record scanner] scan: lines of different lengths
+pass [record scanner] scan: several records, the last without a final newline
+pass [record scanner] scan: a blank line inside a sequence
+pass [record scanner] scan: interior white space belongs to the sequence, trailing white space does not
+pass [record scanner] scan: a non-ASCII header
+pass [record scanner] scan: residues keep their case
+pass [record scanner] scan: a record without residues
+pass [record scanner] scan: an empty record ends the input (bio stops reading there)
+pass [record scanner] scan: a header line without a newline at the end of the input
+pass [record scanner] scan: an empty input has no records
+pass [record scanner] scan: a U+FEFF at the start of a header is part of the ID
+pass [record scanner] scan: bytes after the empty record that ends the input are not read
+[PLUGIN_TIMINGS] JavaScript callbacks ran for 2.7s of this 3.1s build (85%).
+The slowest callbacks, timed inside each callback (the wait before a callback starts is excluded, the time it awaits is included):
+  - plugin vite:build-html transform (33%, 1.0s, 1 call)
+Additional callback time came from the callbacks below and from callbacks under 1s.
+1 callback is listed without a time. Its calls overlapped, so the time inside one call includes work from other calls. To find its cost, profile the build with `node --cpu-prof`:
+  - plugin vite:worker-import-meta-url transform (4 calls)
+See https://rolldown.rs/reference/InputOptions.checks#bundlertimings for more details.
+
+pass [record scanner] scan: a long record (4 checkpoints) with lines of 60 and 61 residues
+multi.blastn n=1: subject registered
+multi.megablast n=1: subject retained
+iupac.beyond_table.blastn n=1: subject retained
+rna.megablast n=1: subject retained
+pass [record scanner] scan: a long record with regular 80-residue lines
+pass [record scanner] scan: the parser's error for text before the first header
+pass [record scanner] scan: the parser's error for a blank line before the first header
+pass [record scanner] scan: the parser's error for white space only
+pass [record scanner] scan: the parser's error for a first line that is not a header, before bytes that are not UTF-8
+pass [record scanner] scan: the parser's error for bytes that are not UTF-8
+pass [record scanner] scan: a multi-byte character split across chunks
+pass [record scanner] scan: parser kind 1 is refused until SX
+  ✓  19 [firefox] › tests/e2e/engine.spec.ts:68:1 › record scanner contract: the serial reactor (6.3s)
+multi.mts3.blastn n=1: subject retained
+multi.ws7_e1000.blastn n=4: subject registered
+pass [engine input] register: the run proceeds when the record tables agree
+multi.besthit.blastn n=4: subject retained
+pass [engine input] register: a query record with another ID stops the run before any output
+pass [engine input] register: a subject record with another length stops the run before any output
+pass [engine input] register: a missing record stops the run before any output
+  ✓  21 [firefox] › tests/e2e/engine.spec.ts:76:3 › engine input contract: the real EngineGateway at 1 thread(s) (1.4s)
+tblastx.multi n=1: subject registered
+pass [engine input] register: the run proceeds when the record tables agree
+tblastx.batch n=1: subject retained
+pass [engine input] register: a query record with another ID stops the run before any output
+pass [engine input] register: a subject record with another length stops the run before any output
+tblastx.mts1 n=4: subject registered
+pass [engine input] register: a missing record stops the run before any output
+  ✓  22 [firefox] › tests/e2e/engine.spec.ts:76:3 › engine input contract: the real EngineGateway at 4 thread(s) (1.5s)
+tblastx.thrwin n=4: subject retained
+pass [run output, Engine worker] every stream arrives in order and the run commits
+pass [run output, Engine worker] many small chunks and one large chunk arrive unchanged
+  ✓  20 [firefox] › tests/e2e/engine.spec.ts:145:1 › R1: searches of one subject with other queries and options reuse it and give the expected bytes (9.8s)
+pass [run output, Engine worker] a run without output commits with empty outputs
+pass [run output, Engine worker] staging: a run cannot be read before it is committed, and the commit waits for end
+pass [run output, Engine worker] an end whose totals disagree fails the commit and discards the run
+pass [run output, Engine worker] a message outside the protocol fails the commit
+cancel n=1: cancelled in 851 ms; next search prepared in 891 ms
+pass [run output, Engine worker] discard drops a staged run and ignores its late chunks
+cancel n=4: cancelled in 284 ms; next search prepared in 1009 ms
+  ✓  24 [firefox] › tests/e2e/engine.spec.ts:187:1 › a cancelled search ends its runtime; the next search runs in a new one with the expected bytes (9.5s)
+pass [run output, Engine worker] a committed run is kept by discard and removed by delete
+pass [run output, Engine worker] two staged runs keep their outputs apart
+pass [run output, Engine worker] the writer refuses to write after end
+renewed 0 n=1: subject registered
+renewed 1 n=1: subject retained
+FAIL [run output, Engine worker] storage full: the run fails with the reason, and committed runs stay readable: ContractError: commit: expected a rejection matching /StorageFullError: Not enough temporary storage/, but it resolved
+  ✓  23 [firefox] › tests/e2e/engine.spec.ts:103:1 › run output contract: the writer in the Engine worker, the real Data worker (without storage full) (18.7s)
+renewed 2 n=4: subject registered
+renewed 3 n=4: subject retained
+completed compact.blastn n=1 n=1 1765 ms
+renewed 0 n=1: subject registered
+completed compact.blastn n=2 n=2 407 ms
+renewed 1 n=1: subject registered
+completed compact.blastn n=4 n=4 1511 ms
+renewed 2 n=4: subject registered
+completed multi.blastn n=1 n=1 1939 ms
+renewed 3 n=4: subject registered
+  ✓  25 [firefox] › tests/e2e/engine.spec.ts:216:1 › a runtime renewed after every search gives the same bytes and registers the subject again (11.9s)
+completed multi.blastn n=2 n=2 565 ms
+completed multi.blastn n=4 n=4 1424 ms
+completed mask.lcase.megablast n=1 n=1 1014 ms
+completed compact.blastn n=4 n=4 2202 ms
+  ✓  27 [firefox] › tests/e2e/engine.spec.ts:239:1 › without cross-origin isolation, a threaded search runs on the serial module with the reason (2.6s)
+completed mask.lcase.megablast n=2 n=2 568 ms
+completed mask.lcase.megablast n=4 n=4 563 ms
+completed width.blastp n=1 n=1 501 ms
+completed width.blastp n=2 n=2 457 ms
+completed width.blastp n=4 n=4 456 ms
+completed width.tblastn n=1 n=1 552 ms
+completed width.tblastn n=2 n=2 450 ms
+completed width.tblastn n=4 n=4 461 ms
+completed tblastx.multi n=1 n=1 1505 ms
+[PLUGIN_TIMINGS] JavaScript callbacks ran for 2.9s of this 3.5s build (82%).
+1 callback is listed without a time. Its calls overlapped, so the time inside one call includes work from other calls. To find its cost, profile the build with `node --cpu-prof`:
+  - plugin vite:worker-import-meta-url transform (4 calls)
+See https://rolldown.rs/reference/InputOptions.checks#bundlertimings for more details.
+
+completed tblastx.multi n=2 n=2 1355 ms
+completed tblastx.multi n=4 n=4 1215 ms
+completed tblastn.code4 n=1 n=1 1620 ms
+pass [record scanner] scan: one record with regular lines (LF)
+pass [record scanner] scan: CRLF line ends
+pass [record scanner] scan: lines of different lengths
+pass [record scanner] scan: several records, the last without a final newline
+pass [record scanner] scan: a blank line inside a sequence
+pass [record scanner] scan: interior white space belongs to the sequence, trailing white space does not
+pass [record scanner] scan: a non-ASCII header
+pass [record scanner] scan: residues keep their case
+pass [record scanner] scan: a record without residues
+pass [record scanner] scan: an empty record ends the input (bio stops reading there)
+pass [record scanner] scan: a header line without a newline at the end of the input
+pass [record scanner] scan: an empty input has no records
+pass [record scanner] scan: a U+FEFF at the start of a header is part of the ID
+pass [record scanner] scan: bytes after the empty record that ends the input are not read
+completed tblastn.code4 n=2 n=2 568 ms
+completed tblastn.code4 n=4 n=4 876 ms
+pass [record scanner] scan: a long record (4 checkpoints) with lines of 60 and 61 residues
+pass [record scanner] scan: a long record with regular 80-residue lines
+pass [record scanner] scan: the parser's error for text before the first header
+pass [record scanner] scan: the parser's error for a blank line before the first header
+pass [record scanner] scan: the parser's error for white space only
+pass [record scanner] scan: the parser's error for a first line that is not a header, before bytes that are not UTF-8
+pass [record scanner] scan: the parser's error for bytes that are not UTF-8
+pass [record scanner] scan: a multi-byte character split across chunks
+pass [record scanner] scan: parser kind 1 is refused until SX
+  ✓  28 [firefox] › tests/e2e/engine.spec.ts:68:1 › record scanner contract: the serial reactor (8.4s)
+pass [engine input] register: the run proceeds when the record tables agree
+pass [engine input] register: a query record with another ID stops the run before any output
+pass [engine input] register: a subject record with another length stops the run before any output
+pass [engine input] register: a missing record stops the run before any output
+  ✓  29 [firefox] › tests/e2e/engine.spec.ts:76:3 › engine input contract: the real EngineGateway at 1 thread(s) (1.5s)
+pass [engine input] register: the run proceeds when the record tables agree
+pass [engine input] register: a query record with another ID stops the run before any output
+pass [engine input] register: a subject record with another length stops the run before any output
+pass [engine input] register: a missing record stops the run before any output
+  ✓  30 [firefox] › tests/e2e/engine.spec.ts:76:3 › engine input contract: the real EngineGateway at 4 thread(s) (1.5s)
+pass [run output, Engine worker] every stream arrives in order and the run commits
+completed tblastn.batches n=1 n=1 9767 ms
+pass [run output, Engine worker] many small chunks and one large chunk arrive unchanged
+pass [run output, Engine worker] a run without output commits with empty outputs
+pass [run output, Engine worker] staging: a run cannot be read before it is committed, and the commit waits for end
+pass [run output, Engine worker] an end whose totals disagree fails the commit and discards the run
+pass [run output, Engine worker] a message outside the protocol fails the commit
+pass [run output, Engine worker] discard drops a staged run and ignores its late chunks
+pass [run output, Engine worker] a committed run is kept by discard and removed by delete
+pass [run output, Engine worker] two staged runs keep their outputs apart
+pass [run output, Engine worker] the writer refuses to write after end
+FAIL [run output, Engine worker] storage full: the run fails with the reason, and committed runs stay readable: ContractError: commit: expected a rejection matching /StorageFullError: Not enough temporary storage/, but it resolved
+  ✓  31 [firefox] › tests/e2e/engine.spec.ts:103:1 › run output contract: the writer in the Engine worker, the real Data worker (without storage full) (8.9s)
+completed compact.blastn n=1 n=1 688 ms
+completed compact.blastn n=2 n=2 296 ms
+completed tblastn.batches n=2 n=2 8647 ms
+completed compact.blastn n=4 n=4 313 ms
+completed multi.blastn n=1 n=1 325 ms
+completed multi.blastn n=2 n=2 282 ms
+completed multi.blastn n=4 n=4 287 ms
+completed mask.lcase.megablast n=1 n=1 251 ms
+completed mask.lcase.megablast n=2 n=2 270 ms
+completed mask.lcase.megablast n=4 n=4 322 ms
+completed width.blastp n=1 n=1 313 ms
+completed width.blastp n=2 n=2 303 ms
+completed width.blastp n=4 n=4 316 ms
+completed width.tblastn n=1 n=1 311 ms
+completed width.tblastn n=2 n=2 305 ms
+completed width.tblastn n=4 n=4 354 ms
+completed tblastx.multi n=1 n=1 748 ms
+completed tblastx.multi n=2 n=2 760 ms
+completed tblastx.multi n=4 n=4 723 ms
+completed tblastn.code4 n=1 n=1 278 ms
+completed tblastn.code4 n=2 n=2 317 ms
+completed tblastn.batches n=4 n=4 6905 ms
+completed tblastn.code4 n=4 n=4 355 ms
+completed tblastx.threaded-direct n=1 n=1 461 ms
+completed tblastx.threaded-direct n=2 n=2 443 ms
+completed tblastx.threaded-direct n=4 n=4 459 ms
+  ✓  26 [firefox] › tests/e2e/engine.spec.ts:112:1 › V-BR: searches through the application give the expected bytes at 1, 2 and 4 threads (51.5s)
+completed tblastn.batches n=1 n=1 9219 ms
+multi.blastn n=1: subject registered
+multi.megablast n=1: subject retained
+iupac.beyond_table.blastn n=1: subject retained
+rna.megablast n=1: subject retained
+multi.mts3.blastn n=1: subject retained
+multi.ws7_e1000.blastn n=4: subject registered
+multi.besthit.blastn n=4: subject retained
+completed tblastn.batches n=2 n=2 8016 ms
+tblastx.multi n=1: subject registered
+tblastx.batch n=1: subject retained
+tblastx.mts1 n=4: subject registered
+tblastx.thrwin n=4: subject retained
+  ✓  33 [firefox] › tests/e2e/engine.spec.ts:145:1 › R1: searches of one subject with other queries and options reuse it and give the expected bytes (9.3s)
+completed tblastn.batches n=4 n=4 6790 ms
+cancel n=1: cancelled in 153 ms; next search prepared in 212 ms
+completed tblastx.threaded-direct n=1 n=1 522 ms
+completed tblastx.threaded-direct n=2 n=2 473 ms
+completed tblastx.threaded-direct n=4 n=4 513 ms
+cancel n=4: cancelled in 146 ms; next search prepared in 214 ms
+  ✓  34 [firefox] › tests/e2e/engine.spec.ts:187:1 › a cancelled search ends its runtime; the next search runs in a new one with the expected bytes (3.5s)
+renewed 0 n=1: subject registered
+renewed 1 n=1: subject retained
+renewed 2 n=4: subject registered
+renewed 3 n=4: subject retained
+renewed 0 n=1: subject registered
+renewed 1 n=1: subject registered
+renewed 2 n=4: subject registered
+renewed 3 n=4: subject registered
+  ✓  35 [firefox] › tests/e2e/engine.spec.ts:216:1 › a runtime renewed after every search gives the same bytes and registers the subject again (3.6s)
+  ✓  32 [firefox] › tests/e2e/engine.spec.ts:112:1 › V-BR: searches through the application give the expected bytes at 1, 2 and 4 threads (38.7s)
+completed compact.blastn n=4 n=4 638 ms
+  ✓  36 [firefox] › tests/e2e/engine.spec.ts:239:1 › without cross-origin isolation, a threaded search runs on the serial module with the reason (1.0s)
+pass [record scanner] scan: one record with regular lines (LF)
+pass [record scanner] scan: CRLF line ends
+pass [record scanner] scan: lines of different lengths
+pass [record scanner] scan: several records, the last without a final newline
+pass [record scanner] scan: a blank line inside a sequence
+pass [record scanner] scan: interior white space belongs to the sequence, trailing white space does not
+pass [record scanner] scan: a non-ASCII header
+pass [record scanner] scan: residues keep their case
+pass [record scanner] scan: a record without residues
+pass [record scanner] scan: an empty record ends the input (bio stops reading there)
+pass [record scanner] scan: a header line without a newline at the end of the input
+pass [record scanner] scan: an empty input has no records
+pass [record scanner] scan: a U+FEFF at the start of a header is part of the ID
+pass [record scanner] scan: bytes after the empty record that ends the input are not read
+pass [record scanner] scan: a long record (4 checkpoints) with lines of 60 and 61 residues
+multi.blastn n=1: subject registered
+multi.megablast n=1: subject retained
+iupac.beyond_table.blastn n=1: subject retained
+rna.megablast n=1: subject retained
+multi.mts3.blastn n=1: subject retained
+pass [record scanner] scan: a long record with regular 80-residue lines
+pass [record scanner] scan: the parser's error for text before the first header
+pass [record scanner] scan: the parser's error for a blank line before the first header
+pass [record scanner] scan: the parser's error for white space only
+pass [record scanner] scan: the parser's error for a first line that is not a header, before bytes that are not UTF-8
+pass [record scanner] scan: the parser's error for bytes that are not UTF-8
+pass [record scanner] scan: a multi-byte character split across chunks
+pass [record scanner] scan: parser kind 1 is refused until SX
+  ✓  37 [webkit] › tests/e2e/engine.spec.ts:68:1 › record scanner contract: the serial reactor (2.2s)
+multi.ws7_e1000.blastn n=4: subject registered
+multi.besthit.blastn n=4: subject retained
+tblastx.multi n=1: subject registered
+tblastx.batch n=1: subject retained
+pass [engine input] register: the run proceeds when the record tables agree
+tblastx.mts1 n=4: subject registered
+tblastx.thrwin n=4: subject retained
+pass [engine input] register: a query record with another ID stops the run before any output
+pass [engine input] register: a subject record with another length stops the run before any output
+pass [engine input] register: a missing record stops the run before any output
+  ✓  39 [webkit] › tests/e2e/engine.spec.ts:76:3 › engine input contract: the real EngineGateway at 1 thread(s) (2.1s)
+pass [engine input] register: the run proceeds when the record tables agree
+pass [engine input] register: a query record with another ID stops the run before any output
+  ✓  38 [webkit] › tests/e2e/engine.spec.ts:145:1 › R1: searches of one subject with other queries and options reuse it and give the expected bytes (5.7s)
+pass [engine input] register: a subject record with another length stops the run before any output
+pass [engine input] register: a missing record stops the run before any output
+  ✓  40 [webkit] › tests/e2e/engine.spec.ts:76:3 › engine input contract: the real EngineGateway at 4 thread(s) (1.8s)
+pass [run output, Engine worker] every stream arrives in order and the run commits
+pass [run output, Engine worker] many small chunks and one large chunk arrive unchanged
+pass [run output, Engine worker] a run without output commits with empty outputs
+cancel n=1: cancelled in 7 ms; next search prepared in 14 ms
+pass [run output, Engine worker] staging: a run cannot be read before it is committed, and the commit waits for end
+pass [run output, Engine worker] an end whose totals disagree fails the commit and discards the run
+pass [run output, Engine worker] a message outside the protocol fails the commit
+pass [run output, Engine worker] discard drops a staged run and ignores its late chunks
+pass [run output, Engine worker] a committed run is kept by discard and removed by delete
+pass [run output, Engine worker] two staged runs keep their outputs apart
+pass [run output, Engine worker] the writer refuses to write after end
+FAIL [run output, Engine worker] storage full: the run fails with the reason, and committed runs stay readable: ContractError: commit: expected a rejection matching /StorageFullError: Not enough temporary storage/, but it resolved
+  ✓  42 [webkit] › tests/e2e/engine.spec.ts:103:1 › run output contract: the writer in the Engine worker, the real Data worker (without storage full) (1.5s)
+cancel n=4: cancelled in 1 ms; next search prepared in 33 ms
+  ✓  41 [webkit] › tests/e2e/engine.spec.ts:187:1 › a cancelled search ends its runtime; the next search runs in a new one with the expected bytes (2.3s)
+completed compact.blastn n=1 n=1 321 ms
+completed compact.blastn n=2 n=2 84 ms
+completed compact.blastn n=4 n=4 106 ms
+completed multi.blastn n=1 n=1 78 ms
+completed multi.blastn n=2 n=2 145 ms
+completed multi.blastn n=4 n=4 134 ms
+completed mask.lcase.megablast n=1 n=1 34 ms
+completed mask.lcase.megablast n=2 n=2 76 ms
+renewed 0 n=1: subject registered
+renewed 1 n=1: subject retained
+completed mask.lcase.megablast n=4 n=4 62 ms
+completed width.blastp n=1 n=1 72 ms
+renewed 2 n=4: subject registered
+completed width.blastp n=2 n=2 71 ms
+renewed 3 n=4: subject retained
+completed width.blastp n=4 n=4 45 ms
+completed width.tblastn n=1 n=1 45 ms
+completed width.tblastn n=2 n=2 56 ms
+completed width.tblastn n=4 n=4 51 ms
+completed tblastx.multi n=1 n=1 217 ms
+renewed 0 n=1: subject registered
+renewed 1 n=1: subject registered
+completed tblastx.multi n=2 n=2 271 ms
+completed tblastx.multi n=4 n=4 203 ms
+renewed 2 n=4: subject registered
+completed tblastn.code4 n=1 n=1 38 ms
+completed tblastn.code4 n=2 n=2 49 ms
+completed tblastn.code4 n=4 n=4 44 ms
+renewed 3 n=4: subject registered
+  ✓  44 [webkit] › tests/e2e/engine.spec.ts:216:1 › a runtime renewed after every search gives the same bytes and registers the subject again (2.5s)
+completed compact.blastn n=4 n=4 363 ms
+  ✓  45 [webkit] › tests/e2e/engine.spec.ts:239:1 › without cross-origin isolation, a threaded search runs on the serial module with the reason (728ms)
+completed tblastn.batches n=1 n=1 1439 ms
+completed tblastn.batches n=2 n=2 1315 ms
+completed tblastn.batches n=4 n=4 1178 ms
+completed tblastx.threaded-direct n=1 n=1 120 ms
+completed tblastx.threaded-direct n=2 n=2 85 ms
+completed tblastx.threaded-direct n=4 n=4 87 ms
+pass [record scanner] scan: one record with regular lines (LF)
+pass [record scanner] scan: CRLF line ends
+pass [record scanner] scan: lines of different lengths
+pass [record scanner] scan: several records, the last without a final newline
+pass [record scanner] scan: a blank line inside a sequence
+pass [record scanner] scan: interior white space belongs to the sequence, trailing white space does not
+pass [record scanner] scan: a non-ASCII header
+pass [record scanner] scan: residues keep their case
+pass [record scanner] scan: a record without residues
+pass [record scanner] scan: an empty record ends the input (bio stops reading there)
+pass [record scanner] scan: a header line without a newline at the end of the input
+pass [record scanner] scan: an empty input has no records
+pass [record scanner] scan: a U+FEFF at the start of a header is part of the ID
+pass [record scanner] scan: bytes after the empty record that ends the input are not read
+pass [record scanner] scan: a long record (4 checkpoints) with lines of 60 and 61 residues
+pass [record scanner] scan: a long record with regular 80-residue lines
+pass [record scanner] scan: the parser's error for text before the first header
+pass [record scanner] scan: the parser's error for a blank line before the first header
+pass [record scanner] scan: the parser's error for white space only
+pass [record scanner] scan: the parser's error for a first line that is not a header, before bytes that are not UTF-8
+pass [record scanner] scan: the parser's error for bytes that are not UTF-8
+pass [record scanner] scan: a multi-byte character split across chunks
+pass [record scanner] scan: parser kind 1 is refused until SX
+  ✓  46 [webkit] › tests/e2e/engine.spec.ts:68:1 › record scanner contract: the serial reactor (1.6s)
+  ✓  43 [webkit] › tests/e2e/engine.spec.ts:112:1 › V-BR: searches through the application give the expected bytes at 1, 2 and 4 threads (11.2s)
+pass [engine input] register: the run proceeds when the record tables agree
+pass [engine input] register: a query record with another ID stops the run before any output
+pass [engine input] register: a subject record with another length stops the run before any output
+pass [engine input] register: a missing record stops the run before any output
+  ✓  47 [webkit] › tests/e2e/engine.spec.ts:76:3 › engine input contract: the real EngineGateway at 1 thread(s) (1.6s)
+pass [engine input] register: the run proceeds when the record tables agree
+pass [engine input] register: a query record with another ID stops the run before any output
+pass [engine input] register: a subject record with another length stops the run before any output
+pass [engine input] register: a missing record stops the run before any output
+  ✓  48 [webkit] › tests/e2e/engine.spec.ts:76:3 › engine input contract: the real EngineGateway at 4 thread(s) (1.7s)
+pass [run output, Engine worker] every stream arrives in order and the run commits
+pass [run output, Engine worker] many small chunks and one large chunk arrive unchanged
+pass [run output, Engine worker] a run without output commits with empty outputs
+pass [run output, Engine worker] staging: a run cannot be read before it is committed, and the commit waits for end
+pass [run output, Engine worker] an end whose totals disagree fails the commit and discards the run
+pass [run output, Engine worker] a message outside the protocol fails the commit
+pass [run output, Engine worker] discard drops a staged run and ignores its late chunks
+pass [run output, Engine worker] a committed run is kept by discard and removed by delete
+pass [run output, Engine worker] two staged runs keep their outputs apart
+pass [run output, Engine worker] the writer refuses to write after end
+FAIL [run output, Engine worker] storage full: the run fails with the reason, and committed runs stay readable: ContractError: commit: expected a rejection matching /StorageFullError: Not enough temporary storage/, but it resolved
+  ✓  50 [webkit] › tests/e2e/engine.spec.ts:103:1 › run output contract: the writer in the Engine worker, the real Data worker (without storage full) (1.4s)
+completed compact.blastn n=1 n=1 295 ms
+completed compact.blastn n=2 n=2 72 ms
+completed compact.blastn n=4 n=4 102 ms
+completed multi.blastn n=1 n=1 94 ms
+completed multi.blastn n=2 n=2 81 ms
+completed multi.blastn n=4 n=4 133 ms
+completed mask.lcase.megablast n=1 n=1 32 ms
+completed mask.lcase.megablast n=2 n=2 70 ms
+completed mask.lcase.megablast n=4 n=4 73 ms
+completed width.blastp n=1 n=1 71 ms
+completed width.blastp n=2 n=2 74 ms
+completed width.blastp n=4 n=4 74 ms
+completed width.tblastn n=1 n=1 41 ms
+completed width.tblastn n=2 n=2 51 ms
+completed width.tblastn n=4 n=4 46 ms
+completed tblastx.multi n=1 n=1 293 ms
+completed tblastx.multi n=2 n=2 223 ms
+multi.blastn n=1: subject registered
+multi.megablast n=1: subject retained
+iupac.beyond_table.blastn n=1: subject retained
+rna.megablast n=1: subject retained
+completed tblastx.multi n=4 n=4 149 ms
+multi.mts3.blastn n=1: subject retained
+completed tblastn.code4 n=1 n=1 38 ms
+completed tblastn.code4 n=2 n=2 50 ms
+completed tblastn.code4 n=4 n=4 41 ms
+multi.ws7_e1000.blastn n=4: subject registered
+multi.besthit.blastn n=4: subject retained
+tblastx.multi n=1: subject registered
+tblastx.batch n=1: subject retained
+tblastx.mts1 n=4: subject registered
+tblastx.thrwin n=4: subject retained
+completed tblastn.batches n=1 n=1 1579 ms
+completed tblastn.batches n=2 n=2 1227 ms
+  ✓  49 [webkit] › tests/e2e/engine.spec.ts:145:1 › R1: searches of one subject with other queries and options reuse it and give the expected bytes (4.4s)
+completed tblastn.batches n=4 n=4 1308 ms
+completed tblastx.threaded-direct n=1 n=1 69 ms
+completed tblastx.threaded-direct n=2 n=2 77 ms
+cancel n=1: cancelled in 2 ms; next search prepared in 17 ms
+completed tblastx.threaded-direct n=4 n=4 89 ms
+cancel n=4: cancelled in 2 ms; next search prepared in 38 ms
+  ✓  52 [webkit] › tests/e2e/engine.spec.ts:187:1 › a cancelled search ends its runtime; the next search runs in a new one with the expected bytes (2.2s)
+renewed 0 n=1: subject registered
+renewed 1 n=1: subject retained
+renewed 2 n=4: subject registered
+renewed 3 n=4: subject retained
+renewed 0 n=1: subject registered
+renewed 1 n=1: subject registered
+renewed 2 n=4: subject registered
+renewed 3 n=4: subject registered
+  ✓  53 [webkit] › tests/e2e/engine.spec.ts:216:1 › a runtime renewed after every search gives the same bytes and registers the subject again (2.2s)
+completed compact.blastn n=4 n=4 289 ms
+  ✓  54 [webkit] › tests/e2e/engine.spec.ts:239:1 › without cross-origin isolation, a threaded search runs on the serial module with the reason (699ms)
+  ✓  51 [webkit] › tests/e2e/engine.spec.ts:112:1 › V-BR: searches through the application give the expected bytes at 1, 2 and 4 threads (11.7s)
+
+  54 passed (3.3m)

@@ -8,7 +8,7 @@ LOSAT Web の公開判定の材料をそろえる。公開するかどうかは�
 2. 最終の commit で、5 program の認証のゲート（Gate A、TLOSAN の Stage G、LOSATX の比較、BLASTP・BLASTN・TBLASTX の既存の比較、このブランチで足した outfmt 0/7 と範囲指定の比較）と、V-ABI・V-BR を再実行する。
 3. 受入表：`docs/web/requirements_trace.tsv` の initial の要求ごとに、満たしたことを示す試験と証拠のファイルを対応付ける。満たしていない要求があれば、公開できない理由として書く（設計書 §2.2「初期必須を省いたものを正式公開しない」）。
 4. 対応環境の表：OS × ブラウザ（Chromium 系、Firefox、Safari / WebKit）× 経路（threaded / serial）ごとに、V-BR の結果と実機の記録（V-MOB：iOS Safari、Android Chrome）を書く。
-5. 実測した上限値（入力の大きさ、メモリ、端末ごと）と性能（V-PERF：1 回の暖機と 3 回の計測、中央値と範囲）を記録し、公開する文面の案を作る。上限値を推測で書かない。
+5. 実測した上限値（入力の大きさ、メモリ、端末ごと）と性能（V-PERF：1 回の暖機と 3 回の計測、中央値と範囲）を記録し、公開する文面の案を作る。上限値を推測で書かない。公開する対応規模の最大の入力で、取消の後の再準備（instance の作り直しと Subject の登録し直し）の時間を 3 ブラウザで測る。1 秒を超えたら、協調取消（計画 §2.3、NCBI の `TInterruptFnPtr` の移植）を公開の前に入れる（計画 DW-22。W1 の `tests/e2e/measure.spec.ts` の `cancel`）。
 6. 既知の例外（承認済みの遺伝暗号の例外、認証済みプロファイルの外の設定、native-equivalent の升目）の一覧を、検証バッジの判定表と照らして作る。
 7. 独立監査（エンジン側の主張）と画面レビュー（公開する画面）を受ける。
 8. 版の名前の案と、ReleaseManifest の内容を記録する。

@@ -12,6 +12,13 @@ export const RESERVED_FLAGS: readonly string[] = Object.freeze([
   '-num_threads',
 ]);
 
+/**
+ * The -query / -subject names of inputs that are not one file (plan §5.3): pasted text, and
+ * several inputs searched together.
+ */
+export const PASTED_NAMES = Object.freeze({ query: 'query.fa', subject: 'subject.fa' } as const);
+export const COMBINED_NAMES = Object.freeze({ query: 'combined_query.fa', subject: 'combined_subject.fa' } as const);
+
 export interface ArgvInput {
   readonly program: ProgramId;
   readonly queryName: string;

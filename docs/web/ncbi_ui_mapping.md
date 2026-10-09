@@ -42,7 +42,7 @@ NCBI の 2 配列の画面は、上から program のタブ、program の一文�
 | 枠「Program Selection」：BLASTN の「Optimize for」の radio | 「Optimize for」の radio（`param-task`、各 radio は `param-task-<task>`）：Highly similar sequences (megablast)、More dissimilar sequences (discontiguous megablast)、Somewhat similar sequences (blastn)、Short sequences (blastn-short) | 寄せる | blastn-short は LOSAT が足す 4 つ目（NCBI は「Short queries」の自動調整で代える）。既定は LOSAT の CLI と同じ megablast（NCBI の 2 配列の画面の既定は blastn）。出力を CLI と比べるため |
 | BLASTP の「Algorithm」の radio（2 配列では blastp だけ） | 「Algorithm」の radio：エンジンの task（blastp (protein-protein BLAST)、Quick BLASTP (blastp-fast)、blastp-short） | 寄せる | task の一覧は `describe` の choices。名前の補いは表示だけ |
 | tblastn・tblastx（選ぶものが無く、枠を出さない） | TBLASTN は「Algorithm」（tblastn、tblastn-fast）。TBLASTX は枠を出さない | 寄せる | LOSAT の TBLASTN には task が 2 つある |
-| BLAST のボタンと「Search nucleotide sequence using Megablast (Optimize for highly similar sequences)」 | ボタン「BLAST: run locally」（キューが空）／「BLAST: add to queue」（実行中か待ちがある）、複数の Run は「(N runs)」を足す（`add-to-queue`）。横に「Search nucleotide subjects with BLASTN, task megablast (optimize for highly similar sequences). Runs in this browser.」の形の一文（`search-summary-line`） | 寄せる | ボタンの言葉で、この機械で動くこととキューに積むことを示す（指示書 3.） |
+| BLAST のボタンと「Search nucleotide sequence using Megablast (Optimize for highly similar sequences)」 | ボタン「Run LOSAT」（キューが空）／「Run LOSAT (add to queue)」（実行中か待ちがある）、複数の Run は「Run LOSAT (2 runs)」「Run LOSAT (2 runs, add to queue)」（`add-to-queue`）。横に「Search nucleotide subjects with BLASTN, task megablast (optimize for highly similar sequences). Runs in this browser.」の形の一文（`search-summary-line`） | 寄せる | ボタンの名前は保守者の指示（2026-10-10）で「Run LOSAT」（「BLAST」を操作の名前にしない）。キューに積むことはボタンの括弧、この機械で動くことは横の一文で示す（指示書 3.） |
 | 「Show results in a new window」 | なし | 採らない | 結果は同じタブの「Results」に出る。新しい窓は保存と worker を分ける |
 | （無い） | Threads の select、エンジンの option の検査の一文、キューの一文（「Show the queue」）、入力の不足の一文 | LOSAT だけ | ボタンの近く（ボタンの行の下） |
 | 「Algorithm parameters」（開閉、閉じて始まる）と「Note: Parameter values that differ from the default are highlighted in yellow and marked with ♦ sign」 | 開閉する「Algorithm parameters」（`algorithm-parameters`、閉じて始める。既定と違う値があれば開いて始め、見出しに数）。同じ注 | 採る | |
@@ -54,7 +54,7 @@ NCBI の 2 配列の画面は、上から program のタブ、program の一文�
 | 「Discontiguous Word Options」：Template length、Template type | 同じ節（`-template_length`、`-template_type`）。task が dc-megablast のとき、または値があるときに出す | 採る | NCBI は discontiguous megablast のときだけ出す。値が隠れたまま argv に入らないよう、値があれば出す |
 | 「PSI/PHI/DELTA BLAST」の節 | なし | 採らない | LOSAT に無い |
 | （無い） | 「Other Parameters」：NCBI の画面に無い LOSAT の option（BLASTN の Max HSPs per subject・Percent identity・Subject best hit、BLASTP・TBLASTN・TBLASTX の Neighboring words threshold・Two-hit window size、TBLASTN の X-dropoff・Sum statistics） | LOSAT だけ | Algorithm parameters の最後の節 |
-| 2 つ目の BLAST のボタン | Algorithm parameters を開いたとき、その下に 2 つ目のボタン（`add-to-queue-bottom`） | 採る | |
+| 2 つ目の BLAST のボタン | Algorithm parameters を開いたとき、その下に 2 つ目の「Run LOSAT」（`add-to-queue-bottom`） | 採る | |
 | フッター、ヘッダー、ロゴ | LOSAT の見出し（「LOSAT Web」と「Local processing…」） | 採らない | ブランド |
 
 **select の選択肢**：NCBI の Word size・Match/Mismatch・Gap Costs・Max target sequences の select は、program と task ごとに許す値を画面に埋めている。LOSAT はこれを写さない。欄の名前と並びを NCBI に合わせ、値は自由な欄のまま（Matrix は候補つき）、エンジンの `validate` が判断する（W3 の判断 3・9、TS で検証の規則を作らない）。既定の値は `describe` の placeholder で示す。

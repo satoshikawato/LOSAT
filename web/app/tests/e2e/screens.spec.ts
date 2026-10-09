@@ -2,7 +2,8 @@
 // "画面レビュー"). Not a test: it runs only with LOSAT_WEB_SCREENS=<directory>, in the
 // browsers chosen with --project, and writes full-page PNGs of the same states at a desktop
 // size (1280 x 900) and a phone size (390 x 844). S13 added the states of the results screen
-// (files 07 to 16, which sort after the search screen's 01 to 06).
+// (files 07 to 18, which sort after the search screen's 01 to 06); 18 is the window, not the
+// whole page, right after "Open results" (S13 screen review M3).
 import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
@@ -20,12 +21,12 @@ const SIZES = [
   { name: 'phone', width: 390, height: 844 },
 ] as const;
 
-async function shoot(page: Page, browser: string, size: string, name: string): Promise<void> {
+async function shoot(page: Page, browser: string, size: string, name: string, fullPage = true): Promise<void> {
   const directory = join(SCREENS!, browser);
   mkdirSync(directory, { recursive: true });
   // Let the elapsed time and the engine's checks settle.
   await page.waitForTimeout(300);
-  await page.screenshot({ path: join(directory, `${size}-${name}.png`), fullPage: true });
+  await page.screenshot({ path: join(directory, `${size}-${name}.png`), fullPage });
 }
 
 async function ready(page: Page, role: string, index = 0): Promise<void> {
@@ -39,6 +40,8 @@ for (const size of SIZES) {
     await page.setViewportSize({ width: size.width, height: size.height });
     await page.goto('/');
     await expect(page.getByTestId('storage-status')).toBeVisible();
+    // After the engine has checked the default options (S13 screen review L6).
+    await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', /^(ok|invalid)$/, { timeout: 60_000 });
     await shoot(page, browserName, size.name, '01-empty');
 
     // Inputs: a query with a duplicate ID, a refused record and a protein-like record; one subject record with a region.
@@ -258,8 +261,8 @@ for (const size of SIZES) {
     await expect(page.locator('[data-field="frames"]').first()).toBeVisible();
     await shoot(page, browserName, size.name, '14-results-translated-frames');
 
-    // The queue: finished runs with "Open results", a search in progress, one waiting, one
-    // cancelled before it started, and one more waiting. BLASTP of a bacterial proteome
+    // The queue: finished runs with "Open results", a search in progress, one cancelled before
+    // it started, and one waiting (queued after the cancel). BLASTP of a bacterial proteome
     // against itself keeps the engine busy long enough.
     await page.getByTestId('tab-search').click();
     await clearInputs(page);
@@ -287,6 +290,25 @@ for (const size of SIZES) {
     await select.selectOption({ label: label!.trim() });
     await expect(page.getByTestId('results-status')).toHaveAttribute('data-run-status', 'cancelled');
     await shoot(page, browserName, size.name, '16-results-cancelled-run');
+
+    // The dot plot of a translated search (TBLASTX, run 3): axes in nt, the frames of the selected HSP.
+    const run3 = await select.locator('option', { hasText: /^Run 3 · / }).textContent();
+    await select.selectOption({ label: run3!.trim() });
+    await expect(page.getByTestId('results-hits')).toHaveAttribute('data-run', '3', { timeout: 60_000 });
+    await expect(page.getByTestId('hsp-detail')).toHaveAttribute('data-state', 'ready', { timeout: 60_000 });
+    await page.getByTestId('pane-dotplot').click();
+    await expect(page.getByTestId('dotplot-canvas')).toHaveAttribute('data-segments', /^[1-9]/);
+    await expect(page.getByTestId('dotplot-selected')).toContainText('frames');
+    await shoot(page, browserName, size.name, '17-results-translated-dotplot');
+    await page.getByTestId('pane-alignment').click();
+
+    // "Open results" from the search tab: the window right after the tap shows the results' heading.
+    await page.getByTestId('tab-search').click();
+    await page.getByTestId('run-1-open').click();
+    await expect(page.getByTestId('results-heading')).toBeFocused();
+    await expect(page.getByTestId('results-heading')).toBeInViewport({ ratio: 1 });
+    await expect(page.getByTestId('hsp-detail')).toHaveAttribute('data-state', 'ready', { timeout: 60_000 });
+    await shoot(page, browserName, size.name, '18-results-open-from-queue-window', false);
     await queued.getByRole('button', { name: 'Cancel' }).click();
     await running.getByRole('button', { name: 'Cancel' }).first().click();
   });

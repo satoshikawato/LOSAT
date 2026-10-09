@@ -976,6 +976,13 @@ label.inline {
   gap: 4px;
 }
 
+/* "Open results" scrolls the results' heading to the top of the window (ResultsPanel.vue), with
+   a little room above it: the browsers round the scroll position, and Firefox stopped 0.2 px past
+   the heading's top on a phone (the heading lies at a fractional y). */
+.results > h2 {
+  scroll-margin-top: 8px;
+}
+
 /* W4b: the header block of NCBI's results (Job Title, RID, Program, Query ID ...) as a list of
    rows, with "Filter Results" on its right where there is room, under it where there is not. */
 .results-top {

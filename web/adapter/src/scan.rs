@@ -2,8 +2,11 @@
 //! that the application can extract original records; every search reads its input
 //! with the program's own parser, and `register` checks that the two agree.
 //!
-//! Parser kind 0 reproduces `bio::io::fasta::Reader` 1.6.0 (`src/io/fasta.rs:316-344`),
-//! the reader of BLASTP, TBLASTN, BLASTN and TBLASTX:
+//! Parser kinds 1 (nucleotide input) and 2 (protein input) give the records of NCBI
+//! BLAST+'s reader as the engine reads them (`ncbi.rs`). Parser kind 0 (`BioScanner`)
+//! reproduces `bio::io::fasta::Reader` 1.6.0 (`src/io/fasta.rs:316-344`), the reader of
+//! BLASTP, TBLASTN, BLASTN and TBLASTX before session SF; the application uses it until it
+//! switches to kinds 1 and 2:
 //! - input is read line by line as UTF-8 (`read_line`); invalid UTF-8 is an error;
 //! - the first line must start with `>` ("Expected > at record start.");
 //! - the ID is the header text before its first whitespace character, after
@@ -13,8 +16,12 @@
 //!   (including `\r`) is not;
 //! - reading stops at the first empty record (no ID, no description, no sequence).
 //!
-//! The scan works on chunks of any size and never holds a sequence line, only a header
-//! line and a run of whitespace whose fate (interior or trailing) is still open.
+//! The kind-0 scan works on chunks of any size and never holds a sequence line, only a
+//! header line and a run of whitespace whose fate (interior or trailing) is still open.
+
+mod ncbi;
+
+pub use ncbi::NcbiScanner;
 
 /// Residues between two checkpoints of a record whose lines are not regular.
 pub const CHECKPOINT_EVERY: u64 = 65_536;
@@ -31,6 +38,8 @@ pub enum LineLayout {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScanRecord {
+    /// Kind 0: `bio`'s ID. Kinds 1 and 2: the title up to its first space (empty without
+    /// a title), with bytes that are not UTF-8 replaced.
     pub id: String,
     /// Offset of the `>` of the header line.
     pub header_offset: u64,
@@ -41,7 +50,8 @@ pub struct ScanRecord {
     /// Sequence length in bytes, as the parser reports it.
     pub length: u64,
     pub layout: LineLayout,
-    /// Count of every byte value in the sequence.
+    /// Count of every byte value in the sequence (kinds 1 and 2: the stored residues,
+    /// upper-cased).
     pub residue_counts: Box<[u64; 256]>,
 }
 
@@ -174,8 +184,55 @@ enum Line {
     Sequence,
 }
 
-/// A streaming scan of one input.
-pub struct Scanner {
+/// A streaming scan of one input with a parser kind.
+pub enum Scanner {
+    /// Kind 0, `bio::io::fasta` 1.6.0.
+    Bio(BioScanner),
+    /// Kinds 1 (nucleotide flags) and 2 (protein flags), NCBI BLAST+'s reader.
+    Ncbi(NcbiScanner),
+}
+
+impl Default for Scanner {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Scanner {
+    /// A scan with parser kind 0.
+    pub fn new() -> Self {
+        Self::Bio(BioScanner::new())
+    }
+
+    /// A scan with parser kind `kind` (0, 1 or 2).
+    pub fn of_kind(kind: u32) -> Option<Self> {
+        match kind {
+            0 => Some(Self::new()),
+            1 => Some(Self::Ncbi(NcbiScanner::new(false))),
+            2 => Some(Self::Ncbi(NcbiScanner::new(true))),
+            _ => None,
+        }
+    }
+
+    /// Scans the next chunk of the input.
+    pub fn feed(&mut self, chunk: &[u8]) {
+        match self {
+            Self::Bio(scanner) => scanner.feed(chunk),
+            Self::Ncbi(scanner) => scanner.feed(chunk),
+        }
+    }
+
+    /// Ends the input and returns the records, or the parser's error.
+    pub fn finish(self) -> Result<Vec<ScanRecord>, String> {
+        match self {
+            Self::Bio(scanner) => scanner.finish(),
+            Self::Ncbi(scanner) => scanner.finish(),
+        }
+    }
+}
+
+/// A streaming scan of one input with parser kind 0.
+pub struct BioScanner {
     offset: u64,
     line_start: u64,
     at_line_start: bool,
@@ -195,13 +252,13 @@ pub struct Scanner {
     error: Option<String>,
 }
 
-impl Default for Scanner {
+impl Default for BioScanner {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Scanner {
+impl BioScanner {
     pub fn new() -> Self {
         Self {
             offset: 0,
@@ -370,9 +427,16 @@ impl Scanner {
     }
 }
 
-/// Scans a whole input at once.
+/// Scans a whole input at once with parser kind 0.
 pub fn scan(input: &[u8]) -> Result<Vec<ScanRecord>, String> {
     let mut scanner = Scanner::new();
+    scanner.feed(input);
+    scanner.finish()
+}
+
+/// Scans a whole input at once with parser kind 1 (`protein` false) or 2.
+pub fn scan_ncbi(input: &[u8], protein: bool) -> Result<Vec<ScanRecord>, String> {
+    let mut scanner = NcbiScanner::new(protein);
     scanner.feed(input);
     scanner.finish()
 }

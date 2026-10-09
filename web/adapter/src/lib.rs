@@ -153,21 +153,22 @@ fn scanners() -> &'static Mutex<(u32, HashMap<u32, scan::Scanner>)> {
     SCANNERS.get_or_init(Mutex::default)
 }
 
-/// Starts an index scan with parser kind `0` (`bio::io::fasta`, the parser of BLASTP,
-/// TBLASTN, BLASTN and TBLASTX). Kind `1` (BLASTX's NCBI-style reader) joins in SX.
+/// Starts an index scan with parser kind `0` (`bio::io::fasta` 1.6.0, the reader of
+/// BLASTP, TBLASTN, BLASTN and TBLASTX before session SF), `1` (NCBI BLAST+'s reader of
+/// nucleotide input: BLASTN, TBLASTX, the TBLASTN subject) or `2` (NCBI BLAST+'s reader
+/// of protein input: BLASTP, the TBLASTN query).
 #[no_mangle]
 pub extern "C" fn losat_web2_scan_begin(parser: u32) -> i32 {
     guarded(|| {
-        if parser != 0 {
-            return Err(format!("unknown or unavailable FASTA parser kind {parser}"));
-        }
+        let scanner = scan::Scanner::of_kind(parser)
+            .ok_or_else(|| format!("unknown or unavailable FASTA parser kind {parser}"))?;
         let mut scanners = scanners().lock().expect("scanners");
         scanners.0 = scanners
             .0
             .checked_add(1)
             .ok_or_else(|| "scanner handle space exhausted".to_string())?;
         let id = scanners.0;
-        scanners.1.insert(id, scan::Scanner::new());
+        scanners.1.insert(id, scanner);
         i32::try_from(id).map_err(|_| "scanner handle space exhausted".to_string())
     })
 }

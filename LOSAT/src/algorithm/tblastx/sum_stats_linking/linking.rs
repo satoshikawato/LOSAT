@@ -90,6 +90,20 @@ fn trace_link_selection_summaries() -> bool {
     *TRACE_LINK_SELECTIONS.get_or_init(|| std::env::var_os("LOSAT_TRACE_LINK_SELECTIONS").is_some())
 }
 
+/// Use the literal O(n^2)-per-pass port (`link_hsp_group_ncbi`) instead of the
+/// result-identical incremental linker: requested explicitly, or when any linking
+/// trace/debug output is enabled (only the literal port prints those traces).
+fn legacy_linking_requested() -> bool {
+    static LEGACY: OnceLock<bool> = OnceLock::new();
+    *LEGACY.get_or_init(|| {
+        std::env::var_os("LOSAT_LINKING_LEGACY").is_some()
+            || std::env::var_os("LOSAT_TRACE_HSP").is_some()
+            || std::env::var_os("LOSAT_TRACE_CHAIN_HSP").is_some()
+            || std::env::var_os("LOSAT_TRACE_LINK_SELECTIONS").is_some()
+            || std::env::var_os("LOSAT_DEBUG_CHAINING").is_some()
+    })
+}
+
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:901-982
 // ```c
 // ordering_method =
@@ -697,6 +711,9 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
             )),
     );
     let initial_lh_size = (total_hits + 5).max(1024); // NCBI: MAX(1024, hspcnt+5)
+                                                      // The incremental linker computes the same chains as `link_hsp_group_ncbi`;
+                                                      // the literal port stays available for tracing and as the reference.
+    let use_legacy = legacy_linking_requested();
 
     #[cfg(all(
         feature = "parallel",
@@ -718,21 +735,34 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
                         lh_helpers: Vec::with_capacity(initial_lh_size),
                         hsp_links: Vec::with_capacity(total_hits),
                     });
-                    let processed = link_hsp_group_ncbi(
-                        group_hits,
-                        params,
-                        &cutoffs,
-                        linking_params.gap_decay_rate,
-                        diag_enabled,
-                        linking_params.subject_len_nucl,
-                        query_contexts,
-                        subject_frame_bases,
-                        length_adj_per_context,
-                        eff_searchsp_per_context,
-                        &log_k_by_ctx,
-                        &mut pool.lh_helpers,
-                        &mut pool.hsp_links,
-                    );
+                    let processed = if use_legacy {
+                        link_hsp_group_ncbi(
+                            group_hits,
+                            params,
+                            &cutoffs,
+                            linking_params.gap_decay_rate,
+                            diag_enabled,
+                            linking_params.subject_len_nucl,
+                            query_contexts,
+                            subject_frame_bases,
+                            length_adj_per_context,
+                            eff_searchsp_per_context,
+                            &log_k_by_ctx,
+                            &mut pool.lh_helpers,
+                            &mut pool.hsp_links,
+                        )
+                    } else {
+                        super::linking_fast::link_hsp_group_fast(
+                            group_hits,
+                            &cutoffs,
+                            linking_params.gap_decay_rate,
+                            linking_params.subject_len_nucl,
+                            query_contexts,
+                            length_adj_per_context,
+                            eff_searchsp_per_context,
+                            &log_k_by_ctx,
+                        )
+                    };
                     (group_idx, processed)
                 })
             })
@@ -760,21 +790,34 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
         };
         let mut ordered: Vec<UngappedHit> = Vec::new();
         for group_hits in frame_groups.into_iter() {
-            let processed = link_hsp_group_ncbi(
-                group_hits,
-                params,
-                &cutoffs,
-                linking_params.gap_decay_rate,
-                diag_enabled,
-                linking_params.subject_len_nucl,
-                query_contexts,
-                subject_frame_bases,
-                length_adj_per_context,
-                eff_searchsp_per_context,
-                &log_k_by_ctx,
-                &mut pools.lh_helpers,
-                &mut pools.hsp_links,
-            );
+            let processed = if use_legacy {
+                link_hsp_group_ncbi(
+                    group_hits,
+                    params,
+                    &cutoffs,
+                    linking_params.gap_decay_rate,
+                    diag_enabled,
+                    linking_params.subject_len_nucl,
+                    query_contexts,
+                    subject_frame_bases,
+                    length_adj_per_context,
+                    eff_searchsp_per_context,
+                    &log_k_by_ctx,
+                    &mut pools.lh_helpers,
+                    &mut pools.hsp_links,
+                )
+            } else {
+                super::linking_fast::link_hsp_group_fast(
+                    group_hits,
+                    &cutoffs,
+                    linking_params.gap_decay_rate,
+                    linking_params.subject_len_nucl,
+                    query_contexts,
+                    length_adj_per_context,
+                    eff_searchsp_per_context,
+                    &log_k_by_ctx,
+                )
+            };
             ordered.extend(processed);
         }
         ordered
@@ -791,21 +834,34 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
         };
         let mut ordered: Vec<UngappedHit> = Vec::new();
         for group_hits in frame_groups.into_iter() {
-            let processed = link_hsp_group_ncbi(
-                group_hits,
-                params,
-                &cutoffs,
-                linking_params.gap_decay_rate,
-                diag_enabled,
-                linking_params.subject_len_nucl,
-                query_contexts,
-                subject_frame_bases,
-                length_adj_per_context,
-                eff_searchsp_per_context,
-                &log_k_by_ctx,
-                &mut pools.lh_helpers,
-                &mut pools.hsp_links,
-            );
+            let processed = if use_legacy {
+                link_hsp_group_ncbi(
+                    group_hits,
+                    params,
+                    &cutoffs,
+                    linking_params.gap_decay_rate,
+                    diag_enabled,
+                    linking_params.subject_len_nucl,
+                    query_contexts,
+                    subject_frame_bases,
+                    length_adj_per_context,
+                    eff_searchsp_per_context,
+                    &log_k_by_ctx,
+                    &mut pools.lh_helpers,
+                    &mut pools.hsp_links,
+                )
+            } else {
+                super::linking_fast::link_hsp_group_fast(
+                    group_hits,
+                    &cutoffs,
+                    linking_params.gap_decay_rate,
+                    linking_params.subject_len_nucl,
+                    query_contexts,
+                    length_adj_per_context,
+                    eff_searchsp_per_context,
+                    &log_k_by_ctx,
+                )
+            };
             ordered.extend(processed);
         }
         ordered

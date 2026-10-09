@@ -98,9 +98,9 @@ NCBI と同じ順で「Descriptions」（`results-view-hits`）、「Graphic Sum
 | 列 Max Score | E2j の前：「Score (bits)」（その subject の最初の HSP の outfmt 6 の bitscore）をこの位置に | エンジン待ち | 列名は今の意味のまま（Max Score と名乗らない） |
 | 列 Total Score、Query Cover、Per. Ident | なし | エンジン待ち（E2j） | |
 | 列 E value | 「E value」（最初の HSP） | 寄せる | E2j の後は表形式の E value |
-| （無い） | 「HSPs」：HSP の数（Total Score・Query Cover の位置） | LOSAT だけ | アプリの数え上げ |
+| （無い） | 「HSPs」：HSP の数（E value の後、Length の前） | LOSAT だけ | アプリの数え上げ。E2j で Score と E value の間に Total Score・Query Cover が入っても、この列は動かない |
 | 列 Acc. Len | 「Length (nt / aa)」：Run のレコードの長さ | 寄せる | |
-| 列 Accession | 「Subject ID」：outfmt 6 の `sseqid`（最後の列） | 寄せる | データベースの accession ではないので「Subject ID」と呼ぶ |
+| 列 Accession | 「Subject ID」：outfmt 6 の `sseqid`（最後の列）。列の幅は値に合わせ（10ch から 24ch、長い ID は「…」で切り title に全文）、Description に残りの幅 | 寄せる | データベースの accession ではないので「Subject ID」と呼ぶ。幅は W4b の画面レビュー L8 |
 | （無い） | 「#」：エンジンの順（最初の列、NCBI の印の位置） | LOSAT だけ | |
 | 並べ替え（Accession 以外、既定は E value） | 「#」・Score・E value・HSPs・Length で並べ替え。既定はエンジンの順（`#`） | 寄せる | エンジンの順は outfmt 0 の説明表の順で、NCBI の既定の E value の順と同じ考え（同値の扱いがエンジンのまま）。Description の並べ替えは採らない（見出しは見えている行の分だけ読む） |
 | 電話の幅 | 大事な列（Subject ID、Score、E value、HSPs）を先に、横に流れるときだけ知らせる（W4 の判断 17） | LOSAT の基準 | |
@@ -126,7 +126,7 @@ NCBI と同じ順で「Descriptions」（`results-view-hits`）、「Graphic Sum
 | subject ごとの塊（全部の subject を続けて） | 選んだ subject の塊（`alignments-subject`）。「Previous」「Next」で前後の subject、「Descriptions」で一覧へ | 寄せる | 数千の subject を 1 ページに並べず、選択に従う |
 | 「Download」「GenBank」「Graphics」「Sort by」 | なし | 採らない（Download は Outputs） | |
 | 題（subject の説明）、「Sequence ID」「Length」「Number of Matches」 | 題（outfmt 0 の見出しの題）、「Sequence ID」（sseqid）、「Length」（レコードの長さ）、「Number of Matches」（HSP の数） | 採る | |
-| （無い） | その subject の HSP の表（`hsp-table`、outfmt 6 の欄、並べ替え） | LOSAT だけ | 塊の見出しの下。行を選ぶとその Range へ |
+| （無い） | その subject の HSP の表（`hsp-table`、outfmt 6 の欄、並べ替え）。frame は翻訳した配列のものだけ：TBLASTN は「Subject frame」（`+2`）、BLASTX は「Query frame」、TBLASTX は「Frames (q/s)」（`-2/+2`） | LOSAT だけ | 塊の見出しの下。行を選ぶとその Range へ。TBLASTN の「–/+2」は TBLASTX の「-2/+2」と並ぶとマイナス鎖に読めた（W4b の画面レビュー L9）。NCBI の節も「Frame = +2」 |
 | 「Range n: a to b」と「Next Match」「Previous Match」「First Match」 | 「Range n: a to b」（n はその subject の中のエンジンの順、a と b は HSP レコードの subject の座標を小さい方から）、「Next Match」「Previous Match」「First Match」 | 採る | NCBI の Range は subject の座標（参照画面の blastn：Range 2: 588 to 608 は Sbjct 588–608） |
 | Score・Expect・Identities・Gaps・Strand（Frame、Method、Positives）の表 | outfmt 0 の節を原文のまま（その中に `Score =`・`Expect =`・`Identities =`・`Gaps =`・`Strand=` / `Frame =` の行）（`detail-section`） | 寄せる | 原文を表に組み直さない |
 | Query / Sbjct の等幅の段 | 同じ（outfmt 0 の原文） | 採る | |
@@ -141,22 +141,22 @@ NCBI の Dot Plot は、題「Plot of <query> vs <subject>」とサーバーが�
 
 | 要素 | スクリプト | LOSAT Web | 理由 |
 |---|---|---|---|
-| 題 | query の題を上、subject の題を左に 90° | 上に「Plot of <query ID> vs <subject ID>」（NCBI の言葉）、軸の名前は上に「Query <ID> (nt)」、左に 90° 回して「Subject <ID> (nt)」 | |
+| 題 | query の題を上、subject の題を左に 90° | 上に「Plot of <query ID> vs <subject ID>」（NCBI の言葉）、軸の名前は上に「Query <ID> (<単位>)」、左に 90° 回して「Subject <ID> (<単位>)」。単位は見えている長さの bp・kbp・Mbp（aa の軸は aa・kaa・Maa）。aa の軸と nt の軸の組で縮尺どおりのとき、aa の軸は「(aa; drawn at 3 nt per aa)」。場所が足りないときは ID を「…」で切り、単位を残す | 単位はスクリプトの bp・kbp・Mbp（保守者のスクリプトを先にする）。説明の行・ポップアップ・「Selected:」の行は Run の単位（nt / aa）のまま |
 | 軸 | X が query、Y が subject。原点は左上、subject は下へ増える。目盛りとラベルは上と左 | 同じ | スクリプトどおり（W4 は原点が左下だった） |
 | 縮尺 | 両軸同じ縮尺。長い方を 1000 px | 同じ縮尺。長い方を描く枠の幅（最大 1000 px）に合わせる。aa の軸と nt の軸の組（TBLASTN の query、BLASTX の subject が aa）では、縦横の比を決めるときだけ 1 aa を 3 nt と数える（目盛りとラベルは各軸の単位のまま。S13b の判断 26）。短い辺は最小 120 px（それより細いときは縮尺を変え、図の下に「Axes not to scale」と示す） | 長さの比が大きいと短い辺が 1 px 以下になる。1 aa を 1 文字と数えると HSP の線の傾きが 3 になり、aa の辺が 3 分の 1 に縮む |
-| 目盛り | `tick_size` の大小の刻み（1 kbp 以下 100 / 10 … 5 Mbp より上 1 M / 500 k）。ラベルは大きい刻みだけ、5000 未満 bp・1 Mbp 未満 kbp・それ以上 Mbp | 同じ表。ズームしたときは見えている長さで刻みと単位を選び直す。単位はラベルごとに書かず軸の名前に置く（「Query q0 (kbp)」。390 px で場所が足りない）。重なるラベルは間引く。aa の軸は単位を aa・kaa・Maa にした同じ刻み。刻みの数が 50 を超えるときは小さい刻みを省く | スクリプトは BLASTN・TBLASTX だけ |
+| 目盛り | `tick_size` の大小の刻み（1 kbp 以下 100 / 10 … 5 Mbp より上 1 M / 500 k）。ラベルは大きい刻みだけ、5000 未満 bp・1 Mbp 未満 kbp・それ以上 Mbp | 同じ表。ズームしたときは見えている長さで刻みと単位を選び直す。単位はラベルごとに書かず軸の名前に置く（「Query q0 (kbp)」。390 px で場所が足りない）。重なるラベルは間引く。aa の軸は単位を aa・kaa・Maa にした同じ刻み。小さい刻みは間隔が 5 px 未満のときだけ省く（両軸に同じ規則。数が 50 を超えると省く規則では、縮尺が同じでも片方の軸だけ消えた。W4b の画面レビュー M2） | スクリプトは BLASTN・TBLASTX だけ |
 | 格子と枠 | 大小の刻みに薄い灰色 `#D3D3D3`、周りに黒い枠 | 同じ | |
 | HSP の線 | 幅 2。両方の frame の符号が同じなら青 `#1f77b4`、違えばオレンジ `#ff7f0e` | 同じ。符号は HSP レコードの座標と frame から（W4 の向き）。BLASTN の 1 文字の HSP（鎖がレコードに無い）は灰色 `#7f7f7f` と凡例（E2j まで） | |
 | 不透明度 | identity（`int()` で切り捨て）60 以下 0.4、70 以下 0.6、80 以下 0.8、それより上 1 | outfmt 6 の `pident` の文字列を数として読み、整数に切り捨てて同じ階級に分ける（TS で identities / 長さを計算しない） | 丸めた `pident`（小数 3 桁）の切り捨てで、スクリプトの切り捨てと階級の境界が同じになる |
 | 出力 | SVG のファイル | 画面（Canvas）。SVG の書き出しは採らない（S15 の出力の段階で検討） | 出力の形式と名前は S15 が決める |
 
-LOSAT が足すもの（W4 の判断 18 を保つ）：ズーム（ボタン、+ / −、Ctrl / ⌘ とホイール）、パン（ドラッグ、矢印キー）、HSP の選択（線のクリック、n / p、表）、「Zoom to HSP」「Whole sequences」、`touch-action: pan-y`。新しく、hover で線を太くし、HSP を選ぶ（クリック、Enter）とその HSP のポップアップ（`dotplot-popup`）を出す：outfmt 6 の行の値をそのまま（bit score、E value、identity、query と subject の範囲、frame、向き、outfmt 0 に有るか）と「Show alignment」（Alignments のその Range へ）。ポップアップは Escape と「Close」で閉じ、キーボードとスクリーンリーダーで届く（focus を移し、閉じたら図に戻す）。描き方は層を分ける：格子と HSP の層（色と不透明度ごとにまとめ、線は 1 本ずつ描き、見えない線（表示の外の線、両端が前の線と同じ画素に来る不透明な線）を省く。重なる多数の線を 1 本の path にすると 2〜3 倍遅かった（W4b の B1）。薄い線の重なりはスクリプトの SVG の線と同じく濃くなる）と、hover・選択の層。ズームとパンは 1 フレームに 1 回だけ描き直す。
+LOSAT が足すもの（W4 の判断 18 を保つ）：ズーム（ボタン、+ / −、Ctrl / ⌘ とホイール）、パン（ドラッグ、矢印キー）、HSP の選択（線のクリック、n / p、表）、「Zoom to HSP」「Whole sequences」、`touch-action: pan-y`。新しく、hover で線を太くし、HSP を選ぶ（クリック、Enter）とその HSP のポップアップ（`dotplot-popup`）を出す：outfmt 6 の行の値をそのまま（bit score、E value、identity、query と subject の範囲、翻訳した配列の frame、向き、outfmt 0 に有るか）と「Show alignment」（Alignments のその Range へ）。ポップアップは線の端の脇に置き、線の中点を覆わない（そこに場所が無いときと、描く枠が 600 px 未満の電話の幅では図の下に）。ポップアップは Escape と「Close」で閉じ、キーボードとスクリーンリーダーで届く（focus を移し、閉じたら図に戻す）。描き方は層を分ける：格子と HSP の層（色と不透明度ごとにまとめ、線は 1 本ずつ描き、見えない線（表示の外の線、両端が前の線と同じ画素に来る不透明な線）を省く。重なる多数の線を 1 本の path にすると 2〜3 倍遅かった（W4b の B1）。薄い線の重なりはスクリプトの SVG の線と同じく濃くなる）と、hover・選択の層。ズームとパンは 1 フレームに 1 回だけ描き直す。
 
 ## 3. LOSAT だけのものの置き場所
 
 | LOSAT の要素 | 置き場所 |
 |---|---|
-| キュー（Run の状態、取消、「Open results」） | 右の補助の領域（どのタブでも同じ幅と位置） |
+| キュー（Run の状態、取消、「Open results」） | 右の補助の領域（どのタブでも同じ幅と位置）。カードはどの状態も同じ形：1 行目 Run の番号・program・状態、2 行目 段階と時間（終わった Run は「Took」）、3 行目 操作（Cancel・Open results）を右に、その下に題・入力・option |
 | 離れることへの備え（wake lock、戻ったときの確認）、保存の状態 | 右の補助の領域、キューの下 |
 | Combined / Separate、レコード一覧と除外 | 検索画面の各枠の中 |
 | Subject の保持（R1） | キューの Run の詳細 |

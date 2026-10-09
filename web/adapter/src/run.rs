@@ -200,7 +200,8 @@ impl FormatObserver for RangeRecorder {
 }
 
 /// The records of NCBI's reader made from the registered `bio` records (`Query_N`,
-/// `Subject_N`); `protein` is the molecule of the input (TBLASTN's query).
+/// `Subject_N`); `protein` is the molecule of the input (BLASTP's query and subjects,
+/// TBLASTN's query).
 fn reader_records(records: &[fasta::Record], prefix: &str, protein: bool) -> Vec<FastaRecord> {
     records
         .iter()
@@ -249,10 +250,17 @@ pub fn run(
             observer: Some(&mut recorder),
         };
         let result = match command {
-            Commands::Blastp(args) => run_local_blastp(args, query, subject, "", "", &mut outputs),
-            // The registered records enter the searches of BLASTN, TBLASTX and TBLASTN as
-            // NCBI's reader's records (`FastaRecord::from_bio`): `register` reads only inputs
-            // that `bio` reads as NCBI does (port plan, steps S3, S5, S6 and S10).
+            // The registered records enter the searches as NCBI's reader's records
+            // (`FastaRecord::from_bio`): `register` reads only inputs that `bio` reads as
+            // NCBI does (port plan, steps S3, S5, S6, S7 and S10).
+            Commands::Blastp(args) => run_local_blastp(
+                args,
+                &reader_records(query, "Query_", true),
+                &reader_records(subject, "Subject_", true),
+                "",
+                "",
+                &mut outputs,
+            ),
             Commands::Tblastn(args) => run_local_tblastn(
                 args,
                 &reader_records(query, "Query_", true),

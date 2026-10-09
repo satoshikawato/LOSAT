@@ -190,39 +190,6 @@ pub struct BlastpPairwiseReport {
 // Pairwise Output Writers
 // =============================================================================
 
-/// The title of a subject read with `bio`: the ID, a space and the rest of the defline
-/// (the title that NCBI's FASTA reader keeps, for the inputs that `bio` reads alike).
-fn subject_defline(subject_id: &str, subject_title: Option<&str>) -> Vec<u8> {
-    let mut defline = subject_id.as_bytes().to_vec();
-    if let Some(title) = subject_title.filter(|title| !title.is_empty()) {
-        defline.push(b' ');
-        defline.extend_from_slice(title.as_bytes());
-    }
-    defline
-}
-
-/// The titles of the subjects of `subject_order` for the outfmt 0 report, by subject
-/// index: the ID of `subject_ids` and the `subject_title` of the subject's first hit.
-fn bio_subject_titles(
-    subject_order: &[u32],
-    subject_hits: &std::collections::HashMap<u32, Vec<&PairwiseHit>>,
-    subject_ids: &[Arc<str>],
-) -> std::collections::HashMap<u32, Vec<u8>> {
-    subject_order
-        .iter()
-        .filter_map(|&s_idx| {
-            let first = subject_hits.get(&s_idx)?.first()?;
-            let subject_id = subject_ids
-                .get(s_idx as usize)
-                .map_or("unknown", |id| id.as_ref());
-            Some((
-                s_idx,
-                subject_defline(subject_id, first.subject_title.as_deref()),
-            ))
-        })
-        .collect()
-}
-
 /// Write database/subject information header
 ///
 /// Reference: ncbi-blast/c++/src/objtools/align_format/showalign.cpp
@@ -1681,7 +1648,8 @@ pub fn write_blastp_pairwise_report<W: Write>(
     writer: &mut W,
     config: &PairwiseConfig,
     queries: &[BlastpPairwiseQuery],
-    subject_ids: &[Arc<str>],
+    query_titles: &[Arc<[u8]>],
+    subject_titles: &[Arc<[u8]>],
     report: &BlastpPairwiseReport,
     mut probe: Option<&mut FormatProbe<'_>>,
     mut warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
@@ -1722,7 +1690,11 @@ pub fn write_blastp_pairwise_report<W: Write>(
         // NCBI blast_format.cpp:1491: m_Outfile << "\n\n";
         writeln!(writer)?;
         writeln!(writer)?;
-        write_blastp_query_header(writer, query.query_name.as_bytes(), query.query_length)?;
+        // The title's bytes by query index (`query_name` is BLASTX's).
+        let query_title = query_titles
+            .get(q_idx)
+            .map_or(&b""[..], |title| title.as_ref());
+        write_blastp_query_header(writer, query_title, query.query_length)?;
         let query_hits = &hits_by_query[q_idx];
         if query_hits.is_empty() {
             write_no_hits_found(writer)?;
@@ -1776,8 +1748,17 @@ pub fn write_blastp_pairwise_report<W: Write>(
         //                               m_NumSummary + additional);
         // ```
         // The table follows `x_InitDeflineTable` (`write_blastn_description_table`): the
-        // subject's highest bit score and that HSP's E-value, and the protein title.
-        let subject_titles = bio_subject_titles(&subject_order, &subject_hits, subject_ids);
+        // subject's highest bit score and that HSP's E-value, and the protein title of the
+        // record read (by subject index), as TBLASTN's.
+        let subject_titles: std::collections::HashMap<u32, Vec<u8>> = subject_order
+            .iter()
+            .map(|&s_idx| {
+                let title = subject_titles
+                    .get(s_idx as usize)
+                    .map_or(&b""[..], |title| title.as_ref());
+                (s_idx, title.to_vec())
+            })
+            .collect();
         let described = &subject_order[..subject_order.len().min(report.num_descriptions)];
         write_blastn_description_table(
             writer,
@@ -4661,8 +4642,10 @@ mod tblastx_tests {
             [(0, vec![&first]), (1, vec![&second])]
                 .into_iter()
                 .collect();
-        let ids: Vec<Arc<str>> = vec![Arc::from("s0"), Arc::from("s1")];
-        let titles = bio_subject_titles(&[0, 1], &hits, &ids);
+        let titles: std::collections::HashMap<u32, Vec<u8>> =
+            [(0, b"s0".to_vec()), (1, b"s1".to_vec())]
+                .into_iter()
+                .collect();
         let mut out = Vec::new();
         write_blastn_description_table(&mut out, &[0, 1], true, &hits, &titles, true, false)
             .unwrap();

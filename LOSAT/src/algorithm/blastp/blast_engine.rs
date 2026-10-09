@@ -3,6 +3,7 @@
 //! Reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c
 
 use anyhow::{bail, Context, Result};
+#[cfg(target_arch = "wasm32")]
 use bio::io::fasta;
 #[cfg(all(
     feature = "parallel",
@@ -18,6 +19,7 @@ use std::sync::{
 };
 use std::time::Instant;
 
+use crate::algorithm::blastn::blast_engine::{QueryReading, NO_DATA_MESSAGE};
 use crate::algorithm::blastn::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
 use crate::algorithm::tblastx::blast_aascan::{
     s_blast_aa_scan_subject_one_range, BlastOffsetPair as OffsetPair,
@@ -34,6 +36,7 @@ use crate::algorithm::tblastx::lookup::{build_ncbi_lookup, BlastAaLookupTable, Q
 use crate::algorithm::tblastx::ncbi_cutoffs::{gap_trigger_raw_score, x_drop_raw_score};
 use crate::algorithm::tblastx::translation::QueryFrame;
 use crate::api::local_blast::{FormatProbe, OutputSink, ReportOutputs};
+use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range;
 use crate::common::{GapEditOp, Hit};
 use crate::config::ScoringMatrix;
@@ -46,8 +49,8 @@ use crate::core::composition_adjustment::redo_alignment::{
 };
 use crate::report::{
     format_bitscore_ncbi, format_evalue_ncbi_tabular, format_percent_identity_ncbi,
-    write_blastp_pairwise_report, write_hit_fields, BlastpPairwiseQuery, BlastpPairwiseReport,
-    OutputConfig, OutputFormat, PairwiseConfig, PairwiseHit, ReportContext,
+    write_blastp_pairwise_report, BlastpPairwiseQuery, BlastpPairwiseReport, OutputConfig,
+    OutputFormat, PairwiseConfig, PairwiseHit, ReportContext,
 };
 use crate::stats::search_space::SearchSpace;
 use crate::stats::{
@@ -594,23 +597,10 @@ impl BlastpSubjectScratch {
 }
 
 #[inline]
-fn fasta_id(record: &fasta::Record) -> Arc<str> {
-    Arc::<str>::from(record.id().split_whitespace().next().unwrap_or("unknown"))
-}
-
-#[inline]
 fn path_label(path: &Path) -> String {
     path.file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.display().to_string())
-}
-
-#[inline]
-fn fasta_defline(record: &fasta::Record) -> String {
-    match record.desc() {
-        Some(desc) => format!("{} {}", record.id(), desc),
-        None => record.id().to_string(),
-    }
 }
 
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1426
@@ -623,8 +613,6 @@ fn fasta_defline(record: &fasta::Record) -> String {
 //    }
 // ```
 struct BlastpPreparedSubject {
-    id: Arc<str>,
-    title: Option<String>,
     encoded: EncodedProtein,
 }
 
@@ -649,14 +637,12 @@ struct BlastpPreparedSubject {
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
 fn prepare_blastp_subjects_preserving_order(
-    subject_records: &[fasta::Record],
+    subject_records: &[FastaRecord],
     requested_threads: usize,
     effective_threads: usize,
     blastp_parallel_pool: &crate::utils::threading::SearchPool<'_>,
 ) -> Result<Vec<BlastpPreparedSubject>> {
-    let prepare_subject = |record: &fasta::Record| BlastpPreparedSubject {
-        id: fasta_id(record),
-        title: record.desc().map(str::to_string),
+    let prepare_subject = |record: &FastaRecord| BlastpPreparedSubject {
         encoded: encode_protein_sequence(record.seq()),
     };
 
@@ -697,12 +683,10 @@ fn prepare_blastp_subjects_preserving_order(
     all(target_arch = "wasm32", not(feature = "wasm-threads"))
 ))]
 fn prepare_blastp_subjects_preserving_order(
-    subject_records: &[fasta::Record],
+    subject_records: &[FastaRecord],
     _num_threads: usize,
 ) -> Result<Vec<BlastpPreparedSubject>> {
-    let prepare_subject = |record: &fasta::Record| BlastpPreparedSubject {
-        id: fasta_id(record),
-        title: record.desc().map(str::to_string),
+    let prepare_subject = |record: &FastaRecord| BlastpPreparedSubject {
         encoded: encode_protein_sequence(record.seq()),
     };
 
@@ -990,7 +974,7 @@ fn blastp_should_parallelize_stage(
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
 fn blastp_should_parallelize_subject_prep(
-    subject_records: &[fasta::Record],
+    subject_records: &[FastaRecord],
     requested_threads: usize,
     effective_threads: usize,
 ) -> bool {
@@ -1025,6 +1009,11 @@ fn blastp_subject_diag_offsets(subjects: &[EncodedProtein], window: i32) -> Vec<
     let mut diag_offset = window;
     for subject in subjects {
         offsets.push(diag_offset);
+        // A subject without letters is not searched (blast_engine.c:1429-1432,
+        // `process_subject`), so the offset does not move for it.
+        if subject.aa_len == 0 {
+            continue;
+        }
         if diag_offset >= i32::MAX / 4 {
             diag_offset = window;
         } else {
@@ -2337,6 +2326,7 @@ fn blastp_frame_value(frame: Option<i8>) -> i8 {
 fn write_blastp_outfmt7_header<W: Write>(
     writer: &mut W,
     context: &ReportContext,
+    query_title: &[u8],
     fields: &[BlastpTabularField],
     num_hits: usize,
     batch_skipped: bool,
@@ -2354,10 +2344,9 @@ fn write_blastp_outfmt7_header<W: Write>(
     //                                             m_ParseLocalIds, kHtmlFormat,
     //                                             kTabularFormat, rid);
     // ```
-    // The title's bytes (`write_outfmt7_query_line`).
-    if let Some(ref query) = context.query_name {
-        crate::report::outfmt6::write_outfmt7_query_line(writer, query.as_bytes())?;
-    }
+    // The title's bytes (`write_outfmt7_query_line`), as NCBI's reader keeps them
+    // (`FastaRecord::title`).
+    crate::report::outfmt6::write_outfmt7_query_line(writer, query_title)?;
     // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:790-803
     // dbname = string("User specified sequence set (Input: ") + m_SubjectTag + string(")");
     if let Some(db) = context
@@ -2388,26 +2377,87 @@ fn write_blastp_outfmt7_header<W: Write>(
     Ok(())
 }
 
+/// The subject ID of the tabular formats of every subject, by subject index
+/// (`report::defline::tabular_subject_id`: the title's first word, or the local ID, and
+/// for `lcl|Subject_...` the first word of `GenerateDefline`, which is `unnamed` for a
+/// protein without a title), as the other programs'.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:863-870
+/// ```c++
+///         } catch (const CException&) {
+///             list<CRef<CSeq_id> > subject_ids;
+///             CRef<CSeq_id> id(new CSeq_id());
+///             id->Assign(align.GetSeq_id(1));
+///             subject_ids.push_back(id);
+///             SetSubjectId(subject_ids);
+///             bioseqs_found = false;
+///         }
+/// ```
+/// A subject with a row whose `GenerateDefline` throws (a `Subject_` first word and a title
+/// in no encoding that `CUtf8::GuessEncoding` recognises) makes NCBI 2.17.0 write part of the
+/// row and stop with a `CCoreException` that names its build's source files (exit 255;
+/// `AUTHORITY.md` §J-6, §K-1, RP-20). No result can be defined for it, so LOSAT rejects such
+/// a subject explicitly before it writes any format; a subject without rows is never
+/// named.
+fn tabular_subject_ids(
+    hit_lists: &[Option<BlastpHitList>],
+    subjects: &[FastaRecord],
+) -> Result<Vec<Arc<[u8]>>> {
+    let ids: Vec<Option<Arc<[u8]>>> = subjects
+        .iter()
+        .map(|subject| {
+            crate::report::defline::tabular_subject_id(
+                subject.local_id.as_bytes(),
+                &subject.title,
+                true,
+            )
+            .ok()
+            .map(Arc::from)
+        })
+        .collect();
+    for hit_list in hit_lists.iter().flatten() {
+        let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+        for hsp in hit_list.hsplist_array[..count]
+            .iter()
+            .flat_map(|hsp_list| hsp_list.hsps.iter())
+        {
+            let s_idx = hsp.s_idx as usize;
+            if ids.get(s_idx).is_some_and(Option::is_none) {
+                bail!(
+                    "subject record {} ({}) has a title whose first word starts with 'Subject_' and whose non-UTF-8 bytes are in no encoding that NCBI BLAST+ recognises; NCBI BLAST+ writes part of a tabular row for such a subject and stops with an exception that names its build's source files (exit 255), which is not supported by LOSAT's BLASTP",
+                    s_idx + 1,
+                    String::from_utf8_lossy(subjects[s_idx].shown_id())
+                );
+            }
+        }
+    }
+    Ok(ids
+        .into_iter()
+        .map(|id| id.unwrap_or_else(|| Arc::from(&b""[..])))
+        .collect())
+}
+
 fn blastp_tabular_field_text(
     field: BlastpTabularField,
     hit: &PairwiseHit,
-    query_id: &str,
-    subject_id: &str,
-) -> String {
+    query_id: &[u8],
+    subject_id: &[u8],
+) -> Vec<u8> {
     let h = &hit.hit;
     let positives = hit.positives.unwrap_or(h.num_positives);
     let gaps = hit.gaps.unwrap_or_else(|| h.gap_letters());
     let query_frame = blastp_frame_value(hit.query_frame);
     let subject_frame = blastp_frame_value(hit.subject_frame);
 
-    match field {
+    // The IDs are written as bytes (`FastaRecord::shown_id`, `tabular_subject_ids`).
+    let text = match field {
         BlastpTabularField::QuerySeqId
         | BlastpTabularField::QueryAccession
-        | BlastpTabularField::QueryAccessionVersion => query_id.to_string(),
+        | BlastpTabularField::QueryAccessionVersion => return query_id.to_vec(),
         BlastpTabularField::QueryLength => h.query_length.to_string(),
         BlastpTabularField::SubjectSeqId
         | BlastpTabularField::SubjectAccession
-        | BlastpTabularField::SubjectAccessionVersion => subject_id.to_string(),
+        | BlastpTabularField::SubjectAccessionVersion => return subject_id.to_vec(),
         BlastpTabularField::SubjectLength => hit.subject_length.unwrap_or_default().to_string(),
         BlastpTabularField::QueryStart => h.q_start.to_string(),
         BlastpTabularField::QueryEnd => h.q_end.to_string(),
@@ -2455,7 +2505,8 @@ fn blastp_tabular_field_text(
         // if (!(*iter)->IsUser()) continue; ... return failure;
         // Local FASTA has no ASN BLAST defline user object, even when it has a title.
         BlastpTabularField::SubjectTitle => "N/A".to_string(),
-    }
+    };
+    text.into_bytes()
 }
 
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
@@ -2474,18 +2525,18 @@ fn write_blastp_hsp_tabular_field<W: Write>(
     writer: &mut W,
     field: BlastpTabularField,
     hsp: &BlastpHsp,
-    query_id: &str,
-    subject_id: &str,
+    query_id: &[u8],
+    subject_id: &[u8],
     subject_length: usize,
 ) -> std::io::Result<()> {
     match field {
         BlastpTabularField::QuerySeqId
         | BlastpTabularField::QueryAccession
-        | BlastpTabularField::QueryAccessionVersion => writer.write_all(query_id.as_bytes()),
+        | BlastpTabularField::QueryAccessionVersion => writer.write_all(query_id),
         BlastpTabularField::QueryLength => write!(writer, "{}", hsp.query_length),
         BlastpTabularField::SubjectSeqId
         | BlastpTabularField::SubjectAccession
-        | BlastpTabularField::SubjectAccessionVersion => writer.write_all(subject_id.as_bytes()),
+        | BlastpTabularField::SubjectAccessionVersion => writer.write_all(subject_id),
         BlastpTabularField::SubjectLength => write!(writer, "{subject_length}"),
         BlastpTabularField::QueryStart => write!(writer, "{}", hsp.q_start),
         BlastpTabularField::QueryEnd => write!(writer, "{}", hsp.q_end),
@@ -2558,9 +2609,9 @@ fn write_blastp_tabular_output(
     fields: &[BlastpTabularField],
     outfmt: OutputFormat,
     writer: &mut impl Write,
-    query_ids: &[Arc<str>],
-    query_headers: &[String],
-    subject_ids: &[Arc<str>],
+    query_ids: &[Arc<[u8]>],
+    query_titles: &[Arc<[u8]>],
+    subject_ids: &[Arc<[u8]>],
     query_batch_skipped: &[bool],
     context: &ReportContext,
     mut probe: Option<&mut FormatProbe<'_>>,
@@ -2571,7 +2622,7 @@ fn write_blastp_tabular_output(
     // PrintHeader(..., const CBioseq& bioseq, ..., const CSeq_align_set* align_set, ...);
     // m_Ostream << "# BLAST processed " << num_queries << " queries\n";
     let mut start = 0;
-    for (q_idx, query_header) in query_headers.iter().enumerate() {
+    for (q_idx, query_title) in query_titles.iter().enumerate() {
         // The query's warnings come before its lines (`QueryWarnings`).
         if let Some(warnings) = warnings.as_deref_mut() {
             warnings.before_query(q_idx, &mut *writer)?;
@@ -2581,11 +2632,10 @@ fn write_blastp_tabular_output(
             end += 1;
         }
         if outfmt == OutputFormat::TabularWithComments {
-            let mut query_context = context.clone();
-            query_context.query_name = Some(query_header.clone());
             write_blastp_outfmt7_header(
                 writer,
-                &query_context,
+                context,
+                query_title,
                 fields,
                 end - start,
                 query_batch_skipped[q_idx],
@@ -2607,7 +2657,12 @@ fn write_blastp_tabular_output(
                 writer.flush()?;
                 probe.begin(hsp_index);
             }
-            let (query_id, subject_id) = hit.hit.resolve_ids(query_ids, subject_ids);
+            let query_id = query_ids
+                .get(hit.hit.q_idx as usize)
+                .map_or(&b""[..], |id| id.as_ref());
+            let subject_id = subject_ids
+                .get(hit.hit.s_idx as usize)
+                .map_or(&b""[..], |id| id.as_ref());
             let frames_set = blastp_tabular_sets_frames(fields, hit.hit.num_ident);
             for (index, field) in fields.iter().enumerate() {
                 if index > 0 {
@@ -2618,7 +2673,7 @@ fn write_blastp_tabular_output(
                     continue;
                 }
                 let value = blastp_tabular_field_text(*field, hit, query_id, subject_id);
-                writer.write_all(value.as_bytes())?;
+                writer.write_all(&value)?;
             }
             writer.write_all(b"\n")?;
             if let Some(probe) = probe.as_mut() {
@@ -2631,7 +2686,7 @@ fn write_blastp_tabular_output(
     // A search that stops at a query batch (`Empty CBlastQueryVector` with `-query_loc`)
     // writes no epilog (blastp_app.cpp:294-295, `PrintEpilog`).
     if outfmt == OutputFormat::TabularWithComments && epilog {
-        writeln!(writer, "# BLAST processed {} queries", query_headers.len())?;
+        writeln!(writer, "# BLAST processed {} queries", query_titles.len())?;
     }
     Ok(())
 }
@@ -2672,9 +2727,9 @@ fn write_blastp_tabular_hit_lists(
     fields: &[BlastpTabularField],
     outfmt: OutputFormat,
     writer: &mut impl Write,
-    query_ids: &[Arc<str>],
-    query_headers: &[String],
-    subject_ids: &[Arc<str>],
+    query_ids: &[Arc<[u8]>],
+    query_titles: &[Arc<[u8]>],
+    subject_ids: &[Arc<[u8]>],
     subjects: &[EncodedProtein],
     subject_placements: &seq_range::Placements,
     query_batch_skipped: &[bool],
@@ -2696,11 +2751,10 @@ fn write_blastp_tabular_hit_lists(
             warnings.before_query(q_idx, &mut *writer)?;
         }
         if outfmt == OutputFormat::TabularWithComments {
-            let mut query_context = context.clone();
-            query_context.query_name = Some(query_headers[q_idx].clone());
             write_blastp_outfmt7_header(
                 writer,
-                &query_context,
+                context,
+                &query_titles[q_idx],
                 fields,
                 blastp_hit_list_hsp_count(std::slice::from_ref(hit_list_opt)),
                 query_batch_skipped[q_idx],
@@ -2735,14 +2789,12 @@ fn write_blastp_tabular_hit_lists(
                 // ```
                 let query_id = query_ids
                     .get(hsp.q_idx as usize)
-                    .map(|id| id.as_ref())
-                    .unwrap_or("unknown");
+                    .map_or(&b""[..], |id| id.as_ref());
                 let subject_id = subject_ids
                     .get(hsp.s_idx as usize)
-                    .map(|id| id.as_ref())
-                    .unwrap_or("unknown");
+                    .map_or(&b""[..], |id| id.as_ref());
                 if use_default_fields {
-                    write_hit_fields(
+                    crate::report::outfmt6::write_hit_fields_bytes(
                         writer,
                         query_id,
                         subject_id,
@@ -2782,7 +2834,7 @@ fn write_blastp_tabular_hit_lists(
     // A search that stops at a query batch (`Empty CBlastQueryVector` with `-query_loc`)
     // writes no epilog (blastp_app.cpp:294-295, `PrintEpilog`).
     if outfmt == OutputFormat::TabularWithComments && epilog {
-        writeln!(writer, "# BLAST processed {} queries", query_headers.len())?;
+        writeln!(writer, "# BLAST processed {} queries", query_titles.len())?;
     }
     Ok(())
 }
@@ -2858,8 +2910,8 @@ fn write_blastp_hsp_tabular_row(
     writer: &mut impl Write,
     fields: &[BlastpTabularField],
     hsp: &BlastpHsp,
-    query_id: &str,
-    subject_id: &str,
+    query_id: &[u8],
+    subject_id: &[u8],
     subjects: &[EncodedProtein],
     subject_placements: &seq_range::Placements,
 ) -> Result<()> {
@@ -3191,8 +3243,8 @@ fn restore_displayed_o(row: Option<String>, sequence: &[u8], start: usize) -> Op
 /// ```
 fn recount_pyrrolysine_identities(
     hit_lists: &mut [Option<BlastpHitList>],
-    query_records: &[fasta::Record],
-    subject_records: &[fasta::Record],
+    query_records: &[FastaRecord],
+    subject_records: &[FastaRecord],
     matrix: ScoringMatrix,
 ) {
     let has_o = |sequence: &[u8]| {
@@ -3281,11 +3333,10 @@ fn build_pairwise_hits(
     hits: Vec<(Hit, u8)>,
     query_contexts: &[QueryContext],
     subjects: &[EncodedProtein],
-    subject_titles: &[Option<String>],
     matrix: ScoringMatrix,
     render_alignment: bool,
-    query_records: &[fasta::Record],
-    subject_records: &[fasta::Record],
+    query_records: &[FastaRecord],
+    subject_records: &[FastaRecord],
 ) -> Result<Vec<PairwiseHit>> {
     hits.into_iter()
         .map(|(mut hit, comp_adjustment_method)| -> Result<PairwiseHit> {
@@ -3402,7 +3453,18 @@ fn build_pairwise_hits(
                 positives: Some(positives),
                 gaps: Some(gaps),
                 subject_length: Some(subjects[s_idx].aa_len),
-                subject_title: subject_titles[s_idx].clone(),
+                // The title after its first word (the `bio` description of the inputs that
+                // `bio` read alike), as the other programs give it; the reports take the
+                // subject's title bytes by subject index (`write_blastp_pairwise_report`).
+                subject_title: subject_records.get(s_idx).and_then(|subject| {
+                    subject
+                        .title
+                        .iter()
+                        .position(|&byte| byte == b' ')
+                        .map(|space| {
+                            String::from_utf8_lossy(&subject.title[space + 1..]).into_owned()
+                        })
+                }),
                 // NCBI core/blast_kappa.c:332-342: the HSP's composition adjustment.
                 comp_adjust_method: Some(comp_adjustment_method),
                 // NCBI showalign.cpp:3595-3598: this optional Stage E field is
@@ -4657,23 +4719,63 @@ pub fn run_web_pair_records(
     let outfmt = args.outfmt.clone();
     let mut stderr = std::io::stderr();
     let mut outputs = ReportOutputs::single(&outfmt, OutputSink::Writer(&mut output), &mut stderr);
-    run_local(
+    // ABI v1 keeps `bio` and its checks (plan TD-1): the checks that it made in the search
+    // come where they came (`V1Records`), and the records that pass them enter the search
+    // as NCBI's reader's records (`FastaRecord::from_bio`; the protein title warning of
+    // each record is the one that ABI v1 wrote).
+    //
+    // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta_reader_utils.cpp:209-213
+    // ```c++
+    //     // trim leading whitespace from title (is this appropriate?)
+    //     while (title_start < len
+    //         &&  isspace((unsigned char)defline[title_start])) {
+    //         ++title_start;
+    //     }
+    // ```
+    // ABI v1's BLASTP has no check of the deflines: `bio` gives a defline that starts with
+    // white space an empty ID, so the title of `from_bio` starts with white space, which
+    // NCBI's reader skips.
+    let v1_record = |index: usize, record: &fasta::Record, prefix: &str| {
+        let mut record = FastaRecord::from_bio(record, index + 1, prefix, true);
+        let start = record
+            .title
+            .iter()
+            .position(|&byte| !matches!(byte, b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r'))
+            .unwrap_or(record.title.len());
+        record.title.drain(..start);
+        record
+    };
+    let queries: Vec<FastaRecord> = query_records
+        .iter()
+        .enumerate()
+        .map(|(index, record)| v1_record(index, record, "Query_"))
+        .collect();
+    let subjects: Vec<FastaRecord> = subject_records
+        .iter()
+        .enumerate()
+        .map(|(index, record)| v1_record(index, record, "Subject_"))
+        .collect();
+    run_local_with(
         args,
-        query_records,
-        subject_records,
+        &queries,
+        &subjects,
         query_label,
         subject_label,
         &mut outputs,
+        Some(&V1Records {
+            queries: query_records,
+            subjects: subject_records,
+        }),
     )?;
     Ok(output)
 }
 
 /// `settings` are the NCBI application settings that LOSAT reproduces
-/// (`ncbi_environment::check_ncbi_application_settings`): the input readers use them once
-/// the program reads with `fasta_reader` (steps S3-S8 of the port plan).
+/// (`ncbi_environment::check_ncbi_application_settings`): the readers of the query and the
+/// subjects use their data loaders (`ReaderConfig`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_scope_src.cpp:67-72
-/// ```c++
+/// ```c
 ///     CNcbiApplication* app = CNcbiApplication::Instance();
 ///     if (app) {
 ///         const CNcbiRegistry& registry = app->GetConfig();
@@ -4683,10 +4785,11 @@ pub fn run_web_pair_records(
 /// ```
 pub fn run(
     args: BlastpArgs,
-    _settings: crate::blastinput::ncbi_environment::ApplicationSettings,
+    settings: crate::blastinput::ncbi_environment::ApplicationSettings,
 ) -> Result<()> {
     use crate::algorithm::blastn::input as fasta_input;
     use crate::blastinput::app;
+    use crate::blastinput::fasta_reader::{read_subjects, FastaInputSource, ReaderConfig};
     // NCBI reference: ncbi-blast/c++/src/app/blast/blastp_app.cpp:128-133
     // ```c
     // if(RecoverSearchStrategy(args, m_CmdLineArgs)) {
@@ -4733,7 +4836,7 @@ pub fn run(
         return Err(app::missing_subject_error());
     };
     fasta_input::check_utf8_file_name(subject_path, "subject", "BLASTP")?;
-    let mut subject_file = fasta_input::open_input(subject_path, "subject", "BLASTP")?;
+    let subject_file = fasta_input::open_input(subject_path, "subject", "BLASTP")?;
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2537-2545
     // ```c++
     //             subj_input_stream = &args[kArgSubject].AsInputFile();
@@ -4752,38 +4855,64 @@ pub fn run(
         seq_range::RangeRole::Subject,
         "BLASTP",
     )?;
-    let subject_bytes = fasta_input::read_fasta_bytes(&mut subject_file, subject_path, "subject")?;
-    drop(subject_file);
-    // NCBI warns about these bytes as it reads the subjects; LOSAT rejects them there.
-    fasta_input::check_protein_sequence_lines_of(&subject_bytes, "subject", "BLASTP")?;
-    let subjects = fasta_input::bio_records_of(&subject_bytes, subject_path, "subject", "BLASTP")?;
-    // NCBI reads these deflines and residues without a message; LOSAT rejects them where the
-    // search would start.
-    let subject_checks =
-        fasta_input::check_protein_input_of(&subject_bytes, &subjects, "subject", "BLASTP");
-    // `bio` reads no record from a file whose first record has an empty defline and no
-    // residues (NCBI reads that record and the rest); the deferred check rejects it.
-    if subjects.is_empty() && subject_checks.is_ok() {
-        return Err(app::empty_subjects_error());
-    }
-    // NCBI reads the records one at a time and checks each one's range after reading it:
-    // a range that starts past the end of a record stops it there, after the title
-    // warnings of the records read (`seq_range::cut_subjects`).
-    fasta_input::write_protein_title_warnings(
-        &subjects[..seq_range::subjects_read(&subjects, subject_range.as_ref())],
-        &mut std::io::stderr(),
-    )?;
-    let subjects = match seq_range::cut_subjects(&subjects, subject_range.as_ref())? {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:242-246
+    // ```c++
+    //     CRef<CBlastFastaInputSource> fasta(new CBlastFastaInputSource(in, iconfig));
+    //     CRef<CBlastInput> input(new CBlastInput(fasta));
+    //     CRef<CScope> scope(new CScope(*CObjectManager::GetInstance()));
+    //     sequences = input->GetAllSeqs(*scope);
+    //     return scope;
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:328-330
+    // ```c++
+    //     flags += (m_ReadProteins
+    //               ? CFastaReader::fAssumeProt
+    //               : CFastaReader::fAssumeNuc);
+    // ```
+    // The subjects of blastp are read as proteins (`IsProtein()`). NCBI reads the records
+    // one at a time, writes each one's messages as it reads it, and checks each one's range
+    // after reading it: a range that starts past the end of a record stops the reading
+    // there (`read_subjects`). Records without residues (and intervals without letters) are
+    // read without a message and reported when the formatter sets up the subjects
+    // (`search`).
+    let mut subject_source = FastaInputSource::from_argument(
+        subject_path,
+        subject_file,
+        ReaderConfig::subject("BLASTP", true, settings.data_loaders),
+    );
+    let read_subject_records = {
+        let mut stderr = std::io::stderr();
+        read_subjects(
+            &mut subject_source,
+            subject_range.as_ref(),
+            &mut |message: &[u8]| std::io::Write::write_all(&mut stderr, message),
+        )?
+    };
+    drop(subject_source);
+    let subjects = match seq_range::cut_subjects(&read_subject_records, subject_range.as_ref())? {
         Some((cut, placements)) => SubjectSet {
             records: std::borrow::Cow::Owned(cut),
             placements,
         },
         None => SubjectSet {
-            records: std::borrow::Cow::Owned(subjects),
+            records: std::borrow::Cow::Owned(read_subject_records),
             placements: seq_range::Placements::default(),
         },
     };
-    drop(subject_bytes);
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
+    // ```c
+    // CObjMgr_QueryFactory::CObjMgr_QueryFactory(CBlastQueryVector & queries)
+    //     : m_QueryVector(& queries)
+    // {
+    //     if (queries.Empty()) {
+    //         NCBI_THROW(CBlastException, eInvalidArgument, "Empty CBlastQueryVector");
+    //     }
+    // ```
+    // `m_Subjects.Reset(new blast::CObjMgr_QueryFactory(*subjects))` (blast_args.cpp:2557)
+    // fails for a subject input without records.
+    if subjects.records.is_empty() {
+        return Err(app::empty_subjects_error());
+    }
     // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3456-3481
     // ```c
     //     if (args.Exist(kArgQuery) && args[kArgQuery].HasValue() &&
@@ -4825,15 +4954,9 @@ pub fn run(
     let result = {
         let mut outputs =
             ReportOutputs::single(&outfmt, OutputSink::Writer(&mut stream), &mut stderr);
-        search_cli(
-            args,
-            query_file,
-            &subjects,
-            subject_checks,
-            &mut outputs,
-            choice,
-        )
+        search_cli(args, query_file, &subjects, &mut outputs, choice, settings)
     };
+    // What was written before an error (such as the outfmt 0 prolog) stays in the file.
     let flushed = std::io::Write::flush(&mut stream);
     // NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.hpp:252-255
     // ```c
@@ -4865,77 +4988,91 @@ pub fn check_options(args: &BlastpArgs) -> Result<()> {
 }
 
 /// The part of `run` after the files are opened: NCBI's processing of the options,
-/// `Query is Empty!`, LOSAT's deferred checks of the inputs, LOSAT's limits and the search.
+/// `Query is Empty!`, the reading of the queries and the search.
 fn search_cli(
     args: BlastpArgs,
-    mut query_file: std::fs::File,
+    query_file: std::fs::File,
     subjects: &SubjectSet<'_>,
-    subject_checks: Result<()>,
     outputs: &mut ReportOutputs<'_>,
     choice: crate::blastinput::app::FormatChoice,
+    settings: crate::blastinput::ncbi_environment::ApplicationSettings,
 ) -> Result<()> {
-    use crate::algorithm::blastn::input as fasta_input;
+    use crate::blastinput::fasta_reader::{
+        read_queries, FastaInputSource, QueryEnd, QueryRecords, ReaderConfig,
+    };
     let resolved = args.check_options(outputs.diagnostics)?;
-    // NCBI reference: ncbi-blast/c++/src/app/blast/blastp_app.cpp:211-214
-    // ```c
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:202-216
+    // ```c++
+    //         SDataLoaderConfig dlconfig =
+    //             InitializeQueryDataLoaderConfiguration(query_opts->QueryIsProtein(),
+    //                                                    db_adapter);
+    //         CBlastInputSourceConfig iconfig(dlconfig, query_opts->GetStrand(),
+    //                                      query_opts->UseLowercaseMasks(),
+    //                                      query_opts->GetParseDeflines(),
+    //                                      query_opts->GetRange());
     //         if(IsIStreamEmpty(m_CmdLineArgs->GetInputStream())){
     //            	ERR_POST(Warning << "Query is Empty!");
     //            	return BLAST_EXIT_SUCCESS;
     //         }
+    //         CBlastFastaInputSource fasta(m_CmdLineArgs->GetInputStream(), iconfig);
+    //         CBlastInput input(&fasta, m_CmdLineArgs->GetQueryBatchSize());
     // ```
-    // NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.cpp:856-860
-    // ```c
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:856-860
+    // ```c++
     // 	char c;
     // 	CNcbiStreampos orig_p = in.tellg();
     // 	// Piped input
     // 	if(orig_p < 0)
     // 		return false;
     // ```
-    // When the subjects were read from standard input too, `cin` has reached its end, so
-    // NCBI gets no position for the query either.
-    let seekable = !(args.query.as_os_str() == "-"
+    // The query of blastp is a protein (`QueryIsProtein()`, `fAssumeProt`) and its data
+    // loaders are those of the subjects (`SDataLoaderConfig`). The position is taken on the
+    // opened file, before it is read (`stream_is_empty`). When the subjects were read from
+    // standard input too, `cin` has reached its end (a failed stream), so NCBI gets no
+    // position for the query either, and its reader is at its end: no query batch is read.
+    let shared_standard_input = args.query.as_os_str() == "-"
         && args
             .subject
             .as_deref()
-            .is_some_and(|path| path.as_os_str() == "-"))
-        && std::io::Seek::stream_position(&mut query_file).is_ok();
-    let query_bytes = fasta_input::read_fasta_bytes(&mut query_file, &args.query, "query")?;
-    drop(query_file);
-    if fasta_input::is_blank(&query_bytes) {
-        if !seekable {
-            anyhow::bail!(
-                "an empty query from a stream without a position (such as a pipe) is not supported by LOSAT's BLASTP"
-            );
-        }
+            .is_some_and(|path| path.as_os_str() == "-");
+    let mut query_source = FastaInputSource::from_argument(
+        &args.query,
+        query_file,
+        ReaderConfig::query("BLASTP", true, settings.data_loaders),
+    );
+    if !shared_standard_input && query_source.stream_is_empty() {
         outputs
             .diagnostics
             .write_all(b"Warning: [blastp] Query is Empty!\n")?;
         return Ok(());
     }
-    // NCBI reference: c++/src/app/blast/blastp_app.cpp:225-227
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:256-259
     // ```c++
-    //         CBlastFormat formatter(opt, *db_adapter,
-    //                                fmt_args->GetFormattedOutputChoice(),
-    //                                query_opts->GetParseDeflines(),
+    //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
+    // 	    BLAST_PROF_START( APP.LOOP.PRE );
+    //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
     // ```
-    // The formatter reads the subjects' sequence source (`SetupSubjects` skips a subject
-    // without residues with its warning) after `Query is Empty!`.
-    fasta_input::write_empty_subject_warnings(&subjects.records, "blastp", outputs.diagnostics)?;
-    // NCBI reference: ncbi-blast/c++/src/app/blast/blastp_app.cpp:250-253
-    // ```c
-    // 	if(UseXInclude(*fmt_args, args[kArgOutput].AsString())) {
-    // ```
-    crate::blastinput::app::xinclude_check(&choice)?;
-    subject_checks?;
-    fasta_input::check_protein_sequence_lines_of(&query_bytes, "query", "BLASTP")?;
-    let queries = fasta_input::bio_records_of(&query_bytes, &args.query, "query", "BLASTP")?;
-    fasta_input::check_protein_input_of(&query_bytes, &queries, "query", "BLASTP")?;
-    // NCBI warns about a query without residues ("Sequence contains no data") and fails
-    // when no query has any; LOSAT rejects such a query, as BLASTN does.
-    fasta_input::check_records_have_residues_of(&queries, "query", "BLASTP")?;
-    drop(query_bytes);
-    validate_requested_blastp_support(&resolved)?;
-    run_resolved_with_records(resolved, &queries, subjects, "", "", outputs)
+    // The records are read here, and their messages are written batch by batch
+    // (`read_query_batches`). What ends the reading (the end of the input, an `eEOF`, a
+    // reader error or LOSAT's rejection of a Seq-id line) comes in the batch that NCBI reads
+    // it in, after the reports of the batches before.
+    let QueryRecords { records, end } = read_queries(&mut query_source);
+    drop(query_source);
+    let reading = match end {
+        QueryEnd::Input => QueryReading::End,
+        QueryEnd::EofError => QueryReading::BlankLines,
+        QueryEnd::Error { error, warnings } => QueryReading::Error { error, warnings },
+    };
+    search(
+        resolved,
+        &records,
+        reading,
+        subjects,
+        "",
+        outputs,
+        Some(&choice),
+        None,
+    )
 }
 
 // NCBI reference: ncbi-blast/c++/src/app/blast/blastp_app.cpp:195-295
@@ -4978,8 +5115,10 @@ fn search_cli(
 // }
 // opt.SetHitlistSize(hitlist_size);
 // ```
-/// Runs one BLASTP search over already parsed records and writes every requested output
-/// format from the same result (the shared entry of the CLI, web ABI v1 and v2).
+/// Runs one BLASTP search over records read as NCBI's reader reads them
+/// (`blastinput::fasta_reader`; their messages are written where NCBI reads them) and
+/// writes every requested output format from the same result (the shared entry of the
+/// CLI, web ABI v1 and v2). Queries without a record are NCBI's `Query is Empty!`.
 ///
 /// Each requested `-outfmt` is parsed as on the command line, before the search starts.
 /// The search options are resolved once per format and must not differ between formats:
@@ -4987,22 +5126,46 @@ fn search_cli(
 /// and `-num_alignments`, which BLASTP does not accept, so a difference is an error here.
 pub fn run_local(
     args: BlastpArgs,
-    query_records: &[fasta::Record],
-    subject_records: &[fasta::Record],
+    query_records: &[FastaRecord],
+    subject_records: &[FastaRecord],
     query_label: &str,
     subject_label: &str,
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
-    // The subject range and its record checks come where NCBI reads the subjects (`run`).
+    run_local_with(
+        args,
+        query_records,
+        subject_records,
+        query_label,
+        subject_label,
+        outputs,
+        None,
+    )
+}
+
+/// `run_local`, with the checks that ABI v1 makes of its `bio` records (`v1`,
+/// `run_web_pair_records`).
+fn run_local_with(
+    args: BlastpArgs,
+    query_records: &[FastaRecord],
+    subject_records: &[FastaRecord],
+    _query_label: &str,
+    subject_label: &str,
+    outputs: &mut ReportOutputs<'_>,
+    v1: Option<&V1Records<'_>>,
+) -> Result<()> {
+    // The subject range and its record checks come where NCBI reads the subjects (`run`):
+    // the messages of each record read, up to a record whose range starts past its end.
     let subject_range = seq_range::parse_optional_range(
         args.subject_loc.as_deref(),
         seq_range::RangeRole::Subject,
         "BLASTP",
     )?;
-    crate::algorithm::blastn::input::write_protein_title_warnings(
-        &subject_records[..seq_range::subjects_read(subject_records, subject_range.as_ref())],
-        outputs.diagnostics,
-    )?;
+    for record in
+        &subject_records[..seq_range::subjects_read(subject_records, subject_range.as_ref())]
+    {
+        outputs.diagnostics.write_all(&record.warnings)?;
+    }
     let subjects = match seq_range::cut_subjects(subject_records, subject_range.as_ref())? {
         Some((cut, placements)) => SubjectSet {
             records: std::borrow::Cow::Owned(cut),
@@ -5017,43 +5180,117 @@ pub fn run_local(
         return Err(crate::blastinput::app::empty_subjects_error());
     }
     let args = resolve_for_formats(&args, outputs)?;
-    if query_records.is_empty() {
-        outputs
-            .diagnostics
-            .write_all(b"Warning: [blastp] Query is Empty!\n")?;
-        return Ok(());
-    }
-    crate::algorithm::blastn::input::write_empty_subject_warnings(
-        &subjects.records,
-        "blastp",
-        outputs.diagnostics,
-    )?;
-    crate::algorithm::blastn::input::check_protein_residues_of(
-        subject_records,
-        "subject",
-        "BLASTP",
-    )?;
-    crate::algorithm::blastn::input::check_protein_residues_of(query_records, "query", "BLASTP")?;
-    crate::algorithm::blastn::input::check_records_have_residues_of(
-        query_records,
-        "query",
-        "BLASTP",
-    )?;
-    validate_requested_blastp_support(&args)?;
-    run_resolved_with_records(
+    search(
         args,
         query_records,
+        QueryReading::Records,
         &subjects,
-        query_label,
         subject_label,
         outputs,
+        None,
+        v1,
     )
+}
+
+/// ABI v1's records as `bio` reads them (`run_web_pair_records`). Plan TD-1 freezes ABI
+/// v1's accepted inputs, its messages and their order: the search makes ABI v1's checks of
+/// these records where it made them when it searched them (`check_records`,
+/// `check_query_intervals`, and `check_shown_subject_titles` before the outfmt 0 report),
+/// and searches the records of NCBI's reader made from them (`FastaRecord::from_bio`),
+/// which those checks guarantee to be read alike.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+struct V1Records<'a> {
+    queries: &'a [bio::io::fasta::Record],
+    subjects: &'a [bio::io::fasta::Record],
+}
+
+impl V1Records<'_> {
+    /// ABI v1's checks of the residues, after the warnings of the subjects without
+    /// residues: a residue that NCBI's protein reader removes (subjects, then queries), and
+    /// a query without residues. NCBI reads those inputs with a warning (or reports a query
+    /// without residues), and ABI v1 rejects them as it did.
+    fn check_records(&self) -> Result<()> {
+        use crate::algorithm::blastn::input::{
+            check_protein_residues_of, check_records_have_residues_of,
+        };
+        check_protein_residues_of(self.subjects, "subject", "BLASTP")?;
+        check_protein_residues_of(self.queries, "query", "BLASTP")?;
+        check_records_have_residues_of(self.queries, "query", "BLASTP")
+    }
+
+    /// ABI v1's rejection of a query interval without letters (`-query_loc` starting just
+    /// past a record's end), after LOSAT's limits, as ABI v1 made it.
+    fn check_query_intervals(
+        &self,
+        searched: &[FastaRecord],
+        query_input: &seq_range::QueryInput,
+    ) -> Result<()> {
+        seq_range::check_no_empty_interval(
+            searched,
+            &query_input.placements,
+            &query_input.ordinals,
+            seq_range::RangeRole::Query,
+            "BLASTP",
+        )
+    }
+}
+
+/// ABI v1's rejection (`V1Records`) of the outfmt 0 titles that it did not write as NCBI,
+/// of the subjects that the report shows (those with hits): a title that NCBI decodes
+/// (`NStr::HtmlDecode`) and a title of punctuation that NCBI's `x_CleanAndCompress` reads
+/// past (`report::defline::check_shown_protein_subject_title`). ABI v1's titles are its
+/// `bio` deflines (`FastaRecord::from_bio`).
+fn check_v1_shown_subject_titles(
+    shown: &std::collections::BTreeSet<usize>,
+    subject_records: &[FastaRecord],
+) -> Result<()> {
+    for &index in shown {
+        crate::report::defline::check_shown_protein_subject_title(
+            &String::from_utf8_lossy(&subject_records[index].title),
+            index + 1,
+            "BLASTP",
+        )?;
+    }
+    Ok(())
+}
+
+/// LOSAT's rejection of a protein subject title of punctuation that NCBI's
+/// `x_CleanAndCompress` reads past the end of in the outfmt 0 titles of the subjects that
+/// the report shows (NCBI BLAST+ 2.17.0 crashes there). The approved exception 2 of
+/// PD-LOSAT-NCBI-DEFECTS covers the nucleotide subjects of BLASTN, TBLASTX and TBLASTN
+/// only (DW-17), so LOSAT's BLASTP keeps the rejection.
+///
+/// NCBI reference: c++/src/objmgr/util/create_defline.cpp:4092-4095
+/// ```c
+///     // produce final result
+///     string penult = mag + prefix + decoded + suffix;
+///
+///     x_CleanAndCompress (final, penult, m_IsAA);
+/// ```
+fn check_shown_subject_titles(
+    shown: &std::collections::BTreeSet<usize>,
+    subject_records: &[FastaRecord],
+) -> Result<()> {
+    for &index in shown {
+        let title = &subject_records[index].title;
+        let reads_past_end = [false, true].into_iter().any(|leave_prefix| {
+            crate::report::defline::generate_defline(title, true, leave_prefix)
+                .is_ok_and(|defline| defline.reads_past_end)
+        });
+        if reads_past_end {
+            bail!(
+                "subject record {} has a title of punctuation that NCBI BLAST+'s x_CleanAndCompress reads past the end of (NCBI BLAST+ 2.17.0 crashes in outfmt 0); this is not supported by LOSAT's BLASTP",
+                index + 1
+            );
+        }
+    }
+    Ok(())
 }
 
 /// The subjects of a search as it searches them (each cut to its `-subject_loc` interval)
 /// and where each lies in its record.
 struct SubjectSet<'a> {
-    records: std::borrow::Cow<'a, [fasta::Record]>,
+    records: std::borrow::Cow<'a, [FastaRecord]>,
     placements: seq_range::Placements,
 }
 
@@ -5061,7 +5298,7 @@ struct SubjectSet<'a> {
 /// record read, and where each searched query lies in its record) and where each
 /// subject's searched letters lie in its record.
 struct BlastpRanges<'a> {
-    input_records: &'a [fasta::Record],
+    input_records: &'a [FastaRecord],
     query_input: &'a seq_range::QueryInput,
     subject_placements: &'a seq_range::Placements,
 }
@@ -5110,139 +5347,499 @@ fn resolve_for_formats(
     Ok(first)
 }
 
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:606-617
-// ```c
-// sequence = queries.GetBlastSequence(index, encoding,
-//                                     eNa_strand_unknown,
-//                                     eSentinels,
-//                                     &warnings);
-// memcpy(&buf.get()[offset], sequence.data.get(), sequence.length);
-// ```
-//
-// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1407-1427
-// ```c
-// while ((seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr)) != BLAST_SEQSRC_EOF) {
-//     if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0) {
-//         continue;
-//     }
-// }
-// ```
-fn run_resolved_with_records(
+/// The search of `run_local` and of the CLI, after NCBI's processing of the options and
+/// the reading of the subjects: `Query is Empty!` for records without a query, the query
+/// batch size, the subjects without letters, the XInclude formats (`xinclude`, the CLI's
+/// format), ABI v1's checks (`v1`), LOSAT's limits and environment, then the query batches
+/// (`read_query_batches`), the search of the batches that NCBI searches and their reports.
+#[allow(clippy::too_many_arguments)]
+fn search(
     args: ResolvedBlastpArgs,
-    query_records: &[fasta::Record],
+    query_records: &[FastaRecord],
+    reading: QueryReading,
     subjects: &SubjectSet<'_>,
-    _query_label: &str,
     subject_label: &str,
     outputs: &mut ReportOutputs<'_>,
+    xinclude: Option<&crate::blastinput::app::FormatChoice>,
+    v1: Option<&V1Records<'_>>,
 ) -> Result<()> {
+    // NCBI reads the subjects before the queries (`run`); the records are those of NCBI's
+    // reader (`fasta_reader`; `run_local`'s callers read them so). The CLI has already
+    // reported an empty query file and read its queries; the records of the other callers
+    // get NCBI's warning for an input without records.
+    if query_records.is_empty() && matches!(reading, QueryReading::Records) {
+        outputs
+            .diagnostics
+            .write_all(b"Warning: [blastp] Query is Empty!\n")?;
+        return Ok(());
+    }
+    // NCBI reference: ncbi-blast/c++/src/app/blast/blastp_app.cpp:215-216
+    // ```c
+    //         CBlastFastaInputSource fasta(m_CmdLineArgs->GetInputStream(), iconfig);
+    //         CBlastInput input(&fasta, m_CmdLineArgs->GetQueryBatchSize());
+    // ```
+    // The batch size is read before the formatter is made and before the queries, which
+    // NCBI reads one batch at a time after the outfmt 0 prolog (`read_query_batches`).
+    let batch_size = crate::blastinput::app::query_batch_size("BLASTP", 10000)?;
+    // NCBI reference: ncbi-blast/c++/src/app/blast/blastp_app.cpp:225-227
+    // ```c
+    //         CBlastFormat formatter(opt, *db_adapter,
+    //                                fmt_args->GetFormattedOutputChoice(),
+    //                                query_opts->GetParseDeflines(),
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:773-789
+    // ```c
+    //         catch(CBlastException & e ) {
+    //         	// Skip bad subject sequence
+    //         	if(e.GetErrCode() == CBlastException::eInvalidArgument) {
+    //         		seqblk_vec->push_back(subj);
+    //         ...
+    //         		warning += "Subject sequence contains no data";
+    //         		ERR_POST(Warning << warning);
+    //         		continue;
+    // ```
+    // The formatter, made after the query batch size and before the outfmt 0 prolog, sets
+    // up the subjects: a subject without letters (a record without residues, or an
+    // interval that starts just past its record's end) gets its warning, stays in the
+    // database statistics with no letters, and is never searched.
+    crate::algorithm::blastn::input::write_empty_subject_warnings(
+        &subjects.records,
+        "blastp",
+        outputs.diagnostics,
+    )?;
+    // NCBI reference: ncbi-blast/c++/src/app/blast/blastp_app.cpp:250-253
+    // ```c
+    // 	if(UseXInclude(*fmt_args, args[kArgOutput].AsString())) {
+    //         	formatter.SetBaseFile(args[kArgOutput].AsString());
+    //         }
+    //         formatter.PrintProlog();
+    // ```
+    // An XInclude format written to standard output fails after the formatter is made.
+    // (`run_local` checks its formats with the options, `resolve_for_formats`.)
+    if let Some(choice) = xinclude {
+        crate::blastinput::app::xinclude_check(choice)?;
+    }
+    // ABI v1's checks of its `bio` records come where they came before the records of
+    // NCBI's reader (plan TD-1).
+    if let Some(v1) = v1 {
+        v1.check_records()?;
+    }
+    // LOSAT's limits come where NCBI starts the search, after its checks.
+    validate_requested_blastp_support(&args)?;
     // The query range applies to every query record as NCBI's batch reader reads it
-    // (`seq_range::cut_queries`): the records were checked whole, and are searched cut.
-    let ranged_queries = args
-        .query_range
-        .as_ref()
-        .map(|range| seq_range::cut_queries(query_records, range));
-    let (searched_queries, query_input) = match ranged_queries {
-        Some(ranged) => (std::borrow::Cow::Owned(ranged.records), ranged.input),
+    // (`seq_range::cut_queries`): a record is searched cut, and one whose interval starts
+    // just past its end is a query without data.
+    let (searched_queries, query_input) = match args.query_range.as_ref() {
+        Some(range) => {
+            let ranged = seq_range::cut_queries(query_records, range);
+            (std::borrow::Cow::Owned(ranged.records), ranged.input)
+        }
         None => (
             std::borrow::Cow::Borrowed(query_records),
             seq_range::QueryInput::whole(query_records),
         ),
     };
-    seq_range::check_no_empty_interval(
+    if let Some(v1) = v1 {
+        v1.check_query_intervals(&searched_queries, &query_input)?;
+    }
+    check_blastp_environment()?;
+    let batches = read_query_batches(
+        query_records,
         &searched_queries,
-        &query_input.placements,
-        &query_input.ordinals,
-        seq_range::RangeRole::Query,
-        "BLASTP",
-    )?;
-    let ranges = BlastpRanges {
-        input_records: query_records,
-        query_input: &query_input,
-        subject_placements: &subjects.placements,
-    };
-    check_blastp_environment(&args, &ranges, &subjects.records, subject_label, outputs)?;
-    crate::utils::threading::with_search_pool(args.num_threads, "blastp", |pool| {
-        run_resolved_in_pool(
-            args,
-            &searched_queries,
-            &subjects.records,
-            _query_label,
-            subject_label,
-            outputs,
-            pool,
-            None,
-            &ranges,
-        )
-    })
+        &query_input,
+        reading,
+        batch_size,
+    );
+    // NCBI reference: c++/src/app/blast/blastp_app.cpp:294-295
+    // ```c++
+    //         BLAST_PROF_START( APP.POST );
+    //         formatter.PrintEpilog(opt);
+    // ```
+    // A run that stops at a query batch writes the reports of the batches before it
+    // without the epilog.
+    let epilog = batches.stop.is_none();
+    if batches.searched_done > 0 {
+        let searched_done = batches.searched_done;
+        let done_input = seq_range::QueryInput {
+            placements: seq_range::Placements(
+                query_input
+                    .placements
+                    .0
+                    .iter()
+                    .take(searched_done)
+                    .copied()
+                    .collect(),
+            ),
+            ordinals: query_input.ordinals[..searched_done].to_vec(),
+            input_lengths: query_input.input_lengths[..batches.input_done].to_vec(),
+            skipped: query_input.skipped[..batches.input_done].to_vec(),
+            range_length: query_input.range_length,
+        };
+        let ranges = BlastpRanges {
+            input_records: &query_records[..batches.input_done],
+            query_input: &done_input,
+            subject_placements: &subjects.placements,
+        };
+        let reports = BlastpReports {
+            reader_warnings: &batches.warnings[..searched_done],
+            epilog,
+            v1_titles: v1.is_some(),
+        };
+        crate::utils::threading::with_search_pool(args.num_threads, "blastp", |pool| {
+            run_resolved_in_pool(
+                args,
+                &searched_queries[..searched_done],
+                &subjects.records,
+                "",
+                subject_label,
+                outputs,
+                pool,
+                None,
+                &ranges,
+                &reports,
+            )
+        })?;
+    } else if batches.stop.is_some() {
+        // NCBI reference: ncbi-blast/c++/src/app/blast/blastp_app.cpp:253
+        // ```c
+        //         formatter.PrintProlog();
+        // ```
+        // The first batch fails after the outfmt 0 prolog.
+        write_pairwise_prologs(&args, &subjects.records, subject_label, outputs)?;
+    } else {
+        // A reader at the end of its input reads no batch (`!input.End()`): the reports of
+        // no query (an empty pipe, or `-query -` after `-subject -`).
+        write_reports_without_queries(&args, &subjects.records, subject_label, outputs)?;
+    }
+    if let Some((warnings, error)) = batches.stop {
+        outputs.diagnostics.write_all(&warnings)?;
+        return Err(error);
+    }
+    Ok(())
 }
 
-// NCBI reference: ncbi-blast/c++/src/app/blast/blastp_app.cpp:215-219
+/// The query batches as NCBI's batch loop reads them, up to the batch that stops the run.
+struct QueryBatches {
+    /// The reader's messages of each batch's records (skipped ones too), before the
+    /// report of the batch's first searched query, by searched query.
+    warnings: Vec<Vec<u8>>,
+    /// The input records and the searched queries of the batches that NCBI searches.
+    input_done: usize,
+    searched_done: usize,
+    /// What stops the run at the batch after them: the messages that NCBI writes as it
+    /// reads that batch, and its error.
+    stop: Option<(Vec<u8>, anyhow::Error)>,
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_input.cpp:134-171
 // ```c
-//         CBlastFastaInputSource fasta(m_CmdLineArgs->GetInputStream(), iconfig);
-//         CBlastInput input(&fasta, m_CmdLineArgs->GetQueryBatchSize());
-// ```
-// NCBI reference: ncbi-blast/c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
-// ```c
-// CObjMgr_QueryFactory::CObjMgr_QueryFactory(CBlastQueryVector & queries)
-//     : m_QueryVector(& queries)
+// CRef<CBlastQueryVector>
+// CBlastInput::GetNextSeqBatch(CScope& scope)
 // {
+//     CRef<CBlastQueryVector> retval(new CBlastQueryVector);
+//     TSeqPos size_read = 0;
+//
+//     while (size_read < GetBatchSize()) {
+//
+//         if (End())
+//             break;
+//
+//         CRef<CBlastSearchQuery> q;
+//         try { q.Reset(m_Source->GetNextSequence(scope)); }
+//         catch (const CObjReaderParseException& e) {
+//             if (e.GetErrCode() == CObjReaderParseException::eEOF) {
+//                 break;
+//             }
+//             throw;
+//         }
+// ```
+// NCBI reference: ncbi-blast/c++/src/algo/blast/api/objmgr_query_data.cpp:378-380
+// ```c
 //     if (queries.Empty()) {
 //         NCBI_THROW(CBlastException, eInvalidArgument, "Empty CBlastQueryVector");
 //     }
 // ```
-/// The environment that NCBI's blastp reads around its search: the variables that LOSAT
-/// rejects (`BL2SEQ_LEGACY`, `OLD_FSC`, values that NCBI cannot convert), and a
-/// `BATCH_SIZE` of 0, with which the first query batch is empty and NCBI fails after the
-/// outfmt 0 prolog. Other batch sizes change a blastp report only through the query
-/// split (`search_split_query_batches`).
-fn check_blastp_environment(
+// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:632-652
+// ```c
+//         } catch (const CException& e) {
+//             ...
+//             CRef<CSearchMessage> m
+//                 (new CSearchMessage(eBlastSevWarning, index, e.GetMsg()));
+//             messages[index].push_back(m);
+//             s_InvalidateQueryContexts(qinfo, index);
+//         }
+//     ...
+//     // Validate that at least one query context is valid
+//     if (BlastSetup_Validate(qinfo, NULL) != 0 && messages.HasMessages()) {
+//         NCBI_THROW(CBlastException, eSetup, messages.ToString());
+//     }
+// ```
+// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_aux.cpp:1013-1025
+// ```c
+// TSearchMessages::ToString() const
+// {
+//     string retval;
+//     ITERATE(vector<TQueryMessages>, qm, *this) {
+//         if (qm->empty()) {
+//             continue;
+//         }
+//         ITERATE(TQueryMessages, msg, *qm) {
+//             retval += (*msg)->GetMessage() + " ";
+//         }
+//     }
+//     return retval;
+// }
+// ```
+/// Reads the query batches as NCBI's loop reads them (`input` and `searched` are the
+/// records read and the queries searched, `seq_range::cut_queries`): a batch counts the
+/// whole records up to the batch size, and the reader's messages of its records come
+/// before the report of its first searched query. The run stops at the first batch that
+/// NCBI fails, after the reports of the batches before (without the epilog) and the
+/// messages of that batch's records:
+/// - the reading ends there with a reader error (or LOSAT's rejection of a Seq-id line);
+/// - the batch has no query (a batch size of 0, a batch of records that `-query_loc`
+///   skips, or a batch that an `eEOF` ends before its first record): `Empty
+///   CBlastQueryVector`;
+/// - every query of the batch has no letters: the context of a protein query is valid at
+///   the set-up exactly when it has letters, so NCBI's set-up fails with one `Sequence
+///   contains no data` per query (`GetMessage` puts the severity first) and `CATCH_ALL`
+///   writes `BLAST engine error: ` (exit 3).
+///
+/// A batch whose queries have letters but no Karlin-Altschul parameters is set up and not
+/// searched (`run_resolved_in_pool`).
+fn read_query_batches(
+    input_records: &[FastaRecord],
+    searched: &[FastaRecord],
+    input: &seq_range::QueryInput,
+    mut reading: QueryReading,
+    batch_size: u32,
+) -> QueryBatches {
+    let mut warnings: Vec<Vec<u8>> = vec![Vec::new(); searched.len()];
+    // Whether what ended the reading after the records (`reading`) has come.
+    let mut reading_ended = false;
+    let mut input_start = 0;
+    // The reader is at the end of its input after the last record, unless an `eEOF` or an
+    // error ends the reading there; that comes in the batch being read when the records
+    // run out before the batch reaches its size, and otherwise in a batch of its own.
+    while input_start < input.input_lengths.len()
+        || (reading.reads_past_records() && !reading_ended)
+    {
+        let (input_end, reached_size) = seq_range::next_ranged_batch(
+            &input.input_lengths,
+            &input.skipped,
+            input_start,
+            batch_size,
+        );
+        let std::ops::Range { start, end } = input.searched_in(input_start..input_end);
+        let reading_ends_here =
+            input_end == input.input_lengths.len() && !reached_size && reading.reads_past_records();
+        // `CFastaReader` writes its messages about a batch's records (their lines and
+        // titles) when it reads them, after the report of the batch before.
+        let mut batch_warnings: Vec<u8> = input_records[input_start..input_end]
+            .iter()
+            .flat_map(|record| record.warnings.iter().copied())
+            .collect();
+        let mut stop_error = None;
+        if reading_ends_here {
+            reading_ended = true;
+            if let QueryReading::Error {
+                error,
+                warnings: error_warnings,
+            } = std::mem::replace(&mut reading, QueryReading::End)
+            {
+                batch_warnings.extend_from_slice(&error_warnings);
+                stop_error = Some(error.into_app_error());
+            }
+        }
+        if stop_error.is_none() && start == end {
+            stop_error = Some(
+                crate::cli::NativeError {
+                    exit: 3,
+                    message: "BLAST engine error: Empty CBlastQueryVector\n".to_string(),
+                }
+                .into(),
+            );
+        }
+        if stop_error.is_none()
+            && searched[start..end]
+                .iter()
+                .all(|record| record.seq().is_empty())
+        {
+            let mut message = String::from("BLAST engine error: ");
+            for _ in start..end {
+                message.push_str("Warning: ");
+                message.push_str(NO_DATA_MESSAGE);
+                message.push(' ');
+            }
+            message.push('\n');
+            stop_error = Some(crate::cli::NativeError { exit: 3, message }.into());
+        }
+        if let Some(error) = stop_error {
+            return QueryBatches {
+                warnings,
+                input_done: input_start,
+                searched_done: start,
+                stop: Some((batch_warnings, error)),
+            };
+        }
+        warnings[start].extend_from_slice(&batch_warnings);
+        input_start = input_end;
+    }
+    QueryBatches {
+        warnings,
+        input_done: input_start,
+        searched_done: searched.len(),
+        stop: None,
+    }
+}
+
+/// The `Database:` text of the reports of a local `-subject` search (`subject_label`, or
+/// the `-subject` argument).
+///
+/// NCBI reference: c++/src/algo/blast/format/blast_format.cpp:797-799
+/// ```c++
+/// 	    string dbname;
+/// 	    if (m_IsDbScan)
+/// 		dbname = string("User specified sequence set (Input: ") + m_SubjectTag + string(")");
+/// ```
+fn blastp_database_name(args: &ResolvedBlastpArgs, subject_label: &str) -> String {
+    let subject_input_label = if subject_label.is_empty() {
+        args.subject.display().to_string()
+    } else {
+        subject_label.to_string()
+    };
+    format!("User specified sequence set (Input: {subject_input_label})")
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:118-119
+// ```c
+// {
+//     m_Outfile.exceptions(NcbiBadbit);
+// ```
+/// Writes and flushes the outfmt 0 prolog of every outfmt 0 format (`PrintProlog`), for a
+/// run that stops at its first query batch.
+fn write_pairwise_prologs(
     args: &ResolvedBlastpArgs,
-    ranges: &BlastpRanges<'_>,
-    subject_records: &[fasta::Record],
+    subject_records: &[FastaRecord],
     subject_label: &str,
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
+    for format in outputs.formats.iter_mut() {
+        if crate::blastinput::app::parse_formatting_string(format.outfmt)?.number == 0 {
+            let mut writer = format.sink.open()?;
+            crate::report::pairwise::write_blastp_pairwise_prolog(
+                &mut writer,
+                NCBI_BLASTP_VERSION,
+                &blastp_database_name(args, subject_label),
+                subject_records.len(),
+                subject_records
+                    .iter()
+                    .map(|record| record.seq().len())
+                    .sum(),
+            )?;
+            writer.flush()?;
+        }
+    }
+    Ok(())
+}
+
+// NCBI reference: ncbi-blast/c++/src/app/blast/blastp_app.cpp:253-259,294-295
+// ```c
+//         formatter.PrintProlog();
+//
+// 	BLAST_PROF_ADD( BATCH_SIZE, (int)input.GetBatchSize() );
+//         /*** Process the input ***/
+//         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
+// ...
+//         BLAST_PROF_START( APP.POST );
+//         formatter.PrintEpilog(opt);
+// ```
+// NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1322-1325
+// ```c
+//     m_Ostream << "# BLAST processed " << num_queries << " queries\n";
+// ```
+/// The reports of a run without a query batch: the outfmt 0 prolog and epilog, the outfmt
+/// 7 count of 0 queries, nothing for outfmt 6.
+fn write_reports_without_queries(
+    args: &ResolvedBlastpArgs,
+    subject_records: &[FastaRecord],
+    subject_label: &str,
+    outputs: &mut ReportOutputs<'_>,
+) -> Result<()> {
+    let total_db_len: usize = subject_records
+        .iter()
+        .map(|record| record.seq().len())
+        .sum();
+    for format in outputs.formats.iter_mut() {
+        let (outfmt, _) = OutputFormat::parse(format.outfmt).map_err(anyhow::Error::msg)?;
+        let mut writer = format.sink.open()?;
+        match outfmt {
+            OutputFormat::Pairwise => {
+                let report = BlastpPairwiseReport {
+                    version: NCBI_BLASTP_VERSION.to_string(),
+                    database_name: blastp_database_name(args, subject_label),
+                    database_num_sequences: subject_records.len(),
+                    database_total_letters: total_db_len,
+                    matrix_name: args.matrix_name.clone(),
+                    gap_open: args.scoring.gap_open,
+                    gap_extend: args.scoring.gap_extend,
+                    word_threshold: args.threshold,
+                    window_size: args.window_size as i32,
+                    gapped_karlin: lookup_protein_params(&args.scoring),
+                    gumbel: lookup_protein_gumbel_params(&args.scoring, total_db_len as i64)
+                        .context("missing NCBI gumbel parameters for supported blastp scoring")?,
+                    num_descriptions: args.max_target_seqs_given.unwrap_or(500),
+                    num_alignments: args.max_target_seqs_given.unwrap_or(250),
+                };
+                let config = PairwiseConfig {
+                    line_length: 60,
+                    show_gi: false,
+                    show_frame: false,
+                    program: "blastp".to_string(),
+                    protein_matrix: args.scoring.matrix,
+                };
+                write_blastp_pairwise_report(
+                    &[],
+                    &mut writer,
+                    &config,
+                    &[],
+                    &[],
+                    &[],
+                    &report,
+                    None,
+                    None,
+                    true,
+                )?;
+            }
+            OutputFormat::TabularWithComments => {
+                writeln!(writer, "# BLAST processed 0 queries")?;
+            }
+            OutputFormat::Tabular => {}
+        }
+        writer.flush()?;
+    }
+    Ok(())
+}
+
+/// What the reports of the searched batches need besides the search: the reader's
+/// messages before each query's report (`read_query_batches`), whether the reports end
+/// with the epilog, and whether ABI v1's rejection of outfmt 0 titles applies
+/// (`V1Records`).
+struct BlastpReports<'a> {
+    reader_warnings: &'a [Vec<u8>],
+    epilog: bool,
+    v1_titles: bool,
+}
+
+/// The environment that NCBI's blastp reads around its search that LOSAT rejects:
+/// `BL2SEQ_LEGACY`, `OLD_FSC` and query split values that NCBI cannot convert. Other
+/// batch sizes change a blastp report only through the query batches
+/// (`read_query_batches`) and the query split (`search_split_query_batches`).
+fn check_blastp_environment() -> Result<()> {
     use crate::blastinput::app;
     app::check_unsupported_environment("BLASTP")?;
     app::check_old_fsc("BLASTP")?;
     app::check_query_split_environment("BLASTP", false)??;
-    // A first batch without a query: a batch size of 0, or (with `-query_loc`) every
-    // record of the first batch skipped. NCBI writes the outfmt 0 prolog and the title
-    // warnings of the records it read, then stops.
-    let batch_size = app::query_batch_size("BLASTP", 10000)?;
-    let first_batch = ranges.query_input.batches(batch_size).into_iter().next();
-    if let Some(first_batch) = first_batch.filter(|batch| batch.searched.is_empty()) {
-        let subject_input_label = if subject_label.is_empty() {
-            args.subject.display().to_string()
-        } else {
-            subject_label.to_string()
-        };
-        for format in outputs.formats.iter_mut() {
-            if app::parse_formatting_string(format.outfmt)?.number == 0 {
-                let mut writer = format.sink.open()?;
-                crate::report::pairwise::write_blastp_pairwise_prolog(
-                    &mut writer,
-                    NCBI_BLASTP_VERSION,
-                    &format!("User specified sequence set (Input: {subject_input_label})"),
-                    subject_records.len(),
-                    subject_records
-                        .iter()
-                        .map(|record| record.seq().len())
-                        .sum(),
-                )?;
-                writer.flush()?;
-            }
-        }
-        crate::algorithm::blastn::input::write_protein_title_warnings(
-            &ranges.input_records[first_batch.input],
-            outputs.diagnostics,
-        )?;
-        return Err(crate::cli::NativeError {
-            exit: 3,
-            message: "BLAST engine error: Empty CBlastQueryVector\n".to_string(),
-        }
-        .into());
-    }
     Ok(())
 }
 
@@ -5295,8 +5892,8 @@ fn check_blastp_environment(
 #[allow(clippy::too_many_arguments)]
 fn search_split_query_batches(
     args: &ResolvedBlastpArgs,
-    query_records: &[fasta::Record],
-    subject_records: &[fasta::Record],
+    query_records: &[FastaRecord],
+    subject_records: &[FastaRecord],
     subject_label: &str,
     outputs: &mut ReportOutputs<'_>,
     blastp_parallel_pool: &crate::utils::threading::SearchPool<'_>,
@@ -5338,17 +5935,10 @@ fn search_split_query_batches(
                 !chunk.queries.is_empty(),
                 "a query chunk without a query is not supported by LOSAT's BLASTP"
             );
-            let parts: Vec<fasta::Record> = chunk
+            let parts: Vec<FastaRecord> = chunk
                 .queries
                 .iter()
-                .map(|part| {
-                    let record = &query_records[range.start + part.query];
-                    fasta::Record::with_attrs(
-                        record.id(),
-                        record.desc(),
-                        &record.seq()[part.from..part.to],
-                    )
-                })
+                .map(|part| query_records[range.start + part.query].cut(part.from, part.to))
                 .collect();
             let mut chunk_lists = Vec::new();
             let part_input = seq_range::QueryInput::whole(&parts);
@@ -5365,6 +5955,12 @@ fn search_split_query_batches(
                     input_records: &parts,
                     query_input: &part_input,
                     subject_placements: &seq_range::Placements::default(),
+                },
+                // A chunk's search ends after its preliminary stage, before any report.
+                &BlastpReports {
+                    reader_warnings: &[],
+                    epilog: false,
+                    v1_titles: false,
                 },
             )?;
             let chunk_parts: Vec<super::query_split::BlastpChunkPart> = chunk
@@ -5401,14 +5997,15 @@ fn search_split_query_batches(
 
 fn run_resolved_in_pool(
     args: ResolvedBlastpArgs,
-    query_records: &[fasta::Record],
-    subject_records: &[fasta::Record],
+    query_records: &[FastaRecord],
+    subject_records: &[FastaRecord],
     _query_label: &str,
     subject_label: &str,
     outputs: &mut ReportOutputs<'_>,
     blastp_parallel_pool: &crate::utils::threading::SearchPool<'_>,
     chunk_prelim: Option<&mut Vec<Option<BlastpHitList>>>,
     ranges: &BlastpRanges<'_>,
+    reports: &BlastpReports<'_>,
 ) -> Result<()> {
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1633-1681
     // ```c
@@ -5479,8 +6076,18 @@ fn run_resolved_in_pool(
         )
         .collect::<Result<Vec<_>>>()?;
 
-    let query_ids: Vec<Arc<str>> = query_records.iter().map(fasta_id).collect();
-    let query_headers: Vec<String> = query_records.iter().map(fasta_defline).collect();
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:474-504
+    // (`s_ReplaceLocalId`)
+    // The query ID of the tabular formats is the title's first word, or the local ID
+    // (`FastaRecord::shown_id`); the reports write the titles' bytes.
+    let query_ids: Vec<Arc<[u8]>> = query_records
+        .iter()
+        .map(|record| Arc::from(record.shown_id()))
+        .collect();
+    let query_titles: Vec<Arc<[u8]>> = query_records
+        .iter()
+        .map(|record| Arc::from(record.title()))
+        .collect();
     let query_lengths: Vec<usize> = query_records
         .iter()
         .map(|record| record.seq().len())
@@ -5527,14 +6134,15 @@ fn run_resolved_in_pool(
     ))]
     let prepared_subjects =
         prepare_blastp_subjects_preserving_order(subject_records, args.num_threads)?;
-    let mut subject_ids = Vec::with_capacity(prepared_subjects.len());
-    let mut subject_titles = Vec::with_capacity(prepared_subjects.len());
-    let mut subjects = Vec::with_capacity(prepared_subjects.len());
-    for prepared_subject in prepared_subjects {
-        subject_ids.push(prepared_subject.id);
-        subject_titles.push(prepared_subject.title);
-        subjects.push(prepared_subject.encoded);
-    }
+    let subjects: Vec<EncodedProtein> = prepared_subjects
+        .into_iter()
+        .map(|prepared_subject| prepared_subject.encoded)
+        .collect();
+    // The subjects' titles by subject index, as the reports write them.
+    let subject_titles: Vec<Arc<[u8]>> = subject_records
+        .iter()
+        .map(|record| Arc::from(record.title()))
+        .collect();
     if let Some(timing) = timing.as_ref() {
         BlastpTiming::record_duration(&timing.subject_encoding_ns, subject_encoding_start);
     }
@@ -5579,7 +6187,7 @@ fn run_resolved_in_pool(
     //    (program == eBlastTypeBlastx || program == eBlastTypeTblastx ||
     //     program == eBlastTypeRpsTblastn);
     // ```
-    let (lookup, contexts) = match args.lookup_table_type {
+    let (lookup, mut contexts) = match args.lookup_table_type {
         BlastpLookupTableType::AaLookupTable => {
             // NCBI reference: c++/src/algo/blast/core/blast_aalookup.c:245
             // ```c
@@ -5636,6 +6244,30 @@ fn run_resolved_in_pool(
     // A query whose Karlin-Altschul parameters cannot be computed is invalid
     // (`is_valid`); a query batch (`GetQueryBatchSize`) of invalid queries only is not
     // searched, and its reports show -1 parameters.
+    //
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:632-640
+    // ```c
+    //         } catch (const CException& e) {
+    //             ...
+    //             CRef<CSearchMessage> m
+    //                 (new CSearchMessage(eBlastSevWarning, index, e.GetMsg()));
+    //             messages[index].push_back(m);
+    //             s_InvalidateQueryContexts(qinfo, index);
+    //         }
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2771-2772
+    // ```c
+    //       if ( !contexts[context].is_valid )
+    //           continue;
+    // ```
+    // A query without letters (`Sequence contains no data`, blast_setup.hpp:190-198) is
+    // invalidated when the queries are set up, before its Karlin-Altschul parameters would
+    // be computed: it is never searched and has no message of its own about them.
+    for context in &mut contexts {
+        if context.aa_len == 0 {
+            context.is_valid = false;
+        }
+    }
     let mut query_valid = vec![true; query_records.len()];
     for context in &contexts {
         if !context.is_valid {
@@ -5644,9 +6276,8 @@ fn run_resolved_in_pool(
     }
     let mut query_batch_skipped = vec![false; query_records.len()];
     let batch_size = crate::blastinput::app::query_batch_size("BLASTP", 10000)?;
-    // The batches count whole records (`seq_range::QueryInput::batches`); with
-    // `-query_loc`, a last batch of skipped records only stops NCBI after the reports of
-    // the batches before (`Empty CBlastQueryVector`).
+    // The batches count whole records (`seq_range::QueryInput::batches`); the batches
+    // here are those that NCBI searches (`read_query_batches`).
     let query_batches = ranges.query_input.batches(batch_size);
     for batch in &query_batches {
         let range = batch.searched.clone();
@@ -5655,9 +6286,6 @@ fn run_resolved_in_pool(
             *flag = skipped;
         }
     }
-    let last_batch_empty = query_batches
-        .last()
-        .is_some_and(|batch| batch.searched.is_empty());
     if let Some(timing) = timing.as_ref() {
         BlastpTiming::record_duration(&timing.lookup_ns, lookup_start);
     }
@@ -5822,6 +6450,20 @@ fn run_resolved_in_pool(
         // ```
         subject_result.reset(s_idx);
         let subject = &subjects[s_idx];
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1354,1429-1432
+        // ```c
+        //     Int4 min_subj_seq_length = 1;
+        // ...
+        //        if (seq_arg.seq->length < min_subj_seq_length) {
+        //            BlastSeqSrcReleaseSequence(seq_src, &seq_arg);
+        //            continue;
+        //        }
+        // ```
+        // A subject without letters (its warning was written when the subjects were set
+        // up) is not searched, and the diagonal offset does not move for it.
+        if subject.aa_len == 0 {
+            return;
+        }
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_util.c:112-121
         // ```c
         // (*seq_blk)->sequence_start = (Uint1 *) buffer;
@@ -7528,7 +8170,6 @@ fn run_resolved_in_pool(
         args.scoring.matrix,
     );
 
-    let query_header = query_headers.first().cloned();
     let subject_name_label = if subject_label.is_empty() {
         path_label(&args.subject)
     } else {
@@ -7540,7 +8181,7 @@ fn run_resolved_in_pool(
         subject_label.to_string()
     };
     let context = ReportContext {
-        query_name: query_header,
+        query_name: None,
         query_length: query_lengths.first().copied(),
         subject_name: Some(subject_name_label.clone()),
         database_name: Some(format!(
@@ -7620,7 +8261,6 @@ fn run_resolved_in_pool(
             collect_hits_and_methods_from_hit_lists(&hit_lists),
             &contexts,
             &subjects,
-            &subject_titles,
             args.scoring.matrix,
             true,
             query_records,
@@ -7689,8 +8329,21 @@ fn run_resolved_in_pool(
     //         ERR_POST(Warning << results.GetWarningStrings());
     //     }
     // ```
-    // The warnings of each query (the O characters read as X, an invalid query) are
-    // written before the query's report, once, with the first format (`QueryWarnings`).
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/local_blast.cpp:197-201,221
+    // ```c
+    //          for (index=0; index<local_query_data->GetNumQueries(); index++)
+    //          {
+    //               CConstRef<objects::CSeq_id> query_id(local_query_data->GetSeq_loc(index)->GetId());
+    //               TQueryMessages q_msg;
+    //               local_query_data->GetQueryMessages(index, q_msg);
+    //     ...
+    //          msg_vec.Combine(m_PrelimSearch->GetSearchMessages());
+    // ```
+    // The warnings of each query are written before the query's report, once, with the
+    // first format (`QueryWarnings`): the reader's messages of the query's batch (before
+    // its first query, `read_query_batches`), then the query's own: the O characters read
+    // as X, and the message of its set-up (a query without letters) or of its
+    // Karlin-Altschul parameters (an invalid query with letters).
     let query_warning_lines: Vec<Vec<u8>> = query_records
         .iter()
         .enumerate()
@@ -7699,25 +8352,35 @@ fn run_resolved_in_pool(
             messages.extend(crate::report::query_warnings::replaced_o_message(
                 record.seq(),
             ));
-            if !query_valid[q_idx] {
+            if record.seq().is_empty() {
+                messages.push(NO_DATA_MESSAGE.to_string());
+            } else if !query_valid[q_idx] {
                 messages.push(crate::report::query_warnings::INVALID_QUERY_MESSAGE.to_string());
             }
-            crate::report::query_warnings::query_warning(
+            let mut lines = reports
+                .reader_warnings
+                .get(q_idx)
+                .cloned()
+                .unwrap_or_default();
+            lines.extend(crate::report::query_warnings::query_warning(
                 "blastp",
                 ranges.query_input.ordinal(q_idx),
                 record,
                 &messages,
-            )
+            ));
+            lines
         })
         .collect();
-    let mut query_warning_lines = query_warning_lines;
-    let unsearched_title_warnings =
-        crate::report::query_warnings::prepend_ranged_batch_title_warnings(
-            &mut query_warning_lines,
-            ranges.input_records,
-            &query_batches,
-            crate::algorithm::blastn::input::protein_title_warning,
-        );
+    // The subject IDs of the tabular formats, checked for the subjects with rows before any
+    // format is written (`tabular_subject_ids`).
+    let subject_ids: Vec<Arc<[u8]>> = if format_plans
+        .iter()
+        .any(|(outfmt, _, _)| *outfmt != OutputFormat::Pairwise)
+    {
+        tabular_subject_ids(&hit_lists, subject_records)?
+    } else {
+        Vec::new()
+    };
     let mut format_warnings = Some(crate::report::query_warnings::QueryWarnings {
         before: &query_warning_lines,
         sink: &mut *outputs.diagnostics,
@@ -7751,12 +8414,13 @@ fn run_resolved_in_pool(
                     program: "blastp".to_string(),
                     protein_matrix: args.scoring.matrix,
                 };
-                let pairwise_queries: Vec<BlastpPairwiseQuery> = query_headers
+                // The titles are written as bytes by query index (`query_titles`);
+                // `query_name` stays empty (`BlastpPairwiseQuery` is BLASTX's too).
+                let pairwise_queries: Vec<BlastpPairwiseQuery> = query_lengths
                     .iter()
-                    .zip(query_lengths.iter())
                     .enumerate()
-                    .map(|(q_idx, (query_name, &query_length))| BlastpPairwiseQuery {
-                        query_name: query_name.clone(),
+                    .map(|(q_idx, &query_length)| BlastpPairwiseQuery {
+                        query_name: String::new(),
                         // NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:742-744
                         // ```c++
                         //         if(cbs.IsSetInst() && cbs.GetInst().CanGetLength()){
@@ -7802,24 +8466,16 @@ fn run_resolved_in_pool(
                     .as_ref()
                     .expect("pairwise hits prepared for blastp outfmt 0");
                 // NCBI makes the titles of the subjects that the report shows, those with
-                // hits; LOSAT rejects the titles that it does not write as NCBI
-                // (`report/defline.rs`).
+                // hits (blast_format.cpp:1540); LOSAT rejects the titles that it does not
+                // write as NCBI (`check_shown_subject_titles`, and ABI v1's own).
                 let shown: std::collections::BTreeSet<usize> = pairwise_hits
                     .iter()
                     .map(|hit| hit.hit.s_idx as usize)
                     .collect();
-                for index in shown {
-                    let record = &subject_records[index];
-                    let defline = match record.desc() {
-                        Some(desc) => format!("{} {desc}", record.id()),
-                        None => record.id().to_string(),
-                    };
-                    crate::report::defline::check_shown_protein_subject_title(
-                        &defline,
-                        index + 1,
-                        "BLASTP",
-                    )?;
+                if reports.v1_titles {
+                    check_v1_shown_subject_titles(&shown, subject_records)?;
                 }
+                check_shown_subject_titles(&shown, subject_records)?;
                 let masked_hits =
                     masked_query_rows(pairwise_hits, &query_frames, &ranges.query_input.placements);
                 write_blastp_pairwise_report(
@@ -7827,11 +8483,12 @@ fn run_resolved_in_pool(
                     &mut writer,
                     &pairwise_config,
                     &pairwise_queries,
-                    &subject_ids,
+                    &query_titles,
+                    &subject_titles,
                     &pairwise_report,
                     probe.as_mut(),
                     warnings.as_mut(),
-                    !last_batch_empty,
+                    reports.epilog,
                 )?;
                 Ok(())
             })(),
@@ -7857,7 +8514,7 @@ fn run_resolved_in_pool(
                         // NCBI reference: c++/src/objtools/align_format/tabular.cpp:1295-1309
                         // AcknowledgeBlastQuery(bioseq, ..., kTabularFormat, rid);
                         &query_ids,
-                        &query_headers,
+                        &query_titles,
                         &subject_ids,
                         &subjects,
                         ranges.subject_placements,
@@ -7865,7 +8522,7 @@ fn run_resolved_in_pool(
                         &context,
                         probe.as_mut(),
                         warnings.as_mut(),
-                        !last_batch_empty,
+                        reports.epilog,
                     )?;
                 } else {
                     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
@@ -7887,13 +8544,13 @@ fn run_resolved_in_pool(
                         // NCBI reference: c++/src/objtools/align_format/tabular.cpp:1295-1309
                         // AcknowledgeBlastQuery(bioseq, ..., kTabularFormat, rid);
                         &query_ids,
-                        &query_headers,
+                        &query_titles,
                         &subject_ids,
                         &query_batch_skipped,
                         &context,
                         probe.as_mut(),
                         warnings.as_mut(),
-                        !last_batch_empty,
+                        reports.epilog,
                     )?;
                 }
                 Ok(())
@@ -7912,26 +8569,6 @@ fn run_resolved_in_pool(
         );
     }
     output_result?;
-    // NCBI reference: c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
-    // ```c
-    // CObjMgr_QueryFactory::CObjMgr_QueryFactory(CBlastQueryVector & queries)
-    //     : m_QueryVector(& queries)
-    // {
-    //     if (queries.Empty()) {
-    //         NCBI_THROW(CBlastException, eInvalidArgument, "Empty CBlastQueryVector");
-    //     }
-    // ```
-    // With `-query_loc`, a last batch whose records are all skipped stops NCBI after the
-    // reports of the batches before (written above without the epilog), when it has read
-    // that batch (its title warnings).
-    if last_batch_empty {
-        outputs.diagnostics.write_all(&unsearched_title_warnings)?;
-        return Err(crate::cli::NativeError {
-            exit: 3,
-            message: "BLAST engine error: Empty CBlastQueryVector\n".to_string(),
-        }
-        .into());
-    }
 
     if let Some(timing) = timing.as_ref() {
         print_blastp_timing(timing, t_total);
@@ -8968,28 +9605,28 @@ mod tests {
             blastp_tabular_field_text(
                 BlastpTabularField::QueryAccessionVersion,
                 &pairwise_hit,
-                "query1",
-                "subject1"
+                b"query1",
+                b"subject1"
             ),
-            "query1"
+            b"query1"
         );
         assert_eq!(
             blastp_tabular_field_text(
                 BlastpTabularField::SubjectTitle,
                 &pairwise_hit,
-                "query1",
-                "subject1"
+                b"query1",
+                b"subject1"
             ),
-            "N/A"
+            b"N/A"
         );
         assert_eq!(
             blastp_tabular_field_text(
                 BlastpTabularField::Btop,
                 &pairwise_hit,
-                "query1",
-                "subject1"
+                b"query1",
+                b"subject1"
             ),
-            "2-D1"
+            b"2-D1"
         );
     }
 
@@ -9021,11 +9658,11 @@ mod tests {
 
         for field in fields {
             let mut rendered = Vec::new();
-            write_blastp_hsp_tabular_field(&mut rendered, field, &hsp, "query1", "subject1", 30)
+            write_blastp_hsp_tabular_field(&mut rendered, field, &hsp, b"query1", b"subject1", 30)
                 .expect("tabular field writes");
             assert_eq!(
-                String::from_utf8(rendered).expect("tabular field is UTF-8"),
-                blastp_tabular_field_text(field, &pairwise_hit, "query1", "subject1")
+                rendered,
+                blastp_tabular_field_text(field, &pairwise_hit, b"query1", b"subject1")
             );
         }
     }

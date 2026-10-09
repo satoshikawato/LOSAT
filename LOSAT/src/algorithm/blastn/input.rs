@@ -93,8 +93,8 @@ pub fn check_deflines_of(bytes: &[u8], role: &str, program: &str) -> Result<()> 
 }
 
 /// `check_deflines_of` for protein FASTA input: NCBI's protein reader checks the end of a
-/// title for 50 amino-acid letters instead of 20 nucleotides (`write_protein_title_warnings`),
-/// so the white space at the end of a defline matters after 50 letters.
+/// title for 50 amino-acid letters instead of 20 nucleotides (the title warning of
+/// `fasta_reader`), so the white space at the end of a defline matters after 50 letters.
 pub fn check_protein_deflines_of(bytes: &[u8], role: &str, program: &str) -> Result<()> {
     check_deflines_with(bytes, role, program, true)
 }
@@ -168,7 +168,7 @@ pub fn check_sequence_lines_of(bytes: &[u8], role: &str, program: &str) -> Resul
 
 /// Whether the text of a defline (after `>`) makes NCBI's protein reader warn that the title
 /// ends with amino acids: it is longer than 50 bytes and its last 50 are ASCII letters
-/// (`write_protein_title_warnings`).
+/// (the title warning of `fasta_reader`).
 fn ends_with_amino_acids(text: &[u8]) -> bool {
     text.len() > 50 && text[text.len() - 50..].iter().all(u8::is_ascii_alphabetic)
 }
@@ -273,47 +273,6 @@ fn ends_with_nucleotides(text: &[u8]) -> bool {
         && text[text.len() - 20..]
             .iter()
             .all(|byte| b"ACGTacgt".contains(byte))
-}
-
-/// NCBI's warning for a protein record whose defline ends with at least 50 ASCII letters,
-/// written when NCBI reads the record (`fAssumeProt`: the nucleotide check is skipped).
-///
-/// NCBI reference: c++/src/objtools/readers/fasta.cpp:1651-1673
-/// ```c
-///     if((length > kWarnAminoAcidCharsAtEnd) && !TestFlag(fAssumeNuc)) {
-/// ...
-///         for( ; pos_to_check >= last_pos_to_check_for_amino_acid; --pos_to_check ) {
-/// ...
-///             const char ch = sLineText[pos_to_check];
-///             if( ( ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') ) {
-/// ...
-///         if( pos_to_check < last_pos_to_check_for_amino_acid ) {
-///             FASTA_WARNING(iLineNum,
-///                 "FASTA-Reader: Title ends with at least " << kWarnAminoAcidCharsAtEnd
-///                 << " valid amino acid characters.  Was the sequence "
-///                 << "accidentally put in the title line?",
-/// ```
-pub fn write_protein_title_warnings(
-    records: &[fasta::Record],
-    diagnostics: &mut dyn std::io::Write,
-) -> std::io::Result<()> {
-    for record in records {
-        diagnostics.write_all(protein_title_warning(record))?;
-    }
-    Ok(())
-}
-
-/// The title warning of one protein record (`write_protein_title_warnings`), or nothing.
-pub fn protein_title_warning(record: &fasta::Record) -> &'static [u8] {
-    let text = match record.desc() {
-        Some(desc) => format!("{} {desc}", record.id()),
-        None => record.id().to_string(),
-    };
-    if ends_with_amino_acids(text.as_bytes()) {
-        b"FASTA-Reader: Title ends with at least 50 valid amino acid characters.  Was the sequence accidentally put in the title line?\n"
-    } else {
-        b""
-    }
 }
 
 /// NCBI's warning for a subject without residues, which it skips when it sets up the

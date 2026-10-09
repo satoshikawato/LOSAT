@@ -190,6 +190,28 @@ async function step(page: Page, act: Act, until: readonly Cond[], timeoutMs = 60
   );
 }
 
+/**
+ * Waits until the page has drawn 5 frames in a row less than 50 ms apart: what the act before
+ * left to do (the Alignments' sections that arrive and are laid out after a selection) is done,
+ * so that the next clock times its own act (W4 decision 14; W4b F1).
+ */
+async function quiet(page: Page): Promise<void> {
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        let last = performance.now();
+        let calm = 0;
+        const tick = (now: number) => {
+          calm = now - last < 50 ? calm + 1 : 0;
+          last = now;
+          if (calm >= 5) resolve();
+          else requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      }),
+  );
+}
+
 const rounded = (timing: Timing): Timing => ({
   ms: Math.round(timing.ms),
   paintMs: Math.round(timing.paintMs),
@@ -757,11 +779,13 @@ async function pairRepetition(page: Page, number: number, other: number): Promis
 
   await page.getByTestId('pane-alignment').click();
   const row = page.getByTestId('hsp-list').locator('[data-testid^="hsp-row-"][aria-pressed="false"]').nth(2);
+  await quiet(page);
   const rowId = (await row.getAttribute('data-testid'))!.replace('hsp-row-', '').replace('-', ':');
   const selectInList = await step(page, { kind: 'click', testid: `hsp-row-${rowId.replace(':', '-')}` }, [
     { testid: 'hsp-detail', attr: 'data-hsp', equals: rowId },
     { testid: 'hsp-detail', attr: 'data-state', equals: 'ready' },
   ]);
+  await quiet(page);
   const sortHsps = await step(page, { kind: 'click', testid: 'hsp-sort-bitScore' }, [
     {
       testid: 'hsp-sort-bitScore',

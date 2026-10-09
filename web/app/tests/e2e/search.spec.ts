@@ -24,6 +24,13 @@ import {
  */
 const SLOW = { program: 'blastp', query: 'NZ_CP006932.faa', subject: 'NZ_CP006932.faa' } as const;
 
+/** Where a part of a run's card is: its top below the card's top, and its right edge from the card's right edge. */
+async function placeInCard(page: Page, number: number, part: string): Promise<{ top: number; right: number }> {
+  const card = (await page.getByTestId(`run-${number}`).boundingBox())!;
+  const box = (await page.getByTestId(`run-${number}-${part}`).boundingBox())!;
+  return { top: Math.round(box.y - card.y), right: Math.round(card.x + card.width - box.x - box.width) };
+}
+
 async function startSlowSearch(page: Page): Promise<void> {
   await program(page, SLOW.program);
   await openFiles(page, 'query', [{ name: SLOW.query, text: fasta(SLOW.query) }]);
@@ -161,6 +168,11 @@ test('several runs in the queue; the next job is edited while one runs; separate
     await expect(page.getByTestId('run-1')).toContainText(`${SLOW.query} vs ${SLOW.subject}`);
     // The group waits behind run 1; cancelling the group leaves run 1 running.
     await expect(page.getByTestId('run-2-status')).toHaveText('queued');
+    // One card layout (W4b screen review L7): the phase line and Cancel are at the same place in
+    // the running card and in the waiting one.
+    await expect(page.getByTestId('run-2-phase')).toHaveText('Waiting');
+    expect(await placeInCard(page, 2, 'progress')).toEqual(await placeInCard(page, 1, 'progress'));
+    expect(await placeInCard(page, 2, 'cancel')).toEqual(await placeInCard(page, 1, 'cancel'));
     await page.getByTestId('run-2-cancel-group').click();
     await expect(page.getByTestId('run-2-status')).toHaveText('cancelled');
     await expect(page.getByTestId('run-3-status')).toHaveText('cancelled');
@@ -181,6 +193,16 @@ test('several runs in the queue; the next job is edited while one runs; separate
   }
   const last = await result(page, BUILD_HAS_ENGINE ? 5 : 3, 6);
   expect(last.command).toBe('LOSAT tblastx -query query.fa -subject b.fa -evalue 1e-3 -outfmt 6');
+  // A finished card has the same lines: the run and its status, the time it took, "Open results"
+  // at the right, then what it searched.
+  const number = BUILD_HAS_ENGINE ? 5 : 3;
+  await expect(page.getByTestId(`run-${number}-phase`)).toHaveText('Took');
+  const box = async (part: string) => (await page.getByTestId(`run-${number}-${part}`).boundingBox())!;
+  const [head, progress, open, options] = [await box('status'), await box('progress'), await box('open'), await box('options')];
+  expect(progress.y).toBeGreaterThanOrEqual(head.y + head.height - 1);
+  expect(open.y).toBeGreaterThanOrEqual(progress.y + progress.height - 1);
+  expect(options.y).toBeGreaterThanOrEqual(open.y + open.height - 1);
+  expect((await placeInCard(page, number, 'open')).right).toBeLessThanOrEqual(12);
 });
 
 test('cancel a running search; the next one runs', async ({ page }) => {

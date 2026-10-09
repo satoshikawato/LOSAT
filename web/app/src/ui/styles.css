@@ -805,29 +805,30 @@ textarea {
   background: var(--accent-bg);
 }
 
-/* "Open results" (or Cancel) shares a line with the run's state where it fits (S13 screen
-   review L3): the state's words and the button wrap as one line of items, the button at the end
-   of the last line. One layout at every width (W4 screen review low 5: the cards wrapped three
-   ways, and moved between the tabs). */
-.run-line {
+/* A run's card has one layout in every state and at every width (W4b screen review L7): the run
+   and its status badge, its phase and time, its actions at the right, then what it searched. The
+   cards no longer wrap three ways or move between the tabs (W4 screen review low 5, S13 L3). */
+.run-head,
+.run-progress {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px 8px;
+  gap: 2px 8px;
 }
 
-.run-state {
-  display: contents;
+.run-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 4px 12px;
+  margin: 2px 0;
 }
 
-.run-line > button {
-  flex: none;
-  margin-left: auto;
-}
-
-.run-open {
+/* Cancel and Open results are the same size in every card. */
+.run-actions > button:not(.link) {
   font-size: 0.88em;
-  padding: 2px 8px;
+  padding: 2px 10px;
 }
 
 .run-inputs {
@@ -884,6 +885,14 @@ textarea {
 
 .phase {
   font-weight: 600;
+}
+
+/* A finished run's "Took" or "Not started": its badge says how it ended. */
+.run[data-status='completed'] .phase,
+.run[data-status='cancelled'] .phase,
+.run[data-status='failed'] .phase {
+  font-weight: 400;
+  color: var(--muted);
 }
 
 .elapsed {

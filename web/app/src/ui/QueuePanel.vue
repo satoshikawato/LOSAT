@@ -58,6 +58,12 @@ function elapsed(run: RunView): string | undefined {
   return formatDuration((endedAt ?? now.value) - startedAt);
 }
 
+/** The card's second line: the phase of a waiting or active run; "Took" (and the time) or "Not started" for a finished one. */
+function phase(run: RunView): string {
+  if (!isTerminal(run.status)) return PHASE_LABELS[run.status];
+  return run.record.startedAt === undefined ? 'Not started' : 'Took';
+}
+
 /** The first listed run of a group that can be cancelled shows the group's cancel button. */
 function groupCancellable(run: RunView): boolean {
   const group = run.snapshot.group;
@@ -87,22 +93,29 @@ function phaseTimes(run: RunView): string {
         :data-status="run.status"
         :data-testid="`run-${run.snapshot.number}`"
       >
-        <!-- The run's state wraps beside its button, so that the button shares a line with it
-             (S13 screen review L3: "Open results" took a line of its own). -->
-        <div class="run-line">
-          <div class="run-state">
-            <strong>Run {{ run.snapshot.number }}</strong>
-            <span>{{ programById(run.snapshot.program).label }}</span>
-            <span class="status" :data-status="run.status" :data-testid="`run-${run.snapshot.number}-status`">{{
-              run.status
-            }}</span>
-            <span v-if="!isTerminal(run.status) && run.status !== 'queued'" class="phase" :data-testid="`run-${run.snapshot.number}-phase`">
-              {{ PHASE_LABELS[run.status] }}
-            </span>
-            <span v-if="elapsed(run)" class="elapsed muted" :data-testid="`run-${run.snapshot.number}-elapsed`">
-              {{ elapsed(run) }}
-            </span>
-          </div>
+        <!-- One layout for every card, at every width (W4b screen review L7): the run and its
+             status, then its phase and time, then its actions at the right; what it searched
+             under them. The phase and the actions are on the same lines in a waiting and a
+             running card. -->
+        <div class="run-head">
+          <strong>Run {{ run.snapshot.number }}</strong>
+          <span>{{ programById(run.snapshot.program).label }}</span>
+          <span class="status" :data-status="run.status" :data-testid="`run-${run.snapshot.number}-status`">{{ run.status }}</span>
+        </div>
+        <div class="run-progress" :data-testid="`run-${run.snapshot.number}-progress`">
+          <span class="phase" :data-testid="`run-${run.snapshot.number}-phase`">{{ phase(run) }}</span>
+          <span v-if="elapsed(run)" class="elapsed muted" :data-testid="`run-${run.snapshot.number}-elapsed`">{{ elapsed(run) }}</span>
+        </div>
+        <div v-if="cancellable(run) || run.status === 'completed'" class="run-actions" :data-testid="`run-${run.snapshot.number}-actions`">
+          <button
+            v-if="groupCancellable(run)"
+            type="button"
+            class="link"
+            :data-testid="`run-${run.snapshot.number}-cancel-group`"
+            @click="coordinator.cancelGroup(run.snapshot.group!.groupId)"
+          >
+            Cancel the group
+          </button>
           <button
             v-if="cancellable(run)"
             type="button"
@@ -114,7 +127,6 @@ function phaseTimes(run: RunView): string {
           <button
             v-if="run.status === 'completed'"
             type="button"
-            class="run-open"
             :data-testid="`run-${run.snapshot.number}-open`"
             @click="$emit('open-results', run.snapshot.runId)"
           >
@@ -134,15 +146,6 @@ function phaseTimes(run: RunView): string {
           Options:
           <template v-for="(word, i) in options(run)" :key="i"><span class="word">{{ word }}</span>{{ ' ' }}</template>
         </div>
-        <button
-          v-if="groupCancellable(run)"
-          type="button"
-          class="link"
-          :data-testid="`run-${run.snapshot.number}-cancel-group`"
-          @click="coordinator.cancelGroup(run.snapshot.group!.groupId)"
-        >
-          Cancel the group
-        </button>
         <p v-if="run.record.error" class="error" :data-testid="`run-${run.snapshot.number}-error`">{{ run.record.error }}</p>
         <details v-if="run.record.startedAt !== undefined" class="diagnostics">
           <summary>Details</summary>

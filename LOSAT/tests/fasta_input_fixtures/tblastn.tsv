@@ -1,8 +1,8 @@
 # Frozen outputs of blastn: 2.17.0+;  Package: blast 2.17.0, build Aug 11 2025 09:46:06 for FASTA-input cases (comparison oracle only; see fasta_input_fixtures.py).
-# Only what `freeze` measured is stored; the row definitions (inputs, args, outfmt, threads, stdin, env, kind, tier, note) are in the script's generator.
+# Only what `freeze`/`freeze-rejections` measured is stored; the row definitions (inputs, args, outfmt, threads, stdin, env, kind, tier, note) are in the script's generator.
 # `@S <n> <sha256>` lines are a table of the distinct non-empty stderr hashes. Row lines: row_id, rc, stdout sha256,
 # stderr (`-` = empty stream, else a table index n), combined `2>&1` stream (`=` = same as stdout, `~` = same as stderr, else its sha256).
-# Rows of kind losat-rejection and rows not frozen yet have no line (their expectation is `pending`). Written by `freeze`/`refresh`; do not edit.
+# Rows of kind losat-rejection hold the hashes of LOSAT's explicit rejection (`freeze-rejections`), not NCBI's. Rows not frozen yet have no line (`pending`). Written by `freeze`/`freeze-rejections`/`refresh`; do not edit.
 @S	1	f7ea50cc4344a6e0e68949fb5e9536edf276830744e36f0bded4246fc7199cb1
 @S	2	2a7fd74f92cbda322c1c7a55ba1513384d4ce3ec8b50c52e13715a7eec4ec609
 @S	3	221c2f44268833a6ab3cf7c99fc5017e6b33f2bcac302038495cd6788d120844
@@ -102,6 +102,10 @@
 @S	97	34752b948d946c9a57670d0f70f1fdb058552e6e8848e3eb45552d2400cd98be
 @S	98	155ea2acc5eaa318780a5a93f904d3a9179fe1855c8e21a8a58d19a35fa281de
 @S	99	af6b92e7bea1c6fa6356ebf186a78808b627599a67be2b6c46d7788a9af43e6b
+@S	100	e4037083903f925e969df0f9705625dd33fbe8ad9c9d7699ac06aa46f6409152
+@S	101	73b2caa6582b1b5c469056c20620f84f62abb74c32fa54e9d713d5e57becc88a
+@S	102	1b355b963fc0db8e1ec60f3162cc5c4d62b0ad3c649630af7d02cfaba49a5789
+@S	103	fb8553e4c1cfd1900051991d0bdfa6a2ca5df7c725edeec9933a3db3507ae09d
 tblastn.def_empty.q.o0	0	4abcb21dba1ed26faed34a56e01938a3b763fb4eae053f35abee970b3055b341	-	=
 tblastn.def_empty.q.o0.t2	0	4abcb21dba1ed26faed34a56e01938a3b763fb4eae053f35abee970b3055b341	-	=
 tblastn.def_empty.q.o0.t4	0	4abcb21dba1ed26faed34a56e01938a3b763fb4eae053f35abee970b3055b341	-	=
@@ -590,3 +594,7 @@ tblastn.prot_in_tblastn_subject.o6	0	e3b0c44298fc1c149afbf4c8996fb92427ae41e4649
 tblastn.prot_in_tblastn_subject.o0	0	9462c03987354cce63f2035f018db3286e61d4fa35a3b56adeafbfdb8c286940	98	6c9fa168fbc8e31e2e8c7c6f28efa102f0ecac8758d8572caff98222ccbb0706
 tblastn.nuc_in_tblastn_query.o6	0	e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	99	~
 tblastn.nuc_in_tblastn_query.o0	0	3edf7a36dc17f4613c6eeab18b745f92f40ec4839f8e7939c9942660a5b0772a	99	10ca68e8f3376c87a71faf11e15498ff61894faf26123ee4a58996b27c4710b9
+tblastn.seqid0.q.o6	1	e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	100	~
+tblastn.seqid0.s.o6	1	e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	101	~
+tblastn.seqid1.q.o6	1	e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	102	~
+tblastn.seqid1.s.o6	1	e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	103	~

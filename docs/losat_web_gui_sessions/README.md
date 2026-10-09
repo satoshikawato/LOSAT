@@ -50,7 +50,7 @@
 | S11 | [領域の指定](session_s11_e2d_query_subject_loc.md) | E2d | `-query_loc` / `-subject_loc` が NCBI とバイト一致 | 完了（2026-10-06、[ゲート記録](../evidence/losat_web_e2d/README.md)。4 program への範囲指定の移植、fixture 53 と回帰 fixture 35、範囲の sweep 1860 件で差 0、独立監査は 4 観点と再監査 2 回（指摘 A-1 と F-1 を直した）） |
 | S12 | [検索画面](session_s12_w3_search_ui.md) | W3 | 研究作業と境界条件の E2E | 完了（2026-10-06、[ゲート記録](../evidence/losat_web_w3/README.md)。研究作業と境界条件の E2E 12 件 × 3 ブラウザ、多数のレコードの計測、コードレビューと 2 回の画面レビュー。表示名は BLASTN 系（DW-21）） |
 | S13 | [結果画面](session_s13_w4_results_ui.md) | W4 | 5 program の E2E、HSP と行・節の対応 | 完了（2026-10-09、[ゲート記録](../evidence/losat_web_w4/README.md)。`feature/losat-web-gui` への merge は SFc、`39a563f1`） |
-| S13b | [画面を NCBI BLAST Web に寄せる](session_s13b_w4b_ncbi_style_ui.md) | W4b | NCBI の参照画面との対応表、検索画面と結果画面がそれに従う（画面レビュー）、E2E と HSP の対応の試験、計測が S13 から大きく悪くならない | 未着手（アプリ側、S14 の前。保守者の指示 2026-10-09、DW-25） |
+| S13b | [画面を NCBI BLAST Web に寄せる](session_s13b_w4b_ncbi_style_ui.md) | W4b | NCBI の参照画面との対応表、検索画面と結果画面がそれに従う（画面レビュー）、E2E と HSP の対応の試験、計測が S13 から大きく悪くならない | 完了（2026-10-10、[ゲート記録](../evidence/losat_web_w4b/README.md)。対応表 `docs/web/ncbi_ui_mapping.md`、画面レビュー 3 回で合格、コードレビュー 2 回で阻む指摘なし。ボタンは「Run LOSAT」（DW-26）。`feature/losat-web-gui` への merge は SFd、`dcbb149d`） |
 | S14 | [抽出と候補](session_s14_w5_extraction_candidates.md) | W5 | 原配列との一致 | 未着手 |
 | S15 | [出力と再現性](session_s15_w6_export_session.md) | W6 | 再計算しない再読込、明示的なつなぎ直し | 未着手 |
 | S16 | [配信の仕上げ](session_s16_w7_delivery.md) | W7 | V-OFF・V-PRIV、プレビューでの隔離 | 未着手 |

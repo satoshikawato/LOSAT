@@ -9,9 +9,9 @@
 //
 // Zoom (Ctrl or ⌘ and the wheel, buttons, + and -), pan (drag, arrow keys) and selection (click,
 // n and p) act on the same selection as the tables. The wheel alone and a finger moving up or down
-// scroll the page (S13 screen review L4). The grid and the HSPs are drawn on a base canvas in one
-// path per colour and opacity class; hover and selection on a canvas above it, so that they redraw
-// cheaply. Input is gathered and drawn once per animation frame.
+// scroll the page (S13 screen review L4). The grid and the HSPs are drawn on a base canvas, the
+// HSPs by colour and opacity class, one stroke each; hover and selection on a canvas above it, so
+// that they redraw cheaply. Input is gathered and drawn once per animation frame.
 import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, useId, watch } from 'vue';
 import type { HspEntry, HspId, ResultsBrowser, ResultsState } from '../application/results';
 import {
@@ -219,25 +219,41 @@ function drawBase(): void {
   }
   context.stroke();
 
-  // The HSPs: one path per batch, lines outside the view left out.
+  // The HSPs, batch by batch (colour and opacity set once), one stroke each, lines outside the view
+  // left out. A stroke per line is 2 to 3 times faster than a path of thousands of lines that
+  // overlap (2,995 repeats: 30 to 45 ms against 70 to 125 ms in Firefox and Chromium, W4b), and
+  // overlapping lines of a lower identity darken each other, as the script's separate SVG lines
+  // do. Their ends are square (SVG's default, as the script's).
   context.save();
   context.beginPath();
   context.rect(b.left, b.top, b.width, b.height);
   context.clip();
   context.lineWidth = 2;
-  context.lineCap = 'round';
+  context.lineCap = 'butt';
   const s = segments.value;
   s.batches.forEach((members, k) => {
     if (members.length === 0) return;
+    const opacity = IDENTITY_CLASSES[k & 3]!.opacity;
     context.strokeStyle = COLORS[ORIENTATIONS[k >> 2]!];
-    context.globalAlpha = IDENTITY_CLASSES[k & 3]!.opacity;
-    context.beginPath();
+    context.globalAlpha = opacity;
+    // An opaque line whose ends are on the same pixels as those of one drawn before it adds almost
+    // nothing (it is 2 px wide): many HSPs of a repeat lie a fraction of a pixel apart. Leaving them
+    // out halves the time of a zoom of 5,993 HSPs in Firefox (W4b). Translucent lines are all drawn:
+    // they darken each other.
+    const drawn = opacity === 1 ? new Set<string>() : undefined;
     for (const i of members) {
       const [ax, bx, ay, by] = [s.x0[i]!, s.x1[i]!, s.y0[i]!, s.y1[i]!];
       if ((ax > bx ? ax : bx) < v.x0 || (ax < bx ? ax : bx) > v.x1 || (ay > by ? ay : by) < v.y0 || (ay < by ? ay : by) > v.y1) continue;
-      segmentPath(context, b.left + (ax - v.x0) * sx, b.top + (ay - v.y0) * sy, b.left + (bx - v.x0) * sx, b.top + (by - v.y0) * sy);
+      const [px0, py0, px1, py1] = [b.left + (ax - v.x0) * sx, b.top + (ay - v.y0) * sy, b.left + (bx - v.x0) * sx, b.top + (by - v.y0) * sy];
+      if (drawn !== undefined) {
+        const key = `${Math.round(px0)},${Math.round(py0)},${Math.round(px1)},${Math.round(py1)}`;
+        if (drawn.has(key)) continue;
+        drawn.add(key);
+      }
+      context.beginPath();
+      segmentPath(context, px0, py0, px1, py1);
+      context.stroke();
     }
-    context.stroke();
   });
   context.restore();
 
@@ -328,7 +344,7 @@ function stroke(context: CanvasRenderingContext2D, i: number, color: string, wid
   context.stroke();
 }
 
-/** A line, or a short dash where the HSP is shorter than a pixel or two (a dot with the round caps). */
+/** A line, or a short dash where the HSP is shorter than a pixel or two (a dot with round caps). */
 function segmentPath(context: CanvasRenderingContext2D, ax: number, ay: number, bx: number, by: number): void {
   if (Math.abs(bx - ax) + Math.abs(by - ay) < 1.5) {
     const [mx, my] = [(ax + bx) / 2, (ay + by) / 2];

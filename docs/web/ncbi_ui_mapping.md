@@ -150,7 +150,7 @@ NCBI の Dot Plot は、題「Plot of <query> vs <subject>」とサーバーが�
 | 不透明度 | identity（`int()` で切り捨て）60 以下 0.4、70 以下 0.6、80 以下 0.8、それより上 1 | outfmt 6 の `pident` の文字列を数として読み、整数に切り捨てて同じ階級に分ける（TS で identities / 長さを計算しない） | 丸めた `pident`（小数 3 桁）の切り捨てで、スクリプトの切り捨てと階級の境界が同じになる |
 | 出力 | SVG のファイル | 画面（Canvas）。SVG の書き出しは採らない（S15 の出力の段階で検討） | 出力の形式と名前は S15 が決める |
 
-LOSAT が足すもの（W4 の判断 18 を保つ）：ズーム（ボタン、+ / −、Ctrl / ⌘ とホイール）、パン（ドラッグ、矢印キー）、HSP の選択（線のクリック、n / p、表）、「Zoom to HSP」「Whole sequences」、`touch-action: pan-y`。新しく、hover で線を太くし、HSP を選ぶ（クリック、Enter）とその HSP のポップアップ（`dotplot-popup`）を出す：outfmt 6 の行の値をそのまま（bit score、E value、identity、query と subject の範囲、frame、向き、outfmt 0 に有るか）と「Show alignment」（Alignments のその Range へ）。ポップアップは Escape と「Close」で閉じ、キーボードとスクリーンリーダーで届く（focus を移し、閉じたら図に戻す）。描き方は層を分ける：格子と HSP の層（色と不透明度ごとにまとめて 1 本の path で描き、見えない線を省く）と、hover・選択の層。ズームとパンは 1 フレームに 1 回だけ描き直す。
+LOSAT が足すもの（W4 の判断 18 を保つ）：ズーム（ボタン、+ / −、Ctrl / ⌘ とホイール）、パン（ドラッグ、矢印キー）、HSP の選択（線のクリック、n / p、表）、「Zoom to HSP」「Whole sequences」、`touch-action: pan-y`。新しく、hover で線を太くし、HSP を選ぶ（クリック、Enter）とその HSP のポップアップ（`dotplot-popup`）を出す：outfmt 6 の行の値をそのまま（bit score、E value、identity、query と subject の範囲、frame、向き、outfmt 0 に有るか）と「Show alignment」（Alignments のその Range へ）。ポップアップは Escape と「Close」で閉じ、キーボードとスクリーンリーダーで届く（focus を移し、閉じたら図に戻す）。描き方は層を分ける：格子と HSP の層（色と不透明度ごとにまとめ、線は 1 本ずつ描き、見えない線（表示の外の線、両端が前の線と同じ画素に来る不透明な線）を省く。重なる多数の線を 1 本の path にすると 2〜3 倍遅かった（W4b の B1）。薄い線の重なりはスクリプトの SVG の線と同じく濃くなる）と、hover・選択の層。ズームとパンは 1 フレームに 1 回だけ描き直す。
 
 ## 3. LOSAT だけのものの置き場所
 

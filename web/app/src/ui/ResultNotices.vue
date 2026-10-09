@@ -35,8 +35,8 @@ const plural = (count: number, one: string, many = `${one}s`) => `${formatCount(
       </p>
       <p v-if="state.atSubjectLimit && limit !== undefined" class="notice" data-testid="results-notice" data-kind="subject-limit">
         This query has {{ plural(totals.subjects, 'subject') }}, the most that the search keeps
-        ({{ limitGiven ? '-max_target_seqs' : 'the default of -max_target_seqs' }}: {{ formatCount(limit) }}). More subjects may
-        match; a search with a larger -max_target_seqs would show them.
+        ({{ limitGiven ? '' : 'the default of ' }}<span class="option-name">-max_target_seqs</span>: {{ formatCount(limit) }}). More
+        subjects may match; a search with a larger <span class="option-name">-max_target_seqs</span> would show them.
       </p>
       <p
         v-if="totals.subjects > 0 && state.outfmt0Subjects < totals.subjects"
@@ -45,7 +45,8 @@ const plural = (count: number, one: string, many = `${one}s`) => `${formatCount(
         data-kind="outfmt0-partial"
       >
         outfmt 0 shows the alignments of the first {{ plural(state.outfmt0Subjects, 'subject') }} of this query
-        (BLAST+'s -num_alignments: 250, or -max_target_seqs when it is given). The other subjects' HSPs are in outfmt 6 and 7.
+        (BLAST+'s <span class="option-name">-num_alignments</span>: 250, or <span class="option-name">-max_target_seqs</span> when it is
+        given). The other subjects' HSPs are in outfmt 6 and 7.
       </p>
     </template>
   </div>

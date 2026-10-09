@@ -2,8 +2,9 @@
 // A list that draws only the rows in view (fixed row height), so lists of a run with many
 // queries, subjects or HSPs stay responsive (S12's note: 100,000 records). The parent
 // draws each row with the `row` slot, keeps the selected row in view with `reveal`, and
-// shows the first rows again after a sort with `orderKey`.
-import { computed, ref, watch } from 'vue';
+// shows the first rows again after a sort with `orderKey`. It reports the width of its scroll
+// bar (`gutter`), so that a table's header can keep its columns over the rows' columns.
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 
 const props = withDefaults(
   defineProps<{
@@ -22,6 +23,7 @@ const props = withDefaults(
   }>(),
   { maxRows: 10, reveal: undefined, revealKey: undefined, orderKey: undefined },
 );
+const emit = defineEmits<{ gutter: [px: number] }>();
 
 const SPARE_ROWS = 6;
 const viewport = ref<HTMLElement>();
@@ -62,6 +64,28 @@ watch(
     }
   },
 );
+
+/** The width of the vertical scroll bar, which appears with more rows than `maxRows` (none where scroll bars overlay). */
+let gutter: number | undefined;
+function measureGutter(): void {
+  const element = viewport.value;
+  if (element === undefined) return;
+  const style = getComputedStyle(element);
+  const borders = parseFloat(style.borderLeftWidth) + parseFloat(style.borderRightWidth);
+  const width = Math.max(0, element.offsetWidth - element.clientWidth - borders);
+  if (width !== gutter) {
+    gutter = width;
+    emit('gutter', width);
+  }
+}
+watch(() => props.count, measureGutter, { flush: 'post' });
+let observer: ResizeObserver | undefined;
+onMounted(() => {
+  observer = new ResizeObserver(measureGutter);
+  if (viewport.value !== undefined) observer.observe(viewport.value);
+  measureGutter();
+});
+onUnmounted(() => observer?.disconnect());
 </script>
 
 <template>

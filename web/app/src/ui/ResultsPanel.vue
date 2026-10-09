@@ -7,6 +7,7 @@ import type { Coordinator, RunView } from '../application/coordinator';
 import type { ResultsBrowser } from '../application/results';
 import { programById } from '../domain/programs';
 import { useStore } from './useStore';
+import CommandText from './CommandText.vue';
 import DotPlot from './DotPlot.vue';
 import HspDetail from './HspDetail.vue';
 import HspTable from './HspTable.vue';
@@ -22,6 +23,17 @@ const props = defineProps<{ coordinator: Coordinator; results: ResultsBrowser; r
 const state = useStore(props.results.state);
 const view = ref<'hits' | 'details' | 'outputs'>('hits');
 const pane = ref<'alignment' | 'dotplot'>('alignment');
+const heading = ref<HTMLElement>();
+
+/**
+ * Brings the panel's heading into view and moves the focus to it (a run opened from the
+ * queue). The scroll is instant: Firefox ended a smooth one early while the run was read.
+ */
+function showHeading(): void {
+  heading.value?.scrollIntoView({ block: 'start' });
+  heading.value?.focus({ preventScroll: true });
+}
+defineExpose({ showHeading });
 
 /** Every run of the working session, newest first: a run without results says why. */
 const choices = computed(() => [...props.runs].reverse());
@@ -52,7 +64,7 @@ function options(run: RunView): string {
 
 <template>
   <section class="results" data-testid="results-panel">
-    <h2>Results</h2>
+    <h2 ref="heading" tabindex="-1" data-testid="results-heading">Results</h2>
     <p v-if="runs.length === 0" class="muted" data-testid="results-empty">No runs yet. Searches appear here when they complete.</p>
     <template v-else>
       <div class="results-run">
@@ -70,7 +82,7 @@ function options(run: RunView): string {
         <VerificationBadge v-if="loaded" :badge="loaded.badge" compact @details="view = 'details'" />
       </div>
       <p v-if="selected" class="run-inputs muted" data-testid="results-run-options">
-        Options: <span class="word">{{ options(selected) }}</span>
+        Options: <CommandText :text="options(selected)" />
         <template v-if="selected.snapshot.group">
           · group run {{ selected.snapshot.group.position }} of {{ selected.snapshot.group.size }}
         </template>

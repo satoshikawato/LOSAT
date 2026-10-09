@@ -26,3 +26,14 @@ export function formatDuration(ms: number): string {
   const seconds = String(total % 60).padStart(2, '0');
   return hours > 0 ? `${hours}:${String(minutes).padStart(2, '0')}:${seconds}` : `${minutes}:${seconds}`;
 }
+
+/**
+ * A time in ISO 8601 form in local time, date and time of day with a space between them, for
+ * example "2026-10-09 21:49:30" (S13 screen review L5).
+ */
+export function formatDateTime(ms: number): string {
+  const time = new Date(ms);
+  const two = (n: number) => String(n).padStart(2, '0');
+  const date = `${String(time.getFullYear()).padStart(4, '0')}-${two(time.getMonth() + 1)}-${two(time.getDate())}`;
+  return `${date} ${two(time.getHours())}:${two(time.getMinutes())}:${two(time.getSeconds())}`;
+}

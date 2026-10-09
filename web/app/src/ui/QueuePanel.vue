@@ -87,18 +87,22 @@ function phaseTimes(run: RunView): string {
         :data-status="run.status"
         :data-testid="`run-${run.snapshot.number}`"
       >
+        <!-- The run's state wraps beside its button, so that the button shares a line with it
+             (S13 screen review L3: "Open results" took a line of its own). -->
         <div class="run-line">
-          <strong>Run {{ run.snapshot.number }}</strong>
-          <span>{{ programById(run.snapshot.program).label }}</span>
-          <span class="status" :data-status="run.status" :data-testid="`run-${run.snapshot.number}-status`">{{
-            run.status
-          }}</span>
-          <span v-if="!isTerminal(run.status) && run.status !== 'queued'" class="phase" :data-testid="`run-${run.snapshot.number}-phase`">
-            {{ PHASE_LABELS[run.status] }}
-          </span>
-          <span v-if="elapsed(run)" class="elapsed muted" :data-testid="`run-${run.snapshot.number}-elapsed`">
-            {{ elapsed(run) }}
-          </span>
+          <div class="run-state">
+            <strong>Run {{ run.snapshot.number }}</strong>
+            <span>{{ programById(run.snapshot.program).label }}</span>
+            <span class="status" :data-status="run.status" :data-testid="`run-${run.snapshot.number}-status`">{{
+              run.status
+            }}</span>
+            <span v-if="!isTerminal(run.status) && run.status !== 'queued'" class="phase" :data-testid="`run-${run.snapshot.number}-phase`">
+              {{ PHASE_LABELS[run.status] }}
+            </span>
+            <span v-if="elapsed(run)" class="elapsed muted" :data-testid="`run-${run.snapshot.number}-elapsed`">
+              {{ elapsed(run) }}
+            </span>
+          </div>
           <button
             v-if="cancellable(run)"
             type="button"
@@ -110,6 +114,7 @@ function phaseTimes(run: RunView): string {
           <button
             v-if="run.status === 'completed'"
             type="button"
+            class="run-open"
             :data-testid="`run-${run.snapshot.number}-open`"
             @click="$emit('open-results', run.snapshot.runId)"
           >

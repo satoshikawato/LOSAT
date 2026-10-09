@@ -3,8 +3,9 @@
 // HSP of the pair that the view filters show, drawn from its start to its end with the
 // coordinates of its record (the outfmt 6 coordinates), on axes in the units of the
 // records (nt or aa). It computes nothing else: no comparison of the two sequences runs
-// behind it. Zoom (wheel, buttons, + and -), pan (drag, arrow keys) and selection (click,
-// n and p) act on the same selection as the tables.
+// behind it. Zoom (Ctrl or ⌘ and the wheel, buttons, + and -), pan (drag, arrow keys) and
+// selection (click, n and p) act on the same selection as the tables. The wheel alone and a
+// finger moving up or down scroll the page (S13 screen review L4).
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import type { HspEntry, ResultsBrowser, ResultsState } from '../application/results';
 import { formatCount } from './format';
@@ -14,6 +15,10 @@ const props = defineProps<{ results: ResultsBrowser; state: ResultsState }>();
 const MARGIN = { left: 72, right: 14, top: 14, bottom: 46 } as const;
 const COLORS = { forward: '#1f5fbf', reverse: '#c2410c', unknown: '#5b6475' } as const;
 const PICK_PX = 8;
+/** The halo of the selected HSP (its legend entry is .swatch-selected). */
+const HALO = 'rgba(255, 196, 0, 0.75)';
+/** Tick and axis labels: at least 12 px (S13 screen review L4). */
+const FONT = '12px system-ui, sans-serif';
 
 const wrap = ref<HTMLElement>();
 const canvas = ref<HTMLCanvasElement>();
@@ -91,7 +96,7 @@ function draw(): void {
   // Axes, ticks and labels.
   context.strokeStyle = '#d5dae3';
   context.fillStyle = '#5b6475';
-  context.font = '11px system-ui, sans-serif';
+  context.font = FONT;
   context.lineWidth = 1;
   context.textAlign = 'center';
   context.textBaseline = 'top';
@@ -101,7 +106,10 @@ function draw(): void {
     context.moveTo(x, MARGIN.top);
     context.lineTo(x, MARGIN.top + plotH());
     context.stroke();
-    context.fillText(formatCount(t), x, MARGIN.top + plotH() + 4);
+    // A label at an end of the axis stays inside the canvas.
+    const label = formatCount(t);
+    const half = context.measureText(label).width / 2;
+    context.fillText(label, Math.min(Math.max(x, half), width.value - half), MARGIN.top + plotH() + 4);
   }
   context.textAlign = 'right';
   context.textBaseline = 'middle';
@@ -138,7 +146,7 @@ function draw(): void {
     const color = COLORS[segment.hsp.orientation];
     const [ax, ay, bx, by] = [px(segment.x0), py(segment.y0), px(segment.x1), py(segment.y1)];
     if (isSelected) {
-      context.strokeStyle = 'rgba(255, 196, 0, 0.75)';
+      context.strokeStyle = HALO;
       context.lineWidth = 9;
       line(context, ax, ay, bx, by);
     }
@@ -211,7 +219,9 @@ function zoomToSelected(): void {
   });
 }
 
+/** The wheel zooms only with Ctrl or ⌘ held (a trackpad's pinch also holds Ctrl); otherwise the page scrolls. */
 function onWheel(event: WheelEvent): void {
+  if (!event.ctrlKey && !event.metaKey) return;
   event.preventDefault();
   const rect = canvas.value!.getBoundingClientRect();
   zoom(event.deltaY < 0 ? 1.25 : 0.8, event.clientX - rect.left, event.clientY - rect.top);
@@ -343,12 +353,13 @@ const signed = (value: number | undefined) => (value === undefined ? '' : value 
       <button type="button" data-testid="dotplot-zoom-hsp" :disabled="!selected" @click="zoomToSelected">Zoom to HSP</button>
       <button type="button" data-testid="dotplot-reset" @click="view = full()">Whole sequences</button>
     </div>
+    <p class="dotplot-help muted small">Hold Ctrl (⌘ on a Mac) and turn the mouse wheel to zoom; drag to move; click a line to select its HSP.</p>
     <div ref="wrap" class="dotplot-canvas">
       <canvas
         ref="canvas"
         tabindex="0"
         role="img"
-        :aria-label="`Dot plot of ${segments.length} HSPs. Use + and - to zoom, the arrow keys to move, n and p to select the next or previous HSP.`"
+        :aria-label="`Dot plot of ${segments.length} HSPs. Use + and -, or Ctrl or ⌘ and the mouse wheel, to zoom; the arrow keys to move; n and p to select the next or previous HSP.`"
         :style="{ width: `${width}px`, height: `${height}px` }"
         data-testid="dotplot-canvas"
         :data-segments="segments.length"
@@ -366,6 +377,7 @@ const signed = (value: number | undefined) => (value === undefined ? '' : value 
       <li><span class="swatch" :style="{ background: COLORS.forward }" />Forward: both sequences in the same direction</li>
       <li><span class="swatch" :style="{ background: COLORS.reverse }" />Reverse: one sequence on its minus strand (or reverse frame)</li>
       <li v-if="hasUnknown"><span class="swatch" :style="{ background: COLORS.unknown }" />One letter: the HSP record does not say its strand</li>
+      <li v-if="selected" data-testid="dotplot-legend-selected"><span class="swatch swatch-selected" />Yellow halo: the selected HSP</li>
     </ul>
     <p v-if="selected" class="muted small" data-testid="dotplot-selected">
       Selected: HSP {{ selected.hsp.id.rank + 1 }}, query {{ selected.hsp.fields.qstart }}–{{ selected.hsp.fields.qend }}

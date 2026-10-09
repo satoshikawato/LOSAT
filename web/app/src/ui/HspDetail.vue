@@ -42,7 +42,9 @@ const limitGiven = computed(() => props.state.loaded?.run.snapshot.argv.includes
     </template>
     <p v-else class="notice" data-testid="detail-not-in-outfmt0">
       outfmt 0 does not show this HSP. It shows the alignments of the first {{ state.outfmt0Subjects }} subjects of this query
-      (BLAST+'s -num_alignments: 250{{ limitGiven ? ', here -max_target_seqs' : '' }}), and this subject comes after them. The
+      (BLAST+'s <span class="option-name">-num_alignments</span>: 250<template v-if="limitGiven"
+        >, here <span class="option-name">-max_target_seqs</span></template
+      >), and this subject comes after them. The
       outfmt 6 row above and outfmt 7 hold the HSP.
     </p>
   </div>

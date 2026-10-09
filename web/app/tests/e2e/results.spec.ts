@@ -161,6 +161,86 @@ async function expectSelected(page: Page, id: string, sIdx: number): Promise<voi
   await expect(page.getByTestId('subject-list').locator('[aria-pressed="true"]')).toHaveCount(1);
 }
 
+/**
+ * At the desktop size the lists fit their pane (S13 screen review H1, M1): neither table
+ * scrolls sideways or says that it does, a value that its column cuts has its full text in its
+ * title, the coordinates, frames and orientation are not cut, and the header of a column of
+ * right-aligned values ends where its values end.
+ */
+async function expectTablesFit(page: Page): Promise<void> {
+  for (const table of ['subject-table', 'hsp-table']) {
+    const scroll = page.getByTestId(table).locator('.table-scroll');
+    const [scrollWidth, clientWidth] = await scroll.evaluate((element) => [element.scrollWidth, element.clientWidth]);
+    expect(scrollWidth, `${table} scrolls sideways`).toBeLessThanOrEqual(clientWidth);
+    await expect(page.getByTestId(`${table}-scroll-hint`)).toHaveCount(0);
+    const report = await scroll.evaluate((element) => {
+      const cells = [...element.querySelectorAll<HTMLElement>('.table-row [data-field]')];
+      const untitled = cells
+        .filter((cell) => cell.scrollWidth > cell.clientWidth && cell.title.replace(/\s/g, '') !== (cell.textContent ?? '').replace(/\s/g, ''))
+        .map((cell) => `${cell.dataset['field']}: ${cell.textContent}`);
+      const cut = cells
+        .filter((cell) => ['query', 'subject', 'frames', 'orientation'].includes(cell.dataset['field']!) && cell.scrollWidth > cell.clientWidth)
+        .map((cell) => `${cell.dataset['field']}: ${cell.textContent}`);
+      return { untitled, cut };
+    });
+    expect(report, table).toEqual({ untitled: [], cut: [] });
+    expect(await misalignedHeaders(page, table)).toEqual([]);
+  }
+}
+
+/**
+ * The headers of right-aligned values that do not end where the first row's value ends (S13
+ * screen review M1), also when the rows have a scroll bar. Header and row cells are in the
+ * same order.
+ */
+function misalignedHeaders(page: Page, table: string): Promise<string[]> {
+  return page
+    .getByTestId(table)
+    .locator('.table-scroll')
+    .evaluate((element) => {
+      const textRight = (node: Element) => {
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        return range.getBoundingClientRect().right;
+      };
+      const head = [...element.querySelector('.table-head')!.children];
+      const row = [...element.querySelector('.table-row')!.children];
+      return row.flatMap((cell, i) => {
+        if (!cell.classList.contains('num') || head[i] === undefined) return [];
+        const [headRight, cellRight] = [textRight(head[i]!), textRight(cell)];
+        return Math.abs(headRight - cellRight) > 2 ? [`${head[i]!.textContent?.trim()}: header ends at ${headRight}, values at ${cellRight}`] : [];
+      });
+    });
+}
+
+/** Checks that the page is no wider than the window; the message names the elements that reach beyond it. */
+async function expectNoSideScroll(page: Page, state: string): Promise<void> {
+  const { scrollWidth, innerWidth, beyond } = await page.evaluate(() => {
+    const edge = window.innerWidth + 0.5;
+    const beyond = [...document.body.querySelectorAll<HTMLElement>('*')]
+      .filter((element) => element.getBoundingClientRect().right > edge && (element.parentElement?.getBoundingClientRect().right ?? 0) <= edge)
+      .slice(0, 10)
+      .map((e) => `${e.tagName.toLowerCase()}.${[...e.classList].join('.')}[${e.dataset['testid'] ?? ''}] to ${Math.round(e.getBoundingClientRect().right)}`);
+    return { scrollWidth: document.documentElement.scrollWidth, innerWidth: window.innerWidth, beyond };
+  });
+  expect(scrollWidth, `${state}: the page is wider than the window (${beyond.join(', ')})`).toBeLessThanOrEqual(innerWidth);
+}
+
+/** The columns of a table whose headers are inside the table's box, from left to right. */
+function columnsInView(page: Page, table: string): Promise<string[]> {
+  return page
+    .getByTestId(table)
+    .locator('.table-scroll')
+    .evaluate((scroll) => {
+      const box = scroll.getBoundingClientRect();
+      return [...scroll.querySelectorAll<HTMLElement>('.table-head > *')]
+        .map((cell) => ({ col: cell.dataset['col'] ?? cell.textContent?.trim() ?? '', rect: cell.getBoundingClientRect() }))
+        .filter(({ rect }) => rect.left >= box.left - 0.5 && rect.right <= box.right + 0.5)
+        .sort((a, b) => a.rect.left - b.rect.left)
+        .map(({ col }) => col);
+    });
+}
+
 /** The orientation that an HSP's outfmt 6 coordinates give (ABI v2 §8), or undefined when only its frames could. */
 function orientationOf(fields: readonly string[], units: { readonly query: Unit; readonly subject: Unit }, translated: boolean): Orientation | undefined {
   const direction = (start: number, end: number, unit: Unit): number | undefined => {
@@ -209,6 +289,8 @@ function tableLevel(programId: ProgramId, argv: readonly string[], path: string,
 for (const c of PROGRAM_CASES) {
   test(`${LABELS[c.id]}: the lists are the outfmt 6 rows, the detail is outfmt 0's text; units, frames and run details`, async ({ page }) => {
     const translated = c.frameLine !== undefined;
+    // The desktop size of the screen review (S13): the tables fit their pane.
+    await page.setViewportSize({ width: 1280, height: 900 });
     await program(page, c.id);
     await openFiles(page, 'query', [{ name: basename(c.query), text: fasta(c.query) }]);
     await openFiles(page, 'subject', [{ name: basename(c.subject), text: fasta(c.subject) }]);
@@ -337,6 +419,9 @@ for (const c of PROGRAM_CASES) {
       }
       seen.queries++;
     }
+    await expectTablesFit(page);
+    // The "With hits only" box sits next to its label (S13 screen review L1).
+    expect((await page.getByTestId('filter-hits-only').boundingBox())!.width).toBeLessThan(30);
     test.info().annotations.push({
       type: 'coverage',
       description:
@@ -360,6 +445,14 @@ for (const c of PROGRAM_CASES) {
     // Run details: the command of each format is the Outputs view's, and the verification badge.
     await page.getByTestId('results-view-details').click();
     for (const format of FORMATS) await expect(page.getByTestId(`run-command-${format}`)).toHaveText(outputs.command[format]);
+    // Times in ISO 8601 form (local time), and the values of both lists start at the same x (S13 screen review L5).
+    const iso = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
+    await expect(page.getByTestId('run-snapshot').locator('[data-detail="queued"]')).toHaveText(iso);
+    await expect(page.getByTestId('run-record').locator('[data-detail="started"]')).toHaveText(iso);
+    const valueStarts = await page
+      .locator('[data-testid="run-snapshot"] > dd, [data-testid="run-record"] > dd')
+      .evaluateAll((values) => [...new Set(values.map((dd) => Math.round(dd.getBoundingClientRect().left)))]);
+    expect(valueStarts).toHaveLength(1);
     const badge = page.getByTestId('verification-badge');
     if (!BUILD_HAS_ENGINE) {
       await expect(badge).toHaveAttribute('data-level', 'development');
@@ -393,6 +486,8 @@ test('an HSP that outfmt 0 does not show, and a hit list that may have reached i
   await expect(partial).toContainText(`outfmt 0 shows the alignments of the first ${shown} subjects of this query`);
   // Fewer subjects than the default hit list (500): no limit notice.
   expect(await noticeKinds(page)).toEqual([]);
+  // The headers stay over their values when the list has a scroll bar.
+  expect(await misalignedHeaders(page, 'subject-table')).toEqual([]);
 
   // The last subject in the engine's order: the "#" column the other way round. The sort keeps
   // the selected (first) subject, at the list's end now, and shows the list's first rows.
@@ -733,6 +828,26 @@ test('the dot plot: the HSPs of the pair on a canvas; zoom; choosing an HSP on i
   await page.getByTestId('dotplot-reset').click();
   await expect(canvas).toHaveAttribute('data-view', full);
 
+  // The mouse wheel zooms only with Ctrl or ⌘ held; otherwise the page scrolls, as it does on a
+  // phone over the plot (S13 screen review L4).
+  const wheel = (keys: { ctrlKey?: boolean; metaKey?: boolean }) =>
+    canvas.evaluate((element, held: { ctrlKey?: boolean; metaKey?: boolean }) => {
+      const event = new WheelEvent('wheel', { deltaY: -100, bubbles: true, cancelable: true, ...held });
+      element.dispatchEvent(event);
+      return event.defaultPrevented;
+    }, keys);
+  expect(await wheel({})).toBe(false);
+  await expect(canvas).toHaveAttribute('data-view', full);
+  for (const modifier of [{ ctrlKey: true }, { metaKey: true }]) {
+    expect(await wheel(modifier)).toBe(true);
+    await expect(canvas).not.toHaveAttribute('data-view', full);
+    await page.getByTestId('dotplot-reset').click();
+    await expect(canvas).toHaveAttribute('data-view', full);
+  }
+  await expect(canvas).toHaveAttribute('aria-label', /Ctrl or ⌘ and the mouse wheel/);
+  await expect(canvas).toHaveCSS('touch-action', 'pan-y');
+  await expect(page.getByTestId('dotplot-legend-selected')).toBeVisible();
+
   // An HSP chosen in the list is selected on the plot; "Zoom to HSP" frames it.
   await hspRows(page).nth(1).click();
   await expect(canvas).toHaveAttribute('data-selected', secondId);
@@ -761,4 +876,65 @@ test('the dot plot: the HSPs of the pair on a canvas; zoom; choosing an HSP on i
   await page.keyboard.press('n');
   await expect(canvas).toHaveAttribute('data-selected', secondId);
   await expect(hspRows(page).nth(1)).toHaveAttribute('aria-pressed', 'true');
+});
+
+// --- the phone size (S13 screen review) ------------------------------------------------------------
+
+test('narrow screens: the results are no wider than the screen; "Open results" shows them; the tables show the key values first', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  // A translated search (frames) of files with long names: the run's label in the run picker is long.
+  const c = PROGRAM_CASES.find((programCase) => programCase.id === 'tblastx')!;
+  await program(page, c.id);
+  await openFiles(page, 'query', [{ name: basename(c.query), text: fasta(c.query) }]);
+  await openFiles(page, 'subject', [{ name: basename(c.subject), text: fasta(c.subject) }]);
+  await run(page, 1);
+
+  // The queue is under the search form: "Open results" brings the results' heading into view and focuses it.
+  await page.getByTestId('run-1-open').click();
+  const heading = page.getByTestId('results-heading');
+  await expect(heading).toBeFocused();
+  await expect(heading).toBeInViewport();
+  await expect(page.getByTestId('results-hits')).toHaveAttribute('data-run', '1');
+  await expect(page.getByTestId('hsp-detail')).toHaveAttribute('data-state', 'ready');
+  await expectNoSideScroll(page, 'hits');
+
+  // The key values first; the tables say that they scroll sideways.
+  expect((await columnsInView(page, 'subject-table')).slice(0, 5)).toEqual(['order', 'sseqid', 'bitscore', 'evalue', 'hsps']);
+  expect((await columnsInView(page, 'hsp-table')).slice(0, 4)).toEqual(['rank', 'bitscore', 'evalue', 'query']);
+  for (const table of ['subject-table', 'hsp-table']) {
+    await expect(page.getByTestId(`${table}-scroll-hint`)).toBeVisible();
+    // Each value is under its header.
+    const offsets = await page
+      .getByTestId(table)
+      .locator('.table-scroll')
+      .evaluate((scroll) => {
+        const row = scroll.querySelector('.table-row')!;
+        return [...scroll.querySelectorAll<HTMLElement>('.table-head [data-col]')].map((head) => {
+          const cell = row.querySelector<HTMLElement>(`[data-field="${head.dataset['col']}"]`);
+          return `${head.dataset['col']} ${cell === null ? 'missing' : Math.round(cell.getBoundingClientRect().left - head.getBoundingClientRect().left)}`;
+        });
+      });
+    expect(offsets.filter((offset) => !offset.endsWith(' 0'))).toEqual([]);
+  }
+  // Sort headers are touch targets of at least 24 px (WCAG 2.5.8).
+  for (const button of await page.locator('.sort-button').all()) expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(24);
+
+  // The dot plot, the run details and the outputs.
+  await page.getByTestId('pane-dotplot').click();
+  await expect(page.getByTestId('dotplot-canvas')).toHaveAttribute('data-segments', /^[1-9]/);
+  await expectNoSideScroll(page, 'dot plot');
+  await page.getByTestId('results-view-details').click();
+  await expect(page.getByTestId('run-details')).toBeVisible();
+  await expectNoSideScroll(page, 'run details');
+  await showOutput(page, 1, 0, false);
+  await expectNoSideScroll(page, 'outputs');
+
+  // "Open results" again from the search tab, the page scrolled to the queue at its end, while
+  // the results are read: the heading stays in view.
+  await page.getByTestId('tab-search').click();
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  await page.getByTestId('run-1-open').click();
+  await expect(heading).toBeFocused();
+  await expect(page.getByTestId('hsp-detail')).toHaveAttribute('data-state', 'ready');
+  await expect(heading).toBeInViewport({ ratio: 1 });
 });

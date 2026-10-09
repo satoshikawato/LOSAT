@@ -137,6 +137,19 @@ textarea {
   align-items: start;
 }
 
+/* The results tab gives its tables more of the width; the queue keeps at least 260 px
+   (S13 screen review H1). The search tab keeps its columns. */
+@media (min-width: 801px) {
+  .layout.results-shown {
+    grid-template-columns: minmax(0, 4fr) minmax(260px, 1fr);
+  }
+}
+
+/* An option name is not broken after its leading hyphen (S13 screen review L2). */
+.option-name {
+  white-space: nowrap;
+}
+
 /* Search screen */
 
 .program-tabs {
@@ -312,7 +325,8 @@ textarea {
   margin: 6px 0;
 }
 
-.record-tools input {
+/* The search box only: a checkbox keeps its own size, next to its label (S13 screen review L1). */
+.record-tools input[type='search'] {
   width: 10em;
 }
 
@@ -567,15 +581,47 @@ textarea {
   background: var(--accent-bg);
 }
 
+/* "Open results" (or Cancel) shares a line with the run's state where it fits (S13 screen
+   review L3): beside the state, which wraps in the width that the button leaves; in a narrow
+   run (the results tab's queue column), at the end of the state's last line. */
+.run {
+  container-type: inline-size;
+}
+
 .run-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 4px 8px;
+}
+
+.run-state {
+  flex: 1 1 0;
+  min-width: 9.5em;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 4px 8px;
 }
 
-.run-line button {
+.run-line > button {
+  flex: none;
   margin-left: auto;
+}
+
+@container (max-width: 270px) {
+  .run-line {
+    align-items: center;
+  }
+
+  .run-state {
+    display: contents;
+  }
+}
+
+.run-open {
+  font-size: 0.88em;
+  padding: 2px 8px;
 }
 
 .run-inputs {
@@ -620,8 +666,10 @@ textarea {
   border-color: currentColor;
 }
 
+/* A cancelled run: a dashed badge and border, its word not struck through (S13 screen review L7). */
 .status[data-status='cancelled'] {
-  text-decoration: line-through;
+  border-style: dashed;
+  border-color: currentColor;
 }
 
 .run[data-status='cancelled'] {
@@ -715,12 +763,18 @@ label.inline {
   gap: 8px 12px;
 }
 
+/* WebKit draws the chosen run's label at its whole length beyond the select's box (overflow
+   on a select does not clip it), which made the page wider than a phone's screen (S13 screen
+   review H2): the label clips it, with room inside for the select's focus ring. */
 .results-run-select {
   display: flex;
   align-items: center;
   gap: 6px;
   min-width: 0;
   max-width: 100%;
+  overflow: hidden;
+  padding: 3px;
+  margin: -3px;
 }
 
 .results-run-select select {
@@ -865,31 +919,25 @@ label.inline {
   box-shadow: inset 3px 0 var(--accent);
 }
 
+/* The subject and HSP tables (S13 screen review H1, M1, M2). Their columns are sized in ch
+   for the values they show (BLAST+'s longest E value and bit score are 9 characters, such
+   as 1.02e-129 and 1.213e+06), at the tables' type size; a header label wraps to a second line
+   where it needs to, and a value that its column cuts ends in an ellipsis and has its full text
+   in its title. The one track of .table-scroll is at least as wide as the header's columns
+   (its min-content), so the table scrolls sideways only when its pane is narrower. */
 .table-scroll {
+  display: grid;
+  grid-template-columns: minmax(min-content, 1fr);
   overflow-x: auto;
+  font-size: 0.875em;
 }
 
-.subject-table .table-scroll > * {
-  min-width: 760px;
-}
-
-.hsp-table .table-scroll > * {
-  min-width: 940px;
-}
-
-.table-head {
-  font-weight: 600;
-  padding: 4px 8px;
-  color: var(--muted);
-}
-
-/* The smaller type is set on the cells, not on the grid: the grid's columns are in em, and
-   would otherwise be narrower than the rows' columns below the header. */
-.table-head > * {
-  font-size: 0.85em;
+.table-hint {
+  margin: 0 0 4px;
 }
 
 .sort-button {
+  width: 100%;
   border: none;
   background: none;
   padding: 0;
@@ -902,30 +950,53 @@ label.inline {
 .subject-grid,
 .hsp-grid {
   display: grid;
-  gap: 8px;
+  gap: 6px;
   align-items: center;
 }
 
+/* #, Subject, Description, Length, Score (bits), E value, HSPs. */
 .subject-grid {
-  grid-template-columns: 3em minmax(8em, 1.2fr) minmax(10em, 2.4fr) 6.5em 6.5em 6.5em 5em;
+  grid-template-columns: 4ch minmax(9ch, 1.2fr) minmax(12ch, 2.4fr) 8.25ch 9ch 8.25ch 7ch;
 }
 
+/* #, Bit score, E value, Identity, Length, Mismatches, Gap opens, Query, Subject, [Frames],
+   Orientation, outfmt 0. */
 .hsp-grid {
-  grid-template-columns: 2.5em 5.5em 6.5em 6em 4.5em 6.5em 5.5em 10em 10em 6.5em 5.5em;
+  grid-template-columns: 3.5ch 9ch 8.25ch 7ch 6ch 9.75ch 5.25ch minmax(11ch, 1fr) minmax(11ch, 1fr) 9.5ch 8.25ch;
 }
 
 .hsp-grid.framed {
-  grid-template-columns: 2.5em 5.5em 6.5em 6em 4.5em 6.5em 5.5em 10em 10em 6em 6.5em 5.5em;
+  grid-template-columns: 3.5ch 9ch 8.25ch 7ch 6ch 9.75ch 5.25ch minmax(11ch, 1fr) minmax(11ch, 1fr) 6ch 9.5ch 8.25ch;
+}
+
+/* The header's columns are the rows' columns: the same borders, and room for the rows'
+   scroll bar (--row-gutter, measured by VirtualRows). The grid keeps the tables' type size
+   and weight, so that its ch are the rows' ch; the labels are set smaller and bold. */
+.table-head {
+  border: solid transparent;
+  border-width: 0 1px;
+  padding: 4px calc(8px + var(--row-gutter, 0px)) 4px 8px;
+  color: var(--muted);
+  align-items: end;
+}
+
+.table-head > * {
+  min-width: 0;
+  font-size: 0.9em;
+  font-weight: 600;
+}
+
+/* The header of a column of right-aligned values ends where its values end (S13 screen review M1). */
+.table-head > .num-head {
+  text-align: right;
 }
 
 .num {
   text-align: right;
   font-variant-numeric: tabular-nums;
-  white-space: nowrap;
 }
 
-.cell-id,
-.cell-text {
+.table-row > * {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -974,7 +1045,8 @@ label.inline {
   border: 1px solid var(--border);
   border-radius: 4px;
   cursor: crosshair;
-  touch-action: none;
+  /* A finger moving up or down scrolls the page; one moving sideways moves the plot (S13 screen review L4). */
+  touch-action: pan-y;
 }
 
 .dotplot-canvas canvas:focus-visible {
@@ -1001,11 +1073,37 @@ label.inline {
   vertical-align: middle;
 }
 
+/* The selected HSP's mark: its line on a yellow halo, as the plot draws it. */
+.swatch-selected {
+  height: 9px;
+  border-radius: 4px;
+  background: linear-gradient(transparent 3px, var(--fg) 3px, var(--fg) 6px, transparent 6px), rgba(255, 196, 0, 0.75);
+}
+
+.dotplot-help {
+  margin: 0 0 6px;
+}
+
 .details-list {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);
   gap: 4px 12px;
   margin: 4px 0 8px;
+}
+
+/* The run details' lists share their columns, so that their values start at the same x (S13 screen review L5). */
+.details-grid {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: 12px;
+}
+
+.details-grid > * {
+  grid-column: 1 / -1;
+}
+
+.details-grid > .details-list {
+  grid-template-columns: subgrid;
 }
 
 .details-list dt {
@@ -1077,9 +1175,104 @@ label.inline {
 
   /* List rows are whole-width targets with their own height. */
   .pick-row,
-  .table-row,
-  .sort-button {
+  .table-row {
     min-height: 0;
+  }
+
+  /* Sort headers are touch targets of at least 24 px (WCAG 2.5.8; S13 screen review L8). */
+  .sort-button {
+    min-height: 24px;
+  }
+
+  /* The key values first (S13 screen review M2): the header's cells and the rows' cells take
+     the same order. Subjects: #, Subject, Score (bits), E value, HSPs, Length, Description. */
+  .subject-grid {
+    grid-template-columns: 4ch minmax(6.5ch, 1fr) 9ch 8.25ch 6ch 8.25ch minmax(16ch, 2fr);
+  }
+
+  .subject-grid > [data-col='sseqid'],
+  .subject-grid > [data-field='sseqid'] {
+    order: 1;
+  }
+
+  .subject-grid > [data-col='bitscore'],
+  .subject-grid > [data-field='bitscore'] {
+    order: 2;
+  }
+
+  .subject-grid > [data-col='evalue'],
+  .subject-grid > [data-field='evalue'] {
+    order: 3;
+  }
+
+  .subject-grid > [data-col='hsps'],
+  .subject-grid > [data-field='hsps'] {
+    order: 4;
+  }
+
+  .subject-grid > [data-col='length'],
+  .subject-grid > [data-field='length'] {
+    order: 5;
+  }
+
+  .subject-grid > [data-col='description'],
+  .subject-grid > [data-field='description'] {
+    order: 6;
+  }
+
+  /* HSPs: #, Bit score, E value, Query, Subject, [Frames], Orientation, Identity, Length,
+     Mismatches, Gap opens, outfmt 0. */
+  .hsp-grid {
+    grid-template-columns: 3.5ch 9ch 8.25ch 11ch 11ch 9.5ch 7ch 6ch 9.75ch 5.25ch 8.25ch;
+  }
+
+  .hsp-grid.framed {
+    grid-template-columns: 3.5ch 9ch 8.25ch 11ch 11ch 6ch 9.5ch 7ch 6ch 9.75ch 5.25ch 8.25ch;
+  }
+
+  .hsp-grid > [data-col='query'],
+  .hsp-grid > [data-field='query'] {
+    order: 3;
+  }
+
+  .hsp-grid > [data-col='subject'],
+  .hsp-grid > [data-field='subject'] {
+    order: 4;
+  }
+
+  .hsp-grid > [data-col='frames'],
+  .hsp-grid > [data-field='frames'] {
+    order: 5;
+  }
+
+  .hsp-grid > [data-col='orientation'],
+  .hsp-grid > [data-field='orientation'] {
+    order: 6;
+  }
+
+  .hsp-grid > [data-col='pident'],
+  .hsp-grid > [data-field='pident'] {
+    order: 7;
+  }
+
+  .hsp-grid > [data-col='length'],
+  .hsp-grid > [data-field='length'] {
+    order: 8;
+  }
+
+  .hsp-grid > [data-col='mismatch'],
+  .hsp-grid > [data-field='mismatch'] {
+    order: 9;
+  }
+
+  .hsp-grid > [data-col='gapopen'],
+  .hsp-grid > [data-field='gapopen'] {
+    order: 10;
+  }
+
+  .hsp-grid > [data-col='outfmt0'],
+  .hsp-grid > [data-field='outfmt0'] {
+    order: 11;
   }
 }
 

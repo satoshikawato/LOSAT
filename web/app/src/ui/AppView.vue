@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue';
+import { nextTick, onMounted, onUnmounted, ref } from 'vue';
 import type { Attention } from '../application/attention';
 import type { Coordinator } from '../application/coordinator';
 import type { SearchDraft } from '../application/draft';
@@ -22,11 +22,18 @@ const props = defineProps<{
 const state = useStore(props.coordinator.state);
 const attentionState = useStore(props.attention.state);
 const tab = ref<'search' | 'results'>('search');
+const resultsPanel = ref<InstanceType<typeof ResultsPanel>>();
 
-/** Opens a run's results from the queue (S12's screen review L7). */
-function openResults(runId: string): void {
+/**
+ * Opens a run's results from the queue (S12's screen review L7), and brings the results
+ * panel into view with the focus on its heading: on a narrow screen the queue is below the
+ * results (S13 screen review M3).
+ */
+async function openResults(runId: string): Promise<void> {
   tab.value = 'results';
   void props.results.open(runId);
+  await nextTick();
+  resultsPanel.value?.showHeading();
 }
 
 // A file dropped outside an input's drop zone would make the browser open it in place of
@@ -57,11 +64,11 @@ onUnmounted(() => {
     <button :aria-pressed="tab === 'search'" data-testid="tab-search" @click="tab = 'search'">Search</button>
     <button :aria-pressed="tab === 'results'" data-testid="tab-results" @click="tab = 'results'">Results</button>
   </nav>
-  <main class="layout">
+  <main class="layout" :class="{ 'results-shown': tab === 'results' }">
     <section class="primary">
       <!-- The search form stays mounted, so the next job keeps its edits while results are viewed. -->
       <SearchPanel v-show="tab === 'search'" :draft="draft" :runs="state.runs" />
-      <ResultsPanel v-if="tab === 'results'" :coordinator="coordinator" :results="results" :runs="state.runs" />
+      <ResultsPanel v-if="tab === 'results'" ref="resultsPanel" :coordinator="coordinator" :results="results" :runs="state.runs" />
     </section>
     <aside class="secondary">
       <QueuePanel :coordinator="coordinator" :runs="state.runs" @open-results="openResults" />

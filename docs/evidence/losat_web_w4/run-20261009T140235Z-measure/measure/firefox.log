@@ -1,0 +1,71 @@
+[WebServer] (!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+[WebServer]   - import "./output-format" without a file extension (src/domain/verification.ts:9:35). Add the file extension
+[WebServer]   - import "./programs" without a file extension (src/domain/verification.ts:10:32). Add the file extension
+[WebServer] Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+[WebServer] (!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+[WebServer]   - import "./output-format" without a file extension (src/domain/verification.ts:9:35). Add the file extension
+[WebServer]   - import "./programs" without a file extension (src/domain/verification.ts:10:32). Add the file extension
+[WebServer] Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+
+Running 3 tests using 1 worker
+
+firefox 10000 queries: search {"indexMs":843,"checkMs":9,"enqueueMs":106,"searchMs":2327,"elapsed":"0:02","path":"threaded, 4 threads (requested: Auto)"}
+firefox 10000 queries: {"summary":{"open":{"ms":{"median":66,"min":60,"max":77},"paintMs":{"median":76,"min":68,"max":93}},"firstHsp":{"ms":{"median":76,"min":75,"max":78},"paintMs":{"median":94,"min":92,"max":95}},"queryRowsDrawn":{"median":20,"min":20,"max":20},"scrollToEnd":{"ms":{"median":1,"min":1,"max":2},"paintMs":{"median":14,"min":12,"max":17}},"rowsDrawnAtEnd":{"median":14,"min":14,"max":14},"scrollToStart":{"ms":{"median":6,"min":4,"max":6},"paintMs":{"median":21,"min":20,"max":22}},"findFar":{"ms":{"median":7,"min":6,"max":11},"paintMs":{"median":24,"min":24,"max":27}},"selectFar":{"ms":{"median":9,"min":5,"max":20},"paintMs":{"median":26,"min":22,"max":37}},"clearFilter":{"ms":{"median":10,"min":10,"max":11},"paintMs":{"median":26,"min":25,"max":27}},"hitsOnly":{"ms":{"median":11,"min":10,"max":11},"paintMs":{"median":26,"min":26,"max":28}},"hitsOnlyQueries":{"median":9000,"min":9000,"max":9000},"hitsOnlyOff":{"ms":{"median":6,"min":6,"max":7},"paintMs":{"median":22,"min":21,"max":23}},"selectWide":{"ms":{"median":7,"min":6,"max":11},"paintMs":{"median":24,"min":24,"max":28}},"wideSubjects":{"median":200,"min":200,"max":200},"subjectRowsDrawn":{"median":22,"min":22,"max":22},"sortSubjects":{"length":{"ms":{"median":2,"min":2,"max":2},"paintMs":{"median":16,"min":12,"max":18}},"bitScore":{"ms":{"median":10,"min":9,"max":10},"paintMs":{"median":27,"min":25,"max":28}},"eValue":{"ms":{"median":11,"min":10,"max":11},"paintMs":{"median":28,"min":27,"max":28}},"hsps":{"ms":{"median":11,"min":6,"max":12},"paintMs":{"median":28,"min":23,"max":28}},"order":{"ms":{"median":12,"min":9,"max":12},"paintMs":{"median":28,"min":26,"max":29}}}},"outfmt6":{"bytes":896542,"hsps":14981,"showMs":0,"showPaintMs":12}}
+  ✓  1 [firefox] › tests/e2e/results-measure.spec.ts:505:3 › 10,000 queries: opening the run, the query picker, finding and sorting (9.4s)
+firefox 100000 queries: search {"indexMs":6174,"checkMs":1806,"enqueueMs":217,"searchMs":23264,"elapsed":"0:23","path":"threaded, 4 threads (requested: Auto)"}
+firefox 100000 queries: {"summary":{"open":{"ms":{"median":619,"min":533,"max":974},"paintMs":{"median":622,"min":537,"max":984}},"firstHsp":{"ms":{"median":674,"min":660,"max":999},"paintMs":{"median":692,"min":676,"max":1016}},"queryRowsDrawn":{"median":20,"min":20,"max":20},"scrollToEnd":{"ms":{"median":2,"min":1,"max":3},"paintMs":{"median":10,"min":4,"max":12}},"rowsDrawnAtEnd":{"median":14,"min":14,"max":14},"scrollToStart":{"ms":{"median":2,"min":2,"max":6},"paintMs":{"median":5,"min":5,"max":22}},"findFar":{"ms":{"median":30,"min":9,"max":160},"paintMs":{"median":47,"min":25,"max":213}},"selectFar":{"ms":{"median":33,"min":19,"max":39},"paintMs":{"median":49,"min":35,"max":50}},"clearFilter":{"ms":{"median":29,"min":19,"max":46},"paintMs":{"median":31,"min":26,"max":48}},"hitsOnly":{"ms":{"median":30,"min":19,"max":48},"paintMs":{"median":37,"min":27,"max":59}},"hitsOnlyQueries":{"median":90000,"min":90000,"max":90000},"hitsOnlyOff":{"ms":{"median":31,"min":20,"max":51},"paintMs":{"median":33,"min":21,"max":54}},"selectWide":{"ms":{"median":20,"min":12,"max":21},"paintMs":{"median":38,"min":29,"max":39}},"wideSubjects":{"median":200,"min":200,"max":200},"subjectRowsDrawn":{"median":22,"min":22,"max":22},"sortSubjects":{"length":{"ms":{"median":4,"min":3,"max":5},"paintMs":{"median":17,"min":10,"max":18}},"bitScore":{"ms":{"median":8,"min":5,"max":11},"paintMs":{"median":24,"min":20,"max":27}},"eValue":{"ms":{"median":6,"min":3,"max":10},"paintMs":{"median":23,"min":18,"max":28}},"hsps":{"ms":{"median":8,"min":3,"max":10},"paintMs":{"median":24,"min":17,"max":27}},"order":{"ms":{"median":7,"min":3,"max":9},"paintMs":{"median":23,"min":19,"max":26}}}},"outfmt6":{"bytes":8966787,"hsps":149828,"showMs":32,"showPaintMs":840}}
+  ✓  2 [firefox] › tests/e2e/results-measure.spec.ts:505:3 › 100,000 queries: opening the run, the query picker, finding and sorting (44.3s)
+firefox 1500 copies: search {"indexMs":40,"checkMs":7,"enqueueMs":66,"searchMs":21938,"elapsed":"0:21","path":"threaded, 4 threads (requested: Auto)"}
+firefox 1500 copies: FAILED page.evaluate: timed out after 30000 ms waiting for [{"testid":"dotplot-canvas","attr":"data-selected","differs":"0:1"}]
+poll@debugger eval code line 303 > eval:51:18
+FrameRequestCallback*poll@debugger eval code line 303 > eval:52:37
+FrameRequestCallback*poll@debugger eval code line 303 > eval:52:37
+FrameRequestCallback*poll@debugger eval code line 303 > eval:52:37
+FrameRequestCallback*poll@debugger eval code line 303 > eval:52:37
+FrameRequestCallback*poll@debugger eval code line 303 > eval:52:37
+FrameRequestCallback*poll@debugger eval code line 303 > eval:52:37
+FrameRequestCallback*poll@debugger eval code line 303 > eval:52:37
+FrameRequestCallback*poll@debugger eval code line 303 > eval:52:37
+FrameRequestCallback*poll@debugger eval code line 303 > eval:52:37
+FrameRequestCallback*poll@debugger eval code line 303 > eval:52:37
+FrameRequestCallback*poll@debugger eval code line 303 > eval:52:37
+FrameRequestCallback*poll@debugger eval code line 303 > eval:52:37
+FrameRequestCallback*poll@debugger eval code line 303 > eval:52:37
+FrameRequestCallback*poll@debugger eval code line 303 > eval:52:37
+FrameRequestCallback*poll@debugger eval code line 303 > eval:52:37
+FrameRequestCallback*poll@debugger eval code line 303 > eval:52:37
+FrameRequestCallback*poll@debugger eval code line 303 > eval:52:37
+FrameRequestCallback*poll@debugger eval code line 303 > eval:52:37
+FrameRequestCallback*poll@debugger eval code line 303 > eval:52:37
+FrameRequestCallback*poll@debugger eval code line 303 > eval:52:37
+FrameRequestCallback*poll@debugger eval code line 303 > eval:52:37
+FrameRequestCallback*poll@debugger eval code line 303 > eval:52:37
+FrameRequestCallback*poll@debugger eval code line 303 > eval:52:37
+FrameRequestCallback*poll@debugger eval code line 303 > eval:52:37
+FrameRequestCallback*poll@debugger eval code line 303 > eval:52:37
+FrameRequestCallback*poll@debugger eval code line 303 > eval:52:37
+FrameRequestCallback*poll@debugger eval code line 303 > eval:52:37
+FrameRequestCallback*poll@debugger eval code line 303 > eval:52:37
+FrameRequestCallback*poll@debugger eval code line 303 > eval:52:37
+FrameRequestCallback*poll@debugger eval code line 303 > eval:52:37
+FrameRequestCallback*poll@debugger eval code line 303 > eval:52:37
+FrameRequestCallback*poll@debugger eval code line 303 > eval:52:37
+FrameRequestCallback*poll@debugger eval code line 303 > eval:52:37
+FrameRequestCallback*poll@debugger eval code line 303 > eval:52:37
+FrameRequestCallback*poll@debugger eval code line 303 > eval:52:37
+FrameRequestCallback*poll@debugger eval code line 303 > eval:52:37
+FrameRequestCallback*poll@debugger eval code line 303 > eval:52:37
+FrameRequestCallback*poll@debugger eval code line 303 > eval:52:37
+FrameRequestCallback*poll@debugger eval code line 303 > eval:52:37
+FrameRequestCallback*poll@debugger eval code line 303 > eval:52:37
+FrameRequestCallback*poll@debugger eval code line 303 > eval:52:37
+FrameRequestCallback*poll@debugger eval code line 303 > eval:52:37
+FrameRequestCallback*poll@debugger eval code line 303 > eval:52:37
+
+run 3: 1 min, Searching, 1:03
+firefox 3000 copies: search {"indexMs":29,"checkMs":7,"enqueueMs":63,"searchMs":79003,"elapsed":"1:18","path":"threaded, 4 threads (requested: Auto)"}
+firefox 3000 copies: 5993 HSPs {"open":{"ms":{"median":1582,"min":1381,"max":1881},"paintMs":{"median":1599,"min":1398,"max":1898}},"hsps":{"median":5993,"min":5993,"max":5993},"hspRowsDrawn":{"median":20,"min":20,"max":20},"showDotPlot":{"ms":{"median":218,"min":185,"max":287},"paintMs":{"median":225,"min":194,"max":291}},"segments":{"median":5993,"min":5993,"max":5993},"coloured":{"median":362328,"min":362328,"max":362328},"zoomIn":{"ms":{"median":77,"min":69,"max":85},"paintMs":{"median":78,"min":70,"max":87}},"zoomOut":{"ms":{"median":140,"min":100,"max":166},"paintMs":{"median":151,"min":101,"max":170}},"zoomToHsp":{"ms":{"median":98,"min":95,"max":99},"paintMs":{"median":102,"min":100,"max":104}},"reset":{"ms":{"median":93,"min":92,"max":106},"paintMs":{"median":107,"min":93,"max":124}},"selectByKey":{"ms":{"median":213,"min":202,"max":244},"paintMs":{"median":224,"min":219,"max":247}},"selectByClick":{"ms":{"median":265,"min":216,"max":299},"paintMs":{"median":282,"min":231,"max":316}},"clickHitTarget":{"median":0,"min":0,"max":0},"selectInList":{"ms":{"median":15,"min":14,"max":23},"paintMs":{"median":31,"min":31,"max":40}},"sortHsps":{"ms":{"median":7,"min":6,"max":8},"paintMs":{"median":24,"min":23,"max":24}},"scrollHspList":{"ms":{"median":10,"min":4,"max":12},"paintMs":{"median":25,"min":23,"max":27}}}
+firefox 4000 copies: FAILED run 4 ended failed: The engine stopped (it ran out of memory): memory allocation of 49881 bytes failed (unreachable executed)
+  ✓  3 [firefox] › tests/e2e/results-measure.spec.ts:727:1 › many HSPs in one query-subject pair: the dot plot and the HSP list (3.3m)
+
+  3 passed (4.2m)

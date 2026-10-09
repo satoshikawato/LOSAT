@@ -1,0 +1,359 @@
+[
+  {
+    "id": "multi.blastn n=1",
+    "argv": [
+      "blastn",
+      "-query",
+      "tests/fasta/outfmt0/multi_query.fasta",
+      "-subject",
+      "tests/fasta/outfmt0/multi_subject.fasta",
+      "-task",
+      "blastn"
+    ],
+    "retained": false,
+    "sha256": {
+      "0": "426dc0485fe87b6a312407766454e1701a11e0658778747575d96cd33309f6fb",
+      "6": "062be82d9d31c37721e65d71a2a2dbea8f1028ce9a88e772a450496b0eeed5fa",
+      "7": "fa9aa30376f7cecea5a21834eddd502ec63609976999843bb28bbff3af957b0e"
+    },
+    "native": {
+      "0": "426dc0485fe87b6a312407766454e1701a11e0658778747575d96cd33309f6fb",
+      "6": "062be82d9d31c37721e65d71a2a2dbea8f1028ce9a88e772a450496b0eeed5fa",
+      "7": "fa9aa30376f7cecea5a21834eddd502ec63609976999843bb28bbff3af957b0e"
+    },
+    "frozenMatch": {
+      "0": true
+    },
+    "memory": {
+      "linearBytesBefore": 1572864,
+      "linearBytesAfter": 1966080,
+      "instanceRuns": 1
+    }
+  },
+  {
+    "id": "multi.megablast n=1",
+    "argv": [
+      "blastn",
+      "-query",
+      "tests/fasta/outfmt0/multi_query.fasta",
+      "-subject",
+      "tests/fasta/outfmt0/multi_subject.fasta",
+      "-task",
+      "megablast"
+    ],
+    "retained": true,
+    "sha256": {
+      "0": "7dcc63f406d27651fcdfa1da5a682ae678bbb5a4bc28631d6c7d23d4b977a8c6",
+      "6": "a9e55cc52c8e829d88cc1382624cfc6e16a60c0aabdfdf82675289213e41dace",
+      "7": "e834e8196e6d4e1fbf6f49716f63faaed2133acab561ffcf4c42766c2f81b6fc"
+    },
+    "native": {
+      "0": "7dcc63f406d27651fcdfa1da5a682ae678bbb5a4bc28631d6c7d23d4b977a8c6",
+      "6": "a9e55cc52c8e829d88cc1382624cfc6e16a60c0aabdfdf82675289213e41dace",
+      "7": "e834e8196e6d4e1fbf6f49716f63faaed2133acab561ffcf4c42766c2f81b6fc"
+    },
+    "frozenMatch": {
+      "0": true
+    },
+    "memory": {
+      "linearBytesBefore": 1966080,
+      "linearBytesAfter": 1966080,
+      "instanceRuns": 2
+    }
+  },
+  {
+    "id": "iupac.beyond_table.blastn n=1",
+    "argv": [
+      "blastn",
+      "-query",
+      "tests/fasta/outfmt0/iupac_query.fasta",
+      "-subject",
+      "tests/fasta/outfmt0/multi_subject.fasta",
+      "-task",
+      "blastn",
+      "-reward",
+      "1",
+      "-penalty",
+      "-3",
+      "-gapopen",
+      "3",
+      "-gapextend",
+      "2"
+    ],
+    "retained": true,
+    "sha256": {
+      "0": "44ca12a08aae4a8a1da65c39fd935ca0fb21753c03f336881f38952f4171d62d",
+      "6": "5f728b7f138d87e42231fcfdc5ffe93109d0055970db3d9dfdf28c0a171ab4ac",
+      "7": "d304dd358445e507dc90885ff5c97cde755a4d516de2d7a5880bba7c47342c66"
+    },
+    "native": {
+      "0": "44ca12a08aae4a8a1da65c39fd935ca0fb21753c03f336881f38952f4171d62d",
+      "6": "5f728b7f138d87e42231fcfdc5ffe93109d0055970db3d9dfdf28c0a171ab4ac",
+      "7": "d304dd358445e507dc90885ff5c97cde755a4d516de2d7a5880bba7c47342c66"
+    },
+    "frozenMatch": {
+      "0": true
+    },
+    "memory": {
+      "linearBytesBefore": 1966080,
+      "linearBytesAfter": 2031616,
+      "instanceRuns": 3
+    }
+  },
+  {
+    "id": "rna.megablast n=1",
+    "argv": [
+      "blastn",
+      "-query",
+      "tests/fasta/outfmt0/rna_query.fasta",
+      "-subject",
+      "tests/fasta/outfmt0/multi_subject.fasta",
+      "-task",
+      "megablast"
+    ],
+    "retained": true,
+    "sha256": {
+      "0": "cb08f6036ec8b172c0a1248870213162a6380404cb2139bb9074d92f9c65af18",
+      "6": "a9e55cc52c8e829d88cc1382624cfc6e16a60c0aabdfdf82675289213e41dace",
+      "7": "9ddc390a328a100bcf73ad69347d0ba8aa8c83f5f47f95fcc1b5ce79d7a9c9a8"
+    },
+    "native": {
+      "0": "cb08f6036ec8b172c0a1248870213162a6380404cb2139bb9074d92f9c65af18",
+      "6": "a9e55cc52c8e829d88cc1382624cfc6e16a60c0aabdfdf82675289213e41dace",
+      "7": "9ddc390a328a100bcf73ad69347d0ba8aa8c83f5f47f95fcc1b5ce79d7a9c9a8"
+    },
+    "frozenMatch": {
+      "0": true
+    },
+    "memory": {
+      "linearBytesBefore": 2031616,
+      "linearBytesAfter": 2031616,
+      "instanceRuns": 4
+    }
+  },
+  {
+    "id": "multi.mts3.blastn n=1",
+    "argv": [
+      "blastn",
+      "-query",
+      "tests/fasta/outfmt0/multi_query.fasta",
+      "-subject",
+      "tests/fasta/outfmt0/multi_subject.fasta",
+      "-task",
+      "blastn",
+      "-max_target_seqs",
+      "3"
+    ],
+    "retained": true,
+    "sha256": {
+      "0": "92bde6e960e0f9745adc3a9f15a5685999c10cd3c4458e36e502ab33208dd9bc",
+      "6": "4c0c35f0a23788a57ce9decdd6b00d8971bfac05096ba61deaa040713359f5bc",
+      "7": "ad5c71f22c4d5d0e1c34009a7196a4bea5a191d770129ff7a7b9b512148dd41e"
+    },
+    "native": {
+      "0": "92bde6e960e0f9745adc3a9f15a5685999c10cd3c4458e36e502ab33208dd9bc",
+      "6": "4c0c35f0a23788a57ce9decdd6b00d8971bfac05096ba61deaa040713359f5bc",
+      "7": "ad5c71f22c4d5d0e1c34009a7196a4bea5a191d770129ff7a7b9b512148dd41e"
+    },
+    "frozenMatch": {
+      "0": true
+    },
+    "memory": {
+      "linearBytesBefore": 2031616,
+      "linearBytesAfter": 2031616,
+      "instanceRuns": 5
+    }
+  },
+  {
+    "id": "multi.ws7_e1000.blastn n=4",
+    "argv": [
+      "blastn",
+      "-query",
+      "tests/fasta/outfmt0/multi_query.fasta",
+      "-subject",
+      "tests/fasta/outfmt0/multi_subject.fasta",
+      "-task",
+      "blastn",
+      "-word_size",
+      "7",
+      "-evalue",
+      "1000"
+    ],
+    "retained": false,
+    "sha256": {
+      "0": "1405ba5ffef4eb2b7e5a528eeda9d758dc5523a10f241468182594c2f3a6e978",
+      "6": "ff1d748740c3520936f52c65d78207ace93d8caeb0245832ac16befb2e55d14f",
+      "7": "e2af042a8a35a4ea6b8052ff5b69b60ddad3e5a54963d91efdea53ae470e96f8"
+    },
+    "native": {
+      "0": "1405ba5ffef4eb2b7e5a528eeda9d758dc5523a10f241468182594c2f3a6e978",
+      "6": "ff1d748740c3520936f52c65d78207ace93d8caeb0245832ac16befb2e55d14f",
+      "7": "e2af042a8a35a4ea6b8052ff5b69b60ddad3e5a54963d91efdea53ae470e96f8"
+    },
+    "frozenMatch": {
+      "0": true
+    },
+    "memory": {
+      "linearBytesBefore": 1638400,
+      "linearBytesAfter": 6094848,
+      "instanceRuns": 1
+    }
+  },
+  {
+    "id": "multi.besthit.blastn n=4",
+    "argv": [
+      "blastn",
+      "-query",
+      "tests/fasta/outfmt0/multi_query.fasta",
+      "-subject",
+      "tests/fasta/outfmt0/multi_subject.fasta",
+      "-task",
+      "blastn",
+      "-subject_besthit"
+    ],
+    "retained": true,
+    "sha256": {
+      "0": "d8f93e37c875d08c716e6c6b76232672a433f9402bf7298b1629dd95521d0e95",
+      "6": "be3ef1c1150d3b5157dc7781664663b20a3d29b0ab52192b86726ba30155a07c",
+      "7": "4d41481ba81613af496bd3ec1966edd05d4b7815da7ffe15d36877803f4ec38e"
+    },
+    "native": {
+      "0": "d8f93e37c875d08c716e6c6b76232672a433f9402bf7298b1629dd95521d0e95",
+      "6": "be3ef1c1150d3b5157dc7781664663b20a3d29b0ab52192b86726ba30155a07c",
+      "7": "4d41481ba81613af496bd3ec1966edd05d4b7815da7ffe15d36877803f4ec38e"
+    },
+    "frozenMatch": {
+      "0": true
+    },
+    "memory": {
+      "linearBytesBefore": 6094848,
+      "linearBytesAfter": 6094848,
+      "instanceRuns": 2
+    }
+  },
+  {
+    "id": "tblastx.multi n=1",
+    "argv": [
+      "tblastx",
+      "-query",
+      "tests/fasta/outfmt0/tblastx_multi_query.fasta",
+      "-subject",
+      "tests/fasta/outfmt0/tblastx_multi_subject.fasta"
+    ],
+    "retained": false,
+    "sha256": {
+      "0": "38d69c9a5b70d456ade106e1b1cac61257f52d144a8cb4f3ea329ea42c8e8f6e",
+      "6": "2f59fbc35faf6bcf0d67742e1dfc290f49613e78dab020136a0b1f9071c92cb1",
+      "7": "1ea1b68aff0d64821ccfb183c9411249be4d4bfbf7c257fe28d11fd96c880c94"
+    },
+    "native": {
+      "0": "38d69c9a5b70d456ade106e1b1cac61257f52d144a8cb4f3ea329ea42c8e8f6e",
+      "6": "2f59fbc35faf6bcf0d67742e1dfc290f49613e78dab020136a0b1f9071c92cb1",
+      "7": "1ea1b68aff0d64821ccfb183c9411249be4d4bfbf7c257fe28d11fd96c880c94"
+    },
+    "frozenMatch": {
+      "0": true,
+      "7": true
+    },
+    "memory": {
+      "linearBytesBefore": 1703936,
+      "linearBytesAfter": 8060928,
+      "instanceRuns": 1
+    }
+  },
+  {
+    "id": "tblastx.batch n=1",
+    "argv": [
+      "tblastx",
+      "-query",
+      "tests/fasta/outfmt0/tblastx_batch_query.fasta",
+      "-subject",
+      "tests/fasta/outfmt0/tblastx_multi_subject.fasta"
+    ],
+    "retained": true,
+    "sha256": {
+      "0": "c117ab1246890a40d58f82fdb5e716dbbab6a5a863a93f3915028df1527098be",
+      "6": "e6beef1e7fa330ec2c4a6da25e76ce513437ed175da02c3b8544e1f023aa643c",
+      "7": "f4e67cd5eec6d0fd92eade1940c65c9e82bb59a5299106cb0fb49391f9a58a2d"
+    },
+    "native": {
+      "0": "c117ab1246890a40d58f82fdb5e716dbbab6a5a863a93f3915028df1527098be",
+      "6": "e6beef1e7fa330ec2c4a6da25e76ce513437ed175da02c3b8544e1f023aa643c",
+      "7": "f4e67cd5eec6d0fd92eade1940c65c9e82bb59a5299106cb0fb49391f9a58a2d"
+    },
+    "frozenMatch": {
+      "0": true,
+      "7": true
+    },
+    "memory": {
+      "linearBytesBefore": 8060928,
+      "linearBytesAfter": 8192000,
+      "instanceRuns": 2
+    }
+  },
+  {
+    "id": "tblastx.mts1 n=4",
+    "argv": [
+      "tblastx",
+      "-query",
+      "tests/fasta/outfmt0/tblastx_multi_query.fasta",
+      "-subject",
+      "tests/fasta/outfmt0/tblastx_multi_subject.fasta",
+      "-max_target_seqs",
+      "1"
+    ],
+    "retained": false,
+    "sha256": {
+      "0": "eb5b017400c361006a3916c7b4f44d58a5ce8ea8aed7fa55447c773747cdc383",
+      "6": "ae784db42d3fcaec1f942fda214b73ec4310f10f3d370075ea0db291908fbf3f",
+      "7": "b7d06d5b90bc408889a78496022f3b4639e7d31329762e2ae9161502889470cb"
+    },
+    "native": {
+      "0": "eb5b017400c361006a3916c7b4f44d58a5ce8ea8aed7fa55447c773747cdc383",
+      "6": "ae784db42d3fcaec1f942fda214b73ec4310f10f3d370075ea0db291908fbf3f",
+      "7": "b7d06d5b90bc408889a78496022f3b4639e7d31329762e2ae9161502889470cb"
+    },
+    "frozenMatch": {
+      "0": true,
+      "7": true
+    },
+    "memory": {
+      "linearBytesBefore": 1703936,
+      "linearBytesAfter": 11337728,
+      "instanceRuns": 1
+    }
+  },
+  {
+    "id": "tblastx.thrwin n=4",
+    "argv": [
+      "tblastx",
+      "-query",
+      "tests/fasta/outfmt0/tblastx_multi_query.fasta",
+      "-subject",
+      "tests/fasta/outfmt0/tblastx_multi_subject.fasta",
+      "-threshold",
+      "11",
+      "-window_size",
+      "25"
+    ],
+    "retained": true,
+    "sha256": {
+      "0": "e002b02d42e49cbbbbfab3dd3931594140f61a20806426f3ca6e1a95f5c7a280",
+      "6": "4ead7d5b65f8c8360344fa91180bcf09366161a08f035837ebaadd75ec3b107b",
+      "7": "6c7b6cdc5a909ee193b45eeaf9ca860ab57a888907c7e2d0c481c6dd205e8f86"
+    },
+    "native": {
+      "0": "e002b02d42e49cbbbbfab3dd3931594140f61a20806426f3ca6e1a95f5c7a280",
+      "6": "4ead7d5b65f8c8360344fa91180bcf09366161a08f035837ebaadd75ec3b107b",
+      "7": "6c7b6cdc5a909ee193b45eeaf9ca860ab57a888907c7e2d0c481c6dd205e8f86"
+    },
+    "frozenMatch": {
+      "0": true
+    },
+    "memory": {
+      "linearBytesBefore": 11337728,
+      "linearBytesAfter": 18874368,
+      "instanceRuns": 2
+    }
+  }
+]

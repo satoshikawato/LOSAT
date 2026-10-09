@@ -1,0 +1,67 @@
+[WebServer] (!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+[WebServer]   - import "./output-format" without a file extension (src/domain/verification.ts:9:35). Add the file extension
+[WebServer]   - import "./programs" without a file extension (src/domain/verification.ts:10:32). Add the file extension
+[WebServer] Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+[WebServer] (!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+[WebServer]   - import "./output-format" without a file extension (src/domain/verification.ts:9:35). Add the file extension
+[WebServer]   - import "./programs" without a file extension (src/domain/verification.ts:10:32). Add the file extension
+[WebServer] Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+
+Running 54 tests using 2 workers
+
+  ✓   1 [chromium] › tests/e2e/results.spec.ts:210:3 › BLASTN: the lists are the outfmt 6 rows, the detail is outfmt 0's text; units, frames and run details (2.9s)
+  ✓   2 [chromium] › tests/e2e/results.spec.ts:210:3 › BLASTP: the lists are the outfmt 6 rows, the detail is outfmt 0's text; units, frames and run details (6.2s)
+  ✓   3 [chromium] › tests/e2e/results.spec.ts:210:3 › TBLASTN: the lists are the outfmt 6 rows, the detail is outfmt 0's text; units, frames and run details (4.1s)
+  ✓   5 [chromium] › tests/e2e/results.spec.ts:381:1 › an HSP that outfmt 0 does not show, and a hit list that may have reached its limit (1.8s)
+  ✓   4 [chromium] › tests/e2e/results.spec.ts:210:3 › TBLASTX: the lists are the outfmt 6 rows, the detail is outfmt 0's text; units, frames and run details (4.2s)
+  ✓   6 [chromium] › tests/e2e/results.spec.ts:450:1 › BLASTN: an HSP of one letter has no orientation in its record; the note points to outfmt 0's Strand= line (2.5s)
+  ✓   7 [chromium] › tests/e2e/results.spec.ts:493:1 › selection by HSP identity: sorting keeps the selected HSP; another subject or query moves it (4.0s)
+  ✓   9 [chromium] › tests/e2e/results.spec.ts:673:1 › the dot plot: the HSPs of the pair on a canvas; zoom; choosing an HSP on it or in the list (2.2s)
+  ✓   8 [chromium] › tests/e2e/results.spec.ts:556:1 › many queries; view filters change the view, not the search; the notices tell filtered out, no hits and a failed run apart (5.4s)
+  ✓  10 [chromium] › tests/e2e/results.spec.ts:210:3 › BLASTN: the lists are the outfmt 6 rows, the detail is outfmt 0's text; units, frames and run details (2.5s)
+  ✓  11 [chromium] › tests/e2e/results.spec.ts:210:3 › BLASTP: the lists are the outfmt 6 rows, the detail is outfmt 0's text; units, frames and run details (5.6s)
+  ✓  12 [chromium] › tests/e2e/results.spec.ts:210:3 › TBLASTN: the lists are the outfmt 6 rows, the detail is outfmt 0's text; units, frames and run details (3.5s)
+  ✓  14 [chromium] › tests/e2e/results.spec.ts:381:1 › an HSP that outfmt 0 does not show, and a hit list that may have reached its limit (1.4s)
+  ✓  13 [chromium] › tests/e2e/results.spec.ts:210:3 › TBLASTX: the lists are the outfmt 6 rows, the detail is outfmt 0's text; units, frames and run details (3.6s)
+  ✓  15 [chromium] › tests/e2e/results.spec.ts:450:1 › BLASTN: an HSP of one letter has no orientation in its record; the note points to outfmt 0's Strand= line (2.5s)
+  ✓  16 [chromium] › tests/e2e/results.spec.ts:493:1 › selection by HSP identity: sorting keeps the selected HSP; another subject or query moves it (4.2s)
+  ✓  17 [chromium] › tests/e2e/results.spec.ts:556:1 › many queries; view filters change the view, not the search; the notices tell filtered out, no hits and a failed run apart (5.0s)
+  ✓  18 [chromium] › tests/e2e/results.spec.ts:673:1 › the dot plot: the HSPs of the pair on a canvas; zoom; choosing an HSP on it or in the list (2.8s)
+  ✓  19 [firefox] › tests/e2e/results.spec.ts:210:3 › BLASTN: the lists are the outfmt 6 rows, the detail is outfmt 0's text; units, frames and run details (4.8s)
+  ✓  20 [firefox] › tests/e2e/results.spec.ts:210:3 › BLASTP: the lists are the outfmt 6 rows, the detail is outfmt 0's text; units, frames and run details (7.9s)
+  ✓  21 [firefox] › tests/e2e/results.spec.ts:210:3 › TBLASTN: the lists are the outfmt 6 rows, the detail is outfmt 0's text; units, frames and run details (5.5s)
+  ✓  23 [firefox] › tests/e2e/results.spec.ts:381:1 › an HSP that outfmt 0 does not show, and a hit list that may have reached its limit (3.1s)
+  ✓  22 [firefox] › tests/e2e/results.spec.ts:210:3 › TBLASTX: the lists are the outfmt 6 rows, the detail is outfmt 0's text; units, frames and run details (4.6s)
+  ✓  24 [firefox] › tests/e2e/results.spec.ts:450:1 › BLASTN: an HSP of one letter has no orientation in its record; the note points to outfmt 0's Strand= line (2.2s)
+  ✓  25 [firefox] › tests/e2e/results.spec.ts:493:1 › selection by HSP identity: sorting keeps the selected HSP; another subject or query moves it (4.6s)
+  ✓  26 [firefox] › tests/e2e/results.spec.ts:556:1 › many queries; view filters change the view, not the search; the notices tell filtered out, no hits and a failed run apart (6.1s)
+  ✓  27 [firefox] › tests/e2e/results.spec.ts:673:1 › the dot plot: the HSPs of the pair on a canvas; zoom; choosing an HSP on it or in the list (3.6s)
+  ✓  28 [firefox] › tests/e2e/results.spec.ts:210:3 › BLASTN: the lists are the outfmt 6 rows, the detail is outfmt 0's text; units, frames and run details (4.2s)
+  ✓  29 [firefox] › tests/e2e/results.spec.ts:210:3 › BLASTP: the lists are the outfmt 6 rows, the detail is outfmt 0's text; units, frames and run details (7.0s)
+  ✓  30 [firefox] › tests/e2e/results.spec.ts:210:3 › TBLASTN: the lists are the outfmt 6 rows, the detail is outfmt 0's text; units, frames and run details (4.4s)
+  ✓  32 [firefox] › tests/e2e/results.spec.ts:381:1 › an HSP that outfmt 0 does not show, and a hit list that may have reached its limit (3.1s)
+  ✓  31 [firefox] › tests/e2e/results.spec.ts:210:3 › TBLASTX: the lists are the outfmt 6 rows, the detail is outfmt 0's text; units, frames and run details (4.6s)
+  ✓  33 [firefox] › tests/e2e/results.spec.ts:450:1 › BLASTN: an HSP of one letter has no orientation in its record; the note points to outfmt 0's Strand= line (3.3s)
+  ✓  34 [firefox] › tests/e2e/results.spec.ts:493:1 › selection by HSP identity: sorting keeps the selected HSP; another subject or query moves it (4.7s)
+  ✓  36 [firefox] › tests/e2e/results.spec.ts:673:1 › the dot plot: the HSPs of the pair on a canvas; zoom; choosing an HSP on it or in the list (2.7s)
+  ✓  35 [firefox] › tests/e2e/results.spec.ts:556:1 › many queries; view filters change the view, not the search; the notices tell filtered out, no hits and a failed run apart (6.0s)
+  ✓  37 [webkit] › tests/e2e/results.spec.ts:210:3 › BLASTN: the lists are the outfmt 6 rows, the detail is outfmt 0's text; units, frames and run details (4.1s)
+  ✓  38 [webkit] › tests/e2e/results.spec.ts:210:3 › BLASTP: the lists are the outfmt 6 rows, the detail is outfmt 0's text; units, frames and run details (7.1s)
+  ✓  39 [webkit] › tests/e2e/results.spec.ts:210:3 › TBLASTN: the lists are the outfmt 6 rows, the detail is outfmt 0's text; units, frames and run details (5.0s)
+  ✓  41 [webkit] › tests/e2e/results.spec.ts:381:1 › an HSP that outfmt 0 does not show, and a hit list that may have reached its limit (3.2s)
+  ✓  40 [webkit] › tests/e2e/results.spec.ts:210:3 › TBLASTX: the lists are the outfmt 6 rows, the detail is outfmt 0's text; units, frames and run details (4.8s)
+  ✓  42 [webkit] › tests/e2e/results.spec.ts:450:1 › BLASTN: an HSP of one letter has no orientation in its record; the note points to outfmt 0's Strand= line (2.6s)
+  ✓  43 [webkit] › tests/e2e/results.spec.ts:493:1 › selection by HSP identity: sorting keeps the selected HSP; another subject or query moves it (5.8s)
+  ✓  44 [webkit] › tests/e2e/results.spec.ts:556:1 › many queries; view filters change the view, not the search; the notices tell filtered out, no hits and a failed run apart (6.1s)
+  ✓  45 [webkit] › tests/e2e/results.spec.ts:673:1 › the dot plot: the HSPs of the pair on a canvas; zoom; choosing an HSP on it or in the list (3.9s)
+  ✓  46 [webkit] › tests/e2e/results.spec.ts:210:3 › BLASTN: the lists are the outfmt 6 rows, the detail is outfmt 0's text; units, frames and run details (3.8s)
+  ✓  47 [webkit] › tests/e2e/results.spec.ts:210:3 › BLASTP: the lists are the outfmt 6 rows, the detail is outfmt 0's text; units, frames and run details (5.8s)
+  ✓  48 [webkit] › tests/e2e/results.spec.ts:210:3 › TBLASTN: the lists are the outfmt 6 rows, the detail is outfmt 0's text; units, frames and run details (4.5s)
+  ✓  50 [webkit] › tests/e2e/results.spec.ts:381:1 › an HSP that outfmt 0 does not show, and a hit list that may have reached its limit (3.2s)
+  ✓  49 [webkit] › tests/e2e/results.spec.ts:210:3 › TBLASTX: the lists are the outfmt 6 rows, the detail is outfmt 0's text; units, frames and run details (5.0s)
+  ✓  51 [webkit] › tests/e2e/results.spec.ts:450:1 › BLASTN: an HSP of one letter has no orientation in its record; the note points to outfmt 0's Strand= line (2.6s)
+  ✓  52 [webkit] › tests/e2e/results.spec.ts:493:1 › selection by HSP identity: sorting keeps the selected HSP; another subject or query moves it (5.6s)
+  ✓  53 [webkit] › tests/e2e/results.spec.ts:556:1 › many queries; view filters change the view, not the search; the notices tell filtered out, no hits and a failed run apart (6.2s)
+  ✓  54 [webkit] › tests/e2e/results.spec.ts:673:1 › the dot plot: the HSPs of the pair on a canvas; zoom; choosing an HSP on it or in the list (3.2s)
+
+  54 passed (2.1m)

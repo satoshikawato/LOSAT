@@ -1,0 +1,4 @@
+{
+  "backend": "memory",
+  "text": "Temporary storage\n\nMemory: 0 bytes used by this tab.\n\nResults are kept in memory only and are lost when this tab is closed or reloaded. The browser's private storage (OPFS) cannot be used: this browser has no Origin Private File System."
+}

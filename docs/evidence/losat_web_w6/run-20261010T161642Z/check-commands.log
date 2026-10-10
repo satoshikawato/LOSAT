@@ -1,0 +1,47 @@
+(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+  - import "./output-format" without a file extension (src/domain/verification.ts:9:35). Add the file extension
+  - import "./programs" without a file extension (src/domain/verification.ts:10:32). Add the file extension
+Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+blastn.default	outfmt 0	match	
+blastn.default	outfmt 6	match	
+blastn.default	outfmt 7	match	
+blastn.options	outfmt 0	match	
+blastn.options	outfmt 6	match	
+blastn.options	outfmt 7	match	
+blastn.region	outfmt 0	match	
+blastn.region	outfmt 6	match	
+blastn.region	outfmt 7	match	
+blastp.default	outfmt 0	match	
+blastp.default	outfmt 6	match	
+blastp.default	outfmt 7	match	
+blastp.options	outfmt 0	match	
+blastp.options	outfmt 6	match	
+blastp.options	outfmt 7	match	
+tblastn.default	outfmt 0	match	
+tblastn.default	outfmt 6	match	
+tblastn.default	outfmt 7	match	
+tblastn.options	outfmt 0	match	
+tblastn.options	outfmt 6	match	
+tblastn.options	outfmt 7	match	
+tblastn.gencode4	outfmt 0	approved-exception	bytes equal
+tblastn.gencode4	outfmt 6	approved-exception	bytes equal
+tblastn.gencode4	outfmt 7	approved-exception	bytes equal
+tblastn.gencode32	outfmt 0	ncbi-refuses	NCBI exit 1: Error:  (CArgException::eConstraint) Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `32'
+tblastn.gencode32	outfmt 6	ncbi-refuses	NCBI exit 1: Error:  (CArgException::eConstraint) Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `32'
+tblastn.gencode32	outfmt 7	ncbi-refuses	NCBI exit 1: Error:  (CArgException::eConstraint) Argument "db_gencode". Illegal value, expected values between: 1-6, 9-16, 21-31, 33:  `32'
+tblastx.default	outfmt 0	match	
+tblastx.default	outfmt 6	match	
+tblastx.default	outfmt 7	match	
+tblastx.options	outfmt 0	match	
+tblastx.options	outfmt 6	match	
+tblastx.options	outfmt 7	match	
+tblastx.gencode5	outfmt 0	approved-exception	bytes differ
+tblastx.gencode5	outfmt 6	approved-exception	bytes differ
+tblastx.gencode5	outfmt 7	approved-exception	bytes differ
+blastx.default	outfmt 0	match	
+blastx.default	outfmt 6	match	
+blastx.default	outfmt 7	match	
+blastx.options	outfmt 0	match	
+blastx.options	outfmt 6	match	
+blastx.options	outfmt 7	match	
+42 comparisons: approved-exception 6, match 33, ncbi-refuses 3

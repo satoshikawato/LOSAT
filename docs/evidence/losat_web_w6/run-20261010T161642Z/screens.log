@@ -1,0 +1,70 @@
+[WebServer] (!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+[WebServer]   - import "./output-format" without a file extension (src/domain/verification.ts:9:35). Add the file extension
+[WebServer]   - import "./programs" without a file extension (src/domain/verification.ts:10:32). Add the file extension
+[WebServer] Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+[WebServer] (!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+[WebServer]   - import "./output-format" without a file extension (src/domain/verification.ts:9:35). Add the file extension
+[WebServer]   - import "./programs" without a file extension (src/domain/verification.ts:10:32). Add the file extension
+[WebServer] Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+
+Running 18 tests using 2 workers
+
+  ✓   2 [chromium] › tests/e2e/screens.spec.ts:58:3 › search screen at the phone size (9.7s)
+  ✓   1 [chromium] › tests/e2e/screens.spec.ts:58:3 › search screen at the desktop size (10.5s)
+  ✓   4 [chromium] › tests/e2e/screens.spec.ts:250:3 › results screen at the phone size (24.6s)
+  ✓   3 [chromium] › tests/e2e/screens.spec.ts:250:3 › results screen at the desktop size (26.1s)
+  ✓   6 [chromium] › tests/e2e/screens.spec.ts:511:3 › outputs, reproduction and session files at the phone size (10.6s)
+  ✓   5 [chromium] › tests/e2e/screens.spec.ts:511:3 › outputs, reproduction and session files at the desktop size (11.6s)
+  ✓   7 [firefox] › tests/e2e/screens.spec.ts:58:3 › search screen at the desktop size (16.5s)
+  ✓   8 [firefox] › tests/e2e/screens.spec.ts:58:3 › search screen at the phone size (16.8s)
+  ✓  10 [firefox] › tests/e2e/screens.spec.ts:250:3 › results screen at the phone size (38.9s)
+  ✓   9 [firefox] › tests/e2e/screens.spec.ts:250:3 › results screen at the desktop size (40.9s)
+  ✓  11 [firefox] › tests/e2e/screens.spec.ts:511:3 › outputs, reproduction and session files at the desktop size (17.9s)
+  ✓  12 [firefox] › tests/e2e/screens.spec.ts:511:3 › outputs, reproduction and session files at the phone size (17.4s)
+  ✓  14 [webkit] › tests/e2e/screens.spec.ts:58:3 › search screen at the phone size (22.7s)
+  ✓  13 [webkit] › tests/e2e/screens.spec.ts:58:3 › search screen at the desktop size (26.2s)
+  ✓  15 [webkit] › tests/e2e/screens.spec.ts:250:3 › results screen at the desktop size (51.6s)
+  ✓  17 [webkit] › tests/e2e/screens.spec.ts:511:3 › outputs, reproduction and session files at the desktop size (20.9s)
+  ✓  18 [webkit] › tests/e2e/screens.spec.ts:511:3 › outputs, reproduction and session files at the phone size (17.2s)
+  ✘  16 [webkit] › tests/e2e/screens.spec.ts:250:3 › results screen at the phone size (1.4m)
+
+
+  1) [webkit] › tests/e2e/screens.spec.ts:250:3 › results screen at the phone size ─────────────────
+
+    Error: expect(locator).toHaveAttribute(expected) failed
+
+    Locator:  getByTestId('results-hits')
+    Expected: "1"
+    Received: "3"
+    Timeout:  60000ms
+
+    Call log:
+      - Expect "toHaveAttribute" with timeout 60000ms
+      - waiting for getByTestId('results-hits')
+        119 × locator resolved to <div data-run="3" class="hits-view" data-testid="results-hits">…</div>
+            - unexpected value "3"
+
+
+      242 | async function openResults(page: Page, number: number): Promise<void> {
+      243 |   await page.getByTestId(`run-${number}-open`).click();
+    > 244 |   await expect(page.getByTestId('results-hits')).toHaveAttribute('data-run', String(number), { timeout: 60_000 });
+          |                                                  ^
+      245 |   await page.getByTestId('results-view-hits').click();
+      246 |   await expect(page.getByTestId('hsp-detail')).toHaveAttribute('data-state', 'ready', { timeout: 60_000 });
+      247 | }
+        at openResults (/home/kawato/losat-work/.worktrees/web-gui-app/web/app/tests/e2e/screens.spec.ts:244:50)
+        at /home/kawato/losat-work/.worktrees/web-gui-app/web/app/tests/e2e/screens.spec.ts:337:5
+
+    Error Context: test-results/screens-results-screen-at-the-phone-size-webkit/error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/screens-results-screen-at-the-phone-size-webkit/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/screens-results-screen-at-the-phone-size-webkit/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  1 failed
+    [webkit] › tests/e2e/screens.spec.ts:250:3 › results screen at the phone size ──────────────────
+  17 passed (4.5m)

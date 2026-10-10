@@ -1,0 +1,17 @@
+steps: all
+commit: f25c0d699950a9d8e599e9e51b063827a400b6c8
+branch: feature/losat-web-gui-app
+uncommitted files under web/app: 0
+node: v26.8.2
+npm: 11.19.1
+playwright: Version 1.61.1
+playwright browsers: chromium-1228 chromium_headless_shell-1228 ffmpeg-1011 firefox-1532 webkit-2311 
+webkit launcher: /home/kawato/.cache/losat-web-gui-target/app-s09-webkit-deps/pw_run.sh
+os: Linux 5.15.167.4-microsoft-standard-WSL2 x86_64
+processors: 32
+native: /home/kawato/.cache/losat-work/s14-gate-native/LOSAT sha256 0236291b81ec8e1735c848c49a4e36c1ae0af3742cc15832c0f9b9352edbb928
+reactors: /home/kawato/.cache/losat-work/s14-reactors
+d4ae253dc3a8530725ff6aa7b82fda07ffdadc141d520a01f8c326719e4b8e1e  losat-web-serial.wasm
+fb685b360fffe2bb7290980e30551b4ef93d42963ed1cade9293a597ab41ebb2  losat-web-threads.wasm
+screens: /home/kawato/.cache/losat-work/s15-gate-screens
+ncbi blast+: /home/kawato/micromamba/bin (blastn: 2.17.0+)

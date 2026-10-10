@@ -403,6 +403,7 @@ describe('session file refusals', () => {
     expect(refusal(check({ index: 2 }))).toMatch(/candidates\[0\]\.index is 2, beyond the 2 HSP records of run 1 in the file/);
     expect(refusal(check({ qIdx: 2 }))).toMatch(/candidates\[0\]\.qIdx is 2, beyond the 2 query records of run 1 in the file/);
     expect(refusal(check({ rank: -1 }))).toMatch(/candidates\[0\]\.rank is not a whole number/);
+    expect(refusal(check({ rank: 4294967296 }))).toMatch(/candidates\[0\]\.rank is 4294967296, beyond the 2 HSP records of run 1 in the file/);
     expect(refusal(check({ note: 5 as unknown as string }))).toMatch(/candidates\[0\]\.note is not text/);
     expect(refusal(() => checkCandidates({ candidates: [CANDIDATES[0], CANDIDATES[1], CANDIDATES[0]] }, m))).toMatch(
       /candidates\[2\] is the same HSP as candidates\[0\]/,
@@ -474,6 +475,19 @@ describe('what a loaded run must agree with', () => {
     expect(problem([hsp({ out6: [5, 4] }), second()])).toMatch(/has out6 \[5,4\]/);
     expect(problem([hsp({ out0: [10, 13] }), second()])).toMatch(/has out0 \[10,13\], not null or a byte range within the run's 12 bytes of outfmt 0/);
     expect(problem([hsp({ out0_subject: [0, 13] }), second()])).toMatch(/has out0_subject \[0,13\]/);
+  });
+
+  it('refuses ranks that are not 0 to n - 1 within each query, which the typed table would wrap or leave unfound (code review 2 L1)', () => {
+    // 2^32 becomes 0 in the table's Int32Array, giving two HSPs "rank 0".
+    expect(problem([hsp({ rank: 4294967296 }), second()])).toBe('HSP record 1 has rank 4294967296, but the run has 2 HSP records');
+    // A gap: the query's one HSP has rank 1; a rank of the count or more is never found.
+    expect(problem([hsp({ rank: 1 }), second()])).toBe('the ranks of the HSP records of query record 0 are not 0 to 0 (there is a rank 1)');
+    // A repeat.
+    expect(problem([hsp({ q_idx: 1 }), second()])).toBe('HSP record 2 has a rank that another HSP of its query has');
+    // Two HSPs of one query with ranks 0 and 2 (a rank of the run's count or more is refused at once).
+    expect(problem([hsp(), second({ q_idx: 0, rank: 2 })])).toBe('HSP record 2 has rank 2, but the run has 2 HSP records');
+    // Ranks in any order are 0 to n - 1 as a set.
+    expect(problem([hsp({ rank: 1 }), second({ q_idx: 0, rank: 0 })])).toBeUndefined();
   });
 
   it('refuses fields of the wrong type that a typed array or a coercion would have hidden (code review M1)', () => {

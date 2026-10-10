@@ -488,6 +488,7 @@ export function checkCandidates(value: unknown, manifest: SessionManifest, limit
         f.fail(`${where}.qIdx`, `is ${qIdx}, beyond the ${run.query.records.id.length} query records of run ${position} in the file`);
       }
       const rank = f.count(candidate.rank, `${where}.rank`);
+      if (rank >= run.hitCount) f.fail(`${where}.rank`, `is ${rank}, beyond the ${run.hitCount} HSP records of run ${position} in the file`);
       const key = `${position}/${qIdx}/${rank}`;
       const twice = seen.get(key);
       if (twice !== undefined) f.fail(where, `is the same HSP as candidates[${twice}]`);
@@ -810,8 +811,9 @@ const isRange = (value: unknown, length: number) =>
  * `rank` whole numbers of 0 or more, coordinates whole numbers of 1 or more, frames null or -3 to
  * 3 other than 0, scores numbers, `subject_length` null or a whole number, aligned rows null or
  * text, byte ranges null or [start, end] within their output; or when an index is outside 0 to
- * count - 1 or repeated, a record index is beyond the record tables, or a query has a rank twice.
- * Fields that the ABI may add later are left alone.
+ * count - 1 or repeated, a record index is beyond the record tables, a rank is not below the count
+ * of records, or the ranks of a query are not exactly 0 to n - 1 (as the engine writes them: the
+ * typed table and the selection identity (run, query, rank) need that). Fields that the ABI may add later are left alone.
  */
 export class HspRecordCheck {
   private records = 0;
@@ -840,6 +842,7 @@ export class HspRecordCheck {
     if (s! >= subjects) return `${where} names subject record ${s}, but the run has ${subjects} subject records`;
     let ranks = this.ranks.get(q!);
     if (ranks === undefined) this.ranks.set(q!, (ranks = new Set()));
+    if (rank! >= count) return `${where} has rank ${rank}, but the run has ${count} HSP records`;
     if (ranks.has(rank!)) return `${where} has a rank that another HSP of its query has`;
     ranks.add(rank!);
     for (const field of ['q_start', 'q_end', 's_start', 's_end']) {
@@ -865,7 +868,14 @@ export class HspRecordCheck {
   /** After the last record: why their count is not the manifest's, or undefined. */
   finish(): string | undefined {
     const { count } = this.bounds;
-    return this.records === count ? undefined : `there are ${this.records} HSP records, but the manifest gives ${count}`;
+    if (this.records !== count) return `there are ${this.records} HSP records, but the manifest gives ${count}`;
+    // Ranks are distinct, so they are 0 to n - 1 exactly when none is n or more.
+    for (const [q, ranks] of this.ranks) {
+      for (const rank of ranks) {
+        if (rank >= ranks.size) return `the ranks of the HSP records of query record ${q} are not 0 to ${ranks.size - 1} (there is a rank ${rank})`;
+      }
+    }
+    return undefined;
   }
 }
 

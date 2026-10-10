@@ -19,6 +19,7 @@ import type { SubjectSortKey } from '../domain/result-index';
 import { formatCount, formatCounted } from './format';
 import { shownWhole, wholeKey } from './shownWhole';
 import SortButton from './SortButton.vue';
+import { useNarrow } from './useNarrow';
 import { focusPressed, useSideScroll } from './useSideScroll';
 import VirtualRows from './VirtualRows.vue';
 
@@ -26,9 +27,14 @@ const props = defineProps<{ results: ResultsBrowser; state: ResultsState }>();
 /** A row chosen (after its subject is selected): the one page brings the subject's alignments into view. */
 const emit = defineEmits<{ 'add-candidates': [ids: readonly HspId[]]; chosen: [sIdx: number] }>();
 const ROW_PX = 28;
-const MAX_ROWS = 10;
+/**
+ * Rows in view before the box scrolls: about two dozen on a desktop screen, so that the page reads
+ * at a glance as NCBI's list (screen review 2 I1); a phone keeps a short box.
+ */
+const MAX_ROWS = computed(() => (narrow.value ? 10 : 22));
 /** Subjects listed until "Show all" (NCBI lists 100 to a page). */
 const FIRST_SUBJECTS = 100;
+const narrow = useNarrow();
 const key = computed(() => wholeKey(props.state.runId, props.state.qIdx));
 const showAll = computed(() => shownWhole.descriptions.value === key.value);
 const listed = computed(() => (showAll.value ? props.state.subjects.length : Math.min(FIRST_SUBJECTS, props.state.subjects.length)));
@@ -37,6 +43,14 @@ const selectedPosition = computed(() => {
   const position = props.state.subjects.findIndex((subject) => subject.sIdx === props.state.sIdx);
   return position < listed.value ? position : -1;
 });
+const cut = computed(() => listed.value < props.state.subjects.length);
+// The marks follow the listed subjects: a mark on one that a sort or a filter moves out of the
+// listed ones is dropped (ResultsBrowser.setListLimit).
+watch(
+  () => (showAll.value ? undefined : FIRST_SUBJECTS),
+  (limit) => props.results.setListLimit(limit),
+  { immediate: true },
+);
 const unit = computed(() => props.state.loaded?.units.subject ?? '');
 const scroller = ref<HTMLElement>();
 const sideScroll = useSideScroll(scroller);
@@ -49,11 +63,11 @@ function sortBy(key: SubjectSortKey, descending: boolean): void {
 // The descriptions are read from outfmt 0 for the subjects in view (and a screenful more).
 watch(
   () => [props.state.subjects, props.state.qIdx] as const,
-  ([subjects]) => props.results.requestHeadings(subjects.slice(0, 3 * MAX_ROWS).map((subject) => subject.sIdx)),
+  ([subjects]) => props.results.requestHeadings(subjects.slice(0, 3 * MAX_ROWS.value).map((subject) => subject.sIdx)),
   { immediate: true },
 );
 function onScroll(position: number): void {
-  props.results.requestHeadings(props.state.subjects.slice(position, position + 2 * MAX_ROWS).map((s) => s.sIdx));
+  props.results.requestHeadings(props.state.subjects.slice(position, position + 2 * MAX_ROWS.value).map((s) => s.sIdx));
 }
 
 /** The HSP count of a subject's row: the HSPs shown, and of how many when the view filters hide some. */
@@ -127,7 +141,9 @@ function description(sIdx: number, inOutfmt0: boolean): string {
     <div class="tool-band">
       <h4>
         Sequences producing significant alignments
-        <span class="muted small" data-testid="subject-count">{{ formatCount(state.subjects.length) }} shown</span>
+        <span class="muted small" data-testid="subject-count">{{
+            cut ? `${formatCount(listed)} of ${formatCount(state.subjects.length)} listed` : `${formatCount(state.subjects.length)} shown`
+          }}</span>
       </h4>
       <div class="descriptions-tools">
         <label class="check">
@@ -138,7 +154,7 @@ function description(sIdx: number, inOutfmt0: boolean): string {
             data-testid="descriptions-select-all"
             @change="markListed"
           />
-          select all
+          {{ cut ? 'select all listed' : 'select all' }}
         </label>
         <span class="muted" data-testid="descriptions-selected" aria-live="polite">{{ formatCounted(state.marked.size, 'sequence') }} selected</span>
         <button

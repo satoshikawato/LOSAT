@@ -159,9 +159,15 @@ export interface ResultsState {
   readonly headings: ReadonlyMap<number, string>;
   /**
    * Subjects of the selected query whose rows are marked (the check boxes of the Descriptions, as
-   * NCBI's): only subjects that the list shows; cleared when the query or the run changes.
+   * NCBI's): only subjects that the list shows (the listed ones, where `listLimit` cuts the
+   * list); cleared when the query or the run changes.
    */
   readonly marked: ReadonlySet<number>;
+  /**
+   * How many of the subjects, in the order shown, the Descriptions list (the first 100 until
+   * "Show all"); undefined when it lists them all. Marks follow the listed subjects.
+   */
+  readonly listLimit?: number;
   /** The last HSP that `reveal` went back to, and the view filters it cleared to show it. */
   readonly revealed?: Revealed;
 }
@@ -553,10 +559,15 @@ export class ResultsBrowser {
     return subject.rows.map((row) => ({ runId, qIdx, rank: table.rank[row]! }));
   }
 
+  /** Tells how many subjects the list shows (the Descriptions cut it as NCBI's); marks beyond it are dropped. */
+  setListLimit(limit: number | undefined): void {
+    if (this.state.get().listLimit !== limit) this.set({ listLimit: limit });
+  }
+
   /** Marks or unmarks rows of the subject list; a subject that the list does not show is left alone. */
   markSubjects(sIdxs: readonly number[], on: boolean): void {
     const state = this.state.get();
-    const listed = new Set(state.subjects.map((subject) => subject.sIdx));
+    const listed = listedSubjects(state);
     const marked = new Set(state.marked);
     for (const sIdx of sIdxs) {
       if (!listed.has(sIdx)) continue;
@@ -569,7 +580,7 @@ export class ResultsBrowser {
   /** Marks or unmarks every subject that the list shows (NCBI's "select all"). */
   markAll(on: boolean): void {
     this.markSubjects(
-      this.state.get().subjects.map((subject) => subject.sIdx),
+      [...listedSubjects(this.state.get())],
       on,
     );
   }
@@ -837,13 +848,19 @@ export class ResultsBrowser {
     const state = next as unknown as ResultsState;
     if (state.marked.size > 0) {
       if (state.runId !== previous.runId || state.qIdx !== previous.qIdx) next.marked = new Set<number>();
-      else if (state.subjects !== previous.subjects) {
-        const listed = new Set(state.subjects.map((subject) => subject.sIdx));
+      else if (state.subjects !== previous.subjects || state.listLimit !== previous.listLimit) {
+        const listed = listedSubjects(state);
         if ([...state.marked].some((sIdx) => !listed.has(sIdx))) next.marked = new Set([...state.marked].filter((sIdx) => listed.has(sIdx)));
       }
     }
     this.state.set(state);
   }
+}
+
+/** The subjects that the Descriptions list: the first `listLimit` in the order shown, or all. */
+function listedSubjects(state: Pick<ResultsState, 'subjects' | 'listLimit'>): ReadonlySet<number> {
+  const subjects = state.listLimit === undefined ? state.subjects : state.subjects.slice(0, state.listLimit);
+  return new Set(subjects.map((subject) => subject.sIdx));
 }
 
 /** The task of a run: the argv's -task, else the default that the engine describes (none for a program without tasks). */

@@ -10,8 +10,9 @@
 // One canvas holds the figure and draws only the rows in view, so that thousands of HSPs stay
 // smooth; with many subjects the rows scroll inside the figure under the query bar. Since the
 // figure heads the one page of the results (2026-10-10, ClassicResults.vue), its band is compact,
-// as NCBI's classic overview: rows of 8 px, 30 in view, so that the Descriptions follow on the
-// same screen.
+// as NCBI's classic overview: rows of 8 px, 30 in view, so that the bars are in the first screen
+// on a desktop; the Descriptions follow directly under it (with a Job Title or a notice above, they
+// start just below the first screen).
 import { computed, onMounted, onUnmounted, ref, useId, watch } from 'vue';
 import type { HspId, ResultsBrowser, ResultsState, SubjectEntry } from '../application/results';
 import { interval } from '../domain/coordinates';

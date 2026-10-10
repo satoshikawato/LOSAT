@@ -305,6 +305,47 @@ describe('what the results browser gives the tray', () => {
     expect(results.markedHspIds()).toEqual([]);
   });
 
+  it('keeps the marks within the listed subjects when the list is cut: a re-sort or a filter that moves a marked subject past it drops the mark (code review 2 L2)', async () => {
+    const subjects = Array.from({ length: 150 }, (_, i) => [`chr${i}`, 1_000_000] as const);
+    // Subject s has bits 1000 - s: the engine's order is also the descending order of the score.
+    const specs: HspSpec[] = subjects.flatMap((_, s) => [
+      { q: 0, s, coords: [1, 100, 1, 100], bits: 1000 - s } as HspSpec,
+      { q: 0, s, coords: [1, 100, 500, 599], bits: 500 - s } as HspSpec,
+    ]);
+    const { runs, hsps } = setup([{ runId: 'big', number: 1, subjects, hsps: specs }]);
+    const results = browser(runs, hsps);
+    await results.open('big');
+    results.setListLimit(100);
+    expect(results.state.get().subjects).toHaveLength(150);
+    // "select all" marks the 100 listed, and "Add to candidates" takes only them.
+    results.markAll(true);
+    expect(results.state.get().marked.size).toBe(100);
+    expect(results.markedHspIds()).toHaveLength(200);
+    results.markAll(false);
+    expect(results.state.get().marked.size).toBe(0);
+    // A subject past the listed ones cannot be marked.
+    results.markSubjects([120], true);
+    expect(results.state.get().marked.size).toBe(0);
+    // Mark the first row, then sort it past the hundredth: its mark goes, and "select all" gives 100.
+    results.markSubjects([0], true);
+    expect([...results.state.get().marked]).toEqual([0]);
+    results.setSubjectSort({ key: 'bitScore', descending: false });
+    expect(results.state.get().subjects.findIndex((subject) => subject.sIdx === 0)).toBe(149);
+    expect(results.state.get().marked.size).toBe(0);
+    expect(results.markedHspIds()).toEqual([]);
+    results.markAll(true);
+    expect(results.state.get().marked.size).toBe(100);
+    expect(results.state.get().marked.has(0)).toBe(false);
+    // "Show all" lists them all and keeps the marks; cutting the list again drops those past 100.
+    results.setListLimit(undefined);
+    expect(results.state.get().marked.size).toBe(100);
+    results.markSubjects([0], true);
+    expect(results.state.get().marked.size).toBe(101);
+    results.setListLimit(100);
+    expect(results.state.get().marked.size).toBe(100);
+    expect(results.state.get().marked.has(0)).toBe(false);
+  });
+
   it('goes back to a candidate: opens its run, selects it, and clears only the filters that hide it', async () => {
     const { runs, hsps } = setup([
       { runId: 'r1', number: 1 },
@@ -815,13 +856,14 @@ describe('the tray at the size of a large run', () => {
     return elapsed;
   }
 
-  it('adds 20 000 candidates, and sorts, moves, notes, selects and removes them in time linear in their number', () => {
+  it('adds 40 000 candidates, and sorts, moves, notes, selects and removes them in time linear in their number', () => {
     const best = (n: number) => Math.min(exercise(n), exercise(n), exercise(n));
     const small = best(5000);
-    const large = best(20_000);
-    // Four times the candidates: linear work takes about 4 times as long (n log n a little more),
-    // quadratic work 16 times.
-    expect(large / Math.max(small, 1)).toBeLessThan(9);
-    expect(large).toBeLessThan(2000);
+    const large = best(40_000);
+    // Eight times the candidates: linear work takes about 8 times as long (n log n a little more),
+    // quadratic work 64 times. The bound sits where a busy machine (code review 2 L3) moves a
+    // linear ratio of 8 to 10 or 12 without reaching 24, and quadratic work (64) is far above it.
+    expect(large / Math.max(small, 1)).toBeLessThan(24);
+    expect(large).toBeLessThan(8000);
   });
 });

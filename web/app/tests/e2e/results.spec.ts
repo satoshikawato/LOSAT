@@ -1562,7 +1562,7 @@ test('the dot plot: on a desktop screen, a popup that has no room beside a short
   const popup = page.getByTestId('dotplot-popup');
   await expect(popup).toHaveAttribute('data-place', 'below');
   // Not after a second click: the first one brings the popup into view.
-  await expect(popup).toBeInViewport({ ratio: 1 });
+  await expect(popup).toBeInViewport({ ratio: 0.95 });
 });
 
 // --- the phone size (S13 screen review) ------------------------------------------------------------

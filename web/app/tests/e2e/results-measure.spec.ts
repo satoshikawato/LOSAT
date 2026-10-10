@@ -289,6 +289,14 @@ function save(): void {
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
+/** The failures recorded in a record and its parts (`error` keys), with where they are. */
+function errorsOf(value: unknown, at = ''): string[] {
+  if (typeof value !== 'object' || value === null) return [];
+  return Object.entries(value).flatMap(([key, part]) =>
+    key === 'error' ? [`${at || '.'}: ${String(part)}`] : errorsOf(part, `${at}/${key}`),
+  );
+}
+
 // --- Chromium's memory ---------------------------------------------------------------------------
 
 interface Heap {
@@ -718,6 +726,10 @@ for (const count of COUNTS) {
       console.log(`${browserName} ${count} queries: FAILED ${message(error)}`);
     }
     save();
+    // No step of this case is an expected limit (unlike the dot plot's largest pairs): a failure
+    // recorded above fails the test, so that a gate does not pass without these numbers (S15's
+    // gate 2 recorded "object null is not iterable" for both counts and passed).
+    expect(errorsOf(record)).toEqual([]);
   });
 }
 
@@ -812,8 +824,10 @@ async function trayOperations(page: Page, count: number): Promise<TrayRepetition
  * one page lists the first 100 subjects until "Show all", which stays for the query once pressed.
  */
 async function listWhole(page: Page): Promise<void> {
-  const [, shown] = /^([\d,]+) shown$/.exec(((await page.getByTestId('subject-count').textContent()) ?? '').trim())!;
-  const subjects = shown!.replace(/,/g, '');
+  // "260 shown" when whole, "100 of 260 listed" when cut (fix round 4).
+  const count = /^(?:[\d,]+ of )?([\d,]+) (?:shown|listed)$/.exec(((await page.getByTestId('subject-count').textContent()) ?? '').trim());
+  if (count === null) throw new Error('the Descriptions header does not say how many subjects there are');
+  const subjects = count[1]!.replace(/,/g, '');
   if ((await page.getByTestId('subject-list').getAttribute('data-count')) !== subjects) await page.getByTestId('descriptions-show-all').click();
   await expect(page.getByTestId('subject-list')).toHaveAttribute('data-count', subjects);
 }

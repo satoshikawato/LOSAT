@@ -93,7 +93,7 @@ const inputs = computed(() => [
       </dl>
     </div>
 
-    <ReproducePanel :run="run" :formats="loaded.description.formats" :run-files="runFiles" />
+    <ReproducePanel :run="run" :formats="loaded.description.formats" :run-files="runFiles" :session="session" />
 
     <h3>Warnings</h3>
     <pre v-if="loaded.diagnostics !== ''" class="output" data-testid="run-diagnostics">{{ loaded.diagnostics }}</pre>

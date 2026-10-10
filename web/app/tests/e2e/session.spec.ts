@@ -279,6 +279,10 @@ test.describe('FakeEngine build', () => {
     await page.getByTestId('run-attach-subject-files').setInputFiles({ name: 'renamed.fa', mimeType: 'text/plain', buffer: Buffer.from(SUBJECTS) });
     await expect(subject).toHaveAttribute('data-attached', 'true');
     await expect(page.getByTestId('run-original-subject-attached')).toContainText('Attached: renamed.fa.');
+    // The reproduction panel follows at once: the subject's input can be saved now, the query's still needs its original.
+    await expect(page.getByTestId('run-input-save-subject')).toBeEnabled();
+    await expect(page.getByTestId('run-input-needs-subject')).toHaveCount(0);
+    await expect(page.getByTestId('run-input-save-query')).toBeDisabled();
     await expect(page.getByTestId('run-attach-subject-message')).toHaveCount(0);
     await expect(page.getByTestId('run-original-query')).toHaveAttribute('data-attached', 'false');
 
@@ -360,7 +364,12 @@ test.describe('engine build', () => {
   }
 
   const relations = (page: Page) =>
-    Promise.all((['query', 'subject'] as const).map(async (role) => (await page.getByTestId(`run-input-file-${role}`).textContent())!.trim()));
+    Promise.all(
+      (['query', 'subject'] as const).map(async (role) =>
+        // Without the sentence that a loaded run adds while its original is not attached (screen review L1).
+        (await page.getByTestId(`run-input-file-${role}`).textContent())!.trim().replace(/ Needs the original \w+ FASTA \(choose it above\)\.$/, ''),
+      ),
+    );
 
   /** A run's argv, and its input FASTA as the reproduction panel saves them: the bytes searched, under the argv's names. */
   async function runInputs(page: Page, run: number): Promise<RunInputs> {

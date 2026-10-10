@@ -7,16 +7,22 @@
 import { computed, ref } from 'vue';
 import type { RunView } from '../application/coordinator';
 import type { RunFiles } from '../application/run-files';
+import type { Session } from '../application/session';
+import { Store } from '../application/store';
 import type { OutputFormat } from '../domain/output-format';
 import type { InputRole } from '../domain/programs';
 import { commandNotes, inputIsChosenFile, inputRelation, losatCommand, NCBI_BLAST_VERSION, ncbiCommand, ncbiComparison } from '../domain/reproduce';
 import CommandText from './CommandText.vue';
 import { useStore } from './useStore';
 
-const props = defineProps<{ run: RunView; formats: readonly OutputFormat[]; runFiles: RunFiles }>();
+const props = defineProps<{ run: RunView; formats: readonly OutputFormat[]; runFiles: RunFiles; session?: Session | undefined }>();
+const emptyRuns = new Store<{ readonly runs: readonly RunView[] }>({ runs: [] });
 const state = useStore(props.runFiles.state);
+/** The run as the working session has it now: the original FASTA attached in Run details shows here at once (the `run` prop is the one results opened). */
+const live = useStore((props.session?.runs ?? emptyRuns) as Store<{ readonly runs: readonly RunView[] }>);
 const snapshot = computed(() => props.run.snapshot);
 const comparison = computed(() => ncbiComparison(snapshot.value.argv));
+const liveRun = computed(() => live.value.runs.find((view) => view.snapshot.runId === props.run.snapshot.runId) ?? props.run);
 const roles: readonly InputRole[] = ['query', 'subject'];
 const parts = computed(() => ({ query: props.runFiles.inputParts(props.run, 'query'), subject: props.runFiles.inputParts(props.run, 'subject') }));
 const notes = computed(() =>
@@ -31,7 +37,7 @@ const inputs = computed(() =>
     const input = snapshot.value[role];
     const relation = inputRelation(role, input.name, input.records.length, parts.value[role]);
     // A loaded run holds no bytes of its input: it can save one only from the original FASTA chosen again.
-    const needsOriginal = props.run.fromSession !== undefined && input.bytes === undefined && props.run.attached?.[role] === undefined;
+    const needsOriginal = props.run.fromSession !== undefined && input.bytes === undefined && liveRun.value.attached?.[role] === undefined;
     return { role, name: input.name, relation, needsOriginal };
   }),
 );

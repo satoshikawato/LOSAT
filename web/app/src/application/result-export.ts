@@ -8,7 +8,10 @@
 // at any point saves nothing (application/export-writer.ts). The values come from the stored
 // outputs and the HSP records: the outfmt 6 text that the results screen already holds, the HSP
 // records read from the Data worker in batches (never the whole run at once, never one read per
-// HSP), and the outfmt 0 text read in windows of about 1 MiB that serve many sections each.
+// HSP), and the outfmt 0 text read in windows of about 1 MiB that serve many sections each. The
+// report is made in parts of about TEXT_CHARS characters and waits only for those parts and for
+// the windows of outfmt 0: an `await` for each of its million small pieces made the report of
+// 100,000 queries take 16-25 s in Firefox (fix round 2).
 import { hspLabel } from '../domain/extraction';
 import {
   allRows,
@@ -62,8 +65,10 @@ export const exportFileName = (run: { readonly number: number; readonly program:
 export const RECORD_BATCH = 1000;
 /** A batch also ends when the HSPs' coordinates span this many residues, so that long aligned rows stay few per batch. */
 export const RECORD_BATCH_RESIDUES = 4_000_000;
-/** Rows of CSV or of a report's table handed to the Writer at once. */
+/** Rows of CSV handed to the Writer at once. */
 const ROWS_PER_TEXT = 500;
+/** Characters of a report collected before they are handed to the Writer. */
+const TEXT_CHARS = 1 << 16;
 /** Bytes of outfmt 0 read at once: one read serves the headings and sections that lie in it. */
 export const OUTFMT0_WINDOW = 1 << 20;
 
@@ -72,6 +77,8 @@ export type ScopeCounts = Readonly<Record<ExportScope, number>>;
 export interface ExportOptions {
   /** JSON: write the HSP records' aligned rows (default true). */
   readonly aligned?: boolean;
+  /** Report: write the outfmt 0 headings and sections of the HSPs (default true). */
+  readonly alignments?: boolean;
 }
 
 export interface ExportSummary {
@@ -80,6 +87,8 @@ export interface ExportSummary {
   readonly fileName: string;
   readonly hsps: number;
   readonly bytes: number;
+  /** A report saved without the outfmt 0 text of its alignments. */
+  readonly withoutAlignments?: true;
 }
 
 export interface ExportState {
@@ -170,6 +179,7 @@ export class ResultExporter {
     const { snapshot } = loaded.run;
     const fileName = exportFileName(snapshot, format);
     const aligned = options.aligned ?? true;
+    const alignments = options.alignments ?? true;
     this.state.set({ busy: { format, scope, fileName } });
     try {
       const bytes = await writeFile(this.deps.downloader, fileName, EXPORT_FILES[format].mime, (writer) => {
@@ -179,10 +189,17 @@ export class ResultExporter {
           case 'json':
             return this.writeJson(writer, job, aligned);
           case 'report':
-            return this.writeReport(writer, job);
+            return this.writeReport(writer, job, alignments);
         }
       });
-      const last: ExportSummary = { format, scope, fileName, hsps: rows.length, bytes };
+      const last: ExportSummary = {
+        format,
+        scope,
+        fileName,
+        hsps: rows.length,
+        bytes,
+        ...(format === 'report' && !alignments ? { withoutAlignments: true as const } : {}),
+      };
       this.state.set({ last });
       return last;
     } catch (error) {
@@ -217,10 +234,10 @@ export class ResultExporter {
   }
 
   /**
-   * The report: the run, then each query of the scope with its HSP table and the outfmt 0 headings
-   * and sections of the HSPs that outfmt 0 shows, then the run's warnings.
+   * The report: the run, then each query of the scope with its HSP table and, unless they are left
+   * out, the outfmt 0 headings and sections of the HSPs that outfmt 0 shows, then the run's warnings.
    */
-  private async writeReport(writer: ExportWriter, job: ExportJob): Promise<void> {
+  private async writeReport(writer: ExportWriter, job: ExportJob, alignments: boolean): Promise<void> {
     const { loaded, rows } = job;
     const { table } = loaded.index;
     const { snapshot } = loaded.run;
@@ -228,38 +245,47 @@ export class ResultExporter {
       (start, end) => this.deps.data.readOutputRange(snapshot.runId, 0, start, end),
       loaded.run.result?.byteLengths[0],
     );
-    await writer.text(reportHead({ run: exportRun(loaded), formats: loaded.description.formats, scope: job.scope, exportedAt: job.exportedAt }));
+    const head = { run: exportRun(loaded), formats: loaded.description.formats, scope: job.scope, exportedAt: job.exportedAt, alignments };
+    let parts: string[] = [];
+    let chars = 0;
+    const add = (part: string) => {
+      parts.push(part);
+      chars += part.length;
+    };
+    const handOn = async () => {
+      await writer.text(parts.join(''));
+      parts = [];
+      chars = 0;
+    };
+    add(reportHead(head));
     for (const [qIdx, queryRows] of groupBy(rows, table.qIdx)) {
       const record = snapshot.query.records[qIdx];
-      await writer.text(
-        reportQueryStart({ position: qIdx, id: record?.id ?? '', length: record?.length ?? 0, unit: loaded.units.query, hsps: queryRows.length }),
-      );
-      for (let i = 0; i < queryRows.length; i += ROWS_PER_TEXT) {
-        await writer.text(
-          queryRows
-            .slice(i, i + ROWS_PER_TEXT)
-            .map((row) => reportTableRow(exportedHsp(loaded, row)))
-            .join(''),
-        );
+      add(reportQueryStart({ position: qIdx, id: record?.id ?? '', length: record?.length ?? 0, unit: loaded.units.query, hsps: queryRows.length }));
+      for (const row of queryRows) {
+        add(reportTableRow(exportedHsp(loaded, row)));
+        if (chars >= TEXT_CHARS) await handOn();
       }
-      await writer.text(REPORT_TABLE_END);
-      const shown = queryRows.filter((row) => out0Range(table, row) !== undefined);
-      if (shown.length > 0) {
-        await writer.text(REPORT_ALIGNMENTS_START);
+      add(REPORT_TABLE_END);
+      if (alignments) {
+        const shown = queryRows.filter((row) => out0Range(table, row) !== undefined);
+        if (shown.length > 0) add(REPORT_ALIGNMENTS_START);
         for (const [, subjectRows] of groupBy(shown, table.sIdx)) {
           const heading = subjectRows.map((row) => out0SubjectRange(table, row)).find((range) => range !== undefined);
-          if (heading !== undefined) await writer.text(reportHeading(await out0.text(heading)));
+          // A range in the window last read is taken without waiting.
+          if (heading !== undefined) add(reportHeading(out0.cached(heading) ?? (await out0.text(heading))));
           for (const row of subjectRows) {
-            await writer.text(reportSection(exportedHsp(loaded, row), await out0.text(out0Range(table, row)!)));
+            const range = out0Range(table, row)!;
+            add(reportSection(exportedHsp(loaded, row), out0.cached(range) ?? (await out0.text(range))));
+            if (chars >= TEXT_CHARS) await handOn();
           }
         }
+        add(reportNotInOutfmt0(queryRows.filter((row) => out0Range(table, row) === undefined).map((row) => hspLabel(qIdx, table.rank[row]!))));
       }
-      await writer.text(
-        reportNotInOutfmt0(queryRows.filter((row) => out0Range(table, row) === undefined).map((row) => hspLabel(qIdx, table.rank[row]!))),
-      );
-      await writer.text(REPORT_QUERY_END);
+      add(REPORT_QUERY_END);
+      if (chars >= TEXT_CHARS) await handOn();
     }
-    await writer.text(reportTail(loaded.diagnostics));
+    add(reportTail(loaded.diagnostics));
+    await handOn();
   }
 }
 
@@ -400,6 +426,13 @@ export class RangeReader {
     private readonly length: number | undefined,
     private readonly window = OUTFMT0_WINDOW,
   ) {}
+
+  /** The text of a range that the last read holds, without reading; undefined if it does not hold it. */
+  cached(range: ByteRange): string | undefined {
+    const [start, end] = range;
+    if (start < this.start || end > this.start + this.bytes.length) return undefined;
+    return decoder.decode(this.bytes.subarray(start - this.start, end - this.start));
+  }
 
   async text(range: ByteRange): Promise<string> {
     const [start, end] = range;

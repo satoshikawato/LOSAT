@@ -454,6 +454,37 @@ describe('the report', () => {
     expect(Math.max(...rangeReads.map(([, end]) => end))).toBeLessThanOrEqual(run.out0.length);
   });
 
+  it('leaves out the outfmt 0 text of the alignments when they are not chosen, and says so', async () => {
+    const { exporter, text, rangeReads } = await setup();
+    await exporter.export('report', 'all');
+    expect(text()).toContain('<dt>Alignments</dt><dd>Included: the outfmt 0 headings and sections of the HSPs that outfmt 0 shows, as written.</dd>');
+    expect(exporter.state.get().last?.withoutAlignments).toBeUndefined();
+    rangeReads.length = 0;
+    const summary = await exporter.export('report', 'all', { alignments: false });
+    expect(summary).toMatchObject({ format: 'report', withoutAlignments: true });
+    const html = text();
+    expect(html).toContain('<dt>Alignments</dt><dd>Not included: this report was saved without the outfmt 0 text of the alignments.');
+    expect(html).toContain('<h2>Query 1: q1</h2>');
+    expect(html).toContain('<td>shown</td>');
+    expect(html).not.toContain('<pre class="section">');
+    expect(html).not.toContain('<pre class="heading">');
+    expect(html).not.toContain('Alignments (outfmt 0');
+    expect(html).not.toContain('outfmt 0 does not show');
+    expect(rangeReads).toEqual([]);
+    // The JSON's choice of aligned rows is its own.
+    await exporter.export('json', 'all', { alignments: false });
+    expect(exporter.state.get().last?.withoutAlignments).toBeUndefined();
+  });
+
+  it('hands a query with many HSPs to the Writer in parts, not as one text', async () => {
+    const specs = Array.from({ length: 8_000 }, (_, i) => ({ q: 0, s: i % 3, bits: 50, e: 1e-5 }));
+    const { exporter, saved } = await setup({ specs, ids: { query: ['q1'], subject: ['s1', 's2', 's3'] } });
+    await exporter.export('report', 'all');
+    expect(saved[0]!.bytes.length).toBeGreaterThan(2 << 20);
+    // Blocks of about 1 MiB (the Writer's), not one block of the whole query.
+    expect(saved[0]!.blocks).toBeGreaterThanOrEqual(3);
+  });
+
   it('saves nothing when outfmt 0 cannot be read', async () => {
     const { exporter, saved, failRanges } = await setup();
     failRanges();

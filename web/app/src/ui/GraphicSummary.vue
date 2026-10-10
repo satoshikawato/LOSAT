@@ -11,6 +11,7 @@
 // smooth; with many subjects the rows scroll inside the figure under the query bar.
 import { computed, onMounted, onUnmounted, ref, useId, watch } from 'vue';
 import type { HspId, ResultsBrowser, ResultsState, SubjectEntry } from '../application/results';
+import { interval } from '../domain/coordinates';
 import { headingTitle } from '../domain/outfmt0';
 import { placeBox } from '../domain/plot-geometry';
 import { rulerTicks, scoreBin, SCORE_BINS } from '../domain/plot-scale';
@@ -100,12 +101,13 @@ const layout = computed<Layout>(() => {
   let k = 0;
   rows.forEach((subject, r) => {
     l.start[r] = k;
-    const low = (row: number) => Math.min(table!.qStart[row]!, table!.qEnd[row]!);
-    const order = [...subject.rows].sort((a, b) => low(a) - low(b) || table!.rank[a]! - table!.rank[b]!);
+    const query = (row: number) => interval(table!.qStart[row]!, table!.qEnd[row]!);
+    const order = [...subject.rows].sort((a, b) => query(a).from - query(b).from || table!.rank[a]! - table!.rank[b]!);
     for (const row of order) {
+      const { from, to } = query(row);
       l.tableRow[k] = row;
-      l.q0[k] = low(row);
-      l.q1[k] = Math.max(table!.qStart[row]!, table!.qEnd[row]!);
+      l.q0[k] = from;
+      l.q1[k] = to;
       l.bin[k] = scoreBin(table!.bitScore[row]!);
       l.rank[k] = table!.rank[row]!;
       l.rowOf[k] = r;

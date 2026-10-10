@@ -4,6 +4,7 @@
 // from the byte ranges (`out6`, `out0`, `out0_subject`) of the stored outputs. The Data
 // worker builds the table and transfers its buffers, so a run with many HSPs never becomes
 // an array of objects on the UI thread.
+import { interval } from './coordinates';
 
 /** The fields of an HSP record that the table keeps (the names of `HspRecord`). */
 export interface HspSummary {
@@ -118,9 +119,9 @@ export const frame = (column: Int8Array, row: number): number | undefined => (co
 /**
  * The smaller and the larger subject coordinate of an HSP record: NCBI's "Range n: a to b" of an
  * alignment names the subject's positions in ascending order (docs/web/ncbi_ui_mapping.md
- * "Alignments"). The coordinates are the record's; nothing is computed from them.
+ * "Alignments"). The coordinates are the record's (domain/coordinates.ts); nothing is computed from them.
  */
 export function subjectSpan(table: HspTable, row: number): readonly [number, number] {
-  const [start, end] = [table.sStart[row]!, table.sEnd[row]!];
-  return start <= end ? [start, end] : [end, start];
+  const { from, to } = interval(table.sStart[row]!, table.sEnd[row]!);
+  return [from, to];
 }

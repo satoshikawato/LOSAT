@@ -2,6 +2,7 @@
 // each query grouped by subject in the engine's order, sorting and filtering with the
 // engine's values, the limits that a query may have reached, and the orientation of an
 // HSP. Nothing here computes or formats a BLAST value.
+import { strandOf } from './coordinates';
 import type { HspTable } from './hsp-table';
 import type { SequenceKind } from './programs';
 
@@ -224,20 +225,15 @@ export function hitLimits(argv: readonly string[], described: readonly Described
 export type Orientation = 'forward' | 'reverse' | 'unknown';
 
 /**
- * Whether the HSP runs along both sequences in the same direction. Coordinates tell it
- * (start > end is the minus strand, ABI v2 §8); for one letter (start = end) the frame's
- * sign tells it, and a protein runs forward. A BLASTN HSP of one letter has neither, so its
- * orientation is unknown from the record (only the outfmt 0 section's Strand= line shows it).
+ * Whether the HSP runs along both sequences in the same direction: the strand of each sequence
+ * from the record's coordinates and frames (domain/coordinates.ts `strandOf`). A BLASTN HSP of
+ * one letter has no strand in its record, so its orientation is unknown (only the outfmt 0
+ * section's Strand= line shows it).
  */
 export function orientation(table: HspTable, row: number, kinds: { readonly query: SequenceKind; readonly subject: SequenceKind }): Orientation {
-  const direction = (start: number, end: number, frame: number, kind: SequenceKind): number => {
-    if (start !== end) return start < end ? 1 : -1;
-    if (frame !== 0) return Math.sign(frame);
-    return kind === 'protein' ? 1 : 0;
-  };
-  const q = direction(table.qStart[row]!, table.qEnd[row]!, table.queryFrame[row]!, kinds.query);
-  const s = direction(table.sStart[row]!, table.sEnd[row]!, table.subjectFrame[row]!, kinds.subject);
-  if (q === 0 || s === 0) return 'unknown';
+  const q = strandOf(table.qStart[row]!, table.qEnd[row]!, table.queryFrame[row], kinds.query);
+  const s = strandOf(table.sStart[row]!, table.sEnd[row]!, table.subjectFrame[row], kinds.subject);
+  if (q === 'unknown' || s === 'unknown') return 'unknown';
   return q === s ? 'forward' : 'reverse';
 }
 

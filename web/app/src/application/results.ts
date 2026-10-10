@@ -6,6 +6,7 @@
 // (docs/web/results_columns.md); the domain functions group, sort and filter them.
 import type { RecordKey } from '../domain/dataset';
 import { optionValue } from '../domain/argv';
+import { translates, type Unit } from '../domain/coordinates';
 import { frame, out0Range, out0SubjectRange, out6Range, subjectSpan } from '../domain/hsp-table';
 import { splitOutfmt6Row, type Outfmt6Row } from '../domain/outfmt6';
 import { programById, residueUnit, type ProgramId, type SequenceKind } from '../domain/programs';
@@ -103,8 +104,8 @@ export interface Detail {
 }
 
 export interface Units {
-  readonly query: string;
-  readonly subject: string;
+  readonly query: Unit;
+  readonly subject: Unit;
 }
 
 export interface LoadedRun {
@@ -568,9 +569,9 @@ export class ResultsBrowser {
 
   private hspEntry(loaded: LoadedRun, row: number): HspEntry {
     const { table } = loaded.index;
-    // Frames belong to the translated roles only (docs/web/results_columns.md "Frames": TBLASTN
+    // Frames belong to the translated roles only (domain/coordinates.ts `translates`; TBLASTN
     // and TBLASTX): the engine's BLASTP records carry frame 1 for both sequences.
-    const translated = (kind: SequenceKind) => kind === 'nucleotide' && loaded.run.snapshot.program !== 'blastn';
+    const translated = (kind: SequenceKind) => translates(loaded.run.snapshot.program, kind);
     const queryFrame = translated(loaded.kinds.query) ? frame(table.queryFrame, row) : undefined;
     const subjectFrame = translated(loaded.kinds.subject) ? frame(table.subjectFrame, row) : undefined;
     return {

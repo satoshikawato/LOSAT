@@ -4,6 +4,7 @@
 // NCBI BLAST's two-sequence page (docs/web/ncbi_ui_mapping.md §1). Defaults, choices and
 // help text come from the engine (`describe`), not from here (plan §5.3, DW-4); a field whose
 // flag the engine does not describe is not shown.
+import type { Unit } from './coordinates';
 import type { FastaParserKind } from './dataset';
 
 export type ProgramId = 'blastn' | 'blastp' | 'blastx' | 'tblastn' | 'tblastx';
@@ -312,8 +313,8 @@ export function sequenceKind(program: ProgramDescriptor, role: InputRole): Seque
   return role === 'query' ? program.query : program.subject;
 }
 
-/** The unit of a position in an input of this kind. */
-export function residueUnit(kind: SequenceKind): string {
+/** The unit of a position in an input of this kind (domain/coordinates.ts `Unit`). */
+export function residueUnit(kind: SequenceKind): Unit {
   return kind === 'nucleotide' ? 'nt' : 'aa';
 }
 

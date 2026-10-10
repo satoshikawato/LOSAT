@@ -144,6 +144,20 @@ Scheduling (each value computed by one thread with the original function; order 
   the next elements' alignments ahead, the tree is read and written in the original order by one
   thread (`utils/xahead.rs`). Shadow: `LOSAT_X_AHEADSHADOW=1`. `LOSAT_X_GREEDYSPEC=1` adds the
   megablast greedy traceback; `LOSAT_X_SPECBATCH` tunes the batch.
+- `LOSAT_X_PAIRPAR=1` (strict-set candidate; S-E, round 5) blastn/megablast, one query-subject
+  pair on a pool of 2+ threads. (1) The megablast lookup table is filled by the pool threads: every
+  thread reads the whole query in order and applies the update only to the words whose cell lies in
+  its blocks of `2^max(11, pv_array_bts)` cells, so each cell gets its words in the original order
+  (`blastn/x_mb_lookup_par.rs`; not with database word counts or `BLEMIR_DEBUG`). (2) The one-hit
+  seed stage of a subject chunk with the diagonal hash (query block over 8000 letters,
+  `window_size` 0, `scan_range` 0, contiguous megablast table, unmasked subject, one subject, no
+  small-query word extension, no debug or trace): the subject scan grid is cut into strips that
+  the pool threads scan (lookup chains and word extension), and the owner thread folds the strips
+  in scan order through a copy of the diagonal-hash code (`blastn/blast_engine/x_pair_seed.rs`).
+  Anything else runs the original code. Shadow: `LOSAT_X_PAIRPARSHADOW=1` (lookup tables and, per
+  chunk, the hit list and the whole diagonal hash compared with the original code; one
+  `[X_PAIRPARSHADOW]` summary line on stderr at the end). With `LOSAT_TIMING` a
+  `[TIMING] x_pairpar_seed` line gives the strips, seeds and the owner's fold, scan and wait time.
 - `LOSAT_X_TBNPAR=1` tblastn: preliminary stage per (frame, chunk) and redo per match in
   parallel, one pool for the search. Shadow: `LOSAT_X_TBNPARSHADOW=1`.
 - `LOSAT_X_TBNBATCH=1` (needs `TBNSSIDE`) tblastn query batches searched side by side, appended

@@ -6,6 +6,15 @@ use crate::blastinput::fasta_reader::InputRecord;
 use crate::core::blast_encoding::{encode_subject_ncbi2na_packed, COMPRESSION_RATIO};
 use crate::utils::dust::MaskedInterval;
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1090-1091
+// ```c
+//          mb_lt->next_pos[index] = mb_lt->hashtable[ecode];
+//          mb_lt->hashtable[ecode] = index;
+// ```
+// EXPERIMENT (LOSAT_X_PAIRPAR): the megablast table filled by the pool threads.
+#[path = "x_mb_lookup_par.rs"]
+pub(crate) mod x_mb_lookup_par;
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:37-43
 // ```c
 // /** bitfield used to detect ambiguities in uncompressed
@@ -1706,7 +1715,31 @@ fn build_mb_lookup(
     // LOSAT_X_MBDELAY or LOSAT_X_MBBATCH, `x_fill_mb_queued` runs a copy of that loop that only
     // touches the table cell earlier (a prefetch, or a read loop) and applies the same update
     // to the same words in the same order, so the result is the same table.
-    if let Some(x_queue) = x_mb_queue() {
+    // Dispatch point of LOSAT_X_PAIRPAR (first arm): `x_mb_lookup_par::fill` applies the same
+    // update to the same words, each cell's words in the same order, on the pool threads (each
+    // thread owns whole blocks of cells); see x_mb_lookup_par.rs.
+    if let Some(x_parts) = x_mb_lookup_par::parts(db_word_counts.is_none() && !debug_mode) {
+        x_mb_lookup_par::fill(
+            x_parts,
+            &x_mb_lookup_par::Words {
+                queries_blastna,
+                query_offsets,
+                query_masks,
+                word_length,
+                lut_word_length,
+                kmer_mask,
+                ascending_cells,
+            },
+            x_mb_lookup_par::Tables {
+                hashtable: &mut hashtable,
+                next_pos: &mut next_pos,
+                pv_array: &mut pv_array,
+                pv_array_bts,
+                helper_array: &mut helper_array,
+            },
+            true,
+        );
+    } else if let Some(x_queue) = x_mb_queue() {
         x_fill_mb_queued(
             x_queue,
             queries_blastna,
@@ -1829,6 +1862,33 @@ fn build_mb_lookup(
     let mut longest_chain = 2usize;
     for &value in &helper_array {
         longest_chain = longest_chain.max(value as usize);
+    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1104-1106
+    // ```c
+    //    longest_chain = 2;
+    //    for (index = 0; index < mb_lt->hashsize / kCompressionFactor; index++)
+    //        longest_chain = MAX(longest_chain, helper_array[index]);
+    // ```
+    // Dispatch point of LOSAT_X_PAIRPARSHADOW: the tables above are built again by the
+    // partitioned fill of LOSAT_X_PAIRPAR and compared element by element.
+    if x_mb_lookup_par::shadow() && db_word_counts.is_none() && !debug_mode {
+        x_mb_lookup_par::shadow_check(
+            &x_mb_lookup_par::Words {
+                queries_blastna,
+                query_offsets,
+                query_masks,
+                word_length,
+                lut_word_length,
+                kmer_mask,
+                ascending_cells,
+            },
+            pv_array_bts,
+            &hashtable,
+            &next_pos,
+            &pv_array,
+            &helper_array,
+            longest_chain,
+        );
     }
 
     if debug_mode {

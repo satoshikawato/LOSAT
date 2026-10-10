@@ -10,6 +10,7 @@ import { computed, nextTick, onUnmounted, ref, watch } from 'vue';
 import type { CandidateTray } from '../application/candidates';
 import type { Coordinator, RunView } from '../application/coordinator';
 import type { HspId, ResultsBrowser } from '../application/results';
+import type { ResultExporter } from '../application/result-export';
 import { programById, residueUnit } from '../domain/programs';
 import { useStore } from './useStore';
 import AlignmentsView from './AlignmentsView.vue';
@@ -28,7 +29,7 @@ import VerificationBadge from './VerificationBadge.vue';
 
 export type ResultsView = 'hits' | 'graphic' | 'alignment' | 'dotplot' | 'details' | 'outputs';
 
-const props = defineProps<{ coordinator: Coordinator; results: ResultsBrowser; candidates: CandidateTray; runs: readonly RunView[] }>();
+const props = defineProps<{ coordinator: Coordinator; results: ResultsBrowser; candidates: CandidateTray; exporter: ResultExporter; runs: readonly RunView[] }>();
 /** The tab shown. The main view keeps it, so that another run, or the results shown again, open on the same tab. */
 const view = defineModel<ResultsView>('view', { default: 'hits' });
 const state = useStore(props.results.state);
@@ -262,7 +263,7 @@ async function toAlignments(id: HspId): Promise<void> {
           </template>
         </div>
         <RunDetails v-if="view === 'details'" :run="loaded.run" :loaded="loaded" />
-        <OutputsView v-if="view === 'outputs'" :coordinator="coordinator" :run="loaded.run" />
+        <OutputsView v-if="view === 'outputs'" :coordinator="coordinator" :run="loaded.run" :exporter="exporter" :state="state" />
       </template>
     </template>
     <!-- A live region that stays in the page, so that each confirmation is announced. -->

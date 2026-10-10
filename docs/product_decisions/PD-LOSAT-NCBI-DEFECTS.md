@@ -1,10 +1,11 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.3
+- Version: 1.4
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
-  (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b)
+  (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b); 1.4 2026-10-10
+  (stage E2h: the rules of `AUTHORITY.md` §K and exception 2 for BLASTP, Session SFd, plan DW-27)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`) and the independent audits found to be
@@ -137,6 +138,25 @@ Reproduced as NCBI (rule 2): the out-of-range `double` to `Int4` conversions of
 `-threshold` and the X-drops (INT_MIN, decision D4); `-max_target_seqs` of 2147483624 or
 more in BLASTP, whose preliminary hit list size wraps to 2 to 48; TBLASTX's culling limit
 plus 3 wrapping in `Int4` (decision D1).
+
+## Stage E2h: the FASTA reader and the registry layer (version 1.4)
+
+Accepted by the maintainer on 2026-10-10 in Session SFd (E2h), plan DW-27, with the recommended
+options ("あなたの推奨案でいきましょう").
+
+- The 14 NCBI BLAST+ 2.17.0 behaviours of `docs/evidence/losat_web_e2h/AUTHORITY.md` §K follow
+  the rule written in each row: reproduced as NCBI (rule 2) for rows 2-7, 9 and the truncation
+  of row 11; explicit rejection (rule 3) for rows 1, 8, the huge gaps of row 11, and 12; Linux
+  semantics on every platform for row 10; LOSAT runs normally and does not reproduce NCBI's
+  abort or crash for row 13 (an NCBI parameter variable set to a value NCBI cannot parse) and
+  row 14 (an environment entry without `=`; NCBI SIGSEGV).
+- **Exception 2 for BLASTP** (BLASTN exception 2, extended again). NCBI blastp builds the
+  outfmt 0 title of a protein subject with the same `CDeflineGenerator` and
+  `x_CleanAndCompress` (`create_defline.cpp:219-312`) and crashes (SIGSEGV) on subject titles
+  made only of punctuation when the subject has hits. The approved result: LOSAT stops the
+  cleanup at the end of the string, as for BLASTN, TBLASTX and TBLASTN. Until it is
+  implemented (Session SFe), LOSAT's BLASTP rejects such subjects with hits in outfmt 0
+  explicitly (E2h `AUTHORITY.md` §J).
 
 ## Reproduced as NCBI (rule 2)
 

@@ -2,7 +2,7 @@
 
 ## INSTRUCTION PROMPT
 
-LOSAT Web の段階 E2j を実行する（エンジン側。Linux の clone の worktree `/home/kawato/losat-work/.worktrees/web-gui`、ブランチ `feature/losat-web-gui`。場所は clone の `CLAUDE.local.md`、手順は skill `losat-campaign`・`losat-worktree`・`losat-gates`・`losat-oracle-runs`・`losat-ship-pr` に従う）。先に [セッション README](README.md) の共通規則を読み、それに従う（規則 1・4 の `/mnt/c` のパスは `CLAUDE.local.md` の表で読み替える）。完了条件の正本は総合計画書 §7 の S13+ の行（S13 の合流で足す）。この段階は S13（W4）が結果画面の列定義表（[`docs/web/results_columns.md`](../web/results_columns.md)）で採用を決め、TS では計算しない値をエンジンから出すためのものである（計画 §5.7、[W4 のゲート記録](../evidence/losat_web_w4/README.md)の判断 1・2）。順番はエンジン側の SF（E2h）の後、S09+（R2）の前を推奨する（保守者の確認待ち）。
+LOSAT Web の段階 E2j を実行する（エンジン側。Linux の clone の worktree `/home/kawato/losat-work/.worktrees/web-gui`、ブランチ `feature/losat-web-gui`。場所は clone の `CLAUDE.local.md`、手順は skill `losat-campaign`・`losat-worktree`・`losat-gates`・`losat-oracle-runs`・`losat-ship-pr` に従う）。先に [セッション README](README.md) の共通規則を読み、それに従う（規則 1・4 の `/mnt/c` のパスは `CLAUDE.local.md` の表で読み替える）。完了条件の正本は総合計画書 §7 の S13+ の行（S13 の合流で足す）。この段階は S13（W4）が結果画面の列定義表（[`docs/web/results_columns.md`](../web/results_columns.md)）で採用を決め、TS では計算しない値をエンジンから出すためのものである（計画 §5.7、[W4 のゲート記録](../evidence/losat_web_w4/README.md)の判断 1・2）。順番はエンジン側の SF（E2h）の後、S09+（R2）の前とする（S13 の判断 1〜3 とともに 2026-10-10 に保守者が承認、計画 DW-27）。
 
 1. **棚卸し（DW-12）**：アプリが出すオプションの範囲で、NCBI が subject ごとの集約の値を作って書く経路の関数を、BLASTN・BLASTP・TBLASTN・TBLASTX ごとに棚卸しし（忠実な移植・差のある移植・未移植・明示的な拒否）、未移植を簡略化せずに transpile する。少なくとも次を含む（固定 commit `598d8ae6a72b923127ba2fbfaffd48e4c83bfbf4`）：
    - `CBlastFormat::x_ConfigCShowBlastDefline`（`c++/src/algo/blast/format/blast_format.cpp:497-527`）：`-sorthits` を与えると `eShowPercentIdent`・`eShowTotalScore`・`eShowQueryCoverage` を立てる。

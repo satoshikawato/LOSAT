@@ -69,6 +69,12 @@ export const RECORD_BATCH_RESIDUES = 4_000_000;
 const ROWS_PER_TEXT = 500;
 /** Characters of a report collected before they are handed to the Writer. */
 const TEXT_CHARS = 1 << 16;
+/**
+ * HSPs of a JSON batch formatted in one task. A batch of 1,000 with their aligned rows, formatted at
+ * once, held Chromium's page for up to 300 ms where the garbage collector marked a large heap in
+ * steps as the text was made (fix round 2); a pause after each group lets the page draw.
+ */
+const JSON_GROUP = 250;
 /** Bytes of outfmt 0 read at once: one read serves the headings and sections that lie in it. */
 export const OUTFMT0_WINDOW = 1 << 20;
 
@@ -106,6 +112,8 @@ export interface ResultExporterDeps {
   readonly data: Pick<RunStore, 'readHspRecords' | 'readOutputRange'>;
   readonly downloader: Pick<Downloader, 'open'>;
   readonly now: () => number;
+  /** Lets the page draw between two parts of a file's work (the composition gives the browser's next task). None: no pause. */
+  readonly pause?: () => Promise<void>;
 }
 
 /** What one export reads: fixed when it starts. */
@@ -219,16 +227,20 @@ export class ResultExporter {
     let first = true;
     for (const batch of recordBatches(rows, table)) {
       const records = await this.deps.data.readHspRecords(runId, Array.from(batch, (row) => table.index[row]!));
-      const parts: string[] = [];
-      batch.forEach((row, i) => {
-        const record = records[i];
-        if (record === undefined || record.index !== table.index[row]) {
-          throw new Error(`the Data worker returned another HSP record than HSP ${table.index[row]} of run ${loaded.run.snapshot.number}`);
+      for (let start = 0; start < batch.length; start += JSON_GROUP) {
+        if (start > 0) await this.deps.pause?.();
+        const parts: string[] = [];
+        for (let i = start; i < Math.min(batch.length, start + JSON_GROUP); i++) {
+          const row = batch[i]!;
+          const record = records[i];
+          if (record === undefined || record.index !== table.index[row]) {
+            throw new Error(`the Data worker returned another HSP record than HSP ${table.index[row]} of run ${loaded.run.snapshot.number}`);
+          }
+          parts.push(jsonHsp(exportedHsp(loaded, row), record, aligned, first));
+          first = false;
         }
-        parts.push(jsonHsp(exportedHsp(loaded, row), record, aligned, first));
-        first = false;
-      });
-      await writer.text(parts.join(''));
+        await writer.texts(parts);
+      }
     }
     await writer.text(JSON_TAIL);
   }
@@ -253,7 +265,7 @@ export class ResultExporter {
       chars += part.length;
     };
     const handOn = async () => {
-      await writer.text(parts.join(''));
+      await writer.texts(parts);
       parts = [];
       chars = 0;
     };
@@ -296,7 +308,7 @@ async function writeCsv(writer: ExportWriter, job: ExportJob): Promise<void> {
   for (let i = 0; i < rows.length; i += ROWS_PER_TEXT) {
     const parts: string[] = [];
     for (const row of rows.subarray(i, i + ROWS_PER_TEXT)) parts.push(csvLine(exportedHsp(loaded, row)));
-    await writer.text(parts.join(''));
+    await writer.texts(parts);
   }
 }
 

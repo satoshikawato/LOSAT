@@ -1019,6 +1019,11 @@ pre.output {
   padding: 8px;
   overflow: auto;
   max-height: 60vh;
+  /* An output of 100,000 queries is millions of lines: without these, every layout of the page
+     (an export's button disabled, its summary shown) searched it for a scroll anchor and laid it
+     out again, 100-200 ms each in Chromium (fix round 2). */
+  overflow-anchor: none;
+  contain: content;
 }
 
 /* Results screen (S13) */

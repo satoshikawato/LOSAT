@@ -1173,6 +1173,21 @@ label.inline {
   background: var(--panel);
 }
 
+/* The phone's disclosure: the heading as a button (ResultFilters.vue). */
+.filter-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+}
+
 .result-filters .filter-fields {
   display: flex;
   flex-wrap: wrap;

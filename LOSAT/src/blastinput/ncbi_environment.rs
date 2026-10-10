@@ -170,6 +170,16 @@ fn rejected_variable(name: &OsStr, value: &OsStr) -> Option<String> {
             "the environment variable {name}, which sets an entry of NCBI BLAST+'s registry that LOSAT does not know to change no output (it accepts only the entries listed for registry files), is not supported by LOSAT"
         ));
     }
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:1585-1586
+    // ```c++
+    //     const TXChar* xoverride_path = NcbiSys_getenv(_TX("NCBI_CONFIG_OVERRIDES"));
+    //     if (xoverride_path  &&  *xoverride_path) {
+    // ```
+    // A set but empty NCBI_CONFIG_OVERRIDES names no file and changes nothing (re-audit round 2
+    // finding R-7 of session SFd).
+    if name == "NCBI_CONFIG_OVERRIDES" && value.is_empty() {
+        return None;
+    }
     if name.starts_with("NCBI_CONFIG_") {
         return Some(format!(
             "the environment variable {name}, which sets entries of NCBI BLAST+'s registry, is not supported by LOSAT"
@@ -193,6 +203,572 @@ fn rejected_variable(name: &OsStr, value: &OsStr) -> Option<String> {
         ));
     }
     None
+}
+
+/// The bytes of an `OsString` built from `OsStr::as_encoded_bytes` parts joined at ASCII
+/// bytes (path separators): the bytes as they are on Unix and WASI, and a lossy conversion
+/// elsewhere (Windows paths are not cut or joined by NCBI's Unix rules below).
+fn os_string_from_bytes(bytes: Vec<u8>) -> OsString {
+    #[cfg(unix)]
+    {
+        std::os::unix::ffi::OsStringExt::from_vec(bytes)
+    }
+    #[cfg(target_os = "wasi")]
+    {
+        std::os::wasi::ffi::OsStringExt::from_vec(bytes)
+    }
+    #[cfg(not(any(unix, target_os = "wasi")))]
+    {
+        OsString::from(String::from_utf8_lossy(&bytes).into_owned())
+    }
+}
+
+fn path_from_bytes(bytes: &[u8]) -> PathBuf {
+    PathBuf::from(os_string_from_bytes(bytes.to_vec()))
+}
+
+/// What NCBI's `CNcbiApplication` knows of the running program and its user, read by
+/// `registry_search_path`.
+struct ProgramContext {
+    /// `argv[0]` as the program was started.
+    argv0: Option<OsString>,
+    /// The executable with its links resolved (`std::env::current_exe`, on Linux
+    /// `readlink("/proc/self/exe")`, as NCBI's `/proc/<pid>/exe`).
+    current_exe: Option<PathBuf>,
+    /// The working directory (`CDir::GetCwd`, `getcwd`).
+    cwd: Option<PathBuf>,
+    /// The home directory of the user's passwd entry (`getpwuid(getuid())->pw_dir`), read only
+    /// when `HOME` is not set; `None` when the user has no entry.
+    passwd_home: Option<OsString>,
+}
+
+impl ProgramContext {
+    fn of_this_process() -> Self {
+        Self {
+            argv0: std::env::args_os().next(),
+            current_exe: std::env::current_exe().ok(),
+            cwd: std::env::current_dir().ok(),
+            // `std::env::home_dir` returns `HOME` when it is set and not empty, and otherwise
+            // the passwd entry's directory (`getpwuid_r(getuid())`); it is asked only when
+            // `HOME` is not set at all (`home_directory`).
+            passwd_home: if std::env::var_os("HOME").is_none() {
+                std::env::home_dir().map(PathBuf::into_os_string)
+            } else {
+                None
+            },
+        }
+    }
+}
+
+/// A directory of NCBI's registry search path.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum SearchDir {
+    Path(PathBuf),
+    /// The home directory when `HOME` is not set and the user has no passwd entry: NCBI then
+    /// looks the login name up (`USER`, `LOGNAME`, `getlogin()`, then `getpwnam`), which LOSAT
+    /// does not port (`AUTHORITY.md` §J-8 of `docs/evidence/losat_web_e2h/`).
+    UnknownHome,
+}
+
+/// `CDir::GetHome`: `HOME` when it is set (an empty value gives no directory), otherwise the
+/// passwd entry's directory; on Windows `APPDATA`, then `USERPROFILE` (re-audit round 2
+/// finding R-2 of session SFd).
+///
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:3586-3597
+/// ```c++
+/// static bool s_GetHomeByUID(string& home)
+/// {
+///     // Get the info using user ID
+///     struct passwd* pwd;
+///
+///     if ((pwd = getpwuid(getuid())) == 0) {
+///         LOG_ERROR_ERRNO(48, "s_GetHomeByUID(): getpwuid() failed");
+///         return false;
+///     }
+///     home = pwd->pw_dir;
+///     return true;
+/// }
+/// ```
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:3624-3657
+/// ```c++
+/// string CDir::GetHome(void)
+/// {
+///     string home;
+///
+/// #if defined(NCBI_OS_MSWIN)
+///     // Get home dir from environment variables
+///     // like - C:\Documents and Settings\user\Application Data
+///     const TXChar* str = NcbiSys_getenv(_TX("APPDATA"));
+///     if ( str ) {
+///         home = _T_CSTRING(str);
+///     } else {
+///         // like - C:\Documents and Settings\user
+///         str = NcbiSys_getenv(_TX("USERPROFILE"));
+///         if ( str ) {
+///             home = _T_CSTRING(str);
+///         }
+///     }
+/// #elif defined(NCBI_OS_UNIX)
+///     // Try get home dir from environment variable
+///     char* str = NcbiSys_getenv(_TX("HOME"));
+///     if ( str ) {
+///         home = str;
+///     } else {
+///         // Try to retrieve the home dir -- first use user's ID,
+///         // and if failed, then use user's login name.
+///         if ( !s_GetHomeByUID(home) ) {
+///             s_GetHomeByLOGIN(home);
+///         }
+///     }
+/// #endif
+///
+///     // Add trailing separator if needed
+///     return AddTrailingPathSeparator(home);
+/// }
+/// ```
+/// The messages of `LOG_ERROR_ERRNO` are written only with `[NCBI] FileAPILogging`
+/// (ncbifile.cpp:178-180, default false; its variable `NCBI_CONFIG__FILEAPILOGGING` is
+/// rejected).
+fn home_directory(env: &dyn Fn(&str) -> Option<OsString>, context: &ProgramContext) -> SearchDir {
+    let home = if cfg!(windows) {
+        env("APPDATA").or_else(|| env("USERPROFILE"))
+    } else {
+        match env("HOME") {
+            Some(home) => Some(home),
+            None => match &context.passwd_home {
+                Some(home) => Some(home.clone()),
+                None => return SearchDir::UnknownHome,
+            },
+        }
+    };
+    SearchDir::Path(PathBuf::from(home.unwrap_or_default()))
+}
+
+/// `CNcbiArguments::GetProgramDirname`: the name up to its last `/`, `\` or `:`, that byte
+/// included, or nothing.
+///
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbienv.cpp:408-415
+/// ```c++
+/// string CNcbiArguments::GetProgramDirname(EFollowLinks follow_links) const
+/// {
+///     const string& name = GetProgramName(follow_links);
+///     SIZE_TYPE base_pos = name.find_last_of("/\\:");
+///     if (base_pos == NPOS)
+///         return NcbiEmptyString;
+///     return name.substr(0, base_pos + 1);
+/// }
+/// ```
+fn program_dirname(name: &[u8]) -> &[u8] {
+    match name
+        .iter()
+        .rposition(|&byte| matches!(byte, b'/' | b'\\' | b':'))
+    {
+        Some(pos) => &name[..=pos],
+        None => &[],
+    }
+}
+
+/// `CDirEntry::NormalizePath` on Unix: `.`, `..` and empty components removed by the text of
+/// the path, and with `follow_links` every component that is a symbolic link replaced by its
+/// target as it is reached.
+///
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:820-971
+/// ```c++
+///     if ( path.empty() ) {
+///         return path;
+///     }
+///     ...
+///     current = DeleteTrailingPathSeparator(path);
+///     if ( current.empty() ) {
+///         // root dir
+///         return string(1, DIR_SEPARATOR);
+///     }
+///     while ( !current.empty()  ||  !tail.empty() ) {
+///         std::list<string> pretail;
+///         if ( !current.empty() ) {
+///             NStr::Split(current, kSep, pretail);
+///             current.erase();
+///             if (pretail.front().empty()
+///                 ) {
+///                 // Absolute path
+///                 head.clear();
+///             }
+///             tail.splice(tail.begin(), pretail);
+///         }
+///         string next;
+///         if (!tail.empty()) {
+///             next = tail.front();
+///             tail.pop_front();
+///         }
+///         if ( !head.empty() ) { // empty heads should accept anything
+///             string& last = head.back();
+///             if (last == DIR_CURRENT) {
+///                 if (!next.empty()) {
+///                     head.pop_back();
+///                 }
+///             } else if (next == DIR_CURRENT) {
+///                 // Leave out, since we already have content
+///                 continue;
+///             } else if (next.empty()) {
+///                 continue; // leave out empty components in most cases
+///             } else if (next == DIR_PARENT) {
+///                 // Back up if possible, assuming existing path to be "physical"
+///                 if (last.empty()) {
+///                     // Already at the root; .. is a no-op
+///                     continue;
+///                 } else if (last != DIR_PARENT) {
+///                     head.pop_back();
+///                     continue;
+///                 }
+///             }
+///         }
+/// #ifdef NCBI_OS_UNIX
+///         // Is there a Windows equivalent for readlink?
+///         if ( follow_links ) {
+///             string s(head.empty() ? next : NStr::Join(head, string(1, DIR_SEPARATOR)) + DIR_SEPARATOR + next);
+///             char buf[PATH_MAX];
+///             int  length = (int)readlink(s.c_str(), buf, sizeof(buf));
+///             if (length > 0) {
+///                 current.assign(buf, length);
+///                 if (++link_depth >= 1024) {
+///                     ...
+///                     follow_links = eIgnoreLinks;
+///                 }
+///                 continue;
+///             }
+///         }
+/// #endif
+///         // Normal case: just append the next element to head
+///         head.push_back(next);
+///     }
+///
+///     // Special cases
+///     if ( (head.size() == 0)  ||
+///          (head.size() == 2  &&  head.front() == DIR_CURRENT  &&  head.back().empty()) ) {
+///         // current dir
+///         return DIR_CURRENT;
+///     }
+///     if (head.size() == 1  &&  head.front().empty()) {
+///         // root dir
+///         return string(1, DIR_SEPARATOR);
+///     }
+///     ...
+///     // Compose path
+///     return NStr::Join(head, string(1, DIR_SEPARATOR));
+/// ```
+/// The symlink depth warning (1024 links) is not reproduced.
+fn normalize_path(path: &[u8], follow_links: bool) -> Vec<u8> {
+    if path.is_empty() {
+        return Vec::new();
+    }
+    // `DeleteTrailingPathSeparator` (ncbifile.cpp:465-472).
+    let end = path
+        .iter()
+        .rposition(|&byte| byte != b'/')
+        .map_or(0, |pos| pos + 1);
+    let mut current = path[..end].to_vec();
+    if current.is_empty() {
+        return b"/".to_vec();
+    }
+    let mut follow_links = follow_links;
+    let mut link_depth = 0;
+    let mut head: Vec<Vec<u8>> = Vec::new();
+    let mut tail: std::collections::VecDeque<Vec<u8>> = std::collections::VecDeque::new();
+    while !current.is_empty() || !tail.is_empty() {
+        if !current.is_empty() {
+            let pretail: Vec<Vec<u8>> = current
+                .split(|&byte| byte == b'/')
+                .map(<[u8]>::to_vec)
+                .collect();
+            current.clear();
+            if pretail[0].is_empty() {
+                head.clear();
+            }
+            for part in pretail.into_iter().rev() {
+                tail.push_front(part);
+            }
+        }
+        let next = tail.pop_front().unwrap_or_default();
+        if let Some(last) = head.last() {
+            if last.as_slice() == b"." {
+                if !next.is_empty() {
+                    head.pop();
+                }
+            } else if next.as_slice() == b"." || next.is_empty() {
+                continue;
+            } else if next.as_slice() == b".." {
+                if last.is_empty() {
+                    continue;
+                } else if last.as_slice() != b".." {
+                    head.pop();
+                    continue;
+                }
+            }
+        }
+        if follow_links {
+            let mut link = head.join(&b'/');
+            if !head.is_empty() {
+                link.push(b'/');
+            }
+            link.extend_from_slice(&next);
+            if let Ok(target) = std::fs::read_link(path_from_bytes(&link)) {
+                let target = target.as_os_str().as_encoded_bytes().to_vec();
+                if !target.is_empty() {
+                    current = target;
+                    link_depth += 1;
+                    if link_depth >= 1024 {
+                        follow_links = false;
+                    }
+                    continue;
+                }
+            }
+        }
+        head.push(next);
+    }
+    if head.is_empty() || (head.len() == 2 && head[0].as_slice() == b"." && head[1].is_empty()) {
+        return b".".to_vec();
+    }
+    if head.len() == 1 && head[0].is_empty() {
+        return b"/".to_vec();
+    }
+    head.join(&b'/')
+}
+
+/// `CNcbiApplicationAPI::FindProgramExecutablePath` outside Windows, as `AppMain` calls it
+/// (the program's name, as `CNcbiArguments` keeps it): `argv[0]` made absolute from the
+/// working directory when it names a file there, otherwise searched in `PATH` by its base
+/// name, then normalized without following links.
+///
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1451-1456
+/// ```c++
+///     if (argc > 0  &&  argv[0] != NULL  &&  argv[0][0] != '\0') {
+///         ret_val = argv[0];
+///     } else if (instance) {
+///         ret_val = instance->GetArguments().GetProgramName();
+///     }
+/// ```
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1544-1597
+/// ```c++
+///     string app_path = ret_val;
+///
+///     if ( !CDirEntry::IsAbsolutePath(app_path) ) {
+///         ...
+///         if ( CFile(app_path).Exists() ) {
+///             // Relative path from the the current directory
+///             app_path = CDir::GetCwd() + CDirEntry::GetPathSeparator() + app_path;
+///             if ( !CFile(app_path).Exists() ) {
+///                 app_path = kEmptyStr;
+///             }
+///         } else {
+///             // Running from some path from PATH environment variable.
+///             // Try to determine that path.
+///             string env_path;
+///             if (instance) {
+///                 env_path = instance->GetEnvironment().Get("PATH");
+///             } else {
+///                 env_path = _T_STDSTRING(NcbiSys_getenv(_TX("PATH")));
+///             }
+///             list<string> split_path;
+///             ...
+///             NStr::Split(env_path, ":", split_path,
+///                 NStr::fSplit_MergeDelimiters | NStr::fSplit_Truncate);
+///             ...
+///             string base_name = CDirEntry(app_path).GetBase();
+///             ITERATE(list<string>, it, split_path) {
+///                 app_path = CDirEntry::MakePath(*it, base_name);
+///                 if ( CFile(app_path).Exists() ) {
+///                     break;
+///                 }
+///                 app_path = kEmptyStr;
+///             }
+///         }
+///     }
+///     ret_val = CDirEntry::NormalizePath(
+///         (app_path.empty() && argv != NULL && argv[0] != NULL) ? argv[0] : app_path);
+/// ```
+/// `CFile::Exists` is `IsFile` (ncbifile.hpp:4039-4042: `stat`, links followed, a regular
+/// file). `GetBase` is the file name without its last extension (`SplitPath`,
+/// ncbifile.cpp:358-377). An empty `argv[0]` is looked up as `ncbi`, the name
+/// `CNcbiArguments` gives before its arguments are set (ncbienv.cpp:388-392); NCBI's warning
+/// for a name it cannot find then (ncbiapp.cpp:901-908) is not reproduced.
+fn find_program_executable_path(argv0: &[u8], cwd: Option<&Path>, path: Option<&OsStr>) -> Vec<u8> {
+    let is_file = |bytes: &[u8]| path_from_bytes(bytes).is_file();
+    let name: &[u8] = if argv0.is_empty() { b"ncbi" } else { argv0 };
+    let mut app_path = name.to_vec();
+    if !app_path.starts_with(b"/") {
+        if is_file(&app_path) {
+            let mut absolute = cwd
+                .map(|cwd| cwd.as_os_str().as_encoded_bytes().to_vec())
+                .unwrap_or_default();
+            absolute.push(b'/');
+            absolute.extend_from_slice(&app_path);
+            app_path = if is_file(&absolute) {
+                absolute
+            } else {
+                Vec::new()
+            };
+        } else {
+            // `CDirEntry(app_path)` drops trailing separators (ncbifile.cpp:298-313).
+            let entry = match app_path.iter().rposition(|&byte| byte != b'/') {
+                Some(pos) if app_path.len() > 1 => &app_path[..=pos],
+                _ => &app_path[..],
+            };
+            let file_name = match entry.iter().rposition(|&byte| byte == b'/') {
+                Some(pos) => &entry[pos + 1..],
+                None => entry,
+            };
+            let base_name = match file_name.iter().rposition(|&byte| byte == b'.') {
+                Some(pos) => &file_name[..pos],
+                None => file_name,
+            }
+            .to_vec();
+            app_path = Vec::new();
+            let path = path.map(OsStr::as_encoded_bytes).unwrap_or_default();
+            for dir in path
+                .split(|&byte| byte == b':')
+                .filter(|dir| !dir.is_empty())
+            {
+                // `MakePath`: the directory, a separator unless it ends with one, the name.
+                let mut candidate = dir.to_vec();
+                if !candidate.ends_with(b"/") {
+                    candidate.push(b'/');
+                }
+                candidate.extend_from_slice(&base_name);
+                if is_file(&candidate) {
+                    app_path = candidate;
+                    break;
+                }
+            }
+        }
+    }
+    let chosen: &[u8] = if app_path.is_empty() {
+        argv0
+    } else {
+        &app_path
+    };
+    normalize_path(chosen, false)
+}
+
+/// The program's directories in NCBI's registry search path (the `args.GetProgramDirname`
+/// part of `GetDefaultSearchPath`, quoted at `registry_search_path`).
+///
+/// The search path is built once, by the first use of `CMetaRegistry` (its constructor calls
+/// `GetDefaultSearchPath`). Normally that is the usage report's load of `.ncbirc` while the
+/// application object is constructed, before `AppMain` gives `CNcbiArguments` the program's
+/// name: `GetProgramDirname(eIgnoreLinks)` is then empty (the name `ncbi`) and only the
+/// resolved directory of `/proc/<pid>/exe` is searched on Linux (nothing elsewhere). When
+/// the usage report does not load `.ncbirc` (`args_known`: `BLAST_USAGE_REPORT` false,
+/// `NCBI_DONT_USE_NCBIRC` or `NCBI_CONFIG__NCBI__DONT_USE_NCBIRC` set), the first use is
+/// `LoadConfig`, after `AppMain` has set the name: the directory of the name as invoked
+/// (`FindProgramExecutablePath`, links not followed) comes first, then the resolved one when
+/// it differs (re-audit round 2 finding R-1 of session SFd).
+///
+/// NCBI reference (598d8ae6): c++/include/corelib/metareg.hpp:257-261
+/// ```c++
+/// inline
+/// CMetaRegistry::CMetaRegistry()
+/// {
+///     GetDefaultSearchPath(x_SetSearchPath());
+/// }
+/// ```
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbienv.cpp:373-393
+/// ```c++
+/// const string& CNcbiArguments::GetProgramName(EFollowLinks follow_links) const
+/// {
+///     if (follow_links) {
+///         CFastMutexGuard LOCK(m_ResolvedNameMutex);
+///         if ( !m_ResolvedName.size() ) {
+/// #ifdef NCBI_OS_LINUX
+///             string proc_link = "/proc/" + NStr::IntToString(getpid()) + "/exe";
+///             m_ResolvedName = CDirEntry::NormalizePath(proc_link, follow_links);
+/// #else
+///             m_ResolvedName = CDirEntry::NormalizePath(GetProgramName(eIgnoreLinks), follow_links);
+/// #endif
+///         }
+///         return m_ResolvedName;
+///     } else if ( !m_ProgramName.empty() ) {
+///         return m_ProgramName;
+///     } else if ( m_Args.size() ) {
+///         return m_Args[0];
+///     } else {
+///         static CSafeStatic<string> kDefProgramName;
+///         kDefProgramName->assign("ncbi");
+///         return kDefProgramName.Get();
+///     }
+/// }
+/// ```
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:881-882,1025-1026
+/// ```c++
+///     string exepath = FindProgramExecutablePath(argc, argv, &m_RealExePath);
+/// ...
+///     // Reset command-line args and application name
+///     m_Arguments->Reset(argc, argv, exepath, m_RealExePath);
+/// ```
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1510-1528
+/// ```c++
+///     if (real_path) {
+///         char buf[PATH_MAX + 1];
+///         string procfile = "/proc/" + NStr::IntToString(getpid()) + "/exe";
+///         int    ncount   = (int)readlink((procfile).c_str(), buf, PATH_MAX);
+///         if (ncount > 0) {
+///             real_path->assign(buf, ncount);
+///             ...
+///             real_path = 0;
+///         }
+///     }
+/// ```
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1603-1608
+/// ```c++
+///     // Save to cache and return
+///     *s_Path = ret_val;
+///     *s_RealPath = CDirEntry::NormalizePath(ret_val, eFollowLinks);
+///     if (real_path) {
+///         *real_path = *s_RealPath;
+///     }
+/// ```
+/// On Windows NCBI takes the module's file name (`GetModuleFileName`, `current_exe`) for
+/// both names (`NormalizePath` follows no links there). Only Linux was run against NCBI.
+fn program_directories(
+    context: &ProgramContext,
+    path: Option<&OsStr>,
+    args_known: bool,
+) -> Vec<PathBuf> {
+    let exe = context
+        .current_exe
+        .as_ref()
+        .map(|exe| exe.as_os_str().as_encoded_bytes().to_vec());
+    let (name, resolved): (Vec<u8>, Vec<u8>) = if !args_known {
+        if cfg!(target_os = "linux") {
+            (Vec::new(), exe.unwrap_or_default())
+        } else {
+            (Vec::new(), Vec::new())
+        }
+    } else if cfg!(windows) {
+        let exe = exe.unwrap_or_default();
+        (exe.clone(), exe)
+    } else {
+        let argv0 = context
+            .argv0
+            .as_ref()
+            .map(|argv0| argv0.as_encoded_bytes().to_vec())
+            .unwrap_or_default();
+        let name = find_program_executable_path(&argv0, context.cwd.as_deref(), path);
+        let resolved = match exe.filter(|_| cfg!(target_os = "linux")) {
+            Some(exe) => exe,
+            None => normalize_path(&name, true),
+        };
+        (name, resolved)
+    };
+    let dir = program_dirname(&name);
+    let dir2 = program_dirname(&resolved);
+    let mut dirs = Vec::new();
+    if !dir.is_empty() {
+        dirs.push(path_from_bytes(dir));
+    }
+    if !dir2.is_empty() && dir2 != dir {
+        dirs.push(path_from_bytes(dir2));
+    }
+    dirs
 }
 
 /// The directories where NCBI looks for its registry files, in order.
@@ -251,8 +827,9 @@ fn rejected_variable(name: &OsStr, value: &OsStr) -> Option<String> {
 ///     }
 /// }
 /// ```
-/// `kConfigPathDelim` is ":;" outside Windows (metareg.cpp:54-56). The program's directory
-/// is LOSAT's.
+/// `kConfigPathDelim` is ":;" outside Windows (metareg.cpp:54-56). The home directory is
+/// `home_directory`, the program's directories `program_directories`. `NCBI_CONFIG_PATH` is
+/// split as bytes, so a directory whose name is not UTF-8 is kept (finding R-3 of SFd).
 ///
 /// `NStr::Split` adds no token for an empty string, so a set but empty `NCBI_CONFIG_PATH`
 /// has no empty element and the search path stays empty: NCBI reads no `<program>.ini` and
@@ -268,63 +845,62 @@ fn rejected_variable(name: &OsStr, value: &OsStr) -> Option<String> {
 ///             return;
 ///         } else if (m_Delim.empty()) {
 /// ```
-fn registry_search_path(env: &dyn Fn(&str) -> Option<OsString>) -> Vec<PathBuf> {
-    let delimiters: &[char] = if cfg!(windows) { &[';'] } else { &[':', ';'] };
-    let mut path: Vec<PathBuf> = Vec::new();
-    let mut tail: Vec<PathBuf> = Vec::new();
+fn registry_search_path(
+    env: &dyn Fn(&str) -> Option<OsString>,
+    context: &ProgramContext,
+    args_known: bool,
+) -> Vec<SearchDir> {
+    let delimiters: &[u8] = if cfg!(windows) { b";" } else { b":;" };
+    let dir = |bytes: &[u8]| SearchDir::Path(path_from_bytes(bytes));
+    let mut path: Vec<SearchDir> = Vec::new();
+    let mut tail: Vec<SearchDir> = Vec::new();
     if let Some(config_path) = env("NCBI_CONFIG_PATH") {
-        let config_path = config_path.to_string_lossy().into_owned();
+        let config_path = config_path.as_encoded_bytes();
         if config_path.is_empty() {
             return path;
         }
-        let parts: Vec<&str> = config_path.split(delimiters).collect();
+        let parts: Vec<&[u8]> = config_path
+            .split(|byte| delimiters.contains(byte))
+            .collect();
         match parts.iter().position(|part| part.is_empty()) {
-            None => return parts.iter().map(PathBuf::from).collect(),
+            None => return parts.iter().map(|part| dir(part)).collect(),
             Some(empty) => {
-                path.extend(parts[..empty].iter().map(PathBuf::from));
+                path.extend(parts[..empty].iter().map(|part| dir(part)));
                 tail.extend(
                     parts[empty + 1..]
                         .iter()
                         .filter(|part| !part.is_empty())
-                        .map(PathBuf::from),
+                        .map(|part| dir(part)),
                 );
             }
         }
     }
     if env("NCBI_DONT_USE_LOCAL_CONFIG").is_none() {
-        path.push(PathBuf::from("."));
-        if let Some(home) = env(if cfg!(windows) { "USERPROFILE" } else { "HOME" }) {
-            if !home.is_empty() {
-                path.push(PathBuf::from(home));
-            }
+        path.push(SearchDir::Path(PathBuf::from(".")));
+        match home_directory(env, context) {
+            SearchDir::Path(home) if home.as_os_str().is_empty() => {}
+            home => path.push(home),
         }
     }
     if let Some(ncbi) = env("NCBI") {
         if !ncbi.is_empty() {
-            path.push(PathBuf::from(ncbi));
+            path.push(SearchDir::Path(PathBuf::from(ncbi)));
         }
     }
     if cfg!(windows) {
         if let Some(root) = env("SYSTEMROOT") {
             if !root.is_empty() {
-                path.push(PathBuf::from(root));
+                path.push(SearchDir::Path(PathBuf::from(root)));
             }
         }
     } else {
-        path.push(PathBuf::from("/etc"));
+        path.push(SearchDir::Path(PathBuf::from("/etc")));
     }
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            path.push(dir.to_path_buf());
-            if let Ok(resolved) = exe.canonicalize() {
-                if let Some(dir2) = resolved.parent() {
-                    if dir2 != dir {
-                        path.push(dir2.to_path_buf());
-                    }
-                }
-            }
-        }
-    }
+    path.extend(
+        program_directories(context, env("PATH").as_deref(), args_known)
+            .into_iter()
+            .map(SearchDir::Path),
+    );
     path.extend(tail);
     path
 }
@@ -600,24 +1176,38 @@ fn registry_lines(data: &[u8]) -> Vec<&[u8]> {
     lines
 }
 
-/// The entries of a registry file as NCBI's reader (`IRWRegistry::Read`, `x_Read`) stores
-/// them, in order, or the reason it does not read the file: a syntax error (NCBI stops at
-/// that line) or a UTF-16 file. A UTF-8 byte-order mark is skipped. An entry before the
-/// first section is read and checked but not stored (`IRWRegistry::Set` refuses the empty
-/// section name without a message).
+/// What `GetTextEncodingForm(is, eBOM_Discard)` leaves for the reader of a registry file.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TextForm<'a> {
+    /// The text after a UTF-8 byte-order mark, or all of it.
+    Text(&'a [u8]),
+    /// A UTF-16 byte-order mark: NCBI converts the rest to UTF-8 (`ReadIntoUtf8`), which
+    /// LOSAT does not port.
+    Utf16,
+    /// A file of one byte 0xEF, 0xFE or 0xFF: the second `get` meets the end of the file and
+    /// `unget()` then fails, so the stream is left failed without its end-of-file flag.
+    FailedStream,
+}
+
+/// `GetTextEncodingForm(is, eBOM_Discard)` on a registry file's `bytes` (re-audit round 2
+/// findings R-4 and R-5 of session SFd). A lead byte 0xEF, 0xFE or 0xFF followed by `BB BF`
+/// is a UTF-8 mark (the lead byte is not checked again); bytes read without a mark are put
+/// back (`Pushback` installs a new buffer through `rdbuf`, which clears the stream's state).
 ///
-/// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:617-623
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbistre.cpp:782-826
 /// ```c++
-///     // Ensure that x_Read gets a stream it can handle.
-///     EEncodingForm ef = GetTextEncodingForm(is, eBOM_Discard);
-///     if (ef == eEncodingForm_Utf16Native  ||  ef == eEncodingForm_Utf16Foreign) {
-///         CStringUTF8 s;
-///         ReadIntoUtf8(is, &s, ef);
-///         CNcbiIstrstream iss(s);
-///         return x_Read(iss, flags, path);
-/// ```
-/// NCBI reference (598d8ae6): c++/src/corelib/ncbistre.cpp:794-808
-/// ```c++
+/// EEncodingForm GetTextEncodingForm(CNcbiIstream& input,
+///                                   EBOMDiscard   discard_bom)
+/// {
+///     EEncodingForm ef = eEncodingForm_Unknown;
+///     if (input.good()) {
+///         const int bom_max = 4;
+///         char tmp[bom_max];
+///         memset(tmp, 0, bom_max);
+///         Uint2* us = reinterpret_cast<Uint2*>(tmp);
+///         Uchar* uc = reinterpret_cast<Uchar*>(tmp);
+///         input.get(tmp[0]);
+///         int n = (int) input.gcount();
 ///         if (n == 1  &&  (uc[0] == 0xEF  ||  uc[0] == 0xFE  ||  uc[0] == 0xFF)){
 ///             input.get(tmp[1]);
 ///             if (input.gcount() == 1) {
@@ -632,7 +1222,208 @@ fn registry_lines(data: &[u8]) -> Vec<&[u8]> {
 ///                         ++n;
 ///                         if (uc[2] == 0xBF) {
 ///                             ef = eEncodingForm_Utf8;
+///                         }
+///                     }
+///                 }
+///             }
+///         }
+///         if (ef == eEncodingForm_Unknown) {
+///             if (n > 1) {
+///                 CStreamUtils::Pushback(input, tmp, n);
+///             } else if (n == 1) {
+///                 input.unget();
+///             }
+///         } else {
+///             if (discard_bom == eBOM_Keep) {
+///                 CStreamUtils::Pushback(input, tmp, n);
+///             }
+///         }
+///     }
+///     return ef;
+/// }
 /// ```
+/// NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:143
+/// ```c++
+///     m_Sb = m_Is.rdbuf(this);
+/// ```
+/// When the stream already reads from a pushback buffer that holds the bytes, `Pushback`
+/// steps back in that buffer instead (no `rdbuf`, the state stays; `read_registry_text`).
+///
+/// NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:411-428
+/// ```c++
+///         // 2/ [make] equal to the [reasonably-sized, if copy] adjacent part
+///         //    of the internal buffer with the data that have just been read?
+///         if (how == ePushback_Stepback
+///             ||  (how == ePushback_Copy
+///                  &&  buf_size <= (del_ptr
+///                                   ? CPushback_Streambuf::kMinBufSize
+///                                   : CPushback_Streambuf::kMinBufSize >> 4))) {
+///             CT_CHAR_TYPE* bp = sb->gptr();
+///             size_t avail = bp - sb->m_Buf;
+///             size_t take  = avail < buf_size ? avail : buf_size;
+///             if (take) {
+///                 bp -= take;
+///                 buf_size -= take;
+///                 if (how != ePushback_Stepback  &&  bp != buf + buf_size) {
+///                     memmove(bp, buf + buf_size, take);
+///                 }
+///                 sb->setg(bp, bp, sb->egptr());
+///             }
+/// ```
+/// NCBI reference (598d8ae6): c++/src/corelib/stream_utils.cpp:323-327
+/// ```c++
+///         streamsize n = m_Sb->sgetn(bp ? bp : (CT_CHAR_TYPE*) m_DelPtr, r);
+///         if (n <= 0) {
+///             // NB: For unknown reasons WorkShop6 can return -1 from sgetn :-/
+///             delete[] bp;
+///             return;
+/// ```
+fn text_encoding_form(bytes: &[u8]) -> TextForm<'_> {
+    match bytes {
+        [0xFF, 0xFE, ..] | [0xFE, 0xFF, ..] => TextForm::Utf16,
+        [0xEF | 0xFE | 0xFF, 0xBB, 0xBF, rest @ ..] => TextForm::Text(rest),
+        [0xEF | 0xFE | 0xFF] => TextForm::FailedStream,
+        _ => TextForm::Text(bytes),
+    }
+}
+
+/// What NCBI writes to stderr when `IRWRegistry::x_Read` ends on a failed stream before its
+/// first line (`read_registry_text`): line 1, no path (`SEntry::Reload` and
+/// `CNcbiRegistry::x_Read` pass none) and an empty line, at the severity `Error` with the
+/// error code of the registry (110) and the subcode 4 (observed with NCBI BLAST+ 2.17.0 for
+/// `.ncbirc` and `<program>.ini`, before and after `AppMain` sets up the diagnostics).
+///
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:813-816
+/// ```c++
+///     if ( !is.eof() ) {
+///         ERR_POST_X(4, "Error reading the registry after line " << line
+///                    << in_path << ": " << str);
+///     }
+/// ```
+/// NCBI reference (598d8ae6): c++/include/corelib/error_codes.hpp:53
+/// ```c++
+/// NCBI_DEFINE_ERRCODE_X(Corelib_Reg,        110,  8);
+/// ```
+const REGISTRY_READ_ERROR: &str = "Error: (110.4) Error reading the registry after line 1: \n";
+
+/// A registry file as NCBI's reader leaves it: its entries, and whether `x_Read` reported a
+/// failed stream (`Error reading the registry after line 1: `, `REGISTRY_READ_ERROR`).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct RegistryText {
+    entries: Vec<RegistryEntry>,
+    read_error: bool,
+}
+
+/// Which reader reads a registry file: the encoding form is checked once for `.ncbirc` and
+/// twice for `<program>.ini`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RegistryKind {
+    /// `.ncbirc`: `IRWRegistry::Read` on a `CCompoundRWRegistry` (`SEntry::Reload`), whose
+    /// `x_Read` is `IRWRegistry::x_Read`.
+    Ncbirc,
+    /// `<program>.ini`: `IRWRegistry::Read` on the application's `CNcbiRegistry`, whose
+    /// `x_Read` passes the stream to `m_FileRegistry->Read`: a second `IRWRegistry::Read`,
+    /// which returns at once on a failed stream.
+    ProgramIni,
+}
+
+/// The registry file `bytes` read by the reader of `kind`: the encoding-form checks, then
+/// `registry_entries`.
+///
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:605-627
+/// ```c++
+/// IRWRegistry* IRWRegistry::Read(CNcbiIstream& is, TFlags flags,
+///                                const string& path)
+/// {
+///     ...
+///     if ( !is ) {
+///         return NULL;
+///     }
+///
+///     // Ensure that x_Read gets a stream it can handle.
+///     EEncodingForm ef = GetTextEncodingForm(is, eBOM_Discard);
+///     if (ef == eEncodingForm_Utf16Native  ||  ef == eEncodingForm_Utf16Foreign) {
+///         CStringUTF8 s;
+///         ReadIntoUtf8(is, &s, ef);
+///         CNcbiIstrstream iss(s);
+///         return x_Read(iss, flags, path);
+///     } else {
+///         return x_Read(is, flags, path);
+///     }
+/// }
+/// ```
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:1681-1692
+/// ```c++
+/// IRWRegistry* CNcbiRegistry::x_Read(CNcbiIstream& is, TFlags flags,
+///                                    const string& path)
+/// {
+///     // Normally, all settings should go to the main portion.  However,
+///     // loading an initial configuration file should instead go to the
+///     // file portion so that environment settings can take priority.
+///     CConstRef<IRegistry> main_reg(FindByName(sm_MainRegName));
+///     if (main_reg->Empty()  &&  m_FileRegistry->Empty()) {
+///         m_FileRegistry->Read(is, flags & ~fWithNcbirc);
+///         LoadBaseRegistries(flags, 0, path);
+///         IncludeNcbircIfAllowed(flags);
+///         return NULL;
+/// ```
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:2080-2089
+/// ```c++
+/// IRWRegistry* CCompoundRWRegistry::x_Read(CNcbiIstream& in, TFlags flags,
+///                                          const string& path)
+/// {
+///     ...
+///     IRWRegistry::x_Read(in, flags, path);
+/// ```
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:813-816
+/// ```c++
+///     if ( !is.eof() ) {
+///         ERR_POST_X(4, "Error reading the registry after line " << line
+///                    << in_path << ": " << str);
+///     }
+/// ```
+/// So `<program>.ini` reads after two UTF-8 marks, and a UTF-8 mark followed by a UTF-16 one
+/// is converted (LOSAT rejects it as UTF-16); a one-byte 0xEF/0xFE/0xFF `<program>.ini` is
+/// empty without a message (the second `Read` sees the failed stream), while a UTF-8 mark and
+/// one such byte, or a one-byte `.ncbirc`, is empty with the message (`x_Read` reads no line
+/// and the stream has no end-of-file flag). An empty file reads no line and reaches the end
+/// of the file: no message.
+fn read_registry_text(bytes: &[u8], kind: RegistryKind) -> Result<RegistryText, RegistryError> {
+    let failed = |read_error| RegistryText {
+        entries: Vec::new(),
+        read_error,
+    };
+    let text = match (text_encoding_form(bytes), kind) {
+        (TextForm::Utf16, _) => return Err(RegistryError::Utf16),
+        (TextForm::FailedStream, RegistryKind::Ncbirc) => return Ok(failed(true)),
+        (TextForm::FailedStream, RegistryKind::ProgramIni) => return Ok(failed(false)),
+        (TextForm::Text(text), RegistryKind::Ncbirc) => text,
+        // The first check put the two bytes back after meeting the end of the file (a new
+        // pushback buffer, state cleared); the second reads them from that buffer, meets the
+        // end again and puts them back into the same buffer, which leaves the stream's
+        // end-of-file and fail flags set: `x_Read` reads no line and posts nothing.
+        (TextForm::Text(_), RegistryKind::ProgramIni)
+            if matches!(bytes, [0xEF | 0xFE | 0xFF, 0xBB]) =>
+        {
+            return Ok(failed(false))
+        }
+        (TextForm::Text(text), RegistryKind::ProgramIni) => match text_encoding_form(text) {
+            TextForm::Utf16 => return Err(RegistryError::Utf16),
+            TextForm::FailedStream => return Ok(failed(true)),
+            TextForm::Text(text) => text,
+        },
+    };
+    Ok(RegistryText {
+        entries: registry_entries(text)?,
+        read_error: false,
+    })
+}
+
+/// The entries of the text of a registry file (after `text_encoding_form`) as NCBI's reader
+/// (`IRWRegistry::x_Read`) stores them, in order, or the line of a syntax error (NCBI stops
+/// at that line). An entry before the first section is read and checked but not stored
+/// (`IRWRegistry::Set` refuses the empty section name without a message).
+///
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:652-662
 /// ```c++
 ///     for (line = 1;  NcbiGetlineEOL(is, str);  ++line) {
@@ -743,11 +1534,7 @@ fn registry_lines(data: &[u8]) -> Vec<&[u8]> {
 /// ```
 /// The `CRegistryException` leaves `x_Read`, since NCBI's reads of `<program>.ini` and
 /// `.ncbirc` do not pass `fIgnoreErrors`.
-fn registry_entries(bytes: &[u8]) -> Result<Vec<RegistryEntry>, RegistryError> {
-    if bytes.starts_with(&[0xFF, 0xFE]) || bytes.starts_with(&[0xFE, 0xFF]) {
-        return Err(RegistryError::Utf16);
-    }
-    let data = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(bytes);
+fn registry_entries(data: &[u8]) -> Result<Vec<RegistryEntry>, RegistryError> {
     let syntax = |line: usize, reason: &'static str| RegistryError::Syntax { line, reason };
     let mut entries = Vec::new();
     let mut section = String::new();
@@ -830,22 +1617,78 @@ fn registry_entries(bytes: &[u8]) -> Result<Vec<RegistryEntry>, RegistryError> {
     Ok(entries)
 }
 
-/// The registry file that NCBI loads under `file_name` (the first one on the search path).
-fn find_registry(search_path: &[PathBuf], file_name: &str) -> Option<PathBuf> {
-    search_path
-        .iter()
-        .map(|dir| dir.join(file_name))
-        .find(|path| path.is_file())
+/// The registry file that NCBI loads under `file_name`: the first one on the search path that
+/// is a regular file (links followed), or LOSAT's rejection when the search reaches a home
+/// directory that LOSAT cannot know (`SearchDir::UnknownHome`).
+///
+/// NCBI reference (598d8ae6): c++/src/corelib/metareg.cpp:258-269
+/// ```c++
+///     if ( dir.empty() ) {
+///         ITERATE (TSearchPath, it, m_SearchPath) {
+///             const string& result
+///                 = x_FindRegistry(CDirEntry::MakePath(*it, name), style);
+///             if ( !result.empty() ) {
+///                 return result;
+///             }
+///         }
+///     } else {
+///         switch (style) {
+///         case eName_AsIs:
+///             if (CFile(name).Exists()) {
+/// ```
+fn find_registry(search_path: &[SearchDir], file_name: &str) -> Result<Option<PathBuf>, String> {
+    for dir in search_path {
+        match dir {
+            SearchDir::Path(dir) => {
+                let path = dir.join(file_name);
+                if path.is_file() {
+                    return Ok(Some(path));
+                }
+            }
+            SearchDir::UnknownHome => {
+                return Err(format!(
+                    "HOME is not set and the user has no passwd entry, so NCBI BLAST+ would look for its registry file {file_name} in the home directory of the login name (USER, LOGNAME or getlogin), which LOSAT does not look up; this is not supported by LOSAT"
+                ))
+            }
+        }
+    }
+    Ok(None)
 }
 
-/// The entries of the registry file at `path`, or LOSAT's rejection of a file that NCBI
-/// reports as a syntax error or that is UTF-16. On a syntax error NCBI writes a message with
-/// the text of the exception (for `.ncbirc` `Critical: ... Syntax error in system-wide
+/// The registry file at `path` as the reader of `kind` reads it, `None` when it cannot be
+/// opened (NCBI then loads no registry from it and does not look further: `SEntry::Reload`
+/// fails after `x_FindRegistry` has chosen the file; re-audit round 2 finding R-6 of session
+/// SFd), or LOSAT's rejection of a file that NCBI reports as a syntax error, that is UTF-16,
+/// or that LOSAT could open but not read. On a syntax error NCBI writes a message with the
+/// text of the exception (for `.ncbirc` `Critical: ... Syntax error in system-wide
 /// configuration file: NCBI C++ Exception:` with the path and line of NCBI's own source file,
 /// once for each reader of the file, and goes on with the entries before the line; for
 /// `<program>.ini` `Error: (CRegistryException::...) ...` and exit code 2), which LOSAT does
 /// not reproduce (`AUTHORITY.md` §J of `docs/evidence/losat_web_e2h/`).
 ///
+/// NCBI reference (598d8ae6): c++/src/corelib/metareg.cpp:62-84
+/// ```c++
+/// bool CMetaRegistry::SEntry::Reload(CMetaRegistry::TFlags reload_flags)
+/// {
+///     CFile file(actual_name);
+///     if ( !file.Exists() ) {
+///         _TRACE("No such registry file " << actual_name);
+///         return false;
+///     }
+///     ...
+///     CNcbiIfstream ifs(actual_name.c_str(), IOS_BASE::in | IOS_BASE::binary);
+///     if ( !ifs.good() ) {
+///         _TRACE("Unable to (re)open registry file " << actual_name);
+///         return false;
+///     }
+/// ```
+/// NCBI reference (598d8ae6): c++/src/corelib/metareg.cpp:228-231
+/// ```c++
+///     if (scratch_entry.actual_name.empty()
+///         ||  !scratch_entry.Reload(flags | fAlwaysReload | fKeepContents) ) {
+///         scratch_entry.registry.Reset();
+///         return scratch_entry;
+/// ```
 /// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:1659-1664
 /// ```c++
 ///     } catch (CRegistryException& e) {
@@ -863,19 +1706,30 @@ fn find_registry(search_path: &[PathBuf], file_name: &str) -> Option<PathBuf> {
 ///                 *got_exception = true;
 ///                 *exit_code = 2;
 /// ```
-fn read_registry_file(path: &Path) -> Result<Vec<RegistryEntry>, String> {
-    let bytes = std::fs::read(path)
-        .map_err(|error| format!("NCBI BLAST+ would read the registry file {} ({error}), which LOSAT cannot check; this is not supported by LOSAT", path.display()))?;
-    registry_entries(&bytes).map_err(|error| match error {
-        RegistryError::Syntax { line, reason } => format!(
-            "the registry file {} has {reason} on line {line}, which NCBI BLAST+ reports as a syntax error; this is not supported by LOSAT",
+fn read_registry_file(path: &Path, kind: RegistryKind) -> Result<Option<RegistryText>, String> {
+    use std::io::Read;
+    let Ok(mut file) = std::fs::File::open(path) else {
+        return Ok(None);
+    };
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes).map_err(|error| {
+        format!(
+            "NCBI BLAST+ would read the registry file {}, which LOSAT could open but not read ({error}); this is not supported by LOSAT",
             path.display()
-        ),
-        RegistryError::Utf16 => format!(
-            "the registry file {} is UTF-16, which NCBI BLAST+ converts to UTF-8 before reading it; this is not supported by LOSAT",
-            path.display()
-        ),
-    })
+        )
+    })?;
+    read_registry_text(&bytes, kind)
+        .map(Some)
+        .map_err(|error| match error {
+            RegistryError::Syntax { line, reason } => format!(
+                "the registry file {} has {reason} on line {line}, which NCBI BLAST+ reports as a syntax error; this is not supported by LOSAT",
+                path.display()
+            ),
+            RegistryError::Utf16 => format!(
+                "the registry file {} is UTF-16, which NCBI BLAST+ converts to UTF-8 before reading it; this is not supported by LOSAT",
+                path.display()
+            ),
+        })
 }
 
 /// Rejects an entry of a registry file that LOSAT does not know to change no output.
@@ -1137,14 +1991,31 @@ fn file_data_loaders(entries: &[RegistryEntry]) -> Option<&[u8]> {
 ///             return x_FindRegistry(CDirEntry::MakePath(dir, '.' + base, ext)
 ///                                   + "rc", eName_AsIs);
 /// ```
+///
+/// NCBI's readers of the registry files write `REGISTRY_READ_ERROR` to stderr once for each
+/// read of a file that leaves the stream failed (`read_registry_text`); LOSAT writes them
+/// before the program's own output, as NCBI does while it starts.
 pub fn check_ncbi_application_settings(program: &str) -> Result<ApplicationSettings, String> {
-    application_settings(program, std::env::vars_os(), &|name: &str| {
-        std::env::var_os(name)
-    })
+    let (settings, read_errors) = application_settings(
+        program,
+        std::env::vars_os(),
+        &|name: &str| std::env::var_os(name),
+        &ProgramContext::of_this_process(),
+    )?;
+    if read_errors > 0 {
+        use std::io::Write;
+        let mut stderr = std::io::stderr().lock();
+        for _ in 0..read_errors {
+            let _ = stderr.write_all(REGISTRY_READ_ERROR.as_bytes());
+        }
+        let _ = stderr.flush();
+    }
+    Ok(settings)
 }
 
-/// `check_ncbi_application_settings` over the environment `variables` (all of them) and
-/// `env` (one of them by name).
+/// `check_ncbi_application_settings` over the environment `variables` (all of them), `env`
+/// (one of them by name) and the program's `context`; returns the settings and the number of
+/// `REGISTRY_READ_ERROR` lines that NCBI's readers of the registry files write.
 ///
 /// NCBI reference (598d8ae6): c++/src/corelib/env_reg.cpp:366-375
 /// ```c++
@@ -1298,46 +2169,64 @@ fn application_settings(
     program: &str,
     variables: impl Iterator<Item = (OsString, OsString)>,
     env: &dyn Fn(&str) -> Option<OsString>,
-) -> Result<ApplicationSettings, String> {
+    context: &ProgramContext,
+) -> Result<(ApplicationSettings, usize), String> {
     for (name, value) in variables {
         if let Some(reason) = rejected_variable(&name, &value) {
             return Err(reason);
         }
     }
-    let search_path = registry_search_path(env);
     let ncbirc_allowed = env("NCBI_DONT_USE_NCBIRC").is_none()
         && env("NCBI_CONFIG__NCBI__DONT_USE_NCBIRC").is_none();
     // `rejected_variable` has rejected a BLAST_USAGE_REPORT that is not a Boolean.
     let usage_report_reads_ncbirc = ncbirc_allowed
         && env("BLAST_USAGE_REPORT")
             .is_none_or(|value| ncbi_string_to_bool(&value.to_string_lossy()) != Some(false));
+    // The search path is built by the first use of CMetaRegistry: the usage report's load of
+    // .ncbirc before the program's name is known, or else LoadConfig (`program_directories`).
+    let search_path = registry_search_path(env, context, !usage_report_reads_ncbirc);
+    let mut read_errors = 0;
     let mut application_reads_ncbirc = ncbirc_allowed;
-    let ini = find_registry(&search_path, &format!("{program}.ini"));
+    // A <program>.ini that cannot be opened is no registry: LoadConfig goes on as without one.
+    let ini = match find_registry(&search_path, &format!("{program}.ini"))? {
+        Some(path) => read_registry_file(&path, RegistryKind::ProgramIni)?.map(|text| (path, text)),
+        None => None,
+    };
     let ini_entries = match &ini {
-        Some(path) => {
-            let entries = read_registry_file(path)?;
-            check_registry_entries(path, &entries)?;
-            if entries.iter().any(|entry| {
+        Some((path, text)) => {
+            check_registry_entries(path, &text.entries)?;
+            read_errors += usize::from(text.read_error);
+            if text.entries.iter().any(|entry| {
                 entry.section.eq_ignore_ascii_case("NCBI")
                     && entry.name.eq_ignore_ascii_case("DONT_USE_NCBIRC")
             }) {
                 application_reads_ncbirc = false;
             }
-            entries
+            text.entries.clone()
         }
         None => Vec::new(),
     };
+    // The application reads .ncbirc itself unless it copies the usage report's cached
+    // registry (no <program>.ini and the usage report loaded the file).
+    let ncbirc_read_directly = ini.is_some() || !usage_report_reads_ncbirc;
     let mut ncbirc_entries = Vec::new();
     if usage_report_reads_ncbirc || application_reads_ncbirc {
-        if let Some(path) = find_registry(&search_path, ".ncbirc") {
-            let entries = read_registry_file(&path)?;
+        let ncbirc = match find_registry(&search_path, ".ncbirc")? {
+            Some(path) => read_registry_file(&path, RegistryKind::Ncbirc)?.map(|text| (path, text)),
+            None => None,
+        };
+        if let Some((path, text)) = ncbirc {
+            if text.read_error {
+                read_errors += usize::from(usage_report_reads_ncbirc)
+                    + usize::from(application_reads_ncbirc && ncbirc_read_directly);
+            }
             if application_reads_ncbirc {
-                check_registry_entries(&path, &entries)?;
-                ncbirc_entries = entries;
+                check_registry_entries(&path, &text.entries)?;
+                ncbirc_entries = text.entries;
             } else if env("NCBI_CONFIG__BLAST__BLAST_USAGE_REPORT").is_none() {
                 // Only the usage report reads the file: its last [BLAST] BLAST_USAGE_REPORT,
                 // empty included (read into the usage report's own registry).
-                let usage = entries.iter().rev().find(|entry| {
+                let usage = text.entries.iter().rev().find(|entry| {
                     entry.section.eq_ignore_ascii_case("BLAST")
                         && entry.name.eq_ignore_ascii_case("BLAST_USAGE_REPORT")
                 });
@@ -1347,18 +2236,20 @@ fn application_settings(
             }
         }
     }
-    let ncbirc_read_directly = ini.is_some() || !usage_report_reads_ncbirc;
     let env_data_loaders = env("NCBI_CONFIG__BLAST__DATA_LOADERS");
-    Ok(ApplicationSettings {
-        data_loaders: data_loaders_of(
-            env_data_loaders.as_deref().map(OsStr::as_encoded_bytes),
-            [
-                file_data_loaders(&ini_entries),
-                file_data_loaders(&ncbirc_entries)
-                    .filter(|value| ncbirc_read_directly || !value.is_empty()),
-            ],
-        ),
-    })
+    Ok((
+        ApplicationSettings {
+            data_loaders: data_loaders_of(
+                env_data_loaders.as_deref().map(OsStr::as_encoded_bytes),
+                [
+                    file_data_loaders(&ini_entries),
+                    file_data_loaders(&ncbirc_entries)
+                        .filter(|value| ncbirc_read_directly || !value.is_empty()),
+                ],
+            ),
+        },
+        read_errors,
+    ))
 }
 
 #[cfg(test)]
@@ -1477,10 +2368,6 @@ mod tests {
             value(b"[x.y-z_1/w]\n[BLAST]\nDATA_LOADERS=none\n"),
             Some(b"none".to_vec())
         );
-        assert_eq!(
-            value(b"\xef\xbb\xbf[BLAST]\nDATA_LOADERS=none\n"),
-            Some(b"none".to_vec())
-        );
         assert_eq!(value(b"DATA_LOADERS=none\n"), None);
         assert_eq!(registry_entries(b"LONG_SEQID=1\n").unwrap(), vec![]);
         assert_eq!(
@@ -1504,19 +2391,109 @@ mod tests {
         if !cfg!(target_os = "macos") {
             assert_eq!(value(b"[BLAST]\rDATA_LOADERS=none\r"), None);
         }
-        // A UTF-16 file is not read.
+    }
+
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbistre.cpp:782-826 (GetTextEncodingForm),
+    // c++/src/corelib/ncbireg.cpp:605-627, 1681-1692, 2080-2089 (one check for .ncbirc, two
+    // for <program>.ini) and :813-816 (the message after a failed stream); re-audit round 2
+    // findings R-4 and R-5 of session SFd.
+    #[test]
+    fn byte_order_marks_are_checked_as_ncbis_readers_do() {
+        use RegistryKind::{Ncbirc, ProgramIni};
+        let loaders = |text: &[u8], kind| {
+            read_registry_text(text, kind).map(|read| {
+                (
+                    read.entries
+                        .iter()
+                        .rev()
+                        .find(|e| e.name.eq_ignore_ascii_case("DATA_LOADERS"))
+                        .map(|e| e.value.clone()),
+                    read.read_error,
+                )
+            })
+        };
+        let none = Some(b"none".to_vec());
+        let body = b"[BLAST]\nDATA_LOADERS=none\n";
+        let with = |prefix: &[u8]| [prefix, &body[..]].concat();
+        for kind in [Ncbirc, ProgramIni] {
+            assert_eq!(loaders(body, kind), Ok((none.clone(), false)));
+            // A UTF-8 mark is skipped, also after the lead bytes 0xFE and 0xFF.
+            for lead in [0xEF, 0xFE, 0xFF] {
+                assert_eq!(
+                    loaders(&with(&[lead, 0xBB, 0xBF]), kind),
+                    Ok((none.clone(), false))
+                );
+            }
+            // An incomplete mark is put back and read as text.
+            assert!(matches!(
+                read_registry_text(&with(b"\xef\xbb"), kind),
+                Err(RegistryError::Syntax { line: 1, .. })
+            ));
+            assert!(matches!(
+                read_registry_text(b"\xfe", kind),
+                Ok(RegistryText { ref entries, .. }) if entries.is_empty()
+            ));
+            assert_eq!(
+                read_registry_text(&with(b"\xff\xfe"), kind),
+                Err(RegistryError::Utf16)
+            );
+            assert_eq!(
+                read_registry_text(&with(b"\xfe\xff"), kind),
+                Err(RegistryError::Utf16)
+            );
+            assert_eq!(loaders(b"", kind), Ok((None, false)));
+            assert_eq!(loaders(b"\xef\xbb\xbf", kind), Ok((None, false)));
+        }
+        // One byte 0xEF/0xFE/0xFF: empty; the message for .ncbirc only.
+        for byte in [0xEF, 0xFE, 0xFF] {
+            assert_eq!(loaders(&[byte], Ncbirc), Ok((None, true)));
+            assert_eq!(loaders(&[byte], ProgramIni), Ok((None, false)));
+            // After a UTF-8 mark: .ncbirc reads the byte as a line, <program>.ini checks again.
+            assert!(matches!(
+                read_registry_text(&[0xEF, 0xBB, 0xBF, byte], Ncbirc),
+                Err(RegistryError::Syntax { line: 1, .. })
+            ));
+            assert_eq!(
+                loaders(&[0xEF, 0xBB, 0xBF, byte], ProgramIni),
+                Ok((None, true))
+            );
+        }
+        // [lead, BB] alone: .ncbirc reads it as a line; <program>.ini's second check leaves
+        // the stream failed at its end (empty, no message); after a UTF-8 mark it is a line.
+        for lead in [0xEF, 0xFE, 0xFF] {
+            assert!(matches!(
+                read_registry_text(&[lead, 0xBB], Ncbirc),
+                Err(RegistryError::Syntax { line: 1, .. })
+            ));
+            assert_eq!(loaders(&[lead, 0xBB], ProgramIni), Ok((None, false)));
+            assert!(matches!(
+                read_registry_text(&[0xEF, 0xBB, 0xBF, lead, 0xBB], ProgramIni),
+                Err(RegistryError::Syntax { line: 1, .. })
+            ));
+        }
+        // Two UTF-8 marks, or a UTF-8 mark and a UTF-16 one: <program>.ini checks twice.
+        let twice = with(b"\xef\xbb\xbf\xef\xbb\xbf");
+        assert_eq!(loaders(&twice, ProgramIni), Ok((none.clone(), false)));
+        assert!(matches!(
+            read_registry_text(&twice, Ncbirc),
+            Err(RegistryError::Syntax { line: 1, .. })
+        ));
+        let utf16: Vec<u8> = [
+            &b"\xef\xbb\xbf\xff\xfe"[..],
+            &"[BLAST]\n"
+                .encode_utf16()
+                .flat_map(u16::to_le_bytes)
+                .collect::<Vec<u8>>(),
+        ]
+        .concat();
         assert_eq!(
-            registry_entries(b"\xff\xfe[\0B\0]\0"),
+            read_registry_text(&utf16, ProgramIni),
             Err(RegistryError::Utf16)
         );
-        assert_eq!(
-            registry_entries(b"\xfe\xff\0[\0B\0]"),
-            Err(RegistryError::Utf16)
-        );
-        assert_eq!(
-            syntax_line(b"\xef\xbb[BLAST]\nDATA_LOADERS=none\n"),
-            Some(1)
-        );
+        assert!(matches!(
+            read_registry_text(&utf16, Ncbirc),
+            Err(RegistryError::Syntax { line: 1, .. })
+        ));
     }
 
     // NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:743-781 (continuation lines
@@ -1584,6 +2561,28 @@ mod tests {
         assert!(registry_entries(b"[BLAST]\nDATA_LOADERS=genbank\\").is_err());
     }
 
+    fn context(
+        argv0: Option<&str>,
+        current_exe: Option<&str>,
+        passwd_home: Option<&str>,
+    ) -> ProgramContext {
+        ProgramContext {
+            argv0: argv0.map(OsString::from),
+            current_exe: current_exe.map(PathBuf::from),
+            cwd: std::env::current_dir().ok(),
+            passwd_home: passwd_home.map(OsString::from),
+        }
+    }
+
+    fn dirs(path: &[SearchDir]) -> Vec<PathBuf> {
+        path.iter()
+            .map(|dir| match dir {
+                SearchDir::Path(path) => path.clone(),
+                SearchDir::UnknownHome => PathBuf::from("<unknown home>"),
+            })
+            .collect()
+    }
+
     #[test]
     fn the_search_path_follows_ncbi_config_path() {
         let env = |pairs: &'static [(&'static str, &'static str)]| {
@@ -1594,23 +2593,181 @@ mod tests {
                     .map(|(_, value)| OsString::from(value))
             }
         };
-        let only = registry_search_path(&env(&[("NCBI_CONFIG_PATH", "/a:/b")]));
+        let none = context(None, None, None);
+        let search = |pairs: &'static [(&'static str, &'static str)]| {
+            dirs(&registry_search_path(&env(pairs), &none, false))
+        };
+        let only = search(&[("NCBI_CONFIG_PATH", "/a:/b")]);
         assert_eq!(only, vec![PathBuf::from("/a"), PathBuf::from("/b")]);
-        let spliced = registry_search_path(&env(&[("NCBI_CONFIG_PATH", "/a::/z"), ("HOME", "/h")]));
+        let spliced = search(&[("NCBI_CONFIG_PATH", "/a::/z"), ("HOME", "/h")]);
         assert_eq!(
             &spliced[..3],
             &[PathBuf::from("/a"), PathBuf::from("."), PathBuf::from("/h")]
         );
         assert_eq!(spliced.last(), Some(&PathBuf::from("/z")));
-        let no_local =
-            registry_search_path(&env(&[("NCBI_DONT_USE_LOCAL_CONFIG", ""), ("NCBI", "/n")]));
+        let no_local = search(&[("NCBI_DONT_USE_LOCAL_CONFIG", ""), ("NCBI", "/n")]);
         assert_eq!(&no_local[..1], &[PathBuf::from("/n")]);
         // A set but empty NCBI_CONFIG_PATH has no token, so no directory is searched
         // (ncbistr_util.hpp:268-273; audit finding A-3/B-4 of session SFd); ":" has two empty
         // tokens and splices in the default directories.
-        assert!(registry_search_path(&env(&[("NCBI_CONFIG_PATH", ""), ("HOME", "/h")])).is_empty());
-        let colon = registry_search_path(&env(&[("NCBI_CONFIG_PATH", ":"), ("HOME", "/h")]));
+        assert!(search(&[("NCBI_CONFIG_PATH", ""), ("HOME", "/h")]).is_empty());
+        let colon = search(&[("NCBI_CONFIG_PATH", ":"), ("HOME", "/h")]);
         assert_eq!(&colon[..2], &[PathBuf::from("."), PathBuf::from("/h")]);
+        // NCBI_CONFIG_PATH is split as bytes (finding R-3 of SFd).
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStrExt;
+            let bytes = |name: &str| {
+                (name == "NCBI_CONFIG_PATH")
+                    .then(|| OsStr::from_bytes(b"/x\xffy:/z").to_os_string())
+            };
+            assert_eq!(
+                dirs(&registry_search_path(&bytes, &none, false)),
+                vec![
+                    PathBuf::from(OsStr::from_bytes(b"/x\xffy")),
+                    PathBuf::from("/z")
+                ]
+            );
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:3586-3657 (CDir::GetHome: HOME
+    // when set, also empty; otherwise the passwd entry's directory, then the login name);
+    // re-audit round 2 finding R-2 of session SFd.
+    #[test]
+    fn the_home_directory_falls_back_to_the_passwd_entry() {
+        if cfg!(windows) {
+            return;
+        }
+        let env = |home: Option<&'static str>| {
+            move |name: &str| {
+                (name == "HOME")
+                    .then_some(home)
+                    .flatten()
+                    .map(OsString::from)
+            }
+        };
+        let home = |home: Option<&'static str>, passwd: Option<&str>| {
+            let path = registry_search_path(&env(home), &context(None, None, passwd), false);
+            path.get(1).cloned()
+        };
+        let at = |dir: &str| Some(SearchDir::Path(PathBuf::from(dir)));
+        assert_eq!(home(Some("/h"), Some("/p")), at("/h"));
+        assert_eq!(home(None, Some("/p")), at("/p"));
+        // An empty HOME, or an empty passwd directory, gives no home directory.
+        assert_eq!(home(Some(""), Some("/p")), at("/etc"));
+        assert_eq!(home(None, Some("")), at("/etc"));
+        // No passwd entry: NCBI looks the login name up, which LOSAT does not.
+        assert_eq!(home(None, None), Some(SearchDir::UnknownHome));
+        let path = registry_search_path(&env(None), &context(None, None, None), false);
+        assert!(find_registry(&path[..1], ".ncbirc").unwrap().is_none());
+        assert!(find_registry(&path, ".ncbirc")
+            .unwrap_err()
+            .contains("passwd"));
+    }
+
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbienv.cpp:408-415 (GetProgramDirname) and
+    // c++/src/corelib/ncbifile.cpp:820-971 (NormalizePath).
+    #[test]
+    fn program_names_are_cut_and_normalized_like_ncbis() {
+        assert_eq!(program_dirname(b"/a/b/LOSAT"), b"/a/b/");
+        assert_eq!(program_dirname(b"LOSAT"), b"");
+        assert_eq!(program_dirname(b"/a/my:dir/LOSAT"), b"/a/my:dir/");
+        assert_eq!(program_dirname(b"/a/my:LOSAT"), b"/a/my:");
+        assert_eq!(program_dirname(b"/a/b\\LOSAT"), b"/a/b\\");
+        for (path, normal) in [
+            (&b""[..], &b""[..]),
+            (b"/", b"/"),
+            (b"///", b"/"),
+            (b"/a/b/", b"/a/b"),
+            (b"/a//b", b"/a/b"),
+            (b"/a/./b", b"/a/b"),
+            (b"/a/../b", b"/b"),
+            (b"/../a", b"/a"),
+            (b"/a/b/..", b"/a"),
+            (b"./a", b"a"),
+            (b"a/./b/", b"a/b"),
+            (b".", b"."),
+            (b"./", b"."),
+            (b"a/..", b"."),
+            (b"../a", b"../a"),
+            (b"../../a", b"../../a"),
+            (b"a/../../b", b"../b"),
+        ] {
+            assert_eq!(normalize_path(path, false), normal, "{path:?}");
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1426-1609
+    // (FindProgramExecutablePath), metareg.cpp:375-388 and ncbienv.cpp:373-393 (the program's
+    // directories before and after AppMain sets the name); re-audit round 2 finding R-1.
+    #[cfg(unix)]
+    #[test]
+    fn the_program_directories_depend_on_when_the_search_path_is_built() {
+        let dir = std::env::temp_dir().join(format!(
+            "losat-ncbi-environment-program-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let dir = std::fs::canonicalize(&dir).unwrap();
+        let real = dir.join("real");
+        let sym = dir.join("sym");
+        std::fs::create_dir_all(&real).unwrap();
+        std::fs::create_dir_all(&sym).unwrap();
+        let exe = real.join("LOSAT");
+        std::fs::write(&exe, b"").unwrap();
+        let link = sym.join("LOSAT");
+        let _ = std::fs::remove_file(&link);
+        std::os::unix::fs::symlink(&exe, &link).unwrap();
+        let text = |path: &Path| path.as_os_str().as_encoded_bytes().to_vec();
+        let argv0 = text(&link);
+        let path_var = OsString::from(format!("/nonexistent::{}", sym.display()));
+        // An absolute argv[0] is kept, links not followed.
+        assert_eq!(find_program_executable_path(&argv0, None, None), argv0);
+        // A bare name is searched in PATH (empty elements skipped).
+        assert_eq!(
+            find_program_executable_path(b"LOSAT", None, Some(&path_var)),
+            argv0
+        );
+        // A name found nowhere stays as it is.
+        assert_eq!(
+            find_program_executable_path(b"nowhere/x", None, None),
+            b"nowhere/x"
+        );
+        let cwd = std::env::current_dir().unwrap();
+        let ctx = ProgramContext {
+            argv0: Some(link.clone().into_os_string()),
+            current_exe: Some(exe.clone()),
+            cwd: Some(cwd),
+            passwd_home: None,
+        };
+        let with_slash = |path: &Path| {
+            let mut bytes = text(path);
+            bytes.push(b'/');
+            path_from_bytes(&bytes)
+        };
+        if cfg!(target_os = "linux") {
+            assert_eq!(
+                program_directories(&ctx, None, false),
+                vec![with_slash(&real)]
+            );
+        } else {
+            assert!(program_directories(&ctx, None, false).is_empty());
+        }
+        assert_eq!(
+            program_directories(&ctx, None, true),
+            vec![with_slash(&sym), with_slash(&real)]
+        );
+        // A direct start: one directory.
+        let direct = ProgramContext {
+            argv0: Some(exe.clone().into_os_string()),
+            ..ctx
+        };
+        assert_eq!(
+            program_directories(&direct, None, true),
+            vec![with_slash(&real)]
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_scope_src.cpp:75-92
@@ -1693,8 +2850,9 @@ mod tests {
                 all.iter()
                     .map(|(n, v)| (OsString::from(n), OsString::from(v))),
                 &env,
+                &context(None, None, None),
             )
-            .map(|settings| settings.data_loaders)
+            .map(|(settings, _)| settings.data_loaders)
         };
         let _ = std::fs::remove_file(&ini);
         let _ = std::fs::remove_file(&ncbirc);
@@ -1785,6 +2943,88 @@ mod tests {
         assert_eq!(settings(&[("NCBI_DONT_USE_NCBIRC", "1")]), Ok(true));
         std::fs::remove_file(&ncbirc).unwrap();
         std::fs::remove_dir(&dir).unwrap();
+    }
+
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:813-816 (the message of a failed
+    // stream, once for each read of the file: the usage report's, and the application's
+    // unless it copies the usage report's cached registry) and metareg.cpp:62-84 (a file that
+    // cannot be opened is no registry, and the search does not go on); re-audit round 2
+    // findings R-5, R-6 and R-7 of session SFd.
+    #[test]
+    fn registry_read_errors_and_unreadable_files_follow_ncbi() {
+        let dir = std::env::temp_dir().join(format!(
+            "losat-ncbi-environment-read-errors-{}",
+            std::process::id()
+        ));
+        let home = dir.join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        let ini = dir.join("blastn.ini");
+        let ncbirc = dir.join(".ncbirc");
+        let settings = |pairs: &[(&str, &str)]| {
+            let mut all = vec![(
+                "NCBI_CONFIG_PATH".to_string(),
+                format!("{}:{}", dir.display(), home.display()),
+            )];
+            all.extend(pairs.iter().map(|(n, v)| (n.to_string(), v.to_string())));
+            let env = |name: &str| {
+                all.iter()
+                    .find(|(key, _)| key == name)
+                    .map(|(_, value)| OsString::from(value))
+            };
+            application_settings(
+                "blastn",
+                all.iter()
+                    .map(|(n, v)| (OsString::from(n), OsString::from(v))),
+                &env,
+                &context(None, None, None),
+            )
+            .map(|(settings, read_errors)| (settings.data_loaders, read_errors))
+        };
+        let _ = std::fs::remove_file(&ini);
+        std::fs::write(&ncbirc, [0xFF]).unwrap();
+        assert_eq!(settings(&[]), Ok((true, 1)));
+        assert_eq!(settings(&[("BLAST_USAGE_REPORT", "false")]), Ok((true, 1)));
+        assert_eq!(settings(&[("NCBI_DONT_USE_NCBIRC", "")]), Ok((true, 0)));
+        std::fs::write(&ini, b"[BLAST]\nBLASTDB=/x\n").unwrap();
+        assert_eq!(settings(&[]), Ok((true, 2)));
+        assert_eq!(settings(&[("BLAST_USAGE_REPORT", "no")]), Ok((true, 1)));
+        std::fs::write(&ini, b"[NCBI]\nDONT_USE_NCBIRC=1\n").unwrap();
+        assert_eq!(settings(&[]), Ok((true, 1)));
+        assert_eq!(settings(&[("BLAST_USAGE_REPORT", "no")]), Ok((true, 0)));
+        // A one-byte <program>.ini is empty and silent; after a UTF-8 mark it has the message.
+        std::fs::write(&ini, [0xFE]).unwrap();
+        assert_eq!(settings(&[]), Ok((true, 2)));
+        std::fs::write(&ini, [0xEF, 0xBB, 0xBF, 0xFE]).unwrap();
+        assert_eq!(settings(&[]), Ok((true, 3)));
+        // Still a <program>.ini: .ncbirc is read into the application's registry itself.
+        std::fs::write(&ini, [0xFE]).unwrap();
+        std::fs::write(&ncbirc, b"[BLAST]\nDATA_LOADERS=\n").unwrap();
+        assert_eq!(settings(&[]), Ok((false, 0)));
+        std::fs::remove_file(&ini).unwrap();
+        assert_eq!(settings(&[]), Ok((true, 0)));
+        // A file that cannot be opened is no registry and hides the next one.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::write(home.join(".ncbirc"), b"[BLAST]\nDATA_LOADERS=none\n").unwrap();
+            std::fs::write(&ncbirc, b"[BLAST]\nLONG_SEQID=1\n").unwrap();
+            std::fs::set_permissions(&ncbirc, std::fs::Permissions::from_mode(0o000)).unwrap();
+            if std::fs::File::open(&ncbirc).is_err() {
+                assert_eq!(settings(&[]), Ok((true, 0)));
+                std::fs::write(&ini, b"[BLAST]\nLONG_SEQID=1\n").ok();
+                std::fs::set_permissions(&ini, std::fs::Permissions::from_mode(0o000)).unwrap();
+                assert_eq!(settings(&[]), Ok((true, 0)));
+                std::fs::set_permissions(&ini, std::fs::Permissions::from_mode(0o644)).unwrap();
+                std::fs::remove_file(&ini).unwrap();
+            }
+            std::fs::set_permissions(&ncbirc, std::fs::Permissions::from_mode(0o644)).unwrap();
+            std::fs::remove_file(home.join(".ncbirc")).unwrap();
+        }
+        // An empty NCBI_CONFIG_OVERRIDES is not set.
+        std::fs::remove_file(&ncbirc).unwrap();
+        assert_eq!(settings(&[("NCBI_CONFIG_OVERRIDES", "")]), Ok((true, 0)));
+        assert!(settings(&[("NCBI_CONFIG_OVERRIDES", "/x")]).is_err());
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

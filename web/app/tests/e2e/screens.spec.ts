@@ -238,9 +238,15 @@ async function openFilters(page: Page): Promise<void> {
   await expect(page.getByTestId('filter-subject')).toBeVisible();
 }
 
-/** Opens a completed run from the queue and waits until its first query's first HSP is read. */
+/**
+ * Opens a completed run from the queue and waits until its first query's first HSP is read. The
+ * button gets the click as an event, not at a point of the screen: on a phone the queue is below
+ * the results, and WebKit (which does not anchor the scroll) moved it down between the click's aim
+ * and the click when alignment sections above it were read late (S15's gate 2: run 2's row got the
+ * click meant for run 1's "Open results").
+ */
 async function openResults(page: Page, number: number): Promise<void> {
-  await page.getByTestId(`run-${number}-open`).click();
+  await page.getByTestId(`run-${number}-open`).dispatchEvent('click');
   await expect(page.getByTestId('results-hits')).toHaveAttribute('data-run', String(number), { timeout: 60_000 });
   await page.getByTestId('results-view-hits').click();
   await expect(page.getByTestId('hsp-detail')).toHaveAttribute('data-state', 'ready', { timeout: 60_000 });

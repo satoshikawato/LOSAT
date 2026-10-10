@@ -2527,6 +2527,9 @@ pub fn x_newtonexact_print_stats() {
             X_NEWTONEXACT_SHADOWED.load(std::sync::atomic::Ordering::Relaxed)
         );
     }
+    // No NCBI counterpart: LOSAT_X_NEWTONLANES shadow and LOSAT_X_STATS counters; it does not change any
+    // value NCBI computes.
+    super::x_newton_lanes::print_stats();
 }
 
 // No NCBI counterpart: prints the LOSAT_X_ADJMEMO_STATS counters; it does not change any value NCBI computes.
@@ -3346,6 +3349,54 @@ fn optimize_target_frequencies(
     // `optimize_target_frequencies_reference`, the port of this function. The exact module handles only
     // `alphsize == 20` with `constrain_rel_entropy`.
     if constrain_rel_entropy && alphsize == COMPO_NUM_TRUE_AA {
+        // EXPERIMENT (LOSAT_X_NEWTONLANES / LOSAT_X_NEWTONLANESSHADOW): a result computed ahead
+        // (four problems per vector, x_newton_lanes.rs) for exactly this input.
+        // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:686-687,693-696
+        // ```c
+        // int
+        // Blast_OptimizeTargetFrequencies(double x[],
+        // ...
+        //                                 int constrain_rel_entropy,
+        //                                 double relative_entropy,
+        //                                 double tol,
+        //                                 int maxits)
+        // ```
+        // No NCBI counterpart: the stored result was computed by the operations of this function on an
+        // input with the same bits (q, row and column sums, relative entropy); the shadow mode runs the
+        // port of this function as well and compares status and all 400 values by bits. It does not
+        // change any value NCBI computes.
+        let x_lanes_mode = super::x_newton_lanes::mode();
+        if x_lanes_mode != 0 {
+            if let Some(status) =
+                super::x_newton_lanes::take(x, q, row_sums, col_sums, relative_entropy)
+            {
+                if x_lanes_mode == 2 {
+                    let mut x_reference = vec![0.0f64; x.len()];
+                    let status_reference = optimize_target_frequencies_reference(
+                        &mut x_reference,
+                        alphsize,
+                        q,
+                        row_sums,
+                        col_sums,
+                        constrain_rel_entropy,
+                        relative_entropy,
+                    );
+                    assert_eq!(
+                        status, status_reference,
+                        "LOSAT_X_NEWTONLANESSHADOW: convergence status differs"
+                    );
+                    for (k, (a, b)) in x.iter().zip(x_reference.iter()).enumerate() {
+                        assert!(
+                            a.to_bits() == b.to_bits(),
+                            "LOSAT_X_NEWTONLANESSHADOW: x[{k}] differs: {a:e} vs {b:e}"
+                        );
+                    }
+                    super::x_newton_lanes::SHADOWED
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
+                return status;
+            }
+        }
         match super::x_newton_exact::mode() {
             1 => {
                 // No NCBI counterpart: call counter and timer of the xstats report; it does not change any value NCBI computes.
@@ -3415,6 +3466,37 @@ fn optimize_target_frequencies(
         row_sums,
         col_sums,
         constrain_rel_entropy,
+        relative_entropy,
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:686-687,693-696
+// ```c
+// int
+// Blast_OptimizeTargetFrequencies(double x[],
+// ...
+//                                 int constrain_rel_entropy,
+//                                 double relative_entropy,
+//                                 double tol,
+//                                 int maxits)
+// ```
+// The port below with `alphsize == 20` and `constrain_rel_entropy`, for the bitwise tests of
+// `x_newton_lanes`.
+#[cfg(test)]
+pub(super) fn x_optimize_reference_for_test(
+    x: &mut [f64],
+    q: &[f64],
+    row_sums: &[f64; COMPO_NUM_TRUE_AA],
+    col_sums: &[f64; COMPO_NUM_TRUE_AA],
+    relative_entropy: f64,
+) -> i32 {
+    optimize_target_frequencies_reference(
+        x,
+        COMPO_NUM_TRUE_AA,
+        q,
+        row_sums,
+        col_sums,
+        true,
         relative_entropy,
     )
 }
@@ -3770,6 +3852,144 @@ pub(crate) fn blast_adjust_scores(
         pvalue_for_this_pair,
         lambda_ratio,
     }))
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1485-1505
+// ```c
+//     if (matrixInfo->positionBased ||
+//         composition_adjust_mode == eCompositionBasedStats) {
+//         /* Use old-style composition-based statistics unconditionally. */
+//         *matrix_adjust_rule =  eCompoScaleOldMatrix;
+//     } else {
+//         /* else call Yi-Kuo's code to choose mode for matrix adjustment. */
+//         *matrix_adjust_rule =
+//             Blast_ChooseMatrixAdjustRule(queryLength, subjectLength,
+//                                          permutedQueryProbs,
+//                                          permutedMatchProbs,
+//                                          matrixInfo->matrixName,
+//                                          composition_adjust_mode);
+//     }  /* end else call Yi-Kuo's code to choose mode for matrix adjustment. */
+//
+//     if (eCompoScaleOldMatrix != *matrix_adjust_rule) {
+//         /* Try matrix optimization, if it fails to converge, we
+//            fall back to traditional scaling below */
+//         int status =
+//             Blast_CompositionMatrixAdj(matrix,
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1354-1355,1385-1399
+// ```c
+//     s_GatherLetterProbs(row_probs, stdaa_row_probs, alphsize);
+//     s_GatherLetterProbs(col_probs, stdaa_col_probs, alphsize);
+// ...
+//     Blast_ApplyPseudocounts(row_probs, length1,
+//                             NRrecord->first_standard_freq, pseudocounts);
+//     Blast_ApplyPseudocounts(col_probs, length2,
+//                             NRrecord->second_standard_freq, pseudocounts);
+//
+//     status =
+//         Blast_OptimizeTargetFrequencies(&NRrecord->mat_final[0][0],
+//                                         COMPO_NUM_TRUE_AA,
+//                                         &iteration_count,
+//                                         &NRrecord->mat_b[0][0],
+//                                         row_probs, col_probs,
+//                                         (desired_re > 0.0),
+//                                         desired_re,
+// ```
+// EXPERIMENT (LOSAT_X_NEWTONLANES): the prefix of `blast_adjust_scores` and `composition_matrix_adjust`
+// up to the `optimize_target_frequencies` call, with the same helpers, arguments and order, returning
+// that call's input. `None` where the call would not reach the relative-entropy-constrained Newton
+// iteration (a composition without true amino acids, position-based or `CompositionBasedStats`,
+// rule `CompoScaleOldMatrix` or an unsupported rule, `desired_re <= 0`, an error). The p-value of the
+// pair (`compositionTestIndex`) does not enter the input and is not computed.
+// No NCBI counterpart: the input is used only to compute a result ahead of the real call, which uses
+// it only when its own input has the same bits; it does not change any value NCBI computes.
+/// The Newton input that `blast_adjust_scores` with these arguments would pass to
+/// `optimize_target_frequencies`, if it reaches the constrained iteration.
+pub(crate) fn x_newton_input(
+    matrix_info: &BlastMatrixInfo,
+    query_composition: &BlastAminoAcidComposition,
+    query_length: i32,
+    subject_composition: &BlastAminoAcidComposition,
+    subject_length: i32,
+    composition_adjust_mode: BlastCompoAdjustMode,
+    workspace: &BlastCompositionWorkspace,
+) -> Option<super::x_newton_lanes::NewtonInput> {
+    if query_composition.num_true_amino_acids == 0 || subject_composition.num_true_amino_acids == 0
+    {
+        return None;
+    }
+    let mut permuted_query_probs = [0.0; COMPO_NUM_TRUE_AA];
+    let mut permuted_match_probs = [0.0; COMPO_NUM_TRUE_AA];
+    gather_letter_probs(&mut permuted_query_probs, &query_composition.prob);
+    gather_letter_probs(&mut permuted_match_probs, &subject_composition.prob);
+    if matrix_info.position_based
+        || composition_adjust_mode == BlastCompoAdjustMode::CompositionBasedStats
+    {
+        return None;
+    }
+    let matrix_adjust_rule = blast_choose_matrix_adjust_rule(
+        query_length,
+        subject_length,
+        &permuted_query_probs,
+        &permuted_match_probs,
+        matrix_info.matrix,
+        composition_adjust_mode,
+    )
+    .ok()?;
+    if matrix_adjust_rule == EMatrixAdjustRule::CompoScaleOldMatrix {
+        return None;
+    }
+    // composition_matrix_adjust(matrix_info, rule, query num_true_amino_acids, subject
+    // num_true_amino_acids, query prob, subject prob, 20, K_FIXED_RE_BLOSUM62, workspace)
+    let mut row_probs = [0.0; COMPO_NUM_TRUE_AA];
+    let mut col_probs = [0.0; COMPO_NUM_TRUE_AA];
+    gather_letter_probs(&mut row_probs, &query_composition.prob);
+    gather_letter_probs(&mut col_probs, &subject_composition.prob);
+    let mut desired_re = 0.0;
+    match matrix_adjust_rule {
+        EMatrixAdjustRule::UnconstrainedRelEntropy => {}
+        EMatrixAdjustRule::RelEntropyOldMatrixNewContext => {
+            if let Some(value) =
+                entropy_old_freq_new_context(&workspace.mat_b, &row_probs, &col_probs).ok()?
+            {
+                desired_re = value;
+            }
+        }
+        EMatrixAdjustRule::RelEntropyOldMatrixOldContext => {
+            desired_re = target_freq_entropy(&workspace.mat_b);
+        }
+        EMatrixAdjustRule::UserSpecifiedRelEntropy => {
+            desired_re = K_FIXED_RE_BLOSUM62;
+        }
+        _ => return None,
+    }
+    if !(desired_re > 0.0) {
+        return None;
+    }
+    apply_pseudocounts(
+        &mut row_probs,
+        query_composition.num_true_amino_acids,
+        &workspace.first_standard_freq,
+        20,
+    );
+    apply_pseudocounts(
+        &mut col_probs,
+        subject_composition.num_true_amino_acids,
+        &workspace.second_standard_freq,
+        20,
+    );
+    let mut q = [0.0; COMPO_NUM_TRUE_AA * COMPO_NUM_TRUE_AA];
+    for i in 0..COMPO_NUM_TRUE_AA {
+        for j in 0..COMPO_NUM_TRUE_AA {
+            q[i * COMPO_NUM_TRUE_AA + j] = workspace.mat_b[i][j];
+        }
+    }
+    Some(super::x_newton_lanes::NewtonInput {
+        q,
+        row: row_probs,
+        col: col_probs,
+        relative_entropy: desired_re,
+    })
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1444-1481

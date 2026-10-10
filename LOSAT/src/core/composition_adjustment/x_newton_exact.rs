@@ -215,7 +215,7 @@ pub(crate) fn mode() -> u8 {
 // NCBI starts from `x = q`, so in the first iteration every `log(x[k] / q[k])` is `log(1.0)`.
 // This is the value of one such call, made once per process.
 /// `ln(1.0)` as the libm of this process computes it (not constant-folded).
-fn ln_one() -> f64 {
+pub(super) fn ln_one() -> f64 {
     static LN_ONE: OnceLock<f64> = OnceLock::new();
     *LN_ONE.get_or_init(|| std::hint::black_box(1.0f64).ln())
 }
@@ -275,15 +275,15 @@ fn euclidean_norm(v: &[f64]) -> f64 {
 // the lower triangle of `W` (column sums `W[j][j]`, row sums `W[i+19][i+19]`, the entries
 // `W[i+19][j]`, and the last row).
 /// The lower triangle of `W` as the reference holds it, from its parts.
-struct Wparts<'a> {
+pub(super) struct Wparts<'a> {
     /// `W[j][j]`, `j < 20`: column sums of `dinv`.
-    wdiag: &'a [f64; N],
+    pub(super) wdiag: &'a [f64; N],
     /// `W[i + 19][i + 19]`, `1 <= i < 20`: row sums of `dinv` (index `i`).
-    wrow: &'a [f64; N],
+    pub(super) wrow: &'a [f64; N],
     /// `W[i + 19][j] = 0.0 + dinv[i * 20 + j]`.
-    dinv: &'a [f64; NN],
+    pub(super) dinv: &'a [f64; NN],
     /// `W[39][c]`, `c < 40`.
-    w39: &'a [f64; M],
+    pub(super) w39: &'a [f64; M],
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:143-149,151-155
@@ -304,20 +304,20 @@ struct Wparts<'a> {
 // ```
 // The entries of `A` after this function, kept in blocks. Only the storage differs.
 /// The Cholesky factor in structured storage.
-struct Factor {
+pub(super) struct Factor {
     /// `L[j][j]` for `j < 20`.
-    d: [f64; N],
+    pub(super) d: [f64; N],
     /// `lsp[k][r] = L[20 + r][k]` for `k < 20`, `r < 20` (rows 20..39).
-    lsp: [[f64; P]; N],
+    pub(super) lsp: [[f64; P]; N],
     /// `c[jj][ii] = L[20 + ii][20 + jj]` for `ii >= jj` (the trailing block,
     /// column-major).  Entries with `ii < jj` and the padding are scratch.
-    c: [[f64; P]; N],
+    pub(super) c: [[f64; P]; N],
 }
 
 // No NCBI counterpart: constructor and test accessor of the structured storage; it does not change any value NCBI computes.
 impl Factor {
     #[inline(always)]
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         Factor {
             d: [0.0; N],
             lsp: [[0.0; P]; N],
@@ -381,7 +381,7 @@ impl Factor {
 // `W` is filled as `ScaledSymmetricProductA` and `FactorReNewtonSystem` fill it.
 /// `Nlm_FactorLtriangPosDef` on `W`, literally (dense lower triangle).
 #[inline(never)]
-fn factor_literal(w: &Wparts, out: &mut Factor) {
+pub(super) fn factor_literal(w: &Wparts, out: &mut Factor) {
     let mut a = [[0.0f64; M]; M];
     for j in 0..N {
         a[j][j] = w.wdiag[j];
@@ -443,7 +443,7 @@ fn factor_literal(w: &Wparts, out: &mut Factor) {
 /// `L[i][k]` finite needs `dinv` finite and `wdiag > 0` (rows 20..38) and
 /// `W[39][k]` finite (row 39).  Everything else is computed literally.
 #[inline(always)]
-fn structure_ok(w: &Wparts, dinv_ok: bool) -> bool {
+pub(super) fn structure_ok(w: &Wparts, dinv_ok: bool) -> bool {
     let mut ok = dinv_ok;
     for &v in w.w39.iter() {
         ok &= v.is_finite() & (v.to_bits() != (-0.0f64).to_bits());
@@ -1184,7 +1184,7 @@ unsafe fn optimize_avx512(
 
 // No NCBI counterpart: run-time choice of the vector width (LOSAT_X_NEWTONEXACT_LEVEL); it only selects which compilation of `optimize` runs; it does not change any value NCBI computes.
 #[cfg(target_arch = "x86_64")]
-fn x86_level() -> u8 {
+pub(super) fn x86_level() -> u8 {
     static LEVEL: OnceLock<u8> = OnceLock::new();
     *LEVEL.get_or_init(|| {
         let forced = std::env::var("LOSAT_X_NEWTONEXACT_LEVEL").ok();

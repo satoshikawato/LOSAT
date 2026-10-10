@@ -77,6 +77,17 @@ Same values, faster computation:
   (`core/composition_adjustment/x_newton_exact.rs`). Shadow: `LOSAT_X_NEWTONEXACTSHADOW=1`
   (convergence state and the 400 values compared bitwise). `LOSAT_X_NEWTONEXACT_LEVEL=0|2`
   (scalar | try AVX-512), `LOSAT_X_NEWTONEXACT_PROF=1` (cycle counters per phase).
+- `LOSAT_X_NEWTONLANES=1` (blastp and tblastn) Newton problems of the composition adjustment
+  solved ahead, four problems side by side (one per AVX2 lane, each lane with the operations of
+  `x_newton_exact`; `core/composition_adjustment/x_newton_lanes.rs`): blastp the first adjustment of
+  the next 16 matches of a query (serial and query-parallel redo; the single-query match-parallel
+  redo is unchanged), tblastn the adjustments of the coming windows of a match (at least 32 problems;
+  the window ranges, translation + SEG, computed ahead are handed to the redo loop). A call uses a
+  stored result only when its input (q, row and column probabilities, relative entropy) has the same
+  bits; otherwise the existing path runs. Shadow: `LOSAT_X_NEWTONLANESSHADOW=1` (every stored result
+  that is used is compared with the reference port, status and the 400 values bitwise; every kept
+  tblastn range with a fresh `get_range`). With `LOSAT_X_STATS=1` it prints
+  `[X_STATS] NEWTONLANES prefetched= hits= misses= unused= ...` (no `xstats` feature needed).
 - `LOSAT_X_SEGFAST=1`, `LOSAT_X_SEGMEMO=1` SEG window as a residue histogram updated in O(1),
   entropy memoised per state vector. Shadow (`SEGFAST` path): `LOSAT_X_SEGSHADOW=1`.
 - `LOSAT_X_DUSTFAST=1`, `LOSAT_X_DUSTRING=1` DUST perfect-interval list built in one merge,

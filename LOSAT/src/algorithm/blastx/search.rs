@@ -1307,29 +1307,55 @@ fn compute_subject(
     //       if (Blast_SubjectIsTranslated(program_number)) {
     // ```
     let mut seeds = Vec::new();
-    let initial = word_finder(
-        batch,
-        params,
-        options,
-        &encoded,
-        lookup,
-        diagonals,
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:494-500
-        // ```c++
-        //             aux_struct->WordFinder(subject, query, query_info, lookup, matrix,
-        //                                    word_params, aux_struct->ewp,
-        //                                    aux_struct->offset_pairs,
-        //                                    kScanSubjectOffsetArraySize,
-        //                                    init_hitlist, ungapped_stats);
-        //
-        //             if (init_hitlist->total == 0) continue;
-        // ```
-        |pairs| {
-            if diagnostics {
-                seeds.extend_from_slice(pairs);
-            }
-        },
-    )?;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:502-511
+    // ```c
+    //     while (scan_range[1] <= scan_range[2]) {
+    //         /* scan the subject sequence for hits */
+    //         hits = scansub(lookup_wrap, subject,
+    //                                   offset_pairs, array_size, scan_range);
+    //
+    //         totalhits += hits;
+    //         /* for each hit, */
+    //         for (i = 0; i < hits; ++i) {
+    //             Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
+    //             Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
+    // ```
+    // Dispatch point of LOSAT_X_BXSCAN / LOSAT_X_BXSCANSHADOW: when nothing traces the seeds
+    // (not the diagnostic stages) and the diagonal order is the reference one (LOSAT_X_SEEDBUCKET
+    // mode 0), the seed loop reads the scanner's per-thread buffer in place (x_seed_scan.rs);
+    // otherwise the reference word finder below runs.
+    let initial = if !diagnostics
+        && super::seed::x_seed_scan::x_bxscan_mode() != 0
+        && crate::algorithm::tblastx::x_seed_bucket::blastx_mode() == 0
+    {
+        super::seed::x_seed_scan::x_word_finder_scan(
+            batch, params, options, &encoded, lookup, diagonals,
+        )?
+    } else {
+        word_finder(
+            batch,
+            params,
+            options,
+            &encoded,
+            lookup,
+            diagonals,
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:494-500
+            // ```c++
+            //             aux_struct->WordFinder(subject, query, query_info, lookup, matrix,
+            //                                    word_params, aux_struct->ewp,
+            //                                    aux_struct->offset_pairs,
+            //                                    kScanSubjectOffsetArraySize,
+            //                                    init_hitlist, ungapped_stats);
+            //
+            //             if (init_hitlist->total == 0) continue;
+            // ```
+            |pairs| {
+                if diagnostics {
+                    seeds.extend_from_slice(pairs);
+                }
+            },
+        )?
+    };
     let raw = if options.gapped {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3916-3921
         // ```c++

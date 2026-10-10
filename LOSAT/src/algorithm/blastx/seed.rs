@@ -13,6 +13,16 @@ use crate::algorithm::tblastx::lookup::{
 };
 use anyhow::{ensure, Result};
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1040-1041
+// ```c
+//     aux_struct->offset_pairs =
+//       (BlastOffsetPair*) malloc(offset_array_size * sizeof(BlastOffsetPair));
+// ```
+// EXPERIMENT (LOSAT_X_BXSCAN): the seed loop on a per-thread offset-pair buffer, read in place
+// (a child module, so that it uses the diagonal table's fields).
+#[path = "x_seed_scan.rs"]
+pub mod x_seed_scan;
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:46-65
 // ```c++
 //         Int4 diag_array_length;

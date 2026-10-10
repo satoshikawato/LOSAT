@@ -210,3 +210,6 @@ pub(crate) fn compute_unmasked_intervals(
 //
 // ```
 pub(crate) use backbone::build_ncbi_lookup_from_prepared;
+// EXPERIMENT (LOSAT_X_BXLUTSHADOW): shadow counter for the exit summary; no NCBI counterpart, it
+// does not change any value NCBI computes.
+pub(crate) use backbone::x_bxlut_shadow_tables;

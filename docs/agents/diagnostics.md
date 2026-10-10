@@ -106,6 +106,14 @@ Same values, faster computation:
   choice against a plain scan; very slow on large groups), `LOSAT_LINK_FAST_SHADOW=1` (every group
   against the literal port, all fields). `LOSAT_LINK_FAST_REUSE0=0` disables the reuse of an unchanged
   index-0 choice. `LOSAT_LINK_STATS=1` prints per-group counters.
+- `LOSAT_X_BXLUT=1` blastx lookup table filled in place from per-cell counts (same append order as
+  `s_AddNeighboringWords` and `BlastAaLookupFinalize`), neighbour-word lists memoised per thread
+  (`tblastx/lookup/x_lut_direct.rs`). Shadow: `LOSAT_X_BXLUTSHADOW=1` (every table compared field by
+  field). Strict-set candidate (S-C, round 5).
+- `LOSAT_X_BXSCAN=1` blastx seed loop reads the scanner's per-thread offset-pair buffer in place instead
+  of a fresh buffer and a copy per subject (`blastx/x_seed_scan.rs`); not in the diagnostic stages, and
+  only with the reference diagonal order (`LOSAT_X_SEEDBUCKET` mode 0). Shadow: `LOSAT_X_BXSCANSHADOW=1`
+  (hit lists and diagonal table). Strict-set candidate (S-C, round 5).
 - `LOSAT_X_SEEDBUCKET=1` TBLASTX two-hit stage: hits buffered per diagonal range and processed
   range by range, HSPs restored to scan order (`tblastx/x_seed_bucket.rs`); only for diagonal tables
   of at least `LOSAT_X_SEEDBUCKET_MIN_CELLS` cells (default 2^21). Shadow:
@@ -121,6 +129,9 @@ Rebuilding less:
 - `LOSAT_X_TBNSSIDE=1` tblastn: subject six-frame translations once per search (up to 256 MiB).
 - `LOSAT_X_LUTSPLIT=1` tblastn: build only the half (contexts or table) a caller uses.
 - `LOSAT_X_IDEALMEMO=1` BLOSUM62 ideal Karlin block once per process.
+- `LOSAT_X_BXSEGMEMO=1` blastx redo stage: the subject SEG once per subject instead of once per window
+  (per-thread memo of the last subject, byte-equal input; `blastx/x_seg_memo.rs`). Shadow:
+  `LOSAT_X_BXSEGMEMOSHADOW=1` (the masker also runs on every call). Strict-set candidate (S-C, round 5).
 
 Scheduling (each value computed by one thread with the original function; order of output kept):
 

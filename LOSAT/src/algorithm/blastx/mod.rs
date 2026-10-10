@@ -330,6 +330,13 @@ pub mod statistics;
 //                         hit_params, psi_options, results);
 // ```
 pub mod kappa;
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1635-1636
+// ```c
+//                 status = s_DoSegSequenceData(seqData, eBlastTypeBlastp,
+//                                              subject_maybe_biased);
+// ```
+// EXPERIMENT (LOSAT_X_BXSEGMEMO): the redo-stage subject SEG memoised per subject.
+mod x_seg_memo;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1508
 // ```c++

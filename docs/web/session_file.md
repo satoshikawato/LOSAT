@@ -170,14 +170,20 @@ Only the extraction of original residues (hit regions, flanks, complete sequence
 of a run's input FASTA need the original files; the outputs, the HSP records, the results screen and
 the export of aligned rows do not. For a loaded run, Run details shows per role that the original is
 not attached and what that prevents, with "Choose the original query/subject FASTA…" (several files,
-in order, for a joined input). The extract form names the runs whose original is missing as soon as
+chosen together in any order, for a joined input). The extract form names the runs whose original is missing as soon as
 such a candidate is selected, and the extraction is refused before anything is read.
 
 Re-attachment is never automatic (a file of the same name in the search form, or one attached to
 another run, attaches nothing). The chosen files must be as many as the recorded sources; each is
-indexed with the recorded reader kind and must have the recorded number of records; the recorded
-exclusions are applied; the included records must have the recorded IDs, lengths and SHA-256s (the
-message names the first that differs, or the count); and the run input that they make must have the
-recorded SHA-256 (which also covers lines before or between records). Only then is the input
-attached to that run and role; otherwise nothing changes. The attachment is kept apart from the
-RunSnapshot (`RunView.attached`), which stays as the file recorded it.
+indexed with the recorded reader kind and matched to a recorded source by its records, whatever
+order the files were chosen in (file dialogs rarely let one order a selection): a file is a
+source's when it has the recorded number of records and, with the source's exclusions applied, the
+recorded IDs, lengths and SHA-256s of the records that the input has from it. When a source has no
+file, the message names a file's record count or the first record that differs. The run input is
+then made in the recorded order with the recorded exclusions, and must have the recorded SHA-256
+(which also covers lines before or between records). Only then is the input attached to that run
+and role (the file names listed in the recorded order); otherwise nothing changes. The sources and
+record tables of a refused attempt, and of an original that a new attachment replaces, are released
+from the Data worker. The attachment is kept apart from the RunSnapshot (`RunView.attached`), which
+stays as the file recorded it. The download of the run's input FASTA rebuilds the input from the
+attached original and refuses it unless its SHA-256 is still the recorded one.

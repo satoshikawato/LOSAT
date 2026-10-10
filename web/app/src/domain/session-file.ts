@@ -815,6 +815,86 @@ export interface RecordIdentity {
   readonly sha256: string;
 }
 
+/** A file chosen as (a part of) a loaded run's original FASTA, indexed with the recorded reader kind: every record of it, in order. */
+export interface ChosenFile {
+  readonly name: string;
+  readonly records: readonly RecordIdentity[];
+}
+
+/** The chosen file of each recorded source (`files[i]` is the index of source i's file), or why the files are not the sources. */
+export type SourceMatch = { readonly ok: true; readonly files: readonly number[] } | { readonly ok: false; readonly message: string };
+
+/** The records of a file that a source's exclusions (0-based indices, ascending) leave in. */
+function includedOf(records: readonly RecordIdentity[], excluded: readonly number[]): RecordIdentity[] {
+  const included: RecordIdentity[] = [];
+  let next = 0;
+  for (let k = 0; k < records.length; k++) {
+    if (excluded[next] === k) next++;
+    else included.push(records[k]!);
+  }
+  return included;
+}
+
+/**
+ * Matches files chosen as a loaded run's original FASTA to the sources that the session file
+ * recorded, whatever order they were chosen in (REQ-23; file dialogs rarely let the user order a
+ * selection): a file is a source's when it has as many records as the source had and, with the
+ * source's exclusions applied, the records that the run input has from that source (IDs, lengths
+ * and SHA-256s). As many files as sources are expected. When some source has no file, the message
+ * names the first problem of a pairing that keeps the matches found and gives each other source a
+ * file left over (one with its record count first): a file's record count (`sourceMismatch`), or
+ * the first record of the input that differs (`recordsMismatch`).
+ */
+export function matchSources(saved: SessionInput, chosen: readonly ChosenFile[]): SourceMatch {
+  const { sources } = saved;
+  const table = saved.records;
+  const starts: number[] = [];
+  let at = 0;
+  for (const source of sources) {
+    starts.push(at);
+    at += source.records - source.excluded.length;
+  }
+  const fits = (i: number, j: number): boolean => {
+    const source = sources[i]!;
+    if (chosen[j]!.records.length !== source.records) return false;
+    return includedOf(chosen[j]!.records, source.excluded).every((record, k) => {
+      const position = starts[i]! + k;
+      return record.id === table.id[position] && record.length === table.length[position] && record.sha256 === table.sha256[position];
+    });
+  };
+  const fitting = sources.map((_, i) => chosen.map((_, j) => j).filter((j) => fits(i, j)));
+  // Augmenting paths (Kuhn): a file that fits two sources (the same file joined twice) goes where it is needed.
+  const fileOf = sources.map(() => -1);
+  const sourceOf = chosen.map(() => -1);
+  const assign = (i: number, visited: boolean[]): boolean => {
+    for (const j of fitting[i]!) {
+      if (visited[j]) continue;
+      visited[j] = true;
+      if (sourceOf[j]! < 0 || assign(sourceOf[j]!, visited)) {
+        sourceOf[j] = i;
+        fileOf[i] = j;
+        return true;
+      }
+    }
+    return false;
+  };
+  sources.forEach((_, i) => assign(i, chosen.map(() => false)));
+  if (fileOf.every((j) => j >= 0)) return { ok: true, files: fileOf };
+  const left = chosen.map((_, j) => j).filter((j) => sourceOf[j]! < 0);
+  const pairing = fileOf.map((j, i) => {
+    if (j >= 0 || left.length === 0) return j;
+    const same = left.findIndex((k) => chosen[k]!.records.length === sources[i]!.records);
+    return left.splice(Math.max(0, same), 1)[0]!;
+  });
+  for (const [i, j] of pairing.entries()) {
+    if (j < 0) continue;
+    const mismatch = sourceMismatch(sources[i]!, i, chosen[j]!.name, chosen[j]!.records.length);
+    if (mismatch !== undefined) return { ok: false, message: mismatch };
+  }
+  const records = pairing.flatMap((j, i) => (j < 0 ? [] : includedOf(chosen[j]!.records, sources[i]!.excluded)));
+  return { ok: false, message: recordsMismatch(saved, records) ?? `the chosen files do not have the records of the run's input` };
+}
+
 /**
  * Why a chosen file cannot be source `position` (0-based) of a loaded run's input, or undefined:
  * its record table does not have as many records as the saved source had.

@@ -12,7 +12,7 @@
 // channel (ports/run-output.ts), as an engine's would, so a loaded run is in the RunStore like a
 // searched one. A file is refused with a message that says what is wrong and where, and then
 // nothing stays: every run staged or committed for it is deleted.
-import { includedRecords } from '../domain/dataset';
+import { includedRecords, type DatasetRevision } from '../domain/dataset';
 import { hspLabel } from '../domain/extraction';
 import { splitOutfmt6Row, type Outfmt6Row } from '../domain/outfmt6';
 import { programById, residueUnit, type InputRole } from '../domain/programs';
@@ -27,6 +27,7 @@ import {
   hspRecordBounds,
   isGzip,
   MANIFEST_BLOCK,
+  matchSources,
   recordsMismatch,
   runBlockName,
   SESSION_FORMAT,
@@ -37,7 +38,6 @@ import {
   SessionFileError,
   SessionFileReader,
   sessionFileName,
-  sourceMismatch,
   type RecordIdentity,
   type SessionApp,
   type SessionCandidate,
@@ -104,6 +104,7 @@ export interface SessionDeps {
     | 'addSource'
     | 'indexSource'
     | 'reviseDataset'
+    | 'releaseSources'
     | 'buildRunInput'
   >;
   readonly compression: Compression;
@@ -158,6 +159,8 @@ interface PendingCandidate {
 export class Session {
   readonly state = new Store<SessionState>({ attaching: new Map() });
   private readonly limits: SessionLimits;
+  /** The Data worker's sources of each attached original, by `attachKey`: released when another replaces it. */
+  private readonly attachedSources = new Map<string, readonly string[]>();
 
   constructor(private readonly deps: SessionDeps) {
     this.limits = deps.limits ?? SESSION_LIMITS;
@@ -536,10 +539,13 @@ export class Session {
 
   /**
    * Attaches the original FASTA of one role of a run loaded from a session file (REQ-23), only on
-   * this explicit choice: the files (several, in order, for a joined input) are indexed with the
-   * reader kind that the file recorded, the recorded exclusions are applied, and the run input
-   * that they make is attached only if its records and its SHA-256 are those that the run
-   * searched. Otherwise nothing changes, and the message names the first record that differs.
+   * this explicit choice: the files (several, in any order, for a joined input) are indexed with
+   * the reader kind that the file recorded and matched to the recorded sources by their records
+   * (domain/session-file.ts `matchSources`); the run input is then made in the recorded order
+   * with the recorded exclusions, and attached only if its records and its SHA-256 are those
+   * that the run searched. Otherwise nothing changes, the message names the first record or file
+   * that differs, and the attempt's sources and record tables are released from the Data worker,
+   * as are those of an original that a new attachment replaces.
    */
   async attach(runId: string, role: InputRole, files: readonly File[]): Promise<AttachResult> {
     const view = this.deps.coordinator.state.get().runs.find((run) => run.snapshot.runId === runId);
@@ -548,30 +554,35 @@ export class Session {
     if (this.state.get().attaching.get(key)?.busy === true) return { ok: false, message: 'These files are being checked; wait until that ends.' };
     this.setAttaching(key, { busy: true });
     const number = view.snapshot.number;
+    const sourceIds: string[] = [];
     try {
       const saved = view.fromSession.inputs[role];
       if (files.length !== saved.sources.length) {
         const names = saved.sources.map((source) => JSON.stringify(source.name)).join(', ');
+        const chosen = `${files.length} ${files.length === 1 ? 'was' : 'were'} chosen`;
         throw new Error(
           saved.sources.length === 1
-            ? `choose one file (the run's ${role} was ${names}); ${files.length} were chosen`
-            : `choose ${saved.sources.length} files, in the order that the run joined them (${names}); ${files.length} were chosen`,
+            ? `choose one file (the run's ${role} was ${names}); ${chosen}`
+            : `choose the ${saved.sources.length} files that the run joined (${names}), together and in any order; ${chosen}`,
         );
       }
-      const revisionIds: string[] = [];
-      const chosen: RecordIdentity[] = [];
-      for (const [i, file] of files.entries()) {
+      const indexed: DatasetRevision[] = [];
+      for (const file of files) {
         const source = await this.deps.data.addSource(file);
-        let revision;
+        sourceIds.push(source.sourceId);
         try {
-          revision = await this.deps.data.indexSource(source.sourceId, saved.reader);
+          indexed.push(await this.deps.data.indexSource(source.sourceId, saved.reader));
         } catch (error) {
           throw new Error(`${JSON.stringify(file.name)} could not be read as the run read its ${role}: ${errorMessage(error)}`);
         }
-        const mismatch = sourceMismatch(saved.sources[i]!, i, file.name, revision.records.length);
-        if (mismatch !== undefined) throw new Error(mismatch);
+      }
+      const match = matchSources(saved, indexed.map((revision, j) => ({ name: files[j]!.name, records: revision.records })));
+      if (!match.ok) throw new Error(match.message);
+      const revisionIds: string[] = [];
+      const chosen: RecordIdentity[] = [];
+      for (const [i, j] of match.files.entries()) {
         const excluded = saved.sources[i]!.excluded;
-        const revised = excluded.length === 0 ? revision : await this.deps.data.reviseDataset(revision.revisionId, excluded);
+        const revised = excluded.length === 0 ? indexed[j]! : await this.deps.data.reviseDataset(indexed[j]!.revisionId, excluded);
         revisionIds.push(revised.revisionId);
         for (const record of includedRecords(revised)) chosen.push({ id: record.id, length: record.length, sha256: record.sha256 });
       }
@@ -584,10 +595,14 @@ export class Session {
             `(SHA-256 ${saved.sha256}): a file has other lines before or between its records`,
         );
       }
-      this.deps.coordinator.attach(runId, role, { revisionIds, fileNames: files.map((file) => file.name) });
+      this.deps.coordinator.attach(runId, role, { revisionIds, fileNames: match.files.map((j) => files[j]!.name) });
+      const replaced = this.attachedSources.get(key);
+      this.attachedSources.set(key, sourceIds);
+      if (replaced !== undefined) await this.deps.data.releaseSources(replaced).catch(() => undefined);
       this.setAttaching(key, undefined);
       return { ok: true };
     } catch (error) {
+      await this.deps.data.releaseSources(sourceIds).catch(() => undefined);
       const message = `The ${role} FASTA was not attached to run ${number}: ${errorMessage(error)}.`;
       this.setAttaching(key, { busy: false, message });
       return { ok: false, message };

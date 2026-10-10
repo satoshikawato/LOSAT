@@ -71,9 +71,19 @@ function world(engine: EngineGateway = new FakeEngine(), prefix = '') {
   });
   const residueCalls: number[] = [];
   const opened: string[] = [];
+  const sources = { added: [] as string[], released: [] as string[] };
   // Counts the reads of original residues, which a loaded run without its original must never make,
-  // and keeps the IDs of the runs opened in the Data worker.
+  // and keeps the IDs of the runs opened and of the sources added and released in the Data worker.
   const data: DataGateway = Object.assign(Object.create(service) as DataService, {
+    addSource: async (file: File) => {
+      const source = await service.addSource(file);
+      sources.added.push(source.sourceId);
+      return source;
+    },
+    releaseSources: (sourceIds: readonly string[]) => {
+      sources.released.push(...sourceIds);
+      return service.releaseSources(sourceIds);
+    },
     readResidues: (...args: Parameters<DataService['readResidues']>) => {
       residueCalls.push(args[1]);
       return service.readResidues(...args);
@@ -102,7 +112,7 @@ function world(engine: EngineGateway = new FakeEngine(), prefix = '') {
     readBytes: 7,
     sendBytes: 16,
   });
-  return { data, service, store, coordinator, tray, session, saved, residueCalls, opened };
+  return { data, service, store, coordinator, tray, session, saved, residueCalls, opened, sources };
 }
 
 type World = ReturnType<typeof world>;
@@ -401,11 +411,16 @@ describe('Session: the original FASTA (REQ-23)', () => {
     expect(b.saved.at(-1)!.bytes).toEqual(alignments);
 
     const refused = async (files: File[], pattern: RegExp) => {
+      const added = b.sources.added.length;
       const result = await b.session.attach(id1, 'subject', files);
       expect(result.ok).toBe(false);
       expect(!result.ok && result.message).toMatch(pattern);
       expect(b.coordinator.state.get().runs[0]!.attached).toBeUndefined();
       expect(b.session.state.get().attaching.get(`${id1}/subject`)?.message).toMatch(pattern);
+      // Nothing of the attempt stays in the Data worker: its sources and record tables are released (code review L3).
+      const attempt = b.sources.added.slice(added);
+      expect(b.sources.released).toEqual(expect.arrayContaining(attempt));
+      for (const sourceId of attempt) await expect(b.service.previewSource(sourceId, 1)).rejects.toThrow(/unknown source/);
     };
     const fa = (text: string, name = 'a.fa') => new File([text], name);
     // One residue changed: the record's SHA-256 names it.
@@ -416,17 +431,21 @@ describe('Session: the original FASTA (REQ-23)', () => {
     await refused([fa('>sA one\nACGTACGTACGTAAACCCGGGTTT\nAACCGGTT\n'), fa(FILE_B, 'b.fa')], /"a\.fa" has 1 record, but file 1 .* had 2/);
     // The right records and exclusions, but a line before the records: the input's SHA-256 differs.
     await refused([fa(FILE_A), fa(`\n${FILE_B}`, 'b.fa')], /the input that they make \(SHA-256 [0-9a-f]{64}\) is not the one that run 1 searched/);
-    // One file of two, or the files in the other order.
-    await refused([fa(FILE_A)], /choose 2 files, in the order that the run joined them \("a\.fa", "b\.fa"\); 1 were chosen/);
-    await refused([fa(FILE_B, 'b.fa'), fa(FILE_A)], /has 1 record, but file 1 of the saved input \("a\.fa"\) had 2/);
+    // One file of two; or two files of which one is the other's copy.
+    await refused([fa(FILE_A)], /choose the 2 files that the run joined \("a\.fa", "b\.fa"\), together and in any order; 1 was chosen/);
+    await refused([fa(FILE_B, 'b.fa'), fa(FILE_B, 'b2.fa')], /"b2?\.fa" has 1 record, but file 1 of the saved input \("a\.fa"\) had 2/);
     // The query's original is not the subject's.
     await refused([fa(QUERIES, 'query.fa'), fa(FILE_B, 'b.fa')], /record 1 is "sA" .* but the chosen files give "q1"/);
     expect(await b.tray.extract(flanks)).toMatchObject({ ok: false });
     expect(b.residueCalls).toEqual([]);
 
-    // The right files attach the subject of run 1 only; run 2 still has none.
-    expect(await b.session.attach(id1, 'subject', [fa(FILE_A), fa(FILE_B, 'b.fa')])).toEqual({ ok: true });
+    // The right files, chosen in the other order, attach the subject of run 1 only, in the order that
+    // the run joined them (code review L3); run 2 still has none.
+    const kept = b.sources.added.length;
+    expect(await b.session.attach(id1, 'subject', [fa(FILE_B, 'b.fa'), fa(FILE_A)])).toEqual({ ok: true });
     expect(b.coordinator.state.get().runs[0]!.attached?.subject?.fileNames).toEqual(['a.fa', 'b.fa']);
+    const attachedSources = b.sources.added.slice(kept);
+    expect(b.sources.released).not.toEqual(expect.arrayContaining(attachedSources));
     expect(b.session.state.get().attaching.size).toBe(0);
     expect(b.tray.missingOriginals('subject')).toBe(
       'Run 2 was loaded from a session file; choose its original subject FASTA in Run details to extract sequences.',
@@ -444,6 +463,13 @@ describe('Session: the original FASTA (REQ-23)', () => {
     // The input FASTA of the run, for its download: the bytes that the engine searched.
     expect((await b.session.attachedInput(id1, 'subject'))?.bytes).toEqual(a.coordinator.state.get().runs[0]!.snapshot.subject.bytes);
     expect(await b.session.attachedInput(id1, 'query')).toBeUndefined();
+
+    // Attached again: the original that it replaces is released from the Data worker.
+    expect(await b.session.attach(id1, 'subject', [fa(FILE_A, 'a2.fa'), fa(FILE_B, 'b2.fa')])).toEqual({ ok: true });
+    expect(b.coordinator.state.get().runs[0]!.attached?.subject?.fileNames).toEqual(['a2.fa', 'b2.fa']);
+    expect(b.sources.released).toEqual(expect.arrayContaining(attachedSources));
+    for (const sourceId of attachedSources) await expect(b.service.previewSource(sourceId, 1)).rejects.toThrow(/unknown source/);
+    expect((await b.session.attachedInput(id1, 'subject'))?.bytes).toEqual(a.coordinator.state.get().runs[0]!.snapshot.subject.bytes);
   });
 
   it('attaches only to a run loaded from a session file, and only by an explicit choice', async () => {

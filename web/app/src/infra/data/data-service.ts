@@ -166,6 +166,12 @@ export class DataService implements DataGateway {
     });
   }
 
+  async releaseSources(sourceIds: readonly string[]): Promise<void> {
+    const released = new Set(sourceIds);
+    for (const sourceId of released) this.sources.delete(sourceId);
+    for (const [revisionId, revision] of this.revisions) if (released.has(revision.sourceId)) this.revisions.delete(revisionId);
+  }
+
   async buildRunInput(revisionIds: readonly string[]): Promise<RunInput> {
     const { bytes, records } = await this.runInputBytes(revisionIds);
     return { bytes, sha256: await this.deps.digest(bytes), records };

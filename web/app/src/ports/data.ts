@@ -69,6 +69,13 @@ export interface DatasetStore {
   /** A new revision of the same record table that leaves out the records `excluded`. */
   reviseDataset(revisionId: string, excluded: readonly number[]): Promise<DatasetRevision>;
   /**
+   * Forgets sources and every revision (record table) made of them, so that their Files and
+   * tables are no longer held; their IDs are then unknown. For sources that one caller alone
+   * holds: the files of a refused or replaced re-attachment of a loaded run's original FASTA
+   * (application/session.ts). Unknown IDs are ignored.
+   */
+  releaseSources(sourceIds: readonly string[]): Promise<void>;
+  /**
    * The engine input made of the included records of the revisions, in order. A revision
    * that includes every record contributes its source unchanged; a newline is added after
    * a source that does not end with one when another follows (plan §5.3).

@@ -13,6 +13,7 @@ import {
   hspRecordBounds,
   HspRecordCheck,
   isGzip,
+  matchSources,
   recordsMismatch,
   runBlockName,
   SESSION_LIMITS,
@@ -23,6 +24,7 @@ import {
   sourceMismatch,
   type SessionCandidate,
   type SessionEvent,
+  type SessionInput,
   type SessionLimits,
   type SessionManifest,
   type SessionRun,
@@ -515,5 +517,45 @@ describe('what a loaded run must agree with', () => {
     expect(recordsMismatch(saved, [...same, same[0]!])).toBe('the chosen files give 3 records after the exclusions, but the saved run searched 2');
     expect(sourceMismatch(saved.sources[0]!, 0, 'a.fa', 2)).toBeUndefined();
     expect(sourceMismatch(saved.sources[0]!, 0, 'a2.fa', 1)).toBe('"a2.fa" has 1 record, but file 1 of the saved input ("a.fa") had 2');
+  });
+
+  it('matches chosen files to the recorded sources by their records, whatever order they were chosen in (code review L3)', () => {
+    const saved = r.subject;
+    const record = (id: string, length: number, c: string) => ({ id, length, sha256: hex(c) });
+    const a = { name: 'a.fa', records: [record('s1', 10, '3'), record('s2', 7, '4')] };
+    const b = { name: 'b.fa', records: [record('s3', 12, '5')] };
+    expect(matchSources(saved, [a, b])).toEqual({ ok: true, files: [0, 1] });
+    expect(matchSources(saved, [b, a])).toEqual({ ok: true, files: [1, 0] });
+    // The names do not matter, nor the record that the run left out.
+    expect(matchSources(saved, [{ ...b, name: 'x.fa' }, { name: 'y.fa', records: [record('s1', 10, '3'), record('other', 1, '9')] }])).toEqual({
+      ok: true,
+      files: [1, 0],
+    });
+    // A file that fits two sources goes where it is needed: x fits both, y only the first.
+    const twice: SessionInput = {
+      ...saved,
+      records: { id: ['s1', 's1'], length: [10, 10], sha256: [hex('3'), hex('3')] },
+      sources: [
+        { name: 'a.fa', size: 30, records: 2, excluded: [1] },
+        { name: 'a.fa', size: 30, records: 2, excluded: [0] },
+      ],
+    };
+    const x = { name: 'x.fa', records: [record('s1', 10, '3'), record('s1', 10, '3')] };
+    const y = { name: 'y.fa', records: [record('s1', 10, '3'), record('s9', 10, '8')] };
+    expect(matchSources(twice, [x, y])).toEqual({ ok: true, files: [1, 0] });
+    // The refusals name a file's record count, or the first record of the input that differs.
+    expect(matchSources(saved, [b, { name: 'a2.fa', records: [record('s1', 10, '3')] }])).toEqual({
+      ok: false,
+      message: '"a2.fa" has 1 record, but file 1 of the saved input ("a.fa") had 2',
+    });
+    expect(matchSources(saved, [b, { name: 'a.fa', records: [record('s1', 10, '9'), record('s2', 7, '4')] }])).toEqual({
+      ok: false,
+      message: 'record 1 ("s1") differs from the saved run\'s record: its bytes have another SHA-256',
+    });
+    expect(matchSources(saved, [a, { name: 'b.fa', records: [record('s4', 12, '5')] }])).toEqual({
+      ok: false,
+      message: 'record 2 is "s3" (length 12) in the saved run, but the chosen files give "s4" (length 12)',
+    });
+    expect(matchSources(twice, [y, y])).toEqual({ ok: false, message: 'record 2 is "s1" (length 10) in the saved run, but the chosen files give "s9" (length 10)' });
   });
 });

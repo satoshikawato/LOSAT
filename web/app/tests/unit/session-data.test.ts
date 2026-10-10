@@ -50,6 +50,20 @@ describe('DataService for session files', () => {
     await expect(data.describeRunInput([rb.revisionId, protein.revisionId])).rejects.toThrow(/different reader kinds/);
   });
 
+  it('releases sources and the revisions made of them, and only those', async () => {
+    const data = service();
+    const a = await data.addSource(new File(['>a\nACGT\n'], 'a.fa'));
+    const b = await data.addSource(new File(['>b\nACGT\n'], 'b.fa'));
+    const ra = await data.indexSource(a.sourceId, 1);
+    const revised = await data.reviseDataset(ra.revisionId, [0]);
+    const rb = await data.indexSource(b.sourceId, 1);
+    await data.releaseSources([a.sourceId, 'unknown']);
+    await expect(data.previewSource(a.sourceId, 1)).rejects.toThrow(/unknown source/);
+    await expect(data.buildRunInput([ra.revisionId])).rejects.toThrow(/unknown dataset revision/);
+    await expect(data.reviseDataset(revised.revisionId, [])).rejects.toThrow(/unknown dataset revision/);
+    expect(new TextDecoder().decode((await data.buildRunInput([rb.revisionId])).bytes)).toBe('>b\nACGT\n');
+  });
+
   it('reads the streams of a committed run in ranges, and gives their lengths', async () => {
     const data = service();
     const port = await data.openRun('r');

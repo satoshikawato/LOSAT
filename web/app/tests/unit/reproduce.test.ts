@@ -125,7 +125,8 @@ const FIXED_CASES: ReadonlyArray<{ readonly id: string; readonly program: Progra
     program: 'blastp',
     query: 'e2d_p_q.faa',
     subject: 'subject.fa',
-    options: ['-matrix', 'BLOSUM45', '-gapopen', '15', '-gapextend', '2', '-comp_based_stats', '1', '-seg', 'yes', '-window_size', '30', '-max_hsps', '1', '-query_loc', '100-400'],
+    // LOSAT's BLASTP searches BLOSUM62 11/1 with -comp_based_stats 2 only (an explicit rejection otherwise).
+    options: ['-task', 'blastp-fast', '-seg', 'yes', '-threshold', '12', '-window_size', '30', '-max_hsps', '1', '-evalue', '1e-3', '-query_loc', '100-400'],
   },
   { id: 'tblastn.default', program: 'tblastn', query: 'query.fa', subject: 'subject.fa', options: [] },
   {
@@ -133,7 +134,8 @@ const FIXED_CASES: ReadonlyArray<{ readonly id: string; readonly program: Progra
     program: 'tblastn',
     query: 'e2d_t_pq.faa',
     subject: 'e2d_t_ts.fa',
-    options: ['-task', 'tblastn-fast', '-comp_based_stats', '0', '-seg', 'yes', '-soft_masking', 'true', '-lcase_masking', '-xdrop_gap', '20', '-xdrop_gap_final', '30', '-sum_stats', 'false', '-query_loc', '20-400', '-subject_loc', '42-700'],
+    // LOSAT's TBLASTN refuses -task tblastn-fast explicitly.
+    options: ['-comp_based_stats', '0', '-seg', 'yes', '-soft_masking', 'true', '-lcase_masking', '-xdrop_gap', '20', '-xdrop_gap_final', '30', '-sum_stats', 'false', '-query_loc', '20-400', '-subject_loc', '42-700'],
   },
   { id: 'tblastn.gencode4', program: 'tblastn', query: 'query.fa', subject: 'subject.fa', options: ['-db_gencode', '4'] },
   { id: 'tblastn.gencode32', program: 'tblastn', query: 'query.fa', subject: 'subject.fa', options: ['-db_gencode', '32'] },

@@ -45,7 +45,7 @@ FASTA = REPOSITORY / 'LOSAT' / 'tests' / 'fasta'
 
 # The FASTA files of each case of FIXED_CASES (query, subject), under LOSAT/tests/fasta/. They are
 # fixtures of the certified outfmt 0/6/7 comparisons (LOSAT/tests/outfmt0_manifest.tsv: multi.blastn,
-# e2d.blastn.dc, e2d.blastp.qloc, width.tblastn, e2d.tblastn.both, e2d.tblastx.both) and, for
+# e2d.blastn.dc, e2d.blastp.fast, width.tblastn, e2d.tblastn.both, e2d.tblastx.both) and, for
 # BLASTX, the TBLASTN width fixture with the roles swapped.
 FIXTURES = {
     'blastn.default': ('outfmt0/multi_query.fasta', 'outfmt0/multi_subject.fasta'),

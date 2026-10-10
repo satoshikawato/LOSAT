@@ -147,12 +147,16 @@ const plural = (count: number, one: string) => `${formatCount(count)} ${count ==
 /** "Results for" (the query list) is for runs of more than one query, as NCBI's. */
 const multiQuery = computed(() => (loaded.value?.run.snapshot.query.records.length ?? 0) > 1);
 
+/** Why "Edit Search" could not fill the form (the engine could not describe the program). */
+const editError = ref<string>();
 /**
  * NCBI's "Edit Search" (W4b decision 18): the run's settings and Job Title go to the search form,
  * which keeps its inputs; nothing is searched (application/run-files.ts).
  */
 async function editSearch(run: RunView): Promise<void> {
+  editError.value = undefined;
   if (await props.runFiles.editSearch(run)) emit('edit-search');
+  else editError.value = props.runFiles.state.get().run?.text;
 }
 
 /** "Show alignment" of the Graphic Summary and the Dot Plot: the Alignments tab, with the HSP's Range in view. */
@@ -170,6 +174,7 @@ async function toAlignments(id: HspId): Promise<void> {
     <template v-else>
       <p v-if="selected" class="results-links">
         <button type="button" class="link" data-testid="edit-search" @click="editSearch(selected)">Edit Search</button>
+        <span v-if="editError" class="error" data-testid="edit-search-error"> {{ editError }}</span>
       </p>
       <div class="results-top">
         <dl class="results-summary" data-testid="results-summary">

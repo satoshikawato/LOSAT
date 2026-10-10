@@ -332,6 +332,23 @@ describe('RunFiles', () => {
     expect(draft.state.get().title).toBe('');
   });
 
+  it('Edit Search changes nothing and says why when the engine cannot describe the program', async () => {
+    const run = await runOf('blastp', [['-seg', 'yes']]);
+    const fake = new FakeEngine();
+    const { draft, runFiles } = setup({
+      describe: (program) => (program === 'blastp' ? Promise.reject(new Error('describe failed')) : fake.describe(program)),
+    });
+    await draft.idle();
+    expect(await runFiles.editSearch(run)).toBe(false);
+    expect(draft.state.get().program).toBe('blastn');
+    expect(runFiles.state.get().run).toEqual({
+      kind: 'error',
+      text: 'The settings of Run 1 could not be put in the form: describe failed',
+      runId: run.snapshot.runId,
+    });
+    expect(runFiles.state.get().settings).toBeUndefined();
+  });
+
   it('saves the exact bytes that the engine searched, under the argv name, in bounded blocks', async () => {
     const { draft, coordinator, runFiles, saved } = setup();
     draft.setPaste('query', NT);
@@ -355,14 +372,18 @@ describe('RunFiles', () => {
     // Where the inputs came from: the pasted text whole, and a selection of a file joined with a whole file.
     expect(runFiles.inputParts(run, 'query')).toEqual([{ origin: 'paste', name: 'query.fa', records: 1 }]);
     expect(runFiles.inputParts(run, 'subject')).toEqual([undefined, { origin: 'file', name: 'c.fa', records: 1 }]);
+  });
 
-    // A large input is written in slices of the Writer's block size.
-    const big = new Uint8Array(2 * INPUT_SLICE_BYTES + 123).fill(0x41);
+  it("writes a large input in slices of the Writer's block size", async () => {
+    const run = await runOf('blastn', []);
+    const { runFiles, saved } = setup();
+    const big = new Uint8Array(2 * INPUT_SLICE_BYTES + 123).map((_, i) => 0x41 + (i % 4));
     const large: RunView = { ...run, snapshot: { ...run.snapshot, query: { ...run.snapshot.query, name: 'big.fa', bytes: big } } };
     await runFiles.saveInput(large, 'query');
-    expect(saved[2]!.name).toBe('big.fa');
-    expect(saved[2]!.blocks).toBe(3);
-    expect(saved[2]!.bytes).toEqual(big);
+    expect(saved[0]!.name).toBe('big.fa');
+    expect(saved[0]!.blocks).toBe(3);
+    // Compared as buffers: a deep comparison of 2 MiB element by element is slow.
+    expect(Buffer.compare(Buffer.from(saved[0]!.bytes), Buffer.from(big))).toBe(0);
   });
 
   it('refuses the input of a run that has no copy of its bytes', async () => {

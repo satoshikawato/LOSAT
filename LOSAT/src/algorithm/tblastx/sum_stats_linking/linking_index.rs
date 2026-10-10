@@ -201,16 +201,13 @@
 //! computed in i64 and compared with the Int4 range. While none has left it,
 //! the values of a pass are the exact chain maxima over the remaining HSPs,
 //! so a value of pass r is at most the value of the same HSP in pass r-1
-//! (step 2 above) and only the first pass can leave the range. With
-//! `check_int4` (always on outside tests) the kernel stops at the first value
+//! (step 2 above) and only the first pass can leave the range. The add-back
+//! of line 907 is computed in i64 as well. With `check_int4` (always on
+//! outside tests) the kernel stops at the first pass value or add-back
 //! outside the range, before it changes the group, and `linking.rs` links the
-//! group with the literal port, which wraps as NCBI's C does in practice
-//! (signed overflow is undefined behaviour in C).
-//!
-//! The add-back of line 907 is not checked: it wraps as in NCBI, and its
-//! value is read only by the "current max" scan of lines 610-623, which this
-//! kernel makes with NCBI's comparisons, including the start value
-//! `-cutoff[index]`.
+//! group with the literal port, which adds the sums in i64: NCBI's C would
+//! wrap (signed overflow is undefined behaviour in C), and LOSAT does not
+//! reproduce that (Owner decision 2026-10-10; `linking_incr.rs`, "Sums").
 //!
 //! # Checking
 //!
@@ -341,6 +338,8 @@ pub(super) struct LinkFastStats {
     /// The first recompute pass with a pass value outside the Int4 range
     /// (1 = the first pass); 0 when none.
     pub int4_overflow_pass: u64,
+    /// The first round with an add-back outside the Int4 range; 0 when none.
+    pub int4_overflow_addback: u64,
 }
 
 impl LinkFastStats {
@@ -349,6 +348,7 @@ impl LinkFastStats {
         self.max_pass_sum = self.max_pass_sum.max(other.max_pass_sum);
         self.max_addback_sum = self.max_addback_sum.max(other.max_addback_sum);
         self.int4_overflow_pass = self.int4_overflow_pass.max(other.int4_overflow_pass);
+        self.int4_overflow_addback = self.int4_overflow_addback.max(other.int4_overflow_addback);
         self.rounds += other.rounds;
         self.recompute_rounds += other.recompute_rounds;
         self.recompute_alive_sum += other.recompute_alive_sum;
@@ -442,7 +442,7 @@ pub(super) fn key_sum(k: u64) -> i32 {
 // maxscore = -cutoff[index];
 // ```
 // NCBI starts both maxima at -cutoff[index], so best[index] stays NULL when every sum is below it
-// (only a wrapped add-back can be). The root of the key tree is the largest (sum, index); it is
+// (an add-back can be). The root of the key tree is the largest (sum, index); it is
 // best[index] when its sum reaches the start value, as in `DualMaximumTree::maxima` of linking.rs.
 /// `best[0]` and `best[1]` from the root of the key tree (`None` when the
 /// largest sum is below `-cutoff[index]`).
@@ -480,28 +480,29 @@ pub(super) fn best_of_root(
 // and `best[1]` of the C loop (largest sum, ties to the later HSP in the list).
 /// Flat maximum tree over the stable post-sort indices, one channel per
 /// ordering method (the existing `DualMaximumTree`, with packed keys and an
-/// update that stops at the first unchanged parent).
-pub(super) struct MaxTree {
+/// update that stops at the first unchanged parent). `K::default()` is "no
+/// entry".
+pub(super) struct MaxTree<K = u64> {
     cap: usize,
-    nodes: Vec<[u64; 2]>,
+    nodes: Vec<[K; 2]>,
 }
 
-impl MaxTree {
+impl<K: Copy + Ord + Default> MaxTree<K> {
     pub(super) fn new(n: usize) -> Self {
         let cap = n.max(1).next_power_of_two();
         Self {
             cap,
-            nodes: vec![[0u64; 2]; cap * 2],
+            nodes: vec![[K::default(); 2]; cap * 2],
         }
     }
 
     #[inline]
-    pub(super) fn leaf(&self, i: usize) -> [u64; 2] {
+    pub(super) fn leaf(&self, i: usize) -> [K; 2] {
         self.nodes[self.cap + i]
     }
 
     #[inline]
-    pub(super) fn set(&mut self, i: usize, v: [u64; 2]) {
+    pub(super) fn set(&mut self, i: usize, v: [K; 2]) {
         let mut pos = self.cap + i;
         self.nodes[pos] = v;
         while pos > 1 {
@@ -525,7 +526,7 @@ impl MaxTree {
     }
 
     #[inline]
-    pub(super) fn root(&self) -> [u64; 2] {
+    pub(super) fn root(&self) -> [K; 2] {
         self.nodes[1]
     }
 }
@@ -723,7 +724,7 @@ pub(super) fn link_hsp_group_fast(
     );
     if let Some(started) = started {
         eprintln!(
-            "[LINK_FAST_STATS] n={} us={} bound={} bound_ratio={:.3e} max_pass_sum={} max_addback_sum={} int4_overflow_pass={} rounds={} recompute_rounds={} recompute_alive_sum={} idx0_searched={} idx0_scanned={} idx0_kept_link={} idx0_kept_none={} idx1_searched={} idx1_kept_link={} idx1_kept_none={} fallbacks={} verified={}",
+            "[LINK_FAST_STATS] n={} us={} bound={} bound_ratio={:.3e} max_pass_sum={} max_addback_sum={} int4_overflow_pass={} int4_overflow_addback={} rounds={} recompute_rounds={} recompute_alive_sum={} idx0_searched={} idx0_scanned={} idx0_kept_link={} idx0_kept_none={} idx1_searched={} idx1_kept_link={} idx1_kept_none={} fallbacks={} verified={}",
             n,
             started.elapsed().as_micros(),
             bound,
@@ -731,6 +732,7 @@ pub(super) fn link_hsp_group_fast(
             stats.max_pass_sum,
             stats.max_addback_sum,
             stats.int4_overflow_pass,
+            stats.int4_overflow_addback,
             stats.rounds,
             stats.recompute_rounds,
             stats.recompute_alive_sum,
@@ -745,7 +747,7 @@ pub(super) fn link_hsp_group_fast(
             stats.verified
         );
     }
-    if stats.int4_overflow_pass != 0 {
+    if stats.int4_overflow_pass != 0 || stats.int4_overflow_addback != 0 {
         Err(group_hits)
     } else {
         Ok(group_hits)
@@ -1538,10 +1540,18 @@ pub(super) fn link_hsp_group_fast_with(
         let mut prob = [f64::MAX, f64::MAX];
         if !ignore_small_gaps {
             if let Some(bi) = best[0] {
-                // Exact in i64, then NCBI's Int4 value (module documentation,
-                // "Int4 range": the add-back wraps as in NCBI).
+                // Exact in i64; outside Int4 the group goes back to the
+                // literal port (module documentation, "Int4 range").
                 let added = i64::from(sum0[bi]) + i64::from(num0[bi]) * i64::from(c0);
                 stats.max_addback_sum = stats.max_addback_sum.max(added);
+                if i64::from(added as i32) != added {
+                    if stats.int4_overflow_addback == 0 {
+                        stats.int4_overflow_addback = stats.rounds;
+                    }
+                    if check_int4 {
+                        return (group_hits, stats);
+                    }
+                }
                 sum0[bi] = added as i32;
                 tree.set(bi, [key(sum0[bi], bi), key(sum1[bi], bi)]);
                 let num = num0[bi] as usize;
@@ -1594,9 +1604,18 @@ pub(super) fn link_hsp_group_fast_with(
             // ...
             // ordering_method = eLinkLargeGaps;
             // ```
-            // Only large gaps are considered when cutoff[0] == 0.
+            // Only large gaps are considered when cutoff[0] == 0. The add-back is exact in i64; outside
+            // Int4 the group goes back to the literal port (module documentation, "Int4 range").
             let added = i64::from(sum1[bi]) + i64::from(num1[bi]) * i64::from(c1);
             stats.max_addback_sum = stats.max_addback_sum.max(added);
+            if i64::from(added as i32) != added {
+                if stats.int4_overflow_addback == 0 {
+                    stats.int4_overflow_addback = stats.rounds;
+                }
+                if check_int4 {
+                    return (group_hits, stats);
+                }
+            }
             sum1[bi] = added as i32;
             tree.set(bi, [key(sum0[bi], bi), key(sum1[bi], bi)]);
             let num = num1[bi] as usize;

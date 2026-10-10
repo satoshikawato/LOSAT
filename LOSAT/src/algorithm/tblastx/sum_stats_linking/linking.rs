@@ -327,6 +327,13 @@ fn sort_linked_hsp_references(
 // Core structures
 // ---------------------------------------------------------------------------
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:104-105
+// ```c
+//   Int4 sum[eOrderingMethods]; /**< raw score of linked set containing HSP(?) */
+//   Int4 maxsum1;               /**< threshold for stopping link attempts (?) */
+// ```
+// NCBI keeps the sums in Int4; LOSAT keeps them in i64 and does not reproduce NCBI's wrap beyond
+// Int4 (Owner decision 2026-10-10; linking_incr.rs, "Sums").
 /// lh_helper structure (NCBI link_hsps.c:100-109)
 /// This is the "hot" data used in the inner loop
 #[derive(Clone)]
@@ -334,9 +341,9 @@ struct LhHelper {
     hsp_idx: usize, // Original HSP index (NCBI: ptr field)
     q_off_trim: i32,
     s_off_trim: i32,
-    sum: [i32; 2],      // sum for both indices (small gap, large gap)
+    sum: [i64; 2],      // sum for both indices (small gap, large gap)
     next_larger: usize, // index of next HSP with larger sum[1]
-    maxsum1: i32,       // NCBI: threshold for stopping link attempts (unused with if(0))
+    maxsum1: i64,       // NCBI: threshold for stopping link attempts (unused with if(0))
 }
 
 // NCBI c++/src/algo/blast/core/link_hsps.c:608-633,654-658:
@@ -348,7 +355,7 @@ struct LhHelper {
 // SENTINEL_IDX means inactive, never a real contender at cutoff equality.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct DualMaximum {
-    sum: [i32; 2],
+    sum: [i64; 2],
     index: [usize; 2],
 }
 
@@ -363,7 +370,7 @@ impl DualMaximum {
     };
 
     #[inline]
-    fn active(index: usize, sum: [i32; 2]) -> Self {
+    fn active(index: usize, sum: [i64; 2]) -> Self {
         Self {
             sum,
             index: [index; 2],
@@ -439,10 +446,10 @@ impl DualMaximumTree {
     }
 
     #[inline]
-    fn maxima(&self, cutoffs: [i32; 2], ignore_small_gaps: bool) -> ([Option<usize>; 2], [i32; 2]) {
+    fn maxima(&self, cutoffs: [i32; 2], ignore_small_gaps: bool) -> ([Option<usize>; 2], [i64; 2]) {
         let root = self.nodes[1];
         let mut best = [None; 2];
-        let mut sums = [-cutoffs[0], -cutoffs[1]];
+        let mut sums = [-i64::from(cutoffs[0]), -i64::from(cutoffs[1])];
         for channel in usize::from(ignore_small_gaps)..2 {
             if root.index[channel] != SENTINEL_IDX && root.sum[channel] >= sums[channel] {
                 best[channel] = Some(root.index[channel]);
@@ -463,7 +470,13 @@ struct HspLink {
     s_off_trim: i32,
     q_end_trim: i32,
     s_end_trim: i32,
-    sum: [i32; 2],  // sum for both indices
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:67
+    // ```c
+    //    Int4 sum[eOrderingMethods]; /**< Sum-Score of HSP. */
+    // ```
+    // i64, not Int4: NCBI's wrap beyond Int4 is not reproduced (Owner decision 2026-10-10;
+    // linking_incr.rs, "Sums").
+    sum: [i64; 2],  // sum for both indices
     xsum: [f64; 2], // normalized sum for both indices
     num: [i16; 2],  // number of HSPs in chain for both indices
     // Best previous HSP to link with for both indices (NCBI: LinkHSPStruct* or NULL).
@@ -1149,11 +1162,11 @@ fn scan_large_gap_predecessors(
     h_qe: i32,
     h_se: i32,
     is_target_hsp: bool,
-    mut h_sum: i32,
+    mut h_sum: i64,
     mut h_num: i16,
     mut h_xsum: f64,
     mut h_link: usize,
-) -> (i32, i16, f64, usize) {
+) -> (i64, i16, f64, usize) {
     // NCBI reference: c++/src/algo/blast/core/link_hsps.c:675-684,876-885
     // Int4 prev=H_index-1;
     // while((cur_sum>=prev_sum) && (prev>0)) { prev=lh_helper[prev].next_larger; }
@@ -1233,14 +1246,15 @@ fn assert_same_linking(expected: &[UngappedHit], actual: &[UngappedHit]) {
 // ```
 // Switch point of LOSAT_LINK_FAST. The index-backed kernel of linking_index.rs (LOSAT_LINK_FAST=1)
 // and the incremental kernel of linking_incr.rs (LOSAT_LINK_FAST=2) port s_BlastEvenGapLinkHSPs
-// with different predecessor searches. A group whose pass values leave the
-// Int4 range runs the literal port; a run with diagnostics on runs the default kernel
-// (linking_fast.rs).
+// with different predecessor searches. The literal port links a group whose sums leave the Int4
+// range of the index kernel; a run with diagnostics on runs the default kernel (linking_fast.rs).
 /// Links one group under `LOSAT_LINK_FAST=1` with the index-backed kernel of
-/// `linking_index.rs`, which returns the same result as the literal port
-/// `link_hsp_group_ncbi`. A group whose pass values leave the Int4 range is
-/// linked by the literal port itself (`linking_index.rs`, "Int4 range"); a run
-/// with diagnostics on uses the default kernel of `linking_fast.rs`.
+/// `linking_index.rs`, or under `LOSAT_LINK_FAST=2` with the incremental
+/// kernel of `linking_incr.rs`; both return the same result as the literal
+/// port `link_hsp_group_ncbi`. The literal port itself links a group whose
+/// sums leave the Int4 range of the index kernel (`linking_index.rs`, "Int4
+/// range"); a run with diagnostics on uses the default kernel of
+/// `linking_fast.rs`.
 #[allow(clippy::too_many_arguments)]
 fn link_hsp_group_link_fast(
     group_hits: Vec<UngappedHit>,
@@ -1289,7 +1303,7 @@ fn link_hsp_group_link_fast(
         )
     });
     let result = if index::link_fast_mode() == 2 {
-        super::linking_incr::link_hsp_group_incr(
+        Ok(super::linking_incr::link_hsp_group_incr(
             group_hits,
             cutoffs,
             gap_decay_rate,
@@ -1298,7 +1312,7 @@ fn link_hsp_group_link_fast(
             length_adj_per_context,
             eff_searchsp_per_context,
             log_k_by_ctx,
-        )
+        ))
     } else {
         index::link_hsp_group_fast(
             group_hits,
@@ -1561,7 +1575,10 @@ fn link_hsp_group_ncbi(
             s_off_trim: s_off + st,
             q_end_trim: q_end - qt,
             s_end_trim: s_end - st,
-            sum: [score - cutoff_small, score - cutoff_big],
+            sum: [
+                i64::from(score) - i64::from(cutoff_small),
+                i64::from(score) - i64::from(cutoff_big),
+            ],
             xsum: [xscore, xscore],
             num: [1, 1],
             link: [SENTINEL_IDX, SENTINEL_IDX],
@@ -1707,7 +1724,7 @@ fn link_hsp_group_ncbi(
         // NCBI lines 607-625: Initialize max sums each pass
         // CRITICAL: must reset to -cutoff each pass to allow all HSPs to be candidates
         let mut best: [Option<usize>; 2] = [None, None];
-        let mut best_sum: [i32; 2] = [-cutoff_small, -cutoff_big];
+        let mut best_sum: [i64; 2] = [-i64::from(cutoff_small), -i64::from(cutoff_big)];
         let mut use_current_max = false;
 
         // NCBI lines 603-652: Try to reuse previous max
@@ -1811,7 +1828,7 @@ fn link_hsp_group_ncbi(
             let mut cur = active_head;
             // NCBI lines 669-671: track max sum[1] for maxsum1 calculation
             // Since LOSAT groups by frame, all HSPs have the same frame sign, so we track one max
-            let mut running_max = -10000i32;
+            let mut running_max = -10000i64;
             while cur != SENTINEL_IDX {
                 let hsp_idx = cur;
 
@@ -1852,7 +1869,7 @@ fn link_hsp_group_ncbi(
             let _active_count = lh_len - 2;
 
             best = [None, None];
-            best_sum = [-cutoff_small, -cutoff_big];
+            best_sum = [-i64::from(cutoff_small), -i64::from(cutoff_big)];
 
             // INDEX 0 LOOP (small gaps) - NCBI lines 691-768
             if !ignore_small_gaps {
@@ -1861,7 +1878,7 @@ fn link_hsp_group_ncbi(
                 for h_lh_idx in 2..lh_len {
                     let i = pool_lh_helpers[h_lh_idx].hsp_idx; // Use stored hsp_idx (NCBI: ptr)
 
-                    let mut h_sum = 0i32;
+                    let mut h_sum = 0i64;
                     let mut h_xsum = 0.0f64;
                     let mut h_num = 0i16;
                     let mut h_link: usize = SENTINEL_IDX;
@@ -1946,8 +1963,8 @@ fn link_hsp_group_ncbi(
                             i_score, cutoff_small);
                     }
 
-                    // NCBI lines 750-767: Update this HSP's link info
-                    let new_sum = h_sum + (i_score - cutoff_small);
+                    // NCBI lines 750-767: Update this HSP's link info (the sum in i64, see LhHelper)
+                    let new_sum = h_sum + (i64::from(i_score) - i64::from(cutoff_small));
                     let ctx_idx = pool_hsp_links[i].ctx_idx;
                     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:750-752
                     // ```c
@@ -2004,7 +2021,7 @@ fn link_hsp_group_ncbi(
             for h_lh_idx in 2..lh_len {
                 let i = pool_lh_helpers[h_lh_idx].hsp_idx; // Use stored hsp_idx (NCBI: ptr)
 
-                let mut h_sum = 0i32;
+                let mut h_sum = 0i64;
                 let mut h_xsum = 0.0f64;
                 let mut h_num = 0i16;
                 let mut h_link: usize = SENTINEL_IDX;
@@ -2129,8 +2146,8 @@ fn link_hsp_group_ncbi(
                     }
                 }
 
-                // NCBI lines 863-895: Update this HSP's link info
-                let new_sum = h_sum + (i_score - cutoff_big);
+                // NCBI lines 863-895: Update this HSP's link info (the sum in i64, see LhHelper)
+                let new_sum = h_sum + (i64::from(i_score) - i64::from(cutoff_big));
                 let ctx_idx = pool_hsp_links[i].ctx_idx;
                 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:866-867
                 // ```c
@@ -2227,7 +2244,8 @@ fn link_hsp_group_ncbi(
             if let Some(bi) = best[0] {
                 // NCBI lines 907-908: Add back cutoff*num that was subtracted during DP
                 // best[0]->hsp_link.sum[0] += (best[0]->hsp_link.num[0])*cutoff[0];
-                pool_hsp_links[bi].sum[0] += (pool_hsp_links[bi].num[0] as i32) * cutoff_small;
+                pool_hsp_links[bi].sum[0] +=
+                    i64::from(pool_hsp_links[bi].num[0]) * i64::from(cutoff_small);
                 // NCBI c++/src/algo/blast/core/link_hsps.c:907-908:
                 // best[0]->hsp_link.sum[0] += (best[0]->hsp_link.num[0])*cutoff[0];
                 // Mirror the persistent addback even if another chain is selected.
@@ -2284,7 +2302,8 @@ fn link_hsp_group_ncbi(
             // NCBI lines 939-952: Only consider large gaps
             if let Some(bi) = best[1] {
                 // NCBI lines 942-943: Add back cutoff*num
-                pool_hsp_links[bi].sum[1] += (pool_hsp_links[bi].num[1] as i32) * cutoff_big;
+                pool_hsp_links[bi].sum[1] +=
+                    i64::from(pool_hsp_links[bi].num[1]) * i64::from(cutoff_big);
                 // NCBI c++/src/algo/blast/core/link_hsps.c:942-943:
                 // best[1]->hsp_link.sum[1] += (best[1]->hsp_link.num[1])*cutoff[1];
                 // Mirror the persistent addback even if another chain is selected.
@@ -2780,9 +2799,9 @@ mod tests {
         active_head: usize,
         cutoffs: [i32; 2],
         ignore_small_gaps: bool,
-    ) -> ([Option<usize>; 2], [i32; 2]) {
+    ) -> ([Option<usize>; 2], [i64; 2]) {
         let mut best = [None; 2];
-        let mut best_sum = [-cutoffs[0], -cutoffs[1]];
+        let mut best_sum = [-i64::from(cutoffs[0]), -i64::from(cutoffs[1])];
         if !ignore_small_gaps {
             let mut cur = active_head;
             while cur != SENTINEL_IDX {
@@ -2824,7 +2843,7 @@ mod tests {
     // for (H=hp_start->next; H!=NULL; H=H->next) { /* stored sums */ }
     // if (H->prev) (H->prev)->next=H->next;
     // Finite state fixture with stable leaves and a separately maintained list.
-    fn tree_links(scores: &[[i32; 2]], active: &[bool]) -> (Vec<HspLink>, usize) {
+    fn tree_links(scores: &[[i64; 2]], active: &[bool]) -> (Vec<HspLink>, usize) {
         let mut links: Vec<_> = scores
             .iter()
             .map(|&sum| HspLink {
@@ -2868,7 +2887,7 @@ mod tests {
     // if(sum1>=max1) { max1=sum1; best[1]=H; }
     #[test]
     fn dual_maximum_boundaries_and_channel_ties() {
-        let cases: Vec<(Vec<[i32; 2]>, Vec<bool>, [Option<usize>; 2], [i32; 2])> = vec![
+        let cases: Vec<(Vec<[i64; 2]>, Vec<bool>, [Option<usize>; 2], [i64; 2])> = vec![
             (vec![], vec![], [None, None], [-10, -20]),
             (vec![[4, 5]], vec![true], [Some(0), Some(0)], [4, 5]),
             (vec![[-10, -20]], vec![true], [Some(0), Some(0)], [-10, -20]),
@@ -2993,7 +3012,7 @@ mod tests {
                 for index in 0..size {
                     seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
                     if round % 11 == 0 || seed % 7 == 0 {
-                        scores[index] = [(seed % 101) as i32 - 50, ((seed >> 8) % 101) as i32 - 50];
+                        scores[index] = [(seed % 101) as i64 - 50, ((seed >> 8) % 101) as i64 - 50];
                         active[index] = seed & 8 != 0;
                         tree.update(
                             index,
@@ -3782,6 +3801,43 @@ mod tests {
         )
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:414-419,589
+    // ```c
+    // s_BlastEvenGapLinkHSPs(EBlastProgramType program_number, BlastHSPList* hsp_list,
+    // ...
+    //       while (number_of_hsps > 0)
+    // ```
+    // The port of s_BlastEvenGapLinkHSPs on a group sorted as link_with_both_kernels sorts it.
+    /// Links `hits` (any order) with the NCBI kernel, on the group prepared as
+    /// `link_with_both_kernels` prepares it.
+    fn link_with_ncbi_kernel(
+        mut hits: Vec<UngappedHit>,
+        cutoffs: &LinkHspCutoffs,
+    ) -> Vec<UngappedHit> {
+        let (params, contexts, log_k) = fast_test_contexts();
+        sort_hsps_by_ncbi_link_order(&mut hits, rev_compare_hsps_tbx);
+        for (link_id, hit) in hits.iter_mut().enumerate() {
+            hit.link_id = link_id;
+            hit.chain_next_link_id = None;
+            hit.num = 1;
+        }
+        link_hsp_group_ncbi(
+            hits,
+            &params,
+            cutoffs,
+            0.5,
+            false,
+            300_000,
+            &contexts,
+            &[0; 6],
+            &[49; 6],
+            &[9_372_428_362; 6],
+            &log_k,
+            &mut Vec::new(),
+            &mut Vec::new(),
+        )
+    }
+
     /// The HSP of a fixed test, found by its query and subject start.
     fn linked_hit(hits: &[UngappedHit], q_aa_start: usize, s_aa_start: usize) -> &UngappedHit {
         hits.iter()
@@ -3984,9 +4040,10 @@ mod tests {
     // ```c
     // Int4 new_sum = H_hsp_sum + (score - cutoff[index]);
     // ```
-    // NCBI sums are Int4. A group whose pass values leave that range is handed back unchanged
-    // (linking.rs then links it with the port of s_BlastEvenGapLinkHSPs); a group whose largest
-    // chain sum is just inside the range is linked by the index-backed kernel.
+    // NCBI sums are Int4. The index-backed kernel hands back a group whose pass values leave that
+    // range unchanged (linking.rs then links it with the port of s_BlastEvenGapLinkHSPs, which adds
+    // the sums in i64 as the incremental kernel does); a group whose largest chain sum is just
+    // inside the range is linked by the index-backed kernel.
     #[test]
     fn fast_kernel_hands_back_a_group_whose_sums_leave_int4() {
         let cutoffs = fast_test_cutoffs();
@@ -4026,6 +4083,19 @@ mod tests {
         assert_eq!(stats.int4_overflow_pass, 1);
         assert_eq!(stats.max_pass_sum, 3 * (1_000_000_000 - 41));
         assert_eq!(format!("{back:?}"), before);
+        // The NCBI kernel links it as one chain of three, and so does the incremental kernel.
+        let expected = link_with_ncbi_kernel(back.clone(), &cutoffs);
+        assert!(expected.iter().all(|h| h.linked_set));
+        let (incr, stats) = link_with_incr_kernel(
+            back,
+            &cutoffs,
+            IncrOptions {
+                verify: true,
+                wide_keys: false,
+            },
+        );
+        assert_eq!(stats.max_pass_sum, 3 * (1_000_000_000 - 41));
+        assert_eq!(format!("{expected:?}"), format!("{incr:?}"));
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:414-419,589
@@ -4159,7 +4229,7 @@ mod tests {
                 cutoffs,
                 IncrOptions {
                     verify: n <= 140,
-                    check_int4: true,
+                    wide_keys: case % 2 == 1,
                 },
             );
             incr_total.add(&stats);
@@ -4218,7 +4288,7 @@ mod tests {
             assert!(t.kept0 > 0 && t.searched0 > 0, "{t:?}");
             assert!(t.kept1 > 0 && t.searched1 > 0, "{t:?}");
             assert!(t.removed > 0 && t.swept > 0 && t.fallbacks > 0, "{t:?}");
-            assert!(t.verified_passes > 0, "{t:?}");
+            assert!(t.verified_passes > 0 && t.wide_groups > 0, "{t:?}");
             eprintln!("incremental kernel: {t:?}");
         }
     }
@@ -4230,26 +4300,17 @@ mod tests {
     // best[0]->hsp_link.sum[0] +=
     //    (best[0]->hsp_link.num[0])*cutoff[0];
     // ```
-    // Groups whose Int4 sums wrap. The reference is the port of s_BlastEvenGapLinkHSPs, which wraps
-    // as NCBI's C does in practice; the test needs wrapping i32 arithmetic, so it runs only with
-    // CARGO_PROFILE_TEST_OVERFLOW_CHECKS=false.
+    // Groups whose sums leave Int4, where NCBI's C would wrap. LOSAT adds the sums in i64 (Owner
+    // decision 2026-10-10; linking_incr.rs, "Sums"), and the reference is the port of
+    // s_BlastEvenGapLinkHSPs, which also adds in i64.
     /// Differential test on groups whose sums leave the Int4 range: the NCBI
-    /// kernel against the index-backed kernel without the Int4 check (with
-    /// and without the index-0 reuse), with the check and the fallback of
-    /// `linking.rs`, and against the default kernel of `linking_fast.rs`.
-    /// Requires: without a pass value outside Int4, both index-backed runs
-    /// equal the NCBI kernel, also when an add-back wraps; a pass value
-    /// leaves Int4 only in the first pass; with the check, the result always
-    /// equals the NCBI kernel. Prints how often the other kernels differ, and
-    /// the smallest group on which each one differs.
+    /// kernel against the incremental kernel with either key (every pass
+    /// checked against a pass from scratch) and against the path of `linking.rs` for the
+    /// index-backed kernel (the checked kernel, the NCBI kernel when a pass
+    /// value leaves Int4). Requires the same result from all three, and both
+    /// kinds of group (with and without a pass value outside Int4).
     #[test]
-    #[ignore = "needs wrapping i32: CARGO_PROFILE_TEST_OVERFLOW_CHECKS=false"]
-    fn fast_kernel_int4_wrap_groups() {
-        use std::hint::black_box;
-        assert!(
-            std::panic::catch_unwind(|| black_box(i32::MAX) + black_box(1)).is_ok(),
-            "run with CARGO_PROFILE_TEST_OVERFLOW_CHECKS=false"
-        );
+    fn kernels_add_sums_beyond_int4() {
         struct Rng(u64);
         impl Rng {
             fn next(&mut self) -> u64 {
@@ -4296,7 +4357,7 @@ mod tests {
                 &mut links,
             )
         };
-        let link_index = |hits: Vec<UngappedHit>, cutoffs: &LinkHspCutoffs, reuse_index0, check| {
+        let link_index = |hits: Vec<UngappedHit>, cutoffs: &LinkHspCutoffs| {
             link_hsp_group_fast_with(
                 hits,
                 cutoffs,
@@ -4306,14 +4367,10 @@ mod tests {
                 &[49; 6],
                 &[9_372_428_362; 6],
                 &log_k,
-                LinkFastOptions {
-                    verify: false,
-                    reuse_index0,
-                    check_int4: check,
-                },
+                VERIFIED,
             )
         };
-        let link_incr = |hits: Vec<UngappedHit>, cutoffs: &LinkHspCutoffs, check| {
+        let link_incr = |hits: Vec<UngappedHit>, cutoffs: &LinkHspCutoffs, wide_keys| {
             link_hsp_group_incr_with(
                 hits,
                 cutoffs,
@@ -4324,29 +4381,17 @@ mod tests {
                 &[9_372_428_362; 6],
                 &log_k,
                 IncrOptions {
-                    verify: false,
-                    check_int4: check,
+                    verify: true,
+                    wide_keys,
                 },
             )
         };
-        let link_pr120 = |hits: Vec<UngappedHit>, cutoffs: &LinkHspCutoffs| {
-            super::super::linking_fast::link_hsp_group_fast(
-                hits,
-                cutoffs,
-                0.5,
-                300_000,
-                &contexts,
-                &[49; 6],
-                &[9_372_428_362; 6],
-                &log_k,
-            )
-        };
-        let same = |a: &[UngappedHit], b: &[UngappedHit]| {
-            a.len() == b.len()
-                && a.iter().zip(b).all(|(x, y)| {
-                    x.e_value.to_bits() == y.e_value.to_bits()
-                        && format!("{x:?}") == format!("{y:?}")
-                })
+        let assert_same = |a: &[UngappedHit], b: &[UngappedHit], label: &str| {
+            assert_eq!(a.len(), b.len(), "{label}");
+            for (x, y) in a.iter().zip(b) {
+                assert_eq!(x.e_value.to_bits(), y.e_value.to_bits(), "{label}");
+                assert_eq!(format!("{x:?}"), format!("{y:?}"), "{label}");
+            }
         };
 
         // (cutoff[0], cutoff[1], gap_prob, ignore_small_gaps, scores from, to)
@@ -4377,12 +4422,8 @@ mod tests {
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(20_000);
-        // [class][kernel]: class 0 = no value outside Int4, 1 = only an
-        // add-back outside Int4, 2 = a pass value outside Int4; kernel 0 =
-        // index with reuse, 1 = index without reuse, 2 = linking_fast.rs, 3 = incremental.
-        let mut cases_of = [0usize; 3];
-        let mut differ = [[0usize; 4]; 3];
-        let mut smallest: [Option<(usize, String)>; 4] = [None, None, None, None];
+        // Groups without / with a pass value outside Int4; groups the index kernel handed back.
+        let mut cases_of = [0usize; 2];
         let mut fallbacks = 0usize;
         for case in 0..cases {
             let (c0, c1, gap_prob, ignore_small_gaps, lo, hi) = settings[case % settings.len()];
@@ -4426,37 +4467,22 @@ mod tests {
             let label = format!("case {case} n {n} cutoffs {c0} {c1} ignore {ignore_small_gaps}");
 
             let expected = link_ncbi(hits.clone(), &cutoffs);
-            let (with_reuse, stats_reuse) = link_index(hits.clone(), &cutoffs, true, false);
-            let (without_reuse, stats_plain) = link_index(hits.clone(), &cutoffs, false, false);
-            let pr120 = link_pr120(hits.clone(), &cutoffs);
             let (incr, stats_incr) = link_incr(hits.clone(), &cutoffs, false);
-            let (incr_checked, stats_incr_checked) = link_incr(hits.clone(), &cutoffs, true);
-            let incr_checked = if stats_incr_checked.int4_overflow_pass != 0 {
-                assert_eq!(
-                    format!("{incr_checked:?}"),
-                    format!("{hits:?}"),
-                    "{label}: incremental handed back changed"
-                );
-                link_ncbi(incr_checked, &cutoffs)
-            } else {
-                incr_checked
-            };
-            assert!(
-                same(&expected, &incr_checked),
-                "{label}: incremental kernel + fallback"
+            assert_same(&expected, &incr, &format!("{label}: incremental kernel"));
+            let (wide, _) = link_incr(hits.clone(), &cutoffs, true);
+            assert_same(
+                &expected,
+                &wide,
+                &format!("{label}: incremental kernel, u128 key"),
             );
-            if stats_incr.int4_overflow_pass == 0 {
-                assert!(same(&expected, &incr), "{label}: incremental kernel");
-            }
-            assert!(
-                stats_incr.int4_overflow_pass <= 1,
-                "{label}: {stats_incr:?}"
-            );
+            cases_of[usize::from(stats_incr.max_pass_sum > i64::from(i32::MAX))] += 1;
 
             // The path of linking.rs: the checked kernel, the NCBI kernel on Int4 overflow.
             let before = format!("{hits:?}");
-            let (checked, stats_checked) = link_index(hits.clone(), &cutoffs, true, true);
-            let checked = if stats_checked.int4_overflow_pass != 0 {
+            let (checked, stats_checked) = link_index(hits.clone(), &cutoffs);
+            let checked = if stats_checked.int4_overflow_pass != 0
+                || stats_checked.int4_overflow_addback != 0
+            {
                 assert_eq!(
                     format!("{checked:?}"),
                     before,
@@ -4467,76 +4493,62 @@ mod tests {
             } else {
                 checked
             };
-            assert!(
-                same(&expected, &checked),
-                "{label}: checked kernel + fallback"
+            assert_same(
+                &expected,
+                &checked,
+                &format!("{label}: index kernel + fallback"),
             );
-
-            for stats in [&stats_reuse, &stats_plain, &stats_checked] {
-                assert!(stats.int4_overflow_pass <= 1, "{label}: {stats:?}");
-            }
-            let class = if stats_reuse.int4_overflow_pass != 0 {
-                2
-            } else if stats_reuse.max_addback_sum > i64::from(i32::MAX)
-                || stats_reuse.max_addback_sum < i64::from(i32::MIN)
-            {
-                1
-            } else {
-                0
-            };
-            cases_of[class] += 1;
-            if stats_reuse.int4_overflow_pass == 0 {
-                assert!(same(&expected, &with_reuse), "{label}: index kernel, reuse");
-            }
-            if stats_plain.int4_overflow_pass == 0 {
-                assert!(
-                    same(&expected, &without_reuse),
-                    "{label}: index kernel, no reuse"
-                );
-            }
-            for (kernel, result) in [&with_reuse, &without_reuse, &pr120, &incr]
-                .into_iter()
-                .enumerate()
-            {
-                if !same(&expected, result) {
-                    differ[class][kernel] += 1;
-                    if smallest[kernel].as_ref().map_or(true, |(m, _)| n < *m) {
-                        let spec: Vec<String> = hits
-                            .iter()
-                            .map(|h| {
-                                format!(
-                                    "({},{},{},{},{})",
-                                    h.q_aa_start, h.q_aa_end, h.s_aa_start, h.s_aa_end, h.raw_score
-                                )
-                            })
-                            .collect();
-                        smallest[kernel] = Some((n, format!("{label}: {}", spec.join(" "))));
-                    }
-                }
-            }
         }
         eprintln!(
-            "fast_kernel_int4_wrap_groups: {cases} cases; classes (none, add-back only, pass) {cases_of:?}; checked kernel fell back {fallbacks} times"
+            "kernels_add_sums_beyond_int4: {cases} cases; (inside, beyond) Int4 {cases_of:?}; index kernel fell back {fallbacks} times"
         );
-        for (kernel, name) in [
-            "index, reuse",
-            "index, no reuse",
-            "linking_fast.rs",
-            "incremental",
-        ]
-        .iter()
-        .enumerate()
-        {
-            eprintln!(
-                "  {name}: differs in (none, add-back only, pass) = ({}, {}, {}); smallest: {}",
-                differ[0][kernel],
-                differ[1][kernel],
-                differ[2][kernel],
-                smallest[kernel]
-                    .as_ref()
-                    .map_or("-".to_string(), |(_, s)| s.clone())
-            );
-        }
         assert!(cases_of.iter().all(|&c| c > 0), "{cases_of:?}");
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:753,907-908
+    // ```c
+    // Int4 new_sum = H_hsp_sum + (score - cutoff[index]);
+    // ...
+    // best[0]->hsp_link.sum[0] +=
+    //    (best[0]->hsp_link.num[0])*cutoff[0];
+    // ```
+    // The keys of the incremental kernel (linking_incr.rs, "Sums"): a group whose pass values
+    // exceed the u64 key is linked with the u128 key, and an add-back beyond the u64 key is
+    // clamped; both give the result of the port of s_BlastEvenGapLinkHSPs.
+    /// One chain of 300 HSPs (a) whose pass values exceed 2^39 and (b) whose
+    /// pass values fit the u64 key but whose add-back does not.
+    #[test]
+    fn incremental_kernel_links_groups_beyond_its_u64_key() {
+        let chain = |score: i32| -> Vec<UngappedHit> {
+            fast_test_hits(
+                &(0..300)
+                    .map(|i| (10 * i, 10 * i + 8, 10 * i, 10 * i + 8, score))
+                    .collect::<Vec<_>>(),
+            )
+        };
+        let plain = IncrOptions {
+            verify: true,
+            wide_keys: false,
+        };
+        // (a) pass values up to 300 * (2e9 - 41) > 2^39: the u128 key.
+        let cutoffs = fast_test_cutoffs();
+        let expected = link_with_ncbi_kernel(chain(2_000_000_000), &cutoffs);
+        let (incr, stats) = link_with_incr_kernel(chain(2_000_000_000), &cutoffs, plain);
+        assert_eq!(stats.wide_groups, 1, "{stats:?}");
+        assert!(stats.max_pass_sum > 1 << 39, "{stats:?}");
+        assert_eq!(format!("{expected:?}"), format!("{incr:?}"));
+        // (b) pass values up to 300 * 1e8 with cutoffs near 2e9: the u64 key; the add-back of
+        // 300 * 2e9 goes beyond it and is clamped.
+        let cutoffs = LinkHspCutoffs {
+            cutoff_small_gap: 2_000_000_000,
+            cutoff_big_gap: 2_050_000_000,
+            gap_prob: 0.5,
+            ignore_small_gaps: false,
+        };
+        let expected = link_with_ncbi_kernel(chain(2_100_000_000), &cutoffs);
+        let (incr, stats) = link_with_incr_kernel(chain(2_100_000_000), &cutoffs, plain);
+        assert_eq!(stats.wide_groups, 0, "{stats:?}");
+        assert!(stats.clamped > 0, "{stats:?}");
+        assert_eq!(format!("{expected:?}"), format!("{incr:?}"));
     }
 }

@@ -118,6 +118,18 @@ use super::super::ncbi_cutoffs::{
 use super::super::tracing as blastn_trace;
 use crate::utils::dust::MaskedInterval;
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1673-1676
+// ```c
+//     while(s_DetermineScanningOffsets(subject, word_length, lut_word_length, scan_range)) {
+//
+//         hitsfound = scansub(lookup_wrap, subject, offset_pairs, max_hits, &scan_range[1]);
+// ```
+// EXPERIMENT (LOSAT_X_PAIRPAR): the one-hit seed stage of one subject chunk scanned in strips
+// by the pool threads and folded in scan order by the owner (a child module, so that it uses
+// the private types and kernels of this file without changing them).
+#[path = "x_pair_seed.rs"]
+mod x_pair_seed;
+
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/ncbi_math.h:160-161
 // ```c
 // #define NCBIMATH_LN2 0.69314718055994530941723212145818
@@ -6022,7 +6034,7 @@ fn search(
     // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
     // TBlastThreads the_threads(GetNumberOfThreads());
     // (*thread)->Run(); (*thread)->Join(&result);
-    crate::utils::threading::with_search_pool(args.num_threads, "blastn", |pool| {
+    let x_result = crate::utils::threading::with_search_pool(args.num_threads, "blastn", |pool| {
         run_in_pool(
             args,
             input_records,
@@ -6036,7 +6048,11 @@ fn search(
             pool,
             batching,
         )
-    })
+    });
+    // No NCBI counterpart: the summary line of LOSAT_X_PAIRPARSHADOW (and the LOSAT_X_PAIRPAR
+    // counters with LOSAT_TIMING); nothing without those switches.
+    x_pair_seed::summary();
+    x_result
 }
 
 /// Rejects the environment variables that put NCBI BLAST+ into a search mode or report that
@@ -8761,6 +8777,63 @@ fn search_query_batch(
 
                 // TWO-STAGE LOOKUP: Use separate rolling k-mer for lut_word_length
                 if let Some(two_stage) = two_stage_lookup_ref {
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1673-1684
+                    // ```c
+                    //     while(s_DetermineScanningOffsets(subject, word_length, lut_word_length, scan_range)) {
+                    //
+                    //         hitsfound = scansub(lookup_wrap, subject, offset_pairs, max_hits, &scan_range[1]);
+                    // ...
+                    //         hits_extended += extend(offset_pairs, hitsfound, word_params,
+                    //                                 lookup_wrap, query, subject, matrix,
+                    //                                 query_info, ewp, init_hitlist, scan_range[2] + lut_word_length);
+                    //     }
+                    // ```
+                    // Dispatch point of LOSAT_X_PAIRPAR: `x_pair_seed::run` runs this block (scan,
+                    // word extension, diagonal hash, ungapped extension; one-hit diagonal-hash
+                    // scope only) with the subject scan in strips on the pool threads and the
+                    // pairs folded by this thread in the scan order; `continue` ends the
+                    // one-iteration strand loop. Otherwise (and with LOSAT_X_PAIRPARSHADOW) the
+                    // code below runs.
+                    if x_pair_seed::run(
+                        &x_pair_seed::Inputs {
+                            two_stage,
+                            search_seq_packed,
+                            s_len,
+                            subject_seq_ranges: &subject_seq_ranges,
+                            subject_masked,
+                            scan_step,
+                            query_context_index: &query_context_index,
+                            query_contexts,
+                            encoded_query_concat_blastna: &encoded_query_concat_blastna,
+                            encoded_query_concat_blastna_with_sentinels:
+                                &encoded_query_concat_blastna_with_sentinels,
+                            query_four_base: &query_four_base,
+                            cutoff_scores: &cutoff_scores,
+                            x_dropoff_scores: &x_dropoff_scores,
+                            reduced_cutoff_scores: &reduced_cutoff_scores,
+                            score_matrix: &score_matrix,
+                            nucl_score_table: &nucl_score_table,
+                            diag_offset,
+                            diag_hash_window: diag_hash_insert_window(
+                                window_size,
+                                scan_range,
+                                two_stage.word_length(),
+                            ),
+                            use_array_indexing,
+                            window_size,
+                            scan_range,
+                            small_na_word: !small_na_compressed_query.is_empty(),
+                            diagnostics: debug_enabled
+                                || blastn_trace_enabled
+                                || debug_window.is_some(),
+                            one_subject_owner: !use_parallel && reuse_prelim_hits,
+                            timing: timing_ref,
+                        },
+                        diag_hash,
+                        ungapped_hits,
+                    ) {
+                        continue;
+                    }
                     // For two-stage lookup, use lut_word_length (8) for scanning
                     let lut_word_length = two_stage.lut_word_length();
                     let word_length = two_stage.word_length();
@@ -11184,6 +11257,9 @@ fn search_query_batch(
             // The oracle's qsort (glibc 2.39) is a stable merge sort: hits that
             // compare equal keep the order in which they were saved. `sort_by`
             // is stable too.
+            // Dispatch point of LOSAT_X_PAIRPARSHADOW: the hit list and the diagonal hash of
+            // the code above against those `x_pair_seed::run` computed for this chunk.
+            x_pair_seed::shadow_check(ungapped_hits, &subject_scratch.diag_hash);
             ungapped_hits.sort_by(score_compare_ungapped_hits);
 
             // Debug counters for containment analysis

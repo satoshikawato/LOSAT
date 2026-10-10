@@ -55,6 +55,8 @@ getrandom = { version = "0.2", features = ["js"] }
 
 [features]
 default = ["parallel"]
+# EXPERIMENT: work counters (off by default so they cost nothing)
+xstats = []
 parallel = ["rayon", "num_cpus"]
 # NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
 # ```c

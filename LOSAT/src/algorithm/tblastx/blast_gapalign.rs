@@ -19,7 +19,7 @@ use std::cmp::Ordering;
 ///
 /// This structure stores HSPs after extension but before coordinate conversion.
 /// Coordinates are stored as absolute positions in the concatenated buffer.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct InitHSP {
     /// Query absolute coordinate (concatenated buffer, 0-based)
     /// Reference: blast_query_info.c:311-315, blast_util.c:112-116.

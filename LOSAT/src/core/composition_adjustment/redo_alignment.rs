@@ -2472,6 +2472,16 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix<'seq>(
 //                                 callbacks->free_align_traceback,
 //                                 num_adjustments == 1);
 // ```
+thread_local! {
+    /// EXPERIMENT (LOSAT_X_BXPAR): what one match did with the matrix it was
+    /// handed.  Bit 0: an adjustment succeeded (the matrix was replaced); bit 1:
+    /// an alignment was redone before that, i.e. with the matrix left behind by
+    /// an earlier match (redo_alignment.c:1232-1259 skips `Blast_AdjustScores`
+    /// for a protein subject unless `hsp_index == 0`).  A caller that redoes
+    /// matches out of order resets this before a match and reads it afterwards.
+    pub(crate) static X_REDO_PROBE: Cell<u8> = const { Cell::new(0) };
+}
+
 pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix_observed<'seq>(
     incoming_aligns: &Option<Box<BlastCompoAlignment>>,
     params: &BlastRedoAlignParams,
@@ -2774,6 +2784,7 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix_observed<'s
                             callbacks.calc_lambda.unwrap_or(redo_calc_lambda),
                         )?;
                         if let Some(adjusted) = adjusted {
+                            X_REDO_PROBE.with(|probe| probe.set(probe.get() | 1));
                             matrix_adjust_rule = adjusted.matrix_adjust_rule;
                             adjusted_matrix = Some(adjusted.adjusted_matrix);
                             pvalue_for_this_pair = adjusted.pvalue_for_this_pair;
@@ -2826,6 +2837,11 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix_observed<'s
                         incoming: current,
                         rule: matrix_adjust_rule,
                         matrix: adjusted_matrix.as_ref(),
+                    });
+                    X_REDO_PROBE.with(|probe| {
+                        if probe.get() & 1 == 0 {
+                            probe.set(probe.get() | 2);
+                        }
                     });
                     let mut new_align = (callbacks.redo_one_alignment)(
                         current,

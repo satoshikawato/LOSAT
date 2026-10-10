@@ -3701,6 +3701,8 @@ struct SubjectScratch {
     // gap_align->rev_prelim_tback = GapPrelimEditBlockNew();
     // ```
     greedy_align_scratch: GreedyAlignScratch,
+    // EXPERIMENT (LOSAT_X_AHEAD): scratch memory of the look-ahead helpers.
+    x_ahead_scratch: Vec<(GapAlignScratch, GreedyAlignScratch)>,
     cutoff_scores: Vec<i32>,
     x_dropoff_scores: Vec<i32>,
     reduced_cutoff_scores: Vec<i32>,
@@ -3799,6 +3801,7 @@ impl SubjectScratch {
             // gap_align->rev_prelim_tback = GapPrelimEditBlockNew();
             // ```
             greedy_align_scratch: GreedyAlignScratch::new(),
+            x_ahead_scratch: Vec::new(),
             cutoff_scores: Vec::with_capacity(query_count),
             x_dropoff_scores: Vec::with_capacity(query_count),
             reduced_cutoff_scores: Vec::with_capacity(query_count),
@@ -3855,6 +3858,20 @@ struct QueryContext {
     masks: Vec<MaskedInterval>,
 }
 
+/// EXPERIMENT (LOSAT_X_GREEDYSPEC): a traceback computed ahead of the ordered
+/// loop, by the dynamic-programming kernel or by the greedy one.
+#[derive(PartialEq)]
+enum XSpecTraceback<D, G> {
+    Dp(D),
+    Greedy(G),
+}
+
+/// EXPERIMENT (LOSAT_X_AHEAD): the scratch memory one gapped alignment may use.
+struct XAheadScratch<'a> {
+    gap: &'a mut GapAlignScratch,
+    greedy: &'a mut GreedyAlignScratch,
+}
+
 struct QueryContextIndex {
     offsets: Vec<usize>,
     min_length: usize,
@@ -3868,6 +3885,27 @@ struct QueryContextIndex {
     // return b;
     // ```
     direct_map: Vec<u32>,
+    // EXPERIMENT (LOSAT_X_CTXFAST): what `direct_map` holds, as the list of
+    // its non-zero runs `(start, end, context)` sorted by `start`, plus the
+    // length it would have. Four bytes per query base become a few words.
+    x_ranges: Vec<(usize, usize, u32)>,
+    x_total_len: usize,
+}
+
+/// 0 = direct map, 1 = LOSAT_X_CTXFAST (ranges only), 2 = LOSAT_X_CTXSHADOW
+/// (both, compared on every lookup).
+fn x_ctx_mode() -> u8 {
+    use std::sync::OnceLock;
+    static MODE: OnceLock<u8> = OnceLock::new();
+    *MODE.get_or_init(|| {
+        if std::env::var_os("LOSAT_X_CTXSHADOW").is_some() {
+            2
+        } else if std::env::var_os("LOSAT_X_CTXFAST").is_some() {
+            1
+        } else {
+            0
+        }
+    })
 }
 
 impl QueryContextIndex {
@@ -3895,12 +3933,44 @@ impl QueryContextIndex {
             .map(|ctx| ctx.query_offset.max(0) as usize + ctx.seq.len())
             .max()
             .unwrap_or(0);
-        let mut direct_map = vec![0u32; total_len];
-        for (idx, ctx) in contexts.iter().enumerate() {
-            let start = ctx.query_offset.max(0) as usize;
-            let end = start.saturating_add(ctx.seq.len());
-            if start < end && end <= direct_map.len() {
-                direct_map[start..end].fill(idx as u32);
+        // EXPERIMENT (LOSAT_X_CTXFAST): the runs the loop below would fill.
+        // Later contexts overwrite earlier ones in `direct_map`, so the list
+        // only stands in for it when no two runs overlap; context 0 needs no
+        // run because the map starts out as zeros.
+        let mut x_mode = x_ctx_mode();
+        let mut x_ranges: Vec<(usize, usize, u32)> = Vec::new();
+        if x_mode != 0 {
+            for (idx, ctx) in contexts.iter().enumerate() {
+                let start = ctx.query_offset.max(0) as usize;
+                let end = start.saturating_add(ctx.seq.len());
+                if start < end && end <= total_len && idx != 0 {
+                    x_ranges.push((start, end, idx as u32));
+                }
+            }
+            let mut all: Vec<(usize, usize)> = contexts
+                .iter()
+                .map(|ctx| {
+                    let start = ctx.query_offset.max(0) as usize;
+                    (start, start.saturating_add(ctx.seq.len()))
+                })
+                .filter(|&(start, end)| start < end && end <= total_len)
+                .collect();
+            all.sort_unstable();
+            if all.windows(2).any(|w| w[0].1 > w[1].0) {
+                x_mode = 0;
+                x_ranges.clear();
+            }
+            x_ranges.sort_unstable();
+        }
+        let mut direct_map = Vec::new();
+        if x_mode != 1 {
+            direct_map = vec![0u32; total_len];
+            for (idx, ctx) in contexts.iter().enumerate() {
+                let start = ctx.query_offset.max(0) as usize;
+                let end = start.saturating_add(ctx.seq.len());
+                if start < end && end <= direct_map.len() {
+                    direct_map[start..end].fill(idx as u32);
+                }
             }
         }
         Self {
@@ -3908,6 +3978,24 @@ impl QueryContextIndex {
             min_length,
             max_length,
             direct_map,
+            x_ranges,
+            x_total_len: if x_mode == 0 { 0 } else { total_len },
+        }
+    }
+
+    /// `direct_map[n]` for `n < x_total_len`, from the runs.
+    #[inline]
+    fn x_direct(&self, n: usize) -> usize {
+        // the last run that starts at or before `n`
+        let after = self.x_ranges.partition_point(|&(start, _, _)| start <= n);
+        if after == 0 {
+            return 0;
+        }
+        let (_, end, context) = self.x_ranges[after - 1];
+        if n < end {
+            context as usize
+        } else {
+            0
         }
     }
 
@@ -3919,6 +4007,16 @@ impl QueryContextIndex {
     // return b;
     // ```
     fn context_for_offset(&self, n: usize) -> usize {
+        if n < self.x_total_len {
+            let context = self.x_direct(n);
+            if !self.direct_map.is_empty() {
+                assert!(
+                    context == self.direct_map[n] as usize,
+                    "LOSAT_X_CTXSHADOW: context of offset {n} differs"
+                );
+            }
+            return context;
+        }
         if n < self.direct_map.len() {
             return self.direct_map[n] as usize;
         }
@@ -6846,10 +6944,24 @@ fn search_query_batch(
     //     query_length, adjusted_s_length, fence_hit);
     // ```
     // Preserve ordered debug-coordinate logging; speculative DP is otherwise pure.
+    // EXPERIMENT (LOSAT_X_GREEDYSPEC): the same scheduling for the greedy
+    // traceback of megablast. A greedy alignment is a function of its
+    // arguments only: every cell it reads from its scratch was written
+    // earlier in the same call, and a larger `max_dist` left by an earlier
+    // call only saves retries.
     let speculative_traceback = requested_parallel
-        && config.use_dp
+        && (config.use_dp || std::env::var_os("LOSAT_X_GREEDYSPEC").is_some())
         && std::env::var_os("LOSAT_DEBUG_COORDS").is_none()
         && std::env::var_os("LOSAT_DEBUG_COORDS_START").is_none();
+    // EXPERIMENT (LOSAT_X_AHEAD[=window]): the other threads of the pool
+    // evaluate the gapped alignments of the two ordered loops (preliminary
+    // and traceback) ahead of the loop; see utils/xahead.rs. Same conditions
+    // as the speculative traceback above.
+    let x_ahead_window = if speculative_traceback {
+        crate::utils::xahead::window()
+    } else {
+        None
+    };
     // Read sequences
     // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:486-651
     // ```c
@@ -10963,88 +11075,193 @@ fn search_query_batch(
             let gapped_start_time = std::time::Instant::now();
             let mut dbg_gapped_calls = 0usize;
 
-            // Process each ungapped hit in score order
-            for (idx, uh) in ungapped_hits.iter().enumerate() {
-                // NCBI reference: blast_gapalign.c:3886-4090 (no per-HSP logging)
-                if verbose && idx % 100 == 0 {
-                    eprintln!("[INFO] Gapped extension: {}/{}", idx, total_ungapped);
-                }
-                // Get query sequence for this hit (context-specific)
-                let ctx = &query_contexts[uh.context_idx as usize];
-                let q_seq = ctx.seq.as_slice();
-
-                let q_seq_blastna = encoded_queries_blastna[uh.context_idx as usize].as_slice();
-                let subject_len = s_seq_blastna.len();
-
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2762-2793
-                // ```c
-                // if (!compressed_subject) {
-                //    s = subject + s_off;
-                //    rem = 4;
-                // } else {
-                //    s = subject + s_off/4;
-                //    rem = s_off % 4;
-                // }
-                // ```
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:503-507 (traceback uses uncompressed subject)
-                let s_seq_score = s_seq_packed;
-                let s_seq_trace = s_seq_blastna;
-
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3908-3913
-                // ```c
-                // tmp_hsp.query.offset = q_start;
-                // tmp_hsp.query.end = q_end;
-                // tmp_hsp.query.frame = query_info->contexts[context].frame;
-                // tmp_hsp.subject.offset = s_start;
-                // tmp_hsp.subject.end = s_end;
-                // ```
-                // NCBI uses 0-based coordinates internally for the tree
-                let subject_frame_sign = 1i32;
-                let ungapped_tree_hsp = TreeHsp {
-                    query_offset: uh.qs as i32,
-                    query_end: uh.qe as i32,
-                    subject_offset: uh.ss as i32,
-                    subject_end: uh.se as i32,
-                    score: uh.score,
-                    query_frame: uh.query_frame,
-                    query_length: ctx.seq.len() as i32,
-                    query_context_offset: uh.query_context_offset,
-                    subject_frame_sign,
+            // EXPERIMENT (LOSAT_X_AHEAD): the gapped extension of the loop below
+            // as a function of the hit's index (the two branches of the loop,
+            // without their trace logging).
+            let x_ungapped: &[UngappedHit] = ungapped_hits.as_slice();
+            let x_prelim_compute =
+                |x_index: usize,
+                 x_scratch: &mut XAheadScratch<'_>|
+                 -> Option<(usize, usize, usize, usize, i32, usize, usize)> {
+                    let uh = &x_ungapped[x_index];
+                    let q_seq_blastna = encoded_queries_blastna[uh.context_idx as usize].as_slice();
+                    if use_dp {
+                        let mut seed_qs = uh.seed_q_off;
+                        let mut seed_ss = uh.seed_s_off;
+                        if uh.se >= uh.seed_s_off.saturating_add(8) {
+                            seed_qs = seed_qs.saturating_add(3);
+                            seed_ss = seed_ss.saturating_add(3);
+                        }
+                        let x_drop_score_only = x_drop_gapped.min(uh.score);
+                        let (p_qs, p_qe, p_ss, p_se, p_score, _, _, _, _, _) =
+                            extend_gapped_heuristic_with_scratch(
+                                q_seq_blastna,
+                                s_seq_packed,
+                                s_seq_blastna.len(),
+                                seed_qs,
+                                seed_ss,
+                                1,
+                                reward,
+                                penalty,
+                                &score_matrix,
+                                gap_open,
+                                gap_extend,
+                                x_drop_score_only,
+                                &mut *x_scratch.gap,
+                                true,
+                            );
+                        Some((p_qs, p_qe, p_ss, p_se, p_score, seed_qs, seed_ss))
+                    } else {
+                        let ungapped_len = uh.qe.saturating_sub(uh.qs);
+                        let seed_qs = uh.qs + ungapped_len / 2;
+                        let seed_ss = uh.ss + ungapped_len / 2;
+                        greedy_gapped_alignment_score_only(
+                            q_seq_blastna,
+                            s_seq_packed,
+                            s_seq_blastna.len(),
+                            seed_qs,
+                            seed_ss,
+                            reward,
+                            penalty,
+                            gap_open,
+                            gap_extend,
+                            x_drop_gapped,
+                            &mut *x_scratch.greedy,
+                        )
+                    }
                 };
-
-                // NCBI reference: blast_gapalign.c:3918 BlastIntervalTreeContainsHSP
-                // Check if UNGAPPED HSP is contained in existing GAPPED HSPs
-                let containing_hsp = interval_tree.containing_hsp(
-                    &ungapped_tree_hsp,
-                    uh.query_context_offset,
-                    min_diag_separation,
-                );
-                let is_contained = containing_hsp.is_some();
-
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3908-3919
-                // ```c
-                // tmp_hsp.query.offset = q_start;
-                // tmp_hsp.query.end = q_end;
-                // tmp_hsp.subject.offset = s_start;
-                // tmp_hsp.subject.end = s_end;
-                // if (!BlastIntervalTreeContainsHSP(tree, &tmp_hsp, query_info,
-                //                                   hit_options->min_diag_separation))
-                // ```
-                if blastn_trace_enabled
-                    && blastn_trace::should_trace_range(
-                        "prelim",
-                        uh.context_idx,
-                        s_idx,
-                        s_id,
-                        uh.qs,
-                        uh.qe,
-                        uh.ss.saturating_add(chunk.offset),
-                        uh.se.saturating_add(chunk.offset),
-                        ctx.seq.len(),
-                        ctx.frame,
-                    )
+            // Only the caller's own (single-chunk) loop gets helpers; chunk
+            // batches already occupy the pool.
+            let x_ahead = match x_ahead_window {
+                Some(x_window)
+                    if reuse_prelim_hits
+                        && !blastn_trace_enabled
+                        && x_ungapped.len() >= 2 * x_window =>
                 {
-                    blastn_trace::log(
+                    Some(crate::utils::xahead::Ahead::new(x_window))
+                }
+                _ => None,
+            };
+            let x_helper_scratch = &mut subject_scratch.x_ahead_scratch;
+            if x_ahead.is_some() {
+                while x_helper_scratch.len() + 1 < num_threads {
+                    x_helper_scratch.push((GapAlignScratch::new(), GreedyAlignScratch::new()));
+                }
+            }
+            let x_helpers = x_helper_scratch
+                .iter_mut()
+                .map(|(gap, greedy)| XAheadScratch { gap, greedy });
+
+            // Process each ungapped hit in score order
+            crate::utils::xahead::with_helpers(
+                x_ahead.as_ref(),
+                x_helpers,
+                &x_prelim_compute,
+                || {
+                    for (idx, uh) in ungapped_hits.iter().enumerate() {
+                        // EXPERIMENT (LOSAT_X_AHEAD): offer the next hits to the helpers,
+                        // leaving out those the tree already contains.
+                        if let Some(x_ahead) = x_ahead.as_ref() {
+                            x_ahead.announce(idx, x_ungapped.len(), |x_index| {
+                                let u = &x_ungapped[x_index];
+                                let h = TreeHsp {
+                                    query_offset: u.qs as i32,
+                                    query_end: u.qe as i32,
+                                    subject_offset: u.ss as i32,
+                                    subject_end: u.se as i32,
+                                    score: u.score,
+                                    query_frame: u.query_frame,
+                                    query_length: query_contexts[u.context_idx as usize].seq.len()
+                                        as i32,
+                                    query_context_offset: u.query_context_offset,
+                                    subject_frame_sign: 1,
+                                };
+                                interval_tree
+                                    .containing_hsp(&h, u.query_context_offset, min_diag_separation)
+                                    .is_none()
+                            });
+                        }
+                        // NCBI reference: blast_gapalign.c:3886-4090 (no per-HSP logging)
+                        if verbose && idx % 100 == 0 {
+                            eprintln!("[INFO] Gapped extension: {}/{}", idx, total_ungapped);
+                        }
+                        // Get query sequence for this hit (context-specific)
+                        let ctx = &query_contexts[uh.context_idx as usize];
+                        let q_seq = ctx.seq.as_slice();
+
+                        let q_seq_blastna =
+                            encoded_queries_blastna[uh.context_idx as usize].as_slice();
+                        let subject_len = s_seq_blastna.len();
+
+                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2762-2793
+                        // ```c
+                        // if (!compressed_subject) {
+                        //    s = subject + s_off;
+                        //    rem = 4;
+                        // } else {
+                        //    s = subject + s_off/4;
+                        //    rem = s_off % 4;
+                        // }
+                        // ```
+                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:503-507 (traceback uses uncompressed subject)
+                        let s_seq_score = s_seq_packed;
+                        let s_seq_trace = s_seq_blastna;
+
+                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3908-3913
+                        // ```c
+                        // tmp_hsp.query.offset = q_start;
+                        // tmp_hsp.query.end = q_end;
+                        // tmp_hsp.query.frame = query_info->contexts[context].frame;
+                        // tmp_hsp.subject.offset = s_start;
+                        // tmp_hsp.subject.end = s_end;
+                        // ```
+                        // NCBI uses 0-based coordinates internally for the tree
+                        let subject_frame_sign = 1i32;
+                        let ungapped_tree_hsp = TreeHsp {
+                            query_offset: uh.qs as i32,
+                            query_end: uh.qe as i32,
+                            subject_offset: uh.ss as i32,
+                            subject_end: uh.se as i32,
+                            score: uh.score,
+                            query_frame: uh.query_frame,
+                            query_length: ctx.seq.len() as i32,
+                            query_context_offset: uh.query_context_offset,
+                            subject_frame_sign,
+                        };
+
+                        // NCBI reference: blast_gapalign.c:3918 BlastIntervalTreeContainsHSP
+                        // Check if UNGAPPED HSP is contained in existing GAPPED HSPs
+                        let containing_hsp = interval_tree.containing_hsp(
+                            &ungapped_tree_hsp,
+                            uh.query_context_offset,
+                            min_diag_separation,
+                        );
+                        let is_contained = containing_hsp.is_some();
+
+                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3908-3919
+                        // ```c
+                        // tmp_hsp.query.offset = q_start;
+                        // tmp_hsp.query.end = q_end;
+                        // tmp_hsp.subject.offset = s_start;
+                        // tmp_hsp.subject.end = s_end;
+                        // if (!BlastIntervalTreeContainsHSP(tree, &tmp_hsp, query_info,
+                        //                                   hit_options->min_diag_separation))
+                        // ```
+                        if blastn_trace_enabled
+                            && blastn_trace::should_trace_range(
+                                "prelim",
+                                uh.context_idx,
+                                s_idx,
+                                s_id,
+                                uh.qs,
+                                uh.qe,
+                                uh.ss.saturating_add(chunk.offset),
+                                uh.se.saturating_add(chunk.offset),
+                                ctx.seq.len(),
+                                ctx.frame,
+                            )
+                        {
+                            blastn_trace::log(
                         "prelim",
                         format!(
                             "subject={}({}) context={} ungapped=q{}..{} s{}..{} raw_score={} tree_contains={} containing_hsp={:?} min_diag_separation={}",
@@ -11061,87 +11278,124 @@ fn search_query_batch(
                             min_diag_separation
                         ),
                     );
-                }
-
-                if is_contained {
-                    // NCBI: Skip gapped extension if ungapped HSP is contained
-                    dbg_containment_skipped += 1;
-                    continue;
-                }
-
-                // Select gapped-start seed within the ungapped HSP.
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4012-4046
-                //
-                // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3924-3927,4058
-                // ```c
-                // if (is_rpsblast)
-                //    cutoff = hit_params->cutoffs[rps_cutoff_index].cutoff_score;
-                // else
-                //    cutoff = hit_params->cutoffs[context].cutoff_score;
-                // ...
-                // if (gap_align->score >= cutoff) {
-                // ```
-                // The score-only gapped HSP enters the preliminary HSP list and
-                // interval tree only if it reaches the hit-saving cutoff, not
-                // the lower BlastInitialWordParameters cutoff used for saving
-                // ungapped HSPs.
-                let cutoff_score = hit_saving_cutoff_scores[uh.context_idx as usize];
-                let (prelim_qs, prelim_qe, prelim_ss, prelim_se, prelim_score, seed_qs, seed_ss) =
-                    if use_dp {
-                        // DP seed selection (blastn)
-                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4033-4045
-                        // ```c
-                        // if (s_end >= (Int4)init_hsp->offsets.qs_offsets.s_off + 8) {
-                        //    init_hsp->offsets.qs_offsets.s_off += 3;
-                        //    init_hsp->offsets.qs_offsets.q_off += 3;
-                        // }
-                        // status = s_BlastDynProgNtGappedAlignment(...);
-                        // ```
-                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4071-4076
-                        // ```c
-                        // status = Blast_HSPInit(...,
-                        //        init_hsp->offsets.qs_offsets.q_off,
-                        //        init_hsp->offsets.qs_offsets.s_off, ...);
-                        // ```
-                        let mut seed_qs = uh.seed_q_off;
-                        let mut seed_ss = uh.seed_s_off;
-                        if uh.se >= uh.seed_s_off.saturating_add(8) {
-                            seed_qs = seed_qs.saturating_add(3);
-                            seed_ss = seed_ss.saturating_add(3);
                         }
 
-                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2959-2963 (x_dropoff limited by ungapped score)
-                        let x_drop_score_only = x_drop_gapped.min(uh.score);
-                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2973-3003
-                        // ```c
-                        // offset_adjustment = COMPRESSION_RATIO -
-                        //      (init_hsp->offsets.qs_offsets.s_off % COMPRESSION_RATIO);
-                        // q_length = init_hsp->offsets.qs_offsets.q_off + offset_adjustment;
-                        // s_length = init_hsp->offsets.qs_offsets.s_off + offset_adjustment;
-                        // score_left = s_BlastAlignPackedNucl(query, subject, q_length, s_length, ...);
-                        // score_right = s_BlastAlignPackedNucl(query+q_length-1,
-                        //    subject+(s_length+3)/COMPRESSION_RATIO - 1, ...);
-                        // ```
-                        if blastn_trace_enabled
-                            && blastn_trace::should_trace_seed(
-                                "prelim",
-                                uh.context_idx,
-                                s_idx,
-                                s_id,
-                                seed_qs,
-                                seed_ss.saturating_add(chunk.offset),
-                            )
-                        {
-                            let offset_adjustment =
-                                COMPRESSION_RATIO - (seed_ss % COMPRESSION_RATIO);
-                            let mut score_q_anchor = seed_qs.saturating_add(offset_adjustment);
-                            let mut score_s_anchor = seed_ss.saturating_add(offset_adjustment);
-                            if score_q_anchor > q_seq_blastna.len() || score_s_anchor > subject_len
-                            {
-                                score_q_anchor = score_q_anchor.saturating_sub(COMPRESSION_RATIO);
-                                score_s_anchor = score_s_anchor.saturating_sub(COMPRESSION_RATIO);
+                        if is_contained {
+                            // NCBI: Skip gapped extension if ungapped HSP is contained
+                            dbg_containment_skipped += 1;
+                            if let Some(x_ahead) = x_ahead.as_ref() {
+                                x_ahead.skip(idx);
                             }
-                            blastn_trace::log(
+                            continue;
+                        }
+
+                        // Select gapped-start seed within the ungapped HSP.
+                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4012-4046
+                        //
+                        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3924-3927,4058
+                        // ```c
+                        // if (is_rpsblast)
+                        //    cutoff = hit_params->cutoffs[rps_cutoff_index].cutoff_score;
+                        // else
+                        //    cutoff = hit_params->cutoffs[context].cutoff_score;
+                        // ...
+                        // if (gap_align->score >= cutoff) {
+                        // ```
+                        // The score-only gapped HSP enters the preliminary HSP list and
+                        // interval tree only if it reaches the hit-saving cutoff, not
+                        // the lower BlastInitialWordParameters cutoff used for saving
+                        // ungapped HSPs.
+                        let cutoff_score = hit_saving_cutoff_scores[uh.context_idx as usize];
+                        let (
+                            prelim_qs,
+                            prelim_qe,
+                            prelim_ss,
+                            prelim_se,
+                            prelim_score,
+                            seed_qs,
+                            seed_ss,
+                        ) = if let Some(x_ahead) = x_ahead.as_ref() {
+                            // EXPERIMENT (LOSAT_X_AHEAD): the value of the branches
+                            // below, taken from a helper or evaluated here.
+                            let mut x_scratch = XAheadScratch {
+                                gap: &mut *gap_scratch,
+                                greedy: &mut *greedy_align_scratch,
+                            };
+                            let x_value = match x_ahead.take(idx, &mut x_scratch, &x_prelim_compute)
+                            {
+                                Some(x_value) => {
+                                    if crate::utils::xahead::shadow() {
+                                        assert!(
+                                            x_value == x_prelim_compute(idx, &mut x_scratch),
+                                            "LOSAT_X_AHEADSHADOW: preliminary extension {idx} differs"
+                                        );
+                                    }
+                                    x_value
+                                }
+                                None => x_prelim_compute(idx, &mut x_scratch),
+                            };
+                            match x_value {
+                                Some(x_value) => x_value,
+                                None => continue,
+                            }
+                        } else if use_dp {
+                            // DP seed selection (blastn)
+                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4033-4045
+                            // ```c
+                            // if (s_end >= (Int4)init_hsp->offsets.qs_offsets.s_off + 8) {
+                            //    init_hsp->offsets.qs_offsets.s_off += 3;
+                            //    init_hsp->offsets.qs_offsets.q_off += 3;
+                            // }
+                            // status = s_BlastDynProgNtGappedAlignment(...);
+                            // ```
+                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4071-4076
+                            // ```c
+                            // status = Blast_HSPInit(...,
+                            //        init_hsp->offsets.qs_offsets.q_off,
+                            //        init_hsp->offsets.qs_offsets.s_off, ...);
+                            // ```
+                            let mut seed_qs = uh.seed_q_off;
+                            let mut seed_ss = uh.seed_s_off;
+                            if uh.se >= uh.seed_s_off.saturating_add(8) {
+                                seed_qs = seed_qs.saturating_add(3);
+                                seed_ss = seed_ss.saturating_add(3);
+                            }
+
+                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2959-2963 (x_dropoff limited by ungapped score)
+                            let x_drop_score_only = x_drop_gapped.min(uh.score);
+                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2973-3003
+                            // ```c
+                            // offset_adjustment = COMPRESSION_RATIO -
+                            //      (init_hsp->offsets.qs_offsets.s_off % COMPRESSION_RATIO);
+                            // q_length = init_hsp->offsets.qs_offsets.q_off + offset_adjustment;
+                            // s_length = init_hsp->offsets.qs_offsets.s_off + offset_adjustment;
+                            // score_left = s_BlastAlignPackedNucl(query, subject, q_length, s_length, ...);
+                            // score_right = s_BlastAlignPackedNucl(query+q_length-1,
+                            //    subject+(s_length+3)/COMPRESSION_RATIO - 1, ...);
+                            // ```
+                            if blastn_trace_enabled
+                                && blastn_trace::should_trace_seed(
+                                    "prelim",
+                                    uh.context_idx,
+                                    s_idx,
+                                    s_id,
+                                    seed_qs,
+                                    seed_ss.saturating_add(chunk.offset),
+                                )
+                            {
+                                let offset_adjustment =
+                                    COMPRESSION_RATIO - (seed_ss % COMPRESSION_RATIO);
+                                let mut score_q_anchor = seed_qs.saturating_add(offset_adjustment);
+                                let mut score_s_anchor = seed_ss.saturating_add(offset_adjustment);
+                                if score_q_anchor > q_seq_blastna.len()
+                                    || score_s_anchor > subject_len
+                                {
+                                    score_q_anchor =
+                                        score_q_anchor.saturating_sub(COMPRESSION_RATIO);
+                                    score_s_anchor =
+                                        score_s_anchor.saturating_sub(COMPRESSION_RATIO);
+                                }
+                                blastn_trace::log(
                                 "prelim",
                                 format!(
                                     "subject={}({}) context={} score_only_seed=({}, {}) local_seed_s={} offset_adjustment={} score_anchor=({}, {}) global_score_anchor_s={} x_drop_score_only={} ungapped_score={}",
@@ -11159,95 +11413,95 @@ fn search_query_batch(
                                     uh.score
                                 ),
                             );
-                        }
+                            }
 
-                        // Preliminary DP gapped extension (score-only)
-                        // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_nucl_options.cpp:176-183
-                        let (p_qs, p_qe, p_ss, p_se, p_score, _, _, _, _, _) =
-                            extend_gapped_heuristic_with_scratch(
+                            // Preliminary DP gapped extension (score-only)
+                            // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_nucl_options.cpp:176-183
+                            let (p_qs, p_qe, p_ss, p_se, p_score, _, _, _, _, _) =
+                                extend_gapped_heuristic_with_scratch(
+                                    q_seq_blastna,
+                                    s_seq_score,
+                                    subject_len,
+                                    seed_qs,
+                                    seed_ss,
+                                    1,
+                                    reward,
+                                    penalty,
+                                    &score_matrix,
+                                    gap_open,
+                                    gap_extend,
+                                    x_drop_score_only,
+                                    gap_scratch,
+                                    true,
+                                );
+                            (p_qs, p_qe, p_ss, p_se, p_score, seed_qs, seed_ss)
+                        } else {
+                            // Greedy seed selection (megablast)
+                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4012-4017
+                            let ungapped_len = uh.qe.saturating_sub(uh.qs);
+                            let seed_qs = uh.qs + ungapped_len / 2;
+                            let seed_ss = uh.ss + ungapped_len / 2;
+
+                            let prelim = match greedy_gapped_alignment_score_only(
                                 q_seq_blastna,
                                 s_seq_score,
                                 subject_len,
                                 seed_qs,
                                 seed_ss,
-                                1,
                                 reward,
                                 penalty,
-                                &score_matrix,
                                 gap_open,
                                 gap_extend,
-                                x_drop_score_only,
-                                gap_scratch,
-                                true,
-                            );
-                        (p_qs, p_qe, p_ss, p_se, p_score, seed_qs, seed_ss)
-                    } else {
-                        // Greedy seed selection (megablast)
-                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4012-4017
-                        let ungapped_len = uh.qe.saturating_sub(uh.qs);
-                        let seed_qs = uh.qs + ungapped_len / 2;
-                        let seed_ss = uh.ss + ungapped_len / 2;
+                                x_drop_gapped,
+                                greedy_align_scratch,
+                            ) {
+                                Some(value) => value,
+                                None => {
+                                    continue;
+                                }
+                            };
 
-                        let prelim = match greedy_gapped_alignment_score_only(
-                            q_seq_blastna,
-                            s_seq_score,
-                            subject_len,
-                            seed_qs,
-                            seed_ss,
-                            reward,
-                            penalty,
-                            gap_open,
-                            gap_extend,
-                            x_drop_gapped,
-                            greedy_align_scratch,
-                        ) {
-                            Some(value) => value,
-                            None => {
-                                continue;
-                            }
+                            let (p_qs, p_qe, p_ss, p_se, p_score, seed_qs, seed_ss) = prelim;
+                            (p_qs, p_qe, p_ss, p_se, p_score, seed_qs, seed_ss)
                         };
 
-                        let (p_qs, p_qe, p_ss, p_se, p_score, seed_qs, seed_ss) = prelim;
-                        (p_qs, p_qe, p_ss, p_se, p_score, seed_qs, seed_ss)
-                    };
-
-                dbg_gapped_calls += 1;
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4058-4091
-                // ```c
-                // if (gap_align->score >= cutoff) {
-                //     status = Blast_HSPInit(gap_align->query_start,
-                //                           gap_align->query_stop,
-                //                           gap_align->subject_start,
-                //                           gap_align->subject_stop, ...);
-                //     status = BlastIntervalTreeAddHSP(new_hsp, tree, query_info,
-                //                                      eQueryAndSubject);
-                // }
-                // ```
-                let trace_prelim_seed = blastn_trace_enabled
-                    && blastn_trace::should_trace_seed(
-                        "prelim",
-                        uh.context_idx,
-                        s_idx,
-                        s_id,
-                        seed_qs,
-                        seed_ss.saturating_add(chunk.offset),
-                    );
-                if blastn_trace_enabled
-                    && (trace_prelim_seed
-                        || blastn_trace::should_trace_range(
-                            "prelim",
-                            uh.context_idx,
-                            s_idx,
-                            s_id,
-                            prelim_qs,
-                            prelim_qe,
-                            prelim_ss.saturating_add(chunk.offset),
-                            prelim_se.saturating_add(chunk.offset),
-                            ctx.seq.len(),
-                            ctx.frame,
-                        ))
-                {
-                    blastn_trace::log(
+                        dbg_gapped_calls += 1;
+                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4058-4091
+                        // ```c
+                        // if (gap_align->score >= cutoff) {
+                        //     status = Blast_HSPInit(gap_align->query_start,
+                        //                           gap_align->query_stop,
+                        //                           gap_align->subject_start,
+                        //                           gap_align->subject_stop, ...);
+                        //     status = BlastIntervalTreeAddHSP(new_hsp, tree, query_info,
+                        //                                      eQueryAndSubject);
+                        // }
+                        // ```
+                        let trace_prelim_seed = blastn_trace_enabled
+                            && blastn_trace::should_trace_seed(
+                                "prelim",
+                                uh.context_idx,
+                                s_idx,
+                                s_id,
+                                seed_qs,
+                                seed_ss.saturating_add(chunk.offset),
+                            );
+                        if blastn_trace_enabled
+                            && (trace_prelim_seed
+                                || blastn_trace::should_trace_range(
+                                    "prelim",
+                                    uh.context_idx,
+                                    s_idx,
+                                    s_id,
+                                    prelim_qs,
+                                    prelim_qe,
+                                    prelim_ss.saturating_add(chunk.offset),
+                                    prelim_se.saturating_add(chunk.offset),
+                                    ctx.seq.len(),
+                                    ctx.frame,
+                                ))
+                        {
+                            blastn_trace::log(
                         "prelim",
                         format!(
                             "subject={}({}) context={} seed=({}, {}) prelim=q{}..{} s{}..{} raw_score={} cutoff={} x_drop_score_only={} accepted={}",
@@ -11266,73 +11520,82 @@ fn search_query_batch(
                             prelim_score >= cutoff_score
                         ),
                     );
-                }
-                if prelim_score < cutoff_score {
-                    continue;
-                }
+                        }
+                        if prelim_score < cutoff_score {
+                            continue;
+                        }
 
-                // Add preliminary GAPPED HSP to interval tree for containment checks
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3908-3913
-                // ```c
-                // tmp_hsp.query.offset = q_start;
-                // tmp_hsp.query.end = q_end;
-                // tmp_hsp.query.frame = query_info->contexts[context].frame;
-                // tmp_hsp.subject.offset = s_start;
-                // tmp_hsp.subject.end = s_end;
-                // ```
-                let gapped_tree_hsp = TreeHsp {
-                    query_offset: prelim_qs as i32,
-                    query_end: prelim_qe as i32,
-                    subject_offset: prelim_ss as i32,
-                    subject_end: prelim_se as i32,
-                    score: prelim_score,
-                    query_frame: uh.query_frame,
-                    query_length: ctx.seq.len() as i32,
-                    query_context_offset: uh.query_context_offset,
-                    subject_frame_sign: 1,
-                };
-                interval_tree.add_hsp(
-                    gapped_tree_hsp,
-                    uh.query_context_offset,
-                    IndexMethod::QueryAndSubject,
-                );
+                        // Add preliminary GAPPED HSP to interval tree for containment checks
+                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3908-3913
+                        // ```c
+                        // tmp_hsp.query.offset = q_start;
+                        // tmp_hsp.query.end = q_end;
+                        // tmp_hsp.query.frame = query_info->contexts[context].frame;
+                        // tmp_hsp.subject.offset = s_start;
+                        // tmp_hsp.subject.end = s_end;
+                        // ```
+                        let gapped_tree_hsp = TreeHsp {
+                            query_offset: prelim_qs as i32,
+                            query_end: prelim_qe as i32,
+                            subject_offset: prelim_ss as i32,
+                            subject_end: prelim_se as i32,
+                            score: prelim_score,
+                            query_frame: uh.query_frame,
+                            query_length: ctx.seq.len() as i32,
+                            query_context_offset: uh.query_context_offset,
+                            subject_frame_sign: 1,
+                        };
+                        interval_tree.add_hsp(
+                            gapped_tree_hsp,
+                            uh.query_context_offset,
+                            IndexMethod::QueryAndSubject,
+                        );
 
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4012-4031
-                // ```c
-                // if (init_hsp->ungapped_data) {
-                //    init_hsp->offsets.qs_offsets.q_off =
-                //        init_hsp->ungapped_data->q_start + init_hsp->ungapped_data->length/2;
-                //    init_hsp->offsets.qs_offsets.s_off =
-                //        init_hsp->ungapped_data->s_start + init_hsp->ungapped_data->length/2;
-                // }
-                // ```
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4058-4076
-                // ```c
-                // if (gap_align->score >= cutoff) {
-                //    status = Blast_HSPInit(gap_align->query_start,
-                //              gap_align->query_stop, gap_align->subject_start,
-                //              gap_align->subject_stop,
-                //              init_hsp->offsets.qs_offsets.q_off,
-                //              init_hsp->offsets.qs_offsets.s_off, context,
-                //              query_frame, subject->frame, gap_align->score,
-                //              &(gap_align->edit_script), &new_hsp);
-                // }
-                // ```
-                prelim_hits.push(PrelimHit {
-                    context_idx: uh.context_idx,
-                    query_idx: uh.query_idx,
-                    query_frame: uh.query_frame,
-                    query_context_offset: uh.query_context_offset,
-                    prelim_qs,
-                    prelim_qe,
-                    prelim_ss,
-                    prelim_se,
-                    prelim_score,
-                    seed_qs,
-                    seed_ss,
-                    prelim_evalue: 0.0,
-                });
-                continue;
+                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4012-4031
+                        // ```c
+                        // if (init_hsp->ungapped_data) {
+                        //    init_hsp->offsets.qs_offsets.q_off =
+                        //        init_hsp->ungapped_data->q_start + init_hsp->ungapped_data->length/2;
+                        //    init_hsp->offsets.qs_offsets.s_off =
+                        //        init_hsp->ungapped_data->s_start + init_hsp->ungapped_data->length/2;
+                        // }
+                        // ```
+                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4058-4076
+                        // ```c
+                        // if (gap_align->score >= cutoff) {
+                        //    status = Blast_HSPInit(gap_align->query_start,
+                        //              gap_align->query_stop, gap_align->subject_start,
+                        //              gap_align->subject_stop,
+                        //              init_hsp->offsets.qs_offsets.q_off,
+                        //              init_hsp->offsets.qs_offsets.s_off, context,
+                        //              query_frame, subject->frame, gap_align->score,
+                        //              &(gap_align->edit_script), &new_hsp);
+                        // }
+                        // ```
+                        prelim_hits.push(PrelimHit {
+                            context_idx: uh.context_idx,
+                            query_idx: uh.query_idx,
+                            query_frame: uh.query_frame,
+                            query_context_offset: uh.query_context_offset,
+                            prelim_qs,
+                            prelim_qe,
+                            prelim_ss,
+                            prelim_se,
+                            prelim_score,
+                            seed_qs,
+                            seed_ss,
+                            prelim_evalue: 0.0,
+                        });
+                        continue;
+                    }
+                },
+            );
+            if let Some(x_ahead) = x_ahead.as_ref() {
+                let (x_evaluated, x_taken) = x_ahead.counts();
+                crate::utils::xstats::AHEAD_PRELIM_EVALUATED
+                    .fetch_add(x_evaluated, std::sync::atomic::Ordering::Relaxed);
+                crate::utils::xstats::AHEAD_PRELIM_TAKEN
+                    .fetch_add(x_taken, std::sync::atomic::Ordering::Relaxed);
             }
 
             // DEBUG: Log gapped extension stats
@@ -11883,7 +12146,13 @@ fn search_query_batch(
                 // BLAST_GappedAlignmentWithTraceback(...);
                 // Each independent scratch slot retains its intermediate results.
                 (0..num_threads)
-                    .map(|_| (GapAlignScratch::new(), Vec::new()))
+                    .map(|_| {
+                        (
+                            GapAlignScratch::new(),
+                            GreedyAlignScratch::new(),
+                            Vec::new(),
+                        )
+                    })
                     .collect()
             } else {
                 Vec::new()
@@ -11913,77 +12182,201 @@ fn search_query_batch(
             // ```
             // Scheduling only; ordered containment and insertion stay unchanged.
             // Serial Wasm compiles out the speculative path and retains batch 8.
-            const SPECULATIVE_TRACEBACK_BATCH_SIZE: usize =
+            const X_DEFAULT_SPECULATIVE_TRACEBACK_BATCH_SIZE: usize =
                 if cfg!(all(target_arch = "wasm32", not(feature = "wasm-threads"))) {
                     8
                 } else {
                     16
                 };
-            for prelim_index in 0..prelim_hits.len() {
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:403-405,436-472,583-612
-                // ```c
-                // if (!BlastIntervalTreeContainsHSP(tree, hsp, query_info, hit_options->min_diag_separation)) {
-                //     BlastGetStartForGappedAlignmentNucl(query, subject, hsp);
-                //     AdjustSubjectRange(&s_start, &adjusted_s_length, q_start, query_length, &start_shift);
-                //     /* traceback, identity test, then BlastIntervalTreeAddHSP */
-                // }
-                // ```
-                // N02 scheduling only: speculative values have no externally visible effects;
-                // the original ordered contains/materialize/add sequence remains authoritative.
-                #[cfg(all(
-                    feature = "parallel",
-                    any(not(target_arch = "wasm32"), feature = "wasm-threads")
-                ))]
-                if speculative_traceback && prelim_index % SPECULATIVE_TRACEBACK_BATCH_SIZE == 0 {
-                    let batch_end =
-                        (prelim_index + SPECULATIVE_TRACEBACK_BATCH_SIZE).min(prelim_hits.len());
-                    speculative_jobs.clear();
-                    speculative_jobs.extend((prelim_index..batch_end).filter(|&index| {
-                        let p = &prelim_hits[index];
-                        let h = TreeHsp {
-                            query_offset: p.prelim_qs as i32,
-                            query_end: p.prelim_qe as i32,
-                            subject_offset: p.prelim_ss as i32,
-                            subject_end: p.prelim_se as i32,
-                            score: p.prelim_score,
-                            query_frame: p.query_frame,
-                            query_length: query_contexts[p.context_idx as usize].seq.len() as i32,
-                            query_context_offset: p.query_context_offset,
-                            subject_frame_sign: 1,
-                        };
-                        interval_tree
-                            .containing_hsp(&h, p.query_context_offset, min_diag_separation)
-                            .is_none()
-                    }));
-                    let jobs = &speculative_jobs;
-                    // NCBI reference: c++/src/algo/blast/core/blast_traceback.c:509-513
-                    // BLAST_GappedAlignmentWithTraceback(...);
-                    crate::utils::threading::report_stage(
-                        "blastn",
-                        "dp_traceback",
-                        jobs.len(),
-                        jobs.len() > 1,
+            // EXPERIMENT (LOSAT_X_SPECBATCH=n): how many HSPs are traced ahead of
+            // the ordered loop at a time. Scheduling only, like the batch itself.
+            #[allow(non_snake_case)]
+            let SPECULATIVE_TRACEBACK_BATCH_SIZE: usize = {
+                use std::sync::OnceLock;
+                static SIZE: OnceLock<usize> = OnceLock::new();
+                *SIZE.get_or_init(|| {
+                    std::env::var("LOSAT_X_SPECBATCH")
+                        .ok()
+                        .and_then(|v| v.parse::<usize>().ok())
+                        .filter(|&n| (1..=4096).contains(&n))
+                        .unwrap_or(X_DEFAULT_SPECULATIVE_TRACEBACK_BATCH_SIZE)
+                })
+            };
+            // EXPERIMENT (LOSAT_X_AHEAD): the traceback of the loop below as a
+            // function of the HSP's index (the job of the speculative batch).
+            let x_trace_compute = |x_index: usize, x_scratch: &mut XAheadScratch<'_>| {
+                let p = &prelim_hits[x_index];
+                let prepared = prepare_traceback(p)?;
+                let (qs, _, shift, slen, ss) = prepared;
+                if !use_dp {
+                    let result = greedy_gapped_alignment_with_traceback(
+                        &encoded_queries_blastna[p.context_idx as usize],
+                        &s_seq_blastna[shift..shift + slen],
+                        slen,
+                        qs,
+                        ss,
+                        reward,
+                        penalty,
+                        gap_open,
+                        gap_extend,
+                        x_drop_final,
+                        &mut *x_scratch.greedy,
                     );
-                    speculative_results.clear();
-                    speculative_results.resize_with(batch_end - prelim_index, || None);
-                    let pool = parallel_pool;
-                    pool.install(|| {
-                        speculative_scratch.par_iter_mut().enumerate().for_each(
-                            |(slot, (scratch, results))| {
-                                results.clear();
-                                results.extend(
-                                    jobs.iter().skip(slot).step_by(num_threads).filter_map(
-                                        |&index| {
-                                            let p = &prelim_hits[index];
-                                            // NCBI reference: core/blast_traceback.c:436-472,509-513
-                                            // BlastGetStartForGappedAlignmentNucl(query, subject, hsp);
-                                            // AdjustSubjectRange(&s_start, &adjusted_s_length,
-                                            //                    q_start, query_length, &start_shift);
-                                            // BLAST_GappedAlignmentWithTraceback(...);
-                                            // Keep the exact preparation with its speculative DP.
-                                            let prepared = prepare_traceback(p)?;
-                                            let (qs, _, shift, slen, ss) = prepared;
-                                            let result =
+                    return Some((prepared, XSpecTraceback::Greedy(result)));
+                }
+                let result = extend_gapped_heuristic_with_traceback_with_scratch(
+                    &encoded_queries_blastna[p.context_idx as usize],
+                    &s_seq_blastna[shift..shift + slen],
+                    qs,
+                    ss,
+                    1,
+                    reward,
+                    penalty,
+                    &score_matrix,
+                    gap_open,
+                    gap_extend,
+                    x_drop_final,
+                    &mut *x_scratch.gap,
+                );
+                Some((prepared, XSpecTraceback::Dp(result)))
+            };
+            let x_ahead = match x_ahead_window {
+                Some(x_window) if !blastn_trace_enabled && prelim_hits.len() >= 2 * x_window => {
+                    Some(crate::utils::xahead::Ahead::new(x_window))
+                }
+                _ => None,
+            };
+            let x_helper_scratch = &mut subject_scratch.x_ahead_scratch;
+            if x_ahead.is_some() {
+                while x_helper_scratch.len() + 1 < num_threads {
+                    x_helper_scratch.push((GapAlignScratch::new(), GreedyAlignScratch::new()));
+                }
+            }
+            let x_helpers = x_helper_scratch
+                .iter_mut()
+                .map(|(gap, greedy)| XAheadScratch { gap, greedy });
+            crate::utils::xahead::with_helpers(
+                x_ahead.as_ref(),
+                x_helpers,
+                &x_trace_compute,
+                || {
+                    for prelim_index in 0..prelim_hits.len() {
+                        // EXPERIMENT (LOSAT_X_AHEAD): offer the next HSPs to the helpers,
+                        // leaving out those the tree already contains.
+                        if let Some(x_ahead) = x_ahead.as_ref() {
+                            x_ahead.announce(prelim_index, prelim_hits.len(), |x_index| {
+                                let p = &prelim_hits[x_index];
+                                let h = TreeHsp {
+                                    query_offset: p.prelim_qs as i32,
+                                    query_end: p.prelim_qe as i32,
+                                    subject_offset: p.prelim_ss as i32,
+                                    subject_end: p.prelim_se as i32,
+                                    score: p.prelim_score,
+                                    query_frame: p.query_frame,
+                                    query_length: query_contexts[p.context_idx as usize].seq.len()
+                                        as i32,
+                                    query_context_offset: p.query_context_offset,
+                                    subject_frame_sign: 1,
+                                };
+                                interval_tree
+                                    .containing_hsp(&h, p.query_context_offset, min_diag_separation)
+                                    .is_none()
+                            });
+                        }
+                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:403-405,436-472,583-612
+                        // ```c
+                        // if (!BlastIntervalTreeContainsHSP(tree, hsp, query_info, hit_options->min_diag_separation)) {
+                        //     BlastGetStartForGappedAlignmentNucl(query, subject, hsp);
+                        //     AdjustSubjectRange(&s_start, &adjusted_s_length, q_start, query_length, &start_shift);
+                        //     /* traceback, identity test, then BlastIntervalTreeAddHSP */
+                        // }
+                        // ```
+                        // N02 scheduling only: speculative values have no externally visible effects;
+                        // the original ordered contains/materialize/add sequence remains authoritative.
+                        #[cfg(all(
+                            feature = "parallel",
+                            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+                        ))]
+                        if speculative_traceback
+                            && x_ahead.is_none()
+                            && prelim_index % SPECULATIVE_TRACEBACK_BATCH_SIZE == 0
+                        {
+                            let batch_end = (prelim_index + SPECULATIVE_TRACEBACK_BATCH_SIZE)
+                                .min(prelim_hits.len());
+                            speculative_jobs.clear();
+                            speculative_jobs.extend((prelim_index..batch_end).filter(|&index| {
+                                let p = &prelim_hits[index];
+                                let h = TreeHsp {
+                                    query_offset: p.prelim_qs as i32,
+                                    query_end: p.prelim_qe as i32,
+                                    subject_offset: p.prelim_ss as i32,
+                                    subject_end: p.prelim_se as i32,
+                                    score: p.prelim_score,
+                                    query_frame: p.query_frame,
+                                    query_length: query_contexts[p.context_idx as usize].seq.len()
+                                        as i32,
+                                    query_context_offset: p.query_context_offset,
+                                    subject_frame_sign: 1,
+                                };
+                                interval_tree
+                                    .containing_hsp(&h, p.query_context_offset, min_diag_separation)
+                                    .is_none()
+                            }));
+                            let jobs = &speculative_jobs;
+                            // NCBI reference: c++/src/algo/blast/core/blast_traceback.c:509-513
+                            // BLAST_GappedAlignmentWithTraceback(...);
+                            crate::utils::threading::report_stage(
+                                "blastn",
+                                "dp_traceback",
+                                jobs.len(),
+                                jobs.len() > 1,
+                            );
+                            speculative_results.clear();
+                            speculative_results.resize_with(batch_end - prelim_index, || None);
+                            let pool = parallel_pool;
+                            pool.install(|| {
+                                speculative_scratch.par_iter_mut().enumerate().for_each(
+                                    |(slot, (scratch, x_greedy_scratch, results))| {
+                                        results.clear();
+                                        results.extend(
+                                            jobs.iter().skip(slot).step_by(num_threads).filter_map(
+                                                |&index| {
+                                                    let p = &prelim_hits[index];
+                                                    // NCBI reference: core/blast_traceback.c:436-472,509-513
+                                                    // BlastGetStartForGappedAlignmentNucl(query, subject, hsp);
+                                                    // AdjustSubjectRange(&s_start, &adjusted_s_length,
+                                                    //                    q_start, query_length, &start_shift);
+                                                    // BLAST_GappedAlignmentWithTraceback(...);
+                                                    // Keep the exact preparation with its speculative DP.
+                                                    let prepared = prepare_traceback(p)?;
+                                                    let (qs, _, shift, slen, ss) = prepared;
+                                                    if !use_dp {
+                                                        // EXPERIMENT (LOSAT_X_GREEDYSPEC): the call of
+                                                        // the ordered loop below, on this slot's scratch.
+                                                        let result =
+                                                            greedy_gapped_alignment_with_traceback(
+                                                                &encoded_queries_blastna
+                                                                    [p.context_idx as usize],
+                                                                &s_seq_blastna[shift..shift + slen],
+                                                                slen,
+                                                                qs,
+                                                                ss,
+                                                                reward,
+                                                                penalty,
+                                                                gap_open,
+                                                                gap_extend,
+                                                                x_drop_final,
+                                                                x_greedy_scratch,
+                                                            );
+                                                        return Some((
+                                                            index,
+                                                            (
+                                                                prepared,
+                                                                XSpecTraceback::Greedy(result),
+                                                            ),
+                                                        ));
+                                                    }
+                                                    let result =
                                                 extend_gapped_heuristic_with_traceback_with_scratch(
                                                     &encoded_queries_blastna
                                                         [p.context_idx as usize],
@@ -11999,110 +12392,115 @@ fn search_query_batch(
                                                     x_drop_final,
                                                     scratch,
                                                 );
-                                            Some((index, (prepared, result)))
-                                        },
-                                    ),
-                                );
-                            },
-                        )
-                    });
-                    // NCBI reference: c++/src/algo/blast/core/blast_traceback.c:583-612
-                    // Blast_HSPUpdateWithTraceback(gap_align, hsp);
-                    // BlastIntervalTreeAddHSP(hsp, tree, query_info, eQueryAndSubject);
-                    // One owner restores each result to its original batch index.
-                    for (_, results) in &mut speculative_scratch {
-                        for (index, result) in results.drain(..) {
-                            speculative_results[index - prelim_index] = Some(result);
+                                                    Some((
+                                                        index,
+                                                        (prepared, XSpecTraceback::Dp(result)),
+                                                    ))
+                                                },
+                                            ),
+                                        );
+                                    },
+                                )
+                            });
+                            // NCBI reference: c++/src/algo/blast/core/blast_traceback.c:583-612
+                            // Blast_HSPUpdateWithTraceback(gap_align, hsp);
+                            // BlastIntervalTreeAddHSP(hsp, tree, query_info, eQueryAndSubject);
+                            // One owner restores each result to its original batch index.
+                            for (_, _, results) in &mut speculative_scratch {
+                                for (index, result) in results.drain(..) {
+                                    speculative_results[index - prelim_index] = Some(result);
+                                }
+                            }
                         }
-                    }
-                }
 
-                let prelim = &prelim_hits[prelim_index];
-                let ctx = &query_contexts[prelim.context_idx as usize];
-                let q_seq_blastna = encoded_queries_blastna[prelim.context_idx as usize].as_slice();
-                let q_seq_nomask_blastna =
-                    encoded_queries_blastna[prelim.context_idx as usize].as_slice();
+                        let prelim = &prelim_hits[prelim_index];
+                        let ctx = &query_contexts[prelim.context_idx as usize];
+                        let q_seq_blastna =
+                            encoded_queries_blastna[prelim.context_idx as usize].as_slice();
+                        let q_seq_nomask_blastna =
+                            encoded_queries_blastna[prelim.context_idx as usize].as_slice();
 
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:403-405
-                // ```c
-                // if (program_number == eBlastTypeRpsBlast ||
-                //     !BlastIntervalTreeContainsHSP(tree, hsp, query_info,
-                //                          hit_options->min_diag_separation)) {
-                // ```
-                let tree_precheck_start = if timing_enabled {
-                    Some(std::time::Instant::now())
-                } else {
-                    None
-                };
-                let subject_frame_sign = 1i32;
-                let prelim_tree_hsp = TreeHsp {
-                    query_offset: prelim.prelim_qs as i32,
-                    query_end: prelim.prelim_qe as i32,
-                    subject_offset: prelim.prelim_ss as i32,
-                    subject_end: prelim.prelim_se as i32,
-                    score: prelim.prelim_score,
-                    query_frame: prelim.query_frame,
-                    query_length: ctx.seq.len() as i32,
-                    query_context_offset: prelim.query_context_offset,
-                    subject_frame_sign,
-                };
-                let traceback_containing_hsp = interval_tree.containing_hsp(
-                    &prelim_tree_hsp,
-                    prelim.query_context_offset,
-                    min_diag_separation,
-                );
-                let prelim_traceback_contained = traceback_containing_hsp.is_some();
-                let trace_traceback_seed = blastn_trace_enabled
-                    && blastn_trace::should_trace_seed(
-                        "traceback",
-                        prelim.context_idx,
-                        s_idx,
-                        s_id,
-                        prelim.seed_qs,
-                        prelim.seed_ss,
-                    );
-                if let (Some(timing), Some(tree_precheck_start)) = (timing_ref, tree_precheck_start)
-                {
-                    BlastnTiming::record_duration(
-                        &timing.traceback_tree_precheck_ns,
-                        tree_precheck_start,
-                    );
-                }
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:403-405
-                // ```c
-                // if (program_number == eBlastTypeRpsBlast ||
-                //     !BlastIntervalTreeContainsHSP(tree, hsp, query_info,
-                //                              hit_options->min_diag_separation)) {
-                // ```
-                if blastn_trace_enabled
-                    && (trace_traceback_seed
-                        || blastn_trace::should_trace_range(
-                            "traceback",
-                            prelim.context_idx,
-                            s_idx,
-                            s_id,
-                            prelim.prelim_qs,
-                            prelim.prelim_qe,
-                            prelim.prelim_ss,
-                            prelim.prelim_se,
-                            ctx.seq.len(),
-                            ctx.frame,
-                        ))
-                {
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4071-4076
-                    // ```c
-                    // status = Blast_HSPInit(gap_align->query_start,
-                    //               gap_align->query_stop, gap_align->subject_start,
-                    //               gap_align->subject_stop,
-                    //               init_hsp->offsets.qs_offsets.q_off,
-                    //               init_hsp->offsets.qs_offsets.s_off, context,
-                    //               query_frame, subject->frame, gap_align->score,
-                    //               &(gap_align->edit_script), &new_hsp);
-                    // ```
-                    // The init_hsp q_off/s_off values become the traceback
-                    // gapped_start seed that BlastGetStartForGappedAlignmentNucl
-                    // may keep or move.
-                    blastn_trace::log(
+                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:403-405
+                        // ```c
+                        // if (program_number == eBlastTypeRpsBlast ||
+                        //     !BlastIntervalTreeContainsHSP(tree, hsp, query_info,
+                        //                          hit_options->min_diag_separation)) {
+                        // ```
+                        let tree_precheck_start = if timing_enabled {
+                            Some(std::time::Instant::now())
+                        } else {
+                            None
+                        };
+                        let subject_frame_sign = 1i32;
+                        let prelim_tree_hsp = TreeHsp {
+                            query_offset: prelim.prelim_qs as i32,
+                            query_end: prelim.prelim_qe as i32,
+                            subject_offset: prelim.prelim_ss as i32,
+                            subject_end: prelim.prelim_se as i32,
+                            score: prelim.prelim_score,
+                            query_frame: prelim.query_frame,
+                            query_length: ctx.seq.len() as i32,
+                            query_context_offset: prelim.query_context_offset,
+                            subject_frame_sign,
+                        };
+                        let traceback_containing_hsp = interval_tree.containing_hsp(
+                            &prelim_tree_hsp,
+                            prelim.query_context_offset,
+                            min_diag_separation,
+                        );
+                        let prelim_traceback_contained = traceback_containing_hsp.is_some();
+                        let trace_traceback_seed = blastn_trace_enabled
+                            && blastn_trace::should_trace_seed(
+                                "traceback",
+                                prelim.context_idx,
+                                s_idx,
+                                s_id,
+                                prelim.seed_qs,
+                                prelim.seed_ss,
+                            );
+                        if let (Some(timing), Some(tree_precheck_start)) =
+                            (timing_ref, tree_precheck_start)
+                        {
+                            BlastnTiming::record_duration(
+                                &timing.traceback_tree_precheck_ns,
+                                tree_precheck_start,
+                            );
+                        }
+                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:403-405
+                        // ```c
+                        // if (program_number == eBlastTypeRpsBlast ||
+                        //     !BlastIntervalTreeContainsHSP(tree, hsp, query_info,
+                        //                              hit_options->min_diag_separation)) {
+                        // ```
+                        if blastn_trace_enabled
+                            && (trace_traceback_seed
+                                || blastn_trace::should_trace_range(
+                                    "traceback",
+                                    prelim.context_idx,
+                                    s_idx,
+                                    s_id,
+                                    prelim.prelim_qs,
+                                    prelim.prelim_qe,
+                                    prelim.prelim_ss,
+                                    prelim.prelim_se,
+                                    ctx.seq.len(),
+                                    ctx.frame,
+                                ))
+                        {
+                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4071-4076
+                            // ```c
+                            // status = Blast_HSPInit(gap_align->query_start,
+                            //               gap_align->query_stop, gap_align->subject_start,
+                            //               gap_align->subject_stop,
+                            //               init_hsp->offsets.qs_offsets.q_off,
+                            //               init_hsp->offsets.qs_offsets.s_off, context,
+                            //               query_frame, subject->frame, gap_align->score,
+                            //               &(gap_align->edit_script), &new_hsp);
+                            // ```
+                            // The init_hsp q_off/s_off values become the traceback
+                            // gapped_start seed that BlastGetStartForGappedAlignmentNucl
+                            // may keep or move.
+                            blastn_trace::log(
                         "traceback",
                         format!(
                             "subject={}({}) context={} prelim=q{}..{} s{}..{} seed=({}, {}) raw_score={} tree_contains={} containing_hsp={:?}",
@@ -12120,302 +12518,344 @@ fn search_query_batch(
                             traceback_containing_hsp
                         ),
                     );
-                }
-                if prelim_traceback_contained {
-                    if let Some(timing) = timing_ref {
-                        BlastnTiming::record_count(&timing.traceback_tree_precheck_skipped_hsps, 1);
-                    }
-                    continue;
-                }
+                        }
+                        if prelim_traceback_contained {
+                            if let Some(timing) = timing_ref {
+                                BlastnTiming::record_count(
+                                    &timing.traceback_tree_precheck_skipped_hsps,
+                                    1,
+                                );
+                            }
+                            if let Some(x_ahead) = x_ahead.as_ref() {
+                                x_ahead.skip(prelim_index);
+                            }
+                            continue;
+                        }
 
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4012-4017
-                // ```c
-                // if (init_hsp->ungapped_data) {
-                //     init_hsp->offsets.qs_offsets.q_off =
-                //         init_hsp->ungapped_data->q_start + init_hsp->ungapped_data->length/2;
-                //     init_hsp->offsets.qs_offsets.s_off =
-                //         init_hsp->ungapped_data->s_start + init_hsp->ungapped_data->length/2;
-                // }
-                // ```
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:451-460
-                // ```c
-                // BlastGetStartForGappedAlignmentNucl(query, subject, hsp);
-                // q_start = hsp->query.gapped_start;
-                // s_start = hsp->subject.gapped_start;
-                // ```
-                // NCBI reference: c++/src/algo/blast/core/blast_traceback.c:403-405,436-472
-                // if (!BlastIntervalTreeContainsHSP(tree, hsp, query_info, ...)) {
-                //     BlastGetStartForGappedAlignmentNucl(query, subject, hsp);
-                //     AdjustSubjectRange(&s_start, &adjusted_s_length,
-                //                        q_start, query_length, &start_shift);
-                // }
-                // Consume only after the live ordered containment check. An HSP
-                // skipped at batch start can become eligible after endpoint
-                // replacement, so missing results still prepare and run here.
-                #[cfg(all(
-                    feature = "parallel",
-                    any(not(target_arch = "wasm32"), feature = "wasm-threads")
-                ))]
-                let precomputed = if speculative_traceback {
-                    speculative_results[prelim_index % SPECULATIVE_TRACEBACK_BATCH_SIZE].take()
-                } else {
-                    None
-                };
-                #[cfg(not(all(
-                    feature = "parallel",
-                    any(not(target_arch = "wasm32"), feature = "wasm-threads")
-                )))]
-                let precomputed: Option<((usize, usize, usize, usize, usize), _)> = None;
-                let start_offsets_start = timing_enabled.then(std::time::Instant::now);
-                let prepared = precomputed
-                    .as_ref()
-                    .map(|(prepared, _)| *prepared)
-                    .or_else(|| prepare_traceback(prelim));
-                if let (Some(timing), Some(start)) = (timing_ref, start_offsets_start) {
-                    BlastnTiming::record_duration(&timing.traceback_start_offsets_ns, start);
-                }
-                let Some((
-                    trace_q_start,
-                    trace_s_start,
-                    start_shift,
-                    adjusted_s_len,
-                    trace_s_start_adj,
-                )) = prepared
-                else {
-                    continue;
-                };
-                let adjusted_subject = &s_seq_blastna[start_shift..start_shift + adjusted_s_len];
-                let x_drop_trace = x_drop_final;
-                if let Some(timing) = timing_ref {
-                    BlastnTiming::record_count(&timing.traceback_full_traceback_hsps, 1);
-                }
-                let alignment_start = if timing_enabled {
-                    Some(std::time::Instant::now())
-                } else {
-                    None
-                };
-                let (
-                    final_qs,
-                    final_qe,
-                    mut final_ss,
-                    mut final_se,
-                    score,
-                    matches,
-                    mismatches,
-                    gaps,
-                    gap_letters,
-                    aln_len,
-                    edit_ops,
-                ) = if use_dp {
-                    let (
-                        final_qs,
-                        final_qe,
-                        final_ss,
-                        final_se,
-                        score,
-                        matches,
-                        mismatches,
-                        gaps,
-                        gap_letters,
-                        edit_ops,
-                    ) = {
-                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:403-405,436-472,583-612
+                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4012-4017
                         // ```c
-                        // if (!BlastIntervalTreeContainsHSP(tree, hsp, query_info, hit_options->min_diag_separation)) {
+                        // if (init_hsp->ungapped_data) {
+                        //     init_hsp->offsets.qs_offsets.q_off =
+                        //         init_hsp->ungapped_data->q_start + init_hsp->ungapped_data->length/2;
+                        //     init_hsp->offsets.qs_offsets.s_off =
+                        //         init_hsp->ungapped_data->s_start + init_hsp->ungapped_data->length/2;
+                        // }
+                        // ```
+                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:451-460
+                        // ```c
+                        // BlastGetStartForGappedAlignmentNucl(query, subject, hsp);
+                        // q_start = hsp->query.gapped_start;
+                        // s_start = hsp->subject.gapped_start;
+                        // ```
+                        // NCBI reference: c++/src/algo/blast/core/blast_traceback.c:403-405,436-472
+                        // if (!BlastIntervalTreeContainsHSP(tree, hsp, query_info, ...)) {
                         //     BlastGetStartForGappedAlignmentNucl(query, subject, hsp);
-                        //     AdjustSubjectRange(&s_start, &adjusted_s_length, q_start, query_length, &start_shift);
-                        //     /* traceback, identity test, then BlastIntervalTreeAddHSP */
+                        //     AdjustSubjectRange(&s_start, &adjusted_s_length,
+                        //                        q_start, query_length, &start_shift);
                         // }
-                        // ```
-                        // N02 scheduling only: speculative values have no externally visible effects;
-                        // the original ordered contains/materialize/add sequence remains authoritative.
-                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.c:273-286,558-585
-                        // ```c
-                        // if (in_hsp->score > tree_hsp->score) return in_hsp;
-                        // /* equal scores: pick the shorter HSP */
-                        // if (index_method == eQueryAndSubject) { /* check common endpoints */ }
-                        // ```
-                        // Endpoint replacement can invalidate batch-start containment. A newly eligible
-                        // HSP therefore runs the unchanged DP here, at its original sequential position.
-                        precomputed.map(|(_, result)| result).unwrap_or_else(|| {
-                            extend_gapped_heuristic_with_traceback_with_scratch(
-                                q_seq_blastna,
-                                adjusted_subject,
-                                trace_q_start,
-                                trace_s_start_adj,
-                                1,
-                                reward,
-                                penalty,
-                                &score_matrix,
-                                gap_open,
-                                gap_extend,
-                                x_drop_trace,
-                                gap_scratch,
-                            )
-                        })
-                    };
-                    let aln_len = matches + mismatches + gap_letters;
-                    (
-                        final_qs,
-                        final_qe,
-                        final_ss,
-                        final_se,
-                        score,
-                        matches,
-                        mismatches,
-                        gaps,
-                        gap_letters,
-                        aln_len,
-                        edit_ops,
-                    )
-                } else {
-                    match greedy_gapped_alignment_with_traceback(
-                        q_seq_blastna,
-                        adjusted_subject,
-                        adjusted_subject.len(),
-                        trace_q_start,
-                        trace_s_start_adj,
-                        reward,
-                        penalty,
-                        gap_open,
-                        gap_extend,
-                        x_drop_trace,
-                        &mut subject_scratch.greedy_align_scratch,
-                    ) {
-                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:583-597
-                        // ```c
-                        // Blast_HSPUpdateWithTraceback(gap_align, hsp);
-                        //
-                        // if (!delete_hsp && !kGreedyTraceback) {
-                        //     Int4 align_length = 0;
-                        //     Blast_HSPGetNumIdentitiesAndPositives(..., &align_length, ...);
-                        //     delete_hsp = Blast_HSPTest(hsp, hit_options, align_length);
-                        // }
-                        // ```
-                        // Greedy traceback keeps score/coordinates/edit-script only here.
-                        // Identity statistics are recomputed later during the NCBI-style
-                        // reevaluation and Blast_HSPTestIdentityAndLength pass.
-                        Some((
+                        // Consume only after the live ordered containment check. An HSP
+                        // skipped at batch start can become eligible after endpoint
+                        // replacement, so missing results still prepare and run here.
+                        #[cfg(all(
+                            feature = "parallel",
+                            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+                        ))]
+                        let precomputed = if let Some(x_ahead) = x_ahead.as_ref() {
+                            // EXPERIMENT (LOSAT_X_AHEAD): a helper's value, if one has
+                            // started on this HSP; otherwise it is evaluated below.
+                            let mut x_scratch = XAheadScratch {
+                                gap: &mut *gap_scratch,
+                                greedy: &mut subject_scratch.greedy_align_scratch,
+                            };
+                            let x_taken =
+                                x_ahead.take(prelim_index, &mut x_scratch, &x_trace_compute);
+                            if x_taken.is_some() && crate::utils::xahead::shadow() {
+                                let x_again = x_trace_compute(prelim_index, &mut x_scratch);
+                                assert!(
+                                    x_taken.as_ref() == Some(&x_again),
+                                    "LOSAT_X_AHEADSHADOW: traceback {prelim_index} differs"
+                                );
+                            }
+                            x_taken.flatten()
+                        } else if speculative_traceback {
+                            speculative_results[prelim_index % SPECULATIVE_TRACEBACK_BATCH_SIZE]
+                                .take()
+                        } else {
+                            None
+                        };
+                        #[cfg(not(all(
+                            feature = "parallel",
+                            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+                        )))]
+                        let precomputed: Option<(
+                            (usize, usize, usize, usize, usize),
+                            _,
+                        )> = None;
+                        let start_offsets_start = timing_enabled.then(std::time::Instant::now);
+                        let prepared = precomputed
+                            .as_ref()
+                            .map(|(prepared, _)| *prepared)
+                            .or_else(|| prepare_traceback(prelim));
+                        if let (Some(timing), Some(start)) = (timing_ref, start_offsets_start) {
+                            BlastnTiming::record_duration(
+                                &timing.traceback_start_offsets_ns,
+                                start,
+                            );
+                        }
+                        let Some((
+                            trace_q_start,
+                            trace_s_start,
+                            start_shift,
+                            adjusted_s_len,
+                            trace_s_start_adj,
+                        )) = prepared
+                        else {
+                            continue;
+                        };
+                        let adjusted_subject =
+                            &s_seq_blastna[start_shift..start_shift + adjusted_s_len];
+                        let x_drop_trace = x_drop_final;
+                        if let Some(timing) = timing_ref {
+                            BlastnTiming::record_count(&timing.traceback_full_traceback_hsps, 1);
+                        }
+                        let alignment_start = if timing_enabled {
+                            Some(std::time::Instant::now())
+                        } else {
+                            None
+                        };
+                        let (
                             final_qs,
                             final_qe,
-                            final_ss,
-                            final_se,
+                            mut final_ss,
+                            mut final_se,
                             score,
+                            matches,
+                            mismatches,
+                            gaps,
+                            gap_letters,
                             aln_len,
                             edit_ops,
-                        )) => (
-                            final_qs, final_qe, final_ss, final_se, score, 0usize, 0usize, 0usize,
-                            0usize, aln_len, edit_ops,
-                        ),
-                        None => {
-                            if let (Some(timing), Some(alignment_start)) =
-                                (timing_ref, alignment_start)
-                            {
-                                let alignment_elapsed_ns =
-                                    alignment_start.elapsed().as_nanos() as u64;
+                        ) = if use_dp {
+                            let (
+                                final_qs,
+                                final_qe,
+                                final_ss,
+                                final_se,
+                                score,
+                                matches,
+                                mismatches,
+                                gaps,
+                                gap_letters,
+                                edit_ops,
+                            ) = {
+                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:403-405,436-472,583-612
+                                // ```c
+                                // if (!BlastIntervalTreeContainsHSP(tree, hsp, query_info, hit_options->min_diag_separation)) {
+                                //     BlastGetStartForGappedAlignmentNucl(query, subject, hsp);
+                                //     AdjustSubjectRange(&s_start, &adjusted_s_length, q_start, query_length, &start_shift);
+                                //     /* traceback, identity test, then BlastIntervalTreeAddHSP */
+                                // }
+                                // ```
+                                // N02 scheduling only: speculative values have no externally visible effects;
+                                // the original ordered contains/materialize/add sequence remains authoritative.
+                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.c:273-286,558-585
+                                // ```c
+                                // if (in_hsp->score > tree_hsp->score) return in_hsp;
+                                // /* equal scores: pick the shorter HSP */
+                                // if (index_method == eQueryAndSubject) { /* check common endpoints */ }
+                                // ```
+                                // Endpoint replacement can invalidate batch-start containment. A newly eligible
+                                // HSP therefore runs the unchanged DP here, at its original sequential position.
+                                match precomputed {
+                                    Some((_, XSpecTraceback::Dp(result))) => result,
+                                    _ => extend_gapped_heuristic_with_traceback_with_scratch(
+                                        q_seq_blastna,
+                                        adjusted_subject,
+                                        trace_q_start,
+                                        trace_s_start_adj,
+                                        1,
+                                        reward,
+                                        penalty,
+                                        &score_matrix,
+                                        gap_open,
+                                        gap_extend,
+                                        x_drop_trace,
+                                        gap_scratch,
+                                    ),
+                                }
+                            };
+                            let aln_len = matches + mismatches + gap_letters;
+                            (
+                                final_qs,
+                                final_qe,
+                                final_ss,
+                                final_se,
+                                score,
+                                matches,
+                                mismatches,
+                                gaps,
+                                gap_letters,
+                                aln_len,
+                                edit_ops,
+                            )
+                        } else {
+                            // EXPERIMENT (LOSAT_X_GREEDYSPEC): the same call, already made
+                            // for this HSP on another scratch, or made here.
+                            let x_greedy_result = match precomputed {
+                                Some((_, XSpecTraceback::Greedy(result))) => result,
+                                _ => greedy_gapped_alignment_with_traceback(
+                                    q_seq_blastna,
+                                    adjusted_subject,
+                                    adjusted_subject.len(),
+                                    trace_q_start,
+                                    trace_s_start_adj,
+                                    reward,
+                                    penalty,
+                                    gap_open,
+                                    gap_extend,
+                                    x_drop_trace,
+                                    &mut subject_scratch.greedy_align_scratch,
+                                ),
+                            };
+                            match x_greedy_result {
+                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:583-597
+                                // ```c
+                                // Blast_HSPUpdateWithTraceback(gap_align, hsp);
+                                //
+                                // if (!delete_hsp && !kGreedyTraceback) {
+                                //     Int4 align_length = 0;
+                                //     Blast_HSPGetNumIdentitiesAndPositives(..., &align_length, ...);
+                                //     delete_hsp = Blast_HSPTest(hsp, hit_options, align_length);
+                                // }
+                                // ```
+                                // Greedy traceback keeps score/coordinates/edit-script only here.
+                                // Identity statistics are recomputed later during the NCBI-style
+                                // reevaluation and Blast_HSPTestIdentityAndLength pass.
+                                Some((
+                                    final_qs,
+                                    final_qe,
+                                    final_ss,
+                                    final_se,
+                                    score,
+                                    aln_len,
+                                    edit_ops,
+                                )) => (
+                                    final_qs, final_qe, final_ss, final_se, score, 0usize, 0usize,
+                                    0usize, 0usize, aln_len, edit_ops,
+                                ),
+                                None => {
+                                    if let (Some(timing), Some(alignment_start)) =
+                                        (timing_ref, alignment_start)
+                                    {
+                                        let alignment_elapsed_ns =
+                                            alignment_start.elapsed().as_nanos() as u64;
+                                        BlastnTiming::record_ns(
+                                            &timing.traceback_alignment_ns,
+                                            alignment_elapsed_ns,
+                                        );
+                                        BlastnTiming::record_ns(
+                                            &timing.traceback_alignment_greedy_ns,
+                                            alignment_elapsed_ns,
+                                        );
+                                    }
+                                    continue;
+                                }
+                            }
+                        };
+                        if let (Some(timing), Some(alignment_start)) = (timing_ref, alignment_start)
+                        {
+                            let alignment_elapsed_ns = alignment_start.elapsed().as_nanos() as u64;
+                            BlastnTiming::record_ns(
+                                &timing.traceback_alignment_ns,
+                                alignment_elapsed_ns,
+                            );
+                            if use_dp {
                                 BlastnTiming::record_ns(
-                                    &timing.traceback_alignment_ns,
+                                    &timing.traceback_alignment_dp_ns,
                                     alignment_elapsed_ns,
                                 );
+                            } else {
                                 BlastnTiming::record_ns(
                                     &timing.traceback_alignment_greedy_ns,
                                     alignment_elapsed_ns,
                                 );
                             }
-                            continue;
                         }
-                    }
-                };
-                if let (Some(timing), Some(alignment_start)) = (timing_ref, alignment_start) {
-                    let alignment_elapsed_ns = alignment_start.elapsed().as_nanos() as u64;
-                    BlastnTiming::record_ns(&timing.traceback_alignment_ns, alignment_elapsed_ns);
-                    if use_dp {
-                        BlastnTiming::record_ns(
-                            &timing.traceback_alignment_dp_ns,
-                            alignment_elapsed_ns,
-                        );
-                    } else {
-                        BlastnTiming::record_ns(
-                            &timing.traceback_alignment_greedy_ns,
-                            alignment_elapsed_ns,
-                        );
-                    }
-                }
 
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:598-600
-                // ```c
-                // Blast_HSPAdjustSubjectOffset(hsp, start_shift);
-                // ```
-                let hsp_build_start = if timing_enabled {
-                    Some(std::time::Instant::now())
-                } else {
-                    None
-                };
-                if start_shift != 0 {
-                    final_ss = final_ss.saturating_add(start_shift);
-                    final_se = final_se.saturating_add(start_shift);
-                }
+                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:598-600
+                        // ```c
+                        // Blast_HSPAdjustSubjectOffset(hsp, start_shift);
+                        // ```
+                        let hsp_build_start = if timing_enabled {
+                            Some(std::time::Instant::now())
+                        } else {
+                            None
+                        };
+                        if start_shift != 0 {
+                            final_ss = final_ss.saturating_add(start_shift);
+                            final_se = final_se.saturating_add(start_shift);
+                        }
 
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:583-597
-                // ```c
-                // Blast_HSPUpdateWithTraceback(gap_align, hsp);
-                // ...
-                // Blast_HSPGetNumIdentitiesAndPositives(query_nomask,
-                //        adjusted_subject, hsp, score_options, &align_length, sbp);
-                // ```
-                // Traceback scoring uses query_blk->sequence; identity/length
-                // reporting uses query_blk->sequence_nomask. In LOSATN's
-                // current soft-query-masking path these slices alias.
-                let (matches, mismatches, gaps, gap_letters, aln_len) = if use_dp {
-                    let (matches, mismatches, gaps, gap_letters) = stats_from_edit_ops(
-                        q_seq_nomask_blastna,
-                        s_seq_blastna,
-                        final_qs,
-                        final_ss,
-                        &edit_ops,
-                    );
-                    (
-                        matches,
-                        mismatches,
-                        gaps,
-                        gap_letters,
-                        matches + mismatches + gap_letters,
-                    )
-                } else {
-                    (matches, mismatches, gaps, gap_letters, aln_len)
-                };
+                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:583-597
+                        // ```c
+                        // Blast_HSPUpdateWithTraceback(gap_align, hsp);
+                        // ...
+                        // Blast_HSPGetNumIdentitiesAndPositives(query_nomask,
+                        //        adjusted_subject, hsp, score_options, &align_length, sbp);
+                        // ```
+                        // Traceback scoring uses query_blk->sequence; identity/length
+                        // reporting uses query_blk->sequence_nomask. In LOSATN's
+                        // current soft-query-masking path these slices alias.
+                        let (matches, mismatches, gaps, gap_letters, aln_len) = if use_dp {
+                            let (matches, mismatches, gaps, gap_letters) = stats_from_edit_ops(
+                                q_seq_nomask_blastna,
+                                s_seq_blastna,
+                                final_qs,
+                                final_ss,
+                                &edit_ops,
+                            );
+                            (
+                                matches,
+                                mismatches,
+                                gaps,
+                                gap_letters,
+                                matches + mismatches + gap_letters,
+                            )
+                        } else {
+                            (matches, mismatches, gaps, gap_letters, aln_len)
+                        };
 
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:436-472
-                // ```c
-                // BlastGetOffsetsForGappedAlignment(..., &q_start, &s_start);
-                // ...
-                // BlastGetStartForGappedAlignmentNucl(query, subject, hsp);
-                // ...
-                // AdjustSubjectRange(&s_start, &adjusted_s_length, q_start,
-                //                    query_length, &start_shift);
-                // ```
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:583-600
-                // ```c
-                // Blast_HSPUpdateWithTraceback(gap_align, hsp);
-                // ...
-                // Blast_HSPAdjustSubjectOffset(hsp, start_shift);
-                // ```
-                if blastn_trace_enabled
-                    && (trace_traceback_seed
-                        || blastn_trace::should_trace_range(
-                            "traceback",
-                            prelim.context_idx,
-                            s_idx,
-                            s_id,
-                            final_qs,
-                            final_qe,
-                            final_ss,
-                            final_se,
-                            ctx.seq.len(),
-                            ctx.frame,
-                        ))
-                {
-                    blastn_trace::log(
+                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:436-472
+                        // ```c
+                        // BlastGetOffsetsForGappedAlignment(..., &q_start, &s_start);
+                        // ...
+                        // BlastGetStartForGappedAlignmentNucl(query, subject, hsp);
+                        // ...
+                        // AdjustSubjectRange(&s_start, &adjusted_s_length, q_start,
+                        //                    query_length, &start_shift);
+                        // ```
+                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:583-600
+                        // ```c
+                        // Blast_HSPUpdateWithTraceback(gap_align, hsp);
+                        // ...
+                        // Blast_HSPAdjustSubjectOffset(hsp, start_shift);
+                        // ```
+                        if blastn_trace_enabled
+                            && (trace_traceback_seed
+                                || blastn_trace::should_trace_range(
+                                    "traceback",
+                                    prelim.context_idx,
+                                    s_idx,
+                                    s_id,
+                                    final_qs,
+                                    final_qe,
+                                    final_ss,
+                                    final_se,
+                                    ctx.seq.len(),
+                                    ctx.frame,
+                                ))
+                        {
+                            blastn_trace::log(
                         "traceback",
                         format!(
                             "subject={}({}) context={} start=({}, {}) adjusted_start=({}, {}) start_shift={} adjusted_s_len={} final=q{}..{} s{}..{} raw_score={} x_drop={} aln_len={} identities={} mismatches={} gaps={} gap_letters={} edit_ops_len={} edit_ops={}",
@@ -12443,156 +12883,172 @@ fn search_query_batch(
                             format_gap_edit_ops_for_trace(&edit_ops)
                         ),
                     );
-                }
+                        }
 
-                if timing_enabled {
-                    traceback_edit_script_lengths
-                        .push(edit_ops.len().min(u32::MAX as usize) as u32);
-                    traceback_alignment_lengths.push(aln_len.min(u32::MAX as usize) as u32);
-                }
+                        if timing_enabled {
+                            traceback_edit_script_lengths
+                                .push(edit_ops.len().min(u32::MAX as usize) as u32);
+                            traceback_alignment_lengths.push(aln_len.min(u32::MAX as usize) as u32);
+                        }
 
-                if use_dp && hsp_test(matches, aln_len, percent_identity, min_hit_length) {
-                    if let Some(timing) = timing_ref {
-                        BlastnTiming::record_count(
-                            &timing.traceback_deleted_identity_length_hsps,
-                            1,
+                        if use_dp && hsp_test(matches, aln_len, percent_identity, min_hit_length) {
+                            if let Some(timing) = timing_ref {
+                                BlastnTiming::record_count(
+                                    &timing.traceback_deleted_identity_length_hsps,
+                                    1,
+                                );
+                            }
+                            if let (Some(timing), Some(hsp_build_start)) =
+                                (timing_ref, hsp_build_start)
+                            {
+                                BlastnTiming::record_duration(
+                                    &timing.traceback_hsp_build_ns,
+                                    hsp_build_start,
+                                );
+                            }
+                            continue;
+                        }
+
+                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:583-612
+                        // ```c
+                        // Blast_HSPUpdateWithTraceback(gap_align, hsp);
+                        // if (!delete_hsp && !kGreedyTraceback) {
+                        //     Blast_HSPGetNumIdentitiesAndPositives(..., &align_length, ...);
+                        //     delete_hsp = Blast_HSPTest(hsp, hit_options, align_length);
+                        // }
+                        // if (!delete_hsp) {
+                        //     Blast_HSPAdjustSubjectOffset(hsp, start_shift);
+                        //     status = BlastIntervalTreeAddHSP(hsp, tree, query_info,
+                        //                                eQueryAndSubject);
+                        // }
+                        // ```
+                        let final_tree_hsp = TreeHsp {
+                            query_offset: final_qs as i32,
+                            query_end: final_qe as i32,
+                            subject_offset: final_ss as i32,
+                            subject_end: final_se as i32,
+                            score,
+                            query_frame: prelim.query_frame,
+                            query_length: ctx.seq.len() as i32,
+                            query_context_offset: prelim.query_context_offset,
+                            subject_frame_sign,
+                        };
+                        interval_tree.add_hsp(
+                            final_tree_hsp,
+                            prelim.query_context_offset,
+                            IndexMethod::QueryAndSubject,
                         );
-                    }
-                    if let (Some(timing), Some(hsp_build_start)) = (timing_ref, hsp_build_start) {
-                        BlastnTiming::record_duration(
-                            &timing.traceback_hsp_build_ns,
-                            hsp_build_start,
+
+                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:234-250
+                        // ```c
+                        // Blast_HSPListGetEvalues(program_number, query_info, subject_length,
+                        //                         hsp_list, kGapped, FALSE, sbp, 0,
+                        //                         scale_factor);
+                        // ...
+                        // Blast_HSPListGetBitScores(hsp_list, kGapped, sbp);
+                        // ```
+                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1887-1890
+                        // ```c
+                        // hsp->evalue =
+                        //     BLAST_KarlinStoE_simple(score, kbp[kbp_context],
+                        //                      query_info->contexts[hsp->context].eff_searchsp);
+                        // ```
+                        let eff_searchsp = query_eff_searchsp[prelim.context_idx as usize];
+                        let (bit_score, eval) = calculate_blastn_context_statistics(
+                            score,
+                            &search_karlin_ref[prelim.context_idx as usize].gapped,
+                            eff_searchsp,
+                            round_down_evalue_score,
                         );
+                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:234-246
+                        // ```c
+                        // Blast_HSPListGetEvalues(program_number, query_info, subject_length,
+                        //                         hsp_list, kGapped, FALSE, sbp, 0,
+                        //                         scale_factor);
+                        // Blast_HSPListReapByEvalue(hsp_list, hit_params->options);
+                        // Blast_HSPListGetBitScores(hsp_list, kGapped, sbp);
+                        // ```
+                        // NCBI reaps by E-value only after common-endpoint purging,
+                        // ambiguity re-evaluation, score resort, and final containment.
+                        // Keep this traceback HSP in the subject list so it can still
+                        // participate in those survivor-set decisions.
+
+                        let identity = if aln_len > 0 {
+                            ((matches as f64 / aln_len as f64) * 100.0).min(100.0)
+                        } else {
+                            0.0
+                        };
+
+                        let query_length = queries[prelim.query_idx as usize].seq().len();
+                        let (hit_q_start, hit_q_end, hit_s_start, hit_s_end) =
+                            adjust_blastn_offsets(
+                                final_qs,
+                                final_qe,
+                                final_ss,
+                                final_se,
+                                query_length,
+                                prelim.query_frame,
+                            );
+
+                        let gap_info = if edit_ops.is_empty() {
+                            None
+                        } else {
+                            Some(edit_ops)
+                        };
+                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4058-4077
+                        // ```c
+                        // if (gap_align->score >= cutoff) {
+                        //     ...
+                        //     status = Blast_HSPInit(gap_align->query_start,
+                        //                   gap_align->query_stop, gap_align->subject_start,
+                        //                   gap_align->subject_stop,
+                        //                   init_hsp->offsets.qs_offsets.q_off,
+                        //                   init_hsp->offsets.qs_offsets.s_off, context,
+                        //                   query_frame, subject->frame, gap_align->score,
+                        //                   &(gap_align->edit_script), &new_hsp);
+                        // }
+                        // ```
+                        hits.push(BlastnHsp {
+                            identity,
+                            length: aln_len,
+                            mismatch: mismatches,
+                            gapopen: gaps,
+                            q_start: hit_q_start,
+                            q_end: hit_q_end,
+                            s_start: hit_s_start,
+                            s_end: hit_s_end,
+                            e_value: eval,
+                            bit_score,
+                            num_ident: matches,
+                            query_frame: prelim.query_frame,
+                            query_length,
+                            q_idx: prelim.query_idx,
+                            s_idx: s_idx as u32,
+                            raw_score: score,
+                            internal_q_offset_0: final_qs,
+                            internal_q_end_0: final_qe,
+                            internal_s_offset_0: final_ss,
+                            internal_s_end_0: final_se,
+                            internal_query_context_offset: prelim.query_context_offset,
+                            gap_info,
+                            num_positives: matches,
+                        });
+                        if let (Some(timing), Some(hsp_build_start)) = (timing_ref, hsp_build_start)
+                        {
+                            BlastnTiming::record_duration(
+                                &timing.traceback_hsp_build_ns,
+                                hsp_build_start,
+                            );
+                        }
                     }
-                    continue;
-                }
-
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:583-612
-                // ```c
-                // Blast_HSPUpdateWithTraceback(gap_align, hsp);
-                // if (!delete_hsp && !kGreedyTraceback) {
-                //     Blast_HSPGetNumIdentitiesAndPositives(..., &align_length, ...);
-                //     delete_hsp = Blast_HSPTest(hsp, hit_options, align_length);
-                // }
-                // if (!delete_hsp) {
-                //     Blast_HSPAdjustSubjectOffset(hsp, start_shift);
-                //     status = BlastIntervalTreeAddHSP(hsp, tree, query_info,
-                //                                eQueryAndSubject);
-                // }
-                // ```
-                let final_tree_hsp = TreeHsp {
-                    query_offset: final_qs as i32,
-                    query_end: final_qe as i32,
-                    subject_offset: final_ss as i32,
-                    subject_end: final_se as i32,
-                    score,
-                    query_frame: prelim.query_frame,
-                    query_length: ctx.seq.len() as i32,
-                    query_context_offset: prelim.query_context_offset,
-                    subject_frame_sign,
-                };
-                interval_tree.add_hsp(
-                    final_tree_hsp,
-                    prelim.query_context_offset,
-                    IndexMethod::QueryAndSubject,
-                );
-
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:234-250
-                // ```c
-                // Blast_HSPListGetEvalues(program_number, query_info, subject_length,
-                //                         hsp_list, kGapped, FALSE, sbp, 0,
-                //                         scale_factor);
-                // ...
-                // Blast_HSPListGetBitScores(hsp_list, kGapped, sbp);
-                // ```
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1887-1890
-                // ```c
-                // hsp->evalue =
-                //     BLAST_KarlinStoE_simple(score, kbp[kbp_context],
-                //                      query_info->contexts[hsp->context].eff_searchsp);
-                // ```
-                let eff_searchsp = query_eff_searchsp[prelim.context_idx as usize];
-                let (bit_score, eval) = calculate_blastn_context_statistics(
-                    score,
-                    &search_karlin_ref[prelim.context_idx as usize].gapped,
-                    eff_searchsp,
-                    round_down_evalue_score,
-                );
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:234-246
-                // ```c
-                // Blast_HSPListGetEvalues(program_number, query_info, subject_length,
-                //                         hsp_list, kGapped, FALSE, sbp, 0,
-                //                         scale_factor);
-                // Blast_HSPListReapByEvalue(hsp_list, hit_params->options);
-                // Blast_HSPListGetBitScores(hsp_list, kGapped, sbp);
-                // ```
-                // NCBI reaps by E-value only after common-endpoint purging,
-                // ambiguity re-evaluation, score resort, and final containment.
-                // Keep this traceback HSP in the subject list so it can still
-                // participate in those survivor-set decisions.
-
-                let identity = if aln_len > 0 {
-                    ((matches as f64 / aln_len as f64) * 100.0).min(100.0)
-                } else {
-                    0.0
-                };
-
-                let query_length = queries[prelim.query_idx as usize].seq().len();
-                let (hit_q_start, hit_q_end, hit_s_start, hit_s_end) = adjust_blastn_offsets(
-                    final_qs,
-                    final_qe,
-                    final_ss,
-                    final_se,
-                    query_length,
-                    prelim.query_frame,
-                );
-
-                let gap_info = if edit_ops.is_empty() {
-                    None
-                } else {
-                    Some(edit_ops)
-                };
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4058-4077
-                // ```c
-                // if (gap_align->score >= cutoff) {
-                //     ...
-                //     status = Blast_HSPInit(gap_align->query_start,
-                //                   gap_align->query_stop, gap_align->subject_start,
-                //                   gap_align->subject_stop,
-                //                   init_hsp->offsets.qs_offsets.q_off,
-                //                   init_hsp->offsets.qs_offsets.s_off, context,
-                //                   query_frame, subject->frame, gap_align->score,
-                //                   &(gap_align->edit_script), &new_hsp);
-                // }
-                // ```
-                hits.push(BlastnHsp {
-                    identity,
-                    length: aln_len,
-                    mismatch: mismatches,
-                    gapopen: gaps,
-                    q_start: hit_q_start,
-                    q_end: hit_q_end,
-                    s_start: hit_s_start,
-                    s_end: hit_s_end,
-                    e_value: eval,
-                    bit_score,
-                    num_ident: matches,
-                    query_frame: prelim.query_frame,
-                    query_length,
-                    q_idx: prelim.query_idx,
-                    s_idx: s_idx as u32,
-                    raw_score: score,
-                    internal_q_offset_0: final_qs,
-                    internal_q_end_0: final_qe,
-                    internal_s_offset_0: final_ss,
-                    internal_s_end_0: final_se,
-                    internal_query_context_offset: prelim.query_context_offset,
-                    gap_info,
-                    num_positives: matches,
-                });
-                if let (Some(timing), Some(hsp_build_start)) = (timing_ref, hsp_build_start) {
-                    BlastnTiming::record_duration(&timing.traceback_hsp_build_ns, hsp_build_start);
-                }
+                },
+            );
+            if let Some(x_ahead) = x_ahead.as_ref() {
+                let (x_evaluated, x_taken) = x_ahead.counts();
+                crate::utils::xstats::AHEAD_TRACE_EVALUATED
+                    .fetch_add(x_evaluated, std::sync::atomic::Ordering::Relaxed);
+                crate::utils::xstats::AHEAD_TRACE_TAKEN
+                    .fetch_add(x_taken, std::sync::atomic::Ordering::Relaxed);
             }
 
             prelim_hits.clear();

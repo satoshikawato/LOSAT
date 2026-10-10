@@ -932,7 +932,7 @@ pub fn extend_hit_ungapped(
     );
 
     // Debug coordinate tracking
-    if std::env::var("LOSAT_DEBUG_COORDS").is_ok() {
+    if crate::utils::xenv::debug_coords_is_ok() {
         eprintln!(
             "[UNGAPPED] q_pos={}, s_pos={}, best_i={}, best_j={} -> q=[{}, {}), s=[{}, {}), score={}",
             q_pos, s_pos, best_i, best_j, result.0, result.1, result.2, result.3, result.4

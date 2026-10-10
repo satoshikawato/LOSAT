@@ -189,6 +189,13 @@ impl GeneticCode {
         if codon.len() != 3 {
             return b'X';
         }
+        // EXPERIMENT (LOSAT_X_CODONFAST): three unambiguous bases select exactly
+        // one (i, j, k) of the loops below, so the answer is that one table entry.
+        if x_codon_fast() {
+            if let Some(aa) = self.x_get_unambiguous(codon) {
+                return aa;
+            }
+        }
         let masks = [
             base_mask(codon[0]),
             base_mask(codon[1]),
@@ -230,6 +237,40 @@ impl GeneticCode {
 //  0, 1,14, 2,13, 0, 0, 4,11, 0, 0,12, 0, 3,15, 0,
 //  0, 0, 5, 6, 8, 0, 7, 9, 0,10, 0, 0, 0, 0, 0,
 // ```
+fn x_codon_fast() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("LOSAT_X_CODONFAST").is_some())
+}
+
+impl GeneticCode {
+    /// EXPERIMENT (LOSAT_X_CODONFAST): the amino acid of three unambiguous
+    /// bases, `None` when a base is ambiguous or not a base.
+    #[inline]
+    fn x_get_unambiguous(&self, codon: &[u8]) -> Option<u8> {
+        let i = X_BASE_INDEX[codon[0] as usize];
+        let j = X_BASE_INDEX[codon[1] as usize];
+        let k = X_BASE_INDEX[codon[2] as usize];
+        ((i | j | k) < 4).then(|| self.table[i as usize * 16 + j as usize * 4 + k as usize])
+    }
+}
+
+// EXPERIMENT (LOSAT_X_CODONFAST): position of a base in NCBI's
+// `mapping[4] = { 8, 2, 1, 4 }` (T, C, A, G) when `base_mask` has exactly that
+// one bit, 4 otherwise.
+const X_BASE_INDEX: [u8; 256] = {
+    let mut table = [4u8; 256];
+    let bases = [(b'T', 0u8), (b'U', 0), (b'C', 1), (b'A', 2), (b'G', 3)];
+    let mut n = 0;
+    while n < bases.len() {
+        let (base, index) = bases[n];
+        table[base as usize] = index;
+        table[base.to_ascii_lowercase() as usize] = index;
+        n += 1;
+    }
+    table
+};
+
 fn base_mask(base: u8) -> u8 {
     match base.to_ascii_uppercase() {
         b'A' => 1,
@@ -254,6 +295,73 @@ fn base_mask(base: u8) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // EXPERIMENT: the table path of `get` against NCBI's nested loops.
+    #[test]
+    fn x_base_index_matches_base_mask_for_every_byte() {
+        for byte in 0..=255u8 {
+            let expected = match base_mask(byte) {
+                8 => 0,
+                2 => 1,
+                1 => 2,
+                4 => 3,
+                _ => 4,
+            };
+            assert_eq!(X_BASE_INDEX[byte as usize], expected, "byte {byte}");
+        }
+        let slow = |code: &GeneticCode, codon: &[u8; 3]| -> u8 {
+            let masks = [
+                base_mask(codon[0]),
+                base_mask(codon[1]),
+                base_mask(codon[2]),
+            ];
+            if masks.contains(&0) {
+                return b'X';
+            }
+            let bit = [8, 2, 1, 4];
+            let mut aa = 0;
+            for i in 0..4 {
+                for j in 0..4 {
+                    for k in 0..4 {
+                        if masks[0] & bit[i] == 0
+                            || masks[1] & bit[j] == 0
+                            || masks[2] & bit[k] == 0
+                        {
+                            continue;
+                        }
+                        let translated = code.table[i * 16 + j * 4 + k];
+                        if aa == 0 {
+                            aa = translated;
+                        } else if translated != aa {
+                            return b'X';
+                        }
+                    }
+                }
+            }
+            aa
+        };
+        let letters = b"ACGTUacgtuNRYKMSWBDHVn-*X";
+        for &(id, _) in TABLES {
+            let code = GeneticCode::try_from_id(id).unwrap();
+            for &a in letters {
+                for &b in letters {
+                    for &c in letters {
+                        let codon = [a, b, c];
+                        // `get` is the nested loops unless the switch is set.
+                        assert_eq!(code.get(&codon), slow(&code, &codon), "code {id} {codon:?}");
+                        let unambiguous = codon.iter().all(|base| b"ACGTUacgtu".contains(base));
+                        match code.x_get_unambiguous(&codon) {
+                            Some(aa) => {
+                                assert!(unambiguous, "code {id} {codon:?}");
+                                assert_eq!(aa, slow(&code, &codon), "code {id} {codon:?}");
+                            }
+                            None => assert!(!unambiguous, "code {id} {codon:?}"),
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn pinned_gc_prt_all_27_codes_and_64_codons() {

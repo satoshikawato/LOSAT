@@ -171,5 +171,10 @@ fn main() -> Result<()> {
             }
         }
     }
+    LOSAT::utils::xstats::print();
+    LOSAT::core::composition_adjustment::adjust_scores::x_adjmemo_print_stats();
+    LOSAT::core::composition_adjustment::adjust_scores::x_newtonexact_print_stats();
+    LOSAT::algorithm::tblastx::x_seed_bucket::print_shadow_stats();
+    LOSAT::utils::x_logclone::print_shadow_stats();
     Ok(())
 }

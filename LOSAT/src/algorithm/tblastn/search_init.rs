@@ -410,6 +410,151 @@ pub(super) fn find_protein_init_hsps_by_chunk_with_mask_mode(
     )
 }
 
+// EXPERIMENT (LOSAT_X_TBNPAR): the two-hit pass of one (frame, chunk) unit on its
+// own diagonal array.  NCBI c++/src/algo/blast/core/blast_extend.c:162-175 ends a
+// WordFinder call with `diag_table->offset += subject_length + window`, which
+// makes every entry of the previous call older than a full window: the first hit
+// of the next call on that diagonal only records `last_hit` (aa_ungapped.c:
+// 516-547), exactly as on a cleared array.  A unit therefore depends on nothing
+// that an earlier unit left behind.
+pub(super) struct XTwoHit<'a> {
+    diagonals: Diagonals,
+    pub query_sequence: &'a [u8],
+    pub context_offsets: &'a [i32],
+    pub x_dropoffs: &'a [i32],
+    pub cutoff_scores: &'a [i32],
+    pub matrix: ScoringMatrix,
+    pub window: i32,
+    pub word_size: usize,
+}
+
+impl<'a> XTwoHit<'a> {
+    pub(super) fn new(
+        query_sequence: &'a [u8],
+        context_offsets: &'a [i32],
+        x_dropoffs: &'a [i32],
+        cutoff_scores: &'a [i32],
+        matrix: ScoringMatrix,
+        window: i32,
+        word_size: usize,
+    ) -> Self {
+        Self {
+            diagonals: Diagonals::new(query_sequence.len().saturating_sub(1), window),
+            query_sequence,
+            context_offsets,
+            x_dropoffs,
+            cutoff_scores,
+            matrix,
+            window,
+            word_size,
+        }
+    }
+
+    /// Start a new unit (the state of `Diagonals::new`).
+    pub(super) fn reset(&mut self) {
+        self.diagonals.offset = self.window;
+        self.diagonals.entries.fill((0, false));
+    }
+
+    /// The loop body of `find_protein_init_hsps_by_chunk_with_mask_mode` for one
+    /// filled offset array.
+    #[inline]
+    pub(super) fn pairs(
+        &mut self,
+        frame: i8,
+        chunk_offset: u32,
+        subject_sequence: &[u8],
+        pairs: &[crate::algorithm::tblastx::blast_aascan::BlastOffsetPair],
+        hits: &mut Vec<InitHsp>,
+    ) {
+        let window = self.window;
+        let word_size = self.word_size;
+        let word_size_i32 = word_size as i32;
+        let diagonals = &mut self.diagonals;
+        for pair in pairs {
+            let q = pair.q_off as i32;
+            let s = pair.s_off as i32;
+            // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:516-547
+            let index = ((q - s) & diagonals.mask) as usize;
+            let (last_hit, flag) = &mut diagonals.entries[index];
+            if *flag {
+                if s + diagonals.offset < *last_hit {
+                    continue;
+                }
+                *last_hit = s + diagonals.offset;
+                *flag = false;
+                continue;
+            }
+            let previous = *last_hit - diagonals.offset;
+            let diff = s - previous;
+            if diff >= window {
+                *last_hit = s + diagonals.offset;
+                continue;
+            }
+            if diff < word_size_i32 {
+                continue;
+            }
+            // NCBI c++/src/algo/blast/core/aa_ungapped.c:562-579:
+            // curr_context = BSearchContextInfo(query_offset, query_info);
+            // if (query_offset - diff <
+            //     query_info->contexts[curr_context].query_offset) continue;
+            let context = self.context_offsets.partition_point(|&offset| offset <= q) - 1;
+            if q - diff < self.context_offsets[context] {
+                *last_hit = s + diagonals.offset;
+                continue;
+            }
+            // NCBI c++/src/algo/blast/core/aa_ungapped.c:570-583,1089-1155:
+            // s_BlastAaExtendTwoHit(matrix, ..., wordsize, ...);
+            let result = extend_two_hit(
+                self.matrix,
+                self.query_sequence,
+                subject_sequence,
+                (previous + word_size_i32) as usize,
+                s as usize,
+                q as usize,
+                self.x_dropoffs[context],
+                word_size,
+            );
+            let Some(result) = result else {
+                continue;
+            };
+            // NCBI c++/src/algo/blast/core/aa_ungapped.c:570-590:
+            // if (score >= cutoffs->cutoff_score) BlastSaveInitHsp(...);
+            if result.ungapped_data.score >= self.cutoff_scores[context] {
+                hits.push(InitHsp {
+                    frame,
+                    chunk_offset,
+                    q_seed: pair.q_off,
+                    s_seed: pair.s_off,
+                    q_start: result.ungapped_data.q_start,
+                    s_start: result.ungapped_data.s_start,
+                    length: result.ungapped_data.length,
+                    score: result.ungapped_data.score,
+                });
+            }
+            // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:588-607
+            if result.right_extend {
+                *flag = true;
+                *last_hit = result.s_last_off - (word_size_i32 - 1) + diagonals.offset;
+            } else {
+                *last_hit = s + diagonals.offset;
+            }
+        }
+    }
+
+    /// NCBI c++/src/algo/blast/core/blast_extend.c:273-313 (stable, as glibc's
+    /// qsort under the pinned NCBI BLAST+).
+    pub(super) fn sort(hits: &mut [InitHsp]) {
+        hits.sort_by(|a, b| {
+            b.score
+                .cmp(&a.score)
+                .then(a.s_start.cmp(&b.s_start))
+                .then(b.length.cmp(&a.length))
+                .then(a.q_start.cmp(&b.q_start))
+        });
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -247,10 +247,100 @@ pub trait RuntimeObserver: super::results::ResultsObserver + Send {
     ) {
     }
     fn early(&mut self, _evalue: f64, _queries: usize, _decision: bool) {}
+    /// EXPERIMENT (LOSAT_X_BXPAR): true when no callback records anything, so
+    /// that work may be done out of order (and some of it twice).
+    fn x_passive(&self) -> bool {
+        false
+    }
 }
 struct Noop;
 impl super::results::ResultsObserver for Noop {}
-impl RuntimeObserver for Noop {}
+impl RuntimeObserver for Noop {
+    fn x_passive(&self) -> bool {
+        true
+    }
+}
+
+/// EXPERIMENT (LOSAT_X_BXLEAN): leave out work whose result nothing reads: the
+/// copy of every candidate HSP kept for an observer when there is none, and
+/// the tree and DP scratch of a (chunk, subject) pair without an initial HSP.
+pub(crate) fn x_bx_lean() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("LOSAT_X_BXLEAN").is_some())
+}
+
+// EXPERIMENT (LOSAT_X_BXPAR): parallel BLASTX stages.
+pub(crate) fn x_bx_parallel() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("LOSAT_X_BXPAR").is_some())
+}
+
+// One pool slot's Kappa state.  SAFETY of `Send`: the only non-Send field is the
+// `context` cell of the gapping parameters, which `redo_context_observed` fills
+// for one synchronous call and restores before returning; the state is only
+// reached through its mutex.
+#[cfg(feature = "parallel")]
+struct XKappaWorker(KappaState);
+#[cfg(feature = "parallel")]
+unsafe impl Send for XKappaWorker {}
+
+/// EXPERIMENT (LOSAT_X_BXPAR): redo one match without knowing the matrix its
+/// predecessor leaves behind.  `None` when the match would have used that
+/// matrix (it is then redone in order); otherwise the finished list, its best
+/// score, and the matrix this match leaves (`None` if it leaves the old one).
+#[cfg(feature = "parallel")]
+#[allow(clippy::type_complexity)]
+fn x_speculate_match(
+    worker: &mut KappaState,
+    list: &HspList,
+    batch: &PreparedQueryBatch,
+    full: &[ContextParameters],
+    options: &ResolvedOptions,
+    subjects: &[FastaRecord],
+    db_length: i64,
+) -> Option<(
+    HspList,
+    i32,
+    Option<crate::core::composition_adjustment::adjust_scores::AdjustedProteinMatrix>,
+)> {
+    use crate::core::composition_adjustment::redo_alignment::X_REDO_PROBE;
+    worker.x_set_matrix(None);
+    X_REDO_PROBE.with(|probe| probe.set(0));
+    let encoded: Vec<_> = subjects[list.oid]
+        .sequence
+        .iter()
+        .copied()
+        .map(aa_char_to_ncbistdaa)
+        .collect();
+    let input: Vec<_> = list.hsps.iter().map(|h| h.hsp.clone()).collect();
+    let redone = worker
+        .redo_list_observed(&input, batch, &encoded, &mut |_| {})
+        .ok()?;
+    let probe = X_REDO_PROBE.with(|probe| probe.get());
+    if probe & 2 != 0 {
+        return None;
+    }
+    let (output, best_score) = finalize_redone(
+        &redone,
+        batch,
+        full,
+        options,
+        &encoded,
+        db_length,
+        list.query_index,
+        list.oid,
+        &mut Noop,
+    )
+    .ok()?;
+    let matrix = if probe & 1 != 0 {
+        worker.x_take_matrix()
+    } else {
+        None
+    };
+    Some((output, best_score, matrix))
+}
 pub fn search_internal(
     records: &[FastaRecord],
     subjects: &[FastaRecord],
@@ -284,6 +374,86 @@ pub fn search_internal(
 //                     }
 //
 // ```
+/// EXPERIMENT (LOSAT_X_BXPOOL): `LOSAT_X_BXPOOL` set.
+pub(crate) fn x_bx_pool() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("LOSAT_X_BXPOOL").is_some())
+}
+
+/// EXPERIMENT (LOSAT_X_BXBATCH): `LOSAT_X_BXBATCH` set (needs LOSAT_X_BXPOOL).
+pub(crate) fn x_bx_batch() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("LOSAT_X_BXBATCH").is_some())
+}
+
+thread_local! {
+    // EXPERIMENT (LOSAT_X_BXBATCH): set while this thread runs a search that
+    // must not start parallel work of its own.
+    static X_INNER_SERIAL: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// EXPERIMENT (LOSAT_X_BXBATCH): true inside `x_search_internal_serial`.
+pub(crate) fn x_inner_serial() -> bool {
+    X_INNER_SERIAL.with(std::cell::Cell::get)
+}
+
+struct XInnerSerial(bool);
+
+impl XInnerSerial {
+    fn enter() -> Self {
+        Self(X_INNER_SERIAL.with(|flag| flag.replace(true)))
+    }
+}
+
+impl Drop for XInnerSerial {
+    fn drop(&mut self) {
+        X_INNER_SERIAL.with(|flag| flag.set(self.0));
+    }
+}
+
+/// EXPERIMENT (LOSAT_X_BXBATCH): `search_internal` as the one-thread search,
+/// whatever thread it is called on. The caller runs several of these side by
+/// side; each takes the serial path of every stage.
+pub fn x_search_internal_serial(
+    records: &[FastaRecord],
+    subjects: &[FastaRecord],
+    options: &ResolvedOptions,
+) -> Result<Vec<BatchResults>> {
+    let _serial = XInnerSerial::enter();
+    x_search_internal_in_pool(
+        records,
+        subjects,
+        options,
+        &crate::utils::threading::SearchPool::x_serial(),
+    )
+}
+
+/// EXPERIMENT (LOSAT_X_BXPOOL): `search_internal` on a pool that the caller
+/// keeps for all its query batches.
+pub fn x_search_internal_in_pool(
+    records: &[FastaRecord],
+    subjects: &[FastaRecord],
+    options: &ResolvedOptions,
+    pool: &crate::utils::threading::SearchPool<'_>,
+) -> Result<Vec<BatchResults>> {
+    let mut observer = Noop;
+    let mut pipeline = Runtime {
+        observer: &mut observer,
+        ungapped_link_state: None,
+        options,
+        subjects,
+        db_length: subjects.iter().map(|s| s.sequence.len() as i64).sum(),
+        ordinal: 0,
+        stream: None,
+        chunk: None,
+        output: Vec::new(),
+    };
+    search_core(records, subjects, options, false, &mut pipeline, pool)?;
+    Ok(pipeline.output)
+}
+
 pub fn search_internal_observed(
     records: &[FastaRecord],
     subjects: &[FastaRecord],
@@ -468,6 +638,9 @@ impl PreliminarySink for Runtime<'_> {
     // ```
     fn containment(&mut self, h: &PreliminaryHsp, contained: bool) {
         self.observer.containment(h, contained);
+    }
+    fn x_wants_containment(&self) -> bool {
+        !(x_bx_lean() && self.observer.x_passive())
     }
     fn preliminary_purge(
         &mut self,
@@ -1422,7 +1595,84 @@ impl PreliminarySink for Runtime<'_> {
             while let Some(list) = stream.read_observed(self.observer) {
                 matches.push(list);
             }
-            for list in matches {
+            // EXPERIMENT (LOSAT_X_BXPAR): redo the matches of one batch on the
+            // search pool before walking them in stream order.  A match is a
+            // function of its own HSP list and of the matrix left by the match
+            // before it; `x_speculate_match` returns a result only when the
+            // latter was never read, and reports the matrix the match leaves.
+            #[allow(unused_mut)]
+            let mut speculated: Vec<Option<(HspList, i32, Option<_>)>> = Vec::new();
+            #[cfg(feature = "parallel")]
+            let x_workers = if x_bx_parallel()
+                && self.observer.x_passive()
+                && !x_inner_serial()
+                && rayon::current_thread_index().is_some()
+                && rayon::current_num_threads() > 1
+                && matches.len() > 1
+            {
+                (0..rayon::current_num_threads())
+                    .map(|_| {
+                        Ok(std::sync::Mutex::new(XKappaWorker(state.x_for_thread(
+                            batch,
+                            &full,
+                            self.options,
+                        )?)))
+                    })
+                    .collect::<Result<Vec<_>>>()?
+            } else {
+                Vec::new()
+            };
+            // `x_workers` has one entry per pool thread (none outside a pool; asking
+            // Rayon for the thread count there would start its global pool).
+            #[cfg(feature = "parallel")]
+            let x_batch = x_workers.len().saturating_mul(32).max(64);
+            #[cfg(feature = "parallel")]
+            if x_bx_parallel() {
+                crate::utils::threading::report_stage(
+                    "blastx",
+                    "kappa_redo",
+                    matches.len(),
+                    !x_workers.is_empty(),
+                );
+            }
+            let mut x_reused = 0usize;
+            let mut x_serial = 0usize;
+            for (match_index, list) in matches.iter().enumerate() {
+                #[cfg(feature = "parallel")]
+                if !x_workers.is_empty() && match_index % x_batch == 0 {
+                    use rayon::prelude::*;
+                    let batch_lists =
+                        &matches[match_index..(match_index + x_batch).min(matches.len())];
+                    // Early termination only becomes true as the heaps fill.
+                    let wanted: Vec<bool> = batch_lists
+                        .iter()
+                        .map(|list| !CompoHeap::early(list.best_evalue, &heaps))
+                        .collect();
+                    let (options, subjects, db_length) =
+                        (self.options, self.subjects, self.db_length);
+                    let full = &full;
+                    let workers = &x_workers;
+                    speculated = batch_lists
+                        .par_iter()
+                        .zip(wanted.par_iter())
+                        .map(|(list, &wanted)| {
+                            if !wanted {
+                                return None;
+                            }
+                            let slot = rayon::current_thread_index().unwrap_or(0) % workers.len();
+                            let mut guard = workers[slot].lock().expect("BLASTX redo worker state");
+                            x_speculate_match(
+                                &mut guard.0,
+                                list,
+                                batch,
+                                full,
+                                options,
+                                subjects,
+                                db_length,
+                            )
+                        })
+                        .collect();
+                }
                 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1560-1582
                 // ```c++
                 // BlastCompo_EarlyTermination(double evalue,
@@ -1452,27 +1702,45 @@ impl PreliminarySink for Runtime<'_> {
                 if early {
                     continue;
                 }
-                let encoded: Vec<_> = self.subjects[list.oid]
-                    .sequence
-                    .iter()
-                    .copied()
-                    .map(aa_char_to_ncbistdaa)
-                    .collect();
-                let input: Vec<_> = list.hsps.iter().map(|h| h.hsp.clone()).collect();
-                let redone = state.redo_list_observed(&input, batch, &encoded, &mut |event| {
-                    self.observer.matrix(list.oid, event)
-                })?;
-                let (output, best_score) = finalize_redone(
-                    &redone,
-                    batch,
-                    &full,
-                    self.options,
-                    &encoded,
-                    self.db_length,
-                    list.query_index,
-                    list.oid,
-                    self.observer,
-                )?;
+                #[cfg(feature = "parallel")]
+                let x_ready = if x_workers.is_empty() {
+                    None
+                } else {
+                    speculated[match_index % x_batch].take()
+                };
+                #[cfg(not(feature = "parallel"))]
+                let x_ready: Option<(HspList, i32, Option<_>)> = None;
+                let (output, best_score) = if let Some((output, best_score, matrix)) = x_ready {
+                    x_reused += 1;
+                    if matrix.is_some() {
+                        state.x_set_matrix(matrix);
+                    }
+                    (output, best_score)
+                } else {
+                    x_serial += 1;
+                    let encoded: Vec<_> = self.subjects[list.oid]
+                        .sequence
+                        .iter()
+                        .copied()
+                        .map(aa_char_to_ncbistdaa)
+                        .collect();
+                    let input: Vec<_> = list.hsps.iter().map(|h| h.hsp.clone()).collect();
+                    let redone =
+                        state.redo_list_observed(&input, batch, &encoded, &mut |event| {
+                            self.observer.matrix(list.oid, event)
+                        })?;
+                    finalize_redone(
+                        &redone,
+                        batch,
+                        &full,
+                        self.options,
+                        &encoded,
+                        self.db_length,
+                        list.query_index,
+                        list.oid,
+                        self.observer,
+                    )?
+                };
                 if output.hsps.is_empty() {
                     continue;
                 }
@@ -1580,6 +1848,7 @@ impl PreliminarySink for Runtime<'_> {
             //     }
             //     if (COMPO_INTENSE_DEBUG) {
             // ```
+            let _ = (x_reused, x_serial);
             for (q, (heap, query)) in heaps.iter_mut().zip(&mut queries).enumerate() {
                 loop {
                     let entry = heap.pop();

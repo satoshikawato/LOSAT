@@ -1228,6 +1228,33 @@ fn search(
         let mut ungapped_karlin = Vec::with_capacity(queries.len());
         let mut query_validity = Vec::with_capacity(queries.len());
         let mut query_batch_skipped = Vec::with_capacity(queries.len());
+        // EXPERIMENT (LOSAT_X_TBNPAR, LOSAT_X_TBNSSIDE, LOSAT_X_TBNBATCH): the batches of the
+        // loop below searched ahead (`x_search_batches`), each with its range; `None` when
+        // the switches are off. A batch whose range does not match is searched by the loop.
+        let mut x_searched = super::stage_d_pipeline::x_search_batches(
+            &query_seqs,
+            &subject_seqs,
+            query_input
+                .batches(batch_size)
+                .into_iter()
+                .map(|batch| batch.searched)
+                .filter(|searched| !searched.is_empty() && searched.end <= searched_done)
+                .collect(),
+            |range| LocalStageDProfile {
+                seg: seg.as_ref(),
+                soft_masking: resolved.soft_masking,
+                mask_lowercase: resolved.lcase_masking,
+                genetic_code: resolved.db_gencode,
+                expect_value: resolved.evalue,
+                max_target_seqs: resolved.hitlist_size,
+                query_offsets: &query_offsets[range],
+            },
+            composition_mode2,
+            resolved.sum_stats,
+            scoring,
+            resolved.num_threads,
+        )?
+        .map(Vec::into_iter);
         for range in query_input
             .batches(batch_size)
             .into_iter()
@@ -1235,23 +1262,26 @@ fn search(
             .filter(|searched| !searched.is_empty() && searched.end <= searched_done)
         {
             let (mut batch_results, batch_lengths, batch_karlin, batch_validity) =
-                run_local_for_report_threads(
-                    &query_seqs[range.clone()],
-                    &subject_seqs,
-                    LocalStageDProfile {
-                        seg: seg.as_ref(),
-                        soft_masking: resolved.soft_masking,
-                        mask_lowercase: resolved.lcase_masking,
-                        genetic_code: resolved.db_gencode,
-                        expect_value: resolved.evalue,
-                        max_target_seqs: resolved.hitlist_size,
-                        query_offsets: &query_offsets[range],
-                    },
-                    composition_mode2,
-                    resolved.sum_stats,
-                    scoring,
-                    resolved.num_threads,
-                )?;
+                match x_searched.as_mut().and_then(Iterator::next) {
+                    Some((x_range, report)) if x_range == range => report,
+                    _ => run_local_for_report_threads(
+                        &query_seqs[range.clone()],
+                        &subject_seqs,
+                        LocalStageDProfile {
+                            seg: seg.as_ref(),
+                            soft_masking: resolved.soft_masking,
+                            mask_lowercase: resolved.lcase_masking,
+                            genetic_code: resolved.db_gencode,
+                            expect_value: resolved.evalue,
+                            max_target_seqs: resolved.hitlist_size,
+                            query_offsets: &query_offsets[range],
+                        },
+                        composition_mode2,
+                        resolved.sum_stats,
+                        scoring,
+                        resolved.num_threads,
+                    )?,
+                };
             results.append(&mut batch_results);
             if let Some(all_lengths) = &mut lengths {
                 // NCBI tblastn_app.cpp:288-301 formats each batch's own

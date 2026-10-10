@@ -1661,6 +1661,43 @@ fn build_mb_lookup(
     let mut total_positions = 0usize;
     let mut ambiguous_skipped = 0usize;
 
+    // EXPERIMENT (LOSAT_X_MBDELAY): prefetch the cell of each word and apply the
+    // update sixteen words later, in the same order.  Only where a prefetch
+    // instruction exists: without one (Wasm) the delay alone costs time.
+    const X_DELAY: usize = 16;
+    let x_delay = cfg!(target_arch = "x86_64") && std::env::var_os("LOSAT_X_MBDELAY").is_some();
+    let mut x_ring = [(0u32, 0u32); X_DELAY];
+    let mut x_ring_len = 0usize;
+    // EXPERIMENT (LOSAT_X_MBBATCH[=n]): collect n words (64 unless given),
+    // read their cells in one tight loop (so the cache misses overlap), then
+    // apply the updates in the original order. Needs no prefetch instruction.
+    let x_batch = !x_delay && std::env::var_os("LOSAT_X_MBBATCH").is_some();
+    let x_batch_size: usize = std::env::var("LOSAT_X_MBBATCH")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .filter(|&n| n >= 2 && n <= 4096)
+        .unwrap_or(64);
+    let mut x_batch_buf: Vec<(u32, u32)> =
+        Vec::with_capacity(if x_batch { x_batch_size } else { 0 });
+    let mut x_touched = 0u32;
+    macro_rules! x_apply_word {
+        ($bucket:expr, $q_off_1:expr) => {{
+            let bucket: usize = $bucket;
+            let q_off_1: u32 = $q_off_1;
+            if hashtable[bucket] == 0 {
+                pv_set_shift(&mut pv_array, bucket, pv_array_bts);
+            } else {
+                helper_array[bucket / K_COMPRESSION_FACTOR] =
+                    helper_array[bucket / K_COMPRESSION_FACTOR].saturating_add(1);
+            }
+            next_pos[q_off_1 as usize] = hashtable[bucket];
+            hashtable[bucket] = q_off_1;
+            if ascending_cells {
+                words.push((bucket as u32, q_off_1));
+            }
+        }};
+    }
+
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:979-1108
     // ```c
     // mb_lt->next_pos = (Int4 *)calloc(query->length + 1, sizeof(Int4));
@@ -1734,18 +1771,54 @@ fn build_mb_lookup(
 
                 let bucket = current_kmer as usize;
                 let q_off_1 = (query_offset + (pos + 1 - lut_word_length) + 1) as u32;
-                if hashtable[bucket] == 0 {
-                    pv_set_shift(&mut pv_array, bucket, pv_array_bts);
+                // EXPERIMENT: apply the table updates X_DELAY words late, in the
+                // same order, after touching the cell of the word just read.
+                if x_delay {
+                    #[cfg(target_arch = "x86_64")]
+                    unsafe {
+                        core::arch::x86_64::_mm_prefetch(
+                            hashtable.as_ptr().add(bucket) as *const i8,
+                            core::arch::x86_64::_MM_HINT_T0,
+                        );
+                    }
+
+                    let slot = x_ring_len % X_DELAY;
+                    if x_ring_len >= X_DELAY {
+                        let (b, q) = x_ring[slot];
+                        x_apply_word!(b as usize, q);
+                    }
+                    x_ring[slot] = (bucket as u32, q_off_1);
+                    x_ring_len += 1;
+                } else if x_batch {
+                    x_batch_buf.push((bucket as u32, q_off_1));
+                    if x_batch_buf.len() == x_batch_size {
+                        for &(b, _) in &x_batch_buf {
+                            x_touched ^= hashtable[b as usize];
+                        }
+                        for &(b, q) in &x_batch_buf {
+                            x_apply_word!(b as usize, q);
+                        }
+                        x_batch_buf.clear();
+                    }
                 } else {
-                    helper_array[bucket / K_COMPRESSION_FACTOR] =
-                        helper_array[bucket / K_COMPRESSION_FACTOR].saturating_add(1);
-                }
-                next_pos[q_off_1 as usize] = hashtable[bucket];
-                hashtable[bucket] = q_off_1;
-                if ascending_cells {
-                    words.push((bucket as u32, q_off_1));
+                    x_apply_word!(bucket, q_off_1);
                 }
             }
+        }
+    }
+    if x_batch {
+        for &(b, q) in &x_batch_buf {
+            x_apply_word!(b as usize, q);
+        }
+        // keep the reads of the first loop from being optimised away
+        std::hint::black_box(x_touched);
+    }
+    if x_delay {
+        let pending = x_ring_len.min(X_DELAY);
+        let first = x_ring_len - pending;
+        for k in first..x_ring_len {
+            let (b, q) = x_ring[k % X_DELAY];
+            x_apply_word!(b as usize, q);
         }
     }
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_lookup.c:74-76

@@ -8,6 +8,28 @@
 
 use std::collections::VecDeque;
 
+fn x_dust_fast() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("LOSAT_X_DUSTFAST").is_some())
+}
+
+/// EXPERIMENT: 0 = reference window, 1 = LOSAT_X_DUSTRING (the same steps on
+/// a fixed ring buffer), 2 = LOSAT_X_DUSTSHADOW (both, compared).
+fn x_dust_ring() -> u8 {
+    use std::sync::OnceLock;
+    static MODE: OnceLock<u8> = OnceLock::new();
+    *MODE.get_or_init(|| {
+        if std::env::var_os("LOSAT_X_DUSTSHADOW").is_some() {
+            2
+        } else if std::env::var_os("LOSAT_X_DUSTRING").is_some() {
+            1
+        } else {
+            0
+        }
+    })
+}
+
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/util/random_gen.cpp:241-264
 // ```c
 // static const CRandom::TValue sm_State[CRandom::kStateSize] = {
@@ -124,7 +146,7 @@ impl MaskedInterval {
 }
 
 /// Perfect interval - represents a region that exceeds the complexity threshold
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 struct PerfectInterval {
     start: usize,
     end: usize,
@@ -237,6 +259,131 @@ impl DustMasker {
 
     /// Mask a subsequence and return the list of masked intervals
     pub fn mask_subsequence(&self, seq: &[u8], start: usize, stop: usize) -> Vec<MaskedInterval> {
+        match x_dust_ring() {
+            1 if self.window <= X_RING => self.x_mask_subsequence(seq, start, stop),
+            2 if self.window <= X_RING => {
+                let fast = self.x_mask_subsequence(seq, start, stop);
+                let reference = self.mask_subsequence_reference(seq, start, stop);
+                assert!(
+                    fast == reference,
+                    "LOSAT_X_DUSTSHADOW: ring-buffer DUST differs from the reference"
+                );
+                reference
+            }
+            _ => self.mask_subsequence_reference(seq, start, stop),
+        }
+    }
+
+    // EXPERIMENT (LOSAT_X_DUSTRING): `mask_subsequence_reference` step for
+    // step, with the window in `XTripletWindow` and the base codes from a
+    // table.
+    fn x_mask_subsequence(&self, seq: &[u8], start: usize, stop: usize) -> Vec<MaskedInterval> {
+        let mut result = Vec::new();
+
+        if seq.is_empty() {
+            return result;
+        }
+
+        let stop = stop.min(seq.len());
+        let start = start.min(stop);
+
+        if stop <= start + 2 {
+            return result;
+        }
+
+        let mut current_start = start;
+        let mut rng = NcbiLfgRandom::new();
+        // NCBI reference: ncbi-blast/c++/include/algo/dustmask/symdust.hpp:75-84
+        // ```c
+        // case 67: return 1;
+        // case 71: return 2;
+        // case 84: return 3;
+        // case 78: return (m_Random.GetRand() & 0x3);
+        // default: return 0;
+        // ```
+        // 4 marks the bases that draw a random number.
+        let code = |base: u8, rng: &mut NcbiLfgRandom| -> u8 {
+            let c = X_BASE_CODE[base as usize];
+            if c < 4 {
+                c
+            } else {
+                (rng.next() & 0x3) as u8
+            }
+        };
+
+        while stop > current_start + 2 {
+            let mut perfect_list: VecDeque<PerfectInterval> = VecDeque::new();
+            let mut window = XTripletWindow::new(self.window, self.low_k, &self.thresholds);
+
+            let mut current_triplet =
+                (code(seq[current_start], &mut rng) << 2) + code(seq[current_start + 1], &mut rng);
+            let mut pos = current_start + 2;
+            let mut done = false;
+
+            while !done && pos < stop {
+                if !perfect_list.is_empty() {
+                    self.save_masked_regions(
+                        &mut result,
+                        window.start,
+                        current_start,
+                        &mut perfect_list,
+                    );
+                }
+
+                let new_triplet = ((current_triplet << 2) & 0x3F) + code(seq[pos], &mut rng);
+                current_triplet = new_triplet;
+                pos += 1;
+
+                if window.shift_window(new_triplet, &mut perfect_list) {
+                    if window.needs_processing() {
+                        window.find_perfect(&mut perfect_list);
+                    }
+                } else {
+                    while pos < stop {
+                        if !perfect_list.is_empty() {
+                            self.save_masked_regions(
+                                &mut result,
+                                window.start,
+                                current_start,
+                                &mut perfect_list,
+                            );
+                        }
+
+                        let new_triplet =
+                            ((current_triplet << 2) & 0x3F) + code(seq[pos], &mut rng);
+                        current_triplet = new_triplet;
+
+                        if window.shift_window(new_triplet, &mut perfect_list) {
+                            done = true;
+                            break;
+                        }
+                        pos += 1;
+                    }
+                }
+            }
+
+            let mut wstart = window.start;
+            while !perfect_list.is_empty() {
+                self.save_masked_regions(&mut result, wstart, current_start, &mut perfect_list);
+                wstart += 1;
+            }
+
+            if window.start > 0 {
+                current_start += window.start;
+            } else {
+                break;
+            }
+        }
+
+        result
+    }
+
+    fn mask_subsequence_reference(
+        &self,
+        seq: &[u8],
+        start: usize,
+        stop: usize,
+    ) -> Vec<MaskedInterval> {
         let mut result = Vec::new();
 
         if seq.is_empty() {
@@ -388,6 +535,258 @@ impl DustMasker {
                     }
                 }
             }
+        }
+    }
+}
+
+/// Capacity of the ring buffer (the largest DUST window).
+const X_RING: usize = 64;
+
+/// `convert_iupac_to_ncbi2na` as a table; 4 = draws a random number.
+static X_BASE_CODE: [u8; 256] = {
+    let mut t = [0u8; 256];
+    t[b'C' as usize] = 1;
+    t[b'c' as usize] = 1;
+    t[b'G' as usize] = 2;
+    t[b'g' as usize] = 2;
+    t[b'T' as usize] = 3;
+    t[b't' as usize] = 3;
+    t[b'U' as usize] = 3;
+    t[b'u' as usize] = 3;
+    t[b'N' as usize] = 4;
+    t[b'n' as usize] = 4;
+    t
+};
+
+/// EXPERIMENT (LOSAT_X_DUSTRING): `TripletWindow` with the triplet deque in a
+/// fixed ring buffer. Deque index `i` (0 = newest, as after `push_front`) is
+/// `ring[(head + i) % X_RING]`; every method below is the `TripletWindow`
+/// method of the same name with only that substitution.
+struct XTripletWindow<'a> {
+    ring: [u8; X_RING],
+    head: usize,
+    len: usize,
+    start: usize,
+    stop: usize,
+    max_size: usize,
+    low_k: u8,
+    l: usize,
+    c_w: [u8; 64],
+    c_v: [u8; 64],
+    r_w: u32,
+    r_v: u32,
+    num_diff: u32,
+    thresholds: &'a [u32],
+}
+
+impl<'a> XTripletWindow<'a> {
+    fn new(window: usize, low_k: u8, thresholds: &'a [u32]) -> Self {
+        Self {
+            ring: [0; X_RING],
+            head: 0,
+            len: 0,
+            start: 0,
+            stop: 0,
+            max_size: window - 2,
+            low_k,
+            l: 0,
+            c_w: [0; 64],
+            c_v: [0; 64],
+            r_w: 0,
+            r_v: 0,
+            num_diff: 0,
+            thresholds,
+        }
+    }
+
+    #[inline(always)]
+    fn at(&self, index: usize) -> u8 {
+        self.ring[(self.head + index) & (X_RING - 1)]
+    }
+
+    #[inline(always)]
+    fn pop_back(&mut self) -> u8 {
+        self.len -= 1;
+        self.ring[(self.head + self.len) & (X_RING - 1)]
+    }
+
+    #[inline(always)]
+    fn push_front(&mut self, triplet: u8) {
+        self.head = (self.head + X_RING - 1) & (X_RING - 1);
+        self.ring[self.head] = triplet;
+        self.len += 1;
+    }
+
+    #[inline(always)]
+    fn add_triplet(sum: &mut u32, counts: &mut [u8; 64], triplet: u8) {
+        let idx = (triplet & 63) as usize;
+        *sum += counts[idx] as u32;
+        counts[idx] += 1;
+    }
+
+    #[inline(always)]
+    fn rem_triplet(sum: &mut u32, counts: &mut [u8; 64], triplet: u8) {
+        let idx = (triplet & 63) as usize;
+        counts[idx] -= 1;
+        *sum -= counts[idx] as u32;
+    }
+
+    /// The three tests of `TripletWindow::needs_processing` as one
+    /// condition (the table is read at a clamped index when the second test
+    /// fails, and that read is then ignored).
+    #[inline(always)]
+    fn needs_processing(&self) -> bool {
+        let count = self.stop - self.l;
+        let last = self.thresholds.len() - 1;
+        (count < self.len)
+            & (count < self.thresholds.len())
+            & (10 * self.r_w > self.thresholds[count.min(last)])
+    }
+
+    #[inline(always)]
+    fn shift_window(&mut self, triplet: u8, perfect_list: &mut VecDeque<PerfectInterval>) -> bool {
+        if self.len >= self.max_size {
+            if self.num_diff <= 1 {
+                return self.shift_high(triplet, perfect_list);
+            }
+
+            // The two `if`s of the reference depend on the sequence in a way
+            // a branch predictor cannot learn; they are written as arithmetic
+            // on the 0/1 value of their conditions.
+            let old = (self.pop_back() & 63) as usize;
+            self.c_w[old] -= 1;
+            self.r_w -= self.c_w[old] as u32;
+            self.num_diff -= (self.c_w[old] == 0) as u32;
+
+            // if (L == start) { ++L; rem_triplet_info(r_v, c_v, old); }
+            let at_start = (self.l == self.start) as usize;
+            self.l += at_start;
+            let suffix_count = self.c_v[old] - at_start as u8;
+            self.c_v[old] = suffix_count;
+            self.r_v -= suffix_count as u32 * at_start as u32;
+
+            self.start += 1;
+        }
+
+        self.push_front(triplet);
+        self.num_diff += (self.c_w[(triplet & 63) as usize] == 0) as u32;
+        Self::add_triplet(&mut self.r_w, &mut self.c_w, triplet);
+        Self::add_triplet(&mut self.r_v, &mut self.c_v, triplet);
+
+        if self.c_v[(triplet & 63) as usize] > self.low_k {
+            let mut off = self.len - (self.l - self.start) - 1;
+            loop {
+                let t = self.at(off);
+                Self::rem_triplet(&mut self.r_v, &mut self.c_v, t);
+                self.l += 1;
+                if t == triplet {
+                    break;
+                }
+                if off == 0 {
+                    break;
+                }
+                off -= 1;
+            }
+        }
+
+        self.stop += 1;
+
+        if self.len >= self.max_size && self.num_diff <= 1 {
+            perfect_list.clear();
+            perfect_list.push_front(PerfectInterval::new(self.start, self.stop + 1, 0, 0));
+            return false;
+        }
+
+        true
+    }
+
+    #[inline(never)]
+    fn shift_high(&mut self, triplet: u8, perfect_list: &mut VecDeque<PerfectInterval>) -> bool {
+        let old_triplet = self.pop_back();
+        Self::rem_triplet(&mut self.r_w, &mut self.c_w, old_triplet);
+        if self.c_w[(old_triplet & 63) as usize] == 0 {
+            self.num_diff -= 1;
+        }
+        self.start += 1;
+
+        self.push_front(triplet);
+        if self.c_w[(triplet & 63) as usize] == 0 {
+            self.num_diff += 1;
+        }
+        Self::add_triplet(&mut self.r_w, &mut self.c_w, triplet);
+        self.stop += 1;
+
+        if self.num_diff <= 1 {
+            perfect_list.push_front(PerfectInterval::new(self.start, self.stop + 1, 0, 0));
+            return false;
+        }
+
+        true
+    }
+
+    /// `TripletWindow::x_find_perfect_merge` (the `LOSAT_X_DUSTFAST` form of
+    /// `find_perfect`, which builds the same list) over the ring buffer.
+    #[inline(never)]
+    fn find_perfect(&mut self, perfect_list: &mut VecDeque<PerfectInterval>) {
+        let suffix_len = self.stop - self.l;
+        if suffix_len >= self.len {
+            return;
+        }
+        let mut counts = self.c_v;
+        let mut score = self.r_v;
+        let mut max_perfect_score = 0u32;
+        let mut max_len = 0usize;
+        let mut pos = self.l.saturating_sub(1);
+        let mut count = suffix_len;
+        let mut read = 0usize;
+        let mut merged: Vec<PerfectInterval> = Vec::new();
+        let mut inserted = false;
+        let old_len = perfect_list.len();
+        for idx in suffix_len..self.len {
+            let triplet = self.at(idx);
+            let cnt = counts[(triplet & 63) as usize];
+            Self::add_triplet(&mut score, &mut counts, triplet);
+            if cnt > 0 && count < self.thresholds.len() && score * 10 > self.thresholds[count] {
+                while read < old_len && pos <= perfect_list[read].start {
+                    let p = perfect_list[read];
+                    if max_perfect_score == 0
+                        || max_len * p.score as usize > max_perfect_score as usize * p.len
+                    {
+                        max_perfect_score = p.score;
+                        max_len = p.len;
+                    }
+                    if inserted {
+                        merged.push(p);
+                    }
+                    read += 1;
+                }
+                if max_perfect_score == 0
+                    || score as usize * max_len >= max_perfect_score as usize * count
+                {
+                    max_perfect_score = score;
+                    max_len = count;
+                    if !inserted {
+                        inserted = true;
+                        merged.reserve(old_len + 8);
+                        merged.extend(perfect_list.iter().take(read).copied());
+                    }
+                    merged.push(PerfectInterval::new(
+                        pos,
+                        self.stop + 1,
+                        max_perfect_score,
+                        count,
+                    ));
+                }
+            }
+            count += 1;
+            if pos > 0 {
+                pos -= 1;
+            }
+        }
+        if inserted {
+            merged.extend(perfect_list.iter().skip(read).copied());
+            perfect_list.clear();
+            perfect_list.extend(merged);
         }
     }
 }
@@ -549,6 +948,113 @@ impl<'a> TripletWindow<'a> {
     }
 
     fn find_perfect(&mut self, perfect_list: &mut VecDeque<PerfectInterval>) {
+        if x_dust_fast() {
+            return self.x_find_perfect_merge(perfect_list);
+        }
+        self.find_perfect_reference(perfect_list)
+    }
+
+    // EXPERIMENT (LOSAT_X_DUSTFAST): the same list, built by one merge pass.
+    //
+    // NCBI reference: ncbi-blast/c++/src/algo/dustmask/symdust.cpp:137-166
+    // ```c
+    // for( impl_citer_type it( triplet_list_.begin() + count ),
+    //      iend( triplet_list_.end() ); it != iend; ++it, ++count, --pos ) {
+    //     Uint1 cnt( counts[*it] );
+    //     add_triplet_info( score, counts, *it );
+    //     if( cnt > 0 && score*10 > thresholds_[count] ) {
+    //         while(    perfect_iter != P.end()
+    //                && pos <= perfect_iter->bounds_.first ) {
+    //             if(    max_perfect_score == 0
+    //                 || max_len*perfect_iter->score_
+    //                    > max_perfect_score*perfect_iter->len_ ) {
+    //                 max_perfect_score = perfect_iter->score_;
+    //                 max_len = perfect_iter->len_;
+    //             }
+    //             ++perfect_iter;
+    //         }
+    //         if( max_perfect_score == 0 || score*max_len >= max_perfect_score*count ) {
+    //             max_perfect_score = score;
+    //             max_len = count;
+    //             perfect_iter = P.insert(
+    //                     perfect_iter, perfect( pos, stop_ + 1,
+    //                     max_perfect_score, count ) );
+    //         }
+    //     }
+    // }
+    // ```
+    // NCBI's P is a std::list, so the insert is O(1); a VecDeque insert moves
+    // every later element. Insert positions never move backwards during one
+    // call, and stepping over an element this call inserted leaves
+    // max_perfect_score/max_len unchanged (it compares the element with
+    // itself), so the result is the old list with the new elements merged in
+    // at the positions where the walk stood.
+    fn x_find_perfect_merge(&mut self, perfect_list: &mut VecDeque<PerfectInterval>) {
+        let suffix_len = self.stop - self.l;
+        if suffix_len >= self.triplet_list.len() {
+            return;
+        }
+        let mut counts = self.c_v;
+        let mut score = self.r_v;
+        let mut max_perfect_score = 0u32;
+        let mut max_len = 0usize;
+        let mut pos = self.l.saturating_sub(1);
+        let mut count = suffix_len;
+        // `read` walks the list as it was on entry; `merged` is only filled
+        // once something has been inserted.
+        let mut read = 0usize;
+        let mut merged: Vec<PerfectInterval> = Vec::new();
+        let mut inserted = false;
+        let old_len = perfect_list.len();
+        for idx in suffix_len..self.triplet_list.len() {
+            let triplet = self.triplet_list[idx];
+            let cnt = counts[triplet as usize];
+            Self::add_triplet(&mut score, &mut counts, triplet);
+            if cnt > 0 && count < self.thresholds.len() && score * 10 > self.thresholds[count] {
+                while read < old_len && pos <= perfect_list[read].start {
+                    let p = perfect_list[read];
+                    if max_perfect_score == 0
+                        || max_len * p.score as usize > max_perfect_score as usize * p.len
+                    {
+                        max_perfect_score = p.score;
+                        max_len = p.len;
+                    }
+                    if inserted {
+                        merged.push(p);
+                    }
+                    read += 1;
+                }
+                if max_perfect_score == 0
+                    || score as usize * max_len >= max_perfect_score as usize * count
+                {
+                    max_perfect_score = score;
+                    max_len = count;
+                    if !inserted {
+                        inserted = true;
+                        merged.reserve(old_len + 8);
+                        merged.extend(perfect_list.iter().take(read).copied());
+                    }
+                    merged.push(PerfectInterval::new(
+                        pos,
+                        self.stop + 1,
+                        max_perfect_score,
+                        count,
+                    ));
+                }
+            }
+            count += 1;
+            if pos > 0 {
+                pos -= 1;
+            }
+        }
+        if inserted {
+            merged.extend(perfect_list.iter().skip(read).copied());
+            perfect_list.clear();
+            perfect_list.extend(merged);
+        }
+    }
+
+    fn find_perfect_reference(&mut self, perfect_list: &mut VecDeque<PerfectInterval>) {
         let suffix_len = self.stop - self.l;
 
         if suffix_len >= self.triplet_list.len() {
@@ -716,6 +1222,120 @@ mod tests {
         assert!(
             total_masked < seq.len() / 2,
             "Complex sequence should not be heavily masked"
+        );
+    }
+
+    /// The ring-buffer window must give the reference intervals on random
+    /// sequences of every kind the masker distinguishes: plain, biased,
+    /// tandem repeats of every short period, homopolymer runs and Ns.
+    #[test]
+    fn x_ring_buffer_dust_matches_reference_on_random_sequences() {
+        struct Rng(u64);
+        impl Rng {
+            fn next(&mut self) -> u64 {
+                self.0 ^= self.0 << 13;
+                self.0 ^= self.0 >> 7;
+                self.0 ^= self.0 << 17;
+                self.0
+            }
+            fn below(&mut self, n: u64) -> u64 {
+                self.next() % n
+            }
+        }
+        let cases: usize = std::env::var("LOSAT_FUZZ_CASES")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(3000);
+        let mut rng = Rng(0x9E37_79B9_7F4A_7C15);
+        let bases = b"ACGT";
+        let mut masked_cases = 0usize;
+        for case in 0..cases {
+            let len = 1 + rng.below(1500) as usize;
+            let mut seq = Vec::with_capacity(len);
+            while seq.len() < len {
+                let piece = 1 + rng.below(200) as usize;
+                match rng.below(7) {
+                    0 | 1 => {
+                        for _ in 0..piece {
+                            seq.push(bases[rng.below(4) as usize]);
+                        }
+                    }
+                    2 => {
+                        // biased composition
+                        let major = bases[rng.below(4) as usize];
+                        for _ in 0..piece {
+                            seq.push(if rng.below(5) == 0 {
+                                bases[rng.below(4) as usize]
+                            } else {
+                                major
+                            });
+                        }
+                    }
+                    3 => {
+                        // tandem repeat with a few substitutions
+                        let period = 1 + rng.below(7) as usize;
+                        let unit: Vec<u8> =
+                            (0..period).map(|_| bases[rng.below(4) as usize]).collect();
+                        for i in 0..piece {
+                            seq.push(if rng.below(25) == 0 {
+                                bases[rng.below(4) as usize]
+                            } else {
+                                unit[i % period]
+                            });
+                        }
+                    }
+                    4 => {
+                        let base = bases[rng.below(4) as usize];
+                        seq.extend(std::iter::repeat(base).take(piece));
+                    }
+                    5 => {
+                        let n = 1 + rng.below(12) as usize;
+                        seq.extend(std::iter::repeat(b'N').take(n));
+                    }
+                    _ => {
+                        // other IUPAC letters and lower case
+                        for _ in 0..piece.min(20) {
+                            seq.push(b"acgtRYKMSWnBDHV"[rng.below(15) as usize]);
+                        }
+                    }
+                }
+            }
+            seq.truncate(len);
+            let (level, window, linker) = match case % 4 {
+                0 => (20, 64, 1),
+                1 => (
+                    10 + rng.below(40) as u32,
+                    8 + rng.below(57) as usize,
+                    1 + rng.below(32) as usize,
+                ),
+                2 => (20, 64, 1),
+                _ => (2 + rng.below(63) as u32, 64, 1),
+            };
+            let masker = DustMasker::new(level, window, linker);
+            let start = if case % 5 == 0 {
+                rng.below(len as u64) as usize
+            } else {
+                0
+            };
+            let stop = if case % 7 == 0 {
+                rng.below(len as u64 + 1) as usize
+            } else {
+                len
+            };
+            let reference = masker.mask_subsequence_reference(&seq, start, stop);
+            let fast = masker.x_mask_subsequence(&seq, start, stop);
+            assert_eq!(
+                fast, reference,
+                "case {case}: level={level} window={window} linker={linker} start={start} stop={stop}"
+            );
+            if !reference.is_empty() {
+                masked_cases += 1;
+            }
+        }
+        // the generator must actually exercise the masking paths
+        assert!(
+            masked_cases * 2 > cases,
+            "only {masked_cases} of {cases} cases masked anything"
         );
     }
 

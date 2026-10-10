@@ -1052,7 +1052,8 @@ pub fn redo_list(
 // ```
 pub struct KappaState {
     params: BlastRedoAlignParams,
-    infos: Vec<BlastCompoQueryInfo>,
+    // EXPERIMENT (LOSAT_X_BXPAR): read-only, shared with the per-thread copies.
+    infos: std::sync::Arc<Vec<BlastCompoQueryInfo>>,
     lambda: f64,
     scratch: GapAlignScratch,
     workspace: BlastCompositionWorkspace,
@@ -1112,8 +1113,27 @@ impl KappaState {
         });
         Ok(Self {
             params,
-            infos,
+            infos: std::sync::Arc::new(infos),
             lambda: ka.lambda / 32.0,
+            scratch: GapAlignScratch::new(),
+            workspace: BlastCompositionWorkspace::new_blosum62(),
+            matrix: None,
+        })
+    }
+    /// EXPERIMENT (LOSAT_X_BXPAR): a second state for another thread, as NCBI
+    /// c++/src/algo/blast/core/blast_kappa.c:3244-3340 allocates per thread
+    /// (`redo_align_params_tld`, `gap_align_tld`, `NRrecord_tld`); the query
+    /// information is read-only and shared.
+    pub(crate) fn x_for_thread(
+        &self,
+        batch: &PreparedQueryBatch,
+        parameters: &[ContextParameters],
+        options: &ResolvedOptions,
+    ) -> Result<Self> {
+        Ok(Self {
+            params: redo_params(batch, parameters, options)?,
+            infos: std::sync::Arc::clone(&self.infos),
+            lambda: self.lambda,
             scratch: GapAlignScratch::new(),
             workspace: BlastCompositionWorkspace::new_blosum62(),
             matrix: None,
@@ -1181,6 +1201,14 @@ impl KappaState {
         subject: &[u8],
     ) -> Result<Vec<RedoneHsp>> {
         self.redo_list_observed(input, batch, subject, &mut |_| {})
+    }
+    /// EXPERIMENT (LOSAT_X_BXPAR): the matrix a match leaves for the next one.
+    pub(crate) fn x_take_matrix(&mut self) -> Option<AdjustedProteinMatrix> {
+        self.matrix.take()
+    }
+    /// EXPERIMENT (LOSAT_X_BXPAR): hand a match the matrix of its predecessor.
+    pub(crate) fn x_set_matrix(&mut self, matrix: Option<AdjustedProteinMatrix>) {
+        self.matrix = matrix;
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3625-3647
     // ```c++

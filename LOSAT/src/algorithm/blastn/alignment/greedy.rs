@@ -680,8 +680,8 @@ fn format_gap_prelim_edit_block_for_trace(block: &GapPrelimEditBlock) -> String 
 }
 
 fn debug_greedy_traceback_enabled(q_off: usize, s_off: usize) -> bool {
-    let debug_all = std::env::var_os("LOSAT_DEBUG_COORDS").is_some();
-    let Some(filter) = std::env::var_os("LOSAT_DEBUG_COORDS_START") else {
+    let debug_all = crate::utils::xenv::debug_coords_is_some();
+    let Some(filter) = crate::utils::xenv::debug_coords_start() else {
         return debug_all;
     };
     let filter = filter.to_string_lossy();
@@ -2441,6 +2441,603 @@ fn get_next_non_affine_tback(
     diag + 1
 }
 
+// ---------------------------------------------------------------------------
+// EXPERIMENT (LOSAT_X_GREEDYFAST / LOSAT_X_GREEDYSHADOW): one distance of
+// `BLAST_GreedyAlign` over an uncompressed subject, with the same cell order,
+// the same writes and the same bookkeeping as the loop below, but as a small
+// leaf routine that compares eight bases per step.
+//
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:537-611
+// ```c
+// for (k = tmp_diag_lower; k <= tmp_diag_upper; k++) {
+//     seq2_index = MAX(last_seq2_off[d - 1][k + 1],
+//                      last_seq2_off[d - 1][k    ]) + 1;
+//     seq2_index = MAX(seq2_index, last_seq2_off[d - 1][k - 1]);
+//     seq1_index = seq2_index + k - diag_origin;
+//     if (seq2_index < 0 || seq1_index + seq2_index < xdrop_score) {
+//         if (k == diag_lower) diag_lower++;
+//         else last_seq2_off[d][k] = kInvalidOffset;
+//         continue;
+//     }
+//     diag_upper = k;
+//     index = s_FindFirstMismatch(seq1, seq2, len1, len2, seq1_index,
+//                                 seq2_index, fence_hit, reverse, rem);
+//     if (fence_hit && *fence_hit) return 0;
+//     ...
+// }
+// ```
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+thread_local! {
+    /// Lets a test choose the mode per call.
+    static X_GREEDY_TEST_MODE: std::cell::Cell<Option<u8>> = const { std::cell::Cell::new(None) };
+}
+
+/// 0 = reference loop, 1 = fast row, 2 = both and compare every row.
+fn x_greedy_mode() -> u8 {
+    #[cfg(test)]
+    if let Some(mode) = X_GREEDY_TEST_MODE.with(|mode| mode.get()) {
+        return mode;
+    }
+    use std::sync::OnceLock;
+    static MODE: OnceLock<u8> = OnceLock::new();
+    *MODE.get_or_init(|| {
+        if std::env::var_os("LOSAT_X_GREEDYSHADOW").is_some() {
+            2
+        } else if std::env::var_os("LOSAT_X_GREEDYFAST").is_some() {
+            1
+        } else {
+            0
+        }
+    })
+}
+
+/// Everything a distance reads and updates besides the two rows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct XGreedyRowState {
+    diag_lower: i32,
+    diag_upper: i32,
+    end1_reached: bool,
+    end2_reached: bool,
+    curr_extent: i32,
+    curr_seq2_index: i32,
+    curr_diag: i32,
+    longest_match_run: i32,
+    seed_start_q: i32,
+    seed_start_s: i32,
+    fence_hit: bool,
+}
+
+/// `s_FindFirstMismatch` for `rem == 4`, without the fence test.
+///
+/// A position matches when the two bytes are equal and the `seq1` byte is
+/// below 4, i.e. when `(b1 ^ b2) | (b1 & 0xFC)` is zero; eight positions are
+/// tested per step and the first non-zero byte is the first mismatch.
+///
+/// SAFETY: `seq1` and `seq2` must be readable for `len1` and `len2` bytes.
+#[inline(always)]
+unsafe fn x_first_mismatch<const REVERSE: bool>(
+    seq1: *const u8,
+    seq2: *const u8,
+    len1: i32,
+    len2: i32,
+    seq1_index: i32,
+    seq2_index: i32,
+) -> i32 {
+    const NOT_A_BASE: u64 = 0xFCFC_FCFC_FCFC_FCFC;
+    // Number of positions both sequences still have (may be <= 0).
+    let n = (len1 - seq1_index).min(len2 - seq2_index);
+    let mut i: i32 = 0;
+    if !REVERSE {
+        while n - i >= 8 {
+            let w1 =
+                u64::from_le((seq1.add((seq1_index + i) as usize) as *const u64).read_unaligned());
+            let w2 =
+                u64::from_le((seq2.add((seq2_index + i) as usize) as *const u64).read_unaligned());
+            let diff = (w1 ^ w2) | (w1 & NOT_A_BASE);
+            if diff != 0 {
+                return i + (diff.trailing_zeros() >> 3) as i32;
+            }
+            i += 8;
+        }
+        while i < n {
+            let b1 = *seq1.add((seq1_index + i) as usize);
+            if b1 >= 4 || b1 != *seq2.add((seq2_index + i) as usize) {
+                break;
+            }
+            i += 1;
+        }
+    } else {
+        // Position `i` reads seq1[len1 - 1 - seq1_index - i]: the eight
+        // positions i..i+8 are the eight bytes ending there, last byte first.
+        while n - i >= 8 {
+            let w1 = u64::from_le(
+                (seq1.add((len1 - seq1_index - i - 8) as usize) as *const u64).read_unaligned(),
+            );
+            let w2 = u64::from_le(
+                (seq2.add((len2 - seq2_index - i - 8) as usize) as *const u64).read_unaligned(),
+            );
+            let diff = (w1 ^ w2) | (w1 & NOT_A_BASE);
+            if diff != 0 {
+                return i + (diff.leading_zeros() >> 3) as i32;
+            }
+            i += 8;
+        }
+        while i < n {
+            let b1 = *seq1.add((len1 - 1 - seq1_index - i) as usize);
+            if b1 >= 4 || b1 != *seq2.add((len2 - 1 - seq2_index - i) as usize) {
+                break;
+            }
+            i += 1;
+        }
+    }
+    i
+}
+
+/// What a distance updates only on a few of its diagonals. The row loop
+/// keeps it in memory and leaves those diagonals to `x_greedy_cell_slow`.
+struct XGreedyRowCold {
+    diag_lower: i32,
+    end1_reached: bool,
+    end2_reached: bool,
+    curr_extent: i32,
+    /// Cell that set `curr_extent` in this distance.
+    best_cell: usize,
+    /// Last cell whose slide ended at `len1`.
+    end1_cell: usize,
+    longest_match_run: i32,
+    seed_start_q: i32,
+    seed_start_s: i32,
+    fence_hit: bool,
+    /// The reference loop returns from inside this distance.
+    stopped: bool,
+}
+
+const X_NO_CELL: usize = usize::MAX;
+
+/// One surviving diagonal, exactly as the reference loop handles it after
+/// its X-drop test: any slide length, the fence test, the seed, the extent
+/// and both sequence ends.
+///
+/// SAFETY: `seq1` and `seq2` must be readable for `len1` and `len2` bytes and
+/// `current` must be writable at `cell`.
+#[inline(never)]
+unsafe fn x_greedy_cell_slow<const REVERSE: bool>(
+    seq1: *const u8,
+    seq2: *const u8,
+    len1: i32,
+    len2: i32,
+    seq1_index: i32,
+    seq2_index: i32,
+    cell: usize,
+    k: i32,
+    current: *mut i32,
+    cold: &mut XGreedyRowCold,
+) {
+    // The reference loop indexes the slices with these offsets.
+    assert!(seq1_index >= 0 && seq2_index >= 0);
+    let index = x_first_mismatch::<REVERSE>(seq1, seq2, len1, len2, seq1_index, seq2_index);
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:331-334,356-359
+    // ```c
+    // if (seq2_index < len2 && seq2[len2-1 - seq2_index] == FENCE_SENTRY) {
+    //     ASSERT(fence_hit);
+    //     *fence_hit = TRUE;
+    // }
+    // ```
+    let stop1 = seq1_index + index;
+    let stop2 = seq2_index + index;
+    if stop2 < len2 {
+        let at = if REVERSE { len2 - 1 - stop2 } else { stop2 };
+        if *seq2.add(at as usize) == FENCE_SENTRY {
+            cold.fence_hit = true;
+        }
+    }
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:571-576
+    // ```c
+    // if (fence_hit && *fence_hit) {
+    //     return 0;
+    // }
+    // ```
+    if cold.fence_hit {
+        cold.stopped = true;
+        return;
+    }
+    if index > cold.longest_match_run {
+        cold.seed_start_q = seq1_index;
+        cold.seed_start_s = seq2_index;
+        cold.longest_match_run = index;
+    }
+    *current.add(cell) = stop2;
+    if stop1 + stop2 > cold.curr_extent {
+        cold.curr_extent = stop1 + stop2;
+        cold.best_cell = cell;
+    }
+    if stop2 == len2 {
+        cold.diag_lower = k + 1;
+        cold.end2_reached = true;
+    }
+    if stop1 == len1 {
+        cold.end1_cell = cell;
+        cold.end1_reached = true;
+    }
+}
+
+/// Cells per pass over the band.
+const X_GREEDY_BLOCK: usize = 256;
+
+/// One distance. `previous` holds diagonals `tmp_diag_lower - 1 ..=
+/// tmp_diag_upper + 1` of distance `d - 1`, `current` diagonals
+/// `tmp_diag_lower ..= tmp_diag_upper` of distance `d`. Returns true when the
+/// reference loop returns from inside the distance (fence).
+///
+/// Three passes per block of the band.
+///
+/// 1. For every diagonal, the offset the reference loop starts its slide
+///    from, or -1 when the diagonal fails the X-drop test. This reads only
+///    distance `d - 1`, which this distance never writes.
+/// 2. For every diagonal, the slide length when it can be read off one
+///    eight-byte comparison, else -1. It is read off when all of this holds:
+///      * the diagonal survived, and both sequences have at least eight
+///        positions left,
+///      * the slide stops within those eight (so it stops inside both
+///        sequences: neither end test of the reference loop can fire),
+///      * the byte the slide stops at in `seq2` is not the fence sentry,
+///      * the slide is not longer than the longest run when the block
+///        started (no seed update: the longest run only grows).
+///    This pass reads the sequences only and keeps no state between
+///    diagonals.
+/// 3. The diagonals in the reference order: dropped diagonals as in the
+///    reference loop; diagonals with a slide length from pass 2 store their
+///    cell and compare their extent, which is all the reference loop does for
+///    them; every other surviving diagonal goes through `x_greedy_cell_slow`.
+///
+/// What the reference loop assigns on every diagonal is recovered from the
+/// cell where it was last assigned:
+///   * `diag_upper` is `k` of the last surviving diagonal that was visited,
+///     minus one when that diagonal ended at `len1`;
+///   * `curr_seq2_index` / `curr_diag` are the stored value and the diagonal
+///     of the cell that last raised `curr_extent`.
+///
+/// SAFETY: `seq1` and `seq2` must be readable for `len1` and `len2` bytes.
+#[inline(always)]
+unsafe fn x_greedy_row_impl<const REVERSE: bool>(
+    seq1: *const u8,
+    seq2: *const u8,
+    len1: i32,
+    len2: i32,
+    previous: &[i32],
+    current: &mut [i32],
+    tmp_diag_lower: i32,
+    diag_origin: i32,
+    xdrop_score: i32,
+    st: &mut XGreedyRowState,
+) -> bool {
+    const NOT_A_BASE: u64 = 0xFCFC_FCFC_FCFC_FCFC;
+    let band_len = current.len();
+    debug_assert!(previous.len() >= band_len + 2);
+    let previous = previous.as_ptr();
+    let current = current.as_mut_ptr();
+    // seq1_index = seq2_index + k - diag_origin = seq2_index + first + cell
+    let first = tmp_diag_lower - diag_origin;
+    // Pass 2 reads eight bytes at offset 0 for the diagonals it does not
+    // handle, so both sequences must have eight bytes. With the fence already
+    // hit, no diagonal may skip `x_greedy_cell_slow`: the reference loop
+    // returns at its first surviving diagonal.
+    let inline_ok = len1 >= 8 && len2 >= 8 && !st.fence_hit;
+    let mut cold = XGreedyRowCold {
+        diag_lower: st.diag_lower,
+        end1_reached: st.end1_reached,
+        end2_reached: st.end2_reached,
+        curr_extent: st.curr_extent,
+        best_cell: X_NO_CELL,
+        end1_cell: X_NO_CELL,
+        longest_match_run: st.longest_match_run,
+        seed_start_q: st.seed_start_q,
+        seed_start_s: st.seed_start_s,
+        fence_hit: st.fence_hit,
+        stopped: false,
+    };
+    let mut last_valid = X_NO_CELL;
+
+    // Both arrays are written for `0..block_len` before they are read.
+    let mut start = [std::mem::MaybeUninit::<i32>::uninit(); X_GREEDY_BLOCK];
+    let mut slide = [std::mem::MaybeUninit::<i32>::uninit(); X_GREEDY_BLOCK];
+    let start = start.as_mut_ptr() as *mut i32;
+    let slide = slide.as_mut_ptr() as *mut i32;
+    let mut block = 0usize;
+    'row: while block < band_len {
+        let block_len = (band_len - block).min(X_GREEDY_BLOCK);
+        let block_first = first + block as i32;
+
+        // pass 1
+        for i in 0..block_len {
+            let p = previous.add(block + i);
+            let mut seq2_index = (*p.add(2)).max(*p.add(1)) + 1;
+            seq2_index = seq2_index.max(*p);
+            let extent = seq2_index + seq2_index + block_first + i as i32;
+            *start.add(i) = if seq2_index < 0 || extent < xdrop_score {
+                -1
+            } else {
+                seq2_index
+            };
+        }
+
+        // pass 2
+        if !inline_ok {
+            for i in 0..block_len {
+                *slide.add(i) = -1;
+            }
+        } else {
+            let longest_match_run = cold.longest_match_run;
+            for i in 0..block_len {
+                let seq2_index = *start.add(i);
+                let seq1_index = seq2_index + block_first + i as i32;
+                // Sign bit set when the diagonal was dropped, when either
+                // sequence has fewer than eight positions left, or when an
+                // offset is negative.
+                let unfit =
+                    (len1 - 8 - seq1_index) | (len2 - 8 - seq2_index) | seq1_index | seq2_index;
+                let at1 = if unfit < 0 { 0 } else { seq1_index };
+                let at2 = if unfit < 0 { 0 } else { seq2_index };
+                let (w1, w2) = if REVERSE {
+                    (
+                        u64::from_le(
+                            (seq1.add((len1 - 8 - at1) as usize) as *const u64).read_unaligned(),
+                        ),
+                        u64::from_le(
+                            (seq2.add((len2 - 8 - at2) as usize) as *const u64).read_unaligned(),
+                        ),
+                    )
+                } else {
+                    (
+                        u64::from_le((seq1.add(at1 as usize) as *const u64).read_unaligned()),
+                        u64::from_le((seq2.add(at2 as usize) as *const u64).read_unaligned()),
+                    )
+                };
+                let diff = (w1 ^ w2) | (w1 & NOT_A_BASE);
+                // 64 when all eight positions match
+                let bits = if REVERSE {
+                    diff.leading_zeros()
+                } else {
+                    diff.trailing_zeros()
+                };
+                let shift = bits & 0x38;
+                let stop_byte = if REVERSE {
+                    (w2 >> (56 - shift)) as u8
+                } else {
+                    (w2 >> shift) as u8
+                };
+                let index = (bits >> 3) as i32;
+                let other = (unfit < 0)
+                    | (diff == 0)
+                    | (stop_byte == FENCE_SENTRY)
+                    | (index > longest_match_run);
+                *slide.add(i) = if other { -1 } else { index };
+            }
+        }
+
+        // pass 3
+        let mut diag_lower = cold.diag_lower;
+        let mut curr_extent = cold.curr_extent;
+        let mut best_cell = cold.best_cell;
+        for i in 0..block_len {
+            let cell = block + i;
+            let seq2_index = *start.add(i);
+            if seq2_index < 0 {
+                if tmp_diag_lower + cell as i32 == diag_lower {
+                    diag_lower += 1;
+                } else {
+                    *current.add(cell) = INVALID_OFFSET;
+                }
+                continue;
+            }
+            let index = *slide.add(i);
+            if index < 0 {
+                cold.diag_lower = diag_lower;
+                cold.curr_extent = curr_extent;
+                cold.best_cell = best_cell;
+                x_greedy_cell_slow::<REVERSE>(
+                    seq1,
+                    seq2,
+                    len1,
+                    len2,
+                    seq2_index + block_first + i as i32,
+                    seq2_index,
+                    cell,
+                    tmp_diag_lower + cell as i32,
+                    current,
+                    &mut cold,
+                );
+                if cold.stopped {
+                    last_valid = cell;
+                    break 'row;
+                }
+                diag_lower = cold.diag_lower;
+                curr_extent = cold.curr_extent;
+                best_cell = cold.best_cell;
+                continue;
+            }
+            let stop2 = seq2_index + index;
+            *current.add(cell) = stop2;
+            // seq1_index + index + seq2_index + index
+            let extent = stop2 + stop2 + block_first + i as i32;
+            if extent > curr_extent {
+                curr_extent = extent;
+                best_cell = cell;
+            }
+        }
+        cold.diag_lower = diag_lower;
+        cold.curr_extent = curr_extent;
+        cold.best_cell = best_cell;
+
+        // last surviving diagonal of this block
+        let mut j = block_len;
+        while j > 0 {
+            j -= 1;
+            if *start.add(j) >= 0 {
+                last_valid = block + j;
+                break;
+            }
+        }
+        block += block_len;
+    }
+
+    st.diag_lower = cold.diag_lower;
+    if last_valid != X_NO_CELL {
+        let k = tmp_diag_lower + last_valid as i32;
+        st.diag_upper = if cold.end1_cell == last_valid {
+            k - 1
+        } else {
+            k
+        };
+    }
+    st.end1_reached = cold.end1_reached;
+    st.end2_reached = cold.end2_reached;
+    st.curr_extent = cold.curr_extent;
+    if cold.best_cell != X_NO_CELL {
+        st.curr_seq2_index = *current.add(cold.best_cell);
+        st.curr_diag = tmp_diag_lower + cold.best_cell as i32;
+    }
+    st.longest_match_run = cold.longest_match_run;
+    st.seed_start_q = cold.seed_start_q;
+    st.seed_start_s = cold.seed_start_s;
+    st.fence_hit = cold.fence_hit;
+    cold.stopped
+}
+
+/// SAFETY: `seq1` and `seq2` must be readable for `len1` and `len2` bytes.
+#[inline(always)]
+unsafe fn x_greedy_row_any(
+    reverse: bool,
+    seq1: *const u8,
+    seq2: *const u8,
+    len1: i32,
+    len2: i32,
+    previous: &[i32],
+    current: &mut [i32],
+    tmp_diag_lower: i32,
+    diag_origin: i32,
+    xdrop_score: i32,
+    st: &mut XGreedyRowState,
+) -> bool {
+    if reverse {
+        x_greedy_row_impl::<true>(
+            seq1,
+            seq2,
+            len1,
+            len2,
+            previous,
+            current,
+            tmp_diag_lower,
+            diag_origin,
+            xdrop_score,
+            st,
+        )
+    } else {
+        x_greedy_row_impl::<false>(
+            seq1,
+            seq2,
+            len1,
+            len2,
+            previous,
+            current,
+            tmp_diag_lower,
+            diag_origin,
+            xdrop_score,
+            st,
+        )
+    }
+}
+
+/// The same code compiled for AVX2/BMI (wider first pass, `tzcnt`/`lzcnt`).
+///
+/// SAFETY: as `x_greedy_row_any`, and the CPU must support the features.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2,bmi1,bmi2,lzcnt")]
+unsafe fn x_greedy_row_avx2(
+    reverse: bool,
+    seq1: *const u8,
+    seq2: *const u8,
+    len1: i32,
+    len2: i32,
+    previous: &[i32],
+    current: &mut [i32],
+    tmp_diag_lower: i32,
+    diag_origin: i32,
+    xdrop_score: i32,
+    st: &mut XGreedyRowState,
+) -> bool {
+    x_greedy_row_any(
+        reverse,
+        seq1,
+        seq2,
+        len1,
+        len2,
+        previous,
+        current,
+        tmp_diag_lower,
+        diag_origin,
+        xdrop_score,
+        st,
+    )
+}
+
+/// SAFETY: `seq1` and `seq2` must be readable for `len1` and `len2` bytes.
+#[inline(never)]
+unsafe fn x_greedy_row(
+    reverse: bool,
+    seq1: *const u8,
+    seq2: *const u8,
+    len1: i32,
+    len2: i32,
+    previous: &[i32],
+    current: &mut [i32],
+    tmp_diag_lower: i32,
+    diag_origin: i32,
+    xdrop_score: i32,
+    st: &mut XGreedyRowState,
+) -> bool {
+    #[cfg(target_arch = "x86_64")]
+    {
+        use std::sync::OnceLock;
+        static AVX2: OnceLock<bool> = OnceLock::new();
+        if *AVX2.get_or_init(|| {
+            std::is_x86_feature_detected!("avx2")
+                && std::is_x86_feature_detected!("bmi1")
+                && std::is_x86_feature_detected!("bmi2")
+                && std::is_x86_feature_detected!("lzcnt")
+        }) {
+            return x_greedy_row_avx2(
+                reverse,
+                seq1,
+                seq2,
+                len1,
+                len2,
+                previous,
+                current,
+                tmp_diag_lower,
+                diag_origin,
+                xdrop_score,
+                st,
+            );
+        }
+    }
+    x_greedy_row_any(
+        reverse,
+        seq1,
+        seq2,
+        len1,
+        len2,
+        previous,
+        current,
+        tmp_diag_lower,
+        diag_origin,
+        xdrop_score,
+        st,
+    )
+}
+
 /// Non-affine greedy alignment with optional traceback.
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:379-751 (BLAST_GreedyAlign)
 fn blast_greedy_align(
@@ -2633,61 +3230,170 @@ fn blast_greedy_align(
             non_affine_mem.row_pair_mut(previous_row, current_row);
         let previous = &previous_values[previous_start..previous_start + band_len + 2];
         let current = &mut current_values[current_start..current_start + band_len];
-        for (cell_index, (previous, cell)) in
-            previous.windows(3).zip(current.iter_mut()).enumerate()
+        // EXPERIMENT (LOSAT_X_GREEDYFAST / LOSAT_X_GREEDYSHADOW)
+        let x_mode = x_greedy_mode();
+        let mut x_done = false;
+        let mut x_shadow: Option<(XGreedyRowState, Vec<i32>, bool)> = None;
+        if x_mode != 0
+            && rem == 4
+            && len1 >= 0
+            && len2 >= 0
+            && len1 as usize <= seq1.len()
+            && len2 as usize <= seq2.len()
         {
-            k = tmp_diag_lower + cell_index as i32;
-            seq2_index = previous[2].max(previous[1]) + 1;
-            seq2_index = seq2_index.max(previous[0]);
-            seq1_index = seq2_index + k - diag_origin;
-
-            if seq2_index < 0 || seq1_index + seq2_index < xdrop_score {
-                if k == diag_lower {
-                    diag_lower += 1;
-                } else {
-                    *cell = INVALID_OFFSET;
-                }
-                continue;
-            }
-
-            diag_upper = k;
-
-            index = find_first_mismatch_greedy(
-                seq1, seq2, len1, len2, seq1_index, seq2_index, reverse, rem, fence_hit,
-            );
-            if *fence_hit {
-                // NCBI reference: c++/src/algo/blast/core/greedy_align.c:523-526,571-576
-                // last_seq2_off[d - 1][diag_lower-1] = kInvalidOffset;
-                // if (fence_hit && *fence_hit) { return 0; }
-                // NCBI's row writes already reside in persistent scratch.
-                return 0;
-            }
-
-            if index > longest_match_run {
-                seed.start_q = seq1_index;
-                seed.start_s = seq2_index;
-                longest_match_run = index;
+            let mut st = XGreedyRowState {
+                diag_lower,
+                diag_upper,
+                end1_reached,
+                end2_reached,
+                curr_extent,
+                curr_seq2_index,
+                curr_diag,
+                longest_match_run,
+                seed_start_q: seed.start_q,
+                seed_start_s: seed.start_s,
+                fence_hit: *fence_hit,
+            };
+            if x_mode == 1 {
+                // SAFETY: both lengths were checked against the slices above.
+                let stopped = unsafe {
+                    x_greedy_row(
+                        reverse,
+                        seq1.as_ptr(),
+                        seq2.as_ptr(),
+                        len1,
+                        len2,
+                        previous,
+                        current,
+                        tmp_diag_lower,
+                        diag_origin,
+                        xdrop_score,
+                        &mut st,
+                    )
+                };
+                diag_lower = st.diag_lower;
+                diag_upper = st.diag_upper;
+                end1_reached = st.end1_reached;
+                end2_reached = st.end2_reached;
+                curr_extent = st.curr_extent;
+                curr_seq2_index = st.curr_seq2_index;
+                curr_diag = st.curr_diag;
+                longest_match_run = st.longest_match_run;
+                seed.start_q = st.seed_start_q;
+                seed.start_s = st.seed_start_s;
                 seed.match_length = longest_match_run;
+                *fence_hit = st.fence_hit;
+                if stopped {
+                    return 0;
+                }
+                x_done = true;
+            } else {
+                let mut copy = current.to_vec();
+                // SAFETY: both lengths were checked against the slices above.
+                let stopped = unsafe {
+                    x_greedy_row(
+                        reverse,
+                        seq1.as_ptr(),
+                        seq2.as_ptr(),
+                        len1,
+                        len2,
+                        previous,
+                        &mut copy,
+                        tmp_diag_lower,
+                        diag_origin,
+                        xdrop_score,
+                        &mut st,
+                    )
+                };
+                x_shadow = Some((st, copy, stopped));
             }
-            seq1_index += index;
-            seq2_index += index;
+        }
+        if !x_done {
+            for (cell_index, (previous, cell)) in
+                previous.windows(3).zip(current.iter_mut()).enumerate()
+            {
+                k = tmp_diag_lower + cell_index as i32;
+                seq2_index = previous[2].max(previous[1]) + 1;
+                seq2_index = seq2_index.max(previous[0]);
+                seq1_index = seq2_index + k - diag_origin;
 
-            *cell = seq2_index;
+                if seq2_index < 0 || seq1_index + seq2_index < xdrop_score {
+                    if k == diag_lower {
+                        diag_lower += 1;
+                    } else {
+                        *cell = INVALID_OFFSET;
+                    }
+                    continue;
+                }
 
-            if seq1_index + seq2_index > curr_extent {
-                curr_extent = seq1_index + seq2_index;
-                curr_seq2_index = seq2_index;
-                curr_diag = k;
-            }
+                diag_upper = k;
 
-            if seq2_index == len2 {
-                diag_lower = k + 1;
-                end2_reached = true;
+                index = find_first_mismatch_greedy(
+                    seq1, seq2, len1, len2, seq1_index, seq2_index, reverse, rem, fence_hit,
+                );
+                if *fence_hit {
+                    // NCBI reference: c++/src/algo/blast/core/greedy_align.c:523-526,571-576
+                    // last_seq2_off[d - 1][diag_lower-1] = kInvalidOffset;
+                    // if (fence_hit && *fence_hit) { return 0; }
+                    // NCBI's row writes already reside in persistent scratch.
+                    return 0;
+                }
+
+                if index > longest_match_run {
+                    seed.start_q = seq1_index;
+                    seed.start_s = seq2_index;
+                    longest_match_run = index;
+                    seed.match_length = longest_match_run;
+                }
+                seq1_index += index;
+                seq2_index += index;
+
+                *cell = seq2_index;
+
+                if seq1_index + seq2_index > curr_extent {
+                    curr_extent = seq1_index + seq2_index;
+                    curr_seq2_index = seq2_index;
+                    curr_diag = k;
+                }
+
+                if seq2_index == len2 {
+                    diag_lower = k + 1;
+                    end2_reached = true;
+                }
+                if seq1_index == len1 {
+                    diag_upper = k - 1;
+                    end1_reached = true;
+                }
             }
-            if seq1_index == len1 {
-                diag_upper = k - 1;
-                end1_reached = true;
-            }
+        }
+        if let Some((st, copy, stopped)) = x_shadow {
+            // LOSAT_X_GREEDYSHADOW: the fast row must leave exactly what the
+            // reference loop left (which did not return inside this row).
+            assert!(
+                !stopped,
+                "LOSAT_X_GREEDYSHADOW: only the fast row stopped at d={d}"
+            );
+            let reference = XGreedyRowState {
+                diag_lower,
+                diag_upper,
+                end1_reached,
+                end2_reached,
+                curr_extent,
+                curr_seq2_index,
+                curr_diag,
+                longest_match_run,
+                seed_start_q: seed.start_q,
+                seed_start_s: seed.start_s,
+                fence_hit: *fence_hit,
+            };
+            assert!(
+                st == reference,
+                "LOSAT_X_GREEDYSHADOW: state differs at d={d}: fast {st:?} reference {reference:?}"
+            );
+            assert!(
+                copy[..] == current[..],
+                "LOSAT_X_GREEDYSHADOW: row differs at d={d}"
+            );
         }
 
         curr_score = curr_extent * (match_cost / 2) - d * (match_cost + mismatch_cost);
@@ -3781,6 +4487,226 @@ pub fn greedy_gapped_alignment_with_traceback(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// EXPERIMENT (LOSAT_X_GREEDYFAST / LOSAT_X_GREEDYSPEC).
+    ///
+    /// On random pairs of related sequences, with and without traceback:
+    ///   * the fast row gives the alignment of the reference loop (compared
+    ///     as a whole, and row by row in the shadow mode);
+    ///   * the reference loop gives the same alignment on a scratch that
+    ///     earlier, unrelated alignments have used as on a new one, which is
+    ///     what running tracebacks ahead of time on other scratches relies on.
+    #[test]
+    fn x_fast_greedy_rows_match_reference_on_random_alignments() {
+        struct Rng(u64);
+        impl Rng {
+            fn next(&mut self) -> u64 {
+                self.0 ^= self.0 << 13;
+                self.0 ^= self.0 >> 7;
+                self.0 ^= self.0 << 17;
+                self.0
+            }
+            fn below(&mut self, n: u64) -> u64 {
+                self.next() % n
+            }
+        }
+        fn run(
+            mode: u8,
+            query: &[u8],
+            subject: &[u8],
+            q_off: usize,
+            s_off: usize,
+            scoring: (i32, i32, i32, i32),
+            x_drop: i32,
+            scratch: &mut GreedyAlignScratch,
+            traceback: bool,
+        ) -> Option<(
+            i32,
+            i32,
+            i32,
+            i32,
+            i32,
+            i32,
+            i32,
+            Option<(Vec<GapAlignOpType>, Vec<i32>)>,
+        )> {
+            X_GREEDY_TEST_MODE.with(|m| m.set(Some(mode)));
+            let core = greedy_gapped_alignment_internal(
+                query,
+                subject,
+                subject.len(),
+                q_off,
+                s_off,
+                scoring.0,
+                scoring.1,
+                scoring.2,
+                scoring.3,
+                x_drop,
+                false,
+                scratch,
+                traceback,
+            );
+            X_GREEDY_TEST_MODE.with(|m| m.set(None));
+            core.map(|c| {
+                (
+                    c.q_start,
+                    c.q_end,
+                    c.s_start,
+                    c.s_end,
+                    c.q_seed_start,
+                    c.s_seed_start,
+                    c.score,
+                    c.edit_script
+                        .map(|e| (e.op_type[..e.size].to_vec(), e.num[..e.size].to_vec())),
+                )
+            })
+        }
+
+        let cases: usize = std::env::var("LOSAT_FUZZ_CASES")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(1500);
+        let mut rng = Rng(0x2545_F491_4F6C_DD1D);
+        let mut used_fast = GreedyAlignScratch::new();
+        let mut used_reference = GreedyAlignScratch::new();
+        let mut aligned = 0usize;
+        let mut with_gaps = 0usize;
+        for case in 0..cases {
+            // a core, a mutated copy of it, and unrelated flanks on both
+            let core_len = 20 + rng.below(if case % 10 == 0 { 6000 } else { 600 }) as usize;
+            let substitution = [0u64, 2, 5, 20, 60, 150][rng.below(6) as usize]; // per mille
+            let indel = [0u64, 0, 2, 10, 30][rng.below(5) as usize]; // per mille
+            let ambiguity = if case % 7 == 0 { 8 } else { 0 }; // per mille
+            let random_base = |rng: &mut Rng| rng.below(4) as u8;
+            let core: Vec<u8> = (0..core_len).map(|_| random_base(&mut rng)).collect();
+            let mut query = Vec::new();
+            let mut subject = Vec::new();
+            for _ in 0..rng.below(40) {
+                query.push(random_base(&mut rng));
+            }
+            for _ in 0..rng.below(40) {
+                subject.push(random_base(&mut rng));
+            }
+            // positions of an unchanged core base in both sequences
+            let mut anchors: Vec<(usize, usize)> = Vec::new();
+            for &base in &core {
+                let roll = rng.below(1000);
+                if roll < indel {
+                    // drop from the subject
+                    query.push(base);
+                } else if roll < 2 * indel {
+                    // extra base in the subject
+                    subject.push(random_base(&mut rng));
+                    anchors.push((query.len(), subject.len()));
+                    query.push(base);
+                    subject.push(base);
+                } else if roll < 2 * indel + substitution {
+                    query.push(base);
+                    subject.push((base + 1 + rng.below(3) as u8) & 3);
+                } else if roll < 2 * indel + substitution + ambiguity {
+                    // an ambiguity code in the query (never matches)
+                    query.push(4 + rng.below(12) as u8);
+                    subject.push(base);
+                } else {
+                    anchors.push((query.len(), subject.len()));
+                    query.push(base);
+                    subject.push(base);
+                }
+            }
+            for _ in 0..rng.below(40) {
+                query.push(random_base(&mut rng));
+            }
+            for _ in 0..rng.below(40) {
+                subject.push(random_base(&mut rng));
+            }
+            if anchors.is_empty() {
+                continue;
+            }
+            let (q_off, s_off) = anchors[rng.below(anchors.len() as u64) as usize];
+            // megablast, and two scorings that take the affine route
+            let scoring = match case % 5 {
+                0 => (2, -3, 5, 2),
+                1 => (1, -3, 0, 0),
+                _ => (1, -2, 0, 0),
+            };
+            let x_drop = 5 + rng.below(60) as i32;
+            for traceback in [false, true] {
+                let reference = run(
+                    0,
+                    &query,
+                    &subject,
+                    q_off,
+                    s_off,
+                    scoring,
+                    x_drop,
+                    &mut GreedyAlignScratch::new(),
+                    traceback,
+                );
+                let fast = run(
+                    1,
+                    &query,
+                    &subject,
+                    q_off,
+                    s_off,
+                    scoring,
+                    x_drop,
+                    &mut used_fast,
+                    traceback,
+                );
+                assert_eq!(
+                    fast, reference,
+                    "case {case}: fast rows, traceback={traceback}"
+                );
+                let shadow = run(
+                    2,
+                    &query,
+                    &subject,
+                    q_off,
+                    s_off,
+                    scoring,
+                    x_drop,
+                    &mut GreedyAlignScratch::new(),
+                    traceback,
+                );
+                assert_eq!(
+                    shadow, reference,
+                    "case {case}: shadow, traceback={traceback}"
+                );
+                let reused = run(
+                    0,
+                    &query,
+                    &subject,
+                    q_off,
+                    s_off,
+                    scoring,
+                    x_drop,
+                    &mut used_reference,
+                    traceback,
+                );
+                assert_eq!(
+                    reused, reference,
+                    "case {case}: used scratch, traceback={traceback}"
+                );
+                if let Some(result) = &reference {
+                    aligned += 1;
+                    if let Some((ops, _)) = &result.7 {
+                        if ops.iter().any(|op| *op != GapAlignOpType::Sub) {
+                            with_gaps += 1;
+                        }
+                    }
+                }
+            }
+        }
+        // the generator must produce real alignments, some of them gapped
+        assert!(
+            aligned > cases,
+            "only {aligned} alignments in {cases} cases"
+        );
+        assert!(
+            with_gaps * 20 > cases,
+            "only {with_gaps} gapped alignments in {cases} cases"
+        );
+    }
 
     // NCBI reference: c++/src/algo/blast/core/greedy_align.c:500-501,523-526,571-576
     // last_seq2_off[0][diag_origin] = seq1_index;

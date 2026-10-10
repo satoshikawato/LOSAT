@@ -30,6 +30,12 @@ impl DiagStruct {
     const LAST_HIT_MASK: u32 = 0x7fff_ffff;
     const FLAG_MASK: u32 = 0x8000_0000;
 
+    /// The packed cell, for comparisons.
+    #[inline]
+    pub fn raw_bits(&self) -> u32 {
+        self.raw
+    }
+
     /// Return the flag (0/1).
     #[inline]
     pub fn flag(&self) -> u32 {

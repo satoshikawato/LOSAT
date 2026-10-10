@@ -400,6 +400,12 @@ pub(crate) fn gapped_observed(
     xdrop: i32,
     observe: &mut dyn FnMut(&PreliminaryHsp, bool),
 ) -> Result<Vec<PreliminaryHsp>> {
+    // EXPERIMENT (LOSAT_X_BXLEAN): most (chunk, subject) pairs have no initial
+    // HSP; the loop below then does nothing, so the tree and the DP scratch
+    // need not be built.
+    if initial.is_empty() && super::runtime::x_bx_lean() {
+        return Ok(Vec::new());
+    }
     let last = batch.contexts.last().expect("BLASTX contexts");
     let mut tree = BlastIntervalTree::new(
         0,

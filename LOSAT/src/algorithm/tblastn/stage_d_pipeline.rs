@@ -200,6 +200,152 @@ pub(super) fn run_local_for_report_threads(
     })
 }
 
+/// EXPERIMENT (LOSAT_X_TBNPAR): `run_local_for_report_threads` on a pool that
+/// the caller keeps for all its query batches.
+pub(super) fn x_run_local_for_report_in_pool(
+    queries: &[Vec<u8>],
+    subjects: &[Vec<u8>],
+    profile: LocalStageDProfile<'_>,
+    composition_mode2: bool,
+    do_sum_stats: bool,
+    scoring: LocalStageDScoring,
+    pool: &SearchPool<'_>,
+) -> Result<XBatchReport> {
+    let mut trace = StageDBoundaryTrace::default();
+    let results = run_local_search_with_pool(
+        queries,
+        subjects,
+        profile,
+        composition_mode2,
+        do_sum_stats,
+        scoring,
+        Some(&mut trace),
+        Some(pool),
+    )?;
+    Ok((
+        results,
+        trace
+            .parameters
+            .context("missing TBLASTN initial parameters")?,
+        trace.ungapped_karlin,
+        trace.query_validity,
+    ))
+}
+
+/// What `run_local_for_report_threads` returns for one query batch.
+pub(super) type XBatchReport = (
+    Vec<KappaResultHitList>,
+    LocalSubjectParameters,
+    Vec<KarlinParams>,
+    Vec<bool>,
+);
+
+/// EXPERIMENT (LOSAT_X_TBNPAR, LOSAT_X_TBNSSIDE, LOSAT_X_TBNBATCH): the query batches
+/// `ranges` of `search` (`args.rs`) searched ahead, each with its range, in the order of
+/// `ranges`; `None` when the switches leave the batches to the reference loop.
+///
+/// NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:275-289
+/// ```c++
+///             for (; !input->End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
+///
+///                 query =  input->GetNextSeqBatch(*scope);
+///                 query_factory.Reset(new CObjMgr_QueryFactory(*query));
+///                 ...
+///                     CLocalBlast lcl_blast(query_factory, m_OptsHndl, db_adapter);
+/// ```
+/// NCBI searches each batch on its own (`CLocalBlast` per batch); a batch reads nothing
+/// another batch writes, so only the order of the reports matters, and the caller appends
+/// them in the order of `ranges`. With `LOSAT_X_TBNPAR` one search pool serves every
+/// batch instead of one pool per batch; with `LOSAT_X_TBNSSIDE` the subject plans
+/// (translations, masks) are made once for the search and shared through the pool; with
+/// `LOSAT_X_TBNBATCH` (and the plans shared and fitting, and at least one batch per
+/// thread) the batches are searched side by side, each as the one-thread search. The
+/// first failing batch in the order of `ranges` gives the error, as in the reference loop.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn x_search_batches<'p>(
+    queries: &[Vec<u8>],
+    subjects: &[Vec<u8>],
+    ranges: Vec<std::ops::Range<usize>>,
+    profile: impl Fn(std::ops::Range<usize>) -> LocalStageDProfile<'p> + Sync,
+    composition_mode2: bool,
+    do_sum_stats: bool,
+    scoring: LocalStageDScoring,
+    threads: usize,
+) -> Result<Option<Vec<(std::ops::Range<usize>, XBatchReport)>>> {
+    let Some(first) = ranges.first() else {
+        return Ok(None);
+    };
+    // The subject plans depend only on the genetic code and the lowercase masking, which
+    // every batch's profile shares.
+    let first = profile(first.clone());
+    let x_subject_side = super::search_seed::XSubjectSide::enabled().then(|| {
+        super::search_seed::XSubjectSide::new(
+            subjects.len(),
+            first.genetic_code,
+            first.mask_lowercase,
+        )
+    });
+    if !(x_tbn_parallel() && (threads > 1 || x_subject_side.is_some())) {
+        return Ok(None);
+    }
+    let search_in = |range: std::ops::Range<usize>, pool: &SearchPool<'_>| {
+        x_run_local_for_report_in_pool(
+            &queries[range.clone()],
+            subjects,
+            profile(range),
+            composition_mode2,
+            do_sum_stats,
+            scoring,
+            pool,
+        )
+    };
+    with_search_pool(threads, "tblastn", |pool| {
+        let x_pool_with_plans;
+        let pool = match x_subject_side.as_ref() {
+            Some(side) => {
+                x_pool_with_plans = pool.x_with_ext(side);
+                &x_pool_with_plans
+            }
+            None => pool,
+        };
+        let mut searched = Vec::with_capacity(ranges.len());
+        // EXPERIMENT (LOSAT_X_TBNBATCH): search the batches side by side, each as the
+        // one-thread search. The serial parts of a batch (query masking, lookup table,
+        // linking, the hand-over between stages) then no longer leave the other threads
+        // idle. It needs the subject plans to be shared (LOSAT_X_TBNSSIDE) and to fit, or
+        // every batch in flight would hold its own translation of the subjects; and at
+        // least one batch per thread (with fewer, each batch uses the pool inside).
+        #[cfg(feature = "parallel")]
+        if std::env::var_os("LOSAT_X_TBNBATCH").is_some() && pool.enabled() {
+            let fits = super::search_seed::XSubjectSide::all_fit(subjects.iter().map(Vec::len));
+            if let Some(side) = x_subject_side
+                .as_ref()
+                .filter(|_| fits && ranges.len() >= pool.threads())
+            {
+                use rayon::prelude::*;
+                let x_serial = SearchPool::x_serial();
+                let x_serial = x_serial.x_with_ext(side);
+                for wave in ranges.chunks(pool.threads() * 4) {
+                    let computed: Vec<_> = pool.install(|| {
+                        wave.par_iter()
+                            .with_max_len(1)
+                            .map(|range| search_in(range.clone(), &x_serial))
+                            .collect()
+                    });
+                    for (range, report) in wave.iter().zip(computed) {
+                        searched.push((range.clone(), report?));
+                    }
+                }
+                return Ok(Some(searched));
+            }
+        }
+        for range in &ranges {
+            searched.push((range.clone(), search_in(range.clone(), pool)?));
+        }
+        Ok(Some(searched))
+    })
+}
+
 // NCBI c++/src/algo/blast/core/blast_engine.c:870-905;
 // c++/src/algo/blast/core/blast_kappa.c:3383-3427,3525-3736,2494-2515;
 // c++/src/algo/blast/core/blast_traceback.c:1763-1776:
@@ -209,6 +355,7 @@ pub(super) fn run_local_for_report_threads(
 // BlastCompo_HeapInsert(...); Blast_HitListUpdate(...);
 // Blast_HSPResultsReverseOrder(results);
 // if (BlastSeqSrcGetTotLen(seq_src) > 0) Blast_HSPResultsSortByEvalue(results);
+
 #[allow(dead_code)] // This internal path is compared before the public CLI is enabled.
 pub(super) fn run_local_mode2_sum_stats(
     queries: &[Vec<u8>],
@@ -700,20 +847,18 @@ fn run_local_search_with_pool(
     let mut owned_lists = HashMap::new();
     let mut scratch = GapAlignScratch::new();
     let mut workspace = BlastCompositionWorkspace::new_blosum62();
-    for (context, oid, list) in preliminary_lists {
-        // NCBI c++/src/algo/blast/core/blast_kappa.c:3383-3427,3525-3736:
-        // if (BlastCompo_EarlyTermination(localMatch->best_evalue,
-        //     redoneMatches, numQueries)) { Blast_HSPListFree(localMatch); continue; }
-        // query_index = localMatch->query_index;
-        if compo_early_termination(list.best_evalue, &heaps) {
-            continue;
-        }
+    // EXPERIMENT (LOSAT_X_TBNPAR): everything one (query, subject) match needs
+    // between the early-termination test and the heap insertion, as a function of
+    // the match alone.  NCBI c++/src/algo/blast/core/blast_kappa.c:3525-3736 keeps
+    // the same state thread-local (matrix, NRrecord, gapAlign) for its redo loop.
+    let redo_item = |context: usize,
+                     oid: usize,
+                     list: &LinkedHspList,
+                     redo_params: &crate::core::composition_adjustment::redo_alignment::BlastRedoAlignParams,
+                     scratch: &mut GapAlignScratch,
+                     workspace: &mut BlastCompositionWorkspace|
+     -> Result<Option<(CompoHeapRecord, KappaResultList)>> {
         let subject = &subjects[oid];
-        if let Some(ref mut trace) = observer {
-            trace
-                .redo
-                .push((context, oid, list.hsps.iter().map(|hsp| hsp.hsp).collect()));
-        }
         let incoming: Vec<_> = list.hsps.iter().map(|hsp| hsp.hsp).collect();
         let mut redo = redo_preliminary_match(
             &incoming,
@@ -721,15 +866,15 @@ fn run_local_search_with_pool(
             &query_infos,
             subject,
             profile.genetic_code,
-            &redo_params,
+            redo_params,
             scaled.lambda,
             ScoringMatrix::Blosum62,
-            &mut scratch,
-            &mut workspace,
+            scratch,
+            workspace,
         )?;
         let converted = convert_distinct_alignments(&mut redo.alignments_by_query[context])?;
         if converted.is_empty() {
-            continue;
+            return Ok(None);
         }
         let mut hsp_values: Vec<_> = converted.iter().map(|h| (h.context, h.hsp)).collect();
         // NCBI c++/src/algo/blast/core/blast_kappa.c:3661-3706:
@@ -767,7 +912,7 @@ fn run_local_search_with_pool(
         };
         reap_by_evalue(&mut postredo, profile.expect_value);
         if postredo.hsps.is_empty() {
-            continue;
+            return Ok(None);
         }
         let candidate = CompoHeapRecord {
             subject_index: i32::try_from(oid)?,
@@ -808,21 +953,164 @@ fn run_local_search_with_pool(
                 })
             })
             .collect::<Result<Vec<_>>>()?;
+        Ok(Some((
+            candidate,
+            KappaResultList {
+                oid: candidate.subject_index,
+                hsps: postredo,
+                payloads,
+            },
+        )))
+    };
+    // The heap update of one redone match, in the order of the preliminary lists.
+    let mut keep_item = |context: usize,
+                         heaps: &mut Vec<CompoHeap>,
+                         item: Option<(CompoHeapRecord, KappaResultList)>| {
+        let Some((candidate, result)) = item else {
+            return;
+        };
         if heaps[context].would_insert(candidate) {
             let discarded = heaps[context].insert(candidate);
-            owned_lists.insert(
-                (context, candidate.subject_index),
-                KappaResultList {
-                    oid: candidate.subject_index,
-                    hsps: postredo,
-                    payloads,
-                },
-            );
+            owned_lists.insert((context, candidate.subject_index), result);
             if let Some(previous) = discarded {
                 owned_lists.remove(&(context, previous.subject_index));
             }
         }
+    };
+    // EXPERIMENT (LOSAT_X_TBNPAR): redo the matches of one batch on the search
+    // pool, then apply early termination and the heap updates in list order.  A
+    // match is a function of its own preliminary list; the only state shared
+    // between matches is the heap array, which only this thread touches.
+    #[cfg(feature = "parallel")]
+    let parallel_redo =
+        x_tbn_parallel() && pool.is_some_and(SearchPool::enabled) && preliminary_lists.len() > 1;
+    #[cfg(not(feature = "parallel"))]
+    let parallel_redo = false;
+    if x_tbn_parallel() {
+        crate::utils::threading::report_stage(
+            "tblastn",
+            "kappa_redo",
+            preliminary_lists.len(),
+            parallel_redo,
+        );
     }
+    if parallel_redo {
+        #[cfg(feature = "parallel")]
+        {
+            let pool = pool.expect("parallel pool selected");
+            let make_params = || {
+                local_kappa_redo_params(
+                    ScoringMatrix::Blosum62,
+                    11,
+                    1,
+                    &gapped_by_context,
+                    &valid_contexts,
+                    &parameters,
+                    *query_lengths.iter().max().unwrap(),
+                    BlastCompoAdjustMode::CompositionMatrixAdjust,
+                    false,
+                    profile.expect_value,
+                    do_sum_stats,
+                    scoring.final_xdrop_bits,
+                    local_extension_final_xdrop(
+                        scoring.gap_xdrop_bits,
+                        scoring.final_xdrop_bits,
+                        gapped.lambda,
+                    )?,
+                )
+            };
+            let states = (0..pool.threads())
+                .map(|_| {
+                    Ok(std::sync::Mutex::new(XRedoWorker {
+                        params: make_params()?,
+                        scratch: GapAlignScratch::new(),
+                        workspace: BlastCompositionWorkspace::new_blosum62(),
+                    }))
+                })
+                .collect::<Result<Vec<_>>>()?;
+            let batch_size = pool.threads().saturating_mul(32).max(64);
+            for batch in preliminary_lists.chunks(batch_size) {
+                // Early termination only becomes true as the heaps fill, so a match
+                // that is skipped now is also skipped at its turn; anything else is
+                // rechecked in order below.
+                let wanted: Vec<bool> = batch
+                    .iter()
+                    .map(|(_, _, list)| !compo_early_termination(list.best_evalue, &heaps))
+                    .collect();
+                let computed: Vec<_> = pool.install(|| {
+                    batch
+                        .par_iter()
+                        .zip(wanted.par_iter())
+                        .map(|((context, oid, list), &wanted)| {
+                            if !wanted {
+                                return None;
+                            }
+                            let slot = rayon::current_thread_index().unwrap_or(0) % states.len();
+                            let mut guard = states[slot].lock().expect("TBLASTN redo worker state");
+                            let worker = &mut *guard;
+                            Some(redo_item(
+                                *context,
+                                *oid,
+                                list,
+                                &worker.params,
+                                &mut worker.scratch,
+                                &mut worker.workspace,
+                            ))
+                        })
+                        .collect()
+                });
+                for ((context, oid, list), result) in batch.iter().zip(computed) {
+                    if compo_early_termination(list.best_evalue, &heaps) {
+                        continue;
+                    }
+                    if let Some(ref mut trace) = observer {
+                        trace.redo.push((
+                            *context,
+                            *oid,
+                            list.hsps.iter().map(|hsp| hsp.hsp).collect(),
+                        ));
+                    }
+                    let item = match result {
+                        Some(result) => result?,
+                        None => redo_item(
+                            *context,
+                            *oid,
+                            list,
+                            &redo_params,
+                            &mut scratch,
+                            &mut workspace,
+                        )?,
+                    };
+                    keep_item(*context, &mut heaps, item);
+                }
+            }
+        }
+    } else {
+        for (context, oid, list) in preliminary_lists {
+            // NCBI c++/src/algo/blast/core/blast_kappa.c:3383-3427,3525-3736:
+            // if (BlastCompo_EarlyTermination(localMatch->best_evalue,
+            //     redoneMatches, numQueries)) { Blast_HSPListFree(localMatch); continue; }
+            // query_index = localMatch->query_index;
+            if compo_early_termination(list.best_evalue, &heaps) {
+                continue;
+            }
+            if let Some(ref mut trace) = observer {
+                trace
+                    .redo
+                    .push((context, oid, list.hsps.iter().map(|hsp| hsp.hsp).collect()));
+            }
+            let item = redo_item(
+                context,
+                oid,
+                &list,
+                &redo_params,
+                &mut scratch,
+                &mut workspace,
+            )?;
+            keep_item(context, &mut heaps, item);
+        }
+    }
+    drop(keep_item);
 
     // NCBI c++/src/algo/blast/core/blast_kappa.c:2494-2515;
     // c++/src/algo/blast/core/blast_hits.c:3243-3297,3383-3400,3420-3437:
@@ -847,6 +1135,29 @@ fn run_local_search_with_pool(
     }
     Ok(results)
 }
+
+// EXPERIMENT (LOSAT_X_TBNPAR): intra-subject parallelism of the TBLASTN search.
+pub(super) fn x_tbn_parallel() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("LOSAT_X_TBNPAR").is_some())
+}
+
+// One pool slot's redo state.  NCBI c++/src/algo/blast/core/blast_kappa.c:3290-3340
+// allocates the same per thread (redo_align_params_tld, gap_align_tld, NRrecord_tld).
+#[cfg(feature = "parallel")]
+struct XRedoWorker {
+    params: crate::core::composition_adjustment::redo_alignment::BlastRedoAlignParams,
+    scratch: GapAlignScratch,
+    workspace: BlastCompositionWorkspace,
+}
+
+// SAFETY: the only non-Send field is the `context` cell of the gapping
+// parameters, which `redo_preliminary_match` fills for the duration of one
+// synchronous call and restores before it returns; the state is only reached
+// through its mutex, so it is never observed mid-call by another thread.
+#[cfg(feature = "parallel")]
+unsafe impl Send for XRedoWorker {}
 
 // The per-context cutoffs of the preliminary stage of a query set.
 struct ContextCutoffArrays {
@@ -1110,14 +1421,26 @@ fn query_set_setup(
     // BlastAaLookupTableNew(..., lookup_options->word_size, ...);
     // The active matrix determines context validity; the active word size
     // determines the lookup state used by Stage C.
-    let (_, mut contexts) = build_ncbi_lookup_for_profile(
+    // EXPERIMENT (LOSAT_X_LUTSPLIT): only the contexts are used here.
+    let mut contexts = match crate::algorithm::tblastx::lookup::x_lookup_contexts_for_profile(
         &working_frames,
-        inputs.scoring.threshold,
-        inputs.ungapped,
         false,
         inputs.scoring.matrix,
         inputs.scoring.word_size,
-    );
+    ) {
+        Some(contexts) => contexts,
+        None => {
+            build_ncbi_lookup_for_profile(
+                &working_frames,
+                inputs.scoring.threshold,
+                inputs.ungapped,
+                false,
+                inputs.scoring.matrix,
+                inputs.scoring.word_size,
+            )
+            .1
+        }
+    };
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:632-640
     // ```c++
     //         } catch (const CException& e) {
@@ -1233,46 +1556,63 @@ fn run_preliminary_subjects(
     // status = s_Blast_HSPListReapByPrelimEvalue(hsp_list_out, hit_params);
     // Finish search, link/direct E-value and preliminary reap inside one subject
     // job, before its OID-ordered list enters the shared collector.
-    let subject_core = |subject: &[u8]| -> Result<(Vec<(usize, GappedHsp)>, LinkedHspList)> {
-        let (preliminary, _) = preliminary_protein_hsps_in_ncbi_order(
-            inputs.queries,
-            subject,
-            inputs.genetic_code,
-            inputs.search,
-        )?;
-        // NCBI c++/src/algo/blast/core/blast_engine.c:870-905:
-        // BLAST_LinkHsps(..., hsp_list_out, ...);
-        // s_Blast_HSPListReapByPrelimEvalue(hsp_list_out, ...);
-        // Even an allocated empty subject list enters link/E-value.
-        let mut linked = if let Some(link) = inputs.link {
-            link_preliminary_hsps(
-                &preliminary,
-                inputs.query_lengths,
-                inputs.lengths,
-                i32::try_from(subject.len())?,
-                inputs.gapped_by_context,
-                inputs
-                    .gumbel
-                    .context("TBLASTN sum-statistics Spouge state is missing")?,
-                &link,
-            )?
-        } else {
-            // NCBI c++/src/algo/blast/core/blast_engine.c:728-729,804-813,882-887:
-            // if (subject->length > 0) stat_length = subject->length;
-            // Blast_HSPListGetEvalues(..., stat_length, ...);
-            let stat_length = initial_translated_stat_length(subject.len());
-            direct_local_evalues(
-                &preliminary,
-                inputs.query_lengths,
-                i32::try_from(stat_length)?,
-                inputs.gapped_by_context,
-                inputs.lengths,
-                inputs.gumbel,
-            )
-        };
-        reap_by_evalue(&mut linked, inputs.prelim_evalue);
-        Ok((preliminary, linked))
+    // EXPERIMENT (LOSAT_X_TBNPAR): with one job per subject the pool is busy with
+    // subjects; otherwise the units of the single subject use it.
+    let unit_pool = if pool.is_some_and(SearchPool::enabled) && subjects.len() > 1 {
+        None
+    } else {
+        pool
     };
+    // EXPERIMENT (LOSAT_X_TBNQSIDE): query frames and lookup table of this
+    // query set, built by the first subject that needs them.
+    let x_query_side = super::search_gapped::XQuerySide::new();
+    // EXPERIMENT (LOSAT_X_TBNSSIDE): the subject plans the owner of the search
+    // attached to the pool; `subjects` is its subject list.
+    let x_subject_side = pool.and_then(|pool| pool.x_ext::<super::search_seed::XSubjectSide>());
+    let subject_core =
+        |x_oid: usize, subject: &[u8]| -> Result<(Vec<(usize, GappedHsp)>, LinkedHspList)> {
+            let preliminary = super::search_gapped::preliminary_protein_hsps_for_search(
+                inputs.queries,
+                subject,
+                inputs.genetic_code,
+                inputs.search,
+                unit_pool,
+                x_query_side.as_ref(),
+                x_subject_side.map(|side| (side, x_oid)),
+            )?;
+            // NCBI c++/src/algo/blast/core/blast_engine.c:870-905:
+            // BLAST_LinkHsps(..., hsp_list_out, ...);
+            // s_Blast_HSPListReapByPrelimEvalue(hsp_list_out, ...);
+            // Even an allocated empty subject list enters link/E-value.
+            let mut linked = if let Some(link) = inputs.link {
+                link_preliminary_hsps(
+                    &preliminary,
+                    inputs.query_lengths,
+                    inputs.lengths,
+                    i32::try_from(subject.len())?,
+                    inputs.gapped_by_context,
+                    inputs
+                        .gumbel
+                        .context("TBLASTN sum-statistics Spouge state is missing")?,
+                    &link,
+                )?
+            } else {
+                // NCBI c++/src/algo/blast/core/blast_engine.c:728-729,804-813,882-887:
+                // if (subject->length > 0) stat_length = subject->length;
+                // Blast_HSPListGetEvalues(..., stat_length, ...);
+                let stat_length = initial_translated_stat_length(subject.len());
+                direct_local_evalues(
+                    &preliminary,
+                    inputs.query_lengths,
+                    i32::try_from(stat_length)?,
+                    inputs.gapped_by_context,
+                    inputs.lengths,
+                    inputs.gumbel,
+                )
+            };
+            reap_by_evalue(&mut linked, inputs.prelim_evalue);
+            Ok((preliminary, linked))
+        };
     // NCBI c++/src/algo/blast/core/blast_engine.c:1411-1414,1469-1475:
     // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
     //        != BLAST_SEQSRC_EOF) {
@@ -1320,12 +1660,13 @@ fn run_preliminary_subjects(
                 let batch: Vec<_> = pool.install(|| {
                     subjects[oid..end]
                         .par_iter()
-                        .map(|subject| {
+                        .enumerate()
+                        .map(|(x_within, subject)| {
                             if diagnose {
                                 let now = active.fetch_add(1, Ordering::SeqCst) + 1;
                                 peak.fetch_max(now, Ordering::SeqCst);
                             }
-                            let result = subject_core(subject);
+                            let result = subject_core(oid + x_within, subject);
                             if diagnose {
                                 active.fetch_sub(1, Ordering::SeqCst);
                             }
@@ -1343,10 +1684,10 @@ fn run_preliminary_subjects(
                 .context("missing ordered TBLASTN subject result")?
                 .0?
         } else {
-            subject_core(subject)?
+            subject_core(oid, subject)?
         };
         #[cfg(not(feature = "parallel"))]
-        let (preliminary, linked) = subject_core(subject)?;
+        let (preliminary, linked) = subject_core(oid, subject)?;
         // NCBI c++/src/algo/blast/core/blast_engine.c:870-905:
         // BLAST_LinkHsps(..., hsp_list_out, ...);
         // s_Blast_HSPListReapByPrelimEvalue(hsp_list_out, ...);

@@ -147,7 +147,39 @@ pub fn lookup_protein_gumbel_params(
 // NCBI blast_stat.c:5216,5223 calls ErfC, not NCBI_ErfC.
 #[inline]
 fn erfc_ncbi(z: f64) -> f64 {
+    // EXPERIMENT (LOSAT_X_ERFMEMO): ErfC is a pure function of its argument and
+    // BLAST_SpougeEtoS (blast_stat.c:5236-5282) asks for the same arguments again
+    // for every subject of the same length; keep the last results per thread.
+    if x_erf_memo() {
+        let key = z.to_bits();
+        return X_ERFC_MEMO.with(|memo| {
+            let mut memo = memo.borrow_mut();
+            let slot = (key.wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 52) as usize;
+            let (stored, value) = memo[slot];
+            if stored == key {
+                return f64::from_bits(value);
+            }
+            let result = erf_impl_ncbi(z, true);
+            // A key of all ones marks an empty slot; that argument (a NaN) is
+            // simply never stored.
+            if key != u64::MAX {
+                memo[slot] = (key, result.to_bits());
+            }
+            result
+        });
+    }
     erf_impl_ncbi(z, true)
+}
+
+fn x_erf_memo() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("LOSAT_X_ERFMEMO").is_some())
+}
+
+thread_local! {
+    static X_ERFC_MEMO: std::cell::RefCell<Vec<(u64, u64)>> =
+        std::cell::RefCell::new(vec![(u64::MAX, 0); 4096]);
 }
 
 // NCBI c++/src/algo/blast/core/boost_erf.c:71-249:
@@ -305,6 +337,58 @@ fn erf_impl_ncbi(z: f64, mut invert: bool) -> f64 {
     result
 }
 
+/// EXPERIMENT (LOSAT_X_DEKKER, Wasm only): `a.mul_add(b, -product)` for
+/// `product == a * b`, i.e. the exact rounding error of the product.  Where
+/// the target has no fused multiply-add instruction (Wasm without relaxed
+/// SIMD) `mul_add` is a library routine; Dekker's product (T. J. Dekker 1971,
+/// with Veltkamp's splitting) yields the same number with seventeen ordinary
+/// operations whenever no partial product can underflow or overflow, which
+/// the magnitude test guarantees: for 2^-900 < |product| < 2^900 and
+/// |a|, |b| < 2^900 the four partial products of the 26/27-bit halves are
+/// exact, their smallest is above 2^-1010 and nothing reaches 2^1024.
+/// Without the switch, and on every other target, this is `mul_add`.
+#[inline(always)]
+fn x_product_error(a: f64, b: f64, product: f64) -> f64 {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let size = product.abs();
+        if x_dekker()
+            && size > X_TWO_POW_M900
+            && size < X_TWO_POW_900
+            && a.abs() < X_TWO_POW_900
+            && b.abs() < X_TWO_POW_900
+        {
+            return x_dekker_product_error(a, b, product);
+        }
+    }
+    a.mul_add(b, -product)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn x_dekker() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("LOSAT_X_DEKKER").is_some())
+}
+
+#[allow(dead_code)]
+const X_TWO_POW_M900: f64 = f64::from_bits((1023 - 900) << 52);
+#[allow(dead_code)]
+const X_TWO_POW_900: f64 = f64::from_bits((1023 + 900) << 52);
+
+#[inline(always)]
+#[allow(dead_code)]
+fn x_dekker_product_error(a: f64, b: f64, product: f64) -> f64 {
+    const SPLIT: f64 = 134_217_729.0; // 2^27 + 1
+    let a_scaled = SPLIT * a;
+    let a_hi = a_scaled - (a_scaled - a);
+    let a_lo = a - a_hi;
+    let b_scaled = SPLIT * b;
+    let b_hi = b_scaled - (b_scaled - b);
+    let b_lo = b - b_hi;
+    ((a_hi * b_hi - product) + a_hi * b_lo + a_lo * b_hi) + a_lo * b_lo
+}
+
 // NCBI c++/src/algo/blast/core/boost_erf.c:149,175,201,230:
 // result *= expl(-z * z) / z;
 // The argument is binary64, while expl and the following division/product
@@ -337,7 +421,7 @@ impl DoubleDouble {
     #[inline]
     fn mul(self, other: Self) -> Self {
         let product = self.hi * other.hi;
-        let error = self.hi.mul_add(other.hi, -product)
+        let error = x_product_error(self.hi, other.hi, product)
             + self.hi * other.lo
             + self.lo * other.hi
             + self.lo * other.lo;
@@ -517,6 +601,50 @@ pub fn blast_spouge_etos(
 
 #[cfg(test)]
 mod tests {
+    // EXPERIMENT: Dekker's product error equals the fused one inside the range
+    // in which the Wasm build uses it.
+    #[test]
+    fn x_dekker_product_error_matches_fused_multiply_add() {
+        let mut state = 0x1234_5678_9ABC_DEF1u64;
+        let mut next = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        let mut checked = 0u32;
+        for _ in 0..2_000_000 {
+            let mantissa_a = (next() >> 12) | (1u64 << 52);
+            let mantissa_b = (next() >> 12) | (1u64 << 52);
+            let exp_a = (next() % 1700) as i32 - 850 - 52;
+            let exp_b = (next() % 1700) as i32 - 850 - 52;
+            let mut a = (mantissa_a as f64) * 2f64.powi(exp_a.clamp(-1000, 900));
+            let mut b = (mantissa_b as f64) * 2f64.powi(exp_b.clamp(-1000, 900));
+            if next() & 1 == 1 {
+                a = -a;
+            }
+            if next() & 2 == 2 {
+                b = -b;
+            }
+            // Also values with few significant bits, as the series divisors have.
+            if next() % 7 == 0 {
+                a = (next() % 41) as f64;
+            }
+            let product = a * b;
+            const TINY: f64 = super::X_TWO_POW_M900;
+            const HUGE: f64 = super::X_TWO_POW_900;
+            assert_eq!(TINY, 2f64.powi(-900));
+            assert_eq!(HUGE, 2f64.powi(900));
+            if product.abs() > TINY && product.abs() < HUGE && a.abs() < HUGE && b.abs() < HUGE {
+                let fused = a.mul_add(b, -product);
+                let dekker = super::x_dekker_product_error(a, b, product);
+                assert_eq!(fused.to_bits(), dekker.to_bits(), "a={a:e} b={b:e}");
+                checked += 1;
+            }
+        }
+        assert!(checked > 500_000, "only {checked} products in range");
+    }
+
     use super::*;
 
     // NCBI c++/src/algo/blast/core/boost_erf.c:252-255:

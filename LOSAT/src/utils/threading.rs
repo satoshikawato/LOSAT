@@ -9,6 +9,42 @@ pub struct SearchPool<'a> {
     requested: &'a usize,
     #[cfg(feature = "parallel")]
     pool: Option<&'a rayon::ThreadPool>,
+    // EXPERIMENT (LOSAT_X_TBNSSIDE): state the owner of the search attaches for
+    // the stages below it, which all receive the pool.
+    x_ext: Option<&'a (dyn std::any::Any + Send + Sync)>,
+}
+
+impl SearchPool<'static> {
+    /// EXPERIMENT (LOSAT_X_BXBATCH): the pool a one-thread search gets, for a
+    /// search that is itself one task of a parallel loop.
+    pub fn x_serial() -> Self {
+        SearchPool {
+            requested: &1,
+            #[cfg(feature = "parallel")]
+            pool: None,
+            x_ext: None,
+        }
+    }
+}
+
+impl<'a> SearchPool<'a> {
+    /// EXPERIMENT (LOSAT_X_TBNSSIDE): this pool with `ext` attached.
+    pub fn x_with_ext<'b>(&'b self, ext: &'b (dyn std::any::Any + Send + Sync)) -> SearchPool<'b>
+    where
+        'a: 'b,
+    {
+        SearchPool {
+            requested: self.requested,
+            #[cfg(feature = "parallel")]
+            pool: self.pool,
+            x_ext: Some(ext),
+        }
+    }
+
+    /// EXPERIMENT (LOSAT_X_TBNSSIDE): the attached state, if it is a `T`.
+    pub fn x_ext<T: std::any::Any>(&self) -> Option<&'a T> {
+        self.x_ext.and_then(|ext| ext.downcast_ref::<T>())
+    }
 }
 
 impl SearchPool<'_> {
@@ -121,6 +157,7 @@ where
                 let search = SearchPool {
                     requested: &requested,
                     pool: Some(&pool),
+                    x_ext: None,
                 };
                 search.install(|| work.take().expect("one search per pool")(&search))
             }));
@@ -181,7 +218,33 @@ where
         requested: &requested,
         #[cfg(feature = "parallel")]
         pool: None,
+        x_ext: None,
     })
+}
+
+/// EXPERIMENT (LOSAT_X_BXPOOL): `with_search_pool` for work that is not `Send`
+/// (it borrows the caller's output stream, for instance), so that one pool can
+/// span a whole loop of query batches instead of being rebuilt, threads and
+/// all, for every batch.
+pub fn x_with_search_pool_local<F, R>(requested: usize, program: &str, work: F) -> Result<R>
+where
+    F: FnOnce(&SearchPool<'_>) -> Result<R>,
+{
+    struct Local<T>(T);
+    // SAFETY: `with_search_pool` calls `work` exactly once, synchronously, on
+    // the thread that called it: without a pool directly, with a pool as slot
+    // zero, which is the caller's own thread running the Rayon worker loop
+    // (`caller.run()` above), from where `ThreadPool::install` runs its
+    // closure in place. The result is written to and read from a slot on that
+    // same thread's stack. Neither value is ever touched by another thread.
+    unsafe impl<T> Send for Local<T> {}
+    let work = Local(work);
+    let result = with_search_pool(requested, program, move |pool| {
+        // Use the wrapper as a whole so that the closure captures it, not its field.
+        let work: Local<F> = work;
+        Ok(Local((work.0)(pool)))
+    })?;
+    result.0
 }
 
 // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:172-180

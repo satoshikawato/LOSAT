@@ -391,6 +391,356 @@ pub(super) struct PreliminaryProfile<'a> {
 // NCBI c++/src/algo/blast/core/blast_engine.c:478-586,804-850:
 // one chunk's WordFinder and gapped result precedes the next chunk's scan;
 // each frame's append precedes the next frame's scan.
+thread_local! {
+    // EXPERIMENT: false while the production pipeline runs the preliminary stage.
+    static X_COLLECT_EVENTS: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+}
+
+fn x_skip_events() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("LOSAT_X_TBNEVENTS").is_some())
+}
+
+fn x_tbn_units() -> u8 {
+    use std::sync::OnceLock;
+    static ON: OnceLock<u8> = OnceLock::new();
+    *ON.get_or_init(|| {
+        if std::env::var_os("LOSAT_X_TBNPARSHADOW").is_some() {
+            2
+        } else if std::env::var_os("LOSAT_X_TBNPAR").is_some() {
+            1
+        } else {
+            0
+        }
+    })
+}
+
+/// EXPERIMENT: the preliminary stage without the test-only event log.
+pub(super) fn preliminary_protein_hsps_for_search(
+    queries: &[&[u8]],
+    subject: &[u8],
+    db_gencode: u8,
+    profile: PreliminaryProfile<'_>,
+    pool: Option<&crate::utils::threading::SearchPool<'_>>,
+    x_query_side: Option<&XQuerySide>,
+    x_subject: Option<(&super::search_seed::XSubjectSide, usize)>,
+) -> Result<Vec<(usize, GappedHsp)>> {
+    match x_tbn_units() {
+        1 => {
+            return x_preliminary_protein_hsps_by_unit(
+                queries,
+                subject,
+                db_gencode,
+                profile,
+                pool,
+                x_query_side,
+                x_subject,
+            )
+        }
+        2 => {
+            let by_unit = x_preliminary_protein_hsps_by_unit(
+                queries,
+                subject,
+                db_gencode,
+                profile,
+                pool,
+                x_query_side,
+                x_subject,
+            )?;
+            let serial = preliminary_protein_hsps_with_comparison_input(
+                queries,
+                subject,
+                db_gencode,
+                profile,
+                |_, _, _| Ok(()),
+            )?
+            .0;
+            assert!(
+                by_unit == serial,
+                "LOSAT_X_TBNPARSHADOW: unit-wise preliminary stage differs from the serial one"
+            );
+            return Ok(by_unit);
+        }
+        _ => {}
+    }
+    let skip = x_skip_events();
+    if skip {
+        X_COLLECT_EVENTS.with(|c| c.set(false));
+    }
+    let result = preliminary_protein_hsps_with_comparison_input(
+        queries,
+        subject,
+        db_gencode,
+        profile,
+        |_, _, _| Ok(()),
+    );
+    if skip {
+        X_COLLECT_EVENTS.with(|c| c.set(true));
+    }
+    Ok(result?.0)
+}
+
+// EXPERIMENT (LOSAT_X_TBNPAR): the preliminary stage as independent (frame,
+// chunk) units.  NCBI c++/src/algo/blast/core/blast_engine.c:478-552 runs
+// WordFinder, GetGappedScore and the endpoint purge of one unit before it scans
+// the next; none of the three reads anything an earlier unit produced (the
+// diagonal array is the only carried state, see `XTwoHit`).  Only the merge
+// (lines 572-586) and the per-frame append (840-850) depend on the order, and
+// they run here afterwards, in that order, on one thread.  The offset pairs are
+// consumed straight from the scan buffer, so no per-frame seed list is kept.
+/// EXPERIMENT (LOSAT_X_TBNQSIDE): what the unit-wise preliminary stage derives
+/// from the query set alone.
+struct XQueryFrames {
+    query_frames: Vec<crate::algorithm::tblastx::translation::QueryFrame>,
+    context_offsets: Vec<i32>,
+    total_query_length: i32,
+    query_sequence: Vec<u8>,
+    init_context_offsets: Vec<i32>,
+}
+
+fn x_query_frames(queries: &[&[u8]], profile: PreliminaryProfile<'_>) -> Result<XQueryFrames> {
+    // As preliminary_protein_hsps_with_comparison_input.
+    let query_frames: Vec<_> = queries
+        .iter()
+        .map(|query| {
+            if profile.soft_masking {
+                encode_protein_query_frame_with_seg(query, None)
+            } else {
+                encode_tblastn_lookup_query(query, profile.seg, profile.mask_lowercase)
+            }
+        })
+        .collect();
+    let mut context_offsets = Vec::with_capacity(queries.len());
+    let mut total_query_length = 0i32;
+    for query in queries {
+        context_offsets.push(total_query_length);
+        total_query_length += i32::try_from(query.len())? + 1;
+    }
+    total_query_length -= 1;
+    // As find_protein_init_hsps_by_chunk_with_mask_mode.
+    let mut query_sequence = Vec::new();
+    let mut init_context_offsets = Vec::with_capacity(queries.len());
+    for frame in &query_frames {
+        init_context_offsets.push(i32::try_from(query_sequence.len())?);
+        query_sequence.extend_from_slice(&frame.aa_seq[1..]);
+    }
+    Ok(XQueryFrames {
+        query_frames,
+        context_offsets,
+        total_query_length,
+        query_sequence,
+        init_context_offsets,
+    })
+}
+
+/// EXPERIMENT (LOSAT_X_TBNQSIDE): the query-side state of the unit-wise
+/// preliminary stage for one query set, shared by all its subjects.
+///
+/// The masked query frames and the neighbourhood lookup table depend on the
+/// queries and the word-finder options, not on the subject, yet the stage is
+/// entered once per subject and rebuilt them every time (NCBI builds its
+/// lookup table once per query batch, `lookup_wrap.c:91-100`). The first
+/// subject that needs a part computes it, exactly as before; the others read
+/// it. One value serves one query set with one set of options only.
+pub(super) struct XQuerySide {
+    frames: std::sync::OnceLock<XQueryFrames>,
+    /// Held while `frames` is being made, so that subjects searched at the
+    /// same time wait for the first one instead of each making the frames.
+    frames_in_progress: std::sync::Mutex<()>,
+    lookup:
+        std::sync::OnceLock<std::sync::Arc<crate::algorithm::tblastx::lookup::BlastAaLookupTable>>,
+}
+
+impl XQuerySide {
+    /// `None` unless `LOSAT_X_TBNQSIDE` is set.
+    pub(super) fn new() -> Option<Self> {
+        use std::sync::OnceLock;
+        static ON: OnceLock<bool> = OnceLock::new();
+        ON.get_or_init(|| std::env::var_os("LOSAT_X_TBNQSIDE").is_some())
+            .then(|| Self {
+                frames: OnceLock::new(),
+                frames_in_progress: std::sync::Mutex::new(()),
+                lookup: OnceLock::new(),
+            })
+    }
+
+    /// The query frames, made by the first caller. A failure is returned to
+    /// that caller and leaves nothing behind, as when every caller made them.
+    fn frames(&self, build: impl FnOnce() -> Result<XQueryFrames>) -> Result<&XQueryFrames> {
+        if let Some(frames) = self.frames.get() {
+            return Ok(frames);
+        }
+        let _in_progress = self
+            .frames_in_progress
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(frames) = self.frames.get() {
+            return Ok(frames);
+        }
+        let built = build()?;
+        Ok(self.frames.get_or_init(|| built))
+    }
+}
+
+fn x_preliminary_protein_hsps_by_unit(
+    queries: &[&[u8]],
+    subject: &[u8],
+    db_gencode: u8,
+    profile: PreliminaryProfile<'_>,
+    pool: Option<&crate::utils::threading::SearchPool<'_>>,
+    x_query_side: Option<&XQuerySide>,
+    x_subject: Option<(&super::search_seed::XSubjectSide, usize)>,
+) -> Result<Vec<(usize, GappedHsp)>> {
+    use super::search_init::XTwoHit;
+    use super::search_seed::{x_scan_plan, x_scan_unit};
+    if profile.gapped_cutoff.len() != queries.len() {
+        bail!("one preliminary gapped cutoff is required per query context");
+    }
+    anyhow::ensure!(
+        profile.word_xdrop.len() == queries.len() && profile.word_cutoff.len() == queries.len(),
+        "one WordFinder x-drop and cutoff per query context"
+    );
+    let x_local_frames;
+    let x_frames: &XQueryFrames = match x_query_side {
+        Some(side) => side.frames(|| x_query_frames(queries, profile))?,
+        None => {
+            x_local_frames = x_query_frames(queries, profile)?;
+            &x_local_frames
+        }
+    };
+    anyhow::ensure!(
+        x_frames.query_frames.len() == queries.len(),
+        "LOSAT_X_TBNQSIDE: query-side state used for another query set"
+    );
+    let query_frames = &x_frames.query_frames;
+    let context_offsets = &x_frames.context_offsets;
+    let total_query_length = x_frames.total_query_length;
+    let query_sequence = &x_frames.query_sequence;
+    let init_context_offsets = &x_frames.init_context_offsets;
+    let Some(plan) = x_scan_plan(
+        queries,
+        subject,
+        db_gencode,
+        profile.seg,
+        profile.threshold,
+        profile.mask_lowercase,
+        profile.matrix,
+        profile.word_size,
+        x_query_side.map(|side| &side.lookup),
+        x_subject,
+    )?
+    else {
+        return Ok(Vec::new());
+    };
+    struct UnitState<'a> {
+        two_hit: XTwoHit<'a>,
+        pairs: Vec<crate::algorithm::tblastx::blast_aascan::BlastOffsetPair>,
+        hits: Vec<InitHsp>,
+        scratch: GapAlignScratch,
+    }
+    let new_state = || UnitState {
+        two_hit: XTwoHit::new(
+            &query_sequence,
+            &init_context_offsets,
+            profile.word_xdrop,
+            profile.word_cutoff,
+            profile.matrix,
+            profile.window,
+            profile.word_size,
+        ),
+        pairs: Vec::new(),
+        hits: Vec::new(),
+        scratch: GapAlignScratch::new(),
+    };
+    let run_unit = |state: &mut UnitState<'_>, unit: usize| -> Result<Vec<(usize, GappedHsp)>> {
+        let (frame_index, chunk, _) = &plan.subject.units[unit];
+        let frame = &plan.subject.frames[*frame_index];
+        let chunk = *chunk;
+        let subject_sequence = &frame.aa_seq[1 + chunk.offset..1 + chunk.offset + chunk.length];
+        let chunk_offset = u32::try_from(chunk.offset)?;
+        let UnitState {
+            two_hit,
+            pairs,
+            hits,
+            scratch,
+        } = state;
+        two_hit.reset();
+        hits.clear();
+        x_scan_unit(&plan, unit, pairs, |filled| {
+            two_hit.pairs(frame.frame, chunk_offset, subject_sequence, filled, hits);
+        });
+        XTwoHit::sort(hits);
+        // NCBI c++/src/algo/blast/core/blast_engine.c:489-493:
+        // if (init_hitlist->total == 0) continue;
+        if hits.is_empty() {
+            return Ok(Vec::new());
+        }
+        let gapped = score_gapped_chunk(
+            queries,
+            &query_frames,
+            &context_offsets,
+            total_query_length,
+            frame,
+            chunk,
+            hits,
+            profile.gap_open,
+            profile.gap_extend,
+            profile.gap_xdrop,
+            profile.gapped_cutoff,
+            profile.matrix,
+            scratch,
+        )?;
+        // NCBI c++/src/algo/blast/core/blast_engine.c:539-552:
+        // Blast_HSPListPurgeHSPsWithCommonEndpoints(..., TRUE);
+        // Blast_HSPListSortByScore(hsp_list);
+        Ok(purge_preliminary_common_endpoints(gapped))
+    };
+    let unit_count = plan.subject.units.len();
+    let parallel = pool.is_some_and(crate::utils::threading::SearchPool::enabled) && unit_count > 1;
+    crate::utils::threading::report_stage("tblastn", "prelim_units", unit_count, parallel);
+    let mut purged: Vec<Result<Vec<(usize, GappedHsp)>>> = Vec::with_capacity(unit_count);
+    #[cfg(feature = "parallel")]
+    if parallel {
+        use rayon::prelude::*;
+        let pool = pool.expect("parallel pool selected");
+        purged = pool.install(|| {
+            (0..unit_count)
+                .into_par_iter()
+                .with_max_len(1)
+                .map_init(&new_state, |state, unit| run_unit(state, unit))
+                .collect()
+        });
+    }
+    if purged.is_empty() {
+        let mut state = new_state();
+        for unit in 0..unit_count {
+            purged.push(run_unit(&mut state, unit));
+        }
+    }
+    let mut purged = purged.into_iter();
+    let mut combined = Vec::new();
+    let mut unit = 0usize;
+    for frame_index in 0..plan.subject.frames.len() {
+        let mut per_frame = Vec::new();
+        while unit < unit_count && plan.subject.units[unit].0 == frame_index {
+            let chunk = plan.subject.units[unit].1;
+            let unit_hsps = purged.next().expect("one result per unit")?;
+            unit += 1;
+            if unit_hsps.is_empty() {
+                continue;
+            }
+            // NCBI c++/src/algo/blast/core/blast_engine.c:572-586:
+            // Blast_HSPListsMerge(&hsp_list, &hsp_list_for_chunks, ...);
+            per_frame = merge_adjusted_chunk(per_frame, unit_hsps, chunk, profile.hsp_num_max)?;
+        }
+        // NCBI c++/src/algo/blast/core/blast_engine.c:840-850:
+        // Blast_HSPListAppend(&hsp_list_for_chunks, &hsp_list_out, kHspNumMax);
+        combined = append_preliminary_hsps(combined, per_frame, profile.hsp_num_max);
+    }
+    Ok(combined)
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum PreliminaryEvent {
     Candidates(i8, usize, Vec<Seed>),
@@ -466,6 +816,9 @@ fn preliminary_protein_hsps_with_comparison_input(
     let mut per_frame = Vec::new();
     let mut combined = Vec::new();
     let mut events = Vec::new();
+    // EXPERIMENT (LOSAT_X_TBNEVENTS): the comparison events are only read by
+    // tests; the search itself discards them.
+    let collect_events = X_COLLECT_EVENTS.with(|c| c.get());
     find_protein_init_hsps_by_chunk_with_mask_mode(
         queries,
         subject,
@@ -482,16 +835,20 @@ fn preliminary_protein_hsps_with_comparison_input(
         |event| {
             match event {
                 InitStageEvent::Chunk(frame, chunk, seeds, initial) => {
-                    events.push(PreliminaryEvent::Candidates(
-                        frame.frame,
-                        chunk.offset,
-                        seeds.to_vec(),
-                    ));
-                    events.push(PreliminaryEvent::Initial(
-                        frame.frame,
-                        chunk.offset,
-                        initial.to_vec(),
-                    ));
+                    if collect_events {
+                        events.push(PreliminaryEvent::Candidates(
+                            frame.frame,
+                            chunk.offset,
+                            seeds.to_vec(),
+                        ));
+                    }
+                    if collect_events {
+                        events.push(PreliminaryEvent::Initial(
+                            frame.frame,
+                            chunk.offset,
+                            initial.to_vec(),
+                        ));
+                    }
                     // NCBI c++/src/algo/blast/core/blast_engine.c:489-493:
                     // if (init_hitlist->total == 0) continue;
                     if initial.is_empty() {
@@ -512,22 +869,26 @@ fn preliminary_protein_hsps_with_comparison_input(
                         profile.matrix,
                         &mut scratch,
                     )?;
-                    events.push(PreliminaryEvent::Gapped(
-                        frame.frame,
-                        chunk.offset,
-                        gapped.clone(),
-                    ));
+                    if collect_events {
+                        events.push(PreliminaryEvent::Gapped(
+                            frame.frame,
+                            chunk.offset,
+                            gapped.clone(),
+                        ));
+                    }
                     let mut gapped = gapped;
                     at_purge_input(frame.frame, chunk.offset, &mut gapped)?;
                     // NCBI c++/src/algo/blast/core/blast_engine.c:539-552:
                     // Blast_HSPListPurgeHSPsWithCommonEndpoints(..., TRUE);
                     // Blast_HSPListSortByScore(hsp_list);
                     let purged = purge_preliminary_common_endpoints(gapped);
-                    events.push(PreliminaryEvent::Purged(
-                        frame.frame,
-                        chunk.offset,
-                        purged.clone(),
-                    ));
+                    if collect_events {
+                        events.push(PreliminaryEvent::Purged(
+                            frame.frame,
+                            chunk.offset,
+                            purged.clone(),
+                        ));
+                    }
                     if purged.is_empty() {
                         return Ok(());
                     }
@@ -537,11 +898,13 @@ fn preliminary_protein_hsps_with_comparison_input(
                         chunk,
                         profile.hsp_num_max,
                     )?;
-                    events.push(PreliminaryEvent::Merged(
-                        frame.frame,
-                        chunk.offset,
-                        per_frame.clone(),
-                    ));
+                    if collect_events {
+                        events.push(PreliminaryEvent::Merged(
+                            frame.frame,
+                            chunk.offset,
+                            per_frame.clone(),
+                        ));
+                    }
                 }
                 InitStageEvent::FrameEnd(frame) => {
                     // NCBI c++/src/algo/blast/core/blast_engine.c:840-850:
@@ -552,7 +915,9 @@ fn preliminary_protein_hsps_with_comparison_input(
                         std::mem::take(&mut per_frame),
                         profile.hsp_num_max,
                     );
-                    events.push(PreliminaryEvent::Appended(frame.frame, combined.clone()));
+                    if collect_events {
+                        events.push(PreliminaryEvent::Appended(frame.frame, combined.clone()));
+                    }
                 }
             }
             Ok(())

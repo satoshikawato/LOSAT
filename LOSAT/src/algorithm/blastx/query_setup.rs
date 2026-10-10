@@ -326,44 +326,84 @@ pub fn prepare_queries(
         );
     }
     let nomask = buffer.clone();
-    for context in &mut contexts {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1144-1158
+    // ```c++
+    //         SSegOptions* seg_options = filter_options->segOptions;
+    //         SegParameters* sparamsp=NULL;
+    //
+    //         sparamsp = SegParametersNewAa();
+    //         sparamsp->overlaps = TRUE;
+    //         if (seg_options->window > 0)
+    //             sparamsp->window = seg_options->window;
+    //         if (seg_options->locut > 0.0)
+    //             sparamsp->locut = seg_options->locut;
+    //         if (seg_options->hicut > 0.0)
+    //             sparamsp->hicut = seg_options->hicut;
+    //
+    // 		status = SeqBufferSeg(sequence, length, offset, sparamsp,
+    //                               seqloc_retval);
+    // 		SegParametersFree(sparamsp);
+    // ```
+    let seg_masker = options.seg.enabled.then(|| {
+        let s = &options.seg;
+        SegMasker::new(
+            if s.window > 0 { s.window as usize } else { 12 },
+            if s.locut > 0.0 { s.locut } else { 2.2 },
+            if s.hicut > 0.0 { s.hicut } else { 2.5 },
+        )
+        // BLASTX keeps LOSAT's former SEG until SX (plan DW-10).
+        .keeping_all_left_segments()
+    });
+    // EXPERIMENT (LOSAT_X_BXPAR): SEG reads only the residues of its own context
+    // and the hard masking below writes only there, so the contexts of a large
+    // batch (the six frames of the full query) are filtered on the search pool
+    // before the loop consumes the intervals in context order.
+    #[allow(unused_mut)]
+    let mut seg_ready: Vec<Option<Vec<(i32, i32)>>> = Vec::new();
+    #[cfg(feature = "parallel")]
+    if let Some(masker) = seg_masker.as_ref() {
+        if super::runtime::x_bx_parallel()
+            && buffer.len() >= 60_000
+            && !super::runtime::x_inner_serial()
+            && rayon::current_thread_index().is_some()
+            && rayon::current_num_threads() > 1
+        {
+            use rayon::prelude::*;
+            let buffer = &buffer;
+            seg_ready = contexts
+                .par_iter()
+                .map(|context| {
+                    context.is_valid.then(|| {
+                        masker
+                            .mask_sequence(
+                                &buffer[context.offset + 1..context.offset + 1 + context.length],
+                            )
+                            .into_iter()
+                            .map(|r| (r.start as i32, r.end as i32 - 1))
+                            .collect()
+                    })
+                })
+                .collect();
+        }
+    }
+    for (context_index, context) in contexts.iter_mut().enumerate() {
         if !context.is_valid {
             continue;
         }
         let mut masks = context.lowercase_masks.clone();
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1144-1158
-        // ```c++
-        //         SSegOptions* seg_options = filter_options->segOptions;
-        //         SegParameters* sparamsp=NULL;
-        //
-        //         sparamsp = SegParametersNewAa();
-        //         sparamsp->overlaps = TRUE;
-        //         if (seg_options->window > 0)
-        //             sparamsp->window = seg_options->window;
-        //         if (seg_options->locut > 0.0)
-        //             sparamsp->locut = seg_options->locut;
-        //         if (seg_options->hicut > 0.0)
-        //             sparamsp->hicut = seg_options->hicut;
-        //
-        // 		status = SeqBufferSeg(sequence, length, offset, sparamsp,
-        //                               seqloc_retval);
-        // 		SegParametersFree(sparamsp);
-        // ```
-        if options.seg.enabled {
-            let s = &options.seg;
-            let masker = SegMasker::new(
-                if s.window > 0 { s.window as usize } else { 12 },
-                if s.locut > 0.0 { s.locut } else { 2.2 },
-                if s.hicut > 0.0 { s.hicut } else { 2.5 },
-            )
-            // BLASTX keeps LOSAT's former SEG until SX (plan DW-10).
-            .keeping_all_left_segments();
-            masks.extend(
-                masker
-                    .mask_sequence(&buffer[context.offset + 1..context.offset + 1 + context.length])
-                    .into_iter()
-                    .map(|r| (r.start as i32, r.end as i32 - 1)),
-            );
+        if let Some(masker) = seg_masker.as_ref() {
+            if let Some(ready) = seg_ready.get_mut(context_index).and_then(Option::take) {
+                masks.extend(ready);
+            } else {
+                masks.extend(
+                    masker
+                        .mask_sequence(
+                            &buffer[context.offset + 1..context.offset + 1 + context.length],
+                        )
+                        .into_iter()
+                        .map(|r| (r.start as i32, r.end as i32 - 1)),
+                );
+            }
         }
         context.masks = combine_masks(masks);
         if !options.soft_masking {

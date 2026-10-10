@@ -171,6 +171,22 @@ pub fn compute_std_aa_composition() -> [f64; BLASTAA_SIZE] {
 // }
 // ```
 pub fn compute_blosum62_ideal_karlin_params() -> Result<KarlinParams, String> {
+    // EXPERIMENT (LOSAT_X_IDEALMEMO): the function has no inputs (standard
+    // composition, BLOSUM62, score range -4..11), so its value is computed
+    // once per process. TBLASTN and BLASTX call it for every query batch and,
+    // in the parallel redo, on every worker.
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    if *ON.get_or_init(|| std::env::var_os("LOSAT_X_IDEALMEMO").is_some()) {
+        static IDEAL: OnceLock<Result<KarlinParams, String>> = OnceLock::new();
+        return IDEAL
+            .get_or_init(x_compute_blosum62_ideal_karlin_params)
+            .clone();
+    }
+    x_compute_blosum62_ideal_karlin_params()
+}
+
+fn x_compute_blosum62_ideal_karlin_params() -> Result<KarlinParams, String> {
     let std_comp = compute_std_aa_composition();
     let sfp = compute_score_freq_profile(&std_comp, &std_comp, -4, 11);
     compute_karlin_params_ungapped(&sfp)

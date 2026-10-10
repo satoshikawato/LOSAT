@@ -7477,6 +7477,11 @@ fn run_resolved_in_pool(
             // for (b = 0; b < numMatches; ++b) {
             // ```
             let pool = blastp_parallel_pool;
+            // EXPERIMENT (LOSAT_X_SEGSHARE): one store of masked subject
+            // ranges for all queries, as in the serial redo below.
+            let x_shared_ranges = (crate::algorithm::blastp::kappa::x_seg_share() != 0).then(|| {
+                std::sync::Arc::new(crate::algorithm::blastp::kappa::XSharedSubjectRanges::new())
+            });
             let query_heaps: Result<Vec<(usize, BlastCompoHeap)>> = pool.install(|| {
                 kappa_parallel_query_indices
                     .par_iter()
@@ -7484,7 +7489,9 @@ fn run_resolved_in_pool(
                         let mut composition_workspace = BlastCompositionWorkspace::new_blosum62();
                         let mut kappa_preliminary_hits = Vec::new();
                         let mut kappa_gap_scratch = GapAlignScratch::new();
-                        let mut kappa_subject_range_cache = BlastpKappaSubjectRangeCache::new();
+                        // EXPERIMENT (LOSAT_X_SEGSHARE): see XSharedSubjectRanges.
+                        let mut kappa_subject_range_cache =
+                            BlastpKappaSubjectRangeCache::x_with_shared(x_shared_ranges.clone());
                         let mut redone_match =
                             BlastCompoHeap::new(args.max_target_seqs, PSI_INCLUSION_ETHRESH);
                         let redo_align_params = build_redo_align_params(q_idx)?;

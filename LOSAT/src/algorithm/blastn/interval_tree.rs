@@ -99,6 +99,8 @@ struct IntervalNode {
     rightptr: i32,
     /// HSP stored at this node (only for leaf nodes)
     hsp: Option<TreeHsp>,
+    /// EXPERIMENT (LOSAT_X_ITREEFAST): this leaf was unlinked from the tree.
+    x_dead: bool,
 }
 
 impl IntervalNode {
@@ -110,6 +112,7 @@ impl IntervalNode {
             midptr: 0,
             rightptr: 0,
             hsp: None,
+            x_dead: false,
         }
     }
 
@@ -121,6 +124,270 @@ impl IntervalNode {
             midptr: 0,
             rightptr: 0,
             hsp: Some(hsp),
+            x_dead: false,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// EXPERIMENT (LOSAT_X_ITREEFAST / LOSAT_X_ITREESHADOW): two side indexes that
+// answer, without walking the tree, the two questions the tree is asked most
+// often and usually answers with "no".
+//
+// The tree is two-level: a tree over query offsets whose nodes each carry a
+// tree over subject offsets. A containment query walks one path of the first
+// and, at every node of it, one path of the second, so it visits a number of
+// nodes proportional to the product of the two depths before it can say that
+// nothing contains the HSP. The side indexes are derived from the same HSPs:
+//
+//   * A grid over (query offset, subject offset). Every HSP of the tree is
+//     listed in each grid cell its bounding box overlaps. `s_HSPIsContained`
+//     requires the start point of the input HSP to lie inside the box of the
+//     tree HSP, so every tree HSP that can contain the input is listed in the
+//     cell of the input's start point, and testing those with the unchanged
+//     predicate decides whether a containing HSP exists.
+//   * The set of (query, subject) start points and the set of end points of
+//     the HSPs ever added. `s_IntervalTreeHasHSPEndpoint` only acts on tree
+//     HSPs with the same start (or end) point as the input; when the set has
+//     no such point the walk finds nothing, removes nothing and returns
+//     FALSE, so it is skipped. The set is a bit table that can report a point
+//     it does not hold, and points are never deleted from it; either at worst
+//     makes the unchanged walk run when it was not needed.
+//
+// Why the grid answer is the tree's answer: the tree walk reaches every HSP
+// that contains the input (an HSP is stored at the first node whose middle it
+// straddles, or as the only leaf of a half it lies in; a containing HSP
+// straddles every middle the input straddles and lies on the input's side of
+// every other one, in query and in subject offsets alike), and it reaches no
+// HSP that was unlinked. So both say whether some linked HSP satisfies
+// `s_HSPIsContained`. Which containing HSP is returned can differ when there
+// are several; callers only test for existence, except trace output, and the
+// index is off whenever tracing is on.
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+thread_local! {
+    /// Lets a test choose the mode of the trees it creates.
+    static X_ITREE_TEST_MODE: std::cell::Cell<Option<u8>> = const { std::cell::Cell::new(None) };
+}
+
+/// 0 = tree only, 1 = side indexes, 2 = both and compare.
+fn x_itree_mode() -> u8 {
+    #[cfg(test)]
+    if let Some(mode) = X_ITREE_TEST_MODE.with(|mode| mode.get()) {
+        return mode;
+    }
+    use std::sync::OnceLock;
+    static MODE: OnceLock<u8> = OnceLock::new();
+    *MODE.get_or_init(|| {
+        if super::tracing::enabled() {
+            0
+        } else if std::env::var_os("LOSAT_X_ITREESHADOW").is_some() {
+            2
+        } else if std::env::var_os("LOSAT_X_ITREEFAST").is_some() {
+            1
+        } else {
+            0
+        }
+    })
+}
+
+/// One listing of a leaf in a grid cell.
+#[derive(Clone, Copy)]
+struct XCellEntry {
+    leaf: u32,
+    /// 1 + index of the next entry of the same cell, 0 = none.
+    next: u32,
+}
+
+/// Grid cells at most (the per-cell heads take four bytes each).
+const X_MAX_CELLS: usize = 1 << 16;
+/// An HSP whose box overlaps more cells than this is kept in `overflow`.
+const X_MAX_CELLS_PER_HSP: usize = 1024;
+/// With more HSPs than this in `overflow` the index is abandoned.
+const X_MAX_OVERFLOW: usize = 512;
+
+/// A set of (query, subject) points that may report points it does not hold
+/// but never misses one it holds: a bit table with two bits per point.
+struct XPointSet {
+    bits: Vec<u64>,
+    points: usize,
+}
+
+impl XPointSet {
+    fn new() -> Self {
+        Self {
+            bits: Vec::new(),
+            points: 0,
+        }
+    }
+
+    fn clear(&mut self) {
+        self.bits.clear();
+        self.points = 0;
+    }
+
+    /// Two bit positions of a point; `salt` separates start from end points.
+    #[inline]
+    fn positions(&self, q: i32, s: i32, salt: u64) -> (usize, usize) {
+        // splitmix64 finalizer
+        let mut z = (((q as u32 as u64) << 32) | s as u32 as u64) ^ salt;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^= z >> 31;
+        let mask = self.bits.len() * 64 - 1;
+        (z as usize & mask, (z >> 32) as usize & mask)
+    }
+
+    /// Bits must be at least 32 per point; true when the table has to grow
+    /// (the caller then re-inserts every point).
+    #[inline]
+    fn needs_growth(&self, more: usize) -> bool {
+        (self.points + more) * 32 > self.bits.len() * 64
+    }
+
+    fn grow(&mut self) {
+        let words = (self.bits.len() * 2).max(128);
+        self.bits = vec![0u64; words];
+        self.points = 0;
+    }
+
+    #[inline]
+    fn insert(&mut self, q: i32, s: i32, salt: u64) {
+        let (a, b) = self.positions(q, s, salt);
+        self.bits[a >> 6] |= 1u64 << (a & 63);
+        self.bits[b >> 6] |= 1u64 << (b & 63);
+        self.points += 1;
+    }
+
+    #[inline]
+    fn may_contain(&self, q: i32, s: i32, salt: u64) -> bool {
+        if self.bits.is_empty() {
+            return false;
+        }
+        let (a, b) = self.positions(q, s, salt);
+        (self.bits[a >> 6] >> (a & 63)) & (self.bits[b >> 6] >> (b & 63)) & 1 != 0
+    }
+}
+
+const X_SALT_START: u64 = 0;
+const X_SALT_END: u64 = 0x9E37_79B9_7F4A_7C15;
+
+struct XTreeIndex {
+    mode: u8,
+    /// False once the tree holds an HSP this index does not describe.
+    usable: bool,
+    shift: u32,
+    q_min: i32,
+    s_min: i32,
+    nq: usize,
+    ns: usize,
+    /// Per cell: 1 + index of its first entry, 0 = empty. Allocated on the
+    /// first HSP.
+    head: Vec<u32>,
+    /// The cells with a non-zero head, for `clear`.
+    used_cells: Vec<u32>,
+    entries: Vec<XCellEntry>,
+    overflow: Vec<u32>,
+    ends: XPointSet,
+    /// Leaves unlinked from the tree so far (for the shadow check).
+    removed: usize,
+}
+
+impl XTreeIndex {
+    fn new(q_min: i32, q_max: i32, s_min: i32, s_max: i32) -> Self {
+        let mode = x_itree_mode();
+        let mut index = Self {
+            mode,
+            usable: mode != 0,
+            shift: 0,
+            q_min,
+            s_min,
+            nq: 1,
+            ns: 1,
+            head: Vec::new(),
+            used_cells: Vec::new(),
+            entries: Vec::new(),
+            overflow: Vec::new(),
+            ends: XPointSet::new(),
+            removed: 0,
+        };
+        index.set_bounds(q_min, q_max, s_min, s_max);
+        index
+    }
+
+    fn set_bounds(&mut self, q_min: i32, q_max: i32, s_min: i32, s_max: i32) {
+        let q_span = (q_max as i64 - q_min as i64).max(0) as usize;
+        let s_span = (s_max as i64 - s_min as i64).max(0) as usize;
+        let mut shift = 6u32;
+        while ((q_span >> shift) + 1).saturating_mul((s_span >> shift) + 1) > X_MAX_CELLS {
+            shift += 1;
+        }
+        self.shift = shift;
+        self.q_min = q_min;
+        self.s_min = s_min;
+        self.nq = (q_span >> shift) + 1;
+        self.ns = (s_span >> shift) + 1;
+        self.head = Vec::new();
+        self.used_cells.clear();
+        self.clear();
+    }
+
+    fn clear(&mut self) {
+        for &cell in &self.used_cells {
+            self.head[cell as usize] = 0;
+        }
+        self.used_cells.clear();
+        self.entries.clear();
+        self.overflow.clear();
+        self.ends.clear();
+        self.removed = 0;
+        self.usable = self.mode != 0;
+    }
+
+    /// Grid column of an absolute query offset (monotone, clamped).
+    #[inline]
+    fn q_cell(&self, q: i32) -> usize {
+        let rel = (q as i64 - self.q_min as i64).max(0) as usize >> self.shift;
+        rel.min(self.nq - 1)
+    }
+
+    /// Grid row of a subject offset (monotone, clamped).
+    #[inline]
+    fn s_cell(&self, s: i32) -> usize {
+        let rel = (s as i64 - self.s_min as i64).max(0) as usize >> self.shift;
+        rel.min(self.ns - 1)
+    }
+
+    /// List `leaf` in every cell its box overlaps.
+    fn register(&mut self, leaf: usize, hsp: &TreeHsp, query_start: i32) {
+        let q_a = self.q_cell(query_start + hsp.query_offset.min(hsp.query_end));
+        let q_b = self.q_cell(query_start + hsp.query_offset.max(hsp.query_end));
+        let s_a = self.s_cell(hsp.subject_offset.min(hsp.subject_end));
+        let s_b = self.s_cell(hsp.subject_offset.max(hsp.subject_end));
+        let cells = (q_b - q_a + 1) * (s_b - s_a + 1);
+        if cells > X_MAX_CELLS_PER_HSP {
+            self.overflow.push(leaf as u32);
+            if self.overflow.len() > X_MAX_OVERFLOW {
+                self.usable = false;
+            }
+            return;
+        }
+        if self.head.is_empty() {
+            self.head = vec![0u32; self.nq * self.ns];
+        }
+        for q in q_a..=q_b {
+            for s in s_a..=s_b {
+                let cell = q * self.ns + s;
+                if self.head[cell] == 0 {
+                    self.used_cells.push(cell as u32);
+                }
+                self.entries.push(XCellEntry {
+                    leaf: leaf as u32,
+                    next: self.head[cell],
+                });
+                self.head[cell] = self.entries.len() as u32;
+            }
         }
     }
 }
@@ -143,6 +410,8 @@ pub struct BlastIntervalTree {
     s_min: i32,
     /// Maximum subject offset
     s_max: i32,
+    /// EXPERIMENT (LOSAT_X_ITREEFAST)
+    x: XTreeIndex,
 }
 
 impl BlastIntervalTree {
@@ -166,6 +435,7 @@ impl BlastIntervalTree {
             nodes: Vec::with_capacity(100),
             s_min,
             s_max,
+            x: XTreeIndex::new(q_min, q_max, s_min, s_max),
         };
 
         // Create root node for query range
@@ -205,6 +475,7 @@ impl BlastIntervalTree {
             self.nodes
                 .push(IntervalNode::new_internal(leftend, rightend));
         }
+        self.x.clear();
     }
 
     /// Reset the tree bounds for reuse.
@@ -223,6 +494,7 @@ impl BlastIntervalTree {
         self.s_max = s_max;
         self.nodes.clear();
         self.nodes.push(IntervalNode::new_internal(q_min, q_max));
+        self.x.set_bounds(q_min, q_max, s_min, s_max);
     }
 
     /// Allocate a new internal node
@@ -432,6 +704,8 @@ impl BlastIntervalTree {
                     Some(EndpointResult::KeepInput) => {
                         // Remove worse HSP from list: list_node->midptr = tmp_index
                         self.nodes[list_idx].midptr = next_idx;
+                        self.nodes[tmp_index as usize].x_dead = true;
+                        self.x.removed += 1;
                     }
                     None => {}
                 }
@@ -483,6 +757,8 @@ impl BlastIntervalTree {
                         } else {
                             self.nodes[root_idx].rightptr = 0;
                         }
+                        self.nodes[next_child_idx as usize].x_dead = true;
+                        self.x.removed += 1;
                         return false;
                     }
                     None => {}
@@ -578,6 +854,8 @@ impl BlastIntervalTree {
                         } else {
                             self.nodes[root_idx].rightptr = 0;
                         }
+                        self.nodes[next_child_idx as usize].x_dead = true;
+                        self.x.removed += 1;
                         return false;
                     }
                     None => {}
@@ -588,6 +866,90 @@ impl BlastIntervalTree {
             // NCBI reference: blast_itree.c:503
             root_idx = next_child_idx as usize;
         }
+    }
+
+    /// EXPERIMENT (LOSAT_X_ITREEFAST): `interval_tree_has_hsp_endpoint`,
+    /// skipped when no HSP ever added has the input's start (or end) point.
+    fn x_has_hsp_endpoint(
+        &mut self,
+        in_hsp: &TreeHsp,
+        in_q_start: i32,
+        which_end: IntervalDirection,
+        x_on: bool,
+    ) -> bool {
+        if !x_on {
+            return self.interval_tree_has_hsp_endpoint(in_hsp, in_q_start, which_end);
+        }
+        let possible = match which_end {
+            IntervalDirection::Left => self.x.ends.may_contain(
+                in_q_start + in_hsp.query_offset,
+                in_hsp.subject_offset,
+                X_SALT_START,
+            ),
+            IntervalDirection::Right => self.x.ends.may_contain(
+                in_q_start + in_hsp.query_end,
+                in_hsp.subject_end,
+                X_SALT_END,
+            ),
+            IntervalDirection::Neither => return false,
+        };
+        if possible {
+            return self.interval_tree_has_hsp_endpoint(in_hsp, in_q_start, which_end);
+        }
+        if self.x.mode == 2 {
+            // LOSAT_X_ITREESHADOW: the walk must find nothing and unlink nothing.
+            let removed = self.x.removed;
+            let found = self.interval_tree_has_hsp_endpoint(in_hsp, in_q_start, which_end);
+            assert!(
+                !found && self.x.removed == removed,
+                "LOSAT_X_ITREESHADOW: the tree found a common endpoint the point set does not have"
+            );
+        }
+        false
+    }
+
+    /// EXPERIMENT (LOSAT_X_ITREEFAST): a linked tree HSP that contains `hsp`,
+    /// from the grid cell of the start point of `hsp`.
+    fn x_find_container(
+        &self,
+        hsp: &TreeHsp,
+        query_start: i32,
+        min_diag_separation: i32,
+    ) -> Option<TreeHsp> {
+        let x = &self.x;
+        let test = |leaf: u32| -> Option<TreeHsp> {
+            let node = &self.nodes[leaf as usize];
+            if node.x_dead {
+                return None;
+            }
+            let tree_hsp = node.hsp.as_ref()?;
+            Self::is_hsp_contained(
+                hsp,
+                query_start,
+                tree_hsp,
+                node.leftptr,
+                min_diag_separation,
+            )
+            .then_some(*tree_hsp)
+        };
+        if !x.head.is_empty() {
+            let cell =
+                x.q_cell(query_start + hsp.query_offset) * x.ns + x.s_cell(hsp.subject_offset);
+            let mut at = x.head[cell];
+            while at != 0 {
+                let entry = x.entries[at as usize - 1];
+                if let Some(found) = test(entry.leaf) {
+                    return Some(found);
+                }
+                at = entry.next;
+            }
+        }
+        for &leaf in &x.overflow {
+            if let Some(found) = test(leaf) {
+                return Some(found);
+            }
+        }
+        None
     }
 
     /// Add an HSP to the tree
@@ -620,15 +982,22 @@ impl BlastIntervalTree {
                 (query_start + hsp.query_offset, query_start + hsp.query_end)
             };
 
+        // EXPERIMENT (LOSAT_X_ITREEFAST): the side indexes describe trees
+        // built with eQueryAndSubject only.
+        if index_method != IndexMethod::QueryAndSubject {
+            self.x.usable = false;
+        }
+        let x_on = self.x.usable;
+
         // NCBI reference: blast_itree.c:558-585
         // For eQueryAndSubject, check for common endpoints before adding
         if index_method == IndexMethod::QueryAndSubject {
             // Check left endpoint
-            if self.interval_tree_has_hsp_endpoint(&hsp, query_start, IntervalDirection::Left) {
+            if self.x_has_hsp_endpoint(&hsp, query_start, IntervalDirection::Left, x_on) {
                 return; // Better HSP with same endpoint already exists
             }
             // Check right endpoint
-            if self.interval_tree_has_hsp_endpoint(&hsp, query_start, IntervalDirection::Right) {
+            if self.x_has_hsp_endpoint(&hsp, query_start, IntervalDirection::Right, x_on) {
                 return; // Better HSP with same endpoint already exists
             }
         }
@@ -636,6 +1005,40 @@ impl BlastIntervalTree {
         // NCBI reference: blast_itree.c:591-599
         // Encapsulate the input HSP in an SIntervalNode (leaf node)
         let new_index = self.alloc_leaf_node(hsp, query_start);
+        if x_on {
+            self.x.register(new_index, &hsp, query_start);
+            if self.x.ends.needs_growth(2) {
+                // a larger table, refilled from every leaf ever allocated
+                self.x.ends.grow();
+                while self.x.ends.needs_growth(2 * self.nodes.len()) {
+                    self.x.ends.grow();
+                }
+                for node in &self.nodes {
+                    if let Some(leaf_hsp) = node.hsp.as_ref() {
+                        let start = node.leftptr;
+                        self.x.ends.insert(
+                            start + leaf_hsp.query_offset,
+                            leaf_hsp.subject_offset,
+                            X_SALT_START,
+                        );
+                        self.x.ends.insert(
+                            start + leaf_hsp.query_end,
+                            leaf_hsp.subject_end,
+                            X_SALT_END,
+                        );
+                    }
+                }
+            } else {
+                self.x.ends.insert(
+                    query_start + hsp.query_offset,
+                    hsp.subject_offset,
+                    X_SALT_START,
+                );
+                self.x
+                    .ends
+                    .insert(query_start + hsp.query_end, hsp.subject_end, X_SALT_END);
+            }
+        }
 
         // Start the insertion loop
         self.add_hsp_internal(
@@ -935,6 +1338,31 @@ impl BlastIntervalTree {
     /// See the snippet on `contains_hsp`; this method preserves that traversal
     /// and exposes the matched tree HSP for Phase 6 parity diagnostics.
     pub fn containing_hsp(
+        &self,
+        hsp: &TreeHsp,
+        query_context_offset: i32,
+        min_diag_separation: i32,
+    ) -> Option<TreeHsp> {
+        // EXPERIMENT (LOSAT_X_ITREEFAST / LOSAT_X_ITREESHADOW)
+        if self.x.usable {
+            let found = self.x_find_container(hsp, query_context_offset, min_diag_separation);
+            if self.x.mode == 1 {
+                return found;
+            }
+            let tree = self.containing_hsp_tree(hsp, query_context_offset, min_diag_separation);
+            assert!(
+                found.is_some() == tree.is_some(),
+                "LOSAT_X_ITREESHADOW: grid says contained={}, tree says contained={}",
+                found.is_some(),
+                tree.is_some()
+            );
+            return tree;
+        }
+        self.containing_hsp_tree(hsp, query_context_offset, min_diag_separation)
+    }
+
+    /// The tree walk of `containing_hsp`.
+    fn containing_hsp_tree(
         &self,
         hsp: &TreeHsp,
         query_context_offset: i32,
@@ -1297,6 +1725,165 @@ mod tests {
             query_context_offset: 0,
             subject_frame_sign,
         }
+    }
+
+    /// EXPERIMENT (LOSAT_X_ITREEFAST): three trees are fed the same random
+    /// HSPs, one walking the tree only, one using the side indexes, and one
+    /// doing both and comparing inside every call. Every containment answer
+    /// must agree, and the trees must end up with the same nodes and the same
+    /// number of unlinked HSPs. The HSPs are generated so that containment,
+    /// shared start points, shared end points and replacements all occur.
+    #[test]
+    fn x_side_indexes_agree_with_tree_walk_on_random_hsps() {
+        struct Rng(u64);
+        impl Rng {
+            fn next(&mut self) -> u64 {
+                self.0 ^= self.0 << 13;
+                self.0 ^= self.0 >> 7;
+                self.0 ^= self.0 << 17;
+                self.0
+            }
+            fn below(&mut self, n: u64) -> u64 {
+                self.next() % n
+            }
+        }
+        let trials: usize = std::env::var("LOSAT_FUZZ_CASES")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(60);
+        let mut rng = Rng(0xD6E8_FEB8_6659_FD93);
+        let mut contained = 0usize;
+        let mut queries = 0usize;
+        let mut unlinked = 0usize;
+        for trial in 0..trials {
+            let q_len = [300i32, 5_000, 80_000, 3_000_000][trial % 4];
+            let s_len = [400i32, 9_000, 120_000, 2_000_000][(trial / 4) % 4];
+            let separation = [0i32, 6, 50][trial % 3];
+            let new_tree = |mode: u8| {
+                X_ITREE_TEST_MODE.with(|m| m.set(Some(mode)));
+                let tree = BlastIntervalTree::new(0, 2 * q_len + 1, 0, s_len + 1);
+                X_ITREE_TEST_MODE.with(|m| m.set(None));
+                tree
+            };
+            let mut walk = new_tree(0);
+            let mut indexed = new_tree(1);
+            let mut both = new_tree(2);
+            let mut added: Vec<(TreeHsp, i32)> = Vec::new();
+            let count = 200 + rng.below(1500) as usize;
+            for _ in 0..count {
+                let context_offset = if rng.below(4) == 0 { q_len + 1 } else { 0 };
+                let kind = rng.below(10);
+                let (mut hsp, context_offset) = if kind < 3 && !added.is_empty() {
+                    // a piece of an earlier HSP (often contained in it)
+                    let (base, offset) = added[rng.below(added.len() as u64) as usize];
+                    let q_span = (base.query_end - base.query_offset).max(1);
+                    let s_span = (base.subject_end - base.subject_offset).max(1);
+                    let a = rng.below(q_span as u64) as i32;
+                    let b = a + rng.below((q_span - a) as u64 + 1) as i32;
+                    let shift = rng.below(5) as i32 - 2;
+                    let mut piece = base;
+                    piece.query_offset = base.query_offset + a;
+                    piece.query_end = base.query_offset + b;
+                    piece.subject_offset = (base.subject_offset + a.min(s_span) + shift).max(0);
+                    piece.subject_end =
+                        (base.subject_offset + b.min(s_span) + shift).max(piece.subject_offset);
+                    piece.score = (base.score - rng.below(40) as i32 + 5).max(1);
+                    (piece, offset)
+                } else if kind < 5 && !added.is_empty() {
+                    // shares the start or the end point of an earlier HSP
+                    let (base, offset) = added[rng.below(added.len() as u64) as usize];
+                    let mut other = base;
+                    let change = 1 + rng.below(200) as i32;
+                    if rng.below(2) == 0 {
+                        other.query_end = (base.query_end + change - 100).max(base.query_offset);
+                        other.subject_end =
+                            (base.subject_end + change - 100).max(base.subject_offset);
+                    } else {
+                        other.query_offset =
+                            (base.query_offset - change + 100).clamp(0, base.query_end);
+                        other.subject_offset =
+                            (base.subject_offset - change + 100).clamp(0, base.subject_end);
+                    }
+                    other.score = (base.score + rng.below(41) as i32 - 20).max(1);
+                    (other, offset)
+                } else {
+                    let longest = [50u64, 800, 20_000][rng.below(3) as usize];
+                    let length = 5 + rng.below(longest) as i32;
+                    let length = length.min(q_len - 1).min(s_len - 1).max(1);
+                    let query_offset = rng.below((q_len - length) as u64) as i32;
+                    let subject_offset = rng.below((s_len - length) as u64) as i32;
+                    let skew = rng.below(7) as i32 - 3;
+                    (
+                        TreeHsp {
+                            query_offset,
+                            query_end: query_offset + length,
+                            subject_offset,
+                            subject_end: (subject_offset + length + skew).max(subject_offset),
+                            score: length + rng.below(30) as i32,
+                            query_frame: 1,
+                            query_length: q_len,
+                            query_context_offset: context_offset,
+                            subject_frame_sign: if rng.below(8) == 0 { -1 } else { 1 },
+                        },
+                        context_offset,
+                    )
+                };
+                hsp.query_context_offset = context_offset;
+                // inside the ranges the tree was built for
+                hsp.query_offset = hsp.query_offset.clamp(0, q_len);
+                hsp.query_end = hsp.query_end.clamp(hsp.query_offset, q_len);
+                hsp.subject_offset = hsp.subject_offset.clamp(0, s_len);
+                hsp.subject_end = hsp.subject_end.clamp(hsp.subject_offset, s_len);
+
+                let a = walk.contains_hsp(&hsp, context_offset, separation);
+                let b = indexed.contains_hsp(&hsp, context_offset, separation);
+                let c = both.contains_hsp(&hsp, context_offset, separation);
+                assert!(
+                    a == b && a == c,
+                    "trial {trial}: walk={a} indexed={b} both={c} for {hsp:?}"
+                );
+                queries += 1;
+                contained += a as usize;
+                if !a || rng.below(4) == 0 {
+                    walk.add_hsp(hsp, context_offset, IndexMethod::QueryAndSubject);
+                    indexed.add_hsp(hsp, context_offset, IndexMethod::QueryAndSubject);
+                    both.add_hsp(hsp, context_offset, IndexMethod::QueryAndSubject);
+                    added.push((hsp, context_offset));
+                }
+            }
+            assert_eq!(walk.node_count(), indexed.node_count(), "trial {trial}");
+            assert_eq!(walk.node_count(), both.node_count(), "trial {trial}");
+            assert_eq!(walk.x.removed, indexed.x.removed, "trial {trial}");
+            assert_eq!(walk.x.removed, both.x.removed, "trial {trial}");
+            assert!(
+                indexed.x.usable && both.x.usable,
+                "trial {trial}: index abandoned"
+            );
+            unlinked += walk.x.removed;
+            // every HSP ever offered, asked again of the final trees
+            for &(hsp, context_offset) in &added {
+                let a = walk.contains_hsp(&hsp, context_offset, separation);
+                let b = indexed.contains_hsp(&hsp, context_offset, separation);
+                let c = both.contains_hsp(&hsp, context_offset, separation);
+                assert!(
+                    a == b && a == c,
+                    "trial {trial}: final walk={a} indexed={b} both={c}"
+                );
+            }
+        }
+        // the generator must exercise both answers and the unlinking
+        assert!(
+            contained * 10 > queries,
+            "{contained} of {queries} contained"
+        );
+        assert!(
+            (queries - contained) * 10 > queries,
+            "{contained} of {queries} contained"
+        );
+        assert!(
+            unlinked > trials,
+            "{unlinked} HSPs unlinked in {trials} trials"
+        );
     }
 
     #[test]

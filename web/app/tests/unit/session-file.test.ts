@@ -454,6 +454,8 @@ describe('what a loaded run must agree with', () => {
     expect(problem([hsp(), second()])).toBeUndefined();
     expect(problem([second(), hsp()])).toBeUndefined();
     expect(problem([hsp({ query_frame: -3, subject_frame: 2, later_field: 'x' }), second({ subject_length: null })])).toBeUndefined();
+    // The adapter writes a value that is not finite as null (web/adapter/src/json.rs).
+    expect(problem([hsp({ bit_score: null, e_value: null }), second({ raw_score: null })])).toBeUndefined();
   });
 
   it('names the HSP record that the run cannot have', () => {
@@ -488,8 +490,8 @@ describe('what a loaded run must agree with', () => {
       [{ q_end: 2 ** 53 }, 'HSP record 1 has q_end 9007199254740992, not a coordinate (a whole number of 1 or more)'],
       [{ query_frame: 259 }, 'HSP record 1 has query_frame 259, not null or a frame of -3 to 3 other than 0'],
       [{ subject_frame: '1' }, 'HSP record 1 has subject_frame "1", not null or a frame of -3 to 3 other than 0'],
-      [{ bit_score: null }, 'HSP record 1 has bit_score null, not a number'],
-      [{ e_value: '1e-5' }, 'HSP record 1 has e_value "1e-5", not a number'],
+      [{ bit_score: true }, 'HSP record 1 has bit_score true, not null or a number'],
+      [{ e_value: '1e-5' }, 'HSP record 1 has e_value "1e-5", not null or a number'],
       [{ subject_length: -1 }, 'HSP record 1 has subject_length -1, not null or a whole number of 0 or more'],
       [{ query_aligned: 5 }, 'HSP record 1 has query_aligned 5, not null or text'],
       [{ out6: [0, '15'] }, 'HSP record 1 has out6 [0,"15"], not null or a byte range within the run\'s 30 bytes of outfmt 6'],
@@ -501,7 +503,7 @@ describe('what a loaded run must agree with', () => {
     expect(problem([null, second()])).toBe('HSP record 1 is not a JSON object');
     // JSON numbers too large for a double are Infinity once parsed.
     const check = new HspRecordCheck(hspRecordBounds(r));
-    expect(check.next(JSON.parse(JSON.stringify(hsp()).replace('"raw_score":10', '"raw_score":1e999')))).toBe('HSP record 1 has raw_score Infinity, not a number');
+    expect(check.next(JSON.parse(JSON.stringify(hsp()).replace('"raw_score":10', '"raw_score":1e999')))).toBe('HSP record 1 has raw_score Infinity, not null or a number');
   });
 
   it('names the first record of chosen files that differs from the saved input, or the count', () => {

@@ -780,8 +780,10 @@ export class HspRecordCheck {
       if (!isCount(record[field]) || record[field] === 0) return wrong(field, 'a coordinate (a whole number of 1 or more)');
     }
     for (const field of ['query_frame', 'subject_frame']) if (!isFrame(record[field])) return wrong(field, 'null or a frame of -3 to 3 other than 0');
+    // The adapter writes null for a value that is not finite (web/adapter/src/json.rs `number`), so
+    // a run that the engine wrote can hold it; refusing it would make a saved session unopenable.
     for (const field of ['raw_score', 'bit_score', 'e_value']) {
-      if (typeof record[field] !== 'number' || !Number.isFinite(record[field])) return wrong(field, 'a number');
+      if (record[field] !== null && (typeof record[field] !== 'number' || !Number.isFinite(record[field]))) return wrong(field, 'null or a number');
     }
     if (record.subject_length !== null && !isCount(record.subject_length)) return wrong('subject_length', 'null or a whole number of 0 or more');
     for (const field of ['query_aligned', 'subject_aligned']) {

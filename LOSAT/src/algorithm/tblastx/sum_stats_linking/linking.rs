@@ -104,6 +104,20 @@ fn legacy_linking_requested() -> bool {
     })
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:414-419
+// ```c
+// s_BlastEvenGapLinkHSPs(EBlastProgramType program_number, BlastHSPList* hsp_list,
+// ```
+// No NCBI counterpart for the switch: with it set, the literal port of s_BlastEvenGapLinkHSPs
+// also links every group and the complete results are compared. It does not change any value NCBI
+// computes.
+/// `LOSAT_LINK_FAST_SHADOW=1`: also link every group with the literal port and
+/// compare the complete results (`link_hsp_group_incremental`).
+fn link_shadow_enabled() -> bool {
+    static FLAG: OnceLock<bool> = OnceLock::new();
+    *FLAG.get_or_init(|| std::env::var_os("LOSAT_LINK_FAST_SHADOW").is_some())
+}
+
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:901-982
 // ```c
 // ordering_method =
@@ -724,12 +738,11 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
             )),
     );
     let initial_lh_size = (total_hits + 5).max(1024); // NCBI: MAX(1024, hspcnt+5)
-                                                      // The incremental linker computes the same chains as `link_hsp_group_ncbi`;
-                                                      // the literal port stays available for tracing and as the reference.
+
+    // The incremental kernel of linking_incr.rs links every group with the same result as the
+    // literal port `link_hsp_group_ncbi`, which stays for LOSAT_LINKING_LEGACY, the linking traces
+    // and as the reference of the tests.
     let use_legacy = legacy_linking_requested();
-    // LOSAT_LINK_FAST=1: the index kernel of linking_index.rs replaces the default kernel; legacy
-    // and traced runs keep the literal port.
-    let use_link_fast = !use_legacy && super::linking_index::link_fast_enabled();
 
     #[cfg(all(
         feature = "parallel",
@@ -767,13 +780,12 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
                             &mut pool.lh_helpers,
                             &mut pool.hsp_links,
                         )
-                    } else if use_link_fast {
-                        link_hsp_group_link_fast(
+                    } else {
+                        link_hsp_group_incremental(
                             group_hits,
                             params,
                             &cutoffs,
                             linking_params.gap_decay_rate,
-                            diag_enabled,
                             linking_params.subject_len_nucl,
                             query_contexts,
                             subject_frame_bases,
@@ -782,17 +794,6 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
                             &log_k_by_ctx,
                             &mut pool.lh_helpers,
                             &mut pool.hsp_links,
-                        )
-                    } else {
-                        super::linking_fast::link_hsp_group_fast(
-                            group_hits,
-                            &cutoffs,
-                            linking_params.gap_decay_rate,
-                            linking_params.subject_len_nucl,
-                            query_contexts,
-                            length_adj_per_context,
-                            eff_searchsp_per_context,
-                            &log_k_by_ctx,
                         )
                     };
                     (group_idx, processed)
@@ -838,13 +839,12 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
                     &mut pools.lh_helpers,
                     &mut pools.hsp_links,
                 )
-            } else if use_link_fast {
-                link_hsp_group_link_fast(
+            } else {
+                link_hsp_group_incremental(
                     group_hits,
                     params,
                     &cutoffs,
                     linking_params.gap_decay_rate,
-                    diag_enabled,
                     linking_params.subject_len_nucl,
                     query_contexts,
                     subject_frame_bases,
@@ -853,17 +853,6 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
                     &log_k_by_ctx,
                     &mut pools.lh_helpers,
                     &mut pools.hsp_links,
-                )
-            } else {
-                super::linking_fast::link_hsp_group_fast(
-                    group_hits,
-                    &cutoffs,
-                    linking_params.gap_decay_rate,
-                    linking_params.subject_len_nucl,
-                    query_contexts,
-                    length_adj_per_context,
-                    eff_searchsp_per_context,
-                    &log_k_by_ctx,
                 )
             };
             ordered.extend(processed);
@@ -898,13 +887,12 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
                     &mut pools.lh_helpers,
                     &mut pools.hsp_links,
                 )
-            } else if use_link_fast {
-                link_hsp_group_link_fast(
+            } else {
+                link_hsp_group_incremental(
                     group_hits,
                     params,
                     &cutoffs,
                     linking_params.gap_decay_rate,
-                    diag_enabled,
                     linking_params.subject_len_nucl,
                     query_contexts,
                     subject_frame_bases,
@@ -913,17 +901,6 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
                     &log_k_by_ctx,
                     &mut pools.lh_helpers,
                     &mut pools.hsp_links,
-                )
-            } else {
-                super::linking_fast::link_hsp_group_fast(
-                    group_hits,
-                    &cutoffs,
-                    linking_params.gap_decay_rate,
-                    linking_params.subject_len_nucl,
-                    query_contexts,
-                    length_adj_per_context,
-                    eff_searchsp_per_context,
-                    &log_k_by_ctx,
                 )
             };
             ordered.extend(processed);
@@ -1232,7 +1209,7 @@ fn assert_same_linking(expected: &[UngappedHit], actual: &[UngappedHit]) {
     for (index, (a, b)) in expected.iter().zip(actual).enumerate() {
         assert!(
             a.e_value.to_bits() == b.e_value.to_bits() && format!("{a:?}") == format!("{b:?}"),
-            "LOSAT_LINK_FAST_SHADOW: HSP {index} of {}\n  NCBI kernel:  {a:?}\n  index kernel: {b:?}",
+            "LOSAT_LINK_FAST_SHADOW: HSP {index} of {}\n  literal port:       {a:?}\n  incremental kernel: {b:?}",
             expected.len()
         );
     }
@@ -1244,24 +1221,19 @@ fn assert_same_linking(expected: &[UngappedHit], actual: &[UngappedHit]) {
 // ...
 //       while (number_of_hsps > 0)
 // ```
-// Switch point of LOSAT_LINK_FAST. The index-backed kernel of linking_index.rs (LOSAT_LINK_FAST=1)
-// and the incremental kernel of linking_incr.rs (LOSAT_LINK_FAST=2) port s_BlastEvenGapLinkHSPs
-// with different predecessor searches. The literal port links a group whose sums leave the Int4
-// range of the index kernel; a run with diagnostics on runs the default kernel (linking_fast.rs).
-/// Links one group under `LOSAT_LINK_FAST=1` with the index-backed kernel of
-/// `linking_index.rs`, or under `LOSAT_LINK_FAST=2` with the incremental
-/// kernel of `linking_incr.rs`; both return the same result as the literal
-/// port `link_hsp_group_ncbi`. The literal port itself links a group whose
-/// sums leave the Int4 range of the index kernel (`linking_index.rs`, "Int4
-/// range"); a run with diagnostics on uses the default kernel of
-/// `linking_fast.rs`.
+// The default per-group port of s_BlastEvenGapLinkHSPs: the incremental kernel of linking_incr.rs,
+// for every group and also in a run with diagnostics on. LOSAT_LINK_FAST_SHADOW only adds a run of
+// the literal port and a comparison; it changes no value of the result.
+/// Links one group with the incremental kernel of `linking_incr.rs`, which
+/// returns the same result as the literal port `link_hsp_group_ncbi`. Under
+/// `LOSAT_LINK_FAST_SHADOW` the literal port also links the group (its
+/// diagnostics output off) and the two results must be equal.
 #[allow(clippy::too_many_arguments)]
-fn link_hsp_group_link_fast(
+fn link_hsp_group_incremental(
     group_hits: Vec<UngappedHit>,
     params: &KarlinParams,
     cutoffs: &LinkHspCutoffs,
     gap_decay_rate: f64,
-    diag_enabled: bool,
     subject_len_nucl: i64,
     query_contexts: &[QueryContext],
     subject_frame_bases: &[i32],
@@ -1271,27 +1243,13 @@ fn link_hsp_group_link_fast(
     pool_lh_helpers: &mut Vec<LhHelper>,
     pool_hsp_links: &mut Vec<HspLink>,
 ) -> Vec<UngappedHit> {
-    use super::linking_index as index;
-
-    if group_hits.is_empty() || diag_enabled {
-        return super::linking_fast::link_hsp_group_fast(
-            group_hits,
-            cutoffs,
-            gap_decay_rate,
-            subject_len_nucl,
-            query_contexts,
-            length_adj_per_context,
-            eff_searchsp_per_context,
-            log_k_by_ctx,
-        );
-    }
-    let expected = index::link_fast_shadow_enabled().then(|| {
+    let expected = link_shadow_enabled().then(|| {
         link_hsp_group_ncbi(
             group_hits.clone(),
             params,
             cutoffs,
             gap_decay_rate,
-            diag_enabled,
+            false,
             subject_len_nucl,
             query_contexts,
             subject_frame_bases,
@@ -1302,47 +1260,16 @@ fn link_hsp_group_link_fast(
             pool_hsp_links,
         )
     });
-    let result = if index::link_fast_mode() == 2 {
-        Ok(super::linking_incr::link_hsp_group_incr(
-            group_hits,
-            cutoffs,
-            gap_decay_rate,
-            subject_len_nucl,
-            query_contexts,
-            length_adj_per_context,
-            eff_searchsp_per_context,
-            log_k_by_ctx,
-        ))
-    } else {
-        index::link_hsp_group_fast(
-            group_hits,
-            cutoffs,
-            gap_decay_rate,
-            subject_len_nucl,
-            query_contexts,
-            length_adj_per_context,
-            eff_searchsp_per_context,
-            log_k_by_ctx,
-        )
-    };
-    let linked = match result {
-        Ok(linked) => linked,
-        Err(group_hits) => link_hsp_group_ncbi(
-            group_hits,
-            params,
-            cutoffs,
-            gap_decay_rate,
-            diag_enabled,
-            subject_len_nucl,
-            query_contexts,
-            subject_frame_bases,
-            length_adj_per_context,
-            eff_searchsp_per_context,
-            log_k_by_ctx,
-            pool_lh_helpers,
-            pool_hsp_links,
-        ),
-    };
+    let linked = super::linking_incr::link_hsp_group_incr(
+        group_hits,
+        cutoffs,
+        gap_decay_rate,
+        subject_len_nucl,
+        query_contexts,
+        length_adj_per_context,
+        eff_searchsp_per_context,
+        log_k_by_ctx,
+    );
     if let Some(expected) = expected {
         assert_same_linking(&expected, &linked);
     }
@@ -3624,7 +3551,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Index-backed kernel (`linking_index.rs`, LOSAT_LINK_FAST=1)
+    // Incremental kernel (`linking_incr.rs`, the default)
     // -----------------------------------------------------------------------
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:414-419,589
@@ -3633,13 +3560,10 @@ mod tests {
     // ...
     //       while (number_of_hsps > 0)
     // ```
-    // These tests compare the index-backed kernel with the port of s_BlastEvenGapLinkHSPs on the
-    // same groups. The reference results are the NCBI kernel above, not hand-written numbers.
+    // These tests compare the incremental kernel with the port of s_BlastEvenGapLinkHSPs on the
+    // same groups. The reference results are the literal port above, not hand-written numbers.
     use crate::algorithm::tblastx::sum_stats_linking::linking_incr::{
         link_hsp_group_incr_with, IncrOptions, IncrStats,
-    };
-    use crate::algorithm::tblastx::sum_stats_linking::linking_index::{
-        link_hsp_group_fast_with, LinkFastOptions, LinkFastStats,
     };
 
     fn fast_test_cutoffs() -> LinkHspCutoffs {
@@ -3699,18 +3623,17 @@ mod tests {
     // ...
     //                 H->hsp->num = num_links;
     // ```
-    // The helper runs the port of s_BlastEvenGapLinkHSPs and the index-backed kernel on the same
+    // The helper runs the port of s_BlastEvenGapLinkHSPs and the incremental kernel on the same
     // sorted group and compares every field of the result (E-values bit for bit).
-    /// Links `hits` (any order) with the NCBI kernel and with the
-    /// index-backed kernel, every choice of the latter checked by the plain
-    /// scan, and requires the same HSPs in the same order with every field
-    /// equal. Returns that result and what the index-backed kernel did.
+    /// Links `hits` (any order) with the literal port and with the incremental
+    /// kernel and requires the same HSPs in the same order with every field
+    /// equal. Returns that result and what the incremental kernel did.
     fn link_with_both_kernels(
         mut hits: Vec<UngappedHit>,
         cutoffs: &LinkHspCutoffs,
-        options: LinkFastOptions,
+        options: IncrOptions,
         label: &str,
-    ) -> (Vec<UngappedHit>, LinkFastStats) {
+    ) -> (Vec<UngappedHit>, IncrStats) {
         let (params, contexts, log_k) = fast_test_contexts();
         sort_hsps_by_ncbi_link_order(&mut hits, rev_compare_hsps_tbx);
         for (link_id, hit) in hits.iter_mut().enumerate() {
@@ -3735,7 +3658,7 @@ mod tests {
             &mut helpers,
             &mut links,
         );
-        let (actual, stats) = link_hsp_group_fast_with(
+        let (actual, stats) = link_hsp_group_incr_with(
             hits,
             cutoffs,
             0.5,
@@ -3754,89 +3677,18 @@ mod tests {
         (actual, stats)
     }
 
-    const VERIFIED: LinkFastOptions = LinkFastOptions {
-        verify: true,
-        reuse_index0: true,
-        check_int4: true,
-    };
-    const VERIFIED_NCBI_INDEX0: LinkFastOptions = LinkFastOptions {
-        verify: true,
-        reuse_index0: false,
-        check_int4: true,
-    };
-
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:414-419,589
-    // ```c
-    // s_BlastEvenGapLinkHSPs(EBlastProgramType program_number, BlastHSPList* hsp_list,
-    // ...
-    //       while (number_of_hsps > 0)
-    // ```
-    // The incremental kernel on a group sorted as link_with_both_kernels sorts it; the callers
-    // compare its result with the port of s_BlastEvenGapLinkHSPs.
-    /// Links `hits` (any order) with the incremental kernel of
-    /// `linking_incr.rs`, on the group prepared as `link_with_both_kernels`
-    /// prepares it.
-    fn link_with_incr_kernel(
-        mut hits: Vec<UngappedHit>,
-        cutoffs: &LinkHspCutoffs,
-        options: IncrOptions,
-    ) -> (Vec<UngappedHit>, IncrStats) {
-        let (_, contexts, log_k) = fast_test_contexts();
-        sort_hsps_by_ncbi_link_order(&mut hits, rev_compare_hsps_tbx);
-        for (link_id, hit) in hits.iter_mut().enumerate() {
-            hit.link_id = link_id;
-            hit.chain_next_link_id = None;
-            hit.num = 1;
-        }
-        link_hsp_group_incr_with(
-            hits,
-            cutoffs,
-            0.5,
-            300_000,
-            &contexts,
-            &[49; 6],
-            &[9_372_428_362; 6],
-            &log_k,
-            options,
-        )
-    }
-
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:414-419,589
-    // ```c
-    // s_BlastEvenGapLinkHSPs(EBlastProgramType program_number, BlastHSPList* hsp_list,
-    // ...
-    //       while (number_of_hsps > 0)
-    // ```
-    // The port of s_BlastEvenGapLinkHSPs on a group sorted as link_with_both_kernels sorts it.
-    /// Links `hits` (any order) with the NCBI kernel, on the group prepared as
-    /// `link_with_both_kernels` prepares it.
-    fn link_with_ncbi_kernel(
-        mut hits: Vec<UngappedHit>,
-        cutoffs: &LinkHspCutoffs,
-    ) -> Vec<UngappedHit> {
-        let (params, contexts, log_k) = fast_test_contexts();
-        sort_hsps_by_ncbi_link_order(&mut hits, rev_compare_hsps_tbx);
-        for (link_id, hit) in hits.iter_mut().enumerate() {
-            hit.link_id = link_id;
-            hit.chain_next_link_id = None;
-            hit.num = 1;
-        }
-        link_hsp_group_ncbi(
-            hits,
-            &params,
-            cutoffs,
-            0.5,
-            false,
-            300_000,
-            &contexts,
-            &[0; 6],
-            &[49; 6],
-            &[9_372_428_362; 6],
-            &log_k,
-            &mut Vec::new(),
-            &mut Vec::new(),
-        )
-    }
+    /// Every pass checked against a pass from scratch, with the u64 key and
+    /// with the u128 key.
+    const VERIFIED: [IncrOptions; 2] = [
+        IncrOptions {
+            verify: true,
+            wide_keys: false,
+        },
+        IncrOptions {
+            verify: true,
+            wide_keys: true,
+        },
+    ];
 
     /// The HSP of a fixed test, found by its query and subject start.
     fn linked_hit(hits: &[UngappedHit], q_aa_start: usize, s_aa_start: usize) -> &UngappedHit {
@@ -3857,16 +3709,16 @@ mod tests {
     //    if (!(b0|b1|b2) )
     // ```
     // The NCBI scan visits only HSPs before H in list order, so J is never a candidate of H. The
-    // test makes the tree of the index-backed kernel answer with J, which forces the fallback scan.
+    // test makes the Fenwick tree of the index-1 sweep answer with J, which forces the fallback scan.
     // H spans 4 residues and J starts one residue before it. J follows H in
     // list order, so NCBI never offers J to H; but J's trimmed start (99 + 5)
     // lies beyond H's trimmed end (104 - 1) on both sequences, so the tree of
-    // the index-backed kernel answers H's large-gap search with J. The kernel
-    // must then decide by NCBI's scan.
+    // the sweep answers H's large-gap search with J. The kernel must then
+    // decide by NCBI's scan.
     #[test]
-    fn fast_kernel_scans_when_the_tree_answers_with_a_later_hsp() {
+    fn incremental_kernel_scans_when_the_tree_answers_with_a_later_hsp() {
         let cutoffs = fast_test_cutoffs();
-        for options in [VERIFIED, VERIFIED_NCBI_INDEX0] {
+        for options in VERIFIED {
             // Nothing precedes H: it stays alone.
             let (linked, stats) = link_with_both_kernels(
                 fast_test_hits(&[(100, 104, 200, 204, 50), (99, 129, 260, 290, 120)]),
@@ -3875,7 +3727,8 @@ mod tests {
                 "4-residue HSP without a predecessor",
             );
             assert_eq!(stats.fallbacks, 1, "{stats:?}");
-            assert!(stats.verified > 0, "{stats:?}");
+            assert!(stats.verified_passes > 0, "{stats:?}");
+            assert_eq!(stats.wide_groups, u64::from(options.wide_keys), "{stats:?}");
             let h = linked_hit(&linked, 100, 200);
             let j = linked_hit(&linked, 99, 260);
             assert!(!h.linked_set && h.chain_next_link_id.is_none(), "{h:?}");
@@ -3918,14 +3771,16 @@ mod tests {
     //    if ((!first_pass) && ((H2==0) || (H2->hsp_link.changed==0)))
     // ```
     // This test reaches the recomputation pass after a removal (use_current_max = 0) and checks
-    // that the kept choices equal the ones NCBI computes by searching.
-    // Removing the best chain a1 -> a2 leaves e, whose recorded chain ran
-    // through a2, as the stale maximum, so NCBI recomputes
-    // (link_hsps.c:639-649). In that pass b2 and b1 are untouched: b2 keeps
-    // "no HSP" and b1 keeps b2 under both ordering methods, while e searches.
+    // that the HSPs the kernel does not compute again, and the choices it keeps without a search,
+    // equal the ones NCBI computes by searching.
     #[test]
-    fn fast_kernel_keeps_unchanged_choices_in_a_later_pass() {
+    fn incremental_kernel_keeps_unchanged_choices_in_a_later_pass() {
         let cutoffs = fast_test_cutoffs();
+        // Removing the best chain a1 -> a2 leaves e, whose recorded chain ran
+        // through a2, as the stale maximum, so NCBI recomputes
+        // (link_hsps.c:639-649). Only e selected a removed HSP: the pass
+        // computes e again (both methods) and leaves b2 ("no HSP") and
+        // b1 -> b2 as they are, without visiting them.
         let spec = [
             (1000, 1030, 1000, 1030, 100), // a2
             (960, 990, 960, 990, 100),     // a1 -> a2
@@ -3933,50 +3788,57 @@ mod tests {
             (3040, 3070, 140, 170, 60),    // b2
             (3000, 3030, 100, 130, 60),    // b1 -> b2
         ];
-        let (linked, stats) =
-            link_with_both_kernels(fast_test_hits(&spec), &cutoffs, VERIFIED, "kept choices");
-        assert_eq!((stats.rounds, stats.recompute_rounds), (3, 2), "{stats:?}");
-        assert_eq!(
-            (stats.idx0_kept_link, stats.idx0_kept_none),
-            (1, 1),
-            "{stats:?}"
-        );
-        assert_eq!(
-            (stats.idx1_kept_link, stats.idx1_kept_none),
-            (1, 1),
-            "{stats:?}"
-        );
-        assert_eq!(
-            (stats.idx0_searched, stats.idx1_searched),
-            (6, 6),
-            "{stats:?}"
-        );
-        assert_eq!(stats.fallbacks, 0, "{stats:?}");
-        // Every choice above was compared with the plain scan.
-        assert_eq!(stats.verified, 16, "{stats:?}");
-        let a2 = linked_hit(&linked, 1000, 1000);
-        let a1 = linked_hit(&linked, 960, 960);
-        let e = linked_hit(&linked, 955, 962);
-        let b2 = linked_hit(&linked, 3040, 140);
-        let b1 = linked_hit(&linked, 3000, 100);
-        assert_eq!(a1.chain_next_link_id, Some(a2.link_id));
-        assert_eq!(b1.chain_next_link_id, Some(b2.link_id));
-        assert!(!e.linked_set && e.chain_next_link_id.is_none(), "{e:?}");
+        for options in VERIFIED {
+            let (linked, stats) =
+                link_with_both_kernels(fast_test_hits(&spec), &cutoffs, options, "unchanged HSPs");
+            assert_eq!((stats.rounds, stats.passes), (3, 2), "{stats:?}");
+            assert_eq!(stats.removed, 2, "{stats:?}");
+            // Five HSPs in the first pass, e in the second.
+            assert_eq!((stats.visited0, stats.searched0), (6, 6), "{stats:?}");
+            assert_eq!((stats.visited1, stats.searched1), (6, 6), "{stats:?}");
+            assert_eq!((stats.kept0, stats.kept1), (0, 0), "{stats:?}");
+            // The second sweep reads the three remaining HSPs.
+            assert_eq!((stats.swept, stats.fallbacks), (3, 0), "{stats:?}");
+            assert_eq!(stats.verified_passes, 2, "{stats:?}");
+            let a2 = linked_hit(&linked, 1000, 1000);
+            let a1 = linked_hit(&linked, 960, 960);
+            let e = linked_hit(&linked, 955, 962);
+            let b2 = linked_hit(&linked, 3040, 140);
+            let b1 = linked_hit(&linked, 3000, 100);
+            assert_eq!(a1.chain_next_link_id, Some(a2.link_id));
+            assert_eq!(b1.chain_next_link_id, Some(b2.link_id));
+            assert!(!e.linked_set && e.chain_next_link_id.is_none(), "{e:?}");
+        }
 
-        // NCBI's index-0 rule (a search in every pass) gives the same HSPs.
-        let (again, stats) = link_with_both_kernels(
-            fast_test_hits(&spec),
-            &cutoffs,
-            VERIFIED_NCBI_INDEX0,
-            "kept choices, index-0 reuse off",
-        );
-        assert_eq!(
-            (stats.idx0_kept_link, stats.idx0_kept_none),
-            (0, 0),
-            "{stats:?}"
-        );
-        assert_eq!(stats.idx0_searched, 8, "{stats:?}");
-        assert_eq!(format!("{linked:?}"), format!("{again:?}"));
+        // P selects Q1 over Q2 (equal sums, Q1 nearer) under both methods, and
+        // H selects P. X, whose only candidate is Q1, gives the best chain
+        // X -> Q1; its removal leaves H -> P -> Q1 as the stale maximum. The
+        // second pass computes P again: it selects Q2 at the same sum, so its
+        // link changes and H is visited, but P's sum did not change and H
+        // keeps P without a search under both methods.
+        let spec = [
+            (1110, 1140, 1110, 1140, 60),  // Q2
+            (1100, 1130, 1140, 1170, 60),  // Q1
+            (1050, 1080, 1075, 1105, 60),  // P  -> Q1, then Q2
+            (1040, 1070, 1095, 1125, 100), // X  -> Q1
+            (1025, 1055, 1020, 1050, 60),  // H  -> P
+        ];
+        for options in VERIFIED {
+            let (linked, stats) =
+                link_with_both_kernels(fast_test_hits(&spec), &cutoffs, options, "kept choices");
+            assert_eq!(stats.passes, 2, "{stats:?}");
+            assert_eq!((stats.kept0, stats.kept1), (1, 1), "{stats:?}");
+            assert_eq!(stats.verified_passes, 2, "{stats:?}");
+            let q2 = linked_hit(&linked, 1110, 1110);
+            let q1 = linked_hit(&linked, 1100, 1140);
+            let p = linked_hit(&linked, 1050, 1075);
+            let x = linked_hit(&linked, 1040, 1095);
+            let h = linked_hit(&linked, 1025, 1020);
+            assert_eq!(x.chain_next_link_id, Some(q1.link_id));
+            assert!(h.linked_set && h.start_of_chain, "{h:?}");
+            assert_eq!(h.chain_next_link_id, Some(p.link_id));
+            assert_eq!(p.chain_next_link_id, Some(q2.link_id));
+        }
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:738-745
@@ -3986,13 +3848,13 @@ mod tests {
     //    H_hsp_link=H2;
     // ```
     // NCBI takes the candidate with the larger sum (p), not the nearer one (k). The test checks that
-    // a kept choice stays correct while another candidate of H loses its chain.
+    // a choice stays correct while another candidate of H loses its chain.
     // H has two small-gap candidates, p (sum 69) and k (sum 5 + 59 through
     // a2). The first pass selects p. Removing a1 -> a2 forces a second pass
-    // in which k searches again and drops to 5, while p is untouched: H keeps
-    // p without a search, and the plain scan confirms the choice.
+    // in which k searches again and drops to 5, while p is untouched: H is
+    // not computed again and keeps p, and the pass from scratch confirms it.
     #[test]
-    fn fast_kernel_keeps_a_choice_while_another_candidate_loses_its_chain() {
+    fn incremental_kernel_keeps_a_choice_while_another_candidate_loses_its_chain() {
         let cutoffs = fast_test_cutoffs();
         let spec = [
             (1000, 1030, 1000, 1030, 100), // a2
@@ -4002,100 +3864,24 @@ mod tests {
             (945, 975, 930, 960, 46),      // k  -> a2
             (910, 940, 880, 910, 43),      // H  -> p (k is nearer but smaller)
         ];
-        let (linked, stats) = link_with_both_kernels(
-            fast_test_hits(&spec),
-            &cutoffs,
-            VERIFIED,
-            "kept choice, changed rival",
-        );
-        assert_eq!(stats.recompute_rounds, 2, "{stats:?}");
-        assert_eq!(
-            (stats.idx0_kept_link, stats.idx0_kept_none),
-            (1, 1),
-            "{stats:?}"
-        );
-        assert_eq!(stats.idx0_searched, 8, "{stats:?}");
-        let h = linked_hit(&linked, 910, 880);
-        let p = linked_hit(&linked, 975, 915);
-        let k = linked_hit(&linked, 945, 930);
-        assert!(h.linked_set && h.start_of_chain, "{h:?}");
-        assert_eq!(h.chain_next_link_id, Some(p.link_id));
-        assert!(!k.linked_set, "{k:?}");
-
-        let (again, stats) = link_with_both_kernels(
-            fast_test_hits(&spec),
-            &cutoffs,
-            VERIFIED_NCBI_INDEX0,
-            "kept choice, changed rival, index-0 reuse off",
-        );
-        assert_eq!(
-            (stats.idx0_kept_link, stats.idx0_kept_none),
-            (0, 0),
-            "{stats:?}"
-        );
-        assert_eq!(format!("{linked:?}"), format!("{again:?}"));
-    }
-
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:753
-    // ```c
-    // Int4 new_sum = H_hsp_sum + (score - cutoff[index]);
-    // ```
-    // NCBI sums are Int4. The index-backed kernel hands back a group whose pass values leave that
-    // range unchanged (linking.rs then links it with the port of s_BlastEvenGapLinkHSPs, which adds
-    // the sums in i64 as the incremental kernel does); a group whose largest chain sum is just
-    // inside the range is linked by the index-backed kernel.
-    #[test]
-    fn fast_kernel_hands_back_a_group_whose_sums_leave_int4() {
-        let cutoffs = fast_test_cutoffs();
-        // Two HSPs: the largest chain sum is 2 * (1e9 - 41), inside Int4.
-        let (_, stats) = link_with_both_kernels(
-            fast_test_hits(&[
-                (0, 30, 0, 30, 1_000_000_000),
-                (40, 70, 40, 70, 1_000_000_000),
-            ]),
-            &cutoffs,
-            VERIFIED,
-            "inside Int4",
-        );
-        assert_eq!(stats.int4_overflow_pass, 0);
-        assert_eq!(stats.max_pass_sum, 2 * (1_000_000_000 - 41));
-        // A third HSP on the same diagonal: the chain sum leaves Int4 in the
-        // first pass, and the group comes back as it went in.
-        let (_, contexts, log_k) = fast_test_contexts();
-        let mut hits = fast_test_hits(&[
-            (0, 30, 0, 30, 1_000_000_000),
-            (40, 70, 40, 70, 1_000_000_000),
-            (80, 110, 80, 110, 1_000_000_000),
-        ]);
-        sort_hsps_by_ncbi_link_order(&mut hits, rev_compare_hsps_tbx);
-        let before = format!("{hits:?}");
-        let (back, stats) = link_hsp_group_fast_with(
-            hits,
-            &cutoffs,
-            0.5,
-            300_000,
-            &contexts,
-            &[49; 6],
-            &[9_372_428_362; 6],
-            &log_k,
-            VERIFIED,
-        );
-        assert_eq!(stats.int4_overflow_pass, 1);
-        assert_eq!(stats.max_pass_sum, 3 * (1_000_000_000 - 41));
-        assert_eq!(format!("{back:?}"), before);
-        // The NCBI kernel links it as one chain of three, and so does the incremental kernel.
-        let expected = link_with_ncbi_kernel(back.clone(), &cutoffs);
-        assert!(expected.iter().all(|h| h.linked_set));
-        let (incr, stats) = link_with_incr_kernel(
-            back,
-            &cutoffs,
-            IncrOptions {
-                verify: true,
-                wide_keys: false,
-            },
-        );
-        assert_eq!(stats.max_pass_sum, 3 * (1_000_000_000 - 41));
-        assert_eq!(format!("{expected:?}"), format!("{incr:?}"));
+        for options in VERIFIED {
+            let (linked, stats) = link_with_both_kernels(
+                fast_test_hits(&spec),
+                &cutoffs,
+                options,
+                "kept choice, changed rival",
+            );
+            assert_eq!(stats.passes, 2, "{stats:?}");
+            // Six HSPs in the first pass, e and k (not H) in the second.
+            assert_eq!((stats.visited0, stats.searched0), (8, 8), "{stats:?}");
+            assert_eq!(stats.verified_passes, 2, "{stats:?}");
+            let h = linked_hit(&linked, 910, 880);
+            let p = linked_hit(&linked, 975, 915);
+            let k = linked_hit(&linked, 945, 930);
+            assert!(h.linked_set && h.start_of_chain, "{h:?}");
+            assert_eq!(h.chain_next_link_id, Some(p.link_id));
+            assert!(!k.linked_set, "{k:?}");
+        }
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:414-419,589
@@ -4105,14 +3891,15 @@ mod tests {
     //       while (number_of_hsps > 0)
     // ```
     // The reference for the comparison is the port of s_BlastEvenGapLinkHSPs.
-    // Differential test of the index-backed kernel against the NCBI kernel
+    // Differential test of the incremental kernel against the literal port
     // on random HSP groups built to reach the rare paths: equal sums, equal
     // coordinates, HSPs of four to six residues (whose candidates can follow
     // them in list order), dense clusters and long chains, with and without
-    // small gaps. Every choice is also checked by the plain scan, and the
-    // cases must reach every branch of the kernel.
+    // small gaps, half of them with the u128 key. Every pass of the smaller
+    // groups is also checked against a pass from scratch, and the cases must
+    // reach every branch of the kernel.
     #[test]
-    fn fast_kernel_matches_ncbi_kernel_on_random_groups() {
+    fn incremental_kernel_matches_ncbi_kernel_on_random_groups() {
         struct Rng(u64);
         impl Rng {
             fn next(&mut self) -> u64 {
@@ -4152,8 +3939,7 @@ mod tests {
         let mut rng = Rng(0x9E37_79B9_7F4A_7C15);
         let mut total_hsps = 0usize;
         let mut total_chained = 0usize;
-        let mut total = LinkFastStats::default();
-        let mut incr_total = IncrStats::default();
+        let mut total = IncrStats::default();
         let cases: usize = std::env::var("LOSAT_FUZZ_CASES")
             .ok()
             .and_then(|v| v.parse().ok())
@@ -4213,49 +3999,14 @@ mod tests {
             }
 
             let label = format!("case {case} style {style} n {n}");
-            // The plain scan of `verify` costs what the NCBI kernel costs, so
-            // the largest groups are verified in one case out of four.
-            let options = LinkFastOptions {
-                verify: n <= 140 || case % 200 == 0,
-                reuse_index0: true,
-                check_int4: true,
+            // The pass from scratch of `verify` costs what the literal port
+            // costs, so only the smaller groups are verified.
+            let options = IncrOptions {
+                verify: n <= 140,
+                wide_keys: case % 2 == 1,
             };
-            let (linked, stats) = link_with_both_kernels(hits.clone(), cutoffs, options, &label);
+            let (linked, stats) = link_with_both_kernels(hits, cutoffs, options, &label);
             total.add(&stats);
-            // The incremental kernel, each pass checked against a pass from scratch on the
-            // smaller groups.
-            let (incr, stats) = link_with_incr_kernel(
-                hits.clone(),
-                cutoffs,
-                IncrOptions {
-                    verify: n <= 140,
-                    wide_keys: case % 2 == 1,
-                },
-            );
-            incr_total.add(&stats);
-            assert_eq!(linked.len(), incr.len(), "{label}");
-            for (a, b) in linked.iter().zip(&incr) {
-                assert_eq!(a.e_value.to_bits(), b.e_value.to_bits(), "{label}");
-                assert_eq!(format!("{a:?}"), format!("{b:?}"), "{label}");
-            }
-            if case % 5 == 0 {
-                let (again, stats) = link_with_both_kernels(
-                    hits,
-                    cutoffs,
-                    LinkFastOptions {
-                        verify: false,
-                        reuse_index0: false,
-                        check_int4: true,
-                    },
-                    &label,
-                );
-                assert_eq!(
-                    (stats.idx0_kept_link, stats.idx0_kept_none),
-                    (0, 0),
-                    "{label}"
-                );
-                assert_eq!(format!("{linked:?}"), format!("{again:?}"), "{label}");
-            }
             total_hsps += linked.len();
             total_chained += linked.iter().filter(|h| h.linked_set).count();
         }
@@ -4264,32 +4015,17 @@ mod tests {
             total_chained * 10 > total_hsps,
             "{total_chained} of {total_hsps}"
         );
-        // ... and every branch of the index-backed kernel.
+        // ... and every branch of the incremental kernel.
         if cases >= 3000 {
-            assert!(total.fallbacks > 0, "{total:?}");
-            assert!(
-                total.idx0_kept_link > 0 && total.idx0_kept_none > 0,
-                "{total:?}"
-            );
-            assert!(
-                total.idx1_kept_link > 0 && total.idx1_kept_none > 0,
-                "{total:?}"
-            );
-            assert!(
-                total.idx0_searched > 0 && total.idx1_searched > 0,
-                "{total:?}"
-            );
-            assert!(total.verified > 0, "{total:?}");
-            eprintln!(
-                "fast_kernel_matches_ncbi_kernel_on_random_groups: {total_hsps} HSPs, {total:?}"
-            );
-            // ... and of the incremental kernel.
-            let t = &incr_total;
+            let t = &total;
             assert!(t.kept0 > 0 && t.searched0 > 0, "{t:?}");
             assert!(t.kept1 > 0 && t.searched1 > 0, "{t:?}");
+            assert!(t.same0 > 0 && t.same1 > 0, "{t:?}");
             assert!(t.removed > 0 && t.swept > 0 && t.fallbacks > 0, "{t:?}");
             assert!(t.verified_passes > 0 && t.wide_groups > 0, "{t:?}");
-            eprintln!("incremental kernel: {t:?}");
+            eprintln!(
+                "incremental_kernel_matches_ncbi_kernel_on_random_groups: {total_hsps} HSPs, {t:?}"
+            );
         }
     }
 
@@ -4303,12 +4039,11 @@ mod tests {
     // Groups whose sums leave Int4, where NCBI's C would wrap. LOSAT adds the sums in i64 (Owner
     // decision 2026-10-10; linking_incr.rs, "Sums"), and the reference is the port of
     // s_BlastEvenGapLinkHSPs, which also adds in i64.
-    /// Differential test on groups whose sums leave the Int4 range: the NCBI
-    /// kernel against the incremental kernel with either key (every pass
-    /// checked against a pass from scratch) and against the path of `linking.rs` for the
-    /// index-backed kernel (the checked kernel, the NCBI kernel when a pass
-    /// value leaves Int4). Requires the same result from all three, and both
-    /// kinds of group (with and without a pass value outside Int4).
+    /// Differential test on groups whose sums leave the Int4 range: the
+    /// literal port against the incremental kernel with either key (every
+    /// pass checked against a pass from scratch). Requires the same result
+    /// from all three, and both kinds of group (with and without a pass value
+    /// outside Int4).
     #[test]
     fn kernels_add_sums_beyond_int4() {
         struct Rng(u64);
@@ -4355,19 +4090,6 @@ mod tests {
                 &log_k,
                 &mut helpers,
                 &mut links,
-            )
-        };
-        let link_index = |hits: Vec<UngappedHit>, cutoffs: &LinkHspCutoffs| {
-            link_hsp_group_fast_with(
-                hits,
-                cutoffs,
-                0.5,
-                300_000,
-                &contexts,
-                &[49; 6],
-                &[9_372_428_362; 6],
-                &log_k,
-                VERIFIED,
             )
         };
         let link_incr = |hits: Vec<UngappedHit>, cutoffs: &LinkHspCutoffs, wide_keys| {
@@ -4422,9 +4144,8 @@ mod tests {
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(20_000);
-        // Groups without / with a pass value outside Int4; groups the index kernel handed back.
+        // Groups without / with a pass value outside Int4.
         let mut cases_of = [0usize; 2];
-        let mut fallbacks = 0usize;
         for case in 0..cases {
             let (c0, c1, gap_prob, ignore_small_gaps, lo, hi) = settings[case % settings.len()];
             let cutoffs = LinkHspCutoffs {
@@ -4469,38 +4190,16 @@ mod tests {
             let expected = link_ncbi(hits.clone(), &cutoffs);
             let (incr, stats_incr) = link_incr(hits.clone(), &cutoffs, false);
             assert_same(&expected, &incr, &format!("{label}: incremental kernel"));
-            let (wide, _) = link_incr(hits.clone(), &cutoffs, true);
+            let (wide, _) = link_incr(hits, &cutoffs, true);
             assert_same(
                 &expected,
                 &wide,
                 &format!("{label}: incremental kernel, u128 key"),
             );
             cases_of[usize::from(stats_incr.max_pass_sum > i64::from(i32::MAX))] += 1;
-
-            // The path of linking.rs: the checked kernel, the NCBI kernel on Int4 overflow.
-            let before = format!("{hits:?}");
-            let (checked, stats_checked) = link_index(hits.clone(), &cutoffs);
-            let checked = if stats_checked.int4_overflow_pass != 0
-                || stats_checked.int4_overflow_addback != 0
-            {
-                assert_eq!(
-                    format!("{checked:?}"),
-                    before,
-                    "{label}: handed back changed"
-                );
-                fallbacks += 1;
-                link_ncbi(checked, &cutoffs)
-            } else {
-                checked
-            };
-            assert_same(
-                &expected,
-                &checked,
-                &format!("{label}: index kernel + fallback"),
-            );
         }
         eprintln!(
-            "kernels_add_sums_beyond_int4: {cases} cases; (inside, beyond) Int4 {cases_of:?}; index kernel fell back {fallbacks} times"
+            "kernels_add_sums_beyond_int4: {cases} cases; (inside, beyond) Int4 {cases_of:?}"
         );
         assert!(cases_of.iter().all(|&c| c > 0), "{cases_of:?}");
     }
@@ -4532,11 +4231,9 @@ mod tests {
         };
         // (a) pass values up to 300 * (2e9 - 41) > 2^39: the u128 key.
         let cutoffs = fast_test_cutoffs();
-        let expected = link_with_ncbi_kernel(chain(2_000_000_000), &cutoffs);
-        let (incr, stats) = link_with_incr_kernel(chain(2_000_000_000), &cutoffs, plain);
+        let (_, stats) = link_with_both_kernels(chain(2_000_000_000), &cutoffs, plain, "(a)");
         assert_eq!(stats.wide_groups, 1, "{stats:?}");
         assert!(stats.max_pass_sum > 1 << 39, "{stats:?}");
-        assert_eq!(format!("{expected:?}"), format!("{incr:?}"));
         // (b) pass values up to 300 * 1e8 with cutoffs near 2e9: the u64 key; the add-back of
         // 300 * 2e9 goes beyond it and is clamped.
         let cutoffs = LinkHspCutoffs {
@@ -4545,10 +4242,8 @@ mod tests {
             gap_prob: 0.5,
             ignore_small_gaps: false,
         };
-        let expected = link_with_ncbi_kernel(chain(2_100_000_000), &cutoffs);
-        let (incr, stats) = link_with_incr_kernel(chain(2_100_000_000), &cutoffs, plain);
+        let (_, stats) = link_with_both_kernels(chain(2_100_000_000), &cutoffs, plain, "(b)");
         assert_eq!(stats.wide_groups, 0, "{stats:?}");
         assert!(stats.clamped > 0, "{stats:?}");
-        assert_eq!(format!("{expected:?}"), format!("{incr:?}"));
     }
 }

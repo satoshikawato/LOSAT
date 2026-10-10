@@ -1,9 +1,12 @@
-//! Incremental replacement of the per-group link_hsps kernel
-//! (`LOSAT_LINK_FAST=2`; the default path is unchanged). It ports
-//! s_BlastEvenGapLinkHSPs for one group as `linking_index.rs` does - the same
-//! rounds, "current max" selection, add-back, E-values and removal - but a
-//! recompute pass after the first computes again only the HSPs whose values
-//! can have changed since the previous pass.
+//! The per-group kernel of TBLASTX even-gap HSP linking: `linking.rs` runs it
+//! for every group (`LOSAT_LINKING_LEGACY` and the linking traces run the
+//! literal port `link_hsp_group_ncbi` instead; both return the same result).
+//! It ports s_BlastEvenGapLinkHSPs for one group - the same rounds, "current
+//! max" selection, add-back, E-values and removal as the literal port - with
+//! two differences: the predecessor searches use index structures (a grid at
+//! index 0, a prefix-maximum Fenwick tree at index 1) instead of NCBI's scans,
+//! and a recompute pass after the first computes again only the HSPs whose
+//! values can have changed since the previous pass.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:414-419,584-589
 //! ```c
@@ -17,22 +20,128 @@
 //! The rounds of s_BlastEvenGapLinkHSPs for one group (one query frame and one subject frame
 //! sign), with the same control flow as link_hsp_group_ncbi.
 //!
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:603-652
+//! ```c
+//! use_current_max=0;
+//! if (!first_pass){
+//! ...
+//!    if(path_changed==0){
+//!       /* No path was changed, use these max sums. */
+//!       use_current_max=1;
+//! ...
+//!       use_current_max=1;
+//!       if(!ignore_small_gaps){
+//!          for (H=best[0]; H!=NULL; H=H->hsp_link.link[0])
+//!             if (H->linked_to==-1000) {use_current_max=0; break;}
+//!       }
+//!       if(use_current_max)
+//!          for (H=best[1]; H!=NULL; H=H->hsp_link.link[1])
+//!             if (H->linked_to==-1000) {use_current_max=0; break;}
+//! ```
+//! A round after the first starts from the maxima of the previous round. The kernel keeps
+//! `first_pass`, `path_changed` and `use_current_max` and tests them in the same way; a removed
+//! HSP (NCBI: `linked_to == -1000`) is one that is not alive.
+//!
+//! # What a search returns
+//!
+//! NCBI scans the remaining HSPs before H in list order, nearest first, and
+//! keeps a candidate when `sum > H_hsp_sum` (link_hsps.c:738; at index 1 the
+//! `b0` test of line 838 and the keep of lines 852-860). The result is the
+//! candidate with the largest sum and, among equal sums, the one nearest to
+//! H: the largest post-sort list index. A key (`LinkKey`: the value, then the
+//! list index) orders candidates exactly that way, so every search here is
+//! "largest key".
+//!
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:702-745
+//! ```c
+//! if (H->hsp->score > cutoff[index]) {
+//! ...
+//!    for (H2_index=H_index-1; H2_index>1; H2_index=H2_index-1)
+//! ...
+//!       b1 = q_off_t <= H_query_etrim;
+//!       b2 = s_off_t <= H_sub_etrim;
+//! ...
+//!       b4 = ( q_off_t > H_q_et_gap ) ;
+//!       b5 = ( s_off_t > H_s_et_gap ) ;
+//! ...
+//!       if(q_off_t > (H_q_et_gap+trim_size))
+//!          break;
+//! ...
+//!       if (b1|b2|b5|b4) continue;
+//! ...
+//!       if (sum>H_hsp_sum)
+//! ```
+//! The small-gap predecessor scan: for each H it walks the earlier HSPs from the nearest one
+//! down, keeps those inside the window, and takes one with a strictly larger sum, starting from
+//! 0 (so the nearest of equal sums wins). The grid search ("Index 0" below) returns the same
+//! HSP.
+//!
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:781-795
+//! ```c
+//! H->hsp_link.changed=1;
+//! H2 = H->hsp_link.link[index];
+//! if ((!first_pass) && ((H2==0) || (H2->hsp_link.changed==0)))
+//! ...
+//!    if(H2){
+//!       H_hsp_num=H2->hsp_link.num[index];
+//!       H_hsp_sum=H2->hsp_link.sum[index];
+//!       H_hsp_xsum=H2->hsp_link.xsum[index];
+//!    }
+//!    H_hsp_link=H2;
+//!    H->hsp_link.changed=0;
+//! ```
+//! At index 1 NCBI keeps the choice of the previous pass without a scan when it selected
+//! nothing or when the HSP it selected kept its own choice (`changed == 0`, so its values did not
+//! change). Both are the cases 1 and 2 of "Which HSPs a later pass visits" below, so the kept HSP
+//! is the largest key as well.
+//!
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:812-816,838-860
+//! ```c
+//! if(!first_pass&&H2&&H2->linked_to>=0){
+//! ...
+//!       H_hsp_sum=H2->hsp_link.sum[index]-1;
+//! ...
+//!    b0 = sum <= H_hsp_sum;
+//! ...
+//!    H2_index--;
+//!    if(b0){     /* If this sum is too small to beat H_hsp_sum, advance to a larger sum */
+//!       H2_index=next_larger;
+//!    }
+//! ...
+//!    if (!(b0|b1|b2) )
+//! ```
+//! The large-gap predecessor scan. It starts from `sum - 1` of the previous choice when that HSP
+//! remains (lines 812-816), else from 0, and takes the last entry of the downward scan that passes
+//! all three tests. `next_larger` jumps to the nearest earlier entry with a larger sum, so it only
+//! skips entries that fail `b0` as well. The previous choice precedes H, so its sum is already
+//! the one of this pass, and it is itself a candidate above `sum - 1`: the start value only
+//! lowers the threshold below a candidate that is present and does not change the selected HSP.
+//! The scan therefore returns the largest key among the candidates with a positive sum, and every
+//! candidate at index 1 has a positive sum ("Index 1" below).
+//!
 //! # What a pass computes
 //!
 //! A recompute pass gives every remaining HSP H, for each ordering method,
 //! the sum `score(H) - cutoff + max(0, largest candidate sum)`, its number of
 //! HSPs and xsum, and the link to the candidate with the largest (sum, list
-//! index) (`linking_index.rs`, "What a search returns"; NCBI's index-1 reuse,
-//! start value and `next_larger` select the same HSP). The sums are added in
-//! i64 ("Sums" below), so these are the exact chain maxima over the remaining
-//! HSPs.
+//! index) ("What a search returns"; NCBI's index-1 reuse, start value and
+//! `next_larger` select the same HSP). The sums are added in i64 ("Sums"
+//! below), so these are the exact chain maxima over the remaining HSPs.
 //!
 //! # Which HSPs a later pass visits
 //!
-//! Between two passes HSPs are only removed. The candidates of H can only
-//! disappear and, by induction in list order, no value increases
-//! (`linking_index.rs`, step 2). Let P be the HSP that H selected in the
-//! previous pass.
+//! Between two passes HSPs are only removed, and the tests that make an
+//! earlier HSP a candidate of H (coordinates, window) do not change, so the
+//! candidates of H in pass r are a subset of those in pass r-1. Write S_r(j)
+//! for the sum of HSP j in pass r: `score(j) - cutoff + max(0, largest S_r(k)
+//! over the candidates k of j)` when `score(j) > cutoff`, else `score(j) -
+//! cutoff`. A candidate precedes j in the list, so by induction in list order
+//! S_r(j) <= S_{r-1}(j): a maximum over fewer and not larger values (the sums
+//! are exact, "Sums" below). The add-back of line 907 does not enter: every
+//! pass stores the pass value of every remaining HSP before an HSP after it
+//! reads it (link_hsps.c:755-758), and the add-back is read only by the
+//! "current max" scan of lines 610-623 ("NCBI's other state" below). Let P be
+//! the HSP that H selected in the previous pass.
 //!
 //! 1. P remains and its sum did not change: every other candidate has a sum
 //!    at most its previous one, which was at most P's, with a smaller list
@@ -79,15 +188,50 @@
 //! which the searches read, and a pass writes the pass value back into the
 //! leaf of every HSP that received an add-back.
 //!
-//! # Index 1
+//! # Index 0 (small gaps, link_hsps.c:691-768)
 //!
-//! Every pass sweeps the remaining HSPs with score > cutoff[1] by decreasing
-//! `q_end_trim` and fills the prefix-maximum Fenwick tree of
-//! `linking_index.rs`, but computes again only the HSPs that need it. A
-//! selected HSP has a larger `q_end_trim` than the HSPs that select it, so
-//! it is final when they are visited. (The removal of a chain changes the
-//! values of a large share of the HSPs downstream of it at index 1, so a
-//! search per HSP in a dynamic 2-d structure costs more than the sweep.)
+//! The candidates of H are the remaining HSPs before H whose trimmed start
+//! lies in (qe, qe+W] x (se, se+W] and whose sum is positive (an HSP with
+//! `score <= cutoff[0]` has a sum of at most 0 and is never one). They are
+//! found in a uniform grid of W x W cells over the trimmed starts of the HSPs
+//! with `score > cutoff[0]`; each cell lists its HSPs by increasing list
+//! index, and the walk of a cell stops at H. NCBI's early `break` (lines
+//! 733-734) only skips HSPs that fail `q_off_t > H_q_et_gap` (the list is
+//! sorted by decreasing query offset, and the trimmed start differs from the
+//! offset by at most `trim_size`) and has no counterpart.
+//!
+//! # Index 1 (large gaps, link_hsps.c:771-896)
+//!
+//! The candidates of H are the remaining HSPs before H with qo > qe(H) and
+//! so > se(H). Every pass sweeps the remaining HSPs with score > cutoff[1] by
+//! decreasing `q_end_trim`: every candidate of H has qe >= qo > qe(H), so it
+//! has its value of this pass before H is visited, as in NCBI's list-order
+//! loop. "qo > qe(H)" is then a prefix of the HSPs by decreasing qo, which the
+//! sweep inserts into a prefix-maximum Fenwick tree over the ranks of so, and
+//! the tree answers "so > se(H)". The sweep computes again only the HSPs that
+//! need it ("Which HSPs a later pass visits"); a selected HSP has a larger
+//! `q_end_trim` than the HSPs that select it, so it is final when they are
+//! visited. (The removal of a chain changes the values of a large share of
+//! the HSPs downstream of it at index 1, so a search per HSP in a dynamic 2-d
+//! structure costs more than the sweep.)
+//!
+//! The tree also holds HSPs after H in list order. One of those can pass the
+//! coordinate test only if H spans at most 4 residues: the list is sorted by
+//! decreasing query offset, so qo(j) is at most q_off(H) - 1 + 5, and qe(H)
+//! is at least q_off(H) + 4 from 5 residues on. Such an H can arise from
+//! two-hit extension alone (an extension that ends after 4 residues, and NCBI
+//! 2.17.0 prints rows of length 4), and also when
+//! `Blast_HSPReevaluateWithAmbiguitiesUngapped` trims an HSP. When the tree
+//! answers with an HSP after H, the search falls back to NCBI's scan over the
+//! remaining HSPs before H. The result does not depend on the length
+//! condition: the fallback runs whenever the tree returns an HSP after H.
+//!
+//! The tree returns the largest candidate whatever its sum, NCBI the largest
+//! one above its start value: 0, or `sum - 1` of the previous choice. They
+//! agree because every candidate in the tree has a positive sum (an HSP with
+//! score > cutoff[1] has a sum of at least score - cutoff[1] > 0, the sums
+//! being exact), and the previous choice, when it remains, is itself a
+//! candidate above `sum - 1` ("What a search returns").
 //!
 //! # Sums
 //!
@@ -126,6 +270,8 @@
 //! and `indeg` of every remaining HSP with a pass computed from scratch by
 //! NCBI's scans. `LOSAT_LINK_FAST_SHADOW=1` (in `linking.rs`) also runs the
 //! literal NCBI port on every group and compares the complete result.
+//! `LOSAT_LINK_STATS=1` prints the counters of every group (`IncrStats`), and
+//! `LOSAT_LINK_WIDE_KEYS=1` links every group with the u128 key.
 
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
@@ -135,10 +281,96 @@ use rustc_hash::FxHashMap;
 
 use crate::algorithm::tblastx::chaining::UngappedHit;
 use crate::algorithm::tblastx::lookup::QueryContext;
-use crate::stats::sum_statistics::{gap_decay_divisor, ncbi_large_gap_sum_e, small_gap_sum_e};
+use crate::stats::sum_statistics::{
+    defaults::{GAP_SIZE, OVERLAP_SIZE},
+    gap_decay_divisor, ncbi_large_gap_sum_e, small_gap_sum_e,
+};
 
-use super::linking_index::{stats_enabled, MaxTree, NONE, TRIM_SIZE, WINDOW_SIZE};
 use super::params::LinkHspCutoffs;
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:465-467
+// ```c
+//    /* For convenience, include overlap size into the gap size */
+// window_size = link_hsp_params->gap_size + link_hsp_params->overlap_size + 1;
+//    trim_size = (link_hsp_params->overlap_size + 1) / 2;
+// ```
+// The same expressions over the default gap_size and overlap_size of HSP linking.
+const WINDOW_SIZE: i32 = GAP_SIZE + OVERLAP_SIZE + 1;
+const TRIM_SIZE: i32 = (OVERLAP_SIZE + 1) / 2;
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:701
+// ```c
+//                   LinkHSPStruct* H_hsp_link=NULL;
+// ```
+// NULL of a link (and the end of a list) as a list index.
+const NONE: u32 = u32::MAX;
+
+// No NCBI counterpart: LOSAT_LINK_STATS only prints counters; it does not change any value NCBI computes.
+fn stats_enabled() -> bool {
+    static FLAG: OnceLock<bool> = OnceLock::new();
+    *FLAG.get_or_init(|| std::env::var_os("LOSAT_LINK_STATS").is_some())
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:604-623
+// ```c
+// if(!ignore_small_gaps){
+//    max0 = -cutoff[0];
+//    max1 = -cutoff[1];
+//    for (H=hp_start->next; H!=NULL; H=H->next) {
+//       Int4 sum0=H->hsp_link.sum[0];
+//       Int4 sum1=H->hsp_link.sum[1];
+//       if(sum0>=max0)
+//       {
+//          max0=sum0;
+//          best[0]=H;
+//       }
+// ```
+// This tree replaces the linear loop over all remaining HSPs that finds the current maxima of
+// sum[0] and sum[1] at the start of a later round. `root()` returns the same HSPs as `best[0]`
+// and `best[1]` of the C loop (largest sum, ties to the later HSP in the list; `best_of_root`).
+/// Flat maximum tree over the stable post-sort list indices, one channel per
+/// ordering method, with keys (`LinkKey`) and an update that stops at the
+/// first unchanged parent. `K::default()` is "no entry".
+struct MaxTree<K> {
+    cap: usize,
+    nodes: Vec<[K; 2]>,
+}
+
+impl<K: Copy + Ord + Default> MaxTree<K> {
+    fn new(n: usize) -> Self {
+        let cap = n.max(1).next_power_of_two();
+        Self {
+            cap,
+            nodes: vec![[K::default(); 2]; cap * 2],
+        }
+    }
+
+    #[inline]
+    fn leaf(&self, i: usize) -> [K; 2] {
+        self.nodes[self.cap + i]
+    }
+
+    #[inline]
+    fn set(&mut self, i: usize, v: [K; 2]) {
+        let mut pos = self.cap + i;
+        self.nodes[pos] = v;
+        while pos > 1 {
+            pos >>= 1;
+            let l = self.nodes[pos * 2];
+            let r = self.nodes[pos * 2 + 1];
+            let m = [l[0].max(r[0]), l[1].max(r[1])];
+            if self.nodes[pos] == m {
+                break;
+            }
+            self.nodes[pos] = m;
+        }
+    }
+
+    #[inline]
+    fn root(&self) -> [K; 2] {
+        self.nodes[1]
+    }
+}
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:610-623
 // ```c
@@ -394,7 +626,8 @@ impl Children {
 // ```
 // link_hsp_group_incr only wraps link_hsp_group_incr_with: it adds the LOSAT_LINK_STATS line and
 // changes no value of the result.
-/// The kernel `linking.rs` calls under `LOSAT_LINK_FAST=2`.
+/// The kernel `linking.rs` runs for every group, unless `LOSAT_LINKING_LEGACY`
+/// or a linking trace selects the literal port.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn link_hsp_group_incr(
     group_hits: Vec<UngappedHit>,
@@ -768,8 +1001,9 @@ fn link_group<K: LinkKey>(
     // ...
     //       if (sum>H_hsp_sum)
     // ```
-    // The grid of linking_index.rs for the index-0 scan: W x W cells over (q_off_t, s_off_t) of
-    // the HSPs with score > cutoff[0], each listing its HSPs by increasing list index.
+    // The grid of the index-0 scan (module documentation, "Index 0"): W x W cells over
+    // (q_off_t, s_off_t) of the HSPs with score > cutoff[0], each listing its HSPs by increasing
+    // list index.
     let w = WINDOW_SIZE;
     let cell_of = |q: i32, s: i32| -> u64 {
         (((q.div_euclid(w)) as u32 as u64) << 32) | ((s.div_euclid(w)) as u32 as u64)
@@ -807,8 +1041,8 @@ fn link_group<K: LinkKey>(
     // ...
     //    H2 = H2_helper->ptr;
     // ```
-    // The structures of the index-1 scan: the orders, ranks and Fenwick tree of the sweep of
-    // linking_index.rs, over the HSPs with score > cutoff[1].
+    // The structures of the index-1 scan: the orders, ranks and Fenwick tree of the sweep (module
+    // documentation, "Index 1"), over the HSPs with score > cutoff[1].
     let elig1: Vec<u32> = (0..n)
         .filter(|&i| score[i] > c[1])
         .map(|i| i as u32)
@@ -1044,8 +1278,8 @@ fn link_group<K: LinkKey>(
                             // ...
                             //       if (sum>H_hsp_sum)
                             // ```
-                            // The grid walk of linking_index.rs: the remaining HSP before H in the
-                            // window with the largest positive (sum, list index).
+                            // The grid walk (module documentation, "Index 0"): the remaining HSP
+                            // before H in the window with the largest positive (sum, list index).
                             stats.searched0 += 1;
                             let h_qe = qe[x];
                             let h_se = se[x];
@@ -1092,7 +1326,7 @@ fn link_group<K: LinkKey>(
                             //       H2 = H2_helper->ptr;
                             // ```
                             // The prefix maximum of the sweep; NCBI's scan when it returns an HSP
-                            // after H (linking_index.rs, "Index 1").
+                            // after H (module documentation, "Index 1").
                             stats.searched1 += 1;
                             let mut f = kq[x] as usize;
                             while f > 0 {

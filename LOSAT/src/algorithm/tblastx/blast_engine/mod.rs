@@ -33,6 +33,8 @@ mod run_impl;
 pub use run_impl::check_options;
 pub use run_impl::run;
 pub use run_impl::run_local;
+// EXPERIMENT (LOSAT_X_PAIRPAR / LOSAT_X_PAIRPARSHADOW): the summary line `main` prints at exit.
+pub use run_impl::x_pair_par_print_summary;
 // ABI v1 (`web_api::v1_tblastx`) searches through `run_local_with` with its checks.
 #[cfg(target_arch = "wasm32")]
 pub(crate) use run_impl::{check_losat_limits, run_local_with, V1Checks};

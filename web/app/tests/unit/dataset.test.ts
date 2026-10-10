@@ -23,7 +23,7 @@ describe('dataset revisions', () => {
   const revision: DatasetRevision = {
     revisionId: 'r',
     sourceId: 's',
-    parser: 0,
+    parser: 1,
     records: [record(0, 'a'), record(1, 'b'), record(2, 'c')],
     excluded: [1],
   };

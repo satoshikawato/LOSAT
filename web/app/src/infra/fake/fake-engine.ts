@@ -3,7 +3,7 @@
 // application layer and UI can be built and tested against the EngineGateway contract.
 import { recordMismatch } from '../../domain/dataset';
 import { OUTPUT_FORMATS } from '../../domain/output-format';
-import { PROGRAMS, type ProgramId } from '../../domain/programs';
+import { indexParser, PROGRAMS, type InputRole, type ProgramId } from '../../domain/programs';
 import {
   InputMismatchError,
   RunCancelledError,
@@ -81,7 +81,7 @@ export class FakeEngine implements EngineGateway {
   private register(request: EngineRunRequest): void {
     for (const role of ['query', 'subject'] as const) {
       const input = request[role];
-      const mismatch = recordMismatch(input.records, fakeRecordKeys(input.bytes));
+      const mismatch = recordMismatch(input.records, recordsOf(request, role));
       if (mismatch !== undefined) throw new InputMismatchError(role, mismatch);
     }
   }
@@ -96,8 +96,8 @@ export class FakeEngine implements EngineGateway {
   private writeOutputs(request: EngineRunRequest, writer: RunOutputWriter): void {
     const encoder = new TextEncoder();
     const program = request.argv[0] ?? '';
-    const queries = fakeRecordKeys(request.query.bytes).slice(0, 200);
-    const subjects = fakeRecordKeys(request.subject.bytes).slice(0, 3);
+    const queries = recordsOf(request, 'query').slice(0, 200);
+    const subjects = recordsOf(request, 'subject').slice(0, 3);
     const nucleotide = { query: program === 'blastn' || program === 'tblastx', subject: program !== 'blastp' };
     const translated = { query: program === 'tblastx', subject: program === 'tblastn' || program === 'tblastx' };
     let out0 = `${FAKE_MARKER}\nProgram: ${program}\n`;
@@ -173,4 +173,9 @@ export class FakeEngine implements EngineGateway {
   private pause(): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, this.phaseDelayMs));
   }
+}
+
+/** The records of a role's input, read with the role's kind as the engine's `register` reads them. */
+function recordsOf(request: EngineRunRequest, role: InputRole) {
+  return fakeRecordKeys(request[role].bytes, indexParser(request.argv[0] as ProgramId, role));
 }

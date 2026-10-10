@@ -74,37 +74,42 @@ test('a file is summarized with its records, not put in the paste box; files can
   await expect(page.getByTestId('subject-source-0-summary')).toHaveText('1 record · 10 nt');
 });
 
-// A record that the checker refuses. The FakeEngine names the record in its message ("query record 3
-// (bad) ..."), so the screen offers to exclude it. The engine's register (S10) reads with NCBI's
-// reader: it refuses a gap line ('>?') with a message about the line, which names no record, so the
-// screen shows the refusal without the exclude button and the record is excluded with its checkbox.
-const REFUSED_RECORD = BUILD_HAS_ENGINE ? '>?10\nACGT\n' : '>bad\nACGT!ACGT\n';
+// A record that the engine refuses. The FakeEngine's check names the record in its message
+// ("query record 3 (bad) ..."), so the screen offers to exclude it. With the engine, the index
+// scan reads as the engine's reader does (kind 1 for a BLASTN query, S14) and refuses a gap line
+// ('>?') itself, before any check: the input cannot be read, the message names the line, and
+// the user removes the record from the text.
+const DUPLICATES = '>dup first\nACGTACGTACGTAAACCCGGGTTT\n>dup second\nACGTACGTACGTAAACCCGGGTTA\n';
 
 test('records: duplicate IDs by number, the engine refuses a record, exclusion, and a run after exclusion', async ({ page }) => {
   await program(page, 'blastn');
-  await paste(page, 'query', `>dup first\nACGTACGTACGTAAACCCGGGTTT\n>dup second\nACGTACGTACGTAAACCCGGGTTA\n${REFUSED_RECORD}`);
   await paste(page, 'subject', '>s1\nACGTACGTACGTAAACCCGGGTTTACGTACGTACGTAAACCCGGGTTA\n');
-  await expect(page.getByTestId('query-source-0-duplicates')).toContainText('2 records share an ID');
   const check = page.getByTestId('query-source-0-check');
-  await expect(check).toHaveAttribute('data-check', 'refused');
-  await expect(check).toContainText(BUILD_HAS_ENGINE ? 'not supported by LOSAT Web' : 'query record 3 (bad)');
-  if (!BUILD_HAS_ENGINE) await expect(check).toContainText('FAKE ENGINE check');
-  // The refused input cannot be queued.
-  await submit(page);
-  await expect(page.getByTestId('search-message')).toContainText(
-    BUILD_HAS_ENGINE ? 'Query (pasted): ' : 'Query (pasted): query record 3 (bad)',
-  );
-  await expect(page.getByTestId('run-1')).toHaveCount(0);
-
   if (BUILD_HAS_ENGINE) {
-    await expect(page.getByTestId('query-source-0-exclude-refused')).toHaveCount(0);
-    await showRecords(page, 'query');
-    await page.getByTestId('query-source-0-record-2').uncheck();
+    await paste(page, 'query', `${DUPLICATES}>?10\nACGT\n`);
+    await expect(page.getByTestId('query-source-0-error')).toHaveText(
+      /^This input cannot be read: line 5 is a gap line \('>\?'\), .* not supported by LOSAT Web$/,
+    );
+    // The input that cannot be read cannot be queued.
+    await submit(page);
+    await expect(page.getByTestId('search-message')).toContainText("Query (pasted): line 5 is a gap line ('>?')");
+    await expect(page.getByTestId('run-1')).toHaveCount(0);
+    await paste(page, 'query', DUPLICATES);
+    await expect(check).toHaveAttribute('data-check', 'ok');
   } else {
+    await paste(page, 'query', `${DUPLICATES}>bad\nACGT!ACGT\n`);
+    await expect(check).toHaveAttribute('data-check', 'refused');
+    await expect(check).toContainText('query record 3 (bad)');
+    await expect(check).toContainText('FAKE ENGINE check');
+    // The refused input cannot be queued.
+    await submit(page);
+    await expect(page.getByTestId('search-message')).toContainText('Query (pasted): query record 3 (bad)');
+    await expect(page.getByTestId('run-1')).toHaveCount(0);
     await page.getByTestId('query-source-0-exclude-refused').click();
+    await expect(check).toHaveAttribute('data-check', 'ok');
+    await expect(page.getByTestId('query-source-0-summary')).toContainText('(2 included)');
   }
-  await expect(check).toHaveAttribute('data-check', 'ok');
-  await expect(page.getByTestId('query-source-0-summary')).toContainText('(2 included)');
+  await expect(page.getByTestId('query-source-0-duplicates')).toContainText('2 records share an ID');
   await submit(page);
   await waitStatus(page, 1, 'completed');
 
@@ -401,12 +406,20 @@ test('empty inputs, every record excluded, a sequence without a defline, and BLA
   await program(page, 'blastn');
   await submit(page);
   await expect(page.getByTestId('search-message')).toHaveText('Add the query sequences: paste them or open FASTA files.');
+  // The engine's reader reads residues before the first '>' as a record without a defline (S14).
   await paste(page, 'query', 'ACGTACGTACGTACGT');
-  await expect(page.getByTestId('query-source-0-error')).toHaveText('This input cannot be read: Expected > at record start.');
-  await page.getByTestId('query-source-0-add-defline').click();
-  await settled(page, 'query');
-  await expect(page.getByTestId('query-input')).toHaveValue('>pasted_query\nACGTACGTACGTACGT');
-  await expect(page.getByTestId('query-source-0')).toHaveAttribute('data-status', 'ready');
+  await expect(page.getByTestId('query-source-0-summary')).toHaveText('1 record · 16 nt');
+  await expect(page.getByTestId('query-source-0-check')).toHaveAttribute('data-check', 'ok');
+  await expect(page.getByTestId('query-source-0-add-defline')).toHaveCount(0);
+  if (BUILD_HAS_ENGINE) {
+    // A first line that NCBI BLAST+ may fetch as a sequence identifier is refused, and a defline is offered.
+    await paste(page, 'query', 'lcl|ACGTACGT');
+    await expect(page.getByTestId('query-source-0-error')).toContainText('(start the input with a \'>\' defline)');
+    await page.getByTestId('query-source-0-add-defline').click();
+    await settled(page, 'query');
+    await expect(page.getByTestId('query-input')).toHaveValue('>pasted_query\nlcl|ACGTACGT');
+    await expect(page.getByTestId('query-source-0')).toHaveAttribute('data-status', 'ready');
+  }
   await submit(page);
   await expect(page.getByTestId('search-message')).toHaveText('Add the subject sequences: paste them or open FASTA files.');
   await paste(page, 'subject', '>s\nACGTACGTACGT\n');
@@ -663,10 +676,11 @@ test('Algorithm parameters: closed at start, the changed values marked and count
 
 test('narrow screens put the inputs and the queue one under the other, without horizontal scrolling', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await paste(page, 'query', `>NZ_CP006932.1 first\nACGTACGTACGTACGTAC\n>NZ_CP006932.1 second\n${BUILD_HAS_ENGINE ? 'ACGT\n>?10\nACGT' : 'ACGT!ACGT'}\n`);
+  await paste(page, 'query', `>NZ_CP006932.1 first\nACGTACGTACGTACGTAC\n>NZ_CP006932.1 second\n${BUILD_HAS_ENGINE ? 'ACGT' : 'ACGT!ACGT'}\n`);
   // A record row puts its tags on a second line: the ID and the "refused" tag stay in the list.
-  // The engine's refusals name no record (see REFUSED_RECORD), so only the FakeEngine shows the tag.
-  await expect(page.getByTestId('query-source-0-check')).toHaveAttribute('data-check', 'refused');
+  // The engine's index scan refuses what its check would refuse before the check (S14), so
+  // only the FakeEngine shows the tag.
+  await expect(page.getByTestId('query-source-0-check')).toHaveAttribute('data-check', BUILD_HAS_ENGINE ? 'ok' : 'refused');
   await showRecords(page, 'query');
   const list = (await page.getByTestId('query-source-0-records').locator('.record-viewport').boundingBox())!;
   if (!BUILD_HAS_ENGINE) {

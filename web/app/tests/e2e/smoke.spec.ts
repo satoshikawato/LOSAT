@@ -39,16 +39,22 @@ test(`paste, queue, run, view and export with ${BUILD_HAS_ENGINE ? 'the engine' 
   expect(file.suggestedFilename()).toBe('losat-run1-tblastx.outfmt0.txt');
 });
 
-test('a BLASTN query of white space only is refused with the index scan error, before it is queued', async ({ page }) => {
-  // The adapter's register reads such a file as no records and the CLI then warns
-  // "Query is Empty!", but the index scan (bio's reader) refuses it; the application follows
-  // the scan and does not rebuild BLASTN's rules (S09, docs/evidence/losat_web_w1/README.md).
+test('a BLASTN query of white space only has no record: the engine reads it, and the run ends without a search', async ({ page }) => {
+  // The index scan reads as the engine's reader does (kind 1 for a BLASTN query, S14): white
+  // space only has no record, `register` accepts it without records, and a run gives NCBI's
+  // "Query is Empty!" warning (docs/web/abi_v2.md §4).
   await page.goto('/');
   await page.getByTestId('program-blastn').check();
   await page.getByTestId('query-input').fill(' \n');
   await page.getByTestId('subject-input').fill('>s1\nACGTACGTACGT\n');
+  await expect(page.getByTestId('query-source-0-summary')).toHaveText('0 records · 0 nt');
+  await expect(page.getByTestId('query-source-0-check')).toHaveAttribute('data-check', 'ok');
   await page.getByTestId('add-to-queue').click();
-  await expect(page.getByTestId('search-message')).toHaveText('Query (pasted): Expected > at record start.');
-  await expect(page.getByTestId('query-source-0-error')).toHaveText('This input cannot be read: Expected > at record start.');
-  await expect(page.getByTestId('run-1')).toHaveCount(0);
+  await expect(page.getByTestId('run-1-status')).toHaveText('completed');
+  if (BUILD_HAS_ENGINE) {
+    await page.getByTestId('tab-results').click();
+    await expect(page.getByTestId('results-hits')).toHaveAttribute('data-run', '1');
+    await page.getByTestId('results-view-details').click();
+    await expect(page.getByTestId('run-diagnostics')).toContainText('Query is Empty!');
+  }
 });

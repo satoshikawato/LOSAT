@@ -29,7 +29,11 @@ const otherKind = computed(
 const otherKindName = computed(() => (kind.value === 'nucleotide' ? 'protein' : 'nucleotide'));
 const programLabel = computed(() => programById(props.state.program).label);
 const title = computed(() => (props.source.origin === 'paste' ? `Pasted sequences (${props.source.name})` : props.source.name));
-/** A pasted text without a defline: the index scan's error for text before the first '>'. */
+/**
+ * A pasted text without a defline that the index scan refuses. The engine's reader reads
+ * residues before the first '>' as a record without a defline, but LOSAT Web refuses a
+ * first line that NCBI BLAST+ may fetch as a sequence identifier, and asks for a defline.
+ */
 const needsDefline = computed(() => {
   const text = props.state[props.role].paste.trimStart();
   return props.source.origin === 'paste' && props.source.status === 'failed' && text !== '' && !text.startsWith('>');

@@ -32,6 +32,7 @@ import type { RecordScanner } from '../../ports/scan';
 import { RunOutputReceiver } from '../run-output/receiver';
 import { concatBytes } from '../bytes';
 import { asStorageFull, isStorageFull, type BlockStore, type BlockWriter } from './block-store';
+import { recordOfMessageLine } from './message-line';
 
 export interface DataServiceDeps {
   readonly store: BlockStore;
@@ -62,6 +63,11 @@ const LF = 0x0a;
 const NEWLINE = new Uint8Array([LF]);
 
 type Lengths = Record<OutputStream, number>;
+
+/** A run input without its SHA-256, and the [start, end) byte range of each of its records. */
+interface RunInputBytes extends Omit<RunInput, 'sha256'> {
+  readonly spans: ReadonlyArray<readonly [number, number]>;
+}
 
 interface StagedRun {
   readonly state: 'staged';
@@ -135,36 +141,60 @@ export class DataService implements DataGateway {
     return { bytes, sha256: await this.deps.digest(bytes), records };
   }
 
-  /** The bytes and record keys of a run input, without its SHA-256. */
-  private async runInputBytes(revisionIds: readonly string[]): Promise<Omit<RunInput, 'sha256'>> {
+  /** The bytes and record keys of a run input, without its SHA-256, and where its records lie. */
+  private async runInputBytes(revisionIds: readonly string[]): Promise<RunInputBytes> {
     if (revisionIds.length === 0) throw new Error('a run input needs at least one dataset revision');
     const parts: Uint8Array[] = [];
     const records: RecordKey[] = [];
+    const spans: Array<readonly [number, number]> = [];
+    let length = 0;
     for (const revisionId of revisionIds) {
       const revision = this.revision(revisionId);
       const file = this.source(revision.sourceId);
       const included = includedRecords(revision);
-      const bytes =
-        revision.excluded.length === 0
-          ? await readRange(file, 0, file.size)
-          : await readRanges(
-              file,
-              included.map((record) => [record.header_offset, record.end_offset] as const),
-            );
+      const whole = revision.excluded.length === 0;
+      const bytes = whole
+        ? await readRange(file, 0, file.size)
+        : await readRanges(
+            file,
+            included.map((record) => [record.header_offset, record.end_offset] as const),
+          );
       const previous = parts[parts.length - 1];
       if (bytes.length > 0 && previous !== undefined && previous[previous.length - 1] !== LF) {
         parts.push(NEWLINE);
+        length += NEWLINE.length;
+      }
+      const first = included[0];
+      if (first !== undefined && first.header_offset === first.sequence_offset && spans.length > 0) {
+        // The engine would read the residues of a first record without a defline as part of
+        // the record before it: only whole original records may form a run input.
+        throw new Error(
+          `the first record of ${file.name} has no defline (a line that begins with ">"), so it cannot follow ` +
+            'other records in one search input; search it separately or give it a defline',
+        );
+      }
+      let at = length;
+      // One by one: spreading a large table into push() overflows the call stack.
+      for (const record of included) {
+        records.push(recordKey(record));
+        const start = whole ? length + record.header_offset : at;
+        const end = start + record.end_offset - record.header_offset;
+        spans.push([start, end]);
+        at = end;
       }
       if (bytes.length > 0) parts.push(bytes);
-      // One by one: spreading a large table into push() overflows the call stack.
-      for (const record of included) records.push(recordKey(record));
+      length += bytes.length;
     }
-    return { bytes: concatBytes(parts), records: Object.freeze(records) };
+    return { bytes: concatBytes(parts), records: Object.freeze(records), spans };
   }
 
   async checkInput(program: ProgramId, role: InputRole, revisionIds: readonly string[]): Promise<InputCheck> {
-    const { bytes } = await this.runInputBytes(revisionIds);
-    return this.deps.checker.check(program, role, bytes);
+    const { bytes, spans } = await this.runInputBytes(revisionIds);
+    const check = await this.deps.checker.check(program, role, bytes);
+    if (check.ok || check.recordPosition !== undefined) return check;
+    // NCBI's reader names the line it refuses; the record that holds the line can be excluded.
+    const recordPosition = recordOfMessageLine(check.message, bytes, spans);
+    return recordPosition === undefined ? check : { ...check, recordPosition };
   }
 
   async previewSource(sourceId: string, maxBytes: number): Promise<Uint8Array> {
@@ -369,14 +399,20 @@ function blockPath(token: string, stream: OutputStream): string {
   return `${runPrefix(token)}/${BLOCK_NAMES[stream]}`;
 }
 
-/** Rejects a record table whose offsets do not describe ordered records inside the source. */
+/**
+ * Rejects a record table whose offsets do not describe ordered records inside the source.
+ * Every record has a defline before its residues (`header_offset < sequence_offset`), except
+ * a first record without one, whose offsets are both 0. A table without records (an input
+ * of white space, blank and comment lines) is valid.
+ */
 function checkRecordTable(records: readonly IndexedRecord[], size: number): void {
   let previousEnd = 0;
   records.forEach((record, i) => {
+    const headerless = i === 0 && record.header_offset === 0 && record.sequence_offset === 0;
     const ordered =
       record.index === i &&
       previousEnd <= record.header_offset &&
-      record.header_offset < record.sequence_offset &&
+      (headerless || record.header_offset < record.sequence_offset) &&
       record.sequence_offset <= record.end_offset &&
       record.end_offset <= size;
     if (!ordered) throw new Error(`the index scan returned an invalid record table (record ${i + 1})`);

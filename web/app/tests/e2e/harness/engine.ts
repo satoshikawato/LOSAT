@@ -7,7 +7,7 @@ import type { RunView } from '../../../src/application/coordinator';
 import { createApp, type App } from '../../../src/composition';
 import { buildArgv } from '../../../src/domain/argv';
 import type { OutputFormat } from '../../../src/domain/output-format';
-import type { ProgramId } from '../../../src/domain/programs';
+import { indexParser, type InputRole, type ProgramId } from '../../../src/domain/programs';
 import { isTerminal, type RunRecord, type RunStatus } from '../../../src/domain/run';
 import { sha256Hex } from '../../../src/infra/browser/platform';
 import { startDataWorker } from '../../../src/infra/data-worker/gateway';
@@ -253,13 +253,15 @@ export async function retention(
     ...(options.renewal === undefined ? {} : { renewal: options.renewal }),
   });
   const inputs = new Map<string, Promise<EngineInput>>();
-  const input = (search: SearchCase, which: SearchInput) => {
-    const key = JSON.stringify([which.url, which.name]);
+  const input = (search: SearchCase, role: InputRole) => {
+    const which = search[role];
+    // A file read as the other sequence kind is another record table.
+    const parser = indexParser(search.program, role);
+    const key = JSON.stringify([which.url, which.name, parser]);
     let cached = inputs.get(key);
     if (cached === undefined) {
       cached = (async () => {
         const source = await data.addSource(await fetchFile(which));
-        const parser = search.program === 'blastx' ? 1 : 0;
         const revision = await data.indexSource(source.sourceId, parser);
         const run = await data.buildRunInput([revision.revisionId]);
         return { bytes: run.bytes, sha256: run.sha256, revisionIds: [revision.revisionId], records: run.records };
@@ -280,7 +282,7 @@ export async function retention(
     const output = await data.openRun(runId);
     try {
       const runtime = await engine.run(
-        { runId, argv, query: await input(search, search.query), subject: await input(search, search.subject), requestedThreads: search.threads },
+        { runId, argv, query: await input(search, 'query'), subject: await input(search, 'subject'), requestedThreads: search.threads },
         output,
         () => undefined,
       );
@@ -340,13 +342,16 @@ export async function timed(list: readonly SearchCase[], options: TimedOptions =
     ...(options.renewal === undefined ? {} : { renewal: options.renewal }),
   });
   const inputs = new Map<string, Promise<EngineInput>>();
-  const input = (which: SearchInput) => {
-    const key = JSON.stringify([which.url, which.name]);
+  const input = (search: SearchCase, role: InputRole) => {
+    const which = search[role];
+    // A file read as the other sequence kind is another record table.
+    const parser = indexParser(search.program, role);
+    const key = JSON.stringify([which.url, which.name, parser]);
     let cached = options.reindex === true ? undefined : inputs.get(key);
     if (cached === undefined) {
       cached = (async () => {
         const source = await data.addSource(await fetchFile(which));
-        const revision = await data.indexSource(source.sourceId, 0);
+        const revision = await data.indexSource(source.sourceId, parser);
         const run = await data.buildRunInput([revision.revisionId]);
         return { bytes: run.bytes, sha256: run.sha256, revisionIds: [revision.revisionId], records: run.records };
       })();
@@ -358,8 +363,8 @@ export async function timed(list: readonly SearchCase[], options: TimedOptions =
   for (const [i, search] of list.entries()) {
     const runId = `timed-${i}`;
     const argv = buildArgv({ program: search.program, queryName: search.query.name, subjectName: search.subject.name, parameters: parameters(search.options) });
-    const query = await input(search.query);
-    const subject = await input(search.subject);
+    const query = await input(search, 'query');
+    const subject = await input(search, 'subject');
     const output = await data.openRun(runId);
     const phases: Partial<Record<string, number>> = {};
     let timer: ReturnType<typeof setTimeout> | undefined;

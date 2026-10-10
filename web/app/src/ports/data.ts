@@ -35,7 +35,7 @@ export interface DatasetStore {
   addSource(file: File): Promise<SourceRef>;
   /**
    * Builds the record table of a source with the index scan of `parser` and the SHA-256
-   * of every record. Rejects with the parser's error.
+   * of every record. Rejects with the scan's error.
    */
   indexSource(sourceId: string, parser: FastaParserKind): Promise<DatasetRevision>;
   /** A new revision of the same record table that leaves out the records `excluded`. */
@@ -48,8 +48,9 @@ export interface DatasetStore {
   buildRunInput(revisionIds: readonly string[]): Promise<RunInput>;
   /**
    * The engine's reading of the run input of the revisions for `program` and `role`
-   * (ports/input-check.ts). Resolves with the engine's verdict; rejects only when the
-   * check itself cannot run.
+   * (ports/input-check.ts). Resolves with the engine's verdict; a refusal whose message
+   * names a line of the run input (NCBI's line numbers) also gives the position of the
+   * record that holds the line. Rejects only when the check itself cannot run.
    */
   checkInput(program: ProgramId, role: InputRole, revisionIds: readonly string[]): Promise<InputCheck>;
   /** The first `maxBytes` bytes of a source, for its preview. */

@@ -2,8 +2,13 @@
 // revisions of it that say which records a run uses. The record fields are those of the
 // ABI v2 *scan* response (docs/web/abi_v2.md §9), so no mapping layer is needed.
 
-/** The FASTA reader whose rules the index scan follows (ABI v2 `scan_begin`, plan TD-8). */
-export type FastaParserKind = 0 | 1;
+/**
+ * The FASTA reader whose rules the index scan follows (ABI v2 `scan_begin`, abi_v2.md §9;
+ * plan TD-8): the engine's port of NCBI BLAST+'s reader, with the flags of nucleotide input
+ * (kind 1) or of protein input (kind 2), so that the record table has the records that the
+ * engine searches (plan DW-23 (6)). The program and the role choose it (`indexParser`).
+ */
+export type FastaParserKind = 1 | 2;
 
 /** How to find the byte offset of residue `i` of a record (ABI v2 §9 `line_layout`). */
 export type LineLayout =
@@ -14,16 +19,22 @@ export type LineLayout =
 export interface IndexedRecord {
   readonly index: number;
   readonly id: string;
-  /** Offset of the `>` of the header line. */
+  /**
+   * Offset of the defline's `>`. The input's first record without a defline (residues
+   * before the first `>`) has 0 here and in `sequence_offset`, so its bytes start the input.
+   */
   readonly header_offset: number;
-  /** Offset of the first byte after the header line. */
+  /** Offset of the first byte after the defline's end of line (0 for a first record without a defline). */
   readonly sequence_offset: number;
-  /** Offset of the next header line, or the end of the input. */
+  /** Offset of the next record's `>`, or the end of the input. */
   readonly end_offset: number;
-  /** Sequence length in bytes, as the parser reports it. */
+  /** The number of residues that the reader stores. */
   readonly length: number;
   readonly line_layout: LineLayout;
-  /** Count of each byte value of the sequence: 0x21-0x7E as the character, others as "0xNN". */
+  /**
+   * Count of each stored residue, upper-cased (kind 1 counts `U` as `T`), keyed by the
+   * character; a byte outside 0x21-0x7E would be "0xNN", but kinds 1 and 2 store letters and `*` only.
+   */
   readonly residue_counts: Readonly<Record<string, number>>;
 }
 

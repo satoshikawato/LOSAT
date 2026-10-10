@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { Coordinator, type SearchRequest } from '../../src/application/coordinator';
+import type { FastaParserKind } from '../../src/domain/dataset';
 import type { RunStatus } from '../../src/domain/run';
 import { sha256Hex } from '../../src/infra/browser/platform';
 import { DataService } from '../../src/infra/data/data-service';
@@ -157,12 +158,39 @@ describe('Coordinator', () => {
   });
 
   it('does not queue an input that the index scan cannot read', async () => {
-    const { coordinator } = setup(new ManualEngine());
-    expect(await coordinator.enqueue({ ...request, query: { text: 'ACGT\n' } })).toEqual({
+    const message = "CFastaReader: Near line 2, there's a line that doesn't look like plausible data, but it's not marked as defline or comment.";
+    const { coordinator } = setup(new ManualEngine(), (data) =>
+      Object.assign(data, {
+        indexSource: async () => {
+          throw new Error(message);
+        },
+      }),
+    );
+    expect(await coordinator.enqueue({ ...request, query: { text: '>q\n1234567890\n' } })).toEqual({
       ok: false,
-      message: 'Query FASTA: Expected > at record start.',
+      message: `Query FASTA: ${message}`,
     });
     expect(coordinator.state.get().runs).toHaveLength(0);
+  });
+
+  it("indexes each text or file input with the reader of the program's kind for its role", async () => {
+    const parsers: string[] = [];
+    const { coordinator } = setup(new ManualEngine(), (data) => {
+      const indexSource = data.indexSource.bind(data);
+      return Object.assign(data, {
+        indexSource: async (sourceId: string, parser: FastaParserKind) => {
+          parsers.push(String(parser));
+          return indexSource(sourceId, parser);
+        },
+      });
+    });
+    await coordinator.enqueue({ ...request, program: 'tblastn', query: { text: '>q\nMKV*LL\n' }, subject: { text: '>s\nACGU\n' } });
+    await coordinator.enqueue({ ...request, program: 'blastp' });
+    expect(parsers).toEqual(['2', '1', '2', '2']);
+    const [tblastn] = coordinator.state.get().runs;
+    // The protein query keeps L and *; the nucleotide subject stores U as T.
+    expect(tblastn!.snapshot.query.records).toEqual([{ id: 'q', length: 6 }]);
+    expect(tblastn!.snapshot.subject.records).toEqual([{ id: 's', length: 4 }]);
   });
 
   it('cancels a queued job without starting it', async () => {
@@ -335,7 +363,7 @@ describe('Coordinator', () => {
     const { coordinator, data } = setup();
     const add = async (name: string, text: string) => {
       const source = await data.addSource(new File([text], name));
-      return (await data.indexSource(source.sourceId, 0)).revisionId;
+      return (await data.indexSource(source.sourceId, 1)).revisionId;
     };
     const subject = await add('s.fa', '>s1\nACGT\n>s2\nGGCC\n');
     const query = await add('q.fa', '>q\nACGT\n');

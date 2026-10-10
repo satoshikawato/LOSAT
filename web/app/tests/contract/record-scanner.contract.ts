@@ -1,12 +1,15 @@
-// RecordScanner contract: the ABI v2 index scan (docs/web/abi_v2.md §4, §9), parser kind
-// 0. The expected values are what the adapter's scan (web/adapter/src/scan.rs, which
-// reproduces `bio::io::fasta` 1.6.0 and is checked by web/adapter/tests/scan_properties.rs)
-// reports; the adapter is the authority (plan TD-8). The FakeScanner runs these cases in
-// Vitest; S09 runs them against the adapter's serial reactor. The layout kind is not
-// prescribed: the cases check that the layout finds every residue.
+// RecordScanner contract: the ABI v2 index scan (docs/web/abi_v2.md §4, §9), parser kinds 1
+// (NCBI BLAST+'s reader with the nucleotide flags) and 2 (with the protein flags). The
+// expected values are what the adapter's scan (web/adapter/src/scan/ncbi.rs, checked against
+// the engine's reader by web/adapter/tests/scan_ncbi_properties.rs) reports; the adapter is
+// the authority (plan TD-8). The FakeScanner runs these cases in Vitest, and the serial
+// reactor runs them in Node (tests/unit/engine-runtime.test.ts) and in a browser worker. The
+// cases are those on which the two agree: the reader's errors and LOSAT Web's rejections are
+// the reactor's only (engine-runtime.test.ts). The layout kind is not prescribed: every
+// record's residues are read through its layout by a walk of this file's own.
 import type { FastaParserKind, IndexedRecord } from '../../src/domain/dataset';
 import type { RecordScanner, ScanResponse } from '../../src/ports/scan';
-import { check, rejects, same, sameBytes, sameValue, type ContractCase } from './contract';
+import { check, rejects, same, sameValue, type ContractCase } from './contract';
 
 export interface RecordScannerEnv {
   readonly scanner: RecordScanner;
@@ -17,23 +20,27 @@ interface ExpectedRecord {
   readonly header_offset: number;
   readonly sequence_offset: number;
   readonly end_offset: number;
-  /** The sequence as the parser reports it. */
-  readonly residues: string;
+  /** The stored residues, upper-cased (`U` as `T` in kind 1); one string, or one for each kind. */
+  readonly residues: string | Readonly<Record<FastaParserKind, string>>;
 }
 
 interface Corpus {
   readonly name: string;
+  readonly kinds: readonly FastaParserKind[];
   readonly input: () => Uint8Array;
   readonly expected: () => readonly ExpectedRecord[];
 }
 
+const BOTH: readonly FastaParserKind[] = [1, 2];
 const encoder = new TextEncoder();
 const text = (value: string) => () => encoder.encode(value);
 const records = (...list: ExpectedRecord[]) => () => list;
 const CHUNKINGS = [0, 1, 3, 4096] as const;
+const CR = 0x0d;
+const LF = 0x0a;
 
 /** A long record whose lines alternate between two widths (or have one width). */
-function longRecord(residues: number, widths: readonly number[]): { input: () => Uint8Array; expected: () => ExpectedRecord[] } {
+function longRecord(residues: number, widths: readonly number[]): Pick<Corpus, 'input' | 'expected'> {
   const letters = 'ACGTNacgtn';
   let sequence = '';
   for (let i = 0; i < residues; i++) sequence += letters[(i * 7 + (i >>> 5)) % letters.length];
@@ -52,102 +59,142 @@ function longRecord(residues: number, widths: readonly number[]): { input: () =>
       header_offset: 0,
       sequence_offset: header.length,
       end_offset: input.length,
-      residues: sequence,
+      residues: sequence.toUpperCase(),
     }),
   };
 }
 
 const CORPUS: readonly Corpus[] = [
   {
-    name: 'one record with regular lines (LF)',
-    input: text('>a desc\nACGT\nAC\n'),
-    expected: records({ id: 'a', header_offset: 0, sequence_offset: 8, end_offset: 16, residues: 'ACGTAC' }),
-  },
-  {
-    name: 'CRLF line ends',
-    input: text('>a\r\nACGT\r\nAC\r\n'),
-    expected: records({ id: 'a', header_offset: 0, sequence_offset: 4, end_offset: 14, residues: 'ACGTAC' }),
-  },
-  {
-    name: 'lines of different lengths',
-    input: text('>a\nAC\nACGT\nA\n'),
-    expected: records({ id: 'a', header_offset: 0, sequence_offset: 3, end_offset: 13, residues: 'ACACGTA' }),
-  },
-  {
-    name: 'several records, the last without a final newline',
-    input: text('>a\nAAAA\n>b x\nCC'),
+    name: 'several records with regular lines (LF)',
+    kinds: BOTH,
+    input: text('>a desc\nACGT\nAC\n>b\nGGCC\n'),
     expected: records(
-      { id: 'a', header_offset: 0, sequence_offset: 3, end_offset: 8, residues: 'AAAA' },
-      { id: 'b', header_offset: 8, sequence_offset: 13, end_offset: 15, residues: 'CC' },
+      { id: 'a', header_offset: 0, sequence_offset: 8, end_offset: 16, residues: 'ACGTAC' },
+      { id: 'b', header_offset: 16, sequence_offset: 19, end_offset: 24, residues: 'GGCC' },
     ),
   },
   {
-    name: 'a blank line inside a sequence',
-    input: text('>a\nAC\n\nGT\n'),
-    expected: records({ id: 'a', header_offset: 0, sequence_offset: 3, end_offset: 10, residues: 'ACGT' }),
+    name: 'CR LF line ends',
+    kinds: BOTH,
+    input: text('>a\r\nACGT\r\nAC\r\n>b x\r\nGG\r\n'),
+    expected: records(
+      { id: 'a', header_offset: 0, sequence_offset: 4, end_offset: 14, residues: 'ACGTAC' },
+      { id: 'b', header_offset: 14, sequence_offset: 20, end_offset: 24, residues: 'GG' },
+    ),
   },
   {
-    name: 'interior white space belongs to the sequence, trailing white space does not',
-    input: text('>a\nAC GT  \nA\t\n'),
-    expected: records({ id: 'a', header_offset: 0, sequence_offset: 3, end_offset: 14, residues: 'AC GTA' }),
+    name: 'CR line ends',
+    kinds: BOTH,
+    input: text('>a\rACGT\rAC\r>b x\rGG\r'),
+    expected: records(
+      { id: 'a', header_offset: 0, sequence_offset: 3, end_offset: 11, residues: 'ACGTAC' },
+      { id: 'b', header_offset: 11, sequence_offset: 16, end_offset: 19, residues: 'GG' },
+    ),
   },
   {
-    name: 'a non-ASCII header',
-    input: text('>é1 d\nAC\n'),
-    expected: records({ id: 'é1', header_offset: 0, sequence_offset: 7, end_offset: 10, residues: 'AC' }),
+    name: 'LF and CR LF line ends in one file',
+    kinds: BOTH,
+    input: text('>a\nACGT\r\nAC\n>b\r\nGG\n'),
+    expected: records(
+      { id: 'a', header_offset: 0, sequence_offset: 3, end_offset: 12, residues: 'ACGTAC' },
+      { id: 'b', header_offset: 12, sequence_offset: 16, end_offset: 19, residues: 'GG' },
+    ),
   },
   {
-    name: 'residues keep their case',
-    input: text('>a\nacgtN\n'),
-    expected: records({ id: 'a', header_offset: 0, sequence_offset: 3, end_offset: 9, residues: 'acgtN' }),
+    name: 'lower case residues are counted upper-cased',
+    kinds: BOTH,
+    input: text('>a\nacgtNn\nAcGt\n'),
+    expected: records({ id: 'a', header_offset: 0, sequence_offset: 3, end_offset: 15, residues: 'ACGTNNACGT' }),
   },
   {
-    name: 'a record without residues',
-    input: text('>a\n>b\nAC\n'),
+    name: 'comment lines (!, # and ;) before and inside records',
+    kinds: BOTH,
+    input: text('#c\n>a\n!x\nACGT\n#y\n ;z\nGGCC\n'),
+    expected: records({ id: 'a', header_offset: 3, sequence_offset: 6, end_offset: 26, residues: 'ACGTGGCC' }),
+  },
+  {
+    name: '; ends the data of a line',
+    kinds: BOTH,
+    input: text('>a\nACGTAC;GT\n\tGGCC ;TT\nAA\n'),
+    expected: records({ id: 'a', header_offset: 0, sequence_offset: 3, end_offset: 26, residues: 'ACGTACGGCCAA' }),
+  },
+  {
+    name: 'blank lines and white space',
+    kinds: BOTH,
+    input: text('>a\n\nAC GT\n \t\nGG\n\n>b\n\n'),
+    expected: records(
+      { id: 'a', header_offset: 0, sequence_offset: 3, end_offset: 17, residues: 'ACGTGG' },
+      { id: 'b', header_offset: 17, sequence_offset: 20, end_offset: 21, residues: '' },
+    ),
+  },
+  {
+    name: 'a first record without a defline',
+    kinds: BOTH,
+    input: text('ACGTACGTAC\nGG\n>b\nTT\n'),
+    expected: records(
+      { id: '', header_offset: 0, sequence_offset: 0, end_offset: 14, residues: 'ACGTACGTACGG' },
+      { id: 'b', header_offset: 14, sequence_offset: 17, end_offset: 20, residues: 'TT' },
+    ),
+  },
+  {
+    name: 'a first record without a defline after a comment line',
+    kinds: BOTH,
+    input: text('#c\nACGT\n>b\nAC\n'),
+    expected: records(
+      { id: '', header_offset: 0, sequence_offset: 0, end_offset: 8, residues: 'ACGT' },
+      { id: 'b', header_offset: 8, sequence_offset: 11, end_offset: 14, residues: 'AC' },
+    ),
+  },
+  {
+    name: 'records without residues, the last a defline without a newline',
+    kinds: BOTH,
+    input: text('>a\n>b\nAC\n>c'),
     expected: records(
       { id: 'a', header_offset: 0, sequence_offset: 3, end_offset: 3, residues: '' },
       { id: 'b', header_offset: 3, sequence_offset: 6, end_offset: 9, residues: 'AC' },
+      { id: 'c', header_offset: 9, sequence_offset: 11, end_offset: 11, residues: '' },
     ),
   },
   {
-    name: 'an empty record ends the input (bio stops reading there)',
-    input: text('>a\nAC\n>\n>b\nGG\n'),
-    expected: records({ id: 'a', header_offset: 0, sequence_offset: 3, end_offset: 6, residues: 'AC' }),
+    name: 'U is stored as T in kind 1',
+    kinds: BOTH,
+    input: text('>a\nACGUuacgu\n'),
+    expected: records({ id: 'a', header_offset: 0, sequence_offset: 3, end_offset: 13, residues: { 1: 'ACGTTACGT', 2: 'ACGUUACGU' } }),
   },
   {
-    name: 'a header line without a newline at the end of the input',
-    input: text('>a'),
-    expected: records({ id: 'a', header_offset: 0, sequence_offset: 2, end_offset: 2, residues: '' }),
-  },
-  { name: 'an empty input has no records', input: text(''), expected: records() },
-  {
-    name: 'a U+FEFF at the start of a header is part of the ID',
-    input: text(`>${String.fromCharCode(0xfeff)}a\nAC\n`),
-    expected: records({ id: `${String.fromCharCode(0xfeff)}a`, header_offset: 0, sequence_offset: 6, end_offset: 9, residues: 'AC' }),
+    name: '* and the protein letters are stored in kind 2 only',
+    kinds: BOTH,
+    input: text('>p\nMKV*LLe*\n'),
+    expected: records({ id: 'p', header_offset: 0, sequence_offset: 3, end_offset: 12, residues: { 1: 'MKV', 2: 'MKV*LLE*' } }),
   },
   {
-    name: 'bytes after the empty record that ends the input are not read',
-    input: () => new Uint8Array([...encoder.encode('>a\nAC\n>\n>b\nGG\n'), 0xff]),
-    expected: records({ id: 'a', header_offset: 0, sequence_offset: 3, end_offset: 6, residues: 'AC' }),
-  },
-  { name: 'a long record (4 checkpoints) with lines of 60 and 61 residues', ...longRecord(3 * 65_536 + 100, [60, 61]) },
-  { name: 'a long record with regular 80-residue lines', ...longRecord(200_000, [80]) },
-];
-
-const ERRORS: ReadonlyArray<{ readonly name: string; readonly input: Uint8Array; readonly error: RegExp }> = [
-  { name: 'text before the first header', input: encoder.encode('x\n>a\nAC\n'), error: /Expected > at record start\./ },
-  { name: 'a blank line before the first header', input: encoder.encode('\n>a\nAC\n'), error: /Expected > at record start\./ },
-  { name: 'white space only', input: encoder.encode(' \n'), error: /Expected > at record start\./ },
-  {
-    name: 'a first line that is not a header, before bytes that are not UTF-8',
-    input: new Uint8Array([0x78, 0x0a, 0xff]),
-    error: /Expected > at record start\./,
+    name: 'bytes that the kind does not store are skipped',
+    kinds: BOTH,
+    input: text('>a\nAC-GT.12xx\n'),
+    expected: records({ id: 'a', header_offset: 0, sequence_offset: 3, end_offset: 14, residues: { 1: 'ACGT', 2: 'ACGTXX' } }),
   },
   {
-    name: 'bytes that are not UTF-8',
-    input: new Uint8Array([...encoder.encode('>a\nAC'), 0xff, ...encoder.encode('GT\n')]),
-    error: /stream did not contain valid UTF-8/,
+    name: 'the ID is the title up to its first space, after the white space that follows >',
+    kinds: BOTH,
+    input: text('>  id1 some description\nAC\n'),
+    expected: records({ id: 'id1', header_offset: 0, sequence_offset: 24, end_offset: 27, residues: 'AC' }),
   },
+  {
+    name: 'a non-ASCII title',
+    kinds: BOTH,
+    input: text('>é1 d\nAC\n'),
+    expected: records({ id: 'é1', header_offset: 0, sequence_offset: 7, end_offset: 10, residues: 'AC' }),
+  },
+  { name: 'an empty input has no records', kinds: BOTH, input: text(''), expected: records() },
+  {
+    name: 'white space, blank and comment lines only have no records',
+    kinds: BOTH,
+    input: text(' \n\n#c\n;d\n!e\n'),
+    expected: records(),
+  },
+  { name: 'a long record (4 checkpoints) with lines of 60 and 61 residues', kinds: BOTH, ...longRecord(3 * 65_536 + 100, [60, 61]) },
+  { name: 'a long record with regular 80-residue lines', kinds: BOTH, ...longRecord(200_000, [80]) },
 ];
 
 async function* chunked(bytes: Uint8Array, size: number): AsyncGenerator<Uint8Array> {
@@ -158,106 +205,136 @@ async function* chunked(bytes: Uint8Array, size: number): AsyncGenerator<Uint8Ar
   for (let at = 0; at < bytes.length; at += size) yield bytes.slice(at, at + size);
 }
 
-/** Reads residues forward from `offset` under parser kind 0: each line without its trailing white space. */
-function readForward(bytes: Uint8Array, offset: number, end: number, count: number): number[] {
-  const out: number[] = [];
-  let position = offset;
-  while (out.length < count && position < end) {
-    let lineEnd = bytes.indexOf(0x0a, position);
-    if (lineEnd < 0 || lineEnd > end) lineEnd = end;
-    let keep = lineEnd;
-    while (keep > position && (bytes[keep - 1] === 0x20 || (bytes[keep - 1]! >= 0x09 && bytes[keep - 1]! <= 0x0d))) keep--;
-    for (let i = position; i < keep && out.length < count; i++) out.push(bytes[i]!);
-    position = lineEnd + 1;
+const NUCLEOTIDE_LETTERS = 'ABCDGHKMNRSTUVWY';
+
+/** The residue that `kind` stores for a byte (upper-cased, `U` as `T` in kind 1), or undefined. */
+function residueOf(byte: number, kind: FastaParserKind): string | undefined {
+  const character = String.fromCharCode(byte);
+  if (!/^[A-Za-z*]$/.test(character)) return undefined;
+  const letter = character.toUpperCase();
+  if (kind === 2) return letter;
+  if (!NUCLEOTIDE_LETTERS.includes(letter)) return undefined;
+  return letter === 'U' ? 'T' : letter;
+}
+
+/**
+ * Reads `count` residues forward from `offset` under the rules of `kind` (abi_v2.md §9): CR
+ * and LF end a line; at the start of a line space, tab, VT and FF are skipped, and the whole
+ * line when its first other byte is `!`, `#` or `;`; elsewhere `;` skips the rest of the line;
+ * every byte that the kind does not store is skipped.
+ */
+function readForward(bytes: Uint8Array, offset: number, end: number, count: number, kind: FastaParserKind): string[] {
+  const out: string[] = [];
+  let lineStart = false;
+  let skipLine = false;
+  for (let at = offset; at < end && out.length < count; at++) {
+    const byte = bytes[at]!;
+    if (byte === CR || byte === LF) {
+      lineStart = true;
+      skipLine = false;
+      continue;
+    }
+    if (skipLine) continue;
+    if (lineStart) {
+      if (byte === 0x20 || byte === 0x09 || byte === 0x0b || byte === 0x0c) continue;
+      lineStart = false;
+      if (byte === 0x21 || byte === 0x23 || byte === 0x3b) {
+        skipLine = true;
+        continue;
+      }
+    }
+    if (byte === 0x3b) {
+      skipLine = true;
+      continue;
+    }
+    const residue = residueOf(byte, kind);
+    if (residue !== undefined) out.push(residue);
   }
   return out;
 }
 
 /** The residues of a record, found through its line layout. */
-function locate(bytes: Uint8Array, record: IndexedRecord): Uint8Array {
-  const out = new Uint8Array(record.length);
+function locate(bytes: Uint8Array, record: IndexedRecord, kind: FastaParserKind): string[] {
   const layout = record.line_layout;
+  const where = `record ${record.index + 1} (${record.id})`;
+  const out: string[] = [];
   if (layout.kind === 'uniform') {
-    check(layout.width > 0 || record.length === 0, `record ${record.id}: a uniform layout needs a width`);
+    check(layout.width > 0 || record.length === 0, `${where}: a uniform layout needs a width`);
+    check(layout.eol > 0, `${where}: a uniform layout needs a positive eol`);
     for (let i = 0; i < record.length; i++) {
       const at = record.sequence_offset + Math.floor(i / layout.width) * (layout.width + layout.eol) + (i % layout.width);
-      check(at < record.end_offset, `record ${record.id}: residue ${i} lies outside the record`);
-      out[i] = bytes[at]!;
+      check(at < record.end_offset, `${where}: residue ${i} lies outside the record`);
+      const residue = residueOf(bytes[at]!, kind);
+      check(residue !== undefined, `${where}: residue ${i} is at a byte that kind ${kind} does not store`);
+      out.push(residue);
     }
     return out;
   }
-  check(layout.every > 0, `record ${record.id}: checkpoints need a positive spacing`);
-  same(layout.offsets.length, Math.ceil(record.length / layout.every), `record ${record.id}: checkpoint count`);
+  check(layout.every > 0, `${where}: checkpoints need a positive spacing`);
+  same(layout.offsets.length, Math.ceil(record.length / layout.every), `${where}: checkpoint count`);
   layout.offsets.forEach((offset, k) => {
-    const first = k * layout.every;
-    out.set(readForward(bytes, offset, record.end_offset, Math.min(layout.every, record.length - first)), first);
+    check(residueOf(bytes[offset]!, kind) !== undefined, `${where}: checkpoint ${k} is not at a residue`);
+    const count = Math.min(layout.every, record.length - k * layout.every);
+    for (const residue of readForward(bytes, offset, record.end_offset, count, kind)) out.push(residue);
   });
   return out;
 }
 
-function countBytes(bytes: Uint8Array): Record<string, number> {
+function countResidues(residues: readonly string[]): Record<string, number> {
   const counts: Record<string, number> = {};
-  for (const byte of bytes) {
-    const key = byte >= 0x21 && byte <= 0x7e ? String.fromCharCode(byte) : `0x${byte.toString(16).padStart(2, '0')}`;
-    counts[key] = (counts[key] ?? 0) + 1;
-  }
+  for (const residue of residues) counts[residue] = (counts[residue] ?? 0) + 1;
   return counts;
 }
 
-function checkResponse(bytes: Uint8Array, response: ScanResponse, expected: readonly ExpectedRecord[]): void {
+function checkResponse(bytes: Uint8Array, response: ScanResponse, expected: readonly ExpectedRecord[], kind: FastaParserKind): void {
   same(response.records.length, expected.length, 'record count');
   response.records.forEach((record, i) => {
     const want = expected[i]!;
-    const residues = encoder.encode(want.residues);
+    const residues = [...(typeof want.residues === 'string' ? want.residues : want.residues[kind])];
     same(record.index, i, `record ${i + 1} index`);
     same(record.id, want.id, `record ${i + 1} id`);
     same(record.header_offset, want.header_offset, `record ${want.id} header_offset`);
     same(record.sequence_offset, want.sequence_offset, `record ${want.id} sequence_offset`);
     same(record.end_offset, want.end_offset, `record ${want.id} end_offset`);
     same(record.length, residues.length, `record ${want.id} length`);
-    sameValue(record.residue_counts, countBytes(residues), `record ${want.id} residue_counts`);
-    sameBytes(locate(bytes, record), residues, `record ${want.id} residues found through the line layout`);
+    sameValue(record.residue_counts, countResidues(residues), `record ${want.id} residue_counts`);
+    // The walk of this file finds `length` residues whose counts are `residue_counts`.
+    const located = locate(bytes, record, kind);
+    same(located.length, record.length, `record ${want.id}: the number of residues found through the line layout`);
+    sameValue(countResidues(located), record.residue_counts, `record ${want.id}: the counts of the residues found through the line layout`);
+    same(located.join(''), residues.join(''), `record ${want.id}: the residues found through the line layout`);
   });
 }
 
 export const RECORD_SCANNER_CASES: readonly ContractCase<RecordScannerEnv>[] = [
-  ...CORPUS.map(
-    (corpus): ContractCase<RecordScannerEnv> => ({
-      name: `scan: ${corpus.name}`,
-      async run({ scanner }) {
-        const bytes = corpus.input();
-        const whole = await scanner.scan(0, chunked(bytes, 0));
-        checkResponse(bytes, whole, corpus.expected());
-        for (const size of CHUNKINGS.slice(1)) {
-          sameValue(await scanner.scan(0, chunked(bytes, size)), whole, `the response for chunks of ${size} bytes`);
-        }
-      },
-    }),
-  ),
-  ...ERRORS.map(
-    (error): ContractCase<RecordScannerEnv> => ({
-      name: `scan: the parser's error for ${error.name}`,
-      async run({ scanner }) {
-        for (const size of CHUNKINGS) {
-          await rejects(scanner.scan(0, chunked(error.input, size)), error.error, `chunks of ${size} bytes`);
-        }
-      },
-    }),
+  ...CORPUS.flatMap((corpus) =>
+    corpus.kinds.map(
+      (kind): ContractCase<RecordScannerEnv> => ({
+        name: `scan kind ${kind}: ${corpus.name}`,
+        async run({ scanner }) {
+          const bytes = corpus.input();
+          const whole = await scanner.scan(kind, chunked(bytes, 0));
+          checkResponse(bytes, whole, corpus.expected(), kind);
+          for (const size of CHUNKINGS.slice(1)) {
+            sameValue(await scanner.scan(kind, chunked(bytes, size)), whole, `the response for chunks of ${size} bytes`);
+          }
+        },
+      }),
+    ),
   ),
   {
     name: 'scan: a multi-byte character split across chunks',
     async run({ scanner }) {
       const bytes = encoder.encode('>éé x\nAC\n');
       for (const size of [1, 2, 3]) {
-        const response = await scanner.scan(0, chunked(bytes, size));
+        const response = await scanner.scan(1, chunked(bytes, size));
         same(response.records[0]?.id, 'éé', `id with chunks of ${size} bytes`);
       }
     },
   },
   {
-    // Kinds 1 (NCBI's reader with the nucleotide flags) and 2 (with the protein flags) are the
-    // adapter's (abi_v2.md §4, §9; tests/unit/engine-runtime.test.ts scans with them). SX joins
-    // BLASTX to them later. The FakeScanner has kind 0 only, so every scanner refuses another kind (the app's type has kinds 0 and 1 only).
+    // Kind 0 (the `bio::io::fasta` reader before session SF) stays in the adapter for itself;
+    // the application uses kinds 1 and 2 only.
     name: 'scan: an unknown parser kind is refused',
     async run({ scanner }) {
       await rejects(scanner.scan(3 as unknown as FastaParserKind, chunked(encoder.encode('>a\nAC\n'), 0)), /parser kind 3/, 'kind 3');

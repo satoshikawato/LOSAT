@@ -46,18 +46,26 @@ for (const size of SIZES) {
     await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', /^(ok|invalid)$/, { timeout: 60_000 });
     await shoot(page, browserName, size.name, '01-empty');
 
-    // Inputs: a query with a duplicate ID, a refused record and a protein-like record; one subject record with a region.
+    // Inputs: a query with a duplicate ID and a protein-like record, and a query file that the
+    // index scan refuses (a gap line: since S14 the scan reads as the engine's reader does and
+    // refuses what the engine refuses, before any check); one subject record with a region.
     await page.getByTestId('query-input').fill(
       '>contig_1 assembled contig\nACGTACGTTTGACCATGGCATGCATGCATTTAGGCCAAGTACGATCGATCG\n' +
         '>contig_1 second copy\nACGTTGCAACGTTGCAACGTTGCAAGGT\n' +
         '>gene_x\nMKLVVLAAGGHHKLMKLVVLAAGG\n',
     );
+    await page.getByTestId('query-files').setInputFiles({
+      name: 'contig_2.fa',
+      mimeType: 'text/plain',
+      buffer: Buffer.from('>contig_2\nACGTACGTTTGACCATGGCA\n>?10\nTGCATTTAGG\n'),
+    });
     await page.getByTestId('subject-files').setInputFiles({
       name: 'LC738884.fasta',
       mimeType: 'text/plain',
       buffer: readFileSync(join(REPOSITORY, 'LOSAT/tests/fasta/LC738884.fasta')),
     });
     await ready(page, 'query');
+    await ready(page, 'query', 1);
     await ready(page, 'subject');
     await page.getByTestId('subject-region-start').fill('1001');
     await page.getByTestId('subject-region-stop').fill('25000');
@@ -69,8 +77,8 @@ for (const size of SIZES) {
     await expect(page.getByTestId('argv-validation')).not.toHaveAttribute('data-state', 'checking');
     await shoot(page, browserName, size.name, '02-inputs-refused-region');
 
-    // Exclude the refused record and queue a group of separate searches behind a running one.
-    await page.getByTestId('query-source-0-exclude-refused').click();
+    // Remove the file that cannot be read and queue a group of separate searches behind a running one.
+    await page.getByTestId('query-source-1-remove').click();
     await ready(page, 'query');
     await page.getByTestId('add-to-queue').click();
     await expect(page.getByTestId('run-1')).toBeVisible();

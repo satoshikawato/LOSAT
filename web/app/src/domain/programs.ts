@@ -76,8 +76,6 @@ export interface ProgramDescriptor {
   readonly taskNotes?: Readonly<Record<string, string>>;
   readonly query: SequenceKind;
   readonly subject: SequenceKind;
-  /** The engine's FASTA reader for this program, which the index scan follows (plan TD-8). */
-  readonly fastaParser: FastaParserKind;
   /** Why the program cannot be searched in this release; undefined when it can. */
   readonly unavailable?: string;
   /**
@@ -138,8 +136,6 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
     },
     query: 'nucleotide',
     subject: 'nucleotide',
-    // Kind 0 is the `bio::io::fasta` reader; kind 1 is BLASTX's NCBI-style reader (ABI v2 §4).
-    fastaParser: 0,
     sections: [
       {
         title: 'Program Selection',
@@ -209,7 +205,6 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
     taskNotes: { blastp: 'protein-protein BLAST', 'blastp-fast': 'Quick BLASTP', 'blastp-short': 'short queries' },
     query: 'protein',
     subject: 'protein',
-    fastaParser: 0,
     sections: [
       {
         title: 'Program Selection',
@@ -241,7 +236,6 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
     queryNote: 'translated nucleotide query',
     query: 'nucleotide',
     subject: 'protein',
-    fastaParser: 1,
     unavailable: 'BLASTX joins LOSAT Web after its certification. Until then, use BLASTX of the LOSAT command line.',
     sections: [],
   },
@@ -253,7 +247,6 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
     queryNote: 'protein query',
     query: 'protein',
     subject: 'nucleotide',
-    fastaParser: 0,
     sections: [
       { title: 'Program Selection', placement: 'program', fields: [{ flag: '-task', label: 'Algorithm', kind: 'radio' }] },
       { title: 'Genetic code', placement: 'subject', fields: [{ flag: '-db_gencode', label: 'Genetic code', kind: 'gencode' }] },
@@ -285,7 +278,6 @@ export const PROGRAMS: readonly ProgramDescriptor[] = Object.freeze([
     queryNote: 'translated nucleotide query',
     query: 'nucleotide',
     subject: 'nucleotide',
-    fastaParser: 0,
     sections: [
       { title: 'Genetic code', placement: 'query', fields: [{ flag: '-query_gencode', label: 'Genetic code', kind: 'gencode' }] },
       { title: 'Genetic code', placement: 'subject', fields: [{ flag: '-db_gencode', label: 'Genetic code', kind: 'gencode' }] },
@@ -310,6 +302,15 @@ export function programById(id: ProgramId): ProgramDescriptor {
 /** The program's sequence kind for an input role. */
 export function sequenceKind(program: ProgramDescriptor, role: InputRole): SequenceKind {
   return role === 'query' ? program.query : program.subject;
+}
+
+/**
+ * The index scan's reader for an input role of a program: the engine's reader with the flags
+ * of the role's sequence kind (abi_v2.md §4, §9), kind 1 for nucleotide input and kind 2 for
+ * protein input. BLASTX, which cannot be searched yet, has its kinds as well.
+ */
+export function indexParser(program: ProgramId, role: InputRole): FastaParserKind {
+  return sequenceKind(programById(program), role) === 'nucleotide' ? 1 : 2;
 }
 
 /** The unit of a position in an input of this kind. */

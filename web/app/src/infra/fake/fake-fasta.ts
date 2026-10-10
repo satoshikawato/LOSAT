@@ -1,162 +1,178 @@
-// A fake of the ABI v2 index scan (docs/web/abi_v2.md §9) for tests and for the
-// development build until S09 connects the adapter's scan. It is not the engine's FASTA
-// reader and must not be used for anything else. It follows the parser kind 0 rules of
-// the ABI document (the `bio::io::fasta` reader) closely enough to pass
-// tests/contract/record-scanner.contract.ts, with these simplifications: it validates
-// UTF-8 line by line (only the lines that bio reads), and it always reports the
-// checkpoints layout.
-import { recordKey, type IndexedRecord, type RecordKey } from '../../domain/dataset';
-import type { InputRole, ProgramId } from '../../domain/programs';
+// A fake of the ABI v2 index scan (docs/web/abi_v2.md §9) for tests and for the FakeEngine
+// build. It is not the engine's FASTA reader and must not be used for anything else. It
+// follows the rules of parser kinds 1 and 2 (NCBI BLAST+'s reader with the nucleotide or
+// the protein flags) closely enough to pass tests/contract/record-scanner.contract.ts:
+// - a record starts at a line whose first byte is `>`; residues before the first `>` line
+//   make a first record without a defline (offsets 0 and 0);
+// - the ID is the title up to its first space; the title follows `>` and its white space,
+//   and ends at the first byte below 0x20, without trailing white space;
+// - at the start of a line, space, tab, VT and FF are skipped, and the whole line when its
+//   first other byte is `!`, `#` or `;`; elsewhere `;` skips the rest of the line;
+// - the residues are the letters that the kind stores (kind 1: `ABCDGHKMNRSTUVWY` in either
+//   case; kind 2: every ASCII letter and `*`), counted upper-cased with `U` as `T` in kind 1;
+//   every other byte is skipped;
+// - an input of white space, blank and comment lines has no record.
+// Its simplifications: LF, CR LF and a lone CR each end one line (NCBI's reader joins two
+// lines of a file that mixes CR with LF line ends, which the engine's scan then rejects); it
+// never fails (NCBI's reader errors and LOSAT Web's rejections, a `>?` gap line among them,
+// are the engine's); and it always reports the checkpoints layout, every 65536 residues.
+import { recordKey, type FastaParserKind, type IndexedRecord, type RecordKey } from '../../domain/dataset';
+import { indexParser, type InputRole, type ProgramId } from '../../domain/programs';
 import type { InputCheck, InputChecker } from '../../ports/input-check';
 import type { RecordScanner, ScanResponse } from '../../ports/scan';
 import { concatBytes } from '../bytes';
 
 const GT = 0x3e;
 const LF = 0x0a;
+const CR = 0x0d;
+const SPACE = 0x20;
+const BANG = 0x21;
+const HASH = 0x23;
+const STAR = 0x2a;
+const SEMICOLON = 0x3b;
 const CHECKPOINT_EVERY = 65_536;
-// Rust's char::is_whitespace (the White_Space property), which bio's trim_end uses.
-const WHITESPACE = /[\t\n\v\f\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]/u;
-const TRAILING_WHITESPACE = /[\t\n\v\f\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+$/u;
+/** The letters that kind 1 stores, upper-cased. */
+const NUCLEOTIDE = new Set([...'ABCDGHKMNRSTUVWY'].map((letter) => letter.charCodeAt(0)));
 
 export class FakeScanner implements RecordScanner {
   async scan(parser: number, chunks: AsyncIterable<Uint8Array>): Promise<ScanResponse> {
-    if (parser !== 0) throw new Error(`unknown or unavailable FASTA parser kind ${parser}`);
+    if (parser !== 1 && parser !== 2) throw new Error(`unknown or unavailable FASTA parser kind ${parser}`);
     const parts: Uint8Array[] = [];
     for await (const chunk of chunks) parts.push(chunk.slice());
-    return { records: fakeScan(concatBytes(parts)) };
+    return { records: fakeScan(concatBytes(parts), parser) };
   }
 }
 
-/** The records that the fake reads, as the FakeEngine's `register` reports them. */
-export function fakeRecordKeys(bytes: Uint8Array): RecordKey[] {
-  return fakeScan(bytes).map(recordKey);
+/** The records that the fake reads with `kind`, as the FakeEngine's `register` reports them. */
+export function fakeRecordKeys(bytes: Uint8Array, kind: FastaParserKind): RecordKey[] {
+  return fakeScan(bytes, kind).map(recordKey);
+}
+
+export function fakeScan(bytes: Uint8Array, kind: FastaParserKind): IndexedRecord[] {
+  return scanRecords(bytes, kind).map(({ record }) => record);
 }
 
 interface Builder {
   readonly index: number;
   readonly id: string;
-  readonly hasDescription: boolean;
   readonly headerOffset: number;
   readonly sequenceOffset: number;
   length: number;
-  readonly counts: number[];
+  readonly counts: Map<number, number>;
   readonly checkpoints: number[];
+  /** A data line has `!` (the FakeInputChecker's refusal). */
+  bang: boolean;
 }
 
-/** Decodes one line as bio reads it: UTF-8, a leading U+FEFF kept. */
-function decodeLine(line: Uint8Array): string {
-  try {
-    return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(line);
-  } catch {
-    throw new Error('stream did not contain valid UTF-8');
-  }
+interface Scanned {
+  readonly record: IndexedRecord;
+  readonly bang: boolean;
 }
 
-export function fakeScan(bytes: Uint8Array): IndexedRecord[] {
-  const records: IndexedRecord[] = [];
+function scanRecords(bytes: Uint8Array, kind: FastaParserKind): Scanned[] {
+  const records: Scanned[] = [];
   let current: Builder | undefined;
   let offset = 0;
   while (offset < bytes.length) {
-    const newline = bytes.indexOf(LF, offset);
-    const lineEnd = newline < 0 ? bytes.length : newline;
-    const next = newline < 0 ? bytes.length : newline + 1;
-    decodeLine(bytes.subarray(offset, lineEnd));
-    if (offset === 0 && bytes[0] !== GT) throw new Error('Expected > at record start.');
+    let end = offset;
+    while (end < bytes.length && bytes[end] !== LF && bytes[end] !== CR) end++;
+    const next = end === bytes.length ? end : end + (bytes[end] === CR && bytes[end + 1] === LF ? 2 : 1);
     if (bytes[offset] === GT) {
-      if (current !== undefined) {
-        const record = finish(current, offset);
-        // bio's records() ends at the first empty record.
-        if (record === undefined) return records;
-        records.push(record);
+      if (current !== undefined) records.push(finish(current, offset));
+      current = startRecord(bytes, offset, end, next, records.length);
+    } else {
+      let at = offset;
+      while (at < end && isLeadingSpace(bytes[at]!)) at++;
+      const first = bytes[at];
+      if (at < end && first !== BANG && first !== HASH && first !== SEMICOLON) {
+        // Data before the first defline: the input's first record, without a defline.
+        current ??= newBuilder(0, '', 0, 0);
+        for (; at < end && bytes[at] !== SEMICOLON; at++) addByte(current, bytes[at]!, at, kind);
       }
-      current = startRecord(bytes, offset, lineEnd, next, records.length);
-    } else if (current !== undefined) {
-      addLine(current, bytes.subarray(offset, lineEnd), offset);
     }
     offset = next;
   }
-  const last = current === undefined ? undefined : finish(current, bytes.length);
-  if (last !== undefined) records.push(last);
+  if (current !== undefined) records.push(finish(current, bytes.length));
   return records;
 }
 
+function newBuilder(index: number, id: string, headerOffset: number, sequenceOffset: number): Builder {
+  return { index, id, headerOffset, sequenceOffset, length: 0, counts: new Map(), checkpoints: [], bang: false };
+}
+
 function startRecord(bytes: Uint8Array, start: number, lineEnd: number, next: number, index: number): Builder {
-  const header = decodeLine(bytes.subarray(start + 1, lineEnd)).replace(TRAILING_WHITESPACE, '');
-  const split = header.search(WHITESPACE);
-  return {
-    index,
-    id: split < 0 ? header : header.slice(0, split),
-    hasDescription: split >= 0,
-    headerOffset: start,
-    sequenceOffset: next,
-    length: 0,
-    counts: new Array<number>(256).fill(0),
-    checkpoints: [],
-  };
+  let from = start + 1;
+  while (from < lineEnd && isLeadingSpace(bytes[from]!)) from++;
+  let to = Math.min(from + 1, lineEnd);
+  while (to < lineEnd && bytes[to]! >= SPACE) to++;
+  while (to > from && bytes[to - 1] === SPACE) to--;
+  const title = bytes.subarray(from, to);
+  const space = title.indexOf(SPACE);
+  const id = new TextDecoder('utf-8', { fatal: false }).decode(space < 0 ? title : title.subarray(0, space));
+  return newBuilder(index, id, start, next);
 }
 
-/** A sequence line: every byte except the trailing white space is a residue. */
-function addLine(builder: Builder, line: Uint8Array, lineOffset: number): void {
-  let keep = line.length;
-  if (line.every((byte) => byte < 0x80)) {
-    while (keep > 0 && isAsciiWhitespace(line[keep - 1]!)) keep--;
-  } else {
-    keep = new TextEncoder().encode(decodeLine(line).replace(TRAILING_WHITESPACE, '')).length;
-  }
-  for (let i = 0; i < keep; i++) {
-    if ((builder.length + i) % CHECKPOINT_EVERY === 0) builder.checkpoints.push(lineOffset + i);
-    builder.counts[line[i]!]!++;
-  }
-  builder.length += keep;
+function addByte(builder: Builder, byte: number, offset: number, kind: FastaParserKind): void {
+  if (byte === BANG) builder.bang = true;
+  const residue = storedResidue(byte, kind);
+  if (residue === undefined) return;
+  if (builder.length % CHECKPOINT_EVERY === 0) builder.checkpoints.push(offset);
+  builder.counts.set(residue, (builder.counts.get(residue) ?? 0) + 1);
+  builder.length++;
 }
 
-function finish(builder: Builder, end: number): IndexedRecord | undefined {
-  if (builder.id === '' && !builder.hasDescription && builder.length === 0) return undefined;
+/** The residue that the kind stores for a byte, upper-cased, or undefined for a byte it skips. */
+function storedResidue(byte: number, kind: FastaParserKind): number | undefined {
+  const upper = byte >= 0x61 && byte <= 0x7a ? byte - 0x20 : byte;
+  if (kind === 1) {
+    if (!NUCLEOTIDE.has(upper)) return undefined;
+    return upper === 0x55 ? 0x54 : upper; // U is stored as T
+  }
+  return (upper >= 0x41 && upper <= 0x5a) || byte === STAR ? upper : undefined;
+}
+
+function finish(builder: Builder, end: number): Scanned {
   const residueCounts: Record<string, number> = {};
-  builder.counts.forEach((count, byte) => {
-    if (count === 0) return;
-    const key = byte >= 0x21 && byte <= 0x7e ? String.fromCharCode(byte) : `0x${byte.toString(16).padStart(2, '0')}`;
-    residueCounts[key] = count;
-  });
+  for (const [residue, count] of [...builder.counts].sort(([a], [b]) => a - b)) {
+    residueCounts[String.fromCharCode(residue)] = count;
+  }
   return {
-    index: builder.index,
-    id: builder.id,
-    header_offset: builder.headerOffset,
-    sequence_offset: builder.sequenceOffset,
-    end_offset: end,
-    length: builder.length,
-    line_layout: { kind: 'checkpoints', every: CHECKPOINT_EVERY, offsets: builder.checkpoints },
-    residue_counts: residueCounts,
+    record: {
+      index: builder.index,
+      id: builder.id,
+      header_offset: builder.headerOffset,
+      sequence_offset: builder.sequenceOffset,
+      end_offset: end,
+      length: builder.length,
+      line_layout: { kind: 'checkpoints', every: CHECKPOINT_EVERY, offsets: builder.checkpoints },
+      residue_counts: residueCounts,
+    },
+    bang: builder.bang,
   };
 }
 
-function isAsciiWhitespace(byte: number): boolean {
-  return byte === 0x20 || (byte >= 0x09 && byte <= 0x0d);
+/** Space, tab, VT and FF: skipped at the start of a line and of a title. */
+function isLeadingSpace(byte: number): boolean {
+  return byte === SPACE || byte === 0x09 || byte === 0x0b || byte === 0x0c;
 }
-
 
 /**
  * The input check of the development build (ports/input-check.ts). It is not the engine's:
- * it accepts what the FakeScanner reads, except a record with `!` in its sequence, which
- * it refuses with a message shaped as the engine's (the record's number and ID), so that
- * the screen's handling of a refused record can be tried without the engine.
+ * it accepts what the FakeScanner reads with the role's kind, except a record with `!` in a
+ * data line, which it refuses with a message shaped as the engine's (the record's number and
+ * ID), so that the screen's handling of a refused record can be tried without the engine.
  */
 export class FakeInputChecker implements InputChecker {
   async check(program: ProgramId, role: InputRole, bytes: Uint8Array): Promise<InputCheck> {
     if (program === 'blastx') return { ok: false, message: 'blastx is not available in LOSAT Web ABI v2 yet' };
-    let records: IndexedRecord[];
-    try {
-      records = fakeScan(bytes);
-    } catch (error) {
-      return { ok: false, message: `failed to read ${role} FASTA: ${error instanceof Error ? error.message : String(error)}` };
-    }
-    const refused = records.find((record) => (record.residue_counts['!'] ?? 0) > 0);
+    const records = scanRecords(bytes, indexParser(program, role));
+    const refused = records.find(({ bang }) => bang)?.record;
     if (refused !== undefined) {
       return {
         ok: false,
         message: `${role} record ${refused.index + 1} (${refused.id}) has '!' in its sequence (FAKE ENGINE check, not LOSAT's)`,
       };
     }
-    return { ok: true, records: records.map(recordKey) };
+    return { ok: true, records: records.map(({ record }) => recordKey(record)) };
   }
 }

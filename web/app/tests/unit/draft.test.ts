@@ -8,19 +8,23 @@ import { MemoryBlockStore } from '../../src/infra/data/memory-block-store';
 import { FakeEngine } from '../../src/infra/fake/fake-engine';
 import { FakeInputChecker, FakeScanner } from '../../src/infra/fake/fake-fasta';
 import type { ValidationResult } from '../../src/ports/engine';
+import type { InputChecker } from '../../src/ports/input-check';
+import type { RecordScanner } from '../../src/ports/scan';
 
 function setup(
   options: {
     validate?: (argv: readonly string[]) => ValidationResult;
     useCoordinator?: boolean;
     checkInput?: DataService['checkInput'];
+    scanner?: RecordScanner;
+    checker?: InputChecker;
   } = {},
 ) {
   let token = 0;
   const data = new DataService({
     store: new MemoryBlockStore(),
-    scanner: new FakeScanner(),
-    checker: new FakeInputChecker(),
+    scanner: options.scanner ?? new FakeScanner(),
+    checker: options.checker ?? new FakeInputChecker(),
     digest: sha256Hex,
     newToken: () => `token-${++token}`,
     cleanup: Promise.resolve({ state: 'done', removedSessions: 0 }),
@@ -95,15 +99,62 @@ describe('SearchDraft inputs', () => {
     expect(draft.state.get().subject.sources).toHaveLength(0);
   });
 
-  it('reports the index scan error of a text without a defline, and adds one on request', async () => {
+  it("reads a text without a defline as a record without an ID, as the engine's reader does, and adds a defline on request", async () => {
     const { draft } = setup();
     draft.setPaste('query', 'ACGTACGT\n');
     await draft.idle();
-    expect(sourceOf(draft, 'query')).toMatchObject({ status: 'failed', error: 'Expected > at record start.' });
+    expect(sourceOf(draft, 'query')).toMatchObject({ status: 'ready', check: { state: 'ok', records: 1 } });
+    expect(sourceOf(draft, 'query').base?.records.map((r) => [r.id, r.header_offset, r.sequence_offset, r.length])).toEqual([['', 0, 0, 8]]);
     draft.addDefline('query');
     await draft.idle();
     expect(draft.state.get().query.paste).toBe('>pasted_query\nACGTACGT\n');
-    expect(sourceOf(draft, 'query')).toMatchObject({ status: 'ready' });
+    expect(sourceOf(draft, 'query').base?.records[0]?.id).toBe('pasted_query');
+  });
+
+  it('reports the index scan error', async () => {
+    const message = 'the first line ("AB123456") is not a defline and may be a sequence identifier ... not supported by LOSAT Web';
+    const { draft } = setup({ scanner: { scan: async () => Promise.reject(new Error(message)) } });
+    draft.setPaste('query', 'AB123456\nACGT\n');
+    await draft.idle();
+    expect(sourceOf(draft, 'query')).toMatchObject({ status: 'failed', error: message });
+    expect(draft.readiness()).toBe('Query (pasted) cannot be read.');
+  });
+
+  it('maps a refusal that names a line to the record that holds it, among the included records', async () => {
+    let line = 4;
+    const checker: InputChecker = {
+      check: async () => ({ ok: false, message: `BLAST query error: CFastaReader: Near line ${line}, there's a line that doesn't look like plausible data, but it's not marked as defline or comment.` }),
+    };
+    const { draft } = setup({ checker });
+    draft.setPaste('query', '>a\nACGT\n>b\nACGT\n>c\nACGT\n');
+    await draft.idle();
+    expect(sourceOf(draft, 'query').check).toMatchObject({ state: 'refused', record: 1, message: expect.stringContaining('Near line 4,') });
+    // Without a, line 4 of the input is the residues of c.
+    line = 4;
+    draft.setIncluded('query', 'paste', [0], false);
+    await draft.idle();
+    expect(sourceOf(draft, 'query').check).toMatchObject({ state: 'refused', record: 2 });
+    // A line outside every record gives no record.
+    line = 1;
+    draft.setPaste('query', '#c\n>a\nACGT\n');
+    await draft.idle();
+    expect(sourceOf(draft, 'query').check).toEqual({ state: 'refused', message: expect.stringContaining('Near line 1,') });
+  });
+
+  it('asks the engine about a source without records, but not about one whose records are all excluded', async () => {
+    const { draft, checks } = setup({
+      checker: { check: async (_program, _role, bytes) => (bytes.length === 0 ? { ok: true, records: [] } : { ok: false, message: 'BLAST engine error: Empty CBlastQueryVector' }) },
+    });
+    draft.setPaste('query', '# only a comment\n');
+    await draft.idle();
+    expect(sourceOf(draft, 'query').base?.records).toEqual([]);
+    expect(sourceOf(draft, 'query').check).toEqual({ state: 'refused', message: 'BLAST engine error: Empty CBlastQueryVector' });
+    draft.setPaste('query', '>a\nACGT\n');
+    await draft.idle();
+    draft.setIncluded('query', 'paste', [0], false);
+    await draft.idle();
+    expect(sourceOf(draft, 'query').check).toEqual({ state: 'ok', records: 0 });
+    expect(checks).toHaveLength(2);
   });
 
   it('shows the engine refusal of a record and maps it to the record table; excluding it passes the check', async () => {
@@ -132,14 +183,70 @@ describe('SearchDraft inputs', () => {
     const { draft } = setup();
     draft.setPaste('query', '>a\nACGT\n');
     await draft.idle();
+    const base = sourceOf(draft, 'query').base;
     draft.setProgram('blastx');
     await draft.idle();
-    // BLASTX cannot be searched until SX: nothing is read again or checked.
+    // BLASTX cannot be searched until SX: nothing is checked. Its query is nucleotide, as
+    // BLASTN's, so the query keeps its record table.
     expect(sourceOf(draft, 'query').status).toBe('ready');
+    expect(sourceOf(draft, 'query').base).toBe(base);
     expect(sourceOf(draft, 'query').check).toBeUndefined();
     draft.setProgram('tblastx');
     await draft.idle();
     expect(sourceOf(draft, 'query').check).toEqual({ state: 'ok', records: 1 });
+  });
+
+  it("indexes a role's sources again when the program reads the role as the other sequence kind", async () => {
+    const { draft } = setup();
+    draft.setPaste('query', '>q\nMKVLU*\n');
+    draft.addFiles('subject', [file('s.fa', '>s\nACGU\n')]);
+    await draft.idle();
+    const table = (role: InputRole) => {
+      const { base } = sourceOf(draft, role);
+      return { revision: base!.revisionId, parser: base!.parser, length: base!.records[0]!.length };
+    };
+    const blastn = { query: table('query'), subject: table('subject') };
+    expect(blastn.query).toMatchObject({ parser: 1, length: 4 });
+    expect(blastn.subject).toMatchObject({ parser: 1, length: 4 });
+    // TBLASTN reads a protein query: the query is read again (L and * are residues now).
+    draft.setProgram('tblastn');
+    await draft.idle();
+    expect(table('query')).toMatchObject({ parser: 2, length: 6 });
+    expect(table('subject')).toEqual(blastn.subject);
+    expect(sourceOf(draft, 'query').check).toEqual({ state: 'ok', records: 1 });
+    // BLASTP reads a protein subject too; BLASTX a nucleotide query and a protein subject.
+    draft.setProgram('blastp');
+    await draft.idle();
+    expect(table('subject')).toMatchObject({ parser: 2, length: 4 });
+    draft.setProgram('blastx');
+    await draft.idle();
+    expect(table('query')).toMatchObject({ parser: 1, length: 4 });
+    expect(table('subject')).toMatchObject({ parser: 2 });
+    draft.setProgram('blastn');
+    await draft.idle();
+    expect(table('subject')).toMatchObject({ parser: 1, length: 4 });
+  });
+
+  it('indexes a source that could not be read again for a program of the other kind, and drops its exclusions', async () => {
+    const fake = new FakeScanner();
+    const scanner: RecordScanner = {
+      scan: async (parser, chunks) => (parser === 1 ? Promise.reject(new Error('nucleotide reader error')) : fake.scan(parser, chunks)),
+    };
+    const { draft } = setup({ scanner });
+    draft.setPaste('query', '>q\nMKV\n>r\nMKV\n');
+    await draft.idle();
+    expect(sourceOf(draft, 'query')).toMatchObject({ status: 'failed', error: 'nucleotide reader error' });
+    draft.setProgram('blastp');
+    await draft.idle();
+    expect(sourceOf(draft, 'query')).toMatchObject({ status: 'ready', check: { state: 'ok', records: 2 } });
+    expect(sourceOf(draft, 'query').error).toBeUndefined();
+    draft.setIncluded('query', 'paste', [1], false);
+    draft.setProgram('tblastn');
+    await draft.idle();
+    expect(sourceOf(draft, 'query')).toMatchObject({ status: 'ready', excluded: [1] });
+    draft.setProgram('tblastx');
+    await draft.idle();
+    expect(sourceOf(draft, 'query')).toMatchObject({ status: 'failed', excluded: [] });
   });
 });
 

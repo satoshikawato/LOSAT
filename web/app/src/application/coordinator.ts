@@ -10,7 +10,7 @@
 import { buildArgv, PASTED_NAMES } from '../domain/argv';
 import type { FastaParserKind } from '../domain/dataset';
 import type { OutputFormat } from '../domain/output-format';
-import { programById, type ProgramId } from '../domain/programs';
+import { indexParser, type ProgramId } from '../domain/programs';
 import { isTerminal, type InputSnapshot, type RunRecord, type RunSnapshot, type RunStatus } from '../domain/run';
 import type { DataGateway, ResultSetRef, RunInput, StorageInfo } from '../ports/data';
 import type { Downloader } from '../ports/download';
@@ -125,12 +125,11 @@ export class Coordinator {
     const snapshots: RunSnapshot[] = [];
     const groupId = prepared.length > 1 ? this.deps.newRunId() : undefined;
     for (const [index, { request, argv, queryName, subjectName }] of prepared.entries()) {
-      const program = programById(request.program);
       let query: InputSnapshot;
       let subject: InputSnapshot;
       try {
-        query = await this.snapshotInput('Query', request.query, queryName, program.fastaParser);
-        subject = await this.snapshotInput('Subject', request.subject, subjectName, program.fastaParser);
+        query = await this.snapshotInput('Query', request.query, queryName, indexParser(request.program, 'query'));
+        subject = await this.snapshotInput('Subject', request.subject, subjectName, indexParser(request.program, 'subject'));
       } catch (error) {
         return { ok: false, message: errorMessage(error) };
       }
@@ -227,7 +226,8 @@ export class Coordinator {
 
   /**
    * Freezes the run input of an input. Dataset inputs use the revisions as they are; text
-   * and files first become a source with a record table. The run input of the same
+   * and files first become a source with a record table, read with `parser`, the index
+   * scan's reader for the program's sequence kind of the role. The run input of the same
    * revisions is built once and shared by the snapshots that use it (a subject kept for
    * many searches is held once).
    */

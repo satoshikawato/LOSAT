@@ -14,6 +14,10 @@ import { toProgramDescription } from '../../src/infra/reactor/control';
 import { ReactorScanner, reopening } from '../../src/infra/reactor/scanner';
 import type { FastaParserKind } from '../../src/domain/dataset';
 import { PROGRAMS } from '../../src/domain/programs';
+import { sha256Hex } from '../../src/infra/browser/platform';
+import { DataService } from '../../src/infra/data/data-service';
+import { MemoryBlockStore } from '../../src/infra/data/memory-block-store';
+import { FakeScanner } from '../../src/infra/fake/fake-fasta';
 import { AUTO_MAX_THREADS, AUTO_SERIAL_BELOW_BYTES, chooseThreads, DEFAULT_RENEWAL, renewalReason } from '../../src/infra/engine-worker/policy';
 import { RECORD_SCANNER_CASES } from '../contract/record-scanner.contract';
 
@@ -231,7 +235,7 @@ describe.skipIf(reactors === undefined)('responses of more than 1 MiB from the s
   it('scans and registers thousands of records', async () => {
     const instance = await instantiateSerial(new WebAssembly.Module(reactors!.serial.bytes as BufferSource));
     const scanner = new ReactorScanner(async () => instance.abi);
-    const scan = await scanner.scan(0, (async function* () {
+    const scan = await scanner.scan(1, (async function* () {
       yield fasta;
     })());
     expect(scan.records).toHaveLength(25_000);
@@ -259,13 +263,37 @@ describe.skipIf(reactors === undefined)('the serial reactor scans with the NCBI 
     yield new TextEncoder().encode('>a desc\nACGT\n>b\nACGTAC\n');
   })();
 
-  // Kinds 1 (nucleotide flags) and 2 (protein flags) are real since S9 (abi_v2.md §4, §9).
+  // Kinds 1 (nucleotide flags) and 2 (protein flags) are real since SF (abi_v2.md §4, §9).
   it.each([1, 2])('scans a small input with parser kind %i', async (kind) => {
     const scan = await scanner.scan(kind as FastaParserKind, bytes());
     expect(scan.records.map(({ id, length }) => ({ id, length }))).toEqual([
       { id: 'a', length: 4 },
       { id: 'b', length: 6 },
     ]);
+  });
+
+  // What the FakeScanner leaves to the engine: NCBI's reader errors and LOSAT Web's
+  // rejections, with the line (NCBI's numbering) or the record they name.
+  const scanError = async (kind: FastaParserKind, text: string) =>
+    scanner.scan(kind, (async function* () {
+      yield new TextEncoder().encode(text);
+    })()).then(() => 'no error', (error: unknown) => (error as Error).message);
+
+  it.each([1, 2])("fails with NCBI's reader error, which names the line (parser kind %i)", async (kind) => {
+    const message = "there's a line that doesn't look like plausible data, but it's not marked as defline or comment.";
+    expect(await scanError(kind as FastaParserKind, '>a\nACGT\n>b\n1234567890123456789012345\n')).toBe(`CFastaReader: Near line 4, ${message}`);
+    // CR LF is one line end, and so is a lone CR in a file of CR line ends.
+    expect(await scanError(kind as FastaParserKind, '>a\r\nACGT\r\n>b\r\n1234567890123456789012345\r\n')).toBe(`CFastaReader: Near line 4, ${message}`);
+    expect(await scanError(kind as FastaParserKind, '>a\rACGT\r\r>b\r1234567890123456789012345\r')).toBe(`CFastaReader: Near line 5, ${message}`);
+    // A lone CR in a file of LF line ends ends its line, and the reader joins the rest of
+    // that line of the file to the next one: the line numbers no longer follow the LFs.
+    expect(await scanError(kind as FastaParserKind, '>a x\ry\nACGT\n>b\n1234567890123456789012345\n')).toBe(`CFastaReader: Near line 5, ${message}`);
+  });
+
+  it("rejects what LOSAT Web cannot index, naming the line or the record", async () => {
+    expect(await scanError(1, '>a\nACGT\n>?10\nACGT\n')).toMatch(/^line 3 is a gap line \('>\?'\), .* not supported by LOSAT Web$/);
+    expect(await scanError(2, 'AB123456\nMKV\n')).toMatch(/^the first line \("AB123456"\) is not a defline .* not supported by LOSAT Web/);
+    expect(await scanError(1, '>a\nAC\n>b\nAC\rGT\n#AC\n')).toMatch(/^record 2 \("b"\): NCBI BLAST\+ reads two of its lines as one .* not supported by LOSAT Web/);
   });
 });
 
@@ -321,5 +349,39 @@ describe.skipIf(reactors === undefined)('the serial reactor answers the search f
     const gap = await checker.check('blastp', 'subject', new TextEncoder().encode('>p\nMK\n>?10\nMK\n'));
     expect(gap.ok).toBe(false);
     expect(!gap.ok && gap.message).toMatch(/not supported by LOSAT Web/);
+  });
+
+  // The engine's messages name NCBI's line; the Data worker finds the record that holds it.
+  // The engine's own index scan refuses these inputs before any check, so the FakeScanner
+  // makes their record tables here: the messages and line numbers are the engine's.
+  it("finds the record of the line that the engine's refusal names", async () => {
+    let token = 0;
+    const data = new DataService({
+      store: new MemoryBlockStore(),
+      scanner: new FakeScanner(),
+      checker: new ReactorInputChecker(reopening(open)),
+      digest: sha256Hex,
+      newToken: () => `token-${++token}`,
+      cleanup: Promise.resolve({ state: 'done', removedSessions: 0 }),
+    });
+    const digits = '1234567890123456789012345';
+    const refusal = async (text: string, excluded: readonly number[] = []) => {
+      const source = await data.addSource(new File([text], 'input.fa'));
+      let revision = await data.indexSource(source.sourceId, 1);
+      if (excluded.length > 0) revision = await data.reviseDataset(revision.revisionId, excluded);
+      const check = await data.checkInput('blastn', 'query', [revision.revisionId]);
+      if (check.ok) throw new Error('the engine accepted the input');
+      return { message: check.message, position: check.recordPosition };
+    };
+    const near = /^BLAST query error: CFastaReader: Near line \d+, /;
+    for (const eol of ['\n', '\r\n', '\r']) {
+      const text = ['>a', 'ACGT', '>b', 'ACGTACGT', '>c', digits, '>d', 'ACGT', ''].join(eol);
+      expect(await refusal(text)).toMatchObject({ message: expect.stringMatching(near), position: 2 });
+    }
+    // A lone CR in the first defline ends a line too: NCBI's line 7 is the sixth line between LFs.
+    expect(await refusal(`>a x\ry\nACGT\n>b\nACGT\n>c\n${digits}\n`)).toMatchObject({ message: expect.stringContaining('Near line 7,'), position: 2 });
+    expect(await refusal('>a\nACGT\n>?10\nACGT\n>c\nAC\n')).toMatchObject({ message: expect.stringMatching(/^line 3 is a gap line/), position: 1 });
+    // With the first record left out, the refused record is the first of the input.
+    expect(await refusal(`>a\nACGT\n>b\n${digits}\n>c\nAC\n`, [0])).toMatchObject({ message: expect.stringContaining('Near line 2,'), position: 0 });
   });
 });

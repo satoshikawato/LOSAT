@@ -5,17 +5,20 @@
 // query changes.
 //
 // Inputs: every pasted text and every file becomes a source of the data layer and is
-// indexed when it is added (DatasetStore). The record table of a source is its
-// `base` revision; the records that the user leaves out make other revisions, created on
-// demand and reused for the same selection, so that a subject whose selection does not
-// change is the same revision from search to search (the engine then keeps it, R1).
+// indexed when it is added (DatasetStore), with the engine's reader for the program's
+// sequence kind of the role (`indexParser`), so that its records are those the engine
+// searches; a program that reads the role as the other kind indexes it again. The record
+// table of a source is its `base` revision; the records that the user leaves out make other
+// revisions, created on demand and reused for the same selection, so that a subject whose
+// selection does not change is the same revision from search to search (the engine then
+// keeps it, R1).
 // Whether the engine reads a source is the engine's verdict (`checkInput`, the program's
 // `register`), shown with its message. Several sources of a role are one combined search
 // input, or separate searches (one run per source, queued as a group).
 import { buildArgv, COMBINED_NAMES, PASTED_NAMES } from '../domain/argv';
-import { includedRecords, type DatasetRecord, type DatasetRevision, type FastaParserKind } from '../domain/dataset';
+import { includedRecords, type DatasetRecord, type DatasetRevision } from '../domain/dataset';
 import { formParameters, setField, type FieldValue, type FormValues } from '../domain/parameters';
-import { PROGRAMS, programById, type InputRole, type ProgramId } from '../domain/programs';
+import { indexParser, PROGRAMS, programById, type InputRole, type ProgramId } from '../domain/programs';
 import { REGION_FLAG, regionProblem, regionValue, type RegionText } from '../domain/region';
 import type { DataGateway } from '../ports/data';
 import type { EngineGateway, ProgramDescription } from '../ports/engine';
@@ -112,8 +115,12 @@ const PASTE_KEY = 'paste';
 const HEAD_BYTES = 2048;
 const HEAD_LINES = 6;
 const HEAD_LINE_CHARS = 120;
-/** "query record 3 (id) …": the record that an engine message names (1-based, among the input's records). */
-const RECORD_IN_MESSAGE = /\b(?:query|subject) record (\d+)\b/;
+/**
+ * "query record 3 (id) …" and LOSAT Web's `record 2 ("id"): …`: the record that an engine
+ * message names (1-based, among the input's records). A message that names a line instead
+ * comes with the position of the record that holds it (InputCheck `recordPosition`).
+ */
+const RECORD_IN_MESSAGE = /\b(?:query|subject) record (\d+)\b|^record (\d+) \(/;
 
 const emptyRole = (): RoleDraft => ({ paste: '', sources: [], mode: 'combined' });
 
@@ -155,23 +162,19 @@ export class SearchDraft {
   // --- program and form -------------------------------------------------------------------
 
   setProgram(program: ProgramId): void {
-    if (this.state.get().program === program) return;
-    const next = programById(program);
+    const previous = this.state.get().program;
+    if (previous === program) return;
     const description = this.described.get(program);
     this.set({ program, description, descriptionError: undefined, message: undefined });
     this.loadDescription(program);
     for (const role of ROLES) {
+      // A program that reads the role as the other sequence kind needs the record tables of
+      // that kind's reader (for example the query of TBLASTN after BLASTN); the sources of a
+      // role whose kind stays keep their tables and are only checked again.
+      const reread = indexParser(previous, role) !== indexParser(program, role);
       for (const source of this.role(role).sources) {
-        if (next.unavailable !== undefined) {
-          this.scheduleCheck(role, source.key);
-          continue;
-        }
-        if (source.base !== undefined && source.base.parser !== indexParser(program)) {
-          // A program with another FASTA reader needs another record table (BLASTX, plan TD-8).
-          this.reindex(role, source.key);
-        } else {
-          this.scheduleCheck(role, source.key, 0);
-        }
+        if (reread) this.reindex(role, source.key);
+        else this.scheduleCheck(role, source.key, 0);
       }
     }
     this.scheduleValidation();
@@ -541,13 +544,16 @@ export class SearchDraft {
     );
   }
 
+  /** Indexes a source again (ready, failed or still being indexed) with the program's reader. */
   private reindex(role: InputRole, key: string): void {
     const source = this.role(role).sources.find((s) => s.key === key);
     if (source === undefined) return;
+    this.cancelTask(`check:${role}:${key}`);
     this.updateSource(role, key, (s) => {
       const next: DraftSource = { ...s, status: 'indexing', excluded: [] };
       delete (next as { base?: unknown }).base;
       delete (next as { check?: unknown }).check;
+      delete (next as { error?: unknown }).error;
       return next;
     });
     this.track(this.index(role, key, source.file));
@@ -558,7 +564,7 @@ export class SearchDraft {
     const generation = this.nextGeneration(task);
     const current = () => this.generations.get(task) === generation;
     const started = this.deps.now();
-    const parser = indexParser(this.state.get().program);
+    const parser = indexParser(this.state.get().program, role);
     try {
       const ref = await this.deps.data.addSource(file);
       const head = await this.deps.data.previewSource(ref.sourceId, HEAD_BYTES).then(headText, () => undefined);
@@ -602,7 +608,9 @@ export class SearchDraft {
     const generation = this.nextGeneration(task);
     const source = this.role(role).sources.find((s) => s.key === key);
     if (source?.status !== 'ready' || source.base === undefined) return;
-    if (includedOf(source).length === 0) {
+    // Every record left out: nothing to read. A table without records (white space, blank
+    // and comment lines) is the engine's to judge.
+    if (includedOf(source).length === 0 && source.base.records.length > 0) {
       this.updateSource(role, key, (s) => ({ ...s, check: { state: 'ok', records: 0 } }));
       return;
     }
@@ -746,16 +754,6 @@ export class SearchDraft {
   }
 }
 
-/**
- * The FASTA reader that indexes the sources of a program: its own, or for a program that
- * cannot be searched yet, that of BLASTN (the sources are indexed again when another
- * reader is needed).
- */
-function indexParser(program: ProgramId): FastaParserKind {
-  const descriptor = programById(program);
-  return descriptor.unavailable === undefined ? descriptor.fastaParser : programById('blastn').fastaParser;
-}
-
 /** The included records of a ready source. */
 export function includedOf(source: DraftSource): readonly DatasetRecord[] {
   return source.base === undefined ? [] : includedRecords({ ...source.base, excluded: source.excluded });
@@ -769,11 +767,12 @@ function describeSource(source: DraftSource): string {
   return source.origin === 'paste' ? 'pasted' : `file ${source.name}`;
 }
 
-/** The engine's verdict, with the record its message names mapped to the record table. */
+/** The engine's verdict, with the record its message points at mapped to the record table. */
 function toSourceCheck(check: InputCheck, source: DraftSource): SourceCheck {
   if (check.ok) return { state: 'ok', records: check.records.length };
   const match = RECORD_IN_MESSAGE.exec(check.message);
-  const record = match === null ? undefined : includedOf(source)[Number(match[1]) - 1];
+  const position = match === null ? check.recordPosition : Number(match[1] ?? match[2]) - 1;
+  const record = position === undefined ? undefined : includedOf(source)[position];
   return { state: 'refused', message: check.message, ...(record === undefined ? {} : { record: record.index }) };
 }
 

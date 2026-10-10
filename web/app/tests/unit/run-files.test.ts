@@ -456,7 +456,7 @@ describe('RunFiles', () => {
     ]);
     expect(inputRelation('query', 'q.fa', 3, runFiles.inputParts(view, 'query'))).toBe('q.fa has the same bytes as the file q.fa (3 records).');
     expect(inputRelation('subject', 'combined_subject.fa', 4, runFiles.inputParts(view, 'subject'))).toBe(
-      'combined_subject.fa joins the 2 subject inputs (a.fa, b.fa) in the order chosen, without the records left out: 4 records. It is no single file you chose.',
+      'combined_subject.fa joins the 2 subject inputs (a.fa, b.fa) in the order chosen, without the record left out: 4 records. It is no single file you chose.',
     );
     const joinedWhole = loaded(sources([['q.fa', 3, []]]), sources([['a.fa', 3, []], ['b.fa', 2, []]]));
     expect(inputRelation('subject', 'combined_subject.fa', 5, runFiles.inputParts(joinedWhole, 'subject'))).toBe(

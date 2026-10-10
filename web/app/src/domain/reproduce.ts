@@ -216,10 +216,12 @@ export function inputIsChosenFile(parts: ReadonlyArray<InputPart | undefined>): 
 export function inputRelation(role: InputRole, name: string, records: number, parts: ReadonlyArray<InputPart | undefined>): string {
   const count = `${records} ${records === 1 ? 'record' : 'records'}`;
   const whole = (part: InputPart | undefined) => part !== undefined && (part.excluded ?? 0) === 0;
+  // One record left out reads in the singular; a part that is unknown (undefined) may have left out several.
+  const only = (left: ReadonlyArray<InputPart | undefined>) => !left.some((part) => part === undefined) && left.reduce((sum, part) => sum + (part?.excluded ?? 0), 0) === 1;
   if (parts.length === 0) return `${name} has the ${count} that the run searched.`;
   if (parts.length > 1) {
     const names = parts.map((part) => part?.name).filter((part): part is string => part !== undefined);
-    const leftOut = parts.some((part) => !whole(part)) ? ', without the records left out' : '';
+    const leftOut = parts.some((part) => !whole(part)) ? `, without the ${only(parts) ? 'record' : 'records'} left out` : '';
     return (
       `${name} joins the ${parts.length} ${role} inputs${names.length > 0 ? ` (${names.join(', ')})` : ''} in the order chosen${leftOut}: ` +
       `${count}. It is no single file you chose.`
@@ -228,7 +230,7 @@ export function inputRelation(role: InputRole, name: string, records: number, pa
   const part = parts[0];
   if (part === undefined) return `${name} has the ${count} that the run searched; the records left out of the chosen ${role} are not in it.`;
   if (!whole(part)) {
-    return `${name} has the ${count} that the run searched from the file ${part.name}; the records left out of it are not in it.`;
+    return `${name} has the ${count} that the run searched from the file ${part.name}; the ${only(parts) ? 'record' : 'records'} left out of it ${only(parts) ? 'is' : 'are'} not in it.`;
   }
   if (part.origin === 'paste') return `${name} is the pasted ${role} text, as the run searched it (${count}).`;
   return `${name} has the same bytes as the file ${part.name} (${count}).`;

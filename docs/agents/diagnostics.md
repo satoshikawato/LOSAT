@@ -58,7 +58,7 @@ export LOSAT_X_ERFMEMO=1 LOSAT_X_DEKKER=1 LOSAT_X_LUTARENA=1 LOSAT_X_LUTSPLIT=1
 export LOSAT_X_TBNPAR=1 LOSAT_X_TBNEVENTS=1 LOSAT_X_TBNQSIDE=1 LOSAT_X_TBNSSIDE=1 LOSAT_X_TBNBATCH=1
 export LOSAT_X_BXPAR=1 LOSAT_X_BXLAZYCTX=1 LOSAT_X_BXLEAN=1 LOSAT_X_BXPOOL=1 LOSAT_X_BXCHUNK=64 LOSAT_X_BXBATCH=1
 export LOSAT_X_CODONFAST=1 LOSAT_LINK_FAST=1
-export LOSAT_X_NEWTONEXACT=1 LOSAT_X_SEEDBUCKET=1 LOSAT_X_THP=1
+export LOSAT_X_NEWTONEXACT=1 LOSAT_X_SEEDBUCKET=1
 ```
 
 Same values, faster computation:
@@ -110,7 +110,6 @@ Same values, faster computation:
   `LOSAT_X_SEEDBUCKETSHADOW=1` (HSP lists and the whole diagonal table). Tuning:
   `LOSAT_X_SEEDBUCKET_CELLS` (cells per bucket), `LOSAT_X_SEEDBUCKET_BUDGET` (hits per flush).
   BLASTX needs `LOSAT_X_BXSEEDBUCKET=1` as well (no gain measured).
-- `LOSAT_X_THP=1` transparent huge pages advised for the diagonal tables (placement only).
 
 Rebuilding less:
 

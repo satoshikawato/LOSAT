@@ -337,21 +337,6 @@ impl SubjectSplitState {
     }
 }
 
-/// A zeroed diagonal table (NCBI calloc), with huge pages advised (LOSAT_X_THP).
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:145-146
-/// ```c
-/// diag_table->hit_level_array = (DiagStruct *)
-///     calloc(diag_table->diag_array_length, sizeof(DiagStruct));
-/// ```
-/// NCBI allocates the diagonal table with calloc once per extension-word structure. This returns
-/// the same zeroed table; with LOSAT_X_THP set it also asks the kernel for huge pages. Placement
-/// only: no cell value and no access order changes.
-fn x_new_diag_array(size: usize) -> Vec<DiagStruct> {
-    let mut v = vec![DiagStruct::default(); size];
-    crate::utils::x_hugepage::advise(&mut v);
-    v
-}
-
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:162-173
 // ```c
 // Blast_ExtendWordExit(Blast_ExtendWord * ewp, Int4 subject_length)
@@ -4477,13 +4462,7 @@ fn search_query_batch(
                                 || {
                                     (
                                         vec![OffsetPair::default(); offset_array_size as usize],
-                                        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:145-146
-                                        // ```c
-                                        // diag_table->hit_level_array = (DiagStruct *)
-                                        //     calloc(diag_table->diag_array_length, sizeof(DiagStruct));
-                                        // ```
-                                        // Same zeroed diagonal table as the C calloc (huge pages advised with LOSAT_X_THP).
-                                        x_new_diag_array(diag_array_size as usize),
+                                        vec![DiagStruct::default(); diag_array_size as usize],
                                     )
                                 },
                                 |state, chunk| {
@@ -5305,13 +5284,7 @@ fn search_query_batch(
                         tx: None,
                         hits: Vec::new(),
                         offset_pairs: vec![OffsetPair::default(); offset_array_size as usize],
-                        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:145-146
-                        // ```c
-                        // diag_table->hit_level_array = (DiagStruct *)
-                        //     calloc(diag_table->diag_array_length, sizeof(DiagStruct));
-                        // ```
-                        // Same zeroed diagonal table as the C calloc (huge pages advised with LOSAT_X_THP).
-                        diag_array: x_new_diag_array(diag_array_size as usize),
+                        diag_array: vec![DiagStruct::default(); diag_array_size as usize],
                         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:52-63
                         // ```c
                         // diag_table->diag_array_length = diag_array_length;
@@ -5347,13 +5320,7 @@ fn search_query_batch(
                 tx: tx_opt.clone(),
                 hits: Vec::new(),
                 offset_pairs: vec![OffsetPair::default(); offset_array_size as usize],
-                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:145-146
-                // ```c
-                // diag_table->hit_level_array = (DiagStruct *)
-                //     calloc(diag_table->diag_array_length, sizeof(DiagStruct));
-                // ```
-                // Same zeroed diagonal table as the C calloc (huge pages advised with LOSAT_X_THP).
-                diag_array: x_new_diag_array(diag_array_size as usize),
+                diag_array: vec![DiagStruct::default(); diag_array_size as usize],
                 // NCBI: diag_table->offset = window_size;
                 // Source: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:63
                 diag_offset: window,
@@ -5378,13 +5345,7 @@ fn search_query_batch(
                     tx: tx_opt.clone(),
                     hits: Vec::new(),
                     offset_pairs: vec![OffsetPair::default(); offset_array_size as usize],
-                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:145-146
-                    // ```c
-                    // diag_table->hit_level_array = (DiagStruct *)
-                    //     calloc(diag_table->diag_array_length, sizeof(DiagStruct));
-                    // ```
-                    // Same zeroed diagonal table as the C calloc (huge pages advised with LOSAT_X_THP).
-                    diag_array: x_new_diag_array(diag_array_size as usize),
+                    diag_array: vec![DiagStruct::default(); diag_array_size as usize],
                     // NCBI: diag_table->offset = window_size;
                     // Source: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:63
                     diag_offset: window,
@@ -5406,13 +5367,7 @@ fn search_query_batch(
                 tx: tx_opt.clone(),
                 hits: Vec::new(),
                 offset_pairs: vec![OffsetPair::default(); offset_array_size as usize],
-                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:145-146
-                // ```c
-                // diag_table->hit_level_array = (DiagStruct *)
-                //     calloc(diag_table->diag_array_length, sizeof(DiagStruct));
-                // ```
-                // Same zeroed diagonal table as the C calloc (huge pages advised with LOSAT_X_THP).
-                diag_array: x_new_diag_array(diag_array_size as usize),
+                diag_array: vec![DiagStruct::default(); diag_array_size as usize],
                 // NCBI: diag_table->offset = window_size;
                 // Source: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:63
                 diag_offset: window,
@@ -5439,13 +5394,7 @@ fn search_query_batch(
                 tx: tx_opt.clone(),
                 hits: Vec::new(),
                 offset_pairs: vec![OffsetPair::default(); offset_array_size as usize],
-                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:145-146
-                // ```c
-                // diag_table->hit_level_array = (DiagStruct *)
-                //     calloc(diag_table->diag_array_length, sizeof(DiagStruct));
-                // ```
-                // Same zeroed diagonal table as the C calloc (huge pages advised with LOSAT_X_THP).
-                diag_array: x_new_diag_array(diag_array_size as usize),
+                diag_array: vec![DiagStruct::default(); diag_array_size as usize],
                 // NCBI: diag_table->offset = window_size;
                 // Source: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:63
                 diag_offset: window,

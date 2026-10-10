@@ -1701,7 +1701,7 @@ impl PreliminarySink for Runtime<'_> {
             // of speculative redoes below does the same per-match work on the pool. A result is
             // used only if the match did not read the matrix of its predecessor; every other match
             // is redone in stream order (see x_speculate_match).
-            #[allow(unused_mut)]
+            #[cfg(feature = "parallel")]
             let mut speculated: Vec<Option<(HspList, i32, Option<_>)>> = Vec::new();
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3329-3334,3499-3502
             // ```c

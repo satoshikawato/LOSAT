@@ -458,6 +458,7 @@ mod tests {
     // The tests below run a stand-in for this ordered loop: a value that depends on the
     // index alone, consumed in order.
     // The owner's result must not depend on what the helpers do.
+    #[cfg(feature = "parallel")]
     fn value_of(index: usize) -> u64 {
         let mut x = index as u64 ^ 0x9E37_79B9_7F4A_7C15;
         for _ in 0..(index % 7) * 3000 {
@@ -468,6 +469,7 @@ mod tests {
         x
     }
 
+    #[cfg(feature = "parallel")]
     fn ordered_sum(n: usize, window: usize, helpers: usize) -> (u64, Vec<usize>) {
         let compute = |index: usize, scratch: &mut u64| -> u64 {
             *scratch += 1;
@@ -506,6 +508,7 @@ mod tests {
         (sum, kept)
     }
 
+    #[cfg(feature = "parallel")]
     #[test]
     fn x_ahead_owner_result_is_independent_of_helpers() {
         let serial = {

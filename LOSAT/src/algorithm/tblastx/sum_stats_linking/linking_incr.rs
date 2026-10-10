@@ -81,14 +81,13 @@
 //!
 //! # Index 1
 //!
-//! The candidates of H are the remaining HSPs before H in the list with
-//! score > cutoff[1], `q_off_t > q_end_trim(H)` and `s_off_t > s_end_trim(H)`
-//! (link_hsps.c:827-861). `DomTree` (a 2-d tree over (q_off_t, s_off_t) with
-//! the largest key and the range of list indices of every subtree) answers
-//! "largest key among them" for one H. When many HSPs need index 1 in a pass,
-//! the pass instead sweeps the remaining HSPs by decreasing `q_end_trim` with
-//! the prefix-maximum Fenwick tree of `linking_index.rs`, computing again only
-//! the HSPs that need it.
+//! Every pass sweeps the remaining HSPs with score > cutoff[1] by decreasing
+//! `q_end_trim` and fills the prefix-maximum Fenwick tree of
+//! `linking_index.rs`, but computes again only the HSPs that need it. A
+//! selected HSP has a larger `q_end_trim` than the HSPs that select it, so
+//! it is final when they are visited. (The removal of a chain changes the
+//! values of a large share of the HSPs downstream of it at index 1, so a
+//! search per HSP in a dynamic 2-d structure costs more than the sweep.)
 //!
 //! # Checking
 //!
@@ -113,18 +112,7 @@ use super::linking_index::{
 };
 use super::params::LinkHspCutoffs;
 
-// No NCBI counterpart: how index 1 is searched in a pass after the first. Every choice selects
-// the same HSP; it does not change any value NCBI computes.
-/// How a pass after the first searches index 1.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum Index1Search {
-    /// The tree when few HSPs need index 1, the sweep otherwise.
-    Auto,
-    Tree,
-    Sweep,
-}
-
-// No NCBI counterpart: options of the check (verify), the Int4 check, and the index-1 search.
+// No NCBI counterpart: options of the check (verify) and the Int4 check.
 /// How the kernel runs. `from_env` is what a search uses.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct IncrOptions {
@@ -133,10 +121,6 @@ pub(super) struct IncrOptions {
     /// Stop at the first pass value outside Int4 (`linking_index.rs`, "Int4
     /// range"). Only tests turn it off.
     pub check_int4: bool,
-    pub index1: Index1Search,
-    /// `Auto` sweeps when (HSPs needing index 1 at the start of the pass) *
-    /// this >= remaining HSPs with score > cutoff[1].
-    pub sweep_factor: u32,
 }
 
 impl IncrOptions {
@@ -145,15 +129,6 @@ impl IncrOptions {
         *OPTIONS.get_or_init(|| IncrOptions {
             verify: std::env::var_os("LOSAT_LINK_FAST_VERIFY").is_some(),
             check_int4: true,
-            index1: match std::env::var("LOSAT_LINK_INCR_INDEX1").as_deref() {
-                Ok("tree") => Index1Search::Tree,
-                Ok("sweep") => Index1Search::Sweep,
-                _ => Index1Search::Auto,
-            },
-            sweep_factor: std::env::var("LOSAT_LINK_INCR_SWEEP")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(16),
         })
     }
 }
@@ -174,10 +149,10 @@ pub(super) struct IncrStats {
     pub visited1: u64,
     pub kept1: u64,
     pub searched1: u64,
-    /// Nodes of `DomTree` read by the index-1 searches.
-    pub tree_visits: u64,
-    /// Passes after the first that swept index 1, and HSPs those sweeps read.
-    pub sweeps: u64,
+    /// Searches that selected the previous choice again.
+    pub same0: u64,
+    pub same1: u64,
+    /// HSPs read by the index-1 sweeps of the passes after the first.
     pub swept: u64,
     /// Sweep searches answered by NCBI's scan (the tree returned a later HSP).
     pub fallbacks: u64,
@@ -202,8 +177,8 @@ impl IncrStats {
         self.visited1 += o.visited1;
         self.kept1 += o.kept1;
         self.searched1 += o.searched1;
-        self.tree_visits += o.tree_visits;
-        self.sweeps += o.sweeps;
+        self.same0 += o.same0;
+        self.same1 += o.same1;
         self.swept += o.swept;
         self.fallbacks += o.fallbacks;
         self.verified_passes += o.verified_passes;
@@ -261,193 +236,6 @@ impl Children {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:827-861
-// ```c
-// b0 = sum <= H_hsp_sum;
-// ...
-// b1 = q_off_t <= H_query_etrim;
-// b2 = s_off_t <= H_sub_etrim;
-// ...
-// if (!(b0|b1|b2) )
-// ...
-//    H2 = H2_helper->ptr;
-// ```
-// The tree answers the index-1 scan for one H: the remaining HSP before H with q_off_t >
-// H_query_etrim and s_off_t > H_sub_etrim and the largest (sum, list index), the HSP NCBI's
-// downward scan ends with.
-#[derive(Clone, Copy)]
-struct DomNode {
-    max: u64,
-    own: u64,
-    qo_lo: i32,
-    qo_hi: i32,
-    so_lo: i32,
-    so_hi: i32,
-    idx_lo: u32,
-    idx_hi: u32,
-    left: u32,
-    right: u32,
-    pt: u32,
-    pt_qo: i32,
-    pt_so: i32,
-}
-
-/// A 2-d tree over the HSPs with score > cutoff[1] at (q_off_t, s_off_t):
-/// every node holds one HSP, the bounding box and list-index range of its
-/// subtree, and the largest key in it (0 for removed HSPs).
-struct DomTree {
-    nodes: Vec<DomNode>,
-    parent: Vec<u32>,
-    node_of: Vec<u32>,
-    root: u32,
-}
-
-impl DomTree {
-    fn build(points: &[u32], qo: &[i32], so: &[i32], n: usize) -> Self {
-        let mut t = DomTree {
-            nodes: Vec::with_capacity(points.len()),
-            parent: Vec::with_capacity(points.len()),
-            node_of: vec![NONE; n],
-            root: NONE,
-        };
-        let mut pts = points.to_vec();
-        if !pts.is_empty() {
-            t.root = t.build_rec(&mut pts, qo, so, 0, NONE);
-        }
-        t
-    }
-
-    fn build_rec(&mut self, pts: &mut [u32], qo: &[i32], so: &[i32], depth: u32, par: u32) -> u32 {
-        let mid = pts.len() / 2;
-        if depth % 2 == 0 {
-            pts.select_nth_unstable_by_key(mid, |&p| (qo[p as usize], p));
-        } else {
-            pts.select_nth_unstable_by_key(mid, |&p| (so[p as usize], p));
-        }
-        let pt = pts[mid];
-        let mut node = DomNode {
-            max: 0,
-            own: 0,
-            qo_lo: i32::MAX,
-            qo_hi: i32::MIN,
-            so_lo: i32::MAX,
-            so_hi: i32::MIN,
-            idx_lo: u32::MAX,
-            idx_hi: 0,
-            left: NONE,
-            right: NONE,
-            pt,
-            pt_qo: qo[pt as usize],
-            pt_so: so[pt as usize],
-        };
-        for &p in pts.iter() {
-            let (q, s) = (qo[p as usize], so[p as usize]);
-            node.qo_lo = node.qo_lo.min(q);
-            node.qo_hi = node.qo_hi.max(q);
-            node.so_lo = node.so_lo.min(s);
-            node.so_hi = node.so_hi.max(s);
-            node.idx_lo = node.idx_lo.min(p);
-            node.idx_hi = node.idx_hi.max(p);
-        }
-        let id = self.nodes.len() as u32;
-        self.nodes.push(node);
-        self.parent.push(par);
-        self.node_of[pt as usize] = id;
-        let (lo, rest) = pts.split_at_mut(mid);
-        let hi = &mut rest[1..];
-        if !lo.is_empty() {
-            let l = self.build_rec(lo, qo, so, depth + 1, id);
-            self.nodes[id as usize].left = l;
-        }
-        if !hi.is_empty() {
-            let r = self.build_rec(hi, qo, so, depth + 1, id);
-            self.nodes[id as usize].right = r;
-        }
-        id
-    }
-
-    #[inline]
-    fn subtree_max(&self, v: usize) -> u64 {
-        let nd = &self.nodes[v];
-        let mut m = nd.own;
-        if nd.left != NONE {
-            m = m.max(self.nodes[nd.left as usize].max);
-        }
-        if nd.right != NONE {
-            m = m.max(self.nodes[nd.right as usize].max);
-        }
-        m
-    }
-
-    /// Sets the key of every HSP in the tree (children follow their parent in
-    /// `nodes`, so one backward walk fills the maxima).
-    fn fill(&mut self, key_of: impl Fn(usize) -> u64) {
-        for v in 0..self.nodes.len() {
-            self.nodes[v].own = key_of(self.nodes[v].pt as usize);
-        }
-        for v in (0..self.nodes.len()).rev() {
-            self.nodes[v].max = self.subtree_max(v);
-        }
-    }
-
-    fn set(&mut self, hsp: usize, k: u64) {
-        let mut v = self.node_of[hsp];
-        if v == NONE {
-            return;
-        }
-        self.nodes[v as usize].own = k;
-        while v != NONE {
-            let m = self.subtree_max(v as usize);
-            if m == self.nodes[v as usize].max {
-                break;
-            }
-            self.nodes[v as usize].max = m;
-            v = self.parent[v as usize];
-        }
-    }
-
-    /// The largest key among the HSPs with q_off_t > `a`, s_off_t > `b` and a
-    /// list index below `before` (0: none), and the nodes read.
-    fn query(&self, a: i32, b: i32, before: u32, stack: &mut Vec<u32>) -> (u64, u64) {
-        let mut best = 0u64;
-        let mut visits = 0u64;
-        if self.root == NONE {
-            return (0, 0);
-        }
-        stack.clear();
-        stack.push(self.root);
-        while let Some(v) = stack.pop() {
-            visits += 1;
-            let nd = &self.nodes[v as usize];
-            if nd.max <= best || nd.qo_hi <= a || nd.so_hi <= b || nd.idx_lo >= before {
-                continue;
-            }
-            if nd.qo_lo > a && nd.so_lo > b && nd.idx_hi < before {
-                best = nd.max;
-                continue;
-            }
-            if nd.own > best && nd.pt_qo > a && nd.pt_so > b && nd.pt < before {
-                best = nd.own;
-            }
-            let (l, r) = (nd.left, nd.right);
-            if l != NONE && r != NONE {
-                if self.nodes[l as usize].max >= self.nodes[r as usize].max {
-                    stack.push(r);
-                    stack.push(l);
-                } else {
-                    stack.push(l);
-                    stack.push(r);
-                }
-            } else if l != NONE {
-                stack.push(l);
-            } else if r != NONE {
-                stack.push(r);
-            }
-        }
-        (best, visits)
-    }
-}
-
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:414-419,589
 // ```c
 // s_BlastEvenGapLinkHSPs(EBlastProgramType program_number, BlastHSPList* hsp_list,
@@ -491,7 +279,7 @@ pub(super) fn link_hsp_group_incr(
     );
     if let Some(started) = started {
         eprintln!(
-            "[LINK_INCR_STATS] n={} us={} bound={} max_pass_sum={} max_addback_sum={} max_num={} int4_overflow_pass={} rounds={} passes={} removed={} visited0={} kept0={} searched0={} visited1={} kept1={} searched1={} tree_visits={} sweeps={} swept={} fallbacks={} verified_passes={}",
+            "[LINK_INCR_STATS] n={} us={} bound={} max_pass_sum={} max_addback_sum={} max_num={} int4_overflow_pass={} rounds={} passes={} removed={} visited0={} kept0={} searched0={} visited1={} kept1={} searched1={} same0={} same1={} swept={} fallbacks={} verified_passes={}",
             n,
             started.elapsed().as_micros(),
             bound,
@@ -508,8 +296,8 @@ pub(super) fn link_hsp_group_incr(
             stats.visited1,
             stats.kept1,
             stats.searched1,
-            stats.tree_visits,
-            stats.sweeps,
+            stats.same0,
+            stats.same1,
             stats.swept,
             stats.fallbacks,
             stats.verified_passes
@@ -821,12 +609,11 @@ pub(super) fn link_hsp_group_incr_with(
     //    H2 = H2_helper->ptr;
     // ```
     // The structures of the index-1 scan: the orders, ranks and Fenwick tree of the sweep of
-    // linking_index.rs, and the 2-d tree, over the HSPs with score > cutoff[1].
+    // linking_index.rs, over the HSPs with score > cutoff[1].
     let elig1: Vec<u32> = (0..n)
         .filter(|&i| score[i] > c[1])
         .map(|i| i as u32)
         .collect();
-    let mut alive1 = elig1.len();
     let mut qorder: Vec<u32> = elig1.clone();
     qorder.sort_unstable_by(|&a, &b| qe[b as usize].cmp(&qe[a as usize]).then_with(|| a.cmp(&b)));
     let mut iorder: Vec<u32> = elig1.clone();
@@ -845,8 +632,6 @@ pub(super) fn link_hsp_group_incr_with(
         kq[i] = (msz - le) as u32;
     }
     let mut fen: Vec<u64> = vec![0; msz + 1];
-    let mut dom = DomTree::build(&elig1, &qo, &so, n);
-    let mut stack: Vec<u32> = Vec::new();
 
     let mut tree = MaxTree::new(n);
 
@@ -957,23 +742,11 @@ pub(super) fn link_hsp_group_incr_with(
             }
             addback_hsps.clear();
 
-            // Index 0 in list order (link_hsps.c:691-768), and index 1 by the tree in list order or
-            // by the sweep in decreasing q_end_trim order (link_hsps.c:771-896).
+            // Index 0 in list order (link_hsps.c:691-768), index 1 by the sweep in decreasing
+            // q_end_trim order (link_hsps.c:771-896).
             for m in usize::from(ignore_small_gaps)..2 {
-                let sweep = m == 1
-                    && (first_pass
-                        || match options.index1 {
-                            Index1Search::Tree => false,
-                            Index1Search::Sweep => true,
-                            Index1Search::Auto => {
-                                seeds[1].len() as u64 * u64::from(options.sweep_factor)
-                                    >= alive1 as u64
-                            }
-                        });
+                let sweep = m == 1;
                 if sweep {
-                    if !first_pass {
-                        stats.sweeps += 1;
-                    }
                     seeds[1].clear();
                     for f in fen.iter_mut() {
                         *f = 0;
@@ -1108,7 +881,7 @@ pub(super) fn link_hsp_group_incr_with(
                                     }
                                 }
                             }
-                        } else if sweep {
+                        } else {
                             // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:827-861
                             // ```c
                             // for (H2_index=H_index-1; H2_index>1;)
@@ -1140,22 +913,13 @@ pub(super) fn link_hsp_group_incr_with(
                                     j = prev_active[jj];
                                 }
                             }
-                        } else {
-                            // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:827-861
-                            // ```c
-                            // b0 = sum <= H_hsp_sum;
-                            // ...
-                            // b1 = q_off_t <= H_query_etrim;
-                            // b2 = s_off_t <= H_sub_etrim;
-                            // ...
-                            // if (!(b0|b1|b2) )
-                            // ```
-                            // The 2-d tree: the remaining HSPs before H with q_off_t > q_end_trim and
-                            // s_off_t > s_end_trim, largest (sum, list index).
-                            stats.searched1 += 1;
-                            let (k, visits) = dom.query(qe[x], se[x], x as u32, &mut stack);
-                            stats.tree_visits += visits;
-                            bestk = k;
+                        }
+                        if bestk != 0 && key_idx(bestk) as u32 == old {
+                            if m == 0 {
+                                stats.same0 += 1;
+                            } else {
+                                stats.same1 += 1;
+                            }
                         }
                         if bestk != 0 {
                             let j = key_idx(bestk);
@@ -1215,9 +979,6 @@ pub(super) fn link_hsp_group_incr_with(
                                 leaf_dirty[x] = true;
                                 leaf_list.push(x as u32);
                             }
-                            if m == 1 && !first_pass {
-                                dom.set(x, key(new_sum, x));
-                            }
                         }
                         let mut ch = children[m].first[x];
                         while ch != NONE {
@@ -1252,7 +1013,6 @@ pub(super) fn link_hsp_group_incr_with(
                 for i in 0..n {
                     tree.set(i, [key(sum[0][i], i), key(sum[1][i], i)]);
                 }
-                dom.fill(|i| key(sum[1][i], i));
             } else {
                 for &x in leaf_list.iter() {
                     let x = x as usize;
@@ -1470,10 +1230,6 @@ pub(super) fn link_hsp_group_incr_with(
             }
             alive[cur] = false;
             removed.push(cur as u32);
-            if score[cur] > c[1] {
-                alive1 -= 1;
-                dom.set(cur, 0);
-            }
             let prev_idx = prev_active[cur];
             let next_idx = next_active[cur];
             if prev_idx != NONE {

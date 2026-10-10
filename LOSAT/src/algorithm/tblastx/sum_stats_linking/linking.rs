@@ -3617,7 +3617,7 @@ mod tests {
     // These tests compare the index-backed kernel with the port of s_BlastEvenGapLinkHSPs on the
     // same groups. The reference results are the NCBI kernel above, not hand-written numbers.
     use crate::algorithm::tblastx::sum_stats_linking::linking_incr::{
-        link_hsp_group_incr_with, IncrOptions, IncrStats, Index1Search,
+        link_hsp_group_incr_with, IncrOptions, IncrStats,
     };
     use crate::algorithm::tblastx::sum_stats_linking::linking_index::{
         link_hsp_group_fast_with, LinkFastOptions, LinkFastStats,
@@ -4153,34 +4153,20 @@ mod tests {
             let (linked, stats) = link_with_both_kernels(hits.clone(), cutoffs, options, &label);
             total.add(&stats);
             // The incremental kernel, each pass checked against a pass from scratch on the
-            // smaller groups, with the automatic index-1 choice and, in some cases, with only the
-            // tree or only the sweep.
-            let modes: &[Index1Search] = if case % 3 == 0 {
-                &[Index1Search::Auto, Index1Search::Tree, Index1Search::Sweep]
-            } else {
-                &[Index1Search::Auto]
-            };
-            for &index1 in modes {
-                let (incr, stats) = link_with_incr_kernel(
-                    hits.clone(),
-                    cutoffs,
-                    IncrOptions {
-                        verify: n <= 140,
-                        check_int4: true,
-                        index1,
-                        sweep_factor: 16,
-                    },
-                );
-                incr_total.add(&stats);
-                assert_eq!(linked.len(), incr.len(), "{label} {index1:?}");
-                for (a, b) in linked.iter().zip(&incr) {
-                    assert_eq!(
-                        a.e_value.to_bits(),
-                        b.e_value.to_bits(),
-                        "{label} {index1:?}"
-                    );
-                    assert_eq!(format!("{a:?}"), format!("{b:?}"), "{label} {index1:?}");
-                }
+            // smaller groups.
+            let (incr, stats) = link_with_incr_kernel(
+                hits.clone(),
+                cutoffs,
+                IncrOptions {
+                    verify: n <= 140,
+                    check_int4: true,
+                },
+            );
+            incr_total.add(&stats);
+            assert_eq!(linked.len(), incr.len(), "{label}");
+            for (a, b) in linked.iter().zip(&incr) {
+                assert_eq!(a.e_value.to_bits(), b.e_value.to_bits(), "{label}");
+                assert_eq!(format!("{a:?}"), format!("{b:?}"), "{label}");
             }
             if case % 5 == 0 {
                 let (again, stats) = link_with_both_kernels(
@@ -4231,8 +4217,7 @@ mod tests {
             let t = &incr_total;
             assert!(t.kept0 > 0 && t.searched0 > 0, "{t:?}");
             assert!(t.kept1 > 0 && t.searched1 > 0, "{t:?}");
-            assert!(t.removed > 0 && t.tree_visits > 0, "{t:?}");
-            assert!(t.sweeps > 0 && t.fallbacks > 0, "{t:?}");
+            assert!(t.removed > 0 && t.swept > 0 && t.fallbacks > 0, "{t:?}");
             assert!(t.verified_passes > 0, "{t:?}");
             eprintln!("incremental kernel: {t:?}");
         }
@@ -4341,8 +4326,6 @@ mod tests {
                 IncrOptions {
                     verify: false,
                     check_int4: check,
-                    index1: Index1Search::Auto,
-                    sweep_factor: 16,
                 },
             )
         };

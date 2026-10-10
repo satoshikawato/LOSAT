@@ -2,6 +2,13 @@
 // Chromium 80, Firefox 113, Safari 16.4), which Node also has for the unit tests.
 import type { Compression } from '../../ports/compression';
 import type { ExportSink } from '../../ports/download';
+import { concatBytes } from '../bytes';
+
+/**
+ * Compressed bytes are handed on in blocks of about this size: the stream's own chunks are small
+ * (tens of kB), and each block that a download's sink takes lets the page paint once.
+ */
+const OUT_BYTES = 1024 * 1024;
 
 export const browserCompression: Compression = {
   gzip(out) {
@@ -38,10 +45,21 @@ class GzipSink implements ExportSink {
     this.writer = stream.writable.getWriter();
     const reader = stream.readable.getReader();
     this.pumping = (async () => {
+      let parts: Uint8Array[] = [];
+      let held = 0;
       for (;;) {
         const { done, value } = await reader.read();
+        if (!done) {
+          parts.push(value);
+          held += value.length;
+        }
+        if ((done || held >= OUT_BYTES) && held > 0) {
+          const block = concatBytes(parts);
+          parts = [];
+          held = 0;
+          await out(block);
+        }
         if (done) return;
-        await out(value);
       }
     })();
     // A failure of `out` stops the writes that wait for the reader (backpressure).

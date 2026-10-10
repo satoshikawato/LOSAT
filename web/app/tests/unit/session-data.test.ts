@@ -98,6 +98,16 @@ describe('browserCompression', () => {
     await sink.close();
     expect(new TextDecoder().decode(gunzipSync(Buffer.concat(out)))).toBe(text);
     await expect(sink.write(block)).rejects.toThrow(/no longer open/);
+    // Data that does not compress leaves in blocks of about 1 MiB, not as one file.
+    const blocks: Uint8Array[] = [];
+    const big = browserCompression.gzip(async (bytes) => void blocks.push(bytes.slice()));
+    let state = 1;
+    const noise = new Uint8Array(3 << 20).map(() => (state = (Math.imul(state, 1103515245) + 12345) >>> 0) >>> 24);
+    for (let at = 0; at < noise.length; at += 1 << 16) await big.write(noise.subarray(at, at + (1 << 16)));
+    await big.close();
+    expect(blocks.length).toBeGreaterThanOrEqual(3);
+    expect(Math.max(...blocks.map((b) => b.length))).toBeLessThan(2 << 20);
+    expect(Buffer.from(gunzipSync(Buffer.concat(blocks))).equals(Buffer.from(noise))).toBe(true);
   });
 
   it('fails the writes when the compressed blocks cannot be handed on, and aborts without output', async () => {

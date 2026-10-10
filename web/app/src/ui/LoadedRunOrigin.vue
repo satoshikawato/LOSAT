@@ -49,7 +49,8 @@ function sourcesText(role: InputRole): string {
     <h3>Loaded from a session file</h3>
     <p data-testid="run-origin-file">
       From {{ origin.fileName }}, run {{ origin.number }} there (saved {{ formatDateTime(origin.savedAt) }}). It was not searched again: its
-      outputs, HSP records and warnings are those that the file holds.
+      outputs, HSP records and warnings are those that the file holds. A session file does not hold the input FASTA; the outputs, HSP
+      records and aligned sequences need none.
     </p>
     <div
       v-for="role in ROLES"
@@ -65,12 +66,11 @@ function sourcesText(role: InputRole): string {
       </p>
       <template v-else>
         <p class="notice" :data-testid="`run-original-${role}-missing`">
-          Not attached. A session file does not hold the input FASTA, so sequences cannot be extracted from this run's candidates (hit
-          regions, flanks or complete sequences) and the input FASTA of this run cannot be downloaded until the original file is chosen
-          again. The outputs, HSP records and aligned sequences need no original.
+          Not attached: the {{ role }} sequences of this run's candidates (hit regions, flanks, complete sequences) cannot be extracted, and
+          the run's {{ role }} input FASTA cannot be downloaded, until the original file is chosen again.
         </p>
         <p class="hint">
-          The run's {{ role }}: {{ sourcesText(role) }}. Files are attached only if their records and SHA-256 match it, with the same records
+          The run's {{ role }}: {{ sourcesText(role) }}. Only files whose records and SHA-256 match it are attached, with the same records
           left out.
         </p>
         <div class="loaded-actions">

@@ -245,7 +245,7 @@ describe('Session: saving and opening', () => {
     const file = await saveSession(a);
     expect(file.name).toBe('losat-session-20261010-120000.losat-session.gz');
     expect(file.mime).toBe('application/gzip');
-    expect(file.blocks).toBeGreaterThan(1);
+    expect(file.blocks).toBeGreaterThanOrEqual(1);
     expect(a.session.state.get().message).toEqual({ text: `Saved ${file.name}: 2 runs and 5 candidates with their notes.`, error: false });
 
     const { engine, calls } = forbiddenEngine();

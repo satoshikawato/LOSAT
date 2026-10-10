@@ -1,0 +1,572 @@
+(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+  - import "./output-format" without a file extension (src/domain/verification.ts:9:35). Add the file extension
+  - import "./programs" without a file extension (src/domain/verification.ts:10:32). Add the file extension
+Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+
+ RUN  v5.0.2 /home/kawato/losat-work/.worktrees/web-gui-app/web/app
+
+ ✓ tests/unit/argv.test.ts > buildArgv > puts the program and input names first, then parameters in the given order 1ms
+ ✓ tests/unit/argv.test.ts > buildArgv > rejects the application-managed flag -query 1ms
+ ✓ tests/unit/argv.test.ts > buildArgv > rejects the application-managed flag -subject 0ms
+ ✓ tests/unit/argv.test.ts > buildArgv > rejects the application-managed flag -out 0ms
+ ✓ tests/unit/argv.test.ts > buildArgv > rejects the application-managed flag -outfmt 0ms
+ ✓ tests/unit/argv.test.ts > buildArgv > rejects the application-managed flag -num_threads 0ms
+ ✓ tests/unit/argv.test.ts > buildArgv > rejects parameters that are not flags 0ms
+ ✓ tests/unit/argv.test.ts > toShellCommand > quotes only the words that need quoting and always writes -outfmt 0ms
+ ✓ tests/unit/argv.test.ts > optionValue > reads the word after an option's last occurrence, and nothing where it is not given 0ms
+ ✓ tests/unit/format.test.ts > formatDateTime > writes a local time in ISO 8601 form, day and month never swapped 1ms
+ ✓ tests/unit/format.test.ts > formatDateTime > pads every field and drops the milliseconds 0ms
+ ✓ tests/unit/format.test.ts > formatCounted > writes the noun in the singular for one only 8ms
+ ✓ tests/unit/format.test.ts > frames > names only the translated sequence’s frame where one sequence is translated (W4b screen review L9) 0ms
+ ✓ tests/unit/format.test.ts > frames > writes the frames with their signs, the query’s first 0ms
+ ✓ tests/unit/format.test.ts > frames > puts them in a sentence 0ms
+ ✓ tests/unit/dataset.test.ts > dataset revisions > lists the included records in the original order 1ms
+ ✓ tests/unit/dataset.test.ts > dataset revisions > sorts and deduplicates an exclusion and rejects indices outside the table 0ms
+ ✓ tests/unit/dataset.test.ts > record tables at register > agrees when every ID and length is the same 0ms
+ ✓ tests/unit/dataset.test.ts > record tables at register > names the first record that differs 0ms
+ ✓ tests/unit/dataset.test.ts > record tables at register > reports a different number of records 0ms
+ ✓ tests/unit/dataset.test.ts > isFirstLineRefusal > is true for the refusal of a first line that may be a sequence identifier, and for no other refusal 0ms
+ ✓ tests/unit/headers.test.ts > _headers > enables cross-origin isolation for every path 2ms
+ ✓ tests/unit/headers.test.ts > _headers > limits every fetch to the site itself and allows Wasm compilation 1ms
+ ✓ tests/unit/headers.test.ts > _headers > rejects a header line outside any path rule 1ms
+ ✓ tests/unit/plot-geometry.test.ts > plotSize > spans the available width with the longer sequence, the shorter one in proportion 1ms
+ ✓ tests/unit/plot-geometry.test.ts > plotSize > is at most 1000 px and the shorter side at least 120 px (then not to scale) 0ms
+ ✓ tests/unit/plot-geometry.test.ts > plotSize > counts 3 letters a residue on a protein axis against a nucleotide one (TBLASTN, BLASTX; decision 26) 0ms
+ ✓ tests/unit/plot-geometry.test.ts > positions and pixels > maps query positions to x and subject positions downward to y, both ways 0ms
+ ✓ tests/unit/plot-geometry.test.ts > positions and pixels > measures the distance from a point to a segment 0ms
+ ✓ tests/unit/plot-geometry.test.ts > zoom and pan > zooms about a point, keeping the two spans in the plot's ratio, and back to the whole plot 0ms
+ ✓ tests/unit/plot-geometry.test.ts > zoom and pan > keeps the point under the pointer in place 0ms
+ ✓ tests/unit/plot-geometry.test.ts > zoom and pan > stops at the whole plot and at 4 letters 0ms
+ ✓ tests/unit/plot-geometry.test.ts > zoom and pan > pans within the records 0ms
+ ✓ tests/unit/plot-geometry.test.ts > zoom and pan > frames an HSP (reverse ones too) at the same scale on both axes 0ms
+ ✓ tests/unit/plot-geometry.test.ts > the lines that show in the view, and the line under a point > keeps a line whose stroke reaches into the view, and leaves out one that cannot 0ms
+ ✓ tests/unit/plot-geometry.test.ts > the lines that show in the view, and the line under a point > clips a segment to a box 0ms
+ ✓ tests/unit/plot-geometry.test.ts > the lines that show in the view, and the line under a point > picks the nearest line within reach by its part inside the frame, and nothing outside the frame 0ms
+ ✓ tests/unit/plot-geometry.test.ts > placeBox > puts the box right of and below the anchor 0ms
+ ✓ tests/unit/plot-geometry.test.ts > placeBox > flips to the left and above near the far edges 0ms
+ ✓ tests/unit/plot-geometry.test.ts > placeBox > stays inside bounds that have room on neither side 0ms
+ ✓ tests/unit/plot-geometry.test.ts > placeBeside > puts the popup off an end of the line, leaving the line uncovered (W4b screen review L10) 0ms
+ ✓ tests/unit/plot-geometry.test.ts > placeBeside > takes the first place that covers nothing of the line and needs no move 0ms
+ ✓ tests/unit/plot-geometry.test.ts > placeBeside > places a box beside a point (a line out of view, or of one pixel) 0ms
+ ✓ tests/unit/plot-geometry.test.ts > placeBeside > gives no place where the box would cover the midpoint wherever it goes, or does not fit 0ms
+ ✓ tests/unit/plot-scale.test.ts > tickSteps > is the tick_size table of blast2dotplot.py, its bounds inclusive 1ms
+ ✓ tests/unit/plot-scale.test.ts > axisUnit and tickLabel > chooses bp, kbp or Mbp by the span (aa, kaa or Maa on a protein axis) 0ms
+ ✓ tests/unit/plot-scale.test.ts > axisUnit and tickLabel > writes a decimal only where the value is not whole in the unit 8ms
+ ✓ tests/unit/plot-scale.test.ts > axisTicks > places the major and minor ticks of the visible span, minor ticks off the major ones 1ms
+ ✓ tests/unit/plot-scale.test.ts > axisTicks > chooses the steps again for a zoomed view and starts at the first multiple in view 0ms
+ ✓ tests/unit/plot-scale.test.ts > axisTicks > places minor ticks whatever their count, leaving out only those closer than MIN_MINOR_PX 0ms
+ ✓ tests/unit/plot-scale.test.ts > axisTicks > builds no minor ticks for a long record drawn small 0ms
+ ✓ tests/unit/plot-scale.test.ts > axisTicks > has no ticks for an empty span 0ms
+ ✓ tests/unit/plot-scale.test.ts > rulerTicks > labels 1, the length and round positions between 0ms
+ ✓ tests/unit/plot-scale.test.ts > rulerTicks > leaves out round positions too close to an end, and copes with tiny records 0ms
+ ✓ tests/unit/plot-scale.test.ts > identityClass > truncates the pident string and classes it as blast2dotplot.py does 0ms
+ ✓ tests/unit/plot-scale.test.ts > identityClass > draws a pident that is not a number (the FakeEngine writes FAKE) opaque 0ms
+ ✓ tests/unit/plot-scale.test.ts > scoreBin > uses NCBI's half-open bins and colours 0ms
+ ✓ tests/unit/rpc.test.ts > rpc > calls the served methods and returns their results 17ms
+ ✓ tests/unit/rpc.test.ts > rpc > transfers the typed arrays of a result and of an array in it when they own their buffers 1ms
+ ✓ tests/unit/rpc.test.ts > rpc > keeps the name and message of an error 0ms
+ ✓ tests/unit/rpc.test.ts > rpc > serves only the listed methods 1ms
+ ✓ tests/unit/rpc.test.ts > rpc > transfers a returned MessagePort 0ms
+ ✓ tests/unit/rpc.test.ts > rpc > rejects every call when the service fails to start 0ms
+ ✓ tests/unit/rpc.test.ts > rpc > keeps working after an error event of a worker that has answered 0ms
+ ✓ tests/unit/rpc.test.ts > rpc > rejects pending and later calls when the worker fails to start 0ms
+ ✓ tests/unit/coordinates.test.ts > record intervals and strands of HSP coordinates > orders the two coordinates and keeps the strand they give 2ms
+ ✓ tests/unit/coordinates.test.ts > record intervals and strands of HSP coordinates > BLASTN: the query on its plus strand, a minus-strand subject, and a one-letter HSP whose strand the record does not give 0ms
+ ✓ tests/unit/coordinates.test.ts > record intervals and strands of HSP coordinates > frames change no coordinate: TBLASTN, TBLASTX and BLASTX positions are the nucleotides of the record 0ms
+ ✓ tests/unit/coordinates.test.ts > record intervals and strands of HSP coordinates > knows which sequences a program translates and their units 0ms
+ ✓ tests/unit/coordinates.test.ts > flanks, the ends of a record and spanning > adds left and right flanks on the record axis whatever the strand 0ms
+ ✓ tests/unit/coordinates.test.ts > flanks, the ends of a record and spanning > cuts at both ends and keeps the requested interval 0ms
+ ✓ tests/unit/coordinates.test.ts > flanks, the ends of a record and spanning > refuses intervals outside the record, negative or fractional flanks 1ms
+ ✓ tests/unit/coordinates.test.ts > flanks, the ends of a record and spanning > spans several intervals without joining them otherwise 0ms
+ ✓ tests/unit/coordinates.test.ts > flanks, the ends of a record and spanning > gives the strand that spans share, or mixed 1ms
+ ✓ tests/unit/coordinates.test.ts > flanks, the ends of a record and spanning > checks that an interval lies in its record 0ms
+ ✓ tests/unit/extraction.test.ts > extraction targets > takes the record, unit, span and label of an HSP on either role 3ms
+ ✓ tests/unit/extraction.test.ts > extraction targets > BLASTX (synthetic records until SX): the query positions are nucleotides whatever the frame 1ms
+ ✓ tests/unit/extraction.test.ts > extraction targets > TBLASTN: a minus frame subject in nucleotides and the protein query in residues 0ms
+ ✓ tests/unit/extraction.test.ts > extraction targets > refuses an HSP that is not within its record 1ms
+ ✓ tests/unit/extraction.test.ts > planning > separate: one sequence per HSP in tray order, overlaps kept 0ms
+ ✓ tests/unit/extraction.test.ts > planning > spanning: one interval from the smallest to the largest position on each record, then the flanks 0ms
+ ✓ tests/unit/extraction.test.ts > planning > whole: one sequence per record listing every HSP of the tray on it, whatever the join 0ms
+ ✓ tests/unit/extraction.test.ts > planning > never joins records of different runs or roles, even with the same ID, length and position 0ms
+ ✓ tests/unit/extraction.test.ts > planning > says that it does not decide the strand of a one-letter BLASTN HSP, and why 0ms
+ ✓ tests/unit/extraction.test.ts > planning > refuses HSPs that disagree about one record 0ms
+ ✓ tests/unit/extraction.test.ts > sequence FASTA > writes the header and the residues as read, 60 per line, case kept 1ms
+ ✓ tests/unit/extraction.test.ts > sequence FASTA > names a record without an ID as the engine does in outfmt 6 0ms
+ ✓ tests/unit/extraction.test.ts > sequence FASTA > wraps any letters at the given width 0ms
+ ✓ tests/unit/extraction.test.ts > gapped alignment FASTA > writes both rows as the engine wrote them, with the search direction of the coordinates 1ms
+ ✓ tests/unit/extraction.test.ts > gapped alignment FASTA > shows frames for translated sequences only 0ms
+ ✓ tests/unit/extraction.test.ts > gapped alignment FASTA > reports an HSP without aligned rows instead of inventing them 0ms
+ ✓ tests/unit/session.test.ts > working session ownership > holds the session lock until the worker ends 1ms
+ ✓ tests/unit/session.test.ts > working session ownership > removes only the sessions whose lock is free, holding their lock while it removes 1ms
+ ✓ tests/unit/session.test.ts > working session ownership > leaves a directory that cannot be removed and goes on 0ms
+ ✓ tests/unit/session.test.ts > working session ownership > takes its lock before it opens its directory, then reclaims in the background 1ms
+ ✓ tests/unit/session.test.ts > working session ownership > reclaims abandoned sessions first when OPFS is too full to open, then opens it 1ms
+ ✓ tests/unit/session.test.ts > working session ownership > keeps its data in memory when OPFS stays full after the reclaim 0ms
+ ✓ tests/unit/session.test.ts > working session ownership > keeps its data in memory and removes nothing without Web Locks 0ms
+ ✓ tests/unit/session.test.ts > working session ownership > keeps its data in memory when its lock cannot be taken, so no other tab can remove it 0ms
+ ✓ tests/unit/session.test.ts > working session ownership > falls back to memory with the reason when OPFS cannot be used 0ms
+ ✓ tests/unit/verification-table.test.ts > verification table > lists the four programs of the engine and the NCBI version 1ms
+ ✓ tests/unit/verification-table.test.ts > verification table > records the browser runtime of every program from the verification cells 1ms
+ ✓ tests/unit/verification-table.test.ts > verification table > has the default options of every program compared for the formats of the records 0ms
+ ✓ tests/unit/verification-table.test.ts > verification table > has the options of the regression fixtures and the approved exception 1ms
+ ✓ tests/unit/verification-table.test.ts > verification table > keeps a flag of a range and drops the range 0ms
+ ✓ tests/unit/verification-table.test.ts > verification table > keeps nothing outside the inputs, outputs and threads in a key 9ms
+ ✓ tests/unit/verification-table.test.ts > verification table > names its sources with their SHA-256 and the records that it took from them 0ms
+ ✓ tests/unit/verification-table.test.ts > verification table > is the same on every run 13ms
+ ✓ tests/unit/verification-table.test.ts > verification table > writes a copy for the gate record when LOSAT_WEB_VERIFICATION_OUT is set 1ms
+ ✓ tests/unit/search-form.test.ts > formParameters > gives no parameters for empty values 1ms
+ ✓ tests/unit/search-form.test.ts > formParameters > omits a value equal to the engine default, also with surrounding white space 0ms
+ ✓ tests/unit/search-form.test.ts > formParameters > keeps a different value, trimmed 0ms
+ ✓ tests/unit/search-form.test.ts > formParameters > keeps a value when the engine states no default 0ms
+ ✓ tests/unit/search-form.test.ts > formParameters > writes a flag field only when its value is true 0ms
+ ✓ tests/unit/search-form.test.ts > formParameters > ignores a boolean value for a value field 0ms
+ ✓ tests/unit/search-form.test.ts > formParameters > skips fields whose flag is not among the engine options 0ms
+ ✓ tests/unit/search-form.test.ts > formParameters > follows the order of the descriptor, not of the values or the options 0ms
+ ✓ tests/unit/search-form.test.ts > formParameters > considers all descriptor fields when the options are undefined 0ms
+ ✓ tests/unit/search-form.test.ts > formParameters > works for TBLASTX with its sections in the order of the page: the genetic codes, then the algorithm parameters 0ms
+ ✓ tests/unit/search-form.test.ts > formParameters > gives the parameters of one place of the screen 0ms
+ ✓ tests/unit/search-form.test.ts > formParameters > omits a TBLASTX value equal to the engine default 0ms
+ ✓ tests/unit/search-form.test.ts > setField > removes the template fields when the task is blastn 0ms
+ ✓ tests/unit/search-form.test.ts > setField > removes the template fields when the task is blastn-short 0ms
+ ✓ tests/unit/search-form.test.ts > setField > keeps the template fields when the task is dc-megablast 0ms
+ ✓ tests/unit/search-form.test.ts > setField > keeps the template fields when the task is megablast 0ms
+ ✓ tests/unit/search-form.test.ts > setField > does not clear the templates when another field is set 0ms
+ ✓ tests/unit/search-form.test.ts > setField > returns a frozen object and leaves the input unchanged 0ms
+ ✓ tests/unit/search-form.test.ts > setField > sets a flag value 0ms
+ ✓ tests/unit/search-form.test.ts > describedSections > returns the program sections when the options are unknown 0ms
+ ✓ tests/unit/search-form.test.ts > describedSections > keeps only described fields and drops empty sections 0ms
+ ✓ tests/unit/search-form.test.ts > describedSections > returns no section when the engine describes none of the fields 0ms
+ ✓ tests/unit/search-form.test.ts > fieldChoices > uses the engine's choices for an option that takes a value 0ms
+ ✓ tests/unit/search-form.test.ts > fieldChoices > uses the field's choices when the engine lists none 0ms
+ ✓ tests/unit/search-form.test.ts > fieldChoices > gives no choices when neither lists any 0ms
+ ✓ tests/unit/search-form.test.ts > fieldChoices > does not use the choices of a flag option 0ms
+ ✓ tests/unit/search-form.test.ts > writtenValue > writes a value other than empty and the default, trimmed 0ms
+ ✓ tests/unit/search-form.test.ts > writtenValue > writes a value equal to no default, as when the engine states none (a default that depends on the task) 0ms
+ ✓ tests/unit/search-form.test.ts > writtenValue > writes a flag only when it is set 0ms
+ ✓ tests/unit/search-form.test.ts > effectiveValue > is the value set, trimmed, or else the default 0ms
+ ✓ tests/unit/search-form.test.ts > sections by place, and the Discontiguous Word Options > shows the section for the dc-megablast task, set or the default 0ms
+ ✓ tests/unit/search-form.test.ts > sections by place, and the Discontiguous Word Options > hides it for the other tasks while its fields are empty 0ms
+ ✓ tests/unit/search-form.test.ts > sections by place, and the Discontiguous Word Options > shows it while one of its fields has a value, so that no hidden value is written 0ms
+ ✓ tests/unit/search-form.test.ts > sections by place, and the Discontiguous Word Options > always shows a section without a rule 0ms
+ ✓ tests/unit/search-form.test.ts > sections by place, and the Discontiguous Word Options > places the task, the genetic codes and the algorithm parameters 2ms
+ ✓ tests/unit/search-form.test.ts > fieldRows > puts the consecutive fields of a row together (NCBI's Match/Mismatch Scores and Gap Costs) 1ms
+ ✓ tests/unit/search-form.test.ts > searchSummary > says what is searched, with which program and task, and where 0ms
+ ✓ tests/unit/search-form.test.ts > searchSummary > names a task without a note, and leaves the task out while it is unknown 0ms
+ ✓ tests/unit/search-form.test.ts > regionProblem > asks for both positions 0ms
+ ✓ tests/unit/search-form.test.ts > regionProblem > rejects "1.5" and "10" as not whole numbers 0ms
+ ✓ tests/unit/search-form.test.ts > regionProblem > rejects " 0x10" and "20" as not whole numbers 0ms
+ ✓ tests/unit/search-form.test.ts > regionProblem > rejects "-3" and "10" as not whole numbers 0ms
+ ✓ tests/unit/search-form.test.ts > regionProblem > rejects "1e3" and "10" as not whole numbers 0ms
+ ✓ tests/unit/search-form.test.ts > regionProblem > rejects "5" and "abc" as not whole numbers 0ms
+ ✓ tests/unit/search-form.test.ts > regionProblem > rejects "5" and "+7" as not whole numbers 0ms
+ ✓ tests/unit/search-form.test.ts > regionProblem > rejects "1 0" and "5" as not whole numbers 0ms
+ ✓ tests/unit/search-form.test.ts > regionProblem > limits the start and the stop to the record 0ms
+ ✓ tests/unit/search-form.test.ts > regionProblem > names the length of the record in the message 0ms
+ ✓ tests/unit/search-form.test.ts > regionProblem > accepts positions within the record, including start == stop and start > stop 0ms
+ ✓ tests/unit/search-form.test.ts > regionProblem > accepts surrounding white space 0ms
+ ✓ tests/unit/search-form.test.ts > region value, range and positions > has a flag for each role 0ms
+ ✓ tests/unit/search-form.test.ts > region value, range and positions > writes the value without white space or leading zeros 0ms
+ ✓ tests/unit/search-form.test.ts > region value, range and positions > gives the range of a valid region 0ms
+ ✓ tests/unit/search-form.test.ts > region value, range and positions > gives no range while the region is incomplete or outside the record 0ms
+ ✓ tests/unit/search-form.test.ts > region value, range and positions > orders, rounds and limits positions 1ms
+ ✓ tests/unit/search-form.test.ts > estimateKind > estimates a nucleotide sequence from a share of at least 90% of A C G T U N 0ms
+ ✓ tests/unit/search-form.test.ts > estimateKind > estimates a protein below that share 0ms
+ ✓ tests/unit/search-form.test.ts > estimateKind > gives no estimate without letters 2ms
+ ✓ tests/unit/search-form.test.ts > estimateKind > counts only the letters A-Z and a-z 0ms
+ ✓ tests/unit/search-form.test.ts > estimateKind > looks for a kind other than the expected one 0ms
+ ✓ tests/unit/search-form.test.ts > estimateKind > does not warn about a record without letters 0ms
+ ✓ tests/unit/search-form.test.ts > geneticCodeLabel > writes the number and the name of a known code 0ms
+ ✓ tests/unit/search-form.test.ts > geneticCodeLabel > writes the number alone for a code without a name 0ms
+ ✓ tests/unit/search-form.test.ts > duplicateIds > returns the IDs that appear more than once 0ms
+ ✓ tests/unit/search-form.test.ts > duplicateIds > returns an empty set when all IDs differ 0ms
+ ✓ tests/unit/search-form.test.ts > program descriptors > lists each program once 0ms
+ ✓ tests/unit/search-form.test.ts > program descriptors > marks BLASTX as unavailable 0ms
+ ✓ tests/unit/search-form.test.ts > program descriptors > blastn has a form with unique flags 0ms
+ ✓ tests/unit/search-form.test.ts > program descriptors > blastp has a form with unique flags 0ms
+ ✓ tests/unit/search-form.test.ts > program descriptors > tblastn has a form with unique flags 0ms
+ ✓ tests/unit/search-form.test.ts > program descriptors > tblastx has a form with unique flags 0ms
+ ✓ tests/unit/search-form.test.ts > program descriptors > blastn uses no reserved flag 0ms
+ ✓ tests/unit/search-form.test.ts > program descriptors > blastp uses no reserved flag 1ms
+ ✓ tests/unit/search-form.test.ts > program descriptors > blastx uses no reserved flag 0ms
+ ✓ tests/unit/search-form.test.ts > program descriptors > tblastn uses no reserved flag 1ms
+ ✓ tests/unit/search-form.test.ts > program descriptors > tblastx uses no reserved flag 0ms
+ ✓ tests/unit/search-form.test.ts > program descriptors > blastn has NCBI's sections in NCBI's order under Algorithm parameters 0ms
+ ✓ tests/unit/search-form.test.ts > program descriptors > blastp has NCBI's sections in NCBI's order under Algorithm parameters 0ms
+ ✓ tests/unit/search-form.test.ts > program descriptors > tblastn has NCBI's sections in NCBI's order under Algorithm parameters 0ms
+ ✓ tests/unit/search-form.test.ts > program descriptors > tblastx has NCBI's sections in NCBI's order under Algorithm parameters 0ms
+ ✓ tests/unit/search-form.test.ts > program descriptors > gives the sequence kind and unit of each input 0ms
+ ✓ tests/unit/thread-host.test.ts > ThreadHost > prepares two sets of thread workers and starts threads in them with increasing thread IDs 2ms
+ ✓ tests/unit/thread-host.test.ts > ThreadHost > starts the next pool of a search in the spare set while the threads of the previous pool still run 1ms
+ ✓ tests/unit/thread-host.test.ts > ThreadHost > waits for a thread worker that is being prepared again after its thread returned 55ms
+ ✓ tests/unit/attention.test.ts > leave guard > is off without runs 2ms
+ ✓ tests/unit/attention.test.ts > leave guard > is on while a run is queued 0ms
+ ✓ tests/unit/attention.test.ts > leave guard > is on while a run is preparing 0ms
+ ✓ tests/unit/attention.test.ts > leave guard > is on while a run is running 0ms
+ ✓ tests/unit/attention.test.ts > leave guard > is on while a run is finalizing 0ms
+ ✓ tests/unit/attention.test.ts > leave guard > follows the runs: on while any run is in progress, off when all are terminal 1ms
+ ✓ tests/unit/attention.test.ts > wake lock > is 'unsupported' when the page cannot hold one, and is never requested 1ms
+ ✓ tests/unit/attention.test.ts > wake lock > is off, and not requested, while keepAwake is false 0ms
+ ✓ tests/unit/attention.test.ts > wake lock > is not requested without runs, and is held from a queued run to the end of the queue 1ms
+ ✓ tests/unit/attention.test.ts > wake lock > is requested when keepAwake is turned on during a run, and released when the run completes 0ms
+ ✓ tests/unit/attention.test.ts > wake lock > is released when keepAwake is turned off 0ms
+ ✓ tests/unit/attention.test.ts > wake lock > is 'failed' with the error message when the request is rejected 0ms
+ ✓ tests/unit/attention.test.ts > wake lock > writes a non-Error rejection as a string 0ms
+ ✓ tests/unit/attention.test.ts > wake lock > is requested again after a failure, and the error is cleared 0ms
+ ✓ tests/unit/attention.test.ts > wake lock > is requested again when the browser releases it while the run is active and the page visible 1ms
+ ✓ tests/unit/attention.test.ts > wake lock > is not requested again when the browser releases it while the page is hidden 0ms
+ ✓ tests/unit/attention.test.ts > wake lock > is not requested while the page is hidden, and is requested when it is shown 1ms
+ ✓ tests/unit/attention.test.ts > resume report > reports how long the page was hidden and what became of the runs 0ms
+ ✓ tests/unit/attention.test.ts > resume report > keeps the earlier status for a run that is no longer in the list 0ms
+ ✓ tests/unit/attention.test.ts > resume report > is 'not-responding' when the probe rejects 0ms
+ ✓ tests/unit/attention.test.ts > resume report > is 'not-responding' when the probe does not answer within probeTimeoutMs 86ms
+ ✓ tests/unit/attention.test.ts > resume report > is not made when no run was in progress as the page was hidden 0ms
+ ✓ tests/unit/attention.test.ts > resume report > is not made when there are no runs, nor when the page is shown without having been hidden 0ms
+ ✓ tests/unit/attention.test.ts > resume report > is not made again by a second show after dismissResume 0ms
+ ✓ tests/unit/attention.test.ts > resume report > is removed by dismissResume 0ms
+ ✓ tests/unit/attention.test.ts > resume report > does not bring the report back when a probe answers after dismissResume 0ms
+ ✓ tests/unit/attention.test.ts > resume report > lets the latest show decide the Data worker status 0ms
+ ✓ tests/unit/attention.test.ts > resume report > makes no report for a hide shorter than minHiddenMs 0ms
+ ✓ tests/unit/results.test.ts > outfmt 6 rows and outfmt 0 headings > splits a row into its twelve fields, and refuses another number of fields 2ms
+ ✓ tests/unit/results.test.ts > outfmt 6 rows and outfmt 0 headings > takes the title of a subject heading as written 0ms
+ ✓ tests/unit/results.test.ts > the HSP table and its index > keeps the small fields of each record, with null as -1 or 0 0ms
+ ✓ tests/unit/results.test.ts > the HSP table and its index > groups the HSPs by query and subject in the engine order 0ms
+ ✓ tests/unit/results.test.ts > the HSP table and its index > sorts subjects and HSPs by engine values, ties in the engine order 0ms
+ ✓ tests/unit/results.test.ts > the HSP table and its index > filters HSPs by E value, bit score and subject text, and counts what it hides 1ms
+ ✓ tests/unit/results.test.ts > the HSP table and its index > gives an HSP's subject coordinates in ascending order (NCBI's Range) 0ms
+ ✓ tests/unit/results.test.ts > the HSP table and its index > puts a window of Ranges around a position, within the list 0ms
+ ✓ tests/unit/results.test.ts > the HSP table and its index > gives the orientation from coordinates, frames, or not at all 1ms
+ ✓ tests/unit/results.test.ts > hitLimits > reads the limits of the argv, or the default that the engine describes 1ms
+ ✓ tests/unit/results.test.ts > hitLimits > claims no limit that it cannot read 0ms
+ ✓ tests/unit/results.test.ts > optionKey > is the same for the same options in any order, with the default task written or not 0ms
+ ✓ tests/unit/results.test.ts > optionKey > keeps a value that starts with "-", and names a range without its coordinates 0ms
+ ✓ tests/unit/results.test.ts > optionKey > reads nothing from words that are not options 0ms
+ ✓ tests/unit/results.test.ts > verificationBadge > certifies a run inside a profile, and says what that means 1ms
+ ✓ tests/unit/results.test.ts > verificationBadge > says why a run is outside the certified profiles 1ms
+ ✓ tests/unit/results.test.ts > verificationBadge > names the approved exceptions of a non-default subject genetic code 1ms
+ ✓ tests/unit/results.test.ts > ResultsBrowser > opens a run on its first query with hits, its first subject and HSP, and reads the HSP as written 4ms
+ ✓ tests/unit/results.test.ts > ResultsBrowser > follows an HSP of another subject, and shows a query without hits 4ms
+ ✓ tests/unit/results.test.ts > ResultsBrowser > drops a detail that arrives after the selection moved on 3ms
+ ✓ tests/unit/results.test.ts > ResultsBrowser > keeps the selected HSP through a filter that shows it, and moves off one that hides it 1ms
+ ✓ tests/unit/results.test.ts > ResultsBrowser > moves off a query that a query filter hides, and selects none when no query is listed 1ms
+ ✓ tests/unit/results.test.ts > ResultsBrowser > opens another run without view filters, and keeps them for the same run 1ms
+ ✓ tests/unit/results.test.ts > ResultsBrowser > says that a query reached the hit list limit, and a subject the HSP limit 0ms
+ ✓ tests/unit/results.test.ts > ResultsBrowser > shows why a run has no results, and opens it when it completes 3ms
+ ✓ tests/unit/results.test.ts > ResultsBrowser > reads a run whose results could not be read once, not at each change of the runs 2ms
+ ✓ tests/unit/results.test.ts > ResultsBrowser > reads the headings of a run opened while those of the run before were being read 6ms
+ ✓ tests/unit/results.test.ts > ResultsBrowser > sorts subjects by the values that the list shows: the first HSP and the HSP count before the filters 1ms
+ ✓ tests/unit/results.test.ts > ResultsBrowser > lists the selected subject's Ranges in the engine's order, numbered among all its HSPs, as the filters show them 1ms
+ ✓ tests/unit/results.test.ts > ResultsBrowser > reads a section of outfmt 0 once per run, none for an HSP that outfmt 0 does not show, and again after a failed read 4ms
+ ✓ tests/unit/results.test.ts > ResultsBrowser > reads a subject's heading once per run for the selected HSP's detail and the lists, and finds HSPs by rank 6ms
+ ✓ tests/unit/results.test.ts > ResultsBrowser > reads the detail of a failed HSP again when it is selected again, and leaves a loading or ready one alone 6ms
+ ✓ tests/unit/results.test.ts > ResultsBrowser > names the task of a run: the argv's, else the engine's default 1ms
+ ✓ tests/unit/engine-gateway.test.ts > WasmEngine > starts a generation, relays phases and resolves with the runtime of the search 6ms
+ ✓ tests/unit/engine-gateway.test.ts > WasmEngine > runs the next search in the same generation 3ms
+ ✓ tests/unit/engine-gateway.test.ts > WasmEngine > cancels by ending the worker; the next search starts a new generation and late messages are dropped 3ms
+ ✓ tests/unit/engine-gateway.test.ts > WasmEngine > ignores a cancel of another or a finished run 1ms
+ ✓ tests/unit/engine-gateway.test.ts > WasmEngine > renews the runtime before the next search when the instance ran too many searches 5ms
+ ✓ tests/unit/engine-gateway.test.ts > WasmEngine > renews the runtime when the memory of the instance reached the high-water mark 3ms
+ ✓ tests/unit/engine-gateway.test.ts > WasmEngine > keeps the name, role and detail of an InputMismatchError 2ms
+ ✓ tests/unit/engine-gateway.test.ts > WasmEngine > ends the runtime after an error that stopped the instance 2ms
+ ✓ tests/unit/engine-gateway.test.ts > WasmEngine > fails the search when the worker fails, and starts a new generation for the next one 4ms
+ ✓ tests/unit/engine-gateway.test.ts > WasmEngine > fails the search when a thread worker reports a fault 23ms
+ ✓ tests/unit/engine-gateway.test.ts > WasmEngine > runs one search at a time 1ms
+ ✓ tests/unit/attention.test.ts > resume report > lets a late answer of the Data worker correct "not-responding" 40ms
+ ✓ tests/unit/sequence-layout.test.ts > reading residues forward from the layout of a record > kind 1, uniform, LF: every interval start, random ends, every chunk size 14ms
+ ✓ tests/unit/sequence-layout.test.ts > reading residues forward from the layout of a record > kind 1, uniform, CR LF: every interval start, random ends, every chunk size 4ms
+ ✓ tests/unit/sequence-layout.test.ts > reading residues forward from the layout of a record > kind 1, uniform, eol 3 from trailing spaces: every interval start, random ends, every chunk size 5ms
+ ✓ tests/unit/sequence-layout.test.ts > reading residues forward from the layout of a record > kind 2, uniform, eol 4 from a tab and CR LF: every interval start, random ends, every chunk size 2ms
+ ✓ tests/unit/sequence-layout.test.ts > reading residues forward from the layout of a record > kind 1, one line: every interval start, random ends, every chunk size 3ms
+ ✓ tests/unit/sequence-layout.test.ts > reading residues forward from the layout of a record > kind 1, ragged LF with noise: every interval start, random ends, every chunk size 14ms
+ ✓ tests/unit/sequence-layout.test.ts > reading residues forward from the layout of a record > kind 1, ragged CR LF with noise: every interval start, random ends, every chunk size 15ms
+ ✓ tests/unit/sequence-layout.test.ts > reading residues forward from the layout of a record > kind 2, ragged LF with noise: every interval start, random ends, every chunk size 7ms
+ ✓ tests/unit/sequence-layout.test.ts > reading residues forward from the layout of a record > kind 2, ragged CR LF, comments only: every interval start, random ends, every chunk size 6ms
+ ✓ tests/unit/sequence-layout.test.ts > reading residues forward from the layout of a record > reads records of more than 65536 residues through their checkpoints, and a uniform one with CR LF 114ms
+ ✓ tests/unit/sequence-layout.test.ts > reading residues forward from the layout of a record > places residue i of a uniform record with the formula, for any positive eol 2ms
+ ✓ tests/unit/sequence-layout.test.ts > reading residues forward from the layout of a record > keeps the bytes of the file: case and U as written 0ms
+ ✓ tests/unit/sequence-layout.test.ts > reading residues forward from the layout of a record > follows the line rules of abi_v2.md §9 on hand-written lines 0ms
+ ✓ tests/unit/sequence-layout.test.ts > reading residues forward from the layout of a record > counts residues as the record table does and knows the stored letters of each kind 1ms
+ ✓ tests/unit/sequence-layout.test.ts > reading residues forward from the layout of a record > accepts reader kinds 1 and 2 only 1ms
+ ✓ tests/unit/sequence-layout.test.ts > reading residues forward from the layout of a record > finds the checkpoint at or before a residue 1ms
+ ✓ tests/unit/coordinator.test.ts > Coordinator > runs one job at a time in FIFO order and stores the outputs and diagnostics 31ms
+ ✓ tests/unit/coordinator.test.ts > Coordinator > freezes the snapshot so later edits cannot change a queued job 4ms
+ ✓ tests/unit/coordinator.test.ts > Coordinator > reads a chosen file by reference and names the input after it 2ms
+ ✓ tests/unit/coordinator.test.ts > Coordinator > does not queue an input that the index scan cannot read 1ms
+ ✓ tests/unit/coordinator.test.ts > Coordinator > indexes each text or file input with the reader of the program's kind for its role 4ms
+ ✓ tests/unit/coordinator.test.ts > Coordinator > cancels a queued job without starting it 4ms
+ ✓ tests/unit/coordinator.test.ts > Coordinator > discards a cancelled run and ignores its late events 3ms
+ ✓ tests/unit/coordinator.test.ts > Coordinator > cancels a FakeEngine run between phases 22ms
+ ✓ tests/unit/coordinator.test.ts > Coordinator > marks a failed run and keeps earlier results 4ms
+ ✓ tests/unit/coordinator.test.ts > Coordinator > fails a run whose records the engine reads differently from the record table 4ms
+ ✓ tests/unit/coordinator.test.ts > Coordinator > fails a run with the reason when storage runs out, keeps earlier results and recovers 18ms
+ ✓ tests/unit/draft.test.ts > SearchDraft inputs > indexes pasted text and checks it with the engine 13ms
+ ✓ tests/unit/draft.test.ts > SearchDraft inputs > replaces the paste source when the text changes, and removes it when the text is emptied 3ms
+ ✓ tests/unit/draft.test.ts > SearchDraft inputs > reads a text without a defline as a record without an ID, as the engine's reader does, and adds a defline on request 2ms
+ ✓ tests/unit/draft.test.ts > SearchDraft inputs > reports the index scan error 1ms
+ ✓ tests/unit/draft.test.ts > SearchDraft inputs > maps a refusal that names a line to the record that holds it, among the included records 4ms
+ ✓ tests/unit/draft.test.ts > SearchDraft inputs > asks the engine about a source without records, but not about one whose records are all excluded 2ms
+ ✓ tests/unit/draft.test.ts > SearchDraft inputs > shows the engine refusal of a record and maps it to the record table; excluding it passes the check 2ms
+ ✓ tests/unit/draft.test.ts > SearchDraft inputs > maps a refused record among the included records only 2ms
+ ✓ tests/unit/draft.test.ts > SearchDraft inputs > checks the inputs again for another program 2ms
+ ✓ tests/unit/draft.test.ts > SearchDraft inputs > indexes a role's sources again when the program reads the role as the other sequence kind 7ms
+ ✓ tests/unit/draft.test.ts > SearchDraft inputs > indexes a source that could not be read again for a program of the other kind, and drops its exclusions 4ms
+ ✓ tests/unit/draft.test.ts > SearchDraft submit > refuses to queue without inputs, with every record excluded, or with a refused input 3ms
+ ✓ tests/unit/draft.test.ts > SearchDraft submit > refuses BLASTX until SX 1ms
+ ✓ tests/unit/draft.test.ts > SearchDraft submit > queues one combined search of all files, named as plan §5.3 says 3ms
+ ✓ tests/unit/draft.test.ts > SearchDraft submit > queues separate searches as every query input against every subject input 3ms
+ ✓ tests/unit/draft.test.ts > SearchDraft submit > uses the same revision for the same selection, so that a kept subject is the same input (R1) 4ms
+ ✓ tests/unit/draft.test.ts > SearchDraft submit > writes the region of a role that has one record, and only then 3ms
+ ✓ tests/unit/draft.test.ts > SearchDraft submit > writes only the values the user set and that differ from the engine default 3ms
+ ✓ tests/unit/draft.test.ts > SearchDraft submit > restores the defaults of some fields: their values are cleared, the others kept, and the argv validated again 1ms
+ ✓ tests/unit/draft.test.ts > SearchDraft submit > gives every run of the draft its Job Title, outside the argv 8ms
+ ✓ tests/unit/draft.test.ts > SearchDraft submit > validates the draft's argv with the engine and shows its message 1ms
+ ✓ tests/unit/draft.test.ts > SearchDraft submit > queues runs in the coordinator, a group with shared subject bytes 6ms
+ ✓ tests/unit/draft.test.ts > SearchDraft submit > reports a failure to queue instead of dropping it 3ms
+ ✓ tests/unit/draft.test.ts > SearchDraft submit > maps a subject record that the engine refuses, and reports it in short above the button 20ms
+ ✓ tests/unit/draft.test.ts > SearchDraft submit > does not let a check that could not run keep the search from the queue 2ms
+ ✓ tests/unit/draft.test.ts > SearchDraft submit > checks a selection once: going back to an earlier selection or program uses its verdict 2ms
+ ✓ tests/unit/draft.test.ts > SearchDraft submit > shows a pasted text as being read at once, before it is indexed 1ms
+ ✓ tests/unit/draft.test.ts > SearchDraft submit > keeps a region with its record: another record leaves it aside 1ms
+ ✓ tests/unit/coordinator.test.ts > Coordinator > publishes the temporary storage in use 6ms
+ ✓ tests/unit/coordinator.test.ts > Coordinator > refuses BLASTX as ABI v2 does until session SX 0ms
+ ✓ tests/unit/coordinator.test.ts > Coordinator > does not queue a request that the engine rejects 1ms
+ ✓ tests/unit/coordinator.test.ts > Coordinator > exports a completed output byte for byte under a descriptive name 5ms
+ ✓ tests/unit/coordinator.test.ts > Coordinator > queues a group in order, numbered without gaps, and cancels the group together 4ms
+ ✓ tests/unit/coordinator.test.ts > Coordinator > keeps the Job Title trimmed in each snapshot of a group, outside the argv, and none when it is empty 5ms
+ ✓ tests/unit/coordinator.test.ts > Coordinator > queues nothing of a group when one request is invalid, and keeps the numbering 2ms
+ ✓ tests/unit/coordinator.test.ts > Coordinator > runs dataset inputs as the revisions say, and shares the bytes of the same revisions 2ms
+ ✓ tests/unit/thread-host.test.ts > ThreadHost > fails to prepare when a thread worker does not become ready in time 102ms
+ ✓ tests/unit/thread-host.test.ts > ThreadHost > abandons a thread that does not start in time, reports a fault, and the thread can no longer start 71ms
+ ✓ tests/unit/data-service.test.ts > DataService sources and record tables > keeps a File reference and builds its record table with per-record SHA-256 7ms
+ ✓ tests/unit/data-service.test.ts > DataService sources and record tables > keeps records with the same ID apart and keeps the original headers and case (REQ-05) 3ms
+ ✓ tests/unit/extraction-engine.test.ts > extraction reads the residues that the engine searched (real searches) > BLASTN: plus and minus strands, flanks cut at both ends, lower case, U and comment lines, an untitled subject, a record over 65536 residues (checkpoints) and a uniform one with CR LF 125ms
+ ✓ tests/unit/candidates.test.ts > what the results browser gives the tray > makes candidate sources from the HSP table, the run snapshot and the outfmt 6 rows, without reading 9ms
+ ✓ tests/unit/candidates.test.ts > what the results browser gives the tray > keeps the frames of translated records 2ms
+ ✓ tests/unit/candidates.test.ts > what the results browser gives the tray > lists every HSP of a subject in the engine order, whatever the filters show 1ms
+ ✓ tests/unit/candidates.test.ts > what the results browser gives the tray > marks subjects that the list shows, keeps them through sorting, and drops them with the query, the run or a filter 2ms
+ ✓ tests/unit/candidates.test.ts > what the results browser gives the tray > goes back to a candidate: opens its run, selects it, and clears only the filters that hide it 1ms
+ ✓ tests/unit/candidates.test.ts > what the results browser gives the tray > does not go back to a run without results 0ms
+ ✓ tests/unit/candidates.test.ts > what the results browser gives the tray > names the filters that hide an HSP as filterQuery and the query list apply them 0ms
+ ✓ tests/unit/candidates.test.ts > CandidateTray > adds HSPs once each, in order, selected, with an empty note and when they were added 4ms
+ ✓ tests/unit/candidates.test.ts > CandidateTray > refuses HSPs, extraction and export of a run that is queued (REQ-10) 2ms
+ ✓ tests/unit/candidates.test.ts > CandidateTray > refuses HSPs, extraction and export of a run that is preparing (REQ-10) 1ms
+ ✓ tests/unit/candidates.test.ts > CandidateTray > refuses HSPs, extraction and export of a run that is running (REQ-10) 1ms
+ ✓ tests/unit/candidates.test.ts > CandidateTray > refuses HSPs, extraction and export of a run that is finalizing (REQ-10) 1ms
+ ✓ tests/unit/candidates.test.ts > CandidateTray > refuses HSPs, extraction and export of a run that is cancelled (REQ-10) 1ms
+ ✓ tests/unit/candidates.test.ts > CandidateTray > refuses HSPs, extraction and export of a run that is failed (REQ-10) 1ms
+ ✓ tests/unit/candidates.test.ts > CandidateTray > refuses HSPs, extraction and export of a run that is unknown (REQ-10) 1ms
+ ✓ tests/unit/candidates.test.ts > CandidateTray > removes, moves, notes, selects and clears 1ms
+ ✓ tests/unit/candidates.test.ts > CandidateTray > sorts by addition, by run and engine order, and by subject and position; sorting rewrites the order 1ms
+ ✓ tests/unit/candidates.test.ts > CandidateTray > lists where the candidates come from, one entry per run, in run order 1ms
+ ✓ tests/unit/candidates.test.ts > CandidateTray > extracts the selected candidates in tray order: one read per record, clipped ends and unknown strands reported 2ms
+ ✓ tests/unit/candidates.test.ts > CandidateTray > saves nothing and leaves the tray as it was when a read fails, and refuses without a selection or while busy 1ms
+ ✓ tests/unit/candidates.test.ts > CandidateTray > exports the gapped alignments of the selected candidates from their HSP records: one read per run, apart from the sequences 2ms
+ ✓ tests/unit/candidates.test.ts > the tray at the size of a large run > takes every HSP of a subject of 3000 copies, and of 200 marked subjects, from the results browser 47ms
+ ✓ tests/unit/candidates.test.ts > the tray at the size of a large run > adds 20 000 candidates, and sorts, moves, notes, selects and removes them in time linear in their number 269ms
+ ✓ tests/unit/data-extraction.test.ts > DataService.readResidues > reads the record at a position of the run input, in buildRunInput order, with exclusions and duplicate IDs 11ms
+ ✓ tests/unit/data-extraction.test.ts > DataService.readResidues > reads a first record without a defline (offsets 0 and 0): from the formula, and after comment lines from its checkpoints 5ms
+ ✓ tests/unit/data-extraction.test.ts > DataService.readResidues > reads a large record in bounded slices of its File, from its checkpoints 41ms
+stdout | tests/unit/extraction-engine.test.ts > extraction reads the residues that the engine searched (real searches) > BLASTP, TBLASTN with a minus frame, and TBLASTX
+extraction against real searches: 8 runs, 45 HSPs, 240 pieces read, 19 cut at position 1 and 31 at the end, 8287 aligned letters compared
+
+ ✓ tests/unit/extraction-engine.test.ts > extraction reads the residues that the engine searched (real searches) > BLASTN with -subject_loc and with -query_loc: coordinates stay those of the whole record 11ms
+ ✓ tests/unit/extraction-engine.test.ts > extraction reads the residues that the engine searched (real searches) > two subject records with the same ID: the hit on the second, then the first left out (positions shift) 8ms
+ ✓ tests/unit/extraction-engine.test.ts > extraction reads the residues that the engine searched (real searches) > BLASTP, TBLASTN with a minus frame, and TBLASTX 90ms
+ ✓ tests/unit/data-extraction.test.ts > DataService.readResidues > reads only bytes near a short interval of a large record, with the default chunk size 289ms
+ ✓ tests/unit/data-extraction.test.ts > DataService.readResidues > refuses intervals outside the record and positions outside the run input 2ms
+ ✓ tests/unit/data-extraction.test.ts > DataService.readResidues > refuses a source that no longer matches its record table 1ms
+ ✓ tests/unit/data-extraction.test.ts > DataService.readResidues > refuses records indexed with another reader kind than 1 or 2 1ms
+ ✓ tests/unit/data-extraction.test.ts > DataService.readHspRecords > returns the records of the indices asked, in that order, with their aligned rows, reading in bounded ranges 31ms
+ ✓ tests/unit/data-extraction.test.ts > DataService.readHspRecords > finds the records by their index where the lines are not in index order 4ms
+ ✓ tests/unit/engine-runtime.test.ts > chooseThreads > keeps an explicit request 2ms
+ ✓ tests/unit/engine-runtime.test.ts > chooseThreads > runs Auto serially below the size threshold 0ms
+ ✓ tests/unit/engine-runtime.test.ts > chooseThreads > runs Auto with up to half the logical processors from the threshold on, within the maximum 0ms
+ ✓ tests/unit/engine-runtime.test.ts > renewalReason > renews at the high-water mark of the linear memory 0ms
+ ✓ tests/unit/engine-runtime.test.ts > renewalReason > renews after a maximum number of searches when one is set, and by default never for the count 0ms
+ ✓ tests/unit/engine-runtime.test.ts > inspectReactor > finds a serial reactor and its own memory 3ms
+ ✓ tests/unit/engine-runtime.test.ts > inspectReactor > finds a threaded reactor and the maximum of the shared memory it imports 1ms
+ ✓ tests/unit/engine-runtime.test.ts > inspectReactor > rejects a module without every ABI v2 export 1ms
+ ✓ tests/unit/engine-runtime.test.ts > inspectReactor > rejects a threaded module without a shared memory with a maximum, or without wasi_thread_start 1ms
+ ✓ tests/unit/engine-runtime.test.ts > inspectReactor > rejects bytes that are not a WebAssembly module 1ms
+ ✓ tests/unit/engine-runtime.test.ts > stopMessage > reports the last line that the engine wrote, and the trap 0ms
+ ✓ tests/unit/engine-runtime.test.ts > stopMessage > says when the engine ran out of memory 0ms
+ ✓ tests/unit/engine-runtime.test.ts > ReactorAbi > joins a response that the engine sends in several chunks (1 MiB each in the adapter) 1ms
+ ✓ tests/unit/engine-runtime.test.ts > ReactorAbi > releases a registered handle whose response cannot be read 0ms
+ ✓ tests/unit/engine-runtime.test.ts > the built reactors > are the two reactor kinds, with the shared memory of the certified threaded build (plan TD-7) 7ms
+ ✓ tests/unit/engine-runtime.test.ts > responses of more than 1 MiB from the serial reactor > scans and registers thousands of records 198ms
+stdout | tests/unit/extraction-engine.test.ts > extraction reads the residues that the engine searched (real searches) > through the application layer: candidates from the results browser, extracted with each region and join and exported, read back
+the candidate tray against real searches: 7 candidates of 2 runs, 49 sequences written and read back (15 cut at a record end), 7 alignments
+
+ ✓ tests/unit/extraction-engine.test.ts > extraction reads the residues that the engine searched (real searches) > a subject file that starts with residues: its first record has no defline (offsets 0 and 0) and is read like the others 7ms
+ ✓ tests/unit/extraction-engine.test.ts > extraction reads the residues that the engine searched (real searches) > through the application layer: candidates from the results browser, extracted with each region and join and exported, read back 34ms
+ ✓ tests/unit/contracts.test.ts > BlockStore contract: memory > write and seal: a block reads back exactly the bytes appended to it 3ms
+ ✓ tests/unit/contracts.test.ts > BlockStore contract: memory > read: any range of a sealed block, and nothing beyond its end 1ms
+ ✓ tests/unit/contracts.test.ts > BlockStore contract: memory > write: the store keeps a copy, so the caller may reuse its buffer 0ms
+ ✓ tests/unit/contracts.test.ts > BlockStore contract: memory > staging: a block cannot be read before it is sealed 0ms
+ ✓ tests/unit/contracts.test.ts > BlockStore contract: memory > seal: a sealed block takes no more bytes and cannot be sealed again 0ms
+ ✓ tests/unit/contracts.test.ts > BlockStore contract: memory > discard: a staged or sealed block disappears and its bytes are freed 0ms
+ ✓ tests/unit/contracts.test.ts > BlockStore contract: memory > create: a path that exists cannot be created again 0ms
+ ✓ tests/unit/contracts.test.ts > BlockStore contract: memory > removeAll: removes one directory, sealed or not, and leaves the rest 0ms
+ ✓ tests/unit/contracts.test.ts > BlockStore contract: memory > paths: empty and relative names are rejected 0ms
+ ✓ tests/unit/contracts.test.ts > BlockStore contract: memory > an empty block can be sealed and read 0ms
+ ✓ tests/unit/contracts.test.ts > BlockStore contract: memory > a large block: 48 MiB in 1 MiB appends reads back unchanged 361ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan kind 1: several records with regular lines (LF) 1ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan kind 2: several records with regular lines (LF) 0ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan kind 1: CR LF line ends 0ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan kind 2: CR LF line ends 0ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan kind 1: CR line ends 0ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan kind 2: CR line ends 0ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan kind 1: LF and CR LF line ends in one file 0ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan kind 2: LF and CR LF line ends in one file 0ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan kind 1: lower case residues are counted upper-cased 0ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan kind 2: lower case residues are counted upper-cased 0ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan kind 1: comment lines (!, # and ;) before and inside records 0ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan kind 2: comment lines (!, # and ;) before and inside records 0ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan kind 1: ; ends the data of a line 0ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan kind 2: ; ends the data of a line 0ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan kind 1: blank lines and white space 0ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan kind 2: blank lines and white space 0ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan kind 1: a first record without a defline 0ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan kind 2: a first record without a defline 0ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan kind 1: a first record without a defline after a comment line 0ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan kind 2: a first record without a defline after a comment line 0ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan kind 1: records without residues, the last a defline without a newline 0ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan kind 2: records without residues, the last a defline without a newline 0ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan kind 1: U is stored as T in kind 1 0ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan kind 2: U is stored as T in kind 1 0ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan kind 1: * and the protein letters are stored in kind 2 only 0ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan kind 2: * and the protein letters are stored in kind 2 only 0ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan kind 1: bytes that the kind does not store are skipped 0ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan kind 2: bytes that the kind does not store are skipped 0ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan kind 1: the ID is the title up to its first space, after the white space that follows > 0ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan kind 2: the ID is the title up to its first space, after the white space that follows > 0ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan kind 1: a non-ASCII title 0ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan kind 2: a non-ASCII title 0ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan kind 1: an empty input has no records 0ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan kind 2: an empty input has no records 0ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan kind 1: white space, blank and comment lines only have no records 0ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan kind 2: white space, blank and comment lines only have no records 0ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan kind 1: a long record (4 checkpoints) with lines of 60 and 61 residues 153ms
+ ✓ tests/unit/layers.test.ts > layer boundaries > src/domain/probe.ts may not import ../application/coordinator 8ms
+ ✓ tests/unit/layers.test.ts > layer boundaries > src/domain/probe.ts may not import ../ports/engine 3ms
+ ✓ tests/unit/layers.test.ts > layer boundaries > src/domain/probe.ts may not import ../infra/fake/fake-engine 3ms
+ ✓ tests/unit/layers.test.ts > layer boundaries > src/domain/probe.ts may not import vue 3ms
+ ✓ tests/unit/layers.test.ts > layer boundaries > src/ports/probe.ts may not import ../application/coordinator 6ms
+ ✓ tests/unit/layers.test.ts > layer boundaries > src/ports/probe.ts may not import ../infra/fake/fake-engine 3ms
+ ✓ tests/unit/layers.test.ts > layer boundaries > src/application/probe.ts may not import ../infra/fake/fake-engine 5ms
+ ✓ tests/unit/layers.test.ts > layer boundaries > src/application/probe.ts may not import ../ui/useStore 3ms
+ ✓ tests/unit/layers.test.ts > layer boundaries > src/application/probe.ts may not import vue 3ms
+ ✓ tests/unit/layers.test.ts > layer boundaries > src/infra/probe.ts may not import ../application/coordinator 10ms
+ ✓ tests/unit/layers.test.ts > layer boundaries > src/infra/probe.ts may not import vue 2ms
+ ✓ tests/unit/layers.test.ts > layer boundaries > src/ui/probe.ts may not import ../infra/fake/fake-engine 4ms
+ ✓ tests/unit/layers.test.ts > layer boundaries > src/ports/probe.ts may import ../domain/programs 2ms
+ ✓ tests/unit/layers.test.ts > layer boundaries > src/application/probe.ts may import ../ports/engine 1ms
+ ✓ tests/unit/layers.test.ts > layer boundaries > src/infra/probe.ts may import ../ports/engine 2ms
+ ✓ tests/unit/layers.test.ts > layer boundaries > src/ui/probe.ts may import ../application/coordinator 2ms
+ ✓ tests/unit/layers.test.ts > layer boundaries > src/ui/probe.ts may import ../domain/argv 1ms
+ ✓ tests/unit/layers.test.ts > layer boundaries > src/composition.ts may import ./infra/fake/fake-engine 3ms
+ ✓ tests/unit/contracts.test.ts > BlockStore contract: memory > storage full: an append fails with StorageFullError, the block can only be discarded, and sealed blocks stay readable 5ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan kind 1: several records with regular lines (LF) 4ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan kind 2: several records with regular lines (LF) 0ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan kind 1: CR LF line ends 0ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan kind 2: CR LF line ends 0ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan kind 1: CR line ends 0ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan kind 2: CR line ends 0ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan kind 1: LF and CR LF line ends in one file 0ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan kind 2: LF and CR LF line ends in one file 0ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan kind 1: lower case residues are counted upper-cased 0ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan kind 2: lower case residues are counted upper-cased 0ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan kind 1: comment lines (!, # and ;) before and inside records 0ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan kind 2: comment lines (!, # and ;) before and inside records 0ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan kind 1: ; ends the data of a line 0ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan kind 2: ; ends the data of a line 0ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan kind 1: blank lines and white space 0ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan kind 2: blank lines and white space 0ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan kind 1: a first record without a defline 0ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan kind 2: a first record without a defline 0ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan kind 1: a first record without a defline after a comment line 0ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan kind 2: a first record without a defline after a comment line 0ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan kind 1: records without residues, the last a defline without a newline 0ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan kind 2: records without residues, the last a defline without a newline 0ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan kind 1: U is stored as T in kind 1 0ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan kind 2: U is stored as T in kind 1 0ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan kind 1: * and the protein letters are stored in kind 2 only 0ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan kind 2: * and the protein letters are stored in kind 2 only 0ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan kind 1: bytes that the kind does not store are skipped 0ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan kind 2: bytes that the kind does not store are skipped 0ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan kind 1: the ID is the title up to its first space, after the white space that follows > 0ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan kind 2: the ID is the title up to its first space, after the white space that follows > 0ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan kind 1: a non-ASCII title 0ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan kind 2: a non-ASCII title 0ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan kind 1: an empty input has no records 0ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan kind 2: an empty input has no records 0ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan kind 1: white space, blank and comment lines only have no records 0ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan kind 2: white space, blank and comment lines only have no records 0ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan kind 1: a long record (4 checkpoints) with lines of 60 and 61 residues 148ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan kind 2: a long record (4 checkpoints) with lines of 60 and 61 residues 115ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan kind 2: a long record (4 checkpoints) with lines of 60 and 61 residues 111ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan kind 1: a long record with regular 80-residue lines 120ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan kind 1: a long record with regular 80-residue lines 115ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan kind 2: a long record with regular 80-residue lines 118ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan kind 2: a long record with regular 80-residue lines 96ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan: a multi-byte character split across chunks 0ms
+ ✓ tests/unit/contracts.test.ts > RecordScanner contract: FakeScanner > scan: an unknown parser kind is refused 0ms
+ ✓ tests/unit/contracts.test.ts > Run output contract: DataService with the memory store, in one thread > every stream arrives in order and the run commits 13ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan: a multi-byte character split across chunks 0ms
+ ✓ tests/unit/engine-runtime.test.ts > RecordScanner contract: the serial reactor in Node > scan: an unknown parser kind is refused 0ms
+ ✓ tests/unit/engine-runtime.test.ts > the serial reactor scans with the NCBI reader kinds > scans a small input with parser kind 1 2ms
+ ✓ tests/unit/engine-runtime.test.ts > the serial reactor scans with the NCBI reader kinds > scans a small input with parser kind 2 0ms
+ ✓ tests/unit/engine-runtime.test.ts > the serial reactor scans with the NCBI reader kinds > fails with NCBI's reader error, which names the line (parser kind 1) 0ms
+ ✓ tests/unit/engine-runtime.test.ts > the serial reactor scans with the NCBI reader kinds > fails with NCBI's reader error, which names the line (parser kind 2) 0ms
+ ✓ tests/unit/engine-runtime.test.ts > the serial reactor scans with the NCBI reader kinds > rejects what LOSAT Web cannot index, naming the line or the record 1ms
+ ✓ tests/unit/engine-runtime.test.ts > the serial reactor answers the search form > FakeEngine's describe.json is the reactor's describe of every program 20ms
+ ✓ tests/unit/engine-runtime.test.ts > the serial reactor answers the search form > every field of the search form is an option that the engine describes 15ms
+ ✓ tests/unit/engine-runtime.test.ts > the serial reactor answers the search form > checks an input with the engine's register: the verdict and the message 2ms
+ ✓ tests/unit/engine-runtime.test.ts > the serial reactor answers the search form > finds the record of the line that the engine's refusal names 6ms
+ ✓ tests/unit/contracts.test.ts > Run output contract: DataService with the memory store, in one thread > many small chunks and one large chunk arrive unchanged 47ms
+ ✓ tests/unit/contracts.test.ts > Run output contract: DataService with the memory store, in one thread > a run without output commits with empty outputs 0ms
+ ✓ tests/unit/contracts.test.ts > Run output contract: DataService with the memory store, in one thread > staging: a run cannot be read before it is committed, and the commit waits for end 301ms
+ ✓ tests/unit/contracts.test.ts > Run output contract: DataService with the memory store, in one thread > an end whose totals disagree fails the commit and discards the run 0ms
+ ✓ tests/unit/contracts.test.ts > Run output contract: DataService with the memory store, in one thread > a message outside the protocol fails the commit 0ms
+ ✓ tests/unit/contracts.test.ts > Run output contract: DataService with the memory store, in one thread > discard drops a staged run and ignores its late chunks 301ms
+ ✓ tests/unit/contracts.test.ts > Run output contract: DataService with the memory store, in one thread > a committed run is kept by discard and removed by delete 0ms
+ ✓ tests/unit/contracts.test.ts > Run output contract: DataService with the memory store, in one thread > two staged runs keep their outputs apart 0ms
+ ✓ tests/unit/contracts.test.ts > Run output contract: DataService with the memory store, in one thread > the writer refuses to write after end 0ms
+ ✓ tests/unit/contracts.test.ts > Run output contract: DataService with the memory store, in one thread > storage full: the run fails with the reason, and committed runs stay readable 5ms
+ ✓ tests/unit/contracts.test.ts > Engine input contract: FakeEngine > register: the run proceeds when the record tables agree 16ms
+ ✓ tests/unit/contracts.test.ts > Engine input contract: FakeEngine > register: a query record with another ID stops the run before any output 302ms
+ ✓ tests/unit/contracts.test.ts > Engine input contract: FakeEngine > register: a subject record with another length stops the run before any output 302ms
+ ✓ tests/unit/contracts.test.ts > Engine input contract: FakeEngine > register: a missing record stops the run before any output 302ms
+ ✓ tests/unit/data-service.test.ts > DataService sources and record tables > builds the run input and checks an input of more records than a call can take as arguments 5225ms
+ ✓ tests/unit/data-service.test.ts > DataService sources and record tables > rejects a source with the index scan's error 1ms
+ ✓ tests/unit/data-service.test.ts > DataService sources and record tables > rejects a record table whose offsets are not ordered inside the source 0ms
+ ✓ tests/unit/data-service.test.ts > DataService sources and record tables > makes a new revision for a new selection and refuses unknown records 4ms
+ ✓ tests/unit/data-service.test.ts > DataService sources and record tables > gives the source unchanged when every record is included 1ms
+ ✓ tests/unit/data-service.test.ts > DataService sources and record tables > gives the included original records in order when records are left out 1ms
+ ✓ tests/unit/data-service.test.ts > DataService sources and record tables > adds one newline after a source without a final newline when another follows 1ms
+ ✓ tests/unit/data-service.test.ts > DataService sources and record tables > keeps a first record without a defline: its bytes start the source, and it can be left out 1ms
+ ✓ tests/unit/data-service.test.ts > DataService sources and record tables > keeps a first record without a defline at the start of a combined input only 1ms
+ ✓ tests/unit/data-service.test.ts > DataService sources and record tables > accepts a source without records: white space, blank and comment lines 0ms
+ ✓ tests/unit/data-service.test.ts > DataService sources and record tables > accepts a record without a defline as the first record of a table only 1ms
+ ✓ tests/unit/data-service.test.ts > DataService checkInput: the record that a refusal names by its line > finds the record of a line with LF and with CR LF line ends; blank lines count 1ms
+ ✓ tests/unit/data-service.test.ts > DataService checkInput: the record that a refusal names by its line > counts the lines as NCBI's line reader does where it joins two lines of the file 1ms
+ ✓ tests/unit/data-service.test.ts > DataService checkInput: the record that a refusal names by its line > finds a first record without a defline, and no record for a line before the first record 1ms
+ ✓ tests/unit/data-service.test.ts > DataService checkInput: the record that a refusal names by its line > finds the record in a run input of several revisions, with an added newline and exclusions 1ms
+ ✓ tests/unit/data-service.test.ts > DataService checkInput: the record that a refusal names by its line > numbers the lines as NCBI's line reader: every line counts, CR LF and a lone CR end one 0ms
+ ✓ tests/unit/data-service.test.ts > DataService checkInput: the record that a refusal names by its line > gives no position for a message that names no line 0ms
+ ✓ tests/unit/data-service.test.ts > DataService runs and storage status > reports the storage it uses, the session bytes and the cleanup state 10ms
+ ✓ tests/unit/data-service.test.ts > DataService runs and storage status > refuses a second run with the same id and a commit of an unknown run 0ms
+ ✓ tests/unit/data-service.test.ts > DataService runs and storage status > reports the storage failure even if removing the failed run fails too 0ms
+ ✓ tests/unit/data-service.test.ts > DataService runs and storage status > counts the HSP records as readHits reads them: blank lines and empty chunks are not records 0ms
+ ✓ tests/unit/data-service.test.ts > DataService runs and storage status > commits a run once when the commit is asked for twice 0ms
+ ✓ tests/unit/data-service.test.ts > DataService runs and storage status > frees the bytes of a run that runs out of storage at once 0ms
+ ✓ tests/unit/data-service.test.ts > DataService runs and storage status > reports the memory budget of results kept in memory with its own message 0ms
+stdout | tests/unit/hsp-correspondence.test.ts > HSP records and the rows and sections of outfmt 6 and 0 (every outfmt 0 fixture) > agree for every search
+HSP correspondence: 165 searches (blastn, blastp, tblastn, tblastx), 30467 HSPs, 30027 outfmt 0 sections, 440 HSPs that outfmt 0 does not show; fixtures equal to NCBI: 196 byte for byte, 2 as the database search (-db_gencode exception), 3 field lists not compared
+
+ ✓ tests/unit/hsp-correspondence.test.ts > HSP records and the rows and sections of outfmt 6 and 0 (every outfmt 0 fixture) > agree for every search 19264ms
+
+ Test Files  27 passed (27)
+      Tests  550 passed (550)
+   Start at  19:04:59
+   Duration  19.91s (tests 81%, transform 16%, import 3%)
+

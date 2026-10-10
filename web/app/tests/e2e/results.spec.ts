@@ -1153,12 +1153,42 @@ test('the Alignments: a block per Range; Next, Previous and First Match; the pre
   await retried.getByTestId('range-retry').click();
   await expect(retried).toHaveAttribute('data-state', 'ready');
   await expect(retried).toHaveText(/^ Score = /);
+  // A block whose read failed, then chosen: the detail shows its section, and the block keeps it
+  // when another Range is chosen (it must not say "could not be read" again). Pressed without the
+  // mouse, so that nothing scrolls the failed block away (it would be read again on its return).
+  await failNext(1000);
+  await rangeBlocks(page).nth(30).evaluate((block) => block.scrollIntoView({ block: 'start' }));
+  await settledSections(page, asked);
+  await failNext(0);
+  const failedBlock = rangeBlocks(page).nth(30);
+  await expect(failedBlock.getByTestId('range-section')).toHaveAttribute('data-state', 'failed');
+  await rangeBlocks(page).nth(29).getByTestId('range-next').dispatchEvent('click');
+  await expect(failedBlock.getByTestId('hsp-detail')).toHaveAttribute('data-state', 'ready');
+  const shownByDetail = await failedBlock.getByTestId('detail-section').textContent();
+  expect(shownByDetail).toMatch(/^ Score = /);
+  await failedBlock.getByTestId('range-next').dispatchEvent('click');
+  await expect(rangeBlocks(page).nth(31).getByTestId('hsp-detail')).toHaveAttribute('data-state', 'ready');
+  await expect(failedBlock.getByTestId('range-section')).toHaveAttribute('data-state', 'ready');
+  await expect(failedBlock.getByTestId('range-section')).toHaveText(shownByDetail!);
+  await expect(failedBlock.getByTestId('range-retry')).toHaveCount(0);
   // The last Range, chosen in the HSP table: the window moves to it.
   await page.getByTestId('hsp-sort-rank').click();
   await expect(page.getByTestId('hsp-sort-rank').locator('..')).toHaveAttribute('aria-sort', 'descending');
+  // Its section was never read: when the read fails, the detail says so and has "Try again" (W4b
+  // decision 71: no automatic repetition); the retry reads it.
+  await failNext(1000);
   await hspRows(page).first().click();
   const lastId = await hspId(hspRows(page).first());
   await expect(page.getByTestId('hsp-detail')).toHaveAttribute('data-hsp', lastId);
+  await expect(page.getByTestId('hsp-detail')).toHaveAttribute('data-state', 'failed');
+  await expect(page.getByTestId('detail-error')).toContainText('The HSP could not be read: ');
+  await settledSections(page, asked);
+  await failNext(0);
+  await expect(page.getByTestId('hsp-detail')).toHaveAttribute('data-state', 'failed');
+  await page.getByTestId('detail-retry').dispatchEvent('click');
+  await expect(page.getByTestId('hsp-detail')).toHaveAttribute('data-state', 'ready');
+  await expect(page.getByTestId('detail-section')).toHaveText(/^ Score = /);
+  await expect(page.getByTestId('detail-retry')).toHaveCount(0);
   await expect(rangeBlocks(page).last()).toHaveAttribute('data-testid', `range-${lastId.replace(':', '-')}`);
   await expect(rangeBlocks(page).last()).toHaveAttribute('data-n', String(total));
   await expect(rangeBlocks(page)).toHaveCount(26);
@@ -1512,6 +1542,27 @@ test('the dot plot: the HSPs of the pair on a canvas; zoom; choosing an HSP on i
   const range = page.getByTestId(`range-${secondId.replace(':', '-')}`);
   await expect(range.getByTestId('range-label')).toBeFocused();
   await expect(range).toBeInViewport();
+});
+
+test('the dot plot: on a desktop screen, a popup that has no room beside a short plot is scrolled into view by the first click (S13b code review 2)', async ({ page }) => {
+  // The subject is short against the query: the plot is flat, lower than the popup, so the popup
+  // goes under it. The screen is low enough that "under the plot" is below its edge.
+  await page.setViewportSize({ width: 1280, height: 520 });
+  await program(page, 'blastn');
+  await paste(page, 'query', `>q1\n${A}${dna(12, 3000)}\n`);
+  await paste(page, 'subject', `>s1\n${A}\n`);
+  await run(page, 1);
+  await openFromQueue(page, 1);
+  await show(page, 'dotplot');
+  const canvas = page.getByTestId('dotplot-canvas');
+  await expect(canvas).toHaveAttribute('data-segments', '1');
+  await expect(page.getByTestId('dotplot-popup')).toHaveCount(0);
+  const targets = JSON.parse((await canvas.getAttribute('data-targets'))!) as { hsp: string; x: number; y: number }[];
+  await canvas.click({ position: { x: targets[0]!.x, y: targets[0]!.y } });
+  const popup = page.getByTestId('dotplot-popup');
+  await expect(popup).toHaveAttribute('data-place', 'below');
+  // Not after a second click: the first one brings the popup into view.
+  await expect(popup).toBeInViewport({ ratio: 1 });
 });
 
 // --- the phone size (S13 screen review) ------------------------------------------------------------

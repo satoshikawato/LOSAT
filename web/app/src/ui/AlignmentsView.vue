@@ -132,7 +132,8 @@ function arrive(k: string, text: string | null): void {
     const batch = [...arrived];
     arrived.clear();
     void keepInPlace(() => {
-      for (const [k, value] of batch) sections.set(k, value);
+      // A failure that arrives after the detail showed the section does not replace it (below).
+      for (const [k, value] of batch) if (value !== null || sections.get(k) === undefined) sections.set(k, value);
     });
   });
 }
@@ -162,6 +163,18 @@ function read(range: RangeEntry): void {
     })
     .finally(() => reading.delete(k));
 }
+
+// The selected HSP's detail reads the same section. Once it shows it, the block keeps it: a
+// failure of the block's own earlier read must not come back when another HSP is selected.
+watch(
+  () => [props.state.runId, detail.value?.id, detail.value?.state, detail.value?.section] as const,
+  () => {
+    const d = detail.value;
+    if (d?.state !== 'ready' || d.section === undefined) return;
+    const k = key(d.id);
+    if (sections.get(k) === null || sections.get(k) === undefined) sections.set(k, d.section);
+  },
+);
 
 /** Reads a failed section again ("Try again", or its block back in view). */
 function retry(range: RangeEntry): void {
@@ -289,7 +302,10 @@ const sectionState = (range: RangeEntry): 'pending' | 'ready' | 'failed' => {
             This HSP covers one letter of each sequence, so its coordinates do not show its strand, and the HSP record does not hold
             it. The <code>Strand=</code> line of its outfmt 0 section below shows it.
           </p>
-          <p v-if="detail.state === 'failed'" class="error" data-testid="detail-error">The HSP could not be read: {{ detail.error }}</p>
+          <p v-if="detail.state === 'failed'" class="error" data-testid="detail-error">
+            The HSP could not be read: {{ detail.error }}
+            <button type="button" class="link" data-testid="detail-retry" @click="results.selectHsp(detail.id)">Try again</button>
+          </p>
           <template v-if="range.inOutfmt0">
             <p v-if="detail.state === 'loading'" class="muted">Reading the alignment…</p>
             <pre v-if="detail.section !== undefined" class="output range-text" data-testid="detail-section">{{ detail.section }}</pre>

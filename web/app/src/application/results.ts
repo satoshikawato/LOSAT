@@ -291,7 +291,10 @@ export class ResultsBrowser {
     this.selectHsp(first?.id);
   }
 
-  /** Selects an HSP of the loaded run; its query and subject follow. */
+  /**
+   * Selects an HSP of the loaded run; its query and subject follow. Selecting the HSP whose detail
+   * could not be read reads it again ("Try again"); one that is loading or ready is left alone.
+   */
   selectHsp(id: HspId | undefined): void {
     const state = this.state.get();
     if (id === undefined || state.loaded === undefined || id.runId !== state.runId) {
@@ -306,7 +309,8 @@ export class ResultsBrowser {
       this.set({ qIdx: id.qIdx, sIdx });
       this.refresh();
     }
-    if (sameHsp(this.state.get().hsp, id) && this.state.get().detail !== undefined) return;
+    const { hsp, detail } = this.state.get();
+    if (sameHsp(hsp, id) && detail !== undefined && detail.state !== 'failed') return;
     this.set({ hsp: id });
     void this.loadDetail(state.loaded, id, row);
   }

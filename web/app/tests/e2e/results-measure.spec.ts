@@ -914,7 +914,10 @@ async function watchFrames(page: Page): Promise<void> {
       if (!frames.on) return;
       const now = performance.now();
       frames.maxLag = Math.max(frames.maxLag, now - due);
-      setTimeout(() => timer(performance.now() + TIMER_MS), TIMER_MS);
+      // When the timer is due: taken now, when it is set (fix round 2: taken when it fired, the
+      // delay was always about 0, and only the first timer counted).
+      const next = now + TIMER_MS;
+      setTimeout(() => timer(next), TIMER_MS);
     };
     setTimeout(() => timer(start + TIMER_MS), TIMER_MS);
     const tick = (now: number) => {

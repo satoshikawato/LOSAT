@@ -16,6 +16,8 @@ const counts = computed(() => props.exporter.counts(props.state));
 const scope = ref<ExportScope>('all');
 /** The JSON's aligned rows: on by default (the JSON is the format that keeps everything of an HSP). */
 const aligned = ref(true);
+/** The report's outfmt 0 text of the alignments: on by default; off, a whole-run report stays small. */
+const alignments = ref(true);
 const busy = computed(() => exportState.value.busy !== undefined);
 
 // A scope that becomes empty (the marks cleared, a filter that hides every HSP) gives way to the whole run.
@@ -37,7 +39,7 @@ const markedQuery = computed(() => {
 
 function download(format: ExportFormat): void {
   if (busy.value || counts.value[scope.value] === 0) return;
-  void props.exporter.export(format, scope.value, { aligned: aligned.value });
+  void props.exporter.export(format, scope.value, { aligned: aligned.value, alignments: alignments.value });
 }
 </script>
 
@@ -87,6 +89,9 @@ function download(format: ExportFormat): void {
       <button type="button" :disabled="busy || counts[scope] === 0" data-testid="export-report" @click="download('report')">
         Download report (HTML)
       </button>
+      <label class="export-aligned">
+        <input v-model="alignments" type="checkbox" :disabled="busy" data-testid="export-report-alignments" /> Include the alignments in the report
+      </label>
     </div>
     <ul class="hint export-format-notes">
       <li>
@@ -98,7 +103,7 @@ function download(format: ExportFormat): void {
       <li>JSON: the run, the HSPs chosen and, for each HSP, its outfmt 6 fields as written and its record's numbers as the engine wrote them.</li>
       <li>
         Report: one static HTML page with no script that loads nothing: the run, its commands, the HSPs chosen, each query's HSP table and the
-        outfmt 0 text of their alignments, and the warnings.
+        outfmt 0 text of their alignments (unless they are left out, which keeps a report of many HSPs small), and the warnings.
       </li>
     </ul>
     <div aria-live="polite">
@@ -114,8 +119,9 @@ function download(format: ExportFormat): void {
         :data-scope="exportState.last.scope"
         :data-hsps="exportState.last.hsps"
       >
-        Saved {{ exportState.last.fileName }}: {{ formatCounted(exportState.last.hsps, 'HSP') }} ({{ SCOPE_LABELS[exportState.last.scope] }}),
-        {{ formatBytes(exportState.last.bytes) }}.
+        Saved {{ exportState.last.fileName }}: {{ formatCounted(exportState.last.hsps, 'HSP') }} ({{ SCOPE_LABELS[exportState.last.scope] }}{{
+          exportState.last.withoutAlignments ? ', without the alignments' : ''
+        }}), {{ formatBytes(exportState.last.bytes) }}.
       </p>
     </div>
   </section>

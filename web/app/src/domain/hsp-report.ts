@@ -16,9 +16,12 @@ import type { OutputFormat } from './output-format';
 
 const ENTITIES: Readonly<Record<string, string>> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 
+const MARKUP = /[&<>"']/;
+
 /** Text as HTML text: `& < > " '` become entities, so no text of the run is read as markup. */
 export function escapeHtml(text: string): string {
-  return text.replace(/[&<>"']/g, (c) => ENTITIES[c]!);
+  // Most fields of a report hold none of these characters: they are returned as they are.
+  return MARKUP.test(text) ? text.replace(/[&<>"']/g, (c) => ENTITIES[c]!) : text;
 }
 
 /** The page loads nothing and runs nothing: only its inline style applies. */
@@ -57,6 +60,8 @@ export interface ReportHead {
   readonly formats: readonly OutputFormat[];
   readonly scope: ExportScopeInfo;
   readonly exportedAt: number;
+  /** The outfmt 0 headings and sections are in the report (default true). */
+  readonly alignments?: boolean;
 }
 
 const iso = (ms: number): string => new Date(ms).toISOString();
@@ -70,6 +75,10 @@ function inputItem(role: string, input: ExportInput): string {
       `<span class="muted">SHA-256 of the FASTA given to the engine: <code>${escapeHtml(input.sha256)}</code></span>`,
   );
 }
+
+const ALIGNMENTS_INCLUDED = 'Included: the outfmt 0 headings and sections of the HSPs that outfmt 0 shows, as written.';
+const ALIGNMENTS_LEFT_OUT =
+  'Not included: this report was saved without the outfmt 0 text of the alignments. Each HSP table says whether outfmt 0 shows the HSP.';
 
 function scopeItems(scope: ExportScopeInfo): string {
   let items = item('HSPs', `${escapeHtml(SCOPE_LABELS[scope.scope])}: ${count(scope.hsps, 'HSP')}`);
@@ -130,6 +139,7 @@ export function reportHead(head: ReportHead): string {
     `<ul>\n${commands}</ul>\n</section>\n` +
     '<section>\n<h2>Scope</h2>\n<dl>\n' +
     scopeItems(scope) +
+    item('Alignments', head.alignments === false ? ALIGNMENTS_LEFT_OUT : ALIGNMENTS_INCLUDED) +
     '</dl>\n</section>\n'
   );
 }
@@ -144,21 +154,25 @@ export interface ReportQuery {
   readonly hsps: number;
 }
 
+const TABLE_START =
+  '<h3>HSPs (outfmt 6 fields, as written)</h3>\n<div class="table"><table>\n<thead><tr><th>HSP</th><th>Subject record</th>' +
+  OUTFMT6_FIELDS.map((name) => `<th>${name}</th>`).join('') +
+  '<th>outfmt 0</th></tr></thead>\n<tbody>\n';
+
 /** A query's section, up to the rows of its HSP table. */
 export function reportQueryStart(query: ReportQuery): string {
   const name = query.id === '' ? '' : `: ${escapeHtml(query.id)}`;
   return (
     `<section class="query">\n<h2>Query ${query.position + 1}${name}</h2>\n` +
     `<p class="muted">Length ${query.length} ${query.unit}; ${count(query.hsps, 'HSP')} in this report.</p>\n` +
-    '<h3>HSPs (outfmt 6 fields, as written)</h3>\n<div class="table"><table>\n<thead><tr><th>HSP</th><th>Subject record</th>' +
-    OUTFMT6_FIELDS.map((name) => `<th>${name}</th>`).join('') +
-    '<th>outfmt 0</th></tr></thead>\n<tbody>\n'
+    TABLE_START
   );
 }
 
 /** A row of the query's HSP table: the HSP, its subject record and its outfmt 6 fields as written. */
 export function reportTableRow(hsp: ExportedHsp): string {
-  const fields = OUTFMT6_FIELDS.map((name) => `<td>${escapeHtml(hsp.outfmt6?.[name] ?? '')}</td>`).join('');
+  let fields = '';
+  for (const name of OUTFMT6_FIELDS) fields += `<td>${escapeHtml(hsp.outfmt6?.[name] ?? '')}</td>`;
   return `<tr><td>${hspLabel(hsp.qIdx, hsp.rank)}</td><td>${hsp.sIdx + 1}</td>${fields}<td>${hsp.inOutfmt0 ? 'shown' : 'not shown'}</td></tr>\n`;
 }
 

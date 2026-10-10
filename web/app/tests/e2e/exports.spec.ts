@@ -202,6 +202,7 @@ test.describe('FakeEngine build', () => {
     expect(opened.text).toContain('Warning: FAKE ENGINE OUTPUT');
     await expect(opened.report.locator('section.query')).toHaveCount(3);
     await expect(opened.report.locator('pre.section')).toHaveCount(9);
+    expect(all.text).toContain('<dt>Alignments</dt><dd>Included: the outfmt 0 headings and sections of the HSPs that outfmt 0 shows, as written.</dd>');
     await opened.report.close();
 
     // --- after the view filters: E values of at most 5e-5 keep HSPs 0-5 ---
@@ -245,6 +246,15 @@ test.describe('FakeEngine build', () => {
     expect(markedReport.text).toContain(`Marked subjects2: ${HOSTILE.subjects[1]}`);
     await expect(markedReport.report.locator('section.query')).toHaveCount(1);
     await markedReport.report.close();
+    // The report without the alignments (fix round 2): the HSP tables only, and the page says so.
+    await expect(page.getByTestId('export-report-alignments')).toBeChecked();
+    await page.getByTestId('export-report-alignments').uncheck();
+    const tablesOnly = await exportFile(page, 'report', 2);
+    await expect(page.getByTestId('export-summary')).toContainText('(Marked subjects, without the alignments)');
+    expect(tablesOnly.text).toContain('<dt>Alignments</dt><dd>Not included: this report was saved without the outfmt 0 text of the alignments.');
+    expect(tablesOnly.text).not.toContain('<pre class="section">');
+    expect(tablesOnly.text).toContain('<td>1.2</td>');
+    expect(tablesOnly.text.length).toBeLessThan(marked.text.length);
 
     // A filter that hides every HSP empties the filtered scope (and the marked one), and the choice goes back to the whole run.
     await scope(page, 'filtered').check();
@@ -292,5 +302,13 @@ test.describe('engine build', () => {
     expect(pres.length).toBeGreaterThan(outfmt6.length);
     for (const text of pres) expect(outfmt0).toContain(text);
     await report.report.close();
+
+    await page.getByTestId('export-report-alignments').uncheck();
+    const tables = await openReport(context, (await exportFile(page, 'report', outfmt6.length)).text);
+    expect(tables.requests).toEqual([]);
+    await expect(tables.report.locator('pre.section, pre.heading')).toHaveCount(0);
+    await expect(tables.report.locator('section.query tbody tr')).toHaveCount(outfmt6.length);
+    expect(tables.text).toContain('Not included: this report was saved without the outfmt 0 text of the alignments.');
+    await tables.report.close();
   });
 });

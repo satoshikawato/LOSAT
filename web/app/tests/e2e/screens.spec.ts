@@ -5,7 +5,10 @@
 // (files 07 to 18, which sort after the search screen's 01 to 06); 18 is the window, not the
 // whole page, right after "Open results" (S13 screen review M3). W4b added 19 to 23: the
 // Descriptions, the Graphic Summary, the Alignments with two Ranges, the dot plot's popup and a
-// TBLASTN dot plot.
+// TBLASTN dot plot. S14 added 24 to 28: the Descriptions' marks, the Alignments with a Range "In
+// candidates", the popup of a TBLASTN HSP (a W4b state not recorded before), the candidate tray
+// with candidates of two runs, notes and Origins, and the tray after an extraction cut at a
+// record's end.
 import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
@@ -339,6 +342,64 @@ for (const size of SIZES) {
     await expect(canvas).toHaveAttribute('data-segments', /^[1-9]/);
     await expect(page.getByTestId('dotplot-selected')).toContainText('subject frame');
     await shoot(page, browserName, size.name, '23-results-tblastn-dotplot');
+
+    // S14. The popup of the TBLASTN HSP, which adds it to the candidates.
+    const confirmation = page.getByTestId('candidates-added');
+    /** The confirmation of an addition goes after a few seconds: the records show the screen without it. */
+    const settledConfirmation = () => expect(confirmation).toHaveCount(0, { timeout: 10_000 });
+    await canvas.focus();
+    await page.keyboard.press('Enter');
+    await expect(page.getByTestId('dotplot-popup')).toBeVisible();
+    await shoot(page, browserName, size.name, '26-results-tblastn-dotplot-popup');
+    await page.getByTestId('dotplot-popup-add').click();
+    await expect(page.getByTestId('dotplot-popup-add')).toHaveText('In candidates');
+    await page.keyboard.press('Escape');
+
+    // The Descriptions of run 1 with two rows marked (not msD, whose Ranges state 25 adds one by one).
+    await openResults(page, 1);
+    await page.getByTestId('results-view-hits').click();
+    const marks = page.getByTestId('subject-list').locator('.marked-line').filter({ hasNotText: 'msD' }).locator('[data-testid^="subject-mark-"]');
+    await marks.nth(0).check();
+    await marks.nth(1).check();
+    await expect(page.getByTestId('descriptions-selected')).toHaveText('2 sequences selected');
+    await settledConfirmation();
+    await shoot(page, browserName, size.name, '24-results-descriptions-marks');
+    await page.getByTestId('descriptions-add-candidates').click();
+    await expect(confirmation).toContainText('added to Candidates');
+
+    // The Alignments of msD (two Ranges): the first added, "In candidates"; the second not.
+    await subjectRow('msD').click();
+    await page.getByTestId('pane-alignment').click();
+    const ranges = page.locator('[data-testid^="range-0-"]');
+    await expect(ranges).toHaveCount(2);
+    await ranges.first().locator('[data-testid^="range-add-"]').click();
+    await expect(ranges.first().locator('[data-testid^="range-add-"]')).toHaveText('In candidates');
+    await expect(ranges.nth(1).locator('[data-testid^="range-add-"]')).toHaveText('Add to candidates');
+    await expect(page.getByTestId('hsp-detail')).toHaveAttribute('data-state', 'ready');
+    // The second Range's section is read when it comes into view.
+    await ranges.nth(1).scrollIntoViewIfNeeded();
+    await expect(page.getByTestId('range-section')).toHaveAttribute('data-state', 'ready');
+    await settledConfirmation();
+    await shoot(page, browserName, size.name, '25-results-alignments-in-candidates');
+
+    // The tray: candidates of runs 1 and 4, two notes, and the Origins.
+    await page.getByTestId('tab-candidates').click();
+    await expect(page.getByTestId('candidate-list')).toBeVisible();
+    await page.getByTestId('candidate-note-1').fill('TBLASTN hit to check');
+    await page.getByTestId('candidate-note-2').fill('compare with msA');
+    await expect(page.getByTestId('candidate-origins').locator('li[data-testid^="candidate-origin-"]')).toHaveCount(2);
+    await shoot(page, browserName, size.name, '27-candidates-two-runs-notes-origins');
+
+    // An extraction with flanks that the records' ends cut: the summary lists the requested and written ranges.
+    await page.getByTestId('extract-region-flanked').check();
+    await page.getByTestId('extract-flank-left').fill('5000');
+    await page.getByTestId('extract-flank-right').fill('5000');
+    const download = page.waitForEvent('download');
+    await page.getByTestId('extract-download').click();
+    await download;
+    await expect(page.getByTestId('extract-clipped').first()).toBeVisible();
+    await page.getByTestId('extract-summary').scrollIntoViewIfNeeded();
+    await shoot(page, browserName, size.name, '28-candidates-extraction-clipped');
 
     // The queue: finished runs with "Open results", a search in progress, one cancelled before
     // it started, and one waiting (queued after the cancel). BLASTP of a bacterial proteome

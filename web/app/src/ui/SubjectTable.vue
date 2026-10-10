@@ -8,6 +8,10 @@
 // check box of its own: the row stays one button that selects the subject), with "select all"
 // and the count of marked rows; "Add to candidates" adds every HSP of the marked subjects in
 // this query (S14).
+//
+// On the one page of the results (ClassicResults.vue), the list is cut as NCBI's: the first 100
+// subjects in the order shown, "Show all N" for the rest, until another run or query. "select all"
+// marks the subjects listed.
 import { computed, onMounted, ref, watch } from 'vue';
 import type { HspId, ResultsBrowser, ResultsState, SubjectEntry } from '../application/results';
 import { headingTitle } from '../domain/outfmt0';
@@ -18,10 +22,24 @@ import { focusPressed, useSideScroll } from './useSideScroll';
 import VirtualRows from './VirtualRows.vue';
 
 const props = defineProps<{ results: ResultsBrowser; state: ResultsState }>();
-const emit = defineEmits<{ 'add-candidates': [ids: readonly HspId[]] }>();
+/** A row chosen (after its subject is selected): the one page brings the subject's alignments into view. */
+const emit = defineEmits<{ 'add-candidates': [ids: readonly HspId[]]; chosen: [sIdx: number] }>();
 const ROW_PX = 28;
 const MAX_ROWS = 10;
-const selectedPosition = computed(() => props.state.subjects.findIndex((subject) => subject.sIdx === props.state.sIdx));
+/** Subjects listed until "Show all" (NCBI lists 100 to a page). */
+const FIRST_SUBJECTS = 100;
+const showAll = ref(false);
+// Another run or query starts with its first subjects again.
+watch(
+  () => `${props.state.runId}|${props.state.qIdx}`,
+  () => (showAll.value = false),
+);
+const listed = computed(() => (showAll.value ? props.state.subjects.length : Math.min(FIRST_SUBJECTS, props.state.subjects.length)));
+/** The selected subject's row, or -1 where the list does not reach it (it is not scrolled to then). */
+const selectedPosition = computed(() => {
+  const position = props.state.subjects.findIndex((subject) => subject.sIdx === props.state.sIdx);
+  return position < listed.value ? position : -1;
+});
 const unit = computed(() => props.state.loaded?.units.subject ?? '');
 const scroller = ref<HTMLElement>();
 const sideScroll = useSideScroll(scroller);
@@ -78,11 +96,26 @@ onMounted(measureIds);
 watch(() => props.state.subjects, measureIds, { flush: 'post' });
 
 /** "select all" is checked when every listed subject is marked, and mixed when some are. */
-const allMarked = computed(() => props.state.subjects.length > 0 && props.state.marked.size === props.state.subjects.length);
+const allMarked = computed(() => {
+  const marked = props.state.marked;
+  if (listed.value === 0 || marked.size < listed.value) return false;
+  for (let i = 0; i < listed.value; i++) if (!marked.has(props.state.subjects[i]!.sIdx)) return false;
+  return true;
+});
 const someMarked = computed(() => props.state.marked.size > 0 && !allMarked.value);
 
 function mark(sIdx: number, event: Event): void {
   props.results.markSubjects([sIdx], (event.target as HTMLInputElement).checked);
+}
+/** NCBI's "select all": the subjects listed (the first 100 until "Show all"). */
+function markListed(event: Event): void {
+  const sIdxs = props.state.subjects.slice(0, listed.value).map((subject) => subject.sIdx);
+  props.results.markSubjects(sIdxs, (event.target as HTMLInputElement).checked);
+}
+
+function choose(sIdx: number): void {
+  props.results.selectSubject(sIdx);
+  emit('chosen', sIdx);
 }
 
 function description(sIdx: number, inOutfmt0: boolean): string {
@@ -95,10 +128,10 @@ function description(sIdx: number, inOutfmt0: boolean): string {
 <template>
   <div class="result-table subject-table" data-testid="subject-table">
     <div class="tool-band">
-      <h3>
+      <h4>
         Sequences producing significant alignments
         <span class="muted small" data-testid="subject-count">{{ formatCount(state.subjects.length) }} shown</span>
-      </h3>
+      </h4>
       <div class="descriptions-tools">
         <label class="check">
           <input
@@ -106,7 +139,7 @@ function description(sIdx: number, inOutfmt0: boolean): string {
             :checked="allMarked"
             :indeterminate="someMarked"
             data-testid="descriptions-select-all"
-            @change="results.markAll(($event.target as HTMLInputElement).checked)"
+            @change="markListed"
           />
           select all
         </label>
@@ -160,7 +193,7 @@ function description(sIdx: number, inOutfmt0: boolean): string {
         <span data-col="sseqid" role="columnheader">Subject ID</span>
       </div>
       <VirtualRows
-        :count="state.subjects.length"
+        :count="listed"
         :row-px="ROW_PX"
         :max-rows="MAX_ROWS"
         :reveal="selectedPosition"
@@ -195,7 +228,7 @@ function description(sIdx: number, inOutfmt0: boolean): string {
               :data-testid="`subject-row-${subject.sIdx}`"
               :data-order="subject.order"
               @mousedown="focusPressed"
-              @click="results.selectSubject(subject.sIdx)"
+              @click="choose(subject.sIdx)"
             >
               <span class="num" data-field="order" :title="String(subject.order)">{{ subject.order }}</span>
               <span
@@ -216,5 +249,9 @@ function description(sIdx: number, inOutfmt0: boolean): string {
         </template>
       </VirtualRows>
     </div>
+    <p v-if="listed < state.subjects.length" class="descriptions-more">
+      <span class="muted small" data-testid="descriptions-listed">The first {{ formatCount(listed) }} of {{ formatCount(state.subjects.length) }} are listed.</span>
+      <button type="button" data-testid="descriptions-show-all" @click="showAll = true">Show all {{ formatCount(state.subjects.length) }}</button>
+    </p>
   </div>
 </template>

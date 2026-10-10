@@ -10,7 +10,15 @@ import SortButton from './SortButton.vue';
 import { focusPressed, useSideScroll } from './useSideScroll';
 import VirtualRows from './VirtualRows.vue';
 
-const props = defineProps<{ results: ResultsBrowser; state: ResultsState }>();
+const props = withDefaults(
+  defineProps<{
+    results: ResultsBrowser;
+    state: ResultsState;
+    /** The level of the table's heading: 4 under the one page's "Alignments", 3 beside the dot plot. */
+    level?: 3 | 4;
+  }>(),
+  { level: 3 },
+);
 /** An HSP chosen in the table (after it is selected): the Alignments bring its Range into view. */
 const emit = defineEmits<{ chosen: [id: HspId] }>();
 const ROW_PX = 28;
@@ -46,10 +54,10 @@ const ORIENTATION: Readonly<Record<HspEntry['orientation'], string>> = {
 
 <template>
   <div class="result-table hsp-table" data-testid="hsp-table">
-    <h3>
+    <component :is="`h${level}`">
       HSPs of {{ subject?.first.sseqid }}
       <span class="muted small">{{ state.hsps.length }} shown</span>
-    </h3>
+    </component>
     <p v-if="sideScroll" class="table-hint muted small" data-testid="hsp-table-scroll-hint">Scroll the table sideways for more columns →</p>
     <div ref="scroller" class="table-scroll" :style="{ '--row-gutter': `${gutter}px` }">
       <div class="table-head hsp-grid" :class="{ framed }" role="row">

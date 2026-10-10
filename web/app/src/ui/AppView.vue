@@ -57,7 +57,7 @@ async function openResults(runId: string): Promise<void> {
  */
 async function showCandidate(id: HspId): Promise<void> {
   const revealing = props.results.reveal(id);
-  resultsView.value = 'alignment';
+  resultsView.value = 'hits';
   tab.value = 'results';
   const shown = await revealing;
   await nextTick();

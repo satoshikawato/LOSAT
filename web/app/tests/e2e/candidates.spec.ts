@@ -190,9 +190,9 @@ test.describe('FakeEngine build', () => {
     await expect(confirmation(page)).toHaveText('This HSP is already in Candidates.');
     await expect(tabCount(page)).toHaveText('3');
 
-    // The Alignments of s3: "Add to candidates" beside its Range, then "In candidates".
+    // The Alignments of s3, under the Descriptions on the one page: "Add to candidates" beside its Range, then "In candidates".
     await page.getByTestId('subject-row-2').click();
-    await show(page, 'pane-alignment');
+    await expect(page.getByTestId('results-alignments-heading')).toBeInViewport();
     const range3 = page.getByTestId('range-add-0-3');
     await expect(range3).toHaveText('Add to candidates');
     await expect(page.getByTestId('alignments-add-subject')).toHaveText('Add all matches to candidates');
@@ -347,7 +347,7 @@ test.describe('FakeEngine build', () => {
     await page.getByTestId('tab-candidates').click();
     await page.getByTestId('candidate-reveal-3').click();
     await expect(page.getByTestId('tab-results')).toHaveAttribute('aria-pressed', 'true');
-    await expect(page.getByTestId('pane-alignment')).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByTestId('results-view-hits')).toHaveAttribute('aria-pressed', 'true');
     await expect(page.getByTestId('hsp-detail')).toHaveAttribute('data-hsp', '0:1');
     await expect(page.getByTestId('alignments-subject')).toHaveAttribute('data-subject', '1');
     await expect(page.getByTestId('revealed-message')).toHaveText(

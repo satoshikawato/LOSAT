@@ -1,7 +1,9 @@
 // The results screen (S13, W4; plan §5.7, design §11): Run -> Query -> Subject -> HSP through
 // the real application, in NCBI BLAST's order and words since W4b (docs/web/ncbi_ui_mapping.md
-// §2): the header block, "Results for", and the tabs Descriptions, Graphic Summary, Alignments,
-// Dot Plot, Run details and Outputs. The tests run with the FakeEngine build and with the engine
+// §2): the header block, "Results for", and the tabs Descriptions, Dot Plot, Run details and
+// Outputs, where the first is NCBI's classic one page since 2026-10-10 (the Owner): the Graphic
+// Summary, the Descriptions directly under it and the Alignments (until then three tabs of
+// their own). The tests run with the FakeEngine build and with the engine
 // build (LOSAT_WEB_REACTORS); what only the engine can show (outfmt 0's frames, a run that the
 // engine refuses, the verification badge of a real run, the bins of real bit scores) is checked in
 // the engine build. The lists, the Alignments, the Graphic Summary and the dot plot are compared
@@ -25,15 +27,17 @@ import { repeats } from './support/synthetic';
 type ProgramId = 'blastn' | 'blastp' | 'tblastn' | 'tblastx';
 type Unit = 'nt' | 'aa';
 type Orientation = 'forward' | 'reverse' | 'unknown';
-type Tab = 'hits' | 'graphic' | 'alignment' | 'dotplot' | 'details' | 'outputs';
+type Tab = 'hits' | 'dotplot' | 'details' | 'outputs';
 
 const FORMATS = [0, 6, 7] as const satisfies readonly OutputFormat[];
 const LABELS: Readonly<Record<ProgramId, string>> = { blastn: 'BLASTN', blastp: 'BLASTP', tblastn: 'TBLASTN', tblastx: 'TBLASTX' };
-/** The tabs' test IDs (W4's: the hits view, the HSP's panes, the run's views). */
+/**
+ * The tabs' test IDs (W4's: the hits view, the HSP's panes, the run's views). Since 2026-10-10 the
+ * first, "Descriptions" (the hits view), is NCBI's classic one page: the Graphic Summary, the
+ * Descriptions and the Alignments under each other.
+ */
 const TABS: Readonly<Record<Tab, string>> = {
   hits: 'results-view-hits',
-  graphic: 'results-view-graphic',
-  alignment: 'pane-alignment',
   dotplot: 'pane-dotplot',
   details: 'results-view-details',
   outputs: 'results-view-outputs',
@@ -265,17 +269,16 @@ async function hspId(row: Locator): Promise<string> {
 }
 
 /**
- * Checks that the HSP `id` of subject `sIdx` is the one selection of every tab: the Alignments'
- * subject, its HSP table and detail, and the Descriptions' row. The Descriptions are shown after.
+ * Checks that the HSP `id` of subject `sIdx` is the one selection of the one page: the Alignments'
+ * subject, its HSP table and detail, and the Descriptions' row.
  */
 async function expectSelected(page: Page, id: string, sIdx: number): Promise<void> {
-  await show(page, 'alignment');
+  await show(page, 'hits');
   await expect(page.getByTestId('alignments-subject')).toHaveAttribute('data-subject', String(sIdx));
   await expect(page.getByTestId('hsp-detail')).toHaveAttribute('data-hsp', id);
   await expect(page.getByTestId(`range-${id.replace(':', '-')}`).getByTestId('hsp-detail')).toHaveCount(1);
   await expect(page.getByTestId(`hsp-row-${id.replace(':', '-')}`)).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByTestId('hsp-list').locator('[aria-pressed="true"]')).toHaveCount(1);
-  await show(page, 'hits');
   await expect(page.getByTestId(`subject-row-${sIdx}`)).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByTestId('subject-list').locator('[aria-pressed="true"]')).toHaveCount(1);
 }
@@ -362,7 +365,7 @@ async function expectRanges(page: Page, queryRows: readonly string[][], pairRank
  * hovered HSP the outfmt 6 strings; a click selects the HSP and shows its Range in the Alignments.
  */
 async function expectGraphicSummary(page: Page, queryRows: readonly string[][], qIdx: number, subjects: number): Promise<void> {
-  await show(page, 'graphic');
+  await show(page, 'hits');
   const canvas = page.getByTestId('graphic-canvas');
   const rows = Math.min(subjects, 100);
   await expect(canvas).toHaveAttribute('data-rows', String(rows));
@@ -394,7 +397,7 @@ async function expectGraphicSummary(page: Page, queryRows: readonly string[][], 
   await expect(popover.locator('.graphic-popover-title')).toHaveText(fields[1]!);
   await expect(popover).toContainText(`HSP ${rank + 1} · Bit score ${fields[11]} · E value ${fields[10]}`);
   await canvas.click({ position: { x: target.x, y: target.y } });
-  await expect(page.getByTestId('pane-alignment')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId(TABS.hits)).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByTestId('hsp-detail')).toHaveAttribute('data-hsp', target.hsp);
   const block = page.getByTestId(`range-${target.hsp.replace(':', '-')}`);
   await expect(block).toBeInViewport();
@@ -558,7 +561,7 @@ for (const c of PROGRAM_CASES) {
     await show(page, 'hits');
 
     // The Descriptions: NCBI's heading and order of columns, the Subject ID last.
-    await expect(page.getByTestId('subject-table').locator('.tool-band h3')).toContainText('Sequences producing significant alignments');
+    await expect(page.getByTestId('subject-table').locator('.tool-band h4')).toContainText('Sequences producing significant alignments');
     expect(await page.getByTestId('subject-table').locator('.table-head > *').evaluateAll((cells) => cells.map((cell) => (cell as HTMLElement).dataset['col']))).toEqual([
       'order',
       'description',
@@ -570,7 +573,6 @@ for (const c of PROGRAM_CASES) {
     ]);
     // Units of the lists.
     await expect(page.getByTestId('subject-sort-length')).toHaveText(`Length (${c.units.subject})`);
-    await show(page, 'alignment');
     await expect(page.getByTestId('hsp-sort-qStart')).toHaveText(`Query (${c.units.query})`);
     await expect(page.getByTestId('hsp-sort-sStart')).toHaveText(`Subject (${c.units.subject})`);
 
@@ -595,7 +597,6 @@ for (const c of PROGRAM_CASES) {
         await queryRow.click();
         await expect(queryRow).toHaveAttribute('aria-pressed', 'true');
       }
-      await show(page, 'alignment');
       await expect(detail).toHaveAttribute('data-hsp', new RegExp(`^${qIdx}:`));
       await expect(detail).toHaveAttribute('data-state', 'ready');
       // The query's HSPs are its outfmt 6 rows, by rank.
@@ -607,7 +608,6 @@ for (const c of PROGRAM_CASES) {
       last = { qIdx, rows: queryRows, subjects: sseqids.length };
 
       // The Descriptions: each subject's first outfmt 6 row, in the engine's order.
-      await show(page, 'hits');
       await expect(page.getByTestId('subject-list')).toHaveAttribute('data-count', String(sseqids.length));
       const drawnSubjects = await subjectRows(page).count();
       expect(drawnSubjects).toBe(Math.min(sseqids.length, 22));
@@ -623,12 +623,14 @@ for (const c of PROGRAM_CASES) {
       }
 
       // The first subjects in the Alignments: the HSP table holds every field of the HSPs' outfmt 6
-      // rows, the Ranges their subject coordinates, the sections and the heading outfmt 0's text.
+      // rows, the Ranges their subject coordinates, the sections and the heading outfmt 0's text. A
+      // click on a Description row brings the Alignments' heading into view, with the focus.
       for (let i = 0; i < Math.min(drawnSubjects, 3); i++) {
-        await show(page, 'hits');
         const subject = subjectRows(page).nth(i);
         await subject.click();
         await expect(subject).toHaveAttribute('aria-pressed', 'true');
+        await expect(page.getByTestId('results-alignments-heading')).toBeFocused();
+        await expect(page.getByTestId('results-alignments-heading')).toBeInViewport();
         const sIdx = await subjectIndex(subject);
         const sseqid = sseqids[i]!;
         const pairRanks = queryRows.flatMap((fields, rank) => (fields[1] === sseqid ? [rank] : []));
@@ -638,7 +640,6 @@ for (const c of PROGRAM_CASES) {
         const descriptionText = await text(description);
         const length = (await text(subject.locator('[data-field="length"]'))).replace(/,/g, '');
 
-        await show(page, 'alignment');
         await expect(page.getByTestId('alignments-subject')).toHaveAttribute('data-subject', String(sIdx));
         await expect(page.getByTestId('alignments-summary')).toHaveText(
           new RegExp(`^\\s*Sequence ID: ${sseqid.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s+Length: ${count(Number(length))}\\s+Number of Matches: ${count(pairRanks.length)}\\s*$`),
@@ -713,9 +714,7 @@ for (const c of PROGRAM_CASES) {
       }
       seen.queries++;
     }
-    await show(page, 'alignment');
     await expectTableFits(page, 'hsp-table');
-    await show(page, 'hits');
     await expectTableFits(page, 'subject-table');
     // The Subject ID column is as wide as its values (from 10ch to 24ch) and starts 12 px further
     // from the lengths; the Description has the rest of the row (W4b screen review L8).
@@ -848,6 +847,15 @@ test('an HSP that outfmt 0 does not show, and a hit list that may have reached i
   await openFiles(page, 'subject', [{ name: 'many_subject.fasta', text: fasta('outfmt0/many_subject.fasta') }]);
   await run(page, 1);
   await openFromQueue(page, 1);
+  // The one page is cut as NCBI's (2026-10-10): the graphic draws and the Descriptions list the
+  // first 100 subjects; "Show all" lists the rest.
+  if (total > 100) {
+    await expect(page.getByTestId('subject-list')).toHaveAttribute('data-count', '100');
+    await expect(page.getByTestId('descriptions-listed')).toHaveText(`The first 100 of ${total} are listed.`);
+    await expect(page.getByTestId('graphic-canvas')).toHaveAttribute('data-rows', '100');
+    await page.getByTestId('descriptions-show-all').click();
+  }
+  await expect(page.getByTestId('descriptions-show-all')).toHaveCount(0);
   await expect(page.getByTestId('subject-list')).toHaveAttribute('data-count', String(total));
   const partial = page.locator('[data-testid="results-notice"][data-kind="outfmt0-partial"]');
   await expect(partial).toContainText(`outfmt 0 shows the alignments of the first ${shown} subjects of this query`);
@@ -858,18 +866,14 @@ test('an HSP that outfmt 0 does not show, and a hit list that may have reached i
 
   // The last subject in the engine's order: the "#" column the other way round. The sort keeps
   // the selected (first) subject, at the list's end now, and shows the list's first rows.
-  await show(page, 'alignment');
   const selected = await page.getByTestId('hsp-detail').getAttribute('data-hsp');
-  await show(page, 'hits');
   await page.getByTestId('subject-sort-order').click();
   await expect(page.getByTestId('subject-sort-order').locator('..')).toHaveAttribute('aria-sort', 'descending');
   const subjectList = page.getByTestId('subject-list');
   await expect.poll(() => subjectList.evaluate((element) => element.scrollTop)).toBe(0);
   await subjectList.evaluate((element) => (element.scrollTop = element.scrollHeight));
   await expect(subjectRows(page).and(page.locator('[aria-pressed="true"]'))).toHaveAttribute('data-order', '1');
-  await show(page, 'alignment');
   await expect(page.getByTestId('hsp-detail')).toHaveAttribute('data-hsp', selected!);
-  await show(page, 'hits');
   await subjectList.evaluate((element) => (element.scrollTop = 0));
   const last = subjectRows(page).first();
   await expect(last).toHaveAttribute('data-order', String(total));
@@ -877,7 +881,6 @@ test('an HSP that outfmt 0 does not show, and a hit list that may have reached i
   const sseqid = await text(last.locator('[data-field="sseqid"]'));
   await last.click();
   await expect(last).toHaveAttribute('aria-pressed', 'true');
-  await show(page, 'alignment');
   for (const row of await hspRows(page).all()) await expect(row.locator('[data-field="outfmt0"]')).toHaveText('not shown');
   await expect(page.getByTestId('detail-not-in-outfmt0')).toContainText(
     `outfmt 0 does not show this HSP. It shows the alignments of the first ${shown} subjects of this query`,
@@ -887,17 +890,17 @@ test('an HSP that outfmt 0 does not show, and a hit list that may have reached i
   await expect(page.getByTestId('range-section')).toHaveCount(0);
   const row = (await text(page.getByTestId('detail-row'))).replace(/\n$/, '');
   expect(row.split('\t')[1]).toBe(sseqid);
-  // The Alignments are the tab of the next run opened, and of the results shown again (W4b).
+  // The one page is the tab of the next run opened, and of the results shown again.
   await page.getByTestId('tab-search').click();
   await page.getByTestId('tab-results').click();
-  await expect(page.getByTestId(TABS.alignment)).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId(TABS.hits)).toHaveAttribute('aria-pressed', 'true');
   // outfmt 6 has the HSP; outfmt 0 has no alignment heading for its subject.
   await showOutput(page, 1, 6, false);
   expect((await text(page.getByTestId('result-output'))).split('\n')).toContain(row);
   await showOutput(page, 1, 0, false);
   const escaped = sseqid.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   expect(await text(page.getByTestId('result-output'))).not.toMatch(new RegExp(`^> ?${escaped}(\\s|$)`, 'm'));
-  await show(page, 'alignment');
+  await show(page, 'hits');
 
   // An explicit -max_target_seqs that the query's subjects reach (many.mts255.blastn): the
   // notice says that more subjects may match, not that hits were lost.
@@ -907,7 +910,7 @@ test('an HSP that outfmt 0 does not show, and a hit list that may have reached i
   await page.getByTestId('param-max_target_seqs').fill(String(limit));
   await run(page, 2);
   await openFromQueue(page, 2);
-  await expect(page.getByTestId(TABS.alignment)).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId(TABS.hits)).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByTestId('results-run-options')).toHaveText(`-task blastn -max_target_seqs ${limit}`);
   await expect(page.getByTestId('results-program')).toHaveText('BLASTN (task blastn)');
   const notice = page.locator('[data-testid="results-notice"][data-kind="subject-limit"]');
@@ -920,7 +923,7 @@ test('an HSP that outfmt 0 does not show, and a hit list that may have reached i
   if (BUILD_HAS_ENGINE) {
     // With -max_target_seqs, outfmt 0 shows the alignments of every subject kept.
     await expect(page.getByTestId('alignments-subject')).toBeVisible();
-    await show(page, 'hits');
+    await page.getByTestId('descriptions-show-all').click();
     await expect(page.getByTestId('subject-list')).toHaveAttribute('data-count', String(limit));
     await expect(partial).toHaveCount(0);
   }
@@ -942,7 +945,6 @@ test("BLASTN: an HSP of one letter has no orientation in its record; the note po
   if (BUILD_HAS_ENGINE) await expect(page.getByTestId('query-list')).toHaveCount(0);
   else await page.getByTestId(`query-row-${qIdx}`).click();
   await expect(page.getByTestId('subject-row-0')).toHaveAttribute('aria-pressed', 'true');
-  await show(page, 'alignment');
   const single = page.getByTestId('hsp-list').locator('[data-testid^="hsp-row-"][data-orientation="unknown"]');
   await expect(single).toHaveCount(1);
   await single.click();
@@ -991,7 +993,6 @@ test('selection by HSP identity: sorting keeps the selected HSP; another subject
   await expect(page.getByTestId('query-row-0')).toHaveAttribute('aria-pressed', 'true');
   // A subject of the first query with two HSPs; choose its second HSP.
   const sIdx = await subjectWithTwoHsps(page);
-  await show(page, 'alignment');
   await expect(hspRows(page)).toHaveCount(2);
   const second = hspRows(page).nth(1);
   const id = await hspId(second);
@@ -999,7 +1000,6 @@ test('selection by HSP identity: sorting keeps the selected HSP; another subject
   await expectSelected(page, id, sIdx);
 
   // The "#" column the other way round: the selected HSP is now first, and still selected.
-  await show(page, 'alignment');
   await page.getByTestId('hsp-sort-rank').click();
   await expect(page.getByTestId('hsp-sort-rank').locator('..')).toHaveAttribute('aria-sort', 'descending');
   expect(await hspId(hspRows(page).first())).toBe(id);
@@ -1017,7 +1017,6 @@ test('selection by HSP identity: sorting keeps the selected HSP; another subject
   ]) {
     // Each column one way, then the other.
     for (let click = 0; click < 2; click++) {
-      await show(page, sort.startsWith('hsp-') ? 'alignment' : 'hits');
       await page.getByTestId(sort).click();
       await expect(page.getByTestId(sort).locator('..')).toHaveAttribute('aria-sort', /^(ascending|descending)$/);
       await expectSelected(page, id, sIdx);
@@ -1029,7 +1028,6 @@ test('selection by HSP identity: sorting keeps the selected HSP; another subject
   const otherIdx = await subjectIndex(unselected);
   await page.getByTestId(`subject-row-${otherIdx}`).click();
   await expect(page.getByTestId(`subject-row-${otherIdx}`)).toHaveAttribute('aria-pressed', 'true');
-  await show(page, 'alignment');
   const firstOfOther = await hspId(hspRows(page).first());
   expect(firstOfOther).not.toBe(id);
   await expectSelected(page, firstOfOther, otherIdx);
@@ -1039,10 +1037,67 @@ test('selection by HSP identity: sorting keeps the selected HSP; another subject
   await expect(page.getByTestId('query-row-1')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByTestId('query-row-0')).toHaveAttribute('aria-pressed', 'false');
   const firstSubject = await subjectIndex(subjectRows(page).first());
-  await show(page, 'alignment');
   const firstHsp = await hspId(hspRows(page).first());
   expect(firstHsp).toMatch(/^1:/);
   await expectSelected(page, firstHsp, firstSubject);
+});
+
+test('the one page (NCBI classic): the Graphic Summary, the Descriptions and the Alignments without a tab click; a Description chosen brings its alignments into view', async ({
+  page,
+}) => {
+  await panelRun(page);
+  // No tab clicked: the first tab is the one page, its parts under each other in NCBI's order.
+  await expect(page.getByTestId(TABS.hits)).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('.results-tabs button')).toHaveText(['Descriptions', 'Dot Plot', 'Run details', 'Outputs']);
+  await expect(page.getByTestId('results-classic').locator('.part-heading')).toHaveText(['Graphic Summary', 'Descriptions', 'Alignments']);
+  const tops: number[] = [];
+  for (const part of ['results-graphic', 'results-descriptions', 'results-alignments']) {
+    await expect(page.getByTestId(part)).toBeVisible();
+    tops.push((await page.getByTestId(part).boundingBox())!.y);
+  }
+  expect(tops).toEqual([...tops].sort((a, b) => a - b));
+  await expect(page.getByTestId('graphic-canvas')).toHaveAttribute('data-drawn', /^[1-9]/);
+  await expect(page.getByTestId('subject-list')).toBeVisible();
+  await expect(page.getByTestId('hsp-detail')).toHaveAttribute('data-state', 'ready');
+  // The overview and the Descriptions directly under it are seen at once.
+  await page.getByTestId('results-graphic').evaluate((part) => part.scrollIntoView({ block: 'start' }));
+  await expect(page.getByTestId('graphic-canvas')).toBeInViewport({ ratio: 1 });
+  await expect(page.getByTestId('results-descriptions-heading')).toBeInViewport();
+
+  // The graphic's arrow keys move within the figure and select nothing; the page stays where it is.
+  const canvas = page.getByTestId('graphic-canvas');
+  const selected = await canvas.getAttribute('data-selected');
+  await canvas.focus();
+  const scrolled = await page.evaluate(() => window.scrollY);
+  for (const key of ['ArrowDown', 'ArrowRight', 'ArrowUp']) await page.keyboard.press(key);
+  await expect(canvas).toHaveAttribute('data-selected', selected!);
+  expect(await page.evaluate(() => window.scrollY)).toBe(scrolled);
+
+  // A click on another Description row selects its subject and brings its alignments into view,
+  // with the focus on the Alignments' heading; so does Enter on a row.
+  const other = page.getByTestId('subject-list').locator('[data-testid^="subject-row-"][aria-pressed="false"]').first();
+  const otherIdx = await subjectIndex(other);
+  await other.click();
+  await expect(page.getByTestId(`subject-row-${otherIdx}`)).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('alignments-subject')).toHaveAttribute('data-subject', String(otherIdx));
+  const heading = page.getByTestId('results-alignments-heading');
+  await expect(heading).toBeFocused();
+  await expect(heading).toBeInViewport();
+  await page.getByTestId('alignments-descriptions').click();
+  await expect(page.getByTestId(`subject-row-${otherIdx}`)).toBeFocused();
+  const first = subjectRows(page).first();
+  const firstIdx = await subjectIndex(first);
+  await first.focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByTestId('alignments-subject')).toHaveAttribute('data-subject', String(firstIdx));
+  await expect(heading).toBeFocused();
+  await expect(heading).toBeInViewport();
+  // A sort keeps the page where it is.
+  await page.getByTestId('results-graphic').evaluate((part) => part.scrollIntoView({ block: 'start' }));
+  const before = await page.evaluate(() => window.scrollY);
+  await page.getByTestId('subject-sort-bitScore').dispatchEvent('click');
+  await expect(page.getByTestId('subject-sort-bitScore').locator('..')).toHaveAttribute('aria-sort', /^(ascending|descending)$/);
+  expect(await page.evaluate(() => window.scrollY)).toBe(before);
 });
 
 test('the Alignments: a block per Range; Next, Previous and First Match; the previous and next subject; Ranges far apart in a window', async ({
@@ -1051,7 +1106,6 @@ test('the Alignments: a block per Range; Next, Previous and First Match; the pre
   await panelRun(page);
   const sIdx = await subjectWithTwoHsps(page);
   const subjectOrder = await subjectRows(page).evaluateAll((rows) => rows.map((row) => Number((row as HTMLElement).dataset['testid']!.replace('subject-row-', ''))));
-  await show(page, 'alignment');
   const [firstId, secondId] = [await hspId(hspRows(page).nth(0)), await hspId(hspRows(page).nth(1))];
   const [first, second] = [page.getByTestId(`range-${firstId.replace(':', '-')}`), page.getByTestId(`range-${secondId.replace(':', '-')}`)];
   await expect(rangeBlocks(page)).toHaveCount(2);
@@ -1080,7 +1134,8 @@ test('the Alignments: a block per Range; Next, Previous and First Match; the pre
   await expect(page.getByTestId('hsp-detail')).toHaveAttribute('data-hsp', secondId);
   await expect(second.getByTestId('range-label')).toBeInViewport();
 
-  // Previous and Next subject follow the Descriptions' order; "Descriptions" goes back to them.
+  // Previous and Next subject follow the Descriptions' order; "Descriptions" goes back up to them
+  // on the one page, with the focus on the selected subject's row.
   const at = subjectOrder.indexOf(sIdx);
   const previous = page.getByTestId('alignments-prev-subject');
   const next = page.getByTestId('alignments-next-subject');
@@ -1095,6 +1150,8 @@ test('the Alignments: a block per Range; Next, Previous and First Match; the pre
   await page.getByTestId('alignments-descriptions').click();
   await expect(page.getByTestId(TABS.hits)).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByTestId(`subject-row-${sIdx}`)).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId(`subject-row-${sIdx}`)).toBeFocused();
+  await expect(page.getByTestId('results-descriptions-heading')).toBeInViewport();
 
   if (!BUILD_HAS_ENGINE) return;
   // A pair of many HSPs (a repeated unit searched against itself, about two HSPs a copy): the
@@ -1110,7 +1167,6 @@ test('the Alignments: a block per Range; Next, Previous and First Match; the pre
   await expect(page.getByTestId(TABS.hits)).toHaveAttribute('aria-pressed', 'true');
   const { asked, failNext } = await watchReads(page);
   const before = await asked();
-  await show(page, 'alignment');
   const total = Number(await page.getByTestId('hsp-list').getAttribute('data-count'));
   expect(total).toBeGreaterThan(80);
   await expect(rangeBlocks(page)).toHaveCount(26);
@@ -1229,8 +1285,8 @@ test('many queries; view filters change the view, not the search; the notices te
   await page.getByTestId('tab-search').click();
   expect(await card()).toEqual(inResults);
   await page.getByTestId('tab-results').click();
-  // The selection is read in the Alignments; "Results for", "Filter Results" and the notices are above the tabs.
-  await show(page, 'alignment');
+  // The selection is read in the Alignments of the one page; "Results for", "Filter Results" and the notices are above the tabs.
+  await expect(page.getByTestId(TABS.hits)).toHaveAttribute('aria-pressed', 'true');
   const detail = page.getByTestId('hsp-detail');
 
   // A query without hits: NCBI's words; the tabs stay.
@@ -1239,12 +1295,10 @@ test('many queries; view filters change the view, not the search; the notices te
   await expect(page.locator('[data-testid="results-notice"][data-kind="no-hits"]')).toHaveText('No significant similarity found for this query.');
   expect(await noticeKinds(page)).toEqual(['no-hits']);
   await expect(page.getByTestId('alignments')).toHaveCount(0);
-  await expect(page.getByTestId(TABS.alignment)).toBeVisible();
-  await show(page, 'hits');
+  await expect(page.getByTestId(TABS.hits)).toBeVisible();
   await expect(page.getByTestId('subject-table')).toHaveCount(0);
-  await show(page, 'graphic');
   await expect(page.getByTestId('graphic-summary')).toHaveCount(0);
-  await show(page, 'alignment');
+  await expect(page.getByTestId('results-classic').locator('section')).toHaveCount(0);
 
   // The query picker draws only the rows in view, and finds a query by its ID.
   const list = page.getByTestId('query-list');
@@ -1276,7 +1330,6 @@ test('many queries; view filters change the view, not the search; the notices te
   await expect(page.getByTestId('query-row-0')).toHaveAttribute('aria-pressed', 'true');
 
   // A subject filter that matches nothing: every HSP of the query is hidden, and one click clears it.
-  await show(page, 'hits');
   const [, subjects, hsps] = /([\d,]+) subjects?, ([\d,]+) HSPs?/.exec(await text(page.getByTestId('query-row-0')))!;
   await page.getByTestId('filter-subject').fill('no-such-subject');
   await page.getByTestId('filter-apply').click();
@@ -1286,9 +1339,7 @@ test('many queries; view filters change the view, not the search; the notices te
   );
   expect(await noticeKinds(page)).toEqual(['filtered-out']);
   await expect(page.getByTestId('subject-table')).toHaveCount(0);
-  await show(page, 'alignment');
   await expect(page.getByTestId('hsp-table')).toHaveCount(0);
-  await show(page, 'hits');
   await page.getByTestId('results-notice-clear').click();
   await expect(filteredOut).toHaveCount(0);
   await expect(page.getByTestId('filter-subject')).toHaveValue('');
@@ -1537,7 +1588,7 @@ test('the dot plot: the HSPs of the pair on a canvas; zoom; choosing an HSP on i
   await expect(popup).toHaveCSS('outline-width', '2px');
   // "Show alignment": the Alignments, with the HSP's Range in view and the focus on its label.
   await popup.getByTestId('dotplot-popup-alignment').click();
-  await expect(page.getByTestId(TABS.alignment)).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId(TABS.hits)).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByTestId('hsp-detail')).toHaveAttribute('data-hsp', secondId);
   const range = page.getByTestId(`range-${secondId.replace(':', '-')}`);
   await expect(range.getByTestId('range-label')).toBeFocused();
@@ -1674,14 +1725,12 @@ test('narrow screens: the results are no wider than the screen; "Open results" s
   };
   await clickKeepsScroll('subject-table', subjectRows(page).first());
 
-  await show(page, 'alignment');
   await expect(page.getByTestId('hsp-detail')).toHaveAttribute('data-state', 'ready');
   await expectNoSideScroll(page, 'alignments');
   // The HSP table: the frames before the ranges, so that they are in view (W4 screen review middle 2).
   expect((await columnsInView(page, 'hsp-table')).slice(0, 4)).toEqual(['rank', 'bitscore', 'evalue', 'frames']);
   await clickKeepsScroll('hsp-table', hspRows(page).nth(Math.min(1, (await hspRows(page).count()) - 1)));
   for (const table of ['subject-table', 'hsp-table']) {
-    await show(page, table === 'subject-table' ? 'hits' : 'alignment');
     await expect(page.getByTestId(`${table}-scroll-hint`)).toBeVisible();
     // Each value is under its header.
     const offsets = await page
@@ -1700,7 +1749,6 @@ test('narrow screens: the results are no wider than the screen; "Open results" s
   }
 
   // The Graphic Summary, the dot plot, the run details and the outputs.
-  await show(page, 'graphic');
   await expect(page.getByTestId('graphic-canvas')).toHaveAttribute('data-rows', /^[1-9]/);
   await expectNoSideScroll(page, 'graphic summary');
   await show(page, 'dotplot');

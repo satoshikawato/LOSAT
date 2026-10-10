@@ -4,6 +4,7 @@
 
 - 作成：2026-10-10（S13b）。採否は保守者の確認待ち（推奨案で進めた。Owner-delegated、[W4b のゲート記録](../evidence/losat_web_w4b/README.md)の判断）。
 - 追記：2026-10-10（S14）。Descriptions の行の印、候補への追加（Descriptions・Alignments・Dot Plot）、候補トレイ（§2「候補（S14）」、§3）。採否は同じく保守者の確認待ち（Owner-delegated、W5 のゲート記録 `docs/evidence/losat_web_w5/README.md` の判断）。
+- 追記：2026-10-10（S15、W6 の WP-H）。結果画面の最初のタブを NCBI の classic（Traditional）結果ページの 1 ページにした（Graphic Summary、その直下に Descriptions、その下に Alignments。§2「タブ」「1 ページの結果（classic）」）。保守者の指示（2026-10-10）「結果画面はClassic版というか、ヒットの座標とスコアの分布がダーッと出る絵が一発で見えるようにしてほしい」「Graphic Summaryの下にDescriptionが直接出てくるやつ。いちいちタブを開かないといけないのはめんどくさい」「全部一斉に開く必要はないんだよ。NCBIも適宜カットしてるでしょ？」による（S15 の DECISIONS 12）。S13b のタブ式の対応（下の「タブ」の履歴）はこれで置き換えた。
 - 寄せるのは配置・節の順・言葉（見出し、欄の名前、ボタン、タブ、列、凡例）。NCBI のロゴ、NIH / NLM のヘッダーとフッター、「BLAST®」の文字、配色は写さない。LOSAT Web が NCBI のサービスに見えないようにする。
 - 値はエンジンが書いたまま示す。TS で BLAST の値を計算・整形しない（`web/AGENTS.md` 規則 1、[`results_columns.md`](results_columns.md)）。表示の分類（Graphic Summary の得点の階級、ドットプロットの identity の階級）は、エンジンの原値を区切るだけで、値を作らない。
 - 採否の語：**採る**（NCBI と同じ場所・同じ言葉）、**寄せる**（同じ場所に LOSAT の要素を置き、言葉を近づける）、**採らない**（理由を書く）、**エンジン待ち**（S13+（E2j）が値を出すまで出さない）、**後の段階**（その段階の名）。
@@ -63,14 +64,14 @@ NCBI の 2 配列の画面は、上から program のタブ、program の一文�
 
 ## 2. 結果画面
 
-NCBI の結果は、上から操作の行（Edit Search、Save Search、Search Summary）、見出しの塊（Job Title、RID、Program、Query ID…）と右の「Filter Results」、タブ（Descriptions、Graphic Summary、Alignments、（Taxonomy）、Dot Plot）、タブの中身、の順である。LOSAT はこの順に置き、タブに Run details と Outputs を足す。
+NCBI の結果は、上から操作の行（Edit Search、Save Search、Search Summary）、見出しの塊（Job Title、RID、Program、Query ID…）と右の「Filter Results」、タブ（Descriptions、Graphic Summary、Alignments、（Taxonomy）、Dot Plot）、タブの中身、の順である。NCBI の classic（Traditional）結果ページ（新しいページの「Back to Traditional Results Page」で戻る形）は、タブの代わりに Graphic Summary、Descriptions、Alignments を 1 ページに上から並べる。LOSAT は操作の行・見出しの塊・Filter Results・「Results for」・知らせをこの順に置き、その下のタブの最初を classic の 1 ページ（2026-10-10 から。下の「タブ」）にし、Dot Plot、Run details、Outputs を続ける。
 
 ### 見出しの塊
 
 | NCBI の要素 | LOSAT Web | 採否 | 理由・置き場所 |
 |---|---|---|---|
 | 「Edit Search」 | 「Edit Search」（`edit-search`、見出しの塊の上の行）：Run の設定（program、argv の `slice(5)`（範囲を含む）、スレッド）と Job Title を検索フォームに入れ、Search タブを設定の行で開き、「The search form has the settings of Run N. The inputs are the form's own.」と言う（`settings-message`）。入力はフォームのまま。検索は始めない | 寄せる | S15：設定ファイルの読み込みと同じ規則（`SearchDraft.applySettings`）。フォームに欄の無い option、入力に当たらない範囲（範囲は 1 レコードの役割だけ）、この browser に無いスレッド数は入れずに「Not applied: …」と並べる。Run の入力を戻すのは、セッションファイルのつなぎ直し（REQ-23）の役目で、ここではしない |
-| 「Save Search」「How to read this report?」「BLAST Help Videos」「Back to Traditional Results Page」 | なし | 採らない | NCBI のアカウントと文書 |
+| 「Save Search」「How to read this report?」「BLAST Help Videos」「Back to Traditional Results Page」 | なし | 採らない | NCBI のアカウントと文書。classic のページへの切り替えは無い：2026-10-10 から最初のタブが classic の 1 ページ（「タブ」） |
 | 「Search Summary」（Search Parameters・Karlin-Altschul statistics・Results Statistics） | タブ「Run details」（`results-view-details`）：RunSnapshot、RunRecord、検証バッジ、「Reproduce this run」（S15、`run-reproduce`：LOSAT のコマンド `run-command-<format>`、NCBI BLAST+ 2.17.0 の比較用のコマンド `run-ncbi-command-<format>` か比べられない理由 `run-ncbi-unavailable`、承認済みの例外、入力 FASTA の保存 `run-input-save-<query|subject>`、設定ファイル `run-settings-save`） | 寄せる | 統計の値（Lambda、K、H、有効探索空間）は outfmt 0 の末尾の原文にある（Outputs）。TS で抜き出さない |
 | 「Job Title」 | 「Job Title」（Run の `title`。無ければ行を出さない） | 採る | |
 | 「RID」と「Search expires on」 | 「Run」：Run の select（`results-run`、Run の番号・program・入力名） | 寄せる | RID に当たるのは Run の番号。期限は無い（作業セッションの中） |
@@ -86,7 +87,23 @@ NCBI の結果は、上から操作の行（Edit Search、Save Search、Search S
 
 ### タブ
 
-NCBI と同じ順で「Descriptions」（`results-view-hits`）、「Graphic Summary」（`results-view-graphic`）、「Alignments」（`pane-alignment`）、「Dot Plot」（`pane-dotplot`）、その後に LOSAT の「Run details」（`results-view-details`）と「Outputs」（`results-view-outputs`）。「Taxonomy」は採らない（ローカルの FASTA に無い）。NCBI のタブの形（選んだタブを塗り、帯の下に道具の行）を LOSAT の色で写す。どのタブも同じ選択（中心は HSP の ID、`ResultsBrowser`）に従う。
+2026-10-10 から（保守者の指示、S15 の DECISIONS 12）：「Descriptions」（`results-view-hits`。中身は classic の 1 ページ：Graphic Summary、Descriptions、Alignments。下の「1 ページの結果（classic）」）、「Dot Plot」（`pane-dotplot`）、その後に LOSAT の「Run details」（`results-view-details`）と「Outputs」（`results-view-outputs`）。最初のタブの名前は NCBI の最初のタブの名前「Descriptions」のままにした（1 ページの中心は Descriptions で、Graphic Summary はその概観、Alignments はその行を開いたもの。「Results」は主のタブと結果の見出しに重なる）。結果を開くとき、Run を替えるとき、候補の「Show in results」、Graphic Summary と Dot Plot の「Show alignment」は、どれもこの 1 ページに来る。「Taxonomy」は採らない（ローカルの FASTA に無い）。NCBI のタブの形（選んだタブを塗り、帯の下に道具の行）を LOSAT の色で写す。どのタブも同じ選択（中心は HSP の ID、`ResultsBrowser`）に従う。
+
+履歴：S13b（2026-10-10）では NCBI の新しいタブ式の結果ページに寄せ、NCBI と同じ順で「Descriptions」（`results-view-hits`）、「Graphic Summary」（`results-view-graphic`）、「Alignments」（`pane-alignment`）、「Dot Plot」、「Run details」、「Outputs」の 6 つのタブにしていた。タブを開き直さないと概観と一覧と整列を見比べられないので、保守者の指示で上の形に替えた（`results-view-graphic` と `pane-alignment` は無くなった）。
+
+### 1 ページの結果（classic）
+
+NCBI の classic の結果ページのように、選んだ query について上から次の 3 つの節を並べる（`results-classic`）。節ごとに NCBI の見出しを置く。タブを開かずに、概観（ヒットの query 上の座標と得点の階級）と一覧が続けて見える。
+
+| 節 | LOSAT Web | 切り方（NCBI のように、全部を一度に開かない） |
+|---|---|---|
+| 「Graphic Summary」（`results-graphic`） | 下の「Graphic Summary」の図。1 行 8 px（棒は 4 px）の詰めた帯で、30 行を一度に見せ、それより多いと図の中で行が流れる（S13b は 1 行 12 px、40 行） | 最初の 100 subject を描く（Descriptions の順と表示用のフィルターに従う）。「Show all N」で全部（W4b のまま）。描くのは図の中で見えている行だけ |
+| 「Descriptions」（`results-descriptions`） | 下の「Descriptions」の表（見出し「Sequences producing significant alignments」、行の印、select all、Add to candidates） | 最初の 100 subject（今の並び順で。既定はエンジンの順）を載せ、「The first 100 of N are listed.」（`descriptions-listed`）と「Show all N」（`descriptions-show-all`）。NCBI の Descriptions は 1 ページに 100 行。「Show all」は Run か query を替えるまで続く。載せた一覧は仮想化（見えている行だけ描く）。「select all」は載せた subject に印を付ける。選んだ subject が載せた範囲の外（並べ替えた後、Alignments の「Next」、候補の「Show in results」）でも、一覧は広げない（Alignments と Graphic Summary は従う） |
+| 「Alignments」（`results-alignments`） | 下の「Alignments」：選んだ subject の塊 | 選んだ subject の塊だけ（全部の subject の整列を並べない）。その中の Range は選んだ HSP の前後 25 個ずつ、節の原文は見える所に来た Range だけ読む（W4b のまま） |
+
+選び方とスクロール：Descriptions の行を選ぶと（クリック、Enter・Space）、その subject が選ばれ、Alignments の見出し（`results-alignments-heading`）を画面の上に出して focus を移す（NCBI の説明の行のリンクが整列へ飛ぶのと同じ。focus が見えている所にある）。Graphic Summary の棒のクリックと Enter は、その HSP の Range を画面に出して focus を移す。Alignments の「Descriptions」は Descriptions の見出しに戻り、選んだ行（描かれていれば）に focus を移す。ページが動くのは選んだときだけ：Graphic Summary の矢印キーは図の中で注目の HSP を動かすだけで選ばず（行は図の中で流れる）、Descriptions の行の間は Tab で動き選ばない。並べ替え、表示用のフィルター、query の切り替え、印ではページは動かない。矢印キーごとにページが飛ぶと一覧を読めないので、こうした。
+
+速さ：開いたときに描くのは 3 つの節の見えている部分だけ（図は見えている行、一覧は見えている行、Alignments は選んだ subject の塊と、見える所に来た Range の原文）。100,000 query の Run を開く速さを W5 と比べた（S15 の WP-H、`results-measure.spec.ts`）。
 
 ### Descriptions
 
@@ -96,8 +113,8 @@ NCBI と同じ順で「Descriptions」（`results-view-hits`）、「Graphic Sum
 | BLASTP の最初のタブ「Clusters」（「Clusters producing significant alignments」、Cluster Representative Sequence） | 「Descriptions」のまま | 採らない | NCBI のデータベースの配列のまとまり。ローカルの subject はまとめない |
 | 「select all」と行の印（「Select for downloading or viewing reports」）、「N sequences selected」 | 「select all」（`descriptions-select-all`）、行の印（`subject-mark-<sIdx>`）、「N sequences selected」（`descriptions-selected`）。印はその query の subject に付き、query や Run を替えると外れる（表示用のフィルターが隠した subject の印も外れる） | 寄せる（S14） | 候補への追加に使う（NCBI は Download・GenBank・Graphics に使う）。行は選択の 1 つのボタンのまま（W4b）で、印はその左の別の check box |
 | 選んだ行への操作「Download」「GenBank」「Graphics」「MSA Viewer」 | 「Add to candidates」（`descriptions-add-candidates`）：印の subject の、その query の全 HSP（表示用のフィルターに関わらず） | LOSAT だけ（S14） | 書き出しは候補トレイから（「候補（S14）」）。GenBank・Graphics・MSA Viewer は NCBI のデータベースと viewer のもの。outfmt 0/6/7 の原文の Download は Outputs |
-| 「Select columns」「Show」 | なし | 採らない | 列は固定（`results_columns.md`）。行は仮想化した一覧で全部を示す |
-| 列 Description（リンク） | 「Description」：outfmt 0 の見出しの題（`results_columns.md`）。行を選ぶとその subject が選ばれ、Alignments・Graphic Summary・Dot Plot が従う | 寄せる | 行は 1 つのボタン（中にリンクを入れない）。選んだ subject の Alignments へは「Alignments」タブで |
+| 「Select columns」「Show」（1 ページの行数） | 「Show」は「The first 100 of N are listed.」と「Show all N」（`descriptions-show-all`）に寄せる（2026-10-10）。「Select columns」はなし | 寄せる・採らない | 列は固定（`results_columns.md`）。NCBI の 1 ページの既定の 100 行で切り、残りは「Show all」で同じ仮想化した一覧に載せる（ページを分けない） |
+| 列 Description（リンク） | 「Description」：outfmt 0 の見出しの題（`results_columns.md`）。行を選ぶとその subject が選ばれ、Alignments・Graphic Summary・Dot Plot が従い、同じページの Alignments が画面に来る（2026-10-10 から。S13b では「Alignments」タブで） | 寄せる | 行は 1 つのボタン（中にリンクを入れない） |
 | 列 Scientific Name、Common Name、Taxid | なし | 採らない | ローカルの FASTA に無い |
 | 列 Max Score | E2j の前：「Score (bits)」（その subject の最初の HSP の outfmt 6 の bitscore）をこの位置に | エンジン待ち | 列名は今の意味のまま（Max Score と名乗らない） |
 | 列 Total Score、Query Cover、Per. Ident | なし | エンジン待ち（E2j） | |
@@ -118,16 +135,16 @@ NCBI と同じ順で「Descriptions」（`results-view-hits`）、「Graphic Sum
 | 「Show Conserved Domains」 | なし | 採らない | NCBI の CDD |
 | 「Distribution of the top N Blast Hits on M subject sequences」 | 「Distribution of N HSPs on M subject sequences」（見せている subject の数） | 寄せる | |
 | query の棒と目盛り | 同じ：棒「Query」と目盛り（1 と query の長さ、その間の切りのよい位置）、単位は query の nt / aa | 採る | 座標は Run の記録の長さ |
-| subject ごとの行、HSP ごとの細い棒（同じ subject の HSP は 1 行、灰色の細い線でつなぐ） | 同じ。Descriptions の順と表示用のフィルターに従い、最初の 100 subject（「Show all M」で全部） | 採る | 棒の位置は HSP レコードの query の座標 |
+| subject ごとの行、HSP ごとの細い棒（同じ subject の HSP は 1 行、灰色の細い線でつなぐ） | 同じ。Descriptions の順と表示用のフィルターに従い、最初の 100 subject（「Show all M」で全部）。2026-10-10 から 1 行 8 px・棒 4 px・30 行を一度に（classic の詰めた帯。S13b は 12 px・6 px・40 行） | 採る | 棒の位置は HSP レコードの query の座標 |
 | hover：題、Score、Evalue | hover と focus：Subject ID、Description（読めていれば）、outfmt 6 の bitscore と evalue | 寄せる | |
-| click：その alignment へ | click（と Enter）：その HSP を選び、Alignments のその「Range」へ | 採る | キーボード：上下で subject、左右で HSP |
+| click：その alignment へ | click（と Enter）：その HSP を選び、同じページの Alignments のその「Range」へ（focus も） | 採る | キーボード：上下で subject、左右で HSP（選ばず、ページも動かさない） |
 
 ### Alignments
 
 | NCBI の要素 | LOSAT Web | 採否 | 理由 |
 |---|---|---|---|
 | 「Alignment view」（Pairwise、Query-anchored など）、「CDS feature」、「Restore defaults」、「Line length」 | なし | 採らない | エンジンが書くのは outfmt 0 の pairwise だけ。原文を書き換えない（`web/AGENTS.md` 規則 2） |
-| subject ごとの塊（全部の subject を続けて） | 選んだ subject の塊（`alignments-subject`）。「Previous」「Next」で前後の subject、「Descriptions」で一覧へ | 寄せる | 数千の subject を 1 ページに並べず、選択に従う |
+| subject ごとの塊（全部の subject を続けて） | 選んだ subject の塊（`alignments-subject`）。「Previous」「Next」で前後の subject、「Descriptions」で同じページの一覧へ戻る（2026-10-10 から。S13b ではタブを替えた） | 寄せる | 数千の subject を 1 ページに並べず、選択に従う（NCBI も整列を既定の数で切る） |
 | 「Download」（subject の塊の道具の行） | 「Add all matches to candidates」（`alignments-add-subject`）：その subject の、その query の全 HSP | LOSAT だけ（S14） | 書き出しは候補トレイから。原文の Download は Outputs |
 | 「Range n: a to b」の横の「GenBank」「Graphics」 | 「Add to candidates」（`range-add-<q>-<r>`）。候補にあれば「In candidates」 | LOSAT だけ（S14） | NCBI のリンクの場所に置く |
 | 「Sort by」 | なし | 採らない | Range はエンジンの順。並べ替えは HSP の表で |
@@ -187,7 +204,7 @@ LOSAT が足すもの（W4 の判断 18 を保つ）：ズーム（ボタン、+
 
 - 節：検索画面の枠は NCBI と同じく、薄い灰色の面に見出しのつまみ（legend）を載せる。見出しは LOSAT の青（`--accent`）の太字。
 - 「Algorithm parameters」は幅いっぱいの帯のボタン（`+` / `−` の印、`aria-expanded`）。
-- 結果のタブは帯のボタンで、選んだタブを LOSAT の青で塗り白の字。タブの下に薄い色の道具の行。
+- 結果のタブは帯のボタンで、選んだタブを LOSAT の青で塗り白の字。タブの下に薄い色の道具の行。1 ページの節の見出し（Graphic Summary、Descriptions、Alignments）は LOSAT の青の太字に細い下線（2026-10-10）。
 - 表：0.875em、見出しは薄い青の面に太字（2 行まで折り返し、数の見出しは右寄せ）、行の境に細い線。リンクは青の下線。
 - 色は LOSAT の配色のまま（ブランドを写さない）。Graphic Summary の凡例とドットプロットの線の色だけは上の約束。
 - S13 の基準を保つ：1280 px で表が切れない、390 px で横に流れない、触れる対象は 24 px 以上、コントラスト、キーボード操作（W4 の判断 16〜23）。

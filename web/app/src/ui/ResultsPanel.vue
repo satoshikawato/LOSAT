@@ -1,10 +1,12 @@
 <script setup lang="ts">
 // The results screen (plan §5.7, design §3.4), in the order and words of NCBI BLAST's results
 // page (S13b, docs/web/ncbi_ui_mapping.md §2): the run's header block with "Filter Results"
-// beside it, "Results for" (the query) and the notices, then the tabs Descriptions, Graphic
-// Summary, Alignments and Dot Plot, and LOSAT's Run details and Outputs. Every tab follows one
-// selection, held by the HSP's identity (application/results.ts). The Descriptions, the
-// Alignments and the dot plot's popup add HSPs to the candidate tray (S14); a short line
+// beside it, "Results for" (the query) and the notices, then the tabs. The first tab,
+// "Descriptions", is NCBI's classic one-page results since the Owner's instruction of 2026-10-10
+// (ClassicResults.vue: Graphic Summary, Descriptions and Alignments under each other, in place of
+// S13b's three tabs); then NCBI's Dot Plot, and LOSAT's Run details and Outputs. Every view
+// follows one selection, held by the HSP's identity (application/results.ts). The Descriptions,
+// the Alignments and the dot plot's popup add HSPs to the candidate tray (S14); a short line
 // confirms each addition.
 import { computed, nextTick, onUnmounted, ref, watch } from 'vue';
 import type { CandidateTray } from '../application/candidates';
@@ -15,21 +17,19 @@ import type { Session } from '../application/session';
 import type { RunFiles } from '../application/run-files';
 import { programById, residueUnit } from '../domain/programs';
 import { useStore } from './useStore';
-import AlignmentsView from './AlignmentsView.vue';
+import ClassicResults from './ClassicResults.vue';
 import CommandText from './CommandText.vue';
 import DotPlot from './DotPlot.vue';
 import { formatCount, formatCounted } from './format';
-import GraphicSummary from './GraphicSummary.vue';
 import HspTable from './HspTable.vue';
 import OutputsView from './OutputsView.vue';
 import QueryPicker from './QueryPicker.vue';
 import ResultFilters from './ResultFilters.vue';
 import ResultNotices from './ResultNotices.vue';
 import RunDetails from './RunDetails.vue';
-import SubjectTable from './SubjectTable.vue';
 import VerificationBadge from './VerificationBadge.vue';
 
-export type ResultsView = 'hits' | 'graphic' | 'alignment' | 'dotplot' | 'details' | 'outputs';
+export type ResultsView = 'hits' | 'dotplot' | 'details' | 'outputs';
 
 const props = defineProps<{
   coordinator: Coordinator;
@@ -50,18 +50,20 @@ const trayState = useStore(props.candidates.state);
 /** The keys of the HSPs in the tray: the Alignments and the dot plot say "In candidates" for them. */
 const inTray = computed<ReadonlySet<string>>(() => new Set(trayState.value.candidates.map((candidate) => candidate.key)));
 const heading = ref<HTMLElement>();
-const alignments = ref<InstanceType<typeof AlignmentsView>>();
+const classic = ref<InstanceType<typeof ClassicResults>>();
 
-/** NCBI's tabs, then LOSAT's. The test IDs are W4's (the hits view, the HSP's panes, the run's views). */
+/**
+ * NCBI's tabs, then LOSAT's. The one page keeps the name of NCBI's first tab, "Descriptions" (the
+ * graphic is its overview, the Alignments its rows opened). The test IDs are W4's (the hits view,
+ * the HSP's panes, the run's views).
+ */
 const TABS: readonly { readonly view: ResultsView; readonly label: string; readonly testid: string }[] = [
   { view: 'hits', label: 'Descriptions', testid: 'results-view-hits' },
-  { view: 'graphic', label: 'Graphic Summary', testid: 'results-view-graphic' },
-  { view: 'alignment', label: 'Alignments', testid: 'pane-alignment' },
   { view: 'dotplot', label: 'Dot Plot', testid: 'pane-dotplot' },
   { view: 'details', label: 'Run details', testid: 'results-view-details' },
   { view: 'outputs', label: 'Outputs', testid: 'results-view-outputs' },
 ];
-const HITS_VIEWS: readonly ResultsView[] = ['hits', 'graphic', 'alignment', 'dotplot'];
+const HITS_VIEWS: readonly ResultsView[] = ['hits', 'dotplot'];
 
 /**
  * Brings the panel's heading into view and moves the focus to it (a run opened from the
@@ -71,11 +73,11 @@ function showHeading(): void {
   heading.value?.scrollIntoView({ block: 'start' });
   heading.value?.focus({ preventScroll: true });
 }
-/** Shows an HSP's Range in the Alignments with the focus on it ("Show in results" of a candidate). */
+/** Shows an HSP's Range in the Alignments of the one page with the focus on it ("Show in results" of a candidate). */
 async function showHsp(id: HspId): Promise<void> {
-  view.value = 'alignment';
+  view.value = 'hits';
   await nextTick();
-  await alignments.value?.reveal(id, true);
+  await classic.value?.showHsp(id, true);
 }
 defineExpose({ showHeading, showHsp });
 
@@ -164,11 +166,11 @@ async function editSearch(run: RunView): Promise<void> {
   else editError.value = props.runFiles.state.get().run?.text;
 }
 
-/** "Show alignment" of the Graphic Summary and the Dot Plot: the Alignments tab, with the HSP's Range in view. */
+/** "Show alignment" of the Dot Plot: the one page, with the HSP's Range of its Alignments in view and the focus on it. */
 async function toAlignments(id: HspId): Promise<void> {
-  view.value = 'alignment';
+  view.value = 'hits';
   await nextTick();
-  alignments.value?.reveal(id, true);
+  await classic.value?.showHsp(id, true);
 }
 </script>
 
@@ -276,22 +278,7 @@ async function toAlignments(id: HspId): Promise<void> {
         </nav>
 
         <div v-show="HITS_VIEWS.includes(view)" class="hits-view" data-testid="results-hits" :data-run="loaded.run.snapshot.number">
-          <SubjectTable v-if="view === 'hits' && state.subjects.length > 0" :results="results" :state="state" @add-candidates="addCandidates" />
-          <GraphicSummary
-            v-else-if="view === 'graphic' && state.subjects.length > 0"
-            :results="results"
-            :state="state"
-            @show-alignment="toAlignments"
-          />
-          <AlignmentsView
-            v-else-if="view === 'alignment' && state.hsps.length > 0"
-            ref="alignments"
-            :results="results"
-            :state="state"
-            :in-tray="inTray"
-            @descriptions="view = 'hits'"
-            @add-candidates="addCandidates"
-          />
+          <ClassicResults v-if="view === 'hits'" ref="classic" :results="results" :state="state" :in-tray="inTray" @add-candidates="addCandidates" />
           <template v-else-if="view === 'dotplot' && state.hsps.length > 0">
             <DotPlot :results="results" :state="state" :in-tray="inTray" @show-alignment="toAlignments" @add-candidates="addCandidates" />
             <HspTable :results="results" :state="state" />

@@ -1242,6 +1242,38 @@ label.inline {
   margin: 0;
 }
 
+/* The one page of the results (ClassicResults.vue, 2026-10-10): NCBI's classic parts under each
+   other, each under its heading; the heading is where "Descriptions" and a chosen row scroll to. */
+.results-part > .part-heading {
+  margin: 16px 0 6px;
+  padding-bottom: 2px;
+  border-bottom: 1px solid var(--border);
+  color: var(--accent);
+  font-size: 1.1em;
+  scroll-margin-top: 8px;
+}
+
+.results-part:first-child > .part-heading {
+  margin-top: 10px;
+}
+
+.hits-view .tool-band h4 {
+  margin: 0;
+  font-size: 1em;
+}
+
+.descriptions-more {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  margin: 6px 0 0;
+}
+
+.descriptions-more button {
+  min-height: 28px;
+}
+
 .result-notices .notice {
   margin: 6px 0;
 }

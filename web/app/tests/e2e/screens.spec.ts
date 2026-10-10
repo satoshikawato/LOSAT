@@ -18,6 +18,11 @@
 // loaded run without its originals, the tray's extract form that needs the original FASTA, a
 // refused session file, Run details after a refused and an accepted re-attachment, the search form
 // after Edit Search, and two W5 states not recorded before: the empty tray and a flank error.
+//
+// Since the Owner's instruction of 2026-10-10 the results' first tab is NCBI's classic one page
+// (the Graphic Summary, the Descriptions directly under it, the selected subject's Alignments), so
+// the states 07, 09 to 11, 14, 18 to 21, 24 and 25 show that page whole (their names say what the
+// state is about); the states of the other tabs (08, 12, 13, 15 to 17, 22, 23, 26) are as before.
 import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
@@ -227,7 +232,7 @@ async function pressRow(page: Page, row: Locator): Promise<void> {
 async function openResults(page: Page, number: number): Promise<void> {
   await page.getByTestId(`run-${number}-open`).click();
   await expect(page.getByTestId('results-hits')).toHaveAttribute('data-run', String(number), { timeout: 60_000 });
-  await page.getByTestId('pane-alignment').click();
+  await page.getByTestId('results-view-hits').click();
   await expect(page.getByTestId('hsp-detail')).toHaveAttribute('data-state', 'ready', { timeout: 60_000 });
 }
 
@@ -282,7 +287,6 @@ for (const size of SIZES) {
     await expect(last).toHaveAttribute('data-order', '260');
     await last.click();
     await expect(last).toHaveAttribute('aria-pressed', 'true');
-    await page.getByTestId('pane-alignment').click();
     await expect(page.getByTestId('detail-not-in-outfmt0')).toBeVisible();
     await shoot(page, browserName, size.name, '09-results-hsp-not-in-outfmt0');
 
@@ -326,7 +330,6 @@ for (const size of SIZES) {
 
     // The Graphic Summary of the query with 260 subjects (run 2), the popover of an HSP.
     await openResults(page, 2);
-    await page.getByTestId('results-view-graphic').click();
     const graphic = page.getByTestId('graphic-canvas');
     await expect(graphic).toHaveAttribute('data-rows', '100');
     const bars = JSON.parse((await graphic.getAttribute('data-targets'))!) as { x: number; y: number }[];
@@ -338,7 +341,6 @@ for (const size of SIZES) {
     await openResults(page, 1);
     await page.getByTestId('results-view-hits').click();
     await subjectRow('msD').click();
-    await page.getByTestId('pane-alignment').click();
     await expect(page.locator('[data-testid^="range-0-"]')).toHaveCount(2);
     await page.locator('[data-testid^="range-0-"]').first().getByTestId('range-next').click();
     await expect(page.getByTestId('hsp-detail')).toHaveAttribute('data-state', 'ready');
@@ -386,7 +388,6 @@ for (const size of SIZES) {
 
     // The Alignments of msD (two Ranges): the first added, "In candidates"; the second not.
     await subjectRow('msD').click();
-    await page.getByTestId('pane-alignment').click();
     const ranges = page.locator('[data-testid^="range-0-"]');
     await expect(ranges).toHaveCount(2);
     await ranges.first().locator('[data-testid^="range-add-"]').click();
@@ -460,7 +461,7 @@ for (const size of SIZES) {
     await expect(page.getByTestId('dotplot-canvas')).toHaveAttribute('data-segments', /^[1-9]/);
     await expect(page.getByTestId('dotplot-selected')).toContainText('frames');
     await shoot(page, browserName, size.name, '17-results-translated-dotplot');
-    await page.getByTestId('pane-alignment').click();
+    await page.getByTestId('results-view-hits').click();
 
     // "Open results" from the search tab: the window right after the tap shows the results' heading.
     await page.getByTestId('tab-search').click();

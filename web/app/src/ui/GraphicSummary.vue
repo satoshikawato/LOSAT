@@ -8,7 +8,10 @@
 // asks the results screen to show its alignment.
 //
 // One canvas holds the figure and draws only the rows in view, so that thousands of HSPs stay
-// smooth; with many subjects the rows scroll inside the figure under the query bar.
+// smooth; with many subjects the rows scroll inside the figure under the query bar. Since the
+// figure heads the one page of the results (2026-10-10, ClassicResults.vue), its band is compact,
+// as NCBI's classic overview: rows of 8 px, 30 in view, so that the Descriptions follow on the
+// same screen.
 import { computed, onMounted, onUnmounted, ref, useId, watch } from 'vue';
 import type { HspId, ResultsBrowser, ResultsState, SubjectEntry } from '../application/results';
 import { interval } from '../domain/coordinates';
@@ -24,9 +27,9 @@ const emit = defineEmits<{ 'show-alignment': [id: HspId] }>();
 /** Subjects drawn until "Show all" (NCBI draws the top hits). */
 const FIRST_SUBJECTS = 100;
 /** Rows in view before the rows scroll inside the figure. */
-const VISIBLE_ROWS = 40;
-const ROW_PX = 12;
-const BAR_PX = 6;
+const VISIBLE_ROWS = 30;
+const ROW_PX = 8;
+const BAR_PX = 4;
 const SIDE = 12;
 const MAX_WIDTH = 1000;
 const QUERY_TOP = 4;

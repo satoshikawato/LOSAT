@@ -491,7 +491,7 @@ async function repetition(page: Page, count: number): Promise<Repetition> {
   // which the next run opens on, shows the selected HSP's detail.
   await page.getByTestId('run-2-open').click();
   await expect(page.getByTestId('results-hits')).toHaveAttribute('data-run', '2', { timeout: 120_000 });
-  await page.getByTestId('pane-alignment').click();
+  await page.getByTestId('results-view-hits').click();
   const { open, firstHsp } = await openRun(page, 1, 2);
   await expect(page.getByTestId('query-count')).toHaveText(`${total} of ${total} queries`);
   const queryRowsDrawn = await rowsDrawn(page, 'query-row-');
@@ -541,12 +541,13 @@ async function repetition(page: Page, count: number): Promise<Repetition> {
     { testid: 'alignments-subject' },
   ]);
   // Its Graphic Summary: the first 100 of its subjects drawn on the canvas.
-  const showGraphic = await step(page, { kind: 'click', testid: 'results-view-graphic' }, [
+  const showGraphic = await step(page, { kind: 'click', testid: 'results-view-hits' }, [
     { testid: 'graphic-canvas', attr: 'data-rows', matches: '^[1-9]\\d{2,}$' },
     { testid: 'graphic-canvas', attr: 'data-drawn' },
   ]);
   const graphicRows = Number(await page.getByTestId('graphic-canvas').getAttribute('data-rows'));
   await page.getByTestId('results-view-hits').click();
+  await page.getByTestId('descriptions-show-all').click();
   await expect(page.getByTestId('subject-list')).toHaveAttribute('data-count', /^[1-9]\d{2,}$/);
   const wideSubjects = Number(await page.getByTestId('subject-list').getAttribute('data-count'));
   const subjectRowsDrawn = await rowsDrawn(page, 'subject-row-');
@@ -828,6 +829,7 @@ async function wideQuery(page: Page, count: number): Promise<number> {
   await expect(page.locator('[data-testid^="query-row-"]').first()).toHaveAttribute('aria-pressed', 'true');
   await page.getByTestId('query-filter').fill('');
   await expect(page.getByTestId('query-count')).toHaveText(`${total} of ${total} queries`);
+  await page.getByTestId('descriptions-show-all').click();
   await expect(page.getByTestId('subject-list')).toHaveAttribute('data-count', /^[1-9]\d{2,}$/);
   return Number(await page.getByTestId('subject-list').getAttribute('data-count'));
 }
@@ -864,7 +866,7 @@ async function openPair(page: Page, number: number): Promise<void> {
     await page.getByTestId(`run-${run}-open`).click();
     await expect(page.getByTestId('results-hits')).toHaveAttribute('data-run', String(run), { timeout: 120_000 });
   }
-  await page.getByTestId('pane-alignment').click();
+  await page.getByTestId('results-view-hits').click();
 }
 
 interface PairTrayRepetition extends TrayRepetition {
@@ -1091,12 +1093,12 @@ async function pairRepetition(page: Page, number: number, other: number): Promis
   await page.getByTestId(`run-${other}-open`).click();
   await expect(page.getByTestId('results-hits')).toHaveAttribute('data-run', String(other), { timeout: 120_000 });
   // The run opens on the Alignments tab, which shows the selected HSP's detail (W4b).
-  await page.getByTestId('pane-alignment').click();
+  await page.getByTestId('results-view-hits').click();
   const open = await step(page, { kind: 'click', testid: `run-${number}-open` }, [
     { testid: 'results-hits', attr: 'data-run', equals: String(number) },
     { testid: 'hsp-detail', attr: 'data-state', equals: 'ready' },
   ]);
-  await page.getByTestId('pane-alignment').click();
+  await page.getByTestId('results-view-hits').click();
   const hsps = Number(await page.getByTestId('hsp-list').getAttribute('data-count'));
   const hspRowsDrawn = await rowsDrawn(page, 'hsp-row-');
 
@@ -1199,7 +1201,7 @@ async function pairRepetition(page: Page, number: number, other: number): Promis
     drew,
   ]);
 
-  await page.getByTestId('pane-alignment').click();
+  await page.getByTestId('results-view-hits').click();
   const row = page.getByTestId('hsp-list').locator('[data-testid^="hsp-row-"][aria-pressed="false"]').nth(2);
   await quiet(page);
   const rowId = (await row.getAttribute('data-testid'))!.replace('hsp-row-', '').replace('-', ':');

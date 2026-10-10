@@ -1,7 +1,8 @@
 <script setup lang="ts">
-// The Alignments tab (S13b, docs/web/ncbi_ui_mapping.md "Alignments"), after NCBI's block of a
-// subject: the selected subject's outfmt 0 heading as written, "Sequence ID", "Length" and
-// "Number of Matches", the subject's HSP table, then one block per HSP in the engine's order,
+// The Alignments (S13b, docs/web/ncbi_ui_mapping.md "Alignments"; the last part of the one page
+// since 2026-10-10, ClassicResults.vue), after NCBI's block of a subject, for the selected subject
+// only: its outfmt 0 heading as written, "Sequence ID", "Length" and "Number of Matches", the
+// subject's HSP table, then one block per HSP in the engine's order,
 // "Range n: a to b" with "Next Match", "Previous Match" and "First Match", and the HSP's outfmt 0
 // section as written. The selected HSP's block holds W4's detail (its outfmt 6 row, and why outfmt
 // 0 does not show it). Nothing of the alignment is drawn again here.
@@ -289,7 +290,7 @@ const sectionState = (range: RangeEntry): 'pending' | 'ready' | 'failed' => {
         <span><strong>Sequence ID:</strong> {{ subject.first.sseqid }}</span>  <span><strong>Length:</strong> {{ formatCount(subject.length) }}</span>  <span><strong>Number of Matches:</strong> {{ formatCount(subject.hspCount) }}<template v-if="ranges.length < subject.hspCount"> ({{ formatCount(ranges.length) }} shown)</template></span>
       </p>
 
-      <HspTable :results="results" :state="state" @chosen="reveal($event)" />
+      <HspTable :results="results" :state="state" :level="4" @chosen="reveal($event)" />
 
       <p v-if="win.start > 0" class="range-more">
         <button type="button" data-testid="alignments-show-earlier" @click="showEarlier">

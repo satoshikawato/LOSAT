@@ -51,8 +51,8 @@ const testid = computed(() => `${props.role}-source-${props.index}`);
     :data-check-ms="source.checkMs"
   >
     <div class="source-head">
-      <strong class="source-name">{{ title }}</strong>
-      <span class="muted">{{ formatBytes(source.size) }}</span>
+      <!-- One box for the name and the size: on phones the size follows the name and wraps under it, so that "Remove" stays on the first line (S13b screen review 3 L1). -->
+      <span class="source-title"><strong class="source-name">{{ title }}</strong> <span class="source-size muted">{{ formatBytes(source.size) }}</span></span>
       <button type="button" class="link" :data-testid="`${testid}-remove`" @click="draft.removeSource(role, source.key)">
         Remove
       </button>

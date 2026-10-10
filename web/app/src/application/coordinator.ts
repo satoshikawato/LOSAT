@@ -12,7 +12,7 @@ import type { FastaParserKind } from '../domain/dataset';
 import type { OutputFormat } from '../domain/output-format';
 import { indexParser, type InputRole, type ProgramId } from '../domain/programs';
 import { isTerminal, type InputSnapshot, type RunRecord, type RunSnapshot, type RunStatus } from '../domain/run';
-import type { SessionInput } from '../domain/session-file';
+import type { SessionApp, SessionInput } from '../domain/session-file';
 import type { DataGateway, ResultSetRef, RunInput, StorageInfo } from '../ports/data';
 import type { Downloader } from '../ports/download';
 import {
@@ -68,6 +68,10 @@ export interface SessionOrigin {
   readonly number: number;
   /** When the file was saved (ms since the epoch). */
   readonly savedAt: number;
+  /** The LOSAT Web that saved the file (its version and build). */
+  readonly app: SessionApp;
+  /** The engine build that wrote the run's outputs (its RunRecord's), if the file names it: what its verification badge is about. */
+  readonly engineBuild?: string;
   /** The identity of the run's inputs that the file recorded: what an original FASTA must match to be attached. */
   readonly inputs: Readonly<Record<InputRole, SessionInput>>;
 }

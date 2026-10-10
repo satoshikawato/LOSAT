@@ -12,7 +12,7 @@
 // channel (ports/run-output.ts), as an engine's would, so a loaded run is in the RunStore like a
 // searched one. A file is refused with a message that says what is wrong and where, and then
 // nothing stays: every run staged or committed for it is deleted.
-import { includedRecords } from '../domain/dataset';
+import { includedRecords, type DatasetRevision } from '../domain/dataset';
 import { hspLabel } from '../domain/extraction';
 import { splitOutfmt6Row, type Outfmt6Row } from '../domain/outfmt6';
 import { programById, residueUnit, type InputRole } from '../domain/programs';
@@ -24,9 +24,10 @@ import {
   checkManifest,
   containerEnd,
   containerHeader,
-  hitTableProblem,
+  hspRecordBounds,
   isGzip,
   MANIFEST_BLOCK,
+  matchSources,
   recordsMismatch,
   runBlockName,
   SESSION_FORMAT,
@@ -37,7 +38,6 @@ import {
   SessionFileError,
   SessionFileReader,
   sessionFileName,
-  sourceMismatch,
   type RecordIdentity,
   type SessionApp,
   type SessionCandidate,
@@ -54,7 +54,7 @@ import type { DataGateway, ResultSetRef, RunInput, RunStore } from '../ports/dat
 import type { Downloader } from '../ports/download';
 import type { HspRecord } from '../ports/engine';
 import { DIAGNOSTICS_STREAM, HITS_STREAM, type OutputStream, type RunOutputMessage } from '../ports/run-output';
-import type { CandidateRecord, CandidateSource, CandidateTray, RestoredCandidate } from './candidates';
+import type { CandidateRecord, CandidateRun, CandidateSource, CandidateTray } from './candidates';
 import type { AppState, Coordinator, RunView, SessionRunInit } from './coordinator';
 import { ExportWriter, writeFile } from './export-writer';
 import { Store } from './store';
@@ -95,7 +95,7 @@ export interface SessionDeps {
     | 'commitRun'
     | 'deleteRun'
     | 'stagedBytes'
-    | 'readHitTable'
+    | 'checkHspRecords'
     | 'readHspRecords'
     | 'readOutputRange'
     | 'runBlockLengths'
@@ -104,6 +104,7 @@ export interface SessionDeps {
     | 'addSource'
     | 'indexSource'
     | 'reviseDataset'
+    | 'releaseSources'
     | 'buildRunInput'
   >;
   readonly compression: Compression;
@@ -141,16 +142,25 @@ interface CommittedRun {
   readonly result: ResultSetRef;
 }
 
-/** A candidate of the file with its HSP record and outfmt 6 row, read from the loaded run. */
-interface CandidateHsp {
-  readonly candidate: SessionCandidate;
-  readonly record: HspRecord;
-  readonly row: Outfmt6Row;
+/** What the tray keeps of a candidate's HSP record: not its aligned rows, which an export reads again. */
+type CandidateHsp = Pick<HspRecord, 'index' | 'q_idx' | 's_idx' | 'rank' | 'q_start' | 'q_end' | 's_start' | 's_end' | 'query_frame' | 'subject_frame'> & {
+  readonly out6: readonly [number, number];
+};
+
+/** A tray entry of a candidate of the file, made before its run joins the working session: all but the run. */
+interface PendingCandidate {
+  /** 1-based position of the run in the file. */
+  readonly run: number;
+  readonly source: Omit<CandidateSource, 'run'>;
+  readonly note: string;
+  readonly addedAt: number;
 }
 
 export class Session {
   readonly state = new Store<SessionState>({ attaching: new Map() });
   private readonly limits: SessionLimits;
+  /** The Data worker's sources of each attached original, by `attachKey`: released when another replaces it. */
+  private readonly attachedSources = new Map<string, readonly string[]>();
 
   constructor(private readonly deps: SessionDeps) {
     this.limits = deps.limits ?? SESSION_LIMITS;
@@ -378,14 +388,17 @@ export class Session {
     } finally {
       await chunks.return?.().catch(() => undefined);
     }
-    const found = await this.candidateHsps(manifest!, committed, candidates);
-    // Every check has passed: the runs join this working session.
+    // Everything that can fail comes before the runs join this working session, so that a refused
+    // file leaves nothing in it (the caller deletes the runs from the Data worker).
     const groupIds = new Map<number, string>();
-    const runs = this.deps.coordinator.addSessionRuns(
-      manifest!.runs.map((run, k) => this.runInit(run, committed[k]!, file.name, manifest!.savedAt, groupIds)),
-    );
+    const inits = manifest!.runs.map((run, k) => this.runInit(run, committed[k]!, file.name, manifest!, groupIds));
+    const pending = await this.candidateEntries(manifest!, committed, candidates);
+    // Every check has passed: the runs join, then their candidates (the tray takes HSPs of completed runs only).
+    const runs = this.deps.coordinator.addSessionRuns(inits);
     if (!manifest!.candidates) return { runs };
-    const restored = this.deps.tray.restore(this.restoredCandidates(runs, found));
+    const restored = this.deps.tray.restore(
+      pending.map(({ run, source, note, addedAt }) => ({ source: { ...source, run: candidateRun(runs[run - 1]!) }, note, addedAt })),
+    );
     return { runs, candidates: restored.ok ? restored.added : 0 };
   }
 
@@ -397,23 +410,31 @@ export class Session {
     if (result.hitCount !== run.hitCount) {
       throw new SessionFileError(`The session file is damaged: ${where} has ${result.hitCount} HSP records, but the manifest gives ${run.hitCount}.`);
     }
-    let table;
+    // The records as the file holds them, before anything coerces them: every later reader (the
+    // results' table, the restored candidates, the exports) takes them as an engine wrote them.
+    let problem: string | undefined;
     try {
-      table = await this.deps.data.readHitTable(sender.runId);
+      problem = await this.deps.data.checkHspRecords(sender.runId, hspRecordBounds(run));
     } catch (error) {
       throw new SessionFileError(`The session file is damaged: the HSP records of ${where} cannot be read${detail(error)}.`);
     }
-    const problem = hitTableProblem(table, run);
     if (problem !== undefined) throw new SessionFileError(`The session file is damaged: in the HSP records of ${where}, ${problem}.`);
     return { runId: sender.runId, result };
   }
 
   /**
-   * The HSP record and outfmt 6 row of each candidate of the file, read from its loaded run: the
-   * record at the candidate's index must be the HSP that it names (its query record and rank).
+   * The tray's entries of the file's candidates, in the file's order, made from the loaded runs
+   * (only the reference comes from the file): the HSP record at a candidate's index must be the HSP
+   * that it names (its query record and rank), and its outfmt 6 row is read from the run's
+   * outfmt 6. The records are read RECORD_BATCH at a time, as the exports read them, and only
+   * the fields that the tray keeps stay (no aligned rows).
    */
-  private async candidateHsps(manifest: SessionManifest, committed: readonly CommittedRun[], candidates: readonly SessionCandidate[]): Promise<readonly CandidateHsp[]> {
-    const found = new Array<CandidateHsp>(candidates.length);
+  private async candidateEntries(
+    manifest: SessionManifest,
+    committed: readonly CommittedRun[],
+    candidates: readonly SessionCandidate[],
+  ): Promise<readonly PendingCandidate[]> {
+    const entries = new Array<PendingCandidate>(candidates.length);
     const byRun = new Map<number, number[]>();
     candidates.forEach((candidate, i) => {
       const list = byRun.get(candidate.run);
@@ -421,48 +442,56 @@ export class Session {
       else list.push(i);
     });
     for (const [position, items] of byRun) {
+      const run = manifest.runs[position - 1]!;
       const { runId } = committed[position - 1]!;
-      const records: HspRecord[] = [];
+      const recordOf = candidateRecords(run);
       for (let first = 0; first < items.length; first += RECORD_BATCH) {
         const batch = items.slice(first, first + RECORD_BATCH);
-        records.push(...(await this.deps.data.readHspRecords(runId, batch.map((i) => candidates[i]!.index))));
+        const read = await this.deps.data.readHspRecords(runId, batch.map((i) => candidates[i]!.index));
+        const hsps = batch.map((i, j) => candidateHsp(candidates[i]!, i, position, read[j]!));
+        const rows = await this.readRows(runId, hsps, run.blocks.out6);
+        batch.forEach((i, j) => {
+          const hsp = hsps[j]!;
+          const { note, addedAt } = candidates[i]!;
+          const source: Omit<CandidateSource, 'run'> = {
+            id: { runId, qIdx: hsp.q_idx, rank: hsp.rank },
+            index: hsp.index,
+            query: recordOf('query', hsp.q_idx),
+            subject: recordOf('subject', hsp.s_idx),
+            coordinates: {
+              q_start: hsp.q_start,
+              q_end: hsp.q_end,
+              s_start: hsp.s_start,
+              s_end: hsp.s_end,
+              query_frame: hsp.query_frame,
+              subject_frame: hsp.subject_frame,
+            },
+            row: rows[j]!,
+          };
+          entries[i] = { run: position, source, note, addedAt };
+        });
       }
-      items.forEach((i, j) => {
-        const candidate = candidates[i]!;
-        const record = records[j]!;
-        if (record.q_idx !== candidate.qIdx || record.rank !== candidate.rank) {
-          throw new SessionFileError(
-            `The session file's candidates block is not valid: candidates[${i}] is HSP ${hspLabel(candidate.qIdx, candidate.rank)} at index ` +
-              `${candidate.index} of run ${position} in the file, but the HSP record there is HSP ${hspLabel(record.q_idx, record.rank)}.`,
-          );
-        }
-        if (record.out6 === null) {
-          throw new SessionFileError(`The session file is damaged: the HSP record of candidates[${i}] (run ${position} in the file) has no outfmt 6 row.`);
-        }
-      });
-      const rows = await this.readRows(runId, records, manifest.runs[position - 1]!.blocks.out6);
-      items.forEach((i, j) => (found[i] = { candidate: candidates[i]!, record: records[j]!, row: rows[j]! }));
     }
-    return found;
+    return entries;
   }
 
   /** The outfmt 6 rows of HSP records of a run, read in spans of nearby rows. */
-  private async readRows(runId: string, records: readonly HspRecord[], out6Length: number): Promise<Outfmt6Row[]> {
-    const order = records.map((_, j) => j).sort((a, b) => records[a]!.out6![0] - records[b]!.out6![0]);
+  private async readRows(runId: string, records: readonly { readonly out6: readonly [number, number] }[], out6Length: number): Promise<Outfmt6Row[]> {
+    const order = records.map((_, j) => j).sort((a, b) => records[a]!.out6[0] - records[b]!.out6[0]);
     const rows = new Array<Outfmt6Row>(records.length);
     const decoder = new TextDecoder();
     let first = 0;
     while (first < order.length) {
-      const start = records[order[first]!]!.out6![0];
+      const start = records[order[first]!]!.out6[0];
       let last = first;
-      let end = records[order[first]!]!.out6![1];
-      while (last + 1 < order.length && records[order[last + 1]!]!.out6![1] - start <= ROW_SPAN_BYTES) {
+      let end = records[order[first]!]!.out6[1];
+      while (last + 1 < order.length && records[order[last + 1]!]!.out6[1] - start <= ROW_SPAN_BYTES) {
         last++;
-        end = Math.max(end, records[order[last]!]!.out6![1]);
+        end = Math.max(end, records[order[last]!]!.out6[1]);
       }
       const bytes = await this.deps.data.readOutputRange(runId, 6, start, Math.min(end, out6Length));
       for (let k = first; k <= last; k++) {
-        const [from, to] = records[order[k]!]!.out6!;
+        const [from, to] = records[order[k]!]!.out6;
         try {
           rows[order[k]!] = splitOutfmt6Row(decoder.decode(bytes.subarray(from - start, to - start)));
         } catch (error) {
@@ -474,7 +503,7 @@ export class Session {
     return rows;
   }
 
-  private runInit(run: SessionRun, committed: CommittedRun, fileName: string, savedAt: number, groupIds: Map<number, string>): SessionRunInit {
+  private runInit(run: SessionRun, committed: CommittedRun, fileName: string, manifest: SessionManifest, groupIds: Map<number, string>): SessionRunInit {
     let group;
     if (run.group !== undefined) {
       const groupId = groupIds.get(run.group.index) ?? this.deps.newRunId();
@@ -495,55 +524,28 @@ export class Session {
       }),
       record: { ...run.record } as RunRecord,
       result: committed.result,
-      fromSession: { fileName, number: run.number, savedAt, inputs: { query: run.query, subject: run.subject } },
+      fromSession: {
+        fileName,
+        number: run.number,
+        savedAt: manifest.savedAt,
+        app: manifest.app,
+        ...(run.record.engineBuild === undefined ? {} : { engineBuild: run.record.engineBuild }),
+        inputs: { query: run.query, subject: run.subject },
+      },
     };
-  }
-
-  /** The tray's entries of the file's candidates, made from the loaded runs' HSP records (only the reference comes from the file). */
-  private restoredCandidates(runs: readonly RunView[], found: readonly CandidateHsp[]): RestoredCandidate[] {
-    const records = new Map<string, CandidateRecord>();
-    const recordOf = (view: RunView, role: InputRole, position: number): CandidateRecord => {
-      const key = `${view.snapshot.runId}/${role}/${position}`;
-      let made = records.get(key);
-      if (made === undefined) {
-        const kind = role === 'query' ? programById(view.snapshot.program).query : programById(view.snapshot.program).subject;
-        const { id, length } = view.snapshot[role].records[position]!;
-        made = { position, id, length, kind, unit: residueUnit(kind) };
-        records.set(key, made);
-      }
-      return made;
-    };
-    return found.map(({ candidate, record, row }): RestoredCandidate => {
-      const view = runs[candidate.run - 1]!;
-      const { snapshot } = view;
-      const source: CandidateSource = {
-        id: { runId: snapshot.runId, qIdx: record.q_idx, rank: record.rank },
-        index: record.index,
-        run: { runId: snapshot.runId, number: snapshot.number, ...(snapshot.title === undefined ? {} : { title: snapshot.title }), program: snapshot.program },
-        query: recordOf(view, 'query', record.q_idx),
-        subject: recordOf(view, 'subject', record.s_idx),
-        coordinates: {
-          q_start: record.q_start,
-          q_end: record.q_end,
-          s_start: record.s_start,
-          s_end: record.s_end,
-          query_frame: record.query_frame || null,
-          subject_frame: record.subject_frame || null,
-        },
-        row,
-      };
-      return { source, note: candidate.note, addedAt: candidate.addedAt };
-    });
   }
 
   // --- re-attaching the original FASTA ---------------------------------------------------------------
 
   /**
    * Attaches the original FASTA of one role of a run loaded from a session file (REQ-23), only on
-   * this explicit choice: the files (several, in order, for a joined input) are indexed with the
-   * reader kind that the file recorded, the recorded exclusions are applied, and the run input
-   * that they make is attached only if its records and its SHA-256 are those that the run
-   * searched. Otherwise nothing changes, and the message names the first record that differs.
+   * this explicit choice: the files (several, in any order, for a joined input) are indexed with
+   * the reader kind that the file recorded and matched to the recorded sources by their records
+   * (domain/session-file.ts `matchSources`); the run input is then made in the recorded order
+   * with the recorded exclusions, and attached only if its records and its SHA-256 are those
+   * that the run searched. Otherwise nothing changes, the message names the first record or file
+   * that differs, and the attempt's sources and record tables are released from the Data worker,
+   * as are those of an original that a new attachment replaces.
    */
   async attach(runId: string, role: InputRole, files: readonly File[]): Promise<AttachResult> {
     const view = this.deps.coordinator.state.get().runs.find((run) => run.snapshot.runId === runId);
@@ -552,30 +554,35 @@ export class Session {
     if (this.state.get().attaching.get(key)?.busy === true) return { ok: false, message: 'These files are being checked; wait until that ends.' };
     this.setAttaching(key, { busy: true });
     const number = view.snapshot.number;
+    const sourceIds: string[] = [];
     try {
       const saved = view.fromSession.inputs[role];
       if (files.length !== saved.sources.length) {
         const names = saved.sources.map((source) => JSON.stringify(source.name)).join(', ');
+        const chosen = `${files.length} ${files.length === 1 ? 'was' : 'were'} chosen`;
         throw new Error(
           saved.sources.length === 1
-            ? `choose one file (the run's ${role} was ${names}); ${files.length} were chosen`
-            : `choose ${saved.sources.length} files, in the order that the run joined them (${names}); ${files.length} were chosen`,
+            ? `choose one file (the run's ${role} was ${names}); ${chosen}`
+            : `choose the ${saved.sources.length} files that the run joined (${names}), together and in any order; ${chosen}`,
         );
       }
-      const revisionIds: string[] = [];
-      const chosen: RecordIdentity[] = [];
-      for (const [i, file] of files.entries()) {
+      const indexed: DatasetRevision[] = [];
+      for (const file of files) {
         const source = await this.deps.data.addSource(file);
-        let revision;
+        sourceIds.push(source.sourceId);
         try {
-          revision = await this.deps.data.indexSource(source.sourceId, saved.reader);
+          indexed.push(await this.deps.data.indexSource(source.sourceId, saved.reader));
         } catch (error) {
           throw new Error(`${JSON.stringify(file.name)} could not be read as the run read its ${role}: ${errorMessage(error)}`);
         }
-        const mismatch = sourceMismatch(saved.sources[i]!, i, file.name, revision.records.length);
-        if (mismatch !== undefined) throw new Error(mismatch);
+      }
+      const match = matchSources(saved, indexed.map((revision, j) => ({ name: files[j]!.name, records: revision.records })));
+      if (!match.ok) throw new Error(match.message);
+      const revisionIds: string[] = [];
+      const chosen: RecordIdentity[] = [];
+      for (const [i, j] of match.files.entries()) {
         const excluded = saved.sources[i]!.excluded;
-        const revised = excluded.length === 0 ? revision : await this.deps.data.reviseDataset(revision.revisionId, excluded);
+        const revised = excluded.length === 0 ? indexed[j]! : await this.deps.data.reviseDataset(indexed[j]!.revisionId, excluded);
         revisionIds.push(revised.revisionId);
         for (const record of includedRecords(revised)) chosen.push({ id: record.id, length: record.length, sha256: record.sha256 });
       }
@@ -588,10 +595,14 @@ export class Session {
             `(SHA-256 ${saved.sha256}): a file has other lines before or between its records`,
         );
       }
-      this.deps.coordinator.attach(runId, role, { revisionIds, fileNames: files.map((file) => file.name) });
+      this.deps.coordinator.attach(runId, role, { revisionIds, fileNames: match.files.map((j) => files[j]!.name) });
+      const replaced = this.attachedSources.get(key);
+      this.attachedSources.set(key, sourceIds);
+      if (replaced !== undefined) await this.deps.data.releaseSources(replaced).catch(() => undefined);
       this.setAttaching(key, undefined);
       return { ok: true };
     } catch (error) {
+      await this.deps.data.releaseSources(sourceIds).catch(() => undefined);
       const message = `The ${role} FASTA was not attached to run ${number}: ${errorMessage(error)}.`;
       this.setAttaching(key, { busy: false, message });
       return { ok: false, message };
@@ -639,7 +650,9 @@ export class Session {
 /**
  * Sends a loaded run's blocks to the Data worker over its run output port (ports/run-output.ts),
  * in messages of about `sendBytes`, and waits while more than IN_FLIGHT_MESSAGES of them are not
- * yet stored, so that a large file does not pile up in the worker's queue.
+ * yet stored, so that a large file does not pile up in the worker's queue. Once the worker cannot
+ * store the run (the storage ran out), that wait rejects with the reason, and the load stops
+ * there instead of decompressing and sending the rest of the file (code review L4).
  */
 class RunSender {
   private buffer: Uint8Array;
@@ -703,6 +716,47 @@ function inputSnapshot(input: SessionInput): InputSnapshot {
   const records = new Array<{ readonly id: string; readonly length: number }>(id.length);
   for (let k = 0; k < id.length; k++) records[k] = { id: id[k]!, length: length[k]! };
   return Object.freeze({ name: input.name, sha256: input.sha256, revisionIds: Object.freeze([]), records: Object.freeze(records) });
+}
+
+/**
+ * The HSP record of candidate `i` of the file (run `position` there), read from the loaded run,
+ * with only the fields that the tray keeps; refused unless it is the HSP that the candidate names
+ * and has an outfmt 6 row. The run's records were checked when it was committed (`checkHspRecords`).
+ */
+function candidateHsp(candidate: SessionCandidate, i: number, position: number, record: HspRecord): CandidateHsp {
+  if (record.q_idx !== candidate.qIdx || record.rank !== candidate.rank) {
+    throw new SessionFileError(
+      `The session file's candidates block is not valid: candidates[${i}] is HSP ${hspLabel(candidate.qIdx, candidate.rank)} at index ` +
+        `${candidate.index} of run ${position} in the file, but the HSP record there is HSP ${hspLabel(record.q_idx, record.rank)}.`,
+    );
+  }
+  if (record.out6 === null) {
+    throw new SessionFileError(`The session file is damaged: the HSP record of candidates[${i}] (run ${position} in the file) has no outfmt 6 row.`);
+  }
+  const { index, q_idx, s_idx, rank, q_start, q_end, s_start, s_end, query_frame, subject_frame, out6 } = record;
+  return { index, q_idx, s_idx, rank, q_start, q_end, s_start, s_end, query_frame, subject_frame, out6: [out6[0], out6[1]] };
+}
+
+/** The tray's records of a loaded run's inputs, made once each from the file's record tables. */
+function candidateRecords(run: SessionRun): (role: InputRole, position: number) => CandidateRecord {
+  const program = programById(run.program);
+  const made = new Map<string, CandidateRecord>();
+  return (role, position) => {
+    const key = `${role}/${position}`;
+    let record = made.get(key);
+    if (record === undefined) {
+      const kind = role === 'query' ? program.query : program.subject;
+      record = { position, id: run[role].records.id[position]!, length: run[role].records.length[position]!, kind, unit: residueUnit(kind) };
+      made.set(key, record);
+    }
+    return record;
+  };
+}
+
+/** How the tray names a loaded run. */
+function candidateRun(view: RunView): CandidateRun {
+  const { snapshot } = view;
+  return { runId: snapshot.runId, number: snapshot.number, ...(snapshot.title === undefined ? {} : { title: snapshot.title }), program: snapshot.program };
 }
 
 async function writeJsonBlock(writer: ExportWriter, name: string, bytes: Uint8Array): Promise<void> {

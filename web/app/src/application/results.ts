@@ -30,7 +30,7 @@ import {
   type SubjectSortKey,
   type ViewFilters,
 } from '../domain/result-index';
-import { verificationBadge, type Badge, type VerificationTable } from '../domain/verification';
+import { loadedRunBadge, verificationBadge, type Badge, type SiteBuild, type VerificationTable } from '../domain/verification';
 import type { RunStore } from '../ports/data';
 import type { Downloader } from '../ports/download';
 import type { ProgramDescription } from '../ports/engine';
@@ -179,6 +179,12 @@ export interface ResultsDeps {
   readonly describe: (program: ProgramId) => Promise<ProgramDescription>;
   readonly runs: Store<AppState>;
   readonly verification: VerificationTable;
+  /**
+   * This site's engine builds and LOSAT Web build: the badge of a run loaded from a session file
+   * is this site's only for outputs that one of these engine builds wrote (`loadedRunBadge`).
+   * Without it, no loaded run is taken as written here.
+   */
+  readonly site?: SiteBuild;
   /** Where the dot plot's SVG is saved (WP-E); a browser without it cannot export. */
   readonly downloader?: Pick<Downloader, 'open'>;
 }
@@ -286,23 +292,25 @@ export class ResultsBrowser {
       if (token !== this.loadToken) return;
       const program = programById(run.snapshot.program);
       const kinds = { query: program.query, subject: program.subject };
+      const badge = verificationBadge(
+        {
+          program: run.snapshot.program,
+          argv: run.snapshot.argv,
+          formats: description.formats,
+          runtimePath: run.record.runtimePath,
+          threads: run.record.threads,
+          grammar: grammarOf(description),
+        },
+        this.deps.verification,
+      );
       const loaded: LoadedRun = {
         run,
         index: buildResultIndex(table),
         out6,
         description,
         limits: hitLimits(run.snapshot.argv, description.parameters),
-        badge: verificationBadge(
-          {
-            program: run.snapshot.program,
-            argv: run.snapshot.argv,
-            formats: description.formats,
-            runtimePath: run.record.runtimePath,
-            threads: run.record.threads,
-            grammar: grammarOf(description),
-          },
-          this.deps.verification,
-        ),
+        // A loaded run's outputs may come from another engine build than this site's (code review M2).
+        badge: run.fromSession === undefined ? badge : loadedRunBadge(badge, run.fromSession, this.deps.site),
         diagnostics,
         kinds,
         units: { query: residueUnit(kinds.query), subject: residueUnit(kinds.subject) },

@@ -72,6 +72,9 @@ function sourcesText(role: InputRole): string {
         <p class="hint">
           The run's {{ role }}: {{ sourcesText(role) }}. Only files whose records and SHA-256 match it are attached, with the same records
           left out.
+          <template v-if="origin.inputs[role].sources.length > 1">
+            Choose its {{ formatCount(origin.inputs[role].sources.length) }} files together, in any order.
+          </template>
         </p>
         <div class="loaded-actions">
           <button type="button" :disabled="attaching(role)?.busy === true" :data-testid="`run-attach-${role}`" @click="pickers.get(role)?.click()">

@@ -10,6 +10,8 @@ import { Store } from '../../src/application/store';
 import { CSV_COLUMNS } from '../../src/domain/hsp-export';
 import { hspTable } from '../../src/domain/hsp-table';
 import type { RunSnapshot } from '../../src/domain/run';
+import type { SessionInput } from '../../src/domain/session-file';
+import type { SiteBuild } from '../../src/domain/verification';
 import type { HspRecord, ProgramDescription } from '../../src/ports/engine';
 import { memoryDownloader, type SavedFile } from './support/memory-downloader';
 
@@ -110,7 +112,7 @@ function snapshot(ids: typeof IDS): RunSnapshot {
   };
 }
 
-async function setup(options: { specs?: readonly Spec[]; ids?: typeof IDS } = {}) {
+async function setup(options: { specs?: readonly Spec[]; ids?: typeof IDS; view?: Partial<RunView>; site?: SiteBuild } = {}) {
   const ids = options.ids ?? IDS;
   const run = makeRun(options.specs ?? SPECS, ids);
   const view: RunView = {
@@ -118,6 +120,7 @@ async function setup(options: { specs?: readonly Spec[]; ids?: typeof IDS } = {}
     status: 'completed',
     record: { runtimePath: 'serial', threads: 1, engineBuild: 'test-build', startedAt: Date.UTC(2026, 9, 10, 1, 0, 1), endedAt: Date.UTC(2026, 9, 10, 1, 0, 2) },
     result: { runId: 'r1', byteLengths: { 0: run.out0.length, 6: run.out6.length, 7: 0 }, hitCount: run.records.length },
+    ...options.view,
   };
   const runs = new Store<AppState>({ runs: [view] });
   const results = new ResultsBrowser({
@@ -130,6 +133,7 @@ async function setup(options: { specs?: readonly Spec[]; ids?: typeof IDS } = {}
     describe: async () => DESCRIPTION,
     runs,
     verification: { ncbi: '2.17.0', sources: [], programs: {} },
+    ...(options.site === undefined ? {} : { site: options.site }),
   });
   await results.open('r1');
   const saved: SavedFile[] = [];
@@ -216,6 +220,50 @@ function parseCsv(text: string): string[][] {
 
 /** The HSP labels of a CSV text's rows. */
 const csvLabels = (text: string) => parseCsv(text).slice(1).map((fields) => fields[5]);
+
+describe('the verification badge of a run loaded from a session file (code review M2)', () => {
+  const site: SiteBuild = { engineBuilds: ['test-build'], app: { version: '0.2.0', build: 'b2' } };
+  const loadedFrom = (engineBuild: string): Partial<RunView> => ({
+    fromSession: {
+      fileName: 'saved.losat-session.gz',
+      number: 3,
+      savedAt: 0,
+      app: { version: '0.1.0', build: 'b1' },
+      engineBuild,
+      inputs: { query: {} as SessionInput, subject: {} as SessionInput },
+    },
+  });
+  /** The badge as Run details, the JSON's run.verification and the report show it. */
+  async function shown(view: Partial<RunView>) {
+    const { results, exporter, text } = await setup({ view, site });
+    const badge = results.state.get().loaded!.badge;
+    await exporter.export('json', 'all');
+    const json = (JSON.parse(text()) as { run: { verification: unknown } }).run.verification;
+    await exporter.export('report', 'all');
+    return { badge, json, report: text() };
+  }
+
+  it("says that another engine build wrote the outputs, instead of this site's verification", async () => {
+    const { badge, json, report } = await shown({ ...loadedFrom('other-build'), record: { runtimePath: 'serial', threads: 1, engineBuild: 'other-build' } });
+    const details = [
+      "Loaded from a session file (saved by LOSAT Web 0.1.0, build b1): its outputs were written by other-build; this site's verification covers test-build (LOSAT Web 0.2.0, build b2).",
+    ];
+    expect(badge).toEqual({ level: 'outside', label: 'Written by another engine build', details, exceptions: [] });
+    expect(json).toEqual({ level: 'outside', label: 'Written by another engine build', details, exceptions: [] });
+    expect(report).toContain('<p><strong>Written by another engine build</strong></p>');
+    expect(report).toContain(`<li>${details[0]!.replace("site's", 'site&#39;s')}</li>`);
+  });
+
+  it("keeps this site's badge for outputs that its engine build wrote, and says that the run was loaded", async () => {
+    const searched = (await setup()).results.state.get().loaded!.badge;
+    const { badge, json, report } = await shown(loadedFrom('test-build'));
+    const note = 'Loaded from a session file (saved by LOSAT Web 0.1.0, build b1): its outputs were written by test-build, an engine build of this site.';
+    expect(badge).toEqual({ ...searched, details: [...searched.details, note] });
+    expect(json).toEqual({ level: searched.level, label: searched.label, details: [...searched.details, note], exceptions: [] });
+    expect(report).toContain(`<p><strong>${searched.label}</strong></p>`);
+    expect(report).toContain(`<li>${note}</li>`);
+  });
+});
 
 describe('the scopes and their counts', () => {
   it('counts the whole run, the HSPs after the view filters, and those of the marked subjects', async () => {

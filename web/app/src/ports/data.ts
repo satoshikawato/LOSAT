@@ -8,7 +8,7 @@ import type { DatasetRevision, FastaParserKind, RecordKey } from '../domain/data
 import type { HspTable } from '../domain/hsp-table';
 import type { OutputFormat } from '../domain/output-format';
 import type { InputRole, ProgramId } from '../domain/programs';
-import type { SessionRecordTable, SessionSource } from '../domain/session-file';
+import type { HspRecordBounds, SessionRecordTable, SessionSource } from '../domain/session-file';
 import type { HspRecord } from './engine';
 import type { InputCheck } from './input-check';
 import type { OutputStream } from './run-output';
@@ -68,6 +68,13 @@ export interface DatasetStore {
   indexSource(sourceId: string, parser: FastaParserKind): Promise<DatasetRevision>;
   /** A new revision of the same record table that leaves out the records `excluded`. */
   reviseDataset(revisionId: string, excluded: readonly number[]): Promise<DatasetRevision>;
+  /**
+   * Forgets sources and every revision (record table) made of them, so that their Files and
+   * tables are no longer held; their IDs are then unknown. For sources that one caller alone
+   * holds: the files of a refused or replaced re-attachment of a loaded run's original FASTA
+   * (application/session.ts). Unknown IDs are ignored.
+   */
+  releaseSources(sourceIds: readonly string[]): Promise<void>;
   /**
    * The engine input made of the included records of the revisions, in order. A revision
    * that includes every record contributes its source unchanged; a newline is added after
@@ -152,6 +159,14 @@ export interface RunStore {
    * UI thread as objects (design §10.2).
    */
   readHitTable(runId: string): Promise<HspTable>;
+  /**
+   * Checks the HSP records of a committed run as the JSON of their lines, before anything coerces
+   * them (domain/session-file.ts `HspRecordCheck`), reading stream 1 in bounded ranges in the Data
+   * worker: resolves with why a record is not one that the run can have, or undefined. For a run
+   * loaded from a session file, whose records no engine of this site wrote. Rejects when a line
+   * is not JSON.
+   */
+  checkHspRecords(runId: string, bounds: HspRecordBounds): Promise<string | undefined>;
   readDiagnostics(runId: string): Promise<string>;
   deleteRun(runId: string): Promise<void>;
   /** The byte length of each stream of a committed run (ports/run-output.ts), for a session file. */
@@ -160,8 +175,10 @@ export interface RunStore {
   readRunBlock(runId: string, stream: OutputStream, start: number, end: number): Promise<Uint8Array>;
   /**
    * Resolves, with the bytes that a staged run's port has delivered so far, once they reach
-   * `atLeast`, or once the run fails, ends or is dropped. A writer that is not the engine (a
-   * session file being loaded) waits on it so that its chunks do not pile up in the Data worker.
+   * `atLeast`, or once the run ends or is dropped; rejects with the run's failure (the storage
+   * ran out, the output broke) once it has failed, at once if it already has. A writer that is
+   * not the engine (a session file being loaded) waits on it so that its chunks do not pile up in
+   * the Data worker, and stops writing when it rejects.
    */
   stagedBytes(runId: string, atLeast: number): Promise<number>;
 }

@@ -148,6 +148,19 @@ Scheduling (each value computed by one thread with the original function; order 
   parallel, one pool for the search. Shadow: `LOSAT_X_TBNPARSHADOW=1`.
 - `LOSAT_X_TBNBATCH=1` (needs `TBNSSIDE`) tblastn query batches searched side by side, appended
   in input order.
+- `LOSAT_X_PAIRPAR=1` TBLASTX seed stage (scan, two-hit test, ungapped extension) of each subject
+  as units of (subject frame, chunk, query context), 36 per one-query pair, on the search pool (in
+  order on the calling thread with one thread); each unit scans with a lookup table holding only its
+  context's chains (order kept) on a fresh unmasked diagonal table, and the unit lists go through the
+  reference's sort and merge in the reference order (`tblastx/x_pair_par.rs`, exactness argument in
+  its header). Only when every query context, or every subject chunk, is at most `slack` = diagonal
+  table size minus query length long; otherwise, and with the trace, debug, diagnostics and chunk
+  switches, the reference loop runs (`LOSAT_X_STATS=1` counts `fallback_guard` / `fallback_gate`;
+  `LOSAT_TIMING` prints one `x_pairpar` line). Strict-set candidate (S-E, round 5).
+- `LOSAT_X_PAIRPARSHADOW=1` shadow of `LOSAT_X_PAIRPAR`: the unit path and the reference loop for
+  every subject, the subject's combined ungapped HSP list compared field by field (the first
+  difference stops the run with subject, frame, index and both values); one `[X_SHADOW] PAIRPAR`
+  summary line at exit (subjects, units, HSPs compared, fallbacks).
 - `LOSAT_X_BXPAR=1` blastx query-chunk, redo and per-context SEG parallelism;
   `LOSAT_X_BXPOOL=1` one pool for the search; `LOSAT_X_BXBATCH=1` (needs `BXPOOL`) small query
   batches searched together, output in input order; `LOSAT_X_BXCHUNK=64` subjects per worker;

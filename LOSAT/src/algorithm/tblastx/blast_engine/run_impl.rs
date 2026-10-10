@@ -15,6 +15,25 @@ use crate::blastinput::seq_range::{
     QueryInput, RangeRole, SequenceRange,
 };
 
+// EXPERIMENT (LOSAT_X_PAIRPAR / LOSAT_X_PAIRPARSHADOW): the seed stage of a subject as units of
+// (subject frame, chunk, query context) on the search pool; a child module of this file so that
+// it uses the chunk helpers below unchanged (see tblastx/x_pair_par.rs).
+//
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:500-516
+// ```c
+// while (scan_range[1] <= scan_range[2]) {
+//     /* scan the subject sequence for hits */
+//     hits = scansub(lookup_wrap, subject,
+//                               offset_pairs, array_size, scan_range);
+// ...
+//     for (i = 0; i < hits; ++i) {
+// ```
+// The module ports the per-hit body of this loop and runs it per query context; it is used only
+// when one of its switches is set.
+#[path = "../x_pair_par.rs"]
+mod x_pair_par;
+pub use x_pair_par::print_summary as x_pair_par_print_summary;
+
 /// The queries of a search: the input records, the searched queries (each cut to its
 /// `-query_loc` interval), the query input (where each searched query lies in its record,
 /// its input position, the skipped records), and where each subject's searched letters
@@ -2505,6 +2524,45 @@ fn search_query_batch(
     const OFFSET_ARRAY_SIZE: i32 = 4096;
     let offset_array_size: i32 = OFFSET_ARRAY_SIZE + lookup.longest_chain.max(0);
 
+    // EXPERIMENT (LOSAT_X_PAIRPAR / LOSAT_X_PAIRPARSHADOW), dispatch point 1 (per batch): the
+    // gates and the exactness guard, then one lookup table per query context (each backbone chain
+    // filtered to the context, order kept). None (switch off, gate or guard) keeps the reference
+    // loop for every subject of the batch.
+    //
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:52-63
+    // ```c
+    // while (diag_array_length < (qlen+window_size))
+    // {
+    //         diag_array_length = diag_array_length << 1;
+    // }
+    // ...
+    // diag_table->diag_mask = diag_array_length-1;
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:337-343
+    // ```c
+    // if (lookup->thin_backbone[i] ) {
+    //     Int4 * dest = NULL;
+    //     /* set the corresponding bit in the pv_array */
+    //     PV_SET(pv, i, PV_ARRAY_BTS);
+    //     bbc[i].num_used = lookup->thin_backbone[i][1];
+    // ```
+    // The guard compares the context and subject lengths with the slack of this table (size above
+    // minus query_length); the per-context tables use the layout above.
+    let x_pair_par_batch = x_pair_par::XPairPar::prepare(x_pair_par::XBatch {
+        lookup: &lookup,
+        contexts: &contexts,
+        query_length,
+        diag_array_size,
+        subjects: subjects_raw,
+        debugging: trace_hsp_target().is_some()
+            || scan_debug_range.is_some()
+            || extension_debug_enabled
+            || diag_enabled
+            || debug_hsp_saving,
+        chunk_switches: use_serial_scan_chunks || use_parallel_chunks,
+    });
+    let x_pair_par_ref = x_pair_par_batch.as_ref();
+
     let lookup_ref = &lookup;
     let contexts_ref = &contexts;
     let _gapped_params_ref = &gapped_params; // Unused - tblastx uses ungapped params
@@ -3015,6 +3073,49 @@ fn search_query_batch(
         // NCBI: Combined HSP list across all subject frames
         // Reference: blast_engine.c:438 BlastHSPList* combined_hsp_list
         let mut combined_ungapped_hits: Vec<UngappedHit> = Vec::new();
+
+        // EXPERIMENT (LOSAT_X_PAIRPAR / LOSAT_X_PAIRPARSHADOW), dispatch point 2 (per subject):
+        // the unit path fills `combined_ungapped_hits` and the frame slice below becomes empty, so
+        // the reference frame loop (unchanged) runs zero times. In shadow mode the slice is kept,
+        // the loop runs, and the two lists are compared after it.
+        //
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:805,835-844
+        // ```c
+        // for (context=first_context; context<=last_context; context++) {
+        // ...
+        //     status = s_BlastSearchEngineOneContext(program_number, query, query_info,
+        // ...
+        //     if (Blast_HSPListAppend(&hsp_list_for_chunks, &hsp_list_out, kHspNumMax)) {
+        // ```
+        // The unit path returns the list this frame loop builds (same calls, same order of
+        // the appended frame lists); see x_pair_par.rs for why it is the same list.
+        let mut x_pair_par_shadow: Option<Vec<UngappedHit>> = None;
+        let s_frames_preliminary: &[QueryFrame] = match x_pair_par_ref {
+            Some(x) => {
+                let x_hits = x.run_subject(
+                    &x_pair_par::XSubject {
+                        s_frames_preliminary,
+                        s_frames: &s_frames,
+                        contexts: contexts_ref,
+                        cutoff_scores: &cutoff_scores,
+                        x_dropoff_per_context: &x_dropoff_per_context,
+                        window,
+                        wordsize,
+                        s_idx,
+                        s_len,
+                    },
+                    parallel_pool,
+                );
+                if x.shadow() {
+                    x_pair_par_shadow = Some(x_hits);
+                    s_frames_preliminary
+                } else {
+                    combined_ungapped_hits = x_hits;
+                    &[]
+                }
+            }
+            None => s_frames_preliminary,
+        };
 
         for (s_f_idx, s_frame) in s_frames_preliminary.iter().enumerate() {
             // NCBI: Diagonal state is NOT reset between subject frames.
@@ -4581,6 +4682,18 @@ fn search_query_batch(
                 }
             }
         } // End of subject frame loop
+
+        // EXPERIMENT (LOSAT_X_PAIRPARSHADOW), dispatch point 3 (per subject): the unit path's
+        // list against the reference loop's, every field; the first difference stops the run.
+        //
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:844
+        // ```c
+        // if (Blast_HSPListAppend(&hsp_list_for_chunks, &hsp_list_out, kHspNumMax)) {
+        // ```
+        // The list compared is the one the frame loop above has appended (hsp_list_out).
+        if let Some(x_hits) = &x_pair_par_shadow {
+            x_pair_par::shadow_compare(s_idx, x_hits, &combined_ungapped_hits);
+        }
 
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:561-584
         // ```c

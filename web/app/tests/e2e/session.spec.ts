@@ -351,7 +351,12 @@ test.describe('engine build', () => {
     readonly argv: readonly string[];
     readonly query: Download;
     readonly subject: Download;
+    /** What the reproduction panel says of each input's origin. */
+    readonly relations: readonly string[];
   }
+
+  const relations = (page: Page) =>
+    Promise.all((['query', 'subject'] as const).map(async (role) => (await page.getByTestId(`run-input-file-${role}`).textContent())!.trim()));
 
   /** A run's argv, and its input FASTA as the reproduction panel saves them: the bytes searched, under the argv's names. */
   async function runInputs(page: Page, run: number): Promise<RunInputs> {
@@ -360,7 +365,7 @@ test.describe('engine build', () => {
     const query = await downloaded(page, 'run-input-save-query');
     const subject = await downloaded(page, 'run-input-save-subject');
     expect(argv.slice(1, 5)).toEqual(['-query', query.name, '-subject', subject.name]);
-    return { argv, query, subject };
+    return { argv, query, subject, relations: await relations(page) };
   }
 
   /** The native CLI's outputs (SHA-256 by format) of the argv, run in a folder that holds the run's input FASTA. */
@@ -456,6 +461,10 @@ test.describe('engine build', () => {
       for (const format of FORMATS) expect(sha256(before[run]![format]), `run ${run} outfmt ${format} = the native CLI's`).toBe(native[format]);
     }
     if (NATIVE === undefined) test.info().annotations.push({ type: 'not compared with the native CLI', description: NO_NATIVE_REASON });
+    expect(inputs[1]!.relations[1]).toContain('combined_subject.fa joins the 2 subject inputs (part1.fa, part2.fa) in the order chosen: 3 records.');
+    expect(inputs[2]!.relations[1]).toContain(
+      'e2e_amb_subject.fna has the 4 records that the run searched; the records left out of the chosen subject are not in it.',
+    );
     const own = await ownFormats(page, 1);
 
     await expect(page.getByTestId('session-include-candidates')).toBeChecked();
@@ -477,10 +486,13 @@ test.describe('engine build', () => {
       await expect(page.getByTestId(`run-${n}-origin`)).toHaveText(`From ${session.name}, run ${n} there (not searched again)`);
     }
 
-    // The outputs of the loaded runs: the bytes exported before saving (so the native CLI's too).
+    // The outputs of the loaded runs: the bytes exported before saving (so the native CLI's too);
+    // the reproduction panel says where the inputs came from as it did before saving.
     for (const run of [1, 2]) {
       const after = await exportedOutputs(page, run);
       for (const format of FORMATS) expect(after[format].equals(before[run]![format]), `run ${run} outfmt ${format}: the bytes before saving`).toBe(true);
+      await details(page, run);
+      expect(await relations(page)).toEqual(inputs[run]!.relations);
     }
     // LOSAT Web's own files need no original FASTA: the same HSPs.
     const ownAfter = await ownFormats(page, 1);

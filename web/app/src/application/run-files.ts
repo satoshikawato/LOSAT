@@ -190,6 +190,13 @@ export class RunFiles {
    * whole source of the search form, or undefined for a selection of a source's records.
    */
   inputParts(view: RunView, role: InputRole): ReadonlyArray<InputPart | undefined> {
+    // A run loaded from a session file has no revisions of this page: the file recorded its
+    // sources, each whole or with records left out. It does not record whether a source was
+    // pasted, so each is named as the file that the session file names.
+    const sources = view.fromSession?.inputs[role].sources;
+    if (sources !== undefined) {
+      return sources.map((source) => (source.excluded.length > 0 ? undefined : { origin: 'file', name: source.name, records: source.records }));
+    }
     return view.snapshot[role].revisionIds.map((revisionId) => this.sources.get(revisionId));
   }
 

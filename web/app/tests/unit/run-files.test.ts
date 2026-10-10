@@ -415,4 +415,19 @@ describe('RunFiles', () => {
     await runFiles.saveInput(loaded, 'query');
     expect(saved.map((f) => [f.name, text(f)])).toEqual([['query.fa', new TextDecoder().decode(original)]]);
   });
+
+  it('tells where the input of a run loaded from a session file came from by the sources that the file recorded', async () => {
+    const run = await runOf('blastn', []);
+    const source = (name: string, records: number, excluded: number[]) => ({ name, size: 100, records, excluded });
+    const inputs = {
+      query: { sources: [source('reads.fa', 2, [])] },
+      subject: { sources: [source('a.fa', 3, [1]), source('b.fa', 1, [])] },
+    };
+    const fromSession = { fileName: 's.losat-session.gz', number: 1, savedAt: 0, inputs } as unknown as NonNullable<RunView['fromSession']>;
+    // The loaded run's revisions are none of this page's: the form's sources say nothing about it.
+    const loaded: RunView = { ...run, snapshot: { ...run.snapshot, query: { ...run.snapshot.query, revisionIds: [] } }, fromSession };
+    const { runFiles } = setup();
+    expect(runFiles.inputParts(loaded, 'query')).toEqual([{ origin: 'file', name: 'reads.fa', records: 2 }]);
+    expect(runFiles.inputParts(loaded, 'subject')).toEqual([undefined, { origin: 'file', name: 'b.fa', records: 1 }]);
+  });
 });

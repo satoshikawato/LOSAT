@@ -5,15 +5,17 @@ Writes to $BUILD_ROOT/sfb-e2h/perf-inputs/ (or --out):
 
   q100k_300nt.fna        100000 nucleotide records of 300 nt (70 columns); every 100th record is a slice
                          of LC738884 with a few substitutions, so the search has hits
-  genome5mb_1line.fna    one record, 5 Mb on ONE line (random, with three mutated copies of AP027152
+  genome_1line.fna       one record, 50 Mb on ONE line (random, with three mutated copies of AP027152
                          inserted so the search has hits)
-  genome5mb_80col.fna    the same record in 80-column lines
-  protein_many.faa       20000 protein records of 300 aa (60 columns); every 50th is a slice of PajaWSV.faa
+  genome_80col.fna       the same record in 80-column lines
+  protein_many.faa       2000 protein records of 300 aa (60 columns); every 50th is a slice of PajaWSV.faa
   inputs.sha256          SHA-256 of every file written
 
 Usage: gen_perf_inputs.py [--out DIR] [--repo DIR] [--queries N] [--genome-mb N] [--proteins N]
 Same seed, same bytes. The perf cases are in perf_cases.py (blastn-q100k, blastn-genome-1line,
-blastn-genome-80col, blastp-many).
+blastn-genome-80col, blastp-many, and the standard-input cases blastn-q100k-stdin-file/-pipe).
+Sizes (SFd, from one native timing of the SFc build, 2026-10-10): 100000 queries ~2 s; a 5 Mb subject took
+0.3-0.5 s (too short to time), so 50 Mb; 20000 proteins took 77-108 s per run, so 2000.
 """
 import argparse
 import hashlib
@@ -49,8 +51,8 @@ def main() -> int:
     ap.add_argument("--out", type=Path)
     ap.add_argument("--repo", type=Path)
     ap.add_argument("--queries", type=int, default=100000)
-    ap.add_argument("--genome-mb", type=int, default=5)
-    ap.add_argument("--proteins", type=int, default=20000)
+    ap.add_argument("--genome-mb", type=int, default=50)
+    ap.add_argument("--proteins", type=int, default=2000)
     args = ap.parse_args()
     repo = args.repo or Path(os.environ.get("WT") or Path(__file__).resolve().parents[4])
     fasta = repo / "LOSAT" / "tests" / "fasta"
@@ -75,8 +77,8 @@ def main() -> int:
         pos = rng.randrange(0, len(genome) - len(piece))
         genome[pos:pos + len(piece)] = piece
     genome = bytes(genome)
-    (out / "genome5mb_1line.fna").write_bytes(b">genome5mb perf subject\n" + genome + b"\n")
-    (out / "genome5mb_80col.fna").write_bytes(b">genome5mb perf subject\n" + wrap(genome, 80))
+    (out / "genome_1line.fna").write_bytes(b">genome perf subject\n" + genome + b"\n")
+    (out / "genome_80col.fna").write_bytes(b">genome perf subject\n" + wrap(genome, 80))
 
     pj = read_fasta_seq(fasta / "PajaWSV.faa")
     with (out / "protein_many.faa").open("wb") as h:
@@ -88,7 +90,7 @@ def main() -> int:
                 seq = rng.randbytes(300).translate(PROT)
             h.write(b">p%d\n" % n + wrap(seq, 60))
 
-    names = ["q100k_300nt.fna", "genome5mb_1line.fna", "genome5mb_80col.fna", "protein_many.faa"]
+    names = ["q100k_300nt.fna", "genome_1line.fna", "genome_80col.fna", "protein_many.faa"]
     (out / "inputs.sha256").write_text("".join(f"{hashlib.sha256((out / n).read_bytes()).hexdigest()}  {n}\n" for n in names))
     print(f"wrote {out}")
     return 0

@@ -9,6 +9,7 @@
 # Read-heavy cases (perf_cases.py, inputs from gen_perf_inputs.py into $BUILD_ROOT/sfb-e2h/perf-inputs/):
 #   blastn-q100k, blastn-genome-1line, blastn-genome-80col, blastp-many.
 # PERF_READ_MODES (default native,serial-wasi,threaded-wasi) restricts the modes of the read-heavy run.
+# Standard-input cases (native only; STDIN_CASES overrides): blastn-q100k-stdin-file, blastn-q100k-stdin-pipe.
 set -u
 WORK_ROOT=${WORK_ROOT:-/home/kawato/losat-work}
 BUILD_ROOT=${BUILD_ROOT:-/home/kawato/.cache/losat-work}
@@ -24,6 +25,7 @@ REPEAT=${REPEAT:-3}
 SUFFIX=${SUFFIX:-1}
 CASES=${CASES:-blastp,blastp-fmt0,tblastn,tblastn-fmt0,tblastx,tblastx-multi,tblastx-many,blastn,blastn-large,blastn-large-fmt0,blastn-many}
 READ_CASES=${READ_CASES:-blastn-q100k,blastn-genome-1line,blastn-genome-80col,blastp-many}
+STDIN_CASES=${STDIN_CASES:-blastn-q100k-stdin-file,blastn-q100k-stdin-pipe}
 PERF=docs/evidence/losat_web_e2h/gates/perf_cases.py
 export PYTHONDONTWRITEBYTECODE=1
 step() { echo "$(date -u +%H:%M:%S) $*"; }
@@ -57,9 +59,13 @@ step "perf read-heavy cases (repeat $REPEAT)"
 PERF_MODES=${PERF_READ_MODES:-native,serial-wasi,threaded-wasi} python3 $PERF run --before "$BEFORE" --after "$AFTER" --repeat "$REPEAT" --cases "$READ_CASES" \
   --out "$OUT/perf/perf-read-$SUFFIX.json" > "$OUT/perf/perf-read-$SUFFIX.log" 2>&1
 python3 docs/evidence/losat_web_e1a/measure_perf.py check "$OUT/perf/perf-read-$SUFFIX.json" > "$OUT/perf/perf-read-check-$SUFFIX.txt" 2>&1; rc2=$?
+step "perf standard-input cases, native (repeat $REPEAT)"
+PERF_MODES=native python3 $PERF run --before "$BEFORE" --after "$AFTER" --repeat "$REPEAT" --cases "$STDIN_CASES" \
+  --out "$OUT/perf/perf-stdin-$SUFFIX.json" > "$OUT/perf/perf-stdin-$SUFFIX.log" 2>&1
+python3 docs/evidence/losat_web_e1a/measure_perf.py check "$OUT/perf/perf-stdin-$SUFFIX.json" > "$OUT/perf/perf-stdin-check-$SUFFIX.txt" 2>&1; rc3=$?
 
 # settle: cases over +5% (or with different output) are measured again with --repeat 5, only those cases
-for kind in "" read-; do
+for kind in "" read- stdin-; do
   f=$OUT/perf/perf-${kind}$SUFFIX.json
   [ -f "$f" ] || continue
   over=$(python3 - "$f" <<'PY'
@@ -71,7 +77,7 @@ PY
 )
   if [ -n "$over" ]; then
     step "settling ${kind}cases over +5%: $over (repeat 5)"
-    modes=""; [ "$kind" = read- ] && modes=${PERF_READ_MODES:-native,serial-wasi,threaded-wasi}
+    modes=""; [ "$kind" = read- ] && modes=${PERF_READ_MODES:-native,serial-wasi,threaded-wasi}; [ "$kind" = stdin- ] && modes=native
     PERF_MODES=$modes python3 $PERF run --before "$BEFORE" --after "$AFTER" --repeat 5 --cases "$over" --out "$OUT/perf/perf-${kind}$SUFFIX-repeat5.json" \
       > "$OUT/perf/perf-${kind}$SUFFIX-repeat5.log" 2>&1
     python3 docs/evidence/losat_web_e1a/measure_perf.py check "$OUT/perf/perf-${kind}$SUFFIX-repeat5.json" > "$OUT/perf/perf-${kind}check-$SUFFIX-repeat5.txt" 2>&1
@@ -79,5 +85,5 @@ PY
 done
 vperf_lock_release
 cp "$OUT"/perf/perf-*.json "$OUT"/perf/perf-*.txt "$OUT"/perf/perf-*.log "$OUT"/perf/load-start-*.txt "$RUN/" 2>/dev/null
-printf 'perf\tperf-standard\t%s\tperf/perf-check-%s.txt\nperf\tperf-read-heavy\t%s\tperf/perf-read-check-%s.txt\n' "$rc1" "$SUFFIX" "$rc2" "$SUFFIX" >> "$OUT/status.tsv"
-step "done (standard rc $rc1, read-heavy rc $rc2; the settled cases are in perf-*-repeat5.*)"
+printf 'perf\tperf-standard\t%s\tperf/perf-check-%s.txt\nperf\tperf-read-heavy\t%s\tperf/perf-read-check-%s.txt\nperf\tperf-stdin\t%s\tperf/perf-stdin-check-%s.txt\n' "$rc1" "$SUFFIX" "$rc2" "$SUFFIX" "$rc3" "$SUFFIX" >> "$OUT/status.tsv"
+step "done (standard rc $rc1, read-heavy rc $rc2, standard input rc $rc3; the settled cases are in perf-*-repeat5.*)"

@@ -70,11 +70,17 @@ function world(engine: EngineGateway = new FakeEngine(), prefix = '') {
     cleanup: Promise.resolve({ state: 'done', removedSessions: 0 }),
   });
   const residueCalls: number[] = [];
-  // Counts the reads of original residues, which a loaded run without its original must never make.
+  const opened: string[] = [];
+  // Counts the reads of original residues, which a loaded run without its original must never make,
+  // and keeps the IDs of the runs opened in the Data worker.
   const data: DataGateway = Object.assign(Object.create(service) as DataService, {
     readResidues: (...args: Parameters<DataService['readResidues']>) => {
       residueCalls.push(args[1]);
       return service.readResidues(...args);
+    },
+    openRun: (runId: string) => {
+      opened.push(runId);
+      return service.openRun(runId);
     },
   });
   const saved: SavedFile[] = [];
@@ -96,7 +102,7 @@ function world(engine: EngineGateway = new FakeEngine(), prefix = '') {
     readBytes: 7,
     sendBytes: 16,
   });
-  return { data, service, store, coordinator, tray, session, saved, residueCalls };
+  return { data, service, store, coordinator, tray, session, saved, residueCalls, opened };
 }
 
 type World = ReturnType<typeof world>;
@@ -236,6 +242,14 @@ function build(manifest: unknown, blocks: ReadonlyMap<string, Uint8Array>, candi
 }
 
 const copy = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
+
+/** The file with one block replaced, the manifest's lengths of the blocks made to agree with the blocks. */
+function rebuilt({ manifest, blocks, candidates }: Parsed, name: string, bytes: Uint8Array): Uint8Array {
+  const map = new Map([...blocks, [name, bytes]]);
+  const lengths = copy(manifest) as unknown as { runs: Array<{ blocks: Record<string, number> }> };
+  lengths.runs.forEach((run, k) => SESSION_STREAMS.forEach((stream) => (run.blocks[stream] = map.get(runBlockName(k + 1, stream))?.length ?? 0)));
+  return build(lengths, map, candidates === undefined ? undefined : { candidates });
+}
 
 // --- the tests ----------------------------------------------------------------------------------------
 
@@ -500,7 +514,7 @@ describe('Session: refused files leave nothing behind', () => {
     const beyond = withHits(hits.replace('"q_idx":1', `"q_idx":${manifest.runs[0]!.query.records.id.length}`));
     await refusedFile(build(lengthsOf(beyond), beyond, cands), /in the HSP records of run 1 in the file \(run 1 there\), HSP record \d+ names query record 2, but the run has 2 query records/);
     const range = withHits(hits.replace(/"out6":\[(\d+),(\d+)\]/, (_, s) => `"out6":[${s},${manifest.runs[0]!.blocks.out6 + 1}]`));
-    await refusedFile(build(lengthsOf(range), range, cands), /outfmt 6 range outside the run's \d+ bytes of outfmt 6/);
+    await refusedFile(build(lengthsOf(range), range, cands), /has out6 \[\d+,\d+\], not null or a byte range within the run's \d+ bytes of outfmt 6/);
     const notJson = withHits(hits.replace('{"index":0', '{"index":0,'));
     await refusedFile(build(lengthsOf(notJson), notJson, cands), /the HSP records of run 1 in the file \(run 1 there\) cannot be read/);
     const more = copy(manifest) as unknown as { runs: Array<{ hitCount: number }> };
@@ -513,6 +527,51 @@ describe('Session: refused files leave nothing behind', () => {
     await refusedFile(build(manifest, blocks, noRun), /The session file's candidates block is not valid: candidates\[0\]\.run is 3, but the file holds 2 runs/);
     const noHsp = { candidates: [{ ...candidates![0]!, index: 999 }] };
     await refusedFile(build(manifest, blocks, noHsp), /candidates\[0\]\.index is 999, beyond the/);
+  });
+
+  it('refuses HSP records whose JSON a typed array would have coerced, and leaves the working session as it was (code review M1)', async () => {
+    const a = await searched();
+    const file = await saveSession(a);
+    const parsed = parse(file.bytes);
+    // The HSP record of a candidate, in its run's block of HSP records.
+    const { run, index } = parsed.candidates![0]!;
+    const name = runBlockName(run, 'hits');
+    const lines = decoder.decode(parsed.blocks.get(name)!).split('\n');
+    const line = lines.findIndex((text) => text !== '' && (JSON.parse(text) as { index: number }).index === index);
+    expect(line).toBeGreaterThanOrEqual(0);
+    const changed = (edit: (record: Record<string, unknown>) => void) => {
+      const record = JSON.parse(lines[line]!) as Record<string, unknown>;
+      edit(record);
+      return rebuilt(parsed, name, encoder.encode(lines.map((text, k) => (k === line ? JSON.stringify(record) : text)).join('\n')));
+    };
+
+    // A working session that already has runs and candidates: a refused file changes none of them.
+    const b = world(forbiddenEngine().engine);
+    expect((await b.session.load(asFile(file.bytes))).ok).toBe(true);
+    const runs = b.coordinator.state.get().runs;
+    const { candidates, selected } = b.tray.state.get();
+    const usage = b.store.usage();
+    const where = `in the HSP records of run ${run} in the file \\(run ${run} there\\), HSP record ${line + 1} `;
+    const cases: Array<[(record: Record<string, unknown>) => void, string]> = [
+      [(record) => (record.s_idx = null), `${where}has s_idx null, not a whole number of 0 or more`],
+      [(record) => (record.query_frame = 259), `${where}has query_frame 259, not null or a frame of -3 to 3 other than 0`],
+      [(record) => (record.q_idx = 4294967296), `${where}names query record 4294967296, but the run has \\d+ query records`],
+      [(record) => (record.q_start = true), `${where}has q_start true, not a coordinate \\(a whole number of 1 or more\\)`],
+      // Valid records, but the candidate's outfmt 6 row is not a row: found while the candidates are made, before the runs join.
+      [(record) => (record.out6 = [0, 1]), 'the outfmt 6 row of a candidate is not a row'],
+    ];
+    for (const [edit, problem] of cases) {
+      const before = b.opened.length;
+      const result = await b.session.load(asFile(changed(edit), 'bad.gz'));
+      expect(result).toEqual({ ok: false, message: expect.stringMatching(new RegExp(`^bad\\.gz was not opened, and nothing was loaded\\. The session file is damaged: ${problem}`)) });
+      expect(b.coordinator.state.get().runs).toEqual(runs);
+      expect(b.tray.state.get().candidates).toEqual(candidates);
+      expect(b.tray.state.get().selected).toEqual(selected);
+      expect(b.store.usage()).toBe(usage);
+      // The runs that the refused file opened in the Data worker are gone.
+      expect(b.opened.length).toBeGreaterThan(before);
+      for (const runId of b.opened.slice(before)) await expect(b.service.runBlockLengths(runId)).rejects.toThrow(/no committed result/);
+    }
   });
 
   it('refuses a newer schema, a missing block and a manifest over the limits, and shows hostile text only as data', async () => {

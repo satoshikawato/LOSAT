@@ -15,7 +15,6 @@
 // pieces and are never held; only the manifest and the candidates are collected, in buffers that
 // the limits bound.
 import type { FastaParserKind } from './dataset';
-import type { HspTable } from './hsp-table';
 import { indexParser, PROGRAMS, type InputRole, type ProgramId } from './programs';
 import type { RunRecord } from './run';
 
@@ -712,45 +711,101 @@ function printable(text: string): string {
 
 // --- what a loaded run must agree with -------------------------------------------------------------
 
+/** What the HSP records of a loaded run may name: its record tables and outputs, as the manifest gives them. */
+export interface HspRecordBounds {
+  /** HSP records of the run (`hitCount`). */
+  readonly count: number;
+  /** Records of the run's query and subject record tables. */
+  readonly queries: number;
+  readonly subjects: number;
+  /** Bytes of the run's outfmt 0 and outfmt 6. */
+  readonly out0: number;
+  readonly out6: number;
+}
+
+export const hspRecordBounds = (run: SessionRun): HspRecordBounds => ({
+  count: run.hitCount,
+  queries: run.query.records.id.length,
+  subjects: run.subject.records.id.length,
+  out0: run.blocks.out0,
+  out6: run.blocks.out6,
+});
+
+const isCount = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+const isFrame = (value: unknown) => value === null || (typeof value === 'number' && Number.isInteger(value) && value !== 0 && Math.abs(value) <= 3);
+const isRange = (value: unknown, length: number) =>
+  value === null || (Array.isArray(value) && value.length === 2 && isCount(value[0]) && isCount(value[1]) && value[0] <= value[1] && value[1] <= length);
+
 /**
- * Why the HSP records of a run loaded from a session file are not records that the run can have,
- * or undefined: their count is not the manifest's; an index is outside 0..count-1 or repeated; a
- * query or subject record index is beyond the run's record tables; a query has a rank twice; a
- * coordinate is not a whole number of 1 or more; a frame is outside -3..3; a score is not a
- * number; or a byte range is not within the output that it points into.
+ * Checks the HSP records of a run loaded from a session file one by one, in the order of their
+ * lines, as the JSON values that the file holds (docs/web/abi_v2.md §8), before anything coerces
+ * them (domain/hsp-table.ts makes typed arrays of them, and the exports write them as they are).
+ * A record is refused when a field is missing or of the wrong type: `index`, `q_idx`, `s_idx` and
+ * `rank` whole numbers of 0 or more, coordinates whole numbers of 1 or more, frames null or -3 to
+ * 3 other than 0, scores numbers, `subject_length` null or a whole number, aligned rows null or
+ * text, byte ranges null or [start, end] within their output; or when an index is outside 0 to
+ * count - 1 or repeated, a record index is beyond the record tables, or a query has a rank twice.
+ * Fields that the ABI may add later are left alone.
  */
-export function hitTableProblem(table: HspTable, run: SessionRun): string | undefined {
-  if (table.count !== run.hitCount) return `there are ${table.count} HSP records, but the manifest gives ${run.hitCount}`;
-  const queries = run.query.records.id.length;
-  const subjects = run.subject.records.id.length;
-  const seen = new Uint8Array(table.count);
-  const ranks = new Set<string>();
-  const coordinate = (v: number) => Number.isSafeInteger(v) && v >= 1;
-  const within = (start: number, end: number, length: number) =>
-    start === -1 ? end === -1 : Number.isSafeInteger(start) && Number.isSafeInteger(end) && start >= 0 && start <= end && end <= length;
-  for (let row = 0; row < table.count; row++) {
-    const index = table.index[row]!;
-    const where = `HSP record ${row + 1}`;
-    if (index < 0 || index >= table.count || seen[index] === 1) return `${where} has an index that is outside 0 to ${table.count - 1} or repeated`;
-    seen[index] = 1;
-    const q = table.qIdx[row]!;
-    const s = table.sIdx[row]!;
-    if (q < 0 || q >= queries) return `${where} names query record ${q}, but the run has ${queries} query records`;
-    if (s < 0 || s >= subjects) return `${where} names subject record ${s}, but the run has ${subjects} subject records`;
-    const rank = table.rank[row]!;
-    if (rank < 0 || ranks.has(`${q}/${rank}`)) return `${where} has a rank that is negative or that another HSP of its query has`;
-    ranks.add(`${q}/${rank}`);
-    if (![table.qStart, table.qEnd, table.sStart, table.sEnd].every((column) => coordinate(column[row]!))) {
-      return `${where} has a coordinate that is not a whole number of 1 or more`;
-    }
-    if (Math.abs(table.queryFrame[row]!) > 3 || Math.abs(table.subjectFrame[row]!) > 3) return `${where} has a frame outside -3 to 3`;
-    if ([table.rawScore, table.bitScore, table.eValue].some((column) => Number.isNaN(column[row]!))) return `${where} has a score that is not a number`;
-    if (!within(table.out6Start[row]!, table.out6End[row]!, run.blocks.out6)) return `${where} has an outfmt 6 range outside the run's ${run.blocks.out6} bytes of outfmt 6`;
-    if (!within(table.out0Start[row]!, table.out0End[row]!, run.blocks.out0) || !within(table.out0SubjectStart[row]!, table.out0SubjectEnd[row]!, run.blocks.out0)) {
-      return `${where} has an outfmt 0 range outside the run's ${run.blocks.out0} bytes of outfmt 0`;
-    }
+export class HspRecordCheck {
+  private records = 0;
+  private readonly seen: Uint8Array;
+  /** The ranks of each query record seen so far. */
+  private readonly ranks = new Map<number, Set<number>>();
+
+  constructor(private readonly bounds: HspRecordBounds) {
+    this.seen = new Uint8Array(bounds.count);
   }
-  return undefined;
+
+  /** Why the next record (the parsed JSON of its line) is not one that the run can have, or undefined. */
+  next(value: unknown): string | undefined {
+    const { count, queries, subjects, out0, out6 } = this.bounds;
+    const where = `HSP record ${++this.records}`;
+    if (this.records > count) return `there are more HSP records than the ${count} that the manifest gives`;
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) return `${where} is not a JSON object`;
+    const record = value as Record<string, unknown>;
+    const wrong = (field: string, expected: string) =>
+      record[field] === undefined ? `${where} has no ${field}` : `${where} has ${field} ${shown(record[field])}, not ${expected}`;
+    for (const field of ['index', 'q_idx', 's_idx', 'rank']) if (!isCount(record[field])) return wrong(field, 'a whole number of 0 or more');
+    const [index, q, s, rank] = [record.index, record.q_idx, record.s_idx, record.rank] as number[];
+    if (index! >= count || this.seen[index!] === 1) return `${where} has an index that is outside 0 to ${count - 1} or repeated`;
+    this.seen[index!] = 1;
+    if (q! >= queries) return `${where} names query record ${q}, but the run has ${queries} query records`;
+    if (s! >= subjects) return `${where} names subject record ${s}, but the run has ${subjects} subject records`;
+    let ranks = this.ranks.get(q!);
+    if (ranks === undefined) this.ranks.set(q!, (ranks = new Set()));
+    if (ranks.has(rank!)) return `${where} has a rank that another HSP of its query has`;
+    ranks.add(rank!);
+    for (const field of ['q_start', 'q_end', 's_start', 's_end']) {
+      if (!isCount(record[field]) || record[field] === 0) return wrong(field, 'a coordinate (a whole number of 1 or more)');
+    }
+    for (const field of ['query_frame', 'subject_frame']) if (!isFrame(record[field])) return wrong(field, 'null or a frame of -3 to 3 other than 0');
+    for (const field of ['raw_score', 'bit_score', 'e_value']) {
+      if (typeof record[field] !== 'number' || !Number.isFinite(record[field])) return wrong(field, 'a number');
+    }
+    if (record.subject_length !== null && !isCount(record.subject_length)) return wrong('subject_length', 'null or a whole number of 0 or more');
+    for (const field of ['query_aligned', 'subject_aligned']) {
+      if (record[field] !== null && typeof record[field] !== 'string') return wrong(field, 'null or text');
+    }
+    if (!isRange(record.out6, out6)) return wrong('out6', `null or a byte range within the run's ${out6} bytes of outfmt 6`);
+    for (const field of ['out0', 'out0_subject']) {
+      if (!isRange(record[field], out0)) return wrong(field, `null or a byte range within the run's ${out0} bytes of outfmt 0`);
+    }
+    return undefined;
+  }
+
+  /** After the last record: why their count is not the manifest's, or undefined. */
+  finish(): string | undefined {
+    const { count } = this.bounds;
+    return this.records === count ? undefined : `there are ${this.records} HSP records, but the manifest gives ${count}`;
+  }
+}
+
+/** A JSON value in a message: its first 40 characters. */
+function shown(value: unknown): string {
+  // JSON.parse makes a number too large for a double Infinity, which JSON.stringify would write as null.
+  const text = typeof value === 'number' && !Number.isFinite(value) ? String(value) : (JSON.stringify(value) ?? String(value));
+  return text.length > 40 ? `${text.slice(0, 40)}…` : text;
 }
 
 /** A record of a run input as the re-attachment compares it: its ID, length and SHA-256. */

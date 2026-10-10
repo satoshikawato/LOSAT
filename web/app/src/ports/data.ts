@@ -8,7 +8,7 @@ import type { DatasetRevision, FastaParserKind, RecordKey } from '../domain/data
 import type { HspTable } from '../domain/hsp-table';
 import type { OutputFormat } from '../domain/output-format';
 import type { InputRole, ProgramId } from '../domain/programs';
-import type { SessionRecordTable, SessionSource } from '../domain/session-file';
+import type { HspRecordBounds, SessionRecordTable, SessionSource } from '../domain/session-file';
 import type { HspRecord } from './engine';
 import type { InputCheck } from './input-check';
 import type { OutputStream } from './run-output';
@@ -152,6 +152,14 @@ export interface RunStore {
    * UI thread as objects (design §10.2).
    */
   readHitTable(runId: string): Promise<HspTable>;
+  /**
+   * Checks the HSP records of a committed run as the JSON of their lines, before anything coerces
+   * them (domain/session-file.ts `HspRecordCheck`), reading stream 1 in bounded ranges in the Data
+   * worker: resolves with why a record is not one that the run can have, or undefined. For a run
+   * loaded from a session file, whose records no engine of this site wrote. Rejects when a line
+   * is not JSON.
+   */
+  checkHspRecords(runId: string, bounds: HspRecordBounds): Promise<string | undefined>;
   readDiagnostics(runId: string): Promise<string>;
   deleteRun(runId: string): Promise<void>;
   /** The byte length of each stream of a committed run (ports/run-output.ts), for a session file. */

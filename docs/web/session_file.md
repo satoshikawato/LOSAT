@@ -131,11 +131,12 @@ the next run numbers of this session; they are never queued, never validated, an
 never asked. The queue, the results header and Run details say "from `<file>`, run N there". A
 loaded run's InputSnapshot has no engine bytes and no revisions (`bytes` is absent); Run details
 shows the input's size from the manifest. Candidates are added to the tray with their notes and
-times, rebuilt from the loaded runs' HSP records and outfmt 6 rows: the file gives only the
-reference.
+times, rebuilt from the loaded runs' HSP records (read 1,000 at a time; the tray keeps no aligned
+rows) and outfmt 6 rows: the file gives only the reference.
 
-A file is **refused** with a message that says what is wrong and where, and then nothing is loaded
-(every run staged or committed for it is deleted):
+A file is **refused** with a message that says what is wrong and where, and then nothing is loaded:
+every run staged or committed for it is deleted, and the runs and candidates join the working
+session only after every check has passed and the tray's entries are made:
 
 - not gzip; damaged or cut gzip data (a changed byte, a cut file, data after the gzip member);
 - a wrong first line; a newer container version or schema;
@@ -144,11 +145,14 @@ A file is **refused** with a message that says what is wrong and where, and then
   `runs[1].query.sha256`);
 - blocks missing, extra, out of order, of another length than the manifest gives, longer than the
   header states, or a file that ends anywhere before its end line, or has bytes after it;
-- HSP records that the run cannot have: another count than `hitCount`; an index outside
-  0..count-1 or repeated; a `q_idx`/`s_idx` beyond the record tables; a rank repeated within a
-  query; a coordinate that is not a whole number of 1 or more; a frame outside -3..3; a score that
-  is not a number; an `out6`/`out0`/`out0_subject` range outside its output; a line that is not
-  JSON;
+- HSP records that the run cannot have, checked in the Data worker as the JSON of their lines,
+  before anything coerces them (the results' typed arrays, the exports): another count than
+  `hitCount`; a line that is not a JSON object; a field missing or of the wrong type (`index`,
+  `q_idx`, `s_idx` and `rank` whole numbers of 0 or more; coordinates whole numbers of 1 or more;
+  frames null or -3..3 other than 0; scores numbers; `subject_length` null or a whole number;
+  aligned rows null or text; `out6`/`out0`/`out0_subject` null or `[start, end]`); an index
+  outside 0..count-1 or repeated; a `q_idx`/`s_idx` beyond the record tables; a rank repeated
+  within a query; a range outside its output. Fields that a later ABI adds are left alone;
 - candidates that name a run or an HSP that the file does not have, or whose `qIdx`/`rank`
   disagree with the HSP record at `index`.
 

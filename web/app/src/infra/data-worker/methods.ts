@@ -21,6 +21,7 @@ export const DATA_GATEWAY_METHODS = [
   'readHits',
   'readHspRecords',
   'readHitTable',
+  'checkHspRecords',
   'readDiagnostics',
   'deleteRun',
   'storageInfo',

@@ -4,14 +4,14 @@
 // fields and limits, the order and lengths of the blocks, truncation at any byte, data after the
 // end, and candidates or HSP records that the runs cannot have.
 import { describe, expect, it } from 'vitest';
-import { hspTable, type HspSummary } from '../../src/domain/hsp-table';
 import {
   blockHeader,
   checkCandidates,
   checkManifest,
   containerEnd,
   containerHeader,
-  hitTableProblem,
+  hspRecordBounds,
+  HspRecordCheck,
   isGzip,
   recordsMismatch,
   runBlockName,
@@ -413,7 +413,8 @@ describe('session file refusals', () => {
 
 describe('what a loaded run must agree with', () => {
   const r = run();
-  const hsp = (overrides: Partial<HspSummary> = {}): HspSummary => ({
+  /** An HSP record as the engine writes it (docs/web/abi_v2.md §8). */
+  const hsp = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
     index: 0,
     q_idx: 0,
     s_idx: 1,
@@ -427,34 +428,78 @@ describe('what a loaded run must agree with', () => {
     s_end: 5,
     query_frame: null,
     subject_frame: null,
+    subject_length: 20,
+    query_aligned: 'ACGTACGT',
+    subject_aligned: 'ACGTACGT',
     out6: [0, 15],
     out0: [0, 6],
     out0_subject: [0, 3],
     ...overrides,
   });
-  const second = () => hsp({ index: 1, q_idx: 1, rank: 0, out6: [15, 30], out0: null, out0_subject: null });
+  const second = (overrides: Record<string, unknown> = {}) =>
+    hsp({ index: 1, q_idx: 1, rank: 0, query_aligned: null, subject_aligned: null, out6: [15, 30], out0: null, out0_subject: null, ...overrides });
+  /** The first problem of records checked in order, as their JSON lines would be (the JSON text, parsed). */
+  const problem = (records: readonly unknown[]): string | undefined => {
+    const check = new HspRecordCheck(hspRecordBounds(r));
+    for (const record of records) {
+      const found = check.next(JSON.parse(JSON.stringify(record)) as unknown);
+      if (found !== undefined) return found;
+    }
+    return check.finish();
+  };
 
-  it('accepts HSP records within the run', () => {
-    expect(hitTableProblem(hspTable([hsp(), second()]), r)).toBeUndefined();
-    expect(hitTableProblem(hspTable([second(), hsp()]), r)).toBeUndefined();
+  it('accepts HSP records within the run, in any order of their indices, with frames and fields that the ABI may add', () => {
+    expect(problem([hsp(), second()])).toBeUndefined();
+    expect(problem([second(), hsp()])).toBeUndefined();
+    expect(problem([hsp({ query_frame: -3, subject_frame: 2, later_field: 'x' }), second({ subject_length: null })])).toBeUndefined();
   });
 
   it('names the HSP record that the run cannot have', () => {
-    const problem = (records: HspSummary[]) => hitTableProblem(hspTable(records), r);
     expect(problem([hsp()])).toBe('there are 1 HSP records, but the manifest gives 2');
-    expect(problem([hsp(), second(), hsp({ index: 2 })])).toMatch(/there are 3 HSP records/);
-    expect(problem([hsp(), hsp({ index: 0, rank: 1 })])).toMatch(/HSP record 2 has an index that is outside 0 to 1 or repeated/);
-    expect(problem([hsp(), second()].map((h, i) => (i === 1 ? { ...h, q_idx: 2 } : h)))).toMatch(/HSP record 2 names query record 2, but the run has 2 query records/);
-    expect(problem([hsp({ s_idx: 2 }), second()])).toMatch(/HSP record 1 names subject record 2, but the run has 2 subject records/);
-    expect(problem([hsp(), { ...second(), q_idx: 0 }])).toMatch(/HSP record 2 has a rank that is negative or that another HSP of its query has/);
-    expect(problem([hsp({ q_start: 0 }), second()])).toMatch(/coordinate that is not a whole number of 1 or more/);
-    expect(problem([hsp({ s_end: 2.5 }), second()])).toMatch(/coordinate that is not a whole number/);
-    expect(problem([hsp({ query_frame: 4 }), second()])).toMatch(/frame outside -3 to 3/);
-    expect(problem([hsp({ bit_score: Number.NaN }), second()])).toMatch(/score that is not a number/);
-    expect(problem([hsp({ out6: [0, 31] }), second()])).toMatch(/outfmt 6 range outside the run's 30 bytes of outfmt 6/);
-    expect(problem([hsp({ out6: [5, 4] }), second()])).toMatch(/outfmt 6 range/);
-    expect(problem([hsp({ out0: [10, 13] }), second()])).toMatch(/outfmt 0 range outside the run's 12 bytes of outfmt 0/);
-    expect(problem([hsp({ out0_subject: [0, 13] }), second()])).toMatch(/outfmt 0 range/);
+    expect(problem([hsp(), second(), hsp({ index: 2 })])).toBe('there are more HSP records than the 2 that the manifest gives');
+    expect(problem([hsp(), hsp({ index: 0, rank: 1 })])).toBe('HSP record 2 has an index that is outside 0 to 1 or repeated');
+    expect(problem([hsp(), second({ q_idx: 2 })])).toBe('HSP record 2 names query record 2, but the run has 2 query records');
+    expect(problem([hsp({ s_idx: 2 }), second()])).toBe('HSP record 1 names subject record 2, but the run has 2 subject records');
+    expect(problem([hsp(), second({ q_idx: 0 })])).toBe('HSP record 2 has a rank that another HSP of its query has');
+    expect(problem([hsp({ q_start: 0 }), second()])).toBe('HSP record 1 has q_start 0, not a coordinate (a whole number of 1 or more)');
+    expect(problem([hsp({ s_end: 2.5 }), second()])).toMatch(/has s_end 2\.5, not a coordinate/);
+    expect(problem([hsp({ query_frame: 4 }), second()])).toBe('HSP record 1 has query_frame 4, not null or a frame of -3 to 3 other than 0');
+    expect(problem([hsp({ subject_frame: 0 }), second()])).toMatch(/has subject_frame 0, not null or a frame/);
+    expect(problem([hsp({ out6: [0, 31] }), second()])).toBe("HSP record 1 has out6 [0,31], not null or a byte range within the run's 30 bytes of outfmt 6");
+    expect(problem([hsp({ out6: [5, 4] }), second()])).toMatch(/has out6 \[5,4\]/);
+    expect(problem([hsp({ out0: [10, 13] }), second()])).toMatch(/has out0 \[10,13\], not null or a byte range within the run's 12 bytes of outfmt 0/);
+    expect(problem([hsp({ out0_subject: [0, 13] }), second()])).toMatch(/has out0_subject \[0,13\]/);
+  });
+
+  it('refuses fields of the wrong type that a typed array or a coercion would have hidden (code review M1)', () => {
+    // Each would become another value in the table's typed arrays: null and true become 0 or 1,
+    // 2^32 becomes 0 in an Int32Array, 259 becomes 3 in an Int8Array, "0" becomes 0.
+    const cases: Array<[Record<string, unknown>, string]> = [
+      [{ s_idx: null }, 'HSP record 1 has s_idx null, not a whole number of 0 or more'],
+      [{ s_idx: undefined }, 'HSP record 1 has no s_idx'],
+      [{ s_idx: 0.5 }, 'HSP record 1 has s_idx 0.5, not a whole number of 0 or more'],
+      [{ q_idx: 4294967296 }, 'HSP record 1 names query record 4294967296, but the run has 2 query records'],
+      [{ q_idx: '0' }, 'HSP record 1 has q_idx "0", not a whole number of 0 or more'],
+      [{ index: -1 }, 'HSP record 1 has index -1, not a whole number of 0 or more'],
+      [{ rank: 2.5 }, 'HSP record 1 has rank 2.5, not a whole number of 0 or more'],
+      [{ q_start: true }, 'HSP record 1 has q_start true, not a coordinate (a whole number of 1 or more)'],
+      [{ q_end: 2 ** 53 }, 'HSP record 1 has q_end 9007199254740992, not a coordinate (a whole number of 1 or more)'],
+      [{ query_frame: 259 }, 'HSP record 1 has query_frame 259, not null or a frame of -3 to 3 other than 0'],
+      [{ subject_frame: '1' }, 'HSP record 1 has subject_frame "1", not null or a frame of -3 to 3 other than 0'],
+      [{ bit_score: null }, 'HSP record 1 has bit_score null, not a number'],
+      [{ e_value: '1e-5' }, 'HSP record 1 has e_value "1e-5", not a number'],
+      [{ subject_length: -1 }, 'HSP record 1 has subject_length -1, not null or a whole number of 0 or more'],
+      [{ query_aligned: 5 }, 'HSP record 1 has query_aligned 5, not null or text'],
+      [{ out6: [0, '15'] }, 'HSP record 1 has out6 [0,"15"], not null or a byte range within the run\'s 30 bytes of outfmt 6'],
+      [{ out0: [0, 6, 7] }, "HSP record 1 has out0 [0,6,7], not null or a byte range within the run's 12 bytes of outfmt 0"],
+      [{ out0_subject: 'x'.repeat(100) }, `HSP record 1 has out0_subject "${'x'.repeat(39)}…, not null or a byte range within the run's 12 bytes of outfmt 0`],
+    ];
+    for (const [change, message] of cases) expect(problem([hsp(change), second()])).toBe(message);
+    expect(problem([[0], second()])).toBe('HSP record 1 is not a JSON object');
+    expect(problem([null, second()])).toBe('HSP record 1 is not a JSON object');
+    // JSON numbers too large for a double are Infinity once parsed.
+    const check = new HspRecordCheck(hspRecordBounds(r));
+    expect(check.next(JSON.parse(JSON.stringify(hsp()).replace('"raw_score":10', '"raw_score":1e999')))).toBe('HSP record 1 has raw_score Infinity, not a number');
   });
 
   it('names the first record of chosen files that differs from the saved input, or the count', () => {

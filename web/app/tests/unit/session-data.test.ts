@@ -15,9 +15,10 @@ import { DIAGNOSTICS_STREAM, HITS_STREAM } from '../../src/ports/run-output';
 const encoder = new TextEncoder();
 const sha256 = (text: string) => createHash('sha256').update(text).digest('hex');
 
-function service() {
+function service(readChunkBytes?: number) {
   let token = 0;
   return new DataService({
+    ...(readChunkBytes === undefined ? {} : { readChunkBytes }),
     store: new MemoryBlockStore(),
     scanner: new FakeScanner(),
     checker: new FakeInputChecker(),
@@ -64,6 +65,50 @@ describe('DataService for session files', () => {
     await expect(data.readRunBlock('r', 6, 0, 1)).rejects.toThrow(RangeError);
     await expect(data.readRunBlock('r', 2 as never, 0, 0)).rejects.toThrow(/not a stream/);
     await expect(data.runBlockLengths('other')).rejects.toThrow(/no committed result/);
+  });
+
+  it('checks the HSP records of a committed run as the JSON of their lines, read in bounded ranges', async () => {
+    const data = service(64);
+    const record = (index: number, change: Record<string, unknown> = {}) =>
+      JSON.stringify({
+        index,
+        q_idx: 0,
+        s_idx: 0,
+        rank: index,
+        raw_score: 1,
+        bit_score: 2,
+        e_value: 0.5,
+        q_start: 1,
+        q_end: 4,
+        s_start: 1,
+        s_end: 4,
+        query_frame: null,
+        subject_frame: null,
+        subject_length: 4,
+        query_aligned: 'ACGT',
+        subject_aligned: 'ACGT',
+        out6: null,
+        out0: null,
+        out0_subject: null,
+        ...change,
+      });
+    const committed = async (runId: string, lines: readonly string[]) => {
+      const writer = new RunOutputWriter(await data.openRun(runId));
+      writer.write(HITS_STREAM, encoder.encode(`${lines.join('\n')}\n`));
+      writer.end();
+      await data.commitRun(runId);
+    };
+    const bounds = { count: 3, queries: 1, subjects: 1, out0: 0, out6: 0 };
+    await committed('good', [record(0), record(1), record(2)]);
+    expect(await data.checkHspRecords('good', bounds)).toBeUndefined();
+    // The records that come after a refused one are not read.
+    await committed('bad', [record(0), record(1, { s_idx: null }), 'not JSON']);
+    expect(await data.checkHspRecords('bad', bounds)).toBe('HSP record 2 has s_idx null, not a whole number of 0 or more');
+    await committed('broken', [record(0), 'not JSON', record(2)]);
+    await expect(data.checkHspRecords('broken', bounds)).rejects.toThrow(/^HSP record 2 is not JSON/);
+    expect(await data.checkHspRecords('good', { ...bounds, count: 4 })).toBe('there are 3 HSP records, but the manifest gives 4');
+    // The lines found for the check serve readHspRecords too.
+    expect((await data.readHspRecords('good', [2]))[0]!.rank).toBe(2);
   });
 
   it('tells a writer how many bytes of a staged run are stored, once they reach a count', async () => {

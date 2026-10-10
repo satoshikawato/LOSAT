@@ -14,7 +14,7 @@ import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { BUILD_HAS_ENGINE } from './support/browser';
 import { REPOSITORY } from './support/harness-server';
-import { fasta, openFiles, openParameters, program, submit, task, waitStatus } from './support/search';
+import { fasta, openFiles, openParameters, program, showRecords, submit, task, waitStatus } from './support/search';
 
 const SCREENS = process.env['LOSAT_WEB_SCREENS'] || undefined;
 test.skip(SCREENS === undefined, 'screen records are taken only with LOSAT_WEB_SCREENS');
@@ -78,6 +78,13 @@ for (const size of SIZES) {
     await task(page, 'blastn');
     await page.getByTestId('job-title').fill('Contigs against LC738884');
     await expect(page.getByTestId('argv-validation')).not.toHaveAttribute('data-state', 'checking');
+    // The engine's reader now refuses at the file (above), not at a record of an indexed input, so
+    // the refused-record mark and "Exclude record" are covered by the FakeEngine E2E only
+    // (search.spec.ts). The user's own exclusion stays on screen: the protein-like record, struck
+    // through in the list of records, left out of this and the following searches.
+    await showRecords(page, 'query');
+    await page.getByTestId('query-source-0-record-2').uncheck();
+    await expect(page.getByTestId('query-source-0-summary')).toContainText('(2 included)');
     await shoot(page, browserName, size.name, '02-inputs-refused-region');
 
     // Remove the file that cannot be read and queue a group of separate searches behind a running one.
@@ -420,7 +427,11 @@ for (const size of SIZES) {
     await expect(page.getByTestId('run-6-status')).toHaveText('cancelled');
     await submit(page);
     await expect(queued).toHaveCount(1);
-    // The queue shows beside either tab, at the same place (W4b).
+    // The queue shows beside either tab, at the same place (W4b). State 15 shows run 4's Dot Plot
+    // as S13b recorded it (24 to 28 left run 1's Alignments open).
+    await openResults(page, 4);
+    await page.getByTestId('pane-dotplot').click();
+    await expect(canvas).toHaveAttribute('data-segments', /^[1-9]/);
     await page.getByTestId('tab-results').click();
     await shoot(page, browserName, size.name, '15-results-queue-open-waiting-cancelled');
 

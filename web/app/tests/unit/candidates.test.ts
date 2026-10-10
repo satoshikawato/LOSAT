@@ -521,7 +521,7 @@ describe('CandidateTray', () => {
       candidates: 4,
       sequences: 4,
       bytes: encoder.encode(text).length,
-      clipped: [{ name: 's0', runNumber: 1, role: 'subject', position: 0, hsps: ['1.3'], requested: { from: -4, to: 61 }, actual: { from: 1, to: 61 } }],
+      clipped: [{ name: 's0', runNumber: 1, role: 'subject', position: 0, hsps: ['1.3'], requested: { from: -4, to: 61 }, actual: { from: 1, to: 61 }, recordLength: 100, unit: 'nt' }],
       unknownStrand: [expect.stringContaining('HSP 1.4 of run 1 covers one letter of subject record 2')],
     });
 

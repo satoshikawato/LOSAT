@@ -6,7 +6,7 @@
 // alignments (the aligned rows of their HSP records), kept in two files. Everything acts through
 // the tray (application/candidates.ts); the values shown are the HSP record's coordinates and the
 // outfmt 6 row's fields as written.
-import { computed, nextTick, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import type { Candidate, CandidateTray, TrayOrder, TrayState } from '../application/candidates';
 import type { HspId } from '../application/results';
 import { interval, spanOn } from '../domain/coordinates';
@@ -23,10 +23,12 @@ const emit = defineEmits<{ reveal: [id: HspId] }>();
 const narrow = useNarrow();
 /** A row is two lines (the values; the note and the actions), on a phone four (W4 judgments 16-23: no sideways page scroll). */
 const ROW_PX = computed(() => (narrow.value ? 168 : 68));
-const MAX_ROWS = computed(() => (narrow.value ? 3 : 8));
+/** A phone shows three rows and half of the fourth, so that the cut row says the list scrolls (screen review L3). */
+const MAX_ROWS = computed(() => (narrow.value ? 3.5 : 8));
 const root = ref<HTMLElement>();
 const heading = ref<HTMLElement>();
 const gutter = ref(0);
+const scroller = ref<HTMLElement>();
 
 const count = computed(() => props.state.candidates.length);
 const chosen = computed(() => props.state.candidates.filter((candidate) => props.state.selected.has(candidate.key)));
@@ -47,6 +49,39 @@ function rangeText(candidate: Candidate): string {
 const strand = (candidate: Candidate) => spanOn(candidate.coordinates, 'subject', candidate.subject.kind).strand;
 const runTitle = (candidate: Candidate) => `Run ${candidate.run.number}${candidate.run.title === undefined ? '' : `: ${candidate.run.title}`}`;
 const hspText = (candidate: Candidate) => `HSP ${candidate.id.qIdx + 1}.${candidate.id.rank + 1}`;
+
+/**
+ * The Subject and Run columns are as wide as their longest values at the table's type (within the
+ * bounds in styles.css; a longer value ends in an ellipsis and has its title), as the Descriptions'
+ * Subject ID column is (W4b screen review L8), so that a short Run does not take the width of an ID
+ * (S14 screen review L4). Only the longest values by their count of letters are measured.
+ */
+const subjectWidth = ref<string>();
+const runWidth = ref<string>();
+let measurer: CanvasRenderingContext2D | null | undefined;
+function widest(texts: readonly string[]): string | undefined {
+  const element = scroller.value;
+  if (element === undefined || texts.length === 0) return undefined;
+  measurer ??= document.createElement('canvas').getContext('2d');
+  if (measurer === null) return undefined;
+  const style = getComputedStyle(element);
+  measurer.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+  const longest = Math.max(...texts.map((text) => text.length));
+  let width = 0;
+  let measured = 0;
+  for (const text of texts) {
+    if (text.length < longest - 4) continue;
+    width = Math.max(width, measurer.measureText(text).width);
+    if (++measured === 64) break;
+  }
+  return `${Math.ceil(width) + 1}px`;
+}
+function measureColumns(): void {
+  subjectWidth.value = widest(props.state.candidates.map(subjectName));
+  runWidth.value = widest(props.state.candidates.map((candidate) => `Run ${candidate.run.number}${candidate.run.title ? ` ${candidate.run.title}` : ''}`));
+}
+onMounted(measureColumns);
+watch(() => props.state.candidates, measureColumns, { flush: 'post' });
 
 // --- order, selection, notes, removal ------------------------------------------------------------
 
@@ -160,7 +195,7 @@ async function downloadAlignments(): Promise<void> {
 
 /** Lists in the summary show their first items; the file's headers hold every one. */
 const LISTED = 20;
-const intervalWords = (iv: { readonly from: number; readonly to: number }) => `${iv.from} to ${iv.to}`;
+const intervalWords = (iv: { readonly from: number; readonly to: number }, unit: string) => `${iv.from} to ${iv.to} ${unit}`;
 </script>
 
 <template>
@@ -198,7 +233,7 @@ const intervalWords = (iv: { readonly from: number; readonly to: number }) => `$
             Remove selected
           </button>
         </div>
-        <div class="table-scroll" :style="{ '--row-gutter': `${gutter}px` }">
+        <div ref="scroller" class="table-scroll" :style="{ '--row-gutter': `${gutter}px`, '--subject-width': subjectWidth, '--run-width': runWidth }">
           <div v-if="!narrow" class="table-head candidate-grid marked-head" role="row">
             <span class="num-head" data-col="n">#</span>
             <span data-col="run">Run</span>
@@ -377,7 +412,7 @@ const intervalWords = (iv: { readonly from: number; readonly to: number }) => `$
             <template v-if="state.last.output === 'sequences'">
               <p>
                 Saved {{ state.last.fileName }}: {{ formatCounted(state.last.sequences, 'sequence') }} of {{ state.last.role }} records from
-                {{ formatCounted(state.last.candidates, 'candidate') }}, {{ formatBytes(state.last.bytes) }}.
+                {{ formatCounted(state.last.candidates, 'candidate') }}, <span class="nowrap">{{ formatBytes(state.last.bytes) }}</span>.
               </p>
               <template v-if="state.last.clipped.length > 0">
                 <p>
@@ -387,7 +422,9 @@ const intervalWords = (iv: { readonly from: number; readonly to: number }) => `$
                 <ul>
                   <li v-for="(clip, i) in state.last.clipped.slice(0, LISTED)" :key="i" data-testid="extract-clipped">
                     {{ clip.name }} (run {{ clip.runNumber }}, {{ clip.role }} record {{ clip.position + 1 }}, HSP {{ clip.hsps.join(', ') }}):
-                    requested {{ intervalWords(clip.requested) }}, written {{ intervalWords(clip.actual) }}
+                    requested <span class="nowrap">{{ intervalWords(clip.requested, clip.unit) }}</span>, written
+                    <span class="nowrap">{{ intervalWords(clip.actual, clip.unit) }}</span> of
+                    <span class="nowrap">{{ clip.recordLength }} {{ clip.unit }}</span>
                   </li>
                   <li v-if="state.last.clipped.length > LISTED" class="muted">and {{ formatCount(state.last.clipped.length - LISTED) }} more</li>
                 </ul>
@@ -403,7 +440,7 @@ const intervalWords = (iv: { readonly from: number; readonly to: number }) => `$
             <template v-else>
               <p>
                 Saved {{ state.last.fileName }}: {{ formatCounted(state.last.alignments, 'alignment') }} from
-                {{ formatCounted(state.last.candidates, 'candidate') }}, {{ formatBytes(state.last.bytes) }}.
+                {{ formatCounted(state.last.candidates, 'candidate') }}, <span class="nowrap">{{ formatBytes(state.last.bytes) }}</span>.
               </p>
               <template v-if="state.last.missing.length > 0">
                 <p>Not written:</p>

@@ -107,6 +107,9 @@ export interface ClippedSequence {
   readonly hsps: readonly string[];
   readonly requested: Interval;
   readonly actual: Interval;
+  /** The record's length, in `unit` (the header's `length=` and `unit=`). */
+  readonly recordLength: number;
+  readonly unit: Unit;
 }
 
 /** What `extract` wrote. */
@@ -372,6 +375,8 @@ export class CandidateTray {
             hsps: piece.hsps,
             requested: piece.interval.requested,
             actual: piece.interval.actual,
+            recordLength: piece.recordLength,
+            unit: piece.unit,
           })),
         unknownStrand: plan.notes,
       };

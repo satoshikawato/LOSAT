@@ -1629,6 +1629,12 @@ button.link[aria-disabled='true'] {
   cursor: pointer;
 }
 
+/* The selected line's 3 px bar stays clear of the check box, which is 20 px on a phone (S14 screen review I4). */
+.marked-line > .row-mark {
+  box-sizing: border-box;
+  padding-left: 4px;
+}
+
 .row-mark input {
   margin: 0;
   flex: none;
@@ -1699,7 +1705,9 @@ button.link[aria-disabled='true'] {
   display: grid;
   gap: 6px;
   align-items: center;
-  grid-template-columns: 4ch minmax(8ch, 0.8fr) 7.5ch minmax(9ch, 1fr) minmax(9ch, 1fr) 17ch 7ch 8.25ch 9ch;
+  grid-template-columns:
+    4ch clamp(6ch, var(--run-width, 8ch), 24ch) 7.5ch minmax(9ch, 1fr) clamp(10ch, var(--subject-width, 24ch), 24ch)
+    17ch 7ch 8.25ch 9ch;
 }
 
 .candidate-row {
@@ -1788,8 +1796,15 @@ button.link[aria-disabled='true'] {
   white-space: nowrap;
 }
 
-.candidate-subject {
+/* On a phone the ID may take a second line instead of ending in an ellipsis (S14 screen review L4). */
+.candidate-key > .candidate-subject {
   font-weight: 600;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
 }
 
 .candidate-card .candidate-note {
@@ -1883,6 +1898,10 @@ button.link[aria-disabled='true'] {
   border-left: 3px solid var(--accent);
   background: var(--panel);
   overflow-wrap: anywhere;
+}
+
+.extract-summary .nowrap {
+  white-space: nowrap;
 }
 
 .extract-summary p {

@@ -425,7 +425,7 @@ test.describe('FakeEngine build', () => {
       { header: header('s1', 1, 31, 'subject', 1, 50, '3.1', 'unknown', '-4-31'), letters: slice(S.s1, 1, 31) },
     ]);
     await expect(page.getByTestId('extract-clipped')).toHaveCount(5);
-    await expect(page.getByTestId('extract-clipped').first()).toHaveText('s1 (run 1, subject record 1, HSP 1.1): requested -4 to 55, written 1 to 50');
+    await expect(page.getByTestId('extract-clipped').first()).toHaveText('s1 (run 1, subject record 1, HSP 1.1): requested -4 to 55 nt, written 1 to 50 nt of 50 nt');
 
     // One region spanning the HSPs of each record (the order of the records' first HSPs).
     await page.getByTestId('extract-region-hit').check();

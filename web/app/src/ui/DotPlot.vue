@@ -733,7 +733,7 @@ const viewText = computed(() => [view.value.x0, view.value.x1, view.value.y0, vi
     </div>
     <div ref="stage" class="plot-stage">
       <!-- As tall as the canvas, and the popup when it is under the plot. -->
-      <div class="plot-layers" :style="{ width: `${canvasWidth}px` }">
+      <div class="plot-layers" :style="{ width: `${canvasWidth}px`, '--stage-px': `${stageWidth}px` }">
         <canvas
           ref="base"
           class="plot-base"

@@ -83,7 +83,7 @@ below only when its condition holds:
 | Item | Time | Required when |
 | --- | --- | --- |
 | Capture, all 236 cases (`capture_outputs.py run ... --jobs 4`, then `compare` with the S02 baseline and the previous gate) | median 37 min | TBLASTX or shared code changed; otherwise the standard tier's fast regressions cover the same hashes |
-| Gate A, 20 pairs (`LOSAT/tests/audit_tblastx_v010.py`) | 3-5.6 h when overlapped; run alone | TBLASTX or shared scoring, statistics, or reader code changed |
+| Gate A, 20 pairs (`LOSAT/tests/audit_tblastx_v010.py`) | 3-5.6 h when overlapped; run alone | TBLASTX or shared scoring, statistics, or reader code changed, unless the capture of the same commit matches the S02 baseline and the Gate A frozen hashes for all 20 TBLASTX pairs (a change proven byte-identical; the NCBI side is the fixed oracle; Owner 2026-10-10) |
 | V-ABI full (`run_v_abi_parallel.py ... --jobs 4`) | median 167 min | ABI, adapter, `run_local`, or report layer changed; only the touched programs' cases |
 | Option sweeps (`docs/evidence/losat_web_e2e/option_sweep.py`, TBLASTN/TBLASTX `--jobs 2`) | 30-34 min, up to 8.6 GB per case | option parsing, validation, or a program's defaults changed |
 | Range and title sweeps (`docs/evidence/losat_web_e2d/range_sweep.py`, the latest stage's `title_sweep.py` and `check_inputs.py` under `docs/evidence/losat_web_e2*/`) | under 1 min each | range handling, FASTA reading, or defline reporting changed |

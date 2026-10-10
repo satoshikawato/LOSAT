@@ -185,6 +185,20 @@ describe('browserCompression', () => {
     expect(Buffer.from(gunzipSync(Buffer.concat(blocks))).equals(Buffer.from(noise))).toBe(true);
   });
 
+  it('compresses one large write in pieces, the same bytes as many small writes (fix round 2)', async () => {
+    let state = 7;
+    const noise = new Uint8Array((3 << 20) + 5).map(() => (state = (Math.imul(state, 1103515245) + 12345) >>> 0) >>> 24);
+    const blocks: Uint8Array[] = [];
+    const sink = browserCompression.gzip(async (bytes) => void blocks.push(bytes.slice()));
+    await sink.write(noise);
+    await sink.write(noise.subarray(0, 3));
+    await sink.close();
+    const back = gunzipSync(Buffer.concat(blocks));
+    expect(back.length).toBe(noise.length + 3);
+    expect(Buffer.from(back.subarray(0, noise.length)).equals(Buffer.from(noise))).toBe(true);
+    expect([...back.subarray(noise.length)]).toEqual([...noise.subarray(0, 3)]);
+  });
+
   it('fails the writes when the compressed blocks cannot be handed on, and aborts without output', async () => {
     const failing = browserCompression.gzip(async () => {
       throw new Error('disk full');

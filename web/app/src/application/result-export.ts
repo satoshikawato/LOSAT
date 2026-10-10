@@ -8,7 +8,10 @@
 // at any point saves nothing (application/export-writer.ts). The values come from the stored
 // outputs and the HSP records: the outfmt 6 text that the results screen already holds, the HSP
 // records read from the Data worker in batches (never the whole run at once, never one read per
-// HSP), and the outfmt 0 text read in windows of about 1 MiB that serve many sections each.
+// HSP), and the outfmt 0 text read in windows of about 1 MiB that serve many sections each. The
+// report is made in parts of about TEXT_CHARS characters and waits only for those parts and for
+// the windows of outfmt 0: an `await` for each of its million small pieces made the report of
+// 100,000 queries take 16-25 s in Firefox (fix round 2).
 import { hspLabel } from '../domain/extraction';
 import {
   allRows,
@@ -62,8 +65,19 @@ export const exportFileName = (run: { readonly number: number; readonly program:
 export const RECORD_BATCH = 1000;
 /** A batch also ends when the HSPs' coordinates span this many residues, so that long aligned rows stay few per batch. */
 export const RECORD_BATCH_RESIDUES = 4_000_000;
-/** Rows of CSV or of a report's table handed to the Writer at once. */
+/** Rows of CSV handed to the Writer at once. */
 const ROWS_PER_TEXT = 500;
+/** Characters of a report collected before they are handed to the Writer. */
+const TEXT_CHARS = 1 << 16;
+/** HSPs of a JSON batch formatted between two looks at the clock (`pace`). */
+const JSON_GROUP = 250;
+/**
+ * Milliseconds of work after which a file's writing pauses (deps.pause) so the page draws: a batch
+ * of 1,000 JSON records formatted at once held Chromium's page up to 300 ms while the garbage
+ * collector marked a large heap in steps, and WebKit drew no frame for 150-230 ms at the start of
+ * an export of 100,000 queries (fix round 2).
+ */
+const PACE_MS = 20;
 /** Bytes of outfmt 0 read at once: one read serves the headings and sections that lie in it. */
 export const OUTFMT0_WINDOW = 1 << 20;
 
@@ -72,6 +86,8 @@ export type ScopeCounts = Readonly<Record<ExportScope, number>>;
 export interface ExportOptions {
   /** JSON: write the HSP records' aligned rows (default true). */
   readonly aligned?: boolean;
+  /** Report: write the outfmt 0 headings and sections of the HSPs (default true). */
+  readonly alignments?: boolean;
 }
 
 export interface ExportSummary {
@@ -80,6 +96,8 @@ export interface ExportSummary {
   readonly fileName: string;
   readonly hsps: number;
   readonly bytes: number;
+  /** A report saved without the outfmt 0 text of its alignments. */
+  readonly withoutAlignments?: true;
 }
 
 export interface ExportState {
@@ -97,7 +115,14 @@ export interface ResultExporterDeps {
   readonly data: Pick<RunStore, 'readHspRecords' | 'readOutputRange'>;
   readonly downloader: Pick<Downloader, 'open'>;
   readonly now: () => number;
+  /** Lets the page draw between two parts of a file's work (the composition gives the browser's next task). None: no pause. */
+  readonly pause?: () => Promise<void>;
+  /** A clock in milliseconds for the pauses (default Date.now). */
+  readonly clock?: () => number;
 }
+
+/** Waits for the page to draw when the work has gone on for a while (ResultExporter.pacer). */
+type Pace = () => Promise<void>;
 
 /** What one export reads: fixed when it starts. */
 interface ExportJob {
@@ -170,19 +195,28 @@ export class ResultExporter {
     const { snapshot } = loaded.run;
     const fileName = exportFileName(snapshot, format);
     const aligned = options.aligned ?? true;
+    const alignments = options.alignments ?? true;
     this.state.set({ busy: { format, scope, fileName } });
     try {
       const bytes = await writeFile(this.deps.downloader, fileName, EXPORT_FILES[format].mime, (writer) => {
+        const pace = this.pacer();
         switch (format) {
           case 'csv':
-            return writeCsv(writer, job);
+            return writeCsv(writer, job, pace);
           case 'json':
-            return this.writeJson(writer, job, aligned);
+            return this.writeJson(writer, job, aligned, pace);
           case 'report':
-            return this.writeReport(writer, job);
+            return this.writeReport(writer, job, alignments, pace);
         }
       });
-      const last: ExportSummary = { format, scope, fileName, hsps: rows.length, bytes };
+      const last: ExportSummary = {
+        format,
+        scope,
+        fileName,
+        hsps: rows.length,
+        bytes,
+        ...(format === 'report' && !alignments ? { withoutAlignments: true as const } : {}),
+      };
       this.state.set({ last });
       return last;
     } catch (error) {
@@ -193,8 +227,21 @@ export class ResultExporter {
     }
   }
 
+  /** A pause that waits only once PACE_MS of work have passed since the last one. */
+  private pacer(): Pace {
+    const { pause } = this.deps;
+    if (pause === undefined) return async () => undefined;
+    const clock = this.deps.clock ?? Date.now;
+    let last = clock();
+    return async () => {
+      if (clock() - last < PACE_MS) return;
+      await pause();
+      last = clock();
+    };
+  }
+
   /** The JSON document: the run, the scope, then each HSP with its record, read in batches. */
-  private async writeJson(writer: ExportWriter, job: ExportJob, aligned: boolean): Promise<void> {
+  private async writeJson(writer: ExportWriter, job: ExportJob, aligned: boolean, pace: Pace): Promise<void> {
     const { loaded, rows } = job;
     const { table } = loaded.index;
     const runId = loaded.run.snapshot.runId;
@@ -202,25 +249,29 @@ export class ResultExporter {
     let first = true;
     for (const batch of recordBatches(rows, table)) {
       const records = await this.deps.data.readHspRecords(runId, Array.from(batch, (row) => table.index[row]!));
-      const parts: string[] = [];
-      batch.forEach((row, i) => {
-        const record = records[i];
-        if (record === undefined || record.index !== table.index[row]) {
-          throw new Error(`the Data worker returned another HSP record than HSP ${table.index[row]} of run ${loaded.run.snapshot.number}`);
+      for (let start = 0; start < batch.length; start += JSON_GROUP) {
+        await pace();
+        const parts: string[] = [];
+        for (let i = start; i < Math.min(batch.length, start + JSON_GROUP); i++) {
+          const row = batch[i]!;
+          const record = records[i];
+          if (record === undefined || record.index !== table.index[row]) {
+            throw new Error(`the Data worker returned another HSP record than HSP ${table.index[row]} of run ${loaded.run.snapshot.number}`);
+          }
+          parts.push(jsonHsp(exportedHsp(loaded, row), record, aligned, first));
+          first = false;
         }
-        parts.push(jsonHsp(exportedHsp(loaded, row), record, aligned, first));
-        first = false;
-      });
-      await writer.text(parts.join(''));
+        await writer.texts(parts);
+      }
     }
     await writer.text(JSON_TAIL);
   }
 
   /**
-   * The report: the run, then each query of the scope with its HSP table and the outfmt 0 headings
-   * and sections of the HSPs that outfmt 0 shows, then the run's warnings.
+   * The report: the run, then each query of the scope with its HSP table and, unless they are left
+   * out, the outfmt 0 headings and sections of the HSPs that outfmt 0 shows, then the run's warnings.
    */
-  private async writeReport(writer: ExportWriter, job: ExportJob): Promise<void> {
+  private async writeReport(writer: ExportWriter, job: ExportJob, alignments: boolean, pace: Pace): Promise<void> {
     const { loaded, rows } = job;
     const { table } = loaded.index;
     const { snapshot } = loaded.run;
@@ -228,49 +279,60 @@ export class ResultExporter {
       (start, end) => this.deps.data.readOutputRange(snapshot.runId, 0, start, end),
       loaded.run.result?.byteLengths[0],
     );
-    await writer.text(reportHead({ run: exportRun(loaded), formats: loaded.description.formats, scope: job.scope, exportedAt: job.exportedAt }));
+    const head = { run: exportRun(loaded), formats: loaded.description.formats, scope: job.scope, exportedAt: job.exportedAt, alignments };
+    let parts: string[] = [];
+    let chars = 0;
+    const add = (part: string) => {
+      parts.push(part);
+      chars += part.length;
+    };
+    const handOn = async () => {
+      await writer.texts(parts);
+      parts = [];
+      chars = 0;
+      await pace();
+    };
+    add(reportHead(head));
     for (const [qIdx, queryRows] of groupBy(rows, table.qIdx)) {
       const record = snapshot.query.records[qIdx];
-      await writer.text(
-        reportQueryStart({ position: qIdx, id: record?.id ?? '', length: record?.length ?? 0, unit: loaded.units.query, hsps: queryRows.length }),
-      );
-      for (let i = 0; i < queryRows.length; i += ROWS_PER_TEXT) {
-        await writer.text(
-          queryRows
-            .slice(i, i + ROWS_PER_TEXT)
-            .map((row) => reportTableRow(exportedHsp(loaded, row)))
-            .join(''),
-        );
+      add(reportQueryStart({ position: qIdx, id: record?.id ?? '', length: record?.length ?? 0, unit: loaded.units.query, hsps: queryRows.length }));
+      for (const row of queryRows) {
+        add(reportTableRow(exportedHsp(loaded, row)));
+        if (chars >= TEXT_CHARS) await handOn();
       }
-      await writer.text(REPORT_TABLE_END);
-      const shown = queryRows.filter((row) => out0Range(table, row) !== undefined);
-      if (shown.length > 0) {
-        await writer.text(REPORT_ALIGNMENTS_START);
+      add(REPORT_TABLE_END);
+      if (alignments) {
+        const shown = queryRows.filter((row) => out0Range(table, row) !== undefined);
+        if (shown.length > 0) add(REPORT_ALIGNMENTS_START);
         for (const [, subjectRows] of groupBy(shown, table.sIdx)) {
           const heading = subjectRows.map((row) => out0SubjectRange(table, row)).find((range) => range !== undefined);
-          if (heading !== undefined) await writer.text(reportHeading(await out0.text(heading)));
+          // A range in the window last read is taken without waiting.
+          if (heading !== undefined) add(reportHeading(out0.cached(heading) ?? (await out0.text(heading))));
           for (const row of subjectRows) {
-            await writer.text(reportSection(exportedHsp(loaded, row), await out0.text(out0Range(table, row)!)));
+            const range = out0Range(table, row)!;
+            add(reportSection(exportedHsp(loaded, row), out0.cached(range) ?? (await out0.text(range))));
+            if (chars >= TEXT_CHARS) await handOn();
           }
         }
+        add(reportNotInOutfmt0(queryRows.filter((row) => out0Range(table, row) === undefined).map((row) => hspLabel(qIdx, table.rank[row]!))));
       }
-      await writer.text(
-        reportNotInOutfmt0(queryRows.filter((row) => out0Range(table, row) === undefined).map((row) => hspLabel(qIdx, table.rank[row]!))),
-      );
-      await writer.text(REPORT_QUERY_END);
+      add(REPORT_QUERY_END);
+      if (chars >= TEXT_CHARS) await handOn();
     }
-    await writer.text(reportTail(loaded.diagnostics));
+    add(reportTail(loaded.diagnostics));
+    await handOn();
   }
 }
 
 /** The CSV: a header row, then one row per HSP. */
-async function writeCsv(writer: ExportWriter, job: ExportJob): Promise<void> {
+async function writeCsv(writer: ExportWriter, job: ExportJob, pace: Pace): Promise<void> {
   await writer.text(csvHeader());
   const { loaded, rows } = job;
   for (let i = 0; i < rows.length; i += ROWS_PER_TEXT) {
     const parts: string[] = [];
     for (const row of rows.subarray(i, i + ROWS_PER_TEXT)) parts.push(csvLine(exportedHsp(loaded, row)));
-    await writer.text(parts.join(''));
+    await writer.texts(parts);
+    await pace();
   }
 }
 
@@ -400,6 +462,13 @@ export class RangeReader {
     private readonly length: number | undefined,
     private readonly window = OUTFMT0_WINDOW,
   ) {}
+
+  /** The text of a range that the last read holds, without reading; undefined if it does not hold it. */
+  cached(range: ByteRange): string | undefined {
+    const [start, end] = range;
+    if (start < this.start || end > this.start + this.bytes.length) return undefined;
+    return decoder.decode(this.bytes.subarray(start - this.start, end - this.start));
+  }
 
   async text(range: ByteRange): Promise<string> {
     const [start, end] = range;

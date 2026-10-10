@@ -181,6 +181,12 @@ const SHA256 = /^[0-9a-f]{64}$/;
 
 /** Checks fields of one JSON block and names the field that fails ("runs[1].query.sha256"). */
 class Fields {
+  /**
+   * The long arrays already frozen, which deepFreeze passes by without asking: WebKit answers
+   * `Object.isFrozen` of an array of 100,000 elements in tens of milliseconds (fix round 2).
+   */
+  readonly frozen = new WeakSet<object>();
+
   constructor(
     private readonly block: string,
     readonly limits: SessionLimits,
@@ -243,6 +249,27 @@ class Fields {
   }
 }
 
+/** Records of a record table checked in one step of the manifest's checks. */
+const RECORDS_PER_STEP = 20_000;
+
+/** The work of a check in steps: the caller may let the page draw between two steps. */
+type Steps<T> = Generator<void, T, void>;
+
+function runSteps<T>(steps: Steps<T>): T {
+  for (;;) {
+    const step = steps.next();
+    if (step.done === true) return step.value;
+  }
+}
+
+async function runStepsPaced<T>(steps: Steps<T>, pause: () => Promise<void>): Promise<T> {
+  for (;;) {
+    const step = steps.next();
+    if (step.done === true) return step.value;
+    await pause();
+  }
+}
+
 /**
  * Checks a parsed manifest and returns it with only its known fields. Throws a SessionFileError
  * that names the field: a format or schema other than this one's (a newer schema is "saved by a
@@ -251,6 +278,20 @@ class Fields {
  * that disagrees with its sources and exclusions.
  */
 export function checkManifest(value: unknown, limits: SessionLimits = SESSION_LIMITS): SessionManifest {
+  return runSteps(manifestSteps(value, limits));
+}
+
+/**
+ * `checkManifest` with `pause` between its steps, so that the page draws while a large manifest is
+ * checked: a step checks at most RECORDS_PER_STEP records or freezes one column of a record table
+ * (fix round 2: with 100,000 queries the checks held WebKit's page for about 260 ms, most of it
+ * freezing the columns, about 35 ms each there).
+ */
+export function checkManifestPaced(value: unknown, limits: SessionLimits, pause: () => Promise<void>): Promise<SessionManifest> {
+  return runStepsPaced(manifestSteps(value, limits), pause);
+}
+
+function* manifestSteps(value: unknown, limits: SessionLimits): Steps<SessionManifest> {
   const f: Fields = new Fields('manifest', limits);
   if (typeof value !== 'object' || value === null || Array.isArray(value)) f.fail('the manifest', 'is not a JSON object');
   const top = value as Record<string, unknown>;
@@ -267,17 +308,16 @@ export function checkManifest(value: unknown, limits: SessionLimits = SESSION_LI
   const app = f.object(top.app, 'app', ['version', 'build']);
   const runs = f.array(top.runs, 'runs', limits.runs);
   if (runs.length === 0) f.fail('runs', 'is empty: the file holds no runs');
-  return deepFreeze({
-    format: SESSION_FORMAT,
-    schema: SESSION_SCHEMA,
-    app: { version: f.text(app.version, 'app.version', limits.textChars), build: f.text(app.build, 'app.build', limits.textChars) },
-    savedAt: f.count(top.savedAt, 'savedAt'),
-    candidates: f.boolean(top.candidates, 'candidates'),
-    runs: runs.map((run, k) => checkRun(f, run, `runs[${k}]`)),
-  });
+  const checkedApp = { version: f.text(app.version, 'app.version', limits.textChars), build: f.text(app.build, 'app.build', limits.textChars) };
+  const savedAt = f.count(top.savedAt, 'savedAt');
+  const candidates = f.boolean(top.candidates, 'candidates');
+  const checkedRuns: SessionRun[] = [];
+  for (const [k, run] of runs.entries()) checkedRuns.push(yield* checkRun(f, run, `runs[${k}]`));
+  // The record tables' columns are frozen already (checkInput), so this does not walk them again.
+  return deepFreeze({ format: SESSION_FORMAT, schema: SESSION_SCHEMA, app: checkedApp, savedAt, candidates, runs: checkedRuns }, f.frozen);
 }
 
-function checkRun(f: Fields, value: unknown, where: string): SessionRun {
+function* checkRun(f: Fields, value: unknown, where: string): Steps<SessionRun> {
   const run = f.object(
     value,
     where,
@@ -289,8 +329,8 @@ function checkRun(f: Fields, value: unknown, where: string): SessionRun {
   if (argv.length < 5 || argv[0] !== program || argv[1] !== '-query' || argv[3] !== '-subject') {
     f.fail(`${where}.argv`, `does not begin with "${program} -query <name> -subject <name>"`);
   }
-  const query = checkInput(f, run.query, `${where}.query`, program, 'query');
-  const subject = checkInput(f, run.subject, `${where}.subject`, program, 'subject');
+  const query = yield* checkInput(f, run.query, `${where}.query`, program, 'query');
+  const subject = yield* checkInput(f, run.subject, `${where}.subject`, program, 'subject');
   if (argv[2] !== query.name) f.fail(`${where}.argv[2]`, `is not the query's name "${query.name}"`);
   if (argv[4] !== subject.name) f.fail(`${where}.argv[4]`, `is not the subject's name "${subject.name}"`);
   const blocks = f.object(run.blocks, `${where}.blocks`, SESSION_STREAMS);
@@ -365,7 +405,7 @@ function checkRecord(f: Fields, value: unknown, where: string): SessionRunRecord
   } as SessionRunRecord;
 }
 
-function checkInput(f: Fields, value: unknown, where: string, program: ProgramId, role: InputRole): SessionInput {
+function* checkInput(f: Fields, value: unknown, where: string, program: ProgramId, role: InputRole): Steps<SessionInput> {
   const input = f.object(value, where, ['name', 'sha256', 'length', 'reader', 'records', 'sources']);
   const reader = f.oneOf(input.reader, `${where}.reader`, [1, 2] as const);
   if (reader !== indexParser(program, role)) {
@@ -380,6 +420,7 @@ function checkInput(f: Fields, value: unknown, where: string, program: ProgramId
   }
   // One by one, the path built only on a failure: a table may have a million records.
   for (let k = 0; k < ids.length; k++) {
+    if (k > 0 && k % RECORDS_PER_STEP === 0) yield;
     if (typeof ids[k] !== 'string' || (ids[k] as string).length > f.limits.idChars) f.text(ids[k], `${where}.records.id[${k}]`, f.limits.idChars);
     const length = lengths[k];
     if (typeof length !== 'number' || !Number.isSafeInteger(length) || length < 0) f.count(length, `${where}.records.length[${k}]`);
@@ -389,6 +430,14 @@ function checkInput(f: Fields, value: unknown, where: string, program: ProgramId
   if (sources.length === 0) f.fail(`${where}.sources`, 'is empty');
   const included = sources.reduce((sum, source) => sum + source.records - source.excluded.length, 0);
   if (included !== ids.length) f.fail(`${where}.sources`, `include ${included} records, but ${where}.records lists ${ids.length}`);
+  // The long arrays are frozen here, one in each step (deepFreeze then passes them by).
+  for (const column of [ids, lengths, hashes, ...sources.map((source) => source.excluded)]) {
+    if (column.length >= RECORDS_PER_STEP) {
+      yield;
+      f.frozen.add(column);
+    }
+    Object.freeze(column);
+  }
   return {
     name: f.text(input.name, `${where}.name`, f.limits.nameChars, false),
     sha256: f.sha256(input.sha256, `${where}.sha256`),
@@ -455,10 +504,10 @@ export function checkCandidates(value: unknown, manifest: SessionManifest, limit
   );
 }
 
-function deepFreeze<T>(value: T): T {
-  if (typeof value === 'object' && value !== null && !Object.isFrozen(value)) {
+function deepFreeze<T>(value: T, frozen?: WeakSet<object>): T {
+  if (typeof value === 'object' && value !== null && !frozen?.has(value) && !Object.isFrozen(value)) {
     Object.freeze(value);
-    for (const item of Object.values(value)) deepFreeze(item);
+    for (const item of Object.values(value)) deepFreeze(item, frozen);
   }
   return value;
 }
@@ -533,7 +582,23 @@ export class SessionFileReader {
   push(bytes: Uint8Array): SessionEvent[] {
     const events: SessionEvent[] = [];
     try {
-      this.read(bytes, events);
+      runSteps(this.read(bytes, events));
+    } catch (error) {
+      this.state = 'failed';
+      throw error;
+    }
+    return events;
+  }
+
+  /**
+   * `push` with `pause` between the steps of reading the manifest (its parse, then the steps of
+   * `checkManifestPaced`), so that the page draws while a large manifest is read. Call it again
+   * only once it has settled.
+   */
+  async pushPaced(bytes: Uint8Array, pause: () => Promise<void>): Promise<SessionEvent[]> {
+    const events: SessionEvent[] = [];
+    try {
+      await runStepsPaced(this.read(bytes, events), pause);
     } catch (error) {
       this.state = 'failed';
       throw error;
@@ -571,7 +636,7 @@ export class SessionFileReader {
     }
   }
 
-  private read(bytes: Uint8Array, events: SessionEvent[]): void {
+  private *read(bytes: Uint8Array, events: SessionEvent[]): Steps<void> {
     if (this.state === 'failed') throw new SessionFileError(`${DAMAGED}.`);
     let at = 0;
     if (bytes.length > 0) this.started = true;
@@ -609,7 +674,7 @@ export class SessionFileReader {
             throw new SessionFileError(`${DAMAGED}: block "${block.expected.name}" is longer than the ${block.length} bytes that its header states.`);
           }
           at++;
-          this.endBlock(events);
+          yield* this.endBlock(events);
           break;
         }
         case 'done':
@@ -665,7 +730,7 @@ export class SessionFileReader {
     this.state = length === 0 ? 'body-end' : 'body';
   }
 
-  private endBlock(events: SessionEvent[]): void {
+  private *endBlock(events: SessionEvent[]): Steps<void> {
     const { expected, parts } = this.block!;
     this.block = undefined;
     this.state = 'header';
@@ -675,7 +740,8 @@ export class SessionFileReader {
     }
     const json = parseJson(parts, expected.name);
     if (expected.name === MANIFEST_BLOCK) {
-      const manifest = checkManifest(json, this.limits);
+      yield;
+      const manifest = yield* manifestSteps(json, this.limits);
       this.manifest = manifest;
       manifest.runs.forEach((run, k) => {
         for (const stream of SESSION_STREAMS) this.expected.push({ name: runBlockName(k + 1, stream), run: k + 1, stream, length: run.blocks[stream] });

@@ -14,6 +14,7 @@ import type { SiteBuild } from './domain/verification';
 import type { Downloader } from './ports/download';
 import type { EngineGateway } from './ports/engine';
 import { browserCompression } from './infra/browser/compression';
+import { nextTask } from './infra/browser/next-task';
 import { browserPage } from './infra/browser/page';
 import { browserDownloader } from './infra/browser/platform';
 import { startDataWorker } from './infra/data-worker/gateway';
@@ -102,7 +103,7 @@ export function createApp(options: AppOptions = {}): App {
     downloader,
   });
   const candidates = new CandidateTray({ runs: coordinator.state, data, downloader, now: () => Date.now() });
-  const exporter = new ResultExporter({ results: results.state, data, downloader, now: () => Date.now() });
+  const exporter = new ResultExporter({ results: results.state, data, downloader, now: () => Date.now(), pause: nextTask, clock: () => performance.now() });
   const attention = new Attention({
     page: browserPage,
     runs: coordinator.state,
@@ -118,6 +119,7 @@ export function createApp(options: AppOptions = {}): App {
     app: APP_BUILD,
     now: () => Date.now(),
     newRunId: () => crypto.randomUUID(),
+    pause: nextTask,
   });
   const runFiles = new RunFiles({
     draft,

@@ -67,6 +67,8 @@ const BLOCK_NAMES: Readonly<Record<OutputStream, string>> = {
   [DIAGNOSTICS_STREAM]: 'diagnostics',
 };
 const LF = 0x0a;
+/** Bytes of stream 1 between two wanted lines that one read of `readHspRecords` reads past (and drops). */
+const HIT_GAP_BYTES = 64 * 1024;
 const NEWLINE = new Uint8Array([LF]);
 
 type Lengths = Record<OutputStream, number>;
@@ -456,23 +458,17 @@ export class DataService implements DataGateway {
       }
     }
     const path = blockPath(run.token, HITS_STREAM);
-    const decoder = new TextDecoder();
-    const readLine = async (line: number): Promise<HspRecord> => {
-      const start = lines.starts[line]!;
-      return JSON.parse(decoder.decode(await this.deps.store.read(path, start, lines.ends[line]! - start))) as HspRecord;
-    };
-    const records: HspRecord[] = [];
-    for (const index of indices) {
-      // The adapter writes the records in the order of their index, so line `index` is the
-      // record; where it is not, every line is read once to map the indices to lines.
-      let record = await readLine(lines.lineOf?.get(index) ?? index);
-      if (record.index !== index) {
-        lines.lineOf ??= await this.mapHitLines(path, lines);
-        const line = lines.lineOf.get(index);
+    // The adapter writes the records in the order of their index, so line `index` is the record;
+    // where it is not, every line is read once to map the indices to lines, and the lines are read again.
+    let records = await this.readHitLines(path, lines, indices.map((index) => lines.lineOf?.get(index) ?? index));
+    if (records.some((record, k) => record.index !== indices[k])) {
+      const lineOf = (lines.lineOf ??= await this.mapHitLines(path, lines));
+      const wanted = indices.map((index) => {
+        const line = lineOf.get(index);
         if (line === undefined) throw new RangeError(`run ${runId} has no HSP ${index}`);
-        record = await readLine(line);
-      }
-      records.push(record);
+        return line;
+      });
+      records = await this.readHitLines(path, lines, wanted);
     }
     return Object.freeze(records);
   }
@@ -652,6 +648,36 @@ export class DataService implements DataGateway {
       ends.push(length);
     }
     return { starts: Float64Array.from(starts), ends: Float64Array.from(ends) };
+  }
+
+  /**
+   * The records on lines `wanted` of stream 1 (any order, repeats allowed), in that order. Lines
+   * close together are read with one range read of at most `readChunkBytes` (a longer line alone),
+   * skipping at most HIT_GAP_BYTES between two of them: one read of the store costs about as much
+   * as reading a thousand short lines (fix round 2: one read per record made a JSON of 150,000
+   * HSPs take two minutes).
+   */
+  private async readHitLines(path: string, lines: HitLines, wanted: readonly number[]): Promise<HspRecord[]> {
+    const order = wanted.map((_, k) => k).sort((a, b) => wanted[a]! - wanted[b]!);
+    const records = new Array<HspRecord>(wanted.length);
+    const decoder = new TextDecoder();
+    let first = 0;
+    while (first < order.length) {
+      const start = lines.starts[wanted[order[first]!]!]!;
+      let last = first;
+      while (last + 1 < order.length) {
+        const next = wanted[order[last + 1]!]!;
+        if (lines.ends[next]! - start > this.chunkBytes || lines.starts[next]! - lines.ends[wanted[order[last]!]!]! > HIT_GAP_BYTES) break;
+        last++;
+      }
+      const bytes = await this.deps.store.read(path, start, lines.ends[wanted[order[last]!]!]! - start);
+      for (let k = first; k <= last; k++) {
+        const line = wanted[order[k]!]!;
+        records[order[k]!] = JSON.parse(decoder.decode(bytes.subarray(lines.starts[line]! - start, lines.ends[line]! - start))) as HspRecord;
+      }
+      first = last + 1;
+    }
+    return records;
   }
 
   /** The line of every HSP index, from parsing every line once. */

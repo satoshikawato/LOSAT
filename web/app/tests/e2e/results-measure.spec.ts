@@ -547,8 +547,7 @@ async function repetition(page: Page, count: number): Promise<Repetition> {
   ]);
   const graphicRows = Number(await page.getByTestId('graphic-canvas').getAttribute('data-rows'));
   await page.getByTestId('results-view-hits').click();
-  await page.getByTestId('descriptions-show-all').click();
-  await expect(page.getByTestId('subject-list')).toHaveAttribute('data-count', /^[1-9]\d{2,}$/);
+  await listWhole(page);
   const wideSubjects = Number(await page.getByTestId('subject-list').getAttribute('data-count'));
   const subjectRowsDrawn = await rowsDrawn(page, 'subject-row-');
   const sortSubjects: Record<string, Timing> = {};
@@ -808,6 +807,17 @@ async function trayOperations(page: Page, count: number): Promise<TrayRepetition
   };
 }
 
+/**
+ * The Descriptions of the selected query listed whole, as W5 measured them: since 2026-10-10 the
+ * one page lists the first 100 subjects until "Show all", which stays for the query once pressed.
+ */
+async function listWhole(page: Page): Promise<void> {
+  const [, shown] = /^([\d,]+) shown$/.exec(((await page.getByTestId('subject-count').textContent()) ?? '').trim())!;
+  const subjects = shown!.replace(/,/g, '');
+  if ((await page.getByTestId('subject-list').getAttribute('data-count')) !== subjects) await page.getByTestId('descriptions-show-all').click();
+  await expect(page.getByTestId('subject-list')).toHaveAttribute('data-count', subjects);
+}
+
 /** One warm-up and the repetitions, written into `into` as they come (a failure keeps what was measured). */
 async function trayRepetitions<T extends object>(into: Record<string, unknown>, repeat: () => Promise<T>): Promise<void> {
   into['warmup'] = await repeat();
@@ -829,8 +839,7 @@ async function wideQuery(page: Page, count: number): Promise<number> {
   await expect(page.locator('[data-testid^="query-row-"]').first()).toHaveAttribute('aria-pressed', 'true');
   await page.getByTestId('query-filter').fill('');
   await expect(page.getByTestId('query-count')).toHaveText(`${total} of ${total} queries`);
-  await page.getByTestId('descriptions-show-all').click();
-  await expect(page.getByTestId('subject-list')).toHaveAttribute('data-count', /^[1-9]\d{2,}$/);
+  await listWhole(page);
   return Number(await page.getByTestId('subject-list').getAttribute('data-count'));
 }
 

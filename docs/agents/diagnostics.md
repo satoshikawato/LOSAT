@@ -68,6 +68,11 @@ Same values, faster computation:
   programs; calls that do not fit 8/16 bits use the original loop (`utils/xdrop_simd.rs`).
   Shadow: `LOSAT_X_DPSHADOW=1`. Timing aids: `LOSAT_X_DPNO8=1` (no 8-bit kernel),
   `LOSAT_X_DPNOAVX=1` (no AVX2).
+- `LOSAT_X_DPAVX2=1` (with `LOSAT_X_DPFAST`; strict-set candidate) the same X-drop DP in 256-bit
+  AVX2 vectors (32 x i8 or 16 x i16 lanes, x86_64 with AVX2 only): the same values, lane width
+  and band steps as the 128-bit kernels, so the same result and edit script; a call the 256-bit
+  kernel does not take runs on the 128-bit kernel (`utils/x_xdrop_avx2.rs`). Covered by
+  `LOSAT_X_DPSHADOW=1`; `LOSAT_X_DPNOAVX=1` turns it off as well.
 - `LOSAT_X_GREEDYFAST=1` megablast greedy alignment, one distance in three passes of 256 cells,
   match extension 8 bases at a time. Shadow: `LOSAT_X_GREEDYSHADOW=1`.
 - `LOSAT_X_COMPFAST=1` composition adjustment (Newton) loops reordered with the same element
@@ -150,4 +155,19 @@ Scheduling (each value computed by one thread with the original function; order 
 
 Counters and tests: `LOSAT_X_STATS=1` (counters on stderr; DP and Newton counts need the
 `xstats` cargo feature), `LOSAT_X_ADJMEMO_STATS=1` (distinct composition-adjustment inputs),
-`LOSAT_FUZZ_CASES=<n>` (random groups of the linking fuzz test).
+`LOSAT_FUZZ_CASES=<n>` (random groups of the linking fuzz test; random problems of the X-drop DP
+kernel tests).
+
+X-drop DP capture and replay (diagnostics, not part of the strict set):
+
+- `LOSAT_X_DPCAPTURE=<dir>` records every Nth call of each thread that reaches the vector X-drop
+  DP (`LOSAT_X_DPFAST`) as a self-contained problem (residues, matrix, gap costs, x_drop, result
+  and edit script) in `<dir>/xdp-<pid>-t<k>.xdp`, one file per thread, appended
+  (`utils/x_xdrop_capture.rs`, format in its header). `LOSAT_X_DPCAPTURE_EVERY=<n>` sets N
+  (default 25). The search output does not change.
+- `LOSAT_X_DPREPLAY=<dir>` input of the ignored test `replay_captured_problems`
+  (`cargo test --release replay_captured_problems -- --ignored --nocapture`): every captured
+  problem through the scalar loops, the 128-bit and the 256-bit kernels and the dispatch, compared
+  with the recorded result, then the 128-bit and 256-bit kernels timed (median ns per cell and per
+  call, traceback and score-only, 8- and 16-bit lanes). `LOSAT_X_DPREPLAY_REPS` (default 7),
+  `LOSAT_X_DPREPLAY_OUT=<file>` (append the table to a file).

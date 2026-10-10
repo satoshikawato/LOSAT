@@ -1,6 +1,6 @@
 # E2h（SF・SFb・SFc・SFd）ゲート記録：FASTA の読み方（NCBI `CFastaReader` の移植）
 
-状態：**途中**（2026-10-10、SFc を監査の修正の後で区切った）。完了条件（計画 §7 の SF の行）はまだ満たしていない。続きは [SFd の指示書](../../losat_web_gui_sessions/session_sfd_e2h_final_gate.md)。
+状態：**途中**（2026-10-10、SFd を修正の再監査の途中で区切った）。完了条件（計画 §7 の SF の行）はまだ満たしていない。続きは [SFe の指示書](../../losat_web_gui_sessions/session_sfe_e2h_final_gate.md)。
 
 ## SF（2026-10-06 開始、10-06 に `/mnt/c` の障害で中断、10-08 に Linux の clone で再開）で行ったこと
 
@@ -105,9 +105,15 @@ run `20261009T145447Z`（HEAD `9dfe7efd`）は 23 工程を流した。build 7 �
 - `screens.spec.ts` の検索画面の 2 つの試験（`LOSAT_WEB_SCREENS` を付けたときだけ流れる、CI には無い）は、エンジンの build で `query-source-0-exclude-refused` を待って止まる（10 分の timeout）。`register` の拒否の文言が行を名指すため（上の 1 つ目）。結果の画面の試験は通る。
 - S13 の `results.spec.ts` の「失敗した run」は、TBLASTX の題の HTML の文字参照（E2h で NCBI と同じく復号されて完了する）から、中身の無い subject だけの TBLASTX（NCBI の `The average subject length is too short`）に変えた（tests only）。
 
-## SFd（2026-10-10〜、エンジン側）で行ったこと
+## SFd（2026-10-10、エンジン側。アプリ側の S13b は SFd で merge 済み）で行ったこと
 
-修正の再監査（4 観点、監査したコミット `2f954c66`）の指摘を直した。
+- アプリ側の S13b（W4b）を merge した（`dcbb149d`。README の表・計画 DW-25・DW-26 は `2f954c66`）。
+- 最後のコミット `2f954c66` でゲートの全工程を始め（run `20261009T232829Z`）、修正の再監査の指摘でエンジンを変えることになったので `fast-all` で止めた。それまでの 13 工程（lint、clippy、tests、build、pychecks、quick-fixtures、regression-fixtures、sf-fixtures、sf-sweeps、input-sweeps）は全部終了コード 0。最後のコミットの run ではないので、ゲートの証拠にはしない（run の記録は作っていない）。
+- 修正の再監査の第 1 回（4 観点、監査したコミット `2f954c66`、opus、読み取り専用。報告は `$BUILD_ROOT/sfd-e2h/audit/{A,B,C,D}.md`）：SFc の修正（B-1、A-3/C-1、A-1）はどれも直っていた。C（蛋白の入力と BLASTP の報告の順、拒否の理由、3,787 件）は supported。B は FASTA の読み方の 666 件が全部 NCBI と一致し、A（109 件）・B の指摘は `[BLAST] DATA_LOADERS` を決める registry の層だけ（R1〜R4）。D（約 15,700 件）は ABI v1 の定義行の変化（D-1）と文書（D-2）。
+- 第 2 回以降は直した層だけを再監査した：registry の層は第 2 回（監査 R、`e418578f`、119 件：R-1〜R-9）と第 3 回（監査 S、`2410a8bd`、164 件：S-1〜S-5、どれも特殊な起動条件）、ABI v1 は第 2 回（監査 V、`44ea6def`、9,460 入力：V-1〜V-4）。下の表の修正で直し、第 4 回の registry と第 3 回の v1 の修正の再監査は SFe で行う。
+- V-PERF の読み込みの重い case の大きさをネイティブの計測で決め（100k の query はそのまま、5 Mb の subject は 0.3〜0.5 秒で短すぎるので 50 Mb、2 万の蛋白は 1 回 77〜108 秒で長すぎるので 2000）、標準入力の case（`blastn-q100k-stdin-file`・`-stdin-pipe`、ネイティブだけ）を足した（`cf809a87`）。
+
+修正の再監査の指摘を直した。
 
 | 修正 | 内容 | コミット |
 |---|---|---|
@@ -163,10 +169,10 @@ run `20261009T145447Z`（HEAD `9dfe7efd`）は 23 工程を流した。build 7 �
 - `AUTHORITY.md` §K の 14 件（前の節）。13（第 2 回の再監査 R-8）は NCBI の parameter の環境変数の解析できない値で NCBI が異常終了するもの、14（第 3 回の再監査 S-4）は `=` の無い環境の項目で NCBI が SIGSEGV で落ちるもので、どちらも LOSAT は普通に走る。記録に留めるか拒否に加えるか。
 - 保守者の指示（2026-10-09「とりあえず main に適宜マージして」）で、検証の済んだ区切りごとに `main` へ PR を出した（#116 `03947fb9`、#117 `e31236bf`、#118 `feea1cea`。計画 DW-20 の「今は PR を作らない」を置き換える、計画 DW-24）。
 
-## 残件（SFd の最初の作業）
+## 残件（SFe の最初の作業）
 
-- 修正の再監査（4 観点とも supported まで）。
+- 修正の再監査の最後の回：registry の層（第 4 回の修正 `201651b8` の後）と ABI v1（第 3 回の修正 `2e82c250` の後）が supported になるまで。
 - 最後のコミットでのゲートの全工程（`FRESH=1`）。
-- Gate A、V-PERF。
-- 終了・引き継ぎ（SF の指示書）、`main` への PR。
-- アプリ側の S13 は SFc で merge 済み（`39a563f1`）。
+- Gate A、V-PERF（大きさは `cf809a87` で決めた）。
+- 終了・引き継ぎ（SF の指示書）、`main` への PR（SFd では出していない）。
+- アプリ側の S13 は SFc（`39a563f1`）、S13b は SFd（`dcbb149d`）で merge 済み。

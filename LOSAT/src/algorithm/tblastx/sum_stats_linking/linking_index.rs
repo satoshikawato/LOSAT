@@ -233,9 +233,9 @@ use crate::stats::sum_statistics::{
 
 use super::params::LinkHspCutoffs;
 
-const WINDOW_SIZE: i32 = GAP_SIZE + OVERLAP_SIZE + 1;
-const TRIM_SIZE: i32 = (OVERLAP_SIZE + 1) / 2;
-const NONE: u32 = u32::MAX;
+pub(super) const WINDOW_SIZE: i32 = GAP_SIZE + OVERLAP_SIZE + 1;
+pub(super) const TRIM_SIZE: i32 = (OVERLAP_SIZE + 1) / 2;
+pub(super) const NONE: u32 = u32::MAX;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:414-419
 // ```c
@@ -245,8 +245,21 @@ const NONE: u32 = u32::MAX;
 // this kernel and the default kernel of linking_fast.rs (both port s_BlastEvenGapLinkHSPs). It
 // does not change any value NCBI computes.
 pub(super) fn link_fast_enabled() -> bool {
-    static FLAG: OnceLock<bool> = OnceLock::new();
-    *FLAG.get_or_init(|| std::env::var_os("LOSAT_LINK_FAST").is_some())
+    link_fast_mode() != 0
+}
+
+// No NCBI counterpart for the switch value: LOSAT_LINK_FAST=2 selects the incremental kernel of
+// linking_incr.rs (another port of s_BlastEvenGapLinkHSPs); it does not change any value NCBI
+// computes.
+/// 0 without `LOSAT_LINK_FAST`, 2 for `LOSAT_LINK_FAST=2` (the incremental
+/// kernel of `linking_incr.rs`), 1 for any other value (this kernel).
+pub(super) fn link_fast_mode() -> u8 {
+    static MODE: OnceLock<u8> = OnceLock::new();
+    *MODE.get_or_init(|| match std::env::var("LOSAT_LINK_FAST") {
+        Err(std::env::VarError::NotPresent) => 0,
+        Ok(v) if v == "2" => 2,
+        _ => 1,
+    })
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:414-419
@@ -264,7 +277,7 @@ pub(super) fn link_fast_shadow_enabled() -> bool {
 }
 
 // No NCBI counterpart: LOSAT_LINK_STATS only prints counters; it does not change any value NCBI computes.
-fn stats_enabled() -> bool {
+pub(super) fn stats_enabled() -> bool {
     static FLAG: OnceLock<bool> = OnceLock::new();
     *FLAG.get_or_init(|| std::env::var_os("LOSAT_LINK_STATS").is_some())
 }
@@ -379,7 +392,7 @@ pub(super) fn sum_bound(group_hits: &[UngappedHit], cutoffs: &LinkHspCutoffs) ->
 /// `h_sum + (score - cutoff)` as NCBI's Int4 holds it, the exact value, and
 /// whether the two differ.
 #[inline(always)]
-fn int4_sum(h_sum: i32, score: i32, cutoff: i32) -> (i32, i64, bool) {
+pub(super) fn int4_sum(h_sum: i32, score: i32, cutoff: i32) -> (i32, i64, bool) {
     let exact = i64::from(h_sum) + (i64::from(score) - i64::from(cutoff));
     let int4 = exact as i32;
     (int4, exact, i64::from(int4) != exact)
@@ -400,17 +413,17 @@ fn int4_sum(h_sum: i32, score: i32, cutoff: i32) -> (i32, i64, bool) {
 /// (sum, index) packed so that the integer order is: larger sum first, then
 /// larger index. 0 is "no entry".
 #[inline(always)]
-fn key(sum: i32, idx: usize) -> u64 {
+pub(super) fn key(sum: i32, idx: usize) -> u64 {
     ((((sum as i64) + (1i64 << 31)) as u64) << 32) | ((idx as u64) + 1)
 }
 
 #[inline(always)]
-fn key_idx(k: u64) -> usize {
+pub(super) fn key_idx(k: u64) -> usize {
     ((k & 0xffff_ffff) - 1) as usize
 }
 
 #[inline(always)]
-fn key_sum(k: u64) -> i32 {
+pub(super) fn key_sum(k: u64) -> i32 {
     ((k >> 32) as i64 - (1i64 << 31)) as i32
 }
 
@@ -434,7 +447,11 @@ fn key_sum(k: u64) -> i32 {
 /// `best[0]` and `best[1]` from the root of the key tree (`None` when the
 /// largest sum is below `-cutoff[index]`).
 #[inline]
-fn best_of_root(root: [u64; 2], cutoffs: [i32; 2], ignore_small_gaps: bool) -> [Option<usize>; 2] {
+pub(super) fn best_of_root(
+    root: [u64; 2],
+    cutoffs: [i32; 2],
+    ignore_small_gaps: bool,
+) -> [Option<usize>; 2] {
     let mut best = [None, None];
     for ch in usize::from(ignore_small_gaps)..2 {
         if root[ch] != 0 && key_sum(root[ch]) >= -cutoffs[ch] {
@@ -464,13 +481,13 @@ fn best_of_root(root: [u64; 2], cutoffs: [i32; 2], ignore_small_gaps: bool) -> [
 /// Flat maximum tree over the stable post-sort indices, one channel per
 /// ordering method (the existing `DualMaximumTree`, with packed keys and an
 /// update that stops at the first unchanged parent).
-struct MaxTree {
+pub(super) struct MaxTree {
     cap: usize,
     nodes: Vec<[u64; 2]>,
 }
 
 impl MaxTree {
-    fn new(n: usize) -> Self {
+    pub(super) fn new(n: usize) -> Self {
         let cap = n.max(1).next_power_of_two();
         Self {
             cap,
@@ -479,12 +496,12 @@ impl MaxTree {
     }
 
     #[inline]
-    fn leaf(&self, i: usize) -> [u64; 2] {
+    pub(super) fn leaf(&self, i: usize) -> [u64; 2] {
         self.nodes[self.cap + i]
     }
 
     #[inline]
-    fn set(&mut self, i: usize, v: [u64; 2]) {
+    pub(super) fn set(&mut self, i: usize, v: [u64; 2]) {
         let mut pos = self.cap + i;
         self.nodes[pos] = v;
         while pos > 1 {
@@ -499,7 +516,7 @@ impl MaxTree {
         }
     }
 
-    fn build(&mut self) {
+    pub(super) fn build(&mut self) {
         for pos in (1..self.cap).rev() {
             let l = self.nodes[pos * 2];
             let r = self.nodes[pos * 2 + 1];
@@ -508,7 +525,7 @@ impl MaxTree {
     }
 
     #[inline]
-    fn root(&self) -> [u64; 2] {
+    pub(super) fn root(&self) -> [u64; 2] {
         self.nodes[1]
     }
 }

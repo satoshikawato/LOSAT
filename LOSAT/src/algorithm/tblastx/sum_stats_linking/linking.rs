@@ -1231,8 +1231,9 @@ fn assert_same_linking(expected: &[UngappedHit], actual: &[UngappedHit]) {
 // ...
 //       while (number_of_hsps > 0)
 // ```
-// Switch point of LOSAT_LINK_FAST. The index-backed kernel of linking_index.rs ports
-// s_BlastEvenGapLinkHSPs with different predecessor searches. A group whose pass values leave the
+// Switch point of LOSAT_LINK_FAST. The index-backed kernel of linking_index.rs (LOSAT_LINK_FAST=1)
+// and the incremental kernel of linking_incr.rs (LOSAT_LINK_FAST=2) port s_BlastEvenGapLinkHSPs
+// with different predecessor searches. A group whose pass values leave the
 // Int4 range runs the literal port; a run with diagnostics on runs the default kernel
 // (linking_fast.rs).
 /// Links one group under `LOSAT_LINK_FAST=1` with the index-backed kernel of
@@ -1287,16 +1288,30 @@ fn link_hsp_group_link_fast(
             pool_hsp_links,
         )
     });
-    let linked = match index::link_hsp_group_fast(
-        group_hits,
-        cutoffs,
-        gap_decay_rate,
-        subject_len_nucl,
-        query_contexts,
-        length_adj_per_context,
-        eff_searchsp_per_context,
-        log_k_by_ctx,
-    ) {
+    let result = if index::link_fast_mode() == 2 {
+        super::linking_incr::link_hsp_group_incr(
+            group_hits,
+            cutoffs,
+            gap_decay_rate,
+            subject_len_nucl,
+            query_contexts,
+            length_adj_per_context,
+            eff_searchsp_per_context,
+            log_k_by_ctx,
+        )
+    } else {
+        index::link_hsp_group_fast(
+            group_hits,
+            cutoffs,
+            gap_decay_rate,
+            subject_len_nucl,
+            query_contexts,
+            length_adj_per_context,
+            eff_searchsp_per_context,
+            log_k_by_ctx,
+        )
+    };
+    let linked = match result {
         Ok(linked) => linked,
         Err(group_hits) => link_hsp_group_ncbi(
             group_hits,
@@ -3601,6 +3616,9 @@ mod tests {
     // ```
     // These tests compare the index-backed kernel with the port of s_BlastEvenGapLinkHSPs on the
     // same groups. The reference results are the NCBI kernel above, not hand-written numbers.
+    use crate::algorithm::tblastx::sum_stats_linking::linking_incr::{
+        link_hsp_group_incr_with, IncrOptions, IncrStats, Index1Search,
+    };
     use crate::algorithm::tblastx::sum_stats_linking::linking_index::{
         link_hsp_group_fast_with, LinkFastOptions, LinkFastStats,
     };
@@ -3727,6 +3745,42 @@ mod tests {
         reuse_index0: false,
         check_int4: true,
     };
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:414-419,589
+    // ```c
+    // s_BlastEvenGapLinkHSPs(EBlastProgramType program_number, BlastHSPList* hsp_list,
+    // ...
+    //       while (number_of_hsps > 0)
+    // ```
+    // The incremental kernel on a group sorted as link_with_both_kernels sorts it; the callers
+    // compare its result with the port of s_BlastEvenGapLinkHSPs.
+    /// Links `hits` (any order) with the incremental kernel of
+    /// `linking_incr.rs`, on the group prepared as `link_with_both_kernels`
+    /// prepares it.
+    fn link_with_incr_kernel(
+        mut hits: Vec<UngappedHit>,
+        cutoffs: &LinkHspCutoffs,
+        options: IncrOptions,
+    ) -> (Vec<UngappedHit>, IncrStats) {
+        let (_, contexts, log_k) = fast_test_contexts();
+        sort_hsps_by_ncbi_link_order(&mut hits, rev_compare_hsps_tbx);
+        for (link_id, hit) in hits.iter_mut().enumerate() {
+            hit.link_id = link_id;
+            hit.chain_next_link_id = None;
+            hit.num = 1;
+        }
+        link_hsp_group_incr_with(
+            hits,
+            cutoffs,
+            0.5,
+            300_000,
+            &contexts,
+            &[49; 6],
+            &[9_372_428_362; 6],
+            &log_k,
+            options,
+        )
+    }
 
     /// The HSP of a fixed test, found by its query and subject start.
     fn linked_hit(hits: &[UngappedHit], q_aa_start: usize, s_aa_start: usize) -> &UngappedHit {
@@ -4029,6 +4083,7 @@ mod tests {
         let mut total_hsps = 0usize;
         let mut total_chained = 0usize;
         let mut total = LinkFastStats::default();
+        let mut incr_total = IncrStats::default();
         let cases: usize = std::env::var("LOSAT_FUZZ_CASES")
             .ok()
             .and_then(|v| v.parse().ok())
@@ -4097,6 +4152,36 @@ mod tests {
             };
             let (linked, stats) = link_with_both_kernels(hits.clone(), cutoffs, options, &label);
             total.add(&stats);
+            // The incremental kernel, each pass checked against a pass from scratch on the
+            // smaller groups, with the automatic index-1 choice and, in some cases, with only the
+            // tree or only the sweep.
+            let modes: &[Index1Search] = if case % 3 == 0 {
+                &[Index1Search::Auto, Index1Search::Tree, Index1Search::Sweep]
+            } else {
+                &[Index1Search::Auto]
+            };
+            for &index1 in modes {
+                let (incr, stats) = link_with_incr_kernel(
+                    hits.clone(),
+                    cutoffs,
+                    IncrOptions {
+                        verify: n <= 140,
+                        check_int4: true,
+                        index1,
+                        sweep_factor: 16,
+                    },
+                );
+                incr_total.add(&stats);
+                assert_eq!(linked.len(), incr.len(), "{label} {index1:?}");
+                for (a, b) in linked.iter().zip(&incr) {
+                    assert_eq!(
+                        a.e_value.to_bits(),
+                        b.e_value.to_bits(),
+                        "{label} {index1:?}"
+                    );
+                    assert_eq!(format!("{a:?}"), format!("{b:?}"), "{label} {index1:?}");
+                }
+            }
             if case % 5 == 0 {
                 let (again, stats) = link_with_both_kernels(
                     hits,
@@ -4142,6 +4227,14 @@ mod tests {
             eprintln!(
                 "fast_kernel_matches_ncbi_kernel_on_random_groups: {total_hsps} HSPs, {total:?}"
             );
+            // ... and of the incremental kernel.
+            let t = &incr_total;
+            assert!(t.kept0 > 0 && t.searched0 > 0, "{t:?}");
+            assert!(t.kept1 > 0 && t.searched1 > 0, "{t:?}");
+            assert!(t.removed > 0 && t.tree_visits > 0, "{t:?}");
+            assert!(t.sweeps > 0 && t.fallbacks > 0, "{t:?}");
+            assert!(t.verified_passes > 0, "{t:?}");
+            eprintln!("incremental kernel: {t:?}");
         }
     }
 
@@ -4235,6 +4328,24 @@ mod tests {
                 },
             )
         };
+        let link_incr = |hits: Vec<UngappedHit>, cutoffs: &LinkHspCutoffs, check| {
+            link_hsp_group_incr_with(
+                hits,
+                cutoffs,
+                0.5,
+                300_000,
+                &contexts,
+                &[49; 6],
+                &[9_372_428_362; 6],
+                &log_k,
+                IncrOptions {
+                    verify: false,
+                    check_int4: check,
+                    index1: Index1Search::Auto,
+                    sweep_factor: 16,
+                },
+            )
+        };
         let link_pr120 = |hits: Vec<UngappedHit>, cutoffs: &LinkHspCutoffs| {
             super::super::linking_fast::link_hsp_group_fast(
                 hits,
@@ -4285,10 +4396,10 @@ mod tests {
             .unwrap_or(20_000);
         // [class][kernel]: class 0 = no value outside Int4, 1 = only an
         // add-back outside Int4, 2 = a pass value outside Int4; kernel 0 =
-        // index with reuse, 1 = index without reuse, 2 = linking_fast.rs.
+        // index with reuse, 1 = index without reuse, 2 = linking_fast.rs, 3 = incremental.
         let mut cases_of = [0usize; 3];
-        let mut differ = [[0usize; 3]; 3];
-        let mut smallest: [Option<(usize, String)>; 3] = [None, None, None];
+        let mut differ = [[0usize; 4]; 3];
+        let mut smallest: [Option<(usize, String)>; 4] = [None, None, None, None];
         let mut fallbacks = 0usize;
         for case in 0..cases {
             let (c0, c1, gap_prob, ignore_small_gaps, lo, hi) = settings[case % settings.len()];
@@ -4335,6 +4446,29 @@ mod tests {
             let (with_reuse, stats_reuse) = link_index(hits.clone(), &cutoffs, true, false);
             let (without_reuse, stats_plain) = link_index(hits.clone(), &cutoffs, false, false);
             let pr120 = link_pr120(hits.clone(), &cutoffs);
+            let (incr, stats_incr) = link_incr(hits.clone(), &cutoffs, false);
+            let (incr_checked, stats_incr_checked) = link_incr(hits.clone(), &cutoffs, true);
+            let incr_checked = if stats_incr_checked.int4_overflow_pass != 0 {
+                assert_eq!(
+                    format!("{incr_checked:?}"),
+                    format!("{hits:?}"),
+                    "{label}: incremental handed back changed"
+                );
+                link_ncbi(incr_checked, &cutoffs)
+            } else {
+                incr_checked
+            };
+            assert!(
+                same(&expected, &incr_checked),
+                "{label}: incremental kernel + fallback"
+            );
+            if stats_incr.int4_overflow_pass == 0 {
+                assert!(same(&expected, &incr), "{label}: incremental kernel");
+            }
+            assert!(
+                stats_incr.int4_overflow_pass <= 1,
+                "{label}: {stats_incr:?}"
+            );
 
             // The path of linking.rs: the checked kernel, the NCBI kernel on Int4 overflow.
             let before = format!("{hits:?}");
@@ -4377,7 +4511,7 @@ mod tests {
                     "{label}: index kernel, no reuse"
                 );
             }
-            for (kernel, result) in [&with_reuse, &without_reuse, &pr120]
+            for (kernel, result) in [&with_reuse, &without_reuse, &pr120, &incr]
                 .into_iter()
                 .enumerate()
             {
@@ -4401,9 +4535,14 @@ mod tests {
         eprintln!(
             "fast_kernel_int4_wrap_groups: {cases} cases; classes (none, add-back only, pass) {cases_of:?}; checked kernel fell back {fallbacks} times"
         );
-        for (kernel, name) in ["index, reuse", "index, no reuse", "linking_fast.rs"]
-            .iter()
-            .enumerate()
+        for (kernel, name) in [
+            "index, reuse",
+            "index, no reuse",
+            "linking_fast.rs",
+            "incremental",
+        ]
+        .iter()
+        .enumerate()
         {
             eprintln!(
                 "  {name}: differs in (none, add-back only, pass) = ({}, {}, {}); smallest: {}",

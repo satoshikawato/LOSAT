@@ -504,7 +504,10 @@ test.describe('engine build', () => {
     expect(ownAfter.csv.bytes.equals(own.csv.bytes)).toBe(true);
     expect(JSON.parse(ownAfter.json.bytes.toString('utf8')).hsps).toEqual(JSON.parse(own.json.bytes.toString('utf8')).hsps);
     const reportText = (report: Download) => report.bytes.toString('utf8').replace(/\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d+)?(Z|[+-]\d\d:\d\d)?/g, '<time>');
-    expect(reportText(ownAfter.report)).toBe(reportText(own.report));
+    // The same report, but for the badge's line that says where the loaded run's outputs come from.
+    const loadedLine = /<li>Loaded from a session file \(saved by LOSAT Web [^<]*: its outputs were written by [^<]*, an engine build of this site\.<\/li>\n/;
+    expect(reportText(ownAfter.report)).toMatch(loadedLine);
+    expect(reportText(ownAfter.report).replace(loadedLine, '')).toBe(reportText(own.report));
 
     // What needs the original FASTA says so: the sequences of the tray and the run's input; the aligned rows do not need it.
     await page.getByTestId('tab-candidates').click();
@@ -547,12 +550,13 @@ test.describe('engine build', () => {
       'The subject FASTA was not attached to run 1: record 1 ("sA") differs from the saved run\'s record: its bytes have another SHA-256.',
     );
     await expect(page.getByTestId('run-original-subject')).toHaveAttribute('data-attached', 'false');
+    // The joined files, chosen together in another order than the run joined them.
     await attach('run-attach-subject-files', [
-      { name: 'part1.fa', text: PART1 },
       { name: 'part2.fa', text: PART2 },
+      { name: 'part1.fa', text: PART1 },
     ]);
     await expect(page.getByTestId('run-original-subject')).toHaveAttribute('data-attached', 'true');
-    await expect(page.getByTestId('run-original-subject-attached')).toContainText('Attached: part1.fa, part2.fa.');
+    await expect(page.getByTestId('run-original-subject-attached')).toContainText(/Attached: (part1\.fa, part2\.fa|part2\.fa, part1\.fa)\./);
     await expect(page.getByTestId('run-attach-subject-message')).toHaveCount(0);
     // The run's input FASTA is the one saved before: the attached files rebuilt with the run's records.
     const subjectAgain = await downloaded(page, 'run-input-save-subject');

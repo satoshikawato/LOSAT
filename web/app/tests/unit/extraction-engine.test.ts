@@ -49,6 +49,7 @@ import type { RunInput } from '../../src/ports/data';
 import type { HspRecord } from '../../src/ports/engine';
 import type { OutputStream } from '../../src/ports/run-output';
 import { FastaWriter, residues, seeded, type Lines, type ReaderKind } from './support/fasta-writer';
+import { memoryDownloader } from './support/memory-downloader';
 
 const latin1 = new TextDecoder('latin1');
 const AMINO_ACIDS = 'ACDEFGHIKLMNPQRSTVWY';
@@ -507,7 +508,7 @@ describe.skipIf(reactors === undefined)('extraction reads the residues that the 
       verification: { ncbi: '2.17.0', sources: [], programs: {} },
     });
     const saved: Array<{ name: string; bytes: Uint8Array }> = [];
-    const tray = new CandidateTray({ runs, data, downloader: { save: (name, bytes) => saved.push({ name, bytes }) }, now: () => 0 });
+    const tray = new CandidateTray({ runs, data, downloader: memoryDownloader((file) => saved.push({ name: file.name, bytes: file.bytes })), now: () => 0 });
 
     // Each query's first subject whole, then the other subjects marked in the list.
     for (const run of searched) {

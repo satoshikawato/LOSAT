@@ -10,6 +10,7 @@ import { FakeInputChecker, FakeScanner } from '../../src/infra/fake/fake-fasta';
 import type { ValidationResult } from '../../src/ports/engine';
 import type { InputChecker } from '../../src/ports/input-check';
 import type { RecordScanner } from '../../src/ports/scan';
+import { memoryDownloader } from './support/memory-downloader';
 
 function setup(
   options: {
@@ -48,7 +49,7 @@ function setup(
   const coordinator = new Coordinator({
     engine: { ...engine, run: fake.run.bind(fake), cancel: fake.cancel.bind(fake) },
     data,
-    downloader: { save: () => undefined },
+    downloader: memoryDownloader(() => undefined),
     now: () => 0,
     newRunId: () => `run-${++id}`,
   });

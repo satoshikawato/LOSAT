@@ -22,6 +22,7 @@ import type { ProgramId } from '../../src/domain/programs';
 import type { RunStatus } from '../../src/domain/run';
 import type { RecordResidues } from '../../src/ports/data';
 import type { HspRecord } from '../../src/ports/engine';
+import { memoryDownloader } from './support/memory-downloader';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -186,7 +187,7 @@ function trayDeps(runs: Store<AppState>, options: { fail?: string } = {}) {
         return indices.map((index) => records.get(runId)![index]!);
       },
     },
-    downloader: { save: (name, bytes, mime) => saved.push({ name, text: decoder.decode(bytes), mime }) },
+    downloader: memoryDownloader((file) => saved.push({ name: file.name, text: decoder.decode(file.bytes), mime: file.mime })),
     now: () => clock++,
   };
   return { deps, saved, residueCalls, hspCalls, records };

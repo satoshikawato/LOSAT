@@ -19,6 +19,7 @@ import type { OutputStream } from '../../../src/ports/run-output';
 import { runCases, type CaseResult } from '../../contract/contract';
 import { ENGINE_INPUT_CASES } from '../../contract/engine-input.contract';
 import { RUN_OUTPUT_CASES, type RemoteWriter } from '../../contract/run-output.contract';
+import { memoryDownloader } from '../../unit/support/memory-downloader';
 
 export interface SearchInput {
   /** Where the harness fetches the bytes (the test serves them). */
@@ -94,7 +95,7 @@ export class SearchSession {
   constructor(options: SessionOptions = {}) {
     if (ENGINE_ASSETS === null) throw new Error('the harness was built without the engine (LOSAT_WEB_REACTORS)');
     this.app = createApp({
-      downloader: { save: (fileName, bytes) => this.exported.set(fileName, bytes) },
+      downloader: memoryDownloader((file) => this.exported.set(file.name, file.bytes)),
       ...(options.renewal === undefined ? {} : { renewal: options.renewal }),
     });
   }

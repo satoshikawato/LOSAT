@@ -19,6 +19,7 @@ import type {
   ValidationResult,
 } from '../../src/ports/engine';
 import { DIAGNOSTICS_STREAM } from '../../src/ports/run-output';
+import { memoryDownloader } from './support/memory-downloader';
 
 const request: SearchRequest = {
   program: 'blastn',
@@ -40,9 +41,9 @@ function setup(engine: EngineGateway = new FakeEngine(), wrap: (data: DataServic
     cleanup: Promise.resolve({ state: 'done', removedSessions: 0 }),
   });
   const saved: Array<{ fileName: string; text: string }> = [];
-  const downloader: Downloader = {
-    save: (fileName, bytes) => saved.push({ fileName, text: new TextDecoder().decode(bytes) }),
-  };
+  const downloader: Downloader = memoryDownloader((file) =>
+    saved.push({ fileName: file.name, text: new TextDecoder().decode(file.bytes) }),
+  );
   let id = 0;
   const coordinator = new Coordinator({
     engine,

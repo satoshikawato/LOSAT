@@ -12,6 +12,7 @@ import type { Coordinator, RunView } from '../application/coordinator';
 import type { HspId, ResultsBrowser } from '../application/results';
 import type { ResultExporter } from '../application/result-export';
 import type { Session } from '../application/session';
+import type { RunFiles } from '../application/run-files';
 import { programById, residueUnit } from '../domain/programs';
 import { useStore } from './useStore';
 import AlignmentsView from './AlignmentsView.vue';
@@ -38,7 +39,10 @@ const props = defineProps<{
   runs: readonly RunView[];
   /** Session files: a loaded run's origin and the re-attachment of its original FASTA in Run details. */
   session?: Session;
+  runFiles: RunFiles;
 }>();
+/** "Edit Search" put the run's settings in the search form: the main view shows the Search tab. */
+const emit = defineEmits<{ 'edit-search': [] }>();
 /** The tab shown. The main view keeps it, so that another run, or the results shown again, open on the same tab. */
 const view = defineModel<ResultsView>('view', { default: 'hits' });
 const state = useStore(props.results.state);
@@ -148,6 +152,18 @@ const plural = (count: number, one: string) => `${formatCount(count)} ${count ==
 /** "Results for" (the query list) is for runs of more than one query, as NCBI's. */
 const multiQuery = computed(() => (loaded.value?.run.snapshot.query.records.length ?? 0) > 1);
 
+/** Why "Edit Search" could not fill the form (the engine could not describe the program). */
+const editError = ref<string>();
+/**
+ * NCBI's "Edit Search" (W4b decision 18): the run's settings and Job Title go to the search form,
+ * which keeps its inputs; nothing is searched (application/run-files.ts).
+ */
+async function editSearch(run: RunView): Promise<void> {
+  editError.value = undefined;
+  if (await props.runFiles.editSearch(run)) emit('edit-search');
+  else editError.value = props.runFiles.state.get().run?.text;
+}
+
 /** "Show alignment" of the Graphic Summary and the Dot Plot: the Alignments tab, with the HSP's Range in view. */
 async function toAlignments(id: HspId): Promise<void> {
   view.value = 'alignment';
@@ -161,6 +177,10 @@ async function toAlignments(id: HspId): Promise<void> {
     <h2 ref="heading" tabindex="-1" data-testid="results-heading">Results</h2>
     <p v-if="runs.length === 0" class="muted" data-testid="results-empty">No runs yet. Searches appear here when they complete.</p>
     <template v-else>
+      <p v-if="selected" class="results-links">
+        <button type="button" class="link" data-testid="edit-search" @click="editSearch(selected)">Edit Search</button>
+        <span v-if="editError" class="error" data-testid="edit-search-error"> {{ editError }}</span>
+      </p>
       <div class="results-top">
         <dl class="results-summary" data-testid="results-summary">
           <template v-if="selected?.snapshot.title">
@@ -277,7 +297,7 @@ async function toAlignments(id: HspId): Promise<void> {
             <HspTable :results="results" :state="state" />
           </template>
         </div>
-        <RunDetails v-if="view === 'details'" :run="loaded.run" :loaded="loaded" :session="session" />
+        <RunDetails v-if="view === 'details'" :run="loaded.run" :loaded="loaded" :session="session" :run-files="runFiles" />
         <OutputsView v-if="view === 'outputs'" :coordinator="coordinator" :run="loaded.run" :exporter="exporter" :state="state" />
       </template>
     </template>

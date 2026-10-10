@@ -8,6 +8,8 @@ import { SearchDraft } from './application/draft';
 import { ResultsBrowser } from './application/results';
 import { ResultExporter } from './application/result-export';
 import { Session } from './application/session';
+import { RunFiles } from './application/run-files';
+import { threadLimit } from './domain/settings-file';
 import type { Downloader } from './ports/download';
 import type { EngineGateway } from './ports/engine';
 import { browserCompression } from './infra/browser/compression';
@@ -34,6 +36,8 @@ export interface App {
   readonly usesFakeEngine: boolean;
   /** Session files: saving the completed runs, opening them without a search, re-attaching originals (application/session.ts). */
   readonly session: Session;
+  /** Settings files, "Edit Search", and the input FASTA of runs (application/run-files.ts). */
+  readonly runFiles: RunFiles;
 }
 
 /** This build's version and commit (vite.config.ts), written into session files; "unknown" where a build does not set them. */
@@ -102,5 +106,11 @@ export function createApp(options: AppOptions = {}): App {
     now: () => Date.now(),
     newRunId: () => crypto.randomUUID(),
   });
-  return { coordinator, draft, results, candidates, exporter, attention, usesFakeEngine: ENGINE_ASSETS === null, session };
+  const runFiles = new RunFiles({
+    draft,
+    downloader,
+    maxThreads: () => threadLimit(navigator.hardwareConcurrency),
+    attachedInput: (runId, role) => session.attachedInput(runId, role),
+  });
+  return { coordinator, draft, results, candidates, exporter, attention, usesFakeEngine: ENGINE_ASSETS === null, session, runFiles };
 }

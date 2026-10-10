@@ -2203,3 +2203,48 @@ button.link[aria-disabled='true'] {
 .validation {
   white-space: pre-line;
 }
+
+/* S15 (WP-C): the search form's settings file, "Edit Search" and the reproduction panel. */
+.settings-file {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  margin: 8px 0;
+}
+
+.settings-message {
+  overflow-wrap: anywhere;
+}
+
+/* NCBI's row of links above the results' header block ("Edit Search"). */
+.results-links {
+  margin: 0 0 6px;
+}
+
+.reproduce h4 {
+  margin: 12px 0 4px;
+}
+
+.reproduce-notes,
+.reproduce-inputs {
+  padding-left: 18px;
+  overflow-wrap: anywhere;
+}
+
+.reproduce-inputs li {
+  margin: 4px 0;
+}
+
+.reproduce-inputs button {
+  margin-right: 8px;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.reproduce-settings {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+}

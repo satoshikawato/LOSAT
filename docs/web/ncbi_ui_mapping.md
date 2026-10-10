@@ -46,6 +46,7 @@ NCBI の 2 配列の画面は、上から program のタブ、program の一文�
 | BLAST のボタンと「Search nucleotide sequence using Megablast (Optimize for highly similar sequences)」 | ボタン「Run LOSAT」（キューが空）／「Run LOSAT (add to queue)」（実行中か待ちがある）、複数の Run は「Run LOSAT (2 runs)」「Run LOSAT (2 runs, add to queue)」（`add-to-queue`）。横に「Search nucleotide subjects with BLASTN, task megablast (optimized for highly similar sequences). Runs in this browser.」の形の一文（`search-summary-line`） | 寄せる | ボタンの名前は保守者の指示（2026-10-10）で「Run LOSAT」（「BLAST」を操作の名前にしない）。キューに積むことはボタンの括弧、この機械で動くことは横の一文で示す（指示書 3.） |
 | 「Show results in a new window」 | なし | 採らない | 結果は同じタブの「Results」に出る。新しい窓は保存と worker を分ける |
 | （無い） | Threads の select、エンジンの option の検査の一文、キューの一文（「Show the queue」）、入力の不足の一文 | LOSAT だけ | ボタンの近く（ボタンの行の下） |
+| （無い） | 「Search settings」の行（S15）：「Save settings」（`settings-save`、フォームの program・option・スレッドを `losat-settings-{program}.json` に。入力・名前・Job Title は書かない）、「Load settings…」（`settings-load`）、何を読んだか・入れなかったか・なぜ拒んだかの一文（`settings-message`、「Edit Search」もここに書く） | LOSAT だけ | Threads の行の下。LOSAT Web の形式であり、NCBI の「Save Search」（アカウントへの保存）ではない |
 | 「Algorithm parameters」（開閉、閉じて始まる）と「Note: Parameter values that differ from the default are highlighted in yellow and marked with ♦ sign」 | 開閉する「Algorithm parameters」（`algorithm-parameters`、閉じて始める。既定と違う値があれば開いて始め、見出しに数）。同じ注 | 採る | |
 | 「Restore default search parameters」 | 同じ言葉のボタン（`restore-defaults`）。Algorithm parameters の節の値を消す（task と遺伝暗号は残す） | 採る | |
 | 既定と違う値の黄色と ♦ | argv に書く値（`formParameters` が書く値）の欄を黄色（LOSAT の注意の色）と ♦ で示し、読み上げに「changed from the default」 | 採る | LOSAT は既定と同じ値を argv に書かないので「書く値」がそのまま「既定と違う値」。task で変わる既定（`describe` に既定が無い）も、書く値なら印を付ける |
@@ -68,9 +69,9 @@ NCBI の結果は、上から操作の行（Edit Search、Save Search、Search S
 
 | NCBI の要素 | LOSAT Web | 採否 | 理由・置き場所 |
 |---|---|---|---|
-| 「Edit Search」 | なし | 後の段階（S15） | Run の入力と条件を検索画面に戻すのは、再現性（再読込とつなぎ直し）の段階で扱う |
+| 「Edit Search」 | 「Edit Search」（`edit-search`、見出しの塊の上の行）：Run の設定（program、argv の `slice(5)`（範囲を含む）、スレッド）と Job Title を検索フォームに入れ、Search タブを設定の行で開き、「The search form has the settings of Run N. The inputs are the form's own.」と言う（`settings-message`）。入力はフォームのまま。検索は始めない | 寄せる | S15：設定ファイルの読み込みと同じ規則（`SearchDraft.applySettings`）。フォームに欄の無い option、入力に当たらない範囲（範囲は 1 レコードの役割だけ）、この browser に無いスレッド数は入れずに「Not applied: …」と並べる。Run の入力を戻すのは、セッションファイルのつなぎ直し（REQ-23）の役目で、ここではしない |
 | 「Save Search」「How to read this report?」「BLAST Help Videos」「Back to Traditional Results Page」 | なし | 採らない | NCBI のアカウントと文書 |
-| 「Search Summary」（Search Parameters・Karlin-Altschul statistics・Results Statistics） | タブ「Run details」（`results-view-details`）：CLI のコマンド、RunSnapshot、RunRecord、検証バッジ | 寄せる | 統計の値（Lambda、K、H、有効探索空間）は outfmt 0 の末尾の原文にある（Outputs）。TS で抜き出さない |
+| 「Search Summary」（Search Parameters・Karlin-Altschul statistics・Results Statistics） | タブ「Run details」（`results-view-details`）：RunSnapshot、RunRecord、検証バッジ、「Reproduce this run」（S15、`run-reproduce`：LOSAT のコマンド `run-command-<format>`、NCBI BLAST+ 2.17.0 の比較用のコマンド `run-ncbi-command-<format>` か比べられない理由 `run-ncbi-unavailable`、承認済みの例外、入力 FASTA の保存 `run-input-save-<query|subject>`、設定ファイル `run-settings-save`） | 寄せる | 統計の値（Lambda、K、H、有効探索空間）は outfmt 0 の末尾の原文にある（Outputs）。TS で抜き出さない |
 | 「Job Title」 | 「Job Title」（Run の `title`。無ければ行を出さない） | 採る | |
 | 「RID」と「Search expires on」 | 「Run」：Run の select（`results-run`、Run の番号・program・入力名） | 寄せる | RID に当たるのは Run の番号。期限は無い（作業セッションの中） |
 | 「Download All」 | 「Download All」：タブ「Outputs」へ移る（`results-download-all`） | 寄せる | 原文の outfmt 0/6/7 と診断を書き出す（Outputs） |

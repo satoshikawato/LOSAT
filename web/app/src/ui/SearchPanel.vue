@@ -8,15 +8,18 @@
 import { computed, ref, watch } from 'vue';
 import type { RunView } from '../application/coordinator';
 import type { SearchDraft } from '../application/draft';
+import type { RunFiles } from '../application/run-files';
 import { isTerminal } from '../domain/run';
 import { effectiveValue, formParameters, placementFlags, sectionsAt } from '../domain/parameters';
 import { PROGRAMS, programById, searchSummary, type InputRole } from '../domain/programs';
+import { threadLimit } from '../domain/settings-file';
 import { useStore } from './useStore';
 import InputPanel from './InputPanel.vue';
 import ParameterField from './ParameterField.vue';
 import ParameterForm from './ParameterForm.vue';
+import SettingsFileControl from './SettingsFileControl.vue';
 
-const props = defineProps<{ draft: SearchDraft; runs: readonly RunView[] }>();
+const props = defineProps<{ draft: SearchDraft; runs: readonly RunView[]; runFiles: RunFiles }>();
 const state = useStore(props.draft.state);
 const program = computed(() => programById(state.value.program));
 const options = computed(() => state.value.description?.parameters);
@@ -24,10 +27,7 @@ const values = computed(() => state.value.values[state.value.program]);
 const roles: readonly InputRole[] = ['query', 'subject'];
 
 /** Threads offered besides Auto: up to the logical processors (at most 16). */
-const threadChoices = computed(() => {
-  const hardware = Number.isInteger(navigator.hardwareConcurrency) ? navigator.hardwareConcurrency : 4;
-  return Array.from({ length: Math.max(1, Math.min(16, hardware)) }, (_, i) => i + 1);
-});
+const threadChoices = computed(() => Array.from({ length: threadLimit(navigator.hardwareConcurrency) }, (_, i) => i + 1));
 
 const waiting = computed(() => props.runs.filter((run) => !isTerminal(run.status)).length);
 const active = computed(() => props.runs.find((run) => !isTerminal(run.status) && run.status !== 'queued'));
@@ -92,6 +92,13 @@ function showQueue(): void {
   document.getElementById('queue')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
+const settingsFile = ref<InstanceType<typeof SettingsFileControl>>();
+/** Shows the settings line and its message ("Edit Search" put a run's settings in the form). */
+function showSettings(): void {
+  settingsFile.value?.show();
+}
+defineExpose({ showSettings });
+
 function onThreads(event: Event): void {
   const value = (event.target as HTMLSelectElement).value;
   props.draft.setThreads(value === 'auto' ? 'auto' : Number(value));
@@ -154,6 +161,7 @@ function onThreads(event: Event): void {
         </label>
         <span class="hint">Auto runs small searches on one thread and larger ones on up to four.</span>
       </div>
+      <SettingsFileControl ref="settingsFile" :run-files="runFiles" :disabled="program.unavailable !== undefined" />
       <p v-if="readiness" class="notice" data-testid="draft-readiness">{{ readiness }}</p>
       <p class="validation" :data-state="state.validation.state" data-testid="argv-validation" aria-live="polite">
         <template v-if="state.validation.state === 'invalid'">

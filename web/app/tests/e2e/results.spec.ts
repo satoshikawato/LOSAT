@@ -349,7 +349,9 @@ async function expectRanges(page: Page, queryRows: readonly string[][], pairRank
     await expect(block.getByTestId('range-label')).toHaveText(rangeLabel(position + 1, queryRows[rank]!));
     const section = block.getByTestId('range-section');
     if (checked >= sections || (await section.count()) === 0) continue;
-    await section.scrollIntoViewIfNeeded();
+    // The block, which stays: its section's element is replaced when the text arrives (on the one
+    // page, the blocks near the window may be read while the test scrolls).
+    await block.scrollIntoViewIfNeeded();
     await expect(section).toHaveAttribute('data-state', 'ready');
     // An HSP's section of outfmt 0 starts with its Score line (an empty text would pass toContain).
     const body = await text(section);

@@ -39,9 +39,9 @@ from pathlib import Path
 from typing import Iterable, Sequence
 
 
-CASES_HEADER = ("module", "file", "case", "line_start", "line_end", "kind")
+CASES_HEADER = ("module", "file", "case", "line_start", "line_end", "kind", "note")
 LEDGER_HEADER = ("module", "case", "status", "losat_test", "note", "since")
-KINDS = ("AUTO", "FIXTURE", "DISABLED")
+KINDS = ("AUTO", "FIXTURE", "DISABLED", "MACRO")
 STATUSES = ("ported", "partial", "e2e", "to-port", "n-a", "superseded")
 LINKED_STATUSES = ("ported", "partial")
 COMMIT_KEY = "ncbi_commit"
@@ -109,6 +109,7 @@ class Case:
     line_start: int
     line_end: int
     kind: str
+    note: str = ""
 
 
 @dataclass(frozen=True)
@@ -285,28 +286,40 @@ def extract_cases_from_text(module: str, file: str, text: str) -> list[Case]:
             raise LedgerError(f"{file}:{line_start}: {error}") from None
         cases.append(Case(module, file, match.group(2), line_start, line_end, kind_of(line_start, match.group(1))))
 
-    # A case declared by a macro (ntscan's DECLARE_TEST) is one case per
-    # invocation, named by expanding the macro's `##` concatenation; it spans
-    # the invocation lines.
-    for _, _, definition in defines:
+    # A macro that declares a case (ntscan's DECLARE_TEST) is one MACRO row as
+    # written in the source, named after the macro, from the `#define` to its
+    # last invocation; the note gives how many cases it declares at run time.
+    for define_start, _, definition in defines:
         macro = MACRO_CASE_RE.match(definition)
         if not macro:
             continue
+        name = macro.group("name")
         params = [param.strip() for param in macro.group("params").split(",")]
-        parts = [part.strip() for part in macro.group("expr").split("##")]
-        for call in re.finditer(rf"\b{re.escape(macro.group('name'))}\s*\(", blanked):
+        live = dead = 0
+        first = last = 0
+        for call in re.finditer(rf"\b{re.escape(name)}\s*\(", blanked):
             if in_define(call.start()):
                 continue
+            line = line_of(call.start())
             close = _matching_paren(blanked, call.end() - 1)
             args = [arg.strip() for arg in blanked[call.end() : close].split(",")]
             if len(args) != len(params):
-                raise LedgerError(f"{file}:{line_of(call.start())}: {macro.group('name')} takes {len(params)} arguments")
-            values = dict(zip(params, args))
-            name = "".join(values.get(part, part) for part in parts)
-            if not re.fullmatch(r"[A-Za-z_]\w*", name):
-                raise LedgerError(f"{file}:{line_of(call.start())}: cannot expand case name {name!r}")
-            line_start = line_of(call.start())
-            cases.append(Case(module, file, name, line_start, line_of(close), kind_of(line_start, macro.group("kind"))))
+                raise LedgerError(f"{file}:{line}: {name} takes {len(params)} arguments")
+            if disabled[line - 1]:
+                dead += 1
+            else:
+                live += 1
+            first = first or line
+            last = line_of(close)
+        if not live + dead:
+            continue
+        parts = [part.strip() for part in macro.group("expr").split("##")]
+        pattern = "".join(f"<{part}>" if part in params else part for part in parts)
+        note = f"{live} cases at run time from {name}(...) at lines {first}-{last}, named {pattern}"
+        if dead:
+            note += f"; {dead} more compiled out"
+        kind = "DISABLED" if disabled[define_start - 1] or not live else "MACRO"
+        cases.append(Case(module, file, name, define_start, last, kind, note))
     cases.sort(key=lambda case: case.line_start)
     return cases
 
@@ -389,7 +402,7 @@ def write_cases(path: Path, commit: str, cases: Iterable[Case]) -> None:
     for case in cases:
         lines.append(
             "\t".join(
-                (case.module, case.file, case.case, str(case.line_start), str(case.line_end), case.kind)
+                (case.module, case.file, case.case, str(case.line_start), str(case.line_end), case.kind, case.note)
             )
         )
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -427,10 +440,10 @@ def load_cases(path: Path) -> CaseList:
     if not re.fullmatch(r"[0-9a-f]{40}", commit):
         raise LedgerError(f"{path}: missing '# {COMMIT_KEY}<TAB><40-hex>' line")
     cases: list[Case] = []
-    for number, (module, file, name, start, end, kind) in rows:
+    for number, (module, file, name, start, end, kind, note) in rows:
         if kind not in KINDS or not start.isdigit() or not end.isdigit():
             raise LedgerError(f"{path}:{number}: invalid case row")
-        cases.append(Case(module, file, name, int(start), int(end), kind))
+        cases.append(Case(module, file, name, int(start), int(end), kind, note))
     return CaseList(commit, cases)
 
 

@@ -39,16 +39,19 @@ are out of scope.
 
 ## Columns
 
-`NCBI_CASES.tsv`: `module  file  case  line_start  line_end  kind`
+`NCBI_CASES.tsv`: `module  file  case  line_start  line_end  kind  note`
 
 - `file`: path from the NCBI repository root, as written in a citation.
-- `line_start`, `line_end`: the `BOOST_*_TEST_CASE(` line and the line of the closing brace. A
-  case declared through a macro (ntscan's `DECLARE_TEST(Tiny, TINY_GI, 0, 0, 4)`, which expands to
-  `TinyScanOffsetSize4`) spans its invocation lines; cite those, and quote the macro body with an
-  `NCBI reference` line.
-- `kind`: `AUTO` (`BOOST_AUTO_TEST_CASE`), `FIXTURE` (`BOOST_FIXTURE_TEST_CASE`), or `DISABLED`
-  (inside `#if 0` or `#if SEQLOC_MIX_QUERY_OK`, which NCBI never compiles).
+- `line_start`, `line_end`: the `BOOST_*_TEST_CASE(` line and the line of the closing brace.
+- `kind`: `AUTO` (`BOOST_AUTO_TEST_CASE`), `FIXTURE` (`BOOST_FIXTURE_TEST_CASE`), `DISABLED`
+  (inside `#if 0` or `#if SEQLOC_MIX_QUERY_OK`, which NCBI never compiles), or `MACRO`.
   `BOOST_AUTO_TEST_CASE_TIMEOUT` lines only set a timeout and are not cases.
+- `MACRO`: a `#define` whose body declares a case, counted once as written. ntscan's
+  `DECLARE_TEST` (lines 846-905) is one row named after the macro, from the `#define` to its last
+  invocation; its 44 invocations (`DECLARE_TEST(Tiny, TINY_GI, 0, 0, 4)` declares
+  `TinyScanOffsetSize4`, ...) are not rows of their own.
+- `note`: for a `MACRO` row, how many cases the macro declares at run time and where; empty
+  otherwise.
 - The `# ncbi_commit` line names the NCBI commit the file was generated from.
 
 `LEDGER.tsv`: `module  case  status  losat_test  note  since`
@@ -92,7 +95,10 @@ are out of scope.
 
    One line per case: the commit, the file, the cited lines (inside the case; `a-b`, or several
    ranges joined by `,`), and the case name. The usual `NCBI reference` snippet may follow it.
-   Lines that start with `NCBI reference` are not citations of a ported case.
+   Lines that start with `NCBI reference` are not citations of a ported case. For a `MACRO` case,
+   cite the macro body and the invocation you port, and name the runtime case in the test name
+   (`ntscan_unit_test.cpp:847-853,855 DECLARE_TEST` above `fn tiny_scan_offset_size_4`); the row
+   becomes `ported` only when the tests cover every invocation.
 3. Set the case's row to `ported` or `partial`, name the test in `losat_test`, and set `since`.
 4. Run `check`, and paste `report` into the gate record of the stage.
 
@@ -137,7 +143,7 @@ require `to-port` rows to go down; ports happen in the sweeps (AGENTS.md rule 10
 
 ## Origin of the first rows
 
-The first `LEDGER.tsv` (2026-10-10) was converted from a mapping of all 722 NCBI cases to LOSAT
+The first `LEDGER.tsv` (2026-10-10) was converted from a mapping of all 679 NCBI cases to LOSAT
 tests made on `main` b28e42e1, each module's mapping checked by a second reader (equivalent ->
 `ported`, partial -> `partial`, e2e_only -> `e2e`, gap -> `to-port`, not_ported and out_of_scope
 -> `n-a`; the 18 refuted claims take the reader's corrected status and evidence; `DISABLED` cases

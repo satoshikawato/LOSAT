@@ -10,8 +10,9 @@
 import { buildArgv, PASTED_NAMES } from '../domain/argv';
 import type { FastaParserKind } from '../domain/dataset';
 import type { OutputFormat } from '../domain/output-format';
-import { indexParser, type ProgramId } from '../domain/programs';
+import { indexParser, type InputRole, type ProgramId } from '../domain/programs';
 import { isTerminal, type InputSnapshot, type RunRecord, type RunSnapshot, type RunStatus } from '../domain/run';
+import type { SessionInput } from '../domain/session-file';
 import type { DataGateway, ResultSetRef, RunInput, StorageInfo } from '../ports/data';
 import type { Downloader } from '../ports/download';
 import {
@@ -49,6 +50,40 @@ export interface RunView {
   readonly status: RunStatus;
   readonly record: RunRecord;
   readonly result?: ResultSetRef;
+  /** Set for a run loaded from a session file: where it comes from. Such a run is completed and never searched here. */
+  readonly fromSession?: SessionOrigin;
+  /**
+   * The original FASTA re-attached to a run loaded from a session file, per role (REQ-23). It is
+   * kept apart from the snapshot, which stays as the file recorded it.
+   */
+  readonly attached?: Readonly<Partial<Record<InputRole, Attachment>>>;
+}
+
+/** Where a run loaded from a session file comes from (design §12.2). */
+export interface SessionOrigin {
+  /** The session file's name, as the chosen file has it. */
+  readonly fileName: string;
+  /** The run's number in the working session that saved the file. */
+  readonly number: number;
+  /** When the file was saved (ms since the epoch). */
+  readonly savedAt: number;
+  /** The identity of the run's inputs that the file recorded: what an original FASTA must match to be attached. */
+  readonly inputs: Readonly<Record<InputRole, SessionInput>>;
+}
+
+/** An original FASTA re-attached to a loaded run: the revisions whose run input matched the session file's record of it. */
+export interface Attachment {
+  readonly revisionIds: readonly string[];
+  /** The chosen files' names, in order. */
+  readonly fileNames: readonly string[];
+}
+
+/** A run loaded from a session file, before the coordinator numbers it (`addSessionRuns`). */
+export interface SessionRunInit {
+  readonly snapshot: Omit<RunSnapshot, 'number'>;
+  readonly record: RunRecord;
+  readonly result: ResultSetRef;
+  readonly fromSession: SessionOrigin;
 }
 
 export interface AppState {
@@ -184,6 +219,33 @@ export class Coordinator {
     }
     this.cancelRequested.add(runId);
     this.deps.engine.cancel(runId);
+  }
+
+  /**
+   * Adds runs loaded from a session file (application/session.ts) as completed runs, numbered
+   * after the runs of this working session, in order. They are never queued, validated or
+   * searched: their outputs are already in the Data worker.
+   */
+  addSessionRuns(runs: readonly SessionRunInit[]): readonly RunView[] {
+    const views = runs.map(
+      (run): RunView => ({
+        snapshot: Object.freeze({ ...run.snapshot, number: this.nextNumber++ }),
+        status: 'completed',
+        record: run.record,
+        result: run.result,
+        fromSession: run.fromSession,
+      }),
+    );
+    this.setRuns([...this.state.get().runs, ...views]);
+    void this.refreshStorage();
+    return views;
+  }
+
+  /** Records the original FASTA of a role of a loaded run, once the session found that it matches (REQ-23). */
+  attach(runId: string, role: InputRole, attachment: Attachment): void {
+    const view = this.find(runId);
+    if (view?.fromSession === undefined) throw new Error('only a run loaded from a session file takes its original FASTA again');
+    this.update(runId, { attached: { ...view.attached, [role]: attachment } });
   }
 
   /** Saves one compatibility output of a completed run, byte for byte. */
@@ -357,6 +419,8 @@ function inputName(input: SequenceInput, pastedName: string): string {
 }
 
 function engineInput(input: InputSnapshot): EngineInput {
+  // Only queued runs are searched, and a run loaded from a session file is never queued.
+  if (input.bytes === undefined) throw new Error('a run loaded from a session file is never searched again');
   return { bytes: input.bytes, sha256: input.sha256, revisionIds: input.revisionIds, records: input.records };
 }
 

@@ -27,6 +27,7 @@ import type {
   RecordResidues,
   ResultSetRef,
   RunInput,
+  RunInputDescription,
   SourceRef,
   StorageInfo,
 } from '../../ports/data';
@@ -87,6 +88,9 @@ interface StagedRun {
   failure: Error | undefined;
   /** The commit in progress; a second commitRun waits for the same one. */
   commit: Promise<ResultSetRef> | undefined;
+  /** Bytes delivered by the port so far, and the `stagedBytes` calls that wait for more. */
+  received: number;
+  readonly waiters: Array<{ readonly atLeast: number; readonly resolve: (received: number) => void }>;
 }
 
 interface CommittedRun {
@@ -302,6 +306,33 @@ export class DataService implements DataGateway {
     return residues;
   }
 
+  async describeRunInput(revisionIds: readonly string[]): Promise<RunInputDescription> {
+    const parts = this.runInputParts(revisionIds);
+    const readers = new Set(parts.map(({ revision }) => revision.parser));
+    if (readers.size !== 1) throw new Error('the revisions of one run input were indexed with different reader kinds');
+    const id: string[] = [];
+    const length: number[] = [];
+    const sha256: string[] = [];
+    // One by one: spreading a large table into push() overflows the call stack.
+    for (const { included } of parts) {
+      for (const record of included) {
+        id.push(record.id);
+        length.push(record.length);
+        sha256.push(record.sha256);
+      }
+    }
+    return {
+      reader: parts[0]!.revision.parser,
+      records: { id, length, sha256 },
+      sources: parts.map(({ revision, file }) => ({
+        name: file.name,
+        size: file.size,
+        records: revision.records.length,
+        excluded: [...revision.excluded],
+      })),
+    };
+  }
+
   // --- runs -----------------------------------------------------------------------------
 
   async openRun(runId: string): Promise<MessagePort> {
@@ -326,6 +357,8 @@ export class DataService implements DataGateway {
       hitLineOpen: false,
       failure: undefined,
       commit: undefined,
+      received: 0,
+      waiters: [],
     };
     this.runs.set(runId, run);
     return channel.port1;
@@ -444,10 +477,57 @@ export class DataService implements DataGateway {
     };
   }
 
+  async runBlockLengths(runId: string): Promise<Readonly<Record<OutputStream, number>>> {
+    const run = this.runs.get(runId);
+    if (run?.state !== 'committed') throw new Error(`run ${runId} has no committed result`);
+    return { ...run.lengths };
+  }
+
+  async readRunBlock(runId: string, stream: OutputStream, start: number, end: number): Promise<Uint8Array> {
+    const run = this.runs.get(runId);
+    if (run?.state !== 'committed') throw new Error(`run ${runId} has no committed result`);
+    if (!OUTPUT_STREAMS.includes(stream)) throw new RangeError(`${String(stream)} is not a stream of a run`);
+    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end < start || end > run.lengths[stream]) {
+      throw new RangeError(`bytes [${start}, ${end}) are not in stream ${stream} of run ${runId} (${run.lengths[stream]} bytes)`);
+    }
+    return this.deps.store.read(blockPath(run.token, stream), start, end - start);
+  }
+
+  stagedBytes(runId: string, atLeast: number): Promise<number> {
+    const run = this.runs.get(runId);
+    if (run?.state !== 'staged' || run.received >= atLeast || run.failure !== undefined) {
+      return Promise.resolve(run?.state === 'staged' ? run.received : 0);
+    }
+    // A port that broke the protocol or closed delivers nothing more.
+    const ended = run.receiver.finished.then(() => run.received);
+    const reached = new Promise<number>((resolve) => run.waiters.push({ atLeast, resolve }));
+    return Promise.race([reached, ended]);
+  }
+
   // --- helpers --------------------------------------------------------------------------
 
   /** Stores one chunk of a staged run. After a failure, the run keeps nothing. */
   private append(run: StagedRun, stream: OutputStream, bytes: Uint8Array): void {
+    run.received += bytes.length;
+    try {
+      this.store(run, stream, bytes);
+    } finally {
+      this.release(run);
+    }
+  }
+
+  /** Resolves the `stagedBytes` calls that the delivered bytes (or a failure) satisfy. */
+  private release(run: StagedRun, all = false): void {
+    for (let i = run.waiters.length - 1; i >= 0; i--) {
+      const waiter = run.waiters[i]!;
+      if (all || run.failure !== undefined || run.received >= waiter.atLeast) {
+        run.waiters.splice(i, 1);
+        waiter.resolve(run.received);
+      }
+    }
+  }
+
+  private store(run: StagedRun, stream: OutputStream, bytes: Uint8Array): void {
     if (run.failure !== undefined || bytes.length === 0) return;
     try {
       run.writers.get(stream)!.append(bytes);
@@ -478,7 +558,10 @@ export class DataService implements DataGateway {
 
   private async drop(runId: string, run: StagedRun | CommittedRun): Promise<void> {
     this.runs.delete(runId);
-    if (run.state === 'staged') run.receiver.close();
+    if (run.state === 'staged') {
+      run.receiver.close();
+      this.release(run, true);
+    }
     await this.deps.store.removeAll(runPrefix(run.token));
   }
 

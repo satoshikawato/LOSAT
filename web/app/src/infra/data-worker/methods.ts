@@ -23,6 +23,10 @@ export const DATA_GATEWAY_METHODS = [
   'readDiagnostics',
   'deleteRun',
   'storageInfo',
+  'describeRunInput',
+  'runBlockLengths',
+  'readRunBlock',
+  'stagedBytes',
 ] as const satisfies readonly (keyof DataGateway)[];
 
 export const ENGINE_CONTROL_METHODS = ['describe', 'validate'] as const satisfies readonly (keyof EngineControl)[];

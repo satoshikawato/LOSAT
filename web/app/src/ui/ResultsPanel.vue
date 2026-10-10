@@ -10,6 +10,7 @@ import { computed, nextTick, onUnmounted, ref, watch } from 'vue';
 import type { CandidateTray } from '../application/candidates';
 import type { Coordinator, RunView } from '../application/coordinator';
 import type { HspId, ResultsBrowser } from '../application/results';
+import type { Session } from '../application/session';
 import { programById, residueUnit } from '../domain/programs';
 import { useStore } from './useStore';
 import AlignmentsView from './AlignmentsView.vue';
@@ -28,7 +29,14 @@ import VerificationBadge from './VerificationBadge.vue';
 
 export type ResultsView = 'hits' | 'graphic' | 'alignment' | 'dotplot' | 'details' | 'outputs';
 
-const props = defineProps<{ coordinator: Coordinator; results: ResultsBrowser; candidates: CandidateTray; runs: readonly RunView[] }>();
+const props = defineProps<{
+  coordinator: Coordinator;
+  results: ResultsBrowser;
+  candidates: CandidateTray;
+  runs: readonly RunView[];
+  /** Session files: a loaded run's origin and the re-attachment of its original FASTA in Run details. */
+  session?: Session;
+}>();
 /** The tab shown. The main view keeps it, so that another run, or the results shown again, open on the same tab. */
 const view = defineModel<ResultsView>('view', { default: 'hits' });
 const state = useStore(props.results.state);
@@ -187,6 +195,12 @@ async function toAlignments(id: HspId): Promise<void> {
                 · group run {{ selected.snapshot.group.position }} of {{ selected.snapshot.group.size }}
               </template>
             </dd>
+            <template v-if="selected.fromSession">
+              <dt>Loaded</dt>
+              <dd class="run-inputs" data-testid="results-origin">
+                from {{ selected.fromSession.fileName }}, run {{ selected.fromSession.number }} there (not searched again)
+              </dd>
+            </template>
             <template v-if="selected.snapshot.query.records.length === 1">
               <dt>Query ID</dt>
               <dd data-testid="results-query-id">{{ selected.snapshot.query.records[0]!.id }}</dd>
@@ -261,7 +275,7 @@ async function toAlignments(id: HspId): Promise<void> {
             <HspTable :results="results" :state="state" />
           </template>
         </div>
-        <RunDetails v-if="view === 'details'" :run="loaded.run" :loaded="loaded" />
+        <RunDetails v-if="view === 'details'" :run="loaded.run" :loaded="loaded" :session="session" />
         <OutputsView v-if="view === 'outputs'" :coordinator="coordinator" :run="loaded.run" />
       </template>
     </template>

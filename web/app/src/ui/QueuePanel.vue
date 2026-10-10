@@ -138,6 +138,9 @@ function phaseTimes(run: RunView): string {
         <div v-if="run.snapshot.title" class="run-title" :data-testid="`run-${run.snapshot.number}-title`">
           {{ run.snapshot.title }}
         </div>
+        <div v-if="run.fromSession" class="run-inputs muted" :data-testid="`run-${run.snapshot.number}-origin`">
+          From {{ run.fromSession.fileName }}, run {{ run.fromSession.number }} there (not searched again)
+        </div>
         <div class="run-inputs muted">
           {{ run.snapshot.query.name }} vs {{ run.snapshot.subject.name }}
           <template v-if="run.snapshot.group">

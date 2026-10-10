@@ -8,6 +8,7 @@
 // outfmt 6 row's fields as written.
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import type { Candidate, CandidateTray, TrayOrder, TrayState } from '../application/candidates';
+import type { RunView } from '../application/coordinator';
 import type { HspId } from '../application/results';
 import { interval, spanOn } from '../domain/coordinates';
 import { recordLabel, type ExtractionRegion } from '../domain/extraction';
@@ -17,7 +18,12 @@ import { formatBytes, formatCount, formatCounted, formatDateTime } from './forma
 import { useNarrow } from './useNarrow';
 import VirtualRows from './VirtualRows.vue';
 
-const props = defineProps<{ candidates: CandidateTray; state: TrayState }>();
+const props = defineProps<{
+  candidates: CandidateTray;
+  state: TrayState;
+  /** The coordinator's runs: a loaded run's original FASTA, once attached, lets its candidates' sequences be extracted. */
+  runs?: readonly RunView[] | undefined;
+}>();
 const emit = defineEmits<{ reveal: [id: HspId] }>();
 
 const narrow = useNarrow();
@@ -175,6 +181,12 @@ const flankUnit = computed(() => {
   return units.size === 1 ? [...units][0]! : 'nt or aa, the unit of each record';
 });
 const busy = computed(() => props.state.busy !== undefined);
+/** Why sequences cannot be extracted now: selected candidates of runs loaded from a session file whose original FASTA is not attached. */
+const originals = computed(() => {
+  void props.runs;
+  void props.state.selected;
+  return props.candidates.missingOriginals(role.value);
+});
 
 function region(): ExtractionRegion {
   if (regionKind.value === 'flanked') {
@@ -184,7 +196,7 @@ function region(): ExtractionRegion {
 }
 
 async function downloadSequences(): Promise<void> {
-  if (busy.value || chosen.value.length === 0 || flanksInvalid.value) return;
+  if (busy.value || chosen.value.length === 0 || flanksInvalid.value || originals.value !== undefined) return;
   await props.candidates.extract({ role: role.value, region: region(), join: join.value });
 }
 
@@ -388,11 +400,12 @@ const intervalWords = (iv: { readonly from: number; readonly to: number }, unit:
           The sequences are the records' own letters as the input files have them, on each record's own strand (the header's hit_strand gives
           the hit's strand); lengths are in nt for nucleotides and aa for proteins.
         </p>
+        <p v-if="originals" class="notice" data-testid="extract-originals">{{ originals }}</p>
         <div class="extract-actions">
           <button
             type="button"
             class="primary-action"
-            :disabled="busy || chosen.length === 0 || flanksInvalid"
+            :disabled="busy || chosen.length === 0 || flanksInvalid || originals !== undefined"
             data-testid="extract-download"
             @click="downloadSequences"
           >

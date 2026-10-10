@@ -22,7 +22,8 @@ agents `plan_critic`, `ncbi_parity_auditor`, and `visual_regression_reviewer`).
   against the brief, `AGENTS.md`, and `web/AGENTS.md`. Report a finding only when it affects
   correctness, a stated requirement, a rule in those files (NCBI reference comments, layer rules,
   no BLAST values computed under `web/`), or a test that does not test what it claims; leave out
-  style. Give file and line, what goes wrong, and a concrete case.
+  style. Give file and line, what goes wrong, and a concrete case. A ported NCBI function that
+  has NCBI unit-test cases but no ported case and no `LEDGER.tsv` row is a finding.
 - **Independent audit (one angle).** Confirm the fixture, options, LOSAT commit, target, NCBI
   BLAST+ version, and applied exception. Trace the NCBI and LOSAT call paths (timing, encoding,
   coordinates, precision, sorting, pruning, formatting, native/Wasm agreement, parallel reduction

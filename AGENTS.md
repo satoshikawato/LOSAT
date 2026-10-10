@@ -266,6 +266,17 @@ cd LOSAT && cargo fmt
 - Add unit tests for NCBI-ported functions, including edge cases and boundaries.
 - Reference NCBI unit tests when available:
   `ncbi-blast/c++/src/algo/blast/unit_tests/`.
+- Port the NCBI unit-test cases of a ported function one case at a time, inside the parity
+  sweep of the module that owns it (rule 10). The test lives next to the implementation, in
+  its `#[cfg(test)]` module or a sibling `<name>_tests.rs` declared with
+  `#[cfg(test)] mod <name>_tests;`, with the line
+  `// NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/<dir>/<file>:<lines> <Case>`
+  above it and a row in `docs/evidence/ncbi_unit_cases/LEDGER.tsv` (statuses: ported,
+  partial, e2e, to-port, n-a, superseded; `python3 LOSAT/tests/ncbi_unit_case_ledger.py`).
+  Do not add integration binaries under `LOSAT/tests/` for unit tests (each links the whole
+  crate and sees only `pub` items) and do not make private items `pub` for a test. Cases that
+  need the object manager, GenBank, BLAST databases, or PSI/RPS/PHI are `n-a`; whole-search
+  cases (bl2seq) become fixture rows, not unit tests.
 - Integration tests must compare output with NCBI BLAST+ and verify hit counts,
   bit scores, E-values, and coordinates.
 - NCBI BLAST+ execution is allowed only as a comparison oracle during testing

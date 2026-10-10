@@ -37,14 +37,18 @@ Engine:
 ```bash
 cd LOSAT && cargo fmt --check                                                   # ~12 s
 cargo build --release --locked --target-dir "$BUILD_ROOT/native"                # ~1 min incremental
-LOSAT_BLASTX_WORKER_LOG="$BUILD_ROOT/blastx-worker.log" CARGO_PROFILE_TEST_OPT_LEVEL=1 \
-  cargo test --locked --all-features --target-dir "$BUILD_ROOT/test" <module filter>   # 15-60 s
+export LOSAT_BLASTX_WORKER_LOG="$BUILD_ROOT/blastx-worker.log"
+cargo test --locked --all-features --lib --target-dir "$BUILD_ROOT/test" <module path>   # inline tests
+cargo test --locked --all-features --test <binary> --target-dir "$BUILD_ROOT/test" <filter>   # integration
 cd .. && python3 docs/evidence/losat_web_e2a/check_losat.py --losat "$N" --threads 1 --programs <touched>   # ~26 s
 ```
 
 plus the one focused fixture from the stage's `AUTHORITY.md`. Adapter: `cargo fmt --check` and
 `cargo test --locked` in `web/adapter` (1-2 min). App: `cd web/app && npm run check` (median
 77 s); `npm ci` only when `package-lock.json` changed.
+
+- A bare `cargo test <filter>` builds and links all ten test binaries (the lib tests and the nine under `LOSAT/tests/`) and the bin before it filters.
+- `LOSAT/Cargo.toml` sets `[profile.test] opt-level = 1`, as CI does, so `CARGO_PROFILE_TEST_OPT_LEVEL=1` is no longer needed.
 
 ## Standard (end of a step and before every push; 10-25 minutes)
 

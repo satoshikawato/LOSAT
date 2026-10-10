@@ -32,6 +32,8 @@ export const INPUT_SLICE_BYTES = BLOCK_CHARS;
 export interface FilesMessage {
   readonly kind: 'info' | 'error';
   readonly text: string;
+  /** A settings file that was only partly applied: shown as a warning, not as a help line. */
+  readonly partial?: true;
 }
 
 export interface RunFilesState {
@@ -128,10 +130,12 @@ export class RunFiles {
       refuse(messageOf(error));
       return;
     }
-    const words = settings.options.length;
+    // Only the words of the options that the form took: a left-out option is listed under "Not applied".
+    const words = applied.words;
     const threads = settings.threads === 'auto' ? 'Auto' : String(settings.threads);
     this.setSettings({
       kind: 'info',
+      ...(applied.notApplied.length > 0 ? { partial: true } : {}),
       text:
         `Loaded ${file.name}: ${descriptor.label}, ${words === 0 ? 'the default options' : `${words} ${words === 1 ? 'word' : 'words'} of options`}, ` +
         `threads ${threads}. The inputs and the Job Title did not change.${notAppliedText(applied)}`,
@@ -169,6 +173,7 @@ export class RunFiles {
       });
       this.setSettings({
         kind: 'info',
+        ...(applied.notApplied.length > 0 ? { partial: true } : {}),
         text: `The search form has the settings of Run ${snapshot.number}. The inputs are the form's own.${notAppliedText(applied)}`,
       });
       return true;

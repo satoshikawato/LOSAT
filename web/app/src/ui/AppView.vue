@@ -124,7 +124,7 @@ onUnmounted(() => {
     </section>
     <aside class="secondary">
       <QueuePanel :coordinator="coordinator" :runs="state.runs" @open-results="openResults" />
-      <SessionPanel :session="session" :runs="state.runs" />
+      <SessionPanel :session="session" :runs="state.runs" :candidates="trayState.candidates" />
       <AttentionPanel :attention="attention" :state="attentionState" />
       <StorageStatus :storage="state.storage" />
     </aside>

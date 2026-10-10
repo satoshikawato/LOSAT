@@ -136,6 +136,12 @@ function rereadNotice(program: ProgramId, role: InputRole, count: number): strin
   return `Read again as ${kind} for ${programById(program).label}: ${records} included again.`;
 }
 
+function withoutNotice(source: DraftSource): DraftSource {
+  const rest = { ...source };
+  delete (rest as { notice?: unknown }).notice;
+  return rest;
+}
+
 const emptyRole = (): RoleDraft => ({ paste: '', sources: [], mode: 'combined' });
 
 export class SearchDraft {
@@ -188,7 +194,11 @@ export class SearchDraft {
       const reread = indexParser(previous, role) !== indexParser(program, role);
       for (const source of this.role(role).sources) {
         if (reread) this.reindex(role, source.key, rereadNotice(program, role, source.excluded.length));
-        else this.scheduleCheck(role, source.key, 0);
+        else {
+          // The notice describes the program it was made for; any later program change ends it.
+          this.updateSource(role, source.key, withoutNotice);
+          this.scheduleCheck(role, source.key, 0);
+        }
       }
     }
     this.scheduleValidation();
@@ -307,9 +317,7 @@ export class SearchDraft {
         if (included) excluded.delete(index);
         else excluded.add(index);
       }
-      const rest = { ...source };
-      delete (rest as { notice?: unknown }).notice;
-      return { ...rest, excluded: [...excluded].sort((a, b) => a - b), check: { state: 'pending' } };
+      return { ...withoutNotice(source), excluded: [...excluded].sort((a, b) => a - b), check: { state: 'pending' } };
     });
     this.set({ message: undefined });
     this.scheduleCheck(role, key);
@@ -412,12 +420,18 @@ export class SearchDraft {
     const notApplied = read.stray.map((word) => `${word} (not an option)`);
     const values: Record<string, FieldValue> = {};
     const regions: Partial<Record<InputRole, string>> = {};
+    const regionWords: Partial<Record<InputRole, number>> = {};
+    let words = 0;
     for (const option of read.options) {
       const role = ROLES.find((r) => REGION_FLAG[r] === option.flag);
       const field = fields.get(option.flag);
-      if (role !== undefined && option.value !== true) regions[role] = option.value;
-      else if (field !== undefined && (field.kind === 'flag') === (option.value === true)) values[option.flag] = option.value;
-      else notApplied.push(`${option.words.join(' ')} (the ${program.label} form has no field for it)`);
+      if (role !== undefined && option.value !== true) {
+        regions[role] = option.value;
+        regionWords[role] = option.words.length;
+      } else if (field !== undefined && (field.kind === 'flag') === (option.value === true)) {
+        values[option.flag] = option.value;
+        words += option.words.length;
+      } else notApplied.push(`${option.words.join(' ')} (the ${program.label} form has no field for it)`);
     }
     const threads = settings.threads === 'auto' || settings.threads <= options.maxThreads ? settings.threads : 'auto';
 
@@ -440,12 +454,14 @@ export class SearchDraft {
       } else if (text !== undefined && this.regionRecord(role) === undefined) {
         notApplied.push(`${REGION_FLAG[role]} ${text} (a region needs a ${role} of one record)`);
       }
-      this.setRegion(role, match === null || this.regionRecord(role) === undefined ? undefined : { start: match[1]!, stop: match[2]! });
+      const taken = match !== null && this.regionRecord(role) !== undefined;
+      if (taken) words += regionWords[role] ?? 0;
+      this.setRegion(role, taken ? { start: match[1]!, stop: match[2]! } : undefined);
     }
     if (threads !== settings.threads) {
       notApplied.push(`threads ${settings.threads} (this browser offers 1 to ${options.maxThreads}; Auto is set)`);
     }
-    return { notApplied };
+    return { notApplied, words };
   }
 
   // --- submit -----------------------------------------------------------------------------
@@ -643,7 +659,8 @@ export class SearchDraft {
     if (source === undefined) return;
     this.cancelTask(`check:${role}:${key}`);
     this.updateSource(role, key, (s) => {
-      const next: DraftSource = { ...s, status: 'indexing', excluded: [], ...(notice === undefined ? {} : { notice }) };
+      // Every re-read sets the notice or deletes it: one that an earlier switch left must not outlive it.
+      const next: DraftSource = { ...withoutNotice(s), status: 'indexing', excluded: [], ...(notice === undefined ? {} : { notice }) };
       delete (next as { base?: unknown }).base;
       delete (next as { check?: unknown }).check;
       delete (next as { error?: unknown }).error;

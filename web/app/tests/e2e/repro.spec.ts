@@ -139,6 +139,10 @@ test("Run details: the commands from the run's argv, the run's input FASTA and s
   await expect(page.getByTestId('run-ncbi-unavailable')).toHaveCount(0);
   await expect(page.getByTestId('run-reproduce-notes')).toContainText('Put the files query.fa and combined_subject.fa in one folder');
   await expect(page.getByTestId('run-reproduce-notes')).toContainText('do not set -num_threads');
+  // Pasted text and joined files are no file you chose: the commands must run on the saved input FASTA (screen review L2).
+  await expect(page.getByTestId('run-reproduce-notes')).toContainText(
+    'Run the commands with the input FASTA saved from this run (under "The input FASTA of this run" below), not with the file you chose: query.fa and combined_subject.fa there are what the run searched.',
+  );
   await expect(page.getByTestId('run-input-file-query')).toContainText('query.fa is the pasted query text, as the run searched it (1 record).');
   await expect(page.getByTestId('run-input-file-subject')).toContainText('combined_subject.fa joins the 2 subject inputs (a.fa, b.fa) in the order chosen');
   await expectNoSideScroll(page, 'the reproduction panel');

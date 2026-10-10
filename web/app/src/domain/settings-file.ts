@@ -35,6 +35,8 @@ export type SettingsRead =
 /** What a settings file or a run's settings left out of the form (S15 item 3: "Not applied: …"). */
 export interface AppliedSettings {
   readonly notApplied: readonly string[];
+  /** The words of the file's options that the form took (a left-out option's words are not counted). */
+  readonly words: number;
 }
 
 const FIELDS = ['format', 'schema', 'note', 'program', 'options', 'threads'];

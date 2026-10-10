@@ -161,12 +161,13 @@ export function ncbiComparison(argv: readonly string[]): NcbiComparison {
  * The notes of the commands: where the files go, and the threads. The browser does not know the
  * folders of the files, so the commands name them as the run did (design §12.3: no invented
  * paths). `sameBytes` says whether the query and the subject are the same bytes, which matters
- * only when they have the same name.
+ * only when they have the same name. `saved` are the roles whose input is not the chosen file as
+ * it is (`inputIsChosenFile`): the commands must run on the file saved from the run for them.
  */
-export function commandNotes(argv: readonly string[], sameBytes: boolean): readonly string[] {
+export function commandNotes(argv: readonly string[], sameBytes: boolean, saved: readonly InputRole[] = []): readonly string[] {
   const query = argv[2] ?? '';
   const subject = argv[4] ?? '';
-  const notes = [
+  const notes: string[] = [
     query !== subject
       ? `The commands name the inputs as the run did. Put the files ${query} and ${subject} in one folder and run the commands there; ` +
         'the browser does not know the folders of your files.'
@@ -175,8 +176,15 @@ export function commandNotes(argv: readonly string[], sameBytes: boolean): reado
           'the browser does not know the folders of your files.'
         : `The query and the subject are both named ${query}, but they differ: save them under two names and change the ` +
           'names in the commands to match. The browser does not know the folders of your files.',
-    'The outputs do not depend on the threads, so the commands do not set -num_threads.',
   ];
+  if (saved.length > 0) {
+    const names = [...new Set(saved.map((role) => (role === 'query' ? query : subject)))];
+    notes.push(
+      `Run the commands with the input FASTA saved from this run (under "The input FASTA of this run" below), not with the file you chose: ` +
+        `${names.join(' and ')} there ${names.length === 1 ? 'is' : 'are'} what the run searched.`,
+    );
+  }
+  notes.push('The outputs do not depend on the threads, so the commands do not set -num_threads.');
   return notes;
 }
 
@@ -188,6 +196,16 @@ export interface InputPart {
   readonly records: number;
   /** Records of the source that the run left out (a session file records them); none when absent. */
   readonly excluded?: number;
+}
+
+/**
+ * Whether a role's run input is the file that was chosen, byte for byte: one whole file (or
+ * nothing known about the parts), not pasted text, a joined input, or a file with records left out.
+ */
+export function inputIsChosenFile(parts: ReadonlyArray<InputPart | undefined>): boolean {
+  if (parts.length === 0) return true;
+  const part = parts[0];
+  return parts.length === 1 && part !== undefined && part.origin === 'file' && (part.excluded ?? 0) === 0;
 }
 
 /**
@@ -210,8 +228,7 @@ export function inputRelation(role: InputRole, name: string, records: number, pa
   const part = parts[0];
   if (part === undefined) return `${name} has the ${count} that the run searched; the records left out of the chosen ${role} are not in it.`;
   if (!whole(part)) {
-    const left = part.excluded === 1 ? 'the record left out of it is' : `the ${part.excluded} records left out of it are`;
-    return `${name} has the ${count} that the run searched from the file ${part.name}; ${left} not in it.`;
+    return `${name} has the ${count} that the run searched from the file ${part.name}; the records left out of it are not in it.`;
   }
   if (part.origin === 'paste') return `${name} is the pasted ${role} text, as the run searched it (${count}).`;
   return `${name} has the same bytes as the file ${part.name} (${count}).`;

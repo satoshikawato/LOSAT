@@ -526,6 +526,24 @@ describe('Session: refused files leave nothing behind', () => {
     await refusedFile(new Uint8Array([...gzip, ...gzipSync(encoder.encode('x'))]), /damaged/);
   });
 
+  it("joins the browser's own gzip error cleanly: its full stop does not double the sentence's (screen review I1)", async () => {
+    const a = await searched();
+    const gzip = (await saveSession(a)).bytes;
+    const failing: Compression = {
+      ...browserCompression,
+      gunzip: async function* () {
+        throw new TypeError('Compressed input was truncated.');
+      },
+    };
+    const { engine } = forbiddenEngine();
+    const b = world(engine, '', { compression: failing });
+    const result = await b.session.load(asFile(gzip, 'cut.gz'));
+    expect(result.ok).toBe(false);
+    const message = result.ok ? '' : result.message;
+    expect(message).toContain('is not valid or is cut short (Compressed input was truncated).');
+    expect(message).not.toContain('.).');
+  });
+
   it('stops reading as soon as a run cannot be stored, and refuses the file with the reason (code review L4)', async () => {
     const file = await saveSession(await searched());
     // The decompressed file in pieces of 64 bytes, counted as the session takes them.

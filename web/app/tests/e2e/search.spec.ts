@@ -476,6 +476,33 @@ test('a program of another reader kind reads the sources again, clears their exc
   await expect(page.getByTestId('query-source-0-notice')).toHaveCount(0);
 });
 
+test('the reader-change notice never outlives its program (screen review M1)', async ({ page }) => {
+  await program(page, 'blastn');
+  await paste(page, 'query', '>a\nACGTACGTAC\n>b\nACGTACGTAC\n>c\nACGTACGTAC\n');
+  await paste(page, 'subject', '>s\nACGTACGTACGT\n');
+  await showRecords(page, 'query');
+  await page.getByTestId('query-source-0-record-0').uncheck();
+  await program(page, 'blastp');
+  await settled(page, 'query');
+  await expect(page.getByTestId('query-source-0-notice')).toContainText('for BLASTP');
+  // BLASTP to TBLASTX reads the query again, with nothing left out: no notice, and none of BLASTP.
+  await program(page, 'tblastx');
+  await settled(page, 'query');
+  await expect(page.getByTestId('query-source-0-notice')).toHaveCount(0);
+  // A program change that reads nothing again ends it too.
+  await program(page, 'blastp');
+  await settled(page, 'query');
+  await showRecords(page, 'query');
+  await page.getByTestId('query-source-0-record-0').uncheck();
+  await program(page, 'tblastx');
+  await settled(page, 'query');
+  await expect(page.getByTestId('query-source-0-notice')).toHaveText(
+    'Read again as nucleotide for TBLASTX: the 1 excluded record is included again.',
+  );
+  await program(page, 'blastn');
+  await expect(page.getByTestId('query-source-0-notice')).toHaveCount(0);
+});
+
 test('the sequence kind warning is an estimate and does not change the program', async ({ page }) => {
   await program(page, 'blastp');
   await paste(page, 'query', '>n\nACGTACGTACGTACGTACGTACGTACGTAC\n');

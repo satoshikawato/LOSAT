@@ -9,11 +9,21 @@ import type { Session } from '../application/session';
 import { formatCounted } from './format';
 import { useStore } from './useStore';
 
-const props = defineProps<{ session: Session; runs: readonly RunView[] }>();
+const props = defineProps<{
+  session: Session;
+  runs: readonly RunView[];
+  /** The tray's candidates: those of completed runs go in the file with their notes (when the box is checked). */
+  candidates: ReadonlyArray<{ readonly run: { readonly runId: string }; readonly note: string }>;
+}>();
 const state = useStore(props.session.state);
 const includeCandidates = ref(true);
 const fileInput = ref<HTMLInputElement>();
 const completed = computed(() => props.runs.filter((run) => run.status === 'completed').length);
+const included = computed(() => {
+  const saved = new Set(props.runs.filter((run) => run.status === 'completed').map((run) => run.snapshot.runId));
+  const list = props.candidates.filter((candidate) => saved.has(candidate.run.runId));
+  return { candidates: list.length, notes: list.filter((candidate) => candidate.note !== '').length };
+});
 const others = computed(() => props.runs.length - completed.value);
 const busy = computed(() => state.value.busy !== undefined);
 
@@ -59,6 +69,13 @@ async function open(event: Event): Promise<void> {
     <p class="hint" data-testid="session-save-note">
       {{ completed === 0 ? 'No completed run to save yet.' : `${formatCounted(completed, 'completed run')} will be saved.` }}
       Queued, running, cancelled and failed runs are never saved<template v-if="others > 0"> ({{ others }} here)</template>.
+      <template v-if="completed > 0">
+        <span data-testid="session-save-candidates">{{
+          includeCandidates
+            ? `The file will include ${formatCounted(included.candidates, 'candidate')} and ${formatCounted(included.notes, 'note')}.`
+            : 'The file will include no candidates and no notes.'
+        }}</span>
+      </template>
     </p>
     <div aria-live="polite">
       <p v-if="state.busy" class="muted" data-testid="session-busy">

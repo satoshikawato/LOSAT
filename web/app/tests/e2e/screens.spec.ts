@@ -556,6 +556,7 @@ for (const size of SIZES) {
       buffer: Buffer.from(JSON.stringify(settings)),
     });
     await expect(page.getByTestId('settings-message')).toContainText('Not applied: -query_loc 3-40');
+    await expect(page.getByTestId('settings-message')).toHaveAttribute('data-partial', 'true');
     await shoot(page, browserName, size.name, '31-search-settings-loaded-not-applied');
 
     // The session panel before saving, with candidates of run 1 and a note.

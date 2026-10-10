@@ -9,7 +9,7 @@ import type { RunView } from '../application/coordinator';
 import type { RunFiles } from '../application/run-files';
 import type { OutputFormat } from '../domain/output-format';
 import type { InputRole } from '../domain/programs';
-import { commandNotes, inputRelation, losatCommand, NCBI_BLAST_VERSION, ncbiCommand, ncbiComparison } from '../domain/reproduce';
+import { commandNotes, inputIsChosenFile, inputRelation, losatCommand, NCBI_BLAST_VERSION, ncbiCommand, ncbiComparison } from '../domain/reproduce';
 import CommandText from './CommandText.vue';
 import { useStore } from './useStore';
 
@@ -17,13 +17,22 @@ const props = defineProps<{ run: RunView; formats: readonly OutputFormat[]; runF
 const state = useStore(props.runFiles.state);
 const snapshot = computed(() => props.run.snapshot);
 const comparison = computed(() => ncbiComparison(snapshot.value.argv));
-const notes = computed(() => commandNotes(snapshot.value.argv, snapshot.value.query.sha256 === snapshot.value.subject.sha256));
 const roles: readonly InputRole[] = ['query', 'subject'];
+const parts = computed(() => ({ query: props.runFiles.inputParts(props.run, 'query'), subject: props.runFiles.inputParts(props.run, 'subject') }));
+const notes = computed(() =>
+  commandNotes(
+    snapshot.value.argv,
+    snapshot.value.query.sha256 === snapshot.value.subject.sha256,
+    roles.filter((role) => !inputIsChosenFile(parts.value[role])),
+  ),
+);
 const inputs = computed(() =>
   roles.map((role) => {
     const input = snapshot.value[role];
-    const relation = inputRelation(role, input.name, input.records.length, props.runFiles.inputParts(props.run, role));
-    return { role, name: input.name, relation };
+    const relation = inputRelation(role, input.name, input.records.length, parts.value[role]);
+    // A loaded run holds no bytes of its input: it can save one only from the original FASTA chosen again.
+    const needsOriginal = props.run.fromSession !== undefined && input.bytes === undefined && props.run.attached?.[role] === undefined;
+    return { role, name: input.name, relation, needsOriginal };
   }),
 );
 /** The message of the latest file saved from this run. */
@@ -73,10 +82,13 @@ async function act(work: () => Promise<unknown>): Promise<void> {
     <p class="muted small">The bytes that the engine searched, under the names that the commands use.</p>
     <ul class="reproduce-inputs">
       <li v-for="input in inputs" :key="input.role" :data-testid="`run-input-file-${input.role}`">
-        <button type="button" :data-testid="`run-input-save-${input.role}`" :disabled="busy" @click="act(() => runFiles.saveInput(run, input.role))">
+        <button type="button" :data-testid="`run-input-save-${input.role}`" :disabled="busy || input.needsOriginal" @click="act(() => runFiles.saveInput(run, input.role))">
           Save {{ input.name }}
         </button>
         <span class="small">{{ input.relation }}</span>
+        <span v-if="input.needsOriginal" class="small" :data-testid="`run-input-needs-${input.role}`">
+          Needs the original {{ input.role }} FASTA (choose it above).
+        </span>
       </li>
     </ul>
 

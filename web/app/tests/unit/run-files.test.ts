@@ -116,7 +116,7 @@ describe('SearchDraft settings', () => {
       { program: 'blastn', options: ['-task', 'blastn', '-penalty', '-3', '-lcase_masking'], threads: 'auto' },
       { maxThreads: 8 },
     );
-    expect(applied).toEqual({ notApplied: [] });
+    expect(applied).toEqual({ notApplied: [], words: 5 });
     const state = draft.state.get();
     expect(state.values.blastn).toEqual({ '-task': 'blastn', '-penalty': '-3', '-lcase_masking': true });
     expect(state.threads).toBe('auto');
@@ -284,8 +284,10 @@ describe('RunFiles', () => {
     expect(draft.state.get().title).toBe('Mine');
     expect(runFiles.state.get().settings).toEqual({
       kind: 'info',
+      partial: true,
       text:
-        'Loaded mine.json: TBLASTX, 6 words of options, threads Auto. The inputs and the Job Title did not change. ' +
+        // Four of the six words: "-matrix PAM30" is listed under "Not applied", not counted.
+        'Loaded mine.json: TBLASTX, 4 words of options, threads Auto. The inputs and the Job Title did not change. ' +
         'Not applied: -matrix PAM30 (the TBLASTX form has no field for it).',
     });
   });
@@ -333,6 +335,7 @@ describe('RunFiles', () => {
     expect(draft.state.get().query.sources.map((s) => s.name)).toEqual(query.sources.map((s) => s.name));
     expect(runFiles.state.get().settings).toEqual({
       kind: 'info',
+      partial: true,
       text: "The search form has the settings of Run 1. The inputs are the form's own. Not applied: -query_loc 2-20 (a region needs a query of one record).",
     });
     // A run without a title clears the form's title.
@@ -461,7 +464,7 @@ describe('RunFiles', () => {
     );
     const selection = loaded(sources([['q.fa', 3, [0, 2]]]), sources([['s.fa', 1, []]]));
     expect(inputRelation('query', 'q.fa', 1, runFiles.inputParts(selection, 'query'))).toBe(
-      'q.fa has the 1 record that the run searched from the file q.fa; the 2 records left out of it are not in it.',
+      'q.fa has the 1 record that the run searched from the file q.fa; the records left out of it are not in it.',
     );
   });
 });

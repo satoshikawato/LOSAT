@@ -114,6 +114,10 @@ test.describe('FakeEngine build', () => {
 
     await expect(page.getByTestId('session-include-candidates')).toBeChecked();
     await expect(page.getByTestId('session-save-note')).toContainText('2 completed runs will be saved.');
+    await expect(page.getByTestId('session-save-candidates')).toHaveText('The file will include 6 candidates and 1 note.');
+    await page.getByTestId('session-include-candidates').uncheck();
+    await expect(page.getByTestId('session-save-candidates')).toHaveText('The file will include no candidates and no notes.');
+    await page.getByTestId('session-include-candidates').check();
     const session = await downloaded(page, 'session-save');
     expect(session.name).toMatch(/^losat-session-\d{8}-\d{6}\.losat-session\.gz$/);
     expect([...session.bytes.subarray(0, 2)]).toEqual([0x1f, 0x8b]);
@@ -519,11 +523,10 @@ test.describe('engine build', () => {
     const alignedAfter = await downloaded(page, 'extract-aligned');
     expect(alignedAfter.bytes.equals(aligned.bytes)).toBe(true);
     await details(page, 1);
-    await page.getByTestId('run-input-save-subject').click();
-    await expect(page.getByTestId('run-files-message')).toHaveText(
-      'combined_subject.fa was not saved: Run 1 was loaded from a session file; choose its original subject FASTA in Run details to save the input it searched.',
-    );
-    await expect(page.getByTestId('run-files-message')).toHaveAttribute('data-kind', 'error');
+    // The save button of a loaded run without the original is disabled and says what it needs (screen review L1).
+    await expect(page.getByTestId('run-input-save-subject')).toBeDisabled();
+    await expect(page.getByTestId('run-input-save-query')).toBeDisabled();
+    await expect(page.getByTestId('run-input-needs-subject')).toHaveText('Needs the original subject FASTA (choose it above).');
 
     // The same files in the search form attach nothing.
     await page.getByTestId('tab-search').click();

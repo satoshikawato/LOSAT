@@ -1978,6 +1978,21 @@ button.link[aria-disabled='true'] {
   font-weight: 600;
 }
 
+/* A radio of a label of several lines sits at the first line (S15 screen review I3), not at the label's middle. */
+.export-formats .radio {
+  align-items: flex-start;
+}
+
+.export-formats .radio input {
+  margin-top: 4px;
+}
+
+@media (max-width: 800px) {
+  .export-formats .radio input {
+    margin-top: 1px;
+  }
+}
+
 .export-actions {
   display: flex;
   flex-wrap: wrap;

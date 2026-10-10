@@ -282,6 +282,33 @@ describe('SearchDraft reader change notice (Owner decision 2, S15)', () => {
     expect(sourceOf(draft, 'subject').notice).toBeDefined();
   });
 
+  it('never outlives its program: BLASTN, BLASTP, TBLASTX', async () => {
+    const { draft } = setup();
+    draft.setPaste('query', '>q\nACGT\n>r\nACGT\n>s\nACGT\n');
+    draft.addFiles('subject', [file('subject.fa', '>a\nACGT\n>b\nACGT\n')]);
+    await draft.idle();
+    draft.setIncluded('query', 'paste', [0, 2], false);
+    draft.setProgram('blastp');
+    await draft.idle();
+    expect(sourceOf(draft, 'query').notice).toMatch(/for BLASTP/);
+    // The BLASTP-to-TBLASTX switch re-reads the query (protein to nucleotide) with no exclusions: no notice.
+    draft.setProgram('tblastx');
+    await draft.idle();
+    expect(sourceOf(draft, 'query').notice).toBeUndefined();
+    expect(sourceOf(draft, 'subject').notice).toBeUndefined();
+    // A new one appears only when that switch re-reads a source that had exclusions.
+    draft.setProgram('blastp');
+    await draft.idle();
+    draft.setIncluded('query', 'paste', [1], false);
+    draft.setProgram('tblastx');
+    await draft.idle();
+    expect(sourceOf(draft, 'query').notice).toBe('Read again as nucleotide for TBLASTX: the 1 excluded record is included again.');
+    // A program change without a re-read (TBLASTX to BLASTN keeps the nucleotide reader) ends it too.
+    draft.setProgram('blastn');
+    await draft.idle();
+    expect(sourceOf(draft, 'query').notice).toBeUndefined();
+  });
+
   it('keeps no notice when the reader kind stays', async () => {
     const { draft } = setup();
     draft.setPaste('query', '>q\nACGT\n>r\nACGT\n');

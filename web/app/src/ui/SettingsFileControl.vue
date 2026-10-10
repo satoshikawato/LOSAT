@@ -59,9 +59,10 @@ function onFile(event: Event): void {
     v-if="state.settings"
     role="status"
     class="settings-message"
-    :class="state.settings.kind === 'error' ? 'error' : 'note'"
+    :class="state.settings.kind === 'error' ? 'error' : state.settings.partial ? 'notice' : 'note'"
     data-testid="settings-message"
     :data-kind="state.settings.kind"
+    :data-partial="state.settings.partial ? 'true' : undefined"
   >
     {{ state.settings.text }}
   </p>

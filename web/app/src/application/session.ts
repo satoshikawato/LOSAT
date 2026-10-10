@@ -768,7 +768,8 @@ async function writeJsonBlock(writer: ExportWriter, name: string, bytes: Uint8Ar
 const count = (n: number, one: string) => `${n} ${n === 1 ? one : `${one}s`}`;
 
 function detail(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error);
+  // The browser's own text, joined cleanly: its final full stop would double the sentence's ("…stream.).").
+  const message = (error instanceof Error ? error.message : String(error)).replace(/[.\s]+$/, '');
   return message === '' ? '' : ` (${message})`;
 }
 

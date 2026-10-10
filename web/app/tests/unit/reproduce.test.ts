@@ -9,6 +9,7 @@ import type { OutputFormat } from '../../src/domain/output-format';
 import type { ProgramId } from '../../src/domain/programs';
 import {
   commandNotes,
+  inputIsChosenFile,
   inputRelation,
   losatCommand,
   NCBI_BLAST_VERSION,
@@ -102,12 +103,37 @@ describe('commands', () => {
     );
     // Parts that name the records left out of them (a run loaded from a session file), and no part at all.
     expect(inputRelation('query', 'q.fa', 2, [{ origin: 'file', name: 'a.fa', records: 3, excluded: 1 }])).toBe(
-      'q.fa has the 2 records that the run searched from the file a.fa; the record left out of it is not in it.',
+      'q.fa has the 2 records that the run searched from the file a.fa; the records left out of it are not in it.',
     );
     expect(inputRelation('subject', 'combined_subject.fa', 4, [{ origin: 'file', name: 'a.fa', records: 2, excluded: 0 }, { origin: 'file', name: 'b.fa', records: 3, excluded: 1 }])).toBe(
       'combined_subject.fa joins the 2 subject inputs (a.fa, b.fa) in the order chosen, without the records left out: 4 records. It is no single file you chose.',
     );
     expect(inputRelation('query', 'q.fa', 2, [])).toBe('q.fa has the 2 records that the run searched.');
+    // One record left out and several are worded the same.
+    expect(inputRelation('query', 'q.fa', 2, [{ origin: 'file', name: 'a.fa', records: 5, excluded: 3 }])).toBe(
+      'q.fa has the 2 records that the run searched from the file a.fa; the records left out of it are not in it.',
+    );
+  });
+
+  it('tells which input is the chosen file as it is, and sends the commands to the saved input of the others (screen review L2)', () => {
+    const file = { origin: 'file', name: 'a.fa', records: 3 } as const;
+    expect(inputIsChosenFile([])).toBe(true);
+    expect(inputIsChosenFile([file])).toBe(true);
+    expect(inputIsChosenFile([{ ...file, excluded: 0 }])).toBe(true);
+    expect(inputIsChosenFile([{ ...file, excluded: 1 }])).toBe(false);
+    expect(inputIsChosenFile([undefined])).toBe(false);
+    expect(inputIsChosenFile([file, file])).toBe(false);
+    expect(inputIsChosenFile([{ origin: 'paste', name: 'query.fa', records: 1 }])).toBe(false);
+
+    const argv = argvOf('blastn', 'multi_query.fasta', 'multi_subject.fasta', []);
+    expect(commandNotes(argv, false)).toHaveLength(2);
+    const notes = commandNotes(argv, false, ['subject']);
+    expect(notes).toHaveLength(3);
+    expect(notes[1]).toBe(
+      'Run the commands with the input FASTA saved from this run (under "The input FASTA of this run" below), not with the file you chose: ' +
+        'multi_subject.fasta there is what the run searched.',
+    );
+    expect(commandNotes(argv, false, ['query', 'subject'])[1]).toContain('multi_query.fasta and multi_subject.fasta there are what the run searched.');
   });
 });
 

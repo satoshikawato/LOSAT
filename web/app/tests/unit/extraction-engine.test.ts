@@ -8,15 +8,25 @@
 // are the extracted hit interval (case-insensitive; reverse complement for a BLASTN minus hit;
 // for TBLASTN and TBLASTX the extracted nucleotides translated here in the HSP's frame with the
 // standard code - test-only code - where the aligned letter is not masked, X or *).
-// BLASTX cannot run until SX (its coordinates are covered by extraction.test.ts), and a first
-// record without a defline cannot be indexed in this tree (checkRecordTable), so neither is here.
+// A subject file that starts with residues (a first record without a defline, offsets 0 and 0) is
+// read like the others. The last test goes through the application layer: the results browser
+// gives the HSPs of real searches to the candidate tray (application/candidates.ts), which
+// extracts them with each region and join and exports their alignments; the saved FASTA is parsed
+// back and compared with the generated letters and the HSP records' aligned rows.
+// BLASTX cannot run until SX (its coordinates are covered by extraction.test.ts).
 // It needs LOSAT_WEB_REACTORS.
 import { beforeAll, describe, expect, it } from 'vitest';
 import { findReactors } from '../../build/reactors';
+import { ALIGNMENTS_FILE, CandidateTray, SEQUENCES_FILE } from '../../src/application/candidates';
+import type { AppState, RunView } from '../../src/application/coordinator';
+import { ResultsBrowser } from '../../src/application/results';
+import { Store } from '../../src/application/store';
 import { interval } from '../../src/domain/coordinates';
 import { recordMismatch, type DatasetRevision, type FastaParserKind, type RecordKey } from '../../src/domain/dataset';
 import {
   extractionTarget,
+  FASTA_LINE_WIDTH,
+  hspLabel,
   planExtraction,
   readRequests,
   recordLabel,
@@ -31,9 +41,11 @@ import { DataService } from '../../src/infra/data/data-service';
 import { MemoryBlockStore } from '../../src/infra/data/memory-block-store';
 import { ROLE_QUERY, ROLE_SUBJECT, type ReactorAbi } from '../../src/infra/reactor/abi';
 import { ReactorInputChecker } from '../../src/infra/reactor/checker';
+import { toProgramDescription } from '../../src/infra/reactor/control';
 import { instantiateSerial } from '../../src/infra/reactor/instance';
 import { ReactorScanner } from '../../src/infra/reactor/scanner';
 import { RunOutputWriter } from '../../src/infra/run-output/writer';
+import type { RunInput } from '../../src/ports/data';
 import type { HspRecord } from '../../src/ports/engine';
 import type { OutputStream } from '../../src/ports/run-output';
 import { FastaWriter, residues, seeded, type Lines, type ReaderKind } from './support/fasta-writer';
@@ -80,7 +92,8 @@ const plant = (letters: string, at: number, insert: string) => letters.slice(0, 
 interface Source {
   readonly name: string;
   readonly kind: ReaderKind;
-  readonly records: ReadonlyArray<{ readonly title: string; readonly letters: string; readonly lines: Lines }>;
+  /** A null title writes the file's first record without a defline. */
+  readonly records: ReadonlyArray<{ readonly title: string | null; readonly letters: string; readonly lines: Lines }>;
   /** Text before the first record (comments, blank lines). */
   readonly lead?: string;
 }
@@ -96,6 +109,8 @@ interface Run {
   /** The generated letters of each record of the run input, by position. */
   readonly letters: Readonly<Record<InputRole, readonly string[]>>;
   readonly records: Readonly<Record<InputRole, readonly RecordKey[]>>;
+  readonly inputs: Readonly<Record<InputRole, RunInput>>;
+  readonly argv: readonly string[];
   readonly hsps: readonly HspRecord[];
 }
 
@@ -149,6 +164,8 @@ describe.skipIf(reactors === undefined)('extraction reads the residues that the 
     const revisions = {} as Record<InputRole, readonly string[]>;
     const letters = {} as Record<InputRole, readonly string[]>;
     const records = {} as Record<InputRole, readonly RecordKey[]>;
+    const inputs = {} as Record<InputRole, RunInput>;
+    const argv = [program, '-query', 'query.fa', '-subject', 'subject.fa', ...words];
     const handles: number[] = [];
     const port = await data.openRun(runId);
     const writer = new RunOutputWriter(port);
@@ -159,11 +176,12 @@ describe.skipIf(reactors === undefined)('extraction reads the residues that the 
         letters[role] = included([...roles[role].indexed], [...chosen]);
         const input = await data.buildRunInput(revisions[role]);
         records[role] = input.records;
+        inputs[role] = input;
         const registered = abi.register(program, role === 'query' ? ROLE_QUERY : ROLE_SUBJECT, input.bytes);
         handles.push(registered.handle);
         expect(recordMismatch(input.records, registered.records), `${runId} ${role}: the engine read the record table's records`).toBeUndefined();
       }
-      abi.run([program, '-query', 'query.fa', '-subject', 'subject.fa', ...words, '-num_threads', '1'], handles[1]!, handles[0]!, (stream, bytes) =>
+      abi.run([...argv, '-num_threads', '1'], handles[1]!, handles[0]!, (stream, bytes) =>
         writer.write(stream as OutputStream, bytes),
       );
       writer.end();
@@ -177,7 +195,7 @@ describe.skipIf(reactors === undefined)('extraction reads the residues that the 
     expect(ref6.hitCount).toBe(all.length);
     summary.runs++;
     summary.hsps += all.length;
-    return { ref, revisions, letters, records, hsps: all };
+    return { ref, revisions, letters, records, inputs, argv, hsps: all };
   }
 
   /** Every region and join for every HSP on both of its records reads the generated letters. */
@@ -371,4 +389,188 @@ describe.skipIf(reactors === undefined)('extraction reads the residues that the 
         `${summary.clippedLeft} cut at position 1 and ${summary.clippedRight} at the end, ${summary.alignedLetters} aligned letters compared`,
     );
   }, 60_000);
+
+  it('a subject file that starts with residues: its first record has no defline (offsets 0 and 0) and is read like the others', async () => {
+    const random = seeded(505);
+    const query = residues(random, 600, 'ACGT');
+    const first = plant(residues(random, 2000, 'ACGT', 0.1), 1, query.slice(50, 350));
+    const second = plant(residues(random, 900, 'ACGT'), 100, reverseComplement(query.slice(400, 580)));
+    const q = await index({ name: 'hl-query.fa', kind: 1, records: [{ title: 'hq', letters: query, lines: { kind: 'uniform', width: 60, eol: '\n' } }] });
+    const uniform = await index({
+      name: 'headerless.fa',
+      kind: 1,
+      records: [
+        { title: null, letters: first, lines: { kind: 'uniform', width: 60, eol: '\n' } },
+        { title: 'second', letters: second, lines: { kind: 'uniform', width: 60, eol: '\n' } },
+      ],
+    });
+    const ragged = await index({
+      name: 'headerless-ragged.fa',
+      kind: 1,
+      records: [{ title: null, letters: first, lines: { kind: 'ragged', minWidth: 50, maxWidth: 70, eol: '\r\n', comments: true } }],
+    });
+    for (const indexed of [uniform, ragged]) {
+      expect(indexed.revision.records[0]).toMatchObject({ id: '', header_offset: 0, sequence_offset: 0, length: first.length });
+    }
+    expect(uniform.revision.records[0]!.line_layout).toEqual({ kind: 'uniform', width: 60, eol: 1 });
+    const run = await search('blastn', [], { indexed: [q] }, { indexed: [uniform] });
+    expect(new Set(run.hsps.map((hsp) => hsp.s_idx))).toEqual(new Set([0, 1]));
+    const hsp = run.hsps.find((each) => each.s_idx === 0)!;
+    const row = splitOutfmt6Row(new TextDecoder().decode(await data.readOutputRange(run.ref.runId, 6, hsp.out6![0], hsp.out6![1])));
+    expect(row.sseqid).toBe(recordLabel('', 'subject', 0));
+    const raggedRun = await search('blastn', [], { indexed: [q] }, { indexed: [ragged] });
+    expect(raggedRun.hsps.length).toBeGreaterThan(0);
+    for (const each of [run, raggedRun]) {
+      await checkExtraction(each);
+      await checkAligned(each);
+    }
+  }, 60_000);
+
+  it('through the application layer: candidates from the results browser, extracted with each region and join and exported, read back', async () => {
+    const random = seeded(606);
+    const query = residues(random, 900, 'ACGT', 0.1);
+    const query2 = residues(random, 400, 'ACGT');
+    // The subject file starts with residues; its records: a plus hit at the start, plus and minus
+    // hits of both queries, and a record without an ID.
+    const atStart = plant(residues(random, 1200, 'ACGT'), 3, query.slice(20, 300));
+    const both = plant(plant(residues(random, 3000, 'acgtACGT'), 2500, reverseComplement(query.slice(500, 800)).toLowerCase()), 100, query2.slice(10, 250));
+    const untitled = plant(residues(random, 800, 'ACGT'), 400, query.slice(320, 480).replaceAll('T', 'U'));
+    const q = await index({
+      name: 'app-query.fa',
+      kind: 1,
+      records: [
+        { title: 'aq1 first query', letters: query, lines: { kind: 'uniform', width: 60, eol: '\n' } },
+        { title: 'aq2', letters: query2, lines: { kind: 'ragged', minWidth: 40, maxWidth: 80, eol: '\n', comments: true } },
+      ],
+    });
+    const s = await index({
+      name: 'app-subject.fa',
+      kind: 1,
+      records: [
+        { title: null, letters: atStart, lines: { kind: 'uniform', width: 70, eol: '\n' } },
+        { title: 'both strands', letters: both, lines: { kind: 'ragged', minWidth: 30, maxWidth: 90, eol: '\r\n', comments: true } },
+        { title: '', letters: untitled, lines: { kind: 'uniform', width: 60, eol: '\n' } },
+      ],
+    });
+    const blastn = await search('blastn', [], { indexed: [q] }, { indexed: [s] });
+    expect(new Set(blastn.hsps.map((hsp) => hsp.q_idx))).toEqual(new Set([0, 1]));
+    expect(new Set(blastn.hsps.map((hsp) => hsp.s_idx))).toEqual(new Set([0, 1, 2]));
+    // TBLASTN: a protein query against a genome with a coding sequence on each strand.
+    const protein = residues(random, 200, AMINO_ACIDS);
+    const genome = plant(plant(residues(random, 2400, 'ACGT'), 1500, reverseComplement(backTranslate(random, protein.slice(20, 180)))), 60, backTranslate(random, protein.slice(0, 70)));
+    const pq = await index({ name: 'app-protein.fa', kind: 2, records: [{ title: 'ap', letters: protein, lines: { kind: 'uniform', width: 60, eol: '\n' } }] });
+    const ns = await index({ name: 'app-genome.fa', kind: 1, records: [{ title: 'genome', letters: genome, lines: { kind: 'uniform', width: 80, eol: '\n' } }] });
+    const tblastn = await search('tblastn', [], { indexed: [pq] }, { indexed: [ns] });
+    expect(tblastn.hsps.some((hsp) => (hsp.subject_frame ?? 0) < 0) && tblastn.hsps.some((hsp) => (hsp.subject_frame ?? 0) > 0)).toBe(true);
+    const searched = [blastn, tblastn];
+
+    const view = (run: Run): RunView => ({
+      snapshot: {
+        runId: run.ref.runId,
+        number: run.ref.number,
+        program: run.ref.program,
+        argv: run.argv,
+        query: { name: 'query.fa', ...run.inputs.query, revisionIds: run.revisions.query },
+        subject: { name: 'subject.fa', ...run.inputs.subject, revisionIds: run.revisions.subject },
+        requestedThreads: 1,
+        queuedAt: 0,
+      },
+      status: 'completed',
+      record: { runtimePath: 'serial', threads: 1, engineBuild: 'test', endedAt: 0 },
+    });
+    const runs = new Store<AppState>({ runs: searched.map(view) });
+    const results = new ResultsBrowser({
+      data,
+      describe: async (program) => toProgramDescription(abi.describe(program)),
+      runs,
+      verification: { ncbi: '2.17.0', sources: [], programs: {} },
+    });
+    const saved: Array<{ name: string; bytes: Uint8Array }> = [];
+    const tray = new CandidateTray({ runs, data, downloader: { save: (name, bytes) => saved.push({ name, bytes }) }, now: () => 0 });
+
+    // Each query's first subject whole, then the other subjects marked in the list.
+    for (const run of searched) {
+      await results.open(run.ref.runId);
+      for (const qIdx of [...results.state.get().loaded!.index.queries.keys()]) {
+        results.selectQuery(qIdx);
+        const [first, ...others] = results.state.get().subjects;
+        expect(tray.add(results.candidateSources(results.hspIdsOfSubject(qIdx, first!.sIdx))).ok).toBe(true);
+        results.markSubjects(others.map((subject) => subject.sIdx), true);
+        expect(tray.add(results.candidateSources(results.markedHspIds())).ok).toBe(true);
+      }
+    }
+    const hspCount = searched.reduce((total, run) => total + run.hsps.length, 0);
+    expect(tray.state.get().candidates).toHaveLength(hspCount);
+    tray.sortBy('subject');
+
+    const byNumber = new Map(searched.map((run) => [run.ref.number, run]));
+    const options: ReadonlyArray<Pick<ExtractionOptions, 'region' | 'join'>> = [
+      { region: { kind: 'hit' }, join: 'separate' },
+      { region: { kind: 'flanked', flanks: { left: 25, right: 400 } }, join: 'separate' },
+      { region: { kind: 'flanked', flanks: { left: 300, right: 0 } }, join: 'spanning' },
+      { region: { kind: 'hit' }, join: 'spanning' },
+      { region: { kind: 'whole' }, join: 'separate' },
+    ];
+    let sequences = 0;
+    let clipped = 0;
+    for (const role of ['query', 'subject'] as const) {
+      for (const option of options) {
+        saved.length = 0;
+        const result = await tray.extract({ role, ...option });
+        if (!result.ok) throw new Error(result.message);
+        expect(saved.map((each) => each.name)).toEqual([SEQUENCES_FILE]);
+        const records = parseFasta(saved[0]!.bytes);
+        expect(records).toHaveLength(result.summary.sequences);
+        for (const record of records) {
+          const header = record.header.match(/^(\S*):(\d+)-(\d+) run=(\d+) (query|subject)_record=(\d+) length=(\d+) unit=(nt|aa) hsps=(\S+) hit_strand=(plus|minus|unknown|mixed)( requested=(-?\d+)-(\d+))?$/);
+          expect(header, record.header).not.toBeNull();
+          const [, name, from, to, number, headerRole, k, length] = header!;
+          const run = byNumber.get(Number(number))!;
+          const position = Number(k) - 1;
+          expect(headerRole).toBe(role);
+          expect(name).toBe(recordLabel(run.records[role][position]!.id, role, position));
+          expect(Number(length)).toBe(run.records[role][position]!.length);
+          expect(record.letters, record.header).toBe(run.letters[role][position]!.slice(Number(from) - 1, Number(to)));
+        }
+        sequences += records.length;
+        clipped += result.summary.clipped.length;
+      }
+    }
+    expect(clipped, 'flanks cut at a record end').toBeGreaterThan(0);
+
+    saved.length = 0;
+    const exported = await tray.exportAlignments();
+    if (!exported.ok) throw new Error(exported.message);
+    expect(saved.map((each) => each.name)).toEqual([ALIGNMENTS_FILE]);
+    const aligned = parseFasta(saved[0]!.bytes);
+    expect(exported.summary).toMatchObject({ candidates: hspCount, alignments: hspCount, missing: [] });
+    expect(aligned).toHaveLength(2 * hspCount);
+    tray.state.get().candidates.forEach((candidate, i) => {
+      const run = byNumber.get(candidate.run.number)!;
+      const hsp = run.hsps.find((each) => each.index === candidate.index)!;
+      const label = hspLabel(hsp.q_idx, hsp.rank);
+      const [queryRecord, subjectRecord] = [aligned[2 * i]!, aligned[2 * i + 1]!];
+      expect(queryRecord.header).toMatch(new RegExp(`^\\S*:${hsp.q_start}-${hsp.q_end} run=${run.ref.number} query_record=${hsp.q_idx + 1} hsp=${label.replace('.', '\\.')} aligned`));
+      expect(subjectRecord.header).toMatch(new RegExp(`^\\S*:${hsp.s_start}-${hsp.s_end} run=${run.ref.number} subject_record=${hsp.s_idx + 1} hsp=${label.replace('.', '\\.')} aligned`));
+      expect(queryRecord.letters).toBe(hsp.query_aligned);
+      expect(subjectRecord.letters).toBe(hsp.subject_aligned);
+    });
+    console.log(`the candidate tray against real searches: ${hspCount} candidates of ${searched.length} runs, ${sequences} sequences written and read back (${clipped} cut at a record end), ${hspCount} alignments`);
+  }, 60_000);
 });
+
+/** The records of a FASTA that the tray saved: every line ends with LF, and no line of letters is longer than 60. */
+function parseFasta(bytes: Uint8Array): Array<{ header: string; letters: string }> {
+  const text = latin1.decode(bytes);
+  expect(text.endsWith('\n')).toBe(true);
+  const records: Array<{ header: string; letters: string }> = [];
+  for (const line of text.slice(0, -1).split('\n')) {
+    if (line.startsWith('>')) records.push({ header: line.slice(1), letters: '' });
+    else {
+      expect(line.length).toBeGreaterThan(0);
+      expect(line.length).toBeLessThanOrEqual(FASTA_LINE_WIDTH);
+      records[records.length - 1]!.letters += line;
+    }
+  }
+  return records;
+}

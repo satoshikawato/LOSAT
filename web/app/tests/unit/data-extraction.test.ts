@@ -112,6 +112,41 @@ describe('DataService.readResidues', () => {
     expect(read((await data.readResidues(revisions, 2, [{ from: 15, to: 15 }])).residues[0]!)).toBe(d.letters[14]);
   });
 
+  it('reads a first record without a defline (offsets 0 and 0): from the formula, and after comment lines from its checkpoints', async () => {
+    const scanner = new TableScanner();
+    const { data } = service(scanner, { readChunkBytes: 16 });
+    const random = seeded(29);
+    // Residues from the first byte, in uniform lines: the formula counts from offset 0.
+    const plain = new FastaWriter(random, 1);
+    const a = plain.record(null, residues(random, 47, 'ACGTU', 0.3), { kind: 'uniform', width: 10, eol: '\n' });
+    const b = plain.record('b second', residues(random, 20, 'ACGT'), { kind: 'uniform', width: 7, eol: '\r\n' });
+    // After a comment and a blank line, the record still starts the input (its bytes include them).
+    const commented = new FastaWriter(random, 2).raw('; a comment\n\n');
+    const c = commented.record(null, residues(random, 30, 'ACDEFGHIKLMNPQRSTVWY*', 0.2), { kind: 'ragged', minWidth: 3, maxWidth: 8, eol: '\n', noise: true });
+    const r1 = await source(data, scanner, plain, 1, 'plain.fa');
+    const r2 = await source(data, scanner, commented, 2, 'commented.fa');
+    expect(r1.records.map((r) => [r.id, r.header_offset, r.sequence_offset, r.line_layout.kind])).toEqual([
+      ['', 0, 0, 'uniform'],
+      ['b', b.headerOffset, b.sequenceOffset, 'uniform'],
+    ]);
+    expect(r2.records.map((r) => [r.id, r.header_offset, r.sequence_offset, r.line_layout.kind])).toEqual([['', 0, 0, 'checkpoints']]);
+
+    for (const [revision, written, text] of [
+      [r1, a, plain.toString()],
+      [r2, c, commented.toString()],
+    ] as const) {
+      const length = written.letters.length;
+      const got = await data.readResidues([revision.revisionId], 0, [{ from: 1, to: length }, { from: 1, to: 1 }, { from: 12, to: length - 3 }]);
+      expect(got.residues.map(read)).toEqual([written.letters, written.letters[0], written.letters.slice(11, length - 3)]);
+      expect(got.origin).toMatchObject({ recordIndex: 0, id: '', length, sha256: sha256(text.slice(0, written.endOffset)) });
+    }
+    expect(read((await data.readResidues([r1.revisionId], 1, [{ from: 1, to: 20 }])).residues[0]!)).toBe(b.letters);
+    // Left out, the record without a defline shifts the positions as any other.
+    const withoutFirst = await data.reviseDataset(r1.revisionId, [0]);
+    const shifted = await data.readResidues([withoutFirst.revisionId], 0, [{ from: 3, to: 9 }]);
+    expect([shifted.origin.id, shifted.origin.recordIndex, read(shifted.residues[0]!)]).toEqual(['b', 1, b.letters.slice(2, 9)]);
+  });
+
   it('reads a large record in bounded slices of its File, from its checkpoints', async () => {
     const scanner = new TableScanner();
     const { data } = service(scanner, { readChunkBytes: 4096 });

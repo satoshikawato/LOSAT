@@ -43,7 +43,8 @@ export type Lines =
   | { readonly kind: 'ragged'; readonly minWidth: number; readonly maxWidth: number; readonly eol: '\n' | '\r\n'; readonly noise?: boolean; readonly comments?: boolean };
 
 export interface WrittenRecord {
-  readonly title: string;
+  /** The defline's text; null for the input's first record written without a defline. */
+  readonly title: string | null;
   readonly id: string;
   /** The residues as written. */
   readonly letters: string;
@@ -74,11 +75,17 @@ export class FastaWriter {
     return this;
   }
 
-  record(title: string, letters: string, lines: Lines, headerEnd: '\n' | '\r\n' = lines.eol.endsWith('\r\n') ? '\r\n' : '\n'): WrittenRecord {
+  /**
+   * Writes a record. With `title` null it has no defline: only the input's first record can (its
+   * offsets are 0 and 0, so its bytes start the input, with any text written before it).
+   */
+  record(title: string | null, letters: string, lines: Lines, headerEnd: '\n' | '\r\n' = lines.eol.endsWith('\r\n') ? '\r\n' : '\n'): WrittenRecord {
     this.close();
-    const headerOffset = this.text.length;
-    this.text += `>${title}${headerEnd}`;
-    const sequenceOffset = this.text.length;
+    if (title === null && this.records.length > 0) throw new Error('only the first record can be written without a defline');
+    const lead = this.text.length;
+    const headerOffset = title === null ? 0 : this.text.length;
+    if (title !== null) this.text += `>${title}${headerEnd}`;
+    const sequenceOffset = title === null ? 0 : this.text.length;
     const offsets: number[] = [];
     const put = (letter: string) => {
       offsets.push(this.text.length);
@@ -107,13 +114,14 @@ export class FastaWriter {
     }
     const record: WrittenRecord = {
       title,
-      id: title.split(' ')[0]!,
+      id: title === null ? '' : title.split(' ')[0]!,
       letters,
       headerOffset,
       sequenceOffset,
       endOffset: -1,
       offsets,
-      ...(lines.kind === 'uniform' ? { uniform: uniformLayout(letters.length, lines.width, lines.eol.length) } : {}),
+      // The formula counts from the sequence offset, so a record without a defline after other text has checkpoints.
+      ...(lines.kind === 'uniform' && (title !== null || lead === 0) ? { uniform: uniformLayout(letters.length, lines.width, lines.eol.length) } : {}),
     };
     this.records.push(record);
     return record;

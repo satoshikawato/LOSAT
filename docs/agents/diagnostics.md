@@ -125,6 +125,9 @@ Rebuilding less:
 - `LOSAT_X_TBNSSIDE=1` tblastn: subject six-frame translations once per search (up to 256 MiB).
 - `LOSAT_X_LUTSPLIT=1` tblastn: build only the half (contexts or table) a caller uses.
 - `LOSAT_X_IDEALMEMO=1` BLOSUM62 ideal Karlin block once per process.
+- `LOSAT_X_BXSEGMEMO=1` blastx redo stage: the subject SEG once per subject instead of once per window
+  (per-thread memo of the last subject, byte-equal input; `blastx/x_seg_memo.rs`). Shadow:
+  `LOSAT_X_BXSEGMEMOSHADOW=1` (the masker also runs on every call). Strict-set candidate (S-C, round 5).
 
 Scheduling (each value computed by one thread with the original function; order of output kept):
 

@@ -155,16 +155,21 @@ class ExtractTests(unittest.TestCase):
                 "IfOneCase": "AUTO",
                 "IfOneElseCase": "DISABLED",
                 "ThreadsCase": "AUTO",
-                "TinyScanOffsetSize4": "AUTO",
-                "Disco_Coding_16_ScanOffsetSize11": "AUTO",
-                "DeadScanOffsetSize8": "DISABLED",
+                "DECLARE_TEST": "MACRO",
             },
         )
-        # The timeout line and the macro body are not cases of their own.
-        self.assertEqual(len(cases), 11)
+        # The timeout line is not a case; the macro is one row as written, from
+        # the #define to its last invocation, with the runtime count in the note.
+        self.assertEqual(len(cases), 9)
         spans = {case.case: (case.line_start, case.line_end) for case in cases}
-        self.assertEqual(spans["TinyScanOffsetSize4"], (55, 55))
-        self.assertEqual(spans["Disco_Coding_16_ScanOffsetSize11"], (56, 57))
+        notes = {case.case: case.note for case in cases}
+        self.assertEqual(spans["DECLARE_TEST"], (50, 59))
+        self.assertEqual(
+            notes["DECLARE_TEST"],
+            "2 cases at run time from DECLARE_TEST(...) at lines 55-59, named <name>ScanOffsetSize<wordsize>; "
+            "1 more compiled out",
+        )
+        self.assertEqual(notes["LiveCase"], "")
         self.assertEqual(spans["LiveCase"], (4, 8))
         self.assertEqual(spans["FixtureCase"], (10, 13))
         self.assertEqual(spans["SeqlocMixCase"], (28, 34))
@@ -201,8 +206,13 @@ class ExtractTests(unittest.TestCase):
         self.assertEqual(disabled["blastfilter"], 1)
         self.assertEqual(disabled["bl2seq"], 3)
         self.assertEqual(fixture["optionshandle"], 61)
-        self.assertEqual(total["ntscan"], 45)  # DiscontigTwoSubjects + 44 DECLARE_TEST cases
-        self.assertNotIn(("ntscan", "name"), cases.by_module_case)
+        self.assertEqual(len(cases.cases), 679)
+        self.assertEqual(total["ntscan"], 2)  # DiscontigTwoSubjects + the DECLARE_TEST macro
+        macro = cases.by_module_case[("ntscan", "DECLARE_TEST")]
+        self.assertEqual((macro.line_start, macro.line_end, macro.kind), (846, 905, "MACRO"))
+        self.assertTrue(macro.note.startswith("44 cases at run time"), macro.note)
+        self.assertEqual([case.case for case in cases.cases if case.kind == "MACRO"], ["DECLARE_TEST"])
+        self.assertNotIn(("ntscan", "TinyScanOffsetSize4"), cases.by_module_case)
 
     @unittest.skipUnless(os.environ.get("NCBI_SRC"), "NCBI_SRC is not set")
     def test_committed_case_list_matches_a_fresh_extract(self) -> None:
@@ -265,6 +275,36 @@ class CheckTests(unittest.TestCase):
         ignored = CITED_TEST.replace("    #[test]\n    fn hsp_list_sort", "    #[test]\n    #[ignore]\n    fn hsp_list_sort")
         failures = self.run_check({"LOSAT/src/hits.rs": ignored}, [row("blasthits", "testHSPListSort", "ported")])
         self.assertTrue(any("which is #[ignore]d" in f for f in failures), failures)
+
+    def test_macro_case_is_cited_by_its_body_and_invocation_lines(self) -> None:
+        cases = [
+            ("ntscan", f"{API}/ntscan_unit_test.cpp", "DECLARE_TEST", 846, 905, "MACRO",
+             "44 cases at run time from DECLARE_TEST(...) at lines 855-905, named <name>ScanOffsetSize<wordsize>"),
+        ]
+        source = """\
+#[cfg(test)]
+mod tests {
+    // NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/api/ntscan_unit_test.cpp:847-853,855 DECLARE_TEST
+    #[test]
+    fn tiny_scan_offset_size_4() {}
+}
+"""
+        for lines, expected in (("847-853,855", []), ("847-853,906", ["outside the case (846-905)"])):
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                write_repo(
+                    root,
+                    {"LOSAT/src/scan.rs": source.replace("847-853,855", lines)},
+                    [row("ntscan", "DECLARE_TEST", "partial", "LOSAT/src/scan.rs::tiny_scan_offset_size_4")],
+                    cases,
+                )
+                failures, _ = ledger.check(
+                    root, ledger.load_cases(root / ledger.DEFAULT_CASES), ledger.load_ledger(root / ledger.DEFAULT_LEDGER)
+                )
+            reasons = [f.reason for f in failures]
+            self.assertEqual(len(reasons), len(expected), reasons)
+            for reason, text in zip(reasons, expected):
+                self.assertIn(text, reason)
 
     def test_multi_line_attributes_are_stepped_over(self) -> None:
         source = CITED_TEST.replace(

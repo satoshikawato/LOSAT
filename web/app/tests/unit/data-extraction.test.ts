@@ -380,6 +380,21 @@ describe('DataService.readHspRecords', () => {
     expect(await data.readHspRecords('run-1', [])).toEqual([]);
   });
 
+  it('reads the lines of a batch that lie close together with one read of the store, not one per record', async () => {
+    const records = Array.from({ length: 1000 }, (_, i) => hit(i, 'ACGT'.repeat(10)));
+    const { data, reads } = await committed(records.map((record) => JSON.stringify(record)), 8 * 1024 * 1024);
+    await data.readHspRecords('run-1', [0]);
+    reads.length = 0;
+    const backwards = Array.from({ length: 1000 }, (_, i) => 999 - i);
+    expect((await data.readHspRecords('run-1', backwards)).map((record) => record.index)).toEqual(backwards);
+    expect(reads).toHaveLength(1);
+    reads.length = 0;
+    // Lines far apart (more than 64 KiB between them) are read apart: the bytes between are not read.
+    expect((await data.readHspRecords('run-1', [999, 0, 1, 2])).map((record) => record.index)).toEqual([999, 0, 1, 2]);
+    expect(reads).toHaveLength(2);
+    expect(reads.reduce((sum, length) => sum + length, 0)).toBeLessThan(5 * JSON.stringify(records[999]).length);
+  });
+
   it('finds the records by their index where the lines are not in index order', async () => {
     const records = Array.from({ length: 12 }, (_, i) => hit(i, 'MKV'.repeat(i + 1)));
     const shuffled = [...records].reverse();

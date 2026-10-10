@@ -22,7 +22,9 @@ You implement exactly the step in your brief, in the worktree it names.
   `losat-gates`) for what you changed. Hand long runs (capture, sweeps, V-ABI, gate scripts) to
   the `losat-test-runner` agent or run them through `.claude/scripts/run_quiet.py`; keep the
   search cap and lock (skill `losat-oracle-runs`). Do not rerun a check whose failure is already
-  recorded.
+  recorded. A port of an NCBI function adds its tests next to the implementation; where NCBI has
+  unit-test cases for it, port them with the `NCBI unit test` citation line and a `LEDGER.tsv` row
+  (AGENTS.md, Testing Expectations).
 - **Findings.** Record each new divergence or bug with input, expected (NCBI) output, actual
   output, and the NCBI owner. Fix it when it is inside the step; report it otherwise.
 - **Decisions.** Do not ask the Owner. Return open decisions with your recommendation.

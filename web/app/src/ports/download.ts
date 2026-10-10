@@ -16,9 +16,4 @@ export interface ExportSink {
 export interface Downloader {
   /** Starts a file; nothing is saved before `close`. */
   open(fileName: string, mimeType: string): ExportSink;
-  /**
-   * Saves a file that is already in memory.
-   * @deprecated Write through `open` (the Writer contract); S15 moves the last callers.
-   */
-  save(fileName: string, bytes: Uint8Array, mimeType: string): void;
 }

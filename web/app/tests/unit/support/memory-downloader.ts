@@ -6,7 +6,7 @@ export interface SavedFile {
   readonly name: string;
   readonly mime: string;
   readonly bytes: Uint8Array;
-  /** The writes that made the file (1 for `save`). */
+  /** The writes that made the file. */
   readonly blocks: number;
 }
 
@@ -35,9 +35,6 @@ export function memoryDownloader(onSave: (file: SavedFile) => void): Downloader 
           if (state === 'open') state = 'aborted';
         },
       };
-    },
-    save(name, bytes, mime) {
-      onSave({ name, mime, bytes: bytes.slice(), blocks: 1 });
     },
   };
 }

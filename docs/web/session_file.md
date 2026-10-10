@@ -128,7 +128,12 @@ export work unchanged.
 
 **Nothing is searched.** The runs join the working session as completed runs, with new run IDs and
 the next run numbers of this session; they are never queued, never validated, and the engine is
-never asked. The queue, the results header and Run details say "from `<file>`, run N there". A
+never asked. The queue, the results header and Run details say "from `<file>`, run N there".
+The run's verification badge (Run details, the JSON export's `run.verification`, the report) is
+this site's only when one of this site's engine builds wrote its outputs (the run record's
+`engineBuild`), and then adds that the run was loaded from a session file; otherwise it is
+"Written by another engine build" and names that build, the LOSAT Web that saved the file (`app`)
+and this site's builds. A FakeEngine run stays a development run. A
 loaded run's InputSnapshot has no engine bytes and no revisions (`bytes` is absent); Run details
 shows the input's size from the manifest. Candidates are added to the tray with their notes and
 times, rebuilt from the loaded runs' HSP records (read 1,000 at a time; the tray keeps no aligned

@@ -388,7 +388,7 @@ export class Session {
     // Everything that can fail comes before the runs join this working session, so that a refused
     // file leaves nothing in it (the caller deletes the runs from the Data worker).
     const groupIds = new Map<number, string>();
-    const inits = manifest!.runs.map((run, k) => this.runInit(run, committed[k]!, file.name, manifest!.savedAt, groupIds));
+    const inits = manifest!.runs.map((run, k) => this.runInit(run, committed[k]!, file.name, manifest!, groupIds));
     const pending = await this.candidateEntries(manifest!, committed, candidates);
     // Every check has passed: the runs join, then their candidates (the tray takes HSPs of completed runs only).
     const runs = this.deps.coordinator.addSessionRuns(inits);
@@ -500,7 +500,7 @@ export class Session {
     return rows;
   }
 
-  private runInit(run: SessionRun, committed: CommittedRun, fileName: string, savedAt: number, groupIds: Map<number, string>): SessionRunInit {
+  private runInit(run: SessionRun, committed: CommittedRun, fileName: string, manifest: SessionManifest, groupIds: Map<number, string>): SessionRunInit {
     let group;
     if (run.group !== undefined) {
       const groupId = groupIds.get(run.group.index) ?? this.deps.newRunId();
@@ -521,7 +521,14 @@ export class Session {
       }),
       record: { ...run.record } as RunRecord,
       result: committed.result,
-      fromSession: { fileName, number: run.number, savedAt, inputs: { query: run.query, subject: run.subject } },
+      fromSession: {
+        fileName,
+        number: run.number,
+        savedAt: manifest.savedAt,
+        app: manifest.app,
+        ...(run.record.engineBuild === undefined ? {} : { engineBuild: run.record.engineBuild }),
+        inputs: { query: run.query, subject: run.subject },
+      },
     };
   }
 

@@ -20,6 +20,7 @@ import {
 } from '../../src/domain/result-index';
 import {
   approvedExceptions,
+  loadedRunBadge,
   optionKey,
   verificationBadge,
   RANGE_VALUE,
@@ -270,6 +271,39 @@ describe('verificationBadge', () => {
     expect(reasons({ program: 'tblastx', argv: ['tblastx'] }).details.join(' ')).toMatch(/browser runtime of tblastx was not checked/);
     expect(reasons({ threads: 3 }).label).toBe('Engine-supported, outside certified profile');
     expect(reasons({ runtimePath: 'fake' }).level).toBe('development');
+  });
+
+  it("keeps the badge of a loaded run only when this site's engine build wrote its outputs, and says that it was loaded (code review M2)", () => {
+    const site = { engineBuilds: ['threads-A', 'serial-A'], app: { version: '0.2.0', build: 'b2' } };
+    const certified = verificationBadge(input, table);
+    const same = loadedRunBadge(certified, { engineBuild: 'threads-A', app: { version: '0.1.0', build: 'b1' } }, site);
+    expect(same).toEqual({
+      ...certified,
+      details: [...certified.details, 'Loaded from a session file: written by threads-A (LOSAT Web 0.1.0, build b1), an engine build of this site.'],
+    });
+    // Another engine build (here one that this site's table would certify): the badge does not claim this site's verification.
+    const other = loadedRunBadge(certified, { engineBuild: 'threads-B', app: { version: '0.1.0', build: 'b1' } }, site);
+    expect(other).toEqual({
+      level: 'outside',
+      label: 'Written by another engine build',
+      details: [
+        "Loaded from a session file: written by threads-B (LOSAT Web 0.1.0, build b1); this site's verification covers threads-A and serial-A (LOSAT Web 0.2.0, build b2).",
+      ],
+      exceptions: [],
+    });
+    // No engine build in the file, or no site to compare with: never this site's badge.
+    expect(loadedRunBadge(certified, { app: { version: '0.1.0', build: 'b1' } }, site).details[0]).toMatch(
+      /^Loaded from a session file: written by an engine build that the file does not name \(LOSAT Web 0\.1\.0, build b1\); this site's verification covers/,
+    );
+    expect(loadedRunBadge(certified, { engineBuild: 'threads-A', app: { version: '0.1.0', build: 'b1' } }, undefined).level).toBe('outside');
+    // The approved exceptions follow the options, whoever wrote the outputs.
+    const exception = verificationBadge({ ...input, program: 'tblastx', argv: ['tblastx', '-db_gencode', '11'] }, table);
+    expect(loadedRunBadge(exception, { engineBuild: 'threads-B', app: site.app }, site).exceptions).toEqual(exception.exceptions);
+    // A run of the FakeEngine stays a development run, whoever loads it.
+    const fake = verificationBadge({ ...input, runtimePath: 'fake' }, table);
+    const loadedFake = loadedRunBadge(fake, { engineBuild: 'fake-engine', app: site.app }, site);
+    expect(loadedFake.level).toBe('development');
+    expect(loadedFake.details).toEqual([...fake.details, 'Loaded from a session file: written by fake-engine (LOSAT Web 0.2.0, build b2).']);
   });
 
   it('names the approved exceptions of a non-default subject genetic code', () => {

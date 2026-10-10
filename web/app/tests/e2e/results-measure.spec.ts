@@ -36,6 +36,18 @@
 //    out and to the selected HSP, to select an HSP by `n`, by a click on its segment and in the
 //    list, to open the selected HSP's popup with Enter (W4b), to sort and to scroll the HSP list.
 //
+// Since W5 (S14: "抽出と候補トレイは、この規模で同じ操作の速さを保つ"), each measurement ends with the
+// candidate tray filled from it, after its own records, which keep their names and their order so
+// that they stay comparable with W4 and W4b. In one warm-up and three repetitions, from an empty
+// tray: `queries` marks every subject of the first query with 200 subjects in the Descriptions
+// ("select all") and adds their HSPs ("Add to candidates"); `pair`, for each count of copies whose
+// measurement completed, adds every HSP of the pair in the Alignments ("Add all matches to
+// candidates"). Then, the same in both (`tray` in the record): opening the Candidates tab, scrolling
+// its list to the end, sorting it by Subject, extracting the hit regions of its first 100
+// candidates (the clock stops at the frame that shows the extraction's summary; `downloadMs`, taken
+// by the test from before the act to Playwright's download event, is an upper bound), and removing
+// all of them.
+//
 // Times are milliseconds, taken in the page with `performance.now()` from the action to the first
 // animation frame in which the screen shows the result (`ms`) and to the frame after it
 // (`paintMs`); the resolution is a frame (about 17 ms). The canvases (the dot plot, the Graphic
@@ -47,6 +59,7 @@
 // clock at the event in the page, and the clock stops at the first frame that shows the result
 // after the test starts looking, so these times include Playwright's round trip (upper bounds).
 import { mkdirSync, writeFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { expect, test, type CDPSession, type Page } from '@playwright/test';
 import { BUILD_HAS_ENGINE } from './support/browser';
@@ -76,6 +89,8 @@ test.use({ actionTimeout: 120_000 });
 type Act =
   | { readonly kind: 'click'; readonly testid: string }
   | { readonly kind: 'fill'; readonly testid: string; readonly value: string }
+  /** Chooses an option of a select element (its change event). */
+  | { readonly kind: 'select'; readonly testid: string; readonly value: string }
   | {
       readonly kind: 'scroll';
       readonly testid: string;
@@ -93,6 +108,8 @@ interface Cond {
   /** The parent of the element, not the element. */
   readonly parent?: boolean;
   readonly absent?: boolean;
+  /** The element is laid out: neither it nor a parent has `display: none` (the tabs that stay mounted). */
+  readonly visible?: boolean;
   readonly attr?: string;
   readonly equals?: string;
   /** The attribute is something else than this (for an act that happened before the step began). */
@@ -148,6 +165,10 @@ async function step(page: Page, act: Act, until: readonly Cond[], timeoutMs = 60
       else if (action.kind === 'scroll') {
         const element = find(action.testid)!;
         element.scrollTop = action.to === 'end' ? element.scrollHeight : 0;
+      } else if (action.kind === 'select') {
+        const select = find(action.testid) as HTMLSelectElement;
+        select.value = action.value;
+        select.dispatchEvent(new Event('change', { bubbles: true }));
       } else {
         const input = find(action.testid) as HTMLInputElement;
         input.value = action.value;
@@ -158,6 +179,7 @@ async function step(page: Page, act: Act, until: readonly Cond[], timeoutMs = 60
           const element = target(c);
           if (c.absent) return element === null;
           if (element === null) return false;
+          if (c.visible && element.getClientRects().length === 0) return false;
           if (c.attr !== undefined) {
             const value = element.getAttribute(c.attr);
             if (c.changed) return value !== initial[i];
@@ -635,12 +657,189 @@ for (const count of COUNTS) {
       console.log(
         `${browserName} ${count} queries: ${JSON.stringify({ summary: record['summary'], heap: record['heap'], outfmt6: record['outfmt6'] })}`,
       );
+      save();
+
+      // The candidate tray (W5), after the records above.
+      const tray: Record<string, unknown> = {};
+      record['tray'] = tray;
+      try {
+        const subjects = await wideQuery(page, count);
+        await trayRepetitions(tray, () => queriesTrayRepetition(page, subjects));
+        console.log(`${browserName} ${count} queries: tray ${JSON.stringify(tray['summary'])}`);
+      } catch (error) {
+        tray['error'] = message(error);
+        console.log(`${browserName} ${count} queries: tray FAILED ${message(error)}`);
+      }
     } catch (error) {
       record['error'] = message(error);
       console.log(`${browserName} ${count} queries: FAILED ${message(error)}`);
     }
     save();
   });
+}
+
+// --- the candidate tray (W5), filled from either measurement ------------------------------------------
+
+/** The candidates whose hit regions are extracted. */
+const EXTRACTED = 100;
+const candidateRows = (page: Page) => page.getByTestId('candidate-list').locator('[data-key]').count();
+
+interface TrayRepetition {
+  candidates: number;
+  openTray: Timing;
+  scrollToEnd: Timing;
+  rowsDrawnAtEnd: number;
+  sortBySubject: Timing;
+  extract: Timing;
+  /** From before the act until Playwright's download event, taken by the test: an upper bound. */
+  downloadMs: number;
+  sequences: number;
+  bytes: number;
+  removeAll: Timing;
+}
+
+/**
+ * The tray's operations on the `count` candidates just added (all selected, in the order added),
+ * while the results screen is shown; the tray is empty again at the end.
+ */
+async function trayOperations(page: Page, count: number): Promise<TrayRepetition> {
+  const total = countText(count);
+  // The sort's clock looks for the first row, which is drawn at the end of the list only for a short list.
+  expect(count).toBeGreaterThan(EXTRACTED);
+  // The tray stays mounted, hidden, while the results are shown (its rows are drawn as candidates
+  // are added): the tab shows it in place of the results screen.
+  await quiet(page);
+  const openTray = await step(page, { kind: 'click', testid: 'tab-candidates' }, [
+    { testid: 'candidates', visible: true },
+    { testid: 'candidate-list', attr: 'data-count', equals: String(count) },
+    { testid: 'candidate-1' },
+  ]);
+  await quiet(page);
+  const scrollToEnd = await step(page, { kind: 'scroll', testid: 'candidate-list', to: 'end' }, [{ testid: `candidate-${count}` }]);
+  const rowsDrawnAtEnd = await candidateRows(page);
+  // A sort shows the list's first rows again in the same update: row 1, not drawn at the end, is drawn in the new order.
+  await quiet(page);
+  const sortBySubject = await step(page, { kind: 'select', testid: 'candidates-sort', value: 'subject' }, [{ testid: 'candidate-1' }]);
+  await expect(page.getByTestId('candidates-sort')).toHaveValue('subject');
+
+  // The first 100 in that order: none selected, then a click on each one's mark (each scrolled into view).
+  await page.getByTestId('candidates-select-all').uncheck();
+  await expect(page.getByTestId('candidates-selected')).toHaveText(`0 of ${total} candidates selected`);
+  for (let n = 1; n <= EXTRACTED; n++) await page.getByTestId(`candidate-mark-${n}`).check();
+  await expect(page.getByTestId('candidates-selected')).toHaveText(`${EXTRACTED} of ${total} candidates selected`);
+  await expect(page.getByTestId('extract-region-hit')).toBeChecked();
+  await expect(page.getByTestId('extract-join-separate')).toBeChecked();
+  // The summary of the extraction before stays until the next one replaces it: the clock waits for a new element.
+  await page.evaluate(() => document.querySelector('[data-testid="extract-summary"]')?.setAttribute('data-measured', 'before'));
+  await quiet(page);
+  const arrival = page.waitForEvent('download', { timeout: 600_000 }).then((download) => ({ download, at: Date.now() }));
+  const t0 = Date.now();
+  const extract = await step(page, { kind: 'click', testid: 'extract-download' }, [
+    { testid: 'extract-summary', attr: 'data-measured', differs: 'before' },
+    { testid: 'extract-summary', text: `Saved losat-candidates\\.fa: ${EXTRACTED} sequences\\s` },
+  ]);
+  const { download, at } = await arrival;
+  const text = await readFile((await download.path())!, 'utf8');
+  const sequences = text.split('\n').filter((line) => line.startsWith('>')).length;
+  expect(sequences).toBe(EXTRACTED);
+
+  await page.getByTestId('candidates-select-all').check();
+  await expect(page.getByTestId('candidates-selected')).toHaveText(`${total} of ${total} candidates selected`);
+  await quiet(page);
+  const removeAll = await step(page, { kind: 'click', testid: 'candidates-remove-selected' }, [
+    { testid: 'candidates-empty' },
+    { testid: 'tab-candidates-count', text: '^0$' },
+  ]);
+  return {
+    candidates: count,
+    openTray: rounded(openTray),
+    scrollToEnd: rounded(scrollToEnd),
+    rowsDrawnAtEnd,
+    sortBySubject: rounded(sortBySubject),
+    extract: rounded(extract),
+    downloadMs: at - t0,
+    sequences,
+    bytes: Buffer.byteLength(text),
+    removeAll: rounded(removeAll),
+  };
+}
+
+/** One warm-up and the repetitions, written into `into` as they come (a failure keeps what was measured). */
+async function trayRepetitions<T extends object>(into: Record<string, unknown>, repeat: () => Promise<T>): Promise<void> {
+  into['warmup'] = await repeat();
+  const samples: T[] = [];
+  into['samples'] = samples;
+  for (let i = 0; i < REPETITIONS; i++) samples.push(await repeat());
+  into['summary'] = summarize(samples as unknown as Record<string, unknown>[]);
+}
+
+/**
+ * Selects the first query with 200 subjects of run 1 (`query-filter` selects it; decision 10) and
+ * shows its Descriptions, with the filter cleared again; returns the number of its subjects.
+ */
+async function wideQuery(page: Page, count: number): Promise<number> {
+  const total = countText(count);
+  await page.getByTestId('results-view-hits').click();
+  await page.getByTestId('query-filter').fill('wide');
+  await expect(page.getByTestId('query-count')).toHaveText(new RegExp(`^[\\d,]+ of ${total} queries$`));
+  await expect(page.locator('[data-testid^="query-row-"]').first()).toHaveAttribute('aria-pressed', 'true');
+  await page.getByTestId('query-filter').fill('');
+  await expect(page.getByTestId('query-count')).toHaveText(`${total} of ${total} queries`);
+  await expect(page.getByTestId('subject-list')).toHaveAttribute('data-count', /^[1-9]\d{2,}$/);
+  return Number(await page.getByTestId('subject-list').getAttribute('data-count'));
+}
+
+interface QueriesTrayRepetition extends TrayRepetition {
+  markAll: Timing;
+  addMarked: Timing;
+}
+
+/** Marks every subject of the selected query ("select all"), adds them, and the tray's operations. */
+async function queriesTrayRepetition(page: Page, subjects: number): Promise<QueriesTrayRepetition> {
+  await page.getByTestId('tab-results').click();
+  await expect(page.getByTestId('subject-list')).toHaveAttribute('data-count', String(subjects));
+  await expect(page.getByTestId('descriptions-selected')).toHaveText('0 sequences selected');
+  await expect(page.getByTestId('tab-candidates-count')).toHaveText('0');
+  await quiet(page);
+  const markAll = await step(page, { kind: 'click', testid: 'descriptions-select-all' }, [
+    { testid: 'descriptions-selected', text: `^${countText(subjects)} sequences selected$` },
+  ]);
+  await quiet(page);
+  const addMarked = await step(page, { kind: 'click', testid: 'descriptions-add-candidates' }, [
+    { testid: 'tab-candidates-count', text: '^[1-9][\\d,]*$' },
+  ]);
+  const added = Number((await page.getByTestId('tab-candidates-count').textContent())!.replace(/,/g, ''));
+  // The marks stay after the addition; the next repetition marks the subjects again.
+  await page.getByTestId('descriptions-select-all').uncheck();
+  await expect(page.getByTestId('descriptions-selected')).toHaveText('0 sequences selected');
+  return { markAll: rounded(markAll), addMarked: rounded(addMarked), ...(await trayOperations(page, added)) };
+}
+
+/** Shows run `number` (a pair) in the Alignments, opened after run 1 so that the clocks see a change of run. */
+async function openPair(page: Page, number: number): Promise<void> {
+  for (const run of [1, number]) {
+    await page.getByTestId(`run-${run}-open`).click();
+    await expect(page.getByTestId('results-hits')).toHaveAttribute('data-run', String(run), { timeout: 120_000 });
+  }
+  await page.getByTestId('pane-alignment').click();
+}
+
+interface PairTrayRepetition extends TrayRepetition {
+  addAll: Timing;
+}
+
+/** Adds every HSP of the pair shown ("Add all matches to candidates"), and the tray's operations. */
+async function pairTrayRepetition(page: Page): Promise<PairTrayRepetition> {
+  await page.getByTestId('tab-results').click();
+  await expect(page.getByTestId('alignments-add-subject')).toHaveText('Add all matches to candidates');
+  await expect(page.getByTestId('tab-candidates-count')).toHaveText('0');
+  const hsps = Number(await page.getByTestId('hsp-list').getAttribute('data-count'));
+  await quiet(page);
+  const addAll = await step(page, { kind: 'click', testid: 'alignments-add-subject' }, [
+    { testid: 'tab-candidates-count', text: `^${countText(hsps)}$` },
+    { testid: 'alignments-add-subject', text: '^\\s*All matches in candidates\\s*$' },
+  ]);
+  return { addAll: rounded(addAll), ...(await trayOperations(page, hsps)) };
 }
 
 // --- measurement 2: many HSPs in one query-subject pair ---------------------------------------------
@@ -840,6 +1039,8 @@ test('many HSPs in one query-subject pair: the dot plot and the HSP list', async
     { name: 'subjects.fna', buffer: manyQueries(20).subjects },
   );
   void first;
+  /** The pairs whose measurement completed, for the candidate tray. */
+  const measured: { number: number; copies: number; record: Record<string, unknown> }[] = [];
   let number = 1;
   for (const copies of COPIES) {
     number++;
@@ -862,9 +1063,25 @@ test('many HSPs in one query-subject pair: the dot plot and the HSP list', async
       record['samples'] = samples;
       record['summary'] = summarize(samples as unknown as Record<string, unknown>[]);
       console.log(`${browserName} ${copies} copies: ${warmup.hsps} HSPs ${JSON.stringify(record['summary'])}`);
+      measured.push({ number, copies, record });
     } catch (error) {
       record['error'] = message(error);
       console.log(`${browserName} ${copies} copies: FAILED ${message(error)}`);
+    }
+    save();
+  }
+
+  // The candidate tray (W5) of each pair, after the records above (which keep the order of W4b).
+  for (const { number: run, copies, record } of measured) {
+    const tray: Record<string, unknown> = {};
+    record['tray'] = tray;
+    try {
+      await openPair(page, run);
+      await trayRepetitions(tray, () => pairTrayRepetition(page));
+      console.log(`${browserName} ${copies} copies: tray ${JSON.stringify(tray['summary'])}`);
+    } catch (error) {
+      tray['error'] = message(error);
+      console.log(`${browserName} ${copies} copies: tray FAILED ${message(error)}`);
     }
     save();
   }

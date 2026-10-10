@@ -1,0 +1,25 @@
+[WebServer] (!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+[WebServer]   - import "./output-format" without a file extension (src/domain/verification.ts:9:35). Add the file extension
+[WebServer]   - import "./programs" without a file extension (src/domain/verification.ts:10:32). Add the file extension
+[WebServer] Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+[WebServer] (!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+[WebServer]   - import "./output-format" without a file extension (src/domain/verification.ts:9:35). Add the file extension
+[WebServer]   - import "./programs" without a file extension (src/domain/verification.ts:10:32). Add the file extension
+[WebServer] Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+
+Running 12 tests using 2 workers
+
+  ✓   1 [chromium] › tests/e2e/screens.spec.ts:44:3 › search screen at the phone size (9.8s)
+  ✓   2 [chromium] › tests/e2e/screens.spec.ts:44:3 › search screen at the desktop size (10.0s)
+  ✓   4 [chromium] › tests/e2e/screens.spec.ts:218:3 › results screen at the phone size (23.2s)
+  ✓   3 [chromium] › tests/e2e/screens.spec.ts:218:3 › results screen at the desktop size (23.7s)
+  ✓   5 [firefox] › tests/e2e/screens.spec.ts:44:3 › search screen at the desktop size (10.8s)
+  ✓   6 [firefox] › tests/e2e/screens.spec.ts:44:3 › search screen at the phone size (10.8s)
+  ✓   7 [firefox] › tests/e2e/screens.spec.ts:218:3 › results screen at the desktop size (25.6s)
+  ✓   8 [firefox] › tests/e2e/screens.spec.ts:218:3 › results screen at the phone size (25.4s)
+  ✓  10 [webkit] › tests/e2e/screens.spec.ts:44:3 › search screen at the phone size (12.6s)
+  ✓   9 [webkit] › tests/e2e/screens.spec.ts:44:3 › search screen at the desktop size (14.2s)
+  ✓  12 [webkit] › tests/e2e/screens.spec.ts:218:3 › results screen at the phone size (28.8s)
+  ✓  11 [webkit] › tests/e2e/screens.spec.ts:218:3 › results screen at the desktop size (32.5s)
+
+  12 passed (2.0m)

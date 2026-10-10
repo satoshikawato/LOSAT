@@ -110,6 +110,10 @@ Same values, faster computation:
   `s_AddNeighboringWords` and `BlastAaLookupFinalize`), neighbour-word lists memoised per thread
   (`tblastx/lookup/x_lut_direct.rs`). Shadow: `LOSAT_X_BXLUTSHADOW=1` (every table compared field by
   field). Strict-set candidate (S-C, round 5).
+- `LOSAT_X_BXSCAN=1` blastx seed loop reads the scanner's per-thread offset-pair buffer in place instead
+  of a fresh buffer and a copy per subject (`blastx/x_seed_scan.rs`); not in the diagnostic stages, and
+  only with the reference diagonal order (`LOSAT_X_SEEDBUCKET` mode 0). Shadow: `LOSAT_X_BXSCANSHADOW=1`
+  (hit lists and diagonal table). Strict-set candidate (S-C, round 5).
 - `LOSAT_X_SEEDBUCKET=1` TBLASTX two-hit stage: hits buffered per diagonal range and processed
   range by range, HSPs restored to scan order (`tblastx/x_seed_bucket.rs`); only for diagonal tables
   of at least `LOSAT_X_SEEDBUCKET_MIN_CELLS` cells (default 2^21). Shadow:

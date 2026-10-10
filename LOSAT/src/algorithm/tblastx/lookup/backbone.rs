@@ -22,6 +22,7 @@ pub const AA_HITS_PER_CELL: usize = 3;
 // x_lut_direct.rs (a child module, so that it uses this file's private builder pieces).
 #[path = "x_lut_direct.rs"]
 mod x_lut_direct;
+pub(crate) use x_lut_direct::x_shadow_tables as x_bxlut_shadow_tables;
 
 fn blosum62_ideal_karlin_params() -> KarlinParams {
     ideal_karlin_params_for_matrix(ScoringMatrix::Blosum62, (-4, 11))

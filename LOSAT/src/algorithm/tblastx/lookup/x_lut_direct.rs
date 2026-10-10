@@ -495,6 +495,11 @@ pub(super) fn x_dispatch(
 pub(crate) static X_SHADOW_TABLES: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(0);
 
+/// EXPERIMENT (LOSAT_X_BXLUTSHADOW): `Some(tables compared)` in shadow mode, for the exit summary.
+pub(crate) fn x_shadow_tables() -> Option<u64> {
+    (x_bxlut_mode() == 2).then(|| X_SHADOW_TABLES.load(std::sync::atomic::Ordering::Relaxed))
+}
+
 /// EXPERIMENT (LOSAT_X_BXLUTSHADOW): assert that two tables are equal field by field.
 pub(super) fn x_assert_same_table(direct: &BlastAaLookupTable, reference: &BlastAaLookupTable) {
     assert_eq!(

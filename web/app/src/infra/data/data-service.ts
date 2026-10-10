@@ -1,25 +1,30 @@
 // The data layer of one working session (plan §3.1, §5.4, §5.6). It runs inside the Data
 // worker (src/infra/data-worker/data-worker.ts), and directly in unit tests. It keeps:
 // - the sources: File references, read with `File.slice`, never copied into storage;
-// - the record tables (dataset revisions), built with the index scan port;
+// - the record tables (dataset revisions), built with the index scan port, and the reading
+//   of a record's residues from its source for extraction (domain/sequence-layout.ts);
 // - the run registry: staged runs, whose outputs arrive over a MessagePort from the
 //   engine, and committed runs. Staged and committed runs use the same blocks; the
 //   registry, not a move of files, says which runs are committed (plan §2.3).
+import { intervalText, withinRecord, type Interval } from '../../domain/coordinates';
 import {
   includedRecords,
   normalizeExclusion,
   recordKey,
+  type DatasetRecord,
   type DatasetRevision,
   type FastaParserKind,
   type IndexedRecord,
   type RecordKey,
 } from '../../domain/dataset';
 import { hspTable, type HspTable } from '../../domain/hsp-table';
+import { ForwardReader, readerKind, readStart, residueCounts, type ReaderKind } from '../../domain/sequence-layout';
 import type { OutputFormat } from '../../domain/output-format';
 import type { InputRole, ProgramId } from '../../domain/programs';
 import type {
   CleanupState,
   DataGateway,
+  RecordResidues,
   ResultSetRef,
   RunInput,
   SourceRef,
@@ -88,6 +93,26 @@ interface CommittedRun {
   readonly state: 'committed';
   readonly token: string;
   readonly lengths: Readonly<Lengths>;
+  /** Where each HSP record's line is in stream 1, found on the first `readHspRecords`. */
+  hitLines?: Promise<HitLines> | undefined;
+}
+
+/**
+ * The lines of stream 1 that hold HSP records (the lines that are not blank, as `readHits`
+ * reads them): line `k` is the bytes [starts[k], ends[k]). `lineOf` maps an HSP index to its
+ * line where the lines are not in the order of the index (the adapter writes them in order).
+ */
+interface HitLines {
+  readonly starts: Float64Array;
+  readonly ends: Float64Array;
+  lineOf?: ReadonlyMap<number, number>;
+}
+
+/** The parts of a run input in order: each revision's source and included records. */
+interface RunInputPart {
+  readonly revision: DatasetRevision;
+  readonly file: File;
+  readonly included: readonly DatasetRecord[];
 }
 
 export class DataService implements DataGateway {
@@ -141,17 +166,26 @@ export class DataService implements DataGateway {
     return { bytes, sha256: await this.deps.digest(bytes), records };
   }
 
+  /**
+   * The parts of the run input of the revisions, in order: the included records of each revision
+   * in turn. `buildRunInput` joins them and `readResidues` finds a record's position in them, so
+   * the positions are those of the engine's records (`q_idx`, `s_idx`).
+   */
+  private runInputParts(revisionIds: readonly string[]): RunInputPart[] {
+    if (revisionIds.length === 0) throw new Error('a run input needs at least one dataset revision');
+    return revisionIds.map((revisionId) => {
+      const revision = this.revision(revisionId);
+      return { revision, file: this.source(revision.sourceId), included: includedRecords(revision) };
+    });
+  }
+
   /** The bytes and record keys of a run input, without its SHA-256, and where its records lie. */
   private async runInputBytes(revisionIds: readonly string[]): Promise<RunInputBytes> {
-    if (revisionIds.length === 0) throw new Error('a run input needs at least one dataset revision');
     const parts: Uint8Array[] = [];
     const records: RecordKey[] = [];
     const spans: Array<readonly [number, number]> = [];
     let length = 0;
-    for (const revisionId of revisionIds) {
-      const revision = this.revision(revisionId);
-      const file = this.source(revision.sourceId);
-      const included = includedRecords(revision);
+    for (const { revision, file, included } of this.runInputParts(revisionIds)) {
       const whole = revision.excluded.length === 0;
       const bytes = whole
         ? await readRange(file, 0, file.size)
@@ -200,6 +234,70 @@ export class DataService implements DataGateway {
   async previewSource(sourceId: string, maxBytes: number): Promise<Uint8Array> {
     const file = this.source(sourceId);
     return readRange(file, 0, Math.min(file.size, Math.max(0, maxBytes)));
+  }
+
+  async readResidues(revisionIds: readonly string[], position: number, intervals: readonly Interval[]): Promise<RecordResidues> {
+    const { revision, file, record } = this.recordAt(revisionIds, position);
+    const kind = readerKind(revision.parser);
+    for (const each of intervals) {
+      if (!withinRecord(each, record.length)) {
+        throw new RangeError(`${each.from}-${each.to} is not an interval of record ${position + 1} ("${record.id}", ${record.length} letters)`);
+      }
+    }
+    const residues: Uint8Array[] = [];
+    for (const each of intervals) residues.push(await this.readInterval(file, record, kind, each));
+    return {
+      origin: {
+        sourceId: revision.sourceId,
+        sourceName: file.name,
+        revisionId: revision.revisionId,
+        recordIndex: record.index,
+        id: record.id,
+        length: record.length,
+        sha256: record.sha256,
+      },
+      residues,
+    };
+  }
+
+  /** The record at `position` of the run input of the revisions (see `runInputParts`). */
+  private recordAt(revisionIds: readonly string[], position: number): RunInputPart & { readonly record: DatasetRecord } {
+    if (!Number.isSafeInteger(position) || position < 0) throw new RangeError(`${position} is not a record position`);
+    let rest = position;
+    for (const part of this.runInputParts(revisionIds)) {
+      if (rest < part.included.length) return { ...part, record: part.included[rest]! };
+      rest -= part.included.length;
+    }
+    throw new RangeError(`the run input has ${position - rest} records, so it has no record ${position + 1}`);
+  }
+
+  /**
+   * Reads the residues of an interval forward from where the record's layout places its first
+   * residue, in ranges of at most `readChunkBytes`, and stops at its last residue.
+   */
+  private async readInterval(file: File, record: DatasetRecord, kind: ReaderKind, wanted: Interval): Promise<Uint8Array> {
+    const count = wanted.to - wanted.from + 1;
+    const start = readStart(record.line_layout, record.sequence_offset, wanted.from - 1);
+    const reader = new ForwardReader(kind, start.skip, count);
+    const end = Math.min(record.end_offset, file.size);
+    for (let offset = start.offset; offset < end && !reader.done; offset += this.chunkBytes) {
+      reader.feed(await readRange(file, offset, Math.min(end, offset + this.chunkBytes)));
+    }
+    const residues = reader.residues();
+    const whole = wanted.from === 1 && wanted.to === record.length;
+    const problem =
+      residues.length !== count
+        ? `only ${residues.length} of its ${count} residues were found`
+        : whole && !sameCounts(residueCounts(kind, residues), record.residue_counts)
+          ? 'its residues are not those counted in the record table'
+          : undefined;
+    if (problem !== undefined) {
+      throw new Error(
+        `The source "${file.name}" no longer matches its record table: record ${record.index + 1} ("${record.id}"), ` +
+          `read for ${intervalText(wanted)}: ${problem}. Add the file again.`,
+      );
+    }
+    return residues;
   }
 
   // --- runs -----------------------------------------------------------------------------
@@ -283,6 +381,43 @@ export class DataService implements DataGateway {
     return parseHitLines(new TextDecoder().decode(await this.readStream(runId, HITS_STREAM)));
   }
 
+  async readHspRecords(runId: string, indices: readonly number[]): Promise<readonly HspRecord[]> {
+    const run = this.runs.get(runId);
+    if (run?.state !== 'committed') throw new Error(`run ${runId} has no committed result`);
+    // A failed search for the lines is not kept, so the next call tries again.
+    run.hitLines ??= this.findHitLines(run).catch((error: unknown) => {
+      run.hitLines = undefined;
+      throw error;
+    });
+    const lines = await run.hitLines;
+    const count = lines.starts.length;
+    for (const index of indices) {
+      if (!Number.isSafeInteger(index) || index < 0 || index >= count) {
+        throw new RangeError(`run ${runId} has no HSP ${index} (it has ${count} HSP records)`);
+      }
+    }
+    const path = blockPath(run.token, HITS_STREAM);
+    const decoder = new TextDecoder();
+    const readLine = async (line: number): Promise<HspRecord> => {
+      const start = lines.starts[line]!;
+      return JSON.parse(decoder.decode(await this.deps.store.read(path, start, lines.ends[line]! - start))) as HspRecord;
+    };
+    const records: HspRecord[] = [];
+    for (const index of indices) {
+      // The adapter writes the records in the order of their index, so line `index` is the
+      // record; where it is not, every line is read once to map the indices to lines.
+      let record = await readLine(lines.lineOf?.get(index) ?? index);
+      if (record.index !== index) {
+        lines.lineOf ??= await this.mapHitLines(path, lines);
+        const line = lines.lineOf.get(index);
+        if (line === undefined) throw new RangeError(`run ${runId} has no HSP ${index}`);
+        record = await readLine(line);
+      }
+      records.push(record);
+    }
+    return Object.freeze(records);
+  }
+
   async readHitTable(runId: string): Promise<HspTable> {
     return hspTable(await this.readHits(runId));
   }
@@ -345,6 +480,56 @@ export class DataService implements DataGateway {
     await this.deps.store.removeAll(runPrefix(run.token));
   }
 
+  /** Finds the lines of stream 1 that are not blank (as `append` counts them), reading the block in bounded ranges. */
+  private async findHitLines(run: CommittedRun): Promise<HitLines> {
+    const path = blockPath(run.token, HITS_STREAM);
+    const length = run.lengths[HITS_STREAM];
+    const starts: number[] = [];
+    const ends: number[] = [];
+    let lineStart = 0;
+    let open = false;
+    for (let offset = 0; offset < length; offset += this.chunkBytes) {
+      const bytes = await this.deps.store.read(path, offset, Math.min(this.chunkBytes, length - offset));
+      for (let i = 0; i < bytes.length; i++) {
+        const byte = bytes[i]!;
+        if (byte === LF) {
+          if (open) {
+            starts.push(lineStart);
+            ends.push(offset + i);
+          }
+          open = false;
+          lineStart = offset + i + 1;
+        } else if (byte !== 0x20 && byte !== 0x09 && byte !== 0x0d) {
+          open = true;
+        }
+      }
+    }
+    if (open) {
+      starts.push(lineStart);
+      ends.push(length);
+    }
+    return { starts: Float64Array.from(starts), ends: Float64Array.from(ends) };
+  }
+
+  /** The line of every HSP index, from parsing every line once (lines read together in bounded ranges). */
+  private async mapHitLines(path: string, lines: HitLines): Promise<Map<number, number>> {
+    const decoder = new TextDecoder();
+    const lineOf = new Map<number, number>();
+    let first = 0;
+    while (first < lines.starts.length) {
+      const start = lines.starts[first]!;
+      let last = first;
+      while (last + 1 < lines.starts.length && lines.ends[last + 1]! - start <= this.chunkBytes) last++;
+      const bytes = await this.deps.store.read(path, start, lines.ends[last]! - start);
+      for (let line = first; line <= last; line++) {
+        const text = decoder.decode(bytes.subarray(lines.starts[line]! - start, lines.ends[line]! - start));
+        lineOf.set((JSON.parse(text) as HspRecord).index, line);
+      }
+      first = last + 1;
+    }
+    return lineOf;
+  }
+
   private async hashRecords(file: File, records: readonly IndexedRecord[]): Promise<string[]> {
     const hashes: string[] = [];
     let first = 0;
@@ -380,6 +565,13 @@ export class DataService implements DataGateway {
     if (revision === undefined) throw new Error(`unknown dataset revision ${revisionId}`);
     return revision;
   }
+}
+
+/** Whether residue counts agree, a count of 0 being the same as no count. */
+function sameCounts(a: Readonly<Record<string, number>>, b: Readonly<Record<string, number>>): boolean {
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+  for (const key of keys) if ((a[key] ?? 0) !== (b[key] ?? 0)) return false;
+  return true;
 }
 
 /** Decodes the HSP records of ABI stream 1 (JSON Lines, docs/web/abi_v2.md §8). */

@@ -6,6 +6,7 @@ interface Service {
   fail(): Promise<never>;
   channel(): Promise<MessagePort>;
   bytes(): Promise<{ readonly data: Uint8Array }>;
+  pieces(): Promise<{ readonly id: string; readonly residues: readonly Uint8Array[] }>;
   hidden(): Promise<string>;
 }
 
@@ -23,8 +24,17 @@ class Impl implements Service {
     channel.port2.onmessage = (event) => channel.port2.postMessage(`echo ${String(event.data)}`);
     return channel.port1;
   }
+  /** The arrays that the last `bytes` and `pieces` returned, to see whether they were transferred. */
+  readonly returned: Uint8Array[] = [];
   async bytes() {
-    return { data: new Uint8Array([1, 2, 3]) };
+    const data = new Uint8Array([1, 2, 3]);
+    this.returned.push(data);
+    return { data };
+  }
+  async pieces() {
+    const residues = [new Uint8Array([65, 67]), new Uint8Array([71]), new Uint8Array(new ArrayBuffer(8), 2, 3)];
+    this.returned.push(...residues);
+    return { id: 'x', residues };
   }
   async hidden() {
     return 'secret';
@@ -39,8 +49,8 @@ afterEach(() => {
 function connect(service: Service | Promise<Service> = new Impl()) {
   const channel = new MessageChannel();
   open.push(channel.port1, channel.port2);
-  serveRpc(channel.port2, service, ['add', 'fail', 'channel', 'bytes']);
-  return rpcClient<Service>(channel.port1, ['add', 'fail', 'channel', 'bytes', 'hidden']);
+  serveRpc(channel.port2, service, ['add', 'fail', 'channel', 'bytes', 'pieces']);
+  return rpcClient<Service>(channel.port1, ['add', 'fail', 'channel', 'bytes', 'pieces', 'hidden']);
 }
 
 describe('rpc', () => {
@@ -48,6 +58,19 @@ describe('rpc', () => {
     const client = connect();
     expect(await client.add(2, 3)).toBe(5);
     expect(await client.bytes()).toEqual({ data: new Uint8Array([1, 2, 3]) });
+  });
+
+  it('transfers the typed arrays of a result and of an array in it when they own their buffers', async () => {
+    const impl = new Impl();
+    const client = connect(impl);
+    expect(await client.bytes()).toEqual({ data: new Uint8Array([1, 2, 3]) });
+    const got = await client.pieces();
+    expect(got.id).toBe('x');
+    expect(got.residues.map((bytes) => [...bytes])).toEqual([[65, 67], [71], [0, 0, 0]]);
+    const [data, first, second, view] = impl.returned;
+    expect([data!.byteLength, first!.byteLength, second!.byteLength]).toEqual([0, 0, 0]);
+    // A view into a larger buffer is copied, so the served object's buffer stays usable.
+    expect(view!.byteLength).toBe(3);
   });
 
   it('keeps the name and message of an error', async () => {

@@ -3,9 +3,10 @@
 // each of which returns a promise. Errors keep their name and message.
 //
 // Transfer rule for results: a MessagePort, and a typed array (a Uint8Array, or a column of
-// an HSP table) that owns its whole buffer
-// (at the top level or as a property of the result), are transferred instead of copied.
-// A served object must therefore return buffers that it does not keep.
+// an HSP table) that owns its whole buffer (at the top level, as a property of the result, or
+// as an element of an array that is a property of the result, such as the residues of
+// `readResidues`), are transferred instead of copied. A served object must therefore return
+// buffers that it does not keep.
 
 export interface RpcEndpoint {
   postMessage(message: unknown, transfer: Transferable[]): void;
@@ -130,7 +131,10 @@ function transferables(value: unknown): Transferable[] {
   };
   add(value);
   if (typeof value === 'object' && value !== null && !ArrayBuffer.isView(value)) {
-    for (const item of Object.values(value)) add(item);
+    for (const item of Object.values(value)) {
+      add(item);
+      if (Array.isArray(item)) for (const element of item) add(element);
+    }
   }
   return found;
 }

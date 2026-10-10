@@ -5,6 +5,7 @@ import type { CandidateTray } from '../application/candidates';
 import type { Coordinator } from '../application/coordinator';
 import type { SearchDraft } from '../application/draft';
 import type { HspId, ResultsBrowser } from '../application/results';
+import type { RunFiles } from '../application/run-files';
 import { formatCount } from './format';
 import { useStore } from './useStore';
 import AttentionPanel from './AttentionPanel.vue';
@@ -22,12 +23,14 @@ const props = defineProps<{
   candidates: CandidateTray;
   attention: Attention;
   usesFakeEngine: boolean;
+  runFiles: RunFiles;
 }>();
 const state = useStore(props.coordinator.state);
 const attentionState = useStore(props.attention.state);
 const trayState = useStore(props.candidates.state);
 const tab = ref<'search' | 'results' | 'candidates'>('search');
 const resultsPanel = ref<InstanceType<typeof ResultsPanel>>();
+const searchPanel = ref<InstanceType<typeof SearchPanel>>();
 /** The results tab's view, kept while the search tab is shown and when another run opens. */
 const resultsView = ref<ResultsView>('hits');
 
@@ -54,6 +57,13 @@ async function showCandidate(id: HspId): Promise<void> {
   const shown = await revealing;
   await nextTick();
   if (shown) resultsPanel.value?.showHsp(id);
+}
+
+/** "Edit Search" put a run's settings in the search form: the form is shown at its settings line, which says so. */
+async function showEditedSearch(): Promise<void> {
+  tab.value = 'search';
+  await nextTick();
+  searchPanel.value?.showSettings();
 }
 
 // A file dropped outside an input's drop zone would make the browser open it in place of
@@ -90,7 +100,7 @@ onUnmounted(() => {
   <main class="layout">
     <section class="primary">
       <!-- The search form stays mounted, so the next job keeps its edits while results are viewed. -->
-      <SearchPanel v-show="tab === 'search'" :draft="draft" :runs="state.runs" />
+      <SearchPanel v-show="tab === 'search'" ref="searchPanel" :draft="draft" :runs="state.runs" :run-files="runFiles" />
       <ResultsPanel
         v-if="tab === 'results'"
         ref="resultsPanel"
@@ -99,6 +109,8 @@ onUnmounted(() => {
         :results="results"
         :candidates="candidates"
         :runs="state.runs"
+        :run-files="runFiles"
+        @edit-search="showEditedSearch"
       />
       <!-- Kept mounted, as the search form: the extraction's choices and the order shown stay while other tabs are viewed. -->
       <CandidatesPanel v-show="tab === 'candidates'" :candidates="candidates" :state="trayState" @reveal="showCandidate" />

@@ -6,6 +6,8 @@ import { CandidateTray } from './application/candidates';
 import { Coordinator } from './application/coordinator';
 import { SearchDraft } from './application/draft';
 import { ResultsBrowser } from './application/results';
+import { RunFiles } from './application/run-files';
+import { threadLimit } from './domain/settings-file';
 import type { Downloader } from './ports/download';
 import type { EngineGateway } from './ports/engine';
 import { browserPage } from './infra/browser/page';
@@ -27,6 +29,8 @@ export interface App {
   readonly attention: Attention;
   /** True while the engine is the FakeEngine; the UI shows a warning banner. */
   readonly usesFakeEngine: boolean;
+  /** Settings files, "Edit Search", and the input FASTA of runs (application/run-files.ts). */
+  readonly runFiles: RunFiles;
 }
 
 export interface AppOptions {
@@ -77,5 +81,6 @@ export function createApp(options: AppOptions = {}): App {
     probe: () => data.storageInfo(),
     now: () => Date.now(),
   });
-  return { coordinator, draft, results, candidates, attention, usesFakeEngine: ENGINE_ASSETS === null };
+  const runFiles = new RunFiles({ draft, downloader, maxThreads: () => threadLimit(navigator.hardwareConcurrency) });
+  return { coordinator, draft, results, candidates, attention, usesFakeEngine: ENGINE_ASSETS === null, runFiles };
 }

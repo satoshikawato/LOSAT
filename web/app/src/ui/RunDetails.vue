@@ -1,17 +1,19 @@
 <script setup lang="ts">
 // The details of a run (plan §5.2, §5.8): its verification badge, what was fixed when it
-// was queued (RunSnapshot), what happened when it ran (RunRecord), the CLI command of each
-// output format, and the warnings that the CLI writes to standard error.
+// was queued (RunSnapshot), what happened when it ran (RunRecord), how to reproduce it (the CLI
+// commands, the NCBI commands to compare with, its input FASTA and settings: ReproducePanel), and
+// the warnings that the CLI writes to standard error.
 import { computed } from 'vue';
 import type { RunView } from '../application/coordinator';
 import type { LoadedRun } from '../application/results';
-import { toShellCommand } from '../domain/argv';
+import type { RunFiles } from '../application/run-files';
 import { programById } from '../domain/programs';
 import CommandText from './CommandText.vue';
 import { formatBytes, formatCount, formatDateTime, formatDuration } from './format';
+import ReproducePanel from './ReproducePanel.vue';
 import VerificationBadge from './VerificationBadge.vue';
 
-const props = defineProps<{ run: RunView; loaded: LoadedRun }>();
+const props = defineProps<{ run: RunView; loaded: LoadedRun; runFiles: RunFiles }>();
 const snapshot = computed(() => props.run.snapshot);
 const record = computed(() => props.run.record);
 /** A time in ISO 8601 form, local time (S13 screen review L5: "09/10/2026" read either way). */
@@ -86,14 +88,7 @@ const inputs = computed(() => [
       </dl>
     </div>
 
-    <h3>Command line</h3>
-    <p class="muted small">The LOSAT command that writes each output from the same inputs.</p>
-    <ul class="commands">
-      <li v-for="format in loaded.description.formats" :key="format">
-        outfmt {{ format }}: <code :data-testid="`run-command-${format}`"><CommandText :text="toShellCommand(snapshot.argv, format)" /></code>
-      </li>
-    </ul>
-    <p v-for="(line, i) in loaded.badge.exceptions" :key="i" class="notice">{{ line }}</p>
+    <ReproducePanel :run="run" :formats="loaded.description.formats" :run-files="runFiles" />
 
     <h3>Warnings</h3>
     <pre v-if="loaded.diagnostics !== ''" class="output" data-testid="run-diagnostics">{{ loaded.diagnostics }}</pre>

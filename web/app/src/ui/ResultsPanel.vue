@@ -10,6 +10,7 @@ import { computed, nextTick, onUnmounted, ref, watch } from 'vue';
 import type { CandidateTray } from '../application/candidates';
 import type { Coordinator, RunView } from '../application/coordinator';
 import type { HspId, ResultsBrowser } from '../application/results';
+import type { RunFiles } from '../application/run-files';
 import { programById, residueUnit } from '../domain/programs';
 import { useStore } from './useStore';
 import AlignmentsView from './AlignmentsView.vue';
@@ -28,7 +29,15 @@ import VerificationBadge from './VerificationBadge.vue';
 
 export type ResultsView = 'hits' | 'graphic' | 'alignment' | 'dotplot' | 'details' | 'outputs';
 
-const props = defineProps<{ coordinator: Coordinator; results: ResultsBrowser; candidates: CandidateTray; runs: readonly RunView[] }>();
+const props = defineProps<{
+  coordinator: Coordinator;
+  results: ResultsBrowser;
+  candidates: CandidateTray;
+  runs: readonly RunView[];
+  runFiles: RunFiles;
+}>();
+/** "Edit Search" put the run's settings in the search form: the main view shows the Search tab. */
+const emit = defineEmits<{ 'edit-search': [] }>();
 /** The tab shown. The main view keeps it, so that another run, or the results shown again, open on the same tab. */
 const view = defineModel<ResultsView>('view', { default: 'hits' });
 const state = useStore(props.results.state);
@@ -138,6 +147,14 @@ const plural = (count: number, one: string) => `${formatCount(count)} ${count ==
 /** "Results for" (the query list) is for runs of more than one query, as NCBI's. */
 const multiQuery = computed(() => (loaded.value?.run.snapshot.query.records.length ?? 0) > 1);
 
+/**
+ * NCBI's "Edit Search" (W4b decision 18): the run's settings and Job Title go to the search form,
+ * which keeps its inputs; nothing is searched (application/run-files.ts).
+ */
+async function editSearch(run: RunView): Promise<void> {
+  if (await props.runFiles.editSearch(run)) emit('edit-search');
+}
+
 /** "Show alignment" of the Graphic Summary and the Dot Plot: the Alignments tab, with the HSP's Range in view. */
 async function toAlignments(id: HspId): Promise<void> {
   view.value = 'alignment';
@@ -151,6 +168,9 @@ async function toAlignments(id: HspId): Promise<void> {
     <h2 ref="heading" tabindex="-1" data-testid="results-heading">Results</h2>
     <p v-if="runs.length === 0" class="muted" data-testid="results-empty">No runs yet. Searches appear here when they complete.</p>
     <template v-else>
+      <p v-if="selected" class="results-links">
+        <button type="button" class="link" data-testid="edit-search" @click="editSearch(selected)">Edit Search</button>
+      </p>
       <div class="results-top">
         <dl class="results-summary" data-testid="results-summary">
           <template v-if="selected?.snapshot.title">
@@ -261,7 +281,7 @@ async function toAlignments(id: HspId): Promise<void> {
             <HspTable :results="results" :state="state" />
           </template>
         </div>
-        <RunDetails v-if="view === 'details'" :run="loaded.run" :loaded="loaded" />
+        <RunDetails v-if="view === 'details'" :run="loaded.run" :loaded="loaded" :run-files="runFiles" />
         <OutputsView v-if="view === 'outputs'" :coordinator="coordinator" :run="loaded.run" />
       </template>
     </template>

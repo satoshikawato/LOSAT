@@ -8,7 +8,16 @@
 // TBLASTN dot plot. S14 added 24 to 28: the Descriptions' marks, the Alignments with a Range "In
 // candidates", the popup of a TBLASTN HSP (a W4b state not recorded before), the candidate tray
 // with candidates of two runs, notes and Origins, and the tray after an extraction cut at a
-// record's end.
+// record's end. S15 (W6) added 29 to 40 in a test of their own, after which the states 01 to 28
+// change only where W6 changed the screen (the tray's Subject ID on phones, the notice on a source
+// read again, the reproduction panel in Run details, the Outputs tab's "LOSAT Web formats", the
+// dot plot's "Download SVG"): the Outputs tab after a CSV export, Run details with the
+// reproduction panel of a run with a subject record left out and of a TBLASTN run with genetic
+// code 4, the search form after "Load settings..." with an item not applied, the session panel
+// before saving, the queue and the results header after opening a session file, Run details of a
+// loaded run without its originals, the tray's extract form that needs the original FASTA, a
+// refused session file, Run details after a refused and an accepted re-attachment, the search form
+// after Edit Search, and two W5 states not recorded before: the empty tray and a flank error.
 import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
@@ -462,5 +471,165 @@ for (const size of SIZES) {
     await shoot(page, browserName, size.name, '18-results-open-from-queue-window', false);
     await queued.getByRole('button', { name: 'Cancel' }).click();
     await running.getByRole('button', { name: 'Cancel' }).first().click();
+  });
+}
+
+// --- outputs, reproduction and session files (S15) -------------------------------------------
+
+/** The bytes of the file that clicking a button saves (the browser's download). */
+async function saveDownload(page: Page, testid: string): Promise<Buffer> {
+  const download = page.waitForEvent('download');
+  await page.getByTestId(testid).click();
+  return readFileSync((await (await download).path())!);
+}
+
+/** A FASTA text with one residue changed: the `at`-th letter (0-based) of the record after `title`'s line. */
+function oneResidueChanged(text: string, title: string, at: number): string {
+  const start = text.indexOf('\n', text.indexOf(`>${title}`)) + 1;
+  let position = start;
+  for (let letters = 0; ; position++) {
+    if (text[position] === '\n') continue;
+    if (letters++ === at) break;
+  }
+  const letter = text[position]!;
+  return text.slice(0, position) + (letter.toUpperCase() === 'A' ? 'C' : 'A') + text.slice(position + 1);
+}
+
+for (const size of SIZES) {
+  test(`outputs, reproduction and session files at the ${size.name} size`, async ({ page, browserName }) => {
+    await page.setViewportSize({ width: size.width, height: size.height });
+    await page.goto('/');
+    await expect(page.getByTestId('storage-status')).toBeVisible();
+    const multiQuery = fasta('outfmt0/multi_query.fasta');
+    const multiSubject = fasta('outfmt0/multi_subject.fasta');
+
+    // Run 1: BLASTN of three queries against six subjects with the fifth (msE) left out; run 2:
+    // TBLASTN with genetic code 4 for the subject.
+    await program(page, 'blastn');
+    await openFiles(page, 'query', [{ name: 'multi_query.fasta', text: multiQuery }]);
+    await openFiles(page, 'subject', [{ name: 'multi_subject.fasta', text: multiSubject }]);
+    await showRecords(page, 'subject');
+    await page.getByTestId('subject-source-0-record-4').uncheck();
+    await expect(page.getByTestId('subject-source-0-summary')).toContainText('(5 included)');
+    await page.getByTestId('job-title').fill('Five of six subjects');
+    await submit(page);
+    await waitStatus(page, 1, 'completed');
+    await page.getByTestId('job-title').fill('');
+    await clearInputs(page);
+    await program(page, 'tblastn');
+    await openFiles(page, 'query', [{ name: 'e2e_protein_query.faa', text: fasta('outfmt0/e2e_protein_query.faa') }]);
+    await openFiles(page, 'subject', [{ name: 'e2e_amb_subject.fna', text: fasta('outfmt0/e2e_amb_subject.fna') }]);
+    await openParameters(page);
+    await page.getByTestId('param-db_gencode').selectOption('4');
+    await submit(page);
+    await waitStatus(page, 2, 'completed');
+
+    // The Outputs tab after a CSV export of the whole run: the summary under "LOSAT Web formats".
+    await openResults(page, 1);
+    await page.getByTestId('results-view-outputs').click();
+    await expect(page.getByTestId('result-output')).toHaveAttribute('data-shown', '1:6');
+    await saveDownload(page, 'export-csv');
+    await expect(page.getByTestId('export-summary')).toHaveAttribute('data-format', 'csv');
+    await shoot(page, browserName, size.name, '29-results-outputs-own-formats');
+
+    // Run details: how to reproduce run 1 (a subject record left out) and run 2 (genetic code 4: the approved exception).
+    await page.getByTestId('results-view-details').click();
+    await expect(page.getByTestId('run-reproduce')).toBeVisible();
+    await expect(page.getByTestId('run-input-file-subject')).toContainText('multi_subject.fasta');
+    await shoot(page, browserName, size.name, '30-results-run-details-reproduce');
+    await openResults(page, 2);
+    await page.getByTestId('results-view-details').click();
+    await expect(page.getByTestId('run-ncbi-exception')).toBeVisible();
+    await shoot(page, browserName, size.name, '30b-results-run-details-reproduce-gencode');
+
+    // "Load settings...": a BLASTN file with a query region, which a query of three records cannot take.
+    await page.getByTestId('tab-search').click();
+    await clearInputs(page);
+    await program(page, 'blastn');
+    await openFiles(page, 'query', [{ name: 'multi_query.fasta', text: multiQuery }]);
+    await openFiles(page, 'subject', [{ name: 'multi_subject.fasta', text: multiSubject }]);
+    const settings = JSON.parse((await saveDownload(page, 'settings-save')).toString('utf8')) as { options: string[] };
+    settings.options.push('-query_loc', '3-40');
+    await page.getByTestId('settings-load').setInputFiles({
+      name: 'losat-settings-blastn.json',
+      mimeType: 'application/json',
+      buffer: Buffer.from(JSON.stringify(settings)),
+    });
+    await expect(page.getByTestId('settings-message')).toContainText('Not applied: -query_loc 3-40');
+    await shoot(page, browserName, size.name, '31-search-settings-loaded-not-applied');
+
+    // The session panel before saving, with candidates of run 1 and a note.
+    await openResults(page, 1);
+    await page.getByTestId('results-view-hits').click();
+    await page.getByTestId('descriptions-select-all').check();
+    await page.getByTestId('descriptions-add-candidates').click();
+    await expect(page.getByTestId('candidates-added')).toContainText('added to Candidates');
+    await page.getByTestId('tab-candidates').click();
+    await page.getByTestId('candidate-note-1').fill('check the minus-strand copy');
+    await expect(page.getByTestId('candidates-added')).toHaveCount(0, { timeout: 10_000 });
+    await page.getByTestId('session-panel').scrollIntoViewIfNeeded();
+    await shoot(page, browserName, size.name, '32-session-panel-before-saving');
+    const session = await saveDownload(page, 'session-save');
+    await expect(page.getByTestId('session-message')).toContainText('Saved ');
+
+    // A new working session: the empty tray (a W5 state), then a refused session file.
+    await page.reload();
+    await expect(page.getByTestId('storage-status')).toBeVisible();
+    await page.getByTestId('tab-candidates').click();
+    await expect(page.getByTestId('candidates-empty')).toBeVisible();
+    await shoot(page, browserName, size.name, '39-candidates-empty');
+    const openSession = async (name: string, buffer: Buffer) => {
+      await page.getByTestId('session-file').setInputFiles({ name, mimeType: 'application/gzip', buffer });
+      await expect(page.getByTestId('session-message')).toBeVisible({ timeout: 60_000 });
+    };
+    await openSession('cut.losat-session.gz', session.subarray(0, Math.floor(session.length / 2)));
+    await expect(page.getByTestId('session-message')).toHaveAttribute('data-error', 'true');
+    await page.getByTestId('session-panel').scrollIntoViewIfNeeded();
+    await shoot(page, browserName, size.name, '36-session-refused');
+
+    // The session opened: the queue says where the runs come from, and so does the results header.
+    await openSession('w6-states.losat-session.gz', session);
+    await expect(page.getByTestId('session-message')).toHaveAttribute('data-error', 'false', { timeout: 60_000 });
+    await expect(page.getByTestId('run-2-origin')).toBeVisible();
+    await openResults(page, 1);
+    await expect(page.getByTestId('results-origin')).toBeVisible();
+    await shoot(page, browserName, size.name, '33-session-opened-queue-results-origin');
+
+    // Run details of a loaded run, its originals not attached.
+    await page.getByTestId('results-view-details').click();
+    await expect(page.getByTestId('run-original-subject')).toHaveAttribute('data-attached', 'false');
+    await shoot(page, browserName, size.name, '34-results-run-details-loaded');
+
+    // The tray's extract form: the sequences need the original FASTA; then a flank that is not a number (a W5 state).
+    await page.getByTestId('tab-candidates').click();
+    await expect(page.getByTestId('extract-originals')).toBeVisible();
+    await page.getByTestId('extract-form').scrollIntoViewIfNeeded();
+    await shoot(page, browserName, size.name, '35-candidates-extract-needs-original');
+    await page.getByTestId('extract-region-flanked').check();
+    await page.getByTestId('extract-flank-left').fill('-5');
+    await expect(page.getByTestId('extract-flank-error')).toBeVisible();
+    await shoot(page, browserName, size.name, '40-candidates-flank-error');
+    await page.getByTestId('extract-flank-left').fill('0');
+
+    // Run details after re-attachment: the subject refused with one residue changed, then accepted;
+    // the query refused (its message stays).
+    await openResults(page, 1);
+    await page.getByTestId('results-view-details').click();
+    const attach = (role: string, name: string, text: string | Buffer) =>
+      page.getByTestId(`run-attach-${role}-files`).setInputFiles({ name, mimeType: 'text/plain', buffer: Buffer.from(text) });
+    await attach('subject', 'multi_subject.fasta', oneResidueChanged(multiSubject.toString('utf8'), 'msA', 100));
+    await expect(page.getByTestId('run-attach-subject-message')).toBeVisible();
+    await attach('subject', 'multi_subject.fasta', multiSubject);
+    await expect(page.getByTestId('run-original-subject')).toHaveAttribute('data-attached', 'true');
+    await attach('query', 'multi_query.fasta', oneResidueChanged(multiQuery.toString('utf8'), 'mq1', 10));
+    await expect(page.getByTestId('run-attach-query-message')).toBeVisible();
+    await shoot(page, browserName, size.name, '37-results-run-details-reattached');
+
+    // Edit Search of run 2: its settings in the search form, and the message that says so.
+    await openResults(page, 2);
+    await page.getByTestId('edit-search').click();
+    await expect(page.getByTestId('tab-search')).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByTestId('settings-message')).toContainText('The search form has the settings of Run 2.');
+    await shoot(page, browserName, size.name, '38-search-after-edit-search');
   });
 }

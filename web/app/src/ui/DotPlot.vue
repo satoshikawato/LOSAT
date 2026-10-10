@@ -12,8 +12,10 @@
 // scroll the page (S13 screen review L4). The grid and the HSPs are drawn on a base canvas, the
 // HSPs by colour and opacity class, one stroke each; hover and selection on a canvas above it, so
 // that they redraw cheaply. Input is gathered and drawn once per animation frame. A TBLASTN or
-// BLASTX plot counts 3 nt per aa for its proportions (S13b decision 26).
+// BLASTX plot counts 3 nt per aa for its proportions (S13b decision 26). The popup of the
+// selected HSP adds it to the candidate tray (S14).
 import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, useId, watch } from 'vue';
+import { candidateKey } from '../application/candidates';
 import type { HspEntry, HspId, ResultsBrowser, ResultsState } from '../application/results';
 import {
   clipToBox,
@@ -37,8 +39,13 @@ import { axisTicks, axisUnit, identityClass, IDENTITY_CLASSES, tickLabel, type A
 import { formatCount, framesLabel, framesPhrase, framesText } from './format';
 import './plots.css';
 
-const props = defineProps<{ results: ResultsBrowser; state: ResultsState }>();
-const emit = defineEmits<{ 'show-alignment': [id: HspId] }>();
+const props = defineProps<{
+  results: ResultsBrowser;
+  state: ResultsState;
+  /** The keys of the HSPs in the candidate tray. */
+  inTray: ReadonlySet<string>;
+}>();
+const emit = defineEmits<{ 'show-alignment': [id: HspId]; 'add-candidates': [ids: readonly HspId[]] }>();
 
 /** blast2dotplot.py's colours: the same direction, opposite directions; grey for a BLASTN HSP of one letter. */
 const COLORS = { forward: '#1f77b4', reverse: '#ff7f0e', unknown: '#7f7f7f' } as const;
@@ -617,6 +624,14 @@ function showAlignment(): void {
   emit('show-alignment', hsp.id);
 }
 
+const selectedInTray = computed(() => selected.value !== undefined && props.inTray.has(candidateKey(selected.value.id)));
+
+/** Adds the selected HSP to the candidate tray; the popup stays open and says "In candidates" (the button keeps the focus). */
+function addSelected(): void {
+  const hsp = selected.value;
+  if (hsp !== undefined && !selectedInTray.value) emit('add-candidates', [hsp.id]);
+}
+
 /**
  * Puts the popup beside the selected line as the frame shows it, off one of its ends, leaving its
  * midpoint uncovered, within the canvas's height and the stage's width (W4b screen review L10);
@@ -779,6 +794,9 @@ const viewText = computed(() => [view.value.x0, view.value.x1, view.value.y0, vi
           </div>
           <div class="plot-popup-actions">
             <button type="button" data-testid="dotplot-popup-alignment" @click="showAlignment">Show alignment</button>
+            <button type="button" :aria-disabled="selectedInTray" data-testid="dotplot-popup-add" @click="addSelected">
+              {{ selectedInTray ? 'In candidates' : 'Add to candidates' }}
+            </button>
             <button type="button" data-testid="dotplot-popup-close" @click="closePopup(true)">Close</button>
           </div>
         </dialog>

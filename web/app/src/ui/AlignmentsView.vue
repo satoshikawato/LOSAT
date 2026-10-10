@@ -9,14 +9,24 @@
 // A pair may have thousands of HSPs: the blocks are the selected Range and up to 25 on each side
 // (more on request), and a block reads its section only when it comes into view. Sections that
 // arrive in the same frame are shown together, so that the page is measured once a frame.
-import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
+//
+// Where NCBI has "Download" in the subject's block and "GenBank" and "Graphics" beside each
+// Range, LOSAT adds the HSPs to the candidate tray: all of the subject's ("Add all matches to
+// candidates"), or the Range's ("Add to candidates", "In candidates" once there; S14).
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, shallowRef, watch } from 'vue';
+import { candidateKey } from '../application/candidates';
 import { sameHsp, type HspId, type RangeEntry, type ResultsBrowser, type ResultsState } from '../application/results';
 import { windowAround } from '../domain/result-index';
 import { formatCount } from './format';
 import HspTable from './HspTable.vue';
 
-const props = defineProps<{ results: ResultsBrowser; state: ResultsState }>();
-const emit = defineEmits<{ descriptions: [] }>();
+const props = defineProps<{
+  results: ResultsBrowser;
+  state: ResultsState;
+  /** The keys of the HSPs in the candidate tray. */
+  inTray: ReadonlySet<string>;
+}>();
+const emit = defineEmits<{ descriptions: []; 'add-candidates': [ids: readonly HspId[]] }>();
 
 /** Ranges shown on each side of the selected one, and added by "Show earlier/later matches". */
 const REACH = 25;
@@ -31,6 +41,29 @@ const detail = computed(() => props.state.detail);
 const entry = computed(() => props.state.hsps.find((hsp) => sameHsp(hsp.id, detail.value?.id)));
 const limitGiven = computed(() => props.state.loaded?.run.snapshot.argv.includes('-max_target_seqs') ?? false);
 
+/**
+ * Every HSP of the subject in this query, whatever the view filters show (a subject is added
+ * whole): listed again only for another subject, not at each change of the results' state.
+ */
+const subjectHsps = shallowRef<readonly HspId[]>([]);
+watch(
+  [() => props.state.loaded, () => props.state.qIdx, () => props.state.sIdx],
+  ([, qIdx, sIdx]) => (subjectHsps.value = qIdx === undefined || sIdx === undefined ? [] : props.results.hspIdsOfSubject(qIdx, sIdx)),
+  { immediate: true },
+);
+const subjectInTray = computed(() => subjectHsps.value.length > 0 && subjectHsps.value.every((id) => props.inTray.has(candidateKey(id))));
+const isInTray = (id: HspId) => props.inTray.has(candidateKey(id));
+
+/** Adds HSPs; a button that already says "In candidates" does nothing (it keeps the focus, so it is not disabled). */
+function add(ids: readonly HspId[], already: boolean): void {
+  if (!already) emit('add-candidates', ids);
+}
+
+/** Why the selected HSP's view filters were cleared ("Show in results" of a candidate), while it stays selected. */
+const revealedMessage = computed(() => {
+  const revealed = props.state.revealed;
+  return revealed?.message !== undefined && sameHsp(revealed.id, props.state.hsp) ? revealed.message : undefined;
+});
 /** The subject's heading in outfmt 0, as written: read with the selected HSP, or for the Descriptions. */
 const heading = computed(() => {
   const sIdx = props.state.sIdx;
@@ -240,6 +273,14 @@ const sectionState = (range: RangeEntry): 'pending' | 'ready' | 'failed' => {
             Next
           </button>
           <button type="button" data-testid="alignments-descriptions" @click="emit('descriptions')">Descriptions</button>
+          <button
+            type="button"
+            :aria-disabled="subjectInTray"
+            data-testid="alignments-add-subject"
+            @click="add(subjectHsps, subjectInTray)"
+          >
+            {{ subjectInTray ? 'All matches in candidates' : 'Add all matches to candidates' }}
+          </button>
         </span>
       </div>
       <pre v-if="heading !== undefined" class="output subject-heading" data-testid="detail-heading">{{ heading }}</pre>
@@ -264,7 +305,18 @@ const sectionState = (range: RangeEntry): 'pending' | 'ready' | 'failed' => {
         :data-n="range.n"
       >
         <div class="range-head">
-          <h4 class="range-label" tabindex="-1" data-testid="range-label">Range {{ range.n }}: {{ range.from }} to {{ range.to }}</h4>
+          <div class="range-title">
+            <h4 class="range-label" tabindex="-1" data-testid="range-label">Range {{ range.n }}: {{ range.from }} to {{ range.to }}</h4>
+            <button
+              type="button"
+              class="link"
+              :aria-disabled="isInTray(range.id)"
+              :data-testid="`range-add-${key(range.id)}`"
+              @click="add([range.id], isInTray(range.id))"
+            >
+              {{ isInTray(range.id) ? 'In candidates' : 'Add to candidates' }}
+            </button>
+          </div>
           <span class="range-buttons">
             <button
               type="button"
@@ -298,6 +350,7 @@ const sectionState = (range: RangeEntry): 'pending' | 'ready' | 'failed' => {
           :data-hsp="`${detail.id.qIdx}:${detail.id.rank}`"
           :data-state="detail.state"
         >
+          <p v-if="revealedMessage" class="notice" data-testid="revealed-message">{{ revealedMessage }}</p>
           <p v-if="entry?.orientation === 'unknown'" class="notice" data-testid="detail-strand-note">
             This HSP covers one letter of each sequence, so its coordinates do not show its strand, and the HSP record does not hold
             it. The <code>Strand=</code> line of its outfmt 0 section below shows it.

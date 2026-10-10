@@ -4,17 +4,21 @@
 // the values (docs/web/ncbi_ui_mapping.md "Descriptions"): the values of the subject's first HSP as
 // outfmt 6 wrote them (the HSP whose score outfmt 0's description table shows), the title of its
 // outfmt 0 heading, counts, and the subject's ID last (NCBI's Accession). Sorting uses the
-// engine's values; ties keep the engine's order.
+// engine's values; ties keep the engine's order. As NCBI's, each row has a mark beside it (a
+// check box of its own: the row stays one button that selects the subject), with "select all"
+// and the count of marked rows; "Add to candidates" adds every HSP of the marked subjects in
+// this query (S14).
 import { computed, onMounted, ref, watch } from 'vue';
-import type { ResultsBrowser, ResultsState, SubjectEntry } from '../application/results';
+import type { HspId, ResultsBrowser, ResultsState, SubjectEntry } from '../application/results';
 import { headingTitle } from '../domain/outfmt0';
 import type { SubjectSortKey } from '../domain/result-index';
-import { formatCount } from './format';
+import { formatCount, formatCounted } from './format';
 import SortButton from './SortButton.vue';
 import { focusPressed, useSideScroll } from './useSideScroll';
 import VirtualRows from './VirtualRows.vue';
 
 const props = defineProps<{ results: ResultsBrowser; state: ResultsState }>();
+const emit = defineEmits<{ 'add-candidates': [ids: readonly HspId[]] }>();
 const ROW_PX = 28;
 const MAX_ROWS = 10;
 const selectedPosition = computed(() => props.state.subjects.findIndex((subject) => subject.sIdx === props.state.sIdx));
@@ -73,6 +77,14 @@ function measureIds(): void {
 onMounted(measureIds);
 watch(() => props.state.subjects, measureIds, { flush: 'post' });
 
+/** "select all" is checked when every listed subject is marked, and mixed when some are. */
+const allMarked = computed(() => props.state.subjects.length > 0 && props.state.marked.size === props.state.subjects.length);
+const someMarked = computed(() => props.state.marked.size > 0 && !allMarked.value);
+
+function mark(sIdx: number, event: Event): void {
+  props.results.markSubjects([sIdx], (event.target as HTMLInputElement).checked);
+}
+
 function description(sIdx: number, inOutfmt0: boolean): string {
   if (!inOutfmt0) return 'not in outfmt 0';
   const heading = props.state.headings.get(sIdx);
@@ -87,10 +99,31 @@ function description(sIdx: number, inOutfmt0: boolean): string {
         Sequences producing significant alignments
         <span class="muted small" data-testid="subject-count">{{ formatCount(state.subjects.length) }} shown</span>
       </h3>
+      <div class="descriptions-tools">
+        <label class="check">
+          <input
+            type="checkbox"
+            :checked="allMarked"
+            :indeterminate="someMarked"
+            data-testid="descriptions-select-all"
+            @change="results.markAll(($event.target as HTMLInputElement).checked)"
+          />
+          select all
+        </label>
+        <span class="muted" data-testid="descriptions-selected" aria-live="polite">{{ formatCounted(state.marked.size, 'sequence') }} selected</span>
+        <button
+          type="button"
+          :disabled="state.marked.size === 0"
+          data-testid="descriptions-add-candidates"
+          @click="emit('add-candidates', results.markedHspIds())"
+        >
+          Add to candidates
+        </button>
+      </div>
     </div>
     <p v-if="sideScroll" class="table-hint muted small" data-testid="subject-table-scroll-hint">Scroll the table sideways for more columns →</p>
     <div ref="scroller" class="table-scroll" :style="{ '--row-gutter': `${gutter}px`, '--id-width': idWidth }">
-      <div class="table-head subject-grid" role="row">
+      <div class="table-head subject-grid marked-head" role="row">
         <SortButton class="num-head" data-col="order" label="#" sort-key="order" :sort="state.subjectSort" scope="subject" @sort="sortBy" />
         <span data-col="description" role="columnheader">Description</span>
         <SortButton
@@ -139,33 +172,47 @@ function description(sIdx: number, inOutfmt0: boolean): string {
         @gutter="gutter = $event"
       >
         <template #row="{ position }">
-          <button
+          <div
             v-for="subject in [state.subjects[position]!]"
             :key="subject.sIdx"
-            type="button"
-            class="table-row subject-grid"
+            class="marked-line"
             :class="{ selected: subject.sIdx === state.sIdx }"
-            :aria-pressed="subject.sIdx === state.sIdx"
-            :data-testid="`subject-row-${subject.sIdx}`"
-            :data-order="subject.order"
-            @mousedown="focusPressed"
-            @click="results.selectSubject(subject.sIdx)"
           >
-            <span class="num" data-field="order" :title="String(subject.order)">{{ subject.order }}</span>
-            <span
-              :class="{ muted: !subject.inOutfmt0 }"
-              :title="description(subject.sIdx, subject.inOutfmt0)"
-              data-field="description"
-              >{{ description(subject.sIdx, subject.inOutfmt0) }}</span
+            <label class="row-mark">
+              <input
+                type="checkbox"
+                :checked="state.marked.has(subject.sIdx)"
+                :aria-label="`Select ${subject.first.sseqid}`"
+                :data-testid="`subject-mark-${subject.sIdx}`"
+                @change="mark(subject.sIdx, $event)"
+              />
+            </label>
+            <button
+              type="button"
+              class="table-row subject-grid"
+              :class="{ selected: subject.sIdx === state.sIdx }"
+              :aria-pressed="subject.sIdx === state.sIdx"
+              :data-testid="`subject-row-${subject.sIdx}`"
+              :data-order="subject.order"
+              @mousedown="focusPressed"
+              @click="results.selectSubject(subject.sIdx)"
             >
-            <span class="num" data-field="bitscore" :title="subject.first.bitscore">{{ subject.first.bitscore }}</span>
-            <span class="num" data-field="evalue" :title="subject.first.evalue">{{ subject.first.evalue }}</span>
-            <span class="num" data-field="hsps" :title="hspCount(subject) + (subject.atHspLimit ? ' max' : '')">
-              {{ hspCount(subject) }}<span v-if="subject.atHspLimit" class="badge" title="The subject has as many HSPs as -max_hsps keeps">max</span>
-            </span>
-            <span class="num" data-field="length" :title="formatCount(subject.length)">{{ formatCount(subject.length) }}</span>
-            <span :title="subject.first.sseqid" data-field="sseqid">{{ subject.first.sseqid }}</span>
-          </button>
+              <span class="num" data-field="order" :title="String(subject.order)">{{ subject.order }}</span>
+              <span
+                :class="{ muted: !subject.inOutfmt0 }"
+                :title="description(subject.sIdx, subject.inOutfmt0)"
+                data-field="description"
+                >{{ description(subject.sIdx, subject.inOutfmt0) }}</span
+              >
+              <span class="num" data-field="bitscore" :title="subject.first.bitscore">{{ subject.first.bitscore }}</span>
+              <span class="num" data-field="evalue" :title="subject.first.evalue">{{ subject.first.evalue }}</span>
+              <span class="num" data-field="hsps" :title="hspCount(subject) + (subject.atHspLimit ? ' max' : '')">
+                {{ hspCount(subject) }}<span v-if="subject.atHspLimit" class="badge" title="The subject has as many HSPs as -max_hsps keeps">max</span>
+              </span>
+              <span class="num" data-field="length" :title="formatCount(subject.length)">{{ formatCount(subject.length) }}</span>
+              <span :title="subject.first.sseqid" data-field="sseqid">{{ subject.first.sseqid }}</span>
+            </button>
+          </div>
         </template>
       </VirtualRows>
     </div>

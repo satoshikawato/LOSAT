@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { nextTick, onMounted, onUnmounted, ref } from 'vue';
 import type { Attention } from '../application/attention';
+import type { CandidateTray } from '../application/candidates';
 import type { Coordinator } from '../application/coordinator';
 import type { SearchDraft } from '../application/draft';
-import type { ResultsBrowser } from '../application/results';
+import type { HspId, ResultsBrowser } from '../application/results';
+import { formatCount } from './format';
 import { useStore } from './useStore';
 import AttentionPanel from './AttentionPanel.vue';
+import CandidatesPanel from './CandidatesPanel.vue';
 import QueuePanel from './QueuePanel.vue';
 import ResultsPanel, { type ResultsView } from './ResultsPanel.vue';
 import ResumeNotice from './ResumeNotice.vue';
@@ -16,12 +19,14 @@ const props = defineProps<{
   coordinator: Coordinator;
   draft: SearchDraft;
   results: ResultsBrowser;
+  candidates: CandidateTray;
   attention: Attention;
   usesFakeEngine: boolean;
 }>();
 const state = useStore(props.coordinator.state);
 const attentionState = useStore(props.attention.state);
-const tab = ref<'search' | 'results'>('search');
+const trayState = useStore(props.candidates.state);
+const tab = ref<'search' | 'results' | 'candidates'>('search');
 const resultsPanel = ref<InstanceType<typeof ResultsPanel>>();
 /** The results tab's view, kept while the search tab is shown and when another run opens. */
 const resultsView = ref<ResultsView>('hits');
@@ -36,6 +41,19 @@ async function openResults(runId: string): Promise<void> {
   void props.results.open(runId);
   await nextTick();
   resultsPanel.value?.showHeading();
+}
+
+/**
+ * "Show in results" of a candidate (REQ-14): its run, query, subject and HSP are selected (the
+ * view filters that hide it are cleared), and the Alignments show its Range with the focus on it.
+ */
+async function showCandidate(id: HspId): Promise<void> {
+  const revealing = props.results.reveal(id);
+  resultsView.value = 'alignment';
+  tab.value = 'results';
+  const shown = await revealing;
+  await nextTick();
+  if (shown) resultsPanel.value?.showHsp(id);
 }
 
 // A file dropped outside an input's drop zone would make the browser open it in place of
@@ -65,6 +83,9 @@ onUnmounted(() => {
   <nav class="tabs main-tabs" aria-label="Main">
     <button :aria-pressed="tab === 'search'" data-testid="tab-search" @click="tab = 'search'">Search</button>
     <button :aria-pressed="tab === 'results'" data-testid="tab-results" @click="tab = 'results'">Results</button>
+    <button :aria-pressed="tab === 'candidates'" data-testid="tab-candidates" @click="tab = 'candidates'">
+      Candidates <span class="tab-count" data-testid="tab-candidates-count">{{ formatCount(trayState.candidates.length) }}</span>
+    </button>
   </nav>
   <main class="layout">
     <section class="primary">
@@ -76,8 +97,11 @@ onUnmounted(() => {
         v-model:view="resultsView"
         :coordinator="coordinator"
         :results="results"
+        :candidates="candidates"
         :runs="state.runs"
       />
+      <!-- Kept mounted, as the search form: the extraction's choices and the order shown stay while other tabs are viewed. -->
+      <CandidatesPanel v-show="tab === 'candidates'" :candidates="candidates" :state="trayState" @reveal="showCandidate" />
     </section>
     <aside class="secondary">
       <QueuePanel :coordinator="coordinator" :runs="state.runs" @open-results="openResults" />

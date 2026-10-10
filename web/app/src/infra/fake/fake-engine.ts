@@ -91,7 +91,9 @@ export class FakeEngine implements EngineGateway {
    * and tested without the engine: up to 200 queries, each but every fourth with HSPs on
    * up to three subjects (the third subject is left out of outfmt 0, as subjects past
    * -num_alignments are), a reverse HSP and, for BLASTN, a one-letter HSP. Every text
-   * says that it is not a search result, and the values are marked FAKE.
+   * says that it is not a search result, and the values are marked FAKE. The first HSP of
+   * each pair has fake aligned rows (`fakeAlignedRows`), the second none, so that the
+   * candidate tray's alignment export meets both (S14).
    */
   private writeOutputs(request: EngineRunRequest, writer: RunOutputWriter): void {
     const encoder = new TextEncoder();
@@ -151,8 +153,9 @@ export class FakeEngine implements EngineGateway {
             query_frame: translated.query ? 1 : null,
             subject_frame: translated.subject ? (reverse ? -1 : 1) : null,
             subject_length: subject.length,
-            query_aligned: null,
-            subject_aligned: null,
+            ...(j === 0
+              ? alignedFields(fakeAlignedRows(qEnd - qStart + 1, sTo - sFrom + 1))
+              : { query_aligned: null, subject_aligned: null }),
             out6: [out6Start, length(out6)],
             out0: shown ? [sectionStart, length(out0)] : null,
             out0_subject: shown ? [headingStart, headingStart + length(heading)] : null,
@@ -174,6 +177,19 @@ export class FakeEngine implements EngineGateway {
     return new Promise((resolve) => setTimeout(resolve, this.phaseDelayMs));
   }
 }
+
+/**
+ * The FakeEngine's aligned rows of an HSP: "FAKE" repeated over the HSP's length on each
+ * sequence, the shorter row ended with gaps, so that the rows are as long as each other. They
+ * are not an alignment, and say so.
+ */
+export function fakeAlignedRows(queryLength: number, subjectLength: number): { readonly query: string; readonly subject: string } {
+  const width = Math.max(queryLength, subjectLength);
+  const row = (length: number) => 'FAKE'.repeat(Math.ceil(length / 4)).slice(0, length) + '-'.repeat(width - length);
+  return { query: row(queryLength), subject: row(subjectLength) };
+}
+
+const alignedFields = (rows: { readonly query: string; readonly subject: string }) => ({ query_aligned: rows.query, subject_aligned: rows.subject });
 
 /** The records of a role's input, read with the role's kind as the engine's `register` reads them. */
 function recordsOf(request: EngineRunRequest, role: InputRole) {

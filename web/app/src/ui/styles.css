@@ -1545,6 +1545,373 @@ pre.range-text {
   overflow-wrap: anywhere;
 }
 
+/* S14: the candidate tray and the controls that add to it (docs/web/ncbi_ui_mapping.md "候補（S14）"). */
+
+/* The main tab's count of candidates. */
+.tab-count {
+  display: inline-block;
+  min-width: 1.4em;
+  margin-left: 4px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--fg);
+  font-size: 0.85em;
+  text-align: center;
+}
+
+/* A check box and its words: a target of 24 px (WCAG 2.5.8). */
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+}
+
+.check input {
+  margin: 0;
+  flex: none;
+}
+
+/* A button that has nothing to do ("In candidates", Up on the first row) keeps the focus: it is
+   aria-disabled, not disabled, and looks it. */
+button[aria-disabled='true'] {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+button.link[aria-disabled='true'] {
+  opacity: 1;
+  color: var(--muted);
+  text-decoration: none;
+}
+
+/* The Descriptions' "select all", count of marked rows and "Add to candidates", under the heading as NCBI's. */
+.descriptions-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+  margin-top: 6px;
+  font-size: 0.92em;
+}
+
+/* A row with its mark: the check box in a 28 px column of its own, the row's button beside it
+   (one button that selects the subject, W4b). The line, not the button, shows the selection. */
+.marked-line {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  height: 100%;
+  border-bottom: 1px solid var(--panel);
+}
+
+.marked-line > .table-row {
+  border-bottom: none;
+}
+
+.marked-line.selected {
+  background: var(--accent-bg);
+  box-shadow: inset 3px 0 var(--accent);
+}
+
+.marked-line > .table-row.selected {
+  background: transparent;
+  box-shadow: none;
+}
+
+.row-mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  min-height: 24px;
+  cursor: pointer;
+}
+
+.row-mark input {
+  margin: 0;
+  flex: none;
+}
+
+/* The header's columns start where the rows' columns start, after the marks. */
+.table-head.marked-head {
+  padding-left: calc(8px + 28px);
+}
+
+/* The Alignments: "Add to candidates" beside the Range label, where NCBI has GenBank and Graphics. */
+.range-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 14px;
+}
+
+.range-title button.link {
+  min-height: 24px;
+  font-size: 0.9em;
+}
+
+/* The confirmation of an addition: over the page's foot for a few seconds, never in the way of a click. */
+.confirmation-host {
+  position: fixed;
+  left: 16px;
+  right: 16px;
+  bottom: 16px;
+  z-index: 20;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.confirmation {
+  max-width: 40rem;
+  margin: 0;
+  padding: 8px 14px;
+  border-radius: 4px;
+  background: var(--fg);
+  color: #fff;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 25%);
+}
+
+.confirmation.error {
+  background: var(--error);
+  color: #fff;
+}
+
+/* The tray. */
+.candidates-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 16px;
+}
+
+.candidates-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* #, Run, Program, Query, Subject, Range on subject, Strand, E value, Bit score (the line of
+   values); under it the note and the actions. */
+.candidate-grid {
+  display: grid;
+  gap: 6px;
+  align-items: center;
+  grid-template-columns: 4ch minmax(8ch, 0.8fr) 7.5ch minmax(9ch, 1fr) minmax(9ch, 1fr) 17ch 7ch 8.25ch 9ch;
+}
+
+.candidate-row {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  grid-template-rows: 24px minmax(0, 1fr);
+  row-gap: 4px;
+  box-sizing: border-box;
+  height: 100%;
+  padding: 4px 8px 4px 0;
+  border-bottom: 1px solid var(--panel);
+}
+
+.candidate-cells,
+.candidate-tools {
+  grid-column: 2;
+  min-width: 0;
+  padding-left: 8px;
+}
+
+.candidate-cells > * {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.candidate-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.candidate-note {
+  flex: 1 1 12ch;
+  min-width: 0;
+  max-width: 48ch;
+}
+
+.candidate-actions {
+  display: flex;
+  flex: none;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.strand-minus {
+  color: #c2410c;
+}
+
+.strand-unknown {
+  color: var(--muted);
+  font-style: italic;
+}
+
+/* A phone's row: #, Subject and Range, the note, the actions, then the other values in two lines at most. */
+.candidate-row.narrow {
+  grid-template-rows: none;
+  align-items: start;
+}
+
+.candidate-row.narrow > .row-mark {
+  height: 28px;
+}
+
+.candidate-card {
+  grid-column: 2;
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding-left: 4px;
+}
+
+.candidate-key {
+  display: grid;
+  grid-template-columns: 4ch minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+}
+
+.candidate-key > * {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.candidate-subject {
+  font-weight: 600;
+}
+
+.candidate-card .candidate-note {
+  width: 100%;
+  max-width: none;
+  box-sizing: border-box;
+}
+
+.candidate-card .candidate-actions {
+  gap: 4px;
+  margin-left: 0;
+}
+
+.candidate-card .candidate-actions button {
+  padding: 4px 8px;
+}
+
+.candidate-rest {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+.extract,
+.candidate-origins {
+  margin-top: 18px;
+}
+
+.extract h3,
+.candidate-origins h3 {
+  margin-bottom: 4px;
+}
+
+.extract-options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px 20px;
+  margin: 6px 0;
+}
+
+.extract fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 4px 12px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.extract legend {
+  padding: 0 4px;
+  font-weight: 600;
+}
+
+.extract-flanks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  padding-left: 26px;
+}
+
+.extract-flanks label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.extract-flanks input {
+  width: 8ch;
+}
+
+.extract-flanks .error {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+.extract-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0 4px;
+}
+
+.extract-summary {
+  margin: 8px 0;
+  padding: 4px 10px;
+  border-left: 3px solid var(--accent);
+  background: var(--panel);
+  overflow-wrap: anywhere;
+}
+
+.extract-summary p {
+  margin: 4px 0;
+}
+
+.extract-summary ul {
+  margin: 4px 0;
+  padding-left: 20px;
+}
+
+.origin-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.origin-list h4 {
+  margin: 6px 0 2px;
+  font-size: 0.95em;
+}
+
+.origin-list h4 .small {
+  margin-left: 6px;
+  font-weight: 400;
+}
+
 /* Narrow screens: one column, in the order search, queue, notes (design §3.4). */
 @media (max-width: 800px) {
   .layout {

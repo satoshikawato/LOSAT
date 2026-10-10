@@ -86,7 +86,8 @@
   margin: 0;
   z-index: 2;
   width: max-content;
-  max-width: min(20rem, 100%);
+  /* Room for its three buttons on one line ("Add to candidates" since S14). */
+  max-width: min(24rem, 100%);
   padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: 4px;
@@ -107,6 +108,9 @@
 .plot-popup.below {
   position: static;
   margin-top: 8px;
+  /* Under a phone's plot, no wider than the plot, its border and padding included. */
+  box-sizing: border-box;
+  max-width: 100%;
 }
 
 .plot-popup h4 {

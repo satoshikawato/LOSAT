@@ -3,8 +3,11 @@
 // page (S13b, docs/web/ncbi_ui_mapping.md §2): the run's header block with "Filter Results"
 // beside it, "Results for" (the query) and the notices, then the tabs Descriptions, Graphic
 // Summary, Alignments and Dot Plot, and LOSAT's Run details and Outputs. Every tab follows one
-// selection, held by the HSP's identity (application/results.ts).
-import { computed, nextTick, ref, watch } from 'vue';
+// selection, held by the HSP's identity (application/results.ts). The Descriptions, the
+// Alignments and the dot plot's popup add HSPs to the candidate tray (S14); a short line
+// confirms each addition.
+import { computed, nextTick, onUnmounted, ref, watch } from 'vue';
+import type { CandidateTray } from '../application/candidates';
 import type { Coordinator, RunView } from '../application/coordinator';
 import type { HspId, ResultsBrowser } from '../application/results';
 import { programById, residueUnit } from '../domain/programs';
@@ -12,7 +15,7 @@ import { useStore } from './useStore';
 import AlignmentsView from './AlignmentsView.vue';
 import CommandText from './CommandText.vue';
 import DotPlot from './DotPlot.vue';
-import { formatCount } from './format';
+import { formatCount, formatCounted } from './format';
 import GraphicSummary from './GraphicSummary.vue';
 import HspTable from './HspTable.vue';
 import OutputsView from './OutputsView.vue';
@@ -25,10 +28,13 @@ import VerificationBadge from './VerificationBadge.vue';
 
 export type ResultsView = 'hits' | 'graphic' | 'alignment' | 'dotplot' | 'details' | 'outputs';
 
-const props = defineProps<{ coordinator: Coordinator; results: ResultsBrowser; runs: readonly RunView[] }>();
+const props = defineProps<{ coordinator: Coordinator; results: ResultsBrowser; candidates: CandidateTray; runs: readonly RunView[] }>();
 /** The tab shown. The main view keeps it, so that another run, or the results shown again, open on the same tab. */
 const view = defineModel<ResultsView>('view', { default: 'hits' });
 const state = useStore(props.results.state);
+const trayState = useStore(props.candidates.state);
+/** The keys of the HSPs in the tray: the Alignments and the dot plot say "In candidates" for them. */
+const inTray = computed<ReadonlySet<string>>(() => new Set(trayState.value.candidates.map((candidate) => candidate.key)));
 const heading = ref<HTMLElement>();
 const alignments = ref<InstanceType<typeof AlignmentsView>>();
 
@@ -51,7 +57,44 @@ function showHeading(): void {
   heading.value?.scrollIntoView({ block: 'start' });
   heading.value?.focus({ preventScroll: true });
 }
-defineExpose({ showHeading });
+/** Shows an HSP's Range in the Alignments with the focus on it ("Show in results" of a candidate). */
+async function showHsp(id: HspId): Promise<void> {
+  view.value = 'alignment';
+  await nextTick();
+  await alignments.value?.reveal(id, true);
+}
+defineExpose({ showHeading, showHsp });
+
+// --- adding to the candidate tray ----------------------------------------------------------------
+
+/** The confirmation of the last addition (or why it was refused), shown for a few seconds. */
+const added = ref<{ readonly text: string; readonly error: boolean }>();
+const CONFIRMATION_MS = 4000;
+let confirmationTimer: ReturnType<typeof setTimeout> | undefined;
+onUnmounted(() => clearTimeout(confirmationTimer));
+
+function addCandidates(ids: readonly HspId[]): void {
+  let text: string;
+  let error = false;
+  try {
+    const result = props.candidates.add(props.results.candidateSources(ids));
+    if (!result.ok) {
+      text = result.message;
+      error = true;
+    } else if (result.added === 0) {
+      text = result.already === 1 ? 'This HSP is already in Candidates.' : 'These HSPs are already in Candidates.';
+    } else {
+      text = `${formatCounted(result.added, 'HSP')} added to Candidates.`;
+      if (result.already > 0) text += ` ${formatCount(result.already)} ${result.already === 1 ? 'was' : 'were'} already there.`;
+    }
+  } catch (failure) {
+    text = `The HSPs could not be added: ${failure instanceof Error ? failure.message : String(failure)}`;
+    error = true;
+  }
+  added.value = { text, error };
+  clearTimeout(confirmationTimer);
+  confirmationTimer = setTimeout(() => (added.value = undefined), CONFIRMATION_MS);
+}
 
 /** Every run of the working session, newest first: a run without results says why. */
 const choices = computed(() => [...props.runs].reverse());
@@ -197,7 +240,7 @@ async function toAlignments(id: HspId): Promise<void> {
         </nav>
 
         <div v-show="HITS_VIEWS.includes(view)" class="hits-view" data-testid="results-hits" :data-run="loaded.run.snapshot.number">
-          <SubjectTable v-if="view === 'hits' && state.subjects.length > 0" :results="results" :state="state" />
+          <SubjectTable v-if="view === 'hits' && state.subjects.length > 0" :results="results" :state="state" @add-candidates="addCandidates" />
           <GraphicSummary
             v-else-if="view === 'graphic' && state.subjects.length > 0"
             :results="results"
@@ -209,10 +252,12 @@ async function toAlignments(id: HspId): Promise<void> {
             ref="alignments"
             :results="results"
             :state="state"
+            :in-tray="inTray"
             @descriptions="view = 'hits'"
+            @add-candidates="addCandidates"
           />
           <template v-else-if="view === 'dotplot' && state.hsps.length > 0">
-            <DotPlot :results="results" :state="state" @show-alignment="toAlignments" />
+            <DotPlot :results="results" :state="state" :in-tray="inTray" @show-alignment="toAlignments" @add-candidates="addCandidates" />
             <HspTable :results="results" :state="state" />
           </template>
         </div>
@@ -220,5 +265,11 @@ async function toAlignments(id: HspId): Promise<void> {
         <OutputsView v-if="view === 'outputs'" :coordinator="coordinator" :run="loaded.run" />
       </template>
     </template>
+    <!-- A live region that stays in the page, so that each confirmation is announced. -->
+    <div class="confirmation-host" role="status">
+      <p v-if="added" class="confirmation" :class="{ error: added.error }" data-testid="candidates-added" :data-error="added.error">
+        {{ added.text }}
+      </p>
+    </div>
   </section>
 </template>

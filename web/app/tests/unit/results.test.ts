@@ -279,7 +279,10 @@ describe('verificationBadge', () => {
     const same = loadedRunBadge(certified, { engineBuild: 'threads-A', app: { version: '0.1.0', build: 'b1' } }, site);
     expect(same).toEqual({
       ...certified,
-      details: [...certified.details, 'Loaded from a session file: written by threads-A (LOSAT Web 0.1.0, build b1), an engine build of this site.'],
+      details: [
+        ...certified.details,
+        'Loaded from a session file (saved by LOSAT Web 0.1.0, build b1): its outputs were written by threads-A, an engine build of this site.',
+      ],
     });
     // Another engine build (here one that this site's table would certify): the badge does not claim this site's verification.
     const other = loadedRunBadge(certified, { engineBuild: 'threads-B', app: { version: '0.1.0', build: 'b1' } }, site);
@@ -287,13 +290,14 @@ describe('verificationBadge', () => {
       level: 'outside',
       label: 'Written by another engine build',
       details: [
-        "Loaded from a session file: written by threads-B (LOSAT Web 0.1.0, build b1); this site's verification covers threads-A and serial-A (LOSAT Web 0.2.0, build b2).",
+        'Loaded from a session file (saved by LOSAT Web 0.1.0, build b1): its outputs were written by threads-B; ' +
+          "this site's verification covers threads-A and serial-A (LOSAT Web 0.2.0, build b2).",
       ],
       exceptions: [],
     });
     // No engine build in the file, or no site to compare with: never this site's badge.
     expect(loadedRunBadge(certified, { app: { version: '0.1.0', build: 'b1' } }, site).details[0]).toMatch(
-      /^Loaded from a session file: written by an engine build that the file does not name \(LOSAT Web 0\.1\.0, build b1\); this site's verification covers/,
+      /^Loaded from a session file \(saved by LOSAT Web 0\.1\.0, build b1\): its outputs were written by an engine build that the file does not name; this site's verification covers/,
     );
     expect(loadedRunBadge(certified, { engineBuild: 'threads-A', app: { version: '0.1.0', build: 'b1' } }, undefined).level).toBe('outside');
     // The approved exceptions follow the options, whoever wrote the outputs.
@@ -303,7 +307,7 @@ describe('verificationBadge', () => {
     const fake = verificationBadge({ ...input, runtimePath: 'fake' }, table);
     const loadedFake = loadedRunBadge(fake, { engineBuild: 'fake-engine', app: site.app }, site);
     expect(loadedFake.level).toBe('development');
-    expect(loadedFake.details).toEqual([...fake.details, 'Loaded from a session file: written by fake-engine (LOSAT Web 0.2.0, build b2).']);
+    expect(loadedFake.details).toEqual([...fake.details, 'Loaded from a session file (saved by LOSAT Web 0.2.0, build b2): its outputs were written by fake-engine.']);
   });
 
   it('names the approved exceptions of a non-default subject genetic code', () => {

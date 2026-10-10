@@ -246,7 +246,7 @@ describe('the verification badge of a run loaded from a session file (code revie
   it("says that another engine build wrote the outputs, instead of this site's verification", async () => {
     const { badge, json, report } = await shown({ ...loadedFrom('other-build'), record: { runtimePath: 'serial', threads: 1, engineBuild: 'other-build' } });
     const details = [
-      "Loaded from a session file: written by other-build (LOSAT Web 0.1.0, build b1); this site's verification covers test-build (LOSAT Web 0.2.0, build b2).",
+      "Loaded from a session file (saved by LOSAT Web 0.1.0, build b1): its outputs were written by other-build; this site's verification covers test-build (LOSAT Web 0.2.0, build b2).",
     ];
     expect(badge).toEqual({ level: 'outside', label: 'Written by another engine build', details, exceptions: [] });
     expect(json).toEqual({ level: 'outside', label: 'Written by another engine build', details, exceptions: [] });
@@ -257,7 +257,7 @@ describe('the verification badge of a run loaded from a session file (code revie
   it("keeps this site's badge for outputs that its engine build wrote, and says that the run was loaded", async () => {
     const searched = (await setup()).results.state.get().loaded!.badge;
     const { badge, json, report } = await shown(loadedFrom('test-build'));
-    const note = 'Loaded from a session file: written by test-build (LOSAT Web 0.1.0, build b1), an engine build of this site.';
+    const note = 'Loaded from a session file (saved by LOSAT Web 0.1.0, build b1): its outputs were written by test-build, an engine build of this site.';
     expect(badge).toEqual({ ...searched, details: [...searched.details, note] });
     expect(json).toEqual({ level: searched.level, label: searched.label, details: [...searched.details, note], exceptions: [] });
     expect(report).toContain(`<p><strong>${searched.label}</strong></p>`);

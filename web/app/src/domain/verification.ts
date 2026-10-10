@@ -168,15 +168,16 @@ export function verificationBadge(input: BadgeInput, table: VerificationTable): 
 export function loadedRunBadge(badge: Badge, written: { readonly engineBuild?: string; readonly app: AppBuild }, site: SiteBuild | undefined): Badge {
   const { engineBuild, app } = written;
   const same = engineBuild !== undefined && site !== undefined && site.engineBuilds.includes(engineBuild);
-  const by = `${engineBuild ?? 'an engine build that the file does not name'} (LOSAT Web ${app.version}, build ${app.build})`;
-  if (same || badge.level === 'development') {
-    return { ...badge, details: [...badge.details, `Loaded from a session file: written by ${by}${same ? ', an engine build of this site' : ''}.`] };
-  }
+  // The LOSAT Web that saved the file is not always the one that searched (a loaded run can be saved again).
+  const loaded = `Loaded from a session file (saved by LOSAT Web ${app.version}, build ${app.build}): its outputs were written by ${
+    engineBuild ?? 'an engine build that the file does not name'
+  }`;
+  if (same || badge.level === 'development') return { ...badge, details: [...badge.details, `${loaded}${same ? ', an engine build of this site' : ''}.`] };
   const here = site === undefined ? "this site's engine builds" : `${list(site.engineBuilds)} (LOSAT Web ${site.app.version}, build ${site.app.build})`;
   return {
     level: 'outside',
     label: OTHER_BUILD_LABEL,
-    details: [`Loaded from a session file: written by ${by}; this site's verification covers ${here}.`],
+    details: [`${loaded}; this site's verification covers ${here}.`],
     exceptions: badge.exceptions,
   };
 }

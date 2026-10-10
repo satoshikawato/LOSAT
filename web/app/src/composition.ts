@@ -103,7 +103,7 @@ export function createApp(options: AppOptions = {}): App {
     downloader,
   });
   const candidates = new CandidateTray({ runs: coordinator.state, data, downloader, now: () => Date.now() });
-  const exporter = new ResultExporter({ results: results.state, data, downloader, now: () => Date.now(), pause: nextTask });
+  const exporter = new ResultExporter({ results: results.state, data, downloader, now: () => Date.now(), pause: nextTask, clock: () => performance.now() });
   const attention = new Attention({
     page: browserPage,
     runs: coordinator.state,

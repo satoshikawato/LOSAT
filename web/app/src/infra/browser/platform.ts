@@ -1,5 +1,6 @@
 // Browser implementations of small platform services used by the composition root.
 import type { Downloader, ExportSink } from '../../ports/download';
+import { nextTask } from './next-task';
 
 /**
  * Each block is copied into a Blob of its own as it comes, so the browser holds it in its own Blob
@@ -20,9 +21,6 @@ function download(fileName: string, blob: Blob): void {
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
-/** Lets the page paint between blocks of a long export. */
-const nextTask = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
-
 class BlobSink implements ExportSink {
   private parts: BlobPart[] = [];
   private unjoined = 0;
@@ -41,6 +39,7 @@ class BlobSink implements ExportSink {
       this.parts = [new Blob(this.parts)];
       this.unjoined = 0;
     }
+    // Lets the page draw between blocks of a long export.
     await nextTask();
   }
 

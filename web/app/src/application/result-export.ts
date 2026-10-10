@@ -69,12 +69,15 @@ export const RECORD_BATCH_RESIDUES = 4_000_000;
 const ROWS_PER_TEXT = 500;
 /** Characters of a report collected before they are handed to the Writer. */
 const TEXT_CHARS = 1 << 16;
-/**
- * HSPs of a JSON batch formatted in one task. A batch of 1,000 with their aligned rows, formatted at
- * once, held Chromium's page for up to 300 ms where the garbage collector marked a large heap in
- * steps as the text was made (fix round 2); a pause after each group lets the page draw.
- */
+/** HSPs of a JSON batch formatted between two looks at the clock (`pace`). */
 const JSON_GROUP = 250;
+/**
+ * Milliseconds of work after which a file's writing pauses (deps.pause) so the page draws: a batch
+ * of 1,000 JSON records formatted at once held Chromium's page up to 300 ms while the garbage
+ * collector marked a large heap in steps, and WebKit drew no frame for 150-230 ms at the start of
+ * an export of 100,000 queries (fix round 2).
+ */
+const PACE_MS = 20;
 /** Bytes of outfmt 0 read at once: one read serves the headings and sections that lie in it. */
 export const OUTFMT0_WINDOW = 1 << 20;
 
@@ -114,7 +117,12 @@ export interface ResultExporterDeps {
   readonly now: () => number;
   /** Lets the page draw between two parts of a file's work (the composition gives the browser's next task). None: no pause. */
   readonly pause?: () => Promise<void>;
+  /** A clock in milliseconds for the pauses (default Date.now). */
+  readonly clock?: () => number;
 }
+
+/** Waits for the page to draw when the work has gone on for a while (ResultExporter.pacer). */
+type Pace = () => Promise<void>;
 
 /** What one export reads: fixed when it starts. */
 interface ExportJob {
@@ -191,13 +199,14 @@ export class ResultExporter {
     this.state.set({ busy: { format, scope, fileName } });
     try {
       const bytes = await writeFile(this.deps.downloader, fileName, EXPORT_FILES[format].mime, (writer) => {
+        const pace = this.pacer();
         switch (format) {
           case 'csv':
-            return writeCsv(writer, job);
+            return writeCsv(writer, job, pace);
           case 'json':
-            return this.writeJson(writer, job, aligned);
+            return this.writeJson(writer, job, aligned, pace);
           case 'report':
-            return this.writeReport(writer, job, alignments);
+            return this.writeReport(writer, job, alignments, pace);
         }
       });
       const last: ExportSummary = {
@@ -218,8 +227,21 @@ export class ResultExporter {
     }
   }
 
+  /** A pause that waits only once PACE_MS of work have passed since the last one. */
+  private pacer(): Pace {
+    const { pause } = this.deps;
+    if (pause === undefined) return async () => undefined;
+    const clock = this.deps.clock ?? Date.now;
+    let last = clock();
+    return async () => {
+      if (clock() - last < PACE_MS) return;
+      await pause();
+      last = clock();
+    };
+  }
+
   /** The JSON document: the run, the scope, then each HSP with its record, read in batches. */
-  private async writeJson(writer: ExportWriter, job: ExportJob, aligned: boolean): Promise<void> {
+  private async writeJson(writer: ExportWriter, job: ExportJob, aligned: boolean, pace: Pace): Promise<void> {
     const { loaded, rows } = job;
     const { table } = loaded.index;
     const runId = loaded.run.snapshot.runId;
@@ -228,7 +250,7 @@ export class ResultExporter {
     for (const batch of recordBatches(rows, table)) {
       const records = await this.deps.data.readHspRecords(runId, Array.from(batch, (row) => table.index[row]!));
       for (let start = 0; start < batch.length; start += JSON_GROUP) {
-        if (start > 0) await this.deps.pause?.();
+        await pace();
         const parts: string[] = [];
         for (let i = start; i < Math.min(batch.length, start + JSON_GROUP); i++) {
           const row = batch[i]!;
@@ -249,7 +271,7 @@ export class ResultExporter {
    * The report: the run, then each query of the scope with its HSP table and, unless they are left
    * out, the outfmt 0 headings and sections of the HSPs that outfmt 0 shows, then the run's warnings.
    */
-  private async writeReport(writer: ExportWriter, job: ExportJob, alignments: boolean): Promise<void> {
+  private async writeReport(writer: ExportWriter, job: ExportJob, alignments: boolean, pace: Pace): Promise<void> {
     const { loaded, rows } = job;
     const { table } = loaded.index;
     const { snapshot } = loaded.run;
@@ -268,6 +290,7 @@ export class ResultExporter {
       await writer.texts(parts);
       parts = [];
       chars = 0;
+      await pace();
     };
     add(reportHead(head));
     for (const [qIdx, queryRows] of groupBy(rows, table.qIdx)) {
@@ -302,13 +325,14 @@ export class ResultExporter {
 }
 
 /** The CSV: a header row, then one row per HSP. */
-async function writeCsv(writer: ExportWriter, job: ExportJob): Promise<void> {
+async function writeCsv(writer: ExportWriter, job: ExportJob, pace: Pace): Promise<void> {
   await writer.text(csvHeader());
   const { loaded, rows } = job;
   for (let i = 0; i < rows.length; i += ROWS_PER_TEXT) {
     const parts: string[] = [];
     for (const row of rows.subarray(i, i + ROWS_PER_TEXT)) parts.push(csvLine(exportedHsp(loaded, row)));
     await writer.texts(parts);
+    await pace();
   }
 }
 

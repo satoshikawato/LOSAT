@@ -112,7 +112,16 @@ function snapshot(ids: typeof IDS): RunSnapshot {
   };
 }
 
-async function setup(options: { specs?: readonly Spec[]; ids?: typeof IDS; view?: Partial<RunView>; site?: SiteBuild } = {}) {
+async function setup(
+  options: {
+    specs?: readonly Spec[];
+    ids?: typeof IDS;
+    view?: Partial<RunView>;
+    site?: SiteBuild;
+    pause?: () => Promise<void>;
+    clock?: () => number;
+  } = {},
+) {
   const ids = options.ids ?? IDS;
   const run = makeRun(options.specs ?? SPECS, ids);
   const view: RunView = {
@@ -161,6 +170,8 @@ async function setup(options: { specs?: readonly Spec[]; ids?: typeof IDS; view?
     },
     downloader: memoryDownloader((file) => saved.push(file)),
     now: () => Date.UTC(2026, 9, 10, 2, 0, 0),
+    ...(options.pause === undefined ? {} : { pause: options.pause }),
+    ...(options.clock === undefined ? {} : { clock: options.clock }),
   });
   return {
     run,
@@ -491,6 +502,24 @@ describe('the report', () => {
     expect(await exporter.export('report', 'all')).toBeUndefined();
     expect(saved).toEqual([]);
     expect(exporter.state.get().error).toMatch(/^The report of run 7 could not be written, so nothing was saved: the stored output is gone/);
+  });
+});
+
+describe('pauses while a file is written (fix round 2)', () => {
+  it('pauses after about 20 ms of work, in each format, and writes the same file as without pauses', async () => {
+    const specs = Array.from({ length: 3_000 }, (_, i) => ({ q: Math.floor(i / 30), s: i % 3, bits: 50, e: 1e-5 }));
+    const ids = { query: Array.from({ length: 100 }, (_, q) => `query_${q}`), subject: ['s1', 's2', 's3'] };
+    let time = 0;
+    let pauses = 0;
+    const paced = await setup({ specs, ids, clock: () => (time += 7), pause: async () => void pauses++ });
+    const plain = await setup({ specs, ids });
+    for (const format of ['csv', 'json', 'report'] as const) {
+      pauses = 0;
+      await paced.exporter.export(format, 'all');
+      await plain.exporter.export(format, 'all');
+      expect(pauses).toBeGreaterThan(0);
+      expect(paced.text()).toBe(plain.text());
+    }
   });
 });
 

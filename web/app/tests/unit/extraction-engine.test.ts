@@ -198,6 +198,22 @@ describe.skipIf(reactors === undefined)('extraction reads the residues that the 
     return { ref, revisions, letters, records, inputs, argv, hsps: all };
   }
 
+  /**
+   * The interval of a piece in the record's coordinates, from the HSPs it is for (labels "q.rank",
+   * 1-based): their lowest and highest outfmt 6 coordinate on the role, widened by the flanks
+   * (left toward 1) and cut to 1 and the record's length; the whole record for "whole".
+   */
+  function expectedInterval(run: Run, role: InputRole, labels: readonly string[], length: number, region: ExtractionOptions['region']): { from: number; to: number } {
+    if (region.kind === 'whole') return { from: 1, to: length };
+    const coordinates = labels.flatMap((label) => {
+      const hsp = run.hsps.find((each) => `${each.q_idx + 1}.${each.rank + 1}` === label);
+      expect(hsp, `${run.ref.runId}: HSP ${label}`).toBeDefined();
+      return role === 'query' ? [hsp!.q_start, hsp!.q_end] : [hsp!.s_start, hsp!.s_end];
+    });
+    const [left, right] = region.kind === 'flanked' ? [region.flanks.left, region.flanks.right] : [0, 0];
+    return { from: Math.max(1, Math.min(...coordinates) - left), to: Math.min(length, Math.max(...coordinates) + right) };
+  }
+
   /** Every region and join for every HSP on both of its records reads the generated letters. */
   async function checkExtraction(run: Run): Promise<void> {
     const options: readonly ExtractionOptions[] = [
@@ -221,7 +237,12 @@ describe.skipIf(reactors === undefined)('extraction reads the residues that the 
           request.pieces.forEach((p, i) => {
             const piece = plan.pieces[p]!;
             const { from, to } = piece.interval.actual;
-            expect(latin1.decode(got.residues[i]), `${run.ref.runId} ${role} ${request.position + 1} ${from}-${to}`).toBe(generated.slice(from - 1, to));
+            // The interval is worked out here from the HSPs' record coordinates, not taken from the plan.
+            const expected = expectedInterval(run, role, piece.hsps, generated.length, option.region);
+            expect({ from, to }, `${run.ref.runId} ${role} ${request.position + 1}: the planned interval of ${piece.hsps.join(', ')}`).toEqual(expected);
+            expect(latin1.decode(got.residues[i]), `${run.ref.runId} ${role} ${request.position + 1} ${expected.from}-${expected.to}`).toBe(
+              generated.slice(expected.from - 1, expected.to),
+            );
             sequenceFasta(piece, got.residues[i]!);
             summary.pieces++;
             if (piece.interval.clippedLeft) summary.clippedLeft++;

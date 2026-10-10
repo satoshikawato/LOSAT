@@ -443,6 +443,104 @@ fn get_prob(sv: &[i32], window_length: i32) -> f64 {
 /// NCBI SEG entropy (Shannon entropy, bits) implementation.
 /// Reference: ncbi-blast/c++/src/algo/blast/core/blast_seg.c:1592-1624 (s_Entropy)
 fn entropy_from_state_vector(state: &[i32]) -> f64 {
+    // EXPERIMENT (LOSAT_X_SEGMEMO): the entropy is a pure function of the
+    // state vector, and a 12-letter window has at most a few hundred distinct
+    // state vectors, so remember the value computed for each one.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:1598-1603,1616-1621
+    // ```c
+    //    total = 0;
+    //    for (i=0; sv[i]!=0; i++)
+    //      {
+    //       total += sv[i];
+    //      }
+    //    if (total==0) return(0.);
+    // ...
+    //     for (i=0; sv[i]!=0; i++)
+    //         {
+    //             ent += ((double)sv[i])*log(((double)sv[i])/(double)total)/NCBIMATH_LN2;
+    //         }
+    //    }
+    //    ent = fabs(ent/(double)total);
+    // ```
+    // Dispatch point of LOSAT_X_SEGMEMO: the reference path is `entropy_from_state_vector_reference`, the port
+    // of this function. The memo is keyed by the sorted counts of the state vector, which is all that `s_Entropy`
+    // reads, so a repeated vector gets the value the first call returned.
+    if x_seg_memo() {
+        let mut key = 0u64;
+        let mut classes = 0u32;
+        let mut total = 0i32;
+        let mut packable = true;
+        for &count in state {
+            if count == 0 {
+                break;
+            }
+            total += count;
+            // Windows of at most 15 letters: fewer than 700 possible keys.
+            if count < 0 || total > 15 {
+                packable = false;
+                break;
+            }
+            key |= (count as u64) << (4 * classes);
+            classes += 1;
+        }
+        if packable {
+            return X_ENTROPY_MEMO.with(|memo| {
+                let mut memo = memo.borrow_mut();
+                let mask = memo.len() - 1;
+                let mut slot = (key.wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 40) as usize & mask;
+                loop {
+                    let (stored_key, bits) = memo[slot];
+                    if stored_key == key {
+                        return f64::from_bits(bits);
+                    }
+                    if stored_key == u64::MAX {
+                        let value = entropy_from_state_vector_reference(state);
+                        memo[slot] = (key, value.to_bits());
+                        return value;
+                    }
+                    slot = (slot + 1) & mask;
+                }
+            });
+        }
+    }
+    entropy_from_state_vector_reference(state)
+}
+
+// No NCBI counterpart: reads LOSAT_X_SEGMEMO once; it does not change any value NCBI computes.
+fn x_seg_memo() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("LOSAT_X_SEGMEMO").is_some())
+}
+
+thread_local! {
+    // No NCBI counterpart: memo table of entropy values per state vector (`s_Entropy` is a pure function of the vector); it does not change any value NCBI computes.
+    // Open-addressing table. Only state vectors summing to at most 15 are
+    // stored, and there are fewer than 700 of those, so it never fills.
+    static X_ENTROPY_MEMO: std::cell::RefCell<Vec<(u64, u64)>> =
+        std::cell::RefCell::new(vec![(u64::MAX, 0); 4096]);
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:1598-1606,1616-1621
+// ```c
+//    total = 0;
+//    for (i=0; sv[i]!=0; i++)
+//      {
+//       total += sv[i];
+//      }
+//    if (total==0) return(0.);
+//    ent = 0.0;
+//    if (total == 10)
+// ...
+//     for (i=0; sv[i]!=0; i++)
+//         {
+//             ent += ((double)sv[i])*log(((double)sv[i])/(double)total)/NCBIMATH_LN2;
+//         }
+//    }
+//    ent = fabs(ent/(double)total);
+// ```
+// The original `entropy_from_state_vector`, renamed; it is the port of this function.
+fn entropy_from_state_vector_reference(state: &[i32]) -> f64 {
     let mut total = 0i32;
     for &count in state {
         if count == 0 {
@@ -818,7 +916,52 @@ impl SegMasker {
         if seq.len() < self.window {
             return Vec::new();
         }
+        // EXPERIMENT (LOSAT_X_SEGFAST / LOSAT_X_SEGSHADOW): see `x_mask_sequence`.
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:2050-2053,2062-2064
+        // ```c
+        //    downset = (window+1)/2 - 1;
+        //    upset = window - downset;
+        //    H = s_SeqEntropy(seq, window, sparamsp->maxbogus);
+        // ...
+        //    for (i=first; i<=last; i++)
+        //    {
+        //       if (H[i] <= locut && H[i] != -1.0)
+        // ```
+        // Dispatch point of LOSAT_X_SEGFAST / LOSAT_X_SEGSHADOW: the reference path is `mask_sequence_reference`, the
+        // port of `s_SegSeq`. The fast path keeps the control flow of this loop and replaces only the entropy
+        // and trim computations.
+        match x_seg_fast() {
+            1 if self.x_fast_applies() => return self.x_mask_sequence(seq),
+            2 if self.x_fast_applies() => {
+                let fast = self.x_mask_sequence(seq);
+                let reference = self.mask_sequence_reference(seq);
+                assert!(
+                    fast == reference,
+                    "LOSAT_X_SEGSHADOW: fast SEG differs from the reference on a {}-residue sequence",
+                    seq.len()
+                );
+                return fast;
+            }
+            _ => {}
+        }
+        self.mask_sequence_reference(seq)
+    }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:2030-2032,2053-2060
+    // ```c
+    // s_SegSeq(SSequence* seq, SegParameters* sparamsp, SSeg **segs,
+    //                    Int4 offset)
+    // {
+    // ...
+    //    H = s_SeqEntropy(seq, window, sparamsp->maxbogus);
+    //    if (H == NULL)
+    //       return status;
+    //    first = downset;
+    //    last = seq->length - upset;
+    //    lowlim = first;
+    // ```
+    // The original body of `mask_sequence`, moved here unchanged; it is the port of this function.
+    fn mask_sequence_reference(&self, seq: &[u8]) -> Vec<MaskedInterval> {
         let mut segs_inclusive: Vec<(usize, usize)> = Vec::new();
 
         fn seg_seq(masker: &SegMasker, seq: &[u8], offset: usize, segs: &mut Vec<(usize, usize)>) {
@@ -958,6 +1101,635 @@ impl SegMasker {
 //    ...
 // }
 // ```
+// ---------------------------------------------------------------------------
+// EXPERIMENT (LOSAT_X_SEGFAST): the same SEG, with the window kept as counts.
+//
+// NCBI keeps a window as a "state vector": the counts of its letters sorted in
+// decreasing order (blast_seg.c s_StateOn / s_DecrementSV / s_IncrementSV), and
+// derives the entropy (s_Entropy), ln(compositions) (s_LnAss) and
+// ln(permutations) (s_LnPerm) from it.  All three are sums taken in the order of
+// that vector, so they are functions of *how many letters occur k times* for each
+// k.  The code below maintains exactly that (a histogram of counts) under a
+// one-letter shift in O(1) and then performs NCBI's additions and subtractions in
+// NCBI's order: the largest count first, each count once per letter.
+//
+// Everything else (find_low / find_high, the recursion, the merge) is shared with
+// the reference implementation.
+// ---------------------------------------------------------------------------
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:1529-1533,1537-1537
+// ```c
+//     for (letter = nel = 0; letter < alphasize; ++letter) {
+//         if ((c = win->composition[letter]) == 0)
+//             continue;
+//         win->state[nel++] = c;
+//     }
+// ...
+//     qsort(win->state, nel, sizeof(win->state[0]), s_StateCmp);
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:1642-1646,1658-1661
+// ```c
+//     while ((svi = *sv++) != 0) {
+//         if (svi == class && *sv < class) {
+//             sv[-1] = svi - 1;
+//             break;
+//         }
+// ...
+//     for (;;) {
+//         if (*sv++ == class) {
+//             sv[-1]++;
+//             break;
+// ```
+// The state vector is the sorted list of letter counts. A shift by one letter lowers the count of the
+// leaving letter and raises the count of the entering one (`s_DecrementSV`, `s_IncrementSV`). The code below keeps a histogram of the counts instead, which holds the
+// same information, and updates it per shift. `x_seg_fast` itself reads LOSAT_X_SEGFAST and LOSAT_X_SEGSHADOW once.
+fn x_seg_fast() -> u8 {
+    use std::sync::OnceLock;
+    static MODE: OnceLock<u8> = OnceLock::new();
+    *MODE.get_or_init(|| {
+        if std::env::var_os("LOSAT_X_SEGSHADOW").is_some() {
+            2
+        } else if std::env::var_os("LOSAT_X_SEGFAST").is_some() {
+            1
+        } else {
+            0
+        }
+    })
+}
+
+// No NCBI counterpart: size bound of the histogram arrays of `x_trim_segment`; longer segments use the reference trim; it does not change any value NCBI computes.
+/// Longest segment handled by the count histogram of `x_trim_segment`.
+const X_TRIM_MAX: usize = 127;
+
+thread_local! {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:1593-1593,1599-1602,1621-1623
+    // ```c
+    // s_Entropy(Int4* sv)
+    // ...
+    //    for (i=0; sv[i]!=0; i++)
+    //      {
+    //       total += sv[i];
+    //      }
+    // ...
+    //    ent = fabs(ent/(double)total);
+    //    return(ent);
+    // ```
+    // No NCBI counterpart: memo table of `s_Entropy` values per count histogram. The entropy depends only on the
+    // counts, so reusing it changes no value.
+    // Entropy by count histogram (4 bits per count value, windows up to 15).
+    static X_ENTROPY_BY_HISTOGRAM: std::cell::RefCell<Vec<(u64, u64)>> =
+        std::cell::RefCell::new(vec![(u64::MAX, 0); 2048]);
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:1598-1603,1616-1621
+// ```c
+//    total = 0;
+//    for (i=0; sv[i]!=0; i++)
+//      {
+//       total += sv[i];
+//      }
+//    if (total==0) return(0.);
+// ...
+//     for (i=0; sv[i]!=0; i++)
+//         {
+//             ent += ((double)sv[i])*log(((double)sv[i])/(double)total)/NCBIMATH_LN2;
+//         }
+//    }
+//    ent = fabs(ent/(double)total);
+// ```
+// The sorted state vector is rebuilt from the histogram (largest count first), and the port of `s_Entropy`
+// is called on it.
+/// NCBI's entropy of the window whose count histogram is `key` (nibble `k - 1`
+/// holds the number of letters that occur `k` times).
+fn x_entropy_of_histogram(key: u64) -> f64 {
+    let mut state = [0i32; 16];
+    let mut used = 0usize;
+    for count in (1..=15usize).rev() {
+        let letters = (key >> (4 * (count - 1))) & 0xF;
+        for _ in 0..letters {
+            state[used] = count as i32;
+            used += 1;
+        }
+    }
+    entropy_from_state_vector_reference(&state[..used])
+}
+
+// No NCBI counterpart: a bit set of the counts present in a window, the index into the histogram of `x_prob_of_histogram`; it does not change any value NCBI computes.
+/// The counts that occur in a window: bit `k` is set when some letter occurs
+/// `k` times (`k <= X_TRIM_MAX = 127`). Two 64-bit words rather than a `u128`,
+/// whose shifts are library calls on wasm32.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct XCountMask([u64; 2]);
+
+impl XCountMask {
+    const EMPTY: Self = Self([0, 0]);
+
+    #[inline(always)]
+    fn set(&mut self, count: usize) {
+        self.0[count >> 6] |= 1u64 << (count & 63);
+    }
+
+    #[inline(always)]
+    fn clear(&mut self, count: usize) {
+        self.0[count >> 6] &= !(1u64 << (count & 63));
+    }
+
+    #[inline(always)]
+    fn is_empty(&self) -> bool {
+        (self.0[0] | self.0[1]) == 0
+    }
+
+    /// The largest count in the mask (which must not be empty).
+    #[inline(always)]
+    fn largest(&self) -> usize {
+        if self.0[1] != 0 {
+            127 - self.0[1].leading_zeros() as usize
+        } else {
+            63 - self.0[0].leading_zeros() as usize
+        }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:1949-1955,1962-1962
+// ```c
+//    totseq = ((double) total) * palpha->lnalphasize;
+//    ans1 = s_LnAss(sv, palpha->alphasize);
+//    if (ans1 > -100000.0 && sv[0] != INT4_MIN)
+//    {
+//     ans2 = s_LnPerm(sv, total);
+//    }
+// ...
+//    ans = ans1 + ans2 - totseq;
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:1901-1905,1909-1912,1919-1923
+// ```c
+//     ans = lnfact[alphasize];
+//     if (sv[0] == 0)
+//         return ans;
+//     total = alphasize;
+// ...
+//     for (i=0;; svim1 = svi) {
+//             if (++i==alphasize) {
+//                 ans -= s_lnfact(class);
+//             break;
+// ...
+//             total -= class;
+//             ans -= s_lnfact(class);
+//             if (svi == 0) {
+//                 ans -= s_lnfact(total);
+//                 break;
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:1874-1879
+// ```c
+//    ans = s_lnfact(window_length);
+//    for (i=0; sv[i]!=0; i++)
+//      {
+//       ans -= s_lnfact(sv[i]);
+//      }
+// ```
+// The terms of `s_LnAss` and `s_LnPerm` are taken in the order of the sorted state vector (largest count first),
+// as here: one `s_lnfact(class)` per run of equal counts, and one `s_lnfact(count)` per letter.
+/// `get_prob` from the histogram: `mask` has bit `k` set when some letter
+/// occurs `k` times and `letters_with[k]` says how many.
+#[inline]
+fn x_prob_of_histogram(
+    mask: XCountMask,
+    letters_with: &[u8; X_TRIM_MAX + 1],
+    window_length: usize,
+) -> f64 {
+    let totseq = (window_length as f64) * K_LN20;
+    // s_LnAss: one term per run of equal counts, largest count first, then the
+    // letters that do not occur (absent when all twenty do).
+    let mut ans1 = s_lnfact(20);
+    if !mask.is_empty() {
+        let mut total = 20usize;
+        let mut rest = mask;
+        while !rest.is_empty() {
+            let count = rest.largest();
+            rest.clear(count);
+            let class = letters_with[count] as usize;
+            total -= class;
+            ans1 -= s_lnfact(class);
+        }
+        if total > 0 {
+            ans1 -= s_lnfact(total);
+        }
+    }
+    // s_LnPerm: one term per letter, largest count first.
+    let ans2 = if ans1 > -100000.0 {
+        let mut ans = s_lnfact(window_length);
+        let mut rest = mask;
+        while !rest.is_empty() {
+            let count = rest.largest();
+            rest.clear(count);
+            let term = s_lnfact(count);
+            for _ in 0..letters_with[count] {
+                ans -= term;
+            }
+        }
+        ans
+    } else {
+        0.0
+    };
+    ans1 + ans2 - totseq
+}
+
+impl SegMasker {
+    // No NCBI counterpart: the fast path needs windows of at most 15 letters and the 20-letter alphabet; other settings use the reference; it does not change any value NCBI computes.
+    fn x_fast_applies(&self) -> bool {
+        (1..=15).contains(&self.window) && self.alpha.alphasize == 20
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:1499-1505
+    // ```c
+    //     while (seq < seqmax) {
+    //         letter = *seq++;
+    //         if (!alphaflag[letter])
+    //             comp[alphaindex[letter]]++;
+    //                 else
+    //                         win->bogus++;
+    //     }
+    // ```
+    // The table maps a residue to `alphaindex` when `alphaflag` is clear, and to 255 (counted as bogus) otherwise.
+    /// 0..19 for a letter of the SEG alphabet, 255 for anything else.
+    fn x_letter_index(&self) -> [u8; 256] {
+        let mut table = [255u8; 256];
+        for (letter, slot) in table
+            .iter_mut()
+            .enumerate()
+            .take(self.alpha.alphaflag.len())
+        {
+            if !self.alpha.alphaflag[letter] {
+                *slot = self.alpha.alphaindex[letter] as u8;
+            }
+        }
+        table
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:1775-1776,1778-1782,1789-1796
+    // ```c
+    //    win = s_OpenWin(seq, 0, window);
+    //    s_EntropyOn(win);
+    // ...
+    //    first = downset;
+    //    last = seq->length - upset;
+    //    for (i=first; i<=last; i++)
+    //      {
+    // ...
+    //       if (win->bogus > maxbogus)
+    //         {
+    //          H[i] = -1.;
+    //          s_ShiftWin1(win);
+    //          continue;
+    //         }
+    //       H[i] = win->entropy;
+    //       s_ShiftWin1(win);
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:1695-1704
+    // ```c
+    //     if (!alphaflag[j])
+    //         s_DecrementSV(win->state, comp[alphaindex[j]]--);
+    //     else win->bogus--;
+    //     j = (Uint1) win->seq[length];   /* prevent sign-extension */
+    //     ++win->seq;
+    //     if (!alphaflag[j])
+    //         s_IncrementSV(win->state, comp[alphaindex[j]]++);
+    //     else win->bogus++;
+    // ```
+    // The first window is counted once; each later window follows from the previous one by one removal and one
+    // addition, as in `s_ShiftWin1`. The entropy of each window with at most `maxbogus` bogus letters comes from
+    // the histogram.
+    /// `calculate_entropy_array` with the window kept as a count histogram.
+    fn x_entropy_array(&self, seq: &[u8], index: &[u8; 256]) -> Vec<f64> {
+        let len = seq.len();
+        let mut h = vec![-1.0; len];
+        let window = self.window;
+        if len < window {
+            return h;
+        }
+        let mut counts = [0u8; 20];
+        let mut bogus = 0i32;
+        let mut key = 0u64;
+        for &letter in &seq[..window] {
+            let letter = index[letter as usize];
+            if letter == 255 {
+                bogus += 1;
+            } else {
+                let count = counts[letter as usize];
+                if count > 0 {
+                    key -= 1u64 << (4 * (count - 1));
+                }
+                key += 1u64 << (4 * count);
+                counts[letter as usize] = count + 1;
+            }
+        }
+        let maxbogus = self.maxbogus as i32;
+        let first = self.downset;
+        let windows = len - window + 1;
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:1621-1623
+        // ```c
+        //    ent = fabs(ent/(double)total);
+        //    return(ent);
+        // ```
+        // The entropy of a window depends only on its count histogram, so the value for a seen histogram is reused.
+        X_ENTROPY_BY_HISTOGRAM.with(|memo| {
+            let mut memo = memo.borrow_mut();
+            let slots = memo.len() - 1;
+            let mut filled = 0usize;
+            for start in 0..windows {
+                h[first + start] = if bogus > maxbogus {
+                    -1.0
+                } else {
+                    let mut slot = (key.wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 40) as usize & slots;
+                    loop {
+                        let (stored, bits) = memo[slot];
+                        if stored == key {
+                            break f64::from_bits(bits);
+                        }
+                        if stored == u64::MAX {
+                            let value = x_entropy_of_histogram(key);
+                            // Fewer than 700 histograms exist for windows up to
+                            // 15 letters; the table is never close to full.
+                            memo[slot] = (key, value.to_bits());
+                            filled += 1;
+                            debug_assert!(filled < slots);
+                            break value;
+                        }
+                        slot = (slot + 1) & slots;
+                    }
+                };
+                if start + window < len {
+                    let outgoing = index[seq[start] as usize];
+                    if outgoing == 255 {
+                        bogus -= 1;
+                    } else {
+                        let count = counts[outgoing as usize];
+                        key -= 1u64 << (4 * (count - 1));
+                        if count > 1 {
+                            key += 1u64 << (4 * (count - 2));
+                        }
+                        counts[outgoing as usize] = count - 1;
+                    }
+                    let incoming = index[seq[start + window] as usize];
+                    if incoming == 255 {
+                        bogus += 1;
+                    } else {
+                        let count = counts[incoming as usize];
+                        if count > 0 {
+                            key -= 1u64 << (4 * (count - 1));
+                        }
+                        key += 1u64 << (4 * count);
+                        counts[incoming as usize] = count + 1;
+                    }
+                }
+            }
+        });
+        h
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:1988-1992,1998-2001,2007-2008,2013-2014
+    // ```c
+    //    if ((seq->length-maxtrim)>minlen)
+    //         minlen = seq->length-maxtrim;
+    //    minprob = 1.;
+    //    for (len=seq->length; len>minlen; len--)
+    // ...
+    //       while (shift)
+    //       {
+    //          prob = s_GetProb(win->state, len, win->palpha);
+    //          if (prob<minprob)
+    // ...
+    //          shift = s_ShiftWin1(win);
+    //          i++;
+    // ...
+    //    *leftend = *leftend + lend;
+    //    *rightend = *rightend - (seq->length - rend - 1);
+    // ```
+    // Windows of each length are visited left to right, with the smallest `prob` kept on a strict `<` as here.
+    // Each window is updated from its neighbour by one removal and one addition, and the sums in `s_LnAss` and
+    // `s_LnPerm` use the histogram in NCBI's order.
+    /// `trim_segment` with every window kept as a count histogram.
+    fn x_trim_segment(
+        &self,
+        seq: &[u8],
+        leftend: usize,
+        rightend: usize,
+        index: &[u8; 256],
+    ) -> (usize, usize) {
+        if leftend >= seq.len() || rightend >= seq.len() || leftend > rightend {
+            return (leftend, rightend);
+        }
+        let seg_len = rightend - leftend + 1;
+        if seg_len > X_TRIM_MAX {
+            return self.trim_segment(seq, leftend, rightend);
+        }
+        let mut minlen: usize = 1;
+        if seg_len.saturating_sub(self.maxtrim) > minlen {
+            minlen = seg_len - self.maxtrim;
+        }
+        let segment = &seq[leftend..=rightend];
+
+        #[derive(Clone, Copy)]
+        struct Window {
+            counts: [u8; 20],
+            letters_with: [u8; X_TRIM_MAX + 1],
+            mask: XCountMask,
+        }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:1642-1646,1658-1661
+        // ```c
+        //     while ((svi = *sv++) != 0) {
+        //         if (svi == class && *sv < class) {
+        //             sv[-1] = svi - 1;
+        //             break;
+        //         }
+        // ...
+        //     for (;;) {
+        //         if (*sv++ == class) {
+        //             sv[-1]++;
+        //             break;
+        // ```
+        // `add` and `remove` change the count of one letter by one, as `s_IncrementSV` and `s_DecrementSV` do for
+        // the state vector; here the histogram `letters_with` and its mask are updated.
+        impl Window {
+            #[inline(always)]
+            fn add(&mut self, letter: u8) {
+                if letter != 255 {
+                    let count = self.counts[letter as usize] as usize;
+                    if count > 0 {
+                        self.letters_with[count] -= 1;
+                        if self.letters_with[count] == 0 {
+                            self.mask.clear(count);
+                        }
+                    }
+                    self.letters_with[count + 1] += 1;
+                    self.mask.set(count + 1);
+                    self.counts[letter as usize] = (count + 1) as u8;
+                }
+            }
+            #[inline(always)]
+            fn remove(&mut self, letter: u8) {
+                if letter != 255 {
+                    let count = self.counts[letter as usize] as usize;
+                    self.letters_with[count] -= 1;
+                    if self.letters_with[count] == 0 {
+                        self.mask.clear(count);
+                    }
+                    if count > 1 {
+                        self.letters_with[count - 1] += 1;
+                        self.mask.set(count - 1);
+                    }
+                    self.counts[letter as usize] = (count - 1) as u8;
+                }
+            }
+        }
+
+        // The window of the current length at the left end of the segment; it
+        // loses its last letter each time the length drops by one.
+        let mut leftmost = Window {
+            counts: [0; 20],
+            letters_with: [0; X_TRIM_MAX + 1],
+            mask: XCountMask::EMPTY,
+        };
+        for &letter in segment {
+            leftmost.add(index[letter as usize]);
+        }
+
+        let mut best_lend: usize = 0;
+        let mut best_rend: usize = seg_len - 1;
+        let mut minprob: f64 = 1.0;
+        for cur_len in (minlen + 1..=seg_len).rev() {
+            let mut win = leftmost;
+            let mut i = 0usize;
+            loop {
+                let prob = x_prob_of_histogram(win.mask, &win.letters_with, cur_len);
+                if prob < minprob {
+                    minprob = prob;
+                    best_lend = i;
+                    best_rend = i + cur_len - 1;
+                }
+                if i + cur_len >= seg_len {
+                    break;
+                }
+                win.remove(index[segment[i] as usize]);
+                win.add(index[segment[i + cur_len] as usize]);
+                i += 1;
+            }
+            leftmost.remove(index[segment[cur_len - 1] as usize]);
+        }
+
+        (leftend + best_lend, leftend + best_rend)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:2062-2071,2073-2074
+    // ```c
+    //    for (i=first; i<=last; i++)
+    //    {
+    //       if (H[i] <= locut && H[i] != -1.0)
+    //         {
+    //          Int4 loi = s_FindLow(i, lowlim, hicut, H);
+    //          Int4 hii = s_FindHigh(i, last, hicut, H);
+    //          SSequence* temp_seq = NULL;
+    //          leftend = loi - downset;
+    //          rightend = hii + upset - 1;
+    // ...
+    //          temp_seq = s_OpenWin(seq, leftend, rightend-leftend+1);
+    //          status = s_Trim(temp_seq, &leftend, &rightend, sparamsp);
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:2081-2084,2105-2111
+    // ```c
+    //          if (i+upset-1<leftend)   /* check for trigger window in left trim */
+    //          {
+    //             Int4 lend = loi - downset;
+    //             Int4 rend = leftend - 1;
+    // ...
+    //          seg = (SSeg*) calloc(1, sizeof(SSeg));
+    //          seg->begin = leftend + offset;
+    //          seg->end = rightend + offset;
+    //          seg->next = *segs;
+    //          *segs = seg;
+    //          i = MIN(hii, rightend+downset);
+    //          lowlim = i + 1;
+    // ```
+    // The recursion, the left-trim handling and the order of the segments are the same as in
+    // `mask_sequence_reference`; only the entropy array and the trim use the histogram.
+    /// `mask_sequence` through `x_entropy_array` and `x_trim_segment`.
+    fn x_mask_sequence(&self, seq: &[u8]) -> Vec<MaskedInterval> {
+        let index = self.x_letter_index();
+        let mut segs_inclusive: Vec<(usize, usize)> = Vec::new();
+
+        // NCBI blast_seg.c:2030-2116 (s_SegSeq); the control flow of `seg_seq` in
+        // `mask_sequence_reference`.
+        fn seg_seq(
+            masker: &SegMasker,
+            index: &[u8; 256],
+            seq: &[u8],
+            offset: usize,
+            segs: &mut Vec<(usize, usize)>,
+        ) {
+            if seq.len() < masker.window {
+                return;
+            }
+            let h = masker.x_entropy_array(seq, index);
+            let first = masker.downset;
+            let last = seq.len().saturating_sub(masker.upset);
+            let mut lowlim = first;
+
+            let mut i = first;
+            while i <= last {
+                if h[i] != -1.0 && h[i] <= masker.locut {
+                    let loi = masker.find_low(i, lowlim, &h);
+                    let hii = masker.find_high(i, last, &h);
+
+                    let mut leftend = loi - masker.downset;
+                    let mut rightend = hii + masker.upset - 1; // inclusive
+
+                    (leftend, rightend) = masker.x_trim_segment(seq, leftend, rightend, index);
+
+                    if i + masker.upset - 1 < leftend {
+                        let lend = loi - masker.downset;
+                        if lend < leftend {
+                            let rend = leftend - 1;
+                            if rend < seq.len() && lend <= rend {
+                                if masker.ncbi_left_segments {
+                                    let mut left_segs: Vec<(usize, usize)> = Vec::new();
+                                    seg_seq(
+                                        masker,
+                                        index,
+                                        &seq[lend..=rend],
+                                        offset + lend,
+                                        &mut left_segs,
+                                    );
+                                    if let Some(&head) = left_segs.first() {
+                                        segs.insert(0, head);
+                                    }
+                                } else {
+                                    seg_seq(masker, index, &seq[lend..=rend], offset + lend, segs);
+                                }
+                            }
+                        }
+                    }
+
+                    segs.insert(0, (leftend + offset, rightend + offset));
+
+                    i = hii.min(rightend + masker.downset);
+                    lowlim = i + 1;
+                    i += 1;
+                } else {
+                    i += 1;
+                }
+            }
+        }
+
+        seg_seq(self, &index, seq, 0, &mut segs_inclusive);
+        merge_segs_inclusive(seq.len(), &mut segs_inclusive);
+        segs_inclusive.reverse();
+        segs_inclusive
+            .into_iter()
+            .map(|(b, e)| MaskedInterval::new(b, e.saturating_add(1)))
+            .collect()
+    }
+}
+
 fn merge_segs_inclusive(seq_len: usize, segs_inclusive: &mut Vec<(usize, usize)>) {
     if segs_inclusive.is_empty() {
         return;
@@ -1018,6 +1790,104 @@ mod tests {
             }
         }
         residues
+    }
+
+    // EXPERIMENT (LOSAT_X_SEGFAST): the histogram path against the reference on
+    // random protein-like sequences with planted low-complexity stretches,
+    // ambiguity codes and stop codons.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:2030-2032,2053-2060
+    // ```c
+    // s_SegSeq(SSequence* seq, SegParameters* sparamsp, SSeg **segs,
+    //                    Int4 offset)
+    // {
+    // ...
+    //    H = s_SeqEntropy(seq, window, sparamsp->maxbogus);
+    //    if (H == NULL)
+    //       return status;
+    //    first = downset;
+    //    last = seq->length - upset;
+    //    lowlim = first;
+    // ```
+    // The test masks random sequences with both implementations and compares the intervals.
+    #[test]
+    fn x_fast_seg_matches_reference_on_random_sequences() {
+        let mut state = 0x243F_6A88_85A3_08D3u64;
+        let mut next = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        let valid: Vec<u8> = (0u8..28)
+            .filter(|&c| c == 1 || (3..=20).contains(&c) || c == 22)
+            .collect();
+        let cases: usize = std::env::var("LOSAT_FUZZ_CASES")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(4000);
+        let mut masked = 0usize;
+        for case in 0..cases {
+            let params = match case % 5 {
+                0 => SegParams::new(12, 2.2, 2.5),
+                1 => SegParams::new(10, 1.8, 2.1),
+                2 => SegParams::with_all(12, 2.2, 2.5, 2, 50),
+                3 => SegParams::with_all(15, 2.6, 2.9, 15, 100),
+                _ => SegParams::with_all(8, 1.5, 1.9, 1, 10),
+            };
+            let masker = if case % 7 == 3 {
+                SegMasker::with_params(&params).keeping_all_left_segments()
+            } else {
+                SegMasker::with_params(&params)
+            };
+            assert!(masker.x_fast_applies());
+            let len = 1 + (next() % if case % 11 == 0 { 3000 } else { 400 }) as usize;
+            let mut seq = Vec::with_capacity(len);
+            while seq.len() < len {
+                match next() % 10 {
+                    // a run over a tiny alphabet (possibly a homopolymer)
+                    0 | 1 => {
+                        let letters = 1 + (next() % 4) as usize;
+                        let pool: Vec<u8> = (0..letters)
+                            .map(|_| valid[(next() % valid.len() as u64) as usize])
+                            .collect();
+                        let run = 1 + (next() % if case % 13 == 0 { 300 } else { 60 }) as usize;
+                        for _ in 0..run {
+                            seq.push(pool[(next() % pool.len() as u64) as usize]);
+                        }
+                    }
+                    // letters outside the SEG alphabet (X, B, Z, *, gap, ...)
+                    2 => {
+                        let run = 1 + (next() % 6) as usize;
+                        for _ in 0..run {
+                            seq.push([0u8, 2, 21, 23, 24, 25, 26, 27, 200][(next() % 9) as usize]);
+                        }
+                    }
+                    _ => {
+                        let run = 1 + (next() % 40) as usize;
+                        for _ in 0..run {
+                            seq.push(valid[(next() % valid.len() as u64) as usize]);
+                        }
+                    }
+                }
+            }
+            seq.truncate(len);
+            let reference = if seq.len() < masker.window {
+                Vec::new()
+            } else {
+                masker.mask_sequence_reference(&seq)
+            };
+            let fast = if seq.len() < masker.window {
+                Vec::new()
+            } else {
+                masker.x_mask_sequence(&seq)
+            };
+            assert_eq!(fast, reference, "case {case}, length {len}");
+            masked += reference.len();
+        }
+        assert!(
+            masked > cases / 4,
+            "only {masked} intervals in {cases} cases"
+        );
     }
 
     #[test]

@@ -158,8 +158,277 @@ impl BlastAaLookupTable {
     }
 }
 
-type LookupChain = Vec<i32>;
-type LookupBackboneChains = Vec<Option<LookupChain>>;
+// EXPERIMENT (LOSAT_X_LUTARENA): the per-cell chains of a thin backbone are
+// carved from a few large blocks owned by the backbone instead of being one
+// `malloc`/`realloc`/`free` each.
+//
+// A lookup table for one query chunk makes tens of thousands of chains that
+// start at 8 `Int4` and double as they fill, and frees them all when the
+// final backbone has been written. Under WebAssembly threads the allocator
+// has one lock for all threads, and two threads building lookup tables spend
+// more time waiting for it than allocating. The arena hands out blocks of the
+// same sizes with the same contents (zeroed where `calloc`/`Vec::resize` zero
+// them) and reuses the block a chain leaves when it doubles, so every chain
+// holds exactly the integers it held before; only where the block lives
+// changes. Everything is released when the backbone is dropped, as before.
+//
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:48-72
+// ```c
+// if (backbone[index] == NULL) {
+//     chain_size = 8;
+//     hits_in_chain = 0;
+//     chain = (Int4 *) malloc(chain_size * sizeof(Int4));
+// ...
+//     backbone[index] = chain;
+// ...
+// if ((hits_in_chain + 2) == chain_size) {
+//     chain_size = chain_size * 2;
+//     chain = (Int4 *) realloc(chain, chain_size * sizeof(Int4));
+// ...
+//     backbone[index] = chain;
+//     chain[0] = chain_size;
+// ```
+// NCBI makes one malloc for each new chain and one realloc for each doubling. The arena changes
+// where those blocks live and nothing else: a new chain still has 8 Int4, a full chain still
+// doubles, and every chain holds the same integers in the same order (placement only).
+//
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:356-360
+// ```c
+// for (j=0; j <lookup->thin_backbone[i][1]; j++)
+//     dest[j] = lookup->thin_backbone[i][j + 2];
+// /* done with this chain- free it */
+// sfree(lookup->thin_backbone[i]);
+// lookup->thin_backbone[i] = NULL;
+// ```
+// NCBI frees each chain when it has been copied into the final backbone. The arena frees all its
+// blocks together when the backbone is dropped. Reuse of memory only.
+fn x_lut_arena() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("LOSAT_X_LUTARENA").is_some())
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:52,67
+// ```c
+// chain = (Int4 *) malloc(chain_size * sizeof(Int4));
+// ...
+// chain = (Int4 *) realloc(chain, chain_size * sizeof(Int4));
+// ```
+// The blocks of the arena take the place of the malloc and realloc of the C code above. Their size
+// classes are 8, 16, 32, ... Int4, the sizes the chain has in C.
+/// Power-of-two blocks of `Int4` for the chains of one backbone.
+struct XChainArena {
+    /// Every allocation made for this arena; freed with it.
+    slabs: Vec<Box<[i32]>>,
+    cursor: *mut i32,
+    remaining: usize,
+    /// Blocks chains have left, by size class (`1 << class` ints).
+    free: Vec<Vec<std::ptr::NonNull<i32>>>,
+}
+
+impl XChainArena {
+    /// `Int4`s per slab (256 KiB).
+    const SLAB_INTS: usize = 1 << 16;
+
+    fn new() -> Self {
+        Self {
+            slabs: Vec::new(),
+            cursor: std::ptr::null_mut(),
+            remaining: 0,
+            free: Vec::new(),
+        }
+    }
+
+    fn allocate(&mut self, ints: usize) -> *mut i32 {
+        let mut slab = vec![0i32; ints].into_boxed_slice();
+        let start = slab.as_mut_ptr();
+        // Moving the box into the list does not move the ints.
+        self.slabs.push(slab);
+        start
+    }
+
+    /// A block of `1 << class` ints with unspecified contents.
+    fn take(&mut self, class: u8) -> std::ptr::NonNull<i32> {
+        let ints = 1usize << class;
+        if let Some(block) = self
+            .free
+            .get_mut(class as usize)
+            .and_then(|list| list.pop())
+        {
+            return block;
+        }
+        let block = if ints > Self::SLAB_INTS / 4 {
+            self.allocate(ints)
+        } else {
+            if self.remaining < ints {
+                self.cursor = self.allocate(Self::SLAB_INTS);
+                self.remaining = Self::SLAB_INTS;
+            }
+            let block = self.cursor;
+            // SAFETY: `ints <= remaining`, so the block stays inside the slab.
+            self.cursor = unsafe { block.add(ints) };
+            self.remaining -= ints;
+            block
+        };
+        std::ptr::NonNull::new(block).expect("allocation is not null")
+    }
+
+    /// Return a block obtained from `take(class)` of this arena.
+    fn give(&mut self, block: std::ptr::NonNull<i32>, class: u8) {
+        if self.free.len() <= class as usize {
+            self.free.resize_with(class as usize + 1, Vec::new);
+        }
+        self.free[class as usize].push(block);
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:49-56
+// ```c
+// if (backbone[index] == NULL) {
+//     chain_size = 8;
+//     hits_in_chain = 0;
+//     chain = (Int4 *) malloc(chain_size * sizeof(Int4));
+//     ASSERT(chain != NULL);
+//     chain[0] = chain_size;
+//     chain[1] = hits_in_chain;
+//     backbone[index] = chain;
+// ```
+// A chain is the C array: chain[0] = allocated size, chain[1] = number of hits, then the hits.
+// It is either a Vec (the reference path) or a block of the arena (LOSAT_X_LUTARENA).
+/// One chain of a thin backbone: `chain[0]` = allocated ints, `chain[1]` =
+/// hits, then the hits (NCBI `Int4 *`).
+enum LookupChain {
+    Heap(Vec<i32>),
+    /// `1 << class` ints inside the arena of the backbone that holds this
+    /// chain. Only ever stored in that backbone's `cells`.
+    Pooled {
+        block: std::ptr::NonNull<i32>,
+        class: u8,
+    },
+}
+
+impl LookupChain {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:49-56
+    // ```c
+    // chain_size = 8;
+    // hits_in_chain = 0;
+    // chain = (Int4 *) malloc(chain_size * sizeof(Int4));
+    // ASSERT(chain != NULL);
+    // chain[0] = chain_size;
+    // chain[1] = hits_in_chain;
+    // backbone[index] = chain;
+    // ```
+    // Dispatch point: with LOSAT_X_LUTARENA the new chain comes from the arena, otherwise from a
+    // Vec of 8 zeroed ints. Both have chain_size 8 and the same contents.
+    /// The 8-int chain of blast_lookup.c:50-56. NCBI `malloc`s it and sets `chain[0..2]`; main's
+    /// `vec![0; 8]` zeroes all 8 ints, and so does the arena block.
+    fn x_zeroed8(arena: &mut XChainArena) -> Self {
+        if x_lut_arena() {
+            let block = arena.take(3);
+            // SAFETY: the block has 8 ints.
+            unsafe { std::ptr::write_bytes(block.as_ptr(), 0, 8) };
+            LookupChain::Pooled { block, class: 3 }
+        } else {
+            LookupChain::Heap(vec![0; 8])
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:65-72
+    // ```c
+    // if ((hits_in_chain + 2) == chain_size) {
+    //     chain_size = chain_size * 2;
+    //     chain = (Int4 *) realloc(chain, chain_size * sizeof(Int4));
+    // ...
+    //     backbone[index] = chain;
+    //     chain[0] = chain_size;
+    // ```
+    // Dispatch point: a Vec chain is resized as before; an arena chain is copied into a block of twice
+    // the size and the old block is given back. The first old_size ints are the same, the rest are zero.
+    /// `Vec::resize(new_size, 0)` for a chain that doubles.
+    fn x_resize(&mut self, new_size: usize, arena: &mut XChainArena) {
+        match self {
+            LookupChain::Heap(chain) => chain.resize(new_size, 0),
+            LookupChain::Pooled { block, class } => {
+                let old_size = 1usize << *class;
+                assert!(
+                    new_size == old_size * 2,
+                    "lookup chains double: {old_size} -> {new_size}"
+                );
+                let new_block = arena.take(*class + 1);
+                // SAFETY: both blocks are valid for their sizes and distinct.
+                unsafe {
+                    std::ptr::copy_nonoverlapping(block.as_ptr(), new_block.as_ptr(), old_size);
+                    std::ptr::write_bytes(new_block.as_ptr().add(old_size), 0, old_size);
+                }
+                arena.give(*block, *class);
+                *block = new_block;
+                *class += 1;
+            }
+        }
+    }
+}
+
+impl std::ops::Deref for LookupChain {
+    type Target = [i32];
+    #[inline(always)]
+    fn deref(&self) -> &[i32] {
+        match self {
+            LookupChain::Heap(chain) => chain,
+            // SAFETY: the block has `1 << class` initialised ints, and the
+            // arena it lies in lives as long as the backbone this chain is
+            // borrowed from.
+            LookupChain::Pooled { block, class } => unsafe {
+                std::slice::from_raw_parts(block.as_ptr(), 1usize << *class)
+            },
+        }
+    }
+}
+
+impl std::ops::DerefMut for LookupChain {
+    #[inline(always)]
+    fn deref_mut(&mut self) -> &mut [i32] {
+        match self {
+            LookupChain::Heap(chain) => chain,
+            // SAFETY: as in `deref`, and `&mut self` is the only access.
+            LookupChain::Pooled { block, class } => unsafe {
+                std::slice::from_raw_parts_mut(block.as_ptr(), 1usize << *class)
+            },
+        }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:246-247
+// ```c
+// lookup->thin_backbone =
+//     (Int4 **) calloc(lookup->backbone_size, sizeof(Int4 *));
+// ```
+// The backbone of chains is the calloc of `backbone_size` pointers in the C code (here all None).
+/// The chains of one thin backbone (NCBI `Int4 **`), with the memory of the
+/// pooled ones. `cells` is declared first so that it is dropped first.
+struct LookupBackboneChains {
+    cells: Vec<Option<LookupChain>>,
+    arena: XChainArena,
+}
+
+impl LookupBackboneChains {
+    /// `calloc(backbone_size, sizeof(Int4 *))`
+    fn new(backbone_size: usize) -> Self {
+        Self {
+            cells: std::iter::repeat_with(|| None)
+                .take(backbone_size)
+                .collect(),
+            arena: XChainArena::new(),
+        }
+    }
+}
+
+impl std::ops::Deref for LookupBackboneChains {
+    type Target = [Option<LookupChain>];
+    #[inline(always)]
+    fn deref(&self) -> &[Option<LookupChain>] {
+        &self.cells
+    }
+}
 
 #[derive(Default)]
 struct LookupBuildStats {
@@ -331,6 +600,18 @@ fn count_lookup_positions(lookup_segments: &[(i32, i32)], word_length: usize) ->
 // offset += length + 1;
 // frame_offsets[context+1] = offset;
 // ```
+//
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2797
+// ```c
+// Blast_ResFreqString(sbp, rfp, (char*)buffer, query_length);
+// ...
+// loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
+// ...
+// if (check_ideal && kbp->Lambda >= sbp->kbp_ideal->Lambda)
+//    Blast_KarlinBlkCopy(kbp, sbp->kbp_ideal);
+// ```
+// prepare_lookup_query now calls x_prepare_lookup_query with x_with_karlin = true, which runs the
+// same code as before (dispatch point of LOSAT_X_LUTSPLIT).
 fn prepare_lookup_query(
     queries: &[Vec<QueryFrame>],
     ideal_params: KarlinParams,
@@ -339,6 +620,135 @@ fn prepare_lookup_query(
     check_ideal: bool,
     matrix: ScoringMatrix,
     bounds: (i32, i32),
+) -> PreparedLookupQuery {
+    x_prepare_lookup_query(
+        queries,
+        ideal_params,
+        std_comp,
+        word_length,
+        check_ideal,
+        matrix,
+        bounds,
+        true,
+    )
+}
+
+// No NCBI counterpart: reads the switch once; it does not change any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_LUTSPLIT): `LOSAT_X_LUTSPLIT` set.
+pub(crate) fn x_lut_split() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("LOSAT_X_LUTSPLIT").is_some())
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2797
+// ```c
+// Blast_ResFreqString(sbp, rfp, (char*)buffer, query_length);
+// ...
+// loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
+// ...
+// if (check_ideal && kbp->Lambda >= sbp->kbp_ideal->Lambda)
+//    Blast_KarlinBlkCopy(kbp, sbp->kbp_ideal);
+// ```
+// NCBI computes the per-context Karlin blocks from the query composition, separately from the
+// lookup table (the table is built in lookup_wrap.c from the query and its lookup segments only).
+// This function runs the same preparation (prepare_lookup_query) and returns only the contexts.
+/// EXPERIMENT (LOSAT_X_LUTSPLIT): the contexts `build_ncbi_lookup_for_profile`
+/// returns, for a caller that drops the table. The table build only reads the
+/// contexts (their count and the end of the last one) and hands them back
+/// unchanged, so they are those of `prepare_lookup_query`. `None` when the
+/// switch is off or the build would print its diagnostics.
+pub(crate) fn x_lookup_contexts_for_profile(
+    queries: &[Vec<QueryFrame>],
+    check_ideal: bool,
+    matrix: ScoringMatrix,
+    word_length: usize,
+) -> Option<Vec<QueryContext>> {
+    if !x_lut_split() || diagnostics_enabled() {
+        return None;
+    }
+    let bounds = if matrix == ScoringMatrix::Blosum62 {
+        (-4, 11)
+    } else {
+        matrix_score_bounds(matrix)
+    };
+    Some(
+        prepare_lookup_query(
+            queries,
+            ideal_karlin_params_for_matrix(matrix, bounds),
+            &compute_std_aa_composition(),
+            word_length,
+            check_ideal,
+            matrix,
+            bounds,
+        )
+        .contexts,
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:93-97
+// ```c
+// BlastAaLookupTableNew(lookup_options, (BlastAaLookupTable* *)
+//                       &lookup_wrap->lut);
+// ((BlastAaLookupTable*)lookup_wrap->lut)->use_pssm = has_pssm;
+// BlastAaLookupIndexQuery( (BlastAaLookupTable*) lookup_wrap->lut, matrix,
+//                           query, lookup_segments, 0);
+// ```
+// The table is built from the concatenated query, its lookup segments, the matrix and the
+// threshold; it reads no Karlin parameter. This function skips the Karlin computation and builds
+// the same table (the contexts it fills carry default Karlin parameters, which the table build
+// does not read).
+/// EXPERIMENT (LOSAT_X_LUTSPLIT): the table `build_ncbi_lookup_for_profile`
+/// returns, for a caller that drops the contexts. The per-context Karlin
+/// parameters are the only part of the preparation the table does not read;
+/// they are left out. `None` when the switch is off.
+pub(crate) fn x_lookup_table_for_profile(
+    queries: &[Vec<QueryFrame>],
+    threshold: i32,
+    matrix: ScoringMatrix,
+    word_length: usize,
+) -> Option<BlastAaLookupTable> {
+    if !x_lut_split() {
+        return None;
+    }
+    let bounds = if matrix == ScoringMatrix::Blosum62 {
+        (-4, 11)
+    } else {
+        matrix_score_bounds(matrix)
+    };
+    let prepared = x_prepare_lookup_query(
+        queries,
+        ideal_karlin_params_for_matrix(matrix, bounds),
+        &compute_std_aa_composition(),
+        word_length,
+        false,
+        matrix,
+        bounds,
+        false,
+    );
+    Some(build_lookup_from_prepared(prepared, threshold, matrix, word_length).0)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2797
+// ```c
+// Blast_ResFreqString(sbp, rfp, (char*)buffer, query_length);
+// ...
+// loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
+// ...
+// if (check_ideal && kbp->Lambda >= sbp->kbp_ideal->Lambda)
+//    Blast_KarlinBlkCopy(kbp, sbp->kbp_ideal);
+// ```
+// This is prepare_lookup_query with a flag: x_with_karlin = true runs the code of the reference
+// path unchanged (the Karlin computation cited below); false skips it for LOSAT_X_LUTSPLIT.
+fn x_prepare_lookup_query(
+    queries: &[Vec<QueryFrame>],
+    ideal_params: KarlinParams,
+    std_comp: &[f64; LOOKUP_ALPHABET_SIZE],
+    word_length: usize,
+    check_ideal: bool,
+    matrix: ScoringMatrix,
+    bounds: (i32, i32),
+    x_with_karlin: bool,
 ) -> PreparedLookupQuery {
     let mut prepared = PreparedLookupQuery {
         concat_query: Vec::new(),
@@ -363,6 +773,33 @@ fn prepare_lookup_query(
                 .lookup_locations
                 .extend_from_slice(&lookup_segments);
 
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:93-97
+            // ```c
+            // BlastAaLookupTableNew(lookup_options, (BlastAaLookupTable* *)
+            //                       &lookup_wrap->lut);
+            // ((BlastAaLookupTable*)lookup_wrap->lut)->use_pssm = has_pssm;
+            // BlastAaLookupIndexQuery( (BlastAaLookupTable*) lookup_wrap->lut, matrix,
+            //                           query, lookup_segments, 0);
+            // ```
+            // The table build reads only the query, the lookup segments, the matrix and the threshold, so
+            // the contexts can skip the Karlin parameters here.
+            // EXPERIMENT (LOSAT_X_LUTSPLIT): a caller that only wants the table.
+            if !x_with_karlin {
+                prepared.contexts.push(QueryContext {
+                    q_idx: q_idx as u32,
+                    f_idx: f_idx as u8,
+                    frame: frame.frame,
+                    aa_seq: frame.aa_seq.clone(),
+                    aa_seq_nomask: frame.aa_seq_nomask.clone(),
+                    aa_len: frame.aa_len,
+                    orig_len: frame.orig_len,
+                    frame_base: query_offset,
+                    is_valid: true,
+                    karlin_params: KarlinParams::default(),
+                });
+                query_offset += frame.aa_seq.len() as i32 - 1;
+                continue;
+            }
             let ctx_comp = compute_aa_composition(&frame.aa_seq, frame.aa_len);
             // NCBI c++/src/algo/blast/core/blast_stat.c:2778-2803:
             // score frequencies use this score block's matrix and lo/hi scores.
@@ -498,8 +935,25 @@ fn blast_lookup_add_word_hit(
         index = (index << charsize) | residue as usize;
     }
 
-    let chain = backbone[index].get_or_insert_with(|| {
-        let mut chain = vec![0; 8];
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:48-72
+    // ```c
+    // if (backbone[index] == NULL) {
+    //     chain_size = 8;
+    //     hits_in_chain = 0;
+    //     chain = (Int4 *) malloc(chain_size * sizeof(Int4));
+    // ...
+    // if ((hits_in_chain + 2) == chain_size) {
+    //     chain_size = chain_size * 2;
+    //     chain = (Int4 *) realloc(chain, chain_size * sizeof(Int4));
+    // ...
+    //     backbone[index] = chain;
+    //     chain[0] = chain_size;
+    // ```
+    // Dispatch point: the chain is created and grown through x_zeroed8 and x_resize, which use the
+    // arena when LOSAT_X_LUTARENA is set. The statements that follow are the C ones.
+    let LookupBackboneChains { cells, arena } = backbone;
+    let chain = cells[index].get_or_insert_with(|| {
+        let mut chain = LookupChain::x_zeroed8(arena);
         chain[0] = 8;
         chain[1] = 0;
         chain
@@ -509,7 +963,7 @@ fn blast_lookup_add_word_hit(
     let chain_size = usize::try_from(chain[0]).expect("NCBI BLAST lookup chain size must fit");
     if (hits_in_chain + 2) == chain_size {
         let new_size = chain_size * 2;
-        chain.resize(new_size, 0);
+        chain.x_resize(new_size, arena);
         chain[0] = i32::try_from(new_size).expect("NCBI BLAST lookup chain size must fit Int4");
     }
 
@@ -974,7 +1428,13 @@ fn build_lookup_from_prepared(
     //     }
     // }
     // ```
-    let mut exact_backbone: LookupBackboneChains = vec![None; backbone_size];
+    //
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:448
+    // ```c
+    // exact_backbone = (Int4 **) calloc(lookup->backbone_size, sizeof(Int4 *));
+    // ```
+    // Same empty backbone as the C code; with LOSAT_X_LUTARENA its chains come from an arena.
+    let mut exact_backbone = LookupBackboneChains::new(backbone_size);
     build_stats.total_exact_positions = blast_lookup_index_query_exact_matches(
         &mut exact_backbone,
         word_length as i32,
@@ -1014,7 +1474,13 @@ fn build_lookup_from_prepared(
     // Phase 1b: Add neighboring words (NCBI precomputed neighbors).
     // Reference: ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:446-543
     let residue_mask: usize = (1usize << charsize) - 1;
-    let mut thin_backbone: LookupBackboneChains = vec![None; backbone_size];
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:246-247
+    // ```c
+    // lookup->thin_backbone =
+    //     (Int4 **) calloc(lookup->backbone_size, sizeof(Int4 *));
+    // ```
+    // Same empty thin backbone as the C code; with LOSAT_X_LUTARENA its chains come from an arena.
+    let mut thin_backbone = LookupBackboneChains::new(backbone_size);
     let mut counts: Vec<u32> = vec![0; backbone_size];
 
     for idx in 0..backbone_size {

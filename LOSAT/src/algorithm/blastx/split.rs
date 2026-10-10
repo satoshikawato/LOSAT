@@ -394,8 +394,23 @@ pub fn split_queries(
             prepared: full.clone(),
         }]);
     }
-    let mut chunks = Vec::new();
-    for index in 0..count {
+    // EXPERIMENT (LOSAT_X_BXPAR): a chunk's query setup (translation, SEG) reads
+    // only its own slice of the query, so the chunks can be prepared on the
+    // search pool; the corrections below still run in chunk order.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:237-249
+    // ```c
+    //         for (Uint4 i = 0; i < query_splitter->GetNumberOfChunks(); i++) {
+    // ...
+    //                 CRef<IQueryFactory> chunk_qf =
+    //                     query_splitter->GetQueryFactoryForChunk(i);
+    // ...
+    //                 CRef<ILocalQueryData> query_data(
+    //                         chunk_qf->MakeLocalQueryData( &*m_Options ) );
+    // ```
+    // NCBI prepares each query chunk in turn (query factory for the chunk, then its local query
+    // data, which holds the translation and the filtering). make_chunk is the same preparation for
+    // one chunk, as a closure so that several chunks can be prepared at once.
+    let make_chunk = |index: usize| -> Result<QueryChunk> {
         let start = index * (size - OVERLAP_NT);
         let end = if index + 1 == count {
             length
@@ -438,12 +453,43 @@ pub fn split_queries(
                 }
             })
             .collect();
-        chunks.push(QueryChunk {
+        Ok(QueryChunk {
             range: start..end,
             absolute_contexts,
             corrections: vec![i32::MAX; 6],
             prepared,
-        });
+        })
+    };
+    let mut chunks: Vec<QueryChunk> = Vec::new();
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:237-249
+    // ```c
+    //         for (Uint4 i = 0; i < query_splitter->GetNumberOfChunks(); i++) {
+    // ...
+    //                 CRef<IQueryFactory> chunk_qf =
+    //                     query_splitter->GetQueryFactoryForChunk(i);
+    // ...
+    //                 CRef<ILocalQueryData> query_data(
+    //                         chunk_qf->MakeLocalQueryData( &*m_Options ) );
+    // ```
+    // Dispatch point: with LOSAT_X_BXPAR on and inside the search pool, the chunks are prepared in
+    // parallel; otherwise the loop below prepares them one after another as NCBI does. The chunks
+    // are collected in index order and the corrections that follow still run in chunk order.
+    #[cfg(feature = "parallel")]
+    if super::runtime::x_bx_parallel()
+        && !super::runtime::x_inner_serial()
+        && rayon::current_thread_index().is_some()
+        && rayon::current_num_threads() > 1
+    {
+        use rayon::prelude::*;
+        chunks = (0..count)
+            .into_par_iter()
+            .map(make_chunk)
+            .collect::<Result<Vec<_>>>()?;
+    }
+    if chunks.is_empty() {
+        for index in 0..count {
+            chunks.push(make_chunk(index)?);
+        }
     }
     for index in 0..count {
         for c in 0..6 {

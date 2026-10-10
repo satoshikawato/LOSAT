@@ -189,6 +189,34 @@ impl GeneticCode {
         if codon.len() != 3 {
             return b'X';
         }
+        // EXPERIMENT (LOSAT_X_CODONFAST): three unambiguous bases select exactly
+        // one (i, j, k) of the loops below, so the answer is that one table entry.
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:375-379,394-403
+        // ```c
+        //    static Uint1 mapping[4] = { 8,     /* T in ncbi4na */
+        //                                2,     /* C */
+        //                                1,     /* A */
+        //                                4 };   /* G */
+        // ...
+        //    for (i = 0; i < 4; i++) {
+        //       if (codon[0] & mapping[i]) {
+        //          index0 = i * 16;
+        //          for (j = 0; j < 4; j++) {
+        //             if (codon[1] & mapping[j]) {
+        //                index1 = index0 + (j * 4);
+        //                for (k = 0; k < 4; k++) {
+        //                   if (codon[2] & mapping[k]) {
+        //                      index2 = index1 + k;
+        //                      taa = codes[index2];
+        // ```
+        // The reference path below ports this nested loop. When the switch is on and all three
+        // bases are unambiguous, only one (i, j, k) passes the `&` tests, so the loop would end
+        // with `aa = codes[i*16+j*4+k]` and the table is read once instead.
+        if x_codon_fast() {
+            if let Some(aa) = self.x_get_unambiguous(codon) {
+                return aa;
+            }
+        }
         let masks = [
             base_mask(codon[0]),
             base_mask(codon[1]),
@@ -224,6 +252,88 @@ impl GeneticCode {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:394-403
+// ```c
+//    for (i = 0; i < 4; i++) {
+//       if (codon[0] & mapping[i]) {
+//          index0 = i * 16;
+//          for (j = 0; j < 4; j++) {
+//             if (codon[1] & mapping[j]) {
+//                index1 = index0 + (j * 4);
+//                for (k = 0; k < 4; k++) {
+//                   if (codon[2] & mapping[k]) {
+//                      index2 = index1 + k;
+//                      taa = codes[index2];
+// ```
+// No NCBI counterpart: the switch is read once per process. It chooses between the loop
+// above and a single table read that gives the same amino acid.
+fn x_codon_fast() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("LOSAT_X_CODONFAST").is_some())
+}
+
+impl GeneticCode {
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:375-379,394-403
+    /// ```c
+    ///    static Uint1 mapping[4] = { 8,     /* T in ncbi4na */
+    ///                                2,     /* C */
+    ///                                1,     /* A */
+    ///                                4 };   /* G */
+    /// ...
+    ///    for (i = 0; i < 4; i++) {
+    ///       if (codon[0] & mapping[i]) {
+    ///          index0 = i * 16;
+    ///          for (j = 0; j < 4; j++) {
+    ///             if (codon[1] & mapping[j]) {
+    ///                index1 = index0 + (j * 4);
+    ///                for (k = 0; k < 4; k++) {
+    ///                   if (codon[2] & mapping[k]) {
+    ///                      index2 = index1 + k;
+    ///                      taa = codes[index2];
+    /// ```
+    /// This is the one (i, j, k) that `s_CodonToAA` reaches when every codon byte has a single
+    /// bit set: `mapping[]` gives the index of that bit. Ambiguous bases return `None` and use
+    /// the loop in `get`.
+    /// EXPERIMENT (LOSAT_X_CODONFAST): the amino acid of three unambiguous
+    /// bases, `None` when a base is ambiguous or not a base.
+    #[inline]
+    fn x_get_unambiguous(&self, codon: &[u8]) -> Option<u8> {
+        let i = X_BASE_INDEX[codon[0] as usize];
+        let j = X_BASE_INDEX[codon[1] as usize];
+        let k = X_BASE_INDEX[codon[2] as usize];
+        ((i | j | k) < 4).then(|| self.table[i as usize * 16 + j as usize * 4 + k as usize])
+    }
+}
+
+// EXPERIMENT (LOSAT_X_CODONFAST): position of a base in NCBI's
+// `mapping[4] = { 8, 2, 1, 4 }` (T, C, A, G) when `base_mask` has exactly that
+// one bit, 4 otherwise.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:375-379,395-396
+// ```c
+//    static Uint1 mapping[4] = { 8,     /* T in ncbi4na */
+//                                2,     /* C */
+//                                1,     /* A */
+//                                4 };   /* G */
+// ...
+//       if (codon[0] & mapping[i]) {
+//          index0 = i * 16;
+// ```
+// The table holds i (0..3) for T/U, C, A, G in either case. Any other byte, including
+// an ambiguity code, maps to 4 so that `(i | j | k) < 4` fails.
+const X_BASE_INDEX: [u8; 256] = {
+    let mut table = [4u8; 256];
+    let bases = [(b'T', 0u8), (b'U', 0), (b'C', 1), (b'A', 2), (b'G', 3)];
+    let mut n = 0;
+    while n < bases.len() {
+        let (base, index) = bases[n];
+        table[base as usize] = index;
+        table[base.to_ascii_lowercase() as usize] = index;
+        n += 1;
+    }
+    table
+};
+
 // NCBI reference: c++/src/algo/blast/core/blast_encoding.c:94-103
 // ```c
 // const Uint1 IUPACNA_TO_NCBI4NA[128]={
@@ -254,6 +364,95 @@ fn base_mask(base: u8) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // EXPERIMENT: the table path of `get` against NCBI's nested loops.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:375-379,394-405
+    // ```c
+    //    static Uint1 mapping[4] = { 8,     /* T in ncbi4na */
+    //                                2,     /* C */
+    //                                1,     /* A */
+    //                                4 };   /* G */
+    // ...
+    //    for (i = 0; i < 4; i++) {
+    //       if (codon[0] & mapping[i]) {
+    //          index0 = i * 16;
+    //          for (j = 0; j < 4; j++) {
+    //             if (codon[1] & mapping[j]) {
+    //                index1 = index0 + (j * 4);
+    //                for (k = 0; k < 4; k++) {
+    //                   if (codon[2] & mapping[k]) {
+    //                      index2 = index1 + k;
+    //                      taa = codes[index2];
+    //                      if (! aa)
+    //                         aa = taa;
+    // ```
+    // The test compares the table with `base_mask` and with a copy of this loop for all
+    // codes and for 25 symbols per codon position.
+    #[test]
+    fn x_base_index_matches_base_mask_for_every_byte() {
+        for byte in 0..=255u8 {
+            let expected = match base_mask(byte) {
+                8 => 0,
+                2 => 1,
+                1 => 2,
+                4 => 3,
+                _ => 4,
+            };
+            assert_eq!(X_BASE_INDEX[byte as usize], expected, "byte {byte}");
+        }
+        let slow = |code: &GeneticCode, codon: &[u8; 3]| -> u8 {
+            let masks = [
+                base_mask(codon[0]),
+                base_mask(codon[1]),
+                base_mask(codon[2]),
+            ];
+            if masks.contains(&0) {
+                return b'X';
+            }
+            let bit = [8, 2, 1, 4];
+            let mut aa = 0;
+            for i in 0..4 {
+                for j in 0..4 {
+                    for k in 0..4 {
+                        if masks[0] & bit[i] == 0
+                            || masks[1] & bit[j] == 0
+                            || masks[2] & bit[k] == 0
+                        {
+                            continue;
+                        }
+                        let translated = code.table[i * 16 + j * 4 + k];
+                        if aa == 0 {
+                            aa = translated;
+                        } else if translated != aa {
+                            return b'X';
+                        }
+                    }
+                }
+            }
+            aa
+        };
+        let letters = b"ACGTUacgtuNRYKMSWBDHVn-*X";
+        for &(id, _) in TABLES {
+            let code = GeneticCode::try_from_id(id).unwrap();
+            for &a in letters {
+                for &b in letters {
+                    for &c in letters {
+                        let codon = [a, b, c];
+                        // `get` is the nested loops unless the switch is set.
+                        assert_eq!(code.get(&codon), slow(&code, &codon), "code {id} {codon:?}");
+                        let unambiguous = codon.iter().all(|base| b"ACGTUacgtu".contains(base));
+                        match code.x_get_unambiguous(&codon) {
+                            Some(aa) => {
+                                assert!(unambiguous, "code {id} {codon:?}");
+                                assert_eq!(aa, slow(&code, &codon), "code {id} {codon:?}");
+                            }
+                            None => assert!(!unambiguous, "code {id} {codon:?}"),
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn pinned_gc_prt_all_27_codes_and_64_codons() {

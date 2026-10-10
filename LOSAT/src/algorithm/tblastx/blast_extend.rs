@@ -30,6 +30,22 @@ impl DiagStruct {
     const LAST_HIT_MASK: u32 = 0x7fff_ffff;
     const FLAG_MASK: u32 = 0x8000_0000;
 
+    // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_extend.h:57-60
+    // ```c
+    // typedef struct DiagStruct {
+    //    signed int last_hit   : 31; /**< Offset of the last hit */
+    //    unsigned int flag      : 1 ; /**< Reset the next extension? */
+    // } DiagStruct;
+    // ```
+    // No computation: it returns the packed (last_hit, flag) word of one cell so that the
+    // LOSAT_X_SEEDBUCKETSHADOW mode can compare two diagonal tables cell by cell. It does not change
+    // any value NCBI computes.
+    /// The packed cell, for comparisons.
+    #[inline]
+    pub fn raw_bits(&self) -> u32 {
+        self.raw
+    }
+
     /// Return the flag (0/1).
     #[inline]
     pub fn flag(&self) -> u32 {

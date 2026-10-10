@@ -267,7 +267,19 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
     let subject_file =
         File::open(&args.subject).map_err(|_| inaccessible("subject", &args.subject))?;
     let mut subject_stream = FastaStream::from_file(subject_file);
-    let mut stderr = io::stderr().lock();
+    // EXPERIMENT (LOSAT_X_BXBATCH): batches are then searched on other
+    // threads while this function runs. A diagnostic or a panic message
+    // written there must not wait for a lock this thread keeps for the whole
+    // run, so the handle is used unlocked: the same bytes, the lock taken for
+    // each write.
+    // No NCBI counterpart: only the stderr lock is taken per write instead of once for the run, so
+    // that other threads can write diagnostics (the bytes and their order are unchanged); it does
+    // not change any value NCBI computes.
+    let mut stderr: Box<dyn Write> = if super::runtime::x_bx_batch() {
+        Box::new(io::stderr())
+    } else {
+        Box::new(io::stderr().lock())
+    };
     let subjects = parse_fasta_stream_with_warnings(
         &mut subject_stream,
         true,
@@ -391,49 +403,279 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
         // The reader and formatter use the same diagnostic stream at distinct
         // times. RefCell only serializes Rust borrows; it does not defer events.
         let diagnostics = std::cell::RefCell::new(&mut stderr);
-        parse_fasta_stream_with_warnings(
-            &mut query_stream,
-            false,
-            args.lcase_masking,
-            BATCH_SIZE,
-            &mut |queries| {
-                // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:259-262
-                // ```c++
-                //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
-                // 	    BLAST_PROF_START( APP.LOOP.PRE );
-                //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
-                //             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
-                // ```
-                // NCBI reference (598d8ae6): c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
-                // ```c++
-                // CObjMgr_QueryFactory::CObjMgr_QueryFactory(CBlastQueryVector & queries)
-                //     : m_QueryVector(& queries)
-                // {
-                //     if (queries.Empty()) {
-                //         NCBI_THROW(CBlastException, eInvalidArgument, "Empty CBlastQueryVector");
-                //     }
-                // ```
-                if queries.is_empty() {
-                    return Err(engine("Empty CBlastQueryVector"));
+        // EXPERIMENT (LOSAT_X_BXPOOL): the batch loop as a function of the pool
+        // its searches run on, so that one pool can serve all batches.
+        // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:259-291
+        // ```c
+        //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
+        // ...
+        //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
+        // ...
+        //                 CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
+        //                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
+        //                 results = lcl_blast.Run();
+        // ...
+        //             	ITERATE(CSearchResultSet, result, *results) {
+        //                	    formatter.PrintOneResultSet(**result, query_batch);
+        //             	}
+        // ```
+        // NCBI runs this loop: take the next batch of queries, search it, print its results.
+        // x_run_batches is the same loop (the code below the batched branch is the original loop
+        // body) as a closure over the pool its searches run on, so that one pool can serve all
+        // batches.
+        let mut x_run_batches = |x_pool: Option<&crate::utils::threading::SearchPool<'_>>| {
+            // EXPERIMENT (LOSAT_X_BXBATCH): search several query batches at a time.
+            //
+            // A batch (`BATCH_SIZE` bases of queries) is searched on its own:
+            // nothing is carried from one batch to the next except the order of
+            // what is written. A file of many short queries is therefore a long
+            // row of small searches whose serial parts (query masking, lookup
+            // table, hand-over between stages) leave the other threads idle. Here
+            // the reader's events are queued instead of acted on: a warning as the
+            // bytes it would have written, a batch as a copy of its records. When
+            // enough batches are queued they are searched side by side on the
+            // pool, and the queue is then replayed in order: warnings are written,
+            // each batch is reported exactly where the unbatched loop reported it.
+            // A batch that fails ends the replay there, as it ended the loop; what
+            // the reader delivered before it failed itself is replayed first.
+            // A batch with a long query is split into chunks that use the whole
+            // pool already; it is flushed at once, never queued with others.
+            // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:345-357
+            // ```c
+            // 		while (master_node.Processing()) {
+            // 			if (!input.AtEOF()) {
+            // 			 	if (!master_node.IsFull()) {
+            // ...
+            // 					int num_q = input.GetQueryBatch(qb, q_index);
+            // 					if (num_q > 0) {
+            // 						CBlastNodeMailbox * mb(new CBlastNodeMailbox(chunk_num, master_node.GetBuzzer()));
+            // 						CBlastxNode * t(new CBlastxNode(chunk_num, GetArguments(), args, m_Bah, qb, q_index, num_q, mb));
+            // 						master_node.RegisterNode(t, mb);
+            // 						chunk_num ++;
+            // ```
+            // NCBI has a similar mode (-mt_mode 1, x_RunMTBySplitQuery): several query batches are
+            // searched at the same time as nodes of a master node. Here the batches are queued and
+            // replayed in input order; the results printed are those of the one-batch-at-a-time
+            // loop above.
+            #[cfg(feature = "parallel")]
+            if let Some(pool) = x_pool.filter(|pool| super::runtime::x_bx_batch() && pool.enabled())
+            {
+                use rayon::prelude::*;
+                enum XEvent {
+                    Warn(Vec<u8>),
+                    Batch(Vec<super::input::FastaRecord>),
                 }
-                let mut results = search_internal(queries, &subjects, &options).map_err(engine)?;
-                report::render_queries(
-                    &mut writer,
-                    &mut **diagnostics.borrow_mut(),
-                    &options,
-                    queries,
-                    &subjects,
-                    &args.subject,
-                    &mut results,
-                )
-                .map_err(report_error)?;
-                writer.flush().map_err(output_error)?;
-                processed += queries.len();
-                Ok(())
-            },
-            &mut |warning| reader_warning(warning, &mut **diagnostics.borrow_mut()),
-        )
-        .map_err(input_error)?;
+                let x_events = std::cell::RefCell::new(Vec::<XEvent>::new());
+                let x_failed = std::cell::Cell::new(false);
+                let x_wave = pool.threads() * 4;
+                let x_large = |queries: &[super::input::FastaRecord]| {
+                    queries.iter().map(|q| q.sequence.len()).sum::<usize>() > 2 * BATCH_SIZE
+                };
+                // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:259-291
+                // ```c
+                //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
+                // ...
+                //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
+                // ...
+                //                 CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
+                //                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
+                //                 results = lcl_blast.Run();
+                // ...
+                //             	ITERATE(CSearchResultSet, result, *results) {
+                //                	    formatter.PrintOneResultSet(**result, query_batch);
+                //             	}
+                // ```
+                // x_flush searches the queued batches (side by side, or one after another with the
+                // whole pool inside each) and then writes warnings and results in the order the
+                // reader produced them, which is the order of the loop above.
+                let mut x_flush = |events: Vec<XEvent>| -> Result<()> {
+                    let batches: Vec<&[super::input::FastaRecord]> = events
+                        .iter()
+                        .filter_map(|event| match event {
+                            XEvent::Batch(queries) => Some(queries.as_slice()),
+                            XEvent::Warn(_) => None,
+                        })
+                        .collect();
+                    // Fewer batches than threads (the end of the input): each one
+                    // uses the pool inside, as the unbatched loop does.
+                    let searched = if batches.len() < pool.threads() {
+                        batches
+                            .iter()
+                            .map(|queries| {
+                                super::runtime::x_search_internal_in_pool(
+                                    queries, &subjects, &options, pool,
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                    } else {
+                        pool.install(|| {
+                            batches
+                                .par_iter()
+                                .with_max_len(1)
+                                .map(|queries| {
+                                    // A long query is split into chunks that use
+                                    // the pool; a short batch is one serial job.
+                                    if x_large(queries) {
+                                        super::runtime::x_search_internal_in_pool(
+                                            queries, &subjects, &options, pool,
+                                        )
+                                    } else {
+                                        super::runtime::x_search_internal_serial(
+                                            queries, &subjects, &options,
+                                        )
+                                    }
+                                })
+                                .collect::<Vec<_>>()
+                        })
+                    };
+                    let mut searched = searched.into_iter();
+                    for event in &events {
+                        match event {
+                            XEvent::Warn(bytes) => diagnostics.borrow_mut().write_all(bytes)?,
+                            XEvent::Batch(queries) => {
+                                let mut results = searched
+                                    .next()
+                                    .expect("one search per queued batch")
+                                    .map_err(engine)?;
+                                report::render_queries(
+                                    &mut writer,
+                                    &mut **diagnostics.borrow_mut(),
+                                    &options,
+                                    queries,
+                                    &subjects,
+                                    &args.subject,
+                                    &mut results,
+                                )
+                                .map_err(report_error)?;
+                                writer.flush().map_err(output_error)?;
+                                processed += queries.len();
+                            }
+                        }
+                    }
+                    Ok(())
+                };
+                let parsed = parse_fasta_stream_with_warnings(
+                    &mut query_stream,
+                    false,
+                    args.lcase_masking,
+                    BATCH_SIZE,
+                    &mut |queries| {
+                        if queries.is_empty() {
+                            return Err(engine("Empty CBlastQueryVector"));
+                        }
+                        let large = x_large(queries);
+                        let events = {
+                            let mut events = x_events.borrow_mut();
+                            events.push(XEvent::Batch(queries.to_vec()));
+                            let queued = events
+                                .iter()
+                                .filter(|event| matches!(event, XEvent::Batch(_)))
+                                .count();
+                            if !large && queued < x_wave {
+                                return Ok(());
+                            }
+                            std::mem::take(&mut *events)
+                        };
+                        let flushed = x_flush(events);
+                        if flushed.is_err() {
+                            x_failed.set(true);
+                        }
+                        flushed
+                    },
+                    &mut |warning| {
+                        let mut bytes = Vec::new();
+                        reader_warning(warning, &mut bytes)?;
+                        x_events.borrow_mut().push(XEvent::Warn(bytes));
+                        Ok(())
+                    },
+                );
+                if !x_failed.get() {
+                    x_flush(x_events.take())?;
+                }
+                return parsed;
+            }
+            parse_fasta_stream_with_warnings(
+                &mut query_stream,
+                false,
+                args.lcase_masking,
+                BATCH_SIZE,
+                &mut |queries| {
+                    // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:259-262
+                    // ```c++
+                    //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
+                    // 	    BLAST_PROF_START( APP.LOOP.PRE );
+                    //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
+                    //             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
+                    // ```
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
+                    // ```c++
+                    // CObjMgr_QueryFactory::CObjMgr_QueryFactory(CBlastQueryVector & queries)
+                    //     : m_QueryVector(& queries)
+                    // {
+                    //     if (queries.Empty()) {
+                    //         NCBI_THROW(CBlastException, eInvalidArgument, "Empty CBlastQueryVector");
+                    //     }
+                    // ```
+                    if queries.is_empty() {
+                        return Err(engine("Empty CBlastQueryVector"));
+                    }
+                    // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:277-279
+                    // ```c
+                    //                 CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
+                    //                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
+                    //                 results = lcl_blast.Run();
+                    // ```
+                    // Dispatch point: with a kept pool the batch is searched on it; without one,
+                    // search_internal runs as before. Both searches compute the same result (the
+                    // pool only changes who runs the work).
+                    let mut results = match x_pool {
+                        Some(pool) => super::runtime::x_search_internal_in_pool(
+                            queries, &subjects, &options, pool,
+                        ),
+                        None => search_internal(queries, &subjects, &options),
+                    }
+                    .map_err(engine)?;
+                    report::render_queries(
+                        &mut writer,
+                        &mut **diagnostics.borrow_mut(),
+                        &options,
+                        queries,
+                        &subjects,
+                        &args.subject,
+                        &mut results,
+                    )
+                    .map_err(report_error)?;
+                    writer.flush().map_err(output_error)?;
+                    processed += queries.len();
+                    Ok(())
+                },
+                &mut |warning| reader_warning(warning, &mut **diagnostics.borrow_mut()),
+            )
+        };
+        // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:277-279
+        // ```c
+        //                 CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
+        //                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
+        //                 results = lcl_blast.Run();
+        // ```
+        // Dispatch point: NCBI builds a CLocalBlast, and so its worker threads, for every batch.
+        // With LOSAT_X_BXPOOL one pool is built for the whole run and every batch is searched on
+        // it. Reuse of threads only.
+        let x_batches = if super::runtime::x_bx_pool() && options.num_threads > 1 {
+            // A pool that cannot be built is the engine error it was when each
+            // batch built its own.
+            match crate::utils::threading::x_with_search_pool_local(
+                options.num_threads as usize,
+                "BLASTX",
+                |pool| Ok(x_run_batches(Some(pool))),
+            ) {
+                Ok(batches) => batches,
+                Err(error) => Err(engine(error)),
+            }
+        } else {
+            x_run_batches(None)
+        };
+        x_batches.map_err(input_error)?;
     }
     report::write_epilog(&mut writer, &options, &subjects, &args.subject, processed)
         .map_err(report_error)?;

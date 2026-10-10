@@ -2426,6 +2426,34 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix<'seq>(
         &mut |_| {},
     )
 }
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1232-1234,1240-1241,1256-1256,1259-1260
+// ```c
+//                 if (compo_adjust_mode != eNoCompositionBasedStats &&
+//                         (subject_is_translated || hsp_index == 0
+//                                 || (nearIdenticalStatus != oldNearIdenticalStatus))) {
+// ...
+//                     adjust_search_failed =
+//                             Blast_AdjustScores(matrix, query_composition,
+// ...
+//                     num_adjustments++;
+// ...
+//                 if ( !adjust_search_failed ) {
+//                     newAlign = callbacks->redo_one_alignment(
+// ```
+// No NCBI counterpart: LOSAT_X_BXPAR probe. It records, per match, whether `Blast_AdjustScores`
+// ran (bit 0) and whether an alignment was redone first (bit 1), so a caller that redoes matches
+// out of order can tell which matrix a redo used. It is read by the BLASTX parallel redo and
+// does not change any value NCBI computes.
+thread_local! {
+    /// EXPERIMENT (LOSAT_X_BXPAR): what one match did with the matrix it was
+    /// handed.  Bit 0: an adjustment succeeded (the matrix was replaced); bit 1:
+    /// an alignment was redone before that, i.e. with the matrix left behind by
+    /// an earlier match (redo_alignment.c:1232-1259 skips `Blast_AdjustScores`
+    /// for a protein subject unless `hsp_index == 0`).  A caller that redoes
+    /// matches out of order resets this before a match and reads it afterwards.
+    pub(crate) static X_REDO_PROBE: Cell<u8> = const { Cell::new(0) };
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1232-1274
 // ```c++
 //                 if (compo_adjust_mode != eNoCompositionBasedStats &&
@@ -2774,6 +2802,16 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix_observed<'s
                             callbacks.calc_lambda.unwrap_or(redo_calc_lambda),
                         )?;
                         if let Some(adjusted) = adjusted {
+                            // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1240-1241,1256-1256
+                            // ```c
+                            //                     adjust_search_failed =
+                            //                             Blast_AdjustScores(matrix, query_composition,
+                            // ...
+                            //                     num_adjustments++;
+                            // ```
+                            // No NCBI counterpart: sets bit 0 of the probe when `Blast_AdjustScores` returned a matrix; the
+                            // probe is not read by this function and does not change any value NCBI computes.
+                            X_REDO_PROBE.with(|probe| probe.set(probe.get() | 1));
                             matrix_adjust_rule = adjusted.matrix_adjust_rule;
                             adjusted_matrix = Some(adjusted.adjusted_matrix);
                             pvalue_for_this_pair = adjusted.pvalue_for_this_pair;
@@ -2826,6 +2864,23 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix_observed<'s
                         incoming: current,
                         rule: matrix_adjust_rule,
                         matrix: adjusted_matrix.as_ref(),
+                    });
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1232-1234,1259-1260
+                    // ```c
+                    //                 if (compo_adjust_mode != eNoCompositionBasedStats &&
+                    //                         (subject_is_translated || hsp_index == 0
+                    //                                 || (nearIdenticalStatus != oldNearIdenticalStatus))) {
+                    // ...
+                    //                 if ( !adjust_search_failed ) {
+                    //                     newAlign = callbacks->redo_one_alignment(
+                    // ```
+                    // No NCBI counterpart: sets bit 1 of the probe when `redo_one_alignment` runs without a
+                    // `Blast_AdjustScores` call in this match (the protein-subject case `hsp_index != 0` skips it),
+                    // so the redo uses the matrix left by an earlier match; it does not change any value NCBI computes.
+                    X_REDO_PROBE.with(|probe| {
+                        if probe.get() & 1 == 0 {
+                            probe.set(probe.get() | 2);
+                        }
                     });
                     let mut new_align = (callbacks.redo_one_alignment)(
                         current,

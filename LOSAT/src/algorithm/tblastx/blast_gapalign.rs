@@ -19,7 +19,18 @@ use std::cmp::Ordering;
 ///
 /// This structure stores HSPs after extension but before coordinate conversion.
 /// Coordinates are stored as absolute positions in the concatenated buffer.
-#[derive(Clone, Copy)]
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_extend.h:150-155
+// ```c
+// typedef struct BlastInitHSP {
+//     BlastOffsetPair offsets; /**< Offsets in query and subject, or, in PHI
+//                                 BLAST, start and end of pattern in subject. */
+//     BlastUngappedData* ungapped_data; /**< Pointer to a structure holding
+//                                          ungapped alignment information */
+// } BlastInitHSP;
+// ```
+// The added PartialEq, Eq and Debug derives are used by the LOSAT_X_SEEDBUCKETSHADOW mode to
+// compare two lists of these initial HSPs field by field. They do not change any value NCBI computes.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct InitHSP {
     /// Query absolute coordinate (concatenated buffer, 0-based)
     /// Reference: blast_query_info.c:311-315, blast_util.c:112-116.

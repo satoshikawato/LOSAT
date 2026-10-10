@@ -19,6 +19,7 @@
 mod cutoffs;
 mod linking;
 mod linking_fast;
+mod linking_index;
 mod params;
 
 // Re-export parameter types and functions

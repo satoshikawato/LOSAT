@@ -25,6 +25,7 @@ pub mod sum_stats_linking;
 pub mod tracing;
 pub mod translation;
 mod ungapped_hit_sort;
+pub mod x_seed_bucket;
 
 pub use args::TblastxArgs;
 pub use blast_engine::run;

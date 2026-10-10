@@ -400,6 +400,20 @@ pub(crate) fn gapped_observed(
     xdrop: i32,
     observe: &mut dyn FnMut(&PreliminaryHsp, bool),
 ) -> Result<Vec<PreliminaryHsp>> {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3707-3708
+    // ```c
+    //    if (init_hitlist->total == 0)
+    //       return 0;
+    // ```
+    // NCBI returns at once when the initial hit list is empty (and the engine skips the gapped
+    // stage, blast_engine.c:500). With the switch on this port returns the empty list before it
+    // builds the interval tree and the DP scratch; the loop below would have done nothing.
+    // EXPERIMENT (LOSAT_X_BXLEAN): most (chunk, subject) pairs have no initial
+    // HSP; the loop below then does nothing, so the tree and the DP scratch
+    // need not be built.
+    if initial.is_empty() && super::runtime::x_bx_lean() {
+        return Ok(Vec::new());
+    }
     let last = batch.contexts.last().expect("BLASTX contexts");
     let mut tree = BlastIntervalTree::new(
         0,

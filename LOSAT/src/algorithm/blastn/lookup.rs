@@ -1690,60 +1690,101 @@ fn build_mb_lookup(
     // for (index = 0; index < mb_lt->hashsize / kCompressionFactor; index++)
     //     longest_chain = MAX(longest_chain, helper_array[index]);
     // ```
-    for (q_idx, seq_blastna) in queries_blastna.iter().enumerate() {
-        let seq = seq_blastna.as_slice();
-        if seq.len() < lut_word_length {
-            continue;
-        }
-
-        let masks = query_masks.get(q_idx).map(|v| v.as_slice()).unwrap_or(&[]);
-        let ranges = build_unmasked_ranges(seq.len(), masks);
-        let query_offset = query_offsets[q_idx].max(0) as usize;
-
-        for (range_start, range_end) in ranges {
-            let range_len = range_end.saturating_sub(range_start);
-            if word_length > range_len {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1081-1091
+    // ```c
+    //          if (mb_lt->hashtable[ecode] == 0) {
+    //             PV_SET(pv_array, ecode, pv_array_bts);
+    //          }
+    //          else {
+    //             helper_array[ecode/kCompressionFactor]++;
+    //          }
+    //          mb_lt->next_pos[index] = mb_lt->hashtable[ecode];
+    //          mb_lt->hashtable[ecode] = index;
+    // ```
+    // Dispatch point: NCBI applies this update to each word as soon as the word is read, as
+    // the loop in the `else` branch does (the original LOSAT loop, unchanged). With
+    // LOSAT_X_MBDELAY or LOSAT_X_MBBATCH, `x_fill_mb_queued` runs a copy of that loop that only
+    // touches the table cell earlier (a prefetch, or a read loop) and applies the same update
+    // to the same words in the same order, so the result is the same table.
+    if let Some(x_queue) = x_mb_queue() {
+        x_fill_mb_queued(
+            x_queue,
+            queries_blastna,
+            query_offsets,
+            query_masks,
+            word_length,
+            lut_word_length,
+            kmer_mask,
+            db_word_counts,
+            max_db_word_count,
+            ascending_cells,
+            &mut XMbTables {
+                hashtable: &mut hashtable,
+                next_pos: &mut next_pos,
+                pv_array: &mut pv_array,
+                pv_array_bts,
+                helper_array: &mut helper_array,
+                words: &mut words,
+                total_positions: &mut total_positions,
+                ambiguous_skipped: &mut ambiguous_skipped,
+            },
+        );
+    } else {
+        for (q_idx, seq_blastna) in queries_blastna.iter().enumerate() {
+            let seq = seq_blastna.as_slice();
+            if seq.len() < lut_word_length {
                 continue;
             }
 
-            let mut current_kmer: u64 = 0;
-            let mut valid_bases = 0usize;
+            let masks = query_masks.get(q_idx).map(|v| v.as_slice()).unwrap_or(&[]);
+            let ranges = build_unmasked_ranges(seq.len(), masks);
+            let query_offset = query_offsets[q_idx].max(0) as usize;
 
-            for pos in range_start..range_end {
-                let base = seq[pos];
-                if (base & BLAST2NA_MASK) != 0 {
-                    current_kmer = 0;
-                    valid_bases = 0;
-                    ambiguous_skipped += 1;
+            for (range_start, range_end) in ranges {
+                let range_len = range_end.saturating_sub(range_start);
+                if word_length > range_len {
                     continue;
                 }
 
-                current_kmer = ((current_kmer << 2) | base as u64) & kmer_mask;
-                valid_bases += 1;
-                if valid_bases < lut_word_length {
-                    continue;
-                }
+                let mut current_kmer: u64 = 0;
+                let mut valid_bases = 0usize;
 
-                total_positions += 1;
-
-                if let Some(counts_filter) = db_word_counts {
-                    if db_word_count_exceeds(counts_filter, current_kmer, max_db_word_count) {
+                for pos in range_start..range_end {
+                    let base = seq[pos];
+                    if (base & BLAST2NA_MASK) != 0 {
+                        current_kmer = 0;
+                        valid_bases = 0;
+                        ambiguous_skipped += 1;
                         continue;
                     }
-                }
 
-                let bucket = current_kmer as usize;
-                let q_off_1 = (query_offset + (pos + 1 - lut_word_length) + 1) as u32;
-                if hashtable[bucket] == 0 {
-                    pv_set_shift(&mut pv_array, bucket, pv_array_bts);
-                } else {
-                    helper_array[bucket / K_COMPRESSION_FACTOR] =
-                        helper_array[bucket / K_COMPRESSION_FACTOR].saturating_add(1);
-                }
-                next_pos[q_off_1 as usize] = hashtable[bucket];
-                hashtable[bucket] = q_off_1;
-                if ascending_cells {
-                    words.push((bucket as u32, q_off_1));
+                    current_kmer = ((current_kmer << 2) | base as u64) & kmer_mask;
+                    valid_bases += 1;
+                    if valid_bases < lut_word_length {
+                        continue;
+                    }
+
+                    total_positions += 1;
+
+                    if let Some(counts_filter) = db_word_counts {
+                        if db_word_count_exceeds(counts_filter, current_kmer, max_db_word_count) {
+                            continue;
+                        }
+                    }
+
+                    let bucket = current_kmer as usize;
+                    let q_off_1 = (query_offset + (pos + 1 - lut_word_length) + 1) as u32;
+                    if hashtable[bucket] == 0 {
+                        pv_set_shift(&mut pv_array, bucket, pv_array_bts);
+                    } else {
+                        helper_array[bucket / K_COMPRESSION_FACTOR] =
+                            helper_array[bucket / K_COMPRESSION_FACTOR].saturating_add(1);
+                    }
+                    next_pos[q_off_1 as usize] = hashtable[bucket];
+                    hashtable[bucket] = q_off_1;
+                    if ascending_cells {
+                        words.push((bucket as u32, q_off_1));
+                    }
                 }
             }
         }
@@ -2286,6 +2327,214 @@ pub fn build_direct_lookup(
     // REMOVED: Over-represented k-mer filtering (MAX_HITS_PER_KMER) - does not exist in NCBI BLAST
 
     DirectKmerLookup { offsets, hits }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1081-1091
+// ```c
+//          if (mb_lt->hashtable[ecode] == 0) {
+//             PV_SET(pv_array, ecode, pv_array_bts);
+//          }
+//          else {
+//             helper_array[ecode/kCompressionFactor]++;
+//          }
+//          mb_lt->next_pos[index] = mb_lt->hashtable[ecode];
+//          mb_lt->hashtable[ecode] = index;
+// ```
+// EXPERIMENT (LOSAT_X_MBDELAY, LOSAT_X_MBBATCH[=n]): how `x_fill_mb_queued` queues the update
+// above. MBDELAY prefetches the cell of each word and applies the update sixteen words later,
+// in the same order; only where a prefetch instruction exists (without one, on Wasm, the delay
+// alone costs time). MBBATCH collects n words (64 unless given), reads their cells in one tight
+// loop (so the cache misses overlap), then applies the updates in the original order; it needs
+// no prefetch instruction. MBDELAY wins when both are set.
+#[derive(Clone, Copy)]
+enum XMbQueue {
+    Delay,
+    Batch(usize),
+}
+
+fn x_mb_queue() -> Option<XMbQueue> {
+    if cfg!(target_arch = "x86_64") && std::env::var_os("LOSAT_X_MBDELAY").is_some() {
+        return Some(XMbQueue::Delay);
+    }
+    std::env::var_os("LOSAT_X_MBBATCH")?;
+    let size = std::env::var("LOSAT_X_MBBATCH")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .filter(|n: &usize| (2..=4096).contains(n))
+        .unwrap_or(64);
+    Some(XMbQueue::Batch(size))
+}
+
+// The state `build_mb_lookup` fills, borrowed by the queued copy of its loop.
+struct XMbTables<'a> {
+    hashtable: &'a mut [u32],
+    next_pos: &'a mut [u32],
+    pv_array: &'a mut [PvArrayType],
+    pv_array_bts: usize,
+    helper_array: &'a mut [u32],
+    words: &'a mut Vec<(u32, u32)>,
+    total_positions: &'a mut usize,
+    ambiguous_skipped: &'a mut usize,
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1081-1091
+// ```c
+//          if (mb_lt->hashtable[ecode] == 0) {
+//             PV_SET(pv_array, ecode, pv_array_bts);
+//          }
+//          else {
+//             helper_array[ecode/kCompressionFactor]++;
+//          }
+//          mb_lt->next_pos[index] = mb_lt->hashtable[ecode];
+//          mb_lt->hashtable[ecode] = index;
+// ```
+// The update of one word, as in the loop of `build_mb_lookup` (same statements, same
+// compression factor).
+#[inline(always)]
+fn x_mb_apply(t: &mut XMbTables<'_>, ascending_cells: bool, bucket: usize, q_off_1: u32) {
+    const K_COMPRESSION_FACTOR: usize = 2048;
+    if t.hashtable[bucket] == 0 {
+        pv_set_shift(t.pv_array, bucket, t.pv_array_bts);
+    } else {
+        t.helper_array[bucket / K_COMPRESSION_FACTOR] =
+            t.helper_array[bucket / K_COMPRESSION_FACTOR].saturating_add(1);
+    }
+    t.next_pos[q_off_1 as usize] = t.hashtable[bucket];
+    t.hashtable[bucket] = q_off_1;
+    if ascending_cells {
+        t.words.push((bucket as u32, q_off_1));
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1081-1091
+// ```c
+//          if (mb_lt->hashtable[ecode] == 0) {
+//             PV_SET(pv_array, ecode, pv_array_bts);
+//          }
+//          else {
+//             helper_array[ecode/kCompressionFactor]++;
+//          }
+//          mb_lt->next_pos[index] = mb_lt->hashtable[ecode];
+//          mb_lt->hashtable[ecode] = index;
+// ```
+// EXPERIMENT: a copy of the word loop of `build_mb_lookup` (the same words, read in the same
+// order, with the same counters) that queues each update (`XMbQueue`) instead of applying it at
+// once. The queue is first in, first out and is drained at the end, so every word is applied
+// once, in the original order: the table is the one the original loop builds. The reference
+// loop in `build_mb_lookup` is kept as it was, so that the switch-off path is not slowed.
+#[allow(clippy::too_many_arguments)]
+fn x_fill_mb_queued(
+    queue: XMbQueue,
+    queries_blastna: &[Vec<u8>],
+    query_offsets: &[i32],
+    query_masks: &[Vec<MaskedInterval>],
+    word_length: usize,
+    lut_word_length: usize,
+    kmer_mask: u64,
+    db_word_counts: Option<&[u8]>,
+    max_db_word_count: u8,
+    ascending_cells: bool,
+    t: &mut XMbTables<'_>,
+) {
+    const X_DELAY: usize = 16;
+    let mut x_ring = [(0u32, 0u32); X_DELAY];
+    let mut x_ring_len = 0usize;
+    let x_batch_size = match queue {
+        XMbQueue::Batch(n) => n,
+        XMbQueue::Delay => 0,
+    };
+    let mut x_batch_buf: Vec<(u32, u32)> = Vec::with_capacity(x_batch_size);
+    let mut x_touched = 0u32;
+    for (q_idx, seq_blastna) in queries_blastna.iter().enumerate() {
+        let seq = seq_blastna.as_slice();
+        if seq.len() < lut_word_length {
+            continue;
+        }
+
+        let masks = query_masks.get(q_idx).map(|v| v.as_slice()).unwrap_or(&[]);
+        let ranges = build_unmasked_ranges(seq.len(), masks);
+        let query_offset = query_offsets[q_idx].max(0) as usize;
+
+        for (range_start, range_end) in ranges {
+            let range_len = range_end.saturating_sub(range_start);
+            if word_length > range_len {
+                continue;
+            }
+
+            let mut current_kmer: u64 = 0;
+            let mut valid_bases = 0usize;
+
+            for pos in range_start..range_end {
+                let base = seq[pos];
+                if (base & BLAST2NA_MASK) != 0 {
+                    current_kmer = 0;
+                    valid_bases = 0;
+                    *t.ambiguous_skipped += 1;
+                    continue;
+                }
+
+                current_kmer = ((current_kmer << 2) | base as u64) & kmer_mask;
+                valid_bases += 1;
+                if valid_bases < lut_word_length {
+                    continue;
+                }
+
+                *t.total_positions += 1;
+
+                if let Some(counts_filter) = db_word_counts {
+                    if db_word_count_exceeds(counts_filter, current_kmer, max_db_word_count) {
+                        continue;
+                    }
+                }
+
+                let bucket = current_kmer as usize;
+                let q_off_1 = (query_offset + (pos + 1 - lut_word_length) + 1) as u32;
+                match queue {
+                    XMbQueue::Delay => {
+                        #[cfg(target_arch = "x86_64")]
+                        // SAFETY: `bucket` < table size (masked k-mer); a prefetch does not fault.
+                        unsafe {
+                            core::arch::x86_64::_mm_prefetch(
+                                t.hashtable.as_ptr().add(bucket) as *const i8,
+                                core::arch::x86_64::_MM_HINT_T0,
+                            );
+                        }
+
+                        let slot = x_ring_len % X_DELAY;
+                        if x_ring_len >= X_DELAY {
+                            let (b, q) = x_ring[slot];
+                            x_mb_apply(t, ascending_cells, b as usize, q);
+                        }
+                        x_ring[slot] = (bucket as u32, q_off_1);
+                        x_ring_len += 1;
+                    }
+                    XMbQueue::Batch(_) => {
+                        x_batch_buf.push((bucket as u32, q_off_1));
+                        if x_batch_buf.len() == x_batch_size {
+                            for &(b, _) in &x_batch_buf {
+                                x_touched ^= t.hashtable[b as usize];
+                            }
+                            for &(b, q) in &x_batch_buf {
+                                x_mb_apply(t, ascending_cells, b as usize, q);
+                            }
+                            x_batch_buf.clear();
+                        }
+                    }
+                }
+            }
+        }
+    }
+    for &(b, q) in &x_batch_buf {
+        x_mb_apply(t, ascending_cells, b as usize, q);
+    }
+    // keep the reads of the batch loop from being optimised away
+    std::hint::black_box(x_touched);
+    let pending = x_ring_len.min(X_DELAY);
+    let first = x_ring_len - pending;
+    for k in first..x_ring_len {
+        let (b, q) = x_ring[k % X_DELAY];
+        x_mb_apply(t, ascending_cells, b as usize, q);
+    }
 }
 
 #[cfg(test)]

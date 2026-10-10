@@ -500,6 +500,448 @@ pub(super) fn scan_protein_words_by_chunk(
     Ok(())
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:772-775,805-812
+// ```c
+//             BLAST_GetAllTranslations(backup.sequence, eBlastEncodingNcbi2na,
+//                                      backup.full_range.right,
+//                                      subject->gen_code_string, &translation_buffer,
+//                                      &frame_offsets, NULL);
+// ...
+//     for (context=first_context; context<=last_context; context++) {
+//         BlastHSPList* hsp_list_for_chunks = NULL;
+//
+//         if (kTranslatedSubject) {
+//             Uint4 i;
+//             subject->frame = BLAST_ContextToFrame(eBlastTypeBlastx, context);
+//             subject->sequence = translation_buffer + frame_offsets[context] + 1;
+//             subject->length = frame_offsets[context+1] - frame_offsets[context] - 1;
+// ```
+// NCBI translates the subject into its six frames once, then calls WordFinder for each frame and
+// chunk with a read-only lookup table. XScanPlan holds what those calls need (the lookup table and
+// the translated frames with their chunks and scan ranges) so that every unit can be scanned on its
+// own.
+// EXPERIMENT (LOSAT_X_TBNPAR): the subject-side state of
+// `scan_protein_words_by_chunk`, built once so that each (frame, chunk) unit can
+// be scanned on its own.  NCBI c++/src/algo/blast/core/blast_engine.c:478-500,
+// 804-841 calls WordFinder once per unit; the lookup table is read-only there.
+pub(super) struct XScanPlan {
+    pub lookup: std::sync::Arc<crate::algorithm::tblastx::lookup::BlastAaLookupTable>,
+    pub subject: std::sync::Arc<XSubjectPlan>,
+    pub pair_capacity: usize,
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:772-775,805-812
+// ```c
+//             BLAST_GetAllTranslations(backup.sequence, eBlastEncodingNcbi2na,
+//                                      backup.full_range.right,
+//                                      subject->gen_code_string, &translation_buffer,
+//                                      &frame_offsets, NULL);
+// ...
+//     for (context=first_context; context<=last_context; context++) {
+//         BlastHSPList* hsp_list_for_chunks = NULL;
+//
+//         if (kTranslatedSubject) {
+//             Uint4 i;
+//             subject->frame = BLAST_ContextToFrame(eBlastTypeBlastx, context);
+//             subject->sequence = translation_buffer + frame_offsets[context] + 1;
+//             subject->length = frame_offsets[context+1] - frame_offsets[context] - 1;
+// ```
+// The six translated frames of one subject and the (frame, chunk, scan range) units in NCBI call
+// order.
+/// EXPERIMENT (LOSAT_X_TBNSSIDE): the part of a scan plan that depends on the
+/// subject only.
+pub(super) struct XSubjectPlan {
+    pub frames: Vec<QueryFrame>,
+    /// (index into `frames`, chunk, scan ranges) in NCBI call order.
+    pub units: Vec<(usize, TranslatedChunk, Vec<(i32, i32)>)>,
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:772-775,805-812
+// ```c
+//             BLAST_GetAllTranslations(backup.sequence, eBlastEncodingNcbi2na,
+//                                      backup.full_range.right,
+//                                      subject->gen_code_string, &translation_buffer,
+//                                      &frame_offsets, NULL);
+// ...
+//     for (context=first_context; context<=last_context; context++) {
+//         BlastHSPList* hsp_list_for_chunks = NULL;
+//
+//         if (kTranslatedSubject) {
+//             Uint4 i;
+//             subject->frame = BLAST_ContextToFrame(eBlastTypeBlastx, context);
+//             subject->sequence = translation_buffer + frame_offsets[context] + 1;
+//             subject->length = frame_offsets[context+1] - frame_offsets[context] - 1;
+// ```
+// NCBI translates a subject once per query batch (BLAST_GetAllTranslations in
+// s_BlastSearchEngineCore). The translation depends only on the subject, the genetic code and the
+// lowercase-masking option, so XSubjectSide keeps it for later batches. A reuse of the same value;
+// no value is computed differently.
+/// EXPERIMENT (LOSAT_X_TBNSSIDE): the subject plans of one search, by subject
+/// index.
+///
+/// A plan (the six translated frames and their chunks) is a function of the
+/// subject, the genetic code and the lowercase-masking option. The search
+/// consists of one preliminary stage per query batch, and each of them made
+/// the plan of every subject again. The owner of the search creates one value
+/// for its fixed list of subjects and options; the first batch that reaches a
+/// subject computes its plan, as before, and the later ones read it. Plans are
+/// kept only up to a total size, beyond which they are made per use as before.
+///
+/// Batches can reach a subject at the same time. The cell of a subject is
+/// initialised by one of them while the others wait, so a plan is made once
+/// and its size is added to `kept_bytes` once: `kept_bytes` is always the
+/// size of the plans the cells hold.
+pub(super) struct XSubjectSide {
+    gencode: u8,
+    mask_lowercase: bool,
+    /// Per subject: unset until a batch reaches it; then the kept plan, or
+    /// `None` when its plan is not kept (over the limit, or the subject could
+    /// not be prepared) and every use makes its own.
+    plans: Vec<std::sync::OnceLock<Option<std::sync::Arc<XSubjectPlan>>>>,
+    kept_bytes: std::sync::atomic::AtomicUsize,
+}
+
+// No NCBI counterpart: the methods below keep, count and hand out the cached subject plans (a memo
+// of x_build_subject); it does not change any value NCBI computes.
+impl XSubjectSide {
+    /// Translated residues kept at most (two bytes per subject base).
+    pub(super) const KEEP_LIMIT: usize = 256 << 20;
+
+    /// `LOSAT_X_TBNSSIDE` set.
+    pub(super) fn enabled() -> bool {
+        use std::sync::OnceLock;
+        static ON: OnceLock<bool> = OnceLock::new();
+        *ON.get_or_init(|| std::env::var_os("LOSAT_X_TBNSSIDE").is_some())
+    }
+
+    pub(super) fn new(subjects: usize, gencode: u8, mask_lowercase: bool) -> Self {
+        Self {
+            gencode,
+            mask_lowercase,
+            plans: (0..subjects).map(|_| std::sync::OnceLock::new()).collect(),
+            kept_bytes: std::sync::atomic::AtomicUsize::new(0),
+        }
+    }
+
+    fn slot(
+        &self,
+        oid: usize,
+        gencode: u8,
+        mask_lowercase: bool,
+    ) -> Option<&std::sync::OnceLock<Option<std::sync::Arc<XSubjectPlan>>>> {
+        if self.gencode != gencode || self.mask_lowercase != mask_lowercase {
+            return None;
+        }
+        self.plans.get(oid)
+    }
+
+    /// Translated residues of a plan: what `KEEP_LIMIT` counts.
+    fn plan_bytes(plan: &XSubjectPlan) -> usize {
+        plan.frames.iter().map(|frame| frame.aa_seq.len()).sum()
+    }
+
+    /// True when the plans of subjects of these lengths are all kept: a plan
+    /// has six frames of at most `length / 3` residues and two sentinels, so
+    /// `2 * length + 12` bounds `plan_bytes`.
+    pub(super) fn all_fit(subject_lengths: impl IntoIterator<Item = usize>) -> bool {
+        let mut total = 0usize;
+        for length in subject_lengths {
+            total = total.saturating_add(length.saturating_mul(2).saturating_add(12));
+        }
+        total <= Self::KEEP_LIMIT
+    }
+
+    /// Size of the plans held, for tests.
+    #[cfg(test)]
+    fn kept_bytes(&self) -> usize {
+        self.kept_bytes.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Reserves room for `plan`. Called once per subject, from the
+    /// initialiser of its cell. The total only changes when the plan fits, so
+    /// a plan that does not fit never makes another one look too large.
+    fn keep(&self, plan: &XSubjectPlan) -> bool {
+        Self::reserve(&self.kept_bytes, Self::plan_bytes(plan), Self::KEEP_LIMIT)
+    }
+
+    /// Adds `bytes` to `kept` if the total stays within `limit`.
+    fn reserve(kept: &std::sync::atomic::AtomicUsize, bytes: usize, limit: usize) -> bool {
+        use std::sync::atomic::Ordering;
+        kept.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |held| {
+            held.checked_add(bytes).filter(|&total| total <= limit)
+        })
+        .is_ok()
+    }
+
+    /// The plan of the subject in `slot`: the kept one, made by the first
+    /// caller, or a plan of the caller's own when it is not kept.
+    fn plan(
+        &self,
+        slot: &std::sync::OnceLock<Option<std::sync::Arc<XSubjectPlan>>>,
+        build: impl Fn() -> Result<std::sync::Arc<XSubjectPlan>>,
+    ) -> Result<std::sync::Arc<XSubjectPlan>> {
+        let mut failed = None;
+        let mut own = None;
+        let kept = slot.get_or_init(|| match build() {
+            Ok(plan) if self.keep(&plan) => Some(plan),
+            Ok(plan) => {
+                own = Some(plan);
+                None
+            }
+            Err(error) => {
+                failed = Some(error);
+                None
+            }
+        });
+        if let Some(error) = failed {
+            return Err(error);
+        }
+        match (kept, own) {
+            (Some(plan), _) => Ok(std::sync::Arc::clone(plan)),
+            (None, Some(plan)) => Ok(plan),
+            (None, None) => build(),
+        }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:772-775,805-812
+// ```c
+//             BLAST_GetAllTranslations(backup.sequence, eBlastEncodingNcbi2na,
+//                                      backup.full_range.right,
+//                                      subject->gen_code_string, &translation_buffer,
+//                                      &frame_offsets, NULL);
+// ...
+//     for (context=first_context; context<=last_context; context++) {
+//         BlastHSPList* hsp_list_for_chunks = NULL;
+//
+//         if (kTranslatedSubject) {
+//             Uint4 i;
+//             subject->frame = BLAST_ContextToFrame(eBlastTypeBlastx, context);
+//             subject->sequence = translation_buffer + frame_offsets[context] + 1;
+//             subject->length = frame_offsets[context+1] - frame_offsets[context] - 1;
+// ```
+// x_scan_plan does the setup that precedes NCBI's WordFinder calls for one subject (translation,
+// scan ranges) and attaches the lookup table of the query set.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:91-100
+// ```c
+//        BlastAaLookupTableNew(lookup_options, (BlastAaLookupTable* *)
+//                              &lookup_wrap->lut);
+//        ((BlastAaLookupTable*)lookup_wrap->lut)->use_pssm = has_pssm;
+//        BlastAaLookupIndexQuery( (BlastAaLookupTable*) lookup_wrap->lut, matrix,
+//                                  query, lookup_segments, 0);
+// ```
+/// EXPERIMENT (LOSAT_X_TBNPAR): `None` when the subject is too short to be searched.
+pub(super) fn x_scan_plan(
+    queries: &[&[u8]],
+    subject: &[u8],
+    db_gencode: u8,
+    seg: Option<&SegParams>,
+    threshold: i32,
+    mask_lowercase: bool,
+    matrix: ScoringMatrix,
+    word_length: usize,
+    // EXPERIMENT (LOSAT_X_TBNQSIDE): where the table of this query set is kept.
+    x_lookup: Option<
+        &std::sync::OnceLock<std::sync::Arc<crate::algorithm::tblastx::lookup::BlastAaLookupTable>>,
+    >,
+    // EXPERIMENT (LOSAT_X_TBNSSIDE): the search's subject plans and this
+    // subject's index among them.
+    x_subject: Option<(&XSubjectSide, usize)>,
+) -> Result<Option<XScanPlan>> {
+    let code = GeneticCode::try_from_id(db_gencode).map_err(anyhow::Error::msg)?;
+    // NCBI reference: c++/src/algo/blast/core/blast_engine.c:1318-1334,1429-1432
+    // return word_length * 3 + 2;
+    // if (seq_arg.seq->length < min_subj_seq_length) { ... continue; }
+    if subject.len() < word_length * 3 + 2 {
+        return Ok(None);
+    }
+    // EXPERIMENT (LOSAT_X_TBNSSIDE): everything below that reads the subject.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:772-775,805-812
+    // ```c
+    //             BLAST_GetAllTranslations(backup.sequence, eBlastEncodingNcbi2na,
+    //                                      backup.full_range.right,
+    //                                      subject->gen_code_string, &translation_buffer,
+    //                                      &frame_offsets, NULL);
+    // ...
+    //     for (context=first_context; context<=last_context; context++) {
+    //         BlastHSPList* hsp_list_for_chunks = NULL;
+    //
+    //         if (kTranslatedSubject) {
+    //             Uint4 i;
+    //             subject->frame = BLAST_ContextToFrame(eBlastTypeBlastx, context);
+    //             subject->sequence = translation_buffer + frame_offsets[context] + 1;
+    //             subject->length = frame_offsets[context+1] - frame_offsets[context] - 1;
+    // ```
+    // Translation and chunking of the subject, as above; this closure is what the shared plan
+    // memoises.
+    let x_build_subject = || -> Result<std::sync::Arc<XSubjectPlan>> {
+        let resolved_subject = resolve_local_subject_ncbi2na(subject)?;
+        let frames = generate_frames(&resolved_subject, &code);
+        let negative_first_length = frames
+            .iter()
+            .find(|frame| frame.frame == -1)
+            .map(|frame| frame.aa_len)
+            .unwrap_or(0);
+        let mut units = Vec::new();
+        for (index, frame) in frames.iter().enumerate() {
+            // NCBI c++/src/algo/blast/core/blast_engine.c:478-500:
+            // SUBJECT_SPLIT_NO_RANGE skips WordFinder for this chunk.
+            for (chunk, ranges) in translated_chunk_scan_ranges(
+                subject,
+                frame.frame,
+                frame.aa_len,
+                negative_first_length,
+                mask_lowercase,
+            )? {
+                units.push((index, chunk, ranges));
+            }
+        }
+        Ok(std::sync::Arc::new(XSubjectPlan { frames, units }))
+    };
+    let x_slot = x_subject.and_then(|(side, oid)| {
+        side.slot(oid, db_gencode, mask_lowercase)
+            .map(|slot| (side, slot))
+    });
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:772-775,805-812
+    // ```c
+    //             BLAST_GetAllTranslations(backup.sequence, eBlastEncodingNcbi2na,
+    //                                      backup.full_range.right,
+    //                                      subject->gen_code_string, &translation_buffer,
+    //                                      &frame_offsets, NULL);
+    // ...
+    //     for (context=first_context; context<=last_context; context++) {
+    //         BlastHSPList* hsp_list_for_chunks = NULL;
+    //
+    //         if (kTranslatedSubject) {
+    //             Uint4 i;
+    //             subject->frame = BLAST_ContextToFrame(eBlastTypeBlastx, context);
+    //             subject->sequence = translation_buffer + frame_offsets[context] + 1;
+    //             subject->length = frame_offsets[context+1] - frame_offsets[context] - 1;
+    // ```
+    // Dispatch point: with LOSAT_X_TBNSSIDE the plan is the shared one (made by the first batch
+    // that reaches the subject); otherwise it is made here, as before.
+    let subject_plan = match x_slot {
+        Some((side, slot)) => side.plan(slot, x_build_subject)?,
+        None => x_build_subject()?,
+    };
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:91-100
+    // ```c
+    //        BlastAaLookupTableNew(lookup_options, (BlastAaLookupTable* *)
+    //                              &lookup_wrap->lut);
+    //        ((BlastAaLookupTable*)lookup_wrap->lut)->use_pssm = has_pssm;
+    //        BlastAaLookupIndexQuery( (BlastAaLookupTable*) lookup_wrap->lut, matrix,
+    //                                  query, lookup_segments, 0);
+    // ```
+    // The query-side lookup table: BlastAaLookupTableNew and BlastAaLookupIndexQuery on the masked
+    // query. LOSAT_X_LUTSPLIT builds a table-only variant when the contexts are not needed; the
+    // table has the same contents.
+    let x_build_lookup = || {
+        let query_frames: Vec<_> = queries
+            .iter()
+            // NCBI blast_filter.c:1241-1255 merges lowercase query and SEG masks.
+            .map(|query| vec![encode_tblastn_lookup_query(query, seg, mask_lowercase)])
+            .collect();
+        // EXPERIMENT (LOSAT_X_LUTSPLIT): the contexts are dropped below.
+        if let Some(lookup) = crate::algorithm::tblastx::lookup::x_lookup_table_for_profile(
+            &query_frames,
+            threshold,
+            matrix,
+            word_length,
+        ) {
+            return std::sync::Arc::new(lookup);
+        }
+        // NCBI c++/src/algo/blast/core/lookup_wrap.c:91-100:
+        // BlastAaLookupTableNew(...); BlastAaLookupIndexQuery(..., sbp->matrix->data, ...);
+        let karlin = lookup_protein_params_ungapped(matrix);
+        let (lookup, _contexts) = build_ncbi_lookup_for_profile(
+            &query_frames,
+            threshold,
+            &karlin,
+            false,
+            matrix,
+            word_length,
+        );
+        std::sync::Arc::new(lookup)
+    };
+    // EXPERIMENT (LOSAT_X_TBNQSIDE): the table depends on the query set and the
+    // word-finder options only; the first subject that gets here builds it.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:91-100
+    // ```c
+    //        BlastAaLookupTableNew(lookup_options, (BlastAaLookupTable* *)
+    //                              &lookup_wrap->lut);
+    //        ((BlastAaLookupTable*)lookup_wrap->lut)->use_pssm = has_pssm;
+    //        BlastAaLookupIndexQuery( (BlastAaLookupTable*) lookup_wrap->lut, matrix,
+    //                                  query, lookup_segments, 0);
+    // ```
+    // Dispatch point: NCBI builds the lookup table once per query batch. With LOSAT_X_TBNQSIDE the
+    // first subject builds it and the others read it; without the switch every call builds its own,
+    // as before.
+    let lookup = match x_lookup {
+        Some(cell) => std::sync::Arc::clone(cell.get_or_init(x_build_lookup)),
+        None => x_build_lookup(),
+    };
+    let pair_capacity = (lookup.longest_chain.max(1) as usize) * 1024;
+    i32::try_from(pair_capacity).expect("NCBI offset array fits Int4");
+    Ok(Some(XScanPlan {
+        lookup,
+        subject: subject_plan,
+        pair_capacity,
+    }))
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:500-515
+// ```c
+//         scan_range[2] = scan_range[1];
+//
+//     while (scan_range[1] <= scan_range[2]) {
+//         /* scan the subject sequence for hits */
+// ...
+//
+//         totalhits += hits;
+//         /* for each hit, */
+//         for (i = 0; i < hits; ++i) {
+// ```
+// x_scan_unit runs the scansub() calls of one unit and passes every filled offset array to the
+// caller in scan order, as the loop at line 506 consumes it.
+/// EXPERIMENT (LOSAT_X_TBNPAR): scan one unit and hand every filled offset
+/// array to `on_pairs` in scan order, as NCBI c++/src/algo/blast/core/
+/// aa_ungapped.c:492-516 consumes it (`for (i = 0; i < hits; ++i)`).
+pub(super) fn x_scan_unit(
+    plan: &XScanPlan,
+    unit: usize,
+    pairs: &mut Vec<BlastOffsetPair>,
+    mut on_pairs: impl FnMut(&[BlastOffsetPair]),
+) {
+    let (frame_index, chunk, ranges) = &plan.subject.units[unit];
+    let frame = &plan.subject.frames[*frame_index];
+    if pairs.len() < plan.pair_capacity {
+        pairs.resize(plan.pair_capacity, BlastOffsetPair::default());
+    }
+    let pair_capacity = plan.pair_capacity as i32;
+    for (range_index, &(left, right)) in ranges.iter().enumerate() {
+        // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:496-501
+        // scan_range[1] = subject->seq_ranges[0].left;
+        // scan_range[2] = subject->seq_ranges[0].right - wordsize;
+        // if (scan_range[2] < scan_range[1])
+        //     scan_range[2] = scan_range[1];
+        let mut end = right - plan.lookup.word_length as i32;
+        if range_index == 0 && end < left {
+            end = left;
+        }
+        let mut scan_range = [0, left, end];
+        while scan_range[1] <= scan_range[2] {
+            let hits = s_blast_aa_scan_subject_one_range(
+                &plan.lookup,
+                &frame.aa_seq[1 + chunk.offset..],
+                pairs,
+                pair_capacity,
+                &mut scan_range,
+            );
+            on_pairs(&pairs[..hits as usize]);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1451,5 +1893,155 @@ mod tests {
             .flat_map(|frame| rows.iter().map(move |chunk| (frame, chunk.length)))
             .collect();
         assert_eq!(observed, expected);
+    }
+
+    // No NCBI counterpart: test helper (pseudo-random nucleotide subject); it does not change any
+    // value NCBI computes.
+    fn x_test_subject(length: usize) -> Vec<u8> {
+        let mut state = 0x2545_F491_4F6C_DD1Du64;
+        (0..length)
+            .map(|_| {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                b"ACGT"[(state % 4) as usize]
+            })
+            .collect()
+    }
+
+    // No NCBI counterpart: test of the plan cache (one plan, charged once, when batches race); it
+    // does not change any value NCBI computes.
+    // LOSAT_X_TBNSSIDE: batches that reach a subject at the same time get one
+    // plan. It is made once, and the shared limit is charged for it once.
+    #[test]
+    fn x_subject_plan_is_made_and_charged_once_when_batches_race() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let subject = x_test_subject(9_000);
+        let code = GeneticCode::try_from_id(1).unwrap();
+        let side = XSubjectSide::new(3, 1, false);
+        let slot = side.slot(1, 1, false).unwrap();
+        let builds = AtomicUsize::new(0);
+        let build = || -> Result<std::sync::Arc<XSubjectPlan>> {
+            builds.fetch_add(1, Ordering::Relaxed);
+            // Long enough for every thread to arrive while the first builds.
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            Ok(std::sync::Arc::new(XSubjectPlan {
+                frames: generate_frames(&subject, &code),
+                units: Vec::new(),
+            }))
+        };
+        let threads = 8;
+        let barrier = std::sync::Barrier::new(threads);
+        let plans: Vec<_> = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..threads)
+                .map(|_| {
+                    scope.spawn(|| {
+                        barrier.wait();
+                        side.plan(slot, &build).unwrap()
+                    })
+                })
+                .collect();
+            handles.into_iter().map(|h| h.join().unwrap()).collect()
+        });
+        assert_eq!(builds.load(Ordering::Relaxed), 1);
+        for plan in &plans[1..] {
+            assert!(std::sync::Arc::ptr_eq(&plans[0], plan));
+        }
+        let bytes = XSubjectSide::plan_bytes(&plans[0]);
+        // Three frames per strand of 3000, 2999 and 2999 residues, two sentinels each.
+        assert_eq!(bytes, 2 * (3_000 + 2_999 + 2_999) + 12);
+        assert_eq!(side.kept_bytes(), bytes);
+        // A later batch reads the same plan and adds nothing.
+        let again = side.plan(slot, &build).unwrap();
+        assert!(std::sync::Arc::ptr_eq(&plans[0], &again));
+        assert_eq!(
+            (builds.load(Ordering::Relaxed), side.kept_bytes()),
+            (1, bytes)
+        );
+        // Another gencode or masking option does not use these plans.
+        assert!(side.slot(1, 4, false).is_none() && side.slot(1, 1, true).is_none());
+    }
+
+    // No NCBI counterpart: test of the plan cache through x_scan_plan; it does not change any value
+    // NCBI computes.
+    // The whole stage: `x_scan_plan` from eight threads on one subject.
+    #[test]
+    fn x_scan_plans_of_racing_batches_share_one_subject_plan() {
+        let subject = x_test_subject(30_000);
+        let query: &[u8] = b"MKVLAAGIVGLLLAQWERTYHHNDCFPSMKTAYIAKQRQISFVKSHFSRQ";
+        let side = XSubjectSide::new(1, 1, false);
+        let threads = 8;
+        let barrier = std::sync::Barrier::new(threads);
+        let plans: Vec<_> = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..threads)
+                .map(|_| {
+                    scope.spawn(|| {
+                        barrier.wait();
+                        x_scan_plan(
+                            &[query],
+                            &subject,
+                            1,
+                            None,
+                            13,
+                            false,
+                            ScoringMatrix::Blosum62,
+                            3,
+                            None,
+                            Some((&side, 0)),
+                        )
+                        .unwrap()
+                        .unwrap()
+                        .subject
+                    })
+                })
+                .collect();
+            handles.into_iter().map(|h| h.join().unwrap()).collect()
+        });
+        for plan in &plans[1..] {
+            assert!(std::sync::Arc::ptr_eq(&plans[0], plan));
+        }
+        assert_eq!(side.kept_bytes(), XSubjectSide::plan_bytes(&plans[0]));
+        assert!(!plans[0].units.is_empty());
+    }
+
+    // No NCBI counterpart: test of the size limit of the plan cache; it does not change any value
+    // NCBI computes.
+    // A plan that does not fit leaves the total as it was; a failure is
+    // returned and nothing is kept for the subject.
+    #[test]
+    fn x_subject_plan_limit_counts_kept_plans_only() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let kept = AtomicUsize::new(0);
+        assert!(XSubjectSide::reserve(&kept, 60, 100));
+        assert!(!XSubjectSide::reserve(&kept, 60, 100));
+        assert_eq!(kept.load(Ordering::Relaxed), 60);
+        assert!(XSubjectSide::reserve(&kept, 40, 100));
+        assert!(!XSubjectSide::reserve(&kept, 1, 100));
+        assert!(XSubjectSide::reserve(&kept, 0, 100));
+        assert_eq!(kept.load(Ordering::Relaxed), 100);
+        assert!(!XSubjectSide::reserve(
+            &AtomicUsize::new(usize::MAX),
+            1,
+            usize::MAX
+        ));
+
+        assert!(XSubjectSide::all_fit([1_000_000usize; 100]));
+        assert!(XSubjectSide::all_fit([(XSubjectSide::KEEP_LIMIT - 12) / 2]));
+        assert!(!XSubjectSide::all_fit([(XSubjectSide::KEEP_LIMIT - 12)
+            / 2
+            + 1]));
+        assert!(!XSubjectSide::all_fit([usize::MAX, 1]));
+
+        let side = XSubjectSide::new(1, 1, false);
+        let slot = side.slot(0, 1, false).unwrap();
+        let failing = || -> Result<std::sync::Arc<XSubjectPlan>> { bail!("no plan") };
+        assert_eq!(
+            side.plan(slot, failing).err().unwrap().to_string(),
+            "no plan"
+        );
+        assert_eq!(side.kept_bytes(), 0);
+        // The subject is not kept; the next use makes (and here fails) its own.
+        assert_eq!(slot.get().map(Option::is_none), Some(true));
+        assert!(side.plan(slot, failing).is_err());
     }
 }

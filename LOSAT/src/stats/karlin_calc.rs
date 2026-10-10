@@ -610,9 +610,68 @@ fn compute_h_from_lambda(sfp: &ScoreFreqProfile, lambda: f64) -> Result<f64, Str
     Ok(h)
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2346-2348,2353-2356
+// ```c
+//     for (iterCounter = 0;
+//          ((iterCounter < iterlimit) && (innerSum > sumlimit));
+//          outerSum += innerSum /= ++iterCounter) {
+// ...
+//         for (ptrP = alignmentScoreProbabilities +
+//                  (highAlignmentScore-lowAlignmentScore);
+//              ptrP >= alignmentScoreProbabilities;
+//              *ptrP-- =innerSum) {
+// ```
+// No NCBI counterpart: the switch is read once per process. It chooses between the
+// scalar convolution loop above and the eight-lane variant in `compute_k_from_lambda_h_impl`.
+fn x_karlin_fast() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("LOSAT_X_KARLINFAST").is_some())
+}
+
 /// Compute K from Lambda and H
 /// Reference: NCBI BlastKarlinLHtoK (blast_stat.c:2247-2418)
 fn compute_k_from_lambda_h(sfp: &ScoreFreqProfile, lambda: f64, h: f64) -> Result<f64, String> {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2353-2364
+    // ```c
+    //         for (ptrP = alignmentScoreProbabilities +
+    //                  (highAlignmentScore-lowAlignmentScore);
+    //              ptrP >= alignmentScoreProbabilities;
+    //              *ptrP-- =innerSum) {
+    //             ptr1  = ptrP - first;
+    //             ptr1e = ptrP - last;
+    //             ptr2  = probArrayStartLow + first;
+    //             for (innerSum = 0.; ptr1 >= ptr1e; ) {
+    //                 innerSum += *ptr1  *  *ptr2;
+    //         ptr1--;
+    //         ptr2++;
+    //             }
+    // ```
+    // Dispatch point of LOSAT_X_KARLINFAST: with the switch off, `x_fast` is false and the
+    // scalar port of this loop below runs. With it on, the lanes replace part of the same loop.
+    compute_k_from_lambda_h_impl(sfp, lambda, h, x_karlin_fast())
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2247-2248,2346-2348,2412-2413
+// ```c
+// BlastKarlinLHtoK(Blast_ScoreFreq* sfp, double lambda, double H)
+// {
+// ...
+//     for (iterCounter = 0;
+//          ((iterCounter < iterlimit) && (innerSum > sumlimit));
+//          outerSum += innerSum /= ++iterCounter) {
+// ...
+//     K = -exp((double)-2.0*outerSum) /
+//              (firstTermClosedForm*BLAST_Expm1(-(double)lambda));
+// ```
+// The body ports BlastKarlinLHtoK. `x_fast` only changes how the convolution `innerSum`
+// values are produced, not which values or the order of the additions in each of them.
+fn compute_k_from_lambda_h_impl(
+    sfp: &ScoreFreqProfile,
+    lambda: f64,
+    h: f64,
+    x_fast: bool,
+) -> Result<f64, String> {
     if lambda <= 0.0 || h <= 0.0 {
         return Err("Lambda and H must be positive".to_string());
     }
@@ -686,6 +745,47 @@ fn compute_k_from_lambda_h(sfp: &ScoreFreqProfile, lambda: f64, h: f64) -> Resul
 
         let mut ptr_p_idx = (high_alignment_score - low_alignment_score) as isize;
         while ptr_p_idx >= 0 {
+            // EXPERIMENT (LOSAT_X_KARLINFAST): away from both ends (`first == 0`
+            // and `last == range`) every new probability is the same `range + 1`
+            // term sum over values that this pass has not overwritten yet, so
+            // eight of them are accumulated side by side.  Each lane performs
+            // NCBI's additions and multiplications in NCBI's order.
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2357-2364
+            // ```c
+            //             ptr1  = ptrP - first;
+            //             ptr1e = ptrP - last;
+            //             ptr2  = probArrayStartLow + first;
+            //             for (innerSum = 0.; ptr1 >= ptr1e; ) {
+            //                 innerSum += *ptr1  *  *ptr2;
+            //         ptr1--;
+            //         ptr2++;
+            //             }
+            // ```
+            // When `first == 0` and `last == range`, `ptr1 - ptr1e` is `range` and each new
+            // `*ptrP` is the sum over the terms `*(ptrP - t) * probArrayStartLow[t]`, t = 0..range,
+            // added in increasing t starting from 0.0. The lanes compute eight adjacent `ptrP` that
+            // way. A sum reads only positions at or below its own `ptrP`. NCBI writes downwards,
+            // so it has not overwritten any of them yet, and reading all eight from the array
+            // before the writes gives the same values.
+            if x_fast && first == 0 {
+                const LANES: isize = 8;
+                let width = range as isize;
+                while ptr_p_idx - (LANES - 1) > width {
+                    let low_lane = (ptr_p_idx - (LANES - 1)) as usize;
+                    let mut sums = [0.0f64; LANES as usize];
+                    for (term, &prob) in prob_array_start_low[..=range as usize].iter().enumerate()
+                    {
+                        let source = &alignment_score_probabilities
+                            [low_lane - term..low_lane - term + LANES as usize];
+                        for lane in 0..LANES as usize {
+                            sums[lane] += source[lane] * prob;
+                        }
+                    }
+                    alignment_score_probabilities[low_lane..low_lane + LANES as usize]
+                        .copy_from_slice(&sums);
+                    ptr_p_idx -= LANES;
+                }
+            }
             let mut ptr1_idx = ptr_p_idx - first as isize;
             let ptr1e_idx = ptr_p_idx - last as isize;
             let mut ptr2_idx = first as isize;
@@ -792,6 +892,75 @@ pub fn apply_check_ideal(computed: KarlinParams, ideal: KarlinParams) -> KarlinP
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // EXPERIMENT (LOSAT_X_KARLINFAST): the side-by-side sums give the bits of the
+    // one-at-a-time loop.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2353-2364
+    // ```c
+    //         for (ptrP = alignmentScoreProbabilities +
+    //                  (highAlignmentScore-lowAlignmentScore);
+    //              ptrP >= alignmentScoreProbabilities;
+    //              *ptrP-- =innerSum) {
+    //             ptr1  = ptrP - first;
+    //             ptr1e = ptrP - last;
+    //             ptr2  = probArrayStartLow + first;
+    //             for (innerSum = 0.; ptr1 >= ptr1e; ) {
+    //                 innerSum += *ptr1  *  *ptr2;
+    //         ptr1--;
+    //         ptr2++;
+    //             }
+    // ```
+    // The test compares the bits of K from the eight-lane variant and the scalar loop for
+    // random compositions.
+    #[test]
+    fn x_karlin_k_lanes_match_scalar_loop_bitwise() {
+        let mut state = 0x9E37_79B9_7F4A_7C15u64;
+        let mut next = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        let standard = compute_std_aa_composition();
+        let mut checked = 0;
+        for round in 0..400 {
+            // A composition between the Robinson frequencies and a skewed one.
+            let mut comp = [0.0f64; BLASTAA_SIZE];
+            let mut total = 0.0;
+            for (index, slot) in comp.iter_mut().enumerate() {
+                if standard[index] > 0.0 {
+                    let weight =
+                        1.0 + (next() % 1000) as f64 / if round % 4 == 0 { 50.0 } else { 400.0 };
+                    *slot = standard[index] * weight;
+                    total += *slot;
+                }
+            }
+            for slot in &mut comp {
+                *slot /= total;
+            }
+            let sfp = compute_score_freq_profile(&comp, &standard, -4, 11);
+            let Ok(lambda) = compute_lambda_nr(&sfp, BLAST_KARLIN_LAMBDA0_DEFAULT) else {
+                continue;
+            };
+            let Ok(h) = compute_h_from_lambda(&sfp, lambda) else {
+                continue;
+            };
+            let slow = compute_k_from_lambda_h_impl(&sfp, lambda, h, false);
+            let fast = compute_k_from_lambda_h_impl(&sfp, lambda, h, true);
+            match (slow, fast) {
+                (Ok(slow), Ok(fast)) => {
+                    assert_eq!(slow.to_bits(), fast.to_bits(), "round {round}");
+                    checked += 1;
+                }
+                (Err(slow), Err(fast)) => assert_eq!(slow, fast),
+                other => panic!("round {round}: {other:?}"),
+            }
+        }
+        assert!(
+            checked > 300,
+            "only {checked} compositions reached the K series"
+        );
+    }
 
     #[test]
     fn test_compute_aa_composition() {

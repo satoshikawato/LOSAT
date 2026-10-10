@@ -96,6 +96,24 @@ pub(crate) trait PreliminarySink {
     //          BlastHSP* new_hsp;
     // ```
     fn containment(&mut self, _h: &PreliminaryHsp, _contained: bool) {}
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3917-3921
+    // ```c
+    //       /* use priate interval tree when recomputing alignments */
+    //       if (!BlastIntervalTreeContainsHSP(tree, &tmp_hsp, query_info,
+    //                                         hit_options->min_diag_separation))
+    //       {
+    //          BlastHSP* new_hsp;
+    // ```
+    // NCBI tests each candidate HSP for containment in the interval tree. The containment callback
+    // only reports that test to an observer. This method says whether the callback reads its
+    // arguments, so that the search can skip the copy of every candidate HSP kept for it. No value
+    // NCBI computes changes.
+    /// EXPERIMENT (LOSAT_X_BXLEAN): false when `containment` ignores its
+    /// arguments, so that the search need not keep a copy of every candidate
+    /// HSP for it.
+    fn x_wants_containment(&self) -> bool {
+        true
+    }
     fn chunk_start(&mut self, _chunk: &QueryChunk) -> Result<()> {
         Ok(())
     }
@@ -457,6 +475,26 @@ pub fn search_preliminary(
 //                     subject, gap_align, score_params, ext_params, hit_params,
 //                     word_params, init_hitlist, &hsp_list, gapped_stats, NULL);
 // ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1413
+// ```c
+//     /* iterate over all subject sequences */
+//     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+//            != BLAST_SEQSRC_EOF) {
+// ```
+// NCBI scans the subjects one after another in this loop. LOSAT_X_BXCHUNK sets how many consecutive
+// subjects one worker scans in a wave (on its own diagonal table). Only the unit of parallel work
+// changes.
+/// EXPERIMENT (LOSAT_X_BXCHUNK[=k]): subjects per worker in one wave; `None`
+/// when the switch is off.
+fn x_bx_chunk() -> Option<usize> {
+    use std::sync::OnceLock;
+    static K: OnceLock<Option<usize>> = OnceLock::new();
+    *K.get_or_init(|| {
+        let raw = std::env::var("LOSAT_X_BXCHUNK").ok()?;
+        Some(raw.parse::<usize>().ok().filter(|&k| k >= 1).unwrap_or(64))
+    })
+}
+
 pub(crate) fn search_core(
     records: &[FastaRecord],
     subjects: &[FastaRecord],
@@ -510,6 +548,9 @@ pub(crate) fn search_core(
         .expect("protein subject");
     let mut result = Vec::new();
     let mut call = 0;
+    // No NCBI counterpart: decides whether candidate HSPs are copied for the containment callback;
+    // it does not change any value NCBI computes.
+    let x_containment = diagnostics || sink.x_wants_containment();
     for range in batch_ranges(records) {
         let queries = &records[range.clone()];
         let mut full = prepare_queries(queries, options)?;
@@ -582,6 +623,95 @@ pub(crate) fn search_core(
         let is_split = chunks.len() > 1;
         let mut stages = Vec::new();
         let mut merged = vec![vec![Vec::new(); subjects.len()]; queries.len()];
+        // EXPERIMENT (LOSAT_X_BXPAR): one job per query chunk instead of one per
+        // subject.  NCBI c++/src/algo/blast/api/prelim_stage.cpp:235-271 searches
+        // the chunks one after another and only `BlastHSPStreamMerge` relates
+        // them; here a wave of chunks is searched on the pool and then written
+        // to the sink in chunk order, subject by subject, as before.
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:237-271
+        // ```c
+        //         for (Uint4 i = 0; i < query_splitter->GetNumberOfChunks(); i++) {
+        // ...
+        //                 CRef<SInternalData> chunk_data =
+        //                     SplitQuery_CreateChunkData(chunk_qf, m_Options,
+        //                                                m_InternalData,
+        //                                                GetNumberOfThreads());
+        // ...
+        //                 if (IsMultiThreaded()) {
+        //                      x_LaunchMultiThreadedSearch(*chunk_data);
+        //                 } else {
+        //                     retval =
+        //                         CPrelimSearchRunner(*chunk_data, opts_memento.get())();
+        // ...
+        //                 BlastHSPStreamMerge(split_query_blk->GetCStruct(), i,
+        //                                 chunk_data->m_HspStream->GetPointer(),
+        //                                 m_InternalData->m_HspStream->GetPointer());
+        // ```
+        // NCBI searches the query chunks one after another and relates them only in
+        // BlastHSPStreamMerge. With LOSAT_X_BXPAR a wave of chunks is searched on the pool
+        // (x_compute_chunk) and written to the sink in chunk order below. Each chunk is searched
+        // exactly as before.
+        #[cfg(feature = "parallel")]
+        let chunks = if super::runtime::x_bx_parallel()
+            && pool.enabled()
+            && chunks.len() > 1
+            && !diagnostics
+        {
+            use rayon::prelude::*;
+            crate::utils::threading::report_stage("blastx", "query_chunks", chunks.len(), true);
+            let wave = pool.threads().max(2);
+            for wave_chunks in chunks.chunks(wave) {
+                let computed: Vec<_> = pool.install(|| {
+                    wave_chunks
+                        .par_iter()
+                        .with_max_len(1)
+                        .map(|chunk| {
+                            x_compute_chunk(
+                                chunk,
+                                subjects,
+                                options,
+                                &spaces,
+                                db_length,
+                                db_count,
+                                min_subject_length,
+                                x_containment,
+                            )
+                        })
+                        .collect()
+                });
+                // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:269-271
+                // ```c
+                //                 BlastHSPStreamMerge(split_query_blk->GetCStruct(), i,
+                //                                 chunk_data->m_HspStream->GetPointer(),
+                //                                 m_InternalData->m_HspStream->GetPointer());
+                // ```
+                // Replay in chunk order: the sink sees chunk_start, each subject and chunk_end in
+                // the same order as the serial chunk loop below.
+                for (chunk, computed) in wave_chunks.iter().zip(computed) {
+                    sink.chunk_start(chunk)?;
+                    let Some((params, results)) = computed? else {
+                        continue;
+                    };
+                    let batch = &chunk.prepared;
+                    for (oid, computed) in results.into_iter().enumerate() {
+                        sink.subject_start(oid, batch, &params, computed.prepared_link)?;
+                        for (h, contained) in &computed.containment {
+                            sink.containment(h, *contained);
+                        }
+                        let SubjectComputation { raw, purged, .. } = computed;
+                        if options.gapped && !raw.is_empty() {
+                            sink.preliminary_purge(oid, &raw, &purged)?;
+                        }
+                        sink.subject(oid, &purged, batch, &params)?;
+                        call += 1;
+                    }
+                    sink.chunk_end(chunk, is_split)?;
+                }
+            }
+            Vec::new()
+        } else {
+            chunks
+        };
         for chunk in chunks {
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:237-244
             // ```c++
@@ -665,10 +795,58 @@ pub(crate) fn search_core(
             // utils::threading owns the search pool; each slot retains its own
             // diagonal table across bounded O(worker-count) reduction windows.
             // Caller/collector/Kappa state remains serial in the original OID order.
-            let wave_size = if pool.enabled() { pool.threads() } else { 1 };
+            // EXPERIMENT (LOSAT_X_BXWAVE=k): k subjects per worker in each
+            // parallel wave instead of one, so a wave is long enough for the
+            // other workers to wake up and take part.
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1413
+            // ```c
+            //     /* iterate over all subject sequences */
+            //     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+            //            != BLAST_SEQSRC_EOF) {
+            // ```
+            // LOSAT_X_BXWAVE=k: k subjects per worker in each parallel wave instead of one. The
+            // subjects are still scanned with the same word finder and their results are still
+            // handed to the sink in OID order. Scheduling only.
+            let x_wave_factor = {
+                use std::sync::OnceLock;
+                static K: OnceLock<usize> = OnceLock::new();
+                *K.get_or_init(|| {
+                    std::env::var("LOSAT_X_BXWAVE")
+                        .ok()
+                        .and_then(|v| v.parse::<usize>().ok())
+                        .filter(|&k| k >= 1)
+                        .unwrap_or(1)
+                })
+            };
+            // EXPERIMENT (LOSAT_X_BXCHUNK[=k]): a wave is k consecutive subjects
+            // per worker, and a worker scans its k subjects one after another
+            // on its own diagonal table, as the serial loop does on the single
+            // table. One subject per worker per wave means a fork-join for
+            // every `threads` subjects, each shorter than the fork-join itself.
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1413
+            // ```c
+            //     /* iterate over all subject sequences */
+            //     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+            //            != BLAST_SEQSRC_EOF) {
+            // ```
+            // LOSAT_X_BXCHUNK: a worker scans k consecutive subjects one after another, as the
+            // serial loop does on the single table. Scheduling only.
+            let x_chunk = if pool.enabled() { x_bx_chunk() } else { None };
+            let wave_size = if let Some(x_k) = x_chunk {
+                pool.threads() * x_k
+            } else if pool.enabled() {
+                pool.threads() * x_wave_factor
+            } else {
+                1
+            };
             #[cfg(feature = "parallel")]
             let mut worker_diagonals = if pool.enabled() {
-                (0..subjects.len().min(wave_size))
+                let x_tables = if x_chunk.is_some() {
+                    pool.threads()
+                } else {
+                    wave_size
+                };
+                (0..subjects.len().min(x_tables))
                     .map(|_| Diagonals::new(last.offset + last.length, options.window_size))
                     .collect::<Result<Vec<_>>>()?
             } else {
@@ -682,6 +860,49 @@ pub(crate) fn search_core(
                         use rayon::prelude::*;
                         if pool.enabled() {
                             pool.install(|| {
+                                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1413,1469-1470
+                                // ```c
+                                //     /* iterate over all subject sequences */
+                                //     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+                                //            != BLAST_SEQSRC_EOF) {
+                                // ...
+                                //       status =
+                                //           s_BlastSearchEngineCore(program_number, query, query_info,
+                                // ```
+                                // Dispatch point: with LOSAT_X_BXCHUNK each worker runs
+                                // compute_subject for its k subjects in order; the results are
+                                // flattened in subject order. Without the switch the code below
+                                // runs one subject per worker.
+                                if let Some(x_k) = x_chunk {
+                                    return wave
+                                        .par_chunks(x_k)
+                                        .zip(worker_diagonals.par_iter_mut())
+                                        .enumerate()
+                                        .flat_map_iter(|(x_slot, (x_part, scratch))| {
+                                            x_part
+                                                .iter()
+                                                .enumerate()
+                                                .map(|(x_within, subject)| {
+                                                    compute_subject(
+                                                        subject,
+                                                        batch,
+                                                        &params,
+                                                        options,
+                                                        &lookup,
+                                                        scratch,
+                                                        xdrop,
+                                                        diagnostics,
+                                                        db_length,
+                                                        wave_index * wave_size
+                                                            + x_slot * x_k
+                                                            + x_within,
+                                                        x_containment,
+                                                    )
+                                                })
+                                                .collect::<Vec<_>>()
+                                        })
+                                        .collect::<Vec<_>>();
+                                }
                                 wave.par_iter()
                                     .zip(worker_diagonals.par_iter_mut())
                                     .enumerate()
@@ -697,6 +918,7 @@ pub(crate) fn search_core(
                                             diagnostics,
                                             db_length,
                                             wave_index * wave_size + within,
+                                            x_containment,
                                         )
                                     })
                                     .collect::<Vec<_>>()
@@ -727,6 +949,7 @@ pub(crate) fn search_core(
                             diagnostics,
                             db_length,
                             oid,
+                            x_containment,
                         )?
                     };
                     sink.subject_start(oid, batch, &params, computed.prepared_link)?;
@@ -904,6 +1127,88 @@ pub(crate) fn search_core(
 // ```
 // Only independent seed/extension state belongs to workers. Existing LOSAT
 // utils::threading owns pool lifetime; all sink state is replayed by input OID.
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:243-260
+// ```c
+//                 CRef<SInternalData> chunk_data =
+//                     SplitQuery_CreateChunkData(chunk_qf, m_Options,
+//                                                m_InternalData,
+//                                                GetNumberOfThreads());
+// ...
+//                 CRef<ILocalQueryData> query_data(
+//                         chunk_qf->MakeLocalQueryData( &*m_Options ) );
+// ...
+//                 if (IsMultiThreaded()) {
+//                      x_LaunchMultiThreadedSearch(*chunk_data);
+//                 } else {
+//                     retval =
+//                         CPrelimSearchRunner(*chunk_data, opts_memento.get())();
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1413
+// ```c
+//     /* iterate over all subject sequences */
+//     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+//            != BLAST_SEQSRC_EOF) {
+// ```
+// x_compute_chunk is everything the serial chunk loop does for one chunk before it writes to the
+// sink: the chunk's scoring parameters, lookup table, diagonal table, subject parameters and the
+// subject loop. The code is the same; it returns the results instead of writing them to the sink.
+/// EXPERIMENT (LOSAT_X_BXPAR): everything the chunk loop computes before it
+/// talks to the sink, for one chunk; `None` when no context of the chunk has
+/// valid Karlin parameters (the loop then skips the chunk).
+#[cfg(feature = "parallel")]
+#[allow(clippy::type_complexity)]
+fn x_compute_chunk(
+    chunk: &QueryChunk,
+    subjects: &[FastaRecord],
+    options: &ResolvedOptions,
+    fixed_spaces: &[i64],
+    db_length: i64,
+    db_count: i64,
+    min_subject_length: usize,
+    x_containment: bool,
+) -> Result<Option<(Vec<ContextParameters>, Vec<SubjectComputation>)>> {
+    let batch = &chunk.prepared;
+    let mut params = score_block(batch);
+    if !params.iter().any(|p| p.valid) {
+        return Ok(None);
+    }
+    let lookup = Lookup::new(batch, &params, options)?;
+    let last = batch.contexts.last().expect("BLASTX contexts");
+    let mut diagonals = Diagonals::new(last.offset + last.length, options.window_size)?;
+    let xdrop = subject_parameters(
+        batch,
+        &mut params,
+        options,
+        db_length,
+        db_count,
+        min_subject_length,
+        Some(fixed_spaces),
+    )?;
+    let mut results = Vec::with_capacity(subjects.len());
+    for (oid, subject) in subjects.iter().enumerate() {
+        let mut computed = compute_subject(
+            subject,
+            batch,
+            &params,
+            options,
+            &lookup,
+            &mut diagonals,
+            xdrop,
+            false,
+            db_length,
+            oid,
+            x_containment,
+        )?;
+        // Only the diagnostic stages read these.
+        // No NCBI counterpart: drops the seed and initial-HSP lists, which only the diagnostic
+        // stages read, to save memory; it does not change any value NCBI computes.
+        computed.seeds = Vec::new();
+        computed.initial = Vec::new();
+        results.push(computed);
+    }
+    Ok(Some((params, results)))
+}
+
 struct SubjectComputation {
     seeds: Vec<(i32, i32)>,
     initial: Vec<InitHsp>,
@@ -937,6 +1242,7 @@ fn compute_subject(
     diagnostics: bool,
     db_length: i64,
     _oid: usize,
+    x_containment: bool,
 ) -> Result<SubjectComputation> {
     #[cfg(feature = "blastx-worker-probe")]
     worker_probe("start", _oid);
@@ -1041,7 +1347,13 @@ fn compute_subject(
             &encoded,
             &initial,
             xdrop,
-            &mut |h, contained| containment.push((h.clone(), contained)),
+            &mut |h, contained| {
+                // No NCBI counterpart: the copy is skipped when nothing reads it; it does not
+                // change any value NCBI computes.
+                if x_containment {
+                    containment.push((h.clone(), contained))
+                }
+            },
         )?
     } else {
         ungapped(batch, &initial)

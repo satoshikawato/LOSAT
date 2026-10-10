@@ -727,6 +727,10 @@ pub(super) fn link_hsp_group_fast(
         return group_hits;
     }
     let n = group_hits.len();
+    // LOSAT_TIMING only adds the time of the group to the line printed below.
+    let started = std::env::var_os("LOSAT_TIMING")
+        .is_some()
+        .then(std::time::Instant::now);
 
     // Effective lengths and search space, as in link_hsps.c:559-571.
     let query_context = group_hits[0].ctx_idx;
@@ -1003,8 +1007,13 @@ pub(super) fn link_hsp_group_fast(
         lk.stats.rounds += 1;
         lk.stats.chain_len_total += chain.len() as u64;
     }
-    if std::env::var_os("LOSAT_TIMING").is_some() {
-        eprintln!("[TIMING] linking_fast group n={} {:?}", n, lk.stats);
+    if let Some(started) = started {
+        eprintln!(
+            "[TIMING] linking_fast group n={} us={} {:?}",
+            n,
+            started.elapsed().as_micros(),
+            lk.stats
+        );
     }
 
     group_hits

@@ -1232,12 +1232,14 @@ fn assert_same_linking(expected: &[UngappedHit], actual: &[UngappedHit]) {
 //       while (number_of_hsps > 0)
 // ```
 // Switch point of LOSAT_LINK_FAST. The index-backed kernel of linking_index.rs ports
-// s_BlastEvenGapLinkHSPs with different predecessor searches. A group that could leave the Int4
-// range, or a run with diagnostics on, runs the default kernel (linking_fast.rs) instead.
+// s_BlastEvenGapLinkHSPs with different predecessor searches. A group whose pass values leave the
+// Int4 range runs the literal port; a run with diagnostics on runs the default kernel
+// (linking_fast.rs).
 /// Links one group under `LOSAT_LINK_FAST=1` with the index-backed kernel of
 /// `linking_index.rs`, which returns the same result as the literal port
-/// `link_hsp_group_ncbi`. A group whose sums could leave the Int4 range, and a
-/// run with diagnostics on, use the default kernel of `linking_fast.rs`.
+/// `link_hsp_group_ncbi`. A group whose pass values leave the Int4 range is
+/// linked by the literal port itself (`linking_index.rs`, "Int4 range"); a run
+/// with diagnostics on uses the default kernel of `linking_fast.rs`.
 #[allow(clippy::too_many_arguments)]
 fn link_hsp_group_link_fast(
     group_hits: Vec<UngappedHit>,
@@ -1256,7 +1258,7 @@ fn link_hsp_group_link_fast(
 ) -> Vec<UngappedHit> {
     use super::linking_index as index;
 
-    if group_hits.is_empty() || diag_enabled || !index::sums_fit_int4(&group_hits, cutoffs) {
+    if group_hits.is_empty() || diag_enabled {
         return super::linking_fast::link_hsp_group_fast(
             group_hits,
             cutoffs,
@@ -1285,7 +1287,7 @@ fn link_hsp_group_link_fast(
             pool_hsp_links,
         )
     });
-    let linked = index::link_hsp_group_fast(
+    let linked = match index::link_hsp_group_fast(
         group_hits,
         cutoffs,
         gap_decay_rate,
@@ -1294,7 +1296,24 @@ fn link_hsp_group_link_fast(
         length_adj_per_context,
         eff_searchsp_per_context,
         log_k_by_ctx,
-    );
+    ) {
+        Ok(linked) => linked,
+        Err(group_hits) => link_hsp_group_ncbi(
+            group_hits,
+            params,
+            cutoffs,
+            gap_decay_rate,
+            diag_enabled,
+            subject_len_nucl,
+            query_contexts,
+            subject_frame_bases,
+            length_adj_per_context,
+            eff_searchsp_per_context,
+            log_k_by_ctx,
+            pool_lh_helpers,
+            pool_hsp_links,
+        ),
+    };
     if let Some(expected) = expected {
         assert_same_linking(&expected, &linked);
     }
@@ -3701,10 +3720,12 @@ mod tests {
     const VERIFIED: LinkFastOptions = LinkFastOptions {
         verify: true,
         reuse_index0: true,
+        check_int4: true,
     };
     const VERIFIED_NCBI_INDEX0: LinkFastOptions = LinkFastOptions {
         verify: true,
         reuse_index0: false,
+        check_int4: true,
     };
 
     /// The HSP of a fixed test, found by its query and subject start.
@@ -3909,31 +3930,48 @@ mod tests {
     // ```c
     // Int4 new_sum = H_hsp_sum + (score - cutoff[index]);
     // ```
-    // NCBI sums are Int4. A group whose sums could leave that range runs the NCBI kernel.
-    // A group whose sums could leave the Int4 range is not given to the
-    // index-backed kernel.
+    // NCBI sums are Int4. A group whose pass values leave that range is handed back unchanged
+    // (linking.rs then links it with the port of s_BlastEvenGapLinkHSPs); a group whose largest
+    // chain sum is just inside the range is linked by the index-backed kernel.
     #[test]
-    fn fast_kernel_is_used_only_when_sums_fit_int4() {
-        use crate::algorithm::tblastx::sum_stats_linking::linking_index::sums_fit_int4;
+    fn fast_kernel_hands_back_a_group_whose_sums_leave_int4() {
         let cutoffs = fast_test_cutoffs();
-        let small = fast_test_hits(&[
+        // Two HSPs: the largest chain sum is 2 * (1e9 - 41), inside Int4.
+        let (_, stats) = link_with_both_kernels(
+            fast_test_hits(&[
+                (0, 30, 0, 30, 1_000_000_000),
+                (40, 70, 40, 70, 1_000_000_000),
+            ]),
+            &cutoffs,
+            VERIFIED,
+            "inside Int4",
+        );
+        assert_eq!(stats.int4_overflow_pass, 0);
+        assert_eq!(stats.max_pass_sum, 2 * (1_000_000_000 - 41));
+        // A third HSP on the same diagonal: the chain sum leaves Int4 in the
+        // first pass, and the group comes back as it went in.
+        let (_, contexts, log_k) = fast_test_contexts();
+        let mut hits = fast_test_hits(&[
             (0, 30, 0, 30, 1_000_000_000),
             (40, 70, 40, 70, 1_000_000_000),
+            (80, 110, 80, 110, 1_000_000_000),
         ]);
-        assert!(sums_fit_int4(&small, &cutoffs));
-        let large = fast_test_hits(&[
-            (0, 30, 0, 30, 1_000_000_000),
-            (40, 70, 40, 70, 1_000_000_000),
-            (80, 110, 80, 110, 147_483_648),
-        ]);
-        assert!(!sums_fit_int4(&large, &cutoffs));
-        let negative_cutoffs = LinkHspCutoffs {
-            cutoff_small_gap: 0,
-            cutoff_big_gap: -1_000_000_000,
-            gap_prob: 0.0,
-            ignore_small_gaps: true,
-        };
-        assert!(!sums_fit_int4(&small, &negative_cutoffs));
+        sort_hsps_by_ncbi_link_order(&mut hits, rev_compare_hsps_tbx);
+        let before = format!("{hits:?}");
+        let (back, stats) = link_hsp_group_fast_with(
+            hits,
+            &cutoffs,
+            0.5,
+            300_000,
+            &contexts,
+            &[49; 6],
+            &[9_372_428_362; 6],
+            &log_k,
+            VERIFIED,
+        );
+        assert_eq!(stats.int4_overflow_pass, 1);
+        assert_eq!(stats.max_pass_sum, 3 * (1_000_000_000 - 41));
+        assert_eq!(format!("{back:?}"), before);
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:414-419,589
@@ -4055,6 +4093,7 @@ mod tests {
             let options = LinkFastOptions {
                 verify: n <= 140 || case % 200 == 0,
                 reuse_index0: true,
+                check_int4: true,
             };
             let (linked, stats) = link_with_both_kernels(hits.clone(), cutoffs, options, &label);
             total.add(&stats);
@@ -4065,6 +4104,7 @@ mod tests {
                     LinkFastOptions {
                         verify: false,
                         reuse_index0: false,
+                        check_int4: true,
                     },
                     &label,
                 );
@@ -4103,5 +4143,278 @@ mod tests {
                 "fast_kernel_matches_ncbi_kernel_on_random_groups: {total_hsps} HSPs, {total:?}"
             );
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:753,868,907-908
+    // ```c
+    // Int4 new_sum = H_hsp_sum + (score - cutoff[index]);
+    // ...
+    // best[0]->hsp_link.sum[0] +=
+    //    (best[0]->hsp_link.num[0])*cutoff[0];
+    // ```
+    // Groups whose Int4 sums wrap. The reference is the port of s_BlastEvenGapLinkHSPs, which wraps
+    // as NCBI's C does in practice; the test needs wrapping i32 arithmetic, so it runs only with
+    // CARGO_PROFILE_TEST_OVERFLOW_CHECKS=false.
+    /// Differential test on groups whose sums leave the Int4 range: the NCBI
+    /// kernel against the index-backed kernel without the Int4 check (with
+    /// and without the index-0 reuse), with the check and the fallback of
+    /// `linking.rs`, and against the default kernel of `linking_fast.rs`.
+    /// Requires: without a pass value outside Int4, both index-backed runs
+    /// equal the NCBI kernel, also when an add-back wraps; a pass value
+    /// leaves Int4 only in the first pass; with the check, the result always
+    /// equals the NCBI kernel. Prints how often the other kernels differ, and
+    /// the smallest group on which each one differs.
+    #[test]
+    #[ignore = "needs wrapping i32: CARGO_PROFILE_TEST_OVERFLOW_CHECKS=false"]
+    fn fast_kernel_int4_wrap_groups() {
+        use std::hint::black_box;
+        assert!(
+            std::panic::catch_unwind(|| black_box(i32::MAX) + black_box(1)).is_ok(),
+            "run with CARGO_PROFILE_TEST_OVERFLOW_CHECKS=false"
+        );
+        struct Rng(u64);
+        impl Rng {
+            fn next(&mut self) -> u64 {
+                self.0 ^= self.0 << 13;
+                self.0 ^= self.0 >> 7;
+                self.0 ^= self.0 << 17;
+                self.0
+            }
+            fn below(&mut self, n: u64) -> u64 {
+                self.next() % n.max(1)
+            }
+        }
+
+        // A small Lambda keeps xsum, and so the E-values that choose the
+        // ordering method, in the usual range for raw scores near 2^30.
+        let params = KarlinParams {
+            lambda: 1.0e-8,
+            k: 0.134,
+            h: 0.401,
+            alpha: 0.7916,
+            beta: -3.2,
+        };
+        let (_, mut contexts, _) = fast_test_contexts();
+        for context in contexts.iter_mut() {
+            context.karlin_params = params;
+        }
+        let log_k: Vec<f64> = contexts.iter().map(|c| c.karlin_params.k.ln()).collect();
+        let link_ncbi = |hits: Vec<UngappedHit>, cutoffs: &LinkHspCutoffs| {
+            let mut helpers = Vec::new();
+            let mut links = Vec::new();
+            link_hsp_group_ncbi(
+                hits,
+                &params,
+                cutoffs,
+                0.5,
+                false,
+                300_000,
+                &contexts,
+                &[0; 6],
+                &[49; 6],
+                &[9_372_428_362; 6],
+                &log_k,
+                &mut helpers,
+                &mut links,
+            )
+        };
+        let link_index = |hits: Vec<UngappedHit>, cutoffs: &LinkHspCutoffs, reuse_index0, check| {
+            link_hsp_group_fast_with(
+                hits,
+                cutoffs,
+                0.5,
+                300_000,
+                &contexts,
+                &[49; 6],
+                &[9_372_428_362; 6],
+                &log_k,
+                LinkFastOptions {
+                    verify: false,
+                    reuse_index0,
+                    check_int4: check,
+                },
+            )
+        };
+        let link_pr120 = |hits: Vec<UngappedHit>, cutoffs: &LinkHspCutoffs| {
+            super::super::linking_fast::link_hsp_group_fast(
+                hits,
+                cutoffs,
+                0.5,
+                300_000,
+                &contexts,
+                &[49; 6],
+                &[9_372_428_362; 6],
+                &log_k,
+            )
+        };
+        let same = |a: &[UngappedHit], b: &[UngappedHit]| {
+            a.len() == b.len()
+                && a.iter().zip(b).all(|(x, y)| {
+                    x.e_value.to_bits() == y.e_value.to_bits()
+                        && format!("{x:?}") == format!("{y:?}")
+                })
+        };
+
+        // (cutoff[0], cutoff[1], gap_prob, ignore_small_gaps, scores from, to)
+        let settings: [(i32, i32, f64, bool, i64, i64); 6] = [
+            (41, 44, 0.5, false, 300_000_000, 1_100_000_000),
+            (41, 44, 0.5, false, 45, 900_000_000),
+            (
+                600_000_000,
+                700_000_000,
+                0.5,
+                false,
+                700_000_001,
+                1_700_000_000,
+            ),
+            (0, 500_000_000, 0.0, true, 500_000_001, 1_500_000_000),
+            (41, -300_000_000, 0.5, false, 200_000_000, 900_000_000),
+            (
+                900_000_000,
+                950_000_000,
+                0.5,
+                false,
+                950_000_001,
+                1_300_000_000,
+            ),
+        ];
+        let mut rng = Rng(0xD1B5_4A32_D192_ED03);
+        let cases: usize = std::env::var("LOSAT_FUZZ_CASES")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(20_000);
+        // [class][kernel]: class 0 = no value outside Int4, 1 = only an
+        // add-back outside Int4, 2 = a pass value outside Int4; kernel 0 =
+        // index with reuse, 1 = index without reuse, 2 = linking_fast.rs.
+        let mut cases_of = [0usize; 3];
+        let mut differ = [[0usize; 3]; 3];
+        let mut smallest: [Option<(usize, String)>; 3] = [None, None, None];
+        let mut fallbacks = 0usize;
+        for case in 0..cases {
+            let (c0, c1, gap_prob, ignore_small_gaps, lo, hi) = settings[case % settings.len()];
+            let cutoffs = LinkHspCutoffs {
+                cutoff_small_gap: c0,
+                cutoff_big_gap: c1,
+                gap_prob,
+                ignore_small_gaps,
+            };
+            let n = 1 + rng.below(if case % 40 == 0 { 120 } else { 14 }) as usize;
+            let span = [60u64, 200, 1200][case % 3];
+            let mut hits: Vec<UngappedHit> = Vec::with_capacity(n);
+            for index in 0..n {
+                let len = if rng.below(9) == 0 {
+                    4 + rng.below(3) as usize
+                } else {
+                    7 + rng.below(40) as usize
+                };
+                let q = rng.below(span) as usize;
+                let s = if rng.below(3) > 0 {
+                    q + rng.below(20) as usize
+                } else {
+                    rng.below(span) as usize
+                };
+                let score = (lo + rng.below((hi - lo + 1) as u64) as i64) as i32;
+                let mut hit = mock_hit(q, q + len, s, s + len, score);
+                hit.ctx_idx = rng.below(3) as usize;
+                hit.q_frame = contexts[hit.ctx_idx].frame;
+                hit.s_frame = 1 + rng.below(3) as i8;
+                hit.q_orig_len = 300_000;
+                hit.s_orig_len = 300_000;
+                hit.hsp_list_order = index;
+                hits.push(hit);
+            }
+            sort_hsps_by_ncbi_link_order(&mut hits, rev_compare_hsps_tbx);
+            for (link_id, hit) in hits.iter_mut().enumerate() {
+                hit.link_id = link_id;
+                hit.chain_next_link_id = None;
+                hit.num = 1;
+            }
+            let label = format!("case {case} n {n} cutoffs {c0} {c1} ignore {ignore_small_gaps}");
+
+            let expected = link_ncbi(hits.clone(), &cutoffs);
+            let (with_reuse, stats_reuse) = link_index(hits.clone(), &cutoffs, true, false);
+            let (without_reuse, stats_plain) = link_index(hits.clone(), &cutoffs, false, false);
+            let pr120 = link_pr120(hits.clone(), &cutoffs);
+
+            // The path of linking.rs: the checked kernel, the NCBI kernel on Int4 overflow.
+            let before = format!("{hits:?}");
+            let (checked, stats_checked) = link_index(hits.clone(), &cutoffs, true, true);
+            let checked = if stats_checked.int4_overflow_pass != 0 {
+                assert_eq!(
+                    format!("{checked:?}"),
+                    before,
+                    "{label}: handed back changed"
+                );
+                fallbacks += 1;
+                link_ncbi(checked, &cutoffs)
+            } else {
+                checked
+            };
+            assert!(
+                same(&expected, &checked),
+                "{label}: checked kernel + fallback"
+            );
+
+            for stats in [&stats_reuse, &stats_plain, &stats_checked] {
+                assert!(stats.int4_overflow_pass <= 1, "{label}: {stats:?}");
+            }
+            let class = if stats_reuse.int4_overflow_pass != 0 {
+                2
+            } else if stats_reuse.max_addback_sum > i64::from(i32::MAX)
+                || stats_reuse.max_addback_sum < i64::from(i32::MIN)
+            {
+                1
+            } else {
+                0
+            };
+            cases_of[class] += 1;
+            if stats_reuse.int4_overflow_pass == 0 {
+                assert!(same(&expected, &with_reuse), "{label}: index kernel, reuse");
+            }
+            if stats_plain.int4_overflow_pass == 0 {
+                assert!(
+                    same(&expected, &without_reuse),
+                    "{label}: index kernel, no reuse"
+                );
+            }
+            for (kernel, result) in [&with_reuse, &without_reuse, &pr120]
+                .into_iter()
+                .enumerate()
+            {
+                if !same(&expected, result) {
+                    differ[class][kernel] += 1;
+                    if smallest[kernel].as_ref().map_or(true, |(m, _)| n < *m) {
+                        let spec: Vec<String> = hits
+                            .iter()
+                            .map(|h| {
+                                format!(
+                                    "({},{},{},{},{})",
+                                    h.q_aa_start, h.q_aa_end, h.s_aa_start, h.s_aa_end, h.raw_score
+                                )
+                            })
+                            .collect();
+                        smallest[kernel] = Some((n, format!("{label}: {}", spec.join(" "))));
+                    }
+                }
+            }
+        }
+        eprintln!(
+            "fast_kernel_int4_wrap_groups: {cases} cases; classes (none, add-back only, pass) {cases_of:?}; checked kernel fell back {fallbacks} times"
+        );
+        for (kernel, name) in ["index, reuse", "index, no reuse", "linking_fast.rs"]
+            .iter()
+            .enumerate()
+        {
+            eprintln!(
+                "  {name}: differs in (none, add-back only, pass) = ({}, {}, {}); smallest: {}",
+                differ[0][kernel],
+                differ[1][kernel],
+                differ[2][kernel],
+                smallest[kernel]
+                    .as_ref()
+                    .map_or("-".to_string(), |(_, s)| s.clone())
+            );
+        }
+        assert!(cases_of.iter().all(|&c| c > 0), "{cases_of:?}");
     }
 }

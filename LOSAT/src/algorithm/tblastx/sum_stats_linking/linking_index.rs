@@ -125,15 +125,15 @@
 //! next pass, lines 755-758: a pass stores `sum0[i]` for every remaining HSP,
 //! kept choice or not, so no pass reads an added-back value; the add-back is
 //! read only by the "current max" scan of lines 610-623, which both kernels
-//! apply to the same stored value with the same `i32` addition, and
-//! `sums_fit_int4` bounds the pass values only).
+//! apply to the same stored value with the same `i32` addition; see "Int4
+//! range" below).
 //!
 //! 1. The window test is fixed and HSPs are only removed, so the candidates
 //!    of H in pass r are a subset of those in pass r-1.
 //! 2. S_r(j) <= S_{r-1}(j): S(j) = score(j) - cutoff + max(0, max of S(k)
 //!    over the candidates k of j); by induction in list order this is a
-//!    maximum over fewer and not larger values. (No sum leaves the Int4
-//!    range: `sums_fit_int4` is checked before this kernel is used.)
+//!    maximum over fewer and not larger values. (No pass value has left the
+//!    Int4 range: see "Int4 range" below.)
 //! 3. `changed0[p] == false` means p kept its own choice in pass r, whose sum
 //!    is unchanged by induction, so S_r(p) = S_{r-1}(p).
 //!
@@ -185,6 +185,32 @@
 //! answers with an HSP after H, the search falls back to NCBI's scan. The
 //! result does not depend on the length condition: the fallback runs
 //! whenever the tree returns an HSP after H.
+//!
+//! The tree returns the largest candidate whatever its sum, NCBI the largest
+//! one above its start value: 0, or `sum - 1` of the previous choice. They
+//! agree while every candidate sum is positive, which holds while no pass
+//! value has left the Int4 range (an HSP with score > cutoff[1] has a sum of
+//! at least score - cutoff[1] > 0), and the previous choice, when it remains,
+//! is itself a candidate above `sum - 1`.
+//!
+//! # Int4 range
+//!
+//! NCBI adds the chain sums in Int4 (`new_sum`, link_hsps.c:753,868). The
+//! index-0 reuse (step 2 above) and the index-1 tree (the paragraph above)
+//! hold only while no pass value has left that range. Every pass value is
+//! computed in i64 and compared with the Int4 range. While none has left it,
+//! the values of a pass are the exact chain maxima over the remaining HSPs,
+//! so a value of pass r is at most the value of the same HSP in pass r-1
+//! (step 2 above) and only the first pass can leave the range. With
+//! `check_int4` (always on outside tests) the kernel stops at the first value
+//! outside the range, before it changes the group, and `linking.rs` links the
+//! group with the literal port, which wraps as NCBI's C does in practice
+//! (signed overflow is undefined behaviour in C).
+//!
+//! The add-back of line 907 is not checked: it wraps as in NCBI, and its
+//! value is read only by the "current max" scan of lines 610-623, which this
+//! kernel makes with NCBI's comparisons, including the start value
+//! `-cutoff[index]`.
 //!
 //! # Checking
 //!
@@ -254,6 +280,10 @@ pub(super) struct LinkFastOptions {
     /// Keep an unchanged index-0 choice without searching again. `false`
     /// searches in every pass, as NCBI does.
     pub reuse_index0: bool,
+    /// Stop at the first pass value outside the Int4 range (module
+    /// documentation, "Int4 range"). Only tests turn it off, to see what the
+    /// kernel would return without the check.
+    pub check_int4: bool,
 }
 
 impl LinkFastOptions {
@@ -262,6 +292,7 @@ impl LinkFastOptions {
         *OPTIONS.get_or_init(|| LinkFastOptions {
             verify: std::env::var_os("LOSAT_LINK_FAST_VERIFY").is_some(),
             reuse_index0: std::env::var("LOSAT_LINK_FAST_REUSE0").map_or(true, |v| v != "0"),
+            check_int4: true,
         })
     }
 }
@@ -290,11 +321,21 @@ pub(super) struct LinkFastStats {
     pub fallbacks: u64,
     /// Choices compared with the plain scan (`verify`).
     pub verified: u64,
+    /// Largest pass value (`new_sum`, exact) and largest value after an
+    /// add-back (exact, before NCBI's Int4 wrap).
+    pub max_pass_sum: i64,
+    pub max_addback_sum: i64,
+    /// The first recompute pass with a pass value outside the Int4 range
+    /// (1 = the first pass); 0 when none.
+    pub int4_overflow_pass: u64,
 }
 
 impl LinkFastStats {
     #[cfg(test)]
     pub(super) fn add(&mut self, other: &LinkFastStats) {
+        self.max_pass_sum = self.max_pass_sum.max(other.max_pass_sum);
+        self.max_addback_sum = self.max_addback_sum.max(other.max_addback_sum);
+        self.int4_overflow_pass = self.int4_overflow_pass.max(other.int4_overflow_pass);
         self.rounds += other.rounds;
         self.recompute_rounds += other.recompute_rounds;
         self.recompute_alive_sum += other.recompute_alive_sum;
@@ -314,24 +355,34 @@ impl LinkFastStats {
 // ```c
 // Int4 new_sum = H_hsp_sum + (score - cutoff[index]);
 // ```
-// NCBI keeps the chain sums in Int4. The index-0 reuse argument (module documentation) holds
-// only while no sum leaves that range, so a group that could leave it goes to the default kernel.
-/// True when no chain sum of this group can leave the Int4 range, which the
-/// index-0 reuse argument (module documentation, step 2) assumes. A chain sum
-/// adds `score - cutoff` over distinct HSPs, so the sum of all positive parts
-/// bounds it. `linking.rs` uses the default kernel (`linking_fast.rs`) for a
-/// group that fails this.
-pub(super) fn sums_fit_int4(group_hits: &[UngappedHit], cutoffs: &LinkHspCutoffs) -> bool {
+// NCBI keeps the chain sums in Int4. No NCBI counterpart for the bound itself: LOSAT_LINK_STATS
+// prints it to show how far a group is from that range; it does not change any value NCBI computes.
+/// An upper bound of every chain sum of this group: a chain sum adds
+/// `score - cutoff` over distinct HSPs, so the sum of all positive parts
+/// bounds it. Printed by `LOSAT_LINK_STATS` only; the kernel checks the pass
+/// values themselves (module documentation, "Int4 range").
+pub(super) fn sum_bound(group_hits: &[UngappedHit], cutoffs: &LinkHspCutoffs) -> i64 {
     let slack = i64::from(cutoffs.cutoff_small_gap.min(0).unsigned_abs())
         + i64::from(cutoffs.cutoff_big_gap.min(0).unsigned_abs());
-    let mut bound = 0i64;
-    for hit in group_hits {
-        bound += i64::from(hit.raw_score.max(0)) + slack;
-        if bound > i64::from(i32::MAX) {
-            return false;
-        }
-    }
-    true
+    group_hits
+        .iter()
+        .map(|hit| i64::from(hit.raw_score.max(0)) + slack)
+        .sum()
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:753,868
+// ```c
+// Int4 new_sum = H_hsp_sum + (score - cutoff[index]);
+// ```
+// The same sum in i64, and whether NCBI's Int4 holds it. `as i32` keeps the low 32 bits, the value
+// a wrapping Int4 addition gives.
+/// `h_sum + (score - cutoff)` as NCBI's Int4 holds it, the exact value, and
+/// whether the two differ.
+#[inline(always)]
+fn int4_sum(h_sum: i32, score: i32, cutoff: i32) -> (i32, i64, bool) {
+    let exact = i64::from(h_sum) + (i64::from(score) - i64::from(cutoff));
+    let int4 = exact as i32;
+    (int4, exact, i64::from(int4) != exact)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:610-623
@@ -356,6 +407,41 @@ fn key(sum: i32, idx: usize) -> u64 {
 #[inline(always)]
 fn key_idx(k: u64) -> usize {
     ((k & 0xffff_ffff) - 1) as usize
+}
+
+#[inline(always)]
+fn key_sum(k: u64) -> i32 {
+    ((k >> 32) as i64 - (1i64 << 31)) as i32
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:607-623,692,772
+// ```c
+// max0 = -cutoff[0];
+// max1 = -cutoff[1];
+// for (H=hp_start->next; H!=NULL; H=H->next) {
+// ...
+//    if(sum0>=max0)
+//    {
+//       max0=sum0;
+//       best[0]=H;
+//    }
+// ...
+// maxscore = -cutoff[index];
+// ```
+// NCBI starts both maxima at -cutoff[index], so best[index] stays NULL when every sum is below it
+// (only a wrapped add-back can be). The root of the key tree is the largest (sum, index); it is
+// best[index] when its sum reaches the start value, as in `DualMaximumTree::maxima` of linking.rs.
+/// `best[0]` and `best[1]` from the root of the key tree (`None` when the
+/// largest sum is below `-cutoff[index]`).
+#[inline]
+fn best_of_root(root: [u64; 2], cutoffs: [i32; 2], ignore_small_gaps: bool) -> [Option<usize>; 2] {
+    let mut best = [None, None];
+    for ch in usize::from(ignore_small_gaps)..2 {
+        if root[ch] != 0 && key_sum(root[ch]) >= -cutoffs[ch] {
+            best[ch] = Some(key_idx(root[ch]));
+        }
+    }
+    best
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:604-623
@@ -584,7 +670,10 @@ fn verify_scan_index1(
 // link_hsp_group_fast only wraps link_hsp_group_fast_with: it adds the LOSAT_LINK_STATS line and
 // changes no value of the result. The kernel is the port of s_BlastEvenGapLinkHSPs described in
 // the module documentation.
-/// The kernel `linking.rs` calls under `LOSAT_LINK_FAST=1`.
+/// The kernel `linking.rs` calls under `LOSAT_LINK_FAST=1`. `Err` returns the
+/// group unchanged when a pass value left the Int4 range (module
+/// documentation, "Int4 range"); `linking.rs` then links it with the literal
+/// port.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn link_hsp_group_fast(
     group_hits: Vec<UngappedHit>,
@@ -595,8 +684,15 @@ pub(super) fn link_hsp_group_fast(
     length_adj_per_context: &[i64],
     eff_searchsp_per_context: &[i64],
     log_k_by_ctx: &[f64],
-) -> Vec<UngappedHit> {
+) -> Result<Vec<UngappedHit>, Vec<UngappedHit>> {
     let n = group_hits.len();
+    let stats_on = stats_enabled() && n > 0;
+    let bound = if stats_on {
+        sum_bound(&group_hits, cutoffs)
+    } else {
+        0
+    };
+    let started = stats_on.then(std::time::Instant::now);
     let (group_hits, stats) = link_hsp_group_fast_with(
         group_hits,
         cutoffs,
@@ -608,10 +704,16 @@ pub(super) fn link_hsp_group_fast(
         log_k_by_ctx,
         LinkFastOptions::from_env(),
     );
-    if stats_enabled() && n > 0 {
+    if let Some(started) = started {
         eprintln!(
-            "[LINK_FAST_STATS] n={} rounds={} recompute_rounds={} recompute_alive_sum={} idx0_searched={} idx0_scanned={} idx0_kept_link={} idx0_kept_none={} idx1_searched={} idx1_kept_link={} idx1_kept_none={} fallbacks={} verified={}",
+            "[LINK_FAST_STATS] n={} us={} bound={} bound_ratio={:.3e} max_pass_sum={} max_addback_sum={} int4_overflow_pass={} rounds={} recompute_rounds={} recompute_alive_sum={} idx0_searched={} idx0_scanned={} idx0_kept_link={} idx0_kept_none={} idx1_searched={} idx1_kept_link={} idx1_kept_none={} fallbacks={} verified={}",
             n,
+            started.elapsed().as_micros(),
+            bound,
+            bound as f64 / f64::from(i32::MAX),
+            stats.max_pass_sum,
+            stats.max_addback_sum,
+            stats.int4_overflow_pass,
             stats.rounds,
             stats.recompute_rounds,
             stats.recompute_alive_sum,
@@ -626,7 +728,11 @@ pub(super) fn link_hsp_group_fast(
             stats.verified
         );
     }
-    group_hits
+    if stats.int4_overflow_pass != 0 {
+        Err(group_hits)
+    } else {
+        Ok(group_hits)
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:414-419,584-589
@@ -660,6 +766,7 @@ pub(super) fn link_hsp_group_fast_with(
     }
     let verify = options.verify;
     let reuse_index0 = options.reuse_index0;
+    let check_int4 = options.check_int4;
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:559-571
     // ```c
@@ -756,6 +863,22 @@ pub(super) fn link_hsp_group_fast_with(
         .map(|i| if i > 0 { (i - 1) as u32 } else { NONE })
         .collect();
     let mut active_head: u32 = 0;
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:955,970-974
+    // ```c
+    // best[ordering_method]->start_of_chain = TRUE;
+    // ...
+    //    H->linked_set = linked_set;
+    //    H->ordering_method = ordering_method;
+    //    H->hsp->evalue = prob[ordering_method];
+    // ```
+    // The fields NCBI sets on a removed chain. They are collected here and written to the group at
+    // the end, so that a group whose pass values leave Int4 is handed back unchanged.
+    let mut out_ordering: Vec<u8> = vec![0; n];
+    let mut out_evalue: Vec<f64> = vec![0.0; n];
+    let mut out_linked_set: Vec<bool> = vec![false; n];
+    let mut out_head_num: Vec<Option<i16>> = vec![None; n];
+    let mut out_next: Vec<u32> = vec![NONE; n];
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:702-745
     // ```c
@@ -870,12 +993,7 @@ pub(super) fn link_hsp_group_fast_with(
         // Same use_current_max rule. The maxima come from the tree root instead of a loop over the HSPs.
         // link_hsps.c:603-652
         if !first_pass {
-            let root = tree.root();
-            for ch in usize::from(ignore_small_gaps)..2 {
-                if root[ch] != 0 {
-                    best[ch] = Some(key_idx(root[ch]));
-                }
-            }
+            best = best_of_root(tree.root(), [c0, c1], ignore_small_gaps);
             if !path_changed {
                 use_current_max = true;
             } else {
@@ -917,6 +1035,9 @@ pub(super) fn link_hsp_group_fast_with(
 
         if !use_current_max {
             stats.recompute_rounds += 1;
+            // A pass value outside the Int4 range in this pass (module
+            // documentation, "Int4 range").
+            let mut pass_int4_overflow = false;
 
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:685
             // ```c
@@ -1099,7 +1220,9 @@ pub(super) fn link_hsp_group_fast_with(
                     // ```
                     // Same statements, in the same order, for the new values of H.
                     // link_hsps.c:750-767
-                    let new_sum = h_sum + (i_score - c0);
+                    let (new_sum, exact, outside) = int4_sum(h_sum, i_score, c0);
+                    stats.max_pass_sum = stats.max_pass_sum.max(exact);
+                    pass_int4_overflow |= outside;
                     let new_xsum = h_xsum + sl[i] - lk[i];
                     sum0[i] = new_sum;
                     num0[i] = h_num + 1;
@@ -1109,6 +1232,14 @@ pub(super) fn link_hsp_group_fast_with(
                         linked_to[h_link as usize] += 1;
                     }
                 }
+            }
+            if pass_int4_overflow && stats.int4_overflow_pass == 0 {
+                stats.int4_overflow_pass = stats.recompute_rounds;
+            }
+            if check_int4 && pass_int4_overflow {
+                // The group is unchanged: `linking.rs` links it with the
+                // literal port (module documentation, "Int4 range").
+                return (group_hits, stats);
             }
 
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:771-774
@@ -1310,7 +1441,9 @@ pub(super) fn link_hsp_group_fast_with(
                 // ```
                 // Same statements for index 1.
                 // link_hsps.c:866-894
-                let new_sum = h_sum + (score[i] - c1);
+                let (new_sum, exact, outside) = int4_sum(h_sum, score[i], c1);
+                stats.max_pass_sum = stats.max_pass_sum.max(exact);
+                pass_int4_overflow |= outside;
                 let new_xsum = h_xsum + sl[i] - lk[i];
                 sum1[i] = new_sum;
                 num1[i] = h_num + 1;
@@ -1322,6 +1455,14 @@ pub(super) fn link_hsp_group_fast_with(
             }
             qorder.truncate(qw);
             iorder.retain(|&j| alive[j as usize]);
+            if pass_int4_overflow && stats.int4_overflow_pass == 0 {
+                stats.int4_overflow_pass = stats.recompute_rounds;
+            }
+            if check_int4 && pass_int4_overflow {
+                // The group is unchanged: `linking.rs` links it with the
+                // literal port (module documentation, "Int4 range").
+                return (group_hits, stats);
+            }
 
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:759-763,887-891
             // ```c
@@ -1350,13 +1491,7 @@ pub(super) fn link_hsp_group_fast_with(
                     }
                 }
             }
-            let root = tree.root();
-            best = [None, None];
-            for ch in usize::from(ignore_small_gaps)..2 {
-                if root[ch] != 0 {
-                    best[ch] = Some(key_idx(root[ch]));
-                }
-            }
+            best = best_of_root(tree.root(), [c0, c1], ignore_small_gaps);
 
             path_changed = false;
             first_pass = false;
@@ -1386,7 +1521,11 @@ pub(super) fn link_hsp_group_fast_with(
         let mut prob = [f64::MAX, f64::MAX];
         if !ignore_small_gaps {
             if let Some(bi) = best[0] {
-                sum0[bi] += (num0[bi] as i32) * c0;
+                // Exact in i64, then NCBI's Int4 value (module documentation,
+                // "Int4 range": the add-back wraps as in NCBI).
+                let added = i64::from(sum0[bi]) + i64::from(num0[bi]) * i64::from(c0);
+                stats.max_addback_sum = stats.max_addback_sum.max(added);
+                sum0[bi] = added as i32;
                 tree.set(bi, [key(sum0[bi], bi), key(sum1[bi], bi)]);
                 let num = num0[bi] as usize;
                 let divisor = gap_decay_divisor(gap_decay_rate, num);
@@ -1439,7 +1578,9 @@ pub(super) fn link_hsp_group_fast_with(
             // ordering_method = eLinkLargeGaps;
             // ```
             // Only large gaps are considered when cutoff[0] == 0.
-            sum1[bi] += (num1[bi] as i32) * c1;
+            let added = i64::from(sum1[bi]) + i64::from(num1[bi]) * i64::from(c1);
+            stats.max_addback_sum = stats.max_addback_sum.max(added);
+            sum1[bi] = added as i32;
             tree.set(bi, [key(sum0[bi], bi), key(sum1[bi], bi)]);
             let num = num1[bi] as usize;
             let divisor = gap_decay_divisor(gap_decay_rate, num);
@@ -1510,14 +1651,12 @@ pub(super) fn link_hsp_group_fast_with(
             link1[best_i]
         };
         let linked_set = head_link != NONE;
-        group_hits[best_i].start_of_chain = true;
-        group_hits[best_i].hsp_link_num = if ordering == 0 {
+        out_head_num[best_i] = Some(if ordering == 0 {
             num0[best_i]
         } else {
             num1[best_i]
-        };
+        });
 
-        let mut is_first = true;
         let mut cur = best_i;
         loop {
             if linked_to[cur] > 1 {
@@ -1541,29 +1680,47 @@ pub(super) fn link_hsp_group_fast_with(
             // Keep prev_active[cur] / next_active[cur]: they are not read again.
             tree.set(cur, [0, 0]);
 
-            group_hits[cur].ordering_method = ordering as u8;
-            group_hits[cur].e_value = evalue;
-            group_hits[cur].linked_set = linked_set;
+            out_ordering[cur] = ordering as u8;
+            out_evalue[cur] = evalue;
+            out_linked_set[cur] = linked_set;
             let next = if ordering == 0 {
                 link0[cur]
             } else {
                 link1[cur]
             };
-            group_hits[cur].chain_next_link_id = if next == NONE {
-                None
-            } else {
-                Some(group_hits[next as usize].link_id)
-            };
-            if is_first {
-                is_first = false;
-            } else {
-                group_hits[cur].start_of_chain = false;
-            }
+            out_next[cur] = next;
             remaining -= 1;
             if next == NONE {
                 break;
             }
             cur = next as usize;
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:955,970-974
+    // ```c
+    // best[ordering_method]->start_of_chain = TRUE;
+    // ...
+    //    H->linked_set = linked_set;
+    //    H->ordering_method = ordering_method;
+    //    H->hsp->evalue = prob[ordering_method];
+    // ```
+    // The collected fields of every removed HSP: the head of each chain starts it and carries its
+    // number of HSPs, the other members do not start a chain.
+    for i in 0..n {
+        if alive[i] {
+            continue;
+        }
+        let next = out_next[i];
+        let chain_next_link_id = (next != NONE).then(|| group_hits[next as usize].link_id);
+        let hit = &mut group_hits[i];
+        hit.ordering_method = out_ordering[i];
+        hit.e_value = out_evalue[i];
+        hit.linked_set = out_linked_set[i];
+        hit.chain_next_link_id = chain_next_link_id;
+        hit.start_of_chain = out_head_num[i].is_some();
+        if let Some(num) = out_head_num[i] {
+            hit.hsp_link_num = num;
         }
     }
 

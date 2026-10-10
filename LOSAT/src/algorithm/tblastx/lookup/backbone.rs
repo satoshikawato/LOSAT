@@ -18,6 +18,11 @@ use crate::utils::matrix::{blosum62_ncbistdaa_score_row, protein_score};
 
 pub const AA_HITS_PER_CELL: usize = 3;
 
+// EXPERIMENT (LOSAT_X_BXLUT / LOSAT_X_BXLUTSHADOW): the BLASTX table filled in place, see
+// x_lut_direct.rs (a child module, so that it uses this file's private builder pieces).
+#[path = "x_lut_direct.rs"]
+mod x_lut_direct;
+
 fn blosum62_ideal_karlin_params() -> KarlinParams {
     ideal_karlin_params_for_matrix(ScoringMatrix::Blosum62, (-4, 11))
 }
@@ -1321,6 +1326,23 @@ pub(crate) fn build_ncbi_lookup_from_prepared(
         contexts,
         frame_bases,
         skipped_seg_mask: 0,
+    };
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:461-467
+    // ```c
+    //     for (i = 0; i < lookup->backbone_size; i++) {
+    //         if (exact_backbone[i] != NULL) {
+    //             s_AddWordHits(lookup, matrix, query->sequence,
+    //                           exact_backbone[i], query_bias, row_max);
+    //             sfree(exact_backbone[i]);
+    //         }
+    //     }
+    // ```
+    // Dispatch point of LOSAT_X_BXLUT / LOSAT_X_BXLUTSHADOW (BLASTX only): with the switch the
+    // table is filled in place from the per-cell counts, in the same append order as this loop
+    // and BlastAaLookupFinalize (x_lut_direct.rs); without it the reference builder below runs.
+    let prepared = match x_lut_direct::x_dispatch(prepared, threshold, ScoringMatrix::Blosum62, 3) {
+        Ok(table) => return table,
+        Err(prepared) => prepared,
     };
     build_lookup_from_prepared(prepared, threshold, ScoringMatrix::Blosum62, 3).0
 }

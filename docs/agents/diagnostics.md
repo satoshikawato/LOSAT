@@ -106,6 +106,10 @@ Same values, faster computation:
   choice against a plain scan; very slow on large groups), `LOSAT_LINK_FAST_SHADOW=1` (every group
   against the literal port, all fields). `LOSAT_LINK_FAST_REUSE0=0` disables the reuse of an unchanged
   index-0 choice. `LOSAT_LINK_STATS=1` prints per-group counters.
+- `LOSAT_X_BXLUT=1` blastx lookup table filled in place from per-cell counts (same append order as
+  `s_AddNeighboringWords` and `BlastAaLookupFinalize`), neighbour-word lists memoised per thread
+  (`tblastx/lookup/x_lut_direct.rs`). Shadow: `LOSAT_X_BXLUTSHADOW=1` (every table compared field by
+  field). Strict-set candidate (S-C, round 5).
 - `LOSAT_X_SEEDBUCKET=1` TBLASTX two-hit stage: hits buffered per diagonal range and processed
   range by range, HSPs restored to scan order (`tblastx/x_seed_bucket.rs`); only for diagonal tables
   of at least `LOSAT_X_SEEDBUCKET_MIN_CELLS` cells (default 2^21). Shadow:

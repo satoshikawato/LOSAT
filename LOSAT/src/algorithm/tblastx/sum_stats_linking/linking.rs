@@ -3709,7 +3709,7 @@ mod tests {
     // that the kept choices equal the ones NCBI computes by searching.
     // Removing the best chain a1 -> a2 leaves e, whose recorded chain ran
     // through a2, as the stale maximum, so NCBI recomputes
-    // (link_hsps.c:639-650). In that pass b2 and b1 are untouched: b2 keeps
+    // (link_hsps.c:639-649). In that pass b2 and b1 are untouched: b2 keeps
     // "no HSP" and b1 keeps b2 under both ordering methods, while e searches.
     #[test]
     fn fast_kernel_keeps_unchanged_choices_in_a_later_pass() {

@@ -61,8 +61,9 @@
 //! # What a search returns
 //!
 //! NCBI scans the remaining HSPs before H in list order, nearest first, and
-//! keeps a candidate when `sum > H_hsp_sum` (link_hsps.c:727, 857). The result
-//! is the candidate with the largest sum and, among equal sums, the one
+//! keeps a candidate when `sum > H_hsp_sum` (link_hsps.c:738; at index 1 the
+//! `b0` test of line 838 and the keep of lines 852-860). The result is the
+//! candidate with the largest sum and, among equal sums, the one
 //! nearest to H: the largest post-sort index. `key(sum, index)` orders
 //! candidates exactly that way, so every search here is "largest key".
 //!
@@ -118,7 +119,11 @@
 //! (on unless `LOSAT_LINK_FAST_REUSE0=0`), by the argument NCBI uses for
 //! index 1 (lines 781-795). Write S_r(j) for sum[0] of j as pass r computes
 //! it (the add-back of line 907 is overwritten for every remaining HSP by the
-//! next pass, lines 755-758).
+//! next pass, lines 755-758: a pass stores `sum0[i]` for every remaining HSP,
+//! kept choice or not, so no pass reads an added-back value; the add-back is
+//! read only by the "current max" scan of lines 610-623, which both kernels
+//! apply to the same stored value with the same `i32` addition, and
+//! `sums_fit_int4` bounds the pass values only).
 //!
 //! 1. The window test is fixed and HSPs are only removed, so the candidates
 //!    of H in pass r are a subset of those in pass r-1.
@@ -457,7 +462,7 @@ struct Choice {
 // verify_scan_index0 is the NCBI loop itself, written over the arrays of this kernel: it scans
 // the remaining HSPs before H from the nearest down with the same tests and the same strict
 // `sum > H_hsp_sum`. It is the reference the grid search is compared with.
-/// `LOSAT_LINK_FAST_VERIFY`: the index-0 choice of link_hsps.c:706-742, by
+/// `LOSAT_LINK_FAST_VERIFY`: the index-0 choice of link_hsps.c:702-745, by
 /// NCBI's own scan over the remaining HSPs before `i`, nearest first.
 #[allow(clippy::too_many_arguments)]
 fn verify_scan_index0(
@@ -485,15 +490,15 @@ fn verify_scan_index0(
         j = prev_active[jj];
         let q_off_t = qo[jj];
         let s_off_t = so[jj];
-        // link_hsps.c:717
+        // link_hsps.c:733-734
         if q_off_t > h_qe_gap + TRIM_SIZE {
             break;
         }
-        // link_hsps.c:719-724
+        // link_hsps.c:720-726, 736
         if q_off_t <= h_qe || s_off_t <= h_se || q_off_t > h_qe_gap || s_off_t > h_se_gap {
             continue;
         }
-        // link_hsps.c:727
+        // link_hsps.c:738
         if sum0[jj] > choice.sum {
             choice = Choice {
                 link: jj as u32,
@@ -552,7 +557,7 @@ fn verify_scan_index1(
     while j != NONE {
         let jj = j as usize;
         j = prev_active[jj];
-        // link_hsps.c:840-857: b0, b1, b2
+        // link_hsps.c:838-852: b0, b1, b2
         if sum1[jj] <= choice.sum || qo[jj] <= h_qe || so[jj] <= h_se {
             continue;
         }

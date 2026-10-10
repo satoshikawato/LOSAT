@@ -320,7 +320,8 @@ impl LookupChain {
     // ```
     // Dispatch point: with LOSAT_X_LUTARENA the new chain comes from the arena, otherwise from a
     // Vec of 8 zeroed ints. Both have chain_size 8 and the same contents.
-    /// `calloc(8, sizeof(Int4))`
+    /// The 8-int chain of blast_lookup.c:50-56. NCBI `malloc`s it and sets `chain[0..2]`; main's
+    /// `vec![0; 8]` zeroes all 8 ints, and so does the arena block.
     fn x_zeroed8(arena: &mut XChainArena) -> Self {
         if x_lut_arena() {
             let block = arena.take(3);

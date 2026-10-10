@@ -103,7 +103,7 @@ NCBI の classic の結果ページのように、選んだ query について�
 
 選び方とスクロール：Descriptions の行を選ぶと（クリック、Enter・Space）、その subject が選ばれ、Alignments の見出し（`results-alignments-heading`）を画面の上に出して focus を移す（NCBI の説明の行のリンクが整列へ飛ぶのと同じ。focus が見えている所にある）。Graphic Summary の棒のクリックと Enter は、その HSP の Range を画面に出して focus を移す。Alignments の「Descriptions」は Descriptions の見出しに戻り、選んだ行（描かれていれば）に focus を移す。ページが動くのは選んだときだけ：Graphic Summary の矢印キーは図の中で注目の HSP を動かすだけで選ばず（行は図の中で流れる）、Descriptions の行の間は Tab で動き選ばない。並べ替え、表示用のフィルター、query の切り替え、印ではページは動かない。矢印キーごとにページが飛ぶと一覧を読めないので、こうした。
 
-速さ：開いたときに描くのは 3 つの節の見えている部分だけ（図は見えている行、一覧は見えている行、Alignments は選んだ subject の塊と、見える所に来た Range の原文）。100,000 query の Run を開く速さを W5 と比べた（S15 の WP-H、`results-measure.spec.ts`）。
+速さ：開いたときに描くのは 3 つの節の見えている部分だけ（図は見えている行、一覧は見えている行、Alignments は選んだ subject の塊と、見える所に来た Range の原文）。`results-measure.spec.ts` で W5 と比べた（S15 の WP-H、Chromium、3 回の実行の中央値）：100,000 query の Run を開くのは 276〜306 ms（W5 は 281）、最初の HSP まで 278〜301 ms（W5 は 261）、選択・絞り込み・並べ替えは 1 フレーム（18 ms 以下）のまま、5,993 HSP の 1 組を開くのは 625〜873 ms（W5 は 634、その標本は 571〜724。873 は fix round 2 を merge する前の 1 回で、その標本は 630〜876。機械は他の作業と共有）。記録は S15 のタスクフォルダ（`logs/wp-h/report.md`）。
 
 ### Descriptions
 

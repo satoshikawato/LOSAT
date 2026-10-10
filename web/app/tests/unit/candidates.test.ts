@@ -161,9 +161,10 @@ function letters(length: number, seed: number): string {
   return out;
 }
 
-function trayDeps(runs: Store<AppState>, options: { fail?: string } = {}) {
-  const saved: Array<{ name: string; text: string; mime: string }> = [];
+function trayDeps(runs: Store<AppState>, options: { fail?: string; changed?: string } = {}) {
+  const saved: Array<{ name: string; text: string; mime: string; blocks: number }> = [];
   const residueCalls: Array<{ revisionIds: readonly string[]; position: number; intervals: readonly Interval[] }> = [];
+  const checkCalls: Array<{ revisionIds: readonly string[]; position: number }> = [];
   const hspCalls: Array<{ runId: string; indices: readonly number[] }> = [];
   const records = new Map<string, readonly HspRecord[]>();
   let clock = 5000;
@@ -182,15 +183,20 @@ function trayDeps(runs: Store<AppState>, options: { fail?: string } = {}) {
           residues: intervals.map(({ from, to }) => encoder.encode(text.slice(from - 1, to))),
         };
       },
+      // The check of a whole record read in parts: `changed` is the refusal of a source that no longer matches.
+      checkRecord: async (revisionIds, position) => {
+        checkCalls.push({ revisionIds, position });
+        if (options.changed !== undefined) throw new Error(options.changed);
+      },
       readHspRecords: async (runId, indices) => {
         hspCalls.push({ runId, indices });
         return indices.map((index) => records.get(runId)![index]!);
       },
     },
-    downloader: memoryDownloader((file) => saved.push({ name: file.name, text: decoder.decode(file.bytes), mime: file.mime })),
+    downloader: memoryDownloader((file) => saved.push({ name: file.name, text: decoder.decode(file.bytes), mime: file.mime, blocks: file.blocks })),
     now: () => clock++,
   };
-  return { deps, saved, residueCalls, hspCalls, records };
+  return { deps, saved, residueCalls, checkCalls, hspCalls, records };
 }
 
 /** Candidate sources of runs made here, through the results browser of each run. */
@@ -617,6 +623,127 @@ describe('CandidateTray', () => {
     expect(none.ok).toBe(false);
     expect(none.ok ? '' : none.message).toContain('no selected candidate has aligned sequences in its HSP record');
     expect(tray.saved).toEqual([]);
+  });
+});
+
+// --- outputs written in bounded steps (S15) ----------------------------------------------------------------
+
+describe('the outputs written as they are read', () => {
+  const BIG: RunSpec = {
+    runId: 'r1',
+    number: 1,
+    subjects: [
+      ['big', 10_000],
+      ['small', 500],
+    ],
+    hsps: [
+      { q: 0, s: 0, coords: [1, 60, 2001, 2060], aligned: ['ACGTAC', 'ACGTAC'] },
+      { q: 0, s: 1, coords: [70, 100, 120, 90], aligned: ['acg', 'ACG'] },
+      { q: 1, s: 0, coords: [10, 30, 9000, 1000] },
+    ],
+  };
+  const sizes = (calls: ReadonlyArray<{ intervals: readonly Interval[] }>) =>
+    calls.map((call) => call.intervals.reduce((sum, each) => sum + each.to - each.from + 1, 0));
+
+  it('extracts a record longer than one read in parts of at most the limit, with the same bytes, and checks a whole record read in parts', async () => {
+    const reference = setup([BIG]);
+    reference.candidates.add(await sourcesOf(reference.runs, reference.hsps, 'r1'));
+    const bounded = setup([BIG]);
+    const candidates = new CandidateTray({ ...bounded.tray.deps, readResidueLimit: 960 });
+    candidates.add(await sourcesOf(bounded.runs, bounded.hsps, 'r1'));
+    for (const options of [
+      { region: { kind: 'whole' } },
+      { region: { kind: 'hit' } },
+      { region: { kind: 'flanked', flanks: { left: 900, right: 1000 } }, join: 'spanning' },
+      { role: 'query', region: { kind: 'whole' } },
+    ] as const) {
+      for (const each of [reference, bounded]) {
+        each.tray.saved.length = 0;
+        each.tray.residueCalls.length = 0;
+        each.tray.checkCalls.length = 0;
+      }
+      const want = await reference.candidates.extract(options);
+      const got = await candidates.extract(options);
+      expect(got).toEqual(want);
+      expect(bounded.tray.saved.map((file) => file.text)).toEqual(reference.tray.saved.map((file) => file.text));
+      // Every read asks for at most the limit; the reference reads the 10,000 letters at once.
+      expect(Math.max(...sizes(bounded.tray.residueCalls))).toBeLessThanOrEqual(960);
+      expect(sizes(bounded.tray.residueCalls).reduce((a, b) => a + b)).toBe(sizes(reference.tray.residueCalls).reduce((a, b) => a + b));
+      expect(reference.tray.checkCalls).toEqual([]);
+      if (options.region.kind === 'whole' && !('role' in options)) {
+        // Only the record read in parts is checked as a whole; the small one is read whole at once.
+        expect(bounded.tray.checkCalls).toEqual([{ revisionIds: ['r1:s.fa'], position: 0 }]);
+        expect(bounded.tray.residueCalls.filter((call) => call.position === 1)).toEqual([{ revisionIds: ['r1:s.fa'], position: 1, intervals: [{ from: 1, to: 500 }] }]);
+        const text = bounded.tray.saved[0]!.text;
+        const big = letters(10_000, 0);
+        expect(text.startsWith(`>big:1-10000 run=1 subject_record=1 length=10000 unit=nt hsps=1.1,2.1 hit_strand=mixed\n${big.slice(0, 60)}\n`)).toBe(true);
+        expect(text.split('\n').filter((line) => !line.startsWith('>')).join('')).toBe(big + letters(500, 1));
+      } else {
+        expect(bounded.tray.checkCalls).toEqual([]);
+      }
+    }
+  });
+
+  it('refuses a whole record read in parts whose source no longer matches its record table, and saves nothing', async () => {
+    const runs = new Store<AppState>({ runs: [runView(BIG)] });
+    const hsps = new Map([['r1', BIG.hsps!]]);
+    const changed = 'The source "s.fa" no longer matches its record table: record 1 ("big"), read for 1-10000: its residues are not those counted in the record table. Add the file again.';
+    const tray = trayDeps(runs, { changed });
+    const candidates = new CandidateTray({ ...tray.deps, readResidueLimit: 960 });
+    candidates.add(await sourcesOf(runs, hsps, 'r1'));
+    const result = await candidates.extract({ region: { kind: 'whole' } });
+    expect(result).toEqual({ ok: false, message: `The sequences could not be extracted: ${changed}` });
+    expect(tray.checkCalls).toEqual([{ revisionIds: ['r1:s.fa'], position: 0 }]);
+    expect(tray.saved).toEqual([]);
+    expect(candidates.state.get().busy).toBeUndefined();
+    // Parts of the record are not checked as a whole, as `readResidues` does not check them.
+    expect((await candidates.extract({ region: { kind: 'hit' } })).ok).toBe(true);
+    expect(tray.saved).toHaveLength(1);
+  });
+
+  it('writes thousands of records in few blocks', async () => {
+    const specs: HspSpec[] = [];
+    for (let i = 0; i < 3000; i++) specs.push({ q: 0, s: 2, coords: [1, 60, 1 + (i % 300), 60 + (i % 300)], aligned: ['ACGT', 'ACGA'] });
+    const { runs, hsps, candidates, tray } = setup([{ runId: 'r1', number: 1, hsps: specs }]);
+    candidates.add(await sourcesOf(runs, hsps, 'r1'));
+    expect((await candidates.extract()).ok).toBe(true);
+    expect((await candidates.exportAlignments()).ok).toBe(true);
+    expect(tray.saved.map((file) => [file.name, file.text.split('\n').length - 1])).toEqual([
+      [SEQUENCES_FILE, 3000 * 2],
+      [ALIGNMENTS_FILE, 3000 * 4],
+    ]);
+    for (const file of tray.saved) expect(file.blocks).toBeLessThanOrEqual(Math.ceil(file.text.length / (1 << 20)) + 1);
+    // 3,000 pieces on one record: three steps of at most 1,000 pieces, one read each.
+    expect(tray.residueCalls.map((call) => call.intervals.length)).toEqual([1000, 1000, 1000]);
+  });
+
+  it('exports the alignments in batches of HSP records, in tray order, with the same bytes', async () => {
+    const specs: readonly RunSpec[] = [
+      { runId: 'r1', number: 1 },
+      { runId: 'r2', number: 2, hsps: [{ q: 1, s: 2, coords: [50, 41, 200, 209], aligned: ['GGTTAACCAA', 'GGTTAACCTA'] }] },
+    ];
+    const reference = setup(specs);
+    reference.candidates.add([...(await sourcesOf(reference.runs, reference.hsps, 'r1')), ...(await sourcesOf(reference.runs, reference.hsps, 'r2'))]);
+    reference.candidates.move('r2/1/0', 1);
+    const want = await reference.candidates.exportAlignments();
+    const batched = setup(specs);
+    const candidates = new CandidateTray({ ...batched.tray.deps, hspRecordBatch: 2 });
+    candidates.add([...(await sourcesOf(batched.runs, batched.hsps, 'r1')), ...(await sourcesOf(batched.runs, batched.hsps, 'r2'))]);
+    candidates.move('r2/1/0', 1);
+    expect(await candidates.exportAlignments()).toEqual(want);
+    expect(batched.tray.saved.map((file) => file.text)).toEqual(reference.tray.saved.map((file) => file.text));
+    // Tray order r1/0/0, r2/1/0 | r1/0/1, r1/0/2 | r1/0/3, r1/1/0: each batch read before the next is written.
+    expect(batched.tray.hspCalls).toEqual([
+      { runId: 'r1', indices: [0] },
+      { runId: 'r2', indices: [0] },
+      { runId: 'r1', indices: [1, 2] },
+      { runId: 'r1', indices: [3, 4] },
+    ]);
+    // A record that does not match in a later batch saves nothing.
+    batched.tray.saved.length = 0;
+    batched.tray.records.set('r1', batched.tray.records.get('r1')!.map((record) => (record.index === 4 ? { ...record, rank: 9 } : record)));
+    expect(await candidates.exportAlignments()).toEqual({ ok: false, message: 'The alignments could not be exported: HSP record 4 of run 1 is not HSP 2.1' });
+    expect(batched.tray.saved).toEqual([]);
   });
 });
 

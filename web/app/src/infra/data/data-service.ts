@@ -260,6 +260,28 @@ export class DataService implements DataGateway {
     };
   }
 
+  async checkRecord(revisionIds: readonly string[], position: number): Promise<void> {
+    const { revision, file, record } = this.recordAt(revisionIds, position);
+    const kind = readerKind(revision.parser);
+    // In parts of at most `readChunkBytes` residues, read as `readResidues` reads an interval.
+    const counts: Record<string, number> = {};
+    let found = 0;
+    for (let from = 1; from <= record.length; from += this.chunkBytes) {
+      const part = { from, to: Math.min(record.length, from + this.chunkBytes - 1) };
+      const residues = await this.readForward(file, record, kind, part);
+      found += residues.length;
+      for (const [letter, n] of Object.entries(residueCounts(kind, residues))) counts[letter] = (counts[letter] ?? 0) + n;
+      if (residues.length < part.to - part.from + 1) break;
+    }
+    const problem =
+      found !== record.length
+        ? `only ${found} of its ${record.length} residues were found`
+        : !sameCounts(counts, record.residue_counts)
+          ? 'its residues are not those counted in the record table'
+          : undefined;
+    if (problem !== undefined) throw sourceChanged(file, record, { from: 1, to: record.length }, problem);
+  }
+
   /** The record at `position` of the run input of the revisions (see `runInputParts`). */
   private recordAt(revisionIds: readonly string[], position: number): RunInputPart & { readonly record: DatasetRecord } {
     if (!Number.isSafeInteger(position) || position < 0) throw new RangeError(`${position} is not a record position`);
@@ -279,13 +301,7 @@ export class DataService implements DataGateway {
    */
   private async readInterval(file: File, record: DatasetRecord, kind: ReaderKind, wanted: Interval): Promise<Uint8Array> {
     const count = wanted.to - wanted.from + 1;
-    const start = readStart(record.line_layout, record.sequence_offset, wanted.from - 1);
-    const reader = new ForwardReader(kind, start.skip, count);
-    const end = Math.min(readLimit(record, wanted.to - 1), file.size);
-    for (let offset = start.offset; offset < end && !reader.done; offset += this.chunkBytes) {
-      reader.feed(await readRange(file, offset, Math.min(end, offset + this.chunkBytes)));
-    }
-    const residues = reader.residues();
+    const residues = await this.readForward(file, record, kind, wanted);
     const whole = wanted.from === 1 && wanted.to === record.length;
     const problem =
       residues.length !== count
@@ -293,13 +309,19 @@ export class DataService implements DataGateway {
         : whole && !sameCounts(residueCounts(kind, residues), record.residue_counts)
           ? 'its residues are not those counted in the record table'
           : undefined;
-    if (problem !== undefined) {
-      throw new Error(
-        `The source "${file.name}" no longer matches its record table: record ${record.index + 1} ("${record.id}"), ` +
-          `read for ${intervalText(wanted)}: ${problem}. Add the file again.`,
-      );
-    }
+    if (problem !== undefined) throw sourceChanged(file, record, wanted, problem);
     return residues;
+  }
+
+  /** The residues of an interval as the source File has them now: fewer than asked where it ran out. */
+  private async readForward(file: File, record: DatasetRecord, kind: ReaderKind, wanted: Interval): Promise<Uint8Array> {
+    const start = readStart(record.line_layout, record.sequence_offset, wanted.from - 1);
+    const reader = new ForwardReader(kind, start.skip, wanted.to - wanted.from + 1);
+    const end = Math.min(readLimit(record, wanted.to - 1), file.size);
+    for (let offset = start.offset; offset < end && !reader.done; offset += this.chunkBytes) {
+      reader.feed(await readRange(file, offset, Math.min(end, offset + this.chunkBytes)));
+    }
+    return reader.residues();
   }
 
   // --- runs -----------------------------------------------------------------------------
@@ -567,6 +589,14 @@ export class DataService implements DataGateway {
     if (revision === undefined) throw new Error(`unknown dataset revision ${revisionId}`);
     return revision;
   }
+}
+
+/** The refusal of a source that no longer matches its record table (`readResidues`, `checkRecord`). */
+function sourceChanged(file: File, record: DatasetRecord, wanted: Interval, problem: string): Error {
+  return new Error(
+    `The source "${file.name}" no longer matches its record table: record ${record.index + 1} ("${record.id}"), ` +
+      `read for ${intervalText(wanted)}: ${problem}. Add the file again.`,
+  );
 }
 
 /** Whether residue counts agree, a count of 0 being the same as no count. */

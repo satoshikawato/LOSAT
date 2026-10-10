@@ -271,6 +271,58 @@ describe('DataService.readResidues', () => {
   });
 });
 
+describe('DataService.checkRecord', () => {
+  it('checks a whole record in parts read in bounded slices, as a whole-record read checks it', async () => {
+    const scanner = new TableScanner();
+    const { data } = service(scanner, { readChunkBytes: 4096 });
+    const random = seeded(23);
+    const writer = new FastaWriter(random, 2);
+    writer.record('first', residues(random, 50, 'ACDE'), { kind: 'uniform', width: 7, eol: '\n' });
+    writer.record('big protein', residues(random, 100_000, 'ACDEFGHIKLMNPQRSTVWY*', 0.1), { kind: 'ragged', minWidth: 40, maxWidth: 80, eol: '\n', noise: true });
+    writer.record('uniform', residues(random, 30_001, 'acdefghiklmnpqrstvwy'), { kind: 'uniform', width: 60, eol: '\r\n' });
+    let file: CountingFile | undefined;
+    const revision = await source(data, scanner, writer, 2, 'big.fa', (text) => (file = new CountingFile([text], 'big.fa')), 1000);
+    for (const position of [0, 1, 2]) {
+      file!.slices.length = 0;
+      await expect(data.checkRecord([revision.revisionId], position)).resolves.toBeUndefined();
+      expect(Math.max(...file!.slices)).toBeLessThanOrEqual(4096);
+    }
+    await expect(data.checkRecord([revision.revisionId], 3)).rejects.toThrow(/has 3 records, so it has no record 4/);
+  });
+
+  it('refuses a source whose record no longer has the residues or the counts of its record table', async () => {
+    const scanner = new TableScanner();
+    // Parts of 3 residues: the counts are added up over the parts.
+    const { data } = service(scanner, { readChunkBytes: 3 });
+    const text = '>x\nACGTAC\nGT\n';
+    const record: IndexedRecord = {
+      index: 0,
+      id: 'x',
+      header_offset: 0,
+      sequence_offset: 3,
+      end_offset: text.length,
+      length: 8,
+      line_layout: { kind: 'checkpoints', every: 2, offsets: [3, 5, 7, 10] },
+      residue_counts: { A: 2, C: 2, G: 2, T: 2 },
+    };
+    scanner.add(text, [record]);
+    const same = await data.indexSource((await data.addSource(new File([text], 'x.fa'))).sourceId, 1);
+    await expect(data.checkRecord([same.revisionId], 0)).resolves.toBeUndefined();
+    const other = `${text} `;
+    scanner.add(other, [{ ...record, end_offset: other.length, residue_counts: { A: 3, C: 1, G: 2, T: 2 } }]);
+    const changed = await data.indexSource((await data.addSource(new File([other], 'x.fa'))).sourceId, 1);
+    await expect(data.checkRecord([changed.revisionId], 0)).rejects.toThrow(
+      'The source "x.fa" no longer matches its record table: record 1 ("x"), read for 1-8: its residues are not those counted in the record table. Add the file again.',
+    );
+    const longer = `${text}\n`;
+    scanner.add(longer, [{ ...record, end_offset: longer.length, length: 9, line_layout: { kind: 'checkpoints', every: 65_536, offsets: [3] } }]);
+    const short = await data.indexSource((await data.addSource(new File([longer], 'y.fa'))).sourceId, 1);
+    await expect(data.checkRecord([short.revisionId], 0)).rejects.toThrow(
+      'The source "y.fa" no longer matches its record table: record 1 ("x"), read for 1-9: only 8 of its 9 residues were found. Add the file again.',
+    );
+  });
+});
+
 describe('DataService.readHspRecords', () => {
   const hit = (index: number, aligned: string): HspRecord => ({
     index,

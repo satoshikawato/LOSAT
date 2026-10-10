@@ -22,6 +22,7 @@ import {
   type HspRecord,
   type ValidationResult,
 } from '../ports/engine';
+import { writeFile } from './export-writer';
 import { Store } from './store';
 
 /**
@@ -63,6 +64,8 @@ export interface CoordinatorDeps {
   readonly downloader: Downloader;
   readonly now: () => number;
   readonly newRunId: () => string;
+  /** Largest range of a stored output read at once by `exportOutput` (`EXPORT_RANGE_BYTES`); tests lower it. */
+  readonly exportRangeBytes?: number;
 }
 
 export type EnqueueResult = ValidationResult & { readonly runId?: string };
@@ -75,6 +78,8 @@ const PHASE_STATUS: Readonly<Record<EnginePhase, RunStatus>> = {
 };
 /** How often the storage status is read again while the start-up cleanup runs. */
 const CLEANUP_POLL_MS = 250;
+/** The ranges in which `exportOutput` reads a stored output: the Data worker's read size. */
+export const EXPORT_RANGE_BYTES = 8 * 1024 * 1024;
 
 export class Coordinator {
   readonly state = new Store<AppState>({ runs: [] });
@@ -186,13 +191,24 @@ export class Coordinator {
     this.deps.engine.cancel(runId);
   }
 
-  /** Saves one compatibility output of a completed run, byte for byte. */
+  /**
+   * Saves one compatibility output of a completed run, the whole of it byte for byte as stored:
+   * read in ranges of `exportRangeBytes` and written in order (design §12.1), so the output is
+   * never held whole. A failed read saves nothing.
+   */
   async exportOutput(runId: string, format: OutputFormat): Promise<void> {
     const view = this.find(runId);
     if (view?.status !== 'completed') throw new Error('only completed runs can be exported');
-    const bytes = await this.deps.data.readOutput(runId, format);
+    if (view.result === undefined) throw new Error('the run has no stored result');
+    const length = view.result.byteLengths[format];
+    const range = this.deps.exportRangeBytes ?? EXPORT_RANGE_BYTES;
+    if (!Number.isSafeInteger(range) || range < 1) throw new RangeError(`a range of ${range} bytes`);
     const { number, program } = view.snapshot;
-    this.deps.downloader.save(`losat-run${number}-${program}.outfmt${format}.txt`, bytes, 'text/plain');
+    await writeFile(this.deps.downloader, `losat-run${number}-${program}.outfmt${format}.txt`, 'text/plain', async (writer) => {
+      for (let start = 0; start < length; start += range) {
+        await writer.bytes(await this.deps.data.readOutputRange(runId, format, start, Math.min(length, start + range)));
+      }
+    });
   }
 
   async readOutput(runId: string, format: OutputFormat): Promise<string> {

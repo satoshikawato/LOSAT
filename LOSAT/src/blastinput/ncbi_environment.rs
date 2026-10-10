@@ -205,6 +205,110 @@ fn rejected_variable(name: &OsStr, value: &OsStr) -> Option<String> {
     None
 }
 
+/// The process environment as NCBI's two readers of it see it (re-audit round 3 finding S-1
+/// of session SFd). `getenv` returns the first entry of a name (glibc walks `environ` from the
+/// start); NCBI reads so `BLAST_USAGE_REPORT`, `NCBI_CONFIG_OVERRIDES`, `NCBI_CONFIG_PATH`,
+/// `NCBI_DONT_USE_LOCAL_CONFIG`, `NCBI_DONT_USE_NCBIRC`, `NCBI` and `HOME`. The application's
+/// `CNcbiEnvironment`, which the environment layer of the registry (`NCBI_CONFIG__<SECTION>__
+/// <NAME>`) and `FindProgramExecutablePath` (`PATH`) read, fills a map in the order of
+/// `environ`, so the last entry of a name wins.
+///
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbienv.cpp:87-105
+/// ```c++
+/// void CNcbiEnvironment::Reset(const char* const* envp)
+/// {
+///     // load new environment values from "envp"
+///     if ( !envp )
+///         return;
+///
+///     CFastMutexGuard LOCK(m_CacheMutex);
+///     // delete old environment values
+///     m_Cache.clear();
+///
+///     for ( ;  *envp;  envp++) {
+///         const char* s = *envp;
+///         const char* eq = strchr(s, '=');
+///         if ( !eq ) {
+///             ERR_POST_X(3, "CNcbiEnvironment: bad string '" << s << "'");
+///             continue;
+///         }
+///         m_Cache[string(s, (size_t)(eq - s))] = SEnvValue(eq + 1, kEmptyXCStr);
+///     }
+/// }
+/// ```
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:193
+/// ```c++
+///     m_Environ.reset(new CNcbiEnvironment);
+/// ```
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:1569-1575
+/// ```c++
+///     CNcbiApplication* app = CNcbiApplication::Instance();
+///     TFlags            cf  = m_Flags & fCaseFlags;
+///     if (app) {
+///         m_EnvRegistry.Reset(new CEnvironmentRegistry(app->SetEnvironment(),
+///                                                      eNoOwnership, cf));
+///     } else {
+///         m_EnvRegistry.Reset(new CEnvironmentRegistry(cf));
+/// ```
+/// An entry without `=` (which NCBI 2.17.0 does not survive, `AUTHORITY.md` §K-14) is not in
+/// `std::env::vars_os`.
+struct Environment {
+    entries: Vec<(OsString, OsString)>,
+}
+
+impl Environment {
+    fn of_this_process() -> Self {
+        Self {
+            entries: std::env::vars_os().collect(),
+        }
+    }
+
+    /// `getenv(name)`: the first entry.
+    fn getenv(&self, name: &str) -> Option<OsString> {
+        self.entries
+            .iter()
+            .find(|(key, _)| key == name)
+            .map(|(_, value)| value.clone())
+    }
+
+    /// `CNcbiEnvironment::Get(name)`: the last entry.
+    fn app(&self, name: &str) -> Option<OsString> {
+        self.entries
+            .iter()
+            .rev()
+            .find(|(key, _)| key == name)
+            .map(|(_, value)| value.clone())
+    }
+
+    /// Each name once, in the order of its first entry, with the value that NCBI reads:
+    /// `getenv`'s for the variables NCBI reads with `getenv` and whose value LOSAT checks
+    /// (`BLAST_USAGE_REPORT`, `NCBI_CONFIG_OVERRIDES`), the application environment's for the
+    /// others (the registry's `NCBI_CONFIG__` entries; `rejected_variable` checks no other
+    /// value).
+    fn variables(&self) -> Vec<(OsString, OsString)> {
+        let mut seen: Vec<&OsString> = Vec::new();
+        let mut variables = Vec::new();
+        for (name, _) in &self.entries {
+            if seen.contains(&name) {
+                continue;
+            }
+            seen.push(name);
+            let mut values = self
+                .entries
+                .iter()
+                .filter(|(key, _)| key == name)
+                .map(|(_, value)| value);
+            let read = if name == "BLAST_USAGE_REPORT" || name == "NCBI_CONFIG_OVERRIDES" {
+                values.next()
+            } else {
+                values.last()
+            };
+            variables.push((name.clone(), read.cloned().unwrap_or_default()));
+        }
+        variables
+    }
+}
+
 /// The bytes of an `OsString` built from `OsStr::as_encoded_bytes` parts joined at ASCII
 /// bytes (path separators): the bytes as they are on Unix and WASI, and a lossy conversion
 /// elsewhere (Windows paths are not cut or joined by NCBI's Unix rules below).
@@ -238,7 +342,8 @@ struct ProgramContext {
     /// The working directory (`CDir::GetCwd`, `getcwd`).
     cwd: Option<PathBuf>,
     /// The home directory of the user's passwd entry (`getpwuid(getuid())->pw_dir`), read only
-    /// when `HOME` is not set; `None` when the user has no entry.
+    /// when `HOME` is not set; `None` when `std::env::home_dir` finds no entry
+    /// (`SearchDir::UnknownHome`).
     passwd_home: Option<OsString>,
 }
 
@@ -264,9 +369,12 @@ impl ProgramContext {
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum SearchDir {
     Path(PathBuf),
-    /// The home directory when `HOME` is not set and the user has no passwd entry: NCBI then
-    /// looks the login name up (`USER`, `LOGNAME`, `getlogin()`, then `getpwnam`), which LOSAT
-    /// does not port (`AUTHORITY.md` §J-8 of `docs/evidence/losat_web_e2h/`).
+    /// The home directory when `HOME` is not set and `std::env::home_dir` finds no passwd
+    /// entry: the user has none (NCBI then looks the login name up: `USER`, `LOGNAME`,
+    /// `getlogin()`, then `getpwnam`), or the entry does not fit the one buffer that std passes
+    /// to `getpwuid_r` (`sysconf(_SC_GETPW_R_SIZE_MAX)`, no retry on `ERANGE`; NCBI's `getpwuid`
+    /// finds it). LOSAT ports neither (`AUTHORITY.md` §J-8 of `docs/evidence/losat_web_e2h/`;
+    /// re-audit round 3 finding S-3 of session SFd).
     UnknownHome,
 }
 
@@ -587,14 +695,41 @@ fn normalize_path(path: &[u8], follow_links: bool) -> Vec<u8> {
 ///         (app_path.empty() && argv != NULL && argv[0] != NULL) ? argv[0] : app_path);
 /// ```
 /// `CFile::Exists` is `IsFile` (ncbifile.hpp:4039-4042: `stat`, links followed, a regular
-/// file). `GetBase` is the file name without its last extension (`SplitPath`,
-/// ncbifile.cpp:358-377). An empty `argv[0]` is looked up as `ncbi`, the name
-/// `CNcbiArguments` gives before its arguments are set (ncbienv.cpp:388-392); NCBI's warning
-/// for a name it cannot find then (ncbiapp.cpp:901-908) is not reproduced.
+/// file) of the name without its trailing separators, which `CDirEntry` drops (so
+/// `sym/blastn/` names the file `sym/blastn`; re-audit round 3 finding S-5 of session SFd).
+/// `GetBase` is the file name without its last extension (`SplitPath`, ncbifile.cpp:358-377).
+/// `PATH` is the application's environment (`CNcbiEnvironment`, the last entry of the name;
+/// `Environment::app`). An empty `argv[0]` does not reach here (`application_settings`
+/// rejects it).
+///
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:298-313
+/// ```c++
+/// void CDirEntry::Reset(const string& path)
+/// {
+///     m_Path = path;
+///     size_t len = path.length();
+///     // Root dir
+///     if ((len == 1)  &&  IsPathSeparator(path[0])) {
+///         return;
+///     }
+///     ...
+///     m_Path = DeleteTrailingPathSeparator(path);
+/// }
+/// ```
 fn find_program_executable_path(argv0: &[u8], cwd: Option<&Path>, path: Option<&OsStr>) -> Vec<u8> {
-    let is_file = |bytes: &[u8]| path_from_bytes(bytes).is_file();
-    let name: &[u8] = if argv0.is_empty() { b"ncbi" } else { argv0 };
-    let mut app_path = name.to_vec();
+    // `CDirEntry::Reset`, then `DeleteTrailingPathSeparator` (ncbifile.cpp:465-472).
+    let entry = |bytes: &[u8]| -> Vec<u8> {
+        if bytes == b"/" {
+            return bytes.to_vec();
+        }
+        let end = bytes
+            .iter()
+            .rposition(|&byte| byte != b'/')
+            .map_or(0, |pos| pos + 1);
+        bytes[..end].to_vec()
+    };
+    let is_file = |bytes: &[u8]| path_from_bytes(&entry(bytes)).is_file();
+    let mut app_path = argv0.to_vec();
     if !app_path.starts_with(b"/") {
         if is_file(&app_path) {
             let mut absolute = cwd
@@ -608,14 +743,10 @@ fn find_program_executable_path(argv0: &[u8], cwd: Option<&Path>, path: Option<&
                 Vec::new()
             };
         } else {
-            // `CDirEntry(app_path)` drops trailing separators (ncbifile.cpp:298-313).
-            let entry = match app_path.iter().rposition(|&byte| byte != b'/') {
-                Some(pos) if app_path.len() > 1 => &app_path[..=pos],
-                _ => &app_path[..],
-            };
-            let file_name = match entry.iter().rposition(|&byte| byte == b'/') {
-                Some(pos) => &entry[pos + 1..],
-                None => entry,
+            let trimmed = entry(&app_path);
+            let file_name = match trimmed.iter().rposition(|&byte| byte == b'/') {
+                Some(pos) => &trimmed[pos + 1..],
+                None => &trimmed[..],
             };
             let base_name = match file_name.iter().rposition(|&byte| byte == b'.') {
                 Some(pos) => &file_name[..pos],
@@ -846,10 +977,11 @@ fn program_directories(
 ///         } else if (m_Delim.empty()) {
 /// ```
 fn registry_search_path(
-    env: &dyn Fn(&str) -> Option<OsString>,
+    environment: &Environment,
     context: &ProgramContext,
     args_known: bool,
 ) -> Vec<SearchDir> {
+    let env = &|name: &str| environment.getenv(name);
     let delimiters: &[u8] = if cfg!(windows) { b";" } else { b":;" };
     let dir = |bytes: &[u8]| SearchDir::Path(path_from_bytes(bytes));
     let mut path: Vec<SearchDir> = Vec::new();
@@ -897,7 +1029,7 @@ fn registry_search_path(
         path.push(SearchDir::Path(PathBuf::from("/etc")));
     }
     path.extend(
-        program_directories(context, env("PATH").as_deref(), args_known)
+        program_directories(context, environment.app("PATH").as_deref(), args_known)
             .into_iter()
             .map(SearchDir::Path),
     );
@@ -1647,7 +1779,7 @@ fn find_registry(search_path: &[SearchDir], file_name: &str) -> Result<Option<Pa
             }
             SearchDir::UnknownHome => {
                 return Err(format!(
-                    "HOME is not set and the user has no passwd entry, so NCBI BLAST+ would look for its registry file {file_name} in the home directory of the login name (USER, LOGNAME or getlogin), which LOSAT does not look up; this is not supported by LOSAT"
+                    "HOME is not set and LOSAT could not determine the home directory where NCBI BLAST+ would look for its registry file {file_name} (std::env::home_dir found no passwd entry for the user: there is none, or it does not fit its getpwuid_r buffer; NCBI uses getpwuid, then the login name's entry); this is not supported by LOSAT"
                 ))
             }
         }
@@ -1998,8 +2130,7 @@ fn file_data_loaders(entries: &[RegistryEntry]) -> Option<&[u8]> {
 pub fn check_ncbi_application_settings(program: &str) -> Result<ApplicationSettings, String> {
     let (settings, read_errors) = application_settings(
         program,
-        std::env::vars_os(),
-        &|name: &str| std::env::var_os(name),
+        &Environment::of_this_process(),
         &ProgramContext::of_this_process(),
     )?;
     if read_errors > 0 {
@@ -2167,24 +2298,65 @@ pub fn check_ncbi_application_settings(program: &str) -> Result<ApplicationSetti
 /// ```
 fn application_settings(
     program: &str,
-    variables: impl Iterator<Item = (OsString, OsString)>,
-    env: &dyn Fn(&str) -> Option<OsString>,
+    environment: &Environment,
     context: &ProgramContext,
 ) -> Result<(ApplicationSettings, usize), String> {
-    for (name, value) in variables {
+    for (name, value) in environment.variables() {
         if let Some(reason) = rejected_variable(&name, &value) {
             return Err(reason);
         }
     }
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:886-909
+    // ```c++
+    //     string appname = name;
+    //     if (appname.empty()) {
+    //         if (!exepath.empty()) {
+    //             CDirEntry::SplitPath(exepath, NULL, &appname);
+    //         } else if (argc > 0  &&  argv  &&  argv[0] != NULL  &&  *argv[0] != '\0') {
+    //             CDirEntry::SplitPath(argv[0], NULL, &appname);
+    //         } else {
+    //             appname = "ncbi";
+    //         }
+    //     }
+    //     ...
+    //     if ( exepath.empty() ) {
+    //         ...
+    //         exepath = appname;
+    //     }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1243-1258
+    // ```c++
+    //     string basename (m_Arguments->GetProgramBasename(eIgnoreLinks));
+    //     string basename2(m_Arguments->GetProgramBasename(eFollowLinks));
+    //     ...
+    //     } else if (conf->empty()) {
+    //         entry = CMetaRegistry::Load(basename, CMetaRegistry::eName_Ini, 0,
+    //                                     reg_flags, &reg);
+    //         if ( !entry.registry  &&  basename2 != basename ) {
+    //             entry = CMetaRegistry::Load(basename2, CMetaRegistry::eName_Ini, 0,
+    //                                         reg_flags, &reg);
+    //         }
+    // ```
+    // LOSAT models NCBI's program started under its own name (blastn, blastp, tblastn,
+    // tblastx), so `<program>.ini` is the only name; LOSAT's argv[0] gives only the program's
+    // directory. With an empty argv[0] NCBI names itself `ncbi` (it looks for `ncbi` in the
+    // working directory and PATH, and reads `ncbi.ini` before the resolved name's `.ini`),
+    // which no started name of LOSAT stands for: rejected (`AUTHORITY.md` §J-8; re-audit
+    // round 3 finding S-2 of session SFd).
+    if context.argv0.as_ref().is_none_or(|argv0| argv0.is_empty()) {
+        return Err("the program was started with an empty argv[0]; NCBI BLAST+ then names itself ncbi (it reads ncbi.ini before its own <program>.ini and looks for a program named ncbi in the working directory and PATH), which is not supported by LOSAT".to_string());
+    }
+    let env = &|name: &str| environment.getenv(name);
+    let app_env = &|name: &str| environment.app(name);
     let ncbirc_allowed = env("NCBI_DONT_USE_NCBIRC").is_none()
-        && env("NCBI_CONFIG__NCBI__DONT_USE_NCBIRC").is_none();
+        && app_env("NCBI_CONFIG__NCBI__DONT_USE_NCBIRC").is_none();
     // `rejected_variable` has rejected a BLAST_USAGE_REPORT that is not a Boolean.
     let usage_report_reads_ncbirc = ncbirc_allowed
         && env("BLAST_USAGE_REPORT")
             .is_none_or(|value| ncbi_string_to_bool(&value.to_string_lossy()) != Some(false));
     // The search path is built by the first use of CMetaRegistry: the usage report's load of
     // .ncbirc before the program's name is known, or else LoadConfig (`program_directories`).
-    let search_path = registry_search_path(env, context, !usage_report_reads_ncbirc);
+    let search_path = registry_search_path(environment, context, !usage_report_reads_ncbirc);
     let mut read_errors = 0;
     let mut application_reads_ncbirc = ncbirc_allowed;
     // A <program>.ini that cannot be opened is no registry: LoadConfig goes on as without one.
@@ -2223,7 +2395,7 @@ fn application_settings(
             if application_reads_ncbirc {
                 check_registry_entries(&path, &text.entries)?;
                 ncbirc_entries = text.entries;
-            } else if env("NCBI_CONFIG__BLAST__BLAST_USAGE_REPORT").is_none() {
+            } else if app_env("NCBI_CONFIG__BLAST__BLAST_USAGE_REPORT").is_none() {
                 // Only the usage report reads the file: its last [BLAST] BLAST_USAGE_REPORT,
                 // empty included (read into the usage report's own registry).
                 let usage = text.entries.iter().rev().find(|entry| {
@@ -2236,7 +2408,7 @@ fn application_settings(
             }
         }
     }
-    let env_data_loaders = env("NCBI_CONFIG__BLAST__DATA_LOADERS");
+    let env_data_loaders = app_env("NCBI_CONFIG__BLAST__DATA_LOADERS");
     Ok((
         ApplicationSettings {
             data_loaders: data_loaders_of(
@@ -2574,6 +2746,15 @@ mod tests {
         }
     }
 
+    fn environment<K: AsRef<OsStr>, V: AsRef<OsStr>>(pairs: &[(K, V)]) -> Environment {
+        Environment {
+            entries: pairs
+                .iter()
+                .map(|(key, value)| (key.as_ref().to_os_string(), value.as_ref().to_os_string()))
+                .collect(),
+        }
+    }
+
     fn dirs(path: &[SearchDir]) -> Vec<PathBuf> {
         path.iter()
             .map(|dir| match dir {
@@ -2585,17 +2766,9 @@ mod tests {
 
     #[test]
     fn the_search_path_follows_ncbi_config_path() {
-        let env = |pairs: &'static [(&'static str, &'static str)]| {
-            move |name: &str| {
-                pairs
-                    .iter()
-                    .find(|(key, _)| *key == name)
-                    .map(|(_, value)| OsString::from(value))
-            }
-        };
         let none = context(None, None, None);
         let search = |pairs: &'static [(&'static str, &'static str)]| {
-            dirs(&registry_search_path(&env(pairs), &none, false))
+            dirs(&registry_search_path(&environment(pairs), &none, false))
         };
         let only = search(&[("NCBI_CONFIG_PATH", "/a:/b")]);
         assert_eq!(only, vec![PathBuf::from("/a"), PathBuf::from("/b")]);
@@ -2617,10 +2790,7 @@ mod tests {
         #[cfg(unix)]
         {
             use std::os::unix::ffi::OsStrExt;
-            let bytes = |name: &str| {
-                (name == "NCBI_CONFIG_PATH")
-                    .then(|| OsStr::from_bytes(b"/x\xffy:/z").to_os_string())
-            };
+            let bytes = environment(&[("NCBI_CONFIG_PATH", OsStr::from_bytes(b"/x\xffy:/z"))]);
             assert_eq!(
                 dirs(&registry_search_path(&bytes, &none, false)),
                 vec![
@@ -2639,13 +2809,9 @@ mod tests {
         if cfg!(windows) {
             return;
         }
-        let env = |home: Option<&'static str>| {
-            move |name: &str| {
-                (name == "HOME")
-                    .then_some(home)
-                    .flatten()
-                    .map(OsString::from)
-            }
+        let env = |home: Option<&'static str>| match home {
+            Some(home) => environment(&[("HOME", home)]),
+            None => environment::<&str, &str>(&[]),
         };
         let home = |home: Option<&'static str>, passwd: Option<&str>| {
             let path = registry_search_path(&env(home), &context(None, None, passwd), false);
@@ -2767,6 +2933,83 @@ mod tests {
             program_directories(&direct, None, true),
             vec![with_slash(&real)]
         );
+        // A relative name with a trailing '/' names the file without it (CDirEntry::Reset;
+        // re-audit round 3 finding S-5): the working directory makes it absolute.
+        let cwd = direct.cwd.clone().unwrap();
+        let mut relative = b"../".repeat(cwd.components().count().saturating_sub(1));
+        relative.extend_from_slice(&text(&link)[1..]);
+        relative.push(b'/');
+        assert_eq!(
+            find_program_executable_path(&relative, Some(&cwd), None),
+            normalize_path(&text(&link), false)
+        );
+        // A bare name is searched in the application environment's PATH: the last entry
+        // (CNcbiEnvironment; finding S-1).
+        let bare = ProgramContext {
+            argv0: Some(OsString::from("LOSAT")),
+            ..direct
+        };
+        let paths = environment(&[
+            ("PATH", OsString::from("/nonexistent")),
+            ("PATH", sym.clone().into_os_string()),
+        ]);
+        let searched = dirs(&registry_search_path(&paths, &bare, true));
+        assert!(searched.contains(&with_slash(&sym)), "{searched:?}");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbienv.cpp:87-105 (CNcbiEnvironment keeps the
+    // last entry of a name) and the getenv readers (blast_usage_report.cpp:197, ncbireg.cpp:1585,
+    // 1642): duplicate entries; ncbiapp.cpp:886-909 (an empty argv[0] names the program `ncbi`);
+    // re-audit round 3 findings S-1 and S-2 of session SFd.
+    #[test]
+    fn duplicate_variables_and_an_empty_argv0_follow_ncbi() {
+        let env = environment(&[("A", "1"), ("B", "x"), ("A", "2")]);
+        assert_eq!(env.getenv("A"), Some(OsString::from("1")));
+        assert_eq!(env.app("A"), Some(OsString::from("2")));
+        assert_eq!(env.getenv("C"), None);
+        let dir = std::env::temp_dir().join(format!(
+            "losat-ncbi-environment-duplicates-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let ncbirc = dir.join(".ncbirc");
+        let settings = |pairs: &[(&str, &str)], argv0: Option<&str>| {
+            let mut all = vec![("NCBI_CONFIG_PATH".to_string(), dir.display().to_string())];
+            all.extend(pairs.iter().map(|(n, v)| (n.to_string(), v.to_string())));
+            application_settings("blastn", &environment(&all), &context(argv0, None, None))
+                .map(|(settings, _)| settings.data_loaders)
+        };
+        let losat = Some("LOSAT");
+        let dl = "NCBI_CONFIG__BLAST__DATA_LOADERS";
+        assert_eq!(settings(&[(dl, "genbank"), (dl, "none")], losat), Ok(false));
+        assert_eq!(settings(&[(dl, "none"), (dl, "genbank")], losat), Ok(true));
+        assert_eq!(settings(&[(dl, "none"), (dl, "")], losat), Ok(false));
+        // BLAST_USAGE_REPORT and NCBI_CONFIG_OVERRIDES: the first entry (getenv).
+        let bur = "BLAST_USAGE_REPORT";
+        assert_eq!(settings(&[(bur, "false"), (bur, "maybe")], losat), Ok(true));
+        assert!(settings(&[(bur, "maybe"), (bur, "false")], losat).is_err());
+        let ovr = "NCBI_CONFIG_OVERRIDES";
+        assert_eq!(settings(&[(ovr, ""), (ovr, "/x")], losat), Ok(true));
+        assert!(settings(&[(ovr, "/x"), (ovr, "")], losat).is_err());
+        // NCBI_CONFIG__BLAST__BLAST_USAGE_REPORT: the last entry (the registry's environment).
+        let cfg_bur = "NCBI_CONFIG__BLAST__BLAST_USAGE_REPORT";
+        assert_eq!(
+            settings(&[(cfg_bur, "maybe"), (cfg_bur, "true")], losat),
+            Ok(true)
+        );
+        assert!(settings(&[(cfg_bur, "true"), (cfg_bur, "maybe")], losat).is_err());
+        // The first BLAST_USAGE_REPORT decides whether the usage report reads .ncbirc.
+        std::fs::write(&ncbirc, "[BLAST]\nDATA_LOADERS =\n").unwrap();
+        assert_eq!(settings(&[(bur, "no"), (bur, "yes")], losat), Ok(false));
+        assert_eq!(settings(&[(bur, "yes"), (bur, "no")], losat), Ok(true));
+        std::fs::remove_file(&ncbirc).unwrap();
+        // An empty argv[0] is rejected.
+        assert!(settings(&[], Some(""))
+            .unwrap_err()
+            .contains("empty argv[0]"));
+        assert!(settings(&[], None).is_err());
+        assert_eq!(settings(&[], losat), Ok(true));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -2840,17 +3083,10 @@ mod tests {
         let settings = |pairs: &[(&str, &str)]| {
             let mut all = vec![("NCBI_CONFIG_PATH".to_string(), dir.display().to_string())];
             all.extend(pairs.iter().map(|(n, v)| (n.to_string(), v.to_string())));
-            let env = |name: &str| {
-                all.iter()
-                    .find(|(key, _)| key == name)
-                    .map(|(_, value)| OsString::from(value))
-            };
             application_settings(
                 "blastn",
-                all.iter()
-                    .map(|(n, v)| (OsString::from(n), OsString::from(v))),
-                &env,
-                &context(None, None, None),
+                &environment(&all),
+                &context(Some("LOSAT"), None, None),
             )
             .map(|(settings, _)| settings.data_loaders)
         };
@@ -2966,17 +3202,10 @@ mod tests {
                 format!("{}:{}", dir.display(), home.display()),
             )];
             all.extend(pairs.iter().map(|(n, v)| (n.to_string(), v.to_string())));
-            let env = |name: &str| {
-                all.iter()
-                    .find(|(key, _)| key == name)
-                    .map(|(_, value)| OsString::from(value))
-            };
             application_settings(
                 "blastn",
-                all.iter()
-                    .map(|(n, v)| (OsString::from(n), OsString::from(v))),
-                &env,
-                &context(None, None, None),
+                &environment(&all),
+                &context(Some("LOSAT"), None, None),
             )
             .map(|(settings, read_errors)| (settings.data_loaders, read_errors))
         };

@@ -841,8 +841,8 @@ fn run_pair_handles(
                     std::path::PathBuf::new(),
                     std::path::PathBuf::new(),
                 )?,
-                &query.records,
-                &subject.records,
+                (&query.records, &query.bytes),
+                (&subject.records, &subject.bytes),
                 &query.label,
                 &subject.label,
             )
@@ -1206,6 +1206,113 @@ mod tests {
         assert!(error.contains("expected a number"), "{error}");
         assert!(v1_blastn::run_web_pair(with(&["-evalue", "+inf"]), fasta, fasta).is_ok());
         assert!(v1_blastn::run_web_pair(with(&["-evalue=+nan"]), fasta, fasta).is_ok());
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta_reader_utils.cpp:209-213
+    // ```c++
+    //     // trim leading whitespace from title (is this appropriate?)
+    //     while (title_start < len
+    //         &&  isspace((unsigned char)defline[title_start])) {
+    //         ++title_start;
+    //     }
+    // ```
+    // SFd re-audit D-1 (round 1): ABI v1's BLASTP (`run_pair` and the FASTA handles) and
+    // TBLASTX reject a defline with an empty `bio` ID that NCBI reads as another title,
+    // after their other checks and only for a search; a title after ASCII white space keeps
+    // NCBI's bytes.
+    #[test]
+    fn v1_rejects_empty_id_deflines_that_ncbi_reads_otherwise() {
+        let blastp = |outfmt: &str| {
+            parse_blastp_args(
+                &["-outfmt", outfmt],
+                PathBuf::new(),
+                PathBuf::new(),
+                PathBuf::new(),
+            )
+            .expect("blastp web args")
+        };
+        let protein = "MKVLAAGIVGLLLAQPAMAAEIPVDPALAVKTAYIAKQRQISFVKSHFSRQ";
+        let fasta = |defline: &str| format!(">{defline}\n{protein}\n");
+        let query = fasta("q1");
+        let rejected = |result: anyhow::Result<Vec<u8>>| engine_error(result.unwrap_err());
+        for outfmt in ["0", "6", "7", "6 qseqid sseqid stitle"] {
+            let error = rejected(v1_blastp::run_web_pair(
+                blastp(outfmt),
+                &query,
+                &fasta("\u{a0}x y"),
+            ));
+            assert!(
+                error.starts_with("subject record 1 has a defline that starts with white space and has the non-ASCII white space character U+00A0;"),
+                "{outfmt}: {error}"
+            );
+            let error = rejected(v1_blastp::run_web_pair(
+                blastp(outfmt),
+                &fasta("\rx y"),
+                &query,
+            ));
+            assert!(
+                error.starts_with("query record 1 has a defline that starts with white space and has a carriage return before the end of its line;"),
+                "{outfmt}: {error}"
+            );
+        }
+        // NCBI 2.17.0 (SFd audit D, `sp_lead`): `>` + space + U+00A0 + `x` has the title
+        // U+00A0 `x`, whose first word is the subject's ID.
+        let output = v1_blastp::run_web_pair(blastp("6"), &query, &fasta(" \u{a0}x")).unwrap();
+        assert!(output.starts_with("q1\t\u{a0}x\t".as_bytes()), "{output:?}");
+        // The checks before it keep their errors: a residue that NCBI removes.
+        let error = rejected(v1_blastp::run_web_pair(
+            blastp("6"),
+            &query,
+            &format!(">\u{a0}x\nMK-V\n"),
+        ));
+        assert!(error.contains("has the residue '-'"), "{error}");
+        // A query input without records gives NCBI's empty report.
+        assert!(v1_blastp::run_web_pair(blastp("6"), "", &fasta("\u{a0}")).is_ok());
+        // The FASTA handles.
+        let store = |text: &str| {
+            let records = parse_fasta_records(text.as_bytes(), "stored FASTA").unwrap();
+            fasta_store()
+                .lock()
+                .unwrap()
+                .insert(records, "s.fa".to_string(), text.as_bytes().to_vec())
+                .unwrap()
+        };
+        let (query_handle, subject_handle) = (store(&query), store(&fasta("\u{3000}")));
+        let error = run_pair_handles("blastp", query_handle, subject_handle, "6", "").unwrap_err();
+        assert!(
+            error.starts_with("subject record 1 has a defline that starts with white space and has the non-ASCII white space character U+3000;"),
+            "{error}"
+        );
+        let accepted = store(&fasta("\t\x0bx y"));
+        assert!(run_pair_handles("blastp", query_handle, accepted, "6", "").is_ok());
+        for handle in [query_handle, subject_handle, accepted] {
+            fasta_store().lock().unwrap().release(handle).unwrap();
+        }
+        // TBLASTX (outfmt 6; outfmt 0 and 7 reject every defline with an empty `bio` ID).
+        let tblastx = parse_tblastx_args(
+            &["-outfmt", "6"],
+            PathBuf::new(),
+            PathBuf::new(),
+            PathBuf::new(),
+        )
+        .expect("tblastx web args");
+        let nucleotides = "ATGAAAACCGCGTATATTGCGAAACAGCGCCAGATTAGCTTTGTGAAAAGCCATTTTAGCCGCCAGCTGGAAGAACGCCTGGGCCTGATTGAAGTGCAGGCGCCGATTCTGAGCCGCGTGGGCGATGGCACCCAGGATAACCTGAGCGGCGCGGAAAAAGCGGTGCAGGTGAAAGTG";
+        let error = rejected(v1_tblastx::run_web_pair(
+            tblastx.clone(),
+            &format!(">q1\n{nucleotides}\n"),
+            &format!("> x\ty\n{nucleotides}\n"),
+        ));
+        assert!(
+            error.starts_with("subject record 1 has a defline that starts with white space and has the control character 0x09;"),
+            "{error}"
+        );
+        assert!(error.contains("LOSAT's TBLASTX"), "{error}");
+        assert!(v1_tblastx::run_web_pair(
+            tblastx,
+            &format!(">q1\n{nucleotides}\n"),
+            &format!(">\x0c x\n{nucleotides}\n"),
+        )
+        .is_ok());
     }
 
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1407-1427

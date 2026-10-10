@@ -91,6 +91,24 @@ pub(super) fn run_web_pair(
             subjects: &subjects,
         }),
     )?;
+    // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta_reader_utils.cpp:209-213
+    // ```c++
+    //     // trim leading whitespace from title (is this appropriate?)
+    //     while (title_start < len
+    //         &&  isspace((unsigned char)defline[title_start])) {
+    //         ++title_start;
+    //     }
+    // ```
+    // The deflines to which `bio` gives an empty ID and whose records NCBI's reader reads
+    // otherwise are rejected (`check_empty_id_deflines_of`), subjects first, as ABI v1's
+    // BLASTN rejects its deflines, and only for a search (a query input without records
+    // gives NCBI's `Query is Empty!`). The rejection comes after ABI v1's other checks,
+    // which plan TD-1 freezes with their order, so that it changes no other v1 error.
+    if !queries.is_empty() {
+        use super::v1_bio::check_empty_id_deflines_of;
+        check_empty_id_deflines_of(subject_fasta.as_bytes(), "subject", "TBLASTX")?;
+        check_empty_id_deflines_of(query_fasta.as_bytes(), "query", "TBLASTX")?;
+    }
     Ok(output)
 }
 

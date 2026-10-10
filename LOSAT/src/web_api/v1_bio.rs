@@ -17,6 +17,13 @@
 //! - a record without residues, or a residue that is not an IUPAC nucleotide letter (NCBI
 //!   warns that the sequence contains no data, ignores white space and hyphens, ends the
 //!   line at `;`, and removes other characters with a warning): `check_residues_of`.
+//!
+//! BLASTP and TBLASTX make no check of the deflines, except of a defline to which `bio`
+//! gives an empty ID (one that starts with Unicode white space, or has nothing else): when
+//! the record that `from_bio` makes of it is not the record of NCBI's reader (a non-ASCII
+//! white space character that `bio` drops and NCBI keeps, a carriage return that ends
+//! NCBI's line, a control character that ends NCBI's title), the search is rejected
+//! (`check_empty_id_deflines_of`, session SFd).
 
 use anyhow::{bail, Result};
 use bio::io::fasta;
@@ -101,6 +108,223 @@ fn check_deflines_with(bytes: &[u8], role: &str, program: &str) -> Result<()> {
         );
     }
     Ok(())
+}
+
+/// `isspace` of the C locale, which NCBI's defline parser and `NStr` use.
+const fn c_isspace(byte: u8) -> bool {
+    matches!(byte, b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r')
+}
+
+/// ABI v1's BLASTP and TBLASTX: rejects a defline to which `bio` gives an empty ID when the
+/// record that `from_bio` makes of it is not the record of NCBI's reader (see the module),
+/// in the bytes of a FASTA file split into lines as `bio` splits them. `bio` 1.6
+/// (`src/io/fasta.rs:331-333`) trims the Unicode white space at the end of the line and
+/// ends the ID at the first `char::is_whitespace`, so a defline that starts with such a
+/// character, or has nothing else, has an empty ID, and `from_bio`'s title is the rest of
+/// the line without that character and the C white space after it. ABI v1 printed
+/// `unknown` for such a record until it searched the records of NCBI's reader (session
+/// SFc, S7 and S8); this rejects the deflines for which the bytes would now be neither ABI
+/// v1's nor NCBI's. The others are NCBI's: an empty defline, one of C white space (with
+/// carriage returns), and a title after C white space.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta_reader_utils.cpp:157-225
+/// ```c++
+///     const size_t len = defline.length();
+///     if (len <= 1 ||
+///         NStr::IsBlank(defline.substr(1))) {
+///         return;
+///     }
+///     ...
+///     // ignore spaces between '>' and the sequence ID
+///     size_t start;
+///     for(start = 1 ; start < len; ++start ) {
+///         if( ! isspace(defline[start]) ) {
+///             break;
+///         }
+///     }
+///
+///     size_t pos;
+///     size_t title_start = NPOS;
+///     if ((fFastaFlags & CFastaReader::fNoParseID)) {
+///         title_start = start;
+///     }
+///     ...
+///     // trim leading whitespace from title (is this appropriate?)
+///     while (title_start < len
+///         &&  isspace((unsigned char)defline[title_start])) {
+///         ++title_start;
+///     }
+///
+///     if (title_start < len) {
+///         for (pos = title_start + 1;  pos < len;  ++pos) {
+///             if ((unsigned char)defline[pos] < ' ') {
+///             break;
+///             }
+///         }
+///         // Parse the title elsewhere - after the molecule has been deduced
+///         data.titles.push_back(
+///             SLineTextAndLoc(
+///                 defline.substr(title_start, pos - title_start), lineNumber));
+///     }
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:319-322
+/// ```c++
+///     CFastaReader::TFlags flags = m_Config.GetBelieveDeflines() ?
+///                                     CFastaReader::fParseRawID:
+///                                     (CFastaReader::fNoParseID |
+///                                      CFastaReader::fDLOptional);
+/// ```
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:2038
+/// ```c++
+///     NStr::TruncateSpacesInPlace(processed_title);
+/// ```
+/// NCBI's line reader ends a line at a carriage return as at a line feed (a CRLF is one
+/// line end), and the reader skips a line of white space.
+///
+/// NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:219-222
+/// ```c++
+/// CStreamLineReader::EEOLStyle CStreamLineReader::x_AdvanceEOLUnknown(void)
+/// {
+///     _ASSERT(m_AutoEOL);
+///     NcbiGetline(*m_Stream, m_Line, "\r\n", &m_LastReadSize);
+/// ```
+/// NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:249-258
+/// ```c++
+///     NcbiGetline(*m_Stream, m_Line, eol, &m_LastReadSize);
+///     if (m_AutoEOL  &&  (pos = m_Line.find(alt_eol)) != NPOS) {
+///         ++pos;
+///         if (eol != '\n'  ||  pos != m_Line.size()) {
+///             // an *immediately* preceding CR is quite all right
+///             CStreamUtils::Pushback(*m_Stream, m_Line.data() + pos,
+///                                    m_Line.size() - pos);
+///             m_EOLStyle = eEOL_mixed;
+///         }
+///         m_Line.resize(pos - 1);
+/// ```
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:376-380
+/// ```c++
+///         CTempString line = NStr::TruncateSpaces_Unsafe(*++GetLineReader());
+///
+///         if (line.empty()) {
+///             continue; // ignore lines containing only whitespace
+///         }
+/// ```
+/// `role` is `query` or `subject`; `program` is named in the message.
+pub fn check_empty_id_deflines_of(bytes: &[u8], role: &str, program: &str) -> Result<()> {
+    let mut record = 0;
+    for line in bytes.split(|&byte| byte == b'\n') {
+        let Some(defline) = line.strip_prefix(b">") else {
+            continue;
+        };
+        record += 1;
+        // `bio` reads UTF-8 only, so ABI v1 searches no other bytes.
+        let Ok(defline) = std::str::from_utf8(defline) else {
+            continue;
+        };
+        if let Some(problem) = empty_id_defline_problem(defline) {
+            bail!(
+                "{role} record {record} has a defline that starts with white space and {problem}; NCBI BLAST+ reads such a defline differently, which is not supported by LOSAT's {program} (begin the defline with a character that is not white space)"
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Why NCBI's reader makes another record of `defline` (the line after `>` as `bio` splits
+/// the lines) than `from_bio` makes of `bio`'s record, when `bio` gives it an empty ID;
+/// `None` when the ID is not empty or the records are alike (`check_empty_id_deflines_of`).
+fn empty_id_defline_problem(defline: &str) -> Option<String> {
+    // `bio`'s ID and description (bio-1.6.0/src/io/fasta.rs:331-333).
+    let header = defline.trim_end();
+    let mut fields = header.splitn(2, char::is_whitespace);
+    let id = fields.next().unwrap_or("");
+    if !id.is_empty() {
+        return None;
+    }
+    let title = bio_title(id, fields.next());
+    // NCBI's defline ends at the first carriage return; the rest of `bio`'s line is
+    // further lines, which add nothing to the record when they are white space.
+    let (ncbi_line, rest) = match defline.find('\r') {
+        Some(at) => (&defline[..at], &defline[at + 1..]),
+        None => (defline, ""),
+    };
+    let rest_is_blank = rest.bytes().all(c_isspace);
+    if rest_is_blank && title == ncbi_title(ncbi_line.as_bytes()) {
+        return None;
+    }
+    // A carriage return inside `bio`'s header leaves the header's last character, which
+    // is not white space, in the rest.
+    if !rest_is_blank {
+        return Some("has a carriage return before the end of its line".to_string());
+    }
+    let non_ascii_space = |text: &str| {
+        text.chars()
+            .find(|&c| !c.is_ascii() && c.is_whitespace())
+            .map(|c| {
+                format!(
+                    "has the non-ASCII white space character U+{:04X}",
+                    u32::from(c)
+                )
+            })
+    };
+    // `bio` drops the character that ends the empty ID, and the whole of a line of white
+    // space; NCBI keeps a non-ASCII one (its bytes are not C white space).
+    let start = match header.chars().next() {
+        Some(first) if first.is_ascii() => None,
+        Some(first) => non_ascii_space(first.encode_utf8(&mut [0; 4])),
+        None => non_ascii_space(ncbi_line),
+    };
+    if start.is_some() {
+        return start;
+    }
+    // NCBI's title ends at a control character after its first byte.
+    if let Some(&byte) = title.iter().skip(1).find(|&&byte| byte < b' ') {
+        return Some(format!("has the control character 0x{byte:02x}"));
+    }
+    // `bio` drops the Unicode white space at the end of the line; NCBI keeps a non-ASCII
+    // one before a control character. (The carriage return, if any, is after the header.)
+    Some(
+        non_ascii_space(&ncbi_line[header.len().min(ncbi_line.len())..])
+            .unwrap_or_else(|| "is read with another title".to_string()),
+    )
+}
+
+/// The title of NCBI's reader for a defline's line (after `>`, up to its line end): none
+/// for a line of C white space; otherwise from the first byte that is not C white space up
+/// to the first byte below a space after it, without the white space at its end
+/// (`check_empty_id_deflines_of`).
+fn ncbi_title(line: &[u8]) -> Vec<u8> {
+    let Some(start) = line.iter().position(|&byte| !c_isspace(byte)) else {
+        return Vec::new();
+    };
+    let end = line[start + 1..]
+        .iter()
+        .position(|&byte| byte < b' ')
+        .map_or(line.len(), |at| start + 1 + at);
+    let title = &line[start..end];
+    let kept = title
+        .iter()
+        .rposition(|&byte| !c_isspace(byte))
+        .map_or(0, |at| at + 1);
+    title[..kept].to_vec()
+}
+
+/// `from_bio`'s title for `bio`'s ID and description: the ID, a space and the
+/// description, without the C white space at its start, which NCBI's defline parser skips
+/// (fasta_reader_utils.cpp:209-213, quoted at `from_bio`).
+fn bio_title(id: &str, desc: Option<&str>) -> Vec<u8> {
+    let mut title = Vec::with_capacity(id.len() + 1);
+    title.extend_from_slice(id.as_bytes());
+    if let Some(desc) = desc {
+        title.push(b' ');
+        title.extend_from_slice(desc.as_bytes());
+    }
+    let start = title
+        .iter()
+        .position(|&byte| !c_isspace(byte))
+        .unwrap_or(title.len());
+    title.drain(..start);
+    title
 }
 
 /// Rejects a sequence line with a non-ASCII byte. `bio` drops Unicode white space at the
@@ -354,18 +578,7 @@ pub(crate) fn from_bio(
     prefix: &str,
     protein: bool,
 ) -> FastaRecord {
-    let mut title = Vec::with_capacity(record.id().len() + 1);
-    title.extend_from_slice(record.id().as_bytes());
-    if let Some(desc) = record.desc() {
-        title.push(b' ');
-        title.extend_from_slice(desc.as_bytes());
-    }
-    // `isspace` of the C locale.
-    let start = title
-        .iter()
-        .position(|&byte| !matches!(byte, b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r'))
-        .unwrap_or(title.len());
-    title.drain(..start);
+    let title = bio_title(record.id(), record.desc());
     let mut sequence = record.seq().to_vec();
     if !protein {
         for residue in sequence.iter_mut() {
@@ -586,5 +799,192 @@ mod tests {
         assert_eq!(records[2].shown_id(), b"q3");
         let protein = from_bio(&bio_records[2], 1, "Subject_", true);
         assert_eq!(protein, FastaRecord::new("Subject_1", b"q3 x", b"acgu"));
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta_reader_utils.cpp:209-213
+    // ```c++
+    //     // trim leading whitespace from title (is this appropriate?)
+    //     while (title_start < len
+    //         &&  isspace((unsigned char)defline[title_start])) {
+    //         ++title_start;
+    //     }
+    // ```
+    // SFd re-audit D-1 (round 1): BLASTP and TBLASTX reject the deflines with an empty
+    // `bio` ID that NCBI reads as another title: a non-ASCII white space character at the
+    // start (or as the whole defline, or at the end after white space at the start), a
+    // carriage return inside the line, a control character after white space at the start.
+    #[test]
+    fn empty_id_deflines_that_ncbi_reads_otherwise_are_rejected() {
+        for (defline, problem) in [
+            ("\u{a0}x y", "the non-ASCII white space character U+00A0"),
+            ("\u{a0}", "the non-ASCII white space character U+00A0"),
+            (
+                "\u{3000}\u{3000}x",
+                "the non-ASCII white space character U+3000",
+            ),
+            ("\u{85}x", "the non-ASCII white space character U+0085"),
+            ("\u{2028}", "the non-ASCII white space character U+2028"),
+            (" \u{a0}", "the non-ASCII white space character U+00A0"),
+            ("\x0c\u{1680}", "the non-ASCII white space character U+1680"),
+            (" x\u{a0}", "the non-ASCII white space character U+00A0"),
+            (" x\u{202f}\r", "the non-ASCII white space character U+202F"),
+            ("\rx y", "a carriage return before the end of its line"),
+            (" \rx", "a carriage return before the end of its line"),
+            ("\r\x0b x", "a carriage return before the end of its line"),
+            (" x\ry", "a carriage return before the end of its line"),
+            ("\r\u{a0}", "a carriage return before the end of its line"),
+            (
+                " x \r\u{a0}",
+                "a carriage return before the end of its line",
+            ),
+            ("\r>x", "a carriage return before the end of its line"),
+            (" x\ty", "the control character 0x09"),
+            ("\tx\x01y", "the control character 0x01"),
+            ("  x\x0b y", "the control character 0x0b"),
+        ] {
+            let bytes = format!(">q0\nMK\n>{defline}\nMKV\n");
+            let error = check_empty_id_deflines_of(bytes.as_bytes(), "subject", "BLASTP")
+                .unwrap_err()
+                .to_string();
+            assert_eq!(
+                error,
+                format!("subject record 2 has a defline that starts with white space and has {problem}; NCBI BLAST+ reads such a defline differently, which is not supported by LOSAT's BLASTP (begin the defline with a character that is not white space)"),
+                "{defline:?}"
+            );
+        }
+        // The first record that NCBI reads otherwise is named, in a CRLF file too.
+        let error = check_empty_id_deflines_of(
+            b">\xc2\xa0a\r\nMK\r\n>\xe3\x80\x80\r\nMK\r\n",
+            "query",
+            "TBLASTX",
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            error.starts_with("query record 1 has a defline that starts with white space and has the non-ASCII white space character U+00A0;"),
+            "{error}"
+        );
+        assert!(error.contains("LOSAT's TBLASTX"), "{error}");
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:376-380
+    // ```c++
+    //         CTempString line = NStr::TruncateSpaces_Unsafe(*++GetLineReader());
+    //
+    //         if (line.empty()) {
+    //             continue; // ignore lines containing only whitespace
+    //         }
+    // ```
+    // The deflines whose v1 records are NCBI's are accepted (README gate item 12): empty,
+    // C white space (space, tab, VT, FF; carriage returns included), a title after C white
+    // space (also when a non-ASCII white space character follows it), a CRLF line end; and
+    // every defline with an ID, which `bio` reads as ABI v1 did.
+    #[test]
+    fn empty_id_deflines_that_ncbi_reads_alike_are_accepted() {
+        for defline in [
+            "",
+            " ",
+            "   ",
+            "\t",
+            "\x0b",
+            "\x0c",
+            "\x0c ",
+            " \t\x0b ",
+            "\r",
+            "\r\r",
+            " \r ",
+            "  x y",
+            " x",
+            "\tx y",
+            "\x0bx y",
+            "\x0cx y",
+            " \t x",
+            " \u{a0}x",
+            "\x0b\u{3000}x y",
+            " x\r",
+            " x \r ",
+            " x\t",
+            " x\t\u{a0}",
+            " \x01x",
+            " x\u{7f}",
+            " \u{e9} x \u{e9}",
+            "x\ry z",
+            "x\u{a0}",
+            "x\u{a0}y z",
+            "\u{feff}x y",
+            "x\ty",
+        ] {
+            let bytes = format!(">{defline}\nMKV\n");
+            assert!(
+                check_empty_id_deflines_of(bytes.as_bytes(), "query", "BLASTP").is_ok(),
+                "{defline:?}"
+            );
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:2038
+    // ```c++
+    //     NStr::TruncateSpacesInPlace(processed_title);
+    // ```
+    // The check accepts a defline with an empty `bio` ID exactly when `from_bio` gives the
+    // local IDs, titles and residues of NCBI's reader (`fasta_reader`), for every defline of
+    // up to four characters of white space (ASCII and not), carriage returns, a letter, a
+    // control character, `>` and `;`, in a protein and a nucleotide input. (The reader's
+    // messages go to standard error, which ABI v1 does not return.)
+    #[test]
+    fn the_empty_id_check_accepts_exactly_the_records_of_ncbis_reader() {
+        let alphabet = [
+            " ", "\t", "\x0b", "\x0c", "\r", "\u{a0}", "\u{3000}", "\u{85}", "x", "\x01", ">", ";",
+        ];
+        let mut deflines = vec![String::new()];
+        let mut last = vec![String::new()];
+        for _ in 0..4 {
+            last = last
+                .iter()
+                .flat_map(|prefix| alphabet.iter().map(move |c| format!("{prefix}{c}")))
+                .collect();
+            deflines.extend(last.iter().cloned());
+        }
+        let (mut accepted, mut rejected) = (0, 0);
+        for defline in &deflines {
+            if defline.chars().next().is_some_and(|c| !c.is_whitespace()) {
+                continue;
+            }
+            for (protein, residues) in [(true, "MKV"), (false, "ACGT")] {
+                let text = format!(">{defline}\n{residues}\n");
+                let bio: Vec<(String, Vec<u8>, Vec<u8>)> = fasta::Reader::new(text.as_bytes())
+                    .records()
+                    .enumerate()
+                    .map(|(index, record)| {
+                        let record = from_bio(&record.unwrap(), index + 1, "Query_", protein);
+                        (record.local_id, record.title, record.sequence)
+                    })
+                    .collect();
+                let config = ReaderConfig::query("BLASTP", protein, false);
+                let ncbi = read_all(
+                    &mut FastaInputSource::from_bytes(text.as_bytes(), config),
+                    &mut |_| Ok(()),
+                )
+                .map(|records| {
+                    records
+                        .into_iter()
+                        .map(|record| (record.local_id, record.title, record.sequence))
+                        .collect::<Vec<_>>()
+                });
+                let alike = ncbi.as_ref().is_ok_and(|ncbi| *ncbi == bio);
+                let checked = check_empty_id_deflines_of(text.as_bytes(), "query", "BLASTP");
+                assert_eq!(
+                    checked.is_ok(),
+                    alike,
+                    "{defline:?} protein {protein}: {checked:?}"
+                );
+                if alike {
+                    accepted += 1;
+                } else {
+                    rejected += 1;
+                }
+            }
+        }
+        assert!(accepted > 1000 && rejected > 1000, "{accepted} {rejected}");
     }
 }

@@ -94,3 +94,8 @@ lto = true
 codegen-units = 1
 panic = "abort"
 opt-level = 3
+
+# Optimized test code, as in CI; the test profile keeps the dev profile's debug
+# assertions and overflow checks.
+[profile.test]
+opt-level = 1

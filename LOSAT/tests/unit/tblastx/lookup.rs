@@ -323,6 +323,7 @@ fn test_build_direct_lookup_amino_acid_positions() {
     }
 }
 
+// NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/api/queryinfo_unit_test.cpp:174-180 BlastnSearchContextInfo
 #[test]
 fn test_get_context_idx_matches_ncbi() {
     // Test get_context_idx against NCBI BSearchContextInfo behavior

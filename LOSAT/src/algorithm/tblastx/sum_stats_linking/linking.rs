@@ -90,6 +90,20 @@ fn trace_link_selection_summaries() -> bool {
     *TRACE_LINK_SELECTIONS.get_or_init(|| std::env::var_os("LOSAT_TRACE_LINK_SELECTIONS").is_some())
 }
 
+/// Use the literal O(n^2)-per-pass port (`link_hsp_group_ncbi`) instead of the
+/// result-identical incremental linker: requested explicitly, or when any linking
+/// trace/debug output is enabled (only the literal port prints those traces).
+fn legacy_linking_requested() -> bool {
+    static LEGACY: OnceLock<bool> = OnceLock::new();
+    *LEGACY.get_or_init(|| {
+        std::env::var_os("LOSAT_LINKING_LEGACY").is_some()
+            || std::env::var_os("LOSAT_TRACE_HSP").is_some()
+            || std::env::var_os("LOSAT_TRACE_CHAIN_HSP").is_some()
+            || std::env::var_os("LOSAT_TRACE_LINK_SELECTIONS").is_some()
+            || std::env::var_os("LOSAT_DEBUG_CHAINING").is_some()
+    })
+}
+
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:901-982
 // ```c
 // ordering_method =
@@ -697,6 +711,12 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
             )),
     );
     let initial_lh_size = (total_hits + 5).max(1024); // NCBI: MAX(1024, hspcnt+5)
+                                                      // The incremental linker computes the same chains as `link_hsp_group_ncbi`;
+                                                      // the literal port stays available for tracing and as the reference.
+    let use_legacy = legacy_linking_requested();
+    // LOSAT_LINK_FAST=1: the index kernel of linking_index.rs replaces the default kernel; legacy
+    // and traced runs keep the literal port.
+    let use_link_fast = !use_legacy && super::linking_index::link_fast_enabled();
 
     #[cfg(all(
         feature = "parallel",
@@ -718,21 +738,50 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
                         lh_helpers: Vec::with_capacity(initial_lh_size),
                         hsp_links: Vec::with_capacity(total_hits),
                     });
-                    let processed = link_hsp_group_ncbi(
-                        group_hits,
-                        params,
-                        &cutoffs,
-                        linking_params.gap_decay_rate,
-                        diag_enabled,
-                        linking_params.subject_len_nucl,
-                        query_contexts,
-                        subject_frame_bases,
-                        length_adj_per_context,
-                        eff_searchsp_per_context,
-                        &log_k_by_ctx,
-                        &mut pool.lh_helpers,
-                        &mut pool.hsp_links,
-                    );
+                    let processed = if use_legacy {
+                        link_hsp_group_ncbi(
+                            group_hits,
+                            params,
+                            &cutoffs,
+                            linking_params.gap_decay_rate,
+                            diag_enabled,
+                            linking_params.subject_len_nucl,
+                            query_contexts,
+                            subject_frame_bases,
+                            length_adj_per_context,
+                            eff_searchsp_per_context,
+                            &log_k_by_ctx,
+                            &mut pool.lh_helpers,
+                            &mut pool.hsp_links,
+                        )
+                    } else if use_link_fast {
+                        link_hsp_group_link_fast(
+                            group_hits,
+                            params,
+                            &cutoffs,
+                            linking_params.gap_decay_rate,
+                            diag_enabled,
+                            linking_params.subject_len_nucl,
+                            query_contexts,
+                            subject_frame_bases,
+                            length_adj_per_context,
+                            eff_searchsp_per_context,
+                            &log_k_by_ctx,
+                            &mut pool.lh_helpers,
+                            &mut pool.hsp_links,
+                        )
+                    } else {
+                        super::linking_fast::link_hsp_group_fast(
+                            group_hits,
+                            &cutoffs,
+                            linking_params.gap_decay_rate,
+                            linking_params.subject_len_nucl,
+                            query_contexts,
+                            length_adj_per_context,
+                            eff_searchsp_per_context,
+                            &log_k_by_ctx,
+                        )
+                    };
                     (group_idx, processed)
                 })
             })
@@ -760,21 +809,50 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
         };
         let mut ordered: Vec<UngappedHit> = Vec::new();
         for group_hits in frame_groups.into_iter() {
-            let processed = link_hsp_group_ncbi(
-                group_hits,
-                params,
-                &cutoffs,
-                linking_params.gap_decay_rate,
-                diag_enabled,
-                linking_params.subject_len_nucl,
-                query_contexts,
-                subject_frame_bases,
-                length_adj_per_context,
-                eff_searchsp_per_context,
-                &log_k_by_ctx,
-                &mut pools.lh_helpers,
-                &mut pools.hsp_links,
-            );
+            let processed = if use_legacy {
+                link_hsp_group_ncbi(
+                    group_hits,
+                    params,
+                    &cutoffs,
+                    linking_params.gap_decay_rate,
+                    diag_enabled,
+                    linking_params.subject_len_nucl,
+                    query_contexts,
+                    subject_frame_bases,
+                    length_adj_per_context,
+                    eff_searchsp_per_context,
+                    &log_k_by_ctx,
+                    &mut pools.lh_helpers,
+                    &mut pools.hsp_links,
+                )
+            } else if use_link_fast {
+                link_hsp_group_link_fast(
+                    group_hits,
+                    params,
+                    &cutoffs,
+                    linking_params.gap_decay_rate,
+                    diag_enabled,
+                    linking_params.subject_len_nucl,
+                    query_contexts,
+                    subject_frame_bases,
+                    length_adj_per_context,
+                    eff_searchsp_per_context,
+                    &log_k_by_ctx,
+                    &mut pools.lh_helpers,
+                    &mut pools.hsp_links,
+                )
+            } else {
+                super::linking_fast::link_hsp_group_fast(
+                    group_hits,
+                    &cutoffs,
+                    linking_params.gap_decay_rate,
+                    linking_params.subject_len_nucl,
+                    query_contexts,
+                    length_adj_per_context,
+                    eff_searchsp_per_context,
+                    &log_k_by_ctx,
+                )
+            };
             ordered.extend(processed);
         }
         ordered
@@ -791,21 +869,50 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
         };
         let mut ordered: Vec<UngappedHit> = Vec::new();
         for group_hits in frame_groups.into_iter() {
-            let processed = link_hsp_group_ncbi(
-                group_hits,
-                params,
-                &cutoffs,
-                linking_params.gap_decay_rate,
-                diag_enabled,
-                linking_params.subject_len_nucl,
-                query_contexts,
-                subject_frame_bases,
-                length_adj_per_context,
-                eff_searchsp_per_context,
-                &log_k_by_ctx,
-                &mut pools.lh_helpers,
-                &mut pools.hsp_links,
-            );
+            let processed = if use_legacy {
+                link_hsp_group_ncbi(
+                    group_hits,
+                    params,
+                    &cutoffs,
+                    linking_params.gap_decay_rate,
+                    diag_enabled,
+                    linking_params.subject_len_nucl,
+                    query_contexts,
+                    subject_frame_bases,
+                    length_adj_per_context,
+                    eff_searchsp_per_context,
+                    &log_k_by_ctx,
+                    &mut pools.lh_helpers,
+                    &mut pools.hsp_links,
+                )
+            } else if use_link_fast {
+                link_hsp_group_link_fast(
+                    group_hits,
+                    params,
+                    &cutoffs,
+                    linking_params.gap_decay_rate,
+                    diag_enabled,
+                    linking_params.subject_len_nucl,
+                    query_contexts,
+                    subject_frame_bases,
+                    length_adj_per_context,
+                    eff_searchsp_per_context,
+                    &log_k_by_ctx,
+                    &mut pools.lh_helpers,
+                    &mut pools.hsp_links,
+                )
+            } else {
+                super::linking_fast::link_hsp_group_fast(
+                    group_hits,
+                    &cutoffs,
+                    linking_params.gap_decay_rate,
+                    linking_params.subject_len_nucl,
+                    query_contexts,
+                    length_adj_per_context,
+                    eff_searchsp_per_context,
+                    &log_k_by_ctx,
+                )
+            };
             ordered.extend(processed);
         }
         ordered
@@ -1088,21 +1195,6 @@ fn scan_large_gap_predecessors(
 
 use super::params::LinkHspCutoffs;
 
-// No NCBI counterpart: reads the trace and diagnostic switches once. A traced run keeps the
-// NCBI kernel, so no value NCBI computes changes.
-/// True when a linking trace or diagnostic was asked for. The index-backed
-/// kernel prints none of them, so a traced run keeps the NCBI kernel.
-fn link_tracing_requested() -> bool {
-    static FLAG: OnceLock<bool> = OnceLock::new();
-    *FLAG.get_or_init(|| {
-        trace_hsp_target().is_some()
-            || trace_chain_target().is_some()
-            || trace_link_selection_summaries()
-            || std::env::var_os("LOSAT_DEBUG_CHAINING").is_some()
-            || std::env::var_os("LOSAT_DIAGNOSTICS").is_some()
-    })
-}
-
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:974,1049,1061,1080-1081
 // ```c
 //          H->hsp->evalue = prob[ordering_method];
@@ -1139,16 +1231,15 @@ fn assert_same_linking(expected: &[UngappedHit], actual: &[UngappedHit]) {
 // ...
 //       while (number_of_hsps > 0)
 // ```
-// Dispatch point. Without LOSAT_LINK_FAST the NCBI kernel below runs (it ports
-// s_BlastEvenGapLinkHSPs). With the switch, the index-backed kernel of linking_fast.rs ports the
-// same function with different predecessor searches. A group that could leave the Int4 range, or
-// a traced run, always runs the NCBI kernel.
-/// Links one group with the NCBI kernel below or, under `LOSAT_LINK_FAST=1`,
-/// with the index-backed kernel of `linking_fast.rs`, which returns the same
-/// result. A traced run, and a group whose sums could leave the Int4 range,
-/// always use the NCBI kernel.
+// Switch point of LOSAT_LINK_FAST. The index-backed kernel of linking_index.rs ports
+// s_BlastEvenGapLinkHSPs with different predecessor searches. A group that could leave the Int4
+// range, or a run with diagnostics on, runs the default kernel (linking_fast.rs) instead.
+/// Links one group under `LOSAT_LINK_FAST=1` with the index-backed kernel of
+/// `linking_index.rs`, which returns the same result as the literal port
+/// `link_hsp_group_ncbi`. A group whose sums could leave the Int4 range, and a
+/// run with diagnostics on, use the default kernel of `linking_fast.rs`.
 #[allow(clippy::too_many_arguments)]
-fn link_hsp_group_ncbi(
+fn link_hsp_group_link_fast(
     group_hits: Vec<UngappedHit>,
     params: &KarlinParams,
     cutoffs: &LinkHspCutoffs,
@@ -1163,32 +1254,22 @@ fn link_hsp_group_ncbi(
     pool_lh_helpers: &mut Vec<LhHelper>,
     pool_hsp_links: &mut Vec<HspLink>,
 ) -> Vec<UngappedHit> {
-    use super::linking_fast as fast;
+    use super::linking_index as index;
 
-    if !fast::link_fast_enabled()
-        || group_hits.is_empty()
-        || diag_enabled
-        || link_tracing_requested()
-        || !fast::sums_fit_int4(&group_hits, cutoffs)
-    {
-        return link_hsp_group_ncbi_kernel(
+    if group_hits.is_empty() || diag_enabled || !index::sums_fit_int4(&group_hits, cutoffs) {
+        return super::linking_fast::link_hsp_group_fast(
             group_hits,
-            params,
             cutoffs,
             gap_decay_rate,
-            diag_enabled,
             subject_len_nucl,
             query_contexts,
-            subject_frame_bases,
             length_adj_per_context,
             eff_searchsp_per_context,
             log_k_by_ctx,
-            pool_lh_helpers,
-            pool_hsp_links,
         );
     }
-    let expected = fast::link_fast_shadow_enabled().then(|| {
-        link_hsp_group_ncbi_kernel(
+    let expected = index::link_fast_shadow_enabled().then(|| {
+        link_hsp_group_ncbi(
             group_hits.clone(),
             params,
             cutoffs,
@@ -1204,7 +1285,7 @@ fn link_hsp_group_ncbi(
             pool_hsp_links,
         )
     });
-    let linked = fast::link_hsp_group_fast(
+    let linked = index::link_hsp_group_fast(
         group_hits,
         cutoffs,
         gap_decay_rate,
@@ -1239,7 +1320,7 @@ fn link_hsp_group_ncbi(
 /// * `pool_lh_helpers` - Thread-local pool for lh_helper buffer reuse
 ///   (NCBI: link_hsps.c:452-454 allocates once with MAX(1024, hspcnt+5))
 /// * `pool_hsp_links` - Thread-local pool for hsp_link buffer reuse
-fn link_hsp_group_ncbi_kernel(
+fn link_hsp_group_ncbi(
     mut group_hits: Vec<UngappedHit>,
     params: &KarlinParams,
     cutoffs: &LinkHspCutoffs,
@@ -3490,7 +3571,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Index-backed kernel (`linking_fast.rs`, LOSAT_LINK_FAST=1)
+    // Index-backed kernel (`linking_index.rs`, LOSAT_LINK_FAST=1)
     // -----------------------------------------------------------------------
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:414-419,589
@@ -3501,7 +3582,7 @@ mod tests {
     // ```
     // These tests compare the index-backed kernel with the port of s_BlastEvenGapLinkHSPs on the
     // same groups. The reference results are the NCBI kernel above, not hand-written numbers.
-    use crate::algorithm::tblastx::sum_stats_linking::linking_fast::{
+    use crate::algorithm::tblastx::sum_stats_linking::linking_index::{
         link_hsp_group_fast_with, LinkFastOptions, LinkFastStats,
     };
 
@@ -3583,7 +3664,7 @@ mod tests {
         }
         let mut helpers = Vec::new();
         let mut links = Vec::new();
-        let expected = link_hsp_group_ncbi_kernel(
+        let expected = link_hsp_group_ncbi(
             hits.clone(),
             &params,
             cutoffs,
@@ -3833,7 +3914,7 @@ mod tests {
     // index-backed kernel.
     #[test]
     fn fast_kernel_is_used_only_when_sums_fit_int4() {
-        use crate::algorithm::tblastx::sum_stats_linking::linking_fast::sums_fit_int4;
+        use crate::algorithm::tblastx::sum_stats_linking::linking_index::sums_fit_int4;
         let cutoffs = fast_test_cutoffs();
         let small = fast_test_hits(&[
             (0, 30, 0, 30, 1_000_000_000),

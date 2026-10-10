@@ -226,8 +226,7 @@ mod tests {
         }
     }
 
-    /// NCBI parity test: equivalent to `testCheckHSPCommonEndpoints` from
-    /// `blasthits_unit_test.cpp` lines 1163-1221.
+    // NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/api/blasthits_unit_test.cpp:1163-1221 testCheckHSPCommonEndpoints
     #[test]
     fn test_purge_ncbi_parity() {
         let scores = [1044, 995, 965, 219, 160, 125, 110, 107, 103];

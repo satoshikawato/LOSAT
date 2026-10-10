@@ -100,9 +100,11 @@ Same values, faster computation:
   without an observer, test events); no tree or DP space for a (chunk, subject) without HSPs.
 - `LOSAT_LINK_FAST=1` TBLASTX sum-statistics linking: predecessor search by a W x W grid
   (small gaps) and a Fenwick prefix-maximum tree (large gaps) inside NCBI's own rounds
-  (`tblastx/sum_stats_linking/linking_fast.rs`). Checks: `LOSAT_LINK_FAST_VERIFY=1` (every choice
-  against a plain scan; very slow on large groups), `LOSAT_LINK_FAST_SHADOW=1` (every group against
-  the NCBI kernel, all fields). `LOSAT_LINK_FAST_REUSE0=0` disables the reuse of an unchanged
+  (`tblastx/sum_stats_linking/linking_index.rs`). It replaces the default kernel
+  (`linking_fast.rs`, incremental recomputation); `LOSAT_LINKING_LEGACY` and the linking traces
+  take precedence (literal port `link_hsp_group_ncbi`). Checks: `LOSAT_LINK_FAST_VERIFY=1` (every
+  choice against a plain scan; very slow on large groups), `LOSAT_LINK_FAST_SHADOW=1` (every group
+  against the literal port, all fields). `LOSAT_LINK_FAST_REUSE0=0` disables the reuse of an unchanged
   index-0 choice. `LOSAT_LINK_STATS=1` prints per-group counters.
 - `LOSAT_X_SEEDBUCKET=1` TBLASTX two-hit stage: hits buffered per diagonal range and processed
   range by range, HSPs restored to scan order (`tblastx/x_seed_bucket.rs`); only for diagonal tables

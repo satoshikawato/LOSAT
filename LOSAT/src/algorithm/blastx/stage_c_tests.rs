@@ -61,7 +61,8 @@ pub(super) fn fixture(name: &str) -> (Vec<FastaRecord>, PreparedQueryBatch, Reso
     let batch = prepare_queries(&records, &o).unwrap();
     (records, batch, o)
 }
-// NCBI reference (598d8ae6): c++/src/algo/blast/unit_tests/api/split_query_unit_test.cpp:1901-1931
+// NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/api/split_query_unit_test.cpp:1901-1925 CalculateNumberChunks
+// NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/api/split_query_unit_test.cpp:1927-1931 InvalidChunkSizeBlastx
 // ```c++
 // BOOST_AUTO_TEST_CASE(CalculateNumberChunks)
 // {
@@ -266,7 +267,8 @@ fn statistical_validity_is_distinct_from_preparation_validity() {
     assert!(p.iter().all(|p| !p.valid));
     assert!(full.contexts.iter().all(|c| c.is_valid));
 }
-// NCBI reference (598d8ae6): c++/src/algo/blast/unit_tests/api/aalookup_unit_test.cpp:282-302
+// NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/api/aalookup_unit_test.cpp:282-292 BackboneSequenceTest
+// NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/api/aalookup_unit_test.cpp:294-304 SmallboneSequenceTest
 // ```c++
 // BOOST_AUTO_TEST_CASE(BackboneSequenceTest) {
 //   // create a trivial sequence

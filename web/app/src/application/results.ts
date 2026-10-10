@@ -7,12 +7,14 @@
 import type { RecordKey } from '../domain/dataset';
 import { optionValue } from '../domain/argv';
 import { translates, type Unit } from '../domain/coordinates';
+import { hspLabel } from '../domain/extraction';
 import { frame, out0Range, out0SubjectRange, out6Range, subjectSpan } from '../domain/hsp-table';
 import { splitOutfmt6Row, type Outfmt6Row } from '../domain/outfmt6';
 import { programById, residueUnit, type ProgramId, type SequenceKind } from '../domain/programs';
 import {
   buildResultIndex,
   filterQuery,
+  filtersHiding,
   hitLimits,
   NO_FILTERS,
   orientation,
@@ -30,6 +32,7 @@ import {
 import { verificationBadge, type Badge, type VerificationTable } from '../domain/verification';
 import type { RunStore } from '../ports/data';
 import type { ProgramDescription } from '../ports/engine';
+import type { CandidateRecord, CandidateRun, CandidateSource } from './candidates';
 import type { AppState, RunView } from './coordinator';
 import { Store } from './store';
 
@@ -151,6 +154,21 @@ export interface ResultsState {
   readonly detail?: Detail;
   /** Subject headings of outfmt 0 read so far, by subject record index (the same in every query). */
   readonly headings: ReadonlyMap<number, string>;
+  /**
+   * Subjects of the selected query whose rows are marked (the check boxes of the Descriptions, as
+   * NCBI's): only subjects that the list shows; cleared when the query or the run changes.
+   */
+  readonly marked: ReadonlySet<number>;
+  /** The last HSP that `reveal` went back to, and the view filters it cleared to show it. */
+  readonly revealed?: Revealed;
+}
+
+export interface Revealed {
+  readonly id: HspId;
+  /** The view filters that hid the HSP, cleared to show it (the others are kept). */
+  readonly cleared: readonly (keyof ViewFilters)[];
+  /** What the screen tells the user: which filters were cleared, or why the HSP is not shown. */
+  readonly message?: string;
 }
 
 export interface ResultsDeps {
@@ -173,7 +191,17 @@ const INITIAL: ResultsState = Object.freeze<ResultsState>({
   hsps: [],
   ranges: [],
   headings: new Map(),
+  marked: new Set<number>(),
 });
+
+/** The names of the view filters as the screen labels them (ResultFilters.vue, QueryPicker.vue). */
+const FILTER_NAMES: Readonly<Record<keyof ViewFilters, string>> = {
+  maxEValue: 'E value',
+  minBitScore: 'Bit score',
+  subjectText: 'Subject ID contains',
+  queriesWithHitsOnly: 'With hits only',
+  queryText: 'Find queries by ID',
+};
 
 const decoder = new TextDecoder();
 
@@ -430,6 +458,156 @@ export class ResultsBrowser {
     }
   }
 
+  // --- candidates (application/candidates.ts) and going back to them ---------------------------------
+
+  /**
+   * The candidate sources of HSPs of the loaded run, in the order asked: the HSP's index,
+   * coordinates and frames from the run's HSP table (frame 0 there is none), its query's and
+   * subject's IDs and lengths from the run snapshot's record tables by position (q_idx, s_idx),
+   * and its outfmt 6 row as written. Nothing is read; an HSP of another run, or that the run does
+   * not have, is an error.
+   */
+  candidateSources(ids: readonly HspId[]): readonly CandidateSource[] {
+    const loaded = this.state.get().loaded;
+    if (loaded === undefined) throw new Error('no run is shown, so it has no HSPs to take');
+    const { snapshot } = loaded.run;
+    const { table } = loaded.index;
+    const run: CandidateRun = {
+      runId: snapshot.runId,
+      number: snapshot.number,
+      ...(snapshot.title === undefined ? {} : { title: snapshot.title }),
+      program: snapshot.program,
+    };
+    // One object per record, shared by its HSPs (a subject of thousands of HSPs is one record).
+    const records = { query: new Map<number, CandidateRecord>(), subject: new Map<number, CandidateRecord>() };
+    const record = (role: 'query' | 'subject', position: number): CandidateRecord => {
+      let found = records[role].get(position);
+      if (found === undefined) {
+        const key = snapshot[role].records[position];
+        if (key === undefined) throw new RangeError(`run ${snapshot.number} has no ${role} record ${position + 1}`);
+        found = { position, id: key.id, length: key.length, kind: loaded.kinds[role], unit: loaded.units[role] };
+        records[role].set(position, found);
+      }
+      return found;
+    };
+    return ids.map((id) => {
+      const row = id.runId === snapshot.runId ? this.rowOf(loaded, id.qIdx, id.rank) : undefined;
+      if (row === undefined) throw new RangeError(`run ${snapshot.number} has no HSP ${hspLabel(id.qIdx, id.rank)}${id.runId === snapshot.runId ? '' : ' (it is of another run)'}`);
+      return {
+        id: { runId: id.runId, qIdx: id.qIdx, rank: id.rank },
+        index: table.index[row]!,
+        run,
+        query: record('query', table.qIdx[row]!),
+        subject: record('subject', table.sIdx[row]!),
+        coordinates: {
+          q_start: table.qStart[row]!,
+          q_end: table.qEnd[row]!,
+          s_start: table.sStart[row]!,
+          s_end: table.sEnd[row]!,
+          query_frame: frame(table.queryFrame, row) ?? null,
+          subject_frame: frame(table.subjectFrame, row) ?? null,
+        },
+        row: this.row(row),
+      };
+    });
+  }
+
+  /**
+   * Every HSP of a subject in a query of the loaded run, in the engine's order: all of them,
+   * whatever the view filters show (a subject taken as candidates is taken whole). None for a
+   * subject without HSPs in the query.
+   */
+  hspIdsOfSubject(qIdx: number, sIdx: number): readonly HspId[] {
+    const loaded = this.state.get().loaded;
+    const subject = loaded?.index.queries.get(qIdx)?.subjects.find((s) => s.sIdx === sIdx);
+    if (loaded === undefined || subject === undefined) return [];
+    const { table } = loaded.index;
+    const runId = loaded.run.snapshot.runId;
+    return subject.rows.map((row) => ({ runId, qIdx, rank: table.rank[row]! }));
+  }
+
+  /** Marks or unmarks rows of the subject list; a subject that the list does not show is left alone. */
+  markSubjects(sIdxs: readonly number[], on: boolean): void {
+    const state = this.state.get();
+    const listed = new Set(state.subjects.map((subject) => subject.sIdx));
+    const marked = new Set(state.marked);
+    for (const sIdx of sIdxs) {
+      if (!listed.has(sIdx)) continue;
+      if (on) marked.add(sIdx);
+      else marked.delete(sIdx);
+    }
+    this.set({ marked });
+  }
+
+  /** Marks or unmarks every subject that the list shows (NCBI's "select all"). */
+  markAll(on: boolean): void {
+    this.markSubjects(
+      this.state.get().subjects.map((subject) => subject.sIdx),
+      on,
+    );
+  }
+
+  /**
+   * Every HSP of the marked subjects (all of them, as `hspIdsOfSubject`), the subjects in the
+   * order that the list shows them, each subject's HSPs in the engine's order.
+   */
+  markedHspIds(): readonly HspId[] {
+    const state = this.state.get();
+    const loaded = state.loaded;
+    const query = state.qIdx === undefined ? undefined : loaded?.index.queries.get(state.qIdx);
+    if (loaded === undefined || query === undefined || state.marked.size === 0) return [];
+    const groups = new Map(query.subjects.filter((subject) => state.marked.has(subject.sIdx)).map((subject) => [subject.sIdx, subject]));
+    const { table } = loaded.index;
+    const runId = loaded.run.snapshot.runId;
+    return state.subjects.flatMap((subject) => groups.get(subject.sIdx)?.rows.map((row) => ({ runId, qIdx: query.qIdx, rank: table.rank[row]! })) ?? []);
+  }
+
+  /**
+   * Goes back to an HSP (a candidate's result, REQ-14): opens its run if another is shown, then
+   * selects its query, subject and HSP. The view filters that hide it are cleared and the others
+   * kept; `revealed` names them, so that the screen can say so. Resolves false when the run's
+   * results cannot be shown (the state's phase and message say why) or the run has no such HSP
+   * (`revealed` says so).
+   */
+  async reveal(id: HspId): Promise<boolean> {
+    let state = this.state.get();
+    if (state.runId !== id.runId || state.phase !== 'ready') {
+      await this.open(id.runId);
+      state = this.state.get();
+    }
+    const loaded = state.loaded;
+    if (state.runId !== id.runId || loaded === undefined) return false;
+    const label = hspLabel(id.qIdx, id.rank);
+    const number = loaded.run.snapshot.number;
+    const row = this.rowOf(loaded, id.qIdx, id.rank);
+    if (row === undefined) {
+      this.set({ revealed: { id, cleared: [], message: `Run ${number} has no HSP ${label}.` } });
+      return false;
+    }
+    const { table } = loaded.index;
+    const sIdx = table.sIdx[row]!;
+    const { query, subject } = loaded.run.snapshot;
+    const cleared = filtersHiding(state.filters, {
+      queryId: query.records[id.qIdx]?.id ?? '',
+      subjectIds: [subject.records[sIdx]?.id ?? '', this.row(row).sseqid],
+      eValue: table.eValue[row]!,
+      bitScore: table.bitScore[row]!,
+    });
+    if (cleared.length > 0) {
+      const filters = Object.fromEntries(Object.entries(state.filters).filter(([name]) => !cleared.includes(name as keyof ViewFilters))) as ViewFilters;
+      this.set({ filters, queries: this.queryEntries(loaded, filters) });
+    }
+    this.set({ qIdx: id.qIdx, sIdx });
+    this.refresh();
+    this.selectHsp(id);
+    const message =
+      cleared.length === 0
+        ? undefined
+        : `The view filters hid HSP ${label} of run ${number}, so these were cleared: ${cleared.map((name) => FILTER_NAMES[name]).join(', ')}.`;
+    this.set({ revealed: { id, cleared, ...(message === undefined ? {} : { message }) } });
+    return true;
+  }
+
   /** The table row of an HSP of the loaded run (its query's rows by rank, made once), or undefined. */
   private rowOf(loaded: LoadedRun, qIdx: number, rank: number): number | undefined {
     const table = loaded.index.table;
@@ -622,12 +800,22 @@ export class ResultsBrowser {
   }
 
   private set(change: { [K in keyof ResultsState]?: ResultsState[K] | undefined }): void {
-    const next = { ...this.state.get() } as Record<string, unknown>;
+    const previous = this.state.get();
+    const next = { ...previous } as Record<string, unknown>;
     for (const [key, value] of Object.entries(change)) {
       if (value === undefined) delete next[key];
       else next[key] = value;
     }
-    this.state.set(next as unknown as ResultsState);
+    // The marks belong to the subjects that the list of one query of one run shows.
+    const state = next as unknown as ResultsState;
+    if (state.marked.size > 0) {
+      if (state.runId !== previous.runId || state.qIdx !== previous.qIdx) next.marked = new Set<number>();
+      else if (state.subjects !== previous.subjects) {
+        const listed = new Set(state.subjects.map((subject) => subject.sIdx));
+        if ([...state.marked].some((sIdx) => !listed.has(sIdx))) next.marked = new Set([...state.marked].filter((sIdx) => listed.has(sIdx)));
+      }
+    }
+    this.state.set(state);
   }
 }
 

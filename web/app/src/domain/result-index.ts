@@ -182,6 +182,32 @@ export function filterQuery(
   return { subjects, hiddenSubjects: query.subjects.length - subjects.length, hiddenHsps };
 }
 
+/** The values of one HSP that the view filters test. */
+export interface FilteredHsp {
+  /** The query's ID in the run's record table. */
+  readonly queryId: string;
+  /** The texts that the subject text filter searches (`filterQuery`'s `subjectIds`). */
+  readonly subjectIds: readonly string[];
+  readonly eValue: number;
+  readonly bitScore: number;
+}
+
+/**
+ * The view filters that hide an HSP, under the rules of `filterQuery` and of the query list
+ * (the query text; "with hits only" never hides a query that has an HSP). Going back to a
+ * candidate clears these and keeps the others.
+ */
+export function filtersHiding(filters: ViewFilters, hsp: FilteredHsp): readonly (keyof ViewFilters)[] {
+  const hiding: (keyof ViewFilters)[] = [];
+  const queryText = (filters.queryText ?? '').toLowerCase();
+  if (queryText !== '' && !hsp.queryId.toLowerCase().includes(queryText)) hiding.push('queryText');
+  const subjectText = (filters.subjectText ?? '').toLowerCase();
+  if (subjectText !== '' && !hsp.subjectIds.some((id) => id.toLowerCase().includes(subjectText))) hiding.push('subjectText');
+  if (filters.maxEValue !== undefined && !(hsp.eValue <= filters.maxEValue)) hiding.push('maxEValue');
+  if (filters.minBitScore !== undefined && !(hsp.bitScore >= filters.minBitScore)) hiding.push('minBitScore');
+  return hiding;
+}
+
 // --- limits that a query may have reached -----------------------------------------------------------
 
 export interface HitLimits {

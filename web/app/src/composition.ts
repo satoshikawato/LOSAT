@@ -2,6 +2,7 @@
 import { ENGINE_ASSETS } from 'virtual:losat-engine';
 import { VERIFICATION_TABLE } from 'virtual:losat-verification';
 import { Attention } from './application/attention';
+import { CandidateTray } from './application/candidates';
 import { Coordinator } from './application/coordinator';
 import { SearchDraft } from './application/draft';
 import { ResultsBrowser } from './application/results';
@@ -20,6 +21,8 @@ export interface App {
   readonly draft: SearchDraft;
   /** What the results screen shows (application/results.ts). */
   readonly results: ResultsBrowser;
+  /** HSPs collected from the results of completed runs, and their extraction (application/candidates.ts). */
+  readonly candidates: CandidateTray;
   /** Wake lock, the warning before leaving, and the check after the page was hidden. */
   readonly attention: Attention;
   /** True while the engine is the FakeEngine; the UI shows a warning banner. */
@@ -47,10 +50,11 @@ export function createApp(options: AppOptions = {}): App {
           control: data,
           ...(options.renewal === undefined ? {} : { renewal: options.renewal }),
         });
+  const downloader = options.downloader ?? browserDownloader;
   const coordinator = new Coordinator({
     engine,
     data,
-    downloader: options.downloader ?? browserDownloader,
+    downloader,
     now: () => Date.now(),
     newRunId: () => crypto.randomUUID(),
   });
@@ -66,11 +70,12 @@ export function createApp(options: AppOptions = {}): App {
     runs: coordinator.state,
     verification: VERIFICATION_TABLE,
   });
+  const candidates = new CandidateTray({ runs: coordinator.state, data, downloader, now: () => Date.now() });
   const attention = new Attention({
     page: browserPage,
     runs: coordinator.state,
     probe: () => data.storageInfo(),
     now: () => Date.now(),
   });
-  return { coordinator, draft, results, attention, usesFakeEngine: ENGINE_ASSETS === null };
+  return { coordinator, draft, results, candidates, attention, usesFakeEngine: ENGINE_ASSETS === null };
 }

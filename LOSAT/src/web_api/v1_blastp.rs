@@ -175,8 +175,8 @@ pub(super) fn run_web_pair_records(
     // ABI v1 keeps `bio` and its checks (plan TD-1): the checks that it made in the search
     // come where they came (`V1Records`), and the records that pass them enter the search
     // as NCBI's reader's records (`FastaRecord::from_bio`, which skips the white space at the
-    // start of a title as NCBI's defline parser does; ABI v1's BLASTP checks no defline
-    // but those to which `bio` gives an empty ID, after the search).
+    // start of a title as NCBI's defline parser does; after the search, ABI v1's BLASTP
+    // rejects the deflines that `check_bio_deflines_of` names, and checks no other).
     let v1_record = |index: usize, record: &fasta::Record, prefix: &str| {
         from_bio(record, index + 1, prefix, true)
     };
@@ -210,8 +210,11 @@ pub(super) fn run_web_pair_records(
     //         ++title_start;
     //     }
     // ```
-    // The deflines to which `bio` gives an empty ID and whose records NCBI's reader reads
-    // otherwise are rejected (`check_bio_deflines_of`), subjects first, as ABI v1's
+    // The deflines whose bytes the shared report now makes neither ABI v1's nor NCBI's are
+    // rejected where the format shows them (`check_bio_deflines_of`: a defline to which
+    // `bio` gives an empty ID and whose record NCBI's reader reads otherwise, a record
+    // without a title that NCBI numbers otherwise, and BLASTP's outfmt 0 titles that `bio`
+    // reads otherwise and that end with a non-ASCII character), subjects first, as ABI v1's
     // BLASTN rejects its deflines, and only for a search (a query input without records
     // gives NCBI's `Query is Empty!`). The rejection comes after ABI v1's other checks,
     // which plan TD-1 freezes with their order, so that it changes no other v1 error.
@@ -224,10 +227,11 @@ pub(super) fn run_web_pair_records(
 }
 
 /// What each role of an ABI v1 BLASTP search shows (`check_bio_deflines_of`), by its
-/// output format, which `check_web_v1_request` has accepted: the subjects' names (a subject
-/// without a title is `unnamed`) and their titles in outfmt 0, and the queries' local IDs in
-/// a tabular format with a query ID field (`std` has `qaccver`); the outfmt 0 and 7 query
-/// lines show the title only.
+/// output format, which `check_web_v1_request` has accepted. Queries: their IDs (local IDs
+/// for those without a title) in a tabular format with a query ID field (`std` has
+/// `qaccver`), their titles in the outfmt 0 and 7 query lines. Subjects: their IDs (a
+/// subject without a title is `unnamed`, never numbered) in outfmt 0 and in a tabular format
+/// with a subject ID field (`std` has `saccver`), their titles in outfmt 0 and `stitle`.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:38-41
 /// ```c++
@@ -241,20 +245,29 @@ fn v1_shown(outfmt: &str) -> V1Shown {
     let Ok((format, fields)) = OutputFormat::parse(outfmt) else {
         return V1Shown::default();
     };
-    let query_ids = format != OutputFormat::Pairwise
-        && fields.is_none_or(|fields| {
-            fields.split_whitespace().any(|token| {
-                token.eq_ignore_ascii_case("std") || matches!(token, "qseqid" | "qacc" | "qaccver")
+    let pairwise = format == OutputFormat::Pairwise;
+    let tokens: Vec<&str> = fields
+        .as_deref()
+        .map_or(vec!["std"], |fields| fields.split_whitespace().collect());
+    // Whether a tabular format has one of the fields `names`, or `std` (the default fields,
+    // with both IDs) when `with_std`.
+    let has = |names: &[&str], with_std: bool| {
+        !pairwise
+            && tokens.iter().any(|token| {
+                names.contains(token) || (with_std && token.eq_ignore_ascii_case("std"))
             })
-        });
+    };
+    let query_ids = has(&["qseqid", "qacc", "qaccver"], true);
     V1Shown {
         subjects: Shown {
-            names: true,
+            ids: pairwise || has(&["sseqid", "sacc", "saccver"], true),
+            titles: pairwise || has(&["stitle"], false),
             local_ids: false,
-            outfmt0_titles: format == OutputFormat::Pairwise,
+            outfmt0_titles: pairwise,
         },
         queries: Shown {
-            names: query_ids,
+            ids: query_ids,
+            titles: pairwise || format == OutputFormat::TabularWithComments,
             local_ids: query_ids,
             outfmt0_titles: false,
         },

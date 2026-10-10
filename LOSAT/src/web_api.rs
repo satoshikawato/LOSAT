@@ -1326,6 +1326,23 @@ mod tests {
         assert!(v1_blastp::run_web_pair(blastp("0"), &gapped, &query).is_ok());
         assert!(v1_blastp::run_web_pair(blastp("6 sseqid evalue"), &gapped, &query).is_ok());
         assert!(v1_blastp::run_web_pair(blastp("6"), &query, &gapped).is_ok());
+        // `bio` stops at an empty record without residues; nothing after it is read or checked.
+        let stopped = format!("{}>\u{a0}\n", fasta("s1"));
+        assert!(v1_blastp::run_web_pair(blastp("6"), &query, &stopped).is_ok());
+        // After a carriage return inside a defline, NCBI reads the later lines otherwise (here
+        // the '>' after it is another record).
+        let split = format!(">s1 a\r>\n{protein}\n{}", fasta(""));
+        let error = rejected(v1_blastp::run_web_pair(blastp("6"), &split, &query));
+        assert!(
+            error.starts_with("query record 2 comes after a defline with a carriage return"),
+            "{error}"
+        );
+        // Only where the format shows the role: no query ID field, no subject field.
+        let led = fasta("\u{3000}x");
+        assert!(v1_blastp::run_web_pair(blastp("6 sseqid evalue"), &led, &query).is_ok());
+        assert!(v1_blastp::run_web_pair(blastp("6"), &led, &query).is_err());
+        assert!(v1_blastp::run_web_pair(blastp("6 qseqid evalue bitscore"), &query, &led).is_ok());
+        assert!(v1_blastp::run_web_pair(blastp("6 qseqid stitle"), &query, &led).is_err());
         // TBLASTX (outfmt 6; outfmt 0 and 7 reject every defline with an empty `bio` ID).
         let tblastx = parse_tblastx_args(
             &["-outfmt", "6"],

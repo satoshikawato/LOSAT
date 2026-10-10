@@ -99,8 +99,11 @@ pub(super) fn run_web_pair(
     //         ++title_start;
     //     }
     // ```
-    // The deflines to which `bio` gives an empty ID and whose records NCBI's reader reads
-    // otherwise are rejected (`check_bio_deflines_of`), subjects first, as ABI v1's
+    // The deflines whose bytes the shared report now makes neither ABI v1's nor NCBI's are
+    // rejected where the format shows them (`check_bio_deflines_of`: a defline to which
+    // `bio` gives an empty ID and whose record NCBI's reader reads otherwise, a record
+    // without a title that NCBI numbers otherwise, and BLASTP's outfmt 0 titles that `bio`
+    // reads otherwise and that end with a non-ASCII character), subjects first, as ABI v1's
     // BLASTN rejects its deflines, and only for a search (a query input without records
     // gives NCBI's `Query is Empty!`). The rejection comes after ABI v1's other checks,
     // which plan TD-1 freezes with their order, so that it changes no other v1 error.
@@ -110,7 +113,8 @@ pub(super) fn run_web_pair(
         // outfmt 0 and 7 reject such deflines, `check_report_titles`) and no title of
         // non-ASCII bytes (outfmt 0 rejects them).
         let shown = Shown {
-            names: true,
+            ids: true,
+            titles: false,
             local_ids: true,
             outfmt0_titles: false,
         };

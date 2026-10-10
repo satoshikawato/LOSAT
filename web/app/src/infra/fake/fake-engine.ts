@@ -22,6 +22,8 @@ import DESCRIBE from './describe.json';
 import { fakeRecordKeys } from './fake-fasta';
 
 export const FAKE_MARKER = 'FAKE ENGINE OUTPUT - not a LOSAT search result';
+/** The engine build that the FakeEngine's runs record. */
+export const FAKE_ENGINE_BUILD = 'fake-engine';
 
 export interface FakeEngineOptions {
   /** Milliseconds spent in each phase, so tests can cancel a running job. */
@@ -70,7 +72,7 @@ export class FakeEngine implements EngineGateway {
     const writer = new RunOutputWriter(output);
     this.writeOutputs(request, writer);
     writer.end();
-    return { path: 'fake', threads: 1, engineBuild: 'fake-engine' };
+    return { path: 'fake', threads: 1, engineBuild: FAKE_ENGINE_BUILD };
   }
 
   cancel(runId: string): void {

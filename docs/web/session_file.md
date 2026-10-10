@@ -121,21 +121,29 @@ session over a limit is not saved, and the message says which value.
 The file is read incrementally: the decompressed chunks go through a state machine that reads the
 header lines, collects only the manifest and the candidates (within their limits), and sends each
 run's blocks straight to the Data worker over the run output channel (`ports/run-output.ts`), as
-the engine's output would arrive, with backpressure; nothing else is held. After a run's last block
+the engine's output would arrive, with backpressure; nothing else is held. Once the Data worker
+cannot store a run (the storage ran out), the backpressure wait fails and loading stops there: the
+rest of the file is not decompressed, and the file is refused with the reason. After a run's last block
 the run is committed and its HSP records are checked against the manifest. A loaded run is in the
 RunStore like a searched one: the results screen, the Alignments, the outputs and the alignment
 export work unchanged.
 
 **Nothing is searched.** The runs join the working session as completed runs, with new run IDs and
 the next run numbers of this session; they are never queued, never validated, and the engine is
-never asked. The queue, the results header and Run details say "from `<file>`, run N there". A
+never asked. The queue, the results header and Run details say "from `<file>`, run N there".
+The run's verification badge (Run details, the JSON export's `run.verification`, the report) is
+this site's only when one of this site's engine builds wrote its outputs (the run record's
+`engineBuild`), and then adds that the run was loaded from a session file; otherwise it is
+"Written by another engine build" and names that build, the LOSAT Web that saved the file (`app`)
+and this site's builds. A FakeEngine run stays a development run. A
 loaded run's InputSnapshot has no engine bytes and no revisions (`bytes` is absent); Run details
 shows the input's size from the manifest. Candidates are added to the tray with their notes and
-times, rebuilt from the loaded runs' HSP records and outfmt 6 rows: the file gives only the
-reference.
+times, rebuilt from the loaded runs' HSP records (read 1,000 at a time; the tray keeps no aligned
+rows) and outfmt 6 rows: the file gives only the reference.
 
-A file is **refused** with a message that says what is wrong and where, and then nothing is loaded
-(every run staged or committed for it is deleted):
+A file is **refused** with a message that says what is wrong and where, and then nothing is loaded:
+every run staged or committed for it is deleted, and the runs and candidates join the working
+session only after every check has passed and the tray's entries are made:
 
 - not gzip; damaged or cut gzip data (a changed byte, a cut file, data after the gzip member);
 - a wrong first line; a newer container version or schema;
@@ -144,11 +152,14 @@ A file is **refused** with a message that says what is wrong and where, and then
   `runs[1].query.sha256`);
 - blocks missing, extra, out of order, of another length than the manifest gives, longer than the
   header states, or a file that ends anywhere before its end line, or has bytes after it;
-- HSP records that the run cannot have: another count than `hitCount`; an index outside
-  0..count-1 or repeated; a `q_idx`/`s_idx` beyond the record tables; a rank repeated within a
-  query; a coordinate that is not a whole number of 1 or more; a frame outside -3..3; a score that
-  is not a number; an `out6`/`out0`/`out0_subject` range outside its output; a line that is not
-  JSON;
+- HSP records that the run cannot have, checked in the Data worker as the JSON of their lines,
+  before anything coerces them (the results' typed arrays, the exports): another count than
+  `hitCount`; a line that is not a JSON object; a field missing or of the wrong type (`index`,
+  `q_idx`, `s_idx` and `rank` whole numbers of 0 or more; coordinates whole numbers of 1 or more;
+  frames null or -3..3 other than 0; scores numbers; `subject_length` null or a whole number;
+  aligned rows null or text; `out6`/`out0`/`out0_subject` null or `[start, end]`); an index
+  outside 0..count-1 or repeated; a `q_idx`/`s_idx` beyond the record tables; a rank repeated
+  within a query; a range outside its output. Fields that a later ABI adds are left alone;
 - candidates that name a run or an HSP that the file does not have, or whose `qIdx`/`rank`
   disagree with the HSP record at `index`.
 
@@ -161,14 +172,20 @@ Only the extraction of original residues (hit regions, flanks, complete sequence
 of a run's input FASTA need the original files; the outputs, the HSP records, the results screen and
 the export of aligned rows do not. For a loaded run, Run details shows per role that the original is
 not attached and what that prevents, with "Choose the original query/subject FASTA…" (several files,
-in order, for a joined input). The extract form names the runs whose original is missing as soon as
+chosen together in any order, for a joined input). The extract form names the runs whose original is missing as soon as
 such a candidate is selected, and the extraction is refused before anything is read.
 
 Re-attachment is never automatic (a file of the same name in the search form, or one attached to
 another run, attaches nothing). The chosen files must be as many as the recorded sources; each is
-indexed with the recorded reader kind and must have the recorded number of records; the recorded
-exclusions are applied; the included records must have the recorded IDs, lengths and SHA-256s (the
-message names the first that differs, or the count); and the run input that they make must have the
-recorded SHA-256 (which also covers lines before or between records). Only then is the input
-attached to that run and role; otherwise nothing changes. The attachment is kept apart from the
-RunSnapshot (`RunView.attached`), which stays as the file recorded it.
+indexed with the recorded reader kind and matched to a recorded source by its records, whatever
+order the files were chosen in (file dialogs rarely let one order a selection): a file is a
+source's when it has the recorded number of records and, with the source's exclusions applied, the
+recorded IDs, lengths and SHA-256s of the records that the input has from it. When a source has no
+file, the message names a file's record count or the first record that differs. The run input is
+then made in the recorded order with the recorded exclusions, and must have the recorded SHA-256
+(which also covers lines before or between records). Only then is the input attached to that run
+and role (the file names listed in the recorded order); otherwise nothing changes. The sources and
+record tables of a refused attempt, and of an original that a new attachment replaces, are released
+from the Data worker. The attachment is kept apart from the RunSnapshot (`RunView.attached`), which
+stays as the file recorded it. The download of the run's input FASTA rebuilds the input from the
+attached original and refuses it unless its SHA-256 is still the recorded one.

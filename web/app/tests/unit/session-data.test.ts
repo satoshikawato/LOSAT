@@ -6,6 +6,7 @@ import { gunzipSync, gzipSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import { sha256Hex } from '../../src/infra/browser/platform';
 import { browserCompression } from '../../src/infra/browser/compression';
+import { StorageFullError } from '../../src/infra/data/block-store';
 import { DataService } from '../../src/infra/data/data-service';
 import { MemoryBlockStore } from '../../src/infra/data/memory-block-store';
 import { FakeInputChecker, FakeScanner } from '../../src/infra/fake/fake-fasta';
@@ -15,10 +16,11 @@ import { DIAGNOSTICS_STREAM, HITS_STREAM } from '../../src/ports/run-output';
 const encoder = new TextEncoder();
 const sha256 = (text: string) => createHash('sha256').update(text).digest('hex');
 
-function service() {
+function service(readChunkBytes?: number, capacityBytes?: number) {
   let token = 0;
   return new DataService({
-    store: new MemoryBlockStore(),
+    ...(readChunkBytes === undefined ? {} : { readChunkBytes }),
+    store: new MemoryBlockStore(capacityBytes === undefined ? {} : { capacityBytes }),
     scanner: new FakeScanner(),
     checker: new FakeInputChecker(),
     digest: sha256Hex,
@@ -49,6 +51,20 @@ describe('DataService for session files', () => {
     await expect(data.describeRunInput([rb.revisionId, protein.revisionId])).rejects.toThrow(/different reader kinds/);
   });
 
+  it('releases sources and the revisions made of them, and only those', async () => {
+    const data = service();
+    const a = await data.addSource(new File(['>a\nACGT\n'], 'a.fa'));
+    const b = await data.addSource(new File(['>b\nACGT\n'], 'b.fa'));
+    const ra = await data.indexSource(a.sourceId, 1);
+    const revised = await data.reviseDataset(ra.revisionId, [0]);
+    const rb = await data.indexSource(b.sourceId, 1);
+    await data.releaseSources([a.sourceId, 'unknown']);
+    await expect(data.previewSource(a.sourceId, 1)).rejects.toThrow(/unknown source/);
+    await expect(data.buildRunInput([ra.revisionId])).rejects.toThrow(/unknown dataset revision/);
+    await expect(data.reviseDataset(revised.revisionId, [])).rejects.toThrow(/unknown dataset revision/);
+    expect(new TextDecoder().decode((await data.buildRunInput([rb.revisionId])).bytes)).toBe('>b\nACGT\n');
+  });
+
   it('reads the streams of a committed run in ranges, and gives their lengths', async () => {
     const data = service();
     const port = await data.openRun('r');
@@ -64,6 +80,50 @@ describe('DataService for session files', () => {
     await expect(data.readRunBlock('r', 6, 0, 1)).rejects.toThrow(RangeError);
     await expect(data.readRunBlock('r', 2 as never, 0, 0)).rejects.toThrow(/not a stream/);
     await expect(data.runBlockLengths('other')).rejects.toThrow(/no committed result/);
+  });
+
+  it('checks the HSP records of a committed run as the JSON of their lines, read in bounded ranges', async () => {
+    const data = service(64);
+    const record = (index: number, change: Record<string, unknown> = {}) =>
+      JSON.stringify({
+        index,
+        q_idx: 0,
+        s_idx: 0,
+        rank: index,
+        raw_score: 1,
+        bit_score: 2,
+        e_value: 0.5,
+        q_start: 1,
+        q_end: 4,
+        s_start: 1,
+        s_end: 4,
+        query_frame: null,
+        subject_frame: null,
+        subject_length: 4,
+        query_aligned: 'ACGT',
+        subject_aligned: 'ACGT',
+        out6: null,
+        out0: null,
+        out0_subject: null,
+        ...change,
+      });
+    const committed = async (runId: string, lines: readonly string[]) => {
+      const writer = new RunOutputWriter(await data.openRun(runId));
+      writer.write(HITS_STREAM, encoder.encode(`${lines.join('\n')}\n`));
+      writer.end();
+      await data.commitRun(runId);
+    };
+    const bounds = { count: 3, queries: 1, subjects: 1, out0: 0, out6: 0 };
+    await committed('good', [record(0), record(1), record(2)]);
+    expect(await data.checkHspRecords('good', bounds)).toBeUndefined();
+    // The records that come after a refused one are not read.
+    await committed('bad', [record(0), record(1, { s_idx: null }), 'not JSON']);
+    expect(await data.checkHspRecords('bad', bounds)).toBe('HSP record 2 has s_idx null, not a whole number of 0 or more');
+    await committed('broken', [record(0), 'not JSON', record(2)]);
+    await expect(data.checkHspRecords('broken', bounds)).rejects.toThrow(/^HSP record 2 is not JSON/);
+    expect(await data.checkHspRecords('good', { ...bounds, count: 4 })).toBe('there are 3 HSP records, but the manifest gives 4');
+    // The lines found for the check serve readHspRecords too.
+    expect((await data.readHspRecords('good', [2]))[0]!.rank).toBe(2);
   });
 
   it('tells a writer how many bytes of a staged run are stored, once they reach a count', async () => {
@@ -85,6 +145,21 @@ describe('DataService for session files', () => {
     await data.deleteRun('r');
     await expect(waiting).resolves.toBe(11);
     expect(await data.stagedBytes('unknown', 5)).toBe(0);
+  });
+
+  it('rejects with the failure once a staged run cannot be stored, so that its writer stops (code review L4)', async () => {
+    const data = service(undefined, 10);
+    const writer = new RunOutputWriter(await data.openRun('r'));
+    const waiting = data.stagedBytes('r', 100);
+    writer.write(0, encoder.encode('12345'));
+    await tick();
+    writer.write(0, encoder.encode('678901'));
+    await expect(waiting).rejects.toThrow(StorageFullError);
+    // At once afterwards, whatever count is asked.
+    await expect(data.stagedBytes('r', 1)).rejects.toThrow(/Not enough temporary storage/);
+    writer.end();
+    await expect(data.commitRun('r')).rejects.toThrow(StorageFullError);
+    expect(await data.stagedBytes('r', 1)).toBe(0);
   });
 });
 

@@ -94,6 +94,19 @@ export interface Badge {
 
 export const CERTIFIED_LABEL = 'Certified profile';
 export const OUTSIDE_LABEL = 'Engine-supported, outside certified profile';
+export const OTHER_BUILD_LABEL = 'Written by another engine build';
+
+/** A LOSAT Web build: its version and the git commit that it was built from (a session file's `app`). */
+export interface AppBuild {
+  readonly version: string;
+  readonly build: string;
+}
+
+/** What this site runs: the names that its engine builds give runs (`RunRecord.engineBuild`), and its LOSAT Web build. */
+export interface SiteBuild {
+  readonly engineBuilds: readonly string[];
+  readonly app: AppBuild;
+}
 
 export function verificationBadge(input: BadgeInput, table: VerificationTable): Badge {
   const exceptions = approvedExceptions(input.program, input.argv);
@@ -141,6 +154,31 @@ export function verificationBadge(input: BadgeInput, table: VerificationTable): 
       'This is a statement about the engine build and the options, not a comparison of your inputs with NCBI.',
     ],
     exceptions,
+  };
+}
+
+/**
+ * The badge of a run loaded from a session file (design §12.2). This site's badge is about this
+ * site's engine builds, so it holds only for outputs that one of them wrote; it then says that the
+ * run was loaded. For outputs that another engine build (or one that the file does not name)
+ * wrote, the badge says so instead of this site's verification, and keeps only the approved
+ * exceptions, which follow from the options. A FakeEngine run stays a development run, whoever
+ * loads it.
+ */
+export function loadedRunBadge(badge: Badge, written: { readonly engineBuild?: string; readonly app: AppBuild }, site: SiteBuild | undefined): Badge {
+  const { engineBuild, app } = written;
+  const same = engineBuild !== undefined && site !== undefined && site.engineBuilds.includes(engineBuild);
+  // The LOSAT Web that saved the file is not always the one that searched (a loaded run can be saved again).
+  const loaded = `Loaded from a session file (saved by LOSAT Web ${app.version}, build ${app.build}): its outputs were written by ${
+    engineBuild ?? 'an engine build that the file does not name'
+  }`;
+  if (same || badge.level === 'development') return { ...badge, details: [...badge.details, `${loaded}${same ? ', an engine build of this site' : ''}.`] };
+  const here = site === undefined ? "this site's engine builds" : `${list(site.engineBuilds)} (LOSAT Web ${site.app.version}, build ${site.app.build})`;
+  return {
+    level: 'outside',
+    label: OTHER_BUILD_LABEL,
+    details: [`${loaded}; this site's verification covers ${here}.`],
+    exceptions: badge.exceptions,
   };
 }
 

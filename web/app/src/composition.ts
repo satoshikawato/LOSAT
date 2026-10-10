@@ -10,6 +10,7 @@ import { ResultExporter } from './application/result-export';
 import { Session } from './application/session';
 import { RunFiles } from './application/run-files';
 import { threadLimit } from './domain/settings-file';
+import type { SiteBuild } from './domain/verification';
 import type { Downloader } from './ports/download';
 import type { EngineGateway } from './ports/engine';
 import { browserCompression } from './infra/browser/compression';
@@ -18,7 +19,8 @@ import { browserDownloader } from './infra/browser/platform';
 import { startDataWorker } from './infra/data-worker/gateway';
 import { WasmEngine } from './infra/engine-worker/gateway';
 import type { RenewalLimits } from './infra/engine-worker/policy';
-import { FakeEngine } from './infra/fake/fake-engine';
+import { FAKE_ENGINE_BUILD, FakeEngine } from './infra/fake/fake-engine';
+import { engineBuildName } from './infra/reactor/assets';
 
 export interface App {
   readonly coordinator: Coordinator;
@@ -44,6 +46,16 @@ export interface App {
 const APP_BUILD = Object.freeze({
   version: typeof __LOSAT_APP_VERSION__ === 'string' ? __LOSAT_APP_VERSION__ : 'unknown',
   build: typeof __LOSAT_APP_BUILD__ === 'string' ? __LOSAT_APP_BUILD__ : 'unknown',
+});
+
+/** This site's engine builds, as its runs record them, and its LOSAT Web build: the badges of loaded runs compare with them. */
+const SITE_BUILD: SiteBuild = Object.freeze({
+  engineBuilds: Object.freeze(
+    ENGINE_ASSETS === null
+      ? [FAKE_ENGINE_BUILD]
+      : [engineBuildName('threads', ENGINE_ASSETS.threads), engineBuildName('serial', ENGINE_ASSETS.serial)],
+  ),
+  app: APP_BUILD,
 });
 
 export interface AppOptions {
@@ -86,6 +98,7 @@ export function createApp(options: AppOptions = {}): App {
     describe: (program) => engine.describe(program),
     runs: coordinator.state,
     verification: VERIFICATION_TABLE,
+    site: SITE_BUILD,
     downloader,
   });
   const candidates = new CandidateTray({ runs: coordinator.state, data, downloader, now: () => Date.now() });

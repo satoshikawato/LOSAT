@@ -299,7 +299,12 @@ export function runJson(run: ExportRun): Record<string, unknown> {
     ...(run.group === undefined ? {} : { group: { position: run.group.position, size: run.group.size } }),
     query: inputJson(run.query),
     subject: inputJson(run.subject),
-    verification: { level: run.verification.level, label: run.verification.label, exceptions: [...run.verification.exceptions] },
+    verification: {
+      level: run.verification.level,
+      label: run.verification.label,
+      details: [...run.verification.details],
+      exceptions: [...run.verification.exceptions],
+    },
   };
 }
 

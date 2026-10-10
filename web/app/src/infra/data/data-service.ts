@@ -18,6 +18,7 @@ import {
   type RecordKey,
 } from '../../domain/dataset';
 import { hspTable, type HspTable } from '../../domain/hsp-table';
+import { HspRecordCheck, type HspRecordBounds } from '../../domain/session-file';
 import { ForwardReader, readLimit, readerKind, readStart, residueCounts, type ReaderKind } from '../../domain/sequence-layout';
 import type { OutputFormat } from '../../domain/output-format';
 import type { InputRole, ProgramId } from '../../domain/programs';
@@ -90,7 +91,7 @@ interface StagedRun {
   commit: Promise<ResultSetRef> | undefined;
   /** Bytes delivered by the port so far, and the `stagedBytes` calls that wait for more. */
   received: number;
-  readonly waiters: Array<{ readonly atLeast: number; readonly resolve: (received: number) => void }>;
+  readonly waiters: Array<{ readonly atLeast: number; readonly resolve: (received: number) => void; readonly reject: (failure: Error) => void }>;
 }
 
 interface CommittedRun {
@@ -163,6 +164,12 @@ export class DataService implements DataGateway {
       revisionId: this.deps.newToken(),
       excluded: normalizeExclusion(excluded, base.records.length),
     });
+  }
+
+  async releaseSources(sourceIds: readonly string[]): Promise<void> {
+    const released = new Set(sourceIds);
+    for (const sourceId of released) this.sources.delete(sourceId);
+    for (const [revisionId, revision] of this.revisions) if (released.has(revision.sourceId)) this.revisions.delete(revisionId);
   }
 
   async buildRunInput(revisionIds: readonly string[]): Promise<RunInput> {
@@ -441,12 +448,7 @@ export class DataService implements DataGateway {
   async readHspRecords(runId: string, indices: readonly number[]): Promise<readonly HspRecord[]> {
     const run = this.runs.get(runId);
     if (run?.state !== 'committed') throw new Error(`run ${runId} has no committed result`);
-    // A failed search for the lines is not kept, so the next call tries again.
-    run.hitLines ??= this.findHitLines(run).catch((error: unknown) => {
-      run.hitLines = undefined;
-      throw error;
-    });
-    const lines = await run.hitLines;
+    const lines = await this.hitLinesOf(run);
     const count = lines.starts.length;
     for (const index of indices) {
       if (!Number.isSafeInteger(index) || index < 0 || index >= count) {
@@ -477,6 +479,24 @@ export class DataService implements DataGateway {
 
   async readHitTable(runId: string): Promise<HspTable> {
     return hspTable(await this.readHits(runId));
+  }
+
+  async checkHspRecords(runId: string, bounds: HspRecordBounds): Promise<string | undefined> {
+    const run = this.runs.get(runId);
+    if (run?.state !== 'committed') throw new Error(`run ${runId} has no committed result`);
+    const check = new HspRecordCheck(bounds);
+    let problem: string | undefined;
+    await this.eachHitLine(blockPath(run.token, HITS_STREAM), await this.hitLinesOf(run), (text, line) => {
+      let value: unknown;
+      try {
+        value = JSON.parse(text);
+      } catch (error) {
+        throw new SyntaxError(`HSP record ${line + 1} is not JSON (${toError(error).message})`);
+      }
+      problem = check.next(value);
+      return problem === undefined;
+    });
+    return problem ?? check.finish();
   }
 
   async readDiagnostics(runId: string): Promise<string> {
@@ -517,12 +537,16 @@ export class DataService implements DataGateway {
 
   stagedBytes(runId: string, atLeast: number): Promise<number> {
     const run = this.runs.get(runId);
-    if (run?.state !== 'staged' || run.received >= atLeast || run.failure !== undefined) {
-      return Promise.resolve(run?.state === 'staged' ? run.received : 0);
-    }
+    if (run?.state !== 'staged') return Promise.resolve(0);
+    // A writer that is not the engine stops at once when the run cannot be stored (code review L4).
+    if (run.failure !== undefined) return Promise.reject(run.failure);
+    if (run.received >= atLeast) return Promise.resolve(run.received);
     // A port that broke the protocol or closed delivers nothing more.
-    const ended = run.receiver.finished.then(() => run.received);
-    const reached = new Promise<number>((resolve) => run.waiters.push({ atLeast, resolve }));
+    const ended = run.receiver.finished.then((result) => {
+      if (result.state === 'broken') throw new Error(`The output of the run arrived incomplete: ${result.detail}`);
+      return run.received;
+    });
+    const reached = new Promise<number>((resolve, reject) => run.waiters.push({ atLeast, resolve, reject }));
     return Promise.race([reached, ended]);
   }
 
@@ -538,11 +562,14 @@ export class DataService implements DataGateway {
     }
   }
 
-  /** Resolves the `stagedBytes` calls that the delivered bytes (or a failure) satisfy. */
+  /** Settles the `stagedBytes` calls that the delivered bytes satisfy, or that a failure ends. */
   private release(run: StagedRun, all = false): void {
     for (let i = run.waiters.length - 1; i >= 0; i--) {
       const waiter = run.waiters[i]!;
-      if (all || run.failure !== undefined || run.received >= waiter.atLeast) {
+      if (run.failure !== undefined) {
+        run.waiters.splice(i, 1);
+        waiter.reject(run.failure);
+      } else if (all || run.received >= waiter.atLeast) {
         run.waiters.splice(i, 1);
         waiter.resolve(run.received);
       }
@@ -587,6 +614,15 @@ export class DataService implements DataGateway {
     await this.deps.store.removeAll(runPrefix(run.token));
   }
 
+  /** The lines of stream 1 of a committed run, found once; a failed search for them is not kept, so the next call tries again. */
+  private hitLinesOf(run: CommittedRun): Promise<HitLines> {
+    run.hitLines ??= this.findHitLines(run).catch((error: unknown) => {
+      run.hitLines = undefined;
+      throw error;
+    });
+    return run.hitLines;
+  }
+
   /** Finds the lines of stream 1 that are not blank (as `append` counts them), reading the block in bounded ranges. */
   private async findHitLines(run: CommittedRun): Promise<HitLines> {
     const path = blockPath(run.token, HITS_STREAM);
@@ -618,10 +654,23 @@ export class DataService implements DataGateway {
     return { starts: Float64Array.from(starts), ends: Float64Array.from(ends) };
   }
 
-  /** The line of every HSP index, from parsing every line once (lines read together in bounded ranges). */
+  /** The line of every HSP index, from parsing every line once. */
   private async mapHitLines(path: string, lines: HitLines): Promise<Map<number, number>> {
-    const decoder = new TextDecoder();
     const lineOf = new Map<number, number>();
+    await this.eachHitLine(path, lines, (text, line) => {
+      lineOf.set((JSON.parse(text) as HspRecord).index, line);
+      return true;
+    });
+    return lineOf;
+  }
+
+  /**
+   * Gives the text of each line of stream 1 to `each`, in order, until it returns false; lines
+   * next to each other are read together, in ranges of at most `readChunkBytes` (a longer line
+   * alone).
+   */
+  private async eachHitLine(path: string, lines: HitLines, each: (text: string, line: number) => boolean): Promise<void> {
+    const decoder = new TextDecoder();
     let first = 0;
     while (first < lines.starts.length) {
       const start = lines.starts[first]!;
@@ -629,12 +678,10 @@ export class DataService implements DataGateway {
       while (last + 1 < lines.starts.length && lines.ends[last + 1]! - start <= this.chunkBytes) last++;
       const bytes = await this.deps.store.read(path, start, lines.ends[last]! - start);
       for (let line = first; line <= last; line++) {
-        const text = decoder.decode(bytes.subarray(lines.starts[line]! - start, lines.ends[line]! - start));
-        lineOf.set((JSON.parse(text) as HspRecord).index, line);
+        if (!each(decoder.decode(bytes.subarray(lines.starts[line]! - start, lines.ends[line]! - start)), line)) return;
       }
       first = last + 1;
     }
-    return lineOf;
   }
 
   private async hashRecords(file: File, records: readonly IndexedRecord[]): Promise<string[]> {

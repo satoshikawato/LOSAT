@@ -48,10 +48,10 @@ export interface RunFilesDeps {
   readonly maxThreads: () => number;
   /**
    * The run input of a role of a run loaded from a session file, rebuilt from the original FASTA
-   * that was chosen again and matched in Run details (application/session.ts `attachedInput`);
-   * undefined while none is attached.
+   * that was chosen again and matched in Run details (application/session.ts `attachedInput`),
+   * with its SHA-256; undefined while none is attached.
    */
-  readonly attachedInput?: (runId: string, role: InputRole) => Promise<{ readonly bytes: Uint8Array } | undefined>;
+  readonly attachedInput?: (runId: string, role: InputRole) => Promise<{ readonly bytes: Uint8Array; readonly sha256: string } | undefined>;
 }
 
 export class RunFiles {
@@ -187,9 +187,17 @@ export class RunFiles {
 
   /**
    * Where the run's input came from, part by part (domain/reproduce.ts `inputRelation`): a
-   * whole source of the search form, or undefined for a selection of a source's records.
+   * whole source of the search form, or undefined for a selection of a source's records. A run
+   * loaded from a session file has no revisions here; its sources are those that the file
+   * recorded, with the records left out of each (code review L2). The file does not say which
+   * source was pasted text, so each is named as the file that the input was given as.
    */
   inputParts(view: RunView, role: InputRole): ReadonlyArray<InputPart | undefined> {
+    if (view.fromSession !== undefined) {
+      return view.fromSession.inputs[role].sources.map(
+        (source): InputPart => ({ origin: 'file', name: source.name, records: source.records, excluded: source.excluded.length }),
+      );
+    }
     return view.snapshot[role].revisionIds.map((revisionId) => this.sources.get(revisionId));
   }
 
@@ -209,16 +217,26 @@ export class RunFiles {
 
   /**
    * The bytes that the engine searched for a role: the snapshot's, or for a run loaded from a
-   * session file, the run input rebuilt from its attached original FASTA (whose SHA-256 the
-   * session checked against the file's). A loaded run without one is refused, never guessed.
+   * session file, the run input rebuilt from its attached original FASTA. A loaded run without
+   * one is refused, never guessed; so is a rebuilt input whose SHA-256 is not the one that the
+   * session file recorded (the original changed after it was attached; code review L1). The
+   * rebuilt input is held whole in memory until it is written, as a search's snapshot holds the
+   * bytes that it gives the engine.
    */
   private async inputBytes(view: RunView, role: InputRole): Promise<Uint8Array> {
     const bytes = view.snapshot[role].bytes;
     if (bytes !== undefined) return bytes;
     const attached = view.fromSession === undefined ? undefined : await this.deps.attachedInput?.(view.snapshot.runId, role);
-    if (attached === undefined) {
+    if (view.fromSession === undefined || attached === undefined) {
       throw new Error(
         `Run ${view.snapshot.number} was loaded from a session file; choose its original ${role} FASTA in Run details to save the input it searched.`,
+      );
+    }
+    const recorded = view.fromSession.inputs[role].sha256;
+    if (attached.sha256 !== recorded) {
+      throw new Error(
+        `the ${role} FASTA attached to Run ${view.snapshot.number} no longer makes the input that the run searched (SHA-256 ${attached.sha256}, ` +
+          `not ${recorded}); the file changed after it was attached. Choose the original ${role} FASTA again in Run details.`,
       );
     }
     return attached.bytes;

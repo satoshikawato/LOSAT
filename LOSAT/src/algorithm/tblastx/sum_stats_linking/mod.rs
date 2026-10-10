@@ -15,11 +15,11 @@
 //! - `params` - Parameter structures (LinkingParams, LinkHspCutoffs) and helpers
 //! - `cutoffs` - NCBI cutoff calculation (calculate_link_hsp_cutoffs_ncbi)
 //! - `linking` - Main linking algorithm (apply_sum_stats_even_gap_linking)
+//! - `linking_incr` - The per-group kernel `linking` runs by default (incremental recomputation)
 
 mod cutoffs;
 mod linking;
-mod linking_fast;
-mod linking_index;
+mod linking_incr;
 mod params;
 
 // Re-export parameter types and functions

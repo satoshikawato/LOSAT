@@ -1,5 +1,6 @@
-//! `LOSAT_LINK_FAST`: the index-backed TBLASTX linking kernel on sequences that
-//! reach each of its branches, against the output of NCBI BLAST+ 2.17.0.
+//! The default TBLASTX linking kernel (the incremental kernel of
+//! `sum_stats_linking/linking_incr.rs`) on sequences that reach each of its
+//! branches, against the output of NCBI BLAST+ 2.17.0.
 //!
 //! The kernel reports what it did with `LOSAT_LINK_STATS=1`; every test checks
 //! that the branch it is about was taken, not only that the output is equal.
@@ -14,8 +15,8 @@
 //! if (!(b0|b1|b2) )
 //! ```
 //! The expected outputs in `tests/fixtures/tblastx_link_fast` were produced by NCBI BLAST+ 2.17.0,
-//! which runs s_BlastEvenGapLinkHSPs (link_hsps.c:414-1091). The tests compare the output of both
-//! LOSAT kernels with them.
+//! which runs s_BlastEvenGapLinkHSPs (link_hsps.c:414-1091). The tests compare with them the output
+//! of the default kernel and of the literal port (`LOSAT_LINKING_LEGACY`).
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -50,13 +51,13 @@ fn tblastx(query: &Path, subject: &Path, switches: &[(&str, &str)]) -> (Vec<u8>,
     (output.stdout, stderr)
 }
 
-/// Sum of one counter over the `[LINK_FAST_STATS]` lines (one per group).
+/// Sum of one counter over the `[LINK_INCR_STATS]` lines (one per group).
 fn counter(stderr: &str, name: &str) -> u64 {
     let key = format!("{name}=");
     let mut groups = 0;
     let total = stderr
         .lines()
-        .filter(|line| line.starts_with("[LINK_FAST_STATS]"))
+        .filter(|line| line.starts_with("[LINK_INCR_STATS]"))
         .map(|line| {
             groups += 1;
             line.split_whitespace()
@@ -66,7 +67,7 @@ fn counter(stderr: &str, name: &str) -> u64 {
                 .expect("counter")
         })
         .sum();
-    assert!(groups > 0, "no [LINK_FAST_STATS] line:\n{stderr}");
+    assert!(groups > 0, "no [LINK_INCR_STATS] line:\n{stderr}");
     total
 }
 
@@ -74,16 +75,18 @@ fn counter(stderr: &str, name: &str) -> u64 {
 // ```c
 // s_BlastEvenGapLinkHSPs(EBlastProgramType program_number, BlastHSPList* hsp_list,
 // ```
-// The checks compare the kernel with the port of s_BlastEvenGapLinkHSPs (SHADOW) and with a plain
-// NCBI-order scan of each choice (VERIFY).
-/// Every check of the kernel on: each choice against the plain scan, each
-/// group against the NCBI kernel.
-const CHECKED: [(&str, &str); 4] = [
-    ("LOSAT_LINK_FAST", "1"),
+// The checks compare the kernel with the port of s_BlastEvenGapLinkHSPs (SHADOW) and every pass
+// with a pass computed from scratch by NCBI's scans (VERIFY).
+/// Every check of the default kernel on: each pass against a pass from
+/// scratch, each group against the literal port.
+const CHECKED: [(&str, &str); 3] = [
     ("LOSAT_LINK_FAST_VERIFY", "1"),
     ("LOSAT_LINK_FAST_SHADOW", "1"),
     ("LOSAT_LINK_STATS", "1"),
 ];
+
+/// The literal port of s_BlastEvenGapLinkHSPs instead of the default kernel.
+const LITERAL_PORT: [(&str, &str); 1] = [("LOSAT_LINKING_LEGACY", "1")];
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:827-861
 // ```c
@@ -98,9 +101,9 @@ const CHECKED: [(&str, &str); 4] = [
 // ```
 // NCBI scans only the HSPs before H in list order, so it does not offer the later long HSP to H.
 // The test reaches the fallback that does the same scan.
-// A 4-residue HSP whose large-gap search finds, in the tree, a long HSP that
-// follows it in list order (`fixtures/tblastx_link_fast/make_short_hsp.py`).
-// NCBI does not link the two.
+// A 4-residue HSP whose large-gap search finds, in the tree of the sweep, a
+// long HSP that follows it in list order
+// (`fixtures/tblastx_link_fast/make_short_hsp.py`). NCBI does not link the two.
 #[test]
 fn a_short_hsp_followed_by_its_tree_answer_matches_ncbi() {
     let query = fixture("short_hsp.query.fna");
@@ -117,26 +120,19 @@ fn a_short_hsp_followed_by_its_tree_answer_matches_ncbi() {
         "{report}"
     );
 
-    let (ncbi_kernel, _) = tblastx(&query, &subject, &[]);
-    assert_eq!(ncbi_kernel, expected, "NCBI kernel");
+    let (literal_port, _) = tblastx(&query, &subject, &LITERAL_PORT);
+    assert_eq!(literal_port, expected, "literal port");
 
-    let (index_kernel, stderr) = tblastx(&query, &subject, &CHECKED);
-    assert_eq!(index_kernel, expected, "index-backed kernel");
+    let (default_kernel, _) = tblastx(&query, &subject, &[]);
+    assert_eq!(default_kernel, expected, "default kernel");
+
+    let (checked, stderr) = tblastx(&query, &subject, &CHECKED);
+    assert_eq!(checked, expected, "default kernel, checked");
     assert!(
         counter(&stderr, "fallbacks") >= 1,
         "the scan fallback was not reached:\n{stderr}"
     );
-    assert!(counter(&stderr, "verified") >= 1, "{stderr}");
-
-    let (searching, _) = tblastx(
-        &query,
-        &subject,
-        &[("LOSAT_LINK_FAST", "1"), ("LOSAT_LINK_FAST_REUSE0", "0")],
-    );
-    assert_eq!(
-        searching, expected,
-        "index-backed kernel, index-0 reuse off"
-    );
+    assert!(counter(&stderr, "verified_passes") >= 1, "{stderr}");
 }
 
 fn fasta_sequence(path: &Path) -> String {
@@ -177,8 +173,11 @@ impl Drop for TempFasta {
 //    H_hsp_link=H2;
 //    H->hsp_link.changed=0;
 // ```
-// The test reaches the reuse of the previous choice (NCBI applies the rule at index 1; the
-// index-backed kernel applies it at index 0 as well).
+// NCBI keeps a choice at index 1 when the HSP it selected kept its own; the incremental kernel
+// computes again, at both indexes, only the HSPs whose choice a removal can change, and the
+// other HSPs keep theirs. The test reaches those later passes, including searches that select
+// the previous choice again (same0, same1); the unit tests of linking.rs reach the choices kept
+// without a search (kept0, kept1).
 // Two overlapping 9 kb windows of one genome: eight groups of up to 65 HSPs
 // that are linked over several passes, so that choices are kept from one pass
 // to the next under both ordering methods.
@@ -191,16 +190,22 @@ fn choices_kept_between_passes_match_ncbi() {
     let expected =
         std::fs::read(fixture("kept_choices.ncbi_2.17.0.fmt6.out")).expect("NCBI output");
 
-    let (ncbi_kernel, _) = tblastx(&query.0, &subject.0, &[]);
-    assert_eq!(ncbi_kernel, expected, "NCBI kernel");
+    let (literal_port, _) = tblastx(&query.0, &subject.0, &LITERAL_PORT);
+    assert_eq!(literal_port, expected, "literal port");
 
-    let (index_kernel, stderr) = tblastx(&query.0, &subject.0, &CHECKED);
-    assert_eq!(index_kernel, expected, "index-backed kernel");
+    let (default_kernel, _) = tblastx(&query.0, &subject.0, &[]);
+    assert_eq!(default_kernel, expected, "default kernel");
+
+    let (checked, stderr) = tblastx(&query.0, &subject.0, &CHECKED);
+    assert_eq!(checked, expected, "default kernel, checked");
     for name in [
-        "idx0_kept_link",
-        "idx0_kept_none",
-        "idx1_kept_link",
-        "idx1_kept_none",
+        "searched0",
+        "searched1",
+        "same0",
+        "same1",
+        "removed",
+        "swept",
+        "verified_passes",
     ] {
         assert!(
             counter(&stderr, name) >= 1,
@@ -208,28 +213,7 @@ fn choices_kept_between_passes_match_ncbi() {
         );
     }
     assert!(
-        counter(&stderr, "recompute_rounds") > counter(&stderr, "n") / 20,
+        counter(&stderr, "passes") > counter(&stderr, "n") / 20,
         "{stderr}"
     );
-    assert!(counter(&stderr, "verified") >= 1, "{stderr}");
-
-    // With NCBI's index-0 rule (a search in every pass) nothing is kept there.
-    let (searching, stderr) = tblastx(
-        &query.0,
-        &subject.0,
-        &[
-            ("LOSAT_LINK_FAST", "1"),
-            ("LOSAT_LINK_FAST_REUSE0", "0"),
-            ("LOSAT_LINK_STATS", "1"),
-        ],
-    );
-    assert_eq!(
-        searching, expected,
-        "index-backed kernel, index-0 reuse off"
-    );
-    assert_eq!(
-        counter(&stderr, "idx0_kept_link") + counter(&stderr, "idx0_kept_none"),
-        0
-    );
-    assert!(counter(&stderr, "idx1_kept_link") >= 1, "{stderr}");
 }

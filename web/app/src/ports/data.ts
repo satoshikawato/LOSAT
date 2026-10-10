@@ -175,8 +175,10 @@ export interface RunStore {
   readRunBlock(runId: string, stream: OutputStream, start: number, end: number): Promise<Uint8Array>;
   /**
    * Resolves, with the bytes that a staged run's port has delivered so far, once they reach
-   * `atLeast`, or once the run fails, ends or is dropped. A writer that is not the engine (a
-   * session file being loaded) waits on it so that its chunks do not pile up in the Data worker.
+   * `atLeast`, or once the run ends or is dropped; rejects with the run's failure (the storage
+   * ran out, the output broke) once it has failed, at once if it already has. A writer that is
+   * not the engine (a session file being loaded) waits on it so that its chunks do not pile up in
+   * the Data worker, and stops writing when it rejects.
    */
   stagedBytes(runId: string, atLeast: number): Promise<number>;
 }

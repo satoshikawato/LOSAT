@@ -650,7 +650,9 @@ export class Session {
 /**
  * Sends a loaded run's blocks to the Data worker over its run output port (ports/run-output.ts),
  * in messages of about `sendBytes`, and waits while more than IN_FLIGHT_MESSAGES of them are not
- * yet stored, so that a large file does not pile up in the worker's queue.
+ * yet stored, so that a large file does not pile up in the worker's queue. Once the worker cannot
+ * store the run (the storage ran out), that wait rejects with the reason, and the load stops
+ * there instead of decompressing and sending the rest of the file (code review L4).
  */
 class RunSender {
   private buffer: Uint8Array;

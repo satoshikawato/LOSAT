@@ -121,7 +121,9 @@ session over a limit is not saved, and the message says which value.
 The file is read incrementally: the decompressed chunks go through a state machine that reads the
 header lines, collects only the manifest and the candidates (within their limits), and sends each
 run's blocks straight to the Data worker over the run output channel (`ports/run-output.ts`), as
-the engine's output would arrive, with backpressure; nothing else is held. After a run's last block
+the engine's output would arrive, with backpressure; nothing else is held. Once the Data worker
+cannot store a run (the storage ran out), the backpressure wait fails and loading stops there: the
+rest of the file is not decompressed, and the file is refused with the reason. After a run's last block
 the run is committed and its HSP records are checked against the manifest. A loaded run is in the
 RunStore like a searched one: the results screen, the Alignments, the outputs and the alignment
 export work unchanged.

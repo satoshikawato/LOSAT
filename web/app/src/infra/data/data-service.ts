@@ -91,7 +91,7 @@ interface StagedRun {
   commit: Promise<ResultSetRef> | undefined;
   /** Bytes delivered by the port so far, and the `stagedBytes` calls that wait for more. */
   received: number;
-  readonly waiters: Array<{ readonly atLeast: number; readonly resolve: (received: number) => void }>;
+  readonly waiters: Array<{ readonly atLeast: number; readonly resolve: (received: number) => void; readonly reject: (failure: Error) => void }>;
 }
 
 interface CommittedRun {
@@ -537,12 +537,16 @@ export class DataService implements DataGateway {
 
   stagedBytes(runId: string, atLeast: number): Promise<number> {
     const run = this.runs.get(runId);
-    if (run?.state !== 'staged' || run.received >= atLeast || run.failure !== undefined) {
-      return Promise.resolve(run?.state === 'staged' ? run.received : 0);
-    }
+    if (run?.state !== 'staged') return Promise.resolve(0);
+    // A writer that is not the engine stops at once when the run cannot be stored (code review L4).
+    if (run.failure !== undefined) return Promise.reject(run.failure);
+    if (run.received >= atLeast) return Promise.resolve(run.received);
     // A port that broke the protocol or closed delivers nothing more.
-    const ended = run.receiver.finished.then(() => run.received);
-    const reached = new Promise<number>((resolve) => run.waiters.push({ atLeast, resolve }));
+    const ended = run.receiver.finished.then((result) => {
+      if (result.state === 'broken') throw new Error(`The output of the run arrived incomplete: ${result.detail}`);
+      return run.received;
+    });
+    const reached = new Promise<number>((resolve, reject) => run.waiters.push({ atLeast, resolve, reject }));
     return Promise.race([reached, ended]);
   }
 
@@ -558,11 +562,14 @@ export class DataService implements DataGateway {
     }
   }
 
-  /** Resolves the `stagedBytes` calls that the delivered bytes (or a failure) satisfy. */
+  /** Settles the `stagedBytes` calls that the delivered bytes satisfy, or that a failure ends. */
   private release(run: StagedRun, all = false): void {
     for (let i = run.waiters.length - 1; i >= 0; i--) {
       const waiter = run.waiters[i]!;
-      if (all || run.failure !== undefined || run.received >= waiter.atLeast) {
+      if (run.failure !== undefined) {
+        run.waiters.splice(i, 1);
+        waiter.reject(run.failure);
+      } else if (all || run.received >= waiter.atLeast) {
         run.waiters.splice(i, 1);
         waiter.resolve(run.received);
       }

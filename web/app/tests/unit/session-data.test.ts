@@ -6,6 +6,7 @@ import { gunzipSync, gzipSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import { sha256Hex } from '../../src/infra/browser/platform';
 import { browserCompression } from '../../src/infra/browser/compression';
+import { StorageFullError } from '../../src/infra/data/block-store';
 import { DataService } from '../../src/infra/data/data-service';
 import { MemoryBlockStore } from '../../src/infra/data/memory-block-store';
 import { FakeInputChecker, FakeScanner } from '../../src/infra/fake/fake-fasta';
@@ -15,11 +16,11 @@ import { DIAGNOSTICS_STREAM, HITS_STREAM } from '../../src/ports/run-output';
 const encoder = new TextEncoder();
 const sha256 = (text: string) => createHash('sha256').update(text).digest('hex');
 
-function service(readChunkBytes?: number) {
+function service(readChunkBytes?: number, capacityBytes?: number) {
   let token = 0;
   return new DataService({
     ...(readChunkBytes === undefined ? {} : { readChunkBytes }),
-    store: new MemoryBlockStore(),
+    store: new MemoryBlockStore(capacityBytes === undefined ? {} : { capacityBytes }),
     scanner: new FakeScanner(),
     checker: new FakeInputChecker(),
     digest: sha256Hex,
@@ -144,6 +145,21 @@ describe('DataService for session files', () => {
     await data.deleteRun('r');
     await expect(waiting).resolves.toBe(11);
     expect(await data.stagedBytes('unknown', 5)).toBe(0);
+  });
+
+  it('rejects with the failure once a staged run cannot be stored, so that its writer stops (code review L4)', async () => {
+    const data = service(undefined, 10);
+    const writer = new RunOutputWriter(await data.openRun('r'));
+    const waiting = data.stagedBytes('r', 100);
+    writer.write(0, encoder.encode('12345'));
+    await tick();
+    writer.write(0, encoder.encode('678901'));
+    await expect(waiting).rejects.toThrow(StorageFullError);
+    // At once afterwards, whatever count is asked.
+    await expect(data.stagedBytes('r', 1)).rejects.toThrow(/Not enough temporary storage/);
+    writer.end();
+    await expect(data.commitRun('r')).rejects.toThrow(StorageFullError);
+    expect(await data.stagedBytes('r', 1)).toBe(0);
   });
 });
 

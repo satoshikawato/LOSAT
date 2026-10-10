@@ -28,6 +28,7 @@ import { DataService } from '../../src/infra/data/data-service';
 import { MemoryBlockStore } from '../../src/infra/data/memory-block-store';
 import { FakeEngine } from '../../src/infra/fake/fake-engine';
 import { FakeInputChecker, FakeScanner } from '../../src/infra/fake/fake-fasta';
+import type { Compression } from '../../src/ports/compression';
 import type { DataGateway } from '../../src/ports/data';
 import type { EngineGateway } from '../../src/ports/engine';
 import { memoryDownloader, type SavedFile } from './support/memory-downloader';
@@ -58,8 +59,8 @@ function forbiddenEngine() {
 }
 
 /** A working session: the data layer, the coordinator, the tray and the session, as composition.ts makes them. */
-function world(engine: EngineGateway = new FakeEngine(), prefix = '') {
-  const store = new MemoryBlockStore();
+function world(engine: EngineGateway = new FakeEngine(), prefix = '', options: { readonly capacityBytes?: number; readonly compression?: Compression } = {}) {
+  const store = new MemoryBlockStore(options.capacityBytes === undefined ? {} : { capacityBytes: options.capacityBytes });
   let token = 0;
   const service = new DataService({
     store,
@@ -103,7 +104,7 @@ function world(engine: EngineGateway = new FakeEngine(), prefix = '') {
     coordinator,
     tray,
     data,
-    compression: browserCompression,
+    compression: options.compression ?? browserCompression,
     downloader,
     app: { version: '0.0.0', build: 'test' },
     now: () => new Date(2026, 9, 10, 12, 0, 0).getTime(),
@@ -523,6 +524,38 @@ describe('Session: refused files leave nothing behind', () => {
     await refusedFile(gzip.slice(0, Math.floor(gzip.length / 2)), /The session file is (damaged: its gzip data|incomplete)/);
     // Gzip data after the session's own.
     await refusedFile(new Uint8Array([...gzip, ...gzipSync(encoder.encode('x'))]), /damaged/);
+  });
+
+  it('stops reading as soon as a run cannot be stored, and refuses the file with the reason (code review L4)', async () => {
+    const file = await saveSession(await searched());
+    // The decompressed file in pieces of 64 bytes, counted as the session takes them.
+    let taken = 0;
+    const sliced: Compression = {
+      gzip: (out) => browserCompression.gzip(out),
+      gunzip: (blob) =>
+        (async function* () {
+          for await (const chunk of browserCompression.gunzip(blob)) {
+            for (let at = 0; at < chunk.length; at += 64) {
+              taken++;
+              yield chunk.subarray(at, at + 64);
+            }
+          }
+        })(),
+    };
+    const pieces = Math.ceil(gunzipSync(file.bytes).length / 64);
+    const { engine, calls } = forbiddenEngine();
+    // Room for the manifest's first run's first bytes only: its out0 alone is larger.
+    const b = world(engine, '', { capacityBytes: 600, compression: sliced });
+    const result = await b.session.load(asFile(file.bytes));
+    expect(result).toEqual({
+      ok: false,
+      message: expect.stringMatching(/^saved\.losat-session\.gz was not opened, and nothing was loaded\. It could not be read: Not enough temporary storage/),
+    });
+    // The window of messages in flight (16 of 16 bytes here) and a piece or two past it, not the rest of the file.
+    expect(taken).toBeLessThan(pieces / 2);
+    expect(b.coordinator.state.get().runs).toEqual([]);
+    expect(b.store.usage()).toBe(0);
+    expect(calls).toEqual([]);
   });
 
   it('refuses HSP records and candidates that the runs cannot have', async () => {

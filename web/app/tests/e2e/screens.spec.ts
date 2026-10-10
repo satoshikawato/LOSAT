@@ -81,7 +81,8 @@ for (const size of SIZES) {
     // The engine's reader now refuses at the file (above), not at a record of an indexed input, so
     // the refused-record mark and "Exclude record" are covered by the FakeEngine E2E only
     // (search.spec.ts). The user's own exclusion stays on screen: the protein-like record, struck
-    // through in the list of records, left out of this and the following searches.
+    // through in the list of records, left out of the following searches until a program of the
+    // other reader kind reads the source again (which clears it and says so on the source).
     await showRecords(page, 'query');
     await page.getByTestId('query-source-0-record-2').uncheck();
     await expect(page.getByTestId('query-source-0-summary')).toContainText('(2 included)');

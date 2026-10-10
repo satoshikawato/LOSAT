@@ -1,6 +1,6 @@
 // The UI's display helpers (src/ui/format.ts).
 import { describe, expect, it } from 'vitest';
-import { formatCounted, formatDateTime, framesLabel, framesPhrase, framesText } from '../../src/ui/format';
+import { breakAfterSeparators, formatCounted, formatDateTime, framesLabel, framesPhrase, framesText } from '../../src/ui/format';
 
 describe('formatDateTime', () => {
   it('writes a local time in ISO 8601 form, day and month never swapped', () => {
@@ -48,5 +48,18 @@ describe('frames', () => {
     expect(framesPhrase(blastx)).toBe('query frame -1');
     expect(framesPhrase(tblastx)).toBe('frames -2 / +2');
     expect(framesPhrase({})).toBe('');
+  });
+});
+
+describe('breakAfterSeparators', () => {
+  it('ends a piece after _ . | and :, and keeps every character', () => {
+    expect(breakAfterSeparators('gi|123|ref|NC_000913.3|')).toEqual(['gi|', '123|', 'ref|', 'NC_', '000913.', '3|']);
+    expect(breakAfterSeparators('contig_1:5-9')).toEqual(['contig_', '1:', '5-9']);
+    expect(breakAfterSeparators('contig_1:5-9').join('')).toBe('contig_1:5-9');
+  });
+
+  it('leaves an ID without those characters whole, and an empty one empty', () => {
+    expect(breakAfterSeparators('LC738884')).toEqual(['LC738884']);
+    expect(breakAfterSeparators('')).toEqual(['']);
   });
 });

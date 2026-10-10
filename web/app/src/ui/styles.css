@@ -455,6 +455,11 @@ textarea {
   margin: 4px 0;
 }
 
+/* Said after a program change read the source again and cleared its exclusions (Owner decision 2, S15). */
+.source > .notice {
+  margin: 6px 0;
+}
+
 .source-head {
   display: flex;
   flex-wrap: wrap;
@@ -1796,10 +1801,12 @@ button.link[aria-disabled='true'] {
   white-space: nowrap;
 }
 
-/* On a phone the ID may take a second line instead of ending in an ellipsis (S14 screen review L4). */
+/* On a phone the ID may take a second line instead of ending in an ellipsis (S14 screen review L4). It
+   breaks only after _ . | : (a <wbr> there, CandidatesPanel); an ID without them still cannot overflow
+   (S14 screen review 2, L-a). */
 .candidate-key > .candidate-subject {
   font-weight: 600;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
   white-space: normal;
   display: -webkit-box;
   -webkit-box-orient: vertical;

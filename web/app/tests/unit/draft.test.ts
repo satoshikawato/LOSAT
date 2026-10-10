@@ -251,6 +251,49 @@ describe('SearchDraft inputs', () => {
   });
 });
 
+describe('SearchDraft reader change notice (Owner decision 2, S15)', () => {
+  it('says, on each source that had exclusions, that they were cleared; the next selection change clears the notice', async () => {
+    const { draft } = setup();
+    draft.setPaste('query', '>q\nACGT\n>r\nACGT\n>s\nACGT\n');
+    draft.addFiles('query', [file('plain.fa', '>p\nACGT\n')]);
+    draft.addFiles('subject', [file('subject.fa', '>a\nACGT\n>b\nACGT\n')]);
+    await draft.idle();
+    draft.setIncluded('query', 'paste', [0, 2], false);
+    draft.setIncluded('subject', sourceOf(draft, 'subject').key, [1], false);
+    expect(sourceOf(draft, 'query').notice).toBeUndefined();
+
+    draft.setProgram('blastp');
+    await draft.idle();
+    expect(sourceOf(draft, 'query')).toMatchObject({
+      excluded: [],
+      notice: 'Read again as protein for BLASTP: the 2 excluded records are included again.',
+    });
+    expect(sourceOf(draft, 'subject').notice).toBe('Read again as protein for BLASTP: the 1 excluded record is included again.');
+    // A source without exclusions says nothing.
+    expect(sourceOf(draft, 'query', 1).notice).toBeUndefined();
+
+    // The notice stays through a check and through a program change that keeps the reader kind ...
+    draft.setProgram('blastp');
+    expect(sourceOf(draft, 'query').notice).toBeDefined();
+    // ... and goes with the next change of the selection.
+    draft.setIncluded('query', 'paste', [1], false);
+    expect(sourceOf(draft, 'query').notice).toBeUndefined();
+    expect(sourceOf(draft, 'query')).toMatchObject({ excluded: [1] });
+    expect(sourceOf(draft, 'subject').notice).toBeDefined();
+  });
+
+  it('keeps no notice when the reader kind stays', async () => {
+    const { draft } = setup();
+    draft.setPaste('query', '>q\nACGT\n>r\nACGT\n');
+    await draft.idle();
+    draft.setIncluded('query', 'paste', [1], false);
+    draft.setProgram('tblastx');
+    await draft.idle();
+    expect(sourceOf(draft, 'query')).toMatchObject({ excluded: [1] });
+    expect(sourceOf(draft, 'query').notice).toBeUndefined();
+  });
+});
+
 describe('SearchDraft submit', () => {
   it('refuses to queue without inputs, with every record excluded, or with a refused input', async () => {
     const { draft, requests } = setup();

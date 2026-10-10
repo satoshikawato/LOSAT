@@ -78,3 +78,11 @@ export function framesPhrase(hsp: Frames): string {
   if (label === undefined) return '';
   return label === 'Frames (q/s)' ? `frames ${framesText(hsp, ' / ')}` : `${label.toLowerCase()} ${framesText(hsp)}`;
 }
+
+/**
+ * An ID in pieces that may end a line: each piece ends after `_ . | :`. The view puts a `<wbr>` after
+ * every piece as an element between text nodes, never as markup built from the ID.
+ */
+export function breakAfterSeparators(text: string): string[] {
+  return text.split(/(?<=[_.|:])/);
+}

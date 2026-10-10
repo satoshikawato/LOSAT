@@ -62,6 +62,7 @@ const testid = computed(() => `${props.role}-source-${props.index}`);
       </button>
     </div>
 
+    <p v-if="source.notice !== undefined" class="notice" :data-testid="`${testid}-notice`">{{ source.notice }}</p>
     <p v-if="source.status === 'indexing'" class="muted">Reading the records…</p>
     <template v-else-if="source.status === 'failed'">
       <p class="error" :data-testid="`${testid}-error`">This input cannot be read: {{ source.error }}</p>

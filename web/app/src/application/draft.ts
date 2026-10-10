@@ -18,7 +18,7 @@
 import { buildArgv, COMBINED_NAMES, PASTED_NAMES } from '../domain/argv';
 import { includedRecords, type DatasetRecord, type DatasetRevision } from '../domain/dataset';
 import { formParameters, setField, type FieldValue, type FormValues } from '../domain/parameters';
-import { indexParser, PROGRAMS, programById, type InputRole, type ProgramId } from '../domain/programs';
+import { indexParser, PROGRAMS, programById, sequenceKind, type InputRole, type ProgramId } from '../domain/programs';
 import { REGION_FLAG, regionProblem, regionValue, type RegionText } from '../domain/region';
 import type { DataGateway } from '../ports/data';
 import type { EngineGateway, ProgramDescription } from '../ports/engine';
@@ -52,6 +52,11 @@ export interface DraftSource {
   readonly base?: DatasetRevision;
   /** Indices of the records that runs leave out, ascending. */
   readonly excluded: readonly number[];
+  /**
+   * Said on the source after a program change read it again and cleared its exclusions
+   * (Owner decision 2, S15); it stays until the user changes the selection or removes the source.
+   */
+  readonly notice?: string;
   /** The first lines of the source, as text, for its preview. */
   readonly head?: string;
   readonly check?: SourceCheck;
@@ -122,6 +127,14 @@ const HEAD_LINE_CHARS = 120;
  */
 const RECORD_IN_MESSAGE = /\b(?:query|subject) record (\d+)\b|^record (\d+) \(/;
 
+/** What a source says when a program change read it again and its `count` exclusions were cleared. */
+function rereadNotice(program: ProgramId, role: InputRole, count: number): string | undefined {
+  if (count === 0) return undefined;
+  const kind = sequenceKind(programById(program), role);
+  const records = count === 1 ? 'the 1 excluded record is' : `the ${count} excluded records are`;
+  return `Read again as ${kind} for ${programById(program).label}: ${records} included again.`;
+}
+
 const emptyRole = (): RoleDraft => ({ paste: '', sources: [], mode: 'combined' });
 
 export class SearchDraft {
@@ -173,7 +186,7 @@ export class SearchDraft {
       // role whose kind stays keep their tables and are only checked again.
       const reread = indexParser(previous, role) !== indexParser(program, role);
       for (const source of this.role(role).sources) {
-        if (reread) this.reindex(role, source.key);
+        if (reread) this.reindex(role, source.key, rereadNotice(program, role, source.excluded.length));
         else this.scheduleCheck(role, source.key, 0);
       }
     }
@@ -293,7 +306,9 @@ export class SearchDraft {
         if (included) excluded.delete(index);
         else excluded.add(index);
       }
-      return { ...source, excluded: [...excluded].sort((a, b) => a - b), check: { state: 'pending' } };
+      const rest = { ...source };
+      delete (rest as { notice?: unknown }).notice;
+      return { ...rest, excluded: [...excluded].sort((a, b) => a - b), check: { state: 'pending' } };
     });
     this.set({ message: undefined });
     this.scheduleCheck(role, key);
@@ -545,12 +560,12 @@ export class SearchDraft {
   }
 
   /** Indexes a source again (ready, failed or still being indexed) with the program's reader. */
-  private reindex(role: InputRole, key: string): void {
+  private reindex(role: InputRole, key: string, notice?: string): void {
     const source = this.role(role).sources.find((s) => s.key === key);
     if (source === undefined) return;
     this.cancelTask(`check:${role}:${key}`);
     this.updateSource(role, key, (s) => {
-      const next: DraftSource = { ...s, status: 'indexing', excluded: [] };
+      const next: DraftSource = { ...s, status: 'indexing', excluded: [], ...(notice === undefined ? {} : { notice }) };
       delete (next as { base?: unknown }).base;
       delete (next as { check?: unknown }).check;
       delete (next as { error?: unknown }).error;

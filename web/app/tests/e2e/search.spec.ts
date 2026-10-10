@@ -414,6 +414,11 @@ test('empty inputs, every record excluded, a sequence without a defline, and BLA
   await expect(page.getByTestId('query-source-0-check')).toHaveAttribute('data-check', 'ok');
   await expect(page.getByTestId('query-source-0-add-defline')).toHaveCount(0);
   if (BUILD_HAS_ENGINE) {
+    // A refusal for a gap line is not fixed by a defline in front, even though the text does not start
+    // with '>' (the old condition offered the button then; code review 2, L-A).
+    await paste(page, 'query', 'ACGTACGT\n>?10\nACGT\n');
+    await expect(page.getByTestId('query-source-0-error')).toContainText("line 2 is a gap line ('>?')");
+    await expect(page.getByTestId('query-source-0-add-defline')).toHaveCount(0);
     // A first line that NCBI BLAST+ may fetch as a sequence identifier is refused, and a defline is offered.
     await paste(page, 'query', 'lcl|ACGTACGT');
     await expect(page.getByTestId('query-source-0-error')).toContainText('(start the input with a \'>\' defline)');
@@ -434,6 +439,41 @@ test('empty inputs, every record excluded, a sequence without a defline, and BLA
   await program(page, 'blastx');
   await expect(page.getByTestId('program-unavailable')).toContainText('BLASTX joins LOSAT Web after its certification');
   await expect(page.getByTestId('add-to-queue')).toBeDisabled();
+});
+
+test('a program of another reader kind reads the sources again, clears their exclusions and says so (Owner decision 2)', async ({
+  page,
+}) => {
+  await program(page, 'blastn');
+  await paste(page, 'query', '>a\nACGTACGTAC\n>b\nACGTACGTAC\n>c\nACGTACGTAC\n');
+  await paste(page, 'subject', '>s\nACGTACGTACGT\n');
+  await showRecords(page, 'query');
+  await page.getByTestId('query-source-0-record-0').uncheck();
+  await page.getByTestId('query-source-0-record-1').uncheck();
+  await expect(page.getByTestId('query-source-0-summary')).toContainText('(1 included)');
+  await expect(page.getByTestId('query-source-0-notice')).toHaveCount(0);
+
+  // BLASTN to TBLASTX keeps the reader kind of both roles: the exclusions stay and nothing is said.
+  await program(page, 'tblastx');
+  await expect(page.getByTestId('query-source-0-summary')).toContainText('(1 included)');
+  await expect(page.getByTestId('query-source-0-notice')).toHaveCount(0);
+
+  // BLASTP reads the query as protein: the source is read again, the two records come back, and the card says so.
+  await program(page, 'blastp');
+  await settled(page, 'query');
+  await expect(page.getByTestId('query-source-0-notice')).toHaveText(
+    'Read again as protein for BLASTP: the 2 excluded records are included again.',
+  );
+  await expect(page.getByTestId('query-source-0-summary')).toContainText('3 records');
+  await expect(page.getByTestId('query-source-0-summary')).not.toContainText('included)');
+  // The subject had no exclusions, so it says nothing.
+  await expect(page.getByTestId('subject-source-0-notice')).toHaveCount(0);
+
+  // The notice stays until the selection changes.
+  await showRecords(page, 'query');
+  await page.getByTestId('query-source-0-record-2').uncheck();
+  await expect(page.getByTestId('query-source-0-summary')).toContainText('(2 included)');
+  await expect(page.getByTestId('query-source-0-notice')).toHaveCount(0);
 });
 
 test('the sequence kind warning is an estimate and does not change the program', async ({ page }) => {

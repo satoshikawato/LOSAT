@@ -13,7 +13,7 @@ import { interval, spanOn } from '../domain/coordinates';
 import { recordLabel, type ExtractionRegion } from '../domain/extraction';
 import { programById, type InputRole } from '../domain/programs';
 import CommandText from './CommandText.vue';
-import { formatBytes, formatCount, formatCounted, formatDateTime } from './format';
+import { breakAfterSeparators, formatBytes, formatCount, formatCounted, formatDateTime } from './format';
 import { useNarrow } from './useNarrow';
 import VirtualRows from './VirtualRows.vue';
 
@@ -66,7 +66,9 @@ function widest(texts: readonly string[]): string | undefined {
   if (measurer === null) return undefined;
   const style = getComputedStyle(element);
   measurer.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
-  const longest = Math.max(...texts.map((text) => text.length));
+  // A loop, not Math.max(...): a spread of 120,000 or more values throws a RangeError (code review 2, L-B).
+  let longest = 0;
+  for (const text of texts) if (text.length > longest) longest = text.length;
   let width = 0;
   let measured = 0;
   for (const text of texts) {
@@ -278,7 +280,7 @@ const intervalWords = (iv: { readonly from: number; readonly to: number }, unit:
                 <div v-if="narrow" class="candidate-card">
                   <div class="candidate-key">
                     <span class="num" data-field="n">{{ position + 1 }}</span>
-                    <span class="candidate-subject" data-field="subject" :title="subjectName(candidate)">{{ subjectName(candidate) }}</span>
+                    <span class="candidate-subject" data-field="subject" :title="subjectName(candidate)"><template v-for="(part, i) in breakAfterSeparators(subjectName(candidate))" :key="i">{{ part }}<wbr /></template></span>
                     <span class="num" data-field="range" :title="`${rangeText(candidate)} of ${formatCount(candidate.subject.length)} ${candidate.subject.unit}`">{{
                       rangeText(candidate)
                     }}</span>

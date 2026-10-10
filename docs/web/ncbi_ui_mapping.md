@@ -3,6 +3,7 @@
 段階 W4b（Session S13b、[指示書](../losat_web_gui_sessions/session_s13b_w4b_ncbi_style_ui.md)）で、保守者の指示（2026-10-09）「NCBI BLAST ウェブサイトの GUI にデザインを寄せてほしい」を具体にする。設計書 §2.1 の「NCBI Web BLAST に馴染みのある操作」と §11.2 の「NCBI Web に準じる入力項目・列を固定した参照画面と対応付ける」の参照画面と対応表である。
 
 - 作成：2026-10-10（S13b）。採否は保守者の確認待ち（推奨案で進めた。Owner-delegated、[W4b のゲート記録](../evidence/losat_web_w4b/README.md)の判断）。
+- 追記：2026-10-10（S14）。Descriptions の行の印、候補への追加（Descriptions・Alignments・Dot Plot）、候補トレイ（§2「候補（S14）」、§3）。採否は同じく保守者の確認待ち（Owner-delegated、W5 のゲート記録 `docs/evidence/losat_web_w5/README.md` の判断）。
 - 寄せるのは配置・節の順・言葉（見出し、欄の名前、ボタン、タブ、列、凡例）。NCBI のロゴ、NIH / NLM のヘッダーとフッター、「BLAST®」の文字、配色は写さない。LOSAT Web が NCBI のサービスに見えないようにする。
 - 値はエンジンが書いたまま示す。TS で BLAST の値を計算・整形しない（`web/AGENTS.md` 規則 1、[`results_columns.md`](results_columns.md)）。表示の分類（Graphic Summary の得点の階級、ドットプロットの identity の階級）は、エンジンの原値を区切るだけで、値を作らない。
 - 採否の語：**採る**（NCBI と同じ場所・同じ言葉）、**寄せる**（同じ場所に LOSAT の要素を置き、言葉を近づける）、**採らない**（理由を書く）、**エンジン待ち**（S13+（E2j）が値を出すまで出さない）、**後の段階**（その段階の名）。
@@ -92,7 +93,9 @@ NCBI と同じ順で「Descriptions」（`results-view-hits`）、「Graphic Sum
 |---|---|---|---|
 | 見出し「Sequences producing significant alignments」 | 同じ見出し | 採る | |
 | BLASTP の最初のタブ「Clusters」（「Clusters producing significant alignments」、Cluster Representative Sequence） | 「Descriptions」のまま | 採らない | NCBI のデータベースの配列のまとまり。ローカルの subject はまとめない |
-| 「Download」「Select columns」「Show」、「select all」と行の印、「GenBank」「Graphics」「MSA Viewer」 | なし | 採らない（Download は Outputs、行の選択は S14 で検討） | 抽出（S14）が行の選択を求めれば、その段階で足す |
+| 「select all」と行の印（「Select for downloading or viewing reports」）、「N sequences selected」 | 「select all」（`descriptions-select-all`）、行の印（`subject-mark-<sIdx>`）、「N sequences selected」（`descriptions-selected`）。印はその query の subject に付き、query や Run を替えると外れる（表示用のフィルターが隠した subject の印も外れる） | 寄せる（S14） | 候補への追加に使う（NCBI は Download・GenBank・Graphics に使う）。行は選択の 1 つのボタンのまま（W4b）で、印はその左の別の check box |
+| 選んだ行への操作「Download」「GenBank」「Graphics」「MSA Viewer」 | 「Add to candidates」（`descriptions-add-candidates`）：印の subject の、その query の全 HSP（表示用のフィルターに関わらず） | LOSAT だけ（S14） | 書き出しは候補トレイから（「候補（S14）」）。GenBank・Graphics・MSA Viewer は NCBI のデータベースと viewer のもの。outfmt 0/6/7 の原文の Download は Outputs |
+| 「Select columns」「Show」 | なし | 採らない | 列は固定（`results_columns.md`）。行は仮想化した一覧で全部を示す |
 | 列 Description（リンク） | 「Description」：outfmt 0 の見出しの題（`results_columns.md`）。行を選ぶとその subject が選ばれ、Alignments・Graphic Summary・Dot Plot が従う | 寄せる | 行は 1 つのボタン（中にリンクを入れない）。選んだ subject の Alignments へは「Alignments」タブで |
 | 列 Scientific Name、Common Name、Taxid | なし | 採らない | ローカルの FASTA に無い |
 | 列 Max Score | E2j の前：「Score (bits)」（その subject の最初の HSP の outfmt 6 の bitscore）をこの位置に | エンジン待ち | 列名は今の意味のまま（Max Score と名乗らない） |
@@ -124,7 +127,9 @@ NCBI と同じ順で「Descriptions」（`results-view-hits`）、「Graphic Sum
 |---|---|---|---|
 | 「Alignment view」（Pairwise、Query-anchored など）、「CDS feature」、「Restore defaults」、「Line length」 | なし | 採らない | エンジンが書くのは outfmt 0 の pairwise だけ。原文を書き換えない（`web/AGENTS.md` 規則 2） |
 | subject ごとの塊（全部の subject を続けて） | 選んだ subject の塊（`alignments-subject`）。「Previous」「Next」で前後の subject、「Descriptions」で一覧へ | 寄せる | 数千の subject を 1 ページに並べず、選択に従う |
-| 「Download」「GenBank」「Graphics」「Sort by」 | なし | 採らない（Download は Outputs） | |
+| 「Download」（subject の塊の道具の行） | 「Add all matches to candidates」（`alignments-add-subject`）：その subject の、その query の全 HSP | LOSAT だけ（S14） | 書き出しは候補トレイから。原文の Download は Outputs |
+| 「Range n: a to b」の横の「GenBank」「Graphics」 | 「Add to candidates」（`range-add-<q>-<r>`）。候補にあれば「In candidates」 | LOSAT だけ（S14） | NCBI のリンクの場所に置く |
+| 「Sort by」 | なし | 採らない | Range はエンジンの順。並べ替えは HSP の表で |
 | 題（subject の説明）、「Sequence ID」「Length」「Number of Matches」 | 題（outfmt 0 の見出しの題）、「Sequence ID」（sseqid）、「Length」（レコードの長さ）、「Number of Matches」（HSP の数） | 採る | |
 | （無い） | その subject の HSP の表（`hsp-table`、outfmt 6 の欄、並べ替え）。frame は翻訳した配列のものだけ：TBLASTN は「Subject frame」（`+2`）、BLASTX は「Query frame」、TBLASTX は「Frames (q/s)」（`-2/+2`） | LOSAT だけ | 塊の見出しの下。行を選ぶとその Range へ。TBLASTN の「–/+2」は TBLASTX の「-2/+2」と並ぶとマイナス鎖に読めた（W4b の画面レビュー L9）。NCBI の節も「Frame = +2」 |
 | 「Range n: a to b」と「Next Match」「Previous Match」「First Match」 | 「Range n: a to b」（n はその subject の中のエンジンの順、a と b は HSP レコードの subject の座標を小さい方から）、「Next Match」「Previous Match」「First Match」 | 採る | NCBI の Range は subject の座標（参照画面の blastn：Range 2: 588 to 608 は Sbjct 588–608） |
@@ -149,8 +154,20 @@ NCBI の Dot Plot は、題「Plot of <query> vs <subject>」とサーバーが�
 | HSP の線 | 幅 2。両方の frame の符号が同じなら青 `#1f77b4`、違えばオレンジ `#ff7f0e` | 同じ。符号は HSP レコードの座標と frame から（W4 の向き）。BLASTN の 1 文字の HSP（鎖がレコードに無い）は灰色 `#7f7f7f` と凡例（E2j まで） | |
 | 不透明度 | identity（`int()` で切り捨て）60 以下 0.4、70 以下 0.6、80 以下 0.8、それより上 1 | outfmt 6 の `pident` の文字列を数として読み、整数に切り捨てて同じ階級に分ける（TS で identities / 長さを計算しない） | 丸めた `pident`（小数 3 桁）の切り捨てで、スクリプトの切り捨てと階級の境界が同じになる |
 | 出力 | SVG のファイル | 画面（Canvas）。SVG の書き出しは採らない（S15 の出力の段階で検討） | 出力の形式と名前は S15 が決める |
+| HSP のポップアップの操作 | （無い。NCBI の Dot Plot にも無い） | 「Show alignment」の横に「Add to candidates」（`dotplot-popup-add`）。候補にあれば「In candidates」 | LOSAT だけ（S14） |
 
 LOSAT が足すもの（W4 の判断 18 を保つ）：ズーム（ボタン、+ / −、Ctrl / ⌘ とホイール）、パン（ドラッグ、矢印キー）、HSP の選択（線のクリック、n / p、表）、「Zoom to HSP」「Whole sequences」、`touch-action: pan-y`。新しく、hover で線を太くし、HSP を選ぶ（クリック、Enter）とその HSP のポップアップ（`dotplot-popup`）を出す：outfmt 6 の行の値をそのまま（bit score、E value、identity、query と subject の範囲、翻訳した配列の frame、向き、outfmt 0 に有るか）と「Show alignment」（Alignments のその Range へ）。ポップアップは線の端の脇に置き、線の中点を覆わない（そこに場所が無いときと、描く枠が 600 px 未満の電話の幅では図の下に）。ポップアップは Escape と「Close」で閉じ、キーボードとスクリーンリーダーで届く（focus を移し、閉じたら図に戻す）。描き方は層を分ける：格子と HSP の層（色と不透明度ごとにまとめ、線は 1 本ずつ描き、見えない線（表示の外の線、両端が前の線と同じ画素に来る不透明な線）を省く。重なる多数の線を 1 本の path にすると 2〜3 倍遅かった（W4b の B1）。薄い線の重なりはスクリプトの SVG の線と同じく濃くなる）と、hover・選択の層。ズームとパンは 1 フレームに 1 回だけ描き直す。
+
+### 候補（S14）
+
+候補トレイは LOSAT だけの主のタブ「Candidates」（§3）にあり、結果画面の Descriptions・Alignments・Dot Plot の「Add to candidates」で、完了した Run の HSP を集める（`REQ-10`）。抽出と書き出しは、トレイで選んだ候補から作る（設計書 §11.4）。
+
+| NCBI の要素 | LOSAT Web | 採否 | 理由 |
+|---|---|---|---|
+| Descriptions の「Download」の「FASTA (complete sequence)」 | Region「Complete sequence」の「Download FASTA」（`extract-download`、`losat-candidates.fa`） | 寄せる（言葉） | 原配列は利用者の File から読む（NCBI はデータベースから）。NCBI の Download のメニューは参照画面に撮っていない：メニューの項目は NCBI の言葉として知られているもので、撮った画面と照らしていない |
+| Descriptions の「Download」の「FASTA (aligned sequences)」 | 「Download aligned sequences (FASTA)」（`extract-aligned`、`losat-candidates-aligned.fa`）：HSP レコードの整列文字列を検索で得た向きのまま。原配列の抽出と別の file | 寄せる（言葉） | 同上（参照画面に無い） |
+| （無い） | Region「Hit region」「Hit region with flanks」（Left・Right、レコードの単位）・「Complete sequence」、「Several HSPs on one record」（Separate sequences・One region spanning them）、Sequence（Subject・Query）（`extract-form`）。書き出しの後の要約（`extract-summary`：配列の数、端で切った配列の要求した範囲と実際の範囲、鎖が分からない HSP とその理由） | LOSAT だけ | 設計書 §11.4 |
+| （無い） | 候補の表（`candidate-list`、行 `candidate-<n>`）、メモ（`candidate-note-<n>`）、並べ替え（Order added・Run・Subject）、上下の移動、削除（Remove・Remove selected）、「Show in results」（`candidate-reveal-<n>`、元の Run・query・HSP へ）、由来の一覧（Origins、`candidate-origins`） | LOSAT だけ | REQ-14 |
 
 ## 3. LOSAT だけのものの置き場所
 
@@ -163,6 +180,7 @@ LOSAT が足すもの（W4 の判断 18 を保つ）：ズーム（ボタン、+
 | 検証バッジ | 結果の見出しの塊の Program の横、Run details |
 | Outputs（outfmt 0/6/7 の原文、診断、書き出し） | タブ「Outputs」と見出しの「Download All」 |
 | FakeEngine の帯 | 画面の上（W0） |
+| 候補トレイ（一覧、メモ、並べ替え、削除、元の結果へ、由来、抽出と書き出し） | 主のタブ「Candidates」（`tab-candidates`、Search・Results の後、候補の数を示す）。どの Run を見ていても同じ |
 
 ## 4. 見た目
 

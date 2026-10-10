@@ -10,13 +10,14 @@
 // this query (S14).
 //
 // On the one page of the results (ClassicResults.vue), the list is cut as NCBI's: the first 100
-// subjects in the order shown, "Show all N" for the rest, until another run or query. "select all"
-// marks the subjects listed.
+// subjects in the order shown, "Show all N" for the rest, until another run or query (shownWhole.ts).
+// "select all" marks the subjects listed.
 import { computed, onMounted, ref, watch } from 'vue';
 import type { HspId, ResultsBrowser, ResultsState, SubjectEntry } from '../application/results';
 import { headingTitle } from '../domain/outfmt0';
 import type { SubjectSortKey } from '../domain/result-index';
 import { formatCount, formatCounted } from './format';
+import { shownWhole, wholeKey } from './shownWhole';
 import SortButton from './SortButton.vue';
 import { focusPressed, useSideScroll } from './useSideScroll';
 import VirtualRows from './VirtualRows.vue';
@@ -28,12 +29,8 @@ const ROW_PX = 28;
 const MAX_ROWS = 10;
 /** Subjects listed until "Show all" (NCBI lists 100 to a page). */
 const FIRST_SUBJECTS = 100;
-const showAll = ref(false);
-// Another run or query starts with its first subjects again.
-watch(
-  () => `${props.state.runId}|${props.state.qIdx}`,
-  () => (showAll.value = false),
-);
+const key = computed(() => wholeKey(props.state.runId, props.state.qIdx));
+const showAll = computed(() => shownWhole.descriptions.value === key.value);
 const listed = computed(() => (showAll.value ? props.state.subjects.length : Math.min(FIRST_SUBJECTS, props.state.subjects.length)));
 /** The selected subject's row, or -1 where the list does not reach it (it is not scrolled to then). */
 const selectedPosition = computed(() => {
@@ -251,7 +248,7 @@ function description(sIdx: number, inOutfmt0: boolean): string {
     </div>
     <p v-if="listed < state.subjects.length" class="descriptions-more">
       <span class="muted small" data-testid="descriptions-listed">The first {{ formatCount(listed) }} of {{ formatCount(state.subjects.length) }} are listed.</span>
-      <button type="button" data-testid="descriptions-show-all" @click="showAll = true">Show all {{ formatCount(state.subjects.length) }}</button>
+      <button type="button" data-testid="descriptions-show-all" @click="shownWhole.descriptions.value = key">Show all {{ formatCount(state.subjects.length) }}</button>
     </p>
   </div>
 </template>

@@ -892,10 +892,12 @@ test('an HSP that outfmt 0 does not show, and a hit list that may have reached i
   await expect(page.getByTestId('range-section')).toHaveCount(0);
   const row = (await text(page.getByTestId('detail-row'))).replace(/\n$/, '');
   expect(row.split('\t')[1]).toBe(sseqid);
-  // The one page is the tab of the next run opened, and of the results shown again.
+  // The one page is the tab of the next run opened, and of the results shown again, with the
+  // Descriptions still shown whole.
   await page.getByTestId('tab-search').click();
   await page.getByTestId('tab-results').click();
   await expect(page.getByTestId(TABS.hits)).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('subject-list')).toHaveAttribute('data-count', String(total));
   // outfmt 6 has the HSP; outfmt 0 has no alignment heading for its subject.
   await showOutput(page, 1, 6, false);
   expect((await text(page.getByTestId('result-output'))).split('\n')).toContain(row);

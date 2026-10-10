@@ -19,6 +19,7 @@ import { headingTitle } from '../domain/outfmt0';
 import { placeBox } from '../domain/plot-geometry';
 import { rulerTicks, scoreBin, SCORE_BINS } from '../domain/plot-scale';
 import { formatCount } from './format';
+import { shownWhole, wholeKey } from './shownWhole';
 import './plots.css';
 
 const props = defineProps<{ results: ResultsBrowser; state: ResultsState }>();
@@ -54,7 +55,6 @@ const popover = ref<HTMLElement>();
 const legendTitle = useId();
 const areaWidth = ref(600);
 const scrollTop = ref(0);
-const showAll = ref(false);
 const hovered = ref(-1);
 /** The HSP that the arrow keys move (an index of the layout), and whether the keyboard focus shows it. */
 const cursor = ref(-1);
@@ -66,6 +66,9 @@ const subjects = computed(() => props.state.subjects);
 const record = computed(() => loaded.value?.run.snapshot.query.records[props.state.qIdx ?? -1]);
 const queryLength = computed(() => Math.max(1, record.value?.length ?? 1));
 const unit = computed(() => loaded.value?.units.query ?? '');
+/** "Show all" of this run's query (kept while the results tab is left, shownWhole.ts). */
+const key = computed(() => wholeKey(props.state.runId, props.state.qIdx));
+const showAll = computed(() => shownWhole.graphic.value === key.value);
 const drawnSubjects = computed(() => (showAll.value ? subjects.value : subjects.value.slice(0, FIRST_SUBJECTS)));
 
 /**
@@ -486,11 +489,10 @@ onUnmounted(() => {
   if (frame !== 0) cancelAnimationFrame(frame);
 });
 
-// Another run or query starts with its first subjects, at the top.
+// Another run or query starts at the top (with its first subjects, shownWhole.ts).
 watch(
   () => `${props.state.runId}|${props.state.qIdx}`,
   () => {
-    showAll.value = false;
     cursor.value = -1;
     hovered.value = -1;
     if (scroller.value !== undefined) scroller.value.scrollTop = 0;
@@ -579,7 +581,7 @@ const selectedText = computed(() => (selectedIndex.value < 0 ? '' : `${props.sta
       <p class="visually-hidden" aria-live="polite">{{ spoken }}</p>
     </div>
     <p v-if="!showAll && subjects.length > FIRST_SUBJECTS" class="graphic-more">
-      <button type="button" data-testid="graphic-show-all" @click="showAll = true">Show all {{ formatCount(subjects.length) }}</button>
+      <button type="button" data-testid="graphic-show-all" @click="shownWhole.graphic.value = key">Show all {{ formatCount(subjects.length) }}</button>
     </p>
   </figure>
 </template>

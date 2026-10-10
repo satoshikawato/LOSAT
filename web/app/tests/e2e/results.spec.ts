@@ -1126,7 +1126,8 @@ test('the one page (NCBI classic): the Graphic Summary, the Descriptions and the
   const scrolled = await page.evaluate(() => window.scrollY);
   for (const key of ['ArrowDown', 'ArrowRight', 'ArrowUp']) await page.keyboard.press(key);
   await expect(canvas).toHaveAttribute('data-selected', selected!);
-  expect(await page.evaluate(() => window.scrollY)).toBe(scrolled);
+  // Within 2 px: Firefox's scroll anchoring may move the page by a sub-pixel row as a list redraws.
+  expect(Math.abs((await page.evaluate(() => window.scrollY)) - scrolled)).toBeLessThanOrEqual(2);
 
   // A click on another Description row selects its subject and brings its alignments into view,
   // with the focus on the Alignments' heading; so does Enter on a row.
@@ -1152,7 +1153,7 @@ test('the one page (NCBI classic): the Graphic Summary, the Descriptions and the
   const before = await page.evaluate(() => window.scrollY);
   await page.getByTestId('subject-sort-bitScore').dispatchEvent('click');
   await expect(page.getByTestId('subject-sort-bitScore').locator('..')).toHaveAttribute('aria-sort', /^(ascending|descending)$/);
-  expect(await page.evaluate(() => window.scrollY)).toBe(before);
+  expect(Math.abs((await page.evaluate(() => window.scrollY)) - before)).toBeLessThanOrEqual(2);
 });
 
 test('the Alignments: a block per Range; Next, Previous and First Match; the previous and next subject; Ranges far apart in a window', async ({

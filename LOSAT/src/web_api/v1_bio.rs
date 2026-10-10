@@ -18,12 +18,14 @@
 //!   warns that the sequence contains no data, ignores white space and hyphens, ends the
 //!   line at `;`, and removes other characters with a warning): `check_residues_of`.
 //!
-//! BLASTP and TBLASTX make no check of the deflines, except of a defline to which `bio`
-//! gives an empty ID (one that starts with Unicode white space, or has nothing else): when
-//! the record that `from_bio` makes of it is not the record of NCBI's reader (a non-ASCII
-//! white space character that `bio` drops and NCBI keeps, a carriage return that ends
-//! NCBI's line, a control character that ends NCBI's title), the search is rejected
-//! (`check_empty_id_deflines_of`, session SFd).
+//! BLASTP and TBLASTX accept the deflines that ABI v1 accepted (plan TD-1), and reject only
+//! those whose bytes the shared report now makes neither ABI v1's nor NCBI's
+//! (`check_bio_deflines_of`, session SFd): a defline to which `bio` gives an empty ID when
+//! the record that `from_bio` makes of it is not NCBI's reader's (a non-ASCII white space
+//! character that `bio` drops and NCBI keeps, a carriage return that ends NCBI's line, a
+//! control character that ends NCBI's title); a record without a title after a `>?` line,
+//! where its local ID shows; and in BLASTP's outfmt 0, a title that `bio` reads otherwise
+//! and that ends with a non-ASCII character.
 
 use anyhow::{bail, Result};
 use bio::io::fasta;
@@ -115,17 +117,45 @@ const fn c_isspace(byte: u8) -> bool {
     matches!(byte, b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r')
 }
 
-/// ABI v1's BLASTP and TBLASTX: rejects a defline to which `bio` gives an empty ID when the
-/// record that `from_bio` makes of it is not the record of NCBI's reader (see the module),
-/// in the bytes of a FASTA file split into lines as `bio` splits them. `bio` 1.6
-/// (`src/io/fasta.rs:331-333`) trims the Unicode white space at the end of the line and
-/// ends the ID at the first `char::is_whitespace`, so a defline that starts with such a
-/// character, or has nothing else, has an empty ID, and `from_bio`'s title is the rest of
-/// the line without that character and the C white space after it. ABI v1 printed
-/// `unknown` for such a record until it searched the records of NCBI's reader (session
-/// SFc, S7 and S8); this rejects the deflines for which the bytes would now be neither ABI
-/// v1's nor NCBI's. The others are NCBI's: an empty defline, one of C white space (with
-/// carriage returns), and a title after C white space.
+/// What an ABI v1 search shows of its records (`check_bio_deflines_of`).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Shown {
+    /// The names of records without a title (`Query_N`, `Subject_N`, `unnamed`): the TBLASTX
+    /// report, BLASTP's subjects, and the query IDs of BLASTP's tabular formats. (BLASTP's
+    /// outfmt 0 and 7 query lines show the title only, which such a record lacks.)
+    pub names: bool,
+    /// The local IDs (`Query_N`, `Subject_N`) of records without a title: the TBLASTX
+    /// report, and the query IDs of BLASTP's tabular formats (`qseqid`, `qacc`,
+    /// `qaccver`). (A BLASTP subject without a title is `unnamed`; the outfmt 0 and 7
+    /// query lines show the title only.)
+    pub local_ids: bool,
+    /// The titles of BLASTP's outfmt 0 subjects (`CDeflineGenerator::GenerateDefline`).
+    pub outfmt0_titles: bool,
+}
+
+/// ABI v1's BLASTP and TBLASTX: rejects the deflines for which the bytes of the search are
+/// now neither ABI v1's (S11) nor NCBI's (see the module), in the bytes of a FASTA file split
+/// into lines as `bio` splits them. `bio` 1.6 (`src/io/fasta.rs:331-333`) trims the Unicode
+/// white space at the end of the line and ends the ID at the first `char::is_whitespace`.
+///
+/// - A defline that starts with such a character, or has nothing else, has an empty ID, and
+///   `from_bio`'s title is the rest of the line without that character and the C white space
+///   after it. ABI v1 printed `unknown` for such a record until it searched the records of
+///   NCBI's reader (session SFc, S7 and S8). It is rejected when `from_bio`'s record is not
+///   NCBI's (its title, or the lines that a carriage return starts), except a record left
+///   without a title where its name does not show (`shown.names`; ABI v1's bytes, as
+///   before). The others are NCBI's: an empty defline, one of C white space (with carriage
+///   returns), and a title after C white space.
+/// - Where the search shows the local IDs (`shown.local_ids`), a record without a title after
+///   a `>?` line is rejected: NCBI reads that line as a gap in the record before it, not as a
+///   record, so it numbers the record lower than `bio` (a `>?` first line opens a record
+///   without a title for NCBI, so it shifts nothing).
+/// - In BLASTP's outfmt 0 (`shown.outfmt0_titles`), a defline with an ID whose `from_bio`
+///   record is not NCBI's (a `>?` line is a gap for NCBI, and NCBI drops a `?_` prefix) is
+///   rejected when its title ends with a non-ASCII character: NCBI's
+///   `x_CleanAndCompress` drops such a last byte (a signed `char`), which ABI v1's report did
+///   not, so the shared report's bytes for `bio`'s title are neither. (Other titles that `bio`
+///   reads otherwise keep ABI v1's bytes.)
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta_reader_utils.cpp:157-225
 /// ```c++
@@ -209,90 +239,238 @@ const fn c_isspace(byte: u8) -> bool {
 ///             continue; // ignore lines containing only whitespace
 ///         }
 /// ```
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:350-362
+/// ```c++
+///         if (c == '>' ) {
+///             CTempString next_line = *++GetLineReader();
+///             string strmodified;
+///             if( NStr::StartsWith(next_line, ">?_") ) {
+///                 CTempString tmp = next_line.substr(3);
+///                 strmodified = ">";
+///                 strmodified.append(tmp.data(), tmp.length());
+///                 next_line = strmodified;
+///             }
+///             if( NStr::StartsWith(next_line, ">?") ) {
+///                 // This is actually a data line. an assembly gap, in particular, which
+///                 // we handle farther below
+///                 GetLineReader().UngetLine();
+/// ```
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:386-389
+/// ```c++
+///         } else if (need_defline) {
+///             if (TestFlag(fDLOptional)) {
+///                 ParseDefLine(">", pMessageListener);
+///                 need_defline = false;
+/// ```
+/// NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:3955-3958
+/// ```c++
+///         size_t pos = m_MainTitle.find_last_not_of (".,;~ ");
+///         if (pos != NPOS) {
+///             m_MainTitle.erase (pos + 1);
+///         }
+/// ```
+/// NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:4070-4073
+/// ```c++
+///     size_t pos = decoded.find_last_not_of (",;~ ");
+///     if (pos != NPOS) {
+///         decoded.erase (pos + 1);
+///     }
+/// ```
+/// NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:304-306
+/// ```c++
+///     if (curr > 0 && curr != ' ') {
+///         *out++ = curr;
+///     }
+/// ```
 /// `role` is `query` or `subject`; `program` is named in the message.
-pub fn check_empty_id_deflines_of(bytes: &[u8], role: &str, program: &str) -> Result<()> {
+pub fn check_bio_deflines_of(bytes: &[u8], role: &str, program: &str, shown: Shown) -> Result<()> {
     let mut record = 0;
+    let mut gaps = 0;
     for line in bytes.split(|&byte| byte == b'\n') {
         let Some(defline) = line.strip_prefix(b">") else {
             continue;
         };
         record += 1;
         // `bio` reads UTF-8 only, so ABI v1 searches no other bytes.
-        let Ok(defline) = std::str::from_utf8(defline) else {
+        let Ok(text) = std::str::from_utf8(defline) else {
             continue;
         };
-        if let Some(problem) = empty_id_defline_problem(defline) {
+        let reading = BioReading::of(text);
+        // A record without a title changes only where its name shows.
+        let shows = shown.names || !reading.title.is_empty();
+        if let Some(problem) = reading.empty_id_problem().filter(|_| shows) {
             bail!(
                 "{role} record {record} has a defline that starts with white space and {problem}; NCBI BLAST+ reads such a defline differently, which is not supported by LOSAT's {program} (begin the defline with a character that is not white space)"
             );
+        }
+        if shown.local_ids && reading.id_empty && reading.title.is_empty() && gaps > 0 {
+            bail!(
+                "{role} record {record} has a defline without a title after a line that starts with '>?', which NCBI BLAST+ reads as a gap, not as a record (NCBI BLAST+ numbers this record {}); this is not supported by LOSAT's {program} (give the record a title)",
+                record - gaps
+            );
+        }
+        if shown.outfmt0_titles {
+            if let Some(problem) = reading.outfmt0_title_problem() {
+                bail!(
+                    "{role} record {record} has a defline that NCBI BLAST+ reads with another title (it {problem}) and that ends with a non-ASCII character, whose last byte NCBI BLAST+'s outfmt 0 drops; this is not supported by LOSAT's {program} outfmt 0 (use ASCII deflines without control characters)"
+                );
+            }
+        }
+        // NCBI's gap lines after the first line (`>?`, and `>?_?` read as `>?`).
+        let gap = match defline.strip_prefix(b"?_") {
+            Some(rest) => rest.starts_with(b"?"),
+            None => defline.starts_with(b"?"),
+        };
+        if gap && record > 1 {
+            gaps += 1;
         }
     }
     Ok(())
 }
 
-/// Why NCBI's reader makes another record of `defline` (the line after `>` as `bio` splits
-/// the lines) than `from_bio` makes of `bio`'s record, when `bio` gives it an empty ID;
-/// `None` when the ID is not empty or the records are alike (`check_empty_id_deflines_of`).
-fn empty_id_defline_problem(defline: &str) -> Option<String> {
-    // `bio`'s ID and description (bio-1.6.0/src/io/fasta.rs:331-333).
-    let header = defline.trim_end();
-    let mut fields = header.splitn(2, char::is_whitespace);
-    let id = fields.next().unwrap_or("");
-    if !id.is_empty() {
-        return None;
+/// A defline (the line after `>` as `bio` splits the lines) as `bio`, `from_bio` and NCBI's
+/// reader read it (`check_bio_deflines_of`).
+struct BioReading<'a> {
+    /// The line without the Unicode white space at its end (`bio`'s header).
+    header: &'a str,
+    /// Whether `bio`'s ID is empty.
+    id_empty: bool,
+    /// `from_bio`'s title.
+    title: Vec<u8>,
+    /// NCBI's line: `bio`'s line up to its first carriage return.
+    ncbi_line: &'a str,
+    /// NCBI's defline after `>`: the line without a `?_` prefix, `None` for a gap line
+    /// (`>?`, also after a `?_` prefix).
+    ncbi_defline: Option<&'a str>,
+    /// Whether the rest of `bio`'s line, which NCBI reads as further lines, is C white
+    /// space (lines that add nothing to the record).
+    rest_is_blank: bool,
+}
+
+impl<'a> BioReading<'a> {
+    fn of(defline: &'a str) -> Self {
+        // `bio`'s ID and description (bio-1.6.0/src/io/fasta.rs:331-333).
+        let header = defline.trim_end();
+        let mut fields = header.splitn(2, char::is_whitespace);
+        let id = fields.next().unwrap_or("");
+        let title = bio_title(id, fields.next());
+        let (ncbi_line, rest) = match defline.find('\r') {
+            Some(at) => (&defline[..at], &defline[at + 1..]),
+            None => (defline, ""),
+        };
+        let ncbi_defline = match ncbi_line.strip_prefix("?_") {
+            Some(text) => (!text.starts_with('?')).then_some(text),
+            None => (!ncbi_line.starts_with('?')).then_some(ncbi_line),
+        };
+        BioReading {
+            header,
+            id_empty: id.is_empty(),
+            title,
+            ncbi_line,
+            ncbi_defline,
+            rest_is_blank: rest.bytes().all(c_isspace),
+        }
     }
-    let title = bio_title(id, fields.next());
-    // NCBI's defline ends at the first carriage return; the rest of `bio`'s line is
-    // further lines, which add nothing to the record when they are white space.
-    let (ncbi_line, rest) = match defline.find('\r') {
-        Some(at) => (&defline[..at], &defline[at + 1..]),
-        None => (defline, ""),
-    };
-    let rest_is_blank = rest.bytes().all(c_isspace);
-    if rest_is_blank && title == ncbi_title(ncbi_line.as_bytes()) {
-        return None;
+
+    /// Whether `from_bio`'s record of the defline is NCBI's reader's record.
+    fn alike(&self) -> bool {
+        self.rest_is_blank
+            && self
+                .ncbi_defline
+                .is_some_and(|defline| self.title == ncbi_title(defline.as_bytes()))
     }
-    // A carriage return inside `bio`'s header leaves the header's last character, which
-    // is not white space, in the rest.
-    if !rest_is_blank {
-        return Some("has a carriage return before the end of its line".to_string());
+
+    /// Why NCBI's reader makes another record of a defline to which `bio` gives an empty ID;
+    /// `None` when the ID is not empty or the records are alike.
+    fn empty_id_problem(&self) -> Option<String> {
+        if !self.id_empty || self.alike() {
+            return None;
+        }
+        // A carriage return inside `bio`'s header leaves the header's last character, which
+        // is not white space, in the rest.
+        if !self.rest_is_blank {
+            return Some("has a carriage return before the end of its line".to_string());
+        }
+        // `bio` drops the character that ends the empty ID, and the whole of a line of white
+        // space; NCBI keeps a non-ASCII one (its bytes are not C white space).
+        let start = match self.header.chars().next() {
+            Some(first) if first.is_ascii() => None,
+            Some(first) => non_ascii_space(first.encode_utf8(&mut [0; 4])),
+            None => non_ascii_space(self.ncbi_line),
+        };
+        if start.is_some() {
+            return start;
+        }
+        // NCBI's title ends at a control character after its first byte.
+        if let Some(&byte) = self.title.iter().skip(1).find(|&&byte| byte < b' ') {
+            return Some(format!("has the control character 0x{byte:02x}"));
+        }
+        // `bio` drops the Unicode white space at the end of the line; NCBI keeps a non-ASCII
+        // one before a control character. (The carriage return, if any, is after the header.)
+        Some(
+            non_ascii_space(&self.ncbi_line[self.header.len().min(self.ncbi_line.len())..])
+                .unwrap_or_else(|| "is read with another title".to_string()),
+        )
     }
-    let non_ascii_space = |text: &str| {
-        text.chars()
-            .find(|&c| !c.is_ascii() && c.is_whitespace())
-            .map(|c| {
-                format!(
-                    "has the non-ASCII white space character U+{:04X}",
-                    u32::from(c)
-                )
-            })
-    };
-    // `bio` drops the character that ends the empty ID, and the whole of a line of white
-    // space; NCBI keeps a non-ASCII one (its bytes are not C white space).
-    let start = match header.chars().next() {
-        Some(first) if first.is_ascii() => None,
-        Some(first) => non_ascii_space(first.encode_utf8(&mut [0; 4])),
-        None => non_ascii_space(ncbi_line),
-    };
-    if start.is_some() {
-        return start;
+
+    /// Why BLASTP's outfmt 0 title of a defline with an ID is neither ABI v1's nor NCBI's:
+    /// `from_bio`'s record is not NCBI's, and its title (without the periods, commas,
+    /// semicolons, tildes and spaces at its end that `GenerateDefline` strips) ends with a
+    /// non-ASCII byte, which `x_CleanAndCompress` drops; `None` otherwise.
+    fn outfmt0_title_problem(&self) -> Option<String> {
+        if self.id_empty || self.alike() {
+            return None;
+        }
+        let last = self
+            .title
+            .iter()
+            .rposition(|byte| !b".,;~ ".contains(byte))
+            .map(|at| self.title[at]);
+        if !last.is_some_and(|byte| byte >= 0x80) {
+            return None;
+        }
+        match self.ncbi_defline {
+            None => return Some("starts with '?', a gap in the sequence".to_string()),
+            Some(defline) if defline.len() != self.ncbi_line.len() => {
+                return Some("starts with '?_', which NCBI BLAST+ drops".to_string())
+            }
+            Some(_) => {}
+        }
+        if !self.rest_is_blank {
+            return Some("has a carriage return before the end of its line".to_string());
+        }
+        // NCBI's title ends at the first byte below a space (its first byte is the ID's);
+        // where that is inside `bio`'s header, a control character ends it, and otherwise
+        // `bio` split the ID or trimmed the end at a non-ASCII white space character.
+        let line = self.ncbi_line.as_bytes();
+        match line.iter().skip(1).position(|&byte| byte < b' ') {
+            Some(at) if at + 1 < self.header.len() => {
+                Some(format!("has the control character 0x{:02x}", line[at + 1]))
+            }
+            _ => Some(
+                non_ascii_space(self.ncbi_line)
+                    .unwrap_or_else(|| "is read with another title".to_string()),
+            ),
+        }
     }
-    // NCBI's title ends at a control character after its first byte.
-    if let Some(&byte) = title.iter().skip(1).find(|&&byte| byte < b' ') {
-        return Some(format!("has the control character 0x{byte:02x}"));
-    }
-    // `bio` drops the Unicode white space at the end of the line; NCBI keeps a non-ASCII
-    // one before a control character. (The carriage return, if any, is after the header.)
-    Some(
-        non_ascii_space(&ncbi_line[header.len().min(ncbi_line.len())..])
-            .unwrap_or_else(|| "is read with another title".to_string()),
-    )
+}
+
+/// The first non-ASCII white space character of `text`, as a problem of a defline.
+fn non_ascii_space(text: &str) -> Option<String> {
+    text.chars()
+        .find(|&c| !c.is_ascii() && c.is_whitespace())
+        .map(|c| {
+            format!(
+                "has the non-ASCII white space character U+{:04X}",
+                u32::from(c)
+            )
+        })
 }
 
 /// The title of NCBI's reader for a defline's line (after `>`, up to its line end): none
 /// for a line of C white space; otherwise from the first byte that is not C white space up
 /// to the first byte below a space after it, without the white space at its end
-/// (`check_empty_id_deflines_of`).
+/// (`check_bio_deflines_of`).
 fn ncbi_title(line: &[u8]) -> Vec<u8> {
     let Some(start) = line.iter().position(|&byte| !c_isspace(byte)) else {
         return Vec::new();
@@ -609,6 +787,14 @@ mod tests {
     use super::*;
     use crate::blastinput::fasta_reader::{read_all, FastaInputSource, ReaderConfig};
 
+    /// A search that shows the names of records without a title, and nothing else that
+    /// `check_bio_deflines_of` checks.
+    const NAMES: Shown = Shown {
+        names: true,
+        local_ids: false,
+        outfmt0_titles: false,
+    };
+
     // The nucleotide 20-letter check of the title reads the trailing white space.
     #[test]
     fn deflines_ending_with_nucleotides_and_white_space_are_rejected() {
@@ -843,7 +1029,7 @@ mod tests {
             ("  x\x0b y", "the control character 0x0b"),
         ] {
             let bytes = format!(">q0\nMK\n>{defline}\nMKV\n");
-            let error = check_empty_id_deflines_of(bytes.as_bytes(), "subject", "BLASTP")
+            let error = check_bio_deflines_of(bytes.as_bytes(), "subject", "BLASTP", NAMES)
                 .unwrap_err()
                 .to_string();
             assert_eq!(
@@ -853,10 +1039,11 @@ mod tests {
             );
         }
         // The first record that NCBI reads otherwise is named, in a CRLF file too.
-        let error = check_empty_id_deflines_of(
+        let error = check_bio_deflines_of(
             b">\xc2\xa0a\r\nMK\r\n>\xe3\x80\x80\r\nMK\r\n",
             "query",
             "TBLASTX",
+            NAMES,
         )
         .unwrap_err()
         .to_string();
@@ -865,6 +1052,11 @@ mod tests {
             "{error}"
         );
         assert!(error.contains("LOSAT's TBLASTX"), "{error}");
+        // A record left without a title is rejected only where its name shows.
+        let untitled = Shown::default();
+        assert!(check_bio_deflines_of(b">\xc2\xa0\nMK\n", "query", "BLASTP", untitled).is_ok());
+        assert!(check_bio_deflines_of(b">\xc2\xa0\nMK\n", "query", "BLASTP", NAMES).is_err());
+        assert!(check_bio_deflines_of(b">\xc2\xa0x\nMK\n", "query", "BLASTP", untitled).is_err());
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:376-380
@@ -916,7 +1108,7 @@ mod tests {
         ] {
             let bytes = format!(">{defline}\nMKV\n");
             assert!(
-                check_empty_id_deflines_of(bytes.as_bytes(), "query", "BLASTP").is_ok(),
+                check_bio_deflines_of(bytes.as_bytes(), "query", "BLASTP", NAMES).is_ok(),
                 "{defline:?}"
             );
         }
@@ -972,7 +1164,7 @@ mod tests {
                         .collect::<Vec<_>>()
                 });
                 let alike = ncbi.as_ref().is_ok_and(|ncbi| *ncbi == bio);
-                let checked = check_empty_id_deflines_of(text.as_bytes(), "query", "BLASTP");
+                let checked = check_bio_deflines_of(text.as_bytes(), "query", "BLASTP", NAMES);
                 assert_eq!(
                     checked.is_ok(),
                     alike,
@@ -986,5 +1178,205 @@ mod tests {
             }
         }
         assert!(accepted > 1000 && rejected > 1000, "{accepted} {rejected}");
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:350-362
+    // ```c++
+    //         if (c == '>' ) {
+    //             CTempString next_line = *++GetLineReader();
+    //             string strmodified;
+    //             if( NStr::StartsWith(next_line, ">?_") ) {
+    //                 CTempString tmp = next_line.substr(3);
+    //                 strmodified = ">";
+    //                 strmodified.append(tmp.data(), tmp.length());
+    //                 next_line = strmodified;
+    //             }
+    //             if( NStr::StartsWith(next_line, ">?") ) {
+    //                 // This is actually a data line. an assembly gap, in particular, which
+    //                 // we handle farther below
+    //                 GetLineReader().UngetLine();
+    // ```
+    // A record without a title after a `>?` line (not the first line) is numbered lower
+    // by NCBI's reader than by `bio`; where the search shows the local IDs, it is rejected.
+    #[test]
+    fn untitled_records_after_gap_lines_are_rejected_where_their_numbers_show() {
+        let ids = Shown {
+            names: true,
+            local_ids: true,
+            outfmt0_titles: false,
+        };
+        let error =
+            check_bio_deflines_of(b">s1\nMK\n>?100\nMK\n>\nMK\n", "subject", "TBLASTX", ids)
+                .unwrap_err()
+                .to_string();
+        assert_eq!(
+            error,
+            "subject record 3 has a defline without a title after a line that starts with '>?', which NCBI BLAST+ reads as a gap, not as a record (NCBI BLAST+ numbers this record 2); this is not supported by LOSAT's TBLASTX (give the record a title)"
+        );
+        for (text, rejected) in [
+            (">s1\nMK\n>?100\nMK\n>\nMK\n", true),
+            (">s1\nMK\n>?100\nMK\n> \t\r\nMK\n", true),
+            (">s1\nMK\n>?_?5\nMK\n>\nMK\n", true),
+            (">s1\nMK\n>?\nMK\n>s2\nMK\n>\nMK\n", true),
+            // A first `>?` line opens a record without a title for NCBI: no shift.
+            (">?5\nMK\n>\nMK\n", false),
+            // `>?_x` is a defline for NCBI.
+            (">s1\nMK\n>?_x\nMK\n>\nMK\n", false),
+            // A record with a title is shown by its first word.
+            (">s1\nMK\n>?5\nMK\n> x\nMK\n", false),
+            (">\nMK\n>?5\nMK\n>s2\nMK\n", false),
+        ] {
+            assert_eq!(
+                check_bio_deflines_of(text.as_bytes(), "query", "BLASTP", ids).is_err(),
+                rejected,
+                "{text:?}"
+            );
+            assert!(
+                check_bio_deflines_of(text.as_bytes(), "query", "BLASTP", Shown::default()).is_ok()
+            );
+        }
+    }
+
+    // The gap rule against NCBI's reader (`fasta_reader`): for every input of one to four
+    // records with the deflines below, the check rejects exactly when some record without
+    // a title has a local ID that no record without a title of NCBI's reader has.
+    #[test]
+    fn the_gap_rule_follows_the_local_ids_of_ncbis_reader() {
+        let deflines = ["s1", "", " ", "?5", "?", "?_x", "?_?3", " x", "?unk100"];
+        let ids = Shown {
+            names: true,
+            local_ids: true,
+            outfmt0_titles: false,
+        };
+        let mut inputs = vec![Vec::<&str>::new()];
+        let mut last = inputs.clone();
+        for _ in 0..4 {
+            last = last
+                .iter()
+                .flat_map(|prefix| {
+                    deflines.iter().map(move |defline| {
+                        let mut next = prefix.clone();
+                        next.push(*defline);
+                        next
+                    })
+                })
+                .collect();
+            inputs.extend(last.iter().cloned());
+        }
+        let (mut accepted, mut rejected) = (0, 0);
+        for records in inputs.iter().filter(|records| !records.is_empty()) {
+            let text: String = records
+                .iter()
+                .map(|defline| format!(">{defline}\nMKV\n"))
+                .collect();
+            let untitled = |records: &[FastaRecord]| -> Vec<String> {
+                records
+                    .iter()
+                    .filter(|record| record.title.is_empty())
+                    .map(|record| record.local_id.clone())
+                    .collect()
+            };
+            let bio: Vec<FastaRecord> = fasta::Reader::new(text.as_bytes())
+                .records()
+                .enumerate()
+                .map(|(index, record)| from_bio(&record.unwrap(), index + 1, "Query_", true))
+                .collect();
+            let config = ReaderConfig::query("BLASTP", true, false);
+            let Ok(ncbi) = read_all(
+                &mut FastaInputSource::from_bytes(text.as_bytes(), config),
+                &mut |_| Ok(()),
+            ) else {
+                continue;
+            };
+            let ncbi_untitled = untitled(&ncbi);
+            let shifted = untitled(&bio).iter().any(|id| !ncbi_untitled.contains(id));
+            let checked = check_bio_deflines_of(text.as_bytes(), "query", "BLASTP", ids);
+            assert_eq!(checked.is_err(), shifted, "{text:?}: {checked:?}");
+            if shifted {
+                rejected += 1;
+            } else {
+                accepted += 1;
+            }
+        }
+        assert!(accepted > 1000 && rejected > 1000, "{accepted} {rejected}");
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:304-306
+    // ```c++
+    //     if (curr > 0 && curr != ' ') {
+    //         *out++ = curr;
+    //     }
+    // ```
+    // BLASTP's outfmt 0 title of a defline with an ID that `bio` reads otherwise is rejected
+    // when it ends with a non-ASCII character (the shared report drops its last byte, as
+    // NCBI does for its own title, and ABI v1's report kept it).
+    #[test]
+    fn outfmt0_titles_that_bio_reads_otherwise_and_that_end_with_non_ascii_are_rejected() {
+        let titles = Shown {
+            names: true,
+            local_ids: false,
+            outfmt0_titles: true,
+        };
+        for (defline, problem) in [
+            ("s1\tx \u{e9}", "it has the control character 0x09"),
+            ("s1 x\x01\u{e9}", "it has the control character 0x01"),
+            (
+                "s1\u{a0}x \u{e9}",
+                "it has the non-ASCII white space character U+00A0",
+            ),
+            (
+                "s1 \u{e9}\u{a0}",
+                "it has the non-ASCII white space character U+00A0",
+            ),
+            ("s1\tx \u{e9}.,; ", "it has the control character 0x09"),
+            (
+                "s1 \u{e9}\r\u{e9}",
+                "it has a carriage return before the end of its line",
+            ),
+            ("s1\tx\u{3000}y\u{e9}", "it has the control character 0x09"),
+            ("?;\u{e9}", "it starts with '?', a gap in the sequence"),
+            ("?_x\u{e9}", "it starts with '?_', which NCBI BLAST+ drops"),
+        ] {
+            let text = format!(">q0\nMK\n>{defline}\nMKV\n");
+            let error = check_bio_deflines_of(text.as_bytes(), "subject", "BLASTP", titles)
+                .unwrap_err()
+                .to_string();
+            assert_eq!(
+                error,
+                format!("subject record 2 has a defline that NCBI BLAST+ reads with another title ({problem}) and that ends with a non-ASCII character, whose last byte NCBI BLAST+'s outfmt 0 drops; this is not supported by LOSAT's BLASTP outfmt 0 (use ASCII deflines without control characters)"),
+                "{defline:?}"
+            );
+            assert!(
+                check_bio_deflines_of(text.as_bytes(), "subject", "BLASTP", Shown::default())
+                    .is_ok()
+            );
+        }
+        // Read alike, or ending with an ASCII character (ABI v1's bytes, as before).
+        for defline in [
+            "s1 x \u{e9}",
+            "s1 \u{e9}\t",
+            "s1\tx",
+            "s1\tx \u{e9} z",
+            "\u{e9}\ty",
+            "?x",
+            "?_x y",
+            "s1\u{a0}x",
+            "x\ry z",
+        ] {
+            let text = format!(">{defline}\nMKV\n");
+            assert!(
+                check_bio_deflines_of(text.as_bytes(), "subject", "BLASTP", titles).is_ok(),
+                "{defline:?}"
+            );
+        }
+        // The shared report drops the last byte of a non-ASCII title end, and of nothing else.
+        let shown = |title: &str| {
+            crate::report::defline::generate_defline(title.as_bytes(), true, true)
+                .unwrap()
+                .text
+        };
+        assert_eq!(shown("s1 x \u{e9}"), b"s1 x \xc3");
+        assert_eq!(shown("s1 x \u{e9}.;"), b"s1 x \xc3");
+        assert_eq!(shown("s1 x \u{e9} z"), "s1 x \u{e9} z".as_bytes());
     }
 }

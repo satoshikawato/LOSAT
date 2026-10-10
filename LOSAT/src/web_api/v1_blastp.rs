@@ -167,6 +167,7 @@ pub(super) fn run_web_pair_records(
     // ```
     // Web ABI v1 runs the same local search as the CLI and keeps the report in memory.
     check_web_v1_request(&args)?;
+    let shown = v1_shown(&args.outfmt);
     let mut output = Vec::new();
     let outfmt = args.outfmt.clone();
     let mut stderr = std::io::stderr();
@@ -210,16 +211,61 @@ pub(super) fn run_web_pair_records(
     //     }
     // ```
     // The deflines to which `bio` gives an empty ID and whose records NCBI's reader reads
-    // otherwise are rejected (`check_empty_id_deflines_of`), subjects first, as ABI v1's
+    // otherwise are rejected (`check_bio_deflines_of`), subjects first, as ABI v1's
     // BLASTN rejects its deflines, and only for a search (a query input without records
     // gives NCBI's `Query is Empty!`). The rejection comes after ABI v1's other checks,
     // which plan TD-1 freezes with their order, so that it changes no other v1 error.
     if !query_records.is_empty() {
-        use super::v1_bio::check_empty_id_deflines_of;
-        check_empty_id_deflines_of(subject_fasta, "subject", "BLASTP")?;
-        check_empty_id_deflines_of(query_fasta, "query", "BLASTP")?;
+        use super::v1_bio::check_bio_deflines_of;
+        check_bio_deflines_of(subject_fasta, "subject", "BLASTP", shown.subjects)?;
+        check_bio_deflines_of(query_fasta, "query", "BLASTP", shown.queries)?;
     }
     Ok(output)
+}
+
+/// What each role of an ABI v1 BLASTP search shows (`check_bio_deflines_of`), by its
+/// output format, which `check_web_v1_request` has accepted: the subjects' names (a subject
+/// without a title is `unnamed`) and their titles in outfmt 0, and the queries' local IDs in
+/// a tabular format with a query ID field (`std` has `qaccver`); the outfmt 0 and 7 query
+/// lines show the title only.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:38-41
+/// ```c++
+/// const char* kDfltArgTabularOutputFmt =
+///     "qaccver saccver pident length mismatch gapopen qstart qend sstart send "
+///     "evalue bitscore";
+/// const char* kDfltArgTabularOutputFmtTag("std");
+/// ```
+fn v1_shown(outfmt: &str) -> V1Shown {
+    use super::v1_bio::Shown;
+    let Ok((format, fields)) = OutputFormat::parse(outfmt) else {
+        return V1Shown::default();
+    };
+    let query_ids = format != OutputFormat::Pairwise
+        && fields.is_none_or(|fields| {
+            fields.split_whitespace().any(|token| {
+                token.eq_ignore_ascii_case("std") || matches!(token, "qseqid" | "qacc" | "qaccver")
+            })
+        });
+    V1Shown {
+        subjects: Shown {
+            names: true,
+            local_ids: false,
+            outfmt0_titles: format == OutputFormat::Pairwise,
+        },
+        queries: Shown {
+            names: query_ids,
+            local_ids: query_ids,
+            outfmt0_titles: false,
+        },
+    }
+}
+
+/// `v1_shown`'s answer for the subjects and the queries.
+#[derive(Default)]
+struct V1Shown {
+    subjects: super::v1_bio::Shown,
+    queries: super::v1_bio::Shown,
 }
 
 /// ABI v1's records as `bio` reads them (`run_web_pair_records`). Plan TD-1 freezes ABI

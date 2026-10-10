@@ -1266,6 +1266,17 @@ mod tests {
             &format!(">\u{a0}x\nMK-V\n"),
         ));
         assert!(error.contains("has the residue '-'"), "{error}");
+        // A query left without a title shows only its (empty) title in outfmt 0, as before.
+        assert!(v1_blastp::run_web_pair(blastp("0"), &fasta("\u{a0}"), &query).is_ok());
+        let error = rejected(v1_blastp::run_web_pair(
+            blastp("6"),
+            &fasta("\u{a0}"),
+            &query,
+        ));
+        assert!(
+            error.starts_with("query record 1 has a defline that starts with white space"),
+            "{error}"
+        );
         // A query input without records gives NCBI's empty report.
         assert!(v1_blastp::run_web_pair(blastp("6"), "", &fasta("\u{a0}")).is_ok());
         // The FASTA handles.
@@ -1285,9 +1296,36 @@ mod tests {
         );
         let accepted = store(&fasta("\t\x0bx y"));
         assert!(run_pair_handles("blastp", query_handle, accepted, "6", "").is_ok());
-        for handle in [query_handle, subject_handle, accepted] {
+        // A title that `bio` reads otherwise and that ends with a non-ASCII character, in
+        // outfmt 0 only.
+        let tab_title = store(&fasta("s1\tx \u{e9}"));
+        let error = run_pair_handles("blastp", query_handle, tab_title, "0", "").unwrap_err();
+        assert!(
+            error.starts_with("subject record 1 has a defline that NCBI BLAST+ reads with another title (it has the control character 0x09)"),
+            "{error}"
+        );
+        assert!(run_pair_handles("blastp", query_handle, tab_title, "6", "").is_ok());
+        for handle in [query_handle, subject_handle, accepted, tab_title] {
             fasta_store().lock().unwrap().release(handle).unwrap();
         }
+        let error = rejected(v1_blastp::run_web_pair(
+            blastp("0"),
+            &query,
+            &fasta("s1\tx \u{e9}"),
+        ));
+        assert!(error.contains("LOSAT's BLASTP outfmt 0"), "{error}");
+        // A query without a title after a `>?` line, where its number shows (`qseqid`).
+        let gapped = format!("{}{}{}", fasta("q0"), fasta("?100"), fasta(""));
+        let error = rejected(v1_blastp::run_web_pair(blastp("6"), &gapped, &query));
+        assert!(
+            error.starts_with(
+                "query record 3 has a defline without a title after a line that starts with '>?'"
+            ),
+            "{error}"
+        );
+        assert!(v1_blastp::run_web_pair(blastp("0"), &gapped, &query).is_ok());
+        assert!(v1_blastp::run_web_pair(blastp("6 sseqid evalue"), &gapped, &query).is_ok());
+        assert!(v1_blastp::run_web_pair(blastp("6"), &query, &gapped).is_ok());
         // TBLASTX (outfmt 6; outfmt 0 and 7 reject every defline with an empty `bio` ID).
         let tblastx = parse_tblastx_args(
             &["-outfmt", "6"],
@@ -1307,6 +1345,15 @@ mod tests {
             "{error}"
         );
         assert!(error.contains("LOSAT's TBLASTX"), "{error}");
+        let error = rejected(v1_tblastx::run_web_pair(
+            tblastx.clone(),
+            &format!(">q1\n{nucleotides}\n"),
+            &format!(">s1\n{nucleotides}\n>?100\n{nucleotides}\n>\n{nucleotides}\n"),
+        ));
+        assert!(
+            error.contains("NCBI BLAST+ numbers this record 2"),
+            "{error}"
+        );
         assert!(v1_tblastx::run_web_pair(
             tblastx,
             &format!(">q1\n{nucleotides}\n"),

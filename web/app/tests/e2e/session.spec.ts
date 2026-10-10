@@ -487,12 +487,16 @@ test.describe('engine build', () => {
     }
 
     // The outputs of the loaded runs: the bytes exported before saving (so the native CLI's too);
-    // the reproduction panel says where the inputs came from as it did before saving.
+    // the reproduction panel says where the inputs came from, as the session file recorded them:
+    // whole files and files joined as before saving, and the record left out of run 2's subject.
     for (const run of [1, 2]) {
       const after = await exportedOutputs(page, run);
       for (const format of FORMATS) expect(after[format].equals(before[run]![format]), `run ${run} outfmt ${format}: the bytes before saving`).toBe(true);
       await details(page, run);
-      expect(await relations(page)).toEqual(inputs[run]!.relations);
+      const [query, subject] = await relations(page);
+      expect(query).toBe(inputs[run]!.relations[0]);
+      if (run === 1) expect(subject).toBe(inputs[run]!.relations[1]);
+      else expect(subject).toMatch(/e2e_amb_subject\.fna has the 4 records that the run searched.*left out/);
     }
     // LOSAT Web's own files need no original FASTA: the same HSPs.
     const ownAfter = await ownFormats(page, 1);

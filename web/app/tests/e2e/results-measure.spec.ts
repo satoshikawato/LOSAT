@@ -894,16 +894,35 @@ interface Frames {
   /** Frames drawn from the act until the file arrived, and the longest time between two of them. */
   readonly frames: number;
   readonly maxFrameGapMs: number;
+  /** When the longest gap ended, from the act (where in the work the page stopped drawing). */
+  readonly maxFrameGapEndMs: number;
+  /**
+   * The longest delay of a 10 ms timer on the page's main thread: a long task of the page shows
+   * here and as a frame gap; a frame gap without it is the browser not drawing (not the page's script).
+   */
+  readonly maxTaskLagMs: number;
 }
 
 /** Starts counting the frames that the page draws and the longest gap between two of them (a long task shows as a long gap). */
 async function watchFrames(page: Page): Promise<void> {
   await page.evaluate(() => {
-    const frames = { on: true, count: 0, maxGap: 0, last: performance.now() };
+    const start = performance.now();
+    const frames = { on: true, count: 0, maxGap: 0, maxGapEnd: 0, start, last: start, maxLag: 0 };
     (window as unknown as { __frames: typeof frames }).__frames = frames;
+    const TIMER_MS = 10;
+    const timer = (due: number) => {
+      if (!frames.on) return;
+      const now = performance.now();
+      frames.maxLag = Math.max(frames.maxLag, now - due);
+      setTimeout(() => timer(performance.now() + TIMER_MS), TIMER_MS);
+    };
+    setTimeout(() => timer(start + TIMER_MS), TIMER_MS);
     const tick = (now: number) => {
       if (!frames.on) return;
-      frames.maxGap = Math.max(frames.maxGap, now - frames.last);
+      if (now - frames.last > frames.maxGap) {
+        frames.maxGap = now - frames.last;
+        frames.maxGapEnd = now - frames.start;
+      }
       frames.last = now;
       frames.count++;
       requestAnimationFrame(tick);
@@ -914,9 +933,21 @@ async function watchFrames(page: Page): Promise<void> {
 
 async function framesSeen(page: Page): Promise<Frames> {
   return page.evaluate(() => {
-    const frames = (window as unknown as { __frames: { on: boolean; count: number; maxGap: number; last: number } }).__frames;
+    const frames = (
+      window as unknown as { __frames: { on: boolean; count: number; maxGap: number; maxGapEnd: number; start: number; last: number; maxLag: number } }
+    ).__frames;
     frames.on = false;
-    return { frames: frames.count, maxFrameGapMs: Math.round(Math.max(frames.maxGap, performance.now() - frames.last)) };
+    const now = performance.now();
+    if (now - frames.last > frames.maxGap) {
+      frames.maxGap = now - frames.last;
+      frames.maxGapEnd = now - frames.start;
+    }
+    return {
+      frames: frames.count,
+      maxFrameGapMs: Math.round(frames.maxGap),
+      maxFrameGapEndMs: Math.round(frames.maxGapEnd),
+      maxTaskLagMs: Math.round(frames.maxLag),
+    };
   });
 }
 

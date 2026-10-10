@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   includedRecords,
+  isFirstLineRefusal,
   normalizeExclusion,
   recordMismatch,
   type DatasetRecord,
@@ -59,5 +60,19 @@ describe('record tables at register', () => {
 
   it('reports a different number of records', () => {
     expect(recordMismatch(table, table.slice(0, 1))).toBe('the record table has 2 records, but the engine read 1');
+  });
+});
+
+describe('isFirstLineRefusal', () => {
+  it('is true for the refusal of a first line that may be a sequence identifier, and for no other refusal', () => {
+    // The adapter's wording (web/adapter/src/scan/ncbi.rs), also with a prefix and an odd first line.
+    const refusal = (line: string) =>
+      `the first line (${JSON.stringify(line)}) is not a defline and may be a sequence identifier that NCBI BLAST+ fetches through a data loader (from GenBank or a BLAST database), which is not supported by LOSAT Web (start the input with a '>' defline)`;
+    expect(isFirstLineRefusal(refusal('AB123456'))).toBe(true);
+    expect(isFirstLineRefusal(`BLAST query error: ${refusal('lcl|a)b')}`)).toBe(true);
+    // A gap line and NCBI's "Near line N" refusal are not fixed by a defline in front of the text.
+    expect(isFirstLineRefusal("line 2 is a gap line ('>?'), which NCBI BLAST+ reads ... not supported by LOSAT Web")).toBe(false);
+    expect(isFirstLineRefusal("BLAST query error: CFastaReader: Near line 2, there's a line that doesn't look like plausible data, but it's not marked as defline or comment.")).toBe(false);
+    expect(isFirstLineRefusal('')).toBe(false);
   });
 });

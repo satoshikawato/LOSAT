@@ -2,7 +2,7 @@
 import { computed } from 'vue';
 import type { DraftSource, DraftState, SearchDraft } from '../application/draft';
 import { includedOf } from '../application/draft';
-import { duplicateIds } from '../domain/dataset';
+import { duplicateIds, isFirstLineRefusal } from '../domain/dataset';
 import { programById, residueUnit, sequenceKind, type InputRole } from '../domain/programs';
 import { looksLikeOtherKind } from '../domain/sequence-kind';
 import { formatBytes, formatCount } from './format';
@@ -30,14 +30,18 @@ const otherKindName = computed(() => (kind.value === 'nucleotide' ? 'protein' : 
 const programLabel = computed(() => programById(props.state.program).label);
 const title = computed(() => (props.source.origin === 'paste' ? `Pasted sequences (${props.source.name})` : props.source.name));
 /**
- * A pasted text without a defline that the index scan refuses. The engine's reader reads
- * residues before the first '>' as a record without a defline, but LOSAT Web refuses a
- * first line that NCBI BLAST+ may fetch as a sequence identifier, and asks for a defline.
+ * A pasted text that the index scan refuses for its first line. The engine's reader reads
+ * residues before the first '>' as a record without a defline, but LOSAT Web refuses a first
+ * line that NCBI BLAST+ may fetch as a sequence identifier, and a defline fixes that refusal
+ * only (not a gap line or a "Near line N" one, which would be refused again further on).
  */
-const needsDefline = computed(() => {
-  const text = props.state[props.role].paste.trimStart();
-  return props.source.origin === 'paste' && props.source.status === 'failed' && text !== '' && !text.startsWith('>');
-});
+const needsDefline = computed(
+  () =>
+    props.source.origin === 'paste' &&
+    props.source.status === 'failed' &&
+    props.source.error !== undefined &&
+    isFirstLineRefusal(props.source.error),
+);
 const refusedRecord = computed(() => (props.source.check?.state === 'refused' ? props.source.check.record : undefined));
 const testid = computed(() => `${props.role}-source-${props.index}`);
 </script>

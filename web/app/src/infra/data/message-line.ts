@@ -14,19 +14,19 @@
 // the file is not a line end; after an LF in a file of CR line ends, the CR that ends that
 // line of the file is not one either.
 
+import { isFirstLineRefusal } from '../../domain/dataset';
+
 const CR = 0x0d;
 const LF = 0x0a;
 
 /** "Near line 7," and "line 3 is a gap line": NCBI's line number in a message. */
 const LINE_IN_MESSAGE = /\bline (\d+)\b/;
-/** LOSAT Web's rejection of a first line that NCBI may read as a sequence identifier. */
-const FIRST_LINE_IN_MESSAGE = /\bthe first line\b/;
 
 /** The 1-based line that a message names, or undefined. */
 export function lineInMessage(message: string): number | undefined {
   const match = LINE_IN_MESSAGE.exec(message);
   if (match !== null) return Number(match[1]);
-  return FIRST_LINE_IN_MESSAGE.test(message) ? 1 : undefined;
+  return isFirstLineRefusal(message) ? 1 : undefined;
 }
 
 /** The end-of-line style of NCBI's line reader: unknown until the first line end. */

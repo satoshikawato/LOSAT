@@ -90,6 +90,8 @@ test('records: duplicate IDs by number, the engine refuses a record, exclusion, 
     await expect(page.getByTestId('query-source-0-error')).toHaveText(
       /^This input cannot be read: line 5 is a gap line \('>\?'\), .* not supported by LOSAT Web$/,
     );
+    // A defline in front would not fix a gap line, so the screen does not offer it (S14 review L2).
+    await expect(page.getByTestId('query-source-0-add-defline')).toHaveCount(0);
     // The input that cannot be read cannot be queued.
     await submit(page);
     await expect(page.getByTestId('search-message')).toContainText("Query (pasted): line 5 is a gap line ('>?')");

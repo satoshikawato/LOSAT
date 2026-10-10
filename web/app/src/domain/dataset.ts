@@ -62,6 +62,16 @@ export interface RecordKey {
   readonly length: number;
 }
 
+/**
+ * LOSAT Web's refusal of an input whose first line is not a defline and may be a sequence
+ * identifier that NCBI BLAST+ fetches through a data loader (the adapter's scan: `the first line
+ * ("…") is not a defline and may be ... (start the input with a '>' defline)`). A defline in
+ * front of the text is the fix for this refusal only, not for a gap line or a `Near line N` one.
+ */
+export function isFirstLineRefusal(message: string): boolean {
+  return /\bthe first line \(.*\) is not a defline\b/s.test(message);
+}
+
 export function includedRecords(revision: DatasetRevision): readonly DatasetRecord[] {
   const excluded = new Set(revision.excluded);
   return revision.records.filter((record) => !excluded.has(record.index));

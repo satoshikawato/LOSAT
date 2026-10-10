@@ -1913,6 +1913,57 @@ button.link[aria-disabled='true'] {
   padding-left: 20px;
 }
 
+/* S15: LOSAT Web's own formats in the Outputs tab, a section apart from the compatibility outputs above it. */
+.export-formats {
+  margin-top: 24px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.export-formats h3 {
+  margin-bottom: 4px;
+}
+
+.export-formats fieldset {
+  min-width: 0;
+  margin: 8px 0;
+  padding: 4px 12px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.export-formats legend {
+  padding: 0 4px;
+  font-weight: 600;
+}
+
+.export-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin: 8px 0 4px;
+}
+
+.export-aligned {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.export-format-notes {
+  margin: 6px 0;
+  padding-left: 1.2em;
+}
+
+.export-summary {
+  margin: 8px 0;
+  padding: 4px 10px;
+  border-left: 3px solid var(--accent);
+  background: var(--panel);
+  overflow-wrap: anywhere;
+}
+
 .origin-list {
   display: grid;
   gap: 10px;

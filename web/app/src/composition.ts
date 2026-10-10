@@ -6,6 +6,7 @@ import { CandidateTray } from './application/candidates';
 import { Coordinator } from './application/coordinator';
 import { SearchDraft } from './application/draft';
 import { ResultsBrowser } from './application/results';
+import { ResultExporter } from './application/result-export';
 import type { Downloader } from './ports/download';
 import type { EngineGateway } from './ports/engine';
 import { browserPage } from './infra/browser/page';
@@ -23,6 +24,8 @@ export interface App {
   readonly results: ResultsBrowser;
   /** HSPs collected from the results of completed runs, and their extraction (application/candidates.ts). */
   readonly candidates: CandidateTray;
+  /** LOSAT Web's own files (CSV, JSON, report) of the run that the results screen shows (application/result-export.ts). */
+  readonly exporter: ResultExporter;
   /** Wake lock, the warning before leaving, and the check after the page was hidden. */
   readonly attention: Attention;
   /** True while the engine is the FakeEngine; the UI shows a warning banner. */
@@ -71,11 +74,12 @@ export function createApp(options: AppOptions = {}): App {
     verification: VERIFICATION_TABLE,
   });
   const candidates = new CandidateTray({ runs: coordinator.state, data, downloader, now: () => Date.now() });
+  const exporter = new ResultExporter({ results: results.state, data, downloader, now: () => Date.now() });
   const attention = new Attention({
     page: browserPage,
     runs: coordinator.state,
     probe: () => data.storageInfo(),
     now: () => Date.now(),
   });
-  return { coordinator, draft, results, candidates, attention, usesFakeEngine: ENGINE_ASSETS === null };
+  return { coordinator, draft, results, candidates, exporter, attention, usesFakeEngine: ENGINE_ASSETS === null };
 }

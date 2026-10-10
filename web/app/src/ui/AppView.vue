@@ -5,6 +5,7 @@ import type { CandidateTray } from '../application/candidates';
 import type { Coordinator } from '../application/coordinator';
 import type { SearchDraft } from '../application/draft';
 import type { HspId, ResultsBrowser } from '../application/results';
+import type { ResultExporter } from '../application/result-export';
 import { formatCount } from './format';
 import { useStore } from './useStore';
 import AttentionPanel from './AttentionPanel.vue';
@@ -20,6 +21,7 @@ const props = defineProps<{
   draft: SearchDraft;
   results: ResultsBrowser;
   candidates: CandidateTray;
+  exporter: ResultExporter;
   attention: Attention;
   usesFakeEngine: boolean;
 }>();
@@ -98,6 +100,7 @@ onUnmounted(() => {
         :coordinator="coordinator"
         :results="results"
         :candidates="candidates"
+        :exporter="exporter"
         :runs="state.runs"
       />
       <!-- Kept mounted, as the search form: the extraction's choices and the order shown stay while other tabs are viewed. -->

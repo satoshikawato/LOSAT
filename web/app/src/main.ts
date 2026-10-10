@@ -3,5 +3,5 @@ import AppView from './ui/AppView.vue';
 import { createApp } from './composition';
 import './ui/styles.css';
 
-const { coordinator, draft, results, candidates, attention, usesFakeEngine } = createApp();
-createVueApp(AppView, { coordinator, draft, results, candidates, attention, usesFakeEngine }).mount('#app');
+const { coordinator, draft, results, candidates, exporter, attention, usesFakeEngine } = createApp();
+createVueApp(AppView, { coordinator, draft, results, candidates, exporter, attention, usesFakeEngine }).mount('#app');

@@ -1528,7 +1528,7 @@ test('the dot plot: the HSPs of the pair on a canvas; zoom; choosing an HSP on i
   await expect(canvas).toBeFocused();
   // Reached with Tab, the plot opens the popup with Enter, and the popup shows its focus in every
   // browser (W4b screen review L11: Firefox showed none).
-  await page.getByTestId('dotplot-reset').focus();
+  await page.getByTestId('dotplot-svg').focus();
   await page.keyboard.press('Tab');
   await expect(canvas).toBeFocused();
   await page.keyboard.press('Enter');
@@ -1542,6 +1542,61 @@ test('the dot plot: the HSPs of the pair on a canvas; zoom; choosing an HSP on i
   const range = page.getByTestId(`range-${secondId.replace(':', '-')}`);
   await expect(range.getByTestId('range-label')).toBeFocused();
   await expect(range).toBeInViewport();
+});
+
+test('the dot plot: Download SVG saves the plot as shown, as a plain SVG with the canvas\'s titles and without the halo (S15)', async ({ page }) => {
+  await program(page, 'blastn');
+  await paste(page, 'query', `>q1\n${dna(21, 20)}\n>q2\n${A}\n`);
+  await paste(page, 'subject', `>s1\n${A}${dna(12, 60)}${A}\n`);
+  await run(page, 1);
+  await openFromQueue(page, 1);
+  await page.getByTestId('query-row-1').click();
+  await show(page, 'dotplot');
+  const canvas = page.getByTestId('dotplot-canvas');
+  await expect(canvas).toHaveAttribute('data-segments', '2');
+  // An HSP is selected, which the canvas draws with a halo; the file has none.
+  await expect(canvas).toHaveAttribute('data-selected', /\d+:\d+/);
+  const download = async () => {
+    const event = page.waitForEvent('download');
+    await page.getByTestId('dotplot-svg').click();
+    const file = await event;
+    return { name: file.suggestedFilename(), text: readFileSync((await file.path())!, 'utf8') };
+  };
+  const whole = await download();
+  // The run's number and the records' positions (q2 of the query file, s1 of the subject file), never an ID.
+  expect(whole.name).toBe('losat-run1-dotplot-q2-s1.svg');
+  const inspect = (text: string) =>
+    page.evaluate((svg) => {
+      const doc = new DOMParser().parseFromString(svg, 'image/svg+xml');
+      const root = doc.documentElement;
+      return {
+        error: doc.querySelector('parsererror')?.textContent ?? '',
+        root: [root.localName, root.getAttribute('width'), root.getAttribute('height')],
+        title: doc.querySelector('title')?.textContent ?? '',
+        lines: doc.querySelectorAll('line').length,
+        texts: [...doc.querySelectorAll('text')].map((t) => t.textContent ?? ''),
+        active: doc.querySelectorAll('script, style, image, use, foreignObject, [href], [onload], [onclick]').length,
+      };
+    }, text);
+  const [titles, box] = [JSON.parse((await canvas.getAttribute('data-titles'))!) as [string, string], (await canvas.boundingBox())!];
+  const all = await inspect(whole.text);
+  expect(all.error).toBe('');
+  expect(all.root).toEqual(['svg', String(Math.round(box.width)), String(Math.round(box.height))]);
+  expect(all.title).toBe('LOSAT Web dot plot of run 1: query q2 against subject s1');
+  expect(all.lines).toBe(2);
+  expect(all.texts.slice(-2)).toEqual(titles);
+  expect(all.active).toBe(0);
+  expect(whole.text).not.toMatch(/href|url\(|rgba\(/);
+  // Zoomed in, the file is the view as shown: fewer lines than HSPs where the view cuts one off.
+  await page.getByTestId('dotplot-zoom-in').click();
+  await page.getByTestId('dotplot-zoom-in').click();
+  await expect(canvas).not.toHaveAttribute('data-view', '0,60,0,180');
+  const zoomed = await download();
+  expect(zoomed.name).toBe(whole.name);
+  const part = await inspect(zoomed.text);
+  expect(part.error).toBe('');
+  expect(part.lines).toBeLessThanOrEqual(2);
+  expect(zoomed.text).not.toBe(whole.text);
 });
 
 test('the dot plot: on a desktop screen, a popup that has no room beside a short plot is scrolled into view by the first click (S13b code review 2)', async ({ page }) => {

@@ -10,6 +10,7 @@ import { translates, type Unit } from '../domain/coordinates';
 import { hspLabel } from '../domain/extraction';
 import { frame, out0Range, out0SubjectRange, out6Range, subjectSpan } from '../domain/hsp-table';
 import { splitOutfmt6Row, type Outfmt6Row } from '../domain/outfmt6';
+import type { DotPlotSvgInput } from '../domain/plot-svg';
 import { programById, residueUnit, type ProgramId, type SequenceKind } from '../domain/programs';
 import {
   buildResultIndex,
@@ -31,9 +32,11 @@ import {
 } from '../domain/result-index';
 import { verificationBadge, type Badge, type VerificationTable } from '../domain/verification';
 import type { RunStore } from '../ports/data';
+import type { Downloader } from '../ports/download';
 import type { ProgramDescription } from '../ports/engine';
 import type { CandidateRecord, CandidateRun, CandidateSource } from './candidates';
 import type { AppState, RunView } from './coordinator';
+import { exportDotPlotSvg } from './plot-export';
 import { Store } from './store';
 
 /** The identity of an HSP: its run, its query record and its rank among the query's HSPs. */
@@ -176,6 +179,8 @@ export interface ResultsDeps {
   readonly describe: (program: ProgramId) => Promise<ProgramDescription>;
   readonly runs: Store<AppState>;
   readonly verification: VerificationTable;
+  /** Where the dot plot's SVG is saved (WP-E); a browser without it cannot export. */
+  readonly downloader?: Pick<Downloader, 'open'>;
 }
 
 const INITIAL: ResultsState = Object.freeze<ResultsState>({
@@ -227,6 +232,16 @@ export class ResultsBrowser {
   /** The table the verification badges come from (generated at build time). */
   get verification(): VerificationTable {
     return this.deps.verification;
+  }
+
+  /**
+   * Saves the dot plot of the selected query and subject as an SVG file (the plot as the screen
+   * shows it, built by the dot plot from the view). Resolves with the file's length in bytes.
+   */
+  exportDotPlot(plot: DotPlotSvgInput): Promise<number> {
+    const { qIdx, sIdx } = this.state.get();
+    if (this.deps.downloader === undefined || qIdx === undefined || sIdx === undefined) return Promise.reject(new Error('there is no dot plot to save'));
+    return exportDotPlotSvg(this.deps.downloader, plot, qIdx + 1, sIdx + 1);
   }
 
   constructor(private readonly deps: ResultsDeps) {

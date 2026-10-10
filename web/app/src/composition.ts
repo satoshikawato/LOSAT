@@ -69,6 +69,7 @@ export function createApp(options: AppOptions = {}): App {
     describe: (program) => engine.describe(program),
     runs: coordinator.state,
     verification: VERIFICATION_TABLE,
+    downloader,
   });
   const candidates = new CandidateTray({ runs: coordinator.state, data, downloader, now: () => Date.now() });
   const attention = new Attention({

@@ -13,13 +13,15 @@
 // HSPs by colour and opacity class, one stroke each; hover and selection on a canvas above it, so
 // that they redraw cheaply. Input is gathered and drawn once per animation frame. A TBLASTN or
 // BLASTX plot counts 3 nt per aa for its proportions (S13b decision 26). The popup of the
-// selected HSP adds it to the candidate tray (S14).
+// selected HSP adds it to the candidate tray (S14). "Download SVG" saves the plot as shown (S15,
+// domain/plot-svg.ts), with the same colours, ticks and labels (domain/plot-layout.ts).
 import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, useId, watch } from 'vue';
 import { candidateKey } from '../application/candidates';
 import type { HspEntry, HspId, ResultsBrowser, ResultsState } from '../application/results';
 import {
   clipToBox,
   codonWeights,
+  EQUAL_WEIGHTS,
   frameRange,
   fromPixelX,
   fromPixelY,
@@ -35,7 +37,29 @@ import {
   type Box,
   type View,
 } from '../domain/plot-geometry';
-import { axisTicks, axisUnit, identityClass, IDENTITY_CLASSES, tickLabel, type AxisTicks } from '../domain/plot-scale';
+import {
+  axisTitleText,
+  FONT,
+  GAP,
+  GRID,
+  INK,
+  labelledTicks,
+  lineOrDash,
+  LINE_WIDTH,
+  MAJOR_PX,
+  MARGIN,
+  MINOR_PX,
+  ORIENTATIONS,
+  PAD,
+  PLOT_COLORS,
+  scaleNote,
+  STROKE_REACH_PX,
+  TEXT,
+  TITLE_FONT,
+  within,
+  type MeasureText,
+} from '../domain/plot-layout';
+import { axisTicks, axisUnit, identityClass, IDENTITY_CLASSES, tickLabel } from '../domain/plot-scale';
 import { formatCount, framesLabel, framesPhrase, framesText } from './format';
 import './plots.css';
 
@@ -47,33 +71,13 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{ 'show-alignment': [id: HspId]; 'add-candidates': [ids: readonly HspId[]] }>();
 
-/** blast2dotplot.py's colours: the same direction, opposite directions; grey for a BLASTN HSP of one letter. */
-const COLORS = { forward: '#1f77b4', reverse: '#ff7f0e', unknown: '#7f7f7f' } as const;
-const ORIENTATIONS = ['forward', 'reverse', 'unknown'] as const;
+const COLORS = PLOT_COLORS;
 const ORIENTATION_TEXT = { forward: 'Forward', reverse: 'Reverse', unknown: 'Not in the record' } as const;
-const GRID = '#d3d3d3';
-const INK = '#000000';
-const TEXT = '#1d2330';
 /** The halo of the selected HSP (its legend entry is .plot-swatch-selected). */
 const HALO = 'rgba(255, 196, 0, 0.75)';
-/** Tick labels: at least 12 px (S13 screen review L4). */
-const FONT = '12px system-ui, sans-serif';
-const TITLE_FONT = '600 13px system-ui, sans-serif';
 const PICK_PX = 8;
 /** Below this width of the plot's stage (phones), the HSP popup is shown under the plot, not over it (W4b screen review L10). */
 const POPUP_BESIDE_MIN_PX = 600;
-/** How far a line's stroke reaches beyond the line: half the 3 px dash of a short HSP (the 2 px line reaches 1 px). */
-const STROKE_REACH_PX = 1.5;
-// Each axis's band, from the outside in: its title, the tick labels, the ticks.
-const PAD = 4;
-const TITLE_PX = 16;
-const LABEL_PX = 14;
-const GAP = 4;
-const MAJOR_PX = 8;
-const MINOR_PX = 4;
-const AXIS_PX = PAD + TITLE_PX + GAP + LABEL_PX + GAP + MAJOR_PX;
-const MARGIN = { left: AXIS_PX, top: AXIS_PX, right: 14, bottom: 10 } as const;
-
 const stage = ref<HTMLElement>();
 const base = ref<HTMLCanvasElement>();
 const overlay = ref<HTMLCanvasElement>();
@@ -97,7 +101,7 @@ const size = computed(() => plotSize(extent.value, stageWidth.value - MARGIN.lef
 const box = computed<Box>(() => ({ left: MARGIN.left, top: MARGIN.top, width: size.value.width, height: size.value.height }));
 
 /** What a protein axis's title adds against a nucleotide axis while the axes are to scale (S13b decision 26). */
-const scaleNote = (weight: number): string => (weight !== 1 && size.value.toScale ? `; drawn at ${weight} nt per aa` : '');
+const scaleNoteOf = (weight: number): string => scaleNote(weight, size.value.toScale);
 /** A context that measures the query's axis title (in its font) before the canvas is sized. */
 const measuring = document.createElement('canvas').getContext('2d');
 if (measuring !== null) measuring.font = TITLE_FONT;
@@ -108,7 +112,7 @@ if (measuring !== null) measuring.font = TITLE_FONT;
  */
 const xTitleWidth = computed(() => {
   if (measuring === null) return 0;
-  const title = `Query ${queryId.value} (${axisUnit(extent.value.x, units.value.query).name}${scaleNote(weights.value?.x ?? 1)})`;
+  const title = `Query ${queryId.value} (${axisUnit(extent.value.x, units.value.query).name}${scaleNoteOf(weights.value?.x ?? 1)})`;
   return Math.ceil(measuring.measureText(title).width) + 2 * PAD + 4;
 });
 const canvasWidth = computed(() => Math.max(MARGIN.left + size.value.width + MARGIN.right, Math.min(stageWidth.value, xTitleWidth.value)));
@@ -242,6 +246,7 @@ function drawBase(): void {
   const xs = (t: number) => Math.round(toPixelX(t, v, b)) + 0.5;
   const ys = (t: number) => Math.round(toPixelY(t, v, b)) + 0.5;
   const [xMinor, yMinor] = [xTicks.minor, yTicks.minor];
+  const measure = canvasMeasure(context);
 
   // The grid at the major and minor ticks.
   context.lineWidth = 1;
@@ -266,7 +271,7 @@ function drawBase(): void {
   context.beginPath();
   context.rect(b.left, b.top, b.width, b.height);
   context.clip();
-  context.lineWidth = 2;
+  context.lineWidth = LINE_WIDTH;
   context.lineCap = 'butt';
   const s = segments.value;
   const [padX, padY] = [STROKE_REACH_PX / sx, STROKE_REACH_PX / sy];
@@ -326,15 +331,15 @@ function drawBase(): void {
   context.textAlign = 'center';
   context.textBaseline = 'bottom';
   const labelEdge = b.top - 1 - MAJOR_PX - GAP;
-  for (const t of labelled(context, xTicks, sx)) {
+  for (const t of labelledTicks(xTicks, sx, measure)) {
     const text = tickLabel(t, xTicks.unit);
     // End labels stay inside the canvas (S13 screen review L7); all sit above the ticks, off the frame.
-    context.fillText(text, within(toPixelX(t, v, b), context.measureText(text).width, W), labelEdge);
+    context.fillText(text, within(toPixelX(t, v, b), measure(text, FONT), W), labelEdge);
   }
-  for (const t of labelled(context, yTicks, sy)) {
+  for (const t of labelledTicks(yTicks, sy, measure)) {
     const text = tickLabel(t, yTicks.unit);
     context.save();
-    context.translate(labelEdge, within(toPixelY(t, v, b), context.measureText(text).width, H));
+    context.translate(labelEdge, within(toPixelY(t, v, b), measure(text, FONT), H));
     context.rotate(-Math.PI / 2);
     context.fillText(text, 0, 0);
     context.restore();
@@ -342,11 +347,11 @@ function drawBase(): void {
 
   context.font = TITLE_FONT;
   context.textBaseline = 'top';
-  const xTitle = axisTitle(context, 'Query', queryId.value, xTicks.unit.name, weights.value?.x ?? 1, W - 2 * PAD);
-  context.fillText(xTitle, within(b.left + b.width / 2, context.measureText(xTitle).width, W), PAD);
-  const yTitle = axisTitle(context, 'Subject', subjectId.value, yTicks.unit.name, weights.value?.y ?? 1, H - 2 * PAD);
+  const xTitle = axisTitleText('Query', queryId.value, xTicks.unit.name, weights.value?.x ?? 1, size.value.toScale, W - 2 * PAD, measure);
+  context.fillText(xTitle, within(b.left + b.width / 2, measure(xTitle, TITLE_FONT), W), PAD);
+  const yTitle = axisTitleText('Subject', subjectId.value, yTicks.unit.name, weights.value?.y ?? 1, size.value.toScale, H - 2 * PAD, measure);
   context.save();
-  context.translate(PAD, within(b.top + b.height / 2, context.measureText(yTitle).width, H));
+  context.translate(PAD, within(b.top + b.height / 2, measure(yTitle, TITLE_FONT), H));
   context.rotate(-Math.PI / 2);
   context.fillText(yTitle, 0, 0);
   context.restore();
@@ -354,14 +359,12 @@ function drawBase(): void {
   if (base.value !== undefined) base.value.dataset['titles'] = JSON.stringify([xTitle, yTitle]);
 }
 
-/**
- * An axis title, "Query <ID> (<unit>)". A protein axis against a nucleotide one says that it is
- * drawn at 3 nt per aa (S13b decision 26), unless the 120 px minimum changed its scale (the note
- * under the plot then says so). Where the room is short, the ID is cut and the unit kept (W4b
- * screen review M3: a phone lost the "(kbp)" of a long subject ID).
- */
-function axisTitle(context: CanvasRenderingContext2D, role: string, id: string, unit: string, weight: number, room: number): string {
-  return fitId(context, `${role} `, id, ` (${unit}${scaleNote(weight)})`, room);
+/** Measures text with a canvas context, in the font asked for (which stays the context's font). */
+function canvasMeasure(context: CanvasRenderingContext2D): MeasureText {
+  return (text, font) => {
+    context.font = font;
+    return context.measureText(text).width;
+  };
 }
 
 /** The hovered HSP drawn thicker, and the selected one wider on its halo. */
@@ -395,53 +398,10 @@ function stroke(context: CanvasRenderingContext2D, i: number, color: string, wid
   context.stroke();
 }
 
-/** A line, or a short dash where the HSP is shorter than a pixel or two (a dot with round caps). */
 function segmentPath(context: CanvasRenderingContext2D, ax: number, ay: number, bx: number, by: number): void {
-  if (Math.abs(bx - ax) + Math.abs(by - ay) < 1.5) {
-    const [mx, my] = [(ax + bx) / 2, (ay + by) / 2];
-    context.moveTo(mx - 1.5, my);
-    context.lineTo(mx + 1.5, my);
-  } else {
-    context.moveTo(ax, ay);
-    context.lineTo(bx, by);
-  }
-}
-
-/** The major ticks that carry a label: every one, or every second, third… where labels would collide. */
-function labelled(context: CanvasRenderingContext2D, ticks: AxisTicks, pxPerLetter: number): number[] {
-  if (ticks.major.length < 2) return [...ticks.major];
-  const widest = Math.max(...ticks.major.map((t) => context.measureText(tickLabel(t, ticks.unit)).width));
-  const stride = Math.max(1, Math.ceil((widest + 10) / (ticks.steps.major * pxPerLetter)));
-  return ticks.major.filter((t) => Math.round(t / ticks.steps.major) % stride === 0);
-}
-
-/** The centre of a text `width` px wide at `at`, moved so that the text stays within 0..`room` (2 px to spare). */
-const within = (at: number, width: number, room: number): number => Math.max(width / 2 + 2, Math.min(room - width / 2 - 2, at));
-
-/** `head`, `id` and `tail` in `room` px: the ID cut with an ellipsis where needed, else the whole text cut. */
-function fitId(context: CanvasRenderingContext2D, head: string, id: string, tail: string, room: number): string {
-  const whole = `${head}${id}${tail}`;
-  if (context.measureText(whole).width <= room) return whole;
-  let [low, high] = [0, id.length];
-  while (low < high) {
-    const mid = Math.ceil((low + high) / 2);
-    if (context.measureText(`${head}${id.slice(0, mid)}…${tail}`).width <= room) low = mid;
-    else high = mid - 1;
-  }
-  const cut = `${head}${id.slice(0, low)}…${tail}`;
-  return context.measureText(cut).width <= room ? cut : fit(context, whole, room);
-}
-
-/** A text cut with an ellipsis to `room` px. */
-function fit(context: CanvasRenderingContext2D, text: string, room: number): string {
-  if (context.measureText(text).width <= room) return text;
-  let [low, high] = [0, text.length];
-  while (low < high) {
-    const mid = Math.ceil((low + high) / 2);
-    if (context.measureText(`${text.slice(0, mid)}…`).width <= room) low = mid;
-    else high = mid - 1;
-  }
-  return `${text.slice(0, low)}…`;
+  const [x0, y0, x1, y1] = lineOrDash(ax, ay, bx, by);
+  context.moveTo(x0, y0);
+  context.lineTo(x1, y1);
 }
 
 /** The ends of an HSP's line in CSS pixels of the canvas, in a view. */
@@ -709,6 +669,45 @@ const targets = computed(() => {
   }
   return JSON.stringify(out);
 });
+
+// --- the SVG file ----------------------------------------------------------------------------------
+
+const svgBusy = ref(false);
+const svgError = ref('');
+
+/** Saves the plot as it is shown (this view, these HSPs; no halo) as an SVG file (domain/plot-svg.ts). */
+async function downloadSvg(): Promise<void> {
+  const run = loaded.value?.run.snapshot.number;
+  if (run === undefined || svgBusy.value) return;
+  svgBusy.value = true;
+  svgError.value = '';
+  try {
+    const s = segments.value;
+    // Its own context, so that the measuring of the title's width keeps its font; with none, 0.55 em a letter.
+    const context = document.createElement('canvas').getContext('2d');
+    const measure: MeasureText = context === null ? (text, font) => text.length * 0.55 * Number.parseFloat(/(\d+(?:\.\d+)?)px/.exec(font)?.[1] ?? '12') : canvasMeasure(context);
+    await props.results.exportDotPlot({
+      run,
+      queryId: queryId.value,
+      subjectId: subjectId.value,
+      queryLength: queryLength.value,
+      subjectLength: subjectLength.value,
+      units: units.value,
+      width: canvasWidth.value,
+      height: canvasHeight.value,
+      box: box.value,
+      view: view.value,
+      weights: weights.value ?? EQUAL_WEIGHTS,
+      toScale: size.value.toScale,
+      lines: { count: s.list.length, x0: s.x0, y0: s.y0, x1: s.x1, y1: s.y1, batch: s.batch },
+      measure,
+    });
+  } catch (error) {
+    svgError.value = `The SVG file could not be saved: ${error instanceof Error ? error.message : String(error)}`;
+  } finally {
+    svgBusy.value = false;
+  }
+}
 const viewText = computed(() => [view.value.x0, view.value.x1, view.value.y0, view.value.y1].map((n) => Math.round(n)).join(','));
 </script>
 
@@ -719,6 +718,15 @@ const viewText = computed(() => [view.value.x0, view.value.x1, view.value.y0, vi
       <button type="button" data-testid="dotplot-zoom-out" @click="zoom(1 / 1.5)">Zoom out</button>
       <button type="button" data-testid="dotplot-zoom-hsp" :disabled="!selected" @click="zoomToSelected">Zoom to HSP</button>
       <button type="button" data-testid="dotplot-reset" @click="setView(fullView(extent))">Whole sequences</button>
+      <button
+        type="button"
+        data-testid="dotplot-svg"
+        :disabled="svgBusy"
+        title="Saves the plot as shown (this zoom and these HSPs, without the yellow halo) as an SVG file in the LOSAT Web format"
+        @click="downloadSvg"
+      >
+        Download SVG
+      </button>
     </div>
     <figcaption class="plot-caption">
       <span class="plot-title" data-testid="dotplot-title">Plot of {{ queryId }} vs {{ subjectId }}</span>
@@ -805,6 +813,7 @@ const viewText = computed(() => [view.value.x0, view.value.x1, view.value.y0, vi
     <p v-if="!size.toScale" class="muted small plot-note" data-testid="dotplot-scale-note">
       Axes not to scale: the shorter sequence is drawn {{ Math.min(size.width, size.height) }} px long so that its HSPs can be seen.
     </p>
+    <p v-if="svgError" class="muted small plot-note" role="alert" data-testid="dotplot-svg-error">{{ svgError }}</p>
     <ul class="plot-legend">
       <li><span class="plot-swatch" :style="{ background: COLORS.forward }" />Forward: both sequences in the same direction</li>
       <li><span class="plot-swatch" :style="{ background: COLORS.reverse }" />Reverse: one sequence on its minus strand (or reverse frame)</li>

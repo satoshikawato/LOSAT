@@ -91,6 +91,13 @@ export interface DatasetStore {
    * (its length and residue counts); a source that no longer matches it is refused.
    */
   readResidues(revisionIds: readonly string[], position: number, intervals: readonly Interval[]): Promise<RecordResidues>;
+  /**
+   * Checks the record at `position` of the run input of the revisions against the record table,
+   * as `readResidues` checks a whole-record interval (its length and residue counts; a source
+   * that no longer matches it is refused), reading it from the source File in bounded parts, so
+   * the record is never held whole. For a record that extraction reads in parts (S15).
+   */
+  checkRecord(revisionIds: readonly string[], position: number): Promise<void>;
 }
 
 export interface ResultSetRef {

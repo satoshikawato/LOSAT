@@ -61,9 +61,6 @@ export const browserDownloader: Downloader = {
   open(fileName, mimeType) {
     return new BlobSink(fileName, mimeType);
   },
-  save(fileName, bytes, mimeType) {
-    download(fileName, new Blob([bytes as BlobPart], { type: mimeType }));
-  },
 };
 
 export async function sha256Hex(bytes: Uint8Array): Promise<string> {

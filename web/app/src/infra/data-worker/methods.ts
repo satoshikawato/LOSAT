@@ -12,6 +12,7 @@ export const DATA_GATEWAY_METHODS = [
   'checkInput',
   'previewSource',
   'readResidues',
+  'checkRecord',
   'openRun',
   'commitRun',
   'discardRun',

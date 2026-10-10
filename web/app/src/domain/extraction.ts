@@ -35,8 +35,11 @@
 //
 //   `frame` only for a translated sequence. An HSP whose record has no aligned rows is reported.
 //
-// Residues are wrapped at 60 per line. Output is bytes (headers UTF-8), so that a writer can
-// stream it record by record (S15). Nothing here reads a file or computes a BLAST value.
+// Residues are wrapped at 60 per line. Output is bytes (headers UTF-8), written as it is read
+// (S15, design §12.1): `extractionSteps` splits a plan into reads of a bounded number of
+// residues, in the order of the file, and a piece longer than one read is read and written in
+// parts of whole lines, so the file is the same as from one read. Nothing here reads a file or
+// computes a BLAST value.
 import {
   clipToRecord,
   commonStrand,
@@ -61,6 +64,14 @@ import { programById, type InputRole, type ProgramId } from './programs';
 
 /** Residues per line of the FASTA that extraction writes (an application choice). */
 export const FASTA_LINE_WIDTH = 60;
+/**
+ * Most residues that one read of an extraction asks for: about 4 Mi, a whole number of lines
+ * (69,905 lines of 60), so that the parts of a long sequence break their lines where one read
+ * would. It bounds what a step holds, whatever the length of the record (S15, code review L1).
+ */
+export const EXTRACTION_READ_RESIDUES = FASTA_LINE_WIDTH * 69_905;
+/** Most pieces read in one step: a bound on the arrays that one step's reads return. */
+export const EXTRACTION_STEP_PIECES = 1_000;
 
 /** The HSP record fields that extraction uses (docs/web/abi_v2.md §8; `HspRecord` has them all). */
 export interface ExtractedHsp extends HspCoordinates {
@@ -146,6 +157,18 @@ export interface ReadRequest {
   /** Indices into the plan's pieces. */
   readonly pieces: readonly number[];
 }
+
+/**
+ * One step of an extraction that is written as it is read, in the order of the file:
+ * - `pieces`: the pieces `first` to `end - 1`, whose residues together fit in one read, read with
+ *   one `readResidues` call per record (`requests`, as `readRequests` groups them);
+ * - `parts`: one piece longer than a read, read in `parts` (each at most one read, all but the
+ *   last a whole number of lines). `wholeRecord`: the parts make up the whole record, so it is
+ *   checked against its record table as a whole-record read is (`DatasetStore.checkRecord`).
+ */
+export type ExtractionStep =
+  | { readonly kind: 'pieces'; readonly first: number; readonly end: number; readonly requests: readonly ReadRequest[] }
+  | { readonly kind: 'parts'; readonly piece: number; readonly parts: readonly Interval[]; readonly wholeRecord: boolean };
 
 /** "3.2": the query record q_idx + 1 and the HSP rank + 1 (the HSP's place in the results). */
 export const hspLabel = (qIdx: number, rank: number): string => `${qIdx + 1}.${rank + 1}`;
@@ -247,8 +270,14 @@ function unknownStrandNote(target: ExtractionTarget): string {
 
 /** The `readResidues` calls of a plan: one per record, with the intervals of its pieces. */
 export function readRequests(plan: ExtractionPlan): readonly ReadRequest[] {
+  return requestsOf(plan.pieces, 0, plan.pieces.length);
+}
+
+/** The `readResidues` calls of the pieces `first` to `end - 1`: one per record, in the order of first use. */
+function requestsOf(pieces: readonly ExtractionPiece[], first: number, end: number): readonly ReadRequest[] {
   const requests = new Map<string, { runId: string; role: InputRole; position: number; intervals: Interval[]; pieces: number[] }>();
-  plan.pieces.forEach((piece, i) => {
+  for (let i = first; i < end; i++) {
+    const piece = pieces[i]!;
     const key = JSON.stringify([piece.runId, piece.role, piece.position]);
     let request = requests.get(key);
     if (request === undefined) {
@@ -257,8 +286,50 @@ export function readRequests(plan: ExtractionPlan): readonly ReadRequest[] {
     }
     request.intervals.push(piece.interval.actual);
     request.pieces.push(i);
-  });
+  }
   return [...requests.values()];
+}
+
+/**
+ * The steps of a plan's extraction, in the order of its pieces (see `ExtractionStep`): runs of
+ * pieces with at most `maxResidues` residues and `maxPieces` pieces each, and each piece longer
+ * than `maxResidues` alone, in parts of `maxResidues` residues. No step reads more than
+ * `maxResidues` residues at once, so what a step holds does not grow with a record's length.
+ * `maxResidues` must be a whole number of lines (`FASTA_LINE_WIDTH`).
+ */
+export function extractionSteps(
+  plan: ExtractionPlan,
+  maxResidues = EXTRACTION_READ_RESIDUES,
+  maxPieces = EXTRACTION_STEP_PIECES,
+): readonly ExtractionStep[] {
+  if (!Number.isSafeInteger(maxResidues) || maxResidues < FASTA_LINE_WIDTH || maxResidues % FASTA_LINE_WIDTH !== 0) {
+    throw new RangeError(`a read of ${maxResidues} residues is not a whole number of lines of ${FASTA_LINE_WIDTH}`);
+  }
+  if (!Number.isSafeInteger(maxPieces) || maxPieces < 1) throw new RangeError(`a step of ${maxPieces} pieces`);
+  const steps: ExtractionStep[] = [];
+  let first = 0;
+  let residues = 0;
+  const close = (end: number) => {
+    if (end > first) steps.push({ kind: 'pieces', first, end, requests: requestsOf(plan.pieces, first, end) });
+    first = end;
+    residues = 0;
+  };
+  plan.pieces.forEach((piece, i) => {
+    const { actual } = piece.interval;
+    const length = intervalLength(actual);
+    if (length > maxResidues) {
+      close(i);
+      const parts: Interval[] = [];
+      for (let from = actual.from; from <= actual.to; from += maxResidues) parts.push({ from, to: Math.min(actual.to, from + maxResidues - 1) });
+      steps.push({ kind: 'parts', piece: i, parts, wholeRecord: actual.from === 1 && actual.to === piece.recordLength });
+      first = i + 1;
+      return;
+    }
+    if (residues + length > maxResidues || i - first >= maxPieces) close(i);
+    residues += length;
+  });
+  close(plan.pieces.length);
+  return steps;
 }
 
 /** The header line of a sequence (without `>` and the line end); see the file comment. */
@@ -279,6 +350,23 @@ export function sequenceFasta(piece: ExtractionPiece, residues: Uint8Array): Uin
     throw new RangeError(`${residues.length} residues were given for ${intervalText(piece.interval.actual)} (${expected} ${piece.unit})`);
   }
   return fastaRecord(sequenceHeader(piece), residues);
+}
+
+/** The header line of a sequence written in parts (`ExtractionStep` `parts`), with `>` and its LF. */
+export function sequenceHeaderLine(piece: ExtractionPiece): Uint8Array {
+  return encoder.encode(`>${sequenceHeader(piece)}\n`);
+}
+
+/**
+ * The lines of one part of a sequence written in parts, from the residues that `readResidues`
+ * read for the part (a whole number of lines after the piece's first residue, but the last).
+ */
+export function sequencePartLines(piece: ExtractionPiece, part: Interval, residues: Uint8Array): Uint8Array {
+  const expected = intervalLength(part);
+  if (residues.length !== expected) {
+    throw new RangeError(`${residues.length} residues were given for ${intervalText(part)} (${expected} ${piece.unit})`);
+  }
+  return fastaLines(residues);
 }
 
 /** The header lines (without `>`) of an HSP's two aligned rows; see the file comment. */
@@ -327,8 +415,20 @@ const LF = 0x0a;
 
 /** `>header`, then the letters in lines of `width`, every line ended with LF. */
 export function fastaRecord(header: string, letters: Uint8Array, width = FASTA_LINE_WIDTH): Uint8Array {
+  return fastaBytes(encoder.encode(`>${header}\n`), letters, width);
+}
+
+/**
+ * The letters in lines of `width`, every line ended with LF: a FASTA record without its header
+ * line, or a part of one that starts at the start of a line (a whole number of lines after the
+ * record's first letter).
+ */
+export function fastaLines(letters: Uint8Array, width = FASTA_LINE_WIDTH): Uint8Array {
+  return fastaBytes(new Uint8Array(), letters, width);
+}
+
+function fastaBytes(head: Uint8Array, letters: Uint8Array, width: number): Uint8Array {
   if (!Number.isSafeInteger(width) || width < 1) throw new RangeError(`a line of ${width} letters`);
-  const head = encoder.encode(`>${header}\n`);
   const lines = Math.ceil(letters.length / width);
   const out = new Uint8Array(head.length + letters.length + lines);
   out.set(head);

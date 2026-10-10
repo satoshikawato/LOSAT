@@ -8,28 +8,36 @@
 // keeps no results and a run that has not ended has none yet, so the tray refuses them here,
 // whatever a screen offers. The tray holds plain data, never a run's tables, and each operation
 // is linear in the number of candidates (sorting n log n), so that adding thousands of HSPs at
-// once, moving and sorting stay fast.
+// once, moving and sorting stay fast. Both outputs are written as they are read, in bounded
+// steps, through the Writer of the exports (design §12.1), so neither holds its file, or a
+// whole long record, in memory.
 import type { HspCoordinates, Interval, Unit } from '../domain/coordinates';
 import {
   alignmentFasta,
+  EXTRACTION_READ_RESIDUES,
+  EXTRACTION_STEP_PIECES,
+  extractionSteps,
   extractionTarget,
   hspLabel,
   missingAlignmentNote,
   planExtraction,
-  readRequests,
   recordLabel,
   sequenceFasta,
+  sequenceHeaderLine,
+  sequencePartLines,
   type ExtractedHsp,
   type ExtractionJoin,
+  type ExtractionPiece,
   type ExtractionRegion,
   type RunRef,
 } from '../domain/extraction';
 import type { Outfmt6Row } from '../domain/outfmt6';
 import type { InputRole, ProgramId, SequenceKind } from '../domain/programs';
-import type { DataGateway } from '../ports/data';
+import type { DataGateway, RecordOrigin } from '../ports/data';
 import type { Downloader } from '../ports/download';
 import type { HspRecord } from '../ports/engine';
 import type { AppState, RunView } from './coordinator';
+import { BLOCK_CHARS, writeFile, type ExportWriter } from './export-writer';
 import type { HspId } from './results';
 import { Store } from './store';
 
@@ -38,6 +46,8 @@ export const SEQUENCES_FILE = 'losat-candidates.fa';
 export const ALIGNMENTS_FILE = 'losat-candidates-aligned.fa';
 /** The outputs are text (FASTA); the other exports of the application are saved as text/plain too. */
 export const FASTA_MIME = 'text/plain';
+/** HSP records read in one `readHspRecords` call of the alignments' export. */
+export const HSP_RECORD_BATCH = 1_000;
 
 /** A record of a run's input that an HSP lies on. */
 export interface CandidateRecord {
@@ -192,9 +202,13 @@ export interface ExtractOptions {
 export interface CandidateTrayDeps {
   /** The coordinator's state: which runs completed, and their snapshots. */
   readonly runs: Store<AppState>;
-  readonly data: Pick<DataGateway, 'readResidues' | 'readHspRecords'>;
+  readonly data: Pick<DataGateway, 'readResidues' | 'checkRecord' | 'readHspRecords'>;
   readonly downloader: Downloader;
   readonly now: () => number;
+  /** Most residues read at once by `extract` (`EXTRACTION_READ_RESIDUES`, a whole number of lines); tests lower it. */
+  readonly readResidueLimit?: number;
+  /** HSP records read at once by `exportAlignments` (`HSP_RECORD_BATCH`); tests lower it. */
+  readonly hspRecordBatch?: number;
 }
 
 /** The key of an HSP in the tray: `runId/qIdx/rank`. */
@@ -329,8 +343,11 @@ export class CandidateTray {
   /**
    * Saves the original residues of the selected candidates' records as one multi-FASTA
    * (`SEQUENCES_FILE`), in tray order: the intervals that domain/extraction.ts plans for the
-   * options, read with one `readResidues` call per record. A failure saves nothing, leaves the
-   * tray as it was, and says why.
+   * options, written as they are read, step by step (`extractionSteps`): pieces that fit in one
+   * read together, with one `readResidues` call per record, and a longer piece alone, in parts
+   * of at most `readResidueLimit` residues, one call each. A whole record read in parts is then
+   * checked against its record table (`checkRecord`), as a whole record read at once is. A
+   * failure saves nothing, leaves the tray as it was, and says why.
    */
   async extract(options: ExtractOptions = {}): Promise<OutputResult<SequencesSummary>> {
     const role = options.role ?? 'subject';
@@ -341,30 +358,39 @@ export class CandidateTray {
     try {
       const targets = chosen.map((candidate) => extractionTarget(runRef(candidate), extractedHsp(candidate), role, candidate[role]));
       const plan = planExtraction(targets, { region: options.region ?? { kind: 'hit' }, join: options.join ?? 'separate' });
-      const parts: Uint8Array[] = new Array<Uint8Array>(plan.pieces.length);
-      for (const request of readRequests(plan)) {
-        const view = views.get(request.runId)!;
-        const read = await this.deps.data.readResidues(view.snapshot[role].revisionIds, request.position, request.intervals);
-        request.pieces.forEach((p, i) => {
-          const piece = plan.pieces[p]!;
-          if (read.origin.id !== piece.recordId || read.origin.length !== piece.recordLength) {
-            throw new Error(
-              `${role} record ${piece.position + 1} of run ${piece.runNumber} is "${piece.recordId}" (${piece.recordLength} ${piece.unit}) ` +
-                `in the run, but its source now gives "${read.origin.id}" (${read.origin.length})`,
-            );
+      const steps = extractionSteps(plan, this.deps.readResidueLimit ?? EXTRACTION_READ_RESIDUES, EXTRACTION_STEP_PIECES);
+      const read = async (piece: ExtractionPiece, intervals: readonly Interval[]): Promise<readonly Uint8Array[]> => {
+        const revisionIds = this.revisionsOf(views.get(piece.runId)!, role);
+        const got = await this.deps.data.readResidues(revisionIds, piece.position, intervals);
+        sameRecord(piece, got.origin);
+        return got.residues;
+      };
+      const bytes = await writeFile(this.deps.downloader, SEQUENCES_FILE, FASTA_MIME, async (writer) => {
+        const blocks = new ByteBlocks(writer);
+        for (const step of steps) {
+          if (step.kind === 'pieces') {
+            const residues = new Array<Uint8Array>(step.end - step.first);
+            for (const request of step.requests) {
+              const got = await read(plan.pieces[request.pieces[0]!]!, request.intervals);
+              request.pieces.forEach((p, i) => (residues[p - step.first] = got[i]!));
+            }
+            for (let p = step.first; p < step.end; p++) await blocks.add(sequenceFasta(plan.pieces[p]!, residues[p - step.first]!));
+          } else {
+            const piece = plan.pieces[step.piece]!;
+            await blocks.add(sequenceHeaderLine(piece));
+            for (const part of step.parts) await blocks.add(sequencePartLines(piece, part, (await read(piece, [part]))[0]!));
+            if (step.wholeRecord) await this.deps.data.checkRecord(this.revisionsOf(views.get(piece.runId)!, role), piece.position);
           }
-          parts[p] = sequenceFasta(piece, read.residues[i]!);
-        });
-      }
-      const bytes = concat(parts);
-      this.deps.downloader.save(SEQUENCES_FILE, bytes, FASTA_MIME);
+        }
+        await blocks.flush();
+      });
       const summary: SequencesSummary = {
         output: 'sequences',
         fileName: SEQUENCES_FILE,
         role,
         candidates: chosen.length,
         sequences: plan.pieces.length,
-        bytes: bytes.length,
+        bytes,
         clipped: plan.pieces
           .filter((piece) => piece.interval.clippedLeft || piece.interval.clippedRight)
           .map((piece) => ({
@@ -389,49 +415,46 @@ export class CandidateTray {
 
   /**
    * Saves the gapped alignments of the selected candidates (`ALIGNMENTS_FILE`), in tray order:
-   * the query and subject rows of each HSP record exactly as the engine wrote them, read with one
-   * `readHspRecords` call per run; never mixed with extracted residues (design §11.4). A failure
-   * saves nothing, leaves the tray as it was, and says why.
+   * the query and subject rows of each HSP record exactly as the engine wrote them, read in
+   * batches of `hspRecordBatch` candidates in tray order, with one `readHspRecords` call per run
+   * of a batch, and written before the next batch is read; never mixed with extracted residues
+   * (design §11.4). A failure, or no aligned rows at all, saves nothing, leaves the tray as it
+   * was, and says why.
    */
   async exportAlignments(): Promise<OutputResult<AlignmentsSummary>> {
     const chosen = this.chosen('export');
     if (typeof chosen === 'string') return this.refuse(chosen);
     this.set({ busy: 'alignments', message: undefined });
     try {
-      const byRun = new Map<string, Candidate[]>();
-      for (const candidate of chosen) {
-        const list = byRun.get(candidate.run.runId);
-        if (list === undefined) byRun.set(candidate.run.runId, [candidate]);
-        else list.push(candidate);
-      }
-      const records = new Map<string, HspRecord>();
-      for (const [runId, list] of byRun) {
-        const read = await this.deps.data.readHspRecords(runId, list.map((candidate) => candidate.index));
-        list.forEach((candidate, i) => {
-          const record = read[i];
-          if (record === undefined || record.q_idx !== candidate.query.position || record.s_idx !== candidate.subject.position || record.rank !== candidate.id.rank) {
-            throw new Error(`HSP record ${candidate.index} of run ${candidate.run.number} is not HSP ${hspLabel(candidate.id.qIdx, candidate.id.rank)}`);
-          }
-          records.set(candidate.key, record);
-        });
-      }
-      const parts: Uint8Array[] = [];
+      const batch = this.deps.hspRecordBatch ?? HSP_RECORD_BATCH;
+      if (!Number.isSafeInteger(batch) || batch < 1) throw new RangeError(`a batch of ${batch} HSP records`);
       const missing: string[] = [];
-      for (const candidate of chosen) {
-        const record = records.get(candidate.key)!;
-        const fasta = alignmentFasta(runRef(candidate), record, { query: candidate.query.id, subject: candidate.subject.id });
-        if (fasta === undefined) missing.push(missingAlignmentNote(runRef(candidate), record));
-        else parts.push(fasta);
-      }
-      if (parts.length === 0) throw new Error(`no selected candidate has aligned sequences in its HSP record. ${missing.join(' ')}`);
-      const bytes = concat(parts);
-      this.deps.downloader.save(ALIGNMENTS_FILE, bytes, FASTA_MIME);
+      let alignments = 0;
+      const bytes = await writeFile(this.deps.downloader, ALIGNMENTS_FILE, FASTA_MIME, async (writer) => {
+        const blocks = new ByteBlocks(writer);
+        for (let start = 0; start < chosen.length; start += batch) {
+          const some = chosen.slice(start, start + batch);
+          const records = await this.hspRecordsOf(some);
+          for (const candidate of some) {
+            const record = records.get(candidate.key)!;
+            const fasta = alignmentFasta(runRef(candidate), record, { query: candidate.query.id, subject: candidate.subject.id });
+            if (fasta === undefined) {
+              missing.push(missingAlignmentNote(runRef(candidate), record));
+            } else {
+              alignments++;
+              await blocks.add(fasta);
+            }
+          }
+        }
+        if (alignments === 0) throw new Error(`no selected candidate has aligned sequences in its HSP record. ${missing.join(' ')}`);
+        await blocks.flush();
+      });
       const summary: AlignmentsSummary = {
         output: 'alignments',
         fileName: ALIGNMENTS_FILE,
         candidates: chosen.length,
-        alignments: parts.length,
-        bytes: bytes.length,
+        alignments,
+        bytes,
         missing,
       };
       this.set({ busy: undefined, last: summary });
@@ -439,6 +462,33 @@ export class CandidateTray {
     } catch (error) {
       return this.fail(`The alignments could not be exported: ${errorMessage(error)}`);
     }
+  }
+
+  /** The HSP records of candidates, by key: one `readHspRecords` call per run, each record checked against its candidate. */
+  private async hspRecordsOf(candidates: readonly Candidate[]): Promise<ReadonlyMap<string, HspRecord>> {
+    const byRun = new Map<string, Candidate[]>();
+    for (const candidate of candidates) {
+      const list = byRun.get(candidate.run.runId);
+      if (list === undefined) byRun.set(candidate.run.runId, [candidate]);
+      else list.push(candidate);
+    }
+    const records = new Map<string, HspRecord>();
+    for (const [runId, list] of byRun) {
+      const read = await this.deps.data.readHspRecords(runId, list.map((candidate) => candidate.index));
+      list.forEach((candidate, i) => {
+        const record = read[i];
+        if (record === undefined || record.q_idx !== candidate.query.position || record.s_idx !== candidate.subject.position || record.rank !== candidate.id.rank) {
+          throw new Error(`HSP record ${candidate.index} of run ${candidate.run.number} is not HSP ${hspLabel(candidate.id.qIdx, candidate.id.rank)}`);
+        }
+        records.set(candidate.key, record);
+      });
+    }
+    return records;
+  }
+
+  /** The dataset revisions that a run read for `role`: where extraction reads the run's records. */
+  private revisionsOf(view: RunView, role: InputRole): readonly string[] {
+    return view.snapshot[role].revisionIds;
   }
 
   /** The selected candidates in tray order, or why an output cannot be written now. */
@@ -500,6 +550,47 @@ function whyNotCompleted(view: RunView | undefined, number: number): string {
 }
 
 const runRef = (candidate: Candidate): RunRef => ({ runId: candidate.run.runId, number: candidate.run.number, program: candidate.run.program });
+
+/** Refuses residues read from a record that is not the one the run read at the piece's position. */
+function sameRecord(piece: ExtractionPiece, origin: RecordOrigin): void {
+  if (origin.id !== piece.recordId || origin.length !== piece.recordLength) {
+    throw new Error(
+      `${piece.role} record ${piece.position + 1} of run ${piece.runNumber} is "${piece.recordId}" (${piece.recordLength} ${piece.unit}) ` +
+        `in the run, but its source now gives "${origin.id}" (${origin.length})`,
+    );
+  }
+}
+
+/**
+ * Gathers the small byte arrays of an output (FASTA records of a few hundred bytes) into blocks of
+ * about `BLOCK_CHARS` bytes before they go to the writer, so that a file of thousands of records
+ * is a few writes to the sink, not one per record; an array of a block or more goes as it is.
+ */
+class ByteBlocks {
+  private parts: Uint8Array[] = [];
+  private size = 0;
+
+  constructor(private readonly writer: ExportWriter) {}
+
+  async add(bytes: Uint8Array): Promise<void> {
+    if (bytes.length >= BLOCK_CHARS) {
+      await this.flush();
+      await this.writer.bytes(bytes);
+      return;
+    }
+    this.parts.push(bytes);
+    this.size += bytes.length;
+    if (this.size >= BLOCK_CHARS) await this.flush();
+  }
+
+  async flush(): Promise<void> {
+    if (this.parts.length === 0) return;
+    const block = concat(this.parts);
+    this.parts = [];
+    this.size = 0;
+    await this.writer.bytes(block);
+  }
+}
 
 /** The HSP record fields that extraction plans with, from the candidate's copy of them. */
 const extractedHsp = (candidate: Candidate): ExtractedHsp => ({

@@ -29,7 +29,11 @@ const request: SearchRequest = {
   requestedThreads: 'auto',
 };
 
-function setup(engine: EngineGateway = new FakeEngine(), wrap: (data: DataService) => DataGateway = (d) => d) {
+function setup(
+  engine: EngineGateway = new FakeEngine(),
+  wrap: (data: DataService) => DataGateway = (d) => d,
+  options: { readonly exportRangeBytes?: number } = {},
+) {
   const store = new MemoryBlockStore();
   let token = 0;
   const data = new DataService({
@@ -40,9 +44,9 @@ function setup(engine: EngineGateway = new FakeEngine(), wrap: (data: DataServic
     newToken: () => `token-${++token}`,
     cleanup: Promise.resolve({ state: 'done', removedSessions: 0 }),
   });
-  const saved: Array<{ fileName: string; text: string }> = [];
+  const saved: Array<{ fileName: string; text: string; bytes: Uint8Array; blocks: number }> = [];
   const downloader: Downloader = memoryDownloader((file) =>
-    saved.push({ fileName: file.name, text: new TextDecoder().decode(file.bytes) }),
+    saved.push({ fileName: file.name, text: new TextDecoder().decode(file.bytes), bytes: file.bytes, blocks: file.blocks }),
   );
   let id = 0;
   const coordinator = new Coordinator({
@@ -51,6 +55,7 @@ function setup(engine: EngineGateway = new FakeEngine(), wrap: (data: DataServic
     downloader,
     now: () => 1000,
     newRunId: () => `run-${++id}`,
+    ...options,
   });
   return { coordinator, data, store, saved };
 }
@@ -310,6 +315,43 @@ describe('Coordinator', () => {
     await coordinator.exportOutput(runId, 7);
     expect(saved).toHaveLength(1);
     expect(saved[0]!.fileName).toBe('losat-run1-blastn.outfmt7.txt');
+    expect(saved[0]!.text).toContain(FAKE_MARKER);
+  });
+
+  it('exports the whole stored output byte for byte, read in bounded ranges and written in order', async () => {
+    const { coordinator, data, saved } = setup(new FakeEngine(), (d) => d, { exportRangeBytes: 16 });
+    const runId = (await coordinator.enqueue(request)).runId!;
+    await waitFor(coordinator, runId, 'completed');
+    for (const format of [0, 6, 7] as const) {
+      saved.length = 0;
+      await coordinator.exportOutput(runId, format);
+      const stored = await data.readOutput(runId, format);
+      expect(stored.length).toBeGreaterThan(32);
+      expect(saved.map((file) => file.fileName)).toEqual([`losat-run1-blastn.outfmt${format}.txt`]);
+      expect(saved[0]!.bytes).toEqual(stored);
+      expect(saved[0]!.blocks).toBe(Math.ceil(stored.length / 16));
+    }
+  });
+
+  it('saves nothing when a read of the stored output fails', async () => {
+    let reads = 0;
+    const { coordinator, saved } = setup(
+      new FakeEngine(),
+      (data) => {
+        const gateway = Object.create(data) as DataGateway;
+        gateway.readOutputRange = async (...args) => {
+          if (++reads === 2) throw new Error('the storage is gone');
+          return data.readOutputRange(...args);
+        };
+        return gateway;
+      },
+      { exportRangeBytes: 16 },
+    );
+    const runId = (await coordinator.enqueue(request)).runId!;
+    await waitFor(coordinator, runId, 'completed');
+    await expect(coordinator.exportOutput(runId, 6)).rejects.toThrow('the storage is gone');
+    expect(saved).toEqual([]);
+    await coordinator.exportOutput(runId, 6);
     expect(saved[0]!.text).toContain(FAKE_MARKER);
   });
 

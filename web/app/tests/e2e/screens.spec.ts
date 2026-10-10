@@ -217,6 +217,9 @@ async function search(page: Page, id: string, number: number, query: string, sub
  * Presses a table's row with the mouse at its part in view, as a finger would (W4b screen review
  * L5): Playwright's click() scrolls the whole row's button into view first, which scrolled a
  * phone's table sideways in the records, though the app keeps it where it is (results.spec.ts).
+ * Screen review 2 L2 (Firefox states 09, 21, 25) was the same: a probe on a 390 px screen read
+ * scrollLeft 158 after Playwright's click() in Firefox (29 in Chromium), and 0 after a mouse
+ * click, Tab and focus(), so every row of the Descriptions is pressed here too.
  */
 async function pressRow(page: Page, row: Locator): Promise<void> {
   await row.scrollIntoViewIfNeeded();
@@ -226,6 +229,13 @@ async function pressRow(page: Page, row: Locator): Promise<void> {
   });
   const box = (await row.boundingBox())!;
   await page.mouse.click(box.x + 24, box.y + box.height / 2);
+}
+
+/** Opens "Filter Results" where it is a disclosure (a phone's screen; closed at first, screen review 2 L1). */
+async function openFilters(page: Page): Promise<void> {
+  const toggle = page.getByTestId('filter-toggle');
+  if ((await toggle.count()) > 0 && (await toggle.getAttribute('aria-expanded')) === 'false') await toggle.click();
+  await expect(page.getByTestId('filter-subject')).toBeVisible();
 }
 
 /** Opens a completed run from the queue and waits until its first query's first HSP is read. */
@@ -268,7 +278,7 @@ for (const size of SIZES) {
 
     // The dot plot of a pair with an HSP on each strand (subject msD), the second HSP selected.
     await page.getByTestId('results-view-hits').click();
-    await subjectRow('msD').click();
+    await pressRow(page, subjectRow('msD'));
     await page.getByTestId('pane-dotplot').click();
     await expect(hspRows).toHaveCount(2);
     await pressRow(page, hspRows.nth(1));
@@ -285,7 +295,7 @@ for (const size of SIZES) {
     await page.getByTestId('subject-list').evaluate((element) => (element.scrollTop = 0));
     const last = page.getByTestId('subject-list').locator('[data-testid^="subject-row-"]').first();
     await expect(last).toHaveAttribute('data-order', '260');
-    await last.click();
+    await pressRow(page, last);
     await expect(last).toHaveAttribute('aria-pressed', 'true');
     await expect(page.getByTestId('detail-not-in-outfmt0')).toBeVisible();
     await shoot(page, browserName, size.name, '09-results-hsp-not-in-outfmt0');
@@ -301,6 +311,7 @@ for (const size of SIZES) {
     await page.getByTestId('query-row-0').click();
     await expect(page.getByTestId('query-row-0')).toHaveAttribute('aria-pressed', 'true');
     await page.getByTestId('results-view-hits').click();
+    await openFilters(page);
     await page.getByTestId('filter-subject').fill('no-such-subject');
     await page.getByTestId('filter-apply').click();
     await expect(page.locator('[data-testid="results-notice"][data-kind="filtered-out"]')).toBeVisible();
@@ -340,7 +351,7 @@ for (const size of SIZES) {
     // The Alignments of a subject with two Ranges (run 1, subject msD), the second selected.
     await openResults(page, 1);
     await page.getByTestId('results-view-hits').click();
-    await subjectRow('msD').click();
+    await pressRow(page, subjectRow('msD'));
     await expect(page.locator('[data-testid^="range-0-"]')).toHaveCount(2);
     await page.locator('[data-testid^="range-0-"]').first().getByTestId('range-next').click();
     await expect(page.getByTestId('hsp-detail')).toHaveAttribute('data-state', 'ready');
@@ -387,7 +398,7 @@ for (const size of SIZES) {
     await expect(confirmation).toContainText('added to Candidates');
 
     // The Alignments of msD (two Ranges): the first added, "In candidates"; the second not.
-    await subjectRow('msD').click();
+    await pressRow(page, subjectRow('msD'));
     const ranges = page.locator('[data-testid^="range-0-"]');
     await expect(ranges).toHaveCount(2);
     await ranges.first().locator('[data-testid^="range-add-"]').click();

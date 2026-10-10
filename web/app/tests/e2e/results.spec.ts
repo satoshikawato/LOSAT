@@ -855,9 +855,14 @@ test('an HSP that outfmt 0 does not show, and a hit list that may have reached i
     await expect(page.getByTestId('subject-list')).toHaveAttribute('data-count', '100');
     await expect(page.getByTestId('descriptions-listed')).toHaveText(`The first 100 of ${total} are listed.`);
     await expect(page.getByTestId('graphic-canvas')).toHaveAttribute('data-rows', '100');
+    // The header counts what is listed, not the subjects of the query (screen review 2 M1).
+    await expect(page.getByTestId('subject-count')).toHaveText(`100 of ${total} listed`);
+    await expect(page.getByTestId('descriptions-select-all')).toHaveAccessibleName('select all listed');
     await page.getByTestId('descriptions-show-all').click();
   }
   await expect(page.getByTestId('descriptions-show-all')).toHaveCount(0);
+  await expect(page.getByTestId('subject-count')).toHaveText(`${total} shown`);
+  await expect(page.getByTestId('descriptions-select-all')).toHaveAccessibleName('select all');
   await expect(page.getByTestId('subject-list')).toHaveAttribute('data-count', String(total));
   const partial = page.locator('[data-testid="results-notice"][data-kind="outfmt0-partial"]');
   await expect(partial).toContainText(`outfmt 0 shows the alignments of the first ${shown} subjects of this query`);
@@ -931,6 +936,49 @@ test('an HSP that outfmt 0 does not show, and a hit list that may have reached i
     await expect(page.getByTestId('subject-list')).toHaveAttribute('data-count', String(limit));
     await expect(partial).toHaveCount(0);
   }
+});
+
+test('the Descriptions cut at 100 subjects: the marks follow the listed rows (code review 2 L2)', async ({ page }) => {
+  test.skip(!BUILD_HAS_ENGINE, 'the FakeEngine gives a query 3 subjects; many.blastn has 260');
+  await program(page, 'blastn');
+  await task(page, 'blastn');
+  await openFiles(page, 'query', [{ name: 'many_query.fasta', text: fasta('outfmt0/many_query.fasta') }]);
+  await openFiles(page, 'subject', [{ name: 'many_subject.fasta', text: fasta('outfmt0/many_subject.fasta') }]);
+  await run(page, 1);
+  await openFromQueue(page, 1);
+  const list = page.getByTestId('subject-list');
+  const selected = page.getByTestId('descriptions-selected');
+  await expect(list).toHaveAttribute('data-count', '100');
+  await expect(selected).toHaveText('0 sequences selected');
+  // A desktop screen lists about two dozen rows before the box scrolls (screen review 2 I1): 22 of 28 px, and the box's border.
+  expect(Math.abs((await list.boundingBox())!.height - 22 * 28)).toBeLessThanOrEqual(4);
+  // Mark the first row, then sort it to the end of the 260: it leaves the listed 100, and its mark goes.
+  await subjectRows(page).first().locator('xpath=preceding-sibling::label//input').check();
+  await expect(selected).toHaveText('1 sequence selected');
+  await page.getByTestId('subject-sort-order').click();
+  await expect(page.getByTestId('subject-sort-order').locator('..')).toHaveAttribute('aria-sort', 'descending');
+  await expect(selected).toHaveText('0 sequences selected');
+  await expect(page.getByTestId('descriptions-add-candidates')).toBeDisabled();
+  // "select all" marks the 100 listed; unmarking leaves none behind.
+  const all = page.getByTestId('descriptions-select-all');
+  await all.check();
+  await expect(selected).toHaveText('100 sequences selected');
+  await expect(all).toBeChecked();
+  // What "Add to candidates" takes is what the "marked" export counts: only the listed subjects' HSPs.
+  await show(page, 'outputs');
+  const count = Number(await page.getByTestId('export-scope-marked').getAttribute('data-count'));
+  expect(count).toBeGreaterThanOrEqual(100);
+  await show(page, 'hits');
+  await page.getByTestId('descriptions-add-candidates').click();
+  await expect(page.getByTestId('tab-candidates-count')).toHaveText(count.toLocaleString('en-US'));
+  await all.uncheck();
+  await expect(selected).toHaveText('0 sequences selected');
+  // After "Show all", a subject past the first 100 is listed and can be marked.
+  await page.getByTestId('descriptions-show-all').click();
+  await expect(list).toHaveAttribute('data-count', '260');
+  await list.evaluate((element) => (element.scrollTop = element.scrollHeight));
+  await subjectRows(page).last().locator('xpath=preceding-sibling::label//input').check();
+  await expect(selected).toHaveText('1 sequence selected');
 });
 
 test("BLASTN: an HSP of one letter has no orientation in its record; the note points to outfmt 0's Strand= line", async ({ page }) => {
@@ -1054,6 +1102,9 @@ test('the one page (NCBI classic): the Graphic Summary, the Descriptions and the
   await expect(page.getByTestId(TABS.hits)).toHaveAttribute('aria-pressed', 'true');
   await expect(page.locator('.results-tabs button')).toHaveText(['Descriptions', 'Dot Plot', 'Run details', 'Outputs']);
   await expect(page.getByTestId('results-classic').locator('.part-heading')).toHaveText(['Graphic Summary', 'Descriptions', 'Alignments']);
+  // "Filter Results" is a plain form on a desktop screen (a disclosure only on a phone).
+  await expect(page.getByTestId('filter-toggle')).toHaveCount(0);
+  await expect(page.getByTestId('filter-evalue')).toBeVisible();
   const tops: number[] = [];
   for (const part of ['results-graphic', 'results-descriptions', 'results-alignments']) {
     await expect(page.getByTestId(part)).toBeVisible();
@@ -1694,6 +1745,24 @@ test('narrow screens: the results are no wider than the screen; "Open results" s
   await expect(page.getByTestId('results-hits')).toHaveAttribute('data-run', '1');
   await expect(page.getByTestId('subject-table')).toBeVisible();
   await expectNoSideScroll(page, 'descriptions');
+
+  // "Filter Results" is a closed disclosure on a phone, so that the graphic comes sooner after
+  // "Open results" (screen review 2 L1); closed, it says how many filters are set.
+  const toggle = page.getByTestId('filter-toggle');
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.getByTestId('filter-bits')).toBeHidden();
+  await expect(page.getByTestId('filter-active')).toHaveCount(0);
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  await page.getByTestId('filter-bits').fill('0');
+  await page.getByTestId('filter-apply').click();
+  await toggle.click();
+  await expect(page.getByTestId('filter-bits')).toBeHidden();
+  await expect(page.getByTestId('filter-active')).toHaveText('(1 set)');
+  await toggle.click();
+  await page.getByTestId('filter-clear').click();
+  await toggle.click();
+  await expect(page.getByTestId('filter-active')).toHaveCount(0);
 
   // The key values first; the tables say that they scroll sideways.
   expect((await columnsInView(page, 'subject-table')).slice(0, 4)).toEqual(['order', 'sseqid', 'bitscore', 'evalue']);

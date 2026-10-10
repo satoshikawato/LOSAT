@@ -344,6 +344,8 @@ pub fn prepare_queries(
     //                               seqloc_retval);
     // 		SegParametersFree(sparamsp);
     // ```
+    // Same SEG parameters as the block above; the masker is built once for all contexts instead of
+    // once per context (placement only).
     let seg_masker = options.seg.enabled.then(|| {
         let s = &options.seg;
         SegMasker::new(
@@ -358,6 +360,23 @@ pub fn prepare_queries(
     // and the hard masking below writes only there, so the contexts of a large
     // batch (the six frames of the full query) are filtered on the search pool
     // before the loop consumes the intervals in context order.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1280-1290
+    // ```c
+    //     for (context = query_info->first_context;
+    //          context <= query_info->last_context; ++context) {
+    // ...
+    //         BlastSeqLoc *filter_per_context = NULL;
+    //         status = s_GetFilteringLocationsForOneContext(query_blk,
+    //                                                       query_info,
+    //                                                       context,
+    //                                                       program_number,
+    //                                                       filter_options,
+    //                                                       &filter_per_context,
+    //                                                       blast_message);
+    // ```
+    // NCBI filters the contexts one after another in this loop. SEG of one context reads only that
+    // context, so with LOSAT_X_BXPAR the contexts of a large batch are filtered in parallel and the
+    // intervals are kept in seg_ready; the loop below still consumes them in context order.
     #[allow(unused_mut)]
     let mut seg_ready: Vec<Option<Vec<(i32, i32)>>> = Vec::new();
     #[cfg(feature = "parallel")]
@@ -392,6 +411,21 @@ pub fn prepare_queries(
         }
         let mut masks = context.lowercase_masks.clone();
         if let Some(masker) = seg_masker.as_ref() {
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1280-1290
+            // ```c
+            //     for (context = query_info->first_context;
+            //          context <= query_info->last_context; ++context) {
+            // ...
+            //         status = s_GetFilteringLocationsForOneContext(query_blk,
+            //                                                       query_info,
+            //                                                       context,
+            //                                                       program_number,
+            //                                                       filter_options,
+            //                                                       &filter_per_context,
+            //                                                       blast_message);
+            // ```
+            // Dispatch point: a context filtered ahead of the loop uses its stored intervals; any
+            // other context is filtered here exactly as before.
             if let Some(ready) = seg_ready.get_mut(context_index).and_then(Option::take) {
                 masks.extend(ready);
             } else {

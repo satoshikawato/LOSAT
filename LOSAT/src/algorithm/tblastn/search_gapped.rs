@@ -391,17 +391,23 @@ pub(super) struct PreliminaryProfile<'a> {
 // NCBI c++/src/algo/blast/core/blast_engine.c:478-586,804-850:
 // one chunk's WordFinder and gapped result precedes the next chunk's scan;
 // each frame's append precedes the next frame's scan.
+// No NCBI counterpart: flag that tells the preliminary stage whether to record the test-only
+// comparison events; it does not change any value NCBI computes.
 thread_local! {
     // EXPERIMENT: false while the production pipeline runs the preliminary stage.
     static X_COLLECT_EVENTS: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
 }
 
+// No NCBI counterpart: reads the LOSAT_X_TBNEVENTS switch once; it does not change any value NCBI
+// computes.
 fn x_skip_events() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| std::env::var_os("LOSAT_X_TBNEVENTS").is_some())
 }
 
+// No NCBI counterpart: reads the LOSAT_X_TBNPAR / LOSAT_X_TBNPARSHADOW switches once; it does not
+// change any value NCBI computes.
 fn x_tbn_units() -> u8 {
     use std::sync::OnceLock;
     static ON: OnceLock<u8> = OnceLock::new();
@@ -416,6 +422,35 @@ fn x_tbn_units() -> u8 {
     })
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-584,844
+// ```c
+//     while (TRUE) {
+// ...
+//             if (init_hitlist->total == 0) continue;
+// ...
+//         if (aux_struct->GetGappedScore) {
+//             status = aux_struct->GetGappedScore(program_number, query,
+//                     query_info,
+//                     subject, gap_align, score_params, ext_params, hit_params,
+//                     word_params, init_hitlist, &hsp_list, gapped_stats, NULL);
+//         }
+// ...
+//             Blast_HSPListPurgeHSPsWithCommonEndpoints(program_number, hsp_list, TRUE);
+// ...
+//         Blast_HSPListSortByScore(hsp_list);
+// ...
+//         status = Blast_HSPListsMerge(&hsp_list, &combined_hsp_list,
+//                      kHspNumMax, &(backup.offset), INT4_MIN,
+//                      overlap, score_options->gapped_calculation,
+//                      Blast_ProgramIsMapping(program_number));
+// ...
+//         if (Blast_HSPListAppend(&hsp_list_for_chunks, &hsp_list_out, kHspNumMax)) {
+// ```
+// Dispatch point: this is the preliminary stage of s_BlastSearchEngineCore for one subject. Switch
+// off: the original port runs (without the test-only event log if LOSAT_X_TBNEVENTS is set).
+// LOSAT_X_TBNPAR: the (frame, chunk) units run independently and are merged in NCBI order
+// (x_preliminary_protein_hsps_by_unit). LOSAT_X_TBNPARSHADOW: both run and the results are asserted
+// equal.
 /// EXPERIMENT: the preliminary stage without the test-only event log.
 pub(super) fn preliminary_protein_hsps_for_search(
     queries: &[&[u8]],
@@ -481,14 +516,21 @@ pub(super) fn preliminary_protein_hsps_for_search(
     Ok(result?.0)
 }
 
-// EXPERIMENT (LOSAT_X_TBNPAR): the preliminary stage as independent (frame,
-// chunk) units.  NCBI c++/src/algo/blast/core/blast_engine.c:478-552 runs
-// WordFinder, GetGappedScore and the endpoint purge of one unit before it scans
-// the next; none of the three reads anything an earlier unit produced (the
-// diagonal array is the only carried state, see `XTwoHit`).  Only the merge
-// (lines 572-586) and the per-frame append (840-850) depend on the order, and
-// they run here afterwards, in that order, on one thread.  The offset pairs are
-// consumed straight from the scan buffer, so no per-frame seed list is kept.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1241-1256
+// ```c
+//         BlastSeqLoc *lcase_mask_slp = NULL;
+//         if (query_blk->lcase_mask && query_blk->lcase_mask->seqloc_array)
+//         {
+//             ASSERT(context < query_blk->lcase_mask->total_size);
+//             lcase_mask_slp = query_blk->lcase_mask->seqloc_array[context];
+// ...
+//         BlastSeqLocAppend(filter_out, lcase_mask_slp);
+// ...
+//     BlastSeqLocCombine(filter_out, 0);
+// ```
+// XQueryFrames is the query-side state the unit-wise stage derives from the query set alone: the
+// query frames with the lowercase and SEG masks merged (as in x_query_frames below), and the
+// offsets of the contexts.
 /// EXPERIMENT (LOSAT_X_TBNQSIDE): what the unit-wise preliminary stage derives
 /// from the query set alone.
 struct XQueryFrames {
@@ -499,6 +541,20 @@ struct XQueryFrames {
     init_context_offsets: Vec<i32>,
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1241-1256
+// ```c
+//         BlastSeqLoc *lcase_mask_slp = NULL;
+//         if (query_blk->lcase_mask && query_blk->lcase_mask->seqloc_array)
+//         {
+//             ASSERT(context < query_blk->lcase_mask->total_size);
+//             lcase_mask_slp = query_blk->lcase_mask->seqloc_array[context];
+// ...
+//         BlastSeqLocAppend(filter_out, lcase_mask_slp);
+// ...
+//     BlastSeqLocCombine(filter_out, 0);
+// ```
+// The same query frames as preliminary_protein_hsps_with_comparison_input builds, taken out so that
+// one value can serve all subjects of a query set.
 fn x_query_frames(queries: &[&[u8]], profile: PreliminaryProfile<'_>) -> Result<XQueryFrames> {
     // As preliminary_protein_hsps_with_comparison_input.
     let query_frames: Vec<_> = queries
@@ -534,6 +590,17 @@ fn x_query_frames(queries: &[&[u8]], profile: PreliminaryProfile<'_>) -> Result<
     })
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:91-100
+// ```c
+//        BlastAaLookupTableNew(lookup_options, (BlastAaLookupTable* *)
+//                              &lookup_wrap->lut);
+//        ((BlastAaLookupTable*)lookup_wrap->lut)->use_pssm = has_pssm;
+//        BlastAaLookupIndexQuery( (BlastAaLookupTable*) lookup_wrap->lut, matrix,
+//                                  query, lookup_segments, 0);
+// ```
+// NCBI builds the lookup table once per query batch. XQuerySide keeps the query frames and the
+// lookup table for all subjects of one query set; the first subject that needs a part builds it,
+// exactly as every subject did before.
 /// EXPERIMENT (LOSAT_X_TBNQSIDE): the query-side state of the unit-wise
 /// preliminary stage for one query set, shared by all its subjects.
 ///
@@ -552,6 +619,8 @@ pub(super) struct XQuerySide {
         std::sync::OnceLock<std::sync::Arc<crate::algorithm::tblastx::lookup::BlastAaLookupTable>>,
 }
 
+// No NCBI counterpart: the methods below create the shared query-side state and build its frames
+// once; it does not change any value NCBI computes.
 impl XQuerySide {
     /// `None` unless `LOSAT_X_TBNQSIDE` is set.
     pub(super) fn new() -> Option<Self> {
@@ -583,6 +652,43 @@ impl XQuerySide {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-584,844
+// ```c
+//     while (TRUE) {
+// ...
+//             if (init_hitlist->total == 0) continue;
+// ...
+//         if (aux_struct->GetGappedScore) {
+//             status = aux_struct->GetGappedScore(program_number, query,
+//                     query_info,
+//                     subject, gap_align, score_params, ext_params, hit_params,
+//                     word_params, init_hitlist, &hsp_list, gapped_stats, NULL);
+//         }
+// ...
+//             Blast_HSPListPurgeHSPsWithCommonEndpoints(program_number, hsp_list, TRUE);
+// ...
+//         Blast_HSPListSortByScore(hsp_list);
+// ...
+//         status = Blast_HSPListsMerge(&hsp_list, &combined_hsp_list,
+//                      kHspNumMax, &(backup.offset), INT4_MIN,
+//                      overlap, score_options->gapped_calculation,
+//                      Blast_ProgramIsMapping(program_number));
+// ...
+//         if (Blast_HSPListAppend(&hsp_list_for_chunks, &hsp_list_out, kHspNumMax)) {
+// ```
+// The units of the loop at line 478 run independently here: WordFinder (two-hit pass with its own
+// diagonal array), the gapped score and the common-endpoint purge are computed per (frame, chunk)
+// unit; the merge (581) and the per-frame append (844) then run in NCBI order on one thread. This
+// reproduces the order-dependent steps of the serial loop; the units read nothing an earlier unit
+// wrote.
+// EXPERIMENT (LOSAT_X_TBNPAR): the preliminary stage as independent (frame,
+// chunk) units.  NCBI c++/src/algo/blast/core/blast_engine.c:478-552 runs
+// WordFinder, GetGappedScore and the endpoint purge of one unit before it scans
+// the next; none of the three reads anything an earlier unit produced (the
+// diagonal array is the only carried state, see `XTwoHit`).  Only the merge
+// (lines 572-586) and the per-frame append (840-850) depend on the order, and
+// they run here afterwards, in that order, on one thread.  The offset pairs are
+// consumed straight from the scan buffer, so no per-frame seed list is kept.
 fn x_preliminary_protein_hsps_by_unit(
     queries: &[&[u8]],
     subject: &[u8],
@@ -696,8 +802,23 @@ fn x_preliminary_protein_hsps_by_unit(
         // Blast_HSPListSortByScore(hsp_list);
         Ok(purge_preliminary_common_endpoints(gapped))
     };
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-482,805-812
+    // ```c
+    //     while (TRUE) {
+    //         status = s_GetNextSubjectChunk(subject, &backup, kNucleotide,
+    //                                        dbseq_chunk_overlap);
+    //
+    //         if (status == SUBJECT_SPLIT_DONE) break;
+    // ...
+    //     for (context=first_context; context<=last_context; context++) {
+    // ```
+    // Dispatch point: NCBI visits the units one after another. With a pool the units run in
+    // parallel (map_init gives each thread its own state); without one the loop below runs them in
+    // order. The results are collected by unit index.
     let unit_count = plan.subject.units.len();
     let parallel = pool.is_some_and(crate::utils::threading::SearchPool::enabled) && unit_count > 1;
+    // No NCBI counterpart: stage report for the thread-use statistics; it does not change any value
+    // NCBI computes.
     crate::utils::threading::report_stage("tblastn", "prelim_units", unit_count, parallel);
     let mut purged: Vec<Result<Vec<(usize, GappedHsp)>>> = Vec::with_capacity(unit_count);
     #[cfg(feature = "parallel")]
@@ -718,6 +839,17 @@ fn x_preliminary_protein_hsps_by_unit(
             purged.push(run_unit(&mut state, unit));
         }
     }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:581-584,844
+    // ```c
+    //         status = Blast_HSPListsMerge(&hsp_list, &combined_hsp_list,
+    //                      kHspNumMax, &(backup.offset), INT4_MIN,
+    //                      overlap, score_options->gapped_calculation,
+    //                      Blast_ProgramIsMapping(program_number));
+    // ...
+    //         if (Blast_HSPListAppend(&hsp_list_for_chunks, &hsp_list_out, kHspNumMax)) {
+    // ```
+    // Replay in NCBI order: the units of a frame are merged one by one (Blast_HSPListsMerge), then
+    // the frame is appended (Blast_HSPListAppend). Only this thread runs it.
     let mut purged = purged.into_iter();
     let mut combined = Vec::new();
     let mut unit = 0usize;
@@ -818,6 +950,8 @@ fn preliminary_protein_hsps_with_comparison_input(
     let mut events = Vec::new();
     // EXPERIMENT (LOSAT_X_TBNEVENTS): the comparison events are only read by
     // tests; the search itself discards them.
+    // No NCBI counterpart: the comparison events are test-only data; the collect_events checks
+    // below only skip pushing them; it does not change any value NCBI computes.
     let collect_events = X_COLLECT_EVENTS.with(|c| c.get());
     find_protein_init_hsps_by_chunk_with_mask_mode(
         queries,

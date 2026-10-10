@@ -99,6 +99,19 @@ struct IntervalNode {
     rightptr: i32,
     /// HSP stored at this node (only for leaf nodes)
     hsp: Option<TreeHsp>,
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:359-362,398-404
+    /// ```c
+    ///             if (best_hsp == next_node->hsp)
+    ///                 return TRUE;
+    ///             else if (best_hsp == in_hsp)
+    ///                 list_node->midptr = tmp_index;
+    /// ...
+    ///                 /* leaf gets removed */
+    ///                 if (target_offset < midpt)
+    ///                     root_node->leftptr = 0;
+    /// ```
+    /// NCBI unlinks such a leaf from the tree. This flag records that fact for the grid index,
+    /// which still lists the leaf; a flagged leaf is never returned as a container.
     /// EXPERIMENT (LOSAT_X_ITREEFAST): this leaf was unlinked from the tree.
     x_dead: bool,
 }
@@ -129,6 +142,26 @@ impl IntervalNode {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:822-831,952-994
+// ```c
+//     if (in_hsp->score <= tree_hsp->score &&
+//         SIGN(in_hsp->subject.frame) == SIGN(tree_hsp->subject.frame) &&
+//         CONTAINED_IN_HSP(tree_hsp->query.offset, tree_hsp->query.end,
+//                               in_hsp->query.offset,
+//                               tree_hsp->subject.offset, tree_hsp->subject.end,
+//                               in_hsp->subject.offset) &&
+// ...
+//     while (node->hsp == NULL) {
+// ...
+//     return s_HSPIsContained(hsp, query_start,
+//                             node->hsp, node->leftptr,
+//                             min_diag_separation);
+// ```
+// The side indexes below answer what `BlastIntervalTreeContainsHSP` answers (does some HSP
+// in the tree satisfy `s_HSPIsContained` for the input) and what
+// `s_IntervalTreeHasHSPEndpoint` answers (is there an HSP with the same end point), without
+// the walk. The tree stays the master copy and the predicates are the unchanged ones. The
+// argument above explains why the answers are the same; LOSAT_X_ITREESHADOW checks it.
 // ---------------------------------------------------------------------------
 // EXPERIMENT (LOSAT_X_ITREEFAST / LOSAT_X_ITREESHADOW): two side indexes that
 // answer, without walking the tree, the two questions the tree is asked most
@@ -171,6 +204,19 @@ thread_local! {
     static X_ITREE_TEST_MODE: std::cell::Cell<Option<u8>> = const { std::cell::Cell::new(None) };
 }
 
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:931-935,952
+/// ```c
+/// BlastIntervalTreeContainsHSP(const BlastIntervalTree *tree,
+///                              const BlastHSP *hsp,
+///                              const BlastQueryInfo *query_info,
+///                              Int4 min_diag_separation)
+/// ...
+///     while (node->hsp == NULL) {
+/// ```
+/// Reads the LOSAT_X_ITREEFAST / LOSAT_X_ITREESHADOW switches once. The mode chooses
+/// whether the walk above (0), the side indexes (1), or both (2) answer a containment
+/// query. It is 0 whenever tracing is on, because the index may return a different
+/// container than the walk when there are several.
 /// 0 = tree only, 1 = side indexes, 2 = both and compare.
 fn x_itree_mode() -> u8 {
     #[cfg(test)]
@@ -192,6 +238,15 @@ fn x_itree_mode() -> u8 {
     })
 }
 
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:822-831
+/// ```c
+///     if (in_hsp->score <= tree_hsp->score &&
+///         SIGN(in_hsp->subject.frame) == SIGN(tree_hsp->subject.frame) &&
+///         CONTAINED_IN_HSP(tree_hsp->query.offset, tree_hsp->query.end,
+///                               in_hsp->query.offset,
+/// ```
+/// A cell lists the tree leaves whose box (the `tree_hsp` offsets and ends in this test)
+/// overlaps the cell. No value is computed here.
 /// One listing of a leaf in a grid cell.
 #[derive(Clone, Copy)]
 struct XCellEntry {
@@ -200,6 +255,9 @@ struct XCellEntry {
     next: u32,
 }
 
+// No NCBI counterpart: size limits of the grid index (memory and fallback thresholds);
+// they do not change any value NCBI computes. Past a limit the index is dropped and the
+// tree walk answers.
 /// Grid cells at most (the per-cell heads take four bytes each).
 const X_MAX_CELLS: usize = 1 << 16;
 /// An HSP whose box overlaps more cells than this is kept in `overflow`.
@@ -207,6 +265,19 @@ const X_MAX_CELLS_PER_HSP: usize = 1024;
 /// With more HSPs than this in `overflow` the index is abandoned.
 const X_MAX_OVERFLOW: usize = 512;
 
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:440-443,452-461
+/// ```c
+///     if (which_end == eIntervalTreeLeft)
+///         target_offset = in_q_start + in_hsp->query.offset;
+///     else
+///         target_offset = in_q_start + in_hsp->query.end;
+/// ...
+///         tmp_index = root_node->midptr;
+/// ```
+/// `s_IntervalTreeHasHSPEndpoint` only acts on tree HSPs with the same start (or end)
+/// point as the input. This set holds the start and end points of the HSPs added, as a
+/// hash bit table. "May contain" is false only when no such HSP was added; a false
+/// "true" only makes the unchanged walk run.
 /// A set of (query, subject) points that may report points it does not hold
 /// but never misses one it holds: a bit table with two bits per point.
 struct XPointSet {
@@ -270,9 +341,26 @@ impl XPointSet {
     }
 }
 
+// No NCBI counterpart: hash salts that keep start points and end points apart in
+// `XPointSet`; they do not change any value NCBI computes.
 const X_SALT_START: u64 = 0;
 const X_SALT_END: u64 = 0x9E37_79B9_7F4A_7C15;
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:164-170,195-201
+// ```c
+//     tree->num_alloc = size;
+//     tree->num_used = 0;
+//     tree->s_min = s_start;
+//     tree->s_max = s_end;
+//
+//     /* The first structure in tree->nodes is the root */
+//     s_IntervalRootNodeInit(tree, q_start, q_end, &retval);
+// ...
+//     tree->num_used = 1;
+// ```
+// The state of the side indexes, tied to the same query and subject ranges as the tree
+// (`q_min`, `s_min`) and emptied whenever the tree is emptied. It is derived from the
+// HSPs in the tree and holds nothing else.
 struct XTreeIndex {
     mode: u8,
     /// False once the tree holds an HSP this index does not describe.
@@ -295,6 +383,17 @@ struct XTreeIndex {
 }
 
 impl XTreeIndex {
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:146-170
+    /// ```c
+    /// Blast_IntervalTreeInit(Int4 q_start, Int4 q_end,
+    ///                        Int4 s_start, Int4 s_end)
+    /// ...
+    ///     tree->s_min = s_start;
+    ///     tree->s_max = s_end;
+    /// ...
+    ///     s_IntervalRootNodeInit(tree, q_start, q_end, &retval);
+    /// ```
+    /// Makes an empty index for the ranges the tree is made for.
     fn new(q_min: i32, q_max: i32, s_min: i32, s_max: i32) -> Self {
         let mode = x_itree_mode();
         let mut index = Self {
@@ -316,6 +415,16 @@ impl XTreeIndex {
         index
     }
 
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:166-170
+    /// ```c
+    ///     tree->s_min = s_start;
+    ///     tree->s_max = s_end;
+    ///
+    ///     /* The first structure in tree->nodes is the root */
+    ///     s_IntervalRootNodeInit(tree, q_start, q_end, &retval);
+    /// ```
+    /// The index follows `reset_with_bounds`: new ranges, empty index; the grid is sized
+    /// from the ranges.
     fn set_bounds(&mut self, q_min: i32, q_max: i32, s_min: i32, s_max: i32) {
         let q_span = (q_max as i64 - q_min as i64).max(0) as usize;
         let s_span = (s_max as i64 - s_min as i64).max(0) as usize;
@@ -333,6 +442,16 @@ impl XTreeIndex {
         self.clear();
     }
 
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:195-201
+    /// ```c
+    ///     SIntervalNode *root = tree->nodes;
+    ///
+    ///     tree->num_used = 1;
+    ///     root->leftptr = 0;
+    ///     root->midptr = 0;
+    ///     root->rightptr = 0;
+    /// ```
+    /// The index is emptied exactly when the tree is reset.
     fn clear(&mut self) {
         for &cell in &self.used_cells {
             self.head[cell as usize] = 0;
@@ -345,6 +464,8 @@ impl XTreeIndex {
         self.usable = self.mode != 0;
     }
 
+    /// No NCBI counterpart: maps an offset to a grid column; it does not change any value
+    /// NCBI computes.
     /// Grid column of an absolute query offset (monotone, clamped).
     #[inline]
     fn q_cell(&self, q: i32) -> usize {
@@ -352,6 +473,8 @@ impl XTreeIndex {
         rel.min(self.nq - 1)
     }
 
+    /// No NCBI counterpart: maps an offset to a grid row; it does not change any value NCBI
+    /// computes.
     /// Grid row of a subject offset (monotone, clamped).
     #[inline]
     fn s_cell(&self, s: i32) -> usize {
@@ -359,6 +482,16 @@ impl XTreeIndex {
         rel.min(self.ns - 1)
     }
 
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:597-599,822-831
+    /// ```c
+    ///     nodes[new_index].leftptr = query_start;
+    ///     nodes[new_index].midptr = 0;
+    ///     nodes[new_index].hsp = hsp;
+    /// ...
+    ///         CONTAINED_IN_HSP(tree_hsp->query.offset, tree_hsp->query.end,
+    /// ```
+    /// Called when NCBI creates the leaf for an HSP. The leaf is listed in each cell of its
+    /// box (query offsets shifted by the strand start `query_start`, as `leftptr` holds it).
     /// List `leaf` in every cell its box overlaps.
     fn register(&mut self, leaf: usize, hsp: &TreeHsp, query_start: i32) {
         let q_a = self.q_cell(query_start + hsp.query_offset.min(hsp.query_end));
@@ -410,6 +543,16 @@ pub struct BlastIntervalTree {
     s_min: i32,
     /// Maximum subject offset
     s_max: i32,
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:158-167
+    /// ```c
+    ///     tree->nodes = (SIntervalNode *)malloc(size * sizeof(SIntervalNode));
+    /// ...
+    ///     tree->num_alloc = size;
+    ///     tree->num_used = 0;
+    ///     tree->s_min = s_start;
+    ///     tree->s_max = s_end;
+    /// ```
+    /// The tree owns its side indexes; they are built from, and follow, the node array above.
     /// EXPERIMENT (LOSAT_X_ITREEFAST)
     x: XTreeIndex,
 }
@@ -475,6 +618,14 @@ impl BlastIntervalTree {
             self.nodes
                 .push(IntervalNode::new_internal(leftend, rightend));
         }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:195-201
+        // ```c
+        //     tree->num_used = 1;
+        //     root->leftptr = 0;
+        //     root->midptr = 0;
+        //     root->rightptr = 0;
+        // ```
+        // Reset point: the side indexes are emptied with the tree.
         self.x.clear();
     }
 
@@ -494,6 +645,15 @@ impl BlastIntervalTree {
         self.s_max = s_max;
         self.nodes.clear();
         self.nodes.push(IntervalNode::new_internal(q_min, q_max));
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:166-170
+        // ```c
+        //     tree->s_min = s_start;
+        //     tree->s_max = s_end;
+        //
+        //     /* The first structure in tree->nodes is the root */
+        //     s_IntervalRootNodeInit(tree, q_start, q_end, &retval);
+        // ```
+        // Re-initialisation point: the side indexes are rebuilt for the new ranges.
         self.x.set_bounds(q_min, q_max, s_min, s_max);
     }
 
@@ -704,6 +864,13 @@ impl BlastIntervalTree {
                     Some(EndpointResult::KeepInput) => {
                         // Remove worse HSP from list: list_node->midptr = tmp_index
                         self.nodes[list_idx].midptr = next_idx;
+                        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:361-362
+                        // ```c
+                        //             else if (best_hsp == in_hsp)
+                        //                 list_node->midptr = tmp_index;
+                        // ```
+                        // The list unlink is the line above; the flag and the count only tell the grid index
+                        // that the leaf is gone.
                         self.nodes[tmp_index as usize].x_dead = true;
                         self.x.removed += 1;
                     }
@@ -757,6 +924,15 @@ impl BlastIntervalTree {
                         } else {
                             self.nodes[root_idx].rightptr = 0;
                         }
+                        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:398-404
+                        // ```c
+                        //             else if (best_hsp == in_hsp) {
+                        //                 /* leaf gets removed */
+                        //                 if (target_offset < midpt)
+                        //                     root_node->leftptr = 0;
+                        // ```
+                        // The leaf unlink is the code above; the flag and the count only tell the grid index
+                        // that the leaf is gone.
                         self.nodes[next_child_idx as usize].x_dead = true;
                         self.x.removed += 1;
                         return false;
@@ -854,6 +1030,15 @@ impl BlastIntervalTree {
                         } else {
                             self.nodes[root_idx].rightptr = 0;
                         }
+                        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:493-499
+                        // ```c
+                        //             else if (best_hsp == in_hsp) {
+                        //                 /* leaf gets removed */
+                        //                 if (target_offset < midpt)
+                        //                     root_node->leftptr = 0;
+                        // ```
+                        // The leaf unlink is the code above; the flag and the count only tell the grid index
+                        // that the leaf is gone.
                         self.nodes[next_child_idx as usize].x_dead = true;
                         self.x.removed += 1;
                         return false;
@@ -868,6 +1053,19 @@ impl BlastIntervalTree {
         }
     }
 
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:440-443,477-478
+    /// ```c
+    ///     if (which_end == eIntervalTreeLeft)
+    ///         target_offset = in_q_start + in_hsp->query.offset;
+    ///     else
+    ///         target_offset = in_q_start + in_hsp->query.end;
+    /// ...
+    ///         if (tmp_index == 0)
+    ///             return FALSE;
+    /// ```
+    /// `s_IntervalTreeHasHSPEndpoint` only acts on tree HSPs with the same start (or end)
+    /// point as the input. If the point set has no such point the walk finds nothing, unlinks
+    /// nothing and returns FALSE, so it is skipped. Otherwise the unchanged walk runs.
     /// EXPERIMENT (LOSAT_X_ITREEFAST): `interval_tree_has_hsp_endpoint`,
     /// skipped when no HSP ever added has the input's start (or end) point.
     fn x_has_hsp_endpoint(
@@ -908,6 +1106,22 @@ impl BlastIntervalTree {
         false
     }
 
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:816-831,889-899
+    /// ```c
+    ///     if (in_q_start != tree_q_start)
+    ///         return FALSE;
+    ///
+    ///     if (in_hsp->score <= tree_hsp->score &&
+    ///         SIGN(in_hsp->subject.frame) == SIGN(tree_hsp->subject.frame) &&
+    /// ...
+    ///             if (s_HSPIsContained(in_hsp, in_q_start,
+    ///                                  tmp_node->hsp, tmp_node->leftptr,
+    ///                                  min_diag_separation)) {
+    /// ```
+    /// Tests the leaves listed in the grid cell of the input's start point with the same
+    /// predicate (`is_hsp_contained`). Any tree HSP that contains the input contains its
+    /// start point, so it is listed in that cell. Which container is returned can differ from
+    /// the walk; whether there is one does not.
     /// EXPERIMENT (LOSAT_X_ITREEFAST): a linked tree HSP that contains `hsp`,
     /// from the grid cell of the start point of `hsp`.
     fn x_find_container(
@@ -982,6 +1196,15 @@ impl BlastIntervalTree {
                 (query_start + hsp.query_offset, query_start + hsp.query_end)
             };
 
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:558-561
+        // ```c
+        //     if (index_method == eQueryAndSubject) {
+        //
+        //         ASSERT(hsp->subject.offset >= tree->s_min);
+        //         ASSERT(hsp->subject.end <= tree->s_max);
+        // ```
+        // NCBI looks for common end points only in this mode. The side indexes are built for it
+        // and are dropped (`usable = false`) for any other mode.
         // EXPERIMENT (LOSAT_X_ITREEFAST): the side indexes describe trees
         // built with eQueryAndSubject only.
         if index_method != IndexMethod::QueryAndSubject {
@@ -993,6 +1216,19 @@ impl BlastIntervalTree {
         // For eQueryAndSubject, check for common endpoints before adding
         if index_method == IndexMethod::QueryAndSubject {
             // Check left endpoint
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:577-584
+            // ```c
+            //         if (s_IntervalTreeHasHSPEndpoint(tree, hsp, query_start,
+            //                                          eIntervalTreeLeft)) {
+            //             return retval;
+            //         }
+            //         if (s_IntervalTreeHasHSPEndpoint(tree, hsp, query_start,
+            //                                          eIntervalTreeRight)) {
+            //             return retval;
+            // ```
+            // Dispatch point of LOSAT_X_ITREEFAST (both calls below). `x_has_hsp_endpoint` runs the
+            // ported `interval_tree_has_hsp_endpoint` unless the point set shows it cannot find
+            // anything.
             if self.x_has_hsp_endpoint(&hsp, query_start, IntervalDirection::Left, x_on) {
                 return; // Better HSP with same endpoint already exists
             }
@@ -1004,6 +1240,19 @@ impl BlastIntervalTree {
 
         // NCBI reference: blast_itree.c:591-599
         // Encapsulate the input HSP in an SIntervalNode (leaf node)
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:591-599
+        // ```c
+        //     /* encapsulate the input HSP in an SIntervalNode */
+        //     root_index = 0;
+        //     new_index = s_IntervalNodeInit(tree, 0, eIntervalTreeNeither, &retval);
+        // ...
+        //     nodes[new_index].leftptr = query_start;
+        //     nodes[new_index].midptr = 0;
+        //     nodes[new_index].hsp = hsp;
+        // ```
+        // After NCBI creates the leaf, the side indexes list it in the grid cells of its box and
+        // add its start and end points to the point set. The tree insertion that follows is
+        // unchanged.
         let new_index = self.alloc_leaf_node(hsp, query_start);
         if x_on {
             self.x.register(new_index, &hsp, query_start);
@@ -1343,6 +1592,22 @@ impl BlastIntervalTree {
         query_context_offset: i32,
         min_diag_separation: i32,
     ) -> Option<TreeHsp> {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:931-935,952,992-994
+        // ```c
+        // BlastIntervalTreeContainsHSP(const BlastIntervalTree *tree,
+        //                              const BlastHSP *hsp,
+        //                              const BlastQueryInfo *query_info,
+        //                              Int4 min_diag_separation)
+        // ...
+        //     while (node->hsp == NULL) {
+        // ...
+        //     return s_HSPIsContained(hsp, query_start,
+        //                             node->hsp, node->leftptr,
+        //                             min_diag_separation);
+        // ```
+        // Dispatch point of LOSAT_X_ITREEFAST / LOSAT_X_ITREESHADOW. `containing_hsp_tree` below
+        // ports this function. The grid answers the same yes/no question (mode 1). In mode 2
+        // the walk also runs, `assert!` compares the two answers, and the walk's result is used.
         // EXPERIMENT (LOSAT_X_ITREEFAST / LOSAT_X_ITREESHADOW)
         if self.x.usable {
             let found = self.x_find_container(hsp, query_context_offset, min_diag_separation);
@@ -1361,6 +1626,22 @@ impl BlastIntervalTree {
         self.containing_hsp_tree(hsp, query_context_offset, min_diag_separation)
     }
 
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:952-988
+    /// ```c
+    ///     while (node->hsp == NULL) {
+    /// ...
+    ///         tmp_index = node->midptr;
+    ///         if (tmp_index > 0) {
+    ///             if (s_MidpointTreeContainsHSP(tree, tmp_index,
+    /// ...
+    ///         middle = ((Int8) node->leftend + (Int8) node->rightend) / 2;
+    ///         if (region_end < middle)
+    ///             tmp_index = node->leftptr;
+    ///         else if (region_start > middle)
+    ///             tmp_index = node->rightptr;
+    /// ```
+    /// The previous body of `containing_hsp`, moved here unchanged: the port of the
+    /// walk, which runs when no switch is set.
     /// The tree walk of `containing_hsp`.
     fn containing_hsp_tree(
         &self,
@@ -1727,6 +2008,17 @@ mod tests {
         }
     }
 
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:577-584,931-935,992-994
+    /// ```c
+    ///         if (s_IntervalTreeHasHSPEndpoint(tree, hsp, query_start,
+    ///                                          eIntervalTreeLeft)) {
+    /// ...
+    /// BlastIntervalTreeContainsHSP(const BlastIntervalTree *tree,
+    /// ...
+    ///     return s_HSPIsContained(hsp, query_start,
+    /// ```
+    /// The test feeds the same random HSPs to trees that use the walk, the side indexes, and
+    /// both. It compares every containment answer and the final trees.
     /// EXPERIMENT (LOSAT_X_ITREEFAST): three trees are fed the same random
     /// HSPs, one walking the tree only, one using the side indexes, and one
     /// doing both and comparing inside every call. Every containment answer

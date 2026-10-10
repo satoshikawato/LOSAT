@@ -1435,6 +1435,7 @@ fn factor_ltriang_pos_def(a: &mut [Vec<f64>], n: usize) {
 
 // EXPERIMENT (LOSAT_X_COMPFAST / LOSAT_X_COMPSHADOW): 0 = original loops, 1 = reordered loops,
 // 2 = reordered loops checked bit-for-bit against the original on every call.
+// No NCBI counterpart: reads LOSAT_X_COMPFAST and LOSAT_X_COMPSHADOW once. It chooses, for each function below that has a reordered variant, between the original loops, the reordered loops, or both with a bitwise comparison; it does not change any value NCBI computes.
 pub(crate) fn x_comp_mode() -> u8 {
     use std::sync::OnceLock;
     static MODE: OnceLock<u8> = OnceLock::new();
@@ -1449,6 +1450,13 @@ pub(crate) fn x_comp_mode() -> u8 {
     })
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:725-727
+// ```c
+//     n  = alphsize * alphsize;
+//     mA = 2 * alphsize - 1;
+//     m  = constrain_rel_entropy ? mA + 1 : mA;
+// ```
+// The stride is `m` for `alphsize == 20` and `constrain_rel_entropy` (the size of `W`).
 /// Column stride of the column-major copy of the Newton matrix.
 const X_WC_STRIDE: usize = 2 * COMPO_NUM_TRUE_AA;
 
@@ -1478,6 +1486,27 @@ const X_WC_STRIDE: usize = 2 * COMPO_NUM_TRUE_AA;
 // which *different* elements are advanced changes: after column k is final it
 // is subtracted from all later columns, whose elements are independent of each
 // other, so the innermost loop has no loop-carried dependency.
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:143-156
+// ```c
+//     for (i = 0;  i < n;  i++) {
+//         for (j = 0;  j < i;  j++) {
+//             temp = A[i][j];
+//             for (k = 0;  k < j;  k++) {
+//                 temp -= A[i][k] * A[j][k];
+//             }
+//             A[i][j] = temp/A[j][j];
+//         }
+//         temp = A[i][i];
+//         for (k = 0;  k < i;  k++) {
+//             temp -= A[i][k] * A[i][k];
+//         }
+//         A[i][i] = sqrt(temp);
+//     }
+// ```
+// (The line numbers in the older comment above are for a different revision; these are the pinned ones.)
+// The loop nest is interchanged: column k is finished and then subtracted from every later
+// column. Element (i, j) still receives its subtractions for k = 0..j-1 in order, then the division
+// or square root.
 fn x_factor_ltriang_pos_def_cols(a: &mut [Vec<f64>], n: usize, wc: &mut [f64]) {
     let s = X_WC_STRIDE;
     debug_assert!(n <= s && wc.len() >= s * s && s % 2 == 0);
@@ -1628,6 +1657,24 @@ fn x_factor_ltriang_pos_def_cols(a: &mut [Vec<f64>], n: usize, wc: &mut [f64]) {
 // ```
 // x[i] still receives `-= L[i][j] * x[j]` for j = 0, ..., i-1 in that order
 // and is then divided by L[i][i]; the second loop is unchanged.
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:171-184
+// ```c
+//     for (i = 0;  i < n;  i++) {
+//         temp = x[i];
+//         for (j = 0;  j < i;  j++) {
+//             temp -= L[i][j] * x[j];
+//         }
+//         x[i] = temp/L[i][i];
+//     }
+//     /* Now x = z.  Back solve the system L\T y = z */
+//     for (j = n - 1;  j >= 0;  j--) {
+//         x[j] /= L[j][j];
+//         for (i = 0;  i < j;  i++) {
+//             x[i] -= L[j][i] * x[j];
+//         }
+//     }
+// ```
+// Forward substitution is done by columns; the back substitution is the reference loop.
 fn x_solve_ltriang_pos_def_cols(x: &mut [f64], n: usize, l: &[Vec<f64>], wc: &[f64]) {
     let s = X_WC_STRIDE;
     for j in 0..n {
@@ -1704,6 +1751,24 @@ fn add_vectors(y: &mut [f64], alpha: f64, x: &[f64]) {
 // double Nlm_StepBound(const double x[], int n, const double step_x[], double max)
 // ```
 fn step_bound(x: &[f64], step_x: &[f64], max: f64) -> f64 {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:224-238
+    // ```c
+    // double
+    // Nlm_StepBound(const double x[], int n, const double step_x[], double max)
+    // {
+    //     int i;                 /* iteration index */
+    //     double alpha = max;    /* current largest permitted step */
+    //     for (i = 0; i < n; i++) {
+    //         double alpha_i;    /* a step to the boundary for the current i */
+    //         alpha_i = -x[i] / step_x[i];
+    //         if (alpha_i >= 0 && alpha_i < alpha) {
+    //             alpha = alpha_i;
+    //         }
+    //     }
+    //     return alpha;
+    // ```
+    // Dispatch point of LOSAT_X_COMPFAST / LOSAT_X_COMPSHADOW: the reference path is
+    // `step_bound_reference`, the port of this function.
     let mode = x_comp_mode();
     if mode != 0 && x.len() <= 400 && x.len() == step_x.len() {
         let fast = x_step_bound(x, step_x, max);
@@ -1719,6 +1784,18 @@ fn step_bound(x: &[f64], step_x: &[f64], max: f64) -> f64 {
     step_bound_reference(x, step_x, max)
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:230-238
+// ```c
+//     for (i = 0; i < n; i++) {
+//         double alpha_i;    /* a step to the boundary for the current i */
+//         alpha_i = -x[i] / step_x[i];
+//         if (alpha_i >= 0 && alpha_i < alpha) {
+//             alpha = alpha_i;
+//         }
+//     }
+//     return alpha;
+// ```
+// The quotients are computed first and then scanned in the original order with the same test.
 // EXPERIMENT: `Nlm_StepBound`. The quotients do not depend on each other;
 // compute them first, then scan them in the original order.
 fn x_step_bound(x: &[f64], step_x: &[f64], max: f64) -> f64 {
@@ -1735,6 +1812,23 @@ fn x_step_bound(x: &[f64], step_x: &[f64], max: f64) -> f64 {
     alpha
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:224-238
+// ```c
+// double
+// Nlm_StepBound(const double x[], int n, const double step_x[], double max)
+// {
+//     int i;                 /* iteration index */
+//     double alpha = max;    /* current largest permitted step */
+//     for (i = 0; i < n; i++) {
+//         double alpha_i;    /* a step to the boundary for the current i */
+//         alpha_i = -x[i] / step_x[i];
+//         if (alpha_i >= 0 && alpha_i < alpha) {
+//             alpha = alpha_i;
+//         }
+//     }
+//     return alpha;
+// ```
+// The original `step_bound`, renamed; it is the port of this function.
 fn step_bound_reference(x: &[f64], step_x: &[f64], max: f64) -> f64 {
     let mut alpha = max;
     for (&x_i, &step_i) in x.iter().zip(step_x.iter()) {
@@ -2289,6 +2383,18 @@ fn scores_std_alphabet(
     scores_std_alphabet_round(&scores, matrix_info)
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:779-788
+// ```c
+//     s_UnpackLetterProbs(RowProb, Alphsize, row_prob);
+//     s_SetPairAmbigProbsToSum(RowProb, Alphsize);
+//     s_UnpackLetterProbs(ColProb, Alphsize, col_prob);
+//     s_SetPairAmbigProbsToSum(ColProb, Alphsize);
+//     Blast_TrueAaToStdTargetFreqs(Scores, Alphsize, target_freq);
+//     Blast_CalcFreqRatios(Scores, Alphsize, RowProb, ColProb);
+//     Blast_FreqRatioToScore(Scores, Alphsize, Alphsize, Lambda);
+//     s_SetXUOScores(Scores, Alphsize, RowProb, ColProb);
+// ```
+// This function ports lines 779-788 of `s_ScoresStdAlphabet`; `scores_std_alphabet_round` ports lines 790-796.
 /// The part of `s_ScoresStdAlphabet` before the scores are rounded.
 fn scores_std_alphabet_unrounded(
     target_freq: &[[f64; COMPO_NUM_TRUE_AA]; COMPO_NUM_TRUE_AA],
@@ -2306,6 +2412,22 @@ fn scores_std_alphabet_unrounded(
     let mut scores = [[0.0; COMPO_LARGEST_ALPHABET]; COMPO_LARGEST_ALPHABET];
     true_aa_to_std_target_freqs(&mut scores, target_freq);
     calc_freq_ratios(&mut scores, &row_prob_std, &col_prob_std);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:403-413
+    // ```c
+    // Blast_FreqRatioToScore(double ** matrix, int rows, int cols, double Lambda)
+    // {
+    //     int i;
+    //     for (i = 0;  i < rows;  i++) {
+    //         int j;
+    //         for (j = 0;  j < cols;  j++) {
+    //             if (0.0 == matrix[i][j]) {
+    //                 matrix[i][j] = COMPO_SCORE_MIN;
+    //             } else {
+    //                 matrix[i][j] = log(matrix[i][j])/Lambda;
+    //             }
+    // ```
+    // `Blast_FreqRatioToScore`: every non-zero entry becomes `log(entry) / Lambda`. The logs of all non-zero
+    // entries are computed first in one slice call, then divided by Lambda in the same entry order.
     // ln of every non-zero ratio (through x_logclone::log_slice: libm unless
     // LOSAT_X_LOGCLONE is set), then / Lambda, as Blast_FreqRatioToScore does.
     let mut ratios = [0.0f64; COMPO_LARGEST_ALPHABET * COMPO_LARGEST_ALPHABET];
@@ -2335,6 +2457,15 @@ fn scores_std_alphabet_unrounded(
     scores
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:790-796
+// ```c
+//     s_RoundScoreMatrix(Matrix, Alphsize, Alphsize, Scores);
+//     Nlm_DenseMatrixFree(&Scores);
+//     for (i = 0;  i < Alphsize;  i++) {
+//         Matrix[i][eStopChar] = StartMatrix[i][eStopChar];
+//         Matrix[eStopChar][i] = StartMatrix[eStopChar][i];
+//     }
+// ```
 /// The rounding and the stop-codon scores of `s_ScoresStdAlphabet`.
 fn scores_std_alphabet_round(
     scores: &[[f64; COMPO_LARGEST_ALPHABET]; COMPO_LARGEST_ALPHABET],
@@ -2348,12 +2479,15 @@ fn scores_std_alphabet_round(
     AdjustedProteinMatrix { scores: rounded }
 }
 
+// No NCBI counterpart: reads LOSAT_X_ADJMEMO_STATS once; it does not change any value NCBI computes.
 fn x_adjmemo_enabled() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| std::env::var_os("LOSAT_X_ADJMEMO_STATS").is_some())
 }
+// No NCBI counterpart: call counter and set of hashed inputs for the LOSAT_X_ADJMEMO_STATS report; it does not change any value NCBI computes.
 static X_ADJMEMO: std::sync::Mutex<Option<(u64, std::collections::HashSet<u64>)>> =
     std::sync::Mutex::new(None);
+// No NCBI counterpart: counts calls of `Blast_AdjustScores` that reach the matrix adjustment, and distinct inputs; it does not change any value NCBI computes.
 fn x_adjmemo_record(
     query_composition: &BlastAminoAcidComposition,
     subject_composition: &BlastAminoAcidComposition,
@@ -2379,10 +2513,12 @@ fn x_adjmemo_record(
     entry.0 += 1;
     entry.1.insert(key);
 }
+// No NCBI counterpart: counter of the shadow comparisons; it does not change any value NCBI computes.
 /// Calls compared with the reference by LOSAT_X_NEWTONEXACTSHADOW.
 pub(crate) static X_NEWTONEXACT_SHADOWED: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(0);
 
+// No NCBI counterpart: prints the shadow counter; it does not change any value NCBI computes.
 /// Shadow-mode summary (printed by `main` at exit).
 pub fn x_newtonexact_print_stats() {
     if super::x_newton_exact::mode() == 2 {
@@ -2393,6 +2529,7 @@ pub fn x_newtonexact_print_stats() {
     }
 }
 
+// No NCBI counterpart: prints the LOSAT_X_ADJMEMO_STATS counters; it does not change any value NCBI computes.
 pub fn x_adjmemo_print_stats() {
     if !x_adjmemo_enabled() {
         return;
@@ -2412,6 +2549,21 @@ pub fn x_adjmemo_print_stats() {
 // static void ScaledSymmetricProductA(double ** W, const double diagonal[], int alphsize)
 // ```
 fn scaled_symmetric_product_a(w: &mut [Vec<f64>], diagonal: &[f64], alphsize: usize) {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:126-137
+    // ```c
+    //     for (i = 0;  i < alphsize;  i++) {
+    //         for (j = 0;  j < alphsize;  j++) {
+    //             double dd;     /* an individual diagonal element */
+    //             dd = diagonal[i * alphsize + j];
+    //             W[j][j] += dd;
+    //             if (i > 0) {
+    //                 W[i + alphsize - 1][j] += dd;
+    //                 W[i + alphsize - 1][i + alphsize - 1] += dd;
+    //             }
+    //         }
+    // ```
+    // Dispatch point of LOSAT_X_COMPFAST / LOSAT_X_COMPSHADOW: the reference path is
+    // `scaled_symmetric_product_a_reference`, the port of this function.
     match x_comp_mode() {
         1 if alphsize <= COMPO_NUM_TRUE_AA => {
             return x_scaled_symmetric_product_a(w, diagonal, alphsize)
@@ -2455,6 +2607,20 @@ fn scaled_symmetric_product_a(w: &mut [Vec<f64>], diagonal: &[f64], alphsize: us
 // W[j][j] still accumulates dd for i = 0, 1, ... in order starting from 0.0,
 // W[i+alphsize-1][i+alphsize-1] accumulates for j = 0, 1, ... in order starting
 // from 0.0, and every W[i+alphsize-1][j] is the single sum 0.0 + dd.
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:126-137
+// ```c
+//     for (i = 0;  i < alphsize;  i++) {
+//         for (j = 0;  j < alphsize;  j++) {
+//             double dd;     /* an individual diagonal element */
+//             dd = diagonal[i * alphsize + j];
+//             W[j][j] += dd;
+//             if (i > 0) {
+//                 W[i + alphsize - 1][j] += dd;
+//                 W[i + alphsize - 1][i + alphsize - 1] += dd;
+//             }
+//         }
+// ```
+// (The line numbers in the older comment above are for a different revision; these are the pinned ones.)
 fn x_scaled_symmetric_product_a(w: &mut [Vec<f64>], diagonal: &[f64], alphsize: usize) {
     let n = alphsize;
     let m = 2 * n - 1;
@@ -2485,6 +2651,18 @@ fn x_scaled_symmetric_product_a(w: &mut [Vec<f64>], diagonal: &[f64], alphsize: 
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:112-113,121-125
+// ```c
+// static void
+// ScaledSymmetricProductA(double ** W, const double diagonal[], int alphsize)
+// ...
+//     for (rowW = 0;  rowW < m;  rowW++) {
+//         for (colW = 0;  colW <= rowW;  colW++) {
+//             W[rowW][colW] = 0.0;
+//         }
+//     }
+// ```
+// The original `scaled_symmetric_product_a`, renamed; it is the port of this function.
 fn scaled_symmetric_product_a_reference(w: &mut [Vec<f64>], diagonal: &[f64], alphsize: usize) {
     let m = 2 * alphsize - 1;
     for (row_idx, row) in w.iter_mut().enumerate().take(m) {
@@ -2520,6 +2698,20 @@ fn scaled_symmetric_product_a_reference(w: &mut [Vec<f64>], diagonal: &[f64], al
 //     }
 // }
 // ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:170-179
+// ```c
+//     for (i = 0;  i < alphsize;  i++) {
+//         for (j = 0;  j < alphsize;  j++) {
+//             y[j] += alpha * x[i * alphsize + j];
+//         }
+//     }
+//     for (i = 1;  i < alphsize;  i++) {
+//         for (j = 0;  j < alphsize;  j++) {
+//             y[i + alphsize - 1] += alpha * x[i * alphsize + j];
+//         }
+//     }
+// ```
+// (The line numbers in the older comment above are for a different revision; these are the pinned ones.)
 fn x_multiply_by_a(beta: f64, y: &mut [f64], alphsize: usize, alpha: f64, x: &[f64]) {
     if beta == 0.0 {
         for value in y.iter_mut() {
@@ -2586,6 +2778,19 @@ fn x_multiply_by_a(beta: f64, y: &mut [f64], alphsize: usize, alpha: f64, x: &[f
 //     }
 // }
 // ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:214-223
+// ```c
+//     for (i = 0;  i < alphsize;  i++) {
+//         for (j = 0;  j < alphsize;  j++) {
+//             k = i * alphsize + j;
+//             y[k] += alpha * x[j];
+//             if (i > 0) {
+//                 y[k] += alpha * x[i + alphsize - 1];
+//             }
+//         }
+//     }
+// ```
+// (The line numbers in the older comment above are for a different revision; these are the pinned ones.)
 fn x_multiply_by_at(beta: f64, y: &mut [f64], alphsize: usize, alpha: f64, x: &[f64]) {
     if beta == 0.0 {
         for value in y.iter_mut() {
@@ -2619,6 +2824,21 @@ fn x_multiply_by_at(beta: f64, y: &mut [f64], alphsize: usize, alpha: f64, x: &[
 // static void MultiplyByA(double beta, double y[], int alphsize, double alpha, const double x[])
 // ```
 fn multiply_by_a(beta: f64, y: &mut [f64], alphsize: usize, alpha: f64, x: &[f64]) {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:170-179
+    // ```c
+    //     for (i = 0;  i < alphsize;  i++) {
+    //         for (j = 0;  j < alphsize;  j++) {
+    //             y[j] += alpha * x[i * alphsize + j];
+    //         }
+    //     }
+    //     for (i = 1;  i < alphsize;  i++) {
+    //         for (j = 0;  j < alphsize;  j++) {
+    //             y[i + alphsize - 1] += alpha * x[i * alphsize + j];
+    //         }
+    //     }
+    // ```
+    // Dispatch point of LOSAT_X_COMPFAST / LOSAT_X_COMPSHADOW: the reference path is
+    // `multiply_by_a_reference`, the port of this function.
     match x_comp_mode() {
         1 => return x_multiply_by_a(beta, y, alphsize, alpha, x),
         2 => {
@@ -2639,6 +2859,25 @@ fn multiply_by_a(beta: f64, y: &mut [f64], alphsize: usize, alpha: f64, x: &[f64
     multiply_by_a_reference(beta, y, alphsize, alpha, x)
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:154-157,170-179
+// ```c
+// static void
+// MultiplyByA(double beta, double y[], int alphsize,
+//             double alpha, const double x[])
+// {
+// ...
+//     for (i = 0;  i < alphsize;  i++) {
+//         for (j = 0;  j < alphsize;  j++) {
+//             y[j] += alpha * x[i * alphsize + j];
+//         }
+//     }
+//     for (i = 1;  i < alphsize;  i++) {
+//         for (j = 0;  j < alphsize;  j++) {
+//             y[i + alphsize - 1] += alpha * x[i * alphsize + j];
+//         }
+//     }
+// ```
+// The original `multiply_by_a`, renamed; it is the port of this function.
 fn multiply_by_a_reference(beta: f64, y: &mut [f64], alphsize: usize, alpha: f64, x: &[f64]) {
     if beta == 0.0 {
         for value in y.iter_mut() {
@@ -2667,6 +2906,20 @@ fn multiply_by_a_reference(beta: f64, y: &mut [f64], alphsize: usize, alpha: f64
 //                                  double alpha, const double x[])
 // ```
 fn multiply_by_at(beta: f64, y: &mut [f64], alphsize: usize, alpha: f64, x: &[f64]) {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:214-223
+    // ```c
+    //     for (i = 0;  i < alphsize;  i++) {
+    //         for (j = 0;  j < alphsize;  j++) {
+    //             k = i * alphsize + j;
+    //             y[k] += alpha * x[j];
+    //             if (i > 0) {
+    //                 y[k] += alpha * x[i + alphsize - 1];
+    //             }
+    //         }
+    //     }
+    // ```
+    // Dispatch point of LOSAT_X_COMPFAST / LOSAT_X_COMPSHADOW: the reference path is
+    // `multiply_by_at_reference`, the port of this function.
     match x_comp_mode() {
         1 => return x_multiply_by_at(beta, y, alphsize, alpha, x),
         2 => {
@@ -2687,6 +2940,23 @@ fn multiply_by_at(beta: f64, y: &mut [f64], alphsize: usize, alpha: f64, x: &[f6
     multiply_by_at_reference(beta, y, alphsize, alpha, x)
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:195-197,214-223
+// ```c
+// static void
+// MultiplyByAtranspose(double beta, double y[], int alphsize,
+//                      double alpha, const double x[])
+// ...
+//     for (i = 0;  i < alphsize;  i++) {
+//         for (j = 0;  j < alphsize;  j++) {
+//             k = i * alphsize + j;
+//             y[k] += alpha * x[j];
+//             if (i > 0) {
+//                 y[k] += alpha * x[i + alphsize - 1];
+//             }
+//         }
+//     }
+// ```
+// The original `multiply_by_at`, renamed; it is the port of this function.
 fn multiply_by_at_reference(beta: f64, y: &mut [f64], alphsize: usize, alpha: f64, x: &[f64]) {
     if beta == 0.0 {
         for value in y.iter_mut() {
@@ -2790,6 +3060,7 @@ struct ReNewtonSystem {
     alphsize: usize,
     constrain_rel_entropy: bool,
     // EXPERIMENT: column-major copy of the factor (see x_factor_ltriang_pos_def_cols).
+    // No NCBI counterpart: a column-major copy of the lower triangle of `W` after the factorisation, and a flag that says whether it is current; it does not change any value NCBI computes.
     x_wc: Vec<f64>,
     x_wc_valid: bool,
     w: Vec<Vec<f64>>,
@@ -2805,6 +3076,7 @@ fn re_newton_system_new(alphsize: usize) -> ReNewtonSystem {
     ReNewtonSystem {
         alphsize,
         constrain_rel_entropy: true,
+        // No NCBI counterpart: the copy is allocated only when LOSAT_X_COMPFAST or LOSAT_X_COMPSHADOW is set; it does not change any value NCBI computes.
         x_wc: if x_comp_mode() != 0 {
             vec![0.0; X_WC_STRIDE * X_WC_STRIDE]
         } else {
@@ -2840,6 +3112,15 @@ fn factor_re_newton_system(
     newton_system.constrain_rel_entropy = constrain_rel_entropy;
     if constrain_rel_entropy {
         let eta = z[m - 1];
+        // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:507-510
+        // ```c
+        //         eta = z[m - 1];
+        //         for (i = 0;  i < n;  i++) {
+        //             Dinv[i] = x[i] / (1 - eta);
+        //         }
+        // ```
+        // Dispatch point of LOSAT_X_COMPFAST: the reference path is the loop in the `else` branch. The
+        // divisor `1 - eta` is the same value for every element, so computing it once gives the same quotients.
         if x_comp_mode() == 1 {
             // Same quotient per element; the divisor is the same value each time.
             let divisor = 1.0 - eta;
@@ -2871,6 +3152,22 @@ fn factor_re_newton_system(
             workspace,
         );
     }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:534-534
+    // ```c
+    //     Nlm_FactorLtriangPosDef(W, m);
+    // ```
+    // Dispatch point of LOSAT_X_COMPFAST / LOSAT_X_COMPSHADOW: the reference path is the
+    // `factor_ltriang_pos_def` call at the end of this function.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:143-149
+    // ```c
+    //     for (i = 0;  i < n;  i++) {
+    //         for (j = 0;  j < i;  j++) {
+    //             temp = A[i][j];
+    //             for (k = 0;  k < j;  k++) {
+    //                 temp -= A[i][k] * A[j][k];
+    //             }
+    //             A[i][j] = temp/A[j][j];
+    // ```
     newton_system.x_wc_valid = false;
     if m <= X_WC_STRIDE {
         match x_comp_mode() {
@@ -2929,6 +3226,22 @@ fn solve_re_newton_system(
             z[m - 1] -= newton_system.grad_re[i] * workspace[i];
         }
     }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:587-587
+    // ```c
+    //     Nlm_SolveLtriangPosDef(z, m, W);
+    // ```
+    // Dispatch point of LOSAT_X_COMPFAST / LOSAT_X_COMPSHADOW: the reference path is the
+    // `solve_ltriang_pos_def` call in the `else` branch.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:171-177
+    // ```c
+    //     for (i = 0;  i < n;  i++) {
+    //         temp = x[i];
+    //         for (j = 0;  j < i;  j++) {
+    //             temp -= L[i][j] * x[j];
+    //         }
+    //         x[i] = temp/L[i][i];
+    //     }
+    // ```
     if newton_system.x_wc_valid {
         if x_comp_mode() == 2 {
             let mut check = z[..m].to_vec();
@@ -3019,9 +3332,23 @@ fn optimize_target_frequencies(
 ) -> i32 {
     // EXPERIMENT (LOSAT_X_NEWTONEXACT): the same iteration, bit for bit, in
     // fixed-size storage (see x_newton_exact.rs).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:686-687,693-696
+    // ```c
+    // int
+    // Blast_OptimizeTargetFrequencies(double x[],
+    // ...
+    //                                 int constrain_rel_entropy,
+    //                                 double relative_entropy,
+    //                                 double tol,
+    //                                 int maxits)
+    // ```
+    // Dispatch point of LOSAT_X_NEWTONEXACT / LOSAT_X_NEWTONEXACTSHADOW: the reference path is
+    // `optimize_target_frequencies_reference`, the port of this function. The exact module handles only
+    // `alphsize == 20` with `constrain_rel_entropy`.
     if constrain_rel_entropy && alphsize == COMPO_NUM_TRUE_AA {
         match super::x_newton_exact::mode() {
             1 => {
+                // No NCBI counterpart: call counter and timer of the xstats report; it does not change any value NCBI computes.
                 let x_t0 = crate::utils::xstats::now();
                 crate::utils::xstats::add(&crate::utils::xstats::COMPO_ADJ_CALLS, 1);
                 let status = super::x_newton_exact::optimize_target_frequencies_exact(
@@ -3031,10 +3358,23 @@ fn optimize_target_frequencies(
                     col_sums,
                     relative_entropy,
                 );
+                // No NCBI counterpart: timer of the xstats report; it does not change any value NCBI computes.
                 crate::utils::xstats::add_ns(&crate::utils::xstats::COMPO_NS, x_t0);
                 return status;
             }
             2 => {
+                // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:686-687,693-696
+                // ```c
+                // int
+                // Blast_OptimizeTargetFrequencies(double x[],
+                // ...
+                //                                 int constrain_rel_entropy,
+                //                                 double relative_entropy,
+                //                                 double tol,
+                //                                 int maxits)
+                // ```
+                // Shadow mode runs the exact module and the reference port on the same input and compares status
+                // and every target frequency by bits.
                 X_NEWTONEXACT_SHADOWED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 let mut x_fast = vec![0.0f64; x.len()];
                 let status_fast = super::x_newton_exact::optimize_target_frequencies_exact(
@@ -3079,6 +3419,22 @@ fn optimize_target_frequencies(
     )
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:686-687,693-697,745-748
+// ```c
+// int
+// Blast_OptimizeTargetFrequencies(double x[],
+// ...
+//                                 int constrain_rel_entropy,
+//                                 double relative_entropy,
+//                                 double tol,
+//                                 int maxits)
+// {
+// ...
+//     ComputeScoresFromProbs(old_scores, alphsize, q, row_sums, col_sums);
+//     /* Use q as the initial value for x */
+//     memcpy(x, q, n * sizeof(double));
+// ```
+// The original `optimize_target_frequencies`, renamed; it is the port of this function.
 fn optimize_target_frequencies_reference(
     x: &mut [f64],
     alphsize: usize,
@@ -3091,6 +3447,7 @@ fn optimize_target_frequencies_reference(
     let n = alphsize * alphsize;
     let ma = 2 * alphsize - 1;
     let m = if constrain_rel_entropy { ma + 1 } else { ma };
+    // No NCBI counterpart: call counter and timer of the xstats report; it does not change any value NCBI computes.
     let x_t0 = crate::utils::xstats::now();
     crate::utils::xstats::add(&crate::utils::xstats::COMPO_ADJ_CALLS, 1);
 
@@ -3135,6 +3492,7 @@ fn optimize_target_frequencies_reference(
         }
         its += 1;
         if its <= K_COMPO_ADJUST_ITERATION_LIMIT {
+            // No NCBI counterpart: Newton iteration counter of the xstats report; it does not change any value NCBI computes.
             crate::utils::xstats::add(&crate::utils::xstats::NEWTON_ITERS, 1);
             factor_re_newton_system(
                 &mut newton_system,
@@ -3165,6 +3523,7 @@ fn optimize_target_frequencies_reference(
     //     }
     // }
     // ```
+    // No NCBI counterpart: timer of the xstats report; it does not change any value NCBI computes.
     crate::utils::xstats::add_ns(&crate::utils::xstats::COMPO_NS, x_t0);
     let converged = its <= K_COMPO_ADJUST_ITERATION_LIMIT
         && rnorm <= K_COMPO_ADJUST_ERR_TOLERANCE
@@ -3351,6 +3710,18 @@ pub(crate) fn blast_adjust_scores(
     if matrix_adjust_rule != EMatrixAdjustRule::CompoScaleOldMatrix {
         // EXPERIMENT (LOSAT_X_ADJMEMO_STATS): how often the same inputs recur
         // (a memo of the adjusted matrix would be exact: the function is pure).
+        // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/composition_adjustment.c:1501-1507
+        // ```c
+        //     if (eCompoScaleOldMatrix != *matrix_adjust_rule) {
+        //         /* Try matrix optimization, if it fails to converge, we
+        //            fall back to traditional scaling below */
+        //         int status =
+        //             Blast_CompositionMatrixAdj(matrix,
+        //                                        alphsize,
+        //                                        *matrix_adjust_rule,
+        // ```
+        // No NCBI counterpart: LOSAT_X_ADJMEMO_STATS counts how many times the call that follows (the port of
+        // `Blast_CompositionMatrixAdj`) is made and with how many distinct inputs; it does not change any value NCBI computes.
         x_adjmemo_record(query_composition, subject_composition, matrix_adjust_rule);
         if let Some(adjusted_matrix) = composition_matrix_adjust(
             matrix_info,
@@ -3822,6 +4193,18 @@ mod tests {
         assert!((combined - (product * (1.0 - product.ln()))).abs() < 1.0e-12);
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:686-687,693-696
+    // ```c
+    // int
+    // Blast_OptimizeTargetFrequencies(double x[],
+    // ...
+    //                                 int constrain_rel_entropy,
+    //                                 double relative_entropy,
+    //                                 double tol,
+    //                                 int maxits)
+    // ```
+    // The ignored test times the port of this function against `optimize_target_frequencies_exact`
+    // and checks the last result bit for bit.
     /// Timing of the Newton kernels on realistic inputs (run with --ignored --nocapture;
     /// LOSAT_X_COMPFAST selects the reference variant, LOSAT_X_NEWTONEXACT_LEVEL the exact one).
     #[test]

@@ -337,6 +337,21 @@ impl SubjectSplitState {
     }
 }
 
+/// A zeroed diagonal table (NCBI calloc), with huge pages advised (LOSAT_X_THP).
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:145-146
+/// ```c
+/// diag_table->hit_level_array = (DiagStruct *)
+///     calloc(diag_table->diag_array_length, sizeof(DiagStruct));
+/// ```
+/// NCBI allocates the diagonal table with calloc once per extension-word structure. This returns
+/// the same zeroed table; with LOSAT_X_THP set it also asks the kernel for huge pages. Placement
+/// only: no cell value and no access order changes.
+fn x_new_diag_array(size: usize) -> Vec<DiagStruct> {
+    let mut v = vec![DiagStruct::default(); size];
+    crate::utils::x_hugepage::advise(&mut v);
+    v
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:162-173
 // ```c
 // Blast_ExtendWordExit(Blast_ExtendWord * ewp, Int4 subject_length)
@@ -350,13 +365,6 @@ impl SubjectSplitState {
 // }
 // ```
 #[inline]
-/// A zeroed diagonal table (NCBI calloc), with huge pages advised (LOSAT_X_THP).
-fn x_new_diag_array(size: usize) -> Vec<DiagStruct> {
-    let mut v = vec![DiagStruct::default(); size];
-    crate::utils::x_hugepage::advise(&mut v);
-    v
-}
-
 fn advance_tblastx_diag_offset(
     diag_offset: &mut i32,
     diag_array: &mut [DiagStruct],
@@ -960,6 +968,7 @@ fn search_cli(
     //            	return BLAST_EXIT_SUCCESS;
     //         }
     // ```
+    //
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:856-860
     // ```c++
     // 	char c;
@@ -1450,6 +1459,7 @@ fn write_tblastx_outputs(
     //     //get defline
     //     sdl->defline = CDeflineGenerator().GenerateDefline(m_ScopeRef->GetBioseqHandle(*(sdl->id)), sequence::CDeflineGenerator::fLeavePrefixSuffix);
     // ```
+    //
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2273
     // ```c++
     // 	alnDispParams->title = CDeflineGenerator().GenerateDefline(bsp_handle);
@@ -3049,6 +3059,18 @@ fn search_query_batch(
             let mut split_state = SubjectSplitState::new(s_aa_len);
             let max_dbseq_len = tblastx_max_dbseq_len_for_run();
 
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:502-516
+            // ```c
+            // while (scan_range[1] <= scan_range[2]) {
+            // ...
+            //     for (i = 0; i < hits; ++i) {
+            //         Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
+            //         Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
+            // ...
+            //         diag_coord = (query_offset - subject_offset) & diag_mask;
+            // ```
+            // This closure is the reference loop (only renamed from scan_chunk): the port of the C loop above.
+            // The dispatcher `scan_chunk` below chooses between it and `scan_chunk_bucketed`.
             let scan_chunk_plain = |chunk: SubjectChunk,
                                     offset_pairs: &mut [OffsetPair],
                                     diag_array: &mut [DiagStruct],
@@ -3597,6 +3619,20 @@ fn search_query_batch(
             // per-diagonal-range buckets and runs the same per-hit body (the macro
             // below, a copy of the loop body of `scan_chunk_plain`) bucket by bucket,
             // then puts the saved HSPs back into scan order.  See `x_seed_bucket`.
+            //
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:502-516
+            // ```c
+            // while (scan_range[1] <= scan_range[2]) {
+            // ...
+            //     for (i = 0; i < hits; ++i) {
+            //         Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
+            //         Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
+            // ...
+            //         diag_coord = (query_offset - subject_offset) & diag_mask;
+            // ```
+            // This variant ports the same C loop with one change of order: the hits of a scan call are
+            // grouped by range of diag_coord and processed range by range (see x_seed_bucket.rs).
+            // The order of the hits within one diagonal, and so every diagonal cell state, is as in C.
             let scan_chunk_bucketed = |chunk: SubjectChunk,
                                        offset_pairs: &mut [OffsetPair],
                                        diag_array: &mut [DiagStruct],
@@ -3640,6 +3676,30 @@ fn search_query_batch(
                 // (macro hygiene), so the body reads `init_hsps`, `seq_keys`, `stats` and
                 // `diag_array` of this closure directly.  `break 'hit` is the `continue`
                 // of the NCBI loop; `seq` is the hit's position in the scan stream.
+                //
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-606
+                // ```c
+                // diag_coord = (query_offset - subject_offset) & diag_mask;
+                // ...
+                // if (diag_array[diag_coord].flag) {
+                // ...
+                //     last_hit = diag_array[diag_coord].last_hit - diag_offset;
+                //     diff = subject_offset - last_hit;
+                // ...
+                //     if (diff >= window) {
+                // ...
+                //     score = s_BlastAaExtendTwoHit(matrix, subject, query,
+                // ...
+                //     if (score >= cutoffs->cutoff_score)
+                // ...
+                //     if (right_extend) {
+                //         diag_array[diag_coord].flag = 1;
+                //         diag_array[diag_coord].last_hit =
+                //             s_last_off - (wordsize - 1) + diag_offset;
+                // ```
+                // The macro body is the loop body of scan_chunk_plain, which ports the C body above statement
+                // for statement. The body reads and writes only diag_array[diag_coord], the sequences and the
+                // matrix, so applying it bucket by bucket gives each diagonal the same sequence of states.
                 macro_rules! x_two_hit_body {
                     ($qo:expr, $so:expr, $sq:expr) => {{
                     let query_offset: u32 = $qo;
@@ -4087,6 +4147,17 @@ fn search_query_batch(
                         // [C] for (i = 0; i < hits; ++i)
                         // The hits of this scan call are appended to the buckets and
                         // processed, bucket by bucket, when the buffer is full.
+                        //
+                        // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-516
+                        // ```c
+                        // for (i = 0; i < hits; ++i) {
+                        //     Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
+                        //     Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
+                        // ...
+                        //     diag_coord = (query_offset - subject_offset) & diag_mask;
+                        // ```
+                        // The C loop processes each offset pair here. This loop only appends the pairs to buckets,
+                        // numbering them in scan order (the number is used to restore that order).
                         let offset_pairs_ptr = offset_pairs.as_ptr();
                         for i in 0..hits as usize {
                             // SAFETY: i < hits, and hits <= offset_array_size (checked by scan)
@@ -4095,13 +4166,39 @@ fn search_query_batch(
                         }
                         x_seq_counter += hits as u32;
                         if buckets.flush_due(x_bucket_budget) {
+                            // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-516
+                            // ```c
+                            // Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
+                            // Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
+                            // ...
+                            // diag_coord = (query_offset - subject_offset) & diag_mask;
+                            // ```
+                            // The buffered hits are processed when the budget is reached (a bucket at a time).
                             buckets.flush(|q, s, seq| x_two_hit_body!(q, s, seq));
                         }
                     }
                 }
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-516
+                // ```c
+                // Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
+                // Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
+                // ...
+                // diag_coord = (query_offset - subject_offset) & diag_mask;
+                // ```
+                // The remaining hits are processed at the end of the subject chunk.
                 buckets.flush(|q, s, seq| x_two_hit_body!(q, s, seq));
                 // Restore the scan order of the saved HSPs (the score sort below is
                 // stable, so the order of comparator-equal HSPs matters).
+                //
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:306-309
+                // ```c
+                // void Blast_InitHitListSortByScore(BlastInitHitList * init_hitlist)
+                // {
+                //     qsort(init_hitlist->init_hsp_array, init_hitlist->total,
+                //           sizeof(BlastInitHSP), score_compare_match);
+                // ```
+                // NCBI sorts the saved HSPs by score after the scan (sort_init_hsps_by_score_ncbi below). Equal
+                // scores keep the order of the input, so the HSPs are first put back into scan order.
                 crate::algorithm::tblastx::x_seed_bucket::restore_scan_order(
                     &mut init_hsps,
                     &seq_keys,
@@ -4147,6 +4244,20 @@ fn search_query_batch(
             // EXPERIMENT (LOSAT_X_SEEDBUCKET): 0 = scan order, 1 = bucketed (only for
             // tables of at least LOSAT_X_SEEDBUCKET_MIN_CELLS cells), 2 = both (the
             // bucketed one on a copy of the diagonal table), compared.
+            //
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:502-516
+            // ```c
+            // while (scan_range[1] <= scan_range[2]) {
+            // ...
+            //     for (i = 0; i < hits; ++i) {
+            //         Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
+            //         Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
+            // ...
+            //         diag_coord = (query_offset - subject_offset) & diag_mask;
+            // ```
+            // Dispatch point of LOSAT_X_SEEDBUCKET / LOSAT_X_SEEDBUCKETSHADOW: mode 0 runs scan_chunk_plain
+            // (the port of the C loop), mode 1 scan_chunk_bucketed, mode 2 runs both and compares. A traced
+            // or debugged run always uses scan_chunk_plain.
             let scan_chunk = |chunk: SubjectChunk,
                               offset_pairs: &mut [OffsetPair],
                               diag_array: &mut [DiagStruct],
@@ -4164,6 +4275,19 @@ fn search_query_batch(
                         scan_chunk_size,
                     ),
                     2 => {
+                        // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-516,588-591
+                        // ```c
+                        // Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
+                        // Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
+                        // ...
+                        // diag_coord = (query_offset - subject_offset) & diag_mask;
+                        // ...
+                        //     if (score >= cutoffs->cutoff_score)
+                        //         BlastSaveInitHsp(ungapped_hsps, hsp_q, hsp_s,
+                        // ```
+                        // Shadow mode: the bucketed order runs on a copy of the diagonal table, the scan-order loop on
+                        // the real one. The assertions below compare the diagonal offset, every diagonal cell (the
+                        // packed last_hit and flag), and every HSP of the result field by field. A difference aborts.
                         let mut diag_copy = diag_array.to_vec();
                         let mut offset_copy = *diag_offset;
                         let shadow = scan_chunk_bucketed(
@@ -4353,6 +4477,12 @@ fn search_query_batch(
                                 || {
                                     (
                                         vec![OffsetPair::default(); offset_array_size as usize],
+                                        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:145-146
+                                        // ```c
+                                        // diag_table->hit_level_array = (DiagStruct *)
+                                        //     calloc(diag_table->diag_array_length, sizeof(DiagStruct));
+                                        // ```
+                                        // Same zeroed diagonal table as the C calloc (huge pages advised with LOSAT_X_THP).
                                         x_new_diag_array(diag_array_size as usize),
                                     )
                                 },
@@ -5175,6 +5305,12 @@ fn search_query_batch(
                         tx: None,
                         hits: Vec::new(),
                         offset_pairs: vec![OffsetPair::default(); offset_array_size as usize],
+                        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:145-146
+                        // ```c
+                        // diag_table->hit_level_array = (DiagStruct *)
+                        //     calloc(diag_table->diag_array_length, sizeof(DiagStruct));
+                        // ```
+                        // Same zeroed diagonal table as the C calloc (huge pages advised with LOSAT_X_THP).
                         diag_array: x_new_diag_array(diag_array_size as usize),
                         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:52-63
                         // ```c
@@ -5211,6 +5347,12 @@ fn search_query_batch(
                 tx: tx_opt.clone(),
                 hits: Vec::new(),
                 offset_pairs: vec![OffsetPair::default(); offset_array_size as usize],
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:145-146
+                // ```c
+                // diag_table->hit_level_array = (DiagStruct *)
+                //     calloc(diag_table->diag_array_length, sizeof(DiagStruct));
+                // ```
+                // Same zeroed diagonal table as the C calloc (huge pages advised with LOSAT_X_THP).
                 diag_array: x_new_diag_array(diag_array_size as usize),
                 // NCBI: diag_table->offset = window_size;
                 // Source: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:63
@@ -5236,6 +5378,12 @@ fn search_query_batch(
                     tx: tx_opt.clone(),
                     hits: Vec::new(),
                     offset_pairs: vec![OffsetPair::default(); offset_array_size as usize],
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:145-146
+                    // ```c
+                    // diag_table->hit_level_array = (DiagStruct *)
+                    //     calloc(diag_table->diag_array_length, sizeof(DiagStruct));
+                    // ```
+                    // Same zeroed diagonal table as the C calloc (huge pages advised with LOSAT_X_THP).
                     diag_array: x_new_diag_array(diag_array_size as usize),
                     // NCBI: diag_table->offset = window_size;
                     // Source: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:63
@@ -5258,6 +5406,12 @@ fn search_query_batch(
                 tx: tx_opt.clone(),
                 hits: Vec::new(),
                 offset_pairs: vec![OffsetPair::default(); offset_array_size as usize],
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:145-146
+                // ```c
+                // diag_table->hit_level_array = (DiagStruct *)
+                //     calloc(diag_table->diag_array_length, sizeof(DiagStruct));
+                // ```
+                // Same zeroed diagonal table as the C calloc (huge pages advised with LOSAT_X_THP).
                 diag_array: x_new_diag_array(diag_array_size as usize),
                 // NCBI: diag_table->offset = window_size;
                 // Source: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:63
@@ -5285,6 +5439,12 @@ fn search_query_batch(
                 tx: tx_opt.clone(),
                 hits: Vec::new(),
                 offset_pairs: vec![OffsetPair::default(); offset_array_size as usize],
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:145-146
+                // ```c
+                // diag_table->hit_level_array = (DiagStruct *)
+                //     calloc(diag_table->diag_array_length, sizeof(DiagStruct));
+                // ```
+                // Same zeroed diagonal table as the C calloc (huge pages advised with LOSAT_X_THP).
                 diag_array: x_new_diag_array(diag_array_size as usize),
                 // NCBI: diag_table->offset = window_size;
                 // Source: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:63

@@ -610,18 +610,62 @@ fn compute_h_from_lambda(sfp: &ScoreFreqProfile, lambda: f64) -> Result<f64, Str
     Ok(h)
 }
 
-/// Compute K from Lambda and H
-/// Reference: NCBI BlastKarlinLHtoK (blast_stat.c:2247-2418)
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2346-2348,2353-2356
+// ```c
+//     for (iterCounter = 0;
+//          ((iterCounter < iterlimit) && (innerSum > sumlimit));
+//          outerSum += innerSum /= ++iterCounter) {
+// ...
+//         for (ptrP = alignmentScoreProbabilities +
+//                  (highAlignmentScore-lowAlignmentScore);
+//              ptrP >= alignmentScoreProbabilities;
+//              *ptrP-- =innerSum) {
+// ```
+// No NCBI counterpart: the switch is read once per process. It chooses between the
+// scalar convolution loop above and the eight-lane variant in `compute_k_from_lambda_h_impl`.
 fn x_karlin_fast() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| std::env::var_os("LOSAT_X_KARLINFAST").is_some())
 }
 
+/// Compute K from Lambda and H
+/// Reference: NCBI BlastKarlinLHtoK (blast_stat.c:2247-2418)
 fn compute_k_from_lambda_h(sfp: &ScoreFreqProfile, lambda: f64, h: f64) -> Result<f64, String> {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2353-2364
+    // ```c
+    //         for (ptrP = alignmentScoreProbabilities +
+    //                  (highAlignmentScore-lowAlignmentScore);
+    //              ptrP >= alignmentScoreProbabilities;
+    //              *ptrP-- =innerSum) {
+    //             ptr1  = ptrP - first;
+    //             ptr1e = ptrP - last;
+    //             ptr2  = probArrayStartLow + first;
+    //             for (innerSum = 0.; ptr1 >= ptr1e; ) {
+    //                 innerSum += *ptr1  *  *ptr2;
+    //         ptr1--;
+    //         ptr2++;
+    //             }
+    // ```
+    // Dispatch point of LOSAT_X_KARLINFAST: with the switch off, `x_fast` is false and the
+    // scalar port of this loop below runs. With it on, the lanes replace part of the same loop.
     compute_k_from_lambda_h_impl(sfp, lambda, h, x_karlin_fast())
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2247-2248,2346-2348,2412-2413
+// ```c
+// BlastKarlinLHtoK(Blast_ScoreFreq* sfp, double lambda, double H)
+// {
+// ...
+//     for (iterCounter = 0;
+//          ((iterCounter < iterlimit) && (innerSum > sumlimit));
+//          outerSum += innerSum /= ++iterCounter) {
+// ...
+//     K = -exp((double)-2.0*outerSum) /
+//              (firstTermClosedForm*BLAST_Expm1(-(double)lambda));
+// ```
+// The body ports BlastKarlinLHtoK. `x_fast` only changes how the convolution `innerSum`
+// values are produced, not which values or the order of the additions in each of them.
 fn compute_k_from_lambda_h_impl(
     sfp: &ScoreFreqProfile,
     lambda: f64,
@@ -706,6 +750,23 @@ fn compute_k_from_lambda_h_impl(
             // term sum over values that this pass has not overwritten yet, so
             // eight of them are accumulated side by side.  Each lane performs
             // NCBI's additions and multiplications in NCBI's order.
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2357-2364
+            // ```c
+            //             ptr1  = ptrP - first;
+            //             ptr1e = ptrP - last;
+            //             ptr2  = probArrayStartLow + first;
+            //             for (innerSum = 0.; ptr1 >= ptr1e; ) {
+            //                 innerSum += *ptr1  *  *ptr2;
+            //         ptr1--;
+            //         ptr2++;
+            //             }
+            // ```
+            // When `first == 0` and `last == range`, `ptr1 - ptr1e` is `range` and each new
+            // `*ptrP` is the sum over the terms `*(ptrP - t) * probArrayStartLow[t]`, t = 0..range,
+            // added in increasing t starting from 0.0. The lanes compute eight adjacent `ptrP` that
+            // way. A sum reads only positions at or below its own `ptrP`. NCBI writes downwards,
+            // so it has not overwritten any of them yet, and reading all eight from the array
+            // before the writes gives the same values.
             if x_fast && first == 0 {
                 const LANES: isize = 8;
                 let width = range as isize;
@@ -834,6 +895,23 @@ mod tests {
 
     // EXPERIMENT (LOSAT_X_KARLINFAST): the side-by-side sums give the bits of the
     // one-at-a-time loop.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2353-2364
+    // ```c
+    //         for (ptrP = alignmentScoreProbabilities +
+    //                  (highAlignmentScore-lowAlignmentScore);
+    //              ptrP >= alignmentScoreProbabilities;
+    //              *ptrP-- =innerSum) {
+    //             ptr1  = ptrP - first;
+    //             ptr1e = ptrP - last;
+    //             ptr2  = probArrayStartLow + first;
+    //             for (innerSum = 0.; ptr1 >= ptr1e; ) {
+    //                 innerSum += *ptr1  *  *ptr2;
+    //         ptr1--;
+    //         ptr2++;
+    //             }
+    // ```
+    // The test compares the bits of K from the eight-lane variant and the scalar loop for
+    // random compositions.
     #[test]
     fn x_karlin_k_lanes_match_scalar_loop_bitwise() {
         let mut state = 0x9E37_79B9_7F4A_7C15u64;

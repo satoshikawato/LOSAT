@@ -247,6 +247,8 @@ pub trait RuntimeObserver: super::results::ResultsObserver + Send {
     ) {
     }
     fn early(&mut self, _evalue: f64, _queries: usize, _decision: bool) {}
+    // No NCBI counterpart: tells the search whether any observer callback records something; it
+    // does not change any value NCBI computes.
     /// EXPERIMENT (LOSAT_X_BXPAR): true when no callback records anything, so
     /// that work may be done out of order (and some of it twice).
     fn x_passive(&self) -> bool {
@@ -261,6 +263,8 @@ impl RuntimeObserver for Noop {
     }
 }
 
+// No NCBI counterpart: reads the LOSAT_X_BXLEAN switch once; it does not change any value NCBI
+// computes.
 /// EXPERIMENT (LOSAT_X_BXLEAN): leave out work whose result nothing reads: the
 /// copy of every candidate HSP kept for an observer when there is none, and
 /// the tree and DP scratch of a (chunk, subject) pair without an initial HSP.
@@ -270,6 +274,8 @@ pub(crate) fn x_bx_lean() -> bool {
     *ON.get_or_init(|| std::env::var_os("LOSAT_X_BXLEAN").is_some())
 }
 
+// No NCBI counterpart: reads the LOSAT_X_BXPAR switch once; it does not change any value NCBI
+// computes.
 // EXPERIMENT (LOSAT_X_BXPAR): parallel BLASTX stages.
 pub(crate) fn x_bx_parallel() -> bool {
     use std::sync::OnceLock;
@@ -277,6 +283,22 @@ pub(crate) fn x_bx_parallel() -> bool {
     *ON.get_or_init(|| std::env::var_os("LOSAT_X_BXPAR").is_some())
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3329-3334,3499-3502
+// ```c
+//         if ((int) compo_adjust_mode > 1 && !positionBased) {
+//             NRrecord_tld[i] = Blast_CompositionWorkspaceNew();
+//             status_code = Blast_CompositionWorkspaceInit(
+//                     NRrecord_tld[i],
+//                     scoringParams->options->matrix
+//             );
+// ...
+//                 NRrecord             = NRrecord_tld[tid];
+//                 sbp                  = sbp_tld[tid];
+//                 redo_align_params    = redo_align_params_tld[tid];
+//                 matrix               = matrix_tld[tid];
+// ```
+// One XKappaWorker is the Rust counterpart of the per-thread state NCBI keeps in NRrecord_tld,
+// redo_align_params_tld and matrix_tld. It is used by one thread at a time.
 // One pool slot's Kappa state.  SAFETY of `Send`: the only non-Send field is the
 // `context` cell of the gapping parameters, which `redo_context_observed` fills
 // for one synchronous call and restores before returning; the state is only
@@ -286,6 +308,21 @@ struct XKappaWorker(KappaState);
 #[cfg(feature = "parallel")]
 unsafe impl Send for XKappaWorker {}
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1232-1234
+// ```c
+//                 if (compo_adjust_mode != eNoCompositionBasedStats &&
+//                         (subject_is_translated || hsp_index == 0
+//                                 || (nearIdenticalStatus != oldNearIdenticalStatus))) {
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3625-3626
+// ```c
+//                                 Blast_RedoOneMatch(
+//                                         alignments,             // thread-local
+// ```
+// x_speculate_match redoes one match with the same steps. Blast_AdjustScores runs for a protein
+// subject only when hsp_index == 0 (line 1233), so a match can read the matrix its predecessor left
+// behind. X_REDO_PROBE records whether that happened; if it did the result is dropped and the match
+// is redone in stream order.
 /// EXPERIMENT (LOSAT_X_BXPAR): redo one match without knowing the matrix its
 /// predecessor leaves behind.  `None` when the match would have used that
 /// matrix (it is then redone in order); otherwise the finished list, its best
@@ -348,6 +385,132 @@ pub fn search_internal(
 ) -> Result<Vec<BatchResults>> {
     search_internal_observed(records, subjects, options, &mut Noop)
 }
+// NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:277-279
+// ```c
+//                 CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
+//                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
+//                 results = lcl_blast.Run();
+// ```
+// NCBI builds a CLocalBlast, and so its worker threads, for every query batch. LOSAT_X_BXPOOL keeps
+// one pool for all batches. Reuse of threads only.
+/// EXPERIMENT (LOSAT_X_BXPOOL): `LOSAT_X_BXPOOL` set.
+pub(crate) fn x_bx_pool() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("LOSAT_X_BXPOOL").is_some())
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:259-262,289-291
+// ```c
+//         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
+// ...
+//             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
+//             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
+// ...
+//             	ITERATE(CSearchResultSet, result, *results) {
+//                	    formatter.PrintOneResultSet(**result, query_batch);
+//             	}
+// ```
+// NCBI searches one query batch and prints its results before it takes the next. With
+// LOSAT_X_BXBATCH several small batches are searched together and printed in input order
+// afterwards.
+/// EXPERIMENT (LOSAT_X_BXBATCH): `LOSAT_X_BXBATCH` set (needs LOSAT_X_BXPOOL).
+pub(crate) fn x_bx_batch() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("LOSAT_X_BXBATCH").is_some())
+}
+
+thread_local! {
+    // No NCBI counterpart: flag for the batched search (a thread that runs one whole batch must not
+    // start parallel work of its own); it does not change any value NCBI computes.
+    // EXPERIMENT (LOSAT_X_BXBATCH): set while this thread runs a search that
+    // must not start parallel work of its own.
+    static X_INNER_SERIAL: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+// No NCBI counterpart: reads the flag above; it does not change any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BXBATCH): true inside `x_search_internal_serial`.
+pub(crate) fn x_inner_serial() -> bool {
+    X_INNER_SERIAL.with(std::cell::Cell::get)
+}
+
+// No NCBI counterpart: scope guard that sets and restores the flag above; it does not change any
+// value NCBI computes.
+struct XInnerSerial(bool);
+
+impl XInnerSerial {
+    fn enter() -> Self {
+        Self(X_INNER_SERIAL.with(|flag| flag.replace(true)))
+    }
+}
+
+impl Drop for XInnerSerial {
+    fn drop(&mut self) {
+        X_INNER_SERIAL.with(|flag| flag.set(self.0));
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:256-265
+// ```c
+//                 if (IsMultiThreaded()) {
+//                      x_LaunchMultiThreadedSearch(*chunk_data);
+//                 } else {
+//                     retval =
+//                         CPrelimSearchRunner(*chunk_data, opts_memento.get())();
+// ```
+// NCBI runs the single-threaded search (CPrelimSearchRunner) when IsMultiThreaded() is false. This
+// is search_internal run on one thread, whatever thread that is, so that several batches can run
+// side by side.
+/// EXPERIMENT (LOSAT_X_BXBATCH): `search_internal` as the one-thread search,
+/// whatever thread it is called on. The caller runs several of these side by
+/// side; each takes the serial path of every stage.
+pub fn x_search_internal_serial(
+    records: &[FastaRecord],
+    subjects: &[FastaRecord],
+    options: &ResolvedOptions,
+) -> Result<Vec<BatchResults>> {
+    let _serial = XInnerSerial::enter();
+    x_search_internal_in_pool(
+        records,
+        subjects,
+        options,
+        &crate::utils::threading::SearchPool::x_serial(),
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:277-279
+// ```c
+//                 CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
+//                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
+//                 results = lcl_blast.Run();
+// ```
+// The search of one query batch (lcl_blast.Run()) on a pool that the caller keeps. The search
+// itself is search_internal.
+/// EXPERIMENT (LOSAT_X_BXPOOL): `search_internal` on a pool that the caller
+/// keeps for all its query batches.
+pub fn x_search_internal_in_pool(
+    records: &[FastaRecord],
+    subjects: &[FastaRecord],
+    options: &ResolvedOptions,
+    pool: &crate::utils::threading::SearchPool<'_>,
+) -> Result<Vec<BatchResults>> {
+    let mut observer = Noop;
+    let mut pipeline = Runtime {
+        observer: &mut observer,
+        ungapped_link_state: None,
+        options,
+        subjects,
+        db_length: subjects.iter().map(|s| s.sequence.len() as i64).sum(),
+        ordinal: 0,
+        stream: None,
+        chunk: None,
+        output: Vec::new(),
+    };
+    search_core(records, subjects, options, false, &mut pipeline, pool)?;
+    Ok(pipeline.output)
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3625-3647
 // ```c++
 //                                 Blast_RedoOneMatch(
@@ -374,86 +537,6 @@ pub fn search_internal(
 //                     }
 //
 // ```
-/// EXPERIMENT (LOSAT_X_BXPOOL): `LOSAT_X_BXPOOL` set.
-pub(crate) fn x_bx_pool() -> bool {
-    use std::sync::OnceLock;
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("LOSAT_X_BXPOOL").is_some())
-}
-
-/// EXPERIMENT (LOSAT_X_BXBATCH): `LOSAT_X_BXBATCH` set (needs LOSAT_X_BXPOOL).
-pub(crate) fn x_bx_batch() -> bool {
-    use std::sync::OnceLock;
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("LOSAT_X_BXBATCH").is_some())
-}
-
-thread_local! {
-    // EXPERIMENT (LOSAT_X_BXBATCH): set while this thread runs a search that
-    // must not start parallel work of its own.
-    static X_INNER_SERIAL: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-}
-
-/// EXPERIMENT (LOSAT_X_BXBATCH): true inside `x_search_internal_serial`.
-pub(crate) fn x_inner_serial() -> bool {
-    X_INNER_SERIAL.with(std::cell::Cell::get)
-}
-
-struct XInnerSerial(bool);
-
-impl XInnerSerial {
-    fn enter() -> Self {
-        Self(X_INNER_SERIAL.with(|flag| flag.replace(true)))
-    }
-}
-
-impl Drop for XInnerSerial {
-    fn drop(&mut self) {
-        X_INNER_SERIAL.with(|flag| flag.set(self.0));
-    }
-}
-
-/// EXPERIMENT (LOSAT_X_BXBATCH): `search_internal` as the one-thread search,
-/// whatever thread it is called on. The caller runs several of these side by
-/// side; each takes the serial path of every stage.
-pub fn x_search_internal_serial(
-    records: &[FastaRecord],
-    subjects: &[FastaRecord],
-    options: &ResolvedOptions,
-) -> Result<Vec<BatchResults>> {
-    let _serial = XInnerSerial::enter();
-    x_search_internal_in_pool(
-        records,
-        subjects,
-        options,
-        &crate::utils::threading::SearchPool::x_serial(),
-    )
-}
-
-/// EXPERIMENT (LOSAT_X_BXPOOL): `search_internal` on a pool that the caller
-/// keeps for all its query batches.
-pub fn x_search_internal_in_pool(
-    records: &[FastaRecord],
-    subjects: &[FastaRecord],
-    options: &ResolvedOptions,
-    pool: &crate::utils::threading::SearchPool<'_>,
-) -> Result<Vec<BatchResults>> {
-    let mut observer = Noop;
-    let mut pipeline = Runtime {
-        observer: &mut observer,
-        ungapped_link_state: None,
-        options,
-        subjects,
-        db_length: subjects.iter().map(|s| s.sequence.len() as i64).sum(),
-        ordinal: 0,
-        stream: None,
-        chunk: None,
-        output: Vec::new(),
-    };
-    search_core(records, subjects, options, false, &mut pipeline, pool)?;
-    Ok(pipeline.output)
-}
-
 pub fn search_internal_observed(
     records: &[FastaRecord],
     subjects: &[FastaRecord],
@@ -639,6 +722,8 @@ impl PreliminarySink for Runtime<'_> {
     fn containment(&mut self, h: &PreliminaryHsp, contained: bool) {
         self.observer.containment(h, contained);
     }
+    // No NCBI counterpart: tells the search whether the containment callback is read; it does not
+    // change any value NCBI computes.
     fn x_wants_containment(&self) -> bool {
         !(x_bx_lean() && self.observer.x_passive())
     }
@@ -1600,8 +1685,40 @@ impl PreliminarySink for Runtime<'_> {
             // function of its own HSP list and of the matrix left by the match
             // before it; `x_speculate_match` returns a result only when the
             // latter was never read, and reports the matrix the match leaves.
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3448-3451,3499-3502
+            // ```c
+            // #pragma omp for schedule(static)
+            //         for (b = 0; b < numMatches; ++b) {
+            // #pragma omp flush(interrupt)
+            //             if (!interrupt) {
+            // ...
+            //                 NRrecord             = NRrecord_tld[tid];
+            //                 sbp                  = sbp_tld[tid];
+            //                 redo_align_params    = redo_align_params_tld[tid];
+            //                 matrix               = matrix_tld[tid];
+            // ```
+            // NCBI redoes the matches in this omp loop, each thread with its own state. The batch
+            // of speculative redoes below does the same per-match work on the pool. A result is
+            // used only if the match did not read the matrix of its predecessor; every other match
+            // is redone in stream order (see x_speculate_match).
             #[allow(unused_mut)]
             let mut speculated: Vec<Option<(HspList, i32, Option<_>)>> = Vec::new();
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3329-3334,3499-3502
+            // ```c
+            //         if ((int) compo_adjust_mode > 1 && !positionBased) {
+            //             NRrecord_tld[i] = Blast_CompositionWorkspaceNew();
+            //             status_code = Blast_CompositionWorkspaceInit(
+            //                     NRrecord_tld[i],
+            //                     scoringParams->options->matrix
+            //             );
+            // ...
+            //                 NRrecord             = NRrecord_tld[tid];
+            //                 sbp                  = sbp_tld[tid];
+            //                 redo_align_params    = redo_align_params_tld[tid];
+            //                 matrix               = matrix_tld[tid];
+            // ```
+            // One Kappa state per pool thread, as NCBI keeps one NRrecord, redo_align_params and
+            // matrix per thread.
             #[cfg(feature = "parallel")]
             let x_workers = if x_bx_parallel()
                 && self.observer.x_passive()
@@ -1624,8 +1741,12 @@ impl PreliminarySink for Runtime<'_> {
             };
             // `x_workers` has one entry per pool thread (none outside a pool; asking
             // Rayon for the thread count there would start its global pool).
+            // No NCBI counterpart: size of one speculative batch (scheduling only); it does not
+            // change any value NCBI computes.
             #[cfg(feature = "parallel")]
             let x_batch = x_workers.len().saturating_mul(32).max(64);
+            // No NCBI counterpart: stage report for the thread-use statistics; it does not change
+            // any value NCBI computes.
             #[cfg(feature = "parallel")]
             if x_bx_parallel() {
                 crate::utils::threading::report_stage(
@@ -1635,9 +1756,22 @@ impl PreliminarySink for Runtime<'_> {
                     !x_workers.is_empty(),
                 );
             }
+            // No NCBI counterpart: counters of speculative results used and matches redone in
+            // order; it does not change any value NCBI computes.
             let mut x_reused = 0usize;
             let mut x_serial = 0usize;
             for (match_index, list) in matches.iter().enumerate() {
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3448-3451
+                // ```c
+                // #pragma omp for schedule(static)
+                //         for (b = 0; b < numMatches; ++b) {
+                // #pragma omp flush(interrupt)
+                //             if (!interrupt) {
+                // ```
+                // A batch of the following matches is redone ahead of time on the pool. The early-
+                // termination test (BlastCompo_EarlyTermination) is evaluated here on the heaps as
+                // they are now, and again, in stream order, below; a result is used only when the
+                // second test agrees.
                 #[cfg(feature = "parallel")]
                 if !x_workers.is_empty() && match_index % x_batch == 0 {
                     use rayon::prelude::*;
@@ -1710,6 +1844,21 @@ impl PreliminarySink for Runtime<'_> {
                 };
                 #[cfg(not(feature = "parallel"))]
                 let x_ready: Option<(HspList, i32, Option<_>)> = None;
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3625-3626
+                // ```c
+                //                                 Blast_RedoOneMatch(
+                //                                         alignments,             // thread-local
+                // ```
+                // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1232-1234
+                // ```c
+                //                 if (compo_adjust_mode != eNoCompositionBasedStats &&
+                //                         (subject_is_translated || hsp_index == 0
+                //                                 || (nearIdenticalStatus != oldNearIdenticalStatus))) {
+                // ```
+                // Dispatch point: the reference path is the else branch, which redoes the match in
+                // stream order (Blast_RedoOneMatch). A speculative result is taken instead only
+                // when it was computed without reading its predecessor's matrix; its matrix, if it
+                // leaves one, is handed on.
                 let (output, best_score) = if let Some((output, best_score, matrix)) = x_ready {
                     x_reused += 1;
                     if matrix.is_some() {

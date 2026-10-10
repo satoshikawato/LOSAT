@@ -112,6 +112,22 @@ pub(crate) fn run_pair(
     //             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
     // ```
     // EXPERIMENT (LOSAT_X_BXPOOL): see native.rs.
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:259-291
+    // ```c
+    //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
+    // ...
+    //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
+    // ...
+    //                 CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
+    //                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
+    //                 results = lcl_blast.Run();
+    // ...
+    //             	ITERATE(CSearchResultSet, result, *results) {
+    //                	    formatter.PrintOneResultSet(**result, query_batch);
+    //             	}
+    // ```
+    // Same batch loop as in native.rs, as a closure over the pool its searches run on (see
+    // native.rs).
     let mut x_run_batches = |x_pool: Option<&crate::utils::threading::SearchPool<'_>>| {
         // EXPERIMENT (LOSAT_X_BXBATCH): see native.rs.
         #[cfg(feature = "parallel")]
@@ -127,6 +143,22 @@ pub(crate) fn run_pair(
             let x_large = |queries: &[input::FastaRecord]| {
                 queries.iter().map(|q| q.sequence.len()).sum::<usize>() > 2 * BATCH_SIZE
             };
+            // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:259-291
+            // ```c
+            //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
+            // ...
+            //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
+            // ...
+            //                 CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
+            //                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
+            //                 results = lcl_blast.Run();
+            // ...
+            //             	ITERATE(CSearchResultSet, result, *results) {
+            //                	    formatter.PrintOneResultSet(**result, query_batch);
+            //             	}
+            // ```
+            // As in native.rs: search the queued batches, then write warnings and results in reader
+            // order.
             let mut x_flush = |events: Vec<XEvent>| -> Result<()> {
                 let batches: Vec<&[input::FastaRecord]> = events
                     .iter()
@@ -230,6 +262,13 @@ pub(crate) fn run_pair(
                 if queries.is_empty() {
                     bail!("Empty CBlastQueryVector");
                 }
+                // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:277-279
+                // ```c
+                //                 CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
+                //                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
+                //                 results = lcl_blast.Run();
+                // ```
+                // Dispatch point: a kept pool or search_internal; same result either way.
                 let mut results = match x_pool {
                     Some(pool) => {
                         runtime::x_search_internal_in_pool(queries, &subjects, &options, pool)
@@ -256,6 +295,14 @@ pub(crate) fn run_pair(
             &mut |warning| native::reader_warning(warning, &mut *diagnostics.borrow_mut()),
         )
     };
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:277-279
+    // ```c
+    //                 CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
+    //                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
+    //                 results = lcl_blast.Run();
+    // ```
+    // Dispatch point: one pool for the whole run (LOSAT_X_BXPOOL) instead of one per batch, as
+    // NCBI's CLocalBlast has per batch. Reuse of threads only.
     if runtime::x_bx_pool() && options.num_threads > 1 {
         crate::utils::threading::x_with_search_pool_local(
             options.num_threads as usize,

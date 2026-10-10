@@ -175,6 +175,20 @@ pub fn compute_blosum62_ideal_karlin_params() -> Result<KarlinParams, String> {
     // composition, BLOSUM62, score range -4..11), so its value is computed
     // once per process. TBLASTN and BLASTX call it for every query batch and,
     // in the parallel redo, on every worker.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2843-2848,2754-2754
+    // ```c
+    //    stdrfp = Blast_ResFreqNew(sbp);
+    //    Blast_ResFreqStdComp(sbp, stdrfp);
+    //    sfp = Blast_ScoreFreqNew(sbp->loscore, sbp->hiscore);
+    //    BlastScoreFreqCalc(sbp, sfp, stdrfp, stdrfp);
+    //    sbp->kbp_ideal = Blast_KarlinBlkNew();
+    //    Blast_KarlinBlkUngappedCalc(sbp->kbp_ideal, sfp);
+    // ...
+    //    status = Blast_ScoreBlkKbpIdealCalc(sbp);
+    // ```
+    // NCBI computes `kbp_ideal` once per score block, in `Blast_ScoreBlkKbpIdealCalc` called from
+    // `Blast_ScoreBlkKbpUngappedCalc`; BLOSUM62 with the standard composition has no other inputs.
+    // The memo keeps the value of the first call of the port below and returns it again. It is reuse only.
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
     if *ON.get_or_init(|| std::env::var_os("LOSAT_X_IDEALMEMO").is_some()) {
@@ -186,6 +200,17 @@ pub fn compute_blosum62_ideal_karlin_params() -> Result<KarlinParams, String> {
     x_compute_blosum62_ideal_karlin_params()
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2843-2848
+// ```c
+//    stdrfp = Blast_ResFreqNew(sbp);
+//    Blast_ResFreqStdComp(sbp, stdrfp);
+//    sfp = Blast_ScoreFreqNew(sbp->loscore, sbp->hiscore);
+//    BlastScoreFreqCalc(sbp, sfp, stdrfp, stdrfp);
+//    sbp->kbp_ideal = Blast_KarlinBlkNew();
+//    Blast_KarlinBlkUngappedCalc(sbp->kbp_ideal, sfp);
+// ```
+// The body of the original `compute_blosum62_ideal_karlin_params`, moved into its own function so
+// that the memo can call it; the computation is unchanged.
 fn x_compute_blosum62_ideal_karlin_params() -> Result<KarlinParams, String> {
     let std_comp = compute_std_aa_composition();
     let sfp = compute_score_freq_profile(&std_comp, &std_comp, -4, 11);

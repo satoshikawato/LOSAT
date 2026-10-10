@@ -8,6 +8,10 @@
 //! function below returns what the same expression returned the first time
 //! it was evaluated; the only difference from reading the environment every
 //! time is for a process that changes these variables while it is running.
+//!
+//! No NCBI counterpart: LOSAT_DEBUG_COORDS and LOSAT_DEBUG_COORDS_START are LOSAT debugging
+//! variables. NCBI BLAST+ has no equivalent, and this module only changes how often the
+//! environment is read; it does not change any value NCBI computes.
 
 use std::ffi::OsString;
 use std::sync::OnceLock;

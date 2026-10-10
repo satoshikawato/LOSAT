@@ -49,6 +49,51 @@
 //!
 //! `LOSAT_X_NEWTONEXACTSHADOW=1` runs both this code and the reference on every
 //! call and aborts on the first value that differs.
+//!
+//! NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:762-768,774-777,781-785
+//! ```c
+//!         if ( !(rnorm > tol) ) {
+//!             /* We converged at the current iterate */
+//!             break;
+//!         } else {
+//!             /* we did not converge, so increment the iteration counter
+//!                and start a new iteration */
+//!             if (++its <= maxits) {
+//! ...
+//!                 FactorReNewtonSystem(newton_system, x, z, grads,
+//!                                      constrain_rel_entropy, workspace);
+//!                 SolveReNewtonSystem(resids_x, resids_z, newton_system,
+//!                                     workspace);
+//! ...
+//!                 alpha = Nlm_StepBound(x, n, resids_x, 1.0 / .95);
+//!                 alpha *= 0.95;
+//!                 Nlm_AddVectors(x, n, alpha, resids_x);
+//!                 Nlm_AddVectors(z, m, alpha, resids_z);
+//! ```
+//! The Newton loop of `optimize` below is this loop. Each call here is a step of one
+//! iteration: residuals, convergence test, factor, solve, step bound, update of x and z.
+//!
+//! NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:143-149,171-177
+//! ```c
+//!     for (i = 0;  i < n;  i++) {
+//!         for (j = 0;  j < i;  j++) {
+//!             temp = A[i][j];
+//!             for (k = 0;  k < j;  k++) {
+//!                 temp -= A[i][k] * A[j][k];
+//!             }
+//!             A[i][j] = temp/A[j][j];
+//! ...
+//!     for (i = 0;  i < n;  i++) {
+//!         temp = x[i];
+//!         for (j = 0;  j < i;  j++) {
+//!             temp -= L[i][j] * x[j];
+//!         }
+//!         x[i] = temp/L[i][i];
+//!     }
+//! ```
+//! These are the Cholesky factorisation and the forward solve whose per-element operations
+//! and order are kept (see the list above). The rest of this module changes only the data layout
+//! and which independent elements are advanced together.
 
 use super::adjust_scores::{
     COMPO_NUM_TRUE_AA, K_COMPO_ADJUST_ERR_TOLERANCE, K_COMPO_ADJUST_ITERATION_LIMIT,
@@ -56,6 +101,7 @@ use super::adjust_scores::{
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
+// No NCBI counterpart: cycle counters for the profile output; it does not change any value NCBI computes.
 /// Cycle counts per phase (LOSAT_X_NEWTONEXACT_PROF=1): logs, residuals,
 /// factor preparation, factor, solve, step, calls, iterations.
 pub(crate) static PROF: [AtomicU64; 12] = [
@@ -72,10 +118,12 @@ pub(crate) static PROF: [AtomicU64; 12] = [
     AtomicU64::new(0),
     AtomicU64::new(0),
 ];
+// No NCBI counterpart: reads LOSAT_X_NEWTONEXACT_PROF once; it does not change any value NCBI computes.
 pub(crate) fn prof_enabled() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| std::env::var_os("LOSAT_X_NEWTONEXACT_PROF").is_some())
 }
+// No NCBI counterpart: reads the time-stamp counter for the profile output; it does not change any value NCBI computes.
 #[inline(always)]
 fn tsc() -> u64 {
     #[cfg(target_arch = "x86_64")]
@@ -86,6 +134,7 @@ fn tsc() -> u64 {
     #[cfg(not(target_arch = "x86_64"))]
     0
 }
+// No NCBI counterpart: adds elapsed cycles to a profile counter; it does not change any value NCBI computes.
 #[inline(always)]
 fn prof_add(i: usize, t0: u64, on: bool) -> u64 {
     if on {
@@ -96,6 +145,7 @@ fn prof_add(i: usize, t0: u64, on: bool) -> u64 {
         0
     }
 }
+// No NCBI counterpart: prints the profile counters; it does not change any value NCBI computes.
 pub(crate) fn prof_print() {
     if !prof_enabled() {
         return;
@@ -113,6 +163,14 @@ pub(crate) fn prof_print() {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:725-727
+// ```c
+//     n  = alphsize * alphsize;
+//     mA = 2 * alphsize - 1;
+//     m  = constrain_rel_entropy ? mA + 1 : mA;
+// ```
+// `N` is `alphsize`, `NN` is `n`, and `M` is `m` for `constrain_rel_entropy` set. This module
+// handles only that case; other cases run the reference.
 const N: usize = COMPO_NUM_TRUE_AA;
 const NN: usize = N * N;
 /// Number of constraints with the relative-entropy constraint (`m`).
@@ -120,6 +178,18 @@ const M: usize = 2 * N;
 /// Lane padding for the 20-row vectors of the trailing block.
 const P: usize = 24;
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:686-687,693-696
+// ```c
+// int
+// Blast_OptimizeTargetFrequencies(double x[],
+// ...
+//                                 int constrain_rel_entropy,
+//                                 double relative_entropy,
+//                                 double tol,
+//                                 int maxits)
+// ```
+// No NCBI counterpart: reads LOSAT_X_NEWTONEXACT and LOSAT_X_NEWTONEXACTSHADOW once. It chooses
+// between the port of this function (reference), this module, or both with a comparison.
 /// 0 = reference, 1 = this module, 2 = both (checked bit for bit on every call).
 pub(crate) fn mode() -> u8 {
     static MODE: OnceLock<u8> = OnceLock::new();
@@ -134,12 +204,40 @@ pub(crate) fn mode() -> u8 {
     })
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:747-748,635-636
+// ```c
+//     /* Use q as the initial value for x */
+//     memcpy(x, q, n * sizeof(double));
+// ...
+//     for (k = 0;  k < alphsize * alphsize;  k++) {
+//         temp = log(x[k] / q[k]);
+// ```
+// NCBI starts from `x = q`, so in the first iteration every `log(x[k] / q[k])` is `log(1.0)`.
+// This is the value of one such call, made once per process.
 /// `ln(1.0)` as the libm of this process computes it (not constant-folded).
 fn ln_one() -> f64 {
     static LN_ONE: OnceLock<f64> = OnceLock::new();
     *LN_ONE.get_or_init(|| std::hint::black_box(1.0f64).ln())
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:193-208
+// ```c
+//     double sum   = 1.0;   /* sum of squares of elements in v */
+//     double scale = 0.0;   /* a scale factor for the elements in v */
+//     int i;                /* iteration index */
+//     for (i = 0;  i < n;  i++) {
+//         if (v[i] != 0.0) {
+//             double absvi = fabs(v[i]);
+//             if (scale < absvi) {
+//                 sum = 1.0 + sum * (scale/absvi) * (scale/absvi);
+//                 scale = absvi;
+//             } else {
+//                 sum += (absvi/scale) * (absvi/scale);
+//             }
+//         }
+//     }
+//     return scale * sqrt(sum);
+// ```
 /// The reference's `Nlm_EuclideanNorm`, copied verbatim.
 #[inline(always)]
 fn euclidean_norm(v: &[f64]) -> f64 {
@@ -159,6 +257,23 @@ fn euclidean_norm(v: &[f64]) -> f64 {
     scale * sum.sqrt()
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:132-135,525-531
+// ```c
+//             W[j][j] += dd;
+//             if (i > 0) {
+//                 W[i + alphsize - 1][j] += dd;
+//                 W[i + alphsize - 1][i + alphsize - 1] += dd;
+// ...
+//         W[m - 1][m - 1] = 0.0;
+//         for (i = 0;  i < n;  i++) {
+//             workspace[i] = Dinv[i] * grad_re[i];
+//             W[m - 1][m - 1] += grad_re[i] * workspace[i];
+//         }
+//         MultiplyByA(0.0, &W[m - 1][0], alphsize, 1.0, workspace);
+// ```
+// The parts are the sums that `ScaledSymmetricProductA` and `FactorReNewtonSystem` put into
+// the lower triangle of `W` (column sums `W[j][j]`, row sums `W[i+19][i+19]`, the entries
+// `W[i+19][j]`, and the last row).
 /// The lower triangle of `W` as the reference holds it, from its parts.
 struct Wparts<'a> {
     /// `W[j][j]`, `j < 20`: column sums of `dinv`.
@@ -171,6 +286,23 @@ struct Wparts<'a> {
     w39: &'a [f64; M],
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:143-149,151-155
+// ```c
+//     for (i = 0;  i < n;  i++) {
+//         for (j = 0;  j < i;  j++) {
+//             temp = A[i][j];
+//             for (k = 0;  k < j;  k++) {
+//                 temp -= A[i][k] * A[j][k];
+//             }
+//             A[i][j] = temp/A[j][j];
+// ...
+//         temp = A[i][i];
+//         for (k = 0;  k < i;  k++) {
+//             temp -= A[i][k] * A[i][k];
+//         }
+//         A[i][i] = sqrt(temp);
+// ```
+// The entries of `A` after this function, kept in blocks. Only the storage differs.
 /// The Cholesky factor in structured storage.
 struct Factor {
     /// `L[j][j]` for `j < 20`.
@@ -182,6 +314,7 @@ struct Factor {
     c: [[f64; P]; N],
 }
 
+// No NCBI counterpart: constructor and test accessor of the structured storage; it does not change any value NCBI computes.
 impl Factor {
     #[inline(always)]
     fn new() -> Self {
@@ -208,6 +341,44 @@ impl Factor {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:143-149,151-155
+// ```c
+//     for (i = 0;  i < n;  i++) {
+//         for (j = 0;  j < i;  j++) {
+//             temp = A[i][j];
+//             for (k = 0;  k < j;  k++) {
+//                 temp -= A[i][k] * A[j][k];
+//             }
+//             A[i][j] = temp/A[j][j];
+// ...
+//         temp = A[i][i];
+//         for (k = 0;  k < i;  k++) {
+//             temp -= A[i][k] * A[i][k];
+//         }
+//         A[i][i] = sqrt(temp);
+// ```
+// The loops below are this function on a dense 40 x 40 copy of `W`, in the same order.
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:121-125,132-135,525-531
+// ```c
+//     for (rowW = 0;  rowW < m;  rowW++) {
+//         for (colW = 0;  colW <= rowW;  colW++) {
+//             W[rowW][colW] = 0.0;
+//         }
+//     }
+// ...
+//             W[j][j] += dd;
+//             if (i > 0) {
+//                 W[i + alphsize - 1][j] += dd;
+//                 W[i + alphsize - 1][i + alphsize - 1] += dd;
+// ...
+//         W[m - 1][m - 1] = 0.0;
+//         for (i = 0;  i < n;  i++) {
+//             workspace[i] = Dinv[i] * grad_re[i];
+//             W[m - 1][m - 1] += grad_re[i] * workspace[i];
+//         }
+//         MultiplyByA(0.0, &W[m - 1][0], alphsize, 1.0, workspace);
+// ```
+// `W` is filled as `ScaledSymmetricProductA` and `FactorReNewtonSystem` fill it.
 /// `Nlm_FactorLtriangPosDef` on `W`, literally (dense lower triangle).
 #[inline(never)]
 fn factor_literal(w: &Wparts, out: &mut Factor) {
@@ -251,6 +422,15 @@ fn factor_literal(w: &Wparts, out: &mut Factor) {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:146-149
+// ```c
+//             for (k = 0;  k < j;  k++) {
+//                 temp -= A[i][k] * A[j][k];
+//             }
+//             A[i][j] = temp/A[j][j];
+// ```
+// The terms `temp -= A[i][k] * A[j][k]` that this check allows to skip are those with
+// `A[j][k] == +0.0`, as the comment below explains.
 /// Whether the structured factorisation reproduces the literal one.
 ///
 /// The skipped terms are `temp -= L[i][k] * L[j][k]` with `L[j][k] == +0.0`
@@ -274,6 +454,38 @@ fn structure_ok(w: &Wparts, dinv_ok: bool) -> bool {
     ok
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:143-149,151-155
+// ```c
+//     for (i = 0;  i < n;  i++) {
+//         for (j = 0;  j < i;  j++) {
+//             temp = A[i][j];
+//             for (k = 0;  k < j;  k++) {
+//                 temp -= A[i][k] * A[j][k];
+//             }
+//             A[i][j] = temp/A[j][j];
+// ...
+//         temp = A[i][i];
+//         for (k = 0;  k < i;  k++) {
+//             temp -= A[i][k] * A[i][k];
+//         }
+//         A[i][i] = sqrt(temp);
+// ```
+// Element `(i, j)` receives the same terms in the same order and the same final division or
+// square root; only the terms known to be zero are left out (checked by `structure_ok`).
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:126-137
+// ```c
+//     for (i = 0;  i < alphsize;  i++) {
+//         for (j = 0;  j < alphsize;  j++) {
+//             double dd;     /* an individual diagonal element */
+//             dd = diagonal[i * alphsize + j];
+//             W[j][j] += dd;
+//             if (i > 0) {
+//                 W[i + alphsize - 1][j] += dd;
+//                 W[i + alphsize - 1][i + alphsize - 1] += dd;
+//             }
+//         }
+// ```
+// This loop fills `W`, so rows 0..19 are diagonal and rows 20..38 are dense only in columns 0..19.
 /// `Nlm_FactorLtriangPosDef` on `W` using its structure (see module comment).
 #[inline(always)]
 fn factor_structured(w: &Wparts, f: &mut Factor) {
@@ -366,6 +578,14 @@ fn factor_structured(w: &Wparts, f: &mut Factor) {
     prof_add(10, t, on);
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:146-148
+// ```c
+//             for (k = 0;  k < j;  k++) {
+//                 temp -= A[i][k] * A[j][k];
+//             }
+// ```
+// Several elements of one column are advanced together; each gets its own
+// `temp -= A[i][k] * A[j][k]` for k in increasing order.
 /// `col[ii] -= lsp[k][ii] * lsp[k][jj]` for `k = 0..20` in order, over the
 /// `4 * V` lanes from `4 * (jj / 4)` (the lanes above the diagonal and the
 /// padding are scratch).
@@ -383,6 +603,10 @@ fn column_terms<const V: usize>(col: &mut [f64; P], lsp: &[[f64; P]; N], jj: usi
     col[start..start + 4 * V].copy_from_slice(&acc[..4 * V]);
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:149-149
+// ```c
+//             A[i][j] = temp/A[j][j];
+// ```
 /// `col[l] /= d` over the `4 * V` lanes from `start`.
 #[inline(always)]
 fn column_divide<const V: usize>(col: &mut [f64; P], d: f64, start: usize) {
@@ -391,6 +615,14 @@ fn column_divide<const V: usize>(col: &mut [f64; P], d: f64, start: usize) {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:146-148
+// ```c
+//             for (k = 0;  k < j;  k++) {
+//                 temp -= A[i][k] * A[j][k];
+//             }
+// ```
+// Right-looking form of the same subtraction: after column `kk` is final, term `k = kk` is
+// subtracted from each later column. Each element still receives its terms in increasing k.
 /// `cj[ii] -= ck[ii] * ljk` over the `4 * V` lanes from `4 * (jj / 4)`.
 #[inline(always)]
 fn column_update<const V: usize>(cj: &mut [f64; P], ck: &[f64; P], ljk: f64, jj: usize) {
@@ -400,6 +632,22 @@ fn column_update<const V: usize>(cj: &mut [f64; P], ck: &[f64; P], ljk: f64, jj:
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:171-177,179-183
+// ```c
+//     for (i = 0;  i < n;  i++) {
+//         temp = x[i];
+//         for (j = 0;  j < i;  j++) {
+//             temp -= L[i][j] * x[j];
+//         }
+//         x[i] = temp/L[i][i];
+//     }
+// ...
+//     for (j = n - 1;  j >= 0;  j--) {
+//         x[j] /= L[j][j];
+//         for (i = 0;  i < j;  i++) {
+//             x[i] -= L[j][i] * x[j];
+//         }
+// ```
 /// `Nlm_SolveLtriangPosDef` with the structured factor.
 ///
 /// Forward substitution by columns: `x[i]` receives `-= L[i][j] * x[j]` for
@@ -451,6 +699,26 @@ fn solve_structured(x: &mut [f64; M], f: &Factor) {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:752-758,762-768
+// ```c
+//     while (its <= maxits) {
+//         /* Compute the residuals */
+//         EvaluateReFunctions(values, grads, alphsize, x, q, old_scores,
+//                             constrain_rel_entropy);
+//         CalculateResiduals(&rnorm, resids_x, alphsize, resids_z, values,
+//                            grads, row_sums, col_sums, x, z,
+//                            constrain_rel_entropy, relative_entropy);
+// ...
+//         if ( !(rnorm > tol) ) {
+//             /* We converged at the current iterate */
+//             break;
+//         } else {
+//             /* we did not converge, so increment the iteration counter
+//                and start a new iteration */
+//             if (++its <= maxits) {
+// ```
+// The function body ports this loop for `alphsize == 20` and `constrain_rel_entropy`. The
+// stopping test, the iteration limit and the status are the reference's.
 /// `Blast_OptimizeTargetFrequencies` with `constrain_rel_entropy` set.
 /// Returns 0 when the iteration converged (the reference's status), 1
 /// otherwise; `x` holds the final iterate either way.
@@ -469,6 +737,13 @@ fn optimize(
     if on {
         PROF[6].fetch_add(1, Ordering::Relaxed);
     }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:675-679
+    // ```c
+    //     for (i = 0;  i < alphsize;  i++) {
+    //         for (j = 0;  j < alphsize;  j++) {
+    //             k = i * alphsize + j;
+    //             scores[k] = log(target_freqs[k] / (row_freqs[i] * col_freqs[j]));
+    // ```
     // ComputeScoresFromProbs
     let mut scores = [0.0f64; NN];
     {
@@ -480,6 +755,11 @@ fn optimize(
         }
         crate::utils::x_logclone::log_slice(&ratios, &mut scores);
     }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:747-748
+    // ```c
+    //     /* Use q as the initial value for x */
+    //     memcpy(x, q, n * sizeof(double));
+    // ```
     *x = *q;
     let mut z = [0.0f64; M];
     let mut resids_x = [0.0f64; NN];
@@ -491,6 +771,19 @@ fn optimize(
     let mut rnorm = 0.0f64;
     let mut its = 0usize;
     while its <= K_COMPO_ADJUST_ITERATION_LIMIT {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:634-645
+        // ```c
+        //     values[0] = 0.0; values[1] = 0.0;
+        //     for (k = 0;  k < alphsize * alphsize;  k++) {
+        //         temp = log(x[k] / q[k]);
+        //         values[0]   += x[k] * temp;
+        //         grads[0][k]  = temp + 1;
+        //         if (constrain_rel_entropy) {
+        //             temp += scores[k];
+        //             values[1]   += x[k] * temp;
+        //             grads[1][k]  = temp + 1;
+        // ```
+        // `values[0]` is not used by the reference after this call, so it is not computed here.
         // ---- EvaluateReFunctions (values[0] is never read by the reference)
         let mut logs = [0.0f64; NN];
         if its == 0 && first_iteration_shortcut {
@@ -506,6 +799,25 @@ fn optimize(
         if on {
             PROF[7].fetch_add(1, Ordering::Relaxed);
         }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:277-279,286-286
+        // ```c
+        //         eta = z[2 * alphsize - 1];
+        //         for (i = 0;  i < n;  i++) {
+        //             resids_x[i] = -grads[0][i] + eta * grads[1][i];
+        // ...
+        //     MultiplyByAtranspose(1.0, resids_x, alphsize, 1.0, z);
+        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:214-221
+        // ```c
+        //     for (i = 0;  i < alphsize;  i++) {
+        //         for (j = 0;  j < alphsize;  j++) {
+        //             k = i * alphsize + j;
+        //             y[k] += alpha * x[j];
+        //             if (i > 0) {
+        //                 y[k] += alpha * x[i + alphsize - 1];
+        //             }
+        // ```
+        // `DualResiduals` and `MultiplyByAtranspose`: the per-element operations below are these, in this order.
         // grads[0] = temp + 1, grads[1] = (temp + scores) + 1, values[1] += x * (temp + scores);
         // DualResiduals: resids_x = -grads[0] + eta * grads[1], then
         // MultiplyByAtranspose(1.0, resids_x, 1.0, z): += 1.0 * z[j], += 1.0 * z[i + 19].
@@ -530,7 +842,28 @@ fn optimize(
                 values1 += x[k] * temp;
             }
         }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:331-332
+        // ```c
+        //     DualResiduals(resids_x, alphsize, grads, z, constrain_rel_entropy);
+        //     norm_resids_x = Nlm_EuclideanNorm(resids_x, alphsize * alphsize);
+        // ```
         let norm_resids_x = euclidean_norm(&resids_x);
+        // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:243-249,172-172,177-177
+        // ```c
+        //     for (i = 0;  i < alphsize;  i++) {
+        //         rA[i] = col_sums[i];
+        //     }
+        //     for (i = 1;  i < alphsize;  i++) {
+        //         rA[i + alphsize - 1] = row_sums[i];
+        //     }
+        //     MultiplyByA(1.0, rA, alphsize, -1.0, x);
+        // ...
+        //             y[j] += alpha * x[i * alphsize + j];
+        // ...
+        //             y[i + alphsize - 1] += alpha * x[i * alphsize + j];
+        // ```
+        // `MultiplyByA(1.0, rA, alphsize, -1.0, x)` adds `-1.0 * x` to each entry, first the column
+        // sums over i, then the row sums over j, in the order of the loops.
         // ResidualsLinearConstraints: (col_sums, row_sums[1..]) - A x
         resids_z[..N].copy_from_slice(col_sums);
         for i in 1..N {
@@ -550,15 +883,69 @@ fn optimize(
             }
             resids_z[i + N - 1] = s;
         }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:337-344
+        // ```c
+        //         resids_z[2 * alphsize - 1] = relative_entropy - values[1];
+        //         norm_resids_z = Nlm_EuclideanNorm(resids_z, 2 * alphsize);
+        //     } else {
+        //         norm_resids_z = Nlm_EuclideanNorm(resids_z, 2 * alphsize - 1);
+        //     }
+        //     *rnorm =
+        //         sqrt(norm_resids_x * norm_resids_x + norm_resids_z * norm_resids_z);
+        // ```
         resids_z[M - 1] = relative_entropy - values1;
         let norm_resids_z = euclidean_norm(&resids_z);
         rnorm = (norm_resids_x * norm_resids_x + norm_resids_z * norm_resids_z).sqrt();
         t = prof_add(1, t, on);
+        // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:762-768
+        // ```c
+        //         if ( !(rnorm > tol) ) {
+        //             /* We converged at the current iterate */
+        //             break;
+        //         } else {
+        //             /* we did not converge, so increment the iteration counter
+        //                and start a new iteration */
+        //             if (++its <= maxits) {
+        // ```
         if !(rnorm > K_COMPO_ADJUST_ERR_TOLERANCE) {
             break;
         }
         its += 1;
         if its <= K_COMPO_ADJUST_ITERATION_LIMIT {
+            // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:504-510,525-531,534-534
+            // ```c
+            //      if (constrain_rel_entropy) {
+            //         double eta;             /* dual variable for the relative
+            //                                    entropy constraint */
+            //         eta = z[m - 1];
+            //         for (i = 0;  i < n;  i++) {
+            //             Dinv[i] = x[i] / (1 - eta);
+            //         }
+            // ...
+            //         W[m - 1][m - 1] = 0.0;
+            //         for (i = 0;  i < n;  i++) {
+            //             workspace[i] = Dinv[i] * grad_re[i];
+            //             W[m - 1][m - 1] += grad_re[i] * workspace[i];
+            //         }
+            //         MultiplyByA(0.0, &W[m - 1][0], alphsize, 1.0, workspace);
+            // ...
+            //     Nlm_FactorLtriangPosDef(W, m);
+            // ```
+            // The loops below compute `Dinv`, the sums that `ScaledSymmetricProductA` adds into `W`, and
+            // the last row of `W`, in the same order per value.
+            // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:126-137
+            // ```c
+            //     for (i = 0;  i < alphsize;  i++) {
+            //         for (j = 0;  j < alphsize;  j++) {
+            //             double dd;     /* an individual diagonal element */
+            //             dd = diagonal[i * alphsize + j];
+            //             W[j][j] += dd;
+            //             if (i > 0) {
+            //                 W[i + alphsize - 1][j] += dd;
+            //                 W[i + alphsize - 1][i + alphsize - 1] += dd;
+            //             }
+            //         }
+            // ```
             // ---- FactorReNewtonSystem
             // dinv = x / (1 - eta); W[j][j] += dinv over i in order;
             // W[i+19][i+19] += dinv over j in order; workspace = dinv * grad_re;
@@ -610,6 +997,19 @@ fn optimize(
             }
             t = prof_add(3, t, on);
 
+            // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:575-578,581-583,587-587
+            // ```c
+            //     for (i = 0;  i < n;  i++) {
+            //         workspace[i] = x[i] * Dinv[i];
+            //     }
+            //     MultiplyByA(1.0, z, alphsize, -1.0, workspace);
+            // ...
+            //         for (i = 0;  i < n;  i++) {
+            //             z[m - 1] -= grad_re[i] * workspace[i];
+            //         }
+            // ...
+            //     Nlm_SolveLtriangPosDef(z, m, W);
+            // ```
             // ---- SolveReNewtonSystem(resids_x, resids_z)
             // workspace = resids_x * dinv; resids_z -= A workspace (column sums
             // over i, row sums over j); resids_z[39] -= grad_re . workspace.
@@ -631,6 +1031,18 @@ fn optimize(
             }
             resids_z[M - 1] = s39;
             solve_structured(&mut resids_z, &factor);
+            // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:593-602
+            // ```c
+            //     if (constrain_rel_entropy) {
+            //         for(i = 0; i < n; i++) {
+            //             x[i] += grad_re[i] * z[m - 1];
+            //         }
+            //     }
+            //     MultiplyByAtranspose(1.0, x, alphsize, 1.0, z);
+            //     for (i = 0;  i < n;  i++) {
+            //         x[i] *= Dinv[i];
+            //     }
+            // ```
             // resids_x += grad_re * z[39]; MultiplyByAtranspose(1.0, resids_x, 1.0, z); *= dinv
             let z_re = resids_z[M - 1];
             for i in 0..N {
@@ -649,6 +1061,24 @@ fn optimize(
             }
             t = prof_add(4, t, on);
 
+            // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:781-785
+            // ```c
+            //                 alpha = Nlm_StepBound(x, n, resids_x, 1.0 / .95);
+            //                 alpha *= 0.95;
+            //                 Nlm_AddVectors(x, n, alpha, resids_x);
+            //                 Nlm_AddVectors(z, m, alpha, resids_z);
+            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:230-238
+            // ```c
+            //     for (i = 0; i < n; i++) {
+            //         double alpha_i;    /* a step to the boundary for the current i */
+            //         alpha_i = -x[i] / step_x[i];
+            //         if (alpha_i >= 0 && alpha_i < alpha) {
+            //             alpha = alpha_i;
+            //         }
+            //     }
+            //     return alpha;
+            // ```
             // ---- Nlm_StepBound(x, 400, resids_x, 1 / 0.95) * 0.95, then Nlm_AddVectors
             let mut ratios = [0.0f64; NN];
             for k in 0..NN {
@@ -670,9 +1100,22 @@ fn optimize(
             t = prof_add(5, t, on);
         }
     }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:789-797
+    // ```c
+    //     converged = 0;
+    //     if (its <= maxits && rnorm <= tol) {
+    //         /* Newton's iteration converged */
+    //         if ( !constrain_rel_entropy || z[m - 1] < 1 ) {
+    //             /* and the final iterate is a minimizer */
+    //             converged = 1;
+    //         }
+    //     }
+    //     status = converged ? 0 : 1;
+    // ```
     let converged = its <= K_COMPO_ADJUST_ITERATION_LIMIT
         && rnorm <= K_COMPO_ADJUST_ERR_TOLERANCE
         && z[M - 1] < 1.0;
+    // No NCBI counterpart: iteration counter; it does not change any value NCBI computes.
     crate::utils::xstats::add(&crate::utils::xstats::NEWTON_ITERS, its as u64);
     if converged {
         0
@@ -681,6 +1124,13 @@ fn optimize(
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:752-752
+// ```c
+//     while (its <= maxits) {
+// ```
+// No NCBI counterpart: the same `optimize` body compiled with AVX2 enabled so that the compiler may
+// use wider vectors. Rust does not fuse `a * b + c` or reorder sums, so it computes the same IEEE-754
+// operations as the body without the feature; it does not change any value NCBI computes.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 unsafe fn optimize_avx2(
@@ -703,6 +1153,13 @@ unsafe fn optimize_avx2(
     )
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:752-752
+// ```c
+//     while (its <= maxits) {
+// ```
+// No NCBI counterpart: the same `optimize` body compiled with AVX-512F enabled so that the compiler may
+// use wider vectors. Rust does not fuse `a * b + c` or reorder sums, so it computes the same IEEE-754
+// operations as the body without the feature; it does not change any value NCBI computes.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f")]
 unsafe fn optimize_avx512(
@@ -725,6 +1182,7 @@ unsafe fn optimize_avx512(
     )
 }
 
+// No NCBI counterpart: run-time choice of the vector width (LOSAT_X_NEWTONEXACT_LEVEL); it only selects which compilation of `optimize` runs; it does not change any value NCBI computes.
 #[cfg(target_arch = "x86_64")]
 fn x86_level() -> u8 {
     static LEVEL: OnceLock<u8> = OnceLock::new();
@@ -744,6 +1202,17 @@ fn x86_level() -> u8 {
     })
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:686-687,693-696
+// ```c
+// int
+// Blast_OptimizeTargetFrequencies(double x[],
+// ...
+//                                 int constrain_rel_entropy,
+//                                 double relative_entropy,
+//                                 double tol,
+//                                 int maxits)
+// ```
+// The caller chooses between this function and the port of the reference (see `mode`).
 /// The entry point: the same contract as the reference
 /// `optimize_target_frequencies` with `constrain_rel_entropy == true`.
 pub(crate) fn optimize_target_frequencies_exact(
@@ -756,6 +1225,13 @@ pub(crate) fn optimize_target_frequencies_exact(
     let x: &mut [f64; NN] = x.try_into().expect("400 target frequencies");
     let q: &[f64; NN] = q.try_into().expect("400 standard frequencies");
     // The shortcut needs x[k] / q[k] == 1.0 exactly, i.e. finite non-zero q.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:747-748,636-636
+    // ```c
+    //     /* Use q as the initial value for x */
+    //     memcpy(x, q, n * sizeof(double));
+    // ...
+    //         temp = log(x[k] / q[k]);
+    // ```
     let shortcut = q.iter().all(|&v| v.is_finite() && v != 0.0);
     let ln_one = ln_one();
     #[cfg(target_arch = "x86_64")]
@@ -782,6 +1258,7 @@ pub(crate) fn optimize_target_frequencies_exact(
 mod tests {
     use super::*;
 
+    // No NCBI counterpart: random number generator of the test; it does not change any value NCBI computes.
     fn xorshift(state: &mut u64) -> f64 {
         *state ^= *state << 13;
         *state ^= *state >> 7;
@@ -789,6 +1266,38 @@ mod tests {
         (*state >> 11) as f64 / (1u64 << 53) as f64
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:143-149,151-155
+    // ```c
+    //     for (i = 0;  i < n;  i++) {
+    //         for (j = 0;  j < i;  j++) {
+    //             temp = A[i][j];
+    //             for (k = 0;  k < j;  k++) {
+    //                 temp -= A[i][k] * A[j][k];
+    //             }
+    //             A[i][j] = temp/A[j][j];
+    // ...
+    //         temp = A[i][i];
+    //         for (k = 0;  k < i;  k++) {
+    //             temp -= A[i][k] * A[i][k];
+    //         }
+    //         A[i][i] = sqrt(temp);
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:171-177,179-183
+    // ```c
+    //     for (i = 0;  i < n;  i++) {
+    //         temp = x[i];
+    //         for (j = 0;  j < i;  j++) {
+    //             temp -= L[i][j] * x[j];
+    //         }
+    //         x[i] = temp/L[i][i];
+    //     }
+    // ...
+    //     for (j = n - 1;  j >= 0;  j--) {
+    //         x[j] /= L[j][j];
+    //         for (i = 0;  i < j;  i++) {
+    //             x[i] -= L[j][i] * x[j];
+    //         }
+    // ```
     /// Reference `Nlm_FactorLtriangPosDef` + `Nlm_SolveLtriangPosDef` on a dense copy.
     fn reference_factor_solve(w: &[[f64; M]; M], b: &[f64; M]) -> ([[f64; M]; M], [f64; M]) {
         let mut a = *w;
@@ -823,6 +1332,7 @@ mod tests {
         (a, x)
     }
 
+    // No NCBI counterpart: random test input for `dinv` and the gradient; it does not change any value NCBI computes.
     fn random_parts(state: &mut u64, wide: bool) -> ([f64; NN], [f64; NN]) {
         let mut dinv = [0.0f64; NN];
         for v in dinv.iter_mut() {
@@ -839,6 +1349,19 @@ mod tests {
         (dinv, grad)
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:132-135,527-531
+    // ```c
+    //             W[j][j] += dd;
+    //             if (i > 0) {
+    //                 W[i + alphsize - 1][j] += dd;
+    //                 W[i + alphsize - 1][i + alphsize - 1] += dd;
+    // ...
+    //             workspace[i] = Dinv[i] * grad_re[i];
+    //             W[m - 1][m - 1] += grad_re[i] * workspace[i];
+    //         }
+    //         MultiplyByA(0.0, &W[m - 1][0], alphsize, 1.0, workspace);
+    // ```
+    // Builds `W` the way `ScaledSymmetricProductA` and `FactorReNewtonSystem` do, for the test.
     fn build_w(
         dinv: &[f64; NN],
         grad: &[f64; NN],
@@ -891,6 +1414,32 @@ mod tests {
         (wdiag, wrow, w39, w)
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/nlm_linear_algebra.c:143-149,151-155,171-177
+    // ```c
+    //     for (i = 0;  i < n;  i++) {
+    //         for (j = 0;  j < i;  j++) {
+    //             temp = A[i][j];
+    //             for (k = 0;  k < j;  k++) {
+    //                 temp -= A[i][k] * A[j][k];
+    //             }
+    //             A[i][j] = temp/A[j][j];
+    // ...
+    //         temp = A[i][i];
+    //         for (k = 0;  k < i;  k++) {
+    //             temp -= A[i][k] * A[i][k];
+    //         }
+    //         A[i][i] = sqrt(temp);
+    // ...
+    //     for (i = 0;  i < n;  i++) {
+    //         temp = x[i];
+    //         for (j = 0;  j < i;  j++) {
+    //             temp -= L[i][j] * x[j];
+    //         }
+    //         x[i] = temp/L[i][i];
+    //     }
+    // ```
+    // The test factors and solves 400 random Newton matrices with the structured code and with a
+    // copy of these loops, and compares every entry by its bits.
     #[test]
     fn x_structured_factor_and_solve_match_reference_bitwise_on_random_newton_matrices() {
         let mut state = 0x9E37_79B9_7F4A_7C15u64;

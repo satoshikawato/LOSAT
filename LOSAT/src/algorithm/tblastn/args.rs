@@ -1231,6 +1231,21 @@ fn search(
         // EXPERIMENT (LOSAT_X_TBNPAR, LOSAT_X_TBNSSIDE, LOSAT_X_TBNBATCH): the batches of the
         // loop below searched ahead (`x_search_batches`), each with its range; `None` when
         // the switches are off. A batch whose range does not match is searched by the loop.
+        // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:275-291
+        // ```c
+        //             for (; !input->End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
+        // ...
+        //                 query =  input->GetNextSeqBatch(*scope);
+        //                 query_factory.Reset(new CObjMgr_QueryFactory(*query));
+        // ...
+        //                     CLocalBlast lcl_blast(query_factory, m_OptsHndl, db_adapter);
+        //                     lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
+        //                     results = lcl_blast.Run();
+        // ```
+        // Dispatch point: NCBI searches the query batches one after another (one CLocalBlast per
+        // batch). With the switches on, x_search_batches searches them ahead (on one shared pool,
+        // or side by side) and returns the reports in batch order; with them off it returns None
+        // and the loop below runs as before.
         let mut x_searched = super::stage_d_pipeline::x_search_batches(
             &query_seqs,
             &subject_seqs,
@@ -1262,6 +1277,18 @@ fn search(
             .filter(|searched| !searched.is_empty() && searched.end <= searched_done)
         {
             let (mut batch_results, batch_lengths, batch_karlin, batch_validity) =
+                // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:277-291
+                // ```c
+                //                 query =  input->GetNextSeqBatch(*scope);
+                //                 query_factory.Reset(new CObjMgr_QueryFactory(*query));
+                // ...
+                //                     CLocalBlast lcl_blast(query_factory, m_OptsHndl, db_adapter);
+                //                     lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
+                //                     results = lcl_blast.Run();
+                // ```
+                // Dispatch point: a report searched ahead for this very range is used; otherwise
+                // run_local_for_report_threads searches the batch here, which is the port of
+                // CLocalBlast::Run for one batch.
                 match x_searched.as_mut().and_then(Iterator::next) {
                     Some((x_range, report)) if x_range == range => report,
                     _ => run_local_for_report_threads(

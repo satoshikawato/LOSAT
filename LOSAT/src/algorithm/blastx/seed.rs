@@ -557,6 +557,23 @@ pub fn word_finder(
     mut trace: impl FnMut(&[(i32, i32)]),
 ) -> Result<Vec<InitHsp>> {
     // EXPERIMENT (LOSAT_X_SEEDBUCKET + LOSAT_X_BXSEEDBUCKET): see x_seed_bucket::blastx_mode.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-606
+    // ```c
+    //             diag_coord = (query_offset - subject_offset) & diag_mask;
+    // ...
+    //                 score = s_BlastAaExtendTwoHit(matrix, subject, query,
+    // ...
+    //                 if (score >= cutoffs->cutoff_score)
+    //                     BlastSaveInitHsp(ungapped_hsps, hsp_q, hsp_s,
+    // ...
+    //                 if (right_extend) {
+    //                     diag_array[diag_coord].flag = 1;
+    //                     diag_array[diag_coord].last_hit =
+    //                         s_last_off - (wordsize - 1) + diag_offset;
+    // ```
+    // Dispatch point: mode 0 runs word_finder_plain (the port of this loop), mode 1 runs the
+    // diagonal-bucketed variant, and the shadow mode runs both on copies of the diagonal table and
+    // asserts equal hit lists and tables. Same hits, same per-diagonal order; see x_seed_bucket.
     match crate::algorithm::tblastx::x_seed_bucket::blastx_mode() {
         0 => word_finder_plain(
             batch, parameters, options, subject, lookup, diagonals, trace,
@@ -602,6 +619,22 @@ pub fn word_finder(
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-606
+// ```c
+//             diag_coord = (query_offset - subject_offset) & diag_mask;
+// ...
+//                 score = s_BlastAaExtendTwoHit(matrix, subject, query,
+// ...
+//                 if (score >= cutoffs->cutoff_score)
+//                     BlastSaveInitHsp(ungapped_hsps, hsp_q, hsp_s,
+// ...
+//                 if (right_extend) {
+//                     diag_array[diag_coord].flag = 1;
+//                     diag_array[diag_coord].last_hit =
+//                         s_last_off - (wordsize - 1) + diag_offset;
+// ```
+// word_finder_plain is the original port of this loop for one subject (it is unchanged except that
+// the context lookup can be moved after the diagonal tests, see LOSAT_X_BXLAZYCTX).
 /// The reference word finder (the loop of NCBI's BlastAaWordFinder_TwoHit /
 /// _OneHit for one subject), kept verbatim; `word_finder_bucketed` is the
 /// LOSAT_X_SEEDBUCKET variant of it.
@@ -618,6 +651,8 @@ fn word_finder_plain(
     let word = options.word_size;
     let mask = diagonals.entries.len() as i32 - 1;
     let mut hits = Vec::new();
+    // No NCBI counterpart: reads the LOSAT_X_BXLAZYCTX switch once; it does not change any value
+    // NCBI computes.
     let lazy_context = {
         use std::sync::OnceLock;
         static ON: OnceLock<bool> = OnceLock::new();
@@ -633,6 +668,16 @@ fn word_finder_plain(
                 // EXPERIMENT (LOSAT_X_BXLAZYCTX): the context of a seed is only
                 // needed once the diagonal tests let it through; looking it up
                 // has no side effect, so doing it later changes nothing.
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:560,783-784
+                // ```c
+                //                 curr_context = BSearchContextInfo(query_offset, query_info);
+                // ...
+                //                 Int4 curr_context = BSearchContextInfo(query_offset,
+                //                                                        query_info);
+                // ```
+                // The two-hit path looks up the context (BSearchContextInfo) only after the
+                // diagonal tests have let the pair through, and the one-hit path only when diff >=
+                // 0. LOSAT_X_BXLAZYCTX does the same here; the lookup has no side effect.
                 let context_of = |q: i32| {
                     batch
                         .contexts
@@ -746,6 +791,23 @@ fn word_finder_plain(
     Ok(hits)
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-606
+// ```c
+//             diag_coord = (query_offset - subject_offset) & diag_mask;
+// ...
+//                 score = s_BlastAaExtendTwoHit(matrix, subject, query,
+// ...
+//                 if (score >= cutoffs->cutoff_score)
+//                     BlastSaveInitHsp(ungapped_hsps, hsp_q, hsp_s,
+// ...
+//                 if (right_extend) {
+//                     diag_array[diag_coord].flag = 1;
+//                     diag_array[diag_coord].last_hit =
+//                         s_last_off - (wordsize - 1) + diag_offset;
+// ```
+// word_finder_bucketed processes the same hits with the same per-hit steps, grouped by diagonal
+// range (LOSAT_X_SEEDBUCKET). Each hit reads and writes only diag_array[diag_coord], so the state
+// of a diagonal depends only on that diagonal's hits in scan order, which is kept.
 #[allow(clippy::too_many_arguments)]
 fn word_finder_bucketed(
     batch: &PreparedQueryBatch,
@@ -760,6 +822,8 @@ fn word_finder_bucketed(
     let word = options.word_size;
     let mask = diagonals.entries.len() as i32 - 1;
     let mut hits = Vec::new();
+    // No NCBI counterpart: reads the LOSAT_X_BXLAZYCTX switch once; it does not change any value
+    // NCBI computes.
     let lazy_context = {
         use std::sync::OnceLock;
         static ON: OnceLock<bool> = OnceLock::new();
@@ -770,6 +834,21 @@ fn word_finder_bucketed(
     // the tests below read and write one diagonal cell per hit, so the order
     // across diagonals is free; the order within a diagonal is kept, and the
     // saved HSPs are put back into scan order before the stable sort).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:500-509
+    // ```c
+    //         scan_range[2] = scan_range[1];
+    // ...
+    //     while (scan_range[1] <= scan_range[2]) {
+    //         /* scan the subject sequence for hits */
+    // ...
+    //
+    //         totalhits += hits;
+    //         /* for each hit, */
+    //         for (i = 0; i < hits; ++i) {
+    // ```
+    // NCBI handles the hits of one scansub() call in scan order. Here the hits of a scan window are
+    // collected into diagonal-range buckets first and flushed when the budget is reached; the saved
+    // HSPs are put back into scan order before the sort.
     let mut buckets = crate::algorithm::tblastx::x_seed_bucket::SeedBuckets::new(
         diagonals.entries.len() as u32,
         mask as u32,
@@ -777,6 +856,22 @@ fn word_finder_bucketed(
     let x_budget = crate::algorithm::tblastx::x_seed_bucket::budget();
     let mut x_seq: u32 = 0;
     let mut seq_keys: Vec<u32> = Vec::new();
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-606
+    // ```c
+    //             diag_coord = (query_offset - subject_offset) & diag_mask;
+    // ...
+    //                 score = s_BlastAaExtendTwoHit(matrix, subject, query,
+    // ...
+    //                 if (score >= cutoffs->cutoff_score)
+    //                     BlastSaveInitHsp(ungapped_hsps, hsp_q, hsp_s,
+    // ...
+    //                 if (right_extend) {
+    //                     diag_array[diag_coord].flag = 1;
+    //                     diag_array[diag_coord].last_hit =
+    //                         s_last_off - (wordsize - 1) + diag_offset;
+    // ```
+    // x_one_hit is a copy of the loop body of word_finder_plain for one hit (the C body above),
+    // expanded in the flush callbacks.
     // One hit of the NCBI loop (aa_ungapped.c:531-606 / blast_aalookup scan): a
     // copy of the loop body of `word_finder_plain`, expanded in place in the
     // flush callbacks (local names resolve here, by macro hygiene).  `break 'hit`
@@ -791,6 +886,16 @@ fn word_finder_bucketed(
                 // EXPERIMENT (LOSAT_X_BXLAZYCTX): the context of a seed is only
                 // needed once the diagonal tests let it through; looking it up
                 // has no side effect, so doing it later changes nothing.
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:560,783-784
+                // ```c
+                //                 curr_context = BSearchContextInfo(query_offset, query_info);
+                // ...
+                //                 Int4 curr_context = BSearchContextInfo(query_offset,
+                //                                                        query_info);
+                // ```
+                // The two-hit path looks up the context (BSearchContextInfo) only after the
+                // diagonal tests have let the pair through, and the one-hit path only when diff >=
+                // 0. LOSAT_X_BXLAZYCTX does the same here; the lookup has no side effect.
                 let context_of = |q: i32| {
                     batch
                         .contexts
@@ -881,6 +986,8 @@ fn word_finder_bucketed(
                         length: u.length,
                         score: u.score,
                     });
+                    // No NCBI counterpart: records the scan position of a saved HSP so that scan
+                    // order can be restored; it does not change any value NCBI computes.
                     seq_keys.push(seq);
                 }
                 if options.window_size == 0 {
@@ -910,6 +1017,15 @@ fn word_finder_bucketed(
         },
     );
     buckets.flush(|q, s, seq| x_one_hit!(q as i32, s as i32, seq));
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:588-591
+    // ```c
+    //                 if (score >= cutoffs->cutoff_score)
+    //                     BlastSaveInitHsp(ungapped_hsps, hsp_q, hsp_s,
+    //                                      query_offset, subject_offset, hsp_len,
+    //                                      score);
+    // ```
+    // BlastSaveInitHsp appends HSPs in scan order. restore_order puts the HSPs saved in bucket
+    // order back into that order, so the sort that follows sees the same input.
     crate::algorithm::tblastx::x_seed_bucket::restore_order(&mut hits, &seq_keys);
     diagonals.finish_subject(subject.len().saturating_sub(1))?;
     hits.sort_by(|a, b| {

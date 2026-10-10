@@ -1088,6 +1088,8 @@ fn scan_large_gap_predecessors(
 
 use super::params::LinkHspCutoffs;
 
+// No NCBI counterpart: reads the trace and diagnostic switches once. A traced run keeps the
+// NCBI kernel, so no value NCBI computes changes.
 /// True when a linking trace or diagnostic was asked for. The index-backed
 /// kernel prints none of them, so a traced run keeps the NCBI kernel.
 fn link_tracing_requested() -> bool {
@@ -1101,6 +1103,19 @@ fn link_tracing_requested() -> bool {
     })
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:974,1049,1061,1080-1081
+// ```c
+//          H->hsp->evalue = prob[ordering_method];
+// ...
+//              H->hsp->num = num_links;
+// ...
+//          H->hsp->num = num_links;
+// ...
+// for (index = 0, H = first_hsp; index < hsp_list->hspcnt; index++) {
+//    hsp_list->hsp_array[index] = H->hsp;
+// ```
+// The shadow check compares what s_BlastEvenGapLinkHSPs leaves in the list: the order of the
+// HSPs, evalue, num and xsum of each. The E-value is compared bit for bit.
 /// `LOSAT_LINK_FAST_SHADOW`: the two kernels must return the same HSPs in the
 /// same order with every field equal, E-values bit for bit.
 fn assert_same_linking(expected: &[UngappedHit], actual: &[UngappedHit]) {
@@ -1118,6 +1133,16 @@ fn assert_same_linking(expected: &[UngappedHit], actual: &[UngappedHit]) {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:414-419,589
+// ```c
+// s_BlastEvenGapLinkHSPs(EBlastProgramType program_number, BlastHSPList* hsp_list,
+// ...
+//       while (number_of_hsps > 0)
+// ```
+// Dispatch point. Without LOSAT_LINK_FAST the NCBI kernel below runs (it ports
+// s_BlastEvenGapLinkHSPs). With the switch, the index-backed kernel of linking_fast.rs ports the
+// same function with different predecessor searches. A group that could leave the Int4 range, or
+// a traced run, always runs the NCBI kernel.
 /// Links one group with the NCBI kernel below or, under `LOSAT_LINK_FAST=1`,
 /// with the index-backed kernel of `linking_fast.rs`, which returns the same
 /// result. A traced run, and a group whose sums could leave the Int4 range,
@@ -3468,6 +3493,14 @@ mod tests {
     // Index-backed kernel (`linking_fast.rs`, LOSAT_LINK_FAST=1)
     // -----------------------------------------------------------------------
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:414-419,589
+    // ```c
+    // s_BlastEvenGapLinkHSPs(EBlastProgramType program_number, BlastHSPList* hsp_list,
+    // ...
+    //       while (number_of_hsps > 0)
+    // ```
+    // These tests compare the index-backed kernel with the port of s_BlastEvenGapLinkHSPs on the
+    // same groups. The reference results are the NCBI kernel above, not hand-written numbers.
     use crate::algorithm::tblastx::sum_stats_linking::linking_fast::{
         link_hsp_group_fast_with, LinkFastOptions, LinkFastStats,
     };
@@ -3521,6 +3554,16 @@ mod tests {
             .collect()
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:414-419,974,1049
+    // ```c
+    // s_BlastEvenGapLinkHSPs(EBlastProgramType program_number, BlastHSPList* hsp_list,
+    // ...
+    //             H->hsp->evalue = prob[ordering_method];
+    // ...
+    //                 H->hsp->num = num_links;
+    // ```
+    // The helper runs the port of s_BlastEvenGapLinkHSPs and the index-backed kernel on the same
+    // sorted group and compares every field of the result (E-values bit for bit).
     /// Links `hits` (any order) with the NCBI kernel and with the
     /// index-backed kernel, every choice of the latter checked by the plain
     /// scan, and requires the same HSPs in the same order with every field
@@ -3590,6 +3633,19 @@ mod tests {
             .expect("HSP of the fixed test")
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:827-861
+    // ```c
+    // for (H2_index=H_index-1; H2_index>1;)
+    // ...
+    //    b0 = sum <= H_hsp_sum;
+    // ...
+    //    b1 = q_off_t <= H_query_etrim;
+    //    b2 = s_off_t <= H_sub_etrim;
+    // ...
+    //    if (!(b0|b1|b2) )
+    // ```
+    // The NCBI scan visits only HSPs before H in list order, so J is never a candidate of H. The
+    // test makes the tree of the index-backed kernel answer with J, which forces the fallback scan.
     // H spans 4 residues and J starts one residue before it. J follows H in
     // list order, so NCBI never offers J to H; but J's trimmed start (99 + 5)
     // lies beyond H's trimmed end (104 - 1) on both sequences, so the tree of
@@ -3636,6 +3692,21 @@ mod tests {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:635-649,781-795
+    // ```c
+    // if(path_changed==0){
+    //    /* No path was changed, use these max sums. */
+    //    use_current_max=1;
+    // ...
+    //    use_current_max=1;
+    //    if(!ignore_small_gaps){
+    //       for (H=best[0]; H!=NULL; H=H->hsp_link.link[0])
+    //          if (H->linked_to==-1000) {use_current_max=0; break;}
+    // ...
+    //    if ((!first_pass) && ((H2==0) || (H2->hsp_link.changed==0)))
+    // ```
+    // This test reaches the recomputation pass after a removal (use_current_max = 0) and checks
+    // that the kept choices equal the ones NCBI computes by searching.
     // Removing the best chain a1 -> a2 leaves e, whose recorded chain ran
     // through a2, as the stale maximum, so NCBI recomputes
     // (link_hsps.c:639-650). In that pass b2 and b1 are untouched: b2 keeps
@@ -3696,6 +3767,14 @@ mod tests {
         assert_eq!(format!("{linked:?}"), format!("{again:?}"));
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:738-745
+    // ```c
+    // if (sum>H_hsp_sum)
+    // ...
+    //    H_hsp_link=H2;
+    // ```
+    // NCBI takes the candidate with the larger sum (p), not the nearer one (k). The test checks that
+    // a kept choice stays correct while another candidate of H loses its chain.
     // H has two small-gap candidates, p (sum 69) and k (sum 5 + 59 through
     // a2). The first pass selects p. Removing a1 -> a2 forces a second pass
     // in which k searches again and drops to 5, while p is untouched: H keeps
@@ -3745,6 +3824,11 @@ mod tests {
         assert_eq!(format!("{linked:?}"), format!("{again:?}"));
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:753
+    // ```c
+    // Int4 new_sum = H_hsp_sum + (score - cutoff[index]);
+    // ```
+    // NCBI sums are Int4. A group whose sums could leave that range runs the NCBI kernel.
     // A group whose sums could leave the Int4 range is not given to the
     // index-backed kernel.
     #[test]
@@ -3771,6 +3855,13 @@ mod tests {
         assert!(!sums_fit_int4(&small, &negative_cutoffs));
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:414-419,589
+    // ```c
+    // s_BlastEvenGapLinkHSPs(EBlastProgramType program_number, BlastHSPList* hsp_list,
+    // ...
+    //       while (number_of_hsps > 0)
+    // ```
+    // The reference for the comparison is the port of s_BlastEvenGapLinkHSPs.
     // Differential test of the index-backed kernel against the NCBI kernel
     // on random HSP groups built to reach the rare paths: equal sums, equal
     // coordinates, HSPs of four to six residues (whose candidates can follow

@@ -298,6 +298,16 @@ pub(crate) struct BlastpKappaSubjectRangeCache {
     x_shared: Option<std::sync::Arc<XSharedSubjectRanges>>,
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1629-1637
+// ```c
+//             if ( (!shouldTestIdentical)
+// ...
+//                 status = s_DoSegSequenceData(seqData, eBlastTypeBlastp,
+//                                              subject_maybe_biased);
+// ```
+// SEG of the subject range depends on the range and the SEG parameters only, so one masked copy
+// serves every query that reaches the same range. Placement of an identical result; no value is
+// computed differently.
 /// EXPERIMENT (LOSAT_X_SEGSHARE): one store of masked subject ranges for all
 /// queries of a search.
 ///
@@ -334,6 +344,8 @@ impl XSharedSubjectRanges {
     }
 }
 
+// No NCBI counterpart: reads the LOSAT_X_SEGSHARE / LOSAT_X_SEGSHARESHADOW switches once; it does
+// not change any value NCBI computes.
 /// 0 = off, 1 = `LOSAT_X_SEGSHARE`, 2 = `LOSAT_X_SEGSHARESHADOW` (every hit is
 /// computed again and compared).
 pub(crate) fn x_seg_share() -> u8 {
@@ -358,6 +370,8 @@ impl BlastpKappaSubjectRangeCache {
         }
     }
 
+    // No NCBI counterpart: constructor that selects the search-wide store (see
+    // XSharedSubjectRanges); it does not change any value NCBI computes.
     /// EXPERIMENT (LOSAT_X_SEGSHARE): a cache backed by the search-wide store.
     pub(crate) fn x_with_shared(shared: Option<std::sync::Arc<XSharedSubjectRanges>>) -> Self {
         Self {
@@ -371,6 +385,14 @@ impl BlastpKappaSubjectRangeCache {
         matching_seq: &BlastCompoMatchingSequence<'_>,
         subject_range: &BlastCompoSequenceRange,
     ) -> Option<CachedSubjectRangeData> {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1635-1636
+        // ```c
+        //                 status = s_DoSegSequenceData(seqData, eBlastTypeBlastp,
+        //                                              subject_maybe_biased);
+        // ```
+        // Dispatch point: with the switch on, a cached SEG result is read from the shared store
+        // instead of the per-query map. The stored value is what s_DoSegSequenceData left in the
+        // buffer for this range.
         if let Some(shared) = &self.x_shared {
             let key = (matching_seq.index, subject_range.begin, subject_range.end);
             return shared.shard(&key).get(&key).cloned();
@@ -387,6 +409,13 @@ impl BlastpKappaSubjectRangeCache {
         subject: &BlastCompoSequenceData,
         subject_maybe_biased: bool,
     ) {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1635-1636
+        // ```c
+        //                 status = s_DoSegSequenceData(seqData, eBlastTypeBlastp,
+        //                                              subject_maybe_biased);
+        // ```
+        // Dispatch point: with the switch on, the SEG-masked range is stored in the shared store
+        // instead of the per-query map (same key, same value).
         if let Some(shared) = &self.x_shared {
             let key = (matching_seq.index, subject_range.begin, subject_range.end);
             let value = CachedSubjectRangeData {
@@ -1220,6 +1249,13 @@ fn build_subject_range_data(
 
     if should_apply_seg {
         // EXPERIMENT (LOSAT_X_SEGSHARESHADOW): a hit that is computed again below.
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1635-1636
+        // ```c
+        //                 status = s_DoSegSequenceData(seqData, eBlastTypeBlastp,
+        //                                              subject_maybe_biased);
+        // ```
+        // Shadow check: on a shared-store hit the range is still masked here and compared with the
+        // stored copy (assert). No value NCBI computes is changed.
         let mut x_expected: Option<CachedSubjectRangeData> = None;
         if let Some(cache) = subject_range_cache.as_mut() {
             if let Some(cached) = cache.get(matching_seq, subject_range) {

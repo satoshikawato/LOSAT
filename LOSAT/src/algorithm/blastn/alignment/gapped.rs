@@ -108,6 +108,15 @@ const FENCE_SENTRY: u8 = 201;
 
 /// EXPERIMENT: make sure `slot` holds the lookup tables of `matrix`.
 /// Returns false when the matrix cannot use the SIMD kernel.
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3063,3128,3150
+/// ```c
+///     matrix = gap_align->sbp->matrix->data;
+///             matrix_row = matrix[a_base_pair];
+///             next_score = score_array[b_index].best + matrix_row[ *b_ptr ];
+/// ```
+/// The SIMD kernel reads its per-letter score rows from tables built once from the same
+/// matrix values NCBI reads through `matrix_row`. The tables are copies, cached per
+/// scratch while the matrix is unchanged; no score is computed differently.
 fn x_prepare_nt_tables(
     slot: &mut Option<(
         Box<BlastnaMatrix>,
@@ -135,12 +144,24 @@ fn x_prepare_nt_tables(
 
 thread_local! {
     // EXPERIMENT: set while the scalar kernel runs as the cross-check reference.
+    // No NCBI counterpart: a flag that stops the LOSAT_X_DPSHADOW cross-check from
+    // recursing; it does not change any value NCBI computes.
     static X_IN_SHADOW: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// Scratch memory mirroring NCBI's BlastGapAlignStruct.
 /// NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_gapalign.h:69-80
 pub struct GapAlignScratch {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3087-3095
+    // ```c
+    //     if (num_extra_cells > gap_align->dp_mem_alloc) {
+    //         gap_align->dp_mem_alloc = MAX(num_extra_cells + 100,
+    //                                       2 * gap_align->dp_mem_alloc);
+    // ...
+    //     score_array = gap_align->dp_mem;
+    // ```
+    // NCBI keeps its DP memory in `gap_align` and reuses it between calls. The SIMD kernel's
+    // rows and its score-table cache are kept in this scratch the same way: reuse only.
     // EXPERIMENT: SIMD X-drop kernel state.
     fast: crate::utils::xdrop_simd::XdropScratch,
     // EXPERIMENT: lookup tables for the matrix last used with this scratch.
@@ -922,6 +943,8 @@ pub fn extend_gapped_heuristic_with_scratch(
             s_length
         };
 
+        // No NCBI counterpart: debug print (LOSAT_DEBUG_COORDS, read once with LOSAT_X_ENVCACHE);
+        // it does not change any value NCBI computes.
         if crate::utils::xenv::debug_coords_is_ok() {
             eprintln!("[COORDS] dp_start: qs={}, ss={}", qs, ss);
             eprintln!(
@@ -1031,6 +1054,8 @@ pub fn extend_gapped_heuristic_with_scratch(
     let final_s_start = ss.saturating_sub(left_s_consumed);
     let final_s_end = ss + seed_len + right_s_consumed;
 
+    // No NCBI counterpart: debug print (LOSAT_DEBUG_COORDS, read once with LOSAT_X_ENVCACHE);
+    // it does not change any value NCBI computes.
     if crate::utils::xenv::debug_coords_is_ok() {
         eprintln!("[COORDS] seed: qs={}, ss={}, len={}", qs, ss, seed_len);
         eprintln!(
@@ -1217,6 +1242,8 @@ fn extend_gapped_one_direction_with_scratch(
     // Main DP loop - for each query position (row)
     for a_index in 1..=m {
         // Debug: track last few rows
+        // No NCBI counterpart: debug print (LOSAT_DEBUG_COORDS, read once with LOSAT_X_ENVCACHE);
+        // it does not change any value NCBI computes.
         if crate::utils::xenv::debug_coords_is_ok() && m > 1000 && a_index >= m.saturating_sub(2) {
             eprintln!(
                 "[DP_ROW] a_index={}/{}, first_b={}, b_size={}",
@@ -1238,6 +1265,8 @@ fn extend_gapped_one_direction_with_scratch(
 
         // NCBI reference: blast_gapalign.c:862-912
         // Inner loop - for each subject position in the band
+        // No NCBI counterpart: LOSAT_X_STATS work counter (xstats feature); it does not change
+        // any value NCBI computes.
         crate::utils::xstats::add(&crate::utils::xstats::NT_SO_ROWS, 1);
         crate::utils::xstats::add(
             &crate::utils::xstats::NT_SO_CELLS,
@@ -1358,6 +1387,8 @@ fn extend_gapped_one_direction_with_scratch(
     // This matches NCBI's approach where stats are computed in traceback
 
     // Debug: check offset values
+    // No NCBI counterpart: debug print (LOSAT_DEBUG_COORDS, read once with LOSAT_X_ENVCACHE);
+    // it does not change any value NCBI computes.
     if crate::utils::xenv::debug_coords_is_ok() {
         eprintln!(
             "[EXT_FWD] m={}, n={}, a_offset={}, b_offset={}, best_score={}",
@@ -1428,6 +1459,28 @@ fn blast_align_packed_nucl_with_scratch(
     subject_byte_offset: isize,
     gap_scratch: &mut GapAlignScratch,
 ) -> (usize, usize, i32, usize) {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3146-3196
+    // ```c
+    //         for (b_index = first_b_index; b_index < b_size; b_index++) {
+    //             score_gap_col = score_array[b_index].best_gap;
+    //             next_score = score_array[b_index].best + matrix_row[ *b_ptr ];
+    //             if (score < score_gap_col)
+    //                 score = score_gap_col;
+    //             if (score < score_gap_row)
+    //                 score = score_gap_row;
+    //             if (best_score - score > x_dropoff) {
+    // ...
+    //                 score_gap_row = MAX(score - gap_open_extend, score_gap_row);
+    //                 score_array[b_index].best = score;
+    // ```
+    // Dispatch point of LOSAT_X_DPFAST / LOSAT_X_DPSHADOW (score only, packed subject,
+    // s_BlastAlignPackedNucl). `blast_align_packed_nucl_scalar` below ports this loop. The
+    // SIMD kernel runs the same recurrence on 16 (8-bit) or 8 (16-bit) cells of a row at a
+    // time. Its argument (head of `utils/xdrop_simd.rs`) is that only cells below the
+    // X-drop cutoff can differ from the scalar loop, and those cells are never read. A call
+    // that does not fit the lanes returns None and runs the scalar path. With
+    // LOSAT_X_DPSHADOW both run and `assert_eq!` compares them. The xstats counters only
+    // count work.
     // EXPERIMENT: SIMD kernel (LOSAT_X_DPFAST), optionally cross-checked
     // against the scalar kernel on every call (LOSAT_X_DPSHADOW).
     let x_mode = crate::utils::xdrop_simd::mode();
@@ -1630,6 +1683,8 @@ fn blast_align_packed_nucl_scalar(
         let mut score_gap_row = GAP_MININT;
         let mut last_b_index = first_b_index;
 
+        // No NCBI counterpart: LOSAT_X_STATS work counter (xstats feature); it does not change
+        // any value NCBI computes.
         crate::utils::xstats::add(&crate::utils::xstats::NT_SO_ROWS, 1);
         crate::utils::xstats::add(
             &crate::utils::xstats::NT_SO_CELLS,
@@ -1863,6 +1918,8 @@ fn extend_gapped_one_direction_ex_with_scratch(
         let mut last_b_index = first_b_index;
 
         // NCBI reference: blast_gapalign.c:862-912
+        // No NCBI counterpart: LOSAT_X_STATS work counter (xstats feature); it does not change
+        // any value NCBI computes.
         crate::utils::xstats::add(&crate::utils::xstats::NT_SO_ROWS, 1);
         crate::utils::xstats::add(
             &crate::utils::xstats::NT_SO_CELLS,
@@ -1965,6 +2022,8 @@ fn extend_gapped_one_direction_ex_with_scratch(
     // For score-only mode, we estimate stats from score and positions
 
     // Debug: check offset values for extension
+    // No NCBI counterpart: debug print (LOSAT_DEBUG_COORDS, read once with LOSAT_X_ENVCACHE);
+    // it does not change any value NCBI computes.
     if crate::utils::xenv::debug_coords_is_ok() {
         eprintln!("[EXT_{}] m={}, n={}, a_offset={}, b_offset={}, best_score={}, expected_perfect_score={}",
             if reverse { "REV" } else { "FWD" },
@@ -2176,6 +2235,32 @@ fn extend_gapped_one_direction_with_traceback_with_scratch(
     usize,
     Vec<GapEditOp>,
 ) {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:563-636,682-727
+    // ```c
+    //         for (b_index = first_b_index; b_index < b_size; b_index++) {
+    //             score_gap_col = score_array[b_index].best_gap;
+    //             next_score = score_array[b_index].best + matrix_row[ *b_ptr ];
+    //             if (matrix_index == FENCE_SENTRY) {
+    //                 if (fence_hit) {
+    //                     *fence_hit = 1;
+    // ...
+    //             script = SCRIPT_SUB;
+    //             if (score < score_gap_col) {
+    //                 script = SCRIPT_GAP_IN_B;
+    // ...
+    //             edit_script_row[b_index] = script;
+    // ...
+    //     while (a_index > 0 || b_index > 0) {
+    // ...
+    //         GapPrelimEditBlockAdd(edit_block, (EGapAlignOpType)script, 1);
+    // ```
+    // Dispatch point of LOSAT_X_DPFAST / LOSAT_X_DPSHADOW (traceback, forward half, ALIGN_EX).
+    // `..._traceback_scalar` below ports ALIGN_EX. The SIMD kernel runs the same recurrence
+    // and the same script bits on vector lanes and records the path with the same walk. Its
+    // argument (head of `utils/xdrop_simd.rs`) is that only cells below the X-drop cutoff can
+    // differ from the scalar loop, and those are never read. The fence sentinel gives
+    // `fence_hit` as in ALIGN_EX. A call that does not fit the lanes runs the scalar path.
+    // With LOSAT_X_DPSHADOW both run and `assert!` compares them.
     // EXPERIMENT: SIMD kernel (LOSAT_X_DPFAST), optionally cross-checked
     // against the scalar kernel on every call (LOSAT_X_DPSHADOW).
     let x_mode = crate::utils::xdrop_simd::mode();
@@ -2490,6 +2575,8 @@ fn extend_gapped_one_direction_with_traceback_scalar(
         let trace_row_cells = &mut *edit_script_row;
         #[cfg(not(all(target_arch = "wasm32", not(feature = "wasm-threads"))))]
         let trace_row_cells = edit_script_row.as_mut_slice();
+        // No NCBI counterpart: LOSAT_X_STATS work counter (xstats feature); it does not change
+        // any value NCBI computes.
         crate::utils::xstats::add(&crate::utils::xstats::NT_TB_ROWS, 1);
         crate::utils::xstats::add(
             &crate::utils::xstats::NT_TB_CELLS,
@@ -2934,6 +3021,31 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
         return (0, 0, 0, 0, 0, 0, 0, Vec::new());
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:563-636,682-727
+    // ```c
+    //         for (b_index = first_b_index; b_index < b_size; b_index++) {
+    //             score_gap_col = score_array[b_index].best_gap;
+    //             next_score = score_array[b_index].best + matrix_row[ *b_ptr ];
+    //             if (matrix_index == FENCE_SENTRY) {
+    //                 if (fence_hit) {
+    //                     *fence_hit = 1;
+    // ...
+    //             script = SCRIPT_SUB;
+    //             if (score < score_gap_col) {
+    //                 script = SCRIPT_GAP_IN_B;
+    // ...
+    //             edit_script_row[b_index] = script;
+    // ...
+    //     while (a_index > 0 || b_index > 0) {
+    // ...
+    //         GapPrelimEditBlockAdd(edit_block, (EGapAlignOpType)script, 1);
+    // ```
+    // Dispatch point of LOSAT_X_DPFAST / LOSAT_X_DPSHADOW (traceback, reverse half, ALIGN_EX
+    // with reverse_sequence). The code after this block is the scalar port of ALIGN_EX. The
+    // SIMD kernel is the same as for the forward half, with the row and column readers set
+    // to walk the sequences backwards, and the script is already in forward order. With
+    // LOSAT_X_DPSHADOW the scalar path runs as the reference (`X_IN_SHADOW` stops the
+    // recursion) and `assert!` compares the results.
     // EXPERIMENT: SIMD kernel (LOSAT_X_DPFAST), optionally cross-checked
     // against the scalar kernel on every call (LOSAT_X_DPSHADOW).
     let x_mode = crate::utils::xdrop_simd::mode();
@@ -3195,6 +3307,8 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
         let trace_row_cells = &mut *edit_script_row;
         #[cfg(not(all(target_arch = "wasm32", not(feature = "wasm-threads"))))]
         let trace_row_cells = edit_script_row.as_mut_slice();
+        // No NCBI counterpart: LOSAT_X_STATS work counter (xstats feature); it does not change
+        // any value NCBI computes.
         crate::utils::xstats::add(&crate::utils::xstats::NT_TB_ROWS, 1);
         crate::utils::xstats::add(
             &crate::utils::xstats::NT_TB_CELLS,
@@ -3550,6 +3664,8 @@ pub fn extend_gapped_heuristic_with_traceback(
 // ```
 #[inline]
 fn debug_coords_traceback_enabled(qs: usize, ss: usize) -> bool {
+    // No NCBI counterpart: debug print (LOSAT_DEBUG_COORDS, read once with LOSAT_X_ENVCACHE);
+    // it does not change any value NCBI computes.
     let debug_all = crate::utils::xenv::debug_coords_is_some();
     let Some(filter) = crate::utils::xenv::debug_coords_start() else {
         return debug_all;

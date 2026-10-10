@@ -680,6 +680,8 @@ fn format_gap_prelim_edit_block_for_trace(block: &GapPrelimEditBlock) -> String 
 }
 
 fn debug_greedy_traceback_enabled(q_off: usize, s_off: usize) -> bool {
+    // No NCBI counterpart: debug print switch (LOSAT_DEBUG_COORDS, read once with
+    // LOSAT_X_ENVCACHE); it does not change any value NCBI computes.
     let debug_all = crate::utils::xenv::debug_coords_is_some();
     let Some(filter) = crate::utils::xenv::debug_coords_start() else {
         return debug_all;
@@ -2441,6 +2443,30 @@ fn get_next_non_affine_tback(
     diag + 1
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:537-614,351-362,375
+// ```c
+// for (k = tmp_diag_lower; k <= tmp_diag_upper; k++) {
+//     seq2_index = MAX(last_seq2_off[d - 1][k + 1],
+//                      last_seq2_off[d - 1][k    ]) + 1;
+//     seq2_index = MAX(seq2_index, last_seq2_off[d - 1][k - 1]);
+// ...
+//     index = s_FindFirstMismatch(seq1, seq2, len1, len2,
+// ...
+//     last_seq2_off[d][k] = seq2_index;
+// ...
+//     if (seq1_index + seq2_index > curr_extent) {
+// ...
+// while (seq1_index < len1 && seq2_index < len2 &&
+//        seq1[seq1_index] < 4 &&
+//        seq1[seq1_index] == seq2[seq2_index]) {
+// ```
+// The code below is a faster form of the loop over diagonals `k` of `BLAST_GreedyAlign`
+// and of its `s_FindFirstMismatch` (`rem == 4`). Pass 1 reads only the row of distance
+// d-1 (the `seq2_index` choice and the X-drop test). Pass 2 reads only the sequences
+// (the slide length). Pass 3 applies the writes and the state updates (`diag_lower`,
+// `diag_upper`, `curr_extent`, seed, sequence ends, fence) diagonal by diagonal in the
+// order of the C loop. By construction this gives the cells, bounds and extent of the C
+// loop; LOSAT_X_GREEDYSHADOW compares them row by row. All of it is integer arithmetic.
 // ---------------------------------------------------------------------------
 // EXPERIMENT (LOSAT_X_GREEDYFAST / LOSAT_X_GREEDYSHADOW): one distance of
 // `BLAST_GreedyAlign` over an uncompressed subject, with the same cell order,
@@ -2474,6 +2500,15 @@ thread_local! {
     static X_GREEDY_TEST_MODE: std::cell::Cell<Option<u8>> = const { std::cell::Cell::new(None) };
 }
 
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:537,571-573
+/// ```c
+///         for (k = tmp_diag_lower; k <= tmp_diag_upper; k++) {
+/// ...
+///             index = s_FindFirstMismatch(seq1, seq2, len1, len2,
+/// ```
+/// Reads the LOSAT_X_GREEDYFAST / LOSAT_X_GREEDYSHADOW switches once. The mode only
+/// chooses whether this loop of `BLAST_GreedyAlign` runs as ported (0), as the fast row
+/// (1), or as both with a comparison (2).
 /// 0 = reference loop, 1 = fast row, 2 = both and compare every row.
 fn x_greedy_mode() -> u8 {
     #[cfg(test)]
@@ -2493,6 +2528,23 @@ fn x_greedy_mode() -> u8 {
     })
 }
 
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:565,578-582,596-614
+/// ```c
+///             diag_upper = k;
+/// ...
+///             if (index > longest_match_run) {
+///                 seed->start_q = seq1_index;
+/// ...
+///             if (seq1_index + seq2_index > curr_extent) {
+///                 curr_extent = seq1_index + seq2_index;
+///                 curr_seq2_index = seq2_index;
+///                 curr_diag = k;
+/// ...
+///                 diag_lower = k + 1;
+///                 end2_reached = TRUE;
+/// ```
+/// These are the variables the C loop updates across diagonals, copied in and out of the
+/// fast row so that it can leave exactly the state the C loop would leave.
 /// Everything a distance reads and updates besides the two rows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct XGreedyRowState {
@@ -2509,6 +2561,22 @@ struct XGreedyRowState {
     fence_hit: bool,
 }
 
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:327-334,351-358,375
+/// ```c
+///     if (reverse) {
+///         if (rem == 4) {
+///             while (seq1_index < len1 && seq2_index < len2 &&
+///                    seq1[len1-1 - seq1_index] < 4 &&
+///                    seq1[len1-1 - seq1_index] == seq2[len2-1 - seq2_index]) {
+/// ...
+///             while (seq1_index < len1 && seq2_index < len2 &&
+///                    seq1[seq1_index] < 4 &&
+///                    seq1[seq1_index] == seq2[seq2_index]) {
+/// ...
+///     return seq1_index - tmp;
+/// ```
+/// Same result as the byte loop: the number of positions before the first one where
+/// the bytes differ or `seq1` is not a base. Eight positions are tested per step.
 /// `s_FindFirstMismatch` for `rem == 4`, without the fence test.
 ///
 /// A position matches when the two bytes are equal and the `seq1` byte is
@@ -2575,6 +2643,19 @@ unsafe fn x_first_mismatch<const REVERSE: bool>(
     i
 }
 
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:578-582,596-614
+/// ```c
+///             if (index > longest_match_run) {
+///                 seed->start_q = seq1_index;
+///                 seed->start_s = seq2_index;
+///                 seed->match_length = longest_match_run = index;
+/// ...
+///             if (seq1_index == len1) {
+///                 diag_upper = k - 1;
+///                 end1_reached = TRUE;
+/// ```
+/// The variables that the C loop changes only on some diagonals (seed, ends, fence). The
+/// fast row keeps them here and remembers which cell last changed them.
 /// What a distance updates only on a few of its diagonals. The row loop
 /// keeps it in memory and leaves those diagonals to `x_greedy_cell_slow`.
 struct XGreedyRowCold {
@@ -2596,6 +2677,21 @@ struct XGreedyRowCold {
 
 const X_NO_CELL: usize = usize::MAX;
 
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:571-614
+/// ```c
+///             index = s_FindFirstMismatch(seq1, seq2, len1, len2,
+///                                         seq1_index, seq2_index,
+///                                         fence_hit, reverse, rem);
+///             if(fence_hit && *fence_hit){
+///                 return 0;
+///             }
+/// ...
+///             last_seq2_off[d][k] = seq2_index;
+/// ...
+///             if (seq2_index == len2) {
+/// ```
+/// The C code after the X-drop test, for one diagonal, with the same order of tests and
+/// writes (slide, fence, seed, cell, extent, ends).
 /// One surviving diagonal, exactly as the reference loop handles it after
 /// its X-drop test: any slide length, the fence test, the seed, the extent
 /// and both sequence ends.
@@ -2663,9 +2759,31 @@ unsafe fn x_greedy_cell_slow<const REVERSE: bool>(
     }
 }
 
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:537
+/// ```c
+///         for (k = tmp_diag_lower; k <= tmp_diag_upper; k++) {
+/// ```
+/// The band of diagonals is cut into blocks of this many cells for the three passes.
+/// Pass 3 still visits the diagonals in increasing `k`, as the C loop does.
 /// Cells per pass over the band.
 const X_GREEDY_BLOCK: usize = 256;
 
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:537-553,571-614
+/// ```c
+///         for (k = tmp_diag_lower; k <= tmp_diag_upper; k++) {
+///             seq2_index = MAX(last_seq2_off[d - 1][k + 1],
+///                              last_seq2_off[d - 1][k    ]) + 1;
+///             seq2_index = MAX(seq2_index, last_seq2_off[d - 1][k - 1]);
+///             seq1_index = seq2_index + k - diag_origin;
+///             if (seq2_index < 0 || seq1_index + seq2_index < xdrop_score) {
+/// ...
+///             index = s_FindFirstMismatch(seq1, seq2, len1, len2,
+/// ...
+///             last_seq2_off[d][k] = seq2_index;
+/// ```
+/// One distance `d` of the C loop above. Pass 1 is the first five statements, pass 2
+/// is the slide, pass 3 is the rest in the order of the diagonals. The comments below
+/// say which cases pass 2 may settle by itself and which go to `x_greedy_cell_slow`.
 /// One distance. `previous` holds diagonals `tmp_diag_lower - 1 ..=
 /// tmp_diag_upper + 1` of distance `d - 1`, `current` diagonals
 /// `tmp_diag_lower ..= tmp_diag_upper` of distance `d`. Returns true when the
@@ -2906,6 +3024,14 @@ unsafe fn x_greedy_row_impl<const REVERSE: bool>(
     cold.stopped
 }
 
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:537,571-573
+/// ```c
+///         for (k = tmp_diag_lower; k <= tmp_diag_upper; k++) {
+/// ...
+///             index = s_FindFirstMismatch(seq1, seq2, len1, len2,
+/// ```
+/// Chooses the `REVERSE` instance of `x_greedy_row_impl` (the C `reverse` argument).
+///
 /// SAFETY: `seq1` and `seq2` must be readable for `len1` and `len2` bytes.
 #[inline(always)]
 unsafe fn x_greedy_row_any(
@@ -2950,6 +3076,13 @@ unsafe fn x_greedy_row_any(
     }
 }
 
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:537
+/// ```c
+///         for (k = tmp_diag_lower; k <= tmp_diag_upper; k++) {
+/// ```
+/// The same integer code as `x_greedy_row_any`, so the same result as the C loop; the
+/// compiler may only use wider registers and `tzcnt` / `lzcnt`.
+///
 /// The same code compiled for AVX2/BMI (wider first pass, `tzcnt`/`lzcnt`).
 ///
 /// SAFETY: as `x_greedy_row_any`, and the CPU must support the features.
@@ -2983,6 +3116,13 @@ unsafe fn x_greedy_row_avx2(
     )
 }
 
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:537
+/// ```c
+///         for (k = tmp_diag_lower; k <= tmp_diag_upper; k++) {
+/// ```
+/// Picks the AVX2 or the plain build of the same row code (the CPU is checked once at
+/// run time). Both give the same result as the C loop; this is a choice of machine code.
+///
 /// SAFETY: `seq1` and `seq2` must be readable for `len1` and `len2` bytes.
 #[inline(never)]
 unsafe fn x_greedy_row(
@@ -3230,6 +3370,26 @@ fn blast_greedy_align(
             non_affine_mem.row_pair_mut(previous_row, current_row);
         let previous = &previous_values[previous_start..previous_start + band_len + 2];
         let current = &mut current_values[current_start..current_start + band_len];
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:537-615
+        // ```c
+        // for (k = tmp_diag_lower; k <= tmp_diag_upper; k++) {
+        //     seq2_index = MAX(last_seq2_off[d - 1][k + 1],
+        //                      last_seq2_off[d - 1][k    ]) + 1;
+        // ...
+        //     index = s_FindFirstMismatch(seq1, seq2, len1, len2,
+        //                                 seq1_index, seq2_index,
+        //                                 fence_hit, reverse, rem);
+        //     if(fence_hit && *fence_hit){
+        //         return 0;
+        //     }
+        // ...
+        // }   /* end loop over diagonals */
+        // ```
+        // Dispatch point of LOSAT_X_GREEDYFAST / LOSAT_X_GREEDYSHADOW. The `for` loop that follows
+        // the `if !x_done` below is the port of this C loop and runs when no switch is set, when
+        // `rem != 4`, or when the lengths do not fit the slices. With the switch, `x_greedy_row`
+        // does the same distance; a fence stop returns 0 as the C code does. The loop over
+        // distances `d` and everything after the diagonals (scores, convergence) is shared.
         // EXPERIMENT (LOSAT_X_GREEDYFAST / LOSAT_X_GREEDYSHADOW)
         let x_mode = x_greedy_mode();
         let mut x_done = false;
@@ -3366,6 +3526,19 @@ fn blast_greedy_align(
                 }
             }
         }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:574-576,589,596-614
+        // ```c
+        //             if(fence_hit && *fence_hit){
+        //                 return 0;
+        //             }
+        // ...
+        //             last_seq2_off[d][k] = seq2_index;
+        // ...
+        //             if (seq1_index + seq2_index > curr_extent) {
+        // ```
+        // LOSAT_X_GREEDYSHADOW: after the ported loop has run, the state and the row it left are
+        // compared with what the fast row left on its copy of the row. The reference loop did
+        // not return inside this distance, so the fast row must not have stopped either.
         if let Some((st, copy, stopped)) = x_shadow {
             // LOSAT_X_GREEDYSHADOW: the fast row must leave exactly what the
             // reference loop left (which did not return inside this row).
@@ -4488,6 +4661,16 @@ pub fn greedy_gapped_alignment_with_traceback(
 mod tests {
     use super::*;
 
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:380-387,537
+    /// ```c
+    /// Int4 BLAST_GreedyAlign(const Uint1* seq1, Int4 len1,
+    ///                        const Uint1* seq2, Int4 len2,
+    ///                        Boolean reverse, Int4 xdrop_threshold,
+    /// ...
+    ///         for (k = tmp_diag_lower; k <= tmp_diag_upper; k++) {
+    /// ```
+    /// The test runs the port of `BLAST_GreedyAlign` (and `BLAST_AffineGreedyAlign`) in
+    /// reference, fast and shadow mode on random inputs and compares the alignments.
     /// EXPERIMENT (LOSAT_X_GREEDYFAST / LOSAT_X_GREEDYSPEC).
     ///
     /// On random pairs of related sequences, with and without traceback:

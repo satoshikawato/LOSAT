@@ -26,6 +26,40 @@
 //! stable score sort (`Blast_InitHitListSortByScore`), so that the list the
 //! rest of the pipeline sees is the reference's list element for element.
 //!
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-538,588-606
+//! ```c
+//! Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
+//! Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
+//! ...
+//! diag_coord = (query_offset - subject_offset) & diag_mask;
+//! ...
+//! if (diag_array[diag_coord].flag) {
+//! ...
+//!     last_hit = diag_array[diag_coord].last_hit - diag_offset;
+//!     diff = subject_offset - last_hit;
+//! ...
+//!     if (score >= cutoffs->cutoff_score)
+//!         BlastSaveInitHsp(ungapped_hsps, hsp_q, hsp_s,
+//!                          query_offset, subject_offset, hsp_len,
+//!                          score);
+//! ```
+//! This is the per-hit body of BlastAaWordFinder_TwoHit that the bucketed order applies. The Rust
+//! code runs the same statements on a hit in the same way; only the order across diagonals
+//! (which cell is visited next) differs. Within one diagonal the hits arrive in scan order, so
+//! each cell goes through the same states and starts the same extensions. This is by
+//! construction (integer operations only); LOSAT_X_SEEDBUCKETSHADOW checks it on real runs.
+//!
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:306-309
+//! ```c
+//! void Blast_InitHitListSortByScore(BlastInitHitList * init_hitlist)
+//! {
+//!     qsort(init_hitlist->init_hsp_array, init_hitlist->total,
+//!           sizeof(BlastInitHSP), score_compare_match);
+//! ```
+//! NCBI sorts the hit list by score after the scan (called at aa_ungapped.c:282). Equal scores
+//! occur, and the order of the result among them follows the order of the input, so the saved HSPs
+//! must be in scan order before the sort. `restore_order` puts them back.
+//!
 //! `LOSAT_X_SEEDBUCKETSHADOW=1` runs both orders on every subject chunk (the
 //! bucketed one on a copy of the diagonal table) and aborts when the HSP
 //! lists or the diagonal tables differ.
@@ -45,6 +79,7 @@ pub(crate) static SHADOW_CHUNKS: AtomicU64 = AtomicU64::new(0);
 pub(crate) static SHADOW_HITS: AtomicU64 = AtomicU64::new(0);
 
 /// Shadow-mode summary (printed by `main` at exit).
+// No NCBI counterpart: prints the shadow-mode counters; it does not change any value NCBI computes.
 pub fn print_shadow_stats() {
     if mode() == 2 {
         eprintln!(
@@ -55,6 +90,18 @@ pub fn print_shadow_stats() {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:502-516
+// ```c
+// while (scan_range[1] <= scan_range[2]) {
+// ...
+//     for (i = 0; i < hits; ++i) {
+//         Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
+//         Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
+// ...
+//         diag_coord = (query_offset - subject_offset) & diag_mask;
+// ```
+// Dispatch point: mode 0 runs the scan-order loop (the port of the C loop above), mode 1 the
+// bucketed order, mode 2 both, compared.
 /// 0 = scan order (reference), 1 = bucketed, 2 = both, compared.
 pub(crate) fn mode() -> u8 {
     static MODE: OnceLock<u8> = OnceLock::new();
@@ -69,6 +116,8 @@ pub(crate) fn mode() -> u8 {
     })
 }
 
+// No NCBI counterpart: a size threshold for choosing the order. It changes speed only; it does
+// not change any value NCBI computes.
 /// Smallest diagonal table, in cells, for which the bucketed order is used
 /// when `LOSAT_X_SEEDBUCKET=1` (LOSAT_X_SEEDBUCKET_MIN_CELLS, default 2^21:
 /// an 8 MiB table of 4-byte cells).  Below that the table is served well
@@ -86,6 +135,18 @@ pub(crate) fn min_cells() -> usize {
     })
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:502-516
+// ```c
+// while (scan_range[1] <= scan_range[2]) {
+// ...
+//     for (i = 0; i < hits; ++i) {
+//         Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
+//         Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
+// ...
+//         diag_coord = (query_offset - subject_offset) & diag_mask;
+// ```
+// Dispatch point: chooses between the scan-order loop (the port of the C loop above) and the
+// bucketed order, by table size.
 /// The order to use for a diagonal table of `cells` cells: the shadow mode
 /// compares whatever the size, the plain bucketed mode applies only from
 /// `min_cells()` up.
@@ -97,6 +158,17 @@ pub(crate) fn mode_for(cells: usize) -> u8 {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:502-516
+// ```c
+// while (scan_range[1] <= scan_range[2]) {
+// ...
+//     for (i = 0; i < hits; ++i) {
+//         Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
+//         Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
+// ...
+//         diag_coord = (query_offset - subject_offset) & diag_mask;
+// ```
+// Dispatch point for BLASTX: the same choice between the scan-order loop and the bucketed order.
 /// BLASTX: the bucketed order needs `LOSAT_X_BXSEEDBUCKET=1` as well.  The
 /// subjects are single proteins, so a subject's hits are far fewer than the
 /// rows of the (query-sized) table and the grouping buys nothing; measured
@@ -109,6 +181,8 @@ pub(crate) fn blastx_mode() -> u8 {
     })
 }
 
+// No NCBI counterpart: how many hits are buffered before they are processed. Buffering changes
+// only when a hit is processed; the hits of one diagonal stay in scan order.
 /// Hits buffered before a flush (LOSAT_X_SEEDBUCKET_BUDGET, default 2^21:
 /// 24 MiB of buffered hits).
 pub(crate) fn budget() -> usize {
@@ -121,6 +195,11 @@ pub(crate) fn budget() -> usize {
     })
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516
+// ```c
+// diag_coord = (query_offset - subject_offset) & diag_mask;
+// ```
+// A bucket is a range of consecutive values of `diag_coord`, the index of the diagonal table.
 /// Diagonal cells per bucket (LOSAT_X_SEEDBUCKET_CELLS, default 32768: a
 /// 128 KiB slice of the diagonal table).
 fn cells_per_bucket() -> u32 {
@@ -134,6 +213,15 @@ fn cells_per_bucket() -> u32 {
     })
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-516
+// ```c
+// Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
+// Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
+// ...
+// diag_coord = (query_offset - subject_offset) & diag_mask;
+// ```
+// A buffered hit: the (q_off, s_off) of one offset pair, and its position `seq` in the scan
+// stream (used to restore the scan order of the saved HSPs).
 #[derive(Clone, Copy, Default)]
 struct Hit {
     q_off: u32,
@@ -141,6 +229,18 @@ struct Hit {
     seq: u32,
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:502-516
+// ```c
+// while (scan_range[1] <= scan_range[2]) {
+// ...
+//     for (i = 0; i < hits; ++i) {
+//         Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
+//         Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
+// ...
+//         diag_coord = (query_offset - subject_offset) & diag_mask;
+// ```
+// The buckets hold the hits of one scan window (one call of scansub in the C loop), grouped by
+// range of diag_coord. Within a bucket the hits are in scan order.
 pub(crate) struct SeedBuckets {
     diag_mask: u32,
     shift: u32,
@@ -180,6 +280,17 @@ impl SeedBuckets {
         self.total += 1;
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-516
+    // ```c
+    // for (i = 0; i < hits; ++i) {
+    //     Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
+    //     Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
+    // ...
+    //     diag_coord = (query_offset - subject_offset) & diag_mask;
+    // ```
+    // The C loop processes the offset pairs in scan order. This processes them bucket by bucket; the
+    // hits of one diagonal share a bucket and keep their order, so every diagonal cell sees the
+    // same sequence of hits.
     /// Processes every buffered hit, bucket by bucket, each bucket in scan
     /// order, and empties the buckets.
     #[inline(always)]
@@ -194,6 +305,15 @@ impl SeedBuckets {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:588-591
+// ```c
+// if (score >= cutoffs->cutoff_score)
+//     BlastSaveInitHsp(ungapped_hsps, hsp_q, hsp_s,
+//                      query_offset, subject_offset, hsp_len,
+//                      score);
+// ```
+// NCBI saves an HSP when the hit that produced it is processed, so the saved list is in scan
+// order (the sort at blast_extend.c:306-309 follows). This puts the list back into that order.
 /// Puts `items` back into increasing `seq_keys` order (the scan order).
 pub(crate) fn restore_order<T: Copy>(items: &mut Vec<T>, seq_keys: &[u32]) {
     debug_assert_eq!(items.len(), seq_keys.len());

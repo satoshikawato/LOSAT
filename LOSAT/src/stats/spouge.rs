@@ -150,6 +150,29 @@ fn erfc_ncbi(z: f64) -> f64 {
     // EXPERIMENT (LOSAT_X_ERFMEMO): ErfC is a pure function of its argument and
     // BLAST_SpougeEtoS (blast_stat.c:5236-5282) asks for the same arguments again
     // for every subject of the same length; keep the last results per thread.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:252-255
+    // ```c
+    // double ErfC(double z)
+    // {
+    //     return ErfImpl(z, TRUE);
+    // }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:5216-5216,5223-5223,5248-5254
+    // ```c
+    //     P_m_F = ErfC(-m_F / sqrt(2.0)) / 2.0;
+    // ...
+    //     P_n_F = ErfC(-n_F / sqrt(2.0)) / 2.0;
+    // ...
+    //     e = BLAST_SpougeStoE(b, kbp, gbp, m, n);
+    //     if (e > e0) {
+    //         while (e> e0) {
+    //             a = b;
+    //             b *= 2;
+    //             e = BLAST_SpougeStoE(b, kbp, gbp, m, n);
+    // ```
+    // NCBI calls ErfC again with the same arguments for every candidate score `b` of every
+    // subject length. The memo returns the value the first call computed for the same bits of
+    // `z`; ErfC reads nothing else, so this is reuse only.
     if x_erf_memo() {
         let key = z.to_bits();
         return X_ERFC_MEMO.with(|memo| {
@@ -171,12 +194,32 @@ fn erfc_ncbi(z: f64) -> f64 {
     erf_impl_ncbi(z, true)
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:252-255
+// ```c
+// double ErfC(double z)
+// {
+//     return ErfImpl(z, TRUE);
+// }
+// ```
+// No NCBI counterpart: the switch is read once per process. It chooses between calling
+// `erf_impl_ncbi` (the port of ErfC above) and reusing an earlier result of that call.
 fn x_erf_memo() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| std::env::var_os("LOSAT_X_ERFMEMO").is_some())
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:5248-5254
+// ```c
+//     e = BLAST_SpougeStoE(b, kbp, gbp, m, n);
+//     if (e > e0) {
+//         while (e> e0) {
+//             a = b;
+//             b *= 2;
+//             e = BLAST_SpougeStoE(b, kbp, gbp, m, n);
+// ```
+// No NCBI counterpart: a per-thread table of (argument bits, result bits) for `erfc_ncbi`.
+// It holds earlier ErfC results of the loop above and changes no value.
 thread_local! {
     static X_ERFC_MEMO: std::cell::RefCell<Vec<(u64, u64)>> =
         std::cell::RefCell::new(vec![(u64::MAX, 0); 4096]);
@@ -337,6 +380,14 @@ fn erf_impl_ncbi(z: f64, mut invert: bool) -> f64 {
     result
 }
 
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143-143
+/// ```c
+///             result *= expl(-z * z) / z;
+/// ```
+/// NCBI has no such helper. The long-double `expl(-z * z) / z` above is emulated here in
+/// double-double arithmetic, and `DoubleDouble::mul` needs the rounding error of one product.
+/// `a.mul_add(b, -product)` gives it exactly; the Dekker path gives the same number
+/// (see the test `x_dekker_product_error_matches_fused_multiply_add`).
 /// EXPERIMENT (LOSAT_X_DEKKER, Wasm only): `a.mul_add(b, -product)` for
 /// `product == a * b`, i.e. the exact rounding error of the product.  Where
 /// the target has no fused multiply-add instruction (Wasm without relaxed
@@ -364,6 +415,12 @@ fn x_product_error(a: f64, b: f64, product: f64) -> f64 {
     a.mul_add(b, -product)
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143-143
+// ```c
+//             result *= expl(-z * z) / z;
+// ```
+// No NCBI counterpart: the switch is read once per process (Wasm builds only). It chooses
+// between `mul_add` and Dekker's product inside the double-double emulation of that line.
 #[cfg(target_arch = "wasm32")]
 fn x_dekker() -> bool {
     use std::sync::OnceLock;
@@ -371,11 +428,23 @@ fn x_dekker() -> bool {
     *ON.get_or_init(|| std::env::var_os("LOSAT_X_DEKKER").is_some())
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143-143
+// ```c
+//             result *= expl(-z * z) / z;
+// ```
+// No NCBI counterpart: 2^-900 and 2^900 bound the range in which Dekker's product is
+// exact (see `x_product_error`). Outside it `mul_add` is used.
 #[allow(dead_code)]
 const X_TWO_POW_M900: f64 = f64::from_bits((1023 - 900) << 52);
 #[allow(dead_code)]
 const X_TWO_POW_900: f64 = f64::from_bits((1023 + 900) << 52);
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143-143
+// ```c
+//             result *= expl(-z * z) / z;
+// ```
+// Dekker (1971) product error with Veltkamp splitting, used in place of `mul_add` inside
+// the double-double emulation of the long-double `expl(-z * z) / z` above.
 #[inline(always)]
 #[allow(dead_code)]
 fn x_dekker_product_error(a: f64, b: f64, product: f64) -> f64 {
@@ -421,6 +490,13 @@ impl DoubleDouble {
     #[inline]
     fn mul(self, other: Self) -> Self {
         let product = self.hi * other.hi;
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143-143
+        // ```c
+        //             result *= expl(-z * z) / z;
+        // ```
+        // Dispatch point of LOSAT_X_DEKKER: the reference path (`mul_add`) is the double-double
+        // product that stands in for the long-double operations of this line. Only the way the
+        // product's rounding error is obtained changes, not its value.
         let error = x_product_error(self.hi, other.hi, product)
             + self.hi * other.lo
             + self.lo * other.hi
@@ -603,6 +679,12 @@ pub fn blast_spouge_etos(
 mod tests {
     // EXPERIMENT: Dekker's product error equals the fused one inside the range
     // in which the Wasm build uses it.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143-143
+    // ```c
+    //             result *= expl(-z * z) / z;
+    // ```
+    // The test checks, for 2 million random pairs, that Dekker's error term has the bits of
+    // the fused multiply-add error term.
     #[test]
     fn x_dekker_product_error_matches_fused_multiply_add() {
         let mut state = 0x1234_5678_9ABC_DEF1u64;

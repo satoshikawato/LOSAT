@@ -518,6 +518,23 @@ fn hsp_for_handle(hsp_storage: &[Option<BlastnHsp>], handle: HspHandle) -> Optio
     })
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2455-2457,2478
+// ```c
+// Blast_HSPListPurgeHSPsWithCommonEndpoints(EBlastProgramType program,
+//                                           BlastHSPList* hsp_list,
+//                                           Boolean purge)
+// ...
+//    qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryOffsetCompareHSPs);
+// ```
+// This function only reads the LOSAT_X_PURGEFAST switch once. It selects between two
+// ways to run the purge passes of `purge_hsps_for_subject_ex` below; it is not an NCBI
+// computation.
+fn x_purge_fast() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("LOSAT_X_PURGEFAST").is_some())
+}
+
 /// Purge HSPs with common endpoints for a single subject.
 ///
 /// NCBI reference: blast_hits.c:2455-2535
@@ -528,12 +545,6 @@ fn hsp_for_handle(hsp_storage: &[Option<BlastnHsp>], handle: HspHandle) -> Optio
 ///
 /// # Returns
 /// Tuple of (result hits, index of first trimmed HSP for re-evaluation)
-fn x_purge_fast() -> bool {
-    use std::sync::OnceLock;
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("LOSAT_X_PURGEFAST").is_some())
-}
-
 fn purge_hsps_for_subject_ex(hits: Vec<BlastnHsp>, purge: bool) -> (Vec<BlastnHsp>, usize) {
     let len = hits.len();
     if len <= 1 {
@@ -591,6 +602,23 @@ fn purge_hsps_for_subject_ex(hits: Vec<BlastnHsp>, purge: bool) -> (Vec<BlastnHs
     // ```
     // The C code keeps the sorted active prefix and moves trimmed/null HSPs to
     // the tail by decrementing hsp_count before shifting hsp_array left.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2478-2502
+    // ```c
+    // qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryOffsetCompareHSPs);
+    // ...
+    //         hsp_count--;
+    //         hsp = hsp_array[i+j];
+    // ...
+    //         for (k=i+j; k<hsp_count; k++) {
+    //             hsp_array[k] = hsp_array[k+1];
+    //         }
+    //         hsp_array[hsp_count] = hsp;
+    // ```
+    // Dispatch point of LOSAT_X_PURGEFAST (pass 1, common start). The `else` branch below
+    // ports the C loop above. The fast branch makes the same keep/trim/delete decisions on
+    // the same pairs. It writes the survivors in order and the removed entries to the tail
+    // slots the C shifts would leave them in. By construction the result is the same
+    // array; it only avoids the repeated left shifts.
     // EXPERIMENT (LOSAT_X_PURGEFAST): the same removals without the
     // per-removal shift. NCBI removes hsp_array[i+1], shifts the rest of the
     // active prefix left and parks the removed pointer at the shrinking end:
@@ -785,6 +813,21 @@ fn purge_hsps_for_subject_ex(hits: Vec<BlastnHsp>, purge: bool) -> (Vec<BlastnHs
     // }
     // ```
     // Repeat the same active-prefix mutation NCBI uses for common endpoints.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2504-2528
+    // ```c
+    // qsort(hsp_array, hsp_count, sizeof(BlastHSP*), s_QueryEndCompareHSPs);
+    // ...
+    //         hsp_count--;
+    //         hsp = hsp_array[i+j];
+    // ...
+    //         for (k=i+j; k<hsp_count; k++) {
+    //             hsp_array[k] = hsp_array[k+1];
+    //         }
+    //         hsp_array[hsp_count] = hsp;
+    // ```
+    // Dispatch point of LOSAT_X_PURGEFAST (pass 2, common end). Same relation as in pass 1:
+    // the `else` branch ports the C loop, and the fast branch gives the same array without
+    // the repeated left shifts.
     // EXPERIMENT (LOSAT_X_PURGEFAST): the same removals without the
     // per-removal shift. NCBI removes hsp_array[i+1], shifts the rest of the
     // active prefix left and parks the removed pointer at the shrinking end:

@@ -500,6 +500,26 @@ pub(super) fn scan_protein_words_by_chunk(
     Ok(())
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:772-775,805-812
+// ```c
+//             BLAST_GetAllTranslations(backup.sequence, eBlastEncodingNcbi2na,
+//                                      backup.full_range.right,
+//                                      subject->gen_code_string, &translation_buffer,
+//                                      &frame_offsets, NULL);
+// ...
+//     for (context=first_context; context<=last_context; context++) {
+//         BlastHSPList* hsp_list_for_chunks = NULL;
+//
+//         if (kTranslatedSubject) {
+//             Uint4 i;
+//             subject->frame = BLAST_ContextToFrame(eBlastTypeBlastx, context);
+//             subject->sequence = translation_buffer + frame_offsets[context] + 1;
+//             subject->length = frame_offsets[context+1] - frame_offsets[context] - 1;
+// ```
+// NCBI translates the subject into its six frames once, then calls WordFinder for each frame and
+// chunk with a read-only lookup table. XScanPlan holds what those calls need (the lookup table and
+// the translated frames with their chunks and scan ranges) so that every unit can be scanned on its
+// own.
 // EXPERIMENT (LOSAT_X_TBNPAR): the subject-side state of
 // `scan_protein_words_by_chunk`, built once so that each (frame, chunk) unit can
 // be scanned on its own.  NCBI c++/src/algo/blast/core/blast_engine.c:478-500,
@@ -510,6 +530,24 @@ pub(super) struct XScanPlan {
     pub pair_capacity: usize,
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:772-775,805-812
+// ```c
+//             BLAST_GetAllTranslations(backup.sequence, eBlastEncodingNcbi2na,
+//                                      backup.full_range.right,
+//                                      subject->gen_code_string, &translation_buffer,
+//                                      &frame_offsets, NULL);
+// ...
+//     for (context=first_context; context<=last_context; context++) {
+//         BlastHSPList* hsp_list_for_chunks = NULL;
+//
+//         if (kTranslatedSubject) {
+//             Uint4 i;
+//             subject->frame = BLAST_ContextToFrame(eBlastTypeBlastx, context);
+//             subject->sequence = translation_buffer + frame_offsets[context] + 1;
+//             subject->length = frame_offsets[context+1] - frame_offsets[context] - 1;
+// ```
+// The six translated frames of one subject and the (frame, chunk, scan range) units in NCBI call
+// order.
 /// EXPERIMENT (LOSAT_X_TBNSSIDE): the part of a scan plan that depends on the
 /// subject only.
 pub(super) struct XSubjectPlan {
@@ -518,6 +556,26 @@ pub(super) struct XSubjectPlan {
     pub units: Vec<(usize, TranslatedChunk, Vec<(i32, i32)>)>,
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:772-775,805-812
+// ```c
+//             BLAST_GetAllTranslations(backup.sequence, eBlastEncodingNcbi2na,
+//                                      backup.full_range.right,
+//                                      subject->gen_code_string, &translation_buffer,
+//                                      &frame_offsets, NULL);
+// ...
+//     for (context=first_context; context<=last_context; context++) {
+//         BlastHSPList* hsp_list_for_chunks = NULL;
+//
+//         if (kTranslatedSubject) {
+//             Uint4 i;
+//             subject->frame = BLAST_ContextToFrame(eBlastTypeBlastx, context);
+//             subject->sequence = translation_buffer + frame_offsets[context] + 1;
+//             subject->length = frame_offsets[context+1] - frame_offsets[context] - 1;
+// ```
+// NCBI translates a subject once per query batch (BLAST_GetAllTranslations in
+// s_BlastSearchEngineCore). The translation depends only on the subject, the genetic code and the
+// lowercase-masking option, so XSubjectSide keeps it for later batches. A reuse of the same value;
+// no value is computed differently.
 /// EXPERIMENT (LOSAT_X_TBNSSIDE): the subject plans of one search, by subject
 /// index.
 ///
@@ -543,6 +601,8 @@ pub(super) struct XSubjectSide {
     kept_bytes: std::sync::atomic::AtomicUsize,
 }
 
+// No NCBI counterpart: the methods below keep, count and hand out the cached subject plans (a memo
+// of x_build_subject); it does not change any value NCBI computes.
 impl XSubjectSide {
     /// Translated residues kept at most (two bytes per subject base).
     pub(super) const KEEP_LIMIT: usize = 256 << 20;
@@ -644,6 +704,32 @@ impl XSubjectSide {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:772-775,805-812
+// ```c
+//             BLAST_GetAllTranslations(backup.sequence, eBlastEncodingNcbi2na,
+//                                      backup.full_range.right,
+//                                      subject->gen_code_string, &translation_buffer,
+//                                      &frame_offsets, NULL);
+// ...
+//     for (context=first_context; context<=last_context; context++) {
+//         BlastHSPList* hsp_list_for_chunks = NULL;
+//
+//         if (kTranslatedSubject) {
+//             Uint4 i;
+//             subject->frame = BLAST_ContextToFrame(eBlastTypeBlastx, context);
+//             subject->sequence = translation_buffer + frame_offsets[context] + 1;
+//             subject->length = frame_offsets[context+1] - frame_offsets[context] - 1;
+// ```
+// x_scan_plan does the setup that precedes NCBI's WordFinder calls for one subject (translation,
+// scan ranges) and attaches the lookup table of the query set.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:91-100
+// ```c
+//        BlastAaLookupTableNew(lookup_options, (BlastAaLookupTable* *)
+//                              &lookup_wrap->lut);
+//        ((BlastAaLookupTable*)lookup_wrap->lut)->use_pssm = has_pssm;
+//        BlastAaLookupIndexQuery( (BlastAaLookupTable*) lookup_wrap->lut, matrix,
+//                                  query, lookup_segments, 0);
+// ```
 /// EXPERIMENT (LOSAT_X_TBNPAR): `None` when the subject is too short to be searched.
 pub(super) fn x_scan_plan(
     queries: &[&[u8]],
@@ -670,6 +756,24 @@ pub(super) fn x_scan_plan(
         return Ok(None);
     }
     // EXPERIMENT (LOSAT_X_TBNSSIDE): everything below that reads the subject.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:772-775,805-812
+    // ```c
+    //             BLAST_GetAllTranslations(backup.sequence, eBlastEncodingNcbi2na,
+    //                                      backup.full_range.right,
+    //                                      subject->gen_code_string, &translation_buffer,
+    //                                      &frame_offsets, NULL);
+    // ...
+    //     for (context=first_context; context<=last_context; context++) {
+    //         BlastHSPList* hsp_list_for_chunks = NULL;
+    //
+    //         if (kTranslatedSubject) {
+    //             Uint4 i;
+    //             subject->frame = BLAST_ContextToFrame(eBlastTypeBlastx, context);
+    //             subject->sequence = translation_buffer + frame_offsets[context] + 1;
+    //             subject->length = frame_offsets[context+1] - frame_offsets[context] - 1;
+    // ```
+    // Translation and chunking of the subject, as above; this closure is what the shared plan
+    // memoises.
     let x_build_subject = || -> Result<std::sync::Arc<XSubjectPlan>> {
         let resolved_subject = resolve_local_subject_ncbi2na(subject)?;
         let frames = generate_frames(&resolved_subject, &code);
@@ -698,10 +802,39 @@ pub(super) fn x_scan_plan(
         side.slot(oid, db_gencode, mask_lowercase)
             .map(|slot| (side, slot))
     });
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:772-775,805-812
+    // ```c
+    //             BLAST_GetAllTranslations(backup.sequence, eBlastEncodingNcbi2na,
+    //                                      backup.full_range.right,
+    //                                      subject->gen_code_string, &translation_buffer,
+    //                                      &frame_offsets, NULL);
+    // ...
+    //     for (context=first_context; context<=last_context; context++) {
+    //         BlastHSPList* hsp_list_for_chunks = NULL;
+    //
+    //         if (kTranslatedSubject) {
+    //             Uint4 i;
+    //             subject->frame = BLAST_ContextToFrame(eBlastTypeBlastx, context);
+    //             subject->sequence = translation_buffer + frame_offsets[context] + 1;
+    //             subject->length = frame_offsets[context+1] - frame_offsets[context] - 1;
+    // ```
+    // Dispatch point: with LOSAT_X_TBNSSIDE the plan is the shared one (made by the first batch
+    // that reaches the subject); otherwise it is made here, as before.
     let subject_plan = match x_slot {
         Some((side, slot)) => side.plan(slot, x_build_subject)?,
         None => x_build_subject()?,
     };
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:91-100
+    // ```c
+    //        BlastAaLookupTableNew(lookup_options, (BlastAaLookupTable* *)
+    //                              &lookup_wrap->lut);
+    //        ((BlastAaLookupTable*)lookup_wrap->lut)->use_pssm = has_pssm;
+    //        BlastAaLookupIndexQuery( (BlastAaLookupTable*) lookup_wrap->lut, matrix,
+    //                                  query, lookup_segments, 0);
+    // ```
+    // The query-side lookup table: BlastAaLookupTableNew and BlastAaLookupIndexQuery on the masked
+    // query. LOSAT_X_LUTSPLIT builds a table-only variant when the contexts are not needed; the
+    // table has the same contents.
     let x_build_lookup = || {
         let query_frames: Vec<_> = queries
             .iter()
@@ -732,6 +865,17 @@ pub(super) fn x_scan_plan(
     };
     // EXPERIMENT (LOSAT_X_TBNQSIDE): the table depends on the query set and the
     // word-finder options only; the first subject that gets here builds it.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:91-100
+    // ```c
+    //        BlastAaLookupTableNew(lookup_options, (BlastAaLookupTable* *)
+    //                              &lookup_wrap->lut);
+    //        ((BlastAaLookupTable*)lookup_wrap->lut)->use_pssm = has_pssm;
+    //        BlastAaLookupIndexQuery( (BlastAaLookupTable*) lookup_wrap->lut, matrix,
+    //                                  query, lookup_segments, 0);
+    // ```
+    // Dispatch point: NCBI builds the lookup table once per query batch. With LOSAT_X_TBNQSIDE the
+    // first subject builds it and the others read it; without the switch every call builds its own,
+    // as before.
     let lookup = match x_lookup {
         Some(cell) => std::sync::Arc::clone(cell.get_or_init(x_build_lookup)),
         None => x_build_lookup(),
@@ -745,6 +889,20 @@ pub(super) fn x_scan_plan(
     }))
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:500-515
+// ```c
+//         scan_range[2] = scan_range[1];
+//
+//     while (scan_range[1] <= scan_range[2]) {
+//         /* scan the subject sequence for hits */
+// ...
+//
+//         totalhits += hits;
+//         /* for each hit, */
+//         for (i = 0; i < hits; ++i) {
+// ```
+// x_scan_unit runs the scansub() calls of one unit and passes every filled offset array to the
+// caller in scan order, as the loop at line 506 consumes it.
 /// EXPERIMENT (LOSAT_X_TBNPAR): scan one unit and hand every filled offset
 /// array to `on_pairs` in scan order, as NCBI c++/src/algo/blast/core/
 /// aa_ungapped.c:492-516 consumes it (`for (i = 0; i < hits; ++i)`).
@@ -1737,6 +1895,8 @@ mod tests {
         assert_eq!(observed, expected);
     }
 
+    // No NCBI counterpart: test helper (pseudo-random nucleotide subject); it does not change any
+    // value NCBI computes.
     fn x_test_subject(length: usize) -> Vec<u8> {
         let mut state = 0x2545_F491_4F6C_DD1Du64;
         (0..length)
@@ -1749,6 +1909,8 @@ mod tests {
             .collect()
     }
 
+    // No NCBI counterpart: test of the plan cache (one plan, charged once, when batches race); it
+    // does not change any value NCBI computes.
     // LOSAT_X_TBNSSIDE: batches that reach a subject at the same time get one
     // plan. It is made once, and the shared limit is charged for it once.
     #[test]
@@ -1800,6 +1962,8 @@ mod tests {
         assert!(side.slot(1, 4, false).is_none() && side.slot(1, 1, true).is_none());
     }
 
+    // No NCBI counterpart: test of the plan cache through x_scan_plan; it does not change any value
+    // NCBI computes.
     // The whole stage: `x_scan_plan` from eight threads on one subject.
     #[test]
     fn x_scan_plans_of_racing_batches_share_one_subject_plan() {
@@ -1840,6 +2004,8 @@ mod tests {
         assert!(!plans[0].units.is_empty());
     }
 
+    // No NCBI counterpart: test of the size limit of the plan cache; it does not change any value
+    // NCBI computes.
     // A plan that does not fit leaves the total as it was; a failure is
     // returned and nothing is kept for the subject.
     #[test]

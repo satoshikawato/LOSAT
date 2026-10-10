@@ -1661,6 +1661,21 @@ fn build_mb_lookup(
     let mut total_positions = 0usize;
     let mut ambiguous_skipped = 0usize;
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1081-1091
+    // ```c
+    //          if (mb_lt->hashtable[ecode] == 0) {
+    //             PV_SET(pv_array, ecode, pv_array_bts);
+    //          }
+    //          else {
+    //             helper_array[ecode/kCompressionFactor]++;
+    //          }
+    //          mb_lt->next_pos[index] = mb_lt->hashtable[ecode];
+    //          mb_lt->hashtable[ecode] = index;
+    // ```
+    // NCBI applies this update to each word as soon as the word is read. MBDELAY and MBBATCH
+    // (below) only touch the table cell earlier (a prefetch, or a read loop). They then run
+    // the same update on the same words in the same order (macro `x_apply_word!`), so the
+    // result is the same table. This is a change of placement and timing only.
     // EXPERIMENT (LOSAT_X_MBDELAY): prefetch the cell of each word and apply the
     // update sixteen words later, in the same order.  Only where a prefetch
     // instruction exists: without one (Wasm) the delay alone costs time.
@@ -1771,6 +1786,17 @@ fn build_mb_lookup(
 
                 let bucket = current_kmer as usize;
                 let q_off_1 = (query_offset + (pos + 1 - lut_word_length) + 1) as u32;
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1081-1091
+                // ```c
+                //          if (mb_lt->hashtable[ecode] == 0) {
+                //             PV_SET(pv_array, ecode, pv_array_bts);
+                //          }
+                //          mb_lt->next_pos[index] = mb_lt->hashtable[ecode];
+                //          mb_lt->hashtable[ecode] = index;
+                // ```
+                // Dispatch point: with LOSAT_X_MBDELAY or LOSAT_X_MBBATCH the update above is queued and
+                // applied later in the original order. Without a switch the last `else` branch applies it
+                // at once, as NCBI does.
                 // EXPERIMENT: apply the table updates X_DELAY words late, in the
                 // same order, after touching the cell of the word just read.
                 if x_delay {

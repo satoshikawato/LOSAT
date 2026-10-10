@@ -343,6 +343,8 @@ struct BlastGapDp {
 // } BlastGapAlignStruct;
 // ```
 pub(crate) struct GapAlignScratch {
+    // No NCBI counterpart: scratch rows for the SIMD kernel (NCBI keeps its DP rows in
+    // gap_align->dp_mem); it does not change any value NCBI computes.
     // EXPERIMENT: SIMD X-drop kernel state.
     fast: crate::utils::xdrop_simd::XdropScratch,
     dp_mem: Vec<BlastGapDp>,
@@ -1122,6 +1124,40 @@ fn align_ex_protein_score_only(
     // ```
     // EXPERIMENT: SIMD kernel (LOSAT_X_DPFAST) with optional cross-check
     // against the scalar kernel on every call (LOSAT_X_DPSHADOW).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:862-912
+    // ```c
+    //         for (b_index = first_b_index; b_index < b_size; b_index++) {
+    //
+    //             b_ptr += b_increment;
+    //             score_gap_col = score_array[b_index].best_gap;
+    //             next_score = score_array[b_index].best + matrix_row[ *b_ptr ];
+    //
+    //             if (score < score_gap_col)
+    // ...
+    //             if (best_score - score > x_dropoff) {
+    //
+    // ...
+    //             else {
+    //                 last_b_index = b_index;
+    //                 if (score > best_score) {
+    //                     best_score = score;
+    //                     *a_offset = a_index;
+    //                     *b_offset = b_index;
+    //                 }
+    // ...
+    //                 score_gap_row -= gap_extend;
+    //                 score_gap_col -= gap_extend;
+    //                 score_array[b_index].best_gap = MAX(score - gap_open_extend,
+    //                                                     score_gap_col);
+    //                 score_gap_row = MAX(score - gap_open_extend, score_gap_row);
+    //                 score_array[b_index].best = score;
+    // ```
+    // Dispatch point: with LOSAT_X_DPFAST on, the SIMD kernel runs this score-only X-drop
+    // recurrence of Blast_SemiGappedAlign
+    // (same max/gap updates, same X-drop test, same best-cell choice) in vector lanes and returns
+    // (a_offset, b_offset, score).
+    // If the problem does not fit the 8/16-bit lanes it returns None and the scalar port below
+    // runs. LOSAT_X_DPSHADOW=1 runs both and asserts equality.
     let x_mode = crate::utils::xdrop_simd::mode();
     if x_mode != 0 {
         use crate::utils::xdrop_simd::{xdrop_align, ColSeq, RowSeq};
@@ -1211,6 +1247,16 @@ fn align_ex_protein_score_only(
     )
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:841-843,866
+// ```c
+//                 matrix_row = matrix[ A[ M - a_index ] ];
+//             else
+//                 matrix_row = matrix[ A[ a_index ] ];
+// ...
+//             next_score = score_array[b_index].best + matrix_row[ *b_ptr ];
+// ```
+// The tables hold the same BLOSUM62 scores that matrix[A[a]][B[b]] reads (built from
+// blosum62_score_ncbistdaa_direct); they only change how the row is looked up.
 // EXPERIMENT: lookup tables for the SIMD kernel.
 fn x_blosum62_tables() -> &'static crate::utils::xdrop_simd::StaticTables {
     use std::sync::OnceLock;
@@ -1221,6 +1267,17 @@ fn x_blosum62_tables() -> &'static crate::utils::xdrop_simd::StaticTables {
     })
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:839-850
+// ```c
+//         if (!(gap_align->positionBased)) {
+//             if(reverse_sequence)
+//                 matrix_row = matrix[ A[ M - a_index ] ];
+//             else
+//                 matrix_row = matrix[ A[ a_index ] ];
+//         }
+// ```
+// Selects the score source for the SIMD kernel: the same matrix rows (BLOSUM62, composition-
+// adjusted, or standard) that the scalar port reads.
 #[inline]
 fn with_x_scores<R>(
     score_matrix: BlastpScoreMatrix<'_>,
@@ -1240,6 +1297,28 @@ fn with_x_scores<R>(
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:862-912
+// ```c
+//         for (b_index = first_b_index; b_index < b_size; b_index++) {
+//
+//             b_ptr += b_increment;
+//             score_gap_col = score_array[b_index].best_gap;
+//             next_score = score_array[b_index].best + matrix_row[ *b_ptr ];
+//
+//             if (score < score_gap_col)
+// ...
+//             if (best_score - score > x_dropoff) {
+//
+// ...
+//                 score_gap_row -= gap_extend;
+//                 score_gap_col -= gap_extend;
+//                 score_array[b_index].best_gap = MAX(score - gap_open_extend,
+//                                                     score_gap_col);
+//                 score_gap_row = MAX(score - gap_open_extend, score_gap_row);
+//                 score_array[b_index].best = score;
+// ```
+// Reference path: the original port of the Blast_SemiGappedAlign score-only recurrence, moved
+// unchanged into its own function so the dispatch above can call it.
 fn align_ex_protein_score_only_scalar(
     query: &[u8],
     query_base: usize,
@@ -1408,6 +1487,8 @@ fn align_ex_protein_score_only_impl<const BLOSUM62: bool, const REVERSE: bool>(
         let mut score_val = GAP_MININT;
         let mut score_gap_row = GAP_MININT;
         let mut last_b_index = first_b_index;
+        // No NCBI counterpart: row and cell counters (xstats feature); they do not change any value
+        // NCBI computes.
         crate::utils::xstats::add(&crate::utils::xstats::DP_SO_ROWS, 1);
         crate::utils::xstats::add(
             &crate::utils::xstats::DP_SO_CELLS,
@@ -1845,6 +1926,61 @@ fn align_ex_protein(
     // ```
     // EXPERIMENT: SIMD kernel (LOSAT_X_DPFAST) with optional cross-check
     // against the scalar kernel on every call (LOSAT_X_DPSHADOW).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:563-635
+    // ```c
+    //         for (b_index = first_b_index; b_index < b_size; b_index++) {
+    //             int matrix_index = 0;
+    //
+    //             b_ptr += b_increment;
+    //             score_gap_col = score_array[b_index].best_gap;
+    // ...
+    //             if (matrix_index == FENCE_SENTRY) {
+    //                 if (fence_hit) {
+    //                     *fence_hit = 1;
+    //                 }
+    //                 break;
+    //             }
+    // ...
+    //             if (score < score_gap_col) {
+    //                 script = SCRIPT_GAP_IN_B;
+    //                 score = score_gap_col;
+    //             }
+    //             if (score < score_gap_row) {
+    //                 script = SCRIPT_GAP_IN_A;
+    //                 score = score_gap_row;
+    //             }
+    // ...
+    //             if (best_score - score > x_dropoff) {
+    //
+    //                 if (first_b_index == b_index)
+    //                     first_b_index++;
+    //                 else
+    //                     score_array[b_index].best = MININT;
+    //             }
+    // ...
+    //                 score_gap_row -= gap_extend;
+    //                 score_gap_col -= gap_extend;
+    //                 if (score_gap_col < (score - gap_open_extend)) {
+    //                     score_array[b_index].best_gap = score - gap_open_extend;
+    //                 }
+    //                 else {
+    //                     score_array[b_index].best_gap = score_gap_col;
+    //                     script += script_col;
+    //                 }
+    //
+    //                 if (score_gap_row < (score - gap_open_extend))
+    //                     score_gap_row = score - gap_open_extend;
+    //                 else
+    //                     script += script_row;
+    //
+    //                 score_array[b_index].best = score;
+    // ```
+    // Dispatch point: with LOSAT_X_DPFAST on, the SIMD kernel runs this traceback recurrence of
+    // ALIGN_EX in vector lanes
+    // (same per-cell script bits, same fence test, same X-drop test) and returns offsets, score,
+    // edit script and fence_hit.
+    // A call that does not fit the lanes, or has fence_hit already set, runs the scalar port below.
+    // LOSAT_X_DPSHADOW=1 runs both and asserts equality.
     let x_mode = crate::utils::xdrop_simd::mode();
     if x_mode != 0 && !*fence_hit {
         use crate::utils::xdrop_simd::{
@@ -1953,6 +2089,35 @@ fn align_ex_protein(
     )
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:563-636
+// ```c
+//         for (b_index = first_b_index; b_index < b_size; b_index++) {
+//             int matrix_index = 0;
+//
+//             b_ptr += b_increment;
+//             score_gap_col = score_array[b_index].best_gap;
+// ...
+//             if (score < score_gap_col) {
+//                 script = SCRIPT_GAP_IN_B;
+//                 score = score_gap_col;
+//             }
+//             if (score < score_gap_row) {
+//                 script = SCRIPT_GAP_IN_A;
+//                 score = score_gap_row;
+//             }
+// ...
+//             if (best_score - score > x_dropoff) {
+//
+//                 if (first_b_index == b_index)
+//                     first_b_index++;
+//                 else
+//                     score_array[b_index].best = MININT;
+//             }
+// ...
+//             edit_script_row[b_index] = script;
+// ```
+// Reference path: the original port of ALIGN_EX, moved unchanged into its own function so the
+// dispatch above can call it.
 fn align_ex_protein_scalar(
     q_seq: &[u8],
     s_seq: &[u8],
@@ -2197,6 +2362,8 @@ fn align_ex_protein_impl<const BLOSUM62: bool, const REVERSE: bool>(
         // The slice borrow ends after this ascending scan, before DP reserve.
         let band_start = first_b_index;
         let dp_band = &mut scratch.dp_mem[band_start..b_size];
+        // No NCBI counterpart: row and cell counters (xstats feature); they do not change any value
+        // NCBI computes.
         crate::utils::xstats::add(&crate::utils::xstats::DP_TB_ROWS, 1);
         crate::utils::xstats::add(&crate::utils::xstats::DP_TB_CELLS, dp_band.len() as u64);
         // NCBI reference: c++/src/algo/blast/core/blast_gapalign.c:513-518,531-540
@@ -4466,6 +4633,8 @@ mod tests {
     // not only the resulting score or final tabular output.
     #[test]
     fn test_traceback_contiguous_rows_reused_scratch_matches_fresh() {
+        // No NCBI counterpart: test guard; the test reads scalar-kernel scratch rows, so it is
+        // skipped when the SIMD kernel is on.
         // EXPERIMENT (LOSAT_X_DPFAST): the rows inspected below are written by
         // the scalar kernel, which the SIMD kernel replaces under the switch.
         if crate::utils::xdrop_simd::mode() != 0 {
@@ -4552,6 +4721,8 @@ mod tests {
     // may become visible when leaving the first main-band row.
     #[test]
     fn test_traceback_fence_exposes_only_initialized_prefix() {
+        // No NCBI counterpart: test guard; the test reads scalar-kernel scratch rows, so it is
+        // skipped when the SIMD kernel is on.
         // EXPERIMENT (LOSAT_X_DPFAST): the rows inspected below are written by
         // the scalar kernel, which the SIMD kernel replaces under the switch.
         if crate::utils::xdrop_simd::mode() != 0 {

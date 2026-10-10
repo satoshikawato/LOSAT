@@ -410,6 +410,35 @@ pub(super) fn find_protein_init_hsps_by_chunk_with_mask_mode(
     )
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-547
+// ```c
+//             diag_coord = (query_offset - subject_offset) & diag_mask;
+// ...
+//             if (diag_array[diag_coord].flag) {
+//                 /* If we've already extended past this hit, skip it. */
+//                 if ((Int4) (subject_offset + diag_offset) <
+//                     diag_array[diag_coord].last_hit) {
+//                     continue;
+//                 }
+// ...
+//                 if (diff >= window) {
+//                     /* We are beyond the window for this diagonal; start a
+//                        new hit */
+//                     diag_array[diag_coord].last_hit =
+//                         subject_offset + diag_offset;
+//                     continue;
+//                 }
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-173
+// ```c
+//     if (ewp->diag_table) {
+// ...
+//             ewp->diag_table->offset += subject_length + ewp->diag_table->window;
+// ```
+// XTwoHit is the two-hit pass of NCBI's word finder with its own diagonal array per (frame, chunk)
+// unit. Each unit starts from the state of a fresh table, which is what the offset update at the
+// end of the previous WordFinder call gives (see the comment above), so units can run in any order
+// or at the same time.
 // EXPERIMENT (LOSAT_X_TBNPAR): the two-hit pass of one (frame, chunk) unit on its
 // own diagonal array.  NCBI c++/src/algo/blast/core/blast_extend.c:162-175 ends a
 // WordFinder call with `diag_table->offset += subject_length + window`, which
@@ -450,12 +479,38 @@ impl<'a> XTwoHit<'a> {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:63-64,145-146
+    // ```c
+    //                 diag_table->offset = window_size;
+    //                 diag_table->window = window_size;
+    // ...
+    //         diag_table->hit_level_array = (DiagStruct *)
+    //             calloc(diag_table->diag_array_length, sizeof(DiagStruct));
+    // ```
+    // A new unit starts from the state of a freshly allocated table: offset = window_size and all
+    // entries zero (calloc).
     /// Start a new unit (the state of `Diagonals::new`).
     pub(super) fn reset(&mut self) {
         self.diagonals.offset = self.window;
         self.diagonals.entries.fill((0, false));
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-606
+    // ```c
+    //             diag_coord = (query_offset - subject_offset) & diag_mask;
+    // ...
+    //                 score = s_BlastAaExtendTwoHit(matrix, subject, query,
+    // ...
+    //                 if (score >= cutoffs->cutoff_score)
+    //                     BlastSaveInitHsp(ungapped_hsps, hsp_q, hsp_s,
+    // ...
+    //                 if (right_extend) {
+    //                     diag_array[diag_coord].flag = 1;
+    //                     diag_array[diag_coord].last_hit =
+    //                         s_last_off - (wordsize - 1) + diag_offset;
+    // ```
+    // The body is the per-hit loop of the two-hit word finder (the same tests, extension and HSP
+    // saving as in find_protein_init_hsps_by_chunk_with_mask_mode), run on one filled offset array.
     /// The loop body of `find_protein_init_hsps_by_chunk_with_mask_mode` for one
     /// filled offset array.
     #[inline]
@@ -542,6 +597,22 @@ impl<'a> XTwoHit<'a> {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:274-309
+    // ```c
+    //     if (0 == (result = BLAST_CMP(h2->ungapped_data->score,
+    //                                  h1->ungapped_data->score)) &&
+    //         0 == (result = BLAST_CMP(h1->ungapped_data->s_start,
+    //                                  h2->ungapped_data->s_start)) &&
+    //         0 == (result = BLAST_CMP(h2->ungapped_data->length,
+    //                                  h1->ungapped_data->length)) &&
+    //         0 == (result = BLAST_CMP(h1->ungapped_data->q_start,
+    //                                  h2->ungapped_data->q_start))) {
+    // ...
+    //     qsort(init_hitlist->init_hsp_array, init_hitlist->total,
+    //           sizeof(BlastInitHSP), score_compare_match);
+    // ```
+    // Same order as Blast_InitHitListSortByScore: score descending, then s_start, length
+    // descending, q_start. The sort is stable, as glibc's qsort is under the pinned NCBI build.
     /// NCBI c++/src/algo/blast/core/blast_extend.c:273-313 (stable, as glibc's
     /// qsort under the pinned NCBI BLAST+).
     pub(super) fn sort(hits: &mut [InitHsp]) {

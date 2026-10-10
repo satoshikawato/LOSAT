@@ -36,22 +36,138 @@
 //!   F  = decayed prefix maximum of H0 - (go+ge)   (row gap)
 //!   H  = max(H0, F)
 //!   dropped = H < running best - X      (dropped cells store 0)
+//!
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:766-770,862-874,903-908
+//! ```c
+//!     if (!score_only) {
+//!         return ALIGN_EX(A, B, M, N, a_offset, b_offset, edit_block, gap_align,
+//! ...
+//!         for (b_index = first_b_index; b_index < b_size; b_index++) {
+//! ...
+//!             if (score < score_gap_col)
+//!                 score = score_gap_col;
+//!             if (score < score_gap_row)
+//!                 score = score_gap_row;
+//!             if (best_score - score > x_dropoff) {
+//! ...
+//!                 score_gap_row -= gap_extend;
+//!                 score_gap_col -= gap_extend;
+//!                 score_array[b_index].best_gap = MAX(score - gap_open_extend,
+//!                                                     score_gap_col);
+//!                 score_gap_row = MAX(score - gap_open_extend, score_gap_row);
+//!                 score_array[b_index].best = score;
+//! ```
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3125-3134,3146-3158,3187-3193
+//! ```c
+//!         if(reverse_sequence) {
+//!             a_base_pair = NCBI2NA_UNPACK_BASE(A[(M-a_index)/4],
+//!                                                ((a_index-1)%4));
+//!             matrix_row = matrix[a_base_pair];
+//! ...
+//!         for (b_index = first_b_index; b_index < b_size; b_index++) {
+//! ...
+//!             if (best_score - score > x_dropoff) {
+//! ...
+//!                 score_gap_row = MAX(score - gap_open_extend, score_gap_row);
+//!                 score_array[b_index].best = score;
+//! ```
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:476-500,563-576,601-636,682-727
+//! ```c
+//!     score_array[0].best = 0;
+//!     score_array[0].best_gap = -gap_open_extend;
+//! ...
+//!     for (a_index = 1; a_index <= M; a_index++) {
+//! ...
+//!         for (b_index = first_b_index; b_index < b_size; b_index++) {
+//! ...
+//!             if (matrix_index == FENCE_SENTRY) {
+//!                 if (fence_hit) {
+//!                     *fence_hit = 1;
+//!                 }
+//!                 break;
+//!             }
+//! ...
+//!             if (best_score - score > x_dropoff) {
+//! ...
+//!             edit_script_row[b_index] = script;
+//! ...
+//!     while (a_index > 0 || b_index > 0) {
+//! ...
+//!         GapPrelimEditBlockAdd(edit_block, (EGapAlignOpType)script, 1);
+//! ```
+//!
+//! Which NCBI code this module serves. The protein programs (blastp, tblastn, blastx)
+//! use `Blast_SemiGappedAlign` with `score_only` TRUE (preliminary gapped score) and with
+//! `score_only` FALSE, which calls `ALIGN_EX` (traceback). blastn uses
+//! `s_BlastAlignPackedNucl` (preliminary score on the packed subject) and `ALIGN_EX` on
+//! one byte per base (traceback). LOSAT_X_DPFAST runs the vector kernels below for all
+//! of these.
+//!
+//! How the module relates to that code. Each row of the DP is the same recurrence as the
+//! cited loops. The diagonal term (`next_score`), the column gap (`best_gap`) and the
+//! X-drop test are evaluated lane by lane, in blocks of 8 (16-bit) or 16 (8-bit) cells.
+//! The row gap (`score_gap_row`), which the C loop carries from cell to cell, is a decayed
+//! prefix maximum over the lanes. The script bits have the values of the NCBI `SCRIPT_*`
+//! constants, and the traceback walk is the C walk. The argument above is why the cells that
+//! are kept have the C values. LOSAT_X_DPSHADOW and the random test
+//! (`simd_kernels_match_scalar_loops_on_random_problems`) compare every result with the
+//! scalar loop. The module is integer arithmetic only. A problem that does not fit the lanes
+//! is not handled here and the scalar port runs.
 
 #![allow(clippy::too_many_arguments)]
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:362-371
+// ```c
+// /** Values for the editing script operations in traceback */
+// enum {
+//     SCRIPT_SUB           = eGapAlignSub,     /**< Substitution */
+//     SCRIPT_GAP_IN_A      = eGapAlignDel,     /**< Deletion */
+//     SCRIPT_GAP_IN_B      = eGapAlignIns,     /**< Insertion */
+//     SCRIPT_OP_MASK       = 0x07, /**< Mask for edit script operations */
+// ...
+//     SCRIPT_EXTEND_GAP_A  = 0x10, /**< continue a gap in A */
+//     SCRIPT_EXTEND_GAP_B  = 0x40  /**< continue a gap in B */
+// };
+// ```
+// The same script bits as NCBI. The three operation values are NCBI's `eGapAlignSub` (3),
+// `eGapAlignDel` (0) and `eGapAlignIns` (6) from `gapinfo.h`.
 pub(crate) const SCRIPT_SUB: u8 = 3;
 pub(crate) const SCRIPT_GAP_IN_A: u8 = 0;
 pub(crate) const SCRIPT_GAP_IN_B: u8 = 6;
 const SCRIPT_OP_MASK: u8 = 0x07;
 const SCRIPT_EXTEND_GAP_A: u8 = 0x10;
 const SCRIPT_EXTEND_GAP_B: u8 = 0x40;
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_util.h:364-364
+// ```c
+// #define FENCE_SENTRY 201
+// ```
+// The same sentinel value as NCBI. The kernels stop at it as `ALIGN_EX` does (lines 571-575 of
+// `blast_gapalign.c`).
 const FENCE_SENTRY: u8 = 201;
 
+// No NCBI counterpart: lane padding, 16-bit value range and the largest score the vector
+// path accepts. A problem outside these limits is not handled and the scalar port runs; the
+// limits do not change any value NCBI computes.
 const PAD: usize = 32;
 const VMAX: i64 = 32767;
 /// Largest substitution score the 16-bit path accepts.
 const MAX_M: i32 = 2000;
 
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:541-545,3125-3134
+/// ```c
+///         if (!(gap_align->positionBased)) {
+///             if(reverse_sequence)
+///                 matrix_row = matrix[ A[ M - a_index ] ];
+///             else
+///                 matrix_row = matrix[ A[ a_index ] ];
+/// ...
+///             a_base_pair = NCBI2NA_UNPACK_BASE(A[1+((a_index-1)/4)],
+///                                                (3-((a_index-1)%4)));
+///             matrix_row = matrix[a_base_pair];
+/// ```
+/// The residue of `A` (the row sequence) that selects the matrix row of row `a_index`, one byte
+/// per residue or unpacked from NCBI2NA bytes, forward or reversed as in the C code.
+///
 /// Row residues: `data[base + step * a]` for `a` in `1..=len1`.
 #[derive(Clone, Copy)]
 pub(crate) enum RowSeq<'a> {
@@ -67,6 +183,18 @@ pub(crate) enum RowSeq<'a> {
 }
 
 impl RowSeq<'_> {
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3125-3134
+    /// ```c
+    ///         if(reverse_sequence) {
+    ///             a_base_pair = NCBI2NA_UNPACK_BASE(A[(M-a_index)/4],
+    ///                                                ((a_index-1)%4));
+    ///             matrix_row = matrix[a_base_pair];
+    ///         }
+    ///         else {
+    ///             a_base_pair = NCBI2NA_UNPACK_BASE(A[1+((a_index-1)/4)],
+    ///                                                (3-((a_index-1)%4)));
+    /// ```
+    /// The same index arithmetic for the packed forms.
     #[inline(always)]
     fn get(&self, a: usize) -> Option<u8> {
         match *self {
@@ -97,6 +225,22 @@ impl RowSeq<'_> {
     }
 }
 
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:554-557,566-576
+/// ```c
+///         if(reverse_sequence)
+///             b_ptr = &B[N - first_b_index];
+///         else
+///             b_ptr = &B[first_b_index];
+/// ...
+///             b_ptr += b_increment;
+/// ...
+///             matrix_index = *b_ptr;
+///
+///             if (matrix_index == FENCE_SENTRY) {
+/// ```
+/// The residue of `B` (the column sequence) at column `k`, read forward or backward as `b_ptr`
+/// is in the C loop. Out of range reads 0; the fence sentinel is recognised by the kernel.
+///
 /// Column residues: column `k` reads `data[base + step * k]`; out of range
 /// or `k >= zero_from` reads 0.
 #[derive(Clone, Copy)]
@@ -108,6 +252,19 @@ pub(crate) struct ColSeq<'a> {
 }
 
 impl ColSeq<'_> {
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:566-576
+    /// ```c
+    ///             b_ptr += b_increment;
+    /// ...
+    ///             matrix_index = *b_ptr;
+    ///
+    ///             if (matrix_index == FENCE_SENTRY) {
+    ///                 if (fence_hit) {
+    ///                     *fence_hit = 1;
+    ///                 }
+    ///                 break;
+    /// ```
+    /// One column residue (`*b_ptr`).
     #[inline(always)]
     fn get(&self, k: usize) -> u8 {
         if k >= self.zero_from {
@@ -121,6 +278,16 @@ impl ColSeq<'_> {
     }
 }
 
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:543,569,578
+/// ```c
+///                 matrix_row = matrix[ A[ M - a_index ] ];
+/// ...
+///             matrix_index = *b_ptr;
+/// ...
+///             next_score = score_array[b_index].best + matrix_row[ *b_ptr ];
+/// ```
+/// `matrix[row residue][column residue]`: the score matrix NCBI reads through `matrix_row`.
+///
 /// Substitution scores by (row residue, column residue).
 #[derive(Clone, Copy)]
 pub(crate) enum Scores<'a> {
@@ -137,10 +304,20 @@ pub(crate) enum Scores<'a> {
     Tables { t: &'a StaticTables, n: usize },
 }
 
+// No NCBI counterpart: the layout of the score tables (bytes per row residue) used by the
+// vector lookups; the tables hold the same matrix values.
 /// Bytes per row residue in a lookup table: low and high bytes of the 16-bit
 /// score, then the score clamped to 8 bits.
 const TAB: usize = 96;
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:543,578
+// ```c
+//                 matrix_row = matrix[ A[ M - a_index ] ];
+// ...
+//             next_score = score_array[b_index].best + matrix_row[ *b_ptr ];
+// ```
+// The matrix rows of a fixed matrix (for example BLOSUM62) copied into lookup tables for the
+// vector kernels, built once. The values are the matrix entries.
 pub(crate) struct StaticTables {
     data: [u8; 32 * TAB],
     /// Largest score in the matrix.
@@ -158,6 +335,16 @@ impl Scores<'_> {
     }
 }
 
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:543,578
+/// ```c
+///                 matrix_row = matrix[ A[ M - a_index ] ];
+/// ...
+///             next_score = score_array[b_index].best + matrix_row[ *b_ptr ];
+/// ```
+/// Copies one row of the score matrix (the `matrix_row` of one row residue) into the lookup
+/// planes. It returns false, and the scalar port runs, if a score is outside the range of the
+/// 16-bit path.
+///
 /// Build the per-row-residue lookup planes (32 low bytes, 32 high bytes, 32
 /// 8-bit scores). Returns false when a score is outside the 16-bit path's range.
 fn build_row_table(scores: &Scores<'_>, q: usize, out: &mut [u8]) -> bool {
@@ -203,6 +390,9 @@ fn build_row_table(scores: &Scores<'_>, q: usize, out: &mut [u8]) -> bool {
     true
 }
 
+/// No NCBI counterpart: the largest matrix score, used to decide whether the 8-bit lanes can
+/// hold the problem; it does not change any value NCBI computes.
+///
 /// Largest score of the matrix, when it is cheap to know.
 fn max_score(scores: &Scores<'_>) -> Option<i32> {
     match *scores {
@@ -213,6 +403,14 @@ fn max_score(scores: &Scores<'_>) -> Option<i32> {
     }
 }
 
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:543,578
+/// ```c
+///                 matrix_row = matrix[ A[ M - a_index ] ];
+/// ...
+///             next_score = score_array[b_index].best + matrix_row[ *b_ptr ];
+/// ```
+/// Builds the lookup planes of every matrix row; see `build_row_table`.
+///
 /// Build all row tables for a fixed matrix (used once per matrix).
 pub(crate) fn build_tables(f: &dyn Fn(u8, u8) -> i32, n: usize) -> Option<Box<StaticTables>> {
     let mut t = Box::new(StaticTables {
@@ -231,6 +429,18 @@ pub(crate) fn build_tables(f: &dyn Fn(u8, u8) -> i32, n: usize) -> Option<Box<St
     Some(t)
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:462-468,476-479
+// ```c
+//     if (num_extra_cells > gap_align->dp_mem_alloc) {
+//         gap_align->dp_mem_alloc = MAX(num_extra_cells + 100,
+//                                       2 * gap_align->dp_mem_alloc);
+// ...
+//     score_array = gap_align->dp_mem;
+//     score_array[0].best = 0;
+//     score_array[0].best_gap = -gap_open_extend;
+// ```
+// The vector kernels' rows (`best`, `best_gap` of `score_array`, here `H` and `E`), the traceback
+// rows (`edit_script`) and the operation list. Kept between calls like `gap_align->dp_mem`.
 pub(crate) struct XdropScratch {
     ha: Vec<i16>,
     hb: Vec<i16>,
@@ -255,6 +465,9 @@ pub(crate) struct XdropScratch {
 }
 
 impl XdropScratch {
+    /// No NCBI counterpart: an empty scratch when the kernel is off, so that a search without the
+    /// switch allocates nothing for it; it does not change any value NCBI computes.
+    ///
     /// The scratch of a search: empty unless the kernel is switched on, so
     /// that a search without the switch allocates nothing for it.
     pub(crate) fn for_search() -> Self {
@@ -283,6 +496,14 @@ impl XdropScratch {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:462-468
+    // ```c
+    //     if (num_extra_cells > gap_align->dp_mem_alloc) {
+    //         gap_align->dp_mem_alloc = MAX(num_extra_cells + 100,
+    //                                       2 * gap_align->dp_mem_alloc);
+    //         sfree(gap_align->dp_mem);
+    // ```
+    // The initial allocation, like the first `dp_mem` allocation.
     pub(crate) fn new() -> Self {
         Self {
             ha: vec![0; 1024],
@@ -306,6 +527,17 @@ impl XdropScratch {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:641-649
+    // ```c
+    //         if (last_b_index + num_extra_cells + 3 >= gap_align->dp_mem_alloc) {
+    //
+    //             gap_align->dp_mem_alloc = MAX(last_b_index + num_extra_cells + 100,
+    //                                           2 * gap_align->dp_mem_alloc);
+    //             score_array = (BlastGapDP *)realloc(score_array,
+    //                                                gap_align->dp_mem_alloc *
+    //                                                sizeof(BlastGapDP));
+    // ```
+    // Grows the rows when the band needs more room, as the C code enlarges `score_array`.
     #[inline(always)]
     fn ensure(&mut self, lanes: usize) {
         let need = lanes + 2 * PAD + 64;
@@ -330,6 +562,16 @@ impl XdropScratch {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:438,476-479
+    // ```c
+    //     s_GapPurgeState(gap_align->state_struct);
+    // ...
+    //     score = -gap_open_extend;
+    //     score_array = gap_align->dp_mem;
+    //     score_array[0].best = 0;
+    //     score_array[0].best_gap = -gap_open_extend;
+    // ```
+    // Clears what the previous call wrote, so that the next call starts from empty rows.
     fn reset(&mut self) {
         let hi = (self.dirty + 2 * PAD + 32).min(self.ha.len());
         self.ha[..hi].fill(0);
@@ -351,6 +593,15 @@ impl XdropScratch {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:612-613,732
+// ```c
+//                     *a_offset = a_index;
+//                     *b_offset = b_index;
+// ...
+//     return best_score;
+// ```
+// The output of `ALIGN_EX` / `Blast_SemiGappedAlign`: `a_offset`, `b_offset`, the best score, and
+// whether the fence sentinel was hit. `cells` only counts work.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct XdropResult {
     pub a_offset: usize,
@@ -361,6 +612,12 @@ pub(crate) struct XdropResult {
     pub cells: u64,
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:726
+// ```c
+//         GapPrelimEditBlockAdd(edit_block, (EGapAlignOpType)script, 1);
+// ```
+// Appends one operation to the edit script, merging equal neighbours as `GapPrelimEditBlockAdd`
+// does.
 #[inline(always)]
 fn push_op(ops: &mut Vec<(u8, u32)>, op: u8) {
     if let Some(last) = ops.last_mut() {
@@ -376,6 +633,8 @@ fn push_op(ops: &mut Vec<(u8, u32)>, op: u8) {
 // 128-bit vector layer
 // ---------------------------------------------------------------------------
 
+// No NCBI counterpart: vector instruction wrappers (one operation on all lanes); they do not
+// change any value NCBI computes.
 #[cfg(target_arch = "x86_64")]
 mod arch {
     use core::arch::x86_64::*;
@@ -547,6 +806,8 @@ mod arch {
     }
 }
 
+// No NCBI counterpart: vector instruction wrappers (one operation on all lanes); they do not
+// change any value NCBI computes.
 #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
 mod arch {
     use core::arch::wasm32::*;
@@ -718,6 +979,30 @@ mod arch {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:578-601,616-619,631
+// ```c
+//             next_score = score_array[b_index].best + matrix_row[ *b_ptr ];
+// ...
+//             if (score < score_gap_col) {
+//                 script = SCRIPT_GAP_IN_B;
+//                 score = score_gap_col;
+//             }
+//             if (score < score_gap_row) {
+//                 script = SCRIPT_GAP_IN_A;
+//                 score = score_gap_row;
+//             }
+//             if (best_score - score > x_dropoff) {
+// ...
+//                 score_gap_row -= gap_extend;
+//                 score_gap_col -= gap_extend;
+//                 if (score_gap_col < (score - gap_open_extend)) {
+//                     score_array[b_index].best_gap = score - gap_open_extend;
+// ...
+//                 score_array[b_index].best = score;
+// ```
+// The vector kernels: ALIGN_EX / Blast_SemiGappedAlign (and `s_BlastAlignPackedNucl`) as
+// described at the head of this file, with 8-bit lanes (`align_body8`) or 16-bit lanes
+// (`align_body`) and with (`TB`) or without a traceback.
 #[cfg(any(
     target_arch = "x86_64",
     all(target_arch = "wasm32", target_feature = "simd128")
@@ -726,6 +1011,8 @@ mod kernel {
     use super::arch::*;
     use super::*;
 
+    // No NCBI counterpart: shuffle and mask constants of the 16-bit lanes; they do not change any
+    // value NCBI computes.
     static KCROSS: [u8; 16] = [
         128, 128, 128, 128, 128, 128, 128, 128, 6, 7, 6, 7, 6, 7, 6, 7,
     ];
@@ -744,6 +1031,8 @@ mod kernel {
         [-1, -1, -1, -1, -1, -1, -1, -1],
     ];
 
+    // No NCBI counterpart: the gap costs and constants of one call, splatted over the lanes
+    // (`gap_open_extend`, `gap_extend`, `x_dropoff`, the script bits).
     struct Consts {
         goe: V,
         ge1: V,
@@ -758,6 +1047,17 @@ mod kernel {
         c40: V,
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:601,610-614
+    // ```c
+    //             if (best_score - score > x_dropoff) {
+    // ...
+    //                 if (score > best_score) {
+    //                     best_score = score;
+    //                     *a_offset = a_index;
+    //                     *b_offset = b_index;
+    // ```
+    // The running `best_score` of the row, the threshold `best_score - x_dropoff` and the cell where
+    // the best score was last raised, kept in vectors across the blocks of one row.
     struct RowState {
         tprev: V,
         bestv: V,
@@ -766,6 +1066,33 @@ mod kernel {
         slow: u32,
     }
 
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:578-601,616-619,631
+    /// ```c
+    ///             next_score = score_array[b_index].best + matrix_row[ *b_ptr ];
+    /// ...
+    ///             if (score < score_gap_col) {
+    ///                 script = SCRIPT_GAP_IN_B;
+    ///                 score = score_gap_col;
+    ///             }
+    ///             if (score < score_gap_row) {
+    ///                 script = SCRIPT_GAP_IN_A;
+    ///                 score = score_gap_row;
+    ///             }
+    ///             if (best_score - score > x_dropoff) {
+    /// ...
+    ///                 score_gap_row -= gap_extend;
+    ///                 score_gap_col -= gap_extend;
+    ///                 if (score_gap_col < (score - gap_open_extend)) {
+    ///                     score_array[b_index].best_gap = score - gap_open_extend;
+    /// ...
+    ///                 score_array[b_index].best = score;
+    /// ```
+    /// One block of 8 cells of one row. `D` is `next_score` of the diagonal, `E` is `score_gap_col`
+    /// (`best_gap`), `F` is `score_gap_row`, `H` is `score`. The comparisons set the same script bits
+    /// as the `if`s of the C loop. The cells that fail the X-drop test are returned as a mask and
+    /// stored as 0 (minus infinity). The argument at the head of this file says why the kept cells
+    /// have the C values.
+    ///
     /// One block of 8 lanes at `b`. Returns (drop mask, script).
     #[inline(always)]
     unsafe fn block<const TB: bool>(
@@ -834,6 +1161,27 @@ mod kernel {
         (drop, scr)
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:476-500,641-675
+    // ```c
+    //     score_array[0].best = 0;
+    //     score_array[0].best_gap = -gap_open_extend;
+    // ...
+    //     for (a_index = 1; a_index <= M; a_index++) {
+    // ...
+    //         if (last_b_index < b_size - 1) {
+    //             b_size = last_b_index + 1;
+    //         }
+    //         else {
+    //             while (score_gap_row >= (best_score - x_dropoff) && b_size <= N) {
+    // ...
+    //         if (b_size <= N) {
+    //             score_array[b_size].best = MININT;
+    //             score_array[b_size].best_gap = MININT;
+    //             b_size++;
+    // ```
+    // The whole DP on 16-bit lanes: row 0, then one row per `a_index`, with the band
+    // `first_b_index .. b_size` narrowed and widened as in the C loop. It returns None for a
+    // problem that does not fit (the caller then runs the scalar port).
     #[inline(always)]
     pub(super) unsafe fn align_body<const TB: bool>(
         q: &RowSeq<'_>,
@@ -1138,6 +1486,8 @@ mod kernel {
         finish::<TB>(sc, a_off, b_off, best, fence_hit, cells)
     }
 
+    // No NCBI counterpart: shuffle and mask constants of the 8-bit lanes; they do not change any
+    // value NCBI computes.
     // -----------------------------------------------------------------
     // 8-bit lanes (16 per vector): same algorithm, used when
     // x_dropoff + gap costs + 2 * max_score fit in 7 bits.
@@ -1153,6 +1503,7 @@ mod kernel {
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     ];
 
+    // No NCBI counterpart: the gap costs and constants of one call on 8-bit lanes.
     struct Consts8 {
         goe: V,
         ge1: V,
@@ -1168,6 +1519,31 @@ mod kernel {
         c40: V,
     }
 
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:578-601,616-619,631
+    /// ```c
+    ///             next_score = score_array[b_index].best + matrix_row[ *b_ptr ];
+    /// ...
+    ///             if (score < score_gap_col) {
+    ///                 script = SCRIPT_GAP_IN_B;
+    ///                 score = score_gap_col;
+    ///             }
+    ///             if (score < score_gap_row) {
+    ///                 script = SCRIPT_GAP_IN_A;
+    ///                 score = score_gap_row;
+    ///             }
+    ///             if (best_score - score > x_dropoff) {
+    /// ...
+    ///                 score_gap_row -= gap_extend;
+    ///                 score_gap_col -= gap_extend;
+    ///                 if (score_gap_col < (score - gap_open_extend)) {
+    ///                     score_array[b_index].best_gap = score - gap_open_extend;
+    /// ...
+    ///                 score_array[b_index].best = score;
+    /// ```
+    /// The same block as `block`, on 16 cells of 8 bits. Scores are kept relative to a base so that
+    /// every value that can still matter fits in 7 bits; `fits_8bit` checks this before the
+    /// call.
+    ///
     /// One block of 16 lanes at `b`. Returns (drop mask, script).
     #[inline(always)]
     unsafe fn block8<const TB: bool>(
@@ -1238,6 +1614,18 @@ mod kernel {
         (drop, scr)
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:476-500,641-675
+    // ```c
+    //     score_array[0].best = 0;
+    //     score_array[0].best_gap = -gap_open_extend;
+    // ...
+    //     for (a_index = 1; a_index <= M; a_index++) {
+    // ...
+    //         if (last_b_index < b_size - 1) {
+    //             b_size = last_b_index + 1;
+    // ```
+    // The same DP as `align_body` on 8-bit lanes (16 cells per vector). It returns None for a
+    // problem that does not fit.
     /// `max_m` is the largest score of the matrix (>= 0).
     #[inline(always)]
     pub(super) unsafe fn align_body8<const TB: bool>(
@@ -1539,6 +1927,20 @@ mod kernel {
         finish::<TB>(sc, a_off, b_off, best, fence_hit, cells)
     }
 
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:682-727
+    /// ```c
+    ///     a_index = *a_offset;
+    ///     b_index = *b_offset;
+    ///     script = SCRIPT_SUB;
+    /// ...
+    ///     while (a_index > 0 || b_index > 0) {
+    /// ...
+    ///         GapPrelimEditBlockAdd(edit_block, (EGapAlignOpType)script, 1);
+    /// ```
+    /// The end of `ALIGN_EX`: the walk from the best cell back to the start, with the same state
+    /// machine on `script`. Score-only calls return the offsets and the score, as
+    /// `Blast_SemiGappedAlign` does.
+    ///
     /// Result assembly and traceback walk shared by both lane widths.
     #[inline(always)]
     unsafe fn finish<const TB: bool>(
@@ -1637,6 +2039,9 @@ mod kernel {
         })
     }
 
+    // No NCBI counterpart: entry points compiled with CPU features enabled (AVX or SSE) around
+    // `align_body` and `align_body8`. The same code runs; only the instructions the compiler may use
+    // change.
     macro_rules! x86_entry {
         ($name:ident, $name8:ident, $feat:literal) => {
             #[cfg(target_arch = "x86_64")]
@@ -1702,6 +2107,14 @@ mod kernel {
     x86_entry!(align_sse, align8_sse, "ssse3,sse4.1");
 }
 
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:766-770
+/// ```c
+///     if (!score_only) {
+///         return ALIGN_EX(A, B, M, N, a_offset, b_offset, edit_block, gap_align,
+/// ```
+/// Reads the LOSAT_X_DPFAST / LOSAT_X_DPSHADOW switches once. The mode only chooses whether the
+/// scalar port of these functions (0), the vector kernels (1), or both with a comparison (2) run.
+///
 /// 0 = scalar only, 1 = SIMD, 2 = SIMD and compare every call with the scalar kernel.
 pub(crate) fn mode() -> u8 {
     use std::sync::OnceLock;
@@ -1717,6 +2130,8 @@ pub(crate) fn mode() -> u8 {
     })
 }
 
+/// No NCBI counterpart: checks the CPU features at run time (LOSAT_X_DPNOAVX turns the AVX
+/// level off for timing); it does not change any value NCBI computes.
 #[cfg(target_arch = "x86_64")]
 fn cpu_level() -> u8 {
     use std::sync::OnceLock;
@@ -1739,6 +2154,8 @@ fn cpu_level() -> u8 {
     })
 }
 
+/// No NCBI counterpart: switch reader for timing; it does not change any value NCBI computes.
+///
 /// LOSAT_X_DPNO8 keeps every call on the 16-bit lanes (for A/B timing).
 fn use_8bit() -> bool {
     use std::sync::OnceLock;
@@ -1746,6 +2163,9 @@ fn use_8bit() -> bool {
     *ON.get_or_init(|| std::env::var_os("LOSAT_X_DPNO8").is_none())
 }
 
+/// No NCBI counterpart: the test of whether the problem fits 8-bit lanes; a problem that does not
+/// fit runs on 16-bit lanes or on the scalar port.
+///
 /// Largest matrix score if the 8-bit lanes can hold this problem.
 fn fits_8bit(scores: &Scores<'_>, gap_open: i32, gap_extend: i32, x_drop: i32) -> Option<i32> {
     if !use_8bit() {
@@ -1766,6 +2186,23 @@ fn fits_8bit(scores: &Scores<'_>, gap_open: i32, gap_extend: i32, x_drop: i32) -
     }
 }
 
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:736-741,766-770
+/// ```c
+/// Blast_SemiGappedAlign(const Uint1* A, const Uint1* B, Int4 M, Int4 N,
+///    Int4* a_offset, Int4* b_offset, Boolean score_only,
+///    GapPrelimEditBlock *edit_block, BlastGapAlignStruct* gap_align,
+///    const BlastScoringParameters* score_params,
+///    Int4 query_offset, Boolean reversed, Boolean reverse_sequence,
+///    Boolean * fence_hit)
+/// ...
+///     if (!score_only) {
+///         return ALIGN_EX(A, B, M, N, a_offset, b_offset, edit_block, gap_align,
+/// ```
+/// Dispatch point of LOSAT_X_DPFAST / LOSAT_X_DPSHADOW for all callers. `tb == false` stands for
+/// `score_only` (`Blast_SemiGappedAlign`, `s_BlastAlignPackedNucl`), `tb == true` for `ALIGN_EX`.
+/// It picks the AVX or SSE build and the 8-bit or 16-bit lanes. `None` means that the caller must
+/// run the scalar port of the C function; callers do so, and compare when the mode is 2.
+///
 /// Score-only (`tb == false`) or traceback X-drop alignment.
 /// `None` means "not handled here": the caller must run the scalar kernel.
 pub(crate) fn xdrop_align(
@@ -2005,6 +2442,24 @@ mod tests {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:862-912,563-636
+    // ```c
+    //         for (b_index = first_b_index; b_index < b_size; b_index++) {
+    //             b_ptr += b_increment;
+    //             score_gap_col = score_array[b_index].best_gap;
+    //             next_score = score_array[b_index].best + matrix_row[ *b_ptr ];
+    //
+    //             if (score < score_gap_col)
+    //                 score = score_gap_col;
+    // ...
+    //             if (matrix_index == FENCE_SENTRY) {
+    // ...
+    //             script = SCRIPT_SUB;
+    //             script_col = SCRIPT_EXTEND_GAP_B;
+    //             script_row = SCRIPT_EXTEND_GAP_A;
+    // ```
+    // The plain scalar transliteration of the C loops that the differential test compares the vector
+    // kernels with.
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:835-959
     // (Blast_SemiGappedAlign, score-only) and :500-727 (ALIGN_EX).
     fn reference(
@@ -2237,6 +2692,17 @@ mod tests {
         Problem { q, s, n, m }
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:736-741,766-770
+    // ```c
+    // Blast_SemiGappedAlign(const Uint1* A, const Uint1* B, Int4 M, Int4 N,
+    //    Int4* a_offset, Int4* b_offset, Boolean score_only,
+    // ...
+    //     if (!score_only) {
+    //         return ALIGN_EX(A, B, M, N, a_offset, b_offset, edit_block, gap_align,
+    // ```
+    // Random problems (matrices of 16 and 28 letters, several gap costs and X-drop values,
+    // some with a fence sentinel) are run through `reference` and `xdrop_align`. The
+    // offsets, score, fence flag, edit script and cell count are compared.
     #[test]
     fn simd_kernels_match_scalar_loops_on_random_problems() {
         let cases: usize = std::env::var("LOSAT_FUZZ_CASES")

@@ -1052,6 +1052,12 @@ pub fn redo_list(
 // ```
 pub struct KappaState {
     params: BlastRedoAlignParams,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3504
+    // ```c
+    //                 query_info           = query_info_tld[tid];
+    // ```
+    // NCBI builds one query_info per thread (query_info_tld). Here the query information is never
+    // written during the redo, so the per-thread states share one copy. Placement only.
     // EXPERIMENT (LOSAT_X_BXPAR): read-only, shared with the per-thread copies.
     infos: std::sync::Arc<Vec<BlastCompoQueryInfo>>,
     lambda: f64,
@@ -1120,6 +1126,26 @@ impl KappaState {
             matrix: None,
         })
     }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3326-3338,3346-3350,3499-3502
+    // ```c
+    //         if ((int) compo_adjust_mode > 1 && !positionBased) {
+    //             NRrecord_tld[i] = Blast_CompositionWorkspaceNew();
+    //             status_code = Blast_CompositionWorkspaceInit(
+    //                     NRrecord_tld[i],
+    //                     scoringParams->options->matrix
+    //             );
+    // ...
+    //         redo_align_params_tld[i] =
+    //             s_GetAlignParams(
+    // ...
+    //                 NRrecord             = NRrecord_tld[tid];
+    //                 sbp                  = sbp_tld[tid];
+    //                 redo_align_params    = redo_align_params_tld[tid];
+    //                 matrix               = matrix_tld[tid];
+    // ```
+    // Each NCBI thread owns an NRrecord (composition workspace), a redo_align_params and a matrix.
+    // This builds the same per-thread objects for one more Rust thread; the query information is
+    // shared because it is read-only.
     /// EXPERIMENT (LOSAT_X_BXPAR): a second state for another thread, as NCBI
     /// c++/src/algo/blast/core/blast_kappa.c:3244-3340 allocates per thread
     /// (`redo_align_params_tld`, `gap_align_tld`, `NRrecord_tld`); the query
@@ -1202,10 +1228,38 @@ impl KappaState {
     ) -> Result<Vec<RedoneHsp>> {
         self.redo_list_observed(input, batch, subject, &mut |_| {})
     }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3502,3625-3641
+    // ```c
+    //                 matrix               = matrix_tld[tid];
+    // ...
+    //                                 Blast_RedoOneMatch(
+    //                                         alignments,             // thread-local
+    //                                         redo_align_params,      // thread-local
+    //                                         incoming_aligns,        // thread-local
+    //                                         numAligns[frame_index], // local
+    //                                         kbp->Lambda,            // thread-local
+    //                                         &matchingSeq,           // thread-local
+    //                                         -1,                     // const
+    //                                         query_info,             // thread-local
+    //                                         numContexts,            // thread-local
+    //                                         matrix,                 // thread-local
+    //                                         BLASTAA_SIZE,           // const
+    //                                         NRrecord,               // thread-local
+    //                                         &pvalueForThisPair,     // local
+    //                                         compositionTestIndex,   // thread-local
+    //                                         &LambdaRatio            // local
+    //                                 );
+    // ```
+    // In NCBI the matrix is thread local (matrix_tld[tid]) and is passed on from one
+    // Blast_RedoOneMatch call to the next on that thread. x_take_matrix and x_set_matrix move it
+    // between Rust states so that a match redone out of order sees the matrix it would have seen in
+    // stream order.
     /// EXPERIMENT (LOSAT_X_BXPAR): the matrix a match leaves for the next one.
     pub(crate) fn x_take_matrix(&mut self) -> Option<AdjustedProteinMatrix> {
         self.matrix.take()
     }
+    // No NCBI counterpart: see x_take_matrix above (the matrix hand-over is a placement of the same
+    // value); it does not change any value NCBI computes.
     /// EXPERIMENT (LOSAT_X_BXPAR): hand a match the matrix of its predecessor.
     pub(crate) fn x_set_matrix(&mut self, matrix: Option<AdjustedProteinMatrix>) {
         self.matrix = matrix;

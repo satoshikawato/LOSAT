@@ -3701,6 +3701,13 @@ struct SubjectScratch {
     // gap_align->rev_prelim_tback = GapPrelimEditBlockNew();
     // ```
     greedy_align_scratch: GreedyAlignScratch,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:356-357
+    // ```c
+    //    gap_align->fwd_prelim_tback = GapPrelimEditBlockNew();
+    //    gap_align->rev_prelim_tback = GapPrelimEditBlockNew();
+    // ```
+    // Every look-ahead helper has its own scratch, as each NCBI call has the `gap_align` structure
+    // that holds its working memory. A helper never uses the caller's scratch. Reuse only.
     // EXPERIMENT (LOSAT_X_AHEAD): scratch memory of the look-ahead helpers.
     x_ahead_scratch: Vec<(GapAlignScratch, GreedyAlignScratch)>,
     cutoff_scores: Vec<i32>,
@@ -3801,6 +3808,8 @@ impl SubjectScratch {
             // gap_align->rev_prelim_tback = GapPrelimEditBlockNew();
             // ```
             greedy_align_scratch: GreedyAlignScratch::new(),
+            // No NCBI counterpart: the helper scratch list starts empty and is filled when helpers are used;
+            // it does not change any value NCBI computes.
             x_ahead_scratch: Vec::new(),
             cutoff_scores: Vec::with_capacity(query_count),
             x_dropoff_scores: Vec::with_capacity(query_count),
@@ -3858,6 +3867,17 @@ struct QueryContext {
     masks: Vec<MaskedInterval>,
 }
 
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:503-512
+/// ```c
+///         } else if (kGreedyTraceback) {
+///             BLAST_GreedyGappedAlignment(query, adjusted_subject,
+/// ...
+///         } else {
+///           BLAST_GappedAlignmentWithTraceback(program_number, query,
+/// ```
+/// The result of the traceback call of NCBI, of the dynamic-programming kind or the greedy
+/// kind, computed before the ordered loop reaches the HSP.
+///
 /// EXPERIMENT (LOSAT_X_GREEDYSPEC): a traceback computed ahead of the ordered
 /// loop, by the dynamic-programming kernel or by the greedy one.
 #[derive(PartialEq)]
@@ -3866,6 +3886,14 @@ enum XSpecTraceback<D, G> {
     Greedy(G),
 }
 
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:356-357
+/// ```c
+///    gap_align->fwd_prelim_tback = GapPrelimEditBlockNew();
+///    gap_align->rev_prelim_tback = GapPrelimEditBlockNew();
+/// ```
+/// The working memory of one gapped alignment call (the `gap_align` of NCBI, and the greedy aligner's
+/// auxiliary memory), borrowed from the caller or from a helper.
+///
 /// EXPERIMENT (LOSAT_X_AHEAD): the scratch memory one gapped alignment may use.
 struct XAheadScratch<'a> {
     gap: &'a mut GapAlignScratch,
@@ -3885,6 +3913,22 @@ struct QueryContextIndex {
     // return b;
     // ```
     direct_map: Vec<u32>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:219-243
+    // ```c
+    // Int4 BSearchContextInfo(Int4 n, const BlastQueryInfo * A)
+    // ...
+    //     while (b < e - 1) {
+    // 	m = (b + e) / 2;
+    // 	if (A->contexts[m].query_offset > n)
+    // 	    e = m;
+    // 	else
+    // 	    b = m;
+    //     }
+    //     return b;
+    // ```
+    // NCBI finds the context of a query offset by this binary search over the `query_offset` of the
+    // contexts. `direct_map` is a table of its answer for every offset. The runs below hold the same
+    // answer as intervals: for an offset inside the sequence of context `c` it is `c`, else 0.
     // EXPERIMENT (LOSAT_X_CTXFAST): what `direct_map` holds, as the list of
     // its non-zero runs `(start, end, context)` sorted by `start`, plus the
     // length it would have. Four bytes per query base become a few words.
@@ -3892,6 +3936,19 @@ struct QueryContextIndex {
     x_total_len: usize,
 }
 
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:235-241
+/// ```c
+///     while (b < e - 1) {
+/// 	m = (b + e) / 2;
+/// 	if (A->contexts[m].query_offset > n)
+/// 	    e = m;
+/// 	else
+/// 	    b = m;
+/// ```
+/// Reads the LOSAT_X_CTXFAST / LOSAT_X_CTXSHADOW switches once. The mode chooses which form
+/// answers the context of a query offset: the table of the answers (0), the runs (1), or both
+/// with a comparison (2).
+///
 /// 0 = direct map, 1 = LOSAT_X_CTXFAST (ranges only), 2 = LOSAT_X_CTXSHADOW
 /// (both, compared on every lookup).
 fn x_ctx_mode() -> u8 {
@@ -3933,6 +3990,17 @@ impl QueryContextIndex {
             .map(|ctx| ctx.query_offset.max(0) as usize + ctx.seq.len())
             .max()
             .unwrap_or(0);
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:225-227,235-241
+        // ```c
+        //     if (A->min_length > 0 && A->max_length > 0 && A->first_context == 0) {
+        //         b = MIN(n / (A->max_length + 1), size - 1);
+        //         e = MIN(n / (A->min_length + 1) + 1, size);
+        // ...
+        //     while (b < e - 1) {
+        // ```
+        // Builds the runs (start, end, context) from the same context offsets and lengths the table is
+        // filled from. If two sequences would overlap, the table's "later context wins" rule would not be
+        // a list of disjoint runs, so the runs are dropped and the table is used.
         // EXPERIMENT (LOSAT_X_CTXFAST): the runs the loop below would fill.
         // Later contexts overwrite earlier ones in `direct_map`, so the list
         // only stands in for it when no two runs overlap; context 0 needs no
@@ -3983,6 +4051,20 @@ impl QueryContextIndex {
         }
     }
 
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:235-242
+    /// ```c
+    ///     while (b < e - 1) {
+    /// 	m = (b + e) / 2;
+    /// 	if (A->contexts[m].query_offset > n)
+    /// 	    e = m;
+    /// 	else
+    /// 	    b = m;
+    ///     }
+    ///     return b;
+    /// ```
+    /// The context of offset `n` from the runs: the last run that starts at or before `n`, if `n` is
+    /// inside it. This is the value the table holds at `n`.
+    ///
     /// `direct_map[n]` for `n < x_total_len`, from the runs.
     #[inline]
     fn x_direct(&self, n: usize) -> usize {
@@ -4007,6 +4089,22 @@ impl QueryContextIndex {
     // return b;
     // ```
     fn context_for_offset(&self, n: usize) -> usize {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:219-243
+        // ```c
+        // Int4 BSearchContextInfo(Int4 n, const BlastQueryInfo * A)
+        // ...
+        //     while (b < e - 1) {
+        // 	m = (b + e) / 2;
+        // 	if (A->contexts[m].query_offset > n)
+        // 	    e = m;
+        // 	else
+        // 	    b = m;
+        //     }
+        //     return b;
+        // ```
+        // Dispatch point of LOSAT_X_CTXFAST / LOSAT_X_CTXSHADOW. The code after this block (the table,
+        // then `bsearch_context_info`) ports `BSearchContextInfo`. With the runs the same context is found
+        // without the table. In mode 2 both are computed and `assert!` compares them.
         if n < self.x_total_len {
             let context = self.x_direct(n);
             if !self.direct_map.is_empty() {
@@ -6944,6 +7042,20 @@ fn search_query_batch(
     //     query_length, adjusted_s_length, fence_hit);
     // ```
     // Preserve ordered debug-coordinate logging; speculative DP is otherwise pure.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:375,503-507
+    // ```c
+    //    for (index=0; index < num_initial_hsps; index++) {
+    // ...
+    //         } else if (kGreedyTraceback) {
+    //             BLAST_GreedyGappedAlignment(query, adjusted_subject,
+    //                 query_length, adjusted_s_length, gap_align,
+    //                 score_params, q_start, s_start, FALSE, TRUE,
+    //                 fence_hit);
+    // ```
+    // Dispatch point of LOSAT_X_GREEDYSPEC. Without it only the dynamic-programming traceback is
+    // scheduled ahead of the ordered loop. With it the greedy traceback of megablast (the call above)
+    // is scheduled too. The ordered loop still tests the tree and adds to it in the NCBI order.
+    // This is scheduling only.
     // EXPERIMENT (LOSAT_X_GREEDYSPEC): the same scheduling for the greedy
     // traceback of megablast. A greedy alignment is a function of its
     // arguments only: every cell it reads from its scratch was written
@@ -6953,6 +7065,25 @@ fn search_query_batch(
         && (config.use_dp || std::env::var_os("LOSAT_X_GREEDYSPEC").is_some())
         && std::env::var_os("LOSAT_DEBUG_COORDS").is_none()
         && std::env::var_os("LOSAT_DEBUG_COORDS_START").is_none();
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3850,3918-3919
+    // ```c
+    //    for (index=0; index<init_hitlist->total; index++)
+    // ...
+    //       if (!BlastIntervalTreeContainsHSP(tree, &tmp_hsp, query_info,
+    //                                         hit_options->min_diag_separation))
+    // ```
+    // Dispatch point of LOSAT_X_AHEAD for the preliminary loop (above) and the traceback loop
+    // (`Blast_TracebackFromHSPList`, next block). The helper threads only evaluate the alignment call
+    // of an index ahead of the loop. The loops, their tree tests and their tree insertions stay on the
+    // calling thread in the NCBI order.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:375,404-405
+    // ```c
+    //    for (index=0; index < num_initial_hsps; index++) {
+    // ...
+    //           !BlastIntervalTreeContainsHSP(tree, hsp, query_info,
+    //                                hit_options->min_diag_separation)) {
+    // ```
+    // The same switch for the loop of `Blast_TracebackFromHSPList`.
     // EXPERIMENT (LOSAT_X_AHEAD[=window]): the other threads of the pool
     // evaluate the gapped alignments of the two ordered loops (preliminary
     // and traceback) ahead of the loop; see utils/xahead.rs. Same conditions
@@ -11075,6 +11206,31 @@ fn search_query_batch(
             let gapped_start_time = std::time::Instant::now();
             let mut dbg_gapped_calls = 0usize;
 
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2959-2963,4012-4025,4041-4046
+            // ```c
+            //    Int4 x_dropoff =  gap_align->gap_x_dropoff;
+            //
+            //    if(init_hsp->ungapped_data->score < x_dropoff) {
+            //           x_dropoff = init_hsp->ungapped_data->score;
+            //    }
+            // ...
+            //          } else if (is_greedy) {
+            //             if (init_hsp->ungapped_data) {
+            //                 init_hsp->offsets.qs_offsets.q_off =
+            //                     init_hsp->ungapped_data->q_start + init_hsp->ungapped_data->length/2;
+            // ...
+            //             status = BLAST_GreedyGappedAlignment(
+            // ...
+            //             if (s_end >= (Int4)init_hsp->offsets.qs_offsets.s_off + 8) {
+            //                init_hsp->offsets.qs_offsets.s_off += 3;
+            // ...
+            //             status = s_BlastDynProgNtGappedAlignment(&query_tmp, subject,
+            // ```
+            // This closure is what each branch of the ordered loop below computes for hit `x_index`, as a
+            // function of the index alone: the seed shift by 3, the X-drop limited by the ungapped score, and the
+            // aligner call, for the dynamic-programming branch and the greedy branch. The branches below make
+            // the same calls on the same arguments, so the closure gives the same value. The tree test and the
+            // tree insertion are not part of it.
             // EXPERIMENT (LOSAT_X_AHEAD): the gapped extension of the loop below
             // as a function of the hit's index (the two branches of the loop,
             // without their trace logging).
@@ -11130,6 +11286,12 @@ fn search_query_batch(
                         )
                     }
                 };
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3850
+            // ```c
+            //    for (index=0; index<init_hitlist->total; index++)
+            // ```
+            // Dispatch point of LOSAT_X_AHEAD for the preliminary loop. When the conditions below do not hold,
+            // `x_ahead` is `None` and the loop runs as ported.
             // Only the caller's own (single-chunk) loop gets helpers; chunk
             // batches already occupy the pool.
             let x_ahead = match x_ahead_window {
@@ -11152,6 +11314,15 @@ fn search_query_batch(
                 .iter_mut()
                 .map(|(gap, greedy)| XAheadScratch { gap, greedy });
 
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3850,4087-4088
+            // ```c
+            //    for (index=0; index<init_hitlist->total; index++)
+            // ...
+            //             status = BlastIntervalTreeAddHSP(new_hsp, tree, query_info,
+            //                                     eQueryAndSubject);
+            // ```
+            // `with_helpers` runs the closure on this thread. The closure is the port of this NCBI loop, in
+            // NCBI order; the other threads of the pool only evaluate values ahead (`utils/xahead.rs`).
             // Process each ungapped hit in score order
             crate::utils::xahead::with_helpers(
                 x_ahead.as_ref(),
@@ -11159,6 +11330,16 @@ fn search_query_batch(
                 &x_prelim_compute,
                 || {
                     for (idx, uh) in ungapped_hits.iter().enumerate() {
+                        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3850,3918-3919
+                        // ```c
+                        //    for (index=0; index<init_hitlist->total; index++)
+                        // ...
+                        //       if (!BlastIntervalTreeContainsHSP(tree, &tmp_hsp, query_info,
+                        //                                         hit_options->min_diag_separation))
+                        // ```
+                        // The owner offers later indexes to the helpers, leaving out the ones the tree already contains.
+                        // The tree is only read here. A wrong guess costs time only, because the loop decides each index
+                        // itself.
                         // EXPERIMENT (LOSAT_X_AHEAD): offer the next hits to the helpers,
                         // leaving out those the tree already contains.
                         if let Some(x_ahead) = x_ahead.as_ref() {
@@ -11283,6 +11464,14 @@ fn search_query_batch(
                         if is_contained {
                             // NCBI: Skip gapped extension if ungapped HSP is contained
                             dbg_containment_skipped += 1;
+                            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3918-3921
+                            // ```c
+                            //       if (!BlastIntervalTreeContainsHSP(tree, &tmp_hsp, query_info,
+                            //                                         hit_options->min_diag_separation))
+                            //       {
+                            // ```
+                            // When the tree contains the hit, NCBI skips the aligner call for this index. The helpers are
+                            // told that nobody needs its value.
                             if let Some(x_ahead) = x_ahead.as_ref() {
                                 x_ahead.skip(idx);
                             }
@@ -11315,6 +11504,24 @@ fn search_query_batch(
                             seed_qs,
                             seed_ss,
                         ) = if let Some(x_ahead) = x_ahead.as_ref() {
+                            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4012-4025,4041-4046
+                            // ```c
+                            //          } else if (is_greedy) {
+                            //             if (init_hsp->ungapped_data) {
+                            //                 init_hsp->offsets.qs_offsets.q_off =
+                            //                     init_hsp->ungapped_data->q_start + init_hsp->ungapped_data->length/2;
+                            // ...
+                            //             status = BLAST_GreedyGappedAlignment(
+                            // ...
+                            //             if (s_end >= (Int4)init_hsp->offsets.qs_offsets.s_off + 8) {
+                            //                init_hsp->offsets.qs_offsets.s_off += 3;
+                            // ...
+                            //             status = s_BlastDynProgNtGappedAlignment(&query_tmp, subject,
+                            // ```
+                            // Dispatch point of LOSAT_X_AHEAD: the value of the aligner call comes from a helper or is
+                            // computed here with `x_prelim_compute`. Without a switch the `else if use_dp` branch and the greedy
+                            // branch below port these calls. LOSAT_X_AHEADSHADOW recomputes a helper's value and `assert!`
+                            // compares them.
                             // EXPERIMENT (LOSAT_X_AHEAD): the value of the branches
                             // below, taken from a helper or evaluated here.
                             let mut x_scratch = XAheadScratch {
@@ -11590,6 +11797,8 @@ fn search_query_batch(
                     }
                 },
             );
+            // No NCBI counterpart: LOSAT_X_STATS work counters (xstats feature); they do not change any
+            // value NCBI computes.
             if let Some(x_ahead) = x_ahead.as_ref() {
                 let (x_evaluated, x_taken) = x_ahead.counts();
                 crate::utils::xstats::AHEAD_PRELIM_EVALUATED
@@ -12146,6 +12355,14 @@ fn search_query_batch(
                 // BLAST_GappedAlignmentWithTraceback(...);
                 // Each independent scratch slot retains its intermediate results.
                 (0..num_threads)
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:503-507
+                    // ```c
+                    //         } else if (kGreedyTraceback) {
+                    //             BLAST_GreedyGappedAlignment(query, adjusted_subject,
+                    //                 query_length, adjusted_s_length, gap_align,
+                    // ```
+                    // LOSAT_X_GREEDYSPEC: each slot of the batch also has the scratch of the greedy aligner, so that
+                    // the greedy traceback call can run on a slot instead of on the ordered loop. Scratch only.
                     .map(|_| {
                         (
                             GapAlignScratch::new(),
@@ -12188,6 +12405,12 @@ fn search_query_batch(
                 } else {
                     16
                 };
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:375
+            // ```c
+            //    for (index=0; index < num_initial_hsps; index++) {
+            // ```
+            // The number of HSPs whose tracebacks are computed ahead of this loop in one batch. Scheduling
+            // only: the loop still visits the HSPs in this order and decides each one itself.
             // EXPERIMENT (LOSAT_X_SPECBATCH=n): how many HSPs are traced ahead of
             // the ordered loop at a time. Scheduling only, like the batch itself.
             #[allow(non_snake_case)]
@@ -12202,6 +12425,27 @@ fn search_query_batch(
                         .unwrap_or(X_DEFAULT_SPECULATIVE_TRACEBACK_BATCH_SIZE)
                 })
             };
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:436-440,457,466-469,503-509
+            // ```c
+            //          if (!kIsOutOfFrame && hsp->query.gapped_start == 0 &&
+            //                                hsp->subject.gapped_start == 0) {
+            //             Boolean retval =
+            //                BlastGetOffsetsForGappedAlignment(query, subject, sbp,
+            // ...
+            //                BlastGetStartForGappedAlignmentNucl(query, subject, hsp);
+            // ...
+            //             AdjustSubjectRange(&s_start, &adjusted_s_length, q_start,
+            //                                query_length, &start_shift);
+            // ...
+            //         } else if (kGreedyTraceback) {
+            //             BLAST_GreedyGappedAlignment(query, adjusted_subject,
+            // ...
+            //         } else {
+            //           BLAST_GappedAlignmentWithTraceback(program_number, query,
+            // ```
+            // This closure is the part of the loop body that depends on the HSP alone: the start offsets and
+            // the subject range (`prepare_traceback`) and the traceback call, dynamic-programming or greedy.
+            // Index in, value out. The tree test and the tree insertion stay in the ordered loop.
             // EXPERIMENT (LOSAT_X_AHEAD): the traceback of the loop below as a
             // function of the HSP's index (the job of the speculative batch).
             let x_trace_compute = |x_index: usize, x_scratch: &mut XAheadScratch<'_>| {
@@ -12240,6 +12484,12 @@ fn search_query_batch(
                 );
                 Some((prepared, XSpecTraceback::Dp(result)))
             };
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:375
+            // ```c
+            //    for (index=0; index < num_initial_hsps; index++) {
+            // ```
+            // Dispatch point of LOSAT_X_AHEAD for the traceback loop. Without helpers `x_ahead` is `None` and
+            // the loop runs as ported.
             let x_ahead = match x_ahead_window {
                 Some(x_window) if !blastn_trace_enabled && prelim_hits.len() >= 2 * x_window => {
                     Some(crate::utils::xahead::Ahead::new(x_window))
@@ -12255,12 +12505,30 @@ fn search_query_batch(
             let x_helpers = x_helper_scratch
                 .iter_mut()
                 .map(|(gap, greedy)| XAheadScratch { gap, greedy });
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:375,600-601
+            // ```c
+            //    for (index=0; index < num_initial_hsps; index++) {
+            // ...
+            //               status = BlastIntervalTreeAddHSP(hsp, tree, query_info,
+            //                                          eQueryAndSubject);
+            // ```
+            // `with_helpers` runs the closure on this thread. The closure is the port of this NCBI loop, in NCBI
+            // order; the other threads of the pool only evaluate tracebacks ahead.
             crate::utils::xahead::with_helpers(
                 x_ahead.as_ref(),
                 x_helpers,
                 &x_trace_compute,
                 || {
                     for prelim_index in 0..prelim_hits.len() {
+                        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:375,404-405
+                        // ```c
+                        //    for (index=0; index < num_initial_hsps; index++) {
+                        // ...
+                        //           !BlastIntervalTreeContainsHSP(tree, hsp, query_info,
+                        //                                hit_options->min_diag_separation)) {
+                        // ```
+                        // The owner offers later HSPs to the helpers, leaving out the ones the tree already contains. The
+                        // tree is only read here.
                         // EXPERIMENT (LOSAT_X_AHEAD): offer the next HSPs to the helpers,
                         // leaving out those the tree already contains.
                         if let Some(x_ahead) = x_ahead.as_ref() {
@@ -12297,6 +12565,17 @@ fn search_query_batch(
                             feature = "parallel",
                             any(not(target_arch = "wasm32"), feature = "wasm-threads")
                         ))]
+                        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:375,509-512
+                        // ```c
+                        //    for (index=0; index < num_initial_hsps; index++) {
+                        // ...
+                        //           BLAST_GappedAlignmentWithTraceback(program_number, query,
+                        //                 adjusted_subject, gap_align, score_params, q_start, s_start,
+                        //                 query_length, adjusted_s_length,
+                        //                 fence_hit);
+                        // ```
+                        // Dispatch point of LOSAT_X_AHEAD: with helpers the batch below is not used; the tracebacks come
+                        // from `x_ahead.take`. Both ways only compute the traceback call of this loop ahead of its turn.
                         if speculative_traceback
                             && x_ahead.is_none()
                             && prelim_index % SPECULATIVE_TRACEBACK_BATCH_SIZE == 0
@@ -12351,6 +12630,17 @@ fn search_query_batch(
                                                     let prepared = prepare_traceback(p)?;
                                                     let (qs, _, shift, slen, ss) = prepared;
                                                     if !use_dp {
+                                                        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:503-507
+                                                        // ```c
+                                                        //         } else if (kGreedyTraceback) {
+                                                        //             BLAST_GreedyGappedAlignment(query, adjusted_subject,
+                                                        //                 query_length, adjusted_s_length, gap_align,
+                                                        //                 score_params, q_start, s_start, FALSE, TRUE,
+                                                        //                 fence_hit);
+                                                        // ```
+                                                        // LOSAT_X_GREEDYSPEC: the greedy traceback call of the ordered loop, made ahead on this slot's
+                                                        // scratch. The call depends on its arguments only, so the value is the one the ordered loop would
+                                                        // compute.
                                                         // EXPERIMENT (LOSAT_X_GREEDYSPEC): the call of
                                                         // the ordered loop below, on this slot's scratch.
                                                         let result =
@@ -12526,6 +12816,16 @@ fn search_query_batch(
                                     1,
                                 );
                             }
+                            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:404-405,607-610
+                            // ```c
+                            //           !BlastIntervalTreeContainsHSP(tree, hsp, query_info,
+                            //                                hit_options->min_diag_separation)) {
+                            // ...
+                            //       } else {
+                            //          /* Contained within another HSP, delete. */
+                            // ```
+                            // When the tree contains the HSP, NCBI deletes it and makes no traceback call. The helpers are
+                            // told that nobody needs its value.
                             if let Some(x_ahead) = x_ahead.as_ref() {
                                 x_ahead.skip(prelim_index);
                             }
@@ -12560,6 +12860,20 @@ fn search_query_batch(
                             feature = "parallel",
                             any(not(target_arch = "wasm32"), feature = "wasm-threads")
                         ))]
+                        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:403-405,509-512
+                        // ```c
+                        //       if (program_number == eBlastTypeRpsBlast ||
+                        //           !BlastIntervalTreeContainsHSP(tree, hsp, query_info,
+                        //                                hit_options->min_diag_separation)) {
+                        // ...
+                        //           BLAST_GappedAlignmentWithTraceback(program_number, query,
+                        //                 adjusted_subject, gap_align, score_params, q_start, s_start,
+                        //                 query_length, adjusted_s_length,
+                        //                 fence_hit);
+                        // ```
+                        // Dispatch point of LOSAT_X_AHEAD. This is reached after the tree test said "not contained". The
+                        // value of the traceback call comes from a helper, or the call is made below as before.
+                        // LOSAT_X_AHEADSHADOW recomputes a helper's value and `assert!` compares them.
                         let precomputed = if let Some(x_ahead) = x_ahead.as_ref() {
                             // EXPERIMENT (LOSAT_X_AHEAD): a helper's value, if one has
                             // started on this HSP; otherwise it is evaluated below.
@@ -12699,6 +13013,16 @@ fn search_query_batch(
                                 edit_ops,
                             )
                         } else {
+                            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:503-507
+                            // ```c
+                            //         } else if (kGreedyTraceback) {
+                            //             BLAST_GreedyGappedAlignment(query, adjusted_subject,
+                            //                 query_length, adjusted_s_length, gap_align,
+                            //                 score_params, q_start, s_start, FALSE, TRUE,
+                            //                 fence_hit);
+                            // ```
+                            // Dispatch point of LOSAT_X_GREEDYSPEC. The `_` arm is the ported call. The other arm uses the
+                            // value of the same call made ahead on another scratch.
                             // EXPERIMENT (LOSAT_X_GREEDYSPEC): the same call, already made
                             // for this HSP on another scratch, or made here.
                             let x_greedy_result = match precomputed {
@@ -13043,6 +13367,8 @@ fn search_query_batch(
                     }
                 },
             );
+            // No NCBI counterpart: LOSAT_X_STATS work counters (xstats feature); they do not change any
+            // value NCBI computes.
             if let Some(x_ahead) = x_ahead.as_ref() {
                 let (x_evaluated, x_taken) = x_ahead.counts();
                 crate::utils::xstats::AHEAD_TRACE_EVALUATED

@@ -11,10 +11,25 @@ pub struct SearchPool<'a> {
     pool: Option<&'a rayon::ThreadPool>,
     // EXPERIMENT (LOSAT_X_TBNSSIDE): state the owner of the search attaches for
     // the stages below it, which all receive the pool.
+    // No NCBI counterpart: read-only shared state (for example a subject translation) that the
+    // owner of the search attaches for the stages below. It only lets stages share a value instead
+    // of computing it again; it does not change any value NCBI computes.
     x_ext: Option<&'a (dyn std::any::Any + Send + Sync)>,
 }
 
 impl SearchPool<'static> {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:253-261
+    // ```c
+    // GetDbIndexRunSearchFn()(
+    //         chunk_queries, lut_options, word_options );
+    // ...
+    // if (IsMultiThreaded()) {
+    //      x_LaunchMultiThreadedSearch(*chunk_data);
+    // } else {
+    // ```
+    // NCBI runs a search without the thread launch when it is not multithreaded. This pool is what a
+    // search that is itself one task of a parallel loop gets: it runs on one thread, in the NCBI
+    // order. Scheduling only.
     /// EXPERIMENT (LOSAT_X_BXBATCH): the pool a one-thread search gets, for a
     /// search that is itself one task of a parallel loop.
     pub fn x_serial() -> Self {
@@ -28,6 +43,8 @@ impl SearchPool<'static> {
 }
 
 impl<'a> SearchPool<'a> {
+    // No NCBI counterpart: it returns the same pool (same thread count, same rayon pool) with a
+    // reference to shared state attached. It does not change any value NCBI computes.
     /// EXPERIMENT (LOSAT_X_TBNSSIDE): this pool with `ext` attached.
     pub fn x_with_ext<'b>(&'b self, ext: &'b (dyn std::any::Any + Send + Sync)) -> SearchPool<'b>
     where
@@ -41,6 +58,8 @@ impl<'a> SearchPool<'a> {
         }
     }
 
+    // No NCBI counterpart: reads back the shared state attached above; it does not change any value
+    // NCBI computes.
     /// EXPERIMENT (LOSAT_X_TBNSSIDE): the attached state, if it is a `T`.
     pub fn x_ext<T: std::any::Any>(&self) -> Option<&'a T> {
         self.x_ext.and_then(|ext| ext.downcast_ref::<T>())
@@ -222,6 +241,22 @@ where
     })
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-149,242-262
+// ```c
+// TBlastThreads the_threads(GetNumberOfThreads());
+// ...
+// _TRACE("Launching BLAST with " << GetNumberOfThreads() << " threads");
+// ...
+//             GetDbIndexRunSearchFn()(
+//                     chunk_queries, lut_options, word_options );
+//
+//             if (IsMultiThreaded()) {
+//                  x_LaunchMultiThreadedSearch(*chunk_data);
+// ```
+// NCBI launches its search threads for each query chunk (lines 253-257) and joins them before
+// the next chunk. Here one pool is built for the whole loop of query batches instead of one per
+// batch. Each batch is still searched by the same function with the same inputs, and the results
+// are used in the input order, so only the placement of work on threads changes.
 /// EXPERIMENT (LOSAT_X_BXPOOL): `with_search_pool` for work that is not `Send`
 /// (it borrows the caller's output stream, for instance), so that one pool can
 /// span a whole loop of query batches instead of being rebuilt, threads and

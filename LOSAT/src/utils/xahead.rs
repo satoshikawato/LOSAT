@@ -26,10 +26,57 @@
 //! batch), an expensive index does not hold up the rest of its batch, and the
 //! owner never waits idle: while a value it needs is still being produced it
 //! evaluates later indexes itself.
+//!
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3850,3918-3919,4045-4046,4087-4088
+//! ```c
+//!    for (index=0; index<init_hitlist->total; index++)
+//! ...
+//!       if (!BlastIntervalTreeContainsHSP(tree, &tmp_hsp, query_info,
+//!                                         hit_options->min_diag_separation))
+//! ...
+//!          status = s_BlastDynProgNtGappedAlignment(&query_tmp, subject,
+//!                       gap_align, score_params, init_hsp);
+//! ...
+//!             status = BlastIntervalTreeAddHSP(new_hsp, tree, query_info,
+//!                                     eQueryAndSubject);
+//! ```
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:375,404-405,509-512,600-601
+//! ```c
+//!    for (index=0; index < num_initial_hsps; index++) {
+//! ...
+//!          !BlastIntervalTreeContainsHSP(tree, hsp, query_info,
+//!                               hit_options->min_diag_separation)) {
+//! ...
+//!           BLAST_GappedAlignmentWithTraceback(program_number, query,
+//!                 adjusted_subject, gap_align, score_params, q_start, s_start,
+//! ...
+//!              status = BlastIntervalTreeAddHSP(hsp, tree, query_info,
+//!                                         eQueryAndSubject);
+//! ```
+//! These are the two ordered loops of NCBI (`BLAST_GetGappedScore`, the preliminary
+//! gapped extension, and `Blast_TracebackFromHSPList`). Each iteration tests the tree,
+//! aligns, and adds to the tree. This module does not change that order. The owner thread
+//! still tests and adds in the NCBI order; the other threads only evaluate the
+//! alignment call for indexes the owner has not reached, which depends on the index
+//! alone. A value nobody takes is dropped. This changes which thread computes a value and
+//! when, and nothing else. Shadow mode (LOSAT_X_AHEADSHADOW) recomputes every value the
+//! owner takes and compares it.
 
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3850,3918-3919,4045-4046
+/// ```c
+///    for (index=0; index<init_hitlist->total; index++)
+/// ...
+///       if (!BlastIntervalTreeContainsHSP(tree, &tmp_hsp, query_info,
+///                                         hit_options->min_diag_separation))
+/// ...
+///          status = s_BlastDynProgNtGappedAlignment(&query_tmp, subject,
+///                       gap_align, score_params, init_hsp);
+/// ```
+/// Reads the LOSAT_X_AHEAD switch once: the number of upcoming indexes of the loop above
+/// that may be evaluated ahead. Placement of work only.
 /// Look-ahead distance in indexes; `None` when the switch is off.
 pub(crate) fn window() -> Option<usize> {
     static WINDOW: OnceLock<Option<usize>> = OnceLock::new();
@@ -44,6 +91,8 @@ pub(crate) fn window() -> Option<usize> {
     })
 }
 
+/// No NCBI counterpart: reads the switch of the shadow comparison; it does not change any
+/// value NCBI computes.
 /// `LOSAT_X_AHEADSHADOW`: the owner evaluates every value it takes once more
 /// on its own scratch and compares.
 pub(crate) fn shadow() -> bool {
@@ -51,6 +100,8 @@ pub(crate) fn shadow() -> bool {
     *SHADOW.get_or_init(|| std::env::var_os("LOSAT_X_AHEADSHADOW").is_some())
 }
 
+// No NCBI counterpart: the states of one slot of the look-ahead ring; the slot holds a
+// value that NCBI computes inside its loop, computed earlier.
 enum State<R> {
     /// Not offered to the helpers, or withdrawn by the owner.
     Closed,
@@ -67,9 +118,24 @@ struct Cell<R> {
     state: State<R>,
 }
 
+// No NCBI counterpart: cache-line padding against false sharing; it does not change any
+// value NCBI computes.
 #[repr(align(128))]
 struct Padded<T>(T);
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3850,3918-3919,4045-4046
+// ```c
+//    for (index=0; index<init_hitlist->total; index++)
+// ...
+//       if (!BlastIntervalTreeContainsHSP(tree, &tmp_hsp, query_info,
+//                                         hit_options->min_diag_separation))
+// ...
+//          status = s_BlastDynProgNtGappedAlignment(&query_tmp, subject,
+//                       gap_align, score_params, init_hsp);
+// ```
+// One slot per upcoming index of this loop (and of the loop of `Blast_TracebackFromHSPList`).
+// A slot holds the value of the alignment call for that index. The loop itself and its tree
+// operations stay on the owner thread.
 pub(crate) struct Ahead<R> {
     /// Ring indexed by `index % window`; the tag says which index a cell is for.
     cells: Box<[Mutex<Cell<R>>]>,
@@ -84,6 +150,8 @@ pub(crate) struct Ahead<R> {
 
 /// Puts an index back to `Open` if its evaluation unwinds, so that the owner
 /// evaluates it itself (and meets the same panic) instead of waiting forever.
+// No NCBI counterpart: puts a slot back on offer if its evaluation panics, so that the
+// owner evaluates it itself; it does not change any value NCBI computes.
 struct Reopen<'a, R> {
     cell: &'a Mutex<Cell<R>>,
     index: usize,
@@ -101,6 +169,8 @@ impl<R> Drop for Reopen<'_, R> {
     }
 }
 
+// No NCBI counterpart: a mutex lock that ignores poisoning; it does not change any value
+// NCBI computes.
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     // No lock is held while user code runs, so poisoning carries no meaning.
     mutex
@@ -109,6 +179,8 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 impl<R> Ahead<R> {
+    // No NCBI counterpart: makes an empty ring of `window` slots; it does not change any value
+    // NCBI computes.
     pub(crate) fn new(window: usize) -> Self {
         let window = window.max(2);
         Self {
@@ -132,6 +204,15 @@ impl<R> Ahead<R> {
         &self.cells[index % self.cells.len()]
     }
 
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3850,3878
+    /// ```c
+    ///    for (index=0; index<init_hitlist->total; index++)
+    /// ...
+    ///      if (index < redo_index && query_index != redo_query) {
+    /// ```
+    /// The owner offers the indexes after the one it is at, in the order of the NCBI loop.
+    /// `wanted` is the owner's guess whether an index will reach the alignment call; a wrong
+    /// guess costs time only, because the owner decides for each index itself.
     /// Owner, at index `at`: offer the indexes of `[at, at + window)` below
     /// `len` that have not been offered yet. `wanted(j)` is the owner's guess,
     /// with what it knows now, whether index `j` will need its value.
@@ -151,6 +232,8 @@ impl<R> Ahead<R> {
         }
     }
 
+    // No NCBI counterpart: a helper takes the next offered index; which thread evaluates an
+    // index does not change its value.
     fn claim(&self) -> Option<usize> {
         let mut next = self.cursor.0.load(Ordering::Relaxed);
         loop {
@@ -169,6 +252,8 @@ impl<R> Ahead<R> {
         }
     }
 
+    /// No NCBI counterpart: runs the alignment call of the NCBI loop for an index ahead of the
+    /// owner. The call depends on the index alone, so the value is the one the owner would get.
     /// Evaluates `index` if it is still on offer.
     fn evaluate<S>(&self, index: usize, scratch: &mut S, compute: &impl Fn(usize, &mut S) -> R) {
         let cell = self.cell(index);
@@ -194,6 +279,8 @@ impl<R> Ahead<R> {
         }
     }
 
+    /// No NCBI counterpart: the helper loop (scheduling of independent work); it does not
+    /// change any value NCBI computes.
     /// Helper thread: evaluate offered indexes until the owner is done.
     pub(crate) fn work<S>(&self, scratch: &mut S, compute: &impl Fn(usize, &mut S) -> R) {
         let mut idle = 0u32;
@@ -215,6 +302,13 @@ impl<R> Ahead<R> {
         }
     }
 
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3918-3919
+    /// ```c
+    ///       if (!BlastIntervalTreeContainsHSP(tree, &tmp_hsp, query_info,
+    ///                                         hit_options->min_diag_separation))
+    /// ```
+    /// The tree test said "contained", so NCBI does not call the aligner for this index. The
+    /// owner withdraws the index from the helpers.
     /// Owner: index `index` does not need its value.
     pub(crate) fn skip(&self, index: usize) {
         let mut cell = lock(self.cell(index));
@@ -223,6 +317,18 @@ impl<R> Ahead<R> {
         }
     }
 
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3918-3921,4045-4046
+    /// ```c
+    ///       if (!BlastIntervalTreeContainsHSP(tree, &tmp_hsp, query_info,
+    ///                                         hit_options->min_diag_separation))
+    ///       {
+    /// ...
+    ///          status = s_BlastDynProgNtGappedAlignment(&query_tmp, subject,
+    ///                       gap_align, score_params, init_hsp);
+    /// ```
+    /// Called by the owner at the point where NCBI calls the aligner, after the tree test has
+    /// said "not contained". The owner uses a helper's value for this index, or computes it
+    /// itself.
     /// Owner: the value of `index` if a helper has produced it or is producing
     /// it. `None` means nobody has started; the owner then evaluates it itself.
     pub(crate) fn take<S>(
@@ -266,10 +372,14 @@ impl<R> Ahead<R> {
         }
     }
 
+    // No NCBI counterpart: tells the helpers that the loop has ended; it does not change any
+    // value NCBI computes.
     fn finish(&self) {
         self.finished.store(true, Ordering::Release);
     }
 
+    /// No NCBI counterpart: counters for LOSAT_X_STATS; they do not change any value NCBI
+    /// computes.
     /// (values evaluated ahead of the owner, values the owner took)
     pub(crate) fn counts(&self) -> (u64, u64) {
         (
@@ -279,6 +389,7 @@ impl<R> Ahead<R> {
     }
 }
 
+// No NCBI counterpart: ends the helpers when the loop exits, also on a panic.
 struct Finish<'a, R>(&'a Ahead<R>);
 
 impl<R> Drop for Finish<'_, R> {
@@ -287,6 +398,18 @@ impl<R> Drop for Finish<'_, R> {
     }
 }
 
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3850,3918-3919,4087-4088
+/// ```c
+///    for (index=0; index<init_hitlist->total; index++)
+/// ...
+///       if (!BlastIntervalTreeContainsHSP(tree, &tmp_hsp, query_info,
+///                                         hit_options->min_diag_separation))
+/// ...
+///             status = BlastIntervalTreeAddHSP(new_hsp, tree, query_info,
+///                                     eQueryAndSubject);
+/// ```
+/// `body` is this loop, run in the NCBI order on the calling thread. The other threads of
+/// the pool only evaluate values ahead; they never touch the tree or the result list.
 /// Runs `body` (the ordered loop) on this thread while one helper per scratch
 /// runs on the other threads of the pool this thread belongs to. Without a
 /// pool, or with `ahead == None`, this is just `body()`.
@@ -326,6 +449,14 @@ where
 mod tests {
     use super::*;
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3850,3918-3919
+    // ```c
+    //    for (index=0; index<init_hitlist->total; index++)
+    // ...
+    //       if (!BlastIntervalTreeContainsHSP(tree, &tmp_hsp, query_info,
+    // ```
+    // The tests below run a stand-in for this ordered loop: a value that depends on the
+    // index alone, consumed in order.
     // The owner's result must not depend on what the helpers do.
     fn value_of(index: usize) -> u64 {
         let mut x = index as u64 ^ 0x9E37_79B9_7F4A_7C15;

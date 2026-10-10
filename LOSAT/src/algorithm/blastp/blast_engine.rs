@@ -7477,6 +7477,17 @@ fn run_resolved_in_pool(
             // for (b = 0; b < numMatches; ++b) {
             // ```
             let pool = blastp_parallel_pool;
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1635-1636,3448-3449
+            // ```c
+            //                 status = s_DoSegSequenceData(seqData, eBlastTypeBlastp,
+            //                                              subject_maybe_biased);
+            // ...
+            // #pragma omp for schedule(static)
+            //         for (b = 0; b < numMatches; ++b) {
+            // ```
+            // Dispatch point: NCBI SEGs the subject range inside the per-match loop (omp for over
+            // matches). Here the masked ranges are kept in one store for all queries, as the serial
+            // redo already does. Reuse of an identical result only.
             // EXPERIMENT (LOSAT_X_SEGSHARE): one store of masked subject
             // ranges for all queries, as in the serial redo below.
             let x_shared_ranges = (crate::algorithm::blastp::kappa::x_seg_share() != 0).then(|| {

@@ -932,6 +932,8 @@ pub fn extend_hit_ungapped(
     );
 
     // Debug coordinate tracking
+    // No NCBI counterpart: LOSAT_DEBUG_COORDS only prints a debug line; LOSAT_X_ENVCACHE only
+    // reads the variable once; it does not change any value NCBI computes.
     if crate::utils::xenv::debug_coords_is_ok() {
         eprintln!(
             "[UNGAPPED] q_pos={}, s_pos={}, best_i={}, best_j={} -> q=[{}, {}), s=[{}, {}), score={}",

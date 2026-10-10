@@ -1,5 +1,8 @@
 //! EXPERIMENT (`xstats` feature): global work counters, printed by `main`
 //! when LOSAT_X_STATS is set.
+//!
+//! No NCBI counterpart: these counters count calls, rows and cells of the ported code and print
+//! them on request; they do not change any value NCBI computes.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 

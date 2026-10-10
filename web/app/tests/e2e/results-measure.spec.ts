@@ -48,6 +48,19 @@
 // by the test from before the act to Playwright's download event, is an upper bound), and removing
 // all of them.
 //
+// Since W6 (S15: "書き出しとセッションは、この規模で画面を止めない"), each measurement then ends with the
+// files of its runs, after the records above (which keep their names and order): from the Outputs
+// tab, one at a time, CSV, JSON (aligned rows on) and the report of the whole run (the scope that
+// holds every HSP; no view filter is set), and the export of the stored outfmt 6; for `pair` also
+// the dot plot as SVG; and last the session file: the tray filled again (`queries`: the HSPs of the
+// first query with 200 subjects; `pair`: every HSP of the largest pair measured), "Save session",
+// then the measured page closed and the file opened in a new page of the same browser. Each file
+// records its size, the time from the act until the screen shows its summary or message (`ms`,
+// `paintMs`; the outfmt 6 export and the SVG show none), the time until Playwright's download event
+// (`downloadMs`, taken by the test: an upper bound), and the frames that the page drew meanwhile with
+// the longest time between two of them (`maxFrameGapMs`): the page stays responsive while a large
+// file is written or read, whatever the file's total time.
+//
 // Times are milliseconds, taken in the page with `performance.now()` from the action to the first
 // animation frame in which the screen shows the result (`ms`) and to the frame after it
 // (`paintMs`); the resolution is a frame (about 17 ms). The canvases (the dot plot, the Graphic
@@ -58,7 +71,7 @@
 // Playwright's mouse or keyboard (selecting an HSP by `n` or by a click on the dot plot) starts its
 // clock at the event in the page, and the clock stops at the first frame that shows the result
 // after the test starts looking, so these times include Playwright's round trip (upper bounds).
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { expect, test, type CDPSession, type Page } from '@playwright/test';
@@ -670,6 +683,36 @@ for (const count of COUNTS) {
         tray['error'] = message(error);
         console.log(`${browserName} ${count} queries: tray FAILED ${message(error)}`);
       }
+      save();
+
+      // The run's files and the session file (W6), after the records above.
+      const files: Record<string, unknown> = {};
+      record['files'] = files;
+      try {
+        await page.getByTestId('run-1-open').click();
+        await expect(page.getByTestId('results-hits')).toHaveAttribute('data-run', '1', { timeout: 120_000 });
+        Object.assign(files, await runFilesOf(page, 1));
+        console.log(`${browserName} ${count} queries: files ${JSON.stringify(files)}`);
+      } catch (error) {
+        files['error'] = message(error);
+        console.log(`${browserName} ${count} queries: files FAILED ${message(error)}`);
+      }
+      save();
+      const sessionFile: Record<string, unknown> = {};
+      record['session'] = sessionFile;
+      try {
+        // The tray: the HSPs of the first query with 200 subjects.
+        await page.getByTestId('tab-results').click();
+        await wideQuery(page, count);
+        await page.getByTestId('descriptions-select-all').check();
+        await page.getByTestId('descriptions-add-candidates').click();
+        await expect(page.getByTestId('tab-candidates-count')).toHaveText(/^[1-9][\d,]*$/);
+        await sessionRoundTrip(page, sessionFile);
+        console.log(`${browserName} ${count} queries: session ${JSON.stringify(sessionFile)}`);
+      } catch (error) {
+        sessionFile['error'] = message(error);
+        console.log(`${browserName} ${count} queries: session FAILED ${message(error)}`);
+      }
     } catch (error) {
       record['error'] = message(error);
       console.log(`${browserName} ${count} queries: FAILED ${message(error)}`);
@@ -840,6 +883,155 @@ async function pairTrayRepetition(page: Page): Promise<PairTrayRepetition> {
     { testid: 'alignments-add-subject', text: '^\\s*All matches in candidates\\s*$' },
   ]);
   return { addAll: rounded(addAll), ...(await trayOperations(page, hsps)) };
+}
+
+// --- the run's files and the session file (W6) ------------------------------------------------------
+
+/** A large file is written or read within this time, or the measurement of it fails. */
+const FILE_TIMEOUT_MS = 1_800_000;
+
+interface Frames {
+  /** Frames drawn from the act until the file arrived, and the longest time between two of them. */
+  readonly frames: number;
+  readonly maxFrameGapMs: number;
+}
+
+/** Starts counting the frames that the page draws and the longest gap between two of them (a long task shows as a long gap). */
+async function watchFrames(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const frames = { on: true, count: 0, maxGap: 0, last: performance.now() };
+    (window as unknown as { __frames: typeof frames }).__frames = frames;
+    const tick = (now: number) => {
+      if (!frames.on) return;
+      frames.maxGap = Math.max(frames.maxGap, now - frames.last);
+      frames.last = now;
+      frames.count++;
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
+}
+
+async function framesSeen(page: Page): Promise<Frames> {
+  return page.evaluate(() => {
+    const frames = (window as unknown as { __frames: { on: boolean; count: number; maxGap: number; last: number } }).__frames;
+    frames.on = false;
+    return { frames: frames.count, maxFrameGapMs: Math.round(Math.max(frames.maxGap, performance.now() - frames.last)) };
+  });
+}
+
+interface FileRecord extends Frames {
+  readonly name: string;
+  readonly bytes: number;
+  /** From the act until the summary or message shows (none for the outfmt 6 export and the SVG). */
+  readonly ms?: number;
+  readonly paintMs?: number;
+  /** From before the act until Playwright's download event, taken by the test: an upper bound. */
+  readonly downloadMs: number;
+}
+
+/**
+ * Clicks a button that saves a file and waits until the screen shows `until` (none: the download
+ * only) and the file has arrived. A summary element `marker` that an earlier file left is marked,
+ * so that the clock waits for the new one. The file is deleted, or kept at `keep`.
+ */
+async function timedFile(page: Page, testid: string, until: readonly Cond[], marker?: string, keep?: string): Promise<FileRecord> {
+  if (marker !== undefined) await page.evaluate((id) => document.querySelector(`[data-testid="${id}"]`)?.setAttribute('data-measured', 'before'), marker);
+  await quiet(page);
+  const arrival = page.waitForEvent('download', { timeout: FILE_TIMEOUT_MS }).then((download) => ({ download, at: Date.now() }));
+  await watchFrames(page);
+  const t0 = Date.now();
+  let timing: Timing | undefined;
+  if (until.length > 0) timing = rounded(await step(page, { kind: 'click', testid }, until, FILE_TIMEOUT_MS));
+  else await page.evaluate((id) => (document.querySelector(`[data-testid="${id}"]`) as HTMLElement).click(), testid);
+  const { download, at } = await arrival;
+  const path = await download.path();
+  const frames = await framesSeen(page);
+  const name = download.suggestedFilename();
+  const bytes = statSync(path).size;
+  if (keep !== undefined) await download.saveAs(keep);
+  await download.delete();
+  return { name, bytes, ...(timing ?? {}), downloadMs: at - t0, ...frames };
+}
+
+/** The run's own files of the whole run and its outfmt 6 export, from the Outputs tab of run `number` (shown), one at a time. */
+async function runFilesOf(page: Page, number: number): Promise<Record<string, unknown>> {
+  await page.getByTestId('tab-results').click();
+  await expect(page.getByTestId('results-hits')).toHaveAttribute('data-run', String(number));
+  const shown = Date.now();
+  await page.getByTestId('results-view-outputs').click();
+  await expect(page.getByTestId('result-output')).toHaveAttribute('data-shown', `${number}:6`, { timeout: FILE_TIMEOUT_MS });
+  const outputsShownMs = Date.now() - shown;
+  const hsps = Number(await page.getByTestId('export-scope-all').getAttribute('data-count'));
+  await expect(page.getByTestId('export-scope-all')).toBeChecked();
+  await expect(page.getByTestId('export-json-aligned')).toBeChecked();
+  const files: Record<string, unknown> = {
+    scope: 'all',
+    hsps,
+    filteredHsps: Number(await page.getByTestId('export-scope-filtered').getAttribute('data-count')),
+    outputsShownMs,
+  };
+  for (const format of ['csv', 'json', 'report'] as const) {
+    files[format] = await timedFile(
+      page,
+      `export-${format}`,
+      [
+        { testid: 'export-summary', attr: 'data-measured', differs: 'before' },
+        { testid: 'export-summary', attr: 'data-format', equals: format },
+        { testid: 'export-summary', attr: 'data-hsps', equals: String(hsps) },
+      ],
+      'export-summary',
+    );
+    note(`run ${number}: ${format} ${JSON.stringify(files[format])}`);
+  }
+  files['outfmt6'] = await timedFile(page, 'export-output', []);
+  return files;
+}
+
+/** The dot plot of the pair shown, saved as SVG (the whole plot, every HSP). */
+async function dotPlotSvg(page: Page): Promise<FileRecord & { segments: number }> {
+  await page.getByTestId('pane-dotplot').click();
+  const hsps = Number(await page.getByTestId('hsp-list').getAttribute('data-count'));
+  await expect(page.getByTestId('dotplot-canvas')).toHaveAttribute('data-segments', String(hsps), { timeout: 120_000 });
+  const file = await timedFile(page, 'dotplot-svg', []);
+  await expect(page.getByTestId('dotplot-svg-error')).toHaveCount(0);
+  return { ...file, segments: hsps };
+}
+
+/**
+ * Saves the session file of the page's completed runs with the tray's candidates, closes the
+ * page, and opens the file in a new page of the same browser (a new working session).
+ */
+async function sessionRoundTrip(page: Page, into: Record<string, unknown>): Promise<void> {
+  into['candidates'] = Number((await page.getByTestId('tab-candidates-count').textContent())!.replace(/,/g, ''));
+  into['runs'] = await page.getByTestId('queue').locator('li[data-status="completed"]').count();
+  await expect(page.getByTestId('session-include-candidates')).toBeChecked();
+  const kept = join(test.info().outputPath('session'), 'measured.losat-session.gz');
+  mkdirSync(join(kept, '..'), { recursive: true });
+  into['save'] = await timedFile(page, 'session-save', [{ testid: 'session-message', text: '^Saved ' }], undefined, kept);
+  into['saveMessage'] = await page.getByTestId('session-message').textContent();
+  save();
+  const context = page.context();
+  await page.close();
+  const fresh = await context.newPage();
+  try {
+    await fresh.goto('/');
+    await expect(fresh.getByTestId('storage-status')).toBeVisible();
+    await quiet(fresh);
+    await arm(fresh, 'session-file', 'change');
+    await watchFrames(fresh);
+    await fresh.getByTestId('session-file').setInputFiles(kept);
+    const open = await step(fresh, { kind: 'armed' }, [{ testid: 'session-message', text: '^(Opened |.* was not opened)' }], FILE_TIMEOUT_MS);
+    const frames = await framesSeen(fresh);
+    const text = (await fresh.getByTestId('session-message').textContent())!.trim();
+    into['open'] = { ...rounded(open), ...frames };
+    into['openMessage'] = text;
+    if (!text.startsWith('Opened ')) throw new Error(text);
+    into['openedRuns'] = await fresh.getByTestId('queue').locator('li[data-status="completed"]').count();
+    into['openedCandidates'] = Number((await fresh.getByTestId('tab-candidates-count').textContent())!.replace(/,/g, ''));
+  } finally {
+    await fresh.close();
+  }
 }
 
 // --- measurement 2: many HSPs in one query-subject pair ---------------------------------------------
@@ -1082,6 +1274,41 @@ test('many HSPs in one query-subject pair: the dot plot and the HSP list', async
     } catch (error) {
       tray['error'] = message(error);
       console.log(`${browserName} ${copies} copies: tray FAILED ${message(error)}`);
+    }
+    save();
+  }
+
+  // The files of each pair and its dot plot as SVG (W6), after the records above.
+  for (const { number: run, copies, record } of measured) {
+    const files: Record<string, unknown> = {};
+    record['files'] = files;
+    try {
+      await openPair(page, run);
+      Object.assign(files, await runFilesOf(page, run));
+      files['svg'] = await dotPlotSvg(page);
+      console.log(`${browserName} ${copies} copies: files ${JSON.stringify(files)}`);
+    } catch (error) {
+      files['error'] = message(error);
+      console.log(`${browserName} ${copies} copies: files FAILED ${message(error)}`);
+    }
+    save();
+  }
+
+  // The session file of the runs, with every HSP of the largest pair measured in the tray (W6).
+  const largest = measured.at(-1);
+  if (largest !== undefined) {
+    const session: Record<string, unknown> = {};
+    largest.record['session'] = session;
+    try {
+      await openPair(page, largest.number);
+      await expect(page.getByTestId('alignments-add-subject')).toHaveText('Add all matches to candidates');
+      await page.getByTestId('alignments-add-subject').click();
+      await expect(page.getByTestId('alignments-add-subject')).toHaveText(/All matches in candidates/, { timeout: 120_000 });
+      await sessionRoundTrip(page, session);
+      console.log(`${browserName} ${largest.copies} copies: session ${JSON.stringify(session)}`);
+    } catch (error) {
+      session['error'] = message(error);
+      console.log(`${browserName} ${largest.copies} copies: session FAILED ${message(error)}`);
     }
     save();
   }

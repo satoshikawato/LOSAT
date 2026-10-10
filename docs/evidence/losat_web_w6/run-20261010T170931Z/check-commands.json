@@ -1,0 +1,555 @@
+{
+  "ncbi": "2.17.0",
+  "formats": [
+    0,
+    6,
+    7
+  ],
+  "cases": [
+    {
+      "id": "blastn.default",
+      "program": "blastn",
+      "query": "query.fa",
+      "subject": "subject.fa",
+      "argv": [
+        "blastn",
+        "-query",
+        "query.fa",
+        "-subject",
+        "subject.fa"
+      ],
+      "refused": [],
+      "exceptions": [],
+      "commands": [
+        {
+          "format": 0,
+          "losat": "LOSAT blastn -query query.fa -subject subject.fa -outfmt 0",
+          "ncbi": "blastn -query query.fa -subject subject.fa -outfmt 0"
+        },
+        {
+          "format": 6,
+          "losat": "LOSAT blastn -query query.fa -subject subject.fa -outfmt 6",
+          "ncbi": "blastn -query query.fa -subject subject.fa -outfmt 6"
+        },
+        {
+          "format": 7,
+          "losat": "LOSAT blastn -query query.fa -subject subject.fa -outfmt 7",
+          "ncbi": "blastn -query query.fa -subject subject.fa -outfmt 7"
+        }
+      ]
+    },
+    {
+      "id": "blastn.options",
+      "program": "blastn",
+      "query": "multi query.fa",
+      "subject": "subject's.fa",
+      "argv": [
+        "blastn",
+        "-query",
+        "multi query.fa",
+        "-subject",
+        "subject's.fa",
+        "-task",
+        "blastn",
+        "-reward",
+        "1",
+        "-penalty",
+        "-2",
+        "-gapopen",
+        "2",
+        "-gapextend",
+        "1",
+        "-evalue",
+        "1e-5",
+        "-max_target_seqs",
+        "5",
+        "-max_hsps",
+        "2",
+        "-dust",
+        "no",
+        "-lcase_masking",
+        "-subject_besthit"
+      ],
+      "refused": [],
+      "exceptions": [],
+      "commands": [
+        {
+          "format": 0,
+          "losat": "LOSAT blastn -query 'multi query.fa' -subject 'subject'\\''s.fa' -task blastn -reward 1 -penalty -2 -gapopen 2 -gapextend 1 -evalue 1e-5 -max_target_seqs 5 -max_hsps 2 -dust no -lcase_masking -subject_besthit -outfmt 0",
+          "ncbi": "blastn -query 'multi query.fa' -subject 'subject'\\''s.fa' -task blastn -reward 1 -penalty -2 -gapopen 2 -gapextend 1 -evalue 1e-5 -max_target_seqs 5 -max_hsps 2 -dust no -lcase_masking -subject_besthit -outfmt 0"
+        },
+        {
+          "format": 6,
+          "losat": "LOSAT blastn -query 'multi query.fa' -subject 'subject'\\''s.fa' -task blastn -reward 1 -penalty -2 -gapopen 2 -gapextend 1 -evalue 1e-5 -max_target_seqs 5 -max_hsps 2 -dust no -lcase_masking -subject_besthit -outfmt 6",
+          "ncbi": "blastn -query 'multi query.fa' -subject 'subject'\\''s.fa' -task blastn -reward 1 -penalty -2 -gapopen 2 -gapextend 1 -evalue 1e-5 -max_target_seqs 5 -max_hsps 2 -dust no -lcase_masking -subject_besthit -outfmt 6"
+        },
+        {
+          "format": 7,
+          "losat": "LOSAT blastn -query 'multi query.fa' -subject 'subject'\\''s.fa' -task blastn -reward 1 -penalty -2 -gapopen 2 -gapextend 1 -evalue 1e-5 -max_target_seqs 5 -max_hsps 2 -dust no -lcase_masking -subject_besthit -outfmt 7",
+          "ncbi": "blastn -query 'multi query.fa' -subject 'subject'\\''s.fa' -task blastn -reward 1 -penalty -2 -gapopen 2 -gapextend 1 -evalue 1e-5 -max_target_seqs 5 -max_hsps 2 -dust no -lcase_masking -subject_besthit -outfmt 7"
+        }
+      ]
+    },
+    {
+      "id": "blastn.region",
+      "program": "blastn",
+      "query": "e2d_n_q.fa",
+      "subject": "combined_subject.fa",
+      "argv": [
+        "blastn",
+        "-query",
+        "e2d_n_q.fa",
+        "-subject",
+        "combined_subject.fa",
+        "-task",
+        "dc-megablast",
+        "-query_loc",
+        "1001-6000",
+        "-subject_loc",
+        "501-6600"
+      ],
+      "refused": [],
+      "exceptions": [],
+      "commands": [
+        {
+          "format": 0,
+          "losat": "LOSAT blastn -query e2d_n_q.fa -subject combined_subject.fa -task dc-megablast -query_loc 1001-6000 -subject_loc 501-6600 -outfmt 0",
+          "ncbi": "blastn -query e2d_n_q.fa -subject combined_subject.fa -task dc-megablast -query_loc 1001-6000 -subject_loc 501-6600 -outfmt 0"
+        },
+        {
+          "format": 6,
+          "losat": "LOSAT blastn -query e2d_n_q.fa -subject combined_subject.fa -task dc-megablast -query_loc 1001-6000 -subject_loc 501-6600 -outfmt 6",
+          "ncbi": "blastn -query e2d_n_q.fa -subject combined_subject.fa -task dc-megablast -query_loc 1001-6000 -subject_loc 501-6600 -outfmt 6"
+        },
+        {
+          "format": 7,
+          "losat": "LOSAT blastn -query e2d_n_q.fa -subject combined_subject.fa -task dc-megablast -query_loc 1001-6000 -subject_loc 501-6600 -outfmt 7",
+          "ncbi": "blastn -query e2d_n_q.fa -subject combined_subject.fa -task dc-megablast -query_loc 1001-6000 -subject_loc 501-6600 -outfmt 7"
+        }
+      ]
+    },
+    {
+      "id": "blastp.default",
+      "program": "blastp",
+      "query": "query.fa",
+      "subject": "subject.fa",
+      "argv": [
+        "blastp",
+        "-query",
+        "query.fa",
+        "-subject",
+        "subject.fa"
+      ],
+      "refused": [],
+      "exceptions": [],
+      "commands": [
+        {
+          "format": 0,
+          "losat": "LOSAT blastp -query query.fa -subject subject.fa -outfmt 0",
+          "ncbi": "blastp -query query.fa -subject subject.fa -outfmt 0"
+        },
+        {
+          "format": 6,
+          "losat": "LOSAT blastp -query query.fa -subject subject.fa -outfmt 6",
+          "ncbi": "blastp -query query.fa -subject subject.fa -outfmt 6"
+        },
+        {
+          "format": 7,
+          "losat": "LOSAT blastp -query query.fa -subject subject.fa -outfmt 7",
+          "ncbi": "blastp -query query.fa -subject subject.fa -outfmt 7"
+        }
+      ]
+    },
+    {
+      "id": "blastp.options",
+      "program": "blastp",
+      "query": "e2d_p_q.faa",
+      "subject": "subject.fa",
+      "argv": [
+        "blastp",
+        "-query",
+        "e2d_p_q.faa",
+        "-subject",
+        "subject.fa",
+        "-task",
+        "blastp-fast",
+        "-seg",
+        "yes",
+        "-threshold",
+        "12",
+        "-window_size",
+        "30",
+        "-max_hsps",
+        "1",
+        "-evalue",
+        "1e-3",
+        "-query_loc",
+        "100-400"
+      ],
+      "refused": [],
+      "exceptions": [],
+      "commands": [
+        {
+          "format": 0,
+          "losat": "LOSAT blastp -query e2d_p_q.faa -subject subject.fa -task blastp-fast -seg yes -threshold 12 -window_size 30 -max_hsps 1 -evalue 1e-3 -query_loc 100-400 -outfmt 0",
+          "ncbi": "blastp -query e2d_p_q.faa -subject subject.fa -task blastp-fast -seg yes -threshold 12 -window_size 30 -max_hsps 1 -evalue 1e-3 -query_loc 100-400 -outfmt 0"
+        },
+        {
+          "format": 6,
+          "losat": "LOSAT blastp -query e2d_p_q.faa -subject subject.fa -task blastp-fast -seg yes -threshold 12 -window_size 30 -max_hsps 1 -evalue 1e-3 -query_loc 100-400 -outfmt 6",
+          "ncbi": "blastp -query e2d_p_q.faa -subject subject.fa -task blastp-fast -seg yes -threshold 12 -window_size 30 -max_hsps 1 -evalue 1e-3 -query_loc 100-400 -outfmt 6"
+        },
+        {
+          "format": 7,
+          "losat": "LOSAT blastp -query e2d_p_q.faa -subject subject.fa -task blastp-fast -seg yes -threshold 12 -window_size 30 -max_hsps 1 -evalue 1e-3 -query_loc 100-400 -outfmt 7",
+          "ncbi": "blastp -query e2d_p_q.faa -subject subject.fa -task blastp-fast -seg yes -threshold 12 -window_size 30 -max_hsps 1 -evalue 1e-3 -query_loc 100-400 -outfmt 7"
+        }
+      ]
+    },
+    {
+      "id": "tblastn.default",
+      "program": "tblastn",
+      "query": "query.fa",
+      "subject": "subject.fa",
+      "argv": [
+        "tblastn",
+        "-query",
+        "query.fa",
+        "-subject",
+        "subject.fa"
+      ],
+      "refused": [],
+      "exceptions": [],
+      "commands": [
+        {
+          "format": 0,
+          "losat": "LOSAT tblastn -query query.fa -subject subject.fa -outfmt 0",
+          "ncbi": "tblastn -query query.fa -subject subject.fa -outfmt 0"
+        },
+        {
+          "format": 6,
+          "losat": "LOSAT tblastn -query query.fa -subject subject.fa -outfmt 6",
+          "ncbi": "tblastn -query query.fa -subject subject.fa -outfmt 6"
+        },
+        {
+          "format": 7,
+          "losat": "LOSAT tblastn -query query.fa -subject subject.fa -outfmt 7",
+          "ncbi": "tblastn -query query.fa -subject subject.fa -outfmt 7"
+        }
+      ]
+    },
+    {
+      "id": "tblastn.options",
+      "program": "tblastn",
+      "query": "e2d_t_pq.faa",
+      "subject": "e2d_t_ts.fa",
+      "argv": [
+        "tblastn",
+        "-query",
+        "e2d_t_pq.faa",
+        "-subject",
+        "e2d_t_ts.fa",
+        "-comp_based_stats",
+        "0",
+        "-seg",
+        "yes",
+        "-soft_masking",
+        "true",
+        "-lcase_masking",
+        "-xdrop_gap",
+        "20",
+        "-xdrop_gap_final",
+        "30",
+        "-sum_stats",
+        "false",
+        "-query_loc",
+        "20-400",
+        "-subject_loc",
+        "42-700"
+      ],
+      "refused": [],
+      "exceptions": [],
+      "commands": [
+        {
+          "format": 0,
+          "losat": "LOSAT tblastn -query e2d_t_pq.faa -subject e2d_t_ts.fa -comp_based_stats 0 -seg yes -soft_masking true -lcase_masking -xdrop_gap 20 -xdrop_gap_final 30 -sum_stats false -query_loc 20-400 -subject_loc 42-700 -outfmt 0",
+          "ncbi": "tblastn -query e2d_t_pq.faa -subject e2d_t_ts.fa -comp_based_stats 0 -seg yes -soft_masking true -lcase_masking -xdrop_gap 20 -xdrop_gap_final 30 -sum_stats false -query_loc 20-400 -subject_loc 42-700 -outfmt 0"
+        },
+        {
+          "format": 6,
+          "losat": "LOSAT tblastn -query e2d_t_pq.faa -subject e2d_t_ts.fa -comp_based_stats 0 -seg yes -soft_masking true -lcase_masking -xdrop_gap 20 -xdrop_gap_final 30 -sum_stats false -query_loc 20-400 -subject_loc 42-700 -outfmt 6",
+          "ncbi": "tblastn -query e2d_t_pq.faa -subject e2d_t_ts.fa -comp_based_stats 0 -seg yes -soft_masking true -lcase_masking -xdrop_gap 20 -xdrop_gap_final 30 -sum_stats false -query_loc 20-400 -subject_loc 42-700 -outfmt 6"
+        },
+        {
+          "format": 7,
+          "losat": "LOSAT tblastn -query e2d_t_pq.faa -subject e2d_t_ts.fa -comp_based_stats 0 -seg yes -soft_masking true -lcase_masking -xdrop_gap 20 -xdrop_gap_final 30 -sum_stats false -query_loc 20-400 -subject_loc 42-700 -outfmt 7",
+          "ncbi": "tblastn -query e2d_t_pq.faa -subject e2d_t_ts.fa -comp_based_stats 0 -seg yes -soft_masking true -lcase_masking -xdrop_gap 20 -xdrop_gap_final 30 -sum_stats false -query_loc 20-400 -subject_loc 42-700 -outfmt 7"
+        }
+      ]
+    },
+    {
+      "id": "tblastn.gencode4",
+      "program": "tblastn",
+      "query": "query.fa",
+      "subject": "subject.fa",
+      "argv": [
+        "tblastn",
+        "-query",
+        "query.fa",
+        "-subject",
+        "subject.fa",
+        "-db_gencode",
+        "4"
+      ],
+      "refused": [],
+      "exceptions": [
+        "Approved exception (PD-TLOSAN-LOCAL-GENCODE-32): LOSAT translates the local subjects with -db_gencode 4. NCBI BLAST+ treats -db_gencode differently for local -subject sequences, so its results can differ for this genetic code."
+      ],
+      "commands": [
+        {
+          "format": 0,
+          "losat": "LOSAT tblastn -query query.fa -subject subject.fa -db_gencode 4 -outfmt 0",
+          "ncbi": "tblastn -query query.fa -subject subject.fa -db_gencode 4 -outfmt 0"
+        },
+        {
+          "format": 6,
+          "losat": "LOSAT tblastn -query query.fa -subject subject.fa -db_gencode 4 -outfmt 6",
+          "ncbi": "tblastn -query query.fa -subject subject.fa -db_gencode 4 -outfmt 6"
+        },
+        {
+          "format": 7,
+          "losat": "LOSAT tblastn -query query.fa -subject subject.fa -db_gencode 4 -outfmt 7",
+          "ncbi": "tblastn -query query.fa -subject subject.fa -db_gencode 4 -outfmt 7"
+        }
+      ]
+    },
+    {
+      "id": "tblastn.gencode32",
+      "program": "tblastn",
+      "query": "query.fa",
+      "subject": "subject.fa",
+      "argv": [
+        "tblastn",
+        "-query",
+        "query.fa",
+        "-subject",
+        "subject.fa",
+        "-db_gencode",
+        "32"
+      ],
+      "refused": [
+        "NCBI BLAST+ 2.17.0 does not accept -db_gencode 32: its command line takes the genetic codes 1-6, 9-16, 21-31 and 33. LOSAT searched with it (PD-TLOSAN-LOCAL-GENCODE-32), so there is no NCBI command to compare with."
+      ],
+      "exceptions": [
+        "Approved exception (PD-TLOSAN-LOCAL-GENCODE-32): LOSAT translates the local subjects with -db_gencode 32. NCBI BLAST+ treats -db_gencode differently for local -subject sequences, so its results can differ for this genetic code."
+      ],
+      "commands": [
+        {
+          "format": 0,
+          "losat": "LOSAT tblastn -query query.fa -subject subject.fa -db_gencode 32 -outfmt 0",
+          "ncbi": "tblastn -query query.fa -subject subject.fa -db_gencode 32 -outfmt 0"
+        },
+        {
+          "format": 6,
+          "losat": "LOSAT tblastn -query query.fa -subject subject.fa -db_gencode 32 -outfmt 6",
+          "ncbi": "tblastn -query query.fa -subject subject.fa -db_gencode 32 -outfmt 6"
+        },
+        {
+          "format": 7,
+          "losat": "LOSAT tblastn -query query.fa -subject subject.fa -db_gencode 32 -outfmt 7",
+          "ncbi": "tblastn -query query.fa -subject subject.fa -db_gencode 32 -outfmt 7"
+        }
+      ]
+    },
+    {
+      "id": "tblastx.default",
+      "program": "tblastx",
+      "query": "query.fa",
+      "subject": "subject.fa",
+      "argv": [
+        "tblastx",
+        "-query",
+        "query.fa",
+        "-subject",
+        "subject.fa"
+      ],
+      "refused": [],
+      "exceptions": [],
+      "commands": [
+        {
+          "format": 0,
+          "losat": "LOSAT tblastx -query query.fa -subject subject.fa -outfmt 0",
+          "ncbi": "tblastx -query query.fa -subject subject.fa -outfmt 0"
+        },
+        {
+          "format": 6,
+          "losat": "LOSAT tblastx -query query.fa -subject subject.fa -outfmt 6",
+          "ncbi": "tblastx -query query.fa -subject subject.fa -outfmt 6"
+        },
+        {
+          "format": 7,
+          "losat": "LOSAT tblastx -query query.fa -subject subject.fa -outfmt 7",
+          "ncbi": "tblastx -query query.fa -subject subject.fa -outfmt 7"
+        }
+      ]
+    },
+    {
+      "id": "tblastx.options",
+      "program": "tblastx",
+      "query": "e2d_x_q.fa",
+      "subject": "e2d_t_ts.fa",
+      "argv": [
+        "tblastx",
+        "-query",
+        "e2d_x_q.fa",
+        "-subject",
+        "e2d_t_ts.fa",
+        "-query_gencode",
+        "2",
+        "-max_target_seqs",
+        "2",
+        "-culling_limit",
+        "1",
+        "-seg",
+        "no",
+        "-threshold",
+        "14",
+        "-window_size",
+        "30",
+        "-evalue",
+        "0.01",
+        "-query_loc",
+        "30-5000",
+        "-subject_loc",
+        "42-700"
+      ],
+      "refused": [],
+      "exceptions": [],
+      "commands": [
+        {
+          "format": 0,
+          "losat": "LOSAT tblastx -query e2d_x_q.fa -subject e2d_t_ts.fa -query_gencode 2 -max_target_seqs 2 -culling_limit 1 -seg no -threshold 14 -window_size 30 -evalue 0.01 -query_loc 30-5000 -subject_loc 42-700 -outfmt 0",
+          "ncbi": "tblastx -query e2d_x_q.fa -subject e2d_t_ts.fa -query_gencode 2 -max_target_seqs 2 -culling_limit 1 -seg no -threshold 14 -window_size 30 -evalue 0.01 -query_loc 30-5000 -subject_loc 42-700 -outfmt 0"
+        },
+        {
+          "format": 6,
+          "losat": "LOSAT tblastx -query e2d_x_q.fa -subject e2d_t_ts.fa -query_gencode 2 -max_target_seqs 2 -culling_limit 1 -seg no -threshold 14 -window_size 30 -evalue 0.01 -query_loc 30-5000 -subject_loc 42-700 -outfmt 6",
+          "ncbi": "tblastx -query e2d_x_q.fa -subject e2d_t_ts.fa -query_gencode 2 -max_target_seqs 2 -culling_limit 1 -seg no -threshold 14 -window_size 30 -evalue 0.01 -query_loc 30-5000 -subject_loc 42-700 -outfmt 6"
+        },
+        {
+          "format": 7,
+          "losat": "LOSAT tblastx -query e2d_x_q.fa -subject e2d_t_ts.fa -query_gencode 2 -max_target_seqs 2 -culling_limit 1 -seg no -threshold 14 -window_size 30 -evalue 0.01 -query_loc 30-5000 -subject_loc 42-700 -outfmt 7",
+          "ncbi": "tblastx -query e2d_x_q.fa -subject e2d_t_ts.fa -query_gencode 2 -max_target_seqs 2 -culling_limit 1 -seg no -threshold 14 -window_size 30 -evalue 0.01 -query_loc 30-5000 -subject_loc 42-700 -outfmt 7"
+        }
+      ]
+    },
+    {
+      "id": "tblastx.gencode5",
+      "program": "tblastx",
+      "query": "query.fa",
+      "subject": "subject.fa",
+      "argv": [
+        "tblastx",
+        "-query",
+        "query.fa",
+        "-subject",
+        "subject.fa",
+        "-db_gencode",
+        "5"
+      ],
+      "refused": [],
+      "exceptions": [
+        "Approved exception: LOSAT translates the local subjects with -db_gencode 5. NCBI BLAST+ treats -db_gencode differently for local -subject sequences, so its results can differ for this genetic code."
+      ],
+      "commands": [
+        {
+          "format": 0,
+          "losat": "LOSAT tblastx -query query.fa -subject subject.fa -db_gencode 5 -outfmt 0",
+          "ncbi": "tblastx -query query.fa -subject subject.fa -db_gencode 5 -outfmt 0"
+        },
+        {
+          "format": 6,
+          "losat": "LOSAT tblastx -query query.fa -subject subject.fa -db_gencode 5 -outfmt 6",
+          "ncbi": "tblastx -query query.fa -subject subject.fa -db_gencode 5 -outfmt 6"
+        },
+        {
+          "format": 7,
+          "losat": "LOSAT tblastx -query query.fa -subject subject.fa -db_gencode 5 -outfmt 7",
+          "ncbi": "tblastx -query query.fa -subject subject.fa -db_gencode 5 -outfmt 7"
+        }
+      ]
+    },
+    {
+      "id": "blastx.default",
+      "program": "blastx",
+      "query": "query.fa",
+      "subject": "subject.fa",
+      "argv": [
+        "blastx",
+        "-query",
+        "query.fa",
+        "-subject",
+        "subject.fa"
+      ],
+      "refused": [],
+      "exceptions": [],
+      "commands": [
+        {
+          "format": 0,
+          "losat": "LOSAT blastx -query query.fa -subject subject.fa -outfmt 0",
+          "ncbi": "blastx -query query.fa -subject subject.fa -outfmt 0"
+        },
+        {
+          "format": 6,
+          "losat": "LOSAT blastx -query query.fa -subject subject.fa -outfmt 6",
+          "ncbi": "blastx -query query.fa -subject subject.fa -outfmt 6"
+        },
+        {
+          "format": 7,
+          "losat": "LOSAT blastx -query query.fa -subject subject.fa -outfmt 7",
+          "ncbi": "blastx -query query.fa -subject subject.fa -outfmt 7"
+        }
+      ]
+    },
+    {
+      "id": "blastx.options",
+      "program": "blastx",
+      "query": "query.fa",
+      "subject": "subject.fa",
+      "argv": [
+        "blastx",
+        "-query",
+        "query.fa",
+        "-subject",
+        "subject.fa",
+        "-evalue",
+        "1e-5",
+        "-query_gencode",
+        "11",
+        "-max_target_seqs",
+        "3",
+        "-seg",
+        "no"
+      ],
+      "refused": [],
+      "exceptions": [],
+      "commands": [
+        {
+          "format": 0,
+          "losat": "LOSAT blastx -query query.fa -subject subject.fa -evalue 1e-5 -query_gencode 11 -max_target_seqs 3 -seg no -outfmt 0",
+          "ncbi": "blastx -query query.fa -subject subject.fa -evalue 1e-5 -query_gencode 11 -max_target_seqs 3 -seg no -outfmt 0"
+        },
+        {
+          "format": 6,
+          "losat": "LOSAT blastx -query query.fa -subject subject.fa -evalue 1e-5 -query_gencode 11 -max_target_seqs 3 -seg no -outfmt 6",
+          "ncbi": "blastx -query query.fa -subject subject.fa -evalue 1e-5 -query_gencode 11 -max_target_seqs 3 -seg no -outfmt 6"
+        },
+        {
+          "format": 7,
+          "losat": "LOSAT blastx -query query.fa -subject subject.fa -evalue 1e-5 -query_gencode 11 -max_target_seqs 3 -seg no -outfmt 7",
+          "ncbi": "blastx -query query.fa -subject subject.fa -evalue 1e-5 -query_gencode 11 -max_target_seqs 3 -seg no -outfmt 7"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,31 @@
+[WebServer] (!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+[WebServer]   - import "./output-format" without a file extension (src/domain/verification.ts:9:35). Add the file extension
+[WebServer]   - import "./programs" without a file extension (src/domain/verification.ts:10:32). Add the file extension
+[WebServer] Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+[WebServer] (!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+[WebServer]   - import "./output-format" without a file extension (src/domain/verification.ts:9:35). Add the file extension
+[WebServer]   - import "./programs" without a file extension (src/domain/verification.ts:10:32). Add the file extension
+[WebServer] Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+
+Running 18 tests using 2 workers
+
+  ✓   1 [chromium] › tests/e2e/screens.spec.ts:58:3 › search screen at the phone size (10.2s)
+  ✓   2 [chromium] › tests/e2e/screens.spec.ts:58:3 › search screen at the desktop size (10.7s)
+  ✓   4 [chromium] › tests/e2e/screens.spec.ts:256:3 › results screen at the phone size (30.2s)
+  ✓   3 [chromium] › tests/e2e/screens.spec.ts:256:3 › results screen at the desktop size (32.0s)
+  ✓   5 [chromium] › tests/e2e/screens.spec.ts:517:3 › outputs, reproduction and session files at the desktop size (10.4s)
+  ✓   6 [chromium] › tests/e2e/screens.spec.ts:517:3 › outputs, reproduction and session files at the phone size (9.7s)
+  ✓   7 [firefox] › tests/e2e/screens.spec.ts:58:3 › search screen at the desktop size (11.3s)
+  ✓   8 [firefox] › tests/e2e/screens.spec.ts:58:3 › search screen at the phone size (11.9s)
+  ✓  10 [firefox] › tests/e2e/screens.spec.ts:256:3 › results screen at the phone size (26.4s)
+  ✓   9 [firefox] › tests/e2e/screens.spec.ts:256:3 › results screen at the desktop size (27.8s)
+  ✓  12 [firefox] › tests/e2e/screens.spec.ts:517:3 › outputs, reproduction and session files at the phone size (11.1s)
+  ✓  11 [firefox] › tests/e2e/screens.spec.ts:517:3 › outputs, reproduction and session files at the desktop size (11.3s)
+  ✓  14 [webkit] › tests/e2e/screens.spec.ts:58:3 › search screen at the phone size (13.2s)
+  ✓  13 [webkit] › tests/e2e/screens.spec.ts:58:3 › search screen at the desktop size (14.6s)
+  ✓  16 [webkit] › tests/e2e/screens.spec.ts:256:3 › results screen at the phone size (28.5s)
+  ✓  15 [webkit] › tests/e2e/screens.spec.ts:256:3 › results screen at the desktop size (34.0s)
+  ✓  17 [webkit] › tests/e2e/screens.spec.ts:517:3 › outputs, reproduction and session files at the desktop size (14.7s)
+  ✓  18 [webkit] › tests/e2e/screens.spec.ts:517:3 › outputs, reproduction and session files at the phone size (12.0s)
+
+  18 passed (3.2m)

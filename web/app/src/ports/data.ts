@@ -3,6 +3,7 @@
 // (src/infra/data-worker), so every argument and result is structured-cloneable. The
 // outputs of a run arrive over the MessagePort that `openRun` returns
 // (ports/run-output.ts), not through these methods.
+import type { Interval } from '../domain/coordinates';
 import type { DatasetRevision, FastaParserKind, RecordKey } from '../domain/dataset';
 import type { HspTable } from '../domain/hsp-table';
 import type { OutputFormat } from '../domain/output-format';
@@ -15,6 +16,31 @@ export interface SourceRef {
   /** File name; pasted text arrives as a File named `query.fa` or `subject.fa` (plan §5.3). */
   readonly name: string;
   readonly size: number;
+}
+
+/** Where a record of a run input comes from (design §11.4): its source and its place in it. */
+export interface RecordOrigin {
+  readonly sourceId: string;
+  /** The source's file name (`query.fa` or `subject.fa` for pasted text). */
+  readonly sourceName: string;
+  readonly revisionId: string;
+  /** 0-based index of the record in its revision's record table (`DatasetRecord.index`). */
+  readonly recordIndex: number;
+  readonly id: string;
+  /** Residues, in the record's letters (nucleotides or amino acids). */
+  readonly length: number;
+  /** Lower-case hex SHA-256 of the record's original bytes. */
+  readonly sha256: string;
+}
+
+/** The residues of one record of a run input, read from its source File (`readResidues`). */
+export interface RecordResidues {
+  readonly origin: RecordOrigin;
+  /**
+   * One array per requested interval, in the order asked: the bytes of the source's residues,
+   * as the file has them (case kept, `U` kept); line ends, white space and comments left out.
+   */
+  readonly residues: readonly Uint8Array[];
 }
 
 /** The engine input of one role of a run. */
@@ -54,6 +80,16 @@ export interface DatasetStore {
   checkInput(program: ProgramId, role: InputRole, revisionIds: readonly string[]): Promise<InputCheck>;
   /** The first `maxBytes` bytes of a source, for its preview. */
   previewSource(sourceId: string, maxBytes: number): Promise<Uint8Array>;
+  /**
+   * The record at `position` (0-based) of the run input of the revisions, in the order of
+   * `buildRunInput` (the included records of each revision in turn), which is the order of the
+   * HSP records' `q_idx` and `s_idx`; and its residues in each interval (record coordinates,
+   * 1-based, both ends included, within the record, else RangeError). The residues are read
+   * from the source File in bounded ranges, under the rules of the reader kind that indexed it
+   * (domain/sequence-layout.ts). A whole-record interval is checked against the record table
+   * (its length and residue counts); a source that no longer matches it is refused.
+   */
+  readResidues(revisionIds: readonly string[], position: number, intervals: readonly Interval[]): Promise<RecordResidues>;
 }
 
 export interface ResultSetRef {
@@ -80,6 +116,12 @@ export interface RunStore {
   /** Bytes [start, end) of one output of a committed run (an HSP's row or section). */
   readOutputRange(runId: string, format: OutputFormat, start: number, end: number): Promise<Uint8Array>;
   readHits(runId: string): Promise<readonly HspRecord[]>;
+  /**
+   * The HSP records (with their aligned sequences) of a committed run whose `index` is one of
+   * `indices`, in the order asked. An index that the run does not have is a RangeError. Only
+   * these records cross to the caller; the Data worker parses what it needs.
+   */
+  readHspRecords(runId: string, indices: readonly number[]): Promise<readonly HspRecord[]>;
   /**
    * The HSP records of a committed run as columns, without the aligned sequences
    * (domain/hsp-table.ts). The Data worker builds it, so the records never cross to the

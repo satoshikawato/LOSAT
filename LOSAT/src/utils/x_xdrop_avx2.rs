@@ -105,15 +105,21 @@
 //!   (otherwise None). The carry to the next block is `max(carry - L*g, max(F_in[L-1] - g,
 //!   v[L-1]))`, the same value as the 128-bit kernel's `max(H - gap_open_extend, F - g)`.
 //! - Running best: the per-lane exclusive prefix maximum of the row, as in the 128-bit kernel.
-//! - The blocks of a row start at `first_b_index + 16k`, as in the 128-bit kernels (a 32-lane
-//!   step is two 16-lane steps), and a row stops at the same block, so every row processes the
-//!   same lanes, records the same traceback row and updates the band and the cell count in the
-//!   same way. The traceback walk is the 128-bit kernels' `finish`.
+//! - Band steps: the blocks of a row start at `first_b_index + 16k`, as in the 128-bit kernels,
+//!   and past the band (`b_size`) a row stops at the first such point where the row gap entering
+//!   the next block is below the threshold, or at the end of `B` (or the fence). A 32-lane step
+//!   is taken while more than 16 lanes of the band are left, so a row may run up to 16 lanes past
+//!   the point where the 128-bit kernel stops. Those lanes lie past the band with a row gap below
+//!   the threshold and nothing above it from the previous row, so they are dropped (H = 0, E
+//!   cleared right of the last survivor) and change nothing. The first and last survivors, hence
+//!   the band of the next row, the cell count, the best cell and the traceback rows the walk
+//!   reads are those of the 128-bit kernel. The traceback walk is the 128-bit kernels' `finish`.
 //!
-//! Less work per row than the 128-bit kernels: no word-by-word survivor bitmap (first and last
-//! survivor tracked while the row runs), vector clearing of the band's right edge, row tables of
-//! `Rows28` / `Flat` matrices built with vector instructions, and the row gap carried from block
-//! to block with two operations.
+//! Less work per row and per call than the 128-bit kernels: wider steps, first and last
+//! survivor tracked while the row runs (no survivor bitmap), the first lane's missing diagonal
+//! as a lane mask instead of a store under the next load, the column residues copied 32 at a
+//! time, row tables of `Rows28` / `Flat` matrices built with vector instructions, and the row
+//! gap carried from block to block with two operations.
 
 #![allow(clippy::too_many_arguments)]
 
@@ -138,6 +144,12 @@ static KB7X2: [u8; 32] = [
 static LANE_MASK16: [i16; 32] = [
     -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0,
+];
+/// `LANE_MASK8[32 - n..]` has the first `n` bytes set.
+static LANE_MASK8: [u8; 64] = [
+    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 ];
 /// `LANE_MASK8X[16 - n..]` has the first `n` bytes set.
 static LANE_MASK8X: [u8; 32] = [
@@ -385,6 +397,82 @@ unsafe fn build_row(scores: &Scores<'_>, q: usize, out: &mut [u8]) -> bool {
     true
 }
 
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:554-557,566-576
+/// ```c
+///         if(reverse_sequence)
+///             b_ptr = &B[N - first_b_index];
+///         else
+///             b_ptr = &B[first_b_index];
+/// ...
+///             b_ptr += b_increment;
+/// ...
+///             matrix_index = *b_ptr;
+///
+///             if (matrix_index == FENCE_SENTRY) {
+/// ```
+/// The column residues `s.get(k)` (`*b_ptr`) for `k` in `sc.sb_filled..to` into the lane buffer,
+/// with the fence and bad-residue bookkeeping of the 128-bit kernels (first column of each).
+/// 32 columns at a time while they are a plain forward or backward run of `s.data` with no
+/// residue `>= ncols`; the rest, and any block with such a residue, by the scalar loop of the
+/// 128-bit kernels.
+#[inline(always)]
+unsafe fn fill_cols(
+    s: &ColSeq<'_>,
+    sc: &mut XdropScratch,
+    to: usize,
+    ncols: usize,
+    check_fence: bool,
+) {
+    let mut k = sc.sb_filled;
+    if ncols > 0 && (s.step == 1 || s.step == -1) {
+        let lim = _mm256_set1_epi8((ncols - 1) as i8);
+        let rev = _mm256_setr_epi8(
+            15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 15, 14, 13, 12, 11, 10, 9, 8, 7,
+            6, 5, 4, 3, 2, 1, 0,
+        );
+        let dl = s.data.len() as isize;
+        while k + 32 <= to && k + 32 <= s.zero_from {
+            let v = if s.step == 1 {
+                // columns k..k+32 are s.data[i..i + 32]
+                let i = s.base + k as isize;
+                if i < 0 || i + 32 > dl {
+                    break;
+                }
+                ld(s.data.as_ptr().offset(i))
+            } else {
+                // columns k..k+32 are s.data[i], s.data[i - 1], ..., s.data[i - 31]
+                let i = s.base - k as isize;
+                if i - 31 < 0 || i >= dl {
+                    break;
+                }
+                _mm256_permute4x64_epi64::<0x4E>(_mm256_shuffle_epi8(
+                    ld(s.data.as_ptr().offset(i - 31)),
+                    rev,
+                ))
+            };
+            if _mm256_movemask_epi8(_mm256_cmpeq_epi8(_mm256_max_epu8(v, lim), lim)) != -1 {
+                break;
+            }
+            st(sc.sb.as_mut_ptr().add(PAD + k + 1), v);
+            k += 32;
+        }
+    }
+    for k in k..to {
+        let ch = s.get(k);
+        if ch as usize >= ncols {
+            if check_fence && ch == FENCE_SENTRY {
+                if sc.fence_k == usize::MAX {
+                    sc.fence_k = k;
+                }
+            } else if sc.bad_k == usize::MAX {
+                sc.bad_k = k;
+            }
+        }
+        *sc.sb.get_unchecked_mut(PAD + k + 1) = ch;
+    }
+    sc.sb_filled = to;
+}
+
 // ---------------------------------------------------------------------------
 // 16-bit lanes, 16 per vector
 // ---------------------------------------------------------------------------
@@ -457,8 +545,10 @@ unsafe fn block16<const TB: bool>(
     b: usize,
     s: W,
     lane_mask: Option<W>,
+    hpm: W,
 ) -> (W, W) {
-    let hp = ld(hr.add(b).sub(1));
+    // `hpm`: lanes with no diagonal (the first lane of the band), as a 0 in the H row
+    let hp = _mm256_andnot_si256(hpm, ld(hr.add(b).sub(1)));
     let ep = ld(e.add(b));
     let d = _mm256_adds_epi16(hp, s);
     let h0 = _mm256_max_epi16(d, ep);
@@ -617,6 +707,7 @@ unsafe fn align16<const TB: bool>(
         c40: _mm256_set1_epi16(SCRIPT_EXTEND_GAP_B as i16),
     };
     let zero = _mm256_setzero_si256();
+    let lane0 = _mm256_setr_epi16(-1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     let k70 = _mm256_set1_epi8(0x70);
     let k10 = _mm256_set1_epi8(0x10);
     let static_tabs: Option<*const u8> = match scores {
@@ -639,21 +730,7 @@ unsafe fn align16<const TB: bool>(
     for a in 1..=len1 {
         sc.ensure(b_size + num_extra + 64);
         if sc.sb_filled < b_size {
-            let to = (b_size + 64).min(len2 + 1);
-            for k in sc.sb_filled..to {
-                let ch = s.get(k);
-                if ch as usize >= ncols {
-                    if check_fence && ch == FENCE_SENTRY {
-                        if sc.fence_k == usize::MAX {
-                            sc.fence_k = k;
-                        }
-                    } else if sc.bad_k == usize::MAX {
-                        sc.bad_k = k;
-                    }
-                }
-                *sc.sb.get_unchecked_mut(PAD + k + 1) = ch;
-            }
-            sc.sb_filled = to;
+            fill_cols(s, sc, (b_size + 64).min(len2 + 1), ncols, check_fence);
         }
         if sc.bad_k < b_size {
             return None;
@@ -709,8 +786,9 @@ unsafe fn align16<const TB: bool>(
             base += best_rel;
             best_rel = 0;
         }
-        // no diagonal into the first lane of the band
-        *hr.add(first).sub(1) = 0;
+        // no diagonal into the first lane of the band: lane 0 of the row's first block (`hpm`);
+        // a store of 0 into the H row would sit right under the first block's load
+        let mut hpm = lane0;
 
         let row_off = sc.trace.len();
         if TB {
@@ -729,15 +807,25 @@ unsafe fn align16<const TB: bool>(
         let mut lo_surv = usize::MAX;
         let mut hi_surv = 0usize;
         let mut b0 = first;
-        // Two blocks (32 lanes) while they lie inside the band, then single blocks for the rest of
-        // the band and the row-gap extension; the stops are on the grid first + 16k.
-        while b0 + 32 <= bend {
+        // Two blocks (32 lanes) while more than 16 lanes of the band are left, then single blocks
+        // for the rest of the band and the row-gap extension. The stop test runs on the grid
+        // first + 16k once the band is passed; lanes processed past the point where the 128-bit
+        // kernel stops are computed exactly and dropped (row gap below the threshold), so the
+        // result is the same.
+        while b0 + 16 < bend {
             // scores of lanes b0..b0+32 (lane b reads column b-1)
             let idx = _mm256_permute4x64_epi64::<0xD8>(ld(sb.add(b0)));
             let i0 = _mm256_add_epi8(idx, k70);
             let i1 = _mm256_sub_epi8(idx, k10);
             let lo = lut32(t0lo, t1lo, i0, i1);
             let hi = lut32(t0hi, t1hi, i0, i1);
+            // the first block lies inside the band (b0 + 16 < bend <= limit); the second may
+            // reach past the band and past `limit`
+            let mask1 = if b0 + 32 <= limit {
+                None
+            } else {
+                Some(ld(LANE_MASK16.as_ptr().add(32 - (limit - b0))))
+            };
             let (d0, r0) = block16::<TB>(
                 &c,
                 &mut rs,
@@ -747,7 +835,9 @@ unsafe fn align16<const TB: bool>(
                 b0,
                 _mm256_unpacklo_epi8(lo, hi),
                 None,
+                hpm,
             );
+            hpm = zero;
             let (d1, r1) = block16::<TB>(
                 &c,
                 &mut rs,
@@ -756,7 +846,8 @@ unsafe fn align16<const TB: bool>(
                 e,
                 b0 + 16,
                 _mm256_unpackhi_epi8(lo, hi),
-                None,
+                mask1,
+                zero,
             );
             if TB {
                 st(
@@ -804,7 +895,9 @@ unsafe fn align16<const TB: bool>(
                 b0,
                 _mm256_unpacklo_epi8(lo, hi),
                 mask,
+                hpm,
             );
+            hpm = zero;
             if TB {
                 stx(
                     tr.add(b0 - first),
@@ -917,15 +1010,20 @@ unsafe fn block8<const TB: bool>(
     e: *mut u8,
     b: usize,
     s: W,
+    lane_mask: Option<W>,
+    hpm: W,
 ) -> (W, W) {
-    let hp = ld(hr.add(b).sub(1));
+    let hp = _mm256_andnot_si256(hpm, ld(hr.add(b).sub(1)));
     let ep = ld(e.add(b));
     let d = _mm256_adds_epi8(hp, s);
     let h0 = _mm256_max_epi8(d, ep);
     let v = _mm256_subs_epu8(h0, c.goe);
     let fi = _mm256_subs_epu8(pmax8(_mm256_adds_epu8(up1_8(v), c.ramp), c.kb15), c.ramp);
     let f = _mm256_max_epu8(fi, _mm256_subs_epu8(rs.carry, c.ramp));
-    let hh = _mm256_max_epi8(h0, f);
+    let mut hh = _mm256_max_epi8(h0, f);
+    if let Some(m) = lane_mask {
+        hh = _mm256_and_si256(hh, m);
+    }
     let hg = _mm256_subs_epu8(hh, c.goe);
     let fs = _mm256_subs_epu8(f, c.ge1);
     let out = last8(_mm256_max_epu8(_mm256_subs_epu8(fi, c.ge1), v), c.kb15);
@@ -989,13 +1087,14 @@ unsafe fn block8x<const TB: bool>(
     b: usize,
     s: X,
     lane_mask: Option<X>,
+    hpm: X,
 ) -> (X, X) {
     let goe = _mm256_castsi256_si128(c.goe);
     let ge1 = _mm256_castsi256_si128(c.ge1);
     let ramp = _mm256_castsi256_si128(c.ramp);
     let xv = _mm256_castsi256_si128(c.xv);
     let k15 = _mm256_castsi256_si128(c.kb15);
-    let hp = ldx(hr.add(b).sub(1));
+    let hp = _mm_andnot_si128(hpm, ldx(hr.add(b).sub(1)));
     let ep = ldx(e.add(b));
     let d = _mm_adds_epi8(hp, s);
     let h0 = _mm_max_epi8(d, ep);
@@ -1152,6 +1251,10 @@ unsafe fn align8<const TB: bool>(
         c40: _mm256_set1_epi8(SCRIPT_EXTEND_GAP_B as i8),
     };
     let zero = _mm256_setzero_si256();
+    let lane0 = _mm256_setr_epi8(
+        -1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0,
+    );
     let k70 = _mm256_set1_epi8(0x70);
     let k10 = _mm256_set1_epi8(0x10);
     let static_tabs: Option<*const u8> = match scores {
@@ -1173,21 +1276,7 @@ unsafe fn align8<const TB: bool>(
     for a in 1..=len1 {
         sc.ensure(b_size + num_extra + 64);
         if sc.sb_filled < b_size {
-            let to = (b_size + 64).min(len2 + 1);
-            for k in sc.sb_filled..to {
-                let ch = s.get(k);
-                if ch as usize >= ncols {
-                    if check_fence && ch == FENCE_SENTRY {
-                        if sc.fence_k == usize::MAX {
-                            sc.fence_k = k;
-                        }
-                    } else if sc.bad_k == usize::MAX {
-                        sc.bad_k = k;
-                    }
-                }
-                *sc.sb.get_unchecked_mut(PAD + k + 1) = ch;
-            }
-            sc.sb_filled = to;
+            fill_cols(s, sc, (b_size + 64).min(len2 + 1), ncols, check_fence);
         }
         if sc.bad_k < b_size {
             return None;
@@ -1241,7 +1330,7 @@ unsafe fn align8<const TB: bool>(
             base += best_rel;
             best_rel = 0;
         }
-        *hr.add(first).sub(1) = 0;
+        let mut hpm = lane0;
 
         let row_off = sc.trace.len();
         if TB {
@@ -1260,16 +1349,22 @@ unsafe fn align8<const TB: bool>(
         let mut lo_surv = usize::MAX;
         let mut hi_surv = 0usize;
         let mut b0 = first;
-        // 32-lane blocks while they lie inside the band, then 16-lane blocks for the rest of the
-        // band and the row-gap extension; the stops are on the grid first + 16k.
-        while b0 + 32 <= bend {
+        // 32-lane blocks while more than 16 lanes of the band are left, then 16-lane blocks for the
+        // rest of the band and the row-gap extension (stop test as in `align16`).
+        while b0 + 16 < bend {
             let idx = ld(sb.add(b0));
             let sv = if small_alphabet {
                 _mm256_shuffle_epi8(t0, idx)
             } else {
                 lut32(t0, t1, _mm256_add_epi8(idx, k70), _mm256_sub_epi8(idx, k10))
             };
-            let (d0, r0) = block8::<TB>(&c, &mut rs, hr, hw, e, b0, sv);
+            let mask = if b0 + 32 <= limit {
+                None
+            } else {
+                Some(ld(LANE_MASK8.as_ptr().add(32 - (limit - b0))))
+            };
+            let (d0, r0) = block8::<TB>(&c, &mut rs, hr, hw, e, b0, sv, mask, hpm);
+            hpm = zero;
             if TB {
                 st(tr.add(b0 - first), r0);
             }
@@ -1310,8 +1405,20 @@ unsafe fn align8<const TB: bool>(
             } else {
                 Some(ldx(LANE_MASK8X.as_ptr().add(16 - (limit - b0))))
             };
-            let (d0, r0) =
-                block8x::<TB>(&c, &mut rx, &mut rec_b, &mut slow, hr, hw, e, b0, sv, mask);
+            let (d0, r0) = block8x::<TB>(
+                &c,
+                &mut rx,
+                &mut rec_b,
+                &mut slow,
+                hr,
+                hw,
+                e,
+                b0,
+                sv,
+                mask,
+                _mm256_castsi256_si128(hpm),
+            );
+            hpm = zero;
             if TB {
                 stx(tr.add(b0 - first), r0);
             }
@@ -1816,6 +1923,9 @@ mod tests {
         );
         // categories: [tb][8-bit] -> (problem indices, cells)
         let mut cats: [[(Vec<usize>, u64); 2]; 2] = Default::default();
+        // [tb][8-bit]: rows and lanes the 256-bit kernel processes (a traceback run of the problem
+        // records them; the band evolves the same way without traceback)
+        let mut shape = [[(0u64, 0u64); 2]; 2];
         let (mut unhandled, mut declined) = (0usize, 0usize);
         let mut m8s = Vec::with_capacity(probs.len());
         for (i, p) in probs.iter().enumerate() {
@@ -1866,6 +1976,30 @@ mod tests {
                     &mut sb,
                 )
             };
+            // SAFETY: AVX2 checked above.
+            if unsafe {
+                run(
+                    Kern::V256,
+                    m8,
+                    true,
+                    &q,
+                    &s,
+                    &scores,
+                    args.0,
+                    args.1,
+                    args.2,
+                    args.3,
+                    args.4,
+                    p.check_fence,
+                    &mut sd,
+                )
+            }
+            .is_some()
+            {
+                let sh = &mut shape[usize::from(p.tb)][usize::from(m8.is_some())];
+                sh.0 += sd.rows.len().saturating_sub(1) as u64;
+                sh.1 += (sd.trace.len() - sd.rows.first().map_or(0, |r| r.2 as usize)) as u64;
+            }
             match r256 {
                 Some(r) => {
                     assert_eq!(r, want, "problem {i}: 256-bit vs recorded");
@@ -1902,92 +2036,165 @@ mod tests {
             dir.display(),
             probs.len()
         );
+        // One call as `xdrop_align` makes it: a call the 256-bit kernel declines goes to the
+        // 128-bit kernel.
+        let call = |k: Kern, i: usize, sc: &mut XdropScratch| {
+            let p = &probs[i];
+            let (q, s, scores) = (p.row_seq(), p.col_seq(), p.scores());
+            let go = |k: Kern, sc: &mut XdropScratch| {
+                // SAFETY: AVX2 checked above.
+                unsafe {
+                    run(
+                        k,
+                        m8s[i],
+                        p.tb,
+                        &q,
+                        &s,
+                        &scores,
+                        p.len1,
+                        p.len2,
+                        p.gap_open,
+                        p.gap_extend,
+                        p.x_drop,
+                        p.check_fence,
+                        sc,
+                    )
+                }
+            };
+            let r = go(k, sc);
+            if r.is_none() && k == Kern::V256 {
+                go(Kern::V128, sc)
+            } else {
+                r
+            }
+        };
+        // Reads a problem's residues and matrix, so that a "warm" call finds them in cache as the
+        // search's calls do (the matrix and sequences are in use there).
+        let touch = |i: usize| {
+            let p = &probs[i];
+            let mut acc = 0i64;
+            for &b in p.rows.iter().chain(p.cols.iter()) {
+                acc += b as i64;
+            }
+            for &v in &p.matrix {
+                acc += v as i64;
+            }
+            if let Scores::Rows28(m) = p.scores() {
+                for &v in m.iter().flatten() {
+                    acc += v as i64;
+                }
+            }
+            std::hint::black_box(acc);
+        };
+        // cost of one pair of `Instant::now()` reads, subtracted from the warm per-call times
+        let timer_ns = {
+            let mut v: Vec<f64> = (0..15)
+                .map(|_| {
+                    let t0 = Instant::now();
+                    for _ in 0..10_000 {
+                        std::hint::black_box(Instant::now().elapsed());
+                    }
+                    t0.elapsed().as_nanos() as f64 / 10_000.0
+                })
+                .collect();
+            v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            v[v.len() / 2]
+        };
+        report += &format!(
+            "  cold = problems back to back in capture order; warm = each call timed alone after its \
+             residues and matrix were read (timer cost {timer_ns:.1} ns/call subtracted)\n"
+        );
         for (tb, by_w) in cats.iter().enumerate() {
             for (w8, (list, cells)) in by_w.iter().enumerate() {
                 if list.is_empty() {
                     continue;
                 }
-                let mut times = [Vec::new(), Vec::new()];
-                for rep in 0..reps {
-                    let order = if rep % 2 == 0 {
-                        [Kern::V128, Kern::V256]
-                    } else {
-                        [Kern::V256, Kern::V128]
-                    };
-                    for k in order {
-                        let sc = if k == Kern::V128 { &mut sa } else { &mut sb };
-                        let t0 = Instant::now();
-                        for &i in list {
-                            let p = &probs[i];
-                            let (q, s, scores) = (p.row_seq(), p.col_seq(), p.scores());
-                            // SAFETY: AVX2 checked above.
-                            let r = unsafe {
-                                let r = run(
-                                    k,
-                                    m8s[i],
-                                    p.tb,
-                                    &q,
-                                    &s,
-                                    &scores,
-                                    p.len1,
-                                    p.len2,
-                                    p.gap_open,
-                                    p.gap_extend,
-                                    p.x_drop,
-                                    p.check_fence,
-                                    sc,
-                                );
-                                // as in `xdrop_align`: a declined call goes to the 128-bit kernel
-                                if r.is_none() && k == Kern::V256 {
-                                    run(
-                                        Kern::V128,
-                                        m8s[i],
-                                        p.tb,
-                                        &q,
-                                        &s,
-                                        &scores,
-                                        p.len1,
-                                        p.len2,
-                                        p.gap_open,
-                                        p.gap_extend,
-                                        p.x_drop,
-                                        p.check_fence,
-                                        sc,
-                                    )
-                                } else {
-                                    r
-                                }
-                            };
-                            std::hint::black_box(r);
-                        }
-                        times[usize::from(k == Kern::V256)].push(t0.elapsed().as_nanos() as f64);
-                    }
-                }
-                let stat = |v: &mut Vec<f64>| {
-                    v.sort_by(|a, b| a.partial_cmp(b).unwrap());
-                    (v[v.len() / 2], v[0], v[v.len() - 1])
-                };
-                let (m128, lo128, hi128) = stat(&mut times[0]);
-                let (m256, lo256, hi256) = stat(&mut times[1]);
-                let (nc, nl) = (*cells as f64, list.len() as f64);
+                let (rows, lanes) = shape[tb][w8];
                 report += &format!(
-                    "  {}-{}: problems={} cells={} | 128-bit ns/cell={:.3} ns/call={:.0} \
-                     (min {:.3} max {:.3}) | 256-bit ns/cell={:.3} ns/call={:.0} (min {:.3} \
-                     max {:.3}) | 128/256={:.2}\n",
+                    "  {}-{}: rows per call {:.1}, cells per row {:.1}, lanes processed per cell \
+                     {:.3} (256-bit)\n",
                     if tb == 1 { "traceback" } else { "score-only" },
                     if w8 == 1 { 8 } else { 16 },
-                    list.len(),
-                    cells,
-                    m128 / nc,
-                    m128 / nl,
-                    lo128 / nc,
-                    hi128 / nc,
-                    m256 / nc,
-                    m256 / nl,
-                    lo256 / nc,
-                    hi256 / nc,
-                    m128 / m256
+                    rows as f64 / list.len() as f64,
+                    *cells as f64 / rows.max(1) as f64,
+                    lanes as f64 / *cells as f64
                 );
+                for warm in [false, true] {
+                    let mut times = [Vec::new(), Vec::new()];
+                    // warm: fastest time of each call over the repetitions
+                    let mut best = [vec![f64::MAX; list.len()], vec![f64::MAX; list.len()]];
+                    for rep in 0..reps {
+                        let order = if rep % 2 == 0 {
+                            [Kern::V128, Kern::V256]
+                        } else {
+                            [Kern::V256, Kern::V128]
+                        };
+                        for k in order {
+                            let sc = if k == Kern::V128 { &mut sa } else { &mut sb };
+                            let total = if warm {
+                                let mut ns = 0f64;
+                                let bk = &mut best[usize::from(k == Kern::V256)];
+                                for (j, &i) in list.iter().enumerate() {
+                                    touch(i);
+                                    let t0 = Instant::now();
+                                    std::hint::black_box(call(k, i, sc));
+                                    let t = t0.elapsed().as_nanos() as f64 - timer_ns;
+                                    ns += t;
+                                    bk[j] = bk[j].min(t);
+                                }
+                                ns
+                            } else {
+                                let t0 = Instant::now();
+                                for &i in list {
+                                    std::hint::black_box(call(k, i, sc));
+                                }
+                                t0.elapsed().as_nanos() as f64
+                            };
+                            times[usize::from(k == Kern::V256)].push(total);
+                        }
+                    }
+                    let stat = |v: &mut Vec<f64>| {
+                        v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                        (v[v.len() / 2], v[0], v[v.len() - 1])
+                    };
+                    let (m128, lo128, hi128) = stat(&mut times[0]);
+                    let (m256, lo256, hi256) = stat(&mut times[1]);
+                    let (nc, nl) = (*cells as f64, list.len() as f64);
+                    if warm {
+                        let (b128, b256): (f64, f64) = (best[0].iter().sum(), best[1].iter().sum());
+                        report += &format!(
+                            "  {}-{} warm-min (fastest of {reps} per call, summed): 128-bit \
+                             ns/cell={:.3} ns/call={:.0} | 256-bit ns/cell={:.3} ns/call={:.0} | \
+                             128/256={:.2}\n",
+                            if tb == 1 { "traceback" } else { "score-only" },
+                            if w8 == 1 { 8 } else { 16 },
+                            b128 / nc,
+                            b128 / nl,
+                            b256 / nc,
+                            b256 / nl,
+                            b128 / b256
+                        );
+                    }
+                    report += &format!(
+                        "  {}-{} {}: problems={} cells={} | 128-bit ns/cell={:.3} ns/call={:.0} \
+                         (min {:.3} max {:.3}) | 256-bit ns/cell={:.3} ns/call={:.0} (min {:.3} \
+                         max {:.3}) | 128/256={:.2}\n",
+                        if tb == 1 { "traceback" } else { "score-only" },
+                        if w8 == 1 { 8 } else { 16 },
+                        if warm { "warm" } else { "cold" },
+                        list.len(),
+                        cells,
+                        m128 / nc,
+                        m128 / nl,
+                        lo128 / nc,
+                        hi128 / nc,
+                        m256 / nc,
+                        m256 / nl,
+                        lo256 / nc,
+                        hi256 / nc,
+                        m128 / m256
+                    );
+                }
             }
         }
         eprint!("{report}");

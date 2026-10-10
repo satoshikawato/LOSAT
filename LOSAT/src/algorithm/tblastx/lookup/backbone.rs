@@ -1789,7 +1789,7 @@ mod tests {
         assert_eq!(lookup.get_hits(aaa_index), &[0]);
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/unit_tests/api/aalookup_unit_test.cpp:218-238
+    // NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/api/aalookup_unit_test.cpp:222-244 DebruijnSequenceTest
     // ```c
     // for(i=0;i<lookup->backbone_size;i++) {
     //   Int4 num_used = ((AaLookupSmallboneCell *)(lookup->thick_backbone))[i].num_used;
@@ -1820,7 +1820,7 @@ mod tests {
         }
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/unit_tests/api/aalookup_unit_test.cpp:253-277
+    // NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/api/aalookup_unit_test.cpp:253-277 NeighboringWordsTest
     // ```c
     // for each possible 3-mer:
     //   find its neighbors by brute force

@@ -405,7 +405,7 @@ mod tests {
         lookup
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/unit_tests/api/aascan_unit_test.cpp:714-752
+    // NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/api/aascan_unit_test.cpp:288-326 ScanOffsetTest
     // ```c
     // qsort(offset_pairs, hits, sizeof(BlastOffsetPair), compare_offsets);
     // if (s_off)

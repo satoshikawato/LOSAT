@@ -670,7 +670,7 @@ fn complement_masks(contexts: &[QueryContext]) -> Vec<(i32, i32)> {
 mod tests {
     use super::*;
     #[test]
-    // NCBI reference (598d8ae6): c++/src/algo/blast/unit_tests/api/blastfilter_unit_test.cpp:1003-1027
+    // NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/api/blastfilter_unit_test.cpp:1003-1027 BlastxLowerCaseMaskProteinLocations
     // ```c++
     //     bqff.UseProteinCoords(9180); // 9180 is length of GI|1945388
     //

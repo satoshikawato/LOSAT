@@ -17,11 +17,14 @@ export const TERMINAL_STATUSES: ReadonlySet<RunStatus> = new Set(['completed', '
 export interface InputSnapshot {
   /** Name passed as -query / -subject (plan §5.3). */
   readonly name: string;
-  /** Exact FASTA bytes given to the engine. */
-  readonly bytes: Uint8Array;
-  /** Lower-case hex SHA-256 of `bytes`. */
+  /**
+   * Exact FASTA bytes given to the engine. Absent for a run loaded from a session file: its
+   * inputs were never in this working session (the file holds their identity, not their bytes).
+   */
+  readonly bytes?: Uint8Array;
+  /** Lower-case hex SHA-256 of the bytes given to the engine. */
   readonly sha256: string;
-  /** Dataset revisions whose included records make up `bytes`, in order. */
+  /** Dataset revisions whose included records make up `bytes`, in order; none for a run loaded from a session file. */
   readonly revisionIds: readonly string[];
   /** ID and length of each record in `bytes`; the engine checks them at `register`. */
   readonly records: readonly RecordKey[];

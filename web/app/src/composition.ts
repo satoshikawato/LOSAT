@@ -7,8 +7,10 @@ import { Coordinator } from './application/coordinator';
 import { SearchDraft } from './application/draft';
 import { ResultsBrowser } from './application/results';
 import { ResultExporter } from './application/result-export';
+import { Session } from './application/session';
 import type { Downloader } from './ports/download';
 import type { EngineGateway } from './ports/engine';
+import { browserCompression } from './infra/browser/compression';
 import { browserPage } from './infra/browser/page';
 import { browserDownloader } from './infra/browser/platform';
 import { startDataWorker } from './infra/data-worker/gateway';
@@ -30,7 +32,15 @@ export interface App {
   readonly attention: Attention;
   /** True while the engine is the FakeEngine; the UI shows a warning banner. */
   readonly usesFakeEngine: boolean;
+  /** Session files: saving the completed runs, opening them without a search, re-attaching originals (application/session.ts). */
+  readonly session: Session;
 }
+
+/** This build's version and commit (vite.config.ts), written into session files; "unknown" where a build does not set them. */
+const APP_BUILD = Object.freeze({
+  version: typeof __LOSAT_APP_VERSION__ === 'string' ? __LOSAT_APP_VERSION__ : 'unknown',
+  build: typeof __LOSAT_APP_BUILD__ === 'string' ? __LOSAT_APP_BUILD__ : 'unknown',
+});
 
 export interface AppOptions {
   /** Where exports go; the browser's download by default. */
@@ -82,5 +92,15 @@ export function createApp(options: AppOptions = {}): App {
     probe: () => data.storageInfo(),
     now: () => Date.now(),
   });
-  return { coordinator, draft, results, candidates, exporter, attention, usesFakeEngine: ENGINE_ASSETS === null };
+  const session = new Session({
+    coordinator,
+    tray: candidates,
+    data,
+    compression: browserCompression,
+    downloader,
+    app: APP_BUILD,
+    now: () => Date.now(),
+    newRunId: () => crypto.randomUUID(),
+  });
+  return { coordinator, draft, results, candidates, exporter, attention, usesFakeEngine: ENGINE_ASSETS === null, session };
 }

@@ -5,13 +5,15 @@
 import { computed } from 'vue';
 import type { RunView } from '../application/coordinator';
 import type { LoadedRun } from '../application/results';
+import type { Session } from '../application/session';
 import { toShellCommand } from '../domain/argv';
-import { programById } from '../domain/programs';
+import { programById, type InputRole } from '../domain/programs';
 import CommandText from './CommandText.vue';
 import { formatBytes, formatCount, formatDateTime, formatDuration } from './format';
+import LoadedRunOrigin from './LoadedRunOrigin.vue';
 import VerificationBadge from './VerificationBadge.vue';
 
-const props = defineProps<{ run: RunView; loaded: LoadedRun }>();
+const props = defineProps<{ run: RunView; loaded: LoadedRun; session?: Session | undefined }>();
 const snapshot = computed(() => props.run.snapshot);
 const record = computed(() => props.run.record);
 /** A time in ISO 8601 form, local time (S13 screen review L5: "09/10/2026" read either way). */
@@ -19,9 +21,11 @@ const time = (ms: number | undefined) => (ms === undefined ? '' : formatDateTime
 const duration = computed(() =>
   record.value.startedAt !== undefined && record.value.endedAt !== undefined ? formatDuration(record.value.endedAt - record.value.startedAt) : '',
 );
+/** Bytes of the engine input: the snapshot's, or for a run loaded from a session file (which has no bytes), the file's record of them. */
+const inputSize = (role: InputRole) => snapshot.value[role].bytes?.length ?? props.run.fromSession?.inputs[role].length ?? 0;
 const inputs = computed(() => [
-  { role: 'Query', input: snapshot.value.query },
-  { role: 'Subject', input: snapshot.value.subject },
+  { role: 'Query', input: snapshot.value.query, size: inputSize('query') },
+  { role: 'Subject', input: snapshot.value.subject, size: inputSize('subject') },
 ]);
 </script>
 
@@ -29,6 +33,7 @@ const inputs = computed(() => [
   <div class="run-details" data-testid="run-details">
     <h3>Verification</h3>
     <VerificationBadge :badge="loaded.badge" />
+    <LoadedRunOrigin v-if="run.fromSession && session" :session="session" :run-id="run.snapshot.runId" />
 
     <div class="details-grid">
       <h3>Search (fixed when the run was queued)</h3>
@@ -41,11 +46,11 @@ const inputs = computed(() => [
         <dd>{{ programById(snapshot.program).label }}</dd>
         <dt>Arguments</dt>
         <dd><code data-testid="run-argv"><CommandText :text="snapshot.argv.join(' ')" /></code></dd>
-        <template v-for="{ role, input } in inputs" :key="role">
+        <template v-for="{ role, input, size } in inputs" :key="role">
           <dt>{{ role }}</dt>
           <dd :data-testid="`run-input-${role.toLowerCase()}`">
             {{ input.name }}: {{ formatCount(input.records.length) }} {{ input.records.length === 1 ? 'record' : 'records' }},
-            {{ formatBytes(input.bytes.length) }}<br />
+            {{ formatBytes(size) }}<br />
             <span class="muted small">SHA-256 {{ input.sha256 }}</span>
           </dd>
         </template>

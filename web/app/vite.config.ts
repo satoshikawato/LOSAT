@@ -1,3 +1,5 @@
+import { execSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { defineConfig } from 'vitest/config';
 import vue from '@vitejs/plugin-vue';
 import type { Plugin } from 'vite';
@@ -6,6 +8,15 @@ import { findReactors, losatEngine } from './build/reactors.ts';
 import { losatVerification } from './build/verification.ts';
 
 const headers = siteHeaders();
+/** The app's version and the commit it was built from, written into session files (src/build-info.d.ts). */
+const appVersion = (JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')) as { version: string }).version;
+function appBuild(): string {
+  try {
+    return execSync('git rev-parse --short HEAD', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim() || 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
 const reactors = findReactors();
 // The dev server injects component styles as inline <style> elements, which the
 // production CSP forbids. It therefore serves the isolation headers without the CSP;
@@ -44,7 +55,11 @@ function headersOnEveryResponse(): Plugin {
 export default defineConfig({
   // The engine modules (LOSAT_WEB_REACTORS); the worker bundles read the same description.
   plugins: [vue(), losatEngine({ reactors }), losatVerification(), headersOnEveryResponse()],
-  define: { __LOSAT_TEST_HOOKS__: 'false' },
+  define: {
+    __LOSAT_TEST_HOOKS__: 'false',
+    __LOSAT_APP_VERSION__: JSON.stringify(appVersion),
+    __LOSAT_APP_BUILD__: JSON.stringify(appBuild()),
+  },
   server: { headers: devHeaders },
   preview: { headers },
   worker: { format: 'es', plugins: () => [losatEngine({ reactors, emit: false })] },

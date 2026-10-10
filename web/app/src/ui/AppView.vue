@@ -6,6 +6,7 @@ import type { Coordinator } from '../application/coordinator';
 import type { SearchDraft } from '../application/draft';
 import type { HspId, ResultsBrowser } from '../application/results';
 import type { ResultExporter } from '../application/result-export';
+import type { Session } from '../application/session';
 import { formatCount } from './format';
 import { useStore } from './useStore';
 import AttentionPanel from './AttentionPanel.vue';
@@ -14,6 +15,7 @@ import QueuePanel from './QueuePanel.vue';
 import ResultsPanel, { type ResultsView } from './ResultsPanel.vue';
 import ResumeNotice from './ResumeNotice.vue';
 import SearchPanel from './SearchPanel.vue';
+import SessionPanel from './SessionPanel.vue';
 import StorageStatus from './StorageStatus.vue';
 
 const props = defineProps<{
@@ -24,6 +26,7 @@ const props = defineProps<{
   exporter: ResultExporter;
   attention: Attention;
   usesFakeEngine: boolean;
+  session: Session;
 }>();
 const state = useStore(props.coordinator.state);
 const attentionState = useStore(props.attention.state);
@@ -102,12 +105,14 @@ onUnmounted(() => {
         :candidates="candidates"
         :exporter="exporter"
         :runs="state.runs"
+        :session="session"
       />
       <!-- Kept mounted, as the search form: the extraction's choices and the order shown stay while other tabs are viewed. -->
-      <CandidatesPanel v-show="tab === 'candidates'" :candidates="candidates" :state="trayState" @reveal="showCandidate" />
+      <CandidatesPanel v-show="tab === 'candidates'" :candidates="candidates" :state="trayState" :runs="state.runs" @reveal="showCandidate" />
     </section>
     <aside class="secondary">
       <QueuePanel :coordinator="coordinator" :runs="state.runs" @open-results="openResults" />
+      <SessionPanel :session="session" :runs="state.runs" />
       <AttentionPanel :attention="attention" :state="attentionState" />
       <StorageStatus :storage="state.storage" />
     </aside>

@@ -8,8 +8,10 @@ import type { DatasetRevision, FastaParserKind, RecordKey } from '../domain/data
 import type { HspTable } from '../domain/hsp-table';
 import type { OutputFormat } from '../domain/output-format';
 import type { InputRole, ProgramId } from '../domain/programs';
+import type { SessionRecordTable, SessionSource } from '../domain/session-file';
 import type { HspRecord } from './engine';
 import type { InputCheck } from './input-check';
+import type { OutputStream } from './run-output';
 
 export interface SourceRef {
   readonly sourceId: string;
@@ -98,6 +100,20 @@ export interface DatasetStore {
    * the record is never held whole. For a record that extraction reads in parts (S15).
    */
   checkRecord(revisionIds: readonly string[], position: number): Promise<void>;
+  /**
+   * What a session file records of the run input of the revisions (design §12.2): the ID, length
+   * and SHA-256 of each record in the order of `buildRunInput`, the revisions' sources (file
+   * name, size, records, the excluded indices) and the reader kind that indexed them. Nothing of
+   * the sources is read.
+   */
+  describeRunInput(revisionIds: readonly string[]): Promise<RunInputDescription>;
+}
+
+/** The identity of a run input, for a session file (`describeRunInput`). */
+export interface RunInputDescription {
+  readonly reader: FastaParserKind;
+  readonly records: SessionRecordTable;
+  readonly sources: readonly SessionSource[];
 }
 
 export interface ResultSetRef {
@@ -138,6 +154,16 @@ export interface RunStore {
   readHitTable(runId: string): Promise<HspTable>;
   readDiagnostics(runId: string): Promise<string>;
   deleteRun(runId: string): Promise<void>;
+  /** The byte length of each stream of a committed run (ports/run-output.ts), for a session file. */
+  runBlockLengths(runId: string): Promise<Readonly<Record<OutputStream, number>>>;
+  /** Bytes [start, end) of one stream of a committed run, as stored; the caller keeps ranges bounded. */
+  readRunBlock(runId: string, stream: OutputStream, start: number, end: number): Promise<Uint8Array>;
+  /**
+   * Resolves, with the bytes that a staged run's port has delivered so far, once they reach
+   * `atLeast`, or once the run fails, ends or is dropped. A writer that is not the engine (a
+   * session file being loaded) waits on it so that its chunks do not pile up in the Data worker.
+   */
+  stagedBytes(runId: string, atLeast: number): Promise<number>;
 }
 
 export type StorageBackend = 'opfs' | 'memory';

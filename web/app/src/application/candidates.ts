@@ -155,6 +155,14 @@ export interface AlignmentsSummary {
 }
 
 export type OutputResult<S> = { readonly ok: true; readonly summary: S } | { readonly ok: false; readonly message: string };
+
+/** A candidate restored from a session file (application/session.ts): its HSP, read again from the loaded run, and its note. */
+export interface RestoredCandidate {
+  readonly source: CandidateSource;
+  readonly note: string;
+  /** When it was added to the tray that saved the file (ms since the epoch). */
+  readonly addedAt: number;
+}
 export type AddResult =
   | { readonly ok: true; readonly added: number; /** Already in the tray (or given twice). */ readonly already: number }
   | { readonly ok: false; readonly message: string };
@@ -252,6 +260,30 @@ export class CandidateTray {
     }
     this.set({ candidates: [...state.candidates, ...added], selected, message: undefined });
     return { ok: true, added: added.length, already: sources.length - added.length };
+  }
+
+  /**
+   * Adds candidates restored from a session file at the end of the tray, selected, in the file's
+   * order, with their notes and the times they were first added. Refused, with nothing added,
+   * when a run has not completed (REQ-10).
+   */
+  restore(entries: readonly RestoredCandidate[]): AddResult {
+    const refused = this.refusal(entries.map((entry) => entry.source.run), 'add');
+    if (refused !== undefined) return this.refuse(refused);
+    const state = this.state.get();
+    const present = new Set(state.candidates.map((candidate) => candidate.key));
+    const selected = new Set(state.selected);
+    const added: Candidate[] = [];
+    for (const { source, note, addedAt } of entries) {
+      const key = candidateKey(source.id);
+      if (present.has(key)) continue;
+      present.add(key);
+      selected.add(key);
+      const { id, index, run, query, subject, coordinates, row } = source;
+      added.push({ id, index, run, query, subject, coordinates, row, key, note, addedAt, serial: this.serial++ });
+    }
+    this.set({ candidates: [...state.candidates, ...added], selected, message: undefined });
+    return { ok: true, added: added.length, already: entries.length - added.length };
   }
 
   remove(keys: readonly string[]): void {
@@ -353,6 +385,9 @@ export class CandidateTray {
     const role = options.role ?? 'subject';
     const chosen = this.chosen('extract');
     if (typeof chosen === 'string') return this.refuse(chosen);
+    // Before anything is read: a run loaded from a session file has no original until one is attached.
+    const missing = this.missingOriginals(role, chosen);
+    if (missing !== undefined) return this.refuse(missing);
     const views = this.runViews();
     this.set({ busy: 'sequences', message: undefined });
     try {
@@ -486,9 +521,43 @@ export class CandidateTray {
     return records;
   }
 
-  /** The dataset revisions that a run read for `role`: where extraction reads the run's records. */
+  /**
+   * Why the selected candidates' sequences cannot be extracted from the `role` records now, or
+   * undefined: some come from runs loaded from a session file whose original FASTA of that role
+   * has not been chosen again and matched in Run details (REQ-23; never attached automatically).
+   * The alignment export needs no original. The extract form shows it as soon as such a candidate
+   * is selected.
+   */
+  missingOriginals(role: InputRole, chosen?: readonly Candidate[]): string | undefined {
+    const state = this.state.get();
+    const candidates = chosen ?? state.candidates.filter((candidate) => state.selected.has(candidate.key));
+    const views = this.runViews();
+    const numbers: number[] = [];
+    const seen = new Set<string>();
+    for (const candidate of candidates) {
+      if (seen.has(candidate.run.runId)) continue;
+      seen.add(candidate.run.runId);
+      const view = views.get(candidate.run.runId);
+      if (view?.fromSession !== undefined && view.attached?.[role] === undefined) numbers.push(candidate.run.number);
+    }
+    if (numbers.length === 0) return undefined;
+    if (numbers.length === 1) {
+      return `Run ${numbers[0]} was loaded from a session file; choose its original ${role} FASTA in Run details to extract sequences.`;
+    }
+    const list = `${numbers.slice(0, -1).join(', ')} and ${numbers[numbers.length - 1]}`;
+    return `Runs ${list} were loaded from a session file; choose their original ${role} FASTA in Run details to extract sequences.`;
+  }
+
+  /**
+   * The dataset revisions whose included records are a run's input of `role`, which extraction
+   * reads: the snapshot's, or for a run loaded from a session file, the original FASTA attached
+   * to it (`missingOriginals` refuses a run without one before anything is read).
+   */
   private revisionsOf(view: RunView, role: InputRole): readonly string[] {
-    return view.snapshot[role].revisionIds;
+    if (view.fromSession === undefined) return view.snapshot[role].revisionIds;
+    const attached = view.attached?.[role];
+    if (attached === undefined) throw new Error(`run ${view.snapshot.number} has no original ${role} FASTA attached`);
+    return attached.revisionIds;
   }
 
   /** The selected candidates in tray order, or why an output cannot be written now. */

@@ -965,6 +965,40 @@ textarea {
   color: var(--muted);
 }
 
+/* Session files (S15): the aside's panel, and a loaded run's origin in Run details. */
+.session-panel {
+  margin-top: 20px;
+  font-size: 0.9em;
+}
+
+.session-panel h2 {
+  font-size: 1em;
+}
+
+.session-actions,
+.loaded-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 6px 0;
+}
+
+.session-panel p,
+.loaded-run p {
+  overflow-wrap: anywhere;
+}
+
+.loaded-run {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 12px 8px;
+  margin: 8px 0;
+}
+
+.loaded-input h4 {
+  margin: 8px 0 4px;
+}
+
 .resume-notice {
   border: 1px solid var(--accent);
   background: var(--accent-bg);

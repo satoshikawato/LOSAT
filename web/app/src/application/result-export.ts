@@ -307,7 +307,8 @@ function exportRun(loaded: LoadedRun): ExportRun {
   const input = (role: 'query' | 'subject') => ({
     name: snapshot[role].name,
     records: snapshot[role].records.length,
-    bytes: snapshot[role].bytes.length,
+    // A run loaded from a session file has no input bytes here; its session gives their length.
+    bytes: snapshot[role].bytes?.length ?? loaded.run.fromSession?.inputs[role].length ?? 0,
     sha256: snapshot[role].sha256,
   });
   const { badge } = loaded;

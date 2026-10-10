@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import type { FastaParserKind, IndexedRecord } from '../../src/domain/dataset';
 import { sha256Hex } from '../../src/infra/browser/platform';
+import { uniformOffset } from '../../src/domain/sequence-layout';
 import { DataService, type DataServiceDeps } from '../../src/infra/data/data-service';
 import { MemoryBlockStore } from '../../src/infra/data/memory-block-store';
 import { FakeInputChecker } from '../../src/infra/fake/fake-fasta';
@@ -61,9 +62,9 @@ function service(scanner: RecordScanner, overrides: Partial<DataServiceDeps> = {
 }
 
 /** Writes a source, gives its record table to the scanner, and indexes it. */
-async function source(data: DataService, scanner: TableScanner, writer: FastaWriter, kind: ReaderKind, name: string, file?: (text: string) => File) {
+async function source(data: DataService, scanner: TableScanner, writer: FastaWriter, kind: ReaderKind, name: string, file?: (text: string) => File, every = 5) {
   const text = writer.toString();
-  scanner.add(text, writer.records.map((record, i) => indexedRecord(record, i, kind, 5)));
+  scanner.add(text, writer.records.map((record, i) => indexedRecord(record, i, kind, every)));
   const ref = await data.addSource(file?.(text) ?? new File([text], name));
   return data.indexSource(ref.sourceId, kind as FastaParserKind);
 }
@@ -162,6 +163,58 @@ describe('DataService.readResidues', () => {
     expect(file!.slices.length).toBeGreaterThan(100_000 / 4096);
     // Each array owns its whole buffer, so the Data worker transfers it (rpc.ts).
     for (const bytes of got.residues) expect(bytes.byteLength).toBe(bytes.buffer.byteLength);
+  });
+
+  it('reads only bytes near a short interval of a large record, with the default chunk size', async () => {
+    const scanner = new TableScanner();
+    const { data } = service(scanner);
+    const random = seeded(17);
+    // Uniform: 60 letters per line. Checkpoints: ragged lines, a checkpoint every 65,536 residues.
+    const uniform = new FastaWriter(random, 1);
+    const u = uniform.record('uniform chromosome', residues(random, 600_000, 'ACGT'), { kind: 'uniform', width: 60, eol: '\n' });
+    const ragged = new FastaWriter(random, 2);
+    const c = ragged.record('ragged protein', residues(random, 600_000, 'ACDEFGHIKLMNPQRSTVWY', 0.01), { kind: 'ragged', minWidth: 40, maxWidth: 80, eol: '\n', noise: true });
+    let counting: CountingFile | undefined;
+    const ru = await source(data, scanner, uniform, 1, 'u.fa', (text) => (counting = new CountingFile([text], 'u.fa')));
+    const fileU = counting!;
+    const rc = await source(data, scanner, ragged, 2, 'c.fa', (text) => (counting = new CountingFile([text], 'c.fa')), 65_536);
+    const fileC = counting!;
+    expect(ru.records[0]!.line_layout.kind).toBe('uniform');
+    expect(rc.records[0]!.line_layout.kind).toBe('checkpoints');
+    expect(fileU.size).toBeGreaterThan(600_000);
+
+    // Intervals in the middle, across a line end, across a checkpoint, and at the record's ends.
+    const intervals = [
+      { from: 300_001, to: 300_300 },
+      { from: 59, to: 125 },
+      { from: 65_530, to: 65_545 },
+      { from: 131_072, to: 131_072 },
+      { from: 1, to: 10 },
+      { from: 599_990, to: 600_000 },
+    ];
+    const gotU = await data.readResidues([ru.revisionId], 0, intervals);
+    expect(gotU.residues.map(read)).toEqual(intervals.map((each) => u.letters.slice(each.from - 1, each.to)));
+    // Exact for the formula: the interval's letters and the line ends between them.
+    const sizes = fileU.slices.slice(-intervals.length);
+    for (const [i, each] of intervals.entries()) {
+      const length = each.to - each.from + 1;
+      expect(sizes[i]).toBe(uniformOffset({ width: 60, eol: 1 }, 0, each.to - 1) + 1 - uniformOffset({ width: 60, eol: 1 }, 0, each.from - 1));
+      expect(sizes[i]).toBeLessThanOrEqual(length + Math.ceil(length / 60));
+    }
+
+    fileC.slices.length = 0;
+    const every = (rc.records[0]!.line_layout as { every: number }).every;
+    expect(every).toBe(65_536);
+    const gotC = await data.readResidues([rc.revisionId], 0, intervals);
+    expect(gotC.residues.map(read)).toEqual(intervals.map((each) => c.letters.slice(each.from - 1, each.to)));
+    // From the checkpoint before the interval to the one after it: under 2 * every residues
+    // of the file's density (white space and comments make bytes per residue above 1) plus slack.
+    const density = (1.5 * fileC.size) / 600_000;
+    const bound = (each: { from: number; to: number }) => (2 * every + (each.to - each.from + 1) + 200) * density;
+    expect(fileC.slices).toHaveLength(intervals.length);
+    for (const [i, bytes] of fileC.slices.entries()) expect(bytes).toBeLessThan(bound(intervals[i]!));
+    // Each read is far below the file (the old first read was the file's rest, up to 8 MiB).
+    expect(Math.max(...fileC.slices)).toBeLessThan(fileC.size / 2);
   });
 
   it('refuses intervals outside the record and positions outside the run input', async () => {

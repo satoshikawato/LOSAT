@@ -18,7 +18,7 @@ import {
   type RecordKey,
 } from '../../domain/dataset';
 import { hspTable, type HspTable } from '../../domain/hsp-table';
-import { ForwardReader, readerKind, readStart, residueCounts, type ReaderKind } from '../../domain/sequence-layout';
+import { ForwardReader, readLimit, readerKind, readStart, residueCounts, type ReaderKind } from '../../domain/sequence-layout';
 import type { OutputFormat } from '../../domain/output-format';
 import type { InputRole, ProgramId } from '../../domain/programs';
 import type {
@@ -273,13 +273,15 @@ export class DataService implements DataGateway {
 
   /**
    * Reads the residues of an interval forward from where the record's layout places its first
-   * residue, in ranges of at most `readChunkBytes`, and stops at its last residue.
+   * residue, in ranges of at most `readChunkBytes`, and stops at its last residue. The bytes
+   * read are bounded by the interval (`readLimit`), not by the record: a short interval of a
+   * 100 Mbp record reads a few hundred bytes (or up to two checkpoint spans), not a chunk.
    */
   private async readInterval(file: File, record: DatasetRecord, kind: ReaderKind, wanted: Interval): Promise<Uint8Array> {
     const count = wanted.to - wanted.from + 1;
     const start = readStart(record.line_layout, record.sequence_offset, wanted.from - 1);
     const reader = new ForwardReader(kind, start.skip, count);
-    const end = Math.min(record.end_offset, file.size);
+    const end = Math.min(readLimit(record, wanted.to - 1), file.size);
     for (let offset = start.offset; offset < end && !reader.done; offset += this.chunkBytes) {
       reader.feed(await readRange(file, offset, Math.min(end, offset + this.chunkBytes)));
     }

@@ -5,7 +5,7 @@
 // Data worker reads the File's bytes with these (infra/data/data-service.ts), so an extracted
 // sequence is the file's own letters (design §6.1, §11.4 "大文字小文字を保つ"): the scan's stored
 // value is upper-cased and reads `U` as `T`, but nothing here changes a byte.
-import type { FastaParserKind, LineLayout } from './dataset';
+import type { FastaParserKind, IndexedRecord, LineLayout } from './dataset';
 
 /** The reader kinds whose records extraction reads (abi_v2.md §9; kind 0 is not used by the app). */
 export type ReaderKind = FastaParserKind;
@@ -35,6 +35,22 @@ export function readStart(layout: LineLayout, sequenceOffset: number, first: num
   const offset = layout.offsets[k];
   if (offset === undefined) throw new RangeError(`the record has no checkpoint for residue ${first + 1}`);
   return { offset, skip: first - k * layout.every };
+}
+
+/**
+ * The end of the bytes that hold residues up to `last` (0-based) of a record: for a uniform
+ * layout the byte after residue `last`, exact by the formula; for checkpoints the checkpoint
+ * after it (the one of residue `(floor(last / every) + 1) * every`, which lies after `last`),
+ * or the record's end where there is none. The reads of an interval stay between `readStart`
+ * and this, so their size follows the interval and not the record.
+ */
+export function readLimit(record: Pick<IndexedRecord, 'line_layout' | 'sequence_offset' | 'end_offset'>, last: number): number {
+  const layout = record.line_layout;
+  const limit =
+    layout.kind === 'uniform'
+      ? uniformOffset(layout, record.sequence_offset, last) + 1
+      : (layout.offsets[Math.floor(last / layout.every) + 1] ?? record.end_offset);
+  return Math.min(limit, record.end_offset);
 }
 
 const LF = 0x0a;

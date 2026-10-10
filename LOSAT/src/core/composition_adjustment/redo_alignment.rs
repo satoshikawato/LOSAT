@@ -1733,7 +1733,7 @@ pub fn translated_subject_get_range<'seq>(
 //     ...
 // }
 // ```
-fn windows_from_protein_aligns(
+pub(crate) fn windows_from_protein_aligns(
     alignments: &Option<Box<BlastCompoAlignment>>,
     query_info: &BlastCompoQueryInfo,
     sequence_length: i32,
@@ -2454,6 +2454,195 @@ thread_local! {
     pub(crate) static X_REDO_PROBE: Cell<u8> = const { Cell::new(0) };
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1192-1211
+// ```c
+//             if (hsp_index == 0 ||
+//                     (subject_maybe_biased &&
+//                             (nearIdenticalStatus != oldNearIdenticalStatus))) {
+//
+//                 /* release previously allocated sequence data */
+//                 s_SequenceDataRelease(&subject);
+//                 s_SequenceDataRelease(&query);
+//                 status = callbacks->get_range(
+//                         matchingSeq,
+//                         &window->subject_range,
+//                         &subject,
+//                         &query_info[query_index].seq,
+//                         &window->query_range,
+//                         &query,
+//                         query_info[query_index].words,
+//                         window->align,
+//                         nearIdenticalStatus,
+//                         compo_adjust_mode,
+//                         FALSE,
+//                         &subject_maybe_biased
+//                 );
+// ```
+// No NCBI counterpart: identifies one `get_range` call of the window loop (window, HSP index, and the
+// `nearIdenticalStatus` and `subject_maybe_biased` values it is called with); the arguments of the
+// call are fixed by these. It does not change any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_NEWTONLANES): key of a `get_range` result made ahead.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct XLaneRangeKey {
+    window: usize,
+    hsp_index: usize,
+    should_test_identical: bool,
+    subject_maybe_biased: bool,
+}
+
+// No NCBI counterpart: removes and returns the `get_range` result made ahead for this call, if any;
+// it does not change any value NCBI computes.
+fn x_take_lane_range(
+    ranges: &mut Vec<(XLaneRangeKey, BlastRedoRangeResult)>,
+    key: XLaneRangeKey,
+) -> Option<BlastRedoRangeResult> {
+    let position = ranges.iter().position(|(stored, _)| *stored == key)?;
+    Some(ranges.swap_remove(position).1)
+}
+
+// No NCBI counterpart: number of Newton inputs gathered per TBLASTN prefetch (at least); it does not
+// change any value NCBI computes.
+const X_LANES_PREFETCH_INPUTS: usize = 32;
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1176-1198
+// ```c
+//             /* if the fist HSP for the pair or subject may have biased
+//                segments; if the subject is not biased, then segging is not
+//                necessary so we do not have to check for near identical status */
+//             if (hsp_index == 0 || subject_maybe_biased) {
+//                 nearIdenticalStatus = s_preliminaryTestNearIdentical(query_info,
+//                         window,
+//                         in_align,
+//                         params->near_identical_cutoff);
+//             }
+//
+//             /* if the first HSP for the pair or subject may have biased
+//                segments and near identical status is different than for the
+//                previous HSP */
+//             if (hsp_index == 0 ||
+//                     (subject_maybe_biased &&
+//                             (nearIdenticalStatus != oldNearIdenticalStatus))) {
+// ...
+//                 status = callbacks->get_range(
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1239-1244
+// ```c++
+//                             in_align, FALSE, subject_is_translated);
+//                     adjust_search_failed =
+//                             Blast_AdjustScores(matrix, query_composition,
+//                                     query.length,
+//                                     &subject_composition,
+//                                     subject.length,
+// ```
+// EXPERIMENT (LOSAT_X_NEWTONLANES), TBLASTN (translated subject, protein query): a replica of the
+// window loop of `blast_redo_one_match_with_workspace_queries_and_matrix_observed` from window
+// `first_window` on: the same `query_info` choice, the same near-identical test and `get_range` calls
+// with the same arguments (results kept in `ranges` for the loop), and the subject composition of
+// every HSP. Containment is not tested (every HSP is assumed not contained), so the inputs are a
+// superset of those the loop adjusts. Stops after the window in which `X_LANES_PREFETCH_INPUTS`
+// inputs are reached and solves them (`x_newton_lanes::prefetch`). Errors end the replica; the loop
+// meets them itself.
+// No NCBI counterpart: computes ahead what the loop computes; it does not change any value NCBI
+// computes.
+/// Returns the first window not covered.
+#[allow(clippy::too_many_arguments)]
+fn x_newton_lanes_prefetch_windows<'seq>(
+    windows: &[WindowInfo],
+    first_window: usize,
+    params: &BlastRedoAlignParams,
+    matching_seq: &BlastCompoMatchingSequence<'seq>,
+    query_infos: &[BlastCompoQueryInfo],
+    callbacks: &BlastRedoAlignCallbacks,
+    composition_workspace: &BlastCompositionWorkspace,
+    ranges: &mut Vec<(XLaneRangeKey, BlastRedoRangeResult)>,
+) -> usize {
+    let mut inputs = Vec::new();
+    let mut window_index = first_window;
+    while window_index < windows.len() && inputs.len() < X_LANES_PREFETCH_INPUTS {
+        let window = &windows[window_index];
+        window_index += 1;
+        let Some(query_info) = usize::try_from(window.query_range.context)
+            .ok()
+            .and_then(|query_index| query_infos.get(query_index))
+        else {
+            window_index = windows.len();
+            break;
+        };
+        let Some(window_align_head) = window.align.as_deref() else {
+            continue;
+        };
+        let mut range_position = 0usize;
+        let mut old_near_identical = false;
+        let mut subject_maybe_biased = true;
+        let mut hsp_index = 0usize;
+        let mut in_align = window.align.as_deref();
+        while let Some(current) = in_align {
+            let near_identical = if hsp_index == 0 || subject_maybe_biased {
+                preliminary_test_near_identical(
+                    query_info,
+                    window,
+                    current,
+                    params.near_identical_cutoff,
+                )
+            } else {
+                old_near_identical
+            };
+            if hsp_index == 0 || (subject_maybe_biased && near_identical != old_near_identical) {
+                let key = XLaneRangeKey {
+                    window: window_index - 1,
+                    hsp_index,
+                    should_test_identical: near_identical,
+                    subject_maybe_biased,
+                };
+                let Ok(next_range) = (callbacks.get_range)(
+                    matching_seq,
+                    &window.subject_range,
+                    &query_info.seq,
+                    &window.query_range,
+                    query_info.words.as_deref(),
+                    window_align_head,
+                    near_identical,
+                    subject_maybe_biased,
+                    params,
+                ) else {
+                    super::x_newton_lanes::prefetch(inputs);
+                    return windows.len();
+                };
+                subject_maybe_biased = next_range.subject_maybe_biased;
+                ranges.push((key, next_range));
+                range_position = ranges.len() - 1;
+            }
+            let range = &ranges[range_position].1;
+            if let Ok(subject_composition) = translated_subject_composition(
+                &range.subject.buffer,
+                &window.subject_range,
+                current,
+            ) {
+                if query_info.composition.num_true_amino_acids != 0
+                    && subject_composition.num_true_amino_acids != 0
+                {
+                    if let Some(input) = super::adjust_scores::x_newton_input(
+                        &params.matrix_info,
+                        &query_info.composition,
+                        range.query.length,
+                        &subject_composition,
+                        range.subject.length,
+                        params.compo_adjust_mode,
+                        composition_workspace,
+                    ) {
+                        inputs.push(input);
+                    }
+                }
+            }
+            old_near_identical = near_identical;
+            in_align = current.next.as_deref();
+            hsp_index += 1;
+        }
+    }
+    super::x_newton_lanes::prefetch(inputs);
+    window_index
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1232-1274
 // ```c++
 //                 if (compo_adjust_mode != eNoCompositionBasedStats &&
@@ -2583,8 +2772,38 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix_observed<'s
     //         return 1;
     // ```
     let mut adjusted_matrix = matrix_state.take();
+    // EXPERIMENT (LOSAT_X_NEWTONLANES): TBLASTN Newton inputs of the coming windows solved ahead,
+    // four per vector (x_newton_lanes.rs); their get_range results are kept for this loop.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1143-1143
+    // ```c
+    //     for (window_index = 0;  window_index < nWindows;  window_index++) {
+    // ```
+    // No NCBI counterpart: the windows of this match are walked ahead to collect the inputs of their
+    // `Blast_AdjustScores` calls; a result is used only by a call with the same input bits, and a kept
+    // range only by the `get_range` call with the same window, HSP index and flags. It does not change
+    // any value NCBI computes.
+    let x_lanes_on = super::x_newton_lanes::mode() != 0
+        && params.subject_is_translated
+        && !params.query_is_translated
+        && params.compo_adjust_mode != BlastCompoAdjustMode::NoCompositionBasedStats;
+    let mut x_next_prefetch = 0usize;
+    let mut x_lane_ranges: Vec<(XLaneRangeKey, BlastRedoRangeResult)> = Vec::new();
 
-    for window in windows {
+    for (window_index, window) in windows.iter().enumerate() {
+        // No NCBI counterpart: LOSAT_X_NEWTONLANES prefetch (see above); it does not change any value
+        // NCBI computes.
+        if x_lanes_on && window_index >= x_next_prefetch {
+            x_next_prefetch = x_newton_lanes_prefetch_windows(
+                &windows,
+                window_index,
+                params,
+                matching_seq,
+                query_infos,
+                callbacks,
+                composition_workspace,
+                &mut x_lane_ranges,
+            );
+        }
         let query_index = usize::try_from(window.query_range.context)?;
         // NCBI reference: ncbi-blast/c++/src/algo/blast/composition_adjustment/redo_alignment.c:1162-1188
         // ```c
@@ -2651,17 +2870,54 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix_observed<'s
                 //         &subject_maybe_biased
                 // );
                 // ```
-                let next_range = (callbacks.get_range)(
-                    matching_seq,
-                    &window.subject_range,
-                    &query_info.seq,
-                    &window.query_range,
-                    query_info.words.as_deref(),
-                    window_align_head,
-                    near_identical,
-                    subject_maybe_biased,
-                    params,
-                )?;
+                // No NCBI counterpart: with LOSAT_X_NEWTONLANES the result of this call made ahead (same
+                // window, HSP index, near-identical status and bias flag) is used; the shadow mode makes
+                // the call as well and compares. It does not change any value NCBI computes.
+                let x_stored = if x_lanes_on {
+                    x_take_lane_range(
+                        &mut x_lane_ranges,
+                        XLaneRangeKey {
+                            window: window_index,
+                            hsp_index,
+                            should_test_identical: near_identical,
+                            subject_maybe_biased,
+                        },
+                    )
+                } else {
+                    None
+                };
+                let next_range = if let Some(stored) = x_stored {
+                    if super::x_newton_lanes::mode() == 2 {
+                        let fresh = (callbacks.get_range)(
+                            matching_seq,
+                            &window.subject_range,
+                            &query_info.seq,
+                            &window.query_range,
+                            query_info.words.as_deref(),
+                            window_align_head,
+                            near_identical,
+                            subject_maybe_biased,
+                            params,
+                        )?;
+                        assert!(
+                            fresh == stored,
+                            "LOSAT_X_NEWTONLANESSHADOW: stored get_range result differs"
+                        );
+                    }
+                    stored
+                } else {
+                    (callbacks.get_range)(
+                        matching_seq,
+                        &window.subject_range,
+                        &query_info.seq,
+                        &window.query_range,
+                        query_info.words.as_deref(),
+                        window_align_head,
+                        near_identical,
+                        subject_maybe_biased,
+                        params,
+                    )?
+                };
                 subject_maybe_biased = next_range.subject_maybe_biased;
                 range_result = Some(next_range);
             }

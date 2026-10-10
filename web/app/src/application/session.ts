@@ -12,6 +12,11 @@
 // channel (ports/run-output.ts), as an engine's would, so a loaded run is in the RunStore like a
 // searched one. A file is refused with a message that says what is wrong and where, and then
 // nothing stays: every run staged or committed for it is deleted.
+//
+// The work on the page's thread is done in steps with a pause between them (`deps.pause`), so that
+// the page draws while a session of 100,000 queries is saved or opened (fix round 2): the checks of
+// the manifest, its JSON and its encoding, the snapshot of each loaded run; the gzip sink
+// compresses in pieces of its own.
 import { includedRecords, type DatasetRevision } from '../domain/dataset';
 import { hspLabel } from '../domain/extraction';
 import { splitOutfmt6Row, type Outfmt6Row } from '../domain/outfmt6';
@@ -21,7 +26,7 @@ import {
   blockHeader,
   CANDIDATES_BLOCK,
   checkCandidates,
-  checkManifest,
+  checkManifestPaced,
   containerEnd,
   containerHeader,
   hspRecordBounds,
@@ -114,6 +119,11 @@ export interface SessionDeps {
   readonly now: () => number;
   /** New run IDs (and group IDs) for loaded runs; the file's are never used. */
   readonly newRunId: () => string;
+  /**
+   * Lets the page draw between the steps of a long piece of work on its thread (the checks of a
+   * large manifest, its JSON); the composition gives the browser's next task. None: no pause.
+   */
+  readonly pause?: () => Promise<void>;
   /** Lower the sizes in tests. */
   readonly limits?: SessionLimits;
   readonly readBytes?: number;
@@ -159,11 +169,13 @@ interface PendingCandidate {
 export class Session {
   readonly state = new Store<SessionState>({ attaching: new Map() });
   private readonly limits: SessionLimits;
+  private readonly pause: () => Promise<void>;
   /** The Data worker's sources of each attached original, by `attachKey`: released when another replaces it. */
   private readonly attachedSources = new Map<string, readonly string[]>();
 
   constructor(private readonly deps: SessionDeps) {
     this.limits = deps.limits ?? SESSION_LIMITS;
+    this.pause = deps.pause ?? (() => Promise.resolve());
   }
 
   /** The coordinator's state: the runs, the loaded ones with their origin and their attached originals. */
@@ -203,15 +215,16 @@ export class Session {
             }))
         : [];
       // The checks of opening, so that a saved file always opens.
-      const manifest = checkManifest(
+      const manifest = await checkManifestPaced(
         { format: SESSION_FORMAT, schema: SESSION_SCHEMA, app: this.deps.app, savedAt: this.deps.now(), candidates: include, runs },
         this.limits,
+        this.pause,
       );
-      const manifestBytes = this.encodeBlock(MANIFEST_BLOCK, manifest, this.limits.manifestBytes);
+      const manifestBytes = await this.encodeBlock(MANIFEST_BLOCK, manifest, this.limits.manifestBytes);
       let candidatesBytes: Uint8Array | undefined;
       if (include) {
         checkCandidates({ candidates }, manifest, this.limits);
-        candidatesBytes = this.encodeBlock(CANDIDATES_BLOCK, { candidates }, this.limits.candidatesBytes);
+        candidatesBytes = await this.encodeBlock(CANDIDATES_BLOCK, { candidates }, this.limits.candidatesBytes);
       }
       const fileName = sessionFileName(manifest.savedAt);
       const bytes = await writeFile(this.deps.downloader, fileName, SESSION_MIME, (out) =>
@@ -273,8 +286,12 @@ export class Session {
     };
   }
 
-  private encodeBlock(name: string, value: unknown, max: number): Uint8Array {
-    const bytes = new TextEncoder().encode(JSON.stringify(value));
+  /** A JSON block's bytes; its text and its encoding are each a task of the page. */
+  private async encodeBlock(name: string, value: unknown, max: number): Promise<Uint8Array> {
+    await this.pause();
+    const text = JSON.stringify(value);
+    await this.pause();
+    const bytes = new TextEncoder().encode(text);
     if (bytes.length > max) throw new SessionFileError(`its ${name} would be ${bytes.length} bytes, more than the ${max} that a session file may have`);
     return bytes;
   }
@@ -358,7 +375,7 @@ export class Session {
           throw new SessionFileError(`The session file is damaged: its gzip data is not valid or is cut short${detail(error)}.`);
         }
         if (next.done === true) break;
-        for (const event of reader.push(next.value)) {
+        for (const event of await reader.pushPaced(next.value, this.pause)) {
           switch (event.type) {
             case 'manifest':
               manifest = event.manifest;
@@ -391,7 +408,8 @@ export class Session {
     // Everything that can fail comes before the runs join this working session, so that a refused
     // file leaves nothing in it (the caller deletes the runs from the Data worker).
     const groupIds = new Map<number, string>();
-    const inits = manifest!.runs.map((run, k) => this.runInit(run, committed[k]!, file.name, manifest!, groupIds));
+    const inits: SessionRunInit[] = [];
+    for (const [k, run] of manifest!.runs.entries()) inits.push(await this.runInit(run, committed[k]!, file.name, manifest!, groupIds));
     const pending = await this.candidateEntries(manifest!, committed, candidates);
     // Every check has passed: the runs join, then their candidates (the tray takes HSPs of completed runs only).
     const runs = this.deps.coordinator.addSessionRuns(inits);
@@ -503,7 +521,13 @@ export class Session {
     return rows;
   }
 
-  private runInit(run: SessionRun, committed: CommittedRun, fileName: string, manifest: SessionManifest, groupIds: Map<number, string>): SessionRunInit {
+  private async runInit(
+    run: SessionRun,
+    committed: CommittedRun,
+    fileName: string,
+    manifest: SessionManifest,
+    groupIds: Map<number, string>,
+  ): Promise<SessionRunInit> {
     let group;
     if (run.group !== undefined) {
       const groupId = groupIds.get(run.group.index) ?? this.deps.newRunId();
@@ -516,8 +540,8 @@ export class Session {
         program: run.program,
         ...(run.title === undefined ? {} : { title: run.title }),
         argv: Object.freeze([...run.argv]),
-        query: inputSnapshot(run.query),
-        subject: inputSnapshot(run.subject),
+        query: await this.inputSnapshot(run.query),
+        subject: await this.inputSnapshot(run.subject),
         requestedThreads: run.requestedThreads,
         queuedAt: run.queuedAt,
         ...(group === undefined ? {} : { group }),
@@ -533,6 +557,20 @@ export class Session {
         inputs: { query: run.query, subject: run.subject },
       },
     };
+  }
+
+  /**
+   * A loaded run's input as its snapshot holds it: a record for each record of the input. Making
+   * the records and freezing them are steps of their own, with pauses around them (each is tens
+   * of milliseconds in WebKit with 100,000 records).
+   */
+  private async inputSnapshot(input: SessionInput): Promise<InputSnapshot> {
+    const { id, length } = input.records;
+    await this.pause();
+    const records = new Array<{ readonly id: string; readonly length: number }>(id.length);
+    for (let k = 0; k < id.length; k++) records[k] = { id: id[k]!, length: length[k]! };
+    await this.pause();
+    return Object.freeze({ name: input.name, sha256: input.sha256, revisionIds: Object.freeze([]), records: Object.freeze(records) });
   }
 
   // --- re-attaching the original FASTA ---------------------------------------------------------------
@@ -711,12 +749,6 @@ class RunSender {
 }
 
 /** The InputSnapshot of a loaded run: the file's identity of the input, without bytes or revisions. */
-function inputSnapshot(input: SessionInput): InputSnapshot {
-  const { id, length } = input.records;
-  const records = new Array<{ readonly id: string; readonly length: number }>(id.length);
-  for (let k = 0; k < id.length; k++) records[k] = { id: id[k]!, length: length[k]! };
-  return Object.freeze({ name: input.name, sha256: input.sha256, revisionIds: Object.freeze([]), records: Object.freeze(records) });
-}
 
 /**
  * The HSP record of candidate `i` of the file (run `position` there), read from the loaded run,

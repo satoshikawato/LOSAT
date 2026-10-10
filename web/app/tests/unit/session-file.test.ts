@@ -8,6 +8,7 @@ import {
   blockHeader,
   checkCandidates,
   checkManifest,
+  checkManifestPaced,
   containerEnd,
   containerHeader,
   hspRecordBounds,
@@ -559,5 +560,67 @@ describe('what a loaded run must agree with', () => {
       message: 'record 2 is "s3" (length 12) in the saved run, but the chosen files give "s4" (length 12)',
     });
     expect(matchSources(twice, [y, y])).toEqual({ ok: false, message: 'record 2 is "s1" (length 10) in the saved run, but the chosen files give "s9" (length 10)' });
+  });
+});
+
+describe('the paced checks of a large manifest (fix round 2)', () => {
+  /** A run whose query has `n` records, as a session of `n` queries saves it. */
+  function large(n: number): SessionManifest {
+    const query = {
+      name: 'query.fa',
+      sha256: hex('a'),
+      length: 20 * n,
+      reader: 1 as const,
+      records: {
+        id: Array.from({ length: n }, (_, k) => `q${k}`),
+        length: Array.from({ length: n }, () => 8),
+        sha256: Array.from({ length: n }, () => hex('1')),
+      },
+      sources: [{ name: 'query.fa', size: 20 * n, records: n + 2, excluded: [3, n] }],
+    };
+    return manifest({ runs: [run({ query })] });
+  }
+
+  it('gives the manifest that checkManifest gives, frozen and written the same, pausing between its steps', async () => {
+    const value = large(50_000);
+    let pauses = 0;
+    const paced = await checkManifestPaced(JSON.parse(JSON.stringify(value)), SESSION_LIMITS, async () => void pauses++);
+    const whole = checkManifest(JSON.parse(JSON.stringify(value)));
+    expect(paced).toEqual(whole);
+    expect(JSON.stringify(paced)).toBe(JSON.stringify(value));
+    expect(Object.isFrozen(paced.runs[0]!.query.records.id)).toBe(true);
+    expect(Object.isFrozen(paced.runs[0]!.query.records.sha256)).toBe(true);
+    expect(Object.isFrozen(paced.runs[0]!.query.sources[0]!.excluded)).toBe(true);
+    // Steps of at most 20,000 records, and a step for each long column frozen.
+    expect(pauses).toBeGreaterThanOrEqual(2 + 3);
+  });
+
+  it('refuses what checkManifest refuses, with the same message', async () => {
+    const value = JSON.parse(JSON.stringify(large(30_000)));
+    value.runs[0].query.records.sha256[25_000] = 'not a hash';
+    const message = 'runs[0].query.records.sha256[25000] is not a SHA-256 (64 lower-case hex digits)';
+    expect(() => checkManifest(JSON.parse(JSON.stringify(value)))).toThrow(message);
+    await expect(checkManifestPaced(value, SESSION_LIMITS, () => Promise.resolve())).rejects.toThrow(message);
+  });
+
+  it('reads a container with pushPaced as push reads it, pausing while it checks the manifest', async () => {
+    const m = large(25_000);
+    const bytes = container(m, [CANDIDATES[0]!]);
+    const reader = new SessionFileReader();
+    let pauses = 0;
+    const events: SessionEvent[] = [];
+    for (let at = 0; at < bytes.length; at += 65_536) {
+      for (const event of await reader.pushPaced(bytes.slice(at, at + 65_536), async () => void pauses++)) {
+        if (event.type !== 'data') events.push(event);
+      }
+    }
+    reader.finish();
+    expect(events).toEqual(read(bytes, 65_536).events);
+    expect(events[0]).toMatchObject({ type: 'manifest' });
+    expect(pauses).toBeGreaterThanOrEqual(2);
+    // A refusal fails the reader as push does.
+    const damaged = new SessionFileReader();
+    await expect(damaged.pushPaced(encoder.encode('LOSAT-WEB-SESSION 1\nmanifest 2\n{}\n'), () => Promise.resolve())).rejects.toThrow(SessionFileError);
+    expect(() => damaged.push(new Uint8Array(1))).toThrow('The session file is damaged.');
   });
 });

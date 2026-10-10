@@ -119,6 +119,7 @@ export function createApp(options: AppOptions = {}): App {
     app: APP_BUILD,
     now: () => Date.now(),
     newRunId: () => crypto.randomUUID(),
+    pause: nextTask,
   });
   const runFiles = new RunFiles({
     draft,

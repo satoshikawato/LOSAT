@@ -137,10 +137,9 @@ require `to-port` rows to go down; ports happen in the sweeps (AGENTS.md rule 10
 
 ## Origin of the first rows
 
-The first `LEDGER.tsv` (2026-10-10) was converted from a mapping of 664 NCBI cases to LOSAT tests
-made on `main` b28e42e1 (equivalent -> `ported`, partial -> `partial`, e2e_only -> `e2e`,
-gap -> `to-port`, not_ported and out_of_scope -> `n-a`; verifier corrections applied; `DISABLED`
-cases set to `n-a`). Where the cited test could not be found on the current `main`, the row is
-`partial` with the evidence (paths at b28e42e1) in `note`. The cases of gencode_singleton,
-hspfilter_besthit, hspfilter_culling, ntscan and subj_ranges (58 with ntscan's 44 macro cases)
-were not mapped and are unlisted.
+The first `LEDGER.tsv` (2026-10-10) was converted from a mapping of all 722 NCBI cases to LOSAT
+tests made on `main` b28e42e1, each module's mapping checked by a second reader (equivalent ->
+`ported`, partial -> `partial`, e2e_only -> `e2e`, gap -> `to-port`, not_ported and out_of_scope
+-> `n-a`; the 18 refuted claims take the reader's corrected status and evidence; `DISABLED` cases
+set to `n-a`). Where the cited test could not be found on the current `main`, the row is
+`partial` with the evidence (paths at b28e42e1) in `note`.

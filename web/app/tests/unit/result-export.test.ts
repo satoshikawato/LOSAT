@@ -387,12 +387,12 @@ describe('the report', () => {
     // The subject's heading and sections of outfmt 0, as written, escaped.
     const out0 = decoder.decode(run.out0);
     const heading = out0.slice(out0.indexOf('> <b>'), out0.indexOf('Length=500\n\n') + 'Length=500\n\n'.length);
-    expect(html).toContain(`<pre class="heading">${heading.replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;')}</pre>`);
+    expect(html).toContain(`<pre class="heading">\n${heading.replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;')}</pre>`);
     expect(html).toContain('<td>&lt;b&gt;&quot;s2&quot;&lt;/b&gt;</td>');
     expect(html).not.toContain('<b>');
     expect(html.match(/<pre class="section">/g)).toHaveLength(4);
     expect(html).toContain('outfmt 0 does not show HSP 1.4.');
-    expect(html).toContain('<pre>Warning: &lt;check&gt; &amp; &quot;this&quot;\n</pre>');
+    expect(html).toContain('<pre>\nWarning: &lt;check&gt; &amp; &quot;this&quot;\n</pre>');
     expect(html.trimEnd().endsWith('</html>')).toBe(true);
   });
 

@@ -165,14 +165,20 @@ export function reportTableRow(hsp: ExportedHsp): string {
 export const REPORT_TABLE_END = '</tbody>\n</table></div>\n';
 export const REPORT_ALIGNMENTS_START = '<h3>Alignments (outfmt 0, as written)</h3>\n';
 
+/**
+ * Text as written in a `<pre>`: the line end after the start tag is one that the HTML parser drops,
+ * so a text that starts with a line end keeps it.
+ */
+const pre = (className: string, text: string): string => `<pre${className === '' ? '' : ` class="${className}"`}>\n${escapeHtml(text)}</pre>\n`;
+
 /** A subject heading of outfmt 0 (defline and Length=), as written. */
 export function reportHeading(heading: string): string {
-  return `<pre class="heading">${escapeHtml(heading)}</pre>\n`;
+  return pre('heading', heading);
 }
 
 /** An HSP's section of outfmt 0 (score lines and alignment), as written. */
 export function reportSection(hsp: ExportedHsp, section: string): string {
-  return `<p class="hsp-label">HSP ${hspLabel(hsp.qIdx, hsp.rank)}</p>\n<pre class="section">${escapeHtml(section)}</pre>\n`;
+  return `<p class="hsp-label">HSP ${hspLabel(hsp.qIdx, hsp.rank)}</p>\n${pre('section', section)}`;
 }
 
 /** The query's HSPs that outfmt 0 does not show, by label. */
@@ -184,7 +190,7 @@ export const REPORT_QUERY_END = '</section>\n';
 
 /** The page after the last query: the run's warnings, as the engine wrote them. */
 export function reportTail(diagnostics: string): string {
-  const warnings = diagnostics === '' ? '<p class="muted">The engine wrote no warnings.</p>\n' : `<pre>${escapeHtml(diagnostics)}</pre>\n`;
+  const warnings = diagnostics === '' ? '<p class="muted">The engine wrote no warnings.</p>\n' : pre('', diagnostics);
   return (
     `<section>\n<h2>Warnings</h2>\n${warnings}</section>\n` +
     '<footer class="muted"><p>LOSAT Web report: an application format of LOSAT Web, not an NCBI BLAST report.</p></footer>\n' +

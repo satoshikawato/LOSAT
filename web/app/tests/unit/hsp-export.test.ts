@@ -375,6 +375,11 @@ describe('the report', () => {
     }
   });
 
+  it('keeps a text that starts with a line end as written inside <pre> (the parser drops one after the tag)', () => {
+    expect(reportSection(hsp(), '\n Score = 1\n')).toBe('<p class="hsp-label">HSP 1.1</p>\n<pre class="section">\n\n Score = 1\n</pre>\n');
+    expect(reportHeading('> s1\nLength=5\n')).toBe('<pre class="heading">\n&gt; s1\nLength=5\n</pre>\n');
+  });
+
   it('lists the HSPs that outfmt 0 does not show, and says when there are no warnings', () => {
     expect(reportNotInOutfmt0([])).toBe('');
     expect(reportNotInOutfmt0(['1.2', '1.3'])).toContain('outfmt 0 does not show HSPs 1.2, 1.3.');

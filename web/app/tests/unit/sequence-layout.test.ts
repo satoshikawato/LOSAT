@@ -135,6 +135,8 @@ describe('reading residues forward from the layout of a record', () => {
     expect([...'EFIJLOPQXZ*-0 ;'].some((c) => stores(1, c.charCodeAt(0)))).toBe(false);
     expect([...'AZaz*'].every((c) => stores(2, c.charCodeAt(0)))).toBe(true);
     expect([...'-0 ;@[`{'].some((c) => stores(2, c.charCodeAt(0)))).toBe(false);
+    // Bytes 0x80-0xFF (UTF-8, a byte order mark) are never residues.
+    for (let byte = 0x80; byte < 0x100; byte++) expect(stores(1, byte) || stores(2, byte), `0x${byte.toString(16)}`).toBe(false);
   });
 
   it('accepts reader kinds 1 and 2 only', () => {

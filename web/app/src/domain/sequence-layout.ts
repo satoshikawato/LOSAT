@@ -44,7 +44,7 @@ const SEMICOLON = 0x3b;
 /** Kind 1 stores these letters in either case (abi_v2.md §9). */
 const NUCLEOTIDE_LETTERS = 'ABCDGHKMNRSTUVWY';
 const STORED: Readonly<Record<ReaderKind, Uint8Array>> = {
-  1: table((byte) => NUCLEOTIDE_LETTERS.includes(String.fromCharCode(byte).toUpperCase())),
+  1: table((byte) => byte < 0x80 && NUCLEOTIDE_LETTERS.includes(String.fromCharCode(byte).toUpperCase())),
   2: table((byte) => (byte >= 0x41 && byte <= 0x5a) || (byte >= 0x61 && byte <= 0x7a) || byte === 0x2a),
 };
 /** Space, tab, VT and FF: skipped at the start of a line. */

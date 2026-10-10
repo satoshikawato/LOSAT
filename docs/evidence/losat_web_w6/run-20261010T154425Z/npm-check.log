@@ -1,0 +1,54 @@
+
+> losat-web@0.0.0 check
+> npm run typecheck && npm run lint && npm run test && npm run build
+
+
+> losat-web@0.0.0 typecheck
+> vue-tsc --noEmit
+
+
+> losat-web@0.0.0 lint
+> eslint .
+
+
+> losat-web@0.0.0 test
+> vitest run
+
+(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+  - import "./output-format" without a file extension (src/domain/verification.ts:9:35). Add the file extension
+  - import "./programs" without a file extension (src/domain/verification.ts:10:32). Add the file extension
+Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+
+ RUN  v5.0.2 /home/kawato/losat-work/.worktrees/web-gui-app/web/app
+
+
+ Test Files  36 passed | 2 skipped (38)
+      Tests  656 passed | 61 skipped (717)
+   Start at  00:49:04
+   Duration  6.62s (tests 53%, transform 41%, import 5%, worker 1%)
+
+  Transform  transforming modules took 11.68s · 41% of tracked time, re-done on every run
+             persist transforms across runs with fsModuleCache: true
+             learn more: https://vitest.dev/guide/improving-performance#caching-between-reruns
+
+
+> losat-web@0.0.0 build
+> vite build
+
+(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+  - import "./output-format" without a file extension (src/domain/verification.ts:9:35). Add the file extension
+  - import "./programs" without a file extension (src/domain/verification.ts:10:32). Add the file extension
+Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+vite v8.3.1 building client environment for production...
+transforming...
+✓ 153 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                          0.39 kB │ gzip:   0.26 kB
+dist/assets/thread-worker-BFsv56lD.js   17.92 kB
+dist/assets/engine-worker-uOxZ35d8.js   30.17 kB
+dist/assets/data-worker-Db0IVyvC.js     40.12 kB
+dist/assets/index-CKLaeZ_U.css          29.57 kB │ gzip:   6.41 kB
+dist/assets/index-ynBkXPAG.js          409.50 kB │ gzip: 130.57 kB
+
+✓ built in 494ms

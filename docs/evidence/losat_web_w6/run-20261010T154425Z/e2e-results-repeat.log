@@ -1,0 +1,132 @@
+[WebServer] (!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+[WebServer]   - import "./output-format" without a file extension (src/domain/verification.ts:9:35). Add the file extension
+[WebServer]   - import "./programs" without a file extension (src/domain/verification.ts:10:32). Add the file extension
+[WebServer] Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+[WebServer] (!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+[WebServer]   - import "./output-format" without a file extension (src/domain/verification.ts:9:35). Add the file extension
+[WebServer]   - import "./programs" without a file extension (src/domain/verification.ts:10:32). Add the file extension
+[WebServer] Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+
+Running 90 tests using 2 workers
+
+  ✓   2 [chromium] › tests/e2e/results.spec.ts:512:3 › BLASTN: the header block is the run's; the Descriptions, Graphic Summary and HSP table are the outfmt 6 rows, the Alignments outfmt 0's text; units, frames and run details (3.2s)
+  ✓   1 [chromium] › tests/e2e/results.spec.ts:512:3 › BLASTP: the header block is the run's; the Descriptions, Graphic Summary and HSP table are the outfmt 6 rows, the Alignments outfmt 0's text; units, frames and run details (5.9s)
+  ✓   3 [chromium] › tests/e2e/results.spec.ts:512:3 › TBLASTN: the header block is the run's; the Descriptions, Graphic Summary and HSP table are the outfmt 6 rows, the Alignments outfmt 0's text; units, frames and run details (5.0s)
+  ✓   5 [chromium] › tests/e2e/results.spec.ts:842:1 › an HSP that outfmt 0 does not show, and a hit list that may have reached its limit (1.6s)
+  ✓   4 [chromium] › tests/e2e/results.spec.ts:512:3 › TBLASTX: the header block is the run's; the Descriptions, Graphic Summary and HSP table are the outfmt 6 rows, the Alignments outfmt 0's text; units, frames and run details (4.8s)
+  ✓   6 [chromium] › tests/e2e/results.spec.ts:941:1 › the Descriptions cut at 100 subjects: the marks follow the listed rows (code review 2 L2) (1.1s)
+  ✓   7 [chromium] › tests/e2e/results.spec.ts:984:1 › BLASTN: an HSP of one letter has no orientation in its record; the note points to outfmt 0's Strand= line (2.4s)
+  ✓   8 [chromium] › tests/e2e/results.spec.ts:1043:1 › selection by HSP identity: sorting keeps the selected HSP; another subject or query moves it (4.7s)
+  ✓   9 [chromium] › tests/e2e/results.spec.ts:1097:1 › the one page (NCBI classic): the Graphic Summary, the Descriptions and the Alignments without a tab click; a Description chosen brings its alignments into view (2.7s)
+  ✓  11 [chromium] › tests/e2e/results.spec.ts:1328:1 › many queries; view filters change the view, not the search; the notices tell filtered out, no hits and a failed run apart (5.3s)
+  ✓  12 [chromium] › tests/e2e/results.spec.ts:1502:1 › the dot plot: the HSPs of the pair on a canvas; zoom; choosing an HSP on it or in the list; its popup (3.2s)
+  ✓  10 [chromium] › tests/e2e/results.spec.ts:1158:1 › the Alignments: a block per Range; Next, Previous and First Match; the previous and next subject; Ranges far apart in a window (10.2s)
+  ✓  13 [chromium] › tests/e2e/results.spec.ts:1653:1 › the dot plot: Download SVG saves the plot as shown, as a plain SVG with the canvas's titles and without the halo (S15) (2.4s)
+  ✓  14 [chromium] › tests/e2e/results.spec.ts:1708:1 › the dot plot: on a desktop screen, a popup that has no room beside a short plot is scrolled into view by the first click (S13b code review 2) (2.0s)
+  ✓  15 [chromium] › tests/e2e/results.spec.ts:1731:1 › narrow screens: the results are no wider than the screen; "Open results" shows them; the tables show the key values first (3.0s)
+  ✓  16 [chromium] › tests/e2e/results.spec.ts:512:3 › BLASTN: the header block is the run's; the Descriptions, Graphic Summary and HSP table are the outfmt 6 rows, the Alignments outfmt 0's text; units, frames and run details (3.6s)
+  ✓  17 [chromium] › tests/e2e/results.spec.ts:512:3 › BLASTP: the header block is the run's; the Descriptions, Graphic Summary and HSP table are the outfmt 6 rows, the Alignments outfmt 0's text; units, frames and run details (8.8s)
+  ✓  18 [chromium] › tests/e2e/results.spec.ts:512:3 › TBLASTN: the header block is the run's; the Descriptions, Graphic Summary and HSP table are the outfmt 6 rows, the Alignments outfmt 0's text; units, frames and run details (6.9s)
+  ✓  20 [chromium] › tests/e2e/results.spec.ts:842:1 › an HSP that outfmt 0 does not show, and a hit list that may have reached its limit (1.7s)
+  ✓  21 [chromium] › tests/e2e/results.spec.ts:941:1 › the Descriptions cut at 100 subjects: the marks follow the listed rows (code review 2 L2) (1.1s)
+  ✓  19 [chromium] › tests/e2e/results.spec.ts:512:3 › TBLASTX: the header block is the run's; the Descriptions, Graphic Summary and HSP table are the outfmt 6 rows, the Alignments outfmt 0's text; units, frames and run details (5.2s)
+  ✓  22 [chromium] › tests/e2e/results.spec.ts:984:1 › BLASTN: an HSP of one letter has no orientation in its record; the note points to outfmt 0's Strand= line (2.7s)
+  ✓  24 [chromium] › tests/e2e/results.spec.ts:1097:1 › the one page (NCBI classic): the Graphic Summary, the Descriptions and the Alignments without a tab click; a Description chosen brings its alignments into view (2.6s)
+  ✓  23 [chromium] › tests/e2e/results.spec.ts:1043:1 › selection by HSP identity: sorting keeps the selected HSP; another subject or query moves it (4.7s)
+  ✓  26 [chromium] › tests/e2e/results.spec.ts:1328:1 › many queries; view filters change the view, not the search; the notices tell filtered out, no hits and a failed run apart (5.4s)
+  ✓  25 [chromium] › tests/e2e/results.spec.ts:1158:1 › the Alignments: a block per Range; Next, Previous and First Match; the previous and next subject; Ranges far apart in a window (10.1s)
+  ✓  27 [chromium] › tests/e2e/results.spec.ts:1502:1 › the dot plot: the HSPs of the pair on a canvas; zoom; choosing an HSP on it or in the list; its popup (3.7s)
+  ✓  28 [chromium] › tests/e2e/results.spec.ts:1653:1 › the dot plot: Download SVG saves the plot as shown, as a plain SVG with the canvas's titles and without the halo (S15) (2.4s)
+  ✓  29 [chromium] › tests/e2e/results.spec.ts:1708:1 › the dot plot: on a desktop screen, a popup that has no room beside a short plot is scrolled into view by the first click (S13b code review 2) (2.1s)
+  ✓  30 [chromium] › tests/e2e/results.spec.ts:1731:1 › narrow screens: the results are no wider than the screen; "Open results" shows them; the tables show the key values first (1.9s)
+  ✓  31 [firefox] › tests/e2e/results.spec.ts:512:3 › BLASTN: the header block is the run's; the Descriptions, Graphic Summary and HSP table are the outfmt 6 rows, the Alignments outfmt 0's text; units, frames and run details (7.1s)
+  ✓  32 [firefox] › tests/e2e/results.spec.ts:512:3 › BLASTP: the header block is the run's; the Descriptions, Graphic Summary and HSP table are the outfmt 6 rows, the Alignments outfmt 0's text; units, frames and run details (9.9s)
+  ✓  33 [firefox] › tests/e2e/results.spec.ts:512:3 › TBLASTN: the header block is the run's; the Descriptions, Graphic Summary and HSP table are the outfmt 6 rows, the Alignments outfmt 0's text; units, frames and run details (9.2s)
+  ✓  34 [firefox] › tests/e2e/results.spec.ts:512:3 › TBLASTX: the header block is the run's; the Descriptions, Graphic Summary and HSP table are the outfmt 6 rows, the Alignments outfmt 0's text; units, frames and run details (6.7s)
+  ✓  35 [firefox] › tests/e2e/results.spec.ts:842:1 › an HSP that outfmt 0 does not show, and a hit list that may have reached its limit (4.6s)
+  ✓  36 [firefox] › tests/e2e/results.spec.ts:941:1 › the Descriptions cut at 100 subjects: the marks follow the listed rows (code review 2 L2) (2.9s)
+  ✓  37 [firefox] › tests/e2e/results.spec.ts:984:1 › BLASTN: an HSP of one letter has no orientation in its record; the note points to outfmt 0's Strand= line (4.2s)
+  ✓  38 [firefox] › tests/e2e/results.spec.ts:1043:1 › selection by HSP identity: sorting keeps the selected HSP; another subject or query moves it (7.6s)
+  ✘  39 [firefox] › tests/e2e/results.spec.ts:1097:1 › the one page (NCBI classic): the Graphic Summary, the Descriptions and the Alignments without a tab click; a Description chosen brings its alignments into view (3.9s)
+  ✓  41 [firefox] › tests/e2e/results.spec.ts:1328:1 › many queries; view filters change the view, not the search; the notices tell filtered out, no hits and a failed run apart (9.8s)
+  ✓  40 [firefox] › tests/e2e/results.spec.ts:1158:1 › the Alignments: a block per Range; Next, Previous and First Match; the previous and next subject; Ranges far apart in a window (13.2s)
+  ✓  42 [firefox] › tests/e2e/results.spec.ts:1502:1 › the dot plot: the HSPs of the pair on a canvas; zoom; choosing an HSP on it or in the list; its popup (5.3s)
+  ✓  43 [firefox] › tests/e2e/results.spec.ts:1653:1 › the dot plot: Download SVG saves the plot as shown, as a plain SVG with the canvas's titles and without the halo (S15) (4.4s)
+  ✓  44 [firefox] › tests/e2e/results.spec.ts:1708:1 › the dot plot: on a desktop screen, a popup that has no room beside a short plot is scrolled into view by the first click (S13b code review 2) (4.0s)
+  ✓  45 [firefox] › tests/e2e/results.spec.ts:1731:1 › narrow screens: the results are no wider than the screen; "Open results" shows them; the tables show the key values first (5.4s)
+  ✓  46 [firefox] › tests/e2e/results.spec.ts:512:3 › BLASTN: the header block is the run's; the Descriptions, Graphic Summary and HSP table are the outfmt 6 rows, the Alignments outfmt 0's text; units, frames and run details (6.1s)
+  ✓  47 [firefox] › tests/e2e/results.spec.ts:512:3 › BLASTP: the header block is the run's; the Descriptions, Graphic Summary and HSP table are the outfmt 6 rows, the Alignments outfmt 0's text; units, frames and run details (9.1s)
+  ✓  48 [firefox] › tests/e2e/results.spec.ts:512:3 › TBLASTN: the header block is the run's; the Descriptions, Graphic Summary and HSP table are the outfmt 6 rows, the Alignments outfmt 0's text; units, frames and run details (6.6s)
+  ✓  50 [firefox] › tests/e2e/results.spec.ts:842:1 › an HSP that outfmt 0 does not show, and a hit list that may have reached its limit (3.0s)
+  ✓  49 [firefox] › tests/e2e/results.spec.ts:512:3 › TBLASTX: the header block is the run's; the Descriptions, Graphic Summary and HSP table are the outfmt 6 rows, the Alignments outfmt 0's text; units, frames and run details (5.9s)
+  ✓  51 [firefox] › tests/e2e/results.spec.ts:941:1 › the Descriptions cut at 100 subjects: the marks follow the listed rows (code review 2 L2) (2.1s)
+  ✓  52 [firefox] › tests/e2e/results.spec.ts:984:1 › BLASTN: an HSP of one letter has no orientation in its record; the note points to outfmt 0's Strand= line (2.8s)
+  ✓  54 [firefox] › tests/e2e/results.spec.ts:1097:1 › the one page (NCBI classic): the Graphic Summary, the Descriptions and the Alignments without a tab click; a Description chosen brings its alignments into view (3.3s)
+  ✓  53 [firefox] › tests/e2e/results.spec.ts:1043:1 › selection by HSP identity: sorting keeps the selected HSP; another subject or query moves it (6.1s)
+  ✓  56 [firefox] › tests/e2e/results.spec.ts:1328:1 › many queries; view filters change the view, not the search; the notices tell filtered out, no hits and a failed run apart (5.8s)
+  ✓  57 [firefox] › tests/e2e/results.spec.ts:1502:1 › the dot plot: the HSPs of the pair on a canvas; zoom; choosing an HSP on it or in the list; its popup (3.8s)
+  ✓  55 [firefox] › tests/e2e/results.spec.ts:1158:1 › the Alignments: a block per Range; Next, Previous and First Match; the previous and next subject; Ranges far apart in a window (10.8s)
+  ✓  58 [firefox] › tests/e2e/results.spec.ts:1653:1 › the dot plot: Download SVG saves the plot as shown, as a plain SVG with the canvas's titles and without the halo (S15) (2.7s)
+  ✓  59 [firefox] › tests/e2e/results.spec.ts:1708:1 › the dot plot: on a desktop screen, a popup that has no room beside a short plot is scrolled into view by the first click (S13b code review 2) (3.1s)
+  ✓  60 [firefox] › tests/e2e/results.spec.ts:1731:1 › narrow screens: the results are no wider than the screen; "Open results" shows them; the tables show the key values first (3.4s)
+  ✓  61 [webkit] › tests/e2e/results.spec.ts:512:3 › BLASTN: the header block is the run's; the Descriptions, Graphic Summary and HSP table are the outfmt 6 rows, the Alignments outfmt 0's text; units, frames and run details (4.6s)
+  ✓  62 [webkit] › tests/e2e/results.spec.ts:512:3 › BLASTP: the header block is the run's; the Descriptions, Graphic Summary and HSP table are the outfmt 6 rows, the Alignments outfmt 0's text; units, frames and run details (8.0s)
+  ✓  63 [webkit] › tests/e2e/results.spec.ts:512:3 › TBLASTN: the header block is the run's; the Descriptions, Graphic Summary and HSP table are the outfmt 6 rows, the Alignments outfmt 0's text; units, frames and run details (6.9s)
+  ✓  65 [webkit] › tests/e2e/results.spec.ts:842:1 › an HSP that outfmt 0 does not show, and a hit list that may have reached its limit (3.7s)
+  ✓  64 [webkit] › tests/e2e/results.spec.ts:512:3 › TBLASTX: the header block is the run's; the Descriptions, Graphic Summary and HSP table are the outfmt 6 rows, the Alignments outfmt 0's text; units, frames and run details (6.4s)
+  ✓  66 [webkit] › tests/e2e/results.spec.ts:941:1 › the Descriptions cut at 100 subjects: the marks follow the listed rows (code review 2 L2) (2.9s)
+  ✓  67 [webkit] › tests/e2e/results.spec.ts:984:1 › BLASTN: an HSP of one letter has no orientation in its record; the note points to outfmt 0's Strand= line (3.2s)
+  ✓  69 [webkit] › tests/e2e/results.spec.ts:1097:1 › the one page (NCBI classic): the Graphic Summary, the Descriptions and the Alignments without a tab click; a Description chosen brings its alignments into view (4.1s)
+  ✓  68 [webkit] › tests/e2e/results.spec.ts:1043:1 › selection by HSP identity: sorting keeps the selected HSP; another subject or query moves it (7.2s)
+  ✓  71 [webkit] › tests/e2e/results.spec.ts:1328:1 › many queries; view filters change the view, not the search; the notices tell filtered out, no hits and a failed run apart (7.1s)
+  ✓  70 [webkit] › tests/e2e/results.spec.ts:1158:1 › the Alignments: a block per Range; Next, Previous and First Match; the previous and next subject; Ranges far apart in a window (12.0s)
+  ✓  72 [webkit] › tests/e2e/results.spec.ts:1502:1 › the dot plot: the HSPs of the pair on a canvas; zoom; choosing an HSP on it or in the list; its popup (5.0s)
+  ✓  73 [webkit] › tests/e2e/results.spec.ts:1653:1 › the dot plot: Download SVG saves the plot as shown, as a plain SVG with the canvas's titles and without the halo (S15) (3.0s)
+  ✓  74 [webkit] › tests/e2e/results.spec.ts:1708:1 › the dot plot: on a desktop screen, a popup that has no room beside a short plot is scrolled into view by the first click (S13b code review 2) (2.4s)
+  ✓  75 [webkit] › tests/e2e/results.spec.ts:1731:1 › narrow screens: the results are no wider than the screen; "Open results" shows them; the tables show the key values first (3.1s)
+  ✓  76 [webkit] › tests/e2e/results.spec.ts:512:3 › BLASTN: the header block is the run's; the Descriptions, Graphic Summary and HSP table are the outfmt 6 rows, the Alignments outfmt 0's text; units, frames and run details (4.7s)
+  ✓  77 [webkit] › tests/e2e/results.spec.ts:512:3 › BLASTP: the header block is the run's; the Descriptions, Graphic Summary and HSP table are the outfmt 6 rows, the Alignments outfmt 0's text; units, frames and run details (8.0s)
+  ✓  78 [webkit] › tests/e2e/results.spec.ts:512:3 › TBLASTN: the header block is the run's; the Descriptions, Graphic Summary and HSP table are the outfmt 6 rows, the Alignments outfmt 0's text; units, frames and run details (6.9s)
+  ✓  80 [webkit] › tests/e2e/results.spec.ts:842:1 › an HSP that outfmt 0 does not show, and a hit list that may have reached its limit (3.7s)
+  ✓  79 [webkit] › tests/e2e/results.spec.ts:512:3 › TBLASTX: the header block is the run's; the Descriptions, Graphic Summary and HSP table are the outfmt 6 rows, the Alignments outfmt 0's text; units, frames and run details (6.4s)
+  ✓  81 [webkit] › tests/e2e/results.spec.ts:941:1 › the Descriptions cut at 100 subjects: the marks follow the listed rows (code review 2 L2) (3.0s)
+  ✓  82 [webkit] › tests/e2e/results.spec.ts:984:1 › BLASTN: an HSP of one letter has no orientation in its record; the note points to outfmt 0's Strand= line (2.7s)
+  ✓  84 [webkit] › tests/e2e/results.spec.ts:1097:1 › the one page (NCBI classic): the Graphic Summary, the Descriptions and the Alignments without a tab click; a Description chosen brings its alignments into view (3.8s)
+  ✓  83 [webkit] › tests/e2e/results.spec.ts:1043:1 › selection by HSP identity: sorting keeps the selected HSP; another subject or query moves it (7.1s)
+  ✓  86 [webkit] › tests/e2e/results.spec.ts:1328:1 › many queries; view filters change the view, not the search; the notices tell filtered out, no hits and a failed run apart (6.9s)
+  ✓  85 [webkit] › tests/e2e/results.spec.ts:1158:1 › the Alignments: a block per Range; Next, Previous and First Match; the previous and next subject; Ranges far apart in a window (11.8s)
+  ✓  87 [webkit] › tests/e2e/results.spec.ts:1502:1 › the dot plot: the HSPs of the pair on a canvas; zoom; choosing an HSP on it or in the list; its popup (4.8s)
+  ✓  88 [webkit] › tests/e2e/results.spec.ts:1653:1 › the dot plot: Download SVG saves the plot as shown, as a plain SVG with the canvas's titles and without the halo (S15) (3.0s)
+  ✓  89 [webkit] › tests/e2e/results.spec.ts:1708:1 › the dot plot: on a desktop screen, a popup that has no room beside a short plot is scrolled into view by the first click (S13b code review 2) (2.4s)
+  ✓  90 [webkit] › tests/e2e/results.spec.ts:1731:1 › narrow screens: the results are no wider than the screen; "Open results" shows them; the tables show the key values first (2.7s)
+
+
+  1) [firefox] › tests/e2e/results.spec.ts:1097:1 › the one page (NCBI classic): the Graphic Summary, the Descriptions and the Alignments without a tab click; a Description chosen brings its alignments into view 
+
+    Error: expect(received).toBe(expected) // Object.is equality
+
+    Expected: 873
+    Received: 874
+
+      1153 |   await page.getByTestId('subject-sort-bitScore').dispatchEvent('click');
+      1154 |   await expect(page.getByTestId('subject-sort-bitScore').locator('..')).toHaveAttribute('aria-sort', /^(ascending|descending)$/);
+    > 1155 |   expect(await page.evaluate(() => window.scrollY)).toBe(before);
+           |                                                     ^
+      1156 | });
+      1157 |
+      1158 | test('the Alignments: a block per Range; Next, Previous and First Match; the previous and next subject; Ranges far apart in a window', async ({
+        at /home/kawato/losat-work/.worktrees/web-gui-app/web/app/tests/e2e/results.spec.ts:1155:53
+
+    Error Context: test-results/results-the-one-page-NCBI--7303d-gs-its-alignments-into-view-firefox/error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/results-the-one-page-NCBI--7303d-gs-its-alignments-into-view-firefox/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/results-the-one-page-NCBI--7303d-gs-its-alignments-into-view-firefox/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  1 failed
+    [firefox] › tests/e2e/results.spec.ts:1097:1 › the one page (NCBI classic): the Graphic Summary, the Descriptions and the Alignments without a tab click; a Description chosen brings its alignments into view 
+  89 passed (3.9m)

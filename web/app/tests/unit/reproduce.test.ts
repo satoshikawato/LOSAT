@@ -100,6 +100,14 @@ describe('commands', () => {
     expect(inputRelation('subject', 'combined_subject.fa', 4, [{ origin: 'file', name: 'a.fa', records: 2 }, { origin: 'paste', name: 'subject.fa', records: 2 }])).toBe(
       'combined_subject.fa joins the 2 subject inputs (a.fa, subject.fa) in the order chosen: 4 records. It is no single file you chose.',
     );
+    // Parts that name the records left out of them (a run loaded from a session file), and no part at all.
+    expect(inputRelation('query', 'q.fa', 2, [{ origin: 'file', name: 'a.fa', records: 3, excluded: 1 }])).toBe(
+      'q.fa has the 2 records that the run searched from the file a.fa; the record left out of it is not in it.',
+    );
+    expect(inputRelation('subject', 'combined_subject.fa', 4, [{ origin: 'file', name: 'a.fa', records: 2, excluded: 0 }, { origin: 'file', name: 'b.fa', records: 3, excluded: 1 }])).toBe(
+      'combined_subject.fa joins the 2 subject inputs (a.fa, b.fa) in the order chosen, without the records left out: 4 records. It is no single file you chose.',
+    );
+    expect(inputRelation('query', 'q.fa', 2, [])).toBe('q.fa has the 2 records that the run searched.');
   });
 });
 

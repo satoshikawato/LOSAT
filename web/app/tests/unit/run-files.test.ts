@@ -7,6 +7,7 @@ import { SearchDraft } from '../../src/application/draft';
 import { INPUT_SLICE_BYTES, RunFiles, type RunFilesDeps } from '../../src/application/run-files';
 import type { InputRole, ProgramId } from '../../src/domain/programs';
 import type { RegionText } from '../../src/domain/region';
+import { inputRelation } from '../../src/domain/reproduce';
 import { parseSettings, serializeSettings, settingsOfRun, SETTINGS_MAX_BYTES, type SearchSettings } from '../../src/domain/settings-file';
 import { sha256Hex } from '../../src/infra/browser/platform';
 import { DataService } from '../../src/infra/data/data-service';
@@ -393,17 +394,24 @@ describe('RunFiles', () => {
     expect(Buffer.compare(Buffer.from(saved[0]!.bytes), Buffer.from(big))).toBe(0);
   });
 
-  it('saves the input of a run loaded from a session file only from its attached original', async () => {
+  it('saves the input of a run loaded from a session file only from its attached original, and only if it still makes that input', async () => {
     const run = await runOf('blastn', []);
     const original = run.snapshot.query.bytes!;
     // A run loaded from a session file has no engine bytes; the session rebuilds them from the
     // original FASTA chosen again and matched in Run details (WP-D), and nothing else.
     const query = { ...run.snapshot.query };
     delete (query as { bytes?: unknown }).bytes;
-    const fromSession = { fileName: 's.losat-session.gz', number: 1, savedAt: 0 } as unknown as NonNullable<RunView['fromSession']>;
+    const fromSession = {
+      fileName: 's.losat-session.gz',
+      number: 1,
+      savedAt: 0,
+      inputs: { query: { sha256: run.snapshot.query.sha256 }, subject: { sha256: run.snapshot.subject.sha256 } },
+    } as unknown as NonNullable<RunView['fromSession']>;
     const loaded: RunView = { ...run, snapshot: { ...run.snapshot, query }, fromSession };
-    const attachment: { bytes?: Uint8Array } = {};
-    const { runFiles, saved } = setup({ attachedInput: async () => (attachment.bytes === undefined ? undefined : { bytes: attachment.bytes }) });
+    const attachment: { bytes?: Uint8Array; sha256?: string } = {};
+    const { runFiles, saved } = setup({
+      attachedInput: async () => (attachment.bytes === undefined ? undefined : { bytes: attachment.bytes, sha256: attachment.sha256! }),
+    });
     await runFiles.saveInput(loaded, 'query');
     expect(saved).toEqual([]);
     expect(runFiles.state.get().run).toEqual({
@@ -411,8 +419,49 @@ describe('RunFiles', () => {
       text: 'query.fa was not saved: Run 1 was loaded from a session file; choose its original query FASTA in Run details to save the input it searched.',
       runId: run.snapshot.runId,
     });
+    // The attached original changed after it was matched: its rebuilt input is not the one that the file recorded (code review L1).
+    attachment.bytes = new TextEncoder().encode('>q1 changed\nACGT\n');
+    attachment.sha256 = 'f'.repeat(64);
+    await runFiles.saveInput(loaded, 'query');
+    expect(saved).toEqual([]);
+    expect(runFiles.state.get().run).toEqual({
+      kind: 'error',
+      text:
+        `query.fa was not saved: the query FASTA attached to Run 1 no longer makes the input that the run searched (SHA-256 ${'f'.repeat(64)}, ` +
+        `not ${run.snapshot.query.sha256}); the file changed after it was attached. Choose the original query FASTA again in Run details.`,
+      runId: run.snapshot.runId,
+    });
     attachment.bytes = original;
+    attachment.sha256 = run.snapshot.query.sha256;
     await runFiles.saveInput(loaded, 'query');
     expect(saved.map((f) => [f.name, text(f)])).toEqual([['query.fa', new TextDecoder().decode(original)]]);
+  });
+
+  it('says where the input of a run loaded from a session file came from, as the file recorded its sources (code review L2)', async () => {
+    const run = await runOf('blastn', []);
+    const sources = (list: ReadonlyArray<readonly [string, number, number[]]>) => list.map(([name, records, excluded]) => ({ name, size: 10, records, excluded }));
+    const loaded = (query: ReturnType<typeof sources>, subject: ReturnType<typeof sources>): RunView => ({
+      ...run,
+      fromSession: { inputs: { query: { sources: query }, subject: { sources: subject } } } as unknown as NonNullable<RunView['fromSession']>,
+    });
+    const { runFiles } = setup();
+    const view = loaded(sources([['q.fa', 3, []]]), sources([['a.fa', 3, [1]], ['b.fa', 2, []]]));
+    expect(runFiles.inputParts(view, 'query')).toEqual([{ origin: 'file', name: 'q.fa', records: 3, excluded: 0 }]);
+    expect(runFiles.inputParts(view, 'subject')).toEqual([
+      { origin: 'file', name: 'a.fa', records: 3, excluded: 1 },
+      { origin: 'file', name: 'b.fa', records: 2, excluded: 0 },
+    ]);
+    expect(inputRelation('query', 'q.fa', 3, runFiles.inputParts(view, 'query'))).toBe('q.fa has the same bytes as the file q.fa (3 records).');
+    expect(inputRelation('subject', 'combined_subject.fa', 4, runFiles.inputParts(view, 'subject'))).toBe(
+      'combined_subject.fa joins the 2 subject inputs (a.fa, b.fa) in the order chosen, without the records left out: 4 records. It is no single file you chose.',
+    );
+    const joinedWhole = loaded(sources([['q.fa', 3, []]]), sources([['a.fa', 3, []], ['b.fa', 2, []]]));
+    expect(inputRelation('subject', 'combined_subject.fa', 5, runFiles.inputParts(joinedWhole, 'subject'))).toBe(
+      'combined_subject.fa joins the 2 subject inputs (a.fa, b.fa) in the order chosen: 5 records. It is no single file you chose.',
+    );
+    const selection = loaded(sources([['q.fa', 3, [0, 2]]]), sources([['s.fa', 1, []]]));
+    expect(inputRelation('query', 'q.fa', 1, runFiles.inputParts(selection, 'query'))).toBe(
+      'q.fa has the 1 record that the run searched from the file q.fa; the 2 records left out of it are not in it.',
+    );
   });
 });

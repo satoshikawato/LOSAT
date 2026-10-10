@@ -184,8 +184,10 @@ export function commandNotes(argv: readonly string[], sameBytes: boolean): reado
 export interface InputPart {
   readonly origin: 'file' | 'paste';
   readonly name: string;
-  /** The records of the part's whole source; the run searched all of them. */
+  /** The records of the part's whole source; the run searched all of them but `excluded`. */
   readonly records: number;
+  /** Records of the source that the run left out (a session file records them); none when absent. */
+  readonly excluded?: number;
 }
 
 /**
@@ -195,9 +197,11 @@ export interface InputPart {
  */
 export function inputRelation(role: InputRole, name: string, records: number, parts: ReadonlyArray<InputPart | undefined>): string {
   const count = `${records} ${records === 1 ? 'record' : 'records'}`;
+  const whole = (part: InputPart | undefined) => part !== undefined && (part.excluded ?? 0) === 0;
+  if (parts.length === 0) return `${name} has the ${count} that the run searched.`;
   if (parts.length > 1) {
     const names = parts.map((part) => part?.name).filter((part): part is string => part !== undefined);
-    const leftOut = parts.some((part) => part === undefined) ? ', without the records left out' : '';
+    const leftOut = parts.some((part) => !whole(part)) ? ', without the records left out' : '';
     return (
       `${name} joins the ${parts.length} ${role} inputs${names.length > 0 ? ` (${names.join(', ')})` : ''} in the order chosen${leftOut}: ` +
       `${count}. It is no single file you chose.`
@@ -205,6 +209,10 @@ export function inputRelation(role: InputRole, name: string, records: number, pa
   }
   const part = parts[0];
   if (part === undefined) return `${name} has the ${count} that the run searched; the records left out of the chosen ${role} are not in it.`;
+  if (!whole(part)) {
+    const left = part.excluded === 1 ? 'the record left out of it is' : `the ${part.excluded} records left out of it are`;
+    return `${name} has the ${count} that the run searched from the file ${part.name}; ${left} not in it.`;
+  }
   if (part.origin === 'paste') return `${name} is the pasted ${role} text, as the run searched it (${count}).`;
   return `${name} has the same bytes as the file ${part.name} (${count}).`;
 }

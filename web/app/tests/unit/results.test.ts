@@ -633,6 +633,31 @@ describe('ResultsBrowser', () => {
     expect(results.state.get().hsp).toEqual({ runId: 'r1', qIdx: 0, rank: 2 });
   });
 
+  it('reads the detail of a failed HSP again when it is selected again, and leaves a loading or ready one alone', async () => {
+    const { results, rangeReads, failRanges } = setup();
+    failRanges(true);
+    await results.open('r1');
+    await settle();
+    const id = { runId: 'r1', qIdx: 0, rank: 0 };
+    expect(results.state.get().detail).toMatchObject({ id, state: 'failed', error: 'the stored output is gone' });
+    // "Try again": the same selection reads it again, and a failure shows again.
+    const failed = rangeReads();
+    results.selectHsp(id);
+    await settle();
+    expect(rangeReads()).toBeGreaterThan(failed);
+    expect(results.state.get().detail).toMatchObject({ id, state: 'failed' });
+    // Once the store answers, the retry shows the section.
+    failRanges(false);
+    results.selectHsp(id);
+    await settle();
+    expect(results.state.get().detail).toMatchObject({ id, state: 'ready', section: ' Score = 90 bits\n\nQuery  1  ACGT  50\n' });
+    // A ready detail is not read again by selecting the HSP again.
+    const ready = rangeReads();
+    results.selectHsp(id);
+    await settle();
+    expect(rangeReads()).toBe(ready);
+  });
+
   it("names the task of a run: the argv's, else the engine's default", async () => {
     const byDefault = setup();
     await byDefault.results.open('r1');

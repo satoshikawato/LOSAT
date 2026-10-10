@@ -527,8 +527,18 @@ function onPointerUp(event: PointerEvent): void {
   }
   props.results.selectHsp(segments.value.list[i]!.id);
   popupOpen.value = true;
-  // Under the plot (phones), the popup may open below the screen's edge.
-  if (popupBelow.value) void nextTick(() => popup.value?.scrollIntoView({ block: 'nearest' }));
+  void revealPopup();
+}
+/**
+ * Under the plot (phones, or where there is no room beside the line) the popup may open below the
+ * screen's edge. The place is decided after the popup is in the page, not before: beside or below
+ * is known only once placePopup has measured it for this pair.
+ */
+async function revealPopup(): Promise<void> {
+  await nextTick();
+  placePopup();
+  await nextTick();
+  if (popupBelow.value) popup.value?.scrollIntoView({ block: 'nearest' });
 }
 function onPointerLeave(): void {
   pointer = undefined;

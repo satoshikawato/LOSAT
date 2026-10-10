@@ -394,6 +394,8 @@ textarea {
 
 .radio input {
   margin: 0;
+  /* A long label must not shrink the box (the phone's 20 px radio was drawn at 14 px; S13b screen review 3 O1). */
+  flex: none;
 }
 
 /* W4b search: "Or, upload file": the open button and the drop zone. */
@@ -462,6 +464,11 @@ textarea {
 
 .source-name {
   overflow-wrap: anywhere;
+}
+
+/* Name and size: two items of the head's row on wide screens, one box on phones (see the media query). */
+.source-title {
+  display: contents;
 }
 
 .source-head .link {
@@ -1570,6 +1577,27 @@ pre.range-text {
 
   button.link {
     min-height: 0;
+  }
+
+  /* A long file name used to push the size and "Remove" to a second line (S13b screen review 3 L1):
+     the size follows the name inline and wraps under it, "Remove" keeps the first line. Short
+     names stay on one line as before. */
+  .source-title {
+    display: block;
+    flex: 1 1 0;
+    min-width: 0;
+    /* The 10 px that the head's gap puts between name and size: the space between them, which
+       does not indent the size where it wraps. */
+    word-spacing: 6px;
+  }
+
+  .source-name,
+  .source-size {
+    word-spacing: normal;
+  }
+
+  .source-size {
+    white-space: nowrap;
   }
 
   .region-bar {

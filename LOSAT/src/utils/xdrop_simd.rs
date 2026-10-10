@@ -1943,7 +1943,7 @@ mod kernel {
     ///
     /// Result assembly and traceback walk shared by both lane widths.
     #[inline(always)]
-    unsafe fn finish<const TB: bool>(
+    pub(super) unsafe fn finish<const TB: bool>(
         sc: &mut XdropScratch,
         a_off: usize,
         b_off: usize,
@@ -2186,6 +2186,134 @@ fn fits_8bit(scores: &Scores<'_>, gap_open: i32, gap_extend: i32, x_drop: i32) -
     }
 }
 
+// EXPERIMENT (LOSAT_X_DPAVX2): 256-bit AVX2 kernels (16 x i16, 32 x i8), x86_64 only. A child
+// module, so that it uses this module's private items (lookup tables, scratch, traceback walk)
+// without changing them.
+#[cfg(target_arch = "x86_64")]
+#[path = "x_xdrop_avx2.rs"]
+mod x_avx2;
+// EXPERIMENT (LOSAT_X_DPCAPTURE, LOSAT_X_DPCAPTURE_EVERY): diagnostic capture of DP problems.
+#[path = "x_xdrop_capture.rs"]
+mod x_capture;
+
+/// No NCBI counterpart: reads the LOSAT_X_DPAVX2 and LOSAT_X_DPCAPTURE switches once; it does not
+/// change any value NCBI computes. Bit 0: try the 256-bit kernels first (set only when the CPU
+/// has AVX2); bit 1: record a sample of the calls. 0 (both off) leaves `xdrop_align` as it was.
+fn x_extra_switches() -> u8 {
+    use std::sync::OnceLock;
+    static ON: OnceLock<u8> = OnceLock::new();
+    *ON.get_or_init(|| {
+        let mut on = 0u8;
+        #[cfg(target_arch = "x86_64")]
+        {
+            if x_avx2::switch_on() {
+                on |= 1;
+            }
+        }
+        if x_capture::switch_on() {
+            on |= 2;
+        }
+        on
+    })
+}
+
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:736-741,766-770
+/// ```c
+/// Blast_SemiGappedAlign(const Uint1* A, const Uint1* B, Int4 M, Int4 N,
+///    Int4* a_offset, Int4* b_offset, Boolean score_only,
+///    GapPrelimEditBlock *edit_block, BlastGapAlignStruct* gap_align,
+///    const BlastScoringParameters* score_params,
+///    Int4 query_offset, Boolean reversed, Boolean reverse_sequence,
+///    Boolean * fence_hit)
+/// ...
+///     if (!score_only) {
+///         return ALIGN_EX(A, B, M, N, a_offset, b_offset, edit_block, gap_align,
+/// ```
+/// EXPERIMENT dispatch point of LOSAT_X_DPAVX2 and LOSAT_X_DPCAPTURE, ahead of the 128-bit
+/// dispatch in `xdrop_align`. With LOSAT_X_DPAVX2 the 256-bit kernel (`x_xdrop_avx2.rs`) runs
+/// the same recurrence (`tb == false`: `Blast_SemiGappedAlign` score-only and
+/// `s_BlastAlignPackedNucl`; `tb == true`: `ALIGN_EX`) and returns exactly what the 128-bit
+/// kernel returns; when it returns None the 128-bit dispatch runs (and may itself leave the call
+/// to the scalar port). The argument for the equality is at the head of `x_xdrop_avx2.rs`. The
+/// call sites' LOSAT_X_DPSHADOW comparison applies to whatever `xdrop_align` returns, so it
+/// covers the 256-bit kernels as well. LOSAT_X_DPCAPTURE records every Nth call of a thread
+/// (inputs and result); the call itself runs through `xdrop_align` unchanged.
+///
+/// `Some(r)`: the call is answered with `r`; `None`: run the 128-bit dispatch.
+#[inline]
+fn x_extra_dispatch(
+    q: &RowSeq<'_>,
+    s: &ColSeq<'_>,
+    scores: &Scores<'_>,
+    len1: usize,
+    len2: usize,
+    gap_open: i32,
+    gap_extend: i32,
+    x_drop: i32,
+    tb: bool,
+    check_fence: bool,
+    sc: &mut XdropScratch,
+    on: u8,
+) -> Option<Option<XdropResult>> {
+    if on & 2 != 0 && x_capture::take_sample() {
+        let r = x_capture::without_capture(|| {
+            xdrop_align(
+                q,
+                s,
+                scores,
+                len1,
+                len2,
+                gap_open,
+                gap_extend,
+                x_drop,
+                tb,
+                check_fence,
+                sc,
+            )
+        });
+        x_capture::record(
+            q,
+            s,
+            scores,
+            len1,
+            len2,
+            gap_open,
+            gap_extend,
+            x_drop,
+            tb,
+            check_fence,
+            r.as_ref(),
+            &sc.ops,
+        );
+        return Some(r);
+    }
+    #[cfg(target_arch = "x86_64")]
+    {
+        if on & 1 != 0 {
+            // SAFETY: bit 0 is set only when `x_avx2::available()` held (AVX2 detected).
+            let r = unsafe {
+                x_avx2::align(
+                    q,
+                    s,
+                    scores,
+                    len1,
+                    len2,
+                    gap_open,
+                    gap_extend,
+                    x_drop,
+                    tb,
+                    check_fence,
+                    sc,
+                )
+            };
+            if r.is_some() {
+                return Some(r);
+            }
+        }
+    }
+    None
+}
+
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:736-741,766-770
 /// ```c
 /// Blast_SemiGappedAlign(const Uint1* A, const Uint1* B, Int4 M, Int4 N,
@@ -2218,6 +2346,27 @@ pub(crate) fn xdrop_align(
     check_fence: bool,
     sc: &mut XdropScratch,
 ) -> Option<XdropResult> {
+    // EXPERIMENT (LOSAT_X_DPAVX2, LOSAT_X_DPCAPTURE): see `x_extra_dispatch`. With both
+    // switches off this is one read of a value set once, and the code below runs as before.
+    let on = x_extra_switches();
+    if on != 0 {
+        if let Some(r) = x_extra_dispatch(
+            q,
+            s,
+            scores,
+            len1,
+            len2,
+            gap_open,
+            gap_extend,
+            x_drop,
+            tb,
+            check_fence,
+            sc,
+            on,
+        ) {
+            return r;
+        }
+    }
     #[cfg(target_arch = "x86_64")]
     {
         let level = cpu_level();
@@ -2420,11 +2569,11 @@ mod tests {
 
     const MININT: i32 = i32::MIN / 2;
 
-    struct Problem {
-        q: Vec<u8>,
-        s: Vec<u8>,
-        n: usize,
-        m: Vec<i32>,
+    pub(super) struct Problem {
+        pub(super) q: Vec<u8>,
+        pub(super) s: Vec<u8>,
+        pub(super) n: usize,
+        pub(super) m: Vec<i32>,
     }
 
     impl Problem {
@@ -2462,7 +2611,7 @@ mod tests {
     // kernels with.
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:835-959
     // (Blast_SemiGappedAlign, score-only) and :500-727 (ALIGN_EX).
-    fn reference(
+    pub(super) fn reference(
         p: &Problem,
         len1: usize,
         len2: usize,
@@ -2622,9 +2771,9 @@ mod tests {
         (a_off, b_off, best_score, false, ops, cells)
     }
 
-    struct Rng(u64);
+    pub(super) struct Rng(pub(super) u64);
     impl Rng {
-        fn next(&mut self) -> u64 {
+        pub(super) fn next(&mut self) -> u64 {
             let mut x = self.0;
             x ^= x << 13;
             x ^= x >> 7;
@@ -2632,15 +2781,15 @@ mod tests {
             self.0 = x;
             x
         }
-        fn below(&mut self, n: u64) -> u64 {
+        pub(super) fn below(&mut self, n: u64) -> u64 {
             self.next() % n
         }
-        fn unit(&mut self) -> f64 {
+        pub(super) fn unit(&mut self) -> f64 {
             (self.next() >> 11) as f64 / (1u64 << 53) as f64
         }
     }
 
-    fn random_problem(rng: &mut Rng, n: usize, scale: i32, len: usize) -> Problem {
+    pub(super) fn random_problem(rng: &mut Rng, n: usize, scale: i32, len: usize) -> Problem {
         // random symmetric-ish matrix with a positive diagonal
         let mut m = vec![0i32; n * n];
         for i in 0..n {

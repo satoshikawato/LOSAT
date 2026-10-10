@@ -4,8 +4,9 @@
 A TBLASTX pair in which a 4-residue HSP H is followed, in link_hsps list
 order, by a long HSP J whose trimmed start lies beyond H's trimmed end on both
 sequences.  NCBI offers H only the HSPs before it in the list, so H and J are
-not linked; the index-backed kernel (LOSAT_LINK_FAST) finds J in its tree and
-has to fall back to NCBI's scan.
+not linked; the large-gap sweep of LOSAT's default linking kernel
+(sum_stats_linking/linking_incr.rs) finds J in its prefix-maximum tree and has
+to fall back to NCBI's scan.
 
   query   frame +1: ... E G L D [W C H W] D I L  A V S  D L G E ...
   subject frame +1: ... C I D L [W C H W] L G D  A V S  L D I C ...

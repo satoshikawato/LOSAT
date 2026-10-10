@@ -7,6 +7,17 @@ Moved from `AGENTS.md` on 2026-10-08 so that it is read only when needed.
 - `LOSAT_TRACE_CHAIN_HSP="qstart,qend,sstart,send"` trace TBLASTX chain
   selection for a specific HSP.
 - `LOSAT_TRACE_LINK_SELECTIONS=1` print TBLASTX link-selection details.
+- `LOSAT_LINKING_LEGACY=1` TBLASTX sum-statistics linking by the literal port
+  `link_hsp_group_ncbi` instead of the default kernel (the incremental kernel of
+  `tblastx/sum_stats_linking/linking_incr.rs`; same result). The linking traces
+  (`LOSAT_TRACE_HSP`, `LOSAT_TRACE_CHAIN_HSP`, `LOSAT_TRACE_LINK_SELECTIONS`,
+  `LOSAT_DEBUG_CHAINING`) also run the literal port, which prints them.
+- Checks of the default TBLASTX linking kernel: `LOSAT_LINK_FAST_VERIFY=1` (every
+  pass against a pass computed from scratch by NCBI's scans; slow on large
+  groups), `LOSAT_LINK_FAST_SHADOW=1` (every group also linked by the literal
+  port, all fields compared), `LOSAT_LINK_WIDE_KEYS=1` (u128 keys for every
+  group, to measure their cost), `LOSAT_LINK_STATS=1` (per-group counters,
+  `[LINK_INCR_STATS]` lines).
 - `LOSAT_DUMP_TBLASTX_STAGE=<dir>` append TBLASTX stage snapshots as TSV files.
 - `LOSAT_TRACE_BLASTN_HSP="qstart,qend,sstart,send"` trace a specific BLASTN
   HSP.
@@ -57,7 +68,7 @@ export LOSAT_X_SEGFAST=1 LOSAT_X_SEGMEMO=1 LOSAT_X_SEGSHARE=1 LOSAT_X_KARLINFAST
 export LOSAT_X_ERFMEMO=1 LOSAT_X_DEKKER=1 LOSAT_X_LUTARENA=1 LOSAT_X_LUTSPLIT=1
 export LOSAT_X_TBNPAR=1 LOSAT_X_TBNEVENTS=1 LOSAT_X_TBNQSIDE=1 LOSAT_X_TBNSSIDE=1 LOSAT_X_TBNBATCH=1
 export LOSAT_X_BXPAR=1 LOSAT_X_BXLAZYCTX=1 LOSAT_X_BXLEAN=1 LOSAT_X_BXPOOL=1 LOSAT_X_BXCHUNK=64 LOSAT_X_BXBATCH=1
-export LOSAT_X_CODONFAST=1 LOSAT_LINK_FAST=1
+export LOSAT_X_CODONFAST=1
 export LOSAT_X_NEWTONEXACT=1 LOSAT_X_SEEDBUCKET=1
 ```
 
@@ -103,14 +114,6 @@ Same values, faster computation:
 - `LOSAT_X_BXLAZYCTX=1` blastx seed context lookup moved after the diagonal test.
 - `LOSAT_X_BXLEAN=1`, `LOSAT_X_TBNEVENTS=1` do not build records nobody reads (candidate copies
   without an observer, test events); no tree or DP space for a (chunk, subject) without HSPs.
-- `LOSAT_LINK_FAST=1` TBLASTX sum-statistics linking: predecessor search by a W x W grid
-  (small gaps) and a Fenwick prefix-maximum tree (large gaps) inside NCBI's own rounds
-  (`tblastx/sum_stats_linking/linking_index.rs`). It replaces the default kernel
-  (`linking_fast.rs`, incremental recomputation); `LOSAT_LINKING_LEGACY` and the linking traces
-  take precedence (literal port `link_hsp_group_ncbi`). Checks: `LOSAT_LINK_FAST_VERIFY=1` (every
-  choice against a plain scan; very slow on large groups), `LOSAT_LINK_FAST_SHADOW=1` (every group
-  against the literal port, all fields). `LOSAT_LINK_FAST_REUSE0=0` disables the reuse of an unchanged
-  index-0 choice. `LOSAT_LINK_STATS=1` prints per-group counters.
 - `LOSAT_X_BXLUT=1` blastx lookup table filled in place from per-cell counts (same append order as
   `s_AddNeighboringWords` and `BlastAaLookupFinalize`), neighbour-word lists memoised per thread
   (`tblastx/lookup/x_lut_direct.rs`). Shadow: `LOSAT_X_BXLUTSHADOW=1` (every table compared field by

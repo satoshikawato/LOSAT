@@ -756,3 +756,7 @@ tblastx.prot_in_tblastx.o0	0	5c6319b7726df5d8e0274236cd83f51433e0b5969deba1c9e38
 tblastx.seqid0.q.o6	1	e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	98	~
 tblastx.seqid0_loaders_env_empty.q.o6	1	e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	49	~
 tblastx.seqid1.q.o6	1	e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	99	~
+tblastx.seqid0_registry_ini_empty.q.o6	1	e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	49	~
+tblastx.seqid0_registry_rc_empty_bur_false.q.o6	1	e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	49	~
+tblastx.seqid0_registry_rc_empty_ini.q.o6	1	e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	49	~
+tblastx.registry_cfgpath_empty.o6	0	9080396690ff9a52b5a2918c5e5b455738d1a65ce86f6b87f719320d51801796	-	=

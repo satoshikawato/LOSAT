@@ -105,13 +105,21 @@ run `20261009T145447Z`（HEAD `9dfe7efd`）は 23 工程を流した。build 7 �
 - `screens.spec.ts` の検索画面の 2 つの試験（`LOSAT_WEB_SCREENS` を付けたときだけ流れる、CI には無い）は、エンジンの build で `query-source-0-exclude-refused` を待って止まる（10 分の timeout）。`register` の拒否の文言が行を名指すため（上の 1 つ目）。結果の画面の試験は通る。
 - S13 の `results.spec.ts` の「失敗した run」は、TBLASTX の題の HTML の文字参照（E2h で NCBI と同じく復号されて完了する）から、中身の無い subject だけの TBLASTX（NCBI の `The average subject length is too short`）に変えた（tests only）。
 
+## SFd（2026-10-10〜、エンジン側）で行ったこと
+
+修正の再監査（4 観点、監査したコミット `2f954c66`）の指摘を直した。
+
+| 修正 | 内容 | コミット |
+|---|---|---|
+| 再監査の修正（registry の層、`ncbi_environment.rs`） | R1（A-1 = B-3）：`<prog>.ini` の空の `DATA_LOADERS=` は項目（loader 無効）。R2（A-2）：`.ncbirc` の空の値は、`BLAST_USAGE_REPORT` が偽か `<prog>.ini` があるとき項目（アプリが file を自分で読む。既定は usage report の cache の写しで落ちる）。R3（A-3 = B-4）：空の `NCBI_CONFIG_PATH=` は探索 path を空にし、registry の file を読まない。R4（A-4 + B-2）：registry の file を `IRWRegistry::x_Read` のとおりに byte で読む（C locale の白空白、名前の文字、全ての値の引用符と `ParseEscapes`、継続行、UTF-8 の BOM、section より前の項目は捨てる）。NCBI が構文の誤りとする file と UTF-16 の file は明示的に拒否（`AUTHORITY.md` §J-8）。usage report だけが読む `.ncbirc` の構文の誤りと Boolean でない `BLAST_USAGE_REPORT` も拒否。`AUTHORITY.md` §G1・§J・§L1・§L2-1 と判断 5 の理由を直した。再現 398 件（再監査 A・B の環境と registry の全件と新しい件、program の directory の 4 件を含む。NCBI は `unshare -rn`）：修正の前は差 145、後は差 0（same 198、loader が有効で Seq-id の行を §J-1 で拒否 106、構文の誤りの拒否 85、その他の記録済みの拒否 9：`-conffile`、`[NCBI] .Inherits`、`[NCBI] DATA_LOADERS`、Boolean でない `BLAST_USAGE_REPORT` 4（NCBI は abort）、UTF-16 2）。fixture に 38 行（`*.seqid0_registry_*`、`*.registry_cfgpath_empty.o6`、registry の file は `LOSAT/tests/fixtures/fasta_input/registry/`。修正の前は 38 行とも拒否） | （この行を書いたコミット） |
+
 ## 推奨の案で進めた判断（保守者に委ねられた判断、2026-09-29 の常設の指示、10-07 に再掲）
 
 1. 移植の順は `PORT_PLAN.md` の S0〜S10。`AUTHORITY.md` を S1 の前に書いた。
 2. **ABI v1**：v1 は `bio` と今の検査のまま、`FastaRecord::from_bio` で `run_local` に入る（v1 の出力と文言は変わらない）。保守者の判断 4 の目的（TD-1 の凍結）を保つ。判断 4 の前提「v1 が受け付ける入力は bio と NCBI で読み方が同じ」は TBLASTX と BLASTP の v1 で成り立たない（棚卸し AD-24・AD-25）。
 3. **Seq-id の行**：`CSeq_id` の解析（BI-15〜19・55）を移した。広めに拒否するのは accession の guide の形（文字と数字の数の 26 の形、先頭の byte が `A-Z`・`_`・`?` のときだけ）。guide の表（1458 の規則）は移さない。`ZZ123456` などは NCBI では FASTA だが LOSAT は拒否する（判断 2 の範囲）。
 4. Web の `register` は data loader を有効とし（CLI の既定）、読み込みの誤りと注釈だけの query を NCBI の文言で早く拒否する。
-5. registry の file（`<prog>.ini`・`.ncbirc`）の空の `DATA_LOADERS=` は項目なし（data loader は有効、`ncbireg.cpp:984-991`）。`blastdb` も `genbank` も含まない空でない値は両方を無効にする。環境変数の空の `NCBI_CONFIG__BLAST__DATA_LOADERS=` は項目があり、両方を無効にする（`env_reg.cpp:157-167`。SFc の監査 B-1 で訂正。以前は file の規則を環境変数にも当てはめていた）。
+5. 空の `DATA_LOADERS=`（空白だけ・`""` を含む）は、その項目を持つ層では項目があり、両方の data loader を無効にする：環境変数 `NCBI_CONFIG__BLAST__DATA_LOADERS=`（`env_reg.cpp:157-167`。SFc の監査 B-1）、`<prog>.ini`（`CCompoundRegistry::FindByContents` が `fCountCleared` を付けて尋ねる、`ncbireg.cpp:1235-1246`・`:984-991`。SFd の再監査 A-1・B-3）、`.ncbirc` は `BLAST_USAGE_REPORT` が偽の Boolean のときか `<prog>.ini` があるとき（アプリが file を自分で読む。既定ではアプリは usage report が cache に読んだ registry を `Write` と `Read` で写し、`Write` が空の値を落とす、`metareg.cpp:152-171`・`ncbireg.cpp:226-234`。SFd の再監査 A-2。`AUTHORITY.md` §G1）。`blastdb` も `genbank` も含まない空でない値は両方を無効にする。以前は「registry の file の空の値は項目なし（`ncbireg.cpp:984-991`）」としていた（その行は `fCountCleared` のある場合を読み落としていた。SFd で訂正）。
 6. 読み込み器の API：Seq-id の拒否の後は、拒否した 1 行の次から読める（局所 ID の番号は進まない）。program は拒否で止まる。
 7. `from_bytes` は同じ byte の通常の file と同じに読む（NCBI の stream の補充の大きさによる尾の消失を含む）。
 8. まとめて読む経路は `FastaStream::bulk` の旗の後ろに置く（program では常に有効。試験では 1 byte ずつの参照の経路と比べる）。
@@ -132,7 +140,9 @@ run `20261009T145447Z`（HEAD `9dfe7efd`）は 23 工程を流した。build 7 �
 21. （ゲート）TBLASTN の Stage G は `unshare -rm` の中で `/mnt` に tmpfs を置き、path を作って worktree を bind する（`/mnt/c` を読まない）。
 22. （アプリの試験）PR #118 の CI の `browser-engine` で失敗したアプリの試験は、エンジンの契約の変更に合わせて別のコミット（tests only）で直した。ゲートの HEAD を動かさないよう、一時的な worktree から push した。
 23. （監査 A-2）accession の guide の表（`accguide2.inc`、1.95 MB、25,779 行）は移さず、記録済みの広めの拒否のままにする（約 1 MB を超える file の規則。保守者の判断 2 の「忠実に移せない部分は広めに拒否」）。
-24. （監査の修正）B-1 は環境変数の層だけ（file の空の値は項目なしのまま）、D-1 は文書だけ（ABI の呼び方を変えない）、D-2 は v1 を変えない（変わった 44 run は NCBI の byte、`/home/kawato/losat-baselines/sfc-e2h-20261009/logs/fix/v1-changes.md`）。
+24. （監査の修正）B-1 は環境変数の層だけ（file の空の値は項目なしのまま。この file の部分は SFd の再監査で誤りと分かり、25 で直した）、D-1 は文書だけ（ABI の呼び方を変えない）、D-2 は v1 を変えない（変わった 44 run は NCBI の byte、`/home/kawato/losat-baselines/sfc-e2h-20261009/logs/fix/v1-changes.md`）。
+
+25. （SFd の再監査の修正）R1〜R3 は NCBI の規則をそのまま移した（R2 の条件「アプリが `.ncbirc` を自分で読むか」は、環境変数 `BLAST_USAGE_REPORT` の偽の Boolean と `<prog>.ini` の有無で全部決まり、拒否に回す部分は無い）。R4 は registry の file を `IRWRegistry::x_Read` のとおりに byte で読み、NCBI が構文の誤りとする file は拒否する（`.ncbirc` の文言は NCBI の build の source の path と行を含み、`<prog>.ini` の文言は診断の層の例外の報告（`NCBI_REPORT_EXCEPTION_X`、この build では 2 回）で、どちらも LOSAT は移さない。終了コードは他の registry の拒否と同じ 1）。UTF-16 の file も拒否（`ReadIntoUtf8` を移さない）、UTF-8 の BOM と section より前の項目は NCBI と同じく扱う。`<prog>.ini` の `[NCBI] DONT_USE_NCBIRC` でアプリが読まない `.ncbirc` も usage report が読むので、構文の誤りと `BLAST_USAGE_REPORT` だけ調べる。fixture の行は registry の file を `LOSAT/tests/fixtures/fasta_input/registry/` に置き、相対の `NCBI_CONFIG_PATH`（R3 は空の値と `HOME`）で指す。構文の誤りの file は fixture にしない（NCBI の stderr が build の path を含む。証拠は task folder の再現）。
 
 ## 保守者への一括の問い（`PD-LOSAT-NCBI-DEFECTS`）
 

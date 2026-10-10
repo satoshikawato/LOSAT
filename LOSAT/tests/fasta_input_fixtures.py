@@ -42,8 +42,11 @@ normalised. The first line of every NCBI input is checked first: NCBI tries a fi
 starts with a letter or digit as a Seq-id and contacts the network, so only files that start
 with `>`, a blank line, a non-alphanumeric byte or a letters-only line are run, or a row whose
 environment turns both data loaders off (an empty `NCBI_CONFIG__BLAST__DATA_LOADERS=`, rows
-`*.seqid0_loaders_env_empty.*`), where NCBI reads the first line as data (and `unshare -rn` cuts
-the network, where it works).
+`*.seqid0_loaders_env_empty.*`) or that names a directory of registry files under
+tests/fixtures/fasta_input/registry/ with NCBI_CONFIG_PATH whose entries turn them off (REGISTRY; rows
+`*.seqid0_registry_*.*`), where NCBI reads the first line as data (and `unshare -rn` cuts the network,
+where it works). Rows `*.registry_cfgpath_empty.*` set an empty NCBI_CONFIG_PATH and a HOME with a
+`.ncbirc` that NCBI then does not read.
 
 Usage:
   fasta_input_fixtures.py generate
@@ -686,6 +689,30 @@ PARTNER = {("blastn", "q"): "base.s.nuc.fa", ("blastn", "s"): "base.q.nuc.fa",
            ("tblastx", "q"): "base.s.nuc.fa", ("tblastx", "s"): "base.q.nuc.fa",
            ("tblastn", "q"): "base.s.nuc.fa", ("tblastn", "s"): "base.q.prot.faa",
            ("blastp", "q"): "base.s.prot.faa", ("blastp", "s"): "base.q.prot.faa"}
+# Registry directories (tests/fixtures/fasta_input/registry/<name>/) that rows name with
+# NCBI_CONFIG_PATH (relative to LOSAT/, the directory the rows run in): name -> (files, the row's other
+# variables, NCBI's data loaders with them, note). The decisions are NCBI BLAST+ 2.17.0's (oracle runs of
+# the SFd audit fixes R1-R4): with the loaders off NCBI reads a Seq-id first line as data, without the
+# network. See ncbi_environment.rs (`application_settings`, `registry_entries`).
+REGISTRY_PROGRAMS = ("blastn", "tblastx", "tblastn", "blastp")
+REGISTRY = {
+    "ini_empty": ({f"{p}.ini": b"[BLAST]\nDATA_LOADERS=\n" for p in REGISTRY_PROGRAMS}, "", False,
+                  "empty DATA_LOADERS in <program>.ini is an entry: data loaders off (SFd R1)"),
+    "rc_empty_bur_false": ({".ncbirc": b"[BLAST]\nDATA_LOADERS=\n"}, "BLAST_USAGE_REPORT=false", False,
+                           "empty DATA_LOADERS in .ncbirc read by the application itself (BLAST_USAGE_REPORT false): off (SFd R2)"),
+    "rc_empty_ini": (dict({".ncbirc": b"[BLAST]\nDATA_LOADERS=\n"},
+                          **{f"{p}.ini": b"[BLAST]\nBLASTDB=/nonexistent\n" for p in REGISTRY_PROGRAMS}), "", False,
+                     "empty DATA_LOADERS in .ncbirc read by the application itself (a <program>.ini): off (SFd R2)"),
+    "rc_nbsp_value": ({".ncbirc": b"[BLAST]\nDATA_LOADERS = \xc2\xa0\n"}, "", False,
+                      "a value of a no-break space (not C-locale white space): off (SFd R4)"),
+    "rc_escape": ({".ncbirc": b"[BLAST]\nDATA_LOADERS = \\x6eo\\156e\n"}, "", False,
+                  "escapes in a value (NStr::ParseEscapes): none, off (SFd R4)"),
+    "rc_bom_sectionless": ({".ncbirc": b"\xef\xbb\xbfLONG_SEQID=1\n[BLAST]\nDATA_LOADERS=none\n"}, "", False,
+                           "a UTF-8 byte-order mark and an entry before the first section (ignored): off (SFd R4)"),
+    "rc_other": ({".ncbirc": b"[BLAST]\nLONG_SEQID=1\n", "blastn.ini": b"[BLAST]\nLONG_SEQID=1\n"}, "", True,
+                 "named only by HOME with an empty NCBI_CONFIG_PATH, which searches no directory (SFd R3)"),
+}
+REGISTRY_DIR = f"{REL}/registry"
 
 
 def kind_of(program: str, role: str) -> str:
@@ -889,6 +916,30 @@ def extra_rows() -> list[Row]:
                 rows.append(make_row(f"{program}{'.' + task if task else ''}.seqid{i}_loaders_env_empty.{role}.o6",
                                      program, task, q, s, outfmt=6, env="NCBI_CONFIG__BLAST__DATA_LOADERS=",
                                      note="empty NCBI_CONFIG__BLAST__DATA_LOADERS: data loaders off", tier="seqid"))
+    # Registry files that turn the data loaders off (SFd audit fixes R1, R2, R4): the Seq-id first line
+    # is read as data. Only NCBI_CONFIG_PATH (and BLAST_USAGE_REPORT) differ from the rows above.
+    for name, (_, extra, loaders, note) in REGISTRY.items():
+        if loaders:
+            continue
+        combos = (("blastn", "megablast", "q"), ("blastn", "blastn", "q"), ("blastn", "megablast", "s"),
+                  ("tblastx", "", "q"), ("tblastn", "", "q"), ("tblastn", "", "s"), ("blastp", "", "q"),
+                  ("blastp", "", "s"))
+        if name.startswith("rc_") and name not in ("rc_empty_bur_false", "rc_empty_ini"):
+            combos = (("blastn", "megablast", "q"), ("tblastn", "", "s"), ("blastp", "", "q"))
+        for program, task, role in combos:
+            kind = kind_of(program, role)
+            path = f"@/seqid0.{role}.{kind}.{EXT[kind]}"
+            partner = f"@/{PARTNER[(program, role)]}"
+            q, s = (path, partner) if role == "q" else (partner, path)
+            env = f"NCBI_CONFIG_PATH={REGISTRY_DIR}/{name}" + (f" {extra}" if extra else "")
+            rows.append(make_row(f"{program}{'.' + task if task else ''}.seqid0_registry_{name}.{role}.o6", program,
+                                 task, q, s, outfmt=6, env=env, note=note, tier="seqid"))
+    # A set but empty NCBI_CONFIG_PATH: NCBI reads no registry file, also not the one in HOME (SFd R3).
+    for program, task in ALL_PROGRAMS:
+        q, s = base_pair(program)
+        rows.append(make_row(f"{program}{'.' + task if task else ''}.registry_cfgpath_empty.o6", program, task, q, s,
+                             outfmt=6, env=f"NCBI_CONFIG_PATH= HOME={REGISTRY_DIR}/rc_other",
+                             note=REGISTRY["rc_other"][3], tier="seqid"))
     return rows
 
 
@@ -967,6 +1018,10 @@ def seqid_files() -> dict[str, bytes]:
     return out
 
 
+def registry_files() -> dict[str, bytes]:
+    return {f"registry/{name}/{fn}": data for name, (files, _, _, _) in REGISTRY.items() for fn, data in files.items()}
+
+
 def command_generate(args) -> int:
     FIXTURES.mkdir(parents=True, exist_ok=True)
     files: dict[str, bytes] = {}
@@ -980,12 +1035,14 @@ def command_generate(args) -> int:
     files.update(batch_files())
     files.update(batchlong_files())
     files.update(seqid_files())
+    files.update(registry_files())
     for existing in FIXTURES.iterdir():
         if existing.is_file() and existing.name not in files:
             existing.unlink()
     total = 0
     for name, data in files.items():
         path = FIXTURES / name
+        path.parent.mkdir(parents=True, exist_ok=True)
         if not path.exists() or path.read_bytes() != data:
             path.write_bytes(data)
         total += len(data)
@@ -1090,10 +1147,21 @@ def loaders_off(case_env: str) -> bool:
     return False
 
 
+def registry_loaders_off(case_env: str) -> bool:
+    """True when the row names a directory of REGISTRY with NCBI_CONFIG_PATH, together with that entry's
+    other variables, and NCBI turns both data loaders off there."""
+    items = dict(item.partition("=")[::2] for item in shlex.split(case_env))
+    path = items.pop("NCBI_CONFIG_PATH", None)
+    if path is None or not path.startswith(REGISTRY_DIR + "/"):
+        return False
+    files, extra, loaders, _ = REGISTRY.get(path[len(REGISTRY_DIR) + 1:], ({}, "", True, ""))
+    return not loaders and items == dict(item.partition("=")[::2] for item in shlex.split(extra))
+
+
 def network_safe(row: Row) -> str | None:
     """None when no input of the row starts with a Seq-id candidate (or the row turns the data
     loaders off), else a reason."""
-    if loaders_off(row.env):
+    if loaders_off(row.env) or registry_loaders_off(row.env):
         return None
     sources = []
     mode, spath = stdin_of(row)

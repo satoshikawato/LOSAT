@@ -17,9 +17,10 @@
 // input, or separate searches (one run per source, queued as a group).
 import { buildArgv, COMBINED_NAMES, PASTED_NAMES } from '../domain/argv';
 import { includedRecords, type DatasetRecord, type DatasetRevision } from '../domain/dataset';
-import { formParameters, setField, type FieldValue, type FormValues } from '../domain/parameters';
+import { describedSections, formParameters, setField, type FieldValue, type FormValues } from '../domain/parameters';
 import { indexParser, PROGRAMS, programById, type InputRole, type ProgramId } from '../domain/programs';
 import { REGION_FLAG, regionProblem, regionValue, type RegionText } from '../domain/region';
+import { readOptions, type AppliedSettings, type SearchSettings } from '../domain/settings-file';
 import type { DataGateway } from '../ports/data';
 import type { EngineGateway, ProgramDescription } from '../ports/engine';
 import type { InputCheck } from '../ports/input-check';
@@ -363,6 +364,75 @@ export class SearchDraft {
     return ROLES.map((role) => this.inputGroups(role).length).reduce((a, b) => a * Math.max(1, b), 1);
   }
 
+  // --- settings (S15: settings files and "Edit Search") --------------------------------------
+
+  /** The search conditions of the form: the program, the argv's options after the inputs, and the threads. */
+  settings(): SearchSettings {
+    const { program, threads } = this.state.get();
+    const options = this.parameters().flatMap(([flag, value]) => (value === true ? [flag] : [flag, value]));
+    return { program, options, threads };
+  }
+
+  /**
+   * Puts search conditions in the form (a settings file, or a run's for "Edit Search"): the
+   * program, the options on the form's fields - the engine's description of the program says
+   * which flags take a value, so `-penalty -3` is one option - and the threads. They replace
+   * the form's conditions: a field or a region that they do not name returns to its default.
+   * The inputs stay, and the Job Title unless `title` is given. An option that the form has no
+   * field for, a region that the inputs cannot take, and more threads than `maxThreads` are
+   * left out and listed. The form is validated as after any edit; nothing is searched. Rejects,
+   * changing nothing, when the engine's description of the program cannot be read.
+   */
+  async applySettings(
+    settings: SearchSettings,
+    options: { readonly maxThreads: number; readonly title?: string },
+  ): Promise<AppliedSettings> {
+    const description = await this.descriptionOf(settings.program);
+    const program = programById(settings.program);
+    const grammar = new Map(description.parameters.map((parameter) => [parameter.flag, parameter.takesValue]));
+    const fields = new Map(
+      describedSections(program, description.parameters).flatMap((section) => section.fields.map((field) => [field.flag, field] as const)),
+    );
+    const read = readOptions(settings.options, (flag) => grammar.get(flag));
+    const notApplied = read.stray.map((word) => `${word} (not an option)`);
+    const values: Record<string, FieldValue> = {};
+    const regions: Partial<Record<InputRole, string>> = {};
+    for (const option of read.options) {
+      const role = ROLES.find((r) => REGION_FLAG[r] === option.flag);
+      const field = fields.get(option.flag);
+      if (role !== undefined && option.value !== true) regions[role] = option.value;
+      else if (field !== undefined && (field.kind === 'flag') === (option.value === true)) values[option.flag] = option.value;
+      else notApplied.push(`${option.words.join(' ')} (the ${program.label} form has no field for it)`);
+    }
+    const threads = settings.threads === 'auto' || settings.threads <= options.maxThreads ? settings.threads : 'auto';
+
+    this.setProgram(settings.program);
+    const current = this.state.get();
+    this.set({
+      values: { ...current.values, [settings.program]: Object.freeze(values) },
+      threads,
+      ...(options.title === undefined ? {} : { title: options.title }),
+      message: undefined,
+    });
+    // A region applies to the role's only record, which a program of the other reader kind
+    // indexes again: the records are known once the inputs are read.
+    await this.idle();
+    for (const role of ROLES) {
+      const text = regions[role];
+      const match = text === undefined ? null : /^\s*(\d+)-(\d+)\s*$/.exec(text);
+      if (text !== undefined && match === null) {
+        notApplied.push(`${REGION_FLAG[role]} ${text} (the form's region is a start and a stop, start-stop)`);
+      } else if (text !== undefined && this.regionRecord(role) === undefined) {
+        notApplied.push(`${REGION_FLAG[role]} ${text} (a region needs a ${role} of one record)`);
+      }
+      this.setRegion(role, match === null || this.regionRecord(role) === undefined ? undefined : { start: match[1]!, stop: match[2]! });
+    }
+    if (threads !== settings.threads) {
+      notApplied.push(`threads ${settings.threads} (this browser offers 1 to ${options.maxThreads}; Auto is set)`);
+    }
+    return { notApplied };
+  }
+
   // --- submit -----------------------------------------------------------------------------
 
   /** Freezes the draft into queued runs (one, or a group of separate searches). */
@@ -542,6 +612,14 @@ export class SearchDraft {
         },
       ),
     );
+  }
+
+  /** The engine's description of a program, from the first request for it. */
+  private descriptionOf(program: ProgramId): Promise<ProgramDescription> {
+    const described = this.described.get(program);
+    if (described !== undefined) return Promise.resolve(described);
+    this.loadDescription(program);
+    return this.descriptions.get(program)!;
   }
 
   /** Indexes a source again (ready, failed or still being indexed) with the program's reader. */

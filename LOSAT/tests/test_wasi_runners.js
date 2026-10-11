@@ -96,11 +96,56 @@ function command({ threaded, status = 0, worker = null, entry = "_start",
   ]);
 }
 
+// NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
+// CATCH_ALL(status); ... return status;
+// Host memory boundary only: one WASI call whose pointer argument is above 2 GiB.
+// clock_time_get writes the time to 0x80000008; the command exits with the call's
+// errno, or with 99 if no time arrived there. The serial memory starts at 2 GiB and
+// one page; the threaded one declares LOSAT's 65,535 pages and grows to that size.
+function highPointerCommand(threaded) {
+  const pages = 32769;
+  const types = vector([
+    [0x60, 1, 0x7f, 0],                    // proc_exit(i32)
+    [0x60, 0, 0],                          // _start()
+    [0x60, 1, 0x7f, 1, 0x7f],              // thread-spawn(i32) -> i32
+    [0x60, 2, 0x7f, 0x7f, 0],              // wasi_thread_start(i32, i32)
+    [0x60, 3, 0x7f, 0x7e, 0x7f, 1, 0x7f],  // clock_time_get(i32, i64, i32) -> i32
+  ]);
+  const imports = [
+    [...name("wasi_snapshot_preview1"), ...name("proc_exit"), 0, 0],
+    [...name("wasi_snapshot_preview1"), ...name("clock_time_get"), 0, 4],
+  ];
+  if (threaded) {
+    imports.push([...name("env"), ...name("memory"), 2, 3, 1, ...uleb(65535)]);
+    imports.push([...name("wasi"), ...name("thread-spawn"), 0, 2]);
+  }
+  const entry = imports.length - (threaded ? 1 : 0);
+  const address = i32(0x80000008 | 0);
+  const start = [1, 1, 0x7f,                                  // (local i32)
+    ...(threaded ? [...i32(pages - 1), 0x40, 0, 0x1a] : []),  // memory.grow; drop
+    ...i32(1), 0x42, 1, ...address, 0x10, 1, 0x22, 0,         // errno = clock_time_get(monotonic, 1, address)
+    0x04, 0x40, 0x20, 0, 0x10, 0, 0x0b,                       // if (errno) proc_exit(errno)
+    ...address, 0x29, 3, 0, 0x50,                             // i64.load(address) == 0
+    0x04, 0x40, ...i32(99), 0x10, 0, 0x0b,                    // if so: proc_exit(99)
+    0x0b];
+  const exports = [[...name("memory"), 2, 0], [...name("_start"), 0, entry]];
+  if (threaded) exports.push([...name("wasi_thread_start"), 0, entry + 1]);
+  return Buffer.from([
+    0, 97, 115, 109, 1, 0, 0, 0,
+    ...section(1, types),
+    ...section(2, vector(imports)),
+    ...section(3, vector(threaded ? [[1], [3]] : [[1]])),
+    ...(threaded ? [] : section(5, [1, 0, ...uleb(pages)])),
+    ...section(7, vector(exports)),
+    ...section(10, vector([[...uleb(start.length), ...start], ...(threaded ? [body([])] : [])])),
+  ]);
+}
+
 function run(options) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "losat-wasi-runner-"));
   try {
     const fixture = path.join(directory, "command.wasm");
-    const bytes = command(options);
+    const bytes = options.bytes || command(options);
     assert.ok(WebAssembly.validate(bytes));
     fs.writeFileSync(fixture, bytes);
     const runner = options.threaded ? "run_losat_wasi_threads.js" : "run_losat_wasi.js";
@@ -145,6 +190,76 @@ test("successful worker releases its parent and exits successfully", () => {
   const result = run({ threaded: true, worker: "success" });
   assert.equal(result.signal, null, result.stderr);
   assert.equal(result.status, 0, result.stderr);
+});
+
+// NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
+// CATCH_ALL(status); ... return status;
+// node:wasi answers EINVAL (28) to a pointer argument that JavaScript sees as negative;
+// both runners pass WASI arguments as unsigned values (wasi_artifact.js).
+for (const threaded of [false, true]) {
+  test(`${threaded ? "threaded" : "serial"} WASI call with a pointer above 2 GiB succeeds`, () => {
+    const result = run({ threaded, bytes: highPointerCommand(threaded) });
+    assert.equal(result.signal, null, result.stderr);
+    assert.equal(result.status, 0, result.stderr);
+  });
+}
+
+test("WASI imports receive i32 arguments as unsigned values", () => {
+  const { unsignedWasiImports } = require("./wasi_artifact");
+  const seen = [];
+  const imports = unsignedWasiImports({
+    clock_time_get: (...args) => { seen.push(args); return 0; },
+    proc_exit: (...args) => { seen.push(args); },
+  });
+  assert.deepEqual(Object.keys(imports), ["clock_time_get", "proc_exit"]);
+  assert.equal(imports.clock_time_get(1, 1n, -2147483640), 0);
+  imports.proc_exit(-1);
+  assert.deepEqual(seen, [[1, 1n, 2147483656], [4294967295]]);
+});
+
+// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+// m_NumThreads = num_threads;
+// Host memory only: when the declared maximum cannot be reserved, the host provides a
+// shared memory with a smaller one. An engine either refuses to create the memory or
+// creates one that cannot grow; an explicit maximum is never replaced.
+test("shared memory steps down when the declared maximum cannot be reserved", () => {
+  const { createSharedMemory } = require("./wasi_thread_host");
+  const tried = [];
+  // `refuses`: the constructor throws above the limit. Otherwise the memory is created
+  // with its initial pages only and cannot grow.
+  const engine = (limit, refuses) => descriptor => {
+    tried.push(descriptor.maximum);
+    if (descriptor.maximum > limit && refuses) throw new RangeError("could not allocate memory");
+    let pages = descriptor.initial;
+    return { descriptor, pages: () => pages, grow(delta) {
+      if (descriptor.maximum > limit) throw new RangeError("Unable to grow instance memory");
+      pages += delta;
+    } };
+  };
+  for (const refuses of [true, false]) {
+    tried.length = 0;
+    const whole = createSharedMemory(23, 65535, true, engine(65535, refuses));
+    assert.deepEqual(whole.memory.descriptor, { initial: 22, maximum: 65535, shared: true });
+    assert.deepEqual([whole.maximum, whole.memory.pages()], [65535, 23]);
+    const less = createSharedMemory(23, 65535, true, engine(20000, refuses));
+    assert.deepEqual([less.maximum, less.memory.pages()], [16384, 23]);
+    assert.deepEqual(tried, [65535, 65535, 49152, 32768, 24576, 16384]);
+    // Never below the 1 GiB of the earlier modules, nor below the initial size.
+    assert.throws(() => createSharedMemory(23, 65535, true, engine(16383, refuses)), RangeError);
+    assert.throws(() => createSharedMemory(23, 16384, true, engine(16383, refuses)), RangeError);
+    tried.length = 0;
+    assert.throws(() => createSharedMemory(30000, 65535, true, engine(20000, refuses)), RangeError);
+    assert.deepEqual(tried, [65535, 49152, 32768]);
+    // An explicit maximum is used as it is.
+    tried.length = 0;
+    assert.throws(() => createSharedMemory(23, 65535, false, engine(20000, refuses)), RangeError);
+    assert.deepEqual(tried, [65535]);
+  }
+  assert.throws(() => createSharedMemory(23, 65535, true, () => { throw new TypeError("other"); }), TypeError);
+  const real = createSharedMemory(3, 4, true);
+  assert.equal(real.maximum, 4);
+  assert.equal(real.memory.buffer.byteLength, 3 * 65536);
+  assert.ok(real.memory.buffer instanceof SharedArrayBuffer);
 });
 
 // NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176

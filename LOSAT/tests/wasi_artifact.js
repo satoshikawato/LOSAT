@@ -64,7 +64,27 @@ function prepareArtifact(bytes, expected) {
 function inspectArtifact(bytes, expected) {
   return prepareArtifact(bytes, expected).identity;
 }
-module.exports = { inspectArtifact, prepareArtifact };
+// NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
+// CATCH_ALL(status); return status;
+// Host compatibility only. A Wasm i32 reaches JavaScript as a signed number, so a
+// pointer or a length of 2 GiB or more arrives negative. Node v24.21.0 and v26.8.2,
+// src/node_wasi.cc:300-301,393-394:
+//   bool CheckType<uint32_t>(Local<Value> value) { return value->IsUint32(); }
+//   if (!CheckTypes<Args...>(args)) { args.GetReturnValue().Set(UVWASI_EINVAL); return; }
+// so node:wasi answers EINVAL to such a call. Every i32 parameter of WASI preview1 is
+// unsigned (pointer, size, descriptor, flags); pass each as its u32 value. The i64
+// parameters are BigInt and pass unchanged.
+function unsignedWasiImports(wasiImport) {
+  const imports = {};
+  for (const [name, fn] of Object.entries(wasiImport)) {
+    imports[name] = (...args) => {
+      for (let i = 0; i < args.length; i += 1) if (typeof args[i] === "number") args[i] >>>= 0;
+      return fn(...args);
+    };
+  }
+  return imports;
+}
+module.exports = { inspectArtifact, prepareArtifact, unsignedWasiImports };
 if (require.main === module) {
   try { console.log(JSON.stringify(inspectArtifact(require("node:fs").readFileSync(process.argv[2]), process.argv[3]), null, 2)); }
   catch (error) { console.error(error); process.exitCode = 1; }

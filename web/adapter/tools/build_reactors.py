@@ -41,6 +41,12 @@ def digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def declared_maximum_pages(rustflags: list[str]) -> int | None:
+    """The `--max-memory` of the rustflags in 64 KiB pages, or None if they set none."""
+    sizes = [flag.rsplit("=", 1)[1] for flag in rustflags if flag.startswith("link-arg=--max-memory=")]
+    return int(sizes[-1]) // 65536 if sizes else None
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--target-dir", type=Path, required=True)
@@ -73,6 +79,12 @@ def main() -> int:
         built = target / name / triple / "release/losat_web_adapter.wasm"
         artifact = json.loads(subprocess.check_output(
             [args.node, str(ENGINE / "tests/wasi_artifact.js"), str(built), kind], text=True))
+        # The shared memory's maximum is a link argument in the rustflags (plan TD-7); a
+        # build that lost it would silently declare Rust's default of 1 GiB.
+        expected_maximum = declared_maximum_pages(config["target"][triple]["rustflags"])
+        if expected_maximum is not None and artifact["memory"]["maximum"] != expected_maximum:
+            raise SystemExit(f"{name}: the module declares a memory maximum of {artifact['memory']['maximum']} pages, "
+                             f"the rustflags ask for {expected_maximum}")
         destination = out / f"losat-web-{name}.wasm"
         shutil.copyfile(built, destination)
         artifact.update(

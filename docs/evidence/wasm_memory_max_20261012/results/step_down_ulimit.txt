@@ -1,0 +1,19 @@
+# memprobe (16 MiB blocks, 2 threads) under an address-space limit, Node v26.8.2; host: LOSAT/tests/wasi_thread_host.js of a6b49721
+ulimit -v 1800000, memprobe-def: [losat-wasi-threads] shared memory: initial 17 pages, maximum 16384 pages (module declares 16384)
+ulimit -v 1800000, memprobe-def: blocks=13 total_mib=208 lowest=0x02370000 highest_start=0x0e430000 highest_end=0x0f430000 pages=3908
+ulimit -v 1800000, memprobe-def: small_chunks=707 small_top=0x0100bffa0 small_mismatches=0 pages=4108
+ulimit -v 1800000, memprobe-p65535: [losat-wasi-threads] shared memory: initial 17 pages, maximum 16384 pages (module declares 65535)
+ulimit -v 1800000, memprobe-p65535: blocks=13 total_mib=208 lowest=0x02370000 highest_start=0x0e430000 highest_end=0x0f430000 pages=3908
+ulimit -v 1800000, memprobe-p65535: small_chunks=707 small_top=0x0100bffa0 small_mismatches=0 pages=4108
+ulimit -v 3000000, memprobe-def: [losat-wasi-threads] shared memory: initial 17 pages, maximum 16384 pages (module declares 16384)
+ulimit -v 3000000, memprobe-def: blocks=61 total_mib=976 lowest=0x02370000 highest_start=0x3e730000 highest_end=0x3f730000 pages=16244
+ulimit -v 3000000, memprobe-def: small_chunks=2228 small_top=0x03fffffb0 small_mismatches=0 pages=16384
+ulimit -v 3000000, memprobe-p65535: [losat-wasi-threads] shared memory: initial 17 pages, maximum 65535 pages (module declares 65535)
+ulimit -v 3000000, memprobe-p65535: blocks=61 total_mib=976 lowest=0x02370000 highest_start=0x3e730000 highest_end=0x3f730000 pages=16244
+ulimit -v 3000000, memprobe-p65535: small_chunks=2233 small_top=0x0400dffa0 small_mismatches=0 pages=16398
+ulimit -v unlimited, memprobe-def: [losat-wasi-threads] shared memory: initial 17 pages, maximum 16384 pages (module declares 16384)
+ulimit -v unlimited, memprobe-def: blocks=61 total_mib=976 lowest=0x02370000 highest_start=0x3e730000 highest_end=0x3f730000 pages=16244
+ulimit -v unlimited, memprobe-def: small_chunks=2228 small_top=0x03fffffb0 small_mismatches=0 pages=16384
+ulimit -v unlimited, memprobe-p65535: [losat-wasi-threads] shared memory: initial 17 pages, maximum 65535 pages (module declares 65535)
+ulimit -v unlimited, memprobe-p65535: blocks=252 total_mib=4032 lowest=0x02370000 highest_start=0xfe320000 highest_end=0xff320000 pages=65331
+ulimit -v unlimited, memprobe-p65535: small_chunks=8636 small_top=0x0fffeffb0 small_mismatches=0 pages=65535

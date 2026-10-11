@@ -1,0 +1,667 @@
+{
+  "project": "http",
+  "site": "http://localhost:4730",
+  "tests": [
+    {
+      "project": "http",
+      "title": "headers: root",
+      "status": "passed",
+      "durationMs": 7,
+      "record": {
+        "kind": "root",
+        "path": "/",
+        "first": {
+          "status": 200,
+          "headers": {
+            "content-type": "text/html; charset=utf-8",
+            "content-length": "451",
+            "etag": "\"40acabc354376cf2008bd0328a8829a2\"",
+            "cache-control": "no-cache",
+            "cross-origin-opener-policy": "same-origin",
+            "cross-origin-embedder-policy": "require-corp",
+            "cross-origin-resource-policy": "same-origin",
+            "content-security-policy": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+            "x-content-type-options": "nosniff",
+            "referrer-policy": "no-referrer",
+            "connection": "keep-alive",
+            "date": "Sun, 11 Oct 2026 08:32:32 GMT",
+            "keep-alive": "timeout=5"
+          },
+          "bytes": 451
+        },
+        "conditional": {
+          "if-none-match": {
+            "status": 304,
+            "headers": {
+              "etag": "\"40acabc354376cf2008bd0328a8829a2\"",
+              "cache-control": "no-cache",
+              "cross-origin-opener-policy": "same-origin",
+              "cross-origin-embedder-policy": "require-corp",
+              "cross-origin-resource-policy": "same-origin",
+              "content-security-policy": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+              "x-content-type-options": "nosniff",
+              "referrer-policy": "no-referrer",
+              "connection": "keep-alive",
+              "date": "Sun, 11 Oct 2026 08:32:32 GMT",
+              "keep-alive": "timeout=5"
+            },
+            "bytes": 0
+          }
+        },
+        "failures": [],
+        "notes": []
+      }
+    },
+    {
+      "project": "http",
+      "title": "headers: boot-js",
+      "status": "passed",
+      "durationMs": 7,
+      "record": {
+        "kind": "boot-js",
+        "path": "/boot.js",
+        "first": {
+          "status": 200,
+          "headers": {
+            "content-type": "text/javascript; charset=utf-8",
+            "content-length": "9464",
+            "etag": "\"d51f483905016122ec48a71a08f91a26\"",
+            "cache-control": "no-cache",
+            "cross-origin-opener-policy": "same-origin",
+            "cross-origin-embedder-policy": "require-corp",
+            "cross-origin-resource-policy": "same-origin",
+            "content-security-policy": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+            "x-content-type-options": "nosniff",
+            "referrer-policy": "no-referrer",
+            "connection": "keep-alive",
+            "date": "Sun, 11 Oct 2026 08:32:32 GMT",
+            "keep-alive": "timeout=5"
+          },
+          "bytes": 9464
+        },
+        "conditional": {
+          "if-none-match": {
+            "status": 304,
+            "headers": {
+              "etag": "\"d51f483905016122ec48a71a08f91a26\"",
+              "cache-control": "no-cache",
+              "cross-origin-opener-policy": "same-origin",
+              "cross-origin-embedder-policy": "require-corp",
+              "cross-origin-resource-policy": "same-origin",
+              "content-security-policy": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+              "x-content-type-options": "nosniff",
+              "referrer-policy": "no-referrer",
+              "connection": "keep-alive",
+              "date": "Sun, 11 Oct 2026 08:32:32 GMT",
+              "keep-alive": "timeout=5"
+            },
+            "bytes": 0
+          }
+        },
+        "failures": [],
+        "notes": []
+      }
+    },
+    {
+      "project": "http",
+      "title": "headers: boot-css",
+      "status": "passed",
+      "durationMs": 3,
+      "record": {
+        "kind": "boot-css",
+        "path": "/boot.css",
+        "first": {
+          "status": 200,
+          "headers": {
+            "content-type": "text/css; charset=utf-8",
+            "content-length": "781",
+            "etag": "\"e55f7615ff94dfcd91dc58fbd89eff19\"",
+            "cache-control": "no-cache",
+            "cross-origin-opener-policy": "same-origin",
+            "cross-origin-embedder-policy": "require-corp",
+            "cross-origin-resource-policy": "same-origin",
+            "content-security-policy": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+            "x-content-type-options": "nosniff",
+            "referrer-policy": "no-referrer",
+            "connection": "keep-alive",
+            "date": "Sun, 11 Oct 2026 08:32:32 GMT",
+            "keep-alive": "timeout=5"
+          },
+          "bytes": 781
+        },
+        "conditional": {
+          "if-none-match": {
+            "status": 304,
+            "headers": {
+              "etag": "\"e55f7615ff94dfcd91dc58fbd89eff19\"",
+              "cache-control": "no-cache",
+              "cross-origin-opener-policy": "same-origin",
+              "cross-origin-embedder-policy": "require-corp",
+              "cross-origin-resource-policy": "same-origin",
+              "content-security-policy": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+              "x-content-type-options": "nosniff",
+              "referrer-policy": "no-referrer",
+              "connection": "keep-alive",
+              "date": "Sun, 11 Oct 2026 08:32:32 GMT",
+              "keep-alive": "timeout=5"
+            },
+            "bytes": 0
+          }
+        },
+        "failures": [],
+        "notes": []
+      }
+    },
+    {
+      "project": "http",
+      "title": "headers: releases-json",
+      "status": "passed",
+      "durationMs": 3,
+      "record": {
+        "kind": "releases-json",
+        "path": "/releases.json",
+        "first": {
+          "status": 200,
+          "headers": {
+            "content-type": "application/json",
+            "content-length": "612",
+            "etag": "\"470b2ea6d69f297776a7fdd4ba944aef\"",
+            "cache-control": "no-cache",
+            "cross-origin-opener-policy": "same-origin",
+            "cross-origin-embedder-policy": "require-corp",
+            "cross-origin-resource-policy": "same-origin",
+            "content-security-policy": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+            "x-content-type-options": "nosniff",
+            "referrer-policy": "no-referrer",
+            "connection": "keep-alive",
+            "date": "Sun, 11 Oct 2026 08:32:32 GMT",
+            "keep-alive": "timeout=5"
+          },
+          "bytes": 612
+        },
+        "conditional": {
+          "if-none-match": {
+            "status": 304,
+            "headers": {
+              "etag": "\"470b2ea6d69f297776a7fdd4ba944aef\"",
+              "cache-control": "no-cache",
+              "cross-origin-opener-policy": "same-origin",
+              "cross-origin-embedder-policy": "require-corp",
+              "cross-origin-resource-policy": "same-origin",
+              "content-security-policy": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+              "x-content-type-options": "nosniff",
+              "referrer-policy": "no-referrer",
+              "connection": "keep-alive",
+              "date": "Sun, 11 Oct 2026 08:32:32 GMT",
+              "keep-alive": "timeout=5"
+            },
+            "bytes": 0
+          }
+        },
+        "failures": [],
+        "notes": []
+      }
+    },
+    {
+      "project": "http",
+      "title": "headers: sw-js",
+      "status": "passed",
+      "durationMs": 6,
+      "record": {
+        "kind": "sw-js",
+        "path": "/sw.js",
+        "first": {
+          "status": 200,
+          "headers": {
+            "content-type": "text/javascript; charset=utf-8",
+            "content-length": "10766",
+            "etag": "\"98dd88211b101dcfcc32621d119043e7\"",
+            "cache-control": "no-cache",
+            "cross-origin-opener-policy": "same-origin",
+            "cross-origin-embedder-policy": "require-corp",
+            "cross-origin-resource-policy": "same-origin",
+            "content-security-policy": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+            "x-content-type-options": "nosniff",
+            "referrer-policy": "no-referrer",
+            "connection": "keep-alive",
+            "date": "Sun, 11 Oct 2026 08:32:32 GMT",
+            "keep-alive": "timeout=5"
+          },
+          "bytes": 10766
+        },
+        "conditional": {
+          "if-none-match": {
+            "status": 304,
+            "headers": {
+              "etag": "\"98dd88211b101dcfcc32621d119043e7\"",
+              "cache-control": "no-cache",
+              "cross-origin-opener-policy": "same-origin",
+              "cross-origin-embedder-policy": "require-corp",
+              "cross-origin-resource-policy": "same-origin",
+              "content-security-policy": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+              "x-content-type-options": "nosniff",
+              "referrer-policy": "no-referrer",
+              "connection": "keep-alive",
+              "date": "Sun, 11 Oct 2026 08:32:32 GMT",
+              "keep-alive": "timeout=5"
+            },
+            "bytes": 0
+          }
+        },
+        "failures": [],
+        "notes": []
+      }
+    },
+    {
+      "project": "http",
+      "title": "headers: release-manifest",
+      "status": "passed",
+      "durationMs": 3,
+      "record": {
+        "kind": "release-manifest",
+        "path": "/r/35970fa18885-e2fb7128/release-manifest.json",
+        "first": {
+          "status": 200,
+          "headers": {
+            "content-type": "application/json",
+            "content-length": "2668",
+            "etag": "\"09a43d2b78e47b0fba9a0d3f4379d7f9\"",
+            "cache-control": "public, max-age=31536000, immutable",
+            "cross-origin-opener-policy": "same-origin",
+            "cross-origin-embedder-policy": "require-corp",
+            "cross-origin-resource-policy": "same-origin",
+            "content-security-policy": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+            "x-content-type-options": "nosniff",
+            "referrer-policy": "no-referrer",
+            "connection": "keep-alive",
+            "date": "Sun, 11 Oct 2026 08:32:32 GMT",
+            "keep-alive": "timeout=5"
+          },
+          "bytes": 2668
+        },
+        "conditional": {
+          "if-none-match": {
+            "status": 304,
+            "headers": {
+              "etag": "\"09a43d2b78e47b0fba9a0d3f4379d7f9\"",
+              "cache-control": "public, max-age=31536000, immutable",
+              "cross-origin-opener-policy": "same-origin",
+              "cross-origin-embedder-policy": "require-corp",
+              "cross-origin-resource-policy": "same-origin",
+              "content-security-policy": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+              "x-content-type-options": "nosniff",
+              "referrer-policy": "no-referrer",
+              "connection": "keep-alive",
+              "date": "Sun, 11 Oct 2026 08:32:32 GMT",
+              "keep-alive": "timeout=5"
+            },
+            "bytes": 0
+          }
+        },
+        "failures": [],
+        "notes": []
+      }
+    },
+    {
+      "project": "http",
+      "title": "headers: entry-script",
+      "status": "passed",
+      "durationMs": 4,
+      "record": {
+        "kind": "entry-script",
+        "path": "/r/35970fa18885-e2fb7128/assets/index-TrLB6fiV.js",
+        "first": {
+          "status": 200,
+          "headers": {
+            "content-type": "text/javascript; charset=utf-8",
+            "content-length": "468177",
+            "etag": "\"be7c58a434b30a352b04b5a38b7db1c2\"",
+            "cache-control": "public, max-age=31536000, immutable",
+            "cross-origin-opener-policy": "same-origin",
+            "cross-origin-embedder-policy": "require-corp",
+            "cross-origin-resource-policy": "same-origin",
+            "content-security-policy": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+            "x-content-type-options": "nosniff",
+            "referrer-policy": "no-referrer",
+            "connection": "keep-alive",
+            "date": "Sun, 11 Oct 2026 08:32:32 GMT",
+            "keep-alive": "timeout=5"
+          },
+          "bytes": 468177
+        },
+        "conditional": {
+          "if-none-match": {
+            "status": 304,
+            "headers": {
+              "etag": "\"be7c58a434b30a352b04b5a38b7db1c2\"",
+              "cache-control": "public, max-age=31536000, immutable",
+              "cross-origin-opener-policy": "same-origin",
+              "cross-origin-embedder-policy": "require-corp",
+              "cross-origin-resource-policy": "same-origin",
+              "content-security-policy": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+              "x-content-type-options": "nosniff",
+              "referrer-policy": "no-referrer",
+              "connection": "keep-alive",
+              "date": "Sun, 11 Oct 2026 08:32:32 GMT",
+              "keep-alive": "timeout=5"
+            },
+            "bytes": 0
+          }
+        },
+        "failures": [],
+        "notes": []
+      }
+    },
+    {
+      "project": "http",
+      "title": "headers: entry-style",
+      "status": "passed",
+      "durationMs": 7,
+      "record": {
+        "kind": "entry-style",
+        "path": "/r/35970fa18885-e2fb7128/assets/index-DM-7JZaz.css",
+        "first": {
+          "status": 200,
+          "headers": {
+            "content-type": "text/css; charset=utf-8",
+            "content-length": "32634",
+            "etag": "\"b6887e7534805bd50df0c8f642d25f2c\"",
+            "cache-control": "public, max-age=31536000, immutable",
+            "cross-origin-opener-policy": "same-origin",
+            "cross-origin-embedder-policy": "require-corp",
+            "cross-origin-resource-policy": "same-origin",
+            "content-security-policy": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+            "x-content-type-options": "nosniff",
+            "referrer-policy": "no-referrer",
+            "connection": "keep-alive",
+            "date": "Sun, 11 Oct 2026 08:32:32 GMT",
+            "keep-alive": "timeout=5"
+          },
+          "bytes": 32634
+        },
+        "conditional": {
+          "if-none-match": {
+            "status": 304,
+            "headers": {
+              "etag": "\"b6887e7534805bd50df0c8f642d25f2c\"",
+              "cache-control": "public, max-age=31536000, immutable",
+              "cross-origin-opener-policy": "same-origin",
+              "cross-origin-embedder-policy": "require-corp",
+              "cross-origin-resource-policy": "same-origin",
+              "content-security-policy": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+              "x-content-type-options": "nosniff",
+              "referrer-policy": "no-referrer",
+              "connection": "keep-alive",
+              "date": "Sun, 11 Oct 2026 08:32:32 GMT",
+              "keep-alive": "timeout=5"
+            },
+            "bytes": 0
+          }
+        },
+        "failures": [],
+        "notes": []
+      }
+    },
+    {
+      "project": "http",
+      "title": "headers: worker-script",
+      "status": "passed",
+      "durationMs": 2,
+      "record": {
+        "kind": "worker-script",
+        "path": "/r/35970fa18885-e2fb7128/assets/engine-worker-BpQx_8tn.js",
+        "first": {
+          "status": 200,
+          "headers": {
+            "content-type": "text/javascript; charset=utf-8",
+            "content-length": "30203",
+            "etag": "\"fab21953be7ef91c388377ce1208599e\"",
+            "cache-control": "public, max-age=31536000, immutable",
+            "cross-origin-opener-policy": "same-origin",
+            "cross-origin-embedder-policy": "require-corp",
+            "cross-origin-resource-policy": "same-origin",
+            "content-security-policy": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+            "x-content-type-options": "nosniff",
+            "referrer-policy": "no-referrer",
+            "connection": "keep-alive",
+            "date": "Sun, 11 Oct 2026 08:32:32 GMT",
+            "keep-alive": "timeout=5"
+          },
+          "bytes": 30203
+        },
+        "conditional": {
+          "if-none-match": {
+            "status": 304,
+            "headers": {
+              "etag": "\"fab21953be7ef91c388377ce1208599e\"",
+              "cache-control": "public, max-age=31536000, immutable",
+              "cross-origin-opener-policy": "same-origin",
+              "cross-origin-embedder-policy": "require-corp",
+              "cross-origin-resource-policy": "same-origin",
+              "content-security-policy": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+              "x-content-type-options": "nosniff",
+              "referrer-policy": "no-referrer",
+              "connection": "keep-alive",
+              "date": "Sun, 11 Oct 2026 08:32:32 GMT",
+              "keep-alive": "timeout=5"
+            },
+            "bytes": 0
+          }
+        },
+        "failures": [],
+        "notes": []
+      }
+    },
+    {
+      "project": "http",
+      "title": "headers: engine-module-1",
+      "status": "passed",
+      "durationMs": 11,
+      "record": {
+        "kind": "engine-module-1",
+        "path": "/r/35970fa18885-e2fb7128/engine/losat-web-serial-d4ae253dc3a85307.wasm",
+        "first": {
+          "status": 200,
+          "headers": {
+            "content-type": "application/wasm",
+            "content-length": "3632122",
+            "etag": "\"d4ae253dc3a8530725ff6aa7b82fda07\"",
+            "cache-control": "public, max-age=31536000, immutable",
+            "cross-origin-opener-policy": "same-origin",
+            "cross-origin-embedder-policy": "require-corp",
+            "cross-origin-resource-policy": "same-origin",
+            "content-security-policy": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+            "x-content-type-options": "nosniff",
+            "referrer-policy": "no-referrer",
+            "connection": "keep-alive",
+            "date": "Sun, 11 Oct 2026 08:32:32 GMT",
+            "keep-alive": "timeout=5"
+          },
+          "bytes": 3632122
+        },
+        "conditional": {
+          "if-none-match": {
+            "status": 304,
+            "headers": {
+              "etag": "\"d4ae253dc3a8530725ff6aa7b82fda07\"",
+              "cache-control": "public, max-age=31536000, immutable",
+              "cross-origin-opener-policy": "same-origin",
+              "cross-origin-embedder-policy": "require-corp",
+              "cross-origin-resource-policy": "same-origin",
+              "content-security-policy": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+              "x-content-type-options": "nosniff",
+              "referrer-policy": "no-referrer",
+              "connection": "keep-alive",
+              "date": "Sun, 11 Oct 2026 08:32:32 GMT",
+              "keep-alive": "timeout=5"
+            },
+            "bytes": 0
+          }
+        },
+        "failures": [],
+        "notes": []
+      }
+    },
+    {
+      "project": "http",
+      "title": "headers: engine-module-2",
+      "status": "passed",
+      "durationMs": 14,
+      "record": {
+        "kind": "engine-module-2",
+        "path": "/r/35970fa18885-e2fb7128/engine/losat-web-threads-a13e6604a16aa868.wasm",
+        "first": {
+          "status": 200,
+          "headers": {
+            "content-type": "application/wasm",
+            "content-length": "3910594",
+            "etag": "\"a13e6604a16aa868eed790c6de160de2\"",
+            "cache-control": "public, max-age=31536000, immutable",
+            "cross-origin-opener-policy": "same-origin",
+            "cross-origin-embedder-policy": "require-corp",
+            "cross-origin-resource-policy": "same-origin",
+            "content-security-policy": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+            "x-content-type-options": "nosniff",
+            "referrer-policy": "no-referrer",
+            "connection": "keep-alive",
+            "date": "Sun, 11 Oct 2026 08:32:32 GMT",
+            "keep-alive": "timeout=5"
+          },
+          "bytes": 3910594
+        },
+        "conditional": {
+          "if-none-match": {
+            "status": 304,
+            "headers": {
+              "etag": "\"a13e6604a16aa868eed790c6de160de2\"",
+              "cache-control": "public, max-age=31536000, immutable",
+              "cross-origin-opener-policy": "same-origin",
+              "cross-origin-embedder-policy": "require-corp",
+              "cross-origin-resource-policy": "same-origin",
+              "content-security-policy": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+              "x-content-type-options": "nosniff",
+              "referrer-policy": "no-referrer",
+              "connection": "keep-alive",
+              "date": "Sun, 11 Oct 2026 08:32:32 GMT",
+              "keep-alive": "timeout=5"
+            },
+            "bytes": 0
+          }
+        },
+        "failures": [],
+        "notes": []
+      }
+    },
+    {
+      "project": "http",
+      "title": "headers: missing-site-file",
+      "status": "passed",
+      "durationMs": 2,
+      "record": {
+        "kind": "missing-site-file",
+        "path": "/missing-54b6eb6e-7851-4e9c-af90-2d2aee24ac62.js",
+        "first": {
+          "status": 404,
+          "headers": {
+            "content-type": "text/html; charset=utf-8",
+            "content-length": "424",
+            "cache-control": "public, max-age=0, must-revalidate",
+            "cross-origin-opener-policy": "same-origin",
+            "cross-origin-embedder-policy": "require-corp",
+            "cross-origin-resource-policy": "same-origin",
+            "content-security-policy": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+            "x-content-type-options": "nosniff",
+            "referrer-policy": "no-referrer",
+            "connection": "keep-alive",
+            "date": "Sun, 11 Oct 2026 08:32:32 GMT",
+            "keep-alive": "timeout=5"
+          },
+          "bytes": 424
+        },
+        "body": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n    <title>Not found · LOSAT Web</title>\n    <link rel=\"stylesheet\" href=\"/boot.css\" />\n  </head>\n  <body>\n    <div id=\"boot\">\n      <h1>Not found</h1>\n ",
+        "failures": [],
+        "notes": []
+      }
+    },
+    {
+      "project": "http",
+      "title": "headers: missing-release-file",
+      "status": "passed",
+      "durationMs": 1,
+      "record": {
+        "kind": "missing-release-file",
+        "path": "/r/35970fa18885-e2fb7128/assets/missing-d8be19b5-5c12-42e6-b486-85da189f60e2.js",
+        "first": {
+          "status": 404,
+          "headers": {
+            "content-type": "text/html; charset=utf-8",
+            "content-length": "424",
+            "cache-control": "public, max-age=31536000, immutable",
+            "cross-origin-opener-policy": "same-origin",
+            "cross-origin-embedder-policy": "require-corp",
+            "cross-origin-resource-policy": "same-origin",
+            "content-security-policy": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+            "x-content-type-options": "nosniff",
+            "referrer-policy": "no-referrer",
+            "connection": "keep-alive",
+            "date": "Sun, 11 Oct 2026 08:32:32 GMT",
+            "keep-alive": "timeout=5"
+          },
+          "bytes": 424
+        },
+        "body": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n    <title>Not found · LOSAT Web</title>\n    <link rel=\"stylesheet\" href=\"/boot.css\" />\n  </head>\n  <body>\n    <div id=\"boot\">\n      <h1>Not found</h1>\n ",
+        "failures": [],
+        "notes": [
+          "the 404 carries Cache-Control: public, max-age=31536000, immutable; a browser or CDN may remember that this file is missing (release IDs are never reused, so it matters only for a release that is removed)"
+        ]
+      }
+    },
+    {
+      "project": "http",
+      "title": "the files of the latest release are served byte for byte",
+      "status": "passed",
+      "durationMs": 29,
+      "record": {
+        "release": "35970fa18885-e2fb7128",
+        "assets": 13,
+        "shell": 3,
+        "failures": []
+      }
+    },
+    {
+      "project": "http",
+      "title": "the boot page loads nothing from another origin and nothing was injected",
+      "status": "passed",
+      "durationMs": 2,
+      "record": {
+        "sources": [
+          "/boot.css",
+          "/boot.js"
+        ],
+        "foreign": [],
+        "injected": false,
+        "inline": false
+      }
+    },
+    {
+      "project": "http",
+      "title": "every release of the site index has its manifest",
+      "status": "passed",
+      "durationMs": 1,
+      "record": {
+        "latest": "35970fa18885-e2fb7128",
+        "statuses": {
+          "35970fa18885-e2fb7128": 200
+        },
+        "failures": []
+      }
+    },
+    {
+      "project": "http",
+      "title": "/api/visit refuses a body that is not the event; a valid event only with LOSAT_WEB_PREVIEW_SEND_VISIT=1",
+      "status": "skipped",
+      "durationMs": 0,
+      "skipReason": "/releases.json has no analytics: the site measures nothing"
+    }
+  ]
+}

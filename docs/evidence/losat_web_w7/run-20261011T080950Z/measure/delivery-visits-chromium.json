@@ -1,0 +1,407 @@
+{
+  "origin": "front server before the E2E site (engine build)",
+  "release": "35970fa18885-e2fb7128",
+  "stored": {
+    "files": 17,
+    "bytes": 8188494
+  },
+  "warmup": {
+    "first": {
+      "app": 162,
+      "checked": 547,
+      "preparing": 2164,
+      "ready": 2283,
+      "prepareMs": 119,
+      "navigation": {
+        "responseEnd": 4,
+        "domContentLoaded": 106,
+        "load": 106
+      },
+      "bytes": {
+        "network": 8201096,
+        "preparation": 3978574
+      },
+      "requests": 25
+    },
+    "second": {
+      "app": 29,
+      "checked": 398,
+      "preparing": 2032,
+      "ready": 2047,
+      "prepareMs": 15,
+      "navigation": {
+        "responseEnd": 4,
+        "domContentLoaded": 11,
+        "load": 11
+      },
+      "bytes": {
+        "network": 1836,
+        "preparation": 612
+      },
+      "requests": 13
+    },
+    "offline": {
+      "app": 15,
+      "checked": 382,
+      "preparing": 2016,
+      "ready": 2020,
+      "prepareMs": 4,
+      "navigation": {
+        "responseEnd": 3,
+        "domContentLoaded": 8,
+        "load": 8
+      },
+      "bytes": {
+        "network": 0,
+        "preparation": 0
+      },
+      "requests": 0
+    }
+  },
+  "samples": [
+    {
+      "first": {
+        "app": 65,
+        "checked": 454,
+        "preparing": 2069,
+        "ready": 2185,
+        "prepareMs": 116,
+        "navigation": {
+          "responseEnd": 2,
+          "domContentLoaded": 18,
+          "load": 18
+        },
+        "bytes": {
+          "network": 8201096,
+          "preparation": 3978574
+        },
+        "requests": 25
+      },
+      "second": {
+        "app": 31,
+        "checked": 400,
+        "preparing": 2033,
+        "ready": 2050,
+        "prepareMs": 17,
+        "navigation": {
+          "responseEnd": 4,
+          "domContentLoaded": 11,
+          "load": 11
+        },
+        "bytes": {
+          "network": 1836,
+          "preparation": 612
+        },
+        "requests": 13
+      },
+      "offline": {
+        "app": 15,
+        "checked": 381,
+        "preparing": 2016,
+        "ready": 2020,
+        "prepareMs": 4,
+        "navigation": {
+          "responseEnd": 3,
+          "domContentLoaded": 8,
+          "load": 8
+        },
+        "bytes": {
+          "network": 0,
+          "preparation": 0
+        },
+        "requests": 0
+      }
+    },
+    {
+      "first": {
+        "app": 65,
+        "checked": 444,
+        "preparing": 2070,
+        "ready": 2189,
+        "prepareMs": 119,
+        "navigation": {
+          "responseEnd": 2,
+          "domContentLoaded": 18,
+          "load": 18
+        },
+        "bytes": {
+          "network": 8201096,
+          "preparation": 3978574
+        },
+        "requests": 25
+      },
+      "second": {
+        "app": 31,
+        "checked": 398,
+        "preparing": 2033,
+        "ready": 2049,
+        "prepareMs": 16,
+        "navigation": {
+          "responseEnd": 4,
+          "domContentLoaded": 9,
+          "load": 9
+        },
+        "bytes": {
+          "network": 1836,
+          "preparation": 612
+        },
+        "requests": 13
+      },
+      "offline": {
+        "app": 15,
+        "checked": 383,
+        "preparing": 2017,
+        "ready": 2023,
+        "prepareMs": 5,
+        "navigation": {
+          "responseEnd": 3,
+          "domContentLoaded": 8,
+          "load": 8
+        },
+        "bytes": {
+          "network": 0,
+          "preparation": 0
+        },
+        "requests": 0
+      }
+    },
+    {
+      "first": {
+        "app": 63,
+        "checked": 445,
+        "preparing": 2065,
+        "ready": 2192,
+        "prepareMs": 127,
+        "navigation": {
+          "responseEnd": 2,
+          "domContentLoaded": 17,
+          "load": 17
+        },
+        "bytes": {
+          "network": 8201096,
+          "preparation": 3978574
+        },
+        "requests": 25
+      },
+      "second": {
+        "app": 34,
+        "checked": 400,
+        "preparing": 2034,
+        "ready": 2045,
+        "prepareMs": 11,
+        "navigation": {
+          "responseEnd": 4,
+          "domContentLoaded": 12,
+          "load": 12
+        },
+        "bytes": {
+          "network": 1836,
+          "preparation": 612
+        },
+        "requests": 13
+      },
+      "offline": {
+        "app": 15,
+        "checked": 387,
+        "preparing": 2016,
+        "ready": 2020,
+        "prepareMs": 4,
+        "navigation": {
+          "responseEnd": 2,
+          "domContentLoaded": 7,
+          "load": 7
+        },
+        "bytes": {
+          "network": 0,
+          "preparation": 0
+        },
+        "requests": 0
+      }
+    }
+  ],
+  "summary": {
+    "first": {
+      "app": {
+        "median": 65,
+        "min": 63,
+        "max": 65
+      },
+      "checked": {
+        "median": 445,
+        "min": 444,
+        "max": 454
+      },
+      "preparing": {
+        "median": 2069,
+        "min": 2065,
+        "max": 2070
+      },
+      "ready": {
+        "median": 2189,
+        "min": 2185,
+        "max": 2192
+      },
+      "prepareMs": {
+        "median": 119,
+        "min": 116,
+        "max": 127
+      },
+      "navigation": {
+        "responseEnd": {
+          "median": 2,
+          "min": 2,
+          "max": 2
+        },
+        "domContentLoaded": {
+          "median": 18,
+          "min": 17,
+          "max": 18
+        },
+        "load": {
+          "median": 18,
+          "min": 17,
+          "max": 18
+        }
+      },
+      "bytes": {
+        "network": {
+          "median": 8201096,
+          "min": 8201096,
+          "max": 8201096
+        },
+        "preparation": {
+          "median": 3978574,
+          "min": 3978574,
+          "max": 3978574
+        }
+      },
+      "requests": {
+        "median": 25,
+        "min": 25,
+        "max": 25
+      }
+    },
+    "second": {
+      "app": {
+        "median": 31,
+        "min": 31,
+        "max": 34
+      },
+      "checked": {
+        "median": 400,
+        "min": 398,
+        "max": 400
+      },
+      "preparing": {
+        "median": 2033,
+        "min": 2033,
+        "max": 2034
+      },
+      "ready": {
+        "median": 2049,
+        "min": 2045,
+        "max": 2050
+      },
+      "prepareMs": {
+        "median": 16,
+        "min": 11,
+        "max": 17
+      },
+      "navigation": {
+        "responseEnd": {
+          "median": 4,
+          "min": 4,
+          "max": 4
+        },
+        "domContentLoaded": {
+          "median": 11,
+          "min": 9,
+          "max": 12
+        },
+        "load": {
+          "median": 11,
+          "min": 9,
+          "max": 12
+        }
+      },
+      "bytes": {
+        "network": {
+          "median": 1836,
+          "min": 1836,
+          "max": 1836
+        },
+        "preparation": {
+          "median": 612,
+          "min": 612,
+          "max": 612
+        }
+      },
+      "requests": {
+        "median": 13,
+        "min": 13,
+        "max": 13
+      }
+    },
+    "offline": {
+      "app": {
+        "median": 15,
+        "min": 15,
+        "max": 15
+      },
+      "checked": {
+        "median": 383,
+        "min": 381,
+        "max": 387
+      },
+      "preparing": {
+        "median": 2016,
+        "min": 2016,
+        "max": 2017
+      },
+      "ready": {
+        "median": 2020,
+        "min": 2020,
+        "max": 2023
+      },
+      "prepareMs": {
+        "median": 4,
+        "min": 4,
+        "max": 5
+      },
+      "navigation": {
+        "responseEnd": {
+          "median": 3,
+          "min": 2,
+          "max": 3
+        },
+        "domContentLoaded": {
+          "median": 8,
+          "min": 7,
+          "max": 8
+        },
+        "load": {
+          "median": 8,
+          "min": 7,
+          "max": 8
+        }
+      },
+      "bytes": {
+        "network": {
+          "median": 0,
+          "min": 0,
+          "max": 0
+        },
+        "preparation": {
+          "median": 0,
+          "min": 0,
+          "max": 0
+        }
+      },
+      "requests": {
+        "median": 0,
+        "min": 0,
+        "max": 0
+      }
+    }
+  }
+}

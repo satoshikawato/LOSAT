@@ -1,0 +1,46 @@
+{
+  "project": "firefox",
+  "site": "http://localhost:4730",
+  "tests": [
+    {
+      "project": "firefox",
+      "title": "the app starts through the boot page, isolated, on the latest release",
+      "status": "passed",
+      "durationMs": 727,
+      "record": {
+        "browser": "firefox",
+        "latest": "35970fa18885-e2fb7128",
+        "shown": "35970fa18885-e2fb7128",
+        "shownFrom": "release-id",
+        "isolated": true,
+        "sharedArrayBuffer": true,
+        "pin": "35970fa18885-e2fb7128",
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:151.0) Gecko/20100101 Firefox/151.0",
+        "entryRequested": true,
+        "foreignPaths": []
+      }
+    },
+    {
+      "project": "firefox",
+      "title": "a search cancelled while it runs, then a new search completes",
+      "status": "passed",
+      "durationMs": 2340,
+      "record": {
+        "browser": "firefox",
+        "run1": "cancelled",
+        "run2": "completed"
+      }
+    },
+    {
+      "project": "firefox",
+      "title": "\"Offline ready\" appears; in Chromium an offline reload starts the app",
+      "status": "passed",
+      "durationMs": 2541,
+      "record": {
+        "browser": "firefox",
+        "offlineReady": true,
+        "offlineReload": "not run in firefox: only Chromium can go offline reliably"
+      }
+    }
+  ]
+}

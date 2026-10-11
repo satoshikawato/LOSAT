@@ -1,0 +1,3195 @@
+{
+  "queries": [
+    {
+      "count": 10000,
+      "queryBytes": 1378904,
+      "subjectBytes": 257758,
+      "kinds": {
+        "unique": 6990,
+        "shared": 2000,
+        "wide": 10,
+        "random": 1000
+      },
+      "search": {
+        "indexMs": 830,
+        "checkMs": 5,
+        "enqueueMs": 71,
+        "searchMs": 2799,
+        "elapsed": "0:02",
+        "path": "threaded, 4 threads (requested: Auto)"
+      },
+      "smallSearch": {
+        "indexMs": 26,
+        "checkMs": 6,
+        "enqueueMs": 67,
+        "searchMs": 186,
+        "elapsed": "0:00",
+        "path": "threaded, 4 threads (requested: Auto)"
+      },
+      "warmup": {
+        "open": {
+          "ms": 69,
+          "paintMs": 73
+        },
+        "firstHsp": {
+          "ms": 69,
+          "paintMs": 86
+        },
+        "queryRowsDrawn": 20,
+        "scrollToEnd": {
+          "ms": 1,
+          "paintMs": 8
+        },
+        "rowsDrawnAtEnd": 14,
+        "scrollToStart": {
+          "ms": 7,
+          "paintMs": 22
+        },
+        "findFar": {
+          "ms": 12,
+          "paintMs": 27
+        },
+        "selectFar": {
+          "ms": 21,
+          "paintMs": 37
+        },
+        "clearFilter": {
+          "ms": 12,
+          "paintMs": 28
+        },
+        "hitsOnly": {
+          "ms": 11,
+          "paintMs": 26
+        },
+        "hitsOnlyQueries": 9000,
+        "hitsOnlyOff": {
+          "ms": 6,
+          "paintMs": 22
+        },
+        "selectWide": {
+          "ms": 10,
+          "paintMs": 28
+        },
+        "showGraphic": {
+          "ms": 6,
+          "paintMs": 23
+        },
+        "graphicRows": 100,
+        "wideSubjects": 200,
+        "subjectRowsDrawn": 34,
+        "sortSubjects": {
+          "length": {
+            "ms": 3,
+            "paintMs": 14
+          },
+          "bitScore": {
+            "ms": 10,
+            "paintMs": 25
+          },
+          "eValue": {
+            "ms": 12,
+            "paintMs": 27
+          },
+          "hsps": {
+            "ms": 11,
+            "paintMs": 27
+          },
+          "order": {
+            "ms": 6,
+            "paintMs": 23
+          }
+        }
+      },
+      "samples": [
+        {
+          "open": {
+            "ms": 52,
+            "paintMs": 56
+          },
+          "firstHsp": {
+            "ms": 85,
+            "paintMs": 101
+          },
+          "queryRowsDrawn": 20,
+          "scrollToEnd": {
+            "ms": 1,
+            "paintMs": 16
+          },
+          "rowsDrawnAtEnd": 14,
+          "scrollToStart": {
+            "ms": 8,
+            "paintMs": 24
+          },
+          "findFar": {
+            "ms": 10,
+            "paintMs": 25
+          },
+          "selectFar": {
+            "ms": 6,
+            "paintMs": 21
+          },
+          "clearFilter": {
+            "ms": 12,
+            "paintMs": 27
+          },
+          "hitsOnly": {
+            "ms": 11,
+            "paintMs": 26
+          },
+          "hitsOnlyQueries": 9000,
+          "hitsOnlyOff": {
+            "ms": 7,
+            "paintMs": 23
+          },
+          "selectWide": {
+            "ms": 20,
+            "paintMs": 37
+          },
+          "showGraphic": {
+            "ms": 7,
+            "paintMs": 24
+          },
+          "graphicRows": 100,
+          "wideSubjects": 200,
+          "subjectRowsDrawn": 34,
+          "sortSubjects": {
+            "length": {
+              "ms": 3,
+              "paintMs": 12
+            },
+            "bitScore": {
+              "ms": 11,
+              "paintMs": 28
+            },
+            "eValue": {
+              "ms": 11,
+              "paintMs": 27
+            },
+            "hsps": {
+              "ms": 11,
+              "paintMs": 26
+            },
+            "order": {
+              "ms": 12,
+              "paintMs": 28
+            }
+          }
+        },
+        {
+          "open": {
+            "ms": 65,
+            "paintMs": 75
+          },
+          "firstHsp": {
+            "ms": 71,
+            "paintMs": 88
+          },
+          "queryRowsDrawn": 20,
+          "scrollToEnd": {
+            "ms": 1,
+            "paintMs": 12
+          },
+          "rowsDrawnAtEnd": 14,
+          "scrollToStart": {
+            "ms": 8,
+            "paintMs": 24
+          },
+          "findFar": {
+            "ms": 11,
+            "paintMs": 28
+          },
+          "selectFar": {
+            "ms": 21,
+            "paintMs": 37
+          },
+          "clearFilter": {
+            "ms": 11,
+            "paintMs": 28
+          },
+          "hitsOnly": {
+            "ms": 9,
+            "paintMs": 25
+          },
+          "hitsOnlyQueries": 9000,
+          "hitsOnlyOff": {
+            "ms": 5,
+            "paintMs": 21
+          },
+          "selectWide": {
+            "ms": 14,
+            "paintMs": 32
+          },
+          "showGraphic": {
+            "ms": 7,
+            "paintMs": 22
+          },
+          "graphicRows": 100,
+          "wideSubjects": 200,
+          "subjectRowsDrawn": 34,
+          "sortSubjects": {
+            "length": {
+              "ms": 3,
+              "paintMs": 14
+            },
+            "bitScore": {
+              "ms": 12,
+              "paintMs": 28
+            },
+            "eValue": {
+              "ms": 11,
+              "paintMs": 28
+            },
+            "hsps": {
+              "ms": 11,
+              "paintMs": 27
+            },
+            "order": {
+              "ms": 8,
+              "paintMs": 25
+            }
+          }
+        },
+        {
+          "open": {
+            "ms": 60,
+            "paintMs": 76
+          },
+          "firstHsp": {
+            "ms": 71,
+            "paintMs": 88
+          },
+          "queryRowsDrawn": 20,
+          "scrollToEnd": {
+            "ms": 1,
+            "paintMs": 16
+          },
+          "rowsDrawnAtEnd": 14,
+          "scrollToStart": {
+            "ms": 8,
+            "paintMs": 23
+          },
+          "findFar": {
+            "ms": 7,
+            "paintMs": 22
+          },
+          "selectFar": {
+            "ms": 7,
+            "paintMs": 22
+          },
+          "clearFilter": {
+            "ms": 11,
+            "paintMs": 26
+          },
+          "hitsOnly": {
+            "ms": 11,
+            "paintMs": 27
+          },
+          "hitsOnlyQueries": 9000,
+          "hitsOnlyOff": {
+            "ms": 6,
+            "paintMs": 23
+          },
+          "selectWide": {
+            "ms": 22,
+            "paintMs": 37
+          },
+          "showGraphic": {
+            "ms": 4,
+            "paintMs": 21
+          },
+          "graphicRows": 100,
+          "wideSubjects": 200,
+          "subjectRowsDrawn": 34,
+          "sortSubjects": {
+            "length": {
+              "ms": 3,
+              "paintMs": 4
+            },
+            "bitScore": {
+              "ms": 11,
+              "paintMs": 28
+            },
+            "eValue": {
+              "ms": 10,
+              "paintMs": 27
+            },
+            "hsps": {
+              "ms": 11,
+              "paintMs": 27
+            },
+            "order": {
+              "ms": 12,
+              "paintMs": 28
+            }
+          }
+        }
+      ],
+      "summary": {
+        "open": {
+          "ms": {
+            "median": 60,
+            "min": 52,
+            "max": 65
+          },
+          "paintMs": {
+            "median": 75,
+            "min": 56,
+            "max": 76
+          }
+        },
+        "firstHsp": {
+          "ms": {
+            "median": 71,
+            "min": 71,
+            "max": 85
+          },
+          "paintMs": {
+            "median": 88,
+            "min": 88,
+            "max": 101
+          }
+        },
+        "queryRowsDrawn": {
+          "median": 20,
+          "min": 20,
+          "max": 20
+        },
+        "scrollToEnd": {
+          "ms": {
+            "median": 1,
+            "min": 1,
+            "max": 1
+          },
+          "paintMs": {
+            "median": 16,
+            "min": 12,
+            "max": 16
+          }
+        },
+        "rowsDrawnAtEnd": {
+          "median": 14,
+          "min": 14,
+          "max": 14
+        },
+        "scrollToStart": {
+          "ms": {
+            "median": 8,
+            "min": 8,
+            "max": 8
+          },
+          "paintMs": {
+            "median": 24,
+            "min": 23,
+            "max": 24
+          }
+        },
+        "findFar": {
+          "ms": {
+            "median": 10,
+            "min": 7,
+            "max": 11
+          },
+          "paintMs": {
+            "median": 25,
+            "min": 22,
+            "max": 28
+          }
+        },
+        "selectFar": {
+          "ms": {
+            "median": 7,
+            "min": 6,
+            "max": 21
+          },
+          "paintMs": {
+            "median": 22,
+            "min": 21,
+            "max": 37
+          }
+        },
+        "clearFilter": {
+          "ms": {
+            "median": 11,
+            "min": 11,
+            "max": 12
+          },
+          "paintMs": {
+            "median": 27,
+            "min": 26,
+            "max": 28
+          }
+        },
+        "hitsOnly": {
+          "ms": {
+            "median": 11,
+            "min": 9,
+            "max": 11
+          },
+          "paintMs": {
+            "median": 26,
+            "min": 25,
+            "max": 27
+          }
+        },
+        "hitsOnlyQueries": {
+          "median": 9000,
+          "min": 9000,
+          "max": 9000
+        },
+        "hitsOnlyOff": {
+          "ms": {
+            "median": 6,
+            "min": 5,
+            "max": 7
+          },
+          "paintMs": {
+            "median": 23,
+            "min": 21,
+            "max": 23
+          }
+        },
+        "selectWide": {
+          "ms": {
+            "median": 20,
+            "min": 14,
+            "max": 22
+          },
+          "paintMs": {
+            "median": 37,
+            "min": 32,
+            "max": 37
+          }
+        },
+        "showGraphic": {
+          "ms": {
+            "median": 7,
+            "min": 4,
+            "max": 7
+          },
+          "paintMs": {
+            "median": 22,
+            "min": 21,
+            "max": 24
+          }
+        },
+        "graphicRows": {
+          "median": 100,
+          "min": 100,
+          "max": 100
+        },
+        "wideSubjects": {
+          "median": 200,
+          "min": 200,
+          "max": 200
+        },
+        "subjectRowsDrawn": {
+          "median": 34,
+          "min": 34,
+          "max": 34
+        },
+        "sortSubjects": {
+          "length": {
+            "ms": {
+              "median": 3,
+              "min": 3,
+              "max": 3
+            },
+            "paintMs": {
+              "median": 12,
+              "min": 4,
+              "max": 14
+            }
+          },
+          "bitScore": {
+            "ms": {
+              "median": 11,
+              "min": 11,
+              "max": 12
+            },
+            "paintMs": {
+              "median": 28,
+              "min": 28,
+              "max": 28
+            }
+          },
+          "eValue": {
+            "ms": {
+              "median": 11,
+              "min": 10,
+              "max": 11
+            },
+            "paintMs": {
+              "median": 27,
+              "min": 27,
+              "max": 28
+            }
+          },
+          "hsps": {
+            "ms": {
+              "median": 11,
+              "min": 11,
+              "max": 11
+            },
+            "paintMs": {
+              "median": 27,
+              "min": 26,
+              "max": 27
+            }
+          },
+          "order": {
+            "ms": {
+              "median": 12,
+              "min": 8,
+              "max": 12
+            },
+            "paintMs": {
+              "median": 28,
+              "min": 25,
+              "max": 28
+            }
+          }
+        }
+      },
+      "outfmt6": {
+        "bytes": 896542,
+        "hsps": 14981,
+        "showMs": 13,
+        "showPaintMs": 29
+      },
+      "tray": {
+        "warmup": {
+          "markAll": {
+            "ms": 10,
+            "paintMs": 28
+          },
+          "addMarked": {
+            "ms": 9,
+            "paintMs": 25
+          },
+          "candidates": 200,
+          "openTray": {
+            "ms": 16,
+            "paintMs": 27
+          },
+          "scrollToEnd": {
+            "ms": 10,
+            "paintMs": 25
+          },
+          "rowsDrawnAtEnd": 14,
+          "sortBySubject": {
+            "ms": 15,
+            "paintMs": 27
+          },
+          "extract": {
+            "ms": 24,
+            "paintMs": 40
+          },
+          "downloadMs": 32,
+          "sequences": 100,
+          "bytes": 19151,
+          "removeAll": {
+            "ms": 8,
+            "paintMs": 24
+          }
+        },
+        "samples": [
+          {
+            "markAll": {
+              "ms": 7,
+              "paintMs": 24
+            },
+            "addMarked": {
+              "ms": 10,
+              "paintMs": 27
+            },
+            "candidates": 200,
+            "openTray": {
+              "ms": 10,
+              "paintMs": 26
+            },
+            "scrollToEnd": {
+              "ms": 13,
+              "paintMs": 27
+            },
+            "rowsDrawnAtEnd": 14,
+            "sortBySubject": {
+              "ms": 11,
+              "paintMs": 24
+            },
+            "extract": {
+              "ms": 26,
+              "paintMs": 43
+            },
+            "downloadMs": 25,
+            "sequences": 100,
+            "bytes": 19151,
+            "removeAll": {
+              "ms": 9,
+              "paintMs": 26
+            }
+          },
+          {
+            "markAll": {
+              "ms": 10,
+              "paintMs": 26
+            },
+            "addMarked": {
+              "ms": 6,
+              "paintMs": 24
+            },
+            "candidates": 200,
+            "openTray": {
+              "ms": 13,
+              "paintMs": 29
+            },
+            "scrollToEnd": {
+              "ms": 12,
+              "paintMs": 27
+            },
+            "rowsDrawnAtEnd": 14,
+            "sortBySubject": {
+              "ms": 11,
+              "paintMs": 23
+            },
+            "extract": {
+              "ms": 26,
+              "paintMs": 43
+            },
+            "downloadMs": 26,
+            "sequences": 100,
+            "bytes": 19151,
+            "removeAll": {
+              "ms": 11,
+              "paintMs": 27
+            }
+          },
+          {
+            "markAll": {
+              "ms": 6,
+              "paintMs": 23
+            },
+            "addMarked": {
+              "ms": 9,
+              "paintMs": 25
+            },
+            "candidates": 200,
+            "openTray": {
+              "ms": 12,
+              "paintMs": 26
+            },
+            "scrollToEnd": {
+              "ms": 9,
+              "paintMs": 25
+            },
+            "rowsDrawnAtEnd": 14,
+            "sortBySubject": {
+              "ms": 14,
+              "paintMs": 26
+            },
+            "extract": {
+              "ms": 24,
+              "paintMs": 41
+            },
+            "downloadMs": 25,
+            "sequences": 100,
+            "bytes": 19151,
+            "removeAll": {
+              "ms": 8,
+              "paintMs": 25
+            }
+          }
+        ],
+        "summary": {
+          "markAll": {
+            "ms": {
+              "median": 7,
+              "min": 6,
+              "max": 10
+            },
+            "paintMs": {
+              "median": 24,
+              "min": 23,
+              "max": 26
+            }
+          },
+          "addMarked": {
+            "ms": {
+              "median": 9,
+              "min": 6,
+              "max": 10
+            },
+            "paintMs": {
+              "median": 25,
+              "min": 24,
+              "max": 27
+            }
+          },
+          "candidates": {
+            "median": 200,
+            "min": 200,
+            "max": 200
+          },
+          "openTray": {
+            "ms": {
+              "median": 12,
+              "min": 10,
+              "max": 13
+            },
+            "paintMs": {
+              "median": 26,
+              "min": 26,
+              "max": 29
+            }
+          },
+          "scrollToEnd": {
+            "ms": {
+              "median": 12,
+              "min": 9,
+              "max": 13
+            },
+            "paintMs": {
+              "median": 27,
+              "min": 25,
+              "max": 27
+            }
+          },
+          "rowsDrawnAtEnd": {
+            "median": 14,
+            "min": 14,
+            "max": 14
+          },
+          "sortBySubject": {
+            "ms": {
+              "median": 11,
+              "min": 11,
+              "max": 14
+            },
+            "paintMs": {
+              "median": 24,
+              "min": 23,
+              "max": 26
+            }
+          },
+          "extract": {
+            "ms": {
+              "median": 26,
+              "min": 24,
+              "max": 26
+            },
+            "paintMs": {
+              "median": 43,
+              "min": 41,
+              "max": 43
+            }
+          },
+          "downloadMs": {
+            "median": 25,
+            "min": 25,
+            "max": 26
+          },
+          "sequences": {
+            "median": 100,
+            "min": 100,
+            "max": 100
+          },
+          "bytes": {
+            "median": 19151,
+            "min": 19151,
+            "max": 19151
+          },
+          "removeAll": {
+            "ms": {
+              "median": 9,
+              "min": 8,
+              "max": 11
+            },
+            "paintMs": {
+              "median": 26,
+              "min": 25,
+              "max": 27
+            }
+          }
+        }
+      },
+      "files": {
+        "scope": "all",
+        "hsps": 14981,
+        "filteredHsps": 14981,
+        "outputsShownMs": 125,
+        "csv": {
+          "name": "losat-run1-blastn-hsps.csv",
+          "bytes": 1579285,
+          "ms": 46,
+          "paintMs": 63,
+          "downloadMs": 49,
+          "frames": 5,
+          "maxFrameGapMs": 17,
+          "maxFrameGapEndMs": 35,
+          "maxTaskLagMs": 18
+        },
+        "json": {
+          "name": "losat-run1-blastn-hsps.json",
+          "bytes": 12650135,
+          "ms": 170,
+          "paintMs": 187,
+          "downloadMs": 166,
+          "frames": 12,
+          "maxFrameGapMs": 17,
+          "maxFrameGapEndMs": 75,
+          "maxTaskLagMs": 3
+        },
+        "report": {
+          "name": "losat-run1-blastn-report.html",
+          "bytes": 17610212,
+          "ms": 153,
+          "paintMs": 169,
+          "downloadMs": 156,
+          "frames": 12,
+          "maxFrameGapMs": 17,
+          "maxFrameGapEndMs": 74,
+          "maxTaskLagMs": 6
+        },
+        "outfmt6": {
+          "name": "losat-run1-blastn.outfmt6.txt",
+          "bytes": 896542,
+          "downloadMs": 9,
+          "frames": 1,
+          "maxFrameGapMs": 9,
+          "maxFrameGapEndMs": 16,
+          "maxTaskLagMs": 0
+        }
+      },
+      "session": {
+        "candidates": 200,
+        "runs": 2,
+        "save": {
+          "name": "losat-session-20261011-174035.losat-session.gz",
+          "bytes": 2674011,
+          "ms": 203,
+          "paintMs": 219,
+          "downloadMs": 200,
+          "frames": 14,
+          "maxFrameGapMs": 17,
+          "maxFrameGapEndMs": 24,
+          "maxTaskLagMs": 6
+        },
+        "saveMessage": "Saved losat-session-20261011-174035.losat-session.gz: 2 runs and 200 candidates with their notes.",
+        "open": {
+          "ms": 476,
+          "paintMs": 487,
+          "frames": 30,
+          "maxFrameGapMs": 17,
+          "maxFrameGapEndMs": 427,
+          "maxTaskLagMs": 12
+        },
+        "openMessage": "Opened measured.losat-session.gz: 2 runs (runs 1 to 2 here) and 200 candidates with their notes. Nothing was searched again.",
+        "openedRuns": 2,
+        "openedCandidates": 200
+      }
+    },
+    {
+      "count": 100000,
+      "queryBytes": 13888995,
+      "subjectBytes": 257758,
+      "kinds": {
+        "unique": 69900,
+        "shared": 20000,
+        "wide": 100,
+        "random": 10000
+      },
+      "search": {
+        "indexMs": 7244,
+        "checkMs": 2305,
+        "enqueueMs": 198,
+        "searchMs": 20405,
+        "elapsed": "0:20",
+        "path": "threaded, 4 threads (requested: Auto)"
+      },
+      "smallSearch": {
+        "indexMs": 19,
+        "checkMs": 5,
+        "enqueueMs": 61,
+        "searchMs": 288,
+        "elapsed": "0:00",
+        "path": "threaded, 4 threads (requested: Auto)"
+      },
+      "warmup": {
+        "open": {
+          "ms": 562,
+          "paintMs": 574
+        },
+        "firstHsp": {
+          "ms": 469,
+          "paintMs": 485
+        },
+        "queryRowsDrawn": 20,
+        "scrollToEnd": {
+          "ms": 2,
+          "paintMs": 11
+        },
+        "rowsDrawnAtEnd": 14,
+        "scrollToStart": {
+          "ms": 8,
+          "paintMs": 25
+        },
+        "findFar": {
+          "ms": 11,
+          "paintMs": 28
+        },
+        "selectFar": {
+          "ms": 21,
+          "paintMs": 37
+        },
+        "clearFilter": {
+          "ms": 19,
+          "paintMs": 26
+        },
+        "hitsOnly": {
+          "ms": 24,
+          "paintMs": 26
+        },
+        "hitsOnlyQueries": 90000,
+        "hitsOnlyOff": {
+          "ms": 14,
+          "paintMs": 21
+        },
+        "selectWide": {
+          "ms": 23,
+          "paintMs": 42
+        },
+        "showGraphic": {
+          "ms": 7,
+          "paintMs": 24
+        },
+        "graphicRows": 100,
+        "wideSubjects": 200,
+        "subjectRowsDrawn": 34,
+        "sortSubjects": {
+          "length": {
+            "ms": 4,
+            "paintMs": 19
+          },
+          "bitScore": {
+            "ms": 11,
+            "paintMs": 27
+          },
+          "eValue": {
+            "ms": 11,
+            "paintMs": 27
+          },
+          "hsps": {
+            "ms": 11,
+            "paintMs": 27
+          },
+          "order": {
+            "ms": 11,
+            "paintMs": 28
+          }
+        }
+      },
+      "samples": [
+        {
+          "open": {
+            "ms": 473,
+            "paintMs": 475
+          },
+          "firstHsp": {
+            "ms": 471,
+            "paintMs": 487
+          },
+          "queryRowsDrawn": 20,
+          "scrollToEnd": {
+            "ms": 1,
+            "paintMs": 13
+          },
+          "rowsDrawnAtEnd": 14,
+          "scrollToStart": {
+            "ms": 8,
+            "paintMs": 24
+          },
+          "findFar": {
+            "ms": 12,
+            "paintMs": 27
+          },
+          "selectFar": {
+            "ms": 22,
+            "paintMs": 39
+          },
+          "clearFilter": {
+            "ms": 17,
+            "paintMs": 27
+          },
+          "hitsOnly": {
+            "ms": 16,
+            "paintMs": 27
+          },
+          "hitsOnlyQueries": 90000,
+          "hitsOnlyOff": {
+            "ms": 16,
+            "paintMs": 20
+          },
+          "selectWide": {
+            "ms": 22,
+            "paintMs": 39
+          },
+          "showGraphic": {
+            "ms": 6,
+            "paintMs": 22
+          },
+          "graphicRows": 100,
+          "wideSubjects": 200,
+          "subjectRowsDrawn": 34,
+          "sortSubjects": {
+            "length": {
+              "ms": 3,
+              "paintMs": 14
+            },
+            "bitScore": {
+              "ms": 11,
+              "paintMs": 27
+            },
+            "eValue": {
+              "ms": 11,
+              "paintMs": 27
+            },
+            "hsps": {
+              "ms": 10,
+              "paintMs": 26
+            },
+            "order": {
+              "ms": 10,
+              "paintMs": 26
+            }
+          }
+        },
+        {
+          "open": {
+            "ms": 545,
+            "paintMs": 558
+          },
+          "firstHsp": {
+            "ms": 472,
+            "paintMs": 488
+          },
+          "queryRowsDrawn": 20,
+          "scrollToEnd": {
+            "ms": 1,
+            "paintMs": 13
+          },
+          "rowsDrawnAtEnd": 14,
+          "scrollToStart": {
+            "ms": 5,
+            "paintMs": 21
+          },
+          "findFar": {
+            "ms": 13,
+            "paintMs": 28
+          },
+          "selectFar": {
+            "ms": 22,
+            "paintMs": 38
+          },
+          "clearFilter": {
+            "ms": 14,
+            "paintMs": 26
+          },
+          "hitsOnly": {
+            "ms": 14,
+            "paintMs": 26
+          },
+          "hitsOnlyQueries": 90000,
+          "hitsOnlyOff": {
+            "ms": 13,
+            "paintMs": 21
+          },
+          "selectWide": {
+            "ms": 8,
+            "paintMs": 26
+          },
+          "showGraphic": {
+            "ms": 6,
+            "paintMs": 23
+          },
+          "graphicRows": 100,
+          "wideSubjects": 200,
+          "subjectRowsDrawn": 34,
+          "sortSubjects": {
+            "length": {
+              "ms": 3,
+              "paintMs": 11
+            },
+            "bitScore": {
+              "ms": 12,
+              "paintMs": 28
+            },
+            "eValue": {
+              "ms": 10,
+              "paintMs": 27
+            },
+            "hsps": {
+              "ms": 10,
+              "paintMs": 27
+            },
+            "order": {
+              "ms": 9,
+              "paintMs": 26
+            }
+          }
+        },
+        {
+          "open": {
+            "ms": 462,
+            "paintMs": 475
+          },
+          "firstHsp": {
+            "ms": 505,
+            "paintMs": 522
+          },
+          "queryRowsDrawn": 20,
+          "scrollToEnd": {
+            "ms": 1,
+            "paintMs": 15
+          },
+          "rowsDrawnAtEnd": 14,
+          "scrollToStart": {
+            "ms": 7,
+            "paintMs": 24
+          },
+          "findFar": {
+            "ms": 11,
+            "paintMs": 28
+          },
+          "selectFar": {
+            "ms": 22,
+            "paintMs": 38
+          },
+          "clearFilter": {
+            "ms": 18,
+            "paintMs": 24
+          },
+          "hitsOnly": {
+            "ms": 17,
+            "paintMs": 28
+          },
+          "hitsOnlyQueries": 90000,
+          "hitsOnlyOff": {
+            "ms": 18,
+            "paintMs": 22
+          },
+          "selectWide": {
+            "ms": 23,
+            "paintMs": 39
+          },
+          "showGraphic": {
+            "ms": 7,
+            "paintMs": 23
+          },
+          "graphicRows": 100,
+          "wideSubjects": 200,
+          "subjectRowsDrawn": 34,
+          "sortSubjects": {
+            "length": {
+              "ms": 3,
+              "paintMs": 6
+            },
+            "bitScore": {
+              "ms": 11,
+              "paintMs": 27
+            },
+            "eValue": {
+              "ms": 8,
+              "paintMs": 25
+            },
+            "hsps": {
+              "ms": 10,
+              "paintMs": 27
+            },
+            "order": {
+              "ms": 10,
+              "paintMs": 26
+            }
+          }
+        }
+      ],
+      "summary": {
+        "open": {
+          "ms": {
+            "median": 473,
+            "min": 462,
+            "max": 545
+          },
+          "paintMs": {
+            "median": 475,
+            "min": 475,
+            "max": 558
+          }
+        },
+        "firstHsp": {
+          "ms": {
+            "median": 472,
+            "min": 471,
+            "max": 505
+          },
+          "paintMs": {
+            "median": 488,
+            "min": 487,
+            "max": 522
+          }
+        },
+        "queryRowsDrawn": {
+          "median": 20,
+          "min": 20,
+          "max": 20
+        },
+        "scrollToEnd": {
+          "ms": {
+            "median": 1,
+            "min": 1,
+            "max": 1
+          },
+          "paintMs": {
+            "median": 13,
+            "min": 13,
+            "max": 15
+          }
+        },
+        "rowsDrawnAtEnd": {
+          "median": 14,
+          "min": 14,
+          "max": 14
+        },
+        "scrollToStart": {
+          "ms": {
+            "median": 7,
+            "min": 5,
+            "max": 8
+          },
+          "paintMs": {
+            "median": 24,
+            "min": 21,
+            "max": 24
+          }
+        },
+        "findFar": {
+          "ms": {
+            "median": 12,
+            "min": 11,
+            "max": 13
+          },
+          "paintMs": {
+            "median": 28,
+            "min": 27,
+            "max": 28
+          }
+        },
+        "selectFar": {
+          "ms": {
+            "median": 22,
+            "min": 22,
+            "max": 22
+          },
+          "paintMs": {
+            "median": 38,
+            "min": 38,
+            "max": 39
+          }
+        },
+        "clearFilter": {
+          "ms": {
+            "median": 17,
+            "min": 14,
+            "max": 18
+          },
+          "paintMs": {
+            "median": 26,
+            "min": 24,
+            "max": 27
+          }
+        },
+        "hitsOnly": {
+          "ms": {
+            "median": 16,
+            "min": 14,
+            "max": 17
+          },
+          "paintMs": {
+            "median": 27,
+            "min": 26,
+            "max": 28
+          }
+        },
+        "hitsOnlyQueries": {
+          "median": 90000,
+          "min": 90000,
+          "max": 90000
+        },
+        "hitsOnlyOff": {
+          "ms": {
+            "median": 16,
+            "min": 13,
+            "max": 18
+          },
+          "paintMs": {
+            "median": 21,
+            "min": 20,
+            "max": 22
+          }
+        },
+        "selectWide": {
+          "ms": {
+            "median": 22,
+            "min": 8,
+            "max": 23
+          },
+          "paintMs": {
+            "median": 39,
+            "min": 26,
+            "max": 39
+          }
+        },
+        "showGraphic": {
+          "ms": {
+            "median": 6,
+            "min": 6,
+            "max": 7
+          },
+          "paintMs": {
+            "median": 23,
+            "min": 22,
+            "max": 23
+          }
+        },
+        "graphicRows": {
+          "median": 100,
+          "min": 100,
+          "max": 100
+        },
+        "wideSubjects": {
+          "median": 200,
+          "min": 200,
+          "max": 200
+        },
+        "subjectRowsDrawn": {
+          "median": 34,
+          "min": 34,
+          "max": 34
+        },
+        "sortSubjects": {
+          "length": {
+            "ms": {
+              "median": 3,
+              "min": 3,
+              "max": 3
+            },
+            "paintMs": {
+              "median": 11,
+              "min": 6,
+              "max": 14
+            }
+          },
+          "bitScore": {
+            "ms": {
+              "median": 11,
+              "min": 11,
+              "max": 12
+            },
+            "paintMs": {
+              "median": 27,
+              "min": 27,
+              "max": 28
+            }
+          },
+          "eValue": {
+            "ms": {
+              "median": 10,
+              "min": 8,
+              "max": 11
+            },
+            "paintMs": {
+              "median": 27,
+              "min": 25,
+              "max": 27
+            }
+          },
+          "hsps": {
+            "ms": {
+              "median": 10,
+              "min": 10,
+              "max": 10
+            },
+            "paintMs": {
+              "median": 27,
+              "min": 26,
+              "max": 27
+            }
+          },
+          "order": {
+            "ms": {
+              "median": 10,
+              "min": 9,
+              "max": 10
+            },
+            "paintMs": {
+              "median": 26,
+              "min": 26,
+              "max": 26
+            }
+          }
+        }
+      },
+      "outfmt6": {
+        "bytes": 8966787,
+        "hsps": 149828,
+        "showMs": 23,
+        "showPaintMs": 621
+      },
+      "tray": {
+        "warmup": {
+          "markAll": {
+            "ms": 7,
+            "paintMs": 23
+          },
+          "addMarked": {
+            "ms": 8,
+            "paintMs": 25
+          },
+          "candidates": 200,
+          "openTray": {
+            "ms": 7,
+            "paintMs": 20
+          },
+          "scrollToEnd": {
+            "ms": 11,
+            "paintMs": 26
+          },
+          "rowsDrawnAtEnd": 14,
+          "sortBySubject": {
+            "ms": 15,
+            "paintMs": 27
+          },
+          "extract": {
+            "ms": 27,
+            "paintMs": 44
+          },
+          "downloadMs": 30,
+          "sequences": 100,
+          "bytes": 19151,
+          "removeAll": {
+            "ms": 12,
+            "paintMs": 28
+          }
+        },
+        "samples": [
+          {
+            "markAll": {
+              "ms": 10,
+              "paintMs": 28
+            },
+            "addMarked": {
+              "ms": 8,
+              "paintMs": 26
+            },
+            "candidates": 200,
+            "openTray": {
+              "ms": 14,
+              "paintMs": 29
+            },
+            "scrollToEnd": {
+              "ms": 12,
+              "paintMs": 26
+            },
+            "rowsDrawnAtEnd": 14,
+            "sortBySubject": {
+              "ms": 13,
+              "paintMs": 26
+            },
+            "extract": {
+              "ms": 27,
+              "paintMs": 44
+            },
+            "downloadMs": 25,
+            "sequences": 100,
+            "bytes": 19151,
+            "removeAll": {
+              "ms": 11,
+              "paintMs": 27
+            }
+          },
+          {
+            "markAll": {
+              "ms": 10,
+              "paintMs": 26
+            },
+            "addMarked": {
+              "ms": 8,
+              "paintMs": 25
+            },
+            "candidates": 200,
+            "openTray": {
+              "ms": 11,
+              "paintMs": 26
+            },
+            "scrollToEnd": {
+              "ms": 11,
+              "paintMs": 25
+            },
+            "rowsDrawnAtEnd": 14,
+            "sortBySubject": {
+              "ms": 12,
+              "paintMs": 25
+            },
+            "extract": {
+              "ms": 24,
+              "paintMs": 40
+            },
+            "downloadMs": 27,
+            "sequences": 100,
+            "bytes": 19151,
+            "removeAll": {
+              "ms": 8,
+              "paintMs": 26
+            }
+          },
+          {
+            "markAll": {
+              "ms": 10,
+              "paintMs": 26
+            },
+            "addMarked": {
+              "ms": 10,
+              "paintMs": 26
+            },
+            "candidates": 200,
+            "openTray": {
+              "ms": 12,
+              "paintMs": 27
+            },
+            "scrollToEnd": {
+              "ms": 13,
+              "paintMs": 27
+            },
+            "rowsDrawnAtEnd": 14,
+            "sortBySubject": {
+              "ms": 15,
+              "paintMs": 30
+            },
+            "extract": {
+              "ms": 23,
+              "paintMs": 40
+            },
+            "downloadMs": 25,
+            "sequences": 100,
+            "bytes": 19151,
+            "removeAll": {
+              "ms": 11,
+              "paintMs": 28
+            }
+          }
+        ],
+        "summary": {
+          "markAll": {
+            "ms": {
+              "median": 10,
+              "min": 10,
+              "max": 10
+            },
+            "paintMs": {
+              "median": 26,
+              "min": 26,
+              "max": 28
+            }
+          },
+          "addMarked": {
+            "ms": {
+              "median": 8,
+              "min": 8,
+              "max": 10
+            },
+            "paintMs": {
+              "median": 26,
+              "min": 25,
+              "max": 26
+            }
+          },
+          "candidates": {
+            "median": 200,
+            "min": 200,
+            "max": 200
+          },
+          "openTray": {
+            "ms": {
+              "median": 12,
+              "min": 11,
+              "max": 14
+            },
+            "paintMs": {
+              "median": 27,
+              "min": 26,
+              "max": 29
+            }
+          },
+          "scrollToEnd": {
+            "ms": {
+              "median": 12,
+              "min": 11,
+              "max": 13
+            },
+            "paintMs": {
+              "median": 26,
+              "min": 25,
+              "max": 27
+            }
+          },
+          "rowsDrawnAtEnd": {
+            "median": 14,
+            "min": 14,
+            "max": 14
+          },
+          "sortBySubject": {
+            "ms": {
+              "median": 13,
+              "min": 12,
+              "max": 15
+            },
+            "paintMs": {
+              "median": 26,
+              "min": 25,
+              "max": 30
+            }
+          },
+          "extract": {
+            "ms": {
+              "median": 24,
+              "min": 23,
+              "max": 27
+            },
+            "paintMs": {
+              "median": 40,
+              "min": 40,
+              "max": 44
+            }
+          },
+          "downloadMs": {
+            "median": 25,
+            "min": 25,
+            "max": 27
+          },
+          "sequences": {
+            "median": 100,
+            "min": 100,
+            "max": 100
+          },
+          "bytes": {
+            "median": 19151,
+            "min": 19151,
+            "max": 19151
+          },
+          "removeAll": {
+            "ms": {
+              "median": 11,
+              "min": 8,
+              "max": 11
+            },
+            "paintMs": {
+              "median": 27,
+              "min": 26,
+              "max": 28
+            }
+          }
+        }
+      },
+      "files": {
+        "scope": "all",
+        "hsps": 149828,
+        "filteredHsps": 149828,
+        "outputsShownMs": 783,
+        "csv": {
+          "name": "losat-run1-blastn-hsps.csv",
+          "bytes": 16242367,
+          "ms": 383,
+          "paintMs": 395,
+          "downloadMs": 393,
+          "frames": 14,
+          "maxFrameGapMs": 83,
+          "maxFrameGapEndMs": 375,
+          "maxTaskLagMs": 16
+        },
+        "json": {
+          "name": "losat-run1-blastn-hsps.json",
+          "bytes": 127249939,
+          "ms": 1643,
+          "paintMs": 1659,
+          "downloadMs": 1654,
+          "frames": 115,
+          "maxFrameGapMs": 17,
+          "maxFrameGapEndMs": 215,
+          "maxTaskLagMs": 6
+        },
+        "report": {
+          "name": "losat-run1-blastn-report.html",
+          "bytes": 176469035,
+          "ms": 1292,
+          "paintMs": 1308,
+          "downloadMs": 1293,
+          "frames": 99,
+          "maxFrameGapMs": 17,
+          "maxFrameGapEndMs": 970,
+          "maxTaskLagMs": 13
+        },
+        "outfmt6": {
+          "name": "losat-run1-blastn.outfmt6.txt",
+          "bytes": 8966787,
+          "downloadMs": 30,
+          "frames": 4,
+          "maxFrameGapMs": 17,
+          "maxFrameGapEndMs": 34,
+          "maxTaskLagMs": 4
+        }
+      },
+      "session": {
+        "candidates": 200,
+        "runs": 2,
+        "save": {
+          "name": "losat-session-20261011-174200.losat-session.gz",
+          "bytes": 26522913,
+          "ms": 1771,
+          "paintMs": 1786,
+          "downloadMs": 1777,
+          "frames": 106,
+          "maxFrameGapMs": 33,
+          "maxFrameGapEndMs": 108,
+          "maxTaskLagMs": 20
+        },
+        "saveMessage": "Saved losat-session-20261011-174200.losat-session.gz: 2 runs and 200 candidates with their notes.",
+        "open": {
+          "ms": 1872,
+          "paintMs": 1883,
+          "frames": 109,
+          "maxFrameGapMs": 33,
+          "maxFrameGapEndMs": 74,
+          "maxTaskLagMs": 30
+        },
+        "openMessage": "Opened measured.losat-session.gz: 2 runs (runs 1 to 2 here) and 200 candidates with their notes. Nothing was searched again.",
+        "openedRuns": 2,
+        "openedCandidates": 200
+      }
+    }
+  ],
+  "pair": [
+    {
+      "unit": 20,
+      "copies": 1500,
+      "bytes": 30452,
+      "search": {
+        "indexMs": 18,
+        "checkMs": 4,
+        "enqueueMs": 60,
+        "searchMs": 18606,
+        "elapsed": "0:18",
+        "path": "threaded, 4 threads (requested: Auto)"
+      },
+      "warmup": {
+        "open": {
+          "ms": 423,
+          "paintMs": 437
+        },
+        "hsps": 2995,
+        "hspRowsDrawn": 20,
+        "showDotPlot": {
+          "ms": 41,
+          "paintMs": 42
+        },
+        "segments": 2995,
+        "coloured": 739600,
+        "zoomIn": {
+          "ms": 28,
+          "paintMs": 28
+        },
+        "zoomOut": {
+          "ms": 30,
+          "paintMs": 30
+        },
+        "zoomToHsp": {
+          "ms": 27,
+          "paintMs": 28
+        },
+        "reset": {
+          "ms": 27,
+          "paintMs": 27
+        },
+        "selectByKey": {
+          "ms": 19,
+          "paintMs": 35
+        },
+        "selectByClick": {
+          "ms": 31,
+          "paintMs": 48
+        },
+        "clickHitTarget": 0,
+        "popupByKey": {
+          "ms": 16,
+          "paintMs": 33
+        },
+        "selectInList": {
+          "ms": 20,
+          "paintMs": 75
+        },
+        "sortHsps": {
+          "ms": 13,
+          "paintMs": 25
+        },
+        "scrollHspList": {
+          "ms": 9,
+          "paintMs": 24
+        }
+      },
+      "samples": [
+        {
+          "open": {
+            "ms": 292,
+            "paintMs": 309
+          },
+          "hsps": 2995,
+          "hspRowsDrawn": 20,
+          "showDotPlot": {
+            "ms": 38,
+            "paintMs": 39
+          },
+          "segments": 2995,
+          "coloured": 739600,
+          "zoomIn": {
+            "ms": 27,
+            "paintMs": 27
+          },
+          "zoomOut": {
+            "ms": 26,
+            "paintMs": 26
+          },
+          "zoomToHsp": {
+            "ms": 39,
+            "paintMs": 39
+          },
+          "reset": {
+            "ms": 28,
+            "paintMs": 28
+          },
+          "selectByKey": {
+            "ms": 19,
+            "paintMs": 35
+          },
+          "selectByClick": {
+            "ms": 31,
+            "paintMs": 47
+          },
+          "clickHitTarget": 0,
+          "popupByKey": {
+            "ms": 17,
+            "paintMs": 34
+          },
+          "selectInList": {
+            "ms": 23,
+            "paintMs": 31
+          },
+          "sortHsps": {
+            "ms": 15,
+            "paintMs": 26
+          },
+          "scrollHspList": {
+            "ms": 9,
+            "paintMs": 22
+          }
+        },
+        {
+          "open": {
+            "ms": 292,
+            "paintMs": 308
+          },
+          "hsps": 2995,
+          "hspRowsDrawn": 20,
+          "showDotPlot": {
+            "ms": 41,
+            "paintMs": 43
+          },
+          "segments": 2995,
+          "coloured": 739600,
+          "zoomIn": {
+            "ms": 27,
+            "paintMs": 27
+          },
+          "zoomOut": {
+            "ms": 29,
+            "paintMs": 29
+          },
+          "zoomToHsp": {
+            "ms": 28,
+            "paintMs": 29
+          },
+          "reset": {
+            "ms": 26,
+            "paintMs": 26
+          },
+          "selectByKey": {
+            "ms": 16,
+            "paintMs": 32
+          },
+          "selectByClick": {
+            "ms": 31,
+            "paintMs": 47
+          },
+          "clickHitTarget": 0,
+          "popupByKey": {
+            "ms": 18,
+            "paintMs": 34
+          },
+          "selectInList": {
+            "ms": 22,
+            "paintMs": 31
+          },
+          "sortHsps": {
+            "ms": 13,
+            "paintMs": 27
+          },
+          "scrollHspList": {
+            "ms": 9,
+            "paintMs": 24
+          }
+        },
+        {
+          "open": {
+            "ms": 275,
+            "paintMs": 292
+          },
+          "hsps": 2995,
+          "hspRowsDrawn": 20,
+          "showDotPlot": {
+            "ms": 34,
+            "paintMs": 35
+          },
+          "segments": 2995,
+          "coloured": 739600,
+          "zoomIn": {
+            "ms": 27,
+            "paintMs": 27
+          },
+          "zoomOut": {
+            "ms": 25,
+            "paintMs": 26
+          },
+          "zoomToHsp": {
+            "ms": 25,
+            "paintMs": 26
+          },
+          "reset": {
+            "ms": 29,
+            "paintMs": 29
+          },
+          "selectByKey": {
+            "ms": 19,
+            "paintMs": 36
+          },
+          "selectByClick": {
+            "ms": 31,
+            "paintMs": 48
+          },
+          "clickHitTarget": 0,
+          "popupByKey": {
+            "ms": 18,
+            "paintMs": 34
+          },
+          "selectInList": {
+            "ms": 16,
+            "paintMs": 69
+          },
+          "sortHsps": {
+            "ms": 10,
+            "paintMs": 23
+          },
+          "scrollHspList": {
+            "ms": 7,
+            "paintMs": 22
+          }
+        }
+      ],
+      "summary": {
+        "open": {
+          "ms": {
+            "median": 292,
+            "min": 275,
+            "max": 292
+          },
+          "paintMs": {
+            "median": 308,
+            "min": 292,
+            "max": 309
+          }
+        },
+        "hsps": {
+          "median": 2995,
+          "min": 2995,
+          "max": 2995
+        },
+        "hspRowsDrawn": {
+          "median": 20,
+          "min": 20,
+          "max": 20
+        },
+        "showDotPlot": {
+          "ms": {
+            "median": 38,
+            "min": 34,
+            "max": 41
+          },
+          "paintMs": {
+            "median": 39,
+            "min": 35,
+            "max": 43
+          }
+        },
+        "segments": {
+          "median": 2995,
+          "min": 2995,
+          "max": 2995
+        },
+        "coloured": {
+          "median": 739600,
+          "min": 739600,
+          "max": 739600
+        },
+        "zoomIn": {
+          "ms": {
+            "median": 27,
+            "min": 27,
+            "max": 27
+          },
+          "paintMs": {
+            "median": 27,
+            "min": 27,
+            "max": 27
+          }
+        },
+        "zoomOut": {
+          "ms": {
+            "median": 26,
+            "min": 25,
+            "max": 29
+          },
+          "paintMs": {
+            "median": 26,
+            "min": 26,
+            "max": 29
+          }
+        },
+        "zoomToHsp": {
+          "ms": {
+            "median": 28,
+            "min": 25,
+            "max": 39
+          },
+          "paintMs": {
+            "median": 29,
+            "min": 26,
+            "max": 39
+          }
+        },
+        "reset": {
+          "ms": {
+            "median": 28,
+            "min": 26,
+            "max": 29
+          },
+          "paintMs": {
+            "median": 28,
+            "min": 26,
+            "max": 29
+          }
+        },
+        "selectByKey": {
+          "ms": {
+            "median": 19,
+            "min": 16,
+            "max": 19
+          },
+          "paintMs": {
+            "median": 35,
+            "min": 32,
+            "max": 36
+          }
+        },
+        "selectByClick": {
+          "ms": {
+            "median": 31,
+            "min": 31,
+            "max": 31
+          },
+          "paintMs": {
+            "median": 47,
+            "min": 47,
+            "max": 48
+          }
+        },
+        "clickHitTarget": {
+          "median": 0,
+          "min": 0,
+          "max": 0
+        },
+        "popupByKey": {
+          "ms": {
+            "median": 18,
+            "min": 17,
+            "max": 18
+          },
+          "paintMs": {
+            "median": 34,
+            "min": 34,
+            "max": 34
+          }
+        },
+        "selectInList": {
+          "ms": {
+            "median": 22,
+            "min": 16,
+            "max": 23
+          },
+          "paintMs": {
+            "median": 31,
+            "min": 31,
+            "max": 69
+          }
+        },
+        "sortHsps": {
+          "ms": {
+            "median": 13,
+            "min": 10,
+            "max": 15
+          },
+          "paintMs": {
+            "median": 26,
+            "min": 23,
+            "max": 27
+          }
+        },
+        "scrollHspList": {
+          "ms": {
+            "median": 9,
+            "min": 7,
+            "max": 9
+          },
+          "paintMs": {
+            "median": 22,
+            "min": 22,
+            "max": 24
+          }
+        }
+      },
+      "tray": {
+        "warmup": {
+          "addAll": {
+            "ms": 11,
+            "paintMs": 22
+          },
+          "candidates": 2995,
+          "openTray": {
+            "ms": 14,
+            "paintMs": 26
+          },
+          "scrollToEnd": {
+            "ms": 11,
+            "paintMs": 24
+          },
+          "rowsDrawnAtEnd": 14,
+          "sortBySubject": {
+            "ms": 12,
+            "paintMs": 27
+          },
+          "extract": {
+            "ms": 24,
+            "paintMs": 40
+          },
+          "downloadMs": 26,
+          "sequences": 100,
+          "bytes": 114675,
+          "removeAll": {
+            "ms": 9,
+            "paintMs": 26
+          }
+        },
+        "samples": [
+          {
+            "addAll": {
+              "ms": 9,
+              "paintMs": 24
+            },
+            "candidates": 2995,
+            "openTray": {
+              "ms": 11,
+              "paintMs": 26
+            },
+            "scrollToEnd": {
+              "ms": 13,
+              "paintMs": 28
+            },
+            "rowsDrawnAtEnd": 14,
+            "sortBySubject": {
+              "ms": 15,
+              "paintMs": 28
+            },
+            "extract": {
+              "ms": 26,
+              "paintMs": 44
+            },
+            "downloadMs": 20,
+            "sequences": 100,
+            "bytes": 114675,
+            "removeAll": {
+              "ms": 8,
+              "paintMs": 24
+            }
+          },
+          {
+            "addAll": {
+              "ms": 10,
+              "paintMs": 25
+            },
+            "candidates": 2995,
+            "openTray": {
+              "ms": 11,
+              "paintMs": 26
+            },
+            "scrollToEnd": {
+              "ms": 13,
+              "paintMs": 28
+            },
+            "rowsDrawnAtEnd": 14,
+            "sortBySubject": {
+              "ms": 15,
+              "paintMs": 28
+            },
+            "extract": {
+              "ms": 24,
+              "paintMs": 41
+            },
+            "downloadMs": 22,
+            "sequences": 100,
+            "bytes": 114675,
+            "removeAll": {
+              "ms": 12,
+              "paintMs": 29
+            }
+          },
+          {
+            "addAll": {
+              "ms": 9,
+              "paintMs": 26
+            },
+            "candidates": 2995,
+            "openTray": {
+              "ms": 13,
+              "paintMs": 27
+            },
+            "scrollToEnd": {
+              "ms": 12,
+              "paintMs": 27
+            },
+            "rowsDrawnAtEnd": 14,
+            "sortBySubject": {
+              "ms": 13,
+              "paintMs": 28
+            },
+            "extract": {
+              "ms": 27,
+              "paintMs": 43
+            },
+            "downloadMs": 20,
+            "sequences": 100,
+            "bytes": 114675,
+            "removeAll": {
+              "ms": 11,
+              "paintMs": 27
+            }
+          }
+        ],
+        "summary": {
+          "addAll": {
+            "ms": {
+              "median": 9,
+              "min": 9,
+              "max": 10
+            },
+            "paintMs": {
+              "median": 25,
+              "min": 24,
+              "max": 26
+            }
+          },
+          "candidates": {
+            "median": 2995,
+            "min": 2995,
+            "max": 2995
+          },
+          "openTray": {
+            "ms": {
+              "median": 11,
+              "min": 11,
+              "max": 13
+            },
+            "paintMs": {
+              "median": 26,
+              "min": 26,
+              "max": 27
+            }
+          },
+          "scrollToEnd": {
+            "ms": {
+              "median": 13,
+              "min": 12,
+              "max": 13
+            },
+            "paintMs": {
+              "median": 28,
+              "min": 27,
+              "max": 28
+            }
+          },
+          "rowsDrawnAtEnd": {
+            "median": 14,
+            "min": 14,
+            "max": 14
+          },
+          "sortBySubject": {
+            "ms": {
+              "median": 15,
+              "min": 13,
+              "max": 15
+            },
+            "paintMs": {
+              "median": 28,
+              "min": 28,
+              "max": 28
+            }
+          },
+          "extract": {
+            "ms": {
+              "median": 26,
+              "min": 24,
+              "max": 27
+            },
+            "paintMs": {
+              "median": 43,
+              "min": 41,
+              "max": 44
+            }
+          },
+          "downloadMs": {
+            "median": 20,
+            "min": 20,
+            "max": 22
+          },
+          "sequences": {
+            "median": 100,
+            "min": 100,
+            "max": 100
+          },
+          "bytes": {
+            "median": 114675,
+            "min": 114675,
+            "max": 114675
+          },
+          "removeAll": {
+            "ms": {
+              "median": 11,
+              "min": 8,
+              "max": 12
+            },
+            "paintMs": {
+              "median": 27,
+              "min": 24,
+              "max": 29
+            }
+          }
+        }
+      },
+      "files": {
+        "scope": "all",
+        "hsps": 2995,
+        "filteredHsps": 2995,
+        "outputsShownMs": 87,
+        "csv": {
+          "name": "losat-run2-blastn-hsps.csv",
+          "bytes": 316052,
+          "ms": 22,
+          "paintMs": 39,
+          "downloadMs": 16,
+          "frames": 3,
+          "maxFrameGapMs": 17,
+          "maxFrameGapEndMs": 43,
+          "maxTaskLagMs": 5
+        },
+        "json": {
+          "name": "losat-run2-blastn-hsps.json",
+          "bytes": 91763005,
+          "ms": 591,
+          "paintMs": 607,
+          "downloadMs": 587,
+          "frames": 45,
+          "maxFrameGapMs": 17,
+          "maxFrameGapEndMs": 311,
+          "maxTaskLagMs": 8
+        },
+        "report": {
+          "name": "losat-run2-blastn-report.html",
+          "bytes": 180484165,
+          "ms": 703,
+          "paintMs": 719,
+          "downloadMs": 695,
+          "frames": 64,
+          "maxFrameGapMs": 17,
+          "maxFrameGapEndMs": 41,
+          "maxTaskLagMs": 5
+        },
+        "outfmt6": {
+          "name": "losat-run2-blastn.outfmt6.txt",
+          "bytes": 184414,
+          "downloadMs": 8,
+          "frames": 1,
+          "maxFrameGapMs": 9,
+          "maxFrameGapEndMs": 9,
+          "maxTaskLagMs": 0
+        },
+        "svg": {
+          "name": "losat-run2-dotplot-q1-s1.svg",
+          "bytes": 96713,
+          "downloadMs": 13,
+          "frames": 1,
+          "maxFrameGapMs": 10,
+          "maxFrameGapEndMs": 19,
+          "maxTaskLagMs": 3,
+          "segments": 2995
+        }
+      }
+    },
+    {
+      "unit": 20,
+      "copies": 3000,
+      "bytes": 60881,
+      "search": {
+        "indexMs": 46,
+        "checkMs": 5,
+        "enqueueMs": 67,
+        "searchMs": 74578,
+        "elapsed": "1:14",
+        "path": "threaded, 4 threads (requested: Auto)"
+      },
+      "warmup": {
+        "open": {
+          "ms": 1190,
+          "paintMs": 1207
+        },
+        "hsps": 5993,
+        "hspRowsDrawn": 20,
+        "showDotPlot": {
+          "ms": 41,
+          "paintMs": 42
+        },
+        "segments": 5993,
+        "coloured": 739600,
+        "zoomIn": {
+          "ms": 26,
+          "paintMs": 27
+        },
+        "zoomOut": {
+          "ms": 30,
+          "paintMs": 30
+        },
+        "zoomToHsp": {
+          "ms": 25,
+          "paintMs": 26
+        },
+        "reset": {
+          "ms": 28,
+          "paintMs": 28
+        },
+        "selectByKey": {
+          "ms": 19,
+          "paintMs": 35
+        },
+        "selectByClick": {
+          "ms": 30,
+          "paintMs": 46
+        },
+        "clickHitTarget": 0,
+        "popupByKey": {
+          "ms": 19,
+          "paintMs": 35
+        },
+        "selectInList": {
+          "ms": 19,
+          "paintMs": 126
+        },
+        "sortHsps": {
+          "ms": 12,
+          "paintMs": 23
+        },
+        "scrollHspList": {
+          "ms": 5,
+          "paintMs": 22
+        }
+      },
+      "samples": [
+        {
+          "open": {
+            "ms": 959,
+            "paintMs": 975
+          },
+          "hsps": 5993,
+          "hspRowsDrawn": 20,
+          "showDotPlot": {
+            "ms": 42,
+            "paintMs": 44
+          },
+          "segments": 5993,
+          "coloured": 739600,
+          "zoomIn": {
+            "ms": 28,
+            "paintMs": 29
+          },
+          "zoomOut": {
+            "ms": 28,
+            "paintMs": 28
+          },
+          "zoomToHsp": {
+            "ms": 27,
+            "paintMs": 28
+          },
+          "reset": {
+            "ms": 27,
+            "paintMs": 27
+          },
+          "selectByKey": {
+            "ms": 23,
+            "paintMs": 39
+          },
+          "selectByClick": {
+            "ms": 30,
+            "paintMs": 46
+          },
+          "clickHitTarget": 0,
+          "popupByKey": {
+            "ms": 19,
+            "paintMs": 35
+          },
+          "selectInList": {
+            "ms": 17,
+            "paintMs": 131
+          },
+          "sortHsps": {
+            "ms": 14,
+            "paintMs": 23
+          },
+          "scrollHspList": {
+            "ms": 7,
+            "paintMs": 23
+          }
+        },
+        {
+          "open": {
+            "ms": 990,
+            "paintMs": 1006
+          },
+          "hsps": 5993,
+          "hspRowsDrawn": 20,
+          "showDotPlot": {
+            "ms": 41,
+            "paintMs": 42
+          },
+          "segments": 5993,
+          "coloured": 739600,
+          "zoomIn": {
+            "ms": 28,
+            "paintMs": 28
+          },
+          "zoomOut": {
+            "ms": 25,
+            "paintMs": 25
+          },
+          "zoomToHsp": {
+            "ms": 24,
+            "paintMs": 25
+          },
+          "reset": {
+            "ms": 27,
+            "paintMs": 27
+          },
+          "selectByKey": {
+            "ms": 19,
+            "paintMs": 35
+          },
+          "selectByClick": {
+            "ms": 31,
+            "paintMs": 48
+          },
+          "clickHitTarget": 0,
+          "popupByKey": {
+            "ms": 16,
+            "paintMs": 33
+          },
+          "selectInList": {
+            "ms": 19,
+            "paintMs": 127
+          },
+          "sortHsps": {
+            "ms": 14,
+            "paintMs": 19
+          },
+          "scrollHspList": {
+            "ms": 8,
+            "paintMs": 22
+          }
+        },
+        {
+          "open": {
+            "ms": 925,
+            "paintMs": 942
+          },
+          "hsps": 5993,
+          "hspRowsDrawn": 20,
+          "showDotPlot": {
+            "ms": 38,
+            "paintMs": 39
+          },
+          "segments": 5993,
+          "coloured": 739600,
+          "zoomIn": {
+            "ms": 26,
+            "paintMs": 27
+          },
+          "zoomOut": {
+            "ms": 31,
+            "paintMs": 31
+          },
+          "zoomToHsp": {
+            "ms": 26,
+            "paintMs": 27
+          },
+          "reset": {
+            "ms": 27,
+            "paintMs": 27
+          },
+          "selectByKey": {
+            "ms": 16,
+            "paintMs": 32
+          },
+          "selectByClick": {
+            "ms": 31,
+            "paintMs": 47
+          },
+          "clickHitTarget": 0,
+          "popupByKey": {
+            "ms": 19,
+            "paintMs": 37
+          },
+          "selectInList": {
+            "ms": 19,
+            "paintMs": 128
+          },
+          "sortHsps": {
+            "ms": 11,
+            "paintMs": 23
+          },
+          "scrollHspList": {
+            "ms": 3,
+            "paintMs": 19
+          }
+        }
+      ],
+      "summary": {
+        "open": {
+          "ms": {
+            "median": 959,
+            "min": 925,
+            "max": 990
+          },
+          "paintMs": {
+            "median": 975,
+            "min": 942,
+            "max": 1006
+          }
+        },
+        "hsps": {
+          "median": 5993,
+          "min": 5993,
+          "max": 5993
+        },
+        "hspRowsDrawn": {
+          "median": 20,
+          "min": 20,
+          "max": 20
+        },
+        "showDotPlot": {
+          "ms": {
+            "median": 41,
+            "min": 38,
+            "max": 42
+          },
+          "paintMs": {
+            "median": 42,
+            "min": 39,
+            "max": 44
+          }
+        },
+        "segments": {
+          "median": 5993,
+          "min": 5993,
+          "max": 5993
+        },
+        "coloured": {
+          "median": 739600,
+          "min": 739600,
+          "max": 739600
+        },
+        "zoomIn": {
+          "ms": {
+            "median": 28,
+            "min": 26,
+            "max": 28
+          },
+          "paintMs": {
+            "median": 28,
+            "min": 27,
+            "max": 29
+          }
+        },
+        "zoomOut": {
+          "ms": {
+            "median": 28,
+            "min": 25,
+            "max": 31
+          },
+          "paintMs": {
+            "median": 28,
+            "min": 25,
+            "max": 31
+          }
+        },
+        "zoomToHsp": {
+          "ms": {
+            "median": 26,
+            "min": 24,
+            "max": 27
+          },
+          "paintMs": {
+            "median": 27,
+            "min": 25,
+            "max": 28
+          }
+        },
+        "reset": {
+          "ms": {
+            "median": 27,
+            "min": 27,
+            "max": 27
+          },
+          "paintMs": {
+            "median": 27,
+            "min": 27,
+            "max": 27
+          }
+        },
+        "selectByKey": {
+          "ms": {
+            "median": 19,
+            "min": 16,
+            "max": 23
+          },
+          "paintMs": {
+            "median": 35,
+            "min": 32,
+            "max": 39
+          }
+        },
+        "selectByClick": {
+          "ms": {
+            "median": 31,
+            "min": 30,
+            "max": 31
+          },
+          "paintMs": {
+            "median": 47,
+            "min": 46,
+            "max": 48
+          }
+        },
+        "clickHitTarget": {
+          "median": 0,
+          "min": 0,
+          "max": 0
+        },
+        "popupByKey": {
+          "ms": {
+            "median": 19,
+            "min": 16,
+            "max": 19
+          },
+          "paintMs": {
+            "median": 35,
+            "min": 33,
+            "max": 37
+          }
+        },
+        "selectInList": {
+          "ms": {
+            "median": 19,
+            "min": 17,
+            "max": 19
+          },
+          "paintMs": {
+            "median": 128,
+            "min": 127,
+            "max": 131
+          }
+        },
+        "sortHsps": {
+          "ms": {
+            "median": 14,
+            "min": 11,
+            "max": 14
+          },
+          "paintMs": {
+            "median": 23,
+            "min": 19,
+            "max": 23
+          }
+        },
+        "scrollHspList": {
+          "ms": {
+            "median": 7,
+            "min": 3,
+            "max": 8
+          },
+          "paintMs": {
+            "median": 22,
+            "min": 19,
+            "max": 23
+          }
+        }
+      },
+      "tray": {
+        "warmup": {
+          "addAll": {
+            "ms": 11,
+            "paintMs": 28
+          },
+          "candidates": 5993,
+          "openTray": {
+            "ms": 7,
+            "paintMs": 16
+          },
+          "scrollToEnd": {
+            "ms": 10,
+            "paintMs": 25
+          },
+          "rowsDrawnAtEnd": 14,
+          "sortBySubject": {
+            "ms": 14,
+            "paintMs": 27
+          },
+          "extract": {
+            "ms": 27,
+            "paintMs": 43
+          },
+          "downloadMs": 21,
+          "sequences": 100,
+          "bytes": 117321,
+          "removeAll": {
+            "ms": 10,
+            "paintMs": 27
+          }
+        },
+        "samples": [
+          {
+            "addAll": {
+              "ms": 10,
+              "paintMs": 27
+            },
+            "candidates": 5993,
+            "openTray": {
+              "ms": 12,
+              "paintMs": 28
+            },
+            "scrollToEnd": {
+              "ms": 11,
+              "paintMs": 26
+            },
+            "rowsDrawnAtEnd": 14,
+            "sortBySubject": {
+              "ms": 13,
+              "paintMs": 27
+            },
+            "extract": {
+              "ms": 23,
+              "paintMs": 39
+            },
+            "downloadMs": 20,
+            "sequences": 100,
+            "bytes": 117321,
+            "removeAll": {
+              "ms": 9,
+              "paintMs": 26
+            }
+          },
+          {
+            "addAll": {
+              "ms": 10,
+              "paintMs": 26
+            },
+            "candidates": 5993,
+            "openTray": {
+              "ms": 13,
+              "paintMs": 27
+            },
+            "scrollToEnd": {
+              "ms": 14,
+              "paintMs": 29
+            },
+            "rowsDrawnAtEnd": 14,
+            "sortBySubject": {
+              "ms": 12,
+              "paintMs": 26
+            },
+            "extract": {
+              "ms": 27,
+              "paintMs": 43
+            },
+            "downloadMs": 21,
+            "sequences": 100,
+            "bytes": 117321,
+            "removeAll": {
+              "ms": 11,
+              "paintMs": 28
+            }
+          },
+          {
+            "addAll": {
+              "ms": 12,
+              "paintMs": 23
+            },
+            "candidates": 5993,
+            "openTray": {
+              "ms": 12,
+              "paintMs": 27
+            },
+            "scrollToEnd": {
+              "ms": 11,
+              "paintMs": 25
+            },
+            "rowsDrawnAtEnd": 14,
+            "sortBySubject": {
+              "ms": 13,
+              "paintMs": 26
+            },
+            "extract": {
+              "ms": 27,
+              "paintMs": 43
+            },
+            "downloadMs": 20,
+            "sequences": 100,
+            "bytes": 117321,
+            "removeAll": {
+              "ms": 9,
+              "paintMs": 27
+            }
+          }
+        ],
+        "summary": {
+          "addAll": {
+            "ms": {
+              "median": 10,
+              "min": 10,
+              "max": 12
+            },
+            "paintMs": {
+              "median": 26,
+              "min": 23,
+              "max": 27
+            }
+          },
+          "candidates": {
+            "median": 5993,
+            "min": 5993,
+            "max": 5993
+          },
+          "openTray": {
+            "ms": {
+              "median": 12,
+              "min": 12,
+              "max": 13
+            },
+            "paintMs": {
+              "median": 27,
+              "min": 27,
+              "max": 28
+            }
+          },
+          "scrollToEnd": {
+            "ms": {
+              "median": 11,
+              "min": 11,
+              "max": 14
+            },
+            "paintMs": {
+              "median": 26,
+              "min": 25,
+              "max": 29
+            }
+          },
+          "rowsDrawnAtEnd": {
+            "median": 14,
+            "min": 14,
+            "max": 14
+          },
+          "sortBySubject": {
+            "ms": {
+              "median": 13,
+              "min": 12,
+              "max": 13
+            },
+            "paintMs": {
+              "median": 26,
+              "min": 26,
+              "max": 27
+            }
+          },
+          "extract": {
+            "ms": {
+              "median": 27,
+              "min": 23,
+              "max": 27
+            },
+            "paintMs": {
+              "median": 43,
+              "min": 39,
+              "max": 43
+            }
+          },
+          "downloadMs": {
+            "median": 20,
+            "min": 20,
+            "max": 21
+          },
+          "sequences": {
+            "median": 100,
+            "min": 100,
+            "max": 100
+          },
+          "bytes": {
+            "median": 117321,
+            "min": 117321,
+            "max": 117321
+          },
+          "removeAll": {
+            "ms": {
+              "median": 9,
+              "min": 9,
+              "max": 11
+            },
+            "paintMs": {
+              "median": 27,
+              "min": 26,
+              "max": 28
+            }
+          }
+        }
+      },
+      "files": {
+        "scope": "all",
+        "hsps": 5993,
+        "filteredHsps": 5993,
+        "outputsShownMs": 95,
+        "csv": {
+          "name": "losat-run3-blastn-hsps.csv",
+          "bytes": 641762,
+          "ms": 22,
+          "paintMs": 39,
+          "downloadMs": 25,
+          "frames": 3,
+          "maxFrameGapMs": 17,
+          "maxFrameGapEndMs": 27,
+          "maxTaskLagMs": 14
+        },
+        "json": {
+          "name": "losat-run3-blastn-hsps.json",
+          "bytes": 363539407,
+          "ms": 2088,
+          "paintMs": 2104,
+          "downloadMs": 3725,
+          "frames": 164,
+          "maxFrameGapMs": 17,
+          "maxFrameGapEndMs": 925,
+          "maxTaskLagMs": 11
+        },
+        "report": {
+          "name": "losat-run3-blastn-report.html",
+          "bytes": 720989181,
+          "ms": 2818,
+          "paintMs": 2835,
+          "downloadMs": 2825,
+          "frames": 268,
+          "maxFrameGapMs": 17,
+          "maxFrameGapEndMs": 606,
+          "maxTaskLagMs": 10
+        },
+        "outfmt6": {
+          "name": "losat-run3-blastn.outfmt6.txt",
+          "bytes": 375214,
+          "downloadMs": 7,
+          "frames": 1,
+          "maxFrameGapMs": 10,
+          "maxFrameGapEndMs": 10,
+          "maxTaskLagMs": 0
+        },
+        "svg": {
+          "name": "losat-run3-dotplot-q1-s1.svg",
+          "bytes": 100575,
+          "downloadMs": 15,
+          "frames": 1,
+          "maxFrameGapMs": 11,
+          "maxFrameGapEndMs": 11,
+          "maxTaskLagMs": 4,
+          "segments": 5993
+        }
+      },
+      "session": {
+        "candidates": 5993,
+        "runs": 3,
+        "save": {
+          "name": "losat-session-20261011-174600.losat-session.gz",
+          "bytes": 86702582,
+          "ms": 8233,
+          "paintMs": 8249,
+          "downloadMs": 8224,
+          "frames": 504,
+          "maxFrameGapMs": 17,
+          "maxFrameGapEndMs": 6605,
+          "maxTaskLagMs": 14
+        },
+        "saveMessage": "Saved losat-session-20261011-174600.losat-session.gz: 3 runs and 5993 candidates with their notes.",
+        "open": {
+          "ms": 10476,
+          "paintMs": 10481,
+          "frames": 587,
+          "maxFrameGapMs": 50,
+          "maxFrameGapEndMs": 3090,
+          "maxTaskLagMs": 49
+        },
+        "openMessage": "Opened measured.losat-session.gz: 3 runs (runs 1 to 3 here) and 5993 candidates with their notes. Nothing was searched again.",
+        "openedRuns": 3,
+        "openedCandidates": 5993
+      }
+    },
+    {
+      "unit": 20,
+      "copies": 4000,
+      "bytes": 81166,
+      "error": "run 4 ended failed: The engine stopped (it ran out of memory): memory allocation of 49861 bytes failed (unreachable executed)"
+    }
+  ]
+}

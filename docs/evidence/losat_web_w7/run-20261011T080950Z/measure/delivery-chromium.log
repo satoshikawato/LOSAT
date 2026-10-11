@@ -1,0 +1,35 @@
+[WebServer] (!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+[WebServer]   - import "./output-format" without a file extension (src/domain/verification.ts:9:35). Add the file extension
+[WebServer]   - import "./programs" without a file extension (src/domain/verification.ts:10:32). Add the file extension
+[WebServer] Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+
+Running 2 tests using 1 worker
+
+chromium visit warm-up: {"first":{"app":162,"checked":547,"preparing":2164,"ready":2283,"prepareMs":119,"navigation":{"responseEnd":4,"domContentLoaded":106,"load":106},"bytes":{"network":8201096,"preparation":3978574},"requests":25},"second":{"app":29,"checked":398,"preparing":2032,"ready":2047,"prepareMs":15,"navigation":{"responseEnd":4,"domContentLoaded":11,"load":11},"bytes":{"network":1836,"preparation":612},"requests":13},"offline":{"app":15,"checked":382,"preparing":2016,"ready":2020,"prepareMs":4,"navigation":{"responseEnd":3,"domContentLoaded":8,"load":8},"bytes":{"network":0,"preparation":0},"requests":0}}
+chromium visit 1: {"first":{"app":65,"checked":454,"preparing":2069,"ready":2185,"prepareMs":116,"navigation":{"responseEnd":2,"domContentLoaded":18,"load":18},"bytes":{"network":8201096,"preparation":3978574},"requests":25},"second":{"app":31,"checked":400,"preparing":2033,"ready":2050,"prepareMs":17,"navigation":{"responseEnd":4,"domContentLoaded":11,"load":11},"bytes":{"network":1836,"preparation":612},"requests":13},"offline":{"app":15,"checked":381,"preparing":2016,"ready":2020,"prepareMs":4,"navigation":{"responseEnd":3,"domContentLoaded":8,"load":8},"bytes":{"network":0,"preparation":0},"requests":0}}
+chromium visit 2: {"first":{"app":65,"checked":444,"preparing":2070,"ready":2189,"prepareMs":119,"navigation":{"responseEnd":2,"domContentLoaded":18,"load":18},"bytes":{"network":8201096,"preparation":3978574},"requests":25},"second":{"app":31,"checked":398,"preparing":2033,"ready":2049,"prepareMs":16,"navigation":{"responseEnd":4,"domContentLoaded":9,"load":9},"bytes":{"network":1836,"preparation":612},"requests":13},"offline":{"app":15,"checked":383,"preparing":2017,"ready":2023,"prepareMs":5,"navigation":{"responseEnd":3,"domContentLoaded":8,"load":8},"bytes":{"network":0,"preparation":0},"requests":0}}
+chromium visit 3: {"first":{"app":63,"checked":445,"preparing":2065,"ready":2192,"prepareMs":127,"navigation":{"responseEnd":2,"domContentLoaded":17,"load":17},"bytes":{"network":8201096,"preparation":3978574},"requests":25},"second":{"app":34,"checked":400,"preparing":2034,"ready":2045,"prepareMs":11,"navigation":{"responseEnd":4,"domContentLoaded":12,"load":12},"bytes":{"network":1836,"preparation":612},"requests":13},"offline":{"app":15,"checked":387,"preparing":2016,"ready":2020,"prepareMs":4,"navigation":{"responseEnd":2,"domContentLoaded":7,"load":7},"bytes":{"network":0,"preparation":0},"requests":0}}
+  ✓  1 [chromium] › tests/e2e/delivery-measure.spec.ts:239:1 › visits: first, second (from the service worker) and offline; the preparation until "Offline ready" (27.0s)
+chromium self-test warm-up: {"ms":390,"cases":{"blastn-4":115,"blastn-1":27,"blastp-4":43,"blastp-1":32,"tblastn-4":40,"tblastn-1":29,"tblastx-4":38,"tblastx-1":30}}
+chromium self-test 1: {"ms":225,"cases":{"blastn-4":27,"blastn-1":16,"blastp-4":28,"blastp-1":18,"tblastn-4":33,"tblastn-1":25,"tblastx-4":31,"tblastx-1":21}}
+chromium self-test 2: {"ms":226,"cases":{"blastn-4":28,"blastn-1":16,"blastp-4":26,"blastp-1":18,"tblastn-4":33,"tblastn-1":25,"tblastx-4":31,"tblastx-1":21}}
+chromium self-test 3: {"ms":230,"cases":{"blastn-4":27,"blastn-1":16,"blastp-4":27,"blastp-1":19,"tblastn-4":32,"tblastn-1":24,"tblastx-4":31,"tblastx-1":24}}
+chromium blastn warm-up: {"load":28,"search":28,"open":19,"firstResults":47}
+chromium blastn 1: {"load":15,"search":28,"open":9,"firstResults":37}
+chromium blastn 2: {"load":14,"search":26,"open":8,"firstResults":34}
+chromium blastn 3: {"load":16,"search":27,"open":8,"firstResults":35}
+chromium blastp warm-up: {"load":22,"search":27,"open":8,"firstResults":35}
+chromium blastp 1: {"load":13,"search":27,"open":24,"firstResults":51}
+chromium blastp 2: {"load":13,"search":28,"open":23,"firstResults":51}
+chromium blastp 3: {"load":14,"search":27,"open":7,"firstResults":34}
+chromium tblastn warm-up: {"load":19,"search":26,"open":24,"firstResults":50}
+chromium tblastn 1: {"load":12,"search":26,"open":21,"firstResults":47}
+chromium tblastn 2: {"load":11,"search":27,"open":23,"firstResults":50}
+chromium tblastn 3: {"load":12,"search":27,"open":24,"firstResults":51}
+chromium tblastx warm-up: {"load":21,"search":26,"open":24,"firstResults":50}
+chromium tblastx 1: {"load":12,"search":26,"open":24,"firstResults":50}
+chromium tblastx 2: {"load":10,"search":26,"open":24,"firstResults":50}
+chromium tblastx 3: {"load":28,"search":27,"open":24,"firstResults":51}
+  ✓  2 [chromium] › tests/e2e/delivery-measure.spec.ts:354:1 › onboarding: the self-test, and "Try an example" then "Run LOSAT" to the first results (7.4s)
+
+  2 passed (36.6s)

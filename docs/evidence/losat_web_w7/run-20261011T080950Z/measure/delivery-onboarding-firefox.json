@@ -1,0 +1,309 @@
+{
+  "selfTestWarmup": {
+    "ms": 1717,
+    "cases": {
+      "blastn-4": 285,
+      "blastn-1": 182,
+      "blastp-4": 188,
+      "blastp-1": 176,
+      "tblastn-4": 224,
+      "tblastn-1": 213,
+      "tblastx-4": 210,
+      "tblastx-1": 188
+    }
+  },
+  "selfTest": {
+    "samples": [
+      {
+        "ms": 1690,
+        "cases": {
+          "blastn-4": 191,
+          "blastn-1": 171,
+          "blastp-4": 193,
+          "blastp-1": 186,
+          "tblastn-4": 255,
+          "tblastn-1": 220,
+          "tblastx-4": 210,
+          "tblastx-1": 204
+        }
+      },
+      {
+        "ms": 1675,
+        "cases": {
+          "blastn-4": 201,
+          "blastn-1": 182,
+          "blastp-4": 198,
+          "blastp-1": 190,
+          "tblastn-4": 225,
+          "tblastn-1": 232,
+          "tblastx-4": 209,
+          "tblastx-1": 198
+        }
+      },
+      {
+        "ms": 1754,
+        "cases": {
+          "blastn-4": 223,
+          "blastn-1": 184,
+          "blastp-4": 199,
+          "blastp-1": 196,
+          "tblastn-4": 255,
+          "tblastn-1": 236,
+          "tblastx-4": 214,
+          "tblastx-1": 201
+        }
+      }
+    ],
+    "summary": {
+      "ms": {
+        "median": 1690,
+        "min": 1675,
+        "max": 1754
+      },
+      "cases": {
+        "blastn-4": {
+          "median": 201,
+          "min": 191,
+          "max": 223
+        },
+        "blastn-1": {
+          "median": 182,
+          "min": 171,
+          "max": 184
+        },
+        "blastp-4": {
+          "median": 198,
+          "min": 193,
+          "max": 199
+        },
+        "blastp-1": {
+          "median": 190,
+          "min": 186,
+          "max": 196
+        },
+        "tblastn-4": {
+          "median": 255,
+          "min": 225,
+          "max": 255
+        },
+        "tblastn-1": {
+          "median": 232,
+          "min": 220,
+          "max": 236
+        },
+        "tblastx-4": {
+          "median": 210,
+          "min": 209,
+          "max": 214
+        },
+        "tblastx-1": {
+          "median": 201,
+          "min": 198,
+          "max": 204
+        }
+      }
+    }
+  },
+  "examples": {
+    "blastn": {
+      "warmup": {
+        "load": 20,
+        "search": 172,
+        "open": 38,
+        "firstResults": 210
+      },
+      "samples": [
+        {
+          "load": 25,
+          "search": 161,
+          "open": 23,
+          "firstResults": 184
+        },
+        {
+          "load": 27,
+          "search": 144,
+          "open": 23,
+          "firstResults": 167
+        },
+        {
+          "load": 26,
+          "search": 144,
+          "open": 24,
+          "firstResults": 168
+        }
+      ],
+      "summary": {
+        "load": {
+          "median": 26,
+          "min": 25,
+          "max": 27
+        },
+        "search": {
+          "median": 144,
+          "min": 144,
+          "max": 161
+        },
+        "open": {
+          "median": 23,
+          "min": 23,
+          "max": 24
+        },
+        "firstResults": {
+          "median": 168,
+          "min": 167,
+          "max": 184
+        }
+      }
+    },
+    "blastp": {
+      "warmup": {
+        "load": 20,
+        "search": 176,
+        "open": 19,
+        "firstResults": 195
+      },
+      "samples": [
+        {
+          "load": 27,
+          "search": 177,
+          "open": 22,
+          "firstResults": 199
+        },
+        {
+          "load": 22,
+          "search": 156,
+          "open": 19,
+          "firstResults": 175
+        },
+        {
+          "load": 23,
+          "search": 160,
+          "open": 23,
+          "firstResults": 183
+        }
+      ],
+      "summary": {
+        "load": {
+          "median": 23,
+          "min": 22,
+          "max": 27
+        },
+        "search": {
+          "median": 160,
+          "min": 156,
+          "max": 177
+        },
+        "open": {
+          "median": 22,
+          "min": 19,
+          "max": 23
+        },
+        "firstResults": {
+          "median": 183,
+          "min": 175,
+          "max": 199
+        }
+      }
+    },
+    "tblastn": {
+      "warmup": {
+        "load": 32,
+        "search": 194,
+        "open": 40,
+        "firstResults": 234
+      },
+      "samples": [
+        {
+          "load": 23,
+          "search": 193,
+          "open": 40,
+          "firstResults": 233
+        },
+        {
+          "load": 24,
+          "search": 192,
+          "open": 40,
+          "firstResults": 232
+        },
+        {
+          "load": 24,
+          "search": 192,
+          "open": 40,
+          "firstResults": 232
+        }
+      ],
+      "summary": {
+        "load": {
+          "median": 24,
+          "min": 23,
+          "max": 24
+        },
+        "search": {
+          "median": 192,
+          "min": 192,
+          "max": 193
+        },
+        "open": {
+          "median": 40,
+          "min": 40,
+          "max": 40
+        },
+        "firstResults": {
+          "median": 232,
+          "min": 232,
+          "max": 233
+        }
+      }
+    },
+    "tblastx": {
+      "warmup": {
+        "load": 52,
+        "search": 175,
+        "open": 72,
+        "firstResults": 247
+      },
+      "samples": [
+        {
+          "load": 23,
+          "search": 176,
+          "open": 71,
+          "firstResults": 247
+        },
+        {
+          "load": 19,
+          "search": 177,
+          "open": 71,
+          "firstResults": 248
+        },
+        {
+          "load": 23,
+          "search": 175,
+          "open": 72,
+          "firstResults": 247
+        }
+      ],
+      "summary": {
+        "load": {
+          "median": 23,
+          "min": 19,
+          "max": 23
+        },
+        "search": {
+          "median": 176,
+          "min": 175,
+          "max": 177
+        },
+        "open": {
+          "median": 71,
+          "min": 71,
+          "max": 72
+        },
+        "firstResults": {
+          "median": 247,
+          "min": 247,
+          "max": 248
+        }
+      }
+    }
+  }
+}

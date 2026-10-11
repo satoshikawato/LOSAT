@@ -1,0 +1,42 @@
+{
+  "project": "firefox",
+  "site": "http://localhost:4730",
+  "tests": [
+    {
+      "project": "firefox",
+      "title": "the app starts through the boot page, isolated, on the latest release",
+      "status": "passed",
+      "durationMs": 828,
+      "record": {
+        "browser": "firefox",
+        "latest": "9cb4e61ee59e-e2fb7128",
+        "shown": "9cb4e61ee59e-e2fb7128",
+        "shownFrom": "release-id",
+        "isolated": true,
+        "sharedArrayBuffer": true,
+        "pin": "9cb4e61ee59e-e2fb7128",
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:151.0) Gecko/20100101 Firefox/151.0",
+        "entryRequested": true,
+        "foreignPaths": []
+      }
+    },
+    {
+      "project": "firefox",
+      "title": "a search cancelled while it runs, then a new search completes",
+      "status": "passed",
+      "durationMs": 2378,
+      "record": {
+        "browser": "firefox",
+        "run1": "cancelled",
+        "run2": "completed"
+      }
+    },
+    {
+      "project": "firefox",
+      "title": "\"Offline ready\" appears; in Chromium an offline reload starts the app",
+      "status": "failed",
+      "durationMs": 181638,
+      "error": "Error: expect(locator).toBeVisible() failed\n\nLocator: getByTestId('offline-ready')\nExpected: visible\nTimeout: 180000ms\nError: element(s) not found\n\nCall log:\n  - Expect \"toBeVisible\" with timeout 180000ms\n  - waiting for getByTestId('offline-ready')\n"
+    }
+  ]
+}

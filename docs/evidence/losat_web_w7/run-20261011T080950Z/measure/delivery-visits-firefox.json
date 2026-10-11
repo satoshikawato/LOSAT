@@ -1,0 +1,407 @@
+{
+  "origin": "front server before the E2E site (engine build)",
+  "release": "35970fa18885-e2fb7128",
+  "stored": {
+    "files": 17,
+    "bytes": 8188494
+  },
+  "warmup": {
+    "first": {
+      "app": 216,
+      "checked": 756,
+      "preparing": 2218,
+      "ready": 2365,
+      "prepareMs": 147,
+      "navigation": {
+        "responseEnd": 19,
+        "domContentLoaded": 102,
+        "load": 103
+      },
+      "bytes": {
+        "network": 8201520,
+        "preparation": 3978574
+      },
+      "requests": 26
+    },
+    "second": {
+      "app": 80,
+      "checked": 502,
+      "preparing": 2082,
+      "ready": 2107,
+      "prepareMs": 26,
+      "navigation": {
+        "responseEnd": 9,
+        "domContentLoaded": 29,
+        "load": 29
+      },
+      "bytes": {
+        "network": 1836,
+        "preparation": 612
+      },
+      "requests": 10
+    },
+    "offline": {
+      "app": 74,
+      "checked": 500,
+      "preparing": 2078,
+      "ready": 2084,
+      "prepareMs": 7,
+      "navigation": {
+        "responseEnd": 6,
+        "domContentLoaded": 22,
+        "load": 22
+      },
+      "bytes": {
+        "network": 0,
+        "preparation": 0
+      },
+      "requests": 0
+    }
+  },
+  "samples": [
+    {
+      "first": {
+        "app": 116,
+        "checked": 573,
+        "preparing": 2120,
+        "ready": 2262,
+        "prepareMs": 142,
+        "navigation": {
+          "responseEnd": 3,
+          "domContentLoaded": 57,
+          "load": 57
+        },
+        "bytes": {
+          "network": 8201520,
+          "preparation": 3978574
+        },
+        "requests": 26
+      },
+      "second": {
+        "app": 76,
+        "checked": 501,
+        "preparing": 2077,
+        "ready": 2103,
+        "prepareMs": 26,
+        "navigation": {
+          "responseEnd": 8,
+          "domContentLoaded": 28,
+          "load": 29
+        },
+        "bytes": {
+          "network": 1836,
+          "preparation": 612
+        },
+        "requests": 10
+      },
+      "offline": {
+        "app": 65,
+        "checked": 482,
+        "preparing": 2068,
+        "ready": 2075,
+        "prepareMs": 6,
+        "navigation": {
+          "responseEnd": 7,
+          "domContentLoaded": 21,
+          "load": 21
+        },
+        "bytes": {
+          "network": 0,
+          "preparation": 0
+        },
+        "requests": 0
+      }
+    },
+    {
+      "first": {
+        "app": 111,
+        "checked": 563,
+        "preparing": 2112,
+        "ready": 2257,
+        "prepareMs": 145,
+        "navigation": {
+          "responseEnd": 3,
+          "domContentLoaded": 57,
+          "load": 57
+        },
+        "bytes": {
+          "network": 8201520,
+          "preparation": 3978574
+        },
+        "requests": 26
+      },
+      "second": {
+        "app": 77,
+        "checked": 493,
+        "preparing": 2079,
+        "ready": 2104,
+        "prepareMs": 24,
+        "navigation": {
+          "responseEnd": 8,
+          "domContentLoaded": 28,
+          "load": 28
+        },
+        "bytes": {
+          "network": 1836,
+          "preparation": 612
+        },
+        "requests": 10
+      },
+      "offline": {
+        "app": 69,
+        "checked": 488,
+        "preparing": 2071,
+        "ready": 2078,
+        "prepareMs": 7,
+        "navigation": {
+          "responseEnd": 7,
+          "domContentLoaded": 24,
+          "load": 24
+        },
+        "bytes": {
+          "network": 0,
+          "preparation": 0
+        },
+        "requests": 0
+      }
+    },
+    {
+      "first": {
+        "app": 118,
+        "checked": 573,
+        "preparing": 2123,
+        "ready": 2262,
+        "prepareMs": 140,
+        "navigation": {
+          "responseEnd": 5,
+          "domContentLoaded": 62,
+          "load": 62
+        },
+        "bytes": {
+          "network": 8201520,
+          "preparation": 3978574
+        },
+        "requests": 26
+      },
+      "second": {
+        "app": 73,
+        "checked": 486,
+        "preparing": 2076,
+        "ready": 2102,
+        "prepareMs": 26,
+        "navigation": {
+          "responseEnd": 7,
+          "domContentLoaded": 26,
+          "load": 27
+        },
+        "bytes": {
+          "network": 1836,
+          "preparation": 612
+        },
+        "requests": 10
+      },
+      "offline": {
+        "app": 67,
+        "checked": 483,
+        "preparing": 2070,
+        "ready": 2076,
+        "prepareMs": 6,
+        "navigation": {
+          "responseEnd": 7,
+          "domContentLoaded": 21,
+          "load": 21
+        },
+        "bytes": {
+          "network": 0,
+          "preparation": 0
+        },
+        "requests": 0
+      }
+    }
+  ],
+  "summary": {
+    "first": {
+      "app": {
+        "median": 116,
+        "min": 111,
+        "max": 118
+      },
+      "checked": {
+        "median": 573,
+        "min": 563,
+        "max": 573
+      },
+      "preparing": {
+        "median": 2120,
+        "min": 2112,
+        "max": 2123
+      },
+      "ready": {
+        "median": 2262,
+        "min": 2257,
+        "max": 2262
+      },
+      "prepareMs": {
+        "median": 142,
+        "min": 140,
+        "max": 145
+      },
+      "navigation": {
+        "responseEnd": {
+          "median": 3,
+          "min": 3,
+          "max": 5
+        },
+        "domContentLoaded": {
+          "median": 57,
+          "min": 57,
+          "max": 62
+        },
+        "load": {
+          "median": 57,
+          "min": 57,
+          "max": 62
+        }
+      },
+      "bytes": {
+        "network": {
+          "median": 8201520,
+          "min": 8201520,
+          "max": 8201520
+        },
+        "preparation": {
+          "median": 3978574,
+          "min": 3978574,
+          "max": 3978574
+        }
+      },
+      "requests": {
+        "median": 26,
+        "min": 26,
+        "max": 26
+      }
+    },
+    "second": {
+      "app": {
+        "median": 76,
+        "min": 73,
+        "max": 77
+      },
+      "checked": {
+        "median": 493,
+        "min": 486,
+        "max": 501
+      },
+      "preparing": {
+        "median": 2077,
+        "min": 2076,
+        "max": 2079
+      },
+      "ready": {
+        "median": 2103,
+        "min": 2102,
+        "max": 2104
+      },
+      "prepareMs": {
+        "median": 26,
+        "min": 24,
+        "max": 26
+      },
+      "navigation": {
+        "responseEnd": {
+          "median": 8,
+          "min": 7,
+          "max": 8
+        },
+        "domContentLoaded": {
+          "median": 28,
+          "min": 26,
+          "max": 28
+        },
+        "load": {
+          "median": 28,
+          "min": 27,
+          "max": 29
+        }
+      },
+      "bytes": {
+        "network": {
+          "median": 1836,
+          "min": 1836,
+          "max": 1836
+        },
+        "preparation": {
+          "median": 612,
+          "min": 612,
+          "max": 612
+        }
+      },
+      "requests": {
+        "median": 10,
+        "min": 10,
+        "max": 10
+      }
+    },
+    "offline": {
+      "app": {
+        "median": 67,
+        "min": 65,
+        "max": 69
+      },
+      "checked": {
+        "median": 483,
+        "min": 482,
+        "max": 488
+      },
+      "preparing": {
+        "median": 2070,
+        "min": 2068,
+        "max": 2071
+      },
+      "ready": {
+        "median": 2076,
+        "min": 2075,
+        "max": 2078
+      },
+      "prepareMs": {
+        "median": 6,
+        "min": 6,
+        "max": 7
+      },
+      "navigation": {
+        "responseEnd": {
+          "median": 7,
+          "min": 7,
+          "max": 7
+        },
+        "domContentLoaded": {
+          "median": 21,
+          "min": 21,
+          "max": 24
+        },
+        "load": {
+          "median": 21,
+          "min": 21,
+          "max": 24
+        }
+      },
+      "bytes": {
+        "network": {
+          "median": 0,
+          "min": 0,
+          "max": 0
+        },
+        "preparation": {
+          "median": 0,
+          "min": 0,
+          "max": 0
+        }
+      },
+      "requests": {
+        "median": 0,
+        "min": 0,
+        "max": 0
+      }
+    }
+  }
+}

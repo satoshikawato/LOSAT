@@ -1,0 +1,49 @@
+{
+  "project": "chromium",
+  "site": "http://localhost:4730",
+  "tests": [
+    {
+      "project": "chromium",
+      "title": "the app starts through the boot page, isolated, on the latest release",
+      "status": "passed",
+      "durationMs": 257,
+      "record": {
+        "browser": "chromium",
+        "latest": "35970fa18885-e2fb7128",
+        "shown": "35970fa18885-e2fb7128",
+        "shownFrom": "release-id",
+        "isolated": true,
+        "sharedArrayBuffer": true,
+        "pin": "35970fa18885-e2fb7128",
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.7827.55 Safari/537.36",
+        "entryRequested": true,
+        "foreignPaths": []
+      }
+    },
+    {
+      "project": "chromium",
+      "title": "a search cancelled while it runs, then a new search completes",
+      "status": "passed",
+      "durationMs": 1602,
+      "record": {
+        "browser": "chromium",
+        "run1": "cancelled",
+        "run2": "completed"
+      }
+    },
+    {
+      "project": "chromium",
+      "title": "\"Offline ready\" appears; in Chromium an offline reload starts the app",
+      "status": "passed",
+      "durationMs": 2492,
+      "record": {
+        "browser": "chromium",
+        "offlineReady": true,
+        "offlineReload": {
+          "started": true,
+          "isolated": true
+        }
+      }
+    }
+  ]
+}

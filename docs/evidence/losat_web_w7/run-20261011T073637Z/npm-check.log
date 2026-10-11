@@ -1,0 +1,59 @@
+
+> losat-web@0.0.0 check
+> npm run typecheck && npm run lint && npm run test && npm run build
+
+
+> losat-web@0.0.0 typecheck
+> vue-tsc --noEmit && vue-tsc --noEmit -p tsconfig.sw.json
+
+
+> losat-web@0.0.0 lint
+> eslint .
+
+
+> losat-web@0.0.0 test
+> vitest run
+
+(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+  - import "./output-format" without a file extension (src/domain/verification.ts:9:35). Add the file extension
+  - import "./programs" without a file extension (src/domain/verification.ts:10:32). Add the file extension
+Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+
+ RUN  v5.0.2 /home/kawato/losat-work/.worktrees/web-gui-app/web/app
+
+
+ Test Files  55 passed | 3 skipped (58)
+      Tests  905 passed | 65 skipped (970)
+   Start at  16:40:26
+   Duration  7.52s (tests 57%, transform 37%, import 6%, worker 1%)
+
+  Transform  transforming modules took 15.42s · 37% of tracked time, re-done on every run
+             persist transforms across runs with fsModuleCache: true
+             learn more: https://vitest.dev/guide/improving-performance#caching-between-reruns
+
+
+> losat-web@0.0.0 build
+> vite build
+
+(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+  - import "./output-format" without a file extension (src/domain/verification.ts:9:35). Add the file extension
+  - import "./programs" without a file extension (src/domain/verification.ts:10:32). Add the file extension
+Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+vite v8.3.1 building client environment for production...
+transforming...
+✓ 199 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/r/9cb4e61ee59e-fake/assets/example-blastp-query-BzN6GSqc.fasta       0.55 kB
+dist/r/9cb4e61ee59e-fake/assets/example-blastp-subject-BQetDNj1.fasta     1.68 kB
+dist/r/9cb4e61ee59e-fake/assets/example-blastx-query-ClbCuBaj.fasta       2.12 kB
+dist/r/9cb4e61ee59e-fake/assets/example-blastn-query-B1eiS6bw.fasta       2.13 kB
+dist/r/9cb4e61ee59e-fake/assets/example-blastn-subject-9NbJfqNP.fasta     6.37 kB
+dist/r/9cb4e61ee59e-fake/assets/example-tblastn-subject-DE5KAftQ.fasta    6.37 kB
+dist/r/9cb4e61ee59e-fake/assets/thread-worker-BFsv56lD.js                17.92 kB
+dist/r/9cb4e61ee59e-fake/assets/engine-worker-BJVxJl9D.js                30.19 kB
+dist/r/9cb4e61ee59e-fake/assets/data-worker-Db0IVyvC.js                  40.12 kB
+dist/r/9cb4e61ee59e-fake/assets/index-DM-7JZaz.css                       32.63 kB │ gzip:   6.93 kB
+dist/r/9cb4e61ee59e-fake/assets/index-C0lWZOsH.js                       460.59 kB │ gzip: 146.09 kB
+
+✓ built in 471ms

@@ -1,0 +1,136 @@
+
+Running 26 tests using 1 worker
+
+  ✓   1 [http] › ../../docs/evidence/losat_web_w7/check_preview/http.spec.ts:115:3 › headers: root (7ms)
+  ✓   2 [http] › ../../docs/evidence/losat_web_w7/check_preview/http.spec.ts:115:3 › headers: boot-js (6ms)
+  ✓   3 [http] › ../../docs/evidence/losat_web_w7/check_preview/http.spec.ts:115:3 › headers: boot-css (3ms)
+  ✓   4 [http] › ../../docs/evidence/losat_web_w7/check_preview/http.spec.ts:115:3 › headers: releases-json (3ms)
+  ✓   5 [http] › ../../docs/evidence/losat_web_w7/check_preview/http.spec.ts:115:3 › headers: sw-js (8ms)
+  ✓   6 [http] › ../../docs/evidence/losat_web_w7/check_preview/http.spec.ts:115:3 › headers: release-manifest (3ms)
+  ✓   7 [http] › ../../docs/evidence/losat_web_w7/check_preview/http.spec.ts:115:3 › headers: entry-script (3ms)
+  ✓   8 [http] › ../../docs/evidence/losat_web_w7/check_preview/http.spec.ts:115:3 › headers: entry-style (7ms)
+  ✓   9 [http] › ../../docs/evidence/losat_web_w7/check_preview/http.spec.ts:115:3 › headers: worker-script (2ms)
+  ✓  10 [http] › ../../docs/evidence/losat_web_w7/check_preview/http.spec.ts:115:3 › headers: engine-module-1 (13ms)
+  ✓  11 [http] › ../../docs/evidence/losat_web_w7/check_preview/http.spec.ts:115:3 › headers: engine-module-2 (10ms)
+  ✓  12 [http] › ../../docs/evidence/losat_web_w7/check_preview/http.spec.ts:115:3 › headers: missing-site-file (2ms)
+  ✓  13 [http] › ../../docs/evidence/losat_web_w7/check_preview/http.spec.ts:115:3 › headers: missing-release-file (1ms)
+  ✓  14 [http] › ../../docs/evidence/losat_web_w7/check_preview/http.spec.ts:175:1 › the files of the latest release are served byte for byte (31ms)
+  ✓  15 [http] › ../../docs/evidence/losat_web_w7/check_preview/http.spec.ts:198:1 › the boot page loads nothing from another origin and nothing was injected (3ms)
+  ✓  16 [http] › ../../docs/evidence/losat_web_w7/check_preview/http.spec.ts:212:1 › every release of the site index has its manifest (1ms)
+  -  17 [http] › ../../docs/evidence/losat_web_w7/check_preview/http.spec.ts:229:1 › /api/visit refuses a body that is not the event; a valid event only with LOSAT_WEB_PREVIEW_SEND_VISIT=1
+  ✓  18 [chromium] › ../../docs/evidence/losat_web_w7/check_preview/browser.spec.ts:27:1 › the app starts through the boot page, isolated, on the latest release (230ms)
+  ✓  19 [chromium] › ../../docs/evidence/losat_web_w7/check_preview/browser.spec.ts:60:1 › a search cancelled while it runs, then a new search completes (1.7s)
+  ✘  20 [chromium] › ../../docs/evidence/losat_web_w7/check_preview/browser.spec.ts:79:1 › "Offline ready" appears; in Chromium an offline reload starts the app (3.0m)
+  ✓  21 [firefox] › ../../docs/evidence/losat_web_w7/check_preview/browser.spec.ts:27:1 › the app starts through the boot page, isolated, on the latest release (828ms)
+  ✓  22 [firefox] › ../../docs/evidence/losat_web_w7/check_preview/browser.spec.ts:60:1 › a search cancelled while it runs, then a new search completes (2.4s)
+  ✘  23 [firefox] › ../../docs/evidence/losat_web_w7/check_preview/browser.spec.ts:79:1 › "Offline ready" appears; in Chromium an offline reload starts the app (3.0m)
+  ✓  24 [webkit] › ../../docs/evidence/losat_web_w7/check_preview/browser.spec.ts:27:1 › the app starts through the boot page, isolated, on the latest release (521ms)
+  ✓  25 [webkit] › ../../docs/evidence/losat_web_w7/check_preview/browser.spec.ts:60:1 › a search cancelled while it runs, then a new search completes (2.3s)
+  ✘  26 [webkit] › ../../docs/evidence/losat_web_w7/check_preview/browser.spec.ts:79:1 › "Offline ready" appears; in Chromium an offline reload starts the app (3.0m)
+
+
+  1) [chromium] › ../../docs/evidence/losat_web_w7/check_preview/browser.spec.ts:79:1 › "Offline ready" appears; in Chromium an offline reload starts the app 
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: getByTestId('offline-ready')
+    Expected: visible
+    Timeout: 180000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" with timeout 180000ms
+      - waiting for getByTestId('offline-ready')
+
+
+      81 |   await page.goto('/');
+      82 |   await appStarted(page);
+    > 83 |   await expect(page.getByTestId('offline-ready')).toBeVisible({ timeout: 180_000 });
+         |                                                   ^
+      84 |   const data: Record<string, unknown> = { browser: browserName, offlineReady: true };
+      85 |   if (browserName === 'chromium') {
+      86 |     // Playwright's offline switch is reliable only in Chromium (S16 decision 6).
+        at /home/kawato/losat-work/.worktrees/web-gui-app/docs/evidence/losat_web_w7/check_preview/browser.spec.ts:83:51
+
+    Error Context: ../../docs/evidence/losat_web_w7/run-20261011T073637Z/preview-check/test-results/browser--Offline-ready-app-57875-fline-reload-starts-the-app-chromium/error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    ../../docs/evidence/losat_web_w7/run-20261011T073637Z/preview-check/test-results/browser--Offline-ready-app-57875-fline-reload-starts-the-app-chromium/trace.zip
+    Usage:
+
+        npx playwright show-trace ../../docs/evidence/losat_web_w7/run-20261011T073637Z/preview-check/test-results/browser--Offline-ready-app-57875-fline-reload-starts-the-app-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  2) [firefox] › ../../docs/evidence/losat_web_w7/check_preview/browser.spec.ts:79:1 › "Offline ready" appears; in Chromium an offline reload starts the app 
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: getByTestId('offline-ready')
+    Expected: visible
+    Timeout: 180000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" with timeout 180000ms
+      - waiting for getByTestId('offline-ready')
+
+
+      81 |   await page.goto('/');
+      82 |   await appStarted(page);
+    > 83 |   await expect(page.getByTestId('offline-ready')).toBeVisible({ timeout: 180_000 });
+         |                                                   ^
+      84 |   const data: Record<string, unknown> = { browser: browserName, offlineReady: true };
+      85 |   if (browserName === 'chromium') {
+      86 |     // Playwright's offline switch is reliable only in Chromium (S16 decision 6).
+        at /home/kawato/losat-work/.worktrees/web-gui-app/docs/evidence/losat_web_w7/check_preview/browser.spec.ts:83:51
+
+    Error Context: ../../docs/evidence/losat_web_w7/run-20261011T073637Z/preview-check/test-results/browser--Offline-ready-app-57875-fline-reload-starts-the-app-firefox/error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    ../../docs/evidence/losat_web_w7/run-20261011T073637Z/preview-check/test-results/browser--Offline-ready-app-57875-fline-reload-starts-the-app-firefox/trace.zip
+    Usage:
+
+        npx playwright show-trace ../../docs/evidence/losat_web_w7/run-20261011T073637Z/preview-check/test-results/browser--Offline-ready-app-57875-fline-reload-starts-the-app-firefox/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  3) [webkit] › ../../docs/evidence/losat_web_w7/check_preview/browser.spec.ts:79:1 › "Offline ready" appears; in Chromium an offline reload starts the app 
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: getByTestId('offline-ready')
+    Expected: visible
+    Timeout: 180000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" with timeout 180000ms
+      - waiting for getByTestId('offline-ready')
+
+
+      81 |   await page.goto('/');
+      82 |   await appStarted(page);
+    > 83 |   await expect(page.getByTestId('offline-ready')).toBeVisible({ timeout: 180_000 });
+         |                                                   ^
+      84 |   const data: Record<string, unknown> = { browser: browserName, offlineReady: true };
+      85 |   if (browserName === 'chromium') {
+      86 |     // Playwright's offline switch is reliable only in Chromium (S16 decision 6).
+        at /home/kawato/losat-work/.worktrees/web-gui-app/docs/evidence/losat_web_w7/check_preview/browser.spec.ts:83:51
+
+    Error Context: ../../docs/evidence/losat_web_w7/run-20261011T073637Z/preview-check/test-results/browser--Offline-ready-app-57875-fline-reload-starts-the-app-webkit/error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    ../../docs/evidence/losat_web_w7/run-20261011T073637Z/preview-check/test-results/browser--Offline-ready-app-57875-fline-reload-starts-the-app-webkit/trace.zip
+    Usage:
+
+        npx playwright show-trace ../../docs/evidence/losat_web_w7/run-20261011T073637Z/preview-check/test-results/browser--Offline-ready-app-57875-fline-reload-starts-the-app-webkit/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  3 failed
+    [chromium] › ../../docs/evidence/losat_web_w7/check_preview/browser.spec.ts:79:1 › "Offline ready" appears; in Chromium an offline reload starts the app 
+    [firefox] › ../../docs/evidence/losat_web_w7/check_preview/browser.spec.ts:79:1 › "Offline ready" appears; in Chromium an offline reload starts the app 
+    [webkit] › ../../docs/evidence/losat_web_w7/check_preview/browser.spec.ts:79:1 › "Offline ready" appears; in Chromium an offline reload starts the app 
+  1 skipped
+  22 passed (9.2m)

@@ -1,0 +1,42 @@
+{
+  "project": "webkit",
+  "site": "http://localhost:4730",
+  "tests": [
+    {
+      "project": "webkit",
+      "title": "the app starts through the boot page, isolated, on the latest release",
+      "status": "passed",
+      "durationMs": 521,
+      "record": {
+        "browser": "webkit",
+        "latest": "9cb4e61ee59e-e2fb7128",
+        "shown": "9cb4e61ee59e-e2fb7128",
+        "shownFrom": "release-id",
+        "isolated": true,
+        "sharedArrayBuffer": true,
+        "pin": "9cb4e61ee59e-e2fb7128",
+        "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.5 Safari/605.1.15",
+        "entryRequested": true,
+        "foreignPaths": []
+      }
+    },
+    {
+      "project": "webkit",
+      "title": "a search cancelled while it runs, then a new search completes",
+      "status": "passed",
+      "durationMs": 2277,
+      "record": {
+        "browser": "webkit",
+        "run1": "cancelled",
+        "run2": "completed"
+      }
+    },
+    {
+      "project": "webkit",
+      "title": "\"Offline ready\" appears; in Chromium an offline reload starts the app",
+      "status": "failed",
+      "durationMs": 180446,
+      "error": "Error: expect(locator).toBeVisible() failed\n\nLocator: getByTestId('offline-ready')\nExpected: visible\nTimeout: 180000ms\nError: element(s) not found\n\nCall log:\n  - Expect \"toBeVisible\" with timeout 180000ms\n  - waiting for getByTestId('offline-ready')\n"
+    }
+  ]
+}

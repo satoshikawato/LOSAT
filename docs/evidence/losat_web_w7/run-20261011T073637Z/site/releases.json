@@ -1,0 +1,28 @@
+{
+  "format": 1,
+  "latest": "9cb4e61ee59e-e2fb7128",
+  "releases": [
+    {
+      "id": "9cb4e61ee59e-e2fb7128",
+      "version": "0.0.0",
+      "build": "9cb4e61e"
+    }
+  ],
+  "shell": [
+    {
+      "path": "/",
+      "size": 451,
+      "sha256": "40acabc354376cf2008bd0328a8829a2859590dec415deb09903e61b67cd6920"
+    },
+    {
+      "path": "/boot.css",
+      "size": 781,
+      "sha256": "e55f7615ff94dfcd91dc58fbd89eff1985dc8fd20ef00d827412b8c91adb6706"
+    },
+    {
+      "path": "/boot.js",
+      "size": 9464,
+      "sha256": "d51f483905016122ec48a71a08f91a264e037a67a757aedcea479f4a0bad4041"
+    }
+  ]
+}

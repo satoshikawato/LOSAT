@@ -1,0 +1,35 @@
+[WebServer] (!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+[WebServer]   - import "./output-format" without a file extension (src/domain/verification.ts:9:35). Add the file extension
+[WebServer]   - import "./programs" without a file extension (src/domain/verification.ts:10:32). Add the file extension
+[WebServer] Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+
+Running 2 tests using 1 worker
+
+firefox visit warm-up: {"first":{"app":216,"checked":756,"preparing":2218,"ready":2365,"prepareMs":147,"navigation":{"responseEnd":19,"domContentLoaded":102,"load":103},"bytes":{"network":8201520,"preparation":3978574},"requests":26},"second":{"app":80,"checked":502,"preparing":2082,"ready":2107,"prepareMs":26,"navigation":{"responseEnd":9,"domContentLoaded":29,"load":29},"bytes":{"network":1836,"preparation":612},"requests":10},"offline":{"app":74,"checked":500,"preparing":2078,"ready":2084,"prepareMs":7,"navigation":{"responseEnd":6,"domContentLoaded":22,"load":22},"bytes":{"network":0,"preparation":0},"requests":0}}
+firefox visit 1: {"first":{"app":116,"checked":573,"preparing":2120,"ready":2262,"prepareMs":142,"navigation":{"responseEnd":3,"domContentLoaded":57,"load":57},"bytes":{"network":8201520,"preparation":3978574},"requests":26},"second":{"app":76,"checked":501,"preparing":2077,"ready":2103,"prepareMs":26,"navigation":{"responseEnd":8,"domContentLoaded":28,"load":29},"bytes":{"network":1836,"preparation":612},"requests":10},"offline":{"app":65,"checked":482,"preparing":2068,"ready":2075,"prepareMs":6,"navigation":{"responseEnd":7,"domContentLoaded":21,"load":21},"bytes":{"network":0,"preparation":0},"requests":0}}
+firefox visit 2: {"first":{"app":111,"checked":563,"preparing":2112,"ready":2257,"prepareMs":145,"navigation":{"responseEnd":3,"domContentLoaded":57,"load":57},"bytes":{"network":8201520,"preparation":3978574},"requests":26},"second":{"app":77,"checked":493,"preparing":2079,"ready":2104,"prepareMs":24,"navigation":{"responseEnd":8,"domContentLoaded":28,"load":28},"bytes":{"network":1836,"preparation":612},"requests":10},"offline":{"app":69,"checked":488,"preparing":2071,"ready":2078,"prepareMs":7,"navigation":{"responseEnd":7,"domContentLoaded":24,"load":24},"bytes":{"network":0,"preparation":0},"requests":0}}
+firefox visit 3: {"first":{"app":118,"checked":573,"preparing":2123,"ready":2262,"prepareMs":140,"navigation":{"responseEnd":5,"domContentLoaded":62,"load":62},"bytes":{"network":8201520,"preparation":3978574},"requests":26},"second":{"app":73,"checked":486,"preparing":2076,"ready":2102,"prepareMs":26,"navigation":{"responseEnd":7,"domContentLoaded":26,"load":27},"bytes":{"network":1836,"preparation":612},"requests":10},"offline":{"app":67,"checked":483,"preparing":2070,"ready":2076,"prepareMs":6,"navigation":{"responseEnd":7,"domContentLoaded":21,"load":21},"bytes":{"network":0,"preparation":0},"requests":0}}
+  ✓  1 [firefox] › tests/e2e/delivery-measure.spec.ts:239:1 › visits: first, second (from the service worker) and offline; the preparation until "Offline ready" (28.4s)
+firefox self-test warm-up: {"ms":1717,"cases":{"blastn-4":285,"blastn-1":182,"blastp-4":188,"blastp-1":176,"tblastn-4":224,"tblastn-1":213,"tblastx-4":210,"tblastx-1":188}}
+firefox self-test 1: {"ms":1690,"cases":{"blastn-4":191,"blastn-1":171,"blastp-4":193,"blastp-1":186,"tblastn-4":255,"tblastn-1":220,"tblastx-4":210,"tblastx-1":204}}
+firefox self-test 2: {"ms":1675,"cases":{"blastn-4":201,"blastn-1":182,"blastp-4":198,"blastp-1":190,"tblastn-4":225,"tblastn-1":232,"tblastx-4":209,"tblastx-1":198}}
+firefox self-test 3: {"ms":1754,"cases":{"blastn-4":223,"blastn-1":184,"blastp-4":199,"blastp-1":196,"tblastn-4":255,"tblastn-1":236,"tblastx-4":214,"tblastx-1":201}}
+firefox blastn warm-up: {"load":20,"search":172,"open":38,"firstResults":210}
+firefox blastn 1: {"load":25,"search":161,"open":23,"firstResults":184}
+firefox blastn 2: {"load":27,"search":144,"open":23,"firstResults":167}
+firefox blastn 3: {"load":26,"search":144,"open":24,"firstResults":168}
+firefox blastp warm-up: {"load":20,"search":176,"open":19,"firstResults":195}
+firefox blastp 1: {"load":27,"search":177,"open":22,"firstResults":199}
+firefox blastp 2: {"load":22,"search":156,"open":19,"firstResults":175}
+firefox blastp 3: {"load":23,"search":160,"open":23,"firstResults":183}
+firefox tblastn warm-up: {"load":32,"search":194,"open":40,"firstResults":234}
+firefox tblastn 1: {"load":23,"search":193,"open":40,"firstResults":233}
+firefox tblastn 2: {"load":24,"search":192,"open":40,"firstResults":232}
+firefox tblastn 3: {"load":24,"search":192,"open":40,"firstResults":232}
+firefox tblastx warm-up: {"load":52,"search":175,"open":72,"firstResults":247}
+firefox tblastx 1: {"load":23,"search":176,"open":71,"firstResults":247}
+firefox tblastx 2: {"load":19,"search":177,"open":71,"firstResults":248}
+firefox tblastx 3: {"load":23,"search":175,"open":72,"firstResults":247}
+  ✓  2 [firefox] › tests/e2e/delivery-measure.spec.ts:354:1 › onboarding: the self-test, and "Try an example" then "Run LOSAT" to the first results (17.2s)
+
+  2 passed (48.2s)

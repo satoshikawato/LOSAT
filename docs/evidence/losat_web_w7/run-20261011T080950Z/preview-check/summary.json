@@ -1,0 +1,159 @@
+{
+  "site": "http://localhost:4730",
+  "status": "passed",
+  "counts": {
+    "http": {
+      "passed": 16,
+      "failed": 0,
+      "skipped": 1
+    },
+    "chromium": {
+      "passed": 3,
+      "failed": 0,
+      "skipped": 0
+    },
+    "firefox": {
+      "passed": 3,
+      "failed": 0,
+      "skipped": 0
+    },
+    "webkit": {
+      "passed": 3,
+      "failed": 0,
+      "skipped": 0
+    }
+  },
+  "tests": [
+    {
+      "project": "http",
+      "title": "headers: root",
+      "status": "passed"
+    },
+    {
+      "project": "http",
+      "title": "headers: boot-js",
+      "status": "passed"
+    },
+    {
+      "project": "http",
+      "title": "headers: boot-css",
+      "status": "passed"
+    },
+    {
+      "project": "http",
+      "title": "headers: releases-json",
+      "status": "passed"
+    },
+    {
+      "project": "http",
+      "title": "headers: sw-js",
+      "status": "passed"
+    },
+    {
+      "project": "http",
+      "title": "headers: release-manifest",
+      "status": "passed"
+    },
+    {
+      "project": "http",
+      "title": "headers: entry-script",
+      "status": "passed"
+    },
+    {
+      "project": "http",
+      "title": "headers: entry-style",
+      "status": "passed"
+    },
+    {
+      "project": "http",
+      "title": "headers: worker-script",
+      "status": "passed"
+    },
+    {
+      "project": "http",
+      "title": "headers: engine-module-1",
+      "status": "passed"
+    },
+    {
+      "project": "http",
+      "title": "headers: engine-module-2",
+      "status": "passed"
+    },
+    {
+      "project": "http",
+      "title": "headers: missing-site-file",
+      "status": "passed"
+    },
+    {
+      "project": "http",
+      "title": "headers: missing-release-file",
+      "status": "passed"
+    },
+    {
+      "project": "http",
+      "title": "the files of the latest release are served byte for byte",
+      "status": "passed"
+    },
+    {
+      "project": "http",
+      "title": "the boot page loads nothing from another origin and nothing was injected",
+      "status": "passed"
+    },
+    {
+      "project": "http",
+      "title": "every release of the site index has its manifest",
+      "status": "passed"
+    },
+    {
+      "project": "http",
+      "title": "/api/visit refuses a body that is not the event; a valid event only with LOSAT_WEB_PREVIEW_SEND_VISIT=1",
+      "status": "skipped",
+      "skipReason": "/releases.json has no analytics: the site measures nothing"
+    },
+    {
+      "project": "chromium",
+      "title": "the app starts through the boot page, isolated, on the latest release",
+      "status": "passed"
+    },
+    {
+      "project": "chromium",
+      "title": "a search cancelled while it runs, then a new search completes",
+      "status": "passed"
+    },
+    {
+      "project": "chromium",
+      "title": "\"Offline ready\" appears; in Chromium an offline reload starts the app",
+      "status": "passed"
+    },
+    {
+      "project": "firefox",
+      "title": "the app starts through the boot page, isolated, on the latest release",
+      "status": "passed"
+    },
+    {
+      "project": "firefox",
+      "title": "a search cancelled while it runs, then a new search completes",
+      "status": "passed"
+    },
+    {
+      "project": "firefox",
+      "title": "\"Offline ready\" appears; in Chromium an offline reload starts the app",
+      "status": "passed"
+    },
+    {
+      "project": "webkit",
+      "title": "the app starts through the boot page, isolated, on the latest release",
+      "status": "passed"
+    },
+    {
+      "project": "webkit",
+      "title": "a search cancelled while it runs, then a new search completes",
+      "status": "passed"
+    },
+    {
+      "project": "webkit",
+      "title": "\"Offline ready\" appears; in Chromium an offline reload starts the app",
+      "status": "passed"
+    }
+  ]
+}

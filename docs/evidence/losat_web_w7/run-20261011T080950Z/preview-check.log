@@ -1,0 +1,32 @@
+
+Running 26 tests using 1 worker
+
+  ✓   1 [http] › ../../docs/evidence/losat_web_w7/check_preview/http.spec.ts:115:3 › headers: root (7ms)
+  ✓   2 [http] › ../../docs/evidence/losat_web_w7/check_preview/http.spec.ts:115:3 › headers: boot-js (7ms)
+  ✓   3 [http] › ../../docs/evidence/losat_web_w7/check_preview/http.spec.ts:115:3 › headers: boot-css (3ms)
+  ✓   4 [http] › ../../docs/evidence/losat_web_w7/check_preview/http.spec.ts:115:3 › headers: releases-json (3ms)
+  ✓   5 [http] › ../../docs/evidence/losat_web_w7/check_preview/http.spec.ts:115:3 › headers: sw-js (6ms)
+  ✓   6 [http] › ../../docs/evidence/losat_web_w7/check_preview/http.spec.ts:115:3 › headers: release-manifest (3ms)
+  ✓   7 [http] › ../../docs/evidence/losat_web_w7/check_preview/http.spec.ts:115:3 › headers: entry-script (4ms)
+  ✓   8 [http] › ../../docs/evidence/losat_web_w7/check_preview/http.spec.ts:115:3 › headers: entry-style (7ms)
+  ✓   9 [http] › ../../docs/evidence/losat_web_w7/check_preview/http.spec.ts:115:3 › headers: worker-script (2ms)
+  ✓  10 [http] › ../../docs/evidence/losat_web_w7/check_preview/http.spec.ts:115:3 › headers: engine-module-1 (11ms)
+  ✓  11 [http] › ../../docs/evidence/losat_web_w7/check_preview/http.spec.ts:115:3 › headers: engine-module-2 (14ms)
+  ✓  12 [http] › ../../docs/evidence/losat_web_w7/check_preview/http.spec.ts:115:3 › headers: missing-site-file (2ms)
+  ✓  13 [http] › ../../docs/evidence/losat_web_w7/check_preview/http.spec.ts:115:3 › headers: missing-release-file (1ms)
+  ✓  14 [http] › ../../docs/evidence/losat_web_w7/check_preview/http.spec.ts:175:1 › the files of the latest release are served byte for byte (29ms)
+  ✓  15 [http] › ../../docs/evidence/losat_web_w7/check_preview/http.spec.ts:198:1 › the boot page loads nothing from another origin and nothing was injected (2ms)
+  ✓  16 [http] › ../../docs/evidence/losat_web_w7/check_preview/http.spec.ts:212:1 › every release of the site index has its manifest (1ms)
+  -  17 [http] › ../../docs/evidence/losat_web_w7/check_preview/http.spec.ts:229:1 › /api/visit refuses a body that is not the event; a valid event only with LOSAT_WEB_PREVIEW_SEND_VISIT=1
+  ✓  18 [chromium] › ../../docs/evidence/losat_web_w7/check_preview/browser.spec.ts:27:1 › the app starts through the boot page, isolated, on the latest release (257ms)
+  ✓  19 [chromium] › ../../docs/evidence/losat_web_w7/check_preview/browser.spec.ts:60:1 › a search cancelled while it runs, then a new search completes (1.6s)
+  ✓  20 [chromium] › ../../docs/evidence/losat_web_w7/check_preview/browser.spec.ts:79:1 › "Offline ready" appears; in Chromium an offline reload starts the app (2.5s)
+  ✓  21 [firefox] › ../../docs/evidence/losat_web_w7/check_preview/browser.spec.ts:27:1 › the app starts through the boot page, isolated, on the latest release (727ms)
+  ✓  22 [firefox] › ../../docs/evidence/losat_web_w7/check_preview/browser.spec.ts:60:1 › a search cancelled while it runs, then a new search completes (2.3s)
+  ✓  23 [firefox] › ../../docs/evidence/losat_web_w7/check_preview/browser.spec.ts:79:1 › "Offline ready" appears; in Chromium an offline reload starts the app (2.5s)
+  ✓  24 [webkit] › ../../docs/evidence/losat_web_w7/check_preview/browser.spec.ts:27:1 › the app starts through the boot page, isolated, on the latest release (497ms)
+  ✓  25 [webkit] › ../../docs/evidence/losat_web_w7/check_preview/browser.spec.ts:60:1 › a search cancelled while it runs, then a new search completes (2.4s)
+  ✓  26 [webkit] › ../../docs/evidence/losat_web_w7/check_preview/browser.spec.ts:79:1 › "Offline ready" appears; in Chromium an offline reload starts the app (2.7s)
+
+  1 skipped
+  25 passed (17.4s)

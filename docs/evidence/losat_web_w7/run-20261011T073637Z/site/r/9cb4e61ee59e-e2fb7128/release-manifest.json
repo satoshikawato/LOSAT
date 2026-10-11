@@ -1,0 +1,85 @@
+{
+  "format": 1,
+  "release": "9cb4e61ee59e-e2fb7128",
+  "app": {
+    "version": "0.0.0",
+    "build": "9cb4e61e"
+  },
+  "engine": {
+    "serial": "losat-web-serial.wasm sha256:d4ae253dc3a85307",
+    "threads": "losat-web-threads.wasm sha256:fb685b360fffe2bb (shared-memory guard)"
+  },
+  "entry": {
+    "script": "assets/index-B81YERZT.js",
+    "styles": [
+      "assets/index-DM-7JZaz.css"
+    ]
+  },
+  "assets": [
+    {
+      "path": "assets/data-worker-YE0dSqgP.js",
+      "size": 64235,
+      "sha256": "547f27a7e4bda2afbf63e3dcae93e2cbdde86e2593cbe3685dbe9179f1f0fec1"
+    },
+    {
+      "path": "assets/engine-worker-DTORcJHY.js",
+      "size": 30203,
+      "sha256": "43fd1f21fe7b44a6df9cb3d3a2ea97db12108b2e7e0dcf54bc427447c06e7e61"
+    },
+    {
+      "path": "assets/example-blastn-query-B1eiS6bw.fasta",
+      "size": 2131,
+      "sha256": "c0b5cb1cee7af3f4d4ccbc4d1a7c44d9a5abf5629d64da1eff94cee68ddd2cdd"
+    },
+    {
+      "path": "assets/example-blastn-subject-9NbJfqNP.fasta",
+      "size": 6371,
+      "sha256": "84779a429b069e2ca3a6e1ad7d85ee9d531bfbbefa8a5986f0c4478dd6b8e4f6"
+    },
+    {
+      "path": "assets/example-blastp-query-BzN6GSqc.fasta",
+      "size": 556,
+      "sha256": "d7161be648b6c156612e102e329ab63f1435298999fdb29e8f3f0a90ac1264de"
+    },
+    {
+      "path": "assets/example-blastp-subject-BQetDNj1.fasta",
+      "size": 1687,
+      "sha256": "5eae832d66f72a29679eee66df17dfa22697c35e61eae729610f9e2ac1f7f286"
+    },
+    {
+      "path": "assets/example-blastx-query-ClbCuBaj.fasta",
+      "size": 2121,
+      "sha256": "71d308056d995a02ffd33b6c2deac715b600008a5ed477e360fd6138eaf2aadd"
+    },
+    {
+      "path": "assets/example-tblastn-subject-DE5KAftQ.fasta",
+      "size": 6378,
+      "sha256": "06a23018ab9d082397f3a212d245e1b1d488b2d4d06582fb6dc8aaf8d9878e7a"
+    },
+    {
+      "path": "assets/index-B81YERZT.js",
+      "size": 468177,
+      "sha256": "cc86fc22c8478b49ab34bb90c54f1b5f53d8a6139f27ccd89ce4f37e190fb245"
+    },
+    {
+      "path": "assets/index-DM-7JZaz.css",
+      "size": 32634,
+      "sha256": "b6887e7534805bd50df0c8f642d25f2c6a8ed1d7e8b888ce697d2391a73860e9"
+    },
+    {
+      "path": "assets/thread-worker-BFsv56lD.js",
+      "size": 17921,
+      "sha256": "691c01f640f2caa4a8671e91d4386c16eee259f35af197d591e1c7f93b3c1725"
+    },
+    {
+      "path": "engine/losat-web-serial-d4ae253dc3a85307.wasm",
+      "size": 3632122,
+      "sha256": "d4ae253dc3a8530725ff6aa7b82fda07ffdadc141d520a01f8c326719e4b8e1e"
+    },
+    {
+      "path": "engine/losat-web-threads-a13e6604a16aa868.wasm",
+      "size": 3910594,
+      "sha256": "a13e6604a16aa868eed790c6de160de2383b706eddce78c43623c5f778a1539b"
+    }
+  ]
+}

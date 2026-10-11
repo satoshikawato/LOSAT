@@ -1,0 +1,2042 @@
+{
+  "ncbi": "2.17.0",
+  "sources": [
+    {
+      "path": "LOSAT/tests/outfmt0_manifest.tsv",
+      "sha256": "d8dc89eed1bd8cb671a6fb7540ab9e1f1a2efab4be42c5e5e1926daacfe34f7c",
+      "optionSets": 198
+    },
+    {
+      "path": "LOSAT/tests/fixtures/blastn_regression/manifest.tsv",
+      "sha256": "58146b431443b9e21df875d9045634cfafd6d6dbd36223ea6165e9ec01d8bfd7",
+      "optionSets": 120
+    },
+    {
+      "path": "LOSAT/tests/fixtures/tblastx_regression/manifest.tsv",
+      "sha256": "eccff2d3c3aad96b93376b7d28a5377dba13b503af1118c5c55a021d35609878",
+      "optionSets": 47
+    },
+    {
+      "path": "LOSAT/tests/fixtures/range_regression/manifest.tsv",
+      "sha256": "665eaf4e396163ee884d687a2f0fba364b57ffdc4808c02369e75f2192c64e65",
+      "optionSets": 0
+    },
+    {
+      "path": "LOSAT/tests/blastp_v010_parity_manifest.tsv",
+      "sha256": "93c90e1fb5053a69d1b1343afcb5d4e3b04f5daf602acd99b6960df1afddfc04",
+      "optionSets": 9
+    },
+    {
+      "path": "LOSAT/tests/tblastx_v010_parity_manifest.tsv",
+      "sha256": "bf5b9dec513464d227f39632f5daa47bf5db412c0cab1731d29e95a686fb89c5",
+      "optionSets": 14
+    },
+    {
+      "path": "docs/evidence/tlosan_stage_g/matrix_162.jsonl",
+      "sha256": "0b25584950cedce2d840625491f69669e7440838fc661d18060ef0e71f47c64d",
+      "optionSets": 162
+    },
+    {
+      "path": "docs/evidence/losat_web_e2e/run-20261004T163746Z/sweeps/after-blastp.tsv",
+      "sha256": "426b0ad3a6b7b5a1c2b363ba9df06872fa249021a475f176c7b506929b80e0fa",
+      "optionSets": 207
+    },
+    {
+      "path": "docs/evidence/losat_web_e2e/run-20261004T163746Z/sweeps/after-tblastn.tsv",
+      "sha256": "8057546422cf812529ddadcd1224347827474cddde46368cdc40edc80d9a8380",
+      "optionSets": 312
+    },
+    {
+      "path": "docs/evidence/losat_web_e2e/run-20261004T163746Z/sweeps/after-tblastx.tsv",
+      "sha256": "48146bb549e46f90bc265bfd821397ba87f9a2ef7c67f6fe21df7f02fb2315b1",
+      "optionSets": 324
+    }
+  ],
+  "programs": {
+    "blastn": {
+      "optionSets": {
+        "[[\"-dust\",\"no\"],[\"-lcase_masking\",\"\"],[\"-task\",\"blastn\"]]": [
+          0
+        ],
+        "[[\"-dust\",\"no\"],[\"-task\",\"blastn\"]]": [
+          0
+        ],
+        "[[\"-dust\",\"no\"],[\"-task\",\"blastn-short\"]]": [
+          7
+        ],
+        "[[\"-dust\",\"no\"],[\"-task\",\"dc-megablast\"]]": [
+          0
+        ],
+        "[[\"-dust\",\"yes\"],[\"-task\",\"blastn-short\"]]": [
+          0
+        ],
+        "[[\"-evalue\",\"+inf\"],[\"-task\",\"megablast\"]]": [
+          6
+        ],
+        "[[\"-evalue\",\"+nan(1)\"],[\"-max_target_seqs\",\"5\"],[\"-task\",\"megablast\"]]": [
+          0
+        ],
+        "[[\"-evalue\",\"-nan\"],[\"-task\",\"blastn\"]]": [
+          7
+        ],
+        "[[\"-evalue\",\"10\"],[\"-task\",\"blastn-short\"],[\"-word_size\",\"4\"]]": [
+          6
+        ],
+        "[[\"-evalue\",\"10\"],[\"-task\",\"blastn-short\"]]": [
+          0
+        ],
+        "[[\"-evalue\",\"100\"],[\"-task\",\"blastn\"],[\"-word_size\",\"7\"]]": [
+          6
+        ],
+        "[[\"-evalue\",\"1000\"],[\"-task\",\"blastn\"],[\"-word_size\",\"7\"]]": [
+          0
+        ],
+        "[[\"-evalue\",\"1e-10\"],[\"-max_hsps\",\"2\"],[\"-max_target_seqs\",\"1\"],[\"-task\",\"dc-megablast\"]]": [
+          0
+        ],
+        "[[\"-evalue\",\"1e-10\"],[\"-max_target_seqs\",\"3\"],[\"-task\",\"blastn-short\"]]": [
+          6
+        ],
+        "[[\"-evalue\",\"1e-100\"],[\"-task\",\"blastn\"]]": [
+          0
+        ],
+        "[[\"-evalue\",\"1e-100\"],[\"-task\",\"megablast\"]]": [
+          0
+        ],
+        "[[\"-evalue\",\"1e-20\"],[\"-task\",\"blastn-short\"]]": [
+          6
+        ],
+        "[[\"-evalue\",\"1e-200\"],[\"-task\",\"dc-megablast\"]]": [
+          0
+        ],
+        "[[\"-evalue\",\"1e-5\"],[\"-max_target_seqs\",\"2\"],[\"-task\",\"megablast\"]]": [
+          6
+        ],
+        "[[\"-evalue\",\"1e-5\"],[\"-task\",\"blastn-short\"]]": [
+          0,
+          6
+        ],
+        "[[\"-evalue\",\"1e5\"],[\"-task\",\"blastn\"],[\"-word_size\",\"4\"]]": [
+          6
+        ],
+        "[[\"-evalue\",\"1e999\"],[\"-task\",\"blastn\"],[\"-word_size\",\"7\"]]": [
+          6
+        ],
+        "[[\"-gapextend\",\"0\"],[\"-gapopen\",\"0\"],[\"-penalty\",\"-3\"],[\"-reward\",\"2\"],[\"-task\",\"megablast\"]]": [
+          0
+        ],
+        "[[\"-gapextend\",\"10\"],[\"-gapopen\",\"10\"],[\"-max_target_seqs\",\"3\"],[\"-penalty\",\"-3\"],[\"-reward\",\"2\"],[\"-task\",\"blastn\"]]": [
+          6
+        ],
+        "[[\"-gapextend\",\"10\"],[\"-gapopen\",\"10\"],[\"-penalty\",\"-1\"],[\"-reward\",\"1\"],[\"-task\",\"blastn\"]]": [
+          6
+        ],
+        "[[\"-gapextend\",\"10\"],[\"-gapopen\",\"10\"],[\"-penalty\",\"-2\"],[\"-reward\",\"1\"],[\"-task\",\"blastn\"]]": [
+          6
+        ],
+        "[[\"-gapextend\",\"2\"],[\"-gapopen\",\"2\"],[\"-penalty\",\"-1\"],[\"-reward\",\"1\"],[\"-task\",\"blastn\"]]": [
+          0
+        ],
+        "[[\"-gapextend\",\"2\"],[\"-gapopen\",\"3\"],[\"-penalty\",\"-1\"],[\"-reward\",\"1\"],[\"-task\",\"blastn\"]]": [
+          6
+        ],
+        "[[\"-gapextend\",\"2\"],[\"-gapopen\",\"3\"],[\"-penalty\",\"-3\"],[\"-reward\",\"1\"],[\"-task\",\"blastn\"]]": [
+          0
+        ],
+        "[[\"-gapextend\",\"2\"],[\"-gapopen\",\"5\"],[\"-penalty\",\"-2\"],[\"-reward\",\"1\"],[\"-task\",\"dc-megablast\"]]": [
+          0
+        ],
+        "[[\"-gapextend\",\"2\"],[\"-gapopen\",\"5\"],[\"-task\",\"megablast\"]]": [
+          0
+        ],
+        "[[\"-gapextend\",\"3\"],[\"-gapopen\",\"10\"],[\"-penalty\",\"-4\"],[\"-reward\",\"3\"],[\"-task\",\"blastn\"]]": [
+          6
+        ],
+        "[[\"-gapextend\",\"30000\"],[\"-gapopen\",\"30000\"],[\"-max_target_seqs\",\"20\"],[\"-penalty\",\"-30000\"],[\"-reward\",\"24000\"],[\"-task\",\"blastn\"]]": [
+          6
+        ],
+        "[[\"-gapextend\",\"30000\"],[\"-gapopen\",\"30000\"],[\"-max_target_seqs\",\"3\"],[\"-penalty\",\"-21000\"],[\"-reward\",\"6000\"],[\"-task\",\"megablast\"]]": [
+          0
+        ],
+        "[[\"-gapextend\",\"32766\"],[\"-gapopen\",\"16383\"],[\"-max_target_seqs\",\"20\"],[\"-penalty\",\"-32766\"],[\"-reward\",\"16383\"],[\"-task\",\"megablast\"]]": [
+          6
+        ],
+        "[[\"-gapextend\",\"4\"],[\"-gapopen\",\"10\"],[\"-penalty\",\"-6\"],[\"-reward\",\"4\"],[\"-task\",\"blastn\"]]": [
+          0
+        ],
+        "[[\"-gapextend\",\"4\"],[\"-gapopen\",\"4\"],[\"-penalty\",\"-3\"],[\"-reward\",\"2\"],[\"-task\",\"blastn-short\"]]": [
+          6
+        ],
+        "[[\"-lcase_masking\",\"\"],[\"-query_loc\",\"<range>\"],[\"-task\",\"blastn\"]]": [
+          0
+        ],
+        "[[\"-lcase_masking\",\"\"],[\"-subject_loc\",\"<range>\"],[\"-task\",\"megablast\"]]": [
+          0
+        ],
+        "[[\"-lcase_masking\",\"\"],[\"-task\",\"blastn\"]]": [
+          0,
+          6
+        ],
+        "[[\"-lcase_masking\",\"\"],[\"-task\",\"blastn-short\"]]": [
+          0,
+          6
+        ],
+        "[[\"-lcase_masking\",\"\"],[\"-task\",\"dc-megablast\"]]": [
+          0,
+          6
+        ],
+        "[[\"-lcase_masking\",\"\"],[\"-task\",\"megablast\"]]": [
+          0,
+          6
+        ],
+        "[[\"-max_hsps\",\"1\"],[\"-max_target_seqs\",\"5\"],[\"-task\",\"megablast\"]]": [
+          6
+        ],
+        "[[\"-max_hsps\",\"1\"],[\"-task\",\"blastn\"]]": [
+          0
+        ],
+        "[[\"-max_hsps\",\"3\"],[\"-max_target_seqs\",\"1\"],[\"-task\",\"blastn-short\"]]": [
+          0
+        ],
+        "[[\"-max_target_seqs\",\"1\"],[\"-task\",\"blastn\"]]": [
+          0,
+          6
+        ],
+        "[[\"-max_target_seqs\",\"1\"],[\"-task\",\"megablast\"]]": [
+          6
+        ],
+        "[[\"-max_target_seqs\",\"20\"],[\"-penalty\",\"-20000\"],[\"-reward\",\"10000\"],[\"-task\",\"megablast\"]]": [
+          6
+        ],
+        "[[\"-max_target_seqs\",\"255\"],[\"-task\",\"blastn\"]]": [
+          0
+        ],
+        "[[\"-max_target_seqs\",\"3\"],[\"-subject_besthit\",\"\"],[\"-task\",\"blastn\"]]": [
+          6
+        ],
+        "[[\"-max_target_seqs\",\"3\"],[\"-task\",\"blastn\"]]": [
+          0
+        ],
+        "[[\"-max_target_seqs\",\"3\"],[\"-task\",\"dc-megablast\"]]": [
+          0
+        ],
+        "[[\"-max_target_seqs\",\"3\"],[\"-task\",\"megablast\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-max_target_seqs\",\"500\"],[\"-task\",\"blastn\"]]": [
+          0
+        ],
+        "[[\"-max_target_seqs\",\"6\"],[\"-task\",\"megablast\"]]": [
+          6
+        ],
+        "[[\"-penalty\",\"-3\"],[\"-reward\",\"2\"],[\"-task\",\"blastn-short\"]]": [
+          0
+        ],
+        "[[\"-perc_identity\",\"90\"],[\"-subject_besthit\",\"\"],[\"-task\",\"blastn-short\"]]": [
+          6
+        ],
+        "[[\"-perc_identity\",\"97\"],[\"-task\",\"blastn\"]]": [
+          0
+        ],
+        "[[\"-query_loc\",\"<range>\"],[\"-subject_loc\",\"<range>\"],[\"-task\",\"dc-megablast\"]]": [
+          0
+        ],
+        "[[\"-query_loc\",\"<range>\"],[\"-subject_loc\",\"<range>\"],[\"-task\",\"megablast\"]]": [
+          0,
+          7
+        ],
+        "[[\"-query_loc\",\"<range>\"],[\"-task\",\"blastn\"]]": [
+          0
+        ],
+        "[[\"-query_loc\",\"<range>\"],[\"-task\",\"megablast\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-subject_besthit\",\"\"],[\"-task\",\"blastn\"]]": [
+          0,
+          6
+        ],
+        "[[\"-subject_besthit\",\"\"],[\"-task\",\"dc-megablast\"]]": [
+          6
+        ],
+        "[[\"-subject_besthit\",\"\"],[\"-task\",\"megablast\"]]": [
+          6
+        ],
+        "[[\"-subject_loc\",\"<range>\"],[\"-task\",\"megablast\"]]": [
+          0,
+          7
+        ],
+        "[[\"-task\",\"blastn\"],[\"-word_size\",\"10\"]]": [
+          0
+        ],
+        "[[\"-task\",\"blastn\"],[\"-word_size\",\"7\"]]": [
+          0,
+          6
+        ],
+        "[[\"-task\",\"blastn\"],[\"-word_size\",\"9\"]]": [
+          6
+        ],
+        "[[\"-task\",\"blastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-task\",\"blastn-short\"],[\"-word_size\",\"11\"]]": [
+          0
+        ],
+        "[[\"-task\",\"blastn-short\"],[\"-word_size\",\"16\"]]": [
+          6
+        ],
+        "[[\"-task\",\"blastn-short\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-task\",\"dc-megablast\"],[\"-template_length\",\"16\"],[\"-template_type\",\"coding\"],[\"-word_size\",\"11\"]]": [
+          6
+        ],
+        "[[\"-task\",\"dc-megablast\"],[\"-template_length\",\"16\"],[\"-template_type\",\"coding\"],[\"-word_size\",\"12\"]]": [
+          6
+        ],
+        "[[\"-task\",\"dc-megablast\"],[\"-template_length\",\"16\"],[\"-template_type\",\"coding_and_optimal\"],[\"-word_size\",\"11\"]]": [
+          6
+        ],
+        "[[\"-task\",\"dc-megablast\"],[\"-template_length\",\"16\"],[\"-template_type\",\"coding_and_optimal\"],[\"-word_size\",\"12\"]]": [
+          6
+        ],
+        "[[\"-task\",\"dc-megablast\"],[\"-template_length\",\"16\"],[\"-template_type\",\"coding_and_optimal\"]]": [
+          6
+        ],
+        "[[\"-task\",\"dc-megablast\"],[\"-template_length\",\"16\"],[\"-template_type\",\"optimal\"],[\"-word_size\",\"11\"]]": [
+          6
+        ],
+        "[[\"-task\",\"dc-megablast\"],[\"-template_length\",\"16\"],[\"-template_type\",\"optimal\"],[\"-word_size\",\"12\"]]": [
+          6,
+          7
+        ],
+        "[[\"-task\",\"dc-megablast\"],[\"-template_length\",\"16\"],[\"-template_type\",\"optimal\"]]": [
+          0
+        ],
+        "[[\"-task\",\"dc-megablast\"],[\"-template_length\",\"18\"],[\"-template_type\",\"coding\"],[\"-word_size\",\"11\"]]": [
+          6
+        ],
+        "[[\"-task\",\"dc-megablast\"],[\"-template_length\",\"18\"],[\"-template_type\",\"coding\"],[\"-word_size\",\"12\"]]": [
+          6,
+          7
+        ],
+        "[[\"-task\",\"dc-megablast\"],[\"-template_length\",\"18\"],[\"-template_type\",\"coding_and_optimal\"],[\"-word_size\",\"11\"]]": [
+          6
+        ],
+        "[[\"-task\",\"dc-megablast\"],[\"-template_length\",\"18\"],[\"-template_type\",\"coding_and_optimal\"],[\"-word_size\",\"12\"]]": [
+          6
+        ],
+        "[[\"-task\",\"dc-megablast\"],[\"-template_length\",\"18\"],[\"-template_type\",\"optimal\"],[\"-word_size\",\"11\"]]": [
+          6
+        ],
+        "[[\"-task\",\"dc-megablast\"],[\"-template_length\",\"18\"],[\"-template_type\",\"optimal\"],[\"-word_size\",\"12\"]]": [
+          6
+        ],
+        "[[\"-task\",\"dc-megablast\"],[\"-template_length\",\"21\"],[\"-template_type\",\"coding\"],[\"-word_size\",\"11\"]]": [
+          6
+        ],
+        "[[\"-task\",\"dc-megablast\"],[\"-template_length\",\"21\"],[\"-template_type\",\"coding\"],[\"-word_size\",\"12\"]]": [
+          6
+        ],
+        "[[\"-task\",\"dc-megablast\"],[\"-template_length\",\"21\"],[\"-template_type\",\"coding_and_optimal\"],[\"-word_size\",\"11\"]]": [
+          6
+        ],
+        "[[\"-task\",\"dc-megablast\"],[\"-template_length\",\"21\"],[\"-template_type\",\"coding_and_optimal\"],[\"-word_size\",\"12\"]]": [
+          6
+        ],
+        "[[\"-task\",\"dc-megablast\"],[\"-template_length\",\"21\"],[\"-template_type\",\"coding_and_optimal\"]]": [
+          0
+        ],
+        "[[\"-task\",\"dc-megablast\"],[\"-template_length\",\"21\"],[\"-template_type\",\"optimal\"],[\"-word_size\",\"11\"]]": [
+          6
+        ],
+        "[[\"-task\",\"dc-megablast\"],[\"-template_length\",\"21\"],[\"-template_type\",\"optimal\"],[\"-word_size\",\"12\"]]": [
+          6
+        ],
+        "[[\"-task\",\"dc-megablast\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-task\",\"megablast\"],[\"-template_length\",\"18\"],[\"-template_type\",\"coding\"],[\"-word_size\",\"11\"]]": [
+          6
+        ],
+        "[[\"-task\",\"megablast\"],[\"-template_length\",\"18\"],[\"-template_type\",\"optimal\"],[\"-word_size\",\"12\"]]": [
+          0
+        ],
+        "[[\"-task\",\"megablast\"],[\"-word_size\",\"16\"]]": [
+          6,
+          7
+        ],
+        "[[\"-task\",\"megablast\"]]": [
+          0,
+          6
+        ]
+      },
+      "browser": {
+        "formats": [
+          0,
+          6,
+          7
+        ],
+        "paths": [
+          "serial",
+          "threaded"
+        ],
+        "threads": [
+          1,
+          2,
+          4
+        ],
+        "browsers": [
+          "Chromium",
+          "Firefox",
+          "WebKit"
+        ]
+      }
+    },
+    "blastp": {
+      "optionSets": {
+        "[[\"-comp_based_stats\",\"2\"],[\"-task\",\"blastp\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-comp_based_stats\",\"2x\"],[\"-task\",\"blastp\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-comp_based_stats\",\"D\"],[\"-evalue\",\"1e5\"],[\"-task\",\"blastp-fast\"],[\"-threshold\",\"8\"]]": [
+          7
+        ],
+        "[[\"-comp_based_stats\",\"D\"],[\"-task\",\"blastp\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-comp_based_stats\",\"T\"],[\"-task\",\"blastp\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-comp_based_stats\",\"d\"],[\"-task\",\"blastp\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-comp_based_stats\",\"t\"],[\"-task\",\"blastp\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-evalue\",\"-nan\"],[\"-task\",\"blastp\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-evalue\",\".5\"],[\"-task\",\"blastp\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-evalue\",\"0.001\"],[\"-task\",\"blastp\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-evalue\",\"1000\"],[\"-query_loc\",\"<range>\"],[\"-task\",\"blastp\"]]": [
+          6
+        ],
+        "[[\"-evalue\",\"1000\"],[\"-task\",\"blastp\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-evalue\",\"1000\"],[\"-task\",\"blastp-fast\"],[\"-threshold\",\"6\"],[\"-window_size\",\"0\"]]": [
+          0
+        ],
+        "[[\"-evalue\",\"100000\"],[\"-task\",\"blastp\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-evalue\",\"1E-5\"],[\"-task\",\"blastp\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-evalue\",\"1e-300\"],[\"-task\",\"blastp\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-evalue\",\"1e-5\"],[\"-task\",\"blastp\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-evalue\",\"1e-50\"],[\"-task\",\"blastp\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-evalue\",\"1e3\"],[\"-task\",\"blastp\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-evalue\",\"1e308\"],[\"-task\",\"blastp\"]]": [
+          0,
+          7
+        ],
+        "[[\"-evalue\",\"1e5\"],[\"-task\",\"blastp\"],[\"-threshold\",\"5\"],[\"-window_size\",\"0\"],[\"-word_size\",\"5\"]]": [
+          0
+        ],
+        "[[\"-evalue\",\"5.\"],[\"-task\",\"blastp\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-gapextend\",\"+1\"],[\"-gapopen\",\"+11\"],[\"-task\",\"blastp\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-gapextend\",\"1\"],[\"-gapopen\",\"11\"],[\"-matrix\",\"BLOSUM62\"],[\"-task\",\"blastp\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-matrix\",\"BLOSUM62\"],[\"-task\",\"blastp\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-matrix\",\"blosum62\"],[\"-task\",\"blastp\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-max_hsps\",\"+1\"],[\"-task\",\"blastp\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-max_hsps\",\"0x2\"],[\"-task\",\"blastp\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-max_hsps\",\"1\"],[\"-max_target_seqs\",\"1\"],[\"-task\",\"blastp\"]]": [
+          6
+        ],
+        "[[\"-max_hsps\",\"1\"],[\"-max_target_seqs\",\"5\"],[\"-task\",\"blastp\"]]": [
+          6
+        ],
+        "[[\"-max_hsps\",\"1\"],[\"-task\",\"blastp\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-max_hsps\",\"2\"],[\"-task\",\"blastp\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-max_target_seqs\",\"+5\"],[\"-task\",\"blastp\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-max_target_seqs\",\"010\"],[\"-task\",\"blastp\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-max_target_seqs\",\"0x10\"],[\"-task\",\"blastp\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-max_target_seqs\",\"1\"],[\"-task\",\"blastp\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-max_target_seqs\",\"2147483647\"],[\"-task\",\"blastp\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-max_target_seqs\",\"280\"],[\"-task\",\"blastp\"]]": [
+          0
+        ],
+        "[[\"-max_target_seqs\",\"3\"],[\"-task\",\"blastp\"]]": [
+          0
+        ],
+        "[[\"-max_target_seqs\",\"4\"],[\"-task\",\"blastp\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-max_target_seqs\",\"5\"],[\"-task\",\"blastp\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-query_loc\",\"<range>\"],[\"-seg\",\"yes\"],[\"-task\",\"blastp\"]]": [
+          0
+        ],
+        "[[\"-query_loc\",\"<range>\"],[\"-task\",\"blastp\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-query_loc\",\"<range>\"],[\"-task\",\"blastp-fast\"]]": [
+          0
+        ],
+        "[[\"-seg\",\"no\"],[\"-task\",\"blastp\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-seg\",\"yes\"],[\"-task\",\"blastp\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-subject_loc\",\"<range>\"],[\"-task\",\"blastp\"]]": [
+          0,
+          7
+        ],
+        "[[\"-task\",\"blastp\"],[\"-threshold\",\"+inf\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-task\",\"blastp\"],[\"-threshold\",\"1\"],[\"-word_size\",\"3\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-task\",\"blastp\"],[\"-threshold\",\"1\"],[\"-word_size\",\"5\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-task\",\"blastp\"],[\"-threshold\",\"1\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-task\",\"blastp\"],[\"-threshold\",\"11\"],[\"-word_size\",\"3\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-task\",\"blastp\"],[\"-threshold\",\"11\"],[\"-word_size\",\"5\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-task\",\"blastp\"],[\"-threshold\",\"11\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-task\",\"blastp\"],[\"-threshold\",\"11.5\"],[\"-word_size\",\"3\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-task\",\"blastp\"],[\"-threshold\",\"11.5\"],[\"-word_size\",\"5\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-task\",\"blastp\"],[\"-threshold\",\"11.5\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-task\",\"blastp\"],[\"-threshold\",\"13\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-task\",\"blastp\"],[\"-threshold\",\"15\"],[\"-window_size\",\"0\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-task\",\"blastp\"],[\"-threshold\",\"1e1\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-task\",\"blastp\"],[\"-threshold\",\"21\"],[\"-word_size\",\"3\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-task\",\"blastp\"],[\"-threshold\",\"21\"],[\"-word_size\",\"5\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-task\",\"blastp\"],[\"-threshold\",\"30\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-task\",\"blastp\"],[\"-threshold\",\"999\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-task\",\"blastp\"],[\"-window_size\",\"0\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-task\",\"blastp\"],[\"-window_size\",\"0x28\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-task\",\"blastp\"],[\"-window_size\",\"1\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-task\",\"blastp\"],[\"-window_size\",\"10\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-task\",\"blastp\"],[\"-window_size\",\"100\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-task\",\"blastp\"],[\"-window_size\",\"2\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-task\",\"blastp\"],[\"-window_size\",\"40\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-task\",\"blastp\"],[\"-word_size\",\"+3\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-task\",\"blastp\"],[\"-word_size\",\"03\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-task\",\"blastp\"],[\"-word_size\",\"0x3\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-task\",\"blastp\"],[\"-word_size\",\"3\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-task\",\"blastp\"],[\"-word_size\",\"5\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-task\",\"blastp\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-task\",\"blastp-fast\"],[\"-word_size\",\"3\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-task\",\"blastp-fast\"],[\"-word_size\",\"5\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-task\",\"blastp-fast\"]]": [
+          0,
+          6,
+          7
+        ]
+      },
+      "browser": {
+        "formats": [
+          0,
+          6,
+          7
+        ],
+        "paths": [
+          "serial",
+          "threaded"
+        ],
+        "threads": [
+          1,
+          2,
+          4
+        ],
+        "browsers": [
+          "Chromium",
+          "Firefox",
+          "WebKit"
+        ]
+      }
+    },
+    "tblastn": {
+      "optionSets": {
+        "[[\"-comp_based_stats\",\"-1\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-comp_based_stats\",\"0\"],[\"-evalue\",\"1000\"],[\"-matrix\",\"BLOSUM45\"],[\"-task\",\"tblastn\"],[\"-word_size\",\"2\"]]": [
+          0,
+          6
+        ],
+        "[[\"-comp_based_stats\",\"0\"],[\"-evalue\",\"1000\"],[\"-task\",\"tblastn\"],[\"-xdrop_gap_final\",\"1e10\"]]": [
+          6
+        ],
+        "[[\"-comp_based_stats\",\"0\"],[\"-evalue\",\"1000\"],[\"-task\",\"tblastn\"]]": [
+          6
+        ],
+        "[[\"-comp_based_stats\",\"0\"],[\"-lcase_masking\",\"\"],[\"-matrix\",\"BLOSUM45\"],[\"-max_target_seqs\",\"2\"],[\"-seg\",\"no\"],[\"-task\",\"tblastn\"],[\"-word_size\",\"2\"]]": [
+          6
+        ],
+        "[[\"-comp_based_stats\",\"0\"],[\"-lcase_masking\",\"\"],[\"-max_target_seqs\",\"1\"],[\"-seg\",\"no\"],[\"-task\",\"tblastn\"]]": [
+          6
+        ],
+        "[[\"-comp_based_stats\",\"0\"],[\"-matrix\",\"BLOSUM45\"],[\"-task\",\"tblastn\"],[\"-word_size\",\"2\"]]": [
+          0
+        ],
+        "[[\"-comp_based_stats\",\"0\"],[\"-matrix\",\"BLOSUM62\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-comp_based_stats\",\"0\"],[\"-task\",\"tblastn\"],[\"-xdrop_gap\",\"5\"],[\"-xdrop_gap_final\",\"5\"]]": [
+          6
+        ],
+        "[[\"-comp_based_stats\",\"0\"],[\"-task\",\"tblastn\"],[\"-xdrop_gap_final\",\"1e10\"]]": [
+          6
+        ],
+        "[[\"-comp_based_stats\",\"0\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-comp_based_stats\",\"0x1\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-comp_based_stats\",\"2\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-comp_based_stats\",\"2x\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-comp_based_stats\",\"4\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-comp_based_stats\",\"D\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-comp_based_stats\",\"F\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-comp_based_stats\",\"T\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-comp_based_stats\",\"d\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-comp_based_stats\",\"f\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-comp_based_stats\",\"t\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-comp_based_stats\",\"yes\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-db_gencode\",\"+1\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-db_gencode\",\"02\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-db_gencode\",\"1\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-db_gencode\",\"10\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-db_gencode\",\"11\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-db_gencode\",\"12\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-db_gencode\",\"13\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-db_gencode\",\"14\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-db_gencode\",\"15\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-db_gencode\",\"16\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-db_gencode\",\"2\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-db_gencode\",\"21\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-db_gencode\",\"22\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-db_gencode\",\"23\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-db_gencode\",\"24\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-db_gencode\",\"25\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-db_gencode\",\"26\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-db_gencode\",\"27\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-db_gencode\",\"28\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-db_gencode\",\"29\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-db_gencode\",\"3\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-db_gencode\",\"30\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-db_gencode\",\"31\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-db_gencode\",\"32\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-db_gencode\",\"33\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-db_gencode\",\"4\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-db_gencode\",\"5\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-db_gencode\",\"6\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-db_gencode\",\"9\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-evalue\",\"-nan\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-evalue\",\".5\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-evalue\",\"0.001\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-evalue\",\"1000\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-evalue\",\"100000\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-evalue\",\"1E-5\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-evalue\",\"1e-300\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-evalue\",\"1e-5\"],[\"-lcase_masking\",\"\"],[\"-query_loc\",\"<range>\"],[\"-task\",\"tblastn\"]]": [
+          6
+        ],
+        "[[\"-evalue\",\"1e-5\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-evalue\",\"1e-50\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-evalue\",\"1e3\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-evalue\",\"1e308\"],[\"-task\",\"tblastn\"]]": [
+          6
+        ],
+        "[[\"-evalue\",\"5.\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-gapextend\",\"+1\"],[\"-gapopen\",\"+11\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-gapextend\",\"1\"],[\"-gapopen\",\"11\"],[\"-matrix\",\"BLOSUM62\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-lcase_masking\",\"\"],[\"-query_loc\",\"<range>\"],[\"-seg\",\"yes\"],[\"-subject_loc\",\"<range>\"],[\"-task\",\"tblastn\"]]": [
+          0
+        ],
+        "[[\"-lcase_masking\",\"\"],[\"-seg\",\"no\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-lcase_masking\",\"\"],[\"-soft_masking\",\"false\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-lcase_masking\",\"\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-matrix\",\"BLOSUM62\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-matrix\",\"blosum62\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-max_intron_length\",\"0\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-max_target_seqs\",\"+5\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-max_target_seqs\",\"010\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-max_target_seqs\",\"0x10\"],[\"-soft_masking\",\"on\"],[\"-sum_stats\",\"F\"],[\"-task\",\"tblastn\"]]": [
+          7
+        ],
+        "[[\"-max_target_seqs\",\"0x10\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-max_target_seqs\",\"1\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-max_target_seqs\",\"2147483647\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-max_target_seqs\",\"280\"],[\"-task\",\"tblastn\"]]": [
+          0
+        ],
+        "[[\"-max_target_seqs\",\"4\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-max_target_seqs\",\"5\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-query_loc\",\"<range>\"],[\"-subject_loc\",\"<range>\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          7
+        ],
+        "[[\"-seg\",\"no\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-seg\",\"yes\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-soft_masking\",\"F\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-soft_masking\",\"false\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-soft_masking\",\"true\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-subject_loc\",\"<range>\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-sum_stats\",\"0\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-sum_stats\",\"1\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-sum_stats\",\"F\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-sum_stats\",\"T\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-sum_stats\",\"false\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-sum_stats\",\"no\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-sum_stats\",\"true\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-sum_stats\",\"yes\"],[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-task\",\"tblastn\"],[\"-threshold\",\"13\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-task\",\"tblastn\"],[\"-window_size\",\"0x28\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-task\",\"tblastn\"],[\"-window_size\",\"40\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-task\",\"tblastn\"],[\"-word_size\",\"+3\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-task\",\"tblastn\"],[\"-word_size\",\"03\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-task\",\"tblastn\"],[\"-word_size\",\"0x3\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-task\",\"tblastn\"],[\"-word_size\",\"3\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-task\",\"tblastn\"],[\"-xdrop_gap\",\"-1\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-task\",\"tblastn\"],[\"-xdrop_gap\",\"0\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-task\",\"tblastn\"],[\"-xdrop_gap\",\"15\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-task\",\"tblastn\"],[\"-xdrop_gap\",\"1e9\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-task\",\"tblastn\"],[\"-xdrop_gap\",\"30\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-task\",\"tblastn\"],[\"-xdrop_gap\",\"7\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-task\",\"tblastn\"],[\"-xdrop_gap_final\",\"-1\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-task\",\"tblastn\"],[\"-xdrop_gap_final\",\"0\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-task\",\"tblastn\"],[\"-xdrop_gap_final\",\"15\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-task\",\"tblastn\"],[\"-xdrop_gap_final\",\"1e9\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-task\",\"tblastn\"],[\"-xdrop_gap_final\",\"30\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-task\",\"tblastn\"],[\"-xdrop_gap_final\",\"7\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-task\",\"tblastn\"]]": [
+          0,
+          6,
+          7
+        ]
+      },
+      "browser": {
+        "formats": [
+          0,
+          6,
+          7
+        ],
+        "paths": [
+          "serial",
+          "threaded"
+        ],
+        "threads": [
+          1,
+          2,
+          4
+        ],
+        "browsers": [
+          "Chromium",
+          "Firefox",
+          "WebKit"
+        ]
+      }
+    },
+    "tblastx": {
+      "optionSets": {
+        "[[\"-culling_limit\",\"+1\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-culling_limit\",\"0\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-culling_limit\",\"0x1\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-culling_limit\",\"0x2\"]]": [
+          6
+        ],
+        "[[\"-culling_limit\",\"1\"],[\"-max_target_seqs\",\"3\"]]": [
+          0
+        ],
+        "[[\"-culling_limit\",\"1\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-culling_limit\",\"2\"],[\"-max_target_seqs\",\"1\"]]": [
+          6
+        ],
+        "[[\"-culling_limit\",\"2\"],[\"-max_target_seqs\",\"3\"]]": [
+          6
+        ],
+        "[[\"-culling_limit\",\"2\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-culling_limit\",\"2147483645\"]]": [
+          6
+        ],
+        "[[\"-culling_limit\",\"2147483646\"]]": [
+          6
+        ],
+        "[[\"-culling_limit\",\"5\"],[\"-evalue\",\"1000\"]]": [
+          6
+        ],
+        "[[\"-culling_limit\",\"5\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-culling_limit\",\"7\"],[\"-max_target_seqs\",\"5\"]]": [
+          7
+        ],
+        "[[\"-db_gencode\",\"+1\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-db_gencode\",\"02\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-db_gencode\",\"1\"],[\"-query_gencode\",\"1\"]]": [
+          6
+        ],
+        "[[\"-db_gencode\",\"1\"],[\"-query_gencode\",\"4\"]]": [
+          6
+        ],
+        "[[\"-db_gencode\",\"1\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-db_gencode\",\"10\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-db_gencode\",\"11\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-db_gencode\",\"12\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-db_gencode\",\"13\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-db_gencode\",\"14\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-db_gencode\",\"15\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-db_gencode\",\"16\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-db_gencode\",\"2\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-db_gencode\",\"21\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-db_gencode\",\"22\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-db_gencode\",\"23\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-db_gencode\",\"24\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-db_gencode\",\"25\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-db_gencode\",\"26\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-db_gencode\",\"27\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-db_gencode\",\"28\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-db_gencode\",\"29\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-db_gencode\",\"3\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-db_gencode\",\"30\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-db_gencode\",\"31\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-db_gencode\",\"33\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-db_gencode\",\"4\"],[\"-query_gencode\",\"4\"]]": [
+          0,
+          7
+        ],
+        "[[\"-db_gencode\",\"4\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-db_gencode\",\"5\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-db_gencode\",\"6\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-db_gencode\",\"9\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-evalue\",\"+inf\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-evalue\",\"-nan\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-evalue\",\".5\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-evalue\",\"0.001\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-evalue\",\"1000\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-evalue\",\"100000\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-evalue\",\"1E-5\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-evalue\",\"1e-100\"]]": [
+          0,
+          7
+        ],
+        "[[\"-evalue\",\"1e-300\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-evalue\",\"1e-5\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-evalue\",\"1e-50\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-evalue\",\"1e10\"]]": [
+          6
+        ],
+        "[[\"-evalue\",\"1e3\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-evalue\",\"1e999\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-evalue\",\"5.\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-max_target_seqs\",\"+5\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-max_target_seqs\",\"010\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-max_target_seqs\",\"0x10\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-max_target_seqs\",\"1\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-max_target_seqs\",\"2\"],[\"-query_gencode\",\"4\"]]": [
+          0
+        ],
+        "[[\"-max_target_seqs\",\"2\"]]": [
+          7
+        ],
+        "[[\"-max_target_seqs\",\"2147483647\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-max_target_seqs\",\"250\"]]": [
+          6
+        ],
+        "[[\"-max_target_seqs\",\"255\"]]": [
+          0
+        ],
+        "[[\"-max_target_seqs\",\"3\"]]": [
+          0
+        ],
+        "[[\"-max_target_seqs\",\"4\"],[\"-query_gencode\",\"4\"]]": [
+          7
+        ],
+        "[[\"-max_target_seqs\",\"4\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-max_target_seqs\",\"5\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-query_gencode\",\"+1\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-query_gencode\",\"02\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-query_gencode\",\"1\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-query_gencode\",\"10\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-query_gencode\",\"11\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-query_gencode\",\"12\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-query_gencode\",\"13\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-query_gencode\",\"14\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-query_gencode\",\"15\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-query_gencode\",\"16\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-query_gencode\",\"2\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-query_gencode\",\"21\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-query_gencode\",\"22\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-query_gencode\",\"23\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-query_gencode\",\"24\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-query_gencode\",\"25\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-query_gencode\",\"26\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-query_gencode\",\"27\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-query_gencode\",\"28\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-query_gencode\",\"29\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-query_gencode\",\"3\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-query_gencode\",\"30\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-query_gencode\",\"31\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-query_gencode\",\"33\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-query_gencode\",\"4\"],[\"-seg\",\"no\"]]": [
+          0,
+          7
+        ],
+        "[[\"-query_gencode\",\"4\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-query_gencode\",\"5\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-query_gencode\",\"6\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-query_gencode\",\"9\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-query_loc\",\"<range>\"],[\"-seg\",\"yes\"]]": [
+          0
+        ],
+        "[[\"-query_loc\",\"<range>\"],[\"-subject_loc\",\"<range>\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-query_loc\",\"<range>\"]]": [
+          7
+        ],
+        "[[\"-seg\",\"no\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-seg\",\"yes\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-subject_loc\",\"<range>\"]]": [
+          0
+        ],
+        "[[\"-threshold\",\"+inf\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-threshold\",\"1\"],[\"-word_size\",\"3\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-threshold\",\"1\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-threshold\",\"11\"],[\"-window_size\",\"25\"]]": [
+          0
+        ],
+        "[[\"-threshold\",\"11\"],[\"-word_size\",\"3\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-threshold\",\"11\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-threshold\",\"11.5\"],[\"-word_size\",\"3\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-threshold\",\"11.5\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-threshold\",\"12\"],[\"-window_size\",\"10\"]]": [
+          6
+        ],
+        "[[\"-threshold\",\"13\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-threshold\",\"13.5\"]]": [
+          0
+        ],
+        "[[\"-threshold\",\"16\"],[\"-window_size\",\"60\"]]": [
+          7
+        ],
+        "[[\"-threshold\",\"1e1\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-threshold\",\"21\"],[\"-word_size\",\"3\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-threshold\",\"30\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-threshold\",\"999\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-window_size\",\"0x28\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-window_size\",\"1\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-window_size\",\"10\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-window_size\",\"100\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-window_size\",\"2\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-window_size\",\"40\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-word_size\",\"+3\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-word_size\",\"03\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-word_size\",\"0x3\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[[\"-word_size\",\"3\"]]": [
+          0,
+          6,
+          7
+        ],
+        "[]": [
+          0,
+          6,
+          7
+        ]
+      },
+      "browser": {
+        "formats": [
+          0,
+          6,
+          7
+        ],
+        "paths": [
+          "serial",
+          "threaded"
+        ],
+        "threads": [
+          1,
+          2,
+          4
+        ],
+        "browsers": [
+          "Chromium",
+          "Firefox",
+          "WebKit"
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "project": "webkit",
+  "site": "http://localhost:4730",
+  "tests": [
+    {
+      "project": "webkit",
+      "title": "the app starts through the boot page, isolated, on the latest release",
+      "status": "passed",
+      "durationMs": 497,
+      "record": {
+        "browser": "webkit",
+        "latest": "35970fa18885-e2fb7128",
+        "shown": "35970fa18885-e2fb7128",
+        "shownFrom": "release-id",
+        "isolated": true,
+        "sharedArrayBuffer": true,
+        "pin": "35970fa18885-e2fb7128",
+        "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.5 Safari/605.1.15",
+        "entryRequested": true,
+        "foreignPaths": []
+      }
+    },
+    {
+      "project": "webkit",
+      "title": "a search cancelled while it runs, then a new search completes",
+      "status": "passed",
+      "durationMs": 2373,
+      "record": {
+        "browser": "webkit",
+        "run1": "cancelled",
+        "run2": "completed"
+      }
+    },
+    {
+      "project": "webkit",
+      "title": "\"Offline ready\" appears; in Chromium an offline reload starts the app",
+      "status": "passed",
+      "durationMs": 2717,
+      "record": {
+        "browser": "webkit",
+        "offlineReady": true,
+        "offlineReload": "not run in webkit: only Chromium can go offline reliably"
+      }
+    }
+  ]
+}

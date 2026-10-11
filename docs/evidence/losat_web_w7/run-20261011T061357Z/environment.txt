@@ -1,0 +1,19 @@
+steps: all
+commit: ba7fa464ad4e16f9aedece658d12f844debb0c65
+branch: feature/losat-web-gui-app
+uncommitted files in the build's inputs (build/inputs.ts: web/app docs/web/verification_cells.tsv LOSAT/tests/outfmt0_manifest.tsv LOSAT/tests/fixtures/blastn_regression/manifest.tsv LOSAT/tests/fixtures/tblastx_regression/manifest.tsv LOSAT/tests/fixtures/range_regression/manifest.tsv LOSAT/tests/blastp_v010_parity_manifest.tsv LOSAT/tests/tblastx_v010_parity_manifest.tsv docs/evidence/tlosan_stage_g/matrix_162.jsonl docs/evidence/losat_web_e2e/run-20261004T163746Z/sweeps/after-blastp.tsv docs/evidence/losat_web_e2e/run-20261004T163746Z/sweeps/after-tblastn.tsv docs/evidence/losat_web_e2e/run-20261004T163746Z/sweeps/after-tblastx.tsv LOSAT/tests/wasi_shared_memory.js): 0
+release (FakeEngine build): ba7fa464ad4e-fake
+release (engine build): ba7fa464ad4e-e2fb7128
+node: v26.8.2
+npm: 11.19.1
+playwright: Version 1.61.1
+playwright browsers: chromium-1228 chromium_headless_shell-1228 ffmpeg-1011 firefox-1532 webkit-2311 
+webkit launcher: /home/kawato/.cache/losat-web-gui-target/app-s09-webkit-deps/pw_run.sh
+os: Linux 5.15.167.4-microsoft-standard-WSL2 x86_64
+processors: 32
+native: /home/kawato/.cache/losat-work/s14-gate-native/LOSAT sha256 0236291b81ec8e1735c848c49a4e36c1ae0af3742cc15832c0f9b9352edbb928
+reactors: /home/kawato/.cache/losat-work/s14-reactors
+d4ae253dc3a8530725ff6aa7b82fda07ffdadc141d520a01f8c326719e4b8e1e  losat-web-serial.wasm
+fb685b360fffe2bb7290980e30551b4ef93d42963ed1cade9293a597ab41ebb2  losat-web-threads.wasm
+screens: /home/kawato/.cache/losat-work/s16-gate-screens
+ncbi blast+: /home/kawato/micromamba/bin (blastn: 2.17.0+)

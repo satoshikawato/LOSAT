@@ -40,6 +40,12 @@ const SIZES = [
   { name: 'phone', width: 390, height: 844 },
 ] as const;
 
+// S16: "Getting started" opens on a first visit; these states are recorded as on later visits,
+// with it closed, so that they compare with W6's. onboarding.spec.ts records the onboarding states.
+test.beforeEach(async ({ context }) => {
+  await context.addInitScript(() => localStorage.setItem('losat-web:getting-started', 'closed'));
+});
+
 async function shoot(page: Page, browser: string, size: string, name: string, fullPage = true): Promise<void> {
   const directory = join(SCREENS!, browser);
   mkdirSync(directory, { recursive: true });

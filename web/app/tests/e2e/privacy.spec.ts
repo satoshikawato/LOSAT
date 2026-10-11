@@ -46,6 +46,7 @@ import { gunzipSync } from 'node:zlib';
 import { expect, type Page } from '@playwright/test';
 import { readSiteIndex } from '../../build/site-files';
 import { BUILD_HAS_ENGINE } from './support/browser';
+import { download } from './support/downloads';
 import { REPOSITORY } from './support/harness-server';
 import { DIST, PrivacyCapture, siteFiles, startCaptureSite, test } from './support/privacy';
 import {
@@ -80,11 +81,12 @@ const protein = (seed: number, length: number) => letters('ACDEFGHIKLMNPQRSTVWY'
 /** A FASTA record with 80 letters a line, so that the canary's 40-mer is not split (it starts a line). */
 const record = (title: string, sequence: string) => `>${title}\n${sequence.match(/.{1,80}/g)!.join('\n')}\n`;
 
-/** The name and bytes of the file that clicking a button saves (the browser's download, made in the page). */
+/**
+ * The name and bytes of the file that clicking a button saves (the browser's download, made in the
+ * page). The main flow saves eleven files in a row: they are paced (support/downloads.ts).
+ */
 async function saved(page: Page, testid: string): Promise<{ name: string; bytes: Buffer }> {
-  const download = page.waitForEvent('download');
-  await page.getByTestId(testid).click();
-  const file = await download;
+  const file = await download(page, testid);
   return { name: file.suggestedFilename(), bytes: await readFile((await file.path())!) };
 }
 

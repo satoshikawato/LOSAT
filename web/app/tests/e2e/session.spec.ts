@@ -19,6 +19,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import { BUILD_HAS_ENGINE } from './support/browser';
+import { download } from './support/downloads';
 import { NATIVE, nativeExpectation, NO_NATIVE_REASON } from './support/native';
 import { chooseRun, fasta, openFiles, paste, program, showOutput, showRecords, submit, waitStatus } from './support/search';
 
@@ -51,11 +52,12 @@ interface Download {
   readonly bytes: Buffer;
 }
 
-/** The file that clicking a button saves (the browser's download). */
+/**
+ * The file that clicking a button saves (the browser's download). The engine build's test saves
+ * sixteen files from one page: they are paced (support/downloads.ts).
+ */
 async function downloaded(page: Page, testid: string): Promise<Download> {
-  const download = page.waitForEvent('download');
-  await page.getByTestId(testid).click();
-  const file = await download;
+  const file = await download(page, testid);
   return { name: file.suggestedFilename(), bytes: await readFile((await file.path())!) };
 }
 

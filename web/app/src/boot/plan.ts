@@ -1,0 +1,119 @@
+// The decisions of the boot page (plan §5.9, design §14, docs/web/release_manifest.md): which
+// release to start, whether to pin it, and what to say when it cannot start. Pure: boot.ts
+// does the requests and the DOM. A pinned release is never switched silently; only the user's
+// "Use release <latest>" (or an update the user chose in the app) changes the pin.
+import { parseReleaseManifest, releaseFileUrl, type ReleaseManifest } from '../domain/release-manifest';
+import { RELEASE_ID_PATTERN, type SiteIndex } from '../domain/site-index';
+
+/** The pinned release in localStorage (S16 decision 3); an app setting, not research data. */
+export const PIN_KEY = 'losat-web:release';
+
+/** The pinned release, or undefined when there is none, it is not a release ID, or storage cannot be read. */
+export function readPin(storage: () => Pick<Storage, 'getItem'>): string | undefined {
+  try {
+    const value = storage().getItem(PIN_KEY);
+    return value !== null && RELEASE_ID_PATTERN.test(value) ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Pins a release; false when storage cannot be written (the page starts anyway). */
+export function writePin(storage: () => Pick<Storage, 'setItem'>, release: string): boolean {
+  try {
+    storage().setItem(PIN_KEY, release);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export type MessageKind = 'first-visit-offline' | 'no-index' | 'not-served' | 'offline-not-stored' | 'failed' | 'pin-not-saved';
+
+/** What the boot page shows instead of the app; `useLatest` offers the site's latest release. */
+export interface BootMessage {
+  readonly kind: MessageKind;
+  readonly text: string;
+  readonly useLatest?: string;
+}
+
+/** The release to start; `pin` says whether the boot pins it (a first visit). */
+export interface Start {
+  readonly kind: 'start';
+  readonly release: string;
+  readonly pin: boolean;
+}
+
+/**
+ * The release to start: the pinned one if there is one, else the site's latest (pinned now).
+ * `index` is the site index, undefined when it was not read (offline, or the request failed).
+ */
+export function chooseRelease(pin: string | undefined, index: SiteIndex | undefined, online: boolean): Start | BootMessage {
+  if (pin !== undefined) return { kind: 'start', release: pin, pin: false };
+  if (index !== undefined) return { kind: 'start', release: index.latest, pin: true };
+  if (!online) return { kind: 'first-visit-offline', text: 'LOSAT Web needs a network connection the first time it is opened.' };
+  return { kind: 'no-index', text: "LOSAT Web could not read this site's list of releases. Reload the page to try again." };
+}
+
+/** The answer to the request for a release manifest; undefined when there was none (network error). */
+export interface FetchedManifest {
+  readonly status: number;
+  /** The body read as JSON; undefined with `json: false` when it is not JSON. */
+  readonly body: unknown;
+  readonly json: boolean;
+}
+
+export type ManifestOutcome =
+  | { readonly kind: 'ok'; readonly manifest: ReleaseManifest }
+  /** The site does not serve the release: 404 or 410, or an answer that is not its manifest. */
+  | { readonly kind: 'not-served'; readonly reason: string }
+  /** No answer: the network failed, or the page is offline and the release is not stored. */
+  | { readonly kind: 'unreachable' }
+  /** Another status (a server error). */
+  | { readonly kind: 'failed'; readonly reason: string };
+
+export function judgeManifest(release: string, fetched: FetchedManifest | undefined): ManifestOutcome {
+  if (fetched === undefined) return { kind: 'unreachable' };
+  if (fetched.status === 404 || fetched.status === 410) return { kind: 'not-served', reason: `the site answered ${fetched.status}` };
+  if (fetched.status < 200 || fetched.status > 299) return { kind: 'failed', reason: `the site answered ${fetched.status}` };
+  if (!fetched.json) return { kind: 'not-served', reason: 'the answer is not JSON' };
+  try {
+    return { kind: 'ok', manifest: parseReleaseManifest(fetched.body, release) };
+  } catch (error) {
+    return { kind: 'not-served', reason: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/** The message for a release that cannot start. */
+export function failureMessage(release: string, outcome: Exclude<ManifestOutcome, { kind: 'ok' }>, index: SiteIndex | undefined, online: boolean): BootMessage {
+  switch (outcome.kind) {
+    case 'not-served':
+      return {
+        kind: 'not-served',
+        text: `This browser uses LOSAT Web release ${release}, which this site no longer serves.`,
+        ...(index !== undefined && index.latest !== release ? { useLatest: index.latest } : {}),
+      };
+    case 'unreachable':
+      return online
+        ? { kind: 'failed', text: `LOSAT Web could not load release ${release}. Check the network connection and reload the page.` }
+        : {
+            kind: 'offline-not-stored',
+            text: `This browser uses LOSAT Web release ${release}, which is not stored for offline use. Connect to the network and reload the page.`,
+          };
+    case 'failed':
+      return { kind: 'failed', text: `LOSAT Web could not load release ${release} (${outcome.reason}). Reload the page to try again.` };
+  }
+}
+
+/** The message when the user chose another release and it could not be pinned. */
+export function pinNotSavedMessage(release: string): BootMessage {
+  return { kind: 'pin-not-saved', text: `This browser did not let LOSAT Web save the choice of release ${release}.` };
+}
+
+/** The absolute URLs of what the boot page adds to the document: the style sheets, then the module script. */
+export function entryUrls(manifest: ReleaseManifest): { readonly script: string; readonly styles: readonly string[] } {
+  return {
+    script: releaseFileUrl(manifest.release, manifest.entry.script),
+    styles: manifest.entry.styles.map((path) => releaseFileUrl(manifest.release, path)),
+  };
+}

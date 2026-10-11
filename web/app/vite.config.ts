@@ -6,6 +6,7 @@ import type { Plugin } from 'vite';
 import { siteHeaders } from './build/headers.ts';
 import { findReactors, losatEngine } from './build/reactors.ts';
 import { releaseId } from './build/release.ts';
+import { losatSite } from './build/site.ts';
 import { losatVerification } from './build/verification.ts';
 
 const headers = siteHeaders();
@@ -23,7 +24,7 @@ const reactors = findReactors();
 const release = releaseId(reactors);
 // The dev server injects component styles as inline <style> elements, which the
 // production CSP forbids. It therefore serves the isolation headers without the CSP;
-// `vite preview` (used by the E2E tests) serves the production headers unchanged.
+// `vite preview` and the site server of the E2E tests (build/site-server.ts) serve the production headers unchanged.
 const devHeaders = Object.fromEntries(
   Object.entries(headers).filter(([name]) => name !== 'Content-Security-Policy'),
 );
@@ -57,7 +58,9 @@ function headersOnEveryResponse(): Plugin {
 
 export default defineConfig({
   // The engine modules (LOSAT_WEB_REACTORS); the worker bundles read the same description.
-  plugins: [vue(), losatEngine({ reactors }), losatVerification(), headersOnEveryResponse()],
+  plugins: [vue(), losatEngine({ reactors }), losatVerification(), headersOnEveryResponse(),
+    // `vite build` writes a site: the boot page and the release under /r/<release-id>/ (build/site.ts).
+    losatSite({ release, app: { version: appVersion, build: appBuild() }, reactors })],
   define: {
     __LOSAT_TEST_HOOKS__: 'false',
     __LOSAT_APP_VERSION__: JSON.stringify(appVersion),

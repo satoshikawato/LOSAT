@@ -1,0 +1,6 @@
+{
+  "name": "losat-web-check-preview",
+  "private": true,
+  "type": "module",
+  "description": "The preview check of LOSAT Web (S16 item 7). It has no dependencies of its own: it runs with web/app's node_modules (README.md)."
+}

@@ -127,6 +127,8 @@ export class Coordinator {
   /** Run inputs by their revisions (snapshotInput). */
   private readonly runInputs = new Map<string, Promise<RunInput>>();
   private active: string | undefined;
+  /** Set while a task outside the queue has the engine to itself (`withEngine`). */
+  private held = false;
   private nextNumber = 1;
 
   constructor(private readonly deps: CoordinatorDeps) {
@@ -228,6 +230,24 @@ export class Coordinator {
     }
     this.cancelRequested.add(runId);
     this.deps.engine.cancel(runId);
+  }
+
+  /**
+   * Runs `task`, which uses the engine outside the queue (the browser self-test,
+   * application/self-test.ts), with the engine to itself: no queued run starts until it
+   * settles, and runs added meanwhile wait in the queue. Rejects without running it while a
+   * run is active or queued, or another such task runs: the engine runs one search at a time.
+   */
+  async withEngine<T>(task: () => Promise<T>): Promise<T> {
+    if (this.held) throw new Error('Another task is using the engine.');
+    if (this.active !== undefined || this.queue.length > 0) throw new Error('Runs are active or queued.');
+    this.held = true;
+    try {
+      return await task();
+    } finally {
+      this.held = false;
+      this.pump();
+    }
   }
 
   /**
@@ -344,7 +364,7 @@ export class Coordinator {
   }
 
   private pump(): void {
-    if (this.active !== undefined) return;
+    if (this.active !== undefined || this.held) return;
     const next = this.queue.shift();
     if (next === undefined) return;
     this.active = next;

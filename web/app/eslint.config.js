@@ -29,8 +29,12 @@ export default tseslint.config(
     languageOptions: { parserOptions: { parser: tseslint.parser } },
   },
   restrict(['src/domain/**'], ['application', 'ports', 'infra', 'ui', 'vue']),
+  // The site's service worker (src/sw/) runs apart from every page: it may use the domain only.
+  restrict(['src/sw/**'], ['application', 'ports', 'infra', 'ui', 'vue']),
   restrict(['src/ports/**'], ['application', 'infra', 'ui', 'vue']),
   restrict(['src/application/**'], ['infra', 'ui', 'vue']),
   restrict(['src/infra/**'], ['application', 'ui', 'vue']),
   restrict(['src/ui/**'], ['infra']),
+  // The boot page's script (src/boot) runs before any release: it may use the domain only.
+  restrict(['src/boot/**'], ['application', 'ports', 'infra', 'ui', 'vue']),
 );

@@ -1,0 +1,113 @@
+/* S16 onboarding: "Getting started" (the header's link and the panel under the header), "Try an
+   example" on the program's line under the tabs, and the optional browser self-test. */
+
+.header-link {
+  margin-left: auto;
+  font-size: 0.92em;
+}
+
+.getting-started {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel);
+  margin: 8px 0;
+  padding: 6px 12px 10px;
+}
+
+.getting-started-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.getting-started-head h2 {
+  margin: 4px 0;
+}
+
+.getting-started-steps {
+  margin: 4px 0 6px;
+  padding-left: 1.6em;
+}
+
+.getting-started-steps li {
+  margin: 2px 0;
+}
+
+.getting-started .local-note {
+  margin: 6px 0;
+}
+
+.self-test {
+  margin-top: 8px;
+  border-top: 1px solid var(--border);
+  padding-top: 6px;
+}
+
+.self-test summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.self-test p {
+  margin: 6px 0;
+}
+
+.self-test-cases {
+  list-style: none;
+  margin: 6px 0;
+  padding: 0;
+}
+
+.self-test-cases li {
+  margin: 4px 0;
+  overflow-wrap: anywhere;
+}
+
+.self-test-case {
+  font-weight: 600;
+  margin-right: 4px;
+}
+
+.self-test-mismatch {
+  font-family: ui-monospace, monospace;
+  font-size: 0.88em;
+  margin-left: 6px;
+}
+
+.self-test-engine {
+  display: block;
+}
+
+/* The program's sentence and "Try an example" share a line; the link wraps under it when the
+   line is full. */
+.program-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 12px;
+}
+
+.program-line .try-example {
+  font-size: 0.92em;
+}
+
+.example-confirm {
+  margin: 0 0 8px;
+}
+
+.example-confirm p {
+  margin: 0 0 6px;
+}
+
+.example-confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.example-loaded {
+  margin: 0 0 8px;
+  font-size: 0.92em;
+}

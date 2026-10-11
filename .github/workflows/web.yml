@@ -144,10 +144,10 @@ jobs:
       - run: chmod +x ${{ runner.temp }}/native/LOSAT
       - run: npm ci
       - run: npx playwright install --with-deps chromium firefox webkit
-      - name: RecordScanner contract on the serial reactor (Node)
+      - name: RecordScanner contract and the self-test's expected outputs on the serial reactor (Node)
         env:
           LOSAT_WEB_REACTORS: ${{ runner.temp }}/reactors
-        run: npx vitest run tests/unit/engine-runtime.test.ts
+        run: npx vitest run tests/unit/engine-runtime.test.ts tests/unit/self-test-engine.test.ts
       - name: V-BR and every E2E test with the engine in the build
         env:
           LOSAT_WEB_REACTORS: ${{ runner.temp }}/reactors

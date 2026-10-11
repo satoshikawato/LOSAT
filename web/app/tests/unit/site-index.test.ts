@@ -24,7 +24,23 @@ describe('site index', () => {
   });
 
   it('ignores fields it does not know', () => {
-    expect(parseSiteIndex(index({ shell: [] })).latest).toBe('b');
+    expect(parseSiteIndex(index({ notices: [] })).latest).toBe('b');
+  });
+
+  it('reads the shell: the site files a browser needs to start offline', () => {
+    const sha256 = 'c'.repeat(64);
+    const shell = [
+      { path: '/', size: 451, sha256 },
+      { path: '/boot.css', size: 544, sha256 },
+      { path: '/boot.js', size: 7202, sha256 },
+    ];
+    expect(parseSiteIndex(index({ shell })).shell).toEqual(shell);
+    expect(parseSiteIndex(index()).shell).toBeUndefined();
+    for (const path of ['boot.js', '//boot.js', '/../boot.js', '/r/a/../b.js', 'https://example.org/boot.js']) {
+      expect(() => parseSiteIndex(index({ shell: [{ path, size: 1, sha256 }] }))).toThrow(/path/);
+    }
+    expect(() => parseSiteIndex(index({ shell: [shell[1], shell[0]] }))).toThrow(/order/);
+    expect(() => parseSiteIndex(index({ shell: [{ path: '/', size: -1, sha256 }] }))).toThrow(/size/);
   });
 
   it('refuses an index whose latest is not served, an unknown format and bad IDs', () => {

@@ -5,3 +5,27 @@
   Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'
   X-Content-Type-Options: nosniff
   Referrer-Policy: no-referrer
+
+/r/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/
+  Cache-Control: no-cache
+
+/index.html
+  Cache-Control: no-cache
+
+/boot.js
+  Cache-Control: no-cache
+
+/boot.css
+  Cache-Control: no-cache
+
+/releases.json
+  Cache-Control: no-cache
+
+/404.html
+  Cache-Control: no-cache
+
+/sw.js
+  Cache-Control: no-cache

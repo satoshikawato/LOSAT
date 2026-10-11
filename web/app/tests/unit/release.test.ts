@@ -555,7 +555,7 @@ describe('explicit update', () => {
 
   it('offers no switch until the download is checked when the worker cannot be registered where service workers exist', async () => {
     const { offline, pin, host, manager, state, start } = setup({ latest: 'b' });
-    offline.connectError = new Error('the operation is insecure');
+    offline.connectError = new Error('the script could not be fetched');
     await start();
     manager.review();
     expect(state().update).toEqual({ kind: 'reviewing', latest: 'b' });
@@ -563,7 +563,7 @@ describe('explicit update', () => {
     await manager.switchNow();
     expect(pin.writes).toEqual([]);
     await manager.download();
-    expect(state().update).toEqual({ kind: 'failed', latest: 'b', reason: 'the offline worker could not be started (the operation is insecure)' });
+    expect(state().update).toEqual({ kind: 'failed', latest: 'b', reason: 'the offline worker could not be started (the script could not be fetched)' });
     await manager.switchNow();
     expect(pin.writes).toEqual([]);
     expect(host.reloads).toBe(0);

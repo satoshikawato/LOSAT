@@ -35,4 +35,6 @@ export default tseslint.config(
   restrict(['src/application/**'], ['infra', 'ui', 'vue']),
   restrict(['src/infra/**'], ['application', 'ui', 'vue']),
   restrict(['src/ui/**'], ['infra']),
+  // The boot page's script (src/boot) runs before any release: it may use the domain only.
+  restrict(['src/boot/**'], ['application', 'ports', 'infra', 'ui', 'vue']),
 );

@@ -1,8 +1,9 @@
 import { defineConfig, devices } from '@playwright/test';
 import { E2E_ORIGIN, E2E_PORT } from './tests/e2e/support/origin';
 
-// E2E tests run against the production build served by `vite preview`, so they see
-// the same response headers as the deployed site (public/_headers). Chromium, Firefox and
+// E2E tests run against the production build (the site in dist/) served by
+// build/site-server.ts as Cloudflare Pages serves it, so they see the same response headers
+// as the deployed site (public/_headers), on 304s and 404s too. Chromium, Firefox and
 // WebKit run the tests; the storage tests that need the Chrome DevTools Protocol skip the
 // other two. LOSAT_WEB_WEBKIT_EXECUTABLE can name a launcher for WebKit on a host whose
 // system libraries Playwright cannot install (docs/evidence/losat_web_w1/README.md).
@@ -34,7 +35,7 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: `npm run build && npx vite preview --port ${E2E_PORT} --strictPort`,
+    command: `npm run build && node build/site-server.ts dist --port ${E2E_PORT}`,
     url: E2E_ORIGIN,
     reuseExistingServer: false,
     timeout: 180_000,

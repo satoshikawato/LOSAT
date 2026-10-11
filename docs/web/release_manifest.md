@@ -13,7 +13,8 @@ None of these files holds research data: they describe the application's own fil
 ## The site
 
 `npm run build` (in `web/app`) writes a site into `dist/` (or `vite build --outDir <dir>`), after
-removing the directory:
+removing the directory (it refuses a directory that is not empty and has no `releases.json`,
+`index.html` or `_headers`):
 
 ```
 dist/

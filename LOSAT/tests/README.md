@@ -162,7 +162,9 @@ copy/fill bounds race; it does not suppress other memory faults or fix OOM.
 Run the host regression checks with
 `"$NODE_BIN" --test test_wasi_runners.js test_wasi_shared_memory.js`
 (or substitute `node`). They exercise real Wasm commands, exit codes, worker
-exceptions, shared-memory growth, overlapping copies, and invalid ranges.
+exceptions, shared-memory growth, overlapping copies, and invalid ranges, and
+the two opt-in host variables `LOSAT_WASI_PRESPAWN` and `LOSAT_WASI_GUARD_CACHE`
+(see "Threading contract gates").
 
 Each completed search immediately prints its measured wall time, for example
 `Finished WSSV.PajaWSV.losatp.wasm: 7.446 s`. Failed searches also
@@ -265,6 +267,36 @@ Pool size is distinct from measured worker activity (null when unmeasured).
 The detailed performance parser rejects absent or inconsistent evidence.
 `LOSAT_TBLASTX_SERIAL_SCAN_CHUNKS=1` describes sequential diagnostic chunking;
 the old `LOSAT_TBLASTX_PARALLEL_SCAN_CHUNKS` name has been removed.
+
+Two host variables of the Node threaded runner (`wasi_thread_host.js`) shorten
+its fixed startup cost. Both are off by default, and without them the runner
+behaves as before; neither changes the module, the guest or its output.
+
+- `LOSAT_WASI_PRESPAWN=auto|N` boots thread workers before `_start`, all at
+  once, instead of one per `thread-spawn` call while the guest waits. `auto`
+  takes N-1 from `-num_threads N` in the command line (0 when it is absent, not
+  a number, below 2, or above the guest's limit of 255 threads); an integer from
+  0 to 254 sets the count, and any other value is an error before the command
+  starts. Each worker instantiates the module with the shared memory and waits.
+  `thread-spawn` hands the next waiting worker its tid and start argument and
+  returns the tid after the same start confirmation and timeout as a new worker;
+  when none is left it creates workers as before. Unused workers are terminated
+  when the run ends and never keep the process alive. With
+  `LOSAT_WASI_THREADS_DEBUG=1`, spawn-attempt, spawned, ready and exit events keep
+  their meaning for the guest's threads (`spawned` of a prebooted worker carries
+  its `standby` index), and prebooted workers have their own `standby_spawned`,
+  `standby_unused` and `standby_exited` events (`standby_rejected` when a worker
+  cannot be created). The test-only startup faults act at worker boot, so with
+  this variable an injected startup error ends the command as soon as a
+  prebooted worker boots, which can be before the first `thread-spawn`.
+- `LOSAT_WASI_GUARD_CACHE=<dir>` stores the output of the shared-memory guard
+  in `<dir>` (created if needed), keyed by the SHA-256 of the artifact and of
+  `wasi_shared_memory.js`. A later run uses the stored bytes only when their
+  SHA-256 and length match the sidecar record, whose own SHA-256 covers the
+  key and the fill/copy counts; otherwise it recomputes the guard and replaces
+  the entry through a temporary file and a rename. The stored bytes are the
+  guard's output, byte for byte. With `LOSAT_WASI_THREADS_DEBUG=1` the runner
+  logs `guard cache hit`, `miss` or `invalid`.
 
 The nightly workflow (`nightly.yml`, also `workflow_dispatch` and release
 readiness) runs `check_wasm_threading_regressions.py --jobs 3` against all frozen

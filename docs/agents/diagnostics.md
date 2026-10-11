@@ -42,6 +42,12 @@ Moved from `AGENTS.md` on 2026-10-08 so that it is read only when needed.
 - `LOSAT_DIAGNOSTICS=1` general diagnostics counters.
 - `LOSAT_STARTUP_TRACE=1` startup trace.
 - `LOSAT_WASI_THREADS_DEBUG=1` threaded-WASI scheduling diagnostics.
+- `LOSAT_WASI_PRESPAWN=auto|N` (Node threaded runner, opt-in) boot N thread
+  workers (`auto`: `-num_threads` - 1) before `_start`; same output, extra
+  `standby_*` debug events. See `LOSAT/tests/README.md`, "Threading contract gates".
+- `LOSAT_WASI_GUARD_CACHE=<dir>` (Node threaded runner, opt-in) reuse the
+  shared-memory guard's output from `<dir>`, checked by SHA-256 and rebuilt
+  when it does not match.
 - `LOSAT_TBLASTX_PARALLEL_CHUNKS=1` force TBLASTX subject-chunk parallel path
   for diagnostics.
 - `LOSAT_TBLASTX_SERIAL_SCAN_CHUNKS=1` diagnostic-only sequential TBLASTX

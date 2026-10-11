@@ -41,6 +41,8 @@ export interface BootMessage {
   readonly retry?: boolean;
   /** Releases that this browser stores whole, each offered as "Use release <id> (stored)": they start without the network. */
   readonly useStored?: readonly string[];
+  /** A stored release that the user chose and that was no longer stored at the click (withoutStored). */
+  readonly noLongerStored?: string;
 }
 
 /** The messages that a reload may resolve, or a stored release may stand in for: no network, or the site did not answer. */
@@ -67,6 +69,24 @@ export function withChoices(message: BootMessage, stored: readonly string[], rel
   if (!offersChoices(message)) return message;
   const others = stored.filter((id) => id !== release && id !== message.useLatest);
   return { ...message, retry: true, ...(others.length > 0 ? { useStored: others } : {}) };
+}
+
+/**
+ * The message again after the user chose "Use release <release> (stored)" and the release was no
+ * longer stored whole at the click (`stored`, read then): another tab's cleanup may have removed it
+ * since the message was shown, for the boot page holds no release lock (code review 3 I1). It says
+ * so and offers the stored releases of `message` that remain, with its other choices; the pin is
+ * not changed.
+ */
+export function withoutStored(message: BootMessage, release: string, stored: readonly string[]): BootMessage {
+  const { useStored, ...rest } = message;
+  const remaining = (useStored ?? []).filter((id) => id !== release && stored.includes(id));
+  return { ...rest, noLongerStored: release, ...(remaining.length > 0 ? { useStored: remaining } : {}) };
+}
+
+/** The sentence for a stored release that was no longer stored when the user chose it. */
+export function noLongerStoredText(release: string): string {
+  return `Release ${release} is no longer stored in this browser.`;
 }
 
 /** The release whose cache the site's service worker names `name` (src/sw/protocol.ts); undefined for another cache. */

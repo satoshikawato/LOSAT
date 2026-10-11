@@ -67,7 +67,7 @@ test('a pinned release that the site no longer serves gives a message and a butt
   await expect(page.getByTestId('boot-message')).toHaveCount(0);
 });
 
-test('a pinned release that the site no longer serves, while the site index cannot be read, offers "Try again" and the stored release, never a dead end', async ({
+test('a pinned release that the site no longer serves, while the site index cannot be read, offers "Try again" and the stored release (looked for again at the click), never a dead end', async ({
   page,
   request,
 }) => {
@@ -97,6 +97,16 @@ test('a pinned release that the site no longer serves, while the site index cann
   await expect(message).toHaveText('This browser uses LOSAT Web release gone-release, which this site no longer serves.');
   await expect(page.getByTestId('boot-use-latest')).toHaveCount(0);
   await expect(page.getByTestId('boot-use-stored')).toHaveText(`Use release ${latest} (stored)`);
+  await expect(page.getByTestId('add-to-queue')).toHaveCount(0);
+  expect(await page.evaluate((key) => localStorage.getItem(key), PIN_KEY)).toBe('gone-release');
+
+  // Another tab's cleanup removes the stored release before the click: the boot looks again, says
+  // so, and pins nothing (code review 3 I1).
+  expect(await page.evaluate((release) => caches.delete(`losat-web-release-${release}`), latest)).toBe(true);
+  await page.getByTestId('boot-use-stored').click();
+  await expect(page.getByTestId('boot-stored-gone')).toHaveText(`Release ${latest} is no longer stored in this browser.`);
+  await expect(message).toHaveAttribute('data-kind', 'not-served');
+  await expect(page.getByTestId('boot-use-stored')).toHaveCount(0);
   await expect(page.getByTestId('add-to-queue')).toHaveCount(0);
   expect(await page.evaluate((key) => localStorage.getItem(key), PIN_KEY)).toBe('gone-release');
 

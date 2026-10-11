@@ -6,12 +6,14 @@ import {
   entryUrls,
   failureMessage,
   judgeManifest,
+  noLongerStoredText,
   PIN_KEY,
   readPin,
   recheckManifest,
   releaseOfCache,
   storedText,
   withChoices,
+  withoutStored,
   writePin,
 } from '../../src/boot/plan';
 import { parseReleaseManifest } from '../../src/domain/release-manifest';
@@ -162,6 +164,17 @@ describe('boot: the messages', () => {
     // The index names the release that it does not serve (a broken deployment): an older stored release still starts.
     const sameLatest = failureMessage('new', { kind: 'not-served', reason: 'the answer is not JSON' }, index, true);
     expect(withChoices(sameLatest, ['new', 'old'], 'new')).toEqual({ ...sameLatest, retry: true, useStored: ['old'] });
+  });
+
+  it('says so when a stored release that the user chose is no longer stored, and offers what remains (code review 3 I1)', () => {
+    const notStored = withChoices(failureMessage('gone', { kind: 'unreachable' }, undefined, false), ['a', 'b', 'gone'], 'gone');
+    expect(notStored.useStored).toEqual(['a', 'b']);
+    // Another tab's cleanup removed a since the message was shown.
+    expect(withoutStored(notStored, 'a', ['b'])).toEqual({ ...notStored, useStored: ['b'], noLongerStored: 'a' });
+    // Nothing remains: "Try again" stays.
+    const none = withoutStored(notStored, 'a', []);
+    expect(none).toEqual({ kind: notStored.kind, text: notStored.text, retry: true, noLongerStored: 'a' });
+    expect(noLongerStoredText('a')).toBe('Release a is no longer stored in this browser.');
   });
 
   it("finds a release from its cache's name, and nothing else", () => {

@@ -12,12 +12,14 @@ import {
   entryUrls,
   failureMessage,
   judgeManifest,
+  noLongerStoredText,
   pinNotSavedMessage,
   readPin,
   recheckManifest,
   releaseOfCache,
   storedText,
   withChoices,
+  withoutStored,
   writePin,
   type BootMessage,
   type FetchedManifest,
@@ -125,6 +127,17 @@ function use(release: string): void {
   else show(pinNotSavedMessage(release));
 }
 
+/**
+ * "Use release <id> (stored)": the stored releases were read when the message was shown, and
+ * another tab's cleanup may have removed this one since. It is read once more at the click, and
+ * pinned only while it is stored whole; otherwise the message says so (plan.ts withoutStored).
+ */
+async function useStored(release: string, message: BootMessage): Promise<void> {
+  const stored = await storedReleases();
+  if (stored.includes(release)) use(release);
+  else show(withoutStored(message, release, stored));
+}
+
 function show(message: BootMessage): void {
   const root = document.getElementById('boot');
   if (root === null) return;
@@ -133,6 +146,13 @@ function show(message: BootMessage): void {
   text.setAttribute('data-kind', message.kind);
   text.textContent = message.text;
   root.replaceChildren(text);
+  if (message.noLongerStored !== undefined) {
+    const gone = document.createElement('p');
+    gone.setAttribute('data-testid', 'boot-stored-gone');
+    gone.setAttribute('role', 'status');
+    gone.textContent = noLongerStoredText(message.noLongerStored);
+    root.append(gone);
+  }
   const stored = message.useStored ?? [];
   if (stored.length > 0) {
     const note = document.createElement('p');
@@ -145,7 +165,7 @@ function show(message: BootMessage): void {
   const latest = message.useLatest;
   if (latest !== undefined) actions.append(button('boot-use-latest', `Use release ${latest}`, () => use(latest)));
   for (const release of stored) {
-    const element = button('boot-use-stored', `Use release ${release} (stored)`, () => use(release));
+    const element = button('boot-use-stored', `Use release ${release} (stored)`, () => void useStored(release, message));
     element.setAttribute('data-release', release);
     actions.append(element);
   }

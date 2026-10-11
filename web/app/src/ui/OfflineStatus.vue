@@ -38,7 +38,7 @@ function describe(state: OfflineState): { line: string; whole: string } {
       };
     }
     case 'failed':
-      return { line: 'Offline use failed', whole: `Offline use could not be prepared (${state.reason}).` };
+      return { line: 'Offline use failed', whole: `Offline use could not be prepared: ${state.reason}.` };
     case 'unsupported':
       return {
         line: 'No offline use',

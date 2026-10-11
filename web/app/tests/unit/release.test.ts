@@ -286,9 +286,9 @@ describe('offline use', () => {
 
   it('says why a preparation failed, and tries again on request', async () => {
     const { offline, manager, state, start } = setup();
-    offline.results = [{ ok: false, reason: 'engine/serial.wasm: the server answered 404' }];
+    offline.results = [{ ok: false, reason: 'the site answered 404 for a file (engine/serial.wasm)' }];
     await start();
-    expect(state().offline).toEqual({ kind: 'failed', reason: 'engine/serial.wasm: the server answered 404' });
+    expect(state().offline).toEqual({ kind: 'failed', reason: 'the site answered 404 for a file (engine/serial.wasm)' });
     expect(offline.cleanups).toEqual([]);
     manager.retryOffline();
     await flush();
@@ -436,9 +436,9 @@ describe('explicit update', () => {
 
   it('stays on this release when the download fails, and can try again', async () => {
     const { offline, pin, host, manager, state } = await reviewed();
-    offline.results = [{ ok: false, reason: 'engine/serial.wasm: its SHA-256 is not the one that the list gives' }];
+    offline.results = [{ ok: false, reason: "a file did not match its checksum in the release's file list (engine/serial.wasm)" }];
     await manager.download();
-    expect(state().update).toEqual({ kind: 'failed', latest: 'b', reason: 'engine/serial.wasm: its SHA-256 is not the one that the list gives' });
+    expect(state().update).toEqual({ kind: 'failed', latest: 'b', reason: "a file did not match its checksum in the release's file list (engine/serial.wasm)" });
     await manager.switchNow();
     expect(pin.writes).toEqual([]);
     expect(host.reloads).toBe(0);

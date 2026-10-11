@@ -279,14 +279,23 @@ test('3b. a release that one tab downloaded and checked survives another tab\'s 
   expect(await isolated(first)).toBe(true);
 });
 
-for (const [name, breakB] of [
-  ['a file of B with other bytes', () => (front.upstream = origins.damaged)],
+/** A path in a regular expression. */
+const literally = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+// Each with the reason that the message gives: which file failed, and why (screen review 1 L5).
+for (const [name, breakB, reason] of [
+  [
+    'a file of B with other bytes',
+    () => (front.upstream = origins.damaged),
+    () => `a file did not match its checksum in the release's file list \\(${literally(largestAsset(manifestOf(dirs.damaged, B)))}\\)`,
+  ],
   [
     'a connection cut in the middle of a file of B',
     () => {
       front.upstream = origins.ab;
       front.cut.add(`/r/${B}/${largestAsset(manifestOf(dirs.ab, B))}`);
     },
+    () => `a file could not be downloaded \\(${literally(largestAsset(manifestOf(dirs.ab, B)))}: .+\\)`,
   ],
 ] as const) {
   test(`4. an incomplete update (${name}) fails with its message; the pin stays A, and A still starts offline`, async ({ page, context, browserName }) => {
@@ -300,7 +309,7 @@ for (const [name, breakB] of [
     await appStarted(page, A);
     await reviewAndDownload(page);
     await expect(page.getByTestId('update-failed')).toHaveText(
-      new RegExp(`The update could not be downloaded completely \\(.+\\)\\. LOSAT Web stays on release ${A}\\.`),
+      new RegExp(`^\\s*Release ${B} could not be downloaded and checked: ${reason()}\\. LOSAT Web stays on release ${A}; nothing was changed\\.\\s*$`),
       { timeout: 60_000 },
     );
     expect(await pinOf(page)).toBe(A);

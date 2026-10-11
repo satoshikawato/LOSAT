@@ -5,6 +5,7 @@ import vue from '@vitejs/plugin-vue';
 import type { Plugin } from 'vite';
 import { siteHeaders } from './build/headers.ts';
 import { findReactors, losatEngine } from './build/reactors.ts';
+import { releaseId } from './build/release.ts';
 import { losatVerification } from './build/verification.ts';
 
 const headers = siteHeaders();
@@ -18,6 +19,8 @@ function appBuild(): string {
   }
 }
 const reactors = findReactors();
+/** The release ID (build/release.ts): the directory of the build's assets and the ID a browser pins. */
+const release = releaseId(reactors);
 // The dev server injects component styles as inline <style> elements, which the
 // production CSP forbids. It therefore serves the isolation headers without the CSP;
 // `vite preview` (used by the E2E tests) serves the production headers unchanged.
@@ -59,6 +62,7 @@ export default defineConfig({
     __LOSAT_TEST_HOOKS__: 'false',
     __LOSAT_APP_VERSION__: JSON.stringify(appVersion),
     __LOSAT_APP_BUILD__: JSON.stringify(appBuild()),
+    __LOSAT_RELEASE_ID__: JSON.stringify(release),
   },
   server: { headers: devHeaders },
   preview: { headers },

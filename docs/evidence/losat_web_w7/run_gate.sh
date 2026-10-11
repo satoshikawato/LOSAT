@@ -121,6 +121,9 @@ unset LOSAT_WEB_REACTORS LOSAT_WEB_NATIVE LOSAT_WEB_EVIDENCE LOSAT_WEB_MEASURE L
 # The site is built with the release ID of this tree (build/release.ts), never one set by hand,
 # and without the measurement endpoint (analytics.spec.ts serves its own site index).
 unset LOSAT_WEB_RELEASE_ID LOSAT_WEB_ANALYTICS_ENDPOINT
+# `vite build` makes a production build only while NODE_ENV is unset (or production): another value
+# gives a development build, with each Vue component's absolute path in its bytes.
+unset NODE_ENV
 
 # The release IDs of this tree, before any step: build/release.ts's rule over the inputs that
 # build/inputs.ts lists. A change that is not committed in any of them would make every build of

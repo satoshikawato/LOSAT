@@ -94,8 +94,8 @@ Same values, faster computation:
   with the per-row savings of `LOSAT_X_DPAVX2` (first and last survivor kept while the row runs,
   row gap as a prefix maximum with a two-operation carry, the first lane's missing diagonal as a
   lane mask, column residues copied 16 at a time, row tables of `Rows28` / `Flat` matrices built
-  with vector instructions, 16-bit rows ended on an 8-lane grid): the same values, lane width and
-  result as the 128-bit kernels; a call it does not take (8-bit lanes with
+  with vector instructions, byte shifts in the form V8 compiles to `palignr`): the same values,
+  lane width, blocks and result as the 128-bit kernels; a call it does not take (8-bit lanes with
   `16 * gap_extend - (gap_open + gap_extend) > 128`) runs on the 128-bit kernel
   (`utils/x_xdrop_w128.rs`). On x86_64 it runs where the 128-bit kernel would (after
   `LOSAT_X_DPAVX2` when both are set on an AVX2 machine, which keeps priority), on the SSE4.1 or
@@ -239,4 +239,7 @@ X-drop DP capture and replay (diagnostics, not part of the strict set):
   problem through the scalar loops, the 128-bit, the `LOSAT_X_DPW128` and the 256-bit kernels and
   the dispatch, compared with the recorded result, then the three kernels timed (median ns per cell
   and per call, traceback and score-only, 8- and 16-bit lanes). `LOSAT_X_DPREPLAY_REPS` (default 7),
-  `LOSAT_X_DPREPLAY_OUT=<file>` (append the table to a file).
+  `LOSAT_X_DPREPLAY_OUT=<file>` (append the table to a file). The ignored test
+  `w128_replay_captured_problems` does the same for the 128-bit and the `LOSAT_X_DPW128` kernels
+  only and also runs in the wasm32-wasip1 test build (the libtest `.wasm` under a WASI host such
+  as Node's `wasi` module with a root preopen), which times the simd128 kernels.

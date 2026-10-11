@@ -94,9 +94,11 @@
 //! walk reads. Each lane here holds exactly the value the 128-bit kernel holds for the same cell:
 //! the same stored values (`score - base + bias`, 0 = minus infinity), the same `bias`, rebase
 //! limit and acceptance tests (plus the precondition of the row gap below, otherwise None), the
-//! same blocks (8 lanes of 16 bits or 16 lanes of 8 bits starting at `first_b_index + L*k`), the
-//! same diagonal, column gap, X-drop test, running best and script bits (the same lane
-//! operations), and lookup tables with the bytes of `build_row_table`. What changes, item by item:
+//! same blocks (8 lanes of 16 bits or 16 lanes of 8 bits starting at `first_b_index + L*k`, two
+//! blocks per step on 16-bit lanes), the same end of a row (the end test on the grid
+//! `first_b_index + 16k`), the same diagonal, column gap, X-drop test, running best and script
+//! bits (the same lane operations), and lookup tables with the bytes of `build_row_table`. What
+//! changes, item by item:
 //!
 //! 1. First and last survivor. The 128-bit kernel writes a survivor bitmap word per block and
 //!    scans it after the row; here the first and the last lane that passed the X-drop test are kept
@@ -117,30 +119,23 @@
 //!    both kernels, so the carry it leaves is never used.
 //! 3. The first lane's missing diagonal. The 128-bit kernel stores 0 at `H[first_b_index - 1]` of
 //!    the previous row and then loads the block over it (a store under an overlapping load every
-//!    row); here the first block of the row clears lane 0 of the loaded `H` with a lane mask (`hpm`).
-//!    That location is read by no other lane of this or a later row (bands only move right), so the
-//!    store and the mask give every lane the same input.
+//!    row); here the first block of the row clears lane 0 of the loaded `H` with a lane mask
+//!    (`hpm`). That location is read by no other lane of this or a later row (bands only move
+//!    right), so the store and the mask give every lane the same input.
 //! 4. Column residues (`*b_ptr`) are copied 16 at a time while they are a plain forward or backward
 //!    run of `B` with no residue `>= ncols` (`fill_cols`); a block holding such a residue, and the
 //!    rest, take the 128-bit kernels' scalar loop, which records the first fence and the first bad
 //!    column. The lane buffer holds the same bytes.
 //! 5. Row tables of `Rows28` / `Flat` matrices are built with vector instructions (`build_row`):
 //!    the same rejection of scores above the 16-bit range, `i32 -> i16` saturation (the clamp at
-//!    -32768 of `build_row_table`) and `i16 -> i8` saturation (its clamp to -128..=127), so the same
-//!    96 bytes.
-//! 6. Row ends on 16-bit lanes. The 128-bit kernel steps 16 lanes (two blocks) at a time and tests
-//!    for the end of the row on the grid `first_b_index + 16k`; here two blocks are taken while more
-//!    than 8 lanes of the band are left (the lanes the 128-bit kernel takes too), then single blocks,
-//!    and the end test (past `b_size`: the end of `B` or the fence, or the row gap entering the next
-//!    block below the threshold) runs on the grid `first_b_index + 8k`. The test at a point of the
-//!    16-lane grid is the same test with the same carry, so a row never runs further than in the
-//!    128-bit kernel; it may stop 8 lanes earlier. The lanes it leaves out lie past the band with a
-//!    row gap below the threshold: their diagonal reads a dropped or cleared `H` of the previous row
-//!    (0) plus a matrix score (the lookup returns a matrix entry or 0 for any residue), which is
-//!    below every threshold by the choice of `bias`, and their column gap is 0 (cleared right of the
-//!    last survivor), so the 128-bit kernel drops them. Their `H` and `E` there are 0 in both
-//!    kernels after the row (stale lanes and lanes right of the last survivor are cleared), and the
-//!    traceback walk reads only surviving cells. The 8-bit lanes keep the 16-lane grid.
+//!    -32768 of `build_row_table`) and `i16 -> i8` saturation (its clamp to -128..=127), so the
+//!    same 96 bytes.
+//! 6. Lane shifts. The byte shifts across the vector (`up1b` .. `up8b`; the same values as the
+//!    `bsl*` of `xdrop_simd.rs`) are written for wasm32 as a window of the concatenation `v ++ 0`,
+//!    which V8 compiles to one `palignr`; the form of `bsl*` is compiled as a general two-input
+//!    shuffle (two `pshufb` and two masks built in registers). The exclusive prefix maximum of the
+//!    running best is formed as the inclusive one moved up by a lane (the same values), so that no
+//!    shift is applied to a shifted vector, a pair the compiler merges into one general shuffle.
 //!
 //! Unchanged: the 8 / 16-bit choice (`fits_8bit`), the per-row `sc.ensure`, the rebase test, the
 //! traceback walk (`finish` of the 128-bit kernels) and the cell count.
@@ -226,6 +221,23 @@ mod ext {
     pub unsafe fn hi64(a: V, b: V) -> V {
         _mm_unpackhi_epi64(a, b)
     }
+    /// Bytes moved up by 1 / 2 / 4 / 8 lanes across the vector, zeros shifted in (`pslldq`).
+    #[inline(always)]
+    pub unsafe fn up1b(v: V) -> V {
+        _mm_slli_si128::<1>(v)
+    }
+    #[inline(always)]
+    pub unsafe fn up2b(v: V) -> V {
+        _mm_slli_si128::<2>(v)
+    }
+    #[inline(always)]
+    pub unsafe fn up4b(v: V) -> V {
+        _mm_slli_si128::<4>(v)
+    }
+    #[inline(always)]
+    pub unsafe fn up8b(v: V) -> V {
+        _mm_slli_si128::<8>(v)
+    }
 }
 
 // No NCBI counterpart: the same lane operations for wasm32 simd128.
@@ -291,6 +303,27 @@ mod ext {
     #[inline(always)]
     pub unsafe fn hi64(a: V, b: V) -> V {
         i64x2_shuffle::<1, 3>(a, b)
+    }
+    // Bytes moved up by 1 / 2 / 4 / 8 lanes across the vector, zeros shifted in. Written as a
+    // window of the concatenation `v ++ 0` (the zero bytes taken from its end, indices 31, 30, ..),
+    // which V8 compiles to one `palignr`; the same shift with the zero bytes taken from the start
+    // of the zero vector (16, 17, .., as `bsl*` of `xdrop_simd.rs`) is compiled as a general
+    // two-input shuffle (two `pshufb` and two built masks).
+    #[inline(always)]
+    pub unsafe fn up1b(v: V) -> V {
+        i8x16_shuffle::<31, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14>(v, u8x16_splat(0))
+    }
+    #[inline(always)]
+    pub unsafe fn up2b(v: V) -> V {
+        i8x16_shuffle::<30, 31, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13>(v, u8x16_splat(0))
+    }
+    #[inline(always)]
+    pub unsafe fn up4b(v: V) -> V {
+        i8x16_shuffle::<28, 29, 30, 31, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11>(v, u8x16_splat(0))
+    }
+    #[inline(always)]
+    pub unsafe fn up8b(v: V) -> V {
+        i8x16_shuffle::<24, 25, 26, 27, 28, 29, 30, 31, 0, 1, 2, 3, 4, 5, 6, 7>(v, u8x16_splat(0))
     }
 }
 
@@ -831,10 +864,10 @@ unsafe fn block16<const TB: bool>(
     let v = subsu16(h0, c.goe);
     // row gap: pw = inclusive prefix maximum of v[j] + (j+1)g (unsigned, exact)
     let w = adds_u16(v, c.ramp1);
-    let p = max_u16(w, bsl2(w));
-    let p = max_u16(p, bsl4(p));
-    let pw = max_u16(p, bsl8(p));
-    let f = subsu16(max_u16(bsl2(pw), rs.carry), c.ramp);
+    let p = max_u16(w, up2b(w));
+    let p = max_u16(p, up4b(p));
+    let pw = max_u16(p, up8b(p));
+    let f = subsu16(max_u16(up2b(pw), rs.carry), c.ramp);
     rs.carry = subsu16(max_u16(rs.carry, bcast_last16(pw, c.kb7)), c.ge8);
     let mut hh = max16(h0, f);
     if let Some(m) = lane_mask {
@@ -846,12 +879,13 @@ unsafe fn block16<const TB: bool>(
     let gt = gt16(hh, rs.bestv);
     let thr;
     if mask8(gt) != 0 {
-        // A new best inside this block: exact running best per lane.
-        let y0 = bsl2(hh);
-        let y1 = max16(y0, bsl2(y0));
-        let y2 = max16(y1, bsl4(y1));
-        let y3 = max16(y2, bsl8(y2));
-        let pfx = max16(y3, rs.bestv);
+        // A new best inside this block: exact running best per lane (the exclusive prefix
+        // maximum of `H`, formed as the inclusive one moved up by a lane, so that no shift is
+        // applied to a shifted vector: such a pair is merged into one general shuffle).
+        let y1 = max16(hh, up2b(hh));
+        let y2 = max16(y1, up4b(y1));
+        let y3 = max16(y2, up8b(y2));
+        let pfx = max16(up2b(y3), rs.bestv);
         thr = subsu16(pfx, c.xv);
         let rm = mask8(gt16(hh, pfx));
         rs.rec_b = b + ((31 - rm.leading_zeros()) >> 1) as usize;
@@ -1090,20 +1124,23 @@ unsafe fn body16<const TB: bool>(
         let mut lo_surv = usize::MAX;
         let mut hi_surv = 0usize;
         let mut b0 = first;
-        // Two blocks (16 lanes) while more than 8 lanes of the band are left: the lanes the 128-bit
-        // kernel takes in its 16-lane steps. The first block lies inside the band; the second may
-        // reach past the band and past `limit`.
-        while b0 + 8 < bend {
+        // Two blocks (16 lanes) per step from `first_b_index`, the end test on the grid
+        // first + 16k: the steps of the 128-bit kernel.
+        loop {
             // scores for the 16 lanes b0..b0+16 (lane b reads column b-1)
             let idx = load(sb.add(b0));
             let lo = lut32(t0lo, t1lo, idx);
             let hi = lut32(t0hi, t1hi, idx);
-            let mask1 = if b0 + 16 <= limit {
-                None
+            let (m0, m1) = if b0 + 16 <= limit {
+                (None, None)
             } else {
-                Some(load(LANE_MASK16.as_ptr().add(16 - (limit - b0))))
+                let n = limit - b0;
+                (
+                    Some(load(LANE_MASK16.as_ptr().add(8 - n.min(8)))),
+                    Some(load(LANE_MASK16.as_ptr().add(8 - n.saturating_sub(8)))),
+                )
             };
-            let (d0, r0) = block16::<TB>(&c, &mut rs, hr, hw, e, b0, unpacklo8(lo, hi), None, hpm);
+            let (d0, r0) = block16::<TB>(&c, &mut rs, hr, hw, e, b0, unpacklo8(lo, hi), m0, hpm);
             hpm = zero_v;
             let (d1, r1) = block16::<TB>(
                 &c,
@@ -1113,7 +1150,7 @@ unsafe fn body16<const TB: bool>(
                 e,
                 b0 + 8,
                 unpackhi8(lo, hi),
-                mask1,
+                m1,
                 zero_v,
             );
             if TB {
@@ -1128,10 +1165,6 @@ unsafe fn body16<const TB: bool>(
                 hi_surv = b0 + ((31 - live.leading_zeros() as usize) >> 1);
             }
             b0 += 16;
-        }
-        // Single blocks for the rest of the band and the row-gap extension; the end test on the
-        // grid first + 8k (item 6).
-        loop {
             if b0 >= bend {
                 if b0 >= limit {
                     break;
@@ -1140,27 +1173,6 @@ unsafe fn body16<const TB: bool>(
                     break;
                 }
             }
-            let idx = load(sb.add(b0));
-            let s_lo = unpacklo8(lut32(t0lo, t1lo, idx), lut32(t0hi, t1hi, idx));
-            let mask = if b0 + 8 <= limit {
-                None
-            } else {
-                Some(load(LANE_MASK16.as_ptr().add(8 - (limit - b0))))
-            };
-            let (d0, r0) = block16::<TB>(&c, &mut rs, hr, hw, e, b0, s_lo, mask, hpm);
-            hpm = zero_v;
-            if TB {
-                // 8 script bytes; the other 8 are overwritten by the next block or lie past the row
-                store(tr.add(b0 - first), packus16(r0, r0));
-            }
-            let live = (!mask8(d0)) & 0xFFFF;
-            if live != 0 {
-                if lo_surv == usize::MAX {
-                    lo_surv = b0 + (live.trailing_zeros() as usize >> 1);
-                }
-                hi_surv = b0 + ((31 - live.leading_zeros() as usize) >> 1);
-            }
-            b0 += 8;
         }
         let proc_end = b0;
         if proc_end > sc.dirty {
@@ -1269,11 +1281,11 @@ unsafe fn block8<const TB: bool>(
     let v = subsu8(h0, c.goe);
     // row gap: pw = inclusive prefix maximum of v[j] + (j+1)g (unsigned, exact)
     let w = adds_u8(v, c.ramp1);
-    let p = max_u8(w, bsl1(w));
-    let p = max_u8(p, bsl2(p));
-    let p = max_u8(p, bsl4(p));
-    let pw = max_u8(p, bsl8(p));
-    let f = subsu8(max_u8(bsl1(pw), rs.carry), c.ramp);
+    let p = max_u8(w, up1b(w));
+    let p = max_u8(p, up2b(p));
+    let p = max_u8(p, up4b(p));
+    let pw = max_u8(p, up8b(p));
+    let f = subsu8(max_u8(up1b(pw), rs.carry), c.ramp);
     rs.carry = subsu8(max_u8(rs.carry, bcast_last8(pw, c.kb15)), c.ge16);
     let mut hh = max8(h0, f);
     if let Some(m) = lane_mask {
@@ -1285,13 +1297,13 @@ unsafe fn block8<const TB: bool>(
     let gt = gt8(hh, rs.bestv);
     let thr;
     if mask8(gt) != 0 {
-        // A new best inside this block: exact running best per lane.
-        let y0 = bsl1(hh);
-        let y1 = max8(y0, bsl1(y0));
-        let y2 = max8(y1, bsl2(y1));
-        let y3 = max8(y2, bsl4(y2));
-        let y4 = max8(y3, bsl8(y3));
-        let pfx = max8(y4, rs.bestv);
+        // A new best inside this block: exact running best per lane (exclusive prefix maximum
+        // as in `block16`).
+        let y1 = max8(hh, up1b(hh));
+        let y2 = max8(y1, up2b(y1));
+        let y3 = max8(y2, up4b(y2));
+        let y4 = max8(y3, up8b(y3));
+        let pfx = max8(up1b(y4), rs.bestv);
         thr = subsu8(pfx, c.xv);
         let rm = mask8(gt8(hh, pfx));
         rs.rec_b = b + (31 - rm.leading_zeros()) as usize;
@@ -1617,6 +1629,7 @@ mod tests {
     //! (`LOSAT_X_DPREPLAY`) is in `x_xdrop_avx2.rs`.
     use super::super::kernel;
     use super::super::tests::{random_problem, reference, Problem, Rng};
+    use super::super::x_capture::load_dir;
     use super::*;
 
     /// The 128-bit kernel of `xdrop_simd.rs` in the build its dispatch picks; `m8` selects the
@@ -2149,6 +2162,220 @@ mod tests {
             }
             assert!(fences > 0 && ops_total > 0 && wide > 0);
             assert!(edge_in > 0 && edge_out > 0 && big_ge > 0);
+        }
+    }
+
+    /// Replay of captured problems (`LOSAT_X_DPCAPTURE` output) through the 128-bit kernel of
+    /// `xdrop_simd.rs` and the kernels of this file, both compared with the recorded result, then
+    /// both timed over all problems per lane width and traceback / score-only: "cold" = the
+    /// problems back to back in capture order (median of `LOSAT_X_DPREPLAY_REPS` repetitions,
+    /// default 7), "warm-min" = each call timed alone after its residues and matrix were read,
+    /// fastest of the repetitions, summed. It runs on every target with the 128-bit kernels, the
+    /// wasm32 simd128 build included (the replay in `x_xdrop_avx2.rs` needs AVX2).
+    /// `LOSAT_X_DPREPLAY_OUT=<file>` appends the table to a file.
+    #[test]
+    #[ignore = "needs LOSAT_X_DPREPLAY=<capture directory>"]
+    fn w128_replay_captured_problems() {
+        use std::time::Instant;
+        let Some(dir) = std::env::var_os("LOSAT_X_DPREPLAY") else {
+            eprintln!("LOSAT_X_DPREPLAY is not set: nothing to replay");
+            return;
+        };
+        assert!(available(), "the replay needs the 128-bit kernels");
+        let dir = std::path::PathBuf::from(dir);
+        let probs = load_dir(&dir).expect("read the capture files");
+        let reps: usize = std::env::var("LOSAT_X_DPREPLAY_REPS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(7)
+            .max(1);
+        let (mut sa, mut sw) = (XdropScratch::new(), XdropScratch::new());
+        // categories: [tb][8-bit] -> (problem indices, cells)
+        let mut cats: [[(Vec<usize>, u64); 2]; 2] = Default::default();
+        let (mut unhandled, mut declined) = (0usize, 0usize);
+        let mut m8s = Vec::with_capacity(probs.len());
+        for (i, p) in probs.iter().enumerate() {
+            let (q, s, scores) = (p.row_seq(), p.col_seq(), p.scores());
+            let m8 = fits_8bit(&scores, p.gap_open, p.gap_extend, p.x_drop);
+            m8s.push(m8);
+            let Some(want) = p.result else {
+                unhandled += 1;
+                continue;
+            };
+            let args = (p.len1, p.len2, p.gap_open, p.gap_extend, p.x_drop);
+            // SAFETY: `available()` checked above.
+            let (r128, rw) = unsafe {
+                (
+                    xs128(
+                        m8,
+                        p.tb,
+                        &q,
+                        &s,
+                        &scores,
+                        args.0,
+                        args.1,
+                        args.2,
+                        args.3,
+                        args.4,
+                        p.check_fence,
+                        &mut sa,
+                    ),
+                    w128(
+                        m8,
+                        p.tb,
+                        &q,
+                        &s,
+                        &scores,
+                        args.0,
+                        args.1,
+                        args.2,
+                        args.3,
+                        args.4,
+                        p.check_fence,
+                        &mut sw,
+                    ),
+                )
+            };
+            assert_eq!(r128, Some(want), "problem {i}: 128-bit vs recorded");
+            assert_eq!(sa.ops, p.ops, "problem {i}: 128-bit ops vs recorded");
+            match rw {
+                Some(r) => {
+                    assert_eq!(r, want, "problem {i}: w128 vs recorded");
+                    assert_eq!(sw.ops, p.ops, "problem {i}: w128 ops vs recorded");
+                }
+                None => declined += 1,
+            }
+            let cat = &mut cats[usize::from(p.tb)][usize::from(m8.is_some())];
+            cat.0.push(i);
+            cat.1 += want.cells;
+        }
+        let checked: usize = cats.iter().flatten().map(|c| c.0.len()).sum();
+        let mut report = format!(
+            "w128 replay {} ({}): problems={} checked={checked} (128-bit, w128: 0 mismatches) \
+             unhandled={unhandled} declined_by_w128={declined} reps={reps}\n",
+            dir.display(),
+            std::env::consts::ARCH,
+            probs.len()
+        );
+        // One call as `xdrop_align` makes it: a call w128 declines goes to the 128-bit kernel.
+        let call = |w: bool, i: usize, sc: &mut XdropScratch| {
+            let p = &probs[i];
+            let (q, s, scores) = (p.row_seq(), p.col_seq(), p.scores());
+            let a = (
+                p.len1,
+                p.len2,
+                p.gap_open,
+                p.gap_extend,
+                p.x_drop,
+                p.check_fence,
+            );
+            // SAFETY: `available()` checked above.
+            unsafe {
+                let r = if w {
+                    w128(
+                        m8s[i], p.tb, &q, &s, &scores, a.0, a.1, a.2, a.3, a.4, a.5, sc,
+                    )
+                } else {
+                    None
+                };
+                if r.is_none() {
+                    xs128(
+                        m8s[i], p.tb, &q, &s, &scores, a.0, a.1, a.2, a.3, a.4, a.5, sc,
+                    )
+                } else {
+                    r
+                }
+            }
+        };
+        let touch = |i: usize| {
+            let p = &probs[i];
+            let mut acc = 0i64;
+            for &b in p.rows.iter().chain(p.cols.iter()) {
+                acc += b as i64;
+            }
+            for &v in &p.matrix {
+                acc += v as i64;
+            }
+            std::hint::black_box(acc);
+        };
+        let timer_ns = {
+            let mut v: Vec<f64> = (0..15)
+                .map(|_| {
+                    let t0 = Instant::now();
+                    for _ in 0..10_000 {
+                        std::hint::black_box(Instant::now().elapsed());
+                    }
+                    t0.elapsed().as_nanos() as f64 / 10_000.0
+                })
+                .collect();
+            v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            v[v.len() / 2]
+        };
+        report += &format!("  timer cost {timer_ns:.1} ns/call (subtracted from warm calls)\n");
+        for (tb, by_w) in cats.iter().enumerate() {
+            for (w8, (list, cells)) in by_w.iter().enumerate() {
+                if list.is_empty() {
+                    continue;
+                }
+                let cat = format!(
+                    "{}-{}",
+                    if tb == 1 { "traceback" } else { "score-only" },
+                    if w8 == 1 { 8 } else { 16 }
+                );
+                let mut cold = [Vec::new(), Vec::new()];
+                let mut best = [vec![f64::MAX; list.len()], vec![f64::MAX; list.len()]];
+                for rep in 0..reps {
+                    for slot in 0..2 {
+                        let w = (slot + rep) % 2 == 1;
+                        let sc = if w { &mut sw } else { &mut sa };
+                        let t0 = Instant::now();
+                        for &i in list {
+                            std::hint::black_box(call(w, i, sc));
+                        }
+                        cold[usize::from(w)].push(t0.elapsed().as_nanos() as f64);
+                        let bk = &mut best[usize::from(w)];
+                        for (j, &i) in list.iter().enumerate() {
+                            touch(i);
+                            let t0 = Instant::now();
+                            std::hint::black_box(call(w, i, sc));
+                            bk[j] = bk[j].min(t0.elapsed().as_nanos() as f64 - timer_ns);
+                        }
+                    }
+                }
+                let (nc, nl) = (*cells as f64, list.len() as f64);
+                let med = |v: &mut Vec<f64>| {
+                    v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                    v[v.len() / 2]
+                };
+                let (c128, cw) = (med(&mut cold[0]), med(&mut cold[1]));
+                let (b128, bw): (f64, f64) = (best[0].iter().sum(), best[1].iter().sum());
+                report += &format!(
+                    "  {cat}: problems={} cells={cells} | cold 128-bit ns/cell={:.3} ns/call={:.0} \
+                     w128 ns/cell={:.3} ns/call={:.0} 128/w128={:.2} | warm-min 128-bit \
+                     ns/cell={:.3} ns/call={:.0} w128 ns/cell={:.3} ns/call={:.0} 128/w128={:.2}\n",
+                    list.len(),
+                    c128 / nc,
+                    c128 / nl,
+                    cw / nc,
+                    cw / nl,
+                    c128 / cw,
+                    b128 / nc,
+                    b128 / nl,
+                    bw / nc,
+                    bw / nl,
+                    b128 / bw
+                );
+            }
+        }
+        eprint!("{report}");
+        if let Some(out) = std::env::var_os("LOSAT_X_DPREPLAY_OUT") {
+            use std::io::Write;
+            let mut f = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(out)
+                .expect("open LOSAT_X_DPREPLAY_OUT");
+            f.write_all(report.as_bytes()).expect("write report");
         }
     }
 }

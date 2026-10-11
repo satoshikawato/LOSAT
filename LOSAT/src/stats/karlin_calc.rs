@@ -626,7 +626,7 @@ fn compute_h_from_lambda(sfp: &ScoreFreqProfile, lambda: f64) -> Result<f64, Str
 fn x_karlin_fast() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("LOSAT_X_KARLINFAST").is_some())
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_KARLINFAST"))
 }
 
 /// Compute K from Lambda and H

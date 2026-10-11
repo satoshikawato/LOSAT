@@ -348,10 +348,10 @@ static LANE_MASK8: [u8; 32] = [
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 ];
 
-/// No NCBI counterpart: LOSAT_X_DPW128 (any value) and a CPU that runs these kernels (SSE4.1 on
-/// x86_64, as the 128-bit kernels; always on wasm32 simd128).
+/// No NCBI counterpart: LOSAT_X_DPW128 on (`utils/xswitch.rs`) and a CPU that runs these kernels
+/// (SSE4.1 on x86_64, as the 128-bit kernels; always on wasm32 simd128).
 pub(super) fn switch_on() -> bool {
-    std::env::var_os("LOSAT_X_DPW128").is_some() && available()
+    crate::utils::xswitch::on("LOSAT_X_DPW128") && available()
 }
 
 /// No NCBI counterpart: the 128-bit kernels' CPU check (LOSAT_X_DPNOAVX selects the SSE4.1 build).

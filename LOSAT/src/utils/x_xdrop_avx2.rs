@@ -162,9 +162,9 @@ static KSPLIT: [u8; 32] = [
     11, 13, 15,
 ];
 
-/// No NCBI counterpart: LOSAT_X_DPAVX2 (any value) and a CPU that runs these kernels.
+/// No NCBI counterpart: LOSAT_X_DPAVX2 on (`utils/xswitch.rs`) and a CPU that runs these kernels.
 pub(super) fn switch_on() -> bool {
-    std::env::var_os("LOSAT_X_DPAVX2").is_some() && available()
+    crate::utils::xswitch::on("LOSAT_X_DPAVX2") && available()
 }
 
 /// No NCBI counterpart: AVX2 and the features of the 128-bit AVX build (LOSAT_X_DPNOAVX, which

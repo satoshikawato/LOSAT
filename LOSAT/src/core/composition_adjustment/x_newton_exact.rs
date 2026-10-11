@@ -196,7 +196,7 @@ pub(crate) fn mode() -> u8 {
     *MODE.get_or_init(|| {
         if std::env::var_os("LOSAT_X_NEWTONEXACTSHADOW").is_some() {
             2
-        } else if std::env::var_os("LOSAT_X_NEWTONEXACT").is_some() {
+        } else if crate::utils::xswitch::on("LOSAT_X_NEWTONEXACT") {
             1
         } else {
             0

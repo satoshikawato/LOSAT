@@ -32,7 +32,8 @@ fn fixture(name: &str) -> PathBuf {
 fn tblastx(query: &Path, subject: &Path, switches: &[(&str, &str)]) -> (Vec<u8>, String) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
     for (name, _) in std::env::vars_os() {
-        if name.to_string_lossy().starts_with("LOSAT_") {
+        // LOSAT_X_DEFAULT stays (src/utils/xswitch.rs): with 0 the run is on the reference paths.
+        if name.to_string_lossy().starts_with("LOSAT_") && name != "LOSAT_X_DEFAULT" {
             command.env_remove(name);
         }
     }

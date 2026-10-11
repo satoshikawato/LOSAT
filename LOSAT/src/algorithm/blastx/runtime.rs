@@ -271,7 +271,7 @@ impl RuntimeObserver for Noop {
 pub(crate) fn x_bx_lean() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("LOSAT_X_BXLEAN").is_some())
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXLEAN"))
 }
 
 // No NCBI counterpart: reads the LOSAT_X_BXPAR switch once; it does not change any value NCBI
@@ -280,7 +280,7 @@ pub(crate) fn x_bx_lean() -> bool {
 pub(crate) fn x_bx_parallel() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("LOSAT_X_BXPAR").is_some())
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXPAR"))
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3329-3334,3499-3502
@@ -397,7 +397,7 @@ pub fn search_internal(
 pub(crate) fn x_bx_pool() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("LOSAT_X_BXPOOL").is_some())
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXPOOL"))
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:259-262,289-291
@@ -418,7 +418,7 @@ pub(crate) fn x_bx_pool() -> bool {
 pub(crate) fn x_bx_batch() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("LOSAT_X_BXBATCH").is_some())
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXBATCH"))
 }
 
 thread_local! {

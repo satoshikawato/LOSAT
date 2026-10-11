@@ -211,7 +211,7 @@ impl BlastAaLookupTable {
 fn x_lut_arena() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("LOSAT_X_LUTARENA").is_some())
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_LUTARENA"))
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:52,67
@@ -644,7 +644,7 @@ fn prepare_lookup_query(
 pub(crate) fn x_lut_split() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("LOSAT_X_LUTSPLIT").is_some())
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_LUTSPLIT"))
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2797

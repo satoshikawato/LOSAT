@@ -206,7 +206,7 @@ fn erfc_ncbi(z: f64) -> f64 {
 fn x_erf_memo() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("LOSAT_X_ERFMEMO").is_some())
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_ERFMEMO"))
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:5248-5254
@@ -425,7 +425,7 @@ fn x_product_error(a: f64, b: f64, product: f64) -> f64 {
 fn x_dekker() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("LOSAT_X_DEKKER").is_some())
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_DEKKER"))
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143-143

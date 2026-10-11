@@ -403,7 +403,7 @@ thread_local! {
 fn x_skip_events() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("LOSAT_X_TBNEVENTS").is_some())
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNEVENTS"))
 }
 
 // No NCBI counterpart: reads the LOSAT_X_TBNPAR / LOSAT_X_TBNPARSHADOW switches once; it does not
@@ -414,7 +414,7 @@ fn x_tbn_units() -> u8 {
     *ON.get_or_init(|| {
         if std::env::var_os("LOSAT_X_TBNPARSHADOW").is_some() {
             2
-        } else if std::env::var_os("LOSAT_X_TBNPAR").is_some() {
+        } else if crate::utils::xswitch::on("LOSAT_X_TBNPAR") {
             1
         } else {
             0
@@ -626,7 +626,7 @@ impl XQuerySide {
     pub(super) fn new() -> Option<Self> {
         use std::sync::OnceLock;
         static ON: OnceLock<bool> = OnceLock::new();
-        ON.get_or_init(|| std::env::var_os("LOSAT_X_TBNQSIDE").is_some())
+        ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNQSIDE"))
             .then(|| Self {
                 frames: OnceLock::new(),
                 frames_in_progress: std::sync::Mutex::new(()),

@@ -343,7 +343,7 @@ pub(super) fn x_search_batches<'p>(
         // master node (-mt_mode 1). Here, if the plans are shared and fit and there is at least one
         // batch per thread, the batches are searched side by side, each as the one-thread search,
         // and the reports are returned in batch order.
-        if std::env::var_os("LOSAT_X_TBNBATCH").is_some() && pool.enabled() {
+        if crate::utils::xswitch::on("LOSAT_X_TBNBATCH") && pool.enabled() {
             let fits = super::search_seed::XSubjectSide::all_fit(subjects.iter().map(Vec::len));
             if let Some(side) = x_subject_side
                 .as_ref()
@@ -1212,7 +1212,7 @@ fn run_local_search_with_pool(
 pub(super) fn x_tbn_parallel() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("LOSAT_X_TBNPAR").is_some())
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNPAR"))
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3329-3334,3346-3350,3499-3502

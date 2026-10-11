@@ -666,7 +666,7 @@ fn word_finder_plain(
     let lazy_context = {
         use std::sync::OnceLock;
         static ON: OnceLock<bool> = OnceLock::new();
-        *ON.get_or_init(|| std::env::var_os("LOSAT_X_BXLAZYCTX").is_some())
+        *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXLAZYCTX"))
     };
     lookup.scan(
         subject,
@@ -837,7 +837,7 @@ fn word_finder_bucketed(
     let lazy_context = {
         use std::sync::OnceLock;
         static ON: OnceLock<bool> = OnceLock::new();
-        *ON.get_or_init(|| std::env::var_os("LOSAT_X_BXLAZYCTX").is_some())
+        *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXLAZYCTX"))
     };
     // EXPERIMENT (LOSAT_X_SEEDBUCKET): the hits of a scan window grouped by
     // diagonal range before the per-diagonal tests (see tblastx::x_seed_bucket;

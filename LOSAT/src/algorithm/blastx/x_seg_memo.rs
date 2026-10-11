@@ -55,7 +55,7 @@ pub(crate) fn x_bxsegmemo_mode() -> u8 {
     *MODE.get_or_init(|| {
         if std::env::var_os("LOSAT_X_BXSEGMEMOSHADOW").is_some() {
             2
-        } else if std::env::var_os("LOSAT_X_BXSEGMEMO").is_some() {
+        } else if crate::utils::xswitch::on("LOSAT_X_BXSEGMEMO") {
             1
         } else {
             0

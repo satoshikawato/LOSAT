@@ -97,7 +97,7 @@ pub(crate) fn mode() -> u8 {
     *MODE.get_or_init(|| {
         if std::env::var_os("LOSAT_X_NEWTONLANESSHADOW").is_some() {
             2
-        } else if std::env::var_os("LOSAT_X_NEWTONLANES").is_some() {
+        } else if crate::utils::xswitch::on("LOSAT_X_NEWTONLANES") {
             1
         } else {
             0

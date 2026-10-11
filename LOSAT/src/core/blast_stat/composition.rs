@@ -191,7 +191,7 @@ pub fn compute_blosum62_ideal_karlin_params() -> Result<KarlinParams, String> {
     // The memo keeps the value of the first call of the port below and returns it again. It is reuse only.
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
-    if *ON.get_or_init(|| std::env::var_os("LOSAT_X_IDEALMEMO").is_some()) {
+    if *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_IDEALMEMO")) {
         static IDEAL: OnceLock<Result<KarlinParams, String>> = OnceLock::new();
         return IDEAL
             .get_or_init(x_compute_blosum62_ideal_karlin_params)

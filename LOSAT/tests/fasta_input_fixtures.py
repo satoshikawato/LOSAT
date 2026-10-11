@@ -1001,8 +1001,10 @@ def sha256(data: bytes) -> str:
 
 
 def clean_env(case_env: str = "") -> dict[str, str]:
+    # LOSAT_X_DEFAULT is kept (LOSAT/src/utils/xswitch.rs): with 0 the fixtures run on the reference paths.
     env = {k: v for k, v in os.environ.items()
-           if k not in REPORT_ENV and not k.startswith(("LOSAT_", "RAYON_", "NCBI_CONFIG__"))}
+           if k == "LOSAT_X_DEFAULT"
+           or (k not in REPORT_ENV and not k.startswith(("LOSAT_", "RAYON_", "NCBI_CONFIG__")))}
     for item in shlex.split(case_env):
         key, _, value = item.partition("=")
         env[key] = value

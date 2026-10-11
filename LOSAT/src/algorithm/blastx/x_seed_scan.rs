@@ -49,7 +49,7 @@ pub(crate) fn x_bxscan_mode() -> u8 {
     *MODE.get_or_init(|| {
         if std::env::var_os("LOSAT_X_BXSCANSHADOW").is_some() {
             2
-        } else if std::env::var_os("LOSAT_X_BXSCAN").is_some() {
+        } else if crate::utils::xswitch::on("LOSAT_X_BXSCAN") {
             1
         } else {
             0
@@ -184,7 +184,7 @@ fn x_word_finder_direct(
     let lazy_context = {
         use std::sync::OnceLock;
         static ON: OnceLock<bool> = OnceLock::new();
-        *ON.get_or_init(|| std::env::var_os("LOSAT_X_BXLAZYCTX").is_some())
+        *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXLAZYCTX"))
     };
     // Lookup::scan's set-up, with length = subject.len() - 1 as word_finder_plain passes it.
     let length = subject.len().saturating_sub(1);

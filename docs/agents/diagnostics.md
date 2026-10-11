@@ -53,18 +53,49 @@ Moved from `AGENTS.md` on 2026-10-08 so that it is read only when needed.
 - `LOSAT_TBLASTX_SERIAL_SCAN_CHUNKS=1` diagnostic-only sequential TBLASTX
   scan-interior chunking; this does not enable parallel scan work.
 
-## Performance switches (experimental, off by default)
+## Performance switches (on by default)
 
-Ported from the round 3-4 performance work (2026-10-10, branch `perf/strict-set`). Every switch
-is off unless its variable is set; without a switch the original path runs. The names are
-provisional (`x_` prefixes, `EXPERIMENT` comments) until the default is decided. Each switch of
-the strict set gives the reference result by construction (the same integer results, or the same
-floating-point operations in the same order, or only a change of order, placement or reuse); the
-`...SHADOW` / `...VERIFY` switches run the new and the reference computation side by side and stop
-with an assertion on the first difference. `LOSAT_X_*=1` means "set to any value" unless a value
-is shown.
+Ported from the round 3-5 performance work (2026-10, `perf/strict-set` and the packages after it).
+Each switch of the strict set gives the reference result by construction (the same integer
+results, or the same floating-point operations in the same order, or only a change of order,
+placement or reuse), so none of them changes the output. Until main 62102f7a every switch was
+off unless its variable was set. Since `perf/strict-default` (2026-10-12) the 43 switches of the
+strict set are on by default, and their variables mean (`LOSAT/src/utils/xswitch.rs`):
 
-The strict set as one block:
+| `LOSAT_X_<NAME>` | `LOSAT_X_DEFAULT` | the switch is |
+| --- | --- | --- |
+| `0` | any | off |
+| any other non-empty value | any | on (a value switch takes the number if it is in range, otherwise its built-in value) |
+| not set, or empty | `0` | off, the default before the change |
+| not set, or empty | not set, empty, or anything but `0` | on |
+
+- `LOSAT_X_DEFAULT=0` runs the previous (reference) paths everywhere. With some variables set
+  as well, it gives the run those variables gave before the default changed.
+- `LOSAT_X_<NAME>=0` turns one switch off, to find which path a problem comes from. Single
+  switches off are a diagnostic aid: `DPAVX2` and `DPW128` act only with `DPFAST`; `TBNSSIDE`,
+  `TBNQSIDE` and `TBNBATCH` only with `TBNPAR` (`TBNEVENTS` only without it); `TBNBATCH` needs
+  `TBNSSIDE`; `BXBATCH` needs `BXPOOL`; `AHEAD` needs `GREEDYSPEC` for megablast; `MBBATCH` runs
+  where `MBDELAY` does not.
+- White space around a value is ignored (`set LOSAT_X_DEFAULT=0 && ...` in cmd.exe stores `0 `).
+  Only `0` means off; `00`, `false` or `off` are "any other value".
+- The variables are read once per process (once per Wasm instance), except `GREEDYSPEC`,
+  `MBDELAY`, `MBBATCH` and `TBNBATCH`, which are read once per search or lookup build. The Web
+  reactors get an empty WASI environment, so they always run the default.
+- The `...SHADOW` / `...VERIFY` switches run the new and the reference computation side by side
+  and stop with an assertion on the first difference. They, the counters, the timing aids and the
+  tuning variables are not part of the set: they are off unless set to any value, and a shadow
+  switch turns its switch on whatever the two variables above say (except
+  `LOSAT_X_AHEADSHADOW`, which compares only while `AHEAD` is on). A shadow compares the kernel
+  the default selects (for `LOSAT_X_DPSHADOW` the 256-bit, `DPW128` or base kernel that takes the
+  call).
+- The names are provisional (`x_` prefixes, `EXPERIMENT` comments). The 43 single variables are
+  to be removed once the default has run on every CI environment and through a few releases;
+  `LOSAT_X_DEFAULT` stays. In the descriptions below `LOSAT_X_<NAME>=1` shows the switch, not a
+  setting that is needed, and "strict-set candidate" marks the round-5 switches, which are in
+  the set.
+
+The strict set (the variables that are on; `STRICT_SET` in `xswitch.rs`), written as the
+environment that turned it on before the change. The three numbers are the built-in values:
 
 ```bash
 export LOSAT_X_DPFAST=1 LOSAT_X_COMPFAST=1 LOSAT_X_PURGEFAST=1 LOSAT_X_ITREEFAST=1 LOSAT_X_CTXFAST=1
@@ -75,8 +106,37 @@ export LOSAT_X_ERFMEMO=1 LOSAT_X_DEKKER=1 LOSAT_X_LUTARENA=1 LOSAT_X_LUTSPLIT=1
 export LOSAT_X_TBNPAR=1 LOSAT_X_TBNEVENTS=1 LOSAT_X_TBNQSIDE=1 LOSAT_X_TBNSSIDE=1 LOSAT_X_TBNBATCH=1
 export LOSAT_X_BXPAR=1 LOSAT_X_BXLAZYCTX=1 LOSAT_X_BXLEAN=1 LOSAT_X_BXPOOL=1 LOSAT_X_BXCHUNK=64 LOSAT_X_BXBATCH=1
 export LOSAT_X_CODONFAST=1
-export LOSAT_X_NEWTONEXACT=1 LOSAT_X_SEEDBUCKET=1
+export LOSAT_X_NEWTONEXACT=1
+export LOSAT_X_DPAVX2=1 LOSAT_X_DPW128=1
+export LOSAT_X_BXLUT=1 LOSAT_X_BXSCAN=1 LOSAT_X_BXSEGMEMO=1
+export LOSAT_X_PAIRPAR=1 LOSAT_X_NEWTONLANES=1 LOSAT_X_GREEDYPRELIM=1
 ```
+
+Value switches: `LOSAT_X_AHEAD` (2 to 65,536, built-in 16), `LOSAT_X_MBBATCH` (2 to 4,096,
+built-in 64), `LOSAT_X_BXCHUNK` (1 or more, built-in 64).
+
+`LOSAT_X_SEEDBUCKET` was in the block of the round 3-4 set and is not on by default (it stays
+"set to any value"): it numbers the lookup hits of one chunk scan in a 32-bit counter, so the
+scan order it restores is exact only up to 2^32 hits per scan, which a query and a subject of
+a few megabases can exceed.
+
+What runs per target:
+
+- x86_64: the vector X-drop DP (`DPFAST`: SSE4.1 or AVX 128-bit; `DPAVX2`: 256-bit with AVX2;
+  `DPW128`), the AVX2 builds of the greedy rows and of the Newton kernels where the CPU has AVX2,
+  `MBDELAY` with the prefetch instruction.
+- wasm32 (built with simd128): the simd128 X-drop DP (`DPW128` replaces the first kernel),
+  `MBBATCH` instead of `MBDELAY`, `DEKKER`; everything else is the same Rust as on x86_64
+  without AVX2.
+- aarch64 and any other target: no vector X-drop DP is compiled, so `DPFAST`, `DPAVX2` and
+  `DPW128` do nothing (the scalar port runs); `MBBATCH` instead of `MBDELAY`; `DEKKER` does
+  nothing (it is compiled for wasm32 only); everything else as on wasm32.
+- One thread (`-num_threads 1`, a build without the `parallel` feature, wasm32 without
+  `wasm-threads`): the scheduling switches (`AHEAD`, `GREEDYSPEC`, `PAIRPAR` for
+  blastn/megablast, `SEGSHARE`, `TBNBATCH`, `BXPAR`, `BXPOOL`, `BXBATCH`, `BXCHUNK`) leave the
+  reference code running. The unit paths have no thread-count gate: the tblastn `TBNPAR` units
+  (with `TBNSSIDE` / `TBNQSIDE`; only its parallel redo needs a pool) and the TBLASTX `PAIRPAR`
+  units run in order on the calling thread.
 
 Same values, faster computation:
 
@@ -210,8 +270,9 @@ Scheduling (each value computed by one thread with the original function; order 
   context's chains (order kept) on a fresh unmasked diagonal table, and the unit lists go through the
   reference's sort and merge in the reference order (`tblastx/x_pair_par.rs`, exactness argument in
   its header). Only when every query context, or every subject chunk, is at most `slack` = diagonal
-  table size minus query length long; otherwise, and with the trace, debug, diagnostics and chunk
-  switches, the reference loop runs (`LOSAT_X_STATS=1` counts `fallback_guard` / `fallback_gate`;
+  table size minus query length long, and `slack` plus twice the longest subject chunk stays under
+  2^29 (it does unless `-window_size` is near 2^29); otherwise, and with the trace, debug,
+  diagnostics and chunk switches, the reference loop runs (`LOSAT_X_STATS=1` counts `fallback_guard` / `fallback_gate`;
   `LOSAT_TIMING` prints one `x_pairpar` line). Strict-set candidate (S-E, round 5).
 - `LOSAT_X_PAIRPARSHADOW=1` shadow of `LOSAT_X_PAIRPAR`: the unit path and the reference loop for
   every subject, the subject's combined ungapped HSP list compared field by field (the first

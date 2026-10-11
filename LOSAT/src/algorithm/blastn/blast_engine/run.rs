@@ -3973,7 +3973,7 @@ fn x_ctx_mode() -> u8 {
     *MODE.get_or_init(|| {
         if std::env::var_os("LOSAT_X_CTXSHADOW").is_some() {
             2
-        } else if std::env::var_os("LOSAT_X_CTXFAST").is_some() {
+        } else if crate::utils::xswitch::on("LOSAT_X_CTXFAST") {
             1
         } else {
             0
@@ -7085,7 +7085,7 @@ fn search_query_batch(
     // earlier in the same call, and a larger `max_dist` left by an earlier
     // call only saves retries.
     let speculative_traceback = requested_parallel
-        && (config.use_dp || std::env::var_os("LOSAT_X_GREEDYSPEC").is_some())
+        && (config.use_dp || crate::utils::xswitch::on("LOSAT_X_GREEDYSPEC"))
         && std::env::var_os("LOSAT_DEBUG_COORDS").is_none()
         && std::env::var_os("LOSAT_DEBUG_COORDS_START").is_none();
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3850,3918-3919

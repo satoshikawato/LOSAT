@@ -79,6 +79,9 @@ python3 -c "import json; print(json.load(open('dist/releases.json'))['latest'])"
 
 - `LOSAT_WEB_REACTORS` is required: without it the build is a FakeEngine site (release ID
   `<commit>-fake`), which must not be deployed.
+- Build with `NODE_ENV` unset (or `production`): any other value makes a development build with
+  the build machine's paths in the bundle, so `vite.config.ts` refuses it (`unset NODE_ENV` first
+  in a shell or a tool that exports it).
 - `LOSAT_WEB_ANALYTICS_ENDPOINT=/api/visit` turns measurement on in the site index
   (`/releases.json`). It is a property of the site, not of the release. Set it for the preview and
   the production site alike (S16 decision 9: the same `dist/` is promoted, below); the preview has

@@ -4,9 +4,20 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { BUILD_INPUTS, CERTIFICATION_RECORDS, SHARED_MEMORY_GUARD, VERIFICATION_CELLS } from '../../build/inputs';
-import { appBuild, RELEASE_ID_PATTERN, releaseId, sourceState } from '../../build/release';
+import { appBuild, buildEnvironmentProblem, RELEASE_ID_PATTERN, releaseId, sourceState } from '../../build/release';
 
 const COMMIT = '0123456789abcdef0123456789abcdef01234567';
+
+describe('the build environment', () => {
+  it('refuses a build with NODE_ENV set to anything but production: that would be a development build, with source paths in the bundle', () => {
+    expect(buildEnvironmentProblem({})).toBeUndefined();
+    expect(buildEnvironmentProblem({ NODE_ENV: '' })).toBeUndefined();
+    expect(buildEnvironmentProblem({ NODE_ENV: 'production' })).toBeUndefined();
+    for (const value of ['test', 'development', 'Production']) {
+      expect(buildEnvironmentProblem({ NODE_ENV: value })).toMatch(new RegExp(`^NODE_ENV=${value}: this would be a development build.*Unset NODE_ENV`));
+    }
+  });
+});
 
 describe('release ID', () => {
   it('takes LOSAT_WEB_RELEASE_ID when it is set', () => {

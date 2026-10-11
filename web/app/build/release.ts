@@ -85,3 +85,20 @@ export function releaseId(reactors: Reactors | undefined, options: ReleaseIdOpti
 export function appBuild(source: SourceState | undefined): string {
   return source === undefined ? 'unknown' : source.commit.slice(0, APP_BUILD_LENGTH);
 }
+
+/**
+ * Why `vite build` must not run in this environment, or undefined. NODE_ENV set to anything
+ * but `production` makes Vite build for development (Vitest exports NODE_ENV=test to its child
+ * processes; a developer's shell may export `development`): the Vue plugin then writes each
+ * component's absolute source path into the bundle (`__file`), a path of the build machine in a
+ * served file (TD-11) and bytes that differ between clones, so the release ID would no longer
+ * fix the bytes. Unset or empty is fine: Vite then builds for production.
+ */
+export function buildEnvironmentProblem(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  const value = env['NODE_ENV'];
+  if (value === undefined || value === '' || value === 'production') return undefined;
+  return (
+    `NODE_ENV=${value}: this would be a development build, with the build machine's paths in the served files. ` +
+    'Unset NODE_ENV (or set it to production) and build again (docs/web/deploy_cloudflare.md).'
+  );
+}

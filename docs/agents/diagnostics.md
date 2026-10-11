@@ -90,6 +90,17 @@ Same values, faster computation:
   and band steps as the 128-bit kernels, so the same result and edit script; a call the 256-bit
   kernel does not take runs on the 128-bit kernel (`utils/x_xdrop_avx2.rs`). Covered by
   `LOSAT_X_DPSHADOW=1`; `LOSAT_X_DPNOAVX=1` turns it off as well.
+- `LOSAT_X_DPW128=1` (with `LOSAT_X_DPFAST`; strict-set candidate) the 128-bit X-drop DP kernels
+  with the per-row savings of `LOSAT_X_DPAVX2` (first and last survivor kept while the row runs,
+  row gap as a prefix maximum with a two-operation carry, the first lane's missing diagonal as a
+  lane mask, column residues copied 16 at a time, row tables of `Rows28` / `Flat` matrices built
+  with vector instructions, byte shifts in the form V8 compiles to `palignr`): the same values,
+  lane width, blocks and result as the 128-bit kernels; a call it does not take (8-bit lanes with
+  `16 * gap_extend - (gap_open + gap_extend) > 128`) runs on the 128-bit kernel
+  (`utils/x_xdrop_w128.rs`). On x86_64 it runs where the 128-bit kernel would (after
+  `LOSAT_X_DPAVX2` when both are set on an AVX2 machine, which keeps priority), on the SSE4.1 or
+  AVX-128 build; on wasm32 it replaces the simd128 128-bit kernel (the only DP kernel there).
+  Covered by `LOSAT_X_DPSHADOW=1`.
 - `LOSAT_X_GREEDYFAST=1` megablast greedy alignment, one distance in three passes of 256 cells,
   match extension 8 bases at a time. Shadow: `LOSAT_X_GREEDYSHADOW=1`.
 - `LOSAT_X_GREEDYPRELIM=1` (strict-set candidate, S-G, round 5) the preliminary (score-only)
@@ -225,7 +236,10 @@ X-drop DP capture and replay (diagnostics, not part of the strict set):
   (default 25). The search output does not change.
 - `LOSAT_X_DPREPLAY=<dir>` input of the ignored test `replay_captured_problems`
   (`cargo test --release replay_captured_problems -- --ignored --nocapture`): every captured
-  problem through the scalar loops, the 128-bit and the 256-bit kernels and the dispatch, compared
-  with the recorded result, then the 128-bit and 256-bit kernels timed (median ns per cell and per
-  call, traceback and score-only, 8- and 16-bit lanes). `LOSAT_X_DPREPLAY_REPS` (default 7),
-  `LOSAT_X_DPREPLAY_OUT=<file>` (append the table to a file).
+  problem through the scalar loops, the 128-bit, the `LOSAT_X_DPW128` and the 256-bit kernels and
+  the dispatch, compared with the recorded result, then the three kernels timed (median ns per cell
+  and per call, traceback and score-only, 8- and 16-bit lanes). `LOSAT_X_DPREPLAY_REPS` (default 7),
+  `LOSAT_X_DPREPLAY_OUT=<file>` (append the table to a file). The ignored test
+  `w128_replay_captured_problems` does the same for the 128-bit and the `LOSAT_X_DPW128` kernels
+  only and also runs in the wasm32-wasip1 test build (the libtest `.wasm` under a WASI host such
+  as Node's `wasi` module with a root preopen), which times the simd128 kernels.

@@ -1486,12 +1486,16 @@ mod tests {
     use super::super::kernel;
     use super::super::tests::{random_problem, reference, Problem, Rng};
     use super::super::x_capture::load_dir;
+    // EXPERIMENT (LOSAT_X_DPW128): the 128-bit kernels with per-row savings, compared and timed in
+    // the replay next to the 128-bit and the 256-bit kernels.
+    use super::super::x_w128 as w128;
     use super::*;
 
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
     enum Kern {
         V128,
         V256,
+        W128,
     }
 
     /// One call of the chosen kernel; `m8` selects the 8-bit lanes (as `fits_8bit` would).
@@ -1537,6 +1541,18 @@ mod tests {
             }
             (Kern::V256, false, None) => {
                 align16::<false>(q, s, scores, len1, len2, go, ge, x, cf, sc)
+            }
+            (Kern::W128, true, Some(m)) => {
+                w128::run8::<true>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
+            }
+            (Kern::W128, false, Some(m)) => {
+                w128::run8::<false>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
+            }
+            (Kern::W128, true, None) => {
+                w128::run16::<true>(q, s, scores, len1, len2, go, ge, x, cf, sc)
+            }
+            (Kern::W128, false, None) => {
+                w128::run16::<false>(q, s, scores, len1, len2, go, ge, x, cf, sc)
             }
         }
     }
@@ -1896,10 +1912,11 @@ mod tests {
     }
 
     /// Replay of captured problems (`LOSAT_X_DPCAPTURE` output): every problem through the scalar
-    /// loops, the 128-bit and the 256-bit kernels and the `xdrop_align` dispatch, all compared
-    /// with the recorded result; then the 128-bit and the 256-bit kernels timed over all
-    /// problems (`LOSAT_X_DPREPLAY_REPS` repetitions, default 7, median), per lane width and
-    /// traceback / score-only. `LOSAT_X_DPREPLAY_OUT=<file>` appends the table to a file.
+    /// loops, the 128-bit and the 256-bit kernels, the 128-bit kernels with per-row savings
+    /// (`x_xdrop_w128.rs`, "w128") and the `xdrop_align` dispatch, all compared with the recorded
+    /// result; then the 128-bit, w128 and 256-bit kernels timed over all problems
+    /// (`LOSAT_X_DPREPLAY_REPS` repetitions, default 7, median), per lane width and traceback /
+    /// score-only. `LOSAT_X_DPREPLAY_OUT=<file>` appends the table to a file.
     #[test]
     #[ignore = "needs LOSAT_X_DPREPLAY=<capture directory>"]
     fn replay_captured_problems() {
@@ -1916,7 +1933,8 @@ mod tests {
             .and_then(|v| v.parse().ok())
             .unwrap_or(7)
             .max(1);
-        let (mut sa, mut sb, mut sd) = (
+        let (mut sa, mut sb, mut sd, mut sw) = (
+            XdropScratch::new(),
             XdropScratch::new(),
             XdropScratch::new(),
             XdropScratch::new(),
@@ -1926,7 +1944,7 @@ mod tests {
         // [tb][8-bit]: rows and lanes the 256-bit kernel processes (a traceback run of the problem
         // records them; the band evolves the same way without traceback)
         let mut shape = [[(0u64, 0u64); 2]; 2];
-        let (mut unhandled, mut declined) = (0usize, 0usize);
+        let (mut unhandled, mut declined, mut declined_w) = (0usize, 0usize, 0usize);
         let mut m8s = Vec::with_capacity(probs.len());
         for (i, p) in probs.iter().enumerate() {
             let (q, s, scores) = (p.row_seq(), p.col_seq(), p.scores());
@@ -2007,6 +2025,31 @@ mod tests {
                 }
                 None => declined += 1,
             }
+            // SAFETY: AVX2 checked above (the 128-bit kernels need a subset of its features).
+            let rw = unsafe {
+                run(
+                    Kern::W128,
+                    m8,
+                    p.tb,
+                    &q,
+                    &s,
+                    &scores,
+                    args.0,
+                    args.1,
+                    args.2,
+                    args.3,
+                    args.4,
+                    p.check_fence,
+                    &mut sw,
+                )
+            };
+            match rw {
+                Some(r) => {
+                    assert_eq!(r, want, "problem {i}: w128 vs recorded");
+                    assert_eq!(sw.ops, p.ops, "problem {i}: w128 ops vs recorded");
+                }
+                None => declined_w += 1,
+            }
             assert_eq!(p.replay(&mut sd), Some(want), "problem {i}: dispatch");
             assert_eq!(sd.ops, p.ops, "problem {i}: dispatch ops");
             let prob = Problem {
@@ -2031,13 +2074,14 @@ mod tests {
         }
         let checked: usize = cats.iter().flatten().map(|c| c.0.len()).sum();
         let mut report = format!(
-            "replay {}: problems={} checked={checked} (scalar, 128-bit, 256-bit, dispatch: 0 \
-             mismatches) unhandled={unhandled} declined_by_256={declined} reps={reps}\n",
+            "replay {}: problems={} checked={checked} (scalar, 128-bit, 256-bit, w128, dispatch: 0 \
+             mismatches) unhandled={unhandled} declined_by_256={declined} \
+             declined_by_w128={declined_w} reps={reps}\n",
             dir.display(),
             probs.len()
         );
-        // One call as `xdrop_align` makes it: a call the 256-bit kernel declines goes to the
-        // 128-bit kernel.
+        // One call as `xdrop_align` makes it: a call the 256-bit or the w128 kernel declines goes to
+        // the 128-bit kernel.
         let call = |k: Kern, i: usize, sc: &mut XdropScratch| {
             let p = &probs[i];
             let (q, s, scores) = (p.row_seq(), p.col_seq(), p.scores());
@@ -2062,7 +2106,7 @@ mod tests {
                 }
             };
             let r = go(k, sc);
-            if r.is_none() && k == Kern::V256 {
+            if r.is_none() && k != Kern::V128 {
                 go(Kern::V128, sc)
             } else {
                 r
@@ -2104,36 +2148,47 @@ mod tests {
             "  cold = problems back to back in capture order; warm = each call timed alone after its \
              residues and matrix were read (timer cost {timer_ns:.1} ns/call subtracted)\n"
         );
+        // kernels in report order; index into `times` / `best`
+        const KERNS: [Kern; 3] = [Kern::V128, Kern::W128, Kern::V256];
+        let kidx = |k: Kern| KERNS.iter().position(|&x| x == k).unwrap();
         for (tb, by_w) in cats.iter().enumerate() {
             for (w8, (list, cells)) in by_w.iter().enumerate() {
                 if list.is_empty() {
                     continue;
                 }
                 let (rows, lanes) = shape[tb][w8];
-                report += &format!(
-                    "  {}-{}: rows per call {:.1}, cells per row {:.1}, lanes processed per cell \
-                     {:.3} (256-bit)\n",
+                let cat = format!(
+                    "{}-{}",
                     if tb == 1 { "traceback" } else { "score-only" },
-                    if w8 == 1 { 8 } else { 16 },
+                    if w8 == 1 { 8 } else { 16 }
+                );
+                report += &format!(
+                    "  {cat}: rows per call {:.1}, cells per row {:.1}, lanes processed per cell \
+                     {:.3} (256-bit)\n",
                     rows as f64 / list.len() as f64,
                     *cells as f64 / rows.max(1) as f64,
                     lanes as f64 / *cells as f64
                 );
                 for warm in [false, true] {
-                    let mut times = [Vec::new(), Vec::new()];
+                    let mut times = [Vec::new(), Vec::new(), Vec::new()];
                     // warm: fastest time of each call over the repetitions
-                    let mut best = [vec![f64::MAX; list.len()], vec![f64::MAX; list.len()]];
+                    let mut best = [
+                        vec![f64::MAX; list.len()],
+                        vec![f64::MAX; list.len()],
+                        vec![f64::MAX; list.len()],
+                    ];
                     for rep in 0..reps {
-                        let order = if rep % 2 == 0 {
-                            [Kern::V128, Kern::V256]
-                        } else {
-                            [Kern::V256, Kern::V128]
-                        };
-                        for k in order {
-                            let sc = if k == Kern::V128 { &mut sa } else { &mut sb };
+                        // the order of the kernels rotates from one repetition to the next
+                        for slot in 0..KERNS.len() {
+                            let k = KERNS[(slot + rep) % KERNS.len()];
+                            let sc = match k {
+                                Kern::V128 => &mut sa,
+                                Kern::W128 => &mut sw,
+                                Kern::V256 => &mut sb,
+                            };
                             let total = if warm {
                                 let mut ns = 0f64;
-                                let bk = &mut best[usize::from(k == Kern::V256)];
+                                let bk = &mut best[kidx(k)];
                                 for (j, &i) in list.iter().enumerate() {
                                     touch(i);
                                     let t0 = Instant::now();
@@ -2150,50 +2205,52 @@ mod tests {
                                 }
                                 t0.elapsed().as_nanos() as f64
                             };
-                            times[usize::from(k == Kern::V256)].push(total);
+                            times[kidx(k)].push(total);
                         }
                     }
                     let stat = |v: &mut Vec<f64>| {
                         v.sort_by(|a, b| a.partial_cmp(b).unwrap());
                         (v[v.len() / 2], v[0], v[v.len() - 1])
                     };
-                    let (m128, lo128, hi128) = stat(&mut times[0]);
-                    let (m256, lo256, hi256) = stat(&mut times[1]);
                     let (nc, nl) = (*cells as f64, list.len() as f64);
                     if warm {
-                        let (b128, b256): (f64, f64) = (best[0].iter().sum(), best[1].iter().sum());
+                        let b: Vec<f64> = best.iter().map(|v| v.iter().sum()).collect();
                         report += &format!(
-                            "  {}-{} warm-min (fastest of {reps} per call, summed): 128-bit \
-                             ns/cell={:.3} ns/call={:.0} | 256-bit ns/cell={:.3} ns/call={:.0} | \
-                             128/256={:.2}\n",
-                            if tb == 1 { "traceback" } else { "score-only" },
-                            if w8 == 1 { 8 } else { 16 },
-                            b128 / nc,
-                            b128 / nl,
-                            b256 / nc,
-                            b256 / nl,
-                            b128 / b256
+                            "  {cat} warm-min (fastest of {reps} per call, summed): 128-bit \
+                             ns/cell={:.3} ns/call={:.0} | w128 ns/cell={:.3} ns/call={:.0} | \
+                             256-bit ns/cell={:.3} ns/call={:.0} | 128/w128={:.2} 128/256={:.2}\n",
+                            b[0] / nc,
+                            b[0] / nl,
+                            b[1] / nc,
+                            b[1] / nl,
+                            b[2] / nc,
+                            b[2] / nl,
+                            b[0] / b[1],
+                            b[0] / b[2]
                         );
                     }
-                    report += &format!(
-                        "  {}-{} {}: problems={} cells={} | 128-bit ns/cell={:.3} ns/call={:.0} \
-                         (min {:.3} max {:.3}) | 256-bit ns/cell={:.3} ns/call={:.0} (min {:.3} \
-                         max {:.3}) | 128/256={:.2}\n",
-                        if tb == 1 { "traceback" } else { "score-only" },
-                        if w8 == 1 { 8 } else { 16 },
+                    let st: Vec<(f64, f64, f64)> = times.iter_mut().map(stat).collect();
+                    let mut line = format!(
+                        "  {cat} {}: problems={} cells={}",
                         if warm { "warm" } else { "cold" },
                         list.len(),
-                        cells,
-                        m128 / nc,
-                        m128 / nl,
-                        lo128 / nc,
-                        hi128 / nc,
-                        m256 / nc,
-                        m256 / nl,
-                        lo256 / nc,
-                        hi256 / nc,
-                        m128 / m256
+                        cells
                     );
+                    for (name, &(m, lo, hi)) in ["128-bit", "w128", "256-bit"].iter().zip(&st) {
+                        line += &format!(
+                            " | {name} ns/cell={:.3} ns/call={:.0} (min {:.3} max {:.3})",
+                            m / nc,
+                            m / nl,
+                            lo / nc,
+                            hi / nc
+                        );
+                    }
+                    line += &format!(
+                        " | 128/w128={:.2} 128/256={:.2}\n",
+                        st[0].0 / st[1].0,
+                        st[0].0 / st[2].0
+                    );
+                    report += &line;
                 }
             }
         }

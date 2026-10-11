@@ -100,7 +100,7 @@ pub(crate) fn x_greedy_prelim_mode() -> u8 {
     *MODE.get_or_init(|| {
         if std::env::var_os("LOSAT_X_GREEDYPRELIMSHADOW").is_some() {
             2
-        } else if std::env::var_os("LOSAT_X_GREEDYPRELIM").is_some() {
+        } else if crate::utils::xswitch::on("LOSAT_X_GREEDYPRELIM") {
             1
         } else {
             0

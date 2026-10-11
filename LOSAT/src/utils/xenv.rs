@@ -18,7 +18,7 @@ use std::sync::OnceLock;
 
 fn cached() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("LOSAT_X_ENVCACHE").is_some())
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_ENVCACHE"))
 }
 
 /// `std::env::var("LOSAT_DEBUG_COORDS").is_ok()`

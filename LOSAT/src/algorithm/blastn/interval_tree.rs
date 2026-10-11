@@ -230,7 +230,7 @@ fn x_itree_mode() -> u8 {
             0
         } else if std::env::var_os("LOSAT_X_ITREESHADOW").is_some() {
             2
-        } else if std::env::var_os("LOSAT_X_ITREEFAST").is_some() {
+        } else if crate::utils::xswitch::on("LOSAT_X_ITREEFAST") {
             1
         } else {
             0

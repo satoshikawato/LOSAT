@@ -489,10 +489,7 @@ pub fn search_preliminary(
 fn x_bx_chunk() -> Option<usize> {
     use std::sync::OnceLock;
     static K: OnceLock<Option<usize>> = OnceLock::new();
-    *K.get_or_init(|| {
-        let raw = std::env::var("LOSAT_X_BXCHUNK").ok()?;
-        Some(raw.parse::<usize>().ok().filter(|&k| k >= 1).unwrap_or(64))
-    })
+    *K.get_or_init(|| crate::utils::xswitch::value("LOSAT_X_BXCHUNK", 1..=usize::MAX, 64))
 }
 
 pub(crate) fn search_core(

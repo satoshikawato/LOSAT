@@ -2413,15 +2413,10 @@ enum XMbQueue {
 }
 
 fn x_mb_queue() -> Option<XMbQueue> {
-    if cfg!(target_arch = "x86_64") && std::env::var_os("LOSAT_X_MBDELAY").is_some() {
+    if cfg!(target_arch = "x86_64") && crate::utils::xswitch::on("LOSAT_X_MBDELAY") {
         return Some(XMbQueue::Delay);
     }
-    std::env::var_os("LOSAT_X_MBBATCH")?;
-    let size = std::env::var("LOSAT_X_MBBATCH")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .filter(|n: &usize| (2..=4096).contains(n))
-        .unwrap_or(64);
+    let size = crate::utils::xswitch::value("LOSAT_X_MBBATCH", 2..=4096, 64)?;
     Some(XMbQueue::Batch(size))
 }
 

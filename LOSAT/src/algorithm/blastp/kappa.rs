@@ -358,7 +358,7 @@ pub(crate) fn x_seg_share() -> u8 {
     *MODE.get_or_init(|| {
         if std::env::var_os("LOSAT_X_SEGSHARESHADOW").is_some() {
             2
-        } else if std::env::var_os("LOSAT_X_SEGSHARE").is_some() {
+        } else if crate::utils::xswitch::on("LOSAT_X_SEGSHARE") {
             1
         } else {
             0

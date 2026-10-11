@@ -21,7 +21,7 @@ use std::collections::VecDeque;
 fn x_dust_fast() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("LOSAT_X_DUSTFAST").is_some())
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_DUSTFAST"))
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/dustmask/symdust.cpp:243-253
@@ -45,7 +45,7 @@ fn x_dust_ring() -> u8 {
     *MODE.get_or_init(|| {
         if std::env::var_os("LOSAT_X_DUSTSHADOW").is_some() {
             2
-        } else if std::env::var_os("LOSAT_X_DUSTRING").is_some() {
+        } else if crate::utils::xswitch::on("LOSAT_X_DUSTRING") {
             1
         } else {
             0

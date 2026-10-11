@@ -2,6 +2,11 @@
 
 All notable release-facing changes and milestones are documented here.
 
+## [Unreleased]
+
+- The exact performance paths of the 2026-10 performance work (43 `LOSAT_X_*` switches of the "strict set") are on by default in every program, natively and in WebAssembly. Each of them gives the reference result by construction, so reports do not change. `LOSAT_X_DEFAULT=0` runs the previous paths, and `LOSAT_X_<NAME>=0` turns one switch off ([`docs/agents/diagnostics.md`](docs/agents/diagnostics.md), "Performance switches"). The Web reactors receive no environment and always run the default.
+- Costs of the default: TBLASTX uses more memory on large inputs (305 to 375 MiB at 8 threads on a 0.66 Mb by 0.61 Mb pair), megablast keeps one byte per base of a subject while it is searched, and tblastn keeps up to 256 MiB of subject translations for a search. On targets other than x86_64 and WebAssembly no vector X-drop kernel exists, and the scalar code runs there.
+
 ## [v0.2.0] - TLOSAN release candidate (unpublished)
 
 - Added local `tblastn` search with 27 NCBI genetic-code IDs and outfmt 0/6/7. Code 32 and local selected subject translation follow the TBLASTN-only `PD-TLOSAN-LOCAL-GENCODE-32` decision.

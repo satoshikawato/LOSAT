@@ -66,7 +66,7 @@ pub(super) fn x_bxlut_mode() -> u8 {
     *MODE.get_or_init(|| {
         if std::env::var_os("LOSAT_X_BXLUTSHADOW").is_some() {
             2
-        } else if std::env::var_os("LOSAT_X_BXLUT").is_some() {
+        } else if crate::utils::xswitch::on("LOSAT_X_BXLUT") {
             1
         } else {
             0

@@ -510,7 +510,7 @@ fn entropy_from_state_vector(state: &[i32]) -> f64 {
 fn x_seg_memo() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("LOSAT_X_SEGMEMO").is_some())
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_SEGMEMO"))
 }
 
 thread_local! {
@@ -1149,7 +1149,7 @@ fn x_seg_fast() -> u8 {
     *MODE.get_or_init(|| {
         if std::env::var_os("LOSAT_X_SEGSHADOW").is_some() {
             2
-        } else if std::env::var_os("LOSAT_X_SEGFAST").is_some() {
+        } else if crate::utils::xswitch::on("LOSAT_X_SEGFAST") {
             1
         } else {
             0

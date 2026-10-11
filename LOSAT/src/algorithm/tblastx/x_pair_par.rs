@@ -148,7 +148,7 @@ pub(super) fn mode() -> u8 {
     *MODE.get_or_init(|| {
         if std::env::var_os("LOSAT_X_PAIRPARSHADOW").is_some() {
             2
-        } else if std::env::var_os("LOSAT_X_PAIRPAR").is_some() {
+        } else if crate::utils::xswitch::on("LOSAT_X_PAIRPAR") {
             1
         } else {
             0

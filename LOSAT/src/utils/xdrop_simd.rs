@@ -2107,6 +2107,13 @@ mod kernel {
     x86_entry!(align_sse, align8_sse, "ssse3,sse4.1");
 }
 
+/// No NCBI counterpart: whether the vector kernels of this file (`mod kernel`) are compiled for
+/// the target: x86_64, and wasm32 built with simd128.
+const KERNEL_COMPILED: bool = cfg!(any(
+    target_arch = "x86_64",
+    all(target_arch = "wasm32", target_feature = "simd128")
+));
+
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:766-770
 /// ```c
 ///     if (!score_only) {
@@ -2116,13 +2123,16 @@ mod kernel {
 /// scalar port of these functions (0), the vector kernels (1), or both with a comparison (2) run.
 ///
 /// 0 = scalar only, 1 = SIMD, 2 = SIMD and compare every call with the scalar kernel.
+/// LOSAT_X_DPFAST is on by default (`utils/xswitch.rs`); on a target without a vector kernel
+/// (`KERNEL_COMPILED` false) the mode stays 0, because `xdrop_align` returns `None` for every
+/// call there and mode 1 would only build the kernel's tables before the scalar port runs.
 pub(crate) fn mode() -> u8 {
     use std::sync::OnceLock;
     static MODE: OnceLock<u8> = OnceLock::new();
     *MODE.get_or_init(|| {
         if std::env::var_os("LOSAT_X_DPSHADOW").is_some() {
             2
-        } else if std::env::var_os("LOSAT_X_DPFAST").is_some() {
+        } else if KERNEL_COMPILED && crate::utils::xswitch::on("LOSAT_X_DPFAST") {
             1
         } else {
             0

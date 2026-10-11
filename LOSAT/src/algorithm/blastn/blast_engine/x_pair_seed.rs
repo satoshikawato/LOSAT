@@ -83,7 +83,7 @@ fn switches() -> (bool, bool) {
     static SWITCHES: OnceLock<(bool, bool)> = OnceLock::new();
     *SWITCHES.get_or_init(|| {
         (
-            std::env::var_os("LOSAT_X_PAIRPAR").is_some(),
+            crate::utils::xswitch::on("LOSAT_X_PAIRPAR"),
             std::env::var_os("LOSAT_X_PAIRPARSHADOW").is_some(),
         )
     })

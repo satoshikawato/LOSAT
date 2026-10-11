@@ -611,7 +611,7 @@ impl XSubjectSide {
     pub(super) fn enabled() -> bool {
         use std::sync::OnceLock;
         static ON: OnceLock<bool> = OnceLock::new();
-        *ON.get_or_init(|| std::env::var_os("LOSAT_X_TBNSSIDE").is_some())
+        *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNSSIDE"))
     }
 
     pub(super) fn new(subjects: usize, gencode: u8, mask_lowercase: bool) -> Self {

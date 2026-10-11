@@ -80,15 +80,7 @@ use std::sync::{Mutex, MutexGuard, OnceLock};
 /// Look-ahead distance in indexes; `None` when the switch is off.
 pub(crate) fn window() -> Option<usize> {
     static WINDOW: OnceLock<Option<usize>> = OnceLock::new();
-    *WINDOW.get_or_init(|| {
-        let raw = std::env::var("LOSAT_X_AHEAD").ok()?;
-        Some(
-            raw.parse::<usize>()
-                .ok()
-                .filter(|n| (2..=65_536).contains(n))
-                .unwrap_or(16),
-        )
-    })
+    *WINDOW.get_or_init(|| crate::utils::xswitch::value("LOSAT_X_AHEAD", 2..=65_536, 16))
 }
 
 /// No NCBI counterpart: reads the switch of the shadow comparison; it does not change any

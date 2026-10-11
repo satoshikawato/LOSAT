@@ -532,7 +532,7 @@ fn hsp_for_handle(hsp_storage: &[Option<BlastnHsp>], handle: HspHandle) -> Optio
 fn x_purge_fast() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("LOSAT_X_PURGEFAST").is_some())
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_PURGEFAST"))
 }
 
 /// Purge HSPs with common endpoints for a single subject.

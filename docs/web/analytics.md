@@ -80,12 +80,12 @@ allows, denies), wiring in `src/composition.ts`. Tests: `tests/unit/analytics.te
 - No dependency: it declares the few types it uses and imports `src/domain/analytics.ts`, which
   Pages' build (wrangler) bundles with it. The file also exports `handleVisit` and
   `measurementRequest` for the unit tests; Pages makes routes only of `onRequest*` exports.
-- Location: Pages reads `functions/` at the root of the Pages project. With the project's root
-  directory set to `web/app` and the build output `dist`, that is `web/app/functions/`; with
-  `wrangler pages deploy dist`, run it from `web/app` so that `functions/` is found. The static
-  assets are served without running the Function (only `/api/visit` routes to it).
-  These Cloudflare details were written from its documentation as known to us and were not re-read
-  in this work package (no external requests were allowed): check them when the project is set up.
+- Location: Pages reads `functions/` at the root of the Pages project. The site is deployed by
+  direct upload (S16 decision 9, [`deploy_cloudflare.md`](deploy_cloudflare.md)):
+  `wrangler pages deploy dist`, run from `web/app` so that `web/app/functions/` is uploaded with
+  it. The static assets are served without running the Function (only `/api/visit` routes to it).
+  `deploy_cloudflare.md` holds the Cloudflare details, read from Cloudflare's documentation on
+  2026-10-11; where this document and that one differ, that one applies.
 - The `Origin` check keeps other sites' pages from posting through a visitor's browser; it does not
   authenticate. Anyone can post a well-formed event with a made-up client ID, which can only add a
   visit count.
@@ -103,12 +103,16 @@ In GA4 (never in the repository):
 5. Keep Google signals and advertising links off; enhanced measurement has no effect (no gtag), and
    can be turned off on the stream as well.
 
-In Cloudflare Pages (production environment only):
+In Cloudflare Pages (S16 decision 9; the steps are in [`deploy_cloudflare.md`](deploy_cloudflare.md)):
 
-1. Environment variables `GA4_MEASUREMENT_ID` and `GA4_API_SECRET`, the secret encrypted. Leave both
-   unset for previews: the Function then forwards nothing.
-2. The production site index with `"analytics": {"endpoint": "/api/visit"}`; a preview's index can
-   leave it out, so that no notice is shown there.
+1. Environment variables `GA4_MEASUREMENT_ID` and `GA4_API_SECRET`, the secret encrypted, in the
+   production environment only. Previews have neither: their Function answers 204 and forwards
+   nothing.
+2. The site is built with `LOSAT_WEB_ANALYTICS_ENDPOINT=/api/visit`, so its index has
+   `"analytics": {"endpoint": "/api/visit"}`, and the same `dist/` is deployed as a preview and
+   then promoted to production. A preview therefore shows the consent notice and posts to its own
+   `/api/visit`, which measures nothing there; the preview check exercises that path. (A site
+   built without the variable measures nothing anywhere.)
 
 GA4 counts `app_visit` events and users by client ID. Measurement Protocol events carry no session
 or engagement data, so GA4's session and engagement reports stay empty or partial; read the event

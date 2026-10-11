@@ -80,10 +80,11 @@ python3 -c "import json; print(json.load(open('dist/releases.json'))['latest'])"
 - `LOSAT_WEB_REACTORS` is required: without it the build is a FakeEngine site (release ID
   `<commit>-fake`), which must not be deployed.
 - `LOSAT_WEB_ANALYTICS_ENDPOINT=/api/visit` turns measurement on in the site index
-  (`/releases.json`). It is a property of the site, not of the release. Recommended: set it for
-  the preview and the production site alike (the same `dist/` is promoted, below); the preview has
+  (`/releases.json`). It is a property of the site, not of the release. Set it for the preview and
+  the production site alike (S16 decision 9: the same `dist/` is promoted, below); the preview has
   no GA4 secrets, so its Function forwards nothing, and the preview check can exercise
-  `/api/visit`. Leave it out to deploy a site that measures nothing.
+  `/api/visit`. [`analytics.md`](analytics.md) says the same. Leave it out to deploy a site that
+  measures nothing.
 - Release IDs: `<commit 12>-<engine digest 8>`, the first 12 hex digits of the commit in every
   clone (a CI build and a local build of one commit get the same ID and the same bytes).
   `LOSAT_WEB_RELEASE_ID=<name>` names one by hand

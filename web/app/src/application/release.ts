@@ -209,9 +209,10 @@ export class ReleaseManager {
   }
 
   /**
-   * Whether the switch needs no download first: only in a browser without service workers,
-   * where nothing can be stored or checked. Where they exist, a worker that cannot be
-   * registered is a failure of offline use, and the update still downloads and checks first.
+   * Whether the switch needs no download first: only in a browser without service workers (or
+   * where they are blocked), where nothing can be stored or checked. Where they exist, a worker
+   * that cannot be registered is a failure of offline use, and the update still downloads and
+   * checks first.
    */
   switchesDirectly(): boolean {
     return !this.deps.offline.supported;
@@ -228,6 +229,11 @@ export class ReleaseManager {
     };
     this.setUpdate({ kind: 'downloading', latest });
     const connected = await this.connect();
+    // The registration showed that service workers are blocked: the switch is offered without a download.
+    if (!connected.ok && this.switchesDirectly()) {
+      if (current()) this.setUpdate({ kind: 'reviewing', latest });
+      return;
+    }
     const result = connected.ok
       ? await this.deps.offline
           .prepare(latest, (progress) => {
@@ -309,13 +315,18 @@ export class ReleaseManager {
   /**
    * Connects to the worker, once it has worked. A registration that fails or times out where
    * service workers exist is a failure of offline use ("Try again" connects again), never
-   * "unsupported", which would offer a switch that nothing checked.
+   * "unsupported", which would offer a switch that nothing checked; only a registration that
+   * shows service workers blocked (the port's `supported` turns false) is "unsupported".
    */
   private connect(): Promise<PrepareResult> {
     this.connected ??= this.deps.offline.connect().then(
       () => ({ ok: true as const }),
       (error: unknown) => {
         this.connected = undefined;
+        if (!this.deps.offline.supported) {
+          this.setOffline({ kind: 'unsupported', reason: message(error) });
+          return { ok: false as const, reason: message(error) };
+        }
         const reason = `the offline worker could not be started (${message(error)})`;
         this.setOffline({ kind: 'failed', reason });
         return { ok: false as const, reason };

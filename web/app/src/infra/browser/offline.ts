@@ -68,6 +68,7 @@ function workerMessage(value: unknown): WorkerMessage | undefined {
 export function browserOffline(): OfflinePort {
   const container = typeof navigator !== 'undefined' && 'serviceWorker' in navigator ? navigator.serviceWorker : undefined;
   let registration: ServiceWorkerRegistration | undefined;
+  let blocked = false;
 
   const active = async (): Promise<ServiceWorker | undefined> => {
     if (container === undefined) return undefined;
@@ -103,7 +104,10 @@ export function browserOffline(): OfflinePort {
     });
 
   return {
-    supported: container !== undefined,
+    // False without service workers, and once a registration showed that they are blocked.
+    get supported(): boolean {
+      return container !== undefined && !blocked;
+    },
 
     async connect(): Promise<void> {
       if (container === undefined) throw new Error('this browser has no service workers');
@@ -111,7 +115,10 @@ export function browserOffline(): OfflinePort {
       // `serviceWorkers: 'block'`, a privacy tool) may resolve with nothing instead of refusing:
       // say so, not what reading an undefined registration throws.
       const registered = (await container.register(SW_URL, { scope: SW_SCOPE, updateViaCache: 'none' })) as ServiceWorkerRegistration | undefined;
-      if (registered === undefined) throw new Error('service workers are blocked in this browser');
+      if (registered === undefined) {
+        blocked = true;
+        throw new Error('service workers are blocked in this browser');
+      }
       registration = registered;
       if (registration.active !== null) return;
       let timer: ReturnType<typeof setTimeout> | undefined;

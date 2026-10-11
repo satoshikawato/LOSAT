@@ -20,8 +20,12 @@ const props = defineProps<{
 const update = computed(() => props.state.update);
 const shown = computed(() => update.value.kind !== 'none' && update.value.kind !== 'dismissed');
 const latest = computed(() => ('latest' in update.value ? update.value.latest : ''));
-/** Only a browser without service workers switches without a download and check first. */
-const direct = computed(() => props.release.switchesDirectly());
+/** Only a browser without service workers (or where they are blocked) switches without a download and check first. */
+const direct = computed(() => {
+  // Read again when the offline state changes: the manager learns of a block at its first registration.
+  void props.state.offline;
+  return props.release.switchesDirectly();
+});
 </script>
 
 <template>

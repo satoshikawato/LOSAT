@@ -14,7 +14,10 @@ export type PrepareResult = { readonly ok: true } | { readonly ok: false; readon
 
 /** The site's service worker, which stores releases for offline use. */
 export interface OfflinePort {
-  /** Whether the browser has service workers; without them the app works online only. */
+  /**
+   * Whether the browser has service workers that the page may use; without them the app works
+   * online only. It turns false when a registration shows that they are blocked.
+   */
   readonly supported: boolean;
   /** Registers the site's worker (or finds it) and waits until it is active; rejects with the reason it is not. */
   connect(): Promise<void>;

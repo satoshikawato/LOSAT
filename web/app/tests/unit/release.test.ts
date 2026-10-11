@@ -512,6 +512,27 @@ describe('explicit update', () => {
     expect(host.reloads).toBe(1);
   });
 
+  it('treats a browser whose registration shows service workers blocked as one without them', async () => {
+    // A run is being prepared, so this tab's release waits; the user asks for the download first.
+    const { offline, pin, host, manager, runs, state, start } = setup({ latest: 'b', runs: [run(1, 'preparing')] });
+    offline.connect.mockImplementation(async () => {
+      offline.supported = false;
+      throw new Error('service workers are blocked in this browser');
+    });
+    await start();
+    manager.review();
+    await manager.download();
+    expect(state().update).toEqual({ kind: 'reviewing', latest: 'b' });
+    expect(manager.switchesDirectly()).toBe(true);
+    expect(state().offline).toEqual({ kind: 'unsupported', reason: 'service workers are blocked in this browser' });
+    runs.set({ runs: [run(1, 'running')] });
+    await flush();
+    expect(state().offline).toEqual({ kind: 'unsupported', reason: 'service workers are blocked in this browser' });
+    await manager.switchNow();
+    expect(pin.value).toBe('b');
+    expect(host.reloads).toBe(1);
+  });
+
   it('offers no switch until the download is checked when the worker cannot be registered where service workers exist', async () => {
     const { offline, pin, host, manager, state, start } = setup({ latest: 'b' });
     offline.connectError = new Error('the operation is insecure');

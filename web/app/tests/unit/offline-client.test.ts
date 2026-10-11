@@ -21,6 +21,8 @@ describe('connecting to the service worker', () => {
     const offline = browserOffline();
     expect(offline.supported).toBe(true);
     await expect(offline.connect()).rejects.toThrow(/^service workers are blocked in this browser$/);
+    // From then on the page treats the browser as one without service workers (the update switches without a download).
+    expect(offline.supported).toBe(false);
   });
 
   it("passes on the browser's refusal", async () => {

@@ -20,6 +20,7 @@ import {
 } from '../../src/domain/result-index';
 import {
   approvedExceptions,
+  appBuildName,
   loadedRunBadge,
   optionKey,
   verificationBadge,
@@ -308,6 +309,16 @@ describe('verificationBadge', () => {
     const loadedFake = loadedRunBadge(fake, { engineBuild: 'fake-engine', app: site.app }, site);
     expect(loadedFake.level).toBe('development');
     expect(loadedFake.details).toEqual([...fake.details, 'Loaded from a session file (saved by LOSAT Web 0.2.0, build b2): its outputs were written by fake-engine.']);
+  });
+
+  it('names a build of hex digits a commit, the digits that begin the release ID in the header (screen review 1 I5)', () => {
+    const site = { engineBuilds: ['threads-A'], app: { version: '0.2.0', build: 'e2fb7128' } };
+    const certified = verificationBadge(input, table);
+    expect(loadedRunBadge(certified, { engineBuild: 'threads-B', app: { version: '0.0.0', build: 'd607a2f5' } }, site).details).toEqual([
+      "Loaded from a session file (saved by LOSAT Web 0.0.0, commit d607a2f5): its outputs were written by threads-B; this site's verification covers threads-A (LOSAT Web 0.2.0, commit e2fb7128).",
+    ]);
+    expect(appBuildName({ version: '0.0.0', build: 'unknown' })).toBe('LOSAT Web 0.0.0, build unknown');
+    expect(appBuildName({ version: '0.0.0', build: 'D607A2F5' })).toBe('LOSAT Web 0.0.0, build D607A2F5');
   });
 
   it('names the approved exceptions of a non-default subject genetic code', () => {

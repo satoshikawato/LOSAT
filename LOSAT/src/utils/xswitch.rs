@@ -8,9 +8,13 @@
 //! | `LOSAT_X_<NAME>` | `LOSAT_X_DEFAULT` | the switch is |
 //! | --- | --- | --- |
 //! | `0` | any | off |
-//! | any other value | any | on (for a value switch, the number given or the built-in value) |
+//! | any other non-empty value | any | on (for a value switch, the number given or the built-in value) |
 //! | not set, or empty | `0` | off, the default before the change |
 //! | not set, or empty | not set, empty, or any other value | on |
+//!
+//! White space around a value is ignored (`set LOSAT_X_DEFAULT=0 && ...` in cmd.exe stores `0 `),
+//! so a value of spaces only counts as empty. Only `0` means off: `00`, `false` or `off` are "any
+//! other value".
 //!
 //! `LOSAT_X_DEFAULT=0` alone runs the previous paths. `LOSAT_X_DEFAULT=0` with some variables set
 //! gives the run that those variables gave before the change. The shadow and verify switches, the
@@ -77,12 +81,13 @@ pub(crate) const STRICT_SET: [&str; 43] = [
     "LOSAT_X_GREEDYPRELIM",
 ];
 
-/// No NCBI counterpart: the table in the module header, for one variable's value.
+/// No NCBI counterpart: the table in the module header, for one variable's value. A value that
+/// is not UTF-8 is "any other value".
 fn state(value: Option<&OsStr>, default_on: bool) -> bool {
-    match value {
-        Some(v) if v == "0" => false,
-        Some(v) if !v.is_empty() => true,
-        _ => default_on,
+    match value.map(|v| v.to_str().map(str::trim)) {
+        Some(Some("0")) => false,
+        Some(Some("")) | None => default_on,
+        Some(_) => true,
     }
 }
 
@@ -90,7 +95,7 @@ fn state(value: Option<&OsStr>, default_on: bool) -> bool {
 /// off.
 fn default_on() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("LOSAT_X_DEFAULT").is_none_or(|v| v != "0"))
+    *ON.get_or_init(|| state(std::env::var_os("LOSAT_X_DEFAULT").as_deref(), true))
 }
 
 /// No NCBI counterpart: whether the strict-set switch `name` is on. Reads the environment on
@@ -122,6 +127,7 @@ pub(crate) fn value(name: &str, range: RangeInclusive<usize>, builtin: usize) ->
 fn given(value: Option<&OsStr>, range: &RangeInclusive<usize>) -> Option<usize> {
     value?
         .to_str()?
+        .trim()
         .parse::<usize>()
         .ok()
         .filter(|n| range.contains(n))
@@ -139,10 +145,15 @@ mod tests {
     fn a_switch_follows_its_variable_then_the_default() {
         for default_on in [true, false] {
             assert!(!state(os("0"), default_on));
+            assert!(!state(os("0 "), default_on));
+            assert!(!state(os(" 0\t"), default_on));
             assert!(state(os("1"), default_on));
             assert!(state(os("16"), default_on));
             assert!(state(os("on"), default_on));
+            assert!(state(os("00"), default_on));
+            assert!(state(os("false"), default_on));
             assert_eq!(state(os(""), default_on), default_on);
+            assert_eq!(state(os("  "), default_on), default_on);
             assert_eq!(state(None, default_on), default_on);
         }
     }
@@ -153,7 +164,8 @@ mod tests {
         assert_eq!(given(os("32"), &range), Some(32));
         assert_eq!(given(os("1"), &range), None);
         assert_eq!(given(os("65537"), &range), None);
-        assert_eq!(given(os(" 32"), &range), None);
+        assert_eq!(given(os(" 32 "), &range), Some(32));
+        assert_eq!(given(os("3 2"), &range), None);
         assert_eq!(given(os("x"), &range), None);
         assert_eq!(given(os(""), &range), None);
         assert_eq!(given(None, &range), None);

@@ -54,7 +54,9 @@
 //!    the extension reads only the two sequences (aa_ungapped.c:516-606; RI:3685-3687). So a hit's
 //!    decision depends only on the earlier hits of its cell. All comparisons are of `last_hit - D`
 //!    with `s`, so a unit starting at D = window and the reference at any D agree whenever their
-//!    cells hold the same `last_hit - D` and flag.
+//!    cells hold the same `last_hit - D` and flag, and `s + D` fits the 31-bit `last_hit` in the
+//!    reference as it does in the unit (`last_hit_fits`; it fails only for a `-window_size` near
+//!    2^29).
 //! 2. Same hits per context, same order. A sub-lookup chain is the reference chain filtered to
 //!    one context with the order kept (`build_groups`; NCBI blast_aalookup.c:337-360 layout), so a
 //!    unit's scan emits exactly the reference's hit stream restricted to that context, in the same
@@ -237,6 +239,45 @@ pub(super) fn guard(
     max_context_len as i64 <= slack || longest_subject_chunk as i64 <= slack
 }
 
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_extend.h:57-60
+// ```c
+// typedef struct DiagStruct {
+//    signed int last_hit   : 31; /**< Offset of the last hit */
+//    unsigned int flag      : 1 ; /**< Reset the next extension? */
+// } DiagStruct;
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:168-173
+// ```c
+//         if (ewp->diag_table->offset >= INT4_MAX / 4) {
+//             ewp->diag_table->offset = ewp->diag_table->window;
+//             s_BlastDiagClear(ewp->diag_table);
+//         } else {
+//             ewp->diag_table->offset += subject_length + ewp->diag_table->window;
+//         }
+// ```
+// The reference keeps `s + offset` in the 31-bit `last_hit`. Its offset is below INT4_MAX/4 before
+// this step and so at most INT4_MAX/4 - 1 + subject_length + window after it; with an `s` of up to
+// subject_length the stored value stays below 2^30, the first value the signed field cannot hold,
+// while `window + 2 * subject_length < 2^29`. Past that the field wraps and the later hits of the
+// diagonal are dropped. A unit starts every table at offset = window (module doc, item 1), so it
+// equals the reference only where the reference does not wrap. The window is at most `slack`
+// (the table has at least query_length + window cells), which keeps this test on the safe side
+// without the window; `X_LAST_HIT_MARGIN` covers what a frame adds to a chunk's letters
+// (sentinels, the chunk overlap).
+/// The second exactness guard: the reference's `last_hit` cannot wrap,
+/// `slack + 2 * longest subject chunk + margin < 2^29` with `slack = diag_array_size - query_length`.
+pub(super) fn last_hit_fits(
+    longest_subject_chunk: usize,
+    query_length: i32,
+    diag_array_size: i32,
+) -> bool {
+    let slack = diag_array_size as i64 - query_length as i64;
+    slack + 2 * (longest_subject_chunk as i64) + X_LAST_HIT_MARGIN < (1 << 29)
+}
+
+/// No NCBI counterpart: room left below 2^29 in `last_hit_fits`.
+const X_LAST_HIT_MARGIN: i64 = 1 << 16;
+
 /// The per-batch inputs of `XPairPar::prepare`.
 pub(super) struct XBatch<'a> {
     pub lookup: &'a BlastAaLookupTable,
@@ -357,7 +398,8 @@ impl XPairPar {
             longest_subject_chunk,
             b.query_length,
             b.diag_array_size,
-        ) {
+        ) || !last_hit_fits(longest_subject_chunk, b.query_length, b.diag_array_size)
+        {
             FALLBACK_GUARD.fetch_add(1, AtomicOrdering::Relaxed);
             return None;
         }
@@ -1340,6 +1382,33 @@ mod tests {
             .sum();
         let full_total: usize = lookup.backbone.iter().map(|c| c.num_used as usize).sum();
         assert_eq!(total, full_total);
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:52-61
+    // ```c
+    // while (diag_array_length < (qlen+window_size))
+    // {
+    //         diag_array_length = diag_array_length << 1;
+    // }
+    // ```
+    #[test]
+    fn last_hit_fits_edges() {
+        // Default window, a query of 20 M letters, the longest chunk NCBI makes: far inside.
+        let ql = 20_000_000;
+        let size = diag_array_size_for(ql, 40);
+        assert!(last_hit_fits(5_000_000 / 3, ql, size));
+        // A window just under 2^29 (the table has 2^30 cells): the reference's second scan
+        // stores values of 2^30 and more, so no unit path.
+        let window = 536_870_000;
+        let size = diag_array_size_for(2_000, window);
+        assert_eq!(size, 1 << 30);
+        assert!(!last_hit_fits(20_000, 2_000, size));
+        // The bound itself: slack + 2 * chunk + margin one below and at 2^29.
+        let size = 1 << 29;
+        let ql = (1 << 29) - (1 << 28);
+        let half_margin = (X_LAST_HIT_MARGIN / 2) as usize;
+        assert!(last_hit_fits((1 << 27) - half_margin - 1, ql, size));
+        assert!(!last_hit_fits((1 << 27) - half_margin, ql, size));
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:52-61

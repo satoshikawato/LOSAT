@@ -76,12 +76,18 @@ strict set are on by default, and their variables mean (`LOSAT/src/utils/xswitch
   `TBNQSIDE` and `TBNBATCH` only with `TBNPAR` (`TBNEVENTS` only without it); `TBNBATCH` needs
   `TBNSSIDE`; `BXBATCH` needs `BXPOOL`; `AHEAD` needs `GREEDYSPEC` for megablast; `MBBATCH` runs
   where `MBDELAY` does not.
-- The variables are read once per process (once per Wasm instance). The Web reactors get an
-  empty WASI environment, so they always run the default.
+- White space around a value is ignored (`set LOSAT_X_DEFAULT=0 && ...` in cmd.exe stores `0 `).
+  Only `0` means off; `00`, `false` or `off` are "any other value".
+- The variables are read once per process (once per Wasm instance), except `GREEDYSPEC`,
+  `MBDELAY`, `MBBATCH` and `TBNBATCH`, which are read once per search or lookup build. The Web
+  reactors get an empty WASI environment, so they always run the default.
 - The `...SHADOW` / `...VERIFY` switches run the new and the reference computation side by side
   and stop with an assertion on the first difference. They, the counters, the timing aids and the
   tuning variables are not part of the set: they are off unless set to any value, and a shadow
-  switch turns its switch on whatever the two variables above say.
+  switch turns its switch on whatever the two variables above say (except
+  `LOSAT_X_AHEADSHADOW`, which compares only while `AHEAD` is on). A shadow compares the kernel
+  the default selects (for `LOSAT_X_DPSHADOW` the 256-bit, `DPW128` or base kernel that takes the
+  call).
 - The names are provisional (`x_` prefixes, `EXPERIMENT` comments). The 43 single variables are
   to be removed once the default has run on every CI environment and through a few releases;
   `LOSAT_X_DEFAULT` stays. In the descriptions below `LOSAT_X_<NAME>=1` shows the switch, not a
@@ -123,13 +129,14 @@ What runs per target:
   `MBBATCH` instead of `MBDELAY`, `DEKKER`; everything else is the same Rust as on x86_64
   without AVX2.
 - aarch64 and any other target: no vector X-drop DP is compiled, so `DPFAST`, `DPAVX2` and
-  `DPW128` do nothing (the scalar port runs); `MBBATCH` instead of `MBDELAY`; everything else as
-  on wasm32.
+  `DPW128` do nothing (the scalar port runs); `MBBATCH` instead of `MBDELAY`; `DEKKER` does
+  nothing (it is compiled for wasm32 only); everything else as on wasm32.
 - One thread (`-num_threads 1`, a build without the `parallel` feature, wasm32 without
   `wasm-threads`): the scheduling switches (`AHEAD`, `GREEDYSPEC`, `PAIRPAR` for
-  blastn/megablast, `SEGSHARE`, `TBNPAR`, `TBNBATCH`, `BXPAR`, `BXPOOL`, `BXBATCH`, `BXCHUNK`)
-  leave the reference code running; the TBLASTX `PAIRPAR` units run in order on the calling
-  thread.
+  blastn/megablast, `SEGSHARE`, `TBNBATCH`, `BXPAR`, `BXPOOL`, `BXBATCH`, `BXCHUNK`) leave the
+  reference code running. The unit paths have no thread-count gate: the tblastn `TBNPAR` units
+  (with `TBNSSIDE` / `TBNQSIDE`; only its parallel redo needs a pool) and the TBLASTX `PAIRPAR`
+  units run in order on the calling thread.
 
 Same values, faster computation:
 
@@ -263,8 +270,9 @@ Scheduling (each value computed by one thread with the original function; order 
   context's chains (order kept) on a fresh unmasked diagonal table, and the unit lists go through the
   reference's sort and merge in the reference order (`tblastx/x_pair_par.rs`, exactness argument in
   its header). Only when every query context, or every subject chunk, is at most `slack` = diagonal
-  table size minus query length long; otherwise, and with the trace, debug, diagnostics and chunk
-  switches, the reference loop runs (`LOSAT_X_STATS=1` counts `fallback_guard` / `fallback_gate`;
+  table size minus query length long, and `slack` plus twice the longest subject chunk stays under
+  2^29 (it does unless `-window_size` is near 2^29); otherwise, and with the trace, debug,
+  diagnostics and chunk switches, the reference loop runs (`LOSAT_X_STATS=1` counts `fallback_guard` / `fallback_gate`;
   `LOSAT_TIMING` prints one `x_pairpar` line). Strict-set candidate (S-E, round 5).
 - `LOSAT_X_PAIRPARSHADOW=1` shadow of `LOSAT_X_PAIRPAR`: the unit path and the reference loop for
   every subject, the subject's combined ungapped HSP list compared field by field (the first

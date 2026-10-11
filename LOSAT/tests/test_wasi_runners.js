@@ -223,7 +223,7 @@ test("WASI imports receive i32 arguments as unsigned values", () => {
 // shared memory with a smaller one. An engine either refuses to create the memory or
 // creates one that cannot grow; an explicit maximum is never replaced.
 test("shared memory steps down when the declared maximum cannot be reserved", () => {
-  const { createSharedMemory } = require("./wasi_thread_host");
+  const { createSharedMemory } = require("./wasi_artifact");
   const tried = [];
   // `refuses`: the constructor throws above the limit. Otherwise the memory is created
   // with its initial pages only and cannot grow.

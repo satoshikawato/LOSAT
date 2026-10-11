@@ -24,7 +24,7 @@ const reactors = findReactors();
 const release = releaseId(reactors);
 // The dev server injects component styles as inline <style> elements, which the
 // production CSP forbids. It therefore serves the isolation headers without the CSP;
-// `vite preview` (used by the E2E tests) serves the production headers unchanged.
+// `vite preview` and the site server of the E2E tests (build/site-server.ts) serve the production headers unchanged.
 const devHeaders = Object.fromEntries(
   Object.entries(headers).filter(([name]) => name !== 'Content-Security-Policy'),
 );

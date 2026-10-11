@@ -133,3 +133,72 @@ may import `src/domain/**` only (ESLint).
 `src/boot/boot.css` and `src/boot/not-found.html` (as `404.html`). The release's entry comes from
 the `index.html` that Vite builds for it; the build stops if that page has anything the boot page
 would not load (an inline script or style, a link other than a style sheet or a module preload).
+
+## Response headers (`web/app/public/_headers`)
+
+`public/_headers` is the only source of the response headers (web/AGENTS.md rule 4). The build
+copies it to the site root, where Cloudflare Pages reads it; the Vite servers use its `/*` rule,
+and `build/site-server.ts`, the E2E harness server and the tests read the same file.
+
+| Path | Headers |
+|---|---|
+| `/*` | `Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Embedder-Policy: require-corp`, `Cross-Origin-Resource-Policy: same-origin`, the `Content-Security-Policy`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` |
+| `/r/*` | `Cache-Control: public, max-age=31536000, immutable`: a release's files never change (S16 item 7) |
+| `/`, `/index.html`, `/boot.js`, `/boot.css`, `/releases.json`, `/404.html` | `Cache-Control: no-cache`: the site-level files are revalidated on every load |
+
+The rules follow Cloudflare Pages (developers.cloudflare.com/pages/configuration/headers/, read
+2026-10-11), as `build/headers.ts` (`headersFor(path)`) implements them:
+
+- A rule is a URL pattern on a line of its own, followed by indented `Name: value` lines. At most
+  100 rules; a line is at most 2,000 characters. (`build/headers.ts` also skips lines starting
+  with `#`; the site's `_headers` has none.)
+- A splat `*` (one per pattern) matches any characters, none included; `:name` (a letter, then
+  letters, digits and `_`) matches the characters of one path segment (not `/`). Their values may be
+  used in header values as `:splat` and `:name`. The request's port, protocol and query are not
+  matched. (Pages also takes `https://host/...` patterns; this site does not use them, and
+  `build/headers.ts` refuses them.)
+- Every rule whose pattern matches applies. A header that more than one matching rule attaches is
+  joined with `, `. `! Name` detaches a header that another rule attached.
+- Headers are not applied to the responses of Pages Functions; a `_redirects` rule takes priority.
+
+What Pages does besides (developers.cloudflare.com/pages/configuration/serving-pages/, read
+2026-10-11), and what it means here:
+
+- **404 and single-page mode.** "If your project does not include a top-level `404.html` file, Pages
+  assumes that you are deploying a single-page application" and serves `/` for every path that is
+  not a file, with status 200. The site therefore has a top-level `404.html`: a missing release file
+  is then a 404, not the boot page. (The boot page also treats an answer that is not JSON as "not
+  served", in case a host does answer every path with a page.) Pages looks for the nearest
+  `404.html` up the directory tree.
+- **`.html` redirects.** Pages redirects `/name.html` to `/name` and `/dir/index.html` to `/dir/`.
+  Nothing links to `/index.html` or `/404.html`; their rules above are kept for a direct request.
+- **ETag.** "Pages always sends `Etag` headers for `200 OK` responses" and answers a matching
+  `If-None-Match` with `304 Not Modified`. Whether the `_headers` rules reach the 304 (WebKit judges
+  a revalidated worker script by the headers of the 304; W3 decision 12) is checked on the preview
+  (S16 item 7).
+- **Default caching.** Without a rule, Pages sends `Cache-Control: public, max-age=0, must-revalidate`.
+- The rules match the request's path, so a 404 under `/r/` also carries the immutable
+  `Cache-Control` (if Pages applies `_headers` to its 404 answers; to be seen on the preview). A
+  browser may then remember that a release is missing; release IDs are not reused, so this only
+  matters for a release that is removed.
+
+## The local server (`web/app/build/site-server.ts`)
+
+`node build/site-server.ts <site directory> [--port 4173] [--host localhost]` serves a site as Pages
+does; `npm run preview` serves `dist/` with it, and the E2E tests (`playwright.config.ts`) run against
+it. `startSiteServer({ root, port?, host?, onRequest? })` starts it from a test; `onRequest` receives
+every request (method, URL, path, headers, body) with the status it was answered with.
+
+- Every response (200, 304, 308, 404, 405) has the headers of the `_headers` rules that match the
+  request's path, read from the served directory's own `_headers`, and Pages' default
+  `Cache-Control` where no rule sets one.
+- Every 200 has a strong ETag (from the file's SHA-256); a matching `If-None-Match` gets 304.
+- `/` and `/dir/` serve `index.html`; `/name` serves `name.html` if there is no file `name`;
+  `/name.html` and `/dir/index.html` redirect (308) as on Pages.
+- A missing file is 404 with the nearest `404.html` (a plain-text 404 if there is none: never a
+  single-page fallback). `_headers`, `_redirects` and `_routes.json` are not served.
+- Content types: `text/html`, `text/javascript`, `text/css` (with `charset=utf-8`), `application/json`,
+  `application/wasm`; `application/octet-stream` for unknown extensions.
+- GET and HEAD only (405 otherwise). No compression, no `_redirects`, no Functions.
+- It reads the directory on every request, so a test may change the site while it runs (swap
+  `releases.json`, add a release).

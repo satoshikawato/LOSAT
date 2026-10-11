@@ -47,7 +47,7 @@ still governs everything under `LOSAT/`, including engine changes made for LOSAT
 cd web/app
 npm ci
 npm run check   # typecheck, lint, unit tests, production build
-npm run e2e     # Playwright against `vite preview` (production headers)
+npm run e2e     # Playwright against the built site served by build/site-server.ts (the `_headers` rules, as Cloudflare Pages)
 ```
 
 Run both before committing changes under `web/app`.

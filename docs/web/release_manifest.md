@@ -13,7 +13,8 @@ None of these files holds research data: they describe the application's own fil
 ## The site
 
 `npm run build` (in `web/app`) writes a site into `dist/` (or `vite build --outDir <dir>`), after
-removing the directory:
+removing the directory (it refuses a directory that is not empty and has no `releases.json`,
+`index.html` or `_headers`):
 
 ```
 dist/
@@ -202,3 +203,26 @@ every request (method, URL, path, headers, body) with the status it was answered
 - GET and HEAD only (405 otherwise). No compression, no `_redirects`, no Functions.
 - It reads the directory on every request, so a test may change the site while it runs (swap
   `releases.json`, add a release).
+
+## Assembling a site with older releases (`web/app/build/assemble-site.ts`)
+
+A build writes a site with one release. To deploy a site that still serves earlier releases (tabs
+that run them keep loading their files; S16 item 3):
+
+```bash
+cd web/app
+npm run build                                  # the new site in dist/
+npm run assemble -- --site dist --previous <dir of an earlier site> [--previous ...] [--latest <id>]
+```
+
+- Every `r/<id>/` of each earlier site is checked against its manifest (every listed file present
+  with its size and SHA-256, no file unlisted); a release that does not match stops the command
+  before anything is copied. A release that the site already has must have the same manifest bytes.
+- Each release is copied beside the releases, checked again, then moved into `r/`, so a release
+  directory is complete or absent.
+- `releases.json` is rewritten: every release (the new site's first, then each earlier site's in
+  the order of its index), `latest` the new site's unless `--latest` names another, the shell of the
+  new site, and the measurement endpoint of `LOSAT_WEB_ANALYTICS_ENDPOINT` if set, otherwise the new
+  site's own setting.
+- How many releases a deployment keeps is the Owner's decision (pending); the command keeps every
+  release it is given.

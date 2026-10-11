@@ -82,7 +82,7 @@ Projects `chromium`, `firefox`, `webkit` (`browser.spec.ts`):
   `web/app/tests/e2e/support/search.ts` and the proteome `LOSAT/tests/fasta/NZ_CP006932.faa`, so
   it needs the repository checkout.
 - **Offline** (`"Offline ready" appears; in Chromium an offline reload starts the app`): skipped if
-  the site has no `/sw.js`. Otherwise `offline-ready` appears (up to 3 minutes); in Chromium only,
+  the site has no `/sw.js`. Otherwise the header's `offline-status` reaches `data-state="ready"` ("Offline ready", up to 3 minutes); in Chromium only,
   the context goes offline and a reload starts the app with `crossOriginIsolated === true`.
   (Firefox and WebKit cannot go offline reliably under Playwright; the local V-OFF test goes
   offline by stopping the server.)

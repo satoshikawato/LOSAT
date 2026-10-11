@@ -80,7 +80,7 @@ test('"Offline ready" appears; in Chromium an offline reload starts the app', as
   test.skip(!site.swPresent, '/sw.js is not there: this site has no service worker');
   await page.goto('/');
   await appStarted(page);
-  await expect(page.getByTestId('offline-ready')).toBeVisible({ timeout: 180_000 });
+  await expect(page.getByTestId('offline-status')).toHaveAttribute('data-state', 'ready', { timeout: 180_000 });
   const data: Record<string, unknown> = { browser: browserName, offlineReady: true };
   if (browserName === 'chromium') {
     // Playwright's offline switch is reliable only in Chromium (S16 decision 6).

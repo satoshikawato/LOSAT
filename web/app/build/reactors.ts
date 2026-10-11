@@ -17,10 +17,11 @@ import { createRequire } from 'node:module';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { join, resolve } from 'node:path';
 import type { Plugin } from 'vite';
+import { REPOSITORY, SHARED_MEMORY_GUARD } from './inputs.ts';
 
 /** The guard of LOSAT/tests/wasi_shared_memory.js, loaded only for a build with the engine. */
 function guardSharedMemory(bytes: Uint8Array): { bytes: Uint8Array; fill: number; copy: number } {
-  const guard = createRequire(import.meta.url)('../../../LOSAT/tests/wasi_shared_memory.js') as {
+  const guard = createRequire(import.meta.url)(join(REPOSITORY, SHARED_MEMORY_GUARD)) as {
     guardSharedMemory: typeof guardSharedMemory;
   };
   return guard.guardSharedMemory(bytes);

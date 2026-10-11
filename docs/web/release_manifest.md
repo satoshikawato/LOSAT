@@ -41,8 +41,19 @@ dist/
 - **The release ID** (`<release-id>`) is `LOSAT_WEB_RELEASE_ID` if set, else
   `<commit 12>-<engine digest 8, or fake>[-dirty]` (`web/app/build/release.ts`; S16 decision 1);
   it matches `^[0-9a-z][0-9a-z.-]{0,63}$`. The application knows its own as `__LOSAT_RELEASE_ID__`.
-- **Determinism.** No file holds a time; lists are sorted. Two builds of the same tree with the same
-  engine modules write the same bytes.
+  - `<commit 12>` is the first 12 hex digits of `git rev-parse HEAD`: a fixed length, never git's
+    own abbreviation, whose length depends on the number of objects in the clone.
+  - `-dirty` marks a build whose inputs differ from the commit (uncommitted or untracked files).
+    The inputs are listed once, in `web/app/build/inputs.ts`: `web/app`, and the files of the
+    repository that the build plugins read (`docs/web/verification_cells.tsv`, the certification
+    records of the verification table, `LOSAT/tests/wasi_shared_memory.js`). The plugins take
+    their paths from that list. A `-dirty` release must not be deployed.
+  - A build without a commit (no git) stops unless `LOSAT_WEB_RELEASE_ID` names its release; only
+    the development server and Vitest run without one (their ID is `unknown-<engine>`).
+- **Determinism.** A release directory is immutable and cached for a year, so its ID must fix its
+  bytes. No file holds a time; lists are sorted. Two builds of the same
+  tree with the same engine modules write the same bytes (`tests/unit/release-bytes.test.ts` builds
+  twice and compares every file).
 - **Older releases.** A build writes one release. `build/assemble-site.ts` copies the releases of
   earlier sites into a new one (below), so that tabs that still run them keep their files.
 
@@ -59,7 +70,7 @@ format 1; a change that an older reader would misread needs format 2.
 |---|---|
 | `format` | `1` |
 | `release` | the release ID; it must be the ID of the directory the manifest is in |
-| `app` | `{ "version", "build" }`: `package.json`'s version and the git short SHA of the build (`unknown` without git) |
+| `app` | `{ "version", "build" }`: `package.json`'s version and the first 8 hex digits of the build's commit (`unknown` without git); the app writes the same `build` into session files (`__LOSAT_APP_BUILD__`) |
 | `engine` | `{ "serial", "threads" }`: the engine build names of the two modules (`engineBuildName`, as Run details and session files record them); `null` in a FakeEngine build |
 | `entry` | `{ "script", "styles" }`: the module script and the style sheets (in order) that the boot page adds; each path is one of `assets` |
 | `assets` | every file of the release directory except the manifest: `{ "path", "size", "sha256" }`, sorted by `path` (code-unit order), each path once |

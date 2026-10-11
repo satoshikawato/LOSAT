@@ -61,7 +61,7 @@ said otherwise; times are milliseconds since the epoch.
 |---|---|
 | `format` | `"losat-web-session"` |
 | `schema` | `1` (a higher one is "saved by a newer LOSAT Web") |
-| `app` | `{ "version", "build" }`: the app's `package.json` version and the git short SHA of its build (`unknown` when the build had no git) |
+| `app` | `{ "version", "build" }`: the app's `package.json` version and the first 8 hex digits of the commit of its build (the same in every clone; `unknown` when the build had no git) |
 | `savedAt` | when the file was saved |
 | `candidates` | `true` when the file has a candidates block |
 | `runs` | 1 to 1,000 runs, in run-number order of the saving session |

@@ -1,27 +1,19 @@
-import { execSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { defineConfig } from 'vitest/config';
 import vue from '@vitejs/plugin-vue';
 import type { Plugin } from 'vite';
 import { siteHeaders } from './build/headers.ts';
 import { findReactors, losatEngine } from './build/reactors.ts';
-import { releaseId } from './build/release.ts';
+import { appBuild, releaseId, sourceState } from './build/release.ts';
 import { losatSite } from './build/site.ts';
 import { losatVerification } from './build/verification.ts';
 
 const headers = siteHeaders();
 /** The app's version and the commit it was built from, written into session files (src/build-info.d.ts). */
 const appVersion = (JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')) as { version: string }).version;
-function appBuild(): string {
-  try {
-    return execSync('git rev-parse --short HEAD', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim() || 'unknown';
-  } catch {
-    return 'unknown';
-  }
-}
 const reactors = findReactors();
-/** The release ID (build/release.ts): the directory of the build's assets and the ID a browser pins. */
-const release = releaseId(reactors);
+/** The commit and whether a build input differs from it (build/release.ts, build/inputs.ts). */
+const source = sourceState();
 // The dev server injects component styles as inline <style> elements, which the
 // production CSP forbids. It therefore serves the isolation headers without the CSP;
 // `vite preview` and the site server of the E2E tests (build/site-server.ts) serve the production headers unchanged.
@@ -56,23 +48,32 @@ function headersOnEveryResponse(): Plugin {
   };
 }
 
-export default defineConfig({
-  // The engine modules (LOSAT_WEB_REACTORS); the worker bundles read the same description.
-  plugins: [vue(), losatEngine({ reactors }), losatVerification(), headersOnEveryResponse(),
-    // `vite build` writes a site: the boot page and the release under /r/<release-id>/ (build/site.ts).
-    losatSite({ release, app: { version: appVersion, build: appBuild() }, reactors })],
-  define: {
-    __LOSAT_TEST_HOOKS__: 'false',
-    __LOSAT_APP_VERSION__: JSON.stringify(appVersion),
-    __LOSAT_APP_BUILD__: JSON.stringify(appBuild()),
-    __LOSAT_RELEASE_ID__: JSON.stringify(release),
-  },
-  server: { headers: devHeaders },
-  preview: { headers },
-  worker: { format: 'es', plugins: () => [losatEngine({ reactors, emit: false })] },
-  build: { target: 'es2022' },
-  test: {
-    include: ['tests/unit/**/*.test.ts'],
-    environment: 'node',
-  },
+export default defineConfig(({ command }) => {
+  /**
+   * The release ID (build/release.ts): the directory of the build's assets and the ID a browser
+   * pins. A build without a commit must be named by LOSAT_WEB_RELEASE_ID; the development
+   * server and Vitest (`serve`) run without one.
+   */
+  const release = releaseId(reactors, { source, build: command === 'build' });
+  const build = appBuild(source);
+  return {
+    // The engine modules (LOSAT_WEB_REACTORS); the worker bundles read the same description.
+    plugins: [vue(), losatEngine({ reactors }), losatVerification(), headersOnEveryResponse(),
+      // `vite build` writes a site: the boot page and the release under /r/<release-id>/ (build/site.ts).
+      losatSite({ release, app: { version: appVersion, build }, reactors })],
+    define: {
+      __LOSAT_TEST_HOOKS__: 'false',
+      __LOSAT_APP_VERSION__: JSON.stringify(appVersion),
+      __LOSAT_APP_BUILD__: JSON.stringify(build),
+      __LOSAT_RELEASE_ID__: JSON.stringify(release),
+    },
+    server: { headers: devHeaders },
+    preview: { headers },
+    worker: { format: 'es', plugins: () => [losatEngine({ reactors, emit: false })] },
+    build: { target: 'es2022' },
+    test: {
+      include: ['tests/unit/**/*.test.ts'],
+      environment: 'node',
+    },
+  };
 });

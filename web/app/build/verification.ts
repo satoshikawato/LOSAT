@@ -9,6 +9,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Plugin } from 'vite';
+import { CERTIFICATION_RECORDS, REPOSITORY, VERIFICATION_CELLS } from './inputs.ts';
 import { optionKey, type BrowserVerification, type OptionGrammar, type ProgramVerification, type VerificationTable } from '../src/domain/verification.ts';
 import type { OutputFormat } from '../src/domain/output-format.ts';
 import type { ProgramId } from '../src/domain/programs.ts';
@@ -71,7 +72,7 @@ export function generateVerificationTable(repository: string): VerificationTable
     sources.push({ path, sha256: createHash('sha256').update(bytes).digest('hex'), optionSets: accepted });
   }
 
-  const browsers = browserVerification(readTable(readFileSync(join(repository, 'docs/web/verification_cells.tsv'), 'utf8')));
+  const browsers = browserVerification(readTable(readFileSync(join(repository, VERIFICATION_CELLS), 'utf8')));
   const programs: Partial<Dictionary<ProgramVerification>> = {};
   for (const program of PROGRAMS) {
     const optionSets: Dictionary<readonly OutputFormat[]> = {};
@@ -103,17 +104,18 @@ function isProgram(program: string): program is Program {
 }
 
 // Each source file and how its records are read, in the order of the sources of the table.
+// The paths are in build/inputs.ts, which the release ID's dirty check reads.
 const SOURCES: readonly (readonly [string, (text: string) => Iterable<Comparison>])[] = [
-  ['LOSAT/tests/outfmt0_manifest.tsv', outfmt0Records],
-  ['LOSAT/tests/fixtures/blastn_regression/manifest.tsv', (text) => regressionRecords(text, 'blastn')],
-  ['LOSAT/tests/fixtures/tblastx_regression/manifest.tsv', (text) => regressionRecords(text, 'tblastx')],
-  ['LOSAT/tests/fixtures/range_regression/manifest.tsv', (text) => regressionRecords(text, undefined)],
-  ['LOSAT/tests/blastp_v010_parity_manifest.tsv', blastpGateRecords],
-  ['LOSAT/tests/tblastx_v010_parity_manifest.tsv', tblastxGateRecords],
-  ['docs/evidence/tlosan_stage_g/matrix_162.jsonl', tblastnMatrixRecords],
-  ...(['blastp', 'tblastn', 'tblastx'] as const).map(
-    (program) => [`docs/evidence/losat_web_e2e/run-20261004T163746Z/sweeps/after-${program}.tsv`, (text: string) => sweepRecords(text, program)] as const,
-  ),
+  [CERTIFICATION_RECORDS.outfmt0, outfmt0Records],
+  [CERTIFICATION_RECORDS.blastnRegression, (text) => regressionRecords(text, 'blastn')],
+  [CERTIFICATION_RECORDS.tblastxRegression, (text) => regressionRecords(text, 'tblastx')],
+  [CERTIFICATION_RECORDS.rangeRegression, (text) => regressionRecords(text, undefined)],
+  [CERTIFICATION_RECORDS.blastpGate, blastpGateRecords],
+  [CERTIFICATION_RECORDS.tblastxGate, tblastxGateRecords],
+  [CERTIFICATION_RECORDS.tblastnMatrix, tblastnMatrixRecords],
+  [CERTIFICATION_RECORDS.blastpSweep, (text) => sweepRecords(text, 'blastp')],
+  [CERTIFICATION_RECORDS.tblastnSweep, (text) => sweepRecords(text, 'tblastn')],
+  [CERTIFICATION_RECORDS.tblastxSweep, (text) => sweepRecords(text, 'tblastx')],
 ];
 
 /** outfmt0_manifest.tsv: NCBI's frozen reports, and the approved -db_gencode exception against NCBI's -db oracle. */
@@ -245,7 +247,7 @@ function hasQuote(text: string): boolean {
 
 /** The plugin: the generated table as the module `virtual:losat-verification`. */
 export function losatVerification(): Plugin {
-  const repository = fileURLToPath(new URL('../../..', import.meta.url));
+  const repository = REPOSITORY;
   return {
     name: 'losat-verification',
     resolveId(id) {

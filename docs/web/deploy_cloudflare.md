@@ -57,8 +57,10 @@ Pages > the project > Settings):
 
 ## 3. Build a release
 
-From a clean checkout of the commit to release (`web/app` with no uncommitted or untracked file:
-the release ID ends in `-dirty` otherwise, and a `-dirty` release must not be deployed).
+From a clean checkout of the commit to release: no uncommitted or untracked file in `web/app` or in
+the other files the build reads (`web/app/build/inputs.ts`); the release ID ends in `-dirty`
+otherwise, and a `-dirty` release must not be deployed. A tree without git cannot be built
+without `LOSAT_WEB_RELEASE_ID`.
 
 ```bash
 # 1. The reactors, as .github/workflows/web.yml's adapter job builds them (Rust 1.92.0, both wasm targets).
@@ -68,7 +70,7 @@ RUSTUP_TOOLCHAIN=1.92.0 python3 web/adapter/tools/build_reactors.py \
 # 2. The site.
 cd web/app
 npm ci
-git status --porcelain -- .                 # must print nothing
+git status --porcelain                      # must print nothing (the release ID checks build/inputs.ts's paths)
 LOSAT_WEB_REACTORS=<scratch>/reactors \
 LOSAT_WEB_ANALYTICS_ENDPOINT=/api/visit \
     npm run build                           # writes dist/
@@ -82,7 +84,9 @@ python3 -c "import json; print(json.load(open('dist/releases.json'))['latest'])"
   the preview and the production site alike (the same `dist/` is promoted, below); the preview has
   no GA4 secrets, so its Function forwards nothing, and the preview check can exercise
   `/api/visit`. Leave it out to deploy a site that measures nothing.
-- Release IDs: `<commit 12>-<engine digest 8>`. `LOSAT_WEB_RELEASE_ID=<name>` names one by hand
+- Release IDs: `<commit 12>-<engine digest 8>`, the first 12 hex digits of the commit in every
+  clone (a CI build and a local build of one commit get the same ID and the same bytes).
+  `LOSAT_WEB_RELEASE_ID=<name>` names one by hand
   (pattern in `release_manifest.md`); a release is never rebuilt under an ID that is already
   served with other bytes (`assemble` refuses it).
 

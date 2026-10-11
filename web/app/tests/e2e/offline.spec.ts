@@ -154,9 +154,16 @@ test('1. a first visit says "Offline ready" once every file of the release and t
   await appStarted(page, A);
   await offlineReady(page);
   expect(await storedFiles(page)).toEqual(expectedCaches(dirs.a, A));
-  // The storage estimate counts the stored release without waiting for a run (screen review 1 L2).
-  const stored = manifestOf(dirs.a, A).assets.reduce((sum, file) => sum + file.size, 0);
-  if ((await siteUsage(page)) !== undefined) await expect.poll(() => siteUsage(page)).toBeGreaterThanOrEqual(0.95 * stored);
+  // The storage estimate is read again once the release is stored, without waiting for a run (screen
+  // review 1 L2): the status shows the browser's own estimate, which now counts the stored release.
+  // Firefox stores cached bodies compressed, so its estimate is below the files' sizes (gate 1 of W7:
+  // 5.4 MB for the 8.2 MB of an engine build); compare with the estimate, not with the sizes.
+  if ((await siteUsage(page)) !== undefined) {
+    const estimate = () => page.evaluate(async () => (await navigator.storage.estimate()).usage ?? 0);
+    const stored = manifestOf(dirs.a, A).assets.reduce((sum, file) => sum + file.size, 0);
+    expect(await estimate()).toBeGreaterThanOrEqual(0.3 * stored);
+    await expect.poll(async () => Math.abs((await siteUsage(page))! - (await estimate())) / (await estimate())).toBeLessThan(0.1);
+  }
 });
 
 test('1b. a first visit whose download breaks does not say "Offline ready" and stores nothing; "Try again" then stores the release', async ({ page }) => {

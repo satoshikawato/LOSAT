@@ -1,8 +1,8 @@
 // The site index from the network (ports/site.ts).
-import { parseSiteIndex } from '../../domain/site-index';
+import { parseSiteIndex, SITE_INDEX_PATH } from '../../domain/site-index';
 import type { SitePort } from '../../ports/site';
 
-export const SITE_INDEX_PATH = '/releases.json';
+export { SITE_INDEX_PATH };
 const TIMEOUT_MS = 10_000;
 
 export const browserSite: SitePort = {

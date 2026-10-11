@@ -1,0 +1,25 @@
+/* The boot page's messages (src/boot) and the page of a missing file. Only #boot and
+   #boot-noscript are styled: the application shares this document and brings its own styles. */
+#boot,
+#boot-noscript {
+  max-width: 40em;
+  margin: 2em auto;
+  padding: 0 16px;
+  font-family: system-ui, sans-serif;
+  line-height: 1.4;
+  color: #1d2330;
+}
+
+#boot h1 {
+  font-size: 1.3em;
+}
+
+#boot button {
+  font: inherit;
+  padding: 4px 10px;
+  border: 1px solid #1f5fbf;
+  border-radius: 4px;
+  background: #1f5fbf;
+  color: #ffffff;
+  cursor: pointer;
+}

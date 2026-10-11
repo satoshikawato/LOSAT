@@ -6,6 +6,7 @@ import type { Plugin } from 'vite';
 import { siteHeaders } from './build/headers.ts';
 import { findReactors, losatEngine } from './build/reactors.ts';
 import { releaseId } from './build/release.ts';
+import { losatSite } from './build/site.ts';
 import { losatVerification } from './build/verification.ts';
 
 const headers = siteHeaders();
@@ -57,7 +58,9 @@ function headersOnEveryResponse(): Plugin {
 
 export default defineConfig({
   // The engine modules (LOSAT_WEB_REACTORS); the worker bundles read the same description.
-  plugins: [vue(), losatEngine({ reactors }), losatVerification(), headersOnEveryResponse()],
+  plugins: [vue(), losatEngine({ reactors }), losatVerification(), headersOnEveryResponse(),
+    // `vite build` writes a site: the boot page and the release under /r/<release-id>/ (build/site.ts).
+    losatSite({ release, app: { version: appVersion, build: appBuild() }, reactors })],
   define: {
     __LOSAT_TEST_HOOKS__: 'false',
     __LOSAT_APP_VERSION__: JSON.stringify(appVersion),

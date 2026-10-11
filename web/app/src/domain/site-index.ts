@@ -3,12 +3,17 @@
 // when the site is assembled, not by a release, so the same release bytes serve a site with
 // or without measurement. It holds no research data. Fields not listed here are ignored, so
 // that an older release can read the index of a newer site.
+// The imports name the `.ts` files: Node runs build/assemble-site.ts, which imports this module.
+import { parseSiteFiles, SITE_PATH_PATTERN, type SiteFile } from './site-file.ts';
+
+/** Where the site serves its index. */
+export const SITE_INDEX_PATH = '/releases.json';
 
 /** Lower-case letters, digits, `.` and `-`, starting with a letter or digit, at most 64 characters (build/release.ts). */
 export const RELEASE_ID_PATTERN = /^[0-9a-z][0-9a-z.-]{0,63}$/;
 
 /** A same-origin path under /api/ (plan §5.10 (b)). */
-const ENDPOINT_PATTERN = /^\/api\/[a-z0-9][a-z0-9/-]{0,63}$/;
+export const ENDPOINT_PATTERN = /^\/api\/[a-z0-9][a-z0-9/-]{0,63}$/;
 
 export interface SiteRelease {
   readonly id: string;
@@ -25,6 +30,11 @@ export interface SiteIndex {
   readonly releases: readonly SiteRelease[];
   /** The measurement endpoint; absent when the site measures nothing. */
   readonly analytics?: { readonly endpoint: string };
+  /**
+   * The site-level files a browser needs to start offline (`/` as served from index.html, the
+   * boot script and its style sheet), sorted by path; absent in an index without the list.
+   */
+  readonly shell?: readonly SiteFile[];
 }
 
 /** Checks a parsed `/releases.json`; throws an Error that says what is wrong. */
@@ -57,5 +67,12 @@ export function parseSiteIndex(value: unknown): SiteIndex {
     index['analytics'] === undefined
       ? undefined
       : Object.freeze({ endpoint: text(object(index['analytics'], 'analytics')['endpoint'], 'analytics endpoint', ENDPOINT_PATTERN) });
-  return Object.freeze({ format: 1, latest, releases: Object.freeze(releases), ...(analytics === undefined ? {} : { analytics }) });
+  const shell = index['shell'] === undefined ? undefined : parseSiteFiles(index['shell'], 'site index shell', SITE_PATH_PATTERN, { min: 0, max: 100 });
+  return Object.freeze({
+    format: 1,
+    latest,
+    releases: Object.freeze(releases),
+    ...(analytics === undefined ? {} : { analytics }),
+    ...(shell === undefined ? {} : { shell }),
+  });
 }

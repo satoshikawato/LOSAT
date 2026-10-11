@@ -91,7 +91,8 @@ python3 -c "import json; print(json.load(open('dist/releases.json'))['latest'])"
   `/api/visit`. [`analytics.md`](analytics.md) says the same. Leave it out to deploy a site that
   measures nothing.
 - Release IDs: `<commit 12>-<engine digest 8>`, the first 12 hex digits of the commit in every
-  clone (a CI build and a local build of one commit get the same ID and the same bytes).
+  clone (a CI build and a local build of one commit get the same ID; the same bytes are shown only
+  for builds on one machine with one Node, whatever the checkout's path: `release_manifest.md`).
   `LOSAT_WEB_RELEASE_ID=<name>` names one by hand
   (pattern in `release_manifest.md`); a release is never rebuilt under an ID that is already
   served with other bytes (`assemble` refuses it).

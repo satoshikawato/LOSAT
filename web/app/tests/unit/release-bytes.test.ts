@@ -1,7 +1,9 @@
 // The release ID fixes the build's bytes (S16 decision 1, review M3): a release directory is
 // immutable and cached for a year, so two builds of one commit must write the same site byte for
-// byte, under the same ID, wherever the commit is checked out (a CI build and a local build of one
-// commit; code review 2, L5); a build that has no commit to name its release stops.
+// byte, under the same ID. Shown here on one machine, with one Node and one node_modules: twice in
+// this checkout, and once in a second checkout of the commit at another path (code review 2, L5),
+// which the gate requires (LOSAT_WEB_SECOND_CHECKOUT=required: a skip fails there; code review 3,
+// I3). A build that has no commit to name its release stops.
 import { spawnSync } from 'node:child_process';
 import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -14,6 +16,8 @@ import { findReactors } from '../../build/reactors';
 import { listFiles } from '../../build/site-files';
 
 const APP_DIR = fileURLToPath(new URL('../..', import.meta.url));
+/** `required` makes the second checkout's case fail where it would be skipped (the gate sets it). */
+const SECOND_CHECKOUT_ENV = 'LOSAT_WEB_SECOND_CHECKOUT';
 const work = mkdtempSync(join(tmpdir(), 'losat-release-bytes-'));
 /** The second checkout's folder while it is a worktree of the repository. */
 let worktree: string | undefined;
@@ -100,7 +104,11 @@ describe('the bytes of a build', () => {
 
   it('are the same from a second checkout of the commit at another path that holds only the build inputs', (context) => {
     const checkout = secondCheckout();
-    if ('skip' in checkout) return context.skip(checkout.skip);
+    if ('skip' in checkout) {
+      // The gate (docs/evidence/losat_web_w7/run_gate.sh) needs this case to run: there a skip fails.
+      if (process.env[SECOND_CHECKOUT_ENV] === 'required') expect.fail(`${SECOND_CHECKOUT_ENV}=required, but the second checkout cannot be built: ${checkout.skip}`);
+      return context.skip(checkout.skip);
+    }
     expect(checkout.app).not.toBe(APP_DIR);
     const there = build('second-checkout-build', {}, checkout.app);
     expect(there.status, there.stderr).toBe(0);

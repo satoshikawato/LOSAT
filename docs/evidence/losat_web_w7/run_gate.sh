@@ -126,6 +126,9 @@ unset LOSAT_WEB_RELEASE_ID LOSAT_WEB_ANALYTICS_ENDPOINT
 # VITE_USER_NODE_ENV (exported, or NODE_ENV in a .env file) as NODE_ENV; vite.config.ts stops such
 # a build, and the gate does not inherit one.
 unset NODE_ENV VITE_USER_NODE_ENV
+# tests/unit/release-bytes.test.ts builds a second checkout of the commit at another path; it may
+# skip that case elsewhere (uncommitted inputs, no `git worktree`), but in the gate a skip fails.
+export LOSAT_WEB_SECOND_CHECKOUT=required
 
 # The release IDs of this tree, before any step: build/release.ts's rule over the inputs that
 # build/inputs.ts lists. A change that is not committed in any of them would make every build of

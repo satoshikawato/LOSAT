@@ -47,13 +47,24 @@ export interface BootMessage {
 const RETRIED: ReadonlySet<MessageKind> = new Set<MessageKind>(['first-visit-offline', 'no-index', 'offline-not-stored', 'failed']);
 
 /**
- * Adds the choices of a message that the network may resolve (screen review 1 I6): "Try
- * again", and each release in `stored` other than `release` (the one that could not start) and
- * the latest already offered. A stored release is only offered: the pin changes when the user
+ * Whether a message gets "Try again" and the stored releases: where the network or the site
+ * failed, and for a release that the site does not serve when no other release is offered (the
+ * site index was not read: offline, timed out, a server error; or it names that same release).
+ * A reload may then read the index, and a stored release starts without it; without them the
+ * message would be a dead end (code review 3 L3). With "Use release <latest>" it needs neither.
+ */
+function offersChoices(message: BootMessage): boolean {
+  return RETRIED.has(message.kind) || (message.kind === 'not-served' && message.useLatest === undefined);
+}
+
+/**
+ * Adds the choices of a message that the network may resolve (screen review 1 I6; offersChoices):
+ * "Try again", and each release in `stored` other than `release` (the one that could not start)
+ * and the latest already offered. A stored release is only offered: the pin changes when the user
  * chooses it, never by itself.
  */
 export function withChoices(message: BootMessage, stored: readonly string[], release?: string): BootMessage {
-  if (!RETRIED.has(message.kind)) return message;
+  if (!offersChoices(message)) return message;
   const others = stored.filter((id) => id !== release && id !== message.useLatest);
   return { ...message, retry: true, ...(others.length > 0 ? { useStored: others } : {}) };
 }

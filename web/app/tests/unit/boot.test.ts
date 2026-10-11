@@ -153,6 +153,17 @@ describe('boot: the messages', () => {
     expect(withChoices(notServed, ['new', 'old'], 'old')).toEqual(notServed);
   });
 
+  it('never leaves a release that the site does not serve without a way on: without a latest to offer, "Try again" and the stored releases (code review 3 L3)', () => {
+    // The site index was not read (offline, timed out, a server error): a reload may read it.
+    const noIndex = failureMessage('old', { kind: 'not-served', reason: '404' }, undefined, false);
+    expect(noIndex.useLatest).toBeUndefined();
+    expect(withChoices(noIndex, ['new', 'old'], 'old')).toEqual({ ...noIndex, retry: true, useStored: ['new'] });
+    expect(withChoices(noIndex, [], 'old')).toEqual({ ...noIndex, retry: true });
+    // The index names the release that it does not serve (a broken deployment): an older stored release still starts.
+    const sameLatest = failureMessage('new', { kind: 'not-served', reason: 'the answer is not JSON' }, index, true);
+    expect(withChoices(sameLatest, ['new', 'old'], 'new')).toEqual({ ...sameLatest, retry: true, useStored: ['old'] });
+  });
+
   it("finds a release from its cache's name, and nothing else", () => {
     expect(releaseOfCache('losat-web-release-d607a2f54e58-e2fb7128')).toBe('d607a2f54e58-e2fb7128');
     expect(releaseOfCache('losat-web-shell')).toBeUndefined();

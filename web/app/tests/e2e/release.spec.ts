@@ -67,6 +67,47 @@ test('a pinned release that the site no longer serves gives a message and a butt
   await expect(page.getByTestId('boot-message')).toHaveCount(0);
 });
 
+test('a pinned release that the site no longer serves, while the site index cannot be read, offers "Try again" and the stored release, never a dead end', async ({
+  page,
+  request,
+}) => {
+  const latest = await latestRelease(request);
+  await page.goto('/');
+  await appStarted(page);
+  await expect(page.getByTestId('offline-status')).toHaveAttribute('data-state', 'ready', { timeout: 60_000 });
+  // The site index cannot be read (a timeout, a server error, offline): no latest release to
+  // offer (code review 3 L3). WebKit does not show page.route() the requests of a page that a
+  // service worker controls, so the page's own fetch of the index fails, until the test lets it through.
+  await page.addInitScript(() => {
+    const fetchOf = window.fetch.bind(window);
+    window.fetch = (input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), location.href);
+      if (url.pathname === '/releases.json' && sessionStorage.getItem('test:site-index') === 'fails') return Promise.reject(new TypeError('Failed to fetch'));
+      return fetchOf(input, init);
+    };
+  });
+  await page.evaluate((key) => {
+    localStorage.setItem(key, 'gone-release');
+    sessionStorage.setItem('test:site-index', 'fails');
+  }, PIN_KEY);
+  await page.reload();
+
+  const message = page.getByTestId('boot-message');
+  await expect(message).toHaveAttribute('data-kind', 'not-served');
+  await expect(message).toHaveText('This browser uses LOSAT Web release gone-release, which this site no longer serves.');
+  await expect(page.getByTestId('boot-use-latest')).toHaveCount(0);
+  await expect(page.getByTestId('boot-use-stored')).toHaveText(`Use release ${latest} (stored)`);
+  await expect(page.getByTestId('add-to-queue')).toHaveCount(0);
+  expect(await page.evaluate((key) => localStorage.getItem(key), PIN_KEY)).toBe('gone-release');
+
+  // "Try again" reads the index again; now it names the latest release, and nothing was switched.
+  await page.evaluate(() => sessionStorage.removeItem('test:site-index'));
+  await page.getByTestId('boot-retry').click();
+  await expect(page.getByTestId('boot-use-latest')).toHaveText(`Use release ${latest}`);
+  await expect(page.getByTestId('boot-retry')).toHaveCount(0);
+  expect(await page.evaluate((key) => localStorage.getItem(key), PIN_KEY)).toBe('gone-release');
+});
+
 test('a first visit without the site index says so, and starts nothing', async ({ page }) => {
   await page.route('**/releases.json', (route) => route.fulfill({ status: 503, body: 'unavailable' }));
   await page.goto('/');

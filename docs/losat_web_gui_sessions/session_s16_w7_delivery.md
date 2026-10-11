@@ -39,4 +39,4 @@ LOSAT Web の段階 W7 を実行する。先に [セッション README](README.
 
 ## 終了・引き継ぎ
 
-README の規則 8 に従う。次は [S17 — 公開判定](session_s17_g_release_decision.md)。
+README の規則 8 に従う。S16 はプレビューでの確認（計画 §7 の S16 の行の 3 つめの条件）を残して終わった（[W7 のゲート記録](../evidence/losat_web_w7/README.md)）。次は [S16b — W7 の続き：プレビューでの確認](session_s16b_w7_preview.md)、その後に [S17 — 公開判定](session_s17_g_release_decision.md)。

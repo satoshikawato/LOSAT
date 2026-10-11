@@ -5,7 +5,7 @@ const crypto = require("node:crypto");
 const os = require("node:os");
 const path = require("node:path");
 const { performance } = require("node:perf_hooks");
-const { inspectArtifact, unsignedWasiImports } = require("./wasi_artifact");
+const { inspectArtifact, unsignedWasiImports, createSharedMemory } = require("./wasi_artifact");
 // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
 // m_NumThreads = num_threads;
 // Keep the parallel command's memory operations valid across V8 isolates.
@@ -398,38 +398,6 @@ async function instantiateWithMemory(module, memory, args, spawnThread, provided
   return { instance, wasi };
 }
 
-// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
-// m_NumThreads = num_threads;
-// Host memory only. The module declares the largest shared memory it can use (65,535
-// pages, LOSAT/.cargo/config.toml), and a provided memory may have a smaller maximum
-// (WebAssembly import matching). An engine reserves a shared memory's maximum as address
-// space when it creates it. JavaScriptCore throws RangeError when it cannot. V8 without
-// guard regions (Android, or an address-space limit) keeps a smaller reservation instead,
-// Node v26.8.2 deps/v8/src/objects/backing-store.cc:454-466:
-//   // Retry with smaller maximum pages at each retry.
-//   size_t sizes[] = {maximum_pages - delta, maximum_pages - 2 * delta,
-//                     maximum_pages - 3 * delta, initial_pages};
-// and with the last of these the memory cannot grow at all. So create each candidate one
-// page short of the initial size and grow that page; a maximum that fails either step is
-// replaced by the next smaller one, down to the 1 GiB that the modules declared before.
-const MEMORY_STEP_DOWN_PAGES = [49152, 32768, 24576, 16384];
-
-function createSharedMemory(initial, maximum, stepDown, create = descriptor => new WebAssembly.Memory(descriptor)) {
-  const smaller = stepDown ? MEMORY_STEP_DOWN_PAGES.filter(pages => pages < maximum && pages >= initial) : [];
-  let failure;
-  for (const pages of [maximum, ...smaller]) {
-    try {
-      const memory = create({ initial: initial - 1, maximum: pages, shared: true });
-      memory.grow(1);
-      return { memory, maximum: pages };
-    } catch (error) {
-      if (!(error instanceof RangeError)) throw error;
-      failure = error;
-    }
-  }
-  throw failure;
-}
-
 async function instantiateMain(module, args, spawnThread, limits, provided) {
   const initial = parsePositiveIntEnv("LOSAT_WASM_MEMORY_INITIAL_PAGES", limits.initial);
   // A maximum given in the environment is used as it is, without stepping down.
@@ -689,7 +657,7 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
     },
   };
 }
-module.exports = { createThreadHost, prepareThreadHost, compileThreadedModule, createSharedMemory, guardSharedMemoryCached, defaultGuardCacheDir };
+module.exports = { createThreadHost, prepareThreadHost, compileThreadedModule, guardSharedMemoryCached, defaultGuardCacheDir };
 
 if (!isMainThread) {
   const { module: workerModule, wasmPath, args, memory, control, fault, standby, recycle } = workerData;

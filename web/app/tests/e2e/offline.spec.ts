@@ -236,6 +236,35 @@ test('3. an update changes nothing until the user chooses; next to the switch it
   expect(servedReleaseFiles(switching).filter((path) => !path.startsWith(`/r/${B}/`))).toEqual([]);
 });
 
+test('3b. a release that one tab downloaded and checked survives another tab\'s cleanup until the switch, which then starts it offline', async ({
+  context,
+  browserName,
+}) => {
+  const first = await context.newPage();
+  await open(first);
+  await appStarted(first, A);
+  await offlineReady(first);
+  front.upstream = origins.ab;
+  await first.reload();
+  await appStarted(first, A);
+  await reviewAndDownload(first);
+  await expect(first.getByTestId('update-downloaded')).toBeVisible({ timeout: 60_000 });
+
+  // A second tab starts A (the pin), is Offline ready, and has the worker clean up: B stays,
+  // because the first tab holds B's lock from its download until it switches.
+  const second = await context.newPage();
+  await open(second);
+  await appStarted(second, A);
+  await offlineReady(second);
+  await expect.poll(async () => Object.keys(await storedFiles(second)).sort()).toEqual([`losat-web-release-${A}`, `losat-web-release-${B}`, 'losat-web-shell']);
+
+  await goOffline(context, browserName);
+  await first.getByTestId('update-switch').click();
+  await appStarted(first, B);
+  expect(await pinOf(first)).toBe(B);
+  expect(await isolated(first)).toBe(true);
+});
+
 for (const [name, breakB] of [
   ['a file of B with other bytes', () => (front.upstream = origins.damaged)],
   [

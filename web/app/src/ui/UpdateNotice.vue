@@ -84,6 +84,17 @@ const direct = computed(() => props.state.offline.kind === 'unsupported');
       </div>
     </template>
 
+    <template v-else-if="update.kind === 'removed'">
+      <p class="error" data-testid="update-removed">
+        Release {{ latest }} is no longer stored in this browser, so LOSAT Web did not switch to it and stays on release
+        {{ state.release }}. Download and check it again to switch.
+      </p>
+      <div class="update-actions">
+        <button type="button" data-testid="update-retry" @click="release.download()">Download and check again</button>
+        <button type="button" data-testid="update-cancel" @click="release.cancel()">Cancel</button>
+      </div>
+    </template>
+
     <template v-else-if="update.kind === 'not-kept'">
       <p class="error" data-testid="update-not-kept">
         The switch cannot be kept: the browser did not store the choice of release ({{ update.reason }}). LOSAT Web stays on release

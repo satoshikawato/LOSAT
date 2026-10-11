@@ -5,10 +5,13 @@
 import { RELEASE_ID_PATTERN } from '../../domain/site-index';
 import type { OfflinePort, PinWrite, PrepareResult, ReleaseChannel, ReleasePage, ReleasePin } from '../../ports/offline';
 import {
+  MANIFEST_NAME,
   PROTOCOL_VERSION,
   RELEASE_LOCK_PREFIX,
   SW_SCOPE,
   SW_URL,
+  releaseCacheName,
+  releasePath,
   type PageMessage,
   type PrepareProgress,
   type WorkerMessage,
@@ -168,12 +171,24 @@ export function browserOffline(): OfflinePort {
       return true;
     },
 
-    holdRelease(release): void {
-      if (typeof navigator === 'undefined' || !('locks' in navigator)) return;
-      // Shared: every tab of the release holds it at once. Never released: the page's end releases it.
-      navigator.locks
-        .request(RELEASE_LOCK_PREFIX + release, { mode: 'shared' }, () => new Promise<void>(() => {}))
-        .catch(() => undefined);
+    holdRelease(release): () => void {
+      if (typeof navigator === 'undefined' || !('locks' in navigator)) return () => undefined;
+      let letGo = (): void => undefined;
+      const held = new Promise<void>((resolve) => (letGo = resolve));
+      // Shared: every tab of the release holds it at once. The page's end releases it too.
+      navigator.locks.request(RELEASE_LOCK_PREFIX + release, { mode: 'shared' }, () => held).catch(() => undefined);
+      return () => letGo();
+    },
+
+    async stored(release): Promise<boolean> {
+      if (typeof caches === 'undefined') return false;
+      try {
+        // caches.match with a cacheName never creates the cache, unlike caches.open.
+        const manifest = await caches.match(location.origin + releasePath(release, MANIFEST_NAME), { cacheName: releaseCacheName(release) });
+        return manifest !== undefined;
+      } catch {
+        return false;
+      }
     },
   };
 }

@@ -7,6 +7,8 @@ import { Store } from '../../src/application/store';
 import type { RunStatus } from '../../src/domain/run';
 import type { SiteIndex } from '../../src/domain/site-index';
 import type { OfflinePort, PinWrite, PrepareProgress, PrepareResult, ReleaseChannel, ReleasePage, ReleasePin } from '../../src/ports/offline';
+import { releaseCachesToRemove } from '../../src/sw/cleanup';
+import { RELEASE_CACHE_PREFIX, RELEASE_LOCK_PREFIX } from '../../src/sw/protocol';
 
 const run = (number: number, status: RunStatus): RunView =>
   ({ snapshot: { runId: `run-${number}`, number }, status, record: {} }) as unknown as RunView;
@@ -24,6 +26,10 @@ class FakeOffline implements OfflinePort {
   supported = true;
   connectError: Error | undefined;
   held: string[] = [];
+  /** The release locks held now, by name, as navigator.locks.query() lists them. */
+  locks: string[] = [];
+  /** The releases stored whole. */
+  storedReleases = new Set<string>();
   prepared: string[] = [];
   cleanups: string[][] = [];
   activations = 0;
@@ -40,7 +46,19 @@ class FakeOffline implements OfflinePort {
     onProgress({ files: 0, filesTotal: 2, bytes: 0, bytesTotal: 300 });
     if (this.hold) await new Promise<void>((resolve) => this.pending.push(resolve));
     onProgress({ files: 1, filesTotal: 2, bytes: 100, bytesTotal: 300 });
-    return this.results.shift() ?? { ok: true };
+    const result = this.results.shift() ?? { ok: true };
+    if (result.ok) this.storedReleases.add(release);
+    return result;
+  }
+  async stored(release: string): Promise<boolean> {
+    return this.storedReleases.has(release);
+  }
+  /** The cleanup that another tab asks for, by the worker's rule (src/sw/cleanup.ts); returns the releases removed. */
+  cleanupElsewhere(keep: readonly string[]): string[] {
+    const names = [...this.storedReleases].map((release) => RELEASE_CACHE_PREFIX + release);
+    const removed = releaseCachesToRemove(names, { held: this.locks.map((name) => ({ name })) }, keep, []).map((name) => name.slice(RELEASE_CACHE_PREFIX.length));
+    for (const release of removed) this.storedReleases.delete(release);
+    return removed;
   }
   releaseHeld(): void {
     for (const resolve of this.pending.splice(0)) resolve();
@@ -52,8 +70,16 @@ class FakeOffline implements OfflinePort {
     this.activations++;
     return true;
   }
-  holdRelease(release: string): void {
+  holdRelease(release: string): () => void {
     this.held.push(release);
+    const name = RELEASE_LOCK_PREFIX + release;
+    this.locks.push(name);
+    let holding = true;
+    return () => {
+      if (!holding) return;
+      holding = false;
+      this.locks.splice(this.locks.indexOf(name), 1);
+    };
   }
 }
 
@@ -409,6 +435,54 @@ describe('explicit update', () => {
     expect(s.pin.value).toBe('b');
     expect(s.offline.activations).toBe(0);
     expect(s.host.reloads).toBe(1);
+  });
+
+  it('holds the downloaded release until the switch, so that another tab’s cleanup keeps it', async () => {
+    const { offline, pin, host, manager, state } = await reviewed();
+    offline.hold = true;
+    const downloading = manager.download();
+    await flush();
+    // Held from the start of the download, not only while the worker prepares it.
+    expect(offline.locks).toContain(`${RELEASE_LOCK_PREFIX}b`);
+    offline.releaseHeld();
+    await downloading;
+    expect(state().update).toEqual({ kind: 'downloaded', latest: 'b' });
+    // Another tab of release a starts, is Offline ready, and asks the worker to clean up (keep: a).
+    expect(offline.cleanupElsewhere(['a'])).toEqual([]);
+    await manager.switchNow();
+    expect(pin.value).toBe('b');
+    expect(host.reloads).toBe(1);
+  });
+
+  it('lets the downloaded release go when the user cancels or says "Not now"', async () => {
+    const { offline, manager } = await reviewed();
+    await manager.download();
+    manager.cancel();
+    expect(offline.locks).toEqual([`${RELEASE_LOCK_PREFIX}a`]);
+    expect(offline.cleanupElsewhere(['a'])).toEqual(['b']);
+
+    manager.review();
+    await manager.download();
+    expect(offline.locks).toEqual([`${RELEASE_LOCK_PREFIX}a`, `${RELEASE_LOCK_PREFIX}b`]);
+    manager.notNow();
+    expect(offline.locks).toEqual([`${RELEASE_LOCK_PREFIX}a`]);
+  });
+
+  it('does not switch to a release that is no longer stored, and can download it again', async () => {
+    const { offline, pin, channel, host, manager, state } = await reviewed();
+    await manager.download();
+    // The browser removed it (storage pressure, site data cleared): no lock prevents that.
+    offline.storedReleases.delete('b');
+    await manager.switchNow();
+    expect(state().update).toEqual({ kind: 'removed', latest: 'b' });
+    expect(pin.writes).toEqual([]);
+    expect(channel.announced).toEqual([]);
+    expect(host.reloads).toBe(0);
+    await manager.download();
+    expect(state().update).toEqual({ kind: 'downloaded', latest: 'b' });
+    await manager.switchNow();
+    expect(pin.value).toBe('b');
+    expect(host.reloads).toBe(1);
   });
 
   it('"Cancel" goes back to the offer, and a check does not disturb a review', async () => {

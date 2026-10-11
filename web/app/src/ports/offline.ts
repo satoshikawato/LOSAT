@@ -27,8 +27,13 @@ export interface OfflinePort {
   cleanup(keep: readonly string[]): Promise<void>;
   /** Tells a waiting (newer) worker to take over; resolves false when there is none. */
   activateWaiting(): Promise<boolean>;
-  /** Holds this page's share of `release`'s lock for the life of the page: the worker keeps the release while it is held. */
-  holdRelease(release: string): void;
+  /**
+   * Holds this page's share of `release`'s lock: the worker keeps the release while anyone holds
+   * it. Held until the returned function is called, or for the life of the page.
+   */
+  holdRelease(release: string): () => void;
+  /** Whether `release` is stored whole (its cache holds its manifest, which is stored last); false when it cannot be read. */
+  stored(release: string): Promise<boolean>;
 }
 
 export type PinWrite = { readonly ok: true } | { readonly ok: false; readonly reason: string };

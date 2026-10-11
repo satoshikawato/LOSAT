@@ -5,12 +5,15 @@
 // - Update: the site index is read after start-up and then hourly while the page is visible
 //   and online (never while offline). A release other than this tab's is offered; nothing
 //   changes until the user chooses. The user reviews what a reload does to this tab's work,
-//   has the worker download and check the new release, and only then switches: the pin is
-//   written, a waiting worker is told to take over, and the page reloads. A failed download
-//   or a pin that cannot be written leaves this tab, the pin and the stored release as they
-//   were. Other tabs are told of a switch and keep their release until they are reloaded.
+//   has the worker download and check the new release, sees again what the reload does, and
+//   only then switches: the pin is written, a waiting worker is told to take over, and the
+//   page reloads. A failed download or a pin that cannot be written leaves this tab, the pin
+//   and the stored release as they were. Other tabs are told of a switch and keep their
+//   release until they are reloaded.
 // - Every page holds its release's lock for its life, so the worker keeps an older release
-//   while a tab still runs it.
+//   while a tab still runs it. From the start of a download until the tab switches, cancels or
+//   closes, it also holds the new release's lock, so that another tab's cleanup cannot remove
+//   the release that was checked; the switch still checks that it is stored whole.
 import type { RunStatus } from '../domain/run';
 import type { OfflinePort, PrepareProgress, ReleaseChannel, ReleasePage, ReleasePin } from '../ports/offline';
 import type { PagePort } from '../ports/page';
@@ -39,6 +42,8 @@ export type UpdateState =
   /** Every file of `latest` is stored and checked. */
   | { readonly kind: 'downloaded'; readonly latest: string }
   | { readonly kind: 'failed'; readonly latest: string; readonly reason: string }
+  /** At the switch, `latest` was no longer stored whole (the browser removed it): nothing was switched. */
+  | { readonly kind: 'removed'; readonly latest: string }
   /** The pin could not be written: the switch would not last, so the page was not reloaded. */
   | { readonly kind: 'not-kept'; readonly latest: string; readonly reason: string }
   /** The pin names `latest`; the reload was asked for (the browser may have asked the user to stay). */
@@ -86,6 +91,8 @@ export interface SwitchImpact {
 }
 
 const RUNNING: ReadonlySet<RunStatus> = new Set(['preparing', 'running', 'finalizing']);
+/** The update states in which this tab holds the lock of `latest`: it is being stored, is stored, or is the pin. */
+const HOLDING: ReadonlySet<UpdateState['kind']> = new Set(['downloading', 'downloaded', 'not-kept', 'switched']);
 const HOUR_MS = 60 * 60 * 1000;
 
 export function switchImpact(
@@ -111,6 +118,9 @@ export class ReleaseManager {
   /** A check fell due while the page was hidden or offline: it runs when the page is visible and online again. */
   private due = false;
   private timer: ReturnType<typeof setTimeout> | undefined;
+  /** The lock of the update's release that this tab holds (HOLDING), and how to let it go. */
+  private updateHold: { readonly release: string; readonly letGo: () => void } | undefined;
+  private switching = false;
 
   constructor(private readonly deps: ReleaseDeps) {
     let offline: OfflineState = { kind: 'waiting' };
@@ -169,7 +179,14 @@ export class ReleaseManager {
   /** "Not now": this tab stops offering this release. */
   notNow(): void {
     const update = this.state.get().update;
-    if (update.kind === 'available' || update.kind === 'reviewing' || update.kind === 'failed' || update.kind === 'not-kept' || update.kind === 'downloaded') {
+    if (
+      update.kind === 'available' ||
+      update.kind === 'reviewing' ||
+      update.kind === 'failed' ||
+      update.kind === 'removed' ||
+      update.kind === 'not-kept' ||
+      update.kind === 'downloaded'
+    ) {
       this.setUpdate({ kind: 'dismissed', latest: update.latest });
     }
   }
@@ -177,7 +194,7 @@ export class ReleaseManager {
   /** "Cancel": back to the offer; nothing has changed. */
   cancel(): void {
     const update = this.state.get().update;
-    if (update.kind === 'reviewing' || update.kind === 'failed' || update.kind === 'not-kept' || update.kind === 'downloaded') {
+    if (update.kind === 'reviewing' || update.kind === 'failed' || update.kind === 'removed' || update.kind === 'not-kept' || update.kind === 'downloaded') {
       this.setUpdate({ kind: 'available', latest: update.latest });
     }
   }
@@ -190,7 +207,7 @@ export class ReleaseManager {
   /** "Download and check": the worker stores the new release after checking every file. */
   async download(): Promise<void> {
     const update = this.state.get().update;
-    if ((update.kind !== 'reviewing' && update.kind !== 'failed') || this.switchesDirectly()) return;
+    if ((update.kind !== 'reviewing' && update.kind !== 'failed' && update.kind !== 'removed') || this.switchesDirectly()) return;
     const latest = update.latest;
     const current = () => {
       const now = this.state.get().update;
@@ -208,12 +225,29 @@ export class ReleaseManager {
     this.setUpdate(result.ok ? { kind: 'downloaded', latest } : { kind: 'failed', latest, reason: result.reason });
   }
 
-  /** "Switch to release <id> and reload": writes the pin, tells the other tabs and a waiting worker, and reloads. */
+  /**
+   * "Switch to release <id> and reload": checks that the release is still stored whole, writes
+   * the pin, tells the other tabs and a waiting worker, and reloads.
+   */
   async switchNow(): Promise<void> {
     const update = this.state.get().update;
-    const ready = update.kind === 'downloaded' || (update.kind === 'reviewing' && this.switchesDirectly());
-    if (!ready) return;
+    const direct = update.kind === 'reviewing' && this.switchesDirectly();
+    if ((update.kind !== 'downloaded' && !direct) || this.switching) return;
     const latest = update.latest;
+    if (!direct) {
+      // The lock held since the download keeps other tabs' cleanups away, but the browser may
+      // still have removed the release (storage pressure, site data cleared): a pin to a
+      // release that is not stored would not start offline.
+      this.switching = true;
+      const stored = await this.deps.offline.stored(latest).catch(() => false);
+      this.switching = false;
+      const now = this.state.get().update;
+      if (now.kind !== 'downloaded' || now.latest !== latest) return;
+      if (!stored) {
+        this.setUpdate({ kind: 'removed', latest });
+        return;
+      }
+    }
     const written = this.deps.pin.write(latest);
     if (!written.ok) {
       this.setUpdate({ kind: 'not-kept', latest, reason: written.reason });
@@ -317,6 +351,13 @@ export class ReleaseManager {
   }
 
   private setUpdate(update: UpdateState): void {
+    const hold = HOLDING.has(update.kind) && 'latest' in update ? update.latest : undefined;
+    if (this.updateHold?.release !== hold) {
+      // Taken before the old one is let go, so that a release never goes unheld between two states.
+      const next = hold === undefined ? undefined : { release: hold, letGo: this.deps.offline.holdRelease(hold) };
+      this.updateHold?.letGo();
+      this.updateHold = next;
+    }
     this.set({ update });
   }
 

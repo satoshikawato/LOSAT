@@ -9,7 +9,7 @@ import { BUILD_HAS_ENGINE, runSearch } from './support/browser';
 import { E2E_ORIGIN } from './support/origin';
 
 const PIN_KEY = 'losat-web:release';
-const SITE_FILES = new Set(['/', '/boot.js', '/boot.css', '/releases.json']);
+const SITE_FILES = new Set(['/', '/boot.js', '/boot.css', '/releases.json', '/sw.js']);
 const ISOLATION = ['cross-origin-opener-policy', 'cross-origin-embedder-policy', 'cross-origin-resource-policy', 'content-security-policy'];
 
 /** The site's latest release, from its index. */
@@ -99,7 +99,10 @@ for (const [name, stub] of [
   });
 }
 
-test('every response has the isolation headers and the CSP, on a reload too; release files are immutable', async ({ page, request }) => {
+test('every response has the isolation headers and the CSP, on a reload too; release files are immutable', async ({ browser, request }) => {
+  // Without the service worker, which would answer the reload itself (V-OFF, offline.spec.ts, covers it).
+  const context = await browser.newContext({ baseURL: E2E_ORIGIN, serviceWorkers: 'block' });
+  const page = await context.newPage();
   const responses: Response[] = [];
   page.context().on('response', (r) => {
     if (sameOrigin(r.url())) responses.push(r);
@@ -133,6 +136,7 @@ test('every response has the isolation headers and the CSP, on a reload too; rel
     expect(revalidated.status(), url).toBe(304);
     for (const name of ISOLATION) expect(revalidated.headers()[name], `${name} of the 304 of ${url}`).toBe(first.headers()[name]);
   }
+  await context.close();
 });
 
 test('a missing file is 404 with the site’s headers, and no page stands in for it', async ({ page, request }) => {

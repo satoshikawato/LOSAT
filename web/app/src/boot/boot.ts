@@ -4,6 +4,7 @@
 // nothing but two GETs: `/releases.json` and the release's manifest. The decisions are in plan.ts.
 import { releaseManifestUrl } from '../domain/release-manifest';
 import { parseSiteIndex, SITE_INDEX_PATH, type SiteIndex } from '../domain/site-index';
+import { SW_SCOPE, SW_URL } from '../sw/protocol';
 import {
   chooseRelease,
   entryUrls,
@@ -118,7 +119,19 @@ async function boot(): Promise<void> {
     await start(script, styles);
   } catch {
     show(failureMessage(choice.release, { kind: 'unreachable' }, undefined, online()));
+    return;
   }
+  registerServiceWorker();
+}
+
+/**
+ * Registers the site's service worker (src/sw/worker.ts) once the release has started, so that
+ * it never delays the start. It stores a release only when the app asks it to. A browser
+ * without service workers, or a registration that fails, is not an error: the app works online.
+ */
+function registerServiceWorker(): void {
+  if (!('serviceWorker' in navigator)) return;
+  navigator.serviceWorker.register(SW_URL, { scope: SW_SCOPE, updateViaCache: 'none' }).catch(() => undefined);
 }
 
 boot().catch(() => show({ kind: 'failed', text: 'LOSAT Web could not start. Reload the page to try again.' }));

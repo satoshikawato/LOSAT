@@ -30,7 +30,7 @@ describe('_headers', () => {
     const rules = readHeaderRules();
     const isolation = siteHeaders();
     expect(headersFor('/r/abc-fake/assets/index-1.js', rules)).toEqual({ ...isolation, 'Cache-Control': 'public, max-age=31536000, immutable' });
-    for (const path of ['/', '/index.html', '/boot.js', '/boot.css', '/releases.json', '/404.html']) {
+    for (const path of ['/', '/index.html', '/boot.js', '/boot.css', '/releases.json', '/404.html', '/sw.js']) {
       expect(headersFor(path, rules)).toEqual({ ...isolation, 'Cache-Control': 'no-cache' });
     }
     // Another path has the isolation headers and no Cache-Control of the site's (Pages adds its default).

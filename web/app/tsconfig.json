@@ -16,5 +16,7 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["src/**/*.ts", "src/**/*.vue", "tests/**/*.ts", "build/**/*.ts", "*.config.ts"]
+  "include": ["src/**/*.ts", "src/**/*.vue", "tests/**/*.ts", "build/**/*.ts", "*.config.ts"],
+  // The service worker's entry needs the WebWorker library (ServiceWorkerGlobalScope): tsconfig.sw.json.
+  "exclude": ["src/sw/worker.ts"]
 }

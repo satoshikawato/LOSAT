@@ -4,6 +4,7 @@
 //   <site>/index.html            the boot page (src/boot/index.html)
 //   <site>/boot.js, boot.css     the boot script (src/boot/boot.ts, built here) and its style sheet
 //   <site>/404.html              the page of a missing file (src/boot/not-found.html)
+//   <site>/sw.js                 the service worker (src/sw/worker.ts, build/service-worker.ts)
 //   <site>/releases.json         the site index: this release, the shell, the measurement setting
 //   <site>/r/<release-id>/       the Vite build with base /r/<release-id>/ and its release-manifest.json
 //
@@ -17,6 +18,7 @@ import { build, type Plugin } from 'vite';
 import { releaseDirectory, type ReleaseManifest } from '../src/domain/release-manifest.ts';
 import { engineBuildName } from '../src/infra/reactor/assets.ts';
 import type { Reactors, ReactorFile } from './reactors.ts';
+import { writeServiceWorker } from './service-worker.ts';
 import { analyticsEndpoint, siteRelease, writeReleaseManifest, writeSiteIndex } from './site-files.ts';
 
 const APP_DIR = fileURLToPath(new URL('..', import.meta.url));
@@ -170,6 +172,7 @@ export function losatSite(options: SiteOptions): Plugin {
       if (entry === undefined) this.error('the build has no entry');
       const manifest = writeReleaseManifest(releaseDir, { release: options.release, app: options.app, engine: engineNames(options.reactors), entry });
       await writeBoot(siteDir);
+      await writeServiceWorker(siteDir);
       if (publicDir !== undefined && existsSync(publicDir)) cpSync(publicDir, siteDir, { recursive: true });
       writeSiteIndex(siteDir, { releases: [siteRelease(manifest)], latest: options.release, analyticsEndpoint: endpoint });
     },

@@ -6,12 +6,12 @@
 import { execSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { RELEASE_ID_PATTERN } from '../src/domain/site-index.ts';
 import type { Reactors } from './reactors.ts';
 
-export const RELEASE_ENV = 'LOSAT_WEB_RELEASE_ID';
+export { RELEASE_ID_PATTERN };
 
-/** Lower-case letters, digits, `.` and `-`, starting with a letter or digit, at most 64 characters. */
-export const RELEASE_ID_PATTERN = /^[0-9a-z][0-9a-z.-]{0,63}$/;
+export const RELEASE_ENV = 'LOSAT_WEB_RELEASE_ID';
 
 const APP_DIR = fileURLToPath(new URL('..', import.meta.url));
 

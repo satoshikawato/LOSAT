@@ -15,7 +15,7 @@
 //   closes, it also holds the new release's lock, so that another tab's cleanup cannot remove
 //   the release that was checked; the switch still checks that it is stored whole.
 import type { RunStatus } from '../domain/run';
-import type { OfflinePort, PrepareProgress, ReleaseChannel, ReleasePage, ReleasePin } from '../ports/offline';
+import type { OfflinePort, PrepareProgress, PrepareResult, ReleaseChannel, ReleasePage, ReleasePin } from '../ports/offline';
 import type { PagePort } from '../ports/page';
 import type { SitePort } from '../ports/site';
 import type { AppState } from './coordinator';
@@ -113,7 +113,7 @@ const message = (error: unknown): string => (error instanceof Error ? error.mess
 export class ReleaseManager {
   readonly state: Store<ReleaseState>;
   private started = false;
-  private connected: Promise<boolean> | undefined;
+  private connected: Promise<PrepareResult> | undefined;
   private checking = false;
   /** A check fell due while the page was hidden or offline: it runs when the page is visible and online again. */
   private due = false;
@@ -199,9 +199,13 @@ export class ReleaseManager {
     }
   }
 
-  /** Whether the switch needs no download first: without a service worker nothing can be stored or checked. */
+  /**
+   * Whether the switch needs no download first: only in a browser without service workers,
+   * where nothing can be stored or checked. Where they exist, a worker that cannot be
+   * registered is a failure of offline use, and the update still downloads and checks first.
+   */
   switchesDirectly(): boolean {
-    return this.state.get().offline.kind === 'unsupported';
+    return !this.deps.offline.supported;
   }
 
   /** "Download and check": the worker stores the new release after checking every file. */
@@ -214,13 +218,14 @@ export class ReleaseManager {
       return now.kind === 'downloading' && now.latest === latest;
     };
     this.setUpdate({ kind: 'downloading', latest });
-    const result = (await this.connect())
+    const connected = await this.connect();
+    const result = connected.ok
       ? await this.deps.offline
           .prepare(latest, (progress) => {
             if (current()) this.setUpdate({ kind: 'downloading', latest, progress });
           })
           .catch((error: unknown) => ({ ok: false as const, reason: message(error) }))
-      : { ok: false as const, reason: 'offline use is not available' };
+      : connected;
     if (!current()) return;
     this.setUpdate(result.ok ? { kind: 'downloaded', latest } : { kind: 'failed', latest, reason: result.reason });
   }
@@ -266,7 +271,7 @@ export class ReleaseManager {
 
   private async prepareOwn(): Promise<void> {
     this.setOffline({ kind: 'preparing' });
-    if (!(await this.connect())) return;
+    if (!(await this.connect()).ok) return;
     const release = this.deps.release;
     const result = await this.deps.offline
       .prepare(release, (progress) => this.setOffline({ kind: 'preparing', progress }))
@@ -280,13 +285,19 @@ export class ReleaseManager {
     await this.deps.offline.cleanup(pin === undefined || pin === release ? [release] : [release, pin]).catch(() => undefined);
   }
 
-  /** Connects to the worker once; a failure means no offline use in this tab. */
-  private connect(): Promise<boolean> {
+  /**
+   * Connects to the worker, once it has worked. A registration that fails or times out where
+   * service workers exist is a failure of offline use ("Try again" connects again), never
+   * "unsupported", which would offer a switch that nothing checked.
+   */
+  private connect(): Promise<PrepareResult> {
     this.connected ??= this.deps.offline.connect().then(
-      () => true,
+      () => ({ ok: true as const }),
       (error: unknown) => {
-        this.setOffline({ kind: 'unsupported', reason: message(error) });
-        return false;
+        this.connected = undefined;
+        const reason = `the offline worker could not be started (${message(error)})`;
+        this.setOffline({ kind: 'failed', reason });
+        return { ok: false as const, reason };
       },
     );
     return this.connected;

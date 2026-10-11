@@ -257,16 +257,24 @@ describe('offline use', () => {
     expect(offline.connect).toHaveBeenCalledTimes(1);
   });
 
-  it('is unsupported without service workers, and when the worker cannot be registered', async () => {
+  it('is unsupported without service workers', async () => {
     const without = setup();
     without.offline.supported = false;
     const manager = new ReleaseManager({ ...without.deps, offline: without.offline });
     expect(manager.state.get().offline).toEqual({ kind: 'unsupported' });
+  });
 
+  it('fails, and tries again on request, when the worker cannot be registered or does not start where service workers exist', async () => {
     const refused = setup();
-    refused.offline.connectError = new Error('the operation is insecure');
+    refused.offline.connectError = new Error('the offline worker did not start');
     await refused.start();
-    expect(refused.state().offline).toEqual({ kind: 'unsupported', reason: 'the operation is insecure' });
+    expect(refused.state().offline).toEqual({ kind: 'failed', reason: 'the offline worker could not be started (the offline worker did not start)' });
+    expect(refused.offline.prepared).toEqual([]);
+    refused.offline.connectError = undefined;
+    refused.manager.retryOffline();
+    await flush();
+    expect(refused.offline.connect).toHaveBeenCalledTimes(2);
+    expect(refused.state().offline).toEqual({ kind: 'ready' });
   });
 
   it('does nothing on a page that is not served as a release', async () => {
@@ -483,6 +491,22 @@ describe('explicit update', () => {
     await manager.switchNow();
     expect(pin.value).toBe('b');
     expect(host.reloads).toBe(1);
+  });
+
+  it('offers no switch until the download is checked when the worker cannot be registered where service workers exist', async () => {
+    const { offline, pin, host, manager, state, start } = setup({ latest: 'b' });
+    offline.connectError = new Error('the operation is insecure');
+    await start();
+    manager.review();
+    expect(state().update).toEqual({ kind: 'reviewing', latest: 'b' });
+    expect(manager.switchesDirectly()).toBe(false);
+    await manager.switchNow();
+    expect(pin.writes).toEqual([]);
+    await manager.download();
+    expect(state().update).toEqual({ kind: 'failed', latest: 'b', reason: 'the offline worker could not be started (the operation is insecure)' });
+    await manager.switchNow();
+    expect(pin.writes).toEqual([]);
+    expect(host.reloads).toBe(0);
   });
 
   it('"Cancel" goes back to the offer, and a check does not disturb a review', async () => {

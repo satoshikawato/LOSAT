@@ -3,7 +3,7 @@
 - 対象：[総合計画書](../../losat_web_gui_plan.md) の DW-28（保守者の決定、2026-10-12：「これは意味わかんないね。取っ払おうぜそんな制限」）。この決定で TD-7、G12、§2.3、§5.5、§8 と [`docs/web/abi_v2.md`](../../web/abi_v2.md) §3・§6 を改訂した。4 GiB を超える 64 ビットの Wasm（Memory64）は保守者の依頼で調査した
 - ブランチ：エンジン側 `feature/wasm-mem-max`（`feature/losat-web-gui` の `141615ec` から。変更は `a6b49721`・`95c1a7f7`・`fe2ca26b`・`dcf9d591`、検証した tree は `dcf9d591`）。アプリ側 `feature/wasm-mem-max-app`（`feature/losat-web-gui-app` の `81dbeec9` から。変更は `7172aaa0`。記録は同じ名前のフォルダの `app/README.md`）
 - 作業：2026-10-12、2 セッション。環境は WSL2（x64、32 スレッド、31 GiB）、Rust 1.92.0、Node v26.8.2
-- 状態：実装と検証は終わった。PR を 2 本開いて保守者の merge を待つ（アプリ側を先に。下の「残件」）。実機（iOS、Android など）での確認は残件
+- 状態：実装と検証は終わった。PR #136（アプリ側）と PR #137（エンジン側）が保守者の merge を待つ（#136 を先に。下の「残件」）。実機（iOS、Android など）での確認は残件
 
 ## 結論
 
@@ -42,7 +42,7 @@ A は変更前（`141615ec`、最大 16,384 ページ）の build（`out-base`�
 | A/B の時間（threaded の command、暖機 1 回の後に A と B を交互に） | p03（TBLASTX）の 1・8 スレッド、blastp の 1・8 スレッド、d04（TBLASTX）の 8 スレッド（d04 は 3 回、ほかは 5 回）。回ごとの B/A の中央値は wall が 1.007・1.022・1.002・0.980・1.031、CPU が 1.008・1.011・1.008・0.984・0.989。全実行で終了コード 0、出力は組ごとに 1 つの SHA-256。ほかのセッションも動いていた（load 2.5〜15.5）ので、回ごとの比は 0.76〜1.32 に散った。code 節と data 節が同じなので、差は計測の揺れと読む | [`results/ab_timing_summary.txt`](results/ab_timing_summary.txt)、[`results/ab_timing.tsv`](results/ab_timing.tsv) |
 | アプリ（`npm run check`、FakeEngine の E2E、新旧の reactor の E2E、3 ブラウザでの最大値と 2 GiB 超の検索） | `npm run check` は通過（単体 916 件）。E2E は新しい reactor で 327 件通過・失敗 0、旧い reactor で 324 件通過・失敗 0。Chromium・Firefox・WebKit とも宣言どおり 65,535 ページの共有メモリを確保し、2.06 GiB から始めた共有メモリでの 4 プログラムの検索（4 スレッド）が通常の memory と同じ bytes。FakeEngine の E2E は 296 件通過、1 件失敗：WebKit の `offline.spec.ts` の試験 6 が boot の画面のボタンを待って時間切れ（エンジンのコードを通らない試験）。同じ試験は新旧の reactor の E2E の WebKit で通り、単独の 5 回の繰り返しも 5/5 で通った。再現しないので原因は特定していない | アプリ側のブランチの `app/README.md` |
 | wasm64 の試作 build（`wasm64-unknown-unknown`、serial、ソースは変えない） | build できない。Rust 1.97.0 に `rust-src` を足し、`RUSTC_BOOTSTRAP=1` と `-Z build-std=std,panic_abort` で試した（固定の 1.92.0 は触っていない）。依存の `getrandom` 0.2.17 が `wasm*-unknown-unknown` を既定では受け付けず（`js` の feature を求める `compile_error!`）、そこで止まった。std の build と LOSAT 自身のコードがこのターゲットで通るかは、この試作では分からない。調査の経路 A の見積もり（WASI の置き換えが要る）と合う | [`results/wasm64_summary.txt`](results/wasm64_summary.txt)、[`scripts/wasm64_probe.sh`](scripts/wasm64_probe.sh) |
-| GitHub の CI（Web） | エンジン側：run 38155449735（`fe2ca26b`）と 38155831282（`dcf9d591`）は 4 つの job（engine-web-api、adapter、app、browser-engine）とも成功。アプリ側：run 38155451498（`7172aaa0`）は 3 つの job が成功、browser-engine が 1 件の失敗（323 件通過。WebKit の `results.spec.ts:512` が dot plot の canvas の `data-titles` を 1 回だけ読んで null）。同じ失敗は、このブランチを作る前の `feature/losat-web-gui-app` の run 38109093750・38109446588・38114111384・38118880176 にもある既存の試験の競合で、この変更は結果の画面を触っていない。手元の WebKit では新旧の reactor とも通った（下の「残件」） | — |
+| GitHub の CI（Web） | エンジン側：run 38155449735（`fe2ca26b`）と 38155831282（`dcf9d591`）は 4 つの job（engine-web-api、adapter、app、browser-engine）とも成功。アプリ側：run 38155451498（`7172aaa0`）は 3 つの job が成功、browser-engine が 1 件の失敗（323 件通過。WebKit の `results.spec.ts:512` が dot plot の canvas の `data-titles` を 1 回だけ読んで null）。同じ失敗は、このブランチを作る前の `feature/losat-web-gui-app` の run 38109093750・38109446588・38114111384・38118880176 にもある既存の試験の競合で、この変更は結果の画面を触っていない。手元の WebKit では新旧の reactor とも通った。PR の run：#137（`3239c511`、run 38162890036 と 38162890086）は 6 つの check がすべて成功。#136（`70e0bf17`、run 38162882236）は同じ試験の競合で app の job が 1 件失敗（今度は BLASTP）し、ほかは成功。2 回続いたので、アプリ側の PR で試験を直した（決定 12） | — |
 
 計画のゲート（skill `losat-gates`）との対応：変更は `web/adapter` の設定と host、`LOSAT` の link 引数と試験の道具で、Rust のソースは変えていない。standard の段（reactor の build、同一性、V-ABI quick、v1 の WASI の行列）を行った。V-ABI full と capture は、code 節と data 節が変更の前後で同じなので行っていない。
 
@@ -66,6 +66,8 @@ A は変更前（`141615ec`、最大 16,384 ページ）の build（`out-base`�
 | 9 | 計画書に DW-28 の行を足し、TD-7・G12・§2.3・§5.5・§8 から引く | 保守者の決定の記録 |
 | 10 | アプリの instance の作り直しの閾値は 512 MiB のまま（「最大値の半分」でなく固定の値にする） | linear memory は縮まないので、大きな検索の後のメモリをブラウザに返すための値である |
 | 11 | 引き下げは 16,384 ページ（1 GiB）で止める。それも取れないときは変更前と同じ動作。`createSharedMemory` は `wasi_artifact.js` に置く | 1 GiB 未満の threaded を許すかどうかは製品の判断なので保守者に残す。serial のモジュールのメモリは前もって予約されず、小さい共有メモリの最大値より先まで伸びうる |
+| 12（セッション 2） | アプリ側の PR で、既存の E2E の競合を 1 行で直す：`web/app/tests/e2e/results.spec.ts` が dot plot の `data-titles` を読む前にその属性を待つ（試験だけ） | plot は animation frame で描かれるのに、試験は属性を待たずに 1 回だけ読んでいた。このブランチの CI で WebKit が 2 回続けて失敗し、前のブランチの run 4 本にもある。流し直すだけでは PR が偶然で赤くなる |
+| 13（セッション 2） | 手元の FakeEngine の E2E で 1 回だけ出た WebKit の `offline.spec.ts` の試験 6 の時間切れは、記録だけして追わない | 単独の 5 回と新旧の reactor の E2E では通り、エンジンのコードを通らない試験で、原因を特定できなかった |
 
 ## 残件
 
@@ -73,7 +75,7 @@ A は変更前（`141615ec`、最大 16,384 ページ）の build（`out-base`�
 - **1 GiB 未満の threaded を許すかどうか**（製品の判断）：今は 1 GiB を確保できない端末では、変更前と同じく serial のモジュールで検索する。
 - **メモリ不足の知らせに大きさを出す案**：検索の途中で `memory.grow` が失敗したときに、確保できた最大値とその時点の大きさを知らせに入れる（今の知らせは変更前と同じ）。
 - **取り込みの順**：アプリ側の PR を先に merge する。エンジン側だけを先に入れると、旧いアプリは引き下げをしないので、4 GiB を予約できない端末で threaded が始まらず serial になる。SFe の未コミットの変更は `docs/web/abi_v2.md` の 86 行目を触るので、SFe を先にコミットしてからこのブランチを取り込む。
-- **この変更の外の、アプリの E2E の揺れ 2 件**（アプリの track に渡す）：WebKit の `results.spec.ts` の 784〜785 行目は dot plot の `data-titles` を待たずに 1 回だけ読む（CI で失敗した。このブランチの前からある）。WebKit の `offline.spec.ts` の試験 6 は FakeEngine の E2E で 1 回だけ時間切れになり、再現しない。
+- **アプリの E2E の揺れ 2 件**（この変更の外で起きた）：WebKit の `results.spec.ts` が dot plot の `data-titles` を待たずに読む競合は、アプリ側の PR #136 で直した（決定 12）。WebKit の `offline.spec.ts` の試験 6 は FakeEngine の E2E で 1 回だけ時間切れになり、再現しない（決定 13。アプリの track でまた出たら調べる）。
 - **Memory64**：上の条件が揃ったら見直す。それまでは大きなデータベースを linear memory の外に置く設計にする（`dbsearch-20261012` の作業に知らせた）。
 
 ## このフォルダ

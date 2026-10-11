@@ -51,9 +51,15 @@ dist/
   - A build without a commit (no git) stops unless `LOSAT_WEB_RELEASE_ID` names its release; only
     the development server and Vitest run without one (their ID is `unknown-<engine>`).
 - **Determinism.** A release directory is immutable and cached for a year, so its ID must fix its
-  bytes. No file holds a time; lists are sorted. Two builds of the same
-  tree with the same engine modules write the same bytes (`tests/unit/release-bytes.test.ts` builds
-  twice and compares every file).
+  bytes. No file holds a time; lists are sorted. Two builds of one commit with the same engine
+  modules write the same bytes, wherever the commit is checked out (a CI build and a local build).
+  `tests/unit/release-bytes.test.ts` builds twice in the checkout, and once more in a second
+  checkout of the commit at another path (a temporary `git worktree` of HEAD under the system's
+  temporary folder, with only the inputs of `web/app/build/inputs.ts` and a copy of
+  `node_modules`), and compares every file. It skips the second checkout, saying why, when the
+  inputs have uncommitted changes or git cannot add a worktree; the gate
+  (`docs/evidence/losat_web_w7/run_gate.sh`) stops on such changes before its first step, so there
+  the second checkout always runs.
 - **Older releases.** A build writes one release. `build/assemble-site.ts` copies the releases of
   earlier sites into a new one (below), so that tabs that still run them keep their files.
 

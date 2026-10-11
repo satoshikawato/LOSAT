@@ -127,8 +127,13 @@ The boot reads no research data and sends nothing but the two GETs of steps 2 an
 are text (`textContent`), in English; test IDs `boot-message` (with `data-kind`: `first-visit-offline`,
 `no-index`, `not-served`, `offline-not-stored`, `failed`, `pin-not-saved`) and `boot-use-latest`.
 `boot.css` styles only `#boot` and `#boot-noscript`, because the application shares the document.
-The pure decisions are in `src/boot/plan.ts` (unit tests `tests/unit/boot.test.ts`); `src/boot/**`
-may import `src/domain/**` only (ESLint).
+The pure decisions are in `src/boot/plan.ts` (unit tests `tests/unit/boot.test.ts`).
+
+**Layers** (ESLint, `web/app/eslint.config.js`; the rule's own test is `tests/unit/layers.test.ts`):
+`src/boot/**` may import `src/domain/**` and `src/sw/protocol.ts` (the worker's URL and scope) only;
+`src/sw/**` (the service worker) may import `src/domain/**` and its own files only; of the app's
+layers, only `src/infra/**` may import from `src/sw/`, and only `src/sw/protocol.ts` (the names and
+messages that the worker and the pages share). Nothing outside `src/boot/` imports it.
 
 **Build.** The site build (`build/site.ts`) builds `src/boot/boot.ts` with a second Vite build
 (`configFile: false`, one ES module, minified) into `boot.js`, and copies `src/boot/index.html`,

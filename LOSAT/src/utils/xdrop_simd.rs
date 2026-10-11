@@ -2192,6 +2192,15 @@ fn fits_8bit(scores: &Scores<'_>, gap_open: i32, gap_extend: i32, x_drop: i32) -
 #[cfg(target_arch = "x86_64")]
 #[path = "x_xdrop_avx2.rs"]
 mod x_avx2;
+// EXPERIMENT (LOSAT_X_DPW128): the 128-bit kernels with the per-row savings of the 256-bit ones,
+// over the same `arch` layer (x86_64 SSE4.1 / AVX-128 builds and wasm32 simd128). A child module
+// like `x_avx2`.
+#[cfg(any(
+    target_arch = "x86_64",
+    all(target_arch = "wasm32", target_feature = "simd128")
+))]
+#[path = "x_xdrop_w128.rs"]
+mod x_w128;
 // EXPERIMENT (LOSAT_X_DPCAPTURE, LOSAT_X_DPCAPTURE_EVERY): diagnostic capture of DP problems.
 #[path = "x_xdrop_capture.rs"]
 mod x_capture;
@@ -2199,6 +2208,8 @@ mod x_capture;
 /// No NCBI counterpart: reads the LOSAT_X_DPAVX2 and LOSAT_X_DPCAPTURE switches once; it does not
 /// change any value NCBI computes. Bit 0: try the 256-bit kernels first (set only when the CPU
 /// has AVX2); bit 1: record a sample of the calls. 0 (both off) leaves `xdrop_align` as it was.
+/// Bit 2 (EXPERIMENT, LOSAT_X_DPW128): try the 128-bit kernels of `x_xdrop_w128.rs` after the
+/// 256-bit ones (set only when the CPU runs the 128-bit kernels; always on wasm32 simd128).
 fn x_extra_switches() -> u8 {
     use std::sync::OnceLock;
     static ON: OnceLock<u8> = OnceLock::new();
@@ -2208,6 +2219,15 @@ fn x_extra_switches() -> u8 {
         {
             if x_avx2::switch_on() {
                 on |= 1;
+            }
+        }
+        #[cfg(any(
+            target_arch = "x86_64",
+            all(target_arch = "wasm32", target_feature = "simd128")
+        ))]
+        {
+            if x_w128::switch_on() {
+                on |= 4;
             }
         }
         if x_capture::switch_on() {
@@ -2237,7 +2257,9 @@ fn x_extra_switches() -> u8 {
 /// to the scalar port). The argument for the equality is at the head of `x_xdrop_avx2.rs`. The
 /// call sites' LOSAT_X_DPSHADOW comparison applies to whatever `xdrop_align` returns, so it
 /// covers the 256-bit kernels as well. LOSAT_X_DPCAPTURE records every Nth call of a thread
-/// (inputs and result); the call itself runs through `xdrop_align` unchanged.
+/// (inputs and result); the call itself runs through `xdrop_align` unchanged. With
+/// LOSAT_X_DPW128 the 128-bit kernels of `x_xdrop_w128.rs` are tried next (see the comment at
+/// that step).
 ///
 /// `Some(r)`: the call is answered with `r`; `None`: run the 128-bit dispatch.
 #[inline]
@@ -2293,6 +2315,47 @@ fn x_extra_dispatch(
             // SAFETY: bit 0 is set only when `x_avx2::available()` held (AVX2 detected).
             let r = unsafe {
                 x_avx2::align(
+                    q,
+                    s,
+                    scores,
+                    len1,
+                    len2,
+                    gap_open,
+                    gap_extend,
+                    x_drop,
+                    tb,
+                    check_fence,
+                    sc,
+                )
+            };
+            if r.is_some() {
+                return Some(r);
+            }
+        }
+    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:766-770
+    // ```c
+    //     if (!score_only) {
+    //         return ALIGN_EX(A, B, M, N, a_offset, b_offset, edit_block, gap_align,
+    // ```
+    // EXPERIMENT (LOSAT_X_DPW128): where the 128-bit dispatch below would run (after the 256-bit
+    // kernels, which keep priority), the 128-bit kernels of `x_xdrop_w128.rs` run the same
+    // recurrence (`tb == false`: `Blast_SemiGappedAlign` score-only and `s_BlastAlignPackedNucl`;
+    // `tb == true`: `ALIGN_EX`) with the per-row savings of the 256-bit kernels and return exactly
+    // what the 128-bit kernel returns (the argument, item by item, is at the head of that file).
+    // When they return None (the row-gap precondition, or a problem the 128-bit kernel declines
+    // too) the 128-bit dispatch runs. The call sites' LOSAT_X_DPSHADOW comparison applies to
+    // whatever `xdrop_align` returns, so it covers these kernels as well.
+    #[cfg(any(
+        target_arch = "x86_64",
+        all(target_arch = "wasm32", target_feature = "simd128")
+    ))]
+    {
+        if on & 4 != 0 {
+            // SAFETY: bit 2 is set only when `x_w128::available()` held (the 128-bit kernels' CPU
+            // features on x86_64; simd128 is a compile-time feature on wasm32).
+            let r = unsafe {
+                x_w128::align(
                     q,
                     s,
                     scores,

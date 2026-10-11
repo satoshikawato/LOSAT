@@ -3,9 +3,9 @@
 // inputs are replaced), "Getting started" (open on the first visit, closed once closed, and
 // with a localStorage that throws), and the browser self-test. The FakeEngine build checks the
 // form and the panel; the engine build (LOSAT_WEB_REACTORS) runs each example and the
-// self-test, which must pass every case in every browser. With LOSAT_WEB_SCREENS it records the
-// onboarding states for the screen review.
-import { mkdirSync, readFileSync } from 'node:fs';
+// self-test, which must pass every case in every browser. The onboarding states of the screen
+// review (41 to 45) are recorded by screens.spec.ts.
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { BUILD_HAS_ENGINE } from './support/browser';
@@ -214,46 +214,4 @@ test.describe('engine build', () => {
     // Nothing of it in the queue.
     await expect(page.getByTestId('run-1')).toHaveCount(0);
   });
-});
-
-// --- screen records ------------------------------------------------------------------------------
-
-const SCREENS = process.env['LOSAT_WEB_SCREENS'] || undefined;
-
-test.describe('screen records', () => {
-  test.skip(SCREENS === undefined || !BUILD_HAS_ENGINE, 'screen records are taken only with LOSAT_WEB_SCREENS in the engine build');
-
-  for (const size of [
-    { name: 'desktop', width: 1280, height: 900 },
-    { name: 'phone', width: 390, height: 844 },
-  ] as const) {
-    test(`onboarding at the ${size.name} size`, async ({ page, browserName }) => {
-      const shoot = async (name: string) => {
-        const directory = join(SCREENS!, browserName);
-        mkdirSync(directory, { recursive: true });
-        await page.waitForTimeout(300);
-        await page.screenshot({ path: join(directory, `${size.name}-${name}.png`), fullPage: true });
-      };
-      await page.setViewportSize({ width: size.width, height: size.height });
-      await page.goto('/');
-      await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', /^(ok|invalid)$/, { timeout: 60_000 });
-      await shoot('41-getting-started-first-visit');
-      await page.getByTestId('self-test').locator('summary').click();
-      await page.getByTestId('self-test-run').click();
-      await expect(page.getByTestId('self-test-summary')).toHaveText(/^All 8 cases passed/, { timeout: 180_000 });
-      await shoot('42-self-test-passed');
-      await page.getByTestId('getting-started-close').click();
-      await paste(page, 'query', '>mine\nMKVLAAGG\n');
-      await program(page, 'tblastn');
-      await page.getByTestId('try-example').click();
-      await shoot('43-try-example-question');
-      await page.getByTestId('try-example-confirm').click();
-      await expect(page.getByTestId('example-loaded')).toBeVisible();
-      await settled(page, 'query');
-      await settled(page, 'subject');
-      await shoot('44-example-loaded');
-      await program(page, 'blastx');
-      await shoot('45-blastx-no-example');
-    });
-  }
 });

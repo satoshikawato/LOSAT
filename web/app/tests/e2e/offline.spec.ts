@@ -55,6 +55,7 @@ test.beforeAll(async ({ browserName }, testInfo) => {
   origins = { a: servers[0]!.origin, ab: servers[1]!.origin, damaged: servers[2]!.origin };
   // Another port for each worker that runs this file (common rule: the E2E port + 100, + 200).
   front = await startFrontServer(E2E_PORT + 100 * (testInfo.parallelIndex + 1), origins.a);
+  front.releasesNoStore = true;
 });
 
 test.afterAll(async () => {

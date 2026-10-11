@@ -61,6 +61,13 @@
 // the longest time between two of them (`maxFrameGapMs`): the page stays responsive while a large
 // file is written or read, whatever the file's total time.
 //
+// Since W7 (S16), the site's boot page starts the release and its service worker stores the
+// release for offline use once the page is idle (about 8 MB with the engine, checked file by file).
+// Every page that the measurement opens (`openApp`) waits until the header says "Offline ready"
+// before its first measured step, so that the preparation never overlaps a measured step; and the
+// pages start as on a later visit, with "Getting started" closed (it opens on a first visit since
+// S16), so that the screen is laid out as in W6's measurements.
+//
 // Times are milliseconds, taken in the page with `performance.now()` from the action to the first
 // animation frame in which the screen shows the result (`ms`) and to the frame after it
 // (`paintMs`); the resolution is a frame (about 17 ms). The canvases (the dot plot, the Graphic
@@ -95,6 +102,28 @@ test.skip(!BUILD_HAS_ENGINE, NO_ENGINE_REASON);
 test.setTimeout(7_200_000);
 // A click that cannot happen fails after two minutes, not at the end of the test.
 test.use({ actionTimeout: 120_000 });
+
+// "Getting started" closed, as on a later visit (S16; screens.spec.ts does the same).
+test.beforeEach(async ({ context }) => {
+  await context.addInitScript(() => {
+    try {
+      localStorage.setItem('losat-web:getting-started', 'closed');
+    } catch {
+      // The page opens it, and the measurement goes on.
+    }
+  });
+});
+
+/**
+ * Opens the application and waits until its release is stored for offline use ("Offline ready"):
+ * the service worker's preparation, which starts once the page is idle, is then over before the
+ * first measured step.
+ */
+async function openApp(page: Page): Promise<void> {
+  await page.goto('/');
+  await expect(page.getByTestId('storage-status')).toBeVisible();
+  await expect(page.getByTestId('offline-status')).toHaveAttribute('data-state', 'ready', { timeout: 180_000 });
+}
 
 // --- the clock in the page ---------------------------------------------------------------------
 
@@ -606,7 +635,7 @@ for (const count of COUNTS) {
     const record: Record<string, unknown> = { count };
     records.queries.push(record);
     try {
-      await page.goto('/');
+      await openApp(page);
       const inputs = manyQueries(count);
       Object.assign(record, {
         queryBytes: inputs.queries.length,
@@ -1074,8 +1103,7 @@ async function sessionRoundTrip(page: Page, into: Record<string, unknown>): Prom
   await page.close();
   const fresh = await context.newPage();
   try {
-    await fresh.goto('/');
-    await expect(fresh.getByTestId('storage-status')).toBeVisible();
+    await openApp(fresh);
     await quiet(fresh);
     await arm(fresh, 'session-file', 'change');
     await watchFrames(fresh);
@@ -1280,7 +1308,7 @@ async function pairRepetition(page: Page, number: number, other: number): Promis
 
 test('many HSPs in one query-subject pair: the dot plot and the HSP list', async ({ page, browserName }) => {
   browser = browserName;
-  await page.goto('/');
+  await openApp(page);
   // Run 1 is a small search to change runs with; the repeats are run 2, 3, ...
   const small = manyQueries(20);
   const first = await search(

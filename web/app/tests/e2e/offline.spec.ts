@@ -187,7 +187,9 @@ test('2. offline, a reload and a new page start the stored release, cross-origin
   expect((await saved(second, 'session-save')).name).toMatch(/^losat-session-\d{8}-\d{6}\.losat-session\.gz$/);
 });
 
-test('3. an update changes nothing until the user chooses; the tab then runs B whole, and the new worker waits until then', async ({ page }) => {
+test('3. an update changes nothing until the user chooses; next to the switch it says what the reload does now; the tab then runs B whole, and the new worker waits until then', async ({
+  page,
+}) => {
   await open(page);
   await appStarted(page, A);
   await offlineReady(page);
@@ -214,6 +216,13 @@ test('3. an update changes nothing until the user chooses; the tab then runs B w
   expect(await workers(page)).toEqual({ active: true, waiting: true });
   const stored = await storedFiles(page);
   expect(stored[`losat-web-release-${B}`]).toEqual(expectedCaches(dirs.ab, B)[`losat-web-release-${B}`]);
+  // Next to the switch, the screen says again what the reload does, counted now (plan §5.9):
+  // a run that completes after the review is named there.
+  const impact = page.getByTestId('update-notice').getByTestId('update-impact-saved');
+  await expect(impact).toHaveText('No completed run or candidate is lost.');
+  await runSearch(page, 1);
+  await expect(page.getByTestId('update-downloaded')).toBeVisible();
+  await expect(impact).toContainText('1 completed run, 0 candidates and 0 notes are not kept by the reload');
 
   const switching = front.requests.length;
   await page.getByTestId('update-switch').click();

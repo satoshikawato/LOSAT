@@ -6,6 +6,8 @@
 //   emulation does not reach a service worker's requests in Firefox, and in WebKit it fails the
 //   navigation itself: logs/wp-u/progress.md, probe 1a),
 // - cut the connection in the middle of a file's body (`cut`),
+// - answer a path with an HTML page instead of the file (`pages`: a proxy's or a captive portal's
+//   page, code review 3 L2),
 // - hold a file's request until the test lets it go (`hold`: the screen records of a release
 //   being prepared, tests/e2e/screens.spec.ts),
 // - keep the release files out of the browser's HTTP cache (`releasesNoStore`, V-OFF): a 200
@@ -33,6 +35,8 @@ export interface FrontServer {
   upstream: string;
   /** Paths whose 200 body is cut after half of it. */
   readonly cut: Set<string>;
+  /** Paths answered with `200 text/html`, a page that is not the file, without asking the site server. */
+  readonly pages: Set<string>;
   /** Whether a 200 under /r/ is sent with `Cache-Control: no-store` (default false: the site's rules). */
   releasesNoStore: boolean;
   readonly requests: FrontRequest[];
@@ -45,6 +49,13 @@ export interface FrontServer {
 async function relay(front: FrontServer, held: ReadonlyMap<string, Promise<void>>, request: IncomingMessage, response: ServerResponse): Promise<void> {
   const path = new URL(request.url ?? '/', 'http://front.invalid').pathname;
   await held.get(path);
+  if (front.pages.has(path)) {
+    const page = Buffer.from('<!doctype html><title>Access blocked</title><p>This network does not allow this address.</p>\n');
+    front.requests.push({ method: request.method ?? 'GET', path, status: 200, bytes: page.length, ended: Date.now() });
+    response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'content-length': String(page.length) });
+    response.end(page);
+    return;
+  }
   const upstream = forward(
     `${front.upstream}${request.url ?? '/'}`,
     { method: request.method, headers: { ...request.headers, host: new URL(front.upstream).host } },
@@ -89,6 +100,7 @@ export async function startFrontServer(port: number, upstream: string): Promise<
     origin: `http://localhost:${port}`,
     upstream,
     cut: new Set(),
+    pages: new Set(),
     releasesNoStore: false,
     requests: [],
     hold(path: string): () => void {

@@ -41,14 +41,25 @@ const IDLE_TIMEOUT_MS = 5_000;
 const message = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
 /**
- * Whether `register()` refused because the browser does not let this site use service workers:
- * with cookies or site data blocked for the site, Chromium rejects with a NotSupportedError ("The
- * user denied permission to use Service Worker.") and Firefox with a SecurityError ("The
- * operation is insecure."), probed in fix round 2. Other rejections (a network error reading
- * `sw.js`, a script that does not evaluate) may pass, and stay failures to try again.
+ * Whether a rejected `register()` means that the browser does not let this site use service
+ * workers (cookies or site data blocked for the site). Then the browser refuses every call of
+ * the container, `getRegistration()` too: Chromium with a NotSupportedError ("The user denied
+ * permission to use Service Worker."), Firefox with a SecurityError ("The operation is
+ * insecure."). A SecurityError also comes from a `sw.js` that is not JavaScript (a proxy's or a
+ * captive portal's HTML page, in all three browsers; Firefox with the same message) and, in
+ * Chromium, from a certificate error; then `getRegistration()` still answers, with or without a
+ * registration, and the rejection stays a failure to try again (code review 3 L2; probed in fix
+ * rounds 2 and 4 of S16). A page that a worker controls is never refused.
  */
-function refusesServiceWorkers(error: unknown): boolean {
-  return error instanceof DOMException && (error.name === 'SecurityError' || error.name === 'NotSupportedError');
+async function refusesServiceWorkers(container: ServiceWorkerContainer, error: unknown): Promise<boolean> {
+  if (!(error instanceof DOMException) || (error.name !== 'SecurityError' && error.name !== 'NotSupportedError')) return false;
+  if ((container.controller ?? null) !== null) return false;
+  try {
+    await container.getRegistration(SW_SCOPE);
+    return false;
+  } catch {
+    return true;
+  }
 }
 
 function isProgress(value: unknown): value is PrepareProgress {
@@ -128,8 +139,9 @@ export function browserOffline(): OfflinePort {
       } catch (error) {
         // A browser that does not let this site use service workers (cookies or site data blocked)
         // refuses every registration: that is no offline use, as without service workers, never a
-        // failure to try again on each load (code review 2 L1).
-        if (refusesServiceWorkers(error)) {
+        // failure to try again on each load (code review 2 L1). Any other rejection stays a failure,
+        // so that an update is still downloaded and checked before the switch (code review 3 L2).
+        if (await refusesServiceWorkers(container, error)) {
           blocked = true;
           throw new Error(`this browser does not let this site use service workers: ${message(error)}`, { cause: error });
         }

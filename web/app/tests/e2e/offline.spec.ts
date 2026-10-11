@@ -1,5 +1,6 @@
 // V-OFF (plan §6.2; S16 items 2, 3 and 7): offline start from the service worker's caches, the
-// explicit update without mixing releases, an incomplete update that changes nothing, an older
+// explicit update without mixing releases, an incomplete update that changes nothing, a worker
+// script that the network replaces with a page (a failure, never "no offline use"), an older
 // tab that keeps its data and its release, and a pin that the site no longer serves.
 //
 // Two releases, voff-a and voff-b, are built like `npm run build` (FakeEngine, or the engine of
@@ -67,6 +68,7 @@ test.afterAll(async () => {
 test.beforeEach(async () => {
   front.upstream = origins.a;
   front.cut.clear();
+  front.pages.clear();
   await front.setOnline(true);
 });
 
@@ -180,6 +182,41 @@ test('1b. a first visit whose download breaks does not say "Offline ready" and s
   await page.getByTestId('offline-retry').click();
   await offlineReady(page);
   expect(await storedFiles(page)).toEqual(expectedCaches(dirs.a, A));
+});
+
+test('1c. a sw.js that is not JavaScript (a proxy\'s page) is a failure to try again, not "no offline use"; an update is still downloaded and checked before the switch', async ({
+  page,
+}) => {
+  // register() rejects with a SecurityError, as it does where cookies are blocked; but the browser
+  // answers getRegistration(), so service workers are not blocked (code review 3 L2).
+  front.pages.add('/sw.js');
+  await open(page);
+  await appStarted(page, A);
+  await expect(page.getByTestId('offline-status')).toHaveAttribute('data-state', 'failed', { timeout: 60_000 });
+  await expect(page.getByTestId('offline-failed')).toContainText('the offline worker could not be started');
+  await expect(page.getByTestId('offline-retry')).toBeVisible();
+
+  // A new deployment: the update offers "Download and check", never a switch that nothing checked.
+  front.upstream = origins.ab;
+  await page.reload();
+  await appStarted(page, A);
+  await expect(page.getByTestId('offline-status')).toHaveAttribute('data-state', 'failed', { timeout: 60_000 });
+  await expect(page.getByTestId('update-notice')).toHaveAttribute('data-state', 'available', { timeout: 30_000 });
+  await page.getByTestId('update-review').click();
+  await expect(page.getByTestId('update-impact')).toBeVisible();
+  await expect(page.getByTestId('update-switch')).toHaveCount(0);
+  await page.getByTestId('update-download').click();
+  await expect(page.getByTestId('update-failed')).toContainText(`Release ${B} could not be downloaded and checked: the offline worker could not be started`);
+  await expect(page.getByTestId('update-switch')).toHaveCount(0);
+  expect(await pinOf(page)).toBe(A);
+
+  // The site serves its worker again: "Try again" stores this tab's release, and the update downloads.
+  front.pages.clear();
+  await page.getByTestId('offline-retry').click();
+  await offlineReady(page);
+  await page.getByTestId('update-retry').click();
+  await expect(page.getByTestId('update-downloaded')).toBeVisible({ timeout: 60_000 });
+  expect(await pinOf(page)).toBe(A);
 });
 
 test('2. offline, a reload and a new page start the stored release, cross-origin isolated; a search runs, its results open, an export downloads and a session saves', async ({

@@ -142,6 +142,8 @@ test.describe('usage statistics', () => {
     // Neither credentials nor a referrer go with it.
     expect(await recorded.visits[0]!.headerValue('cookie')).toBeNull();
     expect(await recorded.visits[0]!.headerValue('referer')).toBeNull();
+    // The Function accepts only a request whose Origin is the site's own (functions/api/visit.ts).
+    expect(await recorded.visits[0]!.headerValue('origin')).toBe(E2E_ORIGIN);
 
     for (const loads of [2, 3]) {
       await open(page, true);

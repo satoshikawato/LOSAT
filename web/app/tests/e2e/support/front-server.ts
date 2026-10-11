@@ -18,7 +18,7 @@ export interface FrontRequest {
   readonly status: number;
   /** The bytes of the body sent so far (the whole body once `ended` is set). */
   bytes: number;
-  /** When the answer ended (Date.now()), or undefined while it is sent. */
+  /** When the answer was sent whole or cut (Date.now()), or undefined while it is sent. */
   ended?: number;
 }
 
@@ -45,7 +45,9 @@ async function relay(front: FrontServer, held: ReadonlyMap<string, Promise<void>
       const status = answer.statusCode ?? 502;
       const record: FrontRequest = { method: request.method ?? 'GET', path, status, bytes: 0 };
       front.requests.push(record);
-      response.on('close', () => (record.ended = Date.now()));
+      const end = () => (record.ended ??= Date.now());
+      response.on('finish', end);
+      response.on('close', end);
       if (status === 200 && front.cut.has(path)) {
         const chunks: Buffer[] = [];
         answer.on('data', (chunk: Buffer) => chunks.push(chunk));

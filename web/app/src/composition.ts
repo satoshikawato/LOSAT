@@ -1,6 +1,7 @@
 // Composition root: the only module that chooses implementations for the ports.
 import { ENGINE_ASSETS } from 'virtual:losat-engine';
 import { VERIFICATION_TABLE } from 'virtual:losat-verification';
+import { Analytics } from './application/analytics';
 import { Attention } from './application/attention';
 import { CandidateTray } from './application/candidates';
 import { Coordinator } from './application/coordinator';
@@ -18,6 +19,7 @@ import { threadLimit } from './domain/settings-file';
 import type { SiteBuild } from './domain/verification';
 import type { Downloader } from './ports/download';
 import type { EngineGateway } from './ports/engine';
+import { browserAnalytics } from './infra/browser/analytics';
 import { browserCompression } from './infra/browser/compression';
 import { browserExamples } from './infra/browser/examples';
 import { browserLocalSettings } from './infra/browser/local-settings';
@@ -25,7 +27,7 @@ import { nextTask } from './infra/browser/next-task';
 import { browserOffline, browserReleaseChannel, browserReleasePage, browserReleasePin } from './infra/browser/offline';
 import { browserPage } from './infra/browser/page';
 import { browserDownloader, sha256Hex } from './infra/browser/platform';
-import { browserSite } from './infra/browser/site';
+import { browserSite, sharedSiteReads } from './infra/browser/site';
 import { startDataWorker } from './infra/data-worker/gateway';
 import { WasmEngine } from './infra/engine-worker/gateway';
 import { AUTO_SERIAL_BELOW_BYTES, chooseThreads, type RenewalLimits } from './infra/engine-worker/policy';
@@ -59,6 +61,8 @@ export interface App {
   readonly gettingStarted: GettingStarted;
   /** This tab's release, its offline use and the explicit update (application/release.ts); main.ts starts it. */
   readonly release: ReleaseManager;
+  /** Usage statistics after consent, when the site measures (application/analytics.ts, docs/web/analytics.md). */
+  readonly analytics: Analytics;
 }
 
 /** This build's version and commit (vite.config.ts), written into session files; "unknown" where a build does not set them. */
@@ -154,6 +158,8 @@ export function createApp(options: AppOptions = {}): App {
     maxThreads: () => threadLimit(navigator.hardwareConcurrency),
     attachedInput: (runId, role) => session.attachedInput(runId, role),
   });
+  // One read of the site index serves the measurement switch and the update check made at start-up.
+  const site = sharedSiteReads(browserSite, 60_000, () => performance.now());
   const examples = new Examples({ source: browserExamples, draft });
   const selfTest = new SelfTest({
     engine,
@@ -181,10 +187,17 @@ export function createApp(options: AppOptions = {}): App {
     offline: browserOffline(),
     pin: browserReleasePin,
     channel: browserReleaseChannel(),
-    site: browserSite,
+    site,
     page: browserPage,
     host: browserReleasePage,
     runs: coordinator.state,
   });
-  return { coordinator, draft, results, candidates, exporter, attention, usesFakeEngine: ENGINE_ASSETS === null, session, runFiles, examples, selfTest, gettingStarted, release };
+  const analytics = new Analytics({
+    siteIndex: () => site.index(),
+    port: browserAnalytics,
+    release: RELEASE_ID === 'unknown' ? undefined : RELEASE_ID,
+    newClientId: () => crypto.randomUUID(),
+  });
+  void analytics.start();
+  return { coordinator, draft, results, candidates, exporter, attention, usesFakeEngine: ENGINE_ASSETS === null, session, runFiles, examples, selfTest, gettingStarted, release, analytics };
 }

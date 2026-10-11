@@ -1,0 +1,628 @@
+{
+  "browser": "chromium",
+  "version": "149.0.7827.55",
+  "storageRules": "Playwright's: ThirdPartyStoragePartitioning disabled",
+  "date": "2026-10-11T03:11:47.667Z",
+  "origins": {
+    "A": "http://localhost:4762",
+    "M": "http://127.0.0.1:4862",
+    "G": "http://localhost:4962"
+  },
+  "rows": [
+    {
+      "id": "b",
+      "what": "POST /api/visit (same origin), site CSP unchanged",
+      "aCspViolations": [],
+      "visit": {
+        "status": 204
+      },
+      "reached": 1,
+      "body": "{\"v\":1,\"release\":\"probe\",\"client\":\"ef39a5b3-ed0e-4ceb-b67a-9c4ed3b77d1d\"}",
+      "headers": {
+        "origin": "http://localhost:4762",
+        "referer": null,
+        "cookie": null,
+        "content-type": "application/json",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty"
+      },
+      "otherRequests": 0
+    },
+    {
+      "id": "navigation",
+      "what": "goto A again (commit) after A with variant b / a2",
+      "b": "committed in 5 ms",
+      "a2": "committed in 14 ms"
+    },
+    {
+      "id": "a1",
+      "what": "M without COEP/CORP",
+      "aCsp": "site + frame-src M",
+      "sandbox": "same-origin",
+      "aCspViolations": [],
+      "mRequested": true,
+      "iframeLoadEvent": true,
+      "frameLoaded": false,
+      "hello": null,
+      "resultReceived": false,
+      "resultChecksPass": null,
+      "mRunMessages": null,
+      "mCrossOriginIsolated": null,
+      "mCspViolations": null,
+      "gScriptRequested": false,
+      "gScript": null,
+      "transportsInPage": null,
+      "collectReached": [],
+      "collectHeaders": [],
+      "storage": null,
+      "hasStorageAccess": null
+    },
+    {
+      "id": "a2",
+      "what": "M with COEP require-corp and CORP cross-origin",
+      "aCsp": "site + frame-src M",
+      "sandbox": "same-origin",
+      "aCspViolations": [],
+      "mRequested": true,
+      "iframeLoadEvent": true,
+      "frameLoaded": true,
+      "hello": {
+        "origin": "http://127.0.0.1:4862",
+        "fromFrame": true,
+        "checksPass": true
+      },
+      "resultReceived": true,
+      "resultChecksPass": true,
+      "mRunMessages": [
+        {
+          "origin": "http://localhost:4762",
+          "fromParent": true,
+          "ok": true,
+          "target": "M"
+        }
+      ],
+      "mCrossOriginIsolated": false,
+      "mCspViolations": [],
+      "gScriptRequested": true,
+      "gScript": {
+        "loaded": true,
+        "ran": true
+      },
+      "transportsInPage": {
+        "beacon": true,
+        "fetch": "rejected:TypeError",
+        "image": "error"
+      },
+      "collectReached": [
+        "beacon",
+        "fetch",
+        "image"
+      ],
+      "collectHeaders": [
+        {
+          "transport": "beacon",
+          "origin": "http://127.0.0.1:4862",
+          "referer": "http://127.0.0.1:4862/",
+          "cookie": null,
+          "content-type": null,
+          "sec-fetch-site": "cross-site",
+          "sec-fetch-mode": "no-cors",
+          "sec-fetch-dest": "empty"
+        },
+        {
+          "transport": "fetch",
+          "origin": "http://127.0.0.1:4862",
+          "referer": "http://127.0.0.1:4862/",
+          "cookie": null,
+          "content-type": null,
+          "sec-fetch-site": "cross-site",
+          "sec-fetch-mode": "no-cors",
+          "sec-fetch-dest": "empty"
+        },
+        {
+          "transport": "image",
+          "origin": null,
+          "referer": "http://127.0.0.1:4862/",
+          "cookie": null,
+          "content-type": null,
+          "sec-fetch-site": "cross-site",
+          "sec-fetch-mode": "no-cors",
+          "sec-fetch-dest": "image"
+        }
+      ],
+      "storage": {
+        "localBefore": null,
+        "localAfter": "a22f368b-2e27-41a0-91b1-5f9aef6d3c0d",
+        "cookieBefore": {},
+        "cookieAfter": {
+          "probe_none": "8a25f9b1-fab5-401c-a1c3-9ad698872c72"
+        }
+      },
+      "hasStorageAccess": true,
+      "persistence": {
+        "afterReload": {
+          "localBefore": "a22f368b-2e27-41a0-91b1-5f9aef6d3c0d",
+          "localAfter": "a22f368b-2e27-41a0-91b1-5f9aef6d3c0d",
+          "cookieBefore": {
+            "probe_none": "8a25f9b1-fab5-401c-a1c3-9ad698872c72"
+          },
+          "cookieAfter": {
+            "probe_none": "8a25f9b1-fab5-401c-a1c3-9ad698872c72"
+          }
+        },
+        "secondTab": {
+          "localBefore": "a22f368b-2e27-41a0-91b1-5f9aef6d3c0d",
+          "localAfter": "a22f368b-2e27-41a0-91b1-5f9aef6d3c0d",
+          "cookieBefore": {
+            "probe_none": "8a25f9b1-fab5-401c-a1c3-9ad698872c72"
+          },
+          "cookieAfter": {
+            "probe_none": "8a25f9b1-fab5-401c-a1c3-9ad698872c72"
+          }
+        },
+        "topLevel": {
+          "localBefore": "a22f368b-2e27-41a0-91b1-5f9aef6d3c0d",
+          "localAfter": "a22f368b-2e27-41a0-91b1-5f9aef6d3c0d",
+          "cookieBefore": {
+            "probe_none": "8a25f9b1-fab5-401c-a1c3-9ad698872c72"
+          },
+          "cookieAfter": {
+            "probe_none": "8a25f9b1-fab5-401c-a1c3-9ad698872c72"
+          }
+        },
+        "topLevelHasStorageAccess": true,
+        "localKept": true,
+        "cookieNoneKept": true,
+        "cookieLaxKept": false,
+        "localSameAsTopLevel": true
+      }
+    },
+    {
+      "id": "a3",
+      "what": "M with COEP credentialless and CORP cross-origin",
+      "aCsp": "site + frame-src M",
+      "sandbox": "same-origin",
+      "aCspViolations": [],
+      "mRequested": true,
+      "iframeLoadEvent": true,
+      "frameLoaded": true,
+      "hello": {
+        "origin": "http://127.0.0.1:4862",
+        "fromFrame": true,
+        "checksPass": true
+      },
+      "resultReceived": true,
+      "resultChecksPass": true,
+      "mRunMessages": [
+        {
+          "origin": "http://localhost:4762",
+          "fromParent": true,
+          "ok": true,
+          "target": "M"
+        }
+      ],
+      "mCrossOriginIsolated": false,
+      "mCspViolations": [],
+      "gScriptRequested": true,
+      "gScript": {
+        "loaded": true,
+        "ran": true
+      },
+      "transportsInPage": {
+        "beacon": true,
+        "fetch": "resolved",
+        "image": "error"
+      },
+      "collectReached": [
+        "beacon",
+        "fetch",
+        "image"
+      ],
+      "collectHeaders": [
+        {
+          "transport": "beacon",
+          "origin": "http://127.0.0.1:4862",
+          "referer": "http://127.0.0.1:4862/",
+          "cookie": null,
+          "content-type": null,
+          "sec-fetch-site": "cross-site",
+          "sec-fetch-mode": "no-cors",
+          "sec-fetch-dest": "empty"
+        },
+        {
+          "transport": "fetch",
+          "origin": "http://127.0.0.1:4862",
+          "referer": "http://127.0.0.1:4862/",
+          "cookie": null,
+          "content-type": null,
+          "sec-fetch-site": "cross-site",
+          "sec-fetch-mode": "no-cors",
+          "sec-fetch-dest": "empty"
+        },
+        {
+          "transport": "image",
+          "origin": null,
+          "referer": "http://127.0.0.1:4862/",
+          "cookie": null,
+          "content-type": null,
+          "sec-fetch-site": "cross-site",
+          "sec-fetch-mode": "no-cors",
+          "sec-fetch-dest": "image"
+        }
+      ],
+      "storage": {
+        "localBefore": null,
+        "localAfter": "b7b96832-67aa-4226-833d-6433068d9227",
+        "cookieBefore": {},
+        "cookieAfter": {
+          "probe_none": "c60f9130-82cf-4bea-b3b1-42f0da272537"
+        }
+      },
+      "hasStorageAccess": true,
+      "persistence": {
+        "afterReload": {
+          "localBefore": "b7b96832-67aa-4226-833d-6433068d9227",
+          "localAfter": "b7b96832-67aa-4226-833d-6433068d9227",
+          "cookieBefore": {
+            "probe_none": "c60f9130-82cf-4bea-b3b1-42f0da272537"
+          },
+          "cookieAfter": {
+            "probe_none": "c60f9130-82cf-4bea-b3b1-42f0da272537"
+          }
+        },
+        "secondTab": {
+          "localBefore": "b7b96832-67aa-4226-833d-6433068d9227",
+          "localAfter": "b7b96832-67aa-4226-833d-6433068d9227",
+          "cookieBefore": {
+            "probe_none": "c60f9130-82cf-4bea-b3b1-42f0da272537"
+          },
+          "cookieAfter": {
+            "probe_none": "c60f9130-82cf-4bea-b3b1-42f0da272537"
+          }
+        },
+        "topLevel": {
+          "localBefore": "b7b96832-67aa-4226-833d-6433068d9227",
+          "localAfter": "b7b96832-67aa-4226-833d-6433068d9227",
+          "cookieBefore": {
+            "probe_none": "c60f9130-82cf-4bea-b3b1-42f0da272537"
+          },
+          "cookieAfter": {
+            "probe_none": "c60f9130-82cf-4bea-b3b1-42f0da272537"
+          }
+        },
+        "topLevelHasStorageAccess": true,
+        "localKept": true,
+        "cookieNoneKept": true,
+        "cookieLaxKept": false,
+        "localSameAsTopLevel": true
+      }
+    },
+    {
+      "id": "a3n",
+      "what": "M with COEP credentialless, no CORP",
+      "aCsp": "site + frame-src M",
+      "sandbox": "same-origin",
+      "aCspViolations": [],
+      "mRequested": true,
+      "iframeLoadEvent": true,
+      "frameLoaded": false,
+      "hello": null,
+      "resultReceived": false,
+      "resultChecksPass": null,
+      "mRunMessages": null,
+      "mCrossOriginIsolated": null,
+      "mCspViolations": null,
+      "gScriptRequested": false,
+      "gScript": null,
+      "transportsInPage": null,
+      "collectReached": [],
+      "collectHeaders": [],
+      "storage": null,
+      "hasStorageAccess": null
+    },
+    {
+      "id": "a4",
+      "what": "<iframe credentialless>, M without COEP/CORP",
+      "aCsp": "site + frame-src M",
+      "sandbox": "same-origin",
+      "aCspViolations": [],
+      "mRequested": true,
+      "iframeLoadEvent": true,
+      "frameLoaded": true,
+      "hello": {
+        "origin": "http://127.0.0.1:4862",
+        "fromFrame": true,
+        "checksPass": true
+      },
+      "credentiallessAttributeSupported": true,
+      "resultReceived": true,
+      "resultChecksPass": true,
+      "mRunMessages": [
+        {
+          "origin": "http://localhost:4762",
+          "fromParent": true,
+          "ok": true,
+          "target": "M"
+        }
+      ],
+      "mCrossOriginIsolated": false,
+      "mCspViolations": [],
+      "gScriptRequested": true,
+      "gScript": {
+        "loaded": true,
+        "ran": true
+      },
+      "transportsInPage": {
+        "beacon": true,
+        "fetch": "resolved",
+        "image": "error"
+      },
+      "collectReached": [
+        "beacon",
+        "fetch",
+        "image"
+      ],
+      "collectHeaders": [
+        {
+          "transport": "beacon",
+          "origin": "http://127.0.0.1:4862",
+          "referer": "http://127.0.0.1:4862/",
+          "cookie": null,
+          "content-type": null,
+          "sec-fetch-site": "cross-site",
+          "sec-fetch-mode": "no-cors",
+          "sec-fetch-dest": "empty"
+        },
+        {
+          "transport": "fetch",
+          "origin": "http://127.0.0.1:4862",
+          "referer": "http://127.0.0.1:4862/",
+          "cookie": null,
+          "content-type": null,
+          "sec-fetch-site": "cross-site",
+          "sec-fetch-mode": "no-cors",
+          "sec-fetch-dest": "empty"
+        },
+        {
+          "transport": "image",
+          "origin": null,
+          "referer": "http://127.0.0.1:4862/",
+          "cookie": null,
+          "content-type": null,
+          "sec-fetch-site": "cross-site",
+          "sec-fetch-mode": "no-cors",
+          "sec-fetch-dest": "image"
+        }
+      ],
+      "storage": {
+        "localBefore": null,
+        "localAfter": "5be9e189-9954-4891-ae28-b77552e179ec",
+        "cookieBefore": {},
+        "cookieAfter": {
+          "probe_none": "33b583f7-ece8-4e55-a4f4-85bf53dbc656"
+        }
+      },
+      "hasStorageAccess": false,
+      "persistence": {
+        "afterReload": {
+          "localBefore": null,
+          "localAfter": "f1bd4cb2-95e2-48f9-a9c8-7de2708d645f",
+          "cookieBefore": {},
+          "cookieAfter": {
+            "probe_none": "e905a71b-7ef1-4044-bc90-eaff120a6038"
+          }
+        },
+        "secondTab": {
+          "localBefore": null,
+          "localAfter": "d2966eae-4a7c-4a39-9d65-63ac623d0f94",
+          "cookieBefore": {},
+          "cookieAfter": {
+            "probe_none": "e8923b0c-1a83-412b-bb8a-22923d52e425"
+          }
+        },
+        "topLevel": {
+          "localBefore": null,
+          "localAfter": null,
+          "cookieBefore": {},
+          "cookieAfter": {}
+        },
+        "topLevelHasStorageAccess": true,
+        "localKept": false,
+        "cookieNoneKept": false,
+        "cookieLaxKept": false,
+        "localSameAsTopLevel": false
+      }
+    },
+    {
+      "id": "a2-csp-unchanged",
+      "what": "a2 under the site's CSP unchanged (no frame-src)",
+      "aCsp": "site",
+      "sandbox": "same-origin",
+      "aCspViolations": [
+        {
+          "directive": "frame-src",
+          "blocked": "http://127.0.0.1:4862"
+        }
+      ],
+      "mRequested": false,
+      "iframeLoadEvent": true,
+      "frameLoaded": false,
+      "hello": null,
+      "resultReceived": false,
+      "resultChecksPass": null,
+      "mRunMessages": null,
+      "mCrossOriginIsolated": null,
+      "mCspViolations": null,
+      "gScriptRequested": false,
+      "gScript": null,
+      "transportsInPage": null,
+      "collectReached": [],
+      "collectHeaders": [],
+      "storage": null,
+      "hasStorageAccess": null
+    },
+    {
+      "id": "a2-no-sandbox",
+      "what": "a2 without sandbox",
+      "aCsp": "site + frame-src M",
+      "sandbox": "none",
+      "aCspViolations": [],
+      "mRequested": true,
+      "iframeLoadEvent": true,
+      "frameLoaded": true,
+      "hello": {
+        "origin": "http://127.0.0.1:4862",
+        "fromFrame": true,
+        "checksPass": true
+      },
+      "resultReceived": true,
+      "resultChecksPass": true,
+      "mRunMessages": [
+        {
+          "origin": "http://localhost:4762",
+          "fromParent": true,
+          "ok": true,
+          "target": "M"
+        }
+      ],
+      "mCrossOriginIsolated": false,
+      "mCspViolations": [],
+      "gScriptRequested": true,
+      "gScript": {
+        "loaded": true,
+        "ran": true
+      },
+      "transportsInPage": {
+        "beacon": true,
+        "fetch": "rejected:TypeError",
+        "image": "error"
+      },
+      "collectReached": [
+        "beacon",
+        "fetch",
+        "image"
+      ],
+      "collectHeaders": [
+        {
+          "transport": "beacon",
+          "origin": "http://127.0.0.1:4862",
+          "referer": "http://127.0.0.1:4862/",
+          "cookie": null,
+          "content-type": null,
+          "sec-fetch-site": "cross-site",
+          "sec-fetch-mode": "no-cors",
+          "sec-fetch-dest": "empty"
+        },
+        {
+          "transport": "fetch",
+          "origin": "http://127.0.0.1:4862",
+          "referer": "http://127.0.0.1:4862/",
+          "cookie": null,
+          "content-type": null,
+          "sec-fetch-site": "cross-site",
+          "sec-fetch-mode": "no-cors",
+          "sec-fetch-dest": "empty"
+        },
+        {
+          "transport": "image",
+          "origin": null,
+          "referer": "http://127.0.0.1:4862/",
+          "cookie": null,
+          "content-type": null,
+          "sec-fetch-site": "cross-site",
+          "sec-fetch-mode": "no-cors",
+          "sec-fetch-dest": "image"
+        }
+      ],
+      "storage": {
+        "localBefore": null,
+        "localAfter": "1792becf-6253-4f94-9c89-9cb664cd7e5c",
+        "cookieBefore": {},
+        "cookieAfter": {
+          "probe_none": "a9f1063f-db36-4e8a-8050-f48cd1060316"
+        }
+      },
+      "hasStorageAccess": true
+    },
+    {
+      "id": "a2-sandbox-opaque",
+      "what": "a2 with sandbox=\"allow-scripts\" (no allow-same-origin)",
+      "aCsp": "site + frame-src M",
+      "sandbox": "opaque",
+      "aCspViolations": [],
+      "mRequested": true,
+      "iframeLoadEvent": true,
+      "frameLoaded": true,
+      "hello": {
+        "origin": "null",
+        "fromFrame": true,
+        "checksPass": false
+      },
+      "resultReceived": true,
+      "resultChecksPass": false,
+      "mRunMessages": [
+        {
+          "origin": "http://localhost:4762",
+          "fromParent": true,
+          "ok": true,
+          "target": "*"
+        }
+      ],
+      "mCrossOriginIsolated": false,
+      "mCspViolations": [],
+      "gScriptRequested": true,
+      "gScript": {
+        "loaded": true,
+        "ran": true
+      },
+      "transportsInPage": {
+        "beacon": true,
+        "fetch": "rejected:TypeError",
+        "image": "error"
+      },
+      "collectReached": [
+        "beacon",
+        "fetch",
+        "image"
+      ],
+      "collectHeaders": [
+        {
+          "transport": "beacon",
+          "origin": "null",
+          "referer": null,
+          "cookie": null,
+          "content-type": null,
+          "sec-fetch-site": "cross-site",
+          "sec-fetch-mode": "no-cors",
+          "sec-fetch-dest": "empty"
+        },
+        {
+          "transport": "fetch",
+          "origin": "null",
+          "referer": null,
+          "cookie": null,
+          "content-type": null,
+          "sec-fetch-site": "cross-site",
+          "sec-fetch-mode": "no-cors",
+          "sec-fetch-dest": "empty"
+        },
+        {
+          "transport": "image",
+          "origin": null,
+          "referer": null,
+          "cookie": null,
+          "content-type": null,
+          "sec-fetch-site": "cross-site",
+          "sec-fetch-mode": "no-cors",
+          "sec-fetch-dest": "image"
+        }
+      ],
+      "storage": {
+        "localError": "SecurityError",
+        "cookieError": "SecurityError"
+      },
+      "hasStorageAccess": false
+    }
+  ]
+}

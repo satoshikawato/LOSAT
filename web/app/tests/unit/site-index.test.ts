@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseSiteIndex } from '../../src/domain/site-index';
+import { sharedSiteReads } from '../../src/infra/browser/site';
 
 const index = (extra: Record<string, unknown> = {}) => ({
   format: 1,
@@ -53,5 +54,21 @@ describe('site index', () => {
     for (const endpoint of ['https://example.org/api/visit', '//example.org/api/visit', '/collect', '/api/../x', '/api/Visit?x=1']) {
       expect(() => parseSiteIndex(index({ analytics: { endpoint } }))).toThrow(/endpoint/);
     }
+  });
+});
+
+describe('shared site index reads', () => {
+  it('shares a read with the calls made within the age, then reads again', async () => {
+    let reads = 0;
+    let clock = 0;
+    const port = { index: async () => (reads++, parseSiteIndex(index())) };
+    const shared = sharedSiteReads(port, 60_000, () => clock);
+    await Promise.all([shared.index(), shared.index()]);
+    clock = 59_000;
+    await shared.index();
+    expect(reads).toBe(1);
+    clock = 120_000;
+    await shared.index();
+    expect(reads).toBe(2);
   });
 });

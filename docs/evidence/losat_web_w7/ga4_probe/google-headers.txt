@@ -1,0 +1,37 @@
+2026-10-11T02:46:09Z
+=== GET https://www.googletagmanager.com/gtag/js?id=G-XXXXXXXXXX (body discarded)
+HTTP/2 200 
+content-type: application/javascript; charset=UTF-8
+access-control-allow-origin: *
+access-control-allow-credentials: true
+access-control-allow-headers: Cache-Control
+vary: Accept-Encoding
+date: Sun, 11 Oct 2026 02:46:09 GMT
+expires: Sun, 11 Oct 2026 02:46:09 GMT
+cache-control: private, max-age=900
+strict-transport-security: max-age=31536000; includeSubDomains
+cross-origin-resource-policy: cross-origin
+server: Google Tag Manager
+x-xss-protection: 0
+alt-svc: h3=":443"; ma=2592000,h3-29=":443"; ma=2592000
+accept-ranges: none
+
+=== GET https://www.google-analytics.com/analytics.js (body discarded)
+HTTP/2 200 
+strict-transport-security: max-age=31536000; includeSubDomains; preload
+x-content-type-options: nosniff
+cross-origin-resource-policy: cross-origin
+content-security-policy-report-only: script-src 'none'; form-action 'none'; frame-src 'none'; report-uri https://csp.withgoogle.com/csp/scaffolding/ascnsrsgac:225:0
+cross-origin-opener-policy-report-only: same-origin; report-to=ascnsrsgac:225:0
+report-to: {"group":"ascnsrsgac:225:0","max_age":2592000,"endpoints":[{"url":"https://csp.withgoogle.com/csp/report-to/scaffolding/ascnsrsgac:225:0"}],}
+server: Golfe2
+date: Sun, 11 Oct 2026 02:01:42 GMT
+expires: Sun, 11 Oct 2026 04:01:42 GMT
+cache-control: public, max-age=7200
+age: 2668
+last-modified: Tue, 15 Jul 2025 00:44:26 GMT
+content-type: text/javascript
+vary: Accept-Encoding
+alt-svc: h3=":443"; ma=2592000,h3-29=":443"; ma=2592000
+accept-ranges: none
+

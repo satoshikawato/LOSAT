@@ -20,3 +20,18 @@ export const browserSite: SitePort = {
     }
   },
 };
+
+/**
+ * Shares a read of the site index among the callers that ask within `maxAgeMs` of it (the
+ * measurement switch and the update check at start-up); a later call reads the network again.
+ * Nothing is kept beyond the page.
+ */
+export function sharedSiteReads(port: SitePort, maxAgeMs: number, now: () => number): SitePort {
+  let last: { readonly at: number; readonly read: ReturnType<SitePort['index']> } | undefined;
+  return {
+    index() {
+      if (last === undefined || now() - last.at > maxAgeMs) last = { at: now(), read: port.index() };
+      return last.read;
+    },
+  };
+}

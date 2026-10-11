@@ -24,6 +24,7 @@ dist/
   boot.js                        the boot script (src/boot/boot.ts, one ES module)
   boot.css                       the style sheet of the boot page's messages and of 404.html
   releases.json                  the site index
+  sw.js                          the service worker (src/sw/worker.ts; offline use and the explicit update)
   r/<release-id>/                one release: the Vite build with base /r/<release-id>/
     release-manifest.json
     assets/...                   JavaScript, CSS, workers, and every file the code imports
@@ -146,6 +147,7 @@ and `build/site-server.ts`, the E2E harness server and the tests read the same f
 | `/*` | `Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Embedder-Policy: require-corp`, `Cross-Origin-Resource-Policy: same-origin`, the `Content-Security-Policy`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` |
 | `/r/*` | `Cache-Control: public, max-age=31536000, immutable`: a release's files never change (S16 item 7) |
 | `/`, `/index.html`, `/boot.js`, `/boot.css`, `/releases.json`, `/404.html` | `Cache-Control: no-cache`: the site-level files are revalidated on every load |
+| `/sw.js` | `Cache-Control: no-cache`: the service worker (site-level, not in the shell: the browser keeps the installed worker) |
 
 The rules follow Cloudflare Pages (developers.cloudflare.com/pages/configuration/headers/, read
 2026-10-11), as `build/headers.ts` (`headersFor(path)`) implements them:

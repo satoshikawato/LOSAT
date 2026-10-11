@@ -104,6 +104,7 @@ Same values, faster computation:
   that is used is compared with the reference port, status and the 400 values bitwise; every kept
   tblastn range with a fresh `get_range`). With `LOSAT_X_STATS=1` it prints
   `[X_STATS] NEWTONLANES prefetched= hits= misses= unused= ...` (no `xstats` feature needed).
+  Strict-set candidate (S-F, round 5).
 - `LOSAT_X_SEGFAST=1`, `LOSAT_X_SEGMEMO=1` SEG window as a residue histogram updated in O(1),
   entropy memoised per state vector. Shadow (`SEGFAST` path): `LOSAT_X_SEGSHADOW=1`.
 - `LOSAT_X_DUSTFAST=1`, `LOSAT_X_DUSTRING=1` DUST perfect-interval list built in one merge,

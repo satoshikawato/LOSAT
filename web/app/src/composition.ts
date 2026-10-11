@@ -7,6 +7,7 @@ import { Coordinator } from './application/coordinator';
 import { SearchDraft } from './application/draft';
 import { ResultsBrowser } from './application/results';
 import { ResultExporter } from './application/result-export';
+import { ReleaseManager } from './application/release';
 import { Session } from './application/session';
 import { RunFiles } from './application/run-files';
 import { threadLimit } from './domain/settings-file';
@@ -15,8 +16,10 @@ import type { Downloader } from './ports/download';
 import type { EngineGateway } from './ports/engine';
 import { browserCompression } from './infra/browser/compression';
 import { nextTask } from './infra/browser/next-task';
+import { browserOffline, browserReleaseChannel, browserReleasePage, browserReleasePin } from './infra/browser/offline';
 import { browserPage } from './infra/browser/page';
 import { browserDownloader } from './infra/browser/platform';
+import { browserSite } from './infra/browser/site';
 import { startDataWorker } from './infra/data-worker/gateway';
 import { WasmEngine } from './infra/engine-worker/gateway';
 import type { RenewalLimits } from './infra/engine-worker/policy';
@@ -41,6 +44,8 @@ export interface App {
   readonly session: Session;
   /** Settings files, "Edit Search", and the input FASTA of runs (application/run-files.ts). */
   readonly runFiles: RunFiles;
+  /** This tab's release, its offline use and the explicit update (application/release.ts); main.ts starts it. */
+  readonly release: ReleaseManager;
 }
 
 /** This build's version and commit (vite.config.ts), written into session files; "unknown" where a build does not set them. */
@@ -58,6 +63,15 @@ const SITE_BUILD: SiteBuild = Object.freeze({
   ),
   app: APP_BUILD,
 });
+
+/** The release ID of this build (build/release.ts); "unknown" where a build does not define it. */
+const RELEASE_ID = typeof __LOSAT_RELEASE_ID__ === 'string' ? __LOSAT_RELEASE_ID__ : 'unknown';
+/**
+ * Whether this page was started from its release directory `/r/<release-id>/` (the boot page's
+ * site layout). Only then are offline use and updates offered: the development server and the
+ * test harness serve the app elsewhere.
+ */
+const SERVED_AS_RELEASE = RELEASE_ID !== 'unknown' && new URL(import.meta.url).pathname.startsWith(`/r/${RELEASE_ID}/`);
 
 export interface AppOptions {
   /** Where exports go; the browser's download by default. */
@@ -127,5 +141,16 @@ export function createApp(options: AppOptions = {}): App {
     maxThreads: () => threadLimit(navigator.hardwareConcurrency),
     attachedInput: (runId, role) => session.attachedInput(runId, role),
   });
-  return { coordinator, draft, results, candidates, exporter, attention, usesFakeEngine: ENGINE_ASSETS === null, session, runFiles };
+  const release = new ReleaseManager({
+    release: RELEASE_ID,
+    served: SERVED_AS_RELEASE,
+    offline: browserOffline(),
+    pin: browserReleasePin,
+    channel: browserReleaseChannel(),
+    site: browserSite,
+    page: browserPage,
+    host: browserReleasePage,
+    runs: coordinator.state,
+  });
+  return { coordinator, draft, results, candidates, exporter, attention, usesFakeEngine: ENGINE_ASSETS === null, session, runFiles, release };
 }

@@ -23,6 +23,10 @@ describe('layer boundaries', () => {
     ['src/domain/probe.ts', '../ports/engine'],
     ['src/domain/probe.ts', '../infra/fake/fake-engine'],
     ['src/domain/probe.ts', 'vue'],
+    ['src/sw/probe.ts', '../application/release'],
+    ['src/sw/probe.ts', '../ports/offline'],
+    ['src/sw/probe.ts', '../infra/browser/offline'],
+    ['src/sw/probe.ts', 'vue'],
     ['src/ports/probe.ts', '../application/coordinator'],
     ['src/ports/probe.ts', '../infra/fake/fake-engine'],
     ['src/application/probe.ts', '../infra/fake/fake-engine'],
@@ -37,6 +41,7 @@ describe('layer boundaries', () => {
 
   it.each([
     ['src/ports/probe.ts', '../domain/programs'],
+    ['src/sw/probe.ts', '../domain/site-index'],
     ['src/application/probe.ts', '../ports/engine'],
     ['src/infra/probe.ts', '../ports/engine'],
     ['src/ui/probe.ts', '../application/coordinator'],

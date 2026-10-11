@@ -8,16 +8,19 @@ import type { HspId, ResultsBrowser } from '../application/results';
 import type { ResultExporter } from '../application/result-export';
 import type { Session } from '../application/session';
 import type { RunFiles } from '../application/run-files';
+import type { ReleaseManager } from '../application/release';
 import { formatCount } from './format';
 import { useStore } from './useStore';
 import AttentionPanel from './AttentionPanel.vue';
 import CandidatesPanel from './CandidatesPanel.vue';
 import QueuePanel from './QueuePanel.vue';
+import OfflineStatus from './OfflineStatus.vue';
 import ResultsPanel, { type ResultsView } from './ResultsPanel.vue';
 import ResumeNotice from './ResumeNotice.vue';
 import SearchPanel from './SearchPanel.vue';
 import SessionPanel from './SessionPanel.vue';
 import StorageStatus from './StorageStatus.vue';
+import UpdateNotice from './UpdateNotice.vue';
 
 const props = defineProps<{
   coordinator: Coordinator;
@@ -29,10 +32,12 @@ const props = defineProps<{
   usesFakeEngine: boolean;
   session: Session;
   runFiles: RunFiles;
+  release: ReleaseManager;
 }>();
 const state = useStore(props.coordinator.state);
 const attentionState = useStore(props.attention.state);
 const trayState = useStore(props.candidates.state);
+const releaseState = useStore(props.release.state);
 const tab = ref<'search' | 'results' | 'candidates'>('search');
 const resultsPanel = ref<InstanceType<typeof ResultsPanel>>();
 const searchPanel = ref<InstanceType<typeof SearchPanel>>();
@@ -90,10 +95,12 @@ onUnmounted(() => {
   <header class="app-header">
     <h1>LOSAT Web</h1>
     <span class="local-note">Local processing: your sequences stay in this browser.</span>
+    <OfflineStatus :release="release" :state="releaseState" />
   </header>
   <p v-if="usesFakeEngine" class="banner" data-testid="fake-engine-banner">
     Development build: a fake engine is in use. Outputs are not search results.
   </p>
+  <UpdateNotice :release="release" :state="releaseState" :runs="state.runs" :candidates="trayState.candidates" />
   <ResumeNotice v-if="attentionState.resume" :report="attentionState.resume" @dismiss="attention.dismissResume()" />
   <nav class="tabs main-tabs" aria-label="Main">
     <button :aria-pressed="tab === 'search'" data-testid="tab-search" @click="tab = 'search'">Search</button>

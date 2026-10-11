@@ -225,24 +225,30 @@ test.describe('usage statistics', () => {
       test(`endpoint ${mode === 'abort' ? 'blocked' : mode === 'error' ? 'answering 500' : 'unreachable: the page is offline'}: a search, results, an extraction, an export and a session save work`, async ({
         page,
         context,
+        browserName,
       }) => {
         const recorded = await site(context, 'measured');
         recorded.endpoint = mode === 'error' ? 'error' : 'abort';
         await open(page);
-        if (mode === 'offline') await context.setOffline(true);
-        else {
+        if (mode !== 'offline') {
           // A stored consent, then a page load: its request fails as well.
           await page.getByTestId('analytics-allow').click();
           await expect.poll(() => recorded.visits.length).toBe(1);
           await open(page, true);
           await expect.poll(() => recorded.visits.length).toBe(2);
         }
-        if (mode === 'offline') await page.getByTestId('analytics-allow').click();
-        await expect(page.getByTestId('analytics-setting')).toHaveText('Usage statistics: on');
-
         await program(page, 'blastn');
         await paste(page, 'query', '>q1 first query\nACGTACGTACGTACGTACGTACGTACGTACGTACGT\n');
         await paste(page, 'subject', '>s1 first subject\nACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGT\n');
+        if (mode === 'offline') {
+          // In Playwright's WebKit, offline emulation (and a route that matches blob: URLs) also
+          // fails the page's own reads of its input Blobs ("The I/O read operation failed"), so
+          // there every HTTP request is aborted instead.
+          if (browserName === 'webkit') await context.route((url) => url.protocol === 'http:' || url.protocol === 'https:', (route) => route.abort('internetdisconnected'));
+          else await context.setOffline(true);
+          await page.getByTestId('analytics-allow').click();
+        }
+        await expect(page.getByTestId('analytics-setting')).toHaveText('Usage statistics: on');
         await submit(page);
         await waitStatus(page, 1, 'completed');
         await chooseRun(page, 1);

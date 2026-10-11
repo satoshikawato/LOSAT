@@ -214,9 +214,17 @@ describe('ReactorAbi', () => {
 const reactors = findReactors();
 
 describe.skipIf(reactors === undefined)('the built reactors', () => {
-  it('are the two reactor kinds, with the shared memory of the certified threaded build (plan TD-7)', () => {
+  it('are the two reactor kinds, with the shared memory that the threaded build declares (plan TD-7)', () => {
     expect(inspectReactor(reactors!.serial.bytes).kind).toBe('serial-reactor');
-    expect(inspectReactor(reactors!.threads.bytes)).toMatchObject({ kind: 'threaded-reactor', memory: { maximum: 16384, shared: true } });
+    const threaded = inspectReactor(reactors!.threads.bytes);
+    expect(threaded).toMatchObject({ kind: 'threaded-reactor', memory: { shared: true } });
+    // The maximum that build_reactors.py recorded: 65,535 pages, or 16,384 in a build from
+    // before the 1 GiB limit was lifted (plan DW-28).
+    const recorded = JSON.parse(readFileSync(`${reactors!.dir}/artifacts.json`, 'utf8')) as {
+      artifacts: { threads: { memory: { maximum: number } } };
+    };
+    expect(threaded.memory.maximum).toBe(recorded.artifacts.threads.memory.maximum);
+    expect([16_384, 65_535]).toContain(threaded.memory.maximum);
     // The served threaded module is the artifact with the shared-memory guard.
     expect(reactors!.threads.sha256).not.toBe(reactors!.threads.artifactSha256);
     const sha256 = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex');

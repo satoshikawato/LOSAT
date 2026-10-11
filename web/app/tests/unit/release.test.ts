@@ -245,6 +245,25 @@ describe('offline use', () => {
     expect(offline.cleanups).toEqual([['a', 'b']]);
   });
 
+  it('says "Offline ready" only while the pin read back names this tab release', async () => {
+    // The browser did not keep the boot page's pin (storage that throws or is full).
+    const unpinned = setup();
+    unpinned.pin.value = undefined;
+    await unpinned.start();
+    expect(unpinned.state().offline).toEqual({ kind: 'stored' });
+
+    // Another tab switched before this tab's release was stored, and switches back later.
+    const { channel, pin, state, start } = setup();
+    pin.value = 'b';
+    await start();
+    expect(state().offline).toEqual({ kind: 'stored', pin: 'b' });
+    pin.value = 'a';
+    channel.receive('a');
+    expect(state().offline).toEqual({ kind: 'ready' });
+    channel.receive('c');
+    expect(state().offline).toEqual({ kind: 'stored', pin: 'c' });
+  });
+
   it('says why a preparation failed, and tries again on request', async () => {
     const { offline, manager, state, start } = setup();
     offline.results = [{ ok: false, reason: 'engine/serial.wasm: the server answered 404' }];

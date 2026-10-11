@@ -1,7 +1,9 @@
 // The release this tab runs, its offline use and the explicit update (plan §5.9, design §14).
 // - Offline: once the app has started and the browser is idle, the site's service worker
 //   stores this tab's release (the pinned one, which the boot page started) and the site's
-//   shell after checking every file, and only then does the screen say "Offline ready".
+//   shell after checking every file, and only then, and only while the pin read back from
+//   storage names this release (an offline start opens the pinned release), does the screen
+//   say "Offline ready".
 // - Update: the site index is read after start-up and then hourly while the page is visible
 //   and online (never while offline). A release other than this tab's is offered; nothing
 //   changes until the user chooses. The user reviews what a reload does to this tab's work,
@@ -27,7 +29,14 @@ export type OfflineState =
   /** No offline use: the browser has no service workers (no reason), or the reason given. */
   | { readonly kind: 'unsupported'; readonly reason?: string }
   | { readonly kind: 'preparing'; readonly progress?: PrepareProgress }
+  /** This tab's release is stored, and the pin names it: an offline start opens it. */
   | { readonly kind: 'ready' }
+  /**
+   * This tab's release is stored, but the pin does not name it: `pin` is the release that
+   * another tab switched to; without `pin`, the browser did not keep the choice of release,
+   * which an offline start needs.
+   */
+  | { readonly kind: 'stored'; readonly pin?: string }
   | { readonly kind: 'failed'; readonly reason: string };
 
 export type UpdateState =
@@ -280,9 +289,21 @@ export class ReleaseManager {
       this.setOffline({ kind: 'failed', reason: result.reason });
       return;
     }
-    this.setOffline({ kind: 'ready' });
     const pin = this.deps.pin.read();
+    this.setOffline(this.storedWith(pin));
     await this.deps.offline.cleanup(pin === undefined || pin === release ? [release] : [release, pin]).catch(() => undefined);
+  }
+
+  /** The offline state of this tab's stored release under `pin` (read back from storage). */
+  private storedWith(pin: string | undefined): OfflineState {
+    if (pin === this.deps.release) return { kind: 'ready' };
+    return pin === undefined ? { kind: 'stored' } : { kind: 'stored', pin };
+  }
+
+  /** "Offline ready" follows the pin once the release is stored (another tab may switch it). */
+  private followPin(pin: string | undefined): void {
+    const kind = this.state.get().offline.kind;
+    if (kind === 'ready' || kind === 'stored') this.setOffline(this.storedWith(pin));
   }
 
   /**
@@ -335,6 +356,7 @@ export class ReleaseManager {
     // A pin that names another release was written by another tab (its message may have been
     // missed while this tab was frozen); after this tab's own switch it is this tab's.
     if (pin !== undefined && pin !== release && update.kind !== 'switched') this.set({ elsewhere: pin });
+    if (update.kind !== 'switched') this.followPin(pin);
     const elsewhere = this.state.get().elsewhere;
     const offered = latest !== release && latest !== elsewhere;
     if (update.kind === 'none') {
@@ -349,6 +371,7 @@ export class ReleaseManager {
   private switchedElsewhere(release: string): void {
     const own = release === this.deps.release;
     this.set({ elsewhere: own ? undefined : release });
+    this.followPin(release);
     const update = this.state.get().update;
     if (update.kind === 'none') return;
     // The offer, or this tab's own switch to another release, no longer holds: the pin now names `release`.

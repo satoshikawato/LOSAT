@@ -10,6 +10,9 @@ pub mod gapped;
 pub mod greedy;
 pub mod statistics;
 pub mod utilities;
+// EXPERIMENT (LOSAT_X_GREEDYPRELIM): the preliminary greedy alignment on a one-byte copy of the
+// packed subject (no NCBI counterpart as a module; see its doc for the NCBI references).
+pub mod x_greedy_prelim;
 
 // Re-export public APIs
 pub use greedy::{

@@ -86,6 +86,16 @@ Same values, faster computation:
   `LOSAT_X_DPSHADOW=1`; `LOSAT_X_DPNOAVX=1` turns it off as well.
 - `LOSAT_X_GREEDYFAST=1` megablast greedy alignment, one distance in three passes of 256 cells,
   match extension 8 bases at a time. Shadow: `LOSAT_X_GREEDYSHADOW=1`.
+- `LOSAT_X_GREEDYPRELIM=1` (strict-set candidate, S-G, round 5) the preliminary (score-only)
+  megablast greedy alignment reads a one-byte-per-base copy of the packed ncbi2na subject (the
+  NCBI-resolved codes) with `compressed_subject = false` instead of the packed bytes: the same
+  comparisons, bounds and results (`algorithm/blastn/alignment/x_greedy_prelim.rs`). Only with
+  `LOSAT_X_GREEDYFAST` does the preliminary stage then use the fast rows; without it the ported
+  loop runs on the copy. Memory: one byte per subject base while the subject is searched (made on
+  the first chunk with ungapped hits, shared by its chunks and threads). Shadow:
+  `LOSAT_X_GREEDYPRELIMSHADOW=1` (implies the switch) also runs the packed call and stops on the
+  first difference; at exit `[X_SHADOW] GREEDYPRELIM calls_compared=N`. With `LOSAT_X_STATS=1`:
+  `[X_STATS] GREEDYPRELIM calls= subjects_unpacked= bytes_unpacked=`.
 - `LOSAT_X_COMPFAST=1` composition adjustment (Newton) loops reordered with the same element
   operations in the same order. Shadow: `LOSAT_X_COMPSHADOW=1`.
 - `LOSAT_X_NEWTONEXACT=1` the Newton iteration of the composition adjustment with fixed-size

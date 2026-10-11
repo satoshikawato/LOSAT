@@ -51,13 +51,17 @@ use super::super::alignment::{
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_gapalign.h:69-80 (BlastGapAlignStruct)
     extend_gapped_heuristic_with_traceback_with_scratch,
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2762-2936 (BLAST_GreedyGappedAlignment)
-    greedy_gapped_alignment_score_only,
+    // (the score-only call goes through `x_greedy_prelim`, which calls it when LOSAT_X_GREEDYPRELIM
+    // is off)
     greedy_gapped_alignment_with_traceback,
     stats_from_edit_ops,
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_gapalign.h:69-80 (BlastGapAlignStruct)
     GapAlignScratch,
     GreedyAlignScratch,
 };
+// EXPERIMENT (LOSAT_X_GREEDYPRELIM): dispatch of the preliminary greedy alignment
+// (NCBI reference: blast_gapalign.c:4019-4025, BLAST_GreedyGappedAlignment with compressed_subject).
+use super::super::alignment::x_greedy_prelim;
 use super::super::args::BlastnArgs;
 use super::super::blast_extend::DiagStruct;
 use super::super::coordination::{
@@ -6052,6 +6056,9 @@ fn search(
     // No NCBI counterpart: the summary line of LOSAT_X_PAIRPARSHADOW (and the LOSAT_X_PAIRPAR
     // counters with LOSAT_TIMING); nothing without those switches.
     x_pair_seed::summary();
+    // No NCBI counterpart: the summary lines of LOSAT_X_GREEDYPRELIMSHADOW (and the
+    // LOSAT_X_GREEDYPRELIM counters with LOSAT_X_STATS); nothing without those switches.
+    x_greedy_prelim::summary();
     x_result
 }
 
@@ -8388,6 +8395,22 @@ fn search_query_batch(
             s_seq_packed_full_vec = Some(encode_subject_ncbi2na_packed(s_seq_full));
             s_seq_packed_full_vec.as_ref().unwrap().as_slice()
         };
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4019-4025
+        // ```c
+        //             status = BLAST_GreedyGappedAlignment(
+        //                          query_tmp.sequence, subject->sequence,
+        // ...
+        //                          (Boolean) TRUE, FALSE, fence_hit);
+        // ```
+        // EXPERIMENT (LOSAT_X_GREEDYPRELIM): the one-byte copy of this subject's packed sequence
+        // that the preliminary greedy alignment reads instead (made on first use, shared by every
+        // chunk and worker of this subject). Off unless the switch is set, the search uses the
+        // greedy aligner and this is the preliminary stage.
+        let x_prelim_subject = x_greedy_prelim::XPrelimSubject::new(
+            !use_dp && prelim_source.is_none(),
+            s_seq_packed_full,
+            s_len_full,
+        );
 
         let dbseq_chunk_overlap = DBSEQ_CHUNK_OVERLAP;
         let mut split_state = SubjectSplitState::new(s_len_full, soft_ranges);
@@ -11281,6 +11304,23 @@ fn search_query_batch(
                 .fetch_add(total_ungapped as u64, std::sync::atomic::Ordering::Relaxed);
             let gapped_start_time = std::time::Instant::now();
             let mut dbg_gapped_calls = 0usize;
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2786-2794
+            // ```c
+            //    if (!compressed_subject) {
+            //       s = subject + s_off;
+            //       rem = 4; /* Special value to indicate that sequence is already
+            //                   uncompressed */
+            //    } else {
+            //       s = subject + s_off/4;
+            //       rem = s_off % 4;
+            // ```
+            // EXPERIMENT (LOSAT_X_GREEDYPRELIM): the bases of `s_seq_packed` one per byte, for the
+            // greedy calls below; `None` (the packed call as ported) when the switch is off.
+            let x_prelim_s = if total_ungapped > 0 {
+                x_prelim_subject.chunk(chunk.offset)
+            } else {
+                None
+            };
 
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2959-2963,4012-4025,4041-4046
             // ```c
@@ -11347,7 +11387,9 @@ fn search_query_batch(
                         let ungapped_len = uh.qe.saturating_sub(uh.qs);
                         let seed_qs = uh.qs + ungapped_len / 2;
                         let seed_ss = uh.ss + ungapped_len / 2;
-                        greedy_gapped_alignment_score_only(
+                        // Dispatch point of LOSAT_X_GREEDYPRELIM (`x_prelim_s` = None: as ported).
+                        x_greedy_prelim::x_greedy_gapped_alignment_score_only(
+                            x_prelim_s,
                             q_seq_blastna,
                             s_seq_packed,
                             s_seq_blastna.len(),
@@ -11725,7 +11767,10 @@ fn search_query_batch(
                             let seed_qs = uh.qs + ungapped_len / 2;
                             let seed_ss = uh.ss + ungapped_len / 2;
 
-                            let prelim = match greedy_gapped_alignment_score_only(
+                            // Dispatch point of LOSAT_X_GREEDYPRELIM (`x_prelim_s` = None: the
+                            // packed call as ported).
+                            let prelim = match x_greedy_prelim::x_greedy_gapped_alignment_score_only(
+                                x_prelim_s,
                                 q_seq_blastna,
                                 s_seq_score,
                                 subject_len,

@@ -801,12 +801,30 @@ test.describe('delivery', () => {
       const letGo = front.hold(`/r/${index.latest}/${held}`);
       try {
         await page.goto(`${front.origin}/`);
-        await expect(page.getByTestId('offline-preparing')).toContainText(`${total - 1} of ${total} files`, { timeout: 60_000 });
+        // The header's line has the bytes; its title has the files as well.
+        await expect(page.getByTestId('offline-status')).toHaveAttribute('title', new RegExp(`${total - 1} of ${total} files`), { timeout: 60_000 });
         await shoot(page, browserName, size.name, '46-offline-preparing', { offline: 'preparing' });
       } finally {
         letGo();
       }
       await shoot(page, browserName, size.name, '46b-offline-ready');
+    });
+
+    test(`the header and its notice when offline use could not be prepared, at the ${size.name} size`, async ({ page, browserName, request }) => {
+      await page.setViewportSize({ width: size.width, height: size.height });
+      front.upstream = E2E_ORIGIN;
+      const index = (await (await request.get('/releases.json')).json()) as { latest: string };
+      const manifest = (await (await request.get(`/r/${index.latest}/release-manifest.json`)).json()) as { assets: { path: string }[] };
+      // The threaded engine's module, which the worker downloads: its connection is cut.
+      const cut = `/r/${index.latest}/${manifest.assets.find((asset) => /threads.*\.wasm$/.test(asset.path))!.path}`;
+      front.cut.add(cut);
+      try {
+        await page.goto(`${front.origin}/`);
+        await expect(page.getByTestId('offline-notice')).toBeVisible({ timeout: 60_000 });
+        await shoot(page, browserName, size.name, '46c-offline-failed', { offline: 'failed' });
+      } finally {
+        front.cut.delete(cut);
+      }
     });
 
     test(`an update reviewed, downloaded and switched in another tab, at the ${size.name} size`, async ({ context, page, browserName }) => {

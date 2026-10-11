@@ -6,8 +6,8 @@
 // release. Release IDs come from the site and are shown as text.
 import { computed } from 'vue';
 import type { RunView } from '../application/coordinator';
-import type { ReleaseManager, ReleaseState } from '../application/release';
-import { formatBytes, formatCount } from './format';
+import { switchImpact, type ReleaseManager, type ReleaseState } from '../application/release';
+import { formatBytesUnbroken, formatCount, formatCounted } from './format';
 import UpdateImpact from './UpdateImpact.vue';
 
 const props = defineProps<{
@@ -20,6 +20,8 @@ const props = defineProps<{
 const update = computed(() => props.state.update);
 const shown = computed(() => update.value.kind !== 'none' && update.value.kind !== 'dismissed');
 const latest = computed(() => ('latest' in update.value ? update.value.latest : ''));
+/** What a reload of this tab drops (the leave guard covers only runs in progress). */
+const impact = computed(() => switchImpact(props.runs, props.candidates));
 /** Only a browser without service workers (or where they are blocked) switches without a download and check first. */
 const direct = computed(() => {
   // Read again when the offline state changes: the manager learns of a block at its first registration.
@@ -32,6 +34,13 @@ const direct = computed(() => {
   <p v-if="state.elsewhere" class="notice" role="status" data-testid="update-other-tab">
     LOSAT Web was switched to release {{ state.elsewhere }} in another tab. This tab keeps release {{ state.release }} until it is
     reloaded.
+    <template v-if="impact.completed + impact.candidates > 0">
+      <br />
+      <span data-testid="update-other-tab-loss">
+        Reloading does not keep this tab's {{ formatCounted(impact.completed, 'completed run') }} and
+        {{ formatCounted(impact.candidates, 'candidate') }}: use <strong>Save session</strong> in the Session panel first.
+      </span>
+    </template>
   </p>
   <section v-if="shown" class="update-notice" aria-label="Update" data-testid="update-notice" :data-state="update.kind">
     <template v-if="update.kind === 'available'">
@@ -61,7 +70,7 @@ const direct = computed(() => {
       <p data-testid="update-progress">
         Downloading and checking release {{ latest }}<template v-if="update.progress">:
           {{ formatCount(update.progress.files) }} of {{ formatCount(update.progress.filesTotal) }} files
-          ({{ formatBytes(update.progress.bytes) }} of {{ formatBytes(update.progress.bytesTotal) }})</template>…
+          ({{ formatBytesUnbroken(update.progress.bytes) }} of {{ formatBytesUnbroken(update.progress.bytesTotal) }})</template>…
       </p>
       <progress
         :value="update.progress?.bytes"

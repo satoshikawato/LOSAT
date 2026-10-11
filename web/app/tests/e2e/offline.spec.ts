@@ -324,8 +324,12 @@ test('5. an older tab keeps its results and its release while another tab switch
   await expect(second.getByTestId('storage-status')).toHaveAttribute('data-cleanup', 'done');
   await offlineReady(second);
 
-  await expect(first.getByTestId('update-other-tab')).toHaveText(
+  await expect(first.getByTestId('update-other-tab')).toContainText(
     `LOSAT Web was switched to release ${B} in another tab. This tab keeps release ${A} until it is reloaded.`,
+  );
+  // And what a reload of tab 1 would drop (the leave guard covers only runs in progress).
+  await expect(first.getByTestId('update-other-tab-loss')).toHaveText(
+    "Reloading does not keep this tab's 1 completed run and 0 candidates: use Save session in the Session panel first.",
   );
   // Tab 1's tmp/<token>, under its lock losat-web:tmp:<token>, survived B's start-up (where the
   // results are in OPFS: a browser without it keeps them in the tab's memory, and the page cannot

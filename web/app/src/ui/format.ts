@@ -13,6 +13,11 @@ export function formatBytes(bytes: number): string {
   return `${value.toFixed(digits)} ${UNITS[unit]}`;
 }
 
+/** formatBytes with a no-break space, for text that may wrap: "8.2 MB" never breaks inside. */
+export function formatBytesUnbroken(bytes: number): string {
+  return formatBytes(bytes).replace(' ', '\u00a0');
+}
+
 /** A count with thousands separators, for example "12,345". */
 export function formatCount(count: number): string {
   return count.toLocaleString('en-US');

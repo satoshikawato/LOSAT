@@ -21,6 +21,7 @@ import AttentionPanel from './AttentionPanel.vue';
 import CandidatesPanel from './CandidatesPanel.vue';
 import GettingStarted from './GettingStarted.vue';
 import QueuePanel from './QueuePanel.vue';
+import OfflineNotice from './OfflineNotice.vue';
 import OfflineStatus from './OfflineStatus.vue';
 import ResultsPanel, { type ResultsView } from './ResultsPanel.vue';
 import ResumeNotice from './ResumeNotice.vue';
@@ -107,22 +108,26 @@ onUnmounted(() => {
   <header class="app-header">
     <h1>LOSAT Web</h1>
     <span class="local-note">Local processing: your sequences stay in this browser.</span>
-    <button
-      type="button"
-      class="link header-link"
-      :aria-expanded="gettingStartedState.open"
-      aria-controls="getting-started"
-      data-testid="getting-started-toggle"
-      @click="gettingStarted.toggle()"
-    >
-      Getting started
-    </button>
-    <OfflineStatus :release="release" :state="releaseState" />
+    <!-- At the right, together: a fixed-size offline status never moves the link or the page. -->
+    <div class="header-tools">
+      <button
+        type="button"
+        class="link header-link"
+        :aria-expanded="gettingStartedState.open"
+        aria-controls="getting-started"
+        data-testid="getting-started-toggle"
+        @click="gettingStarted.toggle()"
+      >
+        Getting started
+      </button>
+      <OfflineStatus :release="release" :state="releaseState" />
+    </div>
   </header>
   <p v-if="usesFakeEngine" class="banner" data-testid="fake-engine-banner">
     Development build: a fake engine is in use. Outputs are not search results.
   </p>
   <UpdateNotice :release="release" :state="releaseState" :runs="state.runs" :candidates="trayState.candidates" />
+  <OfflineNotice :release="release" :state="releaseState" />
   <!-- Kept mounted, so that the header's aria-controls names it and the self-test's section keeps its state. -->
   <GettingStarted v-show="gettingStartedState.open" :getting-started="gettingStarted" :self-test="selfTest" />
   <ResumeNotice v-if="attentionState.resume" :report="attentionState.resume" @dismiss="attention.dismissResume()" />

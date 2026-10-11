@@ -96,6 +96,9 @@ for (const [name, stub] of [
     await page.goto('/');
     await appStarted(page);
     await expect(page.getByTestId('boot-message')).toHaveCount(0);
+    // The release is stored, but without a pin an offline start cannot open it: never "Offline ready".
+    await expect(page.getByTestId('offline-status')).toHaveAttribute('data-state', 'stored', { timeout: 60_000 });
+    await expect(page.getByTestId('offline-not-pinned')).toContainText('LOSAT Web cannot start offline in this browser');
   });
 }
 

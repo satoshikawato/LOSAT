@@ -2317,16 +2317,28 @@ button.link[aria-disabled='true'] {
 }
 
 /* W7: the release and its offline use in the header, and the explicit update
-   (OfflineStatus.vue, UpdateNotice.vue). The status has one size in every state: a fixed width
-   (at most the header's) and one line (two on a phone), so that the header's lines and
-   everything below them stay where they are while the release is prepared. The message ends in
-   an ellipsis; the release ID and "Try again" keep their room. */
+   (OfflineStatus.vue, OfflineNotice.vue, UpdateNotice.vue). "Getting started" and the status
+   sit together at the right of the header (on a phone, right-aligned on lines of their own). The
+   status is one line of one fixed size in every state, so that the header's lines and everything
+   below them stay where they are while the release is prepared: the state's short form is never
+   cut, and the release ID ends in an ellipsis where the box is too narrow. */
+.header-tools {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: baseline;
+  gap: 4px 12px;
+  margin-left: auto;
+  max-width: 100%;
+}
+
 .offline-status {
   display: inline-flex;
   flex: none;
+  justify-content: flex-end;
   align-items: baseline;
   gap: 0 10px;
-  width: 60em;
+  width: 30em;
   max-width: 100%;
   height: 1.4em;
   line-height: 1.4;
@@ -2337,47 +2349,33 @@ button.link[aria-disabled='true'] {
 }
 
 .offline-status .offline-release {
-  flex: none;
-}
-
-.offline-status .offline-state {
-  display: flex;
-  flex: 0 1 auto;
-  min-width: 0;
-  align-items: baseline;
-  gap: 0 10px;
-}
-
-.offline-status .offline-message {
   flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.offline-status .offline-message {
+  flex: none;
   /* Also for .error, which keeps an engine message's line breaks elsewhere. */
   white-space: nowrap;
 }
 
-.offline-status .offline-state > button {
-  flex: none;
-}
-
-@media (max-width: 800px) {
-  /* The release on the first line, the state and "Try again" on the whole of the second. */
-  .offline-status {
-    flex-wrap: wrap;
-    height: 2.8em;
-  }
-
-  .offline-status .offline-release,
-  .offline-status .offline-state {
-    flex-basis: 100%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-}
-
 .offline-status .release-id {
   font-family: ui-monospace, monospace;
+}
+
+.offline-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  margin: 8px 0;
+  overflow-wrap: anywhere;
+}
+
+.offline-notice p {
+  margin: 0;
 }
 
 .update-notice {

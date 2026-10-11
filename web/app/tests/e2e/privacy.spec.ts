@@ -34,7 +34,7 @@ import { gunzipSync } from 'node:zlib';
 import { expect, type Page } from '@playwright/test';
 import { BUILD_HAS_ENGINE } from './support/browser';
 import { REPOSITORY } from './support/harness-server';
-import { DIST, PrivacyCapture, startSiteServer, test } from './support/privacy';
+import { DIST, PrivacyCapture, siteFiles, startCaptureSite, test } from './support/privacy';
 import {
   filesUnder,
   machinePatterns,
@@ -84,15 +84,19 @@ async function openApp(page: Page, capture: PrivacyCapture): Promise<void> {
   await expect(page.getByTestId('storage-status')).toHaveAttribute('data-cleanup', 'done');
 }
 
-/** The capture saw the site's own requests: the page, its script and the Data worker's (and the engine's). */
+/**
+ * The capture saw the site's own requests: the boot page, the release's script and the Data
+ * worker's (and the engine's), and the service worker.
+ */
 function expectSiteRequests(capture: PrivacyCapture): void {
   const paths = capture.serverPaths();
-  expect(paths).toContain('/');
-  expect(paths.some((path) => /^\/assets\/index-[\w-]+\.js$/.test(path))).toBe(true);
-  expect(paths.some((path) => /^\/assets\/data-worker-[\w-]+\.js$/.test(path))).toBe(true);
+  for (const path of ['/', '/boot.js', '/sw.js']) expect(paths).toContain(path);
+  const release = (pattern: string) => expect(paths.some((path) => new RegExp(`^/r/[0-9a-z.-]+/${pattern}$`).test(path)), pattern).toBe(true);
+  release('assets/index-[\\w-]+\\.js');
+  release('assets/data-worker-[\\w-]+\\.js');
   if (BUILD_HAS_ENGINE) {
-    expect(paths.some((path) => /^\/assets\/engine-worker-[\w-]+\.js$/.test(path))).toBe(true);
-    expect(paths.some((path) => /^\/engine\/losat-web-(serial|threads)-[0-9a-f]+\.wasm$/.test(path))).toBe(true);
+    release('assets/engine-worker-[\\w-]+\\.js');
+    release('engine/losat-web-(serial|threads)-[0-9a-f]+\\.wasm');
   }
 }
 
@@ -315,9 +319,9 @@ test('the capture finds what it looks for: a canary in a URL, a path that is not
 }, testInfo) => {
   // Another origin that logs what reaches it, and a worker that only this test serves: the page and
   // the worker each try a request to that origin, which the CSP blocks.
-  const foreign = await startSiteServer(DIST);
+  const foreign = await startCaptureSite(DIST);
   const worker = "fetch(new URL(location.href).searchParams.get('to')).then(() => postMessage('sent'), () => postMessage('failed'));";
-  const server = await startSiteServer(DIST, { extra: new Map([['/__privacy/planted-worker.js', { type: 'text/javascript', body: worker }]]) });
+  const server = await startCaptureSite(DIST, { extra: new Map([['__privacy/planted-worker.js', worker]]) });
   const capture = new PrivacyCapture(server);
   try {
     await capture.attach(context);
@@ -396,9 +400,12 @@ function machineContext(): MachineContext {
 test('TD-11: no file that the site serves holds a path of the build machine or the user name', async ({ browserName }, testInfo) => {
   test.skip(browserName !== 'chromium', 'reads the built files: once, not in every browser');
   const machine = machineContext();
-  const files = filesUnder(DIST);
-  expect(files).toContain('index.html');
-  expect(files.some((file) => file.endsWith('.js'))).toBe(true);
+  // The files that the site lists (the shell, the other site-level files, each release's manifest
+  // and its files) are every file of the build but the `_headers` that Pages reads.
+  const files = siteFiles(DIST).map(({ file }) => file);
+  expect([...files].sort()).toEqual(filesUnder(DIST).filter((file) => file !== '_headers'));
+  for (const file of ['index.html', 'boot.js', 'sw.js', 'releases.json']) expect(files).toContain(file);
+  expect(files.filter((file) => file.endsWith('.js')).length).toBeGreaterThan(4);
   if (BUILD_HAS_ENGINE) expect(files.filter((file) => file.endsWith('.wasm'))).toHaveLength(2);
   const found = scanFiles(DIST, files, machinePatterns(machine));
   // A common user name (CI's `runner`) counts only in a path; how often it occurs as a bare word is recorded.

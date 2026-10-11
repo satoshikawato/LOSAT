@@ -1,118 +1,131 @@
 // V-PRIV's capture (plan §5.10; design §13.3): every request of a flow, seen from both ends.
 //
-// - The server: the site is served by a server that logs every request it receives (method, URL,
-//   headers, body), so that the requests of pages, dedicated and nested workers and a service
-//   worker are all seen in every browser, whatever the browser reports to Playwright. It sends
-//   the site's response headers (public/_headers) on every response, and adds one directive to
-//   the CSP, `report-uri`, so that a violation in a worker (where no page listens) reaches the log.
+// - The server: the site is served by the site's local server (build/site-server.ts, which answers
+//   as Cloudflare Pages does), whose request hook logs every request it receives (method, URL,
+//   headers, body), so that the requests of pages, dedicated and nested workers and the service
+//   worker are all seen in every browser, whatever the browser reports to Playwright. The served
+//   directory is a view of the site (links to its files) whose `_headers` adds one directive to the
+//   CSP, `report-uri`, so that a violation in a worker (where no page listens) reaches the log too;
+//   pointing the view at another site directory is a new deployment at the same origin.
 // - The browser: every request that the context reports to Playwright, and what each page notes
 //   about itself (an init script): its title and address whenever they change, and every
 //   `securitypolicyviolation` event.
-//
-// The server is `startSiteServer` alone, so that it can be replaced by the release layout's local
-// server (WP-R: build/site-server.ts and its request-log hook) in a few lines.
-import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import type { AddressInfo } from 'node:net';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { extname, join } from 'node:path';
+import { lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test as base, type BrowserContext, type Page, type Request, type TestInfo } from '@playwright/test';
-import { siteHeaders } from '../../../build/headers';
-import { canaryForms, filesUnder, findings, type Canary, type Exchange, type PageNote, type RequestRules } from './privacy-scan';
+import { SERVICE_WORKER_FILE } from '../../../build/service-worker';
+import { readSiteIndex, RELEASES_DIR, SHELL_FILES, SITE_INDEX_FILE } from '../../../build/site-files';
+import { startSiteServer, type SiteRequest } from '../../../build/site-server';
+import { parseReleaseManifest, RELEASE_MANIFEST_NAME } from '../../../src/domain/release-manifest';
+import { canaryForms, findings, type Canary, type Exchange, type PageNote, type RequestRules } from './privacy-scan';
 
-/** The production build that `npm run build` writes (playwright.config.ts builds it before the tests). */
+/** The site that `npm run build` writes (playwright.config.ts builds it before the tests). */
 export const DIST = fileURLToPath(new URL('../../../dist/', import.meta.url));
 /** Where the server asks browsers to report CSP violations; any request to it is a finding. */
 export const CSP_REPORT_PATH = '/__privacy/csp-report';
 
-const TYPES: Readonly<Record<string, string>> = {
-  '.html': 'text/html; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.mjs': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.json': 'application/json',
-  '.wasm': 'application/wasm',
-  '.svg': 'image/svg+xml',
-  '.png': 'image/png',
-  '.ico': 'image/x-icon',
-  '.txt': 'text/plain; charset=utf-8',
-  '.webmanifest': 'application/manifest+json',
-};
 /**
  * Paths that are not files of the site and that a browser asks for by itself: Firefox asks for
  * /favicon.ico (index.html names no icon). The canary check applies to them as to every request.
  */
 export const BROWSER_PATHS: ReadonlySet<string> = new Set(['/favicon.ico']);
-/** Files of the build directory that Cloudflare reads and never serves. */
-const NOT_SERVED = new Set(['_headers', '_redirects']);
+/** The site-level files outside the shell (docs/web/release_manifest.md): the site index, the service worker, the 404 page. */
+const OTHER_SITE_FILES: readonly (readonly [path: string, file: string])[] = [
+  [`/${SITE_INDEX_FILE}`, SITE_INDEX_FILE],
+  [`/${SERVICE_WORKER_FILE}`, SERVICE_WORKER_FILE],
+  // Pages serves 404.html as the body of a 404, and at /404 (/404.html redirects there).
+  ['/404', '404.html'],
+];
 
-export interface SiteServer {
+export interface SiteFile {
+  /** The file in the site directory. */
+  readonly file: string;
+  /** The URL path that serves it. */
+  readonly path: string;
+}
+
+/**
+ * Every file that a site serves, as the site lists it: the shell of releases.json, the other
+ * site-level files, and each release's manifest with the files it lists.
+ */
+export function siteFiles(site: string): SiteFile[] {
+  const index = readSiteIndex(site);
+  const shell = new Map(SHELL_FILES);
+  const files: SiteFile[] = (index.shell ?? SHELL_FILES.map(([path]) => ({ path }))).map(({ path }) => ({ file: shell.get(path) ?? path.slice(1), path }));
+  files.push(...OTHER_SITE_FILES.map(([path, file]) => ({ file, path })));
+  for (const { id } of index.releases) {
+    const directory = `${RELEASES_DIR}/${id}`;
+    const manifest = parseReleaseManifest(JSON.parse(readFileSync(join(site, directory, RELEASE_MANIFEST_NAME), 'utf8')), id);
+    for (const file of [RELEASE_MANIFEST_NAME, ...manifest.assets.map((asset) => asset.path)]) files.push({ file: `${directory}/${file}`, path: `/${directory}/${file}` });
+  }
+  return files;
+}
+
+/** The site's `_headers` with `report-uri` added to each Content-Security-Policy. */
+function reportingHeaders(text: string): string {
+  return text.replace(/^([ \t]+Content-Security-Policy:.*\S)[ \t]*$/gm, `$1; report-uri ${CSP_REPORT_PATH}`);
+}
+
+export interface CaptureSite {
   /** For example http://127.0.0.1:41234 */
   readonly origin: string;
-  /** The paths that the site serves: `/` and `/<file>` for each file of the build. */
-  readonly files: ReadonlySet<string>;
   /** Every request received, in order. */
   readonly requests: readonly Exchange[];
+  /** The URL paths of the files of every site deployed so far. */
+  readonly paths: ReadonlySet<string>;
+  /** From now on, the same origin serves another site directory (a new deployment). */
+  deploy(site: string): void;
   close(): Promise<void>;
 }
 
-export interface SiteServerOptions {
+export interface CaptureSiteOptions {
   /** Files that are not the site's, served under their paths (the capture's own test plants them). */
-  readonly extra?: ReadonlyMap<string, { readonly type: string; readonly body: string }>;
+  readonly extra?: ReadonlyMap<string, string>;
 }
 
-/** Serves the build directory as the site, logging every request. */
-export async function startSiteServer(root = DIST, options: SiteServerOptions = {}): Promise<SiteServer> {
-  if (!existsSync(join(root, 'index.html'))) throw new Error(`no build in ${root}: run npm run build`);
-  const served = filesUnder(root).filter((file) => !NOT_SERVED.has(file));
-  const files = new Set(['/', ...served.map((file) => `/${file}`)]);
-  const site = siteHeaders();
-  const headers = {
-    ...site,
-    'Content-Security-Policy': `${site['Content-Security-Policy']}; report-uri ${CSP_REPORT_PATH}`,
+/** Serves a site directory with build/site-server.ts, logging every request. */
+export async function startCaptureSite(site = DIST, options: CaptureSiteOptions = {}): Promise<CaptureSite> {
+  const view = mkdtempSync(join(tmpdir(), 'losat-vpriv-site-'));
+  const paths = new Set<string>();
+  const deploy = (directory: string) => {
+    for (const entry of readdirSync(view)) {
+      const path = join(view, entry);
+      if (lstatSync(path).isDirectory()) rmSync(path, { recursive: true });
+      else unlinkSync(path);
+    }
+    for (const entry of readdirSync(directory)) if (entry !== '_headers') symlinkSync(resolve(directory, entry), join(view, entry));
+    writeFileSync(join(view, '_headers'), reportingHeaders(readFileSync(join(directory, '_headers'), 'utf8')));
+    for (const [path, body] of options.extra ?? []) {
+      mkdirSync(dirname(join(view, path)), { recursive: true });
+      writeFileSync(join(view, path), body);
+    }
+    for (const file of siteFiles(directory)) paths.add(file.path);
   };
+  deploy(site);
   const requests: Exchange[] = [];
   let origin = '';
-  const server = createServer((request: IncomingMessage, response: ServerResponse) => {
-    const chunks: Buffer[] = [];
-    request.on('data', (chunk: Buffer) => chunks.push(chunk));
-    request.on('end', () => {
-      requests.push({
-        seenBy: 'server',
-        method: request.method ?? '',
-        url: `${origin}${request.url ?? ''}`,
-        headers: Object.fromEntries(Object.entries(request.headers).map(([name, value]) => [name, [value ?? ''].flat().join(', ')])),
-        body: Buffer.concat(chunks),
-        kind: 'server',
-      });
-      const path = new URL(request.url ?? '/', origin).pathname;
-      const planted = options.extra?.get(path);
-      if (planted !== undefined) {
-        response.writeHead(200, { ...headers, 'Content-Type': planted.type });
-        response.end(planted.body);
-        return;
-      }
-      const file = path === '/' ? 'index.html' : decodeURIComponent(path.slice(1));
-      if (!files.has(path)) {
-        response.writeHead(404, { ...headers, 'Content-Type': 'text/plain' });
-        response.end('not found');
-        return;
-      }
-      response.writeHead(200, { ...headers, 'Content-Type': TYPES[extname(file)] ?? 'application/octet-stream' });
-      response.end(request.method === 'HEAD' ? undefined : readFileSync(join(root, file)));
+  const log = (request: SiteRequest) =>
+    requests.push({
+      seenBy: 'server',
+      method: request.method,
+      url: `${origin}${request.url}`,
+      headers: Object.fromEntries(Object.entries(request.headers).map(([name, value]) => [name, [value ?? ''].flat().join(', ')])),
+      body: request.body,
+      kind: `server ${request.status}`,
     });
-  });
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const server = await startSiteServer({ root: view, onRequest: log });
+  origin = server.origin;
   return {
     origin,
-    files,
     requests,
-    close: () =>
-      new Promise<void>((resolve, reject) => {
-        server.closeAllConnections();
-        server.close((error) => (error ? reject(error) : resolve()));
-      }),
+    paths,
+    deploy,
+    close: async () => {
+      await server.close();
+      rmSync(view, { recursive: true, force: true });
+    },
   };
 }
 
@@ -145,7 +158,7 @@ export class PrivacyCapture {
   readonly notes: PageNote[] = [];
   private readonly pending: Promise<void>[] = [];
 
-  constructor(readonly server: SiteServer) {}
+  constructor(readonly server: CaptureSite) {}
 
   get origin(): string {
     return this.server.origin;
@@ -163,9 +176,11 @@ export class PrivacyCapture {
   }
 
   private async record(request: Request): Promise<void> {
+    // allHeaders() adds what the network stack sends (cookies among them), but never resolves for
+    // some requests that a service worker answers (Chromium); the server logs every header anyway.
     let headers: Record<string, string>;
     try {
-      headers = await request.allHeaders();
+      headers = await Promise.race([request.allHeaders(), new Promise<Record<string, string>>((resolve) => setTimeout(() => resolve(request.headers()), 2000))]);
     } catch {
       headers = request.headers();
     }
@@ -195,7 +210,7 @@ export class PrivacyCapture {
     await this.settle();
     return findings([...this.server.requests, ...this.browser], this.notes, canaryForms(canary), {
       origin: this.origin,
-      files: this.server.files,
+      files: this.server.paths,
       cspReportPath: CSP_REPORT_PATH,
       ...rules,
       extraPaths: new Set([...BROWSER_PATHS, ...(rules.extraPaths ?? [])]),
@@ -256,7 +271,7 @@ export const test = base.extend<{ capture: PrivacyCapture }>({
     await use(page);
   },
   capture: async ({ context }, use, testInfo) => {
-    const server = await startSiteServer();
+    const server = await startCaptureSite();
     const capture = new PrivacyCapture(server);
     await capture.attach(context);
     try {

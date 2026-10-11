@@ -7,10 +7,14 @@
 # the browser self-test; the Cloudflare Pages preview check; docs/losat_web_gui_sessions/session_s16_w7_delivery.md).
 # Copied from docs/evidence/losat_web_w6/run_gate.sh with the same steps and these changes: Node
 # >= 22.18 (build/site-server.ts and build/assemble-site.ts run under Node's TypeScript support);
-# after the engine-build E2E, the site's index and every release manifest are kept in the run, and
-# a release ID of a tree with uncommitted files (`-dirty`) ends the gate; the delivery measurement
-# follows the results measurement; the screen records include the onboarding states (moved into
-# screens.spec.ts); and, for `all`, a dry run of the preview check against the engine-build site.
+# before the first step, the release IDs of this tree are made by build/release.ts's rule, and a
+# change that is not committed in any input of the build (build/inputs.ts: web/app and the files
+# of the repository that the build reads) ends the gate, since its releases would be `-dirty` and
+# no record would name them; the expected IDs go into environment.txt; after the engine-build E2E
+# and after each measurement, the served site's index and every release manifest are kept in the
+# run, and a site of another release ends the gate; the delivery measurement follows the results
+# measurement; the screen records include the onboarding states (moved into screens.spec.ts); and,
+# for `all`, a dry run of the preview check against the engine-build site.
 # It records the environment and the engine build, then runs
 #   V-ABI quick (Node) on the reactors of this commit, npm ci, npm run check, the unit
 #   tests with every case listed (with the reactors: the HSP records against the rows and
@@ -29,10 +33,13 @@
 #   tests/unit/sw-prepare.test.ts and tests/unit/sw-serve.test.ts, the release manager, the pin and
 #   the worker's client, tests/unit/release.test.ts, tests/unit/release-pin.test.ts and
 #   tests/unit/offline-client.test.ts, usage statistics and the /api/visit Function,
-#   tests/unit/analytics.test.ts and tests/unit/visit-function.test.ts, and onboarding and the
+#   tests/unit/analytics.test.ts and tests/unit/visit-function.test.ts, onboarding and the
 #   self-test, tests/unit/onboarding.test.ts, tests/unit/self-test.test.ts and, with the reactors,
-#   tests/unit/self-test-engine.test.ts (the self-test's expected outputs are the engine's); and
-#   the generated verification table, kept in the run record), the NCBI comparison commands of the
+#   tests/unit/self-test-engine.test.ts (the self-test's expected outputs are the engine's), the
+#   same bytes from two builds of the commit, the second from another checkout path,
+#   tests/unit/release-bytes.test.ts, and V-PRIV's scanners (the canaries, the request rules and
+#   TD-11's machine paths), tests/unit/privacy-scan.test.ts; and the generated verification table,
+#   kept in the run record), the NCBI comparison commands of the
 #   reproduction panel run with the native CLI and NCBI BLAST+ 2.17.0 and compared byte for byte
 #   (docs/evidence/losat_web_w6/check_commands.py, unchanged, under the machine-wide oracle lock),
 #   npm run e2e without the engine (FakeEngine build) and with it (every spec, W7's among them:
@@ -47,7 +54,8 @@
 #   candidate tray and W6's files; since W7 each page waits for "Offline ready" first) and of
 #   delivery (tests/e2e/delivery-measure.spec.ts: the first, second and offline visits, the
 #   preparation until "Offline ready", the self-test, and "Try an example" to the first results of
-#   each program) in Chromium, Firefox and WebKit, and the screen records for the visual review
+#   each program) in Chromium, Firefox and WebKit, with the measured site's index and manifests
+#   (under measure/site/ in the run), and the screen records for the visual review
 #   (tests/e2e/screens.spec.ts: W6's states 01 to 40, which wait for "Offline ready", and W7's 41
 #   to 56) in the three browsers.
 # Logs and records go to docs/evidence/losat_web_w7/run-<UTC>/, which is not changed later;
@@ -114,6 +122,29 @@ unset LOSAT_WEB_REACTORS LOSAT_WEB_NATIVE LOSAT_WEB_EVIDENCE LOSAT_WEB_MEASURE L
 # and without the measurement endpoint (analytics.spec.ts serves its own site index).
 unset LOSAT_WEB_RELEASE_ID LOSAT_WEB_ANALYTICS_ENDPOINT
 
+# The release IDs of this tree, before any step: build/release.ts's rule over the inputs that
+# build/inputs.ts lists. A change that is not committed in any of them would make every build of
+# the gate a `-dirty` release that no record names, so it ends the gate here.
+release_ids="$(cd "$app" && node --input-type=module -e '
+import { BUILD_INPUTS } from "./build/inputs.ts";
+import { findReactors } from "./build/reactors.ts";
+import { releaseId } from "./build/release.ts";
+console.log(`fake ${releaseId(undefined, { env: {} })}`);
+console.log(`engine ${releaseId(findReactors({ LOSAT_WEB_REACTORS: process.argv[1] }), { env: {} })}`);
+console.log(`inputs ${BUILD_INPUTS.join(" ")}`);
+' "$reactors")"
+fake_release="$(sed -n 's/^fake //p' <<< "$release_ids")"
+engine_release="$(sed -n 's/^engine //p' <<< "$release_ids")"
+read -r -a build_inputs <<< "$(sed -n 's/^inputs //p' <<< "$release_ids")"
+uncommitted="$(git -C "$repo" status --porcelain -- "${build_inputs[@]}")"
+case "$fake_release $engine_release" in
+  *-dirty*)
+    echo "the release IDs of this tree are $fake_release and $engine_release: commit the changes in the build's inputs (build/inputs.ts) and run the gate again" >&2
+    [ -z "$uncommitted" ] || echo "$uncommitted" >&2
+    exit 1
+    ;;
+esac
+
 wait_for_vperf() {
   until [ ! -e "$lock" ]; do
     echo "waiting: V-PERF is being measured ($lock)" >&2
@@ -138,7 +169,9 @@ mkdir "$run"
   echo "steps: $steps"
   echo "commit: $(git -C "$repo" rev-parse HEAD)"
   echo "branch: $(git -C "$repo" branch --show-current)"
-  echo "uncommitted files under web/app: $(git -C "$repo" status --porcelain -- web/app | wc -l)"
+  echo "uncommitted files in the build's inputs (build/inputs.ts: ${build_inputs[*]}): $(grep -c . <<< "$uncommitted" || true)"
+  echo "release (FakeEngine build): $fake_release"
+  echo "release (engine build): $engine_release"
   echo "node: $(node --version)"
   echo "npm: $(npm --version)"
   echo "playwright: $(cd "$app" && npx playwright --version 2>/dev/null || echo unknown)"
@@ -155,6 +188,25 @@ mkdir "$run"
   fi
 } > "$run/environment.txt"
 cp "$reactors/artifacts.json" "$run/reactors-artifacts.json"
+
+# Keeps the index of the site in dist/ (built by Playwright's web server for the step that just ran)
+# and the manifest of each of its releases, as the site serves them, under $1; a site whose release
+# is not this tree's engine build (checked before the first step) ends the gate.
+keep_site() {
+  local manifest release latest
+  mkdir -p "$1/r"
+  cp dist/releases.json "$1/releases.json"
+  for manifest in dist/r/*/release-manifest.json; do
+    release="$(basename "$(dirname "$manifest")")"
+    mkdir -p "$1/r/$release"
+    cp "$manifest" "$1/r/$release/release-manifest.json"
+  done
+  latest="$(node -e 'console.log(JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).latest)' "$1/releases.json")"
+  if [ "$latest" != "$engine_release" ]; then
+    echo "the site in dist/ is release $latest, not $engine_release (this tree's engine build): did a build input change during the gate?" >&2
+    exit 1
+  fi
+}
 
 if [ "$steps" = all ]; then
   wait_for_vperf
@@ -192,24 +244,8 @@ if [ "$steps" != measure ]; then
   LOSAT_WEB_REACTORS="$reactors" LOSAT_WEB_NATIVE="$native" LOSAT_WEB_EVIDENCE="$run/records" \
     npm run e2e -- --reporter=list > "$run/npm-e2e-engine.log" 2>&1
 
-  # The site that the engine-build E2E served (dist/, built by Playwright's web server): its index
-  # and the manifest of each release, as the site serves them. A release ID of a tree with
-  # uncommitted files under web/app ends the gate: the records would not name a commit.
-  mkdir -p "$run/site/r"
-  cp dist/releases.json "$run/site/releases.json"
-  for manifest in dist/r/*/release-manifest.json; do
-    release="$(basename "$(dirname "$manifest")")"
-    mkdir "$run/site/r/$release"
-    cp "$manifest" "$run/site/r/$release/release-manifest.json"
-  done
-  latest="$(node -e 'console.log(JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).latest)' "$run/site/releases.json")"
-  echo "release: $latest" >> "$run/environment.txt"
-  case "$latest" in
-    *-dirty)
-      echo "the release ID $latest is a tree's with uncommitted files under web/app: commit them and run the gate again" >&2
-      exit 1
-      ;;
-  esac
+  # The site that the engine-build E2E served: its index and the manifest of each release.
+  keep_site "$run/site"
 fi
 if [ "$steps" = all ]; then
   # A dry run of the preview check (S16 item 7) against the same site served as Cloudflare Pages
@@ -243,6 +279,8 @@ if [ "$steps" != after-review ]; then
       npx playwright test tests/e2e/results-measure.spec.ts --project="$project" --workers=1 --reporter=list \
       > "$run/measure/$project.log" 2>&1
   done
+  # The measured site (both measurements serve the engine build in dist/): its index and manifests.
+  keep_site "$run/measure/site"
   # Delivery (S16): visits, the preparation until "Offline ready", the self-test and the examples.
   for project in chromium firefox webkit; do
     wait_for_vperf
@@ -250,6 +288,7 @@ if [ "$steps" != after-review ]; then
       npx playwright test tests/e2e/delivery-measure.spec.ts --project="$project" --workers=1 --reporter=list \
       > "$run/measure/delivery-$project.log" 2>&1
   done
+  keep_site "$run/measure/site"
 fi
 
 if [ "$steps" != measure ]; then

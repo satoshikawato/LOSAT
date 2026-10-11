@@ -2,7 +2,7 @@ const { Worker, isMainThread, parentPort, workerData } = require("worker_threads
 const { WASI } = require("wasi");
 const fs = require("fs");
 const { performance } = require("node:perf_hooks");
-const { inspectArtifact } = require("./wasi_artifact");
+const { inspectArtifact, unsignedWasiImports, createSharedMemory } = require("./wasi_artifact");
 // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
 // m_NumThreads = num_threads;
 // Keep the parallel command's memory operations valid across V8 isolates.
@@ -135,7 +135,7 @@ function createImports(wasi, memory, spawnThread, extra) {
     ...extra,
     env: { memory },
     wasi: { "thread-spawn": spawnThread },
-    wasi_snapshot_preview1: wasi.wasiImport,
+    wasi_snapshot_preview1: unsignedWasiImports(wasi.wasiImport),
   };
 }
 
@@ -150,8 +150,11 @@ async function instantiateWithMemory(module, memory, args, spawnThread, provided
 
 async function instantiateMain(module, args, spawnThread, limits, provided) {
   const initial = parsePositiveIntEnv("LOSAT_WASM_MEMORY_INITIAL_PAGES", limits.initial);
-  const maximum = parsePositiveIntEnv("LOSAT_WASM_MEMORY_MAXIMUM_PAGES", limits.maximum);
-  const memory = new WebAssembly.Memory({ initial, maximum, shared: true });
+  // A maximum given in the environment is used as it is, without stepping down.
+  const requested = parsePositiveIntEnv("LOSAT_WASM_MEMORY_MAXIMUM_PAGES", limits.maximum);
+  const { memory, maximum } = createSharedMemory(initial, requested,
+    process.env.LOSAT_WASM_MEMORY_MAXIMUM_PAGES === undefined);
+  debug(`shared memory: initial ${initial} pages, maximum ${maximum} pages (module declares ${limits.maximum})`);
   return { ...await instantiateWithMemory(module, memory, args, spawnThread, provided), memory };
 }
 

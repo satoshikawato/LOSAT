@@ -42,8 +42,12 @@ build-wasi-command-serial = "build --release --bin LOSAT --target wasm32-wasip1 
 [target.wasm32-wasip1]
 rustflags = ["-C", "target-feature=+simd128"]
 
+# Rust's wasm32-wasip1-threads target links with `--max-memory=1073741824` (1 GiB);
+# wasm-ld takes the last `--max-memory`. 4294901760 bytes are 65,535 pages, one page
+# less than wasm32's 4 GiB, so that the byte size of the memory always fits 32 bits.
+# A host may create the shared memory with a smaller maximum (docs/web/abi_v2.md §3).
 [target.wasm32-wasip1-threads]
-rustflags = ["-C", "target-feature=+simd128"]
+rustflags = ["-C", "target-feature=+simd128", "-C", "link-arg=--max-memory=4294901760"]
 
 [target.wasm32-unknown-unknown]
 rustflags = ["-C", "target-feature=+simd128"]

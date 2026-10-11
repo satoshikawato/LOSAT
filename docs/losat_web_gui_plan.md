@@ -78,6 +78,7 @@ LOSAT は、NCBI BLAST+ を純 Rust で再実装したものである。宣言�
 | DW-25 | 2026-10-09 | S14 の前の S13b（W4b）：画面を NCBI BLAST Web に寄せる | 保守者の指示：S14 の前にアプリ側の S13b（W4b）で画面を NCBI BLAST Web の配置・節の順・言葉に寄せる。ブランドは写さない。値はエンジンが書いたまま示す。Dotplot は `blast2dotplot.py` を参考に、より軽快でクリックでポップアップするものでもよい。指示書は [S13b](losat_web_gui_sessions/session_s13b_w4b_ncbi_style_ui.md)。S13b は 2026-10-10 に完了（[ゲート記録](evidence/losat_web_w4b/README.md)）。その判断 1〜88 は、W4 の判断と同じく推奨の案で進め（Owner-delegated、2026-09-29 の常設の指示、2026-10-07 に再掲）、保守者が 2026-10-10 に承認した（DW-27） |
 | DW-26 | 2026-10-10 | 検索のボタンの名前 | 保守者の指示：NCBI の配置に従いつつ、検索のボタンは「Run LOSAT」とし、「BLAST」とは書かない（S13b で反映） |
 | DW-27 | 2026-10-10 | SFd の一括の問い | 保守者が全て推奨の案で決めた（「あなたの推奨案でいきましょう」）。(1) `docs/evidence/losat_web_e2h/AUTHORITY.md` §K の 14 件は各行の推奨の規則のとおり（再現：2〜7・9・11 の切り詰め、明示的な拒否：1・8・11 の巨大な gap・12、Linux の意味：10、LOSAT は普通に走る：13・14。`PD-LOSAT-NCBI-DEFECTS` 1.4）。(2) BLASTP の outfmt 0 の句読点だけの subject の題（NCBI は SIGSEGV）は承認済みの例外 2 に含める：BLASTN・TBLASTX・TBLASTN と同じく掃除を文字列の終わりで止める（実装は SFe。それまでは明示的な拒否）。(3) ABI v1 の出力の変化と v1 の新しい拒否（E2h のゲート記録の判断 12・26・28 の (4)・30。S11 と同じ出力だった hit の無い record の 74 run が拒否に変わることを含む）は TD-1 の範囲として受け入れる。(4) S13 の判断 1〜3（集約列の採用とエンジンへの移植、BLASTN の HSP の鎖を ABI に足す、検証バッジの規則。[W4 のゲート記録](evidence/losat_web_w4/README.md)）を承認する（S13+ は SF の後に進める）。(5) S13b の判断 1〜88（[W4b のゲート記録](evidence/losat_web_w4b/README.md)）を承認する |
+| DW-28 | 2026-10-12 | スレッド版の共有メモリの 1 GiB の上限を外す | 保守者の決定（「これは意味わかんないね。取っ払おうぜそんな制限」）：スレッド版の共有メモリの最大値を 1 GiB（16384 ページ）に据え置く判断（改訂前の TD-7）と、「実測で 1 GiB が足りないときだけ拡大する」という §2.3 のトリガーをやめ、最大値を wasm32 の上限まで上げる（TD-7、G12、§2.3、§5.5、§8 を改訂した）。4 GiB を超える 64 ビットの Wasm（Memory64）は保守者の依頼で調査だけを行い、当面は見送る（条件は §2.3。記録：`docs/evidence/wasm_memory_max_20261012/README.md`） |
 | DW-12 | 2026-09-30 | NCBI の経路の棚卸しと一括の transpile | エンジンの NCBI との一致は、独立監査の指摘を 1 つずつ直すのでなく、アプリが出すオプションの範囲で NCBI の実行経路に現れる関数を program ごとに棚卸しし（忠実な移植・差のある移植・未移植・明示的な拒否）、未移植と差のある移植を NCBI の関数ごとに簡略化せずに transpile してから、棚卸しの表を基準に監査する。NCBI の C++ の層（object manager、ASN.1、`CFastaReader` など）は経路にある関数だけを移植する。LOSAT が速度のために NCBI と違う実装にしている箇所（詰めた配列の走査、並列化など）は、出力が同じなら、新しく移植する部分にも同じ方式を使ってよい（S07+ の 16 回の監査の後の、保守者の指示） |
 | DW-12 | 2026-09-29 | `PD-LOSAT-WEB-APP-BOUNDARY` を承認する | 状態を Accepted（版 1.0）にした。S02 の入口の条件を満たす |
 
@@ -93,7 +94,7 @@ LOSAT は、NCBI BLAST+ を純 Rust で再実装したものである。宣言�
 | TD-4 | 1 回の検索から複数の形式を出す。形式ごとに解決した検索オプションが食い違う場合は、`run_local` が明示的なエラーで止める（形式ごとに別に検索する仕組みは作らない） | NCBI では hitlist の大きさが出力形式によって決まる場合がある（`blast_args.cpp:2894-2978`）。ただしそれは `-num_descriptions` / `-num_alignments` を使う場合で、LOSAT はどの program もこれを受け付けない（TBLASTN と BLASTX は明示的に拒否し（`cli.rs:192-193`、`:245-246`）、ほかの program は定義していない）ので、今は食い違いが起きない。起きたときの扱いは §2.3 のトリガーにした |
 | TD-5 | 検証の期待値は、表の升目（program × 形式 × プロファイル × 実行経路）ごとに出どころを決める。認証済みの凍結バイトがあればそれを使い、無ければ同じ commit のネイティブ CLI を単一形式で実行した出力を使う。後者は「native-equivalent, not NCBI-certified」と表示する | 既存の manifest は 1 件につき 1 形式しか固定していない（例：`blastp_v010_parity_manifest.tsv` と `tblastx_v010_parity_manifest.tsv` はすべて outfmt 6） |
 | TD-6 | アダプタは別の crate（`web/adapter/`）にし、reactor の起動は `LOSAT/build.rs` のものを使う（S05 で確かめた方法：その build script の `rustc-cdylib-link-arg` は依存先の cdylib にも渡るので、アダプタは build script を持たない。パスで共有すると `_initialize` が二重に定義される）。`[profile.release]` と Wasm の rustflags は写しを持ち、ビルドの同一性の検査（`web/adapter/tools/check_build_identity.py`：依存の版、profile、rustflags、アダプタに build script が無いこと）で、ずれを機械的に検出する | 規約の範囲を分けたまま（DW-1）、認証済みの command-WASI と同じ条件でビルドする。別の Cargo root は、LOSAT の profile、`LOSAT/.cargo/config.toml` の `+simd128`、`Cargo.lock` を引き継がない |
-| TD-7 | スレッド版の共有メモリの最大値は、認証済みの threaded ビルドと同じ（16384 ページ、1 GiB）にする。host が 2 GiB や 4 GiB を試すことはしない | 取り込むメモリの最大値は、モジュールが宣言した最大値を超えられない。最大値を上げるには link の引数を変える必要があり、TD-6 の同一性とぶつかる。上げる条件は §2.3 に置いた |
+| TD-7 | スレッド版の共有メモリの最大値は 65,535 ページ（4 GiB − 64 KiB）と宣言する（DW-28。2026-10-12 に改訂。それまでは 16384 ページ、1 GiB）。link の引数 `--max-memory=4294901760` を、`LOSAT/.cargo/config.toml` とその写し `web/adapter/.cargo/config.toml` の `wasm32-wasip1-threads` の rustflags に置く（TD-6 の同一性の検査が 2 つを比べ、成果物の JSON の `target_rustflags` と `memory.maximum` に記録される）。host は宣言された最大値で共有メモリを作り、確保できないときは 49,152・32,768・24,576・16,384 ページの順に下げる。各候補は初期サイズより 1 ページ少なく作って 1 ページ伸ばし、作成と伸長の両方が通った最初の候補を使う。16,384 ページ（改訂前の最大値）も確保できないときは、改訂前と同じく、アプリは serial の module で実行し（§4.7）、Node の host は失敗にする。JavaScript の host は、Wasm から受け取るポインタと長さを符号なし（`>>> 0`）で扱う（`docs/web/abi_v2.md` §3・§6） | 1 GiB は Rust の `wasm32-wasip1-threads` ターゲットの既定の link 引数（`--max-memory=1073741824`）で、技術的な上限ではなかった。取り込むメモリの最大値はモジュールが宣言した最大値を超えられないので、上げるには link の引数を変える（wasm-ld は最後の `--max-memory` を使う）。変更の前後で threaded の reactor の差は import 節の最大値の 3 バイトだけで、code と data の節は同じ（`docs/evidence/wasm_memory_max_20261012/README.md`）。65,536 ページにしない理由：メモリのバイト数が 32 ビットに収まらなくなり（wasi-libc の `sbrk(0)` と dlmalloc の区画の終端が 0 に折り返す）、実測でも最後の 1 ページは割り当てに使われなかった。1 GiB より下げない理由：serial の module のメモリは前もって予約されず端末が許すところまで伸びるので、小さい最大値の threaded よりも大きな検索を終えられることがある（改訂前の動作を悪くしない）。段階的に下げる理由：共有メモリは作るときに最大値の分のアドレス空間を予約する。JavaScriptCore は予約できないと `RangeError` を投げ、guard 領域を使わない V8（Android、アドレス空間の制限）は黙って小さい予約に下げ、最後は初期サイズだけになって伸ばせない。符号なしで扱う理由：2 GiB 以上のポインタは JavaScript に負の数で届き、`node:wasi` は `EINVAL` を返し、ブラウザの WASI shim は範囲外の例外か別の場所への書き込みになる（serial の module は最大値を宣言しないので、この問題は上限を外す前からあった） |
 | TD-8 | 索引用の FASTA の走査（`scan`）は、アプリの抽出のためだけの例外として置く。検索に渡す入力は、各 program の解析器が読む。`scan` は解析器の種類（`bio::io::fasta` 型か、BLASTX の NCBI 型か）を受け取り、その解析器とだけ性質試験で照合する。食い違いの最終的な判定は、`register` の時点のエンジンの解析結果との照合で行う | BLASTX の解析器は NCBI の CFastaReader に従い、`;` などで始まる行を読み飛ばす（`LOSAT/src/algorithm/blastx/input.rs`）。`bio` はそうしない。1 つの走査で両方と一致させることはできない |
 | TD-9 | 既存の不具合のうち、BLASTP と TBLASTN の outfmt 0 の座標の桁数（NCBI は 0 始まりの最大値、LOSAT は 1 始まりの最大値から求める）は、S07 で NCBI の規則の 1 つの関数にまとめて直す。BLASTX の関数は変えない（DW-10） | BLASTN の outfmt 0 も同じ規則を使うので、共有の部品として直すのが最も小さい。境界（最大の座標が 10 の累乗）でだけ出力が変わり、変わる凍結出力は NCBI と一致することを示せる（S06 の `docs/evidence/losat_web_e2a/AUTHORITY.md` §D.1） |
 | TD-10 | BLASTN の得点のオプション（既定以外の reward / penalty / gap）は、S07+ で NCBI と同じにするか、明示的に拒否する。アプリが認証されていない BLASTN の得点を出さないよう、S12 の前に終える | S06 で、NCBI が拒否する 34 の組合せを LOSAT が実行し、NCBI が受け付ける 17 の組合せで結果が違うことが分かった（`AUTHORITY.md` §D.5）。outfmt 0 の移植（S07）とは原因が別なので、段階を分ける |
@@ -122,7 +123,7 @@ LOSAT は、NCBI BLAST+ を純 Rust で再実装したものである。宣言�
 | G9 | 領域の指定（`REQ-06`） | BLASTN・BLASTP・TBLASTX は `-query_loc` / `-subject_loc` を定義しておらず、CLI が未知の引数として拒否する。TBLASTN は `-query_loc` を未移植の名前として拒否し（`LOSAT/src/cli.rs:187-193`）、`-subject_loc` も拒否する（`LOSAT/src/algorithm/tblastn/args.rs:364`）。BLASTX は v0.2.0 の範囲外として両方を拒否する（`cli.rs:238-246`） | 4 program へ移植する（S11）。BLASTX は SX で移植する（DW-11） |
 | G10 | 引数（設計書 §11.2） | BLASTX の Web 入口は、CLI と同じ clap パーサに argv を渡す（`LOSAT/src/algorithm/blastx/web.rs` の `parse_args`）。BLASTN・BLASTP・TBLASTX の v1 は、手書きの小さな引数パーサと、それ自身の既定値を持つ（`web_api.rs:227-610`）。TBLASTN は Web に公開されていない。TBLASTX の v1 は outfmt を検証せず常に 6 を出していた（S01 で修正済み） | v2 は argv と clap で統一する。v1 のパーサは凍結する（TD-1） |
 | G11 | ブラウザでの並列実行（設計書 §9.1） | rayon のプールは検索ごとに作られ、N-1 本を thread-spawn する（`LOSAT/src/utils/threading.rs:93`）。serial のビルドは `-num_threads` が 1 を超えると拒否する（同 `:64-77`）。ブラウザ用の host は gbdraw にしか無い | スレッド版 reactor 用のブラウザ host を新設する（S09）。serial に切り替えるときは argv の `-num_threads` を 1 にする（§4.7） |
-| G12 | メモリ（設計書 §9.2） | スレッド版の共有メモリは最大 16384 ページ（1 GiB）。reactor を繰り返し呼ぶとメモリが増える問題が未解決（`docs/wasm_reactor_memory_followup_20260914.md`） | 最大値は据え置き（TD-7）、実測する。instance を作り直す方針を持つ（§5.5） |
+| G12 | メモリ（設計書 §9.2） | スレッド版の共有メモリの最大値は 1 GiB（16384 ページ）だった。これは Rust のターゲットの既定の link 引数だった。reactor を繰り返し呼ぶとメモリが増える問題が未解決（`docs/wasm_reactor_memory_followup_20260914.md`） | 最大値を 65,535 ページに上げた（DW-28、TD-7）。端末ごとに確保できた最大値を実測して記録する。instance を作り直す方針を持つ（§5.5） |
 | G13 | 検証の表示（`REQ-18`） | v0.2.0 のリリース判定では browser/reactor ABI は認証の範囲外（`docs/release/v0.2.0.md`）。既存の manifest は 1 件につき 1 形式だけを固定している | 升目ごとに期待値の出どころを決める（TD-5、§6） |
 | G14 | フロントエンド | リポジトリにフロントエンドもブラウザの CI も無かった | S01 で `web/app` と `.github/workflows/web.yml` を新設した |
 
@@ -143,7 +144,7 @@ LOSAT は、NCBI BLAST+ を純 Rust で再実装したものである。宣言�
 | **D** 依存性逆転 | アプリ層は上の interface にだけ依存し、実装は起動時に組み立てる。試験では FakeEngine などを差し込む。これにより、エンジン側が出来る前からアプリ側を進められる |
 | **KISS** | 物理構成は UI・Data worker・Engine worker（＋スレッド用 worker）の 3 種類だけ。検索条件の表現は LOSAT CLI の argv ひとつ。取消は Worker の終了だけ。進捗は段階と経過時間だけ |
 | **DRY** | ① program ごとに核の入口は `run_local` の 1 本（TD-2）。② argv ひとつで、実行・入力検証・CLI コマンドの表示・セッションをまかなう。③ 既定値・選択肢・help は clap の定義から取る。④ 検索に渡す FASTA は各 program のエンジンの解析器が読む（索引用の走査は TD-8 の例外）。⑤ NCBI 形式の数値整形と詳細アラインメントは、既存の formatter の出力をそのまま使い、TS で作り直さない。⑥ 応答ヘッダーは `web/app/public/_headers` の 1 か所で定義する |
-| **YAGNI** | 結果アーカイブ形式、協調取消、部分読み出し、前処理キャッシュ、形式ごとの別の検索、共有メモリの拡大、複数の計算プール、query ごとの途中経過は作らない。そのうち前の 6 つは §2.3 のトリガーが立ってから入れる |
+| **YAGNI** | 結果アーカイブ形式、協調取消、部分読み出し、前処理キャッシュ、形式ごとの別の検索、複数の計算プール、query ごとの途中経過は作らない。そのうち前の 5 つは §2.3 のトリガーが立ってから入れる（共有メモリの拡大は DW-28 で行った） |
 
 **`web/` の中の線引き**：BLAST が定義する値（スコア、E 値、identity、被覆率、NCBI 形式の数値やアラインメントの整形）を計算・整形するコードは `web/` に置かない。必要なものはエンジンから受け取る。こうすると、NCBI 参照コメントの要らないアプリのコードと、NCBI が権威となるコードとが混ざらない。
 
@@ -163,7 +164,7 @@ LOSAT は、NCBI BLAST+ を純 Rust で再実装したものである。宣言�
 |---|---|---|
 | 共有メモリ上の協調取消フラグ（設計書 §9.4） | Engine worker とスレッド用 worker をすべて終了する。Data worker の保持物は残す | 取消の後の再準備（instance の生成と Subject の再登録）の実測時間が、保守者の決める閾値を超えたとき。そのときは NCBI の `TInterruptFnPtr` を移植する（§4.9）。S09 の実測：取消そのものは 0〜1 ms、取消の後の再準備は最大 0.61 s（Firefox、4.6 Mb の Subject と 5.5 Mb の query）、Chromium と WebKit は 0.14 s 以下で、Subject の長さにほぼ比例する。閾値は 1 秒（DW-22）：公開する対応規模の最大の入力で、取消の後の再準備が 1 秒を超えたとき（S17 で測り直す） |
 | SequenceProvider、部分読み出し、巨大な単一レコードへの範囲供給（設計書 §6.3、§8.2） | 選択したレコードの原バイトを、wasm メモリへまとめて渡す。扱える規模の上限は実測して公開する | 目標とするデータ規模が、実測したメモリ上限を超えるとき |
-| 共有メモリの最大値の拡大 | 1 GiB のまま（TD-7） | 目標とする入力の実測で 1 GiB が足りないとき。そのときは `--max-memory` だけを link の引数の差として認め、成果物の JSON に記録する |
+| 共有メモリの最大値の拡大 | wasm32 の上限まで上げた：65,535 ページ、4 GiB − 64 KiB（DW-28、TD-7） | 4 GiB を超える拡大（64 ビットの Wasm、Memory64）は、Safari の安定版が Memory64 を出し、かつ Rust に wasm64 でスレッドを使える経路（`wasm64-unknown-emscripten`、または wasm-bindgen の threads の memory64 対応）ができたときに見直す。それまでは、大きなデータを linear memory の外に置いて分けて読む（調査：`docs/evidence/wasm_memory_max_20261012/memory64_study.md`） |
 | PreparedSubject（エンコード・翻訳のキャッシュ）（設計書 §5、§8.1） | 解析済みのレコードと warm な instance を保持する（§4.6 の R1） | DW-8：ブラウザでの実測で、前処理が warm 実行時間の 20% 以上を占めた program |
 | 形式ごとに解決した検索オプションが違う場合の、形式ごとの別の検索 | `run_local` が明示的なエラーで止める（TD-4） | いずれかの program が `-num_descriptions` / `-num_alignments` を移植したとき |
 | 構造化バッチ、結果アーカイブからの再整形（設計書 §10.1） | 実行の完了時に、その program が対応する形式と構造化レコードを同時に作り、保存する | 生成していない形式（例：別のカスタム列）を後から出す要求が確定したとき |
@@ -388,7 +389,7 @@ Combined は、複数ファイルのレコードをつないだ 1 回の実行�
 - 取消と確定の順序：実行は `Finalizing` に入るまで取消せる。`Finalizing` の後の取消は受け付けず、その実行は完了する（S01 で実装）。
 - 段階のイベントは、実行中で取消されていない実行のものだけを受け付ける。S09 で Worker を作り直すようになったら、イベントに `runtimeGeneration` を付け、古い世代のものを捨てる。
 - Auto のスレッド数（S09 で決めた）：入力（query と subject の FASTA）が 20,000 バイト未満なら serial、それ以上なら論理プロセッサの半分（最大 4）。手動の指定はそのまま使う（`src/infra/engine-worker/policy.ts`）。
-- instance の作り直し（S09 で決めた）：検索の後の linear memory が 512 MiB（threaded の最大値の半分）以上なら作り直す。実行回数では作り直さない（G12 の対策。linear memory は最初の 1〜3 回の検索で水準に達し、増え続けなかった）。
+- instance の作り直し（S09 で決めた）：検索の後の linear memory が 512 MiB 以上なら作り直す（S09 の時点の threaded の最大値 1 GiB の半分。最大値を上げた後も 512 MiB のままにする：linear memory は縮まないので、大きな検索の後のメモリをブラウザに返すための値である）。実行回数では作り直さない（G12 の対策。linear memory は最初の 1〜3 回の検索で水準に達し、増え続けなかった）。
 - 設計書 §9.4 の Wake Lock の選択、終了前の注意、スリープやバックグラウンドからの復帰時の状態確認（S12、`REQ-22`）：Wake Lock は利用者が選び、Run が実行中か待っている間、ページが見えている間だけ持つ。Run が実行中か待っている間は離れる前に注意する。Run があるまま 1 秒以上隠れたページが戻ると、隠れていた時間、Run ごとの前と今の状態、Data worker の応答を示す。タブを閉じても検索が続くとは言わない。
 
 ### 5.6 保存層と寿命
@@ -512,7 +513,7 @@ NCBI BLAST+（oracle） ─[既存の認証]─► ネイティブ LOSAT の凍�
 | Chromium での共有メモリの境界の問題（Node には `LOSAT/tests/wasi_shared_memory.js` という回避策がある） | threaded の経路 | S09 で判定した：Chromium 149 で起きる（60 回に 1〜2 回）。Node と同じ guard をビルドの時に threaded の module にかける（`build/reactors.ts`） |
 | 304（条件付きの要求への応答）に COOP / COEP / CORP が付かない | WebKit が、作り直す Engine worker の読み込みを拒否する（取消の後の検索が失敗する） | 開発とプレビューのサーバーは、すべての応答に付ける（S12）。本番の Cloudflare は S16 で確かめる |
 | reactor を繰り返し呼ぶとメモリが増える | 長時間の作業 | instance を作り直す方針。メモリの推移を RunRecord に記録する |
-| メモリの上限（1 GiB、端末、モバイル） | 扱える規模 | 実測して上限を公開する。上限を超えたら理由を示して失敗にする。拡大は §2.3 |
+| メモリの上限（wasm32 の 4 GiB、端末、モバイル） | 扱える規模 | host は宣言された最大値（65,535 ページ）から段階的に下げて共有メモリを確保する（TD-7）。確保できた最大値を記録し、実測して上限を公開する。上限を超えたら理由を示して失敗にする。iOS と Android の実機で確保できる大きさは未確認（`docs/evidence/wasm_memory_max_20261012/README.md`）。4 GiB を超える拡大は §2.3 |
 | WebKit での OPFS の同期ハンドルと SAB の対応の差 | 機能の経路 | 機能を実際に確かめて経路を選ぶ。Memory / serial に切り替える |
 | アダプタのビルドが認証済みの command-WASI とずれる | 性能と来歴 | TD-6 の同一性の検査 |
 | `scan` とエンジンの解析器の食い違い | 抽出 | TD-8 の性質試験と、`register` の時点での照合 |

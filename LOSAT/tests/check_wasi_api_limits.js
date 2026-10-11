@@ -2,7 +2,7 @@
 const fs = require("node:fs");
 const assert = require("node:assert/strict");
 const { WASI } = require("node:wasi");
-const { prepareArtifact } = require("./wasi_artifact");
+const { prepareArtifact, unsignedWasiImports } = require("./wasi_artifact");
 const { createThreadHost } = require("./wasi_thread_host");
 const { runPair } = require("./check_wasi_reactor");
 
@@ -19,7 +19,7 @@ const { runPair } = require("./check_wasi_reactor");
     // Reuse the validated module; reactor initialization and ownership are unchanged.
     const bytes=fs.readFileSync(artifact), {module}=prepareArtifact(bytes,kind);
     const wasi=new WASI({version:"preview1",env:process.env,preopens:{"/":"/"},returnOnExit:true});
-    const instance=await WebAssembly.instantiate(module,{wasi_snapshot_preview1:wasi.wasiImport});
+    const instance=await WebAssembly.instantiate(module,{wasi_snapshot_preview1:unsignedWasiImports(wasi.wasiImport)});
     wasi.initialize(instance);
     host={instance,memory:instance.exports.memory,events:[],waitForWorkers:async()=>{},close:async()=>{}};
   } else host=await createThreadHost(artifact,kind);

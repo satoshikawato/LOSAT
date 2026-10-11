@@ -23,3 +23,15 @@
   color: #ffffff;
   cursor: pointer;
 }
+
+/* The boot page's choices: "Use release ..." first, "Try again" (a reload) last and plain. */
+#boot .boot-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+#boot button.secondary {
+  background: #ffffff;
+  color: #1f5fbf;
+}

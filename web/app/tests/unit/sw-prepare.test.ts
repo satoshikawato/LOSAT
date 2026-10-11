@@ -191,28 +191,28 @@ describe('preparing a release', () => {
     [
       'a file with other bytes of the same size (wrong hash)',
       (s) => s.served.set('/r/a/engine/serial.wasm', { body: new Uint8Array(4096) }),
-      /engine\/serial\.wasm: its SHA-256 is not the one that the list gives/,
+      /^a file did not match its checksum in the release's file list \(engine\/serial\.wasm\)$/,
     ],
-    ['a file of another size', (s) => s.served.set('/r/a/assets/index-1.js', { body: bytesOf('short') }), /assets\/index-1\.js: 5 bytes, not the 19/],
+    ['a file of another size', (s) => s.served.set('/r/a/assets/index-1.js', { body: bytesOf('short') }), /^a file had 5 bytes, not the 19 that the release's file list gives \(assets\/index-1\.js\)$/],
     [
       'a redirected response',
       (s) => s.served.set('/r/a/assets/index-1.js', { body: s.assets['assets/index-1.js']!, redirected: true }),
-      /redirected/,
+      /^the site redirected the request for a file \(assets\/index-1\.js\)$/,
     ],
-    ['a missing file (404)', (s) => s.served.delete('/r/a/engine/serial.wasm'), /engine\/serial\.wasm: the server answered 404/],
+    ['a missing file (404)', (s) => s.served.delete('/r/a/engine/serial.wasm'), /^the site answered 404 for a file \(engine\/serial\.wasm\)$/],
     [
       'a download cut in the middle',
       (s) => s.served.set('/r/a/engine/serial.wasm', { body: s.assets['engine/serial.wasm']!, cutAfter: 100 }),
-      /engine\/serial\.wasm: the download failed \(network error: connection reset\)/,
+      /^a file could not be downloaded \(engine\/serial\.wasm: network error: connection reset\)$/,
     ],
-    ['a shell file that does not match', (s) => s.served.set('/boot.js', { body: bytesOf('other();') }), /\/boot\.js: 8 bytes, not the 7/],
-    ['a missing release manifest', (s) => s.served.delete('/r/a/release-manifest.json'), /the release manifest: the server answered 404/],
+    ['a shell file that does not match', (s) => s.served.set('/boot.js', { body: bytesOf('other();') }), /^a file had 8 bytes, not the 7 that the site's list of releases gives \(\/boot\.js\)$/],
+    ['a missing release manifest', (s) => s.served.delete('/r/a/release-manifest.json'), /^the site answered 404 for the release's file list$/],
     [
       'a manifest of another release',
       (s) => s.served.set('/r/a/release-manifest.json', { body: bytesOf(JSON.stringify({ ...s.manifest, release: 'b' })) }),
-      /names another release/,
+      /^the release's file list is not valid \(the release manifest names another release\)$/,
     ],
-    ['an unreadable site index', (s) => s.served.set('/releases.json', { body: bytesOf('<html>') }), /the site index is not valid/],
+    ['an unreadable site index', (s) => s.served.set('/releases.json', { body: bytesOf('<html>') }), /^the site's list of releases is not valid \(/],
   ];
 
   it.each(failures)('stores nothing after %s, and says why', async (_, change, reason) => {
@@ -254,7 +254,7 @@ describe('preparing a release', () => {
     s.served.set('/r/a/engine/serial.wasm', { body: new Uint8Array(1), hang: true });
     const caches = new FakeCaches();
     const { outcome } = await prepare(s, caches, 'a', { stallMs: 50 });
-    expect(outcome).toEqual({ ok: false, reason: expect.stringMatching(/engine\/serial\.wasm: the download failed \(no file arrived for a while\)/) });
+    expect(outcome).toEqual({ ok: false, reason: expect.stringMatching(/^a file could not be downloaded \(engine\/serial\.wasm: no file arrived for a while\)$/) });
     expect(caches.snapshot()).toEqual({});
   });
 
@@ -316,7 +316,7 @@ describe('preparing a release', () => {
     // Without a stored release, the same failure is a failure.
     const fresh = new FakeCaches();
     const first = await prepare(s, fresh, 'a', { fetch: () => Promise.reject(new TypeError('Failed to fetch')) });
-    expect(first.outcome).toEqual({ ok: false, reason: 'the site index could not be read (Failed to fetch)' });
+    expect(first.outcome).toEqual({ ok: false, reason: "the site's list of releases could not be read (Failed to fetch)" });
     expect(fresh.snapshot()).toEqual({});
   });
 
@@ -325,7 +325,7 @@ describe('preparing a release', () => {
     s.index.shell = s.index.shell.filter((file) => file.path !== '/');
     s.served.set('/releases.json', { body: bytesOf(JSON.stringify(s.index)) });
     const caches = new FakeCaches();
-    expect((await prepare(s, caches)).outcome).toEqual({ ok: false, reason: 'the site index lists no start page' });
+    expect((await prepare(s, caches)).outcome).toEqual({ ok: false, reason: "the site's list of releases names no start page" });
     expect(caches.snapshot()).toEqual({});
   });
 

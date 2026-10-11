@@ -4,7 +4,7 @@ import vue from '@vitejs/plugin-vue';
 import type { Plugin } from 'vite';
 import { siteHeaders } from './build/headers.ts';
 import { findReactors, losatEngine } from './build/reactors.ts';
-import { appBuild, releaseId, sourceState } from './build/release.ts';
+import { appBuild, buildEnvironmentProblem, releaseId, sourceState } from './build/release.ts';
 import { losatSite } from './build/site.ts';
 import { losatVerification } from './build/verification.ts';
 
@@ -49,6 +49,9 @@ function headersOnEveryResponse(): Plugin {
 }
 
 export default defineConfig(({ command }) => {
+  // A release is a production build only (build/release.ts); the development server and Vitest run as they are.
+  const problem = command === 'build' ? buildEnvironmentProblem() : undefined;
+  if (problem !== undefined) throw new Error(problem);
   /**
    * The release ID (build/release.ts): the directory of the build's assets and the ID a browser
    * pins. A build without a commit must be named by LOSAT_WEB_RELEASE_ID; the development

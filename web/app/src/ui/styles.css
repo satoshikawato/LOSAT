@@ -8,6 +8,7 @@
   --accent-bg: #e8f0fc;
   --ok: #1d6b3a;
   --error: #a3161a;
+  --error-bg: #fdf0f0;
   --warn-bg: #fff4d6;
   --warn-fg: #6b4a00;
   font-family: system-ui, sans-serif;
@@ -2389,6 +2390,12 @@ button.link[aria-disabled='true'] {
 
 .update-notice p {
   margin: 4px 0;
+}
+
+/* A failed or refused update is an error, not information: the box takes the error colour too. */
+.update-notice.failure {
+  border-color: var(--error);
+  background: var(--error-bg);
 }
 
 .update-notice ul {

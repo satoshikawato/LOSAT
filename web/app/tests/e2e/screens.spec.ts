@@ -33,16 +33,25 @@
 // 41 to 45 (WP-O, moved here from onboarding.spec.ts) "Getting started" on a first visit, the
 // self-test passed, the question of "Try an example", the example loaded and BLASTX without an
 // example; 46 the header while the release is prepared (one file held back by the test's front
-// server) and 46b when it is ready; 47 the notice of a new release; 48 "Review update" with what a
+// server), 46b when it is ready and 46c when its preparation failed (a connection cut: the
+// header's short status, the reason and "Try again" in the notice under the header; fix round
+// 1); 47 the notice of a new release; 48 "Review update" with what a
 // switch loses (completed runs, a running and a queued run, candidates and a note); 49 the new
 // release downloaded and checked, with "Switch to release ..."; 50 the failed update (a file of the
 // new release damaged); 51 the message in a tab after another tab switched; 52 the consent notice
 // of usage statistics and 53 the footer after "Allow"; 54 the boot page for a pinned release that
 // the site no longer serves; 55 the boot page offline with nothing pinned (the stored boot page:
 // with nothing stored at all the browser has no page to show) and 55b offline with a pinned
-// release that is not stored; 56 the offline status where service workers are blocked. The
-// releases of 47 to 51 and 54 to 55b are built by support/sites.ts (as offline.spec.ts builds
-// V-OFF's) and served behind one origin by support/front-server.ts.
+// release that is not stored, both offering the stored release and "Try again" since fix round
+// 2; 56 the offline status where service workers are blocked. Fix round 2 (screen review 1 L4)
+// added 57 the update's download in progress (one file of the new release held back), 58 the
+// offline status failed on a damaged file (its checksum in the notice), 59 the offline status
+// still waiting for the page to settle (the browser's idle callback held back) and 60 a real first
+// visit on a site that measures usage: "Getting started" open, the consent notice under it. (A
+// changed `sw.js` that waits has nothing of its own on the screen: the worker that runs keeps
+// serving, and 47 to 49 are recorded while one waits.) The releases of 47 to 51, 54 to 55b, 57
+// and 58 are built by support/sites.ts (as offline.spec.ts builds V-OFF's) and served behind one
+// origin by support/front-server.ts.
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -889,8 +898,43 @@ test.describe('delivery', () => {
       await expect(second.getByTestId('release-id')).toHaveText(NEW, { timeout: 60_000 });
       await expect(page.getByTestId('update-other-tab')).toBeVisible();
       await page.getByTestId('update-other-tab').scrollIntoViewIfNeeded();
-      await shoot(page, browserName, size.name, '51-update-switched-in-another-tab');
+      // Since fix round 1 the header says "Offline ready" only while the pin names this tab's release.
+      await shoot(page, browserName, size.name, '51-update-switched-in-another-tab', { offline: 'stored' });
       await second.close();
+    });
+
+    test(`the update's download in progress, at the ${size.name} size`, async ({ page, browserName, request }) => {
+      await page.setViewportSize({ width: size.width, height: size.height });
+      await openStored(page, OLD);
+      front.upstream = origins.both;
+      await page.reload();
+      await expect(page.getByTestId('update-notice')).toHaveAttribute('data-state', 'available', { timeout: 30_000 });
+      // The new release's largest file (the threaded engine's module) is held back, as in 46.
+      const index = (await (await request.get(`${origins.both}/releases.json`)).json()) as { shell: unknown[] };
+      const manifest = (await (await request.get(`${origins.both}/r/${NEW}/release-manifest.json`)).json()) as { assets: { path: string; size: number }[] };
+      const held = [...manifest.assets].sort((a, b) => b.size - a.size)[0]!.path;
+      const total = index.shell.length + manifest.assets.length;
+      const letGo = front.hold(`/r/${NEW}/${held}`);
+      try {
+        await page.getByTestId('update-review').click();
+        await page.getByTestId('update-download').click();
+        await expect(page.getByTestId('update-progress')).toContainText(`${total - 1} of ${total} files`, { timeout: 60_000 });
+        await shoot(page, browserName, size.name, '57-update-downloading');
+      } finally {
+        letGo();
+      }
+      await expect(page.getByTestId('update-downloaded')).toBeVisible({ timeout: 120_000 });
+    });
+
+    test(`offline use failed on a damaged file, at the ${size.name} size`, async ({ page, browserName }) => {
+      await page.setViewportSize({ width: size.width, height: size.height });
+      // A first visit to the deployment whose new release has a damaged file: the page starts
+      // (it does not load that file before a threaded search), the worker's check fails.
+      front.upstream = origins.damaged;
+      await page.goto(`${front.origin}/`);
+      await expect(page.getByTestId('release-id')).toHaveText(NEW);
+      await expect(page.getByTestId('offline-failed')).toContainText('did not match its checksum', { timeout: 120_000 });
+      await shoot(page, browserName, size.name, '58-offline-failed-checksum', { offline: 'failed' });
     });
 
     test(`a failed update, at the ${size.name} size`, async ({ page, browserName }) => {
@@ -951,6 +995,34 @@ for (const size of SIZES) {
     await page.getByTestId('analytics-allow').click();
     await expect(page.getByTestId('analytics-setting')).toHaveAttribute('data-on', 'true');
     await shoot(page, browserName, size.name, '53-analytics-footer-allowed');
+  });
+}
+
+for (const size of SIZES) {
+  test(`the offline status while it waits for the page to settle, at the ${size.name} size`, async ({ page, browserName }) => {
+    await page.setViewportSize({ width: size.width, height: size.height });
+    // The preparation (and the update check) start once the browser says the page is idle: an
+    // idle callback that never comes keeps the status waiting (in WebKit, which has none, too).
+    await page.addInitScript(() => {
+      window.requestIdleCallback = (() => 0) as typeof window.requestIdleCallback;
+    });
+    await page.goto('/');
+    await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', /^(ok|invalid)$/, { timeout: 60_000 });
+    await shoot(page, browserName, size.name, '59-offline-waiting', { offline: 'waiting' });
+  });
+
+  test(`a first visit on a site that measures, at the ${size.name} size`, { tag: FIRST_VISIT }, async ({ context, page, browserName }) => {
+    await page.setViewportSize({ width: size.width, height: size.height });
+    await context.route('**/releases.json', async (route) => {
+      const index = (await (await route.fetch()).json()) as Record<string, unknown>;
+      await route.fulfill({ json: { ...index, analytics: { endpoint: '/api/visit' } } });
+    });
+    await context.route('**/api/visit', (route) => route.fulfill({ status: 204 }));
+    await page.goto('/');
+    await expect(page.getByTestId('getting-started')).toBeVisible();
+    await expect(page.getByTestId('analytics-consent')).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', /^(ok|invalid)$/, { timeout: 60_000 });
+    await shoot(page, browserName, size.name, '60-first-visit-measuring-site');
   });
 }
 

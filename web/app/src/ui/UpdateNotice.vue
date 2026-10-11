@@ -3,7 +3,8 @@
 // reviews what a reload does to this tab's work -> the release is downloaded and checked ->
 // the screen says again what the reload does, counted now -> the user switches, and the page
 // reloads. Nothing changes before the user chooses, and a failure leaves this tab on its
-// release. Release IDs come from the site and are shown as text.
+// release; the notice then takes the error style (FAILURES). Release IDs come from the site and
+// are shown as text.
 import { computed } from 'vue';
 import type { RunView } from '../application/coordinator';
 import { switchImpact, type ReleaseManager, type ReleaseState } from '../application/release';
@@ -19,6 +20,8 @@ const props = defineProps<{
 }>();
 const update = computed(() => props.state.update);
 const shown = computed(() => update.value.kind !== 'none' && update.value.kind !== 'dismissed');
+/** The states in which the update failed or was not made: the notice is an error, not information (screen review 1 L5). */
+const FAILURES: ReadonlySet<string> = new Set(['failed', 'removed', 'not-kept']);
 const latest = computed(() => ('latest' in update.value ? update.value.latest : ''));
 /** What a reload of this tab drops (the leave guard covers only runs in progress). */
 const impact = computed(() => switchImpact(props.runs, props.candidates));
@@ -42,7 +45,14 @@ const direct = computed(() => {
       </span>
     </template>
   </p>
-  <section v-if="shown" class="update-notice" aria-label="Update" data-testid="update-notice" :data-state="update.kind">
+  <section
+    v-if="shown"
+    class="update-notice"
+    :class="{ failure: FAILURES.has(update.kind) }"
+    aria-label="Update"
+    data-testid="update-notice"
+    :data-state="update.kind"
+  >
     <template v-if="update.kind === 'available'">
       <p>
         This site now serves LOSAT Web release <strong>{{ latest }}</strong>; this tab uses release {{ state.release }}. Nothing changes
@@ -90,7 +100,8 @@ const direct = computed(() => {
 
     <template v-else-if="update.kind === 'failed'">
       <p class="error" data-testid="update-failed">
-        The update could not be downloaded completely ({{ update.reason }}). LOSAT Web stays on release {{ state.release }}.
+        Release {{ latest }} could not be downloaded and checked: {{ update.reason }}. LOSAT Web stays on release {{ state.release }};
+        nothing was changed.
       </p>
       <div class="update-actions">
         <button type="button" data-testid="update-retry" @click="release.download()">Try again</button>

@@ -5,6 +5,7 @@
 - 作成：2026-10-10（S13b）。採否は保守者の確認待ち（推奨案で進めた。Owner-delegated、[W4b のゲート記録](../evidence/losat_web_w4b/README.md)の判断）。
 - 追記：2026-10-10（S14）。Descriptions の行の印、候補への追加（Descriptions・Alignments・Dot Plot）、候補トレイ（§2「候補（S14）」、§3）。採否は同じく保守者の確認待ち（Owner-delegated、W5 のゲート記録 `docs/evidence/losat_web_w5/README.md` の判断）。
 - 追記：2026-10-10（S15、W6 の WP-H）。結果画面の最初のタブを NCBI の classic（Traditional）結果ページの 1 ページにした（Graphic Summary、その直下に Descriptions、その下に Alignments。§2「タブ」「1 ページの結果（classic）」）。保守者の指示（2026-10-10）「結果画面はClassic版というか、ヒットの座標とスコアの分布がダーッと出る絵が一発で見えるようにしてほしい」「Graphic Summaryの下にDescriptionが直接出てくるやつ。いちいちタブを開かないといけないのはめんどくさい」「全部一斉に開く必要はないんだよ。NCBIも適宜カットしてるでしょ？」による（S15 の DECISIONS 12）。S13b のタブ式の対応（下の「タブ」の履歴）はこれで置き換えた。
+- 追記：2026-10-11（S16、W7 の修正 2 回目、画面レビュー 1 の I4）。W7 の部品（「Getting started」、「Try an example」、ブラウザの自己テスト、リリースとオフラインの状態、更新の知らせ、利用統計の同意とフッター、起動ページの文言）を §5 に足した。採否は同じく保守者の確認待ち（Owner-delegated、W7 のゲート記録 `docs/evidence/losat_web_w7/README.md` の判断）。
 - 寄せるのは配置・節の順・言葉（見出し、欄の名前、ボタン、タブ、列、凡例）。NCBI のロゴ、NIH / NLM のヘッダーとフッター、「BLAST®」の文字、配色は写さない。LOSAT Web が NCBI のサービスに見えないようにする。
 - 値はエンジンが書いたまま示す。TS で BLAST の値を計算・整形しない（`web/AGENTS.md` 規則 1、[`results_columns.md`](results_columns.md)）。表示の分類（Graphic Summary の得点の階級、ドットプロットの identity の階級）は、エンジンの原値を区切るだけで、値を作らない。
 - 採否の語：**採る**（NCBI と同じ場所・同じ言葉）、**寄せる**（同じ場所に LOSAT の要素を置き、言葉を近づける）、**採らない**（理由を書く）、**エンジン待ち**（S13+（E2j）が値を出すまで出さない）、**後の段階**（その段階の名）。
@@ -208,3 +209,19 @@ LOSAT が足すもの（W4 の判断 18 を保つ）：ズーム（ボタン、+
 - 表：0.875em、見出しは薄い青の面に太字（2 行まで折り返し、数の見出しは右寄せ）、行の境に細い線。リンクは青の下線。
 - 色は LOSAT の配色のまま（ブランドを写さない）。Graphic Summary の凡例とドットプロットの線の色だけは上の約束。
 - S13 の基準を保つ：1280 px で表が切れない、390 px で横に流れない、触れる対象は 24 px 以上、コントラスト、キーボード操作（W4 の判断 16〜23）。
+
+## 5. 案内と配信（S16、W7）
+
+NCBI の BLAST のページは、見出しの右に道具の行（「Home」「Recent Results」「Saved Strategies」「Help」）、program の一文の後に「more...」、ページの流れの中に知らせの帯（「No significant similarity found.」など）、下に NIH / NLM のフッター（「Web Policies」など）を置く。サーバーで走るサイトなので、オフライン、リリースの更新、ブラウザの確認は無い。LOSAT Web の W7 の部品は、NCBI に同じ場所があればそこに置き、無ければページの流れの中（見出しの下、タブの上）に置く。
+
+| NCBI の要素 | LOSAT Web | 採否 | 理由・置き場所 |
+|---|---|---|---|
+| 見出しの右の道具の行「Home」「Recent Results」「Saved Strategies」「Help」 | 見出しの右に「Getting started」（`getting-started-toggle`、開閉するリンクのボタン、`aria-expanded`）。その右（電話では次の行）にリリースとオフラインの状態 | 寄せる（置き場所） | NCBI の「Help」の場所。Home・Recent Results・Saved Strategies は採らない（サイトの構成と NCBI のアカウント。過去の Run はキューとセッションファイル） |
+| 「Help」の先の文書（BLAST Help、Help Videos） | 「Getting started」の枠（`getting-started`、見出しの下、タブの上）：program を選んでからセッションを保存するまでの 6 行の手順、配列がブラウザから出ないことの一文、「Close」。初めての訪問で開き、閉じれば次からも閉じたまま（`losat-web:getting-started`） | 寄せる | 別のページへ移らず、同じページで開く（作業を失わない）。長い文書は持たない |
+| program の一文の後の「more...」 | 一文の後に「Try an example」（`try-example`）：その program の例（[`examples.md`](examples.md)）を query と subject に入れる。入力・設定・Job Title を置き換える前に尋ねる（`try-example-question`、「Keep what I entered」）。検索は始めない（「Example loaded」の一文が「Run LOSAT」を選ぶよう言う）。BLASTX は SX まで無効（ほかの無効のリンクと同じ色、理由は説明に） | 寄せる（置き場所） | NCBI の「more...」は一文の続きを開く。LOSAT の説明は一文で足りるので、同じ場所を例に使う。NCBI の 2 配列の画面に例を入れる操作は無い |
+| （無い） | 「Getting started」の中の閉じた節「Test this browser (optional)」（`self-test`）：例を 1 スレッドと Auto のスレッドで走らせ、outfmt 0・6・7 の SHA-256 をリリースの値と比べる。テストの Run はキュー・結果・候補・セッションファイルに出さない | NCBI に無い（LOSAT だけ） | ブラウザで走るエンジンの確認。サーバーで走る NCBI には要らない |
+| （無い） | 見出しの右の 1 行「Release <ID> Offline ready」（`offline-status`、`data-state`、`release-id`）：どの状態でも同じ大きさの 1 行（状態の短い形、ID は幅が足りなければ「…」で切り、title に全文）。準備の失敗の理由と「Try again」、選んだリリースを覚えられないことは、見出しの下の知らせ（`offline-notice`） | NCBI に無い（LOSAT だけ） | LOSAT はリリースを保存し、ネットワーク無しでも始める（plan §5.9）。どのリリースで動いているかを常に示す |
+| 知らせの帯（ページの流れの中） | 新しいリリースの知らせ（`update-notice`、見出しの下、タブの上の青の枠）：「Review update」→ この tab が失うもの（`update-impact`）→「Download and check」→ もう一度、数え直した失うもの →「Switch to release <ID> and reload」。失敗はエラーの色の枠（どのファイルがなぜ、を言う）。他のタブで切り替えたことの一文（`update-other-tab`） | 寄せる（形） | NCBI に更新は無い。知らせを NCBI の帯のようにページの流れに置き、フォームを覆わない。利用者が選ぶまで何も変えない（plan §5.9） |
+| （無い。この NCBI のページは同意を尋ねない） | 測るサイトでだけ、見出しの下、タブの上に「Usage statistics」の知らせ（`analytics-consent`）：何を送るか、送らないもの（太字）、同じ重さの「Allow」「Don't allow」 | NCBI に無い（LOSAT だけ） | [`analytics.md`](analytics.md)。同意の前は何も送らない。ページの流れの中で、フォームを覆わない |
+| フッターのサイトの方針（「Web Policies」など、NIH / NLM のフッター） | フッターに「Usage statistics: off」／「on」と「Change」（`analytics-setting`、測るサイトだけ） | 寄せる（置き場所） | 方針と設定はフッター。NIH / NLM のフッターは写さない（ブランド） |
+| （無い） | 起動ページ（`/`、`boot-message`、`data-kind`）：リリースを始められないときの一文（初めての訪問でネットワークが無い、サイトのリリースの一覧が読めない、選んだリリースをサイトが配っていない、保存されていない、読み込めない）と、「Use release <latest>」（`boot-use-latest`）、「Use release <ID> (stored)」（`boot-use-stored`）、「Try again」（`boot-retry`）。黙って切り替えない | NCBI に無い（LOSAT だけ） | アプリを始める前の素のページ（16 px、40em の段、[`release_manifest.md`](release_manifest.md)） |

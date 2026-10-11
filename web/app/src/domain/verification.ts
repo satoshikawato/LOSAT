@@ -102,6 +102,17 @@ export interface AppBuild {
   readonly build: string;
 }
 
+/**
+ * "LOSAT Web 0.2.0, commit d607a2f5". LOSAT Web records the first hex digits of its commit as
+ * the build, the digits that also begin a release ID ("Release d607a2f54e58-e2fb7128" in the
+ * header), so a build of hex digits is named a commit, which lets a user match the two (screen
+ * review 1 I5); anything else (an older file's text, "unknown") stays a build. Session files
+ * of schema 1 have no release ID to cite.
+ */
+export function appBuildName(app: AppBuild): string {
+  return `LOSAT Web ${app.version}, ${/^[0-9a-f]{7,64}$/.test(app.build) ? 'commit' : 'build'} ${app.build}`;
+}
+
 /** What this site runs: the names that its engine builds give runs (`RunRecord.engineBuild`), and its LOSAT Web build. */
 export interface SiteBuild {
   readonly engineBuilds: readonly string[];
@@ -169,11 +180,11 @@ export function loadedRunBadge(badge: Badge, written: { readonly engineBuild?: s
   const { engineBuild, app } = written;
   const same = engineBuild !== undefined && site !== undefined && site.engineBuilds.includes(engineBuild);
   // The LOSAT Web that saved the file is not always the one that searched (a loaded run can be saved again).
-  const loaded = `Loaded from a session file (saved by LOSAT Web ${app.version}, build ${app.build}): its outputs were written by ${
+  const loaded = `Loaded from a session file (saved by ${appBuildName(app)}): its outputs were written by ${
     engineBuild ?? 'an engine build that the file does not name'
   }`;
   if (same || badge.level === 'development') return { ...badge, details: [...badge.details, `${loaded}${same ? ', an engine build of this site' : ''}.`] };
-  const here = site === undefined ? "this site's engine builds" : `${list(site.engineBuilds)} (LOSAT Web ${site.app.version}, build ${site.app.build})`;
+  const here = site === undefined ? "this site's engine builds" : `${list(site.engineBuilds)} (${appBuildName(site.app)})`;
   return {
     level: 'outside',
     label: OTHER_BUILD_LABEL,

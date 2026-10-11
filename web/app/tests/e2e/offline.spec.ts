@@ -141,11 +141,22 @@ async function reviewAndDownload(page: Page): Promise<void> {
   await page.getByTestId('update-download').click();
 }
 
+/** The browser's estimate of the site's usage that the storage status shows, in bytes; undefined where it shows none. */
+async function siteUsage(page: Page): Promise<number | undefined> {
+  const text = (await page.getByTestId('storage-usage').textContent()) ?? '';
+  const match = /this site uses about ([\d.]+) (bytes|kB|MB|GB) of/.exec(text);
+  if (match === null) return undefined;
+  return Number(match[1]) * 1000 ** ['bytes', 'kB', 'MB', 'GB'].indexOf(match[2]!);
+}
+
 test('1. a first visit says "Offline ready" once every file of the release and the shell is stored and checked, and nothing else is stored', async ({ page }) => {
   await open(page);
   await appStarted(page, A);
   await offlineReady(page);
   expect(await storedFiles(page)).toEqual(expectedCaches(dirs.a, A));
+  // The storage estimate counts the stored release without waiting for a run (screen review 1 L2).
+  const stored = manifestOf(dirs.a, A).assets.reduce((sum, file) => sum + file.size, 0);
+  if ((await siteUsage(page)) !== undefined) await expect.poll(() => siteUsage(page)).toBeGreaterThanOrEqual(0.95 * stored);
 });
 
 test('1b. a first visit whose download breaks does not say "Offline ready" and stores nothing; "Try again" then stores the release', async ({ page }) => {
@@ -268,14 +279,23 @@ test('3b. a release that one tab downloaded and checked survives another tab\'s 
   expect(await isolated(first)).toBe(true);
 });
 
-for (const [name, breakB] of [
-  ['a file of B with other bytes', () => (front.upstream = origins.damaged)],
+/** A path in a regular expression. */
+const literally = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+// Each with the reason that the message gives: which file failed, and why (screen review 1 L5).
+for (const [name, breakB, reason] of [
+  [
+    'a file of B with other bytes',
+    () => (front.upstream = origins.damaged),
+    () => `a file did not match its checksum in the release's file list \\(${literally(largestAsset(manifestOf(dirs.damaged, B)))}\\)`,
+  ],
   [
     'a connection cut in the middle of a file of B',
     () => {
       front.upstream = origins.ab;
       front.cut.add(`/r/${B}/${largestAsset(manifestOf(dirs.ab, B))}`);
     },
+    () => `a file could not be downloaded \\(${literally(largestAsset(manifestOf(dirs.ab, B)))}: .+\\)`,
   ],
 ] as const) {
   test(`4. an incomplete update (${name}) fails with its message; the pin stays A, and A still starts offline`, async ({ page, context, browserName }) => {
@@ -289,7 +309,7 @@ for (const [name, breakB] of [
     await appStarted(page, A);
     await reviewAndDownload(page);
     await expect(page.getByTestId('update-failed')).toHaveText(
-      new RegExp(`The update could not be downloaded completely \\(.+\\)\\. LOSAT Web stays on release ${A}\\.`),
+      new RegExp(`^\\s*Release ${B} could not be downloaded and checked: ${reason()}\\. LOSAT Web stays on release ${A}; nothing was changed\\.\\s*$`),
       { timeout: 60_000 },
     );
     expect(await pinOf(page)).toBe(A);
@@ -377,10 +397,17 @@ test('6. a pin to a release that the site no longer serves and that is not store
   await expect(message).toHaveAttribute('data-kind', browserName === 'webkit' ? 'failed' : 'offline-not-stored');
   await expect(page.getByTestId('add-to-queue')).toHaveCount(0);
   expect(await pinOf(page)).toBe('voff-never-seen');
+  // It offers the release that is stored, and a reload (screen review 1 I6); "Try again" switches nothing.
+  await expect(page.getByTestId('boot-use-stored')).toHaveText(`Use release ${A} (stored)`);
+  await page.getByTestId('boot-retry').click();
+  await expect(message).toHaveAttribute('data-kind', browserName === 'webkit' ? 'failed' : 'offline-not-stored');
+  expect(await pinOf(page)).toBe('voff-never-seen');
 
   await context.setOffline(false);
   await front.setOnline(true);
-  await page.reload();
+  await page.getByTestId('boot-retry').click();
+  await expect(message).toHaveAttribute('data-kind', 'not-served');
+  await expect(page.getByTestId('boot-retry')).toHaveCount(0);
   await page.getByTestId('boot-use-latest').click();
   await appStarted(page, A);
   expect(await pinOf(page)).toBe(A);
@@ -404,7 +431,11 @@ test('6c. a pinned release that the site did not serve once and serves again sta
   expect(await pinOf(page)).toBe(B);
 });
 
-test('6b. without a pin and without the network, the stored boot page says that the first start needs the network', async ({ page, context, browserName }) => {
+test('6b. without a pin and without the network, the stored boot page says that the first start needs the network, and offers the stored release', async ({
+  page,
+  context,
+  browserName,
+}) => {
   await open(page);
   await appStarted(page, A);
   await offlineReady(page);
@@ -414,4 +445,11 @@ test('6b. without a pin and without the network, the stored boot page says that 
   // WebKit keeps navigator.onLine true: the boot tries the site index, and says that it could not read it.
   await expect(page.getByTestId('boot-message')).toHaveAttribute('data-kind', browserName === 'webkit' ? 'no-index' : 'first-visit-offline');
   await expect(page.getByTestId('add-to-queue')).toHaveCount(0);
+  expect(await pinOf(page)).toBeNull();
+  // The release stored on the earlier visit starts offline once the user chooses it, and is pinned then (screen review 1 I6).
+  await expect(page.getByTestId('boot-stored')).toHaveText(`Release ${A} is stored in this browser and starts without the network.`);
+  await expect(page.getByTestId('boot-retry')).toBeVisible();
+  await page.getByTestId('boot-use-stored').click();
+  await appStarted(page, A);
+  expect(await pinOf(page)).toBe(A);
 });

@@ -87,14 +87,30 @@ async function hasShell(caches: CacheStorageLike, origin: string): Promise<boole
   return (await (await caches.open(SHELL_CACHE)).match(origin + '/')) !== undefined;
 }
 
-/** A response that may be stored: 200 from this origin, not redirected. */
+// The reasons below reach the screen after "could not be downloaded and checked:" or "could not
+// be prepared:" (UpdateNotice.vue, OfflineNotice.vue): each says in plain words what failed and
+// why, and ends with the file's path where one file failed (screen review 1 L5).
+
+/** The site index, as the screen names it. */
+const SITE_INDEX = "the site's list of releases";
+/** A ReleaseManifest, as the screen names it. */
+const FILE_LIST = "the release's file list";
+
+/** A response that may be stored: 200 from this origin, not redirected. `what` names the file ("a file (<path>)"). */
 function check(response: Response, what: string): void {
-  if (response.redirected) throw new Error(`${what}: the request was redirected`);
-  if (response.status !== 200) throw new Error(`${what}: the server answered ${response.status}`);
-  if (response.type !== 'basic' && response.type !== 'default') throw new Error(`${what}: not a response of this site`);
+  if (response.redirected) throw new Error(`the site redirected the request for ${what}`);
+  if (response.status !== 200) throw new Error(`the site answered ${response.status} for ${what}`);
+  if (response.type !== 'basic' && response.type !== 'default') throw new Error(`${what} did not come from this site`);
 }
 
-async function fetchJson(deps: PrepareDeps, url: string, init: RequestInit, what: string): Promise<{ value: unknown; response: Response }> {
+/** Reads a JSON list and checks it with `read`, which throws when it is not valid. */
+async function fetchJson<T>(
+  deps: PrepareDeps,
+  url: string,
+  init: RequestInit,
+  what: string,
+  read: (value: unknown) => T,
+): Promise<{ value: T; response: Response }> {
   let response: Response;
   try {
     response = await deps.fetch(url, { credentials: 'same-origin', redirect: 'error', ...init });
@@ -104,7 +120,7 @@ async function fetchJson(deps: PrepareDeps, url: string, init: RequestInit, what
   check(response, what);
   const kept = response.clone();
   try {
-    return { value: JSON.parse(await response.text()) as unknown, response: kept };
+    return { value: read(JSON.parse(await response.text()) as unknown), response: kept };
   } catch (error) {
     throw new Error(`${what} is not valid (${message(error)})`);
   }
@@ -129,11 +145,11 @@ export async function prepareRelease(
 
   let shell: readonly ListedFile[];
   try {
-    shell = deps.readShell((await fetchJson(deps, SITE_INDEX_URL, { cache: 'no-store' }, 'the site index')).value);
+    shell = (await fetchJson(deps, SITE_INDEX_URL, { cache: 'no-store' }, SITE_INDEX, deps.readShell)).value;
   } catch (error) {
     return keepStored(message(error));
   }
-  if (!shell.some((file) => file.path === '/')) return keepStored('the site index lists no start page');
+  if (!shell.some((file) => file.path === '/')) return keepStored(`${SITE_INDEX} names no start page`);
 
   let assets: readonly ListedFile[] = [];
   let manifest: Response | undefined;
@@ -142,10 +158,11 @@ export async function prepareRelease(
       const url = origin + releasePath(release, MANIFEST_NAME);
       // A 404 under /r/ may be the HTTP cache's (the rules make it immutable there): a failed
       // read is tried once more past the HTTP cache before the release counts as not served.
-      const read = await fetchJson(deps, url, { cache: 'no-cache' }, 'the release manifest').catch(() =>
-        fetchJson(deps, url, { cache: 'reload' }, 'the release manifest'),
+      const readManifest = (value: unknown) => deps.readManifest(value, release);
+      const read = await fetchJson(deps, url, { cache: 'no-cache' }, FILE_LIST, readManifest).catch(() =>
+        fetchJson(deps, url, { cache: 'reload' }, FILE_LIST, readManifest),
       );
-      assets = deps.readManifest(read.value, release);
+      assets = read.value;
       manifest = read.response;
     } catch (error) {
       return { ok: false, reason: message(error) };
@@ -253,7 +270,8 @@ async function downloadAll(
  * is not the server's file); a second one fails.
  */
 async function downloadVerified(deps: PrepareDeps, url: string, file: ListedFile, shell: boolean, signal: AbortSignal): Promise<Response> {
-  const what = file.path;
+  const what = `a file (${file.path})`;
+  const list = shell ? SITE_INDEX : FILE_LIST;
   let mismatch = '';
   for (const cache of [shell ? 'no-cache' : 'default', 'reload'] as const) {
     let response: Response;
@@ -261,7 +279,7 @@ async function downloadVerified(deps: PrepareDeps, url: string, file: ListedFile
     try {
       response = await deps.fetch(url, { cache, credentials: 'same-origin', redirect: 'error', signal });
     } catch (error) {
-      throw new Error(`${what}: the download failed (${message(signal.reason ?? error)})`);
+      throw new Error(`a file could not be downloaded (${file.path}: ${message(signal.reason ?? error)})`);
     }
     if (cache !== 'reload') {
       try {
@@ -275,12 +293,12 @@ async function downloadVerified(deps: PrepareDeps, url: string, file: ListedFile
     try {
       bytes = await response.arrayBuffer();
     } catch (error) {
-      throw new Error(`${what}: the download failed (${message(signal.aborted ? signal.reason : error)})`);
+      throw new Error(`a file could not be downloaded (${file.path}: ${message(signal.aborted ? signal.reason : error)})`);
     }
     if (bytes.byteLength !== file.size) {
-      mismatch = `${what}: ${bytes.byteLength} bytes, not the ${file.size} that the list gives`;
+      mismatch = `a file had ${bytes.byteLength} bytes, not the ${file.size} that ${list} gives (${file.path})`;
     } else if ((await deps.sha256(bytes)) !== file.sha256) {
-      mismatch = `${what}: its SHA-256 is not the one that the list gives`;
+      mismatch = `a file did not match its checksum in ${list} (${file.path})`;
     } else {
       return kept;
     }

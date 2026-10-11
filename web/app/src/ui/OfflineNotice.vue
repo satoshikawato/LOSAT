@@ -11,7 +11,7 @@ defineProps<{ release: ReleaseManager; state: ReleaseState }>();
 <template>
   <section v-if="state.offline.kind === 'failed'" class="notice offline-notice" aria-label="Offline use" data-testid="offline-notice">
     <p data-testid="offline-failed">
-      Offline use could not be prepared ({{ state.offline.reason }}). LOSAT Web works online as before.
+      Offline use could not be prepared: {{ state.offline.reason }}. LOSAT Web works online as before.
     </p>
     <button type="button" data-testid="offline-retry" @click="release.retryOffline()">Try again</button>
   </section>

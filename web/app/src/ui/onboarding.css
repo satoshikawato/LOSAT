@@ -6,6 +6,16 @@
   font-size: 0.92em;
 }
 
+/* The text-link buttons of S16 get W4's 24 px targets (screen review 1 L6): padding makes the hit
+   area taller, and an equal negative margin keeps the line, and everything around it, where it
+   was. */
+button.link.header-link,
+button.link.try-example,
+.getting-started-head button.link {
+  padding-block: 2px;
+  margin-block: -2px;
+}
+
 .getting-started {
   border: 1px solid var(--border);
   border-radius: 4px;
@@ -54,6 +64,11 @@
   margin: 6px 0;
 }
 
+/* "SHA-256" is not broken at its hyphen (screen review 1 I3), as option names are not. */
+.self-test .unbroken {
+  white-space: nowrap;
+}
+
 .self-test-cases {
   list-style: none;
   margin: 6px 0;
@@ -93,6 +108,14 @@
   font-size: 0.92em;
 }
 
+/* Disabled (BLASTX has no example yet) as the other disabled link buttons look: the muted
+   colour, not underlined (screen review 1 I2); the reason stays in its description. */
+.program-line button.link.try-example:disabled {
+  opacity: 1;
+  color: var(--muted);
+  text-decoration: none;
+}
+
 .example-confirm {
   margin: 0 0 8px;
 }
@@ -108,6 +131,7 @@
 }
 
 .example-loaded {
-  margin: 0 0 8px;
+  /* Clear of the link above it, which wraps onto its own line on a phone (screen review 1 I3). */
+  margin: 6px 0 8px;
   font-size: 0.92em;
 }

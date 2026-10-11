@@ -1,9 +1,11 @@
 // The decisions of the boot page (plan §5.9, design §14, docs/web/release_manifest.md): which
 // release to start, whether to pin it, and what to say when it cannot start. Pure: boot.ts
 // does the requests and the DOM. A pinned release is never switched silently; only the user's
-// "Use release <latest>" (or an update the user chose in the app) changes the pin.
+// "Use release <latest>", "Use release <id> (stored)" (or an update the user chose in the app)
+// changes the pin.
 import { parseReleaseManifest, releaseFileUrl, type ReleaseManifest } from '../domain/release-manifest';
 import { RELEASE_ID_PATTERN, type SiteIndex } from '../domain/site-index';
+import { RELEASE_CACHE_PREFIX } from '../sw/protocol';
 
 /** The pinned release in localStorage (S16 decision 3); an app setting, not research data. */
 export const PIN_KEY = 'losat-web:release';
@@ -35,6 +37,39 @@ export interface BootMessage {
   readonly kind: MessageKind;
   readonly text: string;
   readonly useLatest?: string;
+  /** "Try again": reloads the page (the network or the site may be back). */
+  readonly retry?: boolean;
+  /** Releases that this browser stores whole, each offered as "Use release <id> (stored)": they start without the network. */
+  readonly useStored?: readonly string[];
+}
+
+/** The messages that a reload may resolve, or a stored release may stand in for: no network, or the site did not answer. */
+const RETRIED: ReadonlySet<MessageKind> = new Set<MessageKind>(['first-visit-offline', 'no-index', 'offline-not-stored', 'failed']);
+
+/**
+ * Adds the choices of a message that the network may resolve (screen review 1 I6): "Try
+ * again", and each release in `stored` other than `release` (the one that could not start) and
+ * the latest already offered. A stored release is only offered: the pin changes when the user
+ * chooses it, never by itself.
+ */
+export function withChoices(message: BootMessage, stored: readonly string[], release?: string): BootMessage {
+  if (!RETRIED.has(message.kind)) return message;
+  const others = stored.filter((id) => id !== release && id !== message.useLatest);
+  return { ...message, retry: true, ...(others.length > 0 ? { useStored: others } : {}) };
+}
+
+/** The release whose cache the site's service worker names `name` (src/sw/protocol.ts); undefined for another cache. */
+export function releaseOfCache(name: string): string | undefined {
+  if (!name.startsWith(RELEASE_CACHE_PREFIX)) return undefined;
+  const release = name.slice(RELEASE_CACHE_PREFIX.length);
+  return RELEASE_ID_PATTERN.test(release) ? release : undefined;
+}
+
+/** The sentence before the stored releases' buttons. */
+export function storedText(stored: readonly string[]): string {
+  return stored.length === 1
+    ? `Release ${stored[0]!} is stored in this browser and starts without the network.`
+    : 'These releases are stored in this browser and start without the network.';
 }
 
 /** The release to start; `pin` says whether the boot pins it (a first visit). */

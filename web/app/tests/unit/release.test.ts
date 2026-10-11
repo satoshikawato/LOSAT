@@ -185,6 +185,7 @@ function setup(options: { latest?: string; served?: boolean; runs?: RunView[] } 
     host,
     runs,
     checkEveryMs: 1000,
+    onStored: vi.fn(),
   };
   const manager = new ReleaseManager(deps);
   const state = () => manager.state.get();
@@ -217,6 +218,25 @@ describe('offline use', () => {
     expect(offline.prepared).toEqual(['a']);
     expect(state().offline).toEqual({ kind: 'ready' });
     expect(offline.cleanups).toEqual([['a']]);
+  });
+
+  it('tells when a release was stored, so that the storage estimate counts it: at "Offline ready", after the cleanup, after an update’s download', async () => {
+    const { deps, offline, manager, state, start } = setup({ latest: 'b' });
+    offline.hold = true;
+    await start();
+    expect(deps.onStored).not.toHaveBeenCalled();
+    offline.hold = false;
+    offline.releaseHeld();
+    await flush();
+    expect(state().offline).toEqual({ kind: 'ready' });
+    expect(deps.onStored).toHaveBeenCalledTimes(2);
+    manager.review();
+    offline.results = [{ ok: false, reason: 'a file did not match its checksum (engine/serial.wasm)' }];
+    await manager.download();
+    expect(deps.onStored).toHaveBeenCalledTimes(2);
+    await manager.download();
+    expect(state().update).toEqual({ kind: 'downloaded', latest: 'b' });
+    expect(deps.onStored).toHaveBeenCalledTimes(3);
   });
 
   it('shows the progress while the files are checked', async () => {
@@ -266,9 +286,9 @@ describe('offline use', () => {
 
   it('says why a preparation failed, and tries again on request', async () => {
     const { offline, manager, state, start } = setup();
-    offline.results = [{ ok: false, reason: 'engine/serial.wasm: the server answered 404' }];
+    offline.results = [{ ok: false, reason: 'the site answered 404 for a file (engine/serial.wasm)' }];
     await start();
-    expect(state().offline).toEqual({ kind: 'failed', reason: 'engine/serial.wasm: the server answered 404' });
+    expect(state().offline).toEqual({ kind: 'failed', reason: 'the site answered 404 for a file (engine/serial.wasm)' });
     expect(offline.cleanups).toEqual([]);
     manager.retryOffline();
     await flush();
@@ -416,9 +436,9 @@ describe('explicit update', () => {
 
   it('stays on this release when the download fails, and can try again', async () => {
     const { offline, pin, host, manager, state } = await reviewed();
-    offline.results = [{ ok: false, reason: 'engine/serial.wasm: its SHA-256 is not the one that the list gives' }];
+    offline.results = [{ ok: false, reason: "a file did not match its checksum in the release's file list (engine/serial.wasm)" }];
     await manager.download();
-    expect(state().update).toEqual({ kind: 'failed', latest: 'b', reason: 'engine/serial.wasm: its SHA-256 is not the one that the list gives' });
+    expect(state().update).toEqual({ kind: 'failed', latest: 'b', reason: "a file did not match its checksum in the release's file list (engine/serial.wasm)" });
     await manager.switchNow();
     expect(pin.writes).toEqual([]);
     expect(host.reloads).toBe(0);
@@ -535,7 +555,7 @@ describe('explicit update', () => {
 
   it('offers no switch until the download is checked when the worker cannot be registered where service workers exist', async () => {
     const { offline, pin, host, manager, state, start } = setup({ latest: 'b' });
-    offline.connectError = new Error('the operation is insecure');
+    offline.connectError = new Error('the script could not be fetched');
     await start();
     manager.review();
     expect(state().update).toEqual({ kind: 'reviewing', latest: 'b' });
@@ -543,7 +563,7 @@ describe('explicit update', () => {
     await manager.switchNow();
     expect(pin.writes).toEqual([]);
     await manager.download();
-    expect(state().update).toEqual({ kind: 'failed', latest: 'b', reason: 'the offline worker could not be started (the operation is insecure)' });
+    expect(state().update).toEqual({ kind: 'failed', latest: 'b', reason: 'the offline worker could not be started (the script could not be fetched)' });
     await manager.switchNow();
     expect(pin.writes).toEqual([]);
     expect(host.reloads).toBe(0);

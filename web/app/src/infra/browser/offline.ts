@@ -40,6 +40,17 @@ const IDLE_TIMEOUT_MS = 5_000;
 
 const message = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
+/**
+ * Whether `register()` refused because the browser does not let this site use service workers:
+ * with cookies or site data blocked for the site, Chromium rejects with a NotSupportedError ("The
+ * user denied permission to use Service Worker.") and Firefox with a SecurityError ("The
+ * operation is insecure."), probed in fix round 2. Other rejections (a network error reading
+ * `sw.js`, a script that does not evaluate) may pass, and stay failures to try again.
+ */
+function refusesServiceWorkers(error: unknown): boolean {
+  return error instanceof DOMException && (error.name === 'SecurityError' || error.name === 'NotSupportedError');
+}
+
 function isProgress(value: unknown): value is PrepareProgress {
   if (typeof value !== 'object' || value === null) return false;
   const p = value as Record<string, unknown>;
@@ -111,10 +122,22 @@ export function browserOffline(): OfflinePort {
 
     async connect(): Promise<void> {
       if (container === undefined) throw new Error('this browser has no service workers');
+      let registered: ServiceWorkerRegistration | undefined;
+      try {
+        registered = (await container.register(SW_URL, { scope: SW_SCOPE, updateViaCache: 'none' })) as ServiceWorkerRegistration | undefined;
+      } catch (error) {
+        // A browser that does not let this site use service workers (cookies or site data blocked)
+        // refuses every registration: that is no offline use, as without service workers, never a
+        // failure to try again on each load (code review 2 L1).
+        if (refusesServiceWorkers(error)) {
+          blocked = true;
+          throw new Error(`this browser does not let this site use service workers: ${message(error)}`, { cause: error });
+        }
+        throw error;
+      }
       // Something that blocks service workers by replacing register() (Playwright's
       // `serviceWorkers: 'block'`, a privacy tool) may resolve with nothing instead of refusing:
       // say so, not what reading an undefined registration throws.
-      const registered = (await container.register(SW_URL, { scope: SW_SCOPE, updateViaCache: 'none' })) as ServiceWorkerRegistration | undefined;
       if (registered === undefined) {
         blocked = true;
         throw new Error('service workers are blocked in this browser');

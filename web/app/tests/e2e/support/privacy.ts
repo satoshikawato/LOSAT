@@ -6,15 +6,20 @@
 //   worker are all seen in every browser, whatever the browser reports to Playwright. The served
 //   directory is a view of the site (links to its files) whose `_headers` adds one directive to the
 //   CSP, `report-uri`, so that a violation in a worker (where no page listens) reaches the log too;
-//   pointing the view at another site directory is a new deployment at the same origin.
+//   pointing the view at another site directory is a new deployment at the same origin. A small
+//   front answers /api/ (the measurement endpoint, a Pages Function on the deployed site) and logs
+//   it the same way.
 // - The browser: every request that the context reports to Playwright, and what each page notes
 //   about itself (an init script): its title and address whenever they change, and every
 //   `securitypolicyviolation` event.
 import { lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { createServer, request as forward } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test as base, type BrowserContext, type Page, type Request, type TestInfo } from '@playwright/test';
+import { siteHeaders } from '../../../build/headers';
 import { SERVICE_WORKER_FILE } from '../../../build/service-worker';
 import { readSiteIndex, RELEASES_DIR, SHELL_FILES, SITE_INDEX_FILE } from '../../../build/site-files';
 import { startSiteServer, type SiteRequest } from '../../../build/site-server';
@@ -83,9 +88,22 @@ export interface CaptureSite {
 export interface CaptureSiteOptions {
   /** Files that are not the site's, served under their paths (the capture's own test plants them). */
   readonly extra?: ReadonlyMap<string, string>;
+  /**
+   * The measurement endpoint that the served releases.json names (`analytics.endpoint`), as a site
+   * built or assembled with LOSAT_WEB_ANALYTICS_ENDPOINT names it.
+   */
+  readonly analyticsEndpoint?: string;
 }
 
-/** Serves a site directory with build/site-server.ts, logging every request. */
+/** The headers of the answer to a request under /api/: the site's, as Pages adds them to a Function's answer. */
+const API_HEADERS = Object.fromEntries(Object.entries(siteHeaders()).concat([['Cache-Control', 'no-store']]));
+
+/**
+ * Serves a site directory with build/site-server.ts, logging every request through its
+ * `onRequest` hook. In front of it, requests under /api/ are logged and answered 204 here, as the
+ * site's Pages Function answers /api/visit (functions/api/visit.ts) and the site server answers
+ * no POST.
+ */
 export async function startCaptureSite(site = DIST, options: CaptureSiteOptions = {}): Promise<CaptureSite> {
   const view = mkdtempSync(join(tmpdir(), 'losat-vpriv-site-'));
   const paths = new Set<string>();
@@ -95,7 +113,13 @@ export async function startCaptureSite(site = DIST, options: CaptureSiteOptions 
       if (lstatSync(path).isDirectory()) rmSync(path, { recursive: true });
       else unlinkSync(path);
     }
-    for (const entry of readdirSync(directory)) if (entry !== '_headers') symlinkSync(resolve(directory, entry), join(view, entry));
+    for (const entry of readdirSync(directory)) {
+      if (entry === '_headers') continue;
+      if (entry === SITE_INDEX_FILE && options.analyticsEndpoint !== undefined) {
+        const index = JSON.parse(readFileSync(join(directory, entry), 'utf8')) as Record<string, unknown>;
+        writeFileSync(join(view, entry), `${JSON.stringify({ ...index, analytics: { endpoint: options.analyticsEndpoint } }, null, 2)}\n`);
+      } else symlinkSync(resolve(directory, entry), join(view, entry));
+    }
     writeFileSync(join(view, '_headers'), reportingHeaders(readFileSync(join(directory, '_headers'), 'utf8')));
     for (const [path, body] of options.extra ?? []) {
       mkdirSync(dirname(join(view, path)), { recursive: true });
@@ -116,13 +140,37 @@ export async function startCaptureSite(site = DIST, options: CaptureSiteOptions 
       kind: `server ${request.status}`,
     });
   const server = await startSiteServer({ root: view, onRequest: log });
-  origin = server.origin;
+  const front = createServer((request, response) => {
+    const chunks: Buffer[] = [];
+    request.on('data', (chunk: Buffer) => chunks.push(chunk));
+    if (new URL(request.url ?? '/', server.origin).pathname.startsWith('/api/')) {
+      request.on('end', () => {
+        response.writeHead(204, API_HEADERS);
+        response.end();
+        log({ method: request.method ?? '', url: request.url ?? '/', path: '', headers: request.headers, body: new Uint8Array(Buffer.concat(chunks)), status: 204 });
+      });
+      return;
+    }
+    const upstream = forward(`${server.origin}${request.url ?? '/'}`, { method: request.method, headers: request.headers }, (answer) => {
+      response.writeHead(answer.statusCode ?? 502, answer.headers);
+      answer.pipe(response);
+    });
+    upstream.on('error', () => {
+      if (!response.headersSent) response.writeHead(502);
+      response.end();
+    });
+    request.pipe(upstream);
+  });
+  await new Promise<void>((resolveListen) => front.listen(0, '127.0.0.1', resolveListen));
+  origin = `http://127.0.0.1:${(front.address() as AddressInfo).port}`;
   return {
     origin,
     requests,
     paths,
     deploy,
     close: async () => {
+      front.closeAllConnections();
+      await new Promise<void>((resolveClose) => front.close(() => resolveClose()));
       await server.close();
       rmSync(view, { recursive: true, force: true });
     },
@@ -217,6 +265,18 @@ export class PrivacyCapture {
     });
   }
 
+  /** Where the requests stand now (once the browser's events in flight are recorded). */
+  async mark(): Promise<{ readonly server: number; readonly browser: number }> {
+    await this.settle();
+    return { server: this.server.requests.length, browser: this.browser.length };
+  }
+
+  /** The requests since a mark, as the server and the browser saw them. */
+  async since(mark: { readonly server: number; readonly browser: number }): Promise<Exchange[]> {
+    await this.settle();
+    return [...this.server.requests.slice(mark.server), ...this.browser.slice(mark.browser)];
+  }
+
   /** The paths the server received, in order. */
   serverPaths(): string[] {
     return this.server.requests.map((exchange) => new URL(exchange.url).pathname);
@@ -262,16 +322,17 @@ export class PrivacyCapture {
 }
 
 /**
- * Playwright's `test` with `capture`: the site served by a logging server, the context watched
- * before the page is made.
+ * Playwright's `test` with `capture`: the site (dist/, served as `captureSite` says) behind a
+ * logging server, the context watched before the page is made.
  */
-export const test = base.extend<{ capture: PrivacyCapture }>({
+export const test = base.extend<{ capture: PrivacyCapture; captureSite: CaptureSiteOptions }>({
+  captureSite: [{}, { option: true }],
   page: async ({ capture, page }, use) => {
     void capture;
     await use(page);
   },
-  capture: async ({ context }, use, testInfo) => {
-    const server = await startCaptureSite();
+  capture: async ({ context, captureSite }, use, testInfo) => {
+    const server = await startCaptureSite(DIST, captureSite);
     const capture = new PrivacyCapture(server);
     await capture.attach(context);
     try {

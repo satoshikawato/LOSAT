@@ -22,29 +22,36 @@
 // TD-11 (chromium project only: it reads files): no file that the site serves holds a path of the
 // build machine (the checkout, CARGO_HOME, RUSTUP_HOME, HOME) or the user name.
 //
-// To come with the work packages that add them (S16): the update path (service worker, explicit
-// update; the caches hold only release files) and the measurement path (consent, /api/visit).
+// The delivery paths (S16): an update while the tab holds research data (the notice, the download
+// and check, the switch; the service worker's caches hold only the releases' files and the shell),
+// "Try an example" and the self-test (they fetch release files only), and measurement (nothing
+// under /api/ before consent or after "Don't allow"; after "Allow" only the fixed POST /api/visit).
 import { execSync } from 'node:child_process';
-import { realpathSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { homedir, userInfo } from 'node:os';
+import { homedir, tmpdir, userInfo } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gunzipSync } from 'node:zlib';
 import { expect, type Page } from '@playwright/test';
+import { readSiteIndex } from '../../build/site-files';
 import { BUILD_HAS_ENGINE } from './support/browser';
 import { REPOSITORY } from './support/harness-server';
 import { DIST, PrivacyCapture, siteFiles, startCaptureSite, test } from './support/privacy';
 import {
+  canaryForms,
   filesUnder,
+  findCanaries,
   machinePatterns,
   makeCanary,
   scanFiles,
   userNameInPathsOnly,
   type Canary,
+  type Exchange,
   type MachineContext,
 } from './support/privacy-scan';
 import { fasta, openFiles, openParameters, paste, program, settled, showOutput, submit, waitStatus } from './support/search';
+import { assemble, buildSite, changeServiceWorker, expectedCaches } from './support/sites';
 
 test.setTimeout(BUILD_HAS_ENGINE ? 300_000 : 180_000);
 
@@ -78,10 +85,20 @@ async function clearInputs(page: Page): Promise<void> {
   }
 }
 
+/**
+ * Waits until the application's start-up has finished: the storage cleanup, and the service
+ * worker's storing of the release ("Offline ready"), whose progress line in the header would move
+ * the page under a click (WebKit then fires no click).
+ */
+async function started(page: Page): Promise<void> {
+  await expect(page.getByTestId('storage-status')).toHaveAttribute('data-cleanup', 'done');
+  await expect(page.getByTestId('offline-status')).toHaveAttribute('data-state', 'ready', { timeout: 60_000 });
+}
+
 /** Opens the application from the capture's server and waits until its start-up has finished. */
 async function openApp(page: Page, capture: PrivacyCapture): Promise<void> {
   await page.goto(`${capture.origin}/`);
-  await expect(page.getByTestId('storage-status')).toHaveAttribute('data-cleanup', 'done');
+  await started(page);
 }
 
 /**
@@ -114,6 +131,7 @@ function searchInputs(canary: Canary) {
       // The 40-mer starts the subject's hit region: in the engine build's HSP, and in the FakeEngine's (the first half).
       text: record(`${t}_s1 ${t} first subject`, canary.nucleotides + shared + dna(83, 30)) + record(`${t}_s2`, dna(84, 60)),
     },
+    subjectId: `${t}_s1`,
     title: `${t} job title`,
     note: `${t} candidate note`,
   };
@@ -202,7 +220,7 @@ test('a search, its results and every export, a reload, the saved session and it
 
   // --- a reload: a new working session; the session file opened under a name with the canary ---
   await page.reload();
-  await expect(page.getByTestId('storage-status')).toHaveAttribute('data-cleanup', 'done');
+  await started(page);
   await expect(page.getByTestId('queue').locator('li[data-status]')).toHaveCount(0);
   const sessionName = `${t}.losat-session.gz`;
   await page.getByTestId('session-file').setInputFiles({ name: sessionName, mimeType: 'application/gzip', buffer: session.bytes });
@@ -311,6 +329,241 @@ test('a cancelled search, a refused input, a refused option and a failed run sen
 
   expect(await capture.findings(canary)).toEqual([]);
   expectSiteRequests(capture);
+});
+
+// --- delivery: update, onboarding, measurement ----------------------------------------------------
+
+/** The work of a tab: a BLASTN search of the canary's inputs as run `run`, its HSPs in Candidates with a note. */
+async function researchWork(page: Page, inputs: ReturnType<typeof searchInputs>, run: number): Promise<void> {
+  await page.getByTestId('tab-search').click();
+  await program(page, 'blastn');
+  await clearInputs(page);
+  await openFiles(page, 'query', [inputs.query]);
+  await openFiles(page, 'subject', [inputs.subject]);
+  await page.getByTestId('job-title').fill(inputs.title);
+  await submit(page);
+  await waitStatus(page, run, 'completed');
+  await page.getByTestId(`run-${run}-open`).click();
+  await page.getByTestId('results-view-hits').click();
+  await expect(page.getByTestId('subject-list')).toContainText(inputs.subjectId);
+  await page.getByTestId('descriptions-select-all').check();
+  await page.getByTestId('descriptions-add-candidates').click();
+  await expect(page.getByTestId('candidates-added')).toHaveText(/^\d+ HSPs? added to Candidates\.$/);
+  await page.getByTestId('tab-candidates').click();
+  await page.getByTestId('candidate-note-1').fill(inputs.note);
+}
+
+/** Every cache of the origin, read from the page: by name, each entry's URL (path and query) and the SHA-256 of its body. */
+function storedFiles(page: Page): Promise<Record<string, Record<string, string>>> {
+  return page.evaluate(async () => {
+    const hex = (bytes: ArrayBuffer) => Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, '0')).join('');
+    const stored: Record<string, Record<string, string>> = {};
+    for (const name of await caches.keys()) {
+      const cache = await caches.open(name);
+      const files: Record<string, string> = {};
+      for (const request of await cache.keys()) {
+        const url = new URL(request.url);
+        const response = await cache.match(request);
+        files[url.pathname + url.search] = hex(await crypto.subtle.digest('SHA-256', await response!.arrayBuffer()));
+      }
+      stored[name] = files;
+    }
+    return stored;
+  });
+}
+
+/**
+ * What the caches hold that is not a file of a release (its manifest's files and the manifest) or of
+ * the shell, byte for byte (support/sites.ts `expectedCaches`): each such entry, and a canary in a
+ * cache's name or an entry's URL. Bytes equal to a release's or the shell's hold no canary.
+ */
+function cacheFindings(stored: Record<string, Record<string, string>>, releases: ReadonlyArray<readonly [site: string, release: string]>, canary: Canary): string[] {
+  const allowed = new Map<string, Array<Record<string, string>>>();
+  for (const [site, release] of releases) {
+    for (const [name, files] of Object.entries(expectedCaches(site, release))) allowed.set(name, [...(allowed.get(name) ?? []), files]);
+  }
+  const forms = canaryForms(canary);
+  const found: string[] = [];
+  for (const [name, files] of Object.entries(stored)) {
+    const expected = allowed.get(name);
+    if (expected === undefined || findCanaries(name, forms).length > 0) {
+      found.push(`a cache of neither a release nor the shell: ${name}`);
+      continue;
+    }
+    for (const [url, sha256] of Object.entries(files)) {
+      if (findCanaries(url, forms).length > 0) found.push(`a canary in the URL of a cached entry: ${name} ${url}`);
+      else if (!expected.some((files) => files[url] === sha256)) found.push(`${name} holds ${url}, which is not that file of the release or the shell`);
+    }
+  }
+  return found;
+}
+
+test('an update while the tab holds research data: notified, downloaded and checked, switched; the caches hold only release files and the shell', async ({
+  page,
+  capture,
+}) => {
+  test.setTimeout(BUILD_HAS_ENGINE ? 420_000 : 240_000);
+  const canary = makeCanary();
+  const t = canary.token;
+  const inputs = searchInputs(canary);
+  // Release A is the build under test (dist/); B is built like it, and its deployment keeps A.
+  const a = readSiteIndex(DIST).latest;
+  const b = 'vpriv-b';
+  const work = mkdtempSync(join(tmpdir(), 'losat-vpriv-update-'));
+  try {
+    const ab = join(work, 'ab');
+    buildSite(ab, b);
+    assemble(ab, [DIST]);
+    changeServiceWorker(ab, 'the V-PRIV deployment of vpriv-b');
+    const releases = [[DIST, a], [ab, a], [ab, b]] as const;
+
+    await openApp(page, capture);
+    await expect(page.getByTestId('release-id')).toHaveText(a);
+    expect(cacheFindings(await storedFiles(page), releases, canary)).toEqual([]);
+
+    // B is deployed; the tab is notified, and its work holds the canaries while it downloads and switches.
+    capture.server.deploy(ab);
+    await page.reload();
+    await started(page);
+    await expect(page.getByTestId('release-id')).toHaveText(a);
+    await expect(page.getByTestId('update-notice')).toHaveAttribute('data-state', 'available', { timeout: 30_000 });
+    await researchWork(page, inputs, 1);
+    const session = await saved(page, 'session-save');
+    await capture.checkpoint(page);
+    await page.getByTestId('update-review').click();
+    await expect(page.getByTestId('update-impact-saved')).toContainText('1 completed run');
+    await page.getByTestId('update-download').click();
+    await expect(page.getByTestId('update-downloaded')).toBeVisible({ timeout: 60_000 });
+    expect(cacheFindings(await storedFiles(page), releases, canary)).toEqual([]);
+    expect(Object.keys(await storedFiles(page))).toContain(`losat-web-release-${b}`);
+    await capture.checkpoint(page);
+    await page.getByTestId('update-switch').click();
+    await expect(page.getByTestId('release-id')).toHaveText(b, { timeout: 60_000 });
+    await started(page);
+
+    // The work saved before the switch, opened in B under a name with the canary.
+    const sessionName = `${t}-before-the-update.losat-session.gz`;
+    await page.getByTestId('session-file').setInputFiles({ name: sessionName, mimeType: 'application/gzip', buffer: session.bytes });
+    await expect(page.getByTestId('session-busy')).toHaveCount(0, { timeout: 30_000 });
+    await expect(page.getByTestId('session-message')).toContainText(`Opened ${sessionName}: 1 run`);
+    expect(cacheFindings(await storedFiles(page), releases, canary)).toEqual([]);
+    await capture.checkpoint(page);
+
+    expect(await capture.findings(canary)).toEqual([]);
+    expect(capture.serverPaths().some((path) => path.startsWith(`/r/${b}/`))).toBe(true);
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+});
+
+/** Chooses a program and puts its example in the form, answering the question if inputs would be replaced. */
+async function loadExample(page: Page, id: string): Promise<void> {
+  await program(page, id);
+  await page.getByTestId('try-example').click();
+  const loaded = page.getByTestId('example-loaded').filter({ hasText: `example-${id}-query.fasta` });
+  const confirm = page.getByTestId('try-example-confirm');
+  await expect(loaded.or(confirm)).toBeVisible();
+  if (await confirm.isVisible()) await confirm.click();
+  await expect(loaded).toBeVisible();
+  await settled(page, 'query');
+  await settled(page, 'subject');
+}
+
+test('"Try an example" and the self-test fetch only files of the release while the form holds research data', async ({ page, capture }) => {
+  const canary = makeCanary();
+  const t = canary.token;
+  await openApp(page, capture);
+  const release = (await page.getByTestId('release-id').textContent())!.trim();
+  await program(page, 'blastn');
+  await paste(page, 'query', record(`${t}_q1 ${t}`, canary.nucleotides));
+  await page.getByTestId('job-title').fill(`${t} before the examples`);
+
+  const mark = await capture.mark();
+  for (const id of ['blastn', 'blastp', 'tblastn', 'tblastx']) await loadExample(page, id);
+  if (BUILD_HAS_ENGINE) {
+    await page.getByTestId('self-test').locator('summary').click();
+    await page.getByTestId('self-test-run').click();
+    await expect(page.getByTestId('self-test-summary')).toHaveText(/^All \d+ cases passed/, { timeout: 180_000 });
+  }
+  await capture.checkpoint(page);
+  const fetched = (await capture.since(mark)).filter((exchange) => !/^(blob|data):/.test(exchange.url)).map((exchange) => `${exchange.method} ${new URL(exchange.url).pathname}`);
+  expect(fetched.some((line) => line.startsWith(`GET /r/${release}/assets/example-blastn-query-`))).toBe(true);
+  // Besides the release's files, only the service worker's script, which the browser checks for an
+  // update by itself (Firefox does during the self-test), may be fetched.
+  expect(fetched.filter((line) => !line.startsWith(`GET /r/${release}/`) && line !== 'GET /sw.js')).toEqual([]);
+  expect(await capture.findings(canary)).toEqual([]);
+});
+
+const VISIT_ENDPOINT = '/api/visit';
+const CLIENT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+/** Whether a request is the one event of measurement: POST /api/visit with exactly {"v":1,"release":..,"client":..}. */
+function isVisit(exchange: Exchange, release: string, client: string): boolean {
+  const url = new URL(exchange.url);
+  return (
+    exchange.method === 'POST' &&
+    url.pathname === VISIT_ENDPOINT &&
+    url.search === '' &&
+    Buffer.from(exchange.body).toString('utf8') === JSON.stringify({ v: 1, release, client })
+  );
+}
+
+test.describe('measurement', () => {
+  // A site whose releases.json names the endpoint, as one built with LOSAT_WEB_ANALYTICS_ENDPOINT=/api/visit.
+  test.use({ captureSite: { analyticsEndpoint: VISIT_ENDPOINT } });
+
+  test('nothing under /api/ before consent or after "Don\'t allow"; after "Allow" only the fixed POST /api/visit, while the work holds research data', async ({
+    page,
+    capture,
+  }) => {
+    const canary = makeCanary();
+    const inputs = searchInputs(canary);
+    const release = readSiteIndex(DIST).latest;
+    const api = () => capture.server.requests.filter((exchange) => new URL(exchange.url).pathname.startsWith('/api/'));
+
+    // Before consent: the question, and the work of the tab.
+    await openApp(page, capture);
+    await expect(page.getByTestId('analytics-consent')).toBeVisible();
+    await researchWork(page, inputs, 1);
+    await saved(page, 'session-save');
+    await capture.checkpoint(page);
+    expect(api()).toEqual([]);
+
+    // "Don't allow", a reload, and the work again.
+    await page.getByTestId('analytics-deny').click();
+    await expect(page.getByTestId('analytics-setting')).toHaveText('Usage statistics: off');
+    await page.reload();
+    await started(page);
+    await expect(page.getByTestId('analytics-consent')).toHaveCount(0);
+    await researchWork(page, inputs, 1);
+    await capture.checkpoint(page);
+    expect(api()).toEqual([]);
+
+    // "Allow": one event for this page load; the work of the tab; a reload, one event more.
+    await page.getByTestId('analytics-change').click();
+    await page.getByTestId('analytics-allow').click();
+    await expect(page.getByTestId('analytics-setting')).toHaveText('Usage statistics: on');
+    await expect.poll(() => api().length).toBe(1);
+    await researchWork(page, inputs, 2);
+    await saved(page, 'session-save');
+    await page.reload();
+    await started(page);
+    await expect.poll(() => api().length).toBe(2);
+    await researchWork(page, inputs, 1);
+    await capture.checkpoint(page);
+
+    const visits = api();
+    expect(visits).toHaveLength(2);
+    const client = (JSON.parse(Buffer.from(visits[0]!.body).toString('utf8')) as { client: string }).client;
+    expect(client).toMatch(CLIENT_ID);
+    for (const visit of visits) {
+      expect(isVisit(visit, release, client)).toBe(true);
+      expect(visit.headers['content-type']).toBe('application/json');
+      expect(visit.headers['cookie']).toBeUndefined();
+      expect(visit.headers['referer']).toBeUndefined();
+    }
+    expect(await capture.findings(canary, { allowBody: (exchange) => isVisit(exchange, release, client) })).toEqual([]);
+  });
 });
 
 test('the capture finds what it looks for: a canary in a URL, a path that is not the site\'s, CSP violations in a page and in a worker', async ({

@@ -17,22 +17,26 @@ use crate::core::blast_seg::{SegMasker, SegParams};
 use crate::core::blast_stat::composition::compute_lambda_from_score_probs;
 use crate::core::blast_stat::{e_to_p, p_to_e};
 use crate::core::composition_adjustment::adjust_scores::{
-    blast_overall_p_value, read_aa_composition, AdjustedProteinMatrix, BlastCompositionWorkspace,
+    blast_overall_p_value, read_aa_composition, x_newton_input, AdjustedProteinMatrix,
+    BlastCompositionWorkspace,
 };
 use crate::core::composition_adjustment::redo_alignment::{
     blast_compo_alignment_new, blast_redo_one_match_with_workspace, build_query_word_hashes,
-    test_near_identical, BlastCompoAlignment, BlastCompoAlignmentContext,
-    BlastCompoMatchingSequence, BlastCompoQueryInfo, BlastCompoSequenceData,
-    BlastCompoSequenceRange, BlastRedoAlignCallbacks, BlastRedoRangeResult, EMatrixAdjustRule,
+    preliminary_test_near_identical, test_near_identical, windows_from_protein_aligns,
+    BlastCompoAlignment, BlastCompoAlignmentContext, BlastCompoMatchingSequence,
+    BlastCompoQueryInfo, BlastCompoSequenceData, BlastCompoSequenceRange, BlastRedoAlignCallbacks,
+    BlastRedoRangeResult, EMatrixAdjustRule,
 };
 use crate::stats::{blast_spouge_stoe, BlastGumbelBlk, KarlinParams};
 use crate::utils::matrix::{blosum62_score_ncbistdaa_direct, ncbistdaa, protein_score};
 
+use super::encoding::EncodedProtein;
 use super::gapalign::{
     blast_gapped_alignment_with_traceback_with_scratch, BlastpPreliminaryHsp, GapAlignScratch,
 };
 use super::hsp::{
-    reap_hsplist_by_evalue, sort_hsplist_by_score, update_best_evalue, BlastpHsp, BlastpHspList,
+    blast_compo_early_termination, reap_hsplist_by_evalue, sort_hsplist_by_score,
+    update_best_evalue, BlastCompoHeap, BlastpHsp, BlastpHspList,
 };
 
 pub(crate) use crate::core::composition_adjustment::redo_alignment::BlastRedoAlignParams;
@@ -2055,6 +2059,141 @@ pub(crate) fn postprocess_preliminary_hits(
         best_score,
         best_evalue,
     })
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3529,3577-3585
+// ```c
+//                 if (BlastCompo_EarlyTermination(
+//                         localMatch->best_evalue,
+//                         redoneMatches,
+//                         numQueries
+//                 )) {
+// ...
+//                 *pStatusCode = s_ResultHspToDistinctAlign(
+//                         incoming_align_set,     /* o */
+//                         numAligns,              /* o */
+//                         localMatch->hsp_array,  /* i */
+//                         localMatch->hspcnt,     /* i */
+//                         context_index,          /* i */
+//                         queryInfo,              /* i */
+//                         localScalingFactor      /* i */
+//                 );
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1176-1198,1239-1244
+// ```c
+//             if (hsp_index == 0 || subject_maybe_biased) {
+//                 nearIdenticalStatus = s_preliminaryTestNearIdentical(query_info,
+//                         window,
+//                         in_align,
+//                         params->near_identical_cutoff);
+//             }
+// ...
+//             if (hsp_index == 0 ||
+//                     (subject_maybe_biased &&
+//                             (nearIdenticalStatus != oldNearIdenticalStatus))) {
+// ...
+//                 status = callbacks->get_range(
+// ...
+//                             in_align, FALSE, subject_is_translated);
+//                     adjust_search_failed =
+//                             Blast_AdjustScores(matrix, query_composition,
+//                                     query.length,
+//                                     &subject_composition,
+//                                     subject.length,
+// ```
+// EXPERIMENT (LOSAT_X_NEWTONLANES), BLASTP: for a group of local matches of one query (those without
+// HSPs, or already ended by `BlastCompo_EarlyTermination` with the current heaps, are skipped), the
+// input of each match's first `Blast_AdjustScores` call as the redo of `postprocess_preliminary_hits`
+// builds it: preliminary hits, incoming alignments, protein windows, the first window with an
+// alignment, its near-identical test, `get_range` through `build_subject_range_data` with the subject
+// range cache the redo will use (so the redo finds the SEG-masked range there), the compositions and
+// `x_newton_input`. The inputs are solved four per vector and kept (`x_newton_lanes::prefetch`).
+// No NCBI counterpart: computes ahead what the redo computes; a result is used only by a call with the
+// same input bits, and the cache returns the value the redo computes itself. It does not change any
+// value NCBI computes.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn x_newton_lanes_prefetch_matches(
+    local_matches: &[BlastpHspList],
+    subjects: &[EncodedProtein],
+    heaps: &[BlastCompoHeap],
+    query_workspace: &BlastpKappaQueryWorkspace,
+    composition_workspace: &BlastCompositionWorkspace,
+    redo_align_params: &BlastRedoAlignParams,
+    subject_range_cache: &mut BlastpKappaSubjectRangeCache,
+) {
+    if redo_align_params.smith_waterman
+        || redo_align_params.position_based
+        || !redo_align_params.uses_composition_based_stats()
+    {
+        return;
+    }
+    let query_info = &query_workspace.redo_query_info;
+    let mut inputs = Vec::new();
+    for local_match in local_matches {
+        if local_match.hsps.is_empty()
+            || blast_compo_early_termination(local_match.best_evalue, heaps)
+        {
+            continue;
+        }
+        let preliminary_hits: Vec<BlastpPreliminaryHsp> = local_match
+            .hsps
+            .iter()
+            .map(super::blast_engine::preliminary_hit_from_local_match_hsp)
+            .collect();
+        let subject = &subjects[local_match.oid as usize];
+        let subject_raw = &subject.aa_seq[1..subject.aa_seq.len() - 1];
+        let incoming_aligns =
+            build_incoming_alignment_list(&preliminary_hits, redo_align_params.score_divisor);
+        let matching_seq =
+            BlastCompoMatchingSequence::new(preliminary_hits[0].s_idx as i32, subject_raw);
+        let Ok(windows) =
+            windows_from_protein_aligns(&incoming_aligns, query_info, matching_seq.length)
+        else {
+            continue;
+        };
+        let Some((window, head)) = windows
+            .iter()
+            .find_map(|window| window.align.as_deref().map(|head| (window, head)))
+        else {
+            continue;
+        };
+        let near_identical = preliminary_test_near_identical(
+            query_info,
+            window,
+            head,
+            redo_align_params.near_identical_cutoff,
+        );
+        let range = build_subject_range_data(
+            &matching_seq,
+            &window.subject_range,
+            &query_info.seq,
+            &window.query_range,
+            query_info.words.as_deref(),
+            head,
+            near_identical,
+            true,
+            redo_align_params,
+            Some(&mut *subject_range_cache),
+        );
+        let subject_composition = read_aa_composition(range.subject.data());
+        if query_info.composition.num_true_amino_acids == 0
+            || subject_composition.num_true_amino_acids == 0
+        {
+            continue;
+        }
+        if let Some(input) = x_newton_input(
+            &redo_align_params.matrix_info,
+            &query_info.composition,
+            range.query.length,
+            &subject_composition,
+            range.subject.length,
+            redo_align_params.compo_adjust_mode,
+            composition_workspace,
+        ) {
+            inputs.push(input);
+        }
+    }
+    crate::core::composition_adjustment::x_newton_lanes::prefetch(inputs);
 }
 
 #[cfg(test)]

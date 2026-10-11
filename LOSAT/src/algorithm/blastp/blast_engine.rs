@@ -83,9 +83,12 @@ use super::kappa::BlastpPostprocessResult;
 use super::kappa::{
     blastp_kappa_range_counters_env_enabled, blastp_trace_hsp_target, blastp_trace_matches_pair,
     build_query_workspace, postprocess_preliminary_hits, print_blastp_kappa_range_counters,
-    reset_blastp_kappa_range_counters, BlastRedoAlignParams, BlastpKappaSubjectRangeCache,
-    BlastpTraceHspTarget,
+    reset_blastp_kappa_range_counters, x_newton_lanes_prefetch_matches, BlastRedoAlignParams,
+    BlastpKappaSubjectRangeCache, BlastpTraceHspTarget,
 };
+// No NCBI counterpart: matches per LOSAT_X_NEWTONLANES prefetch in the BLASTP redo loops; it does
+// not change any value NCBI computes.
+const X_NEWTON_LANES_MATCHES: usize = 16;
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_extend.h:142-154
 // ```c
 // typedef struct BlastUngappedData {
@@ -4320,7 +4323,7 @@ fn remove_preliminary_hits_for_query(
 // new_hsp->query.frame = query_frame;
 // new_hsp->subject.frame = subject_frame;
 // ```
-fn preliminary_hit_from_local_match_hsp(local_hsp: &BlastpHsp) -> BlastpPreliminaryHsp {
+pub(super) fn preliminary_hit_from_local_match_hsp(local_hsp: &BlastpHsp) -> BlastpPreliminaryHsp {
     BlastpPreliminaryHsp {
         query_start: i32::try_from(
             local_hsp
@@ -7212,6 +7215,14 @@ fn run_resolved_in_pool(
         })
     };
 
+    // EXPERIMENT (LOSAT_X_NEWTONLANES): the serial and the query-parallel redo loops below solve
+    // the first Newton problems of the next `X_NEWTON_LANES_MATCHES` matches ahead.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3449-3449
+    // ```c
+    //         for (b = 0; b < numMatches; ++b) {
+    // ```
+    // No NCBI counterpart: reads the switch once; it does not change any value NCBI computes.
+    let x_newton_lanes_on = crate::core::composition_adjustment::x_newton_lanes::mode() != 0;
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -7527,10 +7538,13 @@ fn run_resolved_in_pool(
                         // last_hsplist_index = hit_list->hsplist_count - 1;
                         // *hsp_list_out = hit_list->hsplist_array[last_hsplist_index];
                         // ```
-                        for local_match in preliminary_hit_list
+                        // No NCBI counterpart: position of the next LOSAT_X_NEWTONLANES prefetch.
+                        let mut x_next_prefetch = 0usize;
+                        for (x_match_position, local_match) in preliminary_hit_list
                             .hsplist_array
                             .iter()
                             .take(preliminary_hit_list.hsplist_count)
+                            .enumerate()
                         {
                             let s_idx = local_match.oid;
                             kappa_preliminary_hits.clear();
@@ -7559,6 +7573,31 @@ fn run_resolved_in_pool(
                                 continue;
                             }
 
+                            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3529
+                            // ```c
+                            //                 if (BlastCompo_EarlyTermination(
+                            //                         localMatch->best_evalue,
+                            //                         redoneMatches,
+                            //                         numQueries
+                            //                 )) {
+                            // ```
+                            // No NCBI counterpart: LOSAT_X_NEWTONLANES solves the first Newton problems of this
+                            // and the next matches ahead, four per vector (kappa::x_newton_lanes_prefetch_matches);
+                            // a result is used only by a call with the same input bits. It does not change any value
+                            // NCBI computes.
+                            if x_newton_lanes_on && x_match_position >= x_next_prefetch {
+                                x_next_prefetch = x_match_position + X_NEWTON_LANES_MATCHES;
+                                x_newton_lanes_prefetch_matches(
+                                    &preliminary_hit_list.hsplist_array[x_match_position
+                                        ..x_next_prefetch.min(preliminary_hit_list.hsplist_count)],
+                                    &subjects,
+                                    std::slice::from_ref(&redone_match),
+                                    &query_workspace,
+                                    &composition_workspace,
+                                    &redo_align_params,
+                                    &mut kappa_subject_range_cache,
+                                );
+                            }
                             let postprocessed = postprocess_preliminary_hits(
                                 &kappa_preliminary_hits,
                                 &query_workspace,
@@ -7681,10 +7720,13 @@ fn run_resolved_in_pool(
             // HSPList. Use the sorted preliminary hitlist directly instead of
             // draining an unordered map, so `localMatch->best_evalue` and the
             // admission order match NCBI.
-            for local_match in preliminary_hit_list
+            // No NCBI counterpart: position of the next LOSAT_X_NEWTONLANES prefetch.
+            let mut x_next_prefetch = 0usize;
+            for (x_match_position, local_match) in preliminary_hit_list
                 .hsplist_array
                 .iter()
                 .take(preliminary_hit_list.hsplist_count)
+                .enumerate()
             {
                 let s_idx = local_match.oid;
                 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3612-3619
@@ -7719,6 +7761,31 @@ fn run_resolved_in_pool(
                     continue;
                 }
 
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3529
+                // ```c
+                //                 if (BlastCompo_EarlyTermination(
+                //                         localMatch->best_evalue,
+                //                         redoneMatches,
+                //                         numQueries
+                //                 )) {
+                // ```
+                // No NCBI counterpart: LOSAT_X_NEWTONLANES solves the first Newton problems of this
+                // and the next matches ahead, four per vector (kappa::x_newton_lanes_prefetch_matches);
+                // a result is used only by a call with the same input bits. It does not change any value
+                // NCBI computes.
+                if x_newton_lanes_on && x_match_position >= x_next_prefetch {
+                    x_next_prefetch = x_match_position + X_NEWTON_LANES_MATCHES;
+                    x_newton_lanes_prefetch_matches(
+                        &preliminary_hit_list.hsplist_array[x_match_position
+                            ..x_next_prefetch.min(preliminary_hit_list.hsplist_count)],
+                        &subjects,
+                        &redone_matches,
+                        &query_workspace,
+                        &composition_workspace,
+                        &redo_align_params,
+                        &mut kappa_subject_range_cache,
+                    );
+                }
                 let postprocessed = postprocess_preliminary_hits(
                     &kappa_preliminary_hits,
                     &query_workspace,

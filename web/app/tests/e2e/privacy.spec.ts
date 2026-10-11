@@ -21,6 +21,14 @@
 // the page's blob: reads as requests, and sends no CSP report for a violation in a worker (the CSP
 // still blocks it: the capture's own test shows that nothing reaches the other origin).
 //
+// Requests to another origin never reach the capture's server, so for them the proof is the CSP
+// (`connect-src 'self'` on every response of the site, workers' scripts included). The capture's own
+// test plants an attempt in the page, in a dedicated worker, in a worker that a worker starts and in
+// a service worker (code review 2, L3): in all three browsers each fetch fails and the other origin,
+// which logs every request, receives nothing. Chromium and Firefox also send a CSP report from each
+// worker; WebKit sends none from any worker, so there the evidence is the failed fetch with the
+// empty log: the request never left (one that CORS refused would still reach the other origin).
+//
 // TD-11 (chromium project only: it reads files): no file that the site serves holds a path of the
 // build machine (the checkout, CARGO_HOME, RUSTUP_HOME, HOME) or the user name.
 //
@@ -570,37 +578,80 @@ test.describe('measurement', () => {
   });
 });
 
-test('the capture finds what it looks for: a canary in a URL or a header (also in base64), a query string, a path that is not the site\'s, CSP violations in a page and in a worker', async ({
+/**
+ * The planted sources of the capture's own test that try a request to another origin from outside
+ * the page (code review 2, L3): a dedicated worker, a worker that a worker starts, and a service
+ * worker (at its own scope, in its install event). Each says whether its fetch went through.
+ */
+const PLANTED_SOURCES = ['worker', 'nested-worker', 'service-worker'] as const;
+type PlantedSource = (typeof PLANTED_SOURCES)[number];
+const PLANTED_FILES = new Map([
+  ['__privacy/planted-worker.js', "fetch(new URL(location.href).searchParams.get('to')).then(() => postMessage('sent'), () => postMessage('failed'));"],
+  [
+    '__privacy/planted-nest.js',
+    "const nested = new Worker('/__privacy/planted-worker.js' + location.search); nested.onmessage = (event) => postMessage(event.data); nested.onerror = () => postMessage('the nested worker did not start');",
+  ],
+  [
+    '__privacy/planted-sw.js',
+    `self.addEventListener('install', (event) => event.waitUntil(
+       fetch(new URL(location.href).searchParams.get('to')).then(() => 'sent', () => 'failed').then(async (result) => {
+         for (const client of await self.clients.matchAll({ includeUncontrolled: true, type: 'window' })) client.postMessage({ planted: result });
+       })));`,
+  ],
+]);
+
+test('the capture finds what it looks for: a canary in a URL or a header (also in base64), a query string, a path that is not the site\'s, CSP violations in a page and in workers; nothing reaches another origin from a page, a worker, a nested worker or a service worker', async ({
   context,
   browserName,
 }, testInfo) => {
-  // Another origin that logs what reaches it, and a worker that only this test serves: the page and
-  // the worker each try a request to that origin, which the CSP blocks.
+  // Another origin that logs what reaches it, and the planted workers that only this test serves:
+  // the page and each worker try a request to that origin, which the CSP blocks.
   const foreign = await startCaptureSite(DIST);
-  const worker = "fetch(new URL(location.href).searchParams.get('to')).then(() => postMessage('sent'), () => postMessage('failed'));";
-  const server = await startCaptureSite(DIST, { extra: new Map([['__privacy/planted-worker.js', worker]]) });
+  const server = await startCaptureSite(DIST, { extra: PLANTED_FILES });
   const capture = new PrivacyCapture(server);
   try {
     await capture.attach(context);
     const page = await context.newPage();
     await openApp(page, capture);
     const canary = makeCanary();
-    await page.evaluate(
+    const outcomes = await page.evaluate(
       async ({ token, to }) => {
         await fetch(`/__privacy/planted?note=${token}`);
         // The canary in base64, in a query and in a header (code review 2, L2).
         const encoded = btoa(`>${token} a record`);
         await fetch(`/__privacy/planted-b64?d=${encoded}`, { headers: { 'x-d': encoded } });
         await fetch(`${to}/${token}`).catch(() => undefined);
-        const planted = new Worker(`/__privacy/planted-worker.js?to=${encodeURIComponent(`${to}/from-a-worker`)}`);
-        await new Promise((resolve) => (planted.onmessage = resolve));
+        const target = (source: string) => `?to=${encodeURIComponent(`${to}/from-a-${source}`)}`;
+        const answer = (worker: Worker) =>
+          new Promise<string>((resolve) => {
+            worker.onmessage = (event: MessageEvent<unknown>) => resolve(String(event.data));
+            worker.onerror = () => resolve('the worker did not start');
+          });
+        const worker = await answer(new Worker(`/__privacy/planted-worker.js${target('worker')}`));
+        const nested = await answer(new Worker(`/__privacy/planted-nest.js${target('nested-worker')}`));
+        const fromServiceWorker = new Promise<string>((resolve) => {
+          navigator.serviceWorker.addEventListener('message', (event: MessageEvent<{ planted?: string } | null>) => {
+            if (typeof event.data?.planted === 'string') resolve(event.data.planted);
+          });
+          setTimeout(() => resolve('no answer within 20 s'), 20_000);
+        });
+        navigator.serviceWorker.startMessages();
+        await navigator.serviceWorker.register(`/__privacy/planted-sw.js${target('service-worker')}`, { scope: '/__privacy/' });
+        return { worker, 'nested-worker': nested, 'service-worker': await fromServiceWorker };
       },
       { token: canary.token, to: foreign.origin },
     );
+    // Each planted fetch failed: the CSP blocked it (the other origin would have answered).
+    expect(outcomes).toEqual({ worker: 'failed', 'nested-worker': 'failed', 'service-worker': 'failed' });
+
     const reports = async () => (await capture.findings(canary)).filter((line) => line.startsWith('a CSP violation report'));
-    // Browsers send CSP reports in their own time. WebKit sends none for a worker (S16: seen in WebKit 26.x).
-    const workerReport = expect.stringMatching(/^a CSP violation report: connect-src blocked .* in .*\/__privacy\/planted-worker\.js/);
-    if (browserName !== 'webkit') await expect.poll(reports, { timeout: 15_000 }).toEqual(expect.arrayContaining([workerReport]));
+    const reported = async (source: PlantedSource) => (await reports()).some((line) => line.includes(` blocked ${foreign.origin}/from-a-${source} in `));
+    // Browsers send CSP reports in their own time. Chromium and Firefox send one from each planted
+    // worker; WebKit sends none from any worker (S16: WebKit 26.x), where the evidence is the
+    // worker's failed fetch and the other origin's empty log below.
+    if (browserName !== 'webkit') await expect.poll(async () => (await Promise.all(PLANTED_SOURCES.map(reported))).every(Boolean), { timeout: 15_000 }).toBe(true);
+    const evidence = Object.fromEntries(await Promise.all(PLANTED_SOURCES.map(async (source) => [source, { fetch: outcomes[source], cspReport: await reported(source) }] as const)));
+    testInfo.annotations.push({ type: 'planted workers', description: JSON.stringify(evidence) });
     await expect.poll(async () => (await reports()).length, { timeout: 15_000 }).toBeGreaterThanOrEqual(1);
     testInfo.annotations.push({ type: 'CSP reports', description: (await reports()).join('\n') });
     expect(await capture.findings(canary)).toEqual(
@@ -615,7 +666,7 @@ test('the capture finds what it looks for: a canary in a URL or a header (also i
         expect.stringMatching(new RegExp(`^a CSP violation report: connect-src blocked ${foreign.origin}/LOSATPRIV\\w+ in ${server.origin}/$`)),
       ]),
     );
-    // The CSP held: nothing reached the other origin.
+    // The CSP held: nothing reached the other origin, from the page or from any worker.
     expect(foreign.requests).toEqual([]);
   } finally {
     await capture.report(testInfo);

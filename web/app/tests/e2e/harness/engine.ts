@@ -20,6 +20,7 @@ import { runCases, type CaseResult } from '../../contract/contract';
 import { ENGINE_INPUT_CASES } from '../../contract/engine-input.contract';
 import { RUN_OUTPUT_CASES, type RemoteWriter } from '../../contract/run-output.contract';
 import { memoryDownloader } from '../../unit/support/memory-downloader';
+import type { HighMemoryRequest, HighMemoryResult, HighMemorySearch } from './protocol';
 
 export interface SearchInput {
   /** Where the harness fetches the bytes (the test serves them). */
@@ -512,6 +513,37 @@ export function recordScanner(): Promise<CaseResult[]> {
     };
     worker.postMessage('start');
   });
+}
+
+/**
+ * The threaded reactor on the shared memory as the Engine worker creates it and on one
+ * that starts above 2 GiB (high-memory-worker.ts): the test compares the two.
+ */
+export async function highMemory(
+  cases: ReadonlyArray<{ readonly program: string; readonly argv: readonly string[]; readonly query: SearchInput; readonly subject: SearchInput }>,
+  threads: number,
+): Promise<HighMemoryResult> {
+  const bytesOf = async (input: SearchInput) => new Uint8Array(await (await fetchFile(input)).arrayBuffer());
+  const searches: HighMemorySearch[] = [];
+  for (const c of cases) searches.push({ program: c.program, argv: c.argv, query: await bytesOf(c.query), subject: await bytesOf(c.subject) });
+  const request: HighMemoryRequest = { threads, faultChannel: `losat-high-memory-${crypto.randomUUID()}`, cases: searches };
+  const worker = new Worker(new URL('./high-memory-worker.ts', import.meta.url), { type: 'module' });
+  // A thread that stops leaves the worker inside the engine: the page hears of it here.
+  const faults = new BroadcastChannel(request.faultChannel);
+  try {
+    return await new Promise<HighMemoryResult>((resolve, reject) => {
+      worker.onerror = (event) => reject(new Error(`the high-memory worker failed: ${event.message}`));
+      faults.onmessage = (event: MessageEvent<{ message?: string }>) => reject(new Error(event.data.message ?? 'a thread stopped'));
+      worker.onmessage = (event: MessageEvent<{ type: string; result?: HighMemoryResult; message?: string }>) => {
+        if (event.data.type === 'result') resolve(event.data.result!);
+        else reject(new Error(event.data.message));
+      };
+      worker.postMessage(request);
+    });
+  } finally {
+    faults.close();
+    worker.terminate();
+  }
 }
 
 /** What the browser offers for the threaded module. */

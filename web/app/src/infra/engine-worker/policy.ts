@@ -42,8 +42,9 @@ export interface RenewalLimits {
  * In S09 the linear memory reached its level in the first one to three searches and then
  * stayed there, over 20 repeats of each program and 30 searches of every program in turn;
  * the largest search measured (two E. coli genomes) left about 240 MiB. So the count of searches
- * renews nothing; the high-water mark, half the threaded module's maximum (1 GiB, plan
- * TD-7), gives the memory of an unusually large search back to the browser.
+ * renews nothing; the high-water mark gives the memory of an unusually large search back to
+ * the browser. It was half the threaded module's maximum when that was 1 GiB, and stays
+ * 512 MiB now that the module declares 4 GiB less one page (plan TD-7, §5.5).
  */
 export const DEFAULT_RENEWAL: RenewalLimits = Object.freeze({
   maxRuns: Number.POSITIVE_INFINITY,

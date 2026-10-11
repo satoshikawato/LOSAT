@@ -1,7 +1,8 @@
 // "Try an example" (S16, domain/examples.ts): the program's example query and subject are
 // fetched from the site and put in the search draft as if the user had opened those files,
 // with default settings. Nothing is searched: the user then chooses "Run LOSAT". The UI asks
-// before an example replaces inputs that the user gave (`replacesInputs`).
+// before an example replaces anything that the user entered (`replaces`): inputs, the
+// program's settings, the Job Title.
 import { EXAMPLE_TOPICS, exampleFileName } from '../domain/examples';
 import { programById, type InputRole, type ProgramId } from '../domain/programs';
 import type { ExampleSource } from '../ports/examples';
@@ -24,6 +25,15 @@ export interface ExamplesDeps {
 
 const ROLES: readonly InputRole[] = ['query', 'subject'];
 
+/** What the user entered that loading an example would replace (SearchDraft.loadExample). */
+export interface Replaced {
+  /** Pasted text or files of either role. */
+  readonly inputs: boolean;
+  /** The program's fields, the threads or how the records of a role are searched. */
+  readonly settings: boolean;
+  readonly title: boolean;
+}
+
 /** Whether the draft's inputs are now exactly the program's example files (the user changed nothing of them). */
 export function holdsExample(draft: DraftState, program: ProgramId): boolean {
   return (
@@ -45,15 +55,21 @@ export class Examples {
     return programById(program).unavailable;
   }
 
-  /** Whether loading an example would replace inputs that the user gave (pasted text or files of either role). */
-  replacesInputs(): boolean {
+  /** What loading `program`'s example would replace that the user entered; undefined when nothing. */
+  replaces(program: ProgramId): Replaced | undefined {
     const draft = this.deps.draft.state.get();
-    return ROLES.some((role) => draft[role].paste !== '' || draft[role].sources.length > 0);
+    const replaced: Replaced = {
+      inputs: ROLES.some((role) => draft[role].paste !== '' || draft[role].sources.length > 0),
+      settings: Object.keys(draft.values[program]).length > 0 || draft.threads !== 'auto' || ROLES.some((role) => draft[role].mode !== 'combined'),
+      title: draft.title !== '',
+    };
+    return replaced.inputs || replaced.settings || replaced.title ? replaced : undefined;
   }
 
   /**
-   * Fetches the program's example and puts it in the draft, replacing its inputs (the UI asked
-   * first if there were any). A failed fetch changes nothing in the draft and says why.
+   * Fetches the program's example and puts it in the draft, replacing its inputs, the program's
+   * settings and the Job Title (the UI asked first if the user had entered any). A failed fetch
+   * changes nothing in the draft and says why.
    */
   async load(program: ProgramId): Promise<void> {
     const unavailable = this.unavailable(program);

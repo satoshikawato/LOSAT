@@ -89,7 +89,9 @@ test.describe('Try an example', () => {
     await page.getByTestId('job-title').fill('My search');
     await page.getByTestId('try-example').click();
     const question = page.getByTestId('try-example-question');
-    await expect(question).toContainText('Replace the query and subject in the form with the BLASTN example?');
+    await expect(question).toContainText(
+      'Replace the query and subject in the form with the BLASTN example? It removes your inputs, your BLASTN settings (they return to their defaults) and your Job Title from the form.',
+    );
     await expect(page.getByTestId('try-example-confirm')).toBeFocused();
     await page.getByTestId('try-example-cancel').click();
     await expect(question).toHaveCount(0);
@@ -112,6 +114,22 @@ test.describe('Try an example', () => {
     // The user's own edit ends the line that says the example is loaded.
     await page.getByTestId('subject-source-0-remove').click();
     await expect(page.getByTestId('example-loaded')).toHaveCount(0);
+  });
+
+  test('asks before it replaces the Job Title or settings of a form without inputs', async ({ page }) => {
+    await page.getByTestId('job-title').fill('My search');
+    await page.getByTestId('try-example').click();
+    const question = page.getByTestId('try-example-question');
+    await expect(question).toContainText('It removes your Job Title from the form.');
+    await page.getByTestId('try-example-cancel').click();
+    await expect(page.getByTestId('job-title')).toHaveValue('My search');
+    await page.getByTestId('job-title').fill('');
+    await page.getByTestId('threads').selectOption('2');
+    await page.getByTestId('try-example').click();
+    await expect(question).toContainText('It removes your BLASTN settings (they return to their defaults) from the form.');
+    await page.getByTestId('try-example-confirm').click();
+    await expect(page.getByTestId('example-loaded')).toBeVisible();
+    await expect(page.getByTestId('threads')).toHaveValue('auto');
   });
 });
 

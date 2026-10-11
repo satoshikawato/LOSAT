@@ -116,7 +116,7 @@ describe('Try an example', () => {
     draft.setProgram('blastp');
     draft.setField('-evalue', '1e-3');
     await draft.idle();
-    expect(examples.replacesInputs()).toBe(true);
+    expect(examples.replaces('tblastn')).toEqual({ inputs: true, settings: true, title: true });
 
     await examples.load('tblastn');
     await draft.idle();
@@ -147,7 +147,24 @@ describe('Try an example', () => {
 
   it('needs no question for an empty form', () => {
     const { examples } = setup();
-    expect(examples.replacesInputs()).toBe(false);
+    expect(examples.replaces('blastn')).toBeUndefined();
+  });
+
+  it('asks before it replaces settings or the Job Title, even without inputs', () => {
+    const { draft, examples } = setup();
+    draft.setProgram('blastn');
+    draft.setField('-evalue', '1e-5');
+    expect(examples.replaces('blastn')).toEqual({ inputs: false, settings: true, title: false });
+    // Another program's settings are not replaced by this program's example.
+    expect(examples.replaces('blastp')).toBeUndefined();
+    draft.setThreads(2);
+    expect(examples.replaces('blastp')).toEqual({ inputs: false, settings: true, title: false });
+    draft.setThreads('auto');
+    draft.setMode('query', 'separate');
+    expect(examples.replaces('blastp')).toEqual({ inputs: false, settings: true, title: false });
+    draft.setMode('query', 'combined');
+    draft.setTitle('My job');
+    expect(examples.replaces('blastp')).toEqual({ inputs: false, settings: false, title: true });
   });
 
   it("does not load BLASTX's example while BLASTX cannot be searched, and says why", async () => {

@@ -2,35 +2,65 @@
 // The release this tab runs and its offline use, in the header (plan §5.9): "Offline ready"
 // only once the site's service worker has stored and checked every file of the release, and
 // while the pinned release (which an offline start opens) is this tab's.
-import type { ReleaseManager, ReleaseState } from '../application/release';
+// The status keeps one size in every state, at every width: a fixed width (at most the
+// header's) and one line (two on a phone: the release, then the state), so that a change of
+// state never moves the page under the user's pointer. A longer text ends in an ellipsis; the
+// whole text is the status's title.
+import { computed } from 'vue';
+import type { OfflineState, ReleaseManager, ReleaseState } from '../application/release';
 import { formatBytes, formatCount } from './format';
 
-defineProps<{ release: ReleaseManager; state: ReleaseState }>();
+const props = defineProps<{ release: ReleaseManager; state: ReleaseState }>();
+const offline = computed(() => props.state.offline);
+
+const text = computed(() => describe(offline.value));
+
+/** The line's text, and the whole text for the title (the files of a preparation as well). */
+function describe(state: OfflineState): { line: string; whole: string } {
+  switch (state.kind) {
+    case 'ready':
+      return same('Offline ready');
+    case 'stored':
+      return same(
+        state.pin === undefined
+          ? 'Not offline ready: an offline start needs this browser to keep the choice of release, and it did not.'
+          : `Stored for offline use; this browser now starts release ${state.pin}.`,
+      );
+    case 'preparing': {
+      const p = state.progress;
+      if (p === undefined) return same('Preparing offline use…');
+      return {
+        line: `Preparing offline use: ${formatBytes(p.bytes)} of ${formatBytes(p.bytesTotal)}…`,
+        whole: `Preparing offline use: ${formatCount(p.files)} of ${formatCount(p.filesTotal)} files (${formatBytes(p.bytes)} of ${formatBytes(p.bytesTotal)})…`,
+      };
+    }
+    case 'failed':
+      return same(`Offline use could not be prepared (${state.reason}).`);
+    case 'unsupported':
+      return same(state.reason === undefined ? 'Offline use is not available in this browser.' : `Offline use is not available (${state.reason}).`);
+    case 'waiting':
+      return same('Offline use is prepared once the page has loaded.');
+  }
+}
+
+function same(line: string): { line: string; whole: string } {
+  return { line, whole: line };
+}
 </script>
 
 <template>
-  <span class="offline-status" data-testid="offline-status" :data-state="state.offline.kind">
-    <span>Release <span class="release-id" data-testid="release-id">{{ state.release }}</span></span>
-    <span v-if="state.offline.kind === 'ready'" class="ok" data-testid="offline-ready">Offline ready</span>
-    <span v-else-if="state.offline.kind === 'stored'" data-testid="offline-stored">
-      {{
-        state.offline.pin === undefined
-          ? 'Not offline ready: an offline start needs this browser to keep the choice of release, and it did not.'
-          : `Stored for offline use; this browser now starts release ${state.offline.pin}.`
-      }}
+  <span class="offline-status" data-testid="offline-status" :data-state="offline.kind" :title="`Release ${state.release}. ${text.whole}`">
+    <span class="offline-release">Release <span class="release-id" data-testid="release-id">{{ state.release }}</span></span>
+    <span class="offline-state">
+      <span
+        class="offline-message"
+        :class="{ ok: offline.kind === 'ready', error: offline.kind === 'failed' }"
+        :data-testid="`offline-${offline.kind}`"
+        >{{ text.line }}</span
+      >
+      <button v-if="offline.kind === 'failed'" type="button" class="link" data-testid="offline-retry" @click="release.retryOffline()">
+        Try again
+      </button>
     </span>
-    <span v-else-if="state.offline.kind === 'preparing'" data-testid="offline-preparing">
-      Preparing offline use<template v-if="state.offline.progress">:
-        {{ formatCount(state.offline.progress.files) }} of {{ formatCount(state.offline.progress.filesTotal) }} files
-        ({{ formatBytes(state.offline.progress.bytes) }} of {{ formatBytes(state.offline.progress.bytesTotal) }})</template>…
-    </span>
-    <span v-else-if="state.offline.kind === 'failed'" data-testid="offline-failed">
-      <span class="error">Offline use could not be prepared ({{ state.offline.reason }}).</span>
-      <button type="button" class="link" data-testid="offline-retry" @click="release.retryOffline()">Try again</button>
-    </span>
-    <span v-else-if="state.offline.kind === 'unsupported'" data-testid="offline-unsupported">
-      {{ state.offline.reason === undefined ? 'Offline use is not available in this browser.' : `Offline use is not available (${state.offline.reason}).` }}
-    </span>
-    <span v-else data-testid="offline-waiting">Offline use is prepared once the page has loaded.</span>
   </span>
 </template>

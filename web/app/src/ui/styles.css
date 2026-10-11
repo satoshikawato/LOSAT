@@ -2317,19 +2317,67 @@ button.link[aria-disabled='true'] {
 }
 
 /* W7: the release and its offline use in the header, and the explicit update
-   (OfflineStatus.vue, UpdateNotice.vue). */
+   (OfflineStatus.vue, UpdateNotice.vue). The status has one size in every state: a fixed width
+   (at most the header's) and one line (two on a phone), so that the header's lines and
+   everything below them stay where they are while the release is prepared. The message ends in
+   an ellipsis; the release ID and "Try again" keep their room. */
 .offline-status {
   display: inline-flex;
-  flex-wrap: wrap;
+  flex: none;
   align-items: baseline;
-  gap: 2px 10px;
+  gap: 0 10px;
+  width: 60em;
+  max-width: 100%;
+  height: 1.4em;
+  line-height: 1.4;
+  overflow: hidden;
+  white-space: nowrap;
   color: var(--muted);
   font-size: 0.88em;
 }
 
+.offline-status .offline-release {
+  flex: none;
+}
+
+.offline-status .offline-state {
+  display: flex;
+  flex: 0 1 auto;
+  min-width: 0;
+  align-items: baseline;
+  gap: 0 10px;
+}
+
+.offline-status .offline-message {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* Also for .error, which keeps an engine message's line breaks elsewhere. */
+  white-space: nowrap;
+}
+
+.offline-status .offline-state > button {
+  flex: none;
+}
+
+@media (max-width: 800px) {
+  /* The release on the first line, the state and "Try again" on the whole of the second. */
+  .offline-status {
+    flex-wrap: wrap;
+    height: 2.8em;
+  }
+
+  .offline-status .offline-release,
+  .offline-status .offline-state {
+    flex-basis: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
 .offline-status .release-id {
   font-family: ui-monospace, monospace;
-  overflow-wrap: anywhere;
 }
 
 .update-notice {

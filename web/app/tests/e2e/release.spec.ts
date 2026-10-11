@@ -151,3 +151,69 @@ test('a missing file is 404 with the site’s headers, and no page stands in for
   await expect(page.getByRole('heading', { name: 'Not found' })).toBeVisible();
   await expect(page.getByTestId('add-to-queue')).toHaveCount(0);
 });
+
+/** One layout of the page while the app starts: the header's offline status and what follows the header. */
+interface Layout {
+  readonly state: string;
+  readonly width: number;
+  readonly height: number;
+  readonly headerBottom: number;
+  readonly mainTop: number;
+}
+
+/** Records the layout at every change of the page (from before the app mounts) into `window.__layouts`. */
+async function recordLayouts(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const layouts: Layout[] = [];
+    (window as unknown as { __layouts: Layout[] }).__layouts = layouts;
+    const record = () => {
+      const status = document.querySelector('[data-testid="offline-status"]');
+      const header = document.querySelector('header.app-header');
+      const main = document.querySelector('nav.main-tabs');
+      if (status === null || header === null || main === null) return;
+      const box = status.getBoundingClientRect();
+      const layout = {
+        state: status.getAttribute('data-state') ?? '',
+        width: box.width,
+        height: box.height,
+        headerBottom: header.getBoundingClientRect().bottom,
+        mainTop: main.getBoundingClientRect().top,
+      };
+      const last = layouts.at(-1);
+      if (last === undefined || (Object.keys(layout) as (keyof Layout)[]).some((key) => layout[key] !== last[key])) layouts.push(layout);
+    };
+    new MutationObserver(record).observe(document, { subtree: true, childList: true, characterData: true, attributes: true });
+  });
+}
+
+const layoutsOf = (page: Page) => page.evaluate(() => (window as unknown as { __layouts: Layout[] }).__layouts);
+
+for (const size of [
+  { name: 'desktop', width: 1280, height: 800 },
+  { name: 'phone', width: 390, height: 844 },
+]) {
+  test(`the header's offline status keeps one size in every state, so nothing below the header moves (${size.name})`, async ({ browser }) => {
+    const viewport = { width: size.width, height: size.height };
+    const context = await browser.newContext({ baseURL: E2E_ORIGIN, viewport });
+    const page = await context.newPage();
+    await recordLayouts(page);
+    await page.goto('/');
+    await appStarted(page);
+    await expect(page.getByTestId('offline-status')).toHaveAttribute('data-state', 'ready', { timeout: 60_000 });
+    const layouts = await layoutsOf(page);
+    expect(layouts.map((layout) => layout.state)).toEqual(expect.arrayContaining(['waiting', 'preparing', 'ready']));
+    const first = layouts[0]!;
+    for (const layout of layouts) expect({ ...layout, state: first.state }, layout.state).toEqual(first);
+    await context.close();
+
+    // Without service workers (the status then says why offline use is not available), the same size and the same places.
+    const blocked = await browser.newContext({ baseURL: E2E_ORIGIN, viewport, serviceWorkers: 'block' });
+    const other = await blocked.newPage();
+    await recordLayouts(other);
+    await other.goto('/');
+    await appStarted(other);
+    await expect(other.getByTestId('offline-status')).not.toHaveAttribute('data-state', /^(waiting|preparing)$/, { timeout: 60_000 });
+    for (const layout of await layoutsOf(other)) expect({ ...layout, state: first.state }, layout.state).toEqual(first);
+    await blocked.close();
+  });
+}

@@ -12,7 +12,7 @@
     "build": "vite build",
     "preview": "node build/site-server.ts dist --port 4173",
     "assemble": "node build/assemble-site.ts",
-    "typecheck": "vue-tsc --noEmit",
+    "typecheck": "vue-tsc --noEmit && vue-tsc --noEmit -p tsconfig.sw.json",
     "lint": "eslint .",
     "test": "vitest run",
     "e2e": "playwright test",

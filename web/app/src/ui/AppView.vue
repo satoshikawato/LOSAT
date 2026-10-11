@@ -11,17 +11,20 @@ import type { RunFiles } from '../application/run-files';
 import type { Examples } from '../application/examples';
 import type { GettingStarted as GettingStartedState } from '../application/onboarding';
 import type { SelfTest } from '../application/self-test';
+import type { ReleaseManager } from '../application/release';
 import { formatCount } from './format';
 import { useStore } from './useStore';
 import AttentionPanel from './AttentionPanel.vue';
 import CandidatesPanel from './CandidatesPanel.vue';
 import GettingStarted from './GettingStarted.vue';
 import QueuePanel from './QueuePanel.vue';
+import OfflineStatus from './OfflineStatus.vue';
 import ResultsPanel, { type ResultsView } from './ResultsPanel.vue';
 import ResumeNotice from './ResumeNotice.vue';
 import SearchPanel from './SearchPanel.vue';
 import SessionPanel from './SessionPanel.vue';
 import StorageStatus from './StorageStatus.vue';
+import UpdateNotice from './UpdateNotice.vue';
 
 const props = defineProps<{
   coordinator: Coordinator;
@@ -36,11 +39,13 @@ const props = defineProps<{
   examples: Examples;
   selfTest: SelfTest;
   gettingStarted: GettingStartedState;
+  release: ReleaseManager;
 }>();
 const state = useStore(props.coordinator.state);
 const attentionState = useStore(props.attention.state);
 const trayState = useStore(props.candidates.state);
 const gettingStartedState = useStore(props.gettingStarted.state);
+const releaseState = useStore(props.release.state);
 const tab = ref<'search' | 'results' | 'candidates'>('search');
 const resultsPanel = ref<InstanceType<typeof ResultsPanel>>();
 const searchPanel = ref<InstanceType<typeof SearchPanel>>();
@@ -108,10 +113,12 @@ onUnmounted(() => {
     >
       Getting started
     </button>
+    <OfflineStatus :release="release" :state="releaseState" />
   </header>
   <p v-if="usesFakeEngine" class="banner" data-testid="fake-engine-banner">
     Development build: a fake engine is in use. Outputs are not search results.
   </p>
+  <UpdateNotice :release="release" :state="releaseState" :runs="state.runs" :candidates="trayState.candidates" />
   <!-- Kept mounted, so that the header's aria-controls names it and the self-test's section keeps its state. -->
   <GettingStarted v-show="gettingStartedState.open" :getting-started="gettingStarted" :self-test="selfTest" />
   <ResumeNotice v-if="attentionState.resume" :report="attentionState.resume" @dismiss="attention.dismissResume()" />

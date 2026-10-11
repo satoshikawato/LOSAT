@@ -10,6 +10,7 @@ import { GettingStarted } from './application/onboarding';
 import { SelfTest } from './application/self-test';
 import { ResultsBrowser } from './application/results';
 import { ResultExporter } from './application/result-export';
+import { ReleaseManager } from './application/release';
 import { Session } from './application/session';
 import { RunFiles } from './application/run-files';
 import { parseSelfTestTable } from './domain/examples';
@@ -21,8 +22,10 @@ import { browserCompression } from './infra/browser/compression';
 import { browserExamples } from './infra/browser/examples';
 import { browserLocalSettings } from './infra/browser/local-settings';
 import { nextTask } from './infra/browser/next-task';
+import { browserOffline, browserReleaseChannel, browserReleasePage, browserReleasePin } from './infra/browser/offline';
 import { browserPage } from './infra/browser/page';
 import { browserDownloader, sha256Hex } from './infra/browser/platform';
+import { browserSite } from './infra/browser/site';
 import { startDataWorker } from './infra/data-worker/gateway';
 import { WasmEngine } from './infra/engine-worker/gateway';
 import { AUTO_SERIAL_BELOW_BYTES, chooseThreads, type RenewalLimits } from './infra/engine-worker/policy';
@@ -54,6 +57,8 @@ export interface App {
   readonly selfTest: SelfTest;
   /** The "Getting started" panel (application/onboarding.ts). */
   readonly gettingStarted: GettingStarted;
+  /** This tab's release, its offline use and the explicit update (application/release.ts); main.ts starts it. */
+  readonly release: ReleaseManager;
 }
 
 /** This build's version and commit (vite.config.ts), written into session files; "unknown" where a build does not set them. */
@@ -71,6 +76,15 @@ const SITE_BUILD: SiteBuild = Object.freeze({
   ),
   app: APP_BUILD,
 });
+
+/** The release ID of this build (build/release.ts); "unknown" where a build does not define it. */
+const RELEASE_ID = typeof __LOSAT_RELEASE_ID__ === 'string' ? __LOSAT_RELEASE_ID__ : 'unknown';
+/**
+ * Whether this page was started from its release directory `/r/<release-id>/` (the boot page's
+ * site layout). Only then are offline use and updates offered: the development server and the
+ * test harness serve the app elsewhere.
+ */
+const SERVED_AS_RELEASE = RELEASE_ID !== 'unknown' && new URL(import.meta.url).pathname.startsWith(`/r/${RELEASE_ID}/`);
 
 export interface AppOptions {
   /** Where exports go; the browser's download by default. */
@@ -161,5 +175,16 @@ export function createApp(options: AppOptions = {}): App {
     fake: ENGINE_ASSETS === null,
   });
   const gettingStarted = new GettingStarted(browserLocalSettings);
-  return { coordinator, draft, results, candidates, exporter, attention, usesFakeEngine: ENGINE_ASSETS === null, session, runFiles, examples, selfTest, gettingStarted };
+  const release = new ReleaseManager({
+    release: RELEASE_ID,
+    served: SERVED_AS_RELEASE,
+    offline: browserOffline(),
+    pin: browserReleasePin,
+    channel: browserReleaseChannel(),
+    site: browserSite,
+    page: browserPage,
+    host: browserReleasePage,
+    runs: coordinator.state,
+  });
+  return { coordinator, draft, results, candidates, exporter, attention, usesFakeEngine: ENGINE_ASSETS === null, session, runFiles, examples, selfTest, gettingStarted, release };
 }

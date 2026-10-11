@@ -78,6 +78,8 @@ interface Served {
   cutAfter?: number;
   /** The request never ends. */
   hang?: boolean;
+  /** What the browser's HTTP cache answers, unless the request goes past it (`reload`, `no-store`). */
+  cachedStatus?: number;
 }
 
 /** A site with release `a` (two assets) and its shell; `serve` changes what a path answers. */
@@ -108,6 +110,9 @@ function site(release = 'a') {
     const path = new URL(url, ORIGIN).pathname;
     requests.push({ path, cache: init.cache });
     const entry = served.get(path);
+    if (entry?.cachedStatus !== undefined && init.cache !== 'reload' && init.cache !== 'no-store') {
+      return new Response('not found', { status: entry.cachedStatus, headers: SITE_HEADERS });
+    }
     if (entry === undefined) return new Response('not found', { status: 404, headers: SITE_HEADERS });
     if (entry.hang === true) {
       return new Promise((_, reject) => init.signal?.addEventListener('abort', () => reject(init.signal?.reason)));
@@ -230,6 +235,18 @@ describe('preparing a release', () => {
     s.served.set('/r/a/engine/serial.wasm', { body: new Uint8Array(4096) });
     await prepare(s, new FakeCaches());
     expect(s.requests.filter((r) => r.path === '/r/a/engine/serial.wasm').map((r) => r.cache)).toEqual(['default', 'reload']);
+  });
+
+  it('reads a 404 that the HTTP cache kept once more past it, for a file and for the release manifest', async () => {
+    const s = site();
+    s.served.set('/r/a/engine/serial.wasm', { body: s.assets['engine/serial.wasm']!, cachedStatus: 404 });
+    s.served.set('/r/a/release-manifest.json', { body: bytesOf(JSON.stringify(s.manifest)), cachedStatus: 404 });
+    const caches = new FakeCaches();
+    const { outcome } = await prepare(s, caches);
+    expect(outcome.ok).toBe(true);
+    expect(s.requests.filter((r) => r.path === '/r/a/engine/serial.wasm').map((r) => r.cache)).toEqual(['default', 'reload']);
+    expect(s.requests.filter((r) => r.path === '/r/a/release-manifest.json').map((r) => r.cache)).toEqual(['no-cache', 'reload']);
+    expect(await isComplete(caches, ORIGIN, 'a')).toBe(true);
   });
 
   it('fails when no file arrives for a while', async () => {

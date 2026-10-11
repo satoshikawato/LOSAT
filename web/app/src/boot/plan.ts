@@ -72,6 +72,16 @@ export type ManifestOutcome =
   /** Another status (a server error). */
   | { readonly kind: 'failed'; readonly reason: string };
 
+/**
+ * Whether an answer that would mean "not served" (404, 410, not JSON) must be read once more
+ * past the HTTP cache first: under /r/ the site's rules make every answer immutable, a 404
+ * included, so a release that was missing once and is served again (a rollback undone) would
+ * otherwise stay "not served" for as long as the browser keeps that 404.
+ */
+export function recheckManifest(fetched: FetchedManifest | undefined): boolean {
+  return fetched !== undefined && (fetched.status === 404 || fetched.status === 410 || (fetched.status >= 200 && fetched.status <= 299 && !fetched.json));
+}
+
 export function judgeManifest(release: string, fetched: FetchedManifest | undefined): ManifestOutcome {
   if (fetched === undefined) return { kind: 'unreachable' };
   if (fetched.status === 404 || fetched.status === 410) return { kind: 'not-served', reason: `the site answered ${fetched.status}` };

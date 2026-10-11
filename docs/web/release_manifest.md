@@ -120,9 +120,13 @@ The boot page is static HTML with a `<div id="boot" hidden>` for its messages an
 4. Fetch `/r/<id>/release-manifest.json` (default cache mode, so that the service worker answers it
    when the release is stored; 20 s timeout) and check it (format 1, `release` = `<id>`, entry paths
    among the assets). When it cannot be used:
-   - 404 or 410, an answer that is not JSON (a host that answers every path with a page), or a
-     manifest that fails the check: "This browser uses LOSAT Web release `<id>`, which this site no
-     longer serves." With a site index whose `latest` is another release, a button "Use release
+   - 404 or 410, or an answer that is not JSON (a host that answers every path with a page): the
+     manifest is read once more with `cache: 'reload'` first, because the rules for `/r/*` make a
+     404 there immutable in the HTTP cache too, and a release served again (a rollback undone)
+     would otherwise stay missing for that browser. (The service worker's preparation, likewise,
+     reads a manifest or a file that fails once more past the HTTP cache.)
+   - 404 or 410 again, an answer that is not JSON, or a manifest that fails the check: "This
+     browser uses LOSAT Web release `<id>`, which this site no longer serves." With a site index whose `latest` is another release, a button "Use release
      `<latest>`" writes the pin and reloads; if the write throws, the page says that the browser did
      not let LOSAT Web save the choice. Never a silent switch.
    - no answer while offline (the release is not stored): "This browser uses LOSAT Web release
@@ -198,8 +202,9 @@ What Pages does besides (developers.cloudflare.com/pages/configuration/serving-p
 - **Default caching.** Without a rule, Pages sends `Cache-Control: public, max-age=0, must-revalidate`.
 - The rules match the request's path, so a 404 under `/r/` also carries the immutable
   `Cache-Control` (if Pages applies `_headers` to its 404 answers; to be seen on the preview). A
-  browser may then remember that a release is missing; release IDs are not reused, so this only
-  matters for a release that is removed.
+  browser may then remember that a release is missing; the boot page and the service worker
+  therefore read a missing manifest or file once more past the HTTP cache (`cache: 'reload'`)
+  before they treat the release as not served.
 
 ## The local server (`web/app/build/site-server.ts`)
 

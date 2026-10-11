@@ -139,7 +139,12 @@ export async function prepareRelease(
   let manifest: Response | undefined;
   if (!complete) {
     try {
-      const read = await fetchJson(deps, origin + releasePath(release, MANIFEST_NAME), { cache: 'no-cache' }, 'the release manifest');
+      const url = origin + releasePath(release, MANIFEST_NAME);
+      // A 404 under /r/ may be the HTTP cache's (the rules make it immutable there): a failed
+      // read is tried once more past the HTTP cache before the release counts as not served.
+      const read = await fetchJson(deps, url, { cache: 'no-cache' }, 'the release manifest').catch(() =>
+        fetchJson(deps, url, { cache: 'reload' }, 'the release manifest'),
+      );
       assets = deps.readManifest(read.value, release);
       manifest = read.response;
     } catch (error) {
@@ -243,8 +248,9 @@ async function downloadAll(
 }
 
 /**
- * Downloads one file and checks it. A mismatch is tried once more past the HTTP cache (a
- * stale entry there is not the server's file); a second mismatch fails.
+ * Downloads one file and checks it. A mismatch, or an answer that may not be stored (a 404
+ * that the HTTP cache kept, say), is tried once more past the HTTP cache (a stale entry there
+ * is not the server's file); a second one fails.
  */
 async function downloadVerified(deps: PrepareDeps, url: string, file: ListedFile, shell: boolean, signal: AbortSignal): Promise<Response> {
   const what = file.path;
@@ -257,7 +263,14 @@ async function downloadVerified(deps: PrepareDeps, url: string, file: ListedFile
     } catch (error) {
       throw new Error(`${what}: the download failed (${message(signal.reason ?? error)})`);
     }
-    check(response, what);
+    if (cache !== 'reload') {
+      try {
+        check(response, what);
+      } catch (error) {
+        mismatch = message(error);
+        continue;
+      }
+    } else check(response, what);
     const kept = response.clone();
     try {
       bytes = await response.arrayBuffer();

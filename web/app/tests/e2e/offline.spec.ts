@@ -379,6 +379,24 @@ test('6. a pin to a release that the site no longer serves and that is not store
   expect(await pinOf(page)).toBe(A);
 });
 
+test('6c. a pinned release that the site did not serve once and serves again starts: the 404 that the HTTP cache kept is read again past it', async ({
+  page,
+}) => {
+  await open(page);
+  await appStarted(page, A);
+  await offlineReady(page);
+  // B is pinned (another tab's switch, say) while this deployment does not serve it: its
+  // manifest is 404, which the rules for /r/* make immutable in the HTTP cache.
+  await page.evaluate(([key, release]) => localStorage.setItem(key, release), [PIN_KEY, B] as const);
+  await page.reload();
+  await expect(page.getByTestId('boot-message')).toHaveAttribute('data-kind', 'not-served');
+  // The deployment serves B again (a rollback undone): the boot does not keep the cached 404.
+  front.upstream = origins.ab;
+  await page.reload();
+  await appStarted(page, B);
+  expect(await pinOf(page)).toBe(B);
+});
+
 test('6b. without a pin and without the network, the stored boot page says that the first start needs the network', async ({ page, context, browserName }) => {
   await open(page);
   await appStarted(page, A);

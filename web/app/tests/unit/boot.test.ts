@@ -8,6 +8,7 @@ import {
   judgeManifest,
   PIN_KEY,
   readPin,
+  recheckManifest,
   writePin,
 } from '../../src/boot/plan';
 import { parseReleaseManifest } from '../../src/domain/release-manifest';
@@ -101,6 +102,17 @@ describe('boot: the manifest', () => {
   it('tells a network failure and a server error apart', () => {
     expect(judgeManifest('old', undefined)).toEqual({ kind: 'unreachable' });
     expect(judgeManifest('old', { status: 503, body: undefined, json: false })).toMatchObject({ kind: 'failed' });
+  });
+});
+
+describe('boot: an answer that means "not served" is read once more past the HTTP cache', () => {
+  it('for 404, 410 and an answer that is not JSON; not for a manifest, a server error or no answer', () => {
+    expect(recheckManifest({ status: 404, body: undefined, json: false })).toBe(true);
+    expect(recheckManifest({ status: 410, body: undefined, json: false })).toBe(true);
+    expect(recheckManifest({ status: 200, body: undefined, json: false })).toBe(true);
+    expect(recheckManifest({ status: 200, body: {}, json: true })).toBe(false);
+    expect(recheckManifest({ status: 503, body: undefined, json: false })).toBe(false);
+    expect(recheckManifest(undefined)).toBe(false);
   });
 });
 

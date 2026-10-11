@@ -12,6 +12,7 @@ import {
   judgeManifest,
   pinNotSavedMessage,
   readPin,
+  recheckManifest,
   writePin,
   type BootMessage,
   type FetchedManifest,
@@ -34,11 +35,20 @@ async function fetchIndex(): Promise<SiteIndex | undefined> {
   }
 }
 
-/** The release's manifest, with the default cache mode: a service worker answers it when the release is stored. */
+/**
+ * The release's manifest, with the default cache mode: a service worker answers it when the
+ * release is stored. An answer that means "not served" is read once more past the HTTP cache
+ * (plan.ts recheckManifest); without an answer to that, the first one stands.
+ */
 async function fetchManifest(release: string): Promise<FetchedManifest | undefined> {
+  const first = await requestManifest(release, 'default');
+  return recheckManifest(first) ? ((await requestManifest(release, 'reload')) ?? first) : first;
+}
+
+async function requestManifest(release: string, cache: RequestCache): Promise<FetchedManifest | undefined> {
   let response: Response;
   try {
-    response = await fetch(releaseManifestUrl(release), { credentials: 'same-origin', signal: AbortSignal.timeout(MANIFEST_TIMEOUT_MS) });
+    response = await fetch(releaseManifestUrl(release), { cache, credentials: 'same-origin', signal: AbortSignal.timeout(MANIFEST_TIMEOUT_MS) });
   } catch {
     return undefined;
   }

@@ -242,6 +242,23 @@ Rebuilding less:
 - `LOSAT_X_BXSEGMEMO=1` blastx redo stage: the subject SEG once per subject instead of once per window
   (per-thread memo of the last subject, byte-equal input; `blastx/x_seg_memo.rs`). Shadow:
   `LOSAT_X_BXSEGMEMOSHADOW=1` (the masker also runs on every call). Strict-set candidate (S-C, round 5).
+- `LOSAT_X_HSPINPLACE=1` (TBLASTX, memory; not in the strict set: off unless set) the HSP list of a subject is sorted, cut
+  into linking groups, put together and replayed into NCBI's output order without a second whole copy
+  alive (`tblastx/x_hsp_inplace.rs`, exactness argument in its header). The index sorts of
+  `sort_ungapped_hits_by_index_replay` (score order, link order) move the records inside the list, cycle by
+  cycle, after the same `sort_by`; the linking call cuts its groups off the end of the sorted list as exactly
+  sized lists, links them with the same per-group functions (serially or on the pool, as before), joins them
+  in one allocation of the exact size, and applies the output replay as a permutation in place. A replay that
+  leaves an HSP out or repeats one returns the reference's cloned list (`LOSAT_X_STATS=1` counts both:
+  `[X_STATS] HSPINPLACE sorts= linkings= hits= groups= replay_inplace= replay_fallbacks= gate_reference=`).
+  The per-group scratch of the literal port is not reserved unless that port can run (`LOSAT_LINKING_LEGACY`,
+  a linking trace, `LOSAT_LINK_FAST_SHADOW`). A linking call with `LOSAT_DEBUG_CUTOFFS` or
+  `LOSAT_DIAGNOSTICS` runs the reference function (`gate_reference`).
+- `LOSAT_X_HSPINPLACESHADOW=1` shadow of `LOSAT_X_HSPINPLACE` (implies nothing else): every sort call and
+  every linking call runs both ways (the reference on a clone of the input) and the results are compared HSP
+  by HSP, every field, E-values by bits; the first difference stops the run and the search continues with the
+  reference's result. One line at exit:
+  `[X_SHADOW] HSPINPLACE sorts= linkings= hits_compared= replay_fallbacks=`.
 
 Scheduling (each value computed by one thread with the original function; order of output kept):
 

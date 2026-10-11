@@ -34,6 +34,24 @@ use crate::algorithm::tblastx::ungapped_hit_sort::sort_ungapped_hits_by_index_re
 
 use super::params::LinkingParams;
 
+// EXPERIMENT (LOSAT_X_HSPINPLACE / LOSAT_X_HSPINPLACESHADOW): the HSP list sorted, grouped, put
+// together and replayed without a second whole copy alive; a child module of this file so that it
+// uses the comparators, per-group functions and replay below unchanged (see tblastx/x_hsp_inplace.rs).
+//
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:476-480
+// ```c
+// link_hsp_array =
+//    (LinkHSPStruct**) malloc(total_number_of_hsps*sizeof(LinkHSPStruct*));
+// for (index = 0; index < total_number_of_hsps; ++index) {
+//    link_hsp_array[index] = (LinkHSPStruct*) calloc(1, sizeof(LinkHSPStruct));
+//    link_hsp_array[index]->hsp = hsp_array[index];
+// ```
+// NCBI works on one array of pointers to the HSPs; the module is used only when one of its switches
+// is set.
+#[path = "../x_hsp_inplace.rs"]
+pub(crate) mod x_hsp_inplace;
+pub use x_hsp_inplace::print_summary as x_hsp_inplace_print_summary;
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -591,6 +609,42 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
 ) -> Vec<UngappedHit> {
     if hits.is_empty() {
         return hits;
+    }
+
+    // EXPERIMENT (LOSAT_X_HSPINPLACE / LOSAT_X_HSPINPLACESHADOW), dispatch: the steps of this
+    // function on one list (sort in place, groups cut off the end of the list, exact-capacity
+    // assembly, output replay in place) with the same per-group calls; see x_hsp_inplace.rs for
+    // why it is the same list. Without a switch, and with LOSAT_DEBUG_CUTOFFS or LOSAT_DIAGNOSTICS,
+    // the body below runs on the untouched input.
+    //
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:483-486,990-994
+    // ```c
+    // /* Sort by (reverse) position. */
+    // if (kTranslatedQuery) {
+    //    qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
+    //          s_RevCompareHSPsTbx);
+    // ...
+    // if (kTranslatedQuery) {
+    //    qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
+    //          s_RevCompareHSPsTransl);
+    //    qsort(link_hsp_array, total_number_of_hsps,sizeof(LinkHSPStruct*),
+    //          s_FwdCompareHSPsTransl);
+    // ```
+    // NCBI sorts and regroups one array of pointers and never copies the HSPs.
+    if x_hsp_inplace::mode() != 0 {
+        match x_hsp_inplace::linking_dispatch(
+            hits,
+            params,
+            linking_params,
+            query_contexts,
+            subject_frame_bases,
+            length_adj_per_context,
+            eff_searchsp_per_context,
+            allow_parallel,
+        ) {
+            Ok(linked) => return linked,
+            Err(untouched) => hits = untouched,
+        }
     }
 
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:476-480
@@ -2970,7 +3024,7 @@ mod tests {
     }
 
     /// Helper to create a mock UngappedHit with specified coordinates
-    fn mock_hit(
+    pub(super) fn mock_hit(
         q_aa_start: usize,
         q_aa_end: usize,
         s_aa_start: usize,
@@ -3566,7 +3620,7 @@ mod tests {
         link_hsp_group_incr_with, IncrOptions, IncrStats,
     };
 
-    fn fast_test_cutoffs() -> LinkHspCutoffs {
+    pub(super) fn fast_test_cutoffs() -> LinkHspCutoffs {
         LinkHspCutoffs {
             cutoff_small_gap: 41,
             cutoff_big_gap: 44,
@@ -3575,7 +3629,7 @@ mod tests {
         }
     }
 
-    fn fast_test_contexts() -> (KarlinParams, Vec<QueryContext>, Vec<f64>) {
+    pub(super) fn fast_test_contexts() -> (KarlinParams, Vec<QueryContext>, Vec<f64>) {
         let params = KarlinParams {
             lambda: 0.3176,
             k: 0.134,

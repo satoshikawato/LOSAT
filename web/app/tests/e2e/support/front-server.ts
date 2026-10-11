@@ -6,6 +6,10 @@
 //   emulation does not reach a service worker's requests in Firefox, and in WebKit it fails the
 //   navigation itself: logs/wp-u/progress.md, probe 1a),
 // - cut the connection in the middle of a file's body (`cut`),
+// - keep the release files out of the browser's HTTP cache: a 200 under /r/ is sent with
+//   `Cache-Control: no-store` instead of the site's immutable rule (public/_headers keeps that
+//   rule; 404s keep it too, as V-OFF 6c needs), so that an offline start can only be served by
+//   the service worker's caches, for the page's requests and its workers' alike,
 // - and record every request it receives.
 import { createServer, request as forward, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 
@@ -34,17 +38,18 @@ function relay(front: FrontServer, request: IncomingMessage, response: ServerRes
     (answer) => {
       const status = answer.statusCode ?? 502;
       front.requests.push({ method: request.method ?? 'GET', path, status });
+      const headers = status === 200 && path.startsWith('/r/') ? { ...answer.headers, 'cache-control': 'no-store' } : answer.headers;
       if (status === 200 && front.cut.has(path)) {
         const chunks: Buffer[] = [];
         answer.on('data', (chunk: Buffer) => chunks.push(chunk));
         answer.on('end', () => {
           const body = Buffer.concat(chunks);
-          response.writeHead(status, answer.headers);
+          response.writeHead(status, headers);
           response.write(body.subarray(0, Math.floor(body.length / 2)), () => response.socket?.destroy());
         });
         return;
       }
-      response.writeHead(status, answer.headers);
+      response.writeHead(status, headers);
       answer.pipe(response);
     },
   );

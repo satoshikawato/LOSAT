@@ -10,7 +10,9 @@
 // go offline (port closed: a real network failure for the page and its worker, in every
 // browser; Chromium and Firefox also get Playwright's offline emulation, so that
 // navigator.onLine is false - in WebKit that emulation fails navigations, probe 1a in
-// logs/wp-u/progress.md), and cut a download in the middle.
+// logs/wp-u/progress.md), and cut a download in the middle. The front server sends the release
+// files with `Cache-Control: no-store`, so that what starts offline comes from the service
+// worker's caches and not from the browser's HTTP cache (case 2).
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { cpSync, mkdtempSync, rmSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';

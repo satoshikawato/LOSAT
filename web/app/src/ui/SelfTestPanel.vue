@@ -41,7 +41,7 @@ function engineText(result: SelfTestCaseResult): string | undefined {
   <details class="self-test" data-testid="self-test">
     <summary>Test this browser (optional)</summary>
     <p class="hint">
-      Runs the examples of {{ joinWords(programs) }} in this browser at {{ threadsText }} and compares the SHA-256 of
+      Runs the examples of {{ joinWords(programs) }} in this browser at {{ threadsText }} and compares the <span class="unbroken">SHA-256</span> of
       their outfmt 0, 6 and 7 with the values that came with this release. Nothing is sent, and the test runs do not appear
       in the queue, the results, Candidates or session files.
     </p>

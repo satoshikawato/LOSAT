@@ -81,6 +81,8 @@ test.describe('Try an example', () => {
     await expect(button).toBeDisabled();
     await expect(button).toHaveAccessibleDescription(/BLASTX joins LOSAT Web after its certification/);
     await expect(page.getByTestId('program-unavailable')).toContainText('BLASTX joins LOSAT Web after its certification');
+    // It looks as the other disabled link buttons do: muted, not underlined, not faded (screen review 1 I2).
+    expect(await button.evaluate((element) => [getComputedStyle(element).textDecorationLine, getComputedStyle(element).opacity])).toEqual(['none', '1']);
   });
 
   test('asks before it replaces inputs, and keeps them when the user says so', async ({ page }) => {
@@ -134,6 +136,21 @@ test.describe('Try an example', () => {
 });
 
 test.describe('Getting started', () => {
+  // W4's rule for targets, at both sizes (screen review 1 L6): the text-link buttons of S16 are at least 24 px high.
+  for (const size of [
+    { name: 'desktop', width: 1280, height: 900 },
+    { name: 'phone', width: 390, height: 844 },
+  ]) {
+    test(`its link buttons and "Try an example" are targets of at least 24 px, at the ${size.name} size`, async ({ page }) => {
+      await page.setViewportSize({ width: size.width, height: size.height });
+      await page.goto('/');
+      await expect(page.getByTestId('getting-started')).toBeVisible();
+      for (const id of ['getting-started-toggle', 'getting-started-close', 'try-example']) {
+        expect((await page.getByTestId(id).boundingBox())!.height, id).toBeGreaterThanOrEqual(24);
+      }
+    });
+  }
+
   test('is open on the very first visit, closed after the user closes it, and on later visits', async ({ page }) => {
     await page.goto('/');
     const panel = page.getByTestId('getting-started');

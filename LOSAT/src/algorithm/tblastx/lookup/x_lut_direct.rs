@@ -58,6 +58,25 @@
 use super::*;
 use std::cell::RefCell;
 
+// EXPERIMENT (LOSAT_X_PAIRLUT / LOSAT_X_PAIRLUTSHADOW): the per-group tables of the TBLASTX unit
+// path built by this file's count, layout and fill passes on the lookup locations of one group; a
+// child module so that it uses `x_target_list` and the memo below unchanged (see x_pair_lut.rs).
+//
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:461-467
+// ```c
+//     for (i = 0; i < lookup->backbone_size; i++) {
+//         if (exact_backbone[i] != NULL) {
+//             s_AddWordHits(lookup, matrix, query->sequence,
+//                           exact_backbone[i], query_bias, row_max);
+//             sfree(exact_backbone[i]);
+//         }
+//     }
+// ```
+// The module runs this loop's appends for the exact backbone of a subset of the lookup locations;
+// it is used only when one of its switches is set.
+#[path = "x_pair_lut.rs"]
+pub(crate) mod x_pair_lut;
+
 /// EXPERIMENT (LOSAT_X_BXLUT): 0 = off (reference builder), 1 = in-place builder,
 /// 2 = shadow (`LOSAT_X_BXLUTSHADOW`: both builders, compared).
 pub(super) fn x_bxlut_mode() -> u8 {
@@ -541,7 +560,7 @@ pub(super) fn x_assert_same_table(direct: &BlastAaLookupTable, reference: &Blast
 mod tests {
     use super::*;
 
-    fn frame(seq: Vec<u8>, seg_masks: Vec<(usize, usize)>, frame: i8) -> QueryFrame {
+    pub(super) fn frame(seq: Vec<u8>, seg_masks: Vec<(usize, usize)>, frame: i8) -> QueryFrame {
         let mut aa_seq = Vec::with_capacity(seq.len() + 2);
         aa_seq.push(0);
         aa_seq.extend_from_slice(&seq);
@@ -556,7 +575,7 @@ mod tests {
         }
     }
 
-    fn residues(seed: &mut u64, n: usize) -> Vec<u8> {
+    pub(super) fn residues(seed: &mut u64, n: usize) -> Vec<u8> {
         (0..n)
             .map(|_| {
                 *seed = seed

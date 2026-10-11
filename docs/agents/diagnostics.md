@@ -120,6 +120,9 @@ built-in 64), `LOSAT_X_BXCHUNK` (1 or more, built-in 64).
 scan order it restores is exact only up to 2^32 hits per scan, which a query and a subject of
 a few megabases can exceed.
 
+`LOSAT_X_PAIRLUT` (added after the default changed) is not in the set either: it is off unless
+set to any value, and acts while `LOSAT_X_PAIRPAR` is on.
+
 What runs per target:
 
 - x86_64: the vector X-drop DP (`DPFAST`: SSE4.1 or AVX 128-bit; `DPAVX2`: 256-bit with AVX2;
@@ -278,6 +281,28 @@ Scheduling (each value computed by one thread with the original function; order 
   every subject, the subject's combined ungapped HSP list compared field by field (the first
   difference stops the run with subject, frame, index and both values); one `[X_SHADOW] PAIRPAR`
   summary line at exit (subjects, units, HSPs compared, fallbacks).
+- `LOSAT_X_PAIRLUT=1` (not in the strict set: off unless set; acts while `LOSAT_X_PAIRPAR` is on,
+  not with its shadow) TBLASTX:
+  the lookup tables of the unit path, one per context group, built directly from the query instead
+  of being filtered out of the batch's full table, which is then not built: for each group the
+  exact-match index of the group's lookup locations, then the count, layout and fill passes of
+  `LOSAT_X_BXLUT` (`tblastx/lookup/x_pair_lut.rs`, exactness argument in its header), the groups
+  in order on the calling thread (tuning only: `LOSAT_X_PAIRLUT_POOL=1` builds them on the search
+  pool, a few ms faster per batch and more memory). The reference code holds a stub (the full
+  table's header fields and `longest_chain`, no entry). Whether the unit path runs is decided before the lookup
+  build by the function `prepare` decides with; the run stops if `prepare` disagrees or if the
+  reference frame loop would scan the stub. The reference builder and `build_groups` run as before
+  when the unit path does not run (gate, guard), in diagnostics mode, and when a lookup location
+  does not lie inside one group. `LOSAT_X_STATS=1` prints
+  `[X_STATS] PAIRLUT batches_direct= groups= fallback=`; `LOSAT_TIMING` prints one `x_pairlut` line
+  (the direct build; it is part of `build_lookup`, and `sublookup` of the `x_pairpar` line is 0).
+- `LOSAT_X_PAIRLUTSHADOW=1` shadow of `LOSAT_X_PAIRLUT` (while `LOSAT_X_PAIRPAR` is on, or with its
+  shadow): the
+  full table and `build_groups` as before, and the direct groups as well; every group table (cells,
+  overflow array, presence vector, header, `longest_chain`), `q_min` / `q_max`, the stub's header
+  and `longest_chain`, and the contexts are compared, and the first difference stops the run; the
+  search uses the reference tables. One `[X_SHADOW] PAIRLUT batches= groups_compared= fallback=`
+  line at exit.
 - `LOSAT_X_BXPAR=1` blastx query-chunk, redo and per-context SEG parallelism;
   `LOSAT_X_BXPOOL=1` one pool for the search; `LOSAT_X_BXBATCH=1` (needs `BXPOOL`) small query
   batches searched together, output in input order; `LOSAT_X_BXCHUNK=64` subjects per worker;

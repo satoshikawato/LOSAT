@@ -213,3 +213,13 @@ pub(crate) use backbone::build_ncbi_lookup_from_prepared;
 // EXPERIMENT (LOSAT_X_BXLUTSHADOW): shadow counter for the exit summary; no NCBI counterpart, it
 // does not change any value NCBI computes.
 pub(crate) use backbone::x_bxlut_shadow_tables;
+// EXPERIMENT (LOSAT_X_PAIRLUT / LOSAT_X_PAIRLUTSHADOW): the direct builder of the TBLASTX unit
+// path's group tables (lookup/x_pair_lut.rs); no NCBI counterpart for the re-export itself.
+//
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:454-456
+// ```c
+//     BlastLookupIndexQueryExactMatches(exact_backbone, lookup->word_length,
+//                                       lookup->charsize, lookup->word_length,
+//                                       query, location);
+// ```
+pub(crate) use backbone::x_pair_lut;

@@ -2308,12 +2308,57 @@ fn search_query_batch(
     //     lookup->threshold = (Int4)opt->threshold;
     // ```
     // The x86-64 conversion: `INT_MIN` for a threshold beyond `Int4` (every word).
-    let (lookup, contexts) = build_ncbi_lookup(
-        &query_frames,
-        crate::core::blast_util::ncbi_int4_from_double(args.threshold),
-        &ungapped_params_for_xdrop, // Used for x_dropoff calculation only
-        true,
-    );
+    //
+    // EXPERIMENT (LOSAT_X_PAIRLUT / LOSAT_X_PAIRLUTSHADOW), dispatch point 0 (per batch, at the
+    // lookup build): when LOSAT_X_PAIRPAR will run the seed stage of every subject of this batch
+    // as units, the units' tables (one per query-context group) are built directly from the
+    // query, and `lookup` becomes a stub with the full table's header and no entries
+    // (x_pair_par.rs `lut_build`; lookup/x_pair_lut.rs for why the tables are the same). The
+    // inputs are the ones dispatch point 1 below gives `prepare`, by the same expressions;
+    // `prepare` decides again and stops the run if it disagrees. Without the switch, in shadow
+    // mode, or when the unit path will not run, the reference builder below runs as before.
+    //
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:93-97
+    // ```c
+    // BlastAaLookupTableNew(lookup_options, (BlastAaLookupTable* *)
+    //                       &lookup_wrap->lut);
+    // ((BlastAaLookupTable*)lookup_wrap->lut)->use_pssm = has_pssm;
+    // BlastAaLookupIndexQuery( (BlastAaLookupTable*) lookup_wrap->lut, matrix,
+    //                           query, lookup_segments, 0);
+    // ```
+    let mut x_pair_lut_batch = if x_pair_par::lut_mode() == 0 {
+        None
+    } else {
+        x_pair_par::lut_build(x_pair_par::XLutEarly {
+            query_frames: &query_frames,
+            threshold: crate::core::blast_util::ncbi_int4_from_double(args.threshold),
+            window,
+            subjects: subject_records,
+            debugging: trace_hsp_target().is_some()
+                || scan_debug_range.is_some()
+                || extension_debug_enabled
+                || diag_enabled
+                || debug_hsp_saving,
+            requested_parallel,
+            use_serial_scan_chunks,
+            pool: parallel_pool,
+        })
+    };
+    let x_pair_lut_stub = x_pair_lut_batch
+        .as_mut()
+        .and_then(x_pair_par::XLutBatch::take_stub);
+    // True when `lookup` is the stub: the reference frame loop must then run zero times
+    // (asserted at dispatch point 2).
+    let x_pair_lut_is_stub = x_pair_lut_stub.is_some();
+    let (lookup, contexts) = match x_pair_lut_stub {
+        Some(stub) => stub,
+        None => build_ncbi_lookup(
+            &query_frames,
+            crate::core::blast_util::ncbi_int4_from_double(args.threshold),
+            &ungapped_params_for_xdrop, // Used for x_dropoff calculation only
+            true,
+        ),
+    };
     t_build_lookup = t_phase_build_lookup.elapsed();
 
     // NCBI BLAST: word_params->cutoffs[context].x_dropoff_init
@@ -2560,6 +2605,8 @@ fn search_query_batch(
             || diag_enabled
             || debug_hsp_saving,
         chunk_switches: use_serial_scan_chunks || use_parallel_chunks,
+        // LOSAT_X_PAIRLUT / LOSAT_X_PAIRLUTSHADOW: the groups built at dispatch point 0.
+        lut: x_pair_lut_batch,
     });
     let x_pair_par_ref = x_pair_par_batch.as_ref();
 
@@ -3116,6 +3163,23 @@ fn search_query_batch(
             }
             None => s_frames_preliminary,
         };
+        // EXPERIMENT (LOSAT_X_PAIRLUT): with the direct group tables the batch's `lookup` is a
+        // stub without entries, so a scan of it by the frame loop below would find no hit. The
+        // unit path above must have taken the subject (empty frame slice); anything else stops
+        // the run here.
+        //
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:503-505
+        // ```c
+        //     /* scan the subject sequence for hits */
+        //     hits = scansub(lookup_wrap, subject,
+        //                               offset_pairs, array_size, scan_range);
+        // ```
+        if x_pair_lut_is_stub {
+            assert!(
+                s_frames_preliminary.is_empty() && x_pair_par_ref.is_some_and(|x| x.stub()),
+                "LOSAT_X_PAIRLUT: the reference frame loop would scan the stub lookup table (subject {s_idx})"
+            );
+        }
 
         for (s_f_idx, s_frame) in s_frames_preliminary.iter().enumerate() {
             // NCBI: Diagonal state is NOT reset between subject frames.

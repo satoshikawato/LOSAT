@@ -1,0 +1,197 @@
+{
+  "format": 1,
+  "about": "Expected outputs of the examples (docs/web/examples.md) for the browser self-test; remake with web/app/tools/examples.py expected when the engine changes.",
+  "engine": {
+    "commit": "141615ec",
+    "version": "losat 0.2.0",
+    "nativeSha256": "0236291b81ec8e1735c848c49a4e36c1ae0af3742cc15832c0f9b9352edbb928"
+  },
+  "oracle": "NCBI BLAST+ 2.17.0+",
+  "cases": [
+    {
+      "program": "blastn",
+      "argv": [
+        "blastn",
+        "-query",
+        "example-blastn-query.fasta",
+        "-subject",
+        "example-blastn-subject.fasta"
+      ],
+      "inputs": {
+        "query": {
+          "file": "example-blastn-query.fasta",
+          "sha256": "c0b5cb1cee7af3f4d4ccbc4d1a7c44d9a5abf5629d64da1eff94cee68ddd2cdd"
+        },
+        "subject": {
+          "file": "example-blastn-subject.fasta",
+          "sha256": "84779a429b069e2ca3a6e1ad7d85ee9d531bfbbefa8a5986f0c4478dd6b8e4f6"
+        }
+      },
+      "outputs": {
+        "0": {
+          "sha256": "6ffedbbe15c6fdd069159c76ab51781871c49639c0daaa05afddfd7ecb856fcb",
+          "bytes": 20379,
+          "ncbi": "same"
+        },
+        "6": {
+          "sha256": "a3d64318189748f4a90d7b5a9c992f353d2d819701f3bebcba54297dc11f048f",
+          "bytes": 202,
+          "ncbi": "same"
+        },
+        "7": {
+          "sha256": "d72fbbdca64f5a24a901be419613074a759ca46220c955022ba425c7effa38a9",
+          "bytes": 599,
+          "ncbi": "same"
+        }
+      }
+    },
+    {
+      "program": "blastp",
+      "argv": [
+        "blastp",
+        "-query",
+        "example-blastp-query.fasta",
+        "-subject",
+        "example-blastp-subject.fasta"
+      ],
+      "inputs": {
+        "query": {
+          "file": "example-blastp-query.fasta",
+          "sha256": "d7161be648b6c156612e102e329ab63f1435298999fdb29e8f3f0a90ac1264de"
+        },
+        "subject": {
+          "file": "example-blastp-subject.fasta",
+          "sha256": "5eae832d66f72a29679eee66df17dfa22697c35e61eae729610f9e2ac1f7f286"
+        }
+      },
+      "outputs": {
+        "0": {
+          "sha256": "ec9334846a2830926d723a6098cd553265090b64b563e513bcefdfa1c75fb9e2",
+          "bytes": 7871,
+          "ncbi": "same"
+        },
+        "6": {
+          "sha256": "ea4d96de71668b3223c8eebb6da3a3864499fb4fdf7ca24c38714bc486411a69",
+          "bytes": 198,
+          "ncbi": "same"
+        },
+        "7": {
+          "sha256": "72beb53ba121b15d70671170b8e928375949b3788cc5240a6a3298b359f50f63",
+          "bytes": 586,
+          "ncbi": "same"
+        }
+      }
+    },
+    {
+      "program": "blastx",
+      "argv": [
+        "blastx",
+        "-query",
+        "example-blastx-query.fasta",
+        "-subject",
+        "example-blastx-subject.fasta"
+      ],
+      "inputs": {
+        "query": {
+          "file": "example-blastx-query.fasta",
+          "sha256": "71d308056d995a02ffd33b6c2deac715b600008a5ed477e360fd6138eaf2aadd"
+        },
+        "subject": {
+          "file": "example-blastx-subject.fasta",
+          "sha256": "5eae832d66f72a29679eee66df17dfa22697c35e61eae729610f9e2ac1f7f286"
+        }
+      },
+      "outputs": {
+        "0": {
+          "sha256": "79c5878833736c888efc066953249a0b437d2e804d7773b48829e2e6419c6e62",
+          "bytes": 7880,
+          "ncbi": "same"
+        },
+        "6": {
+          "sha256": "ae2b6df1a90eafd61559d03bd79bae29cca5d082e5b400d6058005f288c9f51b",
+          "bytes": 331,
+          "ncbi": "same"
+        },
+        "7": {
+          "sha256": "cf64b7da1eb5065494a5f4b29249f9aef5e83134dbe0f865a5139ec0b2177d68",
+          "bytes": 718,
+          "ncbi": "same"
+        }
+      }
+    },
+    {
+      "program": "tblastn",
+      "argv": [
+        "tblastn",
+        "-query",
+        "example-tblastn-query.fasta",
+        "-subject",
+        "example-tblastn-subject.fasta"
+      ],
+      "inputs": {
+        "query": {
+          "file": "example-tblastn-query.fasta",
+          "sha256": "d7161be648b6c156612e102e329ab63f1435298999fdb29e8f3f0a90ac1264de"
+        },
+        "subject": {
+          "file": "example-tblastn-subject.fasta",
+          "sha256": "06a23018ab9d082397f3a212d245e1b1d488b2d4d06582fb6dc8aaf8d9878e7a"
+        }
+      },
+      "outputs": {
+        "0": {
+          "sha256": "2385eaa7e4839a39fe513f264bf8643782373a67e072ec643b8f4f5f9fe951bb",
+          "bytes": 7759,
+          "ncbi": "same"
+        },
+        "6": {
+          "sha256": "2afb84c55fe4dde38b8059a9ca03004253e92b79612ae57b3e3bec200c6d89e9",
+          "bytes": 328,
+          "ncbi": "same"
+        },
+        "7": {
+          "sha256": "54c6e28289ad31109e4c940eb0dc035bc0f39c171cd8a8426820cf7756980820",
+          "bytes": 718,
+          "ncbi": "same"
+        }
+      }
+    },
+    {
+      "program": "tblastx",
+      "argv": [
+        "tblastx",
+        "-query",
+        "example-tblastx-query.fasta",
+        "-subject",
+        "example-tblastx-subject.fasta"
+      ],
+      "inputs": {
+        "query": {
+          "file": "example-tblastx-query.fasta",
+          "sha256": "71d308056d995a02ffd33b6c2deac715b600008a5ed477e360fd6138eaf2aadd"
+        },
+        "subject": {
+          "file": "example-tblastx-subject.fasta",
+          "sha256": "06a23018ab9d082397f3a212d245e1b1d488b2d4d06582fb6dc8aaf8d9878e7a"
+        }
+      },
+      "outputs": {
+        "0": {
+          "sha256": "d27f2f1d850becfeea802dd6fb50a00d72d0034423a83b095c7d6a2354af968b",
+          "bytes": 31585,
+          "ncbi": "same"
+        },
+        "6": {
+          "sha256": "8c7cd9289b24c84e6257a4b844e05dad738934c0cc577d31501c1ca83f3c2e5d",
+          "bytes": 6853,
+          "ncbi": "same"
+        },
+        "7": {
+          "sha256": "44849c5f55b0a7512385e3b1efa251af69a8c43c62cc1a41c7275f63d9806f2c",
+          "bytes": 7244,
+          "ncbi": "same"
+        }
+      }
+    }
+  ]
+}

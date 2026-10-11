@@ -336,6 +336,23 @@ export class SearchDraft {
     this.scheduleValidation();
   }
 
+  /**
+   * Puts an example in the draft (S16 "Try an example", application/examples.ts): the program,
+   * and its query and subject files as if the user had opened them, in place of every input of
+   * both roles, with the program's default settings: no field set, no region, Auto threads and
+   * no Job Title. Nothing is searched.
+   */
+  loadExample(program: ProgramId, files: Readonly<Record<InputRole, File>>): void {
+    for (const role of ROLES) {
+      for (const source of this.role(role).sources) this.removeSource(role, source.key);
+      this.updateRole(role, emptyRole);
+    }
+    this.setProgram(program);
+    const { values } = this.state.get();
+    this.set({ values: { ...values, [program]: Object.freeze({}) }, threads: 'auto', title: '', message: undefined });
+    for (const role of ROLES) this.addFiles(role, [files[role]]);
+  }
+
   // --- derived views ----------------------------------------------------------------------
 
   /** The record that the role's region applies to: the role's only included record. */

@@ -8,6 +8,7 @@
 import { computed, ref, watch } from 'vue';
 import type { RunView } from '../application/coordinator';
 import type { SearchDraft } from '../application/draft';
+import type { Examples } from '../application/examples';
 import type { RunFiles } from '../application/run-files';
 import { isTerminal } from '../domain/run';
 import { effectiveValue, formParameters, placementFlags, sectionsAt } from '../domain/parameters';
@@ -18,8 +19,9 @@ import InputPanel from './InputPanel.vue';
 import ParameterField from './ParameterField.vue';
 import ParameterForm from './ParameterForm.vue';
 import SettingsFileControl from './SettingsFileControl.vue';
+import TryExample from './TryExample.vue';
 
-const props = defineProps<{ draft: SearchDraft; runs: readonly RunView[]; runFiles: RunFiles }>();
+const props = defineProps<{ draft: SearchDraft; runs: readonly RunView[]; runFiles: RunFiles; examples: Examples }>();
 const state = useStore(props.draft.state);
 const program = computed(() => programById(state.value.program));
 const options = computed(() => state.value.description?.parameters);
@@ -127,7 +129,9 @@ function onThreads(event: Event): void {
         {{ p.label }}
       </label>
     </fieldset>
-    <p class="program-summary" data-testid="program-summary">{{ program.summary }}</p>
+    <TryExample :examples="examples" :state="state">
+      <p class="program-summary" data-testid="program-summary">{{ program.summary }}</p>
+    </TryExample>
     <p v-if="program.unavailable" class="notice" data-testid="program-unavailable">{{ program.unavailable }}</p>
 
     <InputPanel v-for="role in roles" :key="role" :draft="draft" :state="state" :role="role" />

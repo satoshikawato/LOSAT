@@ -898,7 +898,8 @@ test.describe('delivery', () => {
       await expect(second.getByTestId('release-id')).toHaveText(NEW, { timeout: 60_000 });
       await expect(page.getByTestId('update-other-tab')).toBeVisible();
       await page.getByTestId('update-other-tab').scrollIntoViewIfNeeded();
-      await shoot(page, browserName, size.name, '51-update-switched-in-another-tab');
+      // Since fix round 1 the header says "Offline ready" only while the pin names this tab's release.
+      await shoot(page, browserName, size.name, '51-update-switched-in-another-tab', { offline: 'stored' });
       await second.close();
     });
 

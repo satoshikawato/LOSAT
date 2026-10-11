@@ -23,12 +23,37 @@
 // (the Graphic Summary, the Descriptions directly under it, the selected subject's Alignments), so
 // the states 07, 09 to 11, 14, 18 to 21, 24 and 25 show that page whole (their names say what the
 // state is about); the states of the other tabs (08, 12, 13, 15 to 17, 22, 23, 26) are as before.
-import { mkdirSync, readFileSync } from 'node:fs';
+//
+// S16 (W7) changed every screen in two places: the header has the "Getting started" link and the
+// release's offline status with its ID, and on a site that measures usage the footer has the
+// usage-statistics control. The states 01 to 40 change only there: they are recorded as on later
+// visits ("Getting started" closed) on a site that does not measure, and every record waits until
+// the header says "Offline ready" (the service worker has stored and checked the release; `shoot`),
+// so that the header is the same in all of them whatever the preparation's timing. W7's states:
+// 41 to 45 (WP-O, moved here from onboarding.spec.ts) "Getting started" on a first visit, the
+// self-test passed, the question of "Try an example", the example loaded and BLASTX without an
+// example; 46 the header while the release is prepared (one file held back by the test's front
+// server) and 46b when it is ready; 47 the notice of a new release; 48 "Review update" with what a
+// switch loses (completed runs, a running and a queued run, candidates and a note); 49 the new
+// release downloaded and checked, with "Switch to release ..."; 50 the failed update (a file of the
+// new release damaged); 51 the message in a tab after another tab switched; 52 the consent notice
+// of usage statistics and 53 the footer after "Allow"; 54 the boot page for a pinned release that
+// the site no longer serves; 55 the boot page offline with nothing pinned (the stored boot page:
+// with nothing stored at all the browser has no page to show) and 55b offline with a pinned
+// release that is not stored; 56 the offline status where service workers are blocked. The
+// releases of 47 to 51 and 54 to 55b are built by support/sites.ts (as offline.spec.ts builds
+// V-OFF's) and served behind one origin by support/front-server.ts.
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { startSiteServer, type SiteServer } from '../../build/site-server';
 import { BUILD_HAS_ENGINE } from './support/browser';
+import { startFrontServer, type FrontServer } from './support/front-server';
 import { REPOSITORY } from './support/harness-server';
-import { fasta, openFiles, openParameters, program, showRecords, submit, task, waitStatus } from './support/search';
+import { E2E_ORIGIN, E2E_PORT } from './support/origin';
+import { fasta, openFiles, openParameters, paste, program, settled, showRecords, submit, task, waitStatus } from './support/search';
+import { assemble, buildSite, changeServiceWorker, damage, largestAsset, manifestOf } from './support/sites';
 
 const SCREENS = process.env['LOSAT_WEB_SCREENS'] || undefined;
 test.skip(SCREENS === undefined, 'screen records are taken only with LOSAT_WEB_SCREENS');
@@ -40,15 +65,32 @@ const SIZES = [
   { name: 'phone', width: 390, height: 844 },
 ] as const;
 
-// S16: "Getting started" opens on a first visit; these states are recorded as on later visits,
-// with it closed, so that they compare with W6's. onboarding.spec.ts records the onboarding states.
-test.beforeEach(async ({ context }) => {
+/** The tag of the records of a first visit: "Getting started" opens by itself. */
+const FIRST_VISIT = '@first-visit';
+
+// S16: "Getting started" opens on a first visit; the other states are recorded as on later
+// visits, with it closed, so that they compare with W6's.
+test.beforeEach(async ({ context }, testInfo) => {
+  if (testInfo.tags.includes(FIRST_VISIT)) return;
   await context.addInitScript(() => localStorage.setItem('losat-web:getting-started', 'closed'));
 });
 
-async function shoot(page: Page, browser: string, size: string, name: string, fullPage = true): Promise<void> {
+interface Shot {
+  /** The whole page (the default), or the window. */
+  readonly fullPage?: boolean;
+  /**
+   * The `data-state` that the header's offline status must have first: `ready` ("Offline
+   * ready") by default, so that the header is the same in every record; null for the boot page,
+   * which has no header.
+   */
+  readonly offline?: string | null;
+}
+
+async function shoot(page: Page, browser: string, size: string, name: string, { fullPage = true, offline = 'ready' }: Shot = {}): Promise<void> {
   const directory = join(SCREENS!, browser);
   mkdirSync(directory, { recursive: true });
+  // The preparation starts once the page is idle and downloads the release (8 MB with the engine).
+  if (offline !== null) await expect(page.getByTestId('offline-status')).toHaveAttribute('data-state', offline, { timeout: 120_000 });
   // Let the elapsed time and the engine's checks settle.
   await page.waitForTimeout(300);
   await page.screenshot({ path: join(directory, `${size}-${name}.png`), fullPage });
@@ -492,7 +534,7 @@ for (const size of SIZES) {
     await expect(page.getByTestId('results-heading')).toBeFocused();
     await expect(page.getByTestId('results-heading')).toBeInViewport({ ratio: 1 });
     await expect(page.getByTestId('hsp-detail')).toHaveAttribute('data-state', 'ready', { timeout: 60_000 });
-    await shoot(page, browserName, size.name, '18-results-open-from-queue-window', false);
+    await shoot(page, browserName, size.name, '18-results-open-from-queue-window', { fullPage: false });
     await queued.getByRole('button', { name: 'Cancel' }).click();
     await running.getByRole('button', { name: 'Cancel' }).first().click();
   });
@@ -658,3 +700,250 @@ for (const size of SIZES) {
     await shoot(page, browserName, size.name, '38-search-after-edit-search');
   });
 }
+
+// --- onboarding (S16, WP-O) ------------------------------------------------------------------------
+
+for (const size of SIZES) {
+  test(`onboarding at the ${size.name} size`, { tag: FIRST_VISIT }, async ({ page, browserName }) => {
+    await page.setViewportSize({ width: size.width, height: size.height });
+    await page.goto('/');
+    await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', /^(ok|invalid)$/, { timeout: 60_000 });
+    await shoot(page, browserName, size.name, '41-getting-started-first-visit');
+    await page.getByTestId('self-test').locator('summary').click();
+    await page.getByTestId('self-test-run').click();
+    await expect(page.getByTestId('self-test-summary')).toHaveText(/^All 8 cases passed/, { timeout: 180_000 });
+    await shoot(page, browserName, size.name, '42-self-test-passed');
+    await page.getByTestId('getting-started-close').click();
+    await paste(page, 'query', '>mine\nMKVLAAGG\n');
+    await program(page, 'tblastn');
+    await page.getByTestId('try-example').click();
+    await shoot(page, browserName, size.name, '43-try-example-question');
+    await page.getByTestId('try-example-confirm').click();
+    await expect(page.getByTestId('example-loaded')).toBeVisible();
+    await settled(page, 'query');
+    await settled(page, 'subject');
+    await shoot(page, browserName, size.name, '44-example-loaded');
+    await program(page, 'blastx');
+    await shoot(page, browserName, size.name, '45-blastx-no-example');
+  });
+}
+
+// --- delivery: offline use, the explicit update, usage statistics, the boot page (S16) -------------
+
+const PIN_KEY = 'losat-web:release';
+/** The releases of the update states: test IDs of about the length of a real one (21 characters). */
+const OLD = 'screens-release-old';
+const NEW = 'screens-release-new';
+/** A pinned release that the site does not serve (54); one never requested, for the offline boot page (55b). */
+const GONE = 'screens-release-gone';
+const UNSEEN = 'screens-release-unseen';
+
+const pin = (page: Page, release: string | null) =>
+  page.evaluate(([key, value]) => (value === null ? localStorage.removeItem(key!) : localStorage.setItem(key!, value)), [PIN_KEY, release] as const);
+
+test.describe('delivery', () => {
+  let workDir = '';
+  let servers: SiteServer[] = [];
+  let origins: { old: string; both: string; damaged: string };
+  let front: FrontServer;
+
+  test.beforeAll(async ({ browserName }, testInfo) => {
+    if (SCREENS === undefined || !BUILD_HAS_ENGINE) return;
+    testInfo.setTimeout(300_000);
+    // The old release; the new one in a deployment that keeps the old one and has another worker
+    // script (a new deployment); the same with a file of the new release damaged.
+    workDir = mkdtempSync(join(tmpdir(), `losat-screens-${browserName}-`));
+    const old = join(workDir, 'old');
+    const both = join(workDir, 'both');
+    buildSite(old, OLD);
+    buildSite(both, NEW);
+    assemble(both, [old]);
+    changeServiceWorker(both, `the deployment of ${NEW}`);
+    const damaged = join(workDir, 'damaged');
+    cpSync(both, damaged, { recursive: true });
+    damage(damaged, NEW, largestAsset(manifestOf(damaged, NEW)));
+    servers = [await startSiteServer({ root: old }), await startSiteServer({ root: both }), await startSiteServer({ root: damaged })];
+    origins = { old: servers[0]!.origin, both: servers[1]!.origin, damaged: servers[2]!.origin };
+    // The E2E port + 100, + 200, ... for each worker (common rule; offline.spec.ts does the same).
+    front = await startFrontServer(E2E_PORT + 100 * (testInfo.parallelIndex + 1), origins.old);
+  });
+
+  test.afterAll(async () => {
+    await front?.close();
+    for (const server of servers) await server.close();
+    if (workDir !== '') rmSync(workDir, { recursive: true, force: true });
+  });
+
+  test.beforeEach(async () => {
+    front.upstream = origins.old;
+    await front.setOnline(true);
+  });
+
+  /** Opens the front server's site and waits until the release is stored ("Offline ready"). */
+  async function openStored(page: Page, release: string): Promise<void> {
+    await page.goto(`${front.origin}/`);
+    await expect(page.getByTestId('release-id')).toHaveText(release);
+    await expect(page.getByTestId('offline-status')).toHaveAttribute('data-state', 'ready', { timeout: 120_000 });
+  }
+
+  for (const size of SIZES) {
+    test(`the header while the release is prepared, at the ${size.name} size`, async ({ page, browserName, request }) => {
+      await page.setViewportSize({ width: size.width, height: size.height });
+      // This build's site, whose release ID the other records show.
+      front.upstream = E2E_ORIGIN;
+      const index = (await (await request.get('/releases.json')).json()) as { latest: string; shell: unknown[] };
+      const manifest = (await (await request.get(`/r/${index.latest}/release-manifest.json`)).json()) as { assets: { path: string }[] };
+      // The threaded engine's module: the page does not load it before a threaded search, so the
+      // worker downloads it (in every browser; the other files may come from the page's cache),
+      // and waits for it while the other files are checked.
+      const held = manifest.assets.find((asset) => /threads.*\.wasm$/.test(asset.path))!.path;
+      const total = index.shell.length + manifest.assets.length;
+      const letGo = front.hold(`/r/${index.latest}/${held}`);
+      try {
+        await page.goto(`${front.origin}/`);
+        await expect(page.getByTestId('offline-preparing')).toContainText(`${total - 1} of ${total} files`, { timeout: 60_000 });
+        await shoot(page, browserName, size.name, '46-offline-preparing', { offline: 'preparing' });
+      } finally {
+        letGo();
+      }
+      await shoot(page, browserName, size.name, '46b-offline-ready');
+    });
+
+    test(`an update reviewed, downloaded and switched in another tab, at the ${size.name} size`, async ({ context, page, browserName }) => {
+      test.setTimeout(600_000);
+      await page.setViewportSize({ width: size.width, height: size.height });
+      await openStored(page, OLD);
+      // The site now serves the new release next to the old one.
+      front.upstream = origins.both;
+      await page.reload();
+      await expect(page.getByTestId('release-id')).toHaveText(OLD);
+      await expect(page.getByTestId('update-notice')).toHaveAttribute('data-state', 'available', { timeout: 30_000 });
+      await shoot(page, browserName, size.name, '47-update-available');
+
+      // What a switch loses: two completed runs, candidates with a note, a running and a queued run.
+      await program(page, 'blastn');
+      await page.getByTestId('try-example').click();
+      await expect(page.getByTestId('example-loaded')).toBeVisible();
+      await settled(page, 'query');
+      await settled(page, 'subject');
+      await submit(page);
+      await waitStatus(page, 1, 'completed');
+      await submit(page);
+      await waitStatus(page, 2, 'completed');
+      await openResults(page, 1);
+      await page.getByTestId('descriptions-select-all').check();
+      await page.getByTestId('descriptions-add-candidates').click();
+      await expect(page.getByTestId('candidates-added')).toContainText('added to Candidates');
+      await page.getByTestId('tab-candidates').click();
+      await page.getByTestId('candidate-note-1').fill('check the second copy');
+      await expect(page.getByTestId('candidates-added')).toHaveCount(0, { timeout: 10_000 });
+      await page.getByTestId('tab-search').click();
+      await clearInputs(page);
+      await program(page, 'blastp');
+      for (const role of ['query', 'subject'] as const) {
+        await openFiles(page, role, [{ name: 'NZ_CP006932.faa', text: fasta('NZ_CP006932.faa') }]);
+      }
+      const running = page.locator('li[data-testid^="run-"][data-status="running"]');
+      const queued = page.locator('li[data-testid^="run-"][data-status="queued"]');
+      await submit(page);
+      await expect(running).toHaveCount(1, { timeout: 60_000 });
+      await submit(page);
+      await expect(queued).toHaveCount(1);
+      await page.getByTestId('update-review').click();
+      await expect(page.getByTestId('update-impact-runs')).toContainText('1 running');
+      await page.getByTestId('update-notice').scrollIntoViewIfNeeded();
+      await shoot(page, browserName, size.name, '48-update-review-impact');
+      await page.getByTestId('update-cancel').click();
+      await queued.getByRole('button', { name: 'Cancel' }).click();
+      await running.getByRole('button', { name: 'Cancel' }).first().click();
+      await expect(running).toHaveCount(0, { timeout: 60_000 });
+
+      // A second tab downloads, checks and switches; the first keeps its release and says so.
+      const second = await context.newPage();
+      await second.setViewportSize({ width: size.width, height: size.height });
+      await openStored(second, OLD);
+      await expect(second.getByTestId('update-notice')).toHaveAttribute('data-state', 'available', { timeout: 30_000 });
+      await second.getByTestId('update-review').click();
+      await second.getByTestId('update-download').click();
+      await expect(second.getByTestId('update-downloaded')).toBeVisible({ timeout: 120_000 });
+      await shoot(second, browserName, size.name, '49-update-downloaded');
+      await second.getByTestId('update-switch').click();
+      await expect(second.getByTestId('release-id')).toHaveText(NEW, { timeout: 60_000 });
+      await expect(page.getByTestId('update-other-tab')).toBeVisible();
+      await page.getByTestId('update-other-tab').scrollIntoViewIfNeeded();
+      await shoot(page, browserName, size.name, '51-update-switched-in-another-tab');
+      await second.close();
+    });
+
+    test(`a failed update, at the ${size.name} size`, async ({ page, browserName }) => {
+      await page.setViewportSize({ width: size.width, height: size.height });
+      await openStored(page, OLD);
+      front.upstream = origins.damaged;
+      await page.reload();
+      await expect(page.getByTestId('update-notice')).toHaveAttribute('data-state', 'available', { timeout: 30_000 });
+      await page.getByTestId('update-review').click();
+      await page.getByTestId('update-download').click();
+      await expect(page.getByTestId('update-failed')).toBeVisible({ timeout: 120_000 });
+      await shoot(page, browserName, size.name, '50-update-failed');
+    });
+
+    test(`the boot page's messages, at the ${size.name} size`, async ({ context, page, browserName }) => {
+      await page.setViewportSize({ width: size.width, height: size.height });
+      await openStored(page, OLD);
+      const message = page.getByTestId('boot-message');
+      await pin(page, GONE);
+      await page.reload();
+      await expect(message).toHaveAttribute('data-kind', 'not-served');
+      await expect(page.getByTestId('boot-use-latest')).toHaveText(`Use release ${OLD}`);
+      await shoot(page, browserName, size.name, '54-boot-release-not-served', { offline: null });
+
+      // Offline (the server stopped; offline.spec.ts): the boot page that the service worker stored.
+      // WebKit keeps navigator.onLine true, so its boot page says what it could not read.
+      try {
+        await pin(page, null);
+        await front.setOnline(false);
+        if (browserName !== 'webkit') await context.setOffline(true);
+        await page.reload();
+        await expect(message).toHaveAttribute('data-kind', browserName === 'webkit' ? 'no-index' : 'first-visit-offline');
+        await shoot(page, browserName, size.name, '55-boot-offline-nothing-pinned', { offline: null });
+        await pin(page, UNSEEN);
+        await page.reload();
+        await expect(message).toHaveAttribute('data-kind', browserName === 'webkit' ? 'failed' : 'offline-not-stored');
+        await shoot(page, browserName, size.name, '55b-boot-offline-release-not-stored', { offline: null });
+      } finally {
+        if (browserName !== 'webkit') await context.setOffline(false);
+        await front.setOnline(true);
+      }
+    });
+  }
+});
+
+for (const size of SIZES) {
+  test(`usage statistics on a site that measures, at the ${size.name} size`, async ({ context, page, browserName }) => {
+    await page.setViewportSize({ width: size.width, height: size.height });
+    // This build's site index with the measurement endpoint (as analytics.spec.ts serves it); the endpoint answers 204.
+    await context.route('**/releases.json', async (route) => {
+      const index = (await (await route.fetch()).json()) as Record<string, unknown>;
+      await route.fulfill({ json: { ...index, analytics: { endpoint: '/api/visit' } } });
+    });
+    await context.route('**/api/visit', (route) => route.fulfill({ status: 204 }));
+    await page.goto('/');
+    await expect(page.getByTestId('analytics-consent')).toBeVisible({ timeout: 30_000 });
+    await shoot(page, browserName, size.name, '52-analytics-consent');
+    await page.getByTestId('analytics-allow').click();
+    await expect(page.getByTestId('analytics-setting')).toHaveAttribute('data-on', 'true');
+    await shoot(page, browserName, size.name, '53-analytics-footer-allowed');
+  });
+}
+
+test.describe('without service workers', () => {
+  test.use({ serviceWorkers: 'block' });
+
+  for (const size of SIZES) {
+    test(`the offline status where service workers are blocked, at the ${size.name} size`, async ({ page, browserName }) => {
+      await page.setViewportSize({ width: size.width, height: size.height });
+      await page.goto('/');
+      await shoot(page, browserName, size.name, '56-offline-unavailable', { offline: 'unsupported' });
+    });
+  }
+});

@@ -9,6 +9,9 @@ import {
   PIN_KEY,
   readPin,
   recheckManifest,
+  releaseOfCache,
+  storedText,
+  withChoices,
   writePin,
 } from '../../src/boot/plan';
 import { parseReleaseManifest } from '../../src/domain/release-manifest';
@@ -133,6 +136,30 @@ describe('boot: the messages', () => {
   it('says that a release is not stored when the page is offline', () => {
     expect(failureMessage('old', { kind: 'unreachable' }, undefined, false)).toMatchObject({ kind: 'offline-not-stored' });
     expect(failureMessage('old', { kind: 'unreachable' }, undefined, true)).toMatchObject({ kind: 'failed' });
+  });
+
+  it('offers "Try again" and the stored releases where the network or the site failed, never choosing for the user (screen review 1 I6)', () => {
+    const offline = chooseRelease(undefined, undefined, false) as Parameters<typeof withChoices>[0];
+    expect(withChoices(offline, ['old'])).toEqual({ ...offline, retry: true, useStored: ['old'] });
+    expect(withChoices(offline, [])).toEqual({ ...offline, retry: true });
+    // The release that could not start is not offered again.
+    const notStored = failureMessage('gone', { kind: 'unreachable' }, undefined, false);
+    expect(withChoices(notStored, ['gone', 'old'], 'gone')).toEqual({ ...notStored, retry: true, useStored: ['old'] });
+    const failed = failureMessage('old', { kind: 'failed', reason: 'the site answered 503' }, undefined, true);
+    expect(withChoices(failed, ['old', 'new'], 'old')).toMatchObject({ retry: true, useStored: ['new'] });
+    expect(withChoices(chooseRelease(undefined, undefined, true) as Parameters<typeof withChoices>[0], [])).toMatchObject({ kind: 'no-index', retry: true });
+    // A release that the site does not serve: a reload does not help, and the latest is offered already.
+    const notServed = failureMessage('old', { kind: 'not-served', reason: '404' }, index, true);
+    expect(withChoices(notServed, ['new', 'old'], 'old')).toEqual(notServed);
+  });
+
+  it("finds a release from its cache's name, and nothing else", () => {
+    expect(releaseOfCache('losat-web-release-d607a2f54e58-e2fb7128')).toBe('d607a2f54e58-e2fb7128');
+    expect(releaseOfCache('losat-web-shell')).toBeUndefined();
+    expect(releaseOfCache('losat-web-release-../x')).toBeUndefined();
+    expect(releaseOfCache('other-cache')).toBeUndefined();
+    expect(storedText(['old'])).toBe('Release old is stored in this browser and starts without the network.');
+    expect(storedText(['a', 'b'])).toBe('These releases are stored in this browser and start without the network.');
   });
 
   it('loads the entry from the release directory', () => {

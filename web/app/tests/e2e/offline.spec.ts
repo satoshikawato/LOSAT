@@ -397,10 +397,17 @@ test('6. a pin to a release that the site no longer serves and that is not store
   await expect(message).toHaveAttribute('data-kind', browserName === 'webkit' ? 'failed' : 'offline-not-stored');
   await expect(page.getByTestId('add-to-queue')).toHaveCount(0);
   expect(await pinOf(page)).toBe('voff-never-seen');
+  // It offers the release that is stored, and a reload (screen review 1 I6); "Try again" switches nothing.
+  await expect(page.getByTestId('boot-use-stored')).toHaveText(`Use release ${A} (stored)`);
+  await page.getByTestId('boot-retry').click();
+  await expect(message).toHaveAttribute('data-kind', browserName === 'webkit' ? 'failed' : 'offline-not-stored');
+  expect(await pinOf(page)).toBe('voff-never-seen');
 
   await context.setOffline(false);
   await front.setOnline(true);
-  await page.reload();
+  await page.getByTestId('boot-retry').click();
+  await expect(message).toHaveAttribute('data-kind', 'not-served');
+  await expect(page.getByTestId('boot-retry')).toHaveCount(0);
   await page.getByTestId('boot-use-latest').click();
   await appStarted(page, A);
   expect(await pinOf(page)).toBe(A);
@@ -424,7 +431,11 @@ test('6c. a pinned release that the site did not serve once and serves again sta
   expect(await pinOf(page)).toBe(B);
 });
 
-test('6b. without a pin and without the network, the stored boot page says that the first start needs the network', async ({ page, context, browserName }) => {
+test('6b. without a pin and without the network, the stored boot page says that the first start needs the network, and offers the stored release', async ({
+  page,
+  context,
+  browserName,
+}) => {
   await open(page);
   await appStarted(page, A);
   await offlineReady(page);
@@ -434,4 +445,11 @@ test('6b. without a pin and without the network, the stored boot page says that 
   // WebKit keeps navigator.onLine true: the boot tries the site index, and says that it could not read it.
   await expect(page.getByTestId('boot-message')).toHaveAttribute('data-kind', browserName === 'webkit' ? 'no-index' : 'first-visit-offline');
   await expect(page.getByTestId('add-to-queue')).toHaveCount(0);
+  expect(await pinOf(page)).toBeNull();
+  // The release stored on the earlier visit starts offline once the user chooses it, and is pinned then (screen review 1 I6).
+  await expect(page.getByTestId('boot-stored')).toHaveText(`Release ${A} is stored in this browser and starts without the network.`);
+  await expect(page.getByTestId('boot-retry')).toBeVisible();
+  await page.getByTestId('boot-use-stored').click();
+  await appStarted(page, A);
+  expect(await pinOf(page)).toBe(A);
 });

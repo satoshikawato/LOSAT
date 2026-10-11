@@ -138,14 +138,23 @@ The boot page is static HTML with a `<div id="boot" hidden>` for its messages an
    absolute, under `/r/<id>/`. A style sheet or the script that fails to load gives the
    "could not load" message.
 
+Where the network or the site failed (`first-visit-offline`, `no-index`, `offline-not-stored`,
+`failed`), the message also offers "Try again" (a reload) and, for each release that the service
+worker stores whole (a `losat-web-release-<id>` cache that holds its manifest) other than the one
+that could not start, "Use release `<id>` (stored)", under the line "Release `<id>` is stored in
+this browser and starts without the network." Such a button writes the pin and reloads, as "Use
+release `<latest>`" does; the boot never starts a stored release by itself (S16 fix round 2, screen
+review 1 I6). It reads only the names of the site's caches and whether each holds its manifest.
+
 The boot reads no research data and sends nothing but the two GETs of steps 2 and 4. Its messages
 are text (`textContent`), in English; test IDs `boot-message` (with `data-kind`: `first-visit-offline`,
-`no-index`, `not-served`, `offline-not-stored`, `failed`, `pin-not-saved`) and `boot-use-latest`.
+`no-index`, `not-served`, `offline-not-stored`, `failed`, `pin-not-saved`), `boot-use-latest`,
+`boot-stored`, `boot-use-stored` (one per stored release, with `data-release`) and `boot-retry`.
 `boot.css` styles only `#boot` and `#boot-noscript`, because the application shares the document.
 The pure decisions are in `src/boot/plan.ts` (unit tests `tests/unit/boot.test.ts`).
 
 **Layers** (ESLint, `web/app/eslint.config.js`; the rule's own test is `tests/unit/layers.test.ts`):
-`src/boot/**` may import `src/domain/**` and `src/sw/protocol.ts` (the worker's URL and scope) only;
+`src/boot/**` may import `src/domain/**` and `src/sw/protocol.ts` (the worker's URL and scope, the release caches' names) only;
 `src/sw/**` (the service worker) may import `src/domain/**` and its own files only; of the app's
 layers, only `src/infra/**` may import from `src/sw/`, and only `src/sw/protocol.ts` (the names and
 messages that the worker and the pages share). Nothing outside `src/boot/` imports it.

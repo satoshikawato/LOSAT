@@ -4,7 +4,7 @@ import vue from '@vitejs/plugin-vue';
 import type { Plugin } from 'vite';
 import { siteHeaders } from './build/headers.ts';
 import { findReactors, losatEngine } from './build/reactors.ts';
-import { appBuild, buildEnvironmentProblem, releaseId, sourceState } from './build/release.ts';
+import { appBuild, productionBuildProblem, releaseId, sourceState } from './build/release.ts';
 import { losatSite } from './build/site.ts';
 import { losatVerification } from './build/verification.ts';
 
@@ -48,10 +48,23 @@ function headersOnEveryResponse(): Plugin {
   };
 }
 
+/**
+ * Stops `vite build` unless Vite resolved a production build (build/release.ts
+ * productionBuildProblem). Checked once the config is resolved, because Vite reads NODE_ENV from
+ * `.env` files and VITE_USER_NODE_ENV after the config function has run; the build has written
+ * nothing yet.
+ */
+function productionBuildOnly(): Plugin {
+  return {
+    name: 'losat-production-build-only',
+    configResolved(config) {
+      const problem = productionBuildProblem(config);
+      if (problem !== undefined) throw new Error(problem);
+    },
+  };
+}
+
 export default defineConfig(({ command }) => {
-  // A release is a production build only (build/release.ts); the development server and Vitest run as they are.
-  const problem = command === 'build' ? buildEnvironmentProblem() : undefined;
-  if (problem !== undefined) throw new Error(problem);
   /**
    * The release ID (build/release.ts): the directory of the build's assets and the ID a browser
    * pins. A build without a commit must be named by LOSAT_WEB_RELEASE_ID; the development
@@ -63,7 +76,9 @@ export default defineConfig(({ command }) => {
     // The engine modules (LOSAT_WEB_REACTORS); the worker bundles read the same description.
     plugins: [vue(), losatEngine({ reactors }), losatVerification(), headersOnEveryResponse(),
       // `vite build` writes a site: the boot page and the release under /r/<release-id>/ (build/site.ts).
-      losatSite({ release, app: { version: appVersion, build }, reactors })],
+      losatSite({ release, app: { version: appVersion, build }, reactors }),
+      // A release is a production build only, however Vite decided the mode.
+      productionBuildOnly()],
     define: {
       __LOSAT_TEST_HOOKS__: 'false',
       __LOSAT_APP_VERSION__: JSON.stringify(appVersion),

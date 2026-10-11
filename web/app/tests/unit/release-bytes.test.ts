@@ -3,7 +3,7 @@
 // byte, under the same ID, wherever the commit is checked out (a CI build and a local build of one
 // commit; code review 2, L5); a build that has no commit to name its release stops.
 import { spawnSync } from 'node:child_process';
-import { cpSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -29,22 +29,23 @@ afterAll(() => {
 });
 
 /**
- * What Vitest adds to the environment. NODE_ENV=test above all would make the build a development
- * build (Vue's plugin then writes each component's absolute path into `__file`), which is neither
- * the site nor the same in two checkouts.
+ * What Vitest adds to the environment (and VITE_USER_NODE_ENV, which a shell may export).
+ * NODE_ENV=test above all would make the build a development build (Vue's plugin then writes each
+ * component's absolute path into `__file`), which is neither the site nor the same in two
+ * checkouts; vite.config.ts stops such a build.
  */
-const VITEST_ENV = ['NODE_ENV', 'TEST', 'VITEST', 'VITEST_MODE', 'VITEST_POOL_ID', 'VITEST_WORKER_ID', 'FORCE_TTY', 'BASE_URL', 'MODE', 'DEV', 'PROD', 'SSR'];
+const VITEST_ENV = ['NODE_ENV', 'VITE_USER_NODE_ENV', 'TEST', 'VITEST', 'VITEST_MODE', 'VITEST_POOL_ID', 'VITEST_WORKER_ID', 'FORCE_TTY', 'BASE_URL', 'MODE', 'DEV', 'PROD', 'SSR'];
 
 /**
  * `vite build` of the application in `app` (this checkout's by default) into `<work>/<name>` (the
  * same build as `npm run build` in a shell that sets neither NODE_ENV nor LOSAT_WEB_RELEASE_ID),
  * with `env` added.
  */
-function build(name: string, env: NodeJS.ProcessEnv = {}, app = APP_DIR): { dir: string; status: number | null; stderr: string } {
+function build(name: string, env: NodeJS.ProcessEnv = {}, app = APP_DIR, args: readonly string[] = []): { dir: string; status: number | null; stderr: string } {
   const dir = join(work, name);
   const base: NodeJS.ProcessEnv = { ...process.env };
   for (const key of ['LOSAT_WEB_RELEASE_ID', ...VITEST_ENV]) delete base[key];
-  const result = spawnSync(process.execPath, [join(app, 'node_modules/vite/bin/vite.js'), 'build', '--outDir', dir, '--logLevel', 'error'], {
+  const result = spawnSync(process.execPath, [join(app, 'node_modules/vite/bin/vite.js'), 'build', '--outDir', dir, '--logLevel', 'error', ...args], {
     cwd: app,
     env: { ...base, ...env },
     encoding: 'utf8',
@@ -109,6 +110,22 @@ describe('the bytes of a build', () => {
     const files = bytesOf(first().dir);
     expect(Object.keys(files).some((path) => path.startsWith(`r/${release}/assets/`))).toBe(true);
     expect(bytesOf(there.dir)).toEqual(files);
+  }, 180_000);
+
+  // vite.config.ts reads what Vite resolved (code review 3 L1): VITE_USER_NODE_ENV (or NODE_ENV in a
+  // .env file, which Vite turns into it) is read after the config function has run, and still stops
+  // the build before it writes anything.
+  it('stops a development build or another mode however Vite decided it, before writing anything', () => {
+    for (const [name, env, args, problem] of [
+      ['user-node-env', { VITE_USER_NODE_ENV: 'development' }, [], /NODE_ENV=development, VITE_USER_NODE_ENV=development .*: this would be a development build/],
+      ['node-env-test', { NODE_ENV: 'test' }, [], /NODE_ENV=test: this would be a development build/],
+      ['mode', {}, ['--mode', 'staging'], /vite build --mode staging: a release is built in production mode only/],
+    ] as const) {
+      const refused = build(name, { ...env, LOSAT_WEB_RELEASE_ID: 'refused-1' }, APP_DIR, args);
+      expect(refused.status, name).not.toBe(0);
+      expect(refused.stderr, name).toMatch(problem);
+      expect(existsSync(refused.dir), name).toBe(false);
+    }
   }, 180_000);
 
   it('stops without a commit unless LOSAT_WEB_RELEASE_ID names the release', () => {

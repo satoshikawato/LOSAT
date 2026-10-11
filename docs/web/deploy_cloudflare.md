@@ -81,7 +81,9 @@ python3 -c "import json; print(json.load(open('dist/releases.json'))['latest'])"
   `<commit>-fake`), which must not be deployed.
 - Build with `NODE_ENV` unset (or `production`): any other value makes a development build with
   the build machine's paths in the bundle, so `vite.config.ts` refuses it (`unset NODE_ENV` first
-  in a shell or a tool that exports it).
+  in a shell or a tool that exports it). Vite also takes `VITE_USER_NODE_ENV`, and a `NODE_ENV`
+  in a `web/app/.env*` file, as a development build; `vite.config.ts` refuses that too, and any
+  `--mode` other than `production`.
 - `LOSAT_WEB_ANALYTICS_ENDPOINT=/api/visit` turns measurement on in the site index
   (`/releases.json`). It is a property of the site, not of the release. Set it for the preview and
   the production site alike (S16 decision 9: the same `dist/` is promoted, below); the preview has

@@ -4,18 +4,37 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { BUILD_INPUTS, CERTIFICATION_RECORDS, SHARED_MEMORY_GUARD, VERIFICATION_CELLS } from '../../build/inputs';
-import { appBuild, buildEnvironmentProblem, RELEASE_ID_PATTERN, releaseId, sourceState } from '../../build/release';
+import { appBuild, productionBuildProblem, RELEASE_ID_PATTERN, releaseId, sourceState } from '../../build/release';
 
 const COMMIT = '0123456789abcdef0123456789abcdef01234567';
 
 describe('the build environment', () => {
-  it('refuses a build with NODE_ENV set to anything but production: that would be a development build, with source paths in the bundle', () => {
-    expect(buildEnvironmentProblem({})).toBeUndefined();
-    expect(buildEnvironmentProblem({ NODE_ENV: '' })).toBeUndefined();
-    expect(buildEnvironmentProblem({ NODE_ENV: 'production' })).toBeUndefined();
+  const build = { command: 'build', mode: 'production', isProduction: true } as const;
+
+  it("lets a production build in production mode run, and never stops the development server or Vitest", () => {
+    expect(productionBuildProblem(build, {})).toBeUndefined();
+    expect(productionBuildProblem(build, { NODE_ENV: 'production' })).toBeUndefined();
+    expect(productionBuildProblem({ command: 'serve', mode: 'development', isProduction: false }, { NODE_ENV: 'development' })).toBeUndefined();
+    expect(productionBuildProblem({ command: 'serve', mode: 'test', isProduction: false }, { NODE_ENV: 'test' })).toBeUndefined();
+  });
+
+  // Vite decides isProduction after the config function has run: NODE_ENV, else VITE_USER_NODE_ENV,
+  // which a NODE_ENV in a .env file also sets (code review 3 L1). The rule reads what Vite resolved.
+  it('stops a build that Vite resolved as a development build, whatever made it one, and names the variables', () => {
     for (const value of ['test', 'development', 'Production']) {
-      expect(buildEnvironmentProblem({ NODE_ENV: value })).toMatch(new RegExp(`^NODE_ENV=${value}: this would be a development build.*Unset NODE_ENV`));
+      expect(productionBuildProblem({ ...build, isProduction: false }, { NODE_ENV: value })).toMatch(
+        new RegExp(`^NODE_ENV=${value}: this would be a development build.*Unset NODE_ENV and VITE_USER_NODE_ENV`),
+      );
     }
+    // NODE_ENV was unset, then Vite set it from VITE_USER_NODE_ENV (exported, or from a .env file).
+    expect(productionBuildProblem({ ...build, isProduction: false }, { NODE_ENV: 'development', VITE_USER_NODE_ENV: 'development' })).toMatch(
+      /^NODE_ENV=development, VITE_USER_NODE_ENV=development \(exported, or NODE_ENV in a \.env file\): this would be a development build.*any \.env file of web\/app/,
+    );
+  });
+
+  it('stops a build in another mode, which reads other .env files under the same release ID', () => {
+    expect(productionBuildProblem({ ...build, mode: 'staging' }, {})).toMatch(/^vite build --mode staging: a release is built in production mode only/);
+    expect(productionBuildProblem({ ...build, mode: 'development', isProduction: false }, {})).toMatch(/^vite build --mode development/);
   });
 });
 

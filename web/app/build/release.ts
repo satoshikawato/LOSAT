@@ -86,19 +86,39 @@ export function appBuild(source: SourceState | undefined): string {
   return source === undefined ? 'unknown' : source.commit.slice(0, APP_BUILD_LENGTH);
 }
 
+/** What Vite resolved for a command (the config of a `configResolved` hook), as far as the build rule reads it. */
+export interface ResolvedBuild {
+  readonly command: 'build' | 'serve';
+  readonly mode: string;
+  readonly isProduction: boolean;
+}
+
 /**
- * Why `vite build` must not run in this environment, or undefined. NODE_ENV set to anything
- * but `production` makes Vite build for development (Vitest exports NODE_ENV=test to its child
- * processes; a developer's shell may export `development`): the Vue plugin then writes each
- * component's absolute source path into the bundle (`__file`), a path of the build machine in a
- * served file (TD-11) and bytes that differ between clones, so the release ID would no longer
- * fix the bytes. Unset or empty is fine: Vite then builds for production.
+ * Why this `vite build` must stop, or undefined: a release is a production build in production
+ * mode. Vite decides that only after the config function has run: from NODE_ENV, else from
+ * VITE_USER_NODE_ENV, which it also sets from a NODE_ENV in a `.env*` file of web/app (Vite 8.3.1
+ * `resolveConfig`, code review 3 L1); so the rule reads the final word, `config.isProduction`, in
+ * a `configResolved` hook (vite.config.ts). A development build (Vitest exports NODE_ENV=test; a
+ * shell or a `.env` file may say development) makes the Vue plugin write each component's
+ * absolute source path into the bundle (`__file`): a path of the build machine in a served file
+ * (TD-11), and bytes that differ between clones, so the release ID would no longer fix the bytes.
+ * Another `--mode` reads other `.env.<mode>` files and changes `import.meta.env.MODE` under the
+ * same ID. The development server and Vitest (`serve`) run as they are.
  */
-export function buildEnvironmentProblem(env: NodeJS.ProcessEnv = process.env): string | undefined {
-  const value = env['NODE_ENV'];
-  if (value === undefined || value === '' || value === 'production') return undefined;
+export function productionBuildProblem(resolved: ResolvedBuild, env: NodeJS.ProcessEnv = process.env): string | undefined {
+  if (resolved.command !== 'build') return undefined;
+  if (resolved.mode !== 'production') {
+    return `vite build --mode ${resolved.mode}: a release is built in production mode only. Build without --mode (docs/web/deploy_cloudflare.md).`;
+  }
+  if (resolved.isProduction) return undefined;
+  const userNodeEnv = env['VITE_USER_NODE_ENV'];
+  const causes = [
+    `NODE_ENV=${env['NODE_ENV'] ?? ''}`,
+    ...(userNodeEnv === undefined || userNodeEnv === '' ? [] : [`VITE_USER_NODE_ENV=${userNodeEnv} (exported, or NODE_ENV in a .env file)`]),
+  ];
   return (
-    `NODE_ENV=${value}: this would be a development build, with the build machine's paths in the served files. ` +
-    'Unset NODE_ENV (or set it to production) and build again (docs/web/deploy_cloudflare.md).'
+    `${causes.join(', ')}: this would be a development build, with the build machine's paths in the served files. ` +
+    'Unset NODE_ENV and VITE_USER_NODE_ENV (or set NODE_ENV to production), take NODE_ENV out of any .env file of web/app, ' +
+    'and build again (docs/web/deploy_cloudflare.md).'
   );
 }

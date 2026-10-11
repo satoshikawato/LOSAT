@@ -6,9 +6,11 @@
 // Descriptions, Alignments, Dot Plot), every export, a reload, the saved session opened and its
 // originals attached again; a cancelled search, a refused input, a refused option and a failed run.
 // Every request is captured at the server and in the browser (support/privacy.ts), and none may go
-// to another origin, send a body, ask for a path that is not a file of the site or carry a canary;
-// no CSP violation may occur, and no page title or address may hold a canary. Downloads are made in
-// the page: their contents hold the canaries, which shows that the data was there and stayed.
+// to another origin, send a body, ask for a path that is not a file of the site, carry a query
+// string (the application uses none; no browser added one by itself) or carry a canary in its URL,
+// a header or its body (as written, percent-encoded or in base64); no CSP violation may occur, and
+// no page title or address may hold a canary, a query or a fragment. Downloads are made in the page:
+// their contents hold the canaries, which shows that the data was there and stayed.
 //
 // The FakeEngine build and the engine build (CI's browser-engine job) run the same flows; the engine
 // build searches for real, and only it can refuse an option or fail a run.
@@ -486,7 +488,9 @@ test('"Try an example" and the self-test fetch only files of the release while t
     await expect(page.getByTestId('self-test-summary')).toHaveText(/^All \d+ cases passed/, { timeout: 180_000 });
   }
   await capture.checkpoint(page);
-  const fetched = (await capture.since(mark)).filter((exchange) => !/^(blob|data):/.test(exchange.url)).map((exchange) => `${exchange.method} ${new URL(exchange.url).pathname}`);
+  const fetched = (await capture.since(mark))
+    .filter((exchange) => !/^(blob|data):/.test(exchange.url))
+    .map((exchange) => `${exchange.method} ${new URL(exchange.url).pathname}${new URL(exchange.url).search}`);
   expect(fetched.some((line) => line.startsWith(`GET /r/${release}/assets/example-blastn-query-`))).toBe(true);
   // Besides the release's files, only the service worker's script, which the browser checks for an
   // update by itself (Firefox does during the self-test), may be fetched.
@@ -566,7 +570,7 @@ test.describe('measurement', () => {
   });
 });
 
-test('the capture finds what it looks for: a canary in a URL, a path that is not the site\'s, CSP violations in a page and in a worker', async ({
+test('the capture finds what it looks for: a canary in a URL or a header (also in base64), a query string, a path that is not the site\'s, CSP violations in a page and in a worker', async ({
   context,
   browserName,
 }, testInfo) => {
@@ -584,6 +588,9 @@ test('the capture finds what it looks for: a canary in a URL, a path that is not
     await page.evaluate(
       async ({ token, to }) => {
         await fetch(`/__privacy/planted?note=${token}`);
+        // The canary in base64, in a query and in a header (code review 2, L2).
+        const encoded = btoa(`>${token} a record`);
+        await fetch(`/__privacy/planted-b64?d=${encoded}`, { headers: { 'x-d': encoded } });
         await fetch(`${to}/${token}`).catch(() => undefined);
         const planted = new Worker(`/__privacy/planted-worker.js?to=${encodeURIComponent(`${to}/from-a-worker`)}`);
         await new Promise((resolve) => (planted.onmessage = resolve));
@@ -601,6 +608,9 @@ test('the capture finds what it looks for: a canary in a URL, a path that is not
         expect.stringMatching(/^canary \(token\) in the URL: server GET http:\/\/127\.0\.0\.1:\d+\/__privacy\/planted\?note=LOSATPRIV/),
         expect.stringMatching(/^canary \(token\) in the URL: browser GET http:\/\/127\.0\.0\.1:\d+\/__privacy\/planted\?note=LOSATPRIV/),
         expect.stringMatching(/^a request for a path that is not a file of the site: server GET .*\/__privacy\/planted\?note=/),
+        expect.stringMatching(/^canary \(token, base64\) in the URL: server GET .*\/__privacy\/planted-b64\?d=/),
+        expect.stringMatching(/^canary \(token, base64\) in a header: server GET .*\/__privacy\/planted-b64\?d=/),
+        expect.stringMatching(/^a query string on a request to the site: server GET .*\/__privacy\/planted-b64\?d=/),
         expect.stringMatching(new RegExp(`^a CSP violation in a page: connect-src blocked ${foreign.origin}/LOSATPRIV`)),
         expect.stringMatching(new RegExp(`^a CSP violation report: connect-src blocked ${foreign.origin}/LOSATPRIV\\w+ in ${server.origin}/$`)),
       ]),

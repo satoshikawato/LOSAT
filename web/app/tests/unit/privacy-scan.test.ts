@@ -45,12 +45,31 @@ describe('canaries', () => {
     expect(findCanaries(`/x?q=${CANARY.token}`, FORMS)).toEqual(['token']);
     expect(findCanaries(`title: ${CANARY.token.toLowerCase()}`, FORMS)).toEqual(['token']);
     const encoded = [...CANARY.token].map((letter) => `%${letter.charCodeAt(0).toString(16).toUpperCase()}`).join('');
-    expect(findCanaries(`/x?q=${encoded}`, FORMS)).toEqual(['token, percent-encoded']);
+    expect(findCanaries(`/x?q=${encoded}`, FORMS)).toEqual(['token', 'token, percent-encoded']);
+    expect(findCanaries(`/x?q=LOSAT${encoded.slice(15)}`, FORMS)).toEqual(['token']);
     expect(findCanaries(`>s1\n${CANARY.nucleotides.slice(0, 25)}\n${CANARY.nucleotides.slice(25)}\n`, FORMS)).toEqual(['nucleotide 40-mer']);
     const reverse = [...CANARY.nucleotides].reverse().map((letter) => ({ A: 'T', C: 'G', G: 'C', T: 'A' })[letter]).join('');
     expect(findCanaries(reverse.toLowerCase(), FORMS)).toEqual(['nucleotide 40-mer, reverse complement']);
     expect(findCanaries(`MK${CANARY.protein}LL`, FORMS)).toEqual(['protein motif']);
     expect(findCanaries('GET /assets/index-a.js LOSATPRIV ACGTACGT', FORMS)).toEqual([]);
+  });
+
+  it('are found in base64 at any offset, in either alphabet and case, also percent-encoded, line-wrapped or split by an escaped line break', () => {
+    for (const before of ['', '>', '>q', '>q1']) {
+      for (const text of [CANARY.token, CANARY.token.toLowerCase()]) {
+        const bytes = Buffer.from(`${before}${text} and more`);
+        expect(findCanaries(`d=${bytes.toString('base64')}`, FORMS), `${before}${text}`).toEqual(['token, base64']);
+        expect(findCanaries(`d=${bytes.toString('base64url')}`, FORMS), `${before}${text}, base64url`).toEqual(['token, base64']);
+      }
+    }
+    // Every letter of the base64 percent-encoded: found once the escapes are decoded.
+    const base64 = Buffer.from(`>p1 ${CANARY.protein}`).toString('base64');
+    const escaped = [...base64].map((letter) => `%${letter.charCodeAt(0).toString(16).toUpperCase()}`).join('');
+    expect(findCanaries(`/x?d=${escaped}`, FORMS)).toEqual(['protein motif, base64']);
+    const wrapped = Buffer.from(`>s1\n${CANARY.nucleotides}\n`).toString('base64').replace(/.{10}/g, '$&\r\n');
+    expect(findCanaries(wrapped, FORMS)).toEqual(['nucleotide 40-mer, base64']);
+    expect(findCanaries(JSON.stringify({ sequence: `${CANARY.nucleotides.slice(0, 20)}\n${CANARY.nucleotides.slice(20)}` }), FORMS)).toEqual(['nucleotide 40-mer']);
+    expect(findCanaries(Buffer.from('LOSATPRIV and a sequence ACGTACGTACGT').toString('base64'), FORMS)).toEqual([]);
   });
 });
 
@@ -87,12 +106,33 @@ describe('request findings', () => {
     ]);
   });
 
+  it("report a query string on any request to the site, and a canary in base64 in a query or a header (code review 2, L2)", () => {
+    const encoded = Buffer.from(`>${CANARY.token}\n${CANARY.nucleotides}`).toString('base64url');
+    const rules = { ...RULES, extraPaths: new Set(['/favicon.ico']) };
+    const found = (exchange: Exchange) => findings([exchange], [], FORMS, rules);
+    const inQuery = (url: string) => [
+      `canary (token, base64) in the URL: server GET ${url}`,
+      `canary (nucleotide 40-mer, base64) in the URL: server GET ${url}`,
+      `a query string on a request to the site: server GET ${url}`,
+    ];
+    for (const path of ['/assets/index-a.js', '/favicon.ico', '/']) expect(found(get(`${ORIGIN}${path}?d=${encoded}`)), path).toEqual(inQuery(`${ORIGIN}${path}?d=${encoded}`));
+    expect(found(get(`${ORIGIN}/assets/index-a.js?v=2`))).toEqual([`a query string on a request to the site: server GET ${ORIGIN}/assets/index-a.js?v=2`]);
+    expect(found(get(`${ORIGIN}/assets/index-a.js`, { headers: { 'x-d': encoded } }))).toEqual([
+      `canary (token, base64) in a header: server GET ${ORIGIN}/assets/index-a.js`,
+      `canary (nucleotide 40-mer, base64) in a header: server GET ${ORIGIN}/assets/index-a.js`,
+    ]);
+    const split = JSON.stringify({ sequence: `${CANARY.nucleotides.slice(0, 20)}\n${CANARY.nucleotides.slice(20)}` });
+    expect(found(get(`${ORIGIN}/assets/index-a.js`, { headers: { 'x-d': split } }))).toEqual([`canary (nucleotide 40-mer) in a header: server GET ${ORIGIN}/assets/index-a.js`]);
+    // Another origin's query is part of that request's finding.
+    expect(found(get(`https://example.org/x?d=1`))).toEqual(['a request to another origin: server GET https://example.org/x?d=1']);
+  });
+
   it('allow the paths and bodies that a flow names', () => {
     const rules = { ...RULES, extraPaths: new Set(['/favicon.ico']), allowBody: (exchange: Exchange) => exchange.url.endsWith('/api/visit') };
     expect(findings([get(`${ORIGIN}/favicon.ico`), get(`${ORIGIN}/api/visit`, { method: 'POST', body: new Uint8Array([123, 125]) })], [], FORMS, rules)).toEqual([]);
   });
 
-  it('report a canary in a page title or address, a CSP violation in a page, and a WebSocket', () => {
+  it('report a canary in a page title or address, an address with a query or a fragment, a CSP violation in a page, and a WebSocket', () => {
     expect(
       findings(
         [],
@@ -100,6 +140,8 @@ describe('request findings', () => {
           { kind: 'title', value: 'LOSAT Web' },
           { kind: 'title', value: `${CANARY.token}.fa - LOSAT Web` },
           { kind: 'href', value: `${ORIGIN}/#q=${CANARY.token}` },
+          { kind: 'href', value: `${ORIGIN}/` },
+          { kind: 'href', value: `${ORIGIN}/?s=1` },
           { kind: 'csp', value: 'connect-src blocked https://example.org' },
           { kind: 'websocket', value: 'ws://127.0.0.1:4000/' },
         ],
@@ -109,6 +151,8 @@ describe('request findings', () => {
     ).toEqual([
       `canary (token) in the page's title: ${CANARY.token}.fa - LOSAT Web`,
       `canary (token) in the page's href: ${ORIGIN}/#q=${CANARY.token}`,
+      `an address with a query or a fragment: ${ORIGIN}/#q=${CANARY.token}`,
+      `an address with a query or a fragment: ${ORIGIN}/?s=1`,
       'a CSP violation in a page: connect-src blocked https://example.org',
       'a WebSocket: ws://127.0.0.1:4000/',
     ]);

@@ -46,8 +46,27 @@ const percentEncoded = (text: string) =>
   [...new TextEncoder().encode(text)].map((byte) => `%${byte.toString(16).padStart(2, '0')}`).join('');
 
 /**
+ * The parts of the base64 of a longer text that hold only the canary's bytes, whatever bytes come
+ * before and after it: for each of the three offsets at which it can start in a group of three
+ * bytes, the whole four-letter groups that it fills (standard and URL alphabets).
+ */
+function base64Forms(text: string): string[] {
+  const bytes = new TextEncoder().encode(text);
+  const out: string[] = [];
+  for (const offset of [0, 1, 2]) {
+    const padded = Buffer.concat([Buffer.alloc(offset), bytes]);
+    const groups = Math.floor(padded.length / 3);
+    // A group shared with the bytes before the canary, and the last one when it is shared with the bytes after it, are left out.
+    const stable = padded.toString('base64').slice(offset === 0 ? 0 : 4, groups * 4);
+    out.push(stable, stable.replaceAll('+', '-').replaceAll('/', '_'));
+  }
+  return out;
+}
+
+/**
  * The forms in which a canary could travel: as written (in either case; percent-encoding leaves
- * these letters as they are) and percent-encoded byte by byte; the 40-mer also as its reverse
+ * these letters as they are), percent-encoded byte by byte, and in base64 (of the canary as
+ * written and in lower case, at any offset, in either alphabet); the 40-mer also as its reverse
  * complement.
  */
 export function canaryForms(canary: Canary): readonly CanaryForm[] {
@@ -60,18 +79,24 @@ export function canaryForms(canary: Canary): readonly CanaryForm[] {
   return plain.flatMap(([label, text]) => [
     { label, text: text.toLowerCase() },
     { label: `${label}, percent-encoded`, text: percentEncoded(text).toLowerCase() },
+    ...[...new Set([text, text.toLowerCase()].flatMap(base64Forms).map((form) => form.toLowerCase()))].map((form) => ({ label: `${label}, base64`, text: form })),
   ]);
 }
 
+/** Percent-escapes decoded byte for byte (Latin-1), so that a canary's letters come out whatever else the text holds. */
+const percentDecoded = (text: string) => text.replace(/%([0-9a-f]{2})/gi, (_, hex: string) => String.fromCharCode(Number.parseInt(hex, 16)));
+
 /**
  * The labels of the canary forms in a text (a URL, header lines, or a body read as Latin-1, so that
- * binary bodies are searched too), ignoring case; also with white space removed, for residues that
- * a FASTA line break split.
+ * binary bodies are searched too), ignoring case: as it is and with its percent-escapes decoded,
+ * each also with white space and JSON's escaped line breaks and tabs removed, for residues that a
+ * FASTA line break split. A label is given once, however many of its forms are found.
  */
 export function findCanaries(text: string, forms: readonly CanaryForm[]): string[] {
   const lower = text.toLowerCase();
-  const joined = lower.replace(/\s+/g, '');
-  return forms.filter((form) => lower.includes(form.text) || joined.includes(form.text)).map((form) => form.label);
+  const decoded = percentDecoded(text).toLowerCase();
+  const texts = [...new Set([lower, decoded].flatMap((each) => [each, each.replace(/\s+|\\[nrt]/g, '')]))];
+  return [...new Set(forms.filter((form) => texts.some((each) => each.includes(form.text))).map((form) => form.label))];
 }
 
 // --- requests ----------------------------------------------------------------------------------------
@@ -108,13 +133,6 @@ export interface RequestRules {
 }
 
 const latin1 = (bytes: Uint8Array) => Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString('latin1');
-const decoded = (url: string) => {
-  try {
-    return decodeURIComponent(url);
-  } catch {
-    return url;
-  }
-};
 
 /** A CSP report's directive, blocked URL and document (report-uri's JSON), or the start of its body. */
 function cspReport(body: string): string {
@@ -130,9 +148,11 @@ function cspReport(body: string): string {
 /**
  * Every way in which the requests and the pages' notes break V-PRIV, one line each: a request to
  * another origin; a method other than GET and HEAD or a body (unless the flow allows it); a path
- * that is not a file of the site; a canary in a URL, a header or a body; a CSP violation (an
- * attempt that the CSP blocked is a finding, not a pass); a canary in a page's title or address;
- * a WebSocket.
+ * that is not a file of the site; a query string on a request to the site (the application uses
+ * none, and no file of the site takes one); a canary in a URL, a header or a body; a CSP violation
+ * (an attempt that the CSP blocked is a finding, not a pass); a canary in a page's title or
+ * address, or an address with a query or a fragment (the application keeps nothing in its
+ * address); a WebSocket.
  */
 export function findings(
   exchanges: readonly Exchange[],
@@ -143,7 +163,7 @@ export function findings(
   const found = new Set<string>();
   for (const exchange of exchanges) {
     const where = `${exchange.seenBy} ${exchange.method} ${exchange.url.slice(0, 160)}`;
-    for (const label of findCanaries(`${exchange.url}\n${decoded(exchange.url)}`, forms)) found.add(`canary (${label}) in the URL: ${where}`);
+    for (const label of findCanaries(exchange.url, forms)) found.add(`canary (${label}) in the URL: ${where}`);
     const headers = Object.entries(exchange.headers)
       .map(([name, value]) => `${name}: ${value}`)
       .join('\n');
@@ -163,6 +183,7 @@ export function findings(
       found.add(`a CSP violation report: ${cspReport(latin1(exchange.body))}`);
       continue;
     }
+    if (url.search !== '') found.add(`a query string on a request to the site: ${where}`);
     if (!['GET', 'HEAD'].includes(exchange.method) || exchange.body.length > 0) {
       if (!(rules.allowBody?.(exchange) ?? false)) found.add(`a request that sends a body: ${where} (${exchange.body.length} bytes)`);
     } else if (!rules.files.has(url.pathname) && !(rules.extraPaths?.has(url.pathname) ?? false)) {
@@ -172,7 +193,10 @@ export function findings(
   for (const note of notes) {
     if (note.kind === 'csp') found.add(`a CSP violation in a page: ${note.value}`);
     else if (note.kind === 'websocket') found.add(`a WebSocket: ${note.value}`);
-    else for (const label of findCanaries(`${note.value}\n${decoded(note.value)}`, forms)) found.add(`canary (${label}) in the page's ${note.kind}: ${note.value}`);
+    else {
+      for (const label of findCanaries(note.value, forms)) found.add(`canary (${label}) in the page's ${note.kind}: ${note.value}`);
+      if (note.kind === 'href' && /[?#]/.test(note.value)) found.add(`an address with a query or a fragment: ${note.value.slice(0, 160)}`);
+    }
   }
   return [...found];
 }

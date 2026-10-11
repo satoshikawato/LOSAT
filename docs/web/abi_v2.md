@@ -57,8 +57,24 @@ builds of the same commit from the same checkout path are identical; the identit
 |---|---|---|---|
 | `wasi_snapshot_preview1` | `fd_write`, `fd_close`, `fd_fdstat_get`, `clock_time_get`, `random_get`, `sched_yield`, `environ_get`, `environ_sizes_get`, `proc_exit`, and the filesystem functions `path_open`, `path_create_directory`, `path_filestat_get`, `fd_prestat_get`, `fd_prestat_dir_name` | both | stderr, clocks, random, environment (the host gives an empty environment: variables such as `BATCH_SIZE` change the CLI's results, whose parity is defined without them). The filesystem functions are linked by engine code that the exports do not use (for example the CLI's `-out` file, which `validate` rejects); the host gives no preopened directory, so such a call fails instead of touching files |
 | `wasi` | `thread-spawn` | threads | starts a rayon worker thread |
-| `env` | `memory` | threads | shared linear memory, created by the host with the maximum the module declares (16384 pages, 1 GiB, the same as the certified threaded builds; plan TD-7) |
+| `env` | `memory` | threads | shared linear memory, created by the host. The module declares a maximum of 65,535 pages (4 GiB less one 64 KiB page; plan TD-7, DW-28); the host uses that maximum or, where it cannot be reserved, a smaller one (below) |
 | `losat_host` | `emit(stream: u32, ptr: u32, len: u32)` | both | receives output bytes (§5). Worker instances of the threaded module import it too, but never call it |
+
+The shared memory's maximum. The threaded module is linked with `--max-memory=4294901760`
+(`LOSAT/.cargo/config.toml` and its copy `web/adapter/.cargo/config.toml`). One page less
+than wasm32's 4 GiB keeps the byte size of the memory within 32 bits, in the module's C
+library and in the host. A host must not provide a memory with a larger maximum than the
+declared one; it may provide a smaller one. An engine reserves the maximum as address
+space when the memory is created. If it cannot, it either throws `RangeError`
+(JavaScriptCore without a fast memory) or keeps a smaller reservation without an error,
+down to the initial pages alone, so that `memory.grow` fails (V8 without guard regions,
+as on Android or under an address-space limit). The hosts of this repository therefore
+try 65,535, 49,152, 32,768, 24,576 and 16,384 pages: they create each candidate one page
+short of the module's initial size, grow that page, and use the first candidate for
+which both steps succeed. Below 16,384 pages (1 GiB, the maximum declared until plan
+DW-28) a host does what it did before: LOSAT Web runs the search on the serial module,
+and the Node host fails. The serial module defines its own memory without a maximum; that
+memory is not reserved in advance and can grow to wasm32's 4 GiB as well.
 
 ## 4. Exports
 
@@ -115,6 +131,13 @@ The host allocates input buffers with `losat_web2_alloc`, writes the bytes, pass
 pointer, and frees the buffer with `losat_web2_dealloc` after the call returns. The
 adapter never keeps a pointer to a host buffer after a call: `register` copies what it
 keeps.
+
+Pointers and lengths are unsigned 32-bit values. JavaScript receives a Wasm `i32` (a
+result of an export, an argument of an import) as a signed number, so a pointer of 2 GiB
+or more arrives negative. A JavaScript host converts every pointer and length to its
+unsigned value (`ptr >>> 0`) before it uses it as an offset into the memory: those of
+this ABI (`losat_web2_alloc`, `losat_web2_last_error_ptr`, `emit`) and the arguments of
+the WASI imports.
 
 ## 7. argv
 

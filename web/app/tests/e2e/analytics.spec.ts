@@ -14,6 +14,12 @@ import { E2E_ORIGIN } from './support/origin';
 import { chooseRun, paste, program, showOutput, submit, waitStatus } from './support/search';
 
 test.setTimeout(120_000);
+// Without the site's service worker: once it controls the page, WebKit's page.route no longer
+// sees /releases.json and /api/visit (they pass through the worker's fetch event, which answers
+// neither, so they reach the network unrouted). These tests route both. V-PRIV
+// (privacy.spec.ts) covers the measurement path with the service worker on, from the server's
+// log, in all three browsers.
+test.use({ serviceWorkers: 'block' });
 
 /** The release ID of the build under test (vite.config.ts computes it from the same inputs). */
 const RELEASE = releaseId(findReactors());

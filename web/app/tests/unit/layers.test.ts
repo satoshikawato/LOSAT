@@ -31,6 +31,11 @@ describe('layer boundaries', () => {
     ['src/infra/probe.ts', '../application/coordinator'],
     ['src/infra/probe.ts', 'vue'],
     ['src/ui/probe.ts', '../infra/fake/fake-engine'],
+    ['src/boot/probe.ts', '../application/coordinator'],
+    ['src/boot/probe.ts', '../ports/site'],
+    ['src/boot/probe.ts', '../infra/browser/site'],
+    ['src/boot/probe.ts', '../ui/useStore'],
+    ['src/boot/probe.ts', 'vue'],
   ])('%s may not import %s', async (filePath, specifier) => {
     expect(await importRuleFires(filePath, specifier)).toBe(true);
   });
@@ -42,6 +47,7 @@ describe('layer boundaries', () => {
     ['src/ui/probe.ts', '../application/coordinator'],
     ['src/ui/probe.ts', '../domain/argv'],
     ['src/composition.ts', './infra/fake/fake-engine'],
+    ['src/boot/probe.ts', '../domain/release-manifest'],
   ])('%s may import %s', async (filePath, specifier) => {
     expect(await importRuleFires(filePath, specifier)).toBe(false);
   });

@@ -1,6 +1,7 @@
 // Composition root: the only module that chooses implementations for the ports.
 import { ENGINE_ASSETS } from 'virtual:losat-engine';
 import { VERIFICATION_TABLE } from 'virtual:losat-verification';
+import { Analytics } from './application/analytics';
 import { Attention } from './application/attention';
 import { CandidateTray } from './application/candidates';
 import { Coordinator } from './application/coordinator';
@@ -13,10 +14,12 @@ import { threadLimit } from './domain/settings-file';
 import type { SiteBuild } from './domain/verification';
 import type { Downloader } from './ports/download';
 import type { EngineGateway } from './ports/engine';
+import { browserAnalytics } from './infra/browser/analytics';
 import { browserCompression } from './infra/browser/compression';
 import { nextTask } from './infra/browser/next-task';
 import { browserPage } from './infra/browser/page';
 import { browserDownloader } from './infra/browser/platform';
+import { browserSite } from './infra/browser/site';
 import { startDataWorker } from './infra/data-worker/gateway';
 import { WasmEngine } from './infra/engine-worker/gateway';
 import type { RenewalLimits } from './infra/engine-worker/policy';
@@ -41,6 +44,8 @@ export interface App {
   readonly session: Session;
   /** Settings files, "Edit Search", and the input FASTA of runs (application/run-files.ts). */
   readonly runFiles: RunFiles;
+  /** Usage statistics after consent, when the site measures (application/analytics.ts, docs/web/analytics.md). */
+  readonly analytics: Analytics;
 }
 
 /** This build's version and commit (vite.config.ts), written into session files; "unknown" where a build does not set them. */
@@ -58,6 +63,9 @@ const SITE_BUILD: SiteBuild = Object.freeze({
   ),
   app: APP_BUILD,
 });
+
+/** This build's release ID (build/release.ts); undefined where a build does not define it. */
+const RELEASE_ID = typeof __LOSAT_RELEASE_ID__ === 'string' ? __LOSAT_RELEASE_ID__ : undefined;
 
 export interface AppOptions {
   /** Where exports go; the browser's download by default. */
@@ -127,5 +135,9 @@ export function createApp(options: AppOptions = {}): App {
     maxThreads: () => threadLimit(navigator.hardwareConcurrency),
     attachedInput: (runId, role) => session.attachedInput(runId, role),
   });
-  return { coordinator, draft, results, candidates, exporter, attention, usesFakeEngine: ENGINE_ASSETS === null, session, runFiles };
+  // The site index is read through a function, so that the update check can share one read.
+  const siteIndex = () => browserSite.index();
+  const analytics = new Analytics({ siteIndex, port: browserAnalytics, release: RELEASE_ID, newClientId: () => crypto.randomUUID() });
+  void analytics.start();
+  return { coordinator, draft, results, candidates, exporter, attention, usesFakeEngine: ENGINE_ASSETS === null, session, runFiles, analytics };
 }

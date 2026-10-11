@@ -16,5 +16,5 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["src/**/*.ts", "src/**/*.vue", "tests/**/*.ts", "build/**/*.ts", "*.config.ts"]
+  "include": ["src/**/*.ts", "src/**/*.vue", "tests/**/*.ts", "build/**/*.ts", "functions/**/*.ts", "*.config.ts"]
 }

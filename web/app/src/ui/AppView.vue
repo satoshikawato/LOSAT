@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { nextTick, onMounted, onUnmounted, ref } from 'vue';
+import type { Analytics } from '../application/analytics';
 import type { Attention } from '../application/attention';
 import type { CandidateTray } from '../application/candidates';
 import type { Coordinator } from '../application/coordinator';
@@ -10,6 +11,8 @@ import type { Session } from '../application/session';
 import type { RunFiles } from '../application/run-files';
 import { formatCount } from './format';
 import { useStore } from './useStore';
+import AnalyticsConsent from './AnalyticsConsent.vue';
+import AnalyticsSetting from './AnalyticsSetting.vue';
 import AttentionPanel from './AttentionPanel.vue';
 import CandidatesPanel from './CandidatesPanel.vue';
 import QueuePanel from './QueuePanel.vue';
@@ -29,6 +32,7 @@ const props = defineProps<{
   usesFakeEngine: boolean;
   session: Session;
   runFiles: RunFiles;
+  analytics: Analytics;
 }>();
 const state = useStore(props.coordinator.state);
 const attentionState = useStore(props.attention.state);
@@ -95,6 +99,7 @@ onUnmounted(() => {
     Development build: a fake engine is in use. Outputs are not search results.
   </p>
   <ResumeNotice v-if="attentionState.resume" :report="attentionState.resume" @dismiss="attention.dismissResume()" />
+  <AnalyticsConsent :analytics="analytics" />
   <nav class="tabs main-tabs" aria-label="Main">
     <button :aria-pressed="tab === 'search'" data-testid="tab-search" @click="tab = 'search'">Search</button>
     <button :aria-pressed="tab === 'results'" data-testid="tab-results" @click="tab = 'results'">Results</button>
@@ -129,4 +134,5 @@ onUnmounted(() => {
       <StorageStatus :storage="state.storage" />
     </aside>
   </main>
+  <AnalyticsSetting :analytics="analytics" />
 </template>

@@ -2315,3 +2315,40 @@ button.link[aria-disabled='true'] {
   align-items: center;
   gap: 6px 12px;
 }
+
+/* Usage statistics (AnalyticsConsent.vue, AnalyticsSetting.vue): in the page's flow, never over the form. */
+
+.analytics-consent {
+  border: 1px solid var(--accent);
+  background: var(--accent-bg);
+  border-radius: 4px;
+  padding: 6px 12px;
+  margin: 8px 0;
+}
+
+.analytics-consent h2 {
+  font-size: 1em;
+  margin: 2px 0 4px;
+}
+
+.analytics-consent p {
+  margin: 4px 0;
+}
+
+.analytics-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 10px;
+}
+
+.app-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin-top: 24px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  font-size: 0.9em;
+}

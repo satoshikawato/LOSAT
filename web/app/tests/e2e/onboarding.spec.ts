@@ -127,18 +127,18 @@ test.describe('Getting started', () => {
     await expect(panel).toContainText('Try an example');
     await expect(panel).toContainText('stay in this browser');
     await page.getByTestId('getting-started-close').click();
-    await expect(panel).toHaveCount(0);
+    await expect(panel).toBeHidden();
     await expect(toggle).toHaveAttribute('aria-expanded', 'false');
     expect(await page.evaluate((key) => localStorage.getItem(key), GETTING_STARTED_KEY)).toBe('closed');
     await page.reload();
     await expect(page.getByTestId('storage-status')).toBeVisible();
-    await expect(panel).toHaveCount(0);
+    await expect(panel).toBeHidden();
     // The header opens it again; that does not change what later visits start with.
     await toggle.click();
     await expect(panel).toBeVisible();
     await page.reload();
     await expect(page.getByTestId('storage-status')).toBeVisible();
-    await expect(panel).toHaveCount(0);
+    await expect(panel).toBeHidden();
   });
 
   test('works with a localStorage that throws: open on each visit, closed in the tab after a close', async ({ context, page }) => {
@@ -154,7 +154,7 @@ test.describe('Getting started', () => {
     const panel = page.getByTestId('getting-started');
     await expect(panel).toBeVisible();
     await page.getByTestId('getting-started-close').click();
-    await expect(panel).toHaveCount(0);
+    await expect(panel).toBeHidden();
     // The page keeps working without storage.
     await paste(page, 'query', '>q\nACGTACGTACGT\n');
     await expect(page.getByTestId('query-source-0-summary')).toContainText('1 record');

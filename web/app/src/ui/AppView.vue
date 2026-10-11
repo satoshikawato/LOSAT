@@ -112,7 +112,8 @@ onUnmounted(() => {
   <p v-if="usesFakeEngine" class="banner" data-testid="fake-engine-banner">
     Development build: a fake engine is in use. Outputs are not search results.
   </p>
-  <GettingStarted v-if="gettingStartedState.open" :getting-started="gettingStarted" :self-test="selfTest" />
+  <!-- Kept mounted, so that the header's aria-controls names it and the self-test's section keeps its state. -->
+  <GettingStarted v-show="gettingStartedState.open" :getting-started="gettingStarted" :self-test="selfTest" />
   <ResumeNotice v-if="attentionState.resume" :report="attentionState.resume" @dismiss="attention.dismissResume()" />
   <nav class="tabs main-tabs" aria-label="Main">
     <button :aria-pressed="tab === 'search'" data-testid="tab-search" @click="tab = 'search'">Search</button>

@@ -191,6 +191,8 @@ export function createApp(options: AppOptions = {}): App {
     page: browserPage,
     host: browserReleasePage,
     runs: coordinator.state,
+    // The storage estimate counts the stored releases (screen review 1 L2).
+    onStored: () => void coordinator.refreshStorage(),
   });
   const analytics = new Analytics({
     siteIndex: () => site.index(),

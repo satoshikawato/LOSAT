@@ -141,11 +141,22 @@ async function reviewAndDownload(page: Page): Promise<void> {
   await page.getByTestId('update-download').click();
 }
 
+/** The browser's estimate of the site's usage that the storage status shows, in bytes; undefined where it shows none. */
+async function siteUsage(page: Page): Promise<number | undefined> {
+  const text = (await page.getByTestId('storage-usage').textContent()) ?? '';
+  const match = /this site uses about ([\d.]+) (bytes|kB|MB|GB) of/.exec(text);
+  if (match === null) return undefined;
+  return Number(match[1]) * 1000 ** ['bytes', 'kB', 'MB', 'GB'].indexOf(match[2]!);
+}
+
 test('1. a first visit says "Offline ready" once every file of the release and the shell is stored and checked, and nothing else is stored', async ({ page }) => {
   await open(page);
   await appStarted(page, A);
   await offlineReady(page);
   expect(await storedFiles(page)).toEqual(expectedCaches(dirs.a, A));
+  // The storage estimate counts the stored release without waiting for a run (screen review 1 L2).
+  const stored = manifestOf(dirs.a, A).assets.reduce((sum, file) => sum + file.size, 0);
+  if ((await siteUsage(page)) !== undefined) await expect.poll(() => siteUsage(page)).toBeGreaterThanOrEqual(0.95 * stored);
 });
 
 test('1b. a first visit whose download breaks does not say "Offline ready" and stores nothing; "Try again" then stores the release', async ({ page }) => {

@@ -85,6 +85,12 @@ export interface ReleaseDeps {
   readonly runs: Store<AppState>;
   /** Time between two checks of the site index. */
   readonly checkEveryMs?: number;
+  /**
+   * Told when the releases that this browser stores changed: this tab's was stored (and the
+   * cleanup after it ran), or an update was downloaded. The storage estimate counts them, and
+   * is read again only on such events (screen review 1 L2).
+   */
+  readonly onStored?: () => void;
 }
 
 /** What a reload does to this tab's work, from the app's state (the review screen's counts). */
@@ -243,6 +249,7 @@ export class ReleaseManager {
       : connected;
     if (!current()) return;
     this.setUpdate(result.ok ? { kind: 'downloaded', latest } : { kind: 'failed', latest, reason: result.reason });
+    if (result.ok) this.deps.onStored?.();
   }
 
   /**
@@ -297,7 +304,10 @@ export class ReleaseManager {
     }
     const pin = this.deps.pin.read();
     this.setOffline(this.storedWith(pin));
+    // Told as the status turns, and again once the cleanup may have removed older releases.
+    this.deps.onStored?.();
     await this.deps.offline.cleanup(pin === undefined || pin === release ? [release] : [release, pin]).catch(() => undefined);
+    this.deps.onStored?.();
   }
 
   /** The offline state of this tab's stored release under `pin` (read back from storage). */

@@ -185,6 +185,7 @@ function setup(options: { latest?: string; served?: boolean; runs?: RunView[] } 
     host,
     runs,
     checkEveryMs: 1000,
+    onStored: vi.fn(),
   };
   const manager = new ReleaseManager(deps);
   const state = () => manager.state.get();
@@ -217,6 +218,25 @@ describe('offline use', () => {
     expect(offline.prepared).toEqual(['a']);
     expect(state().offline).toEqual({ kind: 'ready' });
     expect(offline.cleanups).toEqual([['a']]);
+  });
+
+  it('tells when a release was stored, so that the storage estimate counts it: at "Offline ready", after the cleanup, after an update’s download', async () => {
+    const { deps, offline, manager, state, start } = setup({ latest: 'b' });
+    offline.hold = true;
+    await start();
+    expect(deps.onStored).not.toHaveBeenCalled();
+    offline.hold = false;
+    offline.releaseHeld();
+    await flush();
+    expect(state().offline).toEqual({ kind: 'ready' });
+    expect(deps.onStored).toHaveBeenCalledTimes(2);
+    manager.review();
+    offline.results = [{ ok: false, reason: 'a file did not match its checksum (engine/serial.wasm)' }];
+    await manager.download();
+    expect(deps.onStored).toHaveBeenCalledTimes(2);
+    await manager.download();
+    expect(state().update).toEqual({ kind: 'downloaded', latest: 'b' });
+    expect(deps.onStored).toHaveBeenCalledTimes(3);
   });
 
   it('shows the progress while the files are checked', async () => {

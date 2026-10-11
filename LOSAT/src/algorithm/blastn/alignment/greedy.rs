@@ -2496,8 +2496,8 @@ fn get_next_non_affine_tback(
 
 #[cfg(test)]
 thread_local! {
-    /// Lets a test choose the mode per call.
-    static X_GREEDY_TEST_MODE: std::cell::Cell<Option<u8>> = const { std::cell::Cell::new(None) };
+    /// Lets a test choose the mode per call (also the tests of `x_greedy_prelim`).
+    pub(super) static X_GREEDY_TEST_MODE: std::cell::Cell<Option<u8>> = const { std::cell::Cell::new(None) };
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:537,571-573
@@ -4186,20 +4186,23 @@ fn stats_from_edit_ops(
 
 /// Core greedy gapped alignment result (internal).
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2539-2569 (s_BlastGreedyGapAlignStructFill)
-struct GreedyGappedCore {
-    q_start: i32,
-    q_end: i32,
-    s_start: i32,
-    s_end: i32,
-    q_seed_start: i32,
-    s_seed_start: i32,
-    score: i32,
+// EXPERIMENT (LOSAT_X_GREEDYPRELIM): visible to `x_greedy_prelim`, which compares the values.
+pub(super) struct GreedyGappedCore {
+    pub(super) q_start: i32,
+    pub(super) q_end: i32,
+    pub(super) s_start: i32,
+    pub(super) s_end: i32,
+    pub(super) q_seed_start: i32,
+    pub(super) s_seed_start: i32,
+    pub(super) score: i32,
     edit_script: Option<GapEditScript>,
 }
 
 /// Greedy gapped alignment core (with or without traceback).
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2762-2936 (BLAST_GreedyGappedAlignment)
-fn greedy_gapped_alignment_internal(
+// EXPERIMENT (LOSAT_X_GREEDYPRELIM): visible to `x_greedy_prelim`, which calls it with
+// `compressed_subject = false` on the one-byte copy of the packed subject.
+pub(super) fn greedy_gapped_alignment_internal(
     query: &[u8],
     subject: &[u8],
     subject_len: usize,

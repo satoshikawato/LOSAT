@@ -1233,6 +1233,46 @@ pub(super) fn x_tbn_parallel() -> bool {
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNPAR"))
 }
 
+// No NCBI counterpart: reads the LOSAT_X_TBNOIDCHUNK variable once; it does not change any value
+// NCBI computes.
+/// EXPERIMENT (LOSAT_X_TBNOIDCHUNK): off unless the variable is set (it is not in the strict
+/// set).
+#[cfg(feature = "parallel")]
+fn x_tbn_oid_chunk() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("LOSAT_X_TBNOIDCHUNK").is_some())
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1409-1413
+// ```c
+//     itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
+//
+//     /* iterate over all subject sequences */
+//     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+//            != BLAST_SEQSRC_EOF) {
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:474-476
+// ```c++
+//     CSeqDB::EOidListType chunk_type =
+//         seqdb.GetNextOIDChunk(itr->oid_range[0], itr->oid_range[1],
+//                               itr->chunk_sz, oid_list);
+// ```
+// Each NCBI search thread takes a hundredth of the subjects (at least one) from the source at a
+// time and searches them before it asks for more. With the switch one entry into the pool takes
+// one such chunk per thread; without it, one subject per thread, which on many short subjects
+// is an entry (and a wake-up of the workers) for work shorter than the entry itself. Scheduling
+// only: the number enters no computation.
+/// EXPERIMENT (LOSAT_X_TBNOIDCHUNK): the subjects one entry into the search pool takes.
+#[cfg(feature = "parallel")]
+fn x_subjects_per_entry(threads: usize, subjects: usize, oid_chunk: bool) -> usize {
+    if oid_chunk {
+        threads.saturating_mul((subjects / 100).max(1))
+    } else {
+        threads
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3329-3334,3346-3350,3499-3502
 // ```c
 //         if ((int) compo_adjust_mode > 1 && !positionBased) {
@@ -1797,6 +1837,9 @@ fn run_preliminary_subjects(
     //        != BLAST_SEQSRC_EOF) {
     // Keep at most one pool-sized batch of subject results before OID reduction;
     // memory follows NCBI's bounded number of workers, not total subject count.
+    // With LOSAT_X_TBNOIDCHUNK the batch is one chunk of that iterator per worker
+    // (x_subjects_per_entry), so the lists of at most that many subjects wait for the
+    // reduction; a subject's translation still lives only while its worker searches it.
     #[cfg(feature = "parallel")]
     let mut parallel_batch = std::collections::VecDeque::new();
     #[cfg(feature = "parallel")]
@@ -1807,6 +1850,10 @@ fn run_preliminary_subjects(
     let peak = AtomicUsize::new(0);
     #[cfg(feature = "parallel")]
     let mut workers = std::collections::BTreeSet::new();
+    // No NCBI counterpart: counts the entries into the pool for the diagnostic line below; it does
+    // not change any value NCBI computes.
+    #[cfg(feature = "parallel")]
+    let mut x_pool_entries = 0usize;
     for (oid, subject) in subjects.iter().enumerate() {
         // NCBI c++/src/algo/blast/core/blast_engine.c:870-905:
         // BLAST_LinkHsps(..., subject->length, ...);
@@ -1815,7 +1862,22 @@ fn run_preliminary_subjects(
         let (preliminary, linked) = if parallel_selected {
             if parallel_batch.is_empty() {
                 let pool = pool.expect("parallel pool selected");
-                let end = oid.saturating_add(pool.threads()).min(subjects.len());
+                // EXPERIMENT (LOSAT_X_TBNOIDCHUNK): one chunk of subjects per thread.
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1409-1413
+                // ```c
+                //     itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
+                //
+                //     /* iterate over all subject sequences */
+                //     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+                //            != BLAST_SEQSRC_EOF) {
+                // ```
+                // Dispatch point: how many subjects this entry into the pool takes
+                // (x_subjects_per_entry). The subjects of an entry are searched by the same call
+                // as before and their lists are taken in OID order below.
+                let x_take =
+                    x_subjects_per_entry(pool.threads(), subjects.len(), x_tbn_oid_chunk());
+                let end = oid.saturating_add(x_take).min(subjects.len());
+                x_pool_entries += 1;
                 let batch: Vec<_> = pool.install(|| {
                     subjects[oid..end]
                         .par_iter()
@@ -1887,8 +1949,8 @@ fn run_preliminary_subjects(
     #[cfg(feature = "parallel")]
     if parallel_selected && diagnose {
         eprintln!(
-            "[losat-thread-activity] program=tblastn stage=subject_core work_items={} worker_slots={:?} peak_active={}",
-            subjects.len(), workers, peak.load(Ordering::SeqCst)
+            "[losat-thread-activity] program=tblastn stage=subject_core work_items={} worker_slots={:?} peak_active={} pool_entries={}",
+            subjects.len(), workers, peak.load(Ordering::SeqCst), x_pool_entries
         );
     }
     Ok(preliminary_hitlists)
@@ -4954,6 +5016,34 @@ mod tests {
             );
             assert_eq!(payload.num_ident, row[6].parse().unwrap());
             assert!(!payload.edit_script.is_empty());
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1409
+    // ```c
+    //     itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
+    // ```
+    // The chunk of NCBI's iterator is a hundredth of the subjects, at least one. One entry into
+    // the pool takes one chunk per thread with LOSAT_X_TBNOIDCHUNK and one subject per thread
+    // without it; fewer than 200 subjects give the same entries either way.
+    #[cfg(feature = "parallel")]
+    #[test]
+    fn x_pool_entries_take_one_iterator_chunk_per_thread() {
+        for (threads, subjects, with_chunk) in [
+            (8, 1, 8),
+            (8, 99, 8),
+            (8, 199, 8),
+            (8, 200, 16),
+            (8, 28_036, 2_240),
+            (2, 1_000, 20),
+            (usize::MAX, 1_000, usize::MAX),
+        ] {
+            assert_eq!(
+                x_subjects_per_entry(threads, subjects, true),
+                with_chunk,
+                "{threads} threads, {subjects} subjects"
+            );
+            assert_eq!(x_subjects_per_entry(threads, subjects, false), threads);
         }
     }
 

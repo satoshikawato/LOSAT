@@ -3753,7 +3753,9 @@ fn search_query_batch(
                     diag_mask as u32,
                 );
                 let x_bucket_budget = crate::algorithm::tblastx::x_seed_bucket::budget();
-                let mut x_seq_counter: u32 = 0;
+                // Lookup hits of this scan (reported by the shadow mode only).
+                let mut x_scan_hits: u64 = 0;
+                // Per-flush positions of the HSPs the current flush has saved.
                 let mut seq_keys: Vec<u32> = Vec::new();
                 let diag_offset_value: i32 = *diag_offset;
                 // The NCBI two-hit loop body for one hit (aa_ungapped.c:531-606): a copy
@@ -3761,7 +3763,7 @@ fn search_query_batch(
                 // the bucket flush callbacks.  Local names resolve at this definition site
                 // (macro hygiene), so the body reads `init_hsps`, `seq_keys`, `stats` and
                 // `diag_array` of this closure directly.  `break 'hit` is the `continue`
-                // of the NCBI loop; `seq` is the hit's position in the scan stream.
+                // of the NCBI loop; `seq` is the hit's position within the flush.
                 //
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-606
                 // ```c
@@ -4156,6 +4158,34 @@ fn search_query_batch(
                     }
                     }};
                 }
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-516,588-591
+                // ```c
+                // for (i = 0; i < hits; ++i) {
+                //     Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
+                //     Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
+                // ...
+                //     diag_coord = (query_offset - subject_offset) & diag_mask;
+                // ...
+                //     if (score >= cutoffs->cutoff_score)
+                //         BlastSaveInitHsp(ungapped_hsps, hsp_q, hsp_s,
+                //                          query_offset, subject_offset, hsp_len,
+                //                          score);
+                // ```
+                // One flush: the buffered hits go through the loop body bucket by bucket, then the HSPs this
+                // flush saved (the tail of `init_hsps`) are put back into scan order, the order in which the C
+                // loop saves them. The flushes follow each other in scan order, so `init_hsps` is in scan order
+                // after every flush.
+                macro_rules! x_flush {
+                    () => {{
+                        let x_flush_start = init_hsps.len();
+                        buckets.flush(|q, s, seq| x_two_hit_body!(q, s, seq));
+                        crate::algorithm::tblastx::x_seed_bucket::restore_flush_order(
+                            &mut init_hsps,
+                            x_flush_start,
+                            &mut seq_keys,
+                        );
+                    }};
+                }
                 for (_scan_chunk_index, (interior_start, interior_end)) in
                     scan_interiors.into_iter().enumerate()
                 {
@@ -4243,14 +4273,14 @@ fn search_query_batch(
                         //     diag_coord = (query_offset - subject_offset) & diag_mask;
                         // ```
                         // The C loop processes each offset pair here. This loop only appends the pairs to buckets,
-                        // numbering them in scan order (the number is used to restore that order).
+                        // in scan order (a buffered hit keeps its position, which is used to restore that order).
                         let offset_pairs_ptr = offset_pairs.as_ptr();
                         for i in 0..hits as usize {
                             // SAFETY: i < hits, and hits <= offset_array_size (checked by scan)
                             let pair = unsafe { &*offset_pairs_ptr.add(i) };
-                            buckets.push(pair.q_off, pair.s_off, x_seq_counter + i as u32);
+                            buckets.push(pair.q_off, pair.s_off);
                         }
-                        x_seq_counter += hits as u32;
+                        x_scan_hits += hits as u64;
                         if buckets.flush_due(x_bucket_budget) {
                             // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-516
                             // ```c
@@ -4260,7 +4290,7 @@ fn search_query_batch(
                             // diag_coord = (query_offset - subject_offset) & diag_mask;
                             // ```
                             // The buffered hits are processed when the budget is reached (a bucket at a time).
-                            buckets.flush(|q, s, seq| x_two_hit_body!(q, s, seq));
+                            x_flush!();
                         }
                     }
                 }
@@ -4272,9 +4302,9 @@ fn search_query_batch(
                 // diag_coord = (query_offset - subject_offset) & diag_mask;
                 // ```
                 // The remaining hits are processed at the end of the subject chunk.
-                buckets.flush(|q, s, seq| x_two_hit_body!(q, s, seq));
-                // Restore the scan order of the saved HSPs (the score sort below is
-                // stable, so the order of comparator-equal HSPs matters).
+                x_flush!();
+                // The saved HSPs are in scan order here: every flush restored its own (the score
+                // sort below is stable, so the order of comparator-equal HSPs matters).
                 //
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:306-309
                 // ```c
@@ -4284,11 +4314,14 @@ fn search_query_batch(
                 //           sizeof(BlastInitHSP), score_compare_match);
                 // ```
                 // NCBI sorts the saved HSPs by score after the scan (sort_init_hsps_by_score_ncbi below). Equal
-                // scores keep the order of the input, so the HSPs are first put back into scan order.
-                crate::algorithm::tblastx::x_seed_bucket::restore_scan_order(
-                    &mut init_hsps,
-                    &seq_keys,
-                );
+                // scores keep the order of the input, which is the scan order as in C.
+                //
+                // No NCBI counterpart: the shadow mode's record of the most lookup hits one scan went
+                // through; it does not change any value NCBI computes.
+                if crate::algorithm::tblastx::x_seed_bucket::mode() == 2 {
+                    crate::algorithm::tblastx::x_seed_bucket::SHADOW_MAX_SCAN_HITS
+                        .fetch_max(x_scan_hits, AtomicOrdering::Relaxed);
+                }
 
                 // [C] Blast_ExtendWordExit(ewp, subject->length);
                 //

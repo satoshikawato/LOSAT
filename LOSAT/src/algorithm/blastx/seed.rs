@@ -864,7 +864,9 @@ fn word_finder_bucketed(
         mask as u32,
     );
     let x_budget = crate::algorithm::tblastx::x_seed_bucket::budget();
-    let mut x_seq: u32 = 0;
+    // Lookup hits of this subject (reported by the shadow mode only).
+    let mut x_scan_hits: u64 = 0;
+    // Per-flush positions of the HSPs the current flush has saved.
     let mut seq_keys: Vec<u32> = Vec::new();
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-606
     // ```c
@@ -996,8 +998,8 @@ fn word_finder_bucketed(
                         length: u.length,
                         score: u.score,
                     });
-                    // No NCBI counterpart: records the scan position of a saved HSP so that scan
-                    // order can be restored; it does not change any value NCBI computes.
+                    // No NCBI counterpart: records the position within the flush of a saved HSP so
+                    // that scan order can be restored; it does not change any value NCBI computes.
                     seq_keys.push(seq);
                 }
                 if options.window_size == 0 {
@@ -1011,22 +1013,6 @@ fn word_finder_bucketed(
             }
         }};
     }
-    lookup.scan(
-        subject,
-        subject.len().saturating_sub(1),
-        options.window_size,
-        |seeds| {
-            trace(seeds);
-            for &(q, s) in seeds {
-                buckets.push(q as u32, s as u32, x_seq);
-                x_seq += 1;
-            }
-            if buckets.flush_due(x_budget) {
-                buckets.flush(|q, s, seq| x_one_hit!(q as i32, s as i32, seq));
-            }
-        },
-    );
-    buckets.flush(|q, s, seq| x_one_hit!(q as i32, s as i32, seq));
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:588-591
     // ```c
     //                 if (score >= cutoffs->cutoff_score)
@@ -1034,9 +1020,43 @@ fn word_finder_bucketed(
     //                                      query_offset, subject_offset, hsp_len,
     //                                      score);
     // ```
-    // BlastSaveInitHsp appends HSPs in scan order. restore_order puts the HSPs saved in bucket
-    // order back into that order, so the sort that follows sees the same input.
-    crate::algorithm::tblastx::x_seed_bucket::restore_order(&mut hits, &seq_keys);
+    // BlastSaveInitHsp appends HSPs in scan order. One flush: the buffered hits go through the loop
+    // body bucket by bucket, then restore_flush_order puts the HSPs this flush saved (the tail of
+    // `hits`) back into scan order. The flushes follow each other in scan order, so `hits` is in
+    // scan order after every flush and the sort that follows the scan sees the same input as in C.
+    macro_rules! x_flush {
+        () => {{
+            let x_flush_start = hits.len();
+            buckets.flush(|q, s, seq| x_one_hit!(q as i32, s as i32, seq));
+            crate::algorithm::tblastx::x_seed_bucket::restore_flush_order(
+                &mut hits,
+                x_flush_start,
+                &mut seq_keys,
+            );
+        }};
+    }
+    lookup.scan(
+        subject,
+        subject.len().saturating_sub(1),
+        options.window_size,
+        |seeds| {
+            trace(seeds);
+            for &(q, s) in seeds {
+                buckets.push(q as u32, s as u32);
+            }
+            x_scan_hits += seeds.len() as u64;
+            if buckets.flush_due(x_budget) {
+                x_flush!();
+            }
+        },
+    );
+    x_flush!();
+    // No NCBI counterpart: the shadow mode's record of the most lookup hits one scan went through;
+    // it does not change any value NCBI computes.
+    if crate::algorithm::tblastx::x_seed_bucket::mode() == 2 {
+        crate::algorithm::tblastx::x_seed_bucket::SHADOW_MAX_SCAN_HITS
+            .fetch_max(x_scan_hits, std::sync::atomic::Ordering::Relaxed);
+    }
     diagonals.finish_subject(subject.len().saturating_sub(1))?;
     hits.sort_by(|a, b| {
         b.score

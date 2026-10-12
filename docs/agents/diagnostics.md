@@ -60,8 +60,8 @@ Each switch of the strict set gives the reference result by construction (the sa
 results, or the same floating-point operations in the same order, or only a change of order,
 placement or reuse), so none of them changes the output. Until main 62102f7a every switch was
 off unless its variable was set. Since `perf/strict-default` (2026-10-12) the switches of the
-strict set are on by default (43 then, 45 since `LOSAT_X_PAIRLUT` and `LOSAT_X_HSPINPLACE`
-joined), and their variables mean (`LOSAT/src/utils/xswitch.rs`):
+strict set are on by default (43 then, 46 since `LOSAT_X_PAIRLUT`, `LOSAT_X_HSPINPLACE` and
+`LOSAT_X_SEEDBUCKET` joined), and their variables mean (`LOSAT/src/utils/xswitch.rs`):
 
 | `LOSAT_X_<NAME>` | `LOSAT_X_DEFAULT` | the switch is |
 | --- | --- | --- |
@@ -76,7 +76,8 @@ joined), and their variables mean (`LOSAT/src/utils/xswitch.rs`):
   switches off are a diagnostic aid: `DPAVX2` and `DPW128` act only with `DPFAST`; `TBNSSIDE`,
   `TBNQSIDE` and `TBNBATCH` only with `TBNPAR` (`TBNEVENTS` only without it); `TBNBATCH` needs
   `TBNSSIDE`; `BXBATCH` needs `BXPOOL`; `AHEAD` needs `GREEDYSPEC` for megablast; `MBBATCH` runs
-  where `MBDELAY` does not; `PAIRLUT` acts only while `PAIRPAR` is on.
+  where `MBDELAY` does not; `PAIRLUT` acts only while `PAIRPAR` is on; `SEEDBUCKET` acts only
+  in the scan loop, which TBLASTX runs where `PAIRPAR` does not take the search.
 - White space around a value is ignored (`set LOSAT_X_DEFAULT=0 && ...` in cmd.exe stores `0 `).
   Only `0` means off; `00`, `false` or `off` are "any other value".
 - The variables are read once per process (once per Wasm instance), except `GREEDYSPEC`,
@@ -89,7 +90,7 @@ joined), and their variables mean (`LOSAT/src/utils/xswitch.rs`):
   `LOSAT_X_AHEADSHADOW`, which compares only while `AHEAD` is on). A shadow compares the kernel
   the default selects (for `LOSAT_X_DPSHADOW` the 256-bit, `DPW128` or base kernel that takes the
   call).
-- The names are provisional (`x_` prefixes, `EXPERIMENT` comments). The 45 single variables are
+- The names are provisional (`x_` prefixes, `EXPERIMENT` comments). The 46 single variables are
   to be removed once the default has run on every CI environment and through a few releases;
   `LOSAT_X_DEFAULT` stays. In the descriptions below `LOSAT_X_<NAME>=1` shows the switch, not a
   setting that is needed, and "strict-set candidate" marks the round-5 switches, which are in
@@ -112,17 +113,30 @@ export LOSAT_X_DPAVX2=1 LOSAT_X_DPW128=1
 export LOSAT_X_BXLUT=1 LOSAT_X_BXSCAN=1 LOSAT_X_BXSEGMEMO=1
 export LOSAT_X_PAIRPAR=1 LOSAT_X_NEWTONLANES=1 LOSAT_X_GREEDYPRELIM=1
 export LOSAT_X_PAIRLUT=1 LOSAT_X_HSPINPLACE=1
+export LOSAT_X_SEEDBUCKET=1
 ```
 
 Value switches: `LOSAT_X_AHEAD` (2 to 65,536, built-in 16), `LOSAT_X_MBBATCH` (2 to 4,096,
 built-in 64), `LOSAT_X_BXCHUNK` (1 or more, built-in 64).
 
-`LOSAT_X_SEEDBUCKET` was in the block of the round 3-4 set and is not on by default (it stays
-"set to any value"). When the set became the default it numbered the lookup hits of one chunk
-scan in a 32-bit counter, exact only up to 2^32 hits per scan, which a query and a subject of a
-few megabases pass. It now numbers the hits per flush, which is exact for any number of hits. It
-stays opt-in until it is measured on the searches it would act on with the set on (the TBLASTX
-searches that `LOSAT_X_PAIRPAR` leaves to the scan loop).
+`LOSAT_X_SEEDBUCKET` was in the block of the round 3-4 set and was left out when the set became
+the default: it numbered the lookup hits of one chunk scan in a 32-bit counter, exact only up to
+2^32 hits per scan, which a query and a subject of a few megabases pass. It now numbers the hits
+per flush, which is exact for any number of hits, and joined the set on 2026-10-12. With the set
+on it acts on the TBLASTX searches that `LOSAT_X_PAIRPAR` leaves to the scan loop and whose
+diagonal table has at least 2^21 cells (a query of 524 kb or more): a query of 0.9-1.05,
+1.8-2.1, 3.6-4.2 or 7.2-8.4 Mb against a subject longer than the table's spare cells
+(`x_pair_par.rs` `guard`), and on threaded Wasm also a subject of more than one chunk (more than
+15 Mb) at more than one thread. Measured there on 2026-10-12 (alternating pairs with and without
+the switch, the same output in every run; Linux x86_64 with a 36 MiB L3, node 26 for Wasm), as
+time with the switch over time without. On a quiet machine: a 1.0 Mb query against 1.0 Mb (the
+smallest table it acts on, 8 MiB) at 8 threads 0.84-1.12 natively (median 0.88 of five pairs) and
+0.77-0.98 on threaded Wasm, at one thread 0.85-1.09 natively (median 0.99) and 0.79-0.96 on
+serial Wasm; a 1.0 Mb query against 5.0 Mb 0.99 and 1.08 (native, 8 threads); a 2.0 Mb query
+against 5.0 Mb (16 MiB table) 0.62 and 0.67. With other work on the machine the scan order slows
+down more than the bucketed one: most pairs at 1.0 Mb were then between 0.40 and 0.89, single
+ones up to 1.44. A 0.6 Mb query against a 15.1 Mb subject on threaded Wasm with a 4 GiB memory:
+0.76 and 0.85 (loaded machine). The Wasm memory reaches the same size with and without it.
 
 `LOSAT_X_PAIRLUT` and `LOSAT_X_HSPINPLACE` were added after the default changed, as switches
 that were off unless set, and joined the set on 2026-10-12. Both lower the memory of TBLASTX:
@@ -229,9 +243,10 @@ Same values, faster computation:
   field). Strict-set candidate (S-C, round 5).
 - `LOSAT_X_BXSCAN=1` blastx seed loop reads the scanner's per-thread offset-pair buffer in place instead
   of a fresh buffer and a copy per subject (`blastx/x_seed_scan.rs`); not in the diagnostic stages, and
-  only with the reference diagonal order (`LOSAT_X_SEEDBUCKET` mode 0). Shadow: `LOSAT_X_BXSCANSHADOW=1`
+  only with the reference diagonal order (no `LOSAT_X_BXSEEDBUCKET`, no `LOSAT_X_SEEDBUCKETSHADOW`). Shadow: `LOSAT_X_BXSCANSHADOW=1`
   (hit lists and diagonal table). Strict-set candidate (S-C, round 5).
-- `LOSAT_X_SEEDBUCKET=1` TBLASTX two-hit stage: hits buffered per diagonal range and processed
+- `LOSAT_X_SEEDBUCKET=1` (in the strict set since 2026-10-12) TBLASTX two-hit stage: hits buffered
+  per diagonal range and processed
   range by range, HSPs restored to scan order (`tblastx/x_seed_bucket.rs`); only for diagonal tables
   of at least `LOSAT_X_SEEDBUCKET_MIN_CELLS` cells (default 2^21). Shadow:
   `LOSAT_X_SEEDBUCKETSHADOW=1` (HSP lists and the whole diagonal table; its summary line gives
@@ -239,8 +254,11 @@ Same values, faster computation:
   `LOSAT_X_SEEDBUCKET_CELLS` (cells per bucket), `LOSAT_X_SEEDBUCKET_BUDGET` (hits per flush;
   values above 2^31 are read as 2^31, and memory, 12 bytes per hit reserved up front, limits a
   real setting long before that). A shadow run compares something only where the scan loop runs:
-  with the default set use `LOSAT_X_PAIRPAR=0` and check that `chunks_compared` is not 0.
-  BLASTX needs `LOSAT_X_BXSEEDBUCKET=1` as well (no gain measured).
+  with the default set use `LOSAT_X_PAIRPAR=0` and check that `chunks_compared` is not 0. With
+  `LOSAT_X_STATS=1` the line `[X_STATS] SEEDBUCKET bucketed_scans=... flushes=...` tells how many
+  scans ran in the bucketed order (`LOSAT/tests/tblastx_seed_bucket.rs` uses it).
+  BLASTX runs the bucketed order only with `LOSAT_X_BXSEEDBUCKET=1` as well, which is not in the
+  set (off unless set to any value; no gain measured), so BLASTX keeps the reference order by default.
 
 Rebuilding less:
 

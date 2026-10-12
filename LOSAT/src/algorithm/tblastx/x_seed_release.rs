@@ -112,9 +112,9 @@
 //! by comparing two computations, and with the switch on there is no second result to compare
 //! with: the same code produced it. Hence no shadow switch.
 //!
-//! `LOSAT_X_SEEDRELEASE` is not in the strict set (`utils/xswitch.rs`): it is off unless the
-//! variable is set, to any value. `LOSAT_X_STATS=1` then prints one `[X_STATS] SEEDRELEASE` line
-//! at exit (`print_summary`, called by `main`).
+//! `LOSAT_X_SEEDRELEASE` is a switch of the strict set (`utils/xswitch.rs`): on unless it is
+//! `0`, or `LOSAT_X_DEFAULT=0` and it is not set. While it is on, `LOSAT_X_STATS=1` prints one
+//! `[X_STATS] SEEDRELEASE` line at exit (`print_summary`, called by `main`).
 
 use super::x_pair_par::XPairPar;
 use crate::algorithm::tblastx::lookup::BlastAaLookupTable;
@@ -134,10 +134,11 @@ static WORKER_TABLES_RELEASED: AtomicU64 = AtomicU64::new(0);
 // No NCBI counterpart: NCBI keeps its lookup table and diagonal table for the whole preliminary
 // search (blast_engine.c:1002-1004, 1604-1605); this variable only chooses when LOSAT frees its
 // copies. Read once per process.
-/// True when `LOSAT_X_SEEDRELEASE` is set (to any value). Not a strict-set switch: off unless set.
+/// True while `LOSAT_X_SEEDRELEASE` is on. A strict-set switch: on unless it is `0`, or
+/// `LOSAT_X_DEFAULT=0` and it is not set.
 fn on() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("LOSAT_X_SEEDRELEASE").is_some())
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_SEEDRELEASE"))
 }
 
 /// The `LOSAT_X_STATS` line (printed by `main` at exit, only with the switch on).

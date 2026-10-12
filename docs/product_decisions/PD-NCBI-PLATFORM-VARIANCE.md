@@ -74,9 +74,12 @@ Adding or changing an entry needs its own approved record of the new output.
 The one entry, `blastn Sakai.MG1655.megablast` (Gate A steps 11, 52 and 53),
 was approved on 2026-09-28
 (`docs/evidence/losatx_stage_g_authority_v3/run-20260928T121516Z/`): the
-frozen v0.1.0 bytes differ from NCBI BLAST+ 2.17.0 in 5 of 6482 output lines
-(an equal-score greedy traceback), and the current LOSAT output is
-byte-identical to NCBI for the same command.
+frozen v0.1.0 bytes differ from the Linux NCBI BLAST+ 2.17.0 output in 5 of
+6482 lines (an equal-score greedy traceback), and the current LOSAT output is
+byte-identical to that Linux output for the same command (the authority's
+`retained_linux_raw_sha256`). It is not the Windows or macOS native
+fingerprint of the case, which differ from it and stay Gate B's alone, and
+the case stays `SOURCE_UNDETERMINED_ACCEPTED` on the LOSAT parity axis.
 
 ### Gate B — `PLATFORM_NATIVE_NCBI_REFERENCE`
 

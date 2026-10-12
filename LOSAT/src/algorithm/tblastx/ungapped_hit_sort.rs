@@ -43,7 +43,7 @@ pub(crate) fn sort_ungapped_hits_by_index_replay(
 
     // EXPERIMENT (LOSAT_X_HSPINPLACE / LOSAT_X_HSPINPLACESHADOW), dispatch: the same index sort,
     // then the records moved into that order inside `hits` instead of copied out and cloned back
-    // (tblastx/x_hsp_inplace.rs, item 1 of its header). Without a switch the body below runs.
+    // (tblastx/x_hsp_inplace.rs, item 1 of its header). With the switch off the body below runs.
     //
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1380-1381
     // ```c

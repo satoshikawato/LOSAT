@@ -614,8 +614,8 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
     // EXPERIMENT (LOSAT_X_HSPINPLACE / LOSAT_X_HSPINPLACESHADOW), dispatch: the steps of this
     // function on one list (sort in place, groups cut off the end of the list, exact-capacity
     // assembly, output replay in place) with the same per-group calls; see x_hsp_inplace.rs for
-    // why it is the same list. Without a switch, and with LOSAT_DEBUG_CUTOFFS or LOSAT_DIAGNOSTICS,
-    // the body below runs on the untouched input.
+    // why it is the same list. With the switch off, and with LOSAT_DEBUG_CUTOFFS or
+    // LOSAT_DIAGNOSTICS, the body below runs on the untouched input.
     //
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:483-486,990-994
     // ```c

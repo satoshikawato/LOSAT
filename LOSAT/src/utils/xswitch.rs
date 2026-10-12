@@ -35,8 +35,10 @@ use std::sync::OnceLock;
 /// `LOSAT_X_SEEDBUCKET` is not among them. When the set became the default it numbered the lookup
 /// hits of a chunk scan in a `u32`, exact only up to 2^32 hits per scan; it now numbers them per
 /// flush (`tblastx/x_seed_bucket.rs`) and stays opt-in until it is measured on the searches it
-/// would act on with the set on (the fallbacks of `LOSAT_X_PAIRPAR`).
-pub(crate) const STRICT_SET: [&str; 43] = [
+/// would act on with the set on (the fallbacks of `LOSAT_X_PAIRPAR`). `LOSAT_X_PAIRLUT` and
+/// `LOSAT_X_HSPINPLACE`, the last two, were added after the change as switches that are off
+/// unless set and joined the set once they were verified with it on.
+pub(crate) const STRICT_SET: [&str; 45] = [
     "LOSAT_X_DPFAST",
     "LOSAT_X_COMPFAST",
     "LOSAT_X_PURGEFAST",
@@ -80,6 +82,8 @@ pub(crate) const STRICT_SET: [&str; 43] = [
     "LOSAT_X_PAIRPAR",
     "LOSAT_X_NEWTONLANES",
     "LOSAT_X_GREEDYPRELIM",
+    "LOSAT_X_PAIRLUT",
+    "LOSAT_X_HSPINPLACE",
 ];
 
 /// No NCBI counterpart: the table in the module header, for one variable's value. A value that

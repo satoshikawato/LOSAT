@@ -171,7 +171,9 @@ static GATE_REFERENCE: AtomicU64 = AtomicU64::new(0);
 // The shadow sets the flag of the calling thread and calls the reference function; the dispatch at
 // the head of that call takes the flag and lets the body run. Nothing between the two can hand the
 // thread to other work, and the two reference functions have separate flags, so the sort inside a
-// reference linking call is shadowed as well.
+// reference linking call is shadowed as well. The unit tests reach the reference bodies the same
+// way (`tests::reference_sort`, `tests::reference_linking`), with the switch on as well; nothing
+// else sets a flag, so a search with the switch on only reads them.
 thread_local! {
     static SORT_REFERENCE_CALL: Cell<bool> = const { Cell::new(false) };
     static LINKING_REFERENCE_CALL: Cell<bool> = const { Cell::new(false) };
@@ -191,7 +193,7 @@ pub(crate) fn mode() -> u8 {
     *MODE.get_or_init(|| {
         if std::env::var_os("LOSAT_X_HSPINPLACESHADOW").is_some() {
             2
-        } else if std::env::var_os("LOSAT_X_HSPINPLACE").is_some() {
+        } else if crate::utils::xswitch::on("LOSAT_X_HSPINPLACE") {
             1
         } else {
             0
@@ -377,15 +379,22 @@ fn shadow_compare(what: &str, actual: &[UngappedHit], reference: &[UngappedHit])
 //               ScoreCompareHSPs);
 // ```
 // The dispatch of `sort_ungapped_hits_by_index_replay` (called after its `len <= 1` return, only
-// when a switch is set).
+// when the switch or its shadow is on).
 /// `true`: `hits` is sorted (in place, or by both ways and compared). `false`: the caller's
 /// reference body sorts it.
 pub(crate) fn sort_dispatch(
     hits: &mut [UngappedHit],
     compare: fn(&UngappedHit, &UngappedHit) -> Ordering,
 ) -> bool {
-    match mode() {
-        0 => false,
+    let m = mode();
+    if m == 0 {
+        return false;
+    }
+    if SORT_REFERENCE_CALL.with(|flag| flag.replace(false)) {
+        // A call for the reference body: the shadow's own (below) or a unit test's.
+        return false;
+    }
+    match m {
         1 => {
             sort_in_place(hits, compare);
             SORTS.fetch_add(1, AtomicOrdering::Relaxed);
@@ -393,10 +402,6 @@ pub(crate) fn sort_dispatch(
             true
         }
         _ => {
-            if SORT_REFERENCE_CALL.with(|flag| flag.replace(false)) {
-                // The shadow's own call of the reference function (below).
-                return false;
-            }
             let mut reference = hits.to_vec();
             SORT_REFERENCE_CALL.with(|flag| flag.set(true));
             crate::algorithm::tblastx::ungapped_hit_sort::sort_ungapped_hits_by_index_replay(
@@ -984,7 +989,7 @@ fn link_groups_serially(
 //         hsp_list->hsp_array[index]->num = 1;
 // ```
 // The dispatch of `apply_sum_stats_even_gap_linking_with_parallel` (called after its empty-list
-// return and before it touches the list, only when a switch is set).
+// return and before it touches the list, only when the switch or its shadow is on).
 /// `Ok`: the linked list (this path, or both ways compared and the reference's result). `Err`:
 /// the untouched input, for the caller's reference body.
 #[allow(clippy::too_many_arguments)]
@@ -1002,8 +1007,8 @@ pub(super) fn linking_dispatch(
     if m == 0 {
         return Err(hits);
     }
-    if m == 2 && LINKING_REFERENCE_CALL.with(|flag| flag.replace(false)) {
-        // The shadow's own call of the reference function (below).
+    if LINKING_REFERENCE_CALL.with(|flag| flag.replace(false)) {
+        // A call for the reference body: the shadow's own (below) or a unit test's.
         return Err(hits);
     }
     if gate() {
@@ -1088,13 +1093,80 @@ mod tests {
         }
     }
 
-    /// These tests compare with the reference bodies, which run only without a switch.
-    fn reference_runs() {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1380-1381
+    // ```c
+    //         qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
+    //               ScoreCompareHSPs);
+    // ```
+    // No computation: the tests compare with the reference bodies, and the switch is on by
+    // default, so the call goes past the dispatch as the shadow's own call does.
+    /// The body of `sort_ungapped_hits_by_index_replay`, whatever the switch says. The dispatch
+    /// takes the flag when the call reaches it: not with the switch off, and not for a list of
+    /// at most one HSP, which returns before it.
+    fn reference_sort(
+        hits: &mut [UngappedHit],
+        compare: fn(&UngappedHit, &UngappedHit) -> Ordering,
+    ) {
+        SORT_REFERENCE_CALL.with(|flag| flag.set(true));
+        sort_ungapped_hits_by_index_replay(hits, compare);
+        let left = SORT_REFERENCE_CALL.with(|flag| flag.replace(false));
         assert_eq!(
-            mode(),
-            0,
-            "run these tests without LOSAT_X_HSPINPLACE / LOSAT_X_HSPINPLACESHADOW"
+            left,
+            mode() == 0 || hits.len() <= 1,
+            "the dispatch of the reference sort takes the flag when it is reached"
         );
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:483-486
+    // ```c
+    // /* Sort by (reverse) position. */
+    // if (kTranslatedQuery) {
+    //    qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
+    //          s_RevCompareHSPsTbx);
+    // ```
+    // No computation: as `reference_sort`, for the linking call. The reference linking body
+    // sorts the list once with the index-replay sort, on the calling thread, before anything
+    // else can sort; the second flag sends that sort to its reference body as well.
+    /// The body of `apply_sum_stats_even_gap_linking_with_parallel` with the reference sort
+    /// inside, whatever the switch says. The linking dispatch takes its flag unless the list is
+    /// empty, the sort dispatch unless the list has at most one HSP; neither with the switch off.
+    #[allow(clippy::too_many_arguments)]
+    fn reference_linking(
+        hits: Vec<UngappedHit>,
+        params: &KarlinParams,
+        linking_params: &LinkingParams,
+        query_contexts: &[QueryContext],
+        subject_frame_bases: &[i32],
+        length_adj_per_context: &[i64],
+        eff_searchsp_per_context: &[i64],
+        allow_parallel: bool,
+    ) -> Vec<UngappedHit> {
+        let n = hits.len();
+        LINKING_REFERENCE_CALL.with(|flag| flag.set(true));
+        SORT_REFERENCE_CALL.with(|flag| flag.set(true));
+        let linked = apply_sum_stats_even_gap_linking_with_parallel(
+            hits,
+            params,
+            linking_params,
+            query_contexts,
+            subject_frame_bases,
+            length_adj_per_context,
+            eff_searchsp_per_context,
+            allow_parallel,
+        );
+        let linking_left = LINKING_REFERENCE_CALL.with(|flag| flag.replace(false));
+        let sort_left = SORT_REFERENCE_CALL.with(|flag| flag.replace(false));
+        assert_eq!(
+            linking_left,
+            mode() == 0 || n == 0,
+            "the dispatch of the reference linking call takes the flag when it is reached"
+        );
+        assert_eq!(
+            sort_left,
+            mode() == 0 || n <= 1,
+            "the sort of the reference linking call takes the flag when it reaches its dispatch"
+        );
+        linked
     }
 
     /// The same HSPs in the same order, every field, E-values bit for bit.
@@ -1215,7 +1287,6 @@ mod tests {
     // comparators LOSAT sorts HSP lists with, on lists with many comparator-equal HSPs.
     #[test]
     fn sort_in_place_equals_the_index_replay_sort() {
-        reference_runs();
         let comparators: [(&str, fn(&UngappedHit, &UngappedHit) -> Ordering); 4] = [
             ("ScoreCompareHSPs", score_compare_ungapped_hits_ncbi),
             ("s_RevCompareHSPsTbx", rev_compare_hsps_tbx),
@@ -1229,7 +1300,7 @@ mod tests {
                 for (name, compare) in comparators {
                     let hits = random_hits(&mut rng, n, span, 2);
                     let mut expected = hits.clone();
-                    sort_ungapped_hits_by_index_replay(&mut expected, compare);
+                    reference_sort(&mut expected, compare);
                     let mut actual = hits;
                     sort_in_place(&mut actual, compare);
                     assert_same_list(&format!("{name} n {n} span {span}"), &actual, &expected);
@@ -1570,7 +1641,6 @@ mod tests {
     // HSPs), serially and on the pool, with the cutoff sets of the kernel fuzz test.
     #[test]
     fn linking_in_place_equals_the_reference_call() {
-        reference_runs();
         let (params, contexts) = two_query_contexts();
         let cutoff_sets = [
             fast_test_cutoffs(),
@@ -1617,7 +1687,7 @@ mod tests {
                 let label = format!(
                     "case {case} n {n} queries {queries} span {span} parallel {allow_parallel}"
                 );
-                let expected = apply_sum_stats_even_gap_linking_with_parallel(
+                let expected = reference_linking(
                     hits.clone(),
                     &params,
                     &linking,

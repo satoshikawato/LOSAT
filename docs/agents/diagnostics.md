@@ -59,8 +59,9 @@ Ported from the round 3-5 performance work (2026-10, `perf/strict-set` and the p
 Each switch of the strict set gives the reference result by construction (the same integer
 results, or the same floating-point operations in the same order, or only a change of order,
 placement or reuse), so none of them changes the output. Until main 62102f7a every switch was
-off unless its variable was set. Since `perf/strict-default` (2026-10-12) the 43 switches of the
-strict set are on by default, and their variables mean (`LOSAT/src/utils/xswitch.rs`):
+off unless its variable was set. Since `perf/strict-default` (2026-10-12) the switches of the
+strict set are on by default (43 then, 45 since `LOSAT_X_PAIRLUT` and `LOSAT_X_HSPINPLACE`
+joined), and their variables mean (`LOSAT/src/utils/xswitch.rs`):
 
 | `LOSAT_X_<NAME>` | `LOSAT_X_DEFAULT` | the switch is |
 | --- | --- | --- |
@@ -75,7 +76,7 @@ strict set are on by default, and their variables mean (`LOSAT/src/utils/xswitch
   switches off are a diagnostic aid: `DPAVX2` and `DPW128` act only with `DPFAST`; `TBNSSIDE`,
   `TBNQSIDE` and `TBNBATCH` only with `TBNPAR` (`TBNEVENTS` only without it); `TBNBATCH` needs
   `TBNSSIDE`; `BXBATCH` needs `BXPOOL`; `AHEAD` needs `GREEDYSPEC` for megablast; `MBBATCH` runs
-  where `MBDELAY` does not.
+  where `MBDELAY` does not; `PAIRLUT` acts only while `PAIRPAR` is on.
 - White space around a value is ignored (`set LOSAT_X_DEFAULT=0 && ...` in cmd.exe stores `0 `).
   Only `0` means off; `00`, `false` or `off` are "any other value".
 - The variables are read once per process (once per Wasm instance), except `GREEDYSPEC`,
@@ -88,7 +89,7 @@ strict set are on by default, and their variables mean (`LOSAT/src/utils/xswitch
   `LOSAT_X_AHEADSHADOW`, which compares only while `AHEAD` is on). A shadow compares the kernel
   the default selects (for `LOSAT_X_DPSHADOW` the 256-bit, `DPW128` or base kernel that takes the
   call).
-- The names are provisional (`x_` prefixes, `EXPERIMENT` comments). The 43 single variables are
+- The names are provisional (`x_` prefixes, `EXPERIMENT` comments). The 45 single variables are
   to be removed once the default has run on every CI environment and through a few releases;
   `LOSAT_X_DEFAULT` stays. In the descriptions below `LOSAT_X_<NAME>=1` shows the switch, not a
   setting that is needed, and "strict-set candidate" marks the round-5 switches, which are in
@@ -110,6 +111,7 @@ export LOSAT_X_NEWTONEXACT=1
 export LOSAT_X_DPAVX2=1 LOSAT_X_DPW128=1
 export LOSAT_X_BXLUT=1 LOSAT_X_BXSCAN=1 LOSAT_X_BXSEGMEMO=1
 export LOSAT_X_PAIRPAR=1 LOSAT_X_NEWTONLANES=1 LOSAT_X_GREEDYPRELIM=1
+export LOSAT_X_PAIRLUT=1 LOSAT_X_HSPINPLACE=1
 ```
 
 Value switches: `LOSAT_X_AHEAD` (2 to 65,536, built-in 16), `LOSAT_X_MBBATCH` (2 to 4,096,
@@ -122,8 +124,11 @@ few megabases pass. It now numbers the hits per flush, which is exact for any nu
 stays opt-in until it is measured on the searches it would act on with the set on (the TBLASTX
 searches that `LOSAT_X_PAIRPAR` leaves to the scan loop).
 
-`LOSAT_X_PAIRLUT` (added after the default changed) is not in the set either: it is off unless
-set to any value, and acts while `LOSAT_X_PAIRPAR` is on.
+`LOSAT_X_PAIRLUT` and `LOSAT_X_HSPINPLACE` were added after the default changed, as switches
+that were off unless set, and joined the set on 2026-10-12. Both lower the memory of TBLASTX:
+the unit path of `LOSAT_X_PAIRPAR` then builds only the tables it scans with, and the HSP list
+of a subject is sorted and linked without a second whole copy. `LOSAT_X_PAIRLUT` acts only
+while `LOSAT_X_PAIRPAR` is on.
 
 What runs per target:
 
@@ -248,7 +253,7 @@ Rebuilding less:
 - `LOSAT_X_BXSEGMEMO=1` blastx redo stage: the subject SEG once per subject instead of once per window
   (per-thread memo of the last subject, byte-equal input; `blastx/x_seg_memo.rs`). Shadow:
   `LOSAT_X_BXSEGMEMOSHADOW=1` (the masker also runs on every call). Strict-set candidate (S-C, round 5).
-- `LOSAT_X_HSPINPLACE=1` (TBLASTX, memory; not in the strict set: off unless set) the HSP list of a subject is sorted, cut
+- `LOSAT_X_HSPINPLACE=1` (TBLASTX, memory; in the strict set) the HSP list of a subject is sorted, cut
   into linking groups, put together and replayed into NCBI's output order without a second whole copy
   alive (`tblastx/x_hsp_inplace.rs`, exactness argument in its header). The index sorts of
   `sort_ungapped_hits_by_index_replay` (score order, link order) move the records inside the list, cycle by
@@ -304,8 +309,8 @@ Scheduling (each value computed by one thread with the original function; order 
   every subject, the subject's combined ungapped HSP list compared field by field (the first
   difference stops the run with subject, frame, index and both values); one `[X_SHADOW] PAIRPAR`
   summary line at exit (subjects, units, HSPs compared, fallbacks).
-- `LOSAT_X_PAIRLUT=1` (not in the strict set: off unless set; acts while `LOSAT_X_PAIRPAR` is on,
-  not with its shadow) TBLASTX:
+- `LOSAT_X_PAIRLUT=1` (in the strict set; acts while `LOSAT_X_PAIRPAR` is on, not with its
+  shadow) TBLASTX:
   the lookup tables of the unit path, one per context group, built directly from the query instead
   of being filtered out of the batch's full table, which is then not built: for each group the
   exact-match index of the group's lookup locations, then the count, layout and fill passes of

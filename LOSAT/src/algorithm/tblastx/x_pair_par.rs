@@ -199,7 +199,7 @@ pub(super) fn lut_mode() -> u8 {
         let m = mode();
         if m != 0 && std::env::var_os("LOSAT_X_PAIRLUTSHADOW").is_some() {
             2
-        } else if m == 1 && std::env::var_os("LOSAT_X_PAIRLUT").is_some() {
+        } else if m == 1 && crate::utils::xswitch::on("LOSAT_X_PAIRLUT") {
             1
         } else {
             0

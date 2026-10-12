@@ -104,8 +104,20 @@
 //!
 //! `LOSAT_X_PAIRPARSHADOW=1` runs this path and the reference loop for every subject and stops
 //! at the first difference of `combined_ungapped_hits`; the summary is printed by `main`.
+//!
+//! `LOSAT_X_PAIRLUT=1` (with `LOSAT_X_PAIRPAR`): the group tables are built directly from the
+//! query (`lookup/x_pair_lut.rs`, exactness argument in its header) and the batch's full table is
+//! replaced by a stub that nothing scans. Whether the unit path runs is decided before the lookup
+//! build by `decide`, the function `prepare` decides with (`lut_build`); `prepare` stops the run if
+//! direct groups exist for a batch it would leave to the reference loop, and the per-subject
+//! dispatch stops it if the reference frame loop would run on the stub. `LOSAT_X_PAIRLUTSHADOW=1`
+//! builds the full table and `build_groups` as before and compares the direct groups with them.
 
 use super::*;
+use crate::algorithm::tblastx::lookup::x_pair_lut::{
+    x_assert_same_contexts, x_assert_same_group, x_assert_stub_scalars, XPairLutGroup,
+    XPairLutQuery,
+};
 use crate::algorithm::tblastx::lookup::{BackboneCell, BlastAaLookupTable, AA_HITS_PER_CELL};
 use std::sync::OnceLock;
 
@@ -122,6 +134,15 @@ static SHADOW_HSPS: AtomicU64 = AtomicU64::new(0);
 static NS_SUBLOOKUP: AtomicU64 = AtomicU64::new(0);
 static NS_UNITS: AtomicU64 = AtomicU64::new(0);
 static NS_MERGE: AtomicU64 = AtomicU64::new(0);
+// No NCBI counterpart: counters of LOSAT_X_PAIRLUT / LOSAT_X_PAIRLUTSHADOW (batches whose groups
+// were built directly, their groups, batches left to the reference builder, batches and groups
+// compared by the shadow, wall time of the direct build); they do not change any value NCBI computes.
+static LUT_BATCHES: AtomicU64 = AtomicU64::new(0);
+static LUT_GROUPS: AtomicU64 = AtomicU64::new(0);
+static LUT_FALLBACK: AtomicU64 = AtomicU64::new(0);
+static LUT_SHADOW_BATCHES: AtomicU64 = AtomicU64::new(0);
+static LUT_SHADOW_GROUPS: AtomicU64 = AtomicU64::new(0);
+static NS_LUT_DIRECT: AtomicU64 = AtomicU64::new(0);
 
 /// Largest number of context groups (units per subject chunk).
 const X_MAX_GROUPS: usize = 6;
@@ -151,6 +172,34 @@ pub(super) fn mode() -> u8 {
         if std::env::var_os("LOSAT_X_PAIRPARSHADOW").is_some() {
             2
         } else if crate::utils::xswitch::on("LOSAT_X_PAIRPAR") {
+            1
+        } else {
+            0
+        }
+    })
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:93-97
+// ```c
+// BlastAaLookupTableNew(lookup_options, (BlastAaLookupTable* *)
+//                       &lookup_wrap->lut);
+// ((BlastAaLookupTable*)lookup_wrap->lut)->use_pssm = has_pssm;
+// BlastAaLookupIndexQuery( (BlastAaLookupTable*) lookup_wrap->lut, matrix,
+//                           query, lookup_segments, 0);
+// ```
+// Dispatch switch of the lookup build: 0 = the full table by the reference builder (and
+// `build_groups`), 1 = the group tables directly with a stub in place of the full table, 2 = both,
+// compared. The switch acts only where the unit path can run without the reference loop
+// (LOSAT_X_PAIRPAR, mode 1); the shadow also runs under LOSAT_X_PAIRPARSHADOW, where both paths
+// use the tables of the reference builder.
+/// 0 = off, 1 = LOSAT_X_PAIRLUT, 2 = LOSAT_X_PAIRLUTSHADOW.
+pub(super) fn lut_mode() -> u8 {
+    static MODE: OnceLock<u8> = OnceLock::new();
+    *MODE.get_or_init(|| {
+        let m = mode();
+        if m != 0 && std::env::var_os("LOSAT_X_PAIRLUTSHADOW").is_some() {
+            2
+        } else if m == 1 && std::env::var_os("LOSAT_X_PAIRLUT").is_some() {
             1
         } else {
             0
@@ -209,6 +258,37 @@ pub fn print_summary() {
             load(&NS_MERGE) as f64 / 1e9,
             load(&SUBJECTS),
             load(&UNITS)
+        );
+    }
+    let lm = lut_mode();
+    if lm == 0 {
+        return;
+    }
+    if lm == 2 {
+        eprintln!(
+            "[X_SHADOW] PAIRLUT batches={} groups_compared={} fallback={} (group tables, stub header and contexts identical)",
+            load(&LUT_SHADOW_BATCHES),
+            load(&LUT_SHADOW_GROUPS),
+            load(&LUT_FALLBACK)
+        );
+    }
+    if std::env::var_os("LOSAT_X_STATS").is_some() {
+        eprintln!(
+            "[X_STATS] PAIRLUT batches_direct={} groups={} fallback={}",
+            load(&LUT_BATCHES),
+            load(&LUT_GROUPS),
+            load(&LUT_FALLBACK)
+        );
+    }
+    if timing() {
+        // The direct build (query preparation, group tables, stub); it is part of the search's
+        // `[TIMING] build_lookup`, and `sublookup` above is then 0 (no `build_groups`).
+        eprintln!(
+            "[TIMING] x_pairlut: direct {:.3}s (batches={} groups={} fallback={})",
+            load(&NS_LUT_DIRECT) as f64 / 1e9,
+            load(&LUT_BATCHES),
+            load(&LUT_GROUPS),
+            load(&LUT_FALLBACK)
         );
     }
 }
@@ -289,6 +369,341 @@ pub(super) struct XBatch<'a> {
     pub debugging: bool,
     /// LOSAT_TBLASTX_SERIAL_SCAN_CHUNKS or the parallel-chunk path is on.
     pub chunk_switches: bool,
+    /// LOSAT_X_PAIRLUT / LOSAT_X_PAIRLUTSHADOW: the groups built at the lookup build site
+    /// (`lut_build`), or None.
+    pub lut: Option<XLutBatch>,
+}
+
+/// What the unit path does with a batch (`decide`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum XDecision {
+    /// No switch: the reference loop.
+    Off,
+    /// A trace, debug, diagnostics or chunk switch: the reference loop ("fallback: gate").
+    Gate,
+    /// The exactness guard fails: the reference loop ("fallback: guard").
+    Guard,
+    /// The units run (alone, or with the reference loop in shadow mode).
+    Units,
+}
+
+/// The inputs of `decide`: what the decision reads of a batch. None of them needs the lookup
+/// table.
+pub(super) struct XGates<'a> {
+    pub contexts: &'a [QueryContext],
+    pub query_length: i32,
+    pub diag_array_size: i32,
+    pub subjects: &'a [FastaRecord],
+    pub debugging: bool,
+    pub chunk_switches: bool,
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:52-63
+// ```c
+// diag_array_length = 1;
+// /* What power of 2 is just longer than the query? */
+// while (diag_array_length < (qlen+window_size))
+// {
+//         diag_array_length = diag_array_length << 1;
+// }
+// ...
+// diag_table->diag_mask = diag_array_length-1;
+// ```
+// The decision of `prepare` (the gates, then the guard against the reference table size above and
+// the second guard, `last_hit_fits`) as one function, so that the lookup build site (`lut_build`,
+// before the table exists) and `prepare` (after it) decide with the same code.
+/// Whether the unit path runs for a batch, for the switch mode `m` (`mode()`).
+pub(super) fn decide(m: u8, g: &XGates<'_>) -> XDecision {
+    if m == 0 {
+        return XDecision::Off;
+    }
+    if g.debugging || g.chunk_switches {
+        return XDecision::Gate;
+    }
+    let max_context_len = g.contexts.iter().map(|c| c.aa_len).max().unwrap_or(0);
+    let longest_subject_chunk = g
+        .subjects
+        .iter()
+        .map(|r| r.seq().len() / 3)
+        .max()
+        .unwrap_or(0)
+        .min(tblastx_max_dbseq_len_for_run());
+    if !guard(
+        max_context_len,
+        longest_subject_chunk,
+        g.query_length,
+        g.diag_array_size,
+    ) || !last_hit_fits(longest_subject_chunk, g.query_length, g.diag_array_size)
+    {
+        return XDecision::Guard;
+    }
+    XDecision::Units
+}
+
+/// The inputs of `lut_build`: what the lookup build site of the batch has (RI:2311).
+pub(super) struct XLutEarly<'a> {
+    pub query_frames: &'a [Vec<QueryFrame>],
+    /// The lookup threshold (`lookup->threshold`).
+    pub threshold: i32,
+    pub window: i32,
+    pub subjects: &'a [FastaRecord],
+    /// As `XBatch::debugging`.
+    pub debugging: bool,
+    /// `requested_parallel` and `use_serial_scan_chunks` of the batch (RI:2130, 2139).
+    pub requested_parallel: bool,
+    pub use_serial_scan_chunks: bool,
+    pub pool: &'a crate::utils::threading::SearchPool<'a>,
+}
+
+/// The direct groups of a batch, made at the lookup build site and handed to `prepare`.
+pub(super) struct XLutBatch {
+    groups: Vec<XGroup>,
+    /// The stub of the full table and the batch's contexts, until the build site takes them
+    /// (`take_stub`); the shadow keeps them for its comparison.
+    stub: Option<(BlastAaLookupTable, Vec<QueryContext>)>,
+    /// LOSAT_X_PAIRLUTSHADOW: the batch keeps the reference builder's table and `build_groups`.
+    shadow: bool,
+}
+
+impl XLutBatch {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:264-266
+    // ```c
+    //    case eAaLookupTable:
+    //       offset_array_size = OFFSET_ARRAY_SIZE +
+    //          ((BlastAaLookupTable*)lookup->lut)->longest_chain;
+    // ```
+    // The reference code reads `longest_chain` and the header of the batch table; the stub carries
+    // the full table's values (`XPairLutQuery::x_into_stub`).
+    /// The table and contexts that take the place of `build_ncbi_lookup`'s for this batch: the
+    /// stub. None in shadow mode (the reference builder runs).
+    pub(super) fn take_stub(&mut self) -> Option<(BlastAaLookupTable, Vec<QueryContext>)> {
+        if self.shadow {
+            None
+        } else {
+            self.stub.take()
+        }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:246-250
+// ```c
+//     if (backup->offset + MAX_DBSEQ_LEN <
+//         backup->hard_ranges[backup->hm_index].right) {
+//
+//         subject->length = MAX_DBSEQ_LEN;
+//         backup->next = backup->offset + MAX_DBSEQ_LEN - dbseq_chunk_overlap;
+// ```
+// `chunk_switches` of the batch before the lookup build: the expression of RI:2385-2394
+// (`use_parallel_chunks`, which reads the thread request, two switches and the subject lengths
+// only) or'ed with `use_serial_scan_chunks`, as RI:2562 passes it to `prepare`. `prepare` decides
+// again with RI's own value and stops the run if the two decisions differ for a batch with direct
+// groups.
+fn early_chunk_switches(
+    requested_parallel: bool,
+    use_serial_scan_chunks: bool,
+    subjects: &[FastaRecord],
+) -> bool {
+    let use_parallel_chunks = requested_parallel
+        && !use_serial_scan_chunks
+        && (std::env::var_os("LOSAT_TBLASTX_PARALLEL_CHUNKS").is_some()
+            || (cfg!(all(target_arch = "wasm32", feature = "wasm-threads"))
+                && subjects.iter().any(|r| {
+                    tblastx_estimated_subject_chunk_work_items(
+                        r.seq().len(),
+                        tblastx_max_dbseq_len_for_run(),
+                    ) > 1
+                })));
+    use_serial_scan_chunks || use_parallel_chunks
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:93-97
+// ```c
+// BlastAaLookupTableNew(lookup_options, (BlastAaLookupTable* *)
+//                       &lookup_wrap->lut);
+// ((BlastAaLookupTable*)lookup_wrap->lut)->use_pssm = has_pssm;
+// BlastAaLookupIndexQuery( (BlastAaLookupTable*) lookup_wrap->lut, matrix,
+//                           query, lookup_segments, 0);
+// ```
+// Dispatch point 0 (per batch, at the lookup build): when the unit path will run for the batch,
+// the tables its units scan with are built here, one per context group, from the reference query
+// preparation; the full table NCBI builds above is then not built (LOSAT_X_PAIRLUT) or built as
+// before and compared (LOSAT_X_PAIRLUTSHADOW). None leaves the batch to the reference builder and
+// `build_groups`: switch off, the direct builder's preconditions (`XPairLutQuery::x_prepare`), a
+// gate or the guard (`decide`), or a lookup location outside one group.
+/// The direct groups of the batch, or None (the reference builder runs).
+pub(super) fn lut_build(e: XLutEarly<'_>) -> Option<XLutBatch> {
+    let lm = lut_mode();
+    if lm == 0 {
+        return None;
+    }
+    let t0 = timing().then(Instant::now);
+    let built = lut_direct(&e, lm == 2);
+    add_ns(&NS_LUT_DIRECT, t0);
+    match &built {
+        Some(batch) => {
+            LUT_BATCHES.fetch_add(1, AtomicOrdering::Relaxed);
+            LUT_GROUPS.fetch_add(batch.groups.len() as u64, AtomicOrdering::Relaxed);
+        }
+        None => {
+            LUT_FALLBACK.fetch_add(1, AtomicOrdering::Relaxed);
+        }
+    }
+    built
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:52-57
+// ```c
+// diag_array_length = 1;
+// /* What power of 2 is just longer than the query? */
+// while (diag_array_length < (qlen+window_size))
+// {
+//         diag_array_length = diag_array_length << 1;
+// }
+// ```
+// The early decision: the inputs of `decide` from the prepared query, by the expressions RI uses
+// after the lookup build (RI:2502-2510 `query_length`, `check_diag_table_window`,
+// `diag_array_size`), then the groups and the stub.
+fn lut_direct(e: &XLutEarly<'_>, shadow: bool) -> Option<XLutBatch> {
+    // The reference query preparation (contexts, concatenated query, lookup locations).
+    let q = XPairLutQuery::x_prepare(e.query_frames, e.threshold, true)?;
+    let contexts = q.contexts();
+    let query_length: i32 = contexts
+        .last()
+        .map(|c| c.frame_base + c.aa_len as i32)
+        .unwrap_or(0);
+    // RI:2506 reports this error after the reference build.
+    if crate::blastinput::app::check_diag_table_window(query_length, e.window, "TBLASTX").is_err() {
+        return None;
+    }
+    let mut diag_array_size: i32 = 1;
+    while diag_array_size < (query_length + e.window) {
+        diag_array_size <<= 1;
+    }
+    let gates = XGates {
+        contexts,
+        query_length,
+        diag_array_size,
+        subjects: e.subjects,
+        debugging: e.debugging,
+        chunk_switches: early_chunk_switches(
+            e.requested_parallel,
+            e.use_serial_scan_chunks,
+            e.subjects,
+        ),
+    };
+    if decide(mode(), &gates) != XDecision::Units {
+        return None;
+    }
+    let groups = lut_direct_groups(&q, e.pool, lut_on_pool())?;
+    let stub = q.x_into_stub(groups.iter().map(|g| &g.lookup));
+    Some(XLutBatch {
+        groups,
+        stub: Some(stub),
+        shadow,
+    })
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:454-456,461-465
+// ```c
+//     BlastLookupIndexQueryExactMatches(exact_backbone, lookup->word_length,
+//                                       lookup->charsize, lookup->word_length,
+//                                       query, location);
+// ...
+//     for (i = 0; i < lookup->backbone_size; i++) {
+//         if (exact_backbone[i] != NULL) {
+//             s_AddWordHits(lookup, matrix, query->sequence,
+//                           exact_backbone[i], query_bias, row_max);
+//             sfree(exact_backbone[i]);
+// ```
+// One table per context group (`group_starts`, the groups of `build_groups`), each from the
+// lookup locations of its contexts (`XPairLutQuery::x_build_group`). Scheduling only: the groups
+// are independent. They are built in order on the calling thread; with `on_pool` (the tuning knob
+// LOSAT_X_PAIRLUT_POOL, `lut_on_pool`) and a search pool they are built on the pool (an indexed
+// map, results in group order; each thread has its own neighbour-list memo). The calling thread
+// is the default because the pool gained at most 17 ms per batch (AP027131, 6 x 220,702 aa) and
+// cost memory: the memo of every pool thread, and tables allocated in the pool threads' arenas
+// and freed by the search thread (+17 MiB on a 50-batch run at 8 threads).
+/// The groups `build_groups` would filter out of the full table of `q`, built directly. None
+/// when a lookup location does not lie inside one group.
+fn lut_direct_groups(
+    q: &XPairLutQuery,
+    pool: &crate::utils::threading::SearchPool<'_>,
+    on_pool: bool,
+) -> Option<Vec<XGroup>> {
+    let starts = group_starts(q.contexts());
+    let locations = q.x_group_locations(&starts)?;
+    let to_group = |g: XPairLutGroup| XGroup {
+        lookup: g.table,
+        q_min: g.q_min,
+        q_max: g.q_max,
+    };
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    if on_pool && pool.enabled() {
+        return Some(pool.install(|| {
+            locations
+                .par_iter()
+                .map(|group_locations| to_group(q.x_build_group(group_locations)))
+                .collect()
+        }));
+    }
+    let _ = (pool, on_pool);
+    Some(
+        locations
+            .iter()
+            .map(|group_locations| to_group(q.x_build_group(group_locations)))
+            .collect(),
+    )
+}
+
+// No NCBI counterpart: a tuning knob for where the groups are built (the calling thread or the
+// search pool); the tables are the same either way.
+/// LOSAT_X_PAIRLUT_POOL: the groups on the search pool instead of the calling thread.
+fn lut_on_pool() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("LOSAT_X_PAIRLUT_POOL").is_some())
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:343-346
+// ```c
+//             PV_SET(pv, i, PV_ARRAY_BTS);
+//             bbc[i].num_used = lookup->thin_backbone[i][1];
+//             /* if there are three or fewer hits, */
+//             if (lookup->thin_backbone[i][1] <= AA_HITS_PER_CELL)
+// ```
+// No computation: LOSAT_X_PAIRLUTSHADOW compares the direct groups with the groups `build_groups`
+// filtered out of the reference builder's table (every field of every table, `q_min`, `q_max`),
+// the stub with that table, and the contexts; the first difference stops the run.
+fn lut_shadow_compare(
+    lut: &XLutBatch,
+    groups: &[XGroup],
+    lookup: &BlastAaLookupTable,
+    contexts: &[QueryContext],
+) {
+    assert_eq!(
+        lut.groups.len(),
+        groups.len(),
+        "LOSAT_X_PAIRLUTSHADOW: number of groups differs (direct vs reference)"
+    );
+    for (g, (direct, reference)) in lut.groups.iter().zip(groups).enumerate() {
+        x_assert_same_group(
+            g,
+            &direct.lookup,
+            (direct.q_min, direct.q_max),
+            &reference.lookup,
+            (reference.q_min, reference.q_max),
+        );
+    }
+    let (stub, stub_contexts) = lut
+        .stub
+        .as_ref()
+        .expect("LOSAT_X_PAIRLUTSHADOW keeps the stub for the comparison");
+    x_assert_stub_scalars(stub, lookup);
+    x_assert_same_contexts(stub_contexts, contexts);
+    LUT_SHADOW_BATCHES.fetch_add(1, AtomicOrdering::Relaxed);
+    LUT_SHADOW_GROUPS.fetch_add(groups.len() as u64, AtomicOrdering::Relaxed);
 }
 
 /// The per-subject inputs of `XPairPar::run_subject` (the values the reference loop reads).
@@ -359,6 +774,9 @@ enum XHit {
 pub(super) struct XPairPar {
     groups: Vec<XGroup>,
     shadow: bool,
+    /// LOSAT_X_PAIRLUT: the groups were built directly and the batch's table is a stub without
+    /// entries, which the reference frame loop must not scan.
+    stub: bool,
 }
 
 impl XPairPar {
@@ -372,49 +790,83 @@ impl XPairPar {
     //       PV_SET(pv, i, PV_ARRAY_BTS);
     //       bbc[i].num_used = lookup->thin_backbone[i][1];
     // ```
-    // Dispatch point (per batch, after the lookup build): checks the gates and the guard and builds
-    // the sub-lookups. None means the reference loop runs for every subject of the batch.
+    // Dispatch point (per batch, after the lookup build): checks the gates and the guard (`decide`)
+    // and builds the sub-lookups, or takes the ones LOSAT_X_PAIRLUT built at the lookup build site
+    // (`lut_build`). None means the reference loop runs for every subject of the batch.
     /// The unit path for this batch, or None (switch off, a gate or the guard fails).
     pub(super) fn prepare(b: XBatch<'_>) -> Option<Self> {
         let m = mode();
-        if m == 0 {
+        let decision = decide(
+            m,
+            &XGates {
+                contexts: b.contexts,
+                query_length: b.query_length,
+                diag_array_size: b.diag_array_size,
+                subjects: b.subjects,
+                debugging: b.debugging,
+                chunk_switches: b.chunk_switches,
+            },
+        );
+        if decision != XDecision::Off {
+            BATCHES.fetch_add(1, AtomicOrdering::Relaxed);
+        }
+        match decision {
+            XDecision::Gate => {
+                FALLBACK_GATE.fetch_add(1, AtomicOrdering::Relaxed);
+            }
+            XDecision::Guard => {
+                FALLBACK_GUARD.fetch_add(1, AtomicOrdering::Relaxed);
+            }
+            XDecision::Off | XDecision::Units => {}
+        }
+        if decision != XDecision::Units {
+            // LOSAT_X_PAIRLUT: direct groups mean that the build site decided for the unit path
+            // (and, without the shadow, that the batch's table is a stub); the reference loop
+            // must not get this batch.
+            assert!(
+                b.lut.is_none(),
+                "LOSAT_X_PAIRLUT: direct groups were built for a batch the unit path does not take ({decision:?})"
+            );
             return None;
         }
-        BATCHES.fetch_add(1, AtomicOrdering::Relaxed);
-        if b.debugging || b.chunk_switches {
-            FALLBACK_GATE.fetch_add(1, AtomicOrdering::Relaxed);
-            return None;
-        }
-        let max_context_len = b.contexts.iter().map(|c| c.aa_len).max().unwrap_or(0);
-        let longest_subject_chunk = b
-            .subjects
-            .iter()
-            .map(|r| r.seq().len() / 3)
-            .max()
-            .unwrap_or(0)
-            .min(tblastx_max_dbseq_len_for_run());
-        if !guard(
-            max_context_len,
-            longest_subject_chunk,
-            b.query_length,
-            b.diag_array_size,
-        ) || !last_hit_fits(longest_subject_chunk, b.query_length, b.diag_array_size)
-        {
-            FALLBACK_GUARD.fetch_add(1, AtomicOrdering::Relaxed);
-            return None;
-        }
-        let t0 = timing().then(Instant::now);
-        let groups = build_groups(b.lookup, b.contexts);
-        add_ns(&NS_SUBLOOKUP, t0);
+        let (groups, stub) = match b.lut {
+            // LOSAT_X_PAIRLUT: the groups built at the lookup build site (`lut_build`); the
+            // batch's table is the stub the build site took.
+            Some(lut) if !lut.shadow => {
+                let stub = lut.stub.is_none();
+                (lut.groups, stub)
+            }
+            lut => {
+                let t0 = timing().then(Instant::now);
+                let groups = build_groups(b.lookup, b.contexts);
+                add_ns(&NS_SUBLOOKUP, t0);
+                // LOSAT_X_PAIRLUTSHADOW: the direct groups against these.
+                if let Some(lut) = &lut {
+                    lut_shadow_compare(lut, &groups, b.lookup, b.contexts);
+                }
+                (groups, false)
+            }
+        };
+        assert!(
+            !(stub && m == 2),
+            "LOSAT_X_PAIRLUT: the reference loop of LOSAT_X_PAIRPARSHADOW cannot run on the stub table"
+        );
         Some(Self {
             groups,
             shadow: m == 2,
+            stub,
         })
     }
 
     /// Shadow mode: the reference loop runs as well and the lists are compared.
     pub(super) fn shadow(&self) -> bool {
         self.shadow
+    }
+
+    /// LOSAT_X_PAIRLUT: the batch's lookup table is a stub (the units scan with the direct group
+    /// tables; the reference frame loop must run zero times).
+    pub(super) fn stub(&self) -> bool {
+        self.stub
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:479-491,561-584
@@ -1284,6 +1736,7 @@ mod tests {
         let pp = XPairPar {
             groups: build_groups(&lookup, &contexts),
             shadow: false,
+            stub: false,
         };
         let mut diag_array = vec![start; size as usize];
         let mut diag_offset = start_offset;
@@ -1581,6 +2034,394 @@ mod tests {
         }
         assert!(checked > 100, "checked {checked}");
         assert!(aliased > 20, "aliased {aliased}");
+    }
+
+    /// A frame with mask intervals (start, end exclusive, as SEG gives them); the lookup locations
+    /// are their complement.
+    fn masked_frame(f: i8, residues: &[u8], masks: &[(usize, usize)]) -> QueryFrame {
+        let mut masked = frame(f, residues);
+        masked.seg_masks = masks.to_vec();
+        masked
+    }
+
+    /// A random frame: now and then empty or shorter than a word, with zero to two mask intervals
+    /// inside it, now and then masked from end to end.
+    fn random_masked_frame(rng: &mut Rng, f: i8, max_len: u64, alphabet: &[u8]) -> QueryFrame {
+        let len = match rng.below(8) {
+            0 => 0,
+            1 => 2,
+            _ => 3 + rng.below(max_len) as usize,
+        };
+        let residues = random_residues(rng, len, alphabet);
+        let mut masks: Vec<(usize, usize)> = Vec::new();
+        if len > 0 {
+            match rng.below(5) {
+                0 => masks.push((0, len)),
+                1 => {}
+                _ => {
+                    let a = rng.below(len as u64) as usize;
+                    let b = a + 1 + rng.below((len - a) as u64) as usize;
+                    masks.push((a, b));
+                    if b + 2 < len && rng.below(2) == 0 {
+                        let c = b + 1 + rng.below((len - b - 1) as u64) as usize;
+                        let d = c + 1 + rng.below((len - c) as u64) as usize;
+                        masks.push((c, d));
+                    }
+                }
+            }
+        }
+        masked_frame(f, &residues, &masks)
+    }
+
+    /// The direct groups of `queries` (`lut_direct_groups`, then the stub) against `build_groups`
+    /// of the reference builder's table, with the comparison LOSAT_X_PAIRLUTSHADOW makes (every
+    /// field of every group table, `q_min`, `q_max`, the stub's header fields and `longest_chain`,
+    /// the contexts). Returns the number of groups and of groups with entries.
+    fn lut_check(
+        queries: &[Vec<QueryFrame>],
+        threshold: i32,
+        pool: &crate::utils::threading::SearchPool<'_>,
+    ) -> (usize, usize) {
+        let params = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
+        let (full, contexts) = build_ncbi_lookup(queries, threshold, &params, true);
+        let reference = build_groups(&full, &contexts);
+        let q = XPairLutQuery::x_prepare(queries, threshold, true).expect("direct builder applies");
+        // On the pool when the caller has one, else in order on this thread.
+        let direct = lut_direct_groups(&q, pool, true).expect("every location inside one group");
+        let stub = q.x_into_stub(direct.iter().map(|g| &g.lookup));
+        let lut = XLutBatch {
+            groups: direct,
+            stub: Some(stub),
+            shadow: true,
+        };
+        lut_shadow_compare(&lut, &reference, &full, &contexts);
+        (
+            reference.len(),
+            reference
+                .iter()
+                .filter(|g| g.lookup.longest_chain > 0)
+                .count(),
+        )
+    }
+
+    const FRAMES: [i8; 6] = [1, 2, 3, -1, -2, -3];
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:454-456,461-465
+    // ```c
+    //     BlastLookupIndexQueryExactMatches(exact_backbone, lookup->word_length,
+    //                                       lookup->charsize, lookup->word_length,
+    //                                       query, location);
+    // ...
+    //     for (i = 0; i < lookup->backbone_size; i++) {
+    //         if (exact_backbone[i] != NULL) {
+    //             s_AddWordHits(lookup, matrix, query->sequence,
+    //                           exact_backbone[i], query_bias, row_max);
+    //             sfree(exact_backbone[i]);
+    // ```
+    #[test]
+    fn direct_groups_equal_build_groups_for_one_query() {
+        let mut rng = Rng(0x0dd5_eed5_1234_5678);
+        let alphabets = [aa("ACDEKW"), aa("AW"), aa("ACDEFGHIKLMNPQRSTVWY")];
+        let serial = crate::utils::threading::SearchPool::x_serial();
+        let mut with_entries = 0usize;
+        let mut empty_groups = 0usize;
+        for case_no in 0..90 {
+            let alphabet = &alphabets[case_no % alphabets.len()];
+            // 1 to 6 contexts: one group per context.
+            let n_ctx = 1 + case_no % 6;
+            let frames: Vec<QueryFrame> = (0..n_ctx)
+                .map(|c| random_masked_frame(&mut rng, FRAMES[c], 300, alphabet))
+                .collect();
+            for threshold in [0, 11, 13] {
+                let (groups, filled) = lut_check(std::slice::from_ref(&frames), threshold, &serial);
+                assert_eq!(groups, n_ctx);
+                with_entries += filled;
+                empty_groups += groups - filled;
+            }
+        }
+        assert!(with_entries > 300, "groups with entries {with_entries}");
+        assert!(empty_groups > 100, "empty groups {empty_groups}");
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:580-590
+    // ```c
+    //         for (i = 0; i < alphabet_size; i++) {
+    //             if (score + row[i] >= threshold) {
+    //                 subject_word[current_pos] = i;
+    //                 for (j = 0; j < offset_list[1]; j++) {
+    //                     BlastLookupAddWordHit(lookup->thin_backbone, wordsize,
+    //                                           charsize, subject_word,
+    //                                           query_bias + offset_list[j + 2]);
+    //                 }
+    // ```
+    // A threshold of INT_MIN (the conversion of a threshold beyond Int4): every word is a
+    // neighbour of every query word, so every cell of a group holds every offset of the group.
+    #[test]
+    fn direct_groups_equal_build_groups_at_threshold_int_min() {
+        let mut rng = Rng(0x7357_0000_0000_0001);
+        let alphabet = aa("ACDEFGHIKLMNPQRSTVWY");
+        let serial = crate::utils::threading::SearchPool::x_serial();
+        for n_ctx in [1usize, 4, 6] {
+            let frames: Vec<QueryFrame> = (0..n_ctx)
+                .map(|c| random_masked_frame(&mut rng, FRAMES[c], 9, &alphabet))
+                .collect();
+            let (groups, _) = lut_check(std::slice::from_ref(&frames), i32::MIN, &serial);
+            assert_eq!(groups, n_ctx);
+        }
+        // Two queries: twelve contexts in six groups.
+        let queries: Vec<Vec<QueryFrame>> = (0..2)
+            .map(|_| {
+                FRAMES
+                    .iter()
+                    .map(|&f| random_masked_frame(&mut rng, f, 6, &alphabet))
+                    .collect()
+            })
+            .collect();
+        let (groups, _) = lut_check(&queries, i32::MIN, &serial);
+        assert!((2..=X_MAX_GROUPS).contains(&groups), "groups {groups}");
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1045-1047
+    // ```c
+    //       start_offset = query_info->contexts[context].query_offset;
+    //       end_offset = query_info->contexts[context].query_length
+    //           + start_offset - 1;
+    // ```
+    // Several queries make more than X_MAX_GROUPS contexts: a group then holds several contexts,
+    // and its direct table is built from the lookup locations of all of them.
+    #[test]
+    fn direct_groups_equal_build_groups_for_several_queries() {
+        let mut rng = Rng(0x0bad_cafe_dead_beef);
+        let alphabets = [aa("ACDEKW"), aa("ACDEFGHIKLMNPQRSTVWY")];
+        let serial = crate::utils::threading::SearchPool::x_serial();
+        let mut six_groups = 0usize;
+        for case_no in 0..24 {
+            let alphabet = &alphabets[case_no % alphabets.len()];
+            let n_queries = 2 + case_no % 5;
+            let queries: Vec<Vec<QueryFrame>> = (0..n_queries)
+                .map(|_| {
+                    FRAMES
+                        .iter()
+                        .map(|&f| random_masked_frame(&mut rng, f, 120, alphabet))
+                        .collect()
+                })
+                .collect();
+            for threshold in [0, 11, 13] {
+                // 12 to 36 contexts in at most X_MAX_GROUPS groups (`group_starts` balances them
+                // by length and can make fewer), so some group holds several contexts.
+                let (groups, _) = lut_check(&queries, threshold, &serial);
+                assert!((1..=X_MAX_GROUPS).contains(&groups), "groups {groups}");
+                six_groups += usize::from(groups == X_MAX_GROUPS);
+            }
+        }
+        assert!(six_groups > 0, "cases with six groups {six_groups}");
+        // Four queries with frames of one length: six groups of four contexts.
+        let even: Vec<Vec<QueryFrame>> = (0..4)
+            .map(|_| {
+                FRAMES
+                    .iter()
+                    .map(|&f| masked_frame(f, &random_residues(&mut rng, 60, &alphabets[1]), &[]))
+                    .collect()
+            })
+            .collect();
+        assert_eq!(lut_check(&even, 13, &serial), (X_MAX_GROUPS, X_MAX_GROUPS));
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:96-100
+    // ```c
+    //         /* if this location is too small to fit a complete word, skip the
+    //            location */
+    //
+    //         if (word_length > to - from + 1)
+    //             continue;
+    // ```
+    // A context masked from end to end has no lookup location, an empty frame has no letter and a
+    // two-letter frame no word: their groups have no entry, `q_min` = `q_max` = 0, and the units
+    // skip them (`longest_chain` 0).
+    #[test]
+    fn direct_groups_of_contexts_without_words_are_empty() {
+        let mut rng = Rng(0x00c0_ffee_0000_0042);
+        let alphabet = aa("ACDEKLMNPQRSTVWY");
+        let serial = crate::utils::threading::SearchPool::x_serial();
+        let frames = vec![
+            masked_frame(1, &random_residues(&mut rng, 80, &alphabet), &[(10, 20)]),
+            masked_frame(2, &random_residues(&mut rng, 70, &alphabet), &[(0, 70)]),
+            masked_frame(3, &[], &[]),
+            masked_frame(-1, &random_residues(&mut rng, 2, &alphabet), &[]),
+            masked_frame(-2, &random_residues(&mut rng, 60, &alphabet), &[]),
+            masked_frame(
+                -3,
+                &random_residues(&mut rng, 50, &alphabet),
+                &[(0, 3), (47, 50)],
+            ),
+        ];
+        for threshold in [0, 11, 13] {
+            assert_eq!(
+                lut_check(std::slice::from_ref(&frames), threshold, &serial),
+                (6, 3)
+            );
+        }
+        let q = XPairLutQuery::x_prepare(std::slice::from_ref(&frames), 13, true)
+            .expect("direct builder applies");
+        let groups =
+            lut_direct_groups(&q, &serial, false).expect("every location inside one group");
+        for g in [1usize, 2, 3] {
+            assert_eq!(groups[g].lookup.longest_chain, 0);
+            assert_eq!((groups[g].q_min, groups[g].q_max), (0, 0));
+            assert!(groups[g].lookup.overflow.is_empty());
+        }
+        // The stub has the full table's longest chain although it has no entry.
+        let params = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
+        let (full, _) = build_ncbi_lookup(std::slice::from_ref(&frames), 13, &params, true);
+        let (stub, contexts) = q.x_into_stub(groups.iter().map(|g| &g.lookup));
+        assert!(full.longest_chain > 0);
+        assert_eq!(stub.longest_chain, full.longest_chain);
+        assert_eq!(contexts.len(), 6);
+        assert!(stub.pv.iter().all(|&word| word == 0) && stub.overflow.is_empty());
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-149
+    // ```c
+    // TBlastThreads the_threads(GetNumberOfThreads());
+    // ```
+    // The groups built on a search pool (every thread with its own neighbour-list memo) are the
+    // groups built in order on one thread.
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+    #[test]
+    fn direct_groups_on_a_search_pool_equal_build_groups() {
+        let mut rng = Rng(0x9001_9002_9003_9004);
+        let alphabet = aa("ACDEFGHIKLMNPQRSTVWY");
+        let one: Vec<Vec<QueryFrame>> = vec![FRAMES
+            .iter()
+            .map(|&f| random_masked_frame(&mut rng, f, 2000, &alphabet))
+            .collect()];
+        let many: Vec<Vec<QueryFrame>> = (0..4)
+            .map(|_| {
+                FRAMES
+                    .iter()
+                    .map(|&f| random_masked_frame(&mut rng, f, 400, &alphabet))
+                    .collect()
+            })
+            .collect();
+        crate::utils::threading::with_search_pool(4, "tblastx", |pool| {
+            assert!(pool.enabled());
+            for threshold in [0, 11, 13] {
+                // The second round reads the lists the threads memoised in the first.
+                for _round in 0..2 {
+                    assert_eq!(lut_check(&one, threshold, pool).0, 6);
+                    let (groups, _) = lut_check(&many, threshold, pool);
+                    assert!((2..=X_MAX_GROUPS).contains(&groups), "groups {groups}");
+                }
+            }
+            Ok(())
+        })
+        .expect("search pool");
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:52-57
+    // ```c
+    // diag_array_length = 1;
+    // /* What power of 2 is just longer than the query? */
+    // while (diag_array_length < (qlen+window_size))
+    // {
+    //         diag_array_length = diag_array_length << 1;
+    // }
+    // ```
+    // `decide` is the decision of `prepare`: the switch, then the gates, then the guard.
+    #[test]
+    fn decide_checks_the_switch_the_gates_and_the_guard() {
+        let mut rng = Rng(5);
+        let alphabet = aa("ACDEKW");
+        let window = 40;
+        // One context of 216 letters: the table has 256 cells and the slack is 40.
+        let (_, contexts) = lookup_for(&[frame(1, &random_residues(&mut rng, 216, &alphabet))]);
+        let query_length = query_length_of(&contexts);
+        let diag_array_size = diag_array_size_for(query_length, window);
+        assert_eq!((query_length, diag_array_size), (216, 256));
+        let short = [FastaRecord::new("", b"s", &[b'A'; 120])];
+        let long = [
+            FastaRecord::new("", b"s", &[b'A'; 30]),
+            FastaRecord::new("", b"l", &[b'A'; 123]),
+        ];
+        let none: [FastaRecord; 0] = [];
+        let decision = |m: u8, subjects: &[FastaRecord], debugging: bool, chunk_switches: bool| {
+            decide(
+                m,
+                &XGates {
+                    contexts: &contexts,
+                    query_length,
+                    diag_array_size,
+                    subjects,
+                    debugging,
+                    chunk_switches,
+                },
+            )
+        };
+        for m in [1u8, 2] {
+            assert_eq!(decision(m, &short, false, false), XDecision::Units);
+            assert_eq!(decision(m, &none, false, false), XDecision::Units);
+            assert_eq!(decision(m, &long, false, false), XDecision::Guard);
+            assert_eq!(decision(m, &short, true, false), XDecision::Gate);
+            assert_eq!(decision(m, &short, false, true), XDecision::Gate);
+            // The gates come before the guard, as in the counters of LOSAT_X_STATS.
+            assert_eq!(decision(m, &long, true, false), XDecision::Gate);
+        }
+        assert_eq!(decision(0, &short, false, false), XDecision::Off);
+        assert_eq!(decision(0, &long, true, true), XDecision::Off);
+        // The second guard (`last_hit_fits`): with a window just under 2^29 the slack is almost
+        // 2^29, so the first guard holds for the short subject and the units still do not run.
+        let wide = diag_array_size_for(query_length, 536_870_000);
+        assert_eq!(wide, 1 << 29);
+        assert!(guard(216, 40, query_length, wide));
+        for m in [1u8, 2] {
+            let gates = XGates {
+                contexts: &contexts,
+                query_length,
+                diag_array_size: wide,
+                subjects: &short,
+                debugging: false,
+                chunk_switches: false,
+            };
+            assert_eq!(decide(m, &gates), XDecision::Guard);
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:264-266
+    // ```c
+    //    case eAaLookupTable:
+    //       offset_array_size = OFFSET_ARRAY_SIZE +
+    //          ((BlastAaLookupTable*)lookup->lut)->longest_chain;
+    // ```
+    // The build site gets the stub once, and never in shadow mode (the reference table is built).
+    #[test]
+    fn the_stub_is_taken_once_and_not_in_shadow_mode() {
+        let mut rng = Rng(9);
+        let alphabet = aa("ACDEKW");
+        let serial = crate::utils::threading::SearchPool::x_serial();
+        let queries = vec![vec![
+            frame(1, &random_residues(&mut rng, 50, &alphabet)),
+            frame(2, &random_residues(&mut rng, 40, &alphabet)),
+        ]];
+        let batch = |shadow: bool| {
+            let q = XPairLutQuery::x_prepare(&queries, 11, true).expect("direct builder applies");
+            let groups =
+                lut_direct_groups(&q, &serial, false).expect("every location inside one group");
+            let stub = q.x_into_stub(groups.iter().map(|g| &g.lookup));
+            XLutBatch {
+                groups,
+                stub: Some(stub),
+                shadow,
+            }
+        };
+        let mut direct = batch(false);
+        let (stub, contexts) = direct.take_stub().expect("the stub of the batch");
+        assert_eq!(contexts.len(), 2);
+        assert_eq!(stub.num_contexts, 2);
+        assert!(direct.take_stub().is_none());
+        assert!(direct.stub.is_none());
+        let mut shadow = batch(true);
+        assert!(shadow.take_stub().is_none());
+        assert!(shadow.stub.is_some());
     }
 
     // No NCBI counterpart: grouping of contexts (scheduling only).

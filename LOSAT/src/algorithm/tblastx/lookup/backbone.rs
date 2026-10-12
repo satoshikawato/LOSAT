@@ -23,6 +23,19 @@ pub const AA_HITS_PER_CELL: usize = 3;
 #[path = "x_lut_direct.rs"]
 mod x_lut_direct;
 pub(crate) use x_lut_direct::x_shadow_tables as x_bxlut_shadow_tables;
+// EXPERIMENT (LOSAT_X_PAIRLUT / LOSAT_X_PAIRLUTSHADOW): the direct builder of the TBLASTX unit
+// path's group tables (x_pair_lut.rs, a child module of x_lut_direct.rs), used by
+// tblastx/x_pair_par.rs.
+//
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:93-97
+// ```c
+// BlastAaLookupTableNew(lookup_options, (BlastAaLookupTable* *)
+//                       &lookup_wrap->lut);
+// ((BlastAaLookupTable*)lookup_wrap->lut)->use_pssm = has_pssm;
+// BlastAaLookupIndexQuery( (BlastAaLookupTable*) lookup_wrap->lut, matrix,
+//                           query, lookup_segments, 0);
+// ```
+pub(crate) use x_lut_direct::x_pair_lut;
 
 fn blosum62_ideal_karlin_params() -> KarlinParams {
     ideal_karlin_params_for_matrix(ScoringMatrix::Blosum62, (-4, 11))

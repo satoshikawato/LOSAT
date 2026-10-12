@@ -316,6 +316,13 @@ A deadline failure remains a failed attempt, even if a later retry succeeds.
 These runs are correctness checks and must not be used for speed comparisons.
 Native Gate A remains the frozen LOSAT output; the separate registered-platform
 Gate B is unchanged. The local Linux oracle check is explicitly diagnostic.
+The hosted Windows and macOS certification (`certify_platform_native_v010.py`)
+applies the same allowlist to Gate A: it reads the file from the candidate
+commit, requires each entry's `frozen_gate_a_steps` to be exactly the case's
+matrix and repeatability steps of the 61-step plan, passes a listed case only
+with its listed output on every platform, and records it as
+`ALLOWED_KNOWN_MISMATCH` (`all_exact_pr5_raw_bytes` is then false in the
+platform summary).
 
 `benchmark_wasm_threading.py --candidate-dir <build-root> --artifacts <wasi-dir>
 --baseline-dir <baseline-build-root> --baseline-runners <saved-test-dir>

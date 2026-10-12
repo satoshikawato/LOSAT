@@ -116,9 +116,11 @@ Value switches: `LOSAT_X_AHEAD` (2 to 65,536, built-in 16), `LOSAT_X_MBBATCH` (2
 built-in 64), `LOSAT_X_BXCHUNK` (1 or more, built-in 64).
 
 `LOSAT_X_SEEDBUCKET` was in the block of the round 3-4 set and is not on by default (it stays
-"set to any value"): it numbers the lookup hits of one chunk scan in a 32-bit counter, so the
-scan order it restores is exact only up to 2^32 hits per scan, which a query and a subject of
-a few megabases can exceed.
+"set to any value"). When the set became the default it numbered the lookup hits of one chunk
+scan in a 32-bit counter, exact only up to 2^32 hits per scan, which a query and a subject of a
+few megabases pass. It now numbers the hits per flush, which is exact for any number of hits. It
+stays opt-in until it is measured on the searches it would act on with the set on (the TBLASTX
+searches that `LOSAT_X_PAIRPAR` leaves to the scan loop).
 
 `LOSAT_X_PAIRLUT` (added after the default changed) is not in the set either: it is off unless
 set to any value, and acts while `LOSAT_X_PAIRPAR` is on.
@@ -227,8 +229,12 @@ Same values, faster computation:
 - `LOSAT_X_SEEDBUCKET=1` TBLASTX two-hit stage: hits buffered per diagonal range and processed
   range by range, HSPs restored to scan order (`tblastx/x_seed_bucket.rs`); only for diagonal tables
   of at least `LOSAT_X_SEEDBUCKET_MIN_CELLS` cells (default 2^21). Shadow:
-  `LOSAT_X_SEEDBUCKETSHADOW=1` (HSP lists and the whole diagonal table). Tuning:
-  `LOSAT_X_SEEDBUCKET_CELLS` (cells per bucket), `LOSAT_X_SEEDBUCKET_BUDGET` (hits per flush).
+  `LOSAT_X_SEEDBUCKETSHADOW=1` (HSP lists and the whole diagonal table; its summary line gives
+  `max_scan_hits`, the most lookup hits one scan went through). Tuning:
+  `LOSAT_X_SEEDBUCKET_CELLS` (cells per bucket), `LOSAT_X_SEEDBUCKET_BUDGET` (hits per flush;
+  values above 2^31 are read as 2^31, and memory, 12 bytes per hit reserved up front, limits a
+  real setting long before that). A shadow run compares something only where the scan loop runs:
+  with the default set use `LOSAT_X_PAIRPAR=0` and check that `chunks_compared` is not 0.
   BLASTX needs `LOSAT_X_BXSEEDBUCKET=1` as well (no gain measured).
 
 Rebuilding less:

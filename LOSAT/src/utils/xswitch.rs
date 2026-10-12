@@ -32,9 +32,10 @@ use std::ops::RangeInclusive;
 use std::sync::OnceLock;
 
 /// No NCBI counterpart: the switches of the strict set, the variables that are on by default.
-/// `LOSAT_X_SEEDBUCKET` is not among them: it numbers the lookup hits of a chunk scan in a `u32`
-/// (`tblastx/blast_engine/run_impl.rs`, `x_seq_counter`), so its order is the scan order only up
-/// to 2^32 hits per scan, which a query and a subject of a few megabases can exceed.
+/// `LOSAT_X_SEEDBUCKET` is not among them. When the set became the default it numbered the lookup
+/// hits of a chunk scan in a `u32`, exact only up to 2^32 hits per scan; it now numbers them per
+/// flush (`tblastx/x_seed_bucket.rs`) and stays opt-in until it is measured on the searches it
+/// would act on with the set on (the fallbacks of `LOSAT_X_PAIRPAR`).
 pub(crate) const STRICT_SET: [&str; 43] = [
     "LOSAT_X_DPFAST",
     "LOSAT_X_COMPFAST",

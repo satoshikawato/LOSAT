@@ -17,6 +17,8 @@ pub mod api;
 pub mod blastinput;
 pub mod core;
 pub mod format;
+// NCBI objtools/blast/seqdb_reader (CSeqDB): reader of BLAST database volumes.
+pub mod seqdb;
 
 #[cfg(target_arch = "wasm32")]
 pub mod web_api;

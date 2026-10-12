@@ -1,6 +1,7 @@
-//! EXPERIMENT (LOSAT_X_SEEDRELEASE): the seed-stage state of a TBLASTX query batch (the batch's
-//! lookup table, the group tables of the unit path, the worker's diagonal table) is freed when the
-//! last seed stage of the batch has ended, before that subject's HSP list is linked.
+//! EXPERIMENT (LOSAT_X_SEEDRELEASE): the seed-stage state of a TBLASTX query batch is freed as
+//! soon as nothing can read it any more, before the HSP list of the batch's last subject is
+//! merged and linked: the group tables of the unit path when the units of that subject have run,
+//! the batch's lookup table and the worker's diagonal table when its seed stage has ended.
 //!
 //! This file is a child module of `blast_engine/run_impl.rs` (declared there with `#[path]`, as
 //! `x_pair_par.rs` is), so it names the unit path's type without changing it.
@@ -43,51 +44,64 @@
 //!
 //! # What the switch does
 //!
-//! In LOSAT the HSP list of a subject is linked inside the per-subject closure of the batch
-//! function (`process_subject`), after the seed stage of that subject, and the heap of a large
-//! search peaks in that linking call. AP027131 x AP027133 (genetic code 4, one thread), bytes
-//! requested (massif): 167.6 MiB in the first linking call, of them 51.8 MiB group tables and
-//! 8.0 MiB the worker's diagonal table, which nothing reads after the seed stage. With the
-//! switch: 107.3 MiB there; the run's peak is then the end of the seed stage, 147.8 MiB.
+//! In LOSAT the HSP list of a subject is made and linked inside the per-subject closure of the
+//! batch function (`process_subject`): the units of the unit path (or the reference frame loop)
+//! find the HSPs, the unit lists are merged into the subject's list, and the list is linked. The
+//! heap of a large search peaks in that merge and in the first linking call, and neither reads a
+//! table the scan used. AP027131 x AP027133 (genetic code 4, one thread), bytes requested under
+//! massif, without -> with the switch: end of the units 110.4 -> 102.4 MiB, the merge 155.8 ->
+//! 81.0 MiB, the first linking call 167.6 -> 107.3 MiB, which is the peak of the run in both. Of
+//! the 167.6 MiB, 51.8 MiB are group tables and 8.0 MiB the worker's diagonal table.
 //!
-//! The batch function moves its tables into an `XSeedState`. Every call of `process_subject`
-//! opens one stage (`enter`) as its first statement and ends it (`XSeedStage::end`) after the
-//! seed stage, before the first linking call; a stage dropped without `end` (the return for a
-//! subject too short to search, an unwinding panic) ends in `Drop`. The state counts the stages
-//! that have not ended, starting from the number of subjects of the batch. With the switch on,
-//! the stage end that brings the count to zero takes the tables out of the state, which frees
-//! them unless another stage still holds them. With the switch off nothing is taken and the
-//! tables live until the batch function returns, as before.
+//! The batch function moves its tables into two holders (`XSeedBatch`), each an `XSeedState`
+//! with the same rule: `lookup` holds the batch's lookup table (the full table of the reference
+//! frame loop, or the stub of LOSAT_X_PAIRLUT), `units` the unit path with its group tables.
+//! Every call of `process_subject` opens one stage of each (`enter`) as its first statements. It
+//! ends the units stage (`XSeedStage::end`) when the subject's units have run, before their lists
+//! are merged, and the lookup stage after the seed stage, before the first linking call; a stage
+//! dropped without `end` (the return for a subject too short to search, an unwinding panic) ends
+//! in `Drop`. Each state counts its stages that have not ended, starting from the number of
+//! subjects of the batch. With the switch on, the stage end that brings a count to zero takes
+//! that state's tables out of it, which frees them unless another stage still holds them. With
+//! the switch off nothing is taken and the tables live until the batch function returns, as
+//! before; the stage ends only count down.
 //!
 //! The worker's diagonal table (`WorkerState.diag_array`) is read and written only by the
 //! reference frame loop. With the switch on, (a) a batch that the unit path takes without its
 //! shadow never runs that loop, so its workers are created with a table of zero cells
-//! (`worker_table_cells`); (b) otherwise the worker whose stage end released the batch's tables
-//! drops its own table there (`drop_worker_table`). There is no per-subject release in the
-//! reference loop: a batch of many subjects would pay an allocation of the whole table per
-//! subject.
+//! (`XSeedBatch::worker_table_cells`); (b) otherwise the worker whose stage end released the
+//! batch's lookup table drops its own table there (`drop_worker_table`). There is no per-subject
+//! release in the reference loop: a batch of many subjects would pay an allocation of the whole
+//! table per subject.
 //!
-//! The gain is for the last subject of a batch (the only one of a pairwise search): while
-//! earlier subjects are linked, later ones still need the tables.
+//! Known limits, accepted:
+//! - The gain is for the last subject of a batch (the only one of a pairwise search). While
+//!   earlier subjects are merged and linked, later ones still need the tables.
+//! - The lookup stage ends after the frame loop, which names the lookup table. With
+//!   `LOSAT_X_PAIRLUT=0` (and under its shadow) that table is the full one, not a stub, and it
+//!   stays alive through the merge of the unit lists: that path keeps the higher seed-stage peak.
 //!
 //! # Why the result is the same, and why there is no comparison mode
 //!
-//! 1. The switch changes no value and no order of computation: it only decides when two
+//! 1. The switch changes no value and no order of computation: it only decides when three
 //!    allocations are freed. Both paths run the same statements on the same tables.
-//! 2. The tables are reachable only through a stage. `XSeedState::new` takes them by value (the
-//!    batch function keeps no binding of them), the slot is private to this module, and the
-//!    only access it hands out is `XSeedStage::tables`.
-//! 3. No read after the end inside `process_subject`: `tables` borrows the stage and `end` takes
-//!    the stage by value, so the borrow checker rejects any use of `lookup_ref` or
-//!    `x_pair_par_ref` (or of anything borrowed from them) after `x_seed_stage.end()`.
-//! 4. A stage that is still open keeps the tables alive through its own `Arc`, whatever the
+//! 2. The tables are reachable only through a stage. `XSeedBatch::new` takes them by value (the
+//!    batch function keeps no binding of them), each slot is private to this module, and the
+//!    only access a state hands out is `XSeedStage::tables`.
+//! 3. No read after an end inside `process_subject`: `tables` borrows the stage and `end` takes
+//!    the stage by value, so the borrow checker rejects any use of `x_pair_par_ref` (or of
+//!    anything borrowed from it) after `x_units_stage.end()`, and any use of `lookup_ref` after
+//!    `x_seed_stage.end()`. The merge that follows the units stage is a function without `self`
+//!    (`XPairPar::merge_subject`): it gets the units' own lists by value and cannot name a group
+//!    table.
+//! 4. A stage that is still open keeps its tables alive through its own `Arc`, whatever the
 //!    count says: taking the state's `Arc` out of the slot cannot free tables another call of
 //!    `process_subject` is reading.
-//! 5. A call that arrives after the release finds the slot empty, and `enter` stops the run with
+//! 5. A call that arrives after a release finds the slot empty, and `enter` stops the run with
 //!    a message naming the switch and the subject. It cannot search without tables.
-//! 6. So a wrong count can only keep the tables longer (too high: they are freed with the state;
+//! 6. So a wrong count can only keep tables longer (too high: they are freed with the state;
 //!    too low with stages open at once: freed when the last of those ends) or stop the run (too
-//!    low with a later call). It cannot change output.
+//!    low with a later call). It cannot change output. The two counts are independent.
 //! 7. The diagonal table is indexed, through a raw pointer, only by the reference frame loop.
 //!    That loop runs zero times exactly when the subject's frame slice is empty, and
 //!    `process_subject` asserts before the loop, unconditionally, that the slice is empty or the
@@ -107,11 +121,13 @@ use crate::algorithm::tblastx::lookup::BlastAaLookupTable;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering as AtomicOrdering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 
-// No NCBI counterpart: counters for LOSAT_X_STATS (batches that built a state with the switch on;
-// batches whose tables a stage end released; batches whose workers hold no diagonal table; worker
-// tables dropped at the release). They do not change any value NCBI computes.
+// No NCBI counterpart: counters for LOSAT_X_STATS (batches searched with the switch on; batches
+// whose lookup table a stage end released; batches whose unit path, with its group tables, a
+// stage end released; batches whose workers hold no diagonal table; worker tables dropped at the
+// release). They do not change any value NCBI computes.
 static BATCHES: AtomicU64 = AtomicU64::new(0);
 static TABLES_RELEASED: AtomicU64 = AtomicU64::new(0);
+static UNIT_TABLES_RELEASED: AtomicU64 = AtomicU64::new(0);
 static BATCHES_WITHOUT_WORKER_TABLE: AtomicU64 = AtomicU64::new(0);
 static WORKER_TABLES_RELEASED: AtomicU64 = AtomicU64::new(0);
 
@@ -133,9 +149,10 @@ pub fn print_summary() {
     if std::env::var_os("LOSAT_X_STATS").is_some() {
         let load = |c: &AtomicU64| c.load(AtomicOrdering::Relaxed);
         eprintln!(
-            "[X_STATS] SEEDRELEASE batches={} tables_released={} batches_without_worker_table={} worker_tables_released={}",
+            "[X_STATS] SEEDRELEASE batches={} tables_released={} unit_tables_released={} batches_without_worker_table={} worker_tables_released={}",
             load(&BATCHES),
             load(&TABLES_RELEASED),
+            load(&UNIT_TABLES_RELEASED),
             load(&BATCHES_WITHOUT_WORKER_TABLE),
             load(&WORKER_TABLES_RELEASED)
         );
@@ -148,59 +165,58 @@ pub fn print_summary() {
 //     hits = scansub(lookup_wrap, subject,
 //                               offset_pairs, array_size, scan_range);
 // ```
-// The tables the seed stage of a batch scans with: `lookup` is NCBI's `lookup_wrap->lut` (the
-// full table of the reference frame loop, or the stub of LOSAT_X_PAIRLUT), `pair_par` the unit
-// path with its per-group tables (x_pair_par.rs). Nothing after the seed stage reads either.
+// The tables the seed stage of a batch scans with, in two holders: `lookup` is NCBI's
+// `lookup_wrap->lut` (the full table of the reference frame loop, or the stub of
+// LOSAT_X_PAIRLUT), read by the frame loop; `units` is the unit path with its per-group tables
+// (x_pair_par.rs), read while the units of a subject run. Nothing after the seed stage reads
+// either, and nothing after a subject's units reads the second.
 /// The seed-stage tables of one query batch.
-pub(super) struct XSeedTables {
-    pub(super) lookup: BlastAaLookupTable,
-    pub(super) pair_par: Option<XPairPar>,
-}
-
-// No NCBI counterpart: NCBI's lookup table belongs to the search's internal data for the whole
-// search (blast_aux_priv.cpp:214-215); this holder exists so that LOSAT can free its tables
-// earlier (module doc). Generic over the tables so that its rules are tested without a lookup
-// table.
-/// The tables of one batch, the count of seed stages that have not ended, and the switch.
-pub(super) struct XSeedState<T> {
+pub(super) struct XSeedBatch {
+    /// The batch's lookup table.
+    pub(super) lookup: XSeedState<BlastAaLookupTable>,
+    /// The unit path of the batch (`None`: the reference frame loop takes every subject).
+    pub(super) units: XSeedState<Option<XPairPar>>,
     on: bool,
     /// The unit path takes every subject of the batch without its shadow: the reference frame
     /// loop, the only reader of a worker's diagonal table, runs for no subject.
     units_only: bool,
-    /// The batch's hold on the tables; `None` once the last stage end has taken it.
-    slot: Mutex<Option<Arc<T>>>,
-    /// Calls of `process_subject` that have not ended their seed stage.
-    pending: AtomicUsize,
 }
 
-impl XSeedState<XSeedTables> {
-    // No NCBI counterpart: reads the switch and whether the reference frame loop can run for
-    // this batch (dispatch point 2 of LOSAT_X_PAIRPAR in run_impl.rs: the loop runs zero times
-    // exactly when the unit path exists and is not in shadow mode).
-    /// The state of a batch of `subjects` subjects, with the switch read from the environment.
-    pub(super) fn new(tables: XSeedTables, subjects: usize) -> Self {
-        let units_only = tables.pair_par.as_ref().is_some_and(|x| !x.shadow());
-        Self::with_switch(on(), tables, subjects, units_only)
+impl XSeedBatch {
+    // No NCBI counterpart: reads the switch (the holders themselves take it as an argument).
+    /// The holders of a batch of `subjects` subjects, with the switch read from the environment.
+    pub(super) fn new(
+        lookup: BlastAaLookupTable,
+        pair_par: Option<XPairPar>,
+        subjects: usize,
+    ) -> Self {
+        Self::with_switch(on(), lookup, pair_par, subjects)
     }
-}
 
-impl<T> XSeedState<T> {
-    // No NCBI counterpart: see the type. The switch is an argument so that tests do not depend
-    // on the environment.
-    /// A state holding `tables` for `stages` seed stages; `on` is the switch, `units_only` says
-    /// that no worker of the batch runs the reference frame loop.
-    pub(super) fn with_switch(on: bool, tables: T, stages: usize, units_only: bool) -> Self {
+    // No NCBI counterpart: whether the reference frame loop can run for this batch is read
+    // from the unit path before it moves into its holder (dispatch point 2 of LOSAT_X_PAIRPAR
+    // in run_impl.rs: the loop runs zero times exactly when the unit path exists and is not in
+    // shadow mode). One batch is counted once, whatever the number of holders; the release of
+    // the unit path is counted only for a batch that has one.
+    fn with_switch(
+        on: bool,
+        lookup: BlastAaLookupTable,
+        pair_par: Option<XPairPar>,
+        subjects: usize,
+    ) -> Self {
+        let units_only = pair_par.as_ref().is_some_and(|x| !x.shadow());
         if on {
             BATCHES.fetch_add(1, AtomicOrdering::Relaxed);
             if units_only {
                 BATCHES_WITHOUT_WORKER_TABLE.fetch_add(1, AtomicOrdering::Relaxed);
             }
         }
+        let units_released = pair_par.is_some().then_some(&UNIT_TABLES_RELEASED);
         Self {
+            lookup: XSeedState::with_switch(on, lookup, subjects, Some(&TABLES_RELEASED)),
+            units: XSeedState::with_switch(on, pair_par, subjects, units_released),
             on,
             units_only,
-            slot: Mutex::new(Some(Arc::new(tables))),
-            pending: AtomicUsize::new(stages),
         }
     }
 
@@ -221,10 +237,51 @@ impl<T> XSeedState<T> {
     /// The number of cells a worker's diagonal table is created with: `cells`, or 0 when the
     /// switch is on and no worker of the batch runs the reference frame loop.
     pub(super) fn worker_table_cells(&self, cells: usize) -> usize {
-        if self.on && self.units_only {
-            0
-        } else {
-            cells
+        worker_table_cells(self.on, self.units_only, cells)
+    }
+}
+
+// No NCBI counterpart: the rule of `XSeedBatch::worker_table_cells` as a function of its three
+// inputs, so that it is tested without a unit path.
+fn worker_table_cells(on: bool, units_only: bool, cells: usize) -> usize {
+    if on && units_only {
+        0
+    } else {
+        cells
+    }
+}
+
+// No NCBI counterpart: NCBI's lookup table belongs to the search's internal data for the whole
+// search (blast_aux_priv.cpp:214-215); this holder exists so that LOSAT can free its tables
+// earlier (module doc). Generic over the tables: the batch uses it twice (`XSeedBatch`), and
+// its rules are tested without a lookup table.
+/// Tables of one batch, the count of their stages that have not ended, and the switch.
+pub(super) struct XSeedState<T> {
+    on: bool,
+    /// The batch's hold on the tables; `None` once the last stage end has taken it.
+    slot: Mutex<Option<Arc<T>>>,
+    /// Calls of `process_subject` that have not ended their stage of this state.
+    pending: AtomicUsize,
+    /// The LOSAT_X_STATS counter of this state's release, if it has one.
+    released: Option<&'static AtomicU64>,
+}
+
+impl<T> XSeedState<T> {
+    // No NCBI counterpart: see the type. The switch is an argument so that tests do not depend
+    // on the environment.
+    /// A state holding `tables` for `stages` stages; `on` is the switch, `released` the counter
+    /// that the release adds one to.
+    pub(super) fn with_switch(
+        on: bool,
+        tables: T,
+        stages: usize,
+        released: Option<&'static AtomicU64>,
+    ) -> Self {
+        Self {
+            on,
+            slot: Mutex::new(Some(Arc::new(tables))),
+            pending: AtomicUsize::new(stages),
+            released,
         }
     }
 
@@ -245,7 +302,7 @@ impl<T> XSeedState<T> {
     // One stage per iteration of NCBI's subject loop, opened before this length test (the stage
     // of a subject that is not searched ends when it is dropped). NCBI's iterations all read the
     // one lookup table of the search; here each takes its own hold on it.
-    /// Opens the seed stage of subject `s_idx`: a hold on the tables until the stage ends.
+    /// Opens the stage of subject `s_idx`: a hold on the tables until the stage ends.
     /// Stops the run when the tables were already released (module doc, item 5).
     pub(super) fn enter(&self, s_idx: usize) -> XSeedStage<'_, T> {
         // The guard is a temporary of this statement: the lock is free again before the check.
@@ -282,14 +339,16 @@ impl<T> XSeedState<T> {
         let released = taken.is_some();
         drop(taken);
         if released {
-            TABLES_RELEASED.fetch_add(1, AtomicOrdering::Relaxed);
+            if let Some(counter) = self.released {
+                counter.fetch_add(1, AtomicOrdering::Relaxed);
+            }
         }
         released
     }
 }
 
 // No NCBI counterpart: see `XSeedState::enter`.
-/// The seed stage of one subject: the only way to reach the batch's tables.
+/// One subject's stage of a state: the only way to reach that state's tables.
 pub(super) struct XSeedStage<'a, T> {
     state: &'a XSeedState<T>,
     /// This stage's hold; `None` once the stage has ended.
@@ -313,10 +372,12 @@ impl<T> XSeedStage<'_, T> {
     //               subject->length, gap_align->sbp, hit_params->link_hsp_params,
     //               score_options->gapped_calculation);
     // ```
-    // Called between the seed stage of the subject and this linking call, which reads neither
-    // the lookup table nor the diagonal table (NCBI keeps both allocated through it).
-    /// Ends the stage. True when this was the stage end that released the batch's tables (the
-    /// last one of the batch, with the switch on); the caller then drops its diagonal table.
+    // Called before this linking call, which reads neither the lookup table nor the diagonal
+    // table (NCBI keeps both allocated through it): the units stage when the subject's units
+    // have run, the lookup stage after the seed stage.
+    /// Ends the stage. True when this was the stage end that released the state's tables (the
+    /// last one of the batch, with the switch on); for the lookup stage the caller then drops
+    /// its diagonal table.
     pub(super) fn end(mut self) -> bool {
         self.finish()
     }
@@ -356,9 +417,9 @@ impl<T> Drop for XSeedStage<'_, T> {
 //     return NULL;
 // ```
 // NCBI frees the diagonal table after the subject loop (blast_engine.c:1605). The worker that
-// ended the last seed stage of the batch frees its table here, before it links that subject;
+// ended the last lookup stage of the batch frees its table here, before it links that subject;
 // it gets no further subject (module doc, item 7).
-/// Drops a worker's diagonal table (called when `XSeedStage::end` returned true).
+/// Drops a worker's diagonal table (called when the lookup stage's `end` returned true).
 pub(super) fn drop_worker_table<C>(table: &mut Vec<C>) {
     if table.capacity() != 0 {
         WORKER_TABLES_RELEASED.fetch_add(1, AtomicOrdering::Relaxed);
@@ -391,7 +452,7 @@ mod tests {
             drops: Arc::clone(&drops),
             value: 7,
         };
-        (XSeedState::with_switch(on, payload, stages, false), drops)
+        (XSeedState::with_switch(on, payload, stages, None), drops)
     }
 
     fn freed(drops: &AtomicUsize) -> usize {
@@ -573,9 +634,8 @@ mod tests {
             (false, true, cells),
             (false, false, cells),
         ] {
-            let state = XSeedState::with_switch(on, (), 1, units_only);
             assert_eq!(
-                state.worker_table_cells(cells),
+                worker_table_cells(on, units_only, cells),
                 expected,
                 "on {on} units_only {units_only}"
             );
@@ -594,8 +654,95 @@ mod tests {
     }
 
     #[test]
-    fn the_state_is_shared_between_the_threads_of_a_search() {
+    fn the_release_adds_one_to_the_counter_of_its_state() {
+        fn counter() -> &'static AtomicU64 {
+            Box::leak(Box::new(AtomicU64::new(0)))
+        }
+        let count = |c: &AtomicU64| c.load(AtomicOrdering::SeqCst);
+
+        // Switch on: once, at the release, also when further stages were open.
+        let released = counter();
+        let state = XSeedState::with_switch(true, 7u32, 2, Some(released));
+        let a = state.enter(0);
+        let b = state.enter(1);
+        let c = state.enter(2);
+        assert!(!a.end());
+        assert_eq!(count(released), 0);
+        assert!(b.end());
+        assert_eq!(count(released), 1);
+        assert!(!c.end());
+        drop(state);
+        assert_eq!(count(released), 1);
+
+        // Switch off: never.
+        let released = counter();
+        let state = XSeedState::with_switch(false, 7u32, 1, Some(released));
+        assert!(!state.enter(0).end());
+        drop(state);
+        assert_eq!(count(released), 0);
+    }
+
+    /// A lookup table without entries (every field of the type is public).
+    fn empty_lookup() -> BlastAaLookupTable {
+        BlastAaLookupTable {
+            backbone: Vec::new(),
+            overflow: Vec::new(),
+            pv: Vec::new(),
+            frame_bases: Vec::new(),
+            num_contexts: 0,
+            query_length: 0,
+            word_length: 3,
+            alphabet_size: 28,
+            charsize: 5,
+            mask: 0,
+            longest_chain: 11,
+            threshold: 13,
+            row_max: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn the_two_holders_of_a_batch_count_their_stages_apart() {
+        // A batch without a unit path (the reference frame loop takes every subject): its
+        // workers keep their diagonal table whatever the switch says.
+        for on in [true, false] {
+            let batch = XSeedBatch::with_switch(on, empty_lookup(), None, 2);
+            assert_eq!(batch.worker_table_cells(64), 64, "on {on}");
+
+            // First subject: the units stage ends first, then the lookup stage.
+            let lookup_stage = batch.lookup.enter(0);
+            let units_stage = batch.units.enter(0);
+            assert!(units_stage.tables().is_none());
+            assert!(!units_stage.end());
+            assert_eq!(lookup_stage.tables().longest_chain, 11);
+            assert!(!lookup_stage.end());
+
+            // Last subject: the end of its units stage releases the unit holder only; the
+            // lookup table is still read through the stage that is open.
+            let lookup_stage = batch.lookup.enter(1);
+            let units_stage = batch.units.enter(1);
+            assert_eq!(units_stage.end(), on, "on {on}");
+            assert_eq!(lookup_stage.tables().threshold, 13);
+            assert_eq!(lookup_stage.end(), on, "on {on}");
+        }
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "LOSAT_X_SEEDRELEASE: the seed-stage tables of the batch were released before the seed stage of subject 1 started"
+    )]
+    fn a_unit_stage_after_the_release_of_the_unit_holder_stops_the_run() {
+        let batch = XSeedBatch::with_switch(true, empty_lookup(), None, 1);
+        let lookup_stage = batch.lookup.enter(0);
+        assert!(batch.units.enter(0).end());
+        // The lookup holder still serves the open stage, and would serve a new one.
+        assert_eq!(lookup_stage.tables().longest_chain, 11);
+        let _units_stage = batch.units.enter(1);
+    }
+
+    #[test]
+    fn the_holders_are_shared_between_the_threads_of_a_search() {
         fn shared<S: Send + Sync>() {}
-        shared::<XSeedState<XSeedTables>>();
+        shared::<XSeedBatch>();
     }
 }

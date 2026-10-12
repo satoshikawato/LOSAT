@@ -706,7 +706,20 @@ fn lut_shadow_compare(
     LUT_SHADOW_GROUPS.fetch_add(groups.len() as u64, AtomicOrdering::Relaxed);
 }
 
-/// The per-subject inputs of `XPairPar::run_subject` (the values the reference loop reads).
+// No NCBI counterpart: NCBI's word finder hands its init-HSP list straight to
+// `BLAST_GetUngappedHSPList` (blast_engine.c:561-562). Here the lists of a subject's units are
+// carried from `XPairPar::run_subject_units` to `XPairPar::merge_subject` as a value, so that
+// nothing of the group tables is needed between the two.
+/// The units of one subject after they ran: the chunks of each frame, the units in their order,
+/// and each unit's saved init HSPs. It owns its lists and holds no reference to a group table.
+pub(super) struct XSubjectUnits {
+    frame_chunks: Vec<Vec<SubjectChunk>>,
+    units: Vec<XUnit>,
+    outputs: Vec<Vec<InitHSP>>,
+}
+
+/// The per-subject inputs of `XPairPar::run_subject_units` and `XPairPar::merge_subject` (the
+/// values the reference loop reads).
 pub(super) struct XSubject<'a> {
     pub s_frames_preliminary: &'a [QueryFrame],
     pub s_frames: &'a [QueryFrame],
@@ -869,35 +882,25 @@ impl XPairPar {
         self.stub
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:479-491,561-584
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:479-491
     // ```c
     // status = s_GetNextSubjectChunk(subject, &backup, kNucleotide,
     //                                dbseq_chunk_overlap);
     // ...
     // BlastInitHitListReset(init_hitlist);
-    // ...
-    // BLAST_GetUngappedHSPList(init_hitlist, query_info, subject,
-    //         hit_params->options, &hsp_list);
-    // ...
-    // Blast_HSPListAdjustOffsets(hsp_list, backup.offset);
-    // overlap = (backup.offset == backup.hard_ranges[backup.hm_index].left) ?
-    //           0 : dbseq_chunk_overlap;
-    // status = Blast_HSPListsMerge(&hsp_list, &combined_hsp_list,
     // ```
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:234
-    // ```c
-    // Blast_InitHitListSortByScore(init_hitlist);
-    // ```
-    // The seed stage of one subject: the units of every (frame, chunk), then, per chunk in order,
-    // the concatenated unit lists through the same sort, conversion, offset adjustment and chunk
-    // merge as the reference (RI:3582-3598, 4533-4553), and per frame in s_f_idx order the append
-    // and sort of RI:4556-4581.
-    /// `combined_ungapped_hits` of one subject, from the units.
-    pub(super) fn run_subject(
+    // The seed stage of one subject, first half: the chunks of every frame and the units of every
+    // (frame, chunk), run. This is the only part of the seed stage that reads the group tables
+    // (`self.groups`: `longest_chain` while the units are listed, the tables in `run_unit`).
+    // `merge_subject` is the second half; the two were one function (`run_subject`) and are
+    // called one after the other at dispatch point 2 of run_impl.rs, where LOSAT_X_SEEDRELEASE
+    // ends its hold on the group tables between them (x_seed_release.rs).
+    /// The units of one subject, run: what `merge_subject` builds `combined_ungapped_hits` from.
+    pub(super) fn run_subject_units(
         &self,
         inp: &XSubject<'_>,
         pool: &crate::utils::threading::SearchPool<'_>,
-    ) -> Vec<UngappedHit> {
+    ) -> XSubjectUnits {
         let max_dbseq_len = tblastx_max_dbseq_len_for_run();
         let mut frame_chunks: Vec<Vec<SubjectChunk>> =
             Vec::with_capacity(inp.s_frames_preliminary.len());
@@ -933,6 +936,39 @@ impl XPairPar {
         let t_units = timing().then(Instant::now);
         let outputs = self.run_units(&units, inp, pool);
         add_ns(&NS_UNITS, t_units);
+        XSubjectUnits {
+            frame_chunks,
+            units,
+            outputs,
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:561-562,578-581
+    // ```c
+    // BLAST_GetUngappedHSPList(init_hitlist, query_info, subject,
+    //         hit_params->options, &hsp_list);
+    // ...
+    // Blast_HSPListAdjustOffsets(hsp_list, backup.offset);
+    // overlap = (backup.offset == backup.hard_ranges[backup.hm_index].left) ?
+    //           0 : dbseq_chunk_overlap;
+    // status = Blast_HSPListsMerge(&hsp_list, &combined_hsp_list,
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:234
+    // ```c
+    // Blast_InitHitListSortByScore(init_hitlist);
+    // ```
+    // The seed stage of one subject, second half: per chunk in order, the concatenated unit lists
+    // through the same sort, conversion, offset adjustment and chunk merge as the reference
+    // (RI:3582-3598, 4533-4553), and per frame in s_f_idx order the append and sort of
+    // RI:4556-4581. It has no `self`: it reads the units' own lists and the subject's inputs,
+    // never a group table, so the tables may already be freed when it runs.
+    /// `combined_ungapped_hits` of one subject, from its units.
+    pub(super) fn merge_subject(x_units: XSubjectUnits, inp: &XSubject<'_>) -> Vec<UngappedHit> {
+        let XSubjectUnits {
+            frame_chunks,
+            units,
+            outputs,
+        } = x_units;
         let t_merge = timing().then(Instant::now);
         SUBJECTS.fetch_add(1, AtomicOrdering::Relaxed);
         UNITS.fetch_add(units.len() as u64, AtomicOrdering::Relaxed);

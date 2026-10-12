@@ -34,10 +34,11 @@ use crate::blastinput::seq_range::{
 mod x_pair_par;
 pub use x_pair_par::print_summary as x_pair_par_print_summary;
 
-// EXPERIMENT (LOSAT_X_SEEDRELEASE): the seed-stage tables of a query batch are held by a
-// per-batch state and reached only through one stage per subject; with the switch on they are
-// freed when the last seed stage of the batch ends, before that subject's HSP list is linked
-// (see tblastx/x_seed_release.rs). A child module of this file, as x_pair_par is.
+// EXPERIMENT (LOSAT_X_SEEDRELEASE): the seed-stage tables of a query batch are held by two
+// per-batch states (the lookup table; the unit path with its group tables) and reached only
+// through one stage of each per subject; with the switch on they are freed when the batch's
+// last stage of that kind ends, before the last subject's HSP list is merged and linked (see
+// tblastx/x_seed_release.rs). A child module of this file, as x_pair_par is.
 //
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1604-1605
 // ```c
@@ -2625,9 +2626,11 @@ fn search_query_batch(
         lut: x_pair_lut_batch,
     });
     // EXPERIMENT (LOSAT_X_SEEDRELEASE), dispatch point 1 (per batch): the batch's tables move
-    // into one state. From here on they are reached only through the stage that each call of
-    // `process_subject` opens (dispatch point 2), and with the switch on the last stage end of
-    // the batch frees them (dispatch point 4). `x_worker_diag_cells` is the size the workers'
+    // into two holders, `x_seed_batch.lookup` (the lookup table) and `x_seed_batch.units` (the
+    // unit path with its group tables). From here on they are reached only through the stages
+    // that each call of `process_subject` opens (dispatch point 2), and with the switch on the
+    // batch's last units stage frees the unit path (dispatch point 3) and its last lookup stage
+    // the lookup table (dispatch point 5). `x_worker_diag_cells` is the size the workers'
     // diagonal tables are created with: `diag_array_size`, or 0 with the switch on when the
     // unit path takes every subject without its shadow, so that the reference frame loop, the
     // only reader of that table, runs for none.
@@ -2645,14 +2648,9 @@ fn search_query_batch(
     // ```
     // NCBI keeps its lookup table and diagonal table through the subject loop; when LOSAT
     // frees its copies is not a value NCBI computes (x_seed_release.rs).
-    let x_seed_state = x_seed_release::XSeedState::new(
-        x_seed_release::XSeedTables {
-            lookup,
-            pair_par: x_pair_par_batch,
-        },
-        subjects_raw.len(),
-    );
-    let x_worker_diag_cells = x_seed_state.worker_table_cells(diag_array_size as usize);
+    let x_seed_batch =
+        x_seed_release::XSeedBatch::new(lookup, x_pair_par_batch, subjects_raw.len());
+    let x_worker_diag_cells = x_seed_batch.worker_table_cells(diag_array_size as usize);
 
     let contexts_ref = &contexts;
     let _gapped_params_ref = &gapped_params; // Unused - tblastx uses ungapped params
@@ -3063,10 +3061,12 @@ fn search_query_batch(
 
     let process_subject = |st: &mut WorkerState, (s_idx, s_rec): (usize, &FastaRecord)| {
         // EXPERIMENT (LOSAT_X_SEEDRELEASE), dispatch point 2 (per subject): the seed stage of
-        // this subject holds the batch's tables through `x_seed_stage`, and `lookup_ref` and
-        // `x_pair_par_ref` borrow from it, so neither can be used after `x_seed_stage.end()`
-        // (dispatch point 4). A stage that is dropped (the return just below) ends there. The
-        // run stops here if the tables were already released.
+        // this subject holds the batch's lookup table through `x_seed_stage` and the unit path
+        // through `x_units_stage`. `lookup_ref` borrows from the first and `x_pair_par_ref`
+        // from the second, so neither can be used after its stage has ended (`x_units_stage`
+        // at dispatch point 3, `x_seed_stage` at dispatch point 5). A stage that is dropped
+        // (the return just below) ends there. The run stops here if tables were already
+        // released.
         //
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:503-505
         // ```c
@@ -3075,10 +3075,11 @@ fn search_query_batch(
         //                               offset_pairs, array_size, scan_range);
         // ```
         // `lookup_ref` is NCBI's `lookup_wrap`, the one table every subject is scanned with.
-        let x_seed_stage = x_seed_state.enter(s_idx);
+        let x_seed_stage = x_seed_batch.lookup.enter(s_idx);
+        let x_units_stage = x_seed_batch.units.enter(s_idx);
         let lookup_ref: &crate::algorithm::tblastx::lookup::BlastAaLookupTable =
-            &x_seed_stage.tables().lookup;
-        let x_pair_par_ref: Option<&x_pair_par::XPairPar> = x_seed_stage.tables().pair_par.as_ref();
+            x_seed_stage.tables();
+        let x_pair_par_ref: Option<&x_pair_par::XPairPar> = x_units_stage.tables().as_ref();
         // NCBI reference: c++/src/algo/blast/core/blast_engine.c:1318-1330,1429-1431
         // return word_length * 3 + 2;
         // if (subject->length < min_subj_seq_length) { ... continue; }
@@ -3196,24 +3197,43 @@ fn search_query_batch(
         // ```
         // The unit path returns the list this frame loop builds (same calls, same order of
         // the appended frame lists); see x_pair_par.rs for why it is the same list.
+        //
+        // EXPERIMENT (LOSAT_X_SEEDRELEASE), dispatch point 3 (per subject): the unit path runs
+        // in two calls, the units (`run_subject_units`, the only reader of the group tables)
+        // and the merge of their lists (`merge_subject`, a function without `self`), and the
+        // units stage of this subject ends between them. What is still needed of the unit path
+        // is read before that: `x_pair_par_stub` for the assertion below and `x_shadow`. After
+        // `x_units_stage.end()` neither `x` nor `x_pair_par_ref` can be used. With the switch
+        // on, the batch's last units stage frees the unit path there, before the merge, where
+        // the seed stage's memory peaks; with the switch off the end only counts down.
+        //
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:561-562
+        // ```c
+        // BLAST_GetUngappedHSPList(init_hitlist, query_info, subject,
+        //         hit_params->options, &hsp_list);
+        // ```
+        // NCBI converts and merges its init HSPs with the lookup table still allocated (freed
+        // with the search's internal data); that conversion reads no lookup table.
+        let x_pair_par_stub = x_pair_par_ref.is_some_and(|x| x.stub());
         let mut x_pair_par_shadow: Option<Vec<UngappedHit>> = None;
         let s_frames_preliminary: &[QueryFrame] = match x_pair_par_ref {
             Some(x) => {
-                let x_hits = x.run_subject(
-                    &x_pair_par::XSubject {
-                        s_frames_preliminary,
-                        s_frames: &s_frames,
-                        contexts: contexts_ref,
-                        cutoff_scores: &cutoff_scores,
-                        x_dropoff_per_context: &x_dropoff_per_context,
-                        window,
-                        wordsize,
-                        s_idx,
-                        s_len,
-                    },
-                    parallel_pool,
-                );
-                if x.shadow() {
+                let x_subject = x_pair_par::XSubject {
+                    s_frames_preliminary,
+                    s_frames: &s_frames,
+                    contexts: contexts_ref,
+                    cutoff_scores: &cutoff_scores,
+                    x_dropoff_per_context: &x_dropoff_per_context,
+                    window,
+                    wordsize,
+                    s_idx,
+                    s_len,
+                };
+                let x_units = x.run_subject_units(&x_subject, parallel_pool);
+                let x_shadow = x.shadow();
+                x_units_stage.end();
+                let x_hits = x_pair_par::XPairPar::merge_subject(x_units, &x_subject);
+                if x_shadow {
                     x_pair_par_shadow = Some(x_hits);
                     s_frames_preliminary
                 } else {
@@ -3221,7 +3241,10 @@ fn search_query_batch(
                     &[]
                 }
             }
-            None => s_frames_preliminary,
+            None => {
+                x_units_stage.end();
+                s_frames_preliminary
+            }
         };
         // EXPERIMENT (LOSAT_X_PAIRLUT): with the direct group tables the batch's `lookup` is a
         // stub without entries, so a scan of it by the frame loop below would find no hit. The
@@ -3236,14 +3259,14 @@ fn search_query_batch(
         // ```
         if x_pair_lut_is_stub {
             assert!(
-                s_frames_preliminary.is_empty() && x_pair_par_ref.is_some_and(|x| x.stub()),
+                s_frames_preliminary.is_empty() && x_pair_par_stub,
                 "LOSAT_X_PAIRLUT: the reference frame loop would scan the stub lookup table (subject {s_idx})"
             );
         }
-        // EXPERIMENT (LOSAT_X_SEEDRELEASE), dispatch point 3 (per subject): the frame loop below
+        // EXPERIMENT (LOSAT_X_SEEDRELEASE), dispatch point 4 (per subject): the frame loop below
         // indexes the worker's diagonal table through a raw pointer with `diag_mask`. With the
         // switch on, a worker of a batch that the unit path takes without its shadow has a
-        // table of zero cells, and the worker that ended the batch's last seed stage has
+        // table of zero cells, and the worker that ended the batch's last lookup stage has
         // dropped its table. The loop must then run zero times; anything else stops the run
         // here, whatever the switch says.
         //
@@ -4867,12 +4890,13 @@ fn search_query_batch(
             x_pair_par::shadow_compare(s_idx, x_hits, &combined_ungapped_hits);
         }
 
-        // EXPERIMENT (LOSAT_X_SEEDRELEASE), dispatch point 4 (per subject): the seed stage of
-        // this subject ends here; nothing below reads the batch's tables (`end` consumes the
-        // stage that `lookup_ref` and `x_pair_par_ref` borrow from) or the worker's diagonal
-        // table. With the switch on, the last stage end of the batch frees the tables and
-        // returns true, and this worker, which gets no further subject, drops its diagonal
-        // table before the linking call below, where the heap of the search peaks.
+        // EXPERIMENT (LOSAT_X_SEEDRELEASE), dispatch point 5 (per subject): the seed stage of
+        // this subject ends here; nothing below reads the batch's lookup table (`end` consumes
+        // the stage that `lookup_ref` borrows from; the unit path's stage ended at dispatch
+        // point 3) or the worker's diagonal table. With the switch on, the batch's last lookup
+        // stage frees the lookup table and returns true, and this worker, which gets no
+        // further subject, drops its diagonal table before the linking call below, where the
+        // heap of the search peaks.
         //
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:870-873
         // ```c

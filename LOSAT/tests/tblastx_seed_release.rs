@@ -2,11 +2,12 @@
 //! `src/algorithm/tblastx/x_seed_release.rs`) on whole searches.
 //!
 //! The switch is not in the strict set (`src/utils/xswitch.rs`): it is off unless its variable
-//! is set. With it on, the lookup tables of a query batch are freed when the last seed stage of
-//! the batch has ended, and the worker's diagonal table is either not created (the unit path of
-//! `LOSAT_X_PAIRPAR` takes the batch) or dropped at that point (the reference frame loop ran).
-//! Every test reads the `[X_STATS] SEEDRELEASE` line to check which of the two happened, not
-//! only that the output is equal.
+//! is set. With it on, the unit path of `LOSAT_X_PAIRPAR` with its group tables is freed when
+//! the units of the batch's last subject have run, before their lists are merged; the batch's
+//! lookup table is freed when the last seed stage has ended; and the worker's diagonal table is
+//! either not created (the unit path takes the batch) or dropped at that point (the reference
+//! frame loop ran). Every test reads the `[X_STATS] SEEDRELEASE` line to check which of these
+//! happened, not only that the output is equal.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1604-1605
 //! ```c
@@ -86,14 +87,15 @@ fn stats_line(stderr: &str) -> Option<&str> {
         .find(|line| line.starts_with("[X_STATS] SEEDRELEASE "))
 }
 
-/// The four counters of the `[X_STATS] SEEDRELEASE` line: batches, tables_released,
-/// batches_without_worker_table, worker_tables_released.
-fn counters(stderr: &str) -> [u64; 4] {
+/// The five counters of the `[X_STATS] SEEDRELEASE` line: batches, tables_released,
+/// unit_tables_released, batches_without_worker_table, worker_tables_released.
+fn counters(stderr: &str) -> [u64; 5] {
     let line =
         stats_line(stderr).unwrap_or_else(|| panic!("no [X_STATS] SEEDRELEASE line:\n{stderr}"));
     [
         "batches",
         "tables_released",
+        "unit_tables_released",
         "batches_without_worker_table",
         "worker_tables_released",
     ]
@@ -143,8 +145,9 @@ impl Drop for TempFasta {
 // word_params = BlastInitialWordParametersFree(word_params);
 // s_BlastCoreAuxStructFree(aux_struct);
 // ```
-// The default search of the fixture pair runs on the unit path: one batch, its tables released
-// by the only seed stage, and no worker ever holds a diagonal table. The report is NCBI's.
+// The default search of the fixture pair runs on the unit path: one batch, its unit path
+// released when the units of the only subject have run, its lookup table (a stub) by the only
+// seed stage, and no worker ever holds a diagonal table. The report is NCBI's.
 #[test]
 fn the_unit_path_releases_the_tables_and_holds_no_worker_table() {
     let expected = ncbi_report();
@@ -154,7 +157,7 @@ fn the_unit_path_releases_the_tables_and_holds_no_worker_table() {
         assert_eq!(report, expected, "threads {threads}");
         assert_eq!(
             counters(&stderr),
-            [1, 1, 1, 0],
+            [1, 1, 1, 1, 0],
             "threads {threads}:\n{stderr}"
         );
     }
@@ -169,7 +172,7 @@ fn the_unit_path_releases_the_tables_and_holds_no_worker_table() {
 // ```
 // `LOSAT_X_PAIRPAR=0` and `LOSAT_X_DEFAULT=0` leave the search to the reference frame loop,
 // which needs the worker's diagonal table (NCBI's `ewp`): the worker has it and drops it when
-// the batch's tables are released. The report is NCBI's.
+// the batch's lookup table is released. There is no unit path to release. The report is NCBI's.
 #[test]
 fn the_frame_loop_releases_the_tables_and_its_worker_table() {
     let expected = ncbi_report();
@@ -180,7 +183,7 @@ fn the_frame_loop_releases_the_tables_and_its_worker_table() {
             assert_eq!(report, expected, "{frame_loop:?} threads {threads}");
             assert_eq!(
                 counters(&stderr),
-                [1, 1, 0, 1],
+                [1, 1, 0, 0, 1],
                 "{frame_loop:?} threads {threads}:\n{stderr}"
             );
         }
@@ -196,14 +199,16 @@ fn the_frame_loop_releases_the_tables_and_its_worker_table() {
 // The shadow of the unit path runs the unit path and the frame loop for the subject, so the
 // worker keeps its diagonal table until the release. The shadow of the direct group tables
 // builds the full table as well and searches on the unit path alone, so no worker holds one.
-// Both shadows end without a difference and the report is NCBI's.
+// In both the unit path is released before the merge of its lists (and before the frame loop
+// of the first shadow, which scans with the lookup table). Both shadows end without a
+// difference and the report is NCBI's.
 #[test]
 fn the_shadows_of_the_unit_path_run_with_the_switch() {
     let expected = ncbi_report();
     let subject = fixture("short_hsp.subject.fna");
     for (shadow, expected_counters) in [
-        (("LOSAT_X_PAIRPARSHADOW", "1"), [1, 1, 0, 1]),
-        (("LOSAT_X_PAIRLUTSHADOW", "1"), [1, 1, 1, 0]),
+        (("LOSAT_X_PAIRPARSHADOW", "1"), [1, 1, 1, 0, 1]),
+        (("LOSAT_X_PAIRLUTSHADOW", "1"), [1, 1, 1, 1, 0]),
     ] {
         for threads in THREADS {
             let (report, stderr) = tblastx(&subject, threads, &[SWITCH, STATS, shadow]);
@@ -244,9 +249,9 @@ fn the_switch_is_off_unless_its_variable_is_set() {
 // Several subject records, one of them shorter than a word of three codons plus two bases (not
 // searched: its seed stage ends without a scan), as the last record and between the others.
 // With one thread the subjects are searched in order by one worker; with four, by the pool.
-// The tables are released once per search, by the stage of the last record that ends, and the
-// report equals the report of the same search without the switch (see the file header for why
-// this comparison is against LOSAT).
+// The lookup table and the unit path are each released once per search, by the stage of the
+// last record that ends, and the report equals the report of the same search without the
+// switch (see the file header for why this comparison is against LOSAT).
 #[test]
 fn several_subjects_with_a_short_one_give_the_report_of_the_search_without_the_switch() {
     let first = fasta_sequence(&fixture("short_hsp.subject.fna"));
@@ -287,9 +292,14 @@ fn several_subjects_with_a_short_one_give_the_report_of_the_search_without_the_s
                 let switches = [&[SWITCH, STATS][..], path].concat();
                 let (report, stderr) = tblastx(&subjects.0, threads, &switches);
                 assert_eq!(report, expected, "{what}");
-                let [batches, tables_released, without_worker_table, worker_tables_released] =
+                let [batches, tables_released, unit_tables_released, without_worker_table, worker_tables_released] =
                     counters(&stderr);
                 assert_eq!((batches, tables_released), (1, 1), "{what}:\n{stderr}");
+                assert_eq!(
+                    unit_tables_released,
+                    u64::from(!frame_loop),
+                    "{what}:\n{stderr}"
+                );
                 assert_eq!(
                     without_worker_table,
                     u64::from(!frame_loop),

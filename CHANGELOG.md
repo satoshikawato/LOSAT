@@ -4,6 +4,7 @@ All notable release-facing changes and milestones are documented here.
 
 ## [Unreleased]
 
+- Fixed `blastp` with two or more threads and two or more queries that have hits: the composition-based redo ended the remaining matches of a query by that query's hit list alone, so a query whose hit list was full got the result of searching it alone. NCBI BLAST+ (and LOSAT with one thread) looks at the hit lists of all queries of the search. With `-max_target_seqs` 500 this needs more than 500 significant subjects for one query (two queries against Swiss-Prot differed in 42 of 624 rows); the result now equals the one-thread result and NCBI's at every thread count.
 - The exact performance paths of the 2026-10 performance work (43 `LOSAT_X_*` switches of the "strict set") are on by default in every program, natively and in WebAssembly. Each of them gives the reference result by construction, so reports do not change. `LOSAT_X_DEFAULT=0` runs the previous paths, and `LOSAT_X_<NAME>=0` turns one switch off ([`docs/agents/diagnostics.md`](docs/agents/diagnostics.md), "Performance switches"). The Web reactors receive no environment and always run the default.
 - Costs of the default: TBLASTX uses more memory on large inputs (305 to 375 MiB at 8 threads on a 0.66 Mb by 0.61 Mb pair), megablast keeps one byte per base of a subject while it is searched, and tblastn keeps up to 256 MiB of subject translations for a search. On targets other than x86_64 and WebAssembly no vector X-drop kernel exists, and the scalar code runs there.
 

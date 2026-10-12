@@ -7248,7 +7248,21 @@ fn run_resolved_in_pool(
         // #pragma omp for schedule(static)
         // for (b = 0; b < numMatches; ++b) {
         // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:405-409,417-418
+        // ```c
+        // BlastCompo_HeapFilledToCutoff(const BlastCompo_Heap * self)
+        // {
+        //     return self->n >= self->heapThreshold &&
+        //         self->worstEvalue <= self->ecutoff;
+        // }
+        // ...
+        //     self->n             = 0;
+        //     self->heapThreshold = heapThreshold;
+        // ```
+        // The query-parallel redo below relies on a heap that no match has reached not being
+        // filled to its cutoff (hitlist_size >= 1); otherwise the one-thread loop is used.
         kappa_parallel_query_indices.len() > 1
+            && !BlastCompoHeap::new(args.max_target_seqs, PSI_INCLUSION_ETHRESH).filled_to_cutoff()
             && blastp_should_parallelize_stage(
                 "kappa-query-redo",
                 args.num_threads,
@@ -7504,10 +7518,61 @@ fn run_resolved_in_pool(
             let x_shared_ranges = (crate::algorithm::blastp::kappa::x_seg_share() != 0).then(|| {
                 std::sync::Arc::new(crate::algorithm::blastp::kappa::XSharedSubjectRanges::new())
             });
-            let query_heaps: Result<Vec<(usize, BlastCompoHeap)>> = pool.install(|| {
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3529
+            // ```c
+            //                 if (BlastCompo_EarlyTermination(
+            //                         localMatch->best_evalue,
+            //                         redoneMatches,
+            //                         numQueries
+            //                 )) {
+            // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1560-1580
+            // ```c
+            // BlastCompo_EarlyTermination(double evalue,
+            //                             BlastCompo_Heap significantMatches[],
+            //                             int numQueries)
+            // {
+            //     int i;
+            //     for (i = 0;  i < numQueries;  i++) {
+            //         if (BlastCompo_HeapFilledToCutoff(&significantMatches[i])) {
+            //             double ecutoff = significantMatches[i].ecutoff;
+            //             /* Only matches with evalue <= ethresh will be saved. */
+            //             if (evalue <= EVALUE_STRETCH * ecutoff) {
+            //                 ...
+            //                 return FALSE;
+            //             }
+            //         } else {
+            //             return FALSE;
+            //         }
+            //     }
+            //     return TRUE;
+            // }
+            // ```
+            // The test reads the heaps of all queries of the search. The one-thread loop below
+            // redoes the queries in order, so when it tests a match of one query, the heaps of
+            // the queries before it are complete and those of the queries after it are as
+            // BlastCompo_HeapInitialize left them: not filled to the cutoff
+            // (`use_parallel_kappa_redo`), which makes the test FALSE. The queries are redone
+            // here at the same time, with the same outcome:
+            // - a query that is not the last one of the search redoes every match;
+            // - the last query redoes every match too, but keeps the results; the test and the
+            //   heap insertions are replayed in stream order after the parallel loop, when the
+            //   heaps of all other queries are complete.
+            let last_query_index = query_ids.len() - 1;
+            // A heap that no match has reached, for the LOSAT_X_NEWTONLANES prefetch: the
+            // prefetch leaves out the matches that the test ends for the heaps it is given, and
+            // the loop below redoes every match.
+            let x_untouched_heap = BlastCompoHeap::new(args.max_target_seqs, PSI_INCLUSION_ETHRESH);
+            // (query, its heap, the kept results of the last query by match position)
+            type KappaQueryRedo = (
+                usize,
+                BlastCompoHeap,
+                Vec<(usize, Result<BlastpPostprocessResult>)>,
+            );
+            let query_heaps: Result<Vec<KappaQueryRedo>> = pool.install(|| {
                 kappa_parallel_query_indices
                     .par_iter()
-                    .map(|&q_idx| -> Result<(usize, BlastCompoHeap)> {
+                    .map(|&q_idx| -> Result<KappaQueryRedo> {
                         let mut composition_workspace = BlastCompositionWorkspace::new_blosum62();
                         let mut kappa_preliminary_hits = Vec::new();
                         let mut kappa_gap_scratch = GapAlignScratch::new();
@@ -7516,6 +7581,7 @@ fn run_resolved_in_pool(
                             BlastpKappaSubjectRangeCache::x_with_shared(x_shared_ranges.clone());
                         let mut redone_match =
                             BlastCompoHeap::new(args.max_target_seqs, PSI_INCLUSION_ETHRESH);
+                        let mut kept_for_replay = Vec::new();
                         let redo_align_params = build_redo_align_params(q_idx)?;
 
                         let ctx = &contexts[q_idx];
@@ -7529,7 +7595,7 @@ fn run_resolved_in_pool(
                         );
                         let Some(preliminary_hit_list) = preliminary_hit_lists[q_idx].as_ref()
                         else {
-                            return Ok((q_idx, redone_match));
+                            return Ok((q_idx, redone_match, kept_for_replay));
                         };
 
                         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hspstream.c:289-318
@@ -7560,19 +7626,6 @@ fn run_resolved_in_pool(
 
                             let subject = &subjects[s_idx as usize];
                             let subject_raw = &subject.aa_seq[1..subject.aa_seq.len() - 1];
-                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3525-3528
-                            // ```c
-                            // if (BlastCompo_EarlyTermination(localMatch->best_evalue,
-                            //                                 redoneMatches,
-                            //                                 numQueries)) {
-                            // ```
-                            if blast_compo_early_termination(
-                                local_match.best_evalue,
-                                std::slice::from_ref(&redone_match),
-                            ) {
-                                continue;
-                            }
-
                             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3529
                             // ```c
                             //                 if (BlastCompo_EarlyTermination(
@@ -7581,6 +7634,9 @@ fn run_resolved_in_pool(
                             //                         numQueries
                             //                 )) {
                             // ```
+                            // Not tested here: FALSE for a query that is not the last one, and
+                            // replayed after the parallel loop for the last one (see above).
+                            //
                             // No NCBI counterpart: LOSAT_X_NEWTONLANES solves the first Newton problems of this
                             // and the next matches ahead, four per vector (kappa::x_newton_lanes_prefetch_matches);
                             // a result is used only by a call with the same input bits. It does not change any value
@@ -7591,7 +7647,7 @@ fn run_resolved_in_pool(
                                     &preliminary_hit_list.hsplist_array[x_match_position
                                         ..x_next_prefetch.min(preliminary_hit_list.hsplist_count)],
                                     &subjects,
-                                    std::slice::from_ref(&redone_match),
+                                    std::slice::from_ref(&x_untouched_heap),
                                     &query_workspace,
                                     &composition_workspace,
                                     &redo_align_params,
@@ -7611,7 +7667,14 @@ fn run_resolved_in_pool(
                                 args.evalue,
                                 &mut kappa_gap_scratch,
                                 &mut kappa_subject_range_cache,
-                            )?;
+                            );
+                            if q_idx == last_query_index {
+                                // An error is kept as well: the one-thread loop reports it only
+                                // for a match that the test does not end.
+                                kept_for_replay.push((x_match_position, postprocessed));
+                                continue;
+                            }
+                            let postprocessed = postprocessed?;
                             let best_score = postprocessed.best_score;
                             let best_evalue = postprocessed.best_evalue;
                             let Some(hsp_list) = postprocessed.hsp_list else {
@@ -7622,7 +7685,7 @@ fn run_resolved_in_pool(
                             }
                         }
 
-                        Ok((q_idx, redone_match))
+                        Ok((q_idx, redone_match, kept_for_replay))
                     })
                     .collect()
             });
@@ -7631,8 +7694,59 @@ fn run_resolved_in_pool(
             // /* Reduce results from all threads and continue with business as usual */
             // local_results = SThreadLocalDataArrayConsolidateResults(thread_data);
             // ```
-            for (q_idx, heap) in query_heaps? {
+            let mut last_query_kept = Vec::new();
+            for (q_idx, heap, kept_for_replay) in query_heaps? {
                 redone_matches[q_idx] = heap;
+                if q_idx == last_query_index {
+                    last_query_kept = kept_for_replay;
+                }
+            }
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3529,3705-3719
+            // ```c
+            //                 if (BlastCompo_EarlyTermination(
+            //                         localMatch->best_evalue,
+            //                         redoneMatches,
+            //                         numQueries
+            //                 )) {
+            // ...
+            //                     if (BlastCompo_HeapWouldInsert(
+            //                             &redoneMatches[query_index],
+            //                             best_evalue,
+            //                             best_score,
+            //                             localMatch->oid
+            //                     )) {
+            //                         *pStatusCode =
+            //                                 BlastCompo_HeapInsert(
+            //                                         &redoneMatches[query_index],
+            //                                         hsp_list,
+            //                                         best_evalue,
+            //                                         best_score,
+            //                                         localMatch->oid,
+            //                                         &discarded_aligns
+            //                                 );
+            // ```
+            // The last query of the search: the steps of the one-thread loop below in stream
+            // order, with the heaps of all queries and the results redone above.
+            if !last_query_kept.is_empty() {
+                let preliminary_hit_list = preliminary_hit_lists[last_query_index]
+                    .as_ref()
+                    .expect("kept redo results belong to a query with preliminary hits");
+                for (match_position, postprocessed) in last_query_kept {
+                    let local_match = &preliminary_hit_list.hsplist_array[match_position];
+                    if blast_compo_early_termination(local_match.best_evalue, &redone_matches) {
+                        continue;
+                    }
+                    let postprocessed = postprocessed?;
+                    let best_score = postprocessed.best_score;
+                    let best_evalue = postprocessed.best_evalue;
+                    let Some(hsp_list) = postprocessed.hsp_list else {
+                        continue;
+                    };
+                    let redone_match = &mut redone_matches[last_query_index];
+                    if redone_match.would_insert(best_evalue, best_score, local_match.oid) {
+                        redone_match.insert(hsp_list, best_evalue, best_score, local_match.oid);
+                    }
+                }
             }
         }
     } else {

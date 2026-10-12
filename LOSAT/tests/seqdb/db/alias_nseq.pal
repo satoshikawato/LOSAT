@@ -1,0 +1,7 @@
+#
+# Alias file created 10/12/2026 15:46:41
+#
+TITLE alias with NSEQ and LENGTH
+DBLIST "prot_v4" "prot_old" 
+NSEQ 20
+LENGTH 1602

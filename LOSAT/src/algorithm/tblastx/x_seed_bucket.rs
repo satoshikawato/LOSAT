@@ -84,6 +84,13 @@ use std::sync::OnceLock;
 /// the HSPs they produced.
 pub(crate) static SHADOW_CHUNKS: AtomicU64 = AtomicU64::new(0);
 pub(crate) static SHADOW_HITS: AtomicU64 = AtomicU64::new(0);
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:507
+// ```c
+// totalhits += hits;
+// ```
+// NCBI adds up the lookup hits of one subject scan (an Int4, used for its statistics only). No
+// NCBI counterpart for the maximum over scans kept here: it is printed by the shadow mode and
+// does not change any value NCBI computes.
 /// Shadow mode: the most lookup hits one bucketed scan (a subject chunk of one
 /// frame in TBLASTX, a subject in BLASTX) went through.
 pub(crate) static SHADOW_MAX_SCAN_HITS: AtomicU64 = AtomicU64::new(0);
@@ -200,20 +207,29 @@ pub(crate) fn blastx_mode() -> u8 {
 /// The cap bounds a hit's position within its flush (`Hit::seq`, a `u32`): a
 /// flush is due as soon as `budget` hits are buffered, and the callers test
 /// that after each scan call, whose hit count is an `Int4`.  So at most
-/// `budget - 1 + (2^31 - 1) < 2^32` hits are buffered at a time.
+/// `budget - 1 + (2^31 - 1) < 2^32` hits are buffered at a time.  The cap is
+/// about that arithmetic only: memory (12 bytes per buffered hit, reserved
+/// up front) limits a real setting long before it.
 pub(crate) fn budget() -> usize {
     static BUDGET: OnceLock<usize> = OnceLock::new();
     *BUDGET.get_or_init(|| {
-        std::env::var("LOSAT_X_SEEDBUCKET_BUDGET")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(1 << 21)
-            .min(MAX_BUDGET)
+        capped_budget(
+            std::env::var("LOSAT_X_SEEDBUCKET_BUDGET")
+                .ok()
+                .and_then(|v| v.parse().ok()),
+        )
     })
 }
 
+// No NCBI counterpart: the largest number of buffered hits the buckets accept as a budget. It
+// bounds the bookkeeping number `Hit::seq`; it does not change any value NCBI computes.
 /// Largest budget (see `budget`).
 const MAX_BUDGET: usize = 1 << 31;
+
+// No NCBI counterpart: the budget for a given setting (none: 2^21), capped at `MAX_BUDGET`.
+fn capped_budget(setting: Option<usize>) -> usize {
+    setting.unwrap_or(1 << 21).min(MAX_BUDGET)
+}
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516
 // ```c
@@ -259,8 +275,8 @@ struct Hit {
 // ...
 //         diag_coord = (query_offset - subject_offset) & diag_mask;
 // ```
-// The buckets hold the hits of one scan window (one call of scansub in the C loop), grouped by
-// range of diag_coord. Within a bucket the hits are in scan order.
+// The buckets hold the hits buffered since the last flush (one or more calls of scansub in the C
+// loop), grouped by range of diag_coord. Within a bucket the hits are in scan order.
 pub(crate) struct SeedBuckets {
     diag_mask: u32,
     shift: u32,
@@ -276,7 +292,7 @@ impl SeedBuckets {
         let cells = cells_per_bucket().min(diag_array_size);
         let shift = cells.trailing_zeros();
         let count = (diag_array_size / cells).max(1) as usize;
-        let reserve = (budget() / count * 5 / 4).max(1024);
+        let reserve = ((budget() / count).saturating_mul(5) / 4).max(1024);
         SeedBuckets {
             diag_mask,
             shift,
@@ -297,7 +313,9 @@ impl SeedBuckets {
     pub(crate) fn push(&mut self, q_off: u32, s_off: u32) {
         let diag = q_off.wrapping_sub(s_off) & self.diag_mask;
         let b = (diag >> self.shift) as usize;
-        // `total` stays below 2^32 between two flushes (see `budget`).
+        // No NCBI counterpart: the hit's position among the buffered hits, a bookkeeping number
+        // for `restore_flush_order`; it does not change any value NCBI computes. `total` stays
+        // below 2^32 between two flushes (see `budget`).
         debug_assert!(self.total < u32::MAX as usize);
         let seq = self.total as u32;
         // SAFETY: diag <= diag_mask < diag_array_size, so b < count.
@@ -349,7 +367,8 @@ impl SeedBuckets {
 /// for the next flush.
 pub(crate) fn restore_flush_order<T: Copy>(items: &mut [T], start: usize, seq_keys: &mut Vec<u32>) {
     let saved = &mut items[start..];
-    debug_assert_eq!(saved.len(), seq_keys.len());
+    // One key per saved HSP: the callers push the two together.
+    assert_eq!(saved.len(), seq_keys.len());
     let n = saved.len();
     if n >= 2 {
         // A flush holds fewer than 2^32 hits (see `budget`), so `n` fits a `u32`.
@@ -377,6 +396,12 @@ mod tests {
         assert_eq!(items, vec![100, 101, 102, 10, 11, 12, 13]);
         assert!(keys.is_empty());
 
+        // Keys up to the bound of a flush (2^32 - 3, see `budget`) order as unsigned numbers.
+        let mut items: Vec<u32> = vec![1, 3, 2, 0];
+        let mut keys: Vec<u32> = vec![3_000_000_000, u32::MAX - 2, 4_000_000_000, 5];
+        restore_flush_order(&mut items, 0, &mut keys);
+        assert_eq!(items, vec![0, 1, 2, 3]);
+
         // Nothing or one item saved: unchanged, keys emptied.
         let mut items: Vec<u32> = vec![5, 4];
         let mut keys: Vec<u32> = Vec::new();
@@ -393,9 +418,17 @@ mod tests {
     // saved items come out in scan order although the position restarts at every flush.
     #[test]
     fn saved_items_are_in_scan_order_across_flushes() {
-        let diag_array_size: u32 = 1 << 12;
+        // 2^20 cells: several buckets (32 with the default bucket size), so a flush hands the
+        // hits out in an order that is not the scan order.
+        let diag_array_size: u32 = 1 << 20;
         let mut buckets = SeedBuckets::new(diag_array_size, diag_array_size - 1);
+        assert!(
+            buckets.buckets.len() > 1,
+            "the test needs more than one bucket"
+        );
         let budget = 1000usize;
+        // Flushes whose saved items were out of scan order before the restore.
+        let mut flushes_out_of_order = 0u32;
         // (scan position, per-flush position) of every saved hit.
         let mut saved: Vec<(u64, u32)> = Vec::new();
         let mut seq_keys: Vec<u32> = Vec::new();
@@ -439,12 +472,19 @@ mod tests {
                     }
                 });
                 assert_eq!(seen, flushed);
+                if saved[start..].windows(2).any(|w| w[0].0 > w[1].0) {
+                    flushes_out_of_order += 1;
+                }
                 restore_flush_order(&mut saved, start, &mut seq_keys);
                 pending.clear();
                 flushes += 1;
             }
         }
         assert!(flushes > 5, "the stream must span several flushes");
+        assert!(
+            flushes_out_of_order > 5,
+            "the buckets must have changed the order within several flushes"
+        );
         // The position restarted: it never reached the number of hits of the whole stream.
         assert!(u64::from(largest_seq) < scan_position / 4);
         assert!((largest_seq as usize) < budget + 96);
@@ -457,8 +497,12 @@ mod tests {
     // No NCBI counterpart: the cap that keeps the per-flush position within a u32.
     #[test]
     fn budget_cap_keeps_the_flush_position_in_u32() {
+        assert_eq!(capped_budget(None), 1 << 21);
+        assert_eq!(capped_budget(Some(4096)), 4096);
+        assert_eq!(capped_budget(Some(MAX_BUDGET)), MAX_BUDGET);
+        assert_eq!(capped_budget(Some(usize::MAX)), MAX_BUDGET);
         // budget - 1 buffered hits, then one scan call of at most i32::MAX hits.
-        let most_buffered = (MAX_BUDGET as u64 - 1) + i32::MAX as u64;
+        let most_buffered = (capped_budget(Some(usize::MAX)) as u64 - 1) + i32::MAX as u64;
         assert!(most_buffered < u64::from(u32::MAX));
     }
 }

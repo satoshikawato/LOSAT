@@ -228,8 +228,10 @@ Same values, faster computation:
   of at least `LOSAT_X_SEEDBUCKET_MIN_CELLS` cells (default 2^21). Shadow:
   `LOSAT_X_SEEDBUCKETSHADOW=1` (HSP lists and the whole diagonal table; its summary line gives
   `max_scan_hits`, the most lookup hits one scan went through). Tuning:
-  `LOSAT_X_SEEDBUCKET_CELLS` (cells per bucket), `LOSAT_X_SEEDBUCKET_BUDGET` (hits per flush, at
-  most 2^31).
+  `LOSAT_X_SEEDBUCKET_CELLS` (cells per bucket), `LOSAT_X_SEEDBUCKET_BUDGET` (hits per flush;
+  values above 2^31 are read as 2^31, and memory, 12 bytes per hit reserved up front, limits a
+  real setting long before that). A shadow run compares something only where the scan loop runs:
+  with the default set use `LOSAT_X_PAIRPAR=0` and check that `chunks_compared` is not 0.
   BLASTX needs `LOSAT_X_BXSEEDBUCKET=1` as well (no gain measured).
 
 Rebuilding less:

@@ -864,7 +864,12 @@ fn word_finder_bucketed(
         mask as u32,
     );
     let x_budget = crate::algorithm::tblastx::x_seed_bucket::budget();
-    // Lookup hits of this subject (reported by the shadow mode only).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:507
+    // ```c
+    //         totalhits += hits;
+    // ```
+    // The lookup hits of this subject scan, in 64 bits (NCBI: an Int4 for its statistics). Only the
+    // shadow mode reports it; it does not change any value NCBI computes.
     let mut x_scan_hits: u64 = 0;
     // Per-flush positions of the HSPs the current flush has saved.
     let mut seq_keys: Vec<u32> = Vec::new();
@@ -887,8 +892,8 @@ fn word_finder_bucketed(
     // One hit of the NCBI loop (aa_ungapped.c:531-606 / blast_aalookup scan): a
     // copy of the loop body of `word_finder_plain`, expanded in place in the
     // flush callbacks (local names resolve here, by macro hygiene).  `break 'hit`
-    // is the `continue` of that loop; `seq` is the hit's position in the scan
-    // stream, kept so that the saved HSPs can be put back into scan order.
+    // is the `continue` of that loop; `seq` is the hit's position within the
+    // flush, kept so that the saved HSPs can be put back into scan order.
     macro_rules! x_one_hit {
         ($qq:expr, $ss:expr, $sq:expr) => {{
             let q: i32 = $qq;

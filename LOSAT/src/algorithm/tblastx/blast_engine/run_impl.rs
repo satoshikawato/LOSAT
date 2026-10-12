@@ -3753,7 +3753,12 @@ fn search_query_batch(
                     diag_mask as u32,
                 );
                 let x_bucket_budget = crate::algorithm::tblastx::x_seed_bucket::budget();
-                // Lookup hits of this scan (reported by the shadow mode only).
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:507
+                // ```c
+                // totalhits += hits;
+                // ```
+                // The lookup hits of this scan, in 64 bits (NCBI: an Int4 for its statistics). Only the
+                // shadow mode reports it; it does not change any value NCBI computes.
                 let mut x_scan_hits: u64 = 0;
                 // Per-flush positions of the HSPs the current flush has saved.
                 let mut seq_keys: Vec<u32> = Vec::new();
@@ -4303,18 +4308,9 @@ fn search_query_batch(
                 // ```
                 // The remaining hits are processed at the end of the subject chunk.
                 x_flush!();
-                // The saved HSPs are in scan order here: every flush restored its own (the score
-                // sort below is stable, so the order of comparator-equal HSPs matters).
-                //
-                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:306-309
-                // ```c
-                // void Blast_InitHitListSortByScore(BlastInitHitList * init_hitlist)
-                // {
-                //     qsort(init_hitlist->init_hsp_array, init_hitlist->total,
-                //           sizeof(BlastInitHSP), score_compare_match);
-                // ```
-                // NCBI sorts the saved HSPs by score after the scan (sort_init_hsps_by_score_ncbi below). Equal
-                // scores keep the order of the input, which is the scan order as in C.
+                // The saved HSPs are in scan order here, as in C: every flush restored its own. The
+                // score sort below (sort_init_hsps_by_score_ncbi, with its NCBI reference) is stable,
+                // so the order of comparator-equal HSPs matters.
                 //
                 // No NCBI counterpart: the shadow mode's record of the most lookup hits one scan went
                 // through; it does not change any value NCBI computes.

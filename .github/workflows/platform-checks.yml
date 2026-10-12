@@ -1,0 +1,133 @@
+name: Platform checks
+
+# LOSAT on Linux, Windows x64, macOS arm64 and macOS x64, with the performance switches on (the
+# default, LOSAT/src/utils/xswitch.rs) and off (LOSAT_X_DEFAULT=0, the reference paths):
+#  - outputs: release binary, 49 cases (all five programs) at 1 and 4 threads in both modes; the
+#    outputs of the two modes must be byte-identical and the exit codes 0 (LOSAT/tests/platform_checks.py);
+#  - compare: the hashes of the four platforms must equal each other (no expected hash is stored;
+#    the frozen hashes are checked on Linux by ci.yml);
+#  - tests: cargo test --all-features in both modes on the three non-Linux platforms (ci.yml runs
+#    both modes on Linux).
+# Pull requests run it when the engine, the Cargo files or this workflow's own files change; the
+# schedule and workflow_dispatch run it always.
+on:
+  pull_request:
+    paths:
+      - 'LOSAT/src/**'
+      - 'LOSAT/Cargo.toml'
+      - 'LOSAT/Cargo.lock'
+      - 'LOSAT/build.rs'
+      - '.github/workflows/platform-checks.yml'
+      - 'LOSAT/tests/platform_checks.py'
+      - 'LOSAT/tests/platform_check_cases.json'
+  schedule:
+    - cron: '23 19 * * 0'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  outputs:
+    name: default = LOSAT_X_DEFAULT=0 (${{ matrix.id }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-24.04, id: linux-x64, python: python3 }
+          - { runner: windows-2025, id: windows-x64, python: python }
+          - { runner: macos-15, id: macos-arm64, python: python3 }
+          - { runner: macos-15-intel, id: macos-x64, python: python3 }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    steps:
+      # Fixtures are compared byte for byte; keep Git for Windows from turning them into CRLF.
+      - name: Check out without line-ending conversion
+        if: runner.os == 'Windows'
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.92.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: LOSAT -> target
+          key: outputs-${{ matrix.id }}
+      - name: Build release binary
+        run: cd LOSAT && cargo build --release --locked --bin LOSAT
+      - name: Default against LOSAT_X_DEFAULT=0, 49 cases, 1 and 4 threads
+        run: ${{ matrix.python }} LOSAT/tests/platform_checks.py run --losat LOSAT/target/release/LOSAT --out platform-check
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: platform-checks-${{ matrix.id }}
+          path: platform-check/rows.tsv
+          if-no-files-found: error
+          retention-days: 30
+
+  compare:
+    name: same hashes on all platforms
+    needs: outputs
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: platform-checks-*
+          path: tables
+      - name: Compare the tables of the four platforms
+        run: |
+          python3 LOSAT/tests/platform_checks.py compare \
+            --table linux-x64=tables/platform-checks-linux-x64/rows.tsv \
+            --table windows-x64=tables/platform-checks-windows-x64/rows.tsv \
+            --table macos-arm64=tables/platform-checks-macos-arm64/rows.tsv \
+            --table macos-x64=tables/platform-checks-macos-x64/rows.tsv
+
+  tests:
+    name: cargo test, ${{ matrix.mode }} (${{ matrix.id }})
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [windows-2025, macos-15, macos-15-intel]
+        mode: [default, reference]
+        include:
+          - { runner: windows-2025, id: windows-x64 }
+          - { runner: macos-15, id: macos-arm64 }
+          - { runner: macos-15-intel, id: macos-x64 }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    steps:
+      - name: Check out without line-ending conversion
+        if: runner.os == 'Windows'
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.92.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: LOSAT -> target
+          key: tests-${{ matrix.id }}
+      - name: cargo test --all-features
+        run: |
+          if [ "${{ matrix.mode }}" = reference ]; then export LOSAT_X_DEFAULT=0; fi
+          cd LOSAT && cargo test --locked --all-features --no-fail-fast
+        env:
+          LOSAT_BLASTX_WORKER_LOG: ${{ runner.temp }}/blastx-worker.log
+          # Optimized test code; the test profile keeps the dev profile's debug assertions
+          # and overflow checks (as in ci.yml).
+          CARGO_PROFILE_TEST_OPT_LEVEL: '1'

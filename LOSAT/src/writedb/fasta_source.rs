@@ -23,13 +23,36 @@ mod title;
 use std::io::Read;
 
 use super::bioseq::{Bioseq, SeqData};
-use reader::{DeltaSeq, FastaReader, SeqInst};
+use reader::{DeltaSeq, FastaReader, ReadError, SeqInst};
 
 /// An error that ends the reading: the message makeblastdb prints after
 /// "BLAST Database creation error: ".
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceError {
     pub message: String,
+    /// The error is a failed allocation for a length that the input states
+    /// (`std::bad_alloc` in NCBI): makeblastdb then prints `message` alone, "BLAST ran
+    /// out of memory", and exits with its status for that.
+    pub out_of_memory: bool,
+}
+
+impl SourceError {
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:256-259
+    // ```c++
+    //     catch (const std::bad_alloc&) {                                         \
+    //         LOG_POST(Error << "BLAST ran out of memory");                       \
+    //         exit_code = BLAST_OUT_OF_MEMORY;                                    \
+    //     }                                                                       \
+    // ```
+    // `CFastaBioseqSource::GetNext` catches the reader's parse exception only and
+    // `s_FixBioseqDeltas` only `CInvalidChoiceSelection`, so a `std::bad_alloc` of
+    // either reaches this clause (after `AddFasta` has ended the build).
+    fn out_of_memory() -> Self {
+        Self {
+            message: "BLAST ran out of memory".to_string(),
+            out_of_memory: true,
+        }
+    }
 }
 
 /// A warning line of the reader (without the final newline).
@@ -184,14 +207,21 @@ impl<R: Read> FastaBioseqSource<R> {
         }
         let record = match record {
             Ok(record) => record,
-            Err(error) => {
+            Err(ReadError::OutOfMemory) => {
+                self.reader = None;
+                return Err(SourceError::out_of_memory());
+            }
+            Err(ReadError::Parse(error)) => {
                 self.reader = None;
                 let message = error.message;
                 let message = message
                     .strip_prefix("CFastaReader: ")
                     .map(str::to_string)
                     .unwrap_or(message);
-                return Err(SourceError { message });
+                return Err(SourceError {
+                    message,
+                    out_of_memory: false,
+                });
             }
         };
         let title = match extract_title(&record.defline_field, record.title_descr) {
@@ -200,11 +230,15 @@ impl<R: Read> FastaBioseqSource<R> {
                 self.reader = None;
                 return Err(SourceError {
                     message: message.to_string(),
+                    out_of_memory: false,
                 });
             }
         };
         let is_aa = reader.is_protein();
-        let (length, seq_data) = fix_bioseq_deltas(record.inst);
+        let Ok((length, seq_data)) = fix_bioseq_deltas(record.inst) else {
+            self.reader = None;
+            return Err(SourceError::out_of_memory());
+        };
         Ok(Some(Bioseq {
             local_id: record.local_id.to_string(),
             title,
@@ -218,6 +252,7 @@ impl<R: Read> FastaBioseqSource<R> {
 fn read_error_message(error: &std::io::Error) -> SourceError {
     SourceError {
         message: format!("Read error: {error}"),
+        out_of_memory: false,
     }
 }
 
@@ -386,8 +421,17 @@ fn extract_title(
 /// length or a `Seq-loc` other than null. A delta whose first piece is not a literal (a
 /// gap of unknown length) is returned as it is, without `seq-data`. The NCBI8na codes of
 /// a literal are those of its letters (`pack::append_ncbi8na`).
-fn fix_bioseq_deltas(inst: SeqInst) -> (u64, Option<SeqData>) {
-    match inst {
+///
+/// The length of a delta is the one its gap lines state, up to 2,147,483,647 residues
+/// for a few bytes of input, and NCBI reserves `seq8na` for it at once. Where that
+/// allocation or the one of the NCBI4na copy fails, NCBI throws `std::bad_alloc`
+/// (makeblastdb: "BLAST ran out of memory"); here it is the error of this function,
+/// where an allocation that aborts the process would lose that outcome. The space is
+/// reserved for all pieces, so that no later growth of the vector can fail.
+fn fix_bioseq_deltas(
+    inst: SeqInst,
+) -> Result<(u64, Option<SeqData>), std::collections::TryReserveError> {
+    Ok(match inst {
         SeqInst::Virtual => (0, None),
         SeqInst::TooLong { length } => (length, None),
         SeqInst::Raw { length, seq_data } => (length, Some(seq_data)),
@@ -397,9 +441,17 @@ fn fix_bioseq_deltas(inst: SeqInst) -> (u64, Option<SeqData>) {
             pieces,
         } => {
             if pieces.first() == Some(&DeltaSeq::LocNull) {
-                return (length, None);
+                return Ok((length, None));
             }
-            let mut seq8na = Vec::with_capacity(length as usize);
+            let size = pieces.iter().fold(0usize, |size, piece| {
+                size.saturating_add(match piece {
+                    DeltaSeq::LocNull => 1,
+                    DeltaSeq::Gap { length } => *length as usize,
+                    DeltaSeq::Literal(segment) => segment.length as usize,
+                })
+            });
+            let mut seq8na = Vec::new();
+            seq8na.try_reserve_exact(size)?;
             for piece in pieces {
                 match piece {
                     DeltaSeq::LocNull => seq8na.push(0x0f),
@@ -415,8 +467,8 @@ fn fix_bioseq_deltas(inst: SeqInst) -> (u64, Option<SeqData>) {
                     }
                 }
             }
-            let seq4na = pack::ncbi8na_to_ncbi4na(&seq8na);
+            let seq4na = pack::ncbi8na_to_ncbi4na(&seq8na)?;
             (seq8na.len() as u64, Some(SeqData::Ncbi4na(seq4na)))
         }
-    }
+    })
 }

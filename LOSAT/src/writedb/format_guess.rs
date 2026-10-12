@@ -19,8 +19,9 @@
 //! Not ported because they do not influence the decision: the `eNewick` test `GuessFormat` makes when there is no test
 //! buffer (its answer is never `eFasta`), the brace count `EnsureStats` keeps for `TestFormatTextAsn`, the AGP/other
 //! format tests, `CStreamUtils::Stepback` (it only puts the sample back into the stream; the sample is always the first
-//! `Multiplier * 8096` bytes of the stream) and the `m_Stream.good()` / `x_TestInput` checks (the stream of a file that
-//! exists is good).
+//! `Multiplier * 8096` bytes of the stream) and the `m_Stream.good()` / `x_TestInput` checks (the caller makes this test
+//! on a file it has opened; a file that cannot be opened is the caller's error, where LOSAT stops and makeblastdb goes on
+//! with an empty stream and exits with status 0).
 
 use std::io::Read;
 

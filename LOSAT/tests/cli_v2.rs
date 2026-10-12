@@ -78,6 +78,139 @@ fn canonical_options_for_every_program() {
                 assert_eq!(a.evalue, Some(0.001));
                 assert_eq!(a.max_target_seqs, Some(9));
             }
+            Commands::Makedb(_) => unreachable!("{program} is a search program"),
+        }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:225-246
+// ```c++
+//     arg_desc->AddDefaultKey(kInput, "input_file",
+//                             "Input file/database name",
+//                             CArgDescriptions::eInputFile, "-");
+//     arg_desc->AddDefaultKey("input_type", "type",
+//                              "Type of the data specified in input_file",
+//                              CArgDescriptions::eString, "fasta");
+//     arg_desc->SetConstraint("input_type", &(*new CArgAllow_Strings,
+//                                             "fasta", "blastdb",
+//                                             "asn1_bin",
+//                                             "asn1_txt"));
+//
+//     arg_desc->AddKey(kArgDbType, "molecule_type",
+//                      "Molecule type of target db", CArgDescriptions::eString);
+//     arg_desc->SetConstraint(kArgDbType, &(*new CArgAllow_Strings,
+//                                         "nucl", "prot"));
+//
+//     arg_desc->SetCurrentGroup("Configuration options");
+//     arg_desc->AddOptionalKey(kArgDbTitle, "database_title",
+//                              "Title for BLAST database\n" + dflt,
+//                              CArgDescriptions::eString);
+//
+//     arg_desc->AddFlag("parse_seqids",
+// ```
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:293-294
+// ```c++
+//     arg_desc->AddOptionalKey(kOutput, "database_name",
+//                              "Name of BLAST database to be created\n" + dflt +
+// ```
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:304-305
+// ```c++
+//     arg_desc->AddDefaultKey("max_file_sz", "number_of_bytes",
+//                             "Maximum file size for BLAST database files",
+// ```
+#[test]
+fn makedb_takes_makeblastdb_s_option_names() {
+    let makedb = |extra: &[&str]| {
+        let mut argv = vec!["losat", "makedb"];
+        argv.extend(extra);
+        try_parse_from(argv)
+    };
+    let args = |cli: Cli| match cli.command {
+        Commands::Makedb(args) => args,
+        _ => panic!("not makedb"),
+    };
+
+    let given = args(
+        makedb(&[
+            "-in",
+            "x.faa",
+            "-dbtype",
+            "prot",
+            "-out",
+            "db",
+            "-title",
+            "a title",
+            "-max_file_sz",
+            "1GB",
+        ])
+        .unwrap(),
+    );
+    assert_eq!(given.input, "x.faa");
+    assert_eq!(given.dbtype, "prot");
+    assert_eq!(given.out.as_deref(), Some("db"));
+    assert_eq!(given.title.as_deref(), Some("a title"));
+    assert_eq!(given.max_file_sz, "1GB");
+
+    // makeblastdb's defaults, but for the format version: LOSAT writes version 4.
+    let defaults = args(makedb(&["-dbtype", "nucl"]).unwrap());
+    assert_eq!(defaults.input, "-");
+    assert_eq!(defaults.input_type, "fasta");
+    assert_eq!(defaults.out, None);
+    assert_eq!(defaults.title, None);
+    assert_eq!(defaults.max_file_sz, "3GB");
+    assert_eq!(defaults.blastdb_version, 4);
+
+    // `-dbtype` is mandatory and takes makeblastdb's two values.
+    assert!(makedb(&["-in", "x.faa"]).is_err());
+    assert!(makedb(&["-in", "x.faa", "-dbtype", "protein"]).is_err());
+    assert!(makedb(&["-in", "x.faa", "-dbtype", "prot", "-blastdb_version", "3"]).is_err());
+
+    // The options of makeblastdb that LOSAT does not implement are named; `-h` is the
+    // short usage of every NCBI program (ncbiargs.cpp:74), refused as for the search
+    // programs.
+    for option in [
+        "-parse_seqids",
+        "-hash_index",
+        "-mask_data",
+        "-taxid",
+        "-taxid_map",
+        "-logfile",
+        "-h",
+    ] {
+        let err = makedb(&["-in", "x.faa", "-dbtype", "prot", option]).unwrap_err();
+        assert!(
+            err.to_string().contains(&format!(
+                "the NCBI BLAST+ option {option} is not supported by LOSAT's makedb"
+            )),
+            "{option}: {err}"
+        );
+    }
+
+    // `-help` prints LOSAT's usage of makedb, under makeblastdb's option names.
+    for help in ["-help", "--help"] {
+        let err = makedb(&[help]).unwrap_err();
+        assert_eq!(err.kind(), clap::error::ErrorKind::DisplayHelp);
+        let text = LOSAT::cli::render_message(&err);
+        assert!(text.contains("-dbtype <molecule_type>"), "{text}");
+        assert!(text.contains("-max_file_sz"), "{text}");
+        assert!(
+            !text.contains("--in") && !text.contains("--dbtype"),
+            "{text}"
+        );
+    }
+
+    // The options of the search programs are unknown to makedb, and makedb's
+    // options are unknown to the search programs.
+    assert!(makedb(&["-dbtype", "prot", "-evalue", "1"]).is_err());
+    assert!(makedb(&["-dbtype", "prot", "-query", "q.fa"]).is_err());
+    for program in ["blastn", "blastp", "blastx", "tblastn", "tblastx"] {
+        for option in [
+            &["-dbtype", "prot"][..],
+            &["-parse_seqids"],
+            &["-in", "x.faa"],
+        ] {
+            let err = parse(program, option).unwrap_err();
+            assert!(!err.to_string().contains("makedb"), "{program}: {err}");
         }
     }
 }
@@ -903,4 +1036,15 @@ fn a_last_double_dash_changes_nothing_and_a_word_after_it_is_an_error() {
         // As the value of an option, `--` is that value.
         assert!(parse(program, &["-out", "--"]).is_ok(), "{program}");
     }
+    // makeblastdb reads its arguments with the same parser: it builds the database
+    // when `--` is the last word.
+    let makedb = |words: &[&str]| {
+        let mut argv = vec!["losat", "makedb", "-dbtype", "prot"];
+        argv.extend(words);
+        try_parse_from::<Cli, _, _>(argv)
+    };
+    assert!(makedb(&["-in", "x.faa", "--"]).is_ok());
+    assert!(makedb(&["--", "-in", "x.faa"]).is_err());
+    assert!(makedb(&["--", "--"]).is_err());
+    assert!(makedb(&["-out", "--"]).is_ok());
 }

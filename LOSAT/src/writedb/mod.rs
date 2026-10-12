@@ -45,14 +45,45 @@ pub enum WriteDbError {
     /// Another NCBI exception that ends makeblastdb: the text it prints after
     /// "Error: ".
     Other(String),
-    /// The operating system failed to create, write, rename or remove a
-    /// file.
+    /// An allocation failed (`std::bad_alloc`): makeblastdb prints "BLAST ran
+    /// out of memory".
+    OutOfMemory,
+    /// The operating system failed to create or write a file of the
+    /// database, or to open the input file.
     Io {
         path: PathBuf,
         source: std::io::Error,
     },
+    /// The operating system failed to give a file of a volume its final
+    /// name.
+    Rename {
+        from: PathBuf,
+        to: PathBuf,
+        source: std::io::Error,
+    },
 }
 
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:248-259
+// ```c++
+//     catch (const CException& e) {                                           \
+//         LOG_POST(Error << "Error: " << e.what());                           \
+//         exit_code = BLAST_UNKNOWN_ERROR;                                    \
+//     }                                                                       \
+//     catch (const std::ios::failure&) {                                      \
+//         LOG_POST(Error << "BLAST failed to write output");                  \
+//         exit_code = BLAST_OUTPUT_ERROR;                                     \
+//     }                                                                       \
+//     catch (const std::bad_alloc&) {                                         \
+//         LOG_POST(Error << "BLAST ran out of memory");                       \
+//         exit_code = BLAST_OUT_OF_MEMORY;                                    \
+//     }                                                                       \
+// ```
+// NCBI's writer does not test whether a file opened, a write succeeded or a
+// rename took place, so makeblastdb has no message for these failures. LOSAT
+// reports them in the form of makeblastdb's "other" errors ("Error: " and
+// exit status 255, `makeblastdb::MakedbError::exit_code`), with the path and
+// the system's message; they are not errors of the database's contents
+// ("BLAST Database creation error").
 impl std::fmt::Display for WriteDbError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -61,12 +92,12 @@ impl std::fmt::Display for WriteDbError {
             }
             WriteDbError::Options(message) => write!(f, "BLAST options error: {message}"),
             WriteDbError::Other(message) => write!(f, "Error: {message}"),
+            WriteDbError::OutOfMemory => f.write_str("BLAST ran out of memory"),
             WriteDbError::Io { path, source } => {
-                write!(
-                    f,
-                    "BLAST Database creation error: {}: {source}",
-                    path.display()
-                )
+                write!(f, "Error: {}: {source}", path.display())
+            }
+            WriteDbError::Rename { from, to, source } => {
+                write!(f, "Error: {} -> {}: {source}", from.display(), to.display())
             }
         }
     }
@@ -75,7 +106,7 @@ impl std::fmt::Display for WriteDbError {
 impl std::error::Error for WriteDbError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            WriteDbError::Io { source, .. } => Some(source),
+            WriteDbError::Io { source, .. } | WriteDbError::Rename { source, .. } => Some(source),
             _ => None,
         }
     }

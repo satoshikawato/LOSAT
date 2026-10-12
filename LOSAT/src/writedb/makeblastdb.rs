@@ -11,6 +11,7 @@ use super::data_size::{string_to_uint8_data_size, uint8_to_string_data_size};
 use super::format_guess::appears_fasta;
 use super::time::LocalTime;
 use super::WriteDbError;
+use crate::seqdb::{SeqDb, SeqDbError, SeqType};
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:224-244
 // ```c++
@@ -87,9 +88,17 @@ pub struct MakedbArgs {
     pub max_file_sz: String,
 }
 
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:76-77
+// ```c++
+// static const char* s_AutoHelp     = "h";
+// static const char* s_AutoHelpFull = "help";
+// ```
 /// The options of makeblastdb 2.17.0 that `LOSAT makedb` refuses
-/// (makeblastdb.cpp:246-333).
-pub const UNSUPPORTED_OPTIONS: [&str; 14] = [
+/// (makeblastdb.cpp:246-333), and `-h`, the short usage that the NCBI C++
+/// Toolkit gives every program (`-help` prints LOSAT's own usage, as for the
+/// search programs).
+pub const UNSUPPORTED_OPTIONS: [&str; 15] = [
+    "h",
     "parse_seqids",
     "hash_index",
     "randomize",
@@ -106,22 +115,53 @@ pub const UNSUPPORTED_OPTIONS: [&str; 14] = [
     "version",
 ];
 
-/// How `LOSAT makedb` ends when it does not build a database.
+/// How `LOSAT makedb` ends when it does not build a database, or cannot
+/// open the one it built.
 #[derive(Debug)]
 pub enum MakedbError {
     /// An error of makeblastdb, with makeblastdb's exit code.
     Build(WriteDbError),
+    /// The database was written and cannot be opened: NCBI's
+    /// `CSeqDBException`, the text makeblastdb prints after "BLAST Database
+    /// error: ".
+    Database(SeqDbError),
     /// A request makeblastdb serves and LOSAT does not.
     Unsupported(String),
 }
 
 impl MakedbError {
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:149-163
+    // ```c++
+    // #define BLAST_EXIT_SUCCESS          0
+    // /// Command line binary exit code: error in input query/options
+    // #define BLAST_INPUT_ERROR           1
+    // /// Command line binary exit code: error in database/subject
+    // #define BLAST_DATABASE_ERROR        2
+    // /// Command line binary exit code: error in BLAST engine
+    // #define BLAST_ENGINE_ERROR          3
+    // /// Command line binary exit code: BLAST run out of memory
+    // #define BLAST_OUT_OF_MEMORY         4
+    // /// Command line binary exit code: Network error encountered
+    // #define BLAST_NETWORK_ERROR         5
+    // /// Command line binary exit code: error when writing output
+    // #define BLAST_OUTPUT_ERROR          6
+    // /// Command line binary exit code: unknown error
+    // #define BLAST_UNKNOWN_ERROR         255
+    // ```
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:167-171
     // ```c++
     // #define CATCH_ALL(exit_code)                                                \
     //     catch (const CInvalidDataException& e) {                                \
     //         LOG_POST(Error << "BLAST options error: " << e.GetMsg());           \
     //         exit_code = BLAST_INPUT_ERROR;                                      \
+    //     }                                                                       \
+    // ```
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:199-203
+    // ```c++
+    //         else {                                                              \
+    //         	LOG_POST(Error << "BLAST Database error: " << e.GetMsg());      \
+    //         	exit_code = BLAST_DATABASE_ERROR;                               \
+    //         }                                                                   \
     //     }                                                                       \
     // ```
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:212-215
@@ -138,12 +178,27 @@ impl MakedbError {
     //         exit_code = BLAST_UNKNOWN_ERROR;                                    \
     //     }                                                                       \
     // ```
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:256-259
+    // ```c++
+    //     catch (const std::bad_alloc&) {                                         \
+    //         LOG_POST(Error << "BLAST ran out of memory");                       \
+    //         exit_code = BLAST_OUT_OF_MEMORY;                                    \
+    //     }                                                                       \
+    // ```
     /// The exit code: 1 (`BLAST_INPUT_ERROR`) for an error of the options or
-    /// of the database creation, 255 (`BLAST_UNKNOWN_ERROR`) otherwise.
+    /// of the database creation, 2 (`BLAST_DATABASE_ERROR`) when the new
+    /// database cannot be opened, 4 (`BLAST_OUT_OF_MEMORY`) for a failed
+    /// allocation, and 255 (`BLAST_UNKNOWN_ERROR`) otherwise, which includes
+    /// the failures of the file system that LOSAT reports itself.
     pub fn exit_code(&self) -> i32 {
         match self {
-            MakedbError::Build(WriteDbError::Other(_)) => 255,
-            MakedbError::Build(_) | MakedbError::Unsupported(_) => 1,
+            MakedbError::Build(
+                WriteDbError::Other(_) | WriteDbError::Io { .. } | WriteDbError::Rename { .. },
+            ) => 255,
+            MakedbError::Build(WriteDbError::OutOfMemory) => 4,
+            MakedbError::Database(_) => 2,
+            MakedbError::Build(WriteDbError::Creation(_) | WriteDbError::Options(_))
+            | MakedbError::Unsupported(_) => 1,
         }
     }
 }
@@ -152,6 +207,7 @@ impl std::fmt::Display for MakedbError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             MakedbError::Build(error) => error.fmt(f),
+            MakedbError::Database(error) => write!(f, "BLAST Database error: {error}"),
             MakedbError::Unsupported(message) => write!(f, "LOSAT makedb: {message}"),
         }
     }
@@ -250,6 +306,65 @@ fn split_quoted(names: &str) -> Vec<&str> {
     out
 }
 
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1128-1136
+// ```c++
+// void CMakeBlastDBApp::x_BuildDatabase()
+// {
+//     const string env_skip =
+//             GetEnvironment().Get("NCBI_MAKEBLASTDB_SKIP_UNVERIFIED_BIOSEQS");
+//     m_SkipUnver = (env_skip.empty() == false);
+//
+//     const string dont_scan_bioseq =
+//         GetEnvironment().Get("NCBI_MAKEBLASTDB_DONT_SCAN_BIOSEQ_FOR_CFASTAREADER_USER_OBJECTS");
+//     const bool scan_bioseq_4_cfastareader_usrobj = static_cast<bool>(dont_scan_bioseq.empty());
+// ```
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:562-566
+// ```c++
+// 	try {
+//         while(!data.eof())
+//         {
+//             CSeqEntrySource src(data, fmt, m_SkipUnver);
+//             found = found || m_DB->AddSequences(src);
+// ```
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1733-1738,1764-1766
+// ```c++
+//     string fasta;
+//
+//     // Scan the CBioseq for the CFastaReader user object.
+//
+//     if (scan_bioseq_4_cfastareader_usrobj) {
+//         ITERATE(list< CRef< CSeqdesc > >, iter, bioseq.GetDescr().Get()) {
+// ...
+//
+//     }
+//     if (fasta.empty())
+// ```
+// makeblastdb reads two variables of its own. LOSAT reproduces makeblastdb
+// with both unset (or empty, which `Get` cannot tell from unset).
+//
+// * `NCBI_MAKEBLASTDB_DONT_SCAN_BIOSEQ_FOR_CFASTAREADER_USER_OBJECTS`: with a
+//   value, the definition line that the FASTA reader keeps in its user
+//   object is not used, and the title stored for a sequence comes from the
+//   title descriptor instead. The titles differ for a definition line with a
+//   tab, a Ctrl-A or white space at its ends, so the variable changes the
+//   database of a FASTA input; LOSAT refuses to run with it.
+// * `NCBI_MAKEBLASTDB_SKIP_UNVERIFIED_BIOSEQS`: `m_SkipUnver` is read by
+//   `CSeqEntrySource` only, the source of ASN.1 input. A FASTA input goes
+//   through `x_AddFasta`, which does not look at it, so the variable changes
+//   nothing here and is not refused.
+/// Refuses the environment variable of makeblastdb that changes the database
+/// of a FASTA input. `env` gives the value of a variable.
+pub fn check_environment(env: &dyn Fn(&str) -> Option<std::ffi::OsString>) -> Result<(), String> {
+    const DONT_SCAN: &str = "NCBI_MAKEBLASTDB_DONT_SCAN_BIOSEQ_FOR_CFASTAREADER_USER_OBJECTS";
+    if env(DONT_SCAN).is_some_and(|value| !value.is_empty()) {
+        return Err(format!(
+            "the environment variable {DONT_SCAN}, with which NCBI makeblastdb stores other \
+             titles for some FASTA definition lines, is not supported by LOSAT's makedb"
+        ));
+    }
+    Ok(())
+}
+
 /// The checks of the arguments that LOSAT makes before it touches a file:
 /// what LOSAT does not support, and the value of `-max_file_sz`.
 fn check_arguments(args: &MakedbArgs) -> Result<u64, MakedbError> {
@@ -274,12 +389,20 @@ fn check_arguments(args: &MakedbArgs) -> Result<u64, MakedbError> {
     //                 "max_file_sz must be < 4 GiB");
     //     }
     // ```
-    // makeblastdb reads the value after it has removed an existing database
-    // of the same name; LOSAT reads it first, so that a wrong value costs
-    // nothing. A value NCBI cannot convert ends makeblastdb with an uncaught
-    // exception (exit 255); here it is an error of the options.
-    let bytes = string_to_uint8_data_size(&args.max_file_sz)
-        .map_err(|error| options_error(format!("-max_file_sz: {}", error.message)))?;
+    // makeblastdb reads the value after it has written the head of the log
+    // and removed an existing database of the same name; LOSAT reads it
+    // first, so that a wrong value costs nothing. A value NCBI cannot convert
+    // throws a `CStringException`, which `CATCH_ALL` reports through its
+    // `CException` clause (`MakedbError::exit_code`): "Error: NCBI C++
+    // Exception:" and a line with the source path of NCBI's build, the
+    // exception's class and its sentence, exit status 255. LOSAT prints the
+    // sentence after "Error: -max_file_sz: ", with the same status.
+    let bytes = string_to_uint8_data_size(&args.max_file_sz).map_err(|error| {
+        MakedbError::Build(WriteDbError::Other(format!(
+            "-max_file_sz: {}",
+            error.message
+        )))
+    })?;
     if bytes >= 0x1_0000_0000 {
         return Err(options_error("max_file_sz must be < 4 GiB"));
     }
@@ -330,9 +453,12 @@ fn warn_to(err: &mut dyn Write) -> impl FnMut(&[u8]) + '_ {
 //
 //     bool success = m_DB->EndBuild();
 // ```
-// makeblastdb then writes the JSON metadata file (`.pjs` / `.njs`,
-// makeblastdb.cpp:1297-1318). NCBI's programs do not read it when they
-// search, and LOSAT does not write it.
+// After a successful build makeblastdb opens the new database with its
+// reader and writes the JSON metadata file (`.pjs` / `.njs`); an error of
+// that open ends makeblastdb with "BLAST Database error" and exit status 2
+// although the database was written. LOSAT opens the database for the same
+// outcome (`open_new_database`); it does not write the JSON file, which
+// NCBI's programs do not read when they search.
 /// `CMakeBlastDBApp::x_BuildDatabase`. The log goes to `out` (makeblastdb's
 /// standard output), warnings and diagnostics to `err`; `stdin` is read when
 /// `-in` is `-`. `now` is the local time for the database's date (`None`
@@ -348,7 +474,48 @@ pub fn build_database(
     let is_protein = args.dbtype == "prot";
 
     let dbname = args.out.as_deref().unwrap_or(&args.input);
-    if dbname == "-" || dbname.split(' ').filter(|part| !part.is_empty()).count() > 1 {
+    // NCBI reference (598d8ae6): c++/include/corelib/ncbistr_util.hpp:264-275,282-301
+    // ```c++
+    //     void Do(TContainer&     target,
+    //             TPosContainer&  token_pos,
+    //             const TString&  empty_str = TString())
+    //     {
+    //         auto target_initial_size = target.size();
+    //
+    //         // Special cases
+    //         if (m_Str.empty()) {
+    //             return;
+    //         } else if (m_Delim.empty()) {
+    //             target.push_back(m_Str);
+    //             token_pos.push_back(0);
+    // ...
+    //
+    //         CTempStringList part_collector(m_Storage);
+    //         SIZE_TYPE prev_pos;
+    //         SIZE_TYPE delim_pos = NPOS;
+    //         m_Pos = 0;
+    //         do {
+    //             Advance(&part_collector, &prev_pos, &delim_pos);
+    //             target.push_back(empty_str); // reserve space for value added next line
+    //             part_collector.Join(&target.back());
+    //             part_collector.Clear();
+    //             token_pos.push_back(prev_pos);
+    //         } while ( !AtEnd() );
+    //
+    //         if ( (m_Flags & NStr::fSplit_Truncate_End) == 0 ) {
+    //             // account training delimiter
+    //             if (delim_pos != NPOS) {
+    //                 // add empty token after last delimiter
+    //                 target.push_back(empty_str);
+    //                 token_pos.push_back(delim_pos + 1);
+    //             }
+    // ```
+    // `NStr::Split(dbname, " ", input_files)` runs with no flag
+    // (ncbistr.hpp:2551-2555): adjacent delimiters are not merged and none is
+    // truncated, so every space ends a token, an empty one included ("db "
+    // is "db" and "", " db" is "" and "db"). A name with a space anywhere
+    // gives more than one token; the empty name gives none.
+    if dbname == "-" || dbname.contains(' ') {
         return Err(options_error("Please provide a database name using -out"));
     }
     let title = args.title.as_deref().unwrap_or(&args.input);
@@ -445,6 +612,27 @@ pub fn build_database(
                     }
                     add_fasta(&mut db, &mut file, err)
                 }
+                // A file that exists and cannot be opened. makeblastdb does
+                // not test the stream it opened: `AddFasta` skips a stream
+                // that is not good, no sequence is added, the build ends
+                // with "No volumes were created." and exit status 0 (after
+                // the FASTA warning above, for an empty sample). LOSAT does
+                // not reproduce that: it reports the file, with the exit
+                // status of its file-system errors.
+                // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1398-1408
+                // ```c++
+                // bool CBuildDatabase::AddFasta(CNcbiIstream & fasta_file)
+                // {
+                //     // Add any fasta sequences as well.
+                //     bool success = true;
+                //
+                //     if (fasta_file) {
+                //         CFastaBioseqSource fbs(fasta_file,
+                //                                m_IsProtein,
+                //                                m_ParseIDs,
+                //                                m_LongIDs);
+                //
+                // ```
                 Err(source) => Err(MakedbError::Build(WriteDbError::Io {
                     path: name.into(),
                     source,
@@ -455,9 +643,59 @@ pub fn build_database(
     };
     result?;
 
-    let closed = db.end_build(false);
-    let _ = err.write_all(&db.take_diagnostics());
-    closed?;
+    let closed = {
+        let mut warn = warn_to(err);
+        db.end_build(false, &mut warn)
+    };
+    if closed? {
+        open_new_database(db.output_dbname(), is_protein)?;
+    }
+    Ok(())
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1296-1300,1306-1310
+// ```c++
+//     bool success = m_DB->EndBuild();
+//     if(success) {
+//     	string new_db = m_DB->GetOutputDbName();
+//     	CSeqDB::ESeqType t = is_protein? CSeqDB::eProtein: CSeqDB::eNucleotide;
+//     	CSeqDB sdb(new_db, t);
+// ...
+//     	CRef<CBlast_db_metadata> m = sdb.GetDBMetaData(output_prefix);
+//     	string extn (kEmptyStr);
+//     	SeqDB_GetMetadataFileExtension(is_protein, extn);
+//     	string metadata_filename = new_db + "." + extn;
+//         ofstream out(metadata_filename.c_str());
+// ```
+// `CSeqDB sdb(new_db, t)` throws a `CSeqDBException` when the reader cannot
+// open what was written; the usual cause is an alias file of an earlier
+// database of the same name that `DeleteBlastDb` could not resolve and
+// therefore left in place, which now hides the new single volume. The
+// database is opened here for that outcome alone.
+//
+// The path is one database name (`SeqDb::open_one_name`), which departs from
+// NCBI on purpose: `CSeqDB` splits the name at spaces and double quotes, so
+// for an output path with such a character makeblastdb ends here with exit
+// status 2 ("No alias or index file found ...") after every successful
+// build. Apart from that the reader follows NCBI's rules, the volume of the
+// same name in the current directory included.
+//
+// LOSAT does not write the JSON file that makeblastdb writes next. A file of
+// that name left by an earlier database would describe a database that is
+// gone (the removal of an existing database takes the JSON file of a single
+// volume, but not `NAME.pjs` of a database of several volumes), so it is
+// removed where makeblastdb would overwrite it: after the open succeeded.
+/// The end of `x_BuildDatabase` after a successful build: opens the new
+/// database and removes the JSON metadata file of an earlier one.
+fn open_new_database(output_dbname: &str, is_protein: bool) -> Result<(), MakedbError> {
+    let seqtype = if is_protein {
+        SeqType::Protein
+    } else {
+        SeqType::Nucleotide
+    };
+    SeqDb::open_one_name(output_dbname, seqtype).map_err(MakedbError::Database)?;
+    let metadata_filename = format!("{output_dbname}.{}js", seqtype.letter());
+    let _ = std::fs::remove_file(metadata_filename);
     Ok(())
 }
 
@@ -467,21 +705,30 @@ fn add_fasta(
     err: &mut dyn Write,
 ) -> Result<(), MakedbError> {
     // The reader's warnings and the serializer's diagnostics arrive in the
-    // order makeblastdb posts them; what the last sequence leaves follows.
-    let result = {
-        let mut warn = warn_to(err);
-        db.add_fasta(input, &mut warn)
-    };
-    let _ = err.write_all(&db.take_diagnostics());
-    result.map_err(MakedbError::Build)
+    // order makeblastdb posts them.
+    let mut warn = warn_to(err);
+    db.add_fasta(input, &mut warn).map_err(MakedbError::Build)
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1167-1171
+// ```c++
+//     m_LogFile << "\n\nBuilding a new DB, current time: "
+//               << CTime(CTime::eCurrent).AsString() << endl;
+//
+//     m_LogFile << "New DB name:   " << output_dbname << endl;
+//     m_LogFile << "New DB title:  " << title << endl;
+// ```
+// Every line of the log ends with `endl`, which flushes the stream, so the
+// log and the messages of the standard error stream reach a common
+// destination (`2>&1`) in the order of the events. The standard output of
+// the Rust library is line buffered whatever it is connected to; the log
+// goes to it without another buffer.
 /// Runs `LOSAT makedb` and returns the exit code.
 pub fn run(args: &MakedbArgs) -> i32 {
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
     let stderr = std::io::stderr();
-    let mut out = std::io::BufWriter::new(stdout.lock());
+    let mut out = stdout.lock();
     let mut err = stderr.lock();
     let now = LocalTime::now();
     let status = run_with(args, now.as_ref(), &mut stdin.lock(), &mut out, &mut err);
@@ -519,5 +766,72 @@ mod tests {
         assert_eq!(split_quoted("\"a b.fa\" c.fa"), ["a b.fa", "c.fa"]);
         assert_eq!(split_quoted("  a.fa  "), ["a.fa"]);
         assert!(split_quoted("").is_empty());
+    }
+
+    #[test]
+    fn the_variable_that_changes_stored_titles_is_refused() {
+        const DONT_SCAN: &str = "NCBI_MAKEBLASTDB_DONT_SCAN_BIOSEQ_FOR_CFASTAREADER_USER_OBJECTS";
+        let with = |name: &'static str, value: &'static str| {
+            move |asked: &str| (asked == name).then(|| std::ffi::OsString::from(value))
+        };
+        assert!(check_environment(&|_: &str| None).is_ok());
+        let error = check_environment(&with(DONT_SCAN, "1")).unwrap_err();
+        assert!(error.contains(DONT_SCAN), "{error}");
+        // An empty value is no value for makeblastdb.
+        assert!(check_environment(&with(DONT_SCAN, "")).is_ok());
+        // Read by the source of ASN.1 input only.
+        assert!(check_environment(&with("NCBI_MAKEBLASTDB_SKIP_UNVERIFIED_BIOSEQS", "1")).is_ok());
+    }
+
+    #[test]
+    fn errors_end_with_makeblastdb_s_exit_codes_and_prefixes() {
+        let io = || std::io::Error::other("no");
+        for (error, code, text) in [
+            (
+                MakedbError::Build(WriteDbError::Options("o".into())),
+                1,
+                "BLAST options error: o",
+            ),
+            (
+                MakedbError::Build(WriteDbError::Creation("c".into())),
+                1,
+                "BLAST Database creation error: c",
+            ),
+            (
+                MakedbError::Database(SeqDbError::NotFound("d".into())),
+                2,
+                "BLAST Database error: d",
+            ),
+            (
+                MakedbError::Build(WriteDbError::OutOfMemory),
+                4,
+                "BLAST ran out of memory",
+            ),
+            (
+                MakedbError::Build(WriteDbError::Other("x".into())),
+                255,
+                "Error: x",
+            ),
+            (
+                MakedbError::Build(WriteDbError::Io {
+                    path: "p".into(),
+                    source: io(),
+                }),
+                255,
+                "Error: p: no",
+            ),
+            (
+                MakedbError::Build(WriteDbError::Rename {
+                    from: "a".into(),
+                    to: "b".into(),
+                    source: io(),
+                }),
+                255,
+                "Error: a -> b: no",
+            ),
+        ] {
+            assert_eq!(error.exit_code(), code, "{error}");
+            assert_eq!(error.to_string(), text);
+        }
     }
 }

@@ -615,14 +615,18 @@ pub(super) fn append_ncbi8na(seq8na: &mut Vec<u8>, src: &[u8]) {
 ///     return length;
 /// }
 /// ```
-pub(super) fn ncbi8na_to_ncbi4na(src: &[u8]) -> Vec<u8> {
-    let mut dst = Vec::with_capacity(src.len().div_ceil(2));
+/// The length of `src` can be one that the input states rather than holds (a gap line),
+/// so the allocation of the result can fail without the process being short of memory
+/// for anything else; that failure is returned (`fix_bioseq_deltas`).
+pub(super) fn ncbi8na_to_ncbi4na(src: &[u8]) -> Result<Vec<u8>, std::collections::TryReserveError> {
+    let mut dst = Vec::new();
+    dst.try_reserve_exact(src.len().div_ceil(2))?;
     let mut chunks = src.chunks_exact(2);
     dst.extend((&mut chunks).map(|two| two[0] << 4 | two[1]));
     if let [last] = chunks.remainder() {
         dst.push(last << 4);
     }
-    dst
+    Ok(dst)
 }
 
 #[cfg(test)]
@@ -791,8 +795,8 @@ mod tests {
             [0x12, 0x48, 0x83, 0x59, 0x6a, 0xc7, 0xbd, 0xef]
         );
         assert_eq!(iupacna_to_ncbi4na(b"ACN"), [0x12, 0xf0]);
-        assert_eq!(ncbi8na_to_ncbi4na(&[1, 2, 15]), [0x12, 0xf0]);
-        assert_eq!(ncbi8na_to_ncbi4na(&[]), [0u8; 0]);
+        assert_eq!(ncbi8na_to_ncbi4na(&[1, 2, 15]).unwrap(), [0x12, 0xf0]);
+        assert_eq!(ncbi8na_to_ncbi4na(&[]).unwrap(), [0u8; 0]);
     }
 
     /// The NCBI8na codes that `s_FixBioseqDeltas` reads from a literal equal the NCBI4na

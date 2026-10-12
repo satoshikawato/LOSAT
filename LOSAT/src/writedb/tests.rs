@@ -207,12 +207,8 @@ fn build(
             messages.extend_from_slice(line);
             messages.push(b'\n');
         };
-        let added = db.add_fasta(std::fs::File::open(fasta).unwrap(), &mut warn);
-        messages.extend_from_slice(&db.take_diagnostics());
-        added?;
-        let ended = db.end_build(false);
-        messages.extend_from_slice(&db.take_diagnostics());
-        ended.map(|_| ())
+        db.add_fasta(std::fs::File::open(fasta).unwrap(), &mut warn)?;
+        db.end_build(false, &mut warn).map(|_| ())
     })();
     (result, String::from_utf8_lossy(&log).into_owned(), messages)
 }
@@ -423,6 +419,374 @@ fn makedb_runs_as_makeblastdb_on_edge_inputs() {
                 actual.iter().zip(*bytes).position(|(a, b)| a != b)
             );
         }
+    }
+}
+
+/// One run of `LOSAT makedb` for a protein database titled "t": the exit
+/// status, the log and the messages of the standard error stream.
+fn makedb(input: &str, out: &str, max_file_sz: &str, stdin: &[u8]) -> (i32, String, String) {
+    let args = MakedbArgs {
+        input: input.to_string(),
+        input_type: "fasta".to_string(),
+        dbtype: "prot".to_string(),
+        title: Some("t".to_string()),
+        out: Some(out.to_string()),
+        blastdb_version: 4,
+        max_file_sz: max_file_sz.to_string(),
+    };
+    let now = time_of("Oct 12, 2026  9:00 PM");
+    let (mut log, mut messages) = (Vec::new(), Vec::new());
+    let mut stdin = stdin;
+    let status = run_with(&args, Some(&now), &mut stdin, &mut log, &mut messages);
+    (
+        status,
+        String::from_utf8_lossy(&log).into_owned(),
+        String::from_utf8_lossy(&messages).into_owned(),
+    )
+}
+
+fn prot_fasta() -> String {
+    seqdb_fixtures()
+        .join("prot.faa")
+        .to_string_lossy()
+        .into_owned()
+}
+
+/// The name of the database as the log gives it ("New DB name:   ...").
+fn logged_db_name(log: &str) -> &str {
+    log.lines()
+        .find_map(|line| line.strip_prefix("New DB name:   "))
+        .unwrap_or_else(|| panic!("no database name in {log:?}"))
+}
+
+/// makeblastdb splits the output name at every space and refuses a name of
+/// more than one part, an empty part included (2.17.0: `-out "db "`,
+/// `-out " db"`, `-out "a  b"` and `-out "my data/db"` all end like this).
+#[test]
+fn an_output_name_with_a_space_is_refused() {
+    let fasta = prot_fasta();
+    let tmp = TempDir::new("space");
+    for out in [
+        format!("{} ", tmp.base("db")),
+        format!(" {}", tmp.base("db")),
+        format!("{}  b", tmp.base("a")),
+        format!("{} data/db", tmp.base("my")),
+        " ".to_string(),
+    ] {
+        let (status, log, messages) = makedb(&fasta, &out, "3GB", b"");
+        assert_eq!(status, 1, "{out:?}");
+        assert_eq!(
+            messages, "BLAST options error: Please provide a database name using -out\n",
+            "{out:?}"
+        );
+        assert_eq!(log, "", "{out:?}");
+        assert!(
+            std::fs::read_dir(&tmp.0).unwrap().next().is_none(),
+            "{out:?}"
+        );
+    }
+}
+
+/// The output path is one database name for LOSAT, also with a space or a
+/// double quote in a directory's name: the database that is there is found
+/// and removed, and the new one opens. (makeblastdb 2.17.0 run in a directory
+/// `my data` leaves the old volumes and the old alias file beside the new
+/// volume and ends with exit status 2.)
+#[test]
+fn a_database_in_a_directory_with_a_space_is_replaced() {
+    let fixtures = seqdb_fixtures();
+    let date = stored_date(&fixtures.join("db/prot_v4.pin"), SeqType::Protein);
+    let fasta = fixtures.join("prot.faa");
+    let mut names = vec!["my data"];
+    if cfg!(unix) {
+        names.push("q\"d");
+    }
+    for name in names {
+        let tmp = TempDir::new("spacedir");
+        let dir = tmp.0.join(name);
+        std::fs::create_dir(&dir).unwrap();
+        let base = dir.join("db").to_string_lossy().into_owned();
+        let (result, _, _) = build(&fasta, true, "protein in volumes", 300, &date, &base);
+        result.unwrap();
+        assert_eq!(files_named(&dir, "db.").len(), 6 * 3 + 1, "{name}");
+        // In NCBI's syntax of a list of names the path is not one name.
+        assert!(crate::seqdb::SeqDb::open(&base, SeqType::Protein).is_err());
+        let old = crate::seqdb::SeqDb::open_one_name(&base, SeqType::Protein).unwrap();
+        assert_eq!(old.volumes().len(), 6, "{name}");
+
+        let (result, log, _) = build(&fasta, true, "t", 3_000_000_000, &date, &base);
+        result.unwrap();
+        assert!(
+            log.contains("\nDeleted existing Protein BLAST database named "),
+            "{name}: {log:?}"
+        );
+        assert_eq!(
+            files_named(&dir, "db."),
+            ["db.phr", "db.pin", "db.psq"],
+            "{name}"
+        );
+        let new = crate::seqdb::SeqDb::open_one_name(&base, SeqType::Protein).unwrap();
+        assert_eq!((new.volumes().len(), new.num_seqs()), (1, 10), "{name}");
+    }
+}
+
+/// makeblastdb overwrites `NAME.pjs` after every build. LOSAT writes no JSON
+/// file, so the one of the database it replaced must not stay (the removal
+/// of the old database takes `NAME.pjs` only when the old database has one
+/// volume). A JSON file of the other molecule type is not this database's.
+#[test]
+fn the_json_file_of_a_replaced_database_is_removed() {
+    let fasta = prot_fasta();
+    for second_size in ["3GB", "400"] {
+        let tmp = TempDir::new("json");
+        let base = tmp.base("db");
+        let (status, _, messages) = makedb(&fasta, &base, "300", b"");
+        assert_eq!((status, messages.as_str()), (0, ""));
+        assert_eq!(files_named(&tmp.0, "db.").len(), 6 * 3 + 1);
+        std::fs::write(tmp.0.join("db.pjs"), b"{}").unwrap();
+        std::fs::write(tmp.0.join("db.njs"), b"{}").unwrap();
+
+        let (status, _, messages) = makedb(&fasta, &base, second_size, b"");
+        assert_eq!((status, messages.as_str()), (0, ""), "{second_size}");
+        let files = files_named(&tmp.0, "db.");
+        assert!(!files.iter().any(|file| file == "db.pjs"), "{files:?}");
+        assert!(files.iter().any(|file| file == "db.njs"), "{files:?}");
+        if second_size == "3GB" {
+            assert_eq!(files, ["db.njs", "db.phr", "db.pin", "db.psq"]);
+        }
+    }
+}
+
+/// After the build makeblastdb opens the database it wrote. An alias file
+/// whose volumes are missing cannot be resolved, so it is not removed before
+/// the build and hides the new volume after it. makeblastdb 2.17.0 with a
+/// `db.pal` of "DBLIST db.00 db.01": the three files are written, the alias
+/// file and the old JSON file stay, the message below, exit status 2.
+#[test]
+fn a_new_database_that_cannot_be_opened_is_an_error() {
+    let fasta = prot_fasta();
+    let tmp = TempDir::new("stale-alias");
+    let base = tmp.base("db");
+    std::fs::write(tmp.0.join("db.pal"), b"TITLE x\nDBLIST db.00 db.01\n").unwrap();
+    std::fs::write(tmp.0.join("db.pjs"), b"{}").unwrap();
+    let (status, log, messages) = makedb(&fasta, &base, "3GB", b"");
+    assert_eq!(status, 2);
+    assert_eq!(
+        messages,
+        format!(
+            "BLAST Database error: Could not find volume or alias file (db.00) referenced in \
+             alias file ({}).\n",
+            logged_db_name(&log)
+        )
+    );
+    assert!(!log.contains("Deleted existing"), "{log:?}");
+    assert!(log.ends_with(" seconds.\n\n\n"), "{log:?}");
+    assert_eq!(
+        files_named(&tmp.0, "db."),
+        ["db.pal", "db.phr", "db.pin", "db.pjs", "db.psq"]
+    );
+}
+
+/// A file of a volume that cannot be created ends the build (LOSAT's own
+/// error: makeblastdb does not test its output files), and the files of that
+/// volume that were created before it are removed.
+#[test]
+fn a_volume_that_cannot_be_created_leaves_no_file() {
+    let fasta = prot_fasta();
+    let tmp = TempDir::new("planted");
+    let base = tmp.base("db");
+    std::fs::create_dir(tmp.0.join("db.00.phr")).unwrap();
+    let (status, log, messages) = makedb(&fasta, &base, "3GB", b"");
+    assert_eq!(status, 255);
+    assert!(
+        messages.starts_with("Error: ") && messages.contains("db.00.phr: "),
+        "{messages:?}"
+    );
+    assert_eq!(messages.lines().count(), 1, "{messages:?}");
+    assert!(
+        log.ends_with("\nMaximum file size: 3000000000B\n\nNo volumes were created.\n\n"),
+        "{log:?}"
+    );
+    assert_eq!(files_named(&tmp.0, "db."), ["db.00.phr"]);
+    assert!(tmp.0.join("db.00.phr").is_dir());
+}
+
+/// `-in -` reads the standard input: the same database as from the file.
+#[test]
+fn the_standard_input_gives_the_database_of_the_file() {
+    let fasta = prot_fasta();
+    let bytes = std::fs::read(&fasta).unwrap();
+    for max_file_sz in ["3GB", "300"] {
+        let tmp = TempDir::new("stdin");
+        let (from_file, from_stdin) = (tmp.0.join("file"), tmp.0.join("stdin"));
+        for dir in [&from_file, &from_stdin] {
+            std::fs::create_dir(dir).unwrap();
+        }
+        let base = |dir: &Path| dir.join("db").to_string_lossy().into_owned();
+        let (status, log, messages) = makedb(&fasta, &base(&from_file), max_file_sz, b"");
+        assert_eq!((status, messages.as_str()), (0, ""));
+        // The input of the file run is not read from the standard input.
+        assert!(
+            log.contains("\nAdding sequences from FASTA; added 10 sequences in "),
+            "{log:?}"
+        );
+        let (status, log, messages) = makedb("-", &base(&from_stdin), max_file_sz, &bytes);
+        assert_eq!((status, messages.as_str()), (0, ""));
+        assert!(
+            log.contains("\nAdding sequences from FASTA; added 10 sequences in "),
+            "{log:?}"
+        );
+        let files = files_named(&from_file, "db.");
+        assert_eq!(files.len(), if max_file_sz == "300" { 19 } else { 3 });
+        assert_eq!(files_named(&from_stdin, "db."), files);
+        for file in &files {
+            assert!(
+                std::fs::read(from_file.join(file)).unwrap()
+                    == std::fs::read(from_stdin.join(file)).unwrap(),
+                "{max_file_sz}: {file}"
+            );
+        }
+    }
+}
+
+/// An error of the input after volumes were written removes them all. The
+/// texts are makeblastdb's (2.17.0, `-max_file_sz 300`, the ten sequences of
+/// `prot.faa` followed by ">bad" and "MK?V@L."): the log ends with the two
+/// blank lines of the end of the build, without "No volumes were created.".
+#[test]
+fn a_late_error_removes_the_volumes_already_written() {
+    let mut input = std::fs::read(prot_fasta()).unwrap();
+    // Without the last record the same input makes six volumes.
+    let tmp = TempDir::new("late");
+    let fasta = tmp.base("in.fa");
+    std::fs::write(&fasta, &input).unwrap();
+    let (status, _, _) = makedb(&fasta, &tmp.base("db"), "300", b"");
+    assert_eq!(status, 0);
+    assert_eq!(files_named(&tmp.0, "db.").len(), 6 * 3 + 1);
+    for file in files_named(&tmp.0, "db.") {
+        std::fs::remove_file(tmp.0.join(file)).unwrap();
+    }
+
+    input.extend_from_slice(b">bad\nMK?V@L.\n");
+    std::fs::write(&fasta, &input).unwrap();
+    let (status, log, messages) = makedb(&fasta, &tmp.base("db"), "300", b"");
+    assert_eq!(status, 1);
+    assert_eq!(
+        messages,
+        "BLAST Database creation error: Near line 30, there's a line that doesn't look like \
+         plausible data, but it's not marked as defline or comment.\n"
+    );
+    assert_eq!(
+        String::from_utf8(log_with_markers(log.as_bytes())).unwrap(),
+        "\n\nBuilding a new DB, current time: <T>\nNew DB name:   <OUT>\nNew DB title:  t\n\
+         Sequence type: Protein\nKeep MBits: T\nMaximum file size: 0B\n\n\n"
+    );
+    assert_eq!(files_named(&tmp.0, "db."), [] as [&str; 0]);
+}
+
+/// The errors makeblastdb reports through its last `catch` clauses end with
+/// exit status 255 and "Error: ": a `-max_file_sz` that is no size (LOSAT
+/// tests it before it touches a file), and a directory that cannot be used.
+#[test]
+fn other_errors_end_with_status_255() {
+    let fasta = prot_fasta();
+    let tmp = TempDir::new("other");
+    for value in [
+        "abc",
+        "",
+        "-1",
+        "1e3",
+        " 1KB",
+        "1Ki",
+        "18446744073709551616",
+    ] {
+        let (status, log, messages) = makedb(&fasta, &tmp.base("db"), value, b"");
+        assert_eq!(status, 255, "{value:?}");
+        assert_eq!(
+            messages,
+            format!("Error: -max_file_sz: Cannot convert string '{value}' to Uint8\n")
+        );
+        assert_eq!(log, "", "{value:?}");
+    }
+    // A value that is a size, but too large, is an error of the options.
+    let (status, _, messages) = makedb(&fasta, &tmp.base("db"), "4GiB", b"");
+    assert_eq!(
+        (status, messages.as_str()),
+        (1, "BLAST options error: max_file_sz must be < 4 GiB\n")
+    );
+    // The parent of the database is a file.
+    std::fs::write(tmp.0.join("f"), b"").unwrap();
+    let out = tmp.0.join("f").join("db").to_string_lossy().into_owned();
+    let (status, log, messages) = makedb(&fasta, &out, "3GB", b"");
+    assert_eq!(
+        (status, log.as_str(), messages.as_str()),
+        (255, "", "Error: Failed to create directory 'f'\n")
+    );
+    assert_eq!(
+        files_named(&tmp.0, ""),
+        ["f"],
+        "nothing but the planted file"
+    );
+}
+
+/// The directory of the output name is made as makeblastdb makes it
+/// (2.17.0): `-out sub/` is the database `sub` and makes no directory;
+/// missing directories are made; and for `-out nodir/../db` makeblastdb makes
+/// the normalized path (nothing: it exists) and then fails on the path as it
+/// was given, which does not resolve, before it writes a line of the log.
+#[test]
+fn directories_of_the_output_name() {
+    let fasta = prot_fasta();
+    let tmp = TempDir::new("dirs");
+    let sep = std::path::MAIN_SEPARATOR;
+
+    let (status, _, messages) = makedb(&fasta, &format!("{}{sep}", tmp.base("sub")), "3GB", b"");
+    assert_eq!((status, messages.as_str()), (0, ""));
+    assert_eq!(
+        files_named(&tmp.0, "sub"),
+        ["sub.phr", "sub.pin", "sub.psq"]
+    );
+
+    let nested = tmp.0.join("a").join("b");
+    let out = nested.join("db").to_string_lossy().into_owned();
+    let (status, _, messages) = makedb(&fasta, &out, "3GB", b"");
+    assert_eq!((status, messages.as_str()), (0, ""));
+    assert_eq!(files_named(&nested, "db."), ["db.phr", "db.pin", "db.psq"]);
+    #[cfg(unix)]
+    {
+        // The directories get the mode rwxr-xr-x whatever the umask.
+        use std::os::unix::fs::PermissionsExt;
+        for dir in [tmp.0.join("a"), nested.clone()] {
+            let mode = std::fs::metadata(&dir).unwrap().permissions().mode();
+            assert_eq!(mode & 0o7777, 0o755, "{}", dir.display());
+        }
+    }
+
+    // On Windows the system resolves `nodir\..` without looking at `nodir`.
+    #[cfg(unix)]
+    {
+        for (given, name, made, not_made) in [
+            ("nodir/../db", "..", None, "nodir"),
+            ("x/b/../c/db", "c", Some("x/c"), "x/b"),
+        ] {
+            let out = format!("{}/{given}", tmp.0.display());
+            let (status, log, messages) = makedb(&fasta, &out, "3GB", b"");
+            assert_eq!(
+                (status, log.as_str(), messages),
+                (
+                    255,
+                    "",
+                    format!("Error: You do not have write permissions on '{name}'\n")
+                ),
+                "{given}"
+            );
+            if let Some(made) = made {
+                assert!(tmp.0.join(made).is_dir(), "{given}");
+                assert!(files_named(&tmp.0.join(made), "").is_empty(), "{given}");
+            }
+            assert!(!tmp.0.join(not_made).exists(), "{given}");
+        }
+        assert!(files_named(&tmp.0, "db.").is_empty());
     }
 }
 

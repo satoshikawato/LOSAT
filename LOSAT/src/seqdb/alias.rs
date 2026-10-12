@@ -376,6 +376,23 @@ struct Resolver {
     seqtype: SeqType,
     /// Alias files being expanded, outermost first.
     recurse: Vec<String>,
+    /// The directory where a volume named in an alias file is looked for
+    /// before the alias file's own directory: NCBI's "local copy", in the
+    /// current directory. `None`: the alias file's directory only.
+    local_dir: Option<String>,
+}
+
+/// Where the volumes that an alias file names are looked for.
+#[derive(Clone, Copy)]
+pub(super) enum LocalCopy<'a> {
+    /// In the current directory, then in the alias file's (NCBI's rule).
+    CurrentDir,
+    /// In this directory, then in the alias file's: the rule above with the
+    /// directory given by the caller.
+    #[cfg_attr(not(test), allow(dead_code))]
+    Dir(&'a str),
+    /// In the alias file's directory only.
+    No,
 }
 
 impl Resolver {
@@ -563,8 +580,8 @@ impl Resolver {
 
             let mut found = None;
             if !skip_local {
-                if let Ok(cwd) = std::env::current_dir() {
-                    let local_base = combine_path(&cwd.to_string_lossy(), base_name(entry));
+                if let Some(local_dir) = &self.local_dir {
+                    let local_base = combine_path(local_dir, base_name(entry));
                     if exists(&self.index_path(&local_base)) {
                         found = Some(local_base);
                     }
@@ -663,10 +680,6 @@ fn collect_volumes(node: &AliasNode, out: &mut Vec<String>) {
 /// Resolves the database `db_base` (a path without extension): an alias file
 /// when `db_base.{p|n}al` exists, else the single volume `db_base.{p|n}in`.
 pub(super) fn resolve(db_base: &str, seqtype: SeqType) -> Result<AliasTree, SeqDbError> {
-    let mut resolver = Resolver {
-        seqtype,
-        recurse: Vec::new(),
-    };
     // NCBI reads the name as a list (seqdbalias.cpp:114-116, `x_Tokenize`):
     // spaces separate databases and double quotes keep a name with spaces
     // together. LOSAT searches one database.
@@ -677,7 +690,7 @@ pub(super) fn resolve(db_base: &str, seqtype: SeqType) -> Result<AliasTree, SeqD
                 "No database names were passed to CSeqDB::CSeqDB().".to_string(),
             ));
         }
-        [name] => fix_delimiters(&String::from_utf8_lossy(name)),
+        [name] => String::from_utf8_lossy(name).into_owned(),
         _ => {
             return Err(SeqDbError::Unsupported {
                 path: Path::new(db_base).to_path_buf(),
@@ -687,6 +700,51 @@ pub(super) fn resolve(db_base: &str, seqtype: SeqType) -> Result<AliasTree, SeqD
             });
         }
     };
+    resolve_one_name(&db_base, seqtype, LocalCopy::CurrentDir)
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:85-97
+// ```c++
+// void CSeqDBAliasNode::x_Tokenize(const string & dbnames)
+// {
+//     vector<CSeqDB_Substring> dbs;
+//     SeqDB_SplitQuoted(dbnames, dbs);
+//
+//     m_DBList.resize(dbs.size());
+//     m_SkipLocal.resize(dbs.size(),false);
+//
+//     for(size_t i = 0; i<dbs.size(); i++) {
+//         m_DBList[i].Assign(dbs[i]);
+//         m_DBList[i].FixDelimiters();
+//     }
+// }
+// ```
+// This entry point is for a caller that holds the path of one database, not
+// a list in the syntax above (`LOSAT makedb`, whose output name is one name
+// by makeblastdb's own check): the name is not split, so a space or a double
+// quote in it is a character of the path. NCBI has no such entry point: its
+// reader splits every name it is given.
+/// Resolves the one database `db_base` (a path without extension, taken as
+/// it is): an alias file when `db_base.{p|n}al` exists, else the single
+/// volume `db_base.{p|n}in`. `local_copy` says where the volumes named in an
+/// alias file are looked for.
+pub(super) fn resolve_one_name(
+    db_base: &str,
+    seqtype: SeqType,
+    local_copy: LocalCopy<'_>,
+) -> Result<AliasTree, SeqDbError> {
+    let mut resolver = Resolver {
+        seqtype,
+        recurse: Vec::new(),
+        local_dir: match local_copy {
+            LocalCopy::CurrentDir => std::env::current_dir()
+                .ok()
+                .map(|cwd| cwd.to_string_lossy().into_owned()),
+            LocalCopy::Dir(dir) => Some(dir.to_string()),
+            LocalCopy::No => None,
+        },
+    };
+    let db_base = fix_delimiters(db_base);
     if !exists(&resolver.alias_path(&db_base)) && !exists(&resolver.index_path(&db_base)) {
         return Err(SeqDbError::NotFound(format!(
             "No alias or index file found for {} database [{db_base}].",
@@ -759,14 +817,48 @@ fn collect_alias_files(node: &AliasNode, out: &mut std::collections::BTreeSet<St
     }
 }
 
-/// `CSeqDB::FindVolumePaths(dbname, seqtype, paths, &alias_paths)`: the
-/// volumes of the database `db_base` (paths without extension, in NCBI's
-/// order) and the paths of the alias files that name them.
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1517-1532
+// ```c++
+// void
+// CSeqDBImpl::FindVolumePaths(const string   & dbname,
+//                             char             prot_nucl,
+//                             vector<string> & paths,
+//                             vector<string> * alias_paths,
+//                             bool             recursive,
+//                             bool             expand_links)
+// {
+//     bool use_atlas_lock = true;
+//     CSeqDBAtlasHolder AH(NULL, use_atlas_lock);
+//     CSeqDBAtlas & atlas(AH.Get());
+//
+//     // This constructor handles its own locking.
+//     CSeqDBAliasFile aliases(atlas, dbname, prot_nucl, expand_links);
+//     aliases.FindVolumePaths(paths, alias_paths, recursive);
+// }
+// ```
+// The only caller is the removal of an existing database before a build
+// (`DeleteBlastDb`), and for that use LOSAT departs from NCBI on purpose in
+// two points:
+//
+// * `db_base` is one name (`resolve_one_name`). NCBI splits it at spaces and
+//   double quotes, fails to resolve the pieces of a path that has one, and
+//   so leaves the existing database in place.
+// * A volume named in an alias file is looked for in the alias file's own
+//   directory only (an absolute name as it is). NCBI looks in the current
+//   directory first ("local copy", seqdbalias.cpp:831-840, quoted at
+//   `Resolver::expand`), so `makeblastdb -out sub/db` over an existing
+//   `sub/db.pal` removes the files `./db.00.*` of the current directory when
+//   they exist, although they are not the files of `sub/db`. The files to
+//   remove are those the alias file sits beside.
+/// The files of the one database `db_base` for its removal: its volumes
+/// (paths without extension, in NCBI's order) and the paths of the alias
+/// files that name them (`CSeqDB::FindVolumePaths(dbname, seqtype, paths,
+/// &alias_paths)`, with the two differences above).
 pub(crate) fn find_volume_paths(
     db_base: &str,
     seqtype: SeqType,
 ) -> Result<(Vec<String>, Vec<String>), SeqDbError> {
-    let tree = resolve(db_base, seqtype)?;
+    let tree = resolve_one_name(db_base, seqtype, LocalCopy::No)?;
     let mut alias_files = std::collections::BTreeSet::new();
     collect_alias_files(&tree.root, &mut alias_files);
     Ok((tree.volumes, alias_files.into_iter().collect()))

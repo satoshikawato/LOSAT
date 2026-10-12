@@ -671,10 +671,38 @@ fn read_error_ends_the_reading() {
     assert_eq!(
         first,
         Err(SourceError {
-            message: "Read error: the disk is gone".to_string()
+            message: "Read error: the disk is gone".to_string(),
+            out_of_memory: false,
         })
     );
     assert_eq!(source.next_bioseq(&mut |_| ()), Ok(None));
+}
+
+/// A delta whose gap is longer than any allocation is the error that makeblastdb reports
+/// as "BLAST ran out of memory", not an abort. (The reader hands over no length above
+/// 2,147,483,647; the length here only makes the reservation fail on every machine.)
+#[test]
+fn a_delta_that_cannot_be_allocated_is_an_error() {
+    let delta = |gap: u64| SeqInst::Delta {
+        length: 1 + gap,
+        residues: b"A".to_vec(),
+        pieces: vec![
+            DeltaSeq::Literal(pack::Segment {
+                coding: pack::Coding::Ncbi4na,
+                start: 0,
+                length: 1,
+            }),
+            DeltaSeq::Gap { length: gap },
+        ],
+    };
+    assert_eq!(
+        fix_bioseq_deltas(delta(2)).unwrap(),
+        (3, Some(SeqData::Ncbi4na(vec![0x1f, 0xf0])))
+    );
+    assert!(fix_bioseq_deltas(delta(u64::MAX - 1)).is_err());
+    let error = SourceError::out_of_memory();
+    assert!(error.out_of_memory);
+    assert_eq!(error.message, "BLAST ran out of memory");
 }
 
 /// NCBIstdaa: the residue at position `i` has the code `i`

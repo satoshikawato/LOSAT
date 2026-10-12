@@ -174,6 +174,35 @@ fn main() -> Result<()> {
         // }
         // ```
         Commands::Makedb(args) => {
+            // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1031-1041
+            // ```c++
+            //     // Setup some debugging features from environment variables.
+            //     if ( !m_Environ->Get(DIAG_TRACE).empty() ) {
+            //         SetDiagTrace(eDT_Enable, eDT_Enable);
+            //     }
+            //     string post_level = m_Environ->Get(DIAG_POST_LEVEL);
+            //     if ( !post_level.empty() ) {
+            //         EDiagSev sev;
+            //         if (CNcbiDiag::StrToSeverityLevel(post_level.c_str(), sev)) {
+            //             SetDiagFixedPostLevel(sev);
+            //         }
+            //     }
+            // ```
+            // makeblastdb is an NCBI application like the search programs: its application
+            // layer reads the same environment and registry files (`makeblastdb.ini`, then
+            // `.ncbirc`) before `Run`, and LOSAT rejects the settings that change the output.
+            // The data loaders the check reports are not used for a FASTA input.
+            LOSAT::blastinput::ncbi_environment::check_ncbi_application_settings("makeblastdb")
+                .map_err(anyhow::Error::msg)?;
+            // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1134-1136
+            // ```c++
+            //     const string dont_scan_bioseq =
+            //         GetEnvironment().Get("NCBI_MAKEBLASTDB_DONT_SCAN_BIOSEQ_FOR_CFASTAREADER_USER_OBJECTS");
+            //     const bool scan_bioseq_4_cfastareader_usrobj = static_cast<bool>(dont_scan_bioseq.empty());
+            // ```
+            // The variables that makeblastdb reads itself.
+            LOSAT::writedb::makeblastdb::check_environment(&|name: &str| std::env::var_os(name))
+                .map_err(anyhow::Error::msg)?;
             let status = LOSAT::writedb::makeblastdb::run(&args);
             if status != 0 {
                 std::process::exit(status);

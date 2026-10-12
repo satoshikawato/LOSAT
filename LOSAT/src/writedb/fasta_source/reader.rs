@@ -44,6 +44,22 @@ pub(super) struct ParseError {
     pub(super) message: String,
 }
 
+/// What ends `ReadOneSeq` without a record.
+#[derive(Debug)]
+pub(super) enum ReadError {
+    /// The reader's own exception.
+    Parse(ParseError),
+    /// An allocation whose size the input states could not be made
+    /// (`std::bad_alloc` in NCBI, which no reader catches).
+    OutOfMemory,
+}
+
+impl From<ParseError> for ReadError {
+    fn from(error: ParseError) -> Self {
+        ReadError::Parse(error)
+    }
+}
+
 /// One gap of a record (`CFastaReader::SGap`): the raw residues before it and its
 /// length; length 0 is a gap of unknown length (a lone hyphen at the end of a line).
 /// The gap type and the linkage evidence of a `>?` line only decide whether the delta
@@ -531,7 +547,7 @@ impl<R: Read> FastaReader<R> {
     /// of the input after it. `FASTA_PROGRESS` posts to a listener only, and there is
     /// none. Without `fDLOptional` data before a definition line is the `eNoDefline`
     /// error. `CBadResiduesException` comes only with `fValidate`, which is not set.
-    pub(super) fn read_one_seq(&mut self, warn: Warn<'_>) -> Result<Record, ParseError> {
+    pub(super) fn read_one_seq(&mut self, warn: Warn<'_>) -> Result<Record, ReadError> {
         let state = &mut self.state;
         state.seq_data.clear();
         state.gaps.clear();
@@ -578,11 +594,11 @@ impl<R: Read> FastaReader<R> {
             }
             if need_defline {
                 self.lines.unget_line();
-                return Err(ParseError {
+                return Err(ReadError::Parse(ParseError {
                     message: format!(
                         "CFastaReader: Input doesn't start with a defline or comment around line {line_number}"
                     ),
-                });
+                }));
             }
             let raw_length = raw.len();
             match line.strip_prefix(b">?_") {
@@ -597,15 +613,17 @@ impl<R: Read> FastaReader<R> {
         }
 
         if need_defline && self.lines.at_eof() {
-            return Err(ParseError {
+            return Err(ReadError::Parse(ParseError {
                 message: format!(
                     "CFastaReader: Expected defline around line {}",
                     self.lines.line_number()
                 ),
-            });
+            }));
         }
 
-        let inst = state.assemble_seq(warn);
+        let inst = state
+            .assemble_seq(warn)
+            .map_err(|_| ReadError::OutOfMemory)?;
         Ok(Record {
             local_id: state.local_id,
             defline_field: std::mem::take(&mut state.defline_field),
@@ -1425,7 +1443,23 @@ impl RecordState {
     /// that piece's `Seq-data`: `SetLiteral().SetSeq_data()` of a gap piece creates a
     /// `Seq-data` without a choice when it has none, so a record that is one gap has a
     /// `Seq-data` that the database writer cannot read (`SeqData::Other`).
-    fn assemble_seq(&mut self, warn: Warn<'_>) -> SeqInst {
+    ///
+    /// The run of `X` is as long as the `>?` lines say, up to 2,147,483,647 residues for a
+    /// few bytes of input. NCBI reserves the whole string at once and a failure is a
+    /// `std::bad_alloc` (makeblastdb: "BLAST ran out of memory"); here it is the error of
+    /// this function, where an allocation that aborts the process would lose that outcome.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1388-1391
+    /// ```c++
+    ///         string    new_data;
+    ///         char      gap_char(inst.IsAa() ? 'X' : 'N');
+    ///         SIZE_TYPE pos = 0;
+    ///         new_data.reserve(GetCurrentPos(ePosWithGaps));
+    /// ```
+    fn assemble_seq(
+        &mut self,
+        warn: Warn<'_>,
+    ) -> Result<SeqInst, std::collections::TryReserveError> {
         self.close_gap(false, self.seq_data.len(), 0);
 
         let titles = std::mem::take(&mut self.titles);
@@ -1435,11 +1469,12 @@ impl RecordState {
 
         let length = self.seq_data.len() as u64 + self.total_gap_length;
         if length > i32::MAX as u64 {
-            return SeqInst::TooLong { length };
+            return Ok(SeqInst::TooLong { length });
         }
 
         if self.protein && self.total_gap_length > 0 {
-            let mut new_data = Vec::with_capacity(length as usize);
+            let mut new_data = Vec::new();
+            new_data.try_reserve_exact(length as usize)?;
             let mut pos = 0;
             for gap in &self.gaps {
                 if gap.position > pos {
@@ -1457,13 +1492,13 @@ impl RecordState {
         }
 
         if self.gaps.is_empty() && self.seq_data.is_empty() {
-            return SeqInst::Virtual;
+            return Ok(SeqInst::Virtual);
         }
         if self.protein {
-            return SeqInst::Raw {
+            return Ok(SeqInst::Raw {
                 length,
                 seq_data: SeqData::Ncbieaa(std::mem::take(&mut self.seq_data)),
-            };
+            });
         }
 
         let mut pieces = Vec::new();
@@ -1501,13 +1536,13 @@ impl RecordState {
                 },
                 DeltaSeq::LocNull | DeltaSeq::Gap { .. } => SeqData::Other,
             };
-            return SeqInst::Raw { length, seq_data };
+            return Ok(SeqInst::Raw { length, seq_data });
         }
-        SeqInst::Delta {
+        Ok(SeqInst::Delta {
             length,
             residues: std::mem::take(&mut self.seq_data),
             pieces,
-        }
+        })
     }
 
     /// `ParseTitle`: the reader's warning about residues at the end of a title, and the

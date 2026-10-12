@@ -52,14 +52,35 @@ impl Volume {
         index: u32,
         max_file_size: u64,
     ) -> Result<Self, WriteDbError> {
+        // NCBI does not test whether the three files opened
+        // (`WriteDbFile::create`). LOSAT stops at the first that cannot be
+        // created, and this volume is then not one of the build's volumes,
+        // whose files the failed build removes; so the files created here
+        // before the failure are removed here.
+        let mut idx = IndexFile::create(dbname, protein, title, date, index, max_file_size)?;
+        let mut hdr = match HeaderFile::create(dbname, protein, index, max_file_size) {
+            Ok(hdr) => hdr,
+            Err(error) => {
+                idx.file_mut().discard();
+                return Err(error);
+            }
+        };
+        let seq = match SequenceFile::create(dbname, protein, index, max_file_size) {
+            Ok(seq) => seq,
+            Err(error) => {
+                idx.file_mut().discard();
+                hdr.file_mut().discard();
+                return Err(error);
+            }
+        };
         Ok(Self {
             dbname: dbname.to_string(),
             protein,
             vol_name: make_short_name(dbname, index),
             index,
-            idx: IndexFile::create(dbname, protein, title, date, index, max_file_size)?,
-            hdr: HeaderFile::create(dbname, protein, index, max_file_size)?,
-            seq: SequenceFile::create(dbname, protein, index, max_file_size)?,
+            idx,
+            hdr,
+            seq,
             oid: 0,
             open: true,
         })

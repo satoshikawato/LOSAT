@@ -11,6 +11,7 @@
 #![cfg_attr(not(unix), allow(dead_code))]
 
 use std::ffi::OsStr;
+use std::io::Read;
 use std::path::Path;
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:1722-1734
@@ -35,11 +36,10 @@ use std::path::Path;
 pub fn local_utc_offset(unix_seconds: i64) -> Option<i32> {
     #[cfg(unix)]
     {
-        let read = |p: &Path| std::fs::read(p).ok();
         resolve(
             std::env::var_os("TZ").as_deref(),
             std::env::var_os("TZDIR").as_deref(),
-            &read,
+            &read_zone_file,
             unix_seconds,
         )
     }
@@ -51,6 +51,33 @@ pub fn local_utc_offset(unix_seconds: i64) -> Option<i32> {
 }
 
 const DEFAULT_TZDIR: &str = "/usr/share/zoneinfo";
+
+/// The largest zone file that is read. The files of the time zone database are
+/// under 10 kB; `TZ` is the user's, and may name anything.
+const MAX_ZONE_FILE_BYTES: u64 = 1 << 20;
+
+/// The bytes of `input` when it ends within `cap` bytes; `None` when it is longer or
+/// cannot be read. At most `cap + 1` bytes are taken from `input`.
+fn read_bounded(input: impl Read, cap: u64) -> Option<Vec<u8>> {
+    let mut bytes = Vec::new();
+    input
+        .take(cap.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .ok()?;
+    (bytes.len() as u64 <= cap).then_some(bytes)
+}
+
+/// The bytes of the zone file `path`, or `None` when it cannot be read. Only a
+/// regular file of at most `MAX_ZONE_FILE_BYTES` is read: a `TZ` that names a device
+/// without an end (`/dev/zero`) or a huge file must not be read into memory. The
+/// caller treats an unreadable file as the C library treats a file that is not a
+/// zone file.
+fn read_zone_file(path: &Path) -> Option<Vec<u8>> {
+    if !std::fs::metadata(path).ok()?.is_file() {
+        return None;
+    }
+    read_bounded(std::fs::File::open(path).ok()?, MAX_ZONE_FILE_BYTES)
+}
 
 /// The zone the C library picks for `TZ` (`tz`; `None` when unset) and `TZDIR`, then the
 /// offset at `unix_seconds`. `read` returns the bytes of a file or `None` when it cannot
@@ -265,7 +292,8 @@ impl Tzif<'_> {
             } else {
                 i64::from(p.off[1])
             };
-            self.time(i) + shift
+            // Both values come from the file: the sum must not overflow.
+            self.time(i).saturating_add(shift)
         };
         if n == 0 || t < moved(0) {
             return Some(p.off[0]);
@@ -1403,6 +1431,50 @@ mod tests {
     #[test]
     fn local_utc_offset_follows_the_platform() {
         assert_eq!(local_utc_offset(1_700_000_000).is_some(), cfg!(unix));
+    }
+
+    #[test]
+    fn a_zone_file_is_read_up_to_the_cap() {
+        assert_eq!(read_bounded(&b"abc"[..], 3), Some(b"abc".to_vec()));
+        assert_eq!(read_bounded(&b"abc"[..], 4), Some(b"abc".to_vec()));
+        assert_eq!(read_bounded(&b"abcd"[..], 3), None);
+        assert_eq!(read_bounded(&b""[..], 0), Some(Vec::new()));
+        // An input without an end is given up after `cap + 1` bytes.
+        assert_eq!(read_bounded(std::io::repeat(0), 16), None);
+        assert_eq!(read_bounded(std::io::repeat(0), MAX_ZONE_FILE_BYTES), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_device_is_not_read_as_a_zone_file() {
+        assert_eq!(read_zone_file(Path::new("/dev/zero")), None);
+        assert_eq!(read_zone_file(Path::new("/dev/null")), None);
+        assert_eq!(read_zone_file(Path::new("/")), None);
+        // `TZ=:/dev/zero` is then a rule string that is none: UTC.
+        for tz in [":/dev/zero", "/dev/zero"] {
+            assert_eq!(
+                resolve(Some(OsStr::new(tz)), None, &read_zone_file, 0),
+                Some(0)
+            );
+        }
+    }
+
+    #[test]
+    fn posixrules_transitions_at_the_ends_of_the_range_do_not_overflow() {
+        // The standard-time transition moves by the DST offset of the string (-7200) and
+        // the DST transition by +7200: both sums leave the range of the type.
+        let rules = tzif(
+            b'2',
+            &[(-18000, false), (-14400, true)],
+            &[(i64::MIN, 0), (i64::MAX, 1)],
+            None,
+        );
+        let fs = fake_fs(&[("/usr/share/zoneinfo/posixrules", &rules)]);
+        assert_eq!(resolve_in(&fs, Some("AAA3BBB2"), None, 0), Some(-10800));
+        assert_eq!(
+            resolve_in(&fs, Some("AAA3BBB2"), None, i64::MAX),
+            Some(-7200)
+        );
     }
 
     fn real_read(p: &Path) -> Option<Vec<u8>> {

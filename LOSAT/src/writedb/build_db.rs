@@ -136,6 +136,235 @@ fn create_absolute_path(dbname: &str) -> String {
     }
 }
 
+/// A separator of directory names (`DIR_SEPARATORS`).
+fn is_separator(c: char) -> bool {
+    c == '/' || (cfg!(windows) && c == '\\')
+}
+
+/// A character that ends the directory part of a path (`ALL_SEPARATORS`).
+fn is_any_separator(c: char) -> bool {
+    is_separator(c) || (cfg!(windows) && c == ':')
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:298-313
+// ```c++
+// void CDirEntry::Reset(const string& path)
+// {
+//     m_Path = path;
+//     size_t len = path.length();
+//     // Root dir
+//     if ((len == 1)  &&  IsPathSeparator(path[0])) {
+//         return;
+//     }
+//     // Disk name
+// #  if defined(DISK_SEPARATOR)
+//     if ( (len == 2 || len == 3) && (path[1] == DISK_SEPARATOR) ) {
+//         return;
+//     }
+// #  endif
+//     m_Path = DeleteTrailingPathSeparator(path);
+// }
+// ```
+// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:465-472
+// ```c++
+// string CDirEntry::DeleteTrailingPathSeparator(const string& path)
+// {
+//     size_t pos = path.find_last_not_of(DIR_SEPARATORS);
+//     if (pos + 1 < path.length()) {
+//         return path.substr(0, pos + 1);
+//     }
+//     return path;
+// }
+// ```
+/// The path a `CDirEntry` keeps for `path`: without its trailing separators,
+/// unless it is one separator (the root) or, on Windows, a disk name.
+fn dir_entry_path(path: &str) -> &str {
+    if path.len() == 1 && path.starts_with(is_separator) {
+        return path;
+    }
+    if cfg!(windows) && (path.len() == 2 || path.len() == 3) && path.as_bytes()[1] == b':' {
+        return path;
+    }
+    path.trim_end_matches(is_separator)
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:4021-4046,4056-4067
+// ```c++
+// inline bool s_DirCreate(const string&path, CDir::TCreateFlags flags, mode_t mode)
+// {
+//     errno = 0;
+// #if defined(NCBI_OS_MSWIN)
+//     int res = NcbiSys_mkdir(_T_XCSTRING(path));
+// #elif defined(NCBI_OS_UNIX)
+//     int res = NcbiSys_mkdir(_T_XCSTRING(path), mode);
+// #endif
+//     if (res != 0) {
+//         if (errno != EEXIST) {
+//             LOG_ERROR_ERRNO(52, "s_DirCreate(): Cannot create directory: " + path);
+//             return false;
+//         }
+//         // Entry with such name already exists, check its type
+//         CDirEntry::EType type = CDirEntry(path).GetType();
+//         if (type != CDirEntry::eDir) {
+//             LOG_ERROR_NCBI(53, "s_DirCreate(): Path already exist and is not a directory: " + path, CNcbiError::eNotADirectory);
+//             return false;
+//         }
+//         if (F_ISSET(flags, CDir::fCreate_ErrorIfExists)) {
+//             LOG_ERROR_NCBI(54, "s_DirCreate(): Directory already exist: " + path, CNcbiError::eFileExists);
+//             return false;
+//         }
+//         if (!F_ISSET(flags, CDir::fCreate_UpdateIfExists)) {
+//             return true;
+//         }
+// ...
+//     if ( F_ISSET(flags, CDir::fCreate_PermByUmask)  ||
+//           (!F_ISSET(flags, CDir::fCreate_PermByUmask)  &&  !F_ISSET(flags, CDir::fCreate_PermAsParent)  &&
+//            NCBI_PARAM_TYPE(NCBI, FileAPIHonorUmask)::GetDefault()) ) {
+//         // nothing to do if (umask) or (default mode with "honor umask" global flag)
+//         return true;
+//     }
+//     // Change directory permissions
+//     if (NcbiSys_chmod(_T_XCSTRING(path), mode) != 0) {
+//         LOG_ERROR_ERRNO(55, "CDir::Create(): Cannot set mode for directory: " + path);
+//         return false;
+//     }
+//     return true;
+// ```
+// The mode is the default of a `CDir`, rwxr-xr-x. `[NCBI] FileAPIHonorUmask`
+// is false unless the registry sets it (ncbifile.cpp:161; LOSAT refuses a
+// registry that does, `crate::blastinput::ncbi_environment`), so the new
+// directory gets exactly that mode, whatever the umask.
+/// `s_DirCreate(path, fCreate_Default, mode)`: makes one directory; `true`
+/// also when it is there already.
+fn dir_create(path: &str) -> bool {
+    match std::fs::create_dir(path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            // `GetType()` does not follow a link: a link to a directory
+            // is not a directory here.
+            return std::fs::symlink_metadata(path).is_ok_and(|meta| meta.is_dir());
+        }
+        Err(_) => return false,
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).is_ok()
+    }
+    #[cfg(not(unix))]
+    {
+        true
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:4106-4139,4165-4186
+// ```c++
+// bool CDir::CreatePath(TCreateFlags flags) const
+// {
+//     if (GetPath().empty()) {
+//         LOG_ERROR_NCBI(59, "CDir::CreatePath(): Path is empty", CNcbiError::eInvalidArgument);
+//         return false;
+//     }
+//     string path(CreateAbsolutePath(GetPath()));
+//     if (path.empty()) {
+//         LOG_ERROR_NCBI(60, "CDir::CreatePath(): Cannot create absolute path from: " + path, CNcbiError::eInvalidArgument);
+//         return false;
+//     }
+//     if (path[path.length()-1] == GetPathSeparator()
+// #if defined(NCBI_OS_MSWIN)
+//         &&  path.length() != 3
+//         // Special case -- for path like "C:\" dont remove a last separator, it represent a root directory
+// #endif
+//         ) {
+//         path.erase(path.length() - 1);
+//     }
+//
+//     // Find all missed parts of the path
+//
+//     CTempString tmp(path); // existent part of a path
+//     std::list<CTempString> missed_parts;
+//
+//     while (!tmp.empty()  &&  !CDirEntry(tmp).Exists()) {
+//         size_t pos = tmp.find_last_of(DIR_SEPARATORS);
+//         if (pos == NPOS) {
+//             break;
+//         }
+//         CTempString part(tmp.substr(pos+1));
+//         missed_parts.push_front(part);
+//         tmp.erase(pos);
+//     }
+// ...
+//     // Path exists?
+//     if (missed_parts.empty()) {
+//         // check existence and behave depends on flags
+//         if (!s_DirCreate(path, flags, mode)) {
+//             LOG_ERROR(96, "CDir::CreatePath(): Cannot create path: " + GetPath());
+//             return false;
+//         }
+//         return true;
+//     }
+//
+//     // Create missed subdirectories
+//     string p = tmp;
+//     for (auto i : missed_parts) {
+//         p += GetPathSeparator();
+//         p += i;
+//         if (!s_DirCreate(p, flags, mode)) {
+//             LOG_ERROR(97, "CDir::CreatePath(): Cannot create path: " + GetPath());
+//             return false;
+//         }
+//     }
+//     return true;
+// }
+// ```
+// `CDirEntry::Exists` is true for an entry of any type, a link that leads
+// nowhere included (`GetType()` without following links).
+/// `CDir(dir).CreatePath()`: makes the directory `dir` and its missing
+/// parents, after the path was made absolute and normalized without
+/// following links (`a/b/../c` is `a/c`: `a/b` is not made).
+fn create_path(dir: &str) -> bool {
+    if dir.is_empty() {
+        return false;
+    }
+    let mut path = create_absolute_path(dir);
+    if path.is_empty() {
+        return false;
+    }
+    if path.ends_with(is_separator) && !(cfg!(windows) && path.len() == 3) {
+        path.pop();
+    }
+    let mut tmp = path.as_str();
+    let mut missed_parts: Vec<&str> = Vec::new();
+    // NCBI's path is absolute here. LOSAT's is relative under WASI
+    // (`create_absolute_path`): its first component has no separator
+    // before it and can be missing too.
+    let mut relative_start = false;
+    while !tmp.is_empty() && std::fs::symlink_metadata(tmp).is_err() {
+        let Some(pos) = tmp.rfind(is_separator) else {
+            missed_parts.push(tmp);
+            tmp = "";
+            relative_start = true;
+            break;
+        };
+        missed_parts.push(&tmp[pos + 1..]);
+        tmp = &tmp[..pos];
+    }
+    if missed_parts.is_empty() {
+        return dir_create(&path);
+    }
+    let mut p = tmp.to_string();
+    for part in missed_parts.iter().rev() {
+        if !std::mem::take(&mut relative_start) {
+            p.push(std::path::MAIN_SEPARATOR);
+        }
+        p.push_str(part);
+        if !dir_create(&p) {
+            return false;
+        }
+    }
+    true
+}
+
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1051-1071
 // ```c++
 // void CBuildDatabase::CreateDirectories(const string& dbname)
@@ -160,21 +389,74 @@ fn create_absolute_path(dbname: &str) -> String {
 //     }
 // }
 // ```
-// `d.GetName()` is the last component of the directory. The write
-// permission is not probed here: a directory that cannot be written fails
-// when the first file of the database is created.
+// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:358-368
+// ```c++
+// void CDirEntry::SplitPath(const string& path, string* dir,
+//                           string* base, string* ext)
+// {
+//     // Get file name
+//     size_t pos = path.find_last_of(ALL_SEPARATORS);
+//     string filename = (pos == NPOS) ? path : path.substr(pos+1);
+//
+//     // Get dir
+//     if ( dir ) {
+//         *dir = (pos == NPOS) ? kEmptyStr : path.substr(0, pos+1);
+//     }
+// ```
+// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:1735-1748
+// ```c++
+//     const char* path = GetPath().c_str();
+//     int         mode = F_OK;
+//
+//     if ( access_mode & fRead)    mode |= R_OK;
+//     if ( access_mode & fWrite)   mode |= W_OK;
+//     if ( access_mode & fExecute) mode |= X_OK;
+//
+//     // Use euidaccess() where possible
+// #  if defined(HAVE_EUIDACCESS)
+//     if (euidaccess(path, mode) != 0) {
+//         CNcbiError::SetFromErrno(path);
+//         return false;
+//     }
+//     return true;
+// ```
+// The directory is the part of `dbname` up to its last separator, after the
+// trailing separators of `dbname` are dropped: `-out sub/` names the
+// database `sub` of the current directory and makes no directory.
+// `d.GetName()` is what follows the last separator of the directory's path
+// as it was given (`..` for `nodir/..`), and `d.Exists()` is true for a
+// directory, also through a link.
+//
+// `CreatePath` makes the normalized path, but `CheckAccess` then tests the
+// path as it was given: with `-out nodir/../db` and no `nodir`, the current
+// directory "is created" (it exists), `nodir/..` does not resolve, and
+// makeblastdb stops with the write-permission message. LOSAT reproduces that
+// part of `CheckAccess`: a path that does not resolve.
+//
+// Not reproduced: the test of the write permission itself (`euidaccess`
+// with `W_OK`). The standard library has no call that asks for it, and a
+// trial file would touch the directory. A directory that exists and cannot
+// be written to therefore does not stop LOSAT here, before the log, with
+// "You do not have write permissions on ..."; LOSAT goes on, writes the log
+// header, removes what it can of an existing database (nothing, in such a
+// directory), and fails when it creates the first file of the first volume,
+// with the system's message for that file and the same exit status 255.
+/// `CBuildDatabase::CreateDirectories`.
 fn create_directories(dbname: &str) -> Result<(), WriteDbError> {
-    let is_separator = |c: char| c == '/' || (cfg!(windows) && c == '\\');
-    let Some(at) = dbname.rfind(is_separator) else {
+    let dir_entry = dir_entry_path(dbname);
+    let Some(at) = dir_entry.rfind(is_any_separator) else {
         return Ok(());
     };
-    let dir_name = &dbname[..=at];
-    let dir = Path::new(dir_name);
-    if !dir.is_dir() && std::fs::create_dir_all(dir).is_err() {
-        let trimmed = dir_name.trim_end_matches(is_separator);
-        let name = trimmed.rsplit(is_separator).next().unwrap_or(trimmed);
+    let d = dir_entry_path(&dir_entry[..=at]);
+    let name = d.rfind(is_any_separator).map_or(d, |at| &d[at + 1..]);
+    if !Path::new(d).is_dir() && !create_path(d) {
         return Err(WriteDbError::Other(format!(
             "Failed to create directory '{name}'"
+        )));
+    }
+    if std::fs::metadata(d).is_err() {
+        return Err(WriteDbError::Other(format!(
+            "You do not have write permissions on '{name}'"
         )));
     }
     Ok(())
@@ -288,6 +570,21 @@ const LMDB_EXTENSIONS: [&str; 7] = ["db", "os", "ot", "tf", "to", "db-lock", "tf
 // that NCBI reads (filters, replaced totals, group alias files); leaving
 // such an alias file in place would hide the new database behind it, so an
 // existing database of that kind stops the build before anything is removed.
+//
+// Two departures from `DeleteBlastDb`, both in how the existing database is
+// found (`crate::seqdb::alias::find_volume_paths`):
+//
+// * `dbpath` is one database name. NCBI's reader splits the name at spaces
+//   and double quotes, so for an output path with such a character (a
+//   directory `my data`) the call above throws, nothing is removed, the new
+//   files are written beside the old ones (an old alias file then hides the
+//   new database), and makeblastdb ends with exit status 2 when it opens its
+//   result. LOSAT removes the existing database of that path and the build
+//   ends with status 0.
+// * The volumes that an alias file names are those in the alias file's own
+//   directory. NCBI takes a volume of the same name in the current directory
+//   first, and so removes files that do not belong to the database being
+//   replaced.
 /// `DeleteBlastDb`: removes the files of the database `dbpath`; `true` when
 /// a file was removed.
 fn delete_blast_db(dbpath: &str, is_protein: bool) -> Result<bool, WriteDbError> {
@@ -448,11 +745,6 @@ impl<'a> BuildDatabase<'a> {
         self.output_db.set_max_file_size(max_file_size);
     }
 
-    /// Takes the diagnostics the writer posted since the last call.
-    pub fn take_diagnostics(&mut self) -> Vec<u8> {
-        self.output_db.take_diagnostics()
-    }
-
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:859-876
     // ```c++
     //         if(bs->IsAa() != m_IsProtein ){
@@ -514,10 +806,13 @@ impl<'a> BuildDatabase<'a> {
         let mut found = false;
         let start = std::time::Instant::now();
         let mut count = 0u64;
-        while let Some(bioseq) = source
-            .next_bioseq(warn)
-            .map_err(|error| WriteDbError::Creation(error.message))?
-        {
+        while let Some(bioseq) = source.next_bioseq(warn).map_err(|error| {
+            if error.out_of_memory {
+                WriteDbError::OutOfMemory
+            } else {
+                WriteDbError::Creation(error.message)
+            }
+        })? {
             let bioseq_id = format!("lcl|{}", bioseq.local_id);
             if bioseq.is_aa != self.is_protein {
                 continue;
@@ -539,10 +834,7 @@ impl<'a> BuildDatabase<'a> {
             // The serializer posts its diagnostics while the sequence is
             // added, before the reader reads (and warns about) the next
             // record; both go to the standard error stream in that order.
-            let diagnostics = self.output_db.take_diagnostics();
-            if !diagnostics.is_empty() {
-                warn(diagnostics.strip_suffix(b"\n").unwrap_or(&diagnostics));
-            }
+            self.post_diagnostics(warn);
             if !added {
                 let _ = writeln!(
                     self.log,
@@ -592,16 +884,25 @@ impl<'a> BuildDatabase<'a> {
         warn: Warn<'_>,
     ) -> Result<(), WriteDbError> {
         let mut source = FastaBioseqSource::new(fasta_file, self.is_protein);
-        let result = match self.add_sequences(&mut source, warn) {
+        let result = match self.add_sequences(&mut source, &mut *warn) {
             Ok(true) => Ok(()),
             Ok(false) => Err(WriteDbError::Creation("No sequences added".to_string())),
             Err(error) => Err(error),
         };
         if result.is_err() {
             // The error of the build is the one already in hand.
-            let _ = self.end_build(true);
+            let _ = self.end_build(true, warn);
         }
         result
+    }
+
+    /// Hands the diagnostics that the writer posted since the last call to
+    /// `warn`, the sink of the standard error stream.
+    fn post_diagnostics(&mut self, warn: Warn<'_>) {
+        let diagnostics = self.output_db.take_diagnostics();
+        if !diagnostics.is_empty() {
+            warn(diagnostics.strip_suffix(b"\n").unwrap_or(&diagnostics));
+        }
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1423-1475
@@ -652,10 +953,17 @@ impl<'a> BuildDatabase<'a> {
     //     return success;
     // }
     // ```
+    // `Close` publishes the sequence that was added last, and the
+    // serializer posts the diagnostics of its title then: before the lines
+    // that `x_EndBuild` writes to the log. `warn` gets them at that point, so
+    // that the log and the messages keep makeblastdb's order when both
+    // streams have one destination.
     /// `EndBuild`: closes the database; with `erase`, or when closing fails,
-    /// removes its files. `Ok(false)` when no volume was created.
-    pub fn end_build(&mut self, erase: bool) -> Result<bool, WriteDbError> {
+    /// removes its files. `Ok(false)` when no volume was created. `warn`
+    /// takes the diagnostics of the close.
+    pub fn end_build(&mut self, erase: bool, warn: Warn<'_>) -> Result<bool, WriteDbError> {
         let close_error = self.output_db.close().err();
+        self.post_diagnostics(warn);
         let erase = erase || close_error.is_some();
         if erase {
             self.output_db.abandon();
@@ -674,12 +982,14 @@ impl<'a> BuildDatabase<'a> {
         }
         let _ = writeln!(self.log);
         match close_error {
-            Some(WriteDbError::Io { path, source }) => Err(WriteDbError::Io { path, source }),
             Some(
                 WriteDbError::Creation(message)
                 | WriteDbError::Options(message)
                 | WriteDbError::Other(message),
             ) => Err(WriteDbError::Creation(message)),
+            // LOSAT's own errors (a file that could not be written or
+            // renamed) and a failed allocation keep their kind.
+            Some(error) => Err(error),
             None => Ok(success),
         }
     }

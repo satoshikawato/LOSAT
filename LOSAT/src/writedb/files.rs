@@ -179,9 +179,20 @@ impl WriteDbFile {
         }
     }
 
+    /// Drops the file handle and removes the file: what a volume does with
+    /// the files it created when one of its files cannot be created.
+    pub(crate) fn discard(&mut self) {
+        self.abandon();
+        let _ = std::fs::remove_file(&self.fname);
+    }
+
+    // The error names both paths: the system's message does not say which
+    // of the two it is about (a destination that is a directory, a source
+    // that is gone).
     fn rename_to(&mut self, new_name: String) -> Result<(), WriteDbError> {
-        std::fs::rename(&self.fname, &new_name).map_err(|source| WriteDbError::Io {
-            path: PathBuf::from(&self.fname),
+        std::fs::rename(&self.fname, &new_name).map_err(|source| WriteDbError::Rename {
+            from: PathBuf::from(&self.fname),
+            to: PathBuf::from(&new_name),
             source,
         })?;
         self.fname = new_name;

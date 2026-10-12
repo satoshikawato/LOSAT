@@ -135,11 +135,12 @@ where
         // `--` starts NCBI's positional arguments, which the BLAST programs do not have:
         // a last `--` changes nothing, and a word after it is an extra positional
         // argument (NCBI's USAGE error; LOSAT's parser error, exception 1).
+        // makeblastdb reads its arguments with the same parser.
         if text == "--"
             && input.len() == 0
             && matches!(
                 scope.get_name(),
-                "blastn" | "blastp" | "tblastn" | "tblastx"
+                "blastn" | "blastp" | "tblastn" | "tblastx" | "makedb"
             )
         {
             continue;

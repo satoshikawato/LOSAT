@@ -8,6 +8,7 @@ removed.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -16,11 +17,15 @@ SCHEMA = "losat-frozen-mismatch-allowlist-v1"
 
 
 class Allowlist:
-    def __init__(self, path: Path = ALLOWLIST):
-        document = json.loads(Path(path).read_text())
+    def __init__(self, path: Path = ALLOWLIST, raw: bytes | None = None):
+        """`raw` replaces the bytes of `path` (the certification driver passes the candidate commit's Git blob)."""
+        if raw is None:
+            raw = Path(path).read_bytes()
+        document = json.loads(raw)
         if document.get("schema") != SCHEMA:
             raise ValueError(f"{path}: unexpected schema {document.get('schema')!r}")
         self.path = Path(path)
+        self.file_sha256 = hashlib.sha256(raw).hexdigest()
         self.entries = {(entry["program"], entry["case_id"]): entry for entry in document["entries"]}
 
     # NCBI reference: c++/src/objtools/align_format/tabular.cpp:1098-1108

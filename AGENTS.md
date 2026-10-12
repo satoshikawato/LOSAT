@@ -121,8 +121,12 @@ authoritative, current guidance for agent behavior in LOSAT.
 ### Program and target boundaries
 - PR 6 native certification has two non-interchangeable contracts under
   `PD-NCBI-PLATFORM-VARIANCE`: Gate A requires every LOSAT result to match the
-  frozen PR 5 raw bytes; Gate B requires each of six official NCBI searches to
-  match its exact registered platform fingerprint. Never restore the old
+  frozen PR 5 raw bytes, except that a case listed in
+  `LOSAT/tests/frozen_mismatch_allowlist.json` must match its listed actual
+  output instead (the same bytes on every platform, reported as an allowed
+  known mismatch; the frozen bytes then fail as a stale entry); Gate B requires
+  each of six official NCBI searches to match its exact registered platform
+  fingerprint. Never restore the old
   requirement that LOSAT equal platform-local NCBI bytes when those registered
   fingerprints differ. Native fingerprints never become LOSAT expected output,
   never authorize platform-specific LOSAT behavior, and never create a new

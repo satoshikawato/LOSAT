@@ -24,6 +24,10 @@ import tarfile
 from types import ModuleType
 from typing import Iterable, Sequence
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from frozen_allowlist import Allowlist  # noqa: E402
+
 
 EXPECTED_COUNTS = {"blastn": 14, "blastp": 9, "tblastx": 20}
 EXPECTED_EXECUTIONS = {"matrix": 43, "oracle": 6, "repeatability": 12}
@@ -41,6 +45,11 @@ NATIVE_AUTHORITY_REPO_RELATIVE = PurePosixPath(
 CANONICAL_MANIFEST_REPO_RELATIVE = PurePosixPath(
     "LOSAT/tests/platform_native_v010_canonical.tsv"
 )
+FROZEN_ALLOWLIST_REPO_RELATIVE = PurePosixPath(
+    "LOSAT/tests/frozen_mismatch_allowlist.json"
+)
+GATE_A_EXACT = "CANONICAL_PR5_RAW_BYTES"
+GATE_A_ALLOWED = "ALLOWED_KNOWN_MISMATCH"
 SAFE_CASE_ID = re.compile(r"^[A-Za-z0-9_.-]+$")
 SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
@@ -1892,6 +1901,180 @@ def build_steps(
     return steps
 
 
+# NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1098-1108
+#   x_PrintField(*iter); m_Ostream << "\n";
+# Gate A compares these raw bytes by SHA-256 without normalization. The known
+# frozen mismatches are read from the candidate commit's Git blob, like the
+# other control files; the frozen PR 5 hashes themselves are never rewritten.
+def load_frozen_allowlist(repo_root: Path, candidate_sha: str) -> Allowlist:
+    raw = read_git_blob_bytes(repo_root, candidate_sha, FROZEN_ALLOWLIST_REPO_RELATIVE)
+    path = repo_root.joinpath(*FROZEN_ALLOWLIST_REPO_RELATIVE.parts)
+    try:
+        document = json.loads(raw, object_pairs_hook=_strict_json_object)
+        allowlist = Allowlist(path, raw=raw)
+        entry_count = len(document["entries"])
+    except (
+        UnicodeDecodeError,
+        json.JSONDecodeError,
+        AttributeError,
+        KeyError,
+        TypeError,
+        ValueError,
+    ) as error:
+        raise CertificationFailure(
+            f"invalid frozen mismatch allowlist: {type(error).__name__}: {error}"
+        ) from error
+    if len(allowlist.entries) != entry_count:
+        raise CertificationFailure("frozen mismatch allowlist repeats a case")
+    for key, entry in allowlist.entries.items():
+        steps = entry.get("frozen_gate_a_steps") if isinstance(entry, dict) else None
+        if (
+            not isinstance(entry, dict)
+            or not all(isinstance(part, str) for part in key)
+            or not all(
+                isinstance(entry.get(field), str)
+                and SHA256_PATTERN.fullmatch(entry[field])
+                for field in ("frozen_sha256", "allowed_actual_sha256")
+            )
+            or not (
+                steps is None
+                or (isinstance(steps, list) and all(type(i) is int for i in steps))
+            )
+        ):
+            raise CertificationFailure(
+                f"invalid frozen mismatch allowlist entry: {key!r}"
+            )
+    return allowlist
+
+
+def bind_frozen_allowlist(
+    allowlist: Allowlist | None,
+    plan: Iterable[tuple[int, str, str, str, str]],
+) -> list[dict[str, object]]:
+    """Returns the Gate A cases that the allowlist covers.
+
+    `plan` rows are (execution index, kind, program, case ID, frozen SHA-256).
+    An entry applies when it names a planned Gate A case and that case's frozen
+    hash; it must then declare exactly the case's matrix and repeatability
+    steps in `frozen_gate_a_steps`. Entries for other suites' expectations are
+    not Gate A's and must not declare Gate A steps.
+    """
+    if allowlist is None:
+        return []
+    gate_a_steps: dict[tuple[str, str], list[int]] = {}
+    frozen: dict[tuple[str, str], str] = {}
+    for execution_index, kind, program, case_id, expected in plan:
+        if kind in {"matrix", "repeatability"}:
+            gate_a_steps.setdefault((program, case_id), []).append(execution_index)
+            frozen[(program, case_id)] = expected
+    cases: list[dict[str, object]] = []
+    for key in sorted(allowlist.entries):
+        entry = allowlist.entries[key]
+        declared = entry.get("frozen_gate_a_steps")
+        if key not in frozen or entry.get("frozen_sha256") != frozen[key]:
+            if declared is not None:
+                raise CertificationFailure(
+                    "frozen mismatch allowlist declares Gate A steps for a case "
+                    f"or frozen hash outside the plan: {key}"
+                )
+            continue
+        allowed = entry.get("allowed_actual_sha256")
+        if (
+            declared != sorted(gate_a_steps[key])
+            or not isinstance(allowed, str)
+            or not SHA256_PATTERN.fullmatch(allowed)
+            or allowed == frozen[key]
+        ):
+            raise CertificationFailure(
+                f"frozen mismatch allowlist entry does not match the Gate A plan: {key}"
+            )
+        cases.append(
+            {
+                "program": key[0],
+                "case_id": key[1],
+                "frozen_sha256": frozen[key],
+                "allowed_actual_sha256": allowed,
+                "frozen_gate_a_steps": declared,
+            }
+        )
+    return cases
+
+
+def frozen_allowlist_identity(
+    candidate_sha: str,
+    allowlist: Allowlist | None,
+    gate_a_cases: Sequence[dict[str, object]],
+) -> dict[str, object] | None:
+    if allowlist is None:
+        return None
+    return {
+        "git_object": f"{candidate_sha}:{FROZEN_ALLOWLIST_REPO_RELATIVE.as_posix()}",
+        "sha256": allowlist.file_sha256,
+        "gate_a_cases": list(gate_a_cases),
+    }
+
+
+def allowed_known_mismatch_lines(
+    gate_a_cases: Sequence[dict[str, object]],
+) -> list[str]:
+    return [
+        f"allowed known mismatch: {case['program']}/{case['case_id']} "
+        f"(Gate A steps {', '.join(str(index) for index in case['frozen_gate_a_steps'])})"
+        for case in gate_a_cases
+    ]
+
+
+# NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1098-1108
+#   x_PrintField(*iter); m_Ostream << "\n";
+# One rule for a Gate A output hash in execution, resume and aggregation: the
+# frozen PR 5 hash, or, for a case in frozen_mismatch_allowlist.json, only its
+# recorded actual output. A listed case that matches its frozen hash again is
+# a stale entry and fails.
+def gate_a_verification(
+    kind: str,
+    program: str,
+    case_id: str,
+    expected: str,
+    observed: str,
+    allowlist: Allowlist | None,
+) -> dict[str, object]:
+    verdict = (
+        allowlist.classify(program, case_id, expected, observed)
+        if allowlist is not None
+        else ("match" if observed == expected else "mismatch")
+    )
+    if verdict == "stale":
+        raise CertificationFailure(
+            f"STALE_FROZEN_MISMATCH_ALLOWLIST: {program} {case_id} matches its "
+            f"frozen hash {expected} again; remove the entry from "
+            f"{FROZEN_ALLOWLIST_REPO_RELATIVE}"
+        )
+    if verdict == "mismatch":
+        entry = (
+            allowlist.entries.get((program, case_id)) if allowlist is not None else None
+        )
+        known = (
+            f" (allowed known mismatch {entry['allowed_actual_sha256']})"
+            if entry is not None and entry.get("frozen_sha256") == expected
+            else ""
+        )
+        raise CertificationFailure(
+            f"CROSS_PLATFORM_LOSAT_DIVERGENCE: {program} {case_id} "
+            f"expected {expected}{known}, observed {observed}"
+        )
+    verification: dict[str, object] = {
+        "gate": "LOSAT_CANONICAL" if kind == "matrix" else "LOSAT_REPEATABILITY",
+        "classification": GATE_A_EXACT,
+        "canonical_sha256": expected,
+    }
+    if verdict == "allowed":
+        assert allowlist is not None
+        verification["classification"] = GATE_A_ALLOWED
+        verification["allowed_actual_sha256"] = observed
+        verification["allowlist_file_sha256"] = allowlist.file_sha256
+    return verification
+
+
 def canonical_newlines(data: bytes) -> bytes:
     return data.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
 
@@ -2358,6 +2541,8 @@ def record_identity(
     canonical_manifest: Path,
     controlled_fixtures: dict[str, object],
     authority: NativeAuthority,
+    allowlist: Allowlist,
+    allowed_cases: Sequence[dict[str, object]],
 ) -> dict[str, object]:
     canonical_relative = _repository_relative_path(repo_root, canonical_manifest)
     if canonical_relative != CANONICAL_MANIFEST_REPO_RELATIVE:
@@ -2493,6 +2678,9 @@ def record_identity(
             "runtime_cert_sha": RUNTIME_CERT_SHA,
             "pr5_evidence_manifest_sha256": PR5_EVIDENCE_MANIFEST_SHA256,
         },
+        "frozen_mismatch_allowlist": frozen_allowlist_identity(
+            expected_sha, allowlist, allowed_cases
+        ),
         "controlled_fixtures": controlled_fixtures,
         "execution_contract": {
             "matrix": 43,
@@ -2541,6 +2729,10 @@ def _identity_resume_key(identity: dict[str, object]) -> dict[str, object]:
         raise CertificationFailure(
             "resume identity lacks the controlled fixture-path contract"
         )
+    if "frozen_mismatch_allowlist" not in identity:
+        raise CertificationFailure(
+            "resume identity lacks the frozen mismatch allowlist identity"
+        )
     return {
         "evidence_schema": identity["evidence_schema"],
         "authority_version": identity["authority_version"],
@@ -2555,6 +2747,7 @@ def _identity_resume_key(identity: dict[str, object]) -> dict[str, object]:
             program: value["sha256"] for program, value in identity["oracles"].items()
         },
         "canonical_manifest_sha256": identity["canonical_manifest"]["sha256"],
+        "frozen_mismatch_allowlist": identity["frozen_mismatch_allowlist"],
         "controlled_fixtures": identity["controlled_fixtures"],
     }
 
@@ -2600,6 +2793,7 @@ def import_resume(
     steps: Sequence[SearchStep],
     catalog: Catalog,
     authority: NativeAuthority,
+    allowlist: Allowlist | None = None,
 ) -> dict[str, dict[str, object]]:
     if not resume_dir.exists() or not any(resume_dir.iterdir()):
         return {}
@@ -2623,10 +2817,24 @@ def import_resume(
             or sha256_path(prior_output) != record["output_sha256"]
         ):
             raise CertificationFailure(f"resume output hash mismatch: {step.step_id}")
-        if step.kind in {"matrix", "repeatability"} and (
-            record["output_sha256"] != step.expected_losat_sha256
-        ):
-            raise CertificationFailure(f"resume LOSAT output changed: {step.step_id}")
+        if step.kind in {"matrix", "repeatability"}:
+            try:
+                verification = gate_a_verification(
+                    step.kind,
+                    step.program,
+                    step.case_id,
+                    step.expected_losat_sha256,
+                    str(record["output_sha256"]),
+                    allowlist,
+                )
+            except CertificationFailure as error:
+                raise CertificationFailure(
+                    f"resume LOSAT output changed: {step.step_id}"
+                ) from error
+            if record.get("verification") != verification:
+                raise CertificationFailure(
+                    f"resume Gate A verification changed: {step.step_id}"
+                )
         current_output = _safe_resume_path(output_dir, str(record["output_rel"]))
         current_output.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(prior_output, current_output)
@@ -2696,6 +2904,7 @@ def _execute_step(
     catalog: Catalog,
     step: SearchStep,
     authority: NativeAuthority | None = None,
+    allowlist: Allowlist | None = None,
 ) -> dict[str, object]:
     partial_output = output_dir / step.output_rel
     final_output = output_dir / step.final_output_rel
@@ -2734,18 +2943,14 @@ def _execute_step(
     output_hash = sha256_path(final_output)
     verification: dict[str, object]
     if step.kind in {"matrix", "repeatability"}:
-        if output_hash != step.expected_losat_sha256:
-            raise CertificationFailure(
-                f"CROSS_PLATFORM_LOSAT_DIVERGENCE: {step.program} {step.case_id} "
-                f"expected {step.expected_losat_sha256}, observed {output_hash}"
-            )
-        verification = {
-            "gate": (
-                "LOSAT_CANONICAL" if step.kind == "matrix" else "LOSAT_REPEATABILITY"
-            ),
-            "classification": "CANONICAL_PR5_RAW_BYTES",
-            "canonical_sha256": step.expected_losat_sha256,
-        }
+        verification = gate_a_verification(
+            step.kind,
+            step.program,
+            step.case_id,
+            step.expected_losat_sha256,
+            output_hash,
+            allowlist,
+        )
     else:
         assert authority is not None and invocation_identity is not None
         losat_output = output_dir / f"matrix/{step.program}/{step.case_id}/losat.out"
@@ -2819,15 +3024,23 @@ def finalize_evidence(
     steps: Sequence[SearchStep],
     completed: dict[str, dict[str, object]],
     executed_this_attempt: int,
+    allowed_cases: Sequence[dict[str, object]] = (),
 ) -> None:
     if len(completed) != 61:
         raise CertificationFailure(
             f"cannot finalize incomplete platform evidence: {len(completed)}/61"
         )
+    allowed_keys = {(case["program"], case["case_id"]) for case in allowed_cases}
     matrix_rows = []
     oracle_rows = []
     for step in steps:
         record = completed[step.step_id]
+        if step.kind in {"matrix", "repeatability"}:
+            allowed = record["verification"]["classification"] == GATE_A_ALLOWED
+            if allowed != ((step.program, step.case_id) in allowed_keys):
+                raise CertificationFailure(
+                    f"Gate A allowlist coverage changed: {step.step_id}"
+                )
         if step.kind == "matrix":
             matrix_rows.append(
                 {
@@ -2835,7 +3048,7 @@ def finalize_evidence(
                     "case_id": step.case_id,
                     "expected_sha256": step.expected_losat_sha256,
                     "observed_sha256": record["output_sha256"],
-                    "status": "EXACT_BYTES",
+                    "status": GATE_A_ALLOWED if allowed else "EXACT_BYTES",
                 }
             )
         elif step.kind == "oracle":
@@ -2857,7 +3070,9 @@ def finalize_evidence(
                         "native_ncbi_reference_class"
                     ],
                     "ncbi_sha256": record["output_sha256"],
-                    "losat_sha256": step.expected_losat_sha256,
+                    "losat_sha256": completed[f"matrix:{step.program}:{step.case_id}"][
+                        "output_sha256"
+                    ],
                     "status": "EXACT_AUTHORITY_FINGERPRINT",
                 }
             )
@@ -2943,14 +3158,19 @@ def finalize_evidence(
         "gate_a_losat_canonical": {
             "total": 43,
             "passed": 43,
-            "all_exact_pr5_raw_bytes": True,
+            "all_exact_pr5_raw_bytes": not allowed_cases,
+            "allowed_known_mismatches": list(allowed_cases),
         },
         "gate_b_platform_native_ncbi_reference": {
             "total": 6,
             "passed": 6,
             "all_exact_authority_fingerprints": True,
         },
-        "cross_platform_losat": {"total": 43, "all_exact_bytes": True},
+        "cross_platform_losat": {
+            "total": 43,
+            "all_exact_bytes": not allowed_cases,
+            "allowed_known_mismatches": len(allowed_cases),
+        },
         "direct_ncbi": {
             "total": 6,
             "all_authority_accepted": True,
@@ -3180,6 +3400,7 @@ def aggregate_platform_evidence(
     expected_sha: str,
     authority: NativeAuthority,
     catalog: Catalog,
+    allowlist: Allowlist | None = None,
 ) -> dict[str, object]:
     if not SHA_PATTERN.fullmatch(expected_sha):
         raise CertificationFailure(
@@ -3188,6 +3409,22 @@ def aggregate_platform_evidence(
     validate_native_authority_catalog(authority, catalog)
     expected_topology = expected_completion_topology(catalog)
     expected_step_ids = set(expected_topology)
+    allowed_cases = bind_frozen_allowlist(
+        allowlist,
+        (
+            (
+                step["execution_index"],
+                step["kind"],
+                step["program"],
+                step["case_id"],
+                step["expected_losat_sha256"],
+            )
+            for step in expected_topology.values()
+        ),
+    )
+    expected_allowlist_identity = frozen_allowlist_identity(
+        expected_sha, allowlist, allowed_cases
+    )
     expected_platforms = set(PLATFORMS)
     expected_directories = {
         f"platform-native-{platform_id}" for platform_id in expected_platforms
@@ -3238,6 +3475,10 @@ def aggregate_platform_evidence(
         if any(summary.get(key) != value for key, value in expected_identity.items()):
             raise CertificationFailure(
                 f"aggregate platform summary mismatch: {platform_id}"
+            )
+        if identity.get("frozen_mismatch_allowlist") != expected_allowlist_identity:
+            raise CertificationFailure(
+                f"aggregate frozen mismatch allowlist identity failed: {platform_id}"
             )
         identity_losat = _object(identity.get("losat"), "platform LOSAT identity")
         authority_platform = authority.platforms[platform_id]
@@ -3355,7 +3596,8 @@ def aggregate_platform_evidence(
         if summary.get("gate_a_losat_canonical") != {
             "total": 43,
             "passed": 43,
-            "all_exact_pr5_raw_bytes": True,
+            "all_exact_pr5_raw_bytes": not allowed_cases,
+            "allowed_known_mismatches": allowed_cases,
         }:
             raise CertificationFailure(f"aggregate Gate A failed: {platform_id}")
         if summary.get("gate_b_platform_native_ncbi_reference") != {
@@ -3440,21 +3682,29 @@ def aggregate_platform_evidence(
             verification = _object(
                 completion.get("verification"), "completion verification"
             )
-            if kind == "matrix":
-                expected_verification = {
-                    "gate": "LOSAT_CANONICAL",
-                    "classification": "CANONICAL_PR5_RAW_BYTES",
-                    "canonical_sha256": expected_step["expected_losat_sha256"],
-                }
-                if (
-                    verification != expected_verification
-                    or completion.get("output_sha256")
-                    != expected_step["expected_losat_sha256"]
-                ):
-                    raise CertificationFailure(
-                        f"aggregate Gate A completion failed: {completion_path.name}"
+            if kind in {"matrix", "repeatability"}:
+                subgate = "Gate A" if kind == "matrix" else "repeatability"
+                try:
+                    expected_verification = gate_a_verification(
+                        kind,
+                        str(expected_step["program"]),
+                        str(expected_step["case_id"]),
+                        str(expected_step["expected_losat_sha256"]),
+                        str(completion.get("output_sha256")),
+                        allowlist,
                     )
-                gate_a += 1
+                except CertificationFailure as error:
+                    raise CertificationFailure(
+                        f"aggregate {subgate} completion failed: {completion_path.name}"
+                    ) from error
+                if verification != expected_verification:
+                    raise CertificationFailure(
+                        f"aggregate {subgate} completion failed: {completion_path.name}"
+                    )
+                if kind == "matrix":
+                    gate_a += 1
+                else:
+                    repeatability_count += 1
             elif kind == "oracle":
                 fingerprint = _object(
                     verification.get("native_fingerprint"), "native fingerprint"
@@ -3494,21 +3744,6 @@ def aggregate_platform_evidence(
                         f"aggregate native raw fingerprint failed: {completion_path.name}"
                     )
                 gate_b += 1
-            elif kind == "repeatability":
-                expected_verification = {
-                    "gate": "LOSAT_REPEATABILITY",
-                    "classification": "CANONICAL_PR5_RAW_BYTES",
-                    "canonical_sha256": expected_step["expected_losat_sha256"],
-                }
-                if (
-                    verification != expected_verification
-                    or completion.get("output_sha256")
-                    != expected_step["expected_losat_sha256"]
-                ):
-                    raise CertificationFailure(
-                        f"aggregate repeatability completion failed: {completion_path.name}"
-                    )
-                repeatability_count += 1
             else:
                 raise CertificationFailure(
                     f"aggregate found unknown completion kind: {kind}"
@@ -3533,6 +3768,7 @@ def aggregate_platform_evidence(
                 "authority_file_sha256": authority.file_sha256,
                 "search_executions": 61,
                 "gate_a_passed": 43,
+                "gate_a_allowed_known_mismatches": len(allowed_cases),
                 "gate_b_passed": 6,
                 "repeatability_passed": 12,
                 "final_evidence_manifest_sha256": final_manifest_sha256,
@@ -3544,6 +3780,7 @@ def aggregate_platform_evidence(
         "source_sha": expected_sha,
         "authority_version": authority.authority_version,
         "authority_file_sha256": authority.file_sha256,
+        "frozen_mismatch_allowlist": expected_allowlist_identity,
         "expected_platform_ids": sorted(expected_platforms),
         "platform_count": 3,
         "search_executions_per_platform": 61,
@@ -3609,6 +3846,20 @@ def certify(args: argparse.Namespace) -> None:
         args.native_bin.resolve(),
         oracles,
     )
+    allowlist = load_frozen_allowlist(repo_root, certified_sha)
+    allowed_cases = bind_frozen_allowlist(
+        allowlist,
+        (
+            (
+                step.execution_index,
+                step.kind,
+                step.program,
+                step.case_id,
+                step.expected_losat_sha256,
+            )
+            for step in steps
+        ),
+    )
     staged_fixtures = stage_required_fixtures(
         repo_root, certified_sha, steps, output_dir
     )
@@ -3629,6 +3880,8 @@ def certify(args: argparse.Namespace) -> None:
         canonical_manifest,
         controlled_fixtures,
         authority,
+        allowlist,
+        allowed_cases,
     )
     atomic_write_json(
         output_dir / "command_plan.json",
@@ -3654,6 +3907,7 @@ def certify(args: argparse.Namespace) -> None:
             steps,
             catalog,
             authority,
+            allowlist,
         )
     _write_state(output_dir, platform_spec.platform_id, completed, status="RUNNING")
     executed_this_attempt = 0
@@ -3668,12 +3922,16 @@ def certify(args: argparse.Namespace) -> None:
             flush=True,
         )
         record = _execute_step(
-            repo_root, output_dir, identity, catalog, step, authority
+            repo_root, output_dir, identity, catalog, step, authority, allowlist
         )
         completed[step.step_id] = record
         executed_this_attempt += 1
         _write_state(output_dir, platform_spec.platform_id, completed, status="RUNNING")
-    finalize_evidence(output_dir, identity, steps, completed, executed_this_attempt)
+    finalize_evidence(
+        output_dir, identity, steps, completed, executed_this_attempt, allowed_cases
+    )
+    for line in allowed_known_mismatch_lines(allowed_cases):
+        print(line)
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -3778,13 +4036,18 @@ def main(argv: Sequence[str] | None = None) -> int:
                 repo_root, candidate_sha, args.authority.resolve()
             )
             catalog = load_catalog(repo_root, candidate_sha)
-            aggregate_platform_evidence(
+            aggregate = aggregate_platform_evidence(
                 args.input_root.resolve(),
                 args.output.resolve(),
                 candidate_sha,
                 authority,
                 catalog,
+                load_frozen_allowlist(repo_root, candidate_sha),
             )
+            for line in allowed_known_mismatch_lines(
+                aggregate["frozen_mismatch_allowlist"]["gate_a_cases"]
+            ):
+                print(line)
             print("CROSS_PLATFORM_NATIVE_CERTIFIED")
         return 0
     except (CertificationFailure, OSError, ValueError) as error:

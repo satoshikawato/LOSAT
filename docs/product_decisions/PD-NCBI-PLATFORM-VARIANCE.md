@@ -1,8 +1,8 @@
 # Product Decision: Bounded native-NCBI platform variance
 
 - Decision ID: `PD-NCBI-PLATFORM-VARIANCE`
-- Version: 1.0
-- Date: 2026-09-02
+- Version: 1.1
+- Date: 2026-09-02 (1.1: 2026-10-12, see Amendments)
 - Status: Accepted
 
 ## Scope
@@ -45,6 +45,41 @@ SHA256(raw LOSAT output bytes) == frozen PR 5 canonical SHA256
 Gate A permits no normalization, sorting, field tolerance, platform baseline,
 or platform key in production behavior. A native-NCBI fingerprint can never
 compensate for a Gate A failure and never becomes expected LOSAT output.
+
+#### Known frozen mismatches (version 1.1)
+
+`LOSAT/tests/frozen_mismatch_allowlist.json` lists the Gate A cases whose
+approved LOSAT output is no longer the frozen PR 5 bytes. For a listed case
+the certifier requires, on each certified platform:
+
+```text
+SHA256(raw LOSAT output bytes) == allowed_actual_sha256 of the entry
+```
+
+and records the step as `ALLOWED_KNOWN_MISMATCH`, never as exact PR 5 bytes;
+the platform summary then reports `all_exact_pr5_raw_bytes: false` and names
+the case. Any other output of a listed case fails, including the frozen PR 5
+bytes (a stale entry, which is to be removed). Every case that is not listed
+keeps the frozen-hash rule above.
+
+An entry is one byte string for all platforms. It is not a platform baseline,
+a tolerance or a normalization, and the frozen hashes in
+`LOSAT/tests/platform_native_v010_canonical.tsv` are not rewritten. The
+certifier reads the allowlist from the candidate commit, requires each Gate A
+entry to declare exactly the matrix and repeatability steps of its case
+(`frozen_gate_a_steps`), and binds the file's SHA-256 into platform identity,
+resume and the cross-platform aggregate.
+
+Adding or changing an entry needs its own approved record of the new output.
+The one entry, `blastn Sakai.MG1655.megablast` (Gate A steps 11, 52 and 53),
+was approved on 2026-09-28
+(`docs/evidence/losatx_stage_g_authority_v3/run-20260928T121516Z/`): the
+frozen v0.1.0 bytes differ from the Linux NCBI BLAST+ 2.17.0 output in 5 of
+6482 lines (an equal-score greedy traceback), and the current LOSAT output is
+byte-identical to that Linux output for the same command (the authority's
+`retained_linux_raw_sha256`). It is not the Windows or macOS native
+fingerprint of the case, which differ from it and stay Gate B's alone, and
+the case stays `SOURCE_UNDETERMINED_ACCEPTED` on the LOSAT parity axis.
 
 ### Gate B — `PLATFORM_NATIVE_NCBI_REFERENCE`
 
@@ -125,6 +160,16 @@ An NCBI upgrade or newly observed official fingerprint requires a fresh
 three-platform characterization, a new immutable authority version, review,
 and explicit governance acceptance. Historical authority files are not edited
 or auto-learned in place.
+
+## Amendments
+
+- 1.1 (2026-10-12, Owner): Gate A applies
+  `LOSAT/tests/frozen_mismatch_allowlist.json` ("Known frozen mismatches"
+  above), as the pull-request and Wasm regression checks already did. Under
+  1.0 the certifier stopped at step 11 of 61 for every candidate that carries
+  the approved Sakai output (run `38170565780` on `main`), so steps 12 to 61
+  did not run. The Sakai and TBLASTX d06 ratchets, Gate B and the authority
+  file are unchanged.
 
 ## Non-goals
 

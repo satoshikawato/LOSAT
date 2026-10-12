@@ -269,8 +269,9 @@ pub(super) type XBatchReport = (
 /// NCBI searches each batch on its own (`CLocalBlast` per batch); a batch reads nothing
 /// another batch writes, so only the order of the reports matters, and the caller appends
 /// them in the order of `ranges`. With `LOSAT_X_TBNPAR` one search pool serves every
-/// batch instead of one pool per batch; with `LOSAT_X_TBNSSIDE` the subject plans
-/// (translations, masks) are made once for the search and shared through the pool; with
+/// batch instead of one pool per batch; with `LOSAT_X_TBNSSIDE` and two or more batches the
+/// subject plans (translations, masks) are made once for the search and shared through the
+/// pool (a search of one batch has no later reader and keeps none); with
 /// `LOSAT_X_TBNBATCH` (and the plans shared and fitting, and at least one batch per
 /// thread) the batches are searched side by side, each as the one-thread search. The
 /// first failing batch in the order of `ranges` gives the error, as in the reference loop.
@@ -291,14 +292,31 @@ pub(super) fn x_search_batches<'p>(
     // The subject plans depend only on the genetic code and the lowercase masking, which
     // every batch's profile shares.
     let first = profile(first.clone());
-    let x_subject_side = super::search_seed::XSubjectSide::enabled().then(|| {
-        super::search_seed::XSubjectSide::new(
-            subjects.len(),
-            first.genetic_code,
-            first.mask_lowercase,
-        )
-    });
-    if !(x_tbn_parallel() && (threads > 1 || x_subject_side.is_some())) {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:627-631,912-913
+    // ```c
+    //     if (program_number != eBlastTypeRpsTblastn) {
+    //         if (translation_buffer) {
+    //             sfree(translation_buffer);
+    //         }
+    //     }
+    // ...
+    //     s_BlastSearchEngineCoreCleanUp(program_number, query_info, query_info_in,
+    //                                    translation_buffer, frame_offsets_a);
+    // ```
+    // NCBI frees the translation of a subject when the subject has been searched. The plans are
+    // kept only for a later query batch to read, so a search of one batch gets no XSubjectSide
+    // (XSubjectSide::for_batches) and each plan is dropped after its subject, as in NCBI. The gate
+    // below reads the switch and not the object, so the number of batches does not decide which
+    // loop searches them.
+    let x_subject_side_on = super::search_seed::XSubjectSide::enabled();
+    let x_subject_side = super::search_seed::XSubjectSide::for_batches(
+        x_subject_side_on,
+        ranges.len(),
+        subjects.len(),
+        first.genetic_code,
+        first.mask_lowercase,
+    );
+    if !(x_tbn_parallel() && (threads > 1 || x_subject_side_on)) {
         return Ok(None);
     }
     let search_in = |range: std::ops::Range<usize>, pool: &SearchPool<'_>| {
@@ -4936,6 +4954,79 @@ mod tests {
             );
             assert_eq!(payload.num_ident, row[6].parse().unwrap());
             assert!(!payload.edit_script.is_empty());
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:275-289
+    // ```c++
+    //             for (; !input->End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
+    //
+    //                 query =  input->GetNextSeqBatch(*scope);
+    //                 query_factory.Reset(new CObjMgr_QueryFactory(*query));
+    //                 ...
+    //                     CLocalBlast lcl_blast(query_factory, m_OptsHndl, db_adapter);
+    // ```
+    // NCBI searches every batch with the same code, whatever their number. A search of one batch
+    // keeps no subject plans (LOSAT_X_TBNSSIDE), and that does not move it to the other loop:
+    // x_search_batches takes the batches by the switches alone, at one thread too, and gives the
+    // report of run_local_for_report_threads.
+    #[test]
+    fn x_search_batches_takes_one_batch_by_the_switches_alone() {
+        let queries = vec![b"MKVLAAGIVGLLLAQWERTYHHNDCFPSMKTAYIAKQRQISFVKSHFSRQ".to_vec(); 2];
+        let subjects: Vec<Vec<u8>> = (0..2usize)
+            .map(|n| {
+                (0..3_000usize)
+                    .map(|i| b"ACGT"[(i * 7 + i / 3 + i / 11 + n) % 4])
+                    .collect()
+            })
+            .collect();
+        let seg = SegParams::default();
+        let profile = |_: std::ops::Range<usize>| LocalStageDProfile {
+            seg: Some(&seg),
+            soft_masking: false,
+            mask_lowercase: false,
+            genetic_code: 1,
+            expect_value: 10.0,
+            max_target_seqs: 500,
+            query_offsets: &[],
+        };
+        let taken = x_tbn_parallel() && super::super::search_seed::XSubjectSide::enabled();
+        for ranges in [vec![0..1], vec![0..1, 1..2]] {
+            let searched = x_search_batches(
+                &queries,
+                &subjects,
+                ranges.clone(),
+                profile,
+                true,
+                true,
+                LocalStageDScoring::default(),
+                1,
+            )
+            .unwrap();
+            assert_eq!(
+                searched.as_ref().map(Vec::len),
+                taken.then_some(ranges.len())
+            );
+            for (range, (results, parameters, _, validity)) in searched.into_iter().flatten() {
+                let (reference, reference_parameters, _, reference_validity) =
+                    run_local_for_report_threads(
+                        &queries[range.clone()],
+                        &subjects,
+                        profile(range.clone()),
+                        true,
+                        true,
+                        LocalStageDScoring::default(),
+                        1,
+                    )
+                    .unwrap();
+                assert!(ranges.contains(&range));
+                assert_eq!(parameters, reference_parameters);
+                assert_eq!(validity, reference_validity);
+                assert_eq!(results.len(), reference.len());
+                for (hitlist, expected) in results.iter().zip(&reference) {
+                    assert_eq!(hitlist.lists().len(), expected.lists().len());
+                }
+            }
         }
     }
 }

@@ -265,7 +265,9 @@ Rebuilding less:
 - `LOSAT_X_SEGSHARE=1` blastp with 2+ threads: the subject SEG masks shared by the whole search,
   as in the one-thread path. Shadow: `LOSAT_X_SEGSHARESHADOW=1`.
 - `LOSAT_X_TBNQSIDE=1` tblastn: query SEG and lookup table once per query set.
-- `LOSAT_X_TBNSSIDE=1` tblastn: subject six-frame translations once per search (up to 256 MiB).
+- `LOSAT_X_TBNSSIDE=1` tblastn: subject six-frame translations once per search of two or more
+  query batches (20,000 query residues per batch), up to 256 MiB of translated residues. A
+  search of one batch keeps none: no later batch could read them.
 - `LOSAT_X_LUTSPLIT=1` tblastn: build only the half (contexts or table) a caller uses.
 - `LOSAT_X_IDEALMEMO=1` BLOSUM62 ideal Karlin block once per process.
 - `LOSAT_X_BXSEGMEMO=1` blastx redo stage: the subject SEG once per subject instead of once per window

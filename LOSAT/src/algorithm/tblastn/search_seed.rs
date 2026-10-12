@@ -586,6 +586,7 @@ pub(super) struct XSubjectPlan {
 /// for its fixed list of subjects and options; the first batch that reaches a
 /// subject computes its plan, as before, and the later ones read it. Plans are
 /// kept only up to a total size, beyond which they are made per use as before.
+/// A search of one batch has no later reader and gets no value (`for_batches`).
 ///
 /// Batches can reach a subject at the same time. The cell of a subject is
 /// initialised by one of them while the others wait, so a plan is made once
@@ -621,6 +622,22 @@ impl XSubjectSide {
             plans: (0..subjects).map(|_| std::sync::OnceLock::new()).collect(),
             kept_bytes: std::sync::atomic::AtomicUsize::new(0),
         }
+    }
+
+    /// The subject plans of a search of `batches` query batches, or `None`
+    /// when the search keeps none: the switch is off (`on` is `enabled()`), or
+    /// there are fewer than two batches. A kept plan is read by the batches
+    /// after the first one that reaches its subject. A search of one batch has
+    /// no such reader, so its plans are made per use and dropped after the
+    /// subject, like those above `KEEP_LIMIT`.
+    pub(super) fn for_batches(
+        on: bool,
+        batches: usize,
+        subjects: usize,
+        gencode: u8,
+        mask_lowercase: bool,
+    ) -> Option<Self> {
+        (on && batches > 1).then(|| Self::new(subjects, gencode, mask_lowercase))
     }
 
     fn slot(
@@ -2002,6 +2019,61 @@ mod tests {
         }
         assert_eq!(side.kept_bytes(), XSubjectSide::plan_bytes(&plans[0]));
         assert!(!plans[0].units.is_empty());
+    }
+
+    // No NCBI counterpart: test of when the plan cache exists (XSubjectSide::for_batches); it does
+    // not change any value NCBI computes.
+    // LOSAT_X_TBNSSIDE: a search of one query batch has no later batch to read
+    // a kept plan, so it keeps none and every use makes its own; two or more
+    // batches keep the plans. The plan is the same either way.
+    #[test]
+    fn x_subject_plans_are_kept_only_for_two_or_more_batches() {
+        for batches in [0, 1] {
+            assert!(XSubjectSide::for_batches(true, batches, 1, 1, false).is_none());
+        }
+        for batches in [0, 1, 2, 9] {
+            assert!(XSubjectSide::for_batches(false, batches, 1, 1, false).is_none());
+        }
+        let subject = x_test_subject(9_000);
+        let query: &[u8] = b"MKVLAAGIVGLLLAQWERTYHHNDCFPSMKTAYIAKQRQISFVKSHFSRQ";
+        let scan = |side: Option<&XSubjectSide>| {
+            x_scan_plan(
+                &[query],
+                &subject,
+                1,
+                None,
+                13,
+                false,
+                ScoringMatrix::Blosum62,
+                3,
+                None,
+                side.map(|side| (side, 0)),
+            )
+            .unwrap()
+            .unwrap()
+            .subject
+        };
+        // One batch: two uses make two plans, and nothing else holds them.
+        let one = XSubjectSide::for_batches(true, 1, 1, 1, false);
+        let (first, second) = (scan(one.as_ref()), scan(one.as_ref()));
+        assert!(!std::sync::Arc::ptr_eq(&first, &second));
+        assert_eq!(std::sync::Arc::strong_count(&first), 1);
+        // Two batches: the second use reads the plan the first one made.
+        let two = XSubjectSide::for_batches(true, 2, 1, 1, false).unwrap();
+        let (kept, read) = (scan(Some(&two)), scan(Some(&two)));
+        assert!(std::sync::Arc::ptr_eq(&kept, &read));
+        assert_eq!(two.kept_bytes(), XSubjectSide::plan_bytes(&kept));
+        assert!(first
+            .frames
+            .iter()
+            .map(|frame| (frame.frame, &frame.aa_seq))
+            .eq(kept.frames.iter().map(|frame| (frame.frame, &frame.aa_seq))));
+        assert!(first
+            .units
+            .iter()
+            .map(|unit| (unit.0, &unit.2))
+            .eq(kept.units.iter().map(|unit| (unit.0, &unit.2))));
+        assert!(!first.units.is_empty());
     }
 
     // No NCBI counterpart: test of the size limit of the plan cache; it does not change any value

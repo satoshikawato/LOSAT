@@ -43,7 +43,7 @@ const IGNORED_PROBLEMS: [Problem; 3] = [
 
 /// `CSeq_gap::EType` of the gap types that `ParseGapLine` reads (`Seq_gap.cpp:180-191`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum GapType {
+pub(crate) enum GapType {
     Unknown,
     Fragment,
     Clone,
@@ -59,7 +59,7 @@ enum GapType {
 
 /// `CSeq_gap::ELinkEvid`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum LinkEvid {
+pub(crate) enum LinkEvid {
     UnspecifiedOnly,
     Forbidden,
     Required,
@@ -111,7 +111,7 @@ enum LinkEvid {
 /// (`canonicalize_string`). The other lookups of a gap line compare whole byte strings:
 /// the keys with `std::string::operator==` and the linkage evidence in a
 /// `map<CTempString, ..., PQuickStringLess>` (serial/enumvalues.hpp:55).
-fn gap_type_info(name: &[u8]) -> Option<(GapType, LinkEvid)> {
+pub(crate) fn gap_type_info(name: &[u8]) -> Option<(GapType, LinkEvid)> {
     let canonical = canonicalize_string(name);
     let c_string = canonical
         .iter()
@@ -154,7 +154,7 @@ fn gap_type_info(name: &[u8]) -> Option<(GapType, LinkEvid)> {
 ///     }
 /// }
 /// ```
-fn linkage_evidence_value(name: &[u8]) -> Option<u8> {
+pub(crate) fn linkage_evidence_value(name: &[u8]) -> Option<u8> {
     Some(match name {
         b"paired-ends" => 0,
         b"align-genus" => 1,
@@ -173,7 +173,7 @@ fn linkage_evidence_value(name: &[u8]) -> Option<u8> {
 }
 
 /// `CLinkage_evidence::eType_unspecified`.
-const LINKAGE_UNSPECIFIED: u8 = 8;
+pub(crate) const LINKAGE_UNSPECIFIED: u8 = 8;
 
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:2128-2146
 /// ```c++
@@ -196,7 +196,7 @@ const LINKAGE_UNSPECIFIED: u8 = 8;
 ///     return newString;
 /// }
 /// ```
-fn canonicalize_string(value: &[u8]) -> Vec<u8> {
+pub(crate) fn canonicalize_string(value: &[u8]) -> Vec<u8> {
     value
         .iter()
         .map(|&ch| match ch {
@@ -2144,7 +2144,7 @@ pub(crate) fn seq_data_in_title_warning(text: &[u8], protein: bool) -> Option<&'
 /// ```
 /// `maxRanges` is the default 1000 (fasta_exception.hpp:90-92); `iRangesFound` never
 /// exceeds it, so ", and more" is not written.
-fn convert_bad_indexes_to_string(out: &mut Vec<u8>, line: u64, positions: &[u32]) {
+pub(crate) fn convert_bad_indexes_to_string(out: &mut Vec<u8>, line: u64, positions: &[u32]) {
     const MAX_RANGES: usize = 1000;
     let mut ranges: Vec<(u32, u32)> = Vec::new();
     for &idx in positions {

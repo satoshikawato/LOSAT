@@ -158,6 +158,27 @@ fn main() -> Result<()> {
         // NCBI c++/src/app/blast/tblastn_app.cpp:288-301:
         // results = lcl_blast.Run();
         // formatter.PrintOneResultSet(**result, query);
+        // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:1322-1333
+        // ```c++
+        // int CMakeBlastDBApp::Run(void)
+        // {
+        //     SetDiagPostLevel(eDiag_Warning);
+        //     SetDiagPostPrefix("makeblastdb");
+        //
+        //     int status = 0;
+        //     try { x_BuildDatabase(); }
+        //     CATCH_ALL(status)
+        //     x_AddCmdOptions();
+        //     m_UsageReport.AddParam(CBlastUsageReport::eExitStatus, status);
+        //     return status;
+        // }
+        // ```
+        Commands::Makedb(args) => {
+            let status = LOSAT::writedb::makeblastdb::run(&args);
+            if status != 0 {
+                std::process::exit(status);
+            }
+        }
         Commands::Tblastn(args) => {
             // NCBI's application layer reads its environment and registry files before
             // tblastn's own code runs (as for BLASTN); LOSAT rejects the settings that change

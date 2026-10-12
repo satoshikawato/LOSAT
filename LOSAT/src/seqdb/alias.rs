@@ -20,6 +20,9 @@ pub(super) struct AliasNode {
     pub subnodes: Vec<AliasNode>,
     /// Volumes named in `DBLIST` (paths without extension), in order.
     pub vol_names: Vec<String>,
+    /// Path of the alias file of this node (`m_ThisName`); `None` for the
+    /// top node, which NCBI names "-".
+    pub this_name: Option<String>,
 }
 
 /// The resolved database: the alias tree and its volumes in NCBI's order.
@@ -431,6 +434,7 @@ impl Resolver {
 
         self.recurse.push(path.to_string_lossy().into_owned());
         let mut node = AliasNode {
+            this_name: Some(path.to_string_lossy().into_owned()),
             title,
             ..AliasNode::default()
         };
@@ -726,6 +730,46 @@ pub(super) fn resolve(db_base: &str, seqtype: SeqType) -> Result<AliasTree, SeqD
         ));
     }
     Ok(AliasTree { root, volumes })
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:970-984
+// ```c++
+// void CSeqDBAliasNode::x_FindVolumePaths(set<string> & vols, set<string> & alias) const
+// {
+//     ITERATE(TVolNames, iter, m_VolNames) {
+//         vols.insert(iter->GetBasePathS());
+//     }
+//
+//     string alias_base = m_ThisName.GetPathS();
+//     if (alias_base != "-") {
+//         alias.insert(m_ThisName.GetPathS());
+//     }
+//
+//     ITERATE(TSubNodeList, iter, m_SubNodes) {
+//         (*iter)->x_FindVolumePaths(vols, alias);
+//     }
+// }
+// ```
+fn collect_alias_files(node: &AliasNode, out: &mut std::collections::BTreeSet<String>) {
+    if let Some(name) = &node.this_name {
+        out.insert(name.clone());
+    }
+    for subnode in &node.subnodes {
+        collect_alias_files(subnode, out);
+    }
+}
+
+/// `CSeqDB::FindVolumePaths(dbname, seqtype, paths, &alias_paths)`: the
+/// volumes of the database `db_base` (paths without extension, in NCBI's
+/// order) and the paths of the alias files that name them.
+pub(crate) fn find_volume_paths(
+    db_base: &str,
+    seqtype: SeqType,
+) -> Result<(Vec<String>, Vec<String>), SeqDbError> {
+    let tree = resolve(db_base, seqtype)?;
+    let mut alias_files = std::collections::BTreeSet::new();
+    collect_alias_files(&tree.root, &mut alias_files);
+    Ok((tree.volumes, alias_files.into_iter().collect()))
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:1578-1592

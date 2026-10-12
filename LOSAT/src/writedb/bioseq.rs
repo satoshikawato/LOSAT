@@ -4,7 +4,7 @@
 //! `CWriteDB::ExtractBioseqDeflines` and `s_FixBioseqDeltas` build NCBI's
 //! `CBioseq`; the writer reads it as `CWriteDB_Impl` reads the `CBioseq`.
 
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1005-1038
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1007-1036
 // ```c++
 //         switch(sd.Which()) {
 //         case CSeq_data::e_Ncbistdaa:

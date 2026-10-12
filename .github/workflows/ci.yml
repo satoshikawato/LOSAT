@@ -39,7 +39,7 @@ jobs:
       # x_PrintField(*iter); m_Ostream << "\n";
       # The certification driver compares these raw bytes on Windows and macOS only
       # when dispatched; its tests also bind frozen_mismatch_allowlist.json to the
-      # Gate A plan, so an entry that would stop a certification fails here first.
+      # Gate A plan, so an entry that does not bind to the plan fails here first.
       - name: Platform certification driver tests
         run: python3 -m unittest discover -s LOSAT/tests -p 'test_certify_platform_native_v010.py'
       # NCBI reference (598d8ae6): c++/src/algo/blast/unit_tests/api/blasthits_unit_test.cpp:1094-1099

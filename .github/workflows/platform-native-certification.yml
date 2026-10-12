@@ -327,7 +327,8 @@ jobs:
           # NCBI reference:
           # ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:770-832
           # Existing program authorities build and classify the raw outputs;
-          # the platform driver only invokes them and checks PR 5 SHA-256 values.
+          # the platform driver only invokes them and checks PR 5 SHA-256 values
+          # (for a case in frozen_mismatch_allowlist.json, its listed SHA-256).
           set +e
           python LOSAT/tests/certify_platform_native_v010.py certify \
             --expected-sha "$CANDIDATE_SHA" \

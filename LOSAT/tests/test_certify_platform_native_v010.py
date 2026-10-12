@@ -2014,6 +2014,11 @@ class PlatformCertificationTests(unittest.TestCase):
             "authority_file_sha256": identity["authority_file_sha256"],
             "output_rel": step.final_output_rel,
             "output_sha256": output_hash,
+            "verification": {
+                "gate": "LOSAT_CANONICAL",
+                "classification": "CANONICAL_PR5_RAW_BYTES",
+                "canonical_sha256": output_hash,
+            },
         }
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -2371,6 +2376,22 @@ class PlatformCertificationTests(unittest.TestCase):
             "not an object": b"[]",
             "not JSON": b"{",
         }
+        entry = document["entries"][0]
+        other = {**entry, "case_id": "another_case"}
+        other.pop("frozen_gate_a_steps")
+        for label, entries in (
+            ("program is not a string", [entry, {**other, "program": 1}]),
+            ("case ID is null", [entry, {**other, "case_id": None}]),
+            ("entry is not an object", [entry, "blastn"]),
+            (
+                "no frozen hash",
+                [{k: v for k, v in entry.items() if k != "frozen_sha256"}],
+            ),
+            ("allowed is not a SHA-256", [{**entry, "allowed_actual_sha256": "AC81"}]),
+            ("steps are not integers", [{**entry, "frozen_gate_a_steps": [11.0]}]),
+            ("steps are not a list", [{**entry, "frozen_gate_a_steps": "11"}]),
+        ):
+            rejected[label] = json.dumps({**document, "entries": entries}).encode()
         for label, payload in rejected.items():
             with self.subTest(label=label), tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary)
@@ -2402,6 +2423,32 @@ class PlatformCertificationTests(unittest.TestCase):
                 self.fixture_allowlist(other_suite), plan
             ),
             self.fixture_allowed_cases(),
+        )
+        representatives = {
+            (program, case_id) for program, case_id, _ in platform_cert.REPRESENTATIVES
+        }
+        step_index, row = next(
+            (index, row)
+            for index, row in enumerate(self.catalog.canonical_rows, 1)
+            if (row["program"], row["case_id"]) not in representatives
+        )
+        matrix_only = {
+            "program": row["program"],
+            "case_id": row["case_id"],
+            "frozen_sha256": hashlib.sha256(
+                f"matrix:{row['program']}:{row['case_id']}\n".encode()
+            ).hexdigest(),
+            "allowed_actual_sha256": "2" * 64,
+            "frozen_gate_a_steps": [step_index],
+        }
+        self.assertEqual(
+            sorted(
+                case["frozen_gate_a_steps"]
+                for case in platform_cert.bind_frozen_allowlist(
+                    self.fixture_allowlist(matrix_only), plan
+                )
+            ),
+            sorted([[step_index], SAKAI_GATE_A_STEPS]),
         )
         rejected = {
             "a step is missing": self.fixture_allowlist(frozen_gate_a_steps=[11, 52]),
@@ -2611,6 +2658,72 @@ class PlatformCertificationTests(unittest.TestCase):
                     self.catalog,
                     self.authority,
                 )
+            # The prior record's verification must be the one this allowlist gives.
+            completion = platform_cert._step_record_path(prior, step)
+            for label, mutate in (
+                (
+                    "another allowed hash",
+                    lambda value: value["verification"].__setitem__(
+                        "allowed_actual_sha256", "0" * 64
+                    ),
+                ),
+                (
+                    "another allowlist file",
+                    lambda value: value["verification"].__setitem__(
+                        "allowlist_file_sha256", "0" * 64
+                    ),
+                ),
+                ("no verification", lambda value: value.pop("verification")),
+                (
+                    "verification is null",
+                    lambda value: value.__setitem__("verification", None),
+                ),
+            ):
+                with self.subTest(label=label):
+                    value = json.loads(json.dumps(record))
+                    mutate(value)
+                    completion.write_text(json.dumps(value), encoding="utf-8")
+                    target = root / f"rejected-{label.replace(' ', '-')}"
+                    target.mkdir()
+                    with self.assertRaisesRegex(
+                        platform_cert.CertificationFailure,
+                        "resume Gate A verification changed",
+                    ):
+                        platform_cert.import_resume(
+                            prior,
+                            target,
+                            self.repo_root,
+                            identity,
+                            [step],
+                            self.catalog,
+                            self.authority,
+                            allowlist,
+                        )
+            # A prior record with the frozen bytes of a listed case is stale.
+            stale = json.loads(json.dumps(record))
+            (prior / step.final_output_rel).write_bytes(SAKAI_FIXTURE_FROZEN)
+            stale["output_sha256"] = hashlib.sha256(SAKAI_FIXTURE_FROZEN).hexdigest()
+            stale["verification"] = {
+                "gate": "LOSAT_CANONICAL",
+                "classification": "CANONICAL_PR5_RAW_BYTES",
+                "canonical_sha256": stale["output_sha256"],
+            }
+            completion.write_text(json.dumps(stale), encoding="utf-8")
+            third = root / "third"
+            third.mkdir()
+            with self.assertRaisesRegex(
+                platform_cert.CertificationFailure, "resume LOSAT output changed"
+            ):
+                platform_cert.import_resume(
+                    prior,
+                    third,
+                    self.repo_root,
+                    identity,
+                    [step],
+                    self.catalog,
+                    self.authority,
+                    allowlist,
+                )
 
     def test_final_evidence_names_the_allowed_known_mismatch(self) -> None:
         platform_id = "macos-arm64"
@@ -2687,6 +2800,10 @@ class PlatformCertificationTests(unittest.TestCase):
                     "allowed_known_mismatches": allowed_cases,
                 },
             )
+            self.assertEqual(
+                summary["cross_platform_losat"],
+                {"total": 43, "all_exact_bytes": False, "allowed_known_mismatches": 1},
+            )
             equalities = (output / "cross_platform_equalities.tsv").read_text(
                 encoding="utf-8"
             )
@@ -2707,16 +2824,21 @@ class PlatformCertificationTests(unittest.TestCase):
             platform_cert.finalize_evidence(
                 exact, identity, steps, completions(steps, set()), 61
             )
+            exact_summary = json.loads(
+                (exact / "summary.json").read_text(encoding="utf-8")
+            )
             self.assertEqual(
-                json.loads((exact / "summary.json").read_text(encoding="utf-8"))[
-                    "gate_a_losat_canonical"
-                ],
+                exact_summary["gate_a_losat_canonical"],
                 {
                     "total": 43,
                     "passed": 43,
                     "all_exact_pr5_raw_bytes": True,
                     "allowed_known_mismatches": [],
                 },
+            )
+            self.assertEqual(
+                exact_summary["cross_platform_losat"],
+                {"total": 43, "all_exact_bytes": True, "allowed_known_mismatches": 0},
             )
             for label, allowed_keys, cases in (
                 ("allowed step outside the allowlist", {SAKAI}, []),
@@ -2772,7 +2894,8 @@ class PlatformCertificationTests(unittest.TestCase):
                 [(43, 1)] * 3,
             )
             # The same evidence is not certified when the aggregator's allowlist
-            # does not list the case, or lists another output.
+            # does not list the case, or lists another output: the platforms'
+            # allowlist identity is then not the aggregator's.
             for label, other in (
                 ("no allowlist", None),
                 (
@@ -2782,7 +2905,10 @@ class PlatformCertificationTests(unittest.TestCase):
             ):
                 with (
                     self.subTest(label=label),
-                    self.assertRaises(platform_cert.CertificationFailure),
+                    self.assertRaisesRegex(
+                        platform_cert.CertificationFailure,
+                        "aggregate frozen mismatch allowlist identity failed",
+                    ),
                 ):
                     platform_cert.aggregate_platform_evidence(
                         input_root,
@@ -2805,7 +2931,23 @@ class PlatformCertificationTests(unittest.TestCase):
             }
             platform_cert.atomic_write_json(completion, value)
 
+        def third_output(artifact: Path) -> None:
+            completion = (
+                artifact / "completions" / "matrix__blastn__Sakai.MG1655.megablast.json"
+            )
+            value = json.loads(completion.read_text(encoding="utf-8"))
+            payload = b"neither frozen nor allowed\n"
+            (artifact / value["output_rel"]).write_bytes(payload)
+            value["output_sha256"] = hashlib.sha256(payload).hexdigest()
+            value["verification"]["allowed_actual_sha256"] = value["output_sha256"]
+            platform_cert.atomic_write_json(completion, value)
+
         cases = (
+            (
+                "listed case has a third output and claims the allowed class",
+                "aggregate Gate A completion failed",
+                third_output,
+            ),
             (
                 "summary claims exact PR 5 bytes",
                 "aggregate Gate A failed",
@@ -2877,14 +3019,26 @@ class PlatformCertificationTests(unittest.TestCase):
                         catalog,
                         allowlist,
                     )
-        # Evidence in which every case has its frozen bytes is not certified
-        # while the allowlist still lists a case (a stale entry).
+        # Evidence in which the listed case has its frozen bytes again on every
+        # platform is not certified while the allowlist still lists it (a stale
+        # entry); the platforms' allowlist identity is the aggregator's here.
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             input_root = root / "input"
             input_root.mkdir()
-            authority, catalog = self.create_aggregate_fixture(input_root)
-            with self.assertRaises(platform_cert.CertificationFailure):
+            authority, catalog = self.create_aggregate_fixture(input_root, allowlist)
+            for artifact in sorted(input_root.iterdir()):
+                for name in (
+                    "matrix__blastn__Sakai.MG1655.megablast.json",
+                    "repeatability__blastn__Sakai.MG1655.megablast__run2.json",
+                    "repeatability__blastn__Sakai.MG1655.megablast__run3.json",
+                ):
+                    stale(artifact, name)
+                self.refresh_evidence_manifest(artifact)
+            with self.assertRaisesRegex(
+                platform_cert.CertificationFailure,
+                "aggregate Gate A completion failed",
+            ):
                 platform_cert.aggregate_platform_evidence(
                     input_root,
                     root / "aggregate.json",

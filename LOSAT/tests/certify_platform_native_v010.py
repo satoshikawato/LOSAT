@@ -1926,6 +1926,24 @@ def load_frozen_allowlist(repo_root: Path, candidate_sha: str) -> Allowlist:
         ) from error
     if len(allowlist.entries) != entry_count:
         raise CertificationFailure("frozen mismatch allowlist repeats a case")
+    for key, entry in allowlist.entries.items():
+        steps = entry.get("frozen_gate_a_steps") if isinstance(entry, dict) else None
+        if (
+            not isinstance(entry, dict)
+            or not all(isinstance(part, str) for part in key)
+            or not all(
+                isinstance(entry.get(field), str)
+                and SHA256_PATTERN.fullmatch(entry[field])
+                for field in ("frozen_sha256", "allowed_actual_sha256")
+            )
+            or not (
+                steps is None
+                or (isinstance(steps, list) and all(type(i) is int for i in steps))
+            )
+        ):
+            raise CertificationFailure(
+                f"invalid frozen mismatch allowlist entry: {key!r}"
+            )
     return allowlist
 
 
@@ -2801,7 +2819,7 @@ def import_resume(
             raise CertificationFailure(f"resume output hash mismatch: {step.step_id}")
         if step.kind in {"matrix", "repeatability"}:
             try:
-                gate_a_verification(
+                verification = gate_a_verification(
                     step.kind,
                     step.program,
                     step.case_id,
@@ -2813,6 +2831,10 @@ def import_resume(
                 raise CertificationFailure(
                     f"resume LOSAT output changed: {step.step_id}"
                 ) from error
+            if record.get("verification") != verification:
+                raise CertificationFailure(
+                    f"resume Gate A verification changed: {step.step_id}"
+                )
         current_output = _safe_resume_path(output_dir, str(record["output_rel"]))
         current_output.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(prior_output, current_output)
@@ -3144,7 +3166,11 @@ def finalize_evidence(
             "passed": 6,
             "all_exact_authority_fingerprints": True,
         },
-        "cross_platform_losat": {"total": 43, "all_exact_bytes": True},
+        "cross_platform_losat": {
+            "total": 43,
+            "all_exact_bytes": not allowed_cases,
+            "allowed_known_mismatches": len(allowed_cases),
+        },
         "direct_ncbi": {
             "total": 6,
             "all_authority_accepted": True,

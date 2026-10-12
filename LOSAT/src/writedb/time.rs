@@ -1,6 +1,8 @@
 //! The local time of a build (`CTime(CTime::eCurrent)`) and its two text
 //! forms: the creation date of an index file and the time of the log.
 
+use super::local_offset::local_utc_offset;
+
 /// A local calendar time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LocalTime {
@@ -27,10 +29,63 @@ const MONTH_ABBR: [&str; 12] = [
 ];
 
 impl LocalTime {
-    /// The current local time, or `None` where the platform has no clock or
-    /// no local time (`wasm32-unknown-unknown`).
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:1722-1734
+    // ```c++
+    //     // Bind values to internal variables
+    //     struct tm *t;
+    //
+    // #ifdef HAVE_LOCALTIME_R
+    //     struct tm temp;
+    //     if (GetTimeZone() == eLocal) {
+    //         localtime_r(&timer, &temp);
+    //     } else {
+    //         gmtime_r(&timer, &temp);
+    //     }
+    //     t = &temp;
+    // #else
+    //     t = ( GetTimeZone() == eLocal ) ? localtime(&timer) : gmtime(&timer);
+    // ```
+    // `CTime(CTime::eCurrent)` is the local time of the C library. LOSAT
+    // calls no C library: the zone's offset from UTC comes from
+    // `local_offset`, which reads the zone as the C library does, and where
+    // the zone cannot be found (Windows, WASI, an unreadable zone file) the
+    // time is UTC.
+    /// The current local time, or `None` where the platform has no clock.
     pub fn now() -> Option<Self> {
-        now_impl()
+        let seconds = unix_seconds()?;
+        let offset = local_utc_offset(seconds).unwrap_or(0);
+        Some(Self::from_unix_seconds(seconds + i64::from(offset)))
+    }
+
+    /// The calendar time `seconds` after 1970-01-01 00:00:00 (Gregorian
+    /// calendar, days of 86,400 seconds).
+    pub fn from_unix_seconds(seconds: i64) -> Self {
+        let days = seconds.div_euclid(86_400);
+        let second_of_day = seconds.rem_euclid(86_400);
+        // Days since 0000-03-01, in 400-year eras that start on a 1 March.
+        let z = days + 719_468;
+        let era = z.div_euclid(146_097);
+        let day_of_era = z.rem_euclid(146_097);
+        let year_of_era =
+            (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+        let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+        // Months counted from March, so that the leap day is the last day.
+        let month_from_march = (5 * day_of_year + 2) / 153;
+        let day = day_of_year - (153 * month_from_march + 2) / 5 + 1;
+        let month = if month_from_march < 10 {
+            month_from_march + 3
+        } else {
+            month_from_march - 9
+        };
+        let year = year_of_era + era * 400 + i64::from(month <= 2);
+        Self {
+            year: year as i32,
+            month: month as u32,
+            day: day as u32,
+            hour: (second_of_day / 3_600) as u32,
+            minute: (second_of_day % 3_600 / 60) as u32,
+            second: (second_of_day % 60) as u32,
+        }
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:88-97
@@ -88,74 +143,18 @@ impl LocalTime {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:1722-1734
-// ```c++
-//     // Bind values to internal variables
-//     struct tm *t;
-//
-// #ifdef HAVE_LOCALTIME_R
-//     struct tm temp;
-//     if (GetTimeZone() == eLocal) {
-//         localtime_r(&timer, &temp);
-//     } else {
-//         gmtime_r(&timer, &temp);
-//     }
-//     t = &temp;
-// #else
-//     t = ( GetTimeZone() == eLocal ) ? localtime(&timer) : gmtime(&timer);
-// ```
-// `CTime(CTime::eCurrent)` is the local time of the C library. The standard
-// library of Rust has no local time, so the C library is called directly
-// (`localtime_r`; `localtime_s` on Windows).
-#[cfg(any(unix, target_os = "wasi"))]
-fn now_impl() -> Option<LocalTime> {
-    let seconds = std::time::SystemTime::now()
+/// Seconds since 1970-01-01 00:00:00 UTC by the system clock.
+#[cfg(any(unix, windows, target_os = "wasi"))]
+fn unix_seconds() -> Option<i64> {
+    let elapsed = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .ok()?
-        .as_secs() as libc::time_t;
-    // SAFETY: `tm` is plain data for which all-zero bytes are a valid value.
-    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
-    // SAFETY: both pointers refer to live, properly aligned values owned by
-    // this frame; `localtime_r` writes only into `tm`.
-    let result = unsafe { libc::localtime_r(&seconds, &mut tm) };
-    if result.is_null() {
-        return None;
-    }
-    Some(from_tm(&tm))
-}
-
-#[cfg(windows)]
-fn now_impl() -> Option<LocalTime> {
-    let seconds = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .ok()?
-        .as_secs() as libc::time_t;
-    // SAFETY: `tm` is plain data for which all-zero bytes are a valid value.
-    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
-    // SAFETY: both pointers refer to live, properly aligned values owned by
-    // this frame; `localtime_s` writes only into `tm`.
-    let status = unsafe { libc::localtime_s(&mut tm, &seconds) };
-    if status != 0 {
-        return None;
-    }
-    Some(from_tm(&tm))
+        .ok()?;
+    i64::try_from(elapsed.as_secs()).ok()
 }
 
 #[cfg(not(any(unix, windows, target_os = "wasi")))]
-fn now_impl() -> Option<LocalTime> {
+fn unix_seconds() -> Option<i64> {
     None
-}
-
-#[cfg(any(unix, windows, target_os = "wasi"))]
-fn from_tm(tm: &libc::tm) -> LocalTime {
-    LocalTime {
-        year: tm.tm_year + 1900,
-        month: (tm.tm_mon + 1) as u32,
-        day: tm.tm_mday as u32,
-        hour: tm.tm_hour as u32,
-        minute: tm.tm_min as u32,
-        second: tm.tm_sec as u32,
-    }
 }
 
 #[cfg(test)]
@@ -200,6 +199,44 @@ mod tests {
             crate::seqdb::date::database_date(&[earlier.as_str(), later.as_str()]).unwrap(),
             later
         );
+    }
+
+    // The calendar dates of Python's `datetime` for the same instants.
+    #[test]
+    fn unix_seconds_become_calendar_times() {
+        let cases: [(i64, (i32, u32, u32, u32, u32, u32)); 17] = [
+            (0, (1970, 1, 1, 0, 0, 0)),
+            (-1, (1969, 12, 31, 23, 59, 59)),
+            (86399, (1970, 1, 1, 23, 59, 59)),
+            (86400, (1970, 1, 2, 0, 0, 0)),
+            (951782399, (2000, 2, 28, 23, 59, 59)),
+            (951782400, (2000, 2, 29, 0, 0, 0)),
+            (951868800, (2000, 3, 1, 0, 0, 0)),
+            (1798761599, (2026, 12, 31, 23, 59, 59)),
+            (1798761600, (2027, 1, 1, 0, 0, 0)),
+            (4102444800, (2100, 1, 1, 0, 0, 0)),
+            (4107542400, (2100, 3, 1, 0, 0, 0)),
+            (-2208988800, (1900, 1, 1, 0, 0, 0)),
+            (253402300799, (9999, 12, 31, 23, 59, 59)),
+            (1791807000, (2026, 10, 12, 12, 10, 0)),
+            (68169599, (1972, 2, 28, 23, 59, 59)),
+            (68256000, (1972, 3, 1, 0, 0, 0)),
+            (-62135596800, (1, 1, 1, 0, 0, 0)),
+        ];
+        for (seconds, (year, month, day, hour, minute, second)) in cases {
+            assert_eq!(
+                LocalTime::from_unix_seconds(seconds),
+                LocalTime {
+                    year,
+                    month,
+                    day,
+                    hour,
+                    minute,
+                    second
+                },
+                "{seconds}"
+            );
+        }
     }
 
     #[test]

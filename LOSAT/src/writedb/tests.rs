@@ -1,15 +1,19 @@
 //! Tests of the database writer against databases written by makeblastdb
-//! 2.17.0 (`LOSAT/tests/seqdb`, `LOSAT/tests/writedb`). The tests read the
-//! committed files and run no NCBI program.
+//! 2.17.0: the fixtures of `LOSAT/tests/seqdb` and the runs recorded in
+//! `tests/makeblastdb_app_cases.rs`. The tests run no NCBI program.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use super::bioseq::{Bioseq, SeqData};
 use super::build_db::BuildDatabase;
+use super::makeblastdb::{run_with, MakedbArgs};
 use super::time::LocalTime;
 use super::writer::WriteDb;
 use crate::seqdb::SeqType;
+
+mod makeblastdb_app_cases;
+use makeblastdb_app_cases::APP_CASES;
 
 fn seqdb_fixtures() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/seqdb")
@@ -317,4 +321,151 @@ fn an_existing_database_of_the_same_name_is_removed() {
     );
     std::fs::remove_file(tmp.0.join("db.txt")).unwrap();
     assert_same_database(&tmp.0, "db", &fixtures.join("db"), "prot_v4");
+}
+
+/// The log with the markers of `makeblastdb_app_cases.rs` in place of the
+/// build time, the output path and the seconds of the timed line.
+fn log_with_markers(log: &[u8]) -> Vec<u8> {
+    let lines: Vec<Vec<u8>> = log
+        .split(|&b| b == b'\n')
+        .map(|line| {
+            let text = String::from_utf8_lossy(line);
+            if text.starts_with("Building a new DB, current time: ") {
+                b"Building a new DB, current time: <T>".to_vec()
+            } else if text.starts_with("New DB name:   ") {
+                b"New DB name:   <OUT>".to_vec()
+            } else if let (true, Some(at)) = (
+                text.starts_with("Adding sequences from FASTA; added "),
+                text.find(" sequences in "),
+            ) {
+                format!("{} sequences in <S> seconds.", &text[..at]).into_bytes()
+            } else {
+                line.to_vec()
+            }
+        })
+        .collect();
+    lines.join(&b'\n')
+}
+
+fn replace_bytes(text: &[u8], from: &[u8], to: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.windows(from.len()).position(|w| w == from) {
+        out.extend_from_slice(&rest[..at]);
+        out.extend_from_slice(to);
+        rest = &rest[at + from.len()..];
+    }
+    out.extend_from_slice(rest);
+    out
+}
+
+/// `LOSAT makedb` from its arguments to its exit status on the inputs of
+/// `makeblastdb_app_cases.rs`: the files, the log, the messages and the exit
+/// status are makeblastdb's.
+#[test]
+fn makedb_runs_as_makeblastdb_on_edge_inputs() {
+    for case in APP_CASES {
+        let tmp = TempDir::new(case.name);
+        let input = tmp.base("in.fa");
+        std::fs::write(&input, case.input).unwrap();
+        let out_dir = tmp.0.join("out");
+        std::fs::create_dir(&out_dir).unwrap();
+        let base = out_dir.join("db").to_string_lossy().into_owned();
+        let args = MakedbArgs {
+            input: input.clone(),
+            input_type: "fasta".to_string(),
+            dbtype: if case.protein { "prot" } else { "nucl" }.to_string(),
+            title: Some(case.title.to_string()),
+            out: Some(base.clone()),
+            blastdb_version: 4,
+            max_file_sz: case.max_file_sz.unwrap_or("3GB").to_string(),
+        };
+        // A run that writes no database stores no date; any time will do.
+        let now = time_of(if case.date.is_empty() {
+            "Oct 12, 2026  9:00 PM"
+        } else {
+            case.date
+        });
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let status = run_with(&args, Some(&now), &mut std::io::empty(), &mut out, &mut err);
+        let name = case.name;
+        let show = |bytes: &[u8]| String::from_utf8_lossy(bytes).into_owned();
+        let err = replace_bytes(&err, input.as_bytes(), b"<IN>");
+        let err = replace_bytes(&err, base.as_bytes(), b"<OUT>");
+        assert!(
+            err == case.stderr,
+            "{name}: standard error\n{}\nexpected\n{}",
+            show(&err),
+            show(case.stderr)
+        );
+        let log = log_with_markers(&out);
+        assert!(
+            log == case.stdout,
+            "{name}: standard output\n{}\nexpected\n{}",
+            show(&log),
+            show(case.stdout)
+        );
+        assert_eq!(status, case.status, "{name}: exit status");
+        let written = files_named(&out_dir, "db.");
+        let expected: Vec<String> = case
+            .files
+            .iter()
+            .map(|(rest, _)| format!("db{rest}"))
+            .collect();
+        assert_eq!(written, expected, "{name}: files");
+        for (rest, bytes) in case.files {
+            let actual = std::fs::read(out_dir.join(format!("db{rest}"))).unwrap();
+            assert!(
+                actual == *bytes,
+                "{name}: db{rest}: {} bytes written, {} expected; first difference at byte {:?}",
+                actual.len(),
+                bytes.len(),
+                actual.iter().zip(*bytes).position(|(a, b)| a != b)
+            );
+        }
+    }
+}
+
+/// More than 100 volumes are renamed with leading zeros when the database
+/// is closed. The names are makeblastdb's (2.17.0, 1,001 volumes): the
+/// volumes below 100 get four digits, those from 100 to 999 keep their three
+/// digits behind two zeros, and those from 1,000 keep their name.
+#[test]
+fn more_than_a_hundred_volumes_get_makeblastdb_s_names() {
+    let tmp = TempDir::new("volumes");
+    let mut db = WriteDb::new(&tmp.base("db"), true, b"t", b"Oct 12, 2026  9:00 PM", 1);
+    for i in 0..1001 {
+        let bioseq = Bioseq {
+            local_id: (i + 1).to_string(),
+            title: format!("p{i}").into_bytes(),
+            is_aa: true,
+            length: 2,
+            seq_data: Some(SeqData::Ncbieaa(b"MK".to_vec())),
+        };
+        db.extract_bioseq_deflines(&bioseq);
+        db.add_sequence(bioseq).unwrap();
+    }
+    db.close().unwrap();
+    let files = files_named(&tmp.0, "db.");
+    assert_eq!(files.len(), 3 * 1001 + 1);
+    for name in [
+        "db.0000.pin",
+        "db.0099.psq",
+        "db.00100.phr",
+        "db.00999.pin",
+        "db.1000.psq",
+        "db.pal",
+    ] {
+        assert!(files.iter().any(|file| file == name), "{name}");
+    }
+    let alias = std::fs::read_to_string(tmp.0.join("db.pal")).unwrap();
+    let list = alias
+        .lines()
+        .find_map(|line| line.strip_prefix("DBLIST "))
+        .unwrap();
+    let volumes: Vec<&str> = list.split(' ').collect();
+    assert_eq!(volumes.len(), 1001);
+    assert_eq!(volumes[..2], ["db.0000", "db.0001"]);
+    assert_eq!(volumes[99..101], ["db.0099", "db.00100"]);
+    assert_eq!(volumes[999..], ["db.00999", "db.1000"]);
 }

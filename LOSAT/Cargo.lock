@@ -13,7 +13,6 @@ dependencies = [
  "getrandom",
  "indicatif",
  "lazy_static",
- "libc",
  "libm",
  "num_cpus",
  "rayon",

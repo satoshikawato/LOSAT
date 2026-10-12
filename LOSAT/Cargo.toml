@@ -32,17 +32,6 @@ num_cpus = { version = "1.0", optional = true }
 indicatif = "0.17"
 bitvec = "1.0"
 rustc-hash = "1.1"
-# NCBI reference (598d8ae6): c++/src/corelib/ncbitime.cpp:1727-1730
-# ```c++
-#     struct tm temp;
-#     if (GetTimeZone() == eLocal) {
-#         localtime_r(&timer, &temp);
-#     } else {
-# ```
-# The C library's local time for the creation date that `LOSAT makedb` stores
-# (`writedb/time.rs`); the standard library has none. Already in the
-# dependency tree (num_cpus, rustix).
-libc = "0.2"
 
 # NCBI reference (598d8ae6): c++/include/corelib/ncbistre.hpp:437-440
 # ```c++

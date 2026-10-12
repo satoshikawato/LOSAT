@@ -8,6 +8,7 @@ use clap::Args;
 
 use super::build_db::BuildDatabase;
 use super::data_size::{string_to_uint8_data_size, uint8_to_string_data_size};
+use super::format_guess::appears_fasta;
 use super::time::LocalTime;
 use super::WriteDbError;
 
@@ -334,9 +335,11 @@ fn warn_to(err: &mut dyn Write) -> impl FnMut(&[u8]) + '_ {
 // search, and LOSAT does not write it.
 /// `CMakeBlastDBApp::x_BuildDatabase`. The log goes to `out` (makeblastdb's
 /// standard output), warnings and diagnostics to `err`; `stdin` is read when
-/// `-in` is `-`.
+/// `-in` is `-`. `now` is the local time for the database's date (`None`
+/// where the platform has no clock).
 pub fn build_database(
     args: &MakedbArgs,
+    now: Option<&LocalTime>,
     stdin: &mut dyn Read,
     out: &mut dyn Write,
     err: &mut dyn Write,
@@ -386,12 +389,12 @@ pub fn build_database(
         )));
     }
 
-    let Some(now) = LocalTime::now() else {
+    let Some(now) = now else {
         return Err(unsupported(
-            "this platform has no local time for the database's date",
+            "this platform has no clock for the database's date",
         ));
     };
-    let mut db = BuildDatabase::new(dbname, title, is_protein, out, &now)?;
+    let mut db = BuildDatabase::new(dbname, title, is_protein, out, now)?;
     let _ = writeln!(
         db.log(),
         "Maximum file size: {}",
@@ -418,8 +421,30 @@ pub fn build_database(
             Ok(meta) if meta.is_file() && meta.len() == 0 => {
                 Err(options_error(format!("File {name} is empty")))
             }
+            // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:832-836
+            // ```c++
+            //         if(input_type == eFasta && x_ConvertToSupportedType(x_GuessFileType( *data_in ) ) != eFasta) {
+            //             string msg = "\nInput file " + seq_file + " does NOT appear to be FASTA (processing anyway).\n" \
+            //                  + "Advise validating database with 'blastdbcheck -dbtype [prot|nucl] -db ${DBNAME}'\n";
+            //             ERR_POST(Warning << msg);
+            //         }
+            // ```
+            // makeblastdb opens the file a second time for this test, so the
+            // build reads it from its start. `ERR_POST` ends the message
+            // with a line feed.
             Ok(meta) if meta.is_file() => match std::fs::File::open(name) {
-                Ok(mut file) => add_fasta(&mut db, &mut file, err),
+                Ok(mut file) => {
+                    let looks_like_fasta = std::fs::File::open(name).is_ok_and(appears_fasta);
+                    if !looks_like_fasta {
+                        let _ = write!(
+                            err,
+                            "Warning: [makeblastdb] \nInput file {name} does NOT appear to be \
+                             FASTA (processing anyway).\nAdvise validating database with \
+                             'blastdbcheck -dbtype [prot|nucl] -db ${{DBNAME}}'\n\n"
+                        );
+                    }
+                    add_fasta(&mut db, &mut file, err)
+                }
                 Err(source) => Err(MakedbError::Build(WriteDbError::Io {
                     path: name.into(),
                     source,
@@ -441,13 +466,12 @@ fn add_fasta(
     input: &mut dyn Read,
     err: &mut dyn Write,
 ) -> Result<(), MakedbError> {
-    let mut diagnostics = Vec::new();
+    // The reader's warnings and the serializer's diagnostics arrive in the
+    // order makeblastdb posts them; what the last sequence leaves follows.
     let result = {
-        let mut warn = warn_to(&mut diagnostics);
+        let mut warn = warn_to(err);
         db.add_fasta(input, &mut warn)
     };
-    // The reader's warnings and the serializer's diagnostics of this input.
-    let _ = err.write_all(&diagnostics);
     let _ = err.write_all(&db.take_diagnostics());
     result.map_err(MakedbError::Build)
 }
@@ -459,9 +483,22 @@ pub fn run(args: &MakedbArgs) -> i32 {
     let stderr = std::io::stderr();
     let mut out = std::io::BufWriter::new(stdout.lock());
     let mut err = stderr.lock();
-    let result = build_database(args, &mut stdin.lock(), &mut out, &mut err);
+    let now = LocalTime::now();
+    let status = run_with(args, now.as_ref(), &mut stdin.lock(), &mut out, &mut err);
     let _ = out.flush();
-    match result {
+    status
+}
+
+/// One run with the given time and streams: the build, then the error
+/// message and the exit code of a failed build.
+pub(crate) fn run_with(
+    args: &MakedbArgs,
+    now: Option<&LocalTime>,
+    stdin: &mut dyn Read,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    match build_database(args, now, stdin, out, err) {
         Ok(()) => 0,
         Err(error) => {
             let _ = writeln!(err, "{error}");

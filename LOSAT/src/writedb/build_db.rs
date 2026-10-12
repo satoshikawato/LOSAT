@@ -536,6 +536,13 @@ impl<'a> BuildDatabase<'a> {
                     added = true;
                 }
             }
+            // The serializer posts its diagnostics while the sequence is
+            // added, before the reader reads (and warns about) the next
+            // record; both go to the standard error stream in that order.
+            let diagnostics = self.output_db.take_diagnostics();
+            if !diagnostics.is_empty() {
+                warn(diagnostics.strip_suffix(b"\n").unwrap_or(&diagnostics));
+            }
             if !added {
                 let _ = writeln!(
                     self.log,
